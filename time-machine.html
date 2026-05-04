@@ -596,6 +596,132 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
     line-height:1.4;
 }
 #tm-fieldbar .fb-info b { color:#998; font-weight:600; }
+
+/* ── Camera HUD ─────────────────────────────────────────────────────── */
+#tm-cam-panel {
+    position:absolute;
+    top:78px; right:14px;
+    display:flex; flex-direction:column; gap:5px;
+    background:rgba(8,4,24,.78);
+    border:1px solid rgba(180,140,255,.28);
+    border-radius:8px;
+    padding:8px 8px 7px;
+    backdrop-filter:blur(8px);
+    z-index:6;
+    width:172px;
+    font-family:monospace;
+    box-shadow:0 4px 14px rgba(0,0,0,.45);
+}
+#tm-cam-panel .cam-title {
+    font-size:.6rem; color:#998; letter-spacing:.10em;
+    text-transform:uppercase; font-weight:700;
+    display:flex; align-items:center; justify-content:space-between; gap:8px;
+    padding-bottom:2px;
+}
+#tm-cam-panel .cam-title .cam-help-btn {
+    background:rgba(180,140,255,.20); color:#cba9ff;
+    border:1px solid rgba(180,140,255,.45); border-radius:50%;
+    width:18px; height:18px; padding:0; cursor:pointer;
+    font-weight:700; font-size:.7rem; line-height:1;
+    display:flex; align-items:center; justify-content:center;
+}
+#tm-cam-panel .cam-title .cam-help-btn:hover { background:rgba(180,140,255,.45); color:#fff; }
+.cam-row { display:flex; gap:4px; }
+.cam-btn {
+    flex:1; min-width:0; padding:5px 4px;
+    background:rgba(0,0,0,.30);
+    border:1px solid rgba(180,140,255,.22);
+    border-radius:5px;
+    color:#bbb;
+    cursor:pointer;
+    font-family:inherit; font-size:.66rem; font-weight:600;
+    text-align:center;
+    transition:all .12s;
+    white-space:nowrap;
+    letter-spacing:.02em;
+}
+.cam-btn:hover { color:#fff; border-color:rgba(180,140,255,.55); background:rgba(180,140,255,.12); }
+.cam-btn.on  { background:rgba(120,80,255,.32); color:#fff; border-color:#b78cff;
+               box-shadow:0 0 8px rgba(180,140,255,.5); }
+.cam-btn.follow { color:#7fdb9a; border-color:rgba(79,201,127,.40); }
+.cam-btn.follow:hover { background:rgba(79,201,127,.16); color:#fff; }
+.cam-btn.follow.on { background:rgba(79,201,127,.30); color:#fff; border-color:#7fdb9a;
+                     box-shadow:0 0 8px rgba(79,201,127,.55); }
+.cam-row.cam-row-wide .cam-btn { flex:1; padding:6px 4px; font-size:.68rem; }
+.cam-readout {
+    font-family:ui-monospace, Menlo, monospace; font-size:.6rem;
+    color:#776; padding-top:5px; margin-top:2px;
+    border-top:1px dashed rgba(180,140,255,.16);
+    text-align:center; line-height:1.4;
+}
+.cam-readout b { color:#cba9ff; font-weight:600; }
+.cam-readout .cam-mode { color:#7fdb9a; font-weight:700; }
+.cam-readout .cam-mode.free { color:#cba9ff; }
+
+/* Help overlay */
+#tm-cam-help {
+    position:absolute; top:12px; right:14px;
+    width:308px; max-height:calc(100% - 24px); overflow-y:auto;
+    background:rgba(8,4,24,.96);
+    border:1px solid rgba(180,140,255,.45);
+    border-radius:10px;
+    padding:14px 16px 12px;
+    backdrop-filter:blur(12px);
+    z-index:30;
+    font-family:monospace; font-size:.72rem; color:#cfd;
+    box-shadow:0 8px 32px rgba(0,0,0,.6);
+    display:none;
+}
+#tm-cam-help.show { display:block; }
+#tm-cam-help h3 {
+    font-size:.74rem; color:#b78cff;
+    text-transform:uppercase; letter-spacing:.10em; font-weight:800;
+    margin-bottom:8px;
+    display:flex; justify-content:space-between; align-items:center;
+}
+#tm-cam-help h3 .close {
+    background:none; border:none; color:#998; font-size:1.4rem;
+    cursor:pointer; padding:0 4px; line-height:1;
+}
+#tm-cam-help h3 .close:hover { color:#fff; }
+#tm-cam-help table { width:100%; border-collapse:collapse; }
+#tm-cam-help td { padding:3px 0; vertical-align:top; }
+#tm-cam-help td.kbd {
+    color:#fc7; width:108px;
+    font-family:ui-monospace, Menlo, monospace; font-weight:700;
+}
+#tm-cam-help td.kbd kbd {
+    display:inline-block;
+    background:rgba(180,140,255,.14); border:1px solid rgba(180,140,255,.35);
+    border-bottom:2px solid rgba(120,80,255,.55);
+    padding:1px 5px; border-radius:3px; color:#eef;
+    font-size:.66rem; margin-right:2px; font-weight:700;
+}
+#tm-cam-help td.act { color:#cdc; font-weight:400; }
+#tm-cam-help h4 {
+    font-size:.66rem; color:#776; text-transform:uppercase; letter-spacing:.08em;
+    margin:10px 0 4px; font-weight:700;
+}
+#tm-cam-help .hint {
+    color:#998; font-size:.66rem; line-height:1.55; margin-top:10px;
+    padding-top:8px; border-top:1px dashed rgba(180,140,255,.18);
+}
+#tm-cam-help .hint kbd {
+    background:rgba(180,140,255,.14); border:1px solid rgba(180,140,255,.30);
+    padding:0 4px; border-radius:3px; color:#eef; font-weight:700;
+}
+
+/* Side-panel follow button row (above body grid) */
+.tm-side-actions {
+    display:flex; gap:5px; margin-bottom:10px; margin-top:-2px;
+}
+.tm-side-actions .cam-btn { padding:6px 4px; font-size:.66rem; }
+
+@media (max-width:600px) {
+    #tm-cam-panel { width:auto; left:14px; right:14px; top:auto; bottom:64px; }
+    #tm-cam-panel .cam-row { flex-wrap:wrap; }
+    #tm-cam-help { width:auto; left:14px; right:14px; }
+}
 </style>
 <link rel="stylesheet" href="js/nav-styles.css">
 </head>
@@ -643,10 +769,74 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
             <div class="fb-tags"><span id="fb-min">—</span><span id="fb-max">—</span></div>
             <div class="fb-info" id="fb-info">—</div>
         </div>
+
+        <div id="tm-cam-panel" aria-label="Camera controls">
+            <div class="cam-title">
+                God Mode Camera
+                <button class="cam-help-btn" id="tm-cam-help-btn" title="Show camera shortcuts (?)">?</button>
+            </div>
+            <div class="cam-row">
+                <button class="cam-btn" id="tm-cam-default" title="Default 3/4 view (H)">3/4</button>
+                <button class="cam-btn" id="tm-cam-top"     title="Top-down view (T)">Top</button>
+                <button class="cam-btn" id="tm-cam-side"    title="Edge-on / ecliptic (E)">Edge</button>
+            </div>
+            <div class="cam-row">
+                <button class="cam-btn" id="tm-cam-inner"   title="Frame inner planets (I)">Inner</button>
+                <button class="cam-btn" id="tm-cam-outer"   title="Frame outer planets (O)">Outer</button>
+                <button class="cam-btn" id="tm-cam-tilt"    title="Cinematic tilt (C)">Tilt</button>
+            </div>
+            <div class="cam-row">
+                <button class="cam-btn" id="tm-cam-zoom-in"  title="Zoom in (+)">＋ Zoom</button>
+                <button class="cam-btn" id="tm-cam-zoom-out" title="Zoom out (−)">− Zoom</button>
+            </div>
+            <div class="cam-row cam-row-wide">
+                <button class="cam-btn follow" id="tm-cam-follow" title="Follow selected body (F)">◎ Follow</button>
+                <button class="cam-btn" id="tm-cam-reset" title="Reset view (R)">Reset</button>
+            </div>
+            <div class="cam-readout" id="tm-cam-readout">
+                <span class="cam-mode free" id="tm-cam-mode">Free orbit</span><br>
+                <b id="tm-cam-dist">— AU</b> · <b id="tm-cam-fov">48°</b>
+            </div>
+        </div>
+
+        <div id="tm-cam-help" role="dialog" aria-label="Camera help" aria-hidden="true">
+            <h3>God Mode Camera <button class="close" id="tm-cam-help-close" aria-label="Close">×</button></h3>
+            <h4>Mouse</h4>
+            <table>
+                <tr><td class="kbd"><kbd>LMB drag</kbd></td><td class="act">Orbit around target</td></tr>
+                <tr><td class="kbd"><kbd>RMB drag</kbd></td><td class="act">Pan view target</td></tr>
+                <tr><td class="kbd"><kbd>Wheel</kbd></td><td class="act">Zoom in / out</td></tr>
+                <tr><td class="kbd"><kbd>Click body</kbd></td><td class="act">Select / pin a body</td></tr>
+            </table>
+            <h4>Presets</h4>
+            <table>
+                <tr><td class="kbd"><kbd>H</kbd></td><td class="act">Default 3/4 view (home)</td></tr>
+                <tr><td class="kbd"><kbd>T</kbd></td><td class="act">Top-down (north pole)</td></tr>
+                <tr><td class="kbd"><kbd>E</kbd></td><td class="act">Edge-on (ecliptic plane)</td></tr>
+                <tr><td class="kbd"><kbd>I</kbd></td><td class="act">Frame inner planets</td></tr>
+                <tr><td class="kbd"><kbd>O</kbd></td><td class="act">Frame outer planets</td></tr>
+                <tr><td class="kbd"><kbd>C</kbd></td><td class="act">Cinematic tilt</td></tr>
+            </table>
+            <h4>Navigation</h4>
+            <table>
+                <tr><td class="kbd"><kbd>F</kbd></td><td class="act">Follow selected body</td></tr>
+                <tr><td class="kbd"><kbd>R</kbd></td><td class="act">Reset / release follow</td></tr>
+                <tr><td class="kbd"><kbd>+</kbd> <kbd>−</kbd></td><td class="act">Zoom in / out</td></tr>
+                <tr><td class="kbd"><kbd>W A S D</kbd></td><td class="act">Pan target across ecliptic</td></tr>
+                <tr><td class="kbd"><kbd>Q</kbd> <kbd>Z</kbd></td><td class="act">Pan target up / down</td></tr>
+                <tr><td class="kbd"><kbd>0</kbd></td><td class="act">Frame Sun (zoom in tight)</td></tr>
+                <tr><td class="kbd"><kbd>1</kbd> – <kbd>8</kbd></td><td class="act">Jump to Mercury – Neptune</td></tr>
+            </table>
+            <p class="hint">Pick a body from the side panel, then press <kbd>F</kbd> to lock the camera onto it. The view will smoothly chase the body across the time slider — perfect for watching apsidal precession or close approaches in real time.</p>
+        </div>
     </div>
 
     <aside id="tm-side">
         <div class="tm-side-title">Body Picker</div>
+        <div class="tm-side-actions">
+            <button class="cam-btn follow" id="tm-side-follow" title="Follow the selected body with the camera (F)">◎ Follow Earth</button>
+            <button class="cam-btn" id="tm-side-frame" title="Frame the selected body in view (G)">⊞ Frame</button>
+        </div>
         <div class="tm-body-grid" id="tm-body-grid"></div>
 
         <div class="tm-sel-head">
@@ -3489,6 +3679,287 @@ elJdIn.addEventListener('change', () => {
     recenterTo(jd);
     setJd(jd);
 });
+
+// ════════════════════════════════════════════════════════════════════
+// God Mode Camera — presets, follow-body tracking, keyboard shortcuts
+// ════════════════════════════════════════════════════════════════════
+// Builds on the existing OrbitControls — drag/zoom/pan still work in
+// every mode. Adds:
+//   • Cinematic preset framings (top, edge, inner, outer, tilt, default)
+//   • Follow-body mode that locks the camera target onto a moving planet
+//   • Smooth eased tweens between framings (cubic in-out, ~0.65 s)
+//   • Keyboard shortcuts (see help overlay)
+controls.maxDistance = 700;
+controls.minDistance = 0.5;
+controls.enablePan   = true;          // RMB drag to pan target
+controls.zoomSpeed   = 0.85;
+controls.rotateSpeed = 0.85;
+
+const camRig = {
+    followKey: null,          // body key being followed, or null = free
+    tween:     null,          // { t, dur, fromPos, toPos, fromTgt, toTgt, fromFov, toFov }
+};
+
+const PRESETS = {
+    default: { pos:[ 0,  65,  22], target:[0,0,0], fov:48 },
+    top:     { pos:[ 0, 110, 0.01], target:[0,0,0], fov:46 },
+    side:    { pos:[ 95,  3,   0], target:[0,0,0], fov:42 },
+    inner:   { pos:[ 7,  14,  10], target:[0,0,0], fov:50 },
+    outer:   { pos:[ 0,  95,  60], target:[0,0,0], fov:50 },
+    tilt:    { pos:[ 60, 38,  60], target:[0,0,0], fov:46 },
+    sun:     { pos:[ 0,   3,   8], target:[0,0,0], fov:42 },
+};
+
+function tweenTo(toPosArr, toTgtArr, fov = null, dur = 0.65) {
+    const fromPos = camera.position.clone();
+    const fromTgt = controls.target.clone();
+    const toPos = (toPosArr instanceof THREE.Vector3) ? toPosArr.clone() : new THREE.Vector3(...toPosArr);
+    const toTgt = (toTgtArr instanceof THREE.Vector3) ? toTgtArr.clone() : new THREE.Vector3(...toTgtArr);
+    camRig.tween = {
+        t: 0, dur,
+        fromPos, toPos, fromTgt, toTgt,
+        fromFov: camera.fov,
+        toFov:   fov ?? camera.fov,
+    };
+}
+
+function applyPreset(name) {
+    const p = PRESETS[name];
+    if (!p) return;
+    setFollow(null);
+    tweenTo(p.pos, p.target, p.fov, 0.7);
+}
+
+function frameBody(key, { distFactor = 8, dur = 0.65 } = {}) {
+    const m = meshes[key];
+    if (!m) return;
+    const pos = m.position.clone();
+    const r   = (BODY_SIZE_BY_KEY[key] || 0.18);
+    const dist = Math.max(2.5, r * distFactor + 4);
+    // Approach from a 3/4 angle aligned with the body's heliocentric radial
+    // so the Sun stays in frame and we don't end up backlit on the dark side.
+    const radHor = new THREE.Vector3(pos.x, 0, pos.z);
+    if (radHor.lengthSq() < 1e-6) radHor.set(0, 0, 1);
+    radHor.normalize();
+    const camPos = pos.clone()
+        .add(radHor.multiplyScalar(dist))
+        .add(new THREE.Vector3(0, dist * 0.55, 0));
+    tweenTo(camPos, pos, null, dur);
+}
+
+function setFollow(key) {
+    camRig.followKey = key;
+    if (elCamFollow)  elCamFollow.classList.toggle('on', !!key);
+    if (elSideFollow) {
+        elSideFollow.classList.toggle('on', !!key);
+        const lbl = (selected && BODY_LABEL[selected.key]) || 'body';
+        if (key) elSideFollow.textContent = '◉ Following ' + (BODY_LABEL[key] || key);
+        else     elSideFollow.textContent = '◎ Follow '   + lbl;
+    }
+}
+
+function toggleFollowSelected() {
+    if (camRig.followKey) { setFollow(null); return; }
+    const key = (selected && selected.key) || 'earth';
+    setFollow(key);
+    frameBody(key, { distFactor: 7.0, dur: 0.65 });
+}
+
+// Slide the target — and the camera with it — so the orbit is around the
+// moving body. The user can still drag/zoom around the new pivot.
+function updateFollow() {
+    if (!camRig.followKey || camRig.tween) return;
+    const m = meshes[camRig.followKey];
+    if (!m) return;
+    const dx = m.position.x - controls.target.x;
+    const dy = m.position.y - controls.target.y;
+    const dz = m.position.z - controls.target.z;
+    if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) < 1e-9) return;
+    controls.target.set(m.position.x, m.position.y, m.position.z);
+    camera.position.x += dx;
+    camera.position.y += dy;
+    camera.position.z += dz;
+}
+
+function updateTween(dtSec) {
+    if (!camRig.tween) return;
+    const tw = camRig.tween;
+    tw.t += dtSec;
+    let s = Math.min(1, tw.t / tw.dur);
+    s = s < 0.5 ? 4*s*s*s : 1 - Math.pow(-2*s + 2, 3) / 2;   // ease-in-out cubic
+    camera.position.lerpVectors(tw.fromPos, tw.toPos, s);
+    controls.target.lerpVectors(tw.fromTgt, tw.toTgt, s);
+    const fov = tw.fromFov + (tw.toFov - tw.fromFov) * s;
+    if (Math.abs(fov - camera.fov) > 0.05) {
+        camera.fov = fov;
+        camera.updateProjectionMatrix();
+    }
+    if (s >= 1) camRig.tween = null;
+}
+
+function zoomBy(factor) {
+    const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
+    const newDist = THREE.MathUtils.clamp(offset.length() * factor,
+                                          controls.minDistance, controls.maxDistance);
+    offset.setLength(newDist);
+    camera.position.copy(controls.target).add(offset);
+}
+
+function panTarget(rightAmt, upAmt, fwdAmt) {
+    const fwd = new THREE.Vector3().subVectors(controls.target, camera.position);
+    fwd.y = 0;
+    if (fwd.lengthSq() < 1e-6) fwd.set(0, 0, -1);
+    fwd.normalize();
+    const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0)).normalize();
+    const delta = new THREE.Vector3()
+        .addScaledVector(right,                       rightAmt)
+        .addScaledVector(new THREE.Vector3(0, 1, 0),  upAmt)
+        .addScaledVector(fwd,                         fwdAmt);
+    controls.target.add(delta);
+    camera.position.add(delta);
+}
+
+const elCamMode      = document.getElementById('tm-cam-mode');
+const elCamDist      = document.getElementById('tm-cam-dist');
+const elCamFov       = document.getElementById('tm-cam-fov');
+const elCamFollow    = document.getElementById('tm-cam-follow');
+const elCamReset     = document.getElementById('tm-cam-reset');
+const elCamHelp      = document.getElementById('tm-cam-help');
+const elCamHelpBtn   = document.getElementById('tm-cam-help-btn');
+const elCamHelpClose = document.getElementById('tm-cam-help-close');
+const elSideFollow   = document.getElementById('tm-side-follow');
+const elSideFrame    = document.getElementById('tm-side-frame');
+
+let _camHudCounter = 0;
+function updateCamHud() {
+    // Throttle DOM writes — every ~6 frames is plenty for a HUD readout.
+    if ((++_camHudCounter & 5) !== 0) return;
+    const dist = camera.position.distanceTo(controls.target);
+    const r_AU = sceneToAu(dist, 0, 0).r_AU;
+    elCamDist.textContent = dist.toFixed(1) + ' su · ~' + r_AU.toFixed(2) + ' AU';
+    elCamFov .textContent = camera.fov.toFixed(0) + '°';
+    if (camRig.followKey) {
+        elCamMode.textContent = 'Following ' + (BODY_LABEL[camRig.followKey] || camRig.followKey);
+        elCamMode.classList.remove('free');
+    } else if (camRig.tween) {
+        elCamMode.textContent = 'Tweening…';
+        elCamMode.classList.remove('free');
+    } else {
+        elCamMode.textContent = 'Free orbit';
+        elCamMode.classList.add('free');
+    }
+}
+
+// ── Wire up camera buttons ────────────────────────────────────────────
+document.getElementById('tm-cam-default') .addEventListener('click', () => applyPreset('default'));
+document.getElementById('tm-cam-top')     .addEventListener('click', () => applyPreset('top'));
+document.getElementById('tm-cam-side')    .addEventListener('click', () => applyPreset('side'));
+document.getElementById('tm-cam-inner')   .addEventListener('click', () => applyPreset('inner'));
+document.getElementById('tm-cam-outer')   .addEventListener('click', () => applyPreset('outer'));
+document.getElementById('tm-cam-tilt')    .addEventListener('click', () => applyPreset('tilt'));
+document.getElementById('tm-cam-zoom-in') .addEventListener('click', () => zoomBy(0.78));
+document.getElementById('tm-cam-zoom-out').addEventListener('click', () => zoomBy(1.30));
+elCamFollow .addEventListener('click', toggleFollowSelected);
+elCamReset  .addEventListener('click', () => { setFollow(null); applyPreset('default'); });
+elSideFollow.addEventListener('click', toggleFollowSelected);
+elSideFrame .addEventListener('click', () => {
+    const key = (selected && selected.key) || 'earth';
+    frameBody(key, { distFactor: 8.0, dur: 0.65 });
+});
+
+elCamHelpBtn  .addEventListener('click', e => {
+    e.stopPropagation();
+    elCamHelp.classList.toggle('show');
+    elCamHelp.setAttribute('aria-hidden', !elCamHelp.classList.contains('show'));
+});
+elCamHelpClose.addEventListener('click', () => {
+    elCamHelp.classList.remove('show');
+    elCamHelp.setAttribute('aria-hidden', 'true');
+});
+document.addEventListener('click', (e) => {
+    if (!elCamHelp.classList.contains('show')) return;
+    if (elCamHelp.contains(e.target) || elCamHelpBtn.contains(e.target)) return;
+    elCamHelp.classList.remove('show');
+    elCamHelp.setAttribute('aria-hidden', 'true');
+});
+
+// ── Keyboard shortcuts ────────────────────────────────────────────────
+window.addEventListener('keydown', (e) => {
+    const tag = e.target && e.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    const k = e.key.toLowerCase();
+    const panAmt = camera.position.distanceTo(controls.target) * 0.06;
+    let handled = true;
+    switch (k) {
+        case 'h': applyPreset('default'); break;
+        case 't': applyPreset('top');     break;
+        case 'e': applyPreset('side');    break;
+        case 'i': applyPreset('inner');   break;
+        case 'o': applyPreset('outer');   break;
+        case 'c': applyPreset('tilt');    break;
+        case 'r': setFollow(null); applyPreset('default'); break;
+        case 'f': toggleFollowSelected(); break;
+        case 'g': frameBody((selected && selected.key) || 'earth', { distFactor:8.0 }); break;
+        case '+': case '=': zoomBy(0.78); break;
+        case '-': case '_': zoomBy(1.30); break;
+        case 'w': panTarget(0,         0, -panAmt); break;
+        case 's': panTarget(0,         0,  panAmt); break;
+        case 'a': panTarget(-panAmt,   0,         0); break;
+        case 'd': panTarget( panAmt,   0,         0); break;
+        case 'q': panTarget(0,    panAmt,         0); break;
+        case 'z': panTarget(0,   -panAmt,         0); break;
+        case '?': case '/':
+            elCamHelp.classList.toggle('show');
+            elCamHelp.setAttribute('aria-hidden', !elCamHelp.classList.contains('show'));
+            break;
+        case '0':
+            setFollow(null);
+            tweenTo([0, 3.5, 8], [0, 0, 0], 42, 0.6);
+            break;
+        case '1': case '2': case '3': case '4':
+        case '5': case '6': case '7': case '8': {
+            const idx = parseInt(k, 10) - 1;
+            if (idx >= 0 && idx < BODIES.length) {
+                const b = BODIES[idx];
+                selectBody(b.key);
+                if (camRig.followKey) setFollow(b.key);
+                frameBody(b.key, { distFactor: 7.5, dur: 0.6 });
+            }
+            break;
+        }
+        default: handled = false;
+    }
+    if (handled) e.preventDefault();
+});
+
+// ── Hook into the existing tick + selectBody ─────────────────────────
+// Wrap selectBody so the side-panel "Follow" label tracks the picker
+// (and so the camera re-frames if we're already in follow mode).
+const _origSelectBody = selectBody;
+selectBody = function(key) {
+    _origSelectBody(key);
+    if (camRig.followKey) {
+        setFollow(key);     // re-bind follow target to the new selection
+    } else if (elSideFollow) {
+        elSideFollow.textContent = '◎ Follow ' + (BODY_LABEL[key] || key);
+    }
+};
+
+// Insert per-frame camera updates into the existing render loop without
+// rewriting tick(): patch controls.update() so it drives our follow +
+// tween + HUD logic before the OrbitControls inertial damping step.
+const _origControlsUpdate = controls.update.bind(controls);
+let _camPrevT = performance.now();
+controls.update = function() {
+    const now = performance.now();
+    const dt  = Math.min(0.1, (now - _camPrevT) / 1000);
+    _camPrevT = now;
+    updateTween(dt);
+    updateFollow();
+    updateCamHud();
+    return _origControlsUpdate();
+};
 
 // ── Boot ─────────────────────────────────────────────────────────────
 buildBookmarks();
