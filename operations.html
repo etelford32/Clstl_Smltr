@@ -9,7 +9,7 @@
 <link rel="manifest" href="/manifest.json">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Operations — Fleet & Debris Console · Parker Physics</title>
-<meta name="description" content="Decision-grade satellite operations console. Fleet drag and decay analysis, pairwise conjunction screening against the public debris catalog, deterministic time scrub, and full provenance on every number. PRO Preview — open beta.">
+<meta name="description" content="Predictions-first satellite operations console. Real-time start with forward scrub to +14 days — fleet drag and decay forecasts, pairwise conjunction prediction against the public debris catalog, and full provenance on every number. PRO Preview — open beta.">
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 html { height:auto; overflow-y:auto; }
@@ -431,10 +431,15 @@ body {
     min-width:38px;
     font-family:monospace;
 }
-#op-scrub-speeds {
+#op-scrub-speeds,
+#op-scrub-jumps {
     display:inline-flex; gap:3px;
     border-left:1px solid rgba(255,255,255,.08);
     padding-left:10px; margin-left:4px;
+}
+.op-scrub-jump {
+    min-width:38px;
+    font-family:monospace;
 }
 #op-scrub-track {
     flex:1; min-width:200px;
@@ -1289,9 +1294,11 @@ body {
             <span class="op-badge-preview">PRO PREVIEW</span>
         </div>
         <p id="op-hero-sub">
-            Decision-grade fleet and debris analysis. Deterministic time
-            scrub, confidence bands, and full provenance on every number.
-            Open beta — no sign-in required.
+            Predictions-first fleet and debris analysis. Start in real time,
+            then scrub forward minutes, hours, days, or weeks to forecast
+            satellite positions, conjunctions, and decay — with confidence
+            bands and full provenance on every number. Open beta — no
+            sign-in required.
         </p>
 
         <div id="op-personas" role="tablist" aria-label="Operator persona">
@@ -1434,19 +1441,27 @@ body {
     <!-- Bottom: scrub strip -->
     <div id="op-scrub" class="op-panel">
         <div id="op-scrub-row">
-            <button class="op-scrub-btn" id="op-tc-home" title="Jump to −7 days">⏮</button>
+            <button class="op-scrub-btn" id="op-tc-home" title="Jump to −1 day (start of window)">⏮</button>
             <button class="op-scrub-btn" id="op-tc-back" title="Step back 1 hour (←)">⏪</button>
             <button class="op-scrub-btn" id="op-tc-play" title="Play replay (Space)">▶︎</button>
             <button class="op-scrub-btn" id="op-tc-fwd"  title="Step forward 1 hour (→)">⏩</button>
-            <button class="op-scrub-btn" id="op-tc-end"  title="Jump to +7 days">⏭</button>
+            <button class="op-scrub-btn" id="op-tc-end"  title="Jump to +14 days (end of window)">⏭</button>
             <div id="op-scrub-track">
                 <div id="op-scrub-now"></div>
                 <div id="op-scrub-cursor"></div>
             </div>
             <button class="op-scrub-btn" id="op-tc-now" title="Jump to real time (N)">Now</button>
+            <span id="op-scrub-jumps" aria-label="Predictive forward jumps">
+                <button class="op-scrub-btn op-scrub-jump" data-jump-ms="60000"      title="Predict +1 minute ahead">+1m</button>
+                <button class="op-scrub-btn op-scrub-jump" data-jump-ms="3600000"    title="Predict +1 hour ahead">+1h</button>
+                <button class="op-scrub-btn op-scrub-jump" data-jump-ms="86400000"   title="Predict +1 day ahead">+1d</button>
+                <button class="op-scrub-btn op-scrub-jump" data-jump-ms="604800000"  title="Predict +1 week ahead">+1w</button>
+                <button class="op-scrub-btn op-scrub-jump" data-jump-ms="1209600000" title="Predict +2 weeks ahead">+2w</button>
+            </span>
             <span id="op-scrub-speeds">
                 <button class="op-scrub-btn op-scrub-speed" data-speed="1"    title="Replay at real time (1×)">1×</button>
-                <button class="op-scrub-btn op-scrub-speed" data-speed="60"   title="Replay at 60× — 1 minute per second">60×</button>
+                <button class="op-scrub-btn op-scrub-speed" data-speed="10"   title="Replay at 10× — 10 seconds per second">10×</button>
+                <button class="op-scrub-btn op-scrub-speed" data-speed="100"  title="Replay at 100× — 100 seconds per second">100×</button>
                 <button class="op-scrub-btn op-scrub-speed" data-speed="600"  title="Replay at 600× — 10 minutes per second">600×</button>
                 <button class="op-scrub-btn op-scrub-speed" data-speed="3600" title="Replay at 3600× — 1 hour per second">3600×</button>
             </span>
@@ -1655,6 +1670,7 @@ mountTimeStrip({
     btnEnd:    document.getElementById('op-tc-end'),
     btnNow:    document.getElementById('op-tc-now'),
     speedBtns: document.querySelectorAll('#op-scrub-speeds .op-scrub-speed'),
+    jumpBtns:  document.querySelectorAll('#op-scrub-jumps .op-scrub-jump'),
     readout:   document.getElementById('op-tc-readout'),
 });
 timeBus.start();
