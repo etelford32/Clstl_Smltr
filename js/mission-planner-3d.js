@@ -1,36 +1,50 @@
 /**
- * mission-planner-3d.js — Visual mission-planner simulator.
+ * mission-planner-3d.js — Visual mission-planner simulator with patched-conic
+ * trajectories.
  *
- * Self-contained Three.js scene built around an Earth-centered coordinate
- * frame where 1 scene unit = 1 Earth radius (R⊕ = 6378 km). Supports:
+ * Two scenes share a renderer + canvas:
  *
- *   - Launch animation: rocket lifts from a chosen launch site on the
- *     surface, follows a gravity-turn-style profile to the target altitude,
- *     and deploys a payload that then circularizes into orbit.
- *   - Orbit propagation: deployed payloads coast in a circular orbit at the
- *     requested altitude/inclination and trail a fading ribbon.
- *   - Trajectory previews: Moon transfer (Hohmann-style ellipse to lunar
- *     distance) and Mars transfer (escape spiral + heliocentric arc).
+ *   geoScene   Earth-centered. 1 unit = 1 R⊕. Renders Earth, atmosphere,
+ *              starfield, launch sites, near-Earth payloads (LEO/SSO/MEO/
+ *              GEO), and the full lunar-transfer trajectory: parking
+ *              orbit → transfer ellipse → lunar SOI → captured lunar orbit.
  *
- * The math is intentionally schematic — this is a *visual* planner, not a
- * trajectory optimizer. Numbers come from textbook two-body mechanics so
- * the time-of-flight values shown in the HUD are in the right ballpark.
+ *   helioScene Sun-centered. 1 unit = AU_SCALE units. Renders the Sun,
+ *              the inner-planet orbit rings, planets at live ephemeris
+ *              positions, and the heliocentric Hohmann arc for Mars
+ *              transfers, with proper Kepler-equation timing.
+ *
+ * The active mode is a string ('geo' | 'helio') and switches automatically
+ * whenever the user launches a mission whose target lives in the other
+ * frame (Mars ⇒ helio, Moon and lower ⇒ geo). Manual override exposed via
+ * `setMode()`.
+ *
+ * All trajectory math comes from `mission-planner-trajectory.js`; this
+ * file deals only with rendering + animation.
  */
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import {
+    jdNow, moonGeocentric, earthHeliocentric, marsHeliocentric,
+    mercuryHeliocentric, venusHeliocentric,
+} from './horizons.js';
+import {
+    KM_PER_AU, R_EARTH, R_MOON, SOI_MOON, SOI_MARS, SECONDS_PER_DAY,
+    R_EARTH_HELIO, R_MARS_HELIO,
+    planLunarTransfer, planMarsTransfer, planMarsLambert,
+    findLunarLaunchWindow, findMarsLaunchWindow, porkchopMars,
+    hohmannPositionAt,
+} from './mission-planner-trajectory.js';
+import { sampleKeplerArc } from './mission-planner-lambert.js';
 
-// ── Constants ────────────────────────────────────────────────────────────────
-const R_EARTH_KM   = 6378;
-const MU_EARTH     = 398600.4418;        // km^3/s^2
-const MOON_DIST_KM = 384400;             // mean lunar distance
-const MOON_R_KM    = 1737;
-const MARS_DIST_KM = 78340000;           // approx min Earth-Mars (visual only)
+// ── Scene scales ────────────────────────────────────────────────────────────
+const GEO_UNIT_KM   = R_EARTH;          // 1 scene unit = 1 R⊕ in geo scene
+const HELIO_UNIT_AU = 4.0;              // 1 AU = 4 scene units in helio scene
+const MOON_R_SCENE  = R_MOON / GEO_UNIT_KM;
+const SOI_MOON_SCENE = SOI_MOON / GEO_UNIT_KM;
 
-const R_MOON_SCENE = MOON_DIST_KM / R_EARTH_KM;     // ~60 R⊕
-const R_MOON_BODY  = MOON_R_KM    / R_EARTH_KM;     // ~0.27 R⊕
-
-// Launch sites (lat, lon in degrees; common operational pads).
+// ── Launch sites ────────────────────────────────────────────────────────────
 export const LAUNCH_SITES = [
     { id: 'ksc',     name: 'Kennedy SC (USA)',     lat: 28.573, lon: -80.649 },
     { id: 'baikonur',name: 'Baikonur (KAZ)',       lat: 45.965, lon:  63.305 },
@@ -41,19 +55,17 @@ export const LAUNCH_SITES = [
 ];
 
 export const TARGET_ORBITS = [
-    { id: 'leo',  name: 'LEO · 400 km',  alt_km:    400 },
-    { id: 'sso',  name: 'SSO · 600 km',  alt_km:    600, inc_deg: 97.8 },
-    { id: 'meo',  name: 'MEO · 20 200 km (GPS)', alt_km: 20200, inc_deg: 55 },
-    { id: 'geo',  name: 'GEO · 35 786 km',       alt_km: 35786, inc_deg: 0  },
-    { id: 'moon', name: 'Lunar transfer',        alt_km: MOON_DIST_KM, isTransfer: 'moon' },
-    { id: 'mars', name: 'Mars transfer (TMI)',   alt_km: MARS_DIST_KM, isTransfer: 'mars' },
+    { id: 'leo',  name: 'LEO · 400 km',           alt_km:    400,                         frame: 'geo' },
+    { id: 'sso',  name: 'SSO · 600 km',           alt_km:    600, inc_deg: 97.8,          frame: 'geo' },
+    { id: 'meo',  name: 'MEO · 20 200 km (GPS)',  alt_km:  20200, inc_deg: 55,            frame: 'geo' },
+    { id: 'geo',  name: 'GEO · 35 786 km',        alt_km:  35786, inc_deg: 0,             frame: 'geo' },
+    { id: 'moon', name: 'Lunar transfer (TLI)',   alt_km: 384400,                         frame: 'geo',   isTransfer: 'moon' },
+    { id: 'mars', name: 'Mars transfer (TMI)',    alt_km: 78340000,                       frame: 'helio', isTransfer: 'mars' },
 ];
 
-// ── Math helpers ─────────────────────────────────────────────────────────────
 const DEG = Math.PI / 180;
 
-// Convert (lat, lon) on Earth's surface to a Vector3 (in Earth-radii units).
-// We treat +Y as north; lon=0 maps to +X.
+// ── Math helpers ────────────────────────────────────────────────────────────
 function latLonToVec3(latDeg, lonDeg, r = 1) {
     const phi    = latDeg * DEG;
     const lambda = lonDeg * DEG;
@@ -64,308 +76,481 @@ function latLonToVec3(latDeg, lonDeg, r = 1) {
     );
 }
 
-// Circular-orbit speed at radius r_km (km/s).
-function vCirc(r_km) { return Math.sqrt(MU_EARTH / r_km); }
-
-// Hohmann transfer Δv from r1 to r2 (km/s, both radii in km from Earth's center).
-function hohmannDV(r1_km, r2_km) {
-    const a = (r1_km + r2_km) / 2;
-    const v1   = vCirc(r1_km);
-    const v2   = vCirc(r2_km);
-    const vp   = Math.sqrt(MU_EARTH * (2/r1_km - 1/a));
-    const vap  = Math.sqrt(MU_EARTH * (2/r2_km - 1/a));
-    const dv1  = vp - v1;
-    const dv2  = v2 - vap;
-    const tof_s = Math.PI * Math.sqrt(a*a*a / MU_EARTH);
-    return { dv1, dv2, total: Math.abs(dv1) + Math.abs(dv2), tof_s, a };
+// Convert ecliptic (lon_rad, lat_rad, dist_units) → THREE.Vector3 in our scene
+// convention (+Y = ecliptic normal, ecliptic in XZ plane).
+function eclipticToVec3(lon_rad, lat_rad, r) {
+    const cl = Math.cos(lat_rad);
+    return new THREE.Vector3(
+        r * cl * Math.cos(lon_rad),
+        r * Math.sin(lat_rad),
+       -r * cl * Math.sin(lon_rad),
+    );
 }
 
-// ── Scene builder ────────────────────────────────────────────────────────────
+function easeInOutCubic(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3)/2; }
+
+// ── Public init ─────────────────────────────────────────────────────────────
 export function initMissionPlanner({ container, onEvent } = {}) {
     if (!container) throw new Error('initMissionPlanner: container required');
 
     const w = () => container.clientWidth  || 800;
     const h = () => container.clientHeight || 520;
 
-    const scene  = new THREE.Scene();
-    scene.background = new THREE.Color(0x05030f);
-
-    const camera = new THREE.PerspectiveCamera(45, w()/h(), 0.05, 5000);
-    camera.position.set(3.5, 2.4, 4.6);
-
+    // Shared renderer.
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
     renderer.setSize(w(), h());
     container.appendChild(renderer.domElement);
 
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.08;
-    controls.minDistance = 1.4;
-    controls.maxDistance = 200;
+    // ── Geo scene ───────────────────────────────────────────────────────────
+    const geo = buildGeoScene(renderer, w(), h());
 
-    // ── Lights ──────────────────────────────────────────────────────────────
-    scene.add(new THREE.AmbientLight(0x404060, 0.55));
-    const sun = new THREE.DirectionalLight(0xffeec8, 1.1);
-    sun.position.set(8, 4, 5);
-    scene.add(sun);
-
-    // ── Starfield ───────────────────────────────────────────────────────────
-    {
-        const N = 1500;
-        const pos = new Float32Array(N*3);
-        for (let i=0; i<N; i++) {
-            const r = 600;
-            const u = Math.random()*2 - 1;
-            const t = Math.random()*Math.PI*2;
-            const s = Math.sqrt(1 - u*u);
-            pos[i*3+0] = r * s * Math.cos(t);
-            pos[i*3+1] = r * u;
-            pos[i*3+2] = r * s * Math.sin(t);
-        }
-        const g = new THREE.BufferGeometry();
-        g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-        const m = new THREE.PointsMaterial({ color: 0xffffff, size: 0.55, sizeAttenuation: false, transparent: true, opacity: 0.7 });
-        scene.add(new THREE.Points(g, m));
-    }
-
-    // ── Earth ───────────────────────────────────────────────────────────────
-    const earth = new THREE.Mesh(
-        new THREE.SphereGeometry(1, 64, 48),
-        new THREE.MeshPhongMaterial({
-            color: 0x2a4f8e, emissive: 0x0a1830, emissiveIntensity: 0.4,
-            shininess: 18, specular: 0x4488cc,
-        })
-    );
-    scene.add(earth);
-
-    // Equator + prime meridian wireframe to communicate orientation.
-    const grid = new THREE.LineSegments(
-        new THREE.WireframeGeometry(new THREE.SphereGeometry(1.001, 18, 12)),
-        new THREE.LineBasicMaterial({ color: 0x335577, transparent: true, opacity: 0.18 })
-    );
-    scene.add(grid);
-
-    // Atmosphere glow shell.
-    const atmo = new THREE.Mesh(
-        new THREE.SphereGeometry(1.04, 48, 32),
-        new THREE.MeshBasicMaterial({ color: 0x66aaff, transparent: true, opacity: 0.08, side: THREE.BackSide })
-    );
-    scene.add(atmo);
-
-    // ── Moon (always rendered for visual context) ───────────────────────────
-    const moonAngle = { theta: 0 };
-    const moon = new THREE.Mesh(
-        new THREE.SphereGeometry(R_MOON_BODY, 32, 24),
-        new THREE.MeshPhongMaterial({ color: 0xb8b8b8, emissive: 0x333333 })
-    );
-    scene.add(moon);
-    const moonOrbitLine = makeRingLine(R_MOON_SCENE, 0x444466, 0.35);
-    scene.add(moonOrbitLine);
+    // ── Helio scene ─────────────────────────────────────────────────────────
+    const hel = buildHelioScene(renderer, w(), h());
 
     // ── State ───────────────────────────────────────────────────────────────
     const state = {
-        site: LAUNCH_SITES[0],
-        target: TARGET_ORBITS[0],
-        rockets: [],   // active in-flight vehicles
-        payloads: [],  // deployed orbiting payloads
-        markers: [],   // surface launch-site dots
-        timeScale: 1,
-        clock: new THREE.Clock(),
-        elapsed: 0,
+        site:       LAUNCH_SITES[0],
+        target:     TARGET_ORBITS[0],
+        mode:       'geo',
+        rockets:    [],   // active geo-frame ascent vehicles
+        payloads:   [],   // deployed near-Earth orbiters (geo frame)
+        lunarMissions: [],// active lunar transfers (geo frame)
+        marsMissions:  [],// active Mars transfers (helio frame)
+        clock:      new THREE.Clock(),
+        elapsed:    0,
+        timeScale:  1,
+        // Days-per-second of "compressed" simulation time used for the
+        // helio + lunar trajectories. Lunar TOF ≈ 5d → ~5s of wall time
+        // at 1× when simDays = 1; Mars TOF ≈ 259d → ~26s wall at 10×.
+        simDaysPerSec: 1,
+        // Live ephemeris JD that drives planet positions in helio scene.
+        scenarioJD: jdNow(),
     };
 
-    // ── Surface markers for all launch sites ────────────────────────────────
+    // Surface markers
     for (const s of LAUNCH_SITES) {
         const dot = new THREE.Mesh(
             new THREE.SphereGeometry(0.018, 12, 8),
-            new THREE.MeshBasicMaterial({ color: 0xffaa33 })
+            new THREE.MeshBasicMaterial({ color: 0xffaa33 }),
         );
         dot.position.copy(latLonToVec3(s.lat, s.lon, 1.005));
-        dot.userData.siteId = s.id;
-        scene.add(dot);
-        state.markers.push(dot);
+        geo.scene.add(dot);
+    }
+
+    // ── Mode switch ─────────────────────────────────────────────────────────
+    function setMode(mode) {
+        if (mode !== 'geo' && mode !== 'helio') return;
+        state.mode = mode;
+        onEvent?.({ type: 'mode', mode });
     }
 
     // ── Public API: launch ──────────────────────────────────────────────────
-    function launch({ siteId, targetId, payloadName = 'PayloadSat-1' }) {
+    function launch({
+        siteId, targetId,
+        payloadName     = 'PayloadSat-1',
+        windowJD        = null,
+        arriveJD        = null,                // Mars only — Lambert TOF
+        parking_inc_deg = null,                // overrides launch-site latitude
+    }) {
         const site   = LAUNCH_SITES.find(s => s.id === siteId)   || state.site;
         const target = TARGET_ORBITS.find(t => t.id === targetId) || state.target;
         state.site   = site;
         state.target = target;
 
+        if (target.frame !== state.mode) setMode(target.frame);
+
+        if (target.id === 'moon') {
+            return launchLunar({ site, target, payloadName, windowJD, parking_inc_deg });
+        }
+        if (target.id === 'mars') {
+            return launchMars({ site, target, payloadName, windowJD, arriveJD, parking_inc_deg });
+        }
+        return launchNearEarth({ site, target, payloadName });
+    }
+
+    // ── Near-Earth launch (LEO/SSO/MEO/GEO) — geo frame ─────────────────────
+    function launchNearEarth({ site, target, payloadName }) {
         const startPos = latLonToVec3(site.lat, site.lon, 1.0);
         const inc      = (target.inc_deg ?? Math.abs(site.lat));
-        const altScene = (target.alt_km / R_EARTH_KM);
+        const altScene = (target.alt_km / GEO_UNIT_KM);
         const rOrbit   = 1 + altScene;
 
-        // Pick an orbital plane: tilt by `inc` around the X axis after we
-        // construct an "ascending node" frame oriented from the launch site.
-        const ascNode = new THREE.Vector3(startPos.x, 0, startPos.z).normalize();
+        const ascNode  = new THREE.Vector3(startPos.x, 0, startPos.z).normalize();
+        const eastAxis = ascNode.clone().cross(new THREE.Vector3(0, 1, 0)).normalize();
         const planeNormal = new THREE.Vector3(0, 1, 0)
-            .applyAxisAngle(ascNode.clone().cross(new THREE.Vector3(0,1,0)).normalize(), inc * DEG)
-            .normalize();
+            .applyAxisAngle(eastAxis, inc * DEG).normalize();
 
-        // Rocket body: simple cylinder + cone nose.
-        const rocketGroup = new THREE.Group();
-        const body = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.012, 0.014, 0.07, 12),
-            new THREE.MeshPhongMaterial({ color: 0xeeeeee, emissive: 0x222222 })
-        );
-        const nose = new THREE.Mesh(
-            new THREE.ConeGeometry(0.012, 0.025, 12),
-            new THREE.MeshPhongMaterial({ color: 0xff5533 })
-        );
-        nose.position.y = 0.045;
-        rocketGroup.add(body, nose);
+        const rocket = makeRocket(geo.scene);
+        const trail  = makeTrail(geo.scene, 600, 0xffaa33, 0.85);
 
-        // Engine plume (additive sprite-ish glow).
-        const plume = new THREE.Mesh(
-            new THREE.ConeGeometry(0.015, 0.06, 12, 1, true),
-            new THREE.MeshBasicMaterial({ color: 0xffcc66, transparent: true, opacity: 0.85, side: THREE.DoubleSide })
-        );
-        plume.rotation.x = Math.PI;
-        plume.position.y = -0.05;
-        rocketGroup.add(plume);
-
-        // Trail
-        const trailMat = new THREE.LineBasicMaterial({ color: 0xffaa33, transparent: true, opacity: 0.85 });
-        const trailGeom = new THREE.BufferGeometry();
-        trailGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(600*3), 3));
-        trailGeom.setDrawRange(0, 0);
-        const trail = new THREE.Line(trailGeom, trailMat);
-        scene.add(trail);
-
-        scene.add(rocketGroup);
-
-        const rocket = {
-            group: rocketGroup,
-            trail, trailGeom, trailIndex: 0,
-            site, target,
-            startPos, planeNormal, ascNode, rOrbit, inc,
-            startedAt: state.elapsed,
-            phase: 'ascent',           // 'ascent' → 'coast' → 'deployed'
-            ascentDur: target.isTransfer ? 9.0 : 6.5,
-            payloadName,
+        const r = {
+            kind: 'near', group: rocket, ...trail,
+            site, target, payloadName,
+            startPos, ascNode, planeNormal, rOrbit, inc,
+            startedAt: state.elapsed, ascentDur: 6.0,
+            phase: 'ascent',
         };
-        state.rockets.push(rocket);
-
+        state.rockets.push(r);
         onEvent?.({ type: 'launched', site, target, payloadName });
-        return rocket;
+        return r;
+    }
+
+    // ── Lunar transfer (geo frame, real patched conic) ──────────────────────
+    function launchLunar({ site, target, payloadName, windowJD }) {
+        const jd_depart = windowJD ?? state.scenarioJD ?? jdNow();
+        const plan = planLunarTransfer({ jd_depart });
+
+        // Geometry: place the transfer ellipse in the Earth-Moon orbital plane.
+        // For visual simplicity we use the ecliptic plane (Y-up, ellipse in XZ).
+        // Periapsis direction = opposite of where the Moon will be at arrival.
+        const moonArrPos = eclipticToVec3(
+            plan.moon_at_arrival.lon_rad,
+            plan.moon_at_arrival.lat_rad,
+            plan.r_moon_km / GEO_UNIT_KM,
+        );
+        const apoDir   = moonArrPos.clone().normalize();
+        const periDir  = apoDir.clone().multiplyScalar(-1);
+        // Plane normal = approx ecliptic normal +Y (Moon's orbit is ~5° off
+        // ecliptic, fine for a visual planner).
+        const planeNormal = new THREE.Vector3(0, 1, 0);
+        const inPlaneSide = planeNormal.clone().cross(periDir).normalize();
+
+        // Parking orbit (small ring tangent to the transfer at periapsis).
+        const r_park_scene = plan.r_park_km / GEO_UNIT_KM;
+        const parkRing = makeOrbitRingFromBasis(
+            r_park_scene, periDir, inPlaneSide, 0xffcc66, 0.55,
+        );
+        geo.scene.add(parkRing);
+
+        // Transfer ellipse (full 360° for visual reference, but we only fly
+        // periapsis → apoapsis = 0..π in true anomaly).
+        const ellLine = makeEllipseFromBasis(
+            plan.ellipse.a_km / GEO_UNIT_KM,
+            plan.ellipse.e,
+            periDir, inPlaneSide,
+            0x66ddff, 0.85, /* dashed */ true,
+        );
+        geo.scene.add(ellLine);
+
+        // Lunar SOI sphere (wireframe at arrival point).
+        const soiMesh = new THREE.Mesh(
+            new THREE.SphereGeometry(SOI_MOON_SCENE, 24, 16),
+            new THREE.MeshBasicMaterial({
+                color: 0x66ffaa, wireframe: true, transparent: true, opacity: 0.18,
+            }),
+        );
+        soiMesh.position.copy(apoDir.clone().multiplyScalar(plan.r_moon_km / GEO_UNIT_KM));
+        geo.scene.add(soiMesh);
+
+        // Spacecraft + trail.
+        const craft = new THREE.Mesh(
+            new THREE.SphereGeometry(0.04, 12, 8),
+            new THREE.MeshBasicMaterial({ color: 0xffeecc }),
+        );
+        geo.scene.add(craft);
+        const trail = makeTrail(geo.scene, 800, 0x66ddff, 0.7);
+
+        const m = {
+            kind: 'lunar',
+            plan,
+            craft, ellLine, parkRing, soiMesh,
+            ...trail,
+            periDir, inPlaneSide, apoDir, planeNormal,
+            startedAt:  state.elapsed,
+            // Compress TOF: real ~5 days → 8 s of wall time at 1×.
+            durSec:     8,
+            phase:      'ascent',
+            ascentDur:  3,
+            payloadName,
+            site, target,
+            captureRing: null,   // built when we cross SOI
+            crashCheck:  false,
+        };
+        state.lunarMissions.push(m);
+
+        onEvent?.({ type: 'launched-lunar', site, target, payloadName, plan });
+        return m;
+    }
+
+    // ── Mars transfer (helio frame, Lambert solver) ─────────────────────────
+    function launchMars({ site, target, payloadName, windowJD, arriveJD, parking_inc_deg }) {
+        const jd_depart = windowJD ?? state.scenarioJD ?? jdNow();
+        // Default arrival = depart + Hohmann TOF (~258 d). Caller normally
+        // supplies arriveJD from a pork-chop pick.
+        const jd_arrive = arriveJD ?? (jd_depart + 258);
+        const inc       = parking_inc_deg ?? Math.abs(site.lat);
+
+        const plan = planMarsLambert({
+            jd_depart, jd_arrive,
+            parking_inc_deg: inc,
+        });
+
+        // Sample the actual Lambert arc in heliocentric km, then project to
+        // scene units. This replaces the Hohmann ellipse stand-in — the
+        // rendered curve is the trajectory the spacecraft actually flies.
+        const samples_km = plan.sample();
+        const N = samples_km.length;
+        const auMul = HELIO_UNIT_AU / KM_PER_AU;
+        const arcGeom = new THREE.BufferGeometry();
+        const arcPos  = new Float32Array(N * 3);
+        for (let i = 0; i < N; i++) {
+            const r = samples_km[i];
+            // ecliptic +Z → scene +Y? horizons.js puts ecliptic in (x,y) with
+            // +z = ecliptic normal. Our scene puts ecliptic in (x,z) with
+            // +y = normal. Map (x, y, z)_ecl → (x, z, -y)_scene.
+            arcPos[i*3+0] =  r[0] * auMul;
+            arcPos[i*3+1] =  r[2] * auMul;
+            arcPos[i*3+2] = -r[1] * auMul;
+        }
+        arcGeom.setAttribute('position', new THREE.BufferAttribute(arcPos, 3));
+        const arcLine = new THREE.Line(arcGeom, new THREE.LineBasicMaterial({
+            color: 0xff8855, transparent: true, opacity: 0.85,
+        }));
+        hel.scene.add(arcLine);
+
+        // Mars SOI sphere at arrival point (last sample).
+        const soiScene = SOI_MARS * auMul;
+        const soiMesh = new THREE.Mesh(
+            new THREE.SphereGeometry(soiScene, 16, 12),
+            new THREE.MeshBasicMaterial({ color: 0xff7755, wireframe: true,
+                transparent: true, opacity: 0.25 }),
+        );
+        soiMesh.position.set(arcPos[(N-1)*3+0], arcPos[(N-1)*3+1], arcPos[(N-1)*3+2]);
+        hel.scene.add(soiMesh);
+
+        // Spacecraft + trail.
+        const craft = new THREE.Mesh(
+            new THREE.SphereGeometry(0.05, 12, 8),
+            new THREE.MeshBasicMaterial({ color: 0xffeecc }),
+        );
+        hel.scene.add(craft);
+        const trail = makeTrail(hel.scene, 1200, 0xff8855, 0.7);
+
+        const m = {
+            kind: 'mars',
+            plan, arcPos, N,
+            craft, arcLine, soiMesh,
+            ...trail,
+            startedAt: state.elapsed,
+            // Wall-clock time scales with TOF: 30 s for a 260-day Hohmann.
+            durSec:    Math.max(8, plan.tof_d * (30 / 260)),
+            phase:     'cruise',
+            payloadName, site, target,
+        };
+        state.marsMissions.push(m);
+
+        onEvent?.({ type: 'launched-mars', site, target, payloadName, plan });
+        return m;
     }
 
     // ── Update loop ─────────────────────────────────────────────────────────
     function tick() {
         const dt = state.clock.getDelta() * state.timeScale;
         state.elapsed += dt;
+        state.scenarioJD += dt * state.simDaysPerSec;
 
-        // Earth slow rotation (sidereal-ish, just for visual flavor).
-        earth.rotation.y += dt * 0.04;
-        grid.rotation.y  = earth.rotation.y;
-
-        // Moon
-        moonAngle.theta += dt * 0.025;
-        moon.position.set(
-            R_MOON_SCENE * Math.cos(moonAngle.theta),
-            0,
-            R_MOON_SCENE * Math.sin(moonAngle.theta),
-        );
-
-        // Rockets
-        for (const r of state.rockets) {
-            const t = state.elapsed - r.startedAt;
-            if (r.phase === 'ascent') {
-                const u = Math.min(1, t / r.ascentDur);
-                // Curved arc: surface → orbit. Interpolate radius linearly,
-                // and bend the angular position toward the orbital plane.
-                const radius = 1 + (r.rOrbit - 1) * easeInOutCubic(u);
-                // Direction in orbital plane: rotate ascNode by `u·90°` around plane normal.
-                const dir = r.ascNode.clone()
-                    .applyAxisAngle(r.planeNormal, u * Math.PI/2 * 0.85);
-                const pos = dir.multiplyScalar(radius);
-                r.group.position.copy(pos);
-                // Orient rocket along velocity-ish direction (tangent to arc).
-                const tangent = r.ascNode.clone().applyAxisAngle(r.planeNormal, u*Math.PI/2 + 0.001).sub(
-                    r.ascNode.clone().applyAxisAngle(r.planeNormal, u*Math.PI/2)
-                ).normalize();
-                const up = pos.clone().normalize();
-                const look = pos.clone().add(tangent.add(up.multiplyScalar(0.4)));
-                r.group.lookAt(look);
-                r.group.rotateX(Math.PI/2);
-
-                pushTrail(r, pos);
-
-                if (u >= 1) {
-                    r.phase = r.target.isTransfer ? 'transfer' : 'deployed';
-                    deployPayload(r);
-                    if (r.phase === 'transfer') runTransfer(r);
-                }
-            }
+        if (state.mode === 'geo') {
+            updateGeo(dt);
+            geo.controls.update();
+            renderer.render(geo.scene, geo.camera);
+        } else {
+            updateHelio(dt);
+            hel.controls.update();
+            renderer.render(hel.scene, hel.camera);
         }
-
-        // Payloads (orbit propagation)
-        for (const p of state.payloads) {
-            p.theta += dt * p.omega;
-            const a = p.ascNode.clone();
-            const dir = a.applyAxisAngle(p.planeNormal, p.theta);
-            p.mesh.position.copy(dir.multiplyScalar(p.r));
-            // Update trailing ribbon
-            pushOrbitTrail(p);
-        }
-
-        controls.update();
-        renderer.render(scene, camera);
         requestAnimationFrame(tick);
     }
 
-    function pushTrail(r, pos) {
-        const arr = r.trailGeom.attributes.position.array;
-        const i = r.trailIndex;
-        if (i*3 + 2 < arr.length) {
-            arr[i*3+0] = pos.x; arr[i*3+1] = pos.y; arr[i*3+2] = pos.z;
-            r.trailIndex = i + 1;
-            r.trailGeom.setDrawRange(0, r.trailIndex);
-            r.trailGeom.attributes.position.needsUpdate = true;
+    function updateGeo(dt) {
+        // Earth rotation
+        geo.earth.rotation.y += dt * 0.04;
+        geo.grid.rotation.y   = geo.earth.rotation.y;
+
+        // Live Moon position from ephemeris (slowed): drift the moon along
+        // its real angular rate, anchored to scenarioJD.
+        const moonNow = moonGeocentric(state.scenarioJD);
+        geo.moon.position.copy(eclipticToVec3(
+            moonNow.lon_rad, moonNow.lat_rad,
+            moonNow.dist_km / GEO_UNIT_KM,
+        ));
+
+        // ── Near-Earth ascent rockets ───────────────────────────────────────
+        for (const r of state.rockets) {
+            if (r.phase !== 'ascent') continue;
+            const t = state.elapsed - r.startedAt;
+            const u = Math.min(1, t / r.ascentDur);
+            const radius = 1 + (r.rOrbit - 1) * easeInOutCubic(u);
+            const dir = r.ascNode.clone().applyAxisAngle(r.planeNormal, u * Math.PI/2 * 0.85);
+            const pos = dir.multiplyScalar(radius);
+            r.group.position.copy(pos);
+            const up = pos.clone().normalize();
+            const tangent = r.ascNode.clone().applyAxisAngle(r.planeNormal, u*Math.PI/2 + 0.001).sub(
+                r.ascNode.clone().applyAxisAngle(r.planeNormal, u*Math.PI/2)
+            ).normalize();
+            r.group.lookAt(pos.clone().add(tangent.add(up.multiplyScalar(0.4))));
+            r.group.rotateX(Math.PI/2);
+            pushTrail(r, pos);
+            if (u >= 1) {
+                r.phase = 'deployed';
+                deployNearEarthPayload(r);
+            }
+        }
+
+        // ── Near-Earth deployed payloads ────────────────────────────────────
+        for (const p of state.payloads) {
+            p.theta += dt * p.omega;
+            const dir = p.ascNode.clone().applyAxisAngle(p.planeNormal, p.theta);
+            p.mesh.position.copy(dir.multiplyScalar(p.r));
+            pushOrbitTrail(p);
+        }
+
+        // ── Lunar missions ──────────────────────────────────────────────────
+        for (const m of state.lunarMissions) {
+            const t = state.elapsed - m.startedAt;
+
+            if (m.phase === 'ascent') {
+                // Quick visual ascent from launch site to the parking orbit
+                // periapsis (which sits along periDir at r_park_scene).
+                const u = Math.min(1, t / m.ascentDur);
+                const start = latLonToVec3(m.site.lat, m.site.lon, 1.0);
+                const end   = m.periDir.clone().multiplyScalar(m.plan.r_park_km / GEO_UNIT_KM);
+                const pos   = start.clone().lerp(end, easeInOutCubic(u));
+                m.craft.position.copy(pos);
+                pushTrail(m, pos);
+                if (u >= 1) {
+                    m.phase = 'transfer';
+                    m.transferStart = state.elapsed;
+                }
+                continue;
+            }
+
+            if (m.phase === 'transfer') {
+                const u = Math.min(1, (state.elapsed - m.transferStart) / m.durSec);
+                // Kepler position on the ellipse.
+                const a_scene = m.plan.ellipse.a_km / GEO_UNIT_KM;
+                const e       = m.plan.ellipse.e;
+                const p2d     = hohmannPositionAt(u, a_scene, e);
+                // Convert (x, y) in periDir/inPlaneSide basis to scene XYZ.
+                // x along +periDir, y along +inPlaneSide.
+                // BUT focus is at Sun/Earth = origin; periDir points OUT to
+                // periapsis. The Hohmann formula above puts periapsis at +x,
+                // apoapsis at -x. Spacecraft starts at periapsis and ends at
+                // -2a + rp ≈ apoapsis. So position = periDir·x + side·y.
+                const pos = m.periDir.clone().multiplyScalar(p2d.x)
+                    .add(m.inPlaneSide.clone().multiplyScalar(p2d.y));
+                m.craft.position.copy(pos);
+                pushTrail(m, pos);
+
+                // Detect SOI entry.
+                const distToMoon = pos.distanceTo(m.soiMesh.position);
+                if (distToMoon <= SOI_MOON_SCENE && !m.captureRing) {
+                    captureLunar(m);
+                }
+
+                if (u >= 1) {
+                    m.phase = 'captured';
+                    if (!m.captureRing) captureLunar(m);
+                }
+                continue;
+            }
+
+            if (m.phase === 'captured') {
+                // Spacecraft circulates around the (moving) Moon at r_capt.
+                m.captureTheta = (m.captureTheta || 0) + dt * (m.captureOmega || 1.2);
+                const local = m.capturePeri.clone()
+                    .applyAxisAngle(m.planeNormal, m.captureTheta)
+                    .multiplyScalar(m.plan.r_capt_km / GEO_UNIT_KM);
+                m.craft.position.copy(geo.moon.position.clone().add(local));
+                // Move the capture ring to follow the Moon.
+                m.captureRing.position.copy(geo.moon.position);
+            }
         }
     }
 
-    function pushOrbitTrail(p) {
-        if (!p.trailGeom) return;
-        const arr = p.trailGeom.attributes.position.array;
-        const N   = arr.length / 3;
-        const i   = p.trailIndex % N;
-        arr[i*3+0] = p.mesh.position.x;
-        arr[i*3+1] = p.mesh.position.y;
-        arr[i*3+2] = p.mesh.position.z;
-        p.trailIndex++;
-        p.trailGeom.setDrawRange(0, Math.min(p.trailIndex, N));
-        p.trailGeom.attributes.position.needsUpdate = true;
+    function captureLunar(m) {
+        m.captureRing = makeOrbitRingFromBasis(
+            m.plan.r_capt_km / GEO_UNIT_KM,
+            new THREE.Vector3(1, 0, 0),
+            new THREE.Vector3(0, 0, 1),
+            0xffeecc, 0.85,
+        );
+        m.captureRing.position.copy(geo.moon.position);
+        geo.scene.add(m.captureRing);
+        m.capturePeri    = new THREE.Vector3(1, 0, 0);
+        m.captureTheta   = 0;
+        // visual angular speed (rad/sec at 1× timeScale): pick something snappy
+        m.captureOmega   = 1.6;
+        onEvent?.({
+            type: 'lunar-captured',
+            payloadName: m.payloadName,
+            plan: m.plan,
+        });
     }
 
-    function deployPayload(r) {
-        // A small bright dot for the payload + an orbit ring + a fading trail.
+    function updateHelio(dt) {
+        // Sun spin (purely cosmetic).
+        hel.sun.rotation.y += dt * 0.04;
+
+        // Update planet positions from live ephemeris at scenarioJD.
+        const eVec = earthHeliocentric(state.scenarioJD);
+        const mVec = marsHeliocentric(state.scenarioJD);
+        const meVec = mercuryHeliocentric(state.scenarioJD);
+        const vVec  = venusHeliocentric(state.scenarioJD);
+        hel.earth.position.copy(eclipticToVec3(eVec.lon_rad, eVec.lat_rad, eVec.dist_AU * HELIO_UNIT_AU));
+        hel.mars.position.copy (eclipticToVec3(mVec.lon_rad, mVec.lat_rad, mVec.dist_AU * HELIO_UNIT_AU));
+        hel.mercury.position.copy(eclipticToVec3(meVec.lon_rad, meVec.lat_rad, meVec.dist_AU * HELIO_UNIT_AU));
+        hel.venus.position.copy  (eclipticToVec3(vVec.lon_rad,  vVec.lat_rad,  vVec.dist_AU  * HELIO_UNIT_AU));
+
+        // Mars missions — spacecraft walks the pre-sampled Lambert arc.
+        // Linear interpolation between samples is fine because the arc was
+        // sampled at uniform t (Kepler-equation timing). Could be upgraded
+        // to a true Catmull-Rom spline if the arc ever looked jaggy.
+        for (const m of state.marsMissions) {
+            if (m.phase !== 'cruise') continue;
+            const u   = Math.min(1, (state.elapsed - m.startedAt) / m.durSec);
+            const fi  = u * (m.N - 1);
+            const i0  = Math.floor(fi);
+            const i1  = Math.min(m.N - 1, i0 + 1);
+            const t   = fi - i0;
+            const ax  = m.arcPos;
+            m.craft.position.set(
+                ax[i0*3+0] * (1-t) + ax[i1*3+0] * t,
+                ax[i0*3+1] * (1-t) + ax[i1*3+1] * t,
+                ax[i0*3+2] * (1-t) + ax[i1*3+2] * t,
+            );
+            pushTrail(m, m.craft.position);
+            if (u >= 1) {
+                m.phase = 'arrived';
+                onEvent?.({ type: 'mars-captured', payloadName: m.payloadName, plan: m.plan });
+            }
+        }
+    }
+
+    function deployNearEarthPayload(r) {
         const p = new THREE.Mesh(
             new THREE.SphereGeometry(0.025, 16, 12),
-            new THREE.MeshBasicMaterial({ color: 0x66ffaa })
+            new THREE.MeshBasicMaterial({ color: 0x66ffaa }),
         );
-        scene.add(p);
-
-        const ring = makeOrbitRing(r.rOrbit, r.planeNormal, r.ascNode, 0x66ffaa, 0.4);
-        scene.add(ring);
-
+        geo.scene.add(p);
+        const ring = makeOrbitRingFromBasis(
+            r.rOrbit, r.ascNode,
+            r.ascNode.clone().applyAxisAngle(r.planeNormal, Math.PI/2),
+            0x66ffaa, 0.4,
+        );
+        geo.scene.add(ring);
         const trailGeom = new THREE.BufferGeometry();
         trailGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(400*3), 3));
         trailGeom.setDrawRange(0, 0);
         const trail = new THREE.Line(trailGeom, new THREE.LineBasicMaterial({
             color: 0x66ffaa, transparent: true, opacity: 0.6,
         }));
-        scene.add(trail);
+        geo.scene.add(trail);
 
-        // Period (visual): real T = 2π√(a³/μ); compress so LEO ≈ 6 s.
-        const r_km = r.target.alt_km + R_EARTH_KM;
-        const period_s = 2 * Math.PI * Math.sqrt(Math.pow(r_km, 3) / MU_EARTH);
+        const r_km = r.target.alt_km + R_EARTH;
+        const period_s = 2 * Math.PI * Math.sqrt(Math.pow(r_km, 3) / 398600.4418);
         const visualPeriod = Math.max(4, Math.min(45, period_s / 900));
-        const omega = (2*Math.PI) / visualPeriod;
+        const omega = (2 * Math.PI) / visualPeriod;
 
         state.payloads.push({
             mesh: p, ring,
@@ -385,100 +570,51 @@ export function initMissionPlanner({ container, onEvent } = {}) {
                 alt_km: r.target.alt_km,
                 inc_deg: r.inc,
                 period_min: period_s / 60,
-                v_circ_kms: vCirc(r_km),
+                v_circ_kms: Math.sqrt(398600.4418 / r_km),
             },
         });
     }
 
-    function runTransfer(r) {
-        // Fire a transfer ellipse from the *current* orbit (assumed LEO 400 km)
-        // out to the destination (Moon or Mars). Pure visual: render a dashed
-        // ellipse and an animated traveler on it, then report Δv + TOF in HUD.
-        const r1 = R_EARTH_KM + 400;
-        const r2 = (r.target.id === 'moon') ? MOON_DIST_KM : MARS_DIST_KM;
-        const h = hohmannDV(r1, r2);
-
-        // Ellipse in orbital plane: place periapsis at the launch site direction.
-        const a   = (r1 + r2) / 2 / R_EARTH_KM;        // scene units
-        const e   = Math.abs(r2 - r1) / (r2 + r1);
-        const b   = a * Math.sqrt(1 - e*e);
-        const cx  = a - r1 / R_EARTH_KM;                // center offset along major axis
-
-        const N = 256;
-        const pos = new Float32Array(N*3);
-        const u   = r.ascNode.clone();
-        const v   = u.clone().applyAxisAngle(r.planeNormal, Math.PI/2);
-        for (let i=0; i<N; i++) {
-            const ang = (i / (N-1)) * Math.PI * 2;
-            const x = a * Math.cos(ang) - cx;
-            const y = b * Math.sin(ang);
-            const p = u.clone().multiplyScalar(x).add(v.clone().multiplyScalar(y));
-            pos[i*3+0] = p.x; pos[i*3+1] = p.y; pos[i*3+2] = p.z;
-        }
-        const eg = new THREE.BufferGeometry();
-        eg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-        const em = new THREE.LineDashedMaterial({
-            color: r.target.id === 'moon' ? 0xccccff : 0xff8855,
-            dashSize: 0.25, gapSize: 0.18, transparent: true, opacity: 0.85,
-        });
-        const ellipse = new THREE.Line(eg, em);
-        ellipse.computeLineDistances();
-        scene.add(ellipse);
-
-        onEvent?.({
-            type: 'transfer',
-            target: r.target,
-            dv1_kms: h.dv1, dv2_kms: h.dv2, dv_total_kms: h.total,
-            tof_days: h.tof_s / 86400,
-        });
-
-        // Mark the rocket as deployed so the ascent loop stops touching it.
-        r.phase = 'deployed';
-    }
-
-    function makeRingLine(radius, color, opacity) {
-        const N = 256;
-        const pos = new Float32Array(N*3);
-        for (let i=0; i<N; i++) {
-            const a = (i / (N-1)) * Math.PI * 2;
-            pos[i*3+0] = radius * Math.cos(a);
-            pos[i*3+1] = 0;
-            pos[i*3+2] = radius * Math.sin(a);
-        }
-        const g = new THREE.BufferGeometry();
-        g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-        return new THREE.LineLoop(g, new THREE.LineBasicMaterial({
+    // ── Trail helpers (shared) ──────────────────────────────────────────────
+    function makeTrail(scene, capacity, color, opacity) {
+        const trailGeom = new THREE.BufferGeometry();
+        trailGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(capacity*3), 3));
+        trailGeom.setDrawRange(0, 0);
+        const trail = new THREE.Line(trailGeom, new THREE.LineBasicMaterial({
             color, transparent: true, opacity,
         }));
+        scene.add(trail);
+        return { trail, trailGeom, trailIndex: 0, trailCap: capacity };
     }
 
-    function makeOrbitRing(radius, normal, ascNode, color, opacity) {
-        const N = 256;
-        const pos = new Float32Array(N*3);
-        const u = ascNode.clone();
-        const v = u.clone().applyAxisAngle(normal, Math.PI/2);
-        for (let i=0; i<N; i++) {
-            const a = (i / (N-1)) * Math.PI * 2;
-            const p = u.clone().multiplyScalar(radius * Math.cos(a))
-                .add(v.clone().multiplyScalar(radius * Math.sin(a)));
-            pos[i*3+0] = p.x; pos[i*3+1] = p.y; pos[i*3+2] = p.z;
-        }
-        const g = new THREE.BufferGeometry();
-        g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-        return new THREE.LineLoop(g, new THREE.LineBasicMaterial({
-            color, transparent: true, opacity,
-        }));
+    function pushTrail(obj, pos) {
+        const i = obj.trailIndex;
+        if (i >= obj.trailCap) return;
+        const arr = obj.trailGeom.attributes.position.array;
+        arr[i*3+0] = pos.x; arr[i*3+1] = pos.y; arr[i*3+2] = pos.z;
+        obj.trailIndex = i + 1;
+        obj.trailGeom.setDrawRange(0, obj.trailIndex);
+        obj.trailGeom.attributes.position.needsUpdate = true;
     }
 
-    function easeInOutCubic(t) {
-        return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3)/2;
+    function pushOrbitTrail(p) {
+        const N = p.trailGeom.attributes.position.array.length / 3;
+        const i = p.trailIndex % N;
+        const arr = p.trailGeom.attributes.position.array;
+        arr[i*3+0] = p.mesh.position.x;
+        arr[i*3+1] = p.mesh.position.y;
+        arr[i*3+2] = p.mesh.position.z;
+        p.trailIndex++;
+        p.trailGeom.setDrawRange(0, Math.min(p.trailIndex, N));
+        p.trailGeom.attributes.position.needsUpdate = true;
     }
 
     // ── Resize ──────────────────────────────────────────────────────────────
     const ro = new ResizeObserver(() => {
-        camera.aspect = w() / h();
-        camera.updateProjectionMatrix();
-        renderer.setSize(w(), h());
+        const cw = w(), ch = h();
+        renderer.setSize(cw, ch);
+        geo.camera.aspect = cw / ch; geo.camera.updateProjectionMatrix();
+        hel.camera.aspect = cw / ch; hel.camera.updateProjectionMatrix();
     });
     ro.observe(container);
 
@@ -486,21 +622,259 @@ export function initMissionPlanner({ container, onEvent } = {}) {
 
     return {
         launch,
+        setMode,
+        getMode: () => state.mode,
         setTimeScale: (x) => { state.timeScale = Math.max(0, Math.min(50, x)); },
         getTimeScale: () => state.timeScale,
-        clear: () => {
-            for (const r of state.rockets) { scene.remove(r.group); scene.remove(r.trail); }
-            for (const p of state.payloads) {
-                scene.remove(p.mesh); scene.remove(p.ring); scene.remove(p.trail);
-            }
-            state.rockets.length  = 0;
-            state.payloads.length = 0;
+        setSimDaysPerSec: (x) => { state.simDaysPerSec = Math.max(0, x); },
+        clear: () => clearAll(state, geo, hel),
+        focusEarth: () => {
+            geo.controls.target.set(0, 0, 0);
+            geo.camera.position.set(3.5, 2.4, 4.6);
         },
-        focusEarth: () => { controls.target.set(0,0,0); camera.position.set(3.5, 2.4, 4.6); },
-        focusMoon:  () => { controls.target.copy(moon.position); camera.position.set(moon.position.x*1.05, 8, moon.position.z*1.05 + 8); },
+        focusMoon: () => {
+            geo.controls.target.copy(geo.moon.position);
+            geo.camera.position.set(geo.moon.position.x*1.05, 8, geo.moon.position.z*1.05 + 8);
+        },
+        focusSun: () => {
+            hel.controls.target.set(0, 0, 0);
+            hel.camera.position.set(0, 4 * HELIO_UNIT_AU, 4 * HELIO_UNIT_AU);
+        },
         getStats: () => ({
-            rockets:  state.rockets.length,
-            payloads: state.payloads.length,
+            rockets:        state.rockets.length,
+            payloads:       state.payloads.length,
+            lunarMissions:  state.lunarMissions.length,
+            marsMissions:   state.marsMissions.length,
         }),
+        getScenarioJD: () => state.scenarioJD,
+        setScenarioJD: (jd) => { state.scenarioJD = jd; },
+        // Trajectory planners — also useful from the UI for read-only previews.
+        planLunar:        planLunarTransfer,
+        planMars:         planMarsTransfer,
+        planMarsLambert,
+        findLunarWindow:  findLunarLaunchWindow,
+        findMarsWindow:   findMarsLaunchWindow,
+        porkchopMars,
     };
+}
+
+// ── Scene builders ──────────────────────────────────────────────────────────
+
+function buildGeoScene(renderer, w, h) {
+    const scene  = new THREE.Scene();
+    scene.background = new THREE.Color(0x05030f);
+
+    const camera = new THREE.PerspectiveCamera(45, w/h, 0.05, 5000);
+    camera.position.set(3.5, 2.4, 4.6);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true; controls.dampingFactor = 0.08;
+    controls.minDistance = 1.4;    controls.maxDistance = 200;
+
+    scene.add(new THREE.AmbientLight(0x404060, 0.55));
+    const sun = new THREE.DirectionalLight(0xffeec8, 1.1);
+    sun.position.set(8, 4, 5); scene.add(sun);
+
+    addStarfield(scene, 1500, 600);
+
+    const earth = new THREE.Mesh(
+        new THREE.SphereGeometry(1, 64, 48),
+        new THREE.MeshPhongMaterial({
+            color: 0x2a4f8e, emissive: 0x0a1830, emissiveIntensity: 0.4,
+            shininess: 18, specular: 0x4488cc,
+        }),
+    );
+    scene.add(earth);
+
+    const grid = new THREE.LineSegments(
+        new THREE.WireframeGeometry(new THREE.SphereGeometry(1.001, 18, 12)),
+        new THREE.LineBasicMaterial({ color: 0x335577, transparent: true, opacity: 0.18 }),
+    );
+    scene.add(grid);
+
+    const atmo = new THREE.Mesh(
+        new THREE.SphereGeometry(1.04, 48, 32),
+        new THREE.MeshBasicMaterial({ color: 0x66aaff, transparent: true, opacity: 0.08, side: THREE.BackSide }),
+    );
+    scene.add(atmo);
+
+    const moon = new THREE.Mesh(
+        new THREE.SphereGeometry(MOON_R_SCENE, 32, 24),
+        new THREE.MeshPhongMaterial({ color: 0xb8b8b8, emissive: 0x333333 }),
+    );
+    scene.add(moon);
+
+    // Reference lunar-orbit ring (mean distance, equatorial — purely visual).
+    const moonRingMean = makeRingLine(384400 / R_EARTH, 0x444466, 0.35);
+    scene.add(moonRingMean);
+
+    return { scene, camera, controls, earth, grid, atmo, moon };
+}
+
+function buildHelioScene(renderer, w, h) {
+    const scene  = new THREE.Scene();
+    scene.background = new THREE.Color(0x010108);
+
+    const camera = new THREE.PerspectiveCamera(40, w/h, 0.05, 1e5);
+    camera.position.set(0, 5 * HELIO_UNIT_AU, 5 * HELIO_UNIT_AU);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true; controls.dampingFactor = 0.08;
+    controls.minDistance = 0.5;    controls.maxDistance = 200;
+
+    scene.add(new THREE.AmbientLight(0x202028, 0.6));
+
+    addStarfield(scene, 2000, 500);
+
+    // Sun
+    const sun = new THREE.Mesh(
+        new THREE.SphereGeometry(0.18, 32, 24),
+        new THREE.MeshBasicMaterial({ color: 0xffcc55 }),
+    );
+    scene.add(sun);
+    const sunGlow = new THREE.Mesh(
+        new THREE.SphereGeometry(0.36, 24, 18),
+        new THREE.MeshBasicMaterial({ color: 0xffaa33, transparent: true, opacity: 0.18, side: THREE.BackSide }),
+    );
+    scene.add(sunGlow);
+    const sunLight = new THREE.PointLight(0xffeec8, 1.2, 0, 0);
+    scene.add(sunLight);
+
+    // Inner-planet orbit rings
+    const orbits = [
+        { r: 0.387 * HELIO_UNIT_AU, color: 0x886655 }, // Mercury
+        { r: 0.723 * HELIO_UNIT_AU, color: 0xc8b88a }, // Venus
+        { r: 1.000 * HELIO_UNIT_AU, color: 0x4488cc }, // Earth
+        { r: 1.524 * HELIO_UNIT_AU, color: 0xc05530 }, // Mars
+    ];
+    for (const o of orbits) {
+        scene.add(makeRingLine(o.r, o.color, 0.55));
+    }
+
+    const mercury = new THREE.Mesh(new THREE.SphereGeometry(0.05, 16, 12), new THREE.MeshPhongMaterial({ color: 0xaa9988, emissive: 0x222222 }));
+    const venus   = new THREE.Mesh(new THREE.SphereGeometry(0.07, 16, 12), new THREE.MeshPhongMaterial({ color: 0xe7c987, emissive: 0x332211 }));
+    const earth   = new THREE.Mesh(new THREE.SphereGeometry(0.08, 20, 14), new THREE.MeshPhongMaterial({ color: 0x4f8fe0, emissive: 0x112244 }));
+    const mars    = new THREE.Mesh(new THREE.SphereGeometry(0.06, 16, 12), new THREE.MeshPhongMaterial({ color: 0xc0552d, emissive: 0x331100 }));
+    scene.add(mercury, venus, earth, mars);
+
+    return { scene, camera, controls, sun, sunGlow, mercury, venus, earth, mars };
+}
+
+function addStarfield(scene, N, R) {
+    const pos = new Float32Array(N*3);
+    for (let i=0; i<N; i++) {
+        const u = Math.random()*2 - 1;
+        const t = Math.random()*Math.PI*2;
+        const s = Math.sqrt(1 - u*u);
+        pos[i*3+0] = R * s * Math.cos(t);
+        pos[i*3+1] = R * u;
+        pos[i*3+2] = R * s * Math.sin(t);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    scene.add(new THREE.Points(g, new THREE.PointsMaterial({
+        color: 0xffffff, size: 0.55, sizeAttenuation: false, transparent: true, opacity: 0.7,
+    })));
+}
+
+function makeRingLine(radius, color, opacity) {
+    const N = 256;
+    const pos = new Float32Array(N*3);
+    for (let i=0; i<N; i++) {
+        const a = (i / (N-1)) * Math.PI * 2;
+        pos[i*3+0] = radius * Math.cos(a);
+        pos[i*3+1] = 0;
+        pos[i*3+2] = radius * Math.sin(a);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    return new THREE.LineLoop(g, new THREE.LineBasicMaterial({ color, transparent: true, opacity }));
+}
+
+// Orbit ring of given radius in a plane spanned by (uHat, vHat).
+function makeOrbitRingFromBasis(radius, uHat, vHat, color, opacity) {
+    const N = 256;
+    const pos = new Float32Array(N*3);
+    const u = uHat.clone().normalize();
+    const v = vHat.clone().normalize();
+    for (let i=0; i<N; i++) {
+        const a = (i / (N-1)) * Math.PI * 2;
+        const p = u.clone().multiplyScalar(radius * Math.cos(a))
+            .add(v.clone().multiplyScalar(radius * Math.sin(a)));
+        pos[i*3+0] = p.x; pos[i*3+1] = p.y; pos[i*3+2] = p.z;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    return new THREE.LineLoop(g, new THREE.LineBasicMaterial({ color, transparent: true, opacity }));
+}
+
+// Full Kepler ellipse (focus at origin, periapsis along +periHat) sampled
+// over true anomaly. dashed=true uses LineDashedMaterial.
+function makeEllipseFromBasis(a, e, periHat, sideHat, color, opacity, dashed = false) {
+    const N = 256;
+    const pos = new Float32Array(N*3);
+    const p   = a * (1 - e*e);
+    const periN = periHat.clone().normalize();
+    const sideN = sideHat.clone().normalize();
+    for (let i=0; i<N; i++) {
+        const nu = (i / (N-1)) * Math.PI * 2;
+        const r  = p / (1 + e * Math.cos(nu));
+        const v  = periN.clone().multiplyScalar(r * Math.cos(nu))
+            .add(sideN.clone().multiplyScalar(r * Math.sin(nu)));
+        pos[i*3+0] = v.x; pos[i*3+1] = v.y; pos[i*3+2] = v.z;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const mat = dashed
+        ? new THREE.LineDashedMaterial({ color, transparent: true, opacity, dashSize: 0.28, gapSize: 0.18 })
+        : new THREE.LineBasicMaterial ({ color, transparent: true, opacity });
+    const line = new THREE.LineLoop(g, mat);
+    if (dashed) line.computeLineDistances();
+    return line;
+}
+
+function makeRocket(scene) {
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.012, 0.014, 0.07, 12),
+        new THREE.MeshPhongMaterial({ color: 0xeeeeee, emissive: 0x222222 }),
+    );
+    const nose = new THREE.Mesh(
+        new THREE.ConeGeometry(0.012, 0.025, 12),
+        new THREE.MeshPhongMaterial({ color: 0xff5533 }),
+    );
+    nose.position.y = 0.045;
+    const plume = new THREE.Mesh(
+        new THREE.ConeGeometry(0.015, 0.06, 12, 1, true),
+        new THREE.MeshBasicMaterial({ color: 0xffcc66, transparent: true, opacity: 0.85, side: THREE.DoubleSide }),
+    );
+    plume.rotation.x = Math.PI; plume.position.y = -0.05;
+    g.add(body, nose, plume);
+    scene.add(g);
+    return g;
+}
+
+function clearAll(state, geo, hel) {
+    for (const r of state.rockets) {
+        geo.scene.remove(r.group); geo.scene.remove(r.trail);
+    }
+    for (const p of state.payloads) {
+        geo.scene.remove(p.mesh); geo.scene.remove(p.ring); geo.scene.remove(p.trail);
+    }
+    for (const m of state.lunarMissions) {
+        geo.scene.remove(m.craft); geo.scene.remove(m.trail);
+        if (m.ellLine)     geo.scene.remove(m.ellLine);
+        if (m.parkRing)    geo.scene.remove(m.parkRing);
+        if (m.soiMesh)     geo.scene.remove(m.soiMesh);
+        if (m.captureRing) geo.scene.remove(m.captureRing);
+    }
+    for (const m of state.marsMissions) {
+        hel.scene.remove(m.craft); hel.scene.remove(m.trail);
+        if (m.arcLine) hel.scene.remove(m.arcLine);
+        if (m.soiMesh) hel.scene.remove(m.soiMesh);
+    }
+    state.rockets.length        = 0;
+    state.payloads.length       = 0;
+    state.lunarMissions.length  = 0;
+    state.marsMissions.length   = 0;
 }
