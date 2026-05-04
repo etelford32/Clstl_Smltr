@@ -274,6 +274,29 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
         </select>
         <button id="mp-tour-optimize" class="mp-secondary-btn" type="button" style="margin-top:6px;">🌌 Optimize + Run Tour</button>
 
+        <div class="mp-section-divider"></div>
+
+        <div class="mp-label">Launch Physics Lab (any body)</div>
+        <select id="mp-launch-body" class="mp-select"></select>
+        <select id="mp-launch-vehicle" class="mp-select" style="margin-top:6px;"></select>
+        <div class="mp-row" style="margin-top:6px;">
+            <input id="mp-launch-alt" class="mp-input" type="range" min="50" max="500" step="10" value="200">
+            <span class="mp-time" id="mp-launch-alt-val">200 km</span>
+        </div>
+        <button id="mp-launch-sim"  class="mp-secondary-btn" type="button" style="margin-top:6px;">🔥 Run Ascent Simulation</button>
+        <button id="mp-launch-cmp"  class="mp-secondary-btn" type="button" style="margin-top:4px;">📊 Compare All Bodies</button>
+
+        <div id="mp-launch-result" class="mp-plan" style="margin-top:8px; display:none;"></div>
+
+        <div id="mp-launch-chart-wrap" style="display:none; margin-top:6px;">
+            <canvas id="mp-launch-chart" width="280" height="160"
+                style="width:100%; max-width:280px; display:block;
+                       background:#020108; border:1px solid rgba(255,255,255,.08);
+                       border-radius:6px;"></canvas>
+            <div id="mp-launch-chart-legend"
+                style="font-family:monospace; font-size:.62rem; color:#aab; margin-top:4px;"></div>
+        </div>
+
         <div id="mp-plan" class="mp-plan">
             <div class="mp-plan-empty">Plan readout appears after Find Window or Launch.</div>
         </div>
@@ -334,6 +357,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
 
 <script type="module">
 import { initMissionPlanner, LAUNCH_SITES, TARGET_ORBITS } from './js/mission-planner-3d.js';
+import { simulateAscent, compareBodies, LAUNCH_BODIES, LAUNCH_VEHICLES } from './js/launch-physics.js';
 import { jdNow } from './js/horizons.js';
 
 // ── Populate dropdowns ──────────────────────────────────────────────
@@ -857,6 +881,169 @@ planner.setSimDaysPerSec(parseFloat(srRange.value));
 
 // ── HUD heartbeat (Scenario JD ticks even with no missions) ─────────
 setInterval(refreshHUD, 500);
+
+// ── Launch Physics Lab ──────────────────────────────────────────────
+const lpBodySel    = document.getElementById('mp-launch-body');
+const lpVehicleSel = document.getElementById('mp-launch-vehicle');
+const lpAltRange   = document.getElementById('mp-launch-alt');
+const lpAltVal     = document.getElementById('mp-launch-alt-val');
+const lpResult     = document.getElementById('mp-launch-result');
+const lpChartWrap  = document.getElementById('mp-launch-chart-wrap');
+const lpChart      = document.getElementById('mp-launch-chart');
+const lpLegend     = document.getElementById('mp-launch-chart-legend');
+
+lpBodySel.innerHTML = Object.values(LAUNCH_BODIES)
+    .map(b => `<option value="${b.id}">${b.name} · ${b.atmosphere}</option>`).join('');
+lpVehicleSel.innerHTML = Object.values(LAUNCH_VEHICLES)
+    .map(v => `<option value="${v.id}">${v.name}</option>`).join('');
+lpVehicleSel.value = 'heavy';
+lpAltRange.addEventListener('input', () => {
+    lpAltVal.textContent = `${lpAltRange.value} km`;
+});
+
+const STATUS_TAG = {
+    orbit:     '<span style="color:#66ffaa">✓ orbit achieved</span>',
+    'fuel-out':'<span style="color:#ffaa66">⚠ fuel-out (short of orbit)</span>',
+    'time-out':'<span style="color:#ffaa66">⚠ time-out</span>',
+    crashed:   '<span style="color:#ff7777">✗ crashed</span>',
+};
+
+function renderLaunchResult(r) {
+    const body = LAUNCH_BODIES[r.body_id];
+    const shortBy = (r.status !== 'orbit')
+        ? ` <span style="color:#88a">(short by ${(r.v_orb_circ_kms - r.final_vt_kms).toFixed(2)} km/s)</span>`
+        : '';
+    lpResult.style.display = 'block';
+    lpResult.innerHTML = `
+        <div class="mp-plan-title">🔥 ${r.body} · ${r.vehicle}</div>
+        <div class="mp-plan-row"><span class="k">Status</span><span class="v">${STATUS_TAG[r.status] || r.status}</span></div>
+        <div class="mp-plan-row"><span class="k">MECO time</span><span class="v">T+${r.time_s.toFixed(0)}s</span></div>
+        <div class="mp-plan-row"><span class="k">MECO altitude</span><span class="v">${r.final_alt_km.toFixed(0)} km</span></div>
+        <div class="mp-plan-row"><span class="k">vt at MECO</span><span class="v">${r.final_vt_kms.toFixed(3)} km/s${shortBy}</span></div>
+        <div class="mp-plan-row"><span class="k">Orbital v needed</span><span class="v">${r.v_orb_circ_kms.toFixed(3)} km/s</span></div>
+        <div class="mp-plan-row" style="margin-top:6px;"><span class="k">Δv used (Tsiolkovsky)</span><span class="v">${r.dv_used_kms.toFixed(3)} km/s</span></div>
+        <div class="mp-plan-row" style="opacity:.85"><span class="k">  · orbital</span><span class="v">${r.dv_orbital_kms.toFixed(3)} km/s</span></div>
+        <div class="mp-plan-row" style="opacity:.85"><span class="k">  · gravity loss</span><span class="v">${r.dv_grav_loss_kms.toFixed(3)} km/s</span></div>
+        <div class="mp-plan-row" style="opacity:.85"><span class="k">  · drag loss</span><span class="v ${r.dv_drag_loss_kms > 1 ? 'warn' : ''}">${r.dv_drag_loss_kms.toFixed(3)} km/s</span></div>
+        <div class="mp-plan-row" style="opacity:.85"><span class="k">  · steering loss</span><span class="v">${r.dv_steer_loss_kms.toFixed(3)} km/s</span></div>
+        <div class="mp-plan-row" style="margin-top:6px;"><span class="k">Max-Q</span><span class="v ${r.max_q_kPa > 100 ? 'warn' : ''}">${r.max_q_kPa.toFixed(1)} kPa @ ${r.max_q_alt_km.toFixed(1)} km, T+${r.max_q_t_s.toFixed(0)}s</span></div>
+        <div class="mp-plan-row"><span class="k">Fuel burned</span><span class="v">${(r.fuel_mass_fraction*100).toFixed(1)}% (${(r.fuel_burned_kg/1000).toFixed(0)} t)</span></div>
+        <div class="mp-plan-row" style="opacity:.7; font-size:.66rem;"><span class="k">Body</span><span class="v">g=${(body.mu_km3s2/(body.R_km*body.R_km)*1000).toFixed(2)} m/s², ρ₀=${body.rho0_kg_m3.toExponential(1)} kg/m³, H=${body.H_km} km</span></div>
+    `;
+    drawLaunchChart(r);
+}
+
+function drawLaunchChart(r) {
+    if (!r.trajectory.length) { lpChartWrap.style.display = 'none'; return; }
+    lpChartWrap.style.display = 'block';
+    const W = lpChart.width, H = lpChart.height;
+    const ctx = lpChart.getContext('2d');
+    ctx.fillStyle = '#020108';
+    ctx.fillRect(0, 0, W, H);
+
+    const t_max = r.trajectory[r.trajectory.length - 1].t;
+    const alt_max = Math.max(...r.trajectory.map(p => p.alt_km));
+    const v_max   = Math.max(...r.trajectory.map(p => p.v_kms));
+    const q_max   = Math.max(0.001, ...r.trajectory.map(p => p.q_kPa));
+
+    const PAD_L = 28, PAD_R = 8, PAD_T = 12, PAD_B = 18;
+    const w = W - PAD_L - PAD_R, h = H - PAD_T - PAD_B;
+    const sx = t => PAD_L + (t / t_max) * w;
+
+    // Dynamic-pressure curve (orange, fills under the curve)
+    ctx.beginPath();
+    ctx.moveTo(sx(0), PAD_T + h);
+    for (const p of r.trajectory) {
+        const y = PAD_T + h - (p.q_kPa / q_max) * h * 0.7;
+        ctx.lineTo(sx(p.t), y);
+    }
+    ctx.lineTo(sx(t_max), PAD_T + h);
+    ctx.fillStyle = 'rgba(255,170,90,0.18)';
+    ctx.fill();
+    ctx.strokeStyle = '#ffaa66';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    for (const [i, p] of r.trajectory.entries()) {
+        const y = PAD_T + h - (p.q_kPa / q_max) * h * 0.7;
+        if (i === 0) ctx.moveTo(sx(p.t), y); else ctx.lineTo(sx(p.t), y);
+    }
+    ctx.stroke();
+
+    // Altitude (cyan)
+    ctx.strokeStyle = '#66ddff'; ctx.lineWidth = 1.5; ctx.beginPath();
+    for (const [i, p] of r.trajectory.entries()) {
+        const y = PAD_T + h - (p.alt_km / alt_max) * h;
+        if (i === 0) ctx.moveTo(sx(p.t), y); else ctx.lineTo(sx(p.t), y);
+    }
+    ctx.stroke();
+
+    // Velocity (green)
+    ctx.strokeStyle = '#66ffaa'; ctx.lineWidth = 1.5; ctx.beginPath();
+    for (const [i, p] of r.trajectory.entries()) {
+        const y = PAD_T + h - (p.v_kms / v_max) * h;
+        if (i === 0) ctx.moveTo(sx(p.t), y); else ctx.lineTo(sx(p.t), y);
+    }
+    ctx.stroke();
+
+    // Axes
+    ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+    ctx.beginPath();
+    ctx.moveTo(PAD_L, PAD_T); ctx.lineTo(PAD_L, PAD_T + h); ctx.lineTo(PAD_L + w, PAD_T + h);
+    ctx.stroke();
+
+    ctx.fillStyle = '#778'; ctx.font = '9px monospace';
+    ctx.fillText('0', PAD_L - 6, PAD_T + h + 11);
+    ctx.fillText(`${t_max.toFixed(0)}s`, PAD_L + w - 18, PAD_T + h + 11);
+    ctx.fillStyle = '#66ddff'; ctx.fillText(`${alt_max.toFixed(0)} km`, 2, PAD_T + 8);
+
+    lpLegend.innerHTML = `
+        <span style="color:#66ddff">━ alt</span> (peak ${alt_max.toFixed(0)} km) ·
+        <span style="color:#66ffaa">━ v</span> (peak ${v_max.toFixed(2)} km/s) ·
+        <span style="color:#ffaa66">━ q</span> (peak ${q_max.toFixed(1)} kPa)
+    `;
+}
+
+document.getElementById('mp-launch-sim').addEventListener('click', () => {
+    const body = LAUNCH_BODIES[lpBodySel.value];
+    const vehicle = LAUNCH_VEHICLES[lpVehicleSel.value];
+    const target_alt_km = parseFloat(lpAltRange.value);
+    pushLog(`🔥 Ascent: ${vehicle.name} from ${body.name} to ${target_alt_km} km…`, 'launch');
+    setTimeout(() => {
+        const r = simulateAscent({ body, vehicle, target_alt_km });
+        renderLaunchResult(r);
+        const tag = r.status === 'orbit' ? '✓ orbit' :
+                    r.status === 'fuel-out' ? `⚠ fuel-out (short by ${(r.v_orb_circ_kms - r.final_vt_kms).toFixed(2)} km/s)` :
+                    `✗ ${r.status}`;
+        pushLog(`  ${tag} · Δv ${r.dv_used_kms.toFixed(2)} km/s · grav ${r.dv_grav_loss_kms.toFixed(2)} · drag ${r.dv_drag_loss_kms.toFixed(2)} · MaxQ ${r.max_q_kPa.toFixed(0)} kPa`, r.status === 'orbit' ? 'capture' : 'transfer');
+    }, 30);
+});
+
+document.getElementById('mp-launch-cmp').addEventListener('click', () => {
+    const vehicle = LAUNCH_VEHICLES[lpVehicleSel.value];
+    const target_alt_km = parseFloat(lpAltRange.value);
+    pushLog(`📊 Comparing all bodies (${vehicle.name}, ${target_alt_km} km)…`, 'window');
+    setTimeout(() => {
+        const rows = compareBodies({ vehicle, target_alt_km });
+        const html = rows.map(r => {
+            const verdict = r.status === 'orbit' ? '✓' : r.status === 'crashed' ? '✗' : '⚠';
+            return `<div class="mp-plan-row" style="opacity:${r.status==='orbit'?'1':'.7'}">
+                <span class="k">${verdict} ${r.body}</span>
+                <span class="v">${r.dv_used_kms.toFixed(2)} km/s · drag ${r.dv_drag_loss_kms.toFixed(2)}</span>
+            </div>`;
+        }).join('');
+        lpResult.style.display = 'block';
+        lpResult.innerHTML = `
+            <div class="mp-plan-title">📊 Surface→Orbit Δv Ranking · ${vehicle.name}</div>
+            <div class="mp-plan-row" style="opacity:.7; font-size:.66rem;"><span class="k">Target</span><span class="v">${target_alt_km} km circular</span></div>
+            ${html}
+            <div class="mp-plan-row" style="opacity:.65; font-size:.62rem; margin-top:6px;">
+                <span class="k">drag column = Δv lost to atmosphere</span>
+                <span class="v"></span>
+            </div>
+        `;
+        lpChartWrap.style.display = 'none';
+    }, 30);
+});
 
 // ── Auto-launch a starter LEO so the page never looks empty ─────────
 setTimeout(() => {
