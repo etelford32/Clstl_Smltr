@@ -47,14 +47,24 @@
 // thread; do not reorder without updating both sides.
 const SYNC_PUBLISH_SLOT = 0;
 const SYNC_WRITING_SLOT = 1;
+const SYNC_REQUEST_SLOT = 2;
+const SYNC_RUNNING_SLOT = 3;
 
-let _wasm     = null;
-let _ready    = false;
-let _slots    = 0;          // number of slots in the registry (matches main thread)
-let _posSab   = null;       // optional SharedArrayBuffer of positions
-let _posView  = null;       // Float32Array view over _posSab
-let _syncSab  = null;       // optional SharedArrayBuffer for Atomics sync
-let _syncView = null;       // Int32Array over _syncSab
+const CTRL_JD_SLOT      = 0;
+const CTRL_GMST_SLOT    = 1;
+const CTRL_SCALE_SLOT   = 2;
+
+let _wasm       = null;
+let _ready      = false;
+let _slots      = 0;          // number of slots in the registry (matches main thread)
+let _posSab     = null;       // optional SharedArrayBuffer of positions
+let _posView    = null;       // Float32Array view over _posSab
+let _syncSab    = null;       // optional SharedArrayBuffer for Atomics sync
+let _syncView   = null;       // Int32Array over _syncSab
+let _ctrlSab    = null;       // optional SharedArrayBuffer for ctrl (jd/gmst/scale)
+let _ctrlView   = null;       // Float64Array over _ctrlSab
+let _atomicsRunning = false;  // tickLoop is alive
+let _atomicsLastReq = 0;      // last REQUEST slot value the loop processed
 
 async function loadWasm() {
     try {
@@ -160,6 +170,76 @@ function tick(jd, gmst, scale, buffer, frameId, expectedSlots) {
     reply({ slots: written / 3 });
 }
 
+// "True SAB protocol" — coroutine-style tick loop driven entirely by
+// Atomics. The worker parks in Atomics.waitAsync on the REQUEST slot;
+// when main bumps REQUEST and Atomics.notify's, the awaited promise
+// fulfils, the loop resumes (yielding microtask drain so any pending
+// onmessage events — add-sats, clear — run first), reads the
+// jd/gmst/scale from the ctrl SAB, propagates via WASM into the
+// position SAB, and Atomics.store's PUBLISH so main can detect a
+// new frame. Zero postMessage per tick.
+async function startAtomicsTickLoop() {
+    if (_atomicsRunning || !_syncView || !_ctrlView || !_posView) return;
+    if (typeof Atomics.waitAsync !== 'function') return;
+    _atomicsRunning = true;
+    _atomicsLastReq = Atomics.load(_syncView, SYNC_REQUEST_SLOT) | 0;
+    // Mark the loop alive so main's RUNNING-slot store can flip us
+    // off cleanly on teardown.
+    Atomics.store(_syncView, SYNC_RUNNING_SLOT, 1);
+
+    try {
+        while (Atomics.load(_syncView, SYNC_RUNNING_SLOT) === 1) {
+            // Park until the request id changes. waitAsync.value is a
+            // Promise; awaiting it yields the worker thread to its
+            // event loop, so any postMessage (add-sats / clear) that
+            // arrived while we were idle gets dispatched before we
+            // resume. With a 5 s timeout we still wake periodically
+            // even if main goes silent — lets the RUNNING check
+            // shut us down promptly when the parent terminates.
+            const w = Atomics.waitAsync(_syncView, SYNC_REQUEST_SLOT, _atomicsLastReq, 5000);
+            if (w.async) {
+                // eslint-disable-next-line no-await-in-loop
+                await w.value;
+            }
+            // Re-check the run flag in case shutdown raced with the wake.
+            if (Atomics.load(_syncView, SYNC_RUNNING_SLOT) !== 1) break;
+
+            const reqId = Atomics.load(_syncView, SYNC_REQUEST_SLOT) | 0;
+            if (reqId === _atomicsLastReq) continue;     // spurious / timeout
+            _atomicsLastReq = reqId;
+
+            if (!_ready) continue;
+
+            // Slot-count drift guard: read main's notion of how many
+            // slots it expects and stash NaN if it disagrees with our
+            // registry. Main re-syncs by sending more add-sats.
+            // (Reading registry size every iteration is cheap.)
+            const jd    = _ctrlView[CTRL_JD_SLOT];
+            const gmst  = _ctrlView[CTRL_GMST_SLOT];
+            const scale = _ctrlView[CTRL_SCALE_SLOT];
+
+            Atomics.store(_syncView, SYNC_WRITING_SLOT, 1);
+            let written;
+            if (_wasm.registry_propagate_into) {
+                written = _wasm.registry_propagate_into(jd, gmst, scale, _posView) * 3;
+            } else {
+                const out = _wasm.registry_propagate(jd, gmst, scale);
+                written = Math.min(out.length, _posView.length);
+                _posView.set(out.subarray(0, written));
+            }
+            if (written < _posView.length) _posView.fill(0, written);
+            Atomics.store(_syncView, SYNC_WRITING_SLOT, 0);
+            Atomics.store(_syncView, SYNC_PUBLISH_SLOT, reqId);
+            // notify in case main is waiting on PUBLISH (we don't,
+            // currently — main polls — but a future render-on-publish
+            // path can wait on this slot).
+            Atomics.notify(_syncView, SYNC_PUBLISH_SLOT, 1);
+        }
+    } finally {
+        _atomicsRunning = false;
+    }
+}
+
 self.onmessage = async (e) => {
     const msg = e.data;
     try {
@@ -170,29 +250,42 @@ self.onmessage = async (e) => {
         }
         if (msg.type === 'init-shared') {
             // The main thread handed us a SAB sized to maxSats * 3
-            // floats plus an optional small Int32 SAB for Atomics
-            // sync. We wrap views once and reuse them for every tick.
-            // Subsequent tick messages omit the `buffer` field; the
-            // worker writes straight into the position SAB which the
-            // main thread is already reading via the THREE position
-            // attribute.
+            // floats plus optional Int32 (Atomics sync) and Float64
+            // (jd/gmst/scale ctrl) SABs. We wrap views once and
+            // reuse them for every tick.
+            //
+            // When ctrlSab is also present and Atomics.waitAsync is
+            // available, we kick off the tickLoop — a coroutine that
+            // parks in waitAsync, wakes on Atomics.notify from the
+            // main thread, propagates, and notifies back via the
+            // PUBLISH slot. The hot path does ZERO postMessage; this
+            // worker's onmessage only sees init / add-sats / clear /
+            // shutdown.
             try {
                 _posSab  = msg.sab;
                 _posView = new Float32Array(_posSab);
-                if (msg.syncSab) {
-                    _syncSab  = msg.syncSab;
-                    _syncView = new Int32Array(_syncSab);
-                } else {
-                    _syncSab = null; _syncView = null;
-                }
+                _syncSab = msg.syncSab ?? null;
+                _syncView = _syncSab ? new Int32Array(_syncSab) : null;
+                _ctrlSab  = msg.ctrlSab ?? null;
+                _ctrlView = _ctrlSab ? new Float64Array(_ctrlSab) : null;
+
+                const wantAtomics = !!msg.atomicsTickRequested
+                    && _syncView != null
+                    && _ctrlView != null
+                    && typeof Atomics?.waitAsync === 'function';
+
+                if (wantAtomics) startAtomicsTickLoop();
+
                 self.postMessage({
                     type: 'shared-ready', ok: true,
                     length: _posView.length,
                     fenced: _syncView != null,
+                    atomicsTick: wantAtomics,
                 });
             } catch (err) {
                 _posSab = null; _posView = null;
                 _syncSab = null; _syncView = null;
+                _ctrlSab = null; _ctrlView = null;
                 self.postMessage({ type: 'shared-ready', ok: false, error: String(err?.message ?? err) });
             }
             return;
