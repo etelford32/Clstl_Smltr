@@ -435,6 +435,95 @@ export function arrivalBurnIntoOrbit({ r_capt_km, mu, v_inf_vec, i_capt_rad = nu
     };
 }
 
+// ── Gravity-assist (powered-flyby) physics ──────────────────────────────────
+//
+// During a planetary flyby, the spacecraft enters the body's SOI with v∞_in,
+// follows a hyperbolic trajectory with periapsis r_p, and exits with v∞_out
+// of the SAME magnitude (energy conservation in the body's frame) but with
+// the velocity direction rotated by α — the "turn angle". The maximum
+// achievable turn is bounded by the geometry:
+//
+//     α_max(r_p, v∞) = 2·arcsin(μ / (r_p·v∞² + μ))
+//
+// Smaller r_p ⇒ bigger turn (more deflection); higher v∞ ⇒ smaller turn.
+// In a real mission r_p must be ≥ R_body + min_alt to avoid impact.
+//
+// If the Lambert legs require a turn larger than α_max at the minimum
+// allowed r_p, OR a magnitude change in v∞, the mission must supply a
+// powered-flyby Δv at periapsis. We model this as the orthogonal sum of:
+//   • Δv_mag = ||v∞_out| − |v∞_in||  (tangential burn at periapsis)
+//   • Δv_dir = 2·v∞·sin((α_req − α_max)/2)  (when α_req > α_max)
+
+const FLYBY_BODIES = {
+    mercury: { mu: 22032.1,  r_km: 2439.7, min_alt_km: 200 },
+    venus:   { mu: 324859.0, r_km: 6051.8, min_alt_km: 200 },
+    earth:   { mu: MU_EARTH, r_km: R_EARTH, min_alt_km: 300 },
+    mars:    { mu: MU_MARS,  r_km: R_MARS,  min_alt_km: 200 },
+};
+
+/** Maximum natural flyby turn angle (radians) at given r_p and v∞. */
+export function flybyMaxTurnAngle(mu, v_inf_kms, r_p_km) {
+    return 2 * Math.asin(mu / (r_p_km * v_inf_kms * v_inf_kms + mu));
+}
+
+/** Periapsis radius (km) required to achieve a given turn angle. */
+export function flybyPeriapsisForTurn(mu, v_inf_kms, turn_rad) {
+    const s = Math.sin(turn_rad / 2);
+    if (s < 1e-9) return Infinity;       // ~zero turn needs infinite r_p
+    return mu * (1 - s) / (s * v_inf_kms * v_inf_kms);
+}
+
+/**
+ * Assess a planetary flyby: given v∞_in and v∞_out (vectors, in the body's
+ * inertial frame), determine whether the geometry is ballistically
+ * feasible and how much powered Δv (if any) is required.
+ *
+ * @param {string}  body_key   One of 'mercury', 'venus', 'earth', 'mars'.
+ * @param {number[3]} v_inf_in   Incoming v∞ vector (km/s).
+ * @param {number[3]} v_inf_out  Required outgoing v∞ vector (km/s).
+ */
+export function flybyAssessment(body_key, v_inf_in, v_inf_out) {
+    const body = FLYBY_BODIES[body_key];
+    if (!body) throw new Error(`flybyAssessment: unknown body "${body_key}"`);
+
+    const mag_in  = vNorm(v_inf_in);
+    const mag_out = vNorm(v_inf_out);
+    const v_avg   = 0.5 * (mag_in + mag_out);
+
+    const cosTurn = vDot(v_inf_in, v_inf_out) / (mag_in * mag_out);
+    const turn_req_rad = Math.acos(Math.max(-1, Math.min(1, cosTurn)));
+
+    const r_min   = body.r_km + body.min_alt_km;
+    const turn_max_rad = flybyMaxTurnAngle(body.mu, v_avg, r_min);
+
+    let r_p, alt, dv_dir;
+    if (turn_req_rad <= turn_max_rad) {
+        r_p = flybyPeriapsisForTurn(body.mu, v_avg, turn_req_rad);
+        alt = r_p - body.r_km;
+        dv_dir = 0;
+    } else {
+        r_p = r_min;
+        alt = body.min_alt_km;
+        const missing = turn_req_rad - turn_max_rad;
+        dv_dir = 2 * v_avg * Math.sin(missing / 2);
+    }
+    const dv_mag = Math.abs(mag_out - mag_in);
+
+    return {
+        body: body_key,
+        v_inf_in_kms:      mag_in,
+        v_inf_out_kms:     mag_out,
+        turn_required_deg: turn_req_rad * R2D,
+        turn_max_deg:      turn_max_rad * R2D,
+        r_periapsis_km:    r_p,
+        altitude_km:       alt,
+        ballistic:         (turn_req_rad <= turn_max_rad) && (dv_mag < 0.05),
+        dv_mag_kms:        dv_mag,
+        dv_dir_kms:        dv_dir,
+        dv_powered_kms:    dv_mag + dv_dir,
+    };
+}
+
 // ── Lambert-based Mars transfer ─────────────────────────────────────────────
 //
 // Solves Lambert's problem for a single (jd_depart, jd_arrive) pair using
@@ -794,7 +883,6 @@ export function planTour({
     const legs = [];
     let jd_curr     = jd_depart;
     let from_key    = fromKey;
-    let v_inf_in    = null;        // |v∞| arriving at current body (for flyby check)
 
     for (let i = 0; i < sequence.legs.length; i++) {
         const seg     = sequence.legs[i];
@@ -829,17 +917,29 @@ export function planTour({
             v_depart: sol.v1,   v_arrive: sol.v2,
             v_inf_depart_vec: v_inf_dep, v_inf_depart_kms: vNorm(v_inf_dep),
             v_inf_arrive_vec: v_inf_arr, v_inf_arrive_kms: vNorm(v_inf_arr),
-            // Flyby mismatch: how close the incoming v∞ matches the
-            // outgoing v∞ at the departure body of this leg.
-            flyby_mismatch_kms: v_inf_in == null ? null
-                : Math.abs(v_inf_in - vNorm(v_inf_dep)),
             lambert: sol,
             sample: () => sampleKeplerArc(stateA.r, sol.v1, seg.tof_d * SECONDS_PER_DAY, MU_SUN, 96),
         });
 
-        v_inf_in = vNorm(v_inf_arr);
         from_key = seg.to;
         jd_curr  = jd_b;
+    }
+
+    // ── Flyby physics at every intermediate body ────────────────────────────
+    // For body between leg[i] and leg[i+1]: v∞_in = leg[i].v_inf_arrive,
+    // v∞_out = leg[i+1].v_inf_depart. Compute the required turn angle, the
+    // ballistic max turn, and any powered Δv needed to fix the difference.
+    const flybys = [];
+    let dv_powered_flyby_total = 0;
+    for (let i = 0; i < legs.length - 1; i++) {
+        const flyby = flybyAssessment(
+            legs[i].to,
+            legs[i].v_inf_arrive_vec,
+            legs[i+1].v_inf_depart_vec,
+        );
+        legs[i].flyby_at_arrival = flyby;
+        flybys.push(flyby);
+        dv_powered_flyby_total += flyby.dv_powered_kms;
     }
 
     // Departure burn: from parking orbit at the first body (assume Earth).
@@ -860,17 +960,10 @@ export function planTour({
 
     // Arrival burn: capture at the last body.
     const last = legs[legs.length - 1];
-    const lastBodyMu = last.to === 'mars'    ? MU_MARS
-                    : last.to === 'venus'   ? 324859.0     // VENUS μ
-                    : last.to === 'mercury' ? 22032.1      // MERCURY μ
-                    : last.to === 'earth'   ? MU_EARTH    : MU_EARTH;
-    const lastBodyR  = last.to === 'mars'    ? R_MARS
-                    : last.to === 'venus'   ? 6051.8
-                    : last.to === 'mercury' ? 2439.7
-                    : last.to === 'earth'   ? R_EARTH    : R_EARTH;
-    const r_capt   = lastBodyR + target_alt_capt_km;
-    const v_circ   = Math.sqrt(lastBodyMu / r_capt);
-    const v_hyp_c  = Math.sqrt(last.v_inf_arrive_kms ** 2 + 2 * lastBodyMu / r_capt);
+    const lastBody = FLYBY_BODIES[last.to] || FLYBY_BODIES.earth;
+    const r_capt   = lastBody.r_km + target_alt_capt_km;
+    const v_circ   = Math.sqrt(lastBody.mu / r_capt);
+    const v_hyp_c  = Math.sqrt(last.v_inf_arrive_kms ** 2 + 2 * lastBody.mu / r_capt);
     const dv_capt  = v_hyp_c - v_circ;
 
     return {
@@ -879,17 +972,23 @@ export function planTour({
         sequence_id: Object.keys(TOUR_PRESETS).find(k => TOUR_PRESETS[k] === sequence) || 'custom',
         jd_depart, jd_arrive: jd_curr,
         tof_total_d: jd_curr - jd_depart,
-        legs,
+        legs, flybys,
         // Δv breakdown
-        dv_tmi_kms:           dv_dep,
-        dv_capture_kms:       dv_capt,
-        dv_total_kms:         dv_dep + dv_capt,
-        c3_earth_km2s2:       c3_dep,
-        dla_deg:              dla_dep,
-        plane_change_dep_deg: tilt_dep,
-        // Flyby quality: max |v∞_in − v∞_out| across intermediate bodies.
-        max_flyby_mismatch_kms: Math.max(0,
-            ...legs.slice(1).map(l => l.flyby_mismatch_kms || 0)),
+        dv_tmi_kms:               dv_dep,
+        dv_capture_kms:           dv_capt,
+        dv_powered_flyby_kms:     dv_powered_flyby_total,
+        dv_total_kms:             dv_dep + dv_powered_flyby_total + dv_capt,
+        c3_earth_km2s2:           c3_dep,
+        dla_deg:                  dla_dep,
+        plane_change_dep_deg:     tilt_dep,
+        // Energy mismatch (legacy metric — kept for back-compat).
+        max_flyby_mismatch_kms:   flybys.length
+            ? Math.max(...flybys.map(f => f.dv_mag_kms))
+            : 0,
+        // Worst flyby altitude (smallest is most aggressive).
+        min_flyby_altitude_km:    flybys.length
+            ? Math.min(...flybys.map(f => f.altitude_km))
+            : null,
         last_body: last.to,
         last_body_capture_alt_km: target_alt_capt_km,
     };
@@ -952,7 +1051,16 @@ export function optimizeTour({
                     sequence: { name: sequence.name, depart: sequence.depart, legs },
                     parking_alt_km, parking_inc_deg, target_alt_capt_km,
                 });
-                const cost = plan.dv_total_kms + 0.5 * plan.max_flyby_mismatch_kms;
+                // Total Δv now already bundles powered-flyby cost into
+                // dv_total_kms. Add a small penalty for ultra-low flyby
+                // altitudes (< 500 km) — physically possible but operationally
+                // risky, and a softer penalty drives the optimizer away from
+                // marginal solutions.
+                let altitudePenalty = 0;
+                if (plan.min_flyby_altitude_km != null && plan.min_flyby_altitude_km < 500) {
+                    altitudePenalty = (500 - plan.min_flyby_altitude_km) * 0.001;
+                }
+                const cost = plan.dv_total_kms + altitudePenalty;
                 if (!best || cost < best.cost) {
                     best = { cost, plan, jd_depart, tofs: legs.map(l => l.tof_d) };
                 }

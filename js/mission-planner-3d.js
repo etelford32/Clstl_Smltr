@@ -36,6 +36,7 @@ import {
     planMarsTransfer, planMarsLambert,
     findLunarLaunchWindow, findMarsLaunchWindow, porkchopMars,
     planTour, optimizeTour, TOUR_PRESETS,
+    flybyAssessment, flybyMaxTurnAngle, flybyPeriapsisForTurn,
     hohmannPositionAt,
 } from './mission-planner-trajectory.js';
 import { sampleKeplerArc } from './mission-planner-lambert.js';
@@ -412,12 +413,28 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             }));
             hel.scene.add(line);
 
-            // Encounter markers (small wireframe spheres at each leg endpoint).
+            // Encounter markers — color/size encode flyby physics:
+            //   • intermediate body with ballistic flyby   → cyan, large radius
+            //   • intermediate body with powered flyby     → orange, small (tight)
+            //   • final body (capture)                     → green, large
+            const isFinal = i === plan.legs.length - 1;
+            const f = leg.flyby_at_arrival;
+            let mColor, mSize;
+            if (isFinal) {
+                mColor = 0x66ffaa; mSize = 0.16;
+            } else if (f && f.ballistic) {
+                mColor = 0x66ddff;
+                // Bigger sphere = "looser" (higher) flyby altitude
+                mSize = 0.08 + 0.06 * Math.min(1, f.altitude_km / 20000);
+            } else {
+                mColor = 0xff8855;
+                mSize = 0.10;
+            }
             const marker = new THREE.Mesh(
-                new THREE.SphereGeometry(0.12, 12, 8),
+                new THREE.SphereGeometry(mSize, 16, 12),
                 new THREE.MeshBasicMaterial({
-                    color: LEG_COLORS[i % LEG_COLORS.length],
-                    wireframe: true, transparent: true, opacity: 0.55,
+                    color: mColor, wireframe: true,
+                    transparent: true, opacity: 0.65,
                 }),
             );
             marker.position.set(arcPos[(N-1)*3+0], arcPos[(N-1)*3+1], arcPos[(N-1)*3+2]);
@@ -669,6 +686,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
                     type: 'tour-leg', payloadName: t.payloadName,
                     legIndex: legIdx,
                     leg: t.legGeoms[legIdx].leg,
+                    tour: t.plan,
                 });
             }
 
@@ -820,6 +838,8 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         // Tour planning
         planTour, optimizeTour, TOUR_PRESETS,
         launchTour: (opts) => launchTour(opts),
+        // Gravity-assist primitives (exposed for didactic UI uses)
+        flybyAssessment, flybyMaxTurnAngle, flybyPeriapsisForTurn,
     };
 }
 

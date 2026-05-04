@@ -410,11 +410,35 @@ function renderPlan(plan) {
         `;
     } else if (plan.kind === 'tour') {
         const legsHtml = plan.legs.map((leg, i) => {
-            const mismatchHtml = leg.flyby_mismatch_kms != null
-                ? `<div class="mp-plan-row" style="opacity:.85">
-                       <span class="k">  ↳ flyby Δ|v∞|</span>
-                       <span class="v ${leg.flyby_mismatch_kms > 2 ? 'warn' : ''}">${leg.flyby_mismatch_kms.toFixed(2)} km/s</span>
-                   </div>` : '';
+            // Flyby block at the END of this leg (intermediate body)
+            let flybyBlock = '';
+            if (leg.flyby_at_arrival) {
+                const f = leg.flyby_at_arrival;
+                const tag = f.ballistic
+                    ? '<span style="color:#66ffaa">✓ ballistic</span>'
+                    : '<span style="color:#ffaa66">⚠ powered</span>';
+                flybyBlock = `
+                    <div class="mp-plan-row" style="opacity:.95">
+                        <span class="k">  ↳ flyby ${f.body}</span>
+                        <span class="v">${tag}</span>
+                    </div>
+                    <div class="mp-plan-row" style="opacity:.8">
+                        <span class="k">    altitude</span>
+                        <span class="v ${f.altitude_km < 500 ? 'warn' : ''}">${f.altitude_km.toFixed(0)} km</span>
+                    </div>
+                    <div class="mp-plan-row" style="opacity:.8">
+                        <span class="k">    turn req / max</span>
+                        <span class="v">${f.turn_required_deg.toFixed(1)}° / ${f.turn_max_deg.toFixed(1)}°</span>
+                    </div>
+                    ${f.dv_powered_kms > 0.001 ? `
+                    <div class="mp-plan-row" style="opacity:.85">
+                        <span class="k">    powered Δv</span>
+                        <span class="v ${f.dv_powered_kms > 0.5 ? 'warn' : ''}">${f.dv_powered_kms.toFixed(3)} km/s
+                            <span style="color:#88a;font-weight:400">(dir ${f.dv_dir_kms.toFixed(2)} · mag ${f.dv_mag_kms.toFixed(2)})</span>
+                        </span>
+                    </div>` : ''}
+                `;
+            }
             return `
                 <div class="mp-plan-row" style="margin-top:6px;">
                     <span class="k">Leg ${i+1}: ${leg.from} → ${leg.to}</span>
@@ -424,8 +448,11 @@ function renderPlan(plan) {
                     <span class="k">  v∞ depart / arrive</span>
                     <span class="v">${leg.v_inf_depart_kms.toFixed(2)} / ${leg.v_inf_arrive_kms.toFixed(2)}</span>
                 </div>
-                ${mismatchHtml}`;
+                ${flybyBlock}`;
         }).join('');
+        const minAltStr = plan.min_flyby_altitude_km != null
+            ? `<div class="mp-plan-row"><span class="k">Min flyby altitude</span><span class="v ${plan.min_flyby_altitude_km < 500 ? 'warn' : ''}">${plan.min_flyby_altitude_km.toFixed(0)} km</span></div>`
+            : '';
         planEl.innerHTML = `
             <div class="mp-plan-title">🌌 Tour · ${plan.name}${plan._optimized ? ' (optimized)' : ''}</div>
             <div class="mp-plan-row"><span class="k">Depart</span><span class="v">${jdToISO(plan.jd_depart)}</span></div>
@@ -435,9 +462,10 @@ function renderPlan(plan) {
             <div class="mp-plan-row"><span class="k">DLA</span><span class="v">${plan.dla_deg.toFixed(2)}°</span></div>
             <div class="mp-plan-row"><span class="k">Plane tilt</span><span class="v ${plan.plane_change_dep_deg > 10 ? 'warn' : ''}">${plan.plane_change_dep_deg.toFixed(2)}°</span></div>
             <div class="mp-plan-row"><span class="k">Δv (TMI)</span><span class="v">${plan.dv_tmi_kms.toFixed(3)} km/s</span></div>
+            <div class="mp-plan-row"><span class="k">Δv (powered flybys)</span><span class="v ${plan.dv_powered_flyby_kms > 0.5 ? 'warn' : ''}">${plan.dv_powered_flyby_kms.toFixed(3)} km/s</span></div>
             <div class="mp-plan-row"><span class="k">Δv (capture)</span><span class="v">${plan.dv_capture_kms.toFixed(3)} km/s</span></div>
             <div class="mp-plan-row"><span class="k">Total Δv</span><span class="v">${plan.dv_total_kms.toFixed(3)} km/s</span></div>
-            <div class="mp-plan-row"><span class="k">Max flyby Δ|v∞|</span><span class="v ${plan.max_flyby_mismatch_kms > 2 ? 'warn' : ''}">${plan.max_flyby_mismatch_kms.toFixed(2)} km/s</span></div>
+            ${minAltStr}
             ${legsHtml}
         `;
     } else if (plan.kind === 'mars' && plan.method === 'lambert') {
@@ -506,6 +534,14 @@ const planner = initMissionPlanner({
             pushLog(`🌌 Tour ${ev.payloadName} launched · ${ev.plan.legs.length} legs · ${ev.plan.tof_total_d.toFixed(0)}d total`, 'transfer');
         } else if (ev.type === 'tour-leg') {
             pushLog(`  → Leg ${ev.legIndex + 1}: ${ev.leg.from} → ${ev.leg.to} (v∞ ${ev.leg.v_inf_depart_kms.toFixed(2)} → ${ev.leg.v_inf_arrive_kms.toFixed(2)} km/s)`, 'transfer');
+            // After arriving at body, log flyby info if the previous leg had one.
+            if (ev.legIndex > 0 && ev.tour) {
+                const prev = ev.tour.legs[ev.legIndex - 1];
+                const f = prev?.flyby_at_arrival;
+                if (f) {
+                    pushLog(`     ↳ ${f.body} flyby · alt ${f.altitude_km.toFixed(0)} km · turn ${f.turn_required_deg.toFixed(0)}°/${f.turn_max_deg.toFixed(0)}° · ${f.ballistic ? 'ballistic' : `powered Δv ${f.dv_powered_kms.toFixed(2)} km/s`}`, 'capture');
+                }
+            }
         } else if (ev.type === 'tour-arrived') {
             pushLog(`🛰️ Tour complete · captured at ${ev.plan.last_body}`, 'capture');
         } else if (ev.type === 'mode') {
@@ -610,7 +646,10 @@ document.getElementById('mp-tour-optimize').addEventListener('click', () => {
         });
         const t1 = performance.now();
         renderPlan(plan);
-        pushLog(`🌌 Tour optimized in ${(t1-t0).toFixed(0)}ms · Δv ${plan.dv_total_kms.toFixed(2)} km/s · ${plan.tof_total_d.toFixed(0)}d · max flyby Δv∞ ${plan.max_flyby_mismatch_kms.toFixed(2)} km/s`, 'window');
+        const flybyTag = plan.flybys.length
+            ? `${plan.flybys.length} flyby${plan.flybys.length>1?'s':''} (${plan.flybys.every(f=>f.ballistic) ? 'all ballistic' : 'powered'})`
+            : 'no flybys';
+        pushLog(`🌌 Tour optimized in ${(t1-t0).toFixed(0)}ms · Δv ${plan.dv_total_kms.toFixed(2)} km/s · ${plan.tof_total_d.toFixed(0)}d · ${flybyTag}`, 'window');
         planner.launchTour({ plan, payloadName: `Tour-${presetId.toUpperCase()}` });
     }, 30);
 });
