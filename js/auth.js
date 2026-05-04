@@ -57,6 +57,13 @@ class AuthManager {
                 const { data: { session } } = await this._supabase.auth.getSession();
                 if (session?.user) {
                     this._user = this._mapSupabaseUser(session.user);
+                    // Persist immediately so dashboard.html's localStorage
+                    // fallback can read a valid session even if fetchProfile
+                    // below errors out (RLS misconfig, network blip). Without
+                    // this, a Supabase-restored session whose profile fetch
+                    // fails leaves pp_auth empty → dashboard auth gate stays
+                    // visible despite the user being signed in.
+                    this._persistToStorage();
                     // Fetch server-side profile (role, plan) on session restore
                     // so admin status is available immediately, not just from stale user_metadata
                     await this.fetchProfile();

@@ -440,7 +440,7 @@
         // hang on into the magic-link form.
         document.getElementById('password').classList.remove('error');
         document.getElementById('err-pw').classList.remove('visible');
-        document.getElementById('alert-banner').classList.remove('visible');
+        document.getElementById('login-alert').classList.remove('show');
     }
 
     document.getElementById('magic-toggle').addEventListener('click', () => setMagicMode(!_magicMode));
@@ -556,7 +556,7 @@
                 if (!result.success) {
                     document.getElementById('alert-msg').textContent =
                         result.error || "Couldn't send link — try again in a moment.";
-                    document.getElementById('alert-banner').classList.add('visible');
+                    document.getElementById('login-alert').classList.add('show');
                     return;
                 }
                 // Hide the form, show the "check your email" panel,
