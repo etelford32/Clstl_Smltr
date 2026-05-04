@@ -925,6 +925,7 @@ import {
 } from './js/horizons.js';
 import { ASTEROID_EL } from './js/orbital-mechanics/nbody-init.js';
 import { elementsToState } from './js/orbital-mechanics/yoshida4.js';
+import { makeOrreryPlanet, updateOrreryPlanet } from './js/orrery-skins.js';
 
 // ── Body table ───────────────────────────────────────────────────────
 const BODIES = [
@@ -1380,63 +1381,26 @@ function makeAtmosphere(color, size, intensity = 1.0) {
     );
 }
 
+// Procedural planet skins + axial-rotation update — see js/orrery-skins.js
+// for the per-body shaders, ring builders, and obliquity tables.
+const planetSkins = {};      // { key: { group, surface, uniforms, spin } }
+
 for (const body of BODIES) {
-    const m = new THREE.Mesh(
-        new THREE.SphereGeometry(body.size, 36, 36),
-        new THREE.MeshStandardMaterial({
-            color:body.color, emissive:body.color, emissiveIntensity:0.22,
-            roughness:0.72, metalness:0.10,
-        }),
-    );
-    m.userData = { kind:'planet', key:body.key, label:body.name };
-    scene.add(m);
-    meshes[body.key] = m;
+    const skin = makeOrreryPlanet(body.key, body.size, body.color);
+    // The Group is what we position each frame. We tag the surface
+    // mesh as the click target so the raycast hit-walk-up resolves
+    // back to a planet via userData.
+    skin.surface.userData = { kind:'planet', key:body.key, label:body.name };
+    // Also tag the group itself so any descendant hit (atmosphere shell,
+    // rings, tilt rotator) walks up to a planet handle.
+    skin.group.userData = { kind:'planet', key:body.key, label:body.name };
+    scene.add(skin.group);
+    // Existing code references `meshes[body.key]` for position-setting,
+    // selection rings, hover detection. Point it at the *Group* — both
+    // .position and click hit-tests still work as expected.
+    meshes[body.key] = skin.group;
+    planetSkins[body.key] = skin;
     orbits[body.key] = buildOrbitRing(body.fn, body.color);
-
-    // Atmospheric halo (Fresnel BackSide shell). Earth/Venus/Neptune
-    // get a stronger glow; airless bodies a subtler one.
-    const atmK = (body.key === 'earth' || body.key === 'venus' || body.key === 'neptune' || body.key === 'uranus') ? 1.4
-               : (body.key === 'jupiter' || body.key === 'saturn') ? 1.1
-               : 0.65;
-    m.add(makeAtmosphere(body.color, body.size, atmK));
-
-    // Saturn ring system
-    if (body.key === 'saturn') {
-        const rIn  = body.size * 1.42;
-        const rOut = body.size * 2.45;
-        const ringGeom = new THREE.RingGeometry(rIn, rOut, 96, 1);
-        // Rewrite UVs so x = radial fraction (0 at inner edge, 1 at outer).
-        const pos = ringGeom.attributes.position.array;
-        const uvA = ringGeom.attributes.uv.array;
-        for (let i = 0; i < pos.length; i += 3) {
-            const r = Math.hypot(pos[i], pos[i+1]);
-            uvA[(i/3) * 2]     = (r - rIn) / (rOut - rIn);
-            uvA[(i/3) * 2 + 1] = 0.5;
-        }
-        ringGeom.attributes.uv.needsUpdate = true;
-        const ringMat = new THREE.ShaderMaterial({
-            transparent:true, depthWrite:false, side:THREE.DoubleSide,
-            uniforms:{ uColor:{ value:new THREE.Color(0xead9a8) } },
-            vertexShader:`varying vec2 vUv; void main(){ vUv=uv;
-                gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
-            fragmentShader:`uniform vec3 uColor; varying vec2 vUv;
-                void main(){
-                    float r = vUv.x;
-                    // Fine banding + a Cassini-division-like gap near 0.55
-                    float band = 0.55 + 0.45 * sin(r * 90.0);
-                    float gap  = smoothstep(0.50, 0.55, r) * (1.0 - smoothstep(0.58, 0.63, r));
-                    float a    = 0.70 * band * (1.0 - 0.85 * gap);
-                    a *= smoothstep(0.0, 0.06, r) * (1.0 - smoothstep(0.93, 1.0, r));
-                    vec3 c = uColor * (0.65 + 0.45 * band);
-                    gl_FragColor = vec4(c, a);
-                }`,
-        });
-        const ring = new THREE.Mesh(ringGeom, ringMat);
-        // Lay flat in ecliptic, then tilt to Saturn's obliquity
-        ring.rotation.x = Math.PI / 2;
-        ring.rotation.y = 26.73 * Math.PI / 180;
-        m.add(ring);
-    }
 }
 
 // ── Asteroid meshes + thin orbit rings ───────────────────────────────
@@ -2201,11 +2165,17 @@ function formatDate(jd) {
 
 // ── Update positions ─────────────────────────────────────────────────
 let lastRingRefreshJd = -1e12;
+const _sunScenePos = new THREE.Vector3(0, 0, 0);    // Sun is at origin
 function updatePositions(jd) {
     for (const body of ALL_BODIES) {
         const p = body.fn(jd);
         const [x, y, z] = auToScene(p.x_AU, p.y_AU, p.z_AU);
         meshes[body.key].position.set(x, y, z);
+    }
+    // Advance each planet's axial rotation + per-shader sun direction.
+    for (const body of BODIES) {
+        const skin = planetSkins[body.key];
+        if (skin) updateOrreryPlanet(skin, jd, _sunScenePos);
     }
     // Lagrange L4/L5 follow the selected planet (ecliptic ±60° rotation).
     if (selected && selected.key && selected.key !== 'sun') {
