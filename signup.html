@@ -602,6 +602,19 @@
                         classSeatApplied = true;
                         parentPlan = ar.parentPlan;
                         await auth.fetchProfile?.();
+                        // Activation: log on the student's row that they joined a
+                        // class. The funnel groups by plan, so this lands under
+                        // 'free' (the student's stored plan) with metadata noting
+                        // it was a class join. Educator-side metrics ("X students
+                        // joined my class this month") need a server-side log
+                        // from the RPC — that's a follow-up.
+                        try {
+                            const { logActivation, EVENTS } = await import('./js/activation.js');
+                            await logActivation(EVENTS.STUDENT_JOINED, {
+                                parent_plan: ar.parentPlan,
+                                source:      'magic_link',
+                            });
+                        } catch (_) { /* non-essential */ }
                     }
                 } catch (_) { /* signup already succeeded */ }
             } else if (invite?.inviteId && applyInvitePlan) {
