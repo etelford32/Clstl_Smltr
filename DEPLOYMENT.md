@@ -150,6 +150,16 @@ supabase-magic-link-migration.sql         # signin_magic_link_requested event
                                           # card. Operator runbook (with
                                           # branded email template) lives in
                                           # MAGIC_LINK_SETUP.md.
+
+# Profile timezone (May 2026)
+supabase-profile-timezone-migration.sql   # adds user_profiles.timezone so
+                                          # the account page can save the
+                                          # user's display timezone. Without
+                                          # it, /account → Save Profile
+                                          # fails with "Could not find the
+                                          # 'timezone' column of
+                                          # 'user_profiles' in the schema
+                                          # cache".
 ```
 
 > **Apply order — `supabase-role-plan-audit-migration.sql`** must run AFTER
