@@ -987,9 +987,11 @@ export class SatelliteTracker {
         const target = this._satellites.find(s => s.tle.norad_id === targetNoradId);
         if (!target) return [];
 
-        const epochMs = Number.isFinite(opts.epochMs) ? opts.epochMs : Date.now();
-        const refine  = opts.refine !== false;
-        const withDv  = opts.withDv !== false;
+        const epochMs   = Number.isFinite(opts.epochMs) ? opts.epochMs : Date.now();
+        const refine    = opts.refine    !== false;
+        const withDv    = opts.withDv    !== false;
+        const withSpark = opts.withSpark !== false;
+        const SPARK_HALF_WINDOW = 5;   // ±5 samples around TCA coarse
 
         const matchesGroup = (g) => {
             if (groupFilter == null) return true;
@@ -1063,19 +1065,24 @@ export class SatelliteTracker {
             let bestI  = -1;
             let bestD2 = Infinity;
             const catPos = new Array(nSteps);
+            // Sample-distance buffer (km) — kept so we can crop a
+            // window around bestI for the sparkline without
+            // re-propagating.
+            const dists = new Float32Array(nSteps);
 
             for (let i = 0; i < nSteps; i++) {
                 const tgt = targetPositions[i];
-                if (!isFinite(tgt.x)) continue;
+                if (!isFinite(tgt.x)) { dists[i] = NaN; continue; }
 
                 const cp = propagate(cat.tle, catTsinceBase + i * stepMin);
                 catPos[i] = cp;
-                if (!isFinite(cp.x)) continue;
+                if (!isFinite(cp.x)) { dists[i] = NaN; continue; }
 
                 const dx = tgt.x - cp.x;
                 const dy = tgt.y - cp.y;
                 const dz = tgt.z - cp.z;
                 const d2 = dx * dx + dy * dy + dz * dz;
+                dists[i] = Math.sqrt(d2);
 
                 if (d2 < bestD2) { bestD2 = d2; bestI = i; }
             }
@@ -1116,8 +1123,10 @@ export class SatelliteTracker {
             // both objects, then the magnitude of the relative-velocity
             // vector. Cheap (4 propagates) and gives the encounter
             // energy proxy callers want.
-            let dvKms = null;
+            let dvKms    = null;
             let missUnit = null;
+            let vRel     = null;
+            let missVec  = null;
             if (withDv) {
                 const tcaT  = tsinceBase + tcaOffMin;
                 const halfH = 10 / 60;
@@ -1131,6 +1140,7 @@ export class SatelliteTracker {
                     const vRelY = ((pB.y - pA.y) - (sB.y - sA.y)) / dt;
                     const vRelZ = ((pB.z - pA.z) - (sB.z - sA.z)) / dt;
                     dvKms = Math.sqrt(vRelX * vRelX + vRelY * vRelY + vRelZ * vRelZ);
+                    vRel  = { x: vRelX, y: vRelY, z: vRelZ };
 
                     const tcaP = propagate(target.tle, tcaT);
                     const tcaS = propagate(cat.tle,    catTsinceBase + tcaOffMin);
@@ -1139,9 +1149,26 @@ export class SatelliteTracker {
                         const my = tcaP.y - tcaS.y;
                         const mz = tcaP.z - tcaS.z;
                         const m  = Math.sqrt(mx * mx + my * my + mz * mz) || 1;
+                        missVec  = { x: mx, y: my, z: mz };
                         missUnit = { x: mx / m, y: my / m, z: mz / m };
                     }
                 }
+            }
+
+            // Sparkline window: ±SPARK_HALF_WINDOW samples around
+            // bestI, clipped to [0, nSteps-1]. NaNs survive so the
+            // renderer's time axis stays consistent.
+            let spark = null;
+            if (withSpark) {
+                const lo  = Math.max(0, bestI - SPARK_HALF_WINDOW);
+                const hi  = Math.min(nSteps - 1, bestI + SPARK_HALF_WINDOW);
+                const km  = new Array(hi - lo + 1);
+                for (let i = lo; i <= hi; i++) km[i - lo] = dists[i];
+                spark = {
+                    km,
+                    step_min:     stepMin,
+                    center_index: bestI - lo,
+                };
             }
 
             const tcaMs = epochMs + tcaOffMin * 60 * 1000;
@@ -1155,7 +1182,10 @@ export class SatelliteTracker {
                 tca_jd:      jd + tcaOffMin / MIN_PER_DAY,
                 tca_ms:      tcaMs,
                 dv_kms:      dvKms != null ? Math.round(dvKms * 1000) / 1000 : null,
+                v_rel:       vRel,
                 miss_unit:   missUnit,
+                miss_vec:    missVec,
+                spark,
             });
         }
 

@@ -4,19 +4,29 @@
  * Bottom-right SVG overlay over the globe. Shows, for the most
  * recently selected conjunction:
  *   - 1σ, 2σ, 3σ rings of combined miss-plane uncertainty
- *   - a dot at radius = miss_km from origin
+ *   - the miss vector as a dot at the projected (B·R, B·T) coords,
+ *     with the relative-velocity direction (out of the page) called
+ *     out at the corner
  *   - axis legend + numeric readout
  *
- * Honest-v1 caveat: a faithful B-plane requires the relative-velocity
- * direction at TCA to fix the (B·R, B·T) axes. The conjunction
- * screening pipeline today gives us miss magnitude only, so we
- * collapse to a polar plot — concentric rings = combined σ, dot at
- * the right radius. The visual semantic operators care about — "is
- * the dot inside or outside the σ rings?" — survives unchanged.
+ * Geometry: the encounter B-plane is the plane through the primary at
+ * TCA whose normal is v_rel (the relative-velocity vector). We pick
+ * the canonical Vallado axes:
  *
- * Real Space-Track CDMs ship the miss vector with direction; when an
- * Enterprise customer wires those in, this module gets the (xi, eta)
- * pair instead of the bare radius and switches to a true B-plane.
+ *   T-hat = (v_rel × Z_eci) / |…|     (perpendicular to v_rel,
+ *                                      in-plane horizontal)
+ *   R-hat = v_rel × T-hat / |v_rel|   (completes the right-handed
+ *                                      basis)
+ *
+ * The miss vector (primary − secondary at TCA) is projected onto
+ * (T-hat, R-hat); its in-plane components (B·T, B·R) place the dot.
+ * If the screen didn't return v_rel (e.g. a Space-Track CDM that
+ * already ships projected miss vector components, or an old screen),
+ * we fall back to the polar plot — dot on +X axis at the right radius.
+ *
+ * Real Space-Track CDMs ship (xi, eta) pre-projected; when those land
+ * via Enterprise integration, callers can pass them in directly via
+ * conj.bplane = { biR, biT } and skip the on-the-fly projection.
  */
 
 import { tleAgeUncertainty, combinedMissEnvelope } from './uncertainty.js';
@@ -59,6 +69,41 @@ function ensureMounted() {
     return _hostEl;
 }
 
+// Project a miss vector onto the encounter B-plane (Vallado axes).
+// Returns { biR, biT, axesValid } where axesValid is false when v_rel
+// is missing or degenerate (parallel to the chosen reference Z), in
+// which case the caller should fall back to the polar layout.
+function projectMissOntoBPlane(missVec, vRel) {
+    if (!missVec || !vRel) return { biR: null, biT: null, axesValid: false };
+    const vx = vRel.x, vy = vRel.y, vz = vRel.z;
+    const vMag = Math.hypot(vx, vy, vz);
+    if (vMag < 1e-9) return { biR: null, biT: null, axesValid: false };
+
+    // T-hat = (v × Z) / |…|, where Z = (0, 0, 1). Cross with Z drops
+    // the z-component of v: T = (vy, -vx, 0). When v is nearly parallel
+    // to Z (a polar encounter), the cross is near zero — fall back.
+    const tx0 =  vy;
+    const ty0 = -vx;
+    const tz0 =  0;
+    const tMag = Math.hypot(tx0, ty0, tz0);
+    if (tMag < 1e-6 * vMag) return { biR: null, biT: null, axesValid: false };
+    const tx = tx0 / tMag, ty = ty0 / tMag, tz = tz0 / tMag;
+
+    // R-hat = (v × T) / |v|.  v × T computed directly:
+    //   rx = vy*tz - vz*ty
+    //   ry = vz*tx - vx*tz
+    //   rz = vx*ty - vy*tx
+    const rx0 = vy * tz - vz * ty;
+    const ry0 = vz * tx - vx * tz;
+    const rz0 = vx * ty - vy * tx;
+    const rMag = Math.hypot(rx0, ry0, rz0);
+    const rx = rx0 / rMag, ry = ry0 / rMag, rz = rz0 / rMag;
+
+    const biT = missVec.x * tx + missVec.y * ty + missVec.z * tz;
+    const biR = missVec.x * rx + missVec.y * ry + missVec.z * rz;
+    return { biR, biT, axesValid: true };
+}
+
 function render() {
     ensureMounted();
     if (!_state) {
@@ -89,6 +134,18 @@ function render() {
     elems.push(el('line', { x1: 0, y1: CY, x2: SIZE, y2: CY, class: 'op-bplane-axis' }));
     elems.push(el('line', { x1: CX, y1: 0, x2: CX, y2: SIZE, class: 'op-bplane-axis' }));
 
+    // Axis labels (T horizontal, R vertical) — only when the projection
+    // is valid; otherwise we're in polar fallback mode and the labels
+    // would be misleading.
+    if (_state.axesValid) {
+        const tLabel = el('text', { x: SIZE - 14, y: CY - 4, class: 'op-bplane-axis-label' });
+        tLabel.textContent = 'T';
+        elems.push(tLabel);
+        const rLabel = el('text', { x: CX + 4, y: 12, class: 'op-bplane-axis-label' });
+        rLabel.textContent = 'R';
+        elems.push(rLabel);
+    }
+
     // Sigma rings: 1σ, 2σ, 3σ
     for (const k of [1, 2, 3]) {
         const r = radiusOf(k * sigmaPlane);
@@ -97,12 +154,6 @@ function render() {
             cx: CX, cy: CY, r,
             class: `op-bplane-sigma-ring op-bplane-sigma-${k}`,
         }));
-        elems.push(el('text', {
-            x: CX + r + 3, y: CY - 4,
-            class: 'op-bplane-sigma-label',
-        })).appendChild
-            ? null
-            : null;
         const tx = el('text', {
             x: CX + r + 3, y: CY - 4,
             class: 'op-bplane-sigma-label',
@@ -111,16 +162,25 @@ function render() {
         elems.push(tx);
     }
 
-    // Miss dot — placed along +X by convention since true B-plane
-    // direction isn't available without relative-velocity geometry.
-    const missR = radiusOf(_state.missKm);
+    // Miss dot. Real (B·T, B·R) when v_rel is available; +X polar
+    // fallback otherwise.
+    let dotX, dotY;
+    if (_state.axesValid) {
+        // Screen-Y is inverted vs. math-Y, so a positive R goes "up".
+        dotX = CX + radiusOf(_state.biT);
+        dotY = CY - radiusOf(_state.biR);
+    } else {
+        dotX = CX + radiusOf(_state.missKm);
+        dotY = CY;
+    }
+
     elems.push(el('line', {
         x1: CX, y1: CY,
-        x2: CX + missR, y2: CY,
+        x2: dotX, y2: dotY,
         class: 'op-bplane-miss-vec',
     }));
     elems.push(el('circle', {
-        cx: CX + missR, cy: CY, r: 4,
+        cx: dotX, cy: dotY, r: 4,
         class: 'op-bplane-miss-dot',
     }));
 
@@ -131,17 +191,26 @@ function render() {
     document.getElementById('op-bplane-name').textContent =
         `${_state.assetName} ↔ ${_state.secondaryName}`;
     document.getElementById('op-bplane-miss').textContent =
-        `miss ${_state.missKm.toFixed(1)} km`;
+        _state.axesValid
+            ? `miss ${_state.missKm.toFixed(2)} km · B·T ${_state.biT.toFixed(2)} · B·R ${_state.biR.toFixed(2)}`
+            : `miss ${_state.missKm.toFixed(2)} km · polar`;
     document.getElementById('op-bplane-sigma').textContent =
-        `1σ ${sigmaPlane.toFixed(1)} km`;
+        _state.dvKms != null
+            ? `1σ ${sigmaPlane.toFixed(1)} km · |Δv| ${_state.dvKms.toFixed(2)} km/s`
+            : `1σ ${sigmaPlane.toFixed(1)} km`;
 }
 
 /**
  * Update the inset with a fresh conjunction.
  *
  * Inputs (from the decision-deck conjunction-row click):
- *   { assetName, secondaryName,
- *     assetTle, secondaryTle, tcaMs, missKm }
+ *   { assetName, secondaryName, assetTle, secondaryTle,
+ *     tcaMs, missKm,
+ *     missVec?, vRel?, missUnit?, dvKms? }
+ *
+ * When `vRel` and `missVec` are present the inset projects onto the
+ * real (B·T, B·R) axes. Without them it falls back to the polar dot
+ * placement.
  *
  * The σ values come from each TLE's age via tleAgeUncertainty,
  * combined in quadrature (independent uncertainties).
@@ -159,6 +228,19 @@ export function showConjunction(conj) {
         { sigmaAlong: aSig.along, sigmaCross: aSig.cross, sigmaRadial: aSig.radial },
         { sigmaAlong: bSig.along, sigmaCross: bSig.cross, sigmaRadial: bSig.radial },
     );
+
+    // Reconstruct miss vector if only the unit + magnitude survived
+    // the trip from the worker (older callers).
+    let missVec = conj.missVec ?? null;
+    if (!missVec && conj.missUnit && Number.isFinite(conj.missKm)) {
+        missVec = {
+            x: conj.missUnit.x * conj.missKm,
+            y: conj.missUnit.y * conj.missKm,
+            z: conj.missUnit.z * conj.missKm,
+        };
+    }
+    const proj = projectMissOntoBPlane(missVec, conj.vRel);
+
     _state = {
         assetName:     conj.assetName     ?? 'asset',
         secondaryName: conj.secondaryName ?? 'secondary',
@@ -166,6 +248,10 @@ export function showConjunction(conj) {
         sigmaAlong:    env.sigmaAlong,
         sigmaCross:    env.sigmaCross,
         sigmaRadial:   env.sigmaRadial,
+        biR:           proj.biR,
+        biT:           proj.biT,
+        axesValid:     proj.axesValid,
+        dvKms:         Number.isFinite(conj.dvKms) ? conj.dvKms : null,
     };
     render();
 }
