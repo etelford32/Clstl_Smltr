@@ -379,6 +379,11 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         };
         state.marsMissions.push(m);
 
+        // TMI burn flash at Earth's helio position at departure.
+        spawnBurnFlash(hel.scene,
+            new THREE.Vector3(arcPos[0], arcPos[1], arcPos[2]),
+            0xffcc66, 800, 1.4);
+
         onEvent?.({ type: 'launched-mars', site, target, payloadName, plan });
         return m;
     }
@@ -440,7 +445,22 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             marker.position.set(arcPos[(N-1)*3+0], arcPos[(N-1)*3+1], arcPos[(N-1)*3+2]);
             hel.scene.add(marker);
 
-            legGeoms.push({ line, arcPos, N, marker, leg });
+            // ── B-plane visualization (only for intermediate flybys) ──────
+            // Built once at launch using the data from flybyAssessment, sits
+            // at the body marker for the whole mission (later: hide unless
+            // the user is near that body in the timeline).
+            let bPlaneViz = null;
+            if (!isFinal && f && f.b_plane) {
+                // Outgoing v∞ direction (helio frame) for asymptote-out line
+                const v_out_helio = plan.legs[i+1].v_inf_depart_vec;
+                const m_out = Math.hypot(v_out_helio[0], v_out_helio[1], v_out_helio[2]);
+                const v_out_unit = [v_out_helio[0]/m_out, v_out_helio[1]/m_out, v_out_helio[2]/m_out];
+                bPlaneViz = buildBPlaneViz(f, v_out_unit, 0.28);
+                bPlaneViz.position.set(arcPos[(N-1)*3+0], arcPos[(N-1)*3+1], arcPos[(N-1)*3+2]);
+                hel.scene.add(bPlaneViz);
+            }
+
+            legGeoms.push({ line, arcPos, N, marker, bPlaneViz, leg });
         }
 
         const craft = new THREE.Mesh(
@@ -449,6 +469,11 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         );
         hel.scene.add(craft);
         const trail = makeTrail(hel.scene, 1500, 0xffeecc, 0.7);
+
+        // Burn flash at the start of the tour (TMI from Earth).
+        spawnBurnFlash(hel.scene,
+            new THREE.Vector3(legGeoms[0].arcPos[0], legGeoms[0].arcPos[1], legGeoms[0].arcPos[2]),
+            0xffcc66, 800, 1.4);
 
         // Wall-clock seconds for the entire tour at 1× timeScale.
         const totalDur = Math.max(15, plan.tof_total_d * (45 / 800));   // ~45 s for an 800-d tour
@@ -545,6 +570,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
                 if (u >= 1) {
                     m.phase = 'transfer';
                     m.transferStart = state.elapsed;
+                    spawnBurnFlash(geo.scene, pos.clone(), 0xffcc66, 700, 0.8);
                 }
                 continue;
             }
@@ -606,6 +632,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             new THREE.Vector3(0, 0, 1),
             0xffeecc, 0.85,
         );
+        spawnBurnFlash(geo.scene, geo.moon.position.clone(), 0x66ffaa, 900, 0.6);
         m.captureRing.position.copy(geo.moon.position);
         geo.scene.add(m.captureRing);
         m.capturePeri    = new THREE.Vector3(1, 0, 0);
@@ -653,6 +680,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             pushTrail(m, m.craft.position);
             if (u >= 1) {
                 m.phase = 'arrived';
+                spawnBurnFlash(hel.scene, m.craft.position.clone(), 0x66ffaa, 1100, 1.6);
                 onEvent?.({ type: 'mars-captured', payloadName: m.payloadName, plan: m.plan });
             }
         }
@@ -675,6 +703,11 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             }
             if (legIdx >= t.legGeoms.length) {
                 t.phase = 'arrived';
+                // Final capture flash at the last body.
+                const last = t.legGeoms[t.legGeoms.length - 1];
+                spawnBurnFlash(hel.scene, new THREE.Vector3(
+                    last.arcPos[(last.N-1)*3+0], last.arcPos[(last.N-1)*3+1], last.arcPos[(last.N-1)*3+2],
+                ), 0x66ffaa, 1100, 1.6);
                 onEvent?.({ type: 'tour-arrived', payloadName: t.payloadName, plan: t.plan });
                 continue;
             }
@@ -682,6 +715,15 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             // Notify on leg transitions.
             if (legIdx !== t.currentLeg) {
                 t.currentLeg = legIdx;
+                // Flyby flash at the body the spacecraft just crossed.
+                if (legIdx > 0) {
+                    const prev = t.legGeoms[legIdx - 1];
+                    const f = prev.leg.flyby_at_arrival;
+                    const flashColor = f && f.ballistic ? 0x66ddff : 0xff8855;
+                    spawnBurnFlash(hel.scene, new THREE.Vector3(
+                        prev.arcPos[(prev.N-1)*3+0], prev.arcPos[(prev.N-1)*3+1], prev.arcPos[(prev.N-1)*3+2],
+                    ), flashColor, 900, f && f.ballistic ? 1.0 : 1.4);
+                }
                 onEvent?.({
                     type: 'tour-leg', payloadName: t.payloadName,
                     legIndex: legIdx,
@@ -893,6 +935,14 @@ function buildGeoScene(renderer, w, h) {
     const moonRingMean = makeRingLine(384400 / R_EARTH, 0x444466, 0.35);
     scene.add(moonRingMean);
 
+    // Body labels for orientation.
+    const earthLabel = makeBodyLabel('Earth', '#9cf');
+    earthLabel.position.set(0, 1.4, 0);
+    earth.add(earthLabel);
+    const moonLabel = makeBodyLabel('Moon', '#cdd');
+    moonLabel.position.set(0, MOON_R_SCENE * 4, 0);
+    moon.add(moonLabel);
+
     return { scene, camera, controls, earth, grid, atmo, moon };
 }
 
@@ -911,38 +961,283 @@ function buildHelioScene(renderer, w, h) {
 
     addStarfield(scene, 2000, 500);
 
-    // Sun
+    // ── Sun: photosphere + multi-shell additive corona + radial flare sprite
     const sun = new THREE.Mesh(
         new THREE.SphereGeometry(0.18, 32, 24),
-        new THREE.MeshBasicMaterial({ color: 0xffcc55 }),
+        new THREE.MeshBasicMaterial({ color: 0xfff0c8 }),
     );
     scene.add(sun);
-    const sunGlow = new THREE.Mesh(
-        new THREE.SphereGeometry(0.36, 24, 18),
-        new THREE.MeshBasicMaterial({ color: 0xffaa33, transparent: true, opacity: 0.18, side: THREE.BackSide }),
-    );
+    const sunGlow = new THREE.Group();
+    for (const [r, op, col] of [
+        [0.24, 0.45, 0xffd06c],
+        [0.34, 0.22, 0xffa040],
+        [0.55, 0.10, 0xff7022],
+        [0.95, 0.04, 0xcc5511],
+    ]) {
+        sunGlow.add(new THREE.Mesh(
+            new THREE.SphereGeometry(r, 32, 24),
+            new THREE.MeshBasicMaterial({
+                color: col, transparent: true, opacity: op,
+                side: THREE.BackSide, blending: THREE.AdditiveBlending,
+                depthWrite: false,
+            }),
+        ));
+    }
+    // Lens flare disk facing the camera.
+    const flare = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: makeRadialGradientTexture(0xffe09a, 0.55),
+        transparent: true, opacity: 0.55,
+        blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false,
+    }));
+    flare.scale.set(1.6, 1.6, 1);
+    sunGlow.add(flare);
     scene.add(sunGlow);
-    const sunLight = new THREE.PointLight(0xffeec8, 1.2, 0, 0);
+    const sunLight = new THREE.PointLight(0xffeec8, 1.4, 0, 0);
     scene.add(sunLight);
 
-    // Inner-planet orbit rings
+    // ── Orbit rings
     const orbits = [
-        { r: 0.387 * HELIO_UNIT_AU, color: 0x886655 }, // Mercury
-        { r: 0.723 * HELIO_UNIT_AU, color: 0xc8b88a }, // Venus
-        { r: 1.000 * HELIO_UNIT_AU, color: 0x4488cc }, // Earth
-        { r: 1.524 * HELIO_UNIT_AU, color: 0xc05530 }, // Mars
+        { r: 0.387 * HELIO_UNIT_AU, color: 0x886655, label: 'Mercury' },
+        { r: 0.723 * HELIO_UNIT_AU, color: 0xc8b88a, label: 'Venus'   },
+        { r: 1.000 * HELIO_UNIT_AU, color: 0x4488cc, label: 'Earth'   },
+        { r: 1.524 * HELIO_UNIT_AU, color: 0xc05530, label: 'Mars'    },
     ];
-    for (const o of orbits) {
-        scene.add(makeRingLine(o.r, o.color, 0.55));
-    }
+    for (const o of orbits) scene.add(makeRingLine(o.r, o.color, 0.55));
 
+    // ── Planets with small atmosphere shells + body labels
     const mercury = new THREE.Mesh(new THREE.SphereGeometry(0.05, 16, 12), new THREE.MeshPhongMaterial({ color: 0xaa9988, emissive: 0x222222 }));
     const venus   = new THREE.Mesh(new THREE.SphereGeometry(0.07, 16, 12), new THREE.MeshPhongMaterial({ color: 0xe7c987, emissive: 0x332211 }));
     const earth   = new THREE.Mesh(new THREE.SphereGeometry(0.08, 20, 14), new THREE.MeshPhongMaterial({ color: 0x4f8fe0, emissive: 0x112244 }));
     const mars    = new THREE.Mesh(new THREE.SphereGeometry(0.06, 16, 12), new THREE.MeshPhongMaterial({ color: 0xc0552d, emissive: 0x331100 }));
     scene.add(mercury, venus, earth, mars);
 
-    return { scene, camera, controls, sun, sunGlow, mercury, venus, earth, mars };
+    venus.add(makeAtmosphereShell(0.085, 0xffeebb, 0.16));
+    earth.add(makeAtmosphereShell(0.105, 0x88bbff, 0.22));
+    mars.add (makeAtmosphereShell(0.073, 0xffaa77, 0.12));
+
+    const mercuryLabel = makeBodyLabel('Mercury', '#bba');
+    const venusLabel   = makeBodyLabel('Venus',   '#fec');
+    const earthLabel   = makeBodyLabel('Earth',   '#9cf');
+    const marsLabel    = makeBodyLabel('Mars',    '#f96');
+    const sunLabel     = makeBodyLabel('Sun',     '#ffd', 0.9);
+    sunLabel.position.set(0, 0.45, 0);
+    scene.add(sunLabel);
+    mercury.add(mercuryLabel); mercuryLabel.position.set(0, 0.10, 0);
+    venus.add(venusLabel);     venusLabel.position.set(0, 0.13, 0);
+    earth.add(earthLabel);     earthLabel.position.set(0, 0.15, 0);
+    mars.add(marsLabel);       marsLabel.position.set(0, 0.12, 0);
+
+    return {
+        scene, camera, controls,
+        sun, sunGlow, flare,
+        mercury, venus, earth, mars,
+    };
+}
+
+// ── Visual-enhancement primitives ───────────────────────────────────────────
+
+function makeAtmosphereShell(radius, color, opacity) {
+    return new THREE.Mesh(
+        new THREE.SphereGeometry(radius, 32, 24),
+        new THREE.MeshBasicMaterial({
+            color, transparent: true, opacity,
+            side: THREE.BackSide, blending: THREE.AdditiveBlending,
+            depthWrite: false,
+        }),
+    );
+}
+
+function makeRadialGradientTexture(rgbHex, edgeAlpha = 0) {
+    const N = 128;
+    const c = document.createElement('canvas');
+    c.width = c.height = N;
+    const ctx = c.getContext('2d');
+    const r = (rgbHex >> 16) & 0xff, g = (rgbHex >> 8) & 0xff, b = rgbHex & 0xff;
+    const grad = ctx.createRadialGradient(N/2, N/2, 0, N/2, N/2, N/2);
+    grad.addColorStop(0,    `rgba(${r},${g},${b},1)`);
+    grad.addColorStop(0.4,  `rgba(${r},${g},${b},0.6)`);
+    grad.addColorStop(1,    `rgba(${r},${g},${b},${edgeAlpha})`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, N, N);
+    const tex = new THREE.CanvasTexture(c);
+    tex.needsUpdate = true;
+    return tex;
+}
+
+function makeBodyLabel(text, cssColor = '#ccddff', sizeMul = 1) {
+    const c = document.createElement('canvas');
+    c.width = 256; c.height = 64;
+    const ctx = c.getContext('2d');
+    ctx.font = 'bold 32px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillText(text, 130, 34);
+    ctx.fillStyle = cssColor;
+    ctx.fillText(text, 128, 32);
+    const tex = new THREE.CanvasTexture(c);
+    tex.needsUpdate = true;
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: tex, transparent: true, depthTest: false, depthWrite: false,
+    }));
+    sprite.scale.set(0.42 * sizeMul, 0.105 * sizeMul, 1);
+    return sprite;
+}
+
+/**
+ * Schematic B-plane visualisation at a flyby body. Real B-plane geometry
+ * is microscopic at AU scale (Earth's SOI is 0.025 helio units), so this
+ * is intentionally rendered ~150× oversized for educational clarity.
+ *
+ * Returns a Group containing:
+ *   • translucent disk perpendicular to ŝ                  (the B-plane)
+ *   • disk outline                                          (sized = |B| schematic)
+ *   • B-vector arrow from origin to closest-approach point  (along B̂)
+ *   • incoming asymptote line                               (extends in -ŝ direction)
+ *   • outgoing asymptote line                               (extends in v̂∞_out direction)
+ *   • rotation-axis arrow                                   (along ĥ, perpendicular to flyby plane)
+ *   • text label with B·T, B·R, |B| in km
+ */
+function buildBPlaneViz(flybyAssessment, v_inf_out_helio_unit, scale = 0.28) {
+    const g = new THREE.Group();
+    const b = flybyAssessment.b_plane;
+
+    // helio km → scene basis: the flyby data uses heliocentric ecliptic
+    // (x, y, z), and our scene maps (x_ecl, y_ecl, z_ecl) → (x, z, -y).
+    const toScene = (v) => new THREE.Vector3(v[0], v[2], -v[1]);
+    const s = toScene(b.s_hat).normalize();
+    const T = toScene(b.T_hat).normalize();
+    const R = toScene(b.R_hat).normalize();
+    const h = toScene(b.h_hat).normalize();
+    const Bhat = toScene(b.B_hat).normalize();
+    const v_out_hat = toScene(v_inf_out_helio_unit).normalize();
+
+    // Translucent B-plane disk (CircleGeometry's default normal is +Z, so
+    // we orient it via quaternion to face +ŝ).
+    const disk = new THREE.Mesh(
+        new THREE.CircleGeometry(scale, 48),
+        new THREE.MeshBasicMaterial({
+            color: 0x66ddff, transparent: true, opacity: 0.10,
+            side: THREE.DoubleSide, depthWrite: false,
+        }),
+    );
+    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1), s);
+    disk.quaternion.copy(q);
+    g.add(disk);
+
+    // Disk outline ring
+    const ringPts = [];
+    const N = 64;
+    for (let i = 0; i <= N; i++) {
+        const a = (i / N) * Math.PI * 2;
+        ringPts.push(
+            T.clone().multiplyScalar(scale * Math.cos(a))
+             .add(R.clone().multiplyScalar(scale * Math.sin(a))),
+        );
+    }
+    g.add(new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(ringPts),
+        new THREE.LineBasicMaterial({ color: 0x88eeff, transparent: true, opacity: 0.55 }),
+    ));
+
+    // T̂ axis tick (small line from center along +T̂)
+    g.add(new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), T.clone().multiplyScalar(scale)]),
+        new THREE.LineBasicMaterial({ color: 0x44aacc, transparent: true, opacity: 0.5 }),
+    ));
+    // R̂ axis tick
+    g.add(new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), R.clone().multiplyScalar(scale)]),
+        new THREE.LineBasicMaterial({ color: 0x44aacc, transparent: true, opacity: 0.5 }),
+    ));
+
+    // Asymptote-in (spacecraft approaches FROM -ŝ direction TO body)
+    g.add(new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([
+            s.clone().multiplyScalar(-2.5 * scale),
+            new THREE.Vector3(0,0,0),
+        ]),
+        new THREE.LineBasicMaterial({ color: 0xffaa66, transparent: true, opacity: 0.85 }),
+    ));
+    // Asymptote-out (along v̂∞_out from body)
+    g.add(new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(0,0,0),
+            v_out_hat.clone().multiplyScalar(2.5 * scale),
+        ]),
+        new THREE.LineBasicMaterial({ color: 0xffeecc, transparent: true, opacity: 0.95 }),
+    ));
+
+    // B-vector arrow from origin along B̂
+    g.add(new THREE.ArrowHelper(
+        Bhat,
+        new THREE.Vector3(0,0,0),
+        scale * 0.95,
+        0xffcc44, scale * 0.16, scale * 0.10,
+    ));
+
+    // Rotation-axis ĥ arrow (perpendicular to flyby plane)
+    g.add(new THREE.ArrowHelper(
+        h,
+        new THREE.Vector3(0,0,0),
+        scale * 0.7,
+        0xff66cc, scale * 0.14, scale * 0.09,
+    ));
+
+    // B·T / B·R label sprite
+    const lbl = makeBPlaneLabel(b);
+    lbl.position.copy(R.clone().multiplyScalar(scale * 1.25));
+    g.add(lbl);
+
+    return g;
+}
+
+function makeBPlaneLabel(b) {
+    const c = document.createElement('canvas');
+    c.width = 320; c.height = 96;
+    const ctx = c.getContext('2d');
+    ctx.font = 'bold 18px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.fillStyle = '#88eeff';
+    ctx.fillText('B-plane (schematic)', 160, 24);
+    ctx.fillStyle = '#ffcc44';
+    ctx.fillText(`|B| = ${b.B_mag.toFixed(0)} km`, 160, 48);
+    ctx.fillStyle = '#cfd';
+    ctx.fillText(`B·T ${b.B_dot_T.toFixed(0)}  B·R ${b.B_dot_R.toFixed(0)}`, 160, 70);
+    const tex = new THREE.CanvasTexture(c);
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: tex, transparent: true, depthTest: false, depthWrite: false,
+    }));
+    sprite.scale.set(0.55, 0.16, 1);
+    return sprite;
+}
+
+/**
+ * Spawn a brief additive flash at a position to signal a Δv burn.
+ * Auto-fades and removes itself from the scene.
+ */
+function spawnBurnFlash(scene, position, color = 0xffaa33, life_ms = 700, sizeMul = 1) {
+    const flash = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: makeRadialGradientTexture(color, 0),
+        transparent: true, opacity: 0.95,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false, depthTest: false,
+    }));
+    flash.position.copy(position);
+    flash.scale.set(0.3 * sizeMul, 0.3 * sizeMul, 1);
+    scene.add(flash);
+    const start = performance.now();
+    const tick = () => {
+        const t = (performance.now() - start) / life_ms;
+        if (t >= 1) { scene.remove(flash); flash.material.dispose(); flash.material.map.dispose(); return; }
+        const s = (0.3 + 1.4 * t) * sizeMul;
+        flash.scale.set(s, s, 1);
+        flash.material.opacity = (1 - t) * 0.9;
+        requestAnimationFrame(tick);
+    };
+    tick();
 }
 
 function addStarfield(scene, N, R) {
@@ -1062,6 +1357,7 @@ function clearAll(state, geo, hel) {
         hel.scene.remove(t.craft); hel.scene.remove(t.trail);
         for (const lg of t.legGeoms) {
             hel.scene.remove(lg.line); hel.scene.remove(lg.marker);
+            if (lg.bPlaneViz) hel.scene.remove(lg.bPlaneViz);
         }
     }
     state.rockets.length        = 0;
