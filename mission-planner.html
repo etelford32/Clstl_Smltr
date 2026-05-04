@@ -224,8 +224,8 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
 <script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("mission-planner");</script>
 
 <div id="mp-hero">
-    <h1>🎯 Mission Planner — Patched-Conic Trajectory Simulator</h1>
-    <p>Real launch sites. Real ephemerides. Real Δv. Pick a destination, find the next window, and watch the spacecraft fly the trajectory: parking orbit → TLI/TMI burn → transfer ellipse → SOI patch → capture into a circular orbit at the target. Lunar transfers run in the geocentric scene; Mars transfers auto-switch to a heliocentric view with the live planet positions from JPL/Meeus ephemerides.</p>
+    <h1>🎯 Mission Planner — Lambert + Patched-Conic Trajectory Simulator</h1>
+    <p>Real launch sites. Real ephemerides. Real Lambert solver. Pick a destination, run a pork-chop scan, and watch the spacecraft fly the actual transfer: parking orbit → TLI/TMI burn (with plane-change cost) → 3D Kepler arc → SOI patch → capture. Mars transfers use Izzo's Lambert algorithm over a 80×80 (departure × arrival) grid of live Earth/Mars positions — the heatmap is clickable, so any (depart, arrive) pair becomes a flyable mission.</p>
     <div id="mp-hero-stats"></div>
 </div>
 
@@ -247,11 +247,30 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
         <div class="mp-label">Payload Name</div>
         <input id="mp-payload" class="mp-input" type="text" maxlength="32" value="PayloadSat-1">
 
+        <div class="mp-label">Parking-Orbit Inclination</div>
+        <div class="mp-row">
+            <input id="mp-park-inc" class="mp-input" type="range" min="0" max="98" step="0.5" value="28.5">
+            <span class="mp-time" id="mp-park-inc-val">28.5°</span>
+        </div>
+
         <button id="mp-find-window" class="mp-secondary-btn" type="button" style="margin-top:10px;">🔍 Find Next Launch Window</button>
-        <button id="mp-launch" class="mp-launch-btn" type="button">🚀 Launch</button>
+        <button id="mp-porkchop"    class="mp-secondary-btn" type="button" style="margin-top:6px;">🗺️ Run Pork-Chop Scan (Mars)</button>
+        <button id="mp-launch"      class="mp-launch-btn"    type="button">🚀 Launch</button>
 
         <div id="mp-plan" class="mp-plan">
             <div class="mp-plan-empty">Plan readout appears after Find Window or Launch.</div>
+        </div>
+
+        <div id="mp-porkchop-wrap" style="margin-top:10px; display:none;">
+            <div class="mp-plan-title" style="color:#ffaa66; margin-bottom:6px;">📊 Pork-Chop · Total Δv (km/s)</div>
+            <canvas id="mp-porkchop-canvas" width="220" height="220"
+                style="width:100%; max-width:260px; display:block; image-rendering:pixelated;
+                       background:#000; border:1px solid rgba(255,255,255,.1); border-radius:6px;
+                       cursor:crosshair;"></canvas>
+            <div id="mp-porkchop-axes" style="font-family:monospace; font-size:.62rem; color:#778; margin-top:4px; line-height:1.45;">
+                ↕ arrival date  ↔ departure date · click to load
+            </div>
+            <div id="mp-porkchop-legend" style="font-family:monospace; font-size:.62rem; color:#aab; margin-top:4px;"></div>
         </div>
 
         <div class="mp-section-divider"></div>
@@ -361,20 +380,34 @@ function renderPlan(plan) {
             <div class="mp-plan-row"><span class="k">Total Δv</span><span class="v">${plan.dv_total_kms.toFixed(3)} km/s</span></div>
             <div class="mp-plan-row"><span class="k">Lead angle</span><span class="v">${plan.lead_angle_deg.toFixed(1)}°</span></div>
         `;
+    } else if (plan.kind === 'mars' && plan.method === 'lambert') {
+        const tilt = plan.plane_change_dep_deg;
+        const tiltWarn = tilt > 10 ? 'warn' : '';
+        planEl.innerHTML = `
+            <div class="mp-plan-title">♂ Mars Transfer (Lambert · 3D)</div>
+            <div class="mp-plan-row"><span class="k">Depart</span><span class="v">${jdToISO(plan.jd_depart)}</span></div>
+            <div class="mp-plan-row"><span class="k">Arrive</span><span class="v">${jdToISO(plan.jd_arrive)}</span></div>
+            <div class="mp-plan-row"><span class="k">TOF</span><span class="v">${plan.tof_d.toFixed(1)} days</span></div>
+            <div class="mp-plan-row"><span class="k">v∞ Earth</span><span class="v">${plan.v_inf_earth_kms.toFixed(3)} km/s</span></div>
+            <div class="mp-plan-row"><span class="k">C3 Earth</span><span class="v">${plan.c3_earth_km2s2.toFixed(2)} km²/s²</span></div>
+            <div class="mp-plan-row"><span class="k">DLA (v∞ dec)</span><span class="v">${plan.dla_deg.toFixed(2)}°</span></div>
+            <div class="mp-plan-row"><span class="k">Plane tilt</span><span class="v ${tiltWarn}">${plan.plane_change_dep_deg.toFixed(2)}°</span></div>
+            <div class="mp-plan-row"><span class="k">Δv (TMI)</span><span class="v">${plan.dv_tmi_kms.toFixed(3)} km/s</span></div>
+            <div class="mp-plan-row"><span class="k">  · tangent only</span><span class="v" style="opacity:.7">${plan.dv_tmi_tangential_kms.toFixed(3)} km/s</span></div>
+            <div class="mp-plan-row"><span class="k">v∞ Mars</span><span class="v">${plan.v_inf_mars_kms.toFixed(3)} km/s</span></div>
+            <div class="mp-plan-row"><span class="k">Δv (MOI)</span><span class="v">${plan.dv_moi_kms.toFixed(3)} km/s</span></div>
+            <div class="mp-plan-row"><span class="k">Total Δv</span><span class="v">${plan.dv_total_kms.toFixed(3)} km/s</span></div>
+        `;
     } else if (plan.kind === 'mars') {
         const phErr = Math.abs(plan.phi_error_deg);
         const phWarn = phErr > 5 ? 'warn' : '';
         planEl.innerHTML = `
-            <div class="mp-plan-title">♂ Mars Transfer Plan (Hohmann)</div>
+            <div class="mp-plan-title">♂ Mars Transfer (Hohmann reference)</div>
             <div class="mp-plan-row"><span class="k">Depart</span><span class="v">${jdToISO(plan.jd_depart)}</span></div>
             <div class="mp-plan-row"><span class="k">Arrive</span><span class="v">${jdToISO(plan.jd_arrive)}</span></div>
             <div class="mp-plan-row"><span class="k">TOF</span><span class="v">${plan.tof_d.toFixed(1)} days</span></div>
-            <div class="mp-plan-row"><span class="k">Phase φ now</span><span class="v">${plan.phi_current_deg.toFixed(1)}°</span></div>
-            <div class="mp-plan-row"><span class="k">Phase φ req</span><span class="v">${plan.phi_required_deg.toFixed(1)}°</span></div>
-            <div class="mp-plan-row"><span class="k">Phase error</span><span class="v ${phWarn}">${plan.phi_error_deg.toFixed(1)}°</span></div>
-            <div class="mp-plan-row"><span class="k">v∞ Earth</span><span class="v">${plan.v_inf_earth_kms.toFixed(3)} km/s</span></div>
+            <div class="mp-plan-row"><span class="k">Phase err</span><span class="v ${phWarn}">${plan.phi_error_deg.toFixed(1)}°</span></div>
             <div class="mp-plan-row"><span class="k">C3</span><span class="v">${plan.c3_earth_km2s2.toFixed(2)} km²/s²</span></div>
-            <div class="mp-plan-row"><span class="k">v∞ Mars</span><span class="v">${plan.v_inf_mars_kms.toFixed(3)} km/s</span></div>
             <div class="mp-plan-row"><span class="k">Δv (TMI)</span><span class="v">${plan.dv_tmi_kms.toFixed(3)} km/s</span></div>
             <div class="mp-plan-row"><span class="k">Δv (MOI)</span><span class="v">${plan.dv_moi_kms.toFixed(3)} km/s</span></div>
             <div class="mp-plan-row"><span class="k">Total Δv</span><span class="v">${plan.dv_total_kms.toFixed(3)} km/s</span></div>
@@ -416,13 +449,46 @@ const planner = initMissionPlanner({
     },
 });
 
+// ── Mars window state (depart, arrive) — set by Find/Pork-Chop/click ──
+let marsWindow = null;          // { jd_depart, jd_arrive }
+let lastPorkchop = null;        // result from porkchopMars
+
+// Parking inclination slider
+const parkIncRange = document.getElementById('mp-park-inc');
+const parkIncVal   = document.getElementById('mp-park-inc-val');
+parkIncRange.addEventListener('input', () => {
+    parkIncVal.textContent = `${parseFloat(parkIncRange.value).toFixed(1)}°`;
+    // If a Mars window is already selected, re-cost it for the new inclination.
+    if (marsWindow && targetSel.value === 'mars') {
+        const plan = planner.planMarsLambert({
+            jd_depart: marsWindow.jd_depart,
+            jd_arrive: marsWindow.jd_arrive,
+            parking_inc_deg: parseFloat(parkIncRange.value),
+        });
+        renderPlan(plan);
+    }
+});
+// Default parking inclination = launch site latitude.
+siteSel.addEventListener('change', () => {
+    const s = LAUNCH_SITES.find(x => x.id === siteSel.value);
+    if (!s) return;
+    parkIncRange.value = Math.abs(s.lat).toFixed(1);
+    parkIncVal.textContent = `${Math.abs(s.lat).toFixed(1)}°`;
+});
+
 // ── Wire controls ───────────────────────────────────────────────────
 document.getElementById('mp-launch').addEventListener('click', () => {
-    planner.launch({
+    const opts = {
         siteId:   siteSel.value,
         targetId: targetSel.value,
         payloadName: (payloadIn.value || 'Payload').trim(),
-    });
+        parking_inc_deg: parseFloat(parkIncRange.value),
+    };
+    if (targetSel.value === 'mars' && marsWindow) {
+        opts.windowJD = marsWindow.jd_depart;
+        opts.arriveJD = marsWindow.jd_arrive;
+    }
+    planner.launch(opts);
 });
 
 document.getElementById('mp-find-window').addEventListener('click', () => {
@@ -433,17 +499,158 @@ document.getElementById('mp-find-window').addEventListener('click', () => {
         renderPlan(plan);
         pushLog(`🔍 Lunar window · TOF ${plan.tof_d.toFixed(1)} d · Δv ${plan.dv_total_kms.toFixed(2)} km/s`, 'window');
     } else if (tgt.id === 'mars') {
-        pushLog(`⏳ Scanning Mars launch windows (this takes a moment)…`, 'window');
-        // Defer so the log message paints first.
-        setTimeout(() => {
-            const plan = planner.findMarsWindow({ jd_start: jdNow(), search_days: 800, step_days: 2 });
-            renderPlan(plan);
-            pushLog(`🔍 Mars window · depart ${jdToISO(plan.jd_depart)} · arrive ${jdToISO(plan.jd_arrive)} · Δv ${plan.dv_total_kms.toFixed(2)} km/s`, 'window');
-        }, 50);
+        runMarsPorkchop();   // Lambert pork-chop is the proper window finder
     } else {
         pushLog(`No window scan needed for ${tgt.name} — orbit is geometric, not phase-dependent.`, 'window');
     }
 });
+
+document.getElementById('mp-porkchop').addEventListener('click', runMarsPorkchop);
+
+function runMarsPorkchop() {
+    pushLog(`⏳ Pork-chop scan: 80×80 Lamberts over the next 1.5 yr…`, 'window');
+    setTimeout(() => {
+        const inc = parseFloat(parkIncRange.value);
+        const today = jdNow();
+        const pc = planner.porkchopMars({
+            jd_dep_min: today,
+            jd_dep_max: today + 540,        // ~1.5 yr departure window
+            jd_arr_min: today + 90,
+            jd_arr_max: today + 540 + 360,  // up to 360-day TOFs
+            n_dep: 80, n_arr: 80,
+            parking_inc_deg: inc,
+        });
+        lastPorkchop = pc;
+        if (!Number.isFinite(pc.best.dv)) {
+            pushLog(`Pork-chop scan found no feasible trajectories. Try a wider window.`, 'window');
+            return;
+        }
+        marsWindow = { jd_depart: pc.best.jd_dep, jd_arrive: pc.best.jd_arr };
+        renderPorkchop(pc);
+        const plan = planner.planMarsLambert({
+            jd_depart: pc.best.jd_dep,
+            jd_arrive: pc.best.jd_arr,
+            parking_inc_deg: inc,
+        });
+        renderPlan(plan);
+        pushLog(`🔍 Pork-chop best · depart ${jdToISO(pc.best.jd_dep)} → arrive ${jdToISO(pc.best.jd_arr)} · TOF ${pc.best.tof_d.toFixed(0)}d · C3 ${pc.best.c3.toFixed(1)} · Δv ${pc.best.dv.toFixed(2)} km/s`, 'window');
+    }, 30);
+}
+
+// ── Pork-chop heatmap rendering ─────────────────────────────────────
+const pcWrap   = document.getElementById('mp-porkchop-wrap');
+const pcCanvas = document.getElementById('mp-porkchop-canvas');
+const pcLegend = document.getElementById('mp-porkchop-legend');
+const pcAxes   = document.getElementById('mp-porkchop-axes');
+
+function renderPorkchop(pc) {
+    pcWrap.style.display = 'block';
+    const w = pcCanvas.width, h = pcCanvas.height;
+    const ctx = pcCanvas.getContext('2d');
+    const img = ctx.createImageData(w, h);
+
+    // Find finite min/max for the colormap
+    let dvMin = Infinity, dvMax = -Infinity;
+    for (let k = 0; k < pc.dv.length; k++) {
+        const v = pc.dv[k];
+        if (Number.isFinite(v)) { if (v < dvMin) dvMin = v; if (v > dvMax) dvMax = v; }
+    }
+    // Clip the upper end so the contrast stays useful
+    const dvHi = Math.min(dvMax, dvMin + 8);
+
+    // pc grid: pc.dv[i*n_arr + j] with i = depart, j = arrive
+    // Canvas: x = depart (i), y = arrive (j flipped so later arrivals = higher)
+    for (let py = 0; py < h; py++) {
+        for (let px = 0; px < w; px++) {
+            const i = Math.floor(px / w * pc.n_dep);
+            const j = pc.n_arr - 1 - Math.floor(py / h * pc.n_arr);
+            const v = pc.dv[i * pc.n_arr + j];
+            const o = (py * w + px) * 4;
+            if (!Number.isFinite(v)) {
+                img.data[o]   = 8;  img.data[o+1] = 6;  img.data[o+2] = 18; img.data[o+3] = 255;
+            } else {
+                const t = Math.max(0, Math.min(1, (v - dvMin) / (dvHi - dvMin)));
+                const [r,g,b] = viridis(1 - t);   // green = cheap, purple = expensive
+                img.data[o]   = r; img.data[o+1] = g; img.data[o+2] = b; img.data[o+3] = 255;
+            }
+        }
+    }
+    ctx.putImageData(img, 0, 0);
+
+    // Mark the optimal cell with a crosshair
+    const bx = (pc.best.i + 0.5) / pc.n_dep * w;
+    const by = h - (pc.best.j + 0.5) / pc.n_arr * h;
+    ctx.strokeStyle = '#ffeecc';
+    ctx.lineWidth   = 1.5;
+    ctx.beginPath();
+    ctx.arc(bx, by, 6, 0, Math.PI*2);
+    ctx.stroke();
+
+    pcLegend.innerHTML = `
+        Δv ∈ [${dvMin.toFixed(2)}, ${dvHi.toFixed(2)}] km/s &nbsp; · &nbsp;
+        cheap → <span style="color:#7ad151">green</span> ·
+        costly → <span style="color:#9c179e">purple</span> ·
+        <span style="color:#ffeecc">○</span> = optimum
+    `;
+    pcAxes.innerHTML = `
+        ↔ depart ${jdToISO(pc.jd_dep_min)} → ${jdToISO(pc.jd_dep_max)}<br>
+        ↕ arrive ${jdToISO(pc.jd_arr_min)} → ${jdToISO(pc.jd_arr_max)}
+    `;
+}
+
+pcCanvas.addEventListener('click', (ev) => {
+    if (!lastPorkchop) return;
+    const rect = pcCanvas.getBoundingClientRect();
+    const px = (ev.clientX - rect.left) / rect.width  * pcCanvas.width;
+    const py = (ev.clientY - rect.top)  / rect.height * pcCanvas.height;
+    const i = Math.floor(px / pcCanvas.width  * lastPorkchop.n_dep);
+    const j = lastPorkchop.n_arr - 1 - Math.floor(py / pcCanvas.height * lastPorkchop.n_arr);
+    if (i < 0 || j < 0 || i >= lastPorkchop.n_dep || j >= lastPorkchop.n_arr) return;
+    const jd_dep = lastPorkchop.jd_dep_min + (lastPorkchop.jd_dep_max - lastPorkchop.jd_dep_min) * (i / (lastPorkchop.n_dep - 1));
+    const jd_arr = lastPorkchop.jd_arr_min + (lastPorkchop.jd_arr_max - lastPorkchop.jd_arr_min) * (j / (lastPorkchop.n_arr - 1));
+    if (jd_arr <= jd_dep + 30) {
+        pushLog(`Pork-chop: that cell has TOF < 30 d (infeasible) — pick a higher arrival.`, 'window');
+        return;
+    }
+    marsWindow = { jd_depart: jd_dep, jd_arrive: jd_arr };
+    const plan = planner.planMarsLambert({
+        jd_depart: jd_dep, jd_arrive: jd_arr,
+        parking_inc_deg: parseFloat(parkIncRange.value),
+    });
+    renderPlan(plan);
+    pushLog(`📍 Selected · depart ${jdToISO(jd_dep)} → arrive ${jdToISO(jd_arr)} · Δv ${plan.dv_total_kms.toFixed(2)} km/s`, 'window');
+    // Re-render heatmap to refresh the optimum marker (no recompute needed).
+    renderPorkchop(lastPorkchop);
+    // And overlay the user's pick:
+    const ctx = pcCanvas.getContext('2d');
+    const bx = (i + 0.5) / lastPorkchop.n_dep * pcCanvas.width;
+    const by = pcCanvas.height - (j + 0.5) / lastPorkchop.n_arr * pcCanvas.height;
+    ctx.strokeStyle = '#66ffaa';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(bx-7, by); ctx.lineTo(bx+7, by);
+    ctx.moveTo(bx, by-7); ctx.lineTo(bx, by+7);
+    ctx.stroke();
+});
+
+// 8-stop viridis colormap (perceptually uniform, color-blind-friendly).
+function viridis(t) {
+    const stops = [
+        [ 68,  1, 84], [ 72, 35,116], [ 64, 67,135], [ 52, 94,141],
+        [ 41,120,142], [ 32,144,140], [ 34,167,132], [ 68,190,112],
+        [121,209, 81], [189,222, 38], [253,231, 36],
+    ];
+    t = Math.max(0, Math.min(1, t));
+    const f = t * (stops.length - 1);
+    const i = Math.floor(f);
+    const u = f - i;
+    const a = stops[i], b = stops[Math.min(stops.length - 1, i + 1)];
+    return [
+        Math.round(a[0]*(1-u) + b[0]*u),
+        Math.round(a[1]*(1-u) + b[1]*u),
+        Math.round(a[2]*(1-u) + b[2]*u),
+    ];
+}
 
 document.getElementById('mp-mode-geo').addEventListener('click',   () => { planner.setMode('geo');   setModeUI('geo'); });
 document.getElementById('mp-mode-helio').addEventListener('click', () => { planner.setMode('helio'); setModeUI('helio'); });

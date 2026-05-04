@@ -32,10 +32,11 @@ import {
 import {
     KM_PER_AU, R_EARTH, R_MOON, SOI_MOON, SOI_MARS, SECONDS_PER_DAY,
     R_EARTH_HELIO, R_MARS_HELIO,
-    planLunarTransfer, planMarsTransfer,
-    findLunarLaunchWindow, findMarsLaunchWindow,
+    planLunarTransfer, planMarsTransfer, planMarsLambert,
+    findLunarLaunchWindow, findMarsLaunchWindow, porkchopMars,
     hohmannPositionAt,
 } from './mission-planner-trajectory.js';
+import { sampleKeplerArc } from './mission-planner-lambert.js';
 
 // ── Scene scales ────────────────────────────────────────────────────────────
 const GEO_UNIT_KM   = R_EARTH;          // 1 scene unit = 1 R⊕ in geo scene
@@ -145,20 +146,25 @@ export function initMissionPlanner({ container, onEvent } = {}) {
     }
 
     // ── Public API: launch ──────────────────────────────────────────────────
-    function launch({ siteId, targetId, payloadName = 'PayloadSat-1', windowJD = null }) {
+    function launch({
+        siteId, targetId,
+        payloadName     = 'PayloadSat-1',
+        windowJD        = null,
+        arriveJD        = null,                // Mars only — Lambert TOF
+        parking_inc_deg = null,                // overrides launch-site latitude
+    }) {
         const site   = LAUNCH_SITES.find(s => s.id === siteId)   || state.site;
         const target = TARGET_ORBITS.find(t => t.id === targetId) || state.target;
         state.site   = site;
         state.target = target;
 
-        // Auto-switch view to the target's frame.
         if (target.frame !== state.mode) setMode(target.frame);
 
         if (target.id === 'moon') {
-            return launchLunar({ site, target, payloadName, windowJD });
+            return launchLunar({ site, target, payloadName, windowJD, parking_inc_deg });
         }
         if (target.id === 'mars') {
-            return launchMars({ site, target, payloadName, windowJD });
+            return launchMars({ site, target, payloadName, windowJD, arriveJD, parking_inc_deg });
         }
         return launchNearEarth({ site, target, payloadName });
     }
@@ -267,48 +273,50 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         return m;
     }
 
-    // ── Mars transfer (helio frame, real patched conic) ─────────────────────
-    function launchMars({ site, target, payloadName, windowJD }) {
+    // ── Mars transfer (helio frame, Lambert solver) ─────────────────────────
+    function launchMars({ site, target, payloadName, windowJD, arriveJD, parking_inc_deg }) {
         const jd_depart = windowJD ?? state.scenarioJD ?? jdNow();
-        const plan = planMarsTransfer({ jd_depart });
+        // Default arrival = depart + Hohmann TOF (~258 d). Caller normally
+        // supplies arriveJD from a pork-chop pick.
+        const jd_arrive = arriveJD ?? (jd_depart + 258);
+        const inc       = parking_inc_deg ?? Math.abs(site.lat);
 
-        // Heliocentric departure & arrival positions of Earth and Mars.
-        const eDep = eclipticToVec3(
-            plan.earth_at_departure.lon_rad,
-            plan.earth_at_departure.lat_rad,
-            plan.earth_at_departure.dist_AU * HELIO_UNIT_AU,
-        );
-        const mArr = eclipticToVec3(
-            plan.mars_at_arrival.lon_rad,
-            plan.mars_at_arrival.lat_rad,
-            R_MARS_HELIO / KM_PER_AU * HELIO_UNIT_AU,
-        );
+        const plan = planMarsLambert({
+            jd_depart, jd_arrive,
+            parking_inc_deg: inc,
+        });
 
-        // Hohmann ellipse: focus at Sun (origin), periapsis at Earth-departure
-        // direction, apoapsis at Mars-arrival direction (which is 180° around
-        // the Sun by construction of a Hohmann transfer).
-        const periDir = eDep.clone().setY(0).normalize();
-        // True apoapsis direction = -periDir (Hohmann is symmetric). We use
-        // the actual Mars arrival direction for the SOI marker.
-        const planeNormal = new THREE.Vector3(0, 1, 0);
-        const inPlaneSide = planeNormal.clone().cross(periDir).normalize();
+        // Sample the actual Lambert arc in heliocentric km, then project to
+        // scene units. This replaces the Hohmann ellipse stand-in — the
+        // rendered curve is the trajectory the spacecraft actually flies.
+        const samples_km = plan.sample();
+        const N = samples_km.length;
+        const auMul = HELIO_UNIT_AU / KM_PER_AU;
+        const arcGeom = new THREE.BufferGeometry();
+        const arcPos  = new Float32Array(N * 3);
+        for (let i = 0; i < N; i++) {
+            const r = samples_km[i];
+            // ecliptic +Z → scene +Y? horizons.js puts ecliptic in (x,y) with
+            // +z = ecliptic normal. Our scene puts ecliptic in (x,z) with
+            // +y = normal. Map (x, y, z)_ecl → (x, z, -y)_scene.
+            arcPos[i*3+0] =  r[0] * auMul;
+            arcPos[i*3+1] =  r[2] * auMul;
+            arcPos[i*3+2] = -r[1] * auMul;
+        }
+        arcGeom.setAttribute('position', new THREE.BufferAttribute(arcPos, 3));
+        const arcLine = new THREE.Line(arcGeom, new THREE.LineBasicMaterial({
+            color: 0xff8855, transparent: true, opacity: 0.85,
+        }));
+        hel.scene.add(arcLine);
 
-        const a_scene = plan.ellipse.a_km / KM_PER_AU * HELIO_UNIT_AU;
-        const ellLine = makeEllipseFromBasis(
-            a_scene, plan.ellipse.e,
-            periDir, inPlaneSide,
-            0xff8855, 0.9, /* dashed */ true,
-        );
-        hel.scene.add(ellLine);
-
-        // Mars SOI sphere at arrival point.
-        const soiScene = SOI_MARS / KM_PER_AU * HELIO_UNIT_AU;
+        // Mars SOI sphere at arrival point (last sample).
+        const soiScene = SOI_MARS * auMul;
         const soiMesh = new THREE.Mesh(
             new THREE.SphereGeometry(soiScene, 16, 12),
             new THREE.MeshBasicMaterial({ color: 0xff7755, wireframe: true,
                 transparent: true, opacity: 0.25 }),
         );
-        soiMesh.position.copy(mArr);
+        soiMesh.position.set(arcPos[(N-1)*3+0], arcPos[(N-1)*3+1], arcPos[(N-1)*3+2]);
         hel.scene.add(soiMesh);
 
         // Spacecraft + trail.
@@ -321,15 +329,14 @@ export function initMissionPlanner({ container, onEvent } = {}) {
 
         const m = {
             kind: 'mars',
-            plan,
-            craft, ellLine, soiMesh,
+            plan, arcPos, N,
+            craft, arcLine, soiMesh,
             ...trail,
-            periDir, inPlaneSide, planeNormal,
-            startedAt:  state.elapsed,
-            durSec:     30,            // wall-clock seconds for full TOF at 1× speed
-            phase:      'cruise',
-            payloadName,
-            site, target,
+            startedAt: state.elapsed,
+            // Wall-clock time scales with TOF: 30 s for a 260-day Hohmann.
+            durSec:    Math.max(8, plan.tof_d * (30 / 260)),
+            phase:     'cruise',
+            payloadName, site, target,
         };
         state.marsMissions.push(m);
 
@@ -495,17 +502,24 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         hel.mercury.position.copy(eclipticToVec3(meVec.lon_rad, meVec.lat_rad, meVec.dist_AU * HELIO_UNIT_AU));
         hel.venus.position.copy  (eclipticToVec3(vVec.lon_rad,  vVec.lat_rad,  vVec.dist_AU  * HELIO_UNIT_AU));
 
-        // Mars missions
+        // Mars missions — spacecraft walks the pre-sampled Lambert arc.
+        // Linear interpolation between samples is fine because the arc was
+        // sampled at uniform t (Kepler-equation timing). Could be upgraded
+        // to a true Catmull-Rom spline if the arc ever looked jaggy.
         for (const m of state.marsMissions) {
             if (m.phase !== 'cruise') continue;
-            const u = Math.min(1, (state.elapsed - m.startedAt) / m.durSec);
-            const a_scene = m.plan.ellipse.a_km / KM_PER_AU * HELIO_UNIT_AU;
-            const e       = m.plan.ellipse.e;
-            const p2d     = hohmannPositionAt(u, a_scene, e);
-            const pos = m.periDir.clone().multiplyScalar(p2d.x)
-                .add(m.inPlaneSide.clone().multiplyScalar(p2d.y));
-            m.craft.position.copy(pos);
-            pushTrail(m, pos);
+            const u   = Math.min(1, (state.elapsed - m.startedAt) / m.durSec);
+            const fi  = u * (m.N - 1);
+            const i0  = Math.floor(fi);
+            const i1  = Math.min(m.N - 1, i0 + 1);
+            const t   = fi - i0;
+            const ax  = m.arcPos;
+            m.craft.position.set(
+                ax[i0*3+0] * (1-t) + ax[i1*3+0] * t,
+                ax[i0*3+1] * (1-t) + ax[i1*3+1] * t,
+                ax[i0*3+2] * (1-t) + ax[i1*3+2] * t,
+            );
+            pushTrail(m, m.craft.position);
             if (u >= 1) {
                 m.phase = 'arrived';
                 onEvent?.({ type: 'mars-captured', payloadName: m.payloadName, plan: m.plan });
@@ -635,10 +649,12 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         getScenarioJD: () => state.scenarioJD,
         setScenarioJD: (jd) => { state.scenarioJD = jd; },
         // Trajectory planners — also useful from the UI for read-only previews.
-        planLunar: planLunarTransfer,
-        planMars:  planMarsTransfer,
-        findLunarWindow: findLunarLaunchWindow,
-        findMarsWindow:  findMarsLaunchWindow,
+        planLunar:        planLunarTransfer,
+        planMars:         planMarsTransfer,
+        planMarsLambert,
+        findLunarWindow:  findLunarLaunchWindow,
+        findMarsWindow:   findMarsLaunchWindow,
+        porkchopMars,
     };
 }
 
@@ -854,7 +870,7 @@ function clearAll(state, geo, hel) {
     }
     for (const m of state.marsMissions) {
         hel.scene.remove(m.craft); hel.scene.remove(m.trail);
-        if (m.ellLine) hel.scene.remove(m.ellLine);
+        if (m.arcLine) hel.scene.remove(m.arcLine);
         if (m.soiMesh) hel.scene.remove(m.soiMesh);
     }
     state.rockets.length        = 0;
