@@ -578,10 +578,16 @@ nav {
                 <div class="sec-hd"><span>About</span><span class="arrow">▼</span></div>
                 <div class="sec-bd" style="font-size:10px;color:#555;line-height:1.6;">
                     <p>Full Solar System — 8 planets + Ceres (dwarf), asteroid belt,
-                    and 19 major moons with accurate Keplerian orbital periods.
-                    Logarithmic distance scale keeps all bodies visible.</p>
-                    <p style="margin-top:5px">Uranus moon inclination ≈98°; Triton
-                    (Neptune) shown in retrograde. Solar wind Parker spiral active.
+                    and <strong>31 major moons</strong> propagated from full Keplerian
+                    elements (a, e, i, Ω, ω, M₀ at J2000) referred to each parent's
+                    equator. A logarithmic scale keeps everything visible at once.</p>
+                    <p style="margin-top:5px">Jupiter's four Galilean moons run
+                    inside a live <strong>Yoshida-4 symplectic N-body integrator</strong>
+                    so the Laplace 1:2:4 mean-motion resonance and Io's forced
+                    eccentricity emerge from pairwise gravity (no analytic forcing).</p>
+                    <p style="margin-top:5px">Triton (Neptune) and Phoebe (Saturn)
+                    are retrograde; Nereid traces the most eccentric large-moon orbit
+                    in the system (e ≈ 0.75). Solar wind Parker spiral active.
                     Click any body or moon to track it.</p>
                 </div>
             </div>
@@ -635,13 +641,14 @@ nav {
         </div>
 
         <div class="sd-card">
-            <h3>Moon Systems (14 satellites)</h3>
-            <div class="sd-stat"><span class="sd-stat-k">Earth</span><span class="sd-stat-v">Moon (Meeus Ch.47)</span></div>
-            <div class="sd-stat"><span class="sd-stat-k">Mars</span><span class="sd-stat-v">Phobos, Deimos</span></div>
-            <div class="sd-stat"><span class="sd-stat-k">Jupiter</span><span class="sd-stat-v">Io, Europa, Ganymede, Callisto</span></div>
-            <div class="sd-stat"><span class="sd-stat-k">Saturn</span><span class="sd-stat-v">Enceladus, Rhea, Titan</span></div>
-            <div class="sd-stat"><span class="sd-stat-k">Uranus</span><span class="sd-stat-v">Ariel, Umbriel, Titania, Oberon</span></div>
-            <div class="sd-stat"><span class="sd-stat-k">Neptune</span><span class="sd-stat-v">Triton (retrograde ↺)</span></div>
+            <h3>Moon Systems (33 satellites)</h3>
+            <div class="sd-stat"><span class="sd-stat-k">Earth (1)</span><span class="sd-stat-v">Moon</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Mars (2)</span><span class="sd-stat-v">Phobos, Deimos</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Jupiter (8)</span><span class="sd-stat-v">Metis, Adrastea, Amalthea, Thebe + Galilean (N-body)</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Saturn (10)</span><span class="sd-stat-v">Pan, Mimas, Enceladus, Tethys, Dione, Rhea, Titan, Hyperion, Iapetus, Phoebe ↺</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Uranus (5)</span><span class="sd-stat-v">Miranda, Ariel, Umbriel, Titania, Oberon</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Neptune (7)</span><span class="sd-stat-v">Naiad, Despina, Galatea, Larissa, Proteus + Triton ↺ + Nereid</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Galileans</span><span class="sd-stat-v">Live Yoshida-4 N-body · 1:2:4 Laplace resonance</span></div>
         </div>
     </div>
 
@@ -667,7 +674,11 @@ import { EphemerisService, jdNow, earthHeliocentric, moonGeocentric,
          neptuneHeliocentric }
     from './js/horizons.js';
 import { JUPITER_VERT, JUPITER_FRAG, createJupiterUniforms } from './js/jupiter-shader.js';
-import { PLANET_SPIN } from './js/planet-moons.js';
+import {
+    PLANET_SPIN, ALL_MOONS, PARENT_BODIES,
+    propagateMoonKepler, sampleMoonOrbit, moonKmToScene, muOfParent,
+} from './js/planet-moons.js';
+import { JovianSystem } from './js/jovian-system.js';
 
 // ── Scale breadcrumb + page fade-in ──────────────────────────────────────────
 initScaleNav('solar');
@@ -1193,12 +1204,7 @@ const PLANETS = [
             'Mass':'5.97×10²⁴ kg','Temp':'15°C (mean)','Moons':'1',
             'Solar Wind':'Magnetosphere deflects; Kp-driven polar aurora',
         },
-        moons:[
-            { name:'Luna', type:'Moon of Earth', period:0.07480, dist:0.50,
-              radius:0.032, color:0xbbbbaa, inc:0.0898,
-              data:{'Parent':'Earth','Period':'27.32 days','Dist.':'384,400 km',
-                    'Radius':'1,737 km','Notes':'Tidally locked'} },
-        ],
+        moonParent: 'earth',
     },
     {
         name:'Mars', type:'Terrestrial planet', dAU:1.524, period:1.881,
@@ -1209,16 +1215,7 @@ const PLANETS = [
             'Mass':'6.42×10²³ kg','Temp':'-65°C (mean)','Moons':'2',
             'Solar Wind':'Atmospheric erosion, crustal aurora',
         },
-        moons:[
-            { name:'Phobos', type:'Moon of Mars', period:0.000874, dist:0.22,
-              radius:0.010, color:0x998877, inc:0.0178,
-              data:{'Parent':'Mars','Period':'0.319 days','Dist.':'9,376 km',
-                    'Radius':'11 km','Notes':'Doomed to crash in ~50 Myr'} },
-            { name:'Deimos', type:'Moon of Mars', period:0.003457, dist:0.34,
-              radius:0.008, color:0x887766, inc:0.0312,
-              data:{'Parent':'Mars','Period':'1.263 days','Dist.':'23,463 km',
-                    'Radius':'6 km','Notes':'Slowly escaping Mars'} },
-        ],
+        moonParent: 'mars',
     },
     // ── Asteroid belt + Ceres ─────────────────────────────────────────
     {
@@ -1241,25 +1238,7 @@ const PLANETS = [
             'Mass':'1.90×10²⁷ kg','Temp':'-110°C (cloud)','Moons':'95 known',
             'Solar Wind':'Largest magnetosphere; intense UV/X-ray aurora',
         },
-        moons:[
-            // Galilean moons — inclinations nearly zero (ecliptic-coplanar)
-            { name:'Io', type:'Moon of Jupiter', period:0.004844, dist:0.65,
-              radius:0.022, color:0xffcc44, inc:0.0007,
-              data:{'Parent':'Jupiter','Period':'1.77 days','Dist.':'422,000 km',
-                    'Radius':'1,822 km','Notes':'Most volcanically active body'} },
-            { name:'Europa', type:'Moon of Jupiter', period:0.009723, dist:0.92,
-              radius:0.019, color:0xddc8a8, inc:0.0082,
-              data:{'Parent':'Jupiter','Period':'3.55 days','Dist.':'671,000 km',
-                    'Radius':'1,561 km','Notes':'Subsurface ocean; prime life candidate'} },
-            { name:'Ganymede', type:'Moon of Jupiter', period:0.019589, dist:1.25,
-              radius:0.027, color:0x998877, inc:0.003,
-              data:{'Parent':'Jupiter','Period':'7.15 days','Dist.':'1,070,000 km',
-                    'Radius':'2,634 km','Notes':'Largest moon in Solar System; own magnetosphere'} },
-            { name:'Callisto', type:'Moon of Jupiter', period:0.045685, dist:1.62,
-              radius:0.025, color:0x665544, inc:0.003,
-              data:{'Parent':'Jupiter','Period':'16.69 days','Dist.':'1,883,000 km',
-                    'Radius':'2,410 km','Notes':'Heavily cratered; ancient ice-rock surface'} },
-        ],
+        moonParent: 'jupiter',
     },
     {
         name:'Saturn', type:'Gas giant', dAU:9.537, period:29.457,
@@ -1270,20 +1249,7 @@ const PLANETS = [
             'Mass':'5.68×10²⁶ kg','Temp':'-140°C (cloud)','Moons':'146 known',
             'Solar Wind':'Saturn Kilometric Radiation; polar aurora confirmed',
         },
-        moons:[
-            { name:'Enceladus', type:'Moon of Saturn', period:0.003751, dist:0.56,
-              radius:0.013, color:0xeeeeff, inc:0.00017,
-              data:{'Parent':'Saturn','Period':'1.37 days','Dist.':'238,000 km',
-                    'Radius':'252 km','Notes':'Active cryo-geysers; subsurface ocean'} },
-            { name:'Rhea', type:'Moon of Saturn', period:0.012370, dist:0.86,
-              radius:0.017, color:0xddccaa, inc:0.006,
-              data:{'Parent':'Saturn','Period':'4.52 days','Dist.':'527,000 km',
-                    'Radius':'764 km','Notes':'Second largest Saturnian moon'} },
-            { name:'Titan', type:'Moon of Saturn', period:0.043640, dist:1.18,
-              radius:0.030, color:0xe8a030, inc:0.0058,
-              data:{'Parent':'Saturn','Period':'15.95 days','Dist.':'1,221,000 km',
-                    'Radius':'2,575 km','Notes':'Thick N₂ atmosphere; methane lakes'} },
-        ],
+        moonParent: 'saturn',
     },
     // ── Ice giants ────────────────────────────────────────────────────
     {
@@ -1296,25 +1262,8 @@ const PLANETS = [
             'Mass':'8.68×10²⁵ kg','Temp':'-195°C (cloud)','Moons':'28 known',
             'Axial Tilt':'97.77° (rolls on side)','Solar Wind':'Asymmetric magnetosphere',
         },
-        // Uranian moons orbit in Uranus's equatorial plane ≈ 97.77° to ecliptic
-        moons:[
-            { name:'Ariel', type:'Moon of Uranus', period:0.006898, dist:0.47,
-              radius:0.013, color:0xccddee, inc:1.7063,
-              data:{'Parent':'Uranus','Period':'2.52 days','Dist.':'190,900 km',
-                    'Radius':'579 km','Notes':'Bright, geologically young surface'} },
-            { name:'Umbriel', type:'Moon of Uranus', period:0.011342, dist:0.59,
-              radius:0.012, color:0x778899, inc:1.7063,
-              data:{'Parent':'Uranus','Period':'4.14 days','Dist.':'266,300 km',
-                    'Radius':'585 km','Notes':'Darkest of the major Uranian moons'} },
-            { name:'Titania', type:'Moon of Uranus', period:0.023826, dist:0.78,
-              radius:0.016, color:0xaabbcc, inc:1.7063,
-              data:{'Parent':'Uranus','Period':'8.71 days','Dist.':'435,900 km',
-                    'Radius':'789 km','Notes':'Largest Uranian moon; ice cliffs'} },
-            { name:'Oberon', type:'Moon of Uranus', period:0.036846, dist:0.98,
-              radius:0.015, color:0x99aaaa, inc:1.7063,
-              data:{'Parent':'Uranus','Period':'13.46 days','Dist.':'583,500 km',
-                    'Radius':'762 km','Notes':'Outermost large Uranian moon'} },
-        ],
+        // Uranian moons orbit in Uranus's equatorial plane ≈ 97.77° to ecliptic.
+        moonParent: 'uranus',
     },
     {
         name:'Neptune', type:'Ice giant', dAU:30.069, period:164.795,
@@ -1325,17 +1274,7 @@ const PLANETS = [
             'Mass':'1.02×10²⁶ kg','Temp':'-200°C (cloud)','Moons':'16 known',
             'Solar Wind':'Offset dipole field; auroral footprints detected',
         },
-        moons:[
-            { name:'Proteus', type:'Moon of Neptune', period:0.003072, dist:0.46,
-              radius:0.012, color:0x888899, inc:0.0093,
-              data:{'Parent':'Neptune','Period':'1.12 days','Dist.':'117,600 km',
-                    'Radius':'210 km','Notes':'Irregularly shaped, dark surface'} },
-            // Triton: retrograde (period < 0), highly inclined (156.87°)
-            { name:'Triton', type:'Moon of Neptune', period:-0.016088, dist:0.72,
-              radius:0.025, color:0xddeeff, inc:2.7384,
-              data:{'Parent':'Neptune','Period':'5.88 days (retrograde)','Dist.':'354,800 km',
-                    'Radius':'1,353 km','Notes':'Retrograde; likely captured KBO; N₂ geysers'} },
-        ],
+        moonParent: 'neptune',
     },
 ];
 
@@ -1724,40 +1663,127 @@ const plasmaMesh = new THREE.Mesh(
 scene.add(plasmaMesh);
 
 // ═══════════════════════════════════════════════════════
-//  MOON MESHES + ORBIT RINGS
+//  MOON MESHES + ELLIPTIC ORBIT RINGS
 // ═══════════════════════════════════════════════════════
-// Moon orbits are in planes tilted `inc` radians from the ecliptic (XZ plane),
-// tilted around the X-axis.  inc=1.706 gives Uranus's near-polar moon system.
-// Triton uses a negative period to produce retrograde motion.
+// Each moon carries full Keplerian elements (a, e, i, Ω, ω, M₀) referred to
+// its parent's equatorial plane (J2000).  Per frame we propagate Kepler in
+// physical km, rotate the result by the parent's obliquity into the ecliptic,
+// then compress to scene units via the per-planet power-law in planet-moons.js.
+//
+// Jupiter's four Galilean moons additionally drive a live Yoshida-4 N-body
+// integration (jovian-system.js) that overrides the analytic Kepler positions
+// — so the Laplace 1:2:4 mean-motion resonance and Io's forced eccentricity
+// emerge from pairwise gravity rather than being baked in.
 
-const allMoonMeshes = [];   // for raycaster
+const allMoonMeshes = [];                     // for raycaster
+const moonRecords   = [];                     // tick-list: {planet, key, cfg, mesh, ring, ...}
+const _GALILEAN_KEYS = ['io', 'europa', 'ganymede', 'callisto'];
+
+// Live Galilean N-body — initialised once and stepped by the animation loop.
+const jovianNBody = new JovianSystem();
 
 PLANETS.forEach(p => {
-    if (!p.moons) return;
-    p.moons.forEach(m => {
-        m.angle0 = Math.random() * Math.PI * 2;
+    if (!p.moonParent) return;
+    const parentKey   = p.moonParent;
+    const moonTable   = ALL_MOONS[parentKey];
+    if (!moonTable) return;
+    const parentSpin  = PLANET_SPIN[parentKey];
+    const tiltRad     = (parentSpin?.obliquity ?? 0) * Math.PI / 180;
+    const cosT        = Math.cos(tiltRad);
+    const sinT        = Math.sin(tiltRad);
+    const parentR     = p.radius;
+    const isUseNBody  = (parentKey === 'jupiter');
 
-        // Orbit ring — rotate so it lies in the inclined plane
-        const thick  = Math.max(m.dist * 0.012, 0.008);
-        const og     = new THREE.RingGeometry(m.dist - thick, m.dist + thick, 64);
-        const om     = new THREE.MeshBasicMaterial({
-            color: m.color, transparent: true, opacity: 0.20, side: THREE.DoubleSide
+    for (const [key, cfg] of Object.entries(moonTable)) {
+        // Visual sphere — physical radius mapped to vis_scale × parentR.
+        const visR  = parentR * (cfg.vis_scale ?? 0.05);
+        const mg    = new THREE.SphereGeometry(Math.max(visR, 0.004), 16, 16);
+        const mm    = new THREE.MeshStandardMaterial({
+            color: cfg.color, roughness: 0.85, metalness: 0.0,
         });
-        m.orbitRing  = new THREE.Mesh(og, om);
-        m.orbitRing.rotation.x = Math.PI / 2 - m.inc;  // inc=0 → flat in XZ, inc=π/2 → XY plane
-        scene.add(m.orbitRing);
+        const mesh  = new THREE.Mesh(mg, mm);
+        const moon  = {
+            // Exposed for selection / data card / camera-follow (mirrors planet shape).
+            name:   key.charAt(0).toUpperCase() + key.slice(1),
+            type:   `Moon of ${p.name}`,
+            radius: visR,
+            color:  cfg.color,
+            mesh,                 // ← needed by selectBody / targetBody camera follow
+            data: {
+                'Parent':       p.name,
+                'Distance':     `${(cfg.a_km).toLocaleString()} km`,
+                'Period':       `${Math.abs(cfg.period_d).toFixed(cfg.period_d < 1 ? 4 : 2)} days${cfg.period_d < 0 ? ' (retrograde)' : ''}`,
+                'Eccentricity': cfg.e.toFixed(4),
+                'Inclination':  `${cfg.i_deg.toFixed(2)}°`,
+                'Radius':       `${cfg.r_km.toLocaleString()} km`,
+                'Mass':         cfg.mass_kg.toExponential(2) + ' kg',
+                'Notes':        cfg.desc,
+            },
+        };
+        mesh.userData = moon;
+        scene.add(mesh);
+        allMoonMeshes.push(mesh);
 
-        // Moon sphere
-        const mg = new THREE.SphereGeometry(m.radius, 16, 16);
-        const mm = new THREE.MeshStandardMaterial({
-            color: m.color, roughness: 0.85, metalness: 0.0,
+        // Elliptical orbit ring — sample 96 points along the true ellipse,
+        // rotate by parent obliquity into ecliptic, compress to scene units.
+        const samples = sampleMoonOrbit(cfg, 96);
+        const ringPts = new Float32Array(samples.length * 3);
+        for (let k = 0; k < samples.length; k++) {
+            const eq  = samples[k];                                // km, parent equator
+            // Rotate around X by tilt: (x, y, z) → (x, y·cos − z·sin, y·sin + z·cos)
+            const ec  = {
+                x: eq.x,
+                y: eq.y * cosT - eq.z * sinT,
+                z: eq.y * sinT + eq.z * cosT,
+            };
+            const sc  = moonKmToScene(parentKey, parentR, ec);
+            // Scene-Y is up; swap z↔y so orbits lie close to ecliptic XZ plane.
+            ringPts[k * 3]     = sc.x;
+            ringPts[k * 3 + 1] = sc.z;
+            ringPts[k * 3 + 2] = sc.y;
+        }
+        const ringGeo = new THREE.BufferGeometry();
+        ringGeo.setAttribute('position', new THREE.BufferAttribute(ringPts, 3));
+        // Brighter for the headline moons (Galileans, Titan, big Saturnian/Uranian)
+        const opacity = (isUseNBody && _GALILEAN_KEYS.includes(key)) ? 0.32 : 0.16;
+        const ring = new THREE.LineLoop(ringGeo, new THREE.LineBasicMaterial({
+            color: cfg.color, transparent: true, opacity, depthWrite: false,
+        }));
+        scene.add(ring);
+
+        moonRecords.push({
+            planet:    p,
+            parentKey, key, cfg,
+            mesh,      ring,
+            cosT, sinT,
+            useNBody:  isUseNBody && _GALILEAN_KEYS.includes(key),
+            mu_km3_s2: muOfParent(parentKey, cfg.mass_kg),
         });
-        m.mesh = new THREE.Mesh(mg, mm);
-        m.mesh.userData = m;    // so selectBody / raycaster works uniformly
-        scene.add(m.mesh);
-        allMoonMeshes.push(m.mesh);
-    });
+    }
+    // Cache so the moon-button builder and selection helpers can find them.
+    p.moons = moonRecords.filter(r => r.planet === p).map(r => r.mesh.userData);
 });
+
+// Helper used by the animation loop: position one moon for the current JD.
+function _updateMoonPosition(rec, jd) {
+    let kmPos;
+    if (rec.useNBody) {
+        // Yoshida-4 result is in ecliptic-of-J2000 already.
+        kmPos = jovianNBody.getRelPosKm(rec.key);
+    } else {
+        const eq = propagateMoonKepler(rec.cfg, rec.mu_km3_s2, jd);
+        // Rotate parent equator → ecliptic by obliquity.
+        kmPos = {
+            x: eq.x,
+            y: eq.y * rec.cosT - eq.z * rec.sinT,
+            z: eq.y * rec.sinT + eq.z * rec.cosT,
+        };
+    }
+    const sc = moonKmToScene(rec.parentKey, rec.planet.radius, kmPos);
+    const pp = rec.planet.mesh.position;
+    rec.mesh.position.set(pp.x + sc.x, pp.y + sc.z, pp.z + sc.y);
+    rec.ring.position.copy(pp);
+}
 
 // ═══════════════════════════════════════════════════════
 //  ASTEROID BELT
@@ -2662,18 +2688,12 @@ function _fmtSimSpeed(spd) {
     return `${(+v.toFixed(2))} ${unit}`;
 }
 
-// ── Locate Luna and set her initial phase from real Moon position ────────────
-const _earthPlanet = PLANETS.find(p => p.name === 'Earth');
-const _luna        = _earthPlanet?.moons?.find(m => m.name === 'Luna');
-if (_luna) {
-    // mAngle = (simTime / period) × 2π + angle0
-    // Solve for angle0 so mAngle = Moon's real geocentric ecliptic longitude
-    const _mAngleNow = (simTime / _luna.period) * Math.PI * 2;
-    _luna.angle0     = _m0.lon_rad - _mAngleNow;
-    console.log(`[Ephemeris/Meeus] Earth lon ${(_e0.lon_rad * 180/Math.PI).toFixed(2)}°`
-              + ` | Moon lon ${(_m0.lon_rad * 180/Math.PI).toFixed(2)}°`
-              + ` | dist ${Math.round(_m0.dist_km)} km`);
-}
+// ── Diagnostic: log the J2000-anchored Moon position from Meeus.
+// The Earth's Moon now flows through the Keplerian propagator in
+// planet-moons.js (M₀ at J2000), so this is purely informational.
+console.log(`[Ephemeris/Meeus] Earth lon ${(_e0.lon_rad * 180/Math.PI).toFixed(2)}°`
+          + ` | Moon lon ${(_m0.lon_rad * 180/Math.PI).toFixed(2)}°`
+          + ` | dist ${Math.round(_m0.dist_km)} km`);
 
 // ── Epoch for converting simTime → real calendar date display ────────────────
 // currentDate = epochDate + (simTime − epochSimTime) × 365.25 days
@@ -2697,10 +2717,6 @@ window.addEventListener('ephemeris-ready', ev => {
     // Only accept if the shift is physically small (< 1° ≈ 0.003 yr)
     if (Math.abs(newSimTime - simTime) < 0.01) {
         simTime = newSimTime;
-        if (_luna) {
-            const mAngle = (simTime / _luna.period) * Math.PI * 2;
-            _luna.angle0 = ep.moon.lon_rad - mAngle;
-        }
         _ephemEpoch = { simTime, date: ep.timestamp };
     }
 
@@ -2979,6 +2995,13 @@ function animate() {
         hudYear.textContent = _fmtSimDate(simDate);
     }
 
+    // Current simulation Julian Day — drives every Keplerian moon and the
+    // live Jovian Yoshida-4 N-body integrator below.
+    const _simDateNow = _ephemEpoch
+        ? new Date(_ephemEpoch.date.getTime() + (simTime - _ephemEpoch.simTime) * 365.25 * 86400e3)
+        : new Date();
+    const _simJD = _simDateNow.getTime() / 86400000 + 2440587.5;
+
     // Move planets + update wind-shader uniforms
     PLANETS.forEach(p => {
         const angle = (simTime / p.period) * Math.PI * 2 + (p.angle0 ?? 0);
@@ -2995,28 +3018,15 @@ function animate() {
         if (p.uniforms) p.uniforms.u_time.value = t;
         // Jupiter cloud shader tick
         if (p.jupiterU) p.jupiterU.u_time.value = t;
-
-        // ── Moon orbits ──────────────────────────────────────────────
-        if (p.moons) {
-            p.moons.forEach(m => {
-                // Negative period = retrograde (Triton)
-                const mAngle = (simTime / m.period) * Math.PI * 2 + m.angle0;
-                const inc    = m.inc;
-                // Position in tilted orbital plane (tilt axis = world X)
-                m.mesh.position.set(
-                    p.mesh.position.x + m.dist * Math.cos(mAngle),
-                    m.dist * Math.sin(mAngle) * Math.sin(inc),
-                    p.mesh.position.z + m.dist * Math.sin(mAngle) * Math.cos(inc)
-                );
-                // Move orbit ring to follow the planet
-                m.orbitRing.position.copy(p.mesh.position);
-                // Correct ring height: the ring's Y centre must match the moon's
-                // mid-plane offset (zero for ecliptic moons, varies for tilted ones)
-                // We reset it each frame so it tracks the planet perfectly
-            });
-        }
     });
     sunMesh.rotation.y += 0.0012;
+
+    // ── Moon update (Keplerian for all moons; Yoshida-4 N-body for Galileans)
+    // Run the Jovian integrator first so the Galilean overrides are fresh.
+    jovianNBody.advanceTo(_simJD);
+    for (let i = 0; i < moonRecords.length; i++) {
+        _updateMoonPosition(moonRecords[i], _simJD);
+    }
 
     // ── Earth heliophysics objects: follow Earth's orbital position ───────────
     const ep = earthP.mesh.position;
@@ -3423,7 +3433,7 @@ const swFeed = new SpaceWeatherFeed({ pollInterval: 5 * 60 * 1000 });
 swFeed.start();
 
 console.log('%c[Solar System · Celestial Simulator]', 'color:#ffd700;font-weight:bold;font-size:13px');
-console.log('  Sun G2V+SWPC shader · 8 planets + Ceres · 19 moons · asteroid belt · CME bursts');
+console.log('  Sun G2V+SWPC shader · 8 planets + Ceres · 33 moons (Galileans via Yoshida-4 N-body) · asteroid belt · CME bursts');
 console.log('  NOAA SWPC: wind_1m · kp_index · xray_flux · flares_7d · regions · protons · electrons · aurora · alerts · f107');
 console.log('  NASA DONKI: CME Analysis (cone model, ENLIL arrival times) · notifications');
 console.log('  Ephemeris: JPL Horizons (Earth vectors ECLIPJ2000) + Meeus fallback');
