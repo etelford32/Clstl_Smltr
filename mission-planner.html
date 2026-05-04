@@ -437,6 +437,15 @@ function renderPlan(plan) {
                             <span style="color:#88a;font-weight:400">(dir ${f.dv_dir_kms.toFixed(2)} · mag ${f.dv_mag_kms.toFixed(2)})</span>
                         </span>
                     </div>` : ''}
+                    ${f.b_plane ? `
+                    <div class="mp-plan-row" style="opacity:.8">
+                        <span class="k">    B-plane |B|</span>
+                        <span class="v">${f.b_plane.B_mag.toFixed(0)} km</span>
+                    </div>
+                    <div class="mp-plan-row" style="opacity:.8">
+                        <span class="k">    B·T / B·R</span>
+                        <span class="v">${f.b_plane.B_dot_T.toFixed(0)} / ${f.b_plane.B_dot_R.toFixed(0)} km</span>
+                    </div>` : ''}
                 `;
             }
             return `
