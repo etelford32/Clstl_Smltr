@@ -651,6 +651,44 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
     min-width:56px;
 }
 
+/* Force-balance HUD — bottom-right of canvas, shown when Vectors is on */
+.lh-force {
+    position:absolute; bottom:12px; right:12px;
+    z-index:2;
+    width:160px;
+    background:rgba(8,4,20,.72);
+    backdrop-filter:blur(8px);
+    border:1px solid rgba(255,140,40,.32);
+    border-radius:8px;
+    padding:8px 8px 6px;
+    pointer-events:none;
+    font-family:'Consolas','Monaco',monospace;
+}
+.lh-force-hd {
+    font-size:.55rem; color:#9ab; letter-spacing:.14em; font-weight:700;
+    text-align:center; margin-bottom:4px;
+}
+.lh-force-svg {
+    width:100%; height:auto;
+    display:block;
+}
+.lh-force-foot {
+    display:flex; justify-content:space-between;
+    margin-top:4px;
+    font-size:.5rem; letter-spacing:.06em;
+}
+.lh-force-leg { display:flex; align-items:center; gap:3px; }
+.lh-force-leg::before {
+    content:''; display:inline-block;
+    width:8px; height:2px; border-radius:1px;
+}
+.lh-force-leg--t      { color:#5fc97f; }
+.lh-force-leg--t::before { background:#5fc97f; }
+.lh-force-leg--w      { color:#f55; }
+.lh-force-leg--w::before { background:#f55; }
+.lh-force-leg--n      { color:#fc7; }
+.lh-force-leg--n::before { background:#fc7; }
+
 @media (max-width:520px) {
     .lh-view, .lh-toggle, .lh-liftoff { font-size:.6rem; padding:4px 6px; }
     .lh-met { font-size:.7em; bottom:30px; }
@@ -933,7 +971,38 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
                     <button type="button" class="lh-liftoff" id="lh-liftoff" title="Liftoff animation">▶ Liftoff</button>
                     <button type="button" class="lh-toggle lh-toggle--on" data-toggle="autoRotate" title="Auto-rotate camera">⟳ Auto</button>
                     <button type="button" class="lh-toggle"               data-toggle="plume"      title="Engine plume">▲ Plume</button>
+                    <button type="button" class="lh-toggle"               data-toggle="vectors"    title="Per-engine thrust vectors + CoM">⇣ Vectors</button>
                     <button type="button" class="lh-toggle lh-toggle--on" data-toggle="pad"        title="Launch pad + tower">⌂ Pad</button>
+                </div>
+
+                <!-- Force-balance HUD — bottom-right, only shown when Vectors is on -->
+                <div class="lh-force" id="lh-force" hidden>
+                    <div class="lh-force-hd">FORCE BALANCE</div>
+                    <svg class="lh-force-svg" viewBox="-60 -110 120 220">
+                        <!-- Vehicle silhouette in the middle -->
+                        <rect x="-4" y="-8" width="8" height="20" fill="#666" rx="1"/>
+                        <polygon points="-4,-8 4,-8 0,-14" fill="#888"/>
+                        <!-- Thrust arrow (up) -->
+                        <line id="lh-fd-thrust" x1="0" y1="0" x2="0" y2="-50"
+                              stroke="#5fc97f" stroke-width="3" stroke-linecap="round"/>
+                        <polygon id="lh-fd-thrust-head" points="-5,-50 5,-50 0,-60" fill="#5fc97f"/>
+                        <text x="14" y="-30" fill="#5fc97f" font-size="9" font-family="monospace">T 0.0</text>
+                        <!-- Gravity arrow (down) -->
+                        <line id="lh-fd-grav" x1="0" y1="14" x2="0" y2="50"
+                              stroke="#f55" stroke-width="2" stroke-linecap="round"/>
+                        <polygon id="lh-fd-grav-head" points="-4,50 4,50 0,58" fill="#f55"/>
+                        <text x="14" y="35" fill="#f55" font-size="9" font-family="monospace">W 0.0</text>
+                        <!-- Net (lateral / vertical residual) -->
+                        <line id="lh-fd-net" x1="-30" y1="0" x2="-30" y2="-30"
+                              stroke="#fc7" stroke-width="2" stroke-linecap="round"/>
+                        <polygon id="lh-fd-net-head" points="-34,-30 -26,-30 -30,-38" fill="#fc7"/>
+                        <text x="-58" y="-18" fill="#fc7" font-size="9" font-family="monospace">Δ 0.0</text>
+                    </svg>
+                    <div class="lh-force-foot">
+                        <span class="lh-force-leg lh-force-leg--t">Thrust</span>
+                        <span class="lh-force-leg lh-force-leg--w">Weight</span>
+                        <span class="lh-force-leg lh-force-leg--n">Net</span>
+                    </div>
                 </div>
 
                 <!-- Mission Elapsed Time HUD — bottom-left, only shown during liftoff -->
@@ -1094,6 +1163,9 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
                 onVehicleChange: ({ id, info }) => {
                     renderMeta(info);
                     showVariantRow(id);
+                    // Refresh the force diagram if it's visible — different
+                    // vehicle, very different thrust/weight ratio.
+                    if (typeof updateForceDiagram === 'function') updateForceDiagram();
                 },
                 onLiftoffEnd: () => {
                     liftoffBtn.classList.remove('lh-liftoff--ascending');
@@ -1217,6 +1289,9 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
                                 activeMnEl.textContent = live.thrust_mn.toFixed(1);
                             }
                         }
+
+                        // Force-balance diagram tracks live thrust + mass.
+                        updateForceDiagram();
                     }, 100);
                 }
             });
@@ -1245,7 +1320,8 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
                 });
             });
 
-            // Toggle buttons (autoRotate / plume / pad)
+            // Toggle buttons (autoRotate / plume / vectors / pad)
+            const forceEl = document.getElementById('lh-force');
             document.querySelectorAll('.lh-toggle').forEach(btn => {
                 btn.addEventListener('click', () => {
                     btn.classList.toggle('lh-toggle--on');
@@ -1253,8 +1329,84 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
                     if (btn.dataset.toggle === 'autoRotate') api.setAutoRotate(on);
                     if (btn.dataset.toggle === 'plume')      api.setPlume(on);
                     if (btn.dataset.toggle === 'pad')        api.setPad(on);
+                    if (btn.dataset.toggle === 'vectors') {
+                        api.setVectors(on);
+                        forceEl.hidden = !on;
+                        if (on) updateForceDiagram();
+                    }
                 });
             });
+
+            // ── 2D force-balance HUD ──────────────────────────────────────
+            // Updates whenever the Vectors overlay is visible. During pre-
+            // launch idle the diagram shows the static balance (T_max vs W).
+            // During liftoff it tracks live throttle so the thrust arrow
+            // shrinks ~30% during the max-Q bucket.
+            const fdThrust    = document.getElementById('lh-fd-thrust');
+            const fdThrustHd  = document.getElementById('lh-fd-thrust-head');
+            const fdGrav      = document.getElementById('lh-fd-grav');
+            const fdGravHd    = document.getElementById('lh-fd-grav-head');
+            const fdNet       = document.getElementById('lh-fd-net');
+            const fdNetHd     = document.getElementById('lh-fd-net-head');
+            const fdSvg       = forceEl.querySelector('svg');
+
+            function updateForceDiagram() {
+                if (forceEl.hidden) return;
+                const info = api.currentInfo;
+                if (!info?.thrust) return;
+
+                // Live thrust + mass (live during ascent, max otherwise).
+                const live = api.getLiveThrust() || {
+                    thrust_mn: info.thrust.liftoff_mn,
+                    thrust_max_mn: info.thrust.liftoff_mn,
+                    g: info.thrust.twr_initial,
+                    mass_t: info.thrust.mass_t,
+                };
+                // Pre-launch: show max thrust statically. In-flight: show live.
+                const thrustMn = api.isAscending ? live.thrust_mn : info.thrust.liftoff_mn;
+                const massT    = live.mass_t || info.thrust.mass_t;
+                const weightMn = (massT * 9.80665) / 1000;
+                const netMn    = thrustMn - weightMn;
+
+                // SVG y-axis: -y = up. Map MN to pixels — Starship V3 (~96 MN)
+                // maxes out at about 95 px. Cap arrow lengths in case future
+                // variants exceed this.
+                const PX_PER_MN = 0.95;
+                const tPx = Math.min(95, thrustMn * PX_PER_MN);
+                const wPx = Math.min(95, weightMn * PX_PER_MN);
+                const nPx = Math.min(95, Math.abs(netMn) * PX_PER_MN);
+
+                // Thrust arrow: shaft -10..-(10+tPx), head triangle at top.
+                fdThrust.setAttribute('y2', String(-(8 + tPx)));
+                const tHeadY = -(8 + tPx);
+                fdThrustHd.setAttribute('points',
+                    `-5,${tHeadY} 5,${tHeadY} 0,${tHeadY - 8}`);
+
+                // Gravity arrow: shaft 14..(14+wPx)
+                fdGrav.setAttribute('y2', String(14 + wPx));
+                const wHeadY = 14 + wPx;
+                fdGravHd.setAttribute('points',
+                    `-4,${wHeadY} 4,${wHeadY} 0,${wHeadY + 8}`);
+
+                // Net arrow: lateral, points up if positive, down if negative.
+                const netUp = netMn >= 0;
+                const netY  = netUp ? -nPx : nPx;
+                fdNet.setAttribute('y1', '0');
+                fdNet.setAttribute('y2', String(netY));
+                fdNetHd.setAttribute('points',
+                    netUp
+                    ? `-34,${netY} -26,${netY} -30,${netY - 8}`
+                    : `-34,${netY} -26,${netY} -30,${netY + 8}`);
+
+                // Update labels
+                fdSvg.querySelectorAll('text').forEach(t => {
+                    const f = t.getAttribute('fill');
+                    if (f === '#5fc97f') t.textContent = `T ${thrustMn.toFixed(1)}`;
+                    if (f === '#f55')    t.textContent = `W ${weightMn.toFixed(1)}`;
+                    if (f === '#fc7')    t.textContent =
+                        `${netUp ? '↑' : '↓'} ${Math.abs(netMn).toFixed(1)}`;
+                });
+            }
         } catch (err) {
             console.error('[launch-vehicle-3d]', err);
             const host = canvas.parentElement;

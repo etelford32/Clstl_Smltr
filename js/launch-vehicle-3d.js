@@ -35,6 +35,7 @@ import { buildFalcon9 } from './launch-vehicle-falcon9.js';
 import { buildPad as buildPadInfra, tickBeacons } from './launch-pad-3d.js';
 import { createMissionClock } from './launch-mission-clock.js';
 import { ENGINES } from './launch-engines.js';
+import { buildThrustOverlay, tickThrustOverlay } from './launch-thrust-overlay.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -762,11 +763,33 @@ function buildShuttleVehicle() {
     const liftoffKn = 2 * ENGINES.rsrm.sl_kn + 3 * ENGINES.rs_25.sl_kn;
     const massT = 2030;
 
+    // Engine layout — 2 SRBs flanking ET (no gimbal), 3 SSMEs on orbiter
+    // aft (gimbal). Coordinates match buildShuttleStack().
+    const srbOffset = DIM.ET_R + DIM.SRB_R + 0.4;
+    const orbiterZ  = DIM.ET_R + DIM.ORBITER_FUSE_R + 0.4;
+    const engineLayout = {
+        boosterEngines: [
+            { x: -srbOffset, y: -1.7, z: 0, thrust_kn: ENGINES.rsrm.sl_kn,
+              gimbal: false, ring: 'srb' },
+            { x:  srbOffset, y: -1.7, z: 0, thrust_kn: ENGINES.rsrm.sl_kn,
+              gimbal: false, ring: 'srb' },
+        ],
+        upperEngines: [
+            { x:  0,   y: 0.5, z: orbiterZ, thrust_kn: ENGINES.rs_25.sl_kn,
+              gimbal: true, ring: 'ssme' },
+            { x: -1.2, y: 0.5, z: orbiterZ, thrust_kn: ENGINES.rs_25.sl_kn,
+              gimbal: true, ring: 'ssme' },
+            { x:  1.2, y: 0.5, z: orbiterZ, thrust_kn: ENGINES.rs_25.sl_kn,
+              gimbal: true, ring: 'ssme' },
+        ],
+    };
+
     return {
         root,
         plumes: root.userData.plumes,
         height,
         padId: 'lc39a',
+        engineLayout,
         info: {
             name:           'Space Shuttle (STS)',
             years:          '1981 — 2011',
@@ -881,6 +904,8 @@ export function initVehicleCanvas(canvas, opts = {}) {
     // ── Mission clock (drives liftoff animation) ──────────────────────────
     const missionClock = createMissionClock();
     let missionActive = false;
+    // Thrust-vector overlay state (toggleable; persists across vehicle swaps)
+    let vectorsOn = false;
     // Save baseline scene parameters so we can restore after a flight.
     const baseFogColor   = scene.fog.color.clone();
     const baseFogDensity = scene.fog.density;
@@ -973,12 +998,21 @@ export function initVehicleCanvas(canvas, opts = {}) {
         }
 
         const v = builder(variant);
+
+        // Build a thrust-vector overlay matching this vehicle's engine
+        // layout. Parented to the vehicle root so it inherits liftoff
+        // pitch/roll transforms automatically.
+        const thrustOverlay = buildThrustOverlay(v);
+        thrustOverlay.visible = vectorsOn;            // honor user toggle across vehicle changes
+        v.root.add(thrustOverlay);
+
         current = {
             id, variant, ...v,
             basePadY: v.root.position.y,
             baseTargetY: 0,
             baseCamY: 0,
             lastAltitude: 0,
+            thrustOverlay,
             // Per-pad trail width — wider for Stage 0's 33-engine cluster.
             trailWidthM: (v.padId === 'mechazilla') ? 14 : 9,
         };
@@ -1146,6 +1180,13 @@ export function initVehicleCanvas(canvas, opts = {}) {
 
         for (const p of current.plumes) tickPlume(p, t, throttle);
         tickBeacons(padState.beacons, t);
+        // Thrust-vector overlay — read live throttle + mission time.
+        if (current.thrustOverlay && current.thrustOverlay.visible) {
+            tickThrustOverlay(current.thrustOverlay, {
+                throttle: missionActive ? throttle : (vectorsOn ? 0.05 : 0),
+                T:        missionActive ? missionClock.T : 0,
+            });
+        }
         renderer.render(scene, camera);
         rafId = requestAnimationFrame(tick);
     }
@@ -1169,6 +1210,10 @@ export function initVehicleCanvas(canvas, opts = {}) {
     }
     function setPad(on)        { if (padState.root) padState.root.visible = !!on; }
     function setAutoRotate(on) { controls.autoRotate = !!on; }
+    function setVectors(on) {
+        vectorsOn = !!on;
+        if (current.thrustOverlay) current.thrustOverlay.visible = vectorsOn;
+    }
 
     return {
         dispose() {
@@ -1190,6 +1235,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
         setAutoRotate,
         setPlume,
         setPad,
+        setVectors,
         setVehicle,
         liftoff,
         cancelLiftoff,

@@ -688,7 +688,51 @@ export function buildFalcon9({ variant = 'block5', params: override = {} } = {})
         },
     };
 
-    return { root, plumes, height: visualH, info, padId: 'lc39a' };
+    // Engine layout — one entry per visible engine, used by the thrust-
+    // vector overlay. y is the engine bell exit (where the plume + arrow
+    // attach); coordinates are in vehicle-root local space.
+    const ER = P.diameter / 2;
+    function octaweb(xOffset = 0) {
+        const arr = [
+            { x: xOffset, y: -1.6, z: 0,
+              thrust_kn: ENGINES.merlin_1d.sl_kn, gimbal: true, ring: 'inner' },
+        ];
+        for (let i = 0; i < 8; i++) {
+            const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
+            arr.push({
+                x: xOffset + Math.cos(a) * ER * 0.62,
+                y: -1.6,
+                z: Math.sin(a) * ER * 0.62,
+                thrust_kn: ENGINES.merlin_1d.sl_kn,
+                gimbal: true,
+                ring: 'outer',
+            });
+        }
+        return arr;
+    }
+
+    let boosterEngines = octaweb(0);
+    if (P.cores === 3) {
+        const off = P.diameter * 1.02;
+        boosterEngines = boosterEngines
+            .concat(octaweb(-off))
+            .concat(octaweb( off));
+    }
+    const upperEngines = [{
+        x: 0,
+        y: P.boosterLen + P.interstageLen - 0.4,
+        z: 0,
+        thrust_kn: ENGINES.merlin_vac.vac_kn,
+        gimbal: true,
+        ring: 'vac',
+    }];
+
+    const engineLayout = { boosterEngines, upperEngines };
+
+    return {
+        root, plumes, height: visualH, info,
+        padId: 'lc39a', engineLayout,
+    };
 }
 
 export const FALCON9_VARIANT_IDS = Object.keys(FALCON_VARIANTS);

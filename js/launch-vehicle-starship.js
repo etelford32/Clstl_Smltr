@@ -654,7 +654,41 @@ export function buildStarship({ variant = 'v2', params: override = {} } = {}) {
         },
     };
 
-    return { root, plumes, height: totalH, info };
+    // Engine layout — concentric rings on the booster + cluster on the
+    // ship, mirroring buildRaptorCluster's geometry. Used by the thrust-
+    // vector overlay. Inner rings gimbal; outer ring is fixed.
+    const SR = P.diameter / 2;
+    const bellR = Math.max(0.55, SR * 0.16);
+    function ringLayout(counts, plateRadius, baseY, gimbalRings) {
+        const out = [];
+        const innerEdge = bellR * 1.2;
+        for (let ringIdx = 0; ringIdx < counts.length; ringIdx++) {
+            const n = counts[ringIdx];
+            const ringR = ringIdx === 0
+                ? bellR * 1.3
+                : innerEdge + (plateRadius - innerEdge - bellR) *
+                  (ringIdx / Math.max(1, counts.length - 1));
+            for (let i = 0; i < n; i++) {
+                const a = (i / n) * Math.PI * 2 + (ringIdx % 2 ? Math.PI / n : 0);
+                out.push({
+                    x: Math.cos(a) * ringR,
+                    y: baseY,
+                    z: Math.sin(a) * ringR,
+                    thrust_kn: eng.sl_kn,
+                    gimbal:    ringIdx < gimbalRings,
+                    ring: ringIdx === 0 ? 'inner'
+                        : ringIdx === counts.length - 1 ? 'outer' : 'mid',
+                });
+            }
+        }
+        return out;
+    }
+
+    const boosterEngines = ringLayout(P.boosterRings, SR * 0.95, -1.4, P.boosterRings.length - 1);
+    const shipEngines    = ringLayout(P.shipRings,    SR * 0.85, P.boosterLen + P.ringLen - 0.8, 1);
+    const engineLayout = { boosterEngines, upperEngines: shipEngines };
+
+    return { root, plumes, height: totalH, info, engineLayout };
 }
 
 export const STARSHIP_VARIANT_IDS = Object.keys(STARSHIP_VARIANTS);
