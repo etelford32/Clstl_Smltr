@@ -10,20 +10,27 @@
  * Hot-path message protocol:
  *
  *   in  'init'        → load WASM. Replies 'ready'.
+ *   in  'init-shared' → { sab: SharedArrayBuffer } enter SAB mode.
+ *                       Subsequent ticks write straight into the SAB
+ *                       (which the main thread also has wrapped as
+ *                       the THREE position attribute) instead of
+ *                       transferring an ArrayBuffer each frame.
+ *                       Replies 'shared-ready'.
  *   in  'add-sats'    → { tles: TLE[] } append to the registry. Reply
  *                       'add-ack' with the count.
  *   in  'clear'       → wipe the registry. Reply 'clear-ack'.
- *   in  'tick'        → { jd, gmst, scale, buffer (ArrayBuffer),
- *                         frameId, expectedSlots } propagate every
- *                       registered sat, write [x,y,z] f32 triplets
- *                       into the transferred buffer, send it back.
- *   out 'positions'   → { buffer, jd, frameId, slots, registryLen }
+ *   in  'tick'        → { jd, gmst, scale, frameId, expectedSlots }
+ *                       and OPTIONALLY { buffer (ArrayBuffer) } when
+ *                       SAB isn't in use. Propagates every registered
+ *                       sat into either the SAB or the transferred
+ *                       buffer.
+ *   out 'positions'   → { jd, frameId, slots, registryLen, mismatch?,
+ *                         buffer? (only when transferable path) }
  *
- * The main thread ping-pongs a single ArrayBuffer with the worker so
- * we hold at most one outstanding tick. If the worker is still busy
- * when the next animation frame fires, the main thread skips
- * (positions stay one frame stale — well below human perception at
- * 60 fps).
+ * The main thread holds at most one outstanding tick. If the worker
+ * is still busy when the next animation frame fires, the main thread
+ * skips (positions stay one frame stale — well below human
+ * perception at 60 fps).
  *
  * `expectedSlots` lets the worker detect a slot-count drift between
  * main and worker (e.g. an `add-sats` message lost in flight) and
@@ -31,9 +38,11 @@
  * rather than uploading mismatched positions to the GPU.
  */
 
-let _wasm  = null;
-let _ready = false;
-let _slots = 0;          // number of slots in the registry (matches main thread)
+let _wasm     = null;
+let _ready    = false;
+let _slots    = 0;          // number of slots in the registry (matches main thread)
+let _posSab   = null;       // optional SharedArrayBuffer of positions
+let _posView  = null;       // Float32Array view over _posSab
 
 async function loadWasm() {
     try {
@@ -66,17 +75,27 @@ function addSats(tles) {
 }
 
 function tick(jd, gmst, scale, buffer, frameId, expectedSlots) {
-    // The ArrayBuffer was transferred to the worker. Wrap a view so we
-    // can write [x,y,z] triplets into it. Length = buffer.byteLength/4.
-    const view = new Float32Array(buffer);
+    // Two destinations possible: a Float32Array view over a stable
+    // SharedArrayBuffer the main thread also reads from, or a one-
+    // shot Float32Array view over a transferred ArrayBuffer that we
+    // pong back. The protocol used per tick is whatever the main
+    // thread picked at init.
+    const sharedMode = _posView != null;
+    const view = sharedMode ? _posView : new Float32Array(buffer);
+
+    const reply = (extra = {}) => {
+        const msg = { type: 'positions', jd, frameId, registryLen: _slots, ...extra };
+        if (sharedMode) {
+            self.postMessage(msg);
+        } else {
+            msg.buffer = buffer;
+            self.postMessage(msg, [buffer]);
+        }
+    };
 
     if (!_ready) {
-        // Fill with NaN; main thread's fallback will pick up.
         view.fill(NaN);
-        self.postMessage(
-            { type: 'positions', buffer, jd, frameId, slots: 0, registryLen: _slots, mismatch: true },
-            [buffer],
-        );
+        reply({ slots: 0, mismatch: true });
         return;
     }
 
@@ -86,30 +105,23 @@ function tick(jd, gmst, scale, buffer, frameId, expectedSlots) {
     // re-syncs.
     if (Number.isFinite(expectedSlots) && expectedSlots !== _slots) {
         view.fill(NaN);
-        self.postMessage(
-            { type: 'positions', buffer, jd, frameId, slots: 0, registryLen: _slots, mismatch: true },
-            [buffer],
-        );
+        reply({ slots: 0, mismatch: true });
         return;
     }
 
     // WASM call: returns a fresh Float32Array of length 3·_slots in
-    // scene-frame km. Cheap to allocate (V8 arena bump) — would be
-    // even cheaper if Rust wrote into our buffer directly, but
-    // wasm-bindgen passes &mut [f32] as input-only, so the round-trip
-    // through a Vec<f32> is still 1 alloc + 1 memcpy/frame.
+    // scene-frame km. The 240 KB allocation per frame stays — even
+    // in SAB mode the WASM-bindgen round trip needs an output Vec<f32>
+    // — but it's a V8 arena bump. Cheap.
     const out = _wasm.registry_propagate(jd, gmst, scale);
     const n = Math.min(out.length, view.length);
     view.set(out.subarray(0, n));
-    // Defensive zero of any tail (e.g. main allocated a larger buffer
-    // than the registry needs). Avoids stale leftovers showing as
-    // bogus positions when GPU re-uploads.
+    // Defensive zero of any tail. Without this, growing the registry
+    // would leak stale positions into newly-arrived slots until the
+    // first propagate fills them.
     if (n < view.length) view.fill(0, n);
 
-    self.postMessage(
-        { type: 'positions', buffer, jd, frameId, slots: n / 3, registryLen: _slots },
-        [buffer],
-    );
+    reply({ slots: n / 3 });
 }
 
 self.onmessage = async (e) => {
@@ -118,6 +130,23 @@ self.onmessage = async (e) => {
         if (msg.type === 'init') {
             const r = await loadWasm();
             self.postMessage({ type: 'ready', ...r });
+            return;
+        }
+        if (msg.type === 'init-shared') {
+            // The main thread handed us a SAB sized to maxSats * 3
+            // floats. We wrap a Float32Array view once and reuse it
+            // for every tick. Subsequent tick messages omit the
+            // `buffer` field; the worker writes straight into the
+            // SAB which the main thread is already reading via the
+            // THREE position attribute.
+            try {
+                _posSab  = msg.sab;
+                _posView = new Float32Array(_posSab);
+                self.postMessage({ type: 'shared-ready', ok: true, length: _posView.length });
+            } catch (err) {
+                _posSab = null; _posView = null;
+                self.postMessage({ type: 'shared-ready', ok: false, error: String(err?.message ?? err) });
+            }
             return;
         }
         if (msg.type === 'add-sats') {

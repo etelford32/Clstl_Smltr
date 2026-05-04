@@ -257,19 +257,51 @@ export class SatelliteTracker {
 
         // Off-thread propagation. When a Worker spawns and reports
         // ready, the live tick stops calling WASM in-line and instead
-        // ping-pongs a single ArrayBuffer with the worker (transferable
-        // — no copy across the postMessage boundary). The main thread
-        // never blocks on SGP4 again. Buffer ownership is tracked via
-        // `_workerBuf`: when non-null the main thread holds it and
-        // can post a tick; when null a tick is in flight.
+        // hands the work to the worker. Two transports:
+        //
+        //   - SAB ("shared")     : crossOriginIsolated === true. We
+        //     allocate a SharedArrayBuffer once, pass it to the worker,
+        //     and use the same memory as the THREE position attribute.
+        //     Tick messages carry only jd/gmst/scale; the worker writes
+        //     directly into the SAB; the main thread sets needsUpdate
+        //     and reads lat/lon from the same buffer. Zero CPU copies.
+        //
+        //   - Transferable       : not isolated (older browser, no
+        //     COOP/COEP, mobile Safari). Single ArrayBuffer ping-pongs
+        //     between main and worker via postMessage transfer.
+        //
+        // Both share the same _workerInFlight / _workerSyncedTo
+        // bookkeeping; the difference is only in how positions
+        // surface.
         this._worker          = null;
         this._workerReady     = false;
         this._workerSyncedTo  = 0;          // sats already shipped to the worker
-        this._workerBuf       = null;       // Float32Array, our half of the ping-pong
+        this._workerBuf       = null;       // transferable: Float32Array, our half of the ping-pong
         this._workerInFlight  = false;
         this._workerFrameId   = 0;
         this._workerLastFrame = 0;          // most recent frameId that landed
         this._workerEnabled   = (typeof Worker !== 'undefined');
+
+        // SAB fast path. crossOriginIsolated requires COOP/COEP to be
+        // set on the document; vercel.json + dev-server.mjs add them
+        // on /operations.html. Pages without those headers (or
+        // browsers that don't honour `credentialless` — Safari today)
+        // see crossOriginIsolated === false and stay on the
+        // transferable path.
+        const isolated = typeof self !== 'undefined'
+            && self.crossOriginIsolated
+            && typeof SharedArrayBuffer !== 'undefined';
+        this._posSab     = null;
+        this._sabReady   = false;             // worker has accepted the SAB
+        if (isolated) {
+            try {
+                this._posSab = new SharedArrayBuffer(this._maxSats * 3 * 4);
+            } catch (err) {
+                console.debug('[SatTracker] SAB alloc failed, transferable path only:', err.message);
+                this._posSab = null;
+            }
+        }
+
         if (this._workerEnabled) this._spawnWorker();
 
         // Shell visualization group
@@ -713,7 +745,16 @@ export class SatelliteTracker {
             this._pointsMesh.geometry.dispose();
         }
         const n = this._satellites.length;
-        const posArr = new Float32Array(n * 3);
+        // SAB fast path: the position attribute is a Float32Array
+        // view over the shared SAB the worker is also writing to. As
+        // n grows we re-wrap the view; the SAB itself was sized to
+        // maxSats at construction so we never reallocate. WebGL's
+        // bufferData reads through the typed array view, which works
+        // regardless of whether the underlying buffer is an
+        // ArrayBuffer or a SharedArrayBuffer.
+        const posArr = this._posSab
+            ? new Float32Array(this._posSab, 0, n * 3)
+            : new Float32Array(n * 3);
         const colArr = new Float32Array(n * 3);
 
         const overrides = this._colorOverrides;
@@ -805,23 +846,34 @@ export class SatelliteTracker {
         if (msg.type === 'ready') {
             if (msg.ok && msg.hasRegistry) {
                 this._workerReady = true;
+                // If the page is crossOriginIsolated and we got a SAB
+                // allocated, hand it over now. The worker will switch
+                // to shared-memory mode for ticks.
+                if (this._posSab) {
+                    this._worker.postMessage({ type: 'init-shared', sab: this._posSab });
+                }
                 // Ship every sat we already know about.
                 this._workerSync();
             } else {
-                // WASM didn't load in the worker — fall back permanently.
                 console.debug('[SatTracker] worker WASM init failed:', msg.error || 'no registry');
                 this._teardownWorker();
             }
             return;
         }
-        if (msg.type === 'add-ack' || msg.type === 'clear-ack') {
+        if (msg.type === 'shared-ready') {
+            if (msg.ok) {
+                this._sabReady = true;
+            } else {
+                console.debug('[SatTracker] worker rejected SAB, falling back to transferable:', msg.error);
+                this._posSab   = null;
+                this._sabReady = false;
+            }
             return;
         }
+        if (msg.type === 'add-ack' || msg.type === 'clear-ack') return;
         if (msg.type === 'positions') {
             this._workerInFlight = false;
             this._workerLastFrame = msg.frameId;
-            const buf = new Float32Array(msg.buffer);
-            this._workerBuf = buf;
 
             if (msg.mismatch) {
                 // Slot count drifted — re-ship everything and skip
@@ -831,13 +883,65 @@ export class SatelliteTracker {
                 this._workerSync();
                 return;
             }
-            this._uploadPositionsFromBuffer(buf, msg.slots);
+
+            if (this._sabReady && msg.buffer == null) {
+                // SAB path: positions are already in shared memory
+                // (which the THREE position attribute is a view over).
+                // Just refresh lat/lon and tell the GPU to re-upload.
+                this._refreshFromSab(msg.slots);
+            } else {
+                // Transferable path: wrap a view, copy in.
+                const buf = new Float32Array(msg.buffer);
+                this._workerBuf = buf;
+                this._uploadPositionsFromBuffer(buf, msg.slots);
+            }
             return;
         }
         if (msg.type === 'error') {
             console.warn('[SatTracker] worker error:', msg.error);
             return;
         }
+    }
+
+    /**
+     * SAB-mode counterpart to _uploadPositionsFromBuffer. The position
+     * attribute already shares memory with the worker, so there's
+     * nothing to copy — we just walk the buffer for lat/lon recovery
+     * and the highlight sprite, and flag the attribute as dirty so
+     * the next render uploads it to the GPU.
+     */
+    _refreshFromSab(slotCount) {
+        if (!this._positions || !this._posSab) return;
+        const view = new Float32Array(this._posSab);
+        const n = Math.min(slotCount, this._satellites.length);
+        const kmToScene = this._earthR / RE_KM;
+        let dirty = false;
+        for (let i = 0; i < n; i++) {
+            const off = i * 3;
+            const x = view[off];
+            const y = view[off + 1];
+            const z = view[off + 2];
+            if (x !== x) continue;   // NaN — keep last known position
+            dirty = true;
+
+            const sat = this._satellites[i];
+            const sx = x / kmToScene;
+            const sy = y / kmToScene;
+            const sz = z / kmToScene;
+            const r  = Math.sqrt(sx * sx + sy * sy + sz * sz);
+            if (r > 1e-9) {
+                const cy = sy / r;
+                sat.lat = Math.asin(cy < -1 ? -1 : cy > 1 ? 1 : cy) * RAD;
+                sat.lon = Math.atan2(-sz, sx) * RAD;
+                sat.alt = r - RE_KM;
+            }
+            if (this._highlightNoradId != null
+                && sat.tle.norad_id === this._highlightNoradId
+                && this._highlightSprite) {
+                this._highlightSprite.position.set(x, y, z);
+            }
+        }
+        if (dirty) this._positions.needsUpdate = true;
     }
 
     /**
@@ -956,13 +1060,35 @@ export class SatelliteTracker {
 
         // Worker path (preferred). The worker has its own WASM
         // registry; the main thread keeps it in sync via add-sats
-        // messages and ping-pongs a single transferable buffer for
-        // positions. We never block on the worker — if it's still
-        // busy when this frame fires, positions stay one frame stale
-        // (visually invisible at 60 fps).
+        // messages. Two transports converge here:
+        //
+        //   - SAB    : tick is a tiny header message; the worker
+        //              writes positions straight into the shared
+        //              memory the THREE position attribute is a view
+        //              over.
+        //   - Xfer   : a Float32Array's buffer ping-pongs across
+        //              postMessage transfer.
+        //
+        // Either way we hold at most one outstanding tick — if the
+        // worker hasn't acked yet, this frame skips and positions
+        // stay one frame stale (invisible at 60 fps).
         if (this._workerReady && this._workerEnabled) {
             this._workerSync();
-            if (this._workerBuf && !this._workerInFlight) {
+            if (this._workerInFlight) return;
+
+            if (this._sabReady) {
+                this._workerInFlight = true;
+                const frameId        = ++this._workerFrameId;
+                this._worker.postMessage({
+                    type:           'tick',
+                    jd, gmst:        gmstRad,
+                    scale:           kmToScene,
+                    frameId,
+                    expectedSlots:   this._workerSyncedTo,
+                });
+                return;
+            }
+            if (this._workerBuf) {
                 const buf = this._workerBuf;
                 this._workerBuf       = null;
                 this._workerInFlight  = true;
