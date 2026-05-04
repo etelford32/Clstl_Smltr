@@ -116,6 +116,11 @@
             border-bottom: 1px solid rgba(255,200,0,.18);
             padding-bottom: .4rem; margin-bottom: 1rem;
         }
+        .legal-section h3 {
+            font-size: 1rem; color: #e8e0c0;
+            margin-top: 1.6rem; margin-bottom: .55rem;
+            letter-spacing: .01em;
+        }
         .legal-section p, .legal-section li {
             color: #b0b0c8; font-size: .92rem; line-height: 1.75;
         }
@@ -124,6 +129,11 @@
         }
         .legal-section li { margin-bottom: .3rem; }
         .legal-section strong { color: #ddd; }
+        .legal-section code {
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+            font-size: .85em; background: rgba(255,255,255,.06);
+            padding: .12em .4em; border-radius: 3px; color: #e8e0c0;
+        }
         .legal-section a { color: #a080ff; }
         .legal-section a:hover { color: #ffd700; }
         .highlight-box {
@@ -168,146 +178,284 @@
 <!-- ═══════════════════════════════════════════════════ HERO ═══ -->
 <div class="legal-hero">
     <h1>Privacy Policy</h1>
-    <p class="legal-meta"><strong>Effective Date:</strong> March 20, 2026 &nbsp;·&nbsp; <strong>Last Updated:</strong> March 20, 2026</p>
+    <p class="legal-meta"><strong>Effective Date:</strong> May 4, 2026 &nbsp;·&nbsp; <strong>Last Updated:</strong> May 4, 2026 &nbsp;·&nbsp; <strong>Version:</strong> 2.1</p>
 </div>
 
 <!-- ═══════════════════════════════════════════════════ BODY ═══ -->
 <div class="legal-body">
 
     <div class="highlight-box">
-        Parker Physics App ("we," "us," or "our") is committed to protecting your privacy. This policy explains what data we collect, why we collect it, and how we handle it. We do not sell your personal data.
+        <strong>Telford Projects LLC</strong>, operating <strong>Parker Physics App</strong> ("we," "us," "our"), is committed to protecting your privacy and to handling personal data lawfully, fairly, and transparently. This Policy explains what we collect, why we collect it, the legal basis for doing so, who we share it with, and the rights you have. <strong>We do not sell your personal information</strong> and we do not use it for cross-context behavioral advertising.
     </div>
 
     <nav class="toc" aria-label="Table of Contents">
         <h3>Contents</h3>
         <ol>
-            <li><a href="#scope">Scope of This Policy</a></li>
+            <li><a href="#controller">Controller &amp; Scope</a></li>
             <li><a href="#data-collected">Data We Collect</a></li>
             <li><a href="#how-used">How We Use Your Data</a></li>
-            <li><a href="#third-party">Third-Party Services &amp; APIs</a></li>
+            <li><a href="#legal-basis">Legal Bases (GDPR / UK GDPR)</a></li>
+            <li><a href="#third-party">Third-Party Services &amp; Sub-Processors</a></li>
+            <li><a href="#api-use">API Use &amp; Authenticated API Access</a></li>
             <li><a href="#cookies">Cookies &amp; Local Storage</a></li>
-            <li><a href="#sharing">Data Sharing</a></li>
+            <li><a href="#sharing">Data Sharing &amp; Disclosures</a></li>
+            <li><a href="#international">International Data Transfers</a></li>
             <li><a href="#retention">Data Retention</a></li>
             <li><a href="#security">Security</a></li>
             <li><a href="#children">Children's Privacy</a></li>
-            <li><a href="#rights">Your Rights</a></li>
+            <li><a href="#rights">Your Rights (GDPR &amp; UK GDPR)</a></li>
+            <li><a href="#ccpa">California Privacy Rights (CCPA / CPRA)</a></li>
+            <li><a href="#other-us-states">Other U.S. State Privacy Rights</a></li>
+            <li><a href="#automated">Automated Decision-Making</a></li>
             <li><a href="#changes">Changes to This Policy</a></li>
-            <li><a href="#contact">Contact Us</a></li>
+            <li><a href="#contact">Contact &amp; Data Protection</a></li>
         </ol>
     </nav>
 
-    <section class="legal-section" id="scope">
-        <h2>1. Scope of This Policy</h2>
-        <p>This Privacy Policy applies to the Parker Physics App website (parkerphysics.app), any associated mobile or desktop applications, and all interactive simulations and data feeds provided therein. By using our services, you agree to the practices described here.</p>
+    <section class="legal-section" id="controller">
+        <h2>1. Controller &amp; Scope</h2>
+        <p>The data controller responsible for your personal data under the EU General Data Protection Regulation (GDPR), the UK GDPR, and equivalent laws is:</p>
+        <ul>
+            <li><strong>Telford Projects LLC</strong>, a U.S. limited liability company doing business as <strong>Parker Physics App</strong>.</li>
+            <li><strong>Privacy contact:</strong> <a href="mailto:privacy@parkerphysics.app">privacy@parkerphysics.app</a></li>
+            <li><strong>Postal contact:</strong> available on request via the privacy email above.</li>
+        </ul>
+        <p>This Policy applies to the Parker Physics App website at parkerphysics.app, any installable Progressive Web App built from it, our public and authenticated APIs, and all interactive simulations and data feeds provided therein (collectively, the "Service"). It does not apply to third-party sites we link to, which have their own privacy policies.</p>
+        <p>Where this Policy refers to "personal data" or "personal information," those terms have the meanings given in the GDPR/UK GDPR and the California Consumer Privacy Act (CCPA), as amended by the California Privacy Rights Act (CPRA), respectively.</p>
     </section>
 
     <section class="legal-section" id="data-collected">
         <h2>2. Data We Collect</h2>
-        <p>We collect only what is necessary to provide and improve our service.</p>
+        <p>We practice data minimization: we collect only what is necessary to operate, secure, and improve the Service. The personal data we may process falls into the following categories.</p>
         <ul>
-            <li><strong>Account Data:</strong> When you register, we collect your name, email address, and a hashed password. You may optionally provide an institution or affiliation.</li>
-            <li><strong>Usage Data:</strong> We log which simulations you visit, session duration, feature interactions, and error events. This data is aggregated and used to improve performance and content.</li>
-            <li><strong>Payment Data:</strong> Subscription payments are processed by <strong>Stripe</strong>. We never store full card numbers. We receive only a payment confirmation token and billing summary from Stripe.</li>
-            <li><strong>Device &amp; Browser Data:</strong> IP address, browser type, operating system, screen resolution, and referral URL collected automatically for security and analytics purposes.</li>
-            <li><strong>Communications:</strong> If you contact us by email, we retain the content of that correspondence.</li>
+            <li><strong>Identifiers &amp; Account Data</strong> (CCPA cat. A) — name (or display name), email address, salted+hashed password, account ID, optional institution / affiliation.</li>
+            <li><strong>Customer Records</strong> (CCPA cat. B) — billing name, billing country, last 4 digits of payment card and card brand (received from Stripe; we never see the full PAN), subscription tier and history.</li>
+            <li><strong>Commercial Information</strong> (CCPA cat. D) — products / plans purchased, transaction timestamps, refund history.</li>
+            <li><strong>Internet / Network Activity</strong> (CCPA cat. F) — pages visited within the Service, simulations launched, feature interactions, click events, error and crash reports, request timestamps, referral URL.</li>
+            <li><strong>Geolocation (coarse only)</strong> (CCPA cat. G) — country and approximate region inferred from IP address, used for compliance routing (e.g., GDPR vs. CCPA experiences) and abuse prevention. We do <strong>not</strong> collect precise device geolocation.</li>
+            <li><strong>Device &amp; Technical Data</strong> — IP address, browser type and version, operating system, viewport / screen resolution, device type, language, time zone.</li>
+            <li><strong>User-Provided Content</strong> — saved simulation parameters, named locations, dashboard configurations, support correspondence, feedback you submit.</li>
+            <li><strong>API &amp; Developer Data</strong> — API key identifiers (we store hashes of full keys, not the keys themselves), the labels and intended-use descriptions you provide when issuing a key, request logs (timestamp, source IP, endpoint, status code, response size), and aggregate usage counters used for billing and rate-limit enforcement. See Section 6 for detail.</li>
+            <li><strong>Inferences</strong> (CCPA cat. K) — limited operational inferences such as "active in the last 30 days" or "uses launch-planner feature regularly," used to prioritize features and improve the Service.</li>
         </ul>
-        <p>We do <strong>not</strong> collect biometric data, precise geolocation, or social media credentials.</p>
+        <p>We do <strong>not</strong> collect biometric data, government identifiers, precise geolocation, sensitive characteristics protected by anti-discrimination law, content of private communications other than what you send us directly, or social-media credentials. We do not knowingly process "special category" personal data within the meaning of GDPR Article 9.</p>
     </section>
 
     <section class="legal-section" id="how-used">
         <h2>3. How We Use Your Data</h2>
+        <p>We use personal data only for the purposes set out below. We do not use your data to serve third-party advertisements, and we do not engage in cross-context behavioral advertising.</p>
         <ul>
-            <li>Authenticate your account and maintain your session</li>
-            <li>Deliver subscription features according to your plan tier</li>
-            <li>Send transactional emails (account confirmation, password reset, billing receipts)</li>
-            <li>Analyze aggregate usage to improve simulations and data feeds</li>
-            <li>Detect and prevent fraud, abuse, or security incidents</li>
-            <li>Comply with legal obligations</li>
+            <li>Authenticate you and maintain your signed-in session</li>
+            <li>Deliver subscription features and feature gating according to your plan tier</li>
+            <li>Process payments and issue receipts (via Stripe)</li>
+            <li>Send transactional emails: account confirmation, password reset, security alerts, billing receipts, plan changes, service-impacting incidents</li>
+            <li>Send optional product updates only where you have opted in (or for U.S. recipients on a CAN-SPAM compliant basis you can unsubscribe from at any time)</li>
+            <li>Detect, investigate, and prevent fraud, abuse, account takeover, denial-of-service, scraping, and other security incidents</li>
+            <li>Diagnose errors, monitor performance, and improve simulations, data feeds, and user interfaces</li>
+            <li>Compute aggregate, de-identified statistics about usage of the Service</li>
+            <li>Comply with our legal obligations and enforce our <a href="eula.html">EULA</a></li>
         </ul>
-        <p>We do <strong>not</strong> use your data to serve third-party advertisements.</p>
+    </section>
+
+    <section class="legal-section" id="legal-basis">
+        <h2>4. Legal Bases for Processing (GDPR / UK GDPR)</h2>
+        <p>If you are in the European Economic Area, the United Kingdom, or Switzerland, we rely on the following legal bases under Article 6 GDPR / UK GDPR:</p>
+        <ul>
+            <li><strong>Contract</strong> (Art. 6(1)(b)) — to create and operate your account, deliver features included in your plan, process payments, and provide customer support.</li>
+            <li><strong>Legitimate interests</strong> (Art. 6(1)(f)) — to keep the Service secure and reliable, prevent abuse and fraud, debug errors, analyze usage in aggregate, and improve our scientific simulations and data products. We balance these interests against your rights and freedoms; you may object at any time (see Section 13).</li>
+            <li><strong>Consent</strong> (Art. 6(1)(a)) — for non-essential cookies and similar technologies, and for any optional marketing communications. You may withdraw consent at any time without affecting the lawfulness of prior processing.</li>
+            <li><strong>Legal obligation</strong> (Art. 6(1)(c)) — to retain transaction and tax records, respond to lawful requests from authorities, and meet other obligations imposed by law.</li>
+        </ul>
     </section>
 
     <section class="legal-section" id="third-party">
-        <h2>4. Third-Party Services &amp; APIs</h2>
-        <p>Parker Physics App displays live data from the following public scientific APIs. <strong>No personally identifiable information is transmitted to these services.</strong> Requests are made server-side or directly from your browser with no user identifiers attached.</p>
+        <h2>5. Third-Party Services &amp; Sub-Processors</h2>
+        <p>We rely on a small number of trusted vendors who act as <strong>processors</strong> (in GDPR terms) or <strong>service providers / contractors</strong> (in CCPA terms). They process personal data only on our documented instructions and under written contracts that include confidentiality, security, sub-processor, and data-deletion obligations.</p>
         <ul>
-            <li><strong>NASA DONKI</strong> — Coronal Mass Ejection and geomagnetic storm catalog (api.nasa.gov)</li>
-            <li><strong>NOAA Space Weather Prediction Center (SWPC)</strong> — Solar wind, Kp index, X-ray flux, geomagnetic alerts (services.swpc.noaa.gov)</li>
-            <li><strong>JPL Horizons</strong> — Planetary ephemeris and near-Earth object data (ssd.jpl.nasa.gov)</li>
-            <li><strong>SOHO / STEREO / SDO</strong> — Solar imagery (NASA/ESA coronagraph and imager feeds)</li>
-            <li><strong>National Weather Service (NWS)</strong> — Space weather alerts (api.weather.gov)</li>
-            <li><strong>Stripe</strong> — Payment processing (stripe.com). Stripe's own <a href="https://stripe.com/privacy" target="_blank" rel="noopener">Privacy Policy</a> applies to payment data.</li>
-            <li><strong>Vercel</strong> — Hosting and edge network. Vercel may log request metadata per their <a href="https://vercel.com/legal/privacy-policy" target="_blank" rel="noopener">Privacy Policy</a>.</li>
+            <li><strong>Supabase Inc.</strong> — managed Postgres database, authentication, and storage. Hosts account records, hashed passwords, saved configurations. <a href="https://supabase.com/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</li>
+            <li><strong>Vercel Inc.</strong> — hosting and edge network. Processes request metadata (IP, URL, timing) for delivery and security. <a href="https://vercel.com/legal/privacy-policy" target="_blank" rel="noopener">Privacy Policy</a>.</li>
+            <li><strong>Stripe, Inc.</strong> — payment processing. Acts as an independent controller for fraud-prevention and regulatory purposes. We never see full card numbers. <a href="https://stripe.com/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</li>
+            <li><strong>Transactional email provider</strong> (e.g., Resend / Postmark / equivalent) — delivers account, security, and billing emails.</li>
         </ul>
+        <p>We display live data from the following public scientific data sources. <strong>No personally identifiable information is transmitted to these services</strong>; requests are made without user identifiers and may be proxied through our servers:</p>
+        <ul>
+            <li><strong>NASA DONKI</strong> — CME and geomagnetic storm catalog (api.nasa.gov)</li>
+            <li><strong>NOAA Space Weather Prediction Center (SWPC)</strong> — solar wind, Kp index, X-ray flux, geomagnetic alerts (services.swpc.noaa.gov)</li>
+            <li><strong>JPL Horizons</strong> — planetary ephemerides, NEO data (ssd.jpl.nasa.gov)</li>
+            <li><strong>NASA / ESA SOHO, STEREO, SDO</strong> — solar imagery</li>
+            <li><strong>National Weather Service</strong> — terrestrial alerts (api.weather.gov)</li>
+            <li><strong>CelesTrak</strong> and similar public catalogs — orbital elements (TLEs)</li>
+        </ul>
+        <p>An up-to-date list of sub-processors is available on request to <a href="mailto:privacy@parkerphysics.app">privacy@parkerphysics.app</a> and is referenced in our <a href="dpa.html">Data Processing Agreement</a>.</p>
+    </section>
+
+    <section class="legal-section" id="api-use">
+        <h2>6. API Use &amp; Authenticated API Access</h2>
+        <p>This Section explains how we handle personal data when you (or systems acting on your behalf) use our HTTP REST API, WebSocket streams, or embeddable widgets (the "API"). Use of the API is also subject to Section 7 of our <a href="eula.html">EULA</a> and our <a href="api-policy.html">API &amp; Data Policy</a>.</p>
+
+        <h3>6a. What we collect when you use the API</h3>
+        <ul>
+            <li><strong>API key metadata</strong> — a public key identifier, a salted hash of the secret portion (we cannot recover the secret after creation), the issuing account, the label and intended-use description you provided, the plan tier, and the creation / last-rotated / revoked timestamps.</li>
+            <li><strong>Request logs</strong> — timestamp, source IP address, HTTP method, endpoint path, query-parameter shape (not values containing personal data), response status code, response size in bytes, latency, and a coarse client identifier (such as the User-Agent or a derived fingerprint hash) used for abuse detection.</li>
+            <li><strong>Usage counters</strong> — per-key and per-account request totals, used to enforce rate limits and to bill metered plans.</li>
+            <li><strong>Error and security events</strong> — authentication failures, rate-limit hits, anomaly-detection signals.</li>
+        </ul>
+        <p>We do <strong>not</strong> log full request bodies by default. We may sample requests for debugging with appropriate access controls, and only when necessary to investigate a specific incident or to fix a defect. We do not log Authorization headers or other secrets.</p>
+
+        <h3>6b. Why we process this data &amp; legal bases</h3>
+        <ul>
+            <li><strong>Provide and bill the API</strong> (contract — GDPR Art. 6(1)(b)).</li>
+            <li><strong>Enforce rate limits, detect abuse, prevent fraud, secure the platform</strong> (legitimate interests — Art. 6(1)(f)).</li>
+            <li><strong>Debug defects and improve reliability</strong> (legitimate interests).</li>
+            <li><strong>Meet legal, tax, and audit obligations</strong> (legal obligation — Art. 6(1)(c)).</li>
+        </ul>
+
+        <h3>6c. Outbound calls to upstream scientific data sources</h3>
+        <p>When the Service or API serves you data sourced from upstream public APIs (NOAA SWPC, NASA DONKI, JPL Horizons, NWS, CelesTrak, etc.), our backend makes the upstream request on your behalf. <strong>We do not forward your account identifiers, IP address, or API key to those upstream sources.</strong> Where we serve cached responses, no upstream call is made at all.</p>
+
+        <h3>6d. Embedding and developer use cases</h3>
+        <p>If you embed our widgets or render our data on a site you operate, the site visitor's browser will exchange standard HTTP metadata (IP, User-Agent, Referer header) with our infrastructure to deliver the embed. You are responsible for disclosing this in your own site's privacy notice.</p>
+
+        <h3>6e. Retention specific to the API</h3>
+        <ul>
+            <li><strong>API key metadata</strong> — retained while the key is active, plus 12 months after revocation for fraud and audit purposes.</li>
+            <li><strong>API request logs</strong> — full-fidelity logs retained up to 90 days; aggregated counters and security event records retained up to 13 months.</li>
+            <li><strong>Billing-relevant usage records</strong> — retained for up to 7 years to satisfy U.S. tax requirements.</li>
+        </ul>
+
+        <h3>6f. Your control</h3>
+        <p>You can rotate or revoke API keys at any time from your developer dashboard. Deleting your account also revokes all associated keys. You may request export of API key metadata and aggregated usage counters under Sections 13 and 14.</p>
     </section>
 
     <section class="legal-section" id="cookies">
-        <h2>5. Cookies &amp; Local Storage</h2>
-        <p>We use minimal cookies and browser storage:</p>
+        <h2>7. Cookies &amp; Local Storage</h2>
+        <p>We classify the cookies and similar technologies we use as follows. EU/EEA, UK, and Swiss visitors are presented with a consent banner on first visit; non-essential categories are <strong>off by default</strong> until you opt in.</p>
         <ul>
-            <li><strong>Session cookie:</strong> Keeps you signed in across page loads. Expires at session end or after 30 days if "Remember Me" is checked.</li>
-            <li><strong>Preference storage (localStorage):</strong> Stores UI settings such as simulation parameters you have adjusted. No personal data is stored here.</li>
-            <li><strong>No tracking or advertising cookies</strong> are set by Parker Physics App itself.</li>
+            <li><strong>Strictly necessary</strong> (always on): authentication session, CSRF token, load balancing, consent-state cookie. These are required to operate the Service and cannot be disabled.</li>
+            <li><strong>Functional / preference</strong> (consent-based outside the U.S.): saved UI settings, simulation parameters, named locations. Stored in browser <code>localStorage</code> on your device.</li>
+            <li><strong>Analytics</strong> (consent-based outside the U.S.): privacy-respecting, first-party analytics about page views and feature usage. We do not use ad-tech analytics.</li>
+            <li><strong>No advertising or cross-site tracking cookies</strong> are set by us.</li>
         </ul>
-        <p>You can clear cookies and local storage at any time through your browser settings.</p>
+        <p>You can change your choices at any time using the <strong>Cookie Settings</strong> link in our footer, or by clearing site data in your browser. Choices are stored locally on your device, so they may need to be re-set on each browser you use.</p>
     </section>
 
     <section class="legal-section" id="sharing">
-        <h2>6. Data Sharing</h2>
-        <p>We do not sell, rent, or broker your personal data. We share data only in the following limited circumstances:</p>
+        <h2>8. Data Sharing &amp; Disclosures</h2>
+        <p>We do not sell your personal information and we do not "share" it for cross-context behavioral advertising as those terms are defined under the CCPA/CPRA. We disclose personal data only in these limited situations:</p>
         <ul>
-            <li><strong>Service providers:</strong> Stripe (payments), Vercel (hosting) — only the minimum data each provider needs to deliver their service.</li>
-            <li><strong>Legal compliance:</strong> If required by applicable law, court order, or governmental authority.</li>
-            <li><strong>Business transfer:</strong> In the event of a merger, acquisition, or asset sale, user data may transfer with notice given to affected users.</li>
+            <li><strong>Sub-processors / service providers</strong> listed in Section 5, under written agreements that prohibit independent use of the data.</li>
+            <li><strong>Legal compliance:</strong> when required by applicable law, valid legal process (subpoena, warrant, court order), or to respond to lawful requests by public authorities, including for national security or law-enforcement purposes. We will narrowly construe such requests and notify users where we are legally permitted to do so.</li>
+            <li><strong>Protection of rights and safety:</strong> to investigate fraud or security incidents, to enforce our <a href="eula.html">EULA</a>, or to protect the rights, property, or safety of Telford Projects LLC, our users, or the public.</li>
+            <li><strong>Business transfer:</strong> in connection with a merger, acquisition, financing, reorganization, or sale of assets, with notice to affected users where required.</li>
+            <li><strong>With your consent:</strong> for any other purpose you specifically agree to.</li>
         </ul>
     </section>
 
-    <section class="legal-section" id="retention">
-        <h2>7. Data Retention</h2>
+    <section class="legal-section" id="international">
+        <h2>9. International Data Transfers</h2>
+        <p>Telford Projects LLC is established in the United States and our primary infrastructure is located in the United States. If you access the Service from the EEA, the United Kingdom, Switzerland, or another jurisdiction outside the U.S., your personal data will be transferred to and processed in the United States, which has different data-protection rules than your home country.</p>
+        <p>For transfers of personal data from the EEA, UK, or Switzerland to the United States or other third countries, we rely on the following safeguards as applicable:</p>
         <ul>
-            <li><strong>Account data</strong> is retained for the life of your account and deleted within 30 days of a verified deletion request.</li>
-            <li><strong>Aggregate usage logs</strong> are retained for up to 24 months, then deleted or anonymized.</li>
-            <li><strong>Payment records</strong> are retained for 7 years for tax and legal compliance.</li>
-            <li><strong>Support correspondence</strong> is retained for 3 years from the date of the last exchange.</li>
+            <li>The European Commission's <strong>Standard Contractual Clauses</strong> (Decision 2021/914) and the UK <strong>International Data Transfer Addendum</strong> issued by the ICO.</li>
+            <li>Where available, the <strong>EU–U.S. Data Privacy Framework</strong> and its UK / Swiss extensions for vendors that are certified.</li>
+            <li>Supplementary technical and organizational measures (encryption in transit and at rest, access controls, minimization).</li>
+        </ul>
+        <p>You may request a copy of the relevant transfer mechanism by emailing <a href="mailto:privacy@parkerphysics.app">privacy@parkerphysics.app</a>.</p>
+    </section>
+
+    <section class="legal-section" id="retention">
+        <h2>10. Data Retention</h2>
+        <p>We retain personal data only as long as needed for the purposes described in this Policy or as required by law. Specific retention windows include:</p>
+        <ul>
+            <li><strong>Account data</strong> — for the life of your account; deleted within 30 days of a verified deletion request, except where retention is required by law.</li>
+            <li><strong>Authentication and security logs</strong> — up to 12 months from the event.</li>
+            <li><strong>Aggregate usage / analytics logs</strong> — up to 24 months, then deleted or irreversibly aggregated.</li>
+            <li><strong>Billing and tax records</strong> — up to 7 years following the transaction, as required by U.S. tax law.</li>
+            <li><strong>Support correspondence</strong> — up to 3 years from the last exchange.</li>
+            <li><strong>Backups</strong> — encrypted backups are retained on a rolling basis (typically 30 days) before being overwritten; deletion requests are honored in production immediately and propagate through backup rotation.</li>
+            <li><strong>API key metadata, request logs, and usage counters</strong> — see Section 6e for the API-specific retention table.</li>
         </ul>
     </section>
 
     <section class="legal-section" id="security">
-        <h2>8. Security</h2>
-        <p>We implement industry-standard security measures including HTTPS/TLS encryption in transit, bcrypt password hashing at rest, and access controls limiting employee access to personal data. However, no system is perfectly secure. We encourage you to use a strong, unique password and to contact us immediately if you suspect unauthorized access to your account.</p>
+        <h2>11. Security</h2>
+        <p>We implement administrative, technical, and organizational measures appropriate to the risk, including:</p>
+        <ul>
+            <li>HTTPS / TLS for all traffic between your browser and the Service</li>
+            <li>Encryption at rest for the production database and backups</li>
+            <li>Salted password hashing using a memory-hard algorithm</li>
+            <li>Row-Level Security policies in our database to enforce per-user access</li>
+            <li>Multi-factor authentication for administrative access</li>
+            <li>Principle of least privilege for staff and vendor access</li>
+            <li>Application-level rate limiting and abuse detection</li>
+            <li>Monitoring, logging, and dependency vulnerability scanning</li>
+        </ul>
+        <p>No system is perfectly secure. If you suspect unauthorized access to your account or believe you have discovered a security vulnerability, please contact <a href="mailto:security@parkerphysics.app">security@parkerphysics.app</a>. Where required by law, we will notify affected users and supervisory authorities of personal-data breaches without undue delay (and within 72 hours under GDPR Article 33 where feasible).</p>
     </section>
 
     <section class="legal-section" id="children">
-        <h2>9. Children's Privacy</h2>
-        <p>Parker Physics App is intended for users age <strong>13 and older</strong>. We do not knowingly collect personal information from children under 13 (or under 16 in the EU/EEA). If we learn we have inadvertently collected such data, we will delete it promptly. Parents or guardians who believe their child has provided us data should contact us at the address below.</p>
+        <h2>12. Children's Privacy</h2>
+        <p>Parker Physics App is intended for users aged <strong>13 and older</strong> in the United States and <strong>16 and older</strong> in the European Economic Area, the United Kingdom, and Switzerland. We do not knowingly collect personal data from children below those ages. If we learn that we have done so, we will delete the data promptly and terminate the account. Parents or guardians who believe their child has provided us with personal data should contact <a href="mailto:privacy@parkerphysics.app">privacy@parkerphysics.app</a>.</p>
     </section>
 
     <section class="legal-section" id="rights">
-        <h2>10. Your Rights</h2>
-        <p>Depending on your jurisdiction, you may have the following rights regarding your personal data:</p>
+        <h2>13. Your Rights (GDPR &amp; UK GDPR)</h2>
+        <p>If you are in the EEA, the United Kingdom, or Switzerland, you have the following rights under the GDPR and UK GDPR. Exercising these rights is free and we will respond within one month (extendable by two further months for complex requests, with notice).</p>
         <ul>
-            <li><strong>Access:</strong> Request a copy of the data we hold about you.</li>
-            <li><strong>Correction:</strong> Request correction of inaccurate data.</li>
-            <li><strong>Deletion:</strong> Request deletion of your account and associated personal data (subject to legal retention requirements).</li>
-            <li><strong>Portability:</strong> Request your data in a machine-readable format (EU/EEA users under GDPR).</li>
-            <li><strong>Opt-out of marketing:</strong> Unsubscribe from any marketing emails via the link in each email.</li>
-            <li><strong>Do Not Sell (CCPA):</strong> We do not sell personal data; no opt-out is required, but you may contact us to confirm.</li>
+            <li><strong>Right of access</strong> (Art. 15) — obtain confirmation of whether we process your personal data and a copy of it.</li>
+            <li><strong>Right to rectification</strong> (Art. 16) — correct inaccurate or incomplete data.</li>
+            <li><strong>Right to erasure / "to be forgotten"</strong> (Art. 17) — request deletion in defined circumstances.</li>
+            <li><strong>Right to restrict processing</strong> (Art. 18).</li>
+            <li><strong>Right to data portability</strong> (Art. 20) — receive your data in a structured, commonly used, machine-readable format.</li>
+            <li><strong>Right to object</strong> (Art. 21) — object to processing based on our legitimate interests, including profiling.</li>
+            <li><strong>Right to withdraw consent</strong> (Art. 7(3)) — at any time, without affecting prior lawful processing.</li>
+            <li><strong>Right not to be subject to solely automated decisions</strong> with legal or similarly significant effects (Art. 22) — see Section 16.</li>
+            <li><strong>Right to lodge a complaint</strong> with your local supervisory authority (e.g., the Irish DPC, the UK ICO, the Swiss FDPIC) or with the authority of your habitual residence, place of work, or place of the alleged infringement.</li>
         </ul>
-        <p>To exercise any of these rights, email us at <a href="mailto:privacy@parkerphysics.app">privacy@parkerphysics.app</a>. We will respond within 30 days.</p>
+        <p>To exercise any right, email <a href="mailto:privacy@parkerphysics.app">privacy@parkerphysics.app</a>. We may need to verify your identity before responding.</p>
+    </section>
+
+    <section class="legal-section" id="ccpa">
+        <h2>14. California Privacy Rights (CCPA / CPRA)</h2>
+        <p>If you are a California resident, you have the following rights under the California Consumer Privacy Act, as amended by the California Privacy Rights Act:</p>
+        <ul>
+            <li><strong>Right to know</strong> the categories and specific pieces of personal information we collect, the sources, the business purposes, and the categories of recipients.</li>
+            <li><strong>Right to delete</strong> personal information we have collected from you, subject to statutory exceptions.</li>
+            <li><strong>Right to correct</strong> inaccurate personal information.</li>
+            <li><strong>Right to opt out of sale or sharing</strong> of personal information. <strong>We do not sell or share personal information for cross-context behavioral advertising</strong>, so no opt-out is operationally required, but you may confirm in writing.</li>
+            <li><strong>Right to limit use of sensitive personal information.</strong> We do not collect sensitive personal information as defined by the CPRA beyond log-in credentials necessary to access your account, which we use only to authenticate you.</li>
+            <li><strong>Right to non-discrimination</strong> for exercising any of these rights.</li>
+        </ul>
+        <p>Categories of personal information we have collected in the prior 12 months: identifiers (Cat. A); customer records (Cat. B); commercial information (Cat. D); internet/network activity (Cat. F); coarse geolocation (Cat. G); inferences (Cat. K). Categories disclosed for a business purpose: A, B, D, F to our sub-processors listed in Section 5. Categories sold or shared: <strong>none</strong>.</p>
+        <p>You may exercise these rights by emailing <a href="mailto:privacy@parkerphysics.app">privacy@parkerphysics.app</a> or by submitting an authorized agent's request with documentation of authority. We honor browser-level Global Privacy Control (GPC) signals as a valid opt-out preference.</p>
+        <p><strong>"Shine the Light" (Cal. Civ. Code §1798.83):</strong> we do not share personal information with third parties for their direct marketing purposes.</p>
+    </section>
+
+    <section class="legal-section" id="other-us-states">
+        <h2>15. Other U.S. State Privacy Rights</h2>
+        <p>If you are a resident of Virginia, Colorado, Connecticut, Utah, Texas, Oregon, Montana, or another U.S. state with a comprehensive consumer-privacy law, you have rights substantially similar to those described in Sections 13 and 14 — including rights to access, correct, delete, obtain a portable copy, and opt out of targeted advertising and sales (we conduct neither). To exercise any right, contact <a href="mailto:privacy@parkerphysics.app">privacy@parkerphysics.app</a>. You may appeal a denial of your request by replying to our response email; we will respond to appeals within the statutory window applicable to your state.</p>
+    </section>
+
+    <section class="legal-section" id="automated">
+        <h2>16. Automated Decision-Making</h2>
+        <p>We do not use solely automated decision-making, including profiling, that produces legal or similarly significant effects on you. Automated processes used for fraud and abuse detection, rate limiting, and feature gating are subject to human review when their outcomes are challenged.</p>
     </section>
 
     <section class="legal-section" id="changes">
-        <h2>11. Changes to This Policy</h2>
-        <p>We may update this policy from time to time. If we make material changes, we will notify registered users by email at least 14 days before the changes take effect and update the "Last Updated" date at the top of this page. Continued use of the service after the effective date constitutes acceptance of the revised policy.</p>
+        <h2>17. Changes to This Policy</h2>
+        <p>We may update this Policy from time to time. If we make material changes, we will notify registered users by email at least 14 days before the changes take effect and update the "Last Updated" date at the top of this page. Prior versions are archived and available on request. Continued use of the Service after the effective date constitutes acceptance of the revised Policy.</p>
     </section>
 
     <section class="legal-section" id="contact">
-        <h2>12. Contact Us</h2>
-        <p>For privacy-related questions, data requests, or concerns:</p>
+        <h2>18. Contact &amp; Data Protection</h2>
         <ul>
-            <li><strong>Email:</strong> <a href="mailto:privacy@parkerphysics.app">privacy@parkerphysics.app</a></li>
-            <li><strong>General Support:</strong> <a href="mailto:support@parkerphysics.app">support@parkerphysics.app</a></li>
+            <li><strong>Controller:</strong> Telford Projects LLC, d/b/a Parker Physics App</li>
+            <li><strong>Privacy:</strong> <a href="mailto:privacy@parkerphysics.app">privacy@parkerphysics.app</a></li>
+            <li><strong>Security:</strong> <a href="mailto:security@parkerphysics.app">security@parkerphysics.app</a></li>
+            <li><strong>Support:</strong> <a href="mailto:support@parkerphysics.app">support@parkerphysics.app</a></li>
+            <li><strong>Data Processing Agreement:</strong> see <a href="dpa.html">parkerphysics.app/dpa</a></li>
         </ul>
+        <p>We have not appointed a Data Protection Officer (DPO) because our processing activities do not currently meet the thresholds set by GDPR Article 37. If you are an EEA-based controller and require a written representative under Article 27 to be appointed in the EU as a condition of using our Service, contact us to discuss arrangements.</p>
     </section>
 
 </div>
