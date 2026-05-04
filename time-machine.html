@@ -950,6 +950,23 @@ const ASTEROIDS = [
     { key:'pallas', name:'Pallas', color:0xa0a0c0, size:0.05 },
     { key:'hygiea', name:'Hygiea', color:0x808890, size:0.04 },
 ];
+
+// ── Body info (clickable analysis card) ──────────────────────────────
+const BODY_INFO = {
+    sun:     { mass:'1.989×10³⁰ kg', radius:'696,340 km', rot:'~25.4 d',   tilt:'7.25°',   desc:'G-type main-sequence star.' },
+    mercury: { mass:'3.30×10²³ kg',  radius:'2,440 km',   rot:'58.65 d',   tilt:'0.034°',  desc:'Innermost planet, no atmosphere.' },
+    venus:   { mass:'4.87×10²⁴ kg',  radius:'6,052 km',   rot:'-243.0 d',  tilt:'177.4°',  desc:'Hottest planet, retrograde rotation.' },
+    earth:   { mass:'5.972×10²⁴ kg', radius:'6,371 km',   rot:'23.93 h',   tilt:'23.44°',  desc:'Only known life-bearing world.' },
+    mars:    { mass:'6.42×10²³ kg',  radius:'3,390 km',   rot:'24.62 h',   tilt:'25.19°',  desc:'Cold desert world, two moons.' },
+    jupiter: { mass:'1.898×10²⁷ kg', radius:'69,911 km',  rot:'9.93 h',    tilt:'3.13°',   desc:'Largest planet, gas giant.' },
+    saturn:  { mass:'5.683×10²⁶ kg', radius:'58,232 km',  rot:'10.66 h',   tilt:'26.73°',  desc:'Iconic ring system.' },
+    uranus:  { mass:'8.681×10²⁵ kg', radius:'25,362 km',  rot:'-17.24 h',  tilt:'97.77°',  desc:'Ice giant tipped on its side.' },
+    neptune: { mass:'1.024×10²⁶ kg', radius:'24,622 km',  rot:'16.11 h',   tilt:'28.32°',  desc:'Outermost ice giant.' },
+    ceres:   { mass:'9.39×10²⁰ kg',  radius:'473 km',     rot:'9.07 h',    tilt:'4°',      desc:'Largest main-belt body, dwarf planet.' },
+    vesta:   { mass:'2.59×10²⁰ kg',  radius:'263 km',     rot:'5.34 h',    tilt:'29°',     desc:'Bright differentiated asteroid.' },
+    pallas:  { mass:'2.04×10²⁰ kg',  radius:'256 km',     rot:'7.81 h',    tilt:'84°',     desc:'Highly inclined main-belt body.' },
+    hygiea:  { mass:'8.67×10¹⁹ kg',  radius:'215 km',     rot:'13.83 h',   tilt:'—',       desc:'Carbonaceous outer main-belt body.' },
+};
 // Heliocentric position of an asteroid at any JD via two-body Kepler.
 const _astStateScratch = { a:0, e:0, i:0, node:0, argp:0, M0:0, epochJd:0, mu_eff:0 };
 function asteroidHelio(key, jd) {
@@ -1121,52 +1138,190 @@ resize();
 new ResizeObserver(resize).observe(wrap);
 
 // ── Background stars ─────────────────────────────────────────────────
+// Per-vertex size + color, twinkle in a custom shader. A second sparser
+// layer paints a faint Milky Way band for depth.
+const starUniforms = { uTime: { value: 0 } };
 {
-    const n = 2400, p = new Float32Array(n * 3);
+    const n = 4200;
+    const positions = new Float32Array(n * 3);
+    const colors    = new Float32Array(n * 3);
+    const sizes     = new Float32Array(n);
     for (let i = 0; i < n; i++) {
-        const r  = 600 + Math.random() * 400;
+        const r  = 700 + Math.random() * 500;
         const th = Math.random() * Math.PI * 2;
         const ph = Math.acos(2 * Math.random() - 1);
-        p[i*3]   = r * Math.sin(ph) * Math.cos(th);
-        p[i*3+1] = r * Math.sin(ph) * Math.sin(th);
-        p[i*3+2] = r * Math.cos(ph);
+        positions[i*3]   = r * Math.sin(ph) * Math.cos(th);
+        positions[i*3+1] = r * Math.sin(ph) * Math.sin(th);
+        positions[i*3+2] = r * Math.cos(ph);
+        const tcol = Math.random();
+        if (tcol < 0.15) {                                  // warm K/M
+            colors[i*3]   = 1.00;
+            colors[i*3+1] = 0.78 + 0.15 * Math.random();
+            colors[i*3+2] = 0.55 + 0.20 * Math.random();
+        } else if (tcol < 0.30) {                           // cool A/B
+            colors[i*3]   = 0.65 + 0.15 * Math.random();
+            colors[i*3+1] = 0.78 + 0.15 * Math.random();
+            colors[i*3+2] = 1.00;
+        } else {
+            const c = 0.85 + 0.15 * Math.random();
+            colors[i*3] = c; colors[i*3+1] = c; colors[i*3+2] = c;
+        }
+        // Power-law magnitude distribution: many faint, few bright.
+        const u = Math.random();
+        sizes[i] = 0.7 + Math.pow(u, 6) * 4.6;
     }
     const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(p, 3));
-    scene.add(new THREE.Points(g, new THREE.PointsMaterial({
-        color:0xffffff, size:1.0, sizeAttenuation:false, transparent:true, opacity:0.85,
+    g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    g.setAttribute('color',    new THREE.Float32BufferAttribute(colors,    3));
+    g.setAttribute('aSize',    new THREE.Float32BufferAttribute(sizes,     1));
+    const starMat = new THREE.ShaderMaterial({
+        uniforms: starUniforms,
+        vertexColors: true,
+        transparent: true,
+        depthWrite:  false,
+        blending:    THREE.AdditiveBlending,
+        vertexShader: `
+            attribute float aSize;
+            varying vec3 vColor;
+            varying float vTwinkle;
+            uniform float uTime;
+            void main() {
+                vColor = color;
+                vec4 mv = modelViewMatrix * vec4(position, 1.0);
+                gl_Position = projectionMatrix * mv;
+                gl_PointSize = aSize;
+                float seed = position.x*12.9898 + position.y*78.233 + position.z*37.719;
+                vTwinkle = 0.65 + 0.35 * sin(uTime * 1.3 + seed);
+            }`,
+        fragmentShader: `
+            varying vec3 vColor;
+            varying float vTwinkle;
+            void main() {
+                vec2 d = gl_PointCoord - vec2(0.5);
+                float r = length(d);
+                if (r > 0.5) discard;
+                float a = smoothstep(0.5, 0.0, r);
+                gl_FragColor = vec4(vColor * vTwinkle, a);
+            }`,
+    });
+    scene.add(new THREE.Points(g, starMat));
+
+    // ── Faint Milky Way band ──
+    const mwN  = 1800;
+    const mwP  = new Float32Array(mwN * 3);
+    const mwC  = new Float32Array(mwN * 3);
+    // Galactic plane tilted from the ecliptic ~60° — rotate around X.
+    const tiltCos = Math.cos(60 * Math.PI / 180);
+    const tiltSin = Math.sin(60 * Math.PI / 180);
+    for (let i = 0; i < mwN; i++) {
+        const r   = 950 + Math.random() * 280;
+        const th  = Math.random() * Math.PI * 2;
+        const lat = (Math.random() - 0.5) * (Math.PI / 7);   // narrow band
+        const x0 = r * Math.cos(lat) * Math.cos(th);
+        const y0 = r * Math.sin(lat);
+        const z0 = r * Math.cos(lat) * Math.sin(th);
+        mwP[i*3]     = x0;
+        mwP[i*3 + 1] = y0 * tiltCos - z0 * tiltSin;
+        mwP[i*3 + 2] = y0 * tiltSin + z0 * tiltCos;
+        const c = 0.30 + 0.30 * Math.random();
+        mwC[i*3]     = c * 0.85;
+        mwC[i*3 + 1] = c * 0.78;
+        mwC[i*3 + 2] = c * 1.10;
+    }
+    const mg = new THREE.BufferGeometry();
+    mg.setAttribute('position', new THREE.Float32BufferAttribute(mwP, 3));
+    mg.setAttribute('color',    new THREE.Float32BufferAttribute(mwC, 3));
+    scene.add(new THREE.Points(mg, new THREE.PointsMaterial({
+        size:1.4, sizeAttenuation:false, transparent:true, opacity:0.42,
+        vertexColors:true, depthWrite:false,
+        blending:THREE.AdditiveBlending,
     })));
 }
 
+// ── Body mesh registry (populated below) ────────────────────────────
+const meshes = {};
+
 // ── Sun ──────────────────────────────────────────────────────────────
+// Layered: granulating shader sphere + warm halo + outer corona.
+const sunUniforms = { uTime: { value: 0 } };
 {
     const sun = new THREE.Mesh(
-        new THREE.SphereGeometry(0.95, 48, 48),
-        new THREE.MeshBasicMaterial({ color:0xffd27a }),
+        new THREE.SphereGeometry(0.95, 64, 64),
+        new THREE.ShaderMaterial({
+            uniforms: sunUniforms,
+            vertexShader: `
+                varying vec3 vN;
+                varying vec3 vPos;
+                void main() {
+                    vN = normalize(normalMatrix * normal);
+                    vPos = position;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }`,
+            fragmentShader: `
+                uniform float uTime;
+                varying vec3 vN;
+                varying vec3 vPos;
+                float hash(vec3 p){ return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+                float noise(vec3 p){
+                    vec3 i = floor(p), f = fract(p);
+                    f = f*f*(3.0-2.0*f);
+                    return mix(
+                        mix(mix(hash(i),                hash(i+vec3(1,0,0)), f.x),
+                            mix(hash(i+vec3(0,1,0)),    hash(i+vec3(1,1,0)), f.x), f.y),
+                        mix(mix(hash(i+vec3(0,0,1)),    hash(i+vec3(1,0,1)), f.x),
+                            mix(hash(i+vec3(0,1,1)),    hash(i+vec3(1,1,1)), f.x), f.y),
+                        f.z);
+                }
+                void main() {
+                    float n = noise(vPos *  4.0 + vec3(uTime * 0.18));
+                    n     += 0.55 * noise(vPos *  9.0 - vec3(uTime * 0.09));
+                    n     += 0.25 * noise(vPos * 18.0 + vec3(uTime * 0.04));
+                    vec3 hot  = vec3(1.00, 0.93, 0.55);
+                    vec3 warm = vec3(1.00, 0.62, 0.22);
+                    float t = smoothstep(0.45, 1.20, n);
+                    vec3 col = mix(warm, hot, t);
+                    // Limb darkening
+                    float edge = pow(max(vN.z, 0.0), 0.55);
+                    col *= 0.55 + 0.55 * edge;
+                    gl_FragColor = vec4(col, 1.0);
+                }`,
+        }),
     );
+    sun.userData = { kind:'sun', key:'sun', label:'Sun' };
     scene.add(sun);
+    meshes.sun = sun;
 
-    // Glow halo
-    const halo = new THREE.Mesh(
-        new THREE.SphereGeometry(1.6, 48, 48),
+    // Inner halo
+    scene.add(new THREE.Mesh(
+        new THREE.SphereGeometry(1.32, 48, 48),
         new THREE.ShaderMaterial({
             transparent:true, depthWrite:false, side:THREE.BackSide,
             blending:THREE.AdditiveBlending,
-            uniforms:{},
             vertexShader:`varying vec3 vN; void main(){ vN=normalize(normalMatrix*normal);
                 gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
             fragmentShader:`varying vec3 vN;
-                void main(){ float r=pow(1.-abs(vN.z),3.); gl_FragColor=vec4(1.,.85,.5,r*.55); }`,
+                void main(){ float r=pow(1.-abs(vN.z),2.4); gl_FragColor=vec4(1.0,0.78,0.40,r*0.85); }`,
         }),
-    );
-    scene.add(halo);
+    ));
 
-    scene.add(new THREE.PointLight(0xfff4c8, 2.0, 0));
-    scene.add(new THREE.AmbientLight(0x222244, 0.8));
+    // Outer corona
+    scene.add(new THREE.Mesh(
+        new THREE.SphereGeometry(2.20, 48, 48),
+        new THREE.ShaderMaterial({
+            transparent:true, depthWrite:false, side:THREE.BackSide,
+            blending:THREE.AdditiveBlending,
+            vertexShader:`varying vec3 vN; void main(){ vN=normalize(normalMatrix*normal);
+                gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
+            fragmentShader:`varying vec3 vN;
+                void main(){ float r=pow(1.-abs(vN.z),3.6); gl_FragColor=vec4(1.0,0.86,0.55,r*0.42); }`,
+        }),
+    ));
+
+    scene.add(new THREE.PointLight(0xfff4c8, 2.4, 0));
+    scene.add(new THREE.AmbientLight(0x223044, 0.7));
 }
 
 // ── Planet meshes + orbit rings ──────────────────────────────────────
-const meshes = {};
 const orbits = {};
 
 function buildOrbitRing(fn, color) {
@@ -1206,17 +1361,82 @@ function refreshOrbitRing(body, jdCenter) {
     ring.geo.computeBoundingSphere();
 }
 
-for (const body of BODIES) {
-    const m = new THREE.Mesh(
-        new THREE.SphereGeometry(body.size, 24, 24),
-        new THREE.MeshStandardMaterial({
-            color:body.color, emissive:body.color, emissiveIntensity:0.35,
-            roughness:0.6, metalness:0.05,
+// Fresnel-edge atmospheric halo shared across planets (BackSide shell).
+function makeAtmosphere(color, size, intensity = 1.0) {
+    return new THREE.Mesh(
+        new THREE.SphereGeometry(size * 1.38, 32, 32),
+        new THREE.ShaderMaterial({
+            transparent:true, depthWrite:false, side:THREE.BackSide,
+            blending:THREE.AdditiveBlending,
+            uniforms:{ uColor:{ value:new THREE.Color(color) }, uK:{ value:intensity } },
+            vertexShader:`varying vec3 vN; void main(){ vN=normalize(normalMatrix*normal);
+                gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
+            fragmentShader:`uniform vec3 uColor; uniform float uK; varying vec3 vN;
+                void main(){
+                    float r = pow(1.0 - abs(vN.z), 2.0);
+                    gl_FragColor = vec4(uColor, r * 0.55 * uK);
+                }`,
         }),
     );
+}
+
+for (const body of BODIES) {
+    const m = new THREE.Mesh(
+        new THREE.SphereGeometry(body.size, 36, 36),
+        new THREE.MeshStandardMaterial({
+            color:body.color, emissive:body.color, emissiveIntensity:0.22,
+            roughness:0.72, metalness:0.10,
+        }),
+    );
+    m.userData = { kind:'planet', key:body.key, label:body.name };
     scene.add(m);
     meshes[body.key] = m;
     orbits[body.key] = buildOrbitRing(body.fn, body.color);
+
+    // Atmospheric halo (Fresnel BackSide shell). Earth/Venus/Neptune
+    // get a stronger glow; airless bodies a subtler one.
+    const atmK = (body.key === 'earth' || body.key === 'venus' || body.key === 'neptune' || body.key === 'uranus') ? 1.4
+               : (body.key === 'jupiter' || body.key === 'saturn') ? 1.1
+               : 0.65;
+    m.add(makeAtmosphere(body.color, body.size, atmK));
+
+    // Saturn ring system
+    if (body.key === 'saturn') {
+        const rIn  = body.size * 1.42;
+        const rOut = body.size * 2.45;
+        const ringGeom = new THREE.RingGeometry(rIn, rOut, 96, 1);
+        // Rewrite UVs so x = radial fraction (0 at inner edge, 1 at outer).
+        const pos = ringGeom.attributes.position.array;
+        const uvA = ringGeom.attributes.uv.array;
+        for (let i = 0; i < pos.length; i += 3) {
+            const r = Math.hypot(pos[i], pos[i+1]);
+            uvA[(i/3) * 2]     = (r - rIn) / (rOut - rIn);
+            uvA[(i/3) * 2 + 1] = 0.5;
+        }
+        ringGeom.attributes.uv.needsUpdate = true;
+        const ringMat = new THREE.ShaderMaterial({
+            transparent:true, depthWrite:false, side:THREE.DoubleSide,
+            uniforms:{ uColor:{ value:new THREE.Color(0xead9a8) } },
+            vertexShader:`varying vec2 vUv; void main(){ vUv=uv;
+                gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
+            fragmentShader:`uniform vec3 uColor; varying vec2 vUv;
+                void main(){
+                    float r = vUv.x;
+                    // Fine banding + a Cassini-division-like gap near 0.55
+                    float band = 0.55 + 0.45 * sin(r * 90.0);
+                    float gap  = smoothstep(0.50, 0.55, r) * (1.0 - smoothstep(0.58, 0.63, r));
+                    float a    = 0.70 * band * (1.0 - 0.85 * gap);
+                    a *= smoothstep(0.0, 0.06, r) * (1.0 - smoothstep(0.93, 1.0, r));
+                    vec3 c = uColor * (0.65 + 0.45 * band);
+                    gl_FragColor = vec4(c, a);
+                }`,
+        });
+        const ring = new THREE.Mesh(ringGeom, ringMat);
+        // Lay flat in ecliptic, then tilt to Saturn's obliquity
+        ring.rotation.x = Math.PI / 2;
+        ring.rotation.y = 26.73 * Math.PI / 180;
+        m.add(ring);
+    }
 }
 
 // ── Asteroid meshes + thin orbit rings ───────────────────────────────
@@ -1283,6 +1503,58 @@ lagMarkers.l4.visible = false;
 lagMarkers.l5.visible = false;
 scene.add(lagMarkers.l4);
 scene.add(lagMarkers.l5);
+
+// ── Selection + hover rings ──────────────────────────────────────────
+// Camera-facing flat rings that orbit the currently-selected and
+// currently-hovered body. Updated each frame in `tick()` so the rings
+// always face the camera (sprite-style billboarding).
+function makeIndicatorRing(color, opacity, thicknessFrac) {
+    const geom = new THREE.RingGeometry(1.0, 1.0 + thicknessFrac, 64);
+    const mat  = new THREE.MeshBasicMaterial({
+        color, transparent:true, opacity,
+        depthWrite:false, side:THREE.DoubleSide,
+        blending:THREE.AdditiveBlending,
+    });
+    const m = new THREE.Mesh(geom, mat);
+    m.visible = false;
+    m.renderOrder = 10;
+    return m;
+}
+const selectionRing = makeIndicatorRing(0xb78cff, 0.95, 0.16);
+const hoverRing     = makeIndicatorRing(0xfff0a0, 0.55, 0.10);
+scene.add(selectionRing);
+scene.add(hoverRing);
+
+// Quick lookup of body radius (scene units) by key — used to scale rings.
+const BODY_SIZE_BY_KEY = { sun: 0.95 };
+for (const b of BODIES)    BODY_SIZE_BY_KEY[b.key] = b.size;
+for (const a of ASTEROIDS) BODY_SIZE_BY_KEY[a.key] = a.size;
+
+function updateSelectionRing() {
+    if (!selected || !meshes[selected.key]) {
+        selectionRing.visible = false;
+        return;
+    }
+    const m = meshes[selected.key];
+    const s = (BODY_SIZE_BY_KEY[selected.key] || 0.18) * 1.95;
+    selectionRing.scale.setScalar(s);
+    selectionRing.position.copy(m.position);
+    selectionRing.lookAt(camera.position);
+    selectionRing.visible = true;
+}
+
+function updateHoverRing(key) {
+    if (!key || !meshes[key] || (selected && key === selected.key)) {
+        hoverRing.visible = false;
+        return;
+    }
+    const m = meshes[key];
+    const s = (BODY_SIZE_BY_KEY[key] || 0.18) * 2.20;
+    hoverRing.scale.setScalar(s);
+    hoverRing.position.copy(m.position);
+    hoverRing.lookAt(camera.position);
+    hoverRing.visible = true;
+}
 
 /**
  * Heliocentric ecliptic position of L4/L5 for a given primary, computed
@@ -2054,15 +2326,41 @@ const arrowHead = new THREE.Mesh(
 arrowHead.visible = false;
 scene.add(arrowHead);
 
+// Hover state — which body the cursor is currently over (raycast every move).
+let hoveredKey = null;
+
 renderer.domElement.addEventListener('mousemove', ev => {
-    if (!grav.enabled) return;
     const rect = renderer.domElement.getBoundingClientRect();
     grav.screenX = ev.clientX - rect.left;
     grav.screenY = ev.clientY - rect.top;
-    grav.hovering = true;
+    grav.hovering = grav.enabled;
+
+    // Body-pick raycast for hover ring + cursor styling. Always on, even
+    // when hover-gravity is disabled, so picking the bodies still works.
+    mouseNDC.x =  (grav.screenX / rect.width)  * 2 - 1;
+    mouseNDC.y = -(grav.screenY / rect.height) * 2 + 1;
+    raycaster.setFromCamera(mouseNDC, camera);
+    const hits = raycaster.intersectObjects(pickables(), true);
+    let newKey = null;
+    if (hits.length) {
+        let obj = hits[0].object;
+        while (obj && (!obj.userData || !obj.userData.kind)) obj = obj.parent;
+        if (obj && obj.userData && obj.userData.kind) {
+            newKey = obj.userData.key
+                  || (obj.userData.primary
+                      ? `${obj.userData.primary}-${obj.userData.point}`
+                      : null);
+        }
+    }
+    if (newKey !== hoveredKey) {
+        hoveredKey = newKey;
+        renderer.domElement.style.cursor = hoveredKey ? 'pointer' : '';
+    }
 });
 renderer.domElement.addEventListener('mouseleave', () => {
     grav.hovering = false;
+    hoveredKey = null;
+    renderer.domElement.style.cursor = '';
     if (!grav.pinned) {
         cursorMarker.visible = false;
         arrowLine.visible    = false;
@@ -2071,9 +2369,10 @@ renderer.domElement.addEventListener('mouseleave', () => {
     }
 });
 
-// ── Click → pin a clickable marker (asteroid or L4/L5) as gravity sample
+// ── Pickable bodies — Sun + 8 planets + 4 asteroids + visible L4/L5 ──
 const pickables = () => {
-    const list = [];
+    const list = [meshes.sun];
+    for (const b of BODIES)    list.push(meshes[b.key]);
     for (const a of ASTEROIDS) list.push(meshes[a.key]);
     if (lagMarkers.l4.visible) list.push(lagMarkers.l4);
     if (lagMarkers.l5.visible) list.push(lagMarkers.l5);
@@ -2081,13 +2380,14 @@ const pickables = () => {
 };
 
 renderer.domElement.addEventListener('click', ev => {
-    if (!grav.enabled) return;
     const rect = renderer.domElement.getBoundingClientRect();
     mouseNDC.x =  ((ev.clientX - rect.left) / rect.width)  * 2 - 1;
     mouseNDC.y = -((ev.clientY - rect.top)  / rect.height) * 2 + 1;
     raycaster.setFromCamera(mouseNDC, camera);
     raycaster.params.Mesh = raycaster.params.Mesh || {};
-    const hits = raycaster.intersectObjects(pickables(), false);
+    // Recursive=true so we can hit the planet sphere through its child
+    // atmosphere shell / Saturn ring without losing the userData lookup.
+    const hits = raycaster.intersectObjects(pickables(), true);
     if (!hits.length) {
         // Click on empty space clears the pin (keeps live hover working).
         if (grav.pinned) {
@@ -2096,9 +2396,32 @@ renderer.domElement.addEventListener('click', ev => {
         }
         return;
     }
-    const obj = hits[0].object;
-    const ud  = obj.userData || {};
-    if (ud.kind === 'asteroid') {
+    // Walk up to the first ancestor with a userData.kind tag (atmosphere
+    // shells and ring meshes are children of the planet mesh).
+    let obj = hits[0].object;
+    while (obj && (!obj.userData || !obj.userData.kind)) obj = obj.parent;
+    if (!obj || !obj.userData || !obj.userData.kind) return;
+    const ud = obj.userData;
+
+    if (ud.kind === 'planet') {
+        selectBody(ud.key);
+        grav.pinned = {
+            kind:    'planet',
+            key:     ud.key,
+            label:   BODY_LABEL[ud.key],
+            getAuPos: jd => {
+                const p = PLANET_FN_LOOKUP[ud.key](jd);
+                return { x:p.x_AU, y:p.y_AU, z:p.z_AU };
+            },
+        };
+    } else if (ud.kind === 'sun') {
+        grav.pinned = {
+            kind:    'sun',
+            key:     'sun',
+            label:   'Sun',
+            getAuPos: () => ({ x:0, y:0, z:0 }),
+        };
+    } else if (ud.kind === 'asteroid') {
         grav.pinned = {
             kind:  'asteroid',
             key:   ud.key,
@@ -2195,7 +2518,11 @@ function updateHoverGravity() {
     }
     grav.rayHit = { x:hit.x, y:hit.y, z:hit.z, au };
 
-    const excludeKey = (grav.pinned && grav.pinned.kind === 'asteroid') ? grav.pinned.key : null;
+    // Exclude the pinned body's own contribution to avoid 1/r² singularity
+    // when the sample point is at its own centre (any non-empty pin).
+    const excludeKey = grav.pinned
+        ? (grav.pinned.kind === 'lagrange' ? null : grav.pinned.key)
+        : null;
     const G = computeGravity(au.x, au.y, au.z, state.jd, excludeKey);
 
     // ── Marker
@@ -2239,7 +2566,22 @@ function updateHoverGravity() {
 
     let html = '';
     if (pinLabel) {
-        html += `<div class="tt-hdr" style="color:#7fdb9a; border-bottom:1px solid rgba(127,219,154,.25); padding-bottom:4px; margin-bottom:6px;">📌 ${pinLabel} <span style="margin-left:auto; font-weight:400; font-size:.62rem; color:#776">click empty space to unpin</span></div>`;
+        const pinKey   = grav.pinned ? grav.pinned.key : null;
+        const pinHex   = (pinKey && BODY_COLOR[pinKey]) || '#7fdb9a';
+        html += `<div class="tt-hdr" style="color:${pinHex}; border-bottom:1px solid ${pinHex}40; padding-bottom:4px; margin-bottom:6px;"><span class="dot" style="background:${pinHex};color:${pinHex}"></span>${pinLabel}<span style="margin-left:auto; font-weight:400; font-size:.62rem; color:#776">click empty space to unpin</span></div>`;
+        // Body fact card — only when pinned to a real body (not Lagrange).
+        const bi = pinKey && BODY_INFO[pinKey];
+        if (bi) {
+            html += `<div class="tt-row"><span class="tt-k">mass</span><span class="tt-v">${bi.mass}</span></div>`;
+            html += `<div class="tt-row"><span class="tt-k">radius</span><span class="tt-v">${bi.radius}</span></div>`;
+            html += `<div class="tt-row"><span class="tt-k">rot. period</span><span class="tt-v">${bi.rot}</span></div>`;
+            html += `<div class="tt-row"><span class="tt-k">axial tilt</span><span class="tt-v">${bi.tilt}</span></div>`;
+            if (PERIOD_D[pinKey]) {
+                html += `<div class="tt-row"><span class="tt-k">orb. period</span><span class="tt-v">${formatPeriod(PERIOD_D[pinKey])}</span></div>`;
+            }
+            html += `<div class="tt-row" style="margin-top:3px;"><span class="tt-k" style="color:#bcb; font-style:italic; flex:1;">${bi.desc}</span></div>`;
+            html += `<div class="tt-sep"></div>`;
+        }
     }
     html += `<div class="tt-hdr"><span class="dot" style="background:${domHex};color:${domHex}"></span>${domNm}-dominated</div>`;
     if (useSi) {
@@ -2989,6 +3331,10 @@ function tick(now) {
         setJd(newJd);
     }
     updateHoverGravity();
+    updateSelectionRing();
+    updateHoverRing(hoveredKey);
+    sunUniforms.uTime.value  = now * 0.001;
+    starUniforms.uTime.value = now * 0.001;
     maybePostFieldRequest(now);
     updateArrows(now);
     maybePostStreamRequest(now);

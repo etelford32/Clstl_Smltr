@@ -1,0 +1,1573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jovian System — Galilean Moons & the Laplace Resonance · Parker Physics</title>
+<meta name="description" content="Live Yoshida-4 N-body integration of Jupiter + the four Galilean moons. Watch Io's forced eccentricity, the 1:2:4 mean-motion lock, and the Laplace resonance argument librate around 180°.">
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { height:auto; overflow-y:auto; }
+body {
+    width:100%; min-height:100vh; overflow-x:hidden;
+    background:#040210; color:#d6cfeb;
+    font-family:'Segoe UI', system-ui, sans-serif;
+}
+
+#js-hero {
+    padding:28px 24px 18px;
+    background:linear-gradient(180deg, rgba(255,160,80,.10), rgba(4,2,16,0));
+    border-bottom:1px solid rgba(255,184,80,.18);
+}
+#js-hero h1 {
+    font-size:1.7rem; font-weight:800;
+    background:linear-gradient(100deg,#fff 30%,#ffb070);
+    -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+    margin-bottom:8px;
+}
+#js-hero p { font-size:.92rem; color:#bca; line-height:1.6; max-width:880px; }
+#js-hero .js-tag {
+    display:inline-block; font-family:monospace; font-size:.7rem; letter-spacing:.1em;
+    color:#ffd9a8; background:rgba(255,160,80,.14);
+    border:1px solid rgba(255,184,80,.40); border-radius:4px;
+    padding:3px 8px; margin-bottom:10px; text-transform:uppercase;
+}
+
+/* ── Stage ───────────────────────────────────────────────────────────── */
+#js-stage {
+    position:relative;
+    width:100%; max-width:1280px;
+    margin:18px auto 0;
+    padding:0 18px;
+    display:grid;
+    grid-template-columns:1fr 320px;
+    gap:14px;
+}
+@media (max-width:920px) { #js-stage { grid-template-columns:1fr; } }
+#js-canvas-wrap {
+    position:relative;
+    width:100%; height:560px;
+    border:1px solid rgba(255,184,80,.24);
+    border-radius:14px;
+    overflow:hidden;
+    background:radial-gradient(ellipse at center, #110a04 0%, #02010a 80%);
+    box-shadow:0 12px 40px rgba(0,0,0,.5), inset 0 0 80px rgba(160,80,40,.08);
+}
+#js-canvas-wrap canvas { display:block; width:100%; height:100%; }
+
+/* HUD */
+#js-hud {
+    position:absolute; top:12px; left:14px; right:14px;
+    display:flex; justify-content:space-between; align-items:flex-start;
+    gap:12px; pointer-events:none;
+    font-family:monospace; font-size:.74rem;
+}
+.js-hud-card {
+    background:rgba(8,4,24,.72);
+    border:1px solid rgba(255,184,80,.26);
+    border-radius:6px;
+    padding:8px 11px;
+    color:#ffd9a8;
+    backdrop-filter:blur(6px);
+    pointer-events:auto;
+    line-height:1.55;
+}
+.js-hud-card .lbl { color:#998; font-size:.62rem; letter-spacing:.08em; text-transform:uppercase; display:block; margin-bottom:1px; }
+.js-hud-card .val { color:#fff; font-size:.85rem; font-weight:700; }
+.js-hud-card .sub { color:#bca; font-size:.66rem; margin-top:2px; }
+
+#js-mode-pill {
+    position:absolute; top:12px; left:50%; transform:translateX(-50%);
+    font-family:monospace; font-size:.68rem; letter-spacing:.08em;
+    text-transform:uppercase;
+    background:rgba(8,4,24,.78);
+    border:1px solid rgba(180,140,255,.55);
+    color:#b78cff;
+    padding:5px 12px;
+    border-radius:14px;
+    backdrop-filter:blur(6px);
+    pointer-events:none;
+    transition:all .25s ease;
+}
+#js-mode-pill.play { border-color:rgba(79,201,127,.55); color:#7fdb9a; }
+
+#js-legend {
+    position:absolute; bottom:10px; left:14px;
+    display:flex; gap:10px; flex-wrap:wrap;
+    font-family:monospace; font-size:.66rem;
+    background:rgba(8,4,24,.62);
+    border:1px solid rgba(255,184,80,.22);
+    border-radius:6px;
+    padding:6px 10px;
+    color:#bca;
+    backdrop-filter:blur(6px);
+}
+#js-legend .lg { display:flex; align-items:center; gap:5px; }
+#js-legend .dt { width:8px; height:8px; border-radius:50%; }
+
+/* Side panel */
+#js-side {
+    background:rgba(12,8,30,.82);
+    border:1px solid rgba(255,184,80,.22);
+    border-radius:14px;
+    padding:14px 14px 16px;
+    backdrop-filter:blur(14px);
+    display:flex; flex-direction:column;
+    height:560px; overflow:hidden;
+}
+@media (max-width:920px) { #js-side { height:auto; max-height:none; } }
+.js-side-title {
+    font-size:.66rem; color:#998; letter-spacing:.12em;
+    text-transform:uppercase; font-weight:700; margin-bottom:8px;
+}
+.js-body-grid {
+    display:grid; grid-template-columns:repeat(5, 1fr); gap:5px;
+    margin-bottom:14px;
+}
+.js-body-btn {
+    background:rgba(0,0,0,.30);
+    border:1px solid rgba(255,184,80,.22);
+    border-radius:5px;
+    padding:6px 4px 4px;
+    cursor:pointer;
+    text-align:center;
+    transition:all .15s;
+    font-family:inherit;
+    color:#aa9;
+}
+.js-body-btn:hover { border-color:rgba(255,184,80,.55); color:#fff; }
+.js-body-btn.sel {
+    background:rgba(255,184,80,.18);
+    border-color:#ffb070;
+    color:#fff;
+    box-shadow:0 0 10px rgba(255,184,80,.30);
+}
+.js-body-dot {
+    width:14px; height:14px; border-radius:50%;
+    margin:0 auto 3px;
+    box-shadow:0 0 6px currentColor;
+}
+.js-body-name { font-size:.62rem; font-weight:600; letter-spacing:.04em; }
+
+.js-sel-head {
+    display:flex; align-items:center; gap:8px;
+    padding:6px 0 10px;
+    border-bottom:1px solid rgba(255,184,80,.18);
+    margin-bottom:10px;
+}
+.js-sel-dot { width:18px; height:18px; border-radius:50%; box-shadow:0 0 8px currentColor; }
+.js-sel-name { font-size:1.05rem; font-weight:700; color:#fff; }
+.js-sel-sub  { font-size:.66rem; color:#998; font-family:monospace; margin-left:auto; }
+
+.js-el-table {
+    flex:1;
+    display:grid; grid-template-columns:1fr auto;
+    column-gap:10px; row-gap:6px;
+    align-content:start;
+    font-family:monospace; font-size:.78rem;
+    overflow-y:auto;
+}
+.js-el-k { color:#aa9; display:flex; align-items:baseline; gap:6px; }
+.js-el-k .sym { color:#ffd9a8; font-weight:700; min-width:20px; display:inline-block; }
+.js-el-k .nm  { font-size:.66rem; color:#776; }
+.js-el-v { color:#fff; font-variant-numeric:tabular-nums; text-align:right; font-weight:600; }
+.js-el-v .un { color:#776; font-weight:400; margin-left:4px; font-size:.7rem; }
+.js-el-foot {
+    margin-top:10px; padding-top:8px;
+    border-top:1px solid rgba(255,184,80,.16);
+    font-family:monospace; font-size:.62rem; color:#776;
+    line-height:1.55;
+}
+
+/* Time / control card */
+#js-time { width:100%; max-width:1280px; margin:14px auto 0; padding:0 18px; }
+.js-time-card {
+    background:rgba(12,8,30,.78); backdrop-filter:blur(14px);
+    border:1px solid rgba(255,184,80,.22);
+    border-radius:12px;
+    padding:16px 18px;
+}
+.js-row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+.js-row:last-child { margin-bottom:0; }
+
+.js-btn {
+    background:rgba(255,184,80,.10);
+    color:#ffd9a8;
+    border:1px solid rgba(255,184,80,.32);
+    border-radius:6px;
+    padding:7px 13px;
+    font-family:inherit; font-size:.78rem; font-weight:600;
+    cursor:pointer;
+    transition:background .15s, color .15s, border-color .15s;
+}
+.js-btn:hover { background:rgba(255,184,80,.24); color:#fff; }
+.js-btn.primary {
+    background:rgba(79,201,127,.16); color:#7fdb9a; border-color:rgba(79,201,127,.45);
+}
+.js-btn.primary:hover { background:rgba(79,201,127,.30); color:#fff; }
+.js-btn.warn {
+    background:rgba(255,184,48,.14); color:#fc7; border-color:rgba(255,184,48,.40);
+}
+.js-btn.toggle.on {
+    background:rgba(180,140,255,.20); color:#fff; border-color:rgba(180,140,255,.55);
+}
+
+.js-label {
+    font-family:monospace; font-size:.7rem; letter-spacing:.06em;
+    text-transform:uppercase; color:#998;
+}
+.js-select {
+    background:rgba(0,0,0,.30);
+    color:#eef;
+    border:1px solid rgba(255,184,80,.32);
+    border-radius:5px;
+    padding:6px 9px;
+    font-family:monospace; font-size:.78rem;
+    cursor:pointer;
+}
+.js-slider {
+    flex:1; min-width:240px;
+    -webkit-appearance:none; appearance:none;
+    height:6px; border-radius:3px;
+    background:linear-gradient(90deg, rgba(255,184,80,.35), rgba(180,140,255,.50), rgba(255,184,80,.35));
+    outline:none; cursor:pointer;
+}
+.js-slider::-webkit-slider-thumb {
+    -webkit-appearance:none; appearance:none;
+    width:18px; height:18px; border-radius:50%;
+    background:#fff; border:2px solid #ffb070;
+    box-shadow:0 0 8px rgba(255,184,80,.6);
+    cursor:grab;
+}
+.js-slider::-moz-range-thumb {
+    width:18px; height:18px; border-radius:50%;
+    background:#fff; border:2px solid #ffb070;
+    box-shadow:0 0 8px rgba(255,184,80,.6);
+    cursor:grab;
+}
+
+/* Plot panel */
+#js-app {
+    max-width:1280px; margin:0 auto;
+    padding:18px 18px 64px;
+    display:grid; gap:18px;
+}
+.js-panel {
+    background:rgba(12,8,30,.72); backdrop-filter:blur(14px);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:12px;
+    padding:18px 20px;
+}
+.js-panel h2 {
+    font-size:.78rem; color:#ffb070; text-transform:uppercase;
+    letter-spacing:.12em; font-weight:800; margin-bottom:12px;
+}
+.js-panel p { font-size:.86rem; color:#bcb; line-height:1.6; margin-bottom:8px; }
+.js-panel p:last-child { margin-bottom:0; }
+.js-panel code {
+    font-family:monospace; font-size:.78rem;
+    background:rgba(255,255,255,.05); color:#fc7;
+    padding:1px 6px; border-radius:3px;
+}
+
+.js-plot-head {
+    display:flex; align-items:baseline; gap:14px;
+    margin-bottom:8px; flex-wrap:wrap;
+}
+.js-plot-legend { display:flex; gap:10px; flex-wrap:wrap; font-family:monospace; font-size:.7rem; color:#998; }
+.js-plot-legend .lg { display:flex; align-items:center; gap:5px; }
+.js-plot-legend .swatch { display:inline-block; width:14px; height:8px; border-radius:1px; }
+.js-plot-wrap { position:relative; height:230px; border-radius:6px; background:rgba(0,0,0,.22); border:1px solid rgba(180,140,255,.10); }
+#js-plot-canvas { display:block; width:100%; height:100%; }
+
+.js-plot-readout {
+    display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr));
+    gap:8px; margin-top:10px;
+}
+.js-plot-readout .cell {
+    background:rgba(255,255,255,.03);
+    border:1px solid rgba(255,184,80,.16);
+    border-radius:6px;
+    padding:8px 10px;
+    font-family:monospace; font-size:.74rem;
+}
+.js-plot-readout .cell .k { color:#998; display:block; font-size:.62rem; text-transform:uppercase; letter-spacing:.06em; }
+.js-plot-readout .cell .v { color:#fff; font-weight:700; }
+
+.js-warn {
+    font-size:.74rem; color:#998; font-style:italic;
+    border-left:2px solid rgba(255,184,48,.4); padding-left:10px; margin-top:10px;
+}
+
+/* Tooltip */
+#js-tooltip {
+    position:absolute;
+    pointer-events:none;
+    background:rgba(8,4,24,.92);
+    border:1px solid rgba(255,184,80,.40);
+    border-radius:6px;
+    padding:8px 10px;
+    font-family:ui-monospace, Menlo, monospace;
+    font-size:.7rem;
+    color:#ffe9c0;
+    backdrop-filter:blur(8px);
+    box-shadow:0 4px 14px rgba(0,0,0,.5);
+    z-index:30;
+    line-height:1.45;
+    transform:translate(12px, 14px);
+    min-width:180px;
+    transition:opacity .12s;
+    opacity:0;
+}
+#js-tooltip.show { opacity:1; }
+#js-tooltip .tt-row { display:flex; justify-content:space-between; gap:10px; }
+#js-tooltip .tt-k { color:#998; }
+#js-tooltip .tt-v { color:#fff; font-weight:700; }
+#js-tooltip .tt-hdr {
+    display:flex; align-items:center; gap:6px;
+    color:#ffb070; font-weight:700; font-size:.74rem;
+    margin-bottom:5px; padding-bottom:4px;
+    text-transform:uppercase; letter-spacing:.04em;
+    border-bottom:1px solid rgba(255,184,80,.25);
+}
+#js-tooltip .tt-hdr .dot { width:8px; height:8px; border-radius:50%; box-shadow:0 0 5px currentColor; }
+
+</style>
+<link rel="stylesheet" href="js/nav-styles.css">
+</head>
+<body>
+
+<script type="importmap">
+{
+    "imports": {
+        "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+}
+</script>
+
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260503"; initNav("jupiter-system");</script>
+
+<div id="js-hero">
+    <span class="js-tag">Live Yoshida-4 Integration · 1:2:4 Mean-Motion Resonance</span>
+    <h1>Jovian System — The Galilean Moons</h1>
+    <p>Live N-body integration of Jupiter and its four Galilean moons. Io, Europa, and Ganymede are locked in a 1:2:4 orbital resonance — every 7 days, while Ganymede traces one orbit, Europa traces two and Io traces four. The mutual perturbations force a non-zero eccentricity on Io that powers its volcanism through tidal flexing, while the Laplace resonance argument <code>φ_L = λ_Io − 3λ_Europa + 2λ_Ganymede</code> librates tightly around 180° — a coordinated dance that Laplace proved stable in 1788.</p>
+</div>
+
+<!-- ═══ STAGE ═══ -->
+<div id="js-stage">
+    <div id="js-canvas-wrap">
+        <div id="js-hud">
+            <div class="js-hud-card">
+                <span class="lbl">Sim Time</span>
+                <div class="val" id="js-time-display">+ 0.0 d</div>
+                <div class="sub" id="js-jd-display">JD —</div>
+            </div>
+            <div class="js-hud-card" style="text-align:right;">
+                <span class="lbl">Energy Drift</span>
+                <div class="val" id="js-energy-display">—</div>
+                <div class="sub" id="js-step-display">dt = — s</div>
+            </div>
+        </div>
+        <div id="js-mode-pill">⏸ Paused</div>
+        <div id="js-legend"></div>
+        <div id="js-tooltip" role="tooltip" aria-hidden="true"></div>
+    </div>
+
+    <aside id="js-side">
+        <div class="js-side-title">Body Picker</div>
+        <div class="js-body-grid" id="js-body-grid"></div>
+
+        <div class="js-sel-head">
+            <span class="js-sel-dot" id="js-sel-dot"></span>
+            <span class="js-sel-name" id="js-sel-name">Io</span>
+            <span class="js-sel-sub" id="js-sel-period">1.769 d</span>
+        </div>
+
+        <div class="js-el-table" id="js-el-table"></div>
+
+        <div class="js-el-foot">
+            Osculating elements relative to the Jovian centre, computed
+            from the live N-body state. Initial conditions seeded from
+            JPL planetary fact sheets at J2000.
+        </div>
+    </aside>
+</div>
+
+<!-- ═══ TIME CONTROLS ═══ -->
+<div id="js-time">
+    <div class="js-time-card">
+
+        <div class="js-row">
+            <button class="js-btn primary" id="js-play">▶ Play</button>
+            <span class="js-label">Speed</span>
+            <select class="js-select" id="js-speed">
+                <option value="3600">1 hr / s</option>
+                <option value="21600">6 hr / s</option>
+                <option value="86400" selected>1 d / s</option>
+                <option value="259200">3 d / s</option>
+                <option value="864000">10 d / s</option>
+                <option value="2592000">30 d / s</option>
+                <option value="8640000">100 d / s</option>
+            </select>
+            <button class="js-btn" id="js-step-back">◄ −1 hr</button>
+            <button class="js-btn" id="js-step-fwd">+1 hr ►</button>
+            <span style="flex:1"></span>
+            <button class="js-btn warn" id="js-reset">⟲ Reset to J2000</button>
+        </div>
+
+        <div class="js-row">
+            <span class="js-label" style="width:90px">Trails</span>
+            <button class="js-btn toggle on" id="js-trails-toggle">Trails: ON</button>
+            <span class="js-label">Length</span>
+            <select class="js-select" id="js-trail-len">
+                <option value="600">~1 d</option>
+                <option value="3600" selected>~6 d</option>
+                <option value="10800">~18 d</option>
+            </select>
+            <span class="js-label" style="margin-left:14px">Ghost orbits</span>
+            <button class="js-btn toggle" id="js-ghost-toggle">Keplerian ghost: OFF</button>
+        </div>
+
+        <div class="js-row">
+            <span class="js-label" style="width:90px">View</span>
+            <button class="js-btn toggle" id="js-view-top">Top-down</button>
+            <button class="js-btn toggle on" id="js-view-3d">3D oblique</button>
+            <span class="js-label" style="margin-left:14px">Scale</span>
+            <select class="js-select" id="js-scale">
+                <option value="full" selected>Realistic (Callisto fits)</option>
+                <option value="zoom">Inner moons (Io–Europa)</option>
+            </select>
+        </div>
+
+    </div>
+</div>
+
+<div id="js-app">
+
+    <!-- Resonance & eccentricity plot -->
+    <section class="js-panel">
+        <div class="js-plot-head">
+            <h2 style="flex:0 0 auto">Laplace Resonance Argument · Forced Eccentricities <span style="color:#776; text-transform:none; letter-spacing:0; font-weight:400; font-size:.7rem">— last ~30 d window</span></h2>
+            <div class="js-plot-legend">
+                <span class="lg"><span class="swatch" style="background:#ffb070"></span>φ_L = λ_Io − 3λ_E + 2λ_G</span>
+                <span class="lg"><span class="swatch" style="background:#ffd944"></span>e_Io</span>
+                <span class="lg"><span class="swatch" style="background:#a0c8ff"></span>e_Europa</span>
+                <span class="lg"><span class="swatch" style="background:#b78cff"></span>e_Ganymede</span>
+            </div>
+        </div>
+        <div class="js-plot-wrap">
+            <canvas id="js-plot-canvas"></canvas>
+        </div>
+        <div class="js-plot-readout">
+            <div class="cell"><span class="k">φ_L (now)</span><span class="v" id="rd-phi">—</span></div>
+            <div class="cell"><span class="k">φ_L libration peak</span><span class="v" id="rd-phi-amp">—</span></div>
+            <div class="cell"><span class="k">e_Io (now)</span><span class="v" id="rd-eIo">—</span></div>
+            <div class="cell"><span class="k">e_Europa (now)</span><span class="v" id="rd-eE">—</span></div>
+            <div class="cell"><span class="k">e_Ganymede (now)</span><span class="v" id="rd-eG">—</span></div>
+            <div class="cell"><span class="k">n_Io / n_E / n_G</span><span class="v" id="rd-mmr">—</span></div>
+        </div>
+        <p class="js-warn">Laplace (1788) showed that <code>n_Io − 2n_Europa</code> and <code>n_Europa − 2n_Ganymede</code> are
+        commensurable to one part in 10⁻⁹, locking the three innermost Galilean moons into a stable
+        orbital resonance. The angle <code>φ_L</code> librates tightly around 180° — a true triple conjunction
+        (φ_L = 0) never occurs. Io's <em>forced</em> eccentricity (~0.0041) drives the tidal flexing
+        responsible for its sulfur-fed volcanism. Callisto sits outside the resonance.</p>
+    </section>
+
+    <!-- Notes -->
+    <section class="js-panel">
+        <h2>Why this matters</h2>
+        <p><strong>Tidal heating.</strong> If Io's orbit were a perfect circle, tidal stretching from Jupiter would be static — no heating. The Laplace resonance with Europa pumps Io's eccentricity up to ~0.0041, which causes the tidal bulge to flex by ~100 m every orbit. Dissipation of that flexing pours ~10¹⁴ W into Io's interior, more than a thousand times Earth's geothermal flux per unit area, powering the most volcanically active body in the solar system.</p>
+        <p><strong>Stable for billions of years.</strong> Pierre-Simon Laplace proved the resonance dynamically stable in 1788. Numerical experiments confirm it has held since shortly after the moons formed; tidal evolution drove the system <em>into</em> the resonance, not out of it. The same physics binds Pluto–Charon, Saturn's Mimas–Tethys, and exoplanet systems like TRAPPIST-1.</p>
+        <p><strong>What you're seeing.</strong> A pure Newtonian Yoshida-4 integration in barycentric SI units. No fudge, no special-case forcing — the resonance falls out of pairwise gravity alone. Energy and angular momentum are bounded (symplectic) so the integration stays physical for arbitrarily long runs.</p>
+    </section>
+
+    <section class="js-panel">
+        <h2>References</h2>
+        <p style="font-family:monospace; font-size:.74rem; line-height:1.7; color:#998;">
+            Laplace, P.-S. (1788) — <em>Mémoire sur les inégalités des satellites de Jupiter</em>.<br>
+            Yoshida, H. (1990) — <em>Construction of higher order symplectic integrators</em>.<br>
+            Murray &amp; Dermott (1999) — <em>Solar System Dynamics</em>, ch. 8 (resonances).<br>
+            de Pater &amp; Lissauer (2015) — <em>Planetary Sciences</em> 2nd ed.<br>
+            JPL Planetary Fact Sheets — <code>nssdc.gsfc.nasa.gov/planetary/factsheet/</code>
+        </p>
+    </section>
+
+</div>
+
+<!-- ═══ SIMULATION ═══ -->
+<script type="module">
+import * as THREE        from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { JupiterSkin }   from './js/jupiter-skin.js';
+import {
+    yoshida4Step, totalEnergy, elementsToState, stateToElements, G_SI,
+} from './js/gravity-lab/physics.js';
+
+// ── Constants ────────────────────────────────────────────────────────
+const KM = 1000;                          // m per km
+const D2R = Math.PI / 180;
+const R2D = 180 / Math.PI;
+const J2000_JD = 2451545.0;               // 2000-01-01 12:00 UT
+
+// Jupiter radius (m) — used as the natural length unit for the scene.
+const R_JUP_KM = 71492;
+const R_JUP_M  = R_JUP_KM * KM;
+
+// One Jupiter radius = 1 scene unit. So a Galilean moon at 5.9 R_jup
+// (Io) → orbit radius 5.9 in the 3D viewport.
+const M_PER_UNIT = R_JUP_M;
+const m2u = m => m / M_PER_UNIT;
+
+// ── Body table (bodies[0] = Jupiter, [1..4] = Io, Europa, Ganymede, Callisto) ──
+// Mass (kg) and visual color.
+const JOVIAN_BODIES = [
+    { key:'jupiter',  name:'Jupiter',  mass:1.89813e27, radius_km:71492,  color:0xd5a76b, vis:1.00 },
+    { key:'io',       name:'Io',       mass:8.9319e22,  radius_km: 1821.6,color:0xddc63a, vis:0.18 },
+    { key:'europa',   name:'Europa',   mass:4.7998e22,  radius_km: 1560.8,color:0xd4c8a8, vis:0.14 },
+    { key:'ganymede', name:'Ganymede', mass:1.4819e23,  radius_km: 2634.1,color:0xa89880, vis:0.22 },
+    { key:'callisto', name:'Callisto', mass:1.0759e23,  radius_km: 2410.3,color:0x8e7967, vis:0.20 },
+];
+const KEYS = JOVIAN_BODIES.map(b => b.key);
+const idxOf = Object.fromEntries(KEYS.map((k, i) => [k, i]));
+
+// ── Initial Jovicentric mean Keplerian elements at J2000 (TDB).
+// a in km, angles in degrees. Source: JPL planet/sat fact sheets, mean values.
+// These are deliberately mean elements — the live N-body shows the
+// mutual-perturbation oscillations on top of these baselines.
+const INIT_EL = {
+    io:       { a_km: 421_800,  e:0.0041, i_deg:0.040, raan_deg:43.977, argp_deg:84.129, M_deg: 22.0 },
+    europa:   { a_km: 671_100,  e:0.0094, i_deg:0.470, raan_deg:219.106,argp_deg:88.970, M_deg:308.0 },
+    ganymede: { a_km:1_070_400, e:0.0013, i_deg:0.180, raan_deg:63.552, argp_deg:192.417,M_deg:179.0 },
+    callisto: { a_km:1_882_700, e:0.0074, i_deg:0.190, raan_deg:298.848,argp_deg:52.643, M_deg:345.0 },
+};
+
+const PERIOD_D = {
+    jupiter:  4332.589,    // (around Sun, for label only)
+    io:       1.769,
+    europa:   3.551,
+    ganymede: 7.155,
+    callisto: 16.689,
+};
+
+// ── Build initial state (SI, jovicentric, ecliptic-of-date frame) ────
+// We treat Jupiter's barycentric position as 0 and set its velocity to
+// cancel total momentum after the moons are placed.
+function buildInitialBodies() {
+    const bodies = JOVIAN_BODIES.map(b => ({
+        m: b.mass, r:[0,0,0], v:[0,0,0], _key: b.key,
+    }));
+
+    const M_jup = bodies[0].m;
+    for (const moonKey of ['io','europa','ganymede','callisto']) {
+        const el = INIT_EL[moonKey];
+        const m  = bodies[idxOf[moonKey]].m;
+        const mu = G_SI * (M_jup + m);
+        const st = elementsToState({
+            a:    el.a_km * KM,
+            e:    el.e,
+            i_deg:el.i_deg,
+            raan_deg:el.raan_deg,
+            argp_deg:el.argp_deg,
+            M_deg:el.M_deg,
+            mu,
+        });
+        bodies[idxOf[moonKey]].r = st.r;
+        bodies[idxOf[moonKey]].v = st.v;
+    }
+    // Cancel net momentum -> Jupiter velocity (barycentric frame).
+    let px=0, py=0, pz=0;
+    for (let i = 1; i < bodies.length; i++) {
+        px += bodies[i].m * bodies[i].v[0];
+        py += bodies[i].m * bodies[i].v[1];
+        pz += bodies[i].m * bodies[i].v[2];
+    }
+    bodies[0].v[0] = -px / bodies[0].m;
+    bodies[0].v[1] = -py / bodies[0].m;
+    bodies[0].v[2] = -pz / bodies[0].m;
+    return bodies;
+}
+
+// ── State ────────────────────────────────────────────────────────────
+const sim = {
+    bodies:        buildInitialBodies(),
+    t_s:           0,                       // seconds since J2000 in sim
+    playing:       false,
+    speed:         86400,                   // sim seconds per real second
+    initialEnergy: 0,
+    dtTarget:      60,                      // baseline integration step (s)
+};
+sim.initialEnergy = totalEnergy(sim.bodies).total;
+
+// Keplerian-ghost state: a frozen snapshot of each moon's osculating
+// elements at the moment the ghost is enabled. Each moon is then
+// propagated analytically (M = M0 + n*(t - t0)) under Jupiter's pull
+// alone, so the divergence between live and ghost is exactly the
+// mutual-moon perturbation (and the resonance feedback that flows from it).
+const ghost = {
+    enabled: false,
+    elements: {},        // { moonKey: { a, e, i_deg, raan_deg, argp_deg, M0_deg, t0_s, mu } }
+};
+
+function snapshotGhostElements() {
+    const M_jup = sim.bodies[0].m;
+    for (const moonKey of ['io','europa','ganymede','callisto']) {
+        const i  = idxOf[moonKey];
+        const m  = sim.bodies[i].m;
+        const mu = G_SI * (M_jup + m);
+        const rRel = [
+            sim.bodies[i].r[0] - sim.bodies[0].r[0],
+            sim.bodies[i].r[1] - sim.bodies[0].r[1],
+            sim.bodies[i].r[2] - sim.bodies[0].r[2],
+        ];
+        const vRel = [
+            sim.bodies[i].v[0] - sim.bodies[0].v[0],
+            sim.bodies[i].v[1] - sim.bodies[0].v[1],
+            sim.bodies[i].v[2] - sim.bodies[0].v[2],
+        ];
+        const el = stateToElements(rRel, vRel, mu);
+        ghost.elements[moonKey] = {
+            a:        el.a,
+            e:        el.e,
+            i_deg:    el.i_deg,
+            raan_deg: el.raan_deg,
+            argp_deg: el.argp_deg,
+            M0_deg:   el.M_deg,
+            t0_s:     sim.t_s,
+            mu,
+        };
+    }
+}
+
+// Position of the ghost at the current sim time, returned in scene
+// coordinates (unit conversion + axis swap).
+function ghostScenePos(moonKey) {
+    const el = ghost.elements[moonKey];
+    if (!el) return null;
+    const dt_s = sim.t_s - el.t0_s;
+    const n_rad_s = Math.sqrt(el.mu / (el.a * el.a * el.a));     // mean motion
+    const M_now = el.M0_deg + n_rad_s * dt_s * R2D;
+    const st = elementsToState({
+        a: el.a, e: el.e,
+        i_deg: el.i_deg, raan_deg: el.raan_deg, argp_deg: el.argp_deg,
+        M_deg: M_now,
+        mu: el.mu,
+    });
+    // Add Jupiter's barycentric position so ghost shares the same frame
+    const jr = sim.bodies[0].r;
+    return {
+        x: m2u(st.r[0] + jr[0]),
+        y: m2u(st.r[2] + jr[2]),
+        z: -m2u(st.r[1] + jr[1]),
+    };
+}
+
+// ── Three.js setup ───────────────────────────────────────────────────
+const wrap = document.getElementById('js-canvas-wrap');
+const scene  = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(46, 1, 0.05, 4000);
+camera.position.set(0, 22, 32);
+camera.lookAt(0, 0, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping         = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+wrap.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance   = 2;
+controls.maxDistance   = 200;
+
+function resize() {
+    const w = wrap.clientWidth, h = wrap.clientHeight;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+}
+resize();
+new ResizeObserver(resize).observe(wrap);
+
+// ── Background stars ─────────────────────────────────────────────────
+const starUniforms = { uTime:{ value:0 } };
+{
+    const n = 3000;
+    const positions = new Float32Array(n * 3);
+    const colors    = new Float32Array(n * 3);
+    const sizes     = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+        const r  = 600 + Math.random() * 400;
+        const th = Math.random() * Math.PI * 2;
+        const ph = Math.acos(2 * Math.random() - 1);
+        positions[i*3]   = r * Math.sin(ph) * Math.cos(th);
+        positions[i*3+1] = r * Math.sin(ph) * Math.sin(th);
+        positions[i*3+2] = r * Math.cos(ph);
+        const t = Math.random();
+        if (t < 0.2)      { colors[i*3]=1; colors[i*3+1]=.78; colors[i*3+2]=.55; }
+        else if (t < 0.35){ colors[i*3]=.65; colors[i*3+1]=.78; colors[i*3+2]=1; }
+        else              { const c=.85+.15*Math.random(); colors[i*3]=c; colors[i*3+1]=c; colors[i*3+2]=c; }
+        sizes[i] = 0.7 + Math.pow(Math.random(), 6) * 4.0;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    g.setAttribute('color',    new THREE.Float32BufferAttribute(colors,    3));
+    g.setAttribute('aSize',    new THREE.Float32BufferAttribute(sizes,     1));
+    const starMat = new THREE.ShaderMaterial({
+        uniforms: starUniforms, vertexColors:true,
+        transparent:true, depthWrite:false,
+        blending:THREE.AdditiveBlending,
+        vertexShader:`attribute float aSize; varying vec3 vColor; varying float vTw;
+            uniform float uTime;
+            void main(){
+                vColor = color;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.);
+                gl_PointSize = aSize;
+                float seed = position.x*12.9898 + position.y*78.233 + position.z*37.7;
+                vTw = 0.65 + 0.35 * sin(uTime*1.3 + seed);
+            }`,
+        fragmentShader:`varying vec3 vColor; varying float vTw;
+            void main(){
+                vec2 d = gl_PointCoord - vec2(.5);
+                float r = length(d);
+                if (r > .5) discard;
+                gl_FragColor = vec4(vColor*vTw, smoothstep(.5,0.,r));
+            }`,
+    });
+    scene.add(new THREE.Points(g, starMat));
+}
+
+// ── Jupiter (skinned) ────────────────────────────────────────────────
+// Jupiter occupies 1 scene unit (1 R_jup). The JupiterSkin includes
+// banded clouds + atmosphere rim + faint ring set.
+const jupGroup = new THREE.Group();
+scene.add(jupGroup);
+const jupSkin = new JupiterSkin(jupGroup, { radius:1.0, quality:'medium', segments:48 });
+jupSkin.mesh.userData = { kind:'planet', key:'jupiter', label:'Jupiter' };
+
+// Add a soft outer halo on top of the JupiterSkin atm shell.
+{
+    const halo = new THREE.Mesh(
+        new THREE.SphereGeometry(1.30, 32, 32),
+        new THREE.ShaderMaterial({
+            transparent:true, depthWrite:false, side:THREE.BackSide,
+            blending:THREE.AdditiveBlending,
+            vertexShader:`varying vec3 vN; void main(){ vN=normalize(normalMatrix*normal);
+                gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
+            fragmentShader:`varying vec3 vN;
+                void main(){ float r=pow(1.-abs(vN.z),3.); gl_FragColor=vec4(.95,.65,.30,r*.55); }`,
+        }),
+    );
+    jupGroup.add(halo);
+}
+
+// Distant Sun lights the system. We're not modelling Jupiter's heliocentric
+// position here, so put a directional light at a fixed angle.
+{
+    const dl = new THREE.DirectionalLight(0xfff4d6, 1.6);
+    dl.position.set(35, 8, 0);
+    scene.add(dl);
+    scene.add(new THREE.AmbientLight(0x223044, 0.6));
+}
+
+// ── Moon meshes + orbit rings ────────────────────────────────────────
+const meshes  = { jupiter: jupSkin.mesh };
+const ghostMeshes = {};
+const trailLines  = {};
+const orbitRings  = {};
+const trailBuffers = {};            // { key: { positions:Float32Array, idx, count } }
+
+const TRAIL_MAX = 10800;            // max samples per trail (≈18 d at 144 s/sample)
+
+function makeMoon(b) {
+    const r = b.radius_km / R_JUP_KM;     // realistic radius in scene units
+    // Visually exaggerate moon radius so they're not pin-points: 8× real.
+    const rVis = Math.max(r * 8, 0.05);
+    const m = new THREE.Mesh(
+        new THREE.SphereGeometry(rVis, 22, 22),
+        new THREE.MeshStandardMaterial({
+            color:b.color, emissive:b.color, emissiveIntensity:0.18,
+            roughness:0.85, metalness:0.05,
+        }),
+    );
+    m.userData = { kind:'moon', key:b.key, label:b.name };
+    scene.add(m);
+    meshes[b.key] = m;
+
+    // Subtle Fresnel halo
+    const halo = new THREE.Mesh(
+        new THREE.SphereGeometry(rVis * 1.30, 18, 18),
+        new THREE.ShaderMaterial({
+            transparent:true, depthWrite:false, side:THREE.BackSide,
+            blending:THREE.AdditiveBlending,
+            uniforms:{ uColor:{ value:new THREE.Color(b.color) } },
+            vertexShader:`varying vec3 vN; void main(){ vN=normalize(normalMatrix*normal);
+                gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
+            fragmentShader:`uniform vec3 uColor; varying vec3 vN;
+                void main(){ float r=pow(1.-abs(vN.z),2.); gl_FragColor=vec4(uColor,r*.55); }`,
+        }),
+    );
+    m.add(halo);
+
+    // Static reference orbit ring (a circle at the moon's mean a, in the
+    // ecliptic plane). Doesn't need to track the live state; gives the
+    // viewer a sense of where the unperturbed orbit lies.
+    const a_u = (INIT_EL[b.key].a_km * KM) / M_PER_UNIT;
+    const N = 192;
+    const ringGeo = new THREE.BufferGeometry();
+    const arr = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) {
+        const th = (i / N) * Math.PI * 2;
+        arr[i*3]   = a_u * Math.cos(th);
+        arr[i*3+1] = 0;
+        arr[i*3+2] = a_u * Math.sin(th);
+    }
+    ringGeo.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3));
+    const ringMat = new THREE.LineBasicMaterial({
+        color:b.color, transparent:true, opacity:0.20, depthWrite:false,
+    });
+    const ring = new THREE.LineLoop(ringGeo, ringMat);
+    scene.add(ring);
+    orbitRings[b.key] = ring;
+
+    // Trail (line from the live state, last ~6 d by default).
+    const trailGeo = new THREE.BufferGeometry();
+    const positions = new Float32Array(TRAIL_MAX * 3);
+    trailGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    trailGeo.setDrawRange(0, 0);
+    const trailMat = new THREE.LineBasicMaterial({
+        color:b.color, transparent:true, opacity:0.85, depthWrite:false,
+    });
+    const trailLine = new THREE.Line(trailGeo, trailMat);
+    trailLine.frustumCulled = false;
+    scene.add(trailLine);
+    trailLines[b.key]   = trailLine;
+    trailBuffers[b.key] = {
+        positions, idx:0, count:0, capacity:TRAIL_MAX,
+        sampleEvery:144,                  // sim seconds per trail sample
+        accum:0,
+    };
+
+    // Ghost (unperturbed Keplerian) marker — a small wireframe sphere.
+    const ghost = new THREE.Mesh(
+        new THREE.SphereGeometry(rVis * 1.10, 12, 12),
+        new THREE.MeshBasicMaterial({
+            color:b.color, transparent:true, opacity:0.45,
+            wireframe:true, depthWrite:false,
+        }),
+    );
+    ghost.visible = false;
+    scene.add(ghost);
+    ghostMeshes[b.key] = ghost;
+}
+for (const b of JOVIAN_BODIES.slice(1)) makeMoon(b);
+
+// Selection + hover rings
+function makeRing(c, op, t) {
+    const geom = new THREE.RingGeometry(1.0, 1.0 + t, 64);
+    const mat  = new THREE.MeshBasicMaterial({
+        color:c, transparent:true, opacity:op,
+        depthWrite:false, side:THREE.DoubleSide, blending:THREE.AdditiveBlending,
+    });
+    const m = new THREE.Mesh(geom, mat);
+    m.visible = false;
+    m.renderOrder = 10;
+    return m;
+}
+const selRing  = makeRing(0xffb070, 0.92, 0.16);
+const hovRing  = makeRing(0xfff0a0, 0.55, 0.10);
+scene.add(selRing); scene.add(hovRing);
+
+// ── Legend ───────────────────────────────────────────────────────────
+const legend = document.getElementById('js-legend');
+legend.innerHTML = JOVIAN_BODIES.map(b =>
+    `<span class="lg"><span class="dt" style="background:#${b.color.toString(16).padStart(6,'0')}"></span>${b.name}</span>`
+).join('');
+
+// ── Body picker / element table ──────────────────────────────────────
+const elBodyGrid = document.getElementById('js-body-grid');
+const elSelDot   = document.getElementById('js-sel-dot');
+const elSelName  = document.getElementById('js-sel-name');
+const elSelPer   = document.getElementById('js-sel-period');
+const elElTbl    = document.getElementById('js-el-table');
+
+const ELEM_DEFS = [
+    { sym:'a',  nm:'semi-major axis',     unit:'km', fmt:v => (v / KM).toFixed(0) },
+    { sym:'e',  nm:'eccentricity',        unit:'',   fmt:v => v.toFixed(5) },
+    { sym:'i',  nm:'inclination',         unit:'°',  fmt:v => v.toFixed(3) },
+    { sym:'Ω',  nm:'long. asc. node',     unit:'°',  fmt:v => v.toFixed(2) },
+    { sym:'ω',  nm:'arg. of pericentre',  unit:'°',  fmt:v => v.toFixed(2) },
+    { sym:'M',  nm:'mean anomaly',        unit:'°',  fmt:v => v.toFixed(2) },
+    { sym:'λ',  nm:'mean longitude',      unit:'°',  fmt:v => v.toFixed(2) },
+    { sym:'r',  nm:'jovicentric distance',unit:'km', fmt:v => (v / KM).toFixed(0) },
+    { sym:'v',  nm:'speed',               unit:'km/s',fmt:v => (v / KM).toFixed(3) },
+];
+
+let selected = JOVIAN_BODIES[1];   // Io by default
+function buildBodyPicker() {
+    elBodyGrid.innerHTML = '';
+    for (const b of JOVIAN_BODIES) {
+        const btn = document.createElement('button');
+        btn.className = 'js-body-btn' + (b.key === selected.key ? ' sel' : '');
+        btn.dataset.key = b.key;
+        const hex = '#' + b.color.toString(16).padStart(6, '0');
+        btn.innerHTML =
+            `<div class="js-body-dot" style="background:${hex};color:${hex}"></div>` +
+            `<div class="js-body-name">${b.name}</div>`;
+        btn.addEventListener('click', () => selectBody(b.key));
+        elBodyGrid.appendChild(btn);
+    }
+    elElTbl.innerHTML = ELEM_DEFS.map(d =>
+        `<div class="js-el-k"><span class="sym">${d.sym}</span><span class="nm">${d.nm}</span></div>` +
+        `<div class="js-el-v" data-sym="${d.sym}">—</div>`
+    ).join('');
+}
+
+function selectBody(key) {
+    selected = JOVIAN_BODIES.find(b => b.key === key) || selected;
+    elBodyGrid.querySelectorAll('.js-body-btn').forEach(b =>
+        b.classList.toggle('sel', b.dataset.key === key));
+    const hex = '#' + selected.color.toString(16).padStart(6, '0');
+    elSelDot.style.background = hex;
+    elSelDot.style.color      = hex;
+    elSelName.textContent = selected.name;
+    elSelPer.textContent  = formatPeriod(PERIOD_D[selected.key]);
+    refreshSidePanel();
+}
+
+function formatPeriod(d) {
+    if (d < 30)        return `${d.toFixed(2)} d`;
+    if (d < 365)       return `${d.toFixed(1)} d`;
+    return `${(d/365.25).toFixed(2)} yr`;
+}
+
+function refreshSidePanel() {
+    const i  = idxOf[selected.key];
+    if (selected.key === 'jupiter') {
+        // Jupiter — show barycentric speed rather than orbital elements.
+        const b = sim.bodies[0];
+        const speed = Math.hypot(b.v[0], b.v[1], b.v[2]);
+        const setVal = (sym, txt) => {
+            const node = elElTbl.querySelector(`[data-sym="${sym}"]`);
+            if (node) node.innerHTML = txt;
+        };
+        for (const d of ELEM_DEFS) {
+            const node = elElTbl.querySelector(`[data-sym="${d.sym}"]`);
+            if (node) node.innerHTML = '—';
+        }
+        setVal('v', (speed / KM).toFixed(4) + '<span class="un">km/s</span>');
+        return;
+    }
+    const M_jup = sim.bodies[0].m;
+    const m     = sim.bodies[i].m;
+    const mu    = G_SI * (M_jup + m);
+    const rRel  = [
+        sim.bodies[i].r[0] - sim.bodies[0].r[0],
+        sim.bodies[i].r[1] - sim.bodies[0].r[1],
+        sim.bodies[i].r[2] - sim.bodies[0].r[2],
+    ];
+    const vRel  = [
+        sim.bodies[i].v[0] - sim.bodies[0].v[0],
+        sim.bodies[i].v[1] - sim.bodies[0].v[1],
+        sim.bodies[i].v[2] - sim.bodies[0].v[2],
+    ];
+    const el = stateToElements(rRel, vRel, mu);
+    const vals = {
+        a:  el.a, e: el.e, i: el.i_deg,
+        'Ω':el.raan_deg, 'ω':el.argp_deg,
+        M:  el.M_deg, 'λ':el.mean_lon_deg,
+        r:  el.r_mag, v: el.v_mag,
+    };
+    for (const d of ELEM_DEFS) {
+        const node = elElTbl.querySelector(`[data-sym="${d.sym}"]`);
+        if (!node) continue;
+        node.innerHTML = d.fmt(vals[d.sym]) + (d.unit ? `<span class="un">${d.unit}</span>` : '');
+    }
+}
+
+// ── Plot (Laplace argument + eccentricities) ─────────────────────────
+const plot = document.getElementById('js-plot-canvas');
+const pctx = plot.getContext('2d');
+function resizePlot() {
+    const rect = plot.getBoundingClientRect();
+    const dpr  = Math.min(devicePixelRatio, 2);
+    plot.width  = Math.max(1, Math.floor(rect.width  * dpr));
+    plot.height = Math.max(1, Math.floor(rect.height * dpr));
+    pctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+resizePlot();
+new ResizeObserver(resizePlot).observe(plot);
+
+const PLOT_N = 360;          // sample buffer length
+const plotT   = new Float32Array(PLOT_N);
+const plotPhi = new Float32Array(PLOT_N);
+const plotEIo = new Float32Array(PLOT_N);
+const plotEEu = new Float32Array(PLOT_N);
+const plotEGa = new Float32Array(PLOT_N);
+let plotHead  = 0;             // ring buffer head
+let plotCount = 0;
+let lastSampleT = -Infinity;
+const SAMPLE_INTERVAL_S = 6 * 3600;   // 6 hours per plot sample → ~30 d window at 360 samples
+
+function pushSample(tSec, phi, eIo, eEu, eGa) {
+    plotT[plotHead]   = tSec;
+    plotPhi[plotHead] = phi;
+    plotEIo[plotHead] = eIo;
+    plotEEu[plotHead] = eEu;
+    plotEGa[plotHead] = eGa;
+    plotHead = (plotHead + 1) % PLOT_N;
+    if (plotCount < PLOT_N) plotCount++;
+}
+
+function eachSample(fn) {
+    if (plotCount === 0) return;
+    const start = (plotHead - plotCount + PLOT_N) % PLOT_N;
+    for (let k = 0; k < plotCount; k++) {
+        const i = (start + k) % PLOT_N;
+        fn(plotT[i], plotPhi[i], plotEIo[i], plotEEu[i], plotEGa[i], k);
+    }
+}
+
+function drawPlot() {
+    const W = plot.clientWidth, H = plot.clientHeight;
+    if (W < 8 || H < 8) return;
+    pctx.clearRect(0, 0, W, H);
+    if (plotCount < 2) {
+        pctx.fillStyle = '#776';
+        pctx.font = '12px ui-monospace, monospace';
+        pctx.textAlign = 'center';
+        pctx.fillText('Press ▶ Play to start sampling…', W/2, H/2);
+        return;
+    }
+
+    const padL = 56, padR = 56, padT = 12, padB = 24;
+    const pw = W - padL - padR, ph = H - padT - padB;
+
+    // x-domain: time
+    let tMin = Infinity, tMax = -Infinity;
+    eachSample(t => {
+        if (t < tMin) tMin = t;
+        if (t > tMax) tMax = t;
+    });
+    const tSpan = Math.max(tMax - tMin, 1);
+
+    // Left axis (phi): centred around 180°, fit observed range
+    let phiMin = Infinity, phiMax = -Infinity;
+    eachSample((t, phi) => {
+        if (phi < phiMin) phiMin = phi;
+        if (phi > phiMax) phiMax = phi;
+    });
+    const phiPad = Math.max((phiMax - phiMin) * 0.15, 2);
+    phiMin -= phiPad; phiMax += phiPad;
+
+    // Right axis (eccentricity): fit observed range across all 3
+    let eMin = Infinity, eMax = -Infinity;
+    eachSample((t, phi, eIo, eEu, eGa) => {
+        for (const e of [eIo, eEu, eGa]) {
+            if (e < eMin) eMin = e;
+            if (e > eMax) eMax = e;
+        }
+    });
+    const ePad = Math.max((eMax - eMin) * 0.15, 5e-5);
+    eMin -= ePad; eMax += ePad;
+
+    // Grid + axis labels
+    pctx.strokeStyle = 'rgba(255,184,80,.10)';
+    pctx.lineWidth = 1;
+    pctx.font = '10px ui-monospace, monospace';
+    pctx.textBaseline = 'middle';
+    for (let k = 0; k <= 4; k++) {
+        const f = k / 4;
+        const x = padL + f * pw;
+        pctx.beginPath();
+        pctx.moveTo(x, padT); pctx.lineTo(x, padT + ph);
+        pctx.stroke();
+        const t = tMin + f * (tMax - tMin);
+        pctx.fillStyle = '#776';
+        pctx.textAlign = 'center';
+        pctx.fillText((t / 86400).toFixed(1) + ' d', x, H - padB + 12);
+    }
+    for (let k = 0; k <= 4; k++) {
+        const f = k / 4;
+        const y = padT + f * ph;
+        pctx.beginPath();
+        pctx.moveTo(padL, y); pctx.lineTo(W - padR, y);
+        pctx.stroke();
+    }
+    // Left axis (phi)
+    pctx.fillStyle = '#ffb070';
+    pctx.textAlign = 'right';
+    for (let k = 0; k <= 4; k++) {
+        const f = k / 4;
+        const v = phiMax - f * (phiMax - phiMin);
+        pctx.fillText(v.toFixed(2) + '°', padL - 6, padT + f * ph);
+    }
+    // Right axis (e)
+    pctx.fillStyle = '#a0c8ff';
+    pctx.textAlign = 'left';
+    for (let k = 0; k <= 4; k++) {
+        const f = k / 4;
+        const v = eMax - f * (eMax - eMin);
+        pctx.fillText(v.toFixed(4), W - padR + 6, padT + f * ph);
+    }
+
+    // Axis titles
+    pctx.fillStyle = 'rgba(255,184,80,.55)';
+    pctx.textAlign = 'center';
+    pctx.save();
+    pctx.translate(14, padT + ph/2);
+    pctx.rotate(-Math.PI/2);
+    pctx.fillText('φ_L  (deg)', 0, 0);
+    pctx.restore();
+    pctx.fillStyle = 'rgba(160,200,255,.55)';
+    pctx.save();
+    pctx.translate(W - 14, padT + ph/2);
+    pctx.rotate(Math.PI/2);
+    pctx.fillText('eccentricity', 0, 0);
+    pctx.restore();
+
+    const xOf = t => padL + ((t - tMin) / tSpan) * pw;
+    const yPhi = v => padT + (1 - (v - phiMin) / (phiMax - phiMin)) * ph;
+    const yE   = v => padT + (1 - (v - eMin)   / (eMax - eMin))   * ph;
+
+    // Phi line
+    pctx.lineWidth = 2;
+    pctx.strokeStyle = '#ffb070';
+    pctx.beginPath();
+    let first = true;
+    eachSample((t, phi) => {
+        const x = xOf(t), y = yPhi(phi);
+        if (first) { pctx.moveTo(x, y); first = false; }
+        else        pctx.lineTo(x, y);
+    });
+    pctx.stroke();
+
+    // Eccentricity lines
+    const eccentricSeries = [
+        { color:'#ffd944', getter:(t,phi,eIo)        => eIo },
+        { color:'#a0c8ff', getter:(t,phi,eIo,eEu)    => eEu },
+        { color:'#b78cff', getter:(t,phi,eIo,eEu,eGa)=> eGa },
+    ];
+    pctx.lineWidth = 1.5;
+    for (const ser of eccentricSeries) {
+        pctx.strokeStyle = ser.color;
+        pctx.beginPath();
+        let f2 = true;
+        eachSample((t, phi, eIo, eEu, eGa) => {
+            const x = xOf(t);
+            const y = yE(ser.getter(t, phi, eIo, eEu, eGa));
+            if (f2) { pctx.moveTo(x, y); f2 = false; }
+            else     pctx.lineTo(x, y);
+        });
+        pctx.stroke();
+    }
+
+    // 180° reference line for phi
+    if (180 >= phiMin && 180 <= phiMax) {
+        pctx.strokeStyle = 'rgba(255,255,255,.20)';
+        pctx.setLineDash([3, 3]);
+        pctx.beginPath();
+        pctx.moveTo(padL, yPhi(180));
+        pctx.lineTo(W - padR, yPhi(180));
+        pctx.stroke();
+        pctx.setLineDash([]);
+    }
+}
+
+// ── Compute plot quantities from current state ───────────────────────
+function meanLonRel(idx) {
+    const M_jup = sim.bodies[0].m;
+    const m     = sim.bodies[idx].m;
+    const mu    = G_SI * (M_jup + m);
+    const rRel  = [
+        sim.bodies[idx].r[0] - sim.bodies[0].r[0],
+        sim.bodies[idx].r[1] - sim.bodies[0].r[1],
+        sim.bodies[idx].r[2] - sim.bodies[0].r[2],
+    ];
+    const vRel  = [
+        sim.bodies[idx].v[0] - sim.bodies[0].v[0],
+        sim.bodies[idx].v[1] - sim.bodies[0].v[1],
+        sim.bodies[idx].v[2] - sim.bodies[0].v[2],
+    ];
+    return stateToElements(rRel, vRel, mu);
+}
+
+function computeResonance() {
+    const elIo = meanLonRel(idxOf.io);
+    const elEu = meanLonRel(idxOf.europa);
+    const elGa = meanLonRel(idxOf.ganymede);
+    const phi = (elIo.mean_lon_deg - 3 * elEu.mean_lon_deg + 2 * elGa.mean_lon_deg);
+    // Wrap to [0, 360)
+    const phiW = ((phi % 360) + 360) % 360;
+    return {
+        phi: phiW,
+        eIo: elIo.e, eEu: elEu.e, eGa: elGa.e,
+        nIo: 360 / (elIo.period_s / 86400),
+        nEu: 360 / (elEu.period_s / 86400),
+        nGa: 360 / (elGa.period_s / 86400),
+    };
+}
+
+let phiAmpHist = [];
+function updateReadouts(res) {
+    document.getElementById('rd-phi').textContent  = res.phi.toFixed(3) + '°';
+    document.getElementById('rd-eIo').textContent  = res.eIo.toFixed(5);
+    document.getElementById('rd-eE').textContent   = res.eEu.toFixed(5);
+    document.getElementById('rd-eG').textContent   = res.eGa.toFixed(5);
+    document.getElementById('rd-mmr').textContent  =
+        `${res.nIo.toFixed(2)} : ${res.nEu.toFixed(2)} : ${res.nGa.toFixed(2)} °/d`;
+    // Track |phi - 180| amplitude over the live window
+    phiAmpHist.push(Math.abs(res.phi - 180));
+    if (phiAmpHist.length > 1000) phiAmpHist.shift();
+    const maxAmp = phiAmpHist.length ? Math.max(...phiAmpHist) : 0;
+    document.getElementById('rd-phi-amp').textContent = maxAmp.toFixed(3) + '°';
+}
+
+// ── HUD ──────────────────────────────────────────────────────────────
+const elTimeDisp   = document.getElementById('js-time-display');
+const elJdDisp     = document.getElementById('js-jd-display');
+const elEnergyDisp = document.getElementById('js-energy-display');
+const elStepDisp   = document.getElementById('js-step-display');
+const elPill       = document.getElementById('js-mode-pill');
+
+function updateHud() {
+    const days = sim.t_s / 86400;
+    elTimeDisp.textContent = (days >= 0 ? '+ ' : '') + days.toFixed(2) + ' d';
+    elJdDisp.textContent   = 'JD ' + (J2000_JD + days).toFixed(3);
+    const E = totalEnergy(sim.bodies).total;
+    const drift = (E - sim.initialEnergy) / Math.abs(sim.initialEnergy);
+    elEnergyDisp.textContent = drift === 0 ? '0' : (drift.toExponential(2));
+    elStepDisp.textContent   = `dt = ${sim.dtTarget.toFixed(0)} s`;
+    if (sim.playing) { elPill.textContent = '▶ Playing'; elPill.classList.add('play'); }
+    else             { elPill.textContent = '⏸ Paused';  elPill.classList.remove('play'); }
+}
+
+// ── Render: write SI state into scene ────────────────────────────────
+function syncMeshesFromState() {
+    // Jupiter (in barycentric frame, slightly off origin)
+    {
+        const b = sim.bodies[0];
+        meshes.jupiter.position.set(m2u(b.r[0]), m2u(b.r[2]), -m2u(b.r[1]));
+    }
+    // Moons
+    for (let i = 1; i < sim.bodies.length; i++) {
+        const k = JOVIAN_BODIES[i].key;
+        const b = sim.bodies[i];
+        meshes[k].position.set(m2u(b.r[0]), m2u(b.r[2]), -m2u(b.r[1]));
+    }
+    // Ghosts (Keplerian baseline) — analytic propagation under Jupiter only
+    if (ghost.enabled) {
+        for (let i = 1; i < sim.bodies.length; i++) {
+            const k = JOVIAN_BODIES[i].key;
+            const p = ghostScenePos(k);
+            if (p) ghostMeshes[k].position.set(p.x, p.y, p.z);
+        }
+    }
+}
+
+// Append a new trail sample for each moon (called every sim step that
+// crosses the trail's sampleEvery threshold).
+function appendTrails(simSecAdvanced) {
+    for (let i = 1; i < sim.bodies.length; i++) {
+        const k = JOVIAN_BODIES[i].key;
+        const tb = trailBuffers[k];
+        tb.accum += simSecAdvanced;
+        if (tb.accum < tb.sampleEvery) continue;
+        tb.accum = 0;
+        const b = sim.bodies[i];
+        const x = m2u(b.r[0]),  y = m2u(b.r[2]),  z = -m2u(b.r[1]);
+        const dst = tb.idx * 3;
+        tb.positions[dst]     = x;
+        tb.positions[dst + 1] = y;
+        tb.positions[dst + 2] = z;
+        tb.idx = (tb.idx + 1) % tb.capacity;
+        if (tb.count < tb.capacity) tb.count++;
+        rebuildTrailLine(k);
+    }
+}
+
+function rebuildTrailLine(key) {
+    const tb   = trailBuffers[key];
+    const line = trailLines[key];
+    const geo  = line.geometry;
+    const arr  = geo.attributes.position.array;
+    // Copy ring buffer to a contiguous array (oldest -> newest)
+    const start = (tb.idx - tb.count + tb.capacity) % tb.capacity;
+    for (let k = 0; k < tb.count; k++) {
+        const src = ((start + k) % tb.capacity) * 3;
+        const dst = k * 3;
+        arr[dst]     = tb.positions[src];
+        arr[dst + 1] = tb.positions[src + 1];
+        arr[dst + 2] = tb.positions[src + 2];
+    }
+    geo.setDrawRange(0, tb.count);
+    geo.attributes.position.needsUpdate = true;
+    geo.computeBoundingSphere();
+}
+
+function clearTrails() {
+    for (const k of Object.keys(trailBuffers)) {
+        const tb = trailBuffers[k];
+        tb.idx = 0; tb.count = 0; tb.accum = 0;
+        trailLines[k].geometry.setDrawRange(0, 0);
+    }
+}
+
+// ── Selection / hover rings ──────────────────────────────────────────
+function updateSelRing() {
+    if (!selected || !meshes[selected.key]) { selRing.visible = false; return; }
+    const m = meshes[selected.key];
+    const baseR = selected.key === 'jupiter' ? 1.5 :
+        Math.max((JOVIAN_BODIES.find(b => b.key === selected.key).radius_km / R_JUP_KM) * 8 * 1.6, 0.10);
+    selRing.position.copy(m.position);
+    selRing.scale.setScalar(baseR);
+    selRing.lookAt(camera.position);
+    selRing.visible = true;
+}
+function updateHovRing(key) {
+    if (!key || !meshes[key] || (selected && key === selected.key)) {
+        hovRing.visible = false; return;
+    }
+    const m = meshes[key];
+    const b = JOVIAN_BODIES.find(b => b.key === key);
+    const baseR = key === 'jupiter' ? 1.7 :
+        Math.max(((b ? b.radius_km : 1500) / R_JUP_KM) * 8 * 1.85, 0.12);
+    hovRing.position.copy(m.position);
+    hovRing.scale.setScalar(baseR);
+    hovRing.lookAt(camera.position);
+    hovRing.visible = true;
+}
+
+// ── Mouse picking ────────────────────────────────────────────────────
+const raycaster = new THREE.Raycaster();
+const ndc       = new THREE.Vector2();
+let hoveredKey  = null;
+const pickables = () => Object.values(meshes);
+const elTooltip = document.getElementById('js-tooltip');
+
+function hitFromEvent(ev) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    ndc.x =  ((ev.clientX - rect.left) / rect.width)  * 2 - 1;
+    ndc.y = -((ev.clientY - rect.top)  / rect.height) * 2 + 1;
+    raycaster.setFromCamera(ndc, camera);
+    const hits = raycaster.intersectObjects(pickables(), true);
+    if (!hits.length) return null;
+    let obj = hits[0].object;
+    while (obj && (!obj.userData || !obj.userData.kind)) obj = obj.parent;
+    return obj && obj.userData ? obj.userData : null;
+}
+
+renderer.domElement.addEventListener('mousemove', ev => {
+    const rect = renderer.domElement.getBoundingClientRect();
+    const sx = ev.clientX - rect.left;
+    const sy = ev.clientY - rect.top;
+    const ud = hitFromEvent(ev);
+    const newKey = ud ? ud.key : null;
+    if (newKey !== hoveredKey) {
+        hoveredKey = newKey;
+        renderer.domElement.style.cursor = hoveredKey ? 'pointer' : '';
+    }
+    if (ud) {
+        const b = JOVIAN_BODIES.find(b => b.key === ud.key);
+        let html = `<div class="tt-hdr"><span class="dot" style="background:#${b.color.toString(16).padStart(6,'0')}"></span>${b.name}</div>`;
+        if (ud.key === 'jupiter') {
+            html += `<div class="tt-row"><span class="tt-k">mass</span><span class="tt-v">1.898×10²⁷ kg</span></div>`;
+            html += `<div class="tt-row"><span class="tt-k">radius</span><span class="tt-v">71,492 km</span></div>`;
+            html += `<div class="tt-row"><span class="tt-k">rotation</span><span class="tt-v">9.93 h</span></div>`;
+        } else {
+            const el = meanLonRel(idxOf[ud.key]);
+            html += `<div class="tt-row"><span class="tt-k">a</span><span class="tt-v">${(el.a / KM).toFixed(0)} km</span></div>`;
+            html += `<div class="tt-row"><span class="tt-k">e</span><span class="tt-v">${el.e.toFixed(5)}</span></div>`;
+            html += `<div class="tt-row"><span class="tt-k">period</span><span class="tt-v">${formatPeriod(PERIOD_D[ud.key])}</span></div>`;
+            html += `<div class="tt-row"><span class="tt-k">radius</span><span class="tt-v">${b.radius_km.toFixed(1)} km</span></div>`;
+        }
+        elTooltip.innerHTML = html;
+        elTooltip.style.left = sx + 'px';
+        elTooltip.style.top  = sy + 'px';
+        elTooltip.classList.add('show');
+    } else {
+        elTooltip.classList.remove('show');
+    }
+});
+renderer.domElement.addEventListener('mouseleave', () => {
+    hoveredKey = null;
+    renderer.domElement.style.cursor = '';
+    elTooltip.classList.remove('show');
+});
+renderer.domElement.addEventListener('click', ev => {
+    const ud = hitFromEvent(ev);
+    if (ud && ud.key) selectBody(ud.key);
+});
+
+// ── Time controls ────────────────────────────────────────────────────
+const elPlay      = document.getElementById('js-play');
+const elSpeed     = document.getElementById('js-speed');
+const elStepF     = document.getElementById('js-step-fwd');
+const elStepB     = document.getElementById('js-step-back');
+const elReset     = document.getElementById('js-reset');
+const elTrToggle  = document.getElementById('js-trails-toggle');
+const elTrLen     = document.getElementById('js-trail-len');
+const elGhostTog  = document.getElementById('js-ghost-toggle');
+const elViewTop   = document.getElementById('js-view-top');
+const elView3D    = document.getElementById('js-view-3d');
+const elScale     = document.getElementById('js-scale');
+
+elPlay.addEventListener('click', () => {
+    sim.playing = !sim.playing;
+    elPlay.textContent = sim.playing ? '⏸ Pause' : '▶ Play';
+    updateHud();
+});
+elSpeed.addEventListener('change', () => { sim.speed = parseFloat(elSpeed.value); });
+
+function step(simSec) {
+    // Choose dt: small enough for Io's 1.769 d period (~153000 s).
+    // Default 60 s. For high speeds, allow up to 600 s (still ~250 steps/orbit).
+    const absSec = Math.abs(simSec);
+    const dt = Math.sign(simSec) * Math.min(600, Math.max(60, absSec / 50));
+    sim.dtTarget = Math.abs(dt);
+    let remaining = simSec;
+    let safety = 100000;
+    while (Math.abs(remaining) > 1e-6 && safety-- > 0) {
+        const this_dt = (Math.abs(remaining) < Math.abs(dt))
+            ? remaining
+            : dt;
+        yoshida4Step(sim.bodies, this_dt);
+        sim.t_s += this_dt;
+        remaining -= this_dt;
+        appendTrails(this_dt);
+    }
+}
+
+elStepF.addEventListener('click', () => { step(3600); });
+elStepB.addEventListener('click', () => { step(-3600); });
+
+elReset.addEventListener('click', () => {
+    sim.bodies       = buildInitialBodies();
+    sim.t_s = 0;
+    sim.initialEnergy = totalEnergy(sim.bodies).total;
+    plotCount = 0; plotHead = 0;
+    phiAmpHist = [];
+    clearTrails();
+    if (ghost.enabled) snapshotGhostElements();
+    syncMeshesFromState();
+    refreshSidePanel();
+    updateHud();
+    drawPlot();
+});
+
+let trailsOn = true;
+elTrToggle.addEventListener('click', () => {
+    trailsOn = !trailsOn;
+    elTrToggle.classList.toggle('on', trailsOn);
+    elTrToggle.textContent = 'Trails: ' + (trailsOn ? 'ON' : 'OFF');
+    for (const k of Object.keys(trailLines)) trailLines[k].visible = trailsOn;
+});
+elTrLen.addEventListener('change', () => {
+    const max = parseInt(elTrLen.value, 10) || 3600;
+    for (const k of Object.keys(trailBuffers)) {
+        const tb = trailBuffers[k];
+        tb.capacity = Math.min(max, TRAIL_MAX);
+        tb.count    = Math.min(tb.count, tb.capacity);
+        rebuildTrailLine(k);
+    }
+});
+
+elGhostTog.addEventListener('click', () => {
+    ghost.enabled = !ghost.enabled;
+    elGhostTog.classList.toggle('on', ghost.enabled);
+    elGhostTog.textContent = 'Keplerian ghost: ' + (ghost.enabled ? 'ON' : 'OFF');
+    for (const k of Object.keys(ghostMeshes)) ghostMeshes[k].visible = ghost.enabled;
+    if (ghost.enabled) {
+        // Snapshot each moon's current Keplerian elements so the ghost
+        // and the live state coincide at this instant; thereafter the
+        // ghost evolves analytically (Jupiter pull only) while the live
+        // state feels the mutual moon perturbations. Their divergence
+        // is the perturbation.
+        snapshotGhostElements();
+    }
+});
+
+function setView(top) {
+    elViewTop.classList.toggle('on', top);
+    elView3D.classList.toggle('on', !top);
+    if (top) {
+        camera.position.set(0, 36, 0.001);
+    } else {
+        camera.position.set(0, 22, 32);
+    }
+    controls.target.set(0, 0, 0);
+    controls.update();
+}
+elViewTop.addEventListener('click', () => setView(true));
+elView3D .addEventListener('click', () => setView(false));
+
+elScale.addEventListener('change', () => {
+    if (elScale.value === 'zoom') {
+        camera.position.set(0, 8, 12);
+        controls.maxDistance = 50;
+    } else {
+        camera.position.set(0, 22, 32);
+        controls.maxDistance = 200;
+    }
+    controls.target.set(0, 0, 0);
+    controls.update();
+});
+
+// ── Loop ─────────────────────────────────────────────────────────────
+let lastT = performance.now();
+function tick(now) {
+    const dt = (now - lastT) / 1000;
+    lastT = now;
+    if (sim.playing) {
+        const simSec = sim.speed * dt;
+        step(simSec);
+    }
+    syncMeshesFromState();
+    starUniforms.uTime.value = now * 0.001;
+
+    // Drive Jupiter cloud-band animation
+    jupSkin.update(now * 0.001);
+
+    // Sample resonance for the plot (regardless of play state, so when
+    // paused the user still sees the readouts populate from initial state)
+    if (Math.abs(sim.t_s - lastSampleT) >= SAMPLE_INTERVAL_S || plotCount === 0) {
+        const res = computeResonance();
+        pushSample(sim.t_s, res.phi, res.eIo, res.eEu, res.eGa);
+        updateReadouts(res);
+        drawPlot();
+        lastSampleT = sim.t_s;
+    }
+    refreshSidePanel();
+    updateSelRing();
+    updateHovRing(hoveredKey);
+    updateHud();
+
+    controls.update();
+    renderer.render(scene, camera);
+    requestAnimationFrame(tick);
+}
+
+// ── Boot ─────────────────────────────────────────────────────────────
+buildBodyPicker();
+selectBody('io');
+syncMeshesFromState();
+{
+    // Seed the plot with a single sample so axes get a domain
+    const res = computeResonance();
+    pushSample(sim.t_s, res.phi, res.eIo, res.eEu, res.eGa);
+    updateReadouts(res);
+}
+drawPlot();
+updateHud();
+requestAnimationFrame(t => { lastT = t; tick(t); });
+</script>
+
+</body>
+</html>
