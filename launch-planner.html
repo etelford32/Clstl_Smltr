@@ -470,6 +470,46 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
 
 /* Vehicle canvas */
 #lp-vehicle { padding:14px 16px 18px; }
+
+/* Vehicle + variant picker row */
+.lh-vehicle-picker {
+    display:flex; flex-wrap:wrap; gap:14px;
+    margin:6px 0 12px;
+    padding:8px 10px;
+    background:rgba(0,0,0,.25);
+    border:1px solid rgba(255,255,255,.06);
+    border-radius:8px;
+}
+.lh-vp-group { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.lh-vp-label {
+    font-size:.62rem; color:#778; text-transform:uppercase;
+    letter-spacing:.1em; font-weight:700;
+    margin-right:4px;
+}
+.lh-vp-btn {
+    background:rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.1);
+    color:#bcd;
+    border-radius:6px;
+    padding:5px 12px;
+    font-size:.72rem; font-weight:700;
+    cursor:pointer;
+    transition:all .15s;
+    font-family:inherit;
+    letter-spacing:.04em;
+}
+.lh-vp-btn:hover { border-color:rgba(0,200,200,.4); color:#fff; }
+.lh-vp-btn--on {
+    background:rgba(0,200,200,.18);
+    border-color:#0cc;
+    color:#0ff;
+}
+.lh-vp-variants .lh-vp-btn--on {
+    background:rgba(255,140,40,.18);
+    border-color:#fa7;
+    color:#fc7;
+}
+
 .lh-vehicle-wrap {
     display:grid; grid-template-columns:1fr 280px; gap:14px;
 }
@@ -666,8 +706,25 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
     <div class="lp-panel" id="lp-vehicle">
         <div class="lh-section-hd">
             <h2>Vehicle Visualization · Generic</h2>
-            <p>Procedural 3D placeholder — built from primitives, not a licensed model. We'll swap in operator-supplied vehicles as we secure permission.</p>
+            <p>Procedural 3D placeholders — built from primitives, not licensed models. Surrogates for the real article until operator permissions land.</p>
         </div>
+
+        <!-- Vehicle + variant selector row -->
+        <div class="lh-vehicle-picker">
+            <div class="lh-vp-group">
+                <span class="lh-vp-label">Vehicle</span>
+                <button type="button" class="lh-vp-btn lh-vp-btn--on" data-vehicle="shuttle" data-variant="">Space Shuttle</button>
+                <button type="button" class="lh-vp-btn"               data-vehicle="starship" data-variant="v2">Starship</button>
+            </div>
+            <div class="lh-vp-group lh-vp-variants" id="lh-vp-variants" hidden>
+                <span class="lh-vp-label">Variant</span>
+                <button type="button" class="lh-vp-btn" data-vehicle="starship" data-variant="v1">V1</button>
+                <button type="button" class="lh-vp-btn lh-vp-btn--on" data-vehicle="starship" data-variant="v2">V2</button>
+                <button type="button" class="lh-vp-btn" data-vehicle="starship" data-variant="v3">V3</button>
+                <button type="button" class="lh-vp-btn" data-vehicle="starship" data-variant="future">Future ✱</button>
+            </div>
+        </div>
+
         <div class="lh-vehicle-wrap">
             <div class="lh-vehicle-canvas-host">
                 <canvas id="lh-vehicle-canvas"></canvas>
@@ -690,24 +747,8 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
 
                 <div class="lh-vehicle-watermark">Procedural · For illustration only</div>
             </div>
-            <aside class="lh-vehicle-meta">
-                <div>
-                    <div class="lh-vehicle-sub">Generic stack</div>
-                    <div class="lh-vehicle-name">Space Shuttle (STS)</div>
-                </div>
-                <div class="lh-vehicle-stats">
-                    <div class="lh-vehicle-stat"><div class="lh-vehicle-stat-k">Stack height</div><div class="lh-vehicle-stat-v">56.1 m</div></div>
-                    <div class="lh-vehicle-stat"><div class="lh-vehicle-stat-k">Liftoff mass</div><div class="lh-vehicle-stat-v">2,030 t</div></div>
-                    <div class="lh-vehicle-stat"><div class="lh-vehicle-stat-k">Payload (LEO)</div><div class="lh-vehicle-stat-v">27.5 t</div></div>
-                    <div class="lh-vehicle-stat"><div class="lh-vehicle-stat-k">Crew</div><div class="lh-vehicle-stat-v">2–8</div></div>
-                    <div class="lh-vehicle-stat"><div class="lh-vehicle-stat-k">First flight</div><div class="lh-vehicle-stat-v">1981-04-12</div></div>
-                    <div class="lh-vehicle-stat"><div class="lh-vehicle-stat-k">Last flight</div><div class="lh-vehicle-stat-v">2011-07-08</div></div>
-                </div>
-                <div class="lh-vehicle-note">
-                    Drag to orbit · scroll to zoom · use overlay buttons for preset views.
-                    Future versions will add Falcon 9, Falcon Heavy, SLS, and Starship once
-                    we secure model rights or build accurate reference geometry.
-                </div>
+            <aside class="lh-vehicle-meta" id="lh-vehicle-meta">
+                <!-- Filled dynamically by initVehicleCanvas onVehicleChange -->
             </aside>
         </div>
     </div>
@@ -724,8 +765,59 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
 
     const canvas = document.getElementById('lh-vehicle-canvas');
     if (canvas) {
+        const meta     = document.getElementById('lh-vehicle-meta');
+        const variants = document.getElementById('lh-vp-variants');
+
+        function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({
+            '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+        }[c])); }
+
+        function renderMeta(info) {
+            if (!info || !meta) return;
+            meta.innerHTML = `
+                <div>
+                    <div class="lh-vehicle-sub">${esc(info.years || '')}</div>
+                    <div class="lh-vehicle-name">${esc(info.name)}</div>
+                </div>
+                <div class="lh-vehicle-stats">
+                    <div class="lh-vehicle-stat"><div class="lh-vehicle-stat-k">Stack height</div><div class="lh-vehicle-stat-v">${esc(info.height_m)} m</div></div>
+                    <div class="lh-vehicle-stat"><div class="lh-vehicle-stat-k">Diameter</div><div class="lh-vehicle-stat-v">${esc(info.diameter_m)} m</div></div>
+                    <div class="lh-vehicle-stat"><div class="lh-vehicle-stat-k">Booster eng.</div><div class="lh-vehicle-stat-v">${esc(info.booster_engines)}</div></div>
+                    <div class="lh-vehicle-stat"><div class="lh-vehicle-stat-k">Upper eng.</div><div class="lh-vehicle-stat-v">${esc(info.ship_engines)}</div></div>
+                    <div class="lh-vehicle-stat"><div class="lh-vehicle-stat-k">Liftoff mass</div><div class="lh-vehicle-stat-v">${esc(info.liftoff_mass_t)} t</div></div>
+                    <div class="lh-vehicle-stat"><div class="lh-vehicle-stat-k">Payload (LEO)</div><div class="lh-vehicle-stat-v">${esc(info.leo_payload_t)} t</div></div>
+                </div>
+                <div class="lh-vehicle-note">${esc(info.notes || '')}</div>
+                <div class="lh-vehicle-note" style="opacity:.7;font-size:.6rem">
+                    Drag to orbit · scroll to zoom · use overlay buttons for preset views.
+                </div>
+            `;
+        }
+
         try {
-            const api = initVehicleCanvas(canvas, { autoRotate: true });
+            const api = initVehicleCanvas(canvas, {
+                vehicle: 'shuttle',
+                autoRotate: true,
+                onVehicleChange: ({ id, info }) => {
+                    renderMeta(info);
+                    variants.hidden = (id !== 'starship');
+                },
+            });
+
+            // Vehicle/variant selector buttons
+            document.querySelectorAll('.lh-vp-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const v   = btn.dataset.vehicle;
+                    const var_ = btn.dataset.variant || undefined;
+                    // Highlight: vehicle row vs variant row, separate selection.
+                    const row = btn.closest('.lh-vp-group');
+                    row.querySelectorAll('.lh-vp-btn').forEach(b => b.classList.remove('lh-vp-btn--on'));
+                    btn.classList.add('lh-vp-btn--on');
+                    api.setVehicle(v, var_);
+                    // Reset view to threequarter on vehicle change.
+                    document.querySelectorAll('.lh-view').forEach(b => b.classList.toggle('lh-view--on', b.dataset.view === 'threequarter'));
+                });
+            });
 
             // View-preset buttons
             document.querySelectorAll('.lh-view').forEach(btn => {
