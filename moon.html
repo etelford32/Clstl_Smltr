@@ -2,6 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>The Moon — Lunar Radiation Environment · Parker Physics App</title>
 <meta name="description" content="Interactive 3D Moon simulation with real-time radiation environment modeling. GCR flux, SEP events, and dose rate measurements from CRaTER/LRO and Chang'E-4 LND.">
@@ -564,10 +569,9 @@ _updateRadPanel();
 animate();
 </script>
 <script type="module">
-import { analytics } from './js/analytics.js';
+import './js/analytics.js';
 import { userState } from './js/user-state.js';
 import { recordVisit } from './js/greeting.js';
-analytics.page('moon');
 recordVisit('moon');
 userState.trackPage('moon');
 </script>

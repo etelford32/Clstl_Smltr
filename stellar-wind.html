@@ -2,6 +2,11 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Stellar Wind — Parker Physics App</title>
     <style>
@@ -1263,33 +1268,6 @@ document.querySelectorAll('.preset-btn').forEach((btn, i) => {
     };
 });
 
-// ─── Nav ─────────────────────────────────────────────────────────────────────
-const _navBurger = document.getElementById('nav-burger');
-const _navMenu   = document.getElementById('nav-menu');
-if (_navBurger && _navMenu) {
-    _navBurger.addEventListener('click', () => {
-        const open = _navMenu.classList.toggle('open');
-        _navBurger.textContent = open ? '✕' : '☰';
-        _navBurger.setAttribute('aria-expanded', open);
-    });
-    document.addEventListener('click', e => {
-        if (!e.target.closest('nav')) {
-            _navMenu.classList.remove('open');
-            _navBurger.textContent = '☰';
-            _navBurger.setAttribute('aria-expanded', 'false');
-        }
-    });
-    document.querySelectorAll('.nav-drop-btn').forEach(btn => {
-        btn.addEventListener('click', e => {
-            if (window.innerWidth > 1024) return;
-            e.stopPropagation();
-            const drop    = btn.closest('.nav-drop');
-            const opening = !drop.classList.contains('open');
-            document.querySelectorAll('.nav-drop').forEach(d => d.classList.remove('open'));
-            if (opening) drop.classList.add('open');
-        });
-    });
-}
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 resize();

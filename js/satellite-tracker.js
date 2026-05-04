@@ -49,13 +49,30 @@ let _wasmLoading = false;
 async function _loadWasmSgp4() {
     if (_wasmSgp4 || _wasmLoading) return _wasmSgp4;
     _wasmLoading = true;
+    const t0 = performance.now();
     try {
         const mod = await import('./sgp4-wasm/sgp4_wasm.js');
         await mod.default();  // init WASM
         _wasmSgp4 = mod;
         console.info('[SatTracker] Rust SGP4 WASM loaded — high-performance propagation active');
+        // Telemetry: how long did the WASM cold-start take? Big swings
+        // in p95 here are usually network / CDN edge problems, not
+        // wasm-bindgen instantiation. Lazy import so satellite-tracker
+        // doesn't pull telemetry into pages that don't need it.
+        try {
+            const { telemetry } = await import('./telemetry.js');
+            telemetry.recordPerf('wasm_sgp4_init', performance.now() - t0);
+        } catch {}
     } catch (err) {
         console.debug('[SatTracker] WASM SGP4 not available, using JS fallback:', err.message);
+        // Telemetry: don't burn an `error` row on this — WASM-unavailable
+        // is an expected fallback for older browsers. Log as a tagged
+        // app_perf with a -1 value so we can count occurrence rates
+        // without polluting the error top-N.
+        try {
+            const { telemetry } = await import('./telemetry.js');
+            telemetry.recordPerf('wasm_sgp4_init_failed', -1);
+        } catch {}
     }
     _wasmLoading = false;
     return _wasmSgp4;
@@ -455,11 +472,25 @@ export class SatelliteTracker {
      */
     async loadGroup(group = 'stations') {
         if (this._groups.has(group)) return this._groups.get(group).count;
+        const _t0 = performance.now();
         try {
             const res = await fetch(`/api/celestrak/tle?group=${group}`);
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const data = await res.json();
-            if (data.error) throw new Error(data.error);
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || data.error) {
+                const reason = data.error
+                    ? `${data.error}${data.detail ? `: ${data.detail}` : ''}`
+                    : `HTTP ${res.status}`;
+                throw new Error(reason);
+            }
+            // Telemetry: record the TLE-load latency for the superadmin
+            // perf summary. Surfaces as `tle_load_ms` per route. Slow
+            // p95 here is a CelesTrak / edge proxy issue, not a client
+            // one. Lazy import keeps satellite-tracker free of a
+            // hard dep on telemetry.
+            try {
+                const { telemetry } = await import('./telemetry.js');
+                telemetry.recordPerf(`tle_load_${group}`, performance.now() - _t0);
+            } catch {}
 
             const tles = data.satellites ?? [];
             const added = this._addSatellites(tles, group);
@@ -467,8 +498,18 @@ export class SatelliteTracker {
                 visible: true,
                 count: added,
                 color: GROUP_COLORS[group] ?? GROUP_COLORS._default,
+                error: null,
+                composite: data.composite ?? false,
+                subgroups: data.subgroups ?? null,
+                fetched: data.fetched ?? new Date().toISOString(),
             });
 
+            // Composite groups can succeed-with-partial. Keep that visible.
+            const partial = (data.subgroups ?? []).filter(s => s.status === 'error');
+            if (partial.length > 0) {
+                console.warn(`[SatTracker] ${group}: ${partial.length}/${data.subgroups.length} subgroups failed:`,
+                    partial.map(p => `${p.group} (${p.error})`).join(', '));
+            }
             console.info(`[SatTracker] +${added} satellites (${group}) — total: ${this._satellites.length}`);
 
             window.dispatchEvent(new CustomEvent('satellites-loaded', {
@@ -478,8 +519,36 @@ export class SatelliteTracker {
             return added;
         } catch (err) {
             console.warn(`[SatTracker] Failed to load ${group}:`, err.message);
+            // Record the failure so the UI can render a "failed (retry)"
+            // state instead of an indeterminate "—". A subsequent
+            // loadGroup() call will short-circuit on hasGroup(); callers
+            // wanting a retry should remove the group first.
+            this._groups.set(group, {
+                visible: false,
+                count: 0,
+                color: GROUP_COLORS[group] ?? GROUP_COLORS._default,
+                error: err.message || 'unknown',
+                fetched: new Date().toISOString(),
+            });
+            window.dispatchEvent(new CustomEvent('satellites-load-failed', {
+                detail: { group, error: err.message },
+            }));
             return 0;
         }
+    }
+
+    /**
+     * Forget a group entry so a subsequent loadGroup() will refetch.
+     * Used by the layer panel's retry-on-failed-load button. Does not
+     * remove already-rendered satellites for the group (call
+     * unloadGroup() for that).
+     */
+    forgetGroup(group) {
+        if (!this._groups.has(group)) return;
+        const entry = this._groups.get(group);
+        // Only forget failed entries — a successful load keeps its
+        // satellites in _satellites so a forget+reload would dupe them.
+        if (entry.error) this._groups.delete(group);
     }
 
     /**
@@ -487,6 +556,7 @@ export class SatelliteTracker {
      * @param {number} noradId  NORAD catalog number
      */
     async loadNorad(noradId) {
+        const _t0 = performance.now();
         try {
             const res = await fetch(`/api/celestrak/tle?norad=${noradId}`);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -495,6 +565,10 @@ export class SatelliteTracker {
 
             const sats = data.satellites ?? [];
             this._addSatellites(sats, 'search');
+            try {
+                const { telemetry } = await import('./telemetry.js');
+                telemetry.recordPerf('tle_load_norad', performance.now() - _t0);
+            } catch {}
             return sats[0] ?? null;
         } catch (err) {
             console.warn(`[SatTracker] Failed to load NORAD ${noradId}:`, err.message);

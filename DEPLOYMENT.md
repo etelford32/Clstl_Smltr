@@ -52,13 +52,15 @@ supabase-admin.sql                        # admin RPCs, is_admin() helper
 supabase-multi-location-migration.sql     # per-plan saved-location caps
 
 # Weather pipeline
-supabase-weather-cache-migration.sql      # weather_grid_cache table
-supabase-weather-pgcron-migration.sql     # original pg_cron Open-Meteo refresh
-supabase-weather-pgcron-fix-migration.sql # SSL/timeout fix for above
-supabase-weather-unschedule-migration.sql # un-schedule pg_cron once Vercel cron took over
+supabase-weather-cache-migration.sql              # weather_grid_cache table
+supabase-weather-pgcron-migration.sql             # original pg_cron Open-Meteo refresh
+supabase-weather-pgcron-fix-migration.sql         # SSL/timeout fix for above
+supabase-weather-unschedule-migration.sql         # un-schedule pg_cron once Vercel cron took over
+supabase-weather-pgcron-secondary-migration.sql   # pg_cron 72×36 secondary writer at *:30
 
 # Pipeline observability + supplementary feeds
 supabase-pipeline-heartbeat-migration.sql # admin "Pipeline Health" backing tables
+supabase-pipeline-alerts-migration.sql    # last_alert_at column + alert RPC
 supabase-solar-wind-migration.sql         # solar-wind ring buffer
 supabase-solar-wind-freshness-fix.sql     # freshness gate fix for above
 supabase-polar-vortex-migration.sql       # polar_vortex_snapshots schema
@@ -67,6 +69,8 @@ supabase-polar-vortex-migration.sql       # polar_vortex_snapshots schema
 supabase-security-tighten-migration.sql   # analytics + session RLS hardening
 supabase-invites-email-migration.sql      # email-targeted invites + RPCs
 supabase-email-rate-limit-migration.sql   # DB-backed email rate limit + audit
+supabase-auth-failures-migration.sql      # auth_failures table + log_auth_failure RPC;
+                                          # source for the admin "signin_failed" metric
 supabase-schema-hardening-migration.sql   # role/endpoint CHECKs + delete_user_data RPC
 supabase-retention-cron-migration.sql     # analytics/alert retention + cron-status RPC
 
@@ -76,7 +80,88 @@ supabase-plan-lockdown-migration.sql      # blocks self-grant of paid plans (CRI
 
 # Educator wedge (April 2026)
 supabase-class-seats-migration.sql        # class-seat invite RPCs + activation_events table
+
+# Linter follow-up (April 2026)
+supabase-analytics-views-rls-fix.sql      # security_invoker on analytics_daily / user_analytics
+
+# Superadmin role/plan audit (May 2026)
+supabase-role-plan-audit-migration.sql    # is_superadmin(), user_profiles_audit table,
+                                          # promote_user / set_user_plan_override RPCs,
+                                          # AFTER trigger capturing role/plan/Stripe-link
+                                          # changes for forensic review
+
+# Email-confirmation telemetry (May 2026)
+supabase-signup-confirmed-migration.sql   # AFTER trigger on auth.users.confirmed_at
+                                          # logs signup + signup_confirmed events;
+                                          # closes the email-gate funnel hole and
+                                          # extends auth_flow_metrics
+
+# Schema-hardening follow-up (May 2026)
+supabase-schema-hardening-followup-migration.sql
+                                          # CRITICAL — closes a regression where
+                                          # supabase-oauth-trigger-migration.sql
+                                          # accidentally re-introduced
+                                          # COALESCE(v_meta->>'plan', 'free') in
+                                          # handle_new_user(), silently re-opening
+                                          # the metadata-injection path closed by
+                                          # supabase-plan-lockdown-migration.sql.
+                                          # MUST run after both. Includes a
+                                          # verification query to detect any
+                                          # accounts minted while the regression
+                                          # was live.
+
+# Client telemetry (May 2026)
+supabase-client-telemetry-migration.sql   # client_telemetry table (errors,
+                                          # auth_failures, 404s, redirects,
+                                          # web_vitals, app_perf) + log RPC +
+                                          # 4 superadmin-only top-N read RPCs
+                                          # + pg_cron pruner (14d perf, 30d rest).
+                                          # Surfaces on /superadmin → Telemetry tab.
+                                          # Requires the /api/telemetry/log edge
+                                          # endpoint deployed to Vercel.
+
+# Perf alerts (May 2026)
+supabase-perf-alerts-migration.sql        # perf_alert_state + 5 RPCs that wire
+                                          # /api/cron/pipeline-watchdog into the
+                                          # client_telemetry pipeline. LCP p95
+                                          # > 4 s (configurable) on any route
+                                          # fires a Slack/email alert, with
+                                          # 6 h cooldown + auto-resolve after 3
+                                          # consecutive healthy ticks.
+                                          # MUST be applied AFTER
+                                          # supabase-client-telemetry-migration.sql.
+
+# Per-user timeline (May 2026)
+supabase-user-timeline-migration.sql      # telemetry_user_timeline + _summary
+                                          # RPCs that merge client_telemetry +
+                                          # activation_events for a single user
+                                          # into one chronological view. Powers
+                                          # the "Timeline" action on each row of
+                                          # /superadmin → User Management. Read-
+                                          # only; superadmin-gated.
+                                          # MUST be applied AFTER
+                                          # supabase-client-telemetry-migration.sql.
+
+# Magic-link signin (May 2026)
+supabase-magic-link-migration.sql         # signin_magic_link_requested event
+                                          # added to activation_events CHECK +
+                                          # auth_flow_metrics refreshed to
+                                          # expose it on the admin Auth flow
+                                          # card. Operator runbook (with
+                                          # branded email template) lives in
+                                          # MAGIC_LINK_SETUP.md.
 ```
+
+> **Apply order — `supabase-role-plan-audit-migration.sql`** must run AFTER
+> `supabase-plan-lockdown-migration.sql` (it patches the lockdown trigger to
+> honour an opt-in flag set by the new audited RPCs). The migration is
+> idempotent and starts the audit table empty by design — no historical
+> backfill of pre-migration role/plan changes. Once applied, admins can
+> promote between `user`↔`tester` from `/admin` (Users tab → Change role),
+> superadmins get the full management surface at `/superadmin` (role
+> changes up to admin, plan overrides with required reason, audit log).
+> Superadmin minting stays SQL-Editor-only — there is no UI path to mint
+> a new superadmin, by design.
 
 > **Prerequisites for `supabase-class-seats-migration.sql`** — the migration
 > performs a preflight check and aborts with the missing items if any are
@@ -103,10 +188,33 @@ Environment Variables, scope = Production):
 | `ALERT_FROM_EMAIL` | optional; defaults to `Parker Physics Alerts <alerts@parkersphysics.com>` | no |
 | `APP_URL` | optional; defaults to `https://parkersphysics.com` (used in invite magic links) | no |
 | `STRIPE_SECRET_KEY` | paid tiers (Stripe API calls from `/api/stripe/*`) | **yes** |
-| `STRIPE_*_PRICE_ID` | one per price; maps Stripe → plan tier | no |
+| `STRIPE_BASIC_PRICE_ID` / `STRIPE_BASIC_YEARLY_PRICE_ID` | Basic monthly + optional yearly | no |
+| `STRIPE_EDUCATOR_PRICE_ID` / `STRIPE_EDUCATOR_YEARLY_PRICE_ID` | Educator monthly + optional yearly | no |
+| `STRIPE_ADVANCED_PRICE_ID` / `STRIPE_ADVANCED_YEARLY_PRICE_ID` | Advanced monthly + optional yearly | no |
+| `STRIPE_INSTITUTION_PRICE_ID` / `STRIPE_INSTITUTION_YEARLY_PRICE_ID` | Institution monthly + optional yearly | no |
 | `STRIPE_WEBHOOK_SECRET` | `/api/stripe/webhook` signature verification | **yes** |
+| `TRIAL_EDU_14DAY_ENABLED=1` | optional; turns on the `edu-14day` trial promo (Educator outreach) | no |
+
+> **Trial promos (server-enforced).** The checkout endpoint accepts an
+> optional `trial: '<code>'` field; the code → days mapping lives in
+> `api/stripe/checkout.js` (`TRIAL_PROMOS`). Codes shipped today:
+>
+> | Code | Days | Plans | Source |
+> |---|---|---|---|
+> | `tour-30day` | 30 | basic, educator | Home-page Explore tour final stop |
+> | `edu-14day`  | 14 | educator        | Educator outreach (gated by `TRIAL_EDU_14DAY_ENABLED=1`) |
+>
+> Stripe's built-in **trial reminder email** (Dashboard →
+> Subscriptions → Settings → Trials) fires 7 days before trial end —
+> turn it on so users get the standard "trial ending" notice. The
+> webhook also logs an `subscription_trial_ending` activation event on
+> `customer.subscription.trial_will_end` so the admin funnel charts trial
+> reminders alongside trial → paid conversions.
 | `CRON_SECRET` | `/api/cron/*` Bearer token (recommended over `x-vercel-cron` fallback) | **yes** |
 | `METNO_USER_AGENT` | optional; identifies us to MET Norway | no |
+| `ALERT_OPS_EMAIL` | required for `/api/cron/pipeline-watchdog` to actually send (without it the watchdog logs candidates but skips email) | **yes** |
+| `SLACK_WEBHOOK_URL` | optional; Slack incoming-webhook URL. Watchdog uses Slack as the preferred channel for perf-regression + recovery alerts and falls back to email if unset | **yes** |
+| `PERF_ALERT_METRIC` / `PERF_ALERT_THRESHOLD_MS` / `PERF_ALERT_WINDOW_HOURS` / `PERF_ALERT_MIN_SAMPLES` / `PERF_ALERT_COOLDOWN_HOURS` / `PERF_ALERT_RESOLVE_STREAK` | optional; per-knob overrides for the perf-regression alert (defaults: `LCP` / `4000` / `6` / `30` / `6` / `3`) | no |
 
 **3. Promote the first admin** — after you've signed up your own
 account through `/signup`, run this in the Supabase SQL Editor (one
@@ -247,7 +355,7 @@ The two onboarding-blocker migrations at the end (`supabase-daily-digest-migrati
 ### Cron health — admin dashboard
 
 - [ ] `/admin` → Pipeline Health: zero red rows in the last 24h
-- [ ] All 6 crons registered in `vercel.json` are firing on schedule:
+- [ ] All 7 crons registered in `vercel.json` are firing on schedule:
       ```
       0 * * * *      /api/cron/refresh-weather-grid
       */5 * * * *    /api/cron/prewarm-hot
@@ -255,7 +363,12 @@ The two onboarding-blocker migrations at the end (`supabase-daily-digest-migrati
       0 */6 * * *    /api/cron/prewarm-cold
       0 11 * * *     /api/cron/daily-forecast-digest
       */30 * * * *   /api/cron/refresh-saved-locations
+      15,45 * * * *  /api/cron/pipeline-watchdog
       ```
+- [ ] `pipeline-watchdog` reports `candidates: 0` while pipelines are healthy.
+      Force-trigger by leaving `consecutive_fail` artificially high in
+      `pipeline_heartbeat` and verifying an email lands at `ALERT_OPS_EMAIL`,
+      then confirm `last_alert_at` was stamped (so subsequent ticks skip).
 - [ ] `/api/cron/daily-forecast-digest` real run (not dry-run) reports
       `sent > 0` once at least one user has `daily_digest_enabled = true`
 

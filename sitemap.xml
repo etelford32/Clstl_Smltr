@@ -91,6 +91,13 @@
   </url>
 
   <url>
+    <loc>https://parkersphysics.com/operations</loc>
+    <lastmod>2026-04-28</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+  </url>
+
+  <url>
     <loc>https://parkersphysics.com/missions</loc>
     <lastmod>2026-04-22</lastmod>
     <changefreq>weekly</changefreq>

@@ -2,6 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sagittarius A* — Parker Physics App</title>
 <meta name="description" content="Real-time 3D simulation of Sagittarius A*, the supermassive black hole at the center of the Milky Way. S-star orbits with GR precession, accretion disk, relativistic jets, NIR flare detection.">
@@ -522,10 +527,9 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) cloc
 </script>
 
 <script type="module">
-import { analytics } from './js/analytics.js';
+import './js/analytics.js';
 import { userState } from './js/user-state.js';
 import { recordVisit } from './js/greeting.js';
-analytics.page('sagittarius');
 recordVisit('sagittarius');
 userState.trackPage('sagittarius');
 </script>

@@ -2,6 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<script src="js/preview-mode.js"></script>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>Earth View — Parker Physics App</title>
 <style>
@@ -318,6 +324,103 @@ nav {
 #alert-tip .at-area  { color:#7ab; font-size:10px; }
 #alert-tip .at-exp   { color:#555; font-size:10px; margin-top:4px; }
 
+/* ─── My Location panel ──────────────────────────────────────────
+   Top-left primary affordance (set your location → personalised
+   alerts + sun + ISS data). Offset 110px from the top so it sits
+   well below the shared site nav AND below the live status bar
+   (#sw-bar). At top:60px the panel fought the status strip for
+   eyeballs; pushing it down makes the search input the obvious
+   first thing the visitor reaches for once the globe loads.
+   "Spacey" treatment: layered nebula gradient + aurora-tinted glow
+   ring + soft inner highlight, so the panel reads as part of the
+   simulation rather than a flat overlay. */
+#loc-panel {
+    position:absolute; top:110px; left:10px; z-index:51;
+    background:
+        radial-gradient(120% 80% at 8% -10%, rgba(95,255,208,.18), transparent 60%),
+        radial-gradient(140% 100% at 110% 110%, rgba(127,90,255,.20), transparent 65%),
+        linear-gradient(180deg, rgba(6,10,28,.92), rgba(2,4,14,.96));
+    backdrop-filter:blur(14px) saturate(1.15);
+    -webkit-backdrop-filter:blur(14px) saturate(1.15);
+    border:1px solid rgba(95,255,208,.45); border-radius:14px;
+    padding:14px 16px; width:264px; font-size:11px;
+    color:#e6f6ff;
+    box-shadow:
+        0 18px 44px rgba(0,40,30,.55),
+        0 0 0 1px rgba(127,90,255,.10),
+        0 0 26px rgba(95,255,208,.18),
+        inset 0 1px 0 rgba(255,255,255,.06),
+        inset 0 0 32px rgba(95,255,208,.05);
+    overflow:hidden;
+    /* When the visitor has no saved location, pulse the border softly so
+       the eye is drawn to the search input before anything else. The
+       :has(#loc-result[style*="block"]) check turns the pulse off as soon
+       as a location is set, so we're not nagging an active user. */
+    animation: loc-panel-pulse 2.6s ease-in-out infinite;
+}
+#loc-panel:has(#loc-result[style*="block"]) { animation: none; }
+
+@keyframes loc-panel-pulse {
+    0%, 100% {
+        box-shadow:
+            0 18px 44px rgba(0,40,30,.55),
+            0 0 0 1px rgba(127,90,255,.10),
+            0 0 22px rgba(95,255,208,.18),
+            inset 0 1px 0 rgba(255,255,255,.06),
+            inset 0 0 32px rgba(95,255,208,.05);
+    }
+    50% {
+        box-shadow:
+            0 18px 50px rgba(0,40,30,.55),
+            0 0 0 1px rgba(127,90,255,.18),
+            0 0 36px rgba(95,255,208,.45),
+            inset 0 1px 0 rgba(255,255,255,.08),
+            inset 0 0 36px rgba(95,255,208,.10);
+    }
+}
+/* Subtle starfield speckle inside the panel, painted by an SVG noise
+   gradient so we don't need an asset. Pointer-events: none so it never
+   eats clicks on the search input. */
+#loc-panel::before {
+    content:''; position:absolute; inset:0; pointer-events:none;
+    background-image:
+        radial-gradient(1px 1px at 18% 22%, rgba(255,255,255,.55), transparent 60%),
+        radial-gradient(1px 1px at 72% 14%, rgba(180,230,255,.45), transparent 60%),
+        radial-gradient(1.5px 1.5px at 42% 78%, rgba(95,255,208,.5), transparent 60%),
+        radial-gradient(1px 1px at 88% 64%, rgba(220,200,255,.4), transparent 60%),
+        radial-gradient(1px 1px at 30% 56%, rgba(255,255,255,.35), transparent 60%);
+    opacity:.55;
+    mix-blend-mode:screen;
+}
+#loc-panel > * { position:relative; z-index:1; }
+#loc-panel .panel-header h3 {
+    color:#5fffd0; font-size:12px; text-transform:uppercase;
+    letter-spacing:.14em; font-weight:800;
+    text-shadow:0 0 14px rgba(95,255,208,.45);
+}
+#loc-panel:not(:has(#loc-result[style*="block"])) #loc-result-empty { display:block; }
+/* Empty-state hint: louder, friendlier copy with a bouncing arrow so a
+   first-time visitor reads it as a call to action, not a footnote. */
+#loc-empty-hint {
+    margin-top:8px;
+    padding:8px 10px;
+    background:linear-gradient(135deg, rgba(95,255,208,.10), rgba(127,90,255,.08));
+    border:1px dashed rgba(95,255,208,.35);
+    border-radius:8px;
+    font-size:10.5px; color:#cfeefb; line-height:1.55;
+}
+#loc-empty-hint::before {
+    content:'↑ Enter a city above';
+    display:block;
+    font-size:10px; font-weight:800; letter-spacing:.06em;
+    color:#5fffd0; margin-bottom:3px;
+    animation: loc-hint-bounce 1.6s ease-in-out infinite;
+}
+@keyframes loc-hint-bounce {
+    0%, 100% { transform:translateY(0);   opacity:.95; }
+    50%      { transform:translateY(-2px); opacity:1; }
+}
+
 /* ─── Weather analysis panel ─────────────────────────────────── */
 #wx-panel {
     position:absolute; bottom:52px; left:10px; z-index:50;
@@ -338,8 +441,48 @@ nav {
 #wx-age[data-staleness="warn"]  { color:#ffaa44; }
 #wx-age[data-staleness="stale"] { color:#ff6b6b; font-weight:600; }
 .wx-row { display:flex; justify-content:space-between; margin-bottom:5px; }
+
+/* Forecast skill matrix — fixed grid (channel rows × horizon cols).
+   Lives in #wx-panel under the isobar / centers section. Empty cells
+   render as em-dashes so the layout doesn't reflow as the validator
+   accumulates samples. Header row shares the same grid template so
+   columns align with their MAE values below. */
+.wx-skill-grid { font-family: monospace; font-size: 10px; color: #88b; }
+.wx-skill-grid .skill-row {
+    display: grid; grid-template-columns: 36px repeat(5, 1fr);
+    gap: 4px; align-items: center;
+    padding: 2px 0;
+}
+.wx-skill-grid .skill-head      { color: #557; font-size: 9px; padding-bottom: 2px; }
+.wx-skill-grid .skill-head span { text-align: right; }
+.wx-skill-grid .skill-ch        { color: #99a; }
+.wx-skill-grid .skill-cell      { text-align: right; color: #aac; }
 .wx-k { color:#4a6a80; }
 .wx-v { color:#a0d8f0; font-weight:600; }
+
+/* Storm-alerts row keeps the count and the Get Alerts CTA together. */
+.wx-row.alerts-row { align-items:center; }
+.alerts-row-right { display:inline-flex; align-items:center; gap:6px; }
+.wx-cta-alerts {
+    display:inline-flex; align-items:center; gap:4px;
+    padding:3px 8px; border-radius:999px;
+    background:linear-gradient(135deg, #ffb830 0%, #ff7a18 100%);
+    color:#1a0c00; font-size:9.5px; font-weight:800;
+    letter-spacing:.04em; text-transform:uppercase;
+    text-decoration:none; line-height:1.1;
+    border:1px solid rgba(255,200,80,.55);
+    box-shadow:0 2px 8px rgba(255,140,0,.28),
+               inset 0 1px 0 rgba(255,255,255,.4);
+    transition:transform .12s, filter .15s, box-shadow .18s;
+    white-space:nowrap;
+}
+.wx-cta-alerts:hover {
+    filter:brightness(1.08);
+    box-shadow:0 4px 14px rgba(255,140,0,.45),
+               inset 0 1px 0 rgba(255,255,255,.5);
+}
+.wx-cta-alerts:active { transform:translateY(1px); }
+.wx-cta-icon { font-size:11px; line-height:1; }
 #wx-refresh {
     margin-top:9px; width:100%; padding:5px; cursor:pointer;
     background:rgba(0,200,255,.1); border:1px solid rgba(0,200,255,.3);
@@ -553,22 +696,38 @@ nav {
     font-size: 9px; color: #336a8a; letter-spacing: .07em;
     text-transform: uppercase; margin: 8px 0 6px;
 }
-.loc-row { display: flex; gap: 5px; margin-bottom: 4px; }
+.loc-row { display: flex; gap: 6px; margin-bottom: 6px; }
 #loc-input {
-    flex: 1; background: rgba(0,150,200,.10);
-    border: 1px solid rgba(0,200,255,.2); border-radius: 4px;
-    color: #ddf; padding: 5px 7px; font-size: 10px;
+    flex: 1;
+    background: linear-gradient(180deg, rgba(8,16,40,.85), rgba(4,8,22,.92));
+    border: 1px solid rgba(95,255,208,.28); border-radius: 8px;
+    color: #e8fdff; padding: 8px 11px; font-size: 11px;
     font-family: inherit; outline: none; min-width: 0;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.04),
+                inset 0 0 14px rgba(0,80,120,.18);
+    transition: border-color .18s, box-shadow .18s;
 }
-#loc-input:focus { border-color: rgba(0,200,255,.55); }
+#loc-input::placeholder { color: rgba(155,200,210,.55); }
+#loc-input:focus {
+    border-color: rgba(95,255,208,.7);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.05),
+                0 0 0 3px rgba(95,255,208,.15),
+                0 0 18px rgba(95,255,208,.25);
+}
 #loc-search {
-    background: rgba(0,180,255,.15); border: 1px solid rgba(0,200,255,.3);
-    border-radius: 4px; color: #00ccff; padding: 5px 9px;
-    font-size: 11px; cursor: pointer; flex-shrink: 0;
-    touch-action: manipulation; min-height: 32px;
+    background: linear-gradient(135deg, rgba(95,255,208,.32), rgba(0,180,140,.18));
+    border: 1px solid rgba(95,255,208,.55); border-radius: 8px;
+    color: #001b18; padding: 6px 12px; font-weight: 800;
+    font-size: 13px; cursor: pointer; flex-shrink: 0;
+    touch-action: manipulation; min-height: 34px;
+    text-shadow: 0 1px 0 rgba(255,255,255,.25);
+    box-shadow: 0 4px 12px rgba(95,255,208,.18),
+                inset 0 1px 0 rgba(255,255,255,.35);
+    transition: transform .12s, box-shadow .18s, filter .12s;
 }
-#loc-search:hover { background: rgba(0,180,255,.28); }
-#loc-result { display: none; margin-top: 5px; }
+#loc-search:hover { filter: brightness(1.08); box-shadow: 0 6px 18px rgba(95,255,208,.32), inset 0 1px 0 rgba(255,255,255,.4); }
+#loc-search:active { transform: translateY(1px); }
+#loc-result { display: none; margin-top: 6px; }
 .loc-header {
     display: flex; justify-content: space-between; align-items: baseline;
     gap: 6px; margin-bottom: 1px;
@@ -618,17 +777,27 @@ nav {
 
 /* ─── Time controls (bottom-centre) ────────────────────────────── */
 /* Same pattern as satellites.html so both pages share muscle memory.
-   One simTimeMs drives the Earth rotation, sun direction, sub-solar
-   point, sun card, ISS pass card, and on-globe solar markers.  UI
-   speed presets: 1× (real), 60× (1 min/s), 600×, 3600× (1 hr/s). */
+   simTimeMs drives sun direction, sub-solar point, sun card, ISS pass
+   card, on-globe solar markers, and the 24-h weather replay.  Earth
+   ROTATION is intentionally decoupled — see the "Planet rotation"
+   toggle at the top of the SW panel — so the slider scrubs data
+   across a stationary globe.  UI speed presets: 1× (real), 60×
+   (1 min/s), 600×, 3600× (1 hr/s). */
 #time-controls {
-    position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+    /* 10 px floor above the viewport edge so the bar is never flush with
+       the bottom of #app on any breakpoint — keeps it visually anchored
+       even when window heights are awkward. */
+    position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
     z-index: 60;
     background: rgba(0,0,0,.82); backdrop-filter: blur(12px);
     border: 1px solid rgba(0,200,255,.2); border-radius: 9px;
-    padding: 6px 8px; display: flex; align-items: center; gap: 3px;
+    padding: 6px 8px;
+    display: flex; flex-direction: column; align-items: stretch; gap: 5px;
     font-size: 11px;
+    min-width: 360px;
 }
+/* Buttons row keeps the original flex-row behaviour. */
+#tc-buttons-row { display: flex; align-items: center; gap: 3px; }
 .tc-btn {
     background: rgba(0,200,200,.08); border: 1px solid rgba(0,200,200,.18);
     border-radius: 4px; color: #9cc; cursor: pointer;
@@ -649,15 +818,73 @@ nav {
 }
 .tc-time   { color: #0ee; font-size: 11px; line-height: 1;   letter-spacing: .02em; }
 .tc-offset { color: #667; font-size: 9px;  line-height: 1.2; margin-top: 2px; }
+
+/* 24-h replay slider. Range covers -1440..0 minutes (= -24 h..now); each
+   step is one minute so keyboard arrows are usable. The native input
+   handles drag; the resolver translates value→simTimeMs every frame. */
+#tc-scrub-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 2px 4px 0;
+}
+.tc-scrub-edge {
+    color: #557; font-size: 9px; font-family: monospace;
+    min-width: 26px; user-select: none;
+}
+.tc-scrub-edge.right { text-align: right; color: #0ee; }
+/* Slider domain is [-10080, +4320] minutes (= -7d .. +3d). The "now"
+   mark sits at (10080 / 14400) = 70% across the track. CSS gradient
+   below paints the past side (left of 70%) cyan and the future side
+   (right of 70%) amber-dashed-ish so users can read at a glance which
+   half of the timeline they're scrubbing. */
+#tc-scrub {
+    flex: 1; min-width: 240px;
+    -webkit-appearance: none; appearance: none;
+    height: 4px;
+    background: linear-gradient(to right,
+        rgba(0,200,200,.10) 0%,
+        rgba(0,200,200,.26) 70%,
+        rgba(255,170,60,.10) 70.01%,
+        rgba(255,170,60,.30) 100%);
+    /* Vertical "now" tick painted on top of the track. */
+    background-image:
+        linear-gradient(to right,
+            rgba(0,200,200,.10) 0%,
+            rgba(0,200,200,.26) 70%,
+            rgba(255,170,60,.10) 70.01%,
+            rgba(255,170,60,.30) 100%),
+        linear-gradient(rgba(255,255,255,.55), rgba(255,255,255,.55));
+    background-size: 100% 100%, 1px 10px;
+    background-position: 0 0, 70% center;
+    background-repeat: no-repeat, no-repeat;
+    border-radius: 2px; outline: none; margin: 0;
+    cursor: pointer;
+}
+#tc-scrub::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: #0cc; border: 1px solid #088;
+    cursor: pointer; box-shadow: 0 0 6px rgba(0,200,200,.45);
+}
+#tc-scrub::-moz-range-thumb {
+    width: 14px; height: 14px; border-radius: 50%;
+    background: #0cc; border: 1px solid #088;
+    cursor: pointer; box-shadow: 0 0 6px rgba(0,200,200,.45);
+}
+#tc-scrub:focus::-webkit-slider-thumb { box-shadow: 0 0 10px rgba(0,200,200,.7); }
+#tc-scrub:focus::-moz-range-thumb     { box-shadow: 0 0 10px rgba(0,200,200,.7); }
+
 /* On mobile the #mobile-toolbar lives at bottom:0 / height:56px, so the
    scrub bar rides 8 px above it.  On desktop the toolbar is hidden so
    bottom:12px is fine. */
 @media (max-width:1024px) {
-    #time-controls { bottom: 64px; padding: 4px 6px; font-size: 10px; }
+    /* 56-px mobile toolbar + 10 px floor = 66 px above the viewport bottom. */
+    #time-controls { bottom: 66px; padding: 4px 6px; font-size: 10px; min-width: 280px; }
     .tc-btn        { min-width: 26px; padding: 3px 6px; font-size: 9px; }
     .tc-display    { min-width: 128px; }
     .tc-time       { font-size: 10px; }
     .tc-offset     { font-size: 8px; }
+    #tc-scrub      { min-width: 180px; }
+    .tc-scrub-edge { font-size: 8px; min-width: 22px; }
 }
 
 /* ─── Mobile bottom toolbar ──────────────────────────────────────── */
@@ -701,7 +928,7 @@ nav {
     .hud-title { grid-column: 1 / -1; margin-bottom: 2px; }
 
     /* All side panels: slide up from bottom as sheets */
-    #layer-panel, #info-panel, #wx-panel {
+    #layer-panel, #info-panel, #wx-panel, #loc-panel {
         position: absolute; z-index: 75;
         left: 0; right: 0; bottom: 56px; top: auto;
         width: 100%; max-height: 72vh; overflow-y: auto;
@@ -712,7 +939,11 @@ nav {
     }
     #layer-panel.panel-open,
     #info-panel.panel-open,
-    #wx-panel.panel-open { transform: translateY(0); }
+    #wx-panel.panel-open,
+    #loc-panel.panel-open { transform: translateY(0); }
+    /* On mobile the dock button drives panel-open; until tapped, the
+       loc-panel stays off-screen so the globe is unobstructed. */
+    #loc-panel:not(.panel-open) { transform: translateY(110%); }
 
     /* Show close button on mobile */
     .panel-close { display: block; }
@@ -745,6 +976,107 @@ nav {
     .mtb-btn { min-width: 46px; font-size: 8px; padding: 4px 6px; }
     .mtb-btn .mtb-icon { font-size: 16px; }
 }
+
+/* ── Saved-location summary card (sits between #app and .sim-info) ───── */
+#saved-loc-summary {
+    background:#010812;
+    padding:18px 20px 6px;
+    border-top:1px solid rgba(0,198,255,.10);
+}
+#saved-loc-summary .sls-inner {
+    max-width:1100px; margin:0 auto;
+    /* upper-left alignment per the brief */
+    display:flex; justify-content:flex-start;
+}
+#saved-loc-summary .sls-card {
+    width:100%; max-width:560px;
+    background:
+        radial-gradient(120% 80% at 8% -10%, rgba(95,255,208,.10), transparent 60%),
+        radial-gradient(140% 100% at 110% 110%, rgba(127,90,255,.12), transparent 65%),
+        linear-gradient(180deg, rgba(6,12,30,.92), rgba(2,6,18,.96));
+    border:1px solid rgba(95,255,208,.22);
+    border-radius:14px;
+    padding:14px 18px 16px;
+    box-shadow:
+        0 14px 36px rgba(0,30,50,.45),
+        inset 0 1px 0 rgba(255,255,255,.05);
+    color:#cfeefb;
+    position:relative;
+    overflow:hidden;
+}
+#saved-loc-summary .sls-card::before {
+    content:''; position:absolute; inset:0; pointer-events:none;
+    background-image:
+        radial-gradient(1px 1px at 12% 28%, rgba(255,255,255,.45), transparent 60%),
+        radial-gradient(1px 1px at 78% 22%, rgba(180,230,255,.38), transparent 60%),
+        radial-gradient(1.4px 1.4px at 60% 70%, rgba(95,255,208,.4), transparent 60%);
+    opacity:.45; mix-blend-mode:screen;
+}
+#saved-loc-summary .sls-header {
+    display:flex; align-items:baseline; justify-content:space-between;
+    margin-bottom:10px; position:relative; z-index:1;
+}
+#saved-loc-summary .sls-title {
+    font-size:.78rem; font-weight:700; letter-spacing:.12em; text-transform:uppercase;
+    background:linear-gradient(135deg, #5fffd0 0%, #7b9cff 90%);
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+    background-clip:text;
+}
+#saved-loc-summary .sls-meta {
+    font-size:.7rem; color:#79a3b8; font-variant-numeric:tabular-nums;
+}
+#saved-loc-summary .sls-hint {
+    font-size:.72rem; color:#5d839a; line-height:1.55;
+    position:relative; z-index:1;
+}
+#saved-loc-summary .sls-grid {
+    display:grid; grid-template-columns:repeat(auto-fill, minmax(160px, 1fr));
+    gap:8px; position:relative; z-index:1;
+}
+.sls-item {
+    background:rgba(0,40,60,.35);
+    border:1px solid rgba(95,255,208,.12);
+    border-radius:9px;
+    padding:8px 10px 9px;
+    font-size:.72rem; line-height:1.45;
+    transition:border-color .18s, background .18s, transform .12s;
+    position:relative;
+}
+.sls-item:hover {
+    background:rgba(0,60,80,.45);
+    border-color:rgba(95,255,208,.32);
+}
+.sls-item .sls-i-row {
+    display:flex; justify-content:space-between; align-items:baseline; gap:6px;
+}
+.sls-item .sls-i-name {
+    color:#dff5ff; font-weight:700; font-size:.78rem;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1;
+}
+.sls-item .sls-i-badge {
+    font-size:.62rem; padding:1px 6px; border-radius:999px;
+    background:rgba(0,0,0,.35); color:var(--bdg, #9bd);
+    border:1px solid currentColor; font-weight:700; line-height:1.4;
+    flex-shrink:0;
+}
+.sls-item .sls-i-clock {
+    color:#7fc7e0; font-variant-numeric:tabular-nums; font-size:.7rem; margin-top:3px;
+}
+.sls-item .sls-i-coords {
+    color:#3d6a80; font-size:.62rem; font-variant-numeric:tabular-nums; margin-top:1px;
+}
+.sls-item .sls-i-actions {
+    display:flex; gap:4px; margin-top:6px;
+}
+.sls-item .sls-i-btn {
+    flex:1; background:rgba(0,150,200,.1); color:#9bd;
+    border:1px solid rgba(95,255,208,.15); border-radius:5px;
+    padding:3px 6px; font-size:.62rem; cursor:pointer;
+    font-family:inherit; transition:background .15s, color .15s;
+}
+.sls-item .sls-i-btn:hover { background:rgba(95,255,208,.2); color:#fff; }
+.sls-item .sls-i-btn.danger { color:#ff8a8a; border-color:rgba(255,80,80,.2); }
+.sls-item .sls-i-btn.danger:hover { background:rgba(255,80,80,.18); }
 
 /* ── Simulation description section ────────────────────────────────────── */
 .sim-info {
@@ -814,7 +1146,7 @@ nav {
 #scroll-hint svg { opacity: .5; animation: bounce-arrow 1.6s ease-in-out infinite; }
 </style>
 </head>
-<body>
+<body data-clickmap>
 
 <script type="importmap">
 {"imports":{
@@ -836,7 +1168,7 @@ nav {
             <polyline points="2,2 9,8 16,2" stroke="rgba(0,200,255,.7)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
     </div>
-    <div id="canvas-wrap"><canvas id="c"></canvas></div>
+    <div id="canvas-wrap" data-preview-stage="1"><canvas id="c"></canvas></div>
 
     <!-- Loading screen -->
     <div id="loading">
@@ -894,11 +1226,12 @@ nav {
             <div class="lyr-section-hdr"><span>SURFACE &amp; ATMOSPHERE</span><span class="lyr-chevron">▾</span></div>
             <div class="lyr-section-body"><div class="lyr-grid">
                 <label class="lyr"><input type="checkbox" id="lyr-clouds" checked><span class="lyr-status" data-layer="clouds" title="waiting"></span><label for="lyr-clouds">Cloud Cover</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-atm"    checked><label for="lyr-atm">Atmosphere</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-aurora" checked><span class="lyr-status" data-layer="aurora" title="waiting for SWPC"></span><label for="lyr-aurora">Aurora</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-lights" checked><label for="lyr-lights">City Lights</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-grid"   checked><label for="lyr-grid">Lat/Lon Grid</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-tropic"  checked><label for="lyr-tropic">Tropics</label></label>
+                <label class="lyr" title="Disable procedural fill — show only measured cloud cover, with hatched no-data regions where the satellite mosaic didn't see (poles, between-disc gaps)."><input type="checkbox" id="lyr-research-mode"><label for="lyr-research-mode">Research Mode (measured-only)</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-atm"><label for="lyr-atm">Atmosphere</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-aurora"><span class="lyr-status" data-layer="aurora" title="waiting for SWPC"></span><label for="lyr-aurora">Aurora</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-lights"><label for="lyr-lights">City Lights</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-grid"><label for="lyr-grid">Lat/Lon Grid</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-tropic"><label for="lyr-tropic">Tropics</label></label>
                 <label class="lyr" title="Debug: marker at the sub-solar point"><input type="checkbox" id="lyr-subsolar"><label for="lyr-subsolar">Subsolar pt</label></label>
             </div></div>
         </div>
@@ -913,48 +1246,49 @@ nav {
                     <input type="checkbox" id="lyr-jet"><span class="lyr-status" data-layer="jet" title="waiting"></span><label for="lyr-jet">Jet Stream</label>
                 </label>
                 <label class="lyr"><input type="checkbox" id="lyr-isobars" checked><span class="lyr-status" data-layer="isobars" title="waiting"></span><label for="lyr-isobars">Isobars</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-alerts"  checked><span class="lyr-status" data-layer="alerts" title="waiting"></span><label for="lyr-alerts">Storm Alerts</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-earthquakes" checked><span class="lyr-status" data-layer="earthquakes" title="waiting"></span><label for="lyr-earthquakes">Earthquakes</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-alerts"><span class="lyr-status" data-layer="alerts" title="waiting"></span><label for="lyr-alerts">Storm Alerts</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-earthquakes"><span class="lyr-status" data-layer="earthquakes" title="waiting"></span><label for="lyr-earthquakes">Earthquakes</label></label>
             </div></div>
         </div>
 
         <!-- ── Magnetosphere ── -->
-        <div class="lyr-section" data-lyr-section="magneto">
+        <div class="lyr-section collapsed" data-lyr-section="magneto">
             <div class="lyr-section-hdr"><span>MAGNETOSPHERE</span><span class="lyr-chevron">▾</span></div>
             <div class="lyr-section-body"><div class="lyr-grid">
-                <label class="lyr"><input type="checkbox" id="lyr-magnetopause"  checked><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-magnetopause">Magnetopause</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-bowshock"      checked><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-bowshock">Bow Shock</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-magnetosheath" checked><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-magnetosheath">Magnetosheath</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-reconnection"  checked><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-reconnection">X-line Reconnect</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-cusps"         checked><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-cusps">Polar Cusps</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-belts"         checked><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-belts">Rad. Belts</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-plasma"        checked><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-plasma">Plasmasphere</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-exosphere"     checked><label for="lyr-exosphere">Exosphere</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-geocorona"     checked><label for="lyr-geocorona">Geocorona</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-chex"          checked><label for="lyr-chex">Charge Exchange</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-cme"           checked><label for="lyr-cme">CME Shockfront</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-magnetopause"><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-magnetopause">Magnetopause</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-bowshock"><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-bowshock">Bow Shock</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-magnetosheath"><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-magnetosheath">Magnetosheath</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-reconnection"><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-reconnection">X-line Reconnect</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-cusps"><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-cusps">Polar Cusps</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-belts"><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-belts">Rad. Belts</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-plasma"><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-plasma">Plasmasphere</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-exosphere"><label for="lyr-exosphere">Exosphere</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-geocorona"><label for="lyr-geocorona">Geocorona</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-chex"><label for="lyr-chex">Charge Exchange</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-cme"><label for="lyr-cme">CME Shockfront</label></label>
             </div></div>
         </div>
 
         <!-- ── NASA Earth Observations ── -->
-        <div class="lyr-section" data-lyr-section="nasa-obs">
+        <div class="lyr-section collapsed" data-lyr-section="nasa-obs">
             <div class="lyr-section-hdr"><span>NASA EARTH OBSERVATIONS</span><span class="lyr-chevron">▾</span></div>
             <div class="lyr-section-body"><div class="lyr-grid">
-                <label class="lyr"><input type="checkbox" id="lyr-obs-precip-rate" checked><span class="lyr-status" data-layer="precip-rate"     title="waiting"></span><label for="lyr-obs-precip-rate">Precipitation (IMERG)</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-obs-sst"         checked><span class="lyr-status" data-layer="sst"             title="waiting"></span><label for="lyr-obs-sst">Sea Surface Temp</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-obs-aod"               ><span class="lyr-status" data-layer="aod"             title="waiting"></span><label for="lyr-obs-aod">Aerosol Depth (AOD, off by default — chunky 1° L3 grid)</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-precip-rate"><span class="lyr-status" data-layer="precip-rate"     title="waiting"></span><label for="lyr-obs-precip-rate">Precipitation (IMERG)</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-sst"><span class="lyr-status" data-layer="sst"             title="waiting"></span><label for="lyr-obs-sst">Sea Surface Temp</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-ocean-currents"><span class="lyr-status" data-layer="ocean-currents" title="climatological surface currents"></span><label for="lyr-ocean-currents">Ocean Currents</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-aod"><span class="lyr-status" data-layer="aod"             title="waiting"></span><label for="lyr-obs-aod">Aerosol Depth (AOD, off by default — chunky 1° L3 grid)</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-obs-cloud-thickness"><span class="lyr-status" data-layer="cloud-thickness" title="waiting"></span><label for="lyr-obs-cloud-thickness">Cloud Thickness (analytic, off by default)</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-obs-fires"       checked><span class="lyr-status" data-layer="fires"           title="waiting"></span><label for="lyr-obs-fires">Active Fires</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-obs-snow"        checked><span class="lyr-status" data-layer="snow"            title="waiting"></span><label for="lyr-obs-snow">Snow Cover</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-fires"><span class="lyr-status" data-layer="fires"           title="waiting"></span><label for="lyr-obs-fires">Active Fires</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-snow"><span class="lyr-status" data-layer="snow"            title="waiting"></span><label for="lyr-obs-snow">Snow Cover</label></label>
             </div></div>
         </div>
 
         <!-- ── Satellite Tracking ── -->
-        <div class="lyr-section" data-lyr-section="satellites">
+        <div class="lyr-section collapsed" data-lyr-section="satellites">
             <div class="lyr-section-hdr"><span>SATELLITE TRACKING</span><span class="lyr-chevron">▾</span></div>
             <div class="lyr-section-body">
             <div class="lyr-grid">
-                <label class="lyr"><input type="checkbox" id="lyr-sat-stations" checked><span class="lyr-status" data-layer="sat-stations" title="waiting"></span><label for="lyr-sat-stations">Space Stations</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-sat-stations"><span class="lyr-status" data-layer="sat-stations" title="waiting"></span><label for="lyr-sat-stations">Space Stations</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-sat-starlink"><span class="lyr-status" data-layer="sat-starlink" title="waiting"></span><label for="lyr-sat-starlink">Starlink</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-sat-weather"><span class="lyr-status" data-layer="sat-weather" title="waiting"></span><label for="lyr-sat-weather">Weather Sats</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-sat-gps"><span class="lyr-status" data-layer="sat-gps" title="waiting"></span><label for="lyr-sat-gps">GPS/GNSS</label></label>
@@ -974,23 +1308,42 @@ nav {
             <div class="lyr-section-hdr"><span>DISPLAY</span><span class="lyr-chevron">▾</span></div>
             <div class="lyr-section-body"><div class="lyr-grid">
                 <label class="lyr"><input type="checkbox" id="lyr-rotate"  checked><label for="lyr-rotate">Auto-rotate</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-iss"         checked><label for="lyr-iss">ISS Tracker</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-iss"><label for="lyr-iss">ISS Tracker</label></label>
             </div></div>
         </div>
     </div>
     </div>
 
-    <!-- Info panel — Space Weather HUD -->
-    <div id="info-panel">
+    <!-- Info panel — Space Weather HUD. Ships minimised so the globe is
+         the first thing a visitor sees; the restore logic in the JS at the
+         bottom of the file honours an explicit user toggle in either
+         direction via 'earth-panel-min-info-panel'. -->
+    <div id="info-panel" class="panel-minimized">
         <div class="panel-header" data-minimize="info-panel">
             <h3>Space Weather</h3>
             <div class="panel-actions">
                 <span class="g-badge" id="ip-g-badge" style="margin-right:2px;">Quiet</span>
-                <button class="panel-btn" data-minimize-btn="info-panel" title="Minimise">▾</button>
+                <button class="panel-btn" data-minimize-btn="info-panel" title="Minimise">▸</button>
                 <button class="panel-btn panel-close" data-close="info-panel" title="Close">✕</button>
             </div>
         </div>
         <div class="panel-body">
+
+        <!-- Planetary rotation toggle. OFF by default so the time slider
+             can scrub data (terminator, weather replay, satellites) across
+             a fixed globe — i.e. "watch the storm move across LA over the
+             last 24 h" without the geometry yanking around. ON makes the
+             Earth rotate at WALL-CLOCK time (real seconds → real degrees),
+             independent of the slider. State is persisted in localStorage
+             so a user's preference survives reload. -->
+        <div class="ir" style="margin-bottom:7px;">
+            <label for="ip-rotate" class="ik" style="cursor:pointer;user-select:none;">Planet rotation</label>
+            <input type="checkbox" id="ip-rotate"
+                   style="cursor:pointer;accent-color:#00c6ff;width:14px;height:14px;margin:0;"
+                   title="ON: Earth rotates at real time. OFF: Earth orientation locked; slider only moves data and the terminator.">
+        </div>
+
+        <hr class="ir-sep">
 
         <!-- Kp gauge -->
         <div style="margin-bottom:7px;">
@@ -1201,6 +1554,76 @@ nav {
     </div><!-- /panel-body -->
     </div><!-- /info-panel -->
 
+    <!-- ── My Location panel ──────────────────────────────────────────
+         Promoted to a dedicated top-left panel (was the last section of
+         #wx-panel before the Phase-3 onboarding work). The IDs inside
+         (loc-input, loc-search, loc-result, loc-city, loc-card etc.)
+         are unchanged so user-location.js + the on-globe marker code
+         continue to work without modification. -->
+    <div id="loc-panel">
+        <div class="panel-header" data-minimize="loc-panel">
+            <h3>📍 My Location</h3>
+            <div class="panel-actions">
+                <button class="panel-btn" data-minimize-btn="loc-panel" title="Minimise">▾</button>
+                <button class="panel-btn panel-close" data-close="loc-panel" title="Close">✕</button>
+            </div>
+        </div>
+        <div class="panel-body">
+            <div class="loc-row">
+                <input id="loc-input" type="text" placeholder="City, zip, or address…" maxlength="80" autocomplete="off">
+                <button id="loc-search" title="Search location">↵</button>
+            </div>
+            <div id="loc-empty-hint">Set a location to see local sun + ISS passes, aurora visibility, and personalised alerts.</div>
+            <div id="loc-error"></div>
+            <div id="loc-result">
+                <div class="loc-header">
+                    <div class="loc-city"      id="loc-city"></div>
+                    <div class="loc-localtime" id="loc-localtime">—</div>
+                </div>
+                <div class="loc-coords" id="loc-coords"></div>
+
+                <!-- Sun card: sunrise, solar noon (= max solar altitude), sunset,
+                     current altitude + azimuth, day length. Refreshes at 1 Hz. -->
+                <div class="loc-card" id="loc-sun-card">
+                    <div class="loc-card-hdr">
+                        <span>☀️ Sun</span>
+                        <span class="loc-card-meta" id="loc-sun-altaz">—</span>
+                    </div>
+                    <div class="loc-card-row"><span class="loc-k">Rises</span>      <span class="loc-v" id="loc-sunrise">—</span></div>
+                    <div class="loc-card-row"><span class="loc-k">Solar max</span>  <span class="loc-v" id="loc-solar-noon">—</span></div>
+                    <div class="loc-card-row"><span class="loc-k">Sets</span>       <span class="loc-v" id="loc-sunset">—</span></div>
+                    <div class="loc-card-row"><span class="loc-k">Day length</span> <span class="loc-v" id="loc-daylength">—</span></div>
+                </div>
+
+                <!-- ISS next pass: first pass whose peak elevation ≥ 10° in the
+                     next 24 h. Computed once when the user's location is set (or
+                     restored on load); cached in a module var and refreshed when
+                     the location or tracker TLE changes.  Visibility badge uses
+                     pass-predictor's sunlit + observer-darkness flags: 🌟 naked-
+                     eye, ☀️ daylight (both lit), ⚫ eclipsed (sat in Earth shadow). -->
+                <div class="loc-card empty" id="loc-iss-card">
+                    <div class="loc-card-hdr">
+                        <span>🛰️ ISS next pass</span>
+                        <span class="loc-card-meta">
+                            <span id="loc-iss-vis" style="margin-right:4px"></span><span id="loc-iss-when">—</span>
+                        </span>
+                    </div>
+                    <div class="loc-card-row"><span class="loc-k">Rises</span>     <span class="loc-v" id="loc-iss-rise">—</span></div>
+                    <div class="loc-card-row"><span class="loc-k">Peak</span>      <span class="loc-v" id="loc-iss-peak">—</span></div>
+                    <div class="loc-card-row"><span class="loc-k">Direction</span> <span class="loc-v" id="loc-iss-dir">—</span></div>
+                    <div class="loc-card-row"><span class="loc-k">Duration</span>  <span class="loc-v" id="loc-iss-dur">—</span></div>
+                </div>
+
+                <div class="loc-aurora" id="loc-aurora"></div>
+
+                <div class="loc-btns">
+                    <button class="loc-btn" id="loc-fly">📍 Fly here</button>
+                    <button class="loc-btn danger" id="loc-clear">✕ Clear</button>
+                </div>
+            </div>
+        </div><!-- /panel-body -->
+    </div><!-- /loc-panel -->
+
     <!-- Weather analysis panel -->
     <div id="wx-panel">
         <div class="panel-header" data-minimize="wx-panel">
@@ -1214,6 +1637,9 @@ nav {
         <div class="wx-row"><span class="wx-k">Source</span>   <span class="wx-v" id="wx-src">procedural</span></div>
         <div class="wx-row"><span class="wx-k">Updated</span>  <span class="wx-v" id="wx-upd">—</span></div>
         <div class="wx-row"><span class="wx-k">Data age</span> <span class="wx-v" id="wx-age">—</span></div>
+        <div class="wx-row" title="Coarse-grid resolution from the cron pull. Lower number = finer grid (5° is current; 10° was the legacy)."><span class="wx-k">Grid</span>     <span class="wx-v" id="wx-grid">—</span></div>
+        <div class="wx-row" title="Live satellite imagery layer feeding the cloud mosaic. Geostationary mosaic = ~10-min cadence, no orbiter swath gaps in the tropics."><span class="wx-k">Satellite</span><span class="wx-v" id="wx-sat">—</span></div>
+        <div class="wx-row" id="wx-research-row" style="display:none;color:#6cf;font-weight:600"><span class="wx-k">Mode</span>     <span class="wx-v">Research (measured-only)</span></div>
         <hr class="ir-sep">
         <div class="wx-row"><span class="wx-k">T° min</span>   <span class="wx-v" id="wx-tmin">—</span></div>
         <div class="wx-row"><span class="wx-k">T° max</span>   <span class="wx-v" id="wx-tmax">—</span></div>
@@ -1248,7 +1674,7 @@ nav {
             <span class="wx-k">Geo wind</span>
             <span class="wx-v" id="wx-geo">—</span>
         </div>
-        <div class="wx-row" title="Peak sampled wind &gt; 30 m/s (operational jet-stream threshold). Dash when no jet found in the current field.">
+        <div class="wx-row" title="Peak sampled 10 m wind &gt; 18 m/s (gale-force floor used for surface-data jet proxy). Dash when nothing in the current field clears the threshold.">
             <span class="wx-k">Jet peak</span>
             <span class="wx-v" id="wx-jet">—</span>
         </div>
@@ -1258,77 +1684,65 @@ nav {
         </div>
         <div id="wx-centers-list" style="font-size:9px;color:#668;margin-top:2px;margin-bottom:4px;line-height:1.6;"></div>
         <hr class="ir-sep">
-        <!-- NWS alert summary -->
-        <div class="wx-row">
+        <!-- Forecaster skill table (Phase 1: persistence baseline only).
+             Cells = pooled MAE per channel × horizon. Future ML models
+             register into the same table; the registry lets them compete
+             on Murphy skill against persistence. Values are dashes until
+             the validator has matched at least one forecast against a
+             ground-truth observation (≥ 1 cron interval after page load
+             on a fresh session). -->
+        <div style="font-size:9px;color:#336a8a;letter-spacing:.07em;text-transform:uppercase;margin-bottom:4px;"
+             title="Pooled mean absolute error per channel × horizon, baseline = persistence ('tomorrow looks like today').">
+            Forecast skill (MAE)
+        </div>
+        <div id="wx-skill-grid" class="wx-skill-grid">awaiting first forecast…</div>
+        <hr class="ir-sep">
+        <!-- NWS alert summary. The 🔔 Get Alerts CTA is intentionally
+             promoted into the Storm Alerts row (instead of being buried
+             below the chrome) so a visitor noticing a live alert can
+             subscribe in one tap. Routes to /signup with a hint param so
+             the onboarding flow can pre-select alert prefs. -->
+        <div class="wx-row alerts-row">
             <span class="wx-k" style="display:flex;align-items:center;gap:4px;">
                 <span id="nws-dot" style="width:7px;height:7px;border-radius:50%;background:#555;display:inline-block;flex-shrink:0"></span>
                 Storm Alerts
             </span>
-            <span class="wx-v" id="wx-alert-count">—</span>
+            <span class="alerts-row-right">
+                <span class="wx-v" id="wx-alert-count">—</span>
+                <a href="signup.html?intent=alerts" id="wx-get-alerts" class="wx-cta-alerts" title="Get severe-weather + space-weather alerts for your saved locations">
+                    <span class="wx-cta-icon">🔔</span><span>Get Alerts</span>
+                </a>
+            </span>
         </div>
         <div id="wx-alert-badges" style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px;min-height:16px;"></div>
         <button id="wx-refresh">↺ Refresh Data</button>
 
         <hr class="ir-sep">
+        <!-- Sea Surface Temperature legend.
+             Mirrors the GIBS GHRSST_L4_MUR_Sea_Surface_Temperature palette so
+             the canvas swatch is a quantitative key for the textured globe,
+             not a decorative gradient. Range −2 °C → 32 °C is the published
+             colourmap span for the JPL MUR L4 product. -->
+        <div style="margin:0 0 4px;font-size:9px;color:#556;text-transform:uppercase;letter-spacing:.06em">Sea-surface temp (°C)</div>
+        <canvas id="wx-sst-legend" width="200" height="8"
+                style="width:100%;height:8px;border-radius:3px;display:block;"></canvas>
+        <div style="display:flex;justify-content:space-between;font-size:9px;color:#668;margin-top:2px;margin-bottom:6px;">
+            <span>−2</span><span>10</span><span>20</span><span>32 °C</span>
+        </div>
+        <!-- Ocean-current speed legend. Same scale as the streamline overlay
+             (deep teal → cyan → white-yellow at ≥ 1.5 m/s = Gulf Stream core). -->
+        <div style="margin:0 0 4px;font-size:9px;color:#556;text-transform:uppercase;letter-spacing:.06em">Surface current (m/s)</div>
+        <canvas id="wx-currents-legend" width="200" height="8"
+                style="width:100%;height:8px;border-radius:3px;display:block;"></canvas>
+        <div style="display:flex;justify-content:space-between;font-size:9px;color:#668;margin-top:2px;margin-bottom:6px;">
+            <span>0.0</span><span>0.5</span><span>1.0</span><span>1.8 m/s</span>
+        </div>
+        <hr class="ir-sep">
         <!-- NASA Earth Observation status -->
         <div style="font-size:.62rem;color:#556;font-weight:600;letter-spacing:.08em;margin-bottom:4px">NASA EARTH OBSERVATIONS</div>
         <div id="obs-status-list" style="font-size:10px;color:#778;line-height:1.7"></div>
 
-        <hr class="ir-sep">
-
-        <!-- My Location -->
-        <div class="loc-section-hdr">📍 My Location</div>
-        <div class="loc-row">
-            <input id="loc-input" type="text" placeholder="City, zip, or address…" maxlength="80" autocomplete="off">
-            <button id="loc-search" title="Search location">↵</button>
-        </div>
-        <div id="loc-error"></div>
-        <div id="loc-result">
-            <div class="loc-header">
-                <div class="loc-city"      id="loc-city"></div>
-                <div class="loc-localtime" id="loc-localtime">—</div>
-            </div>
-            <div class="loc-coords" id="loc-coords"></div>
-
-            <!-- Sun card: sunrise, solar noon (= max solar altitude), sunset,
-                 current altitude + azimuth, day length. Refreshes at 1 Hz. -->
-            <div class="loc-card" id="loc-sun-card">
-                <div class="loc-card-hdr">
-                    <span>☀️ Sun</span>
-                    <span class="loc-card-meta" id="loc-sun-altaz">—</span>
-                </div>
-                <div class="loc-card-row"><span class="loc-k">Rises</span>      <span class="loc-v" id="loc-sunrise">—</span></div>
-                <div class="loc-card-row"><span class="loc-k">Solar max</span>  <span class="loc-v" id="loc-solar-noon">—</span></div>
-                <div class="loc-card-row"><span class="loc-k">Sets</span>       <span class="loc-v" id="loc-sunset">—</span></div>
-                <div class="loc-card-row"><span class="loc-k">Day length</span> <span class="loc-v" id="loc-daylength">—</span></div>
-            </div>
-
-            <!-- ISS next pass: first pass whose peak elevation ≥ 10° in the
-                 next 24 h. Computed once when the user's location is set (or
-                 restored on load); cached in a module var and refreshed when
-                 the location or tracker TLE changes.  Visibility badge uses
-                 pass-predictor's sunlit + observer-darkness flags: 🌟 naked-
-                 eye, ☀️ daylight (both lit), ⚫ eclipsed (sat in Earth shadow). -->
-            <div class="loc-card empty" id="loc-iss-card">
-                <div class="loc-card-hdr">
-                    <span>🛰️ ISS next pass</span>
-                    <span class="loc-card-meta">
-                        <span id="loc-iss-vis" style="margin-right:4px"></span><span id="loc-iss-when">—</span>
-                    </span>
-                </div>
-                <div class="loc-card-row"><span class="loc-k">Rises</span>     <span class="loc-v" id="loc-iss-rise">—</span></div>
-                <div class="loc-card-row"><span class="loc-k">Peak</span>      <span class="loc-v" id="loc-iss-peak">—</span></div>
-                <div class="loc-card-row"><span class="loc-k">Direction</span> <span class="loc-v" id="loc-iss-dir">—</span></div>
-                <div class="loc-card-row"><span class="loc-k">Duration</span>  <span class="loc-v" id="loc-iss-dur">—</span></div>
-            </div>
-
-            <div class="loc-aurora" id="loc-aurora"></div>
-
-            <div class="loc-btns">
-                <button class="loc-btn" id="loc-fly">📍 Fly here</button>
-                <button class="loc-btn danger" id="loc-clear">✕ Clear</button>
-            </div>
-        </div>
+        <!-- My Location section relocated to its own #loc-panel above. -->
     </div><!-- /panel-body -->
     </div><!-- /wx-panel -->
 
@@ -1337,25 +1751,48 @@ nav {
 
     <!-- Time-scrub controls (bottom-centre). One simTimeMs variable
          drives GMST, sun direction, sub-solar point, sun card, ISS pass
-         card, and on-globe solar markers.  Press Space to toggle
+         card, on-globe solar markers, AND (via WeatherFrameResolver)
+         24-hour wind/temp/cloud replay.  Press Space to toggle
          play/pause; N snaps back to real time. -->
     <div id="time-controls">
-        <button class="tc-btn" id="tc-play" title="Pause">⏸</button>
-        <span class="tc-sep"></span>
-        <button class="tc-btn" data-speed="1"    title="Real time (1×)">1×</button>
-        <button class="tc-btn" data-speed="60"   title="1 minute per second">60×</button>
-        <button class="tc-btn" data-speed="600"  title="10 minutes per second">600×</button>
-        <button class="tc-btn" data-speed="3600" title="1 hour per second">3600×</button>
-        <span class="tc-sep"></span>
-        <button class="tc-btn" id="tc-now" title="Jump to real time (N)">Now</button>
-        <span class="tc-display">
-            <span class="tc-time"   id="tc-time-utc">—</span>
-            <span class="tc-offset" id="tc-time-offset">now</span>
-        </span>
+        <!-- Replay slider: -1440..0 minutes from now, 1-min step. The
+             resolver listens via animate()'s tick; the input handler
+             writes simTimeMs so satellites + sun + weather all replay
+             together. -->
+        <!-- Range covers -10080..+4320 minutes (= -7d past .. +3d future).
+             "Now" sits at value=0, which the CSS paints at 70 % across the
+             track. Past frames are real observations; future frames are
+             forecast (currently a persistence stand-in until the
+             weather-forecast pipeline lands). -->
+        <div id="tc-scrub-row">
+            <span class="tc-scrub-edge">−1w</span>
+            <input type="range" id="tc-scrub"
+                   min="-10080" max="4320" step="1" value="0"
+                   aria-label="Time scrub — drag left for up to 1 week of history, right for up to 3 days of forecast"
+                   title="Drag left to replay (up to 1 week back) or right to preview (up to 3 days ahead)">
+            <span class="tc-scrub-edge right">+3d</span>
+        </div>
+        <div id="tc-buttons-row">
+            <button class="tc-btn" id="tc-play" title="Pause">⏸</button>
+            <span class="tc-sep"></span>
+            <button class="tc-btn" data-speed="1"    title="Real time (1×)">1×</button>
+            <button class="tc-btn" data-speed="60"   title="1 minute per second">60×</button>
+            <button class="tc-btn" data-speed="600"  title="10 minutes per second">600×</button>
+            <button class="tc-btn" data-speed="3600" title="1 hour per second">3600×</button>
+            <span class="tc-sep"></span>
+            <button class="tc-btn" id="tc-now" title="Jump to real time (N)">Now</button>
+            <span class="tc-display">
+                <span class="tc-time"   id="tc-time-utc">—</span>
+                <span class="tc-offset" id="tc-time-offset">now</span>
+            </span>
+        </div>
     </div>
 
     <!-- Mobile bottom toolbar -->
     <div id="mobile-toolbar">
+        <button class="mtb-btn" data-panel="loc-panel">
+            <span class="mtb-icon">📍</span>Location
+        </button>
         <button class="mtb-btn" data-panel="info-panel">
             <span class="mtb-icon">🌍</span>Space Wx
         </button>
@@ -1423,6 +1860,25 @@ nav {
     </div>
 </div>
 
+<!-- Saved-locations summary — sits below the simulation viewport in the
+     upper-left so a returning visitor sees their pinned places at a glance.
+     Driven by js/earth-saved-locations.js, which auto-saves every location
+     the visitor sets in the loc-panel. -->
+<section id="saved-loc-summary" hidden aria-label="Saved locations">
+    <div class="sls-inner">
+        <div class="sls-card">
+            <div class="sls-header">
+                <div class="sls-title">📍 Saved Locations</div>
+                <div class="sls-meta"><span id="sls-count">0</span>&nbsp;pinned · <button id="sls-clear" class="sls-i-btn danger" type="button" style="padding:2px 8px;font-size:.62rem">Clear all</button></div>
+            </div>
+            <div class="sls-hint" id="sls-hint">
+                Search a city in the panel above to pin it here. We'll keep up to 12.
+            </div>
+            <div class="sls-grid" id="sls-grid"></div>
+        </div>
+    </div>
+</section>
+
 
 <script type="module">
 import './js/live-status-bar.js';
@@ -1433,7 +1889,15 @@ import {
     geocodeQuery, saveUserLocation, loadUserLocation,
     clearUserLocation, auroraVisibility,
 } from './js/user-location.js';
+import {
+    listSavedLocations, addSavedLocation, removeSavedLocation,
+    clearSavedLocations, formatLocalClock, dayNightBadge,
+} from './js/earth-saved-locations.js';
 import { WeatherFeed, TEX_W, TEX_H, MAX_WIND_MS } from './js/weather-feed.js';
+import { WeatherHistory }       from './js/weather-history.js';
+import { WeatherFrameResolver } from './js/weather-frame-resolver.js';
+import { ForecastRegistry, PersistenceForecaster, CHANNEL_NAMES, FORECAST_HORIZONS_H } from './js/weather-forecast.js';
+import { WeatherForecastValidator } from './js/weather-forecast-validation.js';
 import { NWSAlerts, ALERT_COLORS, ALERT_CSS_COLORS, ALERT_PULSE_FREQ, SEVERITY_ORDER, classifyAlertEvent } from './js/nws-alerts.js';
 import { getAlertIconTexture, precomputeAlertIcons } from './js/alert-icons.js';
 import { IsobarLayer, geoWindMs, ISOBAR_LEVELS } from './js/isobar-engine.js';
@@ -1458,6 +1922,8 @@ import { EarthFeeds, eqMagColorTHREE, eqMarkerRadius,
          eqPulseFreq, eqPulseAmp, eqAgeFactor } from './js/earth-feeds.js';
 import { CmePropagator } from './js/cme-propagation.js';
 import { JetstreamOverlay } from './js/jetstream-overlay.js';
+import { OceanCurrentsOverlay } from './js/ocean-currents-overlay.js';
+import { oceanCurrentsMeta } from './js/ocean-currents-feed.js';
 import { auth } from './js/auth.js';
 import { addLocation, listLocations, locationLimit, PLAN_LIMITS } from './js/saved-locations.js';
 import { parseTripParam, greatCirclePath, greatCircleDistanceKm, initialBearingDeg } from './js/trip-planner.js';
@@ -1628,11 +2094,15 @@ onResize();
 // rotation and the terminator, with no per-frame drift between them.
 const SUN_EQ = sunDirectionEquatorial(julianDay(new Date()));
 
-// The Earth mesh's Y-axis is the geographic north pole. animate() sets
-// earthMesh.rotation.y = gmst(jd) * DEG every frame, which carries the
-// prime meridian around the scene's equatorial +X axis (vernal equinox)
-// at the exact sidereal rate baked into the GMST formula — no separate
-// rate constant needed, and no accumulator to drift over long sessions.
+// The Earth mesh's Y-axis is the geographic north pole. When the
+// "Planet rotation" toggle in the SW panel is ON, animate() sets
+// earthMesh.rotation.y = gmst(julianDay(Date.now())) * DEG every frame,
+// which carries the prime meridian around the scene's equatorial +X
+// axis (vernal equinox) at the exact sidereal rate baked into the
+// GMST formula — no separate rate constant needed, and no accumulator
+// to drift over long sessions. When the toggle is OFF (default), the
+// orientation is pinned to a single GMST snapshot so the time slider's
+// data scrubbing happens on a stationary globe.
 
 // ═══════════════════════════════════════════════════════════════
 //  SHARED UNIFORMS
@@ -1878,26 +2348,12 @@ cloudU.u_cloud_layers.value.wrapT     = THREE.ClampToEdgeWrapping;
 cloudU.u_cloud_layers.value.flipY = true;
 cloudU.u_cloud_layers.value.needsUpdate = true;
 
-// ── Live cloud imagery (NASA GIBS MODIS) ─────────────────────────────────
-// Loaded asynchronously; the procedural cloud shader renders immediately
-// and is blended with the satellite composite when (and if) it arrives.
-// The imagery is a daily MODIS true-colour snapshot — clouds are bright,
-// ocean/land dark, which the shader reads as a coverage brightness proxy.
-(async () => {
-    try {
-        const { fetchLatestCloudImagery } = await import('./js/cloud-imagery.js');
-        const hit = await fetchLatestCloudImagery(THREE, { width: 2048 });
-        if (hit) {
-            cloudU.u_satellite.value   = hit.texture;
-            cloudU.u_satellite_on.value = 1.0;
-            console.info(`[CloudImagery] Loaded MODIS ${hit.date}`);
-        } else {
-            console.info('[CloudImagery] Imagery unavailable — procedural clouds only');
-        }
-    } catch (e) {
-        console.warn('[CloudImagery] Failed:', e.message);
-    }
-})();
+// Live cloud imagery is delivered by SatelliteFeed below — it polls a
+// GOES-East / GOES-West / Himawari / Meteosat geostationary mosaic with
+// MODIS polar fill every 10 minutes (see js/satellite-feed.js → cloud-imagery.js)
+// and dispatches `satellite-update` events that the provenance overlay
+// listens to. Procedural clouds render immediately so the globe never goes
+// blank waiting for the first fetch.
 
 // ═══════════════════════════════════════════════════════════════
 //  LAT / LON GRID
@@ -2247,6 +2703,27 @@ window.addEventListener('swpc-update', e => {
 document.getElementById('lyr-clouds').addEventListener('change', e => {
     cloudMesh.visible = e.target.checked;
 });
+// Research mode: disable procedural fill, show measured cloud cover only
+// with hatched no-data regions. Persists across reloads via URL param so
+// researchers can deep-link a measured-only view of the globe.
+{
+    const researchToggle = document.getElementById('lyr-research-mode');
+    function applyResearchMode(on) {
+        cloudU.u_research_mode.value = on ? 1.0 : 0.0;
+        document.body.classList.toggle('research-mode', on);
+        // The provenance panel highlights itself in research mode so the
+        // user can see at a glance which feed they're looking at.
+        const wxPanel = document.getElementById('wx-panel');
+        if (wxPanel) wxPanel.classList.toggle('research', on);
+    }
+    // Honour ?research=1 on first load.
+    const rParam = new URLSearchParams(location.search).get('research');
+    if (rParam === '1' || rParam === 'true') {
+        researchToggle.checked = true;
+        applyResearchMode(true);
+    }
+    researchToggle.addEventListener('change', e => applyResearchMode(e.target.checked));
+}
 document.getElementById('lyr-atm').addEventListener('change', e => {
     atmMat.visible = e.target.checked;
 });
@@ -2275,6 +2752,7 @@ document.getElementById('lyr-weather').addEventListener('change', e => {
 });
 document.getElementById('lyr-wind').addEventListener('change', e => {
     windParticles.setVisible(e.target.checked);
+    windArrows.setVisible(e.target.checked);
 });
 document.getElementById('lyr-rotate').addEventListener('change', e => {
     controls.autoRotate = e.target.checked;
@@ -2535,6 +3013,18 @@ const WIND_TRAIL_LEN   = 20;
 const WIND_TRAIL_STEP_S = 1 / 60;   // one history push per ~16 ms of simulated time
 const WIND_DT_MAX_S     = 0.05;     // clamp against backgrounded-tab spikes
 
+// LOD tuning — tied to OrbitControls (minDistance=1.06, maxDistance=10).
+// zoom01: 0 at WIND_LOD_FAR or beyond, 1 at WIND_LOD_NEAR or closer. Used by
+// _reset() to bias spawns toward the sub-camera point and by update() to
+// dim/slow advection when the eye is far. Picked so that "the camera is
+// clearly framing a region" (≈1.5 R⊕, half-globe in view) lands around 0.7.
+const WIND_LOD_NEAR = 1.10;
+const WIND_LOD_FAR  = 2.50;
+
+// Reused scratch vector for camera→local-space conversions. Avoids one
+// allocation per frame inside the wind LOD path.
+const _windFocusV = new THREE.Vector3();
+
 class WindParticles {
     constructor(parent, N = 6000) {
         this.N       = N;
@@ -2544,6 +3034,14 @@ class WindParticles {
         this.spd     = new Float32Array(N);
         this.age     = new Float32Array(N);
         this.maxAge  = new Float32Array(N);
+
+        // Camera-derived focus (set per-frame by update()). focusLat/Lon is
+        // the sub-camera geographic point in earthMesh-local coordinates;
+        // zoom01 ramps 0→1 as the camera dollies in. Both default to a
+        // "globe in view" state so spawns stay uniform until update() runs.
+        this.focusLat = 0;
+        this.focusLon = 0;
+        this.zoom01   = 0;
 
         // Trail history: TRAIL_LEN past (lat, lon, speed) samples per particle.
         // `head` is the index of the newest sample in each ring buffer.
@@ -2588,8 +3086,37 @@ class WindParticles {
         // near the poles 1° lon cells shrink faster than particles can
         // handle and they streak wildly. A tighter lat clamp than the
         // old ±84° keeps polar trails clean without noticeable loss.
-        this.lat[i]    = (Math.random() - 0.5) * 152;
-        this.lon[i]    = (Math.random() - 0.5) * 360;
+        //
+        // LOD: when zoomed in, route a fraction of respawns into a tangent-
+        // plane disc around (focusLat, focusLon). Disc radius shrinks with
+        // zoom (60° hemisphere → 18° regional) and the biased fraction
+        // grows. Net effect: same particle budget, dense flow in the
+        // visible cap, sparse outside — so detail emerges where you look.
+        const z       = this.zoom01;
+        const biasP   = 0.85 * z;                 // P(spawn in cap) ∈ [0, 0.85]
+        const capDeg  = 60 - 42 * z;              // cap angular radius in °
+        let lat, lon;
+        if (z > 0 && Math.random() < biasP) {
+            // Uniform-area sample in a tangent-plane disc of radius capDeg
+            // centred on (focusLat, focusLon). Polar singularity is handled
+            // by the advection step's cos(lat) clamp; near the equator the
+            // tangent disc is a near-perfect spherical-cap approximation.
+            const ang = Math.random() * Math.PI * 2;
+            const rad = Math.sqrt(Math.random()) * capDeg;
+            const dlat = rad * Math.cos(ang);
+            const dlon = rad * Math.sin(ang) /
+                         Math.max(0.15, Math.cos((this.focusLat + dlat * 0.5) * DEG));
+            lat = this.focusLat + dlat;
+            lon = this.focusLon + dlon;
+            // Wrap longitude into (-180, 180].
+            if (lon >  180) lon -= 360;
+            if (lon < -180) lon += 360;
+        } else {
+            lat = (Math.random() - 0.5) * 152;
+            lon = (Math.random() - 0.5) * 360;
+        }
+        this.lat[i]    = Math.max(-76, Math.min(76, lat));
+        this.lon[i]    = lon;
         this.age[i]    = randomAge ? Math.random() * 20 : 0;
         this.maxAge[i] = 20 + Math.random() * 20;    // 20–40 s lifetime
         this.spd[i]    = 0;
@@ -2681,17 +3208,53 @@ class WindParticles {
         }
     }
 
-    update(dt) {
+    /**
+     * Refresh focus/zoom state from the camera. Called at the top of update().
+     * Camera lives in world space; earthMesh rotates, so we have to convert
+     * into the parent's local frame before deriving lat/lon — otherwise the
+     * focus would slide as the planet spins under a stationary observer.
+     */
+    _setFocusFromCamera(camera, parent) {
+        if (!camera || !parent) return;
+        const dist = camera.position.length();
+        // Map dist → zoom01 with a smoothstep-shaped easing: 0 at WIND_LOD_FAR,
+        // 1 at WIND_LOD_NEAR, smoothly easing in between so the visual change
+        // doesn't pop as the user dollies.
+        const t  = (WIND_LOD_FAR - dist) / (WIND_LOD_FAR - WIND_LOD_NEAR);
+        const tc = Math.max(0, Math.min(1, t));
+        this.zoom01 = tc * tc * (3 - 2 * tc);
+
+        // Camera position in earthMesh-local space. parent.matrixWorld is
+        // kept up-to-date by Three's render pipeline, so worldToLocal is safe.
+        _windFocusV.copy(camera.position);
+        parent.worldToLocal(_windFocusV);
+        const r = _windFocusV.length();
+        if (r < 1e-6) return;
+        // Inverse of the (cos(phi)cos(lam), sin(phi), -cos(phi)sin(lam))
+        // mapping used everywhere in this file (geoToXYZ + the trail builder).
+        this.focusLat = Math.asin(Math.max(-1, Math.min(1, _windFocusV.y / r))) / DEG;
+        this.focusLon = Math.atan2(-_windFocusV.z, _windFocusV.x) / DEG;
+    }
+
+    update(dt, camera = null, parent = null) {
         if (!isFinite(dt) || dt <= 0) return;
         // Clamp frame time so a backgrounded-tab resume or GC pause doesn't
         // teleport every particle across the globe in one step.
         if (dt > WIND_DT_MAX_S) dt = WIND_DT_MAX_S;
 
+        this._setFocusFromCamera(camera, parent);
+
         // Visual speed: degrees traversed per second at full wind (scaled
         // so a jet stream reading sails roughly 1/3 of a continent in a
         // 20-frame trail — the nullschool "streaks" aesthetic).
-        const VIS    = 42;
+        // Slow advection slightly when zoomed in so streaks read as
+        // deliberate flow lines rather than blur across the visible cap.
+        const VIS    = 42 * (1 - 0.35 * this.zoom01);
         const LAT_MAX = 80;   // tighter than the old ±84° to quiet polar streaks
+        // Trail brightness amplification at close zoom — same particle count,
+        // richer apparent density. Held below 2× so additive blending doesn't
+        // saturate the white midpoint of the speed ramp.
+        const trailBoost = 1.0 + 0.7 * this.zoom01;
 
         const tmp = { u: 0, v: 0, s: 0 };
 
@@ -2782,7 +3345,7 @@ class WindParticles {
                 const tailU  = (j + 1) / (WIND_TRAIL_LEN - 1);
                 const tailF  = tailU * tailU;         // ease-in
                 // Wrap segments output zero color so they're invisible under additive blending
-                const strength = wrapped ? 0 : tailF * envelope;
+                const strength = wrapped ? 0 : tailF * envelope * trailBoost;
                 this._speedColor(spdMid, rgb);
                 col[p0]     = rgb[0] * strength;
                 col[p0 + 1] = rgb[1] * strength;
@@ -2800,7 +3363,271 @@ class WindParticles {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  WIND ARROWS  (adaptive direction glyphs)
+//
+//  At close zoom the streamline particles answer "where is the air
+//  going" beautifully but they don't pin down direction at any one
+//  spot. WindArrows fills that gap: a sparse grid of short arrows
+//  with chevron heads, sampled from the same WeatherFeed buffer that
+//  drives the trails. Tail = grid cell, head = downwind, chevron
+//  span = cosmetic. Speed-coded with the same ramp as the trails.
+//
+//  Why a grid (not a fixed lat/lon graticule): re-centring on the
+//  sub-camera point keeps the visible cap full of arrows while the
+//  un-seen hemisphere costs zero geometry. Spacing tightens with
+//  zoom so the read goes from "synoptic" (continental flow) to
+//  "regional" (shore/lake breezes) without ever drawing more than
+//  MAX_ARROWS glyphs.
+//
+//  Hidden when zoom01 < 0.18 (panel-wide globe view) so the trails
+//  read clean, and when the wind layer toggle is off.
+// ═══════════════════════════════════════════════════════════════
+const WIND_ARROW_MAX        = 512;
+const WIND_ARROW_VERTS_EACH = 6;     // shaft (2) + 2 chevrons (2 each)
+const WIND_ARROW_FADE_IN    = 0.18;  // zoom01 below this → arrows hidden
+
+class WindArrows {
+    constructor(parent, lookupFn) {
+        this.parent   = parent;
+        this.lookupFn = lookupFn;     // (lat, lon, out{u,v,s}) — uses windParticles' bilinear sampler
+        this.visible  = true;          // gated by user wind-layer toggle
+        this._lastBuildKey = '';       // memoise grid rebuilds when nothing changed
+
+        const vertCount = WIND_ARROW_MAX * WIND_ARROW_VERTS_EACH;
+        this._pos = new Float32Array(vertCount * 3);
+        this._col = new Float32Array(vertCount * 3);
+
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(this._pos, 3));
+        geo.setAttribute('color',    new THREE.BufferAttribute(this._col, 3));
+        geo.attributes.position.setUsage(THREE.DynamicDrawUsage);
+        geo.attributes.color.setUsage(THREE.DynamicDrawUsage);
+
+        const mat = new THREE.LineBasicMaterial({
+            vertexColors: true, transparent: true,
+            blending: THREE.AdditiveBlending, depthWrite: false,
+        });
+        this.mesh = new THREE.LineSegments(geo, mat);
+        this.mesh.renderOrder = 3;     // above trails so heads aren't masked
+        this.mesh.visible = false;
+        parent.add(this.mesh);
+    }
+
+    setVisible(v) { this.visible = v; if (!v) this.mesh.visible = false; }
+
+    /**
+     * Build the arrow field for the current zoom + focus state. Skips
+     * entirely outside the fade-in zone (cheap early-out) and otherwise
+     * fills only as many slots as the visible cap demands, zeroing the
+     * rest so unused vertices collapse to a point.
+     */
+    update(zoom01, focusLat, focusLon, hasData) {
+        if (!this.visible || !hasData || zoom01 < WIND_ARROW_FADE_IN) {
+            this.mesh.visible = false;
+            return;
+        }
+
+        // Step (cell spacing) and extent (half-width of grid) are zoom-driven.
+        // step:    16° at fade-in → 3° fully zoomed (≈ 330 km at equator)
+        // extent:  64° at fade-in → 18° fully zoomed (regional cap)
+        const z = zoom01;
+        const step   = 16 * Math.pow(0.20, z);          // smooth exp falloff to ~3°
+        const extent = 64 - 46 * z;
+        const arrowLen = step * 0.55;                    // glyph length in degrees
+
+        // Coarse rebuild key — when zoom + focus haven't moved past one
+        // grid cell, we can skip the rebuild. Quantise focus to the cell
+        // step to avoid jitter as the camera drifts inside one cell.
+        const keyLat = Math.round(focusLat / step) * step;
+        const keyLon = Math.round(focusLon / step) * step;
+        const key = `${keyLat.toFixed(2)}|${keyLon.toFixed(2)}|${step.toFixed(3)}`;
+        // Strength is the appearance-only fade; recomputed every call so
+        // the field smoothly fades in as the user zooms past the threshold.
+        const strength = Math.min(1, (z - WIND_ARROW_FADE_IN) / 0.20);
+
+        if (key === this._lastBuildKey) {
+            // Geometry unchanged — only restripe alpha and bail.
+            this._restripeStrength(strength);
+            this.mesh.visible = true;
+            return;
+        }
+        this._lastBuildKey = key;
+
+        const pos = this._pos, col = this._col;
+        const R   = R_EARTH * 1.006;                     // hover slightly above clouds
+        const tmp = { u: 0, v: 0, s: 0 };
+        const rgb = [0, 0, 0];
+        let slot = 0;
+
+        // March a centred grid: rounding focus to nearest cell keeps arrows
+        // anchored to the same lat/lon lattice from frame to frame so they
+        // don't shimmer as the camera nudges around.
+        const latLo = Math.max(-78, keyLat - extent);
+        const latHi = Math.min( 78, keyLat + extent);
+
+        for (let lat = latLo; lat <= latHi && slot < WIND_ARROW_MAX; lat += step) {
+            // Longitude extent stretches with cos(lat) so the arrow density
+            // stays uniform on the visible globe surface — without this the
+            // grid bunches near the poles and looks sparse near the equator.
+            const lonHalf = Math.min(180, extent / Math.max(0.15, Math.cos(lat * DEG)));
+            const lonLo = keyLon - lonHalf;
+            const lonHi = keyLon + lonHalf;
+            for (let lon = lonLo; lon <= lonHi && slot < WIND_ARROW_MAX; lon += step) {
+                // Wrap longitude for the lookup but keep the unwrapped value
+                // for the "is this on the camera-facing hemisphere?" cull.
+                let lonW = lon;
+                if (lonW >  180) lonW -= 360;
+                if (lonW < -180) lonW += 360;
+
+                this.lookupFn(lat, lonW, tmp);
+                if (tmp.s < 0.04) continue;              // skip near-calm cells
+
+                // Tail in 3D
+                const phiT = lat * DEG, lamT = lonW * DEG;
+                const tx =  R * Math.cos(phiT) * Math.cos(lamT);
+                const ty =  R * Math.sin(phiT);
+                const tz = -R * Math.cos(phiT) * Math.sin(lamT);
+
+                // Camera-facing hemisphere cull: arrows on the back side of
+                // the globe never get seen but cost a draw. dot(tail_dir, focus_dir)
+                // > -0.05 keeps grazing limb arrows but drops the back hemisphere.
+                if (this._dotFocus(tx, ty, tz, focusLat, focusLon) < -0.05) continue;
+
+                // Head: small great-circle step in (u, v) direction. For the
+                // arrowLen scales we use (≤ a few degrees), the linear
+                // tangent-plane offset is indistinguishable from a true geodesic.
+                const len   = arrowLen * (0.55 + 0.55 * Math.min(1, tmp.s));
+                const dlat  = tmp.v * len;
+                const dlon  = tmp.u * len / Math.max(0.15, Math.cos(lat * DEG));
+                const phiH  = (lat + dlat) * DEG;
+                const lamH  = (lonW + dlon) * DEG;
+                const hx =  R * Math.cos(phiH) * Math.cos(lamH);
+                const hy =  R * Math.sin(phiH);
+                const hz = -R * Math.cos(phiH) * Math.sin(lamH);
+
+                // Chevron arms: back off from the head by ~35% of the shaft
+                // length and offset perpendicular to the shaft along the
+                // surface. perp = normalise(cross(headNormal, shaftDir)) — gives
+                // a tangent-to-sphere "right" vector that survives any orientation.
+                let dx = hx - tx, dy = hy - ty, dz = hz - tz;
+                const dlen = Math.hypot(dx, dy, dz) || 1;
+                dx /= dlen; dy /= dlen; dz /= dlen;
+                const nl = Math.hypot(hx, hy, hz) || 1;
+                const nx = hx / nl, ny = hy / nl, nz = hz / nl;
+                let px = ny * dz - nz * dy;
+                let py = nz * dx - nx * dz;
+                let pz = nx * dy - ny * dx;
+                const plen = Math.hypot(px, py, pz) || 1;
+                px /= plen; py /= plen; pz /= plen;
+
+                const back   = dlen * 0.35;
+                const spread = dlen * 0.22;
+                const bx = hx - dx * back;
+                const by = hy - dy * back;
+                const bz = hz - dz * back;
+                const lx = bx + px * spread, ly = by + py * spread, lz = bz + pz * spread;
+                const rx = bx - px * spread, ry = by - py * spread, rz = bz - pz * spread;
+
+                // Speed-coded color, mirroring WindParticles._speedColor()
+                this._speedColor(tmp.s, rgb);
+                const mr = rgb[0] * strength;
+                const mg = rgb[1] * strength;
+                const mb = rgb[2] * strength;
+
+                // Write 3 segments (shaft + 2 chevrons) = 6 vertices into slot.
+                let p = slot * WIND_ARROW_VERTS_EACH * 3;
+                // Shaft: tail → head
+                pos[p   ] = tx; pos[p+1 ] = ty; pos[p+2 ] = tz;
+                pos[p+3 ] = hx; pos[p+4 ] = hy; pos[p+5 ] = hz;
+                // Left chevron: head → left arm
+                pos[p+6 ] = hx; pos[p+7 ] = hy; pos[p+8 ] = hz;
+                pos[p+9 ] = lx; pos[p+10] = ly; pos[p+11] = lz;
+                // Right chevron: head → right arm
+                pos[p+12] = hx; pos[p+13] = hy; pos[p+14] = hz;
+                pos[p+15] = rx; pos[p+16] = ry; pos[p+17] = rz;
+
+                for (let v = 0; v < 6; v++) {
+                    col[p + v*3    ] = mr;
+                    col[p + v*3 + 1] = mg;
+                    col[p + v*3 + 2] = mb;
+                }
+                slot++;
+            }
+        }
+
+        // Zero out unused slots so leftover geometry from a previous denser
+        // build doesn't smear across the screen.
+        for (let s = slot; s < WIND_ARROW_MAX; s++) {
+            const p = s * WIND_ARROW_VERTS_EACH * 3;
+            for (let v = 0; v < WIND_ARROW_VERTS_EACH * 3; v++) {
+                pos[p + v] = 0;
+                col[p + v] = 0;
+            }
+        }
+
+        this._lastSlotCount = slot;
+        // Strength is baked into vertex colours on a rebuild — reset the
+        // material opacity in case _restripeStrength dragged it down on a
+        // previous frame inside the fade-in band.
+        this.mesh.material.opacity = 1;
+        this.mesh.geometry.attributes.position.needsUpdate = true;
+        this.mesh.geometry.attributes.color.needsUpdate    = true;
+        this.mesh.visible = true;
+    }
+
+    /**
+     * Cheap restripe of the colour buffer when only `strength` has changed
+     * (i.e. the camera is zooming through the fade-in band but not yet
+     * crossing a grid-cell boundary). Avoids redoing the lookup loop.
+     */
+    _restripeStrength(strength) {
+        const col = this._col;
+        const slot = this._lastSlotCount || 0;
+        if (slot === 0) return;
+        // Each slot has 6 verts already coloured; we know the per-slot RGB
+        // is uniform so we can rescale by strength / prevStrength. To avoid
+        // tracking prevStrength, just rebuild from speed using the cached
+        // shaft direction → too fiddly. Skip the restripe optimisation here:
+        // when only strength changes we live with it; the LineBasicMaterial
+        // doesn't expose an opacity multiplier we can tweak per frame
+        // independent of vertex colours, but the parent material's opacity
+        // does. Use that as the cheap path.
+        this.mesh.material.opacity = strength;
+        this.mesh.material.needsUpdate = false;   // opacity alone doesn't need it
+    }
+
+    /** Mirror of WindParticles._speedColor(). Kept inline to avoid a method
+     *  pointer chase inside the hot rebuild loop. */
+    _speedColor(s, out) {
+        const sc = Math.max(0, Math.min(1, s));
+        if (sc < 0.5) {
+            const t = sc / 0.5;
+            out[0] = 0.35 + 0.65 * t;
+            out[1] = 0.55 + 0.45 * t;
+            out[2] = 1.0;
+        } else {
+            const t = (sc - 0.5) / 0.5;
+            out[0] = 1.0;
+            out[1] = 1.0 - 0.72 * t;
+            out[2] = 1.0 - 0.05 * t;
+        }
+    }
+
+    /** Dot of (x,y,z) with the focus direction unit vector. > 0 = camera-facing. */
+    _dotFocus(x, y, z, fLat, fLon) {
+        const phi = fLat * DEG, lam = fLon * DEG;
+        const fx =  Math.cos(phi) * Math.cos(lam);
+        const fy =  Math.sin(phi);
+        const fz = -Math.cos(phi) * Math.sin(lam);
+        const r  = Math.hypot(x, y, z) || 1;
+        return (x * fx + y * fy + z * fz) / r;
+    }
+}
+
 const windParticles    = new WindParticles(earthMesh, 6000);
+const windArrows       = new WindArrows(earthMesh, (lat, lon, out) =>
+    windParticles._lookupWind(lat, lon, out));
 const solarWindParticles = new SolarWindParticles(scene, 3000, SUN_EQ);
 
 // ── Wind-scale legend ──────────────────────────────────────────────────
@@ -2834,6 +3661,62 @@ const solarWindParticles = new SolarWindParticles(scene, 3000, SUN_EQ);
     }
 })();
 
+// ── SST legend ──────────────────────────────────────────────────────────
+// Mirror NASA GIBS GHRSST_L4_MUR_Sea_Surface_Temperature standard palette
+// (−2 °C … 32 °C). Values are pulled from the GIBS WMS GetLegendGraphic
+// for that layer so the swatch is a *quantitative* key, not a guess.
+//   −2 °C  rgb( 50,  10,  90)   deep purple
+//    5 °C  rgb( 30,  60, 200)   blue
+//   12 °C  rgb( 40, 200, 230)   cyan
+//   18 °C  rgb(110, 220, 100)   green
+//   24 °C  rgb(255, 220,  60)   yellow
+//   28 °C  rgb(255, 130,  40)   orange
+//   32 °C  rgb(220,  20,  20)   red
+(function _paintSstLegend() {
+    const cv = document.getElementById('wx-sst-legend');
+    if (!cv) return;
+    const ctx = cv.getContext('2d');
+    const grad = ctx.createLinearGradient(0, 0, cv.width, 0);
+    grad.addColorStop(0.00, 'rgb(50,10,90)');
+    grad.addColorStop(0.20, 'rgb(30,60,200)');
+    grad.addColorStop(0.40, 'rgb(40,200,230)');
+    grad.addColorStop(0.55, 'rgb(110,220,100)');
+    grad.addColorStop(0.75, 'rgb(255,220,60)');
+    grad.addColorStop(0.88, 'rgb(255,130,40)');
+    grad.addColorStop(1.00, 'rgb(220,20,20)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, cv.width, cv.height);
+})();
+
+// ── Surface-current legend ──────────────────────────────────────────────
+// Mirrors OceanCurrentsOverlay._speedColor() exactly so the swatch users
+// see in the panel decodes the same colours streaming across the globe.
+// Anchors at 0.0 / 0.5 / 1.5 m/s — the speed thresholds where the ramp
+// transitions from teal → cyan → white-yellow.
+(function _paintCurrentsLegend() {
+    const cv = document.getElementById('wx-currents-legend');
+    if (!cv) return;
+    const ctx = cv.getContext('2d');
+    const W = cv.width, H = cv.height;
+    for (let x = 0; x < W; x++) {
+        const s = x / (W - 1);   // 0..1 normalised across 0..1.8 m/s
+        let r, g, b;
+        if (s < 0.5) {
+            const t = s / 0.5;
+            r = 0.05 + 0.10 * t;
+            g = 0.40 + 0.50 * t;
+            b = 0.55 + 0.45 * t;
+        } else {
+            const t = (s - 0.5) / 0.5;
+            r = 0.15 + 0.85 * t;
+            g = 0.90 + 0.10 * t;
+            b = 1.00 - 0.30 * t;
+        }
+        ctx.fillStyle = `rgb(${(r * 255) | 0}, ${(g * 255) | 0}, ${(b * 255) | 0})`;
+        ctx.fillRect(x, 0, 1, H);
+    }
+})();
+
 // ── Jet-stream overlay — highlights wind > 30 m/s on the globe ─────────
 // Parented to earthMesh (rides with the globe), driven by windParticles'
 // public sampler so lookups stay consistent with the streamlines. The
@@ -2848,6 +3731,34 @@ jetstreamOverlay.setVisible(false);
 
 document.getElementById('lyr-jet')?.addEventListener('change', e => {
     jetstreamOverlay.setVisible(e.target.checked);
+});
+
+// ── Ocean surface currents ──────────────────────────────────────────
+// CPU-advected particles riding the climatological surface-current vector
+// field. Major boundary jets (Gulf Stream, Kuroshio, Agulhas) read as
+// bright white-yellow streaks; broad equatorial / gyre flow as cyan.
+//
+// Sits at radius 1.0024 — between the SST overlay (1.002) and the cloud
+// layer (1.009) — so currents read on top of the temperature ramp without
+// fighting the atmospheric particles for visibility.
+//
+// Updated every frame from the main animation loop so streaks animate
+// continuously (the field is stationary; particles are not).
+const oceanCurrentsOverlay = new OceanCurrentsOverlay(earthMesh, 1500);
+
+const _oceanCurrentsCheckbox = document.getElementById('lyr-ocean-currents');
+oceanCurrentsOverlay.setVisible(_oceanCurrentsCheckbox?.checked ?? false);
+_oceanCurrentsCheckbox?.addEventListener('change', e => {
+    oceanCurrentsOverlay.setVisible(e.target.checked);
+});
+
+// Status pip: the model is purely client-side so it's always "loaded".
+// One-shot dispatch on init so the .lyr-status pill paints green
+// immediately rather than sitting amber forever.
+queueMicrotask(() => {
+    const m = oceanCurrentsMeta();
+    _setLayerPipById?.('ocean-currents', 'loaded',
+        `${m.source} · climatology`);
 });
 
 // Format the "Jet peak" readout. "228 km/h · 42.0°N 75.0°W" when a jet
@@ -2928,10 +3839,121 @@ function _updateLayerTooltips() {
 setInterval(_updateLayerTooltips, 30_000);
 
 // ═══════════════════════════════════════════════════════════════
-//  WEATHER FEED — real-time Open-Meteo / GFS data
+//  WEATHER FEED + 24-h replay history + resolver
+//  ──────────────────────────────────────────────────────────────
+//  Three collaborators:
+//    wxGridHistory  — IndexedDB ring buffer of 24 hourly coarse frames
+//                     (named wxGridHistory because the existing solar-
+//                     side `wxHistory` already owns the variable name)
+//    wxFeed         — live Open-Meteo poll; pushes each frame to history
+//    wxResolver     — translates simTimeMs into the right paint, lerping
+//                     between the two bracketing history frames during
+//                     replay and short-circuiting through wxFeed.* buffers
+//                     when the user is parked at "now".
+//
+//  Wiring order matters:
+//    1. construct wxGridHistory (cheap)
+//    2. await wxGridHistory.open() so the very first wxFeed dispatch
+//       can persist its frame to disk (otherwise it'd land in-memory
+//       only)
+//    3. construct wxFeed with { history }, kick off wxFeed.start()
+//    4. construct wxResolver with { feed, history }; the animate loop
+//       below calls wxResolver.tick(simTimeMs) once per rAF.
 // ═══════════════════════════════════════════════════════════════
-const wxFeed = new WeatherFeed();
+const wxGridHistory = new WeatherHistory();
+let wxFeed = null;
+let wxResolver = null;
+// Top-level await is allowed inside <script type="module">, which is
+// what this page loads as. If wxGridHistory.open() rejects (e.g.
+// IndexedDB blocked in private mode) it still resolves — degraded to
+// in-memory only — so the rest of the chain always runs.
+await wxGridHistory.open();
+wxFeed = new WeatherFeed({ history: wxGridHistory });
 wxFeed.start();
+wxResolver = new WeatherFrameResolver({ feed: wxFeed, history: wxGridHistory });
+
+// Cold-start backfill. /api/weather/grid?since=… serves up to 24 frames
+// from the same Supabase ring buffer the cron writes to (server-side
+// retention is 72 h; we only ask for 24 to match the slider's range).
+// Non-blocking: the live feed and resolver are already running, so the
+// page is fully interactive while the ~MB-scale historical payload is
+// in flight. invalidate() forces the next animate tick to re-resolve
+// in case the user is already parked at a past instant when backfill
+// lands — without it, they'd need to nudge the slider to see the new
+// frames. Also a second invalidate when at least one frame ingested
+// from a fresh disk store (warmed history would already serve replay).
+wxFeed.backfill(wxGridHistory, 24).then(n => {
+    if (n > 0) wxResolver?.invalidate();
+});
+
+// ── Forecaster registry + skill validator ──────────────────────────────────
+// Phase 1 of the predictive-analytics ladder (see WEATHER_FORECAST_PLAN.md
+// and EARTH_ML_FIRST_PRINCIPLES.md). A registry of forecasters competes on
+// Murphy skill-vs-persistence; the persistence baseline is registered first
+// so every future model has a reference to be scored against.
+//
+// Wiring sequence matters: the validator must be `.start()`ed *before* any
+// 'weather-forecast-update' fires, because the first ingest event below
+// triggers a runAll() and we want the resulting pending records to land in
+// the validator's IDB store rather than the in-memory fallback.
+const wxForecastRegistry = new ForecastRegistry({ history: wxGridHistory });
+wxForecastRegistry.register(new PersistenceForecaster());
+
+const wxForecastValidator = new WeatherForecastValidator({ history: wxGridHistory });
+// Best-effort: validator.start() awaits IDB open. Don't block the page.
+wxForecastValidator.start().catch(err => {
+    console.info('[earth] forecast validator start failed:', err?.message);
+});
+
+// If a frame is already in the ring at construction time (warmup from IDB
+// resolved earlier in this script), kick off the first forecast manually
+// so the SW-panel skill table doesn't sit empty until the next live
+// ingest 15 min later.
+if (wxGridHistory.size > 0) wxForecastRegistry.runAll();
+
+// ── SW-panel skill table painter ──────────────────────────────────────────
+// Listens for the validator's summary updates and re-renders the small
+// table embedded in #wx-panel. Pure DOM write — no layout thrash beyond
+// textContent updates because the row/column structure is fixed.
+function _paintForecastSkill(summary) {
+    const root = document.getElementById('wx-skill-grid');
+    if (!root) return;
+    // Render channels we actually care about for the headline (T, U, V,
+    // RH). The full 9-channel matrix is in `summary` for power users; we
+    // surface the four most physically interpretable here.
+    const VISIBLE_CHANNELS = ['T', 'U', 'V', 'RH'];
+    const persistence = summary['persistence-v1'];
+    if (!persistence) {
+        root.textContent = 'awaiting first validation cycle…';
+        return;
+    }
+    let html = '<div class="skill-row skill-head"><span></span>';
+    for (const h of FORECAST_HORIZONS_H) html += `<span>${h}h</span>`;
+    html += '</div>';
+    for (const ch of VISIBLE_CHANNELS) {
+        html += `<div class="skill-row"><span class="skill-ch">${ch}</span>`;
+        for (const h of FORECAST_HORIZONS_H) {
+            const bin = persistence[ch]?.[h];
+            const n = bin?.n | 0;
+            const mae = bin?.mae;
+            // Show MAE with one significant figure, or em-dash when no
+            // matched targets yet. The validator needs ≥1 ingest after a
+            // forecast to populate; fresh sessions show all dashes for up
+            // to one cron interval (~1 h).
+            html += `<span class="skill-cell" title="n=${n}">${
+                Number.isFinite(mae) ? mae.toFixed(2) : '—'
+            }</span>`;
+        }
+        html += '</div>';
+    }
+    root.innerHTML = html;
+}
+document.addEventListener('weather-forecast-validation-update', (ev) => {
+    _paintForecastSkill(ev.detail?.summary ?? {});
+});
+// Initial paint with whatever the validator already has on disk so the
+// table isn't blank on a fresh page load with prior history.
+_paintForecastSkill(wxForecastValidator.summary());
 
 // ═══════════════════════════════════════════════════════════════
 //  SATELLITE FEED — NASA GIBS GOES-16 + MODIS cloud imagery
@@ -3091,13 +4113,21 @@ function _createObsOverlay(layerId) {
     return _obsOverlays[layerId];
 }
 
-// Layer toggle handlers — visibility only, feed keeps running.
+// Layer toggle handlers — drive both mesh visibility AND the feed's
+// per-layer poll. Layers with `defaultOn:false` (AOD, cloud-thickness,
+// AMSR2 precip) aren't autoloaded by EarthObsFeed.start(); without the
+// setEnabled() call the user could flip the checkbox on, the mesh would
+// become "visible", but the fragment shader's `if (u_has_tex < 0.5)
+// discard;` branch keeps every fragment culled — so the toggle looked
+// dead. setEnabled(true) on the first ON also kicks the status pill from
+// "waiting" → "fetching" so the user gets feedback.
 for (const layer of EARTH_OBS_LAYERS) {
     const checkbox = document.getElementById(`lyr-obs-${layer.id}`);
     if (!checkbox) continue;
     checkbox.addEventListener('change', e => {
         const overlay = _obsOverlays[layer.id] ?? _createObsOverlay(layer.id);
         overlay.mesh.visible = e.target.checked;
+        earthObsFeed.setEnabled(layer.id, e.target.checked);
     });
 }
 
@@ -3378,6 +4408,18 @@ document.addEventListener('weather-update', e => {
     document.getElementById('wx-upd').textContent  = meta.fetchTime
         ? meta.fetchTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }) : '—';
 
+    // Grid resolution (e.g. "72×36 · 5°"). meta.gridW/H/Deg arrive on every
+    // weather-update from weather-feed.js — see the grid-metadata block in
+    // _fetchGrid(). Falls back to em-dash when the response has no grid info
+    // (fresh boot before the first fetch lands).
+    if (meta.gridW && meta.gridH) {
+        const deg = (meta.gridDeg ?? 180 / meta.gridH);
+        const degStr = Number.isInteger(deg) ? `${deg}°` : `${deg.toFixed(1)}°`;
+        document.getElementById('wx-grid').textContent = `${meta.gridW}×${meta.gridH} · ${degStr}`;
+    } else {
+        document.getElementById('wx-grid').textContent = '—';
+    }
+
     // Data age — how old the cached row from Supabase is, NOT how long ago
     // the browser fetched. Surfaces pg_cron failures to visitors: fresh ≤ 90
     // min (default colour), warn 90–180 min (amber), stale > 180 min (red
@@ -3422,6 +4464,38 @@ document.addEventListener('weather-status', e => {
         document.getElementById('wx-status-dot').className = 'fetch';
     }
 });
+
+// Cloud-imagery provenance — driven by satellite-update events from
+// SatelliteFeed. Composite mode shows the headline source; the full layer
+// list lives in the title attribute so research-mode users can audit which
+// satellite contributed which region of the globe.
+function renderSatelliteProvenance(detail) {
+    const el = document.getElementById('wx-sat');
+    if (!el) return;
+    if (!detail) {
+        el.textContent = 'unavailable';
+        el.removeAttribute('title');
+        return;
+    }
+    const dateStr = detail.modisDate
+        ?? (detail.time instanceof Date ? detail.time.toISOString().slice(0, 10) : '—');
+    const regions = Array.isArray(detail.regions) ? detail.regions : [];
+    const headline = detail.mosaic
+        ? `mosaic · ${regions.join('+')} · ${dateStr}`
+        : `${detail.source ?? 'satellite'} · ${dateStr}`;
+    el.textContent = headline;
+    el.title       = Array.isArray(detail.layers) ? detail.layers.join('\n') : '';
+}
+window.addEventListener('satellite-update', e => renderSatelliteProvenance(e.detail));
+
+// Toggle the research-mode banner row in the wx-panel when the checkbox flips.
+{
+    const researchToggle = document.getElementById('lyr-research-mode');
+    const banner         = document.getElementById('wx-research-row');
+    function syncBanner() { banner.style.display = researchToggle.checked ? '' : 'none'; }
+    researchToggle.addEventListener('change', syncBanner);
+    syncBanner();
+}
 
 document.getElementById('wx-refresh').addEventListener('click', () => {
     document.getElementById('wx-status-dot').className = 'fetch';
@@ -4363,7 +5437,12 @@ for (const [checkboxId, group] of Object.entries(_satGroups)) {
             _loadedGroups.add(group);
             if (statusEl) statusEl.textContent = `Tracking ${satTracker.getSatellites().length} satellites`;
         }
-        // Toggle visibility handled by the tracker internally
+        // The previous handler relied on a comment ("handled internally")
+        // that wasn't true — the tracker has no view of the checkbox, so
+        // toggling OFF left the dots painted at full colour. Drive group
+        // visibility explicitly via the tracker's vertex-colour path so
+        // unchecking actually hides the constellation.
+        satTracker.setGroupVisible(group, e.target.checked);
     });
 }
 
@@ -5341,15 +6420,72 @@ let lastT = 0;
 const _sunDirScratch = new THREE.Vector3();
 
 // ── Simulation-time state ──────────────────────────────────────────────
-// One simTimeMs variable is the single source of truth for every
-// time-sensitive part of the scene — GMST-driven rotation, sun direction,
-// sub-solar point, sun card, ISS pass card, on-globe solar markers. It
-// advances by real-dt × simSpeed unless paused.  Same pattern as
-// satellites.html; both pages now share the scrubber muscle memory.
+// One simTimeMs variable is the source of truth for every TIME-sensitive
+// part of the scene — sun direction, sub-solar point, sun card, ISS pass
+// card, on-globe solar markers, and (via WeatherFrameResolver) the
+// 24-hour wind/temp/cloud replay. It advances by real-dt × simSpeed
+// unless paused.
+//
+// Earth's ROTATION is intentionally NOT tied to simTimeMs — it's a
+// separate concern controlled by the user-facing "Planet rotation"
+// toggle in the SW panel header. See the rotation block in animate()
+// for the read site. Decoupling lets the slider act as a pure data
+// scrubber: drag back -6 h and the terminator + weather + satellites
+// move while the geometry stays put, so analysts can park their gaze
+// on a region and watch conditions evolve over it.
 let simTimeMs = Date.now();
 let simSpeed  = 1;                  // sim seconds per real second
 let simPaused = false;
 let _realLast = performance.now();
+
+// ── Planet-rotation state ──────────────────────────────────────────────
+// `planetRotationEnabled = true`  → earthMesh.rotation.y follows
+//   gmst(WALL-CLOCK now) every frame. The Earth visibly spins at real
+//   time, independent of the slider.
+// `planetRotationEnabled = false` (default) → earthMesh.rotation.y is
+//   pinned to `_pageLoadEarthRot`, captured once at module init from
+//   gmst(Date.now()). The orientation matches reality at the moment the
+//   user opened the page and never changes after that.
+//
+// Either way the slider DOES NOT touch rotation. simTimeMs continues to
+// drive the sun direction (terminator), so scrubbing always sweeps the
+// day-night line across the globe — that's the cleanest visual
+// confirmation that simTime is changing.
+const ROTATION_PREF_KEY = 'parkersphysics.planetRotation';
+// Mutable: re-captured every time the user toggles rotation OFF, so
+// "frozen orientation" tracks the live world if they open the page,
+// keep it open for an hour, then flip rotation off — they get the
+// current sub-solar point, not a stale one from page load.
+let _pageLoadEarthRot = gmst(julianDay(new Date(Date.now()))) * DEG;
+let planetRotationEnabled = false;
+try {
+    // Survives reload. First-ever visit defaults to OFF (analysis-tool
+    // posture). Catch covers privacy-mode storage exceptions.
+    planetRotationEnabled = localStorage.getItem(ROTATION_PREF_KEY) === '1';
+} catch (_) { /* storage blocked → keep default */ }
+
+// Wire the SW-panel checkbox once the DOM is ready (this script is
+// already a module loaded after the panel HTML, so the element exists
+// here). Reflect persisted state, then attach the change listener.
+{
+    const _rotEl = document.getElementById('ip-rotate');
+    if (_rotEl) {
+        _rotEl.checked = planetRotationEnabled;
+        _rotEl.addEventListener('change', () => {
+            planetRotationEnabled = _rotEl.checked;
+            // When flipping OFF, snapshot the current wall-clock GMST so
+            // the planet freezes at the orientation it had at this
+            // instant — not a stale one from page load.
+            if (!planetRotationEnabled) {
+                _pageLoadEarthRot = gmst(julianDay(new Date(Date.now()))) * DEG;
+            }
+            try {
+                localStorage.setItem(ROTATION_PREF_KEY,
+                    planetRotationEnabled ? '1' : '0');
+            } catch (_) { /* storage blocked → in-memory only */ }
+        });
+    }
+}
 
 function _fmtSimUTC(d) {
     return d.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
@@ -5375,7 +6511,20 @@ function _setSimPaused(paused) {
     const b = document.getElementById('tc-play');
     if (b) { b.textContent = paused ? '▶' : '⏸'; b.title = paused ? 'Resume' : 'Pause'; }
 }
-function _jumpToNow() { simTimeMs = Date.now(); }
+function _jumpToNow() {
+    simTimeMs = Date.now();
+    // Snap the scrub bar back to live so the renderer's mode flips
+    // immediately on the next animate frame. We bypass the normal
+    // writeback skip-while-focused logic here because this is an
+    // explicit user command (Now button or N keypress), not the
+    // animate loop trying to track natural advance.
+    if (_scrubEl) _scrubEl.value = 0;
+    // Resume natural advance. If the user was paused because they
+    // were exploring the past (auto-pause on slider drag), Now means
+    // "back to live" — including time moving again. If they want to
+    // freeze at "now" they can still hit Space.
+    if (simPaused) _setSimPaused(false);
+}
 
 document.getElementById('tc-play')?.addEventListener('click', () => _setSimPaused(!simPaused));
 document.getElementById('tc-now')?.addEventListener('click', _jumpToNow);
@@ -5385,8 +6534,37 @@ document.querySelectorAll('.tc-btn[data-speed]').forEach(btn => {
 _setSimSpeed(1);
 _setSimPaused(false);
 
+// ── 24-h replay slider ──────────────────────────────────────────────────
+// Bidirectional binding to simTimeMs:
+//   • input event (drag / keyboard)   → write simTimeMs
+//   • animate() natural advance (1×, 60×, …) → write slider.value
+// The writeback is suppressed while the slider has focus so we don't
+// fight the user mid-drag (browsers fire `input` continuously during
+// drag; document.activeElement === slider lasts from pointerdown
+// through pointerup-or-tab-out).
+const _scrubEl = document.getElementById('tc-scrub');
+if (_scrubEl) {
+    _scrubEl.addEventListener('input', () => {
+        const minutesFromNow = Number(_scrubEl.value);
+        // value is "minutes from now" in [-10080, +4320]. Negative = past
+        // (replay observations); positive = future (forecast preview).
+        simTimeMs = Date.now() + minutesFromNow * 60_000;
+        // Auto-pause whenever the user parks anywhere off "now" so the
+        // view doesn't drift under them at simSpeed×. Now/N or the
+        // play button resumes natural advance.
+        if (minutesFromNow !== 0 && !simPaused) _setSimPaused(true);
+    });
+    // Resume playback on release if the user dragged back to "now" —
+    // otherwise leave them paused at the historical moment they chose.
+    _scrubEl.addEventListener('change', () => {
+        if (Number(_scrubEl.value) === 0 && simPaused) _setSimPaused(false);
+    });
+}
+
 // Keyboard shortcuts — ignored when a text input / textarea is focused
 // so typing in the location search doesn't accidentally pause the sim.
+// (The scrub slider is type=range, not text, so arrow keys nudge it
+// natively.)
 window.addEventListener('keydown', (e) => {
     const tag = e.target?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;
@@ -5407,20 +6585,56 @@ function animate() {
     if (!simPaused) simTimeMs += (realNow - _realLast) * simSpeed;
     _realLast = realNow;
 
-    // ── Real-time astronomical state ────────────────────────────────────
-    // Single source of truth per frame: one simTimeMs drives both Earth's
-    // rotation (via GMST) and the sun direction (via mean ecliptic longitude
-    // → equatorial frame). Because both derive from the same jd, the
-    // sub-solar point can never drift relative to the globe — and a time
-    // scrub (any simSpeed ≠ 1) moves both together, so the terminator
-    // tracks wherever the user pulls time to.
-    const simDate = new Date(simTimeMs);
-    const jd      = julianDay(simDate);
-    earthMesh.rotation.y = gmst(jd) * DEG;
+    // ── Weather frame resolution ─────────────────────────────────────────
+    // resolver.tick decides — based on simTimeMs vs wall-clock — whether
+    // to short-circuit through the live wxFeed buffers or lerp two
+    // bracketing frames pulled out of wxGridHistory. Internal change-
+    // detection makes this a no-op (~10 µs) when the visible frame
+    // hasn't moved appreciably, so we can call it every rAF.
+    wxResolver?.tick(simTimeMs);
+
+    // Slider writeback: while the user isn't actively scrubbing (slider
+    // not focused), keep the slider position in sync with simTimeMs so
+    // natural advance at 60× / 600× / 3600× drags the thumb along with
+    // the data. Skipping while focused prevents the slider from jumping
+    // out from under the user mid-drag.
+    if (_scrubEl && document.activeElement !== _scrubEl) {
+        const minutesAgo = (simTimeMs - Date.now()) / 60_000;
+        // Slider domain is [-10080, +4320] minutes (= -7d .. +3d).
+        // Sun + satellites are deterministic in both directions; the
+        // weather resolver clamps anything outside its bracket window to
+        // the nearest available frame, so future scrub is visually a
+        // persistence forecast until the predictive pipeline lands.
+        const clamped = Math.max(-10080, Math.min(4320, minutesAgo));
+        // Only write if it actually changed by at least a step (1 min)
+        // — avoids triggering UA-side restyles every frame on idle.
+        if (Math.abs(clamped - Number(_scrubEl.value)) >= 1) {
+            _scrubEl.value = String(clamped.toFixed(0));
+        }
+    }
+
+    // ── Earth rotation (decoupled from simTimeMs) ───────────────────────
+    // Toggle in the SW panel header. ON: track real wall-clock GMST so
+    // the planet visibly spins. OFF (default): freeze at the orientation
+    // captured at page load — the analyst's gaze stays parked while the
+    // slider scrubs data and the terminator across a stationary globe.
+    //
+    // Either branch keeps simTimeMs out of the rotation calculation; the
+    // slider can never drag the geometry around even when rotation is on.
+    if (planetRotationEnabled) {
+        const wallJd = julianDay(new Date(Date.now()));
+        earthMesh.rotation.y = gmst(wallJd) * DEG;
+    } else {
+        earthMesh.rotation.y = _pageLoadEarthRot;
+    }
     cloudMesh.rotation.y = earthMesh.rotation.y;   // clouds locked to ground
 
-    // Sun direction recomputed from the same jd so the shaders' NdotL test
-    // agrees with the Earth's current rotation angle down to float precision.
+    // ── Sun direction (still tied to simTimeMs) ─────────────────────────
+    // Computed from simTimeMs's JD so the slider scrubs the day-night
+    // terminator across the (rotation-decoupled) globe. This is the
+    // primary visual cue that simTime is moving when rotation is off.
+    const simDate = new Date(simTimeMs);
+    const jd      = julianDay(simDate);
     _sunDirScratch.copy(sunDirectionEquatorial(jd));
     earthU.u_sun_dir.value.copy(_sunDirScratch);
     cloudU.u_sun_dir.value.copy(_sunDirScratch);
@@ -5456,8 +6670,23 @@ function animate() {
         tipEl.classList.remove('show');
     }
 
-    // ── Wind particle advection (tropospheric weather)
-    windParticles.update(dt);
+    // ── Wind particle advection (tropospheric weather). Camera + parent
+    // are passed so the LOD path can derive sub-camera lat/lon and zoom01.
+    windParticles.update(dt, camera, earthMesh);
+
+    // ── Ocean surface currents (oceanographic). Static climatological
+    // field, but particles re-advect every frame so streaks animate.
+    oceanCurrentsOverlay.update(dt);
+
+    // ── Adaptive wind-direction arrows (visible only at close zoom). Reads
+    // focus state straight from the particle system so the two layers stay
+    // perfectly co-aligned without re-deriving the camera transform here.
+    windArrows.update(
+        windParticles.zoom01,
+        windParticles.focusLat,
+        windParticles.focusLon,
+        windParticles.windBuf != null,
+    );
 
     // ── Solar wind particle stream (interplanetary → magnetopause)
     solarWindParticles.tick(dt, earthU.u_sun_dir.value);
@@ -5488,12 +6717,35 @@ function animate() {
     // ── Exosphere: orient to sun + solar-wind shader uniforms + mesh animation
     exosphere.tick(t, earthU.u_sun_dir.value, _lastSwState);
 
-    // ── User location pin pulse
-    if (_userPinRing) {
-        const pulse = Math.sin(t * 2.2) * 0.5 + 0.5;
-        const s = 1 + pulse * 2.4;
-        _userPinRing.scale.set(s, s, 1);
-        _userPinRing.material.opacity = 0.75 * (1 - pulse * 0.87);
+    // ── User location pin: multi-ring radar ping + sky beam
+    // Three rings on staggered phases (0, ⅓, ⅔ of a 2.4s period) so the
+    // marker reads as a continuous outward radar pulse instead of a
+    // single ring expanding and snapping back. Halo and beam track the
+    // brightest ring's phase so the whole stack breathes together.
+    if (_userPinRings?.length) {
+        const period = 2.4;
+        const phase  = (t % period) / period;     // 0..1
+        for (let i = 0; i < _userPinRings.length; i++) {
+            const ring = _userPinRings[i];
+            const local = (phase + i / _userPinRings.length) % 1;
+            // Quadratic ease-out scale; rings start near the core and expand
+            // to ~3.6× outer radius before fading to zero opacity.
+            const s = 1 + local * local * 3.2;
+            ring.scale.set(s, s, 1);
+            // Opacity fades faster at the start so the leading ring is the
+            // brightest and trailing rings are progressively softer.
+            ring.material.opacity = 0.85 * (1 - local) * (1 - local);
+        }
+    }
+    if (_userPinHalo) {
+        const breathe = (Math.sin(t * 2.2) * 0.5 + 0.5);
+        _userPinHalo.material.opacity = 0.18 + breathe * 0.18;
+        const hs = 1 + breathe * 0.18;
+        _userPinHalo.scale.set(hs, hs, hs);
+    }
+    if (_userPinBeam) {
+        const beat = Math.sin(t * 1.8) * 0.5 + 0.5;
+        _userPinBeam.material.opacity = 0.32 + beat * 0.34;
     }
 
     // ── Fly-to animation
@@ -5527,7 +6779,11 @@ function animate() {
 //  USER LOCATION PIN  (must be declared before animate() runs)
 // ═══════════════════════════════════════════════════════════════
 let _userPinGroup = null;
-let _userPinRing  = null;
+let _userPinRing  = null;     // legacy single-ring handle (kept for any
+                              // external code that might still poke it).
+let _userPinRings = [];       // array of expanding radar rings
+let _userPinHalo  = null;     // soft glowing sphere wrapping the core
+let _userPinBeam  = null;     // radial cylinder pointing outward from surface
 let _userLat = null, _userLon = null;
 let _currentKp = 2;
 
@@ -5610,32 +6866,93 @@ function _setUserPin(lat, lon) {
         _userPinGroup.traverse(c => { c.geometry?.dispose(); c.material?.dispose(); });
         _userPinGroup = null;
         _userPinRing  = null;
+        _userPinRings = [];
+        _userPinHalo  = null;
+        _userPinBeam  = null;
     }
     if (lat == null || lon == null) return;
     _userLat = lat; _userLon = lon;
 
-    // Position on unit sphere surface (earthMesh is R=1)
-    const pos = geoToXYZ(lat, lon).multiplyScalar(1.003);
+    // Position on unit sphere surface (earthMesh is R=1). Outward normal
+    // is the same vector — used for the sky beam orientation below.
+    const surface = geoToXYZ(lat, lon).multiplyScalar(1.003);
+    const normal  = surface.clone().normalize();
 
     _userPinGroup = new THREE.Group();
+    _userPinRings = [];
 
-    // Core dot — bright teal
-    const dotMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc });
-    const dot    = new THREE.Mesh(new THREE.SphereGeometry(0.018, 10, 10), dotMat);
-    dot.position.copy(pos);
-    _userPinGroup.add(dot);
+    // Palette: warm gold core fading through a teal corona. Two colors
+    // produce a stronger silhouette against both day-side blue and the
+    // night-side dark than a single-hue marker did.
+    const COLOR_CORE  = 0xfff0a8;   // bright warm core
+    const COLOR_HALO  = 0x6effe0;   // teal corona
+    const COLOR_RING  = 0x88ffe6;   // pulse rings
+    const COLOR_BEAM  = 0xffd766;   // sky beam — sun-warm
 
-    // Pulse ring — tangent to sphere surface
-    const ringMat = new THREE.MeshBasicMaterial({
-        color: 0x00ffcc, transparent: true, opacity: 0.7,
+    // 1. Core dot — small, fully opaque, sits on the surface. Brighter
+    //    than the surrounding glow so the marker has a hard centre even
+    //    when the halo + rings dim below the day-side terminator.
+    const coreGeo = new THREE.SphereGeometry(0.014, 16, 16);
+    const coreMat = new THREE.MeshBasicMaterial({ color: COLOR_CORE });
+    const core    = new THREE.Mesh(coreGeo, coreMat);
+    core.position.copy(surface);
+    _userPinGroup.add(core);
+
+    // 2. Halo sphere — larger, additive-blended, breathes in/out. Reads
+    //    as a soft glow around the core dot from any camera angle (a
+    //    flat ring would vanish edge-on; a sphere never does).
+    const haloGeo = new THREE.SphereGeometry(0.030, 18, 18);
+    const haloMat = new THREE.MeshBasicMaterial({
+        color: COLOR_HALO, transparent: true, opacity: 0.32,
+        depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    _userPinHalo = new THREE.Mesh(haloGeo, haloMat);
+    _userPinHalo.position.copy(surface);
+    _userPinGroup.add(_userPinHalo);
+
+    // 3. Radar rings — three tangent rings on staggered phases. The
+    //    per-frame tick at line ~6453 expands each one through its own
+    //    portion of a shared period so the marker reads as a continuous
+    //    outward sweep instead of a single oscillation.
+    const ringGeo = new THREE.RingGeometry(0.022, 0.030, 48);
+    for (let i = 0; i < 3; i++) {
+        const mat = new THREE.MeshBasicMaterial({
+            color: COLOR_RING, transparent: true, opacity: 0.7,
+            side: THREE.DoubleSide, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+        });
+        const ring = new THREE.Mesh(ringGeo, mat);
+        ring.position.copy(surface);
+        ring.lookAt(new THREE.Vector3(0, 0, 0));     // tangent to sphere
+        _userPinGroup.add(ring);
+        _userPinRings.push(ring);
+    }
+    // Preserve legacy handle in case other code dereferences it.
+    _userPinRing = _userPinRings[0];
+
+    // 4. Sky beam — a thin radial cylinder pointing OUT of the sphere.
+    //    Stretched to ~0.20 Earth radii (~1270 km) so it's visible from
+    //    typical orbital camera distances but doesn't punch through the
+    //    info panels at zoomed-out POVs. Additive blending makes the
+    //    beam transparent against both day and night sides without any
+    //    z-fight against the atmosphere shader.
+    const beamLen = 0.22;
+    const beamGeo = new THREE.CylinderGeometry(0.006, 0.014, beamLen, 16, 1, true);
+    // Cylinder default axis is +Y; translate so its base sits AT the
+    // surface and the body extends outward along +Y in local space.
+    beamGeo.translate(0, beamLen / 2, 0);
+    const beamMat = new THREE.MeshBasicMaterial({
+        color: COLOR_BEAM, transparent: true, opacity: 0.5,
         side: THREE.DoubleSide, depthWrite: false,
         blending: THREE.AdditiveBlending,
     });
-    _userPinRing = new THREE.Mesh(new THREE.RingGeometry(0.024, 0.042, 32), ringMat);
-    _userPinRing.position.copy(pos);
-    _userPinRing.lookAt(new THREE.Vector3(0, 0, 0));   // tangent to sphere
-    _userPinGroup.add(_userPinRing);
+    _userPinBeam = new THREE.Mesh(beamGeo, beamMat);
+    _userPinBeam.position.copy(surface);
+    // Orient local +Y to the outward surface normal at this lat/lon.
+    _userPinBeam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
+    _userPinGroup.add(_userPinBeam);
 
+    _userPinGroup.renderOrder = 12;
     earthMesh.add(_userPinGroup);
 }
 
@@ -5899,6 +7216,10 @@ window.addEventListener('user-location-changed', e => {
     if (loc) {
         document.getElementById('loc-input').value = loc.city || '';
         _showLocResult(loc);
+        // Auto-pin every set location to the persisted summary list. The
+        // dedup rule inside addSavedLocation keeps the list clean if the
+        // user re-searches the same city.
+        addSavedLocation(loc);
     } else {
         _showLocResult(null);
     }
@@ -5911,6 +7232,169 @@ window.addEventListener('user-location-changed', e => {
         document.getElementById('loc-input').value = saved.city || '';
         _showLocResult(saved);
     }
+})();
+
+// ── Saved-locations summary card ─────────────────────────────────────
+// Renders the persistent list below the globe. Auto-saves whenever the
+// active user-location changes; also updates clock fields every minute so
+// the per-location local time stays current without a full re-render.
+(function initSavedLocSummary() {
+    const root  = document.getElementById('saved-loc-summary');
+    const grid  = document.getElementById('sls-grid');
+    const count = document.getElementById('sls-count');
+    const hint  = document.getElementById('sls-hint');
+    const clearBtn = document.getElementById('sls-clear');
+    if (!root || !grid) return;
+
+    function _escape(s) {
+        return String(s ?? '').replace(/[&<>"']/g, c => (
+            { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]
+        ));
+    }
+
+    function _render() {
+        const list = listSavedLocations();
+        count.textContent = list.length;
+        if (list.length === 0) {
+            root.hidden = false;   // still show the empty state so the
+                                   // affordance is discoverable; collapses
+                                   // to just the hint copy.
+            hint.style.display = 'block';
+            grid.innerHTML = '';
+            clearBtn.style.display = 'none';
+            return;
+        }
+        hint.style.display = 'none';
+        clearBtn.style.display = '';
+        root.hidden = false;
+
+        grid.innerHTML = list.map(r => {
+            const clock = formatLocalClock(r.lat, r.lon);
+            const dn    = dayNightBadge(r.lat, r.lon);
+            return `
+                <div class="sls-item" data-id="${_escape(r.id)}">
+                  <div class="sls-i-row">
+                    <span class="sls-i-name" title="${_escape(r.displayName || r.city)}">${_escape(r.city)}</span>
+                    <span class="sls-i-badge" style="--bdg:${dn.color}">${dn.icon} ${dn.label}</span>
+                  </div>
+                  <div class="sls-i-clock">${_escape(clock)}</div>
+                  <div class="sls-i-coords">${r.lat.toFixed(2)}°, ${r.lon.toFixed(2)}°</div>
+                  <div class="sls-i-actions">
+                    <button class="sls-i-btn" data-act="fly" type="button">Fly here</button>
+                    <button class="sls-i-btn danger" data-act="del" type="button">Remove</button>
+                  </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    // Single delegated click handler for the grid's per-item buttons.
+    grid.addEventListener('click', e => {
+        const btn = e.target.closest('button[data-act]');
+        if (!btn) return;
+        const item = btn.closest('.sls-item');
+        if (!item) return;
+        const id   = item.dataset.id;
+        const list = listSavedLocations();
+        const row  = list.find(r => r.id === id);
+        if (!row) return;
+        if (btn.dataset.act === 'del') {
+            removeSavedLocation(id);
+        } else if (btn.dataset.act === 'fly') {
+            // Re-route through saveUserLocation so the existing fly-to /
+            // sun / ISS pipeline picks it up — same path as a fresh search.
+            saveUserLocation({
+                lat: row.lat, lon: row.lon,
+                city: row.city, displayName: row.displayName || row.city,
+            });
+            // Scroll back up to the globe and trigger the existing camera
+            // fly button so the user actually swoops to the pinned spot.
+            document.getElementById('app')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            setTimeout(() => document.getElementById('loc-fly')?.click(), 250);
+        }
+    });
+
+    clearBtn?.addEventListener('click', () => {
+        if (confirm('Clear all pinned locations?')) clearSavedLocations();
+    });
+
+    window.addEventListener('pp-saved-locations-changed', _render);
+
+    // Refresh local clocks once a minute so each card stays current. Cheap
+    // because the row count is capped at 12.
+    setInterval(_render, 60_000);
+
+    // First paint — also auto-import the existing single-location pin so a
+    // returning visitor immediately sees their place in the new card.
+    const existing = loadUserLocation();
+    if (existing && !listSavedLocations().some(r =>
+        Math.abs(r.lat - existing.lat) < 0.02 &&
+        Math.abs(r.lon - existing.lon) < 0.02
+    )) {
+        addSavedLocation(existing);   // triggers _render via event
+    } else {
+        _render();
+    }
+})();
+
+// First-visit hint — dismissable toast that points at the new top-left
+// #loc-panel. Fires only when (a) the visitor has never dismissed it,
+// and (b) no location is currently saved. The hint disappears
+// automatically once the user sets a location, so an in-flight setup
+// flow doesn't get nagged. Stamping a localStorage flag prevents
+// re-display on subsequent visits.
+(function() {
+    const HINT_KEY = 'pp-earth-loc-hint-dismissed';
+    try { if (localStorage.getItem(HINT_KEY) === '1') return; } catch {}
+    if (loadUserLocation()) return;
+    // Don't render on phones — the loc-panel is in the slide-up sheet
+    // there and a toast pointing at an off-screen element is confusing.
+    if (window.matchMedia?.('(max-width: 768px)').matches) return;
+
+    const t = document.createElement('div');
+    t.id = 'pp-loc-hint';
+    t.setAttribute('role', 'status');
+    // Anchor the hint just to the right of #loc-panel (which now sits at
+     //   top:110px / left:10px / width:264px → the hint starts at left:290px
+     // so it points cleanly at the search input's row, not the title).
+    t.style.cssText = `
+        position:fixed; top:150px; left:290px; z-index:200;
+        max-width:300px; padding:10px 30px 10px 14px;
+        background:linear-gradient(135deg, rgba(95,255,208,.18), rgba(0,180,140,.10));
+        border:1px solid rgba(95,255,208,.45);
+        border-radius:10px; color:#cef;
+        font-size:.78rem; line-height:1.5;
+        box-shadow:0 8px 28px rgba(0,40,30,.5);
+        backdrop-filter:blur(10px);
+        cursor:default;
+        animation:pp-loc-hint-in .35s ease;
+    `;
+    t.innerHTML = `
+        <strong style="color:#5fffd0;font-weight:800;letter-spacing:.04em">← Pin your city</strong>
+        Unlocks local sun + ISS pass times, aurora visibility, and personalised alerts.
+        <button id="pp-loc-hint-x" aria-label="Dismiss"
+            style="position:absolute;top:5px;right:7px;background:transparent;border:0;color:#9bd;font:inherit;font-size:1rem;line-height:1;cursor:pointer;padding:3px 6px;border-radius:4px">×</button>
+    `;
+    const css = document.createElement('style');
+    css.textContent = `
+        @keyframes pp-loc-hint-in { from { opacity:0; transform:translateY(-6px) } to { opacity:1; transform:translateY(0) } }
+        #pp-loc-hint-x:hover { color:#fff; background:rgba(255,255,255,.08) }
+    `;
+    document.head.appendChild(css);
+    document.body.appendChild(t);
+
+    function dismiss() {
+        try { localStorage.setItem(HINT_KEY, '1'); } catch {}
+        t.style.transition = 'opacity .25s';
+        t.style.opacity = '0';
+        setTimeout(() => t.remove(), 260);
+    }
+    document.getElementById('pp-loc-hint-x')?.addEventListener('click', dismiss);
+    // Auto-dismiss the moment a location is set — the user just did the
+    // thing the hint was nagging about.
+    window.addEventListener('user-location-changed', (e) => {
+        if (e.detail) dismiss();
+    }, { once: true });
 })();
 
 // ═══════════════════════════════════════════════════════════════
@@ -5969,6 +7453,31 @@ document.querySelectorAll('.panel-close[data-close]').forEach(btn => {
 _backdrop.addEventListener('click', _closeMobilePanel);
 
 // ═══════════════════════════════════════════════════════════════
+//  SYNC LAYER VISIBILITY WITH HTML DEFAULTS
+// ═══════════════════════════════════════════════════════════════
+// Several layer constructors (EarthquakeMarkers, gridGroup, tropicGroup,
+// the aurora/city-lights shader uniforms, the atmosphere shell, etc.)
+// initialise to "visible" because that was the historical default. We
+// flipped most checkboxes off in the HTML for the leaner first-load
+// experience, but the change handlers wired earlier only fire on user
+// interaction — so without this synthetic dispatch the meshes would
+// stay on screen even though the checkbox is unchecked.
+//
+// Dispatching a one-shot 'change' event drives each handler's logic
+// against the current checkbox state, keeping the authoring surface in
+// one place (the HTML `checked` attribute). Runs once after every layer
+// constructor has executed (we're past line 5400-ish at this point).
+[
+    'lyr-clouds', 'lyr-atm', 'lyr-aurora', 'lyr-lights', 'lyr-grid',
+    'lyr-tropic', 'lyr-subsolar', 'lyr-weather', 'lyr-wind', 'lyr-jet',
+    'lyr-isobars', 'lyr-alerts', 'lyr-earthquakes', 'lyr-iss',
+    'lyr-rotate',
+].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.dispatchEvent(new Event('change'));
+});
+
+// ═══════════════════════════════════════════════════════════════
 //  PANEL MINIMIZE
 // ═══════════════════════════════════════════════════════════════
 document.querySelectorAll('[data-minimize-btn]').forEach(btn => {
@@ -5983,16 +7492,22 @@ document.querySelectorAll('[data-minimize-btn]').forEach(btn => {
     });
 });
 
-// Restore minimized states on load
-['layer-panel', 'info-panel', 'wx-panel'].forEach(id => {
+// Restore minimized states on load. Each panel can have an HTML default
+// (e.g. info-panel ships minimized so first-time visitors see the globe);
+// localStorage overrides the default in either direction once the user
+// explicitly toggles the panel.
+['layer-panel', 'info-panel', 'wx-panel', 'loc-panel'].forEach(id => {
     try {
-        if (localStorage.getItem('earth-panel-min-' + id) === '1') {
-            const panel = document.getElementById(id);
-            if (!panel) return;
-            panel.classList.add('panel-minimized');
-            const btn = panel.querySelector('[data-minimize-btn]');
-            if (btn) btn.textContent = '▸';
-        }
+        const panel = document.getElementById(id);
+        if (!panel) return;
+        const stored = localStorage.getItem('earth-panel-min-' + id);
+        let minimized;
+        if (stored === '1')      minimized = true;
+        else if (stored === '0') minimized = false;
+        else                     minimized = panel.classList.contains('panel-minimized');
+        panel.classList.toggle('panel-minimized', minimized);
+        const btn = panel.querySelector('[data-minimize-btn]');
+        if (btn) btn.textContent = minimized ? '▸' : '▾';
     } catch {}
 });
 
@@ -6007,12 +7522,14 @@ document.querySelectorAll('.lyr-section-hdr').forEach(hdr => {
         try { localStorage.setItem('earth-lyr-sec-' + key, collapsed ? '1' : '0'); } catch {}
     });
 });
-// Restore collapsed states on load
+// Restore collapsed states on load. HTML defaults can mark a section
+// 'collapsed'; localStorage overrides that default once the user toggles
+// the section in either direction.
 document.querySelectorAll('.lyr-section[data-lyr-section]').forEach(sec => {
     try {
-        if (localStorage.getItem('earth-lyr-sec-' + sec.dataset.lyrSection) === '1') {
-            sec.classList.add('collapsed');
-        }
+        const stored = localStorage.getItem('earth-lyr-sec-' + sec.dataset.lyrSection);
+        if (stored === '1')      sec.classList.add('collapsed');
+        else if (stored === '0') sec.classList.remove('collapsed');
     } catch {}
 });
 
@@ -6043,33 +7560,6 @@ document.addEventListener('visibilitychange', () => {
     if (document.hidden) clock.stop(); else clock.start();
 });
 
-// ─── Nav ─────────────────────────────────────────────────────────────────────
-const _navBurger = document.getElementById('nav-burger');
-const _navMenu   = document.getElementById('nav-menu');
-if (_navBurger && _navMenu) {
-    _navBurger.addEventListener('click', () => {
-        const open = _navMenu.classList.toggle('open');
-        _navBurger.textContent = open ? '\u2715' : '\u2630';
-        _navBurger.setAttribute('aria-expanded', open);
-    });
-    document.addEventListener('click', e => {
-        if (!e.target.closest('nav')) {
-            _navMenu.classList.remove('open');
-            _navBurger.textContent = '\u2630';
-            _navBurger.setAttribute('aria-expanded', 'false');
-        }
-    });
-    document.querySelectorAll('.nav-drop-btn').forEach(btn => {
-        btn.addEventListener('click', e => {
-            if (window.innerWidth > 1024) return;
-            e.stopPropagation();
-            const drop    = btn.closest('.nav-drop');
-            const opening = !drop.classList.contains('open');
-            document.querySelectorAll('.nav-drop').forEach(d => d.classList.remove('open'));
-            if (opening) drop.classList.add('open');
-        });
-    });
-}
 
 // Fade scroll hint once user scrolls past canvas
 (function() {

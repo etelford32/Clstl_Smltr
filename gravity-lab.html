@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gravity Lab — Live Newtonian N-Body Simulation · Parker Physics</title>
+<meta name="description" content="Watch real Newtonian gravity run on the major moon systems of the solar system. Earth-Moon and Jupiter's Galilean moons including the Laplace 4:2:1 resonance, integrated live with a Yoshida-4 symplectic N-body solver.">
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html, body { height:100%; }
+body {
+    background:#040210; color:#d8d4ee;
+    font-family:'Segoe UI', system-ui, sans-serif;
+    overflow:hidden;
+}
+
+/* ─── Hero strip ─────────────────────────────────────────────── */
+#gl-hero {
+    position:relative; z-index:5;
+    padding:14px 22px 12px;
+    background:linear-gradient(180deg, rgba(120,80,255,.10), rgba(4,2,16,0));
+    border-bottom:1px solid rgba(180,140,255,.14);
+    display:flex; align-items:baseline; justify-content:space-between; gap:18px;
+    flex-wrap:wrap;
+}
+#gl-hero h1 {
+    font-size:1.35rem; font-weight:800;
+    background:linear-gradient(100deg,#fff 30%,#b78cff);
+    -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+}
+#gl-hero p {
+    font-size:.78rem; color:#9990b8; font-family:monospace;
+    letter-spacing:.04em;
+}
+#gl-hero p strong { color:#cba9ff; }
+
+/* ─── Layout ─────────────────────────────────────────────────── */
+#gl-app {
+    position:relative;
+    display:grid;
+    grid-template-columns:280px 1fr 320px;
+    height:calc(100vh - 110px);
+    min-height:520px;
+    gap:0;
+}
+@media (max-width:1100px) {
+    #gl-app { grid-template-columns:1fr; height:auto; }
+    #gl-stage { height:60vh; min-height:380px; }
+}
+
+.gl-side {
+    background:rgba(10,6,28,.78);
+    backdrop-filter:blur(14px);
+    border-right:1px solid rgba(255,255,255,.06);
+    overflow-y:auto;
+    padding:18px 16px 24px;
+}
+#gl-side-right {
+    border-right:none;
+    border-left:1px solid rgba(255,255,255,.06);
+}
+
+#gl-stage {
+    position:relative;
+    background:#03020a;
+    overflow:hidden;
+}
+#gl-canvas {
+    width:100%; height:100%; display:block;
+    cursor:grab;
+}
+#gl-canvas:active { cursor:grabbing; }
+
+/* ─── Sidebar — system picker / controls ─────────────────────── */
+.gl-label {
+    font-size:.68rem; color:#7a78a4;
+    text-transform:uppercase; letter-spacing:.12em;
+    font-weight:800;
+    margin-top:18px; margin-bottom:8px;
+}
+.gl-label:first-child { margin-top:0; }
+
+.gl-tabs { display:grid; gap:6px; }
+.gl-tab {
+    background:rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.10);
+    border-radius:8px;
+    padding:10px 12px;
+    font-family:inherit; color:#bcb;
+    text-align:left; cursor:pointer;
+    transition:all .15s;
+}
+.gl-tab:hover { border-color:rgba(180,140,255,.45); color:#fff; }
+.gl-tab.on {
+    background:linear-gradient(120deg, rgba(180,140,255,.18), rgba(255,255,255,.03));
+    border-color:#b78cff;
+    color:#fff;
+}
+.gl-tab-name { font-size:.92rem; font-weight:700; }
+.gl-tab-sub  { font-size:.7rem; color:#998; margin-top:2px; line-height:1.4; }
+.gl-tab.on .gl-tab-sub { color:#cba9ff; }
+
+.gl-controls { display:grid; gap:8px; }
+.gl-btn-row { display:flex; gap:6px; }
+.gl-btn {
+    flex:1;
+    background:rgba(255,255,255,.05);
+    border:1px solid rgba(255,255,255,.10);
+    border-radius:6px;
+    color:#cbd; padding:8px 10px;
+    font-family:inherit; font-size:.78rem; font-weight:700;
+    cursor:pointer;
+    transition:all .15s;
+}
+.gl-btn:hover { border-color:rgba(180,140,255,.45); color:#fff; }
+.gl-btn-primary {
+    background:linear-gradient(120deg,#b78cff 0%,#7a4dff 100%);
+    border-color:transparent; color:#fff;
+}
+.gl-btn-primary:hover { filter:brightness(1.1); }
+
+.gl-warp-wrap {
+    background:rgba(255,255,255,.03);
+    border:1px solid rgba(255,255,255,.07);
+    border-radius:8px;
+    padding:10px 12px;
+}
+.gl-warp-wrap input {
+    width:100%; -webkit-appearance:none; appearance:none;
+    height:4px; background:rgba(255,255,255,.10); border-radius:2px;
+    outline:none; cursor:pointer; margin-top:6px;
+}
+.gl-warp-wrap input::-webkit-slider-thumb {
+    -webkit-appearance:none; appearance:none;
+    width:16px; height:16px; border-radius:50%;
+    background:#b78cff; cursor:pointer;
+    box-shadow:0 0 8px rgba(180,140,255,.6);
+}
+.gl-warp-wrap input::-moz-range-thumb {
+    width:16px; height:16px; border-radius:50%; border:none;
+    background:#b78cff; cursor:pointer;
+}
+.gl-warp-readout {
+    font-family:monospace; font-size:.82rem; color:#fff;
+    font-weight:700;
+}
+.gl-warp-mini { font-size:.62rem; color:#778; margin-top:4px; font-family:monospace; }
+
+/* ─── Camera focus block ─────────────────────────────────────── */
+.gl-camera { display:grid; gap:8px; }
+.gl-focus-label {
+    font-family:monospace; font-size:.72rem; color:#cba9ff;
+    background:rgba(180,140,255,.08);
+    border:1px solid rgba(180,140,255,.20);
+    border-radius:6px; padding:7px 10px;
+    line-height:1.3;
+}
+.gl-chips {
+    display:flex; flex-wrap:wrap; gap:5px;
+}
+.gl-chip {
+    background:rgba(255,255,255,.05);
+    border:1px solid rgba(255,255,255,.10);
+    border-radius:999px;
+    color:#bcb;
+    padding:5px 11px;
+    font-family:inherit; font-size:.72rem; font-weight:600;
+    cursor:pointer;
+    transition:all .15s;
+    display:inline-flex; align-items:center;
+}
+.gl-chip:hover { border-color:rgba(180,140,255,.45); color:#fff; }
+.gl-chip.on {
+    background:rgba(180,140,255,.20);
+    border-color:#b78cff;
+    color:#fff;
+}
+.gl-chip .gl-dot {
+    display:inline-block; width:8px; height:8px; border-radius:50%;
+    margin-right:6px; vertical-align:middle;
+}
+.gl-camera-hint {
+    font-size:.66rem; color:#778; line-height:1.5; margin-top:2px;
+}
+
+/* ─── Perturbation toggle ───────────────────────────────────── */
+.gl-j2-row {
+    display:flex; align-items:center; gap:10px;
+    background:rgba(255,255,255,.03);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:8px;
+    padding:9px 12px;
+    cursor:pointer;
+    transition:border-color .15s;
+}
+.gl-j2-row:hover { border-color:rgba(180,140,255,.45); }
+.gl-j2-row input[type=checkbox] {
+    appearance:none; -webkit-appearance:none;
+    width:32px; height:18px; border-radius:999px;
+    background:rgba(255,255,255,.10);
+    border:1px solid rgba(255,255,255,.18);
+    cursor:pointer; position:relative;
+    transition:background .15s, border-color .15s;
+    flex-shrink:0;
+}
+.gl-j2-row input[type=checkbox]::after {
+    content:""; position:absolute;
+    width:12px; height:12px; border-radius:50%;
+    background:#fff; top:2px; left:2px;
+    transition:transform .15s;
+}
+.gl-j2-row input[type=checkbox]:checked {
+    background:rgba(180,140,255,.45);
+    border-color:#b78cff;
+}
+.gl-j2-row input[type=checkbox]:checked::after {
+    transform:translateX(14px);
+    background:#fff;
+}
+.gl-j2-name { font-size:.78rem; font-weight:700; color:#fff; }
+.gl-j2-note  {
+    font-size:.7rem; color:#cba9ff; line-height:1.5;
+    margin-top:8px; font-family:monospace;
+}
+.gl-j2-note strong { color:#fff; }
+.gl-j2-hint {
+    font-size:.64rem; color:#778; line-height:1.5; margin-top:6px; font-style:italic;
+}
+
+/* ─── Showcase block ────────────────────────────────────────── */
+.gl-showcase {
+    background:linear-gradient(150deg, rgba(180,140,255,.10), rgba(10,6,28,.5) 70%);
+    border:1px solid rgba(180,140,255,.20);
+    border-radius:10px;
+    padding:14px 14px 12px;
+    margin-bottom:6px;
+}
+.gl-showcase-headline {
+    font-size:.92rem; font-weight:800; color:#fff;
+    margin-bottom:6px; line-height:1.25;
+}
+.gl-showcase-callout {
+    font-size:.78rem; color:#cba9ff; line-height:1.55;
+    margin-bottom:8px;
+}
+.gl-showcase-physics {
+    font-size:.7rem; color:#998; line-height:1.55; font-style:italic;
+    border-top:1px solid rgba(255,255,255,.06);
+    padding-top:8px;
+}
+
+/* ─── HUD (right sidebar) ───────────────────────────────────── */
+.gl-hud-section {
+    margin-bottom:18px;
+}
+.gl-hud-title {
+    font-size:.68rem; color:#7a78a4;
+    text-transform:uppercase; letter-spacing:.12em;
+    font-weight:800;
+    margin-bottom:8px;
+}
+.gl-hud-grid {
+    display:grid; grid-template-columns:auto 1fr; gap:4px 12px;
+    font-family:monospace; font-size:.78rem;
+}
+.gl-hud-grid dt { color:#778; }
+.gl-hud-grid dd { color:#fff; text-align:right; }
+
+table.gl-bodies {
+    width:100%; border-collapse:collapse; font-size:.74rem;
+}
+table.gl-bodies th, table.gl-bodies td {
+    padding:6px 4px;
+    border-bottom:1px solid rgba(255,255,255,.05);
+    text-align:left;
+}
+table.gl-bodies th {
+    color:#7a78a4; font-weight:700;
+    font-size:.62rem; letter-spacing:.06em;
+    text-transform:uppercase;
+}
+.gl-mono { font-family:monospace; }
+.gl-role { color:#998; font-size:.66rem; }
+.gl-dot {
+    display:inline-block; width:8px; height:8px; border-radius:50%;
+    margin-right:6px; vertical-align:middle;
+}
+
+/* ─── Resonance panel (Galilean only) ───────────────────────── */
+#gl-resonance {
+    background:rgba(180,140,255,.06);
+    border:1px solid rgba(180,140,255,.18);
+    border-radius:10px;
+    padding:12px 14px;
+}
+#gl-resonance .gl-hud-title { color:#cba9ff; margin-bottom:4px; }
+.gl-laplace-eq {
+    font-family:monospace; font-size:.7rem; color:#998;
+    margin-bottom:6px; line-height:1.4;
+}
+.gl-laplace-val {
+    font-family:monospace; font-size:1.4rem; font-weight:800; color:#fff;
+}
+.gl-laplace-status {
+    font-family:monospace; font-size:.74rem; color:#6fe48b;
+    margin-bottom:8px;
+}
+canvas.gl-resonance-canvas {
+    width:100%; height:80px;
+    background:rgba(0,0,0,.35);
+    border-radius:6px; display:block;
+}
+
+/* ─── Time-control bar (overlay on stage) ───────────────────── */
+#gl-stage-bar {
+    position:absolute; left:50%; bottom:18px;
+    transform:translateX(-50%);
+    z-index:3;
+    display:flex; align-items:center; gap:10px;
+    background:rgba(10,6,28,.78); backdrop-filter:blur(12px);
+    border:1px solid rgba(255,255,255,.10);
+    border-radius:999px;
+    padding:6px 12px;
+}
+.gl-stage-time {
+    font-family:monospace; font-size:.78rem; color:#cba9ff;
+    padding:0 6px;
+}
+.gl-stage-jd {
+    font-family:monospace; font-size:.66rem; color:#778;
+}
+#gl-stage-watermark {
+    position:absolute; right:12px; bottom:12px;
+    z-index:2;
+    font-family:monospace; font-size:.6rem;
+    color:#665a7a; letter-spacing:.06em;
+    text-transform:uppercase;
+    pointer-events:none;
+}
+
+</style>
+<link rel="stylesheet" href="js/nav-styles.css">
+<script type="importmap">
+{
+    "imports": {
+        "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+}
+</script>
+</head>
+<body>
+
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260502b"; initNav("gravity-lab");</script>
+
+<div id="gl-hero">
+    <div>
+        <h1 id="gl-title">Gravity Lab</h1>
+        <p id="gl-blurb"><strong>Live Yoshida-4 symplectic N-body</strong> · pure Newtonian gravity · sub-arcsecond conservation</p>
+    </div>
+    <p style="text-align:right;">
+        <strong>FREE</strong> for everyone ·
+        <a href="time-machine.html" style="color:#b78cff;">deep-time engine →</a>
+    </p>
+</div>
+
+<div id="gl-app">
+
+    <!-- ─── LEFT SIDEBAR — system picker + controls ─────────────────── -->
+    <aside class="gl-side" id="gl-side-left">
+        <div class="gl-label">System</div>
+        <div class="gl-tabs" id="gl-tabs">
+            <button type="button" class="gl-tab" data-system="earth-moon">
+                <div class="gl-tab-name">Earth + Moon</div>
+                <div class="gl-tab-sub">5° inclined · 27.32 d period · true scale</div>
+            </button>
+            <button type="button" class="gl-tab" data-system="mars-system">
+                <div class="gl-tab-name">Mars + Phobos &amp; Deimos</div>
+                <div class="gl-tab-sub">J₂ precession · 159°/yr nodal regression of Phobos</div>
+            </button>
+            <button type="button" class="gl-tab" data-system="jupiter-galileans">
+                <div class="gl-tab-name">Jupiter + the Galileans</div>
+                <div class="gl-tab-sub">Io · Europa · Ganymede · Callisto — 4 : 2 : 1 resonance</div>
+            </button>
+            <button type="button" class="gl-tab" data-system="saturn-major">
+                <div class="gl-tab-name">Saturn + Major Moons</div>
+                <div class="gl-tab-sub">Mimas → Iapetus · 7 worlds · cascade of resonances</div>
+            </button>
+            <button type="button" class="gl-tab" data-system="saturn-coorbitals">
+                <div class="gl-tab-name">Saturn — Janus &amp; Epimetheus</div>
+                <div class="gl-tab-sub">co-orbital swap every ~4 yr · the showpiece</div>
+            </button>
+            <button type="button" class="gl-tab" data-system="pluto-charon">
+                <div class="gl-tab-name">Pluto + Charon</div>
+                <div class="gl-tab-sub">true binary · barycenter floats outside Pluto</div>
+            </button>
+        </div>
+
+        <div class="gl-label">Showcase</div>
+        <div class="gl-showcase">
+            <div class="gl-showcase-headline" id="gl-headline">—</div>
+            <div class="gl-showcase-callout"  id="gl-callout">—</div>
+            <div class="gl-showcase-physics"  id="gl-physics">—</div>
+        </div>
+
+        <div class="gl-label">Time Warp</div>
+        <div class="gl-warp-wrap">
+            <div class="gl-warp-readout" id="gl-warp-val">—</div>
+            <input type="range" id="gl-warp" min="0" max="1000" step="1" value="700">
+            <div class="gl-warp-mini">slider · log scale · 1× ↔ 1×10⁸×</div>
+        </div>
+
+        <div class="gl-label">Controls</div>
+        <div class="gl-controls">
+            <div class="gl-btn-row">
+                <button type="button" class="gl-btn gl-btn-primary" id="gl-play">❚❚ Pause</button>
+                <button type="button" class="gl-btn" id="gl-rev">↻ Reverse Time</button>
+            </div>
+            <button type="button" class="gl-btn" id="gl-reset">Reset to J2000.0</button>
+        </div>
+
+        <div class="gl-label">Camera</div>
+        <div class="gl-camera">
+            <div class="gl-focus-label" id="gl-focus-label">Free orbit · click a body to focus</div>
+            <div class="gl-chips" id="gl-chips"></div>
+            <button type="button" class="gl-btn" id="gl-fit">⌖ Fit System View</button>
+            <p class="gl-camera-hint">Click any body — in the scene or below — to follow it. Click again or the fit button to return.</p>
+        </div>
+
+        <div id="gl-j2-wrap" style="display:none;">
+            <div class="gl-label">Perturbations</div>
+            <label class="gl-j2-row">
+                <input type="checkbox" id="gl-j2" />
+                <span class="gl-j2-name">Central-body J₂ (oblateness)</span>
+            </label>
+            <p class="gl-j2-note" id="gl-j2-note">—</p>
+            <p class="gl-j2-hint">J₂ is conservative — energy stays bounded. Tidal decay (dissipative) will arrive on a future "non-conservative" toggle.</p>
+        </div>
+    </aside>
+
+    <!-- ─── 3D STAGE ────────────────────────────────────────────────── -->
+    <main id="gl-stage">
+        <canvas id="gl-canvas"></canvas>
+        <div id="gl-stage-bar">
+            <span class="gl-stage-time" id="gl-elapsed">—</span>
+            <span class="gl-stage-jd"   id="gl-jd">JD —</span>
+        </div>
+        <div id="gl-stage-watermark">Yoshida-4 · symplectic · live</div>
+    </main>
+
+    <!-- ─── RIGHT SIDEBAR — HUD ─────────────────────────────────────── -->
+    <aside class="gl-side" id="gl-side-right">
+
+        <div class="gl-hud-section">
+            <div class="gl-hud-title">Integrator Health</div>
+            <dl class="gl-hud-grid">
+                <dt>|ΔE / E₀|</dt><dd id="gl-de">—</dd>
+                <dt>|ΔL / L₀|</dt><dd id="gl-dl">—</dd>
+            </dl>
+            <p style="font-size:.66rem; color:#778; margin-top:6px; line-height:1.5;">
+                Symplectic schemes bound the energy and angular-momentum errors. Drift below ~1e-8 means the integrator is well-converged.
+            </p>
+        </div>
+
+        <div class="gl-hud-section">
+            <div class="gl-hud-title">Bodies (osculating elements)</div>
+            <table class="gl-bodies" id="gl-bodies">
+                <thead><tr><th>Body</th><th>Role</th><th>P</th><th>e</th><th>i</th></tr></thead>
+                <tbody><tr><td colspan="5" style="color:#778;">loading…</td></tr></tbody>
+            </table>
+        </div>
+
+        <div class="gl-hud-section" id="gl-resonance" style="display:none;">
+            <div class="gl-hud-title">Laplace Resonance</div>
+            <div class="gl-laplace-eq">φ = λ_Io − 3λ_Europa + 2λ_Ganymede</div>
+            <div class="gl-laplace-val" data-cell="laplace">—</div>
+            <div class="gl-laplace-status" data-cell="laplace-status">—</div>
+            <canvas class="gl-resonance-canvas" id="gl-resonance-canvas" width="280" height="80"></canvas>
+            <p style="font-size:.66rem; color:#998; margin-top:8px; line-height:1.5;">
+                Laplace proved this configuration stable in 1788. The angle hovers near 180° — a triple conjunction never closes.
+            </p>
+        </div>
+
+    </aside>
+
+</div>
+
+<script type="module">
+import { boot } from './js/gravity-lab/lab.js?v=20260503b';
+
+const canvas = document.getElementById('gl-canvas');
+const ui = {
+    title:     document.getElementById('gl-title'),
+    blurb:     document.getElementById('gl-blurb'),
+    headline:  document.getElementById('gl-headline'),
+    callout:   document.getElementById('gl-callout'),
+    physics:   document.getElementById('gl-physics'),
+
+    elapsed:   document.getElementById('gl-elapsed'),
+    jd:        document.getElementById('gl-jd'),
+    warpVal:   document.getElementById('gl-warp-val'),
+
+    energyDrift: document.getElementById('gl-de'),
+    angMomDrift: document.getElementById('gl-dl'),
+
+    bodyTable: document.getElementById('gl-bodies'),
+
+    resonance:        document.getElementById('gl-resonance'),
+    resonanceCanvas:  document.getElementById('gl-resonance-canvas'),
+
+    playBtn:    document.getElementById('gl-play'),
+    revBtn:     document.getElementById('gl-rev'),
+    resetBtn:   document.getElementById('gl-reset'),
+    warpSlider: document.getElementById('gl-warp'),
+    tabs:       Array.from(document.querySelectorAll('#gl-tabs .gl-tab')),
+
+    // Camera UI
+    bodyChips:  document.getElementById('gl-chips'),
+    fitBtn:     document.getElementById('gl-fit'),
+    focusLabel: document.getElementById('gl-focus-label'),
+
+    // Perturbation toggle
+    j2Toggle:   document.getElementById('gl-j2'),
+    j2Wrap:     document.getElementById('gl-j2-wrap'),
+    j2Note:     document.getElementById('gl-j2-note'),
+};
+
+boot({ canvas, ui, defaultSystem: 'jupiter-galileans' });
+</script>
+
+</body>
+</html>

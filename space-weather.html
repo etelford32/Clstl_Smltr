@@ -2,6 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<script src="js/preview-mode.js"></script>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Space Weather · Parker Physics App</title>
 <style>
@@ -478,6 +484,36 @@ nav {
     background:rgba(255,140,0,.15); color:#ff9900;
     border:1px solid rgba(255,140,0,.3); font-size:.68rem;
 }
+
+/* AR rows are interactive — click to focus the 3-D view on that AR */
+.sw-table tr.ar-row { cursor:pointer; transition:background .15s ease; }
+.sw-table tr.ar-row:hover td,
+.sw-table tr.ar-row:focus td { background:rgba(255,200,80,.08); outline:none; }
+.sw-table tr.ar-row.ar-active td {
+    background:rgba(255,210,90,.14);
+    box-shadow: inset 3px 0 0 #ffd078;
+}
+.sw-table tr.ar-row.ar-active td:first-child { color:#fff8d8; }
+
+/* 3-D AR hover tooltip — anchored to the globe canvas, follows the pointer */
+.ar-tooltip {
+    position:absolute; pointer-events:none; z-index:60;
+    background:rgba(8,14,22,.92);
+    border:1px solid rgba(255,200,90,.35);
+    border-radius:6px; padding:7px 10px;
+    color:#ffe2b0; font-size:.72rem;
+    font-family: 'Courier New', monospace;
+    box-shadow: 0 4px 14px rgba(0,0,0,.45), 0 0 12px rgba(255,180,60,.18);
+    white-space:nowrap; transition: opacity .12s ease;
+    max-width: 240px;
+}
+.ar-tooltip strong { color:#fff8d8; font-weight:700; }
+.ar-tooltip .tt-row { display:flex; justify-content:space-between; gap:14px; }
+.ar-tooltip .tt-row .k { color:#88a4b8; }
+.ar-tooltip .tt-row .v { color:#ffe2b0; font-weight:600; }
+.ar-tooltip.kink   { border-color:rgba(255,80,40,.55); box-shadow:0 4px 14px rgba(0,0,0,.5),0 0 14px rgba(255,80,40,.25); }
+.ar-tooltip.kink .tt-row .v.kink { color:#ff7038; }
+
 
 /* ── WIND ALERT LEVEL BADGE ──────────────────────────────────────────────── */
 .wind-alert-badge {
@@ -1151,12 +1187,296 @@ nav {
 .layer-btn.active { background: rgba(0,198,255,.18); color: #00e5ff;
     border-color: rgba(0,198,255,.45); }
 
+/* SDO live A/B panel — top-left of canvas, mirror of HUD glass-pane style */
+.sdo-cmp-panel {
+    position: absolute; top: 60px; left: 14px;
+    width: 200px;
+    background: rgba(2, 8, 16, .82);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 192, 96, .18);
+    border-radius: 10px;
+    padding: 8px 10px;
+    color: #cfd8e2;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    z-index: 4;
+    box-shadow: 0 8px 24px rgba(0,0,0,.5);
+}
+.sdo-cmp-header {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 6px; margin-bottom: 6px;
+}
+.sdo-cmp-title {
+    font-size: .62rem; text-transform: uppercase; letter-spacing: .08em;
+    color: #ffc060; font-weight: 600;
+}
+.sdo-cmp-mark {
+    font-size: .55rem; padding: 0 4px; border-radius: 4px;
+    background: rgba(255,180,40,.20); color: #ffd070;
+    letter-spacing: .04em;
+}
+.sdo-cmp-ch {
+    font-size: .58rem; color: #889;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    text-align: right;
+}
+.sdo-cmp-img {
+    width: 100%; height: auto; display: block;
+    border-radius: 6px;
+    background: #010812;
+    border: 1px solid rgba(255, 192, 96, .12);
+    aspect-ratio: 1 / 1;
+    object-fit: cover;
+    image-rendering: -webkit-optimize-contrast;
+}
+.sdo-cmp-foot {
+    margin-top: 4px; font-size: .58rem; color: #667;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    text-align: center;
+}
+.sdo-cmp-foot.sdo-cmp-err { color: #ff6644; }
+@media (max-width: 900px) {
+    .sdo-cmp-panel { position: static; width: auto; margin-top: 10px; }
+}
+
+/* EUV channel selector — sits below the layer toggle row */
+.euv-row {
+    margin-top: 6px; align-items: center;
+    border-top: 1px solid rgba(255,180,40,.10);
+    padding-top: 6px;
+}
+.euv-label {
+    font-size: .62rem; letter-spacing: .12em; text-transform: uppercase;
+    color: #ffc060; padding-right: 4px; align-self: center;
+}
+.euv-btn {
+    border-color: rgba(255,180,40,.25);
+    color: #c8a060;
+    background: rgba(255,180,40,.05);
+}
+.euv-btn:hover  { border-color: rgba(255,180,40,.55); color: #ffd070; }
+.euv-btn.active { background: rgba(255,180,40,.20); color: #ffe090;
+    border-color: rgba(255,180,40,.55);
+    box-shadow: 0 0 8px rgba(255,180,40,.35); }
+
 /* Legend below the globe */
 .globe-legend {
     display: flex; flex-wrap: wrap; gap: 8px 18px;
     font-size: .70rem; color: #889; margin-top: 12px;
 }
 .globe-legend span { display: flex; align-items: center; gap: 6px; }
+
+/* ── Simulation description / release notes ─────────────────────────── */
+.sim-about {
+    margin-top: 10px;
+    padding: 10px 14px;
+    background: rgba(0, 4, 12, .55);
+    border: 1px solid rgba(0, 198, 255, .10);
+    border-left: 2px solid rgba(255, 192, 96, .55);
+    border-radius: 6px;
+    color: #8a98a6;
+    font-size: .72rem;
+    line-height: 1.55;
+}
+.sim-about strong { color: #cfd8e2; font-weight: 600; }
+.sim-about .sim-about-tag {
+    display: inline-block; padding: 0 6px; margin-right: 4px;
+    background: rgba(255,180,40,.12); color: #ffc060;
+    border-radius: 4px; font-size: .60rem; letter-spacing: .06em;
+    text-transform: uppercase; vertical-align: 1px;
+}
+.sim-about ul {
+    margin: 6px 0 0 0; padding-left: 18px; color: #778492;
+}
+.sim-about li { margin: 1px 0; }
+
+/* ── HUD overlay (diagnostic glass-pane) ─────────────────────────────────── */
+.globe-section { position: relative; }
+.space-weather-hud {
+    position: absolute; top: 60px; right: 22px;
+    width: 280px; max-height: calc(100% - 96px);
+    overflow-y: auto;
+    background: rgba(2, 8, 16, .82);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 192, 96, .18);
+    border-radius: 10px;
+    padding: 10px 12px;
+    color: #cfd8e2;
+    font-size: .68rem;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    z-index: 4;
+    pointer-events: auto;
+    box-shadow: 0 8px 24px rgba(0,0,0,.5);
+}
+.space-weather-hud::-webkit-scrollbar       { width: 6px; }
+.space-weather-hud::-webkit-scrollbar-thumb { background: rgba(255,192,96,.3); border-radius: 3px; }
+.space-weather-hud .hud-block {
+    border-bottom: 1px solid rgba(255, 192, 96, .07);
+    padding-bottom: 8px;
+    margin-bottom: 8px;
+}
+.space-weather-hud .hud-block:last-child { border: 0; margin-bottom: 0; }
+.space-weather-hud .hud-section-title {
+    font-size: .62rem; text-transform: uppercase; letter-spacing: .10em;
+    color: #ffc060; margin-bottom: 6px; font-weight: 600;
+}
+.space-weather-hud .hud-row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; line-height: 1.55;
+}
+.space-weather-hud .hud-k { color: #7d8a98; font-size: .66rem; }
+.space-weather-hud .hud-v {
+    color: #fff8e8; font-feature-settings: "tnum" 1;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: .70rem;
+}
+.space-weather-hud .hud-tiny { font-size: .60rem; }
+.space-weather-hud .hud-bar {
+    flex: 1; height: 6px; border-radius: 3px; overflow: hidden;
+    background: rgba(255, 192, 96, .08);
+}
+.space-weather-hud .hud-bar-fill {
+    height: 100%; width: 0%; transition: width .25s ease, background .25s ease;
+    background: hsl(120, 60%, 55%);
+}
+.space-weather-hud .hud-cumulative { color: #557; font-size: .60rem; }
+.space-weather-hud .hud-storm .hud-bar { margin: 0 6px; }
+
+/* EMIC ion-channel indicator */
+.space-weather-hud .hud-emic-status { color: #667; font-size: .64rem; }
+.space-weather-hud .hud-emic.hud-emic-on .hud-emic-status { color: #ff7e3a; }
+.space-weather-hud .hud-emic.hud-emic-oplus .hud-emic-status {
+    color: #ff4830;
+    text-shadow: 0 0 4px rgba(255, 72, 48, .55);
+    animation: hud-emic-pulse 1.6s ease-in-out infinite;
+}
+@keyframes hud-emic-pulse {
+    0%, 100% { opacity: 0.9; }
+    50%      { opacity: 0.55; }
+}
+
+/* AR flux-rope twist rows */
+.space-weather-hud .hud-twist-list { display: flex; flex-direction: column; gap: 4px; }
+.space-weather-hud .hud-twist-row {
+    display: grid; grid-template-columns: 56px 28px 1fr 38px;
+    align-items: center; gap: 6px;
+    padding: 2px 0;
+    transition: background .25s;
+}
+.space-weather-hud .hud-twist-row.hud-twist-erupting {
+    background: rgba(255, 72, 48, .12); border-radius: 4px;
+}
+.space-weather-hud .hud-twist-id  { color: #cfd8e2; font-family: 'JetBrains Mono', monospace; font-size: .65rem; }
+.space-weather-hud .hud-twist-cls { color: #ffc060; font-size: .68rem; text-align: center; }
+.space-weather-hud .hud-twist-bar { height: 5px; }
+.space-weather-hud .hud-twist-phi { color: #ffd070; font-family: 'JetBrains Mono', monospace; font-size: .62rem; text-align: right; }
+
+/* Eruption ticker */
+.space-weather-hud .hud-eruption-list { display: flex; flex-direction: column; gap: 3px; }
+.space-weather-hud .hud-erupt-row {
+    display: grid; grid-template-columns: 36px 56px 1fr auto;
+    align-items: baseline; gap: 6px;
+    font-size: .62rem;
+    padding: 2px 0;
+}
+.space-weather-hud .hud-erupt-cls {
+    font-weight: 700; font-family: 'JetBrains Mono', monospace;
+}
+.space-weather-hud .hud-erupt-cls.cls-X { color: #ff4830; }
+.space-weather-hud .hud-erupt-cls.cls-M { color: #ffa040; }
+.space-weather-hud .hud-erupt-cls.cls-C { color: #ffd070; }
+.space-weather-hud .hud-erupt-ar  { color: #cfd8e2; font-family: 'JetBrains Mono', monospace; }
+.space-weather-hud .hud-erupt-spd { color: #88ccff; font-family: 'JetBrains Mono', monospace; }
+.space-weather-hud .hud-erupt-earth { color: #5fd0ff; font-weight: 600; }
+.space-weather-hud .hud-erupt-limb  { color: #667; }
+.space-weather-hud .hud-erupt-age   { color: #556; grid-column: 1 / -1; font-size: .58rem; padding-left: 4px; }
+.space-weather-hud .hud-erupt-row.hud-erupt-new {
+    animation: hud-erupt-flash 1.4s ease-out;
+}
+@keyframes hud-erupt-flash {
+    0%   { background: rgba(255, 72, 48, .35); }
+    100% { background: transparent; }
+}
+
+.space-weather-hud .hud-empty { color: #445; font-size: .62rem; padding: 4px 0; }
+
+/* Type-III radio burst rows — wider grid to fit the dν/dt sparkline */
+.space-weather-hud .hud-typeiii-row {
+    grid-template-columns: 32px 50px 70px 64px auto;
+    align-items: center;
+}
+.space-weather-hud .hud-typeiii-spark {
+    background: rgba(255,180,80,.04);
+    border: 1px solid rgba(255,180,80,.15);
+    border-radius: 2px;
+    overflow: hidden;
+}
+.space-weather-hud .hud-typeiii-drift {
+    color: #ff9b50; font-family: 'JetBrains Mono', monospace;
+    font-size: .58rem; text-align: right;
+}
+.space-weather-hud .hud-typeiii .hud-section-title {
+    color: #ff9b50;
+}
+
+/* Performance block — per-section frame-time bars */
+.space-weather-hud .hud-perf-sections { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+.space-weather-hud .hud-perf-row {
+    display: grid; grid-template-columns: 70px 1fr 52px;
+    align-items: center; gap: 6px;
+    font-size: .58rem;
+}
+.space-weather-hud .hud-perf-name {
+    color: #889;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.space-weather-hud .hud-perf-bar { height: 4px; }
+.space-weather-hud .hud-perf-ms {
+    color: #cfd8e2; text-align: right;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: .60rem;
+}
+
+/* 60-min timeline strip */
+.space-weather-hud .hud-tl-canvas {
+    width: 100%; height: 80px; display: block;
+    border-radius: 4px;
+    background: rgba(0, 4, 12, .85);
+    border: 1px solid rgba(255, 192, 96, .10);
+    margin-top: 2px;
+}
+.space-weather-hud .hud-tl-legend {
+    display: flex; gap: 6px; flex-wrap: wrap;
+    margin-top: 4px;
+}
+.space-weather-hud .hud-tl-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: .58rem; color: #889;
+    padding: 1px 6px; border-radius: 8px;
+    background: rgba(255, 192, 96, .04);
+    border: 1px solid rgba(255, 192, 96, .10);
+}
+.space-weather-hud .hud-tl-chip::before {
+    content: ''; display: inline-block;
+    width: 8px; height: 2px;
+    background: var(--hud-tl-c, #fff);
+    border-radius: 1px;
+}
+.space-weather-hud .hud-tl-axis {
+    display: flex; justify-content: space-between;
+    margin-top: 2px;
+    color: #556; font-size: .56rem;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+@media (max-width: 900px) {
+    .space-weather-hud {
+        position: static; width: auto; max-height: none;
+        margin-top: 10px;
+    }
+}
 .leg-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
 
 @media (max-width: 700px) { #sw-globe-canvas { height: 460px; } }
@@ -1219,7 +1539,7 @@ nav {
     <!-- ── HELIOSPHERE HERO ────────────────────────────────────────────────── -->
     <!-- 3D inner solar system: real ephemeris orbits, 3D Parker spiral wind,  -->
     <!-- Earth magnetosphere (Shue model), CME shells, flare events.           -->
-    <div class="helio-hero-wrap">
+    <div class="helio-hero-wrap" data-preview-stage="1">
         
         <button class="cv-btn" id="btn-sw-here" title="Current Space Weather" style="top:12px;right:12px;" onclick="document.getElementById('helio-canvas').dispatchEvent(new Event('reset'))">⊙ Reset View</button>
         <canvas id="helio-canvas"
@@ -1781,13 +2101,46 @@ nav {
                 <button class="layer-btn active" data-layer="magnetopause">Magnetopause</button>
                 <button class="layer-btn active" data-layer="bowShock">Bow Shock</button>
                 <button class="layer-btn active" data-layer="belts">Van Allen Belts</button>
+                <button class="layer-btn active" data-layer="beltParticles">μ-Conserving Tracers</button>
                 <button class="layer-btn active" data-layer="plasmasphere">Plasmasphere</button>
                 <button class="layer-btn active" data-layer="cme">CME Shells</button>
+                <button class="layer-btn active" data-layer="solarField">Solar Field / HCS</button>
+                <button class="layer-btn active" data-layer="parker">Parker Streamline</button>
+                <button class="layer-btn active" data-layer="fluxRopes">AR Flux Ropes</button>
+                <button class="layer-btn active" data-layer="fieldLines" title="RK4-traced field lines from a multipole B field — real bipolar AR loop topology, not parametric tori">AR Field Lines</button>
+                <button class="layer-btn active" data-layer="arMarkers" title="Click an AR pin (or table row below) to focus the camera and read its current twist Φ / Hale class / area">AR Pins</button>
+                <button class="layer-btn active" data-layer="filaments" title="Cool filament/prominence arcs lifting off during M/X flares and internal kink eruptions — Hα / 304 Å signature, distinct from the gold/orange hot loops underneath">Filaments</button>
+                <button class="layer-btn active" data-layer="wind">Wind Streams</button>
+            </div>
+            <!-- AIA-style EUV channel selector — switches the sun rendering
+                 between white-light and one of six SDO/AIA passbands. Each
+                 channel raymarches a synthetic DEM through the corona using
+                 the channel's Gaussian temperature response, so the same
+                 active-region / coronal-hole / X-ray data drives a real
+                 multi-wavelength instrument view. -->
+            <div class="globe-layer-btns euv-row" id="euv-channel-btns">
+                <span class="euv-label">EUV channel:</span>
+                <button class="layer-btn euv-btn active" data-euv="white" title="White-light photosphere (default)">White</button>
+                <button class="layer-btn euv-btn" data-euv="171" title="171 Å — Fe IX, 0.7 MK · quiet plage / coronal loops">171</button>
+                <button class="layer-btn euv-btn" data-euv="193" title="193 Å — Fe XII, 1.6 MK · ARs + coronal holes (dark)">193</button>
+                <button class="layer-btn euv-btn" data-euv="211" title="211 Å — Fe XIV, 2 MK · AR loops">211</button>
+                <button class="layer-btn euv-btn" data-euv="304" title="304 Å — He II, 50 kK · chromosphere + prominences">304</button>
+                <button class="layer-btn euv-btn" data-euv="131" title="131 Å — Fe XXI, 10 MK · flare hot">131</button>
+                <button class="layer-btn euv-btn" data-euv="94"  title="94 Å — Fe XVIII, 7 MK · flare core">94</button>
             </div>
         </div>
         <canvas id="sw-globe-canvas"
             aria-label="Interactive 3D Earth showing live magnetosphere, Van Allen belts, auroral ovals and solar wind particles"
             role="img"></canvas>
+        <!-- Hover tooltip for AR pins in 3D — populated by raycast handler -->
+        <div class="ar-tooltip" id="ar-tooltip" style="display:none" role="tooltip"></div>
+        <!-- Diagnostic HUD overlay — populated by space-weather-hud.js at 4 Hz -->
+        <div class="space-weather-hud" id="sw-hud"
+             aria-label="Live physics diagnostics: storm index, AR twist, internal eruptions, Van Allen tracer counts"></div>
+        <!-- Live SDO/AIA reference image, A/B alongside the synthetic-DEM
+             corona render. Populated by sdo-compare-panel.js -->
+        <div class="sdo-cmp-panel" id="sdo-cmp"
+             aria-label="Live SDO/AIA reference image at the currently-selected EUV channel"></div>
         <div class="globe-legend">
             <span><span class="leg-dot" style="background:#ffd700"></span>Sun (live SWPC photosphere + corona, flare response)</span>
             <span><span class="leg-dot" style="background:#888"></span>Moon (procedural surface, orbital motion)</span>
@@ -1796,9 +2149,42 @@ nav {
             <span><span class="leg-dot" style="background:#66aaff"></span>Bow shock</span>
             <span><span class="leg-dot" style="background:#ffa040"></span>Van Allen inner belt (protons ~1-3 R_earth)</span>
             <span><span class="leg-dot" style="background:#ff6040"></span>Van Allen outer belt (electrons ~3-7 R_earth)</span>
+            <span><span class="leg-dot" style="background:#ff7330"></span>Trapped protons (inner belt, drift west, μ = mv⊥²/2B conserved)</span>
+            <span><span class="leg-dot" style="background:#5fd0ff"></span>Trapped electrons (outer belt, drift east, T_d = 1.557 hr / E·L·g(α₀))</span>
             <span><span class="leg-dot" style="background:#00ccff"></span>Plasmasphere (Carpenter-Anderson model)</span>
-            <span><span class="leg-dot" style="background:#88d8ff"></span>Solar wind particle stream (speed-coloured)</span>
-            <span style="color:#445;font-size:.7rem;margin-top:4px">Drag to orbit · scroll to zoom · zoom out to see full Sun-Earth system</span>
+            <span><span class="leg-dot" style="background:#5fb8ff"></span>Slow solar wind (ambient, ~350-500 km/s)</span>
+            <span><span class="leg-dot" style="background:#ffd28a"></span>Active-region stream (171 Å plage, simple AR)</span>
+            <span><span class="leg-dot" style="background:#ff6633"></span>Active-region stream (304 Å, β-γ-δ complex AR — flare-prone, fast)</span>
+            <span><span class="leg-dot" style="background:#ffaa55"></span>Solar magnetic field (heliospheric current sheet + dipole)</span>
+            <span><span class="leg-dot" style="background:#ffd070"></span>Parker streamline · Earth-connected (φ_foot = π + Ω r/v_sw)</span>
+            <span><span class="leg-dot" style="background:#ffc060"></span>AR flux rope · stable (twist Φ < 2.5π kink threshold)</span>
+            <span><span class="leg-dot" style="background:#ff4830"></span>AR flux rope · kink-prone (β-γ-δ AR, twist ≥ 2.5π)</span>
+            <span><span class="leg-dot" style="background:#ffe8a0"></span>CME ejecta core · Lundquist rope (J₀/J₁ field lines, αR ≈ 2.24)</span>
+            <span><span class="leg-dot" style="background:#ff4060"></span>Filament/prominence eruption arc (cool ~10⁴ K Hα/304 Å plasma lifting off during M/X flares and kink eruptions)</span>
+            <span><span class="leg-dot" style="background:#ff9b50"></span>AR loop pre-flare brightening (Φ → 2.5π · loops warm white-hot and pulse faster as kink approaches)</span>
+            <span style="color:#445;font-size:.7rem;margin-top:4px">Drag to orbit · scroll to zoom · zoom out to see full Sun-Earth system · transit time-compression 3000× (≈ 2 min viewing per 4-day Sun→Earth crossing at 400 km/s)</span>
+        </div>
+
+        <!-- ── About / release notes ─────────────────────────────────── -->
+        <div class="sim-about">
+            <span class="sim-about-tag">Live</span>
+            <strong>Sun → Earth space-weather sandbox.</strong>
+            Real-time NOAA SWPC / GOES / DONKI / HEK feeds drive a synthetic
+            corona that ray-marches a temperature-weighted DEM into one of
+            six SDO/AIA passbands; live SDO image inset for A/B comparison.
+            Active regions follow Carrington rotation and Joy's-law tilt;
+            recent flares brighten their AR within 1.5 h.
+            CMEs propagate via Vršnak (2013) DBM with Lundquist J₀/J₁ field
+            lines in the ejecta core.
+            μ-conserving Van Allen tracers respond to chorus, EMIC (ions and
+            ≥ 2 MeV electrons), and Brautigam-Albert radial diffusion — full
+            storm-cycle drain → recovery refill plays out from per-particle
+            physics, no hard-coded animations.
+            <ul>
+                <li>Click the <em>EUV channel</em> buttons to switch wavelengths</li>
+                <li>HUD top-right tracks storm index, twist accumulators, kink eruptions, and a 60-min timeline</li>
+                <li>SDO panel top-left mirrors the channel for live cross-check</li>
+            </ul>
         </div>
     </section>
 
@@ -2387,6 +2773,9 @@ import { EphemerisService }    from './js/horizons.js';
 import { SolarWindState }      from './js/solar-wind-state.js';
 import WindPipelineFeed         from './js/wind-pipeline-feed.js';
 import { SpaceWeatherGlobe }   from './js/space-weather-globe.js';
+import { SpaceWeatherHud }     from './js/space-weather-hud.js';
+import { SdoComparePanel }     from './js/sdo-compare-panel.js';
+import { HekFeed }             from './js/hek-feed.js';
 import { earthOrbitFull }       from './js/earth-orbit.js';
 import { akasofuEpsilon, substormIndex } from './js/solar-wind-magnetosphere.js';
 import { CmePropagator } from './js/cme-propagation.js';
@@ -2396,34 +2785,6 @@ import { EarthForecastEngine } from './js/earth-forecast.js';
 import { ForecastValidator } from './js/forecast-validation.js';
 import { ForecastTimeline } from './js/forecast-timeline.js';
 import { ModelValidator } from './js/model-validation.js';
-
-// ─── Nav ─────────────────────────────────────────────────────────────────────
-const _navBurger = document.getElementById('nav-burger');
-const _navMenu   = document.getElementById('nav-menu');
-if (_navBurger && _navMenu) {
-    _navBurger.addEventListener('click', () => {
-        const open = _navMenu.classList.toggle('open');
-        _navBurger.textContent = open ? '\u2715' : '\u2630';
-        _navBurger.setAttribute('aria-expanded', open);
-    });
-    document.addEventListener('click', e => {
-        if (!e.target.closest('nav')) {
-            _navMenu.classList.remove('open');
-            _navBurger.textContent = '\u2630';
-            _navBurger.setAttribute('aria-expanded', 'false');
-        }
-    });
-    document.querySelectorAll('.nav-drop-btn').forEach(btn => {
-        btn.addEventListener('click', e => {
-            if (window.innerWidth > 1024) return;
-            e.stopPropagation();
-            const drop    = btn.closest('.nav-drop');
-            const opening = !drop.classList.contains('open');
-            document.querySelectorAll('.nav-drop').forEach(d => d.classList.remove('open'));
-            if (opening) drop.classList.add('open');
-        });
-    });
-}
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 const el = id => document.getElementById(id);
@@ -2713,14 +3074,15 @@ window.addEventListener('swpc-update', e => {
     el('flare-time').textContent = d.flare_time ? fmtDate(d.flare_time) : '–';
     el('flare-loc').textContent  = d.flare_location || '';
 
-    // Active regions table
+    // Active regions table — rows are clickable: click to focus 3-D camera
+    // on the AR and highlight its marker pin.  Hover briefly highlights.
     if (d.active_regions && d.active_regions.length) {
         el('ar-tbody').innerHTML = d.active_regions.map(r => {
             const lat = (r.lat_rad * 180 / Math.PI).toFixed(0);
             const lon = (r.lon_rad * 180 / Math.PI).toFixed(0);
             const latStr = `${lat < 0 ? 'S' : 'N'}${Math.abs(lat)}° ${lon < 0 ? 'W' : 'E'}${Math.abs(lon)}°`;
             const area   = Math.round((r.area_norm || 0) * 1000);
-            return `<tr>
+            return `<tr class="ar-row" data-ar-id="${r.region}" tabindex="0" title="Click to focus AR${r.region} in the 3D view">
                 <td style="font-weight:600;color:#c8e0f0">AR${r.region}</td>
                 <td>${latStr}</td>
                 <td>${area > 0 ? area + ' μH' : '–'}</td>
@@ -3605,12 +3967,149 @@ let _globe = null;
     if (globeCanvas) {
         _globe = new SpaceWeatherGlobe(globeCanvas).start();
 
+        // Diagnostic HUD overlay — updates at 4 Hz from globe internal state
+        const hudEl = document.getElementById('sw-hud');
+        if (hudEl) new SpaceWeatherHud(hudEl, _globe).start();
+
+        // Live SDO/AIA reference panel for A/B comparison with the
+        // synthetic-DEM corona render.  Mirrors the active EUV channel.
+        const sdoEl = document.getElementById('sdo-cmp');
+        let _sdoPanel = null;
+        if (sdoEl) {
+            _sdoPanel = new SdoComparePanel(sdoEl).start();
+            _sdoPanel.setChannel(_globe.euvMode ?? 'white');
+        }
+
+        // HEK coronal-hole catalog → real-data hole positions (193 Å match).
+        // Updates every 30 min on success, retries every 5 min on failure.
+        // Falls back gracefully to the synthetic polar + wind-driven holes
+        // if HEK is unreachable.
+        const _hekFeed = new HekFeed().start();
+        window.addEventListener('hek-update', ev => {
+            _globe?.setRealHoles(ev.detail?.holes ?? []);
+        });
+
         // Layer toggle buttons
         document.getElementById('globe-layers')?.addEventListener('click', ev => {
             const btn = ev.target.closest('.layer-btn');
             if (!btn) return;
             btn.classList.toggle('active');
             _globe.setLayerVisible(btn.dataset.layer, btn.classList.contains('active'));
+        });
+
+        // SDO/AIA EUV channel selector — radio-style (only one active at a time).
+        // Drives both the synthetic-DEM corona shader (via _globe.setEuvMode)
+        // and the live SDO reference image panel for A/B comparison.
+        document.getElementById('euv-channel-btns')?.addEventListener('click', ev => {
+            const btn = ev.target.closest('.euv-btn');
+            if (!btn) return;
+            const channel = btn.dataset.euv;
+            // Mark this button active, deactivate siblings
+            for (const sib of btn.parentElement.querySelectorAll('.euv-btn')) {
+                sib.classList.toggle('active', sib === btn);
+            }
+            _globe.setEuvMode(channel);
+            _sdoPanel?.setChannel(channel);
+        });
+
+        // ── AR-pin interactivity ────────────────────────────────────────────
+        // Hover the canvas → raycast against AR billboard sprites; show
+        // tooltip with class / twist / kink-ratio / area when hit.
+        // Click a pin → focus the camera on the AR.
+        // Click an AR row in the table below → ditto + sync row highlight.
+        const _tooltip = document.getElementById('ar-tooltip');
+        let _hoverArId = null;
+
+        function _formatTooltip(arId) {
+            const twistList = _globe.arTwistState ?? [];
+            const twist     = twistList.find(t => t.arId === arId);
+            const marker    = (_globe.arMarkers ?? []).find(m => m.region === arId);
+            const recent    = (_globe.recentFlares ?? []).find(f => f.region === arId);
+            if (!marker) return '';
+            const cls       = (marker.cls || twist?.cls || '–').toString();
+            const phiPi     = twist ? twist.phiPi.toFixed(2) : '–';
+            const kink      = twist ? Math.round(twist.kinkRatio * 100) : 0;
+            const area      = twist ? Math.round(twist.areaNorm * 1000) : '–';
+            const recentTxt = recent
+                ? `<div class="tt-row"><span class="k">Recent</span><span class="v" style="color:#ff8e3a">${recent.cls} · ${recent.dt_hr.toFixed(1)} h</span></div>`
+                : '';
+            const kinkClass = (twist && twist.kinkRatio >= 0.85) ? 'v kink' : 'v';
+            return `
+              <div style="margin-bottom:4px"><strong>AR${arId}</strong>${marker.complex ? ' <span style="color:#ff6633">β-γ-δ</span>' : ''}</div>
+              <div class="tt-row"><span class="k">Hale class</span><span class="v">${cls}</span></div>
+              <div class="tt-row"><span class="k">Twist Φ</span><span class="${kinkClass}">${phiPi}π <span style="color:#88a">(${kink}% of kink)</span></span></div>
+              <div class="tt-row"><span class="k">Area</span><span class="v">${area} μH</span></div>
+              ${recentTxt}
+              <div style="margin-top:5px;color:#667;font-size:.65rem">Click to focus camera</div>`;
+        }
+
+        function _showTooltipAt(arId, clientX, clientY) {
+            const wrap = globeCanvas.parentElement;
+            const rect = wrap.getBoundingClientRect();
+            _tooltip.innerHTML = _formatTooltip(arId);
+            const twistList = _globe.arTwistState ?? [];
+            const t = twistList.find(x => x.arId === arId);
+            _tooltip.classList.toggle('kink', !!(t && t.kinkRatio >= 0.85));
+            _tooltip.style.display = '';
+            // Position tooltip near pointer but inside the wrapper
+            const ox = clientX - rect.left + 14;
+            const oy = clientY - rect.top  + 12;
+            const maxX = rect.width  - _tooltip.offsetWidth  - 8;
+            const maxY = rect.height - _tooltip.offsetHeight - 8;
+            _tooltip.style.left = Math.min(Math.max(8, ox), Math.max(8, maxX)) + 'px';
+            _tooltip.style.top  = Math.min(Math.max(8, oy), Math.max(8, maxY)) + 'px';
+        }
+
+        function _hideTooltip() {
+            _tooltip.style.display = 'none';
+            _hoverArId = null;
+            globeCanvas.style.cursor = '';
+        }
+
+        globeCanvas.addEventListener('pointermove', (ev) => {
+            const hit = _globe.pickArAt(ev.clientX, ev.clientY);
+            if (hit) {
+                _hoverArId = hit.region;
+                globeCanvas.style.cursor = 'pointer';
+                _showTooltipAt(hit.region, ev.clientX, ev.clientY);
+            } else if (_hoverArId !== null) {
+                _hideTooltip();
+            }
+        });
+        globeCanvas.addEventListener('pointerleave', _hideTooltip);
+        globeCanvas.addEventListener('click', (ev) => {
+            const hit = _globe.pickArAt(ev.clientX, ev.clientY);
+            if (!hit) return;
+            _globe.focusRegion(hit.region);
+            _highlightArRow(hit.region);
+        });
+
+        function _highlightArRow(arId) {
+            document.querySelectorAll('#ar-tbody tr.ar-row').forEach(r => {
+                r.classList.toggle('ar-active', String(r.dataset.arId) === String(arId));
+            });
+        }
+
+        // Delegate clicks on AR table rows → focus camera + highlight pin.
+        document.getElementById('ar-tbody')?.addEventListener('click', (ev) => {
+            const row = ev.target.closest('tr.ar-row');
+            if (!row) return;
+            const arId = parseInt(row.dataset.arId, 10);
+            if (!isFinite(arId)) return;
+            _globe.focusRegion(arId);
+            _highlightArRow(arId);
+        });
+
+        // Keyboard a11y: enter/space activates focused row
+        document.getElementById('ar-tbody')?.addEventListener('keydown', (ev) => {
+            if (ev.key !== 'Enter' && ev.key !== ' ') return;
+            const row = ev.target.closest('tr.ar-row');
+            if (!row) return;
+            ev.preventDefault();
+            const arId = parseInt(row.dataset.arId, 10);
+            if (!isFinite(arId)) return;
+            _globe.focusRegion(arId);
+            _highlightArRow(arId);
         });
     }
 }

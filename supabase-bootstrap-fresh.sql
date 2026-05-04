@@ -148,7 +148,14 @@ CREATE POLICY "Admins can view all alerts"
     ON public.alert_history FOR SELECT
     USING (auth.uid() = user_id OR public.is_admin());
 
--- Trigger: auto-create profile on signup
+-- Trigger: auto-create profile on signup.
+--
+-- This is the bootstrap copy. It's overridden later in this same file
+-- by the lockdown version (search for "Replace handle_new_user() to
+-- ignore client-supplied plan/role"). Both copies hard-code plan='free'
+-- and role='user' — the COALESCE-from-metadata pattern in earlier
+-- versions silently re-opened the signup-metadata injection that the
+-- plan-lockdown migration was meant to close.
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -157,8 +164,8 @@ BEGIN
         NEW.id,
         NEW.email,
         COALESCE(NEW.raw_user_meta_data->>'name', split_part(NEW.email, '@', 1)),
-        COALESCE(NEW.raw_user_meta_data->>'plan', 'free'),
-        'user'
+        'free',   -- HARD-CODED. Stripe webhook is the only path to a paid plan.
+        'user'    -- HARD-CODED. Admin grants happen post-signup via SQL editor.
     );
     RETURN NEW;
 END;
@@ -788,7 +795,7 @@ ALTER TABLE public.user_profiles
 
 ALTER TABLE public.user_profiles
     ADD CONSTRAINT user_profiles_plan_check
-    CHECK (plan IN ('free', 'basic', 'educator', 'advanced', 'institution', 'enterprise'));
+    CHECK (plan IN ('free', 'tester', 'basic', 'educator', 'advanced', 'institution', 'enterprise'));
 
 -- ── 2. Widen the invite_codes.plan CHECK constraint ──────────────
 ALTER TABLE public.invite_codes
@@ -796,7 +803,7 @@ ALTER TABLE public.invite_codes
 
 ALTER TABLE public.invite_codes
     ADD CONSTRAINT invite_codes_plan_check
-    CHECK (plan IN ('free', 'basic', 'educator', 'advanced', 'institution', 'enterprise'));
+    CHECK (plan IN ('free', 'tester', 'basic', 'educator', 'advanced', 'institution', 'enterprise'));
 
 -- ── 3. Per-tier columns on user_profiles ─────────────────────────
 ALTER TABLE public.user_profiles
@@ -821,6 +828,7 @@ RETURNS INTEGER AS $$
         WHEN 'enterprise'  THEN 1000  -- placeholder; real value set by admin per contract
         WHEN 'advanced'    THEN 1
         WHEN 'basic'       THEN 1
+        WHEN 'tester'      THEN 1
         ELSE 1
     END;
 $$ LANGUAGE sql IMMUTABLE;
@@ -842,6 +850,7 @@ RETURNS INTEGER AS $$
         WHEN 'enterprise'  THEN 100
         WHEN 'institution' THEN 25
         WHEN 'advanced'    THEN 25
+        WHEN 'tester'      THEN 25
         WHEN 'educator'    THEN 5
         WHEN 'basic'       THEN 5
         ELSE 0

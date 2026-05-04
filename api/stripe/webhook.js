@@ -6,11 +6,12 @@
  * updates user_profiles.plan and subscription_status based on Stripe events.
  *
  * ── Events handled ───────────────────────────────────────────────────────────
- *   checkout.session.completed    — first subscription created
- *   customer.subscription.updated — plan change, trial end, renewal
- *   customer.subscription.deleted — cancellation
- *   invoice.payment_failed        — mark past_due
- *   invoice.paid                  — confirm active after retry
+ *   checkout.session.completed         — first subscription created
+ *   customer.subscription.updated      — plan change, trial end, renewal
+ *   customer.subscription.deleted      — cancellation
+ *   customer.subscription.trial_will_end — 3-day-out warning (re-engagement)
+ *   invoice.payment_failed             — mark past_due
+ *   invoice.paid                       — confirm active after retry
  *
  * ── Env vars required ────────────────────────────────────────────────────────
  *   STRIPE_SECRET_KEY      — for API calls
@@ -28,6 +29,15 @@ const WEBHOOK_SECRET    = process.env.STRIPE_WEBHOOK_SECRET || '';
 const SUPABASE_URL      = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const SUPABASE_KEY      = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SECRET_KEY || '';
 
+// Subscription notifications. The owner wants a heads-up whenever someone
+// subscribes (or cancels). Falls back to a hard-coded address so a fresh
+// deployment without env vars still notifies the owner.
+const RESEND_API        = 'https://api.resend.com/emails';
+const RESEND_KEY        = process.env.RESEND_API_KEY || '';
+const FROM_EMAIL        = process.env.ALERT_FROM_EMAIL || 'Parker Physics <noreply@parkerphysics.com>';
+const SUB_NOTIFY_EMAIL  = process.env.SUBSCRIPTION_NOTIFY_EMAIL || 'etelford32@gmail.com';
+const APP_URL           = process.env.APP_URL || 'https://parkerphysics.com';
+
 // Map Stripe price IDs to plan names. Accept both the original naming
 // (STRIPE_{TIER}_PRICE_ID) and the Vercel-dashboard convention
 // (STRIPE_PRICE_{TIER}) so the webhook upgrades work regardless of how
@@ -35,15 +45,33 @@ const SUPABASE_KEY      = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABA
 //
 // Enterprise has no price ID — it's a manually-assigned plan set by an
 // admin once a custom contract is signed. The webhook never touches it.
+// Both monthly and yearly price IDs resolve to the SAME plan name — the
+// user is on "educator", whether they're billed monthly or yearly. Cadence
+// lives in subscription metadata, set by the checkout endpoint.
 const PRICE_TO_PLAN = {};
-const _basicPrice       = process.env.STRIPE_BASIC_PRICE_ID       || process.env.STRIPE_PRICE_BASIC;
-const _educatorPrice    = process.env.STRIPE_EDUCATOR_PRICE_ID    || process.env.STRIPE_PRICE_EDUCATOR;
-const _advancedPrice    = process.env.STRIPE_ADVANCED_PRICE_ID    || process.env.STRIPE_PRICE_ADVANCED;
-const _institutionPrice = process.env.STRIPE_INSTITUTION_PRICE_ID || process.env.STRIPE_PRICE_INSTITUTION;
-if (_basicPrice)       PRICE_TO_PLAN[_basicPrice]       = 'basic';
-if (_educatorPrice)    PRICE_TO_PLAN[_educatorPrice]    = 'educator';
-if (_advancedPrice)    PRICE_TO_PLAN[_advancedPrice]    = 'advanced';
-if (_institutionPrice) PRICE_TO_PLAN[_institutionPrice] = 'institution';
+function _bind(planName, ...envValues) {
+    for (const v of envValues) if (v) PRICE_TO_PLAN[v] = planName;
+}
+_bind('basic',
+    process.env.STRIPE_BASIC_PRICE_ID,
+    process.env.STRIPE_PRICE_BASIC,
+    process.env.STRIPE_BASIC_YEARLY_PRICE_ID,
+    process.env.STRIPE_PRICE_BASIC_YEARLY);
+_bind('educator',
+    process.env.STRIPE_EDUCATOR_PRICE_ID,
+    process.env.STRIPE_PRICE_EDUCATOR,
+    process.env.STRIPE_EDUCATOR_YEARLY_PRICE_ID,
+    process.env.STRIPE_PRICE_EDUCATOR_YEARLY);
+_bind('advanced',
+    process.env.STRIPE_ADVANCED_PRICE_ID,
+    process.env.STRIPE_PRICE_ADVANCED,
+    process.env.STRIPE_ADVANCED_YEARLY_PRICE_ID,
+    process.env.STRIPE_PRICE_ADVANCED_YEARLY);
+_bind('institution',
+    process.env.STRIPE_INSTITUTION_PRICE_ID,
+    process.env.STRIPE_PRICE_INSTITUTION,
+    process.env.STRIPE_INSTITUTION_YEARLY_PRICE_ID,
+    process.env.STRIPE_PRICE_INSTITUTION_YEARLY);
 
 /** Constant-time string compare — same length required, returns false on mismatch. */
 function constantTimeEqual(a, b) {
@@ -88,6 +116,126 @@ async function updateProfile(userId, updates) {
         },
         body: JSON.stringify({ ...updates, updated_at: new Date().toISOString() }),
     });
+}
+
+/**
+ * Insert a row into activation_events directly. The log_activation_event
+ * RPC keys off auth.uid(), which is null in a webhook context — so we
+ * write to the table with the service key (RLS bypassed) and rely on the
+ * unique partial index for idempotency on first_* events. subscription_*
+ * events aren't in that index by design, so we de-dupe in-query.
+ */
+async function logActivationServerSide(userId, event, plan, metadata = {}) {
+    if (!userId || !event) return;
+    try {
+        // Skip if a row for the same (user, event) was inserted in the last
+        // 60 seconds — Stripe occasionally retries webhook deliveries, and
+        // we don't want a duplicate `subscription_started` row showing up
+        // in the funnel from a redelivered event.
+        const sinceIso = new Date(Date.now() - 60_000).toISOString();
+        const dupeRes = await fetch(
+            `${SUPABASE_URL}/rest/v1/activation_events`
+            + `?user_id=eq.${userId}&event=eq.${encodeURIComponent(event)}`
+            + `&created_at=gte.${encodeURIComponent(sinceIso)}&select=id&limit=1`,
+            { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+        );
+        if (dupeRes.ok) {
+            const rows = await dupeRes.json();
+            if (Array.isArray(rows) && rows.length) return;
+        }
+
+        await fetch(`${SUPABASE_URL}/rest/v1/activation_events`, {
+            method: 'POST',
+            headers: {
+                apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json', Prefer: 'return=minimal',
+            },
+            body: JSON.stringify({
+                user_id:  userId,
+                event,
+                plan:     plan ?? null,
+                metadata: metadata || {},
+            }),
+        });
+    } catch (e) {
+        console.warn(`[StripeWebhook] activation log (${event}) failed:`, e.message);
+    }
+}
+
+function escHtml(s) {
+    return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/** Look up the user's email + display name for the notification body. */
+async function fetchUserSummary(userId) {
+    if (!userId) return null;
+    try {
+        const res = await fetch(
+            `${SUPABASE_URL}/rest/v1/user_profiles?id=eq.${userId}&select=email,display_name,plan&limit=1`,
+            { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+        );
+        const rows = await res.json();
+        return rows?.[0] || null;
+    } catch { return null; }
+}
+
+/** Notify the owner that someone subscribed / started a trial / canceled. */
+async function notifyOwner({ kind, plan, userId, amountCents, currency, periodEndIso, trialCode }) {
+    if (!RESEND_KEY)        return;
+    if (!SUB_NOTIFY_EMAIL)  return;
+    const summary = await fetchUserSummary(userId);
+    const who = summary
+        ? `${summary.display_name || '(no name)'} <${summary.email || 'unknown'}>`
+        : `user ${userId || '(unknown)'}`;
+    const isCancel = kind === 'subscription_canceled';
+    const isTrial  = kind === 'subscription_trial_started';
+    const headline = isCancel ? 'Subscription canceled'
+                   : isTrial  ? 'Free trial started'
+                   :            'New subscriber';
+    const headlineColor = isCancel ? '#ff8c00' : isTrial ? '#9bff66' : '#4eff91';
+    const subject  = isCancel
+        ? `[Parker Physics] Subscription canceled — ${plan || '?'}`
+        : isTrial
+        ? `[Parker Physics] Trial started — ${plan || '?'}${trialCode ? ` · ${trialCode}` : ''}`
+        : `[Parker Physics] New subscriber — ${plan || '?'}`;
+    const amount = (typeof amountCents === 'number' && currency && amountCents > 0)
+        ? `${(amountCents / 100).toFixed(2)} ${currency.toUpperCase()}`
+        : isTrial ? '$0 (trial)' : '—';
+    const periodLabel = isCancel ? 'Access until'
+                      : isTrial  ? 'Trial ends'
+                      :            'Renews';
+    const html = `<!DOCTYPE html>
+<html><body style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#0a0a14;color:#e8f4ff;padding:24px">
+  <div style="max-width:560px;margin:0 auto;background:#12111a;border:1px solid #222;border-radius:12px;padding:24px">
+    <h2 style="margin:0 0 12px;color:${headlineColor}">${escHtml(headline)}</h2>
+    <p style="margin:0 0 14px;font-size:.9rem;color:#aab"><strong style="color:#fff">${escHtml(who)}</strong></p>
+    <p style="margin:0 0 6px;font-size:.85rem;color:#aab"><strong>Plan:</strong> ${escHtml(plan || '—')}</p>
+    <p style="margin:0 0 6px;font-size:.85rem;color:#aab"><strong>Amount:</strong> ${escHtml(amount)}</p>
+    ${trialCode
+        ? `<p style="margin:0 0 6px;font-size:.85rem;color:#aab"><strong>Promo:</strong> ${escHtml(trialCode)}</p>`
+        : ''}
+    ${periodEndIso
+        ? `<p style="margin:0 0 6px;font-size:.85rem;color:#aab"><strong>${periodLabel}:</strong> ${escHtml(new Date(periodEndIso).toUTCString())}</p>`
+        : ''}
+    <hr style="border:none;border-top:1px solid #333;margin:14px 0">
+    <p style="margin:18px 0 0;font-size:.75rem;color:#778"><a href="${APP_URL}/admin.html#activation" style="color:#a080ff">Open admin → activation</a></p>
+  </div>
+</body></html>`;
+    try {
+        await fetch(RESEND_API, {
+            method:  'POST',
+            headers: { Authorization: `Bearer ${RESEND_KEY}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                from:    FROM_EMAIL,
+                to:      SUB_NOTIFY_EMAIL,
+                subject,
+                html,
+            }),
+            signal: AbortSignal.timeout(8000),
+        });
+    } catch (e) {
+        console.warn('[StripeWebhook] subscriber notification failed:', e.message);
+    }
 }
 
 /** Find the Supabase user ID from a Stripe subscription's metadata or customer. */
@@ -152,14 +300,44 @@ export default async function handler(req) {
                 const sub   = await fetchSubscription(subId);
                 const uid   = session.metadata?.supabase_uid ?? await resolveUserId(sub);
                 if (!uid) { console.warn('[StripeWebhook] No user ID for session'); break; }
-                const priceId = sub.items?.data?.[0]?.price?.id;
-                const plan    = PRICE_TO_PLAN[priceId] ?? sub.metadata?.plan ?? 'basic';
+                const priceId   = sub.items?.data?.[0]?.price?.id;
+                const plan      = PRICE_TO_PLAN[priceId] ?? sub.metadata?.plan ?? 'basic';
+                const periodEnd = new Date(sub.current_period_end * 1000).toISOString();
+                const trialCode = sub.metadata?.trial_code || null;
+                const isTrial   = sub.status === 'trialing';
+                const trialEndIso = sub.trial_end
+                    ? new Date(sub.trial_end * 1000).toISOString()
+                    : null;
                 await updateProfile(uid, {
                     plan,
                     stripe_subscription_id: subId,
                     stripe_price_id:        priceId,
                     subscription_status:    sub.status,
-                    subscription_period_end: new Date(sub.current_period_end * 1000).toISOString(),
+                    subscription_period_end: periodEnd,
+                });
+                // Populate the activation funnel so the admin dashboard can
+                // see paying conversions, and ping the owner. Trials get
+                // their own event name so we can chart trial → paid lift
+                // independently from cold-paid conversions.
+                await logActivationServerSide(
+                    uid,
+                    isTrial ? 'subscription_trial_started' : 'subscription_started',
+                    plan,
+                    {
+                        stripe_subscription_id: subId,
+                        stripe_price_id:        priceId,
+                        trial_code:             trialCode,
+                        trial_end:              trialEndIso,
+                    }
+                );
+                await notifyOwner({
+                    kind:        isTrial ? 'subscription_trial_started' : 'subscription_started',
+                    plan,
+                    userId:      uid,
+                    amountCents: session.amount_total,
+                    currency:    session.currency,
+                    periodEndIso: isTrial ? trialEndIso : periodEnd,
+                    trialCode,
                 });
                 break;
             }
@@ -206,6 +384,8 @@ export default async function handler(req) {
                 //      cron (or auth.js client-side guard) downgrades after.
                 const periodEndMs = (sub.current_period_end ?? 0) * 1000;
                 const stillPaid   = periodEndMs > Date.now() + 60_000;  // 60s skew tolerance
+                const priceId    = sub.items?.data?.[0]?.price?.id;
+                const cancelPlan = PRICE_TO_PLAN[priceId] ?? sub.metadata?.plan ?? null;
                 if (stillPaid) {
                     console.warn(
                         `[StripeWebhook] subscription.deleted with future period_end ` +
@@ -226,6 +406,16 @@ export default async function handler(req) {
                         stripe_price_id: null,
                     });
                 }
+                await logActivationServerSide(uid, 'subscription_canceled', cancelPlan, {
+                    stripe_subscription_id: sub.id,
+                    still_paid:             stillPaid,
+                });
+                await notifyOwner({
+                    kind:         'subscription_canceled',
+                    plan:         cancelPlan,
+                    userId:       uid,
+                    periodEndIso: stillPaid ? new Date(periodEndMs).toISOString() : null,
+                });
                 break;
             }
 
@@ -249,10 +439,44 @@ export default async function handler(req) {
                 if (!uid) break;
                 const priceId = sub.items?.data?.[0]?.price?.id;
                 const plan    = PRICE_TO_PLAN[priceId] ?? 'basic';
+                // Detect trial → paid conversion: this invoice is the first
+                // paid charge after the trial ended. Stripe sets the invoice's
+                // billing_reason to 'subscription_cycle' for normal renewals;
+                // for trial conversions it's also 'subscription_cycle' but we
+                // can identify the moment from the trial metadata + status
+                // flip to 'active'. Best-effort logging; safe to skip silently.
+                const wasTrial = sub.metadata?.trial_code && sub.status === 'active';
+                if (wasTrial) {
+                    await logActivationServerSide(uid, 'subscription_trial_converted', plan, {
+                        stripe_subscription_id: sub.id,
+                        trial_code:             sub.metadata?.trial_code || null,
+                    });
+                }
                 await updateProfile(uid, {
                     plan,
                     subscription_status: 'active',
                     subscription_period_end: new Date(sub.current_period_end * 1000).toISOString(),
+                });
+                break;
+            }
+
+            case 'customer.subscription.trial_will_end': {
+                // Stripe fires this 3 days before trial_end. We use it as the
+                // re-engagement hook the user described — "come back in a
+                // month." Just log to the activation funnel so admin can
+                // chart it; the actual reminder email is sent by Stripe
+                // (built-in trial reminder, configurable in dashboard) so we
+                // don't double-up.
+                const sub = event.data.object;
+                const uid = await resolveUserId(sub);
+                if (!uid) break;
+                const priceId = sub.items?.data?.[0]?.price?.id;
+                const plan    = PRICE_TO_PLAN[priceId] ?? sub.metadata?.plan ?? null;
+                await logActivationServerSide(uid, 'subscription_trial_ending', plan, {
+                    stripe_subscription_id: sub.id,
+                    trial_code:             sub.metadata?.trial_code || null,
+                    trial_end:              sub.trial_end
+                        ? new Date(sub.trial_end * 1000).toISOString() : null,
                 });
                 break;
             }

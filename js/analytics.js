@@ -132,6 +132,103 @@ async function _endSession() {
     } catch (_) {}
 }
 
+// ── Auto-page + engagement helpers ───────────────────────────────────────────
+
+/** Derive a short page name from the URL pathname (e.g. /earth.html -> "earth"). */
+function _autoPageName() {
+    try {
+        const p = (window.location.pathname || '').replace(/\/+$/, '');
+        const last = p.split('/').pop() || 'index';
+        return last.replace(/\.html?$/i, '') || 'index';
+    } catch (_) { return 'index'; }
+}
+
+let _autoPaged = false;
+let _pageStart = Date.now();
+let _maxScrollPct = 0;
+const _scrollMilestones = new Set();
+let _pageCloseSent = false;
+
+// ── Click heatmap (opt-in via <body data-clickmap>) ──────────────────────────
+// Ultralight: single passive listener, throttled to 10 Hz, batched into the
+// existing 30s flush. Stores integer percentages of viewport coords + a tiny
+// target descriptor. Typical session: <100 events, <5 KB total.
+
+const _CLICK_THROTTLE_MS = 100;
+let _lastClickAt = 0;
+let _clickmapEnabled = false;
+
+function _describeTarget(el) {
+    if (!el || el.nodeType !== 1) return '';
+    const tag = (el.tagName || '').toLowerCase();
+    const id  = el.id ? '#' + el.id : '';
+    let cls = '';
+    if (typeof el.className === 'string' && el.className) {
+        cls = '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.');
+    }
+    return (tag + id + cls).slice(0, 80);
+}
+
+function _onClick(e) {
+    const now = Date.now();
+    if (now - _lastClickAt < _CLICK_THROTTLE_MS) return;
+    _lastClickAt = now;
+
+    const w = window.innerWidth  || 1;
+    const h = window.innerHeight || 1;
+    const xp = Math.max(0, Math.min(100, Math.round((e.clientX / w) * 100)));
+    const yp = Math.max(0, Math.min(100, Math.round((e.clientY / h) * 100)));
+
+    _buffer.push({
+        event_type: 'click',
+        event_name: _autoPageName(),
+        page_path: window.location.pathname.slice(0, 200),
+        page_title: (document.title || '').slice(0, 300),
+        session_id: _sessionId,
+        user_id: _userId,
+        properties: {
+            x_pct: xp,
+            y_pct: yp,
+            vw: w,
+            vh: h,
+            t: _describeTarget(e.target),
+        },
+        created_at: new Date().toISOString(),
+    });
+}
+
+function _initClickmap() {
+    if (_clickmapEnabled) return;
+    if (typeof document === 'undefined' || !document.body) return;
+    if (!document.body.hasAttribute('data-clickmap')) return;
+    _clickmapEnabled = true;
+    document.addEventListener('click', _onClick, { passive: true, capture: true });
+}
+
+// ── Scroll depth milestones (25/50/75/100%) ─────────────────────────────────
+
+function _onScroll() {
+    const doc = document.documentElement;
+    const scrollable = (doc.scrollHeight - window.innerHeight) || 1;
+    const pct = Math.max(0, Math.min(100, Math.round((window.scrollY / scrollable) * 100)));
+    if (pct > _maxScrollPct) _maxScrollPct = pct;
+    for (const m of [25, 50, 75, 100]) {
+        if (pct >= m && !_scrollMilestones.has(m)) {
+            _scrollMilestones.add(m);
+            _buffer.push({
+                event_type: 'event',
+                event_name: 'scroll_depth',
+                page_path: window.location.pathname.slice(0, 200),
+                page_title: (document.title || '').slice(0, 300),
+                session_id: _sessionId,
+                user_id: _userId,
+                properties: { milestone: m },
+                created_at: new Date().toISOString(),
+            });
+        }
+    }
+}
+
 // ── Core API ─────────────────────────────────────────────────────────────────
 
 class Analytics {
@@ -149,13 +246,63 @@ class Analytics {
             }
         });
 
-        // Flush + end session on page hide/unload
         if (typeof document !== 'undefined') {
+            // Auto-fire page() exactly once per import. Manually-instrumented
+            // pages can still call page() with a custom name; subsequent calls
+            // are accepted (and sent) so a manual call after the auto one
+            // upgrades the name without losing the auto event.
+            const autoFire = () => {
+                if (_autoPaged) return;
+                _autoPaged = true;
+                _pageStart = Date.now();
+                this.page(_autoPageName());
+                _initClickmap();
+            };
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', autoFire, { once: true });
+            } else {
+                autoFire();
+            }
+
+            // Scroll-depth milestones (passive, single coalesced listener).
+            let scrollTimer = null;
+            window.addEventListener('scroll', () => {
+                if (scrollTimer) return;
+                scrollTimer = setTimeout(() => { scrollTimer = null; _onScroll(); }, 200);
+            }, { passive: true });
+
+            // Time-on-page: emit on hidden + unload. Guarded so we only send
+            // once per page load.
+            const sendPageClose = () => {
+                if (_pageCloseSent) return;
+                _pageCloseSent = true;
+                const dwell = Math.round((Date.now() - _pageStart) / 1000);
+                _buffer.push({
+                    event_type: 'event',
+                    event_name: 'page_close',
+                    page_path: window.location.pathname.slice(0, 200),
+                    page_title: (document.title || '').slice(0, 300),
+                    session_id: _sessionId,
+                    user_id: _userId,
+                    properties: {
+                        time_on_page_s: dwell,
+                        max_scroll_pct: _maxScrollPct,
+                    },
+                    created_at: new Date().toISOString(),
+                });
+            };
+
             document.addEventListener('visibilitychange', () => {
                 if (document.visibilityState === 'hidden') {
+                    sendPageClose();
                     _flush();
                     _endSession();
                 }
+            });
+            window.addEventListener('pagehide', () => {
+                sendPageClose();
+                _flush();
+                _endSession();
             });
         }
     }

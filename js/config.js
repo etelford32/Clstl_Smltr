@@ -16,14 +16,42 @@
  *  TIER.PRO   — All tiers including T3 (15min) + T4 (60min), full history,
  *               storm-mode acceleration, and on-demand series endpoints.
  *
- *  TIER.* is the feed's *feature bucket*, not the user-facing plan. Use
- *  `planToTier(plan)` to translate a Stripe/Supabase plan name into a
- *  bucket — everything 'advanced' or above lands in TIER.PRO, including
- *  'institution' and 'enterprise'.
+ *  PRO ≡ Advanced. TIER.* is the feed's *feature bucket*, not the
+ *  user-facing plan. Use `planToTier(plan)` to translate a Stripe/Supabase
+ *  plan name into a bucket — everything 'advanced' or above lands in
+ *  TIER.PRO, including 'institution' and 'enterprise'. The canonical
+ *  client-side gate is `auth.isPro()` in js/auth.js, which mirrors this
+ *  mapping for any feature-flag check that isn't feed-cadence-related.
  */
 
 // ── NASA API key (local dev only; replaced by env var in production) ─────────
 export const NASA_KEY = 'DEMO_KEY';   // ← replace with your key for local dev
+
+// ── Social auth providers ────────────────────────────────────────────────────
+//
+// Allow-list for the "Continue with X" buttons rendered on
+// signin.html + signup.html via js/oauth-buttons.js. The button only
+// renders for providers in this array, so a partially-configured
+// provider (Supabase dashboard side not yet finished) stays hidden.
+//
+// Adding a new provider takes three steps:
+//   1. Configure the provider in the Supabase dashboard
+//      (Authentication → Providers).
+//   2. Add a metadata entry to js/oauth-buttons.js OAUTH_PROVIDERS.
+//   3. Add the provider id to this array.
+//
+// Apple is staged: its metadata + brand button live in
+// js/oauth-buttons.js OAUTH_PROVIDERS already, and the auth-callback
+// page handles its return URL the same way it handles Google's. To
+// turn it on, follow OAUTH_SETUP.md → Apple steps 1–4 (Apple Developer
+// console + Supabase dashboard) THEN change the array to:
+//   Object.freeze(['google', 'apple'])
+// Don't flip it before completing the dashboard work — the button
+// would render but every click would surface a Supabase
+// "provider not enabled" error.
+//
+// See OAUTH_SETUP.md for the full operator runbook.
+export const SOCIAL_PROVIDERS = Object.freeze(['google', 'apple']);
 
 // ── Plan tier constants ───────────────────────────────────────────────────────
 export const TIER = Object.freeze({
@@ -32,21 +60,22 @@ export const TIER = Object.freeze({
 });
 
 /**
- * Map a user-facing plan name (free/basic/educator/advanced/institution/enterprise)
+ * Map a user-facing plan name (free/tester/basic/educator/advanced/institution/enterprise)
  * to a feed feature bucket (TIER.FREE / TIER.PRO).
  *
  * Educator and Basic share data depth — they pay for licensing/embed terms,
  * not for richer feeds, so they stay in the FREE bucket. Advanced and above
  * unlock T4 and the faster storm-mode multipliers.
  *
- * Accepts admin/tester role hints so a tester account gets PRO data without
- * needing a paid plan.
+ * "tester" is a comp tier issued via admin invite — testers get PRO data
+ * without paying. Accepts admin/tester role hints too, so a QA account
+ * with role='tester' but plan='free' (legacy) still gets PRO.
  */
 export function planToTier(plan, role) {
     const r = String(role || '').toLowerCase();
     if (r === 'admin' || r === 'superadmin' || r === 'tester') return TIER.PRO;
     const p = String(plan || '').toLowerCase();
-    if (p === 'advanced' || p === 'institution' || p === 'enterprise') return TIER.PRO;
+    if (p === 'tester' || p === 'advanced' || p === 'institution' || p === 'enterprise') return TIER.PRO;
     return TIER.FREE;
 }
 

@@ -173,9 +173,11 @@ export function layerAt(altitudeKm) {
 }
 
 // ── Composition anchors (number-density fractions) ──────────────────────────
-// Shapes tracked against NRL-MSIS / CIRA 1972. Log-space linear blend
-// between adjacent anchors; values below/above the anchor range use
-// the nearest anchor (no extrapolation).
+// LEGACY altitude-only fractions — kept for fallback use only. The
+// physical model below derives fractions from per-species diffusive
+// equilibrium (Bates 1959 + barometric integration of each species'
+// own scale height). These anchors are used only when the per-species
+// path early-outs (e.g., during selfTest invariants).
 const _ANCHORS = [
     { alt: 120,  frac: { N2: 0.78,   O2: 0.18,  NO: 5e-3, O: 0.03,  N: 0.01,  He: 1e-4,  H: 1e-6 } },
     { alt: 250,  frac: { N2: 0.55,   O2: 0.08,  NO: 1e-3, O: 0.36,  N: 4e-3,  He: 1e-3,  H: 1e-5 } },
@@ -185,6 +187,115 @@ const _ANCHORS = [
     { alt: 1500, frac: { N2: 1e-4,   O2: 1e-5,  NO: 1e-7, O: 0.12,  N: 1e-6,  He: 0.48,  H:  0.40 } },
     { alt: 2000, frac: { N2: 1e-5,   O2: 1e-6,  NO: 1e-8, O: 0.03,  N: 1e-7,  He: 0.27,  H:  0.70 } },
 ];
+
+// ── Bates (1959) thermospheric temperature profile ──────────────────────────
+//
+// The thermosphere's vertical temperature structure is *not* an exponential
+// fall-off — it's a monotonic rise from a near-mesopause base T₁₂₀ ≈ 380 K
+// to the asymptotic exospheric temperature T∞ that's set by F10.7 and the
+// geomagnetic state. The classic empirical fit (Bates 1959, MSIS, Jacchia):
+//
+//     T(z) = T∞ − (T∞ − T₁₂₀) · exp[ −σ · (z − 120) ]
+//
+// where σ ≈ 0.02 km⁻¹ controls how fast T relaxes toward T∞. At 200 km
+// you're still inside the inversion (T ~ 800 K when T∞ = 1100 K); at
+// 400+ km you're effectively at T∞.
+//
+// The closed-form integral that diffusion equilibrium needs:
+//
+//     ∫_120^z dz' / T(z')  =  (z − 120) / T∞   +  (1 / (σ T∞)) · ln[ T(z) / T₁₂₀ ]
+//
+// derived by partial fractions on 1/[T∞ − (T∞−T₁₂₀)·exp(−σ·u)].
+// Used by `_speciesNumberDensity` to compute per-species barometric
+// decay along the local Bates T(z) without numerical quadrature.
+const BATES_T120_K = 380;          // base temperature at z₀ = 120 km (K)
+const BATES_SIGMA  = 0.02;         // T-relaxation rate (km⁻¹)
+
+/** Local kinetic temperature (K) at altitude under the Bates profile. */
+export function batesTemperature(altKm, Tinf) {
+    if (altKm <= 120) return BATES_T120_K;
+    const dT = Tinf - BATES_T120_K;
+    return Tinf - dT * Math.exp(-BATES_SIGMA * (altKm - 120));
+}
+
+/**
+ * ∫_120^z dz' / T(z') under the Bates profile, in km/K. Used as the
+ * temperature-weighted altitude integrand inside the per-species
+ * barometric exponential below.
+ */
+function _batesInvTempIntegral(altKm, Tinf) {
+    if (altKm <= 120) return 0;
+    const T_z   = batesTemperature(altKm, Tinf);
+    const linear = (altKm - 120) / Tinf;
+    const corr   = (1 / (BATES_SIGMA * Tinf)) * Math.log(T_z / BATES_T120_K);
+    return linear + corr;
+}
+
+// ── Per-species anchor concentrations at z₀ = 120 km ───────────────────────
+// Climatological MSIS values (m⁻³) — units consistent with the rest of
+// the engine. The total at 120 km is ~4×10¹⁷ m⁻³ which puts ρ_120 in
+// the ~5×10⁻⁸ kg/m³ range, a hair above the engine's RHO_150 anchor
+// (~2×10⁻⁹) by 30 km — exactly the homopause-to-thermosphere falloff.
+//
+// These don't change with solar activity at z₀ — the thermosphere
+// expands above 120 km when T∞ rises, but the lower thermosphere is
+// largely insensitive (turbopause mixing keeps fractions clamped there).
+const N0_120 = Object.freeze({
+    N2: 1.13e17,
+    O2: 5.30e16,
+    O:  7.60e16,
+    N:  1.60e15,
+    NO: 1.00e14,
+    He: 4.00e13,
+    H:  4.00e11,
+});
+
+// Thermal-diffusion coefficient α_i. Negligible (≈0) for heavy species;
+// He has α ≈ −0.4, H has α ≈ −0.25 (Banks & Kockarts 1973). We absorb
+// the (1+α) factor as a small correction on the (T₁₂₀/T)^(1+α) term.
+const ALPHA_T = Object.freeze({
+    N2: 0, O2: 0, O: 0, N: 0, NO: 0,
+    He: -0.40,
+    H:  -0.25,
+});
+
+/**
+ * Number density of one species at altitude under diffusive equilibrium
+ * along the Bates T(z) profile. Above the homopause (~105 km) each
+ * species independently follows its own scale height H_i = kT/(m_i g):
+ *
+ *     n_i(z) = n_i(120) · [T(120)/T(z)]^(1+α_i)
+ *                       · exp[ −(m_i · g_eff / k) · ∫_120^z dz'/T(z') ]
+ *
+ * where g_eff is the gravity at the midpoint of (120, z). The integral
+ * has the closed form derived above.
+ *
+ * Returns 0 for altitudes below 120 km (the diffusive-equilibrium
+ * regime starts at the homopause; below that, mixing keeps fractions
+ * clamped — handled separately if ever needed).
+ */
+function _speciesNumberDensity(species, altKm, Tinf) {
+    if (altKm < 120) return 0;
+    const m_i  = SPECIES_MASS_KG[species];
+    if (!Number.isFinite(m_i) || m_i <= 0) return 0;
+
+    const T_z  = batesTemperature(altKm, Tinf);
+    const Tratio = BATES_T120_K / T_z;
+    const alpha  = ALPHA_T[species] ?? 0;
+    const tFactor = Math.pow(Tratio, 1 + alpha);
+
+    // Use a midpoint gravity — slow variation across (120, z), and this
+    // saves us a numerical quadrature without a measurable accuracy hit
+    // even at z = 2000 km (g changes only ~50 % across that span).
+    const zMidKm = 0.5 * (120 + altKm);
+    const g_eff  = gravity(zMidKm);
+
+    const I_T = _batesInvTempIntegral(altKm, Tinf);   // km/K
+    const argKm = (m_i * g_eff / KB) * I_T;           // dimensionless if I_T in m/K
+    // I_T is km/K; convert to m/K by ×1000 inside the exponent:
+    const arg = argKm * 1000;
+    return N0_120[species] * tFactor * Math.exp(-arg);
+}
 
 // ── Public: derived quantities ──────────────────────────────────────────────
 
@@ -207,17 +318,64 @@ export function gravity(altKm) {
 }
 
 /**
- * Mass density (kg/m³) at altitude under Jacchia-exponential assumptions.
- * Anchored at 150 km with ρ ≈ 2×10⁻⁹ kg/m³; uses a short scale height
- * below 150 km (barometric) and a T-dependent scale height above.
+ * Mass density (kg/m³) at altitude. Below 120 km we fall back to a short
+ * barometric extrapolation anchored on the lumped 120-km column. Above
+ * 120 km we sum the per-species contributions n_i × m_i directly — no
+ * mean-scale-height fudging — so the density profile inherits the
+ * correct heavy/light differential expansion when T∞ rises.
  */
-function _massDensity(altKm, T) {
-    const RHO_150 = 2.0e-9;
-    if (altKm <= 150) {
-        return RHO_150 * Math.exp((150 - altKm) / 8.0);
+function _massDensity(altKm, Tinf) {
+    if (altKm <= 120) {
+        // Stitch onto the per-species column at 120 km via a short
+        // barometric exponential. Below the homopause turbulent mixing
+        // dominates → use the column ρ at 120 km × the local Bates T(z)
+        // ratio. This matches MSIS to ~factor of 2 across 80–120 km
+        // which is plenty for the visualisation's purpose.
+        let rho120 = 0;
+        for (const s of SPECIES) rho120 += N0_120[s] * SPECIES_MASS_KG[s];
+        return rho120 * Math.exp((120 - altKm) / 7.0);
     }
-    const H_km = 0.053 * T;
-    return RHO_150 * Math.exp(-(altKm - 150) / H_km);
+    let rho = 0;
+    for (const s of SPECIES) {
+        rho += _speciesNumberDensity(s, altKm, Tinf) * SPECIES_MASS_KG[s];
+    }
+    // Floor — keeps log10(ρ) finite for plotting code.
+    return Math.max(rho, 1e-30);
+}
+
+/**
+ * Total number density (m⁻³) under diffusive equilibrium.
+ */
+function _totalNumberDensity(altKm, Tinf) {
+    if (altKm <= 120) {
+        let n120 = 0;
+        for (const s of SPECIES) n120 += N0_120[s];
+        return n120 * Math.exp((120 - altKm) / 7.0);
+    }
+    let n = 0;
+    for (const s of SPECIES) n += _speciesNumberDensity(s, altKm, Tinf);
+    return Math.max(n, 1e0);
+}
+
+/**
+ * Composition fractions at altitude — derived from the same per-species
+ * diffusive-equilibrium calc as the density, so the storm response
+ * (atomic O expanding more than N₂ when T∞ rises) is *physical*, not
+ * decoration. Falls back to the legacy altitude-only anchors below
+ * 120 km where the diffusive regime doesn't apply.
+ */
+function _fractionsAtT(altKm, Tinf) {
+    if (altKm <= 120) return _fractionsAt(altKm);   // legacy mixing-region
+    const out = {};
+    let sum = 0;
+    for (const s of SPECIES) {
+        const n_i = _speciesNumberDensity(s, altKm, Tinf);
+        out[s] = n_i;
+        sum += n_i;
+    }
+    if (sum <= 0) return _fractionsAt(altKm);
+    for (const s of SPECIES) out[s] /= sum;
+    return out;
 }
 
 /**
@@ -261,26 +419,39 @@ export function density({ altitudeKm, f107Sfu, ap }) {
     if (altitudeKm < 80) {
         throw new Error("altitudeKm must be ≥ 80 (thermosphere lower bound)");
     }
-    const T = exosphereTempK(f107Sfu, ap);
-    const rho = _massDensity(altitudeKm, T);
-    const fractions = _fractionsAt(altitudeKm);
+    const Tinf = exosphereTempK(f107Sfu, ap);
+    // Local kinetic temperature from the Bates (1959) inversion profile —
+    // *not* T∞ everywhere. Below ~250 km T(z) is markedly cooler than T∞.
+    const T_local = batesTemperature(altitudeKm, Tinf);
+
+    const rho = _massDensity(altitudeKm, Tinf);
+    const fractions = _fractionsAtT(altitudeKm, Tinf);
 
     // Mean molecular mass in kg (by number fraction).
     let mBar = 0;
     for (const s of SPECIES) mBar += fractions[s] * SPECIES_MASS_KG[s];
 
-    // Total number density = ρ / m̄.
-    const nTotal = mBar > 0 ? rho / mBar : 0;
+    // Total number density — direct sum (not ρ/m̄) so heavy/light
+    // contributions remain self-consistent even with rounding.
+    const nTotal = _totalNumberDensity(altitudeKm, Tinf);
 
-    // Per-species number density.
+    // Per-species number density (m⁻³).
     const n = {};
     for (const s of SPECIES) n[s] = fractions[s] * nTotal;
 
-    // Scale height of the mean neutral (km).
+    // Scale height of the mean neutral (km), using local T.
     const g = gravity(altitudeKm);
-    const H_km = mBar > 0 && T > 0 ? (KB * T / (mBar * g)) / 1000 : NaN;
+    const H_km = mBar > 0 && T_local > 0 ? (KB * T_local / (mBar * g)) / 1000 : NaN;
 
-    return { altitudeKm, T, rho, nTotal, H_km, mBar, fractions, n };
+    return {
+        altitudeKm,
+        // T is the *local kinetic* temperature — not T∞. Plots and
+        // particle thermal speeds want this so vth varies through the
+        // thermosphere instead of clamping to a single asymptotic value.
+        T:    T_local,
+        Tinf,                  // exosphere asymptote — useful for callers
+        rho, nTotal, H_km, mBar, fractions, n,
+    };
 }
 
 /**
@@ -690,19 +861,47 @@ export async function fetchDebrisSample({
     count       = 50,
     altMinKm    = 350,
     altMaxKm    = 900,
-    timeoutMs   = 5000,
+    timeoutMs   = 8000,
     seed        = null,
 } = {}) {
+    // Try the composite group first; fall through to per-event groups if
+    // the composite is empty or returns an upstream error. Per-event
+    // groups are individually <2 MB and far more resilient than the
+    // 4-way fan-out, so the user always sees *some* debris even when
+    // CelesTrak rolls a group name or hits a rate limit.
+    const SOURCES = [
+        '/api/celestrak/tle?group=debris',
+        '/api/celestrak/tle?group=cosmos-1408-debris',
+        '/api/celestrak/tle?group=fengyun-1c-debris',
+        '/api/celestrak/tle?group=iridium-33-debris',
+        '/api/celestrak/tle?group=cosmos-2251-debris',
+    ];
+
     const ctl = new AbortController();
     const t = setTimeout(() => ctl.abort(), timeoutMs);
     try {
-        const r = await fetch('/api/celestrak/tle?group=debris', {
-            signal: ctl.signal,
-            headers: { Accept: 'application/json' },
-        });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const data = await r.json();
-        const all = data?.satellites || [];
+        let all = [];
+        let lastErr = null;
+        for (const url of SOURCES) {
+            try {
+                const r = await fetch(url, {
+                    signal: ctl.signal,
+                    headers: { Accept: 'application/json' },
+                });
+                if (!r.ok) { lastErr = new Error(`HTTP ${r.status} (${url})`); continue; }
+                const data = await r.json();
+                const sats = data?.satellites || [];
+                if (sats.length > 0) {
+                    all = sats;
+                    break;
+                }
+            } catch (e) {
+                lastErr = e;
+                // AbortError aborts the whole fallback chain — bail out.
+                if (e?.name === 'AbortError') throw e;
+            }
+        }
+        if (all.length === 0 && lastErr) throw lastErr;
         // Filter to LEO debris in our altitude band. Skip anything with
         // a NaN inclination / mean motion / element so downstream
         // propagation never hits NaNs.

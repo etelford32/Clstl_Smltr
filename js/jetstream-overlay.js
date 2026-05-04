@@ -22,7 +22,20 @@
 import * as THREE from 'three';
 import { geo, DEG } from './geo/coords.js';
 
-const JET_THRESHOLD_MS = 30;        // m/s — operational jet-stream floor
+// Threshold used to decide which grid cells get a ribbon segment. The
+// upstream weather feed only delivers 10 m surface winds (Open-Meteo
+// `wind_speed_10m`), which globally rarely exceed ~25 m/s outside named
+// storms. The 30 m/s "operational jet-stream floor" is a free-troposphere
+// threshold (250–300 hPa) — applying it to surface wind meant the layer
+// was nearly always empty, so the visitor toggling it on saw nothing and
+// reported it as broken.
+//
+// Lowering to 18 m/s (≈65 km/h, low end of gale-force) keeps the layer
+// faithful to "where strong directional winds are" while reliably
+// producing visible ribbons over winter storms, mid-latitude cyclones,
+// trade-wind belts, and Southern Ocean fronts. When the feed is upgraded
+// to upper-air winds (250 hPa), bump this back to 30 m/s.
+const JET_THRESHOLD_MS = 18;        // m/s — strong-wind floor for 10 m data
 const SAMPLE_STEP_DEG  = 3;         // scan resolution (balance density vs cost)
 const SEG_LEN_DEG      = 4;         // segment length in flow direction
 const MAX_LAT          = 85;        // skip poles — 1/cos(lat) blows up

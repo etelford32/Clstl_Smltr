@@ -19,7 +19,7 @@ ALTER TABLE public.user_profiles
 
 ALTER TABLE public.user_profiles
     ADD CONSTRAINT user_profiles_plan_check
-    CHECK (plan IN ('free', 'basic', 'educator', 'advanced', 'institution', 'enterprise'));
+    CHECK (plan IN ('free', 'tester', 'basic', 'educator', 'advanced', 'institution', 'enterprise'));
 
 -- ── 2. Widen the invite_codes.plan CHECK constraint ──────────────
 ALTER TABLE public.invite_codes
@@ -27,7 +27,7 @@ ALTER TABLE public.invite_codes
 
 ALTER TABLE public.invite_codes
     ADD CONSTRAINT invite_codes_plan_check
-    CHECK (plan IN ('free', 'basic', 'educator', 'advanced', 'institution', 'enterprise'));
+    CHECK (plan IN ('free', 'tester', 'basic', 'educator', 'advanced', 'institution', 'enterprise'));
 
 -- ── 3. Per-tier columns on user_profiles ─────────────────────────
 ALTER TABLE public.user_profiles
@@ -52,6 +52,7 @@ RETURNS INTEGER AS $$
         WHEN 'enterprise'  THEN 1000  -- placeholder; real value set by admin per contract
         WHEN 'advanced'    THEN 1
         WHEN 'basic'       THEN 1
+        WHEN 'tester'      THEN 1
         ELSE 1
     END;
 $$ LANGUAGE sql IMMUTABLE;
@@ -73,6 +74,7 @@ RETURNS INTEGER AS $$
         WHEN 'enterprise'  THEN 100
         WHEN 'institution' THEN 25
         WHEN 'advanced'    THEN 25
+        WHEN 'tester'      THEN 25
         WHEN 'educator'    THEN 5
         WHEN 'basic'       THEN 5
         ELSE 0

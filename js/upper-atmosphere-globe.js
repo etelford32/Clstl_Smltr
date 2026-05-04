@@ -43,13 +43,35 @@ import * as THREE from 'three';
 import { EarthSkin } from './earth-skin.js';
 import { SATELLITE_REFERENCES, density, fetchDebrisSample }
     from './upper-atmosphere-engine.js';
+import { annotate as annotateDebris, summariseByFamily, DEBRIS_FAMILIES }
+    from './debris-catalog.js';
+import { CONSTELLATIONS, spawnConstellationPositions }
+    from './constellation-catalog.js';
+import { buildSatelliteModel, buildSatelliteModelLow }
+    from './satellite-models.js';
 import { computeShue, computeBowShock } from './magnetosphere-engine.js';
 import { ATMOSPHERIC_LAYER_SCHEMA, layerForAltitude }
     from './upper-atmosphere-layers.js';
 import { LayerParticleSystem } from './upper-atmosphere-particles.js';
 import { layerPhysics, pointPhysics } from './upper-atmosphere-physics.js';
 import { LayerVectorField } from './upper-atmosphere-vector-fields.js';
+import { MagneticCascade } from './upper-atmosphere-magnetic-cascade.js';
+import { SubstormController } from './upper-atmosphere-substorm.js';
 import { CameraController } from './upper-atmosphere-camera.js';
+import { subSolarPoint } from './sun-altitude.js';
+
+// Map (sub-solar lat, sub-solar lon) → unit Vector3 in the scene's world
+// frame. Convention: scene +Y is the geographic north pole; lon=0 (Greenwich)
+// faces +X at scene-origin orientation. This keeps the day-side terminator
+// on the existing Earth texture aligned with the real sub-solar geographic
+// point, so the simulation reads as "real-time Earth–Sun geometry."
+function _subSolarToVec3(latDeg, lonDeg) {
+    const DEG = Math.PI / 180;
+    const phi = latDeg * DEG;
+    const lam = lonDeg * DEG;
+    const c = Math.cos(phi);
+    return new THREE.Vector3(c * Math.cos(lam), Math.sin(phi), c * Math.sin(lam));
+}
 
 // NOAA SWPC Kp→Ap table, used to invert Ap back to Kp for the aurora
 // shader. The shader's own oval-geometry code wants Kp, not Ap.
@@ -323,6 +345,179 @@ const SW_STREAM_FRAG = /* glsl */`
     }
 `;
 
+// ── Sun photosphere shader — procedural granulation + limb darkening ──
+// fbm-based cell pattern that drifts slowly so the disc reads as a
+// roiling, convecting surface rather than a flat sprite. Colour ramps
+// from a hot white-yellow core toward orange limb (limb darkening), with
+// brighter "active region" highlights that breathe with uTime.
+const SUN_VERT = /* glsl */`
+    varying vec3 vNormalW;
+    varying vec3 vPosW;
+    varying vec3 vViewDirW;
+    void main() {
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vPosW    = wp.xyz;
+        vNormalW = normalize(mat3(modelMatrix) * normal);
+        vViewDirW = normalize(cameraPosition - wp.xyz);
+        gl_Position = projectionMatrix * viewMatrix * wp;
+    }
+`;
+const SUN_FRAG = /* glsl */`
+    precision highp float;
+    uniform float uTime;
+    uniform float uIntensity;
+    uniform vec3  uHot;
+    uniform vec3  uCool;
+    varying vec3  vNormalW;
+    varying vec3  vViewDirW;
+    varying vec3  vPosW;
+
+    // Hash + value-noise — cheap, no texture dependency.
+    float hash3(vec3 p) {
+        p = fract(p * 0.3183099 + vec3(0.71, 0.113, 0.419));
+        p *= 17.0;
+        return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+    }
+    float vnoise(vec3 p) {
+        vec3 i = floor(p), f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        float n000 = hash3(i + vec3(0.0, 0.0, 0.0));
+        float n100 = hash3(i + vec3(1.0, 0.0, 0.0));
+        float n010 = hash3(i + vec3(0.0, 1.0, 0.0));
+        float n110 = hash3(i + vec3(1.0, 1.0, 0.0));
+        float n001 = hash3(i + vec3(0.0, 0.0, 1.0));
+        float n101 = hash3(i + vec3(1.0, 0.0, 1.0));
+        float n011 = hash3(i + vec3(0.0, 1.0, 1.0));
+        float n111 = hash3(i + vec3(1.0, 1.0, 1.0));
+        return mix(
+            mix(mix(n000, n100, f.x), mix(n010, n110, f.x), f.y),
+            mix(mix(n001, n101, f.x), mix(n011, n111, f.x), f.y),
+            f.z);
+    }
+    float fbm(vec3 p) {
+        float a = 0.0, w = 0.5;
+        for (int i = 0; i < 5; i++) {
+            a += w * vnoise(p);
+            p *= 2.05;
+            w *= 0.5;
+        }
+        return a;
+    }
+
+    void main() {
+        // Granulation: scale up the surface position so cells are small
+        // relative to the disc, then drift with uTime to roil. A second
+        // FBM at half scale picks out broad active-region brightening.
+        vec3 p = normalize(vPosW) * 4.5;
+        float gran   = fbm(p + vec3(0.0, uTime * 0.04, 0.0));
+        float active = fbm(p * 0.6 + vec3(uTime * 0.02, 0.0, uTime * 0.015));
+        float surf   = mix(gran, active, 0.45);
+
+        // Limb darkening: the disc edge cools toward orange/red; the
+        // centre reads white-hot. Boost the darkening exponent slightly
+        // so users get the "convex 3D star" cue rather than a flat disc.
+        float NdV  = clamp(dot(normalize(vNormalW), normalize(vViewDirW)), 0.0, 1.0);
+        float limb = pow(NdV, 0.55);
+
+        // Active-region hotspots — breathing white-hot peaks. Squared
+        // contrast so they punch through the granulation noise.
+        float hotspot = smoothstep(0.62, 0.95, surf);
+        hotspot = pow(hotspot, 1.6);
+
+        // Colour blend: limb-darkened cool baseline, brightened by the
+        // FBM and lifted toward white at the hotspots.
+        vec3 base = mix(uCool, uHot, limb);
+        base += hotspot * vec3(0.55, 0.42, 0.18);
+        base *= 0.78 + 0.42 * surf;
+
+        // Subtle uIntensity scale (tied to F10.7) — quiet sun is a
+        // touch dimmer, cycle max is brighter and whiter.
+        base *= 0.85 + 0.45 * uIntensity;
+
+        gl_FragColor = vec4(base, 1.0);
+    }
+`;
+
+// ── Sun corona shader — multi-layer additive halo ─────────────────────
+// A fresnel-bright shell with FBM "streamer" filaments rotating slowly
+// around the disc. Used at three radii (chromosphere → mid corona →
+// outer corona) with different colours so the layered glow reads as
+// real depth rather than a single flat halo.
+const CORONA_VERT = /* glsl */`
+    varying vec3 vNormalW;
+    varying vec3 vViewDirW;
+    varying vec2 vUv;
+    void main() {
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vNormalW  = normalize(mat3(modelMatrix) * normal);
+        vViewDirW = normalize(cameraPosition - wp.xyz);
+        vUv       = uv;
+        gl_Position = projectionMatrix * viewMatrix * wp;
+    }
+`;
+const CORONA_FRAG = /* glsl */`
+    precision highp float;
+    uniform vec3  uColor;
+    uniform vec3  uRimColor;
+    uniform float uTime;
+    uniform float uIntensity;
+    uniform float uRimPower;
+    uniform float uBaseAlpha;
+    varying vec3  vNormalW;
+    varying vec3  vViewDirW;
+    varying vec2  vUv;
+
+    float hash3(vec3 p) {
+        p = fract(p * 0.3183099 + vec3(0.71, 0.113, 0.419));
+        p *= 17.0;
+        return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+    }
+    float vnoise(vec3 p) {
+        vec3 i = floor(p), f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        return mix(
+            mix(mix(hash3(i+vec3(0,0,0)), hash3(i+vec3(1,0,0)), f.x),
+                mix(hash3(i+vec3(0,1,0)), hash3(i+vec3(1,1,0)), f.x), f.y),
+            mix(mix(hash3(i+vec3(0,0,1)), hash3(i+vec3(1,0,1)), f.x),
+                mix(hash3(i+vec3(0,1,1)), hash3(i+vec3(1,1,1)), f.x), f.y),
+            f.z);
+    }
+    float fbm(vec3 p) {
+        float a = 0.0, w = 0.5;
+        for (int i = 0; i < 4; i++) {
+            a += w * vnoise(p);
+            p *= 2.1;
+            w *= 0.5;
+        }
+        return a;
+    }
+
+    void main() {
+        // Limb-bright fresnel — corona reads brightest at the silhouette.
+        float NdV  = abs(dot(normalize(vNormalW), normalize(vViewDirW)));
+        float fres = pow(1.0 - NdV, uRimPower);
+
+        // Rotating filament noise: creates the suggestion of corona
+        // streamers without modelling each one geometrically. The radial
+        // sample uses the surface normal so the filaments stay attached
+        // to the disc as it rotates.
+        vec3 p = normalize(vNormalW) * 3.2 + vec3(uTime * 0.03, 0.0, uTime * 0.05);
+        float fil = fbm(p);
+        // Sharpen the FBM into "ribbons" — power curve picks out brighter
+        // ridges and lets the rest fall away.
+        fil = pow(smoothstep(0.40, 0.95, fil), 1.4);
+
+        vec3 col = mix(uColor, uRimColor, fres);
+        col += fil * uRimColor * 0.55;
+
+        // Slow breathing pulse — overall corona modulation.
+        float pulse = 0.92 + 0.16 * sin(uTime * 0.5);
+
+        float alpha = (uBaseAlpha + fres * 0.55 + fil * 0.18) * pulse * uIntensity;
+        gl_FragColor = vec4(col, clamp(alpha, 0.0, 0.95));
+    }
+`;
+
 export class AtmosphereGlobe {
     /**
      * @param {HTMLCanvasElement} canvas
@@ -365,6 +560,7 @@ export class AtmosphereGlobe {
         });
         this._buildAltitudeRing();
         this._buildSolarWind();
+        this._buildMagneticCascade();
         if (this.opts.stars) this._initStars();
         this._initControls();
         this._initResize();
@@ -633,17 +829,58 @@ export class AtmosphereGlobe {
         // Drive the sun's emission visuals from F10.7 — corona glow,
         // streamer brightness/length, core temperature.
         this.setF107(f107);
+
+        // Drive the magnetic-field cascade — solar EUV + precipitation
+        // packets flowing down dipole L-shells into the auroral oval.
+        // Pass the live solar-wind state too so the cascade can:
+        //   • compress dayside / stretch nightside lines from Pdyn
+        //   • compute Φ_PC, FAC magnitude, HPI
+        //   • dispatch a 'ua-magnetic-state' event with operator-grade
+        //     headlines (HPI, Φ_PC, Lpp, FAC, oval edges, implications)
+        // Uses live IMF Bz when available; falls back to an Ap-derived
+        // proxy so storm presets still light up the reconnection cue.
+        if (this._cascade) {
+            this._cascade.setState({
+                f107, ap, bz,
+                speed:   this._swState?.speed,
+                density: this._swState?.density,
+                by:      this._swState?.by,
+            });
+        }
+
+        // Feed a substorm-index proxy into the controller's auto-
+        // trigger. We synthesise the index from the same drivers
+        // solar-wind-magnetosphere.js uses: an Ap-driven storm-norm
+        // plus a southward-Bz integrand. Climbing across 0.6 fires
+        // an auto-substorm if the controller is idle + past the
+        // refractory period.
+        if (this._substorm) {
+            const stormNorm = Math.max(0, Math.min(1, (ap - 12) / 200));
+            // Bz drive integrand — accumulates while Bz is southward,
+            // decays exponentially otherwise. Half-life ~30 sec wall-
+            // clock so a state push of southward Bz primes the next
+            // few sets of pushes (mirrors the real magnetosphere's
+            // memory of recent driving).
+            const bzS = Number.isFinite(bz)
+                ? Math.max(0, -bz / 20)        // 0 at +Bz, 1 at -20 nT
+                : stormNorm * 0.7;
+            this._bzDriveAccum = Math.max(0, Math.min(1,
+                0.85 * (this._bzDriveAccum || 0) + 0.45 * bzS));
+            const idx = Math.min(1, 0.55 * stormNorm + 0.65 * this._bzDriveAccum);
+            this._substorm.setSubstormIndex(idx);
+        }
     }
 
     /**
      * Toggle overlay groups.
      */
     setVisibility({ satellites = true, shells = true, solarWind = true,
-                    particles = true, vectorFields } = {}) {
+                    particles = true, vectorFields, cascade = true } = {}) {
         if (this._satGroup)      this._satGroup.visible      = satellites;
         if (this._shellGroup)    this._shellGroup.visible    = shells;
         if (this._swGroup)       this._swGroup.visible       = solarWind;
         if (this._particleGroup) this._particleGroup.visible = particles;
+        if (this._cascade)       this._cascade.setVisible(cascade);
         // vectorFields visibility is driven by the field MODE — passing
         // false explicitly here forces the whole group off without
         // changing the mode (a user-friendly "hide" without losing
@@ -669,7 +906,15 @@ export class AtmosphereGlobe {
         const speed   = Number.isFinite(sw.speed)   ? sw.speed   : SW_DEFAULTS.speed;
         const density = Number.isFinite(sw.density) ? sw.density : SW_DEFAULTS.density;
         const bz      = Number.isFinite(sw.bz)      ? sw.bz      : SW_DEFAULTS.bz;
-        this._swState = { speed, density, bz };
+        const by      = Number.isFinite(sw.by)      ? sw.by      : 0;
+        this._swState = { speed, density, bz, by };
+
+        // Cascade geometry compresses dayside / stretches nightside
+        // lines under Pdyn — push the live state so the visual tracks
+        // the boundary motion the magnetopause is showing in parallel.
+        if (this._cascade) {
+            this._cascade.setSolarWindState({ speed, density, bz, by });
+        }
 
         const mp = computeShue(density, speed, bz);
         const bs = computeBowShock(mp.r0, mp.alpha);
@@ -768,9 +1013,17 @@ export class AtmosphereGlobe {
         this._camera = new THREE.PerspectiveCamera(40, aspect, 0.01, 1000);
         this._camera.position.set(0, 0.6, this.opts.cameraDistance);
 
-        // Sun direction — mostly from +X with a slight northern tilt.
-        // Used by EarthSkin and by subsequent setState() recomputations.
-        this._sunDir = new THREE.Vector3(1, 0.35, 0.2).normalize();
+        // Sun direction — derived from the actual sub-solar point at
+        // the current wall-clock time. The day-side terminator on the
+        // EarthSkin texture and the position of the Sun graphic in the
+        // solar-wind group both fall out of this vector, so the scene
+        // reflects the real Earth–Sun geometry at page-load. _animate()
+        // refreshes it every frame; that motion is genuinely glacial
+        // (≈15°/hour, the Earth's actual rotation rate relative to the
+        // Sun) so the camera reads as static while the geometry remains
+        // physically correct.
+        const ssp = subSolarPoint(new Date());
+        this._sunDir = _subSolarToVec3(ssp.lat, ssp.lon);
     }
 
     _buildEarth() {
@@ -923,43 +1176,78 @@ export class AtmosphereGlobe {
         const altKm    = spec.altitudeKm;
         const r        = 1 + altKm / R_EARTH_KM;
 
-        // ── Probe sprite ──────────────────────────────────────────────
-        const geo = new THREE.SphereGeometry(0.012, 14, 10);
-        const mat = new THREE.MeshBasicMaterial({
-            color: colorHex,
-            transparent: true,
-            opacity: 1.0,
-        });
-        const mesh = new THREE.Mesh(geo, mat);
-        mesh.userData = {
+        // ── Probe LOD ────────────────────────────────────────────────
+        // Three tiers, swapped automatically by THREE.LOD based on
+        // camera distance to the probe (in scene units, where 1 = R⊕):
+        //
+        //   far   (≥ 0.9)  sphere + halo only — the original "dot" look
+        //                   from any zoomed-out camera position.
+        //   mid   (≥ 0.06) low-poly recognisable shape — solar panels,
+        //                   bus, antennas — readable from a few hundred
+        //                   km out (artistic scale).
+        //   near  (≥ 0)    the same shape (kept as a separate level so
+        //                   we can plug a higher-poly variant later).
+        //
+        // The LOD is the picker target — userData is set on it so a
+        // raycast against any of its children resolves up via the
+        // .parent chain in _initTooltip.
+        const lod = new THREE.LOD();
+        lod.userData = {
             kind:    'sat-probe',
             id:      spec.id,
             name:    spec.name,
-            altKm,                // updated each frame as the probe moves
+            altKm,
             color:   spec.color,
-            spec,                 // full orbital + descriptive metadata
+            spec,
             tooltip: spec.description ||
                      'Click to fly the camera here. Drag pressure '
                    + '≈ ½ρv² uses live ρ at the probe\'s current altitude.',
         };
-        // Halo for distance visibility.
-        const haloMat = new THREE.MeshBasicMaterial({
-            color: colorHex,
-            transparent: true,
-            opacity: 0.25,
-            depthWrite: false,
-            blending: THREE.AdditiveBlending,
-        });
+
+        // Far tier: sphere + halo (original look). Wrapped in a Group
+        // so the halo stays a child and follows orientation cleanly.
+        const farGrp = new THREE.Group();
+        const sphere = new THREE.Mesh(
+            new THREE.SphereGeometry(0.012, 14, 10),
+            new THREE.MeshBasicMaterial({
+                color: colorHex, transparent: true, opacity: 1.0,
+            }),
+        );
         const halo = new THREE.Mesh(
             new THREE.SphereGeometry(0.026, 14, 10),
-            haloMat,
+            new THREE.MeshBasicMaterial({
+                color: colorHex, transparent: true, opacity: 0.25,
+                depthWrite: false, blending: THREE.AdditiveBlending,
+            }),
         );
-        halo.userData = mesh.userData;
-        mesh.add(halo);
+        farGrp.add(sphere);
+        farGrp.add(halo);
+
+        // Mid + near tiers: recognisable model from satellite-models.js.
+        // The high-detail tier is currently identical to mid — kept
+        // separate so future poly-count work plugs in cleanly.
+        const midGrp = buildSatelliteModel(spec);
+        const nearGrp = buildSatelliteModelLow(spec);
+
+        // LOD distance thresholds. Three.js picks the highest-index
+        // level whose distance ≤ camera-to-LOD distance; smaller
+        // numbers = closer. With camera at ~3.2 R⊕ and probes at
+        // ~1.07 R⊕, the default view sees distance ≈ 2.1 → far tier.
+        // When the user flies to within ~0.3 R⊕ (≈ 2000 km artistic)
+        // we promote to mid; closer than 0.06 R⊕ (≈ 380 km) we render
+        // near. Tuned empirically — bump if the swap reads as a pop.
+        lod.addLevel(nearGrp, 0);
+        lod.addLevel(midGrp,  0.06);
+        lod.addLevel(farGrp,  0.30);
+
         // Seed the probe's position on first paint at one orbital point
         // so it's not stuck at origin until the first animate() tick.
-        mesh.position.set(r, 0, 0);
-        this._satProbeGrp.add(mesh);
+        lod.position.set(r, 0, 0);
+        this._satProbeGrp.add(lod);
+
+        // Keep `mesh` as the LOD object — _stepSatellites and the
+        // public APIs that read probe.mesh.position keep working.
+        const mesh = lod;
 
         // ── Orbital-path polyline ─────────────────────────────────────
         // 96 points around a full period — closed loop. Drawn in the
@@ -1247,10 +1535,16 @@ export class AtmosphereGlobe {
     // gives users visible LEO context without the Kessler-syndrome
     // cost of a quadratic 4-asset × 30k debris screen.
 
-    async _loadDebrisSample({ count = 50 } = {}) {
+    async _loadDebrisSample({ count = 200 } = {}) {
         let records;
         try {
-            records = await fetchDebrisSample({ count, altMinKm: 350, altMaxKm: 900 });
+            // Widened to 250–1500 km so the sample spans the major
+            // debris-rich shells: ISS (400 km), Cosmos 1408 cloud
+            // (480 km), Starlink (550 km), Iridium-33/Cosmos-2251
+            // (790 km), Fengyun-1C (850 km), and OneWeb (1200 km).
+            // Sample size bumped from 50 → 200 so each family gets
+            // a visible footprint without flooding the screener.
+            records = await fetchDebrisSample({ count, altMinKm: 250, altMaxKm: 1500 });
         } catch (err) {
             console.debug('[upper-atmosphere] debris fetch failed:', err?.message || err);
             return;
@@ -1301,11 +1595,21 @@ export class AtmosphereGlobe {
         let M_now = (orb.meanAnomalyDeg0 * Math.PI / 180) + n_rad_s * dtSec;
         M_now = ((M_now % TAU) + TAU) % TAU;
 
+        // Family + size attribution. The catalog assigns:
+        //   _family   — known fragmentation event or generic-debris
+        //   _size     — small / medium / large (mass + RCS estimate)
+        //   _hazardMJ — kinetic energy at typical LEO closing speed
+        // Used downstream by the debris cloud (per-vertex color),
+        // tooltips, and the family roll-up panel.
+        const annot = annotateDebris(rec);
+
         const probe = {
             spec: {
                 id: rec.id,
                 name: rec.name,
-                color: rec.color,
+                // Override the engine's generic pink with the family
+                // color so the cloud reads as "debris by source event".
+                color: annot.family.color,
                 altitudeKm: rec.altitudeKm,
                 orbital: { ...orb, meanAnomalyDeg0: M_now * 180 / Math.PI },
             },
@@ -1313,6 +1617,9 @@ export class AtmosphereGlobe {
             _propTable: null,
             _propTableN: 0,
             _kind: 'debris',
+            _family: annot.family,
+            _size:   annot.size,
+            _hazardMJ: annot.hazardMJ,
             mesh: null,           // debris are points in a shared cloud, not individual meshes
         };
         this._buildProbeLookup(probe);
@@ -1327,23 +1634,47 @@ export class AtmosphereGlobe {
     _buildDebrisCloud(debris) {
         const N = debris.length;
         const positions = new Float32Array(N * 3);
+        // Per-vertex color: each debris point inherits its family's
+        // signature color from debris-catalog.js. The PointsMaterial
+        // is set to vertexColors so the cloud reads as a heatmap of
+        // source events instead of a uniform pink swarm.
+        const colors    = new Float32Array(N * 3);
+        // Per-vertex point size — large rocket bodies render bigger
+        // than small ASAT shrapnel, giving a visual hazard hierarchy.
+        const sizes     = new Float32Array(N);
+
         // Seed with current positions so first paint isn't at origin.
         const ts = this.opts.satTimeScale ?? this.opts.issTimeScale ?? 60;
         const tNowSim = (this._clock?.getElapsedTime?.() ?? 0) * ts;
+        const _tmpColor = new THREE.Color();
         for (let i = 0; i < N; i++) {
             const p = _lookupProbePosition(debris[i], tNowSim);
             positions[i * 3]     = p.x;
             positions[i * 3 + 1] = p.y;
             positions[i * 3 + 2] = p.z;
+
+            const fam = debris[i]._family;
+            _tmpColor.set(fam?.color || '#ff7099');
+            colors[i * 3]     = _tmpColor.r;
+            colors[i * 3 + 1] = _tmpColor.g;
+            colors[i * 3 + 2] = _tmpColor.b;
+
+            sizes[i] = debris[i]._size?.pointPx ?? 0.014;
         }
         const geom = new THREE.BufferGeometry();
         geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geom.setAttribute('color',    new THREE.BufferAttribute(colors, 3));
         const mat = new THREE.PointsMaterial({
-            color:       0xff7099,           // hazard pink
-            size:        0.014,
+            vertexColors: true,
+            // 2.4× the previous size so the cloud reads as "hazard" at the
+            // default 3.2 Earth-radii camera distance instead of needing
+            // the user to zoom in.
+            size:         0.034,
             sizeAttenuation: true,
             transparent: true,
-            opacity:     0.75,
+            // Bumped opacity so the additive blend doesn't wash the dots
+            // out against the day-side Earth.
+            opacity:     1.0,
             depthWrite:  false,
             blending:    THREE.AdditiveBlending,
         });
@@ -1389,6 +1720,175 @@ export class AtmosphereGlobe {
     /** Count of currently-tracked debris pieces. UI uses this for the
      *  panel header. Returns 0 if the fetch hasn't resolved yet. */
     getDebrisCount() { return this._debris?.length ?? 0; }
+
+    /**
+     * Roll-up of the loaded debris sample by source-event family.
+     * Each entry is { family, count, mediumEnergyMJ }, sorted by count
+     * desc. Used by the Debris Families UI panel.
+     */
+    getDebrisFamilyBreakdown() {
+        return summariseByFamily(this._debris || []);
+    }
+
+    /**
+     * Returns metadata for the i-th debris piece — used by the tooltip
+     * pipeline (which has the index from the picked vertex). The
+     * shape mirrors what the conjunction-watch row needs:
+     *   { name, noradId, altKm, family:{id,name,color,year},
+     *     size:{class,rangeM,massKg}, hazardMJ }
+     */
+    getDebrisMetaByIndex(idx) {
+        const d = this._debris?.[idx];
+        if (!d) return null;
+        return {
+            name:      d.spec.name,
+            noradId:   d.spec.orbital?.noradId,
+            altKm:     d.spec.altitudeKm,
+            family:    d._family
+                ? { id: d._family.id, name: d._family.name,
+                    color: d._family.color, year: d._family.year }
+                : null,
+            size:      d._size
+                ? { class: d._size.class, rangeM: d._size.rangeM,
+                    massKg: d._size.massKg }
+                : null,
+            hazardMJ:  d._hazardMJ ?? 0,
+        };
+    }
+
+    // ── Constellation overlays ───────────────────────────────────────────
+    //
+    // Render one or more major constellations as faint distinct point
+    // clouds. Each constellation gets its own THREE.Points so toggling
+    // is a single mesh.visible flip. Positions come from
+    // constellation-catalog.js's spawnConstellationPositions(), which
+    // synthesises Walker-Delta element sets — no live TLE fetch.
+    //
+    // Operational modelling needs the live catalog (see
+    // js/satellite-tracker.js); these overlays exist purely to give
+    // the user spatial intuition for "where do the big constellations
+    // live, relative to my orbit + the debris clouds."
+
+    /**
+     * Toggle a constellation overlay on/off. Lazily builds the cloud
+     * on first enable and caches it; subsequent toggles are O(1). When
+     * the constellation has a `.meo: true` flag (GPS / Galileo /
+     * GLONASS / BeiDou), the cloud is built but the camera distance
+     * may need expanding to see it — we don't move the camera here.
+     *
+     * @param {string} id          constellation id (see CONSTELLATIONS)
+     * @param {boolean} visible
+     * @returns {boolean}          whether the call succeeded
+     */
+    setConstellationVisible(id, visible) {
+        const c = CONSTELLATIONS.find(c => c.id === id);
+        if (!c) return false;
+        this._constellationClouds = this._constellationClouds || {};
+        let cloud = this._constellationClouds[id];
+        if (!cloud && visible) {
+            cloud = this._buildConstellationCloud(c);
+            this._constellationClouds[id] = cloud;
+        }
+        if (cloud) cloud.cloud.visible = visible;
+        return true;
+    }
+
+    /** Returns a list of constellation ids currently visible. */
+    getConstellationsVisible() {
+        const out = [];
+        const all = this._constellationClouds || {};
+        for (const id in all) if (all[id].cloud.visible) out.push(id);
+        return out;
+    }
+
+    /**
+     * Build a {cloud, probes} entry for one constellation. Each probe
+     * has the same shape as a debris probe (with _kind = 'sat'), so
+     * the per-frame _stepConstellations loop can drive it through the
+     * standard _lookupProbePosition pathway.
+     */
+    _buildConstellationCloud(c) {
+        const recs = spawnConstellationPositions(c);
+        const probes = recs.map(rec => {
+            const orb = rec.orbital;
+            const TAU = 2 * Math.PI;
+            const M_now = ((orb.meanAnomalyDeg0 * Math.PI / 180) % TAU + TAU) % TAU;
+            const probe = {
+                spec: {
+                    id: rec.id,
+                    name: c.name,
+                    color: rec.color,
+                    altitudeKm: rec.altitudeKm,
+                    orbital: { ...orb, meanAnomalyDeg0: M_now * 180 / Math.PI },
+                },
+                _phase0: M_now,
+                _propTable: null,
+                _propTableN: 0,
+                _kind: 'constellation',
+                _constellationId: c.id,
+                mesh: null,
+            };
+            this._buildProbeLookup(probe);
+            return probe;
+        });
+
+        const N = probes.length;
+        const positions = new Float32Array(N * 3);
+        const ts = this.opts.satTimeScale ?? this.opts.issTimeScale ?? 60;
+        const tNowSim = (this._clock?.getElapsedTime?.() ?? 0) * ts;
+        for (let i = 0; i < N; i++) {
+            const p = _lookupProbePosition(probes[i], tNowSim);
+            positions[i * 3]     = p.x;
+            positions[i * 3 + 1] = p.y;
+            positions[i * 3 + 2] = p.z;
+        }
+        const geom = new THREE.BufferGeometry();
+        geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        const mat = new THREE.PointsMaterial({
+            color:       new THREE.Color(c.color),
+            size:        0.012,
+            sizeAttenuation: true,
+            transparent: true,
+            opacity:     0.55,
+            depthWrite:  false,
+            blending:    THREE.AdditiveBlending,
+        });
+        const cloud = new THREE.Points(geom, mat);
+        cloud.frustumCulled = false;
+        cloud.userData = {
+            kind: 'constellation',
+            id:   c.id,
+            name: `${c.name} (${c.operator}) — ${c.countActive} active`,
+            tooltip: `${c.name}: ${c.summary}`,
+        };
+        // Mount on the same group as debris so it inherits any
+        // global toggling we add later.
+        this._satProbeGrp.add(cloud);
+
+        return { cloud, probes, positions };
+    }
+
+    /** Per-frame: advance every visible constellation cloud's points. */
+    _stepConstellations(t) {
+        const all = this._constellationClouds;
+        if (!all) return;
+        const ts = this.opts.satTimeScale ?? this.opts.issTimeScale ?? 60;
+        const tNowSim = t * ts;
+        for (const id in all) {
+            const entry = all[id];
+            if (!entry.cloud.visible) continue;
+            const probes = entry.probes;
+            const pos = entry.positions;
+            for (let i = 0; i < probes.length; i++) {
+                const p = _lookupProbePosition(probes[i], tNowSim);
+                const o = i * 3;
+                pos[o]     = p.x;
+                pos[o + 1] = p.y;
+                pos[o + 2] = p.z;
+            }
+            entry.cloud.geometry.attributes.position.needsUpdate = true;
+        }
+    }
 
     /**
      * Build the hover-highlight ring used to disambiguate which dot
@@ -1572,18 +2072,52 @@ export class AtmosphereGlobe {
         });
         this._streamGroup = new THREE.Group();
         this._streamGroup.name = 'fluxStreamers';
-        const streamerStarts = _streamerStartPoints(8, bs0.r0 + 4);
-        for (const s of streamerStarts) {
-            const positions = new Float32Array(2 * 3);
-            const progress  = new Float32Array(2);
-            // Streamer goes from far-sunward (y = s.y) toward Earth
-            // (y ~ bs.r0). Both points are in the solar group's local
-            // frame; we'll +Y == sunward by group orientation.
+        // Bumped from 8 → 64 streamers for a denser, more textured
+        // sunward flow. Each streamer is a multi-segment polyline with
+        // a subtle Parker-spiral curl + per-strand jitter so the
+        // cluster doesn't read as a wheel of straight spokes.
+        const N_FLUX = 64;
+        const SEG    = 16;          // segments per streamer
+        const streamerStarts = _streamerStartPoints(N_FLUX, bs0.r0 + 4);
+        const tooltipText = 'Bulk plasma flow from the Sun. Brightness ∝ dynamic pressure ρv²; flow rate ∝ speed.';
+        for (let si = 0; si < streamerStarts.length; si++) {
+            const s = streamerStarts[si];
+            // Bow-shock approach point — converge slightly toward the
+            // sun-Earth axis but never to zero so streamers don't
+            // bunch into a single line at the nose.
             const yEnd = bs0.r0 * 0.95;
-            positions[0] = s.x; positions[1] = s.y; positions[2] = s.z;
-            positions[3] = s.x * 0.20; positions[4] = yEnd; positions[5] = s.z * 0.20;
-            progress[0] = 0;
-            progress[1] = 1;
+            const xEnd = s.x * 0.20;
+            const zEnd = s.z * 0.20;
+
+            // Parker-spiral hint — small azimuthal twist proportional
+            // to streamer arrival distance. Sign jittered so adjacent
+            // strands curl opposite ways and visually braid.
+            const sign = (si % 2 === 0) ? 1 : -1;
+            const twistAmp = 0.22 * sign * (0.7 + 0.6 * Math.random());
+
+            const positions = new Float32Array(SEG * 3);
+            const progress  = new Float32Array(SEG);
+            for (let i = 0; i < SEG; i++) {
+                const t = i / (SEG - 1);
+                // Linear interpolate sunward → Earth, then add the
+                // twist as an azimuthal offset around the sun-Earth
+                // axis (+Y in solar-group frame).
+                const x0 = s.x + (xEnd - s.x) * t;
+                const y0 = s.y + (yEnd - s.y) * t;
+                const z0 = s.z + (zEnd - s.z) * t;
+                // Twist grows from 0 at the source to a peak around
+                // mid-flight then relaxes near the bow shock — the
+                // shape Parker-spiral streamers actually take in the
+                // inner heliosphere.
+                const tw = twistAmp * Math.sin(Math.PI * t);
+                const c = Math.cos(tw), sn = Math.sin(tw);
+                const x1 = x0 * c - z0 * sn;
+                const z1 = x0 * sn + z0 * c;
+                positions[i * 3 + 0] = x1;
+                positions[i * 3 + 1] = y0;
+                positions[i * 3 + 2] = z1;
+                progress[i] = t;
+            }
             const geom = new THREE.BufferGeometry();
             geom.setAttribute('position',  new THREE.BufferAttribute(positions, 3));
             geom.setAttribute('aProgress', new THREE.BufferAttribute(progress, 1));
@@ -1592,11 +2126,68 @@ export class AtmosphereGlobe {
                 kind:    'flux-stream',
                 id:      'flux-stream',
                 name:    'Solar-wind flux',
-                tooltip: 'Bulk plasma flow from the Sun. Brightness ∝ dynamic pressure ρv²; flow rate ∝ speed.',
+                tooltip: tooltipText,
             };
             this._streamGroup.add(line);
         }
         this._swGroup.add(this._streamGroup);
+
+        // ── Heliospheric current sheet (faint disc) ─────────────────────
+        // Thin equatorial sheet along the solar-wind flow plane. Reads
+        // as a soft pink-orange wash that traces the wavy ballerina-
+        // skirt geometry. Cheap — one ring mesh; fragment shader does
+        // the radial fade.
+        const sheetGeo = new THREE.RingGeometry(2.5, bs0.r0 + 2, 96, 1);
+        const sheetMat = new THREE.ShaderMaterial({
+            uniforms: {
+                uColor: { value: new THREE.Color(0xff9c66) },
+                uTime:  { value: 0 },
+            },
+            vertexShader: /* glsl */`
+                varying vec2 vUv;
+                varying vec3 vPosL;
+                void main() {
+                    vUv = uv;
+                    vPosL = position;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: /* glsl */`
+                precision highp float;
+                uniform vec3  uColor;
+                uniform float uTime;
+                varying vec2  vUv;
+                varying vec3  vPosL;
+                void main() {
+                    // Distance from the sun-Earth axis (+Y) → ring radius.
+                    float r = length(vPosL.xz);
+                    // Ballerina-skirt waviness — gentle azimuthal warp.
+                    float az = atan(vPosL.z, vPosL.x);
+                    float warp = sin(az * 4.0 + uTime * 0.4) * 0.5 + 0.5;
+                    // Radial taper: brighter near the disc, falling to
+                    // zero at both inner & outer edges.
+                    float radial = smoothstep(2.5, 4.0, r) * (1.0 - smoothstep(8.0, 14.0, r));
+                    float a = 0.10 * radial * (0.5 + 0.5 * warp);
+                    gl_FragColor = vec4(uColor, a);
+                }
+            `,
+            transparent: true,
+            side:        THREE.DoubleSide,
+            depthWrite:  false,
+            blending:    THREE.AdditiveBlending,
+        });
+        const sheet = new THREE.Mesh(sheetGeo, sheetMat);
+        // RingGeometry is in the XY plane — rotate so it lies in the
+        // XZ plane (the sun-aligned group's equatorial plane).
+        sheet.rotation.x = Math.PI / 2;
+        sheet.userData = {
+            kind:    'current-sheet',
+            id:      'helio-current-sheet',
+            name:    'Heliospheric current sheet',
+            tooltip: 'Wavy equatorial boundary in the interplanetary magnetic field; the "ballerina skirt".',
+        };
+        this._currentSheetMat = sheetMat;
+        this._swGroup.add(sheet);
 
         // ── Sun glow + EUV streamers ───────────────────────────────────
         // Replaces the flat sphere marker with a proper "the Sun is
@@ -1614,6 +2205,49 @@ export class AtmosphereGlobe {
     }
 
     /**
+     * Build the dipole magnetic-field cascade — a set of L-shell field
+     * lines carrying an animated EUV/precipitation packet train from
+     * the magnetopause down to the auroral oval and the polar cusps.
+     * Drives intensity from the live (F10.7, Ap, Bz) state via
+     * setState(), which is called from setState() on the globe.
+     */
+    _buildMagneticCascade() {
+        this._cascade = new MagneticCascade({
+            parent:    this._scene,
+            intensity: 0.45,
+            sunDir:    this._sunDir,
+        });
+        // Apply the climatology so first paint shows a baseline cascade
+        // even before setState() arrives.
+        this._cascade.setState({ f107: 150, ap: 15 });
+
+        // Substorm state machine — drives the growth → expansion →
+        // recovery animation. 'demo' mode walks through a substorm
+        // in ~30 s wall-clock; auto-triggered when the cumulative
+        // southward-Bz drive (substorm-index proxy) crosses 0.6.
+        this._substorm = new SubstormController({ mode: 'demo' });
+
+        // Local accumulator of southward-Bz drive — fed into the
+        // controller as a substorm-index proxy. Re-evaluated whenever
+        // setState() pushes a fresh (Ap, Bz) tuple.
+        this._bzDriveAccum = 0;
+    }
+
+    /**
+     * Manually trigger a substorm. Returns true on success (controller
+     * was IDLE), false if a substorm is already in progress.
+     */
+    triggerSubstorm(opts) {
+        return this._substorm?.trigger(opts) ?? false;
+    }
+    /** Force-end any in-progress substorm. */
+    resetSubstorm() { this._substorm?.reset(); }
+    /** 'demo' (compressed ~30 s) or 'realtime' (literal-minutes timing). */
+    setSubstormMode(mode) { this._substorm?.setMode(mode); }
+    /** Toggle the auto-trigger from substorm-index threshold. */
+    setSubstormAuto(v) { this._substorm?.setAutoEnabled(v); }
+
+    /**
      * Build the sun: a hot inner core + a soft halo + 24 outgoing
      * radial streamers that read as photon emission. F10.7 modulates
      * the corona brightness + streamer length so users see "active
@@ -1622,66 +2256,126 @@ export class AtmosphereGlobe {
      */
     _buildSun(bs0) {
         const sunDistance = bs0.r0 + 8;
-        const coreR = 0.55;
-        const haloR = 1.4;
+        // Multi-layer Sun: photosphere → chromosphere → corona →
+        // outer corona. Each layer is a separate sphere mesh with its
+        // own material so the layered fresnel additive blend reads as
+        // real depth rather than a single flat halo. Sized in scene
+        // units (Earth radii); not to true scale — the real Sun is
+        // ~109 R⊕ wide but we keep it visually marker-sized so it
+        // fits in frame next to Earth's magnetosphere.
+        const photoR    = 0.55;   // visible "surface"
+        const chromoR   = 0.72;   // tight reddish ring
+        const coronaR   = 1.50;   // mid-corona glow
+        const outerR    = 2.80;   // wide blue-white halo
 
-        // Hot core — solid bright disc.
-        const coreGeo = new THREE.SphereGeometry(coreR, 22, 16);
-        const coreMat = new THREE.MeshBasicMaterial({
-            color: 0xfff4c4,
-            transparent: true,
-            opacity: 0.95,
-            blending: THREE.AdditiveBlending,
-            depthWrite: false,
-        });
-        const core = new THREE.Mesh(coreGeo, coreMat);
-        core.userData = {
+        const sunUserData = {
             kind:    'sun-marker',
             id:      'sun',
             name:    'Sun',
-            tooltip: 'Solar emission source. Brightness + streamer '
-                   + 'length scale with F10.7 (10.7-cm radio flux, an '
-                   + 'EUV proxy used by NRL-MSIS / Jacchia models).',
+            tooltip: 'Solar emission source. Photosphere granulation, '
+                   + 'chromosphere ring, and multi-layer corona. '
+                   + 'Brightness + streamer length scale with F10.7 '
+                   + '(10.7-cm radio flux, an EUV proxy used by NRL-MSIS).',
         };
 
-        // Halo — fresnel-bright corona that breathes with the F10.7
-        // driver. We re-use the SW_VERT/SW_FRAG shaders since they
-        // already implement a viewer-direction limb glow.
-        const haloMat = new THREE.ShaderMaterial({
+        // ── Photosphere — granulated, limb-darkened disc ────────────
+        const photoMat = new THREE.ShaderMaterial({
             uniforms: {
-                uColor:     { value: new THREE.Color(0xffd060) },
-                uRimColor:  { value: new THREE.Color(0xffe5a8) },
-                uBaseAlpha: { value: 0.18 },
-                uRimPower:  { value: 1.6 },
+                uTime:      { value: 0 },
+                uIntensity: { value: 1.0 },
+                uHot:       { value: new THREE.Color(0xfff5d8) },
+                uCool:      { value: new THREE.Color(0xff8a30) },
+            },
+            vertexShader:   SUN_VERT,
+            fragmentShader: SUN_FRAG,
+            depthWrite:     true,
+        });
+        const photo = new THREE.Mesh(
+            new THREE.SphereGeometry(photoR, 64, 48),
+            photoMat,
+        );
+        photo.userData = sunUserData;
+
+        // ── Chromosphere — thin reddish-pink shell hugging the disc ─
+        const chromoMat = new THREE.ShaderMaterial({
+            uniforms: {
+                uColor:     { value: new THREE.Color(0xff5530) },
+                uRimColor:  { value: new THREE.Color(0xff9870) },
+                uBaseAlpha: { value: 0.22 },
+                uRimPower:  { value: 2.4 },
                 uIntensity: { value: 1.0 },
                 uTime:      { value: 0 },
             },
-            vertexShader:   SW_VERT,
-            fragmentShader: SW_FRAG,
+            vertexShader:   CORONA_VERT,
+            fragmentShader: CORONA_FRAG,
             transparent:    true,
             side:           THREE.DoubleSide,
             depthWrite:     false,
             blending:       THREE.AdditiveBlending,
         });
-        const halo = new THREE.Mesh(
-            new THREE.SphereGeometry(haloR, 32, 22),
-            haloMat,
+        const chromo = new THREE.Mesh(
+            new THREE.SphereGeometry(chromoR, 48, 32),
+            chromoMat,
         );
-        halo.userData = core.userData;
-        core.add(halo);
+        chromo.userData = sunUserData;
 
-        // Outgoing photon streamers — radial line strips emanating
-        // from the core in 24 directions on a Fibonacci sphere. Each
-        // streamer carries an aProgress attribute (0 at core, 1 at
-        // tip) so the SW_STREAM shaders can paint the travelling-dash
-        // pattern radiating *outward* (negative speed → outward dash).
-        const N_STREAMS = 24;
+        // ── Mid corona — yellow-white, fbm filaments ────────────────
+        const coronaMat = new THREE.ShaderMaterial({
+            uniforms: {
+                uColor:     { value: new THREE.Color(0xffd070) },
+                uRimColor:  { value: new THREE.Color(0xffeec0) },
+                uBaseAlpha: { value: 0.16 },
+                uRimPower:  { value: 1.7 },
+                uIntensity: { value: 1.0 },
+                uTime:      { value: 0 },
+            },
+            vertexShader:   CORONA_VERT,
+            fragmentShader: CORONA_FRAG,
+            transparent:    true,
+            side:           THREE.DoubleSide,
+            depthWrite:     false,
+            blending:       THREE.AdditiveBlending,
+        });
+        const corona = new THREE.Mesh(
+            new THREE.SphereGeometry(coronaR, 48, 32),
+            coronaMat,
+        );
+        corona.userData = sunUserData;
+
+        // ── Outer corona — wide cool halo, near-transparent ─────────
+        const outerMat = new THREE.ShaderMaterial({
+            uniforms: {
+                uColor:     { value: new THREE.Color(0xffe8c8) },
+                uRimColor:  { value: new THREE.Color(0xb0d8ff) },
+                uBaseAlpha: { value: 0.05 },
+                uRimPower:  { value: 2.6 },
+                uIntensity: { value: 1.0 },
+                uTime:      { value: 0 },
+            },
+            vertexShader:   CORONA_VERT,
+            fragmentShader: CORONA_FRAG,
+            transparent:    true,
+            side:           THREE.DoubleSide,
+            depthWrite:     false,
+            blending:       THREE.AdditiveBlending,
+        });
+        const outer = new THREE.Mesh(
+            new THREE.SphereGeometry(outerR, 36, 24),
+            outerMat,
+        );
+        outer.userData = sunUserData;
+
+        // ── Outgoing radial streamers — Fibonacci sphere ────────────
+        // Bumped from 24 → 56 strands and each carries a slight curl
+        // off-axis so the cluster reads as a textured photon flow
+        // rather than a regular wheel of spokes.
+        const N_STREAMS = 56;
         const streamMat = new THREE.ShaderMaterial({
             uniforms: {
-                uColor:     { value: new THREE.Color(0xffe080) },
+                uColor:     { value: new THREE.Color(0xffe4a0) },
                 uTime:      { value: 0 },
                 uIntensity: { value: 0.7 },
-                uSpeed:     { value: -0.22 },     // negative → flow outward
+                uSpeed:     { value: -0.28 },     // negative → flow outward
             },
             vertexShader:   SW_STREAM_VERT,
             fragmentShader: SW_STREAM_FRAG,
@@ -1699,10 +2393,17 @@ export class AtmosphereGlobe {
             const dx = r * Math.cos(lon);
             const dy = y;
             const dz = r * Math.sin(lon);
-            const tipLen = 2.4;     // R⊕ from the core; modulated below
+            // Curl factor — small per-strand offset so the tip drifts
+            // off the radial line. Amount alternates ± so neighbours
+            // visually braid rather than radiate uniformly.
+            const sign = (i % 2 === 0) ? 1 : -1;
+            const curl = 0.18 * sign;
+            const tx = -dz * curl;
+            const tz =  dx * curl;
+            const tipLen = 2.0 + 1.4 * Math.random();   // jittered length
             const positions = new Float32Array([
-                dx * coreR, dy * coreR, dz * coreR,
-                dx * (coreR + tipLen), dy * (coreR + tipLen), dz * (coreR + tipLen),
+                dx * photoR, dy * photoR, dz * photoR,
+                (dx + tx) * (photoR + tipLen), dy * (photoR + tipLen), (dz + tz) * (photoR + tipLen),
             ]);
             const progress = new Float32Array([0, 1]);
             const g = new THREE.BufferGeometry();
@@ -1717,15 +2418,26 @@ export class AtmosphereGlobe {
             };
             streamGroup.add(line);
         }
-        core.add(streamGroup);
 
-        core.position.set(0, sunDistance, 0);
-        this._sunMarker  = core;
-        this._sunCoreMat = coreMat;
-        this._sunHaloMat = haloMat;
-        this._sunStreamMat = streamMat;
+        // ── Sun group — bundle photosphere + halos + streamers ──────
+        const sunGroup = new THREE.Group();
+        sunGroup.add(photo);
+        sunGroup.add(chromo);
+        sunGroup.add(corona);
+        sunGroup.add(outer);
+        sunGroup.add(streamGroup);
+        sunGroup.position.set(0, sunDistance, 0);
+
+        // Cache references for setF107 + animate.
+        this._sunMarker      = sunGroup;
+        this._sunPhotoMat    = photoMat;
+        this._sunChromoMat   = chromoMat;
+        this._sunCoreMat     = photoMat;       // legacy alias for setF107
+        this._sunHaloMat     = coronaMat;
+        this._sunOuterMat    = outerMat;
+        this._sunStreamMat   = streamMat;
         this._sunStreamGroup = streamGroup;
-        this._swGroup.add(core);
+        this._swGroup.add(sunGroup);
     }
 
     /**
@@ -1736,20 +2448,73 @@ export class AtmosphereGlobe {
     setF107(f107Sfu) {
         const f = Number.isFinite(f107Sfu) ? f107Sfu : 150;
         const q = Math.max(0, Math.min(1, (f - 65) / (300 - 65)));   // 0..1
-        if (this._sunHaloMat)   this._sunHaloMat.uniforms.uIntensity.value = 0.55 + 0.85 * q;
-        if (this._sunStreamMat) this._sunStreamMat.uniforms.uIntensity.value = 0.30 + 0.95 * q;
-        // Subtle core warming with activity: cooler yellow at quiet,
-        // hotter white at max.
-        if (this._sunCoreMat) {
-            const cool = new THREE.Color(0xffd06c);
-            const hot  = new THREE.Color(0xffffe8);
-            this._sunCoreMat.color.copy(cool.clone().lerp(hot, q));
-            this._sunCoreMat.opacity = 0.85 + 0.13 * q;
+        if (this._sunChromoMat) this._sunChromoMat.uniforms.uIntensity.value = 0.65 + 0.70 * q;
+        if (this._sunHaloMat)   this._sunHaloMat.uniforms.uIntensity.value   = 0.55 + 0.95 * q;
+        if (this._sunOuterMat)  this._sunOuterMat.uniforms.uIntensity.value  = 0.40 + 0.90 * q;
+        if (this._sunStreamMat) this._sunStreamMat.uniforms.uIntensity.value = 0.35 + 1.10 * q;
+        // Photosphere intensity ramp — the granulation stays the same
+        // but the overall brightness rises with activity.
+        if (this._sunPhotoMat) {
+            this._sunPhotoMat.uniforms.uIntensity.value = 0.85 + 0.45 * q;
         }
         // Stream group scales radially so high F10.7 = longer EUV reach.
         if (this._sunStreamGroup) {
-            const s = 0.85 + 0.55 * q;
+            const s = 0.85 + 0.65 * q;
             this._sunStreamGroup.scale.setScalar(s);
+        }
+    }
+
+    /**
+     * Refresh the world-frame sun direction from the current sub-solar
+     * point so the day/night terminator on Earth and the Sun graphic in
+     * the solar-wind group track real time. Cheap (one trig call + a
+     * quaternion + a few uniform copies) so we run it every frame.
+     */
+    _updateSunRealTime() {
+        const ssp = subSolarPoint(new Date());
+        // Skin: only push uniform updates when the angle has actually
+        // moved meaningfully (>0.01° ≈ 1.7e-4 rad). Sub-solar drift is
+        // ≈15°/hour so this still fires several times a minute.
+        const next = _subSolarToVec3(ssp.lat, ssp.lon);
+        if (!this._sunDir) this._sunDir = next;
+        else {
+            // copy in place so consumers that captured the reference
+            // (EarthSkin uniform, layer shells, particle systems, etc.)
+            // see the new value without us having to re-push.
+            this._sunDir.copy(next);
+        }
+        // EarthSkin holds its own clone — push the update so the
+        // shader's u_sun_dir matches.
+        this._skin?.setSunDir?.(this._sunDir);
+        // Layer shells: each material owns its own uSunDir clone.
+        if (this._shells) {
+            for (const sh of this._shells) {
+                sh.material.uniforms.uSunDir?.value.copy(this._sunDir);
+            }
+        }
+        // Particle systems & vector fields use the sun direction for
+        // the subsolar→antisolar wind tangent.
+        if (this._particles) {
+            for (const id in this._particles) {
+                this._particles[id].setSunDir?.(this._sunDir);
+            }
+        }
+        if (this._fields) {
+            for (const id in this._fields) {
+                this._fields[id].setSunDir?.(this._sunDir);
+            }
+        }
+        // Magnetic-field cascade: sun direction biases the dayside-vs-
+        // nightside packet weighting (cusp packets brighten on the
+        // dayside where reconnection is active).
+        this._cascade?.setSunDir?.(this._sunDir);
+        // Solar-wind group is oriented so its local +Y points at the
+        // Sun; update the quaternion so the Shue magnetopause + bow
+        // shock + Sun marker all rotate to the new sub-solar direction.
+        if (this._swGroup) {
+            const yAxis = new THREE.Vector3(0, 1, 0);
+            const q = new THREE.Quaternion().setFromUnitVectors(yAxis, this._sunDir);
+            this._swGroup.quaternion.copy(q);
         }
     }
 
@@ -1903,6 +2668,11 @@ export class AtmosphereGlobe {
             // raycaster returns a per-point .index we use to resolve
             // which dot was hovered. See _findTaggedUserData below.
             ...(this._debrisCloud ? [this._debrisCloud] : []),
+            // Magnetic-cascade artefacts — every line, oval band,
+            // cusp dot, MLT marker, and FAC ring carries a tagged
+            // userData; the recursive=true raycast finds them via
+            // their parent groups.
+            ...(this._cascade ? [this._cascade.group] : []),
         ];
 
         // Recursive: the ISS sprite carries a child halo mesh; if we
@@ -2046,15 +2816,13 @@ export class AtmosphereGlobe {
             }
         }
 
-        // Slow auto-rotation when in orbit mode + user isn't dragging.
-        // In fly mode we keep the world stationary so users can orient
-        // themselves against fixed reference frames.
-        const orbitMode = this._controls.getMode() === 'orbit';
-        if (this.opts.autoRotate && orbitMode && this._skin) {
-            this._skin.earthMesh.rotation.y += 0.0010;
-            if (this._shellGroup) this._shellGroup.rotation.y += 0.00045;
-            if (this._satGroup)   this._satGroup.rotation.y   += 0.00060;
-        }
+        // Real-time Earth–Sun geometry. We don't rotate the Earth mesh or
+        // the camera here — instead the sub-solar point is recomputed from
+        // the wall clock every frame so the day-side terminator tracks
+        // reality at the actual sidereal rate (≈15°/hour). The user reads
+        // this as a stationary, physically-correct scene rather than the
+        // old fast spin-and-circle.
+        this._updateSunRealTime();
 
         // Push the live camera position into the shell shaders so their
         // limb fresnel tracks the current viewpoint.
@@ -2069,9 +2837,46 @@ export class AtmosphereGlobe {
         if (this._mpMat)       this._mpMat.uniforms.uTime.value       = t;
         if (this._bsMat)       this._bsMat.uniforms.uTime.value       = t;
         if (this._streamMat)   this._streamMat.uniforms.uTime.value   = t;
-        // Sun shaders: corona breathing pulse + outgoing-streamer dash.
+        if (this._currentSheetMat) this._currentSheetMat.uniforms.uTime.value = t;
+        // Sun shaders: photosphere granulation drift, multi-layer
+        // corona breathing pulse, outgoing-streamer dash.
+        if (this._sunPhotoMat)  this._sunPhotoMat.uniforms.uTime.value  = t;
+        if (this._sunChromoMat) this._sunChromoMat.uniforms.uTime.value = t;
         if (this._sunHaloMat)   this._sunHaloMat.uniforms.uTime.value   = t;
+        if (this._sunOuterMat)  this._sunOuterMat.uniforms.uTime.value  = t;
         if (this._sunStreamMat) this._sunStreamMat.uniforms.uTime.value = t;
+
+        // Magnetic-field cascade: advance the packet-dash phase. One
+        // uniform write feeds every L-shell field line.
+        if (this._cascade) this._cascade.update(t);
+
+        // Substorm state machine: tick → push to cascade → broadcast
+        // for the UI panel. Skip the heavy refresh path while idle so
+        // we don't spend cycles re-rebuilding the oval every frame
+        // when nothing is happening.
+        if (this._substorm && this._cascade) {
+            const prevPhase = this._substorm.getTick().phase;
+            const tick = this._substorm.update(dt);
+            const isActive   = tick.phase !== 'idle';
+            const wasActive  = prevPhase   !== 'idle';
+            // Only push to cascade when the substorm is doing
+            // something — every frame during active phases (so the
+            // bulge / WTS / AE proxy update smoothly), plus a one-
+            // shot zero-state push on the active→idle transition so
+            // the oval snaps back to its quiet position.
+            if (isActive || wasActive) {
+                this._cascade.setSubstormState(
+                    tick,
+                    this._cascade._lastKpCached,
+                );
+                // Broadcast for the UI panel.
+                try {
+                    window.dispatchEvent(new CustomEvent('ua-substorm-tick', {
+                        detail: tick,
+                    }));
+                } catch (_) { /* SSR / no-window — ignore */ }
+            }
+        }
 
         this._controls.update(dt);
 
@@ -2081,6 +2886,7 @@ export class AtmosphereGlobe {
         // and starting mean anomaly so paths don't all overlap.
         if (this._satProbes) this._stepSatellites(t);
         if (this._debris)    this._stepDebris(t);
+        if (this._constellationClouds) this._stepConstellations(t);
         // Track the hovered debris with a face-on cyan reticle so
         // users can tell which of 50 identical-looking pink dots the
         // tooltip is describing. Cheap; just position + scale + lookAt.
@@ -2828,6 +3634,37 @@ function _tipHTML(userData, profile, swState) {
             }
             lines.push(`<div style="color:#666;font-size:10px;margin-top:2px">${userData.tooltip}</div>`);
             dataLines = lines.join('');
+            break;
+        }
+        case 'magnetic-cascade-line': {
+            const L = userData.L?.toFixed(1) ?? '—';
+            const labelColor = userData.color || '#9cf';
+            detail = `L = ${L} · <span style="color:${labelColor}">${userData.label || ''}</span>`;
+            dataLines = `
+                <div style="color:#9ab;font-size:10px;margin-top:2px">${userData.population || ''}</div>
+                <div style="color:#666;font-size:10px;margin-top:1px">family: ${userData.family || ''}</div>`;
+            break;
+        }
+        case 'auroral-oval': {
+            detail = `${userData.band === 'equatorward' ? 'Equatorward' : 'Poleward'} edge · ${userData.hemisphere} · ~${userData.altKm} km`;
+            dataLines = `<div style="color:#666;font-size:10px;margin-top:2px">${userData.tooltip || ''}</div>`;
+            break;
+        }
+        case 'polar-cusp': {
+            detail = `Polar cusp · ${userData.hemisphere} · ~${userData.altKm} km`;
+            dataLines = `<div style="color:#666;font-size:10px;margin-top:2px">${userData.tooltip || ''}</div>`;
+            break;
+        }
+        case 'mlt-marker': {
+            detail = `MLT ${userData.mlt.toString().padStart(2, '0')} · ${userData.label}`;
+            dataLines = `<div style="color:#666;font-size:10px;margin-top:2px">${userData.tooltip || ''}</div>`;
+            break;
+        }
+        case 'fac-region-1':
+        case 'fac-region-2': {
+            const region = userData.region;
+            detail = `Region ${region} Birkeland · ${userData.hemisphere} · ~${userData.altKm} km`;
+            dataLines = `<div style="color:#666;font-size:10px;margin-top:2px">${userData.tooltip || ''}</div>`;
             break;
         }
         default:

@@ -29,6 +29,38 @@ nav {
 .nav-spacer { flex: 1; }
 .nav-auth-sep { width: 1px; height: 22px; background: rgba(255,255,255,.15); margin: 0 3px; flex-shrink: 0; }
 
+/* ── Utility text-links + PRO promo ─────────────────────────────────────── */
+.nav-utility-links {
+    display: flex; align-items: center; gap: 10px;
+    flex-shrink: 0; min-width: 0;
+}
+.nav-util-link {
+    color: #99a; text-decoration: none; font-size: .72rem;
+    letter-spacing: .02em; white-space: nowrap;
+    transition: color .15s;
+}
+.nav-util-link:hover { color: #fff; text-decoration: underline; }
+.nav-pro-promo {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 9px; border-radius: 999px;
+    background: linear-gradient(90deg, rgba(255,180,0,.10), rgba(255,140,0,.10));
+    border: 1px solid rgba(255,180,0,.28);
+    color: #ffb84a; text-decoration: none;
+    font-size: .65rem; font-weight: 600; letter-spacing: .02em;
+    white-space: nowrap; transition: filter .15s, background .15s;
+    max-width: 320px; overflow: hidden;
+}
+.nav-pro-promo:hover { filter: brightness(1.15); background: linear-gradient(90deg, rgba(255,180,0,.18), rgba(255,140,0,.18)); }
+.nav-pro-spark { font-size: .8rem; line-height: 1; }
+.nav-pro-text { overflow: hidden; text-overflow: ellipsis; }
+.nav-pro-arrow { opacity: .8; }
+
+/* Hide promo text on tighter desktops, keep the chip */
+@media (max-width: 1280px) {
+    .nav-pro-text { display: none; }
+    .nav-pro-promo::after { content: 'PRO'; font-weight: 800; letter-spacing: .08em; }
+}
+
 /* Hover only on devices with a real pointer (not touch) */
 @media (hover: hover) and (pointer: fine) {
     .nav-item:hover { background: rgba(255,255,255,.16); border-color: rgba(255,200,0,.4); color: #fff; }
@@ -58,6 +90,22 @@ nav {
     font-size: .55rem; font-weight: 700; letter-spacing: .06em;
     background: rgba(255,180,0,.12); color: #ffa500; border: 1px solid rgba(255,180,0,.25);
     margin-left: 3px; vertical-align: middle; line-height: 1.4;
+}
+
+/* NEW badge — rendered as a small superscript pill so it reads as a
+   typographic mark next to the menu label, not a separate chip. */
+.nav-badge-new {
+    display: inline-block;
+    font-size: .48rem; font-weight: 800; letter-spacing: .10em;
+    color: #cba9ff;
+    background: rgba(180,140,255,.14);
+    border: 1px solid rgba(180,140,255,.40);
+    border-radius: 3px;
+    padding: 0 4px;
+    margin-left: 3px;
+    vertical-align: super;
+    line-height: 1;
+    text-shadow: 0 0 6px rgba(180,140,255,.35);
 }
 
 /* ── Dropdown menus ──────────────────────────────────────────────────────── */
@@ -170,6 +218,16 @@ nav {
 @media (max-width: 1024px) {
     .nav-burger { display: flex; }
     .nav-spacer, .nav-auth-sep { display: none; }
+
+    /* Utility links — stack as a row inside the mobile menu */
+    .nav-utility-links {
+        flex-direction: row; flex-wrap: wrap; gap: 14px;
+        padding: 10px 14px 4px; border-top: 1px solid rgba(255,255,255,.06); margin-top: 6px;
+    }
+    .nav-util-link { font-size: .82rem; color: #aab; }
+    .nav-pro-promo { width: 100%; justify-content: center; padding: 9px 12px; font-size: .72rem; }
+    .nav-pro-text { display: inline; }
+    .nav-pro-promo::after { content: none; }
 
     .nav-menu {
         display: none; flex-direction: column; align-items: stretch;

@@ -2,6 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<script src="js/preview-mode.js"></script>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>The Sun — G2V · Parker Physics App</title>
 <style>
@@ -731,7 +737,7 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
             <polyline points="2,2 9,8 16,2" stroke="rgba(255,180,60,.7)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
     </div>
-    <div id="canvas-wrap">
+    <div id="canvas-wrap" data-preview-stage="1">
         <div id="hud">
             <h3>Sol — G2V</h3>
             <div>T<sub>eff</sub>: <span class="val" id="hud-teff">5778</span> <span class="dim">K</span></div>
@@ -1488,33 +1494,6 @@ import { SolarWeatherForecaster } from './js/solar-weather-forecast.js';
 import { ModelValidator }     from './js/model-validation.js';
 import { SolarLSTM, normalise as lstmNormalise, denormalise as lstmDenorm, FEATURES } from './js/solar-lstm.js';
 
-// ─── Nav ─────────────────────────────────────────────────────────────────────
-const _navBurger = document.getElementById('nav-burger');
-const _navMenu   = document.getElementById('nav-menu');
-if (_navBurger && _navMenu) {
-    _navBurger.addEventListener('click', () => {
-        const open = _navMenu.classList.toggle('open');
-        _navBurger.textContent = open ? '\u2715' : '\u2630';
-        _navBurger.setAttribute('aria-expanded', open);
-    });
-    document.addEventListener('click', e => {
-        if (!e.target.closest('nav')) {
-            _navMenu.classList.remove('open');
-            _navBurger.textContent = '\u2630';
-            _navBurger.setAttribute('aria-expanded', 'false');
-        }
-    });
-    document.querySelectorAll('.nav-drop-btn').forEach(btn => {
-        btn.addEventListener('click', e => {
-            if (window.innerWidth > 1024) return;
-            e.stopPropagation();
-            const drop    = btn.closest('.nav-drop');
-            const opening = !drop.classList.contains('open');
-            document.querySelectorAll('.nav-drop').forEach(d => d.classList.remove('open'));
-            if (opening) drop.classList.add('open');
-        });
-    });
-}
 
 // PANEL
 const panel = document.getElementById('panel');

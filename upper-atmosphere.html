@@ -2,7 +2,13 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="required-tier" content="advanced">
 <title>Upper Atmosphere Simulator — Thermosphere & Exosphere · Parker Physics</title>
 <meta name="description" content="Interactive Parker Physics thermosphere + exosphere simulator. Explore density, temperature, and per-species composition from 80 to 2000 km under any F10.7 / Ap state, with historical storm presets (Starlink Feb 2022, Gannon May 2024, AR3842). PRO access.">
 <style>
@@ -492,6 +498,102 @@ input[type=range]::-moz-range-thumb {
 .ua-conj-tca .ua-conj-eta {
     display:block; color:#778; font-weight:400; font-size:.58rem;
 }
+.ua-conj-pc {
+    font-family:monospace; font-weight:600;
+    color:#aab; font-size:.6rem;
+}
+
+/* ─── Debris families panel ────────────────────────────── */
+#ua-debris-families { display:flex; flex-direction:column; gap:4px; }
+.ua-fam-row {
+    display:grid;
+    grid-template-columns: 14px 1fr auto 80px auto;
+    gap:7px;
+    align-items:center;
+    padding:4px 8px;
+    background:rgba(255,255,255,.025);
+    border:1px solid rgba(255,255,255,.05);
+    border-radius:6px;
+    font-size:.66rem;
+    color:#cde;
+}
+.ua-fam-row:hover { background:rgba(255,255,255,.06); }
+.ua-fam-swatch { width:10px; height:10px; border-radius:50%; box-shadow:0 0 4px currentColor; }
+.ua-fam-name { font-weight:600; color:#cde; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ua-fam-count { font-family:monospace; color:#9ab; min-width:30px; text-align:right; }
+.ua-fam-bar {
+    display:block; height:4px; width:80px;
+    background:rgba(255,255,255,.06);
+    border-radius:2px; overflow:hidden;
+}
+.ua-fam-bar-fill { display:block; height:100%; transition:width .25s; }
+.ua-fam-energy {
+    font-family:monospace; font-size:.6rem;
+    min-width:54px; text-align:right;
+}
+
+/* ─── Avoidance recommendations ────────────────────────── */
+#ua-avoidance { display:flex; flex-direction:column; gap:7px; }
+.ua-av-card {
+    padding:8px 10px;
+    background:rgba(255,255,255,.025);
+    border:1px solid rgba(255,255,255,.06);
+    border-left-width:3px;
+    border-radius:6px;
+    font-size:.7rem;
+    color:#cde;
+}
+.ua-av-head {
+    display:flex; align-items:center; justify-content:space-between;
+    gap:8px; margin-bottom:3px;
+}
+.ua-av-pair { font-weight:600; color:#dde; flex:1; overflow:hidden;
+    text-overflow:ellipsis; white-space:nowrap; }
+.ua-av-tier {
+    font-size:.55rem; font-weight:800; letter-spacing:.05em;
+    padding:2px 6px; border-radius:3px;
+}
+.ua-av-fam {
+    font-size:.62rem; line-height:1.35;
+    margin:2px 0 4px;
+}
+.ua-av-stats {
+    display:flex; gap:10px; flex-wrap:wrap;
+    font-family:monospace; font-size:.62rem; color:#aab;
+    margin-bottom:4px;
+}
+.ua-av-stats b { color:#fff; font-weight:700; }
+.ua-av-action {
+    display:flex; align-items:center; gap:5px;
+    font-size:.7rem; color:#fff; font-weight:600;
+    padding:4px 0;
+}
+.ua-av-action-icon { font-weight:800; }
+.ua-av-meta {
+    font-family:monospace; font-size:.58rem; color:#788; line-height:1.4;
+}
+
+/* ─── Constellation toggle chips ───────────────────────── */
+#ua-constellation-toggles { display:flex; flex-wrap:wrap; gap:5px; }
+.ua-cn-chip {
+    display:inline-flex; align-items:center; gap:6px;
+    padding:5px 10px; border-radius:999px;
+    background:rgba(255,255,255,.03);
+    border:1px solid rgba(255,255,255,.12);
+    color:#bcd; cursor:pointer;
+    font-size:.66rem; font-family:inherit;
+    transition: background .15s, border-color .15s;
+}
+.ua-cn-chip:hover { border-color:var(--cn-c, rgba(0,200,200,.4)); color:#fff; }
+.ua-cn-chip.ua-cn-on {
+    background:color-mix(in srgb, var(--cn-c) 16%, transparent);
+    border-color:var(--cn-c);
+    color:#fff;
+}
+.ua-cn-swatch { width:8px; height:8px; border-radius:50%; box-shadow:0 0 4px currentColor; }
+.ua-cn-name { font-weight:600; }
+.ua-cn-meta { font-family:monospace; font-size:.58rem; color:#889; }
+.ua-cn-chip.ua-cn-on .ua-cn-meta { color:#bcd; }
 
 /* ─── Field-overlay radio row ──────────────────────────── */
 .ua-field-mode-row {
@@ -578,6 +680,7 @@ input[type=range]::-moz-range-thumb {
 <link rel="stylesheet" href="js/nav-styles.css">
 <nav></nav>
 <script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("upper-atmosphere");</script>
+<script type="module">import "./js/page-tier-gate.js?v=20260428";</script>
 
 <!-- ─── Hero ─────────────────────────────────────────────────── -->
 <div id="ua-hero" class="ua-panel">
@@ -734,7 +837,7 @@ input[type=range]::-moz-range-thumb {
             <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px">
                 <h2 style="margin:0">Conjunction watch</h2>
                 <span id="ua-debris-pill" class="ua-tle-pill ua-tle-pill--pending"
-                      title="LEO debris sample from CelesTrak (350–900 km altitude band)">
+                      title="LEO debris sample from CelesTrak (250–1500 km altitude band) classified by source-event family">
                     <span class="ua-tle-dot"></span>
                     <span id="ua-debris-label">no debris yet</span>
                 </span>
@@ -744,10 +847,114 @@ input[type=range]::-moz-range-thumb {
                 minutes of physical orbital evolution. Distances are
                 3-D centre-to-centre (not in-track). Chord lines on
                 the globe light up when a pair is predicted within
-                200 km. <span style="color:#ff7099">●</span> = debris,
-                <span style="color:#0cc">●</span> = asset.
+                200 km. Each debris row carries its source-event family
+                tag (FY-1C, IR-33, C1408, R/B, …) plus an inline Pc
+                estimate. <span style="color:#0cc">●</span> = asset.
             </p>
             <div id="ua-conjunction"></div>
+        </div>
+
+        <div class="ua-panel" style="margin-bottom:14px;">
+            <h2>Avoidance recommendations</h2>
+            <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:8px">
+                Top threats with operational COLA framing:
+                Probability of Collision (Foster 1D, σ scales with TCA),
+                tier label (<span style="color:#ff3060">maneuver</span> ·
+                <span style="color:#ff9050">monitor</span> ·
+                <span style="color:#ffcc60">watch</span> ·
+                <span style="color:#80c890">nominal</span>),
+                and the cheapest in-track Δv to clear a 5-km miss
+                from Clohessy-Wiltshire.
+            </p>
+            <div id="ua-avoidance"></div>
+        </div>
+
+        <div class="ua-panel" style="margin-bottom:14px;">
+            <h2>Debris source families</h2>
+            <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:8px">
+                Loaded debris attributed to known fragmentation events
+                via NORAD-ID range + name pattern. Color matches the
+                cloud points on the globe. Σ energy is the cumulative
+                kinetic-impact potential of the sample at 14 km/s.
+            </p>
+            <div id="ua-debris-families"></div>
+        </div>
+
+        <div class="ua-panel" style="margin-bottom:14px;">
+            <h2>Satellite constellations</h2>
+            <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:8px">
+                Toggle major operational constellations as overlay
+                shells. Walker-Delta synthesis from per-shell altitude,
+                inclination, and plane count — visualization-grade,
+                not live TLE-based.
+            </p>
+            <div id="ua-constellation-toggles"></div>
+        </div>
+
+        <div class="ua-panel" style="margin-bottom:14px;">
+            <h2>Substorm injection · animation</h2>
+            <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:10px">
+                Walk through the canonical magnetospheric substorm:
+                <strong>growth</strong> (oval drifts equatorward, tail
+                lobes inflate) → <strong>expansion</strong> (onset arc
+                breakup at ~22 MLT, westward traveling surge, poleward
+                bulge, bursty bulk flows from the tail) →
+                <strong>recovery</strong>. Auto-fires when the
+                substorm-index proxy crosses 0.6.
+            </p>
+            <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+                <button id="ua-substorm-trigger" type="button" class="ua-chip ua-chip--live"
+                        title="Force-trigger a demo substorm (~30 s end-to-end)">
+                    ⚡ Trigger substorm
+                </button>
+                <button id="ua-substorm-reset" type="button" class="ua-chip"
+                        title="Force-end any active substorm">
+                    ⏹ Reset
+                </button>
+                <label class="ua-chip" style="cursor:pointer"
+                       title="Compressed timing for demo (~30s end-to-end) vs literal real-time minutes">
+                    <input type="checkbox" id="ua-substorm-realtime"
+                           style="vertical-align:middle;margin-right:5px;accent-color:#0cc">
+                    realtime
+                </label>
+                <label class="ua-chip" style="cursor:pointer"
+                       title="Auto-fire when cumulative southward-Bz drive crosses 0.6">
+                    <input type="checkbox" id="ua-substorm-auto" checked
+                           style="vertical-align:middle;margin-right:5px;accent-color:#0cc">
+                    auto
+                </label>
+            </div>
+            <div id="ua-substorm-state" style="font-size:.74rem;font-family:monospace;color:#cde">
+                <div style="color:#9ab">phase</div>
+                <div id="ua-sub-phase-bar" style="position:relative;height:16px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:4px;margin:3px 0 8px;overflow:hidden">
+                    <div id="ua-sub-phase-fill" style="height:100%;width:0;background:linear-gradient(90deg,#0cc,#fc6,#f7c);transition:width .15s"></div>
+                    <div id="ua-sub-phase-label" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:.66rem;font-weight:700;letter-spacing:.06em;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.7)">IDLE</div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:3px 12px">
+                    <div style="color:#9ab">onset MLT</div>      <div id="ua-sub-onset-mlt"  style="color:#fff">—</div>
+                    <div style="color:#9ab">WTS head MLT</div>   <div id="ua-sub-wts"         style="color:#f8a">—</div>
+                    <div style="color:#9ab">bulge mag</div>      <div id="ua-sub-bulge"       style="color:#fc6">—</div>
+                    <div style="color:#9ab">oval shift</div>     <div id="ua-sub-shift"       style="color:#9cf">—</div>
+                    <div style="color:#9ab">BBF activity</div>   <div id="ua-sub-bbf"         style="color:#fe8">—</div>
+                    <div style="color:#9ab">AE proxy</div>       <div id="ua-sub-ae"          style="color:#0fc">— nT</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="ua-panel" style="margin-bottom:14px;">
+            <h2>Magnetosphere state · live</h2>
+            <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:8px">
+                Operator-grade headlines computed from the current
+                (F10.7, Ap, IMF) state and dispatched by the
+                <code>magnetic-cascade</code> module. Hemispheric Power
+                (Newell-Liou 2011), cross-polar-cap potential
+                (Hill-1984 / Siscoe-2002), plasmapause Lpp
+                (Carpenter-Anderson 1992), Region-1+2 Birkeland current
+                (Iijima-Potemra 1976), and Feldstein-Starkov auroral
+                oval edges.
+            </p>
+            <div id="ua-mag-state" style="display:flex;flex-direction:column;gap:4px;font-size:.74rem"></div>
+            <div id="ua-mag-implications" style="margin-top:8px;display:flex;flex-direction:column;gap:3px"></div>
         </div>
 
         <div class="ua-panel">
@@ -829,7 +1036,20 @@ input[type=range]::-moz-range-thumb {
             colour = layer · brightness ∝ log ρ · warmth ∝ Ap<br>
             cyan ring = current altitude · cyan dot = ISS probe<br>
             <span style="color:#60d8ff">·</span> magnetopause · <span style="color:#ffc070">·</span> bow shock<br>
-            <span style="color:#aac">switch to Fly mode to enter the layers</span>
+            debris dots colored by source family:
+            <span style="color:#ff3060">FY-1C</span>
+            <span style="color:#ff7040">IR-33/C-2251</span>
+            <span style="color:#ff5070">C1408</span>
+            <span style="color:#60d8a0">R/B</span><br>
+            <span style="color:#aac">switch to Fly mode + Visit ISS to see satellite shapes up close</span><br>
+            <span style="color:#9ff">magnetic cascade:</span>
+            <span style="color:#ff8060">L=4 inner-belt</span> ·
+            <span style="color:#ff60a0">L=6 outer-belt</span> ·
+            <span style="color:#80ff80">L=8 oval</span> ·
+            <span style="color:#a0a0ff">L=20 lobe</span><br>
+            <span style="color:#ff60c0">●</span> auroral oval ·
+            <span style="color:#ffe066">●</span> polar cusps ·
+            <span style="color:#9cf">R1/R2 currents</span> (blue=down, red=up)
         </div>
     </section>
 
@@ -881,6 +1101,11 @@ input[type=range]::-moz-range-thumb {
             conjunctionBox: document.getElementById('ua-conjunction'),
             debrisPill:     document.getElementById('ua-debris-pill'),
             debrisLabel:    document.getElementById('ua-debris-label'),
+            // Detailed-debris additions: family roll-up, avoidance
+            // recommendations, and constellation overlay toggles.
+            debrisFamilies:        document.getElementById('ua-debris-families'),
+            avoidanceBox:          document.getElementById('ua-avoidance'),
+            constellationToggles:  document.getElementById('ua-constellation-toggles'),
             // Camera HUD
             camOrbitBtn:    document.getElementById('ua-cam-orbit'),
             camFlyBtn:      document.getElementById('ua-cam-fly'),
@@ -919,6 +1144,109 @@ input[type=range]::-moz-range-thumb {
             // Nudge the globe canvas to repaint at the new column height.
             window.dispatchEvent(new Event('resize'));
         });
+    });
+
+    /* ─── Magnetosphere state listener ───────────────────────────────────
+       The MagneticCascade module dispatches 'ua-magnetic-state' on
+       every state push. Render an operator-grade readout: HPI, Φ_PC,
+       Lpp, FAC, oval edges (eq/pw at noon/dusk/midn/dawn), cusp lat,
+       plus the implication bullets. */
+    const magBox      = document.getElementById('ua-mag-state');
+    const magImplBox  = document.getElementById('ua-mag-implications');
+    const fmt = (v, d = 1) => Number.isFinite(v) ? v.toFixed(d) : '—';
+    function renderMagState(s) {
+        if (!magBox || !s) return;
+        const o = s.oval || {};
+        magBox.innerHTML = `
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:3px 12px;font-family:monospace">
+                <div style="color:#9ab">Kp</div>            <div style="color:#fff">${fmt(s.kp, 1)}</div>
+                <div style="color:#9ab">HPI (one hemi)</div><div style="color:#0fc">${fmt(s.hpi_GW, 1)} GW</div>
+                <div style="color:#9ab">Φ<sub>PC</sub></div>      <div style="color:#0ff">${fmt(s.phi_pc_kV, 0)} kV</div>
+                <div style="color:#9ab">L<sub>pp</sub> (plasmapause)</div><div style="color:#fc6">${fmt(s.plasmapauseL, 2)}</div>
+                <div style="color:#9ab">|I<sub>FAC</sub>|</div>     <div style="color:#fa6">${fmt(s.fac_MA, 2)} MA</div>
+                <div style="color:#9ab">cusp λ</div>         <div style="color:#fe8">${fmt(s.cuspLatDeg, 1)}°</div>
+                <div style="color:#9ab">oval eq @midn</div>  <div style="color:#f8a">${fmt(o.midnight?.eq, 1)}°</div>
+                <div style="color:#9ab">oval eq @noon</div>  <div style="color:#f8a">${fmt(o.noon?.eq, 1)}°</div>
+                <div style="color:#9ab">oval pw @midn</div>  <div style="color:#8fa">${fmt(o.midnight?.pw, 1)}°</div>
+                <div style="color:#9ab">oval pw @noon</div>  <div style="color:#8fa">${fmt(o.noon?.pw, 1)}°</div>
+            </div>`;
+        if (magImplBox) {
+            const lis = (s.implications || []).map(t =>
+                `<div style="font-size:.66rem;color:#cde;padding:3px 8px;background:rgba(255,200,90,.05);border-left:2px solid rgba(255,200,90,.45);border-radius:3px">${t}</div>`
+            ).join('');
+            magImplBox.innerHTML = lis;
+        }
+    }
+    window.addEventListener('ua-magnetic-state', e => renderMagState(e.detail));
+    // Seed once if cascade already has computed state by now.
+    setTimeout(() => {
+        const s = window.__ua?.globe?._cascade?.getState?.();
+        if (s) renderMagState(s);
+    }, 200);
+
+    /* ─── Substorm panel + controls ─────────────────────────────────────
+       Wires the trigger / reset / mode-toggle buttons to the globe's
+       substorm controller, and renders the live state from the
+       'ua-substorm-tick' window event the per-frame loop dispatches.
+       Phase bar fills 0..1 within the active phase; colour cycles
+       cyan (growth) → gold (expansion) → magenta (recovery) via the
+       gradient + a phase-aware label.  */
+    const subPhaseFill  = document.getElementById('ua-sub-phase-fill');
+    const subPhaseLabel = document.getElementById('ua-sub-phase-label');
+    const subOnsetMlt   = document.getElementById('ua-sub-onset-mlt');
+    const subWts        = document.getElementById('ua-sub-wts');
+    const subBulge      = document.getElementById('ua-sub-bulge');
+    const subShift      = document.getElementById('ua-sub-shift');
+    const subBbf        = document.getElementById('ua-sub-bbf');
+    const subAe         = document.getElementById('ua-sub-ae');
+    function renderSubstorm(t) {
+        if (!t || !subPhaseFill) return;
+        const phase = t.phase || 'idle';
+        const prog  = Math.max(0, Math.min(1, t.progress || 0));
+        subPhaseFill.style.width = (phase === 'idle' ? 0 : prog * 100) + '%';
+        const labelMap = {
+            idle:      'IDLE',
+            growth:    'GROWTH · flux loading',
+            expansion: 'EXPANSION · onset + WTS',
+            recovery:  'RECOVERY · ring-current decay',
+        };
+        subPhaseLabel.textContent = labelMap[phase] || phase.toUpperCase();
+        // Phase-tinted bar background — accent the active phase by
+        // shifting the colour gradient origin.
+        const bgMap = {
+            idle:      'rgba(255,255,255,.04)',
+            growth:    'linear-gradient(90deg, rgba(0,200,200,.18), rgba(0,200,200,.04))',
+            expansion: 'linear-gradient(90deg, rgba(255,200,90,.25), rgba(255,90,140,.10))',
+            recovery:  'linear-gradient(90deg, rgba(180,90,255,.20), rgba(60,30,80,.05))',
+        };
+        subPhaseFill.parentElement.style.background = bgMap[phase] || bgMap.idle;
+        const fmtMlt = v => Number.isFinite(v) ? v.toFixed(1) : '—';
+        subOnsetMlt.textContent = fmtMlt(t.onsetMlt);
+        subWts.textContent      = Number.isFinite(t.wtsMlt) ? t.wtsMlt.toFixed(1) : '—';
+        subBulge.textContent    = (t.bulgeMag || 0).toFixed(2);
+        subShift.textContent    = (t.ovalShiftDeg || 0).toFixed(1) + '°';
+        subBbf.textContent      = (t.bbfActivity || 0).toFixed(2);
+        subAe.textContent       = (t.aeProxy || 0).toFixed(0) + ' nT';
+    }
+    window.addEventListener('ua-substorm-tick', e => renderSubstorm(e.detail));
+
+    document.getElementById('ua-substorm-trigger')?.addEventListener('click', () => {
+        const ok = window.__ua?.globe?.triggerSubstorm?.();
+        if (!ok) {
+            // Already running — flash the label so the user knows.
+            const orig = subPhaseLabel.textContent;
+            subPhaseLabel.textContent = 'already in progress';
+            setTimeout(() => { subPhaseLabel.textContent = orig; }, 900);
+        }
+    });
+    document.getElementById('ua-substorm-reset')?.addEventListener('click', () => {
+        window.__ua?.globe?.resetSubstorm?.();
+    });
+    document.getElementById('ua-substorm-realtime')?.addEventListener('change', (e) => {
+        window.__ua?.globe?.setSubstormMode?.(e.target.checked ? 'realtime' : 'demo');
+    });
+    document.getElementById('ua-substorm-auto')?.addEventListener('change', (e) => {
+        window.__ua?.globe?.setSubstormAuto?.(e.target.checked);
     });
 </script>
 

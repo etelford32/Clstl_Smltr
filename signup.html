@@ -2,6 +2,11 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sign Up — Parker Physics App</title>
     <meta name="description" content="Create your Parker Physics account and start exploring interactive astrophysics simulations powered by WebGL and live NASA/NOAA data.">
@@ -166,7 +171,7 @@
             width: 100%; padding: 11px 14px;
             background: rgba(255,255,255,.06);
             border: 1px solid rgba(255,255,255,.12); border-radius: 8px;
-            color: #fff; font-family: inherit; font-size: .92rem;
+            color: #fff; font-family: inherit; font-size: 16px;
             transition: border-color .2s, background .2s; outline: none;
         }
         .form-group input:focus { border-color: rgba(128,64,255,.6); background: rgba(255,255,255,.09); }
@@ -345,8 +350,18 @@
                     <button type="submit" class="btn-submit" id="btn-submit">Create Account →</button>
                 </form>
 
-                <!-- Social auth will be added when OAuth providers are configured -->
+                <!-- Social auth — see signin.html for the same wiring. -->
+                <div class="divider" id="oauth-divider" style="display:none">or</div>
+                <div id="oauth-mount"></div>
             </div>
+            <script type="module">
+                import { mountOAuthButtons } from './js/oauth-buttons.js';
+                import { SOCIAL_PROVIDERS } from './js/config.js';
+                if (SOCIAL_PROVIDERS?.length) {
+                    document.getElementById('oauth-divider').style.display = '';
+                    mountOAuthButtons('#oauth-mount', { source: 'signup' });
+                }
+            </script>
 
             <!-- Success state -->
             <div class="success-overlay" id="success-view">
@@ -415,6 +430,7 @@
         if (res.ok) {
             const _PLAN_LABELS = {
                 free:        'Free',
+                tester:      'Tester (full access)',
                 basic:       'Basic',
                 educator:    'Educator',
                 advanced:    'Advanced',
@@ -655,6 +671,47 @@
             document.getElementById('form-view').style.display = 'none';
             document.getElementById('success-view').classList.add('show');
 
+            // Stamp a localStorage flag so the dashboard's welcome wizard
+            // fires on the next page load. Stripe checkout redirect (paid
+            // tiers) lands BACK on the dashboard with success=true via
+            // the Stripe portal — the flag survives that round-trip.
+            try { localStorage.setItem('pp_welcome_pending', '1'); } catch {}
+
+            // Activation event: the brand-new account is signed in by
+            // this branch (auto-confirm path), so logActivation has a
+            // valid auth.uid() to attach the row to. Email-confirmation
+            // flow stamps the event on first dashboard load instead.
+            try {
+                const { logActivation } = await import('./js/activation.js');
+                logActivation('signup', { plan, source: invite ? 'invite' : 'organic' });
+            } catch {}
+
+            // Welcome email — fire-and-forget. The edge function is
+            // idempotent (unique partial index on activation_events
+            // welcome_email_sent), so a double-fire from page reload or
+            // the Stripe checkout round-trip is harmless. We don't await
+            // it because we don't want the success view to wait on
+            // Resend latency. Skipped silently when the backend isn't
+            // configured (501) — the user still gets a working dashboard.
+            try {
+                const sb = await (await import('./js/supabase-config.js')).getSupabase();
+                const { data: { session } } = await sb.auth.getSession();
+                if (session?.access_token) {
+                    fetch('/api/welcome/send', {
+                        method:  'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            Authorization:  `Bearer ${session.access_token}`,
+                        },
+                        body: '{}',
+                    }).catch(err => {
+                        console.warn('[Signup] welcome email send failed:', err?.message || err);
+                    });
+                }
+            } catch (e) {
+                console.warn('[Signup] welcome email dispatch skipped:', e?.message || e);
+            }
+
             // Skip Stripe checkout when:
             //   - the invite already comped a paid tier (admin granted), OR
             //   - this was a class-seat invite (student rides parent's plan).
@@ -667,10 +724,15 @@
                     try {
                         const sb = await (await import('./js/supabase-config.js')).getSupabase();
                         const { data: { session } } = await sb.auth.getSession();
+                        // Forward any promo-trial code from the URL — the server
+                        // validates which (plan, code) pairs are real promotions
+                        // and silently drops anything else, so this is safe to
+                        // pass through verbatim.
+                        const trial = (new URLSearchParams(location.search).get('trial') || '').slice(0, 64);
                         const res = await fetch('/api/stripe/checkout', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-                            body: JSON.stringify({ plan }),
+                            body: JSON.stringify(trial ? { plan, trial } : { plan }),
                         });
                         const data = await res.json();
                         if (data.url) { window.location.href = data.url; return; }

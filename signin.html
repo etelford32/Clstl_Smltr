@@ -2,6 +2,11 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sign In — Parker Physics App</title>
     <meta name="description" content="Sign in to your Parker Physics account and access interactive astrophysics simulations powered by WebGL and live NASA/NOAA data.">
@@ -145,7 +150,7 @@
             width: 100%; padding: 12px 14px;
             background: rgba(255,255,255,.06);
             border: 1px solid rgba(255,255,255,.12); border-radius: 8px;
-            color: #fff; font-family: inherit; font-size: .95rem;
+            color: #fff; font-family: inherit; font-size: 16px;
             transition: border-color .2s, background .2s; outline: none;
         }
         .form-group input:focus { border-color: rgba(128,64,255,.6); background: rgba(255,255,255,.09); }
@@ -273,24 +278,79 @@
                         <div class="form-error" id="err-email">Please enter a valid email address.</div>
                     </div>
 
-                    <div class="form-group">
+                    <!-- Password row: hidden in magic-link mode. Wrapping in a
+                         container with id="pw-row" lets us toggle the whole
+                         block, including its label + error line, with one
+                         display change. -->
+                    <div class="form-group" id="pw-row">
                         <label for="password">Password</label>
-                        <input type="password" id="password" name="password" placeholder="Your password" autocomplete="current-password" required>
+                        <input type="password" id="password" name="password" placeholder="Your password" autocomplete="current-password">
                         <div class="form-error" id="err-pw">Please enter your password.</div>
                     </div>
 
                     <div class="form-row-inline">
-                        <label class="form-check-remember">
+                        <label class="form-check-remember" id="remember-row">
                             <input type="checkbox" id="remember"> Remember me
                         </label>
                         <button type="button" class="forgot-link" id="forgot-btn">Forgot password?</button>
                     </div>
 
                     <button type="submit" class="btn-submit" id="btn-submit">Sign In →</button>
+
+                    <!-- Magic-link toggle. Two states share this single
+                         element; the JS swaps the label + form mode. -->
+                    <div style="text-align:center;margin-top:14px;font-size:.85rem">
+                        <button type="button" id="magic-toggle"
+                                style="background:none;border:0;color:#a080ff;cursor:pointer;text-decoration:underline;font:inherit;font-size:.85rem">
+                            Send me a sign-in link instead
+                        </button>
+                    </div>
                 </form>
 
-                <!-- Social auth will be added when OAuth providers are configured -->
+                <!-- Magic-link "Check your email" success state. Shown after
+                     a successful signInWithOtp call. The Resend button is
+                     disabled for 60 s on top of Supabase's own per-email
+                     throttle so users can't mash the button before the
+                     email actually arrives. -->
+                <div id="magic-sent" style="display:none;padding:24px 0;text-align:center">
+                    <div style="font-size:2.4rem;margin-bottom:10px">📬</div>
+                    <h3 style="color:#a080ff;margin-bottom:8px">Check your email</h3>
+                    <p style="color:#aab;font-size:.9rem;line-height:1.5;margin-bottom:14px">
+                        We sent a one-time sign-in link to
+                        <span id="magic-sent-email" style="color:#fff;font-weight:600"></span>.
+                        Click it from this device — the session lands here on return.
+                    </p>
+                    <p style="color:#666;font-size:.78rem;margin-bottom:18px">
+                        Didn't get it? Check spam, or wait a moment and resend.
+                    </p>
+                    <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+                        <button type="button" id="magic-resend" class="btn-submit" style="max-width:160px" disabled>
+                            <span id="magic-resend-label">Resend (60s)</span>
+                        </button>
+                        <button type="button" id="magic-back" class="btn-submit"
+                                style="max-width:160px;background:rgba(255,255,255,.06);color:#ccc;border:1px solid rgba(255,255,255,.1)">
+                            Use password instead
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Social auth — buttons render only for providers in
+                     js/config.js SOCIAL_PROVIDERS, so an unconfigured
+                     provider stays hidden instead of throwing. The
+                     divider above sits ABOVE the mount point so we
+                     don't render an orphan "or" line when the array
+                     is empty. -->
+                <div class="divider" id="oauth-divider" style="display:none">or</div>
+                <div id="oauth-mount"></div>
             </div>
+            <script type="module">
+                import { mountOAuthButtons } from './js/oauth-buttons.js';
+                import { SOCIAL_PROVIDERS } from './js/config.js';
+                if (SOCIAL_PROVIDERS?.length) {
+                    document.getElementById('oauth-divider').style.display = '';
+                    mountOAuthButtons('#oauth-mount', { source: 'signin' });
+                }
+            </script>
 
             <!-- ── Forgot password view ── -->
             <div class="reset-view" id="reset-view">
@@ -350,6 +410,116 @@
     });
 
     // ── Sign-in form ────────────────────────────────────────────────
+    // ── Magic-link mode toggle ──────────────────────────────────────
+    // Tracks whether the form is in password mode (default) or
+    // magic-link mode. The submit handler below branches on this.
+    let _magicMode = false;
+
+    function setMagicMode(on) {
+        _magicMode = !!on;
+        const pwRow      = document.getElementById('pw-row');
+        const remRow     = document.getElementById('remember-row');
+        const forgotBtn  = document.getElementById('forgot-btn');
+        const submitBtn  = document.getElementById('btn-submit');
+        const toggleBtn  = document.getElementById('magic-toggle');
+        if (_magicMode) {
+            pwRow.style.display     = 'none';
+            remRow.style.display    = 'none';
+            forgotBtn.style.display = 'none';
+            submitBtn.textContent   = 'Send sign-in link →';
+            toggleBtn.textContent   = 'Use password instead';
+        } else {
+            pwRow.style.display     = '';
+            remRow.style.display    = '';
+            forgotBtn.style.display = '';
+            submitBtn.textContent   = 'Sign In →';
+            toggleBtn.textContent   = 'Send me a sign-in link instead';
+        }
+        // Clear stale validation styling when switching modes — a
+        // password validation error from the previous mode shouldn't
+        // hang on into the magic-link form.
+        document.getElementById('password').classList.remove('error');
+        document.getElementById('err-pw').classList.remove('visible');
+        document.getElementById('alert-banner').classList.remove('visible');
+    }
+
+    document.getElementById('magic-toggle').addEventListener('click', () => setMagicMode(!_magicMode));
+    document.getElementById('magic-back').addEventListener('click', () => {
+        // Flip back to password form from the "check your email" panel.
+        document.getElementById('magic-sent').style.display = 'none';
+        document.getElementById('signin-form').style.display = '';
+        setMagicMode(false);
+    });
+
+    // Resend countdown — re-arms the magic-resend button after 60 s.
+    // Called once when the success panel renders and again whenever
+    // the user clicks resend.
+    let _resendTimer = null;
+    function startResendCooldown(seconds = 60) {
+        const btn   = document.getElementById('magic-resend');
+        const label = document.getElementById('magic-resend-label');
+        let left = seconds;
+        btn.disabled = true;
+        label.textContent = `Resend (${left}s)`;
+        clearInterval(_resendTimer);
+        _resendTimer = setInterval(() => {
+            left -= 1;
+            if (left <= 0) {
+                clearInterval(_resendTimer);
+                btn.disabled = false;
+                label.textContent = 'Resend link';
+            } else {
+                label.textContent = `Resend (${left}s)`;
+            }
+        }, 1000);
+    }
+
+    async function sendMagicLink(email) {
+        const { auth } = window._ppAuth || {};
+        if (!auth) return { success: false, error: 'auth-not-loaded' };
+        const result = await auth.signInWithMagicLink(email);
+        // Telemetry: log every request regardless of outcome. The
+        // funnel cares about how many users initiated magic-link, not
+        // just how many succeeded. signInWithMagicLink itself is
+        // anonymous (no JWT yet) so we use the existing log-failure
+        // endpoint shape via the unified telemetry pipeline only on
+        // failure; success path uses the activation_events table via
+        // logActivation if a session has somehow been re-established
+        // (rare but possible after a recent password sign-in).
+        try {
+            const { telemetry } = await import('./js/telemetry.js');
+            if (result.success) {
+                telemetry.recordPerf('magic_link_request', 1);
+            } else {
+                telemetry.recordAuthFailure(result.error || 'magic_link_request_failed', {
+                    source:   'magic_link_request',
+                    provider: 'email',
+                    code:     result.code,
+                });
+            }
+        } catch {}
+        // The success-side activation event has to be logged via the
+        // /api/auth/log-failure-style anonymous shape if Supabase does
+        // not yet have a session for the requester. Log via
+        // activation.js when we DO have one (e.g., the user is signed
+        // in on another tab and just wants a fresh link); skip silently
+        // otherwise — the unified telemetry signal above is sufficient.
+        if (result.success) {
+            try {
+                const { logActivation } = await import('./js/activation.js');
+                logActivation('signin_magic_link_requested', { source: 'signin_form' });
+            } catch {}
+        }
+        return result;
+    }
+
+    document.getElementById('magic-resend').addEventListener('click', async () => {
+        const emailVal = document.getElementById('email').value;
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailVal)) return;
+        startResendCooldown(60);
+        await sendMagicLink(emailVal);
+    });
+
     document.getElementById('signin-form').addEventListener('submit', function(e) {
         e.preventDefault();
         let valid = true;
@@ -363,12 +533,42 @@
         document.getElementById('err-email').classList.toggle('visible', !emailOk);
         if (!emailOk) valid = false;
 
-        const pwOk = pw.value.length > 0;
-        pw.classList.toggle('error', !pwOk);
-        document.getElementById('err-pw').classList.toggle('visible', !pwOk);
-        if (!pwOk) valid = false;
+        // Password validation only applies in password mode. In magic-
+        // link mode the field is hidden + irrelevant.
+        if (!_magicMode) {
+            const pwOk = pw.value.length > 0;
+            pw.classList.toggle('error', !pwOk);
+            document.getElementById('err-pw').classList.toggle('visible', !pwOk);
+            if (!pwOk) valid = false;
+        }
 
         if (!valid) return;
+
+        // Magic-link branch — short-circuits the rest of the password flow.
+        if (_magicMode) {
+            const btn = document.getElementById('btn-submit');
+            btn.disabled = true;
+            btn.textContent = 'Sending…';
+            (async () => {
+                const result = await sendMagicLink(email.value);
+                btn.disabled = false;
+                btn.textContent = 'Send sign-in link →';
+                if (!result.success) {
+                    document.getElementById('alert-msg').textContent =
+                        result.error || "Couldn't send link — try again in a moment.";
+                    document.getElementById('alert-banner').classList.add('visible');
+                    return;
+                }
+                // Hide the form, show the "check your email" panel,
+                // arm the resend cooldown. Anti-enumeration: this branch
+                // runs even if the email belongs to no account.
+                document.getElementById('signin-form').style.display = 'none';
+                document.getElementById('magic-sent-email').textContent = email.value;
+                document.getElementById('magic-sent').style.display = '';
+                startResendCooldown(60);
+            })();
+            return;
+        }
 
         const btn = document.getElementById('btn-submit');
         btn.disabled = true;
@@ -399,12 +599,73 @@
                     errEl.classList.add('visible');
                     pw.classList.add('error');
                 }
+                // Failed-signin counter — survives the page lifetime so the
+                // eventual successful signin can stamp how many retries it
+                // took. Local sessionStorage proxy is the fallback signal
+                // even if the edge endpoint below is unavailable.
+                try {
+                    const cur = +(sessionStorage.getItem('pp_signin_attempts') || 0);
+                    sessionStorage.setItem('pp_signin_attempts', String(cur + 1));
+                } catch {}
+                // Server-side telemetry: log the failure so the admin
+                // Onboarding > Auth flow card can show real failure
+                // counts. Edge endpoint hashes the email server-side
+                // with a pepper before persisting, so plaintext never
+                // leaves this device EXCEPT in the edge function's
+                // memory for the duration of the request. Fire-and-
+                // forget — a network error on the telemetry path
+                // shouldn't punish the user further than the failed
+                // signin already does.
+                try {
+                    fetch('/api/auth/log-failure', {
+                        method:  'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body:    JSON.stringify({
+                            email:  email.value,
+                            reason: result.error || 'unknown',
+                        }),
+                    }).catch(() => { /* swallow */ });
+                } catch {}
+                // Mirror to the unified telemetry pipeline so the
+                // superadmin Telemetry tab's "Top auth failures" card
+                // reflects this without joining auth_failures + the
+                // new client_telemetry table at query time.
+                try {
+                    const { telemetry } = await import('./js/telemetry.js');
+                    telemetry.recordAuthFailure(result.error || 'unknown', {
+                        source: 'signin_form',
+                        provider: 'email',
+                    });
+                } catch {}
                 return;
             }
 
             // Show success state
             document.getElementById('signin-form').style.display = 'none';
             document.getElementById('login-success').style.display = 'block';
+            // Telemetry: successful signin. Pass the retry count so the
+            // admin auth-flow card can highlight users who had to fight
+            // the form. Reset the counter for a clean next session.
+            try {
+                let retries = 0;
+                try { retries = +(sessionStorage.getItem('pp_signin_attempts') || 0); } catch {}
+                try { sessionStorage.removeItem('pp_signin_attempts'); } catch {}
+                const { logActivation } = await import('./js/activation.js');
+                logActivation('signin_succeeded', { retry_count: retries });
+            } catch {}
+            // Perf: time from page-navigation start to a successful
+            // login. Captures the form-fill + supabase round-trip path
+            // end-to-end. Slow p95 here usually points at a sluggish
+            // Supabase region or a degraded auth endpoint.
+            try {
+                const t0 = performance.timing?.navigationStart
+                        || performance.timeOrigin
+                        || 0;
+                if (t0) {
+                    const { telemetry } = await import('./js/telemetry.js');
+                    telemetry.recordPerf('signin_success', Date.now() - t0);
+                }
+            } catch {}
 
             // Redirect: check for post-login redirect, else go to dashboard
             const redirect = auth.getPostLoginRedirect() || 'dashboard.html';

@@ -130,12 +130,20 @@ export async function fetchKPIs() {
             minutesUsed = Math.round(totalSecs / 60);
         }
 
-        // Plan/role breakdown
-        let introSubs = 0, proSubs = 0, adminUsers = 0;
+        // Plan/role breakdown.
+        //
+        // basicSubs counts plan='basic' — the tier formerly labelled "Intro"
+        // in early KPI dashboards. The two names are synonymous in this
+        // app: 'intro' is a legacy alias for 'basic' (no plan='intro' rows
+        // ever land in the DB; the CHECK constraint forbids it). The
+        // `introSubs` field on the returned payload is preserved as an
+        // alias for one release window so existing admin templates keep
+        // working — prefer `basicSubs` going forward.
+        let basicSubs = 0, proSubs = 0, adminUsers = 0;
         let educatorSubs = 0, institutionSubs = 0, enterpriseSubs = 0;
         if (plansRes.status === 'fulfilled' && !plansRes.value.error) {
             for (const u of plansRes.value.data || []) {
-                if (u.plan === 'basic')       introSubs++;
+                if (u.plan === 'basic')       basicSubs++;
                 if (u.plan === 'educator')    educatorSubs++;
                 if (u.plan === 'advanced')    proSubs++;
                 if (u.plan === 'institution') institutionSubs++;
@@ -159,7 +167,8 @@ export async function fetchKPIs() {
                 signIns: signInsRes.status === 'fulfilled' ? (signInsRes.value.count || 0) : 0,
                 minutesUsed,
                 signUps: signUpsRes.status === 'fulfilled' ? (signUpsRes.value.count || 0) : 0,
-                introSubs,
+                basicSubs,
+                introSubs: basicSubs, // legacy alias — same number as basicSubs
                 educatorSubs,
                 proSubs,
                 institutionSubs,
@@ -194,9 +203,9 @@ export async function fetchUsers(limit = 100) {
     }
 }
 
-// ── 3. Top pages (last 7 days) ──────────────────────────────────────────────
+// ── 3. Top pages (last N days) ──────────────────────────────────────────────
 
-export async function fetchTopPages() {
+export async function fetchTopPages(days = 7) {
     const client = await sb();
     if (!client) return { ok: false, error: 'Supabase not configured' };
     if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
@@ -206,7 +215,7 @@ export async function fetchTopPages() {
             .from('analytics_events')
             .select('event_name, session_id')
             .eq('event_type', 'page_view')
-            .gte('created_at', daysAgo(7));
+            .gte('created_at', daysAgo(days));
 
         if (error) throw error;
 
@@ -232,7 +241,31 @@ export async function fetchTopPages() {
 
 // ── 4. Recent events (live feed) ─────────────────────────────────────────────
 
-export async function fetchRecentEvents(limit = 30) {
+export async function fetchRecentEvents(limit = 30, opts = {}) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+
+    try {
+        let q = client
+            .from('analytics_events')
+            .select('event_type, event_name, page_path, session_id, user_id, created_at, properties')
+            .order('created_at', { ascending: false })
+            .limit(limit);
+
+        if (opts.eventType) q = q.eq('event_type', opts.eventType);
+
+        const { data, error } = await q;
+        if (error) throw error;
+        return { ok: true, data: data || [] };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+}
+
+// ── 4b. Average time-on-page (from page_close events) ───────────────────────
+
+export async function fetchAvgTimeOnPage(days = 14) {
     const client = await sb();
     if (!client) return { ok: false, error: 'Supabase not configured' };
     if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
@@ -240,9 +273,41 @@ export async function fetchRecentEvents(limit = 30) {
     try {
         const { data, error } = await client
             .from('analytics_events')
-            .select('event_type, event_name, page_path, session_id, user_id, created_at, properties')
+            .select('properties')
+            .eq('event_name', 'page_close')
+            .gte('created_at', daysAgo(days))
+            .limit(5000);
+
+        if (error) throw error;
+
+        let total = 0, n = 0;
+        for (const row of data || []) {
+            const t = row.properties?.time_on_page_s;
+            // Cap a single value at 1 hour to keep one stuck tab from dominating.
+            if (typeof t === 'number' && t > 0 && t < 3600) { total += t; n++; }
+        }
+        return { ok: true, data: { avg_s: n > 0 ? Math.round(total / n) : null, sample: n } };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+}
+
+// ── 4c. Click heatmap (raw click events for one page) ───────────────────────
+
+export async function fetchClickHeatmap(pageName, days = 7) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+
+    try {
+        const { data, error } = await client
+            .from('analytics_events')
+            .select('event_name, page_path, session_id, properties, created_at')
+            .eq('event_type', 'click')
+            .eq('event_name', pageName)
+            .gte('created_at', daysAgo(days))
             .order('created_at', { ascending: false })
-            .limit(limit);
+            .limit(5000);
 
         if (error) throw error;
         return { ok: true, data: data || [] };
@@ -617,6 +682,99 @@ export async function fetchActivationFunnel(days = 30) {
 }
 
 /**
+ * Activation overview KPIs for the last N days. Single round trip to
+ * activation_events; aggregated client-side. Returns:
+ *   {
+ *     signups,                  // # users who signed up in the window
+ *     activated,                // # of those signups with ANY post-signup event
+ *     activationRate,           // activated / signups (0..1)
+ *     medianTimeToSimHours,     // median signup → first_sim_opened (or null)
+ *     newSubscriptions,         // # subscription_started in window
+ *     canceledSubscriptions,    // # subscription_canceled in window
+ *     totalEvents,              // raw event count in window
+ *   }
+ *
+ * Designed so a fresh table (no rows) returns all-zeros rather than
+ * erroring — the dashboard renders it as a quiet "—".
+ */
+export async function fetchActivationOverview(days = 30) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client
+            .from('activation_events')
+            .select('user_id, event, created_at')
+            .gte('created_at', daysAgo(days))
+            .order('created_at', { ascending: true });
+        if (error) throw error;
+
+        // Bucket events per user. Per-event sets allow us to derive
+        // activation rate + time-to-first-sim without a second query.
+        const POST_SIGNUP_EVENTS = new Set([
+            'profile_completed', 'location_saved', 'first_sim_opened',
+            'first_alert_configured', 'first_email_alert_sent',
+            'invite_sent', 'student_joined', 'subscription_started',
+        ]);
+        const signupAt = new Map();      // user_id → first signup ts
+        const firstSimAt = new Map();    // user_id → first first_sim_opened ts
+        const activated = new Set();     // user_id with any post-signup event
+        let newSubscriptions = 0;
+        let canceledSubscriptions = 0;
+        let totalEvents = 0;
+
+        for (const row of (data || [])) {
+            totalEvents++;
+            const uid = row.user_id;
+            const ev  = row.event;
+            const ts  = Date.parse(row.created_at);
+            if (ev === 'signup') {
+                if (!signupAt.has(uid)) signupAt.set(uid, ts);
+            } else if (POST_SIGNUP_EVENTS.has(ev)) {
+                activated.add(uid);
+                if (ev === 'first_sim_opened' && !firstSimAt.has(uid)) {
+                    firstSimAt.set(uid, ts);
+                }
+            }
+            if (ev === 'subscription_started')  newSubscriptions++;
+            if (ev === 'subscription_canceled') canceledSubscriptions++;
+        }
+
+        const signups = signupAt.size;
+        // Only count "activated" within the cohort that actually signed up
+        // in this window — a user who signed up months ago and just opened
+        // a sim shouldn't inflate the rate.
+        let activatedInCohort = 0;
+        const deltas = [];
+        for (const [uid, suTs] of signupAt.entries()) {
+            if (activated.has(uid)) activatedInCohort++;
+            const simTs = firstSimAt.get(uid);
+            if (simTs && simTs >= suTs) deltas.push((simTs - suTs) / 3_600_000);
+        }
+        deltas.sort((a, b) => a - b);
+        const medianTimeToSimHours = deltas.length
+            ? Math.round(deltas[Math.floor(deltas.length / 2)] * 10) / 10
+            : null;
+
+        return {
+            ok: true,
+            data: {
+                signups,
+                activated:             activatedInCohort,
+                activationRate:        signups > 0 ? activatedInCohort / signups : 0,
+                medianTimeToSimHours,
+                newSubscriptions,
+                canceledSubscriptions,
+                totalEvents,
+                windowDays:            days,
+            },
+        };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+}
+
+/**
  * Daily activation rollup for the last N days. Returns one row per
  * (day, event) bucket — used by the activation chart in the admin
  * dashboard.
@@ -714,6 +872,238 @@ export async function fetchCohortRetention(weeks = 6) {
     } catch (err) {
         return { ok: false, error: err.message };
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Visitor flow — derived from analytics_events page_view rows. One round trip
+// per call; everything (entry/exit pages, transitions, bounce rate, anon vs
+// signed split, referrers) is computed client-side from the same dataset to
+// keep this cheap on Supabase. No schema change required.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Headline visitor-flow stats for the window. Returns:
+ *   {
+ *     sessions, anonSessions, signedSessions,
+ *     pageviews, avgPagesPerSession, bounceRate,
+ *     avgSessionDurationSec,
+ *     entryPages:   [{ name, count, share }],
+ *     exitPages:    [{ name, count, share }],
+ *     transitions:  [{ from, to, count }],
+ *     referrers:    [{ origin, count, share }],
+ *     anonConverted: # of sessions that started anonymous and ended signed-in
+ *   }
+ *
+ * Capped at 30k events to keep payload sane on long windows. Beyond that
+ * the dashboard hint suggests narrowing the window.
+ */
+export async function fetchVisitorFlow(days = 7) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+
+    const HARD_CAP = 30000;
+    try {
+        const { data, error } = await client
+            .from('analytics_events')
+            .select('event_name, page_path, session_id, user_id, referrer, created_at')
+            .eq('event_type', 'page_view')
+            .gte('created_at', daysAgo(days))
+            .order('created_at', { ascending: true })
+            .limit(HARD_CAP);
+        if (error) throw error;
+
+        const rows = data || [];
+        const truncated = rows.length >= HARD_CAP;
+
+        // Group by session — each session becomes a chronological page
+        // sequence. We collapse adjacent duplicates (A → A) because those
+        // are reloads / SPA-route-noise, not navigation.
+        const sessions = new Map();   // sid -> { pages:[name], firstTs, lastTs, hadUser }
+        for (const r of rows) {
+            const sid = r.session_id;
+            if (!sid) continue;
+            const name = r.event_name || _pageNameFromPath(r.page_path);
+            const ts = Date.parse(r.created_at);
+            let s = sessions.get(sid);
+            if (!s) {
+                s = {
+                    pages: [], firstTs: ts, lastTs: ts,
+                    hadUser: !!r.user_id,
+                    firstHadNoUser: !r.user_id,
+                    firstReferrer: r.referrer || null,
+                };
+                sessions.set(sid, s);
+            }
+            // Drop consecutive duplicates.
+            if (s.pages[s.pages.length - 1] !== name) s.pages.push(name);
+            if (ts > s.lastTs) s.lastTs = ts;
+            if (r.user_id) s.hadUser = true;
+        }
+
+        // ── Aggregate ─────────────────────────────────────────────────
+        const entryCount = new Map();
+        const exitCount  = new Map();
+        const transition = new Map();   // 'from→to' -> count
+        const refCount   = new Map();
+        let totalPages = 0;
+        let bounces    = 0;
+        let totalDurationMs = 0;
+        let withDuration    = 0;
+        let anonSessions    = 0;
+        let signedSessions  = 0;
+        let anonConverted   = 0;
+
+        for (const [sid, s] of sessions) {
+            const pages = s.pages;
+            if (!pages.length) continue;
+            entryCount.set(pages[0], (entryCount.get(pages[0]) || 0) + 1);
+            exitCount.set(pages[pages.length - 1], (exitCount.get(pages[pages.length - 1]) || 0) + 1);
+            totalPages += pages.length;
+            if (pages.length === 1) bounces++;
+            for (let i = 0; i < pages.length - 1; i++) {
+                const key = pages[i] + '→' + pages[i + 1];
+                transition.set(key, (transition.get(key) || 0) + 1);
+            }
+            // Duration = last_seen - first_seen for this session. Sessions
+            // with only one page_view have duration 0 by definition; skip
+            // them so the average isn't dragged toward zero by bounces.
+            if (s.lastTs > s.firstTs) {
+                totalDurationMs += (s.lastTs - s.firstTs);
+                withDuration++;
+            }
+            if (s.hadUser) signedSessions++;
+            else           anonSessions++;
+            // "Converted" = session has signed-in events but landing was anon.
+            // Heuristic: hadUser is true but the FIRST event had no user_id.
+            // We can't perfectly tell from the cap-limited dataset, but the
+            // session row was inserted in chronological order — if hadUser
+            // is true and the first row's user_id was null, we treat that
+            // as a conversion within the visit.
+            if (s.hadUser && s.firstHadNoUser) anonConverted++;
+            // Referrers — only the first referrer per session matters.
+            if (s.firstReferrer) {
+                refCount.set(s.firstReferrer, (refCount.get(s.firstReferrer) || 0) + 1);
+            }
+        }
+
+        const sessionCount = sessions.size;
+        const sortTop = (m, n = 10) => Array.from(m, ([name, count]) => ({ name, count }))
+            .sort((a, b) => b.count - a.count).slice(0, n)
+            .map(x => ({ ...x, share: sessionCount ? +(x.count / sessionCount).toFixed(3) : 0 }));
+
+        const topTransitions = Array.from(transition, ([k, count]) => {
+            const [from, to] = k.split('→');
+            return { from, to, count };
+        }).sort((a, b) => b.count - a.count).slice(0, 15);
+
+        const topReferrers = Array.from(refCount, ([origin, count]) => ({ origin, count }))
+            .sort((a, b) => b.count - a.count).slice(0, 10)
+            .map(r => ({ ...r, share: sessionCount ? +(r.count / sessionCount).toFixed(3) : 0 }));
+
+        return {
+            ok: true,
+            data: {
+                windowDays:            days,
+                sessions:              sessionCount,
+                anonSessions,
+                signedSessions,
+                anonConverted,
+                pageviews:             totalPages,
+                avgPagesPerSession:    sessionCount ? +(totalPages / sessionCount).toFixed(2) : 0,
+                bounceRate:            sessionCount ? +(bounces / sessionCount).toFixed(3) : 0,
+                avgSessionDurationSec: withDuration ? Math.round(totalDurationMs / withDuration / 1000) : 0,
+                entryPages:            sortTop(entryCount, 10),
+                exitPages:             sortTop(exitCount, 10),
+                transitions:           topTransitions,
+                referrers:             topReferrers,
+                truncated,
+            },
+        };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+}
+
+/**
+ * Last-page-of-session distribution, but bucketed by whether the visitor
+ * ever signed in. Lets the dashboard show "of anonymous visitors who
+ * landed on /pricing, X% bounced and Y% navigated to /signup".
+ *
+ * Returns: { ok, data: [{ entry, anonNext: [{ to, count }], signedNext: [...] }] }
+ */
+export async function fetchEntryDestinations(days = 7, topN = 6) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client
+            .from('analytics_events')
+            .select('event_name, session_id, user_id, created_at')
+            .eq('event_type', 'page_view')
+            .gte('created_at', daysAgo(days))
+            .order('created_at', { ascending: true })
+            .limit(30000);
+        if (error) throw error;
+
+        const sessions = new Map();
+        for (const r of data || []) {
+            const sid = r.session_id;
+            if (!sid) continue;
+            let s = sessions.get(sid);
+            if (!s) { s = { pages: [], hadUser: !!r.user_id }; sessions.set(sid, s); }
+            const name = r.event_name;
+            if (s.pages[s.pages.length - 1] !== name) s.pages.push(name);
+            if (r.user_id) s.hadUser = true;
+        }
+
+        // entry -> { anonNext: Map(to,count), signedNext: Map(to,count), bouncesAnon, bouncesSigned }
+        const buckets = new Map();
+        for (const s of sessions.values()) {
+            if (!s.pages.length) continue;
+            const entry = s.pages[0];
+            if (!buckets.has(entry)) buckets.set(entry, {
+                anonNext: new Map(), signedNext: new Map(),
+                bouncesAnon: 0, bouncesSigned: 0,
+                totalAnon: 0, totalSigned: 0,
+            });
+            const b = buckets.get(entry);
+            if (s.hadUser) b.totalSigned++; else b.totalAnon++;
+            if (s.pages.length === 1) {
+                if (s.hadUser) b.bouncesSigned++; else b.bouncesAnon++;
+            } else {
+                const next = s.pages[1];
+                const m = s.hadUser ? b.signedNext : b.anonNext;
+                m.set(next, (m.get(next) || 0) + 1);
+            }
+        }
+
+        const out = Array.from(buckets, ([entry, b]) => {
+            const total = b.totalAnon + b.totalSigned;
+            const top = (m, n = 5) => Array.from(m, ([to, count]) => ({ to, count }))
+                .sort((a, b) => b.count - a.count).slice(0, n);
+            return {
+                entry,
+                total,
+                totalAnon:    b.totalAnon,
+                totalSigned:  b.totalSigned,
+                bouncesAnon:  b.bouncesAnon,
+                bouncesSigned:b.bouncesSigned,
+                anonNext:     top(b.anonNext),
+                signedNext:   top(b.signedNext),
+            };
+        }).sort((a, b) => b.total - a.total).slice(0, topN);
+
+        return { ok: true, data: out };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+}
+
+function _pageNameFromPath(p) {
+    if (!p) return '(none)';
+    return String(p).split('?')[0].split('#')[0]
+        .replace(/^\/+/, '').replace(/\.html?$/i, '') || 'index';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -899,5 +1289,260 @@ export async function fetchAtRiskSubscriptions() {
         return { ok: true, data: enriched };
     } catch (err) {
         return { ok: false, error: err.message };
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ── ONBOARDING ANALYTICS ────────────────────────────────────────────────────
+//
+// New surface added in the Phase-3 onboarding work. Fetches lean wrappers
+// around four RPCs created in supabase-onboarding-events-migration.sql:
+//
+//   onboarding_funnel(p_days)   → wizard step funnel + drop-off
+//   tour_metrics(p_days)        → guided-tour start/complete/skip
+//   auth_flow_metrics(p_days)   → signup / signin success counts
+//   new_vs_returning(p_days)    → bucketed user counts
+//
+// Plus one event_log query for anonymous demo telemetry (demo_entered
+// and demo_signup_clicked land in event_log because the visitor isn't
+// signed in and RLS on activation_events forbids unauth writes).
+//
+// All fetchers degrade gracefully if the migration hasn't been applied —
+// the admin UI surfaces the migration filename in the empty state so an
+// operator knows what to do.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Wizard funnel: shown → step1 done → step2 done → step3 done → completed.
+ * Returns a flat object keyed by event name with user-counts as values
+ * plus three derived ratios (step-1, step-2, step-3 completion).
+ */
+export async function fetchWizardFunnel(days = 30) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client.rpc('onboarding_funnel', { p_days: days });
+        if (error) throw error;
+        const counts = Object.fromEntries((data || []).map(r => [r.event, Number(r.user_count) || 0]));
+        // Note: step_completed is fired multiple times per user (one per
+        // advance), but the RPC counts DISTINCT users — so the value is
+        // "users who completed at least one step", not total step events.
+        // For per-step drop-off we'd need a separate query that filters
+        // metadata->>'step'. Keeping this lean for now; the four-bucket
+        // funnel below is good enough for headline conversion.
+        const shown   = counts.wizard_shown || 0;
+        const stepped = counts.wizard_step_completed || 0;
+        const done    = counts.wizard_completed || 0;
+        const skipped = counts.wizard_skipped || 0;
+        return {
+            ok: true,
+            data: {
+                shown, stepped, completed: done, skipped,
+                completionRate: shown ? +(done / shown).toFixed(3) : 0,
+                skipRate:       shown ? +(skipped / shown).toFixed(3) : 0,
+                anyProgress:    shown ? +(stepped / shown).toFixed(3) : 0,
+            },
+        };
+    } catch (err) {
+        const hint = /function .* does not exist/i.test(err.message || '')
+            ? 'onboarding_funnel RPC missing — apply supabase-onboarding-events-migration.sql'
+            : err.message;
+        return { ok: false, error: hint };
+    }
+}
+
+/** Tour metrics: started/completed/skipped + completion ratio. */
+export async function fetchTourMetrics(days = 30) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client.rpc('tour_metrics', { p_days: days });
+        if (error) throw error;
+        const counts = Object.fromEntries((data || []).map(r => [r.event, Number(r.user_count) || 0]));
+        const started   = counts.tour_started || 0;
+        const completed = counts.tour_completed || 0;
+        const skipped   = counts.tour_skipped || 0;
+        return {
+            ok: true,
+            data: {
+                started, completed, skipped,
+                completionRate: started ? +(completed / started).toFixed(3) : 0,
+            },
+        };
+    } catch (err) {
+        const hint = /function .* does not exist/i.test(err.message || '')
+            ? 'tour_metrics RPC missing — apply supabase-onboarding-events-migration.sql'
+            : err.message;
+        return { ok: false, error: hint };
+    }
+}
+
+/**
+ * Demo-mode metrics. Anonymous events live in event_log (analytics.event)
+ * because the visitor isn't signed in, so this fetcher hits that table
+ * directly instead of the activation RPCs.
+ *
+ * Conversion = demo_signup_clicked / demo_entered. Not perfect (a click
+ * doesn't guarantee signup completion) but close enough to spot a
+ * step-funnel regression.
+ */
+export async function fetchDemoMetrics(days = 30) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const since = new Date(Date.now() - days * 86400_000).toISOString();
+        const { data, error } = await client
+            .from('event_log')
+            .select('event_name')
+            .in('event_name', ['demo_entered', 'demo_signup_clicked'])
+            .gte('created_at', since);
+        if (error) throw error;
+        let entered = 0, clicked = 0;
+        for (const r of data || []) {
+            if (r.event_name === 'demo_entered')        entered++;
+            else if (r.event_name === 'demo_signup_clicked') clicked++;
+        }
+        return {
+            ok: true,
+            data: {
+                entered, clicked,
+                clickRate: entered ? +(clicked / entered).toFixed(3) : 0,
+            },
+        };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+}
+
+/**
+ * Auth flow metrics: signups / signin success / signin retries.
+ *
+ * Failed signins can't be logged client-side (RLS forbids unauth writes
+ * to activation_events), so we surface "retries to first success" via
+ * the metadata.retry_count attached to signin_succeeded rows. A high
+ * average retry count is the same actionable signal as a high failure
+ * rate.
+ */
+export async function fetchAuthFlowMetrics(days = 30) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client.rpc('auth_flow_metrics', { p_days: days });
+        if (error) throw error;
+        const byEvent = Object.fromEntries(
+            (data || []).map(r => [r.event, { users: Number(r.user_count) || 0, events: Number(r.event_count) || 0 }])
+        );
+        // Retry-count average: pull metadata for signin_succeeded events
+        // separately (the RPC aggregates by event only). Cheap query;
+        // bounded to the same window.
+        const since = new Date(Date.now() - days * 86400_000).toISOString();
+        const { data: succRows } = await client
+            .from('activation_events')
+            .select('metadata')
+            .eq('event', 'signin_succeeded')
+            .gte('created_at', since)
+            .limit(5000);
+        let totalRetries = 0, withRetry = 0;
+        for (const r of succRows || []) {
+            const n = +((r.metadata || {}).retry_count || 0);
+            totalRetries += n;
+            if (n > 0) withRetry++;
+        }
+        const succUsers = byEvent.signin_succeeded?.users || 0;
+        const signups   = byEvent.signup?.users || 0;
+        const confirmed = byEvent.signup_confirmed?.users || 0;
+        const welcomes  = byEvent.welcome_email_sent?.users || 0;
+        const nudges    = byEvent.nudge_sent?.users || 0;
+        const magicReqs = byEvent.signin_magic_link_requested?.users || 0;
+        const magicEvts = byEvent.signin_magic_link_requested?.events || 0;
+        const failUsers   = byEvent.signin_failed?.users  || 0;
+        const failEvents  = byEvent.signin_failed?.events || 0;
+        return {
+            ok: true,
+            data: {
+                signups,
+                signupsConfirmed:  confirmed,
+                // Confirmation rate = confirmed / total signups in the
+                // window. Lower than 1.0 means email-gated users dropped
+                // off before clicking the confirmation link OR the
+                // trigger isn't applied (apply
+                // supabase-signup-confirmed-migration.sql). Higher than
+                // 1.0 means the window saw confirmations for accounts
+                // that signed up earlier — catch-up is normal in the
+                // first weeks after the trigger ships.
+                confirmationRate:  signups ? +(confirmed / signups).toFixed(3) : 0,
+                signinSuccesses:   succUsers,
+                signinFailures:    failUsers,
+                signinFailEvents:  failEvents,
+                // Distinct emails that failed ÷ (failed + succeeded).
+                // Approximation: an attacker hammering one email skews
+                // failEvents but not failUsers, so this is the user-
+                // impact rate, not the raw error rate.
+                signinFailureRate: (failUsers + succUsers) ? +(failUsers / (failUsers + succUsers)).toFixed(3) : 0,
+                returningSessions: byEvent.returning_user_session?.users || 0,
+                welcomeEmails:     welcomes,
+                // Send rate = welcome emails / signups in the same window.
+                // > 1.0 means we welcomed users who signed up before the
+                // window opened (catch-up automation, future cron); < 1.0
+                // means the edge endpoint is dropping sends — investigate.
+                welcomeSendRate:   signups ? +(welcomes / signups).toFixed(3) : 0,
+                nudgesSent:        nudges,
+                // Nudge rate is the share of signups in the window that
+                // got nudged (i.e. didn't finish the wizard within 24h).
+                // High nudge-rate = wizard friction; investigate the
+                // funnel card. Low nudge-rate AND low completion-rate
+                // means the cron isn't firing (env var, RPC missing).
+                nudgeRate:         signups ? +(nudges / signups).toFixed(3) : 0,
+                avgRetries:        succUsers ? +(totalRetries / succUsers).toFixed(2) : 0,
+                pctNeedingRetry:   succUsers ? +(withRetry / succUsers).toFixed(3) : 0,
+                // Magic-link funnel: how many distinct users requested
+                // a sign-in link, how many total requests fired (some
+                // users hit "Resend"), and what fraction of all sign-in
+                // successes appear to come from the magic-link flow.
+                // The denominator is signins-in-window, not magic-link
+                // requests, because some links are clicked outside the
+                // window. Sanity-cap at 100% in case of clock skew.
+                magicLinkRequests:     magicReqs,
+                magicLinkRequestEvents: magicEvts,
+                magicLinkShare:        succUsers ? Math.min(1,
+                    +(magicReqs / succUsers).toFixed(3)) : 0,
+            },
+        };
+    } catch (err) {
+        const hint = /function .* does not exist/i.test(err.message || '')
+            ? 'auth_flow_metrics RPC missing — apply supabase-onboarding-events-migration.sql'
+            : err.message;
+        return { ok: false, error: hint };
+    }
+}
+
+/** New vs returning users in the window. */
+export async function fetchNewVsReturning(days = 30) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client.rpc('new_vs_returning', { p_days: days });
+        if (error) throw error;
+        const counts = Object.fromEntries((data || []).map(r => [r.bucket, Number(r.user_count) || 0]));
+        const newU = counts.new || 0;
+        const ret  = counts.returning || 0;
+        const total = newU + ret;
+        return {
+            ok: true,
+            data: {
+                new: newU, returning: ret, total,
+                returningShare: total ? +(ret / total).toFixed(3) : 0,
+            },
+        };
+    } catch (err) {
+        const hint = /function .* does not exist/i.test(err.message || '')
+            ? 'new_vs_returning RPC missing — apply supabase-onboarding-events-migration.sql'
+            : err.message;
+        return { ok: false, error: hint };
     }
 }

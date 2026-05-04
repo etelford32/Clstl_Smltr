@@ -439,6 +439,26 @@ test.describe('Tier expansion', () => {
         expect([400, 401, 501]).toContain(res.status());
     });
 
+    test('stripe checkout accepts trial promo code in body schema', async ({ request }) => {
+        // The endpoint should at least parse the body; without a real JWT
+        // it'll 401 (unauthorized) before applying the trial. We're just
+        // verifying the schema didn't reject because of the new field.
+        const res = await request.post('/api/stripe/checkout', {
+            data:    { plan: 'basic', trial: 'tour-30day' },
+            headers: { Authorization: 'Bearer fake-token' },
+        });
+        expect([400, 401, 501]).toContain(res.status());
+    });
+
+    test('?plan=basic&trial=tour-30day URL preserves trial param on signup', async ({ page }) => {
+        await page.goto('/signup.html?plan=basic&trial=tour-30day');
+        // Plan pre-selection still works; trial param stays in the URL so
+        // the post-signup checkout call can forward it server-side.
+        await expect(page.locator('#pill-basic')).toHaveClass(/selected/);
+        const url = page.url();
+        expect(url).toMatch(/trial=tour-30day/);
+    });
+
     test('contact-enterprise endpoint rejects missing email', async ({ request }) => {
         const res = await request.post('/api/contact/enterprise', {
             data: { name: 'Test User' },

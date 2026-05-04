@@ -28,6 +28,12 @@ import {
 } from './upper-atmosphere-engine.js';
 import { ATMOSPHERIC_LAYER_SCHEMA } from './upper-atmosphere-layers.js';
 import { layerPhysics } from './upper-atmosphere-physics.js';
+import { DEBRIS_FAMILIES } from './debris-catalog.js';
+import { CONSTELLATIONS } from './constellation-catalog.js';
+import {
+    probabilityOfCollision, pcRisk, recommendDeltaV,
+    formatDeltaV, deltaVToFuelKg,
+} from './collision-avoidance.js';
 
 // ── Palette (matches the globe's density ramp in spirit) ────────────────────
 const SPECIES_COLORS = {
@@ -140,9 +146,16 @@ export class UpperAtmosphereUI {
             this._paintCameraHUD();
             this._paintSatelliteDrag();
             this._paintConjunctionWatch();
+            this._paintAvoidancePanel();
         };
         clearInterval(this._camHUDTimer);
         this._camHUDTimer = setInterval(tick, 250);
+        // Family panel + constellation toggles repaint less often —
+        // they only change when the debris sample loads or the user
+        // flips a toggle.
+        this._renderDebrisFamilies();
+        this._renderConstellationToggles();
+        window.addEventListener('ua-debris-update', () => this._renderDebrisFamilies());
         tick();
     }
 
@@ -194,9 +207,38 @@ export class UpperAtmosphereUI {
             // Truncate long debris names so the layout stays tidy.
             const bShort = p.bName.length > 22 ? p.bName.slice(0, 21) + '…' : p.bName;
             const aShort = p.aName.length > 22 ? p.aName.slice(0, 21) + '…' : p.aName;
-            const kindBadge = p.kind === 'asset-debris'
-                ? `<span style="color:#ff7099;font-size:.58rem;font-weight:700;letter-spacing:.04em">DEB</span>`
-                : '';
+            // For asset-debris pairs, look up the family + size meta
+            // so the row badge reads "FY-1C SMALL" instead of bare DEB.
+            // The globe stores debris by id; we recover the index by id.
+            let famBadge = '';
+            let pcText   = '';
+            if (p.kind === 'asset-debris') {
+                const debrisIdx = (this.globe?._debris || []).findIndex(d => d.spec.id === p.bId);
+                const meta = this.globe?.getDebrisMetaByIndex?.(debrisIdx);
+                if (meta?.family) {
+                    const sizeTag = meta.size?.class
+                        ? `<span style="opacity:.7">${meta.size.class.toUpperCase()}</span>`
+                        : '';
+                    famBadge = `
+                        <span style="color:${meta.family.color};font-size:.58rem;font-weight:700;letter-spacing:.04em"
+                              title="${meta.family.name}">
+                            ${this._shortFamilyTag(meta.family.id)}
+                            ${sizeTag}
+                        </span>`;
+                }
+                // Quick Pc preview right in the row so the user sees
+                // the magnitude without opening the avoidance panel.
+                const { pc } = probabilityOfCollision({
+                    missKm: p.tcaDistKm,
+                    tcaSec: p.tcaTimeSec,
+                    kind:   'asset-debris',
+                });
+                const pcRisk_ = pcRisk(pc);
+                pcText = `<span class="ua-conj-pc" style="color:${pcRisk_.color}"
+                                title="Probability of Collision (Foster 1D, σ scales with TCA)">
+                            Pc ≈ ${pc.toExponential(1)}
+                          </span>`;
+            }
             return `
               <div class="ua-conj-row ${cls}" title="${p.aName} ↔ ${p.bName}${p.bNorad ? ' · NORAD ' + p.bNorad : ''}">
                 <span class="ua-conj-pair">
@@ -205,10 +247,11 @@ export class UpperAtmosphereUI {
                     <span class="ua-conj-link">↔</span>
                     <span class="ua-conj-dot" style="background:${p.bColor};color:${p.bColor}"></span>
                     <span>${bShort}</span>
-                    ${kindBadge}
+                    ${famBadge}
                 </span>
                 <span class="ua-conj-meta">
                     <span>now ${currText} km</span>
+                    ${pcText}
                 </span>
                 <span class="ua-conj-tca" style="color:${tcaCol}">
                     ${tcaText} km
@@ -222,6 +265,240 @@ export class UpperAtmosphereUI {
             ? `<div class="ua-dim" style="font-size:.62rem;margin-top:4px;text-align:right">+${pairs.length - displayed.length} more pairs screened</div>`
             : '';
         box.innerHTML = html + trailing;
+    }
+
+    // ── Debris family roll-up ────────────────────────────────────────────
+    //
+    // Aggregates the loaded debris sample by source-event family and
+    // renders a compact bar / count list. Each row shows the family
+    // name + year, a colored swatch, the in-sample count, and the
+    // catalog-wide tracked-fragment estimate so users can extrapolate
+    // from the visualization-grade sample to operational scale.
+
+    /**
+     * Map debris-family id → 4-character row badge for the conjunction
+     * panel. Mirror the family name's mnemonic so users can scan rows.
+     */
+    _shortFamilyTag(id) {
+        const m = {
+            'fengyun-1c':            'FY-1C',
+            'cosmos-iridium-2009':   'IR-33',
+            'cosmos-1408':           'C1408',
+            'mission-shakti':        'SHKTI',
+            'long-march-6a':         'CZ-6A',
+            'noaa-breakups':         'NOAA',
+            'rocket-bodies':         'R/B',
+            'generic-debris':        'DEB',
+            'unknown':               'UNK',
+        };
+        return m[id] || 'DEB';
+    }
+
+    _renderDebrisFamilies() {
+        const box = this.el.debrisFamilies;
+        if (!box) return;
+        const families = this.globe?.getDebrisFamilyBreakdown?.() ?? [];
+        if (!families.length) {
+            box.innerHTML = '<div class="ua-dim" style="font-size:.7rem">'
+                          + 'waiting for debris catalog…</div>';
+            return;
+        }
+        const totalSample = families.reduce((s, f) => s + f.count, 0);
+        // Total catalog-wide tracked debris across the registry — for
+        // the "showing X of Y tracked" framing.
+        const totalCatalog = DEBRIS_FAMILIES.reduce((s, f) => s + (f.tracked || 0), 0);
+        const html = families.map(({ family, count, mediumEnergyMJ }) => {
+            const pct = (100 * count / totalSample).toFixed(0);
+            const yr  = family.year ? ` · ${family.year}` : '';
+            const energyTxt = mediumEnergyMJ > 0
+                ? `<span style="color:#cc9">${(mediumEnergyMJ / 1000).toFixed(1)} GJ Σ</span>`
+                : '';
+            return `
+              <div class="ua-fam-row" title="${family.summary}">
+                <span class="ua-fam-swatch" style="background:${family.color}"></span>
+                <span class="ua-fam-name">${family.name}${yr}</span>
+                <span class="ua-fam-count">${count}</span>
+                <span class="ua-fam-bar">
+                  <span class="ua-fam-bar-fill"
+                        style="width:${pct}%; background:${family.color}"></span>
+                </span>
+                <span class="ua-fam-energy">${energyTxt}</span>
+              </div>`;
+        }).join('');
+        const footer = `
+          <div class="ua-dim" style="font-size:.6rem;margin-top:6px;line-height:1.4">
+            Showing ${totalSample} of ~${totalCatalog.toLocaleString()} tracked
+            objects in the LEO debris registry. Σ energy is sample-only,
+            kinetic at 14 km/s closing speed.
+          </div>`;
+        box.innerHTML = html + footer;
+    }
+
+    // ── Collision avoidance recommendations ──────────────────────────────
+    //
+    // For the closest active threat (asset-debris pair under 50 km TCA),
+    // compute the recommended evasion Δv via Clohessy-Wiltshire and
+    // report the operational decision. The thresholds are conservative
+    // versions of CCSDS-recommended COLA tiers:
+    //
+    //   < 1 km miss → maneuver (red)
+    //   < 5 km miss → consider maneuver (amber)
+    //   < 50 km miss → monitor (yellow)
+    //   ≥ 50 km miss → nominal (green)
+    //
+    // Δv recommendations assume a circular reference orbit; the model
+    // returns the cheapest in-track impulse needed to clear a 5-km
+    // safety margin given the current TCA lookahead. Real ops would
+    // also screen the post-burn trajectory for secondary conjunctions —
+    // we don't here.
+
+    _paintAvoidancePanel() {
+        const box = this.el.avoidanceBox;
+        if (!box) return;
+        const pairs = this.globe?.getConjunctionAnalysis?.() ?? [];
+        if (!pairs.length) {
+            box.innerHTML = '<div class="ua-dim" style="font-size:.7rem">'
+                          + 'no conjunctions to evaluate.</div>';
+            return;
+        }
+
+        // Pull the top 3 threats: prefer asset-debris (the operational
+        // case) but fall back to asset-asset if no debris pair has
+        // crossed the screening threshold yet.
+        const threats = pairs
+            .filter(p => p.tcaDistKm < 200)
+            .slice(0, 3);
+
+        if (!threats.length) {
+            box.innerHTML = `
+              <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;
+                          background:rgba(96,200,144,.10);border-radius:6px;
+                          border:1px solid rgba(96,200,144,.3)">
+                <span style="color:#80c890;font-weight:700">●</span>
+                <span style="font-size:.74rem;color:#a4d8b0">Nominal — no
+                pairs within 200 km TCA.</span>
+              </div>`;
+            return;
+        }
+
+        const cards = threats.map(p => {
+            const altKm = (this.globe?._satProbes?.[p.aId]?.spec?.altitudeKm) ?? 500;
+            const { pc } = probabilityOfCollision({
+                missKm: p.tcaDistKm,
+                tcaSec: p.tcaTimeSec,
+                kind:   p.kind,
+            });
+            const risk = pcRisk(pc);
+            const rec = recommendDeltaV({
+                altKm,
+                tcaSec:        p.tcaTimeSec,
+                currentMissKm: p.tcaDistKm,
+                targetMissKm:  5,
+            });
+            const fuelG = deltaVToFuelKg(rec.dvInTrackMS) * 1000;
+            // For asset-debris, surface the family + size so the user
+            // sees what they're avoiding.
+            let famLine = '';
+            if (p.kind === 'asset-debris') {
+                const idx = (this.globe?._debris || []).findIndex(d => d.spec.id === p.bId);
+                const meta = this.globe?.getDebrisMetaByIndex?.(idx);
+                if (meta?.family) {
+                    famLine = `
+                      <div class="ua-av-fam" style="color:${meta.family.color}">
+                        ${meta.family.name}
+                        ${meta.size?.class ? `· ${meta.size.class} (${meta.size.rangeM})` : ''}
+                        ${meta.size?.massKg ? `· ~${meta.size.massKg} kg` : ''}
+                      </div>`;
+                }
+            }
+            const action = !rec.feasible ? 'TCA too close — shelter / orient'
+                          : rec.dvInTrackMS === 0
+                            ? 'Current miss exceeds 5 km — no action'
+                            : `Burn ${formatDeltaV(rec.dvInTrackMS)} prograde`;
+            // Direction explanation: positive Δv in-track shifts the
+            // asset along-track (raising orbit slightly + delaying TCA);
+            // negative Δv (retrograde) lowers + advances. Either works
+            // — we report the magnitude.
+            return `
+              <div class="ua-av-card" style="border-left:3px solid ${risk.color}">
+                <div class="ua-av-head">
+                  <span class="ua-av-pair">
+                    ${p.aName} <span style="opacity:.6">↔</span> ${p.bName}
+                  </span>
+                  <span class="ua-av-tier" style="background:${risk.color}20;color:${risk.color}">
+                    ${risk.label.toUpperCase()}
+                  </span>
+                </div>
+                ${famLine}
+                <div class="ua-av-stats">
+                  <span title="Predicted miss distance at TCA">
+                    miss <b>${p.tcaDistKm.toFixed(2)} km</b>
+                  </span>
+                  <span title="Probability of collision (Foster 1D)">
+                    Pc <b>${pc.toExponential(2)}</b>
+                  </span>
+                  <span title="Time-to-closest-approach in simulated orbital seconds">
+                    TCA <b>${(p.tcaTimeSec / 60).toFixed(0)} min</b>
+                  </span>
+                </div>
+                <div class="ua-av-action">
+                  <span class="ua-av-action-icon" style="color:${risk.color}">▸</span>
+                  ${action}
+                </div>
+                <div class="ua-av-meta">
+                  in-track Δv <b>${formatDeltaV(rec.dvInTrackMS)}</b>
+                  · radial Δv ${formatDeltaV(rec.dvRadialMS)}
+                  · lead ${(rec.leadSec / 60).toFixed(0)} min
+                  ${fuelG > 0 ? `· fuel ~${fuelG.toFixed(1)} g (Hall, Isp 1500 s)` : ''}
+                </div>
+              </div>`;
+        }).join('');
+        box.innerHTML = cards + `
+          <div class="ua-dim" style="font-size:.6rem;margin-top:6px;line-height:1.4">
+            Δv from Clohessy-Wiltshire on a circular reference orbit;
+            Pc via Foster 1D with σ ∝ TCA lookahead. Visualization-grade
+            — operational COLA needs CDM-derived covariance.
+          </div>`;
+    }
+
+    // ── Constellation toggles ────────────────────────────────────────────
+    //
+    // Render the constellation registry as a row of toggle chips.
+    // Each chip flips visibility on the globe's overlay cloud for that
+    // constellation; clouds are lazily built on first enable. MEO
+    // constellations are flagged so the user knows they live well
+    // outside the camera's default zoom.
+
+    _renderConstellationToggles() {
+        const box = this.el.constellationToggles;
+        if (!box) return;
+        const html = CONSTELLATIONS.map(c => {
+            const meoTag = c.meo ? ' · MEO' : '';
+            return `
+              <button type="button"
+                      class="ua-cn-chip"
+                      data-cn-id="${c.id}"
+                      style="--cn-c:${c.color}"
+                      title="${c.summary}">
+                <span class="ua-cn-swatch" style="background:${c.color}"></span>
+                <span class="ua-cn-name">${c.name}</span>
+                <span class="ua-cn-meta">${c.countActive}${meoTag}</span>
+              </button>`;
+        }).join('');
+        box.innerHTML = html + `
+          <div class="ua-dim" style="font-size:.6rem;margin-top:6px;line-height:1.4;flex-basis:100%">
+            Visualization-grade Walker overlays. Click to render a
+            representative sample of ${CONSTELLATIONS.reduce((s,c)=>s+c.sampleCount,0)}
+            dots across all constellations.
+          </div>`;
+        box.querySelectorAll('.ua-cn-chip').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const id = btn.dataset.cnId;
+                const on = !btn.classList.contains('ua-cn-on');
+                btn.classList.toggle('ua-cn-on', on);
+                this.globe?.setConstellationVisible?.(id, on);
+            });
+        });
     }
 
     // ── TLE freshness pill ─────────────────────────────────────────────────

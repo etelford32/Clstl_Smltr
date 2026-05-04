@@ -2,9 +2,15 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Dashboard — Parker Physics</title>
 <meta name="robots" content="noindex,nofollow">
+<link rel="stylesheet" href="js/nav-styles.css">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -15,17 +21,9 @@
 html{height:auto;overflow-y:auto}
 body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh;display:flex;flex-direction:column;overflow-x:hidden}
 
-/* ── NAV ── */
-nav#dash-nav{position:sticky;top:0;z-index:100;background:rgba(6,3,15,.94);backdrop-filter:blur(14px);border-bottom:1px solid var(--border);padding:0 24px;height:58px;display:flex;align-items:center;justify-content:space-between}
-.nav-logo{display:flex;align-items:center;gap:10px;text-decoration:none}
-.nav-logo img{height:32px;width:32px;border-radius:50%;object-fit:cover}
-.nav-logo-text{font-size:.95rem;font-weight:700;background:linear-gradient(45deg,#ffd700,#ff8c00);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
-.nav-actions{display:flex;align-items:center;gap:12px}
-.nav-user{font-size:.82rem;color:var(--muted)}
-.nav-user strong{color:var(--text)}
+/* Local button helper used by the subscription card upgrade CTA. The
+   shared nav uses its own .nav-item class from nav-styles.css. */
 .btn-sm{padding:6px 14px;border-radius:20px;font-size:.8rem;font-weight:600;cursor:pointer;text-decoration:none;border:none;line-height:1}
-.btn-outline{background:transparent;border:1px solid var(--border);color:var(--text);transition:border-color .2s,color .2s}
-.btn-outline:hover{border-color:var(--accent);color:var(--accent)}
 
 /* ── LAYOUT ── */
 main{flex:1;max-width:1180px;width:100%;margin:0 auto;padding:36px 24px 60px}
@@ -270,19 +268,88 @@ footer a:hover{color:var(--text)}
 #auth-gate h2{font-size:1.55rem;font-weight:800;margin-bottom:10px}
 #auth-gate p{color:var(--muted);margin-bottom:26px;max-width:360px;font-size:.9rem}
 .gate-actions{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
-.gate-actions a{padding:10px 24px;border-radius:24px;font-weight:700;font-size:.88rem;text-decoration:none}
+.gate-actions a{display:inline-flex;align-items:center;justify-content:center;padding:12px 24px;min-height:44px;border-radius:24px;font-weight:700;font-size:.88rem;text-decoration:none;cursor:pointer;-webkit-tap-highlight-color:rgba(255,184,48,.25)}
 .gate-signin{background:transparent;border:1px solid var(--accent);color:var(--accent)}
 .gate-signup{background:var(--accent);color:#0a0510}
 
+/* ── MOBILE / TOUCH RESPONSIVENESS ────────────────────────────────────────
+   Tuned against iPhone (375 / 390 / 430px wide) and the Safari address-bar
+   resize behavior. The shared nav (nav-styles.css) handles its own breakpoint
+   at 1024px; rules below target the dashboard chrome only. */
+
+/* Tablet & narrow desktop — tighten the welcome row before it wraps. */
+@media(max-width:760px){
+  .welcome h1{font-size:1.55rem}
+  .welcome-sub{font-size:.82rem;gap:6px}
+}
+
+/* Phone — give every interactive control at least a 36-44px tap target,
+   tighten card padding, and make horizontal scrollers explicit. */
 @media(max-width:600px){
-  .welcome h1{font-size:1.35rem}
-  main{padding:22px 14px 48px}
+  main{padding:18px 12px 56px}
+  .welcome{margin-bottom:24px}
+  .welcome h1{font-size:1.3rem;line-height:1.25}
+  .welcome-sub{font-size:.78rem}
+  .section-label{margin-bottom:10px}
+
+  /* Cards — narrower padding so content gets the screen. */
+  .card{border-radius:13px}
+  .card-head{padding:13px 13px 0}
+  .card-body{padding:13px}
+
+  /* Bigger tap targets on the dense control rows. */
+  .sl-btn{font-size:.72rem;padding:7px 12px;min-height:32px}
+  .loc-action-btn{font-size:.78rem;padding:8px 14px;min-height:36px}
+  .loc-input,.sl-add-row input{font-size:.9rem;padding:10px 12px;min-height:40px}
+  .loc-btn{padding:10px 12px;min-height:40px;min-width:40px}
+  .tp-earth-btn,.tp-go-btn{font-size:.78rem;padding:9px 16px;min-height:36px}
+  .tp-select{font-size:.88rem;padding:9px 11px;min-height:38px}
+  .alert-pref-row{padding:8px 10px}
+  .alert-pref-toggle{font-size:.82rem}
+
+  /* Stacked saved-location row — let the action buttons fall onto their
+     own line below the name instead of compressing the label. */
+  .sl-row{padding:10px;gap:8px}
+  .sl-actions{width:100%;justify-content:flex-end}
+  .sl-label-wrap{flex-basis:100%;min-width:0}
+  .sl-status{flex:0 0 auto}
+
+  /* Condition grid in the alert card — min 120 keeps two columns at 320px. */
+  #alert-card-body > div[style*="grid-template-columns"]{
+    grid-template-columns:repeat(auto-fit,minmax(120px,1fr))!important;
+  }
+
+  /* Sim grid — one card per row at <380, two above. */
+  .sim-grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:32px}
+  .sim-thumb{height:88px;font-size:1.9rem}
+  .sim-info{padding:9px 12px 11px}
+
+  /* Space-weather metric strip — wrap two-up instead of three-up so the
+     numbers don't truncate on a 320px iPhone SE. */
+  .sw-cell{flex:1 1 calc(50% - 4px);min-width:0}
+
+  /* Safe-area padding for notched iPhones. */
+  footer{padding-bottom:calc(22px + env(safe-area-inset-bottom))}
+  main{padding-bottom:calc(56px + env(safe-area-inset-bottom))}
+}
+
+/* Very narrow (iPhone SE) — drop one more notch. */
+@media(max-width:360px){
+  .welcome h1{font-size:1.18rem}
+  .card-head{padding:11px 10px 0}
+  .card-body{padding:11px 10px}
+  main{padding:14px 8px 56px}
 }
 </style>
 </head>
 <body>
 
 <!-- ── AUTH GATE ── -->
+<!-- Lets unauthenticated visitors preview the live dashboard with sample
+     data (everything except saved locations, billing, and the class
+     roster — those need a real account). Choosing "Continue as Guest"
+     stamps a sessionStorage flag the rest of dashboard.js reads to
+     hide gated cards and show a sticky banner. -->
 <div id="auth-gate" aria-live="polite">
   <img src="ParkersPhysics_logo2.jpg" alt="Parker Physics" style="height:52px;width:52px;border-radius:50%;object-fit:cover;margin-bottom:18px">
   <h2>Sign in to access your dashboard</h2>
@@ -291,19 +358,25 @@ footer a:hover{color:var(--text)}
     <a href="signin.html" class="gate-signin">Sign In</a>
     <a href="signup.html" class="gate-signup">Create Free Account</a>
   </div>
+  <button id="gate-demo" type="button" style="margin-top:18px;background:none;border:none;color:rgba(160,128,255,.85);cursor:pointer;font:inherit;font-size:.82rem;text-decoration:underline;text-underline-offset:3px">
+    or preview the dashboard as a guest
+  </button>
 </div>
 
-<!-- ── NAV ── -->
-<nav id="dash-nav" aria-label="Dashboard navigation">
-  <a href="index.html" class="nav-logo" aria-label="Parker Physics home">
-    <img src="ParkersPhysics_logo2.jpg" alt="">
-    <span class="nav-logo-text">Parker Physics</span>
-  </a>
-  <div class="nav-actions">
-    <span class="nav-user">Welcome, <strong id="user-name">–</strong></span>
-    <button class="btn-sm btn-outline" id="signout-btn" aria-label="Sign out">Sign Out</button>
-  </div>
-</nav>
+<!-- Demo-mode banner (rendered when sessionStorage.pp_demo_mode === '1').
+     Sticky at the top of the page so the upgrade pitch is always visible
+     even after the user scrolls. -->
+<div id="demo-banner" style="display:none;position:sticky;top:0;z-index:200;background:linear-gradient(90deg,rgba(192,128,255,.18),rgba(79,195,247,.18));border-bottom:1px solid rgba(160,128,255,.3);padding:10px 16px;text-align:center;font-size:.82rem;color:#e8e0ff">
+  <strong style="color:#c77dff;letter-spacing:.04em">DEMO MODE</strong>
+  · You're previewing with sample data.
+  <a href="signup.html" style="color:#ffd700;font-weight:700;text-decoration:none;margin:0 6px">Sign up free</a>
+  to save locations and get personalised alerts.
+  <button id="demo-exit" type="button" style="margin-left:10px;background:transparent;border:1px solid rgba(255,255,255,.2);color:#cef;font:inherit;font-size:.72rem;padding:3px 10px;border-radius:4px;cursor:pointer">Exit demo</button>
+</div>
+
+<!-- ── NAV (shared component, see js/nav.js) ── -->
+<nav aria-label="Primary navigation"></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260429"; initNav("dashboard");</script>
 
 <!-- ── MAIN ── -->
 <main>
@@ -314,8 +387,11 @@ footer a:hover{color:var(--text)}
       Your astrophysics command center.
       <span class="plan-badge plan-free" id="plan-badge">Free</span>
       <button id="retake-tour" style="background:none;border:none;color:rgba(160,128,255,.7);cursor:pointer;font-family:inherit;font-size:.72rem;margin-left:8px;padding:0" title="Guided tour of features">Take the tour &rarr;</button>
-      <a href="admin.html" id="dash-admin-btn" style="display:none;margin-left:10px;padding:4px 12px;background:rgba(255,50,50,.15);border:1px solid rgba(255,60,60,.35);border-radius:5px;color:#f55;font-size:.72rem;font-weight:700;text-decoration:none;letter-spacing:.04em;transition:background .2s" onmouseover="this.style.background='rgba(255,50,50,.3)'" onmouseout="this.style.background='rgba(255,50,50,.15)'">SUPER ADMIN</a>
-      <a href="status.html" id="dash-status-btn" style="display:none;margin-left:6px;padding:4px 12px;background:rgba(255,140,0,.12);border:1px solid rgba(255,140,0,.3);border-radius:5px;color:#ff8c00;font-size:.72rem;font-weight:700;text-decoration:none;letter-spacing:.04em;transition:background .2s" onmouseover="this.style.background='rgba(255,140,0,.25)'" onmouseout="this.style.background='rgba(255,140,0,.12)'">SYSTEM STATUS</a>
+      <a href="account.html" style="color:rgba(79,195,247,.85);font-size:.72rem;margin-left:8px;text-decoration:none;font-weight:600" title="Profile, alerts, API keys, billing">Account &rarr;</a>
+      <!-- Admin/superadmin shortcuts intentionally live in the shared nav
+           (js/nav.js renders the ADMIN/SUPER pill for elevated roles). The
+           user dashboard is now strictly user-scoped — operator content
+           lives on admin.html. -->
     </p>
   </div>
 
@@ -337,16 +413,10 @@ footer a:hover{color:var(--text)}
   <!-- Mounted by js/class-roster.js when the user holds a seated plan. -->
   <div class="card" id="class-roster-card" style="margin-bottom:16px;display:none"></div>
 
-  <!-- ── PIPELINE ANALYTICS (superadmin only) ── -->
-  <div class="card" id="pipeline-card" style="margin-bottom:16px;display:none">
-    <div class="card-head">
-      <span class="card-title">Pipeline Analytics · Superadmin</span>
-      <a href="admin.html" class="card-link">Open admin console →</a>
-    </div>
-    <div class="card-body">
-      <div id="pipeline-health"><div style="color:var(--muted);font-size:.78rem;padding:10px 0">Loading pipeline probes…</div></div>
-    </div>
-  </div>
+  <!-- Pipeline Analytics has moved to admin.html → System tab.
+       The user dashboard is strictly user-scoped; superadmin operator
+       content (live edge-proxy probes, heartbeat freshness, cron status)
+       all lives on the admin console now. -->
 
   <!-- ── TOP ROW ── -->
   <div class="top-row">
@@ -624,10 +694,12 @@ footer a:hover{color:var(--text)}
     </div>
     <div class="card-body">
 
-      <!-- Gate for free users -->
+      <!-- Gate for free users. Copy is rendered dynamically from
+           js/tier-config.js so adding a tier doesn't require a string
+           edit here too. See _renderSavedLocsGate() below. -->
       <div id="sl-gate" class="sl-gate" style="display:none">
         <div style="font-size:1.3rem;margin-bottom:6px">&#128205;</div>
-        <div>Save up to <strong>5 locations</strong> with Basic, or <strong>25 locations</strong> with Advanced, and get dedicated alerts for each one.</div>
+        <div id="sl-gate-copy">Save locations and get dedicated alerts for each one.</div>
         <a href="pricing.html" class="btn">Upgrade</a>
       </div>
 
@@ -1055,6 +1127,11 @@ import {
 } from './js/trip-planner.js';
 import { mountClassRoster } from './js/class-roster.js';
 import { logActivation, EVENTS } from './js/activation.js';
+import { tierLabel, tierBadgeClass } from './js/tier-config.js';
+// Auto-mounts a welcome wizard on first signed-in load (post-signup or
+// when ?welcome=1 is in the URL). No-ops on subsequent loads. See
+// js/welcome-wizard.js for trigger logic + dismissal flag.
+import './js/welcome-wizard.js';
 
 // Expose auth for the inline script sections
 window._ppAuth = { auth };
@@ -1094,21 +1171,142 @@ console.info('[Dashboard] auth gate:', {
     plan:             _auth?.plan,
 });
 
+// ── Anonymous demo mode ─────────────────────────────────────────────────
+// Lets a visitor preview the dashboard without an account. Cards that
+// require Supabase reads (saved locations, billing, class roster) are
+// hidden; everything that's pulled from public NOAA proxies (snapshot,
+// briefing, impact ring, alert history) renders normally. Flag lives
+// in sessionStorage so closing the tab exits demo mode.
+const DEMO_KEY = 'pp_demo_mode';
+let _demoMode = false;
+try { _demoMode = sessionStorage.getItem(DEMO_KEY) === '1'; } catch {}
+
+const gateDemoBtn = document.getElementById('gate-demo');
+gateDemoBtn?.addEventListener('click', () => {
+    try { sessionStorage.setItem(DEMO_KEY, '1'); } catch {}
+    location.reload();
+});
+
+document.getElementById('demo-exit')?.addEventListener('click', () => {
+    try { sessionStorage.removeItem(DEMO_KEY); } catch {}
+    // Clear the seeded sample location on exit so a subsequent real
+    // session starts blank instead of inheriting "Boulder, CO (sample)".
+    try {
+        const cur = loadUserLocation();
+        if (cur && cur.city === DEMO_LOCATION.city) clearUserLocation();
+    } catch {}
+    location.reload();
+});
+
+// Curated sample location for demo mode. Boulder, CO is at 40°N — high
+// enough that aurora alerts fire on G3+ storms (so the demo isn't dead
+// during quiet sun) and low enough that summer ISS passes are common.
+// Keeping this server-agnostic (just a localStorage write) means the
+// space-weather snapshot, sun card, and ISS pass card all populate
+// from public NOAA proxies without needing a real account.
+const DEMO_LOCATION = { lat: 40.0150, lon: -105.2705, city: 'Boulder, CO (sample)' };
+
+function _enterDemoMode() {
+    document.getElementById('auth-gate').style.display = 'none';
+    document.querySelector('main').style.visibility = '';
+    document.querySelector('footer').style.visibility = '';
+    const banner = document.getElementById('demo-banner');
+    if (banner) banner.style.display = 'block';
+    // Telemetry — anonymous, so this goes through analytics.event()
+    // (event_log table) rather than activation_events (which requires
+    // auth.uid()). Admin Onboarding card pulls demo metrics from there.
+    try {
+        import('./js/analytics.js').then(({ analytics }) => {
+            analytics?.event?.('demo_entered', { source: 'auth_gate' });
+        }).catch(() => {});
+    } catch {}
+    // Wire the banner's "Sign up free" link to fire a conversion event
+    // before navigating.
+    const signupLink = document.querySelector('#demo-banner a[href="signup.html"]');
+    signupLink?.addEventListener('click', () => {
+        try {
+            import('./js/analytics.js').then(({ analytics }) => {
+                analytics?.event?.('demo_signup_clicked');
+            }).catch(() => {});
+        } catch {}
+    });
+    // Hide cards that have nothing useful to show without a session.
+    // (Saved-locations stays hidden because the gate-card upsell is the
+    // wrong message in demo mode — we want users evaluating the dashboard
+    // to focus on the public-data cards, not the sales pitch.)
+    ['subscription-card','class-roster-card','saved-locations-card']
+        .forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
+    // Seed a sample location so the live cards (sun, aurora visibility,
+    // impact ring at-your-location, location-anchored briefing) render
+    // with realistic data instead of empty dashes. We DO NOT overwrite
+    // an existing location — a returning visitor in demo mode keeps
+    // whatever they had set previously.
+    try {
+        if (!loadUserLocation()) {
+            saveUserLocation(DEMO_LOCATION);
+        }
+    } catch {}
+    // Recolor the welcome line.
+    const heading = document.getElementById('welcome-heading');
+    if (heading) heading.textContent = 'Sample dashboard · Boulder, CO';
+    const badge = document.getElementById('plan-badge');
+    if (badge) { badge.textContent = 'Demo'; badge.className = 'plan-badge plan-free'; }
+}
+
 if (!_auth || !_auth.signedIn) {
-  document.getElementById('dash-nav').style.visibility = 'hidden';
-  document.querySelector('main').style.visibility = 'hidden';
-  document.querySelector('footer').style.visibility = 'hidden';
+  if (_demoMode) {
+      _enterDemoMode();
+  } else {
+      // Nav stays visible so a stuck/unauthenticated visitor still has the
+      // sign-in / sign-up buttons rendered by nav.js. Only the protected
+      // dashboard chrome gets hidden behind the auth gate.
+      document.querySelector('main').style.visibility = 'hidden';
+      document.querySelector('footer').style.visibility = 'hidden';
+  }
 } else {
   // Hide the full-screen sign-in overlay FIRST, before any downstream init can
   // throw. A crash below used to leave the gate visible, which looked to
   // superusers like "the sign-in is broken for me" when the real failure was
   // something cosmetic further down the script.
   document.getElementById('auth-gate').style.display = 'none';
+
+  // Telemetry: time from navigation start (the moment the browser
+  // committed the dashboard URL) to the gate clearing. Captures the
+  // full critical path — Supabase session restore + auth.ready() race
+  // + module imports — which is the user-visible "is this app
+  // working?" latency, not just the resource-load timing the Web
+  // Vitals capture.
+  try {
+      const { telemetry } = await import('./js/telemetry.js');
+      const t0 = performance.timing?.navigationStart
+              || performance.timeOrigin
+              || 0;
+      if (t0) telemetry.recordPerf('dashboard_gate_clear', Date.now() - t0);
+  } catch {}
+
+  // Returning-user telemetry: fires once per session for any signed-in
+  // user whose previous dashboard visit was > 24 h ago. The DB-side
+  // RPC counts these to compute returning-user rates without needing
+  // a heavyweight session table. Guarded by a localStorage key so
+  // a 5-tab marathon doesn't fire it 5 times.
+  try {
+      const KEY = 'pp_last_dash_visit';
+      const last = +(localStorage.getItem(KEY) || 0);
+      const now  = Date.now();
+      if (last && (now - last) > 24 * 60 * 60 * 1000) {
+          import('./js/activation.js').then(({ logActivation }) => {
+              logActivation('returning_user_session', { gap_hours: Math.round((now - last) / 3600_000) });
+          }).catch(() => {});
+      }
+      localStorage.setItem(KEY, String(now));
+  } catch {}
+
   try {
 
   const name  = _auth.name || _auth.email || 'Explorer';
   const first = name.split(' ')[0];
-  document.getElementById('user-name').textContent = first;
+  // Nav now owns the welcome / sign-out chrome (nav.js renders the
+  // dashboard + sign-out buttons), so we only need the greeting heading.
 
   const hour = new Date().getHours();
   const greet = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
@@ -1129,65 +1327,21 @@ if (!_auth || !_auth.signedIn) {
           badge.textContent = r === 'superadmin' ? 'Superadmin' : 'Admin';
           badge.className   = 'plan-badge plan-advanced';
       } else {
-          // CSS class set per plan; unrecognized plans fall through to 'free'
-          // styling so a future tier added to the DB doesn't render with no
-          // background.
-          const KNOWN = new Set(['free','basic','educator','advanced','institution','enterprise']);
-          const cls   = KNOWN.has(p) ? p : 'free';
-          badge.textContent = p.charAt(0).toUpperCase() + p.slice(1);
-          badge.className   = 'plan-badge plan-' + cls;
+          // Labels + CSS class come from js/tier-config.js so an unknown
+          // plan id falls through to the Free Trial styling instead of
+          // rendering a blank badge.
+          badge.textContent = tierLabel(p);
+          badge.className   = 'plan-badge ' + tierBadgeClass(p);
       }
   }
 
-  function _renderAdminButtons() {
-      const btn       = document.getElementById('dash-admin-btn');
-      const statusBtn = document.getElementById('dash-status-btn');
-      const isAdmin   = _authMod.isAdmin?.()      ?? false;
-      const isSuper   = _authMod.isSuperAdmin?.() ?? false;
-      if (btn) {
-          btn.style.display = isAdmin ? 'inline-block' : 'none';
-          if (isAdmin) btn.textContent = isSuper ? 'SUPER ADMIN' : 'ADMIN';
-      }
-      if (statusBtn) {
-          statusBtn.style.display = isSuper ? 'inline-block' : 'none';
-      }
-  }
-
-  // Pipeline Analytics — superadmin only. Defer the module import until we
-  // know the user qualifies so regular users never pay the download cost.
-  async function _mountPipelineCard() {
-      const card = document.getElementById('pipeline-card');
-      if (!card) return;
-      const isSuper = _authMod.isSuperAdmin?.() ?? false;
-      if (!isSuper) {
-          card.style.display = 'none';
-          // Reset mount flag so a late-arriving superadmin role flip re-mounts.
-          card.dataset.mounted = '';
-          return;
-      }
-      if (card.dataset.mounted === '1') {
-          card.style.display = '';
-          return;
-      }
-      card.dataset.mounted = '1';
-      card.style.display = '';
-      try {
-          const mod = await import('./js/pipeline-analytics.js');
-          mod.renderPipelineAnalytics(document.getElementById('pipeline-health'));
-      } catch (err) {
-          console.error('[Dashboard] pipeline-analytics failed:', err);
-          document.getElementById('pipeline-health').innerHTML =
-              `<div style="color:#f88;font-size:.78rem">Pipeline analytics failed to load: ${err.message}</div>`;
-      }
-  }
+  // Admin / superadmin shortcuts and Pipeline Analytics moved to nav.js
+  // and admin.html respectively — the user dashboard no longer renders
+  // operator UI inline.
 
   _renderPlanBadge();
-  _renderAdminButtons();
-  _mountPipelineCard();
   window.addEventListener('auth-changed', () => {
       _renderPlanBadge();
-      _renderAdminButtons();
-      _mountPipelineCard();
       _renderSubscriptionCard();
   });
 
@@ -1201,17 +1355,8 @@ if (!_auth || !_auth.signedIn) {
       });
   }
 
-  function signOut() {
-    if (_authMod) {
-        _authMod.signOut('index.html');
-    } else {
-        // Fallback: clear both storages
-        try { localStorage.removeItem('pp_auth'); } catch(_){}
-        try { sessionStorage.removeItem('pp_auth'); } catch(_){}
-        window.location.href = 'index.html';
-    }
-  }
-  document.getElementById('signout-btn').addEventListener('click', signOut);
+  // Sign-out is wired by nav.js (the shared #nav-signout-btn). The legacy
+  // dashboard-local sign-out button no longer exists in the DOM.
 
   // ── Subscription card ─────────────────────────────────────────────────────
   // Rendered as a function so auth-changed (e.g. PROFILE_FETCHED, post-checkout
@@ -2062,9 +2207,26 @@ initAll();
             : `${plan.toUpperCase()} · up to ${planCap}`;
     }
 
-    // Plan-gate: free users see upgrade pitch
+    // Plan-gate: free users see upgrade pitch. Build the copy from
+    // PLAN_LIMITS (sourced from tier-config.js) so adding a tier doesn't
+    // require touching this string.
     if (!isAdmin && cap <= 0) {
-        if (gate)    gate.style.display = '';
+        if (gate) {
+            const copyEl = $('sl-gate-copy');
+            if (copyEl) {
+                const pairs = [
+                    ['Basic',       PLAN_LIMITS.basic],
+                    ['Advanced',    PLAN_LIMITS.advanced],
+                    ['Institution', PLAN_LIMITS.institution],
+                    ['Enterprise',  PLAN_LIMITS.enterprise],
+                ].filter(([, n]) => n > 0);
+                const phrase = pairs.map(([label, n]) =>
+                    `<strong>${n} location${n === 1 ? '' : 's'}</strong> on ${label}`
+                ).join(', ');
+                copyEl.innerHTML = `Save ${phrase}, and get dedicated alerts for each one.`;
+            }
+            gate.style.display = '';
+        }
         if (content) content.style.display = 'none';
         return;
     }
@@ -2195,10 +2357,21 @@ initAll();
         const url = `/api/weather/forecast?type=hourly&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`;
         const ctrl = new AbortController();
         const to   = setTimeout(() => ctrl.abort(), HOURLY_FETCH_TIMEOUT_MS);
+        const _t0  = performance.now();
         try {
             const res = await fetch(url, { signal: ctrl.signal });
             if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
             const json = await res.json();
+            // Telemetry: record per-call latency. The dashboard fans out
+            // one call per saved location on every render, so this metric
+            // is N×-amplified vs. a single-page metric like LCP. Sampled
+            // at the same 25% rate so volume stays bounded; the table
+            // values are still representative because each user's calls
+            // share a session and hit the same Vercel region.
+            try {
+                const { telemetry } = await import('./js/telemetry.js');
+                telemetry.recordPerf('weather_grid_hourly', performance.now() - _t0);
+            } catch {}
             return { ok: true, data: json };
         } catch (e) {
             return { ok: false, error: e.name === 'AbortError' ? 'timeout' : e.message };
@@ -3059,5 +3232,6 @@ initAll();
     loadHistory();
 }
 </script>
+<script type="module">import './js/analytics.js';</script>
 </body>
 </html>

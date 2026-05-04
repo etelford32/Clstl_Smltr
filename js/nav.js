@@ -3,19 +3,44 @@
  *
  * Generates a full navigation bar with:
  *   - Logo + brand
- *   - Dropdown menus: Space Weather, Earth, Stars, Tools
- *   - Tier-gated items (free, intro, advanced)
+ *   - Dropdown menus: Earth, Space Weather, Stars, Black Holes, Simulators
+ *   - Tier-gated items (public, free, advanced) where 'advanced' ≡ PRO
+ *     (Advanced + Institution + Enterprise). See auth.isPro().
  *   - Auth state (Sign In / Dashboard / Admin badge)
+ *   - Compact utility text-links in the auth area (Dashboard · Account ·
+ *     Pricing) plus an inline PRO promo for non-pro users.
  *   - Mobile burger with full menu expansion + accordion dropdowns
  *   - Robust hover with delay for desktop, touch-aware for hybrid devices
  *   - Keyboard support (Escape, Tab focus management)
  */
+
+// Side-effect import: cross-page guided tour controller. Hooks the hero CTA
+// on the home page and renders a progress banner on each tour stop.
+import './explore-tour.js';
+import { tierLevel as _cfgTierLevel, PAID_PLAN_IDS } from './tier-config.js';
+// Side-effect import: boots the telemetry singleton (window.onerror,
+// unhandledrejection, Web-Vitals observers). Every page that mounts
+// the nav gets autocapture for free; pages without the nav (rare,
+// embedded simulators) opt-in by importing js/telemetry.js directly.
+import './telemetry.js';
 
 const LOGO_IMG = 'ParkersPhysics_logo2.jpg';
 
 // ── Navigation Structure ─────────────────────────────────────────────────────
 
 const NAV_DROPDOWNS = [
+    {
+        label: 'Earth',
+        id: 'earth-menu',
+        items: [
+            { href: 'earth.html',             label: 'Earth',               sub: '3D globe with live data layers',       tier: 'public',   icon: '🌍' },
+            { href: 'moon.html',              label: 'Moon',                sub: 'Lunar radiation environment',          tier: 'public',   icon: '🌙' },
+            { href: 'operations.html',        label: 'Operations',          sub: 'Fleet & debris analysis console',      tier: 'public',   icon: '🛰️', badge: 'PRO PREVIEW', id: 'operations' },
+            { href: 'satellites.html',        label: 'Satellites',          sub: 'Real-time orbital tracking',           tier: 'advanced', icon: '🛰️', badge: 'PRO' },
+            { href: 'launch-planner.html',    label: 'Launch Planner',      sub: 'SpaceX/Blue Origin launches + weather', tier: 'advanced', icon: '🚀', badge: 'PRO', id: 'launch-planner' },
+            { href: 'upper-atmosphere.html',  label: 'Upper Atmosphere',    sub: 'Thermosphere + exosphere simulator',    tier: 'advanced', icon: '🌡️', badge: 'PRO', id: 'upper-atmosphere' },
+        ],
+    },
     {
         label: 'Space Weather',
         id: 'space-weather',
@@ -24,7 +49,20 @@ const NAV_DROPDOWNS = [
             { href: 'threejs.html',       label: 'Solar System',   sub: 'Interactive 3D orrery',           tier: 'public', icon: '🪐', id: 'solar' },
             { href: 'sun.html',           label: 'The Sun',        sub: 'Real-time solar surface view',    tier: 'public', icon: '☀️' },
             { href: 'missions.html',      label: 'Space Missions', sub: 'Inner solar system fleet roster', tier: 'public', icon: '🛸', id: 'missions' },
+            { href: 'mission-planner.html', label: 'Mission Planner', sub: 'Launch rockets · plan Moon & Mars trips', tier: 'public', icon: '🎯', badge: 'NEW', id: 'mission-planner' },
             { href: 'galactic-map.html',  label: 'Galaxy',         sub: '3D Milky Way star map',           tier: 'free',   icon: '🌌' },
+        ],
+    },
+    {
+        label: 'Stars',
+        id: 'stars',
+        items: [
+            { href: 'sirius.html',     label: 'Sirius Binary',    sub: 'A1V + white dwarf system',    tier: 'public', icon: '⭐' },
+            { href: 'betelgeuse.html', label: 'Betelgeuse',       sub: 'Red supergiant · M1-2 Ia',    tier: 'public', icon: '🔴' },
+            { href: 'vega.html',       label: 'Vega',             sub: 'Rapid rotator · A0V',          tier: 'public', icon: '💫' },
+            { href: 'achernar.html',   label: 'Achernar',         sub: 'Oblate Be star · B6Vep',       tier: 'public', icon: '🌀' },
+            { href: 'wr102.html',      label: 'WR-102',           sub: 'Wolf-Rayet · hottest known',   tier: 'free',   icon: '🌟' },
+            { href: 'star3d.html',     label: 'Sirius Planetary', sub: '3D stellar system simulator',  tier: 'free',   icon: '🪐' },
         ],
     },
     {
@@ -37,39 +75,15 @@ const NAV_DROPDOWNS = [
         ],
     },
     {
-        label: 'Earth',
-        id: 'earth-menu',
+        label: 'Simulators',
+        id: 'simulators',
         items: [
-            { href: 'earth.html',             label: 'Earth',               sub: '3D globe with live data layers',       tier: 'public',   icon: '🌍' },
-            { href: 'moon.html',              label: 'Moon',                sub: 'Lunar radiation environment',          tier: 'public',   icon: '🌙' },
-            { href: 'satellites.html',        label: 'Satellites',          sub: 'Real-time orbital tracking',           tier: 'advanced', icon: '🛰️', badge: 'PRO' },
-            { href: 'launch-planner.html',    label: 'Launch Planner',      sub: 'SpaceX/Blue Origin launches + weather', tier: 'advanced', icon: '🚀', badge: 'PRO', id: 'launch-planner' },
-            { href: 'upper-atmosphere.html',  label: 'Upper Atmosphere',    sub: 'Thermosphere + exosphere simulator',    tier: 'advanced', icon: '🌡️', badge: 'PRO', id: 'upper-atmosphere' },
-        ],
-    },
-    {
-        label: 'Stars',
-        id: 'stars',
-        items: [
-            { href: 'sirius.html',     label: 'Sirius Binary',    sub: 'A1V + white dwarf system',    tier: 'public', icon: '⭐' },
-            { href: 'betelgeuse.html', label: 'Betelgeuse',       sub: 'Red supergiant · M1-2 Ia',    tier: 'public', icon: '🔴' },
-            { href: 'vega.html',       label: 'Vega',             sub: 'Rapid rotator · A0V',          tier: 'public', icon: '💫' },
-            { href: 'wr102.html',      label: 'WR-102',           sub: 'Wolf-Rayet · hottest known',   tier: 'free',   icon: '🌟' },
-            { href: 'star3d.html',     label: 'Sirius Planetary', sub: '3D stellar system simulator',  tier: 'free',   icon: '🪐' },
-        ],
-    },
-    {
-        label: 'Tools',
-        id: 'tools',
-        items: [
-            { section: 'Simulations' },
             { href: 'solar-fluid.html',       label: 'Solar Fluid',          sub: 'Navier-Stokes MHD solver',        tier: 'public', icon: '🌊' },
             { href: 'stellar-wind.html',      label: 'Stellar Wind',         sub: 'Parker spiral + wind stream',     tier: 'public', icon: '💨' },
             { href: 'star2d.html',            label: '2D Stellar Modeler',   sub: 'HR diagram + classification',     tier: 'public', icon: '📊' },
             { href: 'star2d-advanced.html',   label: 'Advanced 2D Solar',    sub: 'CME, Parker spirals, fluid',      tier: 'free',   icon: '🔬' },
-            { section: 'Utilities' },
-            { href: 'dashboard.html',         label: 'Dashboard',            sub: 'Your space weather report',       tier: 'free',   icon: '📋' },
-            { href: 'pricing.html',           label: 'Pricing',              sub: 'Free, Basic, Educator, Advanced, Institution, Enterprise', tier: 'public', icon: '💰' },
+            { href: 'gravity-lab.html',       label: 'Gravity Lab',          sub: 'Live N-body · moons & resonances', tier: 'public', icon: '🪐', badge: 'NEW', id: 'gravity-lab' },
+            { href: 'time-machine.html',      label: 'Orbital Time Machine', sub: 'N-body propagation · ±10 kyr to ±1 Myr', tier: 'public', icon: '⏳', badge: 'IN DEV', id: 'time-machine' },
             { href: 'rust.html',              label: 'Rust/WASM Engine',     sub: 'WebAssembly compute module',      tier: 'free',   icon: '⚙️' },
         ],
     },
@@ -89,16 +103,11 @@ function _getAuth() {
 // Tier level determines which menu items + features a user can see.
 // Educator sits alongside Basic (level 2) — same data feeds, plus embed
 // permission. Institution + Enterprise are Advanced-equivalent (level 3).
+// The mapping itself lives in js/tier-config.js (single source of truth);
+// this wrapper keeps the existing 0 fallback for blank-plan accounts.
 function _tierLevel(plan, role) {
-    if (role === 'admin' || role === 'superadmin') return 99;
-    if (role === 'tester') return 98;  // testers get full feature access
-    if (plan === 'enterprise')  return 3;
-    if (plan === 'institution') return 3;
-    if (plan === 'advanced')    return 3;
-    if (plan === 'educator')    return 2;
-    if (plan === 'basic' || plan === 'intro') return 2;
-    if (plan === 'free') return 1;
-    return 0;
+    const lvl = _cfgTierLevel(plan, role);
+    return lvl > 0 ? lvl : 0;
 }
 
 function _tierRequired(tier) {
@@ -156,6 +165,10 @@ export function initNav(activeId = '') {
     import('./attribution-badge.js')
         .then(m => m.mountAttributionBadge?.())
         .catch(() => { /* nav must not break if the badge module fails */ });
+
+    // First-party analytics: auto-tracks page views, time-on-page, scroll
+    // depth, and (opt-in) clicks. Side-effect import — singleton inside.
+    import('./analytics.js').catch(() => { /* analytics must not break nav */ });
 
     // Re-render nav when profile fetches real role (fixes admin button
     // not showing because nav rendered before fetchProfile() resolved)
@@ -223,7 +236,11 @@ export function initNav(activeId = '') {
                 html += `<a href="${item.href}" class="nav-drop-link${_isAct ? ' active' : ''}" role="menuitem">
                     <span class="ndl-icon">${item.icon || ''}</span>
                     <span class="ndl-body">
-                        <span class="ndl-title">${item.label}${item.badge ? ` <span class="nav-badge-pro" style="background:rgba(0,200,200,.12);color:#0cc;border-color:rgba(0,200,200,.25)">${item.badge}</span>` : ''}</span>
+                        <span class="ndl-title">${item.label}${item.badge ? (
+                            item.badge === 'NEW'
+                                ? ` <sup class="nav-badge-new">${item.badge}</sup>`
+                                : ` <span class="nav-badge-pro" style="background:rgba(0,200,200,.12);color:#0cc;border-color:rgba(0,200,200,.25)">${item.badge}</span>`
+                        ) : ''}</span>
                         <span class="ndl-sub">${item.sub}</span>
                     </span>
                 </a>`;
@@ -235,12 +252,31 @@ export function initNav(activeId = '') {
 
     // Spacer + auth
     html += '<span class="nav-spacer"></span>';
+
+    // Utility text-links (Dashboard · Account · Pricing) + PRO promo.
+    // Signed-out users only get Pricing (Dashboard/Account require auth).
+    // The PRO promo nudges Free/Basic users toward the simulations
+    // unlocked by Advanced: Satellites, Launch Planner, Upper Atmosphere.
+    const isPro = userTier >= 3;
+    html += `<div class="nav-utility-links">`;
+    if (isSignedIn) {
+        html += `<a href="dashboard.html" class="nav-util-link">Dashboard</a>`;
+        html += `<a href="account.html" class="nav-util-link">Account</a>`;
+    }
+    html += `<a href="pricing.html" class="nav-util-link">Pricing</a>`;
+    if (!isPro) {
+        html += `<a href="pricing.html" class="nav-pro-promo" title="Unlock Satellites, Launch Planner & Upper Atmosphere with PRO">
+            <span class="nav-pro-spark">✨</span><span class="nav-pro-text">PRO unlocks Satellites · Launch Planner · Upper Atmosphere</span><span class="nav-pro-arrow" aria-hidden="true">→</span>
+        </a>`;
+    }
+    html += `</div>`;
+
     html += '<span class="nav-auth-sep"></span>';
 
     if (isSignedIn) {
-        // Notification bell (any paid tier or admin)
-        const PAID_PLANS = new Set(['basic', 'educator', 'advanced', 'institution', 'enterprise']);
-        const canAlert = PAID_PLANS.has(auth?.plan) || isAdmin;
+        // Notification bell (any paid tier or admin). PAID_PLAN_IDS is the
+        // canonical set from js/tier-config.js.
+        const canAlert = PAID_PLAN_IDS.has(auth?.plan) || isAdmin;
         if (canAlert) {
             html += `<div class="nav-bell-wrap" id="nav-bell-wrap">
                 <button class="nav-bell" id="nav-bell-btn" title="Alerts" aria-label="Notifications">
@@ -267,7 +303,6 @@ export function initNav(activeId = '') {
         if (isAdmin) {
             html += `<a href="admin.html" class="nav-item nav-admin-link">${auth.role === 'superadmin' ? 'SUPER' : 'ADMIN'}</a>`;
         }
-        html += `<a href="dashboard.html" class="nav-item nav-dash">Dashboard</a>`;
         html += `<button class="nav-item nav-signout" id="nav-signout-btn">Sign Out</button>`;
     } else {
         html += `<a href="signin.html" class="nav-item nav-login">Sign In</a>`;

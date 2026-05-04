@@ -2,6 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Space Missions — Inner Solar System Fleet · Parker Physics</title>
 <meta name="description" content="Live roster of 24+ inner-solar-system space missions — Parker Solar Probe, Solar Orbiter, SOHO, SDO, BepiColombo, DART, Psyche, and every spacecraft measuring the Sun, inner planets, and near-Earth asteroids.">
@@ -153,8 +158,43 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
     background:rgba(255,255,255,.02); border-radius:10px; border:1px dashed rgba(255,255,255,.08);
     grid-column:1 / -1;
 }
+
+/* ─── 3D Solar-system viewport ──────────────────────────── */
+#msn-3d-wrap {
+    margin: 0 24px 14px;
+    max-width: 1400px; margin-left: auto; margin-right: auto;
+}
+#msn-3d {
+    width: 100%; height: 540px;
+    background:#040210;
+    border:1px solid rgba(255,184,48,.18);
+    border-radius:12px;
+    overflow:hidden;
+    position:relative;
+}
+#msn-3d-help {
+    margin: 6px 0 0;
+    font-size: .68rem; color:#778; font-family:monospace; letter-spacing:.04em;
+}
+#msn-3d-help strong { color:#ffb830; font-weight:700; }
+@media (max-width: 720px) {
+    #msn-3d-wrap { margin: 0 12px 12px; }
+    #msn-3d { height: 380px; }
+}
+.msn-card { cursor: pointer; }
+.msn-card--focus {
+    border-color:#fb0 !important;
+    box-shadow:0 0 0 1px rgba(255,184,48,.4), 0 4px 22px rgba(255,184,48,.18);
+    transform:translateY(-1px);
+}
 </style>
 <link rel="stylesheet" href="js/nav-styles.css">
+<script type="importmap">
+{"imports":{
+    "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
 </head>
 <body>
 
@@ -165,6 +205,11 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
     <h1>Space Missions — Inner Solar System Fleet</h1>
     <p>Every operational, cruising, and historically-important spacecraft measuring the Sun, the inner planets, and near-Earth small bodies. Parker Solar Probe is the namesake of this app and the first vehicle ever to cross the Alfvén surface.</p>
     <div id="msn-hero-stats"></div>
+</div>
+
+<div id="msn-3d-wrap">
+    <div id="msn-3d" aria-label="Real-time 3D solar-system mission map"></div>
+    <p id="msn-3d-help"><strong>Drag</strong> to orbit · <strong>Scroll</strong> to zoom · <strong>Right-drag</strong> to pan · <strong>Click</strong> a marker to focus a mission</p>
 </div>
 
 <div id="msn-app">
@@ -195,6 +240,7 @@ import {
     SMALL_BODY_MISSIONS,
     LEGACY_MISSIONS,
 } from './js/space-missions.js';
+import { initMissionsViewer } from './js/missions-3d.js';
 
 // ── Tag each mission with its family for filtering ──────────────
 const FAMILIES = [
@@ -292,7 +338,7 @@ function renderCard(m) {
     const source = m.source ? `<div class="msn-card-source">${esc(m.source)}</div>` : '';
 
     return `
-        <article class="msn-card msn-card--${esc(m.status)} ${isPSP ? 'msn-card--psp' : ''}">
+        <article class="msn-card msn-card--${esc(m.status)} ${isPSP ? 'msn-card--psp' : ''}" data-mission-id="${esc(m.id)}">
             ${pspPin}
             <div class="msn-card-hd">
                 <div class="msn-card-name">${esc(m.name)}</div>
@@ -341,6 +387,29 @@ renderStats();
 renderFamilyFilters();
 renderStatusFilters();
 renderGrid();
+
+// ── 3D viewport + bidirectional card↔marker focus ────────────────
+const viewer = initMissionsViewer({
+    container: document.getElementById('msn-3d'),
+    missions:  ALL,
+    onSelect:  (id) => focusCard(id),
+});
+
+function focusCard(id) {
+    const cards = document.querySelectorAll('.msn-card');
+    cards.forEach(c => c.classList.toggle('msn-card--focus', c.dataset.missionId === id));
+    const card = document.querySelector(`.msn-card[data-mission-id="${CSS.escape(id)}"]`);
+    if (card) card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+document.getElementById('msn-grid').addEventListener('click', (ev) => {
+    const card = ev.target.closest('.msn-card');
+    if (!card) return;
+    const id = card.dataset.missionId;
+    if (!id) return;
+    viewer.focusMission(id);
+    focusCard(id);
+});
 </script>
 
 </body>
