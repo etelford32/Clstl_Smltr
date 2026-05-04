@@ -34,6 +34,7 @@ import { buildStarship } from './launch-vehicle-starship.js';
 import { buildFalcon9 } from './launch-vehicle-falcon9.js';
 import { buildPad as buildPadInfra, tickBeacons } from './launch-pad-3d.js';
 import { createMissionClock } from './launch-mission-clock.js';
+import { ENGINES } from './launch-engines.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -754,6 +755,13 @@ function buildShuttleVehicle() {
     root.position.y = 4.2;
     const height = DIM.ET_LEN;     // ~47 m; slightly under 56 m stack but
                                    // close enough for camera framing.
+
+    // Thrust at liftoff: 2 SRBs (12.5 MN each) + 3 SSMEs (1.86 MN each) =
+    // 30.58 MN. SRBs are the dominant contributor; SSMEs run continuously
+    // through ascent while SRBs separate at T+125 s.
+    const liftoffKn = 2 * ENGINES.rsrm.sl_kn + 3 * ENGINES.rs_25.sl_kn;
+    const massT = 2030;
+
     return {
         root,
         plumes: root.userData.plumes,
@@ -764,12 +772,24 @@ function buildShuttleVehicle() {
             years:          '1981 — 2011',
             height_m:       '56.1',
             diameter_m:     '8.4 (ET)',
-            booster_engines:'2 SRBs',
-            ship_engines:   '3 SSMEs',
+            booster_engines:'2 × RSRM Solid',
+            ship_engines:   '3 × RS-25 (SSME)',
             liftoff_mass_t: '2,030',
             leo_payload_t:  '27.5',
             pad:            'KSC LC-39A',
             notes:          '135 missions, ISS construction, Hubble servicing.',
+            thrust: {
+                liftoff_kn:    liftoffKn,
+                liftoff_mn:    liftoffKn / 1000,
+                per_engine_kn: ENGINES.rsrm.sl_kn,
+                engine_count:  5,
+                booster_engine: ENGINES.rsrm.name,
+                upper_engine:   ENGINES.rs_25.name,
+                propellant:    'APCP (SRB) + LH2/LOX (SSME)',
+                twr_initial:   liftoffKn / (massT * 9.80665),
+                mass_t:        massT,
+                ref_id:        'shuttle',
+            },
         },
     };
 }
@@ -1176,5 +1196,30 @@ export function initVehicleCanvas(canvas, opts = {}) {
         get isAscending() { return missionActive; },
         get missionT()    { return missionClock.T; },
         get currentInfo() { return current.info; },
+        // Live thrust + g-force readout for the MET HUD. Returns:
+        //   { throttle, thrust_mn, twr, g, mass_t }
+        // Mass loss approximated as 35% over the clip (T-3 → T+50) so
+        // T/W rises through ascent, mirroring real propellant burn-off.
+        getLiveThrust() {
+            const info = current.info;
+            const t = info?.thrust;
+            if (!t) return null;
+            const throttle = missionActive
+                ? missionClock.snapshot().throttle
+                : 0;
+            const T = missionActive ? missionClock.T : 0;
+            const massFrac = Math.max(0.55, 1 - 0.35 * Math.max(0, Math.min(1, T / 50)));
+            const massNow  = t.mass_t * massFrac;
+            const liveKn   = t.liftoff_kn * throttle;
+            const twr      = liveKn / (massNow * 9.80665);
+            return {
+                throttle,
+                thrust_mn:  liveKn / 1000,
+                thrust_max_mn: t.liftoff_mn,
+                twr,
+                g:          twr,                        // felt g-force ≈ TWR
+                mass_t:     Math.round(massNow),
+            };
+        },
     };
 }

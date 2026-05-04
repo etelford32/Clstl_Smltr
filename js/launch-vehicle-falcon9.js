@@ -20,6 +20,7 @@
  */
 
 import * as THREE from 'three';
+import { ENGINES } from './launch-engines.js';
 
 // ── Colors ───────────────────────────────────────────────────────────────────
 
@@ -650,6 +651,15 @@ export function buildFalcon9({ variant = 'block5', params: override = {} } = {})
     const sideTop = P.cores === 3 ? P.boosterLen + P.sideNoseLen : 0;
     const visualH = Math.max(totalH, sideTop);
 
+    // Thrust spec — all 9 Merlins per booster fire at liftoff. Falcon
+    // Heavy adds 2× side cores, so total = 27 Merlins. Block 5 Merlin 1D
+    // SL thrust = 854 kN.
+    const merlinSl  = ENGINES.merlin_1d.sl_kn;
+    const totalEnginesSl = P.boosterEngines;        // already accounts for side cores
+    const liftoffKn  = totalEnginesSl * merlinSl;
+    const massT      = P.cores === 3 ? 1420 : 549;
+    const twrInitial = liftoffKn / (massT * 9.80665);
+
     const info = {
         name:           P.label,
         years:          P.years,
@@ -657,11 +667,25 @@ export function buildFalcon9({ variant = 'block5', params: override = {} } = {})
         diameter_m:     P.cores === 3
             ? `${(P.diameter * 3).toFixed(1)} (3 cores)`
             : P.diameter.toFixed(2),
-        booster_engines:`${P.boosterEngines} Merlin 1D`,
-        ship_engines:   `${P.upperEngines} Merlin Vacuum`,
+        booster_engines:`${P.boosterEngines} ${ENGINES.merlin_1d.name}`,
+        ship_engines:   `${P.upperEngines} ${ENGINES.merlin_vac.name}`,
         liftoff_mass_t: P.cores === 3 ? '1,420' : '549',
         leo_payload_t:  P.cores === 3 ? '63.8' : (P.payload === 'crew_dragon' ? '~12 (crew)' : '22.8'),
         notes:          P.notes,
+        thrust: {
+            liftoff_kn:    liftoffKn,
+            liftoff_mn:    liftoffKn / 1000,
+            per_engine_kn: merlinSl,
+            engine_count:  totalEnginesSl,
+            booster_engine: ENGINES.merlin_1d.name,
+            upper_engine:   ENGINES.merlin_vac.name,
+            propellant:     ENGINES.merlin_1d.propellant,
+            twr_initial:   twrInitial,
+            mass_t:        massT,
+            // Comparison-bar id — keeps the highlight in lockstep
+            // with the REFERENCE_THRUSTS table.
+            ref_id:        P.cores === 3 ? 'falcon9_heavy' : 'falcon9_b5',
+        },
     };
 
     return { root, plumes, height: visualH, info, padId: 'lc39a' };
