@@ -331,6 +331,201 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
     color:#667; font-size:.82rem; line-height:1.5;
 }
 
+/* ─── Achievements + Timeline + Vehicle Canvas ───────── */
+#lp-history {
+    max-width:1400px; margin:0 auto; padding:0 14px 48px;
+    display:grid; gap:14px;
+}
+.lh-section-hd {
+    display:flex; justify-content:space-between; align-items:baseline;
+    gap:10px; margin:6px 2px 2px;
+}
+.lh-section-hd h2 {
+    font-size:1.05rem; font-weight:800; color:#eef;
+    letter-spacing:.02em;
+}
+.lh-section-hd p { font-size:.74rem; color:#889; line-height:1.5; max-width:680px; }
+
+/* Achievements panel */
+#lp-achievements { padding:14px 16px 18px; }
+.lh-tabs { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px; }
+.lh-tab {
+    background:rgba(255,255,255,.05);
+    border:1px solid rgba(255,255,255,.12);
+    color:#bcd;
+    border-radius:999px;
+    padding:5px 14px;
+    font-size:.74rem; font-weight:700;
+    cursor:pointer; transition:all .15s;
+    font-family:inherit; letter-spacing:.04em;
+}
+.lh-tab:hover { border-color:rgba(0,200,200,.4); color:#fff; }
+.lh-tab--on { background:rgba(0,200,200,.18); border-color:#0cc; color:#0ff; }
+
+.lh-programs {
+    display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr));
+    gap:12px;
+}
+.lh-program {
+    background:rgba(15,10,35,.78);
+    border:1px solid rgba(255,255,255,.08);
+    border-left:3px solid #888;
+    border-radius:10px;
+    padding:12px 14px;
+    transition:box-shadow .25s, transform .15s;
+}
+.lh-program--flash {
+    box-shadow:0 0 0 2px rgba(0,200,200,.5), 0 0 24px rgba(0,200,200,.25);
+    transform:translateY(-2px);
+}
+.lh-program-hd {
+    display:flex; justify-content:space-between; align-items:flex-start;
+    gap:10px; margin-bottom:4px;
+}
+.lh-program-op {
+    font-size:.62rem; color:#8ab; text-transform:uppercase;
+    letter-spacing:.08em; font-weight:700; margin-bottom:2px;
+    font-family:monospace;
+}
+.lh-program-name { font-size:1rem; font-weight:800; line-height:1.2; }
+.lh-program-count {
+    font-size:.62rem; color:#778; font-family:monospace;
+    background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08);
+    border-radius:4px; padding:2px 6px; white-space:nowrap;
+}
+.lh-program-tag { font-size:.74rem; color:#aab; line-height:1.5; margin:4px 0 10px; font-style:italic; }
+.lh-flights { list-style:none; display:flex; flex-direction:column; gap:6px; }
+.lh-flight {
+    display:grid; grid-template-columns:90px 1fr; gap:10px;
+    padding:6px 0; border-top:1px dashed rgba(255,255,255,.06);
+    font-size:.76rem;
+}
+.lh-flight:first-child { border-top:none; }
+.lh-flight-date {
+    font-size:.66rem; color:#9ab; font-family:monospace;
+    padding-top:2px; letter-spacing:.04em;
+}
+.lh-flight-name { font-weight:700; color:#eef; margin-bottom:2px; }
+.lh-flight-note { font-size:.7rem; color:#99a; line-height:1.5; }
+
+/* Timeline */
+#lp-timeline { padding:14px 16px; }
+.lh-tl-scroll {
+    overflow-x:auto; overflow-y:hidden;
+    padding:24px 0 110px;     /* room for dot + staggered labels */
+    scrollbar-width:thin;
+}
+.lh-tl-scroll::-webkit-scrollbar { height:6px; }
+.lh-tl-scroll::-webkit-scrollbar-thumb { background:rgba(0,200,200,.3); border-radius:3px; }
+.lh-tl-rail {
+    position:relative;
+    width:1800px;     /* horizontal canvas; scrolls on smaller screens */
+    height:60px;
+}
+.lh-tl-axis {
+    position:absolute; left:0; right:0; top:50%;
+    height:2px; background:linear-gradient(90deg, rgba(0,200,200,.05), rgba(0,200,200,.4) 30%, rgba(0,200,200,.4) 70%, rgba(0,200,200,.05));
+}
+.lh-tl-decade {
+    position:absolute; top:50%;
+    width:1px; height:18px; background:rgba(255,255,255,.12);
+    transform:translate(-50%, -50%);
+}
+.lh-tl-decade-lbl {
+    position:absolute; top:14px; left:50%;
+    transform:translateX(-50%);
+    font-size:.62rem; color:#556; font-family:monospace; letter-spacing:.06em;
+    white-space:nowrap;
+}
+.lh-tl-marker {
+    position:absolute;
+    top:50%; transform:translate(-50%, -50%);
+    background:transparent; border:none; padding:0; cursor:pointer;
+    font-family:inherit; color:inherit;
+    display:flex; flex-direction:column; align-items:center;
+    transition:transform .15s;
+}
+.lh-tl-marker:hover { transform:translate(-50%, -55%); }
+.lh-tl-marker:hover .lh-tl-lbl { color:#fff; }
+.lh-tl-dot {
+    width:10px; height:10px; border-radius:50%;
+    background:var(--c, #0cc);
+    box-shadow:0 0 8px var(--c, #0cc), 0 0 0 2px rgba(4,2,16,.9);
+    flex-shrink:0;
+}
+.lh-tl-lbl {
+    position:absolute;
+    font-size:.62rem; line-height:1.25; color:#aab;
+    white-space:nowrap; text-align:center;
+    font-family:monospace; letter-spacing:.02em;
+    pointer-events:none;
+}
+.lh-tl-lbl-name { display:block; font-weight:700; color:#ccd; }
+.lh-tl-lbl-date { display:block; font-size:.56rem; color:#778; margin-top:1px; }
+/* Stagger labels into 4 lanes (2 above, 2 below) so they don't pile up. */
+.lh-tl-lane-0 .lh-tl-lbl { top:-46px; }
+.lh-tl-lane-1 .lh-tl-lbl { top:18px;  }
+.lh-tl-lane-2 .lh-tl-lbl { top:-72px; }
+.lh-tl-lane-3 .lh-tl-lbl { top:44px;  }
+
+/* Vehicle canvas */
+#lp-vehicle { padding:14px 16px 18px; }
+.lh-vehicle-wrap {
+    display:grid; grid-template-columns:1fr 280px; gap:14px;
+}
+@media (max-width:820px) { .lh-vehicle-wrap { grid-template-columns:1fr; } }
+.lh-vehicle-canvas-host {
+    position:relative;
+    background:radial-gradient(ellipse at 50% 30%, rgba(40,30,80,.5) 0%, rgba(8,4,18,.95) 70%);
+    border:1px solid rgba(0,200,200,.18);
+    border-radius:10px;
+    overflow:hidden;
+    aspect-ratio:16/10;
+    min-height:340px;
+}
+.lh-vehicle-canvas-host canvas { display:block; width:100%; height:100%; }
+.lh-vehicle-watermark {
+    position:absolute; bottom:10px; left:12px;
+    font-size:.6rem; color:#667; font-family:monospace;
+    letter-spacing:.06em; text-transform:uppercase;
+    pointer-events:none;
+}
+.lh-vehicle-meta {
+    background:rgba(15,10,35,.6);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:10px;
+    padding:14px;
+    display:flex; flex-direction:column; gap:10px;
+}
+.lh-vehicle-name {
+    font-size:1rem; font-weight:800; color:#fc7; line-height:1.2;
+}
+.lh-vehicle-sub {
+    font-size:.7rem; color:#9ab; font-family:monospace;
+    letter-spacing:.04em; text-transform:uppercase;
+}
+.lh-vehicle-stats {
+    display:grid; grid-template-columns:1fr 1fr; gap:6px;
+    margin-top:4px;
+}
+.lh-vehicle-stat {
+    background:rgba(255,255,255,.03);
+    border:1px solid rgba(255,255,255,.06);
+    border-radius:6px;
+    padding:6px 8px;
+}
+.lh-vehicle-stat-k {
+    font-size:.58rem; color:#778; text-transform:uppercase;
+    letter-spacing:.08em; font-weight:700; margin-bottom:2px;
+}
+.lh-vehicle-stat-v {
+    font-size:.78rem; font-weight:700; color:#eef; font-family:monospace;
+}
+.lh-vehicle-note {
+    font-size:.66rem; color:#889; line-height:1.55; font-style:italic;
+    border-top:1px solid rgba(255,255,255,.06); padding-top:8px;
+}
+
 /* ─── Mobile tweaks ──────────────────────────────────── */
 @media (max-width:720px) {
     #lp-roster { max-height:none; }
@@ -400,7 +595,83 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
 
 </div>
 
+<!-- ─── Achievement Runs · Timeline · Vehicle Canvas ──────────────────── -->
+<section id="lp-history">
+
+    <!-- Achievement Runs -->
+    <div class="lp-panel" id="lp-achievements">
+        <div class="lh-section-hd">
+            <h2>Achievement Runs</h2>
+            <p>Program-scale milestone flights from NASA and SpaceX — the launches that opened doors no one had walked through before.</p>
+        </div>
+        <div id="lh-achievements-root"></div>
+    </div>
+
+    <!-- Historic Timeline -->
+    <div class="lp-panel" id="lp-timeline">
+        <div class="lh-section-hd">
+            <h2>Historic Timeline</h2>
+            <p>Every milestone flight, plotted chronologically. Click a marker to jump to the program above. Scroll horizontally to span 1961 → today.</p>
+        </div>
+        <div id="lh-timeline-root"></div>
+    </div>
+
+    <!-- 3D Vehicle Canvas -->
+    <div class="lp-panel" id="lp-vehicle">
+        <div class="lh-section-hd">
+            <h2>Vehicle Visualization · Generic</h2>
+            <p>Procedural 3D placeholder — built from primitives, not a licensed model. We'll swap in operator-supplied vehicles as we secure permission.</p>
+        </div>
+        <div class="lh-vehicle-wrap">
+            <div class="lh-vehicle-canvas-host">
+                <canvas id="lh-vehicle-canvas"></canvas>
+                <div class="lh-vehicle-watermark">Procedural · For illustration only</div>
+            </div>
+            <aside class="lh-vehicle-meta">
+                <div>
+                    <div class="lh-vehicle-sub">Generic stack</div>
+                    <div class="lh-vehicle-name">Space Shuttle (STS)</div>
+                </div>
+                <div class="lh-vehicle-stats">
+                    <div class="lh-vehicle-stat"><div class="lh-vehicle-stat-k">Stack height</div><div class="lh-vehicle-stat-v">56.1 m</div></div>
+                    <div class="lh-vehicle-stat"><div class="lh-vehicle-stat-k">Liftoff mass</div><div class="lh-vehicle-stat-v">2,030 t</div></div>
+                    <div class="lh-vehicle-stat"><div class="lh-vehicle-stat-k">Payload (LEO)</div><div class="lh-vehicle-stat-v">27.5 t</div></div>
+                    <div class="lh-vehicle-stat"><div class="lh-vehicle-stat-k">Crew</div><div class="lh-vehicle-stat-v">2–8</div></div>
+                    <div class="lh-vehicle-stat"><div class="lh-vehicle-stat-k">First flight</div><div class="lh-vehicle-stat-v">1981-04-12</div></div>
+                    <div class="lh-vehicle-stat"><div class="lh-vehicle-stat-k">Last flight</div><div class="lh-vehicle-stat-v">2011-07-08</div></div>
+                </div>
+                <div class="lh-vehicle-note">
+                    Drag to orbit · scroll to zoom. Future versions will add Falcon 9, Falcon Heavy,
+                    SLS, Starship, and vehicle-specific commit-criteria overlays once we secure model
+                    rights or build accurate reference geometry.
+                </div>
+            </aside>
+        </div>
+    </div>
+
+</section>
+
 <script type="module" src="./js/launch-planner.js"></script>
+<script type="module">
+    import { renderAchievements, renderTimeline } from './js/launch-history.js';
+    import { initVehicleCanvas } from './js/launch-vehicle-3d.js';
+
+    renderAchievements(document.getElementById('lh-achievements-root'));
+    renderTimeline(document.getElementById('lh-timeline-root'));
+
+    const canvas = document.getElementById('lh-vehicle-canvas');
+    if (canvas) {
+        try {
+            initVehicleCanvas(canvas, { autoRotate: true });
+        } catch (err) {
+            console.error('[launch-vehicle-3d]', err);
+            const host = canvas.parentElement;
+            if (host) {
+                host.innerHTML = '<div style="padding:40px;text-align:center;color:#778;font-size:.78rem">3D canvas unavailable in this browser.</div>';
+            }
+        }
+    }
+</script>
 
 </body>
 </html>
