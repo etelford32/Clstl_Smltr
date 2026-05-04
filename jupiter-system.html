@@ -216,6 +216,38 @@ body {
 .js-btn.toggle.on {
     background:rgba(180,140,255,.20); color:#fff; border-color:rgba(180,140,255,.55);
 }
+.js-btn.live {
+    background:rgba(120,80,255,.20); color:#fff; border-color:rgba(180,140,255,.55);
+}
+.js-btn.live:hover { background:rgba(120,80,255,.32); }
+.js-btn.live.on { box-shadow:0 0 0 1px rgba(180,140,255,.55), 0 0 12px rgba(180,140,255,.35); }
+
+.js-input {
+    background:rgba(0,0,0,.30);
+    color:#fff;
+    border:1px solid rgba(255,184,80,.30);
+    border-radius:5px;
+    padding:6px 8px;
+    font-family:monospace; font-size:.78rem;
+}
+.js-input:focus { outline:none; border-color:#ffb070; }
+
+.js-bookmarks { display:flex; gap:6px; flex-wrap:wrap; max-width:100%; }
+.js-bm {
+    background:rgba(0,0,0,.30);
+    color:#aa9;
+    border:1px solid rgba(255,184,80,.20);
+    border-radius:14px;
+    padding:4px 10px;
+    font-family:monospace; font-size:.7rem;
+    cursor:pointer;
+    transition:all .15s;
+}
+.js-bm:hover {
+    color:#fff; border-color:rgba(255,184,80,.55);
+    background:rgba(255,184,80,.14);
+}
+.js-bm-yr { color:#665; margin-right:4px; }
 
 .js-label {
     font-family:monospace; font-size:.7rem; letter-spacing:.06em;
@@ -304,6 +336,72 @@ body {
     border-left:2px solid rgba(255,184,48,.4); padding-left:10px; margin-top:10px;
 }
 
+/* Body labels & hover badges (HTML overlays projected from 3D) */
+.js-label-3d {
+    position:absolute;
+    pointer-events:none;
+    transform:translate(-50%, -120%);
+    font-family:ui-monospace, Menlo, monospace;
+    font-size:.66rem;
+    font-weight:600;
+    color:#fff;
+    background:rgba(8,4,24,.55);
+    border:1px solid rgba(255,184,80,.30);
+    border-radius:10px;
+    padding:1px 7px;
+    white-space:nowrap;
+    backdrop-filter:blur(6px);
+    box-shadow:0 0 8px rgba(0,0,0,.5);
+    transition:opacity .15s;
+    z-index:6;
+}
+.js-label-3d .icon { margin-right:3px; }
+.js-label-3d.behind { opacity:0; }
+.js-label-3d.selected {
+    color:#ffb070;
+    border-color:rgba(255,184,80,.65);
+    box-shadow:0 0 12px rgba(255,184,80,.30);
+}
+
+.js-hover-icon {
+    position:absolute;
+    pointer-events:none;
+    transform:translate(-50%, -50%);
+    font-size:1.2rem;
+    z-index:7;
+    text-shadow:0 0 8px rgba(255,255,255,.4), 0 0 18px rgba(255,184,80,.5);
+    opacity:0;
+    transition:opacity .15s;
+}
+.js-hover-icon.show {
+    opacity:1;
+    animation:js-pulse 1.6s ease-in-out infinite;
+}
+@keyframes js-pulse {
+    0%,100% { transform:translate(-50%, -50%) scale(1); filter:brightness(1); }
+    50%     { transform:translate(-50%, -50%) scale(1.18); filter:brightness(1.4); }
+}
+
+/* Conjunction flash overlay */
+.js-conjunction {
+    position:absolute;
+    top:48px; left:50%; transform:translateX(-50%);
+    font-family:monospace; font-size:.72rem; letter-spacing:.06em;
+    text-transform:uppercase;
+    background:rgba(8,4,24,.85);
+    border:1px solid rgba(255,255,128,.55);
+    color:#ffe070;
+    padding:5px 14px;
+    border-radius:14px;
+    backdrop-filter:blur(6px);
+    pointer-events:none;
+    opacity:0;
+    transition:opacity .25s;
+    z-index:8;
+    box-shadow:0 0 16px rgba(255,224,112,.40);
+}
+.js-conjunction.show { opacity:1; }
+
 /* Tooltip */
 #js-tooltip {
     position:absolute;
@@ -378,6 +476,8 @@ body {
         <div id="js-mode-pill">⏸ Paused</div>
         <div id="js-legend"></div>
         <div id="js-tooltip" role="tooltip" aria-hidden="true"></div>
+        <div id="js-conjunction" class="js-conjunction"></div>
+        <div id="js-overlay" style="position:absolute; inset:0; pointer-events:none; z-index:5;"></div>
     </div>
 
     <aside id="js-side">
@@ -406,6 +506,7 @@ body {
 
         <div class="js-row">
             <button class="js-btn primary" id="js-play">▶ Play</button>
+            <button class="js-btn" id="js-rev" title="Reverse direction">⇄ Forward</button>
             <span class="js-label">Speed</span>
             <select class="js-select" id="js-speed">
                 <option value="3600">1 hr / s</option>
@@ -415,11 +516,25 @@ body {
                 <option value="864000">10 d / s</option>
                 <option value="2592000">30 d / s</option>
                 <option value="8640000">100 d / s</option>
+                <option value="31557600">1 yr / s</option>
             </select>
             <button class="js-btn" id="js-step-back">◄ −1 hr</button>
             <button class="js-btn" id="js-step-fwd">+1 hr ►</button>
             <span style="flex:1"></span>
-            <button class="js-btn warn" id="js-reset">⟲ Reset to J2000</button>
+            <button class="js-btn live" id="js-now" title="Sync to current real-world time">⟲ Now (Live)</button>
+            <button class="js-btn warn" id="js-reset" title="Reset simulation to J2000.0 epoch (2000-01-01 12:00 UT)">⟲ J2000</button>
+        </div>
+
+        <div class="js-row">
+            <span class="js-label" style="width:90px">Date (UTC)</span>
+            <input class="js-input" type="date" id="js-date" min="1500-01-01" max="2200-12-31" style="width:160px">
+            <span class="js-label">Hr</span>
+            <input class="js-input" type="number" id="js-hour" min="0" max="23" step="1" value="12" style="width:64px">
+            <span class="js-label">JD</span>
+            <input class="js-input" type="number" id="js-jd-input" step="0.5" style="width:140px">
+            <span style="flex:1"></span>
+            <span class="js-label">Jump to</span>
+            <div class="js-bookmarks" id="js-bookmarks"></div>
         </div>
 
         <div class="js-row">
@@ -433,12 +548,25 @@ body {
             </select>
             <span class="js-label" style="margin-left:14px">Ghost orbits</span>
             <button class="js-btn toggle" id="js-ghost-toggle">Keplerian ghost: OFF</button>
+            <span class="js-label" style="margin-left:14px">Labels</span>
+            <button class="js-btn toggle on" id="js-labels-toggle">Labels: ON</button>
         </div>
 
         <div class="js-row">
             <span class="js-label" style="width:90px">View</span>
-            <button class="js-btn toggle" id="js-view-top">Top-down</button>
-            <button class="js-btn toggle on" id="js-view-3d">3D oblique</button>
+            <button class="js-btn toggle" id="js-view-top" title="Top-down (look down the spin axis)">⊙ Top-down</button>
+            <button class="js-btn toggle on" id="js-view-3d" title="Standard oblique 3D view">⛯ 3D Oblique</button>
+            <button class="js-btn toggle" id="js-view-equ" title="Edge-on the equatorial plane — see how flat the orbits really are">— Edge-on</button>
+            <span class="js-label" style="margin-left:14px">Focus</span>
+            <select class="js-select" id="js-focus" title="Lock the camera to a body so it tracks across orbit">
+                <option value="" selected>Free (system view)</option>
+                <option value="jupiter">Jupiter</option>
+                <option value="io">Io</option>
+                <option value="europa">Europa</option>
+                <option value="ganymede">Ganymede</option>
+                <option value="callisto">Callisto</option>
+            </select>
+            <button class="js-btn" id="js-pov" title="Place the camera on the selected moon's surface, looking toward Jupiter">👁 POV</button>
             <span class="js-label" style="margin-left:14px">Scale</span>
             <select class="js-select" id="js-scale">
                 <option value="full" selected>Realistic (Callisto fits)</option>
@@ -556,6 +684,87 @@ const PERIOD_D = {
     callisto: 16.689,
 };
 
+// ── Behavioural fingerprint per body — drives dynamic tooltip text and
+// the hover-icon overlay. The tone is "what makes this object weird".
+const BODY_BEHAVIOR = {
+    jupiter: {
+        icon:  '🪐',
+        title: '318 Earth masses · failed star',
+        bullets: [
+            'Pulls inner moons inward via tides — they migrate ~few cm/yr.',
+            'Spins once every 9.93 h — the fastest day of any planet.',
+            'Magnetic field 14× Earth\'s, traps a particle belt that would kill a human within minutes.',
+        ],
+    },
+    io: {
+        icon:  '🌋',
+        title: 'Most volcanically active body in the Solar System',
+        bullets: [
+            'Forced eccentricity from the resonance flexes Io by ~100 m every orbit.',
+            'Tidal dissipation pours ~10¹⁴ W into the interior — 30× Earth\'s heat budget per area.',
+            'Sulfur-driven plumes reach 500 km altitude; the surface repaves itself on a million-year clock.',
+        ],
+    },
+    europa: {
+        icon:  '🧊',
+        title: 'Subsurface salt-water ocean under an ice shell',
+        bullets: [
+            'Ice crust 10–30 km thick over a liquid ocean ~100 km deep.',
+            'Ocean is more water by volume than every Earth ocean combined.',
+            'Resonance pumps Europa\'s eccentricity → tidal heating that may keep the ocean liquid.',
+        ],
+    },
+    ganymede: {
+        icon:  '🧲',
+        title: 'Largest moon · only moon with its own magnetic field',
+        bullets: [
+            'Bigger than Mercury (2,634 km) but only half its mass — half ice, half rock.',
+            'Auroral footprint visible in HST UV imagery — internal dynamo + Jupiter-induced field.',
+            'Likely a salty ocean ~150 km below the surface.',
+        ],
+    },
+    callisto: {
+        icon:  '🪨',
+        title: 'Outside the resonance · oldest unchanged surface in the Solar System',
+        bullets: [
+            'No appreciable tidal heating — orbit doesn\'t resonate with Io/Europa/Ganymede.',
+            'Most heavily cratered body known; surface essentially frozen since formation.',
+            'Sits outside Jupiter\'s lethal radiation belts — a candidate for crewed Jovian missions.',
+        ],
+    },
+};
+
+// ── Famous Jovian-system epochs (for the bookmark bar) ────────────────
+// Dates chosen because something visually interesting was observed or
+// predicted on that JD. Mostly Earth-based observations / spacecraft
+// arrivals; the integration warps to that epoch and lets the user see
+// how the moons were arranged.
+const JOVIAN_BOOKMARKS = [
+    { y:1610, m: 1, d: 7,  label:'Galileo I',     desc:'Galileo first sees three "stars" near Jupiter (Jan 7, 1610).' },
+    { y:1610, m: 1, d:13,  label:'4th moon',      desc:'Galileo resolves Callisto — four moons confirmed (Jan 13, 1610).' },
+    { y:1676, m: 9, d:29,  label:'Rømer',         desc:'Ole Rømer measures the speed of light from Io eclipse timings.' },
+    { y:1973, m:12, d: 4,  label:'Pioneer 10',    desc:'First spacecraft flyby of Jupiter (Pioneer 10 closest approach).' },
+    { y:1979, m: 3, d: 5,  label:'Voyager 1',     desc:'Voyager 1 imaged the rings and active volcanism on Io.' },
+    { y:1995, m:12, d: 7,  label:'Galileo arrives', desc:'Galileo orbiter arrives at Jupiter; releases probe into atmosphere.' },
+    { y:2000, m: 1, d: 1,  label:'J2000',         desc:'Reference epoch — initial conditions are seeded here.' },
+    { y:2016, m: 7, d: 4,  label:'Juno arrives',  desc:'Juno enters polar orbit around Jupiter.' },
+    { y:2024, m:10, d:14,  label:'Europa Clipper',desc:'Europa Clipper launch (mission to study habitability of Europa\'s ocean).' },
+    { y:2030, m: 7, d: 1,  label:'JUICE @ Jovi.', desc:'ESA JUICE mission projected Jupiter arrival window.' },
+];
+
+// ── Date / JD helpers (Meeus Eqn. 7) ──────────────────────────────────
+function jdFromDate(d) {
+    return d.getTime() / 86400000 + 2440587.5;
+}
+function dateFromJD(jd) {
+    return new Date((jd - 2440587.5) * 86400000);
+}
+function jdFromYMD(y, m, d, hr = 12, mi = 0) {
+    const dt = new Date(Date.UTC(2000, 0, 1, hr, mi));
+    dt.setUTCFullYear(y, m - 1, d);
+    return jdFromDate(dt);
+}
+
 // ── Build initial state (SI, jovicentric, ecliptic-of-date frame) ────
 // We treat Jupiter's barycentric position as 0 and set its velocity to
 // cancel total momentum after the moons are placed.
@@ -599,11 +808,17 @@ const sim = {
     bodies:        buildInitialBodies(),
     t_s:           0,                       // seconds since J2000 in sim
     playing:       false,
-    speed:         86400,                   // sim seconds per real second
+    direction:     1,                       // +1 forward, -1 reverse
+    speed:         86400,                   // sim seconds per real second (always positive)
+    live:          false,                   // true = sync to wall clock each frame
     initialEnergy: 0,
     dtTarget:      60,                      // baseline integration step (s)
 };
 sim.initialEnergy = totalEnergy(sim.bodies).total;
+
+// JD <-> sim_t_s helpers: sim integrates from J2000 with t_s = 0.
+const jdFromSimT = t_s => J2000_JD + t_s / 86400;
+const simTFromJD = jd  => (jd - J2000_JD) * 86400;
 
 // Keplerian-ghost state: a frozen snapshot of each moon's osculating
 // elements at the moment the ghost is enabled. Each moon is then
@@ -684,8 +899,49 @@ wrap.appendChild(renderer.domElement);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
-controls.minDistance   = 2;
+controls.minDistance   = 1.2;
 controls.maxDistance   = 200;
+// Right-click reserved for tooltip pinning — disable OrbitControls' pan.
+controls.mouseButtons = {
+    LEFT:   THREE.MOUSE.ROTATE,
+    MIDDLE: THREE.MOUSE.DOLLY,
+    RIGHT:  null,
+};
+
+// ── Camera state machine ─────────────────────────────────────────────
+// Three modes:
+//   'free'   — user-driven OrbitControls around scene origin
+//   'focus'  — controls.target follows a body each frame
+//   'pov'    — camera locked to a moon's surface, looking toward Jupiter
+// Smooth 0.6 s tween between mode/preset switches via ease-in-out.
+const cam = {
+    mode:        'free',
+    focusKey:    null,
+    tween:       null,         // { t0, dur, fromPos, toPos, fromTgt, toTgt }
+    presetName:  '3d',
+};
+
+function easeInOut(t) { return t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2) / 2; }
+
+function startCameraTween(toPos, toTgt, durMs = 600) {
+    cam.tween = {
+        t0:     performance.now(),
+        dur:    durMs,
+        fromPos:camera.position.clone(),
+        toPos:  toPos.clone(),
+        fromTgt:controls.target.clone(),
+        toTgt:  toTgt.clone(),
+    };
+}
+
+function stepCameraTween(now) {
+    if (!cam.tween) return;
+    const t = Math.min(1, (now - cam.tween.t0) / cam.tween.dur);
+    const k = easeInOut(t);
+    camera.position.lerpVectors(cam.tween.fromPos, cam.tween.toPos, k);
+    controls.target.lerpVectors(cam.tween.fromTgt, cam.tween.toTgt, k);
+    if (t >= 1) cam.tween = null;
+}
 
 function resize() {
     const w = wrap.clientWidth, h = wrap.clientHeight;
@@ -1364,6 +1620,85 @@ function hitFromEvent(ev) {
     return obj && obj.userData ? obj.userData : null;
 }
 
+// ── Tooltip rendering: dynamic + behavioural ─────────────────────────
+// Tooltip can be live-following (follows hover) or pinned (right-click
+// to lock in place; left-click empty space or close button to clear).
+let pinnedKey = null;
+
+function tidalHeatProxy(eIo) {
+    // Simple proxy: power ∝ e² (Yoder & Peale 1981 to leading order).
+    // Reference: e = 0.0041 → ~10¹⁴ W.
+    if (!isFinite(eIo) || eIo <= 0) return 0;
+    const ref_e = 0.0041, ref_W = 1.0e14;
+    return ref_W * (eIo / ref_e) ** 2;
+}
+
+function buildTooltipHtml(key) {
+    const b   = JOVIAN_BODIES.find(b => b.key === key);
+    if (!b) return '';
+    const beh = BODY_BEHAVIOR[key] || {};
+    const hex = '#' + b.color.toString(16).padStart(6, '0');
+
+    const isPinned = (pinnedKey === key);
+    const closeHint = isPinned
+        ? `<span style="margin-left:auto; font-weight:400; font-size:.62rem; color:#776">📌 pinned · right-click to unpin</span>`
+        : `<span style="margin-left:auto; font-weight:400; font-size:.62rem; color:#776">right-click to pin</span>`;
+
+    let html = `<div class="tt-hdr"><span class="dot" style="background:${hex};color:${hex}"></span>${b.name}${closeHint}</div>`;
+    if (beh.title) {
+        html += `<div style="color:#ffd9a8; font-size:.7rem; line-height:1.4; margin-bottom:5px">${beh.title}</div>`;
+    }
+
+    // Live state — recomputed each frame so values update during play.
+    if (key === 'jupiter') {
+        const speed = Math.hypot(...sim.bodies[0].v);
+        html += `<div class="tt-row"><span class="tt-k">mass</span><span class="tt-v">1.898×10²⁷ kg</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">radius</span><span class="tt-v">71,492 km</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">spin</span><span class="tt-v">9.93 h</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">v (bary)</span><span class="tt-v">${(speed/KM).toFixed(4)} km/s</span></div>`;
+    } else {
+        const el = meanLonRel(idxOf[key]);
+        html += `<div class="tt-row"><span class="tt-k">a (live)</span><span class="tt-v">${(el.a / KM).toFixed(0)} km</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">e (live)</span><span class="tt-v">${el.e.toFixed(5)}</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">period</span><span class="tt-v">${formatPeriod(PERIOD_D[key])}</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">r (now)</span><span class="tt-v">${(el.r_mag/KM).toFixed(0)} km</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">v (now)</span><span class="tt-v">${(el.v_mag/KM).toFixed(2)} km/s</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">λ</span><span class="tt-v">${el.mean_lon_deg.toFixed(1)}°</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">phys. radius</span><span class="tt-v">${b.radius_km.toFixed(0)} km</span></div>`;
+
+        // Resonance status (only meaningful for Io / Europa / Ganymede).
+        if (['io','europa','ganymede'].includes(key)) {
+            const elIo = meanLonRel(idxOf.io);
+            const elEu = meanLonRel(idxOf.europa);
+            const elGa = meanLonRel(idxOf.ganymede);
+            const phi = ((elIo.mean_lon_deg - 3 * elEu.mean_lon_deg + 2 * elGa.mean_lon_deg) % 360 + 360) % 360;
+            const fromTriple = Math.abs(phi - 180);
+            html += `<div class="tt-sep"></div>`;
+            html += `<div class="tt-row"><span class="tt-k">φ_L</span><span class="tt-v">${phi.toFixed(2)}° <span style="color:#776">(${fromTriple.toFixed(2)}° off 180)</span></span></div>`;
+        }
+        // Tidal heating estimate for Io
+        if (key === 'io') {
+            const W = tidalHeatProxy(el.e);
+            html += `<div class="tt-row"><span class="tt-k">tidal heat</span><span class="tt-v">${W.toExponential(2)} W</span></div>`;
+        }
+    }
+    // Behavioural bullets — what makes this body interesting.
+    if (beh.bullets && beh.bullets.length) {
+        html += `<div class="tt-sep"></div>`;
+        for (const line of beh.bullets) {
+            html += `<div style="color:#bcb; font-style:italic; font-size:.66rem; line-height:1.4; margin:2px 0">• ${line}</div>`;
+        }
+    }
+    return html;
+}
+
+function showTooltipAt(key, sx, sy) {
+    elTooltip.innerHTML = buildTooltipHtml(key);
+    elTooltip.style.left = sx + 'px';
+    elTooltip.style.top  = sy + 'px';
+    elTooltip.classList.add('show');
+}
+
 renderer.domElement.addEventListener('mousemove', ev => {
     const rect = renderer.domElement.getBoundingClientRect();
     const sx = ev.clientX - rect.left;
@@ -1374,70 +1709,115 @@ renderer.domElement.addEventListener('mousemove', ev => {
         hoveredKey = newKey;
         renderer.domElement.style.cursor = hoveredKey ? 'pointer' : '';
     }
-    if (ud) {
-        const b = JOVIAN_BODIES.find(b => b.key === ud.key);
-        let html = `<div class="tt-hdr"><span class="dot" style="background:#${b.color.toString(16).padStart(6,'0')}"></span>${b.name}</div>`;
-        if (ud.key === 'jupiter') {
-            html += `<div class="tt-row"><span class="tt-k">mass</span><span class="tt-v">1.898×10²⁷ kg</span></div>`;
-            html += `<div class="tt-row"><span class="tt-k">radius</span><span class="tt-v">71,492 km</span></div>`;
-            html += `<div class="tt-row"><span class="tt-k">rotation</span><span class="tt-v">9.93 h</span></div>`;
-        } else {
-            const el = meanLonRel(idxOf[ud.key]);
-            html += `<div class="tt-row"><span class="tt-k">a</span><span class="tt-v">${(el.a / KM).toFixed(0)} km</span></div>`;
-            html += `<div class="tt-row"><span class="tt-k">e</span><span class="tt-v">${el.e.toFixed(5)}</span></div>`;
-            html += `<div class="tt-row"><span class="tt-k">period</span><span class="tt-v">${formatPeriod(PERIOD_D[ud.key])}</span></div>`;
-            html += `<div class="tt-row"><span class="tt-k">radius</span><span class="tt-v">${b.radius_km.toFixed(1)} km</span></div>`;
-        }
-        elTooltip.innerHTML = html;
-        elTooltip.style.left = sx + 'px';
-        elTooltip.style.top  = sy + 'px';
-        elTooltip.classList.add('show');
-    } else {
-        elTooltip.classList.remove('show');
-    }
+    if (pinnedKey) return;          // pinned tooltip overrides hover
+    if (ud) showTooltipAt(ud.key, sx, sy);
+    else    elTooltip.classList.remove('show');
 });
 renderer.domElement.addEventListener('mouseleave', () => {
     hoveredKey = null;
     renderer.domElement.style.cursor = '';
-    elTooltip.classList.remove('show');
+    if (!pinnedKey) elTooltip.classList.remove('show');
 });
+
+// Refresh the pinned tooltip's content each frame (live state).
+function refreshPinnedTooltip() {
+    if (!pinnedKey) return;
+    elTooltip.innerHTML = buildTooltipHtml(pinnedKey);
+}
+
+// Click → select. Double-click → focus camera. Right-click → pin tooltip.
+let lastClickTime = 0;
+let lastClickKey  = null;
 renderer.domElement.addEventListener('click', ev => {
     const ud = hitFromEvent(ev);
-    if (ud && ud.key) selectBody(ud.key);
+    const now = performance.now();
+    if (ud && ud.key) {
+        selectBody(ud.key);
+        // Manual double-click detection (avoids losing single-click state).
+        if (lastClickKey === ud.key && now - lastClickTime < 350) {
+            focusBody(ud.key);
+            lastClickTime = 0; lastClickKey = null;
+        } else {
+            lastClickTime = now;
+            lastClickKey  = ud.key;
+        }
+    } else {
+        // Click on empty space — unpin tooltip if pinned.
+        if (pinnedKey) {
+            pinnedKey = null;
+            elTooltip.classList.remove('show');
+        }
+    }
+});
+
+renderer.domElement.addEventListener('contextmenu', ev => {
+    ev.preventDefault();
+    const ud = hitFromEvent(ev);
+    const rect = renderer.domElement.getBoundingClientRect();
+    const sx = ev.clientX - rect.left;
+    const sy = ev.clientY - rect.top;
+    if (ud && ud.key) {
+        if (pinnedKey === ud.key) {
+            pinnedKey = null;
+            elTooltip.classList.remove('show');
+        } else {
+            pinnedKey = ud.key;
+            showTooltipAt(ud.key, sx, sy);
+        }
+    } else if (pinnedKey) {
+        pinnedKey = null;
+        elTooltip.classList.remove('show');
+    }
 });
 
 // ── Time controls ────────────────────────────────────────────────────
 const elPlay      = document.getElementById('js-play');
+const elRev       = document.getElementById('js-rev');
 const elSpeed     = document.getElementById('js-speed');
 const elStepF     = document.getElementById('js-step-fwd');
 const elStepB     = document.getElementById('js-step-back');
+const elNow       = document.getElementById('js-now');
 const elReset     = document.getElementById('js-reset');
+const elDate      = document.getElementById('js-date');
+const elHour      = document.getElementById('js-hour');
+const elJdInput   = document.getElementById('js-jd-input');
+const elBookmarks = document.getElementById('js-bookmarks');
 const elTrToggle  = document.getElementById('js-trails-toggle');
 const elTrLen     = document.getElementById('js-trail-len');
 const elGhostTog  = document.getElementById('js-ghost-toggle');
+const elLabelsTog = document.getElementById('js-labels-toggle');
 const elViewTop   = document.getElementById('js-view-top');
 const elView3D    = document.getElementById('js-view-3d');
+const elViewEqu   = document.getElementById('js-view-equ');
+const elFocus     = document.getElementById('js-focus');
+const elPov       = document.getElementById('js-pov');
 const elScale     = document.getElementById('js-scale');
 
 elPlay.addEventListener('click', () => {
     sim.playing = !sim.playing;
+    sim.live = false; elNow.classList.remove('on');
     elPlay.textContent = sim.playing ? '⏸ Pause' : '▶ Play';
     updateHud();
 });
+elRev.addEventListener('click', () => {
+    sim.direction *= -1;
+    elRev.textContent = sim.direction > 0 ? '⇄ Forward' : '⇆ Reverse';
+    elRev.classList.toggle('on', sim.direction < 0);
+    sim.live = false; elNow.classList.remove('on');
+});
 elSpeed.addEventListener('change', () => { sim.speed = parseFloat(elSpeed.value); });
 
+// Step the live N-body simulation by `simSec` (signed). Substeps are
+// capped so the integrator stays stable across Io's 1.769 d period.
 function step(simSec) {
-    // Choose dt: small enough for Io's 1.769 d period (~153000 s).
-    // Default 60 s. For high speeds, allow up to 600 s (still ~250 steps/orbit).
     const absSec = Math.abs(simSec);
-    const dt = Math.sign(simSec) * Math.min(600, Math.max(60, absSec / 50));
-    sim.dtTarget = Math.abs(dt);
+    const dtMag  = Math.min(600, Math.max(60, absSec / 50));
+    const dt     = Math.sign(simSec) * dtMag;
+    sim.dtTarget = dtMag;
     let remaining = simSec;
     let safety = 100000;
     while (Math.abs(remaining) > 1e-6 && safety-- > 0) {
-        const this_dt = (Math.abs(remaining) < Math.abs(dt))
-            ? remaining
-            : dt;
+        const this_dt = (Math.abs(remaining) < Math.abs(dt)) ? remaining : dt;
         yoshida4Step(sim.bodies, this_dt);
         sim.t_s += this_dt;
         remaining -= this_dt;
@@ -1445,22 +1825,146 @@ function step(simSec) {
     }
 }
 
-elStepF.addEventListener('click', () => { step(3600); });
-elStepB.addEventListener('click', () => { step(-3600); });
+// Re-seed the bodies analytically (pure Kepler, no perturbations) at
+// the requested simulation time. Used for long jumps where a real
+// integration would take too many steps. The user-visible perturbation
+// history then re-builds from the new epoch.
+function reseedAtSimT(targetTs) {
+    sim.bodies = buildInitialBodies();
+    const M_jup = sim.bodies[0].m;
+    const dt_s  = targetTs;       // since J2000
+    for (const moonKey of ['io','europa','ganymede','callisto']) {
+        const i  = idxOf[moonKey];
+        const m  = sim.bodies[i].m;
+        const mu = G_SI * (M_jup + m);
+        const el = INIT_EL[moonKey];
+        const a_m = el.a_km * KM;
+        const n_rad_s = Math.sqrt(mu / (a_m * a_m * a_m));
+        const M_now = el.M_deg + n_rad_s * dt_s * R2D;
+        const st = elementsToState({
+            a:a_m, e:el.e,
+            i_deg:el.i_deg, raan_deg:el.raan_deg, argp_deg:el.argp_deg,
+            M_deg:M_now, mu,
+        });
+        sim.bodies[i].r = st.r;
+        sim.bodies[i].v = st.v;
+    }
+    // Cancel net momentum so Jupiter sits at the barycentre.
+    let px=0, py=0, pz=0;
+    for (let i = 1; i < sim.bodies.length; i++) {
+        px += sim.bodies[i].m * sim.bodies[i].v[0];
+        py += sim.bodies[i].m * sim.bodies[i].v[1];
+        pz += sim.bodies[i].m * sim.bodies[i].v[2];
+    }
+    sim.bodies[0].v[0] = -px / sim.bodies[0].m;
+    sim.bodies[0].v[1] = -py / sim.bodies[0].m;
+    sim.bodies[0].v[2] = -pz / sim.bodies[0].m;
+    sim.t_s = targetTs;
+    sim.initialEnergy = totalEnergy(sim.bodies).total;
+}
+
+// Move sim time to a target JD. Short jumps use real integration so
+// perturbations stay continuous; long jumps fall back to Kepler reseed.
+function jumpToJD(jd) {
+    const targetTs = simTFromJD(jd);
+    const dT = targetTs - sim.t_s;
+    const ABS_DT_THRESHOLD = 365.25 * 86400 * 2;    // 2 years
+    if (Math.abs(dT) < ABS_DT_THRESHOLD) {
+        step(dT);
+    } else {
+        reseedAtSimT(targetTs);
+        plotCount = 0; plotHead = 0; phiAmpHist = [];
+        clearTrails();
+        if (ghost.enabled) snapshotGhostElements();
+    }
+    syncMeshesFromState();
+    refreshSidePanel();
+    updateHud();
+    drawPlot();
+}
+
+elStepF.addEventListener('click', () => { step(3600); syncInputsFromSim(); });
+elStepB.addEventListener('click', () => { step(-3600); syncInputsFromSim(); });
 
 elReset.addEventListener('click', () => {
     sim.bodies       = buildInitialBodies();
     sim.t_s = 0;
     sim.initialEnergy = totalEnergy(sim.bodies).total;
+    sim.live = false; elNow.classList.remove('on');
     plotCount = 0; plotHead = 0;
     phiAmpHist = [];
     clearTrails();
     if (ghost.enabled) snapshotGhostElements();
     syncMeshesFromState();
     refreshSidePanel();
+    syncInputsFromSim();
     updateHud();
     drawPlot();
 });
+
+elNow.addEventListener('click', () => {
+    sim.live    = true;
+    sim.playing = false;
+    elPlay.textContent = '▶ Play';
+    elNow.classList.add('on');
+    const now = Date.now() / 86400000 + 2440587.5;       // current JD
+    jumpToJD(now);
+    syncInputsFromSim();
+});
+
+// Date / hour / JD inputs: writing one updates the others and the sim.
+function syncInputsFromSim() {
+    const jd = jdFromSimT(sim.t_s);
+    const d  = dateFromJD(jd);
+    const y = d.getUTCFullYear(), mo = d.getUTCMonth() + 1, da = d.getUTCDate();
+    const yyyy = String(y).padStart(4, '0');
+    const mm   = String(mo).padStart(2, '0');
+    const dd   = String(da).padStart(2, '0');
+    elDate.value = `${yyyy}-${mm}-${dd}`;
+    elHour.value = d.getUTCHours();
+    elJdInput.value = jd.toFixed(3);
+}
+function commitDateInputs() {
+    const m = (elDate.value || '').match(/^(-?\d+)-(\d{2})-(\d{2})$/);
+    if (!m) return;
+    const y  = parseInt(m[1], 10);
+    const mo = parseInt(m[2], 10);
+    const da = parseInt(m[3], 10);
+    const hr = Math.max(0, Math.min(23, parseInt(elHour.value, 10) || 0));
+    if (!Number.isFinite(y)) return;
+    const jd = jdFromYMD(y, mo, da, hr);
+    sim.live = false; elNow.classList.remove('on');
+    jumpToJD(jd);
+    syncInputsFromSim();
+}
+elDate.addEventListener('change', commitDateInputs);
+elHour.addEventListener('change', commitDateInputs);
+elJdInput.addEventListener('change', () => {
+    const jd = parseFloat(elJdInput.value);
+    if (!Number.isFinite(jd)) return;
+    sim.live = false; elNow.classList.remove('on');
+    jumpToJD(jd);
+    syncInputsFromSim();
+});
+
+// Bookmarks
+function buildBookmarks() {
+    elBookmarks.innerHTML = '';
+    for (const bm of JOVIAN_BOOKMARKS) {
+        const btn = document.createElement('button');
+        btn.className = 'js-bm';
+        btn.title = bm.desc;
+        btn.innerHTML = `<span class="js-bm-yr">${bm.y}</span>${bm.label}`;
+        btn.addEventListener('click', () => {
+            sim.live = false; elNow.classList.remove('on');
+            sim.playing = false; elPlay.textContent = '▶ Play';
+            const jd = jdFromYMD(bm.y, bm.m || 1, bm.d || 1, bm.hr || 12);
+            jumpToJD(jd);
+            syncInputsFromSim();
+        });
+        elBookmarks.appendChild(btn);
+    }
+}
 
 let trailsOn = true;
 elTrToggle.addEventListener('click', () => {
@@ -1494,49 +1998,246 @@ elGhostTog.addEventListener('click', () => {
     }
 });
 
-function setView(top) {
-    elViewTop.classList.toggle('on', top);
-    elView3D.classList.toggle('on', !top);
-    if (top) {
-        camera.position.set(0, 36, 0.001);
-    } else {
-        camera.position.set(0, 22, 32);
-    }
-    controls.target.set(0, 0, 0);
-    controls.update();
+// ── View presets (smooth tweened) ────────────────────────────────────
+const VIEW_PRESETS = {
+    top:  { pos:new THREE.Vector3(0, 36, 0.001),     btn:elViewTop, distMax:200 },
+    '3d': { pos:new THREE.Vector3(0, 22, 32),        btn:elView3D,  distMax:200 },
+    equ:  { pos:new THREE.Vector3(0, 0.6, 38),       btn:elViewEqu, distMax:200 },
+};
+function setView(name) {
+    const preset = VIEW_PRESETS[name];
+    if (!preset) return;
+    cam.presetName = name;
+    elViewTop.classList.toggle('on', name === 'top');
+    elView3D .classList.toggle('on', name === '3d');
+    elViewEqu.classList.toggle('on', name === 'equ');
+    cam.mode = 'free';
+    cam.focusKey = null; elFocus.value = '';
+    controls.maxDistance = preset.distMax;
+    startCameraTween(preset.pos, new THREE.Vector3(0, 0, 0));
 }
-elViewTop.addEventListener('click', () => setView(true));
-elView3D .addEventListener('click', () => setView(false));
+elViewTop.addEventListener('click', () => setView('top'));
+elView3D .addEventListener('click', () => setView('3d'));
+elViewEqu.addEventListener('click', () => setView('equ'));
 
 elScale.addEventListener('change', () => {
+    let pos;
     if (elScale.value === 'zoom') {
-        camera.position.set(0, 8, 12);
+        pos = new THREE.Vector3(0, 8, 12);
         controls.maxDistance = 50;
     } else {
-        camera.position.set(0, 22, 32);
+        pos = new THREE.Vector3(0, 22, 32);
         controls.maxDistance = 200;
     }
-    controls.target.set(0, 0, 0);
-    controls.update();
+    cam.mode = 'free';
+    cam.focusKey = null; elFocus.value = '';
+    startCameraTween(pos, new THREE.Vector3(0, 0, 0));
 });
+
+// Focus dropdown — camera tracks a body each frame.
+elFocus.addEventListener('change', () => focusBody(elFocus.value || null));
+
+function bodyPosition(key) {
+    return meshes[key] ? meshes[key].position.clone() : new THREE.Vector3(0,0,0);
+}
+function bodySceneRadius(key) {
+    if (key === 'jupiter') return 1.0;
+    const b = JOVIAN_BODIES.find(b => b.key === key);
+    return b ? Math.max((b.radius_km / R_JUP_KM) * 8, 0.05) : 0.05;
+}
+function focusBody(key) {
+    if (!key) {
+        cam.mode = 'free';
+        cam.focusKey = null;
+        elFocus.value = '';
+        startCameraTween(VIEW_PRESETS[cam.presetName].pos, new THREE.Vector3(0,0,0));
+        return;
+    }
+    cam.mode = 'focus';
+    cam.focusKey = key;
+    elFocus.value = key;
+    const tgt = bodyPosition(key);
+    const r   = bodySceneRadius(key);
+    // Frame the body at ~14× its own radius, slightly above the orbital plane.
+    const off = new THREE.Vector3(r * 14, r * 8, r * 14);
+    startCameraTween(tgt.clone().add(off), tgt);
+}
+
+// POV mode — sit on the surface of the selected moon, looking at Jupiter.
+elPov.addEventListener('click', () => {
+    if (!selected || selected.key === 'jupiter') {
+        // Fallback: POV from above Jupiter looking down
+        cam.mode = 'free';
+        startCameraTween(new THREE.Vector3(0, 4, 0.001), new THREE.Vector3(0,0,0));
+        return;
+    }
+    cam.mode = 'pov';
+    cam.focusKey = selected.key;
+    elFocus.value = selected.key;
+    // Tween once; subsequent frames are managed in tick() by applyFocusOrPov.
+    const moonPos = bodyPosition(selected.key);
+    const r = bodySceneRadius(selected.key);
+    // Place camera on the Jupiter-facing side of the moon, just above its surface.
+    const toJup = new THREE.Vector3().subVectors(meshes.jupiter.position, moonPos).normalize();
+    const camPos = moonPos.clone().add(toJup.clone().multiplyScalar(r * 1.35));
+    startCameraTween(camPos, meshes.jupiter.position.clone());
+});
+
+// Each frame after the tween settles, update target + camera position
+// for focus / POV modes.
+function applyFocusOrPov() {
+    if (cam.tween) return;     // tween in progress, leave it alone
+    if (cam.mode === 'focus' && cam.focusKey && meshes[cam.focusKey]) {
+        const tgt = meshes[cam.focusKey].position;
+        const offset = camera.position.clone().sub(controls.target);
+        controls.target.copy(tgt);
+        camera.position.copy(tgt).add(offset);
+    } else if (cam.mode === 'pov' && cam.focusKey && meshes[cam.focusKey]) {
+        const moonPos = meshes[cam.focusKey].position;
+        const jupPos  = meshes.jupiter.position;
+        const r = bodySceneRadius(cam.focusKey);
+        const toJup = new THREE.Vector3().subVectors(jupPos, moonPos).normalize();
+        camera.position.copy(moonPos).add(toJup.clone().multiplyScalar(r * 1.35));
+        controls.target.copy(jupPos);
+    }
+}
+
+let labelsOn = true;
+elLabelsTog.addEventListener('click', () => {
+    labelsOn = !labelsOn;
+    elLabelsTog.classList.toggle('on', labelsOn);
+    elLabelsTog.textContent = 'Labels: ' + (labelsOn ? 'ON' : 'OFF');
+    // Visibility update happens each frame via updateLabels()
+});
+
+// ── HTML labels & hover icon (3D-projected DOM overlays) ─────────────
+const overlay = document.getElementById('js-overlay');
+const labelEls = {};
+const hoverIcon = document.createElement('div');
+hoverIcon.className = 'js-hover-icon';
+overlay.appendChild(hoverIcon);
+for (const b of JOVIAN_BODIES) {
+    const div = document.createElement('div');
+    div.className = 'js-label-3d';
+    const beh = BODY_BEHAVIOR[b.key] || {};
+    div.innerHTML = `<span class="icon">${beh.icon || '·'}</span>${b.name}`;
+    overlay.appendChild(div);
+    labelEls[b.key] = div;
+}
+const _projVec = new THREE.Vector3();
+function projectToScreen(pos3) {
+    _projVec.copy(pos3).project(camera);
+    const rect = renderer.domElement.getBoundingClientRect();
+    const x = (_projVec.x * 0.5 + 0.5) * rect.width;
+    const y = (-_projVec.y * 0.5 + 0.5) * rect.height;
+    const behind = _projVec.z > 1;
+    return { x, y, behind, ndcZ:_projVec.z };
+}
+function updateLabels() {
+    if (!labelsOn) {
+        for (const el of Object.values(labelEls)) el.style.display = 'none';
+        hoverIcon.classList.remove('show');
+        return;
+    }
+    for (const b of JOVIAN_BODIES) {
+        const el = labelEls[b.key];
+        const m  = meshes[b.key];
+        if (!m) continue;
+        const p = projectToScreen(m.position);
+        if (p.behind) { el.classList.add('behind'); el.style.display = 'block'; el.style.left = '-9999px'; continue; }
+        el.classList.remove('behind');
+        el.style.display = 'block';
+        el.style.left = `${p.x}px`;
+        el.style.top  = `${p.y}px`;
+        el.classList.toggle('selected', selected && b.key === selected.key);
+    }
+    // Hover icon (pulses on hovered body, except the selected one)
+    if (hoveredKey && meshes[hoveredKey] && (!selected || hoveredKey !== selected.key)) {
+        const beh = BODY_BEHAVIOR[hoveredKey];
+        if (beh && beh.icon) {
+            hoverIcon.textContent = beh.icon;
+            const p = projectToScreen(meshes[hoveredKey].position);
+            if (!p.behind) {
+                hoverIcon.style.left = `${p.x}px`;
+                hoverIcon.style.top  = `${p.y - 32}px`;
+                hoverIcon.classList.add('show');
+            } else {
+                hoverIcon.classList.remove('show');
+            }
+        } else {
+            hoverIcon.classList.remove('show');
+        }
+    } else {
+        hoverIcon.classList.remove('show');
+    }
+}
+
+// ── Conjunction detector ─────────────────────────────────────────────
+// Flash a banner when any pair of moons has its Jovicentric longitude
+// difference under 4°. Resets when they separate again.
+const elConjunction = document.getElementById('js-conjunction');
+let activeConjPair = null;
+function detectConjunctions() {
+    const lon = {};
+    for (const k of ['io','europa','ganymede','callisto']) {
+        const el = meanLonRel(idxOf[k]);
+        lon[k] = el.mean_lon_deg;
+    }
+    let nearest = null, nearestDelta = 360;
+    const pairs = [['io','europa'], ['europa','ganymede'], ['io','ganymede'], ['ganymede','callisto']];
+    for (const [a, b] of pairs) {
+        let d = Math.abs(lon[a] - lon[b]);
+        if (d > 180) d = 360 - d;
+        if (d < nearestDelta) { nearestDelta = d; nearest = [a, b]; }
+    }
+    if (nearestDelta < 4 && nearest) {
+        const tag = nearest.join('+');
+        if (activeConjPair !== tag) {
+            const aName = JOVIAN_BODIES.find(x => x.key === nearest[0]).name;
+            const bName = JOVIAN_BODIES.find(x => x.key === nearest[1]).name;
+            elConjunction.textContent = `✦ ${aName} ↔ ${bName} conjunction (Δλ = ${nearestDelta.toFixed(1)}°)`;
+            elConjunction.classList.add('show');
+            activeConjPair = tag;
+        }
+    } else if (nearestDelta > 7 && activeConjPair) {
+        elConjunction.classList.remove('show');
+        activeConjPair = null;
+    }
+}
 
 // ── Loop ─────────────────────────────────────────────────────────────
 let lastT = performance.now();
 function tick(now) {
     const dt = (now - lastT) / 1000;
     lastT = now;
-    if (sim.playing) {
-        const simSec = sim.speed * dt;
+
+    // Time advance
+    if (sim.live) {
+        // Sync to wall clock — sim.t_s recomputed every frame.
+        const nowJD = Date.now() / 86400000 + 2440587.5;
+        const targetTs = simTFromJD(nowJD);
+        const diff = targetTs - sim.t_s;
+        if (Math.abs(diff) < 7 * 86400) {
+            // Small drift: integrate forward through it
+            step(diff);
+        } else {
+            reseedAtSimT(targetTs);
+            clearTrails();
+        }
+    } else if (sim.playing) {
+        const simSec = sim.direction * sim.speed * dt;
         step(simSec);
     }
+
     syncMeshesFromState();
     starUniforms.uTime.value = now * 0.001;
-
-    // Drive Jupiter cloud-band animation
     jupSkin.update(now * 0.001);
 
-    // Sample resonance for the plot (regardless of play state, so when
-    // paused the user still sees the readouts populate from initial state)
+    // Camera updates
+    stepCameraTween(now);
+    applyFocusOrPov();
+
+    // Plot sampling: runs while playing/live (or on first frame).
     if (Math.abs(sim.t_s - lastSampleT) >= SAMPLE_INTERVAL_S || plotCount === 0) {
         const res = computeResonance();
         pushSample(sim.t_s, res.phi, res.eIo, res.eEu, res.eGa);
@@ -1545,9 +2246,14 @@ function tick(now) {
         lastSampleT = sim.t_s;
     }
     refreshSidePanel();
+    refreshPinnedTooltip();
     updateSelRing();
     updateHovRing(hoveredKey);
+    updateLabels();
+    detectConjunctions();
     updateHud();
+
+    if (sim.live || sim.playing) syncInputsFromSim();
 
     controls.update();
     renderer.render(scene, camera);
@@ -1556,8 +2262,10 @@ function tick(now) {
 
 // ── Boot ─────────────────────────────────────────────────────────────
 buildBodyPicker();
+buildBookmarks();
 selectBody('io');
 syncMeshesFromState();
+syncInputsFromSim();
 {
     // Seed the plot with a single sample so axes get a domain
     const res = computeResonance();
