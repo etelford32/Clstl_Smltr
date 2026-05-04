@@ -104,19 +104,27 @@ function householder(x0, T0, lambda, M, tol = 1e-12, maxIter = 35) {
     throw new Error('Lambert: Householder did not converge');
 }
 
-function initialGuess(T, lambda, M = 0) {
-    if (M !== 0) throw new Error('Lambert: multi-rev not implemented');
-    const T0 = Math.acos(lambda) + lambda * Math.sqrt(1 - lambda*lambda);
-    const T1 = (2/3) * (1 - Math.pow(lambda, 3));
-    if (T >= T0) {
-        // Long flights: hyperbolic-ish
-        return Math.pow(T0/T, 2/3) - 1;
-    } else if (T <= T1) {
-        // Short flights: highly elliptical
-        return 5/2 * T1/T * (T1 - T) / (1 - Math.pow(lambda, 5)) + 1;
+function initialGuess(T, lambda, M = 0, branch = 'right') {
+    if (M === 0) {
+        const T0 = Math.acos(lambda) + lambda * Math.sqrt(1 - lambda*lambda);
+        const T1 = (2/3) * (1 - Math.pow(lambda, 3));
+        if (T >= T0) {
+            return Math.pow(T0/T, 2/3) - 1;
+        } else if (T <= T1) {
+            return 5/2 * T1/T * (T1 - T) / (1 - Math.pow(lambda, 5)) + 1;
+        } else {
+            return Math.exp(Math.log(2) * Math.log(T/T0) / Math.log(T1/T0)) - 1;
+        }
+    }
+    // Multi-rev (M ≥ 1) initial guesses (Izzo 2014 eq. 31).
+    // Two solution branches per M — "left" (low x, near −1, slow short arc)
+    // and "right" (high x, near +1, fast long arc). Returned x is in (−1, 1).
+    if (branch === 'left') {
+        const num = Math.pow((M*Math.PI + Math.PI) / (8*T), 2/3);
+        return (num - 1) / (num + 1);
     } else {
-        // In-between: power-law interpolation
-        return Math.exp(Math.log(2) * Math.log(T/T0) / Math.log(T1/T0)) - 1;
+        const num = Math.pow((8*T) / (M*Math.PI), 2/3);
+        return (num - 1) / (num + 1);
     }
 }
 
@@ -132,13 +140,17 @@ function initialGuess(T, lambda, M = 0) {
  * @param {object}    options
  * @param {boolean}   options.prograde  If true (default), pick the prograde
  *                                      branch (h_z > 0); else retrograde.
- * @param {number}    options.M         Number of complete revolutions
- *                                      (0 default; multi-rev not yet supported).
- * @returns {{ v1:[x,y,z], v2:[x,y,z], iter:number, x:number, lambda:number }}
+ * @param {number}    options.M         Number of complete revolutions (0 default).
+ * @param {string}    options.branch    For M ≥ 1: 'left' or 'right' (default).
+ *                                      Two solutions exist per M; the user
+ *                                      picks which side of the dT/dx=0
+ *                                      inflection to converge to.
+ * @returns {{ v1:[x,y,z], v2:[x,y,z], iter:number, x:number, lambda:number, M:number, branch:string }}
  */
 export function lambert(r1Vec, r2Vec, tof, mu, options = {}) {
     const prograde = options.prograde !== false;
     const M = options.M || 0;
+    const branch = options.branch || 'right';
 
     const r1 = vNorm(r1Vec);
     const r2 = vNorm(r2Vec);
@@ -176,8 +188,25 @@ export function lambert(r1Vec, r2Vec, tof, mu, options = {}) {
 
     const T = Math.sqrt(2 * mu / (s*s*s)) * tof;
 
-    const x0 = initialGuess(T, lambda, M);
+    // For M ≥ 1, the minimum non-dimensional TOF is bounded below — if the
+    // user asked for too short a time we'd diverge or land on the wrong
+    // branch. Quick feasibility check: T(x=0; M) is roughly the lower edge.
+    if (M > 0) {
+        const T0_M = Math.acos(lambda) + lambda * Math.sqrt(1 - lambda*lambda) + M * Math.PI;
+        if (T < 0.1 * T0_M) {
+            throw new Error(`Lambert: T (${T.toFixed(3)}) too small for M=${M} (need ≥ ${(0.1*T0_M).toFixed(3)})`);
+        }
+    }
+
+    const x0 = initialGuess(T, lambda, M, branch);
     const { x, iter } = householder(x0, T, lambda, M);
+
+    // Validate that x stayed in the allowed range. For M ≥ 1, x must be in
+    // (−1, 1) (elliptical only); for M = 0 the hyperbolic branch (x > 1) is
+    // legal too. Out-of-range usually means we converged to the wrong branch.
+    if (M > 0 && (x <= -1 || x >= 1)) {
+        throw new Error(`Lambert: M=${M} ${branch} branch landed out of range (x=${x.toFixed(3)})`);
+    }
 
     const y     = _y(x, lambda);
     const gamma = Math.sqrt(mu * s / 2);
@@ -192,7 +221,30 @@ export function lambert(r1Vec, r2Vec, tof, mu, options = {}) {
     const v1 = vAdd(vScale(ir1, Vr1), vScale(it1, Vt1));
     const v2 = vAdd(vScale(ir2, Vr2), vScale(it2, Vt2));
 
-    return { v1, v2, iter, x, lambda };
+    return { v1, v2, iter, x, lambda, M, branch: M > 0 ? branch : '0' };
+}
+
+/**
+ * Try every Lambert solution branch (M = 0 single-rev plus M = 1..maxM
+ * left + right) for the same (r1, r2, tof). Returns an array sorted by
+ * |v1| (cheapest departure first) so the caller can pick the best.
+ *
+ * Useful for outer-planet transfers where multi-rev solutions can have
+ * substantially lower departure C3 than the single-rev case.
+ */
+export function lambertAll(r1Vec, r2Vec, tof, mu, options = {}) {
+    const maxM = options.maxM ?? 3;
+    const out = [];
+    // Single-rev (M = 0) — always try
+    try { out.push(lambert(r1Vec, r2Vec, tof, mu, { ...options, M: 0 })); } catch (_) {}
+    // Multi-rev — both branches per M
+    for (let M = 1; M <= maxM; M++) {
+        for (const branch of ['left', 'right']) {
+            try { out.push(lambert(r1Vec, r2Vec, tof, mu, { ...options, M, branch })); } catch (_) {}
+        }
+    }
+    out.sort((a, b) => vNorm(a.v1) - vNorm(b.v1));
+    return out;
 }
 
 /**
