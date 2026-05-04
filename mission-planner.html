@@ -8,8 +8,8 @@
 <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mission Planner — Launch & Trajectory Simulator · Parker Physics</title>
-<meta name="description" content="Interactive mock mission planner. Launch a rocket, deploy a payload into orbit, then plan transfers to the Moon and Mars with live Δv and time-of-flight readouts.">
+<title>Mission Planner — Patched-Conic Trajectory Simulator · Parker Physics</title>
+<meta name="description" content="Visual mission planner with real patched-conic trajectories. Launch rockets to LEO/GEO, plan lunar transfers with TLI/LOI Δv, and run heliocentric Hohmann transfers to Mars with C3, v∞, and pork-chop window scans.">
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 html { height:auto; overflow-y:auto; }
@@ -17,7 +17,6 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
     background:#040210; color:#d0cce8;
     font-family:'Segoe UI', system-ui, sans-serif; }
 
-/* ─── Hero ──────────────────────────────────────────────── */
 #mp-hero {
     padding:22px 24px 14px;
     background:linear-gradient(180deg, rgba(102,255,170,.07), rgba(4,2,16,0));
@@ -29,7 +28,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
     -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
     margin-bottom:6px;
 }
-#mp-hero p { font-size:.88rem; color:#aab; line-height:1.55; max-width:780px; }
+#mp-hero p { font-size:.88rem; color:#aab; line-height:1.55; max-width:820px; }
 #mp-hero-stats { margin-top:12px; display:flex; gap:10px; flex-wrap:wrap; }
 .mp-stat {
     font-size:.72rem; color:#aab; font-family:monospace;
@@ -39,7 +38,6 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
 }
 .mp-stat strong { color:#66ffaa; font-weight:800; margin-right:6px; }
 
-/* ─── Layout ────────────────────────────────────────────── */
 #mp-app {
     display:grid; grid-template-columns: 320px 1fr; gap:16px;
     padding:16px 24px 48px; max-width:1500px; margin:0 auto;
@@ -106,7 +104,43 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
     min-width:48px; text-align:right;
 }
 
-/* ─── 3D Viewport ───────────────────────────────────────── */
+/* View-mode toggle ─────────────────────────────────── */
+.mp-mode-toggle { display:flex; gap:0; border-radius:6px; overflow:hidden; }
+.mp-mode-btn {
+    flex:1; background:rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.12);
+    color:#aab; padding:8px 10px;
+    font-size:.74rem; font-weight:700; cursor:pointer;
+    transition:all .15s;
+}
+.mp-mode-btn + .mp-mode-btn { border-left:none; }
+.mp-mode-btn:hover { color:#fff; }
+.mp-mode-btn.on {
+    background:rgba(102,255,170,.16);
+    color:#66ffaa;
+    border-color:#3aa67a;
+    box-shadow:inset 0 0 12px rgba(102,255,170,.2);
+}
+
+/* Plan readout ─────────────────────────────────────── */
+.mp-plan {
+    margin-top:10px;
+    background:rgba(0,0,0,.3);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:8px; padding:10px 12px;
+    font-family:monospace; font-size:.72rem; color:#cfd;
+}
+.mp-plan-title {
+    color:#ff99dd; font-weight:800; font-size:.66rem;
+    letter-spacing:.12em; text-transform:uppercase; margin-bottom:8px;
+}
+.mp-plan-row { display:flex; justify-content:space-between; gap:10px; padding:2px 0; }
+.mp-plan-row .k { color:#88a; }
+.mp-plan-row .v { color:#fff; font-weight:700; }
+.mp-plan-row .v.warn { color:#ffaa66; }
+.mp-plan-empty { color:#667; font-style:italic; }
+
+/* 3D Viewport ──────────────────────────────────────── */
 #mp-3d-wrap {
     background:rgba(0,0,0,.5);
     border:1px solid rgba(255,255,255,.08);
@@ -114,10 +148,10 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
     position:relative;
 }
 #mp-3d {
-    width:100%; height:560px;
+    width:100%; height:580px;
     background:radial-gradient(circle at 50% 35%, #0a0820, #02010a 70%);
 }
-@media (max-width:980px) { #mp-3d { height:420px; } }
+@media (max-width:980px) { #mp-3d { height:440px; } }
 
 #mp-3d-help {
     padding:8px 14px;
@@ -126,14 +160,13 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
 }
 #mp-3d-help strong { color:#66ffaa; font-weight:700; }
 
-/* ─── HUD overlay ──────────────────────────────────────── */
 #mp-hud {
     position:absolute; top:12px; right:12px;
     background:rgba(6,4,18,.85); backdrop-filter:blur(8px);
     border:1px solid rgba(102,255,170,.2);
     border-radius:8px; padding:10px 12px;
     font-family:monospace; font-size:.72rem; color:#cfd;
-    min-width:200px;
+    min-width:220px;
     pointer-events:none;
 }
 #mp-hud .hud-title {
@@ -143,11 +176,19 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
 #mp-hud .hud-row { display:flex; justify-content:space-between; gap:10px; padding:1px 0; }
 #mp-hud .hud-row .k { color:#88a; }
 #mp-hud .hud-row .v { color:#fff; font-weight:700; }
+#mp-mode-badge {
+    position:absolute; top:12px; left:12px;
+    background:rgba(6,4,18,.85); backdrop-filter:blur(8px);
+    border:1px solid rgba(102,255,170,.2);
+    border-radius:8px; padding:6px 10px;
+    font-family:monospace; font-size:.7rem; color:#66ffaa;
+    text-transform:uppercase; letter-spacing:.1em; font-weight:800;
+    pointer-events:none;
+}
 
-/* ─── Event log ────────────────────────────────────────── */
 .mp-log {
-    margin-top:14px;
-    max-height:240px; overflow-y:auto;
+    margin-top:10px;
+    max-height:200px; overflow-y:auto;
     background:rgba(0,0,0,.35);
     border:1px solid rgba(255,255,255,.06);
     border-radius:8px;
@@ -161,9 +202,11 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
 .mp-log-row .lvl-launch  { color:#ffcc66; }
 .mp-log-row .lvl-deploy  { color:#66ffaa; }
 .mp-log-row .lvl-transfer{ color:#ff99dd; }
+.mp-log-row .lvl-window  { color:#aaccff; }
+.mp-log-row .lvl-capture { color:#ffeecc; }
 
 .mp-section-divider {
-    margin:16px -16px;
+    margin:14px -16px;
     border-top:1px solid rgba(255,255,255,.06);
 }
 </style>
@@ -181,14 +224,20 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
 <script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("mission-planner");</script>
 
 <div id="mp-hero">
-    <h1>🎯 Mission Planner — Visual Launch Simulator</h1>
-    <p>Pick a launch site, choose a target orbit, and watch a rocket lift off, deliver its payload, and circularize. Then preview transfer trajectories to the Moon and Mars with first-order Δv and time-of-flight readouts. (Mock physics — visual planner only.)</p>
+    <h1>🎯 Mission Planner — Lambert + Patched-Conic Trajectory Simulator</h1>
+    <p>Real launch sites. Real ephemerides. Real Lambert solver. Pick a destination, run a pork-chop scan, and watch the spacecraft fly the actual transfer: parking orbit → TLI/TMI burn (with plane-change cost) → 3D Kepler arc → SOI patch → capture. Mars transfers use Izzo's Lambert algorithm over a 80×80 (departure × arrival) grid of live Earth/Mars positions — the heatmap is clickable, so any (depart, arrive) pair becomes a flyable mission.</p>
     <div id="mp-hero-stats"></div>
 </div>
 
 <div id="mp-app">
 
     <aside class="mp-panel" id="mp-controls">
+        <div class="mp-label">View</div>
+        <div class="mp-mode-toggle">
+            <button id="mp-mode-geo"   class="mp-mode-btn on"  type="button">🌍 Earth System</button>
+            <button id="mp-mode-helio" class="mp-mode-btn"     type="button">☀️ Heliocentric</button>
+        </div>
+
         <div class="mp-label">Launch Site</div>
         <select id="mp-site" class="mp-select"></select>
 
@@ -198,7 +247,31 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
         <div class="mp-label">Payload Name</div>
         <input id="mp-payload" class="mp-input" type="text" maxlength="32" value="PayloadSat-1">
 
-        <button id="mp-launch" class="mp-launch-btn" type="button">🚀 Launch</button>
+        <div class="mp-label">Parking-Orbit Inclination</div>
+        <div class="mp-row">
+            <input id="mp-park-inc" class="mp-input" type="range" min="0" max="98" step="0.5" value="28.5">
+            <span class="mp-time" id="mp-park-inc-val">28.5°</span>
+        </div>
+
+        <button id="mp-find-window" class="mp-secondary-btn" type="button" style="margin-top:10px;">🔍 Find Next Launch Window</button>
+        <button id="mp-porkchop"    class="mp-secondary-btn" type="button" style="margin-top:6px;">🗺️ Run Pork-Chop Scan (Mars)</button>
+        <button id="mp-launch"      class="mp-launch-btn"    type="button">🚀 Launch</button>
+
+        <div id="mp-plan" class="mp-plan">
+            <div class="mp-plan-empty">Plan readout appears after Find Window or Launch.</div>
+        </div>
+
+        <div id="mp-porkchop-wrap" style="margin-top:10px; display:none;">
+            <div class="mp-plan-title" style="color:#ffaa66; margin-bottom:6px;">📊 Pork-Chop · Total Δv (km/s)</div>
+            <canvas id="mp-porkchop-canvas" width="220" height="220"
+                style="width:100%; max-width:260px; display:block; image-rendering:pixelated;
+                       background:#000; border:1px solid rgba(255,255,255,.1); border-radius:6px;
+                       cursor:crosshair;"></canvas>
+            <div id="mp-porkchop-axes" style="font-family:monospace; font-size:.62rem; color:#778; margin-top:4px; line-height:1.45;">
+                ↕ arrival date  ↔ departure date · click to load
+            </div>
+            <div id="mp-porkchop-legend" style="font-family:monospace; font-size:.62rem; color:#aab; margin-top:4px;"></div>
+        </div>
 
         <div class="mp-section-divider"></div>
 
@@ -208,8 +281,15 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
             <span class="mp-time" id="mp-timescale-val">1.0×</span>
         </div>
 
+        <div class="mp-label">Sim Days / Sec (planet drift)</div>
+        <div class="mp-row">
+            <input id="mp-simrate" class="mp-input" type="range" min="0" max="60" step="1" value="2">
+            <span class="mp-time" id="mp-simrate-val">2 d/s</span>
+        </div>
+
         <button id="mp-focus-earth" class="mp-secondary-btn" type="button">Focus: Earth</button>
         <button id="mp-focus-moon"  class="mp-secondary-btn" type="button">Focus: Moon</button>
+        <button id="mp-focus-sun"   class="mp-secondary-btn" type="button">Focus: Sun (helio)</button>
         <button id="mp-clear"       class="mp-secondary-btn" type="button" style="border-color:rgba(255,120,120,.4); color:#ffaaaa;">Clear All Vehicles</button>
 
         <div class="mp-label">Mission Log</div>
@@ -219,22 +299,24 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
     <main>
         <div id="mp-3d-wrap">
             <div id="mp-3d" aria-label="3D mission planner viewport"></div>
+            <div id="mp-mode-badge">🌍 Earth System</div>
             <div id="mp-hud">
                 <div class="hud-title">Mission Status</div>
                 <div class="hud-row"><span class="k">Rockets in flight</span><span class="v" id="hud-rockets">0</span></div>
-                <div class="hud-row"><span class="k">Payloads on orbit</span><span class="v" id="hud-payloads">0</span></div>
-                <div class="hud-row"><span class="k">Last Δv₁</span><span class="v" id="hud-dv1">—</span></div>
-                <div class="hud-row"><span class="k">Last Δv₂</span><span class="v" id="hud-dv2">—</span></div>
-                <div class="hud-row"><span class="k">Last TOF</span><span class="v" id="hud-tof">—</span></div>
+                <div class="hud-row"><span class="k">Near-Earth payloads</span><span class="v" id="hud-payloads">0</span></div>
+                <div class="hud-row"><span class="k">Lunar missions</span><span class="v" id="hud-lunar">0</span></div>
+                <div class="hud-row"><span class="k">Mars missions</span><span class="v" id="hud-mars">0</span></div>
+                <div class="hud-row"><span class="k">Scenario JD</span><span class="v" id="hud-jd">—</span></div>
             </div>
         </div>
-        <p id="mp-3d-help"><strong>Drag</strong> to orbit · <strong>Scroll</strong> to zoom · <strong>Right-drag</strong> to pan · Earth radius = 1 unit · Moon ring shown to scale</p>
+        <p id="mp-3d-help"><strong>Drag</strong> orbit · <strong>Scroll</strong> zoom · <strong>Right-drag</strong> pan · Geo: 1 unit = R⊕ · Helio: 1 AU = 4 units · planets at live ephemeris</p>
     </main>
 
 </div>
 
 <script type="module">
 import { initMissionPlanner, LAUNCH_SITES, TARGET_ORBITS } from './js/mission-planner-3d.js';
+import { jdNow } from './js/horizons.js';
 
 // ── Populate dropdowns ──────────────────────────────────────────────
 const siteSel   = document.getElementById('mp-site');
@@ -247,11 +329,12 @@ targetSel.innerHTML = TARGET_ORBITS.map(t => `<option value="${t.id}">${t.name}<
 document.getElementById('mp-hero-stats').innerHTML = `
     <span class="mp-stat"><strong>${LAUNCH_SITES.length}</strong>launch sites</span>
     <span class="mp-stat"><strong>${TARGET_ORBITS.length}</strong>target orbits</span>
-    <span class="mp-stat"><strong>2</strong>interplanetary transfers</span>
     <span class="mp-stat"><strong>μ⊕ = 398 600</strong>km³/s²</span>
+    <span class="mp-stat"><strong>μ☉ = 1.327×10¹¹</strong>km³/s²</span>
+    <span class="mp-stat"><strong>Live</strong>Earth/Mars/Moon ephemerides</span>
 `;
 
-// ── Mount the 3D scene ──────────────────────────────────────────────
+// ── Logging ─────────────────────────────────────────────────────────
 const log = document.getElementById('mp-log');
 function pushLog(text, lvl='') {
     const t = new Date();
@@ -263,6 +346,84 @@ function pushLog(text, lvl='') {
     while (log.children.length > 80) log.removeChild(log.lastChild);
 }
 
+// ── HUD updaters ────────────────────────────────────────────────────
+function refreshHUD() {
+    const s = planner.getStats();
+    document.getElementById('hud-rockets').textContent  = s.rockets;
+    document.getElementById('hud-payloads').textContent = s.payloads;
+    document.getElementById('hud-lunar').textContent    = s.lunarMissions;
+    document.getElementById('hud-mars').textContent     = s.marsMissions;
+    document.getElementById('hud-jd').textContent       = planner.getScenarioJD().toFixed(2);
+}
+
+// ── Plan-readout renderer ───────────────────────────────────────────
+const planEl = document.getElementById('mp-plan');
+function jdToISO(jd) {
+    // JD → Date (UNIX = JD 2440587.5).
+    const ms = (jd - 2440587.5) * 86400 * 1000;
+    return new Date(ms).toISOString().slice(0, 10);
+}
+function renderPlan(plan) {
+    if (!plan) { planEl.innerHTML = `<div class="mp-plan-empty">Plan readout appears after Find Window or Launch.</div>`; return; }
+
+    if (plan.kind === 'lunar') {
+        planEl.innerHTML = `
+            <div class="mp-plan-title">🌙 Lunar Transfer Plan</div>
+            <div class="mp-plan-row"><span class="k">Depart JD</span><span class="v">${jdToISO(plan.jd_depart)}</span></div>
+            <div class="mp-plan-row"><span class="k">Arrive JD</span><span class="v">${jdToISO(plan.jd_arrive)}</span></div>
+            <div class="mp-plan-row"><span class="k">TOF</span><span class="v">${plan.tof_d.toFixed(2)} days</span></div>
+            <div class="mp-plan-row"><span class="k">Parking r</span><span class="v">${(plan.r_park_km - 6378).toFixed(0)} km LEO</span></div>
+            <div class="mp-plan-row"><span class="k">Lunar dist</span><span class="v">${(plan.r_moon_km/1000).toFixed(0)}×10³ km</span></div>
+            <div class="mp-plan-row"><span class="k">Δv (TLI)</span><span class="v">${plan.dv_tli_kms.toFixed(3)} km/s</span></div>
+            <div class="mp-plan-row"><span class="k">v∞ at Moon</span><span class="v">${plan.v_inf_moon_kms.toFixed(3)} km/s</span></div>
+            <div class="mp-plan-row"><span class="k">Δv (LOI)</span><span class="v">${plan.dv_loi_kms.toFixed(3)} km/s</span></div>
+            <div class="mp-plan-row"><span class="k">Total Δv</span><span class="v">${plan.dv_total_kms.toFixed(3)} km/s</span></div>
+            <div class="mp-plan-row"><span class="k">Lead angle</span><span class="v">${plan.lead_angle_deg.toFixed(1)}°</span></div>
+        `;
+    } else if (plan.kind === 'mars' && plan.method === 'lambert') {
+        const tilt = plan.plane_change_dep_deg;
+        const tiltWarn = tilt > 10 ? 'warn' : '';
+        planEl.innerHTML = `
+            <div class="mp-plan-title">♂ Mars Transfer (Lambert · 3D)</div>
+            <div class="mp-plan-row"><span class="k">Depart</span><span class="v">${jdToISO(plan.jd_depart)}</span></div>
+            <div class="mp-plan-row"><span class="k">Arrive</span><span class="v">${jdToISO(plan.jd_arrive)}</span></div>
+            <div class="mp-plan-row"><span class="k">TOF</span><span class="v">${plan.tof_d.toFixed(1)} days</span></div>
+            <div class="mp-plan-row"><span class="k">v∞ Earth</span><span class="v">${plan.v_inf_earth_kms.toFixed(3)} km/s</span></div>
+            <div class="mp-plan-row"><span class="k">C3 Earth</span><span class="v">${plan.c3_earth_km2s2.toFixed(2)} km²/s²</span></div>
+            <div class="mp-plan-row"><span class="k">DLA (v∞ dec)</span><span class="v">${plan.dla_deg.toFixed(2)}°</span></div>
+            <div class="mp-plan-row"><span class="k">Plane tilt</span><span class="v ${tiltWarn}">${plan.plane_change_dep_deg.toFixed(2)}°</span></div>
+            <div class="mp-plan-row"><span class="k">Δv (TMI)</span><span class="v">${plan.dv_tmi_kms.toFixed(3)} km/s</span></div>
+            <div class="mp-plan-row"><span class="k">  · tangent only</span><span class="v" style="opacity:.7">${plan.dv_tmi_tangential_kms.toFixed(3)} km/s</span></div>
+            <div class="mp-plan-row"><span class="k">v∞ Mars</span><span class="v">${plan.v_inf_mars_kms.toFixed(3)} km/s</span></div>
+            <div class="mp-plan-row"><span class="k">Δv (MOI)</span><span class="v">${plan.dv_moi_kms.toFixed(3)} km/s</span></div>
+            <div class="mp-plan-row"><span class="k">Total Δv</span><span class="v">${plan.dv_total_kms.toFixed(3)} km/s</span></div>
+        `;
+    } else if (plan.kind === 'mars') {
+        const phErr = Math.abs(plan.phi_error_deg);
+        const phWarn = phErr > 5 ? 'warn' : '';
+        planEl.innerHTML = `
+            <div class="mp-plan-title">♂ Mars Transfer (Hohmann reference)</div>
+            <div class="mp-plan-row"><span class="k">Depart</span><span class="v">${jdToISO(plan.jd_depart)}</span></div>
+            <div class="mp-plan-row"><span class="k">Arrive</span><span class="v">${jdToISO(plan.jd_arrive)}</span></div>
+            <div class="mp-plan-row"><span class="k">TOF</span><span class="v">${plan.tof_d.toFixed(1)} days</span></div>
+            <div class="mp-plan-row"><span class="k">Phase err</span><span class="v ${phWarn}">${plan.phi_error_deg.toFixed(1)}°</span></div>
+            <div class="mp-plan-row"><span class="k">C3</span><span class="v">${plan.c3_earth_km2s2.toFixed(2)} km²/s²</span></div>
+            <div class="mp-plan-row"><span class="k">Δv (TMI)</span><span class="v">${plan.dv_tmi_kms.toFixed(3)} km/s</span></div>
+            <div class="mp-plan-row"><span class="k">Δv (MOI)</span><span class="v">${plan.dv_moi_kms.toFixed(3)} km/s</span></div>
+            <div class="mp-plan-row"><span class="k">Total Δv</span><span class="v">${plan.dv_total_kms.toFixed(3)} km/s</span></div>
+        `;
+    }
+}
+
+// ── Mode badge ──────────────────────────────────────────────────────
+function setModeUI(mode) {
+    document.getElementById('mp-mode-geo').classList.toggle('on',   mode === 'geo');
+    document.getElementById('mp-mode-helio').classList.toggle('on', mode === 'helio');
+    document.getElementById('mp-mode-badge').textContent =
+        mode === 'helio' ? '☀️ Heliocentric' : '🌍 Earth System';
+}
+
+// ── Mount the 3D scene ──────────────────────────────────────────────
 const planner = initMissionPlanner({
     container: document.getElementById('mp-3d'),
     onEvent: (ev) => {
@@ -271,33 +432,238 @@ const planner = initMissionPlanner({
         } else if (ev.type === 'deployed') {
             const o = ev.orbit;
             pushLog(`✅ Deploy · ${ev.payloadName} on ${o.alt_km.toFixed(0)} km / ${o.inc_deg.toFixed(1)}° · v=${o.v_circ_kms.toFixed(2)} km/s · T=${o.period_min.toFixed(1)} min`, 'deploy');
-        } else if (ev.type === 'transfer') {
-            pushLog(`🛰️ ${ev.target.name} · Δv₁=${ev.dv1_kms.toFixed(2)}, Δv₂=${ev.dv2_kms.toFixed(2)} km/s · TOF=${ev.tof_days.toFixed(1)} d`, 'transfer');
-            document.getElementById('hud-dv1').textContent = `${ev.dv1_kms.toFixed(2)} km/s`;
-            document.getElementById('hud-dv2').textContent = `${ev.dv2_kms.toFixed(2)} km/s`;
-            document.getElementById('hud-tof').textContent = `${ev.tof_days.toFixed(1)} days`;
+        } else if (ev.type === 'launched-lunar') {
+            pushLog(`🌙 TLI · ${ev.payloadName} · Δv₁=${ev.plan.dv_tli_kms.toFixed(2)} · Δv₂=${ev.plan.dv_loi_kms.toFixed(2)} km/s · TOF=${ev.plan.tof_d.toFixed(1)} d`, 'transfer');
+            renderPlan(ev.plan);
+        } else if (ev.type === 'launched-mars') {
+            pushLog(`♂ TMI · ${ev.payloadName} · C3=${ev.plan.c3_earth_km2s2.toFixed(1)} km²/s² · Δv=${ev.plan.dv_total_kms.toFixed(2)} km/s · TOF=${ev.plan.tof_d.toFixed(0)} d`, 'transfer');
+            renderPlan(ev.plan);
+        } else if (ev.type === 'lunar-captured') {
+            pushLog(`🛰️ LOI · ${ev.payloadName} captured into ${(ev.plan.r_capt_km - 1737).toFixed(0)} km lunar orbit`, 'capture');
+        } else if (ev.type === 'mars-captured') {
+            pushLog(`🛰️ MOI · ${ev.payloadName} arrived at Mars`, 'capture');
+        } else if (ev.type === 'mode') {
+            setModeUI(ev.mode);
         }
-        const stats = planner.getStats();
-        document.getElementById('hud-rockets').textContent  = stats.rockets;
-        document.getElementById('hud-payloads').textContent = stats.payloads;
+        refreshHUD();
     },
+});
+
+// ── Mars window state (depart, arrive) — set by Find/Pork-Chop/click ──
+let marsWindow = null;          // { jd_depart, jd_arrive }
+let lastPorkchop = null;        // result from porkchopMars
+
+// Parking inclination slider
+const parkIncRange = document.getElementById('mp-park-inc');
+const parkIncVal   = document.getElementById('mp-park-inc-val');
+parkIncRange.addEventListener('input', () => {
+    parkIncVal.textContent = `${parseFloat(parkIncRange.value).toFixed(1)}°`;
+    // If a Mars window is already selected, re-cost it for the new inclination.
+    if (marsWindow && targetSel.value === 'mars') {
+        const plan = planner.planMarsLambert({
+            jd_depart: marsWindow.jd_depart,
+            jd_arrive: marsWindow.jd_arrive,
+            parking_inc_deg: parseFloat(parkIncRange.value),
+        });
+        renderPlan(plan);
+    }
+});
+// Default parking inclination = launch site latitude.
+siteSel.addEventListener('change', () => {
+    const s = LAUNCH_SITES.find(x => x.id === siteSel.value);
+    if (!s) return;
+    parkIncRange.value = Math.abs(s.lat).toFixed(1);
+    parkIncVal.textContent = `${Math.abs(s.lat).toFixed(1)}°`;
 });
 
 // ── Wire controls ───────────────────────────────────────────────────
 document.getElementById('mp-launch').addEventListener('click', () => {
-    planner.launch({
+    const opts = {
         siteId:   siteSel.value,
         targetId: targetSel.value,
         payloadName: (payloadIn.value || 'Payload').trim(),
-    });
+        parking_inc_deg: parseFloat(parkIncRange.value),
+    };
+    if (targetSel.value === 'mars' && marsWindow) {
+        opts.windowJD = marsWindow.jd_depart;
+        opts.arriveJD = marsWindow.jd_arrive;
+    }
+    planner.launch(opts);
 });
-document.getElementById('mp-focus-earth').addEventListener('click', () => planner.focusEarth());
-document.getElementById('mp-focus-moon').addEventListener('click',  () => planner.focusMoon());
+
+document.getElementById('mp-find-window').addEventListener('click', () => {
+    const tgt = TARGET_ORBITS.find(t => t.id === targetSel.value);
+    if (!tgt) return;
+    if (tgt.id === 'moon') {
+        const plan = planner.findLunarWindow({ jd_start: jdNow() });
+        renderPlan(plan);
+        pushLog(`🔍 Lunar window · TOF ${plan.tof_d.toFixed(1)} d · Δv ${plan.dv_total_kms.toFixed(2)} km/s`, 'window');
+    } else if (tgt.id === 'mars') {
+        runMarsPorkchop();   // Lambert pork-chop is the proper window finder
+    } else {
+        pushLog(`No window scan needed for ${tgt.name} — orbit is geometric, not phase-dependent.`, 'window');
+    }
+});
+
+document.getElementById('mp-porkchop').addEventListener('click', runMarsPorkchop);
+
+function runMarsPorkchop() {
+    pushLog(`⏳ Pork-chop scan: 80×80 Lamberts over the next 1.5 yr…`, 'window');
+    setTimeout(() => {
+        const inc = parseFloat(parkIncRange.value);
+        const today = jdNow();
+        const pc = planner.porkchopMars({
+            jd_dep_min: today,
+            jd_dep_max: today + 540,        // ~1.5 yr departure window
+            jd_arr_min: today + 90,
+            jd_arr_max: today + 540 + 360,  // up to 360-day TOFs
+            n_dep: 80, n_arr: 80,
+            parking_inc_deg: inc,
+        });
+        lastPorkchop = pc;
+        if (!Number.isFinite(pc.best.dv)) {
+            pushLog(`Pork-chop scan found no feasible trajectories. Try a wider window.`, 'window');
+            return;
+        }
+        marsWindow = { jd_depart: pc.best.jd_dep, jd_arrive: pc.best.jd_arr };
+        renderPorkchop(pc);
+        const plan = planner.planMarsLambert({
+            jd_depart: pc.best.jd_dep,
+            jd_arrive: pc.best.jd_arr,
+            parking_inc_deg: inc,
+        });
+        renderPlan(plan);
+        pushLog(`🔍 Pork-chop best · depart ${jdToISO(pc.best.jd_dep)} → arrive ${jdToISO(pc.best.jd_arr)} · TOF ${pc.best.tof_d.toFixed(0)}d · C3 ${pc.best.c3.toFixed(1)} · Δv ${pc.best.dv.toFixed(2)} km/s`, 'window');
+    }, 30);
+}
+
+// ── Pork-chop heatmap rendering ─────────────────────────────────────
+const pcWrap   = document.getElementById('mp-porkchop-wrap');
+const pcCanvas = document.getElementById('mp-porkchop-canvas');
+const pcLegend = document.getElementById('mp-porkchop-legend');
+const pcAxes   = document.getElementById('mp-porkchop-axes');
+
+function renderPorkchop(pc) {
+    pcWrap.style.display = 'block';
+    const w = pcCanvas.width, h = pcCanvas.height;
+    const ctx = pcCanvas.getContext('2d');
+    const img = ctx.createImageData(w, h);
+
+    // Find finite min/max for the colormap
+    let dvMin = Infinity, dvMax = -Infinity;
+    for (let k = 0; k < pc.dv.length; k++) {
+        const v = pc.dv[k];
+        if (Number.isFinite(v)) { if (v < dvMin) dvMin = v; if (v > dvMax) dvMax = v; }
+    }
+    // Clip the upper end so the contrast stays useful
+    const dvHi = Math.min(dvMax, dvMin + 8);
+
+    // pc grid: pc.dv[i*n_arr + j] with i = depart, j = arrive
+    // Canvas: x = depart (i), y = arrive (j flipped so later arrivals = higher)
+    for (let py = 0; py < h; py++) {
+        for (let px = 0; px < w; px++) {
+            const i = Math.floor(px / w * pc.n_dep);
+            const j = pc.n_arr - 1 - Math.floor(py / h * pc.n_arr);
+            const v = pc.dv[i * pc.n_arr + j];
+            const o = (py * w + px) * 4;
+            if (!Number.isFinite(v)) {
+                img.data[o]   = 8;  img.data[o+1] = 6;  img.data[o+2] = 18; img.data[o+3] = 255;
+            } else {
+                const t = Math.max(0, Math.min(1, (v - dvMin) / (dvHi - dvMin)));
+                const [r,g,b] = viridis(1 - t);   // green = cheap, purple = expensive
+                img.data[o]   = r; img.data[o+1] = g; img.data[o+2] = b; img.data[o+3] = 255;
+            }
+        }
+    }
+    ctx.putImageData(img, 0, 0);
+
+    // Mark the optimal cell with a crosshair
+    const bx = (pc.best.i + 0.5) / pc.n_dep * w;
+    const by = h - (pc.best.j + 0.5) / pc.n_arr * h;
+    ctx.strokeStyle = '#ffeecc';
+    ctx.lineWidth   = 1.5;
+    ctx.beginPath();
+    ctx.arc(bx, by, 6, 0, Math.PI*2);
+    ctx.stroke();
+
+    pcLegend.innerHTML = `
+        Δv ∈ [${dvMin.toFixed(2)}, ${dvHi.toFixed(2)}] km/s &nbsp; · &nbsp;
+        cheap → <span style="color:#7ad151">green</span> ·
+        costly → <span style="color:#9c179e">purple</span> ·
+        <span style="color:#ffeecc">○</span> = optimum
+    `;
+    pcAxes.innerHTML = `
+        ↔ depart ${jdToISO(pc.jd_dep_min)} → ${jdToISO(pc.jd_dep_max)}<br>
+        ↕ arrive ${jdToISO(pc.jd_arr_min)} → ${jdToISO(pc.jd_arr_max)}
+    `;
+}
+
+pcCanvas.addEventListener('click', (ev) => {
+    if (!lastPorkchop) return;
+    const rect = pcCanvas.getBoundingClientRect();
+    const px = (ev.clientX - rect.left) / rect.width  * pcCanvas.width;
+    const py = (ev.clientY - rect.top)  / rect.height * pcCanvas.height;
+    const i = Math.floor(px / pcCanvas.width  * lastPorkchop.n_dep);
+    const j = lastPorkchop.n_arr - 1 - Math.floor(py / pcCanvas.height * lastPorkchop.n_arr);
+    if (i < 0 || j < 0 || i >= lastPorkchop.n_dep || j >= lastPorkchop.n_arr) return;
+    const jd_dep = lastPorkchop.jd_dep_min + (lastPorkchop.jd_dep_max - lastPorkchop.jd_dep_min) * (i / (lastPorkchop.n_dep - 1));
+    const jd_arr = lastPorkchop.jd_arr_min + (lastPorkchop.jd_arr_max - lastPorkchop.jd_arr_min) * (j / (lastPorkchop.n_arr - 1));
+    if (jd_arr <= jd_dep + 30) {
+        pushLog(`Pork-chop: that cell has TOF < 30 d (infeasible) — pick a higher arrival.`, 'window');
+        return;
+    }
+    marsWindow = { jd_depart: jd_dep, jd_arrive: jd_arr };
+    const plan = planner.planMarsLambert({
+        jd_depart: jd_dep, jd_arrive: jd_arr,
+        parking_inc_deg: parseFloat(parkIncRange.value),
+    });
+    renderPlan(plan);
+    pushLog(`📍 Selected · depart ${jdToISO(jd_dep)} → arrive ${jdToISO(jd_arr)} · Δv ${plan.dv_total_kms.toFixed(2)} km/s`, 'window');
+    // Re-render heatmap to refresh the optimum marker (no recompute needed).
+    renderPorkchop(lastPorkchop);
+    // And overlay the user's pick:
+    const ctx = pcCanvas.getContext('2d');
+    const bx = (i + 0.5) / lastPorkchop.n_dep * pcCanvas.width;
+    const by = pcCanvas.height - (j + 0.5) / lastPorkchop.n_arr * pcCanvas.height;
+    ctx.strokeStyle = '#66ffaa';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(bx-7, by); ctx.lineTo(bx+7, by);
+    ctx.moveTo(bx, by-7); ctx.lineTo(bx, by+7);
+    ctx.stroke();
+});
+
+// 8-stop viridis colormap (perceptually uniform, color-blind-friendly).
+function viridis(t) {
+    const stops = [
+        [ 68,  1, 84], [ 72, 35,116], [ 64, 67,135], [ 52, 94,141],
+        [ 41,120,142], [ 32,144,140], [ 34,167,132], [ 68,190,112],
+        [121,209, 81], [189,222, 38], [253,231, 36],
+    ];
+    t = Math.max(0, Math.min(1, t));
+    const f = t * (stops.length - 1);
+    const i = Math.floor(f);
+    const u = f - i;
+    const a = stops[i], b = stops[Math.min(stops.length - 1, i + 1)];
+    return [
+        Math.round(a[0]*(1-u) + b[0]*u),
+        Math.round(a[1]*(1-u) + b[1]*u),
+        Math.round(a[2]*(1-u) + b[2]*u),
+    ];
+}
+
+document.getElementById('mp-mode-geo').addEventListener('click',   () => { planner.setMode('geo');   setModeUI('geo'); });
+document.getElementById('mp-mode-helio').addEventListener('click', () => { planner.setMode('helio'); setModeUI('helio'); });
+
+document.getElementById('mp-focus-earth').addEventListener('click', () => { planner.setMode('geo'); setModeUI('geo'); planner.focusEarth(); });
+document.getElementById('mp-focus-moon').addEventListener('click',  () => { planner.setMode('geo'); setModeUI('geo'); planner.focusMoon(); });
+document.getElementById('mp-focus-sun').addEventListener('click',   () => { planner.setMode('helio'); setModeUI('helio'); planner.focusSun(); });
+
 document.getElementById('mp-clear').addEventListener('click', () => {
     planner.clear();
     pushLog('🧹 Cleared all vehicles.', '');
-    document.getElementById('hud-rockets').textContent  = '0';
-    document.getElementById('hud-payloads').textContent = '0';
+    renderPlan(null);
+    refreshHUD();
 });
 
 const tsRange = document.getElementById('mp-timescale');
@@ -308,7 +674,19 @@ tsRange.addEventListener('input', () => {
     tsVal.textContent = `${v.toFixed(2)}×`;
 });
 
-// ── Auto-launch a starter payload so the page never looks empty ─────
+const srRange = document.getElementById('mp-simrate');
+const srVal   = document.getElementById('mp-simrate-val');
+srRange.addEventListener('input', () => {
+    const v = parseFloat(srRange.value);
+    planner.setSimDaysPerSec(v);
+    srVal.textContent = `${v} d/s`;
+});
+planner.setSimDaysPerSec(parseFloat(srRange.value));
+
+// ── HUD heartbeat (Scenario JD ticks even with no missions) ─────────
+setInterval(refreshHUD, 500);
+
+// ── Auto-launch a starter LEO so the page never looks empty ─────────
 setTimeout(() => {
     payloadIn.value = 'Demo-LEO-1';
     planner.launch({ siteId: 'ksc', targetId: 'leo', payloadName: 'Demo-LEO-1' });
