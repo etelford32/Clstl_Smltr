@@ -1570,14 +1570,217 @@ function makeAtmosphere(color, size, intensity = 1.0) {
     );
 }
 
+// ── Procedural planet shader ─────────────────────────────────────────
+// One unified ShaderMaterial drives every planet — per-body looks come
+// from a small uniform pack (c1/c2/c3 colours + band/noise/polar/spot
+// dials). The fragment shader builds spherical UVs from object-space
+// position, runs 5-octave fbm for surface noise, lays down zonal cloud
+// bands with subtle latitudinal swirl, drops in a Great-Red-Spot oval
+// for Jupiter/Neptune, and dusts on polar caps for Earth/Mars. A slow
+// u_time-driven rotation keeps the planets visibly "alive" when the
+// God-Mode camera zooms in close.
+const planetVS = /* glsl */`
+    varying vec3 vWorldNormal;
+    varying vec3 vWorldPos;
+    varying vec3 vObjPos;
+    void main() {
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vWorldPos    = wp.xyz;
+        vWorldNormal = normalize(mat3(modelMatrix) * normal);
+        vObjPos      = position;
+        gl_Position  = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }`;
+
+const planetFS = /* glsl */`
+    uniform float u_time;
+    uniform vec3  u_c1;       // base / ocean / zone
+    uniform vec3  u_c2;       // detail / land / belt
+    uniform vec3  u_c3;       // accent (storm / cap)
+    uniform float u_bands;    // zonal-band intensity 0..1
+    uniform float u_swirl;    // band lat swirl 0..1
+    uniform float u_noise;    // surface fbm intensity 0..1.5
+    uniform float u_polar;    // polar-cap intensity 0..1
+    uniform float u_spot;     // GRS-style oval intensity 0..1
+    uniform float u_spotLon;  // longitude (rad) of the spot centre
+    uniform float u_spotLat;  // latitude  (rad) of the spot centre
+    uniform float u_spin;     // rad / second of texture rotation
+    uniform float u_seed;     // per-planet phase offset
+    uniform float u_emiss;    // self-glow (Sun-side ambient floor)
+
+    varying vec3 vWorldNormal;
+    varying vec3 vWorldPos;
+    varying vec3 vObjPos;
+
+    float hash(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+    float vnoise(vec3 p) {
+        vec3 i = floor(p), f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        return mix(
+            mix(mix(hash(i),                hash(i + vec3(1,0,0)), f.x),
+                mix(hash(i + vec3(0,1,0)),  hash(i + vec3(1,1,0)), f.x), f.y),
+            mix(mix(hash(i + vec3(0,0,1)),  hash(i + vec3(1,0,1)), f.x),
+                mix(hash(i + vec3(0,1,1)),  hash(i + vec3(1,1,1)), f.x), f.y),
+            f.z);
+    }
+    float fbm(vec3 p) {
+        float v = 0.0, a = 0.5;
+        for (int i = 0; i < 5; i++) {
+            v += a * vnoise(p);
+            p *= 2.05;
+            a *= 0.5;
+        }
+        return v;
+    }
+
+    void main() {
+        // Object-space sphere position → rotated to give time-varying texture
+        vec3 op = normalize(vObjPos);
+        float ang = u_time * u_spin;
+        float ca = cos(ang), sa = sin(ang);
+        vec3 rp = vec3(op.x * ca - op.z * sa, op.y, op.x * sa + op.z * ca);
+
+        float lon = atan(rp.z, rp.x);
+        float lat = asin(clamp(rp.y, -1.0, 1.0));
+
+        vec3 col = u_c1;
+
+        // ── Surface noise (continents, mare, craters) ───────────────────
+        if (u_noise > 0.0) {
+            float n = fbm(rp * 3.2 + vec3(u_seed));
+            float h = fbm(rp * 8.5 + vec3(u_seed * 1.7));
+            float t = clamp(n * 0.7 + h * 0.3, 0.0, 1.0);
+            col = mix(u_c2, u_c1, smoothstep(0.34, 0.62, t));
+            col = mix(col, u_c1 * 1.18, smoothstep(0.62, 0.85, t) * u_noise);
+            // Tiny dark speckle for crater fields / mare — only when u_noise high
+            float sp = step(0.78, fbm(rp * 22.0 + vec3(u_seed * 2.3)));
+            col = mix(col, u_c2 * 0.65, sp * u_noise * 0.35);
+        }
+
+        // ── Horizontal cloud bands (Jupiter, Saturn, Venus, ice giants) ─
+        if (u_bands > 0.0) {
+            float swirlN = fbm(vec3(lat * 4.5, lon * 1.5 + u_time * 0.04, u_seed));
+            float bandLat = lat + u_swirl * 0.35 * (swirlN - 0.5);
+            float wide   = 0.5 + 0.5 * sin(bandLat * 14.0 + u_seed);
+            float fine   = 0.5 + 0.5 * sin(bandLat * 38.0 - u_seed * 0.7);
+            float band   = mix(wide, fine, 0.30);
+            // Small turbulent eddies along the band
+            float eddy = fbm(vec3(lon * 4.0, lat * 18.0, u_time * 0.10 + u_seed));
+            band = clamp(band * 0.85 + eddy * 0.20, 0.0, 1.0);
+            col = mix(col, u_c2, band * u_bands * 0.78);
+        }
+
+        // ── Storm oval (Jupiter Great Red Spot, Neptune Dark Spot) ──────
+        if (u_spot > 0.0) {
+            float dlon = lon - u_spotLon - u_time * u_spin * 0.95;
+            dlon = mod(dlon + 3.14159265, 6.28318530) - 3.14159265;
+            float dlat = lat - u_spotLat;
+            float d = sqrt(dlon * dlon * 0.55 + dlat * dlat * 2.6);
+            float core = smoothstep(0.32, 0.04, d);
+            float swirl = 0.5 + 0.5 * sin(atan(dlat, dlon) * 3.0 + u_time * 0.6);
+            col = mix(col, u_c3 * (0.85 + 0.25 * swirl), core * u_spot);
+        }
+
+        // ── Polar ice caps (Earth, Mars) ────────────────────────────────
+        if (u_polar > 0.0) {
+            float alat = abs(lat);
+            float ragged = fbm(rp * 7.5) * 0.18;
+            float pc = smoothstep(1.05, 1.40, alat + ragged);
+            col = mix(col, vec3(0.95, 0.97, 1.0), pc * u_polar);
+        }
+
+        // ── Lighting: diffuse from Sun at origin, with limb darkening ───
+        vec3  nrm    = normalize(vWorldNormal);
+        vec3  toSun  = normalize(-vWorldPos);
+        vec3  toCam  = normalize(cameraPosition - vWorldPos);
+        float sunFace = max(dot(nrm, toSun), 0.0);
+        col *= (u_emiss * 0.45 + 0.10) + 0.90 * sunFace;
+
+        // Limb darkening — small dimming towards the silhouette
+        float facing = max(dot(nrm, toCam), 0.0);
+        col *= 1.0 - 0.30 * pow(1.0 - facing, 2.6);
+
+        gl_FragColor = vec4(col, 1.0);
+    }`;
+
+// Per-planet shader pack. Colors are linearly weighted (hex inputs are
+// converted to vec3 via THREE.Color). spotLon/Lat in radians (only used
+// when u_spot > 0). u_spin is in rad/s of texture rotation — small
+// values keep the spin discreet at default zoom but visible up close.
+const PLANET_LOOK = {
+    mercury: { c1:0xa49a90, c2:0x4a423b, c3:0xc9c1b6,
+               bands:0.0, swirl:0.0, noise:1.10, polar:0.0,
+               spot:0.0, spotLon:0.0, spotLat:0.0, spin:0.04, seed:1.7,  emiss:0.05 },
+    venus:   { c1:0xefcf86, c2:0xa8753a, c3:0xfff1c0,
+               bands:0.55, swirl:0.85, noise:0.20, polar:0.0,
+               spot:0.0, spotLon:0.0, spotLat:0.0, spin:0.06, seed:3.1,  emiss:0.10 },
+    earth:   { c1:0x2a64bf, c2:0x2a7a36, c3:0xffffff,
+               bands:0.0, swirl:0.0, noise:1.30, polar:0.95,
+               spot:0.0, spotLon:0.0, spotLat:0.0, spin:0.18, seed:5.7,  emiss:0.06 },
+    mars:    { c1:0xc06237, c2:0x5a2a18, c3:0xfff5ee,
+               bands:0.0, swirl:0.0, noise:1.10, polar:0.75,
+               spot:0.0, spotLon:0.0, spotLat:0.0, spin:0.18, seed:8.3,  emiss:0.06 },
+    jupiter: { c1:0xd9b780, c2:0x7d5532, c3:0xc4422a,
+               bands:1.00, swirl:1.00, noise:0.18, polar:0.0,
+               spot:1.00, spotLon:1.20, spotLat:-0.36, spin:0.22, seed:11.2, emiss:0.08 },
+    saturn:  { c1:0xeacf91, c2:0x9c7e4c, c3:0xd9b16c,
+               bands:0.65, swirl:0.55, noise:0.16, polar:0.0,
+               spot:0.0, spotLon:0.0, spotLat:0.0, spin:0.20, seed:13.5, emiss:0.07 },
+    uranus:  { c1:0x9be0e6, c2:0x4d8f9a, c3:0xd6f0f4,
+               bands:0.30, swirl:0.30, noise:0.15, polar:0.0,
+               spot:0.0, spotLon:0.0, spotLat:0.0, spin:0.10, seed:17.7, emiss:0.06 },
+    neptune: { c1:0x325ad6, c2:0x162a78, c3:0xe6e6f0,
+               bands:0.45, swirl:0.55, noise:0.22, polar:0.0,
+               spot:0.55, spotLon:-1.6, spotLat:-0.45, spin:0.12, seed:19.3, emiss:0.06 },
+};
+
+// Approximate axial tilt (radians). Venus is retrograde (~177°), Uranus
+// is on its side (~98°) — those make a real visual difference up close.
+const PLANET_TILT_RAD = {
+    mercury:  0.034 * Math.PI / 180,
+    venus:  177.40 * Math.PI / 180,
+    earth:   23.44 * Math.PI / 180,
+    mars:    25.19 * Math.PI / 180,
+    jupiter:  3.13 * Math.PI / 180,
+    saturn:  26.73 * Math.PI / 180,
+    uranus:  97.77 * Math.PI / 180,
+    neptune: 28.32 * Math.PI / 180,
+};
+
+const planetUniforms = {};   // populated per-body for the tick loop
+
+function makePlanetMaterial(key) {
+    const look = PLANET_LOOK[key];
+    const c1 = new THREE.Color(look.c1);
+    const c2 = new THREE.Color(look.c2);
+    const c3 = new THREE.Color(look.c3);
+    const u = {
+        u_time:    { value: 0 },
+        u_c1:      { value: new THREE.Vector3(c1.r, c1.g, c1.b) },
+        u_c2:      { value: new THREE.Vector3(c2.r, c2.g, c2.b) },
+        u_c3:      { value: new THREE.Vector3(c3.r, c3.g, c3.b) },
+        u_bands:   { value: look.bands },
+        u_swirl:   { value: look.swirl },
+        u_noise:   { value: look.noise },
+        u_polar:   { value: look.polar },
+        u_spot:    { value: look.spot },
+        u_spotLon: { value: look.spotLon },
+        u_spotLat: { value: look.spotLat },
+        u_spin:    { value: look.spin },
+        u_seed:    { value: look.seed },
+        u_emiss:   { value: look.emiss },
+    };
+    planetUniforms[key] = u;
+    return new THREE.ShaderMaterial({ uniforms: u, vertexShader: planetVS, fragmentShader: planetFS });
+}
+
 for (const body of BODIES) {
     const m = new THREE.Mesh(
-        new THREE.SphereGeometry(body.size, 36, 36),
-        new THREE.MeshStandardMaterial({
-            color:body.color, emissive:body.color, emissiveIntensity:0.22,
-            roughness:0.72, metalness:0.10,
-        }),
+        new THREE.SphereGeometry(body.size, 64, 64),
+        makePlanetMaterial(body.key),
     );
+    // Apply axial tilt (z-rotation in scene, since y is the ecliptic normal).
+    const tilt = PLANET_TILT_RAD[body.key] || 0;
+    m.rotation.z = tilt;
     m.userData = { kind:'planet', key:body.key, label:body.name };
     scene.add(m);
     meshes[body.key] = m;
@@ -1622,9 +1825,10 @@ for (const body of BODIES) {
                 }`,
         });
         const ring = new THREE.Mesh(ringGeom, ringMat);
-        // Lay flat in ecliptic, then tilt to Saturn's obliquity
+        // Lay flat in Saturn's equatorial plane. The parent mesh
+        // already carries Saturn's 26.73° axial tilt, so the ring
+        // inherits the obliquity automatically.
         ring.rotation.x = Math.PI / 2;
-        ring.rotation.y = 26.73 * Math.PI / 180;
         m.add(ring);
     }
 }
@@ -3525,6 +3729,8 @@ function tick(now) {
     updateHoverRing(hoveredKey);
     sunUniforms.uTime.value  = now * 0.001;
     starUniforms.uTime.value = now * 0.001;
+    const tSec = now * 0.001;
+    for (const k in planetUniforms) planetUniforms[k].u_time.value = tSec;
     maybePostFieldRequest(now);
     updateArrows(now);
     maybePostStreamRequest(now);
