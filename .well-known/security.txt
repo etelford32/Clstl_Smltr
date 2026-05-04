@@ -1,0 +1,12 @@
+# Parker Physics App / Telford Projects LLC
+# Vulnerability disclosure contact, per RFC 9116.
+# If you've discovered a security issue, please report it via the email
+# below. We commit to acknowledging your report within 3 business days
+# and to keeping you informed as we work on a fix.
+
+Contact: mailto:security@parkerphysics.app
+Expires: 2027-05-01T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://parkerphysics.app/.well-known/security.txt
+Policy: https://parkerphysics.app/SECURITY.md
+Acknowledgments: https://parkerphysics.app/SECURITY.md#acknowledgments

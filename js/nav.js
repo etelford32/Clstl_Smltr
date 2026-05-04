@@ -154,6 +154,12 @@ export function initNav(activeId = '') {
     const nav = document.querySelector('nav');
     if (!nav) return;
 
+    // Lazy-load the cookie-consent banner — module ensures single-mount.
+    if (!window._ppConsentLoaded) {
+        window._ppConsentLoaded = true;
+        import('./cookie-consent.js').catch(() => { window._ppConsentLoaded = false; });
+    }
+
     const auth = _getAuth();
     const userTier = _tierLevel(auth?.plan, auth?.role);
     const isSignedIn = !!auth;
