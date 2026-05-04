@@ -229,22 +229,50 @@ function _onScroll() {
     }
 }
 
+// ── Consent gate ─────────────────────────────────────────────────────────────
+// GA4 + Supabase analytics only initialize after the user opts in via the
+// cookie-consent banner (window.ppConsent). Until then, _initGA / _initSupabase
+// are not called and any events buffered in memory are dropped on consent
+// withdrawal. See js/cookie-consent.js.
+
+function _hasAnalyticsConsent() {
+    try { return window.ppConsent?.has?.('analytics') === true; } catch (_) { return false; }
+}
+
+let _consentInitDone = false;
+
 // ── Core API ─────────────────────────────────────────────────────────────────
 
 class Analytics {
     constructor() {
-        _initGA();
-        const supaInit = _initSupabase();
+        const _initIfConsented = () => {
+            if (_consentInitDone || !_hasAnalyticsConsent()) return;
+            _consentInitDone = true;
+            _initGA();
+            const supaInit = _initSupabase();
+            setInterval(_flush, FLUSH_INTERVAL);
+            supaInit.then(() => {
+                if (_supabaseReady) {
+                    _heartbeat();
+                    _heartbeatTimer = setInterval(_heartbeat, HEARTBEAT_INTERVAL);
+                }
+            });
+        };
 
-        setInterval(_flush, FLUSH_INTERVAL);
-
-        // Start heartbeat after Supabase is ready
-        supaInit.then(() => {
-            if (_supabaseReady) {
-                _heartbeat();  // initial heartbeat
-                _heartbeatTimer = setInterval(_heartbeat, HEARTBEAT_INTERVAL);
-            }
-        });
+        // If consent is already on file from a prior session, init now;
+        // otherwise wait for the banner to grant it.
+        _initIfConsented();
+        if (typeof window !== 'undefined') {
+            window.addEventListener('pp-consent-changed', e => {
+                if (e?.detail?.analytics === true) {
+                    _initIfConsented();
+                } else if (_consentInitDone && !_hasAnalyticsConsent()) {
+                    // Consent withdrawn: stop heartbeat, drop buffered events.
+                    if (_heartbeatTimer) { clearInterval(_heartbeatTimer); _heartbeatTimer = null; }
+                    _buffer.splice(0, _buffer.length);
+                }
+            });
+        }
 
         if (typeof document !== 'undefined') {
             // Auto-fire page() exactly once per import. Manually-instrumented
