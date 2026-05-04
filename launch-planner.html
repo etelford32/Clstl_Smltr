@@ -611,6 +611,18 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
     font-size:.66rem; color:#889; line-height:1.55; font-style:italic;
     border-top:1px solid rgba(255,255,255,.06); padding-top:8px;
 }
+.lh-vehicle-pad {
+    font-size:.7rem; color:#cde; font-family:monospace;
+    background:rgba(0,200,200,.08);
+    border:1px solid rgba(0,200,200,.18);
+    border-radius:6px;
+    padding:6px 10px;
+    letter-spacing:.04em;
+}
+.lh-vehicle-pad-k {
+    color:#778; font-size:.58rem; text-transform:uppercase;
+    letter-spacing:.1em; margin-right:6px;
+}
 
 /* ─── Mobile tweaks ──────────────────────────────────── */
 @media (max-width:720px) {
@@ -787,6 +799,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
                     <div class="lh-vehicle-stat"><div class="lh-vehicle-stat-k">Liftoff mass</div><div class="lh-vehicle-stat-v">${esc(info.liftoff_mass_t)} t</div></div>
                     <div class="lh-vehicle-stat"><div class="lh-vehicle-stat-k">Payload (LEO)</div><div class="lh-vehicle-stat-v">${esc(info.leo_payload_t)} t</div></div>
                 </div>
+                ${info.pad ? `<div class="lh-vehicle-pad"><span class="lh-vehicle-pad-k">Pad</span> ${esc(info.pad)}</div>` : ''}
                 <div class="lh-vehicle-note">${esc(info.notes || '')}</div>
                 <div class="lh-vehicle-note" style="opacity:.7;font-size:.6rem">
                     Drag to orbit · scroll to zoom · use overlay buttons for preset views.

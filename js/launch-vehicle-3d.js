@@ -31,6 +31,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { buildStarship } from './launch-vehicle-starship.js';
+import { buildPad as buildPadInfra, tickBeacons } from './launch-pad-3d.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -520,82 +521,6 @@ function tickPlume(plume, t) {
     });
 }
 
-// ── Pad ──────────────────────────────────────────────────────────────────────
-// Mobile launcher platform stub + a stylized fixed service tower silhouette
-// + lightning masts. Just enough geometry to anchor the stack visually.
-
-function buildPad() {
-    const g = new THREE.Group();
-    g.name = 'Pad';
-
-    // MLP square deck
-    const deck = new THREE.Mesh(
-        new THREE.BoxGeometry(34, 1.2, 34),
-        mkMat(COLORS.pad, { roughness: 0.95 })
-    );
-    deck.position.y = -0.6;
-    deck.receiveShadow = true;
-    deck.castShadow = true;
-    g.add(deck);
-
-    // Flame trench slot (visual gap under the stack).
-    const trench = new THREE.Mesh(
-        new THREE.BoxGeometry(8, 1.4, 4),
-        new THREE.MeshBasicMaterial({ color: 0x000000 })
-    );
-    trench.position.y = -0.5;
-    g.add(trench);
-
-    // Fixed service structure — orange lattice tower aft of the stack.
-    const towerMat = mkMat(COLORS.tower, { roughness: 0.7 });
-    const towerH = 80;
-    const tower = new THREE.Group();
-    // Four corner columns
-    for (const [dx, dz] of [[-3.5,-3.5],[3.5,-3.5],[-3.5,3.5],[3.5,3.5]]) {
-        const col = new THREE.Mesh(
-            new THREE.BoxGeometry(0.7, towerH, 0.7),
-            towerMat
-        );
-        col.position.set(dx, towerH / 2, dz);
-        col.castShadow = true;
-        tower.add(col);
-    }
-    // Cross-bracing rings every 8 m
-    for (let y = 4; y < towerH; y += 6) {
-        for (const [a, b] of [
-            [[-3.5,-3.5,y],[ 3.5,-3.5,y]],
-            [[-3.5, 3.5,y],[ 3.5, 3.5,y]],
-            [[-3.5,-3.5,y],[-3.5, 3.5,y]],
-            [[ 3.5,-3.5,y],[ 3.5, 3.5,y]],
-            [[-3.5,-3.5,y],[ 3.5, 3.5,y]],   // diagonal
-        ]) {
-            const v0 = new THREE.Vector3(...a);
-            const v1 = new THREE.Vector3(...b);
-            const len = v0.distanceTo(v1);
-            const beam = new THREE.Mesh(
-                new THREE.BoxGeometry(0.18, 0.18, len),
-                towerMat
-            );
-            beam.position.copy(v0).lerp(v1, 0.5);
-            beam.lookAt(v1);
-            tower.add(beam);
-        }
-    }
-    // Lightning masts — 3 thin spikes on top
-    for (let i = 0; i < 3; i++) {
-        const mast = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.08, 0.08, 12, 8),
-            mkMat(COLORS.metalBright, { roughness: 0.4, metalness: 0.6 })
-        );
-        mast.position.set(-3.5 + i * 3.5, towerH + 6, -3.5);
-        tower.add(mast);
-    }
-    tower.position.set(-22, 0, 0);
-    g.add(tower);
-
-    return g;
-}
-
 // ── Stack assembly ───────────────────────────────────────────────────────────
 
 function buildShuttleStack() {
@@ -724,24 +649,32 @@ function buildStarfield() {
 }
 
 // ── Camera presets ───────────────────────────────────────────────────────────
-// Presets are *ratios* of the current vehicle's stack height, so the same
-// preset frames a 56 m shuttle and a 150 m starship equally well. setView()
-// re-evaluates these for the active vehicle each call.
+// Presets are *ratios* of the current vehicle's stack height, plus an offset
+// from the stack base, so the same preset frames a 56 m shuttle on its MLP
+// and a 150 m starship on the OLM equally well. setView() re-evaluates
+// these for the active vehicle each call.
+//
+// Each ratio is interpreted as:
+//   pos.y  →  baseY + posY * height
+//   target →  baseY + targetYFrac * height
+// where baseY is the world-Y of the vehicle's base (top of MLP / OLM table).
 
 const VIEW_RATIOS = {
-    threequarter: { pos: [0.95, 0.50, 1.20], targetY: 0.10 },
-    front:        { pos: [0.0,  0.32, 1.95], targetY: 0.10 },
-    side:         { pos: [1.95, 0.32, 0.0],  targetY: 0.10 },
-    top:          { pos: [0.0,  2.40, 0.001], targetY: 0.0  },
-    closeup:      { pos: [0.40, 0.22, 0.55], targetY: 0.18 },
+    threequarter: { pos: [1.10, 0.65, 1.40], targetYFrac: 0.45 },
+    front:        { pos: [0.0,  0.55, 2.20], targetYFrac: 0.45 },
+    side:         { pos: [2.20, 0.55, 0.0],  targetYFrac: 0.45 },
+    top:          { pos: [0.0,  3.00, 0.001], targetYFrac: 0.4 },
+    closeup:      { pos: [0.55, 0.35, 0.70], targetYFrac: 0.20 },
 };
 
-function viewForHeight(name, height) {
+function viewForVehicle(name, vehicle) {
     const v = VIEW_RATIOS[name];
     if (!v) return null;
+    const h = vehicle.height;
+    const baseY = vehicle.root.position.y;
     return {
-        pos:    v.pos.map(r => r * height),
-        target: [0, v.targetY * height, 0],
+        pos:    [v.pos[0] * h, baseY + v.pos[1] * h, v.pos[2] * h],
+        target: [0, baseY + v.targetYFrac * h, 0],
     };
 }
 
@@ -766,14 +699,17 @@ function tween(from, to, ms, onUpdate, onDone) {
 
 function buildShuttleVehicle() {
     const root = buildShuttleStack();
-    // Recenter so base sits at y ≈ 0.
-    root.position.y = -DIM.ET_LEN * 0.5 + 4;
+    // Internal stack origin already places ET/SRB bases at y=0. The LC-39A
+    // pad's MLP top sits at world y = 4.2, so put the stack origin there
+    // and the SRB skirts land flush on the deck.
+    root.position.y = 4.2;
     const height = DIM.ET_LEN;     // ~47 m; slightly under 56 m stack but
                                    // close enough for camera framing.
     return {
         root,
         plumes: root.userData.plumes,
         height,
+        padId: 'lc39a',
         info: {
             name:           'Space Shuttle (STS)',
             years:          '1981 — 2011',
@@ -783,6 +719,7 @@ function buildShuttleVehicle() {
             ship_engines:   '3 SSMEs',
             liftoff_mass_t: '2,030',
             leo_payload_t:  '27.5',
+            pad:            'KSC LC-39A',
             notes:          '135 missions, ISS construction, Hubble servicing.',
         },
     };
@@ -790,9 +727,10 @@ function buildShuttleVehicle() {
 
 function buildStarshipVehicle(variant = 'v2') {
     const built = buildStarship({ variant });
-    // Starship base sits at y=0 already; pad-frame the stack so the
-    // booster engines sit just above the pad deck.
-    built.root.position.y = 0;
+    // Starship sits on the OLM table at ~21 m above ground.
+    built.root.position.y = 21.4;
+    built.padId = 'mechazilla';
+    if (built.info) built.info.pad = 'SpaceX Stage 0 (Mechazilla)';
     return built;
 }
 
@@ -816,20 +754,23 @@ export function initVehicleCanvas(canvas, opts = {}) {
 
     const scene = new THREE.Scene();
     scene.background = buildSkyTexture();
+    // Atmospheric fog — pulls distant scenery into a soft purple-night haze
+    // and hides the hard edge where the ground plane cuts off.
+    scene.fog = new THREE.FogExp2(0x1a1428, 0.0025);
 
     const stars = buildStarfield();
     scene.add(stars);
 
     // Ground horizon disc — large, faintly glowing edge to suggest atmosphere.
     const horizon = new THREE.Mesh(
-        new THREE.RingGeometry(150, 1600, 96, 1),
+        new THREE.RingGeometry(280, 1600, 96, 1),
         new THREE.MeshBasicMaterial({
-            color: 0x3a2a4c, transparent: true, opacity: 0.35,
-            side: THREE.DoubleSide, depthWrite: false,
+            color: 0x3a2a4c, transparent: true, opacity: 0.45,
+            side: THREE.DoubleSide, depthWrite: false, fog: false,
         })
     );
     horizon.rotation.x = -Math.PI / 2;
-    horizon.position.y = -25;
+    horizon.position.y = -1;
     scene.add(horizon);
 
     const camera = new THREE.PerspectiveCamera(32, 1, 0.5, 8000);
@@ -854,9 +795,24 @@ export function initVehicleCanvas(canvas, opts = {}) {
     rim.position.set(0, 30, -80);
     scene.add(rim);
 
-    // ── Pad ────────────────────────────────────────────────────────────────
-    const pad = buildPad();
-    scene.add(pad);
+    // ── Pad (replaced per vehicle in setVehicle) ──────────────────────────
+    let padState = { root: null, beacons: [] };
+
+    function swapPad(padId) {
+        if (padState.root) {
+            scene.remove(padState.root);
+            padState.root.traverse(o => {
+                if (o.geometry) o.geometry.dispose();
+                if (o.material) {
+                    const mats = Array.isArray(o.material) ? o.material : [o.material];
+                    mats.forEach(m => m.dispose());
+                }
+            });
+        }
+        const built = buildPadInfra(padId || 'generic');
+        scene.add(built.root);
+        padState = built;
+    }
 
     // ── OrbitControls ──────────────────────────────────────────────────────
     const controls = new OrbitControls(camera, canvas);
@@ -886,19 +842,22 @@ export function initVehicleCanvas(canvas, opts = {}) {
         });
     }
 
-    function fitShadowCameraToVehicle(h) {
-        // Wrap the directional shadow camera around the current vehicle so
-        // it actually casts useful shadows on a 50 m or 150 m stack.
-        const r = h * 1.2;
+    function fitShadowCameraToVehicle(vehicle) {
+        // Wrap the directional shadow camera around the current vehicle +
+        // its pad so it actually casts useful shadows from a 56 m shuttle
+        // up to a 150 m+ starship + tower.
+        const h = vehicle.height;
+        const baseY = vehicle.root.position.y;
+        const r = h * 1.4;
         key.shadow.camera.left   = -r;
         key.shadow.camera.right  =  r;
-        key.shadow.camera.top    =  h * 1.4;
-        key.shadow.camera.bottom = -h * 0.3;
+        key.shadow.camera.top    =  baseY + h * 1.4;
+        key.shadow.camera.bottom = -10;
         key.shadow.camera.near   = 30;
-        key.shadow.camera.far    = h * 5;
+        key.shadow.camera.far    = h * 6;
         key.shadow.camera.updateProjectionMatrix();
         // Aim the key light at the middle of the stack.
-        key.target.position.set(0, h * 0.4, 0);
+        key.target.position.set(0, baseY + h * 0.5, 0);
         key.target.updateMatrixWorld();
         scene.add(key.target);
     }
@@ -917,16 +876,16 @@ export function initVehicleCanvas(canvas, opts = {}) {
         current = { id, variant, ...v };
         scene.add(v.root);
 
-        // Re-fit camera + shadow camera to the new height.
-        const view = viewForHeight('threequarter', v.height);
+        // Swap pad infrastructure to whichever site this vehicle flies from.
+        swapPad(v.padId);
+
+        // Re-fit camera + shadow camera to the new height + base.
+        const view = viewForVehicle('threequarter', current);
         camera.position.set(...view.pos);
         controls.target.set(...view.target);
         controls.minDistance = v.height * 0.45;
-        controls.maxDistance = v.height * 4.0;
-        fitShadowCameraToVehicle(v.height);
-
-        // Pad sits just below stack base regardless of vehicle.
-        pad.position.y = v.root.position.y - 1.0;
+        controls.maxDistance = v.height * 4.5;
+        fitShadowCameraToVehicle(current);
 
         if (typeof opts.onVehicleChange === 'function') {
             opts.onVehicleChange({ id, variant, info: v.info });
@@ -965,6 +924,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
         controls.update();
         stars.material.uniforms.uTime.value = t;
         for (const p of current.plumes) tickPlume(p, t);
+        tickBeacons(padState.beacons, t);
         renderer.render(scene, camera);
         rafId = requestAnimationFrame(tick);
     }
@@ -972,7 +932,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
 
     // ── Public API ─────────────────────────────────────────────────────────
     function setView(name) {
-        const view = viewForHeight(name, current.height);
+        const view = viewForVehicle(name, current);
         if (!view) return;
         const fromPos = camera.position.toArray();
         const fromTgt = controls.target.toArray();
@@ -986,7 +946,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
     function setPlume(on) {
         for (const p of current.plumes) p.visible = !!on;
     }
-    function setPad(on)        { pad.visible = !!on; }
+    function setPad(on)        { if (padState.root) padState.root.visible = !!on; }
     function setAutoRotate(on) { controls.autoRotate = !!on; }
 
     return {
