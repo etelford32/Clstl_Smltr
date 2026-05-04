@@ -138,6 +138,20 @@ export class OperationsVisuals {
         this._covSecondary = null;
         this._activeConj   = null;   // { assetTle, secondaryTle, tcaMs, missKm }
 
+        // TCA glyphs — static markers parked at the scene-frame
+        // (ECEF using TCA-time GMST) position the primary and
+        // secondary will occupy at TCA. They don't move as the user
+        // scrubs sim time; the actual sats orbit through them. Useful
+        // when an operator wants to "look at the encounter point"
+        // while inspecting the lead-up geometry.
+        this._tcaGroup = new THREE.Group();
+        this._tcaGroup.name = 'op-tca-glyph';
+        this._tcaGroup.visible = false;
+        this._scene.add(this._tcaGroup);
+        this._tcaPrimary   = null;
+        this._tcaSecondary = null;
+        this._tcaConnector = null;
+
         // Per-orbit risk trail (replaces the basic streak when set).
         this._riskLine = null;
         this._riskGeo  = null;
@@ -412,12 +426,14 @@ export class OperationsVisuals {
         if (!conj) {
             this._activeConj = null;
             this._covGroup.visible = false;
+            this._tcaGroup.visible = false;
             return;
         }
         this._activeConj = conj;
         this._ensureCovTubes();
         this._covGroup.visible = true;
         this._refreshCovTubes(timeBus.getState().simTimeMs);
+        this._refreshTcaGlyphs();
 
         provStore.set('conj.miss.combined', {
             value: conj.missKm,
@@ -490,6 +506,96 @@ export class OperationsVisuals {
 
         place(this._covPrimary,   c.assetTle);
         place(this._covSecondary, c.secondaryTle);
+    }
+
+    /* ─── TCA glyphs ─────────────────────────────────────── */
+
+    _ensureTcaGlyphs() {
+        if (this._tcaPrimary && this._tcaSecondary) return;
+        const buildPin = (color) => {
+            // Small wireframe sphere over a solid core — reads as
+            // "pinned location" against busy scenes without lighting.
+            const group = new THREE.Group();
+            const core = new THREE.Mesh(
+                new THREE.SphereGeometry(0.012, 12, 8),
+                new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85 }),
+            );
+            const ring = new THREE.Mesh(
+                new THREE.SphereGeometry(0.022, 18, 10),
+                new THREE.MeshBasicMaterial({
+                    color, wireframe: true, transparent: true, opacity: 0.4,
+                    depthWrite: false,
+                }),
+            );
+            core.frustumCulled = false;
+            ring.frustumCulled = false;
+            group.add(core);
+            group.add(ring);
+            this._tcaGroup.add(group);
+            return group;
+        };
+        this._tcaPrimary   = buildPin(0x00ffcc);   // asset
+        this._tcaSecondary = buildPin(0xff7099);   // debris
+
+        // Connector line drawn between the two pins so the encounter
+        // separation is visible at a glance.
+        const lineGeo = new THREE.BufferGeometry();
+        lineGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+        const lineMat = new THREE.LineBasicMaterial({
+            color: 0xffaa66, transparent: true, opacity: 0.55, depthWrite: false,
+        });
+        this._tcaConnector = new THREE.Line(lineGeo, lineMat);
+        this._tcaConnector.frustumCulled = false;
+        this._tcaGroup.add(this._tcaConnector);
+    }
+
+    /**
+     * Park the primary + secondary glyphs at the ECEF-frame position
+     * each will occupy at TCA. The marker is computed once per call
+     * (showConjunction) and stays in scene-frame so as the user
+     * scrubs sim time the actual sats orbit through the parked pins.
+     */
+    _refreshTcaGlyphs() {
+        const c = this._activeConj;
+        if (!c?.assetTle || !c?.secondaryTle || !Number.isFinite(c.tcaMs)) {
+            this._tcaGroup.visible = false;
+            return;
+        }
+        this._ensureTcaGlyphs();
+
+        const km = this._kmToScene;
+        const jdTca   = jdFromMs(c.tcaMs);
+        const gmstTca = geo.greenwichSiderealTimeFromJD(jdTca);
+
+        const placePin = (group, tle) => {
+            const tsinceMin = (jdTca - tleEpochToJd(tle)) * MIN_PER_DAY;
+            temeToScene(tle, tsinceMin, km, gmstTca, _scnA);
+            group.position.set(_scnA.x, _scnA.y, _scnA.z);
+            return _scnA.clone();
+        };
+
+        const pA = placePin(this._tcaPrimary,   c.assetTle);
+        const pB = placePin(this._tcaSecondary, c.secondaryTle);
+
+        // Connector line between the two pins.
+        const arr = this._tcaConnector.geometry.attributes.position.array;
+        arr[0] = pA.x; arr[1] = pA.y; arr[2] = pA.z;
+        arr[3] = pB.x; arr[4] = pB.y; arr[5] = pB.z;
+        this._tcaConnector.geometry.attributes.position.needsUpdate = true;
+        this._tcaConnector.geometry.computeBoundingSphere();
+
+        this._tcaGroup.visible = true;
+    }
+
+    /**
+     * Public toggle. Hides the glyph group without dropping the
+     * active conjunction so the b-plane / covariance tubes survive.
+     * Returns the new visibility state.
+     */
+    toggleTcaGlyph() {
+        if (!this._activeConj) return false;
+        this._tcaGroup.visible = !this._tcaGroup.visible;
+        return this._tcaGroup.visible;
     }
 
     /* ─── Per-orbit risk trail ─────────────────────────── */

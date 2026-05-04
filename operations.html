@@ -179,6 +179,91 @@ body {
     background:rgba(0,200,200,.06); padding:1px 6px; border-radius:3px;
 }
 
+/* ─── Globe picker tooltip + context menu ──────────────── */
+.op-pick-tooltip {
+    position: absolute;
+    z-index: 30;
+    pointer-events: none;
+    background: rgba(8, 14, 20, 0.92);
+    border: 1px solid rgba(0, 200, 200, 0.3);
+    border-radius: 5px;
+    padding: 6px 9px;
+    color: #cef;
+    font-size: .7rem;
+    font-family: inherit;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+    max-width: 280px;
+    line-height: 1.35;
+    backdrop-filter: blur(4px);
+}
+.op-pick-tooltip .op-pick-name {
+    color: #0ff; font-weight: 700;
+    margin-bottom: 2px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.op-pick-tooltip .op-pick-meta {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    color: #9bd; font-family: monospace; font-size: .65rem;
+}
+.op-pick-tooltip .op-pick-group {
+    color: #0fa;
+    background: rgba(0, 200, 200, 0.08);
+    padding: 0 4px; border-radius: 2px;
+}
+.op-pick-tooltip .op-pick-fleet {
+    color: #fc8;
+}
+.op-pick-tooltip .op-pick-hint {
+    margin-top: 4px;
+    color: #678;
+    font-size: .6rem;
+    border-top: 1px solid rgba(255,255,255,.06);
+    padding-top: 3px;
+}
+
+.op-pick-menu {
+    position: absolute;
+    z-index: 31;
+    background: rgba(8, 14, 20, 0.96);
+    border: 1px solid rgba(0, 200, 200, 0.3);
+    border-radius: 5px;
+    color: #cef;
+    font-size: .72rem;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.6);
+    min-width: 200px;
+    overflow: hidden;
+    backdrop-filter: blur(6px);
+}
+.op-pick-menu-head {
+    display: flex; align-items: baseline; gap: 6px;
+    padding: 6px 9px;
+    border-bottom: 1px solid rgba(255,255,255,.07);
+    background: rgba(0, 200, 200, 0.05);
+}
+.op-pick-menu-name {
+    color: #0ff; font-weight: 700;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    flex: 1; min-width: 0;
+}
+.op-pick-menu-id {
+    color: #678; font-family: monospace; font-size: .62rem;
+}
+.op-pick-menu-list {
+    list-style: none; margin: 0; padding: 4px 0;
+}
+.op-pick-menu-item {
+    padding: 6px 12px;
+    cursor: pointer;
+    color: #aab;
+    transition: background .12s, color .12s;
+}
+.op-pick-menu-item:hover,
+.op-pick-menu-item:focus {
+    background: rgba(0, 200, 200, 0.16);
+    color: #fff;
+    outline: none;
+}
+
 /* ─── B-plane inset (bottom-right of globe) ────────────── */
 #op-bplane {
     position: absolute;
@@ -1617,6 +1702,7 @@ import {
     mountMyFleet, mountDecayWatch, mountConjunctions, mountPropBudget,
 } from './js/operations/decision-deck.js';
 import { OperationsVisuals }  from './js/operations/visuals.js';
+import { mountGlobePicker }   from './js/operations/globe-picker.js';
 import * as bPlane            from './js/operations/b-plane.js';
 import * as densityMap        from './js/operations/density-map.js';
 import { mountAristotle }     from './js/operations/aristotle.js';
@@ -1857,7 +1943,7 @@ mountMyFleet(myFleet, {
     onSelectChange: (fn) => visuals.onSelectionChange(fn),
 });
 mountDecayWatch(myFleet);
-mountConjunctions(myFleet, fleet.tracker, {
+const conjDeck = mountConjunctions(myFleet, fleet.tracker, {
     onSelect:      (id)   => visuals.setSelectedAsset(id),
     onConjunction: (conj) => {
         bPlane.showConjunction(conj);
@@ -1866,6 +1952,23 @@ mountConjunctions(myFleet, fleet.tracker, {
 });
 
 bPlane.mountBPlane();
+
+/* ─── Mouse picking on the globe ──────────────────────── */
+// Hover for satellite info, click to select, right-click for the
+// add-to-fleet / screen / TCA-pin context menu. The picker is the
+// only thing in this file that touches every other operations module
+// — visuals (selection), myFleet (add/remove), conjDeck (rescreen).
+mountGlobePicker({
+    canvas:        document.getElementById('op-globe'),
+    camera:        globe.camera,
+    tracker:       fleet.tracker,
+    onSelect:      (id) => visuals.setSelectedAsset(id),
+    onAddFleet:    (id) => myFleet.add(id),
+    onRemoveFleet: (id) => myFleet.remove(id),
+    isInFleet:     (id) => myFleet.has(id),
+    onScreen:      ()   => conjDeck?.rescreen?.(),
+    onPinTca:      ()   => visuals.toggleTcaGlyph?.(),
+});
 densityMap.mountDensityMap(fleet.tracker);
 
 // Aristotle (SOCRATES) daily-conjunction feed. Clicking a primary or
