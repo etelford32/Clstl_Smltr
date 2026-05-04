@@ -1115,6 +1115,7 @@ import {
 } from './js/horizons.js';
 import { ASTEROID_EL } from './js/orbital-mechanics/nbody-init.js';
 import { elementsToState } from './js/orbital-mechanics/yoshida4.js';
+import { SATURN_MOONS, SATURN_R_KM, JUPITER_MOONS, JUPITER_R_KM } from './js/planet-moons.js';
 
 // ── Body table ───────────────────────────────────────────────────────
 const BODIES = [
@@ -1156,6 +1157,20 @@ const BODY_INFO = {
     vesta:   { mass:'2.59×10²⁰ kg',  radius:'263 km',     rot:'5.34 h',    tilt:'29°',     desc:'Bright differentiated asteroid.' },
     pallas:  { mass:'2.04×10²⁰ kg',  radius:'256 km',     rot:'7.81 h',    tilt:'84°',     desc:'Highly inclined main-belt body.' },
     hygiea:  { mass:'8.67×10¹⁹ kg',  radius:'215 km',     rot:'13.83 h',   tilt:'—',       desc:'Carbonaceous outer main-belt body.' },
+    // ── Jupiter Galilean moons (Laplace 1:2:4 resonance for Io:Europa:Ganymede) ─
+    io:        { mass:'8.93×10²² kg', radius:'1,821 km',   rot:'1.77 d',     tilt:'0°',      desc:'Most volcanically active body in the solar system · sulphur plumes.' },
+    europa:    { mass:'4.80×10²² kg', radius:'1,561 km',   rot:'3.55 d',     tilt:'0°',      desc:'Smooth ice shell over a global subsurface ocean · astrobiology target.' },
+    ganymede:  { mass:'1.482×10²³ kg', radius:'2,634 km',   rot:'7.15 d',     tilt:'0°',      desc:'Largest moon in the solar system · only moon with a magnetic field.' },
+    callisto:  { mass:'1.076×10²³ kg', radius:'2,410 km',   rot:'16.69 d',    tilt:'0°',      desc:'Most heavily cratered body in the solar system · ancient icy crust.' },
+    // ── Saturn major moons ────────────────────────────────────────────
+    mimas:     { mass:'3.75×10¹⁹ kg', radius:'198 km',     rot:'0.94 d',     tilt:'0°',      desc:'Innermost large moon · Herschel "Death Star" crater.' },
+    enceladus: { mass:'1.08×10²⁰ kg', radius:'252 km',     rot:'1.37 d',     tilt:'0°',      desc:'Cryovolcanic plumes from south-polar tiger stripes.' },
+    tethys:    { mass:'6.18×10²⁰ kg', radius:'533 km',     rot:'1.89 d',     tilt:'0°',      desc:'Icy moon dominated by the giant Odysseus crater.' },
+    dione:     { mass:'1.10×10²¹ kg', radius:'561 km',     rot:'2.74 d',     tilt:'0°',      desc:'Wispy trailing-hemisphere ice cliffs.' },
+    rhea:      { mass:'2.31×10²¹ kg', radius:'764 km',     rot:'4.52 d',     tilt:'0°',      desc:'2nd-largest Saturnian moon · ~75% water ice.' },
+    titan:     { mass:'1.345×10²³ kg', radius:'2,575 km',   rot:'15.95 d',    tilt:'0°',      desc:'Thick N₂ atmosphere · methane lakes · larger than Mercury.' },
+    hyperion:  { mass:'5.62×10¹⁸ kg', radius:'135 km',     rot:'chaotic',    tilt:'—',       desc:'Tumbling sponge-like surface · non-synchronous rotation.' },
+    iapetus:   { mass:'1.81×10²¹ kg', radius:'736 km',     rot:'79.32 d',    tilt:'7.5°',    desc:'Two-tone surface · mysterious equatorial ridge.' },
 };
 // Heliocentric position of an asteroid at any JD via two-body Kepler.
 const _astStateScratch = { a:0, e:0, i:0, node:0, argp:0, M0:0, epochJd:0, mu_eff:0 };
@@ -1570,14 +1585,217 @@ function makeAtmosphere(color, size, intensity = 1.0) {
     );
 }
 
+// ── Procedural planet shader ─────────────────────────────────────────
+// One unified ShaderMaterial drives every planet — per-body looks come
+// from a small uniform pack (c1/c2/c3 colours + band/noise/polar/spot
+// dials). The fragment shader builds spherical UVs from object-space
+// position, runs 5-octave fbm for surface noise, lays down zonal cloud
+// bands with subtle latitudinal swirl, drops in a Great-Red-Spot oval
+// for Jupiter/Neptune, and dusts on polar caps for Earth/Mars. A slow
+// u_time-driven rotation keeps the planets visibly "alive" when the
+// God-Mode camera zooms in close.
+const planetVS = /* glsl */`
+    varying vec3 vWorldNormal;
+    varying vec3 vWorldPos;
+    varying vec3 vObjPos;
+    void main() {
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vWorldPos    = wp.xyz;
+        vWorldNormal = normalize(mat3(modelMatrix) * normal);
+        vObjPos      = position;
+        gl_Position  = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }`;
+
+const planetFS = /* glsl */`
+    uniform float u_time;
+    uniform vec3  u_c1;       // base / ocean / zone
+    uniform vec3  u_c2;       // detail / land / belt
+    uniform vec3  u_c3;       // accent (storm / cap)
+    uniform float u_bands;    // zonal-band intensity 0..1
+    uniform float u_swirl;    // band lat swirl 0..1
+    uniform float u_noise;    // surface fbm intensity 0..1.5
+    uniform float u_polar;    // polar-cap intensity 0..1
+    uniform float u_spot;     // GRS-style oval intensity 0..1
+    uniform float u_spotLon;  // longitude (rad) of the spot centre
+    uniform float u_spotLat;  // latitude  (rad) of the spot centre
+    uniform float u_spin;     // rad / second of texture rotation
+    uniform float u_seed;     // per-planet phase offset
+    uniform float u_emiss;    // self-glow (Sun-side ambient floor)
+
+    varying vec3 vWorldNormal;
+    varying vec3 vWorldPos;
+    varying vec3 vObjPos;
+
+    float hash(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+    float vnoise(vec3 p) {
+        vec3 i = floor(p), f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        return mix(
+            mix(mix(hash(i),                hash(i + vec3(1,0,0)), f.x),
+                mix(hash(i + vec3(0,1,0)),  hash(i + vec3(1,1,0)), f.x), f.y),
+            mix(mix(hash(i + vec3(0,0,1)),  hash(i + vec3(1,0,1)), f.x),
+                mix(hash(i + vec3(0,1,1)),  hash(i + vec3(1,1,1)), f.x), f.y),
+            f.z);
+    }
+    float fbm(vec3 p) {
+        float v = 0.0, a = 0.5;
+        for (int i = 0; i < 5; i++) {
+            v += a * vnoise(p);
+            p *= 2.05;
+            a *= 0.5;
+        }
+        return v;
+    }
+
+    void main() {
+        // Object-space sphere position → rotated to give time-varying texture
+        vec3 op = normalize(vObjPos);
+        float ang = u_time * u_spin;
+        float ca = cos(ang), sa = sin(ang);
+        vec3 rp = vec3(op.x * ca - op.z * sa, op.y, op.x * sa + op.z * ca);
+
+        float lon = atan(rp.z, rp.x);
+        float lat = asin(clamp(rp.y, -1.0, 1.0));
+
+        vec3 col = u_c1;
+
+        // ── Surface noise (continents, mare, craters) ───────────────────
+        if (u_noise > 0.0) {
+            float n = fbm(rp * 3.2 + vec3(u_seed));
+            float h = fbm(rp * 8.5 + vec3(u_seed * 1.7));
+            float t = clamp(n * 0.7 + h * 0.3, 0.0, 1.0);
+            col = mix(u_c2, u_c1, smoothstep(0.34, 0.62, t));
+            col = mix(col, u_c1 * 1.18, smoothstep(0.62, 0.85, t) * u_noise);
+            // Tiny dark speckle for crater fields / mare — only when u_noise high
+            float sp = step(0.78, fbm(rp * 22.0 + vec3(u_seed * 2.3)));
+            col = mix(col, u_c2 * 0.65, sp * u_noise * 0.35);
+        }
+
+        // ── Horizontal cloud bands (Jupiter, Saturn, Venus, ice giants) ─
+        if (u_bands > 0.0) {
+            float swirlN = fbm(vec3(lat * 4.5, lon * 1.5 + u_time * 0.04, u_seed));
+            float bandLat = lat + u_swirl * 0.35 * (swirlN - 0.5);
+            float wide   = 0.5 + 0.5 * sin(bandLat * 14.0 + u_seed);
+            float fine   = 0.5 + 0.5 * sin(bandLat * 38.0 - u_seed * 0.7);
+            float band   = mix(wide, fine, 0.30);
+            // Small turbulent eddies along the band
+            float eddy = fbm(vec3(lon * 4.0, lat * 18.0, u_time * 0.10 + u_seed));
+            band = clamp(band * 0.85 + eddy * 0.20, 0.0, 1.0);
+            col = mix(col, u_c2, band * u_bands * 0.78);
+        }
+
+        // ── Storm oval (Jupiter Great Red Spot, Neptune Dark Spot) ──────
+        if (u_spot > 0.0) {
+            float dlon = lon - u_spotLon - u_time * u_spin * 0.95;
+            dlon = mod(dlon + 3.14159265, 6.28318530) - 3.14159265;
+            float dlat = lat - u_spotLat;
+            float d = sqrt(dlon * dlon * 0.55 + dlat * dlat * 2.6);
+            float core = smoothstep(0.32, 0.04, d);
+            float swirl = 0.5 + 0.5 * sin(atan(dlat, dlon) * 3.0 + u_time * 0.6);
+            col = mix(col, u_c3 * (0.85 + 0.25 * swirl), core * u_spot);
+        }
+
+        // ── Polar ice caps (Earth, Mars) ────────────────────────────────
+        if (u_polar > 0.0) {
+            float alat = abs(lat);
+            float ragged = fbm(rp * 7.5) * 0.18;
+            float pc = smoothstep(1.05, 1.40, alat + ragged);
+            col = mix(col, vec3(0.95, 0.97, 1.0), pc * u_polar);
+        }
+
+        // ── Lighting: diffuse from Sun at origin, with limb darkening ───
+        vec3  nrm    = normalize(vWorldNormal);
+        vec3  toSun  = normalize(-vWorldPos);
+        vec3  toCam  = normalize(cameraPosition - vWorldPos);
+        float sunFace = max(dot(nrm, toSun), 0.0);
+        col *= (u_emiss * 0.45 + 0.10) + 0.90 * sunFace;
+
+        // Limb darkening — small dimming towards the silhouette
+        float facing = max(dot(nrm, toCam), 0.0);
+        col *= 1.0 - 0.30 * pow(1.0 - facing, 2.6);
+
+        gl_FragColor = vec4(col, 1.0);
+    }`;
+
+// Per-planet shader pack. Colors are linearly weighted (hex inputs are
+// converted to vec3 via THREE.Color). spotLon/Lat in radians (only used
+// when u_spot > 0). u_spin is in rad/s of texture rotation — small
+// values keep the spin discreet at default zoom but visible up close.
+const PLANET_LOOK = {
+    mercury: { c1:0xa49a90, c2:0x4a423b, c3:0xc9c1b6,
+               bands:0.0, swirl:0.0, noise:1.10, polar:0.0,
+               spot:0.0, spotLon:0.0, spotLat:0.0, spin:0.04, seed:1.7,  emiss:0.05 },
+    venus:   { c1:0xefcf86, c2:0xa8753a, c3:0xfff1c0,
+               bands:0.55, swirl:0.85, noise:0.20, polar:0.0,
+               spot:0.0, spotLon:0.0, spotLat:0.0, spin:0.06, seed:3.1,  emiss:0.10 },
+    earth:   { c1:0x2a64bf, c2:0x2a7a36, c3:0xffffff,
+               bands:0.0, swirl:0.0, noise:1.30, polar:0.95,
+               spot:0.0, spotLon:0.0, spotLat:0.0, spin:0.18, seed:5.7,  emiss:0.06 },
+    mars:    { c1:0xc06237, c2:0x5a2a18, c3:0xfff5ee,
+               bands:0.0, swirl:0.0, noise:1.10, polar:0.75,
+               spot:0.0, spotLon:0.0, spotLat:0.0, spin:0.18, seed:8.3,  emiss:0.06 },
+    jupiter: { c1:0xd9b780, c2:0x7d5532, c3:0xc4422a,
+               bands:1.00, swirl:1.00, noise:0.18, polar:0.0,
+               spot:1.00, spotLon:1.20, spotLat:-0.36, spin:0.22, seed:11.2, emiss:0.08 },
+    saturn:  { c1:0xeacf91, c2:0x9c7e4c, c3:0xd9b16c,
+               bands:0.65, swirl:0.55, noise:0.16, polar:0.0,
+               spot:0.0, spotLon:0.0, spotLat:0.0, spin:0.20, seed:13.5, emiss:0.07 },
+    uranus:  { c1:0x9be0e6, c2:0x4d8f9a, c3:0xd6f0f4,
+               bands:0.30, swirl:0.30, noise:0.15, polar:0.0,
+               spot:0.0, spotLon:0.0, spotLat:0.0, spin:0.10, seed:17.7, emiss:0.06 },
+    neptune: { c1:0x325ad6, c2:0x162a78, c3:0xe6e6f0,
+               bands:0.45, swirl:0.55, noise:0.22, polar:0.0,
+               spot:0.55, spotLon:-1.6, spotLat:-0.45, spin:0.12, seed:19.3, emiss:0.06 },
+};
+
+// Approximate axial tilt (radians). Venus is retrograde (~177°), Uranus
+// is on its side (~98°) — those make a real visual difference up close.
+const PLANET_TILT_RAD = {
+    mercury:  0.034 * Math.PI / 180,
+    venus:  177.40 * Math.PI / 180,
+    earth:   23.44 * Math.PI / 180,
+    mars:    25.19 * Math.PI / 180,
+    jupiter:  3.13 * Math.PI / 180,
+    saturn:  26.73 * Math.PI / 180,
+    uranus:  97.77 * Math.PI / 180,
+    neptune: 28.32 * Math.PI / 180,
+};
+
+const planetUniforms = {};   // populated per-body for the tick loop
+
+function makePlanetMaterial(key) {
+    const look = PLANET_LOOK[key];
+    const c1 = new THREE.Color(look.c1);
+    const c2 = new THREE.Color(look.c2);
+    const c3 = new THREE.Color(look.c3);
+    const u = {
+        u_time:    { value: 0 },
+        u_c1:      { value: new THREE.Vector3(c1.r, c1.g, c1.b) },
+        u_c2:      { value: new THREE.Vector3(c2.r, c2.g, c2.b) },
+        u_c3:      { value: new THREE.Vector3(c3.r, c3.g, c3.b) },
+        u_bands:   { value: look.bands },
+        u_swirl:   { value: look.swirl },
+        u_noise:   { value: look.noise },
+        u_polar:   { value: look.polar },
+        u_spot:    { value: look.spot },
+        u_spotLon: { value: look.spotLon },
+        u_spotLat: { value: look.spotLat },
+        u_spin:    { value: look.spin },
+        u_seed:    { value: look.seed },
+        u_emiss:   { value: look.emiss },
+    };
+    planetUniforms[key] = u;
+    return new THREE.ShaderMaterial({ uniforms: u, vertexShader: planetVS, fragmentShader: planetFS });
+}
+
 for (const body of BODIES) {
     const m = new THREE.Mesh(
-        new THREE.SphereGeometry(body.size, 36, 36),
-        new THREE.MeshStandardMaterial({
-            color:body.color, emissive:body.color, emissiveIntensity:0.22,
-            roughness:0.72, metalness:0.10,
-        }),
+        new THREE.SphereGeometry(body.size, 64, 64),
+        makePlanetMaterial(body.key),
     );
+    // Apply axial tilt (z-rotation in scene, since y is the ecliptic normal).
+    const tilt = PLANET_TILT_RAD[body.key] || 0;
+    m.rotation.z = tilt;
     m.userData = { kind:'planet', key:body.key, label:body.name };
     scene.add(m);
     meshes[body.key] = m;
@@ -1622,10 +1840,91 @@ for (const body of BODIES) {
                 }`,
         });
         const ring = new THREE.Mesh(ringGeom, ringMat);
-        // Lay flat in ecliptic, then tilt to Saturn's obliquity
+        // Lay flat in Saturn's equatorial plane. The parent mesh
+        // already carries Saturn's 26.73° axial tilt, so the ring
+        // inherits the obliquity automatically.
         ring.rotation.x = Math.PI / 2;
-        ring.rotation.y = 26.73 * Math.PI / 180;
         m.add(ring);
+
+    }
+}
+
+// ── Moon system builder ──────────────────────────────────────────────
+// Shared infrastructure for any planet's moon system.  Stores moon
+// meshes in `moonMeshes` keyed by moon name and registers each moon in
+// the global `meshes` / BODY_SIZE_BY_KEY maps so the follow-camera,
+// hover-ring and selection-ring code paths work without modification.
+//
+// Orbit-scale formula uses a fractional-power compression so the inner
+// moons cluster near the planet (just outside any ring system) and the
+// far outer moons (Iapetus at ~59 R_sat real) still stay on-screen.
+const J2000_JD = 2451545.0;
+const moonMeshes = {};                    // key → { mesh, cfg, orbitR, primary, ringMesh }
+const moonsByPrimary = {};                // primary planet key → array of moon keys
+
+function buildMoonSystem(parentMesh, parentSceneR, moonTable, planetRealR_km, primaryKey) {
+    moonsByPrimary[primaryKey] = [];
+    for (const [key, cfg] of Object.entries(moonTable)) {
+        // Visual orbit radius — see comment block above for the formula.
+        const realRatio = cfg.a_km / planetRealR_km;
+        const orbitR    = parentSceneR * Math.pow(realRatio, 0.45) * 1.8;
+        const moonR     = parentSceneR * cfg.vis_scale;
+
+        const mesh = new THREE.Mesh(
+            new THREE.SphereGeometry(moonR, 18, 18),
+            new THREE.MeshStandardMaterial({
+                color:             cfg.color,
+                emissive:          cfg.color,
+                emissiveIntensity: 0.10,
+                roughness:         0.85,
+                metalness:         0.0,
+            }),
+        );
+        const label = key.charAt(0).toUpperCase() + key.slice(1);
+        mesh.userData = { kind:'moon', key, primary:primaryKey, label };
+        parentMesh.add(mesh);
+
+        // Faint orbit ring in the local equatorial plane (XZ).
+        const N = 96;
+        const pos = new Float32Array(N * 3);
+        for (let i = 0; i < N; i++) {
+            const a = (i / N) * Math.PI * 2;
+            pos[i*3]     = orbitR * Math.cos(a);
+            pos[i*3 + 1] = 0;
+            pos[i*3 + 2] = orbitR * Math.sin(a);
+        }
+        const ringGeo = new THREE.BufferGeometry();
+        ringGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+        const ringMat = new THREE.LineBasicMaterial({
+            color: cfg.color, transparent:true, opacity:0.20, depthWrite:false,
+        });
+        const ringMesh = new THREE.LineLoop(ringGeo, ringMat);
+        parentMesh.add(ringMesh);
+
+        moonMeshes[key] = { mesh, cfg, orbitR, primary:primaryKey, ringMesh, parentSceneR };
+        moonsByPrimary[primaryKey].push(key);
+
+        // Register so follow-camera and indicator rings find the moon mesh.
+        meshes[key]            = mesh;
+        BODY_SIZE_BY_KEY[key]  = moonR;
+    }
+}
+
+function updateMoons(jd) {
+    const dt_d = jd - J2000_JD;
+    for (const key in moonMeshes) {
+        const { mesh, cfg, orbitR } = moonMeshes[key];
+        // Mean motion (deg/day). Negative period = retrograde.
+        const n_dpd = 360 / cfg.period_d;
+        const L = ((cfg.L0_deg + n_dpd * dt_d) % 360 + 360) % 360;
+        const Lr = L * Math.PI / 180;
+        // Inclination to parent equator — small for Saturn moons, except Iapetus (7.5°).
+        const incl = (cfg.incl_deg || 0) * Math.PI / 180;
+        const cI = Math.cos(incl), sI = Math.sin(incl);
+        const x0 = orbitR * Math.cos(Lr);
+        const z0 = orbitR * Math.sin(Lr);
+        // Tilt around X axis so non-zero inclination shows up subtly.
+        mesh.position.set(x0, -z0 * sI, z0 * cI);
     }
 }
 
@@ -1720,6 +2019,7 @@ const BODY_SIZE_BY_KEY = { sun: 0.95 };
 for (const b of BODIES)    BODY_SIZE_BY_KEY[b.key] = b.size;
 for (const a of ASTEROIDS) BODY_SIZE_BY_KEY[a.key] = a.size;
 
+const _ringWP = new THREE.Vector3();
 function updateSelectionRing() {
     if (!selected || !meshes[selected.key]) {
         selectionRing.visible = false;
@@ -1728,7 +2028,8 @@ function updateSelectionRing() {
     const m = meshes[selected.key];
     const s = (BODY_SIZE_BY_KEY[selected.key] || 0.18) * 1.95;
     selectionRing.scale.setScalar(s);
-    selectionRing.position.copy(m.position);
+    m.getWorldPosition(_ringWP);
+    selectionRing.position.copy(_ringWP);
     selectionRing.lookAt(camera.position);
     selectionRing.visible = true;
 }
@@ -1741,7 +2042,8 @@ function updateHoverRing(key) {
     const m = meshes[key];
     const s = (BODY_SIZE_BY_KEY[key] || 0.18) * 2.20;
     hoverRing.scale.setScalar(s);
-    hoverRing.position.copy(m.position);
+    m.getWorldPosition(_ringWP);
+    hoverRing.position.copy(_ringWP);
     hoverRing.lookAt(camera.position);
     hoverRing.visible = true;
 }
@@ -1776,7 +2078,9 @@ legend.innerHTML =
         `<span class="lg" style="opacity:.75"><span class="dt" style="background:#${a.color.toString(16).padStart(6,'0')}; width:6px; height:6px"></span>${a.name}</span>`
     ).join('') +
     '<span class="lg" style="opacity:.75; margin-left:6px;"><span class="dt" style="background:#6affc8; width:7px; height:7px; clip-path:polygon(50% 0,100% 100%,0 100%)"></span>L4</span>' +
-    '<span class="lg" style="opacity:.75"><span class="dt" style="background:#ffae6a; width:7px; height:7px; clip-path:polygon(50% 0,100% 100%,0 100%)"></span>L5</span>';
+    '<span class="lg" style="opacity:.75"><span class="dt" style="background:#ffae6a; width:7px; height:7px; clip-path:polygon(50% 0,100% 100%,0 100%)"></span>L5</span>' +
+    '<span class="lg" style="opacity:.65; margin-left:6px;"><span class="dt" style="background:#d9c8a5; width:5px; height:5px; box-shadow:0 0 4px #d9c8a5"></span>Galilean moons (zoom in)</span>' +
+    '<span class="lg" style="opacity:.65;"><span class="dt" style="background:#d9aa55; width:5px; height:5px; box-shadow:0 0 4px #d9aa55"></span>Saturn moons (zoom in)</span>';
 
 // ── Body picker + element table ──────────────────────────────────────
 const elBodyGrid = document.getElementById('tm-body-grid');
@@ -2419,6 +2723,8 @@ function updatePositions(jd) {
         for (const body of ALL_BODIES) refreshOrbitRing(body, jd);
         lastRingRefreshJd = jd;
     }
+    // Moons (Saturn for now) — local positions in their primary's frame.
+    if (typeof updateMoons === 'function') updateMoons(jd);
 }
 
 // ── HUD update ───────────────────────────────────────────────────────
@@ -2564,6 +2870,7 @@ const pickables = () => {
     const list = [meshes.sun];
     for (const b of BODIES)    list.push(meshes[b.key]);
     for (const a of ASTEROIDS) list.push(meshes[a.key]);
+    for (const k in moonMeshes) list.push(moonMeshes[k].mesh);
     if (lagMarkers.l4.visible) list.push(lagMarkers.l4);
     if (lagMarkers.l5.visible) list.push(lagMarkers.l5);
     return list;
@@ -2633,6 +2940,27 @@ renderer.domElement.addEventListener('click', ev => {
                 return { x:p.x_AU, y:p.y_AU, z:p.z_AU };
             },
         };
+    } else if (ud.kind === 'moon') {
+        const moonKey  = ud.key;
+        const primary  = ud.primary;
+        const _wp = new THREE.Vector3();
+        grav.pinned = {
+            kind:    'moon',
+            key:     moonKey,
+            primary,
+            label:   `${BODY_LABEL[primary]} · ${BODY_LABEL[moonKey] || ud.label}`,
+            getAuPos: jd => {
+                // Moon world position → heliocentric ecliptic AU.
+                // Parent planet's world position drives the bulk of the
+                // motion; the moon offset (≪ 1 scene unit) is a small
+                // local correction.
+                const mm = moonMeshes[moonKey];
+                if (!mm) return { x:0, y:0, z:0 };
+                mm.mesh.getWorldPosition(_wp);
+                const au = sceneToAu(_wp.x, _wp.y, _wp.z);
+                return { x:au.x, y:au.y, z:au.z };
+            },
+        };
     }
 });
 
@@ -2669,6 +2997,19 @@ for (const a of ASTEROIDS) BODY_COLOR[a.key] = '#' + a.color.toString(16).padSta
 const BODY_LABEL = Object.fromEntries(BODIES.map(b => [b.key, b.name]));
 BODY_LABEL.sun = 'Sun';
 for (const a of ASTEROIDS) BODY_LABEL[a.key] = a.name;
+
+// Build outer-planet moon systems now that the lookup tables exist.
+// Moons are children of their primary's mesh, so they inherit that
+// planet's axial tilt and orbit in its equatorial plane.
+buildMoonSystem(meshes.jupiter, BODY_SIZE_BY_KEY.jupiter, JUPITER_MOONS, JUPITER_R_KM, 'jupiter');
+buildMoonSystem(meshes.saturn,  BODY_SIZE_BY_KEY.saturn,  SATURN_MOONS,  SATURN_R_KM,  'saturn');
+for (const moonKey in moonMeshes) {
+    const cfg = moonMeshes[moonKey].cfg;
+    const lbl = moonMeshes[moonKey].mesh.userData.label;
+    BODY_LABEL[moonKey] = lbl;
+    BODY_COLOR[moonKey] = '#' + cfg.color.toString(16).padStart(6, '0');
+    PERIOD_D[moonKey]   = cfg.period_d;
+}
 
 function fmtSci(x, sig = 3) {
     if (!isFinite(x)) return '—';
@@ -3525,6 +3866,8 @@ function tick(now) {
     updateHoverRing(hoveredKey);
     sunUniforms.uTime.value  = now * 0.001;
     starUniforms.uTime.value = now * 0.001;
+    const tSec = now * 0.001;
+    for (const k in planetUniforms) planetUniforms[k].u_time.value = tSec;
     maybePostFieldRequest(now);
     updateArrows(now);
     maybePostStreamRequest(now);
@@ -3733,9 +4076,13 @@ function applyPreset(name) {
 function frameBody(key, { distFactor = 8, dur = 0.65 } = {}) {
     const m = meshes[key];
     if (!m) return;
-    const pos = m.position.clone();
+    const pos = new THREE.Vector3();
+    m.getWorldPosition(pos);   // world-space (moons are children of their primary)
     const r   = (BODY_SIZE_BY_KEY[key] || 0.18);
-    const dist = Math.max(2.5, r * distFactor + 4);
+    // Moons need a tighter approach because their visual radius is small
+    // and they may sit close to a much-brighter parent planet.
+    const isMoon = !!(typeof moonMeshes !== 'undefined' && moonMeshes[key]);
+    const dist = Math.max(isMoon ? 1.0 : 2.5, r * distFactor + (isMoon ? 1.2 : 4));
     // Approach from a 3/4 angle aligned with the body's heliocentric radial
     // so the Sun stays in frame and we don't end up backlit on the dark side.
     const radHor = new THREE.Vector3(pos.x, 0, pos.z);
@@ -3760,22 +4107,31 @@ function setFollow(key) {
 
 function toggleFollowSelected() {
     if (camRig.followKey) { setFollow(null); return; }
-    const key = (selected && selected.key) || 'earth';
+    // If the user has clicked a moon, follow that moon. Otherwise fall
+    // back to the body-picker selection.
+    let key;
+    if (typeof grav !== 'undefined' && grav.pinned && grav.pinned.kind === 'moon') {
+        key = grav.pinned.key;
+    } else {
+        key = (selected && selected.key) || 'earth';
+    }
     setFollow(key);
     frameBody(key, { distFactor: 7.0, dur: 0.65 });
 }
 
 // Slide the target — and the camera with it — so the orbit is around the
 // moving body. The user can still drag/zoom around the new pivot.
+const _followWP = new THREE.Vector3();
 function updateFollow() {
     if (!camRig.followKey || camRig.tween) return;
     const m = meshes[camRig.followKey];
     if (!m) return;
-    const dx = m.position.x - controls.target.x;
-    const dy = m.position.y - controls.target.y;
-    const dz = m.position.z - controls.target.z;
+    m.getWorldPosition(_followWP);   // moons are children of their primary
+    const dx = _followWP.x - controls.target.x;
+    const dy = _followWP.y - controls.target.y;
+    const dz = _followWP.z - controls.target.z;
     if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) < 1e-9) return;
-    controls.target.set(m.position.x, m.position.y, m.position.z);
+    controls.target.set(_followWP.x, _followWP.y, _followWP.z);
     camera.position.x += dx;
     camera.position.y += dy;
     camera.position.z += dz;

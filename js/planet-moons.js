@@ -77,17 +77,40 @@ export const PLANET_SPIN = {
 // vis_scale: visual radius scale factor (moons are tiny at solar system scale)
 
 export const JUPITER_MOONS = {
-    io:       { a_km:  421_800, period_d:  1.769,  L0_deg: 106.1, incl_deg: 0.04, color: 0xccbb44, vis_scale: 0.18 },
-    europa:   { a_km:  671_100, period_d:  3.551,  L0_deg: 176.6, incl_deg: 0.47, color: 0xc8bba0, vis_scale: 0.15 },
-    ganymede: { a_km: 1_070_400, period_d:  7.155, L0_deg:  43.6, incl_deg: 0.21, color: 0xaa9988, vis_scale: 0.22 },
-    callisto: { a_km: 1_882_700, period_d: 16.689, L0_deg: 260.0, incl_deg: 0.51, color: 0x776655, vis_scale: 0.20 },
+    io:       { a_km:   421_800, period_d:  1.7691, L0_deg: 106.1, incl_deg: 0.04, color: 0xe8d65f, vis_scale: 0.10, r_km: 1821,
+                desc: 'Most volcanically active body in the solar system · sulphur surface' },
+    europa:   { a_km:   671_100, period_d:  3.5512, L0_deg: 176.6, incl_deg: 0.47, color: 0xd9c8a5, vis_scale: 0.09, r_km: 1561,
+                desc: 'Smooth ice shell over a global subsurface ocean · prime astrobiology target' },
+    ganymede: { a_km: 1_070_400, period_d:  7.1546, L0_deg:  43.6, incl_deg: 0.21, color: 0x9b8a78, vis_scale: 0.13, r_km: 2634,
+                desc: 'Largest moon in the solar system · only moon with a magnetic field' },
+    callisto: { a_km: 1_882_700, period_d: 16.6890, L0_deg: 260.0, incl_deg: 0.51, color: 0x6e5a48, vis_scale: 0.12, r_km: 2410,
+                desc: 'Most cratered body in the solar system · old, dark, icy crust' },
 };
+// Jupiter equatorial radius (km) — used for the moon orbit-scale conversion.
+export const JUPITER_R_KM = 71_492;
 
 export const SATURN_MOONS = {
-    titan:  { a_km: 1_221_870, period_d: 15.945,  L0_deg: 120.0, incl_deg: 0.33, color: 0xcc9944, vis_scale: 0.22 },
-    rhea:   { a_km:   527_108, period_d:  4.518,  L0_deg: 256.0, incl_deg: 0.35, color: 0xcccccc, vis_scale: 0.12 },
-    dione:  { a_km:   377_396, period_d:  2.737,  L0_deg:  52.0, incl_deg: 0.02, color: 0xdddddd, vis_scale: 0.10 },
+    mimas:     { a_km:   185_539, period_d:  0.9424, L0_deg:  14.0, incl_deg: 1.57, color: 0xc8c2b8, vis_scale: 0.05, r_km: 198,
+                 desc: 'Innermost large moon · Herschel "Death Star" crater' },
+    enceladus: { a_km:   237_948, period_d:  1.3702, L0_deg: 100.0, incl_deg: 0.02, color: 0xeef5ff, vis_scale: 0.06, r_km: 252,
+                 desc: 'Cryovolcanic plumes from south-pole tiger stripes · subsurface ocean' },
+    tethys:    { a_km:   294_619, period_d:  1.8878, L0_deg: 188.0, incl_deg: 1.09, color: 0xd6dee0, vis_scale: 0.08, r_km: 533,
+                 desc: 'Icy with the giant Odysseus impact crater' },
+    dione:     { a_km:   377_396, period_d:  2.7369, L0_deg:  52.0, incl_deg: 0.02, color: 0xddd6c8, vis_scale: 0.09, r_km: 561,
+                 desc: 'Wispy trailing-hemisphere ice cliffs' },
+    rhea:      { a_km:   527_108, period_d:  4.5182, L0_deg: 256.0, incl_deg: 0.35, color: 0xc8c2b8, vis_scale: 0.11, r_km: 764,
+                 desc: '2nd-largest Saturnian moon · faint ring suggested by Cassini' },
+    titan:     { a_km: 1_221_870, period_d: 15.9454, L0_deg: 120.0, incl_deg: 0.33, color: 0xd9aa55, vis_scale: 0.18, r_km: 2575,
+                 desc: 'Thick N₂ atmosphere · methane lakes · larger than Mercury' },
+    hyperion:  { a_km: 1_481_009, period_d: 21.2766, L0_deg: 180.0, incl_deg: 0.43, color: 0xa89578, vis_scale: 0.04, r_km: 135,
+                 desc: 'Chaotic, non-synchronous rotation · sponge-like surface' },
+    iapetus:   { a_km: 3_561_679, period_d: 79.3215, L0_deg:  10.0, incl_deg: 7.52, color: 0x8a7e6c, vis_scale: 0.10, r_km: 736,
+                 desc: 'Two-tone — bright trailing, dark leading hemisphere · equatorial ridge' },
 };
+// Saturn equatorial radius (km) — used to convert moon a_km into Saturn radii
+// for the time-machine visualisation, where orbits are placed via a power
+// scaling so Mimas sits just outside the rings and Iapetus stays in frame.
+export const SATURN_R_KM = 60_268;
 
 export const URANUS_MOONS = {
     titania: { a_km: 436_300, period_d: 8.706,  L0_deg: 316.0, incl_deg: 0.08, color: 0xaabbcc, vis_scale: 0.14 },
