@@ -959,24 +959,48 @@ export class SatelliteTracker {
      * Conjunction screening: find close approaches between a target satellite
      * and all loaded catalog objects over the next N hours.
      *
-     * Uses WASM batch propagation when available for ~100× speed.
+     * Anchors at `opts.epochMs` (defaults to wall-clock now) so callers
+     * can screen relative to a scrubbed sim time. After the coarse
+     * SGP4 sweep, each candidate's closest sample is refined with a
+     * parabolic fit through dist²(i-1, i, i+1) — sub-step TCA + miss.
+     * When `opts.withDv` is set, finite-differences relative velocity
+     * at the refined TCA and reports |Δv| (km/s) plus the unit miss
+     * vector (useful for a real B-plane).
      *
      * @param {number} targetNoradId    NORAD ID of the target satellite
      * @param {number} [hoursAhead=72]  Look-ahead window
      * @param {number} [stepMin=10]     Time step in minutes
      * @param {number} [thresholdKm=25] Distance threshold
-     * @param {string|null} [groupFilter=null]
-     *        If set (e.g. 'debris'), skip catalog objects whose group
-     *        isn't a match. Saves thousands of propagate() calls per run
-     *        when the caller only cares about one constellation kind.
-     * @returns {Array<{name, norad_id, dist_km, hours_ahead, tca_jd}>}
+     * @param {string|string[]|null} [groupFilter=null]
+     *        Restrict secondaries to one group, an array of groups, or
+     *        null (every loaded sat except the primary). Saves
+     *        thousands of propagate() calls per run when the caller
+     *        only cares about one constellation kind.
+     * @param {object}  [opts]
+     * @param {number}  [opts.epochMs]   Anchor in ms since epoch.
+     * @param {boolean} [opts.refine=true]   Parabolic refine.
+     * @param {boolean} [opts.withDv=true]   Include |Δv| + miss unit.
+     * @returns {Array<{ name, norad_id, group, dist_km, tca_jd,
+     *                   tca_ms, hours_ahead, dv_kms, miss_unit }>}
      */
-    async screenConjunctions(targetNoradId, hoursAhead = 72, stepMin = 10, thresholdKm = 25, groupFilter = null) {
+    async screenConjunctions(targetNoradId, hoursAhead = 72, stepMin = 10, thresholdKm = 25, groupFilter = null, opts = {}) {
         const target = this._satellites.find(s => s.tle.norad_id === targetNoradId);
         if (!target) return [];
 
+        const epochMs   = Number.isFinite(opts.epochMs) ? opts.epochMs : Date.now();
+        const refine    = opts.refine    !== false;
+        const withDv    = opts.withDv    !== false;
+        const withSpark = opts.withSpark !== false;
+        const SPARK_HALF_WINDOW = 5;   // ±5 samples around TCA coarse
+
+        const matchesGroup = (g) => {
+            if (groupFilter == null) return true;
+            if (Array.isArray(groupFilter)) return groupFilter.includes(g);
+            return g === groupFilter;
+        };
+
         const nSteps = Math.ceil(hoursAhead * 60 / stepMin);
-        const jd = Date.now() / 86400000 + 2440587.5;
+        const jd = epochMs / 86400000 + 2440587.5;
         const tsinceBase = (jd - target.epochJd) * MIN_PER_DAY;
 
         // Generate time array
@@ -1008,45 +1032,161 @@ export class SatelliteTracker {
             console.debug(`[Conjunction] Target propagated via JS fallback: ${nSteps} steps`);
         }
 
+        // Pre-filter widens with the horizon: a debris piece in an
+        // eccentric orbit can drift through the asset's altitude shell
+        // over a 14-day window, so the bound has to grow with time.
+        // ~50 km/d worst-case altitude drift in high-drag LEO; cap so
+        // the filter still does work at long horizons.
+        const targetAltAvg = (target.tle.perigee_km + target.tle.apogee_km) / 2;
+        const altMargin    = Math.min(50 * (hoursAhead / 24) + 200, 1500);
+
         // Screen all catalog objects
         const conjunctions = [];
-        const targetAltAvg = (target.tle.perigee_km + target.tle.apogee_km) / 2;
 
         for (const cat of this._satellites) {
             if (cat.tle.norad_id === targetNoradId) continue;
-            if (groupFilter && cat.group !== groupFilter) continue;
+            if (!matchesGroup(cat.group)) continue;
 
-            // Pre-filter: skip if altitude difference > 200 km
-            const catAltAvg = (cat.tle.perigee_km + cat.tle.apogee_km) / 2;
-            if (Math.abs(catAltAvg - targetAltAvg) > 200) continue;
+            // Pre-filter on apogee/perigee overlap with the target's
+            // shell ± altMargin. Tighter than a "mean-altitude within
+            // 200 km" check while still horizon-aware.
+            const catPerigee = cat.tle.perigee_km;
+            const catApogee  = cat.tle.apogee_km;
+            if (catApogee  + altMargin < targetAltAvg - 200) continue;
+            if (catPerigee - altMargin > targetAltAvg + 200) continue;
 
-            // Propagate catalog object at each step
+            // Propagate catalog object at each step.
             const catTsinceBase = (jd - cat.epochJd) * MIN_PER_DAY;
+
+            // Track the closest sample over the *full* window. The
+            // previous version broke on the first sample under the
+            // threshold, which is the wrong number — closest-approach
+            // is deeper than the first dip into the threshold.
+            let bestI  = -1;
+            let bestD2 = Infinity;
+            const catPos = new Array(nSteps);
+            // Sample-distance buffer (km) — kept so we can crop a
+            // window around bestI for the sparkline without
+            // re-propagating.
+            const dists = new Float32Array(nSteps);
 
             for (let i = 0; i < nSteps; i++) {
                 const tgt = targetPositions[i];
-                if (!isFinite(tgt.x)) continue;
+                if (!isFinite(tgt.x)) { dists[i] = NaN; continue; }
 
-                const catTsince = catTsinceBase + i * stepMin;
-                const catPos = propagate(cat.tle, catTsince);
-                if (!isFinite(catPos.x)) continue;
+                const cp = propagate(cat.tle, catTsinceBase + i * stepMin);
+                catPos[i] = cp;
+                if (!isFinite(cp.x)) { dists[i] = NaN; continue; }
 
-                const dx = tgt.x - catPos.x;
-                const dy = tgt.y - catPos.y;
-                const dz = tgt.z - catPos.z;
-                const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                const dx = tgt.x - cp.x;
+                const dy = tgt.y - cp.y;
+                const dz = tgt.z - cp.z;
+                const d2 = dx * dx + dy * dy + dz * dz;
+                dists[i] = Math.sqrt(d2);
 
-                if (dist < thresholdKm) {
-                    conjunctions.push({
-                        name: cat.tle.name,
-                        norad_id: cat.tle.norad_id,
-                        dist_km: Math.round(dist * 10) / 10,
-                        hours_ahead: Math.round(i * stepMin / 60 * 10) / 10,
-                        tca_jd: jd + i * stepMin / MIN_PER_DAY,
-                    });
-                    break;  // one conjunction per object (closest approach)
+                if (d2 < bestD2) { bestD2 = d2; bestI = i; }
+            }
+
+            if (bestI < 0) continue;
+
+            let missKm    = Math.sqrt(bestD2);
+            let tcaOffMin = bestI * stepMin;
+
+            // Parabolic refine through dist²(i-1, i, i+1). Sub-step
+            // TCA + miss without extra propagate calls — we already
+            // have the neighbours from the sweep. Skip at the window
+            // boundary; there's no reliable "outside" sample.
+            if (refine && bestI > 0 && bestI < nSteps - 1) {
+                const tgtL = targetPositions[bestI - 1];
+                const tgtR = targetPositions[bestI + 1];
+                const cpL  = catPos[bestI - 1];
+                const cpR  = catPos[bestI + 1];
+                if (isFinite(tgtL?.x) && isFinite(tgtR?.x) && isFinite(cpL?.x) && isFinite(cpR?.x)) {
+                    const dL = (tgtL.x - cpL.x) ** 2 + (tgtL.y - cpL.y) ** 2 + (tgtL.z - cpL.z) ** 2;
+                    const dC = bestD2;
+                    const dR = (tgtR.x - cpR.x) ** 2 + (tgtR.y - cpR.y) ** 2 + (tgtR.z - cpR.z) ** 2;
+                    const denom = dL - 2 * dC + dR;
+                    if (Math.abs(denom) > 1e-9) {
+                        const delta = 0.5 * (dL - dR) / denom;
+                        if (delta > -1 && delta < 1) {
+                            tcaOffMin = (bestI + delta) * stepMin;
+                            const d2Min = dC - 0.25 * (dL - dR) * delta;
+                            if (d2Min > 0 && isFinite(d2Min)) missKm = Math.sqrt(d2Min);
+                        }
+                    }
                 }
             }
+
+            if (missKm > thresholdKm) continue;
+
+            // |Δv| at TCA via central-difference (10 s either side) on
+            // both objects, then the magnitude of the relative-velocity
+            // vector. Cheap (4 propagates) and gives the encounter
+            // energy proxy callers want.
+            let dvKms    = null;
+            let missUnit = null;
+            let vRel     = null;
+            let missVec  = null;
+            if (withDv) {
+                const tcaT  = tsinceBase + tcaOffMin;
+                const halfH = 10 / 60;
+                const pA = propagate(target.tle, tcaT - halfH);
+                const pB = propagate(target.tle, tcaT + halfH);
+                const sA = propagate(cat.tle,    catTsinceBase + tcaOffMin - halfH);
+                const sB = propagate(cat.tle,    catTsinceBase + tcaOffMin + halfH);
+                if (isFinite(pA.x) && isFinite(pB.x) && isFinite(sA.x) && isFinite(sB.x)) {
+                    const dt = 20; // seconds of central-diff span
+                    const vRelX = ((pB.x - pA.x) - (sB.x - sA.x)) / dt;
+                    const vRelY = ((pB.y - pA.y) - (sB.y - sA.y)) / dt;
+                    const vRelZ = ((pB.z - pA.z) - (sB.z - sA.z)) / dt;
+                    dvKms = Math.sqrt(vRelX * vRelX + vRelY * vRelY + vRelZ * vRelZ);
+                    vRel  = { x: vRelX, y: vRelY, z: vRelZ };
+
+                    const tcaP = propagate(target.tle, tcaT);
+                    const tcaS = propagate(cat.tle,    catTsinceBase + tcaOffMin);
+                    if (isFinite(tcaP.x) && isFinite(tcaS.x)) {
+                        const mx = tcaP.x - tcaS.x;
+                        const my = tcaP.y - tcaS.y;
+                        const mz = tcaP.z - tcaS.z;
+                        const m  = Math.sqrt(mx * mx + my * my + mz * mz) || 1;
+                        missVec  = { x: mx, y: my, z: mz };
+                        missUnit = { x: mx / m, y: my / m, z: mz / m };
+                    }
+                }
+            }
+
+            // Sparkline window: ±SPARK_HALF_WINDOW samples around
+            // bestI, clipped to [0, nSteps-1]. NaNs survive so the
+            // renderer's time axis stays consistent.
+            let spark = null;
+            if (withSpark) {
+                const lo  = Math.max(0, bestI - SPARK_HALF_WINDOW);
+                const hi  = Math.min(nSteps - 1, bestI + SPARK_HALF_WINDOW);
+                const km  = new Array(hi - lo + 1);
+                for (let i = lo; i <= hi; i++) km[i - lo] = dists[i];
+                spark = {
+                    km,
+                    step_min:     stepMin,
+                    center_index: bestI - lo,
+                };
+            }
+
+            const tcaMs = epochMs + tcaOffMin * 60 * 1000;
+
+            conjunctions.push({
+                name:        cat.tle.name,
+                norad_id:    cat.tle.norad_id,
+                group:       cat.group,
+                dist_km:     Math.round(missKm * 100) / 100,
+                hours_ahead: Math.round(tcaOffMin / 60 * 100) / 100,
+                tca_jd:      jd + tcaOffMin / MIN_PER_DAY,
+                tca_ms:      tcaMs,
+                dv_kms:      dvKms != null ? Math.round(dvKms * 1000) / 1000 : null,
+                v_rel:       vRel,
+                miss_unit:   missUnit,
+                miss_vec:    missVec,
+                spark,
+            });
         }
 
         conjunctions.sort((a, b) => a.dist_km - b.dist_km);

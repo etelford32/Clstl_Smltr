@@ -26,10 +26,11 @@
  * primitives — this module just composes them on real values.
  */
 
-import { provStore }   from './provenance.js';
-import { bindBand }    from './bands.js';
-import { attachDelta } from './delta.js';
-import { timeBus }     from './time-bus.js';
+import { provStore }          from './provenance.js';
+import { bindBand }           from './bands.js';
+import { attachDelta }        from './delta.js';
+import { timeBus }            from './time-bus.js';
+import { ConjunctionScreener } from './conjunction-screener.js';
 
 /* ─── Decay heuristic ─────────────────────────────────────────
  * The existing js/orbital-analytics.js estimateOrbitLifetime() ships
@@ -342,106 +343,373 @@ export function mountDecayWatch(fleet) {
     });
 }
 
-/* ─── Conjunctions 7d panel ───────────────────────────────── */
+/* ─── Conjunctions panel ──────────────────────────────────── */
+
+const CONJ_HORIZONS = Object.freeze([
+    { id: '1d',   label: '24 h',   hours: 24       },
+    { id: '7d',   label: '7 d',    hours: 7  * 24  },
+    { id: '14d',  label: '14 d',   hours: 14 * 24, default: true },
+]);
+
+const SEVERITY_THRESHOLDS = Object.freeze({
+    high: 5,    // < 5 km miss
+    med:  15,
+    low:  50,
+});
+
+function severityFor(distKm) {
+    if (distKm < SEVERITY_THRESHOLDS.high) return 'high';
+    if (distKm < SEVERITY_THRESHOLDS.med)  return 'med';
+    return 'low';
+}
+
+function pad2(n) { return String(n).padStart(2, '0'); }
+function fmtUtc(ms) {
+    const d = new Date(ms);
+    return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())} ` +
+           `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}Z`;
+}
+function fmtAhead(simMs, tcaMs) {
+    const diff = Math.max(0, tcaMs - simMs);
+    if (diff < 3_600_000)         return `+${Math.round(diff / 60_000)} min`;
+    if (diff < 24 * 3_600_000)    return `+${(diff / 3_600_000).toFixed(1)} h`;
+    return `+${(diff / (24 * 3_600_000)).toFixed(1)} d`;
+}
+
+// Inline SVG sparkline of dist(t) around closest approach. Width is
+// fixed; height tight enough to slot into a sub-row without expanding
+// it. The TCA marker is drawn at center_index. Returns '' when the
+// input is missing or has fewer than 3 valid samples — the row just
+// drops the column rather than rendering a degenerate plot.
+const SPARK_W = 64;
+const SPARK_H = 18;
+function renderSparkSvg(spark, missKm) {
+    if (!spark || !Array.isArray(spark.km)) return '';
+    const km = spark.km;
+    const valid = km.filter(v => Number.isFinite(v));
+    if (valid.length < 3) return '';
+
+    const lo = Math.min(...valid);
+    const hi = Math.max(...valid, missKm ?? 0, 1);
+    const range = Math.max(hi - lo, 1e-3);
+
+    const dx = SPARK_W / Math.max(km.length - 1, 1);
+    const yOf = (v) => SPARK_H - 2 - ((v - lo) / range) * (SPARK_H - 4);
+
+    let d = '';
+    let prevValid = false;
+    for (let i = 0; i < km.length; i++) {
+        const v = km[i];
+        if (!Number.isFinite(v)) { prevValid = false; continue; }
+        const x = i * dx;
+        const y = yOf(v);
+        d += (prevValid ? `L${x.toFixed(1)},${y.toFixed(1)}` : `M${x.toFixed(1)},${y.toFixed(1)}`);
+        prevValid = true;
+    }
+
+    const ci = Number.isFinite(spark.center_index)
+        ? Math.max(0, Math.min(km.length - 1, spark.center_index))
+        : Math.floor(km.length / 2);
+    const cx = ci * dx;
+    const cy = Number.isFinite(km[ci]) ? yOf(km[ci]) : SPARK_H / 2;
+
+    const minutes = (km.length - 1) * (spark.step_min ?? 0);
+    const titleAttr = `dist(t) over ±${Math.round(minutes / 2)} min around TCA · ${valid[0].toFixed(1)} – ${valid[valid.length - 1].toFixed(1)} km`;
+
+    return `<svg class="op-conj-spark" viewBox="0 0 ${SPARK_W} ${SPARK_H}" width="${SPARK_W}" height="${SPARK_H}" aria-hidden="true">
+        <title>${escapeHtml(titleAttr)}</title>
+        <line x1="${cx.toFixed(1)}" x2="${cx.toFixed(1)}" y1="0" y2="${SPARK_H}" class="op-conj-spark-tca"/>
+        <path d="${d}" class="op-conj-spark-line"/>
+        <circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="2" class="op-conj-spark-min"/>
+    </svg>`;
+}
 
 export function mountConjunctions(fleet, tracker, opts = {}) {
     const root = document.getElementById('op-conj-body');
+    const btn  = document.getElementById('op-conj-btn');
     if (!root) return;
-    const onSelect       = opts.onSelect       ?? (() => {});
-    const onConjunction  = opts.onConjunction  ?? (() => {});
+    const onSelect      = opts.onSelect      ?? (() => {});
+    const onConjunction = opts.onConjunction ?? (() => {});
 
-    let runId = 0;
-    let busy = false;
+    const screener = new ConjunctionScreener();
+
+    // UI state.
+    const horizonDefault = CONJ_HORIZONS.find(h => h.default) ?? CONJ_HORIZONS[2];
+    let horizonId = horizonDefault.id;
+    let busy   = false;
+    let stale  = true;
+    let lastRows = [];     // cached so re-renders are cheap (e.g. expand/collapse)
+    let lastEpochMs = null;
+    let autoRescreen = true;             // anchor follows the time cursor
+    let autoTimer    = null;             // debounce handle
+    const expanded   = new Set();        // primary norad IDs that are expanded
+
+    // How far the cursor can drift from the anchor before the panel
+    // is considered "stale". The auto-rescreen path triggers a fresh
+    // run after the cursor has been quiet for AUTO_DEBOUNCE_MS past
+    // the threshold; this keeps a casual scrub from spamming the
+    // worker.
+    const AUTO_THRESHOLD_MS = 5 * 60 * 1000;
+    const AUTO_DEBOUNCE_MS  = 750;
+
+    function horizonHours() {
+        const h = CONJ_HORIZONS.find(x => x.id === horizonId);
+        return (h ?? horizonDefault).hours;
+    }
+
+    function activeSecondaryGroups() {
+        // Every loaded group present in the catalog. Drops the
+        // hard `'debris'` requirement — if the user has Starlink on,
+        // they want to see Starlink-on-fleet conjunctions too.
+        const sats = tracker.getSatellites?.() ?? [];
+        const groups = new Set();
+        for (const s of sats) {
+            if (s.group) groups.add(s.group);
+        }
+        return [...groups];
+    }
+
+    function buildGroupMap() {
+        // O(N) noradId → group lookup so the secondaries can carry
+        // their group through to the worker without quadratic work.
+        const map = new Map();
+        for (const s of (tracker.getSatellites?.() ?? [])) {
+            map.set(s.norad_id, s.group ?? null);
+        }
+        return map;
+    }
+
+    function renderShell() {
+        const horizonChips = CONJ_HORIZONS.map(h => `
+            <button type="button" class="op-conj-chip${h.id === horizonId ? ' op-conj-chip--on' : ''}"
+                    data-horizon="${h.id}" title="Screen ahead ${h.label}">${h.label}</button>
+        `).join('');
+
+        return `
+            <div class="op-conj-toolbar">
+                <span class="op-conj-toolbar-label">Horizon</span>
+                ${horizonChips}
+                <button type="button" id="op-conj-auto" class="op-conj-chip${autoRescreen ? ' op-conj-chip--on' : ''}"
+                    title="Auto-rescreen when the time cursor moves more than ${Math.round(AUTO_THRESHOLD_MS / 60_000)} min from the screen anchor">Auto</button>
+                <span id="op-conj-status" class="op-conj-toolbar-status">—</span>
+            </div>
+            <div id="op-conj-rows" class="op-conj-rows"></div>
+        `;
+    }
+
+    function paintShell() {
+        if (root.dataset.shell === 'on') return;
+        root.dataset.shell = 'on';
+        root.innerHTML = renderShell();
+
+        root.querySelectorAll('[data-horizon]').forEach(el => {
+            el.addEventListener('click', () => {
+                if (busy || el.dataset.horizon === horizonId) return;
+                horizonId = el.dataset.horizon;
+                root.querySelectorAll('[data-horizon]').forEach(b => {
+                    b.classList.toggle('op-conj-chip--on', b.dataset.horizon === horizonId);
+                });
+                stale = true;
+                screen();
+            });
+        });
+
+        const autoBtn = root.querySelector('#op-conj-auto');
+        autoBtn?.addEventListener('click', () => {
+            autoRescreen = !autoRescreen;
+            autoBtn.classList.toggle('op-conj-chip--on', autoRescreen);
+            // If the user enables auto AND the panel is already
+            // stale, rescreen immediately rather than waiting for the
+            // next time-bus tick.
+            if (autoRescreen && lastEpochMs != null) {
+                const drift = Math.abs(timeBus.getState().simTimeMs - lastEpochMs);
+                if (drift > AUTO_THRESHOLD_MS) screen();
+            }
+        });
+    }
+
+    function setStatus(text, kind = '') {
+        const el = root.querySelector('#op-conj-status');
+        if (!el) return;
+        el.textContent = text;
+        el.dataset.kind = kind;
+    }
 
     async function screen() {
         if (busy) return;
-        const list = fleet.list().filter(a => a.status === 'ready');
+        paintShell();
+
+        const list = fleet.list().filter(a => a.status === 'ready' && a.tle);
         if (list.length === 0) {
-            root.innerHTML = `<div class="op-deck-empty">Add fleet assets to screen.</div>`;
+            setStatus('Add fleet assets to screen.', 'empty');
+            renderRows([]);
             return;
         }
-        if (!tracker.hasGroup('debris')) {
-            root.innerHTML = `<div class="op-deck-empty">Toggle the <b>Tracked Debris</b> layer to enable screening.</div>`;
+
+        const groups = activeSecondaryGroups();
+        const secondaryTles = (tracker.getTlesByGroup?.(groups) ?? []);
+        if (secondaryTles.length === 0) {
+            setStatus('Toggle a layer (debris, Starlink…) to enable screening.', 'empty');
+            renderRows([]);
             return;
+        }
+
+        const simTimeMs = timeBus.getState().simTimeMs;
+        lastEpochMs = simTimeMs;
+
+        // Wire targets and secondaries with their group so the worker
+        // can echo group back per-row (used for severity coloring +
+        // future filter chips).
+        const fleetIds = new Set(list.map(a => a.noradId));
+        const groupMap = buildGroupMap();
+        const targets  = list.map(a => ({ tle: a.tle, group: 'fleet' }));
+        const secondaries = [];
+        for (const t of secondaryTles) {
+            if (fleetIds.has(t.norad_id)) continue;   // primary excludes itself
+            secondaries.push({ tle: t, group: groupMap.get(t.norad_id) ?? null });
         }
 
         busy = true;
-        const myRun = ++runId;
-        root.innerHTML = `<div class="op-deck-empty">Screening ${list.length} asset${list.length===1?'':'s'} × debris…</div>`;
+        stale = false;
+        setStatus(`Screening ${list.length} asset${list.length === 1 ? '' : 's'} × ${secondaries.length} secondaries…`, 'busy');
+        if (btn) btn.disabled = true;
 
-        const rows = [];
-        for (const a of list) {
-            try {
-                const conjs = await tracker.screenConjunctions(a.noradId, 7 * 24, 30, 50, 'debris');
-                if (myRun !== runId) return;       // superseded
-                rows.push({ asset: a, conjs: conjs || [] });
-            } catch (e) {
-                rows.push({ asset: a, conjs: [], error: e.message });
-            }
+        try {
+            const results = await screener.run({
+                targets, secondaries,
+                epochMs: simTimeMs,
+                params:  {
+                    horizonH:    horizonHours(),
+                    stepMin:     10,
+                    thresholdKm: 50,
+                    refine:      true,
+                    withDv:      true,
+                },
+            });
+
+            const rows = list.map(a => ({
+                asset: a,
+                conjs: results[a.noradId] ?? [],
+            }));
+            lastRows = rows;
+            renderRows(rows);
+
+            const totalConj = rows.reduce((s, r) => s + r.conjs.length, 0);
+            setStatus(
+                `Screened anchor ${fmtUtc(simTimeMs)} · +${horizonHours()} h · ` +
+                `${totalConj} conjunction${totalConj === 1 ? '' : 's'} ≤ 50 km.`,
+                totalConj === 0 ? 'clear' : 'done',
+            );
+        } catch (err) {
+            if (err?.code === 'superseded' || err?.code === 'disposed') return;
+            setStatus(`Screen failed: ${err.message ?? err}`, 'error');
+            renderRows([]);
+        } finally {
+            busy = false;
+            if (btn) btn.disabled = false;
         }
-        if (myRun !== runId) return;
+    }
 
-        renderRows(rows);
-        busy = false;
+    function renderRow(r, simNow) {
+        const { asset, conjs } = r;
+        if (conjs.length === 0) {
+            return `<li class="op-conj-row op-conj-row-clear" data-norad="${asset.noradId}" tabindex="0" role="button">
+                <span class="op-conj-name">${escapeHtml(asset.name)}</span>
+                <span class="op-conj-status">clear · ${horizonHours() / 24 >= 1 ? `${horizonHours()/24} d` : `${horizonHours()} h`}</span>
+            </li>`;
+        }
+        const closest = conjs[0];
+        const sev = severityFor(closest.dist_km);
+        const isOpen = expanded.has(asset.noradId);
+        const ahead = fmtAhead(simNow, closest.tca_ms ?? Date.now());
+        const dvBit = closest.dv_kms != null
+            ? `<span class="op-conj-dv" title="Relative velocity at TCA">${closest.dv_kms.toFixed(2)} km/s</span>`
+            : '';
+
+        let html = `<li class="op-conj-row op-conj-row-${sev}${isOpen ? ' op-conj-row--open' : ''}"
+            data-norad="${asset.noradId}" data-tca-ms="${closest.tca_ms}" tabindex="0" role="button"
+            title="Closest approach for ${escapeHtml(asset.name)}. Click to expand; Shift-click to scrub to TCA.">
+            <span class="op-conj-name">${escapeHtml(asset.name)}</span>
+            <span class="op-conj-count" title="${conjs.length} secondaries within 50 km over the horizon">${conjs.length}</span>
+            <span class="op-conj-closest">${closest.dist_km.toFixed(2)} km · ${ahead}</span>
+            ${dvBit}
+            <span class="op-conj-caret" aria-hidden="true">${isOpen ? '▾' : '▸'}</span>
+        </li>`;
+
+        if (isOpen) {
+            const top = conjs.slice(0, 6);
+            html += `<ul class="op-conj-sublist" data-parent="${asset.noradId}">`;
+            for (const c of top) {
+                const sub = severityFor(c.dist_km);
+                const subAhead = fmtAhead(simNow, c.tca_ms);
+                const subDv = c.dv_kms != null ? ` · ${c.dv_kms.toFixed(2)} km/s` : '';
+                const groupBit = c.group ? `<span class="op-conj-sub-group">${escapeHtml(c.group)}</span>` : '';
+                const sparkSvg = renderSparkSvg(c.spark, c.dist_km);
+                html += `<li class="op-conj-sub op-conj-sub-${sub}" data-norad="${asset.noradId}" data-secondary="${c.norad_id}" data-tca-ms="${c.tca_ms}" tabindex="0" role="button"
+                    title="${escapeHtml(c.name)} · click to scrub to TCA and load encounter">
+                    <span class="op-conj-sub-name">${escapeHtml(c.name)} <span class="op-conj-sub-id">#${c.norad_id}</span></span>
+                    ${groupBit}
+                    <span class="op-conj-sub-miss">${c.dist_km.toFixed(2)} km</span>
+                    ${sparkSvg}
+                    <span class="op-conj-sub-tca">${fmtUtc(c.tca_ms)} (${subAhead})${subDv}</span>
+                </li>`;
+            }
+            if (conjs.length > top.length) {
+                html += `<li class="op-conj-sub op-conj-sub-more">+${conjs.length - top.length} more below 50 km</li>`;
+            }
+            html += `</ul>`;
+        }
+
+        return html;
     }
 
     function renderRows(rows) {
-        let html = '';
-        for (const { asset, conjs, error } of rows) {
-            if (error) {
-                html += `<li class="op-conj-row op-conj-row-err">${escapeHtml(asset.name)} — ${escapeHtml(error)}</li>`;
-                continue;
-            }
-            if (conjs.length === 0) {
-                html += `<li class="op-conj-row op-conj-row-clear" data-norad="${asset.noradId}" tabindex="0" role="button">
-                    <span class="op-conj-name">${escapeHtml(asset.name)}</span>
-                    <span class="op-conj-status">clear · 7 d</span>
-                </li>`;
-                continue;
-            }
-            const closest = conjs.reduce((a, b) => (a.dist_km <= b.dist_km ? a : b));
-            const sev = closest.dist_km < 5 ? 'high' : closest.dist_km < 15 ? 'med' : 'low';
-            const tcaMs = Date.now() + closest.hours_ahead * 3600 * 1000;
-            html += `<li class="op-conj-row op-conj-row-${sev}" data-norad="${asset.noradId}" data-tca-ms="${tcaMs}" tabindex="0" role="button"
-                title="Click to scrub time to TCA and select ${escapeHtml(asset.name)}">
-                <span class="op-conj-name">${escapeHtml(asset.name)}</span>
-                <span class="op-conj-count">${conjs.length}</span>
-                <span class="op-conj-closest">closest ${closest.dist_km.toFixed(1)} km @ +${closest.hours_ahead.toFixed(1)} h</span>
-            </li>`;
-        }
-        root.innerHTML = `<ul class="op-conj-list">${html}</ul>`;
+        const host = root.querySelector('#op-conj-rows');
+        if (!host) return;
+        if (rows.length === 0) { host.innerHTML = ''; return; }
+        const simNow = lastEpochMs ?? timeBus.getState().simTimeMs;
+        host.innerHTML = `<ul class="op-conj-list">${rows.map(r => renderRow(r, simNow)).join('')}</ul>`;
+        wireRows(host, rows);
+    }
 
-        // Click → select asset + scrub to TCA + push the rich
-        // conjunction shape (asset TLE, secondary TLE, miss, TCA) to
-        // any listener that wants it (b-plane inset, covariance
-        // tubes). Rows without a TCA (the "clear · 7 d" path) still
-        // select the asset for Δv coloring without moving time.
-        root.querySelectorAll('.op-conj-row[data-norad]').forEach(row => {
-            const id    = parseInt(row.dataset.norad, 10);
-            const tcaMs = parseInt(row.dataset.tcaMs, 10);
+    function wireRows(host, rows) {
+        const fireConj = (asset, conj, scrub = true) => {
+            onSelect(asset.noradId);
+            if (scrub && Number.isFinite(conj.tca_ms)) {
+                timeBus.setSimTime(conj.tca_ms, { mode: 'scrub' });
+            }
+            const secondary = tracker.getSatellite?.(conj.norad_id);
+            onConjunction({
+                assetName:     asset.name,
+                assetTle:      asset.tle,
+                secondaryName: conj.name || `#${conj.norad_id}`,
+                secondaryTle:  secondary?.tle ?? null,
+                tcaMs:         conj.tca_ms,
+                missKm:        conj.dist_km,
+                dvKms:         conj.dv_kms,
+                missUnit:      conj.miss_unit,
+                missVec:       conj.miss_vec,
+                vRel:          conj.v_rel,
+            });
+        };
+
+        // Primary row: tap = scrub to closest-approach + select +
+        // toggle the secondaries panel. Sub-rows let the user pick a
+        // different secondary without re-screening.
+        host.querySelectorAll('.op-conj-row[data-norad]').forEach(row => {
+            const id      = parseInt(row.dataset.norad, 10);
             const rowData = rows.find(r => r.asset.noradId === id);
-            const closest = rowData?.conjs.length
-                ? rowData.conjs.reduce((a, b) => (a.dist_km <= b.dist_km ? a : b))
-                : null;
-
-            const fire = () => {
-                onSelect(id);
-                if (Number.isFinite(tcaMs)) {
-                    timeBus.setSimTime(tcaMs, { mode: 'scrub' });
-                }
-                if (closest) {
-                    const secondary = tracker.getSatellite?.(closest.norad_id);
-                    onConjunction({
-                        assetName:     rowData.asset.name,
-                        assetTle:      rowData.asset.tle,
-                        secondaryName: closest.name || `#${closest.norad_id}`,
-                        secondaryTle:  secondary?.tle ?? null,
-                        tcaMs,
-                        missKm:        closest.dist_km,
-                    });
-                } else {
+            const fire    = () => {
+                if (!rowData) return;
+                if (rowData.conjs.length === 0) {
+                    onSelect(id);
                     onConjunction(null);
+                    return;
                 }
+                fireConj(rowData.asset, rowData.conjs[0], true);
+                if (expanded.has(id)) expanded.delete(id);
+                else                  expanded.add(id);
+                renderRows(rows);
             };
             row.addEventListener('click', fire);
             row.addEventListener('keydown', (e) => {
@@ -451,21 +719,116 @@ export function mountConjunctions(fleet, tracker, opts = {}) {
                 }
             });
         });
+
+        // Sub rows: tap = scrub + show on globe + b-plane.
+        host.querySelectorAll('.op-conj-sub[data-secondary]').forEach(sub => {
+            const primaryId   = parseInt(sub.dataset.norad, 10);
+            const secondaryId = parseInt(sub.dataset.secondary, 10);
+            const rowData     = rows.find(r => r.asset.noradId === primaryId);
+            const conj        = rowData?.conjs.find(c => c.norad_id === secondaryId);
+            if (!rowData || !conj) return;
+
+            const fire = () => fireConj(rowData.asset, conj, true);
+            sub.addEventListener('click', (ev) => { ev.stopPropagation(); fire(); });
+            sub.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    fire();
+                }
+            });
+        });
     }
 
-    document.getElementById('op-conj-btn')?.addEventListener('click', screen);
+    btn?.addEventListener('click', () => screen());
 
-    fleet.onChange(() => {
-        // Stay quiet until user clicks; render the resting state only.
-        if (!busy) {
-            const list = fleet.list();
-            if (list.length === 0) {
-                root.innerHTML = `<div class="op-deck-empty">Add assets and click <b>Screen 7 d</b>.</div>`;
-            } else {
-                root.innerHTML = `<div class="op-deck-empty">${list.length} asset${list.length===1?'':'s'} ready · click <b>Screen 7 d</b>.</div>`;
+    // Time-bus integration. Two modes:
+    //   - autoRescreen on  → debounce, then re-run when the cursor
+    //     drifts > AUTO_THRESHOLD_MS from the last anchor. The worker
+    //     supersedes any in-flight run so spamming the cursor is
+    //     safe.
+    //   - autoRescreen off → just mark the panel stale and tell the
+    //     user a manual click is needed.
+    timeBus.subscribe(({ simTimeMs }) => {
+        if (lastEpochMs == null) return;
+        const drift = Math.abs(simTimeMs - lastEpochMs);
+        if (drift < 60_000) return;
+
+        const status = root.querySelector('#op-conj-status');
+
+        if (autoRescreen) {
+            if (drift < AUTO_THRESHOLD_MS) return;
+            if (status && status.dataset.kind !== 'busy') {
+                status.dataset.kind = 'stale';
+                status.textContent = `Cursor drifted · auto-rescreen pending`;
             }
+            if (autoTimer != null) clearTimeout(autoTimer);
+            autoTimer = setTimeout(() => {
+                autoTimer = null;
+                if (busy) return;     // wait for the previous run; subscriber will fire again on the next tick
+                screen();
+            }, AUTO_DEBOUNCE_MS);
+        } else if (status && status.dataset.kind !== 'busy') {
+            status.dataset.kind = 'stale';
+            status.textContent = `Anchor moved · click Screen to refresh from ${fmtUtc(simTimeMs)}`;
         }
     });
+
+    // Progress callback — surfaces "12 / 30 assets screened" so long
+    // runs don't look hung.
+    screener.subscribe(evt => {
+        if (evt.phase === 'progress') {
+            setStatus(`Screening… ${evt.done} / ${evt.total} primaries`, 'busy');
+        }
+    });
+
+    // Initial paint: show the toolbar plus a hint, regardless of fleet.
+    paintShell();
+    setStatus(
+        fleet.list().length === 0
+            ? 'Add assets and click Screen.'
+            : `${fleet.list().length} asset${fleet.list().length === 1 ? '' : 's'} ready · click Screen.`,
+        'idle',
+    );
+
+    fleet.onChange(() => {
+        if (busy) return;
+        const n = fleet.list().length;
+        if (n === 0) {
+            lastRows = [];
+            renderRows([]);
+        }
+        const status = root.querySelector('#op-conj-status');
+        if (status && (status.dataset.kind === 'idle' || status.dataset.kind === 'empty' || status.dataset.kind === 'clear')) {
+            setStatus(
+                n === 0 ? 'Add assets and click Screen.' : `${n} asset${n === 1 ? '' : 's'} ready · click Screen.`,
+                'idle',
+            );
+        }
+        // Auto-rescreen on fleet edits when auto is on AND we already
+        // have a baseline screen — adding a new asset means the user
+        // wants its conjunctions populated. Debounced through the
+        // same timer the cursor-drift path uses so back-to-back edits
+        // (e.g. paste-then-paste) collapse into one run.
+        if (autoRescreen && lastEpochMs != null && n > 0) {
+            if (autoTimer != null) clearTimeout(autoTimer);
+            autoTimer = setTimeout(() => {
+                autoTimer = null;
+                if (!busy) screen();
+            }, AUTO_DEBOUNCE_MS);
+        }
+    });
+
+    return {
+        rescreen: screen,
+        dispose() {
+            if (autoTimer != null) {
+                clearTimeout(autoTimer);
+                autoTimer = null;
+            }
+            screener.dispose();
+        },
+    };
 }
 
 /* ─── Prop Budget panel ───────────────────────────────────── */

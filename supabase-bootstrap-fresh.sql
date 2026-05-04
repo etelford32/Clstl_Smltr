@@ -62,6 +62,9 @@ CREATE TABLE IF NOT EXISTS public.user_profiles (
     location_lat DOUBLE PRECISION,
     location_lon DOUBLE PRECISION,
     location_city TEXT,
+    -- Account-level display timezone (IANA name); per-location
+    -- overrides live on user_locations.timezone.
+    timezone TEXT,
     -- Notification preferences (basic tier)
     notify_aurora BOOLEAN DEFAULT false,
     notify_conjunction BOOLEAN DEFAULT false,
@@ -411,6 +414,11 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 ALTER TABLE public.user_profiles
     ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user'
     CHECK (role IN ('user', 'tester', 'admin', 'superadmin'));
+
+-- Account-level display timezone (account.html → js/account.js writes
+-- this when the user picks a timezone in the Profile card).
+ALTER TABLE public.user_profiles
+    ADD COLUMN IF NOT EXISTS timezone TEXT;
 
 -- Helper function: check if the current user is an admin
 CREATE OR REPLACE FUNCTION public.is_admin()

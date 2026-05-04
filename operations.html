@@ -9,7 +9,7 @@
 <link rel="manifest" href="/manifest.json">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Operations — Fleet & Debris Console · Parker Physics</title>
-<meta name="description" content="Decision-grade satellite operations console. Fleet drag and decay analysis, pairwise conjunction screening against the public debris catalog, deterministic time scrub, and full provenance on every number. PRO Preview — open beta.">
+<meta name="description" content="Predictions-first satellite operations console. Real-time start with forward scrub to +14 days — fleet drag and decay forecasts, pairwise conjunction prediction against the public debris catalog, and full provenance on every number. PRO Preview — open beta.">
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 html { height:auto; overflow-y:auto; }
@@ -233,6 +233,12 @@ body {
     font-family: monospace;
     font-size: 9px;
 }
+#op-bplane .op-bplane-axis-label {
+    fill: rgba(180,220,255,.55);
+    font-family: monospace;
+    font-size: 10px;
+    font-weight: 700;
+}
 #op-bplane .op-bplane-miss-vec {
     stroke: rgba(255,140,200,.55);
     stroke-width: 1;
@@ -431,10 +437,15 @@ body {
     min-width:38px;
     font-family:monospace;
 }
-#op-scrub-speeds {
+#op-scrub-speeds,
+#op-scrub-jumps {
     display:inline-flex; gap:3px;
     border-left:1px solid rgba(255,255,255,.08);
     padding-left:10px; margin-left:4px;
+}
+.op-scrub-jump {
+    min-width:38px;
+    font-family:monospace;
 }
 #op-scrub-track {
     flex:1; min-width:200px;
@@ -737,6 +748,43 @@ body {
 }
 
 /* ─── Conjunctions ─────────────────────────────────────── */
+.op-conj-toolbar {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 0 8px 0;
+    flex-wrap: wrap;
+}
+.op-conj-toolbar-label {
+    font-size: .65rem; color: #889;
+    letter-spacing: .05em; text-transform: uppercase;
+}
+.op-conj-chip {
+    background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.12);
+    color: #aab;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: .68rem; font-family: monospace;
+    cursor: pointer;
+}
+.op-conj-chip:hover { color: #fff; border-color: rgba(255,255,255,.25); }
+.op-conj-chip--on {
+    background: rgba(0,200,200,.18);
+    border-color: #0cc;
+    color: #0ff;
+}
+.op-conj-toolbar-status {
+    margin-left: auto;
+    font-size: .65rem; color: #9bd;
+    font-family: monospace;
+    text-align: right;
+    flex: 1; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.op-conj-toolbar-status[data-kind="busy"]  { color: #fc8; }
+.op-conj-toolbar-status[data-kind="error"] { color: #f88; }
+.op-conj-toolbar-status[data-kind="stale"] { color: #fa6; }
+.op-conj-toolbar-status[data-kind="clear"] { color: #0fa; }
+.op-conj-rows { min-height: 1px; }
 .op-conj-list {
     list-style: none; padding: 0; margin: 0;
     display: flex; flex-direction: column;
@@ -744,7 +792,7 @@ body {
 }
 .op-conj-row {
     display: grid;
-    grid-template-columns: 1fr auto 1fr;
+    grid-template-columns: 1fr auto auto auto auto;
     align-items: baseline;
     gap: 8px;
     padding: 6px 8px;
@@ -760,7 +808,8 @@ body {
 .op-conj-row[data-tca-ms] { cursor: pointer; transition: background .12s; }
 .op-conj-row[data-tca-ms]:hover { background: rgba(0,200,200,.08); }
 .op-conj-row:focus-visible { outline: 1px solid rgba(0,200,200,.6); outline-offset: -1px; }
-.op-conj-name { color: #cef; }
+.op-conj-row--open { background: rgba(0,200,200,.06); }
+.op-conj-name { color: #cef; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .op-conj-count {
     font-family: monospace;
     font-weight: 700; color: #0ff;
@@ -771,6 +820,76 @@ body {
     font-family: monospace; color: #9bd; font-size: .68rem;
     text-align: right;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.op-conj-dv {
+    font-family: monospace; font-size: .65rem;
+    color: #fc8;
+    padding: 0 4px;
+    border-left: 1px solid rgba(255,255,255,.08);
+}
+.op-conj-caret {
+    color: #678;
+    font-size: .7rem;
+    width: 10px;
+    text-align: right;
+}
+.op-conj-row--open .op-conj-caret { color: #0cc; }
+.op-conj-sublist {
+    list-style: none;
+    padding: 4px 0 6px 18px;
+    margin: 0 0 4px 0;
+    display: flex; flex-direction: column; gap: 2px;
+    border-left: 1px solid rgba(0,200,200,.18);
+    margin-left: 9px;
+}
+.op-conj-sub {
+    display: grid;
+    grid-template-columns: 1fr auto auto auto;
+    gap: 6px;
+    padding: 4px 8px;
+    font-size: .65rem;
+    border-radius: 3px;
+    cursor: pointer;
+    color: #9ab;
+}
+.op-conj-sub:hover { background: rgba(0,200,200,.07); color: #def; }
+.op-conj-sub:focus-visible { outline: 1px solid rgba(0,200,200,.5); outline-offset: -1px; }
+.op-conj-sub-high { color: #fbc; }
+.op-conj-sub-med  { color: #fdb; }
+.op-conj-sub-low  { color: #adc; }
+.op-conj-sub-name { font-family: inherit; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.op-conj-sub-id   { color: #678; font-family: monospace; font-size: .6rem; }
+.op-conj-sub-group {
+    font-family: monospace; font-size: .6rem;
+    color: #9bd;
+    background: rgba(0,200,200,.08);
+    padding: 0 5px; border-radius: 2px;
+    align-self: center;
+}
+.op-conj-sub-miss { font-family: monospace; color: #fc8; text-align: right; }
+.op-conj-sub-tca  { font-family: monospace; color: #79b; text-align: right; white-space: nowrap; }
+.op-conj-sub-more { color: #678; font-size: .62rem; padding: 4px 8px; cursor: default; }
+.op-conj-sub { grid-template-columns: 1fr auto auto auto auto; }
+.op-conj-spark {
+    align-self: center;
+    overflow: visible;
+}
+.op-conj-spark-line {
+    fill: none;
+    stroke: rgba(0,255,200,.7);
+    stroke-width: 1.2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.op-conj-spark-tca {
+    stroke: rgba(255,140,180,.45);
+    stroke-width: 1;
+    stroke-dasharray: 2 2;
+}
+.op-conj-spark-min {
+    fill: rgba(255,180,80,.95);
+    stroke: rgba(0,0,0,.4);
+    stroke-width: 0.5;
 }
 
 /* ─── Prop Budget ──────────────────────────────────────── */
@@ -1289,9 +1408,11 @@ body {
             <span class="op-badge-preview">PRO PREVIEW</span>
         </div>
         <p id="op-hero-sub">
-            Decision-grade fleet and debris analysis. Deterministic time
-            scrub, confidence bands, and full provenance on every number.
-            Open beta — no sign-in required.
+            Predictions-first fleet and debris analysis. Start in real time,
+            then scrub forward minutes, hours, days, or weeks to forecast
+            satellite positions, conjunctions, and decay — with confidence
+            bands and full provenance on every number. Open beta — no
+            sign-in required.
         </p>
 
         <div id="op-personas" role="tablist" aria-label="Operator persona">
@@ -1407,14 +1528,14 @@ body {
         </div>
         <div class="op-panel">
             <h2 style="display:flex;align-items:baseline;gap:8px">
-                Conjunctions · 7 days
+                Conjunctions
                 <button id="op-conj-btn" class="op-deck-btn" type="button"
-                        title="Run a 7-day SGP4 conjunction screen against the loaded debris catalog (50 km threshold).">
-                    Screen 7 d
+                        title="Screen the fleet against every loaded layer over the selected horizon. Anchors at the current sim time, refines TCA via parabolic fit, reports |Δv| at closest approach.">
+                    Screen
                 </button>
             </h2>
             <div id="op-conj-body">
-                <div class="op-deck-empty">Add assets and toggle <b>Tracked Debris</b>, then click <b>Screen 7 d</b>.</div>
+                <div class="op-deck-empty">Add fleet assets, toggle a layer (debris, Starlink…), pick a horizon, then click <b>Screen</b>.</div>
             </div>
         </div>
         <div class="op-panel">
@@ -1434,19 +1555,27 @@ body {
     <!-- Bottom: scrub strip -->
     <div id="op-scrub" class="op-panel">
         <div id="op-scrub-row">
-            <button class="op-scrub-btn" id="op-tc-home" title="Jump to −7 days">⏮</button>
+            <button class="op-scrub-btn" id="op-tc-home" title="Jump to −1 day (start of window)">⏮</button>
             <button class="op-scrub-btn" id="op-tc-back" title="Step back 1 hour (←)">⏪</button>
             <button class="op-scrub-btn" id="op-tc-play" title="Play replay (Space)">▶︎</button>
             <button class="op-scrub-btn" id="op-tc-fwd"  title="Step forward 1 hour (→)">⏩</button>
-            <button class="op-scrub-btn" id="op-tc-end"  title="Jump to +7 days">⏭</button>
+            <button class="op-scrub-btn" id="op-tc-end"  title="Jump to +14 days (end of window)">⏭</button>
             <div id="op-scrub-track">
                 <div id="op-scrub-now"></div>
                 <div id="op-scrub-cursor"></div>
             </div>
             <button class="op-scrub-btn" id="op-tc-now" title="Jump to real time (N)">Now</button>
+            <span id="op-scrub-jumps" aria-label="Predictive forward jumps">
+                <button class="op-scrub-btn op-scrub-jump" data-jump-ms="60000"      title="Predict +1 minute ahead">+1m</button>
+                <button class="op-scrub-btn op-scrub-jump" data-jump-ms="3600000"    title="Predict +1 hour ahead">+1h</button>
+                <button class="op-scrub-btn op-scrub-jump" data-jump-ms="86400000"   title="Predict +1 day ahead">+1d</button>
+                <button class="op-scrub-btn op-scrub-jump" data-jump-ms="604800000"  title="Predict +1 week ahead">+1w</button>
+                <button class="op-scrub-btn op-scrub-jump" data-jump-ms="1209600000" title="Predict +2 weeks ahead">+2w</button>
+            </span>
             <span id="op-scrub-speeds">
                 <button class="op-scrub-btn op-scrub-speed" data-speed="1"    title="Replay at real time (1×)">1×</button>
-                <button class="op-scrub-btn op-scrub-speed" data-speed="60"   title="Replay at 60× — 1 minute per second">60×</button>
+                <button class="op-scrub-btn op-scrub-speed" data-speed="10"   title="Replay at 10× — 10 seconds per second">10×</button>
+                <button class="op-scrub-btn op-scrub-speed" data-speed="100"  title="Replay at 100× — 100 seconds per second">100×</button>
                 <button class="op-scrub-btn op-scrub-speed" data-speed="600"  title="Replay at 600× — 10 minutes per second">600×</button>
                 <button class="op-scrub-btn op-scrub-speed" data-speed="3600" title="Replay at 3600× — 1 hour per second">3600×</button>
             </span>
@@ -1655,6 +1784,7 @@ mountTimeStrip({
     btnEnd:    document.getElementById('op-tc-end'),
     btnNow:    document.getElementById('op-tc-now'),
     speedBtns: document.querySelectorAll('#op-scrub-speeds .op-scrub-speed'),
+    jumpBtns:  document.querySelectorAll('#op-scrub-jumps .op-scrub-jump'),
     readout:   document.getElementById('op-tc-readout'),
 });
 timeBus.start();

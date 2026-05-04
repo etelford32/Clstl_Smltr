@@ -15,12 +15,40 @@
  */
 
 import { createServer }         from 'node:http';
+import { readFileSync }         from 'node:fs';
 import { readFile, stat }       from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
+
+// ── .env.local loader (tiny shim, no dotenv dependency) ──────────────────────
+// Lets the smoke-test runbook be a single command instead of a paragraph of
+// `export FOO=...`. Reads .env.local from the project root if present;
+// existing process.env values win (so CI/explicit overrides aren't clobbered).
+try {
+    const envPath = join(ROOT, '.env.local');
+    const raw = readFileSync(envPath, 'utf8');
+    let count = 0;
+    for (const line of raw.split('\n')) {
+        const t = line.trim();
+        if (!t || t.startsWith('#')) continue;
+        const eq = t.indexOf('=');
+        if (eq <= 0) continue;
+        const key = t.slice(0, eq).trim();
+        let val   = t.slice(eq + 1).trim();
+        if ((val.startsWith('"') && val.endsWith('"')) ||
+            (val.startsWith("'") && val.endsWith("'"))) {
+            val = val.slice(1, -1);
+        }
+        if (process.env[key] === undefined) {
+            process.env[key] = val;
+            count++;
+        }
+    }
+    if (count) console.log(`[dev-server] loaded ${count} vars from .env.local`);
+} catch (_) { /* no .env.local — fine */ }
 
 // ── MIME types ────────────────────────────────────────────────────────────────
 const MIME = {
@@ -75,11 +103,19 @@ const API_ROUTES = {
     '/api/lightning/strikes':      'api/lightning/strikes.js',
     '/api/nws/convective':         'api/nws/convective.js',
     '/api/storms':                 'api/storms.js',
-    '/api/celestrak/tle':          'api/celestrak/tle.js',
-    '/api/celestrak/aristotle':    'api/celestrak/aristotle.js',
-    '/api/atmosphere/profile':     'api/atmosphere/profile.js',
-    '/api/atmosphere/snapshot':    'api/atmosphere/snapshot.js',
-    '/api/horizons':               'api/horizons.js',
+
+    // ── Auth / billing / invites / class / contact ────────────────────────
+    // These are the user-facing edge functions (not data-pipeline). Vercel's
+    // file-based routing handles them in prod; the dev server needs explicit
+    // entries here for local smoke tests of the signup → checkout → roster
+    // → student-invite flow to reach the handlers instead of 404'ing.
+    '/api/stripe/checkout':        'api/stripe/checkout.js',
+    '/api/stripe/portal':          'api/stripe/portal.js',
+    '/api/stripe/webhook':         'api/stripe/webhook.js',
+    '/api/invites/send':           'api/invites/send.js',
+    '/api/class/invite':           'api/class/invite.js',
+    '/api/class/roster':           'api/class/roster.js',
+    '/api/contact/enterprise':     'api/contact/enterprise.js',
 };
 
 // Cache imported edge-function modules (stateless, so caching is safe)
@@ -115,7 +151,7 @@ async function handleHorizons(rawUrl, nodeRes) {
 
 // ── Handle an /api/* request ──────────────────────────────────────────────────
 
-async function handleApi(pathname, rawUrl, nodeRes) {
+async function handleApi(pathname, rawUrl, nodeRes, nodeReq) {
     const fnPath = API_ROUTES[pathname];
     if (!fnPath) {
         nodeRes.writeHead(404, { 'Content-Type': 'application/json' });
@@ -128,22 +164,44 @@ async function handleApi(pathname, rawUrl, nodeRes) {
         const handler = mod.default;
         if (typeof handler !== 'function') throw new Error('Edge function has no default export');
 
-        // Build a Web API Request object (Node 18+ has this built-in)
+        // Build a Web API Request that mirrors the inbound Node request:
+        // method, headers, AND body. The original implementation only
+        // passed the URL — fine for GETs to data-pipeline endpoints but
+        // breaks POST / DELETE flows (every auth/billing/class endpoint).
         const fullUrl = `http://localhost:${PORT}${rawUrl}`;
-        const request = new Request(fullUrl);
+        const headers = new Headers();
+        for (const [k, v] of Object.entries(nodeReq.headers)) {
+            if (Array.isArray(v)) v.forEach(vv => headers.append(k, vv));
+            else if (v != null)   headers.set(k, v);
+        }
+        // Strip hop-by-hop headers that Fetch refuses.
+        ['host', 'connection', 'transfer-encoding'].forEach(h => headers.delete(h));
 
+        const method = (nodeReq.method || 'GET').toUpperCase();
+        const init   = { method, headers };
+        if (method !== 'GET' && method !== 'HEAD') {
+            // Read the request body off the IncomingMessage stream.
+            init.body = await new Promise((resolve, reject) => {
+                const chunks = [];
+                nodeReq.on('data',  c => chunks.push(c));
+                nodeReq.on('end',   () => resolve(Buffer.concat(chunks)));
+                nodeReq.on('error', reject);
+            });
+            // duplex required for Node fetch with a body.
+            init.duplex = 'half';
+        }
+
+        const request  = new Request(fullUrl, init);
         const response = await handler(request);
 
-        // Relay headers and body to the Node IncomingMessage response
-        const ct    = response.headers.get('Content-Type') ?? 'application/json';
-        const cc    = response.headers.get('Cache-Control') ?? 'no-cache';
-        const body  = await response.text();
-
-        nodeRes.writeHead(response.status, {
-            'Content-Type':               ct,
-            'Cache-Control':              cc,
-            'Access-Control-Allow-Origin': '*',
-        });
+        // Relay status, headers, and body back to the Node response.
+        const outHeaders = {};
+        response.headers.forEach((v, k) => { outHeaders[k] = v; });
+        outHeaders['Access-Control-Allow-Origin']  = outHeaders['Access-Control-Allow-Origin']  ?? '*';
+        outHeaders['Access-Control-Allow-Methods'] = outHeaders['Access-Control-Allow-Methods'] ?? 'GET,POST,DELETE,OPTIONS';
+        outHeaders['Access-Control-Allow-Headers'] = outHeaders['Access-Control-Allow-Headers'] ?? 'Authorization,Content-Type';
+        nodeRes.writeHead(response.status, outHeaders);
+        const body = Buffer.from(await response.arrayBuffer());
         nodeRes.end(body);
 
     } catch (err) {
@@ -190,11 +248,13 @@ const server = createServer(async (req, res) => {
     try {
         const { pathname } = new URL(req.url, `http://localhost:${PORT}`);
 
-        // OPTIONS pre-flight (CORS)
+        // OPTIONS pre-flight (CORS) — must echo all the methods the
+        // edge functions accept, otherwise the browser blocks POST /
+        // DELETE before the handler even runs.
         if (req.method === 'OPTIONS') {
             res.writeHead(204, {
                 'Access-Control-Allow-Origin':  '*',
-                'Access-Control-Allow-Methods': 'GET,HEAD,OPTIONS',
+                'Access-Control-Allow-Methods': 'GET,HEAD,POST,DELETE,OPTIONS',
                 'Access-Control-Allow-Headers': 'Authorization,Content-Type',
             });
             res.end();
@@ -210,7 +270,7 @@ const server = createServer(async (req, res) => {
             if (apiPath === '/api/horizons') {
                 await handleHorizons(req.url, res);
             } else {
-                await handleApi(apiPath, req.url, res);
+                await handleApi(apiPath, req.url, res, req);
             }
         } else {
             await handleStatic(pathname, res);
