@@ -122,6 +122,39 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
     box-shadow:inset 0 0 12px rgba(102,255,170,.2);
 }
 
+/* Δv budget panel ──────────────────────────────────── */
+.mp-dv-budget {
+    margin-top:10px;
+    background:rgba(0,0,0,.3);
+    border:1px solid rgba(255,255,255,.1);
+    border-radius:8px; padding:10px 12px;
+    font-family:monospace; font-size:.7rem;
+}
+.mp-dv-row { display:flex; justify-content:space-between; gap:10px; line-height:1.5; }
+.mp-dv-row .k { color:#aab; }
+.mp-dv-row .v { color:#cfd; font-weight:700; }
+.mp-dv-row.mp-dv-margin { margin-top:4px; padding-top:4px; border-top:1px dashed rgba(255,255,255,.08); }
+.mp-dv-row.mp-dv-margin .v { font-size:.8rem; }
+.mp-dv-margin.ok    .v { color:#66ffaa; }
+.mp-dv-margin.tight .v { color:#ffcc66; }
+.mp-dv-margin.short .v { color:#ff7766; }
+.mp-dv-bar {
+    margin-top:6px; height:6px; border-radius:3px;
+    background:rgba(255,255,255,.06); overflow:hidden;
+}
+.mp-dv-bar-fill {
+    height:100%; background:#66ffaa;
+    transition:width .25s ease, background-color .25s ease;
+}
+.mp-dv-bar-fill.tight { background:#ffcc66; }
+.mp-dv-bar-fill.short { background:#ff7766; }
+.mp-dv-breakdown { margin-top:5px; color:#88a; font-size:.62rem; line-height:1.4; }
+.mp-launch-btn.tight { box-shadow:0 0 0 2px rgba(255,204,102,.4) inset; }
+.mp-launch-btn.short {
+    background:linear-gradient(180deg, #aa3322, #771a11);
+    box-shadow:0 4px 12px rgba(170,51,34,.45);
+}
+
 /* Time controls ────────────────────────────────────── */
 .mp-time-display {
     font-family:monospace; font-size:.84rem; color:#cfd0e0;
@@ -291,6 +324,18 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
             <span class="mp-time" id="mp-lunar-tof-val">5.4 d</span>
         </div>
 
+        <div class="mp-label">Vehicle</div>
+        <select id="mp-mission-vehicle" class="mp-select"></select>
+
+        <div id="mp-dv-budget" class="mp-dv-budget">
+            <div class="mp-dv-row"><span class="k">Δv required</span><span class="v" id="mp-dv-required">—</span></div>
+            <div class="mp-dv-row"><span class="k">Δv available</span><span class="v" id="mp-dv-available">—</span></div>
+            <div class="mp-dv-row"><span class="k">Mass m₀ / m_dry</span><span class="v" id="mp-dv-mass">—</span></div>
+            <div class="mp-dv-row mp-dv-margin"><span class="k">Margin</span><span class="v" id="mp-dv-margin-val">—</span></div>
+            <div class="mp-dv-bar"><div class="mp-dv-bar-fill" id="mp-dv-bar-fill"></div></div>
+            <div class="mp-dv-breakdown" id="mp-dv-breakdown"></div>
+        </div>
+
         <button id="mp-find-window" class="mp-secondary-btn" type="button" style="margin-top:10px;">🔍 Find Next Launch Window</button>
         <button id="mp-porkchop"    class="mp-secondary-btn" type="button" style="margin-top:6px;">🗺️ Run Pork-Chop Scan (Mars)</button>
         <button id="mp-launch"      class="mp-launch-btn"    type="button">🚀 Launch</button>
@@ -448,6 +493,7 @@ originBtns.forEach(btn => {
         // Re-evaluate which auxiliary controls are relevant (e.g. lunar
         // TOF slider for moon→earth).
         if (typeof updateTargetUI === 'function') updateTargetUI();
+        if (typeof refreshDvBudget === 'function') refreshDvBudget();
     });
 });
 refreshOriginUI();
@@ -703,6 +749,158 @@ const planner = initMissionPlanner({
 let marsWindow = null;          // { jd_depart, jd_arrive }
 let lastPorkchop = null;        // result from porkchopMars
 
+// ── Δv budget (Tsiolkovsky gating) ──────────────────────────────────
+// Available Δv = Isp · g₀ · ln(m₀ / m_dry). Required Δv = surface ascent
+// to a low parking orbit + transfer plan's dv_total_kms (when applicable)
+// + a coarse Hohmann delta for high Earth orbits (MEO/GEO). The required
+// number is recomputed on every UI change that affects it.
+const G0 = 9.80665;
+const missionVehicleSel = document.getElementById('mp-mission-vehicle');
+missionVehicleSel.innerHTML = Object.values(LAUNCH_VEHICLES)
+    .map(v => `<option value="${v.id}">${v.name}</option>`).join('');
+missionVehicleSel.value = 'heavy';
+
+// Heuristic ascent loss budgets, calibrated against simulateAscent for
+// each origin body. Used so the Δv readout updates instantly on UI change
+// instead of running the full ~5 ms ascent integrator on every event.
+const ASCENT_LOSS = {
+    earth: { g_loss: 1.7, d_loss: 0.15, s_loss: 0.30, default_alt_km: 400 },
+    moon:  { g_loss: 0.10, d_loss: 0.0, s_loss: 0.20, default_alt_km: 100 },
+    mars:  { g_loss: 0.50, d_loss: 0.04, s_loss: 0.30, default_alt_km: 400 },
+};
+const BODY_PHYS = {
+    earth: { R_km: 6378.137, mu_km3s2: 398600.4418 },
+    moon:  { R_km: 1737.4,   mu_km3s2: 4902.800066 },
+    mars:  { R_km: 3389.5,   mu_km3s2: 42828.37   },
+};
+
+function dvAvailableKms(vehicle) {
+    return vehicle.Isp_s * G0 * Math.log(1 / vehicle.dry_frac) / 1000;
+}
+function ascentDvKms(originBody, alt_km = null) {
+    const phys = BODY_PHYS[originBody];
+    const loss = ASCENT_LOSS[originBody];
+    const r_km = phys.R_km + (alt_km ?? loss.default_alt_km);
+    const v_circ = Math.sqrt(phys.mu_km3s2 / r_km);
+    return v_circ + loss.g_loss + loss.d_loss + loss.s_loss;
+}
+// Coarse two-burn Hohmann transfer between LEO and a higher Earth orbit.
+function leoToHigherEarthDv(target_alt_km) {
+    const r1 = 6378.137 + 400;
+    const r2 = 6378.137 + target_alt_km;
+    const mu = 398600.4418;
+    const a  = (r1 + r2) / 2;
+    const v1   = Math.sqrt(mu / r1);
+    const v_p  = Math.sqrt(mu * (2/r1 - 1/a));
+    const v_a  = Math.sqrt(mu * (2/r2 - 1/a));
+    const v2   = Math.sqrt(mu / r2);
+    return Math.abs(v_p - v1) + Math.abs(v2 - v_a);
+}
+
+function dvRequiredKms() {
+    const origin   = currentOriginBody;
+    const destId   = targetSel.value;
+    const ascent   = ascentDvKms(origin);
+    let transfer   = 0;
+    let label      = '';
+    try {
+        if (origin === 'earth') {
+            if (destId === 'leo' || destId === 'sso') {
+                label = 'ascent only';
+            } else if (destId === 'meo' || destId === 'geo') {
+                const target = TARGET_ORBITS.find(t => t.id === destId);
+                transfer = leoToHigherEarthDv(target.alt_km);
+                label    = `ascent + Hohmann to ${destId.toUpperCase()}`;
+            } else if (destId === 'moon') {
+                const tof = parseFloat(lunarTofRange.value);
+                const plan = planner.planLunarLambert({
+                    jd_depart: planner.getScenarioJD(),
+                    tof_d: tof,
+                    parking_inc_deg: parseFloat(parkIncRange.value),
+                });
+                transfer = plan.dv_total_kms;
+                label    = 'ascent + TLI + LOI';
+            } else if (destId === 'mars') {
+                const jd_d = marsWindow ? marsWindow.jd_depart : planner.getScenarioJD();
+                const jd_a = marsWindow ? marsWindow.jd_arrive : (jd_d + 258);
+                const plan = planner.planMarsLambert({
+                    jd_depart: jd_d, jd_arrive: jd_a,
+                    parking_inc_deg: parseFloat(parkIncRange.value),
+                });
+                transfer = plan.dv_total_kms;
+                label    = 'ascent + TMI + MOI';
+            }
+        } else if (origin === 'mars' && destId === 'earth') {
+            const plan = planner.planMarsToEarthLambert({
+                jd_depart: planner.getScenarioJD(),
+                jd_arrive: planner.getScenarioJD() + 258,
+            });
+            transfer = plan.dv_total_kms;
+            label    = 'ascent + TEI + EOI';
+        } else if (origin === 'moon' && destId === 'mars') {
+            const plan = planner.planMoonToMarsLambert({
+                jd_depart: planner.getScenarioJD(),
+                jd_arrive: planner.getScenarioJD() + 258,
+            });
+            transfer = plan.dv_total_kms;
+            label    = 'ascent + helio Lambert + MOI';
+        } else if (origin === 'moon' && destId === 'earth') {
+            const tof = parseFloat(lunarTofRange.value);
+            const plan = planner.planMoonToEarthLambert({
+                jd_depart: planner.getScenarioJD(),
+                tof_d: tof,
+            });
+            transfer = plan.dv_total_kms;
+            label    = 'ascent + TEI + EOI';
+        }
+    } catch (e) {
+        // Lambert can fail at degenerate dates; fall back to ascent only.
+        label = 'ascent only (transfer infeasible at this date)';
+    }
+    return { ascent, transfer, total: ascent + transfer, label };
+}
+
+const dvReqEl   = document.getElementById('mp-dv-required');
+const dvAvailEl = document.getElementById('mp-dv-available');
+const dvMassEl  = document.getElementById('mp-dv-mass');
+const dvMargEl  = document.getElementById('mp-dv-margin-val');
+const dvMargRow = dvMargEl.parentElement;
+const dvBarFill = document.getElementById('mp-dv-bar-fill');
+const dvBreakEl = document.getElementById('mp-dv-breakdown');
+const launchBtn = document.getElementById('mp-launch');
+
+function refreshDvBudget() {
+    const vehicle = LAUNCH_VEHICLES[missionVehicleSel.value];
+    const avail   = dvAvailableKms(vehicle);
+    const req     = dvRequiredKms();
+    const margin  = avail - req.total;
+
+    dvReqEl.textContent   = `${req.total.toFixed(2)} km/s`;
+    dvAvailEl.textContent = `${avail.toFixed(2)} km/s`;
+    dvMassEl.textContent  = `${(vehicle.m0_kg/1000).toFixed(1)} t / ${(vehicle.m0_kg*vehicle.dry_frac/1000).toFixed(1)} t`;
+    dvMargEl.textContent  = `${margin >= 0 ? '+' : ''}${margin.toFixed(2)} km/s`;
+    dvBreakEl.textContent = `${req.label} · ascent ${req.ascent.toFixed(2)} + transfer ${req.transfer.toFixed(2)} km/s`;
+
+    const ratio = Math.max(0, Math.min(1, req.total / Math.max(0.1, avail)));
+    dvBarFill.style.width = `${(ratio * 100).toFixed(1)}%`;
+
+    let cls;
+    if (margin < 0)        cls = 'short';
+    else if (margin < 1.0) cls = 'tight';
+    else                   cls = 'ok';
+    dvMargRow.classList.remove('ok', 'tight', 'short');
+    dvMargRow.classList.add(cls);
+    dvBarFill.classList.remove('tight', 'short');
+    if (cls !== 'ok') dvBarFill.classList.add(cls);
+    launchBtn.classList.remove('tight', 'short');
+    if (cls !== 'ok') launchBtn.classList.add(cls);
+    launchBtn.textContent = cls === 'short' ? '🚫 Δv shortfall — Launch anyway?'
+                          : cls === 'tight' ? '🚀 Launch (tight margin)'
+                          :                   '🚀 Launch';
+}
+
+missionVehicleSel.addEventListener('change', refreshDvBudget);
+
 // Parking inclination slider
 const parkIncRange = document.getElementById('mp-park-inc');
 const parkIncVal   = document.getElementById('mp-park-inc-val');
@@ -717,13 +915,18 @@ parkIncRange.addEventListener('input', () => {
         });
         renderPlan(plan);
     }
+    refreshDvBudget();
 });
-// Default parking inclination = launch site latitude.
+// Default parking inclination = launch site latitude (Earth pads only).
 siteSel.addEventListener('change', () => {
-    const s = LAUNCH_SITES.find(x => x.id === siteSel.value);
-    if (!s) return;
-    parkIncRange.value = Math.abs(s.lat).toFixed(1);
-    parkIncVal.textContent = `${Math.abs(s.lat).toFixed(1)}°`;
+    if (currentOriginBody === 'earth') {
+        const s = LAUNCH_SITES.find(x => x.id === siteSel.value);
+        if (s) {
+            parkIncRange.value = Math.abs(s.lat).toFixed(1);
+            parkIncVal.textContent = `${Math.abs(s.lat).toFixed(1)}°`;
+        }
+    }
+    refreshDvBudget();
 });
 
 // Lunar TOF slider — show only when "Lunar transfer" is the selected target.
@@ -749,7 +952,7 @@ function updateTargetUI() {
         renderPlan(plan);
     }
 }
-targetSel.addEventListener('change', updateTargetUI);
+targetSel.addEventListener('change', () => { updateTargetUI(); refreshDvBudget(); });
 lunarTofRange.addEventListener('input', () => {
     const v = parseFloat(lunarTofRange.value);
     lunarTofVal.textContent = `${v.toFixed(2)} d`;
@@ -761,6 +964,7 @@ lunarTofRange.addEventListener('input', () => {
         });
         renderPlan(plan);
     }
+    refreshDvBudget();
 });
 
 // ── Wire controls ───────────────────────────────────────────────────
@@ -782,6 +986,23 @@ document.getElementById('mp-launch').addEventListener('click', () => {
     if (targetSel.value === 'moon' || (currentOriginBody === 'moon' && targetSel.value === 'earth')) {
         opts.lunar_tof_d = parseFloat(lunarTofRange.value);
     }
+
+    // Δv budget audit — log the rocket-equation result and warn (but
+    // still launch) if the vehicle is short.
+    const vehicle = LAUNCH_VEHICLES[missionVehicleSel.value];
+    const avail = dvAvailableKms(vehicle);
+    const req   = dvRequiredKms();
+    const margin = avail - req.total;
+    opts.vehicleId = vehicle.id;
+    opts.dvBudget  = { vehicle: vehicle.name, avail, required: req.total, margin };
+    if (margin < 0) {
+        pushLog(`⚠️ ${vehicle.name}: Δv shortfall ${margin.toFixed(2)} km/s (need ${req.total.toFixed(2)}, have ${avail.toFixed(2)}). Launching anyway — flight will run out of propellant.`, 'window');
+    } else if (margin < 1.0) {
+        pushLog(`⚠️ ${vehicle.name}: tight Δv margin +${margin.toFixed(2)} km/s · ${req.label}`, 'window');
+    } else {
+        pushLog(`✓ ${vehicle.name}: Δv margin +${margin.toFixed(2)} km/s · ${req.label}`, 'deploy');
+    }
+
     planner.launch(opts);
 });
 
@@ -851,6 +1072,7 @@ function runMarsPorkchop() {
         });
         renderPlan(plan);
         pushLog(`🔍 Pork-chop best · depart ${jdToISO(pc.best.jd_dep)} → arrive ${jdToISO(pc.best.jd_arr)} · TOF ${pc.best.tof_d.toFixed(0)}d · C3 ${pc.best.c3.toFixed(1)} · Δv ${pc.best.dv.toFixed(2)} km/s`, 'window');
+        refreshDvBudget();
     }, 30);
 }
 
@@ -936,6 +1158,7 @@ pcCanvas.addEventListener('click', (ev) => {
     });
     renderPlan(plan);
     pushLog(`📍 Selected · depart ${jdToISO(jd_dep)} → arrive ${jdToISO(jd_arr)} · Δv ${plan.dv_total_kms.toFixed(2)} km/s`, 'window');
+    refreshDvBudget();
     // Re-render heatmap to refresh the optimum marker (no recompute needed).
     renderPorkchop(lastPorkchop);
     // And overlay the user's pick:
@@ -1233,6 +1456,9 @@ document.getElementById('mp-launch-cmp').addEventListener('click', () => {
         lpChartWrap.style.display = 'none';
     }, 30);
 });
+
+// Initial Δv budget render once planner + UI are wired.
+refreshDvBudget();
 
 // ── Auto-launch a starter LEO so the page never looks empty ─────────
 setTimeout(() => {
