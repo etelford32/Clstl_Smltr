@@ -40,6 +40,11 @@ import {
     hohmannPositionAt,
 } from './mission-planner-trajectory.js';
 import { sampleKeplerArc } from './mission-planner-lambert.js';
+import {
+    EARTH_VERT, EARTH_FRAG,
+    createEarthUniforms, loadEarthTextures,
+} from './earth-skin.js';
+import { makeOrreryPlanet, updateOrreryPlanet } from './orrery-skins.js';
 
 // ── Scene scales ────────────────────────────────────────────────────────────
 const GEO_UNIT_KM   = R_EARTH;          // 1 scene unit = 1 R⊕ in geo scene
@@ -67,6 +72,14 @@ export const TARGET_ORBITS = [
 ];
 
 const DEG = Math.PI / 180;
+const EARTH_OBLQ_RAD = 23.4393 * DEG;
+// Visual placement of the Sun in the Earth-centered scene. The real Sun is
+// ~23 455 R⊕ away which would punch through the camera's far plane and look
+// like a dot anyway. We park it at a fixed scene distance along the live
+// Earth→Sun direction so the day/night terminator and the on-screen Sun
+// stay co-located.
+const GEO_SUN_DIST   = 220;
+const GEO_SUN_RADIUS = 6.0;
 
 // ── Math helpers ────────────────────────────────────────────────────────────
 function latLonToVec3(latDeg, lonDeg, r = 1) {
@@ -132,14 +145,11 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         scenarioJD: jdNow(),
     };
 
-    // Surface markers
+    // Surface markers — parented to the spinning Earth so labels stay pinned
+    // to real lat/lon as the planet rotates. Each site gets a small base
+    // disk + glowing dot + canvas-sprite label naming the actual pad.
     for (const s of LAUNCH_SITES) {
-        const dot = new THREE.Mesh(
-            new THREE.SphereGeometry(0.018, 12, 8),
-            new THREE.MeshBasicMaterial({ color: 0xffaa33 }),
-        );
-        dot.position.copy(latLonToVec3(s.lat, s.lon, 1.005));
-        geo.scene.add(dot);
+        addLaunchSiteMarker(geo.earth, s);
     }
 
     // ── Mode switch ─────────────────────────────────────────────────────────
@@ -512,9 +522,27 @@ export function initMissionPlanner({ container, onEvent } = {}) {
     }
 
     function updateGeo(dt) {
-        // Earth rotation
+        // Earth rotation (cosmetic — slow enough that pinned launch sites
+        // don't whip around the globe between frames).
         geo.earth.rotation.y += dt * 0.04;
-        geo.grid.rotation.y   = geo.earth.rotation.y;
+
+        // Sun direction in world space = -(Earth heliocentric position).
+        // Drive the EarthSkin shader, the on-scene Sun mesh, and the
+        // directional light off this single source so the day/night line,
+        // the visible Sun, and the lighting all agree.
+        const eVec = earthHeliocentric(state.scenarioJD);
+        const earthHelio = eclipticToVec3(eVec.lon_rad, eVec.lat_rad, 1);
+        const sunDir = earthHelio.clone().multiplyScalar(-1).normalize();
+        if (geo.earthSkinU?.u_sun_dir) {
+            geo.earthSkinU.u_sun_dir.value.copy(sunDir);
+            geo.earthSkinU.u_time.value = state.elapsed;
+        }
+        if (geo.sunGroup) {
+            geo.sunGroup.position.copy(sunDir.clone().multiplyScalar(GEO_SUN_DIST));
+        }
+        if (geo.sunLight) {
+            geo.sunLight.position.copy(sunDir.clone().multiplyScalar(50));
+        }
 
         // Live Moon position from ephemeris (slowed): drift the moon along
         // its real angular rate, anchored to scenarioJD.
@@ -659,6 +687,18 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         hel.mars.position.copy (eclipticToVec3(mVec.lon_rad, mVec.lat_rad, mVec.dist_AU * HELIO_UNIT_AU));
         hel.mercury.position.copy(eclipticToVec3(meVec.lon_rad, meVec.lat_rad, meVec.dist_AU * HELIO_UNIT_AU));
         hel.venus.position.copy  (eclipticToVec3(vVec.lon_rad,  vVec.lat_rad,  vVec.dist_AU  * HELIO_UNIT_AU));
+
+        // Drive procedural-skin axial rotation + sun-direction lighting so
+        // the lit hemisphere always faces the (origin) Sun. Done after
+        // position updates because updateOrreryPlanet uses planet.group's
+        // current position to compute uSunDir.
+        if (hel.planets) {
+            const sunPos = new THREE.Vector3(0, 0, 0);
+            updateOrreryPlanet(hel.planets.mercury, state.scenarioJD, sunPos);
+            updateOrreryPlanet(hel.planets.venus,   state.scenarioJD, sunPos);
+            updateOrreryPlanet(hel.planets.earth,   state.scenarioJD, sunPos);
+            updateOrreryPlanet(hel.planets.mars,    state.scenarioJD, sunPos);
+        }
 
         // Mars missions — spacecraft walks the pre-sampled Lambert arc.
         // Linear interpolation between samples is fine because the arc was
@@ -899,31 +939,57 @@ function buildGeoScene(renderer, w, h) {
     controls.minDistance = 1.4;    controls.maxDistance = 200;
 
     scene.add(new THREE.AmbientLight(0x404060, 0.55));
-    const sun = new THREE.DirectionalLight(0xffeec8, 1.1);
-    sun.position.set(8, 4, 5); scene.add(sun);
+    // DirectionalLight tracks the live Sun direction (updated each frame).
+    const sunLight = new THREE.DirectionalLight(0xffeec8, 1.25);
+    sunLight.position.set(8, 4, 5);
+    scene.add(sunLight);
 
-    addStarfield(scene, 1500, 600);
+    addStarfield(scene, 1800, 600);
 
+    // ── Earth: Blue Marble shader piggy-backed off earth.html ───────────────
+    // The mesh sits inside a tilt group so axial obliquity (23.44°) shows up
+    // correctly. Day/night terminator follows u_sun_dir which we drive from
+    // live heliocentric coordinates each frame.
+    const earthTilt = new THREE.Group();
+    earthTilt.rotation.x = EARTH_OBLQ_RAD;
+    scene.add(earthTilt);
+
+    const earthSkinU = createEarthUniforms(new THREE.Vector3(1, 0, 0));
+    earthSkinU.u_aurora_on.value     = 0;     // saved for future Kp-driven UI
+    earthSkinU.u_city_lights.value   = 1;
+    earthSkinU.u_weather_on.value    = 0;
+    earthSkinU.u_bump_strength.value = 0.8;
     const earth = new THREE.Mesh(
         new THREE.SphereGeometry(1, 64, 48),
-        new THREE.MeshPhongMaterial({
-            color: 0x2a4f8e, emissive: 0x0a1830, emissiveIntensity: 0.4,
-            shininess: 18, specular: 0x4488cc,
+        new THREE.ShaderMaterial({
+            vertexShader:   EARTH_VERT,
+            fragmentShader: EARTH_FRAG,
+            uniforms:       earthSkinU,
         }),
     );
-    scene.add(earth);
+    earthTilt.add(earth);
+    // Async texture load (Blue Marble + night lights + topology + ocean mask).
+    // Until they arrive, the shader falls back to its placeholder textures.
+    loadEarthTextures(earthSkinU, null);
 
+    // Reference equatorial graticule — kept faint so it doesn't fight the
+    // texture detail but still gives orbital-plane orientation.
     const grid = new THREE.LineSegments(
-        new THREE.WireframeGeometry(new THREE.SphereGeometry(1.001, 18, 12)),
-        new THREE.LineBasicMaterial({ color: 0x335577, transparent: true, opacity: 0.18 }),
+        new THREE.WireframeGeometry(new THREE.SphereGeometry(1.002, 18, 12)),
+        new THREE.LineBasicMaterial({ color: 0x335577, transparent: true, opacity: 0.12 }),
     );
-    scene.add(grid);
+    earth.add(grid);
 
+    // Fresnel-edge atmosphere shell (BackSide additive).
     const atmo = new THREE.Mesh(
-        new THREE.SphereGeometry(1.04, 48, 32),
-        new THREE.MeshBasicMaterial({ color: 0x66aaff, transparent: true, opacity: 0.08, side: THREE.BackSide }),
+        new THREE.SphereGeometry(1.045, 48, 32),
+        new THREE.MeshBasicMaterial({
+            color: 0x66aaff, transparent: true, opacity: 0.18,
+            side: THREE.BackSide, blending: THREE.AdditiveBlending,
+            depthWrite: false,
+        }),
     );
-    scene.add(atmo);
+    earthTilt.add(atmo);
 
     const moon = new THREE.Mesh(
         new THREE.SphereGeometry(MOON_R_SCENE, 32, 24),
@@ -935,6 +1001,44 @@ function buildGeoScene(renderer, w, h) {
     const moonRingMean = makeRingLine(384400 / R_EARTH, 0x444466, 0.35);
     scene.add(moonRingMean);
 
+    // ── Sun in the geo scene ────────────────────────────────────────────────
+    // Lives ~220 R⊕ from Earth along the live Earth→Sun direction. Looks
+    // directional but is parented to a positionable Group so the corona +
+    // PointLight + lens flare all move together.
+    const sunGroup = new THREE.Group();
+    scene.add(sunGroup);
+    const sunMesh = new THREE.Mesh(
+        new THREE.SphereGeometry(GEO_SUN_RADIUS, 32, 24),
+        new THREE.MeshBasicMaterial({ color: 0xfff0c8 }),
+    );
+    sunGroup.add(sunMesh);
+    for (const [r, op, col] of [
+        [GEO_SUN_RADIUS * 1.30, 0.45, 0xffd06c],
+        [GEO_SUN_RADIUS * 1.85, 0.22, 0xffa040],
+        [GEO_SUN_RADIUS * 3.00, 0.10, 0xff7022],
+    ]) {
+        sunGroup.add(new THREE.Mesh(
+            new THREE.SphereGeometry(r, 32, 24),
+            new THREE.MeshBasicMaterial({
+                color: col, transparent: true, opacity: op,
+                side: THREE.BackSide, blending: THREE.AdditiveBlending,
+                depthWrite: false,
+            }),
+        ));
+    }
+    const sunFlare = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: makeRadialGradientTexture(0xffe09a, 0.0),
+        transparent: true, opacity: 0.6,
+        blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false,
+    }));
+    sunFlare.scale.set(GEO_SUN_RADIUS * 6, GEO_SUN_RADIUS * 6, 1);
+    sunGroup.add(sunFlare);
+    const sunPoint = new THREE.PointLight(0xffeec8, 0.6, 0, 0);
+    sunGroup.add(sunPoint);
+    const sunLabel = makeBodyLabel('Sun', '#ffe', 1.4);
+    sunLabel.position.set(0, GEO_SUN_RADIUS * 2.4, 0);
+    sunGroup.add(sunLabel);
+
     // Body labels for orientation.
     const earthLabel = makeBodyLabel('Earth', '#9cf');
     earthLabel.position.set(0, 1.4, 0);
@@ -943,7 +1047,12 @@ function buildGeoScene(renderer, w, h) {
     moonLabel.position.set(0, MOON_R_SCENE * 4, 0);
     moon.add(moonLabel);
 
-    return { scene, camera, controls, earth, grid, atmo, moon };
+    return {
+        scene, camera, controls,
+        earth, earthTilt, earthSkinU,
+        grid, atmo, moon,
+        sunGroup, sunLight,
+    };
 }
 
 function buildHelioScene(renderer, w, h) {
@@ -1004,16 +1113,23 @@ function buildHelioScene(renderer, w, h) {
     ];
     for (const o of orbits) scene.add(makeRingLine(o.r, o.color, 0.55));
 
-    // ── Planets with small atmosphere shells + body labels
-    const mercury = new THREE.Mesh(new THREE.SphereGeometry(0.05, 16, 12), new THREE.MeshPhongMaterial({ color: 0xaa9988, emissive: 0x222222 }));
-    const venus   = new THREE.Mesh(new THREE.SphereGeometry(0.07, 16, 12), new THREE.MeshPhongMaterial({ color: 0xe7c987, emissive: 0x332211 }));
-    const earth   = new THREE.Mesh(new THREE.SphereGeometry(0.08, 20, 14), new THREE.MeshPhongMaterial({ color: 0x4f8fe0, emissive: 0x112244 }));
-    const mars    = new THREE.Mesh(new THREE.SphereGeometry(0.06, 16, 12), new THREE.MeshPhongMaterial({ color: 0xc0552d, emissive: 0x331100 }));
-    scene.add(mercury, venus, earth, mars);
+    // ── Planets with procedural skins (orrery-skins.js) ────────────────────
+    // Each entry returns {group, surface, uniforms, spin}. The Group is the
+    // positionable handle used by the trajectory layer (.position.copy()).
+    // The atmosphere fresnel shell + axial tilt + rotation are handled by
+    // makeOrreryPlanet so we don't have to re-implement them here.
+    const mercuryP = makeOrreryPlanet('mercury', 0.052, 0xaa9988);
+    const venusP   = makeOrreryPlanet('venus',   0.072, 0xffeebb);
+    const earthP   = makeOrreryPlanet('earth',   0.082, 0x88bbff);
+    const marsP    = makeOrreryPlanet('mars',    0.062, 0xffaa77);
+    scene.add(mercuryP.group, venusP.group, earthP.group, marsP.group);
 
-    venus.add(makeAtmosphereShell(0.085, 0xffeebb, 0.16));
-    earth.add(makeAtmosphereShell(0.105, 0x88bbff, 0.22));
-    mars.add (makeAtmosphereShell(0.073, 0xffaa77, 0.12));
+    // Position-handle aliases — these are the Groups, so legacy
+    // hel.<planet>.position.copy(...) calls still work unchanged.
+    const mercury = mercuryP.group;
+    const venus   = venusP.group;
+    const earth   = earthP.group;
+    const mars    = marsP.group;
 
     const mercuryLabel = makeBodyLabel('Mercury', '#bba');
     const venusLabel   = makeBodyLabel('Venus',   '#fec');
@@ -1022,30 +1138,23 @@ function buildHelioScene(renderer, w, h) {
     const sunLabel     = makeBodyLabel('Sun',     '#ffd', 0.9);
     sunLabel.position.set(0, 0.45, 0);
     scene.add(sunLabel);
-    mercury.add(mercuryLabel); mercuryLabel.position.set(0, 0.10, 0);
-    venus.add(venusLabel);     venusLabel.position.set(0, 0.13, 0);
-    earth.add(earthLabel);     earthLabel.position.set(0, 0.15, 0);
-    mars.add(marsLabel);       marsLabel.position.set(0, 0.12, 0);
+    mercuryP.group.add(mercuryLabel); mercuryLabel.position.set(0, 0.10, 0);
+    venusP.group.add(venusLabel);     venusLabel.position.set(0, 0.13, 0);
+    earthP.group.add(earthLabel);     earthLabel.position.set(0, 0.15, 0);
+    marsP.group.add(marsLabel);       marsLabel.position.set(0, 0.12, 0);
 
     return {
         scene, camera, controls,
         sun, sunGlow, flare,
         mercury, venus, earth, mars,
+        // Full handles (group + uniforms + spin) for updateOrreryPlanet().
+        planets: {
+            mercury: mercuryP, venus: venusP, earth: earthP, mars: marsP,
+        },
     };
 }
 
 // ── Visual-enhancement primitives ───────────────────────────────────────────
-
-function makeAtmosphereShell(radius, color, opacity) {
-    return new THREE.Mesh(
-        new THREE.SphereGeometry(radius, 32, 24),
-        new THREE.MeshBasicMaterial({
-            color, transparent: true, opacity,
-            side: THREE.BackSide, blending: THREE.AdditiveBlending,
-            depthWrite: false,
-        }),
-    );
-}
 
 function makeRadialGradientTexture(rgbHex, edgeAlpha = 0) {
     const N = 128;
@@ -1082,6 +1191,61 @@ function makeBodyLabel(text, cssColor = '#ccddff', sizeMul = 1) {
     }));
     sprite.scale.set(0.42 * sizeMul, 0.105 * sizeMul, 1);
     return sprite;
+}
+
+/**
+ * Plant a launch-site marker on the rotating Earth mesh.
+ *
+ * Renders a glowing orange dot tipped slightly off the surface, an additive
+ * radial flare so it pops against night-side cities, and a canvas-sprite
+ * label with the pad's name floating just outside the atmosphere shell.
+ * The marker is parented to the Earth mesh, so it follows the planet's
+ * axial tilt + diurnal spin and stays pinned to real lat/lon.
+ */
+function addLaunchSiteMarker(earthMesh, site) {
+    const surface = latLonToVec3(site.lat, site.lon, 1.0);
+    const up      = surface.clone().normalize();
+
+    // Small thin post connects the surface to the dot — sells the "this
+    // pad is here" idea against the textured globe.
+    const postLen = 0.06;
+    const post = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.004, 0.004, postLen, 6),
+        new THREE.MeshBasicMaterial({ color: 0xffcc66, transparent: true, opacity: 0.85 }),
+    );
+    // Cylinder default axis is +Y; orient along the local up vector.
+    post.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
+    post.position.copy(up.clone().multiplyScalar(1.0 + postLen * 0.5));
+    earthMesh.add(post);
+
+    const dot = new THREE.Mesh(
+        new THREE.SphereGeometry(0.022, 14, 10),
+        new THREE.MeshBasicMaterial({ color: 0xffaa33 }),
+    );
+    dot.position.copy(up.clone().multiplyScalar(1.0 + postLen));
+    earthMesh.add(dot);
+
+    // Additive flare so the marker stays visible on the night side.
+    const flare = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: makeRadialGradientTexture(0xffd07a, 0),
+        transparent: true, opacity: 0.85,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false, depthTest: false,
+    }));
+    flare.position.copy(dot.position);
+    flare.scale.set(0.13, 0.13, 1);
+    earthMesh.add(flare);
+
+    // Canvas label — short name only so we don't clutter the globe.
+    const label = makeBodyLabel(siteShortName(site), '#ffd6a0', 0.7);
+    label.position.copy(up.clone().multiplyScalar(1.0 + postLen + 0.10));
+    earthMesh.add(label);
+}
+
+function siteShortName(site) {
+    // Strip trailing country/agency tag like " (USA)" so the on-globe
+    // label stays readable.
+    return site.name.replace(/\s*\([^)]+\)\s*$/, '').trim();
 }
 
 /**
