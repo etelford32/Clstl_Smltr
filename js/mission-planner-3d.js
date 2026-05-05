@@ -62,6 +62,12 @@ export const LAUNCH_SITES = [
     { id: 'vandy',   name: 'Vandenberg (USA)',     lat: 34.742, lon:-120.572 },
 ];
 
+// ── Mars surface bases (gamification — fictional but anchored to real
+//     Olympus Mons coordinates so the dome sits where it ought to). ──────────
+export const MARS_BIOMES = [
+    { id: 'olympia', name: 'Olympia Base', lat: 18.65, lon: 226.2 },
+];
+
 export const TARGET_ORBITS = [
     { id: 'leo',  name: 'LEO · 400 km',           alt_km:    400,                         frame: 'geo' },
     { id: 'sso',  name: 'SSO · 600 km',           alt_km:    600, inc_deg: 97.8,          frame: 'geo' },
@@ -1121,8 +1127,15 @@ function buildHelioScene(renderer, w, h) {
     const mercuryP = makeOrreryPlanet('mercury', 0.052, 0xaa9988);
     const venusP   = makeOrreryPlanet('venus',   0.072, 0xffeebb);
     const earthP   = makeOrreryPlanet('earth',   0.082, 0x88bbff);
-    const marsP    = makeOrreryPlanet('mars',    0.062, 0xffaa77);
+    const MARS_R   = 0.062;
+    const marsP    = makeOrreryPlanet('mars',    MARS_R, 0xffaa77);
     scene.add(mercuryP.group, venusP.group, earthP.group, marsP.group);
+
+    // Pin Mars surface bases to the spinning surface mesh so the dome
+    // tracks day/night with the planet's rotation + axial tilt.
+    for (const biome of MARS_BIOMES) {
+        addMarsBiome(marsP.surface, MARS_R, biome);
+    }
 
     // Position-handle aliases — these are the Groups, so legacy
     // hel.<planet>.position.copy(...) calls still work unchanged.
@@ -1246,6 +1259,97 @@ function siteShortName(site) {
     // Strip trailing country/agency tag like " (USA)" so the on-globe
     // label stays readable.
     return site.name.replace(/\s*\([^)]+\)\s*$/, '').trim();
+}
+
+/**
+ * Plant a stylized colony "biome" on the Mars surface mesh.
+ *
+ * Visual stack:
+ *   • Reddish landing pad (CircleGeometry) flush with the surface
+ *   • Glowing orange pad ring (RingGeometry) so the site reads from orbit
+ *   • Translucent habitat dome (open hemisphere, MeshPhong with emissive)
+ *   • Small communications spire (slim cone) topped by a beacon sprite
+ *   • Canvas-sprite name label floating above the dome
+ *
+ * Parented to the planet's spinning surface mesh, so the whole colony
+ * inherits axial tilt + diurnal spin and stays pinned to its lat/lon.
+ */
+function addMarsBiome(marsSurface, planetRadius, biome) {
+    const surfacePoint = latLonToVec3(biome.lat, biome.lon, planetRadius);
+    const up           = surfacePoint.clone().normalize();
+
+    const group = new THREE.Group();
+    group.position.copy(surfacePoint);
+    // Re-orient so the group's local +Y points along the local surface
+    // normal — keeps the dome upright on the curved planet.
+    group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
+
+    // Landing pad — flat reddish disc just above the regolith.
+    const padR = planetRadius * 0.18;
+    const pad = new THREE.Mesh(
+        new THREE.CircleGeometry(padR, 28),
+        new THREE.MeshBasicMaterial({
+            color: 0x553322, transparent: true, opacity: 0.95,
+            side: THREE.DoubleSide, depthWrite: false,
+        }),
+    );
+    pad.rotation.x = -Math.PI / 2;
+    pad.position.y = planetRadius * 0.001;
+    group.add(pad);
+
+    // Glowing pad ring — additive so it pops on the night side.
+    const padRing = new THREE.Mesh(
+        new THREE.RingGeometry(padR, padR * 1.12, 36),
+        new THREE.MeshBasicMaterial({
+            color: 0xffaa44, transparent: true, opacity: 0.9,
+            side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+            depthWrite: false,
+        }),
+    );
+    padRing.rotation.x = -Math.PI / 2;
+    padRing.position.y = planetRadius * 0.0015;
+    group.add(padRing);
+
+    // Habitat dome — open hemisphere so it reads as a structure even at
+    // 1 px on screen. Slight emissive so it's visible against the night
+    // side without needing extra lighting.
+    const domeR = planetRadius * 0.10;
+    const dome = new THREE.Mesh(
+        new THREE.SphereGeometry(domeR, 18, 12, 0, Math.PI * 2, 0, Math.PI / 2),
+        new THREE.MeshPhongMaterial({
+            color: 0xddeeff, emissive: 0x113355, emissiveIntensity: 0.45,
+            transparent: true, opacity: 0.55, shininess: 90,
+            side: THREE.DoubleSide,
+        }),
+    );
+    dome.position.y = planetRadius * 0.002;
+    group.add(dome);
+
+    // Comms spire + beacon sprite for visibility from orbit.
+    const spire = new THREE.Mesh(
+        new THREE.ConeGeometry(planetRadius * 0.006, planetRadius * 0.16, 6),
+        new THREE.MeshBasicMaterial({ color: 0xeeccaa }),
+    );
+    spire.position.y = planetRadius * 0.18;
+    group.add(spire);
+
+    const beacon = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: makeRadialGradientTexture(0xffcc66, 0),
+        transparent: true, opacity: 0.85,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false, depthTest: false,
+    }));
+    beacon.scale.set(planetRadius * 0.55, planetRadius * 0.55, 1);
+    beacon.position.y = planetRadius * 0.27;
+    group.add(beacon);
+
+    // Name label
+    const label = makeBodyLabel(biome.name, '#ffaa66', 0.7);
+    label.position.y = planetRadius * 0.48;
+    group.add(label);
+
+    marsSurface.add(group);
+    return group;
 }
 
 /**
