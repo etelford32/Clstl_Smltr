@@ -172,8 +172,8 @@ function injectStyle() {
 #${PANEL_ID} .sw-card {
     border-radius:6px; padding:7px 8px 6px;
     margin-bottom:5px; cursor:pointer;
-    background:rgba(255,255,255,.04);
-    border:1px solid rgba(255,255,255,.06);
+    background: var(--c-border-faint, rgba(255,255,255,.04));
+    border:1px solid var(--c-border-faint, rgba(255,255,255,.06));
     transition:background .15s, transform .12s, border-color .15s;
 }
 #${PANEL_ID} .sw-card:hover {
@@ -211,7 +211,7 @@ function injectStyle() {
 }
 #${PANEL_ID} .sw-bar {
     height:3px; border-radius:2px; margin:3px 0 4px;
-    background:rgba(255,255,255,.08);
+    background: var(--c-border-soft, rgba(255,255,255,.08));
     overflow:hidden;
 }
 #${PANEL_ID} .sw-bar-fill {
@@ -231,8 +231,8 @@ function injectStyle() {
     color:#ffb070;
 }
 #${PANEL_ID} .sw-foot {
-    font-size:9px; color:#4f5c6a; margin-top:4px;
-    padding-top:4px; border-top:1px dashed rgba(255,255,255,.06);
+    font-size:9px; color: var(--c-text-faint, #4f5c6a); margin-top:4px;
+    padding-top:4px; border-top:1px dashed var(--c-border-faint, rgba(255,255,255,.06));
     text-align:right;
 }
 #${PANEL_ID} .sw-scrub {
