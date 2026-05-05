@@ -345,18 +345,13 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
         </div>
 
         <button id="mp-find-window" class="mp-secondary-btn" type="button" style="margin-top:10px;">🔍 Find Next Launch Window</button>
-        <button id="mp-porkchop"    class="mp-secondary-btn" type="button" style="margin-top:6px;">🗺️ Run Pork-Chop Scan (Mars)</button>
+        <button id="mp-porkchop"    class="mp-secondary-btn" type="button" style="margin-top:6px;">🗺️ Run Pork-Chop Scan</button>
         <button id="mp-launch"      class="mp-launch-btn"    type="button">🚀 Launch</button>
 
         <div class="mp-section-divider"></div>
 
-        <div class="mp-label">Multi-leg Tour (chained Lambert)</div>
-        <select id="mp-tour-preset" class="mp-select">
-            <option value="veem">V-E-E-M · Earth → Venus → Earth → Mars</option>
-            <option value="evvm">V-V-M · Earth → Venus → Venus → Mars</option>
-            <option value="eve">V-E · Earth → Venus → Earth (BepiColombo-like)</option>
-            <option value="em">Direct · Earth → Mars (reference)</option>
-        </select>
+        <div class="mp-label">Multi-leg Tour (chained Lambert + gravity assists)</div>
+        <select id="mp-tour-preset" class="mp-select"></select>
         <button id="mp-tour-optimize" class="mp-secondary-btn" type="button" style="margin-top:6px;">🌌 Optimize + Run Tour</button>
 
         <div class="mp-section-divider"></div>
@@ -669,20 +664,27 @@ function renderPlan(plan) {
             <div class="mp-plan-row"><span class="k">Δv (MOI)</span><span class="v">${plan.dv_moi_kms.toFixed(3)} km/s</span></div>
             <div class="mp-plan-row"><span class="k">Total Δv</span><span class="v">${plan.dv_total_kms.toFixed(3)} km/s</span></div>
         `;
-    } else if (plan.kind === 'mars-to-earth' || plan.kind === 'moon-to-mars' || plan.kind === 'moon-to-earth') {
+    } else if (plan.kind === 'mars-to-earth' || plan.kind === 'moon-to-mars' ||
+               plan.kind === 'moon-to-earth' || plan.kind?.startsWith('earth-to-')) {
         const titles = {
-            'mars-to-earth': '⟲ Mars → Earth (Lambert · 3D)',
-            'moon-to-mars':  '🌙→♂ Moon → Mars (Lambert · 3D)',
-            'moon-to-earth': '🌙→🌍 Moon → Earth (lunar return)',
+            'mars-to-earth':    '⟲ Mars → Earth (Lambert · 3D)',
+            'moon-to-mars':     '🌙→♂ Moon → Mars (Lambert · 3D)',
+            'moon-to-earth':    '🌙→🌍 Moon → Earth (lunar return)',
+            'earth-to-jupiter': '♃ Earth → Jupiter (Lambert · 3D)',
+            'earth-to-saturn':  '♄ Earth → Saturn (Lambert · 3D)',
+            'earth-to-uranus':  '⛢ Earth → Uranus (Lambert · 3D)',
+            'earth-to-neptune': '♆ Earth → Neptune (Lambert · 3D)',
         };
+        const yrs = plan.tof_d / 365.25;
         planEl.innerHTML = `
-            <div class="mp-plan-title">${titles[plan.kind]}</div>
+            <div class="mp-plan-title">${titles[plan.kind] ?? plan.kind}</div>
             <div class="mp-plan-row"><span class="k">Depart</span><span class="v">${jdToISO(plan.jd_depart)}</span></div>
             <div class="mp-plan-row"><span class="k">Arrive</span><span class="v">${jdToISO(plan.jd_arrive)}</span></div>
-            <div class="mp-plan-row"><span class="k">TOF</span><span class="v">${plan.tof_d.toFixed(1)} days</span></div>
+            <div class="mp-plan-row"><span class="k">TOF</span><span class="v">${plan.tof_d.toFixed(0)} d (${yrs.toFixed(2)} yr)</span></div>
             <div class="mp-plan-row"><span class="k">Δv depart</span><span class="v">${plan.dv_depart_kms.toFixed(3)} km/s</span></div>
             <div class="mp-plan-row"><span class="k">Δv arrive</span><span class="v">${plan.dv_arrive_kms.toFixed(3)} km/s</span></div>
             <div class="mp-plan-row"><span class="k">Total Δv</span><span class="v">${plan.dv_total_kms.toFixed(3)} km/s</span></div>
+            ${plan.c3_earth_km2s2 ? `<div class="mp-plan-row"><span class="k">C3 Earth</span><span class="v">${plan.c3_earth_km2s2.toFixed(2)} km²/s²</span></div>` : ''}
             ${plan.v_inf_depart_kms ? `<div class="mp-plan-row"><span class="k">v∞ depart</span><span class="v">${plan.v_inf_depart_kms.toFixed(3)} km/s</span></div>` : ''}
             ${plan.v_inf_arrive_kms ? `<div class="mp-plan-row"><span class="k">v∞ arrive</span><span class="v">${plan.v_inf_arrive_kms.toFixed(3)} km/s</span></div>` : ''}
         `;
@@ -720,10 +722,22 @@ const planner = initMissionPlanner({
             renderPlan(ev.plan);
         } else if (ev.type === 'lunar-captured') {
             pushLog(`🛰️ LOI · ${ev.payloadName} captured into ${(ev.plan.r_capt_km - 1737).toFixed(0)} km lunar orbit`, 'capture');
-        } else if (ev.type === 'mars-captured') {
-            pushLog(`🛰️ MOI · ${ev.payloadName} arrived at Mars`, 'capture');
-        } else if (ev.type === 'earth-captured') {
-            pushLog(`🛰️ EOI · ${ev.payloadName} arrived back at Earth`, 'capture');
+        } else if (ev.type === 'lunar-captured') {
+            // Keep the lunar capture's altitude readout — it has plan-specific
+            // info (r_capt_km in km) that the generic handler would lose.
+            pushLog(`🌙 LOI · ${ev.payloadName} captured into ${(ev.plan.r_capt_km - 1737).toFixed(0)} km lunar orbit`, 'capture');
+        } else if (ev.type?.endsWith('-captured')) {
+            // Generic capture-event handler driven by INSERTION_LABELS so the
+            // wording for each body lives in one place (planner.INSERTION_LABELS
+            // → trajectory module). Falls back gracefully if a new body is
+            // added without a label entry.
+            const bodyKey = ev.type.replace('-captured', '');
+            const lbl     = planner.INSERTION_LABELS?.[bodyKey];
+            const disp    = planner.PLANET_DISPLAY?.[bodyKey];
+            const tag     = lbl?.abbr ?? bodyKey.toUpperCase();
+            const long    = lbl?.long ?? `${bodyKey} orbit insertion`;
+            const sym     = disp?.symbol ?? '🛰️';
+            pushLog(`${sym} ${tag} · ${ev.payloadName} — ${long}`, 'capture');
         } else if (ev.type === 'lunar-return-arrived') {
             pushLog(`🛰️ EOI · ${ev.payloadName} captured into LEO from Moon`, 'capture');
         } else if (ev.type === 'launched-helio') {
@@ -754,6 +768,16 @@ const planner = initMissionPlanner({
         refreshHUD();
     },
 });
+
+// Populate the tour-preset dropdown from TOUR_PRESETS so newly added
+// gravity-assist sequences (Voyager 2, Cassini, etc.) show up without
+// touching the HTML.
+{
+    const tourSel = document.getElementById('mp-tour-preset');
+    tourSel.innerHTML = Object.entries(planner.TOUR_PRESETS)
+        .map(([id, p]) => `<option value="${id}">${p.name}</option>`)
+        .join('');
+}
 
 // ── Mars window state (depart, arrive) — set by Find/Pork-Chop/click ──
 let marsWindow = null;          // { jd_depart, jd_arrive }
@@ -839,6 +863,15 @@ function dvRequiredKms() {
                 });
                 transfer = plan.dv_total_kms;
                 label    = 'ascent + TMI + MOI';
+            } else if (['jupiter','saturn','uranus','neptune'].includes(destId)) {
+                // Outer-planet Lambert (Hohmann-default TOF — multi-year).
+                const plan = planner.planEarthToOuterLambert({
+                    planet:    destId,
+                    jd_depart: planner.getScenarioJD(),
+                    parking_inc_deg: parseFloat(parkIncRange.value),
+                });
+                transfer = plan.dv_total_kms;
+                label    = `ascent + TXI + capture (${(plan.tof_d/365.25).toFixed(1)} yr TOF)`;
             }
         } else if (origin === 'mars' && destId === 'earth') {
             const plan = planner.planMarsToEarthLambert({
@@ -961,6 +994,20 @@ function updateTargetUI() {
         });
         renderPlan(plan);
     }
+    // Porkchop button label reflects the destination so the user knows
+    // which planet's window will be scanned.
+    const porkBtn = document.getElementById('mp-porkchop');
+    const t = targetSel.value;
+    const planetCap = t.charAt(0).toUpperCase() + t.slice(1);
+    if (['mars','jupiter','saturn','uranus','neptune'].includes(t)) {
+        porkBtn.textContent = `🗺️ Run Pork-Chop Scan (${planetCap})`;
+        porkBtn.disabled = false;
+        porkBtn.style.opacity = '1';
+    } else {
+        porkBtn.textContent = `🗺️ Run Pork-Chop Scan`;
+        porkBtn.disabled = true;
+        porkBtn.style.opacity = '0.5';
+    }
 }
 targetSel.addEventListener('change', () => { updateTargetUI(); refreshDvBudget(); });
 lunarTofRange.addEventListener('input', () => {
@@ -1046,42 +1093,74 @@ document.getElementById('mp-find-window').addEventListener('click', () => {
         const plan = planner.findLunarWindow({ jd_start: jdNow() });
         renderPlan(plan);
         pushLog(`🔍 Lunar window · TOF ${plan.tof_d.toFixed(1)} d · Δv ${plan.dv_total_kms.toFixed(2)} km/s`, 'window');
-    } else if (tgt.id === 'mars') {
-        runMarsPorkchop();   // Lambert pork-chop is the proper window finder
+    } else if (['mars','jupiter','saturn','uranus','neptune'].includes(tgt.id)) {
+        runPlanetPorkchop(tgt.id);
     } else {
         pushLog(`No window scan needed for ${tgt.name} — orbit is geometric, not phase-dependent.`, 'window');
     }
 });
 
-document.getElementById('mp-porkchop').addEventListener('click', runMarsPorkchop);
+document.getElementById('mp-porkchop').addEventListener('click', () => {
+    const planet = ['mars','jupiter','saturn','uranus','neptune'].includes(targetSel.value)
+        ? targetSel.value : 'mars';
+    runPlanetPorkchop(planet);
+});
 
-function runMarsPorkchop() {
-    pushLog(`⏳ Pork-chop scan: 80×80 Lamberts over the next 1.5 yr…`, 'window');
+// Per-planet porkchop search ranges. Departure windows grow with the
+// synodic period; arrival windows reach further out for slower transfers.
+// Numbers are days from "now" — scaled so each scan covers at least one
+// synodic cycle plus a generous TOF spread.
+const _PORKCHOP_RANGES = {
+    mars:    { dep_max:   540, arr_min:   90, arr_max:   900, n: 80 },
+    jupiter: { dep_max:   780, arr_min:  365, arr_max:  2200, n: 60 },
+    saturn:  { dep_max:   400, arr_min:  900, arr_max:  4500, n: 60 },
+    uranus:  { dep_max:   400, arr_min: 2500, arr_max:  9000, n: 50 },
+    neptune: { dep_max:   400, arr_min: 5000, arr_max: 15000, n: 50 },
+};
+
+function runPlanetPorkchop(planet) {
+    const range = _PORKCHOP_RANGES[planet];
+    if (!range) { pushLog(`Pork-chop not supported for ${planet}.`, 'window'); return; }
+    const N = range.n;
+    pushLog(`⏳ ${planet[0].toUpperCase()+planet.slice(1)} pork-chop scan: ${N}×${N} Lamberts…`, 'window');
     setTimeout(() => {
         const inc = parseFloat(parkIncRange.value);
         const today = jdNow();
-        const pc = planner.porkchopMars({
+        const pc = planner.porkchop({
+            planet,
             jd_dep_min: today,
-            jd_dep_max: today + 540,        // ~1.5 yr departure window
-            jd_arr_min: today + 90,
-            jd_arr_max: today + 540 + 360,  // up to 360-day TOFs
-            n_dep: 80, n_arr: 80,
+            jd_dep_max: today + range.dep_max,
+            jd_arr_min: today + range.arr_min,
+            jd_arr_max: today + range.arr_max,
+            n_dep: N, n_arr: N,
             parking_inc_deg: inc,
         });
         lastPorkchop = pc;
         if (!Number.isFinite(pc.best.dv)) {
-            pushLog(`Pork-chop scan found no feasible trajectories. Try a wider window.`, 'window');
+            pushLog(`Pork-chop scan found no feasible trajectories for ${planet}. Try a wider window.`, 'window');
             return;
         }
+        // Cache the chosen (depart, arrive) window. We reuse the existing
+        // marsWindow slot for any planet — the launch dispatcher picks the
+        // right route by the destination dropdown, not the planet name.
         marsWindow = { jd_depart: pc.best.jd_dep, jd_arrive: pc.best.jd_arr };
         renderPorkchop(pc);
-        const plan = planner.planMarsLambert({
-            jd_depart: pc.best.jd_dep,
-            jd_arrive: pc.best.jd_arr,
-            parking_inc_deg: inc,
-        });
+        let plan;
+        if (planet === 'mars') {
+            plan = planner.planMarsLambert({
+                jd_depart: pc.best.jd_dep, jd_arrive: pc.best.jd_arr,
+                parking_inc_deg: inc,
+            });
+        } else {
+            plan = planner.planEarthToOuterLambert({
+                planet,
+                jd_depart: pc.best.jd_dep, jd_arrive: pc.best.jd_arr,
+                parking_inc_deg: inc,
+            });
+        }
         renderPlan(plan);
-        pushLog(`🔍 Pork-chop best · depart ${jdToISO(pc.best.jd_dep)} → arrive ${jdToISO(pc.best.jd_arr)} · TOF ${pc.best.tof_d.toFixed(0)}d · C3 ${pc.best.c3.toFixed(1)} · Δv ${pc.best.dv.toFixed(2)} km/s`, 'window');
+        const yrs = pc.best.tof_d / 365.25;
+        pushLog(`🔍 ${planet} pork-chop best · depart ${jdToISO(pc.best.jd_dep)} → arrive ${jdToISO(pc.best.jd_arr)} · TOF ${pc.best.tof_d.toFixed(0)} d (${yrs.toFixed(1)} yr) · C3 ${pc.best.c3.toFixed(1)} · Δv ${pc.best.dv.toFixed(2)} km/s`, 'window');
         refreshDvBudget();
     }, 30);
 }
@@ -1471,6 +1550,8 @@ document.getElementById('mp-launch-cmp').addEventListener('click', () => {
 
 // Initial Δv budget render once planner + UI are wired.
 refreshDvBudget();
+// Sync porkchop button label / disabled state to the initial destination.
+updateTargetUI();
 
 // ── Auto-launch a starter LEO so the page never looks empty ─────────
 setTimeout(() => {
