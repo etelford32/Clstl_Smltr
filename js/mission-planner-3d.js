@@ -940,6 +940,42 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         }
     }
 
+    // ── Camera-distance LOD for visible bodies ──────────────────────────────
+    // Each planet's mesh is built at its real radius (Mercury 0.382, Venus
+    // 0.949, Earth 1.0, Mars 0.531 R⊕). Up close that's correct: Mars
+    // really is half the size of Earth, Mercury is a third. From AU-scale
+    // distance those meshes would be sub-pixel, so we uniformly scale each
+    // body up to maintain a minimum on-screen angular size (~12 mrad ≈
+    // 0.7°, roughly 12 px on a 1080p viewport). Below the crossover
+    // distance the scale is exactly 1 — no pop, just a smooth transition
+    // when the camera passes through ≈ realRadius / minAngular.
+    //
+    // Earth is scaled via earthTilt so the Moon (sibling in earthSystem)
+    // and the lunar orbit ring stay at their real heliocentric offsets.
+    // Moon stays at real size and relies on its halo sprite at distance.
+    const MIN_ANGULAR = 0.012;
+    const _camWorld    = new THREE.Vector3();
+    const _bodyWorld   = new THREE.Vector3();
+    function lodScale(distance, realRadius) {
+        const angular = realRadius / Math.max(1e-3, distance);
+        return angular < MIN_ANGULAR ? MIN_ANGULAR / angular : 1.0;
+    }
+    function applyPlanetLOD() {
+        world.camera.getWorldPosition(_camWorld);
+
+        // Inner-planet groups
+        for (const handle of [hel.planets.mercury, hel.planets.venus, hel.planets.mars]) {
+            handle.group.getWorldPosition(_bodyWorld);
+            handle.group.scale.setScalar(
+                lodScale(_camWorld.distanceTo(_bodyWorld), handle.realRadius));
+        }
+
+        // Earth (scale earthTilt only — keeps Moon on its real orbit)
+        world.earthSystem.getWorldPosition(_bodyWorld);
+        world.earthTilt.scale.setScalar(
+            lodScale(_camWorld.distanceTo(_bodyWorld), 1.0));
+    }
+
     function captureLunar(m) {
         m.captureRing = makeOrbitRingFromBasis(
             m.plan.r_capt_km / GEO_UNIT_KM,
@@ -985,6 +1021,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             updateOrreryPlanet(hel.planets.mercury, state.scenarioJD, sunPos);
             updateOrreryPlanet(hel.planets.venus,   state.scenarioJD, sunPos);
             updateOrreryPlanet(hel.planets.mars,    state.scenarioJD, sunPos);
+            applyPlanetLOD();
         }
 
         // Mars missions — spacecraft walks the pre-sampled Lambert arc.
@@ -1324,13 +1361,16 @@ function buildWorldScene(renderer, w, h) {
     for (const o of orbits) scene.add(makeRingLine(o.r, o.color, 0.6));
 
     // ── Inner planets via procedural orrery skins ──────────────────────────
-    // Sizes are exaggerated so they read at AU-scale viewing distance.
-    // Real radii (R⊕): Mercury 0.382, Venus 0.949, Mars 0.531. With a 60-80×
-    // visibility boost they come in at ~30-50 R⊕ — small at planet-flyby
-    // scale but still proportionally sensible against Earth at 1 R⊕.
-    const MARS_R    = 50;
-    const VENUS_R   = 50;
-    const MERCURY_R = 30;
+    // Bodies are built at their REAL radii so that flying close (e.g.,
+    // Olympia Base on Mars) shows correct relative scale: Mars (0.531 R⊕)
+    // really is half of Earth. From AU-scale viewing distance the meshes
+    // would be sub-pixel, so the unified tick scales them up uniformly via
+    // applyPlanetLOD() to maintain a minimum on-screen angular size. The
+    // stylised landing pad / dome / beacon on each surface scales with the
+    // group, so Olympia Base reads at every zoom.
+    const MARS_R    = R_MARS  / R_EARTH;     // 0.531
+    const VENUS_R   = 6051.8  / R_EARTH;     // 0.949
+    const MERCURY_R = 2439.7  / R_EARTH;     // 0.382
     const mercuryP = makeOrreryPlanet('mercury', MERCURY_R, 0xaa9988);
     const venusP   = makeOrreryPlanet('venus',   VENUS_R,   0xffeebb);
     const marsP    = makeOrreryPlanet('mars',    MARS_R,    0xffaa77);
@@ -1389,17 +1429,19 @@ function buildWorldScene(renderer, w, h) {
     );
     earthTilt.add(atmo);
 
-    // Halo billboard so Earth is visible from heliocentric distances. The
-    // sprite is depth-tested, so it sits behind the Earth mesh when the
-    // camera is close (and stays out of the way visually). When the camera
-    // is far, the halo dominates and reads as a "you-are-here" marker.
+    // Halo billboard so Earth is visible from heliocentric distances.
+    // sizeAttenuation:false keeps it at a constant ~5% screen-height size
+    // regardless of camera zoom, so it doesn't overwhelm close-ups (where
+    // the LOD-scaled Earth mesh + atmosphere dominate). depthTest stays on
+    // so the halo sits behind the Earth mesh when the camera is close.
     const earthHalo = new THREE.Sprite(new THREE.SpriteMaterial({
         map: makeRadialGradientTexture(0x66aaff, 0),
         transparent: true, opacity: 0.55,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
+        sizeAttenuation: false,
     }));
-    earthHalo.scale.set(60, 60, 1);
+    earthHalo.scale.set(0.05, 0.05, 1);
     earthSystem.add(earthHalo);
 
     const moon = new THREE.Mesh(
@@ -1417,8 +1459,9 @@ function buildWorldScene(renderer, w, h) {
         transparent: true, opacity: 0.45,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
+        sizeAttenuation: false,
     }));
-    moonHalo.scale.set(15, 15, 1);
+    moonHalo.scale.set(0.025, 0.025, 1);
     moon.add(moonHalo);
 
     // Lunar mean-orbit ring (visual reference, equatorial).
@@ -1431,6 +1474,14 @@ function buildWorldScene(renderer, w, h) {
     const moonLabel = makeBodyLabel('Moon', '#cdd');
     moonLabel.position.set(0, MOON_R_SCENE * 4, 0);
     moon.add(moonLabel);
+
+    // Annotate each planet handle with its real radius so the LOD pass
+    // can scale uniformly when the camera is far. Stored alongside the
+    // existing {group, surface, uniforms, spin} so the orrery helpers
+    // don't care.
+    mercuryP.realRadius = MERCURY_R;
+    venusP.realRadius   = VENUS_R;
+    marsP.realRadius    = MARS_R;
 
     return {
         scene, camera, controls,
