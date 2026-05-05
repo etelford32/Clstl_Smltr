@@ -1688,6 +1688,16 @@ nav {
             <span class="ik">Aurora Power</span>
             <span class="iv" id="ip-aurora">—</span>
         </div>
+        <!-- Aurora forecast — blended persistence + AR(3) + Kp-regression
+             prediction at +1/+3/+6/+24 h. Populated by AuroraForecaster
+             once AuroraHistory has accumulated ~12 samples (~1 h of
+             OVATION data). Renders as four small chips so the user can
+             read "next 24 h doubles" at a glance. -->
+        <div class="ir" id="ip-aurora-forecast-row" style="align-items:flex-start;display:none;">
+            <span class="ik" style="padding-top:1px;">Forecast</span>
+            <span id="ip-aurora-forecast" class="iv"
+                  style="display:flex;flex-wrap:wrap;gap:3px;justify-content:flex-end;font-size:9.5px;line-height:1.3;"></span>
+        </div>
 
         <!-- (hidden legacy element for JS compat) -->
         <span id="ip-storm" style="display:none;">—</span>
@@ -2236,6 +2246,8 @@ import {
     fieldAlignedCurrent, substormIndex, cmeTransitTime,
 } from './js/solar-wind-magnetosphere.js';
 import { SolarWeatherHistory, seedSyntheticHistory } from './js/solar-weather-history.js';
+import { AuroraHistory } from './js/aurora-history.js';
+import { forecastAurora as predictAurora, AURORA_HORIZONS_H } from './js/aurora-forecast.js';
 import { SolarWeatherForecaster } from './js/solar-weather-forecast.js';
 import { SatelliteFeed } from './js/satellite-feed.js';
 import { EarthObsFeed, EARTH_OBS_LAYERS } from './js/earth-obs-feed.js';
@@ -2911,9 +2923,97 @@ swFeed.start();
 // Cache last solar wind state for animate() loop
 let _lastSwState = {};
 
+// ── Aurora history + forecaster ─────────────────────────────────────────
+// AuroraHistory persists OVATION hemispheric-power samples across
+// reloads (IDB-backed, 30-day retention). The forecaster blends AR(3)
+// on log1p(power) with a Kp-regression projection driven by SWPC's
+// 3-day Kp forecast. HUD chips paint the +1/+3/+6/+24 h headline.
+//
+// Why this lives at module scope: the history needs to start absorbing
+// samples before any UI renders, so it's created here and the swpc-
+// update handler below ingests on every tick.
+const auroraHistory = new AuroraHistory();
+auroraHistory.open().catch(err => {
+    console.info('[earth] aurora history open failed:', err?.message);
+});
+window._auroraHistory = auroraHistory;   // dev-console handle
+
+// Render the four-chip forecast strip in the SW panel. Hidden until the
+// blended forecaster produces something meaningful (≥ persistence + AR
+// available). One textContent + classList write per chip — no layout
+// thrash even when the SW feed updates mid-sub-second.
+function _paintAuroraForecast() {
+    const row = document.getElementById('ip-aurora-forecast-row');
+    const wrap = document.getElementById('ip-aurora-forecast');
+    if (!row || !wrap) return;
+    // Build a {0,1,3,6,24} → kp lookup from the SWPC 3-day forecast.
+    // Each kp_forecast row carries { time_tag, kp_index, observed }
+    // — we pick the one closest to t_now + horizon.
+    const kpFc = _lastSwState?.kp_forecast ?? [];
+    const tNow = Date.now();
+    const kpAt = { 0: _lastSwState?.kp ?? null };
+    for (const h of [1, 3, 6, 24]) {
+        const target = tNow + h * 3_600_000;
+        let best = null, bestDt = Infinity;
+        for (const r of kpFc) {
+            const t = r.time_tag instanceof Date ? r.time_tag.getTime()
+                    : Date.parse(r.time_tag);
+            if (!Number.isFinite(t)) continue;
+            const dt = Math.abs(t - target);
+            if (dt < bestDt) { bestDt = dt; best = r; }
+        }
+        kpAt[h] = best ? (best.kp_index ?? best.kp ?? null) : kpAt[0];
+    }
+    const bzNow = _lastSwState?.solar_wind?.bz ?? 0;
+    const bzAt  = { 0: bzNow, 1: bzNow, 3: bzNow, 6: bzNow, 24: bzNow };
+
+    const fc = predictAurora({
+        history: auroraHistory,
+        kpForecast: kpAt,
+        bzForecast: bzAt,
+    });
+    if (!fc) { row.style.display = 'none'; return; }
+
+    row.style.display = 'flex';
+    const chips = [];
+    for (const h of AURORA_HORIZONS_H) {
+        const f = fc.frames[h];
+        if (!f || (f.north_gw == null && f.south_gw == null)) continue;
+        const n = f.north_gw != null ? Math.round(f.north_gw) : '—';
+        // Colour the chip by north-hemi predicted intensity — matches
+        // the activity buckets in api/noaa/aurora.js.
+        let bg = 'rgba(80,120,200,.15)', fg = '#9bd';
+        if (f.north_gw >= 100)      { bg = 'rgba(255,80,120,.20)'; fg = '#ff7090'; }
+        else if (f.north_gw >= 50)  { bg = 'rgba(255,160,80,.18)'; fg = '#ffb070'; }
+        else if (f.north_gw >= 20)  { bg = 'rgba(180,220,80,.18)'; fg = '#cfdf60'; }
+        else if (f.north_gw >= 5)   { bg = 'rgba(120,200,160,.18)'; fg = '#88dab0'; }
+        chips.push(
+            `<span title="+${h}h: N≈${n} GW · S≈${f.south_gw != null ? Math.round(f.south_gw) : '—'} GW"
+                   style="padding:2px 6px;border-radius:4px;background:${bg};color:${fg};font-variant-numeric:tabular-nums;">
+                +${h}h ${n}<small style="opacity:.65;">GW</small>
+             </span>`
+        );
+    }
+    wrap.innerHTML = chips.join('');
+}
+
 window.addEventListener('swpc-update', e => {
     const sw = e.detail;           // e.detail IS the full state
     _lastSwState = sw;
+    // Ingest into AuroraHistory FIRST so the forecaster painter at the
+    // bottom of this handler sees the freshest sample. The bin key is
+    // 5-minute-rounded so a swpc burst of multiple updates inside a
+    // single OVATION cadence collapses to one row in IDB.
+    if (Number.isFinite(sw.aurora_power_north) || Number.isFinite(sw.aurora_power_south)) {
+        auroraHistory.ingest({
+            t:              Date.now(),
+            north_gw:       sw.aurora_power_north,
+            south_gw:       sw.aurora_power_south,
+            kp:             sw.kp,
+            bz:             sw.solar_wind?.bz,
+            forecastTimeMs: sw.aurora_forecast_ms,
+        });
+    }
     const d  = sw.derived ?? {};
     const kp = sw.kp ?? 0;
     const storm = Math.min(5, Math.floor(kp / 1.67));
@@ -3071,6 +3171,12 @@ window.addEventListener('swpc-update', e => {
 
     // ── Aurora visibility for user's location
     updateUserAuroraVis(kp);
+
+    // ── Aurora forecast strip (4 chips: +1h, +3h, +6h, +24h).
+    // Paints AFTER the history ingest at the top of this handler so the
+    // forecaster runs on the freshest sample. Cheap: ≤8 K samples × O(N)
+    // OLS, well under one frame on mobile.
+    _paintAuroraForecast();
 
     // ── Magnetosphere geometry: driven by SunEarthCoupling (lag-corrected)
     // SunEarthCoupling.start() listens to 'swpc-update' and calls
