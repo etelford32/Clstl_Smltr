@@ -48,10 +48,18 @@ import {
 import { makeOrreryPlanet, updateOrreryPlanet } from './orrery-skins.js';
 
 // ── Scene scales ────────────────────────────────────────────────────────────
-const GEO_UNIT_KM   = R_EARTH;          // 1 scene unit = 1 R⊕ in geo scene
-const HELIO_UNIT_AU = 4.0;              // 1 AU = 4 scene units in helio scene
-const MOON_R_SCENE  = R_MOON / GEO_UNIT_KM;
-const SOI_MOON_SCENE = SOI_MOON / GEO_UNIT_KM;
+// Unified scene: 1 unit = 1 R⊕ (≈ 6378 km). Earth orbits Sun at ~23 456 R⊕
+// (= 1 AU). All bodies, trajectories, and labels live in one scene at this
+// scale; the renderer uses logarithmicDepthBuffer to span the 1 → 200 000
+// unit dynamic range without z-fighting.
+const GEO_UNIT_KM     = R_EARTH;
+const KM_TO_SCENE     = 1 / GEO_UNIT_KM;            // km → scene units
+const AU_TO_SCENE     = KM_PER_AU * KM_TO_SCENE;    // ≈ 23 456 R⊕ per AU
+// Backward-compat alias: legacy code multiplies dist_AU by this to land in
+// scene units. Kept so trajectory rendering doesn't need a sweeping rename.
+const HELIO_UNIT_AU   = AU_TO_SCENE;
+const MOON_R_SCENE    = R_MOON / GEO_UNIT_KM;
+const SOI_MOON_SCENE  = SOI_MOON / GEO_UNIT_KM;
 
 // ── Launch sites ────────────────────────────────────────────────────────────
 export const LAUNCH_SITES = [
@@ -141,28 +149,65 @@ export function initMissionPlanner({ container, onEvent } = {}) {
     const w = () => container.clientWidth  || 800;
     const h = () => container.clientHeight || 520;
 
-    // Shared renderer.
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    // Shared renderer with logarithmic depth buffer so we can span Earth-
+    // surface scale (~1 unit) and full heliocentric scale (~150 000 units)
+    // in one scene without z-fighting.
+    const renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
     renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
     renderer.setSize(w(), h());
     container.appendChild(renderer.domElement);
 
-    // ── Geo scene ───────────────────────────────────────────────────────────
-    const geo = buildGeoScene(renderer, w(), h());
+    // ── Unified world scene ─────────────────────────────────────────────────
+    // One Scene + Camera + OrbitControls. `world.earthSystem` is a Group
+    // parked at Earth's heliocentric scene position each frame; everything
+    // Earth-relative (atmosphere, launch sites, lunar mesh, near-Earth
+    // payloads, lunar trajectories) hangs off it so it rides Earth as it
+    // orbits the Sun. Heliocentric content (Sun, Mars/Venus/Mercury, helio
+    // Lambert arcs, orbit rings) lives in scene root.
+    const world = buildWorldScene(renderer, w(), h());
 
-    // ── Helio scene ─────────────────────────────────────────────────────────
-    const hel = buildHelioScene(renderer, w(), h());
+    // Legacy view aliases — they let existing launch helpers keep using
+    // `geo.scene.add(...)` / `hel.scene.add(...)` semantics. `geo.scene`
+    // points at the moving earthSystem group; `hel.scene` is the scene
+    // root. Camera/controls are shared.
+    const geo = {
+        scene:        world.earthSystem,    // Earth-relative content goes here
+        camera:       world.camera,
+        controls:     world.controls,
+        earth:        world.earth,
+        earthTilt:    world.earthTilt,
+        earthSkinU:   world.earthSkinU,
+        atmo:         world.atmo,
+        moon:         world.moon,
+    };
+    const hel = {
+        scene:        world.scene,           // Heliocentric content goes here
+        camera:       world.camera,
+        controls:     world.controls,
+        sun:          world.sun,
+        sunGlow:      world.sunGlow,
+        flare:        world.flare,
+        // hel.earth being the earthSystem group means the helio update loop's
+        // `hel.earth.position.copy(...)` repositions the entire Earth System.
+        earth:        world.earthSystem,
+        mercury:      world.planets.mercury.group,
+        venus:        world.planets.venus.group,
+        mars:         world.planets.mars.group,
+        planets:      world.planets,
+    };
 
     // ── State ───────────────────────────────────────────────────────────────
     const state = {
         site:       LAUNCH_SITES[0],
         target:     TARGET_ORBITS[0],
+        // `mode` retained for legacy callers but ignored by the renderer —
+        // the scene is unified. Setting it now drives the focus preset.
         mode:       'geo',
-        rockets:    [],   // active geo-frame ascent vehicles
-        payloads:   [],   // deployed near-Earth orbiters (geo frame)
-        lunarMissions: [],// active lunar transfers (geo frame)
-        marsMissions:  [],// active Mars transfers (helio frame)
-        tours:         [],// active multi-leg tours (helio frame)
+        rockets:    [],   // active ascent vehicles (Earth-relative)
+        payloads:   [],   // deployed near-Earth orbiters
+        lunarMissions: [],// active lunar transfers (Earth-relative)
+        marsMissions:  [],// active heliocentric Lambert cruises
+        tours:         [],// active multi-leg tours
         clock:      new THREE.Clock(),
         elapsed:    0,
         timeScale:  1,
@@ -170,7 +215,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         // helio + lunar trajectories. Lunar TOF ≈ 5d → ~5s of wall time
         // at 1× when simDays = 1; Mars TOF ≈ 259d → ~26s wall at 10×.
         simDaysPerSec: 1,
-        // Live ephemeris JD that drives planet positions in helio scene.
+        // Live ephemeris JD that drives planet positions.
         scenarioJD: jdNow(),
     };
 
@@ -181,10 +226,14 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         addLaunchSiteMarker(geo.earth, s);
     }
 
-    // ── Mode switch ─────────────────────────────────────────────────────────
+    // ── Focus presets (mode toggle replaced) ────────────────────────────────
+    // setMode is kept as a no-op compat shim that just retargets the camera.
+    // The renderer doesn't switch scenes anymore.
     function setMode(mode) {
         if (mode !== 'geo' && mode !== 'helio') return;
         state.mode = mode;
+        if (mode === 'geo')   focusEarth();
+        else                  focusSun();
         onEvent?.({ type: 'mode', mode });
     }
 
@@ -732,48 +781,49 @@ export function initMissionPlanner({ container, onEvent } = {}) {
     }
 
     // ── Update loop ─────────────────────────────────────────────────────────
+    // Single unified tick: drive Earth's heliocentric position (which moves
+    // the entire earthSystem group), update Earth-relative animations,
+    // update heliocentric planet positions + cruise spacecraft, then render
+    // the one scene through the one camera.
     function tick() {
         const dt = state.clock.getDelta() * state.timeScale;
         state.elapsed += dt;
         state.scenarioJD += dt * state.simDaysPerSec;
 
-        if (state.mode === 'geo') {
-            updateGeo(dt);
-            geo.controls.update();
-            renderer.render(geo.scene, geo.camera);
-        } else {
-            updateHelio(dt);
-            hel.controls.update();
-            renderer.render(hel.scene, hel.camera);
-        }
+        updateEarthSystem(dt);   // earthSystem heliocentric pos + Earth-frame anims
+        updateHelio(dt);          // Sun spin + Mercury/Venus/Mars + helio cruises
+        world.controls.update();
+        renderer.render(world.scene, world.camera);
+
         requestAnimationFrame(tick);
     }
 
-    function updateGeo(dt) {
+    function updateEarthSystem(dt) {
         // Earth rotation (cosmetic — slow enough that pinned launch sites
         // don't whip around the globe between frames).
         geo.earth.rotation.y += dt * 0.04;
 
-        // Sun direction in world space = -(Earth heliocentric position).
-        // Drive the EarthSkin shader, the on-scene Sun mesh, and the
-        // directional light off this single source so the day/night line,
-        // the visible Sun, and the lighting all agree.
+        // Park the entire Earth system at Earth's heliocentric scene
+        // position. Everything inside earthSystem (atmosphere, launch
+        // sites, Moon, near-Earth payloads, lunar trajectories) rides
+        // along automatically.
         const eVec = earthHeliocentric(state.scenarioJD);
-        const earthHelio = eclipticToVec3(eVec.lon_rad, eVec.lat_rad, 1);
-        const sunDir = earthHelio.clone().multiplyScalar(-1).normalize();
+        world.earthSystem.position.copy(eclipticToVec3(
+            eVec.lon_rad, eVec.lat_rad, eVec.dist_AU * AU_TO_SCENE,
+        ));
+
+        // Sun direction in WORLD space: the real Sun is at scene origin,
+        // so the unit vector from Earth → Sun is just -earthSystem.position
+        // normalized. Drives the EarthSkin shader's day/night terminator.
         if (geo.earthSkinU?.u_sun_dir) {
+            const sunDir = world.earthSystem.position.clone().multiplyScalar(-1).normalize();
             geo.earthSkinU.u_sun_dir.value.copy(sunDir);
             geo.earthSkinU.u_time.value = state.elapsed;
         }
-        if (geo.sunGroup) {
-            geo.sunGroup.position.copy(sunDir.clone().multiplyScalar(GEO_SUN_DIST));
-        }
-        if (geo.sunLight) {
-            geo.sunLight.position.copy(sunDir.clone().multiplyScalar(50));
-        }
 
         // Live Moon position from ephemeris (slowed): drift the moon along
-        // its real angular rate, anchored to scenarioJD.
+        // its real angular rate, anchored to scenarioJD. Position is in
+        // earthSystem-local coordinates (Earth at origin of that group).
         const moonNow = moonGeocentric(state.scenarioJD);
         geo.moon.position.copy(eclipticToVec3(
             moonNow.lon_rad, moonNow.lat_rad,
@@ -915,15 +965,16 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         // Sun spin (purely cosmetic).
         hel.sun.rotation.y += dt * 0.04;
 
-        // Update planet positions from live ephemeris at scenarioJD.
-        const eVec = earthHeliocentric(state.scenarioJD);
-        const mVec = marsHeliocentric(state.scenarioJD);
+        // Update inner-planet positions from live ephemeris at scenarioJD.
+        // (Earth's position is handled by updateEarthSystem, which moves
+        // the parented earthSystem group; that's why we don't update
+        // hel.earth here anymore.)
+        const mVec  = marsHeliocentric(state.scenarioJD);
         const meVec = mercuryHeliocentric(state.scenarioJD);
         const vVec  = venusHeliocentric(state.scenarioJD);
-        hel.earth.position.copy(eclipticToVec3(eVec.lon_rad, eVec.lat_rad, eVec.dist_AU * HELIO_UNIT_AU));
-        hel.mars.position.copy (eclipticToVec3(mVec.lon_rad, mVec.lat_rad, mVec.dist_AU * HELIO_UNIT_AU));
-        hel.mercury.position.copy(eclipticToVec3(meVec.lon_rad, meVec.lat_rad, meVec.dist_AU * HELIO_UNIT_AU));
-        hel.venus.position.copy  (eclipticToVec3(vVec.lon_rad,  vVec.lat_rad,  vVec.dist_AU  * HELIO_UNIT_AU));
+        hel.mars.position.copy   (eclipticToVec3(mVec.lon_rad,  mVec.lat_rad,  mVec.dist_AU  * AU_TO_SCENE));
+        hel.mercury.position.copy(eclipticToVec3(meVec.lon_rad, meVec.lat_rad, meVec.dist_AU * AU_TO_SCENE));
+        hel.venus.position.copy  (eclipticToVec3(vVec.lon_rad,  vVec.lat_rad,  vVec.dist_AU  * AU_TO_SCENE));
 
         // Drive procedural-skin axial rotation + sun-direction lighting so
         // the lit hemisphere always faces the (origin) Sun. Done after
@@ -933,7 +984,6 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             const sunPos = new THREE.Vector3(0, 0, 0);
             updateOrreryPlanet(hel.planets.mercury, state.scenarioJD, sunPos);
             updateOrreryPlanet(hel.planets.venus,   state.scenarioJD, sunPos);
-            updateOrreryPlanet(hel.planets.earth,   state.scenarioJD, sunPos);
             updateOrreryPlanet(hel.planets.mars,    state.scenarioJD, sunPos);
         }
 
@@ -1119,10 +1169,45 @@ export function initMissionPlanner({ container, onEvent } = {}) {
     const ro = new ResizeObserver(() => {
         const cw = w(), ch = h();
         renderer.setSize(cw, ch);
-        geo.camera.aspect = cw / ch; geo.camera.updateProjectionMatrix();
-        hel.camera.aspect = cw / ch; hel.camera.updateProjectionMatrix();
+        world.camera.aspect = cw / ch; world.camera.updateProjectionMatrix();
     });
     ro.observe(container);
+
+    // Focus presets — set OrbitControls target + camera position relative
+    // to whichever body the user wants centered. All use world coordinates
+    // since planets move (Earth at 1 AU from Sun, etc.).
+    function focusEarth() {
+        const eP = world.earthSystem.position;
+        world.controls.target.copy(eP);
+        world.camera.position.set(eP.x + 3.5, eP.y + 2.4, eP.z + 4.6);
+    }
+    function focusMoon() {
+        const mWorld = new THREE.Vector3();
+        world.moon.getWorldPosition(mWorld);
+        world.controls.target.copy(mWorld);
+        world.camera.position.set(mWorld.x * 1.001, mWorld.y + 8, mWorld.z * 1.001 + 8);
+    }
+    function focusMars() {
+        const mP = hel.mars.position;
+        world.controls.target.copy(mP);
+        const dir = mP.clone().normalize();
+        world.camera.position.copy(mP).add(dir.multiplyScalar(20));
+    }
+    function focusSun() {
+        world.controls.target.set(0, 0, 0);
+        world.camera.position.set(0, 0.5 * AU_TO_SCENE, 1.0 * AU_TO_SCENE);
+    }
+    function focusSystem() {
+        world.controls.target.set(0, 0, 0);
+        world.camera.position.set(0, 1.5 * AU_TO_SCENE, 2.5 * AU_TO_SCENE);
+    }
+
+    // Seed initial body positions (zero-dt update so earthSystem.position
+    // reflects today's heliocentric Earth before first render), then frame
+    // the camera on Earth.
+    updateEarthSystem(0);
+    updateHelio(0);
+    focusEarth();
 
     requestAnimationFrame(tick);
 
@@ -1134,18 +1219,11 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         getTimeScale: () => state.timeScale,
         setSimDaysPerSec: (x) => { state.simDaysPerSec = Math.max(0, x); },
         clear: () => clearAll(state, geo, hel),
-        focusEarth: () => {
-            geo.controls.target.set(0, 0, 0);
-            geo.camera.position.set(3.5, 2.4, 4.6);
-        },
-        focusMoon: () => {
-            geo.controls.target.copy(geo.moon.position);
-            geo.camera.position.set(geo.moon.position.x*1.05, 8, geo.moon.position.z*1.05 + 8);
-        },
-        focusSun: () => {
-            hel.controls.target.set(0, 0, 0);
-            hel.camera.position.set(0, 4 * HELIO_UNIT_AU, 4 * HELIO_UNIT_AU);
-        },
+        focusEarth,
+        focusMoon,
+        focusMars,
+        focusSun,
+        focusSystem,
         getStats: () => ({
             rockets:        state.rockets.length,
             payloads:       state.payloads.length,
@@ -1174,37 +1252,113 @@ export function initMissionPlanner({ container, onEvent } = {}) {
     };
 }
 
-// ── Scene builders ──────────────────────────────────────────────────────────
-
-function buildGeoScene(renderer, w, h) {
+// ── Unified scene builder ───────────────────────────────────────────────────
+// Single Scene with: Sun at origin, inner-planet orrery groups at their
+// heliocentric positions (Mercury / Venus / Mars), and an `earthSystem`
+// Group that is parked at Earth's heliocentric scene position each frame.
+// Inside earthSystem live the textured Earth, atmosphere, Moon, and all
+// Earth-relative trajectories. The renderer's logarithmic depth buffer
+// lets the camera roam from 1.4 R⊕ (just outside Earth) to ~200 000 R⊕
+// (well past Saturn's orbit) without z-fighting.
+function buildWorldScene(renderer, w, h) {
     const scene  = new THREE.Scene();
-    scene.background = new THREE.Color(0x05030f);
+    scene.background = new THREE.Color(0x02010a);
 
-    const camera = new THREE.PerspectiveCamera(45, w/h, 0.05, 5000);
-    camera.position.set(3.5, 2.4, 4.6);
+    const camera = new THREE.PerspectiveCamera(45, w/h, 0.05, 1e8);
+    camera.position.set(3.5, 2.4, 4.6);    // overridden by initial focusEarth
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true; controls.dampingFactor = 0.08;
-    controls.minDistance = 1.4;    controls.maxDistance = 200;
+    controls.minDistance = 1.4;
+    controls.maxDistance = 2.0 * AU_TO_SCENE;     // past Mars orbit
 
-    scene.add(new THREE.AmbientLight(0x404060, 0.55));
-    // DirectionalLight tracks the live Sun direction (updated each frame).
-    const sunLight = new THREE.DirectionalLight(0xffeec8, 1.25);
-    sunLight.position.set(8, 4, 5);
+    scene.add(new THREE.AmbientLight(0x303048, 0.45));
+    addStarfield(scene, 2400, 0.8 * AU_TO_SCENE);
+
+    // ── Sun: photosphere + corona shells + lens flare + PointLight ─────────
+    const SUN_R = 70;  // ~64% of real Sun radius (109 R⊕); plenty visible
+    const sun = new THREE.Mesh(
+        new THREE.SphereGeometry(SUN_R, 32, 24),
+        new THREE.MeshBasicMaterial({ color: 0xfff0c8 }),
+    );
+    scene.add(sun);
+    const sunGlow = new THREE.Group();
+    for (const [scl, op, col] of [
+        [1.30, 0.45, 0xffd06c],
+        [1.85, 0.22, 0xffa040],
+        [3.00, 0.10, 0xff7022],
+        [5.50, 0.04, 0xcc5511],
+    ]) {
+        sunGlow.add(new THREE.Mesh(
+            new THREE.SphereGeometry(SUN_R * scl, 32, 24),
+            new THREE.MeshBasicMaterial({
+                color: col, transparent: true, opacity: op,
+                side: THREE.BackSide, blending: THREE.AdditiveBlending,
+                depthWrite: false,
+            }),
+        ));
+    }
+    const flare = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: makeRadialGradientTexture(0xffe09a, 0.55),
+        transparent: true, opacity: 0.55,
+        blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false,
+    }));
+    flare.scale.set(SUN_R * 8, SUN_R * 8, 1);
+    sunGlow.add(flare);
+    scene.add(sunGlow);
+    // Single PointLight at Sun origin lights every body in the scene.
+    const sunLight = new THREE.PointLight(0xffeec8, 1.6, 0, 0);
     scene.add(sunLight);
 
-    addStarfield(scene, 1800, 600);
+    const sunLabel = makeBodyLabel('Sun', '#ffe', 1.4);
+    sunLabel.position.set(0, SUN_R * 1.6, 0);
+    scene.add(sunLabel);
 
-    // ── Earth: Blue Marble shader piggy-backed off earth.html ───────────────
-    // The mesh sits inside a tilt group so axial obliquity (23.44°) shows up
-    // correctly. Day/night terminator follows u_sun_dir which we drive from
-    // live heliocentric coordinates each frame.
+    // ── Heliocentric orbit rings (Mercury / Venus / Earth / Mars) ──────────
+    const orbits = [
+        { r: 0.387 * AU_TO_SCENE, color: 0x886655 },
+        { r: 0.723 * AU_TO_SCENE, color: 0xc8b88a },
+        { r: 1.000 * AU_TO_SCENE, color: 0x4488cc },
+        { r: 1.524 * AU_TO_SCENE, color: 0xc05530 },
+    ];
+    for (const o of orbits) scene.add(makeRingLine(o.r, o.color, 0.6));
+
+    // ── Inner planets via procedural orrery skins ──────────────────────────
+    // Sizes are exaggerated so they read at AU-scale viewing distance.
+    // Real radii (R⊕): Mercury 0.382, Venus 0.949, Mars 0.531. With a 60-80×
+    // visibility boost they come in at ~30-50 R⊕ — small at planet-flyby
+    // scale but still proportionally sensible against Earth at 1 R⊕.
+    const MARS_R    = 50;
+    const VENUS_R   = 50;
+    const MERCURY_R = 30;
+    const mercuryP = makeOrreryPlanet('mercury', MERCURY_R, 0xaa9988);
+    const venusP   = makeOrreryPlanet('venus',   VENUS_R,   0xffeebb);
+    const marsP    = makeOrreryPlanet('mars',    MARS_R,    0xffaa77);
+    scene.add(mercuryP.group, venusP.group, marsP.group);
+
+    // Mars surface bases (Olympia Base) ride the spinning Mars surface.
+    for (const biome of MARS_BIOMES) {
+        addMarsBiome(marsP.surface, MARS_R, biome);
+    }
+
+    const mercuryLabel = makeBodyLabel('Mercury', '#bba', 1.4);
+    const venusLabel   = makeBodyLabel('Venus',   '#fec', 1.6);
+    const marsLabel    = makeBodyLabel('Mars',    '#f96', 1.6);
+    mercuryP.group.add(mercuryLabel); mercuryLabel.position.set(0, MERCURY_R * 1.8, 0);
+    venusP.group.add(venusLabel);     venusLabel.position.set(0, VENUS_R   * 1.8, 0);
+    marsP.group.add(marsLabel);       marsLabel.position.set(0, MARS_R    * 1.8, 0);
+
+    // ── Earth System group (parented to scene root, repositioned each frame
+    //     to Earth's heliocentric position by updateEarthSystem). ───────────
+    const earthSystem = new THREE.Group();
+    scene.add(earthSystem);
+
     const earthTilt = new THREE.Group();
     earthTilt.rotation.x = EARTH_OBLQ_RAD;
-    scene.add(earthTilt);
+    earthSystem.add(earthTilt);
 
     const earthSkinU = createEarthUniforms(new THREE.Vector3(1, 0, 0));
-    earthSkinU.u_aurora_on.value     = 0;     // saved for future Kp-driven UI
+    earthSkinU.u_aurora_on.value     = 0;
     earthSkinU.u_city_lights.value   = 1;
     earthSkinU.u_weather_on.value    = 0;
     earthSkinU.u_bump_strength.value = 0.8;
@@ -1217,19 +1371,14 @@ function buildGeoScene(renderer, w, h) {
         }),
     );
     earthTilt.add(earth);
-    // Async texture load (Blue Marble + night lights + topology + ocean mask).
-    // Until they arrive, the shader falls back to its placeholder textures.
     loadEarthTextures(earthSkinU, null);
 
-    // Reference equatorial graticule — kept faint so it doesn't fight the
-    // texture detail but still gives orbital-plane orientation.
     const grid = new THREE.LineSegments(
         new THREE.WireframeGeometry(new THREE.SphereGeometry(1.002, 18, 12)),
         new THREE.LineBasicMaterial({ color: 0x335577, transparent: true, opacity: 0.12 }),
     );
     earth.add(grid);
 
-    // Fresnel-edge atmosphere shell (BackSide additive).
     const atmo = new THREE.Mesh(
         new THREE.SphereGeometry(1.045, 48, 32),
         new THREE.MeshBasicMaterial({
@@ -1240,63 +1389,44 @@ function buildGeoScene(renderer, w, h) {
     );
     earthTilt.add(atmo);
 
+    // Halo billboard so Earth is visible from heliocentric distances. The
+    // sprite is depth-tested, so it sits behind the Earth mesh when the
+    // camera is close (and stays out of the way visually). When the camera
+    // is far, the halo dominates and reads as a "you-are-here" marker.
+    const earthHalo = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: makeRadialGradientTexture(0x66aaff, 0),
+        transparent: true, opacity: 0.55,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+    }));
+    earthHalo.scale.set(60, 60, 1);
+    earthSystem.add(earthHalo);
+
     const moon = new THREE.Mesh(
         new THREE.SphereGeometry(MOON_R_SCENE, 32, 24),
         new THREE.MeshPhongMaterial({ color: 0xb8b8b8, emissive: 0x333333 }),
     );
-    scene.add(moon);
+    earthSystem.add(moon);
 
-    // Pin lunar bases (Tranquility Base, etc.) to the Moon mesh so they
-    // ride its position updates.
     for (const base of MOON_BASES) {
         addMoonBiome(moon, MOON_R_SCENE, base);
     }
 
-    // Reference lunar-orbit ring (mean distance, equatorial — purely visual).
-    const moonRingMean = makeRingLine(384400 / R_EARTH, 0x444466, 0.35);
-    scene.add(moonRingMean);
-
-    // ── Sun in the geo scene ────────────────────────────────────────────────
-    // Lives ~220 R⊕ from Earth along the live Earth→Sun direction. Looks
-    // directional but is parented to a positionable Group so the corona +
-    // PointLight + lens flare all move together.
-    const sunGroup = new THREE.Group();
-    scene.add(sunGroup);
-    const sunMesh = new THREE.Mesh(
-        new THREE.SphereGeometry(GEO_SUN_RADIUS, 32, 24),
-        new THREE.MeshBasicMaterial({ color: 0xfff0c8 }),
-    );
-    sunGroup.add(sunMesh);
-    for (const [r, op, col] of [
-        [GEO_SUN_RADIUS * 1.30, 0.45, 0xffd06c],
-        [GEO_SUN_RADIUS * 1.85, 0.22, 0xffa040],
-        [GEO_SUN_RADIUS * 3.00, 0.10, 0xff7022],
-    ]) {
-        sunGroup.add(new THREE.Mesh(
-            new THREE.SphereGeometry(r, 32, 24),
-            new THREE.MeshBasicMaterial({
-                color: col, transparent: true, opacity: op,
-                side: THREE.BackSide, blending: THREE.AdditiveBlending,
-                depthWrite: false,
-            }),
-        ));
-    }
-    const sunFlare = new THREE.Sprite(new THREE.SpriteMaterial({
-        map: makeRadialGradientTexture(0xffe09a, 0.0),
-        transparent: true, opacity: 0.6,
-        blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false,
+    const moonHalo = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: makeRadialGradientTexture(0xc0c0c8, 0),
+        transparent: true, opacity: 0.45,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
     }));
-    sunFlare.scale.set(GEO_SUN_RADIUS * 6, GEO_SUN_RADIUS * 6, 1);
-    sunGroup.add(sunFlare);
-    const sunPoint = new THREE.PointLight(0xffeec8, 0.6, 0, 0);
-    sunGroup.add(sunPoint);
-    const sunLabel = makeBodyLabel('Sun', '#ffe', 1.4);
-    sunLabel.position.set(0, GEO_SUN_RADIUS * 2.4, 0);
-    sunGroup.add(sunLabel);
+    moonHalo.scale.set(15, 15, 1);
+    moon.add(moonHalo);
 
-    // Body labels for orientation.
-    const earthLabel = makeBodyLabel('Earth', '#9cf');
-    earthLabel.position.set(0, 1.4, 0);
+    // Lunar mean-orbit ring (visual reference, equatorial).
+    const moonRingMean = makeRingLine(384400 / R_EARTH, 0x444466, 0.35);
+    earthSystem.add(moonRingMean);
+
+    const earthLabel = makeBodyLabel('Earth', '#9cf', 1.6);
+    earthLabel.position.set(0, 1.6, 0);
     earth.add(earthLabel);
     const moonLabel = makeBodyLabel('Moon', '#cdd');
     moonLabel.position.set(0, MOON_R_SCENE * 4, 0);
@@ -1304,115 +1434,10 @@ function buildGeoScene(renderer, w, h) {
 
     return {
         scene, camera, controls,
-        earth, earthTilt, earthSkinU,
-        grid, atmo, moon,
-        sunGroup, sunLight,
-    };
-}
-
-function buildHelioScene(renderer, w, h) {
-    const scene  = new THREE.Scene();
-    scene.background = new THREE.Color(0x010108);
-
-    const camera = new THREE.PerspectiveCamera(40, w/h, 0.05, 1e5);
-    camera.position.set(0, 5 * HELIO_UNIT_AU, 5 * HELIO_UNIT_AU);
-
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true; controls.dampingFactor = 0.08;
-    controls.minDistance = 0.5;    controls.maxDistance = 200;
-
-    scene.add(new THREE.AmbientLight(0x202028, 0.6));
-
-    addStarfield(scene, 2000, 500);
-
-    // ── Sun: photosphere + multi-shell additive corona + radial flare sprite
-    const sun = new THREE.Mesh(
-        new THREE.SphereGeometry(0.18, 32, 24),
-        new THREE.MeshBasicMaterial({ color: 0xfff0c8 }),
-    );
-    scene.add(sun);
-    const sunGlow = new THREE.Group();
-    for (const [r, op, col] of [
-        [0.24, 0.45, 0xffd06c],
-        [0.34, 0.22, 0xffa040],
-        [0.55, 0.10, 0xff7022],
-        [0.95, 0.04, 0xcc5511],
-    ]) {
-        sunGlow.add(new THREE.Mesh(
-            new THREE.SphereGeometry(r, 32, 24),
-            new THREE.MeshBasicMaterial({
-                color: col, transparent: true, opacity: op,
-                side: THREE.BackSide, blending: THREE.AdditiveBlending,
-                depthWrite: false,
-            }),
-        ));
-    }
-    // Lens flare disk facing the camera.
-    const flare = new THREE.Sprite(new THREE.SpriteMaterial({
-        map: makeRadialGradientTexture(0xffe09a, 0.55),
-        transparent: true, opacity: 0.55,
-        blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false,
-    }));
-    flare.scale.set(1.6, 1.6, 1);
-    sunGlow.add(flare);
-    scene.add(sunGlow);
-    const sunLight = new THREE.PointLight(0xffeec8, 1.4, 0, 0);
-    scene.add(sunLight);
-
-    // ── Orbit rings
-    const orbits = [
-        { r: 0.387 * HELIO_UNIT_AU, color: 0x886655, label: 'Mercury' },
-        { r: 0.723 * HELIO_UNIT_AU, color: 0xc8b88a, label: 'Venus'   },
-        { r: 1.000 * HELIO_UNIT_AU, color: 0x4488cc, label: 'Earth'   },
-        { r: 1.524 * HELIO_UNIT_AU, color: 0xc05530, label: 'Mars'    },
-    ];
-    for (const o of orbits) scene.add(makeRingLine(o.r, o.color, 0.55));
-
-    // ── Planets with procedural skins (orrery-skins.js) ────────────────────
-    // Each entry returns {group, surface, uniforms, spin}. The Group is the
-    // positionable handle used by the trajectory layer (.position.copy()).
-    // The atmosphere fresnel shell + axial tilt + rotation are handled by
-    // makeOrreryPlanet so we don't have to re-implement them here.
-    const mercuryP = makeOrreryPlanet('mercury', 0.052, 0xaa9988);
-    const venusP   = makeOrreryPlanet('venus',   0.072, 0xffeebb);
-    const earthP   = makeOrreryPlanet('earth',   0.082, 0x88bbff);
-    const MARS_R   = 0.062;
-    const marsP    = makeOrreryPlanet('mars',    MARS_R, 0xffaa77);
-    scene.add(mercuryP.group, venusP.group, earthP.group, marsP.group);
-
-    // Pin Mars surface bases to the spinning surface mesh so the dome
-    // tracks day/night with the planet's rotation + axial tilt.
-    for (const biome of MARS_BIOMES) {
-        addMarsBiome(marsP.surface, MARS_R, biome);
-    }
-
-    // Position-handle aliases — these are the Groups, so legacy
-    // hel.<planet>.position.copy(...) calls still work unchanged.
-    const mercury = mercuryP.group;
-    const venus   = venusP.group;
-    const earth   = earthP.group;
-    const mars    = marsP.group;
-
-    const mercuryLabel = makeBodyLabel('Mercury', '#bba');
-    const venusLabel   = makeBodyLabel('Venus',   '#fec');
-    const earthLabel   = makeBodyLabel('Earth',   '#9cf');
-    const marsLabel    = makeBodyLabel('Mars',    '#f96');
-    const sunLabel     = makeBodyLabel('Sun',     '#ffd', 0.9);
-    sunLabel.position.set(0, 0.45, 0);
-    scene.add(sunLabel);
-    mercuryP.group.add(mercuryLabel); mercuryLabel.position.set(0, 0.10, 0);
-    venusP.group.add(venusLabel);     venusLabel.position.set(0, 0.13, 0);
-    earthP.group.add(earthLabel);     earthLabel.position.set(0, 0.15, 0);
-    marsP.group.add(marsLabel);       marsLabel.position.set(0, 0.12, 0);
-
-    return {
-        scene, camera, controls,
-        sun, sunGlow, flare,
-        mercury, venus, earth, mars,
-        // Full handles (group + uniforms + spin) for updateOrreryPlanet().
-        planets: {
-            mercury: mercuryP, venus: venusP, earth: earthP, mars: marsP,
-        },
+        earthSystem, earth, earthTilt, earthSkinU,
+        grid, atmo, moon, earthHalo, moonHalo,
+        sun, sunGlow, flare, sunLight,
+        planets: { mercury: mercuryP, venus: venusP, mars: marsP },
     };
 }
 

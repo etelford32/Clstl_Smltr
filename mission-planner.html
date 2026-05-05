@@ -290,10 +290,13 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
 <div id="mp-app">
 
     <aside class="mp-panel" id="mp-controls">
-        <div class="mp-label">View</div>
+        <div class="mp-label">Focus</div>
         <div class="mp-mode-toggle">
-            <button id="mp-mode-geo"   class="mp-mode-btn on"  type="button">🌍 Earth System</button>
-            <button id="mp-mode-helio" class="mp-mode-btn"     type="button">☀️ Heliocentric</button>
+            <button id="mp-focus-earth"  class="mp-mode-btn on" type="button">🌍 Earth</button>
+            <button id="mp-focus-moon"   class="mp-mode-btn"    type="button">🌙 Moon</button>
+            <button id="mp-focus-mars"   class="mp-mode-btn"    type="button">♂ Mars</button>
+            <button id="mp-focus-sun"    class="mp-mode-btn"    type="button">☀️ Sun</button>
+            <button id="mp-focus-system" class="mp-mode-btn"    type="button">🌌 System</button>
         </div>
 
         <div class="mp-label">Origin Body</div>
@@ -423,10 +426,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
             <span class="mp-time" id="mp-timescale-val">1.0×</span>
         </div>
 
-        <button id="mp-focus-earth" class="mp-secondary-btn" type="button">Focus: Earth</button>
-        <button id="mp-focus-moon"  class="mp-secondary-btn" type="button">Focus: Moon</button>
-        <button id="mp-focus-sun"   class="mp-secondary-btn" type="button">Focus: Sun (helio)</button>
-        <button id="mp-clear"       class="mp-secondary-btn" type="button" style="border-color:rgba(255,120,120,.4); color:#ffaaaa;">Clear All Vehicles</button>
+        <button id="mp-clear" class="mp-secondary-btn" type="button" style="border-color:rgba(255,120,120,.4); color:#ffaaaa;">Clear All Vehicles</button>
 
         <div class="mp-label">Mission Log</div>
         <div id="mp-log" class="mp-log"><div class="mp-log-row"><span class="t">--:--</span>Ready for launch.</div></div>
@@ -435,7 +435,6 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
     <main>
         <div id="mp-3d-wrap">
             <div id="mp-3d" aria-label="3D mission planner viewport"></div>
-            <div id="mp-mode-badge">🌍 Earth System</div>
             <div id="mp-hud">
                 <div class="hud-title">Mission Status</div>
                 <div class="hud-row"><span class="k">Rockets in flight</span><span class="v" id="hud-rockets">0</span></div>
@@ -446,7 +445,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
                 <div class="hud-row"><span class="k">Scenario JD</span><span class="v" id="hud-jd">—</span></div>
             </div>
         </div>
-        <p id="mp-3d-help"><strong>Drag</strong> orbit · <strong>Scroll</strong> zoom · <strong>Right-drag</strong> pan · Geo: 1 unit = R⊕ · Helio: 1 AU = 4 units · planets at live ephemeris</p>
+        <p id="mp-3d-help"><strong>Drag</strong> orbit · <strong>Scroll</strong> zoom · <strong>Right-drag</strong> pan · 1 unit = 1 R⊕ · 1 AU ≈ 23 456 units · single scene with log-depth · planets at live ephemeris</p>
     </main>
 
 </div>
@@ -685,12 +684,18 @@ function renderPlan(plan) {
     }
 }
 
-// ── Mode badge ──────────────────────────────────────────────────────
-function setModeUI(mode) {
-    document.getElementById('mp-mode-geo').classList.toggle('on',   mode === 'geo');
-    document.getElementById('mp-mode-helio').classList.toggle('on', mode === 'helio');
-    document.getElementById('mp-mode-badge').textContent =
-        mode === 'helio' ? '☀️ Heliocentric' : '🌍 Earth System';
+// ── Focus toggle highlight ──────────────────────────────────────────
+// The renderer now uses one unified scene; the old 🌍/☀️ mode toggle has
+// been replaced by Earth / Moon / Mars / Sun / System focus presets that
+// just retarget the camera. Keep `setModeUI` as a compat shim for the
+// `'mode'` event path (does nothing visible now; could reflect the
+// auto-focus inferred from a launch destination if we want to highlight
+// the matching focus button).
+function setModeUI(/* mode */) { /* no-op */ }
+function setFocusUI(focusId) {
+    for (const id of ['earth','moon','mars','sun','system']) {
+        document.getElementById(`mp-focus-${id}`)?.classList.toggle('on', id === focusId);
+    }
 }
 
 // ── Mount the 3D scene ──────────────────────────────────────────────
@@ -1192,12 +1197,11 @@ function viridis(t) {
     ];
 }
 
-document.getElementById('mp-mode-geo').addEventListener('click',   () => { planner.setMode('geo');   setModeUI('geo'); });
-document.getElementById('mp-mode-helio').addEventListener('click', () => { planner.setMode('helio'); setModeUI('helio'); });
-
-document.getElementById('mp-focus-earth').addEventListener('click', () => { planner.setMode('geo'); setModeUI('geo'); planner.focusEarth(); });
-document.getElementById('mp-focus-moon').addEventListener('click',  () => { planner.setMode('geo'); setModeUI('geo'); planner.focusMoon(); });
-document.getElementById('mp-focus-sun').addEventListener('click',   () => { planner.setMode('helio'); setModeUI('helio'); planner.focusSun(); });
+document.getElementById('mp-focus-earth' ).addEventListener('click', () => { planner.focusEarth();  setFocusUI('earth'); });
+document.getElementById('mp-focus-moon'  ).addEventListener('click', () => { planner.focusMoon();   setFocusUI('moon'); });
+document.getElementById('mp-focus-mars'  ).addEventListener('click', () => { planner.focusMars();   setFocusUI('mars'); });
+document.getElementById('mp-focus-sun'   ).addEventListener('click', () => { planner.focusSun();    setFocusUI('sun'); });
+document.getElementById('mp-focus-system').addEventListener('click', () => { planner.focusSystem(); setFocusUI('system'); });
 
 document.getElementById('mp-clear').addEventListener('click', () => {
     planner.clear();
