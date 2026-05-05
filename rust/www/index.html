@@ -230,66 +230,172 @@
         import init, {
             set_live_wind_speed,
             set_solar_features,
-            load_flare_model_weights,
         } from './star_renderer.js';
 
-        // Feature index constants must match prediction/feature_extract.rs order.
-        // [0] xray_flux_norm  [1] xray_deriv      [2] wind_speed_norm
-        // [3] wind_trend       [4] bz_southward    [5] density_norm
-        // [6] radio_flux_norm  [7] ar_count_norm   [8] ar_mag_class_norm
-        // [9] flare_rate_norm  [10] hours_since_m  [11] cme_speed_norm
+        // ── Shared 12-feature state ───────────────────────────────────────────
+        // Indices mirror prediction/feature_extract.rs RawFeatures::normalise():
+        //  [0] xray_flux_norm   (log10 W/m², range -9..-3 → 0..1)
+        //  [1] xray_deriv       (W/m²/min / 1e-6, clamped -1..1)
+        //  [2] wind_speed_norm  ((km/s - 250) / 650)
+        //  [3] wind_trend       (km/s/min / 10, clamped -1..1)
+        //  [4] bz_southward     (-bz_nt / 30, southward-only)
+        //  [5] density_norm     (density_cc / 25)
+        //  [6] radio_flux_norm  ((sfu - 65) / 235)
+        //  [7] ar_count_norm    (count / 15)
+        //  [8] ar_mag_class     (0=α, 0.33=β, 0.67=βγ, 1.0=βγδ)
+        //  [9] flare_rate       (M+ flares per 24h / 10)
+        // [10] hours_since_m    (hours / 48)
+        // [11] cme_speed        ((km/s - 300) / 2700, earth-directed only)
+        //
+        // Defaults match SolarFeatures::default() in feature_extract.rs.
+        const feats = new Float32Array([
+            0.33, 0.0, 0.31, 0.0, 0.0, 0.2, 0.3, 0.3, 0.33, 0.0, 0.5, 0.0,
+        ]);
 
-        function clamp01(v) { return Math.max(0, Math.min(1, v)); }
+        function clamp01(v)  { return Math.max(0,  Math.min(1,  v)); }
+        function clampSym(v) { return Math.max(-1, Math.min(1,  v)); }
 
-        // Poll solar wind API (60 s cadence) → push speed + Bz features.
-        function startWindBridge() {
-            const URL    = '/api/solar-wind/wind-speed';
-            const POLL   = 60_000;
-            let lastNorm = 0.5;
+        // ── Poll 1: solar wind + IMF  (60 s) ─────────────────────────────────
+        // Covers features [2..5]. Also drives set_live_wind_speed which
+        // the Rust VelocityField reads every frame to scale particle flow.
+        let lastWindKmS = 450;
+        let lastWindMs  = 0;
 
-            async function fetch_and_push() {
-                try {
-                    const res  = await fetch(URL);
-                    if (!res.ok) return;
-                    const body = await res.json();
-                    const cur  = body?.data?.current;
-                    if (!cur) return;
+        async function pollWind() {
+            try {
+                const res = await fetch('/api/solar-wind/wind-speed');
+                if (!res.ok) return;
+                const { data } = await res.json();
+                const cur = data?.current;
+                if (!cur) return;
 
-                    const norm = clamp01(cur.speed_norm ?? 0.5);
-                    const kmS  = cur.speed_km_s ?? 450;
-                    set_live_wind_speed(norm, kmS);
+                const norm = clamp01(cur.speed_norm ?? 0.5);
+                const kmS  = cur.speed_km_s  ?? 450;
+                set_live_wind_speed(norm, kmS);
 
-                    // Features derived from the wind response.
-                    const trend = clamp01((norm - lastNorm + 1) / 2); // -1..1 → 0..1
-                    lastNorm    = norm;
+                const now = Date.now();
+                const dtMin = lastWindMs ? (now - lastWindMs) / 60_000 : 1;
+                feats[2] = norm;
+                feats[3] = clampSym((kmS - lastWindKmS) / dtMin / 10);
+                feats[4] = clamp01(-(cur.bz_nt ?? 0) / 30);
+                feats[5] = clamp01((cur.density_cc ?? 5) / 25);
+                lastWindKmS = kmS;
+                lastWindMs  = now;
 
-                    // Bz: bz_nt is negative = southward; clamp southward portion to 0..1.
-                    const bzRaw      = cur.bz_nt ?? 0;
-                    const bzSouth    = clamp01(-bzRaw / 30);
-                    const densityNorm = clamp01(((cur.density_cc ?? 5) - 1) / 24);
-
-                    // Push the wind-derived subset of the 12-feature vector.
-                    // Full vector uses set_solar_features(Float32Array of length 12);
-                    // partial updates go through set_solar_feature(index, value).
-                    const feats = new Float32Array(12);
-                    feats.fill(0);
-                    feats[2] = norm;           // wind_speed_norm
-                    feats[3] = trend;          // wind_trend
-                    feats[4] = bzSouth;        // bz_southward_norm
-                    feats[5] = densityNorm;    // density_norm
-                    set_solar_features(feats);
-                } catch (_) {}
-            }
-
-            fetch_and_push();
-            setInterval(fetch_and_push, POLL);
+                set_solar_features(feats);
+            } catch (_) {}
         }
 
+        // ── Poll 2: x-ray flux + active regions + F10.7  (120 s) ────────────
+        // Covers features [0], [1], [6], [7], [8].
+        let lastXrayFlux = 0;
+        let lastXrayMs   = 0;
+
+        // NOAA mag_class string → integer rank (0=α..3=βγδ)
+        const MAG_RANK = {
+            'alpha': 0, 'a': 0,
+            'beta': 1, 'b': 1,
+            'beta-gamma': 2, 'betagamma': 2, 'bg': 2,
+            'beta-gamma-delta': 3, 'betagammadelta': 3, 'bgd': 3,
+        };
+
+        async function pollXrayRegions() {
+            const [xrayR, regR, radioR] = await Promise.allSettled([
+                fetch('/api/noaa/xray'),
+                fetch('/api/noaa/regions'),
+                fetch('/api/noaa/radio-flux'),
+            ]);
+
+            if (xrayR.status === 'fulfilled' && xrayR.value.ok) {
+                const { data } = await xrayR.value.json();
+                const flux = data?.current?.flux_W_m2;
+                if (flux != null && flux > 0) {
+                    feats[0] = clamp01((Math.log10(flux) + 9) / 6);
+                    const now = Date.now();
+                    if (lastXrayFlux > 0 && lastXrayMs > 0) {
+                        const dtMin = (now - lastXrayMs) / 60_000;
+                        feats[1] = clampSym((flux - lastXrayFlux) / dtMin / 1e-6);
+                    }
+                    lastXrayFlux = flux;
+                    lastXrayMs   = Date.now();
+                }
+            }
+
+            if (regR.status === 'fulfilled' && regR.value.ok) {
+                const { data } = await regR.value.json();
+                feats[7] = clamp01((data?.region_count ?? 0) / 15);
+                let maxRank = 0;
+                for (const r of data?.regions ?? []) {
+                    const key  = (r.mag_class ?? '').toLowerCase().replace(/[\s-]/g, '');
+                    const rank = MAG_RANK[key] ?? MAG_RANK[(r.mag_class ?? '').toLowerCase()] ?? 0;
+                    if (rank > maxRank) maxRank = rank;
+                }
+                feats[8] = clamp01(maxRank / 3);
+            }
+
+            if (radioR.status === 'fulfilled' && radioR.value.ok) {
+                const { data } = await radioR.value.json();
+                const sfu = data?.current?.flux_sfu;
+                if (sfu != null) feats[6] = clamp01((sfu - 65) / 235);
+            }
+
+            set_solar_features(feats);
+        }
+
+        // ── Poll 3: DONKI flares + CME  (15 min) ─────────────────────────────
+        // Covers features [9], [10], [11].
+        async function pollDonki() {
+            const [flrR, cmeR] = await Promise.allSettled([
+                fetch('/api/donki/flares?days=2'),
+                fetch('/api/donki/cme?days=7'),
+            ]);
+
+            if (flrR.status === 'fulfilled' && flrR.value.ok) {
+                const { data } = await flrR.value.json();
+                const flares = data?.flares ?? [];
+
+                // Count M+ flares in the last 24 hours.
+                const cutoffMs = Date.now() - 86_400_000;
+                const mPlus24h = flares.filter(f =>
+                    (f.class_letter === 'M' || f.class_letter === 'X') &&
+                    new Date(f.begin_time ?? 0).getTime() > cutoffMs
+                );
+                feats[9] = clamp01(mPlus24h.length / 10);
+
+                // Hours since the most-recent M+ flare.
+                // API returns flares sorted by class rank; re-sort by time desc
+                // so we always get the chronologically latest M+ event.
+                const lastM = flares
+                    .filter(f => f.class_letter === 'M' || f.class_letter === 'X')
+                    .sort((a, b) => (b.begin_time ?? '').localeCompare(a.begin_time ?? ''))[0];
+                feats[10] = lastM?.begin_time
+                    ? clamp01((Date.now() - new Date(lastM.begin_time).getTime()) / 3_600_000 / 48)
+                    : 1.0; // no M+ in window → treat as max elapsed
+            }
+
+            if (cmeR.status === 'fulfilled' && cmeR.value.ok) {
+                const { data } = await cmeR.value.json();
+                const spd = data?.latest_earth_cme?.speed_km_s;
+                feats[11] = spd != null ? clamp01((spd - 300) / 2700) : 0;
+            }
+
+            set_solar_features(feats);
+        }
+
+        // ── Startup ───────────────────────────────────────────────────────────
         async function run() {
             try {
                 await init();
                 document.getElementById('loading').classList.add('hidden');
-                startWindBridge();
+
+                // Stagger initial fetches so they don't all fire simultaneously.
+                pollWind();
+                setTimeout(pollXrayRegions, 2_000);
+                setTimeout(pollDonki,       5_000);
+
+                setInterval(pollWind,        60_000);
+                setInterval(pollXrayRegions, 120_000);
+                setInterval(pollDonki,       900_000);
             } catch (error) {
                 console.error('Failed to initialize WASM:', error);
                 document.getElementById('loading').innerHTML = `
