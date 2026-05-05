@@ -395,6 +395,10 @@ canvas { display:block; width:100% !important; height:100% !important; }
             <input type="checkbox" id="tog-sun-orbit" checked>
             <label for="tog-sun-orbit">☉ Sun's orbit around Sgr A*</label>
         </div>
+        <div class="tog-row" title="Custom 3D visuals for nebulae and supernova remnants (Orion, Crab, Eagle, Carina, η Car, Cas A).">
+            <input type="checkbox" id="tog-showpieces" checked>
+            <label for="tog-showpieces">✦ Galactic showpieces (visuals)</label>
+        </div>
 
         <div class="sb-hd" style="margin-top:16px">Spectral Type Legend</div>
         <div class="legend-item"><div class="legend-dot" style="background:#88aaff"></div>O/B — hot blue/white</div>
@@ -416,6 +420,12 @@ canvas { display:block; width:100% !important; height:100% !important; }
         <div class="legend-item"><div class="legend-dot" style="background:#554477;border:1px solid #888"></div>Cosmic void (negative space)</div>
         <div class="legend-item"><div class="legend-dot" style="background:#3366ff"></div>Galaxy cluster (ICM glow)</div>
         <div class="legend-item"><div class="legend-dot" style="background:#ffe0a0"></div>Supergiant cD galaxy</div>
+
+        <div class="sb-hd" style="margin-top:16px">Galactic Showpieces</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ff66aa"></div>H II region (Orion, Eagle, Carina)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#aa66ff"></div>Pulsar wind nebula (Crab)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#66aaff"></div>SN remnant (Cas A)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ffeecc"></div>LBV / Homunculus (η Car)</div>
 
         <div class="sb-hd" style="margin-top:16px">Sun's Orbit Around Sgr A*</div>
         <div style="font-size:10px;color:#666;line-height:1.6">
@@ -1234,6 +1244,129 @@ const CATALOG = [
             ['Arecibo Message', 'Target — 1974'],
         ],
         isCluster: true,
+    },
+
+    // ── Section header (sidebar only — no 3D object) ───────────────────────
+    { id: '__sep_showpieces', sectionHeader: 'Galactic Showpieces (Nebulae & SNRs)', isHeader: true },
+
+    // ── Galactic showpieces ───────────────────────────────────────────────
+    // Iconic Milky Way nebulae and supernova remnants.  Each has a custom
+    // 3D visual builder (see "GALACTIC SHOWPIECE VISUALS" further down).
+    {
+        id: 'orion_nebula', name: 'Orion Nebula (M42)', abbr: 'M42',
+        type: 'H II Region',
+        l: 209.013, b: -19.385, dist: 1344,
+        temp: 30000, spectral: 'H II',
+        color: 0xff66aa, glowColor: 0xff88aa, size: 0.95,
+        desc: 'The closest large region of massive star formation. A blister H II region carved out of the Orion Molecular Cloud by the radiation of the central Trapezium cluster (θ¹ Orionis). Visible to the naked eye in Orion\'s sword. The Hubble Space Telescope and JWST have catalogued thousands of protoplanetary disks ("proplyds") in its core.',
+        props: [
+            ['Type', 'H II Region / Stellar Nursery'],
+            ['Distance', '1,344 ly (412 pc)'],
+            ['Galactic l / b', '209.013° / −19.385°'],
+            ['Diameter', '~24 ly'],
+            ['Apparent magnitude', '+4.0 (naked-eye)'],
+            ['Ionizing source', 'Trapezium Cluster (θ¹ Ori, ~2,000 stars)'],
+            ['Age', '~2 Myr (active SF)'],
+            ['Notable', 'Hundreds of resolved proplyds (HST/JWST)'],
+        ],
+        isShowpiece: true,
+    },
+    {
+        id: 'crab_nebula', name: 'Crab Nebula (M1)', abbr: 'Crab',
+        type: 'Pulsar Wind Nebula (SNR)',
+        l: 184.557, b: -5.784, dist: 6500,
+        temp: 0, spectral: 'SNR',
+        color: 0xddaaff, glowColor: 0xaa66ff, size: 1.0,
+        desc: 'Remnant of supernova SN 1054, recorded by Chinese, Arab and Native-American astronomers in July 1054. Powered by the Crab Pulsar (PSR B0531+21) — a 33-ms-period neutron star whose relativistic wind inflates an expanding bubble of synchrotron-emitting plasma. The first object linked to a historical SN and the prototype pulsar wind nebula.',
+        props: [
+            ['Type', 'Pulsar Wind Nebula / Type II SNR'],
+            ['Distance', '~6,500 ly (~2.0 kpc)'],
+            ['Galactic l / b', '184.557° / −5.784°'],
+            ['Progenitor SN', 'SN 1054 (4 July 1054 CE)'],
+            ['Diameter', '~11 ly (still expanding ~1,500 km/s)'],
+            ['Pulsar', 'PSR B0531+21 — period 33.5 ms, B ~ 4×10¹² G'],
+            ['Pulsar mass', '~1.4 M☉ (neutron star)'],
+            ['Spin-down luminosity', '~5 × 10³⁸ erg/s (powers nebula)'],
+            ['Notable', 'Type-defining pulsar wind nebula'],
+        ],
+        link: 'sun.html',
+        isShowpiece: true,
+    },
+    {
+        id: 'eagle_nebula', name: 'Eagle Nebula (M16) — Pillars of Creation', abbr: 'M16',
+        type: 'H II Region + EGGs',
+        l: 17.0, b: 0.6, dist: 7000,
+        temp: 25000, spectral: 'H II',
+        color: 0xff7799, glowColor: 0xffaadd, size: 1.05,
+        desc: 'A young (~2 Myr) star-forming region anchored by the open cluster NGC 6611. Famous for the "Pillars of Creation" — towers of dense molecular gas being slowly evaporated by ultraviolet radiation from O-stars in the cluster, with embedded "Evaporating Gaseous Globules" (EGGs) collapsing into new stars. Iconic targets for both Hubble (1995) and JWST (2022).',
+        props: [
+            ['Type', 'H II region + dark molecular pillars'],
+            ['Distance', '~7,000 ly (~2.15 kpc)'],
+            ['Galactic l / b', '17.0° / +0.6°'],
+            ['Cluster', 'NGC 6611 (~460 stars, ~2 Myr)'],
+            ['Pillars', '4–5 ly tall (longest ~9.5 ly) — being photo-evaporated'],
+            ['Age', '~2 Myr (active)'],
+            ['Notable images', 'HST 1995 / JWST NIRCam 2022 / MIRI 2022'],
+        ],
+        isShowpiece: true,
+    },
+    {
+        id: 'carina_nebula', name: 'Carina Nebula (NGC 3372)', abbr: 'Carina',
+        type: 'Giant H II Region',
+        l: 287.6, b: -0.6, dist: 7500,
+        temp: 35000, spectral: 'H II',
+        color: 0xffaa88, glowColor: 0xffcc99, size: 1.4,
+        desc: 'One of the largest diffuse nebulae in the sky — a vast complex of glowing gas and dark dust ~460 ly across, four times larger than the Orion Nebula. Houses several massive young clusters (Trumpler 14, 16) and an exceptional sample of LBVs and Wolf-Rayet stars, including the famously unstable η Carinae. JWST\'s "Cosmic Cliffs" image (2022) shows its NGC 3324 ionization edge.',
+        props: [
+            ['Type', 'Giant H II Region (LBV factory)'],
+            ['Distance', '~7,500 ly (~2.3 kpc)'],
+            ['Galactic l / b', '287.6° / −0.6°'],
+            ['Diameter', '~460 ly (largest in southern sky)'],
+            ['Open clusters', 'Trumpler 14, 16, 15, 17; Coll. 228; Bochum 11'],
+            ['Massive stars', '~70 O-type + Wolf-Rayet, including WR 22, WR 25'],
+            ['Notable members', 'η Carinae (LBV), HD 93129A (O2 If*)'],
+            ['JWST imagery', 'Cosmic Cliffs (NGC 3324 rim) — Jul 2022'],
+        ],
+        isShowpiece: true,
+    },
+    {
+        id: 'eta_carinae', name: 'Eta Carinae (η Car)', abbr: 'η Car',
+        type: 'LBV Binary + Homunculus',
+        l: 287.596, b: -0.629, dist: 7500,
+        temp: 35000, spectral: 'B (LBV)',
+        color: 0xffeecc, glowColor: 0xffaa66, size: 0.85,
+        desc: 'A luminous blue variable binary at the heart of the Carina Nebula, comprising the most luminous star known in our Galaxy (~5 million L☉) and a hot evolved companion. Underwent the "Great Eruption" of 1843 — briefly the second-brightest star in the sky — ejecting the bipolar Homunculus Nebula now expanding at ~650 km/s. Considered an imminent (geologically speaking) supernova candidate.',
+        props: [
+            ['Type', 'Luminous Blue Variable Binary'],
+            ['Distance', '~7,500 ly (~2.3 kpc)'],
+            ['Galactic l / b', '287.596° / −0.629°'],
+            ['Mass (primary)', '~100 M☉'],
+            ['Mass (companion)', '~30 M☉, ~5.54 yr orbit'],
+            ['Luminosity (primary)', '~5 × 10⁶ L☉ (most luminous in MW)'],
+            ['Great Eruption', '1843 — apparent mag dropped to −0.8'],
+            ['Homunculus Nebula', 'Bipolar, ~0.67 ly across, expanding ~650 km/s'],
+            ['Future', 'SN/hypernova candidate within ~10⁵ yr'],
+        ],
+        isShowpiece: true,
+    },
+    {
+        id: 'cassiopeia_a', name: 'Cassiopeia A', abbr: 'Cas A',
+        type: 'Type IIb SN Remnant',
+        l: 111.74, b: -2.13, dist: 11000,
+        temp: 0, spectral: 'SNR',
+        color: 0xaaccff, glowColor: 0x66aaff, size: 1.0,
+        desc: 'The youngest known supernova remnant in our Galaxy — its progenitor exploded around 1670 CE (light first reached Earth then), but no clear historical sighting was recorded, suggesting heavy interstellar extinction. Brightest extrasolar radio source in the sky (Cas A = 3C 461). The first object whose forward shock has been imaged in light-echo "movies"; JWST detail (2023) revealed unprecedented ejecta filaments.',
+        props: [
+            ['Type', 'Type IIb SN remnant + central compact object'],
+            ['Distance', '~11,000 ly (~3.4 kpc)'],
+            ['Galactic l / b', '111.74° / −2.13°'],
+            ['Age', '~355 yr (light arrived ~1670 CE)'],
+            ['Diameter', '~10 ly (still expanding ~5,500 km/s)'],
+            ['Central compact object', 'Neutron star (no detectable pulsations)'],
+            ['Brightest', 'Strongest extrasolar radio source (Cas A / 3C 461)'],
+            ['Notable imagery', 'Light-echo "movies" + JWST NIRCam/MIRI 2023'],
+        ],
+        isShowpiece: true,
     },
 
     // ── Section header (sidebar only — no 3D object) ───────────────────────
@@ -2382,19 +2515,30 @@ function buildGalaxy() {
             bright = 0.85 + Math.random() * 0.15;
             cTone = -0.6;
         } else if (t < 0.22) {
-            // ── Galactic bar (peanut/X-shaped, oriented ~27°) ─────────
-            // Sample inside a triaxial ellipsoid in bar-local coords, then rotate.
-            const u = Math.random() * 2 - 1;       // along bar
+            // ── Galactic bar (peanut / X-shape, oriented ~27°) ────────
+            // Real MW: ARGOS / VVV surveys show clear "boxy/peanut" bulge with
+            // an X-shape — vertical thickness peaks at the bar ends and on
+            // ±45° diagonals from the bar centre. We reproduce that by giving
+            // the vertical scale height a (1 + cos(2θ_b)) modulation so stars
+            // pile up at high |z| near the bar ends.
+            const u = Math.random() * 2 - 1;       // along bar (-1..1)
             const v = (Math.random() - 0.5) * 2;   // across bar
-            const w = sampleExpH(BAR_H * 0.35);
             const xb = u * BAR_HALF;
             const zb = v * BAR_W * (1 - 0.55 * Math.abs(u));   // taper toward ends
+            // Bar-local cylindrical radius (kiloparsec scale)
+            const rho = Math.sqrt(xb*xb + zb*zb);
+            // Boost vertical scale height with |xb| → peanut shape
+            const peanutBoost = 0.55 + 0.85 * Math.pow(Math.abs(u), 1.4);
+            const w = sampleExpH(BAR_H * 0.32 * peanutBoost);
             // Rotate (xb, zb) by BAR_ANGLE in the XZ plane
             x = xb * cosBA - zb * sinBA;
             z = xb * sinBA + zb * cosBA;
             y = w;
-            bright = 0.7 + Math.random() * 0.3;
-            cTone = -0.35;
+            // X-shape extra brightening on diagonals (signature of the
+            // boxy/peanut bulge in IR star counts)
+            const diag = Math.cos(2 * Math.atan2(w, xb * 0.7));
+            bright = 0.7 + Math.random() * 0.3 + 0.10 * Math.max(0, diag);
+            cTone = -0.4;
         } else {
             // ── Logarithmic spiral arm ─────────────────────────────────
             const arm     = Math.floor(Math.random() * 4);
@@ -2496,6 +2640,77 @@ function buildGalaxy() {
 
 const galaxyPoints = buildGalaxy();
 scene.add(galaxyPoints);
+
+// ══════════════════════════════════════════════════════════════════════════
+//  DUST LANES  — dark molecular ribbons along the inner edges of spiral arms.
+//  Real MW: dust lanes are the most striking feature in optical edge-on
+//  views (think Cen A or NGC 891). They sit on the inner ("leading") side of
+//  each density-wave-compressed spiral arm and absorb background starlight,
+//  not emit. We render them with MultiplyBlending so they actually darken
+//  the bright additive disk behind them.
+// ══════════════════════════════════════════════════════════════════════════
+const galaxyDust = (function buildDustLanes() {
+    const PITCH       = Math.tan(13 * Math.PI / 180);
+    const R0          = 2500;
+    const MAX_WINDING = 13.5;
+    const ARM_STARTS  = [0.0, Math.PI/2, Math.PI, 3*Math.PI/2];
+    const ORION_OFF   = -(Math.PI + 10.252 - 2*Math.PI);
+    const N = 6500;
+    const pos = new Float32Array(N * 3);
+    const sz  = new Float32Array(N);
+    let idx = 0;
+    for (let i = 0; i < N; i++) {
+        const arm = Math.floor(Math.random() * 4);
+        // Sit just inside the arm ridge — bias winding toward middle radii
+        const winding = 1.0 + Math.random() * (MAX_WINDING - 1.5);
+        const r       = R0 * Math.exp(PITCH * winding);
+        if (r > 42000 || r < 3500) { i--; continue; }
+        let startAngle = ARM_STARTS[arm];
+        if (arm === 2) startAngle += ORION_OFF;
+        // Inner-edge offset: dust sits at slightly smaller radius than star ridge
+        const ridgeAngle = startAngle + winding;
+        const innerR = r * (0.92 + Math.random() * 0.04);
+        const angScatter = (Math.random() - 0.5) * 0.06;
+        pos[idx*3]   = innerR * Math.cos(ridgeAngle + angScatter);
+        pos[idx*3+1] = (Math.random() - 0.5) * 90;     // hugs galactic plane
+        pos[idx*3+2] = innerR * Math.sin(ridgeAngle + angScatter);
+        sz[idx]      = 220 + Math.random() * 380;
+        idx++;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos.subarray(0, idx*3), 3));
+    geo.setAttribute('size',     new THREE.BufferAttribute(sz.subarray(0, idx), 1));
+    geo.setDrawRange(0, idx);
+    // Multiply-blended dark brown — actually darkens the bright disk behind it
+    const mat = new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false,
+        blending: THREE.MultiplyBlending,
+        uniforms: { uScale: { value: renderer.getPixelRatio() } },
+        vertexShader: `
+            attribute float size;
+            uniform float uScale;
+            void main() {
+                vec4 mvp = modelViewMatrix * vec4(position, 1.0);
+                gl_PointSize = size * uScale / -mvp.z;
+                gl_PointSize = clamp(gl_PointSize, 0.5, 9.0);
+                gl_Position = projectionMatrix * mvp;
+            }
+        `,
+        fragmentShader: `
+            void main() {
+                float d = length(gl_PointCoord - 0.5) * 2.0;
+                float a = 1.0 - smoothstep(0.0, 1.0, d);
+                a = pow(a, 1.6);
+                // Multiply-blend toward dark warm brown — darkens what's behind
+                vec3 dark = vec3(0.30, 0.18, 0.11);
+                gl_FragColor = vec4(mix(vec3(1.0), dark, a * 0.85), 1.0);
+            }
+        `,
+    });
+    const pts = new THREE.Points(geo, mat);
+    scene.add(pts);
+    return pts;
+})();
 
 // ══════════════════════════════════════════════════════════════════════════
 //  STELLAR HALO  — sparse spheroidal cloud of old yellow/red stars
@@ -4424,6 +4639,487 @@ let mwOuterSprite = null;
 })();
 
 // ══════════════════════════════════════════════════════════════════════════
+//  GALACTIC SHOWPIECE VISUALS
+//
+//  Custom 3D visuals for the iconic Milky Way nebulae and SNRs.
+//  Each is positioned at its catalog `pos3` and registered in
+//  `showpieceAnims` for per-frame updates (pulsation, rotation, expansion).
+//
+//  Sizes are tuned so the objects read clearly at neighborhood/local-arm
+//  zoom but don't overwhelm the disk view at galaxy zoom.
+// ══════════════════════════════════════════════════════════════════════════
+const showpieceAnims = [];   // [{ obj, kind, basePos, t0, ... }, ...]
+const showpieceGroups = {};  // id → THREE.Group (so we can toggle visibility)
+
+// — Helper: build a sprite from a canvas painter (returns a Sprite) ─────
+function makeSpriteFromCanvas(painter, scale) {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 256;
+    painter(cv.getContext('2d'), 256);
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: new THREE.CanvasTexture(cv), transparent: true,
+        depthWrite: false, blending: THREE.AdditiveBlending,
+    }));
+    sp.scale.setScalar(scale);
+    return sp;
+}
+
+// ── Orion Nebula (M42) ─────────────────────────────────────────────────
+(function buildOrionNebula() {
+    const obj = CATALOG.find(s => s.id === 'orion_nebula');
+    if (!obj) return;
+    const g = new THREE.Group();
+    g.position.copy(obj.pos3);
+
+    // Pink/red H II glow (main body, ~24 ly)
+    g.add(makeSpriteFromCanvas((cx, S) => {
+        cx.translate(S/2, S/2);
+        const grad = cx.createRadialGradient(-10, 0, 4, 0, 0, S/2);
+        grad.addColorStop(0,    'rgba(255,210,180,0.95)');
+        grad.addColorStop(0.05, 'rgba(255,150,170,0.85)');
+        grad.addColorStop(0.20, 'rgba(255,90,130,0.55)');
+        grad.addColorStop(0.45, 'rgba(180,40,80,0.30)');
+        grad.addColorStop(0.75, 'rgba(60,10,30,0.10)');
+        grad.addColorStop(1,    'rgba(20,0,10,0.0)');
+        cx.fillStyle = grad;
+        cx.beginPath(); cx.arc(0,0, S/2, 0, Math.PI*2); cx.fill();
+        // O III green tint along the ionization rim (asymmetric)
+        cx.globalCompositeOperation = 'screen';
+        const ox = cx.createRadialGradient(20,-15, 6, 20,-15, 80);
+        ox.addColorStop(0,    'rgba(180,255,200,0.45)');
+        ox.addColorStop(0.5,  'rgba(120,200,180,0.18)');
+        ox.addColorStop(1,    'rgba(80,150,120,0.0)');
+        cx.fillStyle = ox;
+        cx.beginPath(); cx.arc(20,-15, 80, 0, Math.PI*2); cx.fill();
+        cx.globalCompositeOperation = 'source-over';
+    }, 30));
+
+    // Wider faint envelope
+    g.add(makeSpriteFromCanvas((cx, S) => {
+        cx.translate(S/2, S/2);
+        const grad = cx.createRadialGradient(0,0, 0, 0,0, S/2);
+        grad.addColorStop(0,   'rgba(255,160,200,0.30)');
+        grad.addColorStop(0.4, 'rgba(180,80,140,0.08)');
+        grad.addColorStop(1,   'rgba(60,20,40,0.0)');
+        cx.fillStyle = grad;
+        cx.beginPath(); cx.arc(0,0, S/2, 0, Math.PI*2); cx.fill();
+    }, 65));
+
+    // Trapezium cluster — 4 bright blue stars + bright knot
+    const trapPositions = [[-0.4, 0.2, 0], [0.5, 0.0, 0.1], [0.0, 0.6, -0.1], [0.2, -0.5, 0.05]];
+    trapPositions.forEach(([x, y, z]) => {
+        const star = new THREE.Mesh(
+            new THREE.SphereGeometry(0.25, 12, 12),
+            new THREE.MeshBasicMaterial({ color: 0xaaccff })
+        );
+        star.position.set(x, y, z);
+        g.add(star);
+        // Glow
+        const sp = makeSpriteFromCanvas((cx, S) => {
+            cx.translate(S/2, S/2);
+            const gr = cx.createRadialGradient(0,0,0, 0,0, S/2);
+            gr.addColorStop(0,    'rgba(220,235,255,1.0)');
+            gr.addColorStop(0.25, 'rgba(170,210,255,0.55)');
+            gr.addColorStop(1,    'rgba(80,140,255,0.0)');
+            cx.fillStyle = gr;
+            cx.beginPath(); cx.arc(0,0, S/2, 0, Math.PI*2); cx.fill();
+        }, 4);
+        sp.position.set(x, y, z);
+        g.add(sp);
+    });
+
+    // Dark dust silhouette (front lane) — slight darkening using multiply blend
+    const dust = new THREE.Mesh(
+        new THREE.SphereGeometry(8, 24, 24),
+        new THREE.MeshBasicMaterial({
+            color: 0x110608, transparent: true, opacity: 0.30,
+            depthWrite: false, blending: THREE.MultiplyBlending,
+        })
+    );
+    dust.scale.set(1.6, 0.45, 0.9);
+    dust.position.set(-3, -1, 4);
+    g.add(dust);
+
+    g.userData.isShowpiece = 'orion_nebula';
+    scene.add(g);
+    showpieceGroups.orion_nebula = g;
+    showpieceAnims.push({ obj: g, kind: 'breathe', t0: Math.random() * 6 });
+})();
+
+// ── Crab Nebula (M1) ───────────────────────────────────────────────────
+(function buildCrabNebula() {
+    const obj = CATALOG.find(s => s.id === 'crab_nebula');
+    if (!obj) return;
+    const g = new THREE.Group();
+    g.position.copy(obj.pos3);
+
+    // Outer red filamentary shell (oval)
+    const outer = makeSpriteFromCanvas((cx, S) => {
+        cx.translate(S/2, S/2);
+        // Rough elliptical body
+        cx.scale(1.25, 0.85);
+        const grad = cx.createRadialGradient(0,0,0, 0,0, S/2);
+        grad.addColorStop(0,    'rgba(255,200,170,0.0)');
+        grad.addColorStop(0.45, 'rgba(255,80,80,0.55)');
+        grad.addColorStop(0.7,  'rgba(180,30,80,0.30)');
+        grad.addColorStop(1,    'rgba(40,0,20,0.0)');
+        cx.fillStyle = grad;
+        cx.beginPath(); cx.arc(0,0, S/2, 0, Math.PI*2); cx.fill();
+        cx.scale(1/1.25, 1/0.85);
+        // Filaments — random short curved strokes
+        cx.globalCompositeOperation = 'screen';
+        for (let i = 0; i < 18; i++) {
+            const a = Math.random() * Math.PI * 2;
+            const r0 = 30 + Math.random() * 70;
+            const r1 = r0 + 18 + Math.random() * 22;
+            cx.strokeStyle = `rgba(255,${100+Math.random()*120|0},${80+Math.random()*60|0},${0.18+Math.random()*0.25})`;
+            cx.lineWidth = 1.2 + Math.random();
+            cx.beginPath();
+            cx.moveTo(r0*Math.cos(a), r0*Math.sin(a)*0.8);
+            cx.lineTo(r1*Math.cos(a + (Math.random()-0.5)*0.4), r1*Math.sin(a + (Math.random()-0.5)*0.4)*0.8);
+            cx.stroke();
+        }
+    }, 14);
+    g.add(outer);
+
+    // Inner blue synchrotron cloud
+    const inner = makeSpriteFromCanvas((cx, S) => {
+        cx.translate(S/2, S/2);
+        cx.scale(1.1, 0.95);
+        const grad = cx.createRadialGradient(0,0,0, 0,0, S/2);
+        grad.addColorStop(0,    'rgba(220,210,255,0.85)');
+        grad.addColorStop(0.25, 'rgba(140,150,255,0.55)');
+        grad.addColorStop(0.6,  'rgba(80,90,200,0.20)');
+        grad.addColorStop(1,    'rgba(20,30,80,0.0)');
+        cx.fillStyle = grad;
+        cx.beginPath(); cx.arc(0,0, S/2, 0, Math.PI*2); cx.fill();
+    }, 8);
+    g.add(inner);
+
+    // Pulsar — bright white pinprick + halo
+    const pulsar = new THREE.Mesh(
+        new THREE.SphereGeometry(0.3, 12, 12),
+        new THREE.MeshBasicMaterial({ color: 0xffffff })
+    );
+    g.add(pulsar);
+    const pulsarHalo = makeSpriteFromCanvas((cx, S) => {
+        cx.translate(S/2, S/2);
+        const gr = cx.createRadialGradient(0,0,0, 0,0, S/2);
+        gr.addColorStop(0,    'rgba(255,255,255,1.0)');
+        gr.addColorStop(0.15, 'rgba(220,220,255,0.65)');
+        gr.addColorStop(0.5,  'rgba(120,120,255,0.18)');
+        gr.addColorStop(1,    'rgba(40,40,120,0.0)');
+        cx.fillStyle = gr;
+        cx.beginPath(); cx.arc(0,0, S/2, 0, Math.PI*2); cx.fill();
+    }, 1.5);
+    g.add(pulsarHalo);
+
+    // Polar jets along pulsar spin axis (NW–SE in real Crab)
+    const jetMat = new THREE.LineBasicMaterial({ color: 0xddccff, transparent: true, opacity: 0.55 });
+    [1, -1].forEach(s => {
+        const jet = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(0, 0, 0),
+                new THREE.Vector3(0, s * 6, 0),
+            ]),
+            jetMat
+        );
+        jet.rotation.z = 0.45; // tilt
+        g.add(jet);
+    });
+
+    g.userData.isShowpiece = 'crab_nebula';
+    scene.add(g);
+    showpieceGroups.crab_nebula = g;
+    showpieceAnims.push({ obj: g, kind: 'crab_pulsar', pulsar, halo: pulsarHalo, t0: 0 });
+})();
+
+// ── Eagle Nebula (M16) — Pillars of Creation ───────────────────────────
+(function buildEagleNebula() {
+    const obj = CATALOG.find(s => s.id === 'eagle_nebula');
+    if (!obj) return;
+    const g = new THREE.Group();
+    g.position.copy(obj.pos3);
+
+    // Background pink/violet H II glow
+    g.add(makeSpriteFromCanvas((cx, S) => {
+        cx.translate(S/2, S/2);
+        const grad = cx.createRadialGradient(0,0,0, 0,0, S/2);
+        grad.addColorStop(0,    'rgba(255,200,220,0.85)');
+        grad.addColorStop(0.25, 'rgba(220,120,170,0.55)');
+        grad.addColorStop(0.55, 'rgba(120,60,140,0.22)');
+        grad.addColorStop(1,    'rgba(40,20,60,0.0)');
+        cx.fillStyle = grad;
+        cx.beginPath(); cx.arc(0,0, S/2, 0, Math.PI*2); cx.fill();
+        // Blue ionizing cluster (NGC 6611) — bright knot top-right
+        cx.globalCompositeOperation = 'screen';
+        const cl = cx.createRadialGradient(45,-30, 2, 45,-30, 50);
+        cl.addColorStop(0,   'rgba(220,235,255,0.95)');
+        cl.addColorStop(0.4, 'rgba(140,180,255,0.45)');
+        cl.addColorStop(1,   'rgba(60,80,180,0.0)');
+        cx.fillStyle = cl;
+        cx.beginPath(); cx.arc(45,-30, 50, 0, Math.PI*2); cx.fill();
+    }, 20));
+
+    // Three vertical "pillar" cones (dark dust lit at the tips)
+    const PIL_H = 5.5;
+    const pillars = [
+        { x:  0, z:  0, h: PIL_H,        scale: 1.0 },
+        { x: -1.6, z: 0.4, h: PIL_H*0.75, scale: 0.7 },
+        { x:  1.4, z: -0.3, h: PIL_H*0.55, scale: 0.55 },
+    ];
+    pillars.forEach(p => {
+        const pillar = new THREE.Mesh(
+            new THREE.ConeGeometry(0.55 * p.scale, p.h, 14, 1, true),
+            new THREE.MeshBasicMaterial({
+                color: 0x281a18, transparent: true, opacity: 0.85,
+                side: THREE.DoubleSide, depthWrite: false,
+            })
+        );
+        pillar.position.set(p.x, p.h * 0.45, p.z);
+        g.add(pillar);
+        // Bright pink rim at tip
+        const tip = new THREE.Mesh(
+            new THREE.SphereGeometry(0.45 * p.scale, 12, 12),
+            new THREE.MeshBasicMaterial({
+                color: 0xff88aa, transparent: true, opacity: 0.55,
+                depthWrite: false, blending: THREE.AdditiveBlending,
+            })
+        );
+        tip.position.set(p.x, p.h, p.z);
+        g.add(tip);
+    });
+
+    // NGC 6611 ionizing cluster — three bright blue stars
+    [[3.0, 4.5, -1.2], [3.6, 4.0, -1.6], [2.6, 4.8, -0.7]].forEach(([x, y, z]) => {
+        const s = new THREE.Mesh(
+            new THREE.SphereGeometry(0.18, 10, 10),
+            new THREE.MeshBasicMaterial({ color: 0xbbddff })
+        );
+        s.position.set(x, y, z); g.add(s);
+    });
+
+    g.userData.isShowpiece = 'eagle_nebula';
+    scene.add(g);
+    showpieceGroups.eagle_nebula = g;
+    showpieceAnims.push({ obj: g, kind: 'breathe', t0: Math.random() * 6 });
+})();
+
+// ── Carina Nebula (NGC 3372) ──────────────────────────────────────────
+(function buildCarinaNebula() {
+    const obj = CATALOG.find(s => s.id === 'carina_nebula');
+    if (!obj) return;
+    const g = new THREE.Group();
+    g.position.copy(obj.pos3);
+
+    // Huge multi-lobed pink/magenta cloud
+    g.add(makeSpriteFromCanvas((cx, S) => {
+        cx.translate(S/2, S/2);
+        // Two overlapping radial gradients give the bilobed look
+        const a = cx.createRadialGradient(-30, 8, 6, -30, 8, S/2 * 0.85);
+        a.addColorStop(0,   'rgba(255,210,210,0.70)');
+        a.addColorStop(0.3, 'rgba(255,120,140,0.45)');
+        a.addColorStop(0.7, 'rgba(140,40,100,0.18)');
+        a.addColorStop(1,   'rgba(40,10,30,0.0)');
+        cx.fillStyle = a;
+        cx.beginPath(); cx.arc(-30, 8, S/2*0.85, 0, Math.PI*2); cx.fill();
+        const b = cx.createRadialGradient(40, -10, 8, 40, -10, S/2*0.7);
+        b.addColorStop(0,   'rgba(255,200,170,0.70)');
+        b.addColorStop(0.35,'rgba(255,140,90,0.40)');
+        b.addColorStop(0.8, 'rgba(120,40,30,0.12)');
+        b.addColorStop(1,   'rgba(20,5,10,0.0)');
+        cx.fillStyle = b;
+        cx.beginPath(); cx.arc(40, -10, S/2*0.7, 0, Math.PI*2); cx.fill();
+        // Dark "Keyhole" silhouette — irregular dark blob
+        cx.globalCompositeOperation = 'multiply';
+        cx.fillStyle = 'rgba(20,10,15,0.85)';
+        cx.beginPath();
+        cx.moveTo(0, -8); cx.bezierCurveTo(-24, -22, -30, 16, -8, 24);
+        cx.bezierCurveTo(8, 26, 18, 6, 0, -8);
+        cx.fill();
+        cx.globalCompositeOperation = 'source-over';
+        // Bright "Cosmic Cliffs" rim — top-right edge highlight
+        cx.globalCompositeOperation = 'screen';
+        const cliff = cx.createLinearGradient(20, -90, 80, -10);
+        cliff.addColorStop(0,   'rgba(255,160,180,0.0)');
+        cliff.addColorStop(0.5, 'rgba(255,210,200,0.55)');
+        cliff.addColorStop(1,   'rgba(255,130,150,0.0)');
+        cx.fillStyle = cliff;
+        cx.beginPath();
+        cx.moveTo(20, -90); cx.lineTo(95, -50); cx.lineTo(80, -10); cx.lineTo(15, -55);
+        cx.closePath(); cx.fill();
+    }, 80));
+
+    // Trumpler 14/16 — small clusters of bright blue stars
+    const clusterCenters = [
+        { c: [ 18, 4, -5], n: 6, color: 0xbbddff }, // Trumpler 14
+        { c: [-12, 2, 10], n: 5, color: 0xaaccff }, // Trumpler 16
+    ];
+    clusterCenters.forEach(({ c, n, color }) => {
+        for (let i = 0; i < n; i++) {
+            const s = new THREE.Mesh(
+                new THREE.SphereGeometry(0.6, 10, 10),
+                new THREE.MeshBasicMaterial({ color })
+            );
+            s.position.set(
+                c[0] + (Math.random()-0.5) * 6,
+                c[1] + (Math.random()-0.5) * 2,
+                c[2] + (Math.random()-0.5) * 6,
+            );
+            g.add(s);
+        }
+    });
+
+    g.userData.isShowpiece = 'carina_nebula';
+    scene.add(g);
+    showpieceGroups.carina_nebula = g;
+    showpieceAnims.push({ obj: g, kind: 'breathe', t0: Math.random() * 6 });
+})();
+
+// ── Eta Carinae — Homunculus bipolar nebula ───────────────────────────
+(function buildEtaCarinae() {
+    const obj = CATALOG.find(s => s.id === 'eta_carinae');
+    if (!obj) return;
+    const g = new THREE.Group();
+    g.position.copy(obj.pos3);
+
+    // Bipolar Homunculus — two slightly-overlapping bright lobes
+    [1, -1].forEach(dir => {
+        const lobe = new THREE.Mesh(
+            new THREE.SphereGeometry(0.55, 18, 18),
+            new THREE.MeshBasicMaterial({
+                color: 0xfff0c8, transparent: true, opacity: 0.65,
+                depthWrite: false, blending: THREE.AdditiveBlending,
+            })
+        );
+        lobe.scale.set(0.7, 1.1, 0.7);
+        lobe.position.y = dir * 0.45;
+        g.add(lobe);
+        // Inner brighter core of each lobe
+        const inner = new THREE.Mesh(
+            new THREE.SphereGeometry(0.30, 14, 14),
+            new THREE.MeshBasicMaterial({
+                color: 0xffe8b4, transparent: true, opacity: 0.85,
+                depthWrite: false, blending: THREE.AdditiveBlending,
+            })
+        );
+        inner.scale.set(0.55, 0.95, 0.55);
+        inner.position.y = dir * 0.45;
+        g.add(inner);
+    });
+
+    // Equatorial debris skirt — thin bright ring
+    const skirt = new THREE.Mesh(
+        new THREE.RingGeometry(0.55, 0.85, 48),
+        new THREE.MeshBasicMaterial({
+            color: 0xffd28a, transparent: true, opacity: 0.55,
+            side: THREE.DoubleSide, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+        })
+    );
+    skirt.rotation.x = Math.PI / 2;
+    g.add(skirt);
+
+    // Central LBV — pinprick + halo
+    g.add(new THREE.Mesh(
+        new THREE.SphereGeometry(0.10, 10, 10),
+        new THREE.MeshBasicMaterial({ color: 0xffffff })
+    ));
+    const halo = makeSpriteFromCanvas((cx, S) => {
+        cx.translate(S/2, S/2);
+        const gr = cx.createRadialGradient(0,0,0, 0,0, S/2);
+        gr.addColorStop(0,    'rgba(255,255,255,1.0)');
+        gr.addColorStop(0.18, 'rgba(255,230,180,0.7)');
+        gr.addColorStop(0.6,  'rgba(255,160,80,0.18)');
+        gr.addColorStop(1,    'rgba(180,60,30,0.0)');
+        cx.fillStyle = gr;
+        cx.beginPath(); cx.arc(0,0, S/2, 0, Math.PI*2); cx.fill();
+    }, 1.6);
+    g.add(halo);
+
+    // Tilt the bipolar axis ~40° (real Homunculus axis is ~41° to LOS)
+    g.rotation.z = 0.7;
+
+    g.userData.isShowpiece = 'eta_carinae';
+    scene.add(g);
+    showpieceGroups.eta_carinae = g;
+    showpieceAnims.push({ obj: g, kind: 'eta_car', halo, t0: Math.random() * 6 });
+})();
+
+// ── Cassiopeia A — youngest known MW SNR ──────────────────────────────
+(function buildCassiopeiaA() {
+    const obj = CATALOG.find(s => s.id === 'cassiopeia_a');
+    if (!obj) return;
+    const g = new THREE.Group();
+    g.position.copy(obj.pos3);
+
+    // Outer X-ray shock shell (blue-white, expanding)
+    const shock = new THREE.Mesh(
+        new THREE.SphereGeometry(5.5, 28, 28),
+        new THREE.MeshBasicMaterial({
+            color: 0x99ccff, transparent: true, opacity: 0.30,
+            side: THREE.DoubleSide, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+        })
+    );
+    g.add(shock);
+
+    // Inner reverse-shock filaments (magenta-orange)
+    const inner = new THREE.Mesh(
+        new THREE.SphereGeometry(3.6, 24, 24),
+        new THREE.MeshBasicMaterial({
+            color: 0xff7766, transparent: true, opacity: 0.30,
+            side: THREE.DoubleSide, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+        })
+    );
+    g.add(inner);
+
+    // Filament wisps (spike lines from center outward)
+    const FIL_N = 24;
+    const filGeo = new THREE.BufferGeometry();
+    const filPos = new Float32Array(FIL_N * 6);
+    for (let i = 0; i < FIL_N; i++) {
+        const phi = Math.acos(2 * Math.random() - 1);
+        const th  = Math.random() * Math.PI * 2;
+        const r0  = 1.5 + Math.random() * 1.0;
+        const r1  = 4.5 + Math.random() * 1.5;
+        const ux = Math.sin(phi) * Math.cos(th);
+        const uy = Math.cos(phi);
+        const uz = Math.sin(phi) * Math.sin(th);
+        filPos[i*6]   = r0 * ux; filPos[i*6+1] = r0 * uy; filPos[i*6+2] = r0 * uz;
+        filPos[i*6+3] = r1 * ux; filPos[i*6+4] = r1 * uy; filPos[i*6+5] = r1 * uz;
+    }
+    filGeo.setAttribute('position', new THREE.BufferAttribute(filPos, 3));
+    const filMat = new THREE.LineBasicMaterial({
+        color: 0xffaa88, transparent: true, opacity: 0.45,
+    });
+    g.add(new THREE.LineSegments(filGeo, filMat));
+
+    // Central neutron star — small bright dot
+    g.add(new THREE.Mesh(
+        new THREE.SphereGeometry(0.16, 10, 10),
+        new THREE.MeshBasicMaterial({ color: 0xeeeeff })
+    ));
+    // Halo around NS
+    const nsHalo = makeSpriteFromCanvas((cx, S) => {
+        cx.translate(S/2, S/2);
+        const gr = cx.createRadialGradient(0,0,0, 0,0, S/2);
+        gr.addColorStop(0,   'rgba(220,230,255,1.0)');
+        gr.addColorStop(0.3, 'rgba(140,170,255,0.5)');
+        gr.addColorStop(1,   'rgba(40,60,180,0.0)');
+        cx.fillStyle = gr;
+        cx.beginPath(); cx.arc(0,0, S/2, 0, Math.PI*2); cx.fill();
+    }, 0.8);
+    g.add(nsHalo);
+
+    g.userData.isShowpiece = 'cassiopeia_a';
+    scene.add(g);
+    showpieceGroups.cassiopeia_a = g;
+    showpieceAnims.push({ obj: g, kind: 'cas_a', shock, inner, t0: 0 });
+})();
+
+// ══════════════════════════════════════════════════════════════════════════
 //  M31 COLLISION TRAJECTORY
 //  Andromeda is approaching at ~110 km/s; merger in ~4.5 Gyr.
 //  We trace its path in log-compressed scene space with:
@@ -4843,6 +5539,7 @@ document.getElementById('tog-galaxy').addEventListener('change', e => {
     galaxyPoints.visible = v;
     galaxyHalo.visible   = v;
     galaxyHII.visible    = v;
+    galaxyDust.visible   = v;
     mwInnerGlow.visible  = v;
 });
 document.getElementById('tog-grid').addEventListener('change', e => {
@@ -4860,6 +5557,10 @@ document.getElementById('tog-plane').addEventListener('change', e => {
 document.getElementById('tog-sun-orbit').addEventListener('change', e => {
     sunOrbitEnabled = e.target.checked;
     if (!sunOrbitEnabled) sunOrbitGroup.visible = false;
+});
+document.getElementById('tog-showpieces').addEventListener('change', e => {
+    const v = e.target.checked;
+    Object.values(showpieceGroups).forEach(g => { g.visible = v; });
 });
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -5149,6 +5850,9 @@ function animate() {
     // ── Sun's orbit around Sgr A* — animated marker, trail, vel arrow ──
     updateSunOrbit(dt, camDistFromOrigin);
 
+    // ── Galactic showpiece animations (pulsar pulse, SNR expand, breathe) ──
+    updateShowpieces(t, camDistFromOrigin);
+
     updateLabelScales();
     updateCoordDisplay();
     renderer.render(scene, camera);
@@ -5242,6 +5946,50 @@ function updateSunOrbit(dt, camDistFromOrigin) {
     const elGP = document.getElementById('hud-galactic-phase');
     if (elGY) elGY.textContent = simGalacticYr.toFixed(1) + ' Myr  /  225 Myr';
     if (elGP) elGP.textContent = phasePct.toFixed(1) + '%  (θ = ' + phaseDeg.toFixed(0) + '°)';
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  SHOWPIECE ANIMATIONS
+//  Each showpiece registered in `showpieceAnims` gets a per-frame update:
+//    • crab_pulsar : 33 ms pulsar — in-app rendered as a faster-than-real
+//      brightness flicker on the central pinprick + halo
+//    • cas_a       : slow expanding shock + faint reverse-shock pulsation
+//    • eta_car     : LBV variability — slow brightness breath on the core
+//    • breathe     : generic gentle nebular sway (subtle scale modulation)
+// ══════════════════════════════════════════════════════════════════════════
+function updateShowpieces(t, camDistFromOrigin) {
+    // Skip work entirely at universe zoom — these are tiny dots out there.
+    const lod = camDistFromOrigin < 90000;
+    showpieceAnims.forEach(a => {
+        if (!lod || !a.obj.visible) return;
+        switch (a.kind) {
+            case 'crab_pulsar': {
+                // Visible "pulse" at ~1.4 Hz (slowed from the real 30 Hz so it reads).
+                // Real Crab is 33 ms; that's 30 Hz, way too fast on a 60-fps screen.
+                const pulse = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(t * 8.8));
+                if (a.pulsar) a.pulsar.scale.setScalar(0.85 + 0.45 * pulse);
+                if (a.halo)   a.halo.scale.setScalar(1.5 * (0.85 + 0.55 * pulse));
+                break;
+            }
+            case 'cas_a': {
+                // Subtle expansion + opacity breath (forward shock vs reverse shock)
+                const s = 1 + 0.025 * Math.sin(t * 0.6);
+                if (a.shock) a.shock.scale.setScalar(s);
+                if (a.inner) a.inner.scale.setScalar(1 + 0.04 * Math.sin(t * 0.6 + 1.4));
+                break;
+            }
+            case 'eta_car': {
+                // LBV brightness breath
+                if (a.halo) a.halo.scale.setScalar(1.6 * (0.9 + 0.35 * Math.sin(t * 0.45 + a.t0)));
+                break;
+            }
+            case 'breathe':
+            default: {
+                a.obj.scale.setScalar(1 + 0.025 * Math.sin(t * 0.35 + a.t0));
+                break;
+            }
+        }
+    });
 }
 
 // ── Start at galaxy view so the full context is visible immediately ───────
