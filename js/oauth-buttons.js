@@ -19,6 +19,7 @@
 
 import { auth } from './auth.js';
 import { SOCIAL_PROVIDERS } from './config.js';
+import { funnel } from './auth-funnel.js';
 
 // Provider metadata. label, brand colours, and the OFFICIAL logo
 // markup. Google + Apple both publish brand guidelines we must follow
@@ -166,6 +167,11 @@ export function mountOAuthButtons(target, opts = {}) {
 }
 
 async function handleClick(provider, btn, errEl, opts) {
+    // Funnel: which provider, from which page (signin vs signup vs other).
+    // Fired BEFORE the redirect call so a Supabase outage that prevents
+    // the redirect still leaves a click-through datapoint server-side.
+    try { funnel.step('oauth_button_clicked', { provider, source: opts.source || null }); } catch {}
+
     // Disable + spinner — Supabase navigates the page on success, but
     // the click → redirect roundtrip can be a few hundred ms and the
     // user shouldn't be able to mash the button into double-firing.
@@ -191,5 +197,12 @@ async function handleClick(provider, btn, errEl, opts) {
         btn.innerHTML = original;
         errEl.textContent = `Could not start ${provider} sign-in: ${e.message}`;
         errEl.style.display = '';
+        try {
+            funnel.step('oauth_start_failed', {
+                provider,
+                source: opts.source || null,
+                reason: String(e?.message || 'unknown').slice(0, 120),
+            });
+        } catch {}
     }
 }

@@ -125,6 +125,17 @@ body {
 import { auth } from './js/auth.js';
 import { getSupabase, isConfigured } from './js/supabase-config.js';
 import { logActivation } from './js/activation.js';
+import { funnel } from './js/auth-funnel.js';
+// telemetry.js is auto-init on import (window.onerror autocapture for
+// the callback page) — keep the side-effect import explicit so a
+// future tree-shake doesn't drop it.
+import './js/telemetry.js';
+import { analytics } from './js/analytics.js';
+
+// Time the entire callback hydration so we can track p95 latency in the
+// admin auth-flow card. Slow callbacks here usually mean Supabase
+// session-restore is racing against the page's getSession() poll.
+const _cbT0 = Date.now();
 
 const titleEl  = document.getElementById('cb-title');
 const subEl    = document.getElementById('cb-sub');
@@ -142,6 +153,15 @@ function showError(msg, source = 'oauth_callback') {
     import('./js/telemetry.js')
         .then(({ telemetry }) => telemetry.recordAuthFailure(msg || 'unknown', { source }))
         .catch(() => { /* fire-and-forget */ });
+    // Funnel: stitches into the same funnel_id as oauth_button_clicked
+    // so the admin can compute click→callback success rate per provider.
+    try {
+        funnel.step('auth_callback_failed', {
+            source,
+            reason:     String(msg || 'unknown').slice(0, 200),
+            elapsed_ms: Date.now() - _cbT0,
+        });
+    } catch {}
 }
 
 // Provider failures come back as ?error=<code>&error_description=<text>
@@ -160,6 +180,11 @@ const callbackSource = (
     hashParams.get('type') === 'magiclink' ||
     hashParams.get('type') === 'otp'
 ) ? 'magic_link' : 'oauth';
+
+// Funnel: callback enter — fires before any session-hydration work so
+// we count even the cases where the rest of this script crashes.
+try { funnel.step('auth_callback_enter', { source: callbackSource }); } catch {}
+
 if (errCode) {
     const desc = params.get('error_description')
               || hashParams.get('error_description')
@@ -218,6 +243,17 @@ async function boot() {
                 await logActivation('signup', { plan: 'free', source: callbackSource });
             } catch {}
 
+            // Funnel: dedicated stage for OAuth/magic-link signups so the
+            // funnel summary RPC can split signup_succeeded volume by
+            // method without joining against activation_events.
+            try {
+                funnel.step('auth_callback_signup', {
+                    source:     callbackSource,
+                    plan:       'free',
+                    elapsed_ms: Date.now() - _cbT0,
+                });
+            } catch {}
+
             // Welcome email — fire-and-forget. The edge function
             // does its own idempotency pre-check against
             // welcome_email_sent so a refresh is also safe.
@@ -243,10 +279,25 @@ async function boot() {
             try {
                 await logActivation('signin_succeeded', { retry_count: 0, source: callbackSource });
             } catch {}
+            try {
+                funnel.step('auth_callback_succeeded', {
+                    source:     callbackSource,
+                    is_new:     false,
+                    elapsed_ms: Date.now() - _cbT0,
+                });
+            } catch {}
 
             titleEl.textContent = 'Welcome back.';
             subEl.textContent   = 'Loading your dashboard…';
         }
+
+        // Identify the user for analytics so the dashboard page_view
+        // attaches to a real user_id. fetchProfile already populated
+        // plan/role above, so this is the cheapest read in the file.
+        try {
+            const u = auth.getUser?.();
+            if (u?.id) analytics.identify(u.id, { plan: u.plan, role: u.role });
+        } catch {}
 
         // Honour any post-login redirect a sign-in-required page may
         // have stashed in sessionStorage; default to dashboard.
