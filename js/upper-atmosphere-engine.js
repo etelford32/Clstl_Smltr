@@ -160,6 +160,136 @@ export const SATELLITE_REFERENCES = [
         },
         description: "Iridium NEXT polar constellation. 86.4° inclined; covers high-latitude comms.",
     },
+
+    // ── Crewed + science assets in the LEO drag belt ──────────────────
+    {
+        id: "tiangong", name: "Tiangong (CSS)", altitudeKm: 385,
+        color: "#ff70a0",
+        orbital: {
+            noradId: 48274,                   // CSS / TIANHE core module
+            inclinationDeg:    41.5,
+            raanDeg:           300,
+            argPerigeeDeg:      0,
+            meanAnomalyDeg0:   115,
+            eccentricity:       0.0008,
+            periodMin:         92.2,
+        },
+        description: "Chinese Space Station. Crewed since 2021; permanent T-shaped configuration "
+                   + "since the Wentian + Mengtian modules docked in 2022.",
+    },
+    {
+        id: "swarm-a", name: "Swarm-A", altitudeKm: 462,
+        color: "#80f0d0",
+        orbital: {
+            noradId: 39452,
+            inclinationDeg:    87.4,
+            raanDeg:            45,
+            argPerigeeDeg:      0,
+            meanAnomalyDeg0:   200,
+            eccentricity:       0.0011,
+            periodMin:         93.8,
+        },
+        description: "ESA Swarm magnetic-field probe (one of three). Maps the lithospheric, "
+                   + "ionospheric and core fields — gold-standard data for the magnetic-cascade "
+                   + "module driving this simulator.",
+    },
+    {
+        id: "icesat2", name: "ICESat-2", altitudeKm: 496,
+        color: "#9cffe0",
+        orbital: {
+            noradId: 43613,
+            inclinationDeg:    92.0,
+            raanDeg:           120,
+            argPerigeeDeg:      0,
+            meanAnomalyDeg0:    35,
+            eccentricity:       0.0003,
+            periodMin:         94.5,
+        },
+        description: "NASA polar laser-altimeter measuring sea ice + ice-sheet elevation "
+                   + "to 4 mm precision via the ATLAS photon-counting LIDAR.",
+    },
+    {
+        id: "grace-fo", name: "GRACE-FO", altitudeKm: 490,
+        color: "#f8c060",
+        orbital: {
+            noradId: 43476,
+            inclinationDeg:    89.0,
+            raanDeg:           220,
+            argPerigeeDeg:      0,
+            meanAnomalyDeg0:   310,
+            eccentricity:       0.0021,
+            periodMin:         94.4,
+        },
+        description: "GRACE Follow-On twin gravity-mapping pair. Inter-satellite laser "
+                   + "ranging tracks Earth-mass redistribution — groundwater, ice, ocean.",
+    },
+    {
+        id: "cryosat2", name: "CryoSat-2", altitudeKm: 717,
+        color: "#a0e0ff",
+        orbital: {
+            noradId: 36508,
+            inclinationDeg:    92.0,
+            raanDeg:            70,
+            argPerigeeDeg:      0,
+            meanAnomalyDeg0:    50,
+            eccentricity:       0.0010,
+            periodMin:         99.2,
+        },
+        description: "ESA Ku-band SAR radar altimeter. Drift orbit — no fixed ground-track "
+                   + "repeat — gives dense polar ice-thickness sampling.",
+    },
+    {
+        id: "sentinel1a", name: "Sentinel-1A", altitudeKm: 693,
+        color: "#c0a0ff",
+        orbital: {
+            noradId: 39634,
+            inclinationDeg:    98.2,                // sun-synchronous
+            raanDeg:           340,
+            argPerigeeDeg:      0,
+            meanAnomalyDeg0:   180,
+            eccentricity:       0.0001,
+            periodMin:         98.6,
+        },
+        description: "ESA Copernicus C-band SAR. Sun-synchronous dawn-dusk; "
+                   + "InSAR deformation + maritime monitoring.",
+    },
+    {
+        id: "noaa20", name: "NOAA-20 (JPSS-1)", altitudeKm: 824,
+        color: "#ffe080",
+        orbital: {
+            noradId: 43013,
+            inclinationDeg:    98.7,
+            raanDeg:            10,
+            argPerigeeDeg:      0,
+            meanAnomalyDeg0:    90,
+            eccentricity:       0.0001,
+            periodMin:        101.4,
+        },
+        description: "Polar-orbiting NOAA weather sat. VIIRS imager + CrIS sounder feed "
+                   + "operational forecasts and the JPSS data-assimilation chain.",
+    },
+    {
+        id: "sentinel6", name: "Sentinel-6 MF", altitudeKm: 1336,
+        color: "#ff9070",
+        orbital: {
+            noradId: 46984,
+            inclinationDeg:    66.0,
+            raanDeg:           150,
+            argPerigeeDeg:      0,
+            meanAnomalyDeg0:   270,
+            eccentricity:       0.0008,
+            periodMin:        112.4,
+        },
+        description: "Sentinel-6 Michael Freilich. Sea-level reference altimeter; "
+                   + "successor to TOPEX/Jason — the operational sea-level record.",
+    },
+    {
+        id: "geo-line", name: "Geostationary belt", altitudeKm: 2000,
+        color: "#80a0c0",
+        orbital: null,
+        description: "Marker only — true GEO (35 786 km) is far outside the simulator's "
+                   + "drag-belt. Shown so users know what's *above* the rendered band.",
+    },
 ];
 
 /**

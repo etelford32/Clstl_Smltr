@@ -661,6 +661,78 @@ input[type=range]::-moz-range-thumb {
 .ua-tab-pane { display:none; flex-direction:column; gap:0; }
 .ua-tab-pane.ua-tab-pane-on { display:flex; }
 
+/* ─── Space-weather analytics rows ──────────────────────── */
+.ua-sw-row {
+    display:grid;
+    grid-template-columns: 92px 1fr auto;
+    gap:8px;
+    align-items:center;
+    padding:6px 9px;
+    background:rgba(255,255,255,.025);
+    border:1px solid rgba(255,255,255,.06);
+    border-left-width:3px;
+    border-radius:7px;
+    font-size:.72rem;
+}
+.ua-sw-row .ua-sw-k {
+    color:#9ab; font-weight:700;
+    font-size:.62rem; letter-spacing:.06em;
+    text-transform:uppercase;
+}
+.ua-sw-row .ua-sw-v {
+    color:#fff; font-family:monospace;
+    font-weight:700; font-size:.78rem;
+}
+.ua-sw-row .ua-sw-tail {
+    font-family:monospace; font-size:.62rem;
+    color:#aab; text-align:right; line-height:1.3;
+}
+.ua-sw-row .ua-sw-tag {
+    display:inline-block; padding:1px 6px; border-radius:3px;
+    font-size:.58rem; font-weight:800; letter-spacing:.06em;
+    margin-left:6px;
+}
+.ua-sw-bar {
+    grid-column:1 / -1;
+    height:3px;
+    background:rgba(255,255,255,.06);
+    border-radius:2px;
+    overflow:hidden;
+    margin-top:4px;
+}
+.ua-sw-bar-fill {
+    display:block; height:100%;
+    transition: width .25s, background .25s;
+}
+
+/* ─── Mesosphere phenomena rows ─────────────────────────── */
+.ua-meso-row {
+    display:grid;
+    grid-template-columns: 14px 1fr auto;
+    gap:9px;
+    align-items:center;
+    padding:6px 9px;
+    background:rgba(255,255,255,.025);
+    border:1px solid rgba(255,255,255,.06);
+    border-radius:6px;
+    font-size:.7rem;
+    color:#cde;
+}
+.ua-meso-row.ua-meso--off { opacity:.45; }
+.ua-meso-dot {
+    width:10px; height:10px; border-radius:50%;
+    box-shadow:0 0 6px currentColor;
+}
+.ua-meso-name { font-weight:600; color:#cde; }
+.ua-meso-meta { display:block; color:#778; font-size:.6rem;
+    font-family:monospace; margin-top:1px; }
+.ua-meso-state {
+    font-family:monospace; font-size:.66rem;
+    padding:1px 6px; border-radius:3px;
+    border:1px solid currentColor;
+    text-align:center; min-width:46px;
+}
+
 /* ─── Scrollbar polish ─────────────────────────────────── */
 ::-webkit-scrollbar { width:6px; height:6px; }
 ::-webkit-scrollbar-thumb { background:rgba(0,200,200,.3); border-radius:3px; }
@@ -942,6 +1014,31 @@ input[type=range]::-moz-range-thumb {
         </div>
 
         <div class="ua-panel" style="margin-bottom:14px;">
+            <h2>Space-weather analytics</h2>
+            <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:8px">
+                Operator headlines derived from the current state — SWPC
+                G-scale, ring-current Dst proxy, LEO drag-forecast (% over
+                quiet, ISS reboost-fuel/day, Starlink lifetime), HF radio
+                absorption score, GIC threat for power grids, polar-cap
+                absorption boundary, NLC visibility window, and the
+                equatorward edge of the visible auroral oval.
+            </p>
+            <div id="ua-sw-analytics" style="display:flex;flex-direction:column;gap:6px"></div>
+        </div>
+
+        <div class="ua-panel" style="margin-bottom:14px;">
+            <h2>Mesosphere &amp; currents</h2>
+            <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:8px">
+                Live overlay status for the four phenomena rendered on
+                the globe between 80-110 km — noctilucent clouds (summer
+                polar mesopause), the equatorial electrojet (dayside
+                EUV), the auroral electrojets (storm-driven), and the Sq
+                quiet-time current vortices.
+            </p>
+            <div id="ua-mesosphere" style="display:flex;flex-direction:column;gap:6px"></div>
+        </div>
+
+        <div class="ua-panel" style="margin-bottom:14px;">
             <h2>Magnetosphere state · live</h2>
             <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:8px">
                 Operator-grade headlines computed from the current
@@ -1049,7 +1146,12 @@ input[type=range]::-moz-range-thumb {
             <span style="color:#a0a0ff">L=20 lobe</span><br>
             <span style="color:#ff60c0">●</span> auroral oval ·
             <span style="color:#ffe066">●</span> polar cusps ·
-            <span style="color:#9cf">R1/R2 currents</span> (blue=down, red=up)
+            <span style="color:#9cf">R1/R2 currents</span> (blue=down, red=up)<br>
+            <span style="color:#9eecff">●</span> NLC band (~83 km) ·
+            <span style="color:#c0ff60">●</span> equatorial electrojet (~110 km) ·
+            <span style="color:#ff6dd2">●</span> auroral electrojet ·
+            <span style="color:#fff0a8">●</span> Sq vortices ·
+            <span style="color:#ffd890">·</span> mesospheric meteor flux
         </div>
     </section>
 
@@ -1106,6 +1208,9 @@ input[type=range]::-moz-range-thumb {
             debrisFamilies:        document.getElementById('ua-debris-families'),
             avoidanceBox:          document.getElementById('ua-avoidance'),
             constellationToggles:  document.getElementById('ua-constellation-toggles'),
+            // Space-weather analytics + mesosphere overlay
+            swAnalytics:    document.getElementById('ua-sw-analytics'),
+            mesosphereBox:  document.getElementById('ua-mesosphere'),
             // Camera HUD
             camOrbitBtn:    document.getElementById('ua-cam-orbit'),
             camFlyBtn:      document.getElementById('ua-cam-fly'),
