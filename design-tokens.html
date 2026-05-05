@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Earth UI — Design Tokens Swatch Viewer</title>
+<!--
+   Self-contained swatch viewer for the Earth UI design system. Links
+   the SAME js/design-tokens.css that earth.html consumes, so the
+   colours rendered here are guaranteed to match what users actually
+   see on the simulation page — no risk of doc-drift the way a static
+   PNG cheatsheet would have. Reads each token's *resolved* value via
+   getComputedStyle and renders a labelled swatch panel for it.
+
+   Live theme + viewport simulation:
+     - Click the dark/light/auto buttons in the header to flip themes.
+     - Click "Sim phone (640px)" to constrain the viewport so the
+       mobile-only @media token overrides activate visibly.
+   ───────────────────────────────────────────────────────────────── -->
+<link rel="stylesheet" href="js/design-tokens.css">
+<style>
+*, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+html, body { font-family:'Segoe UI', system-ui, sans-serif; }
+body {
+    background: #0a0e18; color: var(--c-text-primary);
+    padding: var(--sp-7) var(--sp-8) 64px;
+    transition: background .25s ease, color .25s ease;
+}
+body.theme-light, html.theme-light body {
+    /* Same flip rule design-tokens.css applies for earth.html. The
+       viewer page's <body> needs it for its own backdrop. */
+}
+
+/* ── Header bar ──────────────────────────────────────────────────── */
+.header {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-6);
+    margin-bottom: var(--sp-7);
+    padding-bottom: var(--sp-5);
+    border-bottom: 1px solid var(--c-border-soft);
+}
+.header h1 {
+    font-size: 22px; font-weight: 700; letter-spacing: .5px;
+    color: var(--c-text-primary);
+}
+.header .subtitle {
+    font-size: 12px; color: var(--c-text-muted);
+    flex: 1;
+}
+.toolbar {
+    display: flex; gap: var(--sp-3);
+    flex-wrap: wrap;
+}
+.tb-btn {
+    background: var(--c-accent-soft);
+    color: var(--c-accent);
+    border: 1px solid var(--c-accent-border);
+    padding: var(--sp-3) var(--sp-5);
+    border-radius: var(--r-md);
+    font-size: 11px; font-weight: 600; cursor: pointer;
+    transition: background var(--t-snap), border-color var(--t-snap),
+                transform .08s, color var(--t-snap);
+    font-family: inherit;
+    letter-spacing: .04em; text-transform: uppercase;
+}
+.tb-btn:hover {
+    background: rgba(var(--c-accent-rgb), .25);
+    border-color: var(--c-accent-border-hi);
+}
+.tb-btn:active { transform: scale(.95); }
+.tb-btn[aria-pressed="true"] {
+    background: var(--c-accent);
+    color: white;
+    border-color: var(--c-accent);
+}
+body.theme-light .tb-btn[aria-pressed="true"],
+html.theme-light .tb-btn[aria-pressed="true"] {
+    /* Slightly lower-luminance white text on the deeper light-theme
+       accent so the pressed state has clear contrast. */
+    color: #f5fafd;
+}
+
+/* ── Section ─────────────────────────────────────────────────────── */
+.section {
+    margin-top: var(--sp-8);
+}
+.section-title {
+    font-size: 14px; font-weight: 700; letter-spacing: .04em;
+    color: var(--c-accent);
+    text-transform: uppercase; padding-bottom: var(--sp-3);
+    border-bottom: 1px solid var(--c-border-faint);
+    margin-bottom: var(--sp-5);
+}
+.section-blurb {
+    font-size: 12px; color: var(--c-text-muted);
+    line-height: 1.5; margin-bottom: var(--sp-5);
+    max-width: 64ch;
+}
+
+/* ── Swatch grid ─────────────────────────────────────────────────── */
+.swatch-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: var(--sp-5);
+}
+.swatch {
+    background: var(--c-surface-1);
+    border: 1px solid var(--c-border-soft);
+    border-radius: var(--r-md);
+    padding: var(--sp-5);
+    display: flex; flex-direction: column; gap: var(--sp-3);
+    transition: border-color var(--t-snap), transform .12s, box-shadow var(--t-snap);
+}
+.swatch:hover {
+    border-color: var(--c-accent-border-hi);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 12px rgba(var(--c-accent-rgb), .12);
+}
+.swatch-chip {
+    width: 100%; height: 56px;
+    border-radius: var(--r-sm);
+    border: 1px solid var(--c-border-faint);
+    /* Checker pattern shows alpha cleanly — without it, an .06-alpha
+       chip would render against the surface and look opaque. */
+    background-image:
+        linear-gradient(45deg, rgba(127,127,127,.18) 25%, transparent 25%),
+        linear-gradient(-45deg, rgba(127,127,127,.18) 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, rgba(127,127,127,.18) 75%),
+        linear-gradient(-45deg, transparent 75%, rgba(127,127,127,.18) 75%);
+    background-size: 14px 14px;
+    background-position: 0 0, 0 7px, 7px -7px, -7px 0;
+    position: relative; overflow: hidden;
+}
+.swatch-chip::before {
+    content: ''; position: absolute; inset: 0;
+    background: var(--swatch-fill);    /* injected by JS per-token */
+}
+.swatch-name {
+    font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+    font-size: 11px; font-weight: 600;
+    color: var(--c-text-primary);
+    word-break: break-all;
+}
+.swatch-value {
+    font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+    font-size: 10px; color: var(--c-text-muted);
+    word-break: break-all; line-height: 1.4;
+}
+.swatch-intent {
+    font-size: 10.5px; color: var(--c-text-faint);
+    line-height: 1.45; font-style: italic;
+}
+
+/* Larger chip for surface fills — the layered tint matters more than
+   the swatch height here. */
+.swatch.is-surface .swatch-chip { height: 80px; }
+
+/* Spacing & radii visualisations: paint the actual size as a coloured
+   bar so reviewers can compare scales at a glance. */
+.swatch.is-spacing .swatch-chip,
+.swatch.is-radii   .swatch-chip {
+    height: 36px; background-image: none;
+    background: var(--c-accent-soft);
+    border: 1px dashed var(--c-accent-border);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--c-accent);
+    font-family: 'SF Mono', monospace;
+    font-size: 11px;
+}
+.swatch.is-spacing .swatch-chip::before { display: none; }
+.swatch.is-radii   .swatch-chip::before { display: none; }
+.spacing-bar {
+    height: 12px; background: var(--c-accent);
+    border-radius: 2px;
+}
+.radius-box {
+    width: 60px; height: 28px;
+    background: var(--c-accent);
+    border-radius: var(--swatch-radius, 4px);
+}
+
+/* Effects: render the actual blur/shadow on a sample card. */
+.swatch.is-effect .swatch-chip {
+    height: 70px;
+    background: rgba(var(--c-accent-rgb), .35);
+    border: 1px solid var(--c-accent-border);
+    backdrop-filter: var(--swatch-blur);
+    -webkit-backdrop-filter: var(--swatch-blur);
+    box-shadow: var(--swatch-shadow);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--c-text-primary); font-size: 11px;
+}
+.swatch.is-effect .swatch-chip::before { display: none; }
+
+/* Small floating note when the viewport is too wide to demonstrate
+   the mobile @media overrides. */
+.viewport-note {
+    margin-top: var(--sp-4); padding: var(--sp-4) var(--sp-5);
+    border-radius: var(--r-md);
+    background: rgba(var(--c-storm-rgb), .10);
+    border: 1px solid var(--c-storm-border);
+    color: var(--c-storm);
+    font-size: 11px;
+}
+
+/* Phone-sim: clamp the viewport's effective width by sandboxing the
+   page in a centred 360-wide column. The mobile @media inside
+   design-tokens.css fires automatically when the actual viewport is
+   ≤640 px, so to demo it on a desktop we either resize the browser
+   OR enable this body class which adds a max-width + outer letterbox.
+   The class also forces the @media to apply via a manual override
+   that re-declares the mobile token values. */
+body.sim-phone {
+    max-width: 360px; margin: 0 auto;
+    border-left: 1px dashed var(--c-border-soft);
+    border-right: 1px dashed var(--c-border-soft);
+}
+body.sim-phone {
+    /* Re-state the mobile @media tokens manually so the simulation
+       fires regardless of actual viewport width. */
+    --sp-2: 3px; --sp-3: 5px; --sp-4: 7px; --sp-5: 8px;
+    --sp-6: 10px; --sp-7: 12px; --sp-8: 14px;
+    --shadow-panel: 0 2px 14px rgba(0, 16, 40, .50);
+    --blur-glass: blur(8px) saturate(1.10);
+    --r-xl: 8px; --r-2xl: 12px;
+}
+</style>
+</head>
+<body>
+    <header class="header">
+        <h1>Earth UI — Design Tokens</h1>
+        <div class="subtitle">
+            Linked from the same <code>js/design-tokens.css</code> that
+            <code>earth.html</code> consumes. See
+            <a href="DESIGN_TOKENS.md" style="color:var(--c-accent);text-decoration:none;">DESIGN_TOKENS.md</a>
+            for usage rationale.
+        </div>
+        <div class="toolbar">
+            <button type="button" class="tb-btn" id="tb-dark"  aria-pressed="false">Dark</button>
+            <button type="button" class="tb-btn" id="tb-light" aria-pressed="false">Light</button>
+            <button type="button" class="tb-btn" id="tb-auto"  aria-pressed="false">Auto (OS)</button>
+            <button type="button" class="tb-btn" id="tb-phone" aria-pressed="false" style="margin-left:var(--sp-5);">📱 Sim phone (≤640 px)</button>
+        </div>
+    </header>
+
+    <!-- Each <section data-tokens="..."> is populated by JS at load.
+         Order matches DESIGN_TOKENS.md so the doc and viewer can be
+         scrolled side-by-side without losing place. -->
+    <section class="section">
+        <h2 class="section-title">Color — accent families</h2>
+        <p class="section-blurb">
+            Three accent tracks: cyan (primary chrome), amber (Storm
+            Watch / cyclone), teal-mint (location panel hero). Each
+            family ships hex + RGB triplet + a ladder of soft / border /
+            border-hi / glow / bg-overlay variants so consumers can hit
+            the right alpha without inlining a literal.
+        </p>
+        <div class="swatch-grid" data-tokens="
+            --c-accent | Headings, link colour, chrome accents
+            --c-accent-soft | Hover backgrounds, badge fills
+            --c-accent-border | Default panel border
+            --c-accent-border-hi | Active / focused border
+            --c-accent-glow | Outer glow ring on focused / live elements
+            --c-accent-bg-overlay | Subtle radial gradient overlay on panels
+            --c-storm | Storm Watch heading, badge text
+            --c-storm-soft | Card-hover background (storm panel)
+            --c-storm-border | Default border on storm panel
+            --c-storm-border-hi | Active card border
+            --c-storm-glow | Pulse ring on the live-feed dot
+            --c-storm-bg-overlay | Storm panel backdrop tint
+            --c-loc | Hero heading, hint banner (loc-panel only)
+            --c-loc-soft | Top-left radial gradient on the panel
+            --c-loc-border | Panel outline + glow ring
+        "></div>
+    </section>
+
+    <section class="section">
+        <h2 class="section-title">Color — status palette</h2>
+        <p class="section-blurb">
+            Single source of truth for every layer-status pip. Stays
+            put across themes — green=live, red=error is universal and
+            re-mapping it would just confuse the convention.
+        </p>
+        <div class="swatch-grid" data-tokens="
+            --c-status-live | Feed is producing fresh data
+            --c-status-live-glow | Pulse ring around a live dot
+            --c-status-fetching | Request in flight (amber pulse)
+            --c-status-fetch-glow | Pulse during fetch
+            --c-status-error | Last fetch failed
+            --c-status-error-glow | Pulse on errored row
+            --c-status-idle | Layer never polled (toggle off)
+        "></div>
+    </section>
+
+    <section class="section">
+        <h2 class="section-title">Color — surface fills</h2>
+        <p class="section-blurb">
+            The frosted-glass panel backgrounds. Layered radial-gradient
+            overlays on top of these give each panel its characteristic
+            hue without diverging the underlying value scale.
+        </p>
+        <div class="swatch-grid" data-tokens="
+            --c-surface-1 | Top stop in panel linear-gradient backing
+            --c-surface-2 | Bottom stop — slight value shift gives card depth
+        " data-class="is-surface"></div>
+    </section>
+
+    <section class="section">
+        <h2 class="section-title">Color — text scale</h2>
+        <p class="section-blurb">
+            Five-tier hierarchy. Skill-grid uses a slightly different
+            mid-grey so refactors don't accidentally flatten the
+            "this is data" vs "this is chrome" distinction.
+        </p>
+        <div class="swatch-grid" data-tokens="
+            --c-text-primary | Card titles, primary readouts
+            --c-text-secondary | Layer labels, body copy
+            --c-text-muted | Descriptors, captions
+            --c-text-faint | Metadata, ago timestamps
+            --c-text-skill | Skill-grid cells
+        "></div>
+    </section>
+
+    <section class="section">
+        <h2 class="section-title">Color — borders</h2>
+        <p class="section-blurb">
+            Three weights for separators. Light theme uses higher alpha
+            because dark separators on white have to be visibly darker
+            than white separators on black to read at the same
+            perceived weight.
+        </p>
+        <div class="swatch-grid" data-tokens="
+            --c-border-faint | Section separators inside a panel
+            --c-border-soft | Button outlines, scrollbar tracks
+            --c-border-medium | Featured-card outlines
+        "></div>
+    </section>
+
+    <section class="section">
+        <h2 class="section-title">Spacing rhythm</h2>
+        <p class="section-blurb">
+            2 px-base scale; phones tighten 1-2 px per step. Mixing
+            arbitrary px values is what tokens exist to prevent.
+        </p>
+        <div class="swatch-grid" data-tokens="
+            --sp-1 | Hairline gap (rare)
+            --sp-2 | Inter-item gap inside button rows
+            --sp-3 | Sub-row spacing inside a card
+            --sp-4 | Standard card-internal padding
+            --sp-5 | Panel inner padding (vertical)
+            --sp-6 | Panel inner padding (horizontal)
+            --sp-7 | Panel section gaps
+            --sp-8 | Hero-panel padding
+        " data-class="is-spacing"></div>
+    </section>
+
+    <section class="section">
+        <h2 class="section-title">Border radii</h2>
+        <p class="section-blurb">
+            Smaller affordances get smaller radii; hero panels get the
+            loudest curve.
+        </p>
+        <div class="swatch-grid" data-tokens="
+            --r-sm | Badges, buttons, chips
+            --r-md | Sub-cards inside a panel
+            --r-lg | Legacy panel default (rare in new code)
+            --r-xl | Current panel default
+            --r-2xl | Loc-panel hero only
+        " data-class="is-radii"></div>
+    </section>
+
+    <section class="section">
+        <h2 class="section-title">Surface effects</h2>
+        <p class="section-blurb">
+            <code>--blur-glass</code> is the most expensive line in the
+            panel render budget — phones drop it to <code>blur(8px)</code>.
+            Each chip below paints the actual filter on a sample card so
+            the effect is observable.
+        </p>
+        <div class="swatch-grid" data-tokens="
+            --blur-glass | Backdrop filter on every panel
+            --shadow-panel | Drop shadow under panels
+        " data-class="is-effect"></div>
+    </section>
+
+<script>
+(function() {
+    'use strict';
+    const cs = getComputedStyle(document.documentElement);
+
+    function readToken(name) {
+        return cs.getPropertyValue(name).trim();
+    }
+
+    // Build swatches from each <section>'s data-tokens manifest.
+    function build() {
+        document.querySelectorAll('.swatch-grid[data-tokens]').forEach(grid => {
+            const klass = grid.dataset.class || '';
+            const lines = grid.dataset.tokens.trim().split('\n');
+            grid.innerHTML = '';
+            for (const line of lines) {
+                const [rawName, intent] = line.split('|').map(s => s.trim());
+                if (!rawName) continue;
+                const value = readToken(rawName);
+                const card = document.createElement('div');
+                card.className = 'swatch ' + klass;
+
+                const chip = document.createElement('div');
+                chip.className = 'swatch-chip';
+
+                if (klass === 'is-spacing') {
+                    // Paint a bar whose width matches the token's px value.
+                    const bar = document.createElement('div');
+                    bar.className = 'spacing-bar';
+                    bar.style.width = value;
+                    chip.appendChild(bar);
+                    chip.append(value);
+                } else if (klass === 'is-radii') {
+                    const box = document.createElement('div');
+                    box.className = 'radius-box';
+                    box.style.borderRadius = value;
+                    chip.appendChild(box);
+                } else if (klass === 'is-effect') {
+                    if (rawName === '--blur-glass') {
+                        chip.style.setProperty('--swatch-blur', value);
+                        chip.style.setProperty('--swatch-shadow', 'none');
+                        chip.append('blur on glass');
+                    } else if (rawName === '--shadow-panel') {
+                        chip.style.setProperty('--swatch-blur', 'none');
+                        chip.style.setProperty('--swatch-shadow', value);
+                        chip.append('drop shadow');
+                    }
+                } else {
+                    // Standard colour swatch — paint the token's resolved
+                    // value through the ::before overlay on top of the
+                    // checker pattern so alpha is visible.
+                    chip.style.setProperty('--swatch-fill', value);
+                }
+                card.appendChild(chip);
+
+                const name = document.createElement('div');
+                name.className = 'swatch-name';
+                name.textContent = rawName;
+                card.appendChild(name);
+
+                const val = document.createElement('div');
+                val.className = 'swatch-value';
+                val.textContent = value;
+                card.appendChild(val);
+
+                if (intent) {
+                    const it = document.createElement('div');
+                    it.className = 'swatch-intent';
+                    it.textContent = intent;
+                    card.appendChild(it);
+                }
+                grid.appendChild(card);
+            }
+        });
+    }
+
+    // ── Theme controls ─────────────────────────────────────────────
+    const STORAGE = 'pp.theme';
+    function applyTheme(mode) {
+        const isLight = mode === 'light';
+        document.documentElement.classList.toggle('theme-light', isLight);
+        document.body.classList.toggle('theme-light', isLight);
+        try {
+            if (mode === 'auto') localStorage.removeItem(STORAGE);
+            else                 localStorage.setItem(STORAGE, mode);
+        } catch (_) {}
+        // Re-build with freshly-resolved values now that the cascade
+        // has flipped — getComputedStyle returns light-theme values
+        // when the class is on.
+        build();
+        markPressed(mode);
+    }
+    function resolveAuto() {
+        if (window.matchMedia?.('(prefers-color-scheme: light)').matches) return 'light';
+        return 'dark';
+    }
+    function markPressed(mode) {
+        const map = { dark: 'tb-dark', light: 'tb-light', auto: 'tb-auto' };
+        for (const [k, id] of Object.entries(map)) {
+            const el = document.getElementById(id);
+            if (el) el.setAttribute('aria-pressed', String(k === mode));
+        }
+    }
+
+    // Initial state — mirror earth.html's resolution order.
+    const url = new URLSearchParams(window.location.search);
+    let initial = url.get('theme');
+    if (initial !== 'light' && initial !== 'dark' && initial !== 'auto') {
+        try { initial = localStorage.getItem(STORAGE); } catch (_) {}
+    }
+    if (initial !== 'light' && initial !== 'dark') initial = 'auto';
+    applyTheme(initial === 'auto' ? resolveAuto() : initial);
+    if (initial === 'auto') markPressed('auto');
+
+    document.getElementById('tb-dark') ?.addEventListener('click', () => applyTheme('dark'));
+    document.getElementById('tb-light')?.addEventListener('click', () => applyTheme('light'));
+    document.getElementById('tb-auto') ?.addEventListener('click', () => {
+        const next = resolveAuto();
+        applyTheme(next);
+        // After applying, mark 'auto' as pressed so the user knows
+        // they're following the OS preference.
+        markPressed('auto');
+        try { localStorage.removeItem(STORAGE); } catch (_) {}
+    });
+
+    // Phone-sim toggle — adds .sim-phone class which manually re-
+    // declares the mobile @media token values, so the swatches re-
+    // resolve to mobile values on a desktop viewport.
+    const phoneBtn = document.getElementById('tb-phone');
+    phoneBtn?.addEventListener('click', () => {
+        const next = !document.body.classList.contains('sim-phone');
+        document.body.classList.toggle('sim-phone', next);
+        phoneBtn.setAttribute('aria-pressed', String(next));
+        build();
+    });
+
+    // Live-react to the actual viewport hitting ≤640 px so the spacing
+    // swatches show real mobile values without the sim toggle.
+    const mq = window.matchMedia?.('(max-width: 640px)');
+    mq?.addEventListener?.('change', build);
+})();
+</script>
+</body>
+</html>
