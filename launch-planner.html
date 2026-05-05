@@ -468,6 +468,111 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
 .lh-tl-lane-2 .lh-tl-lbl { top:-72px; }
 .lh-tl-lane-3 .lh-tl-lbl { top:44px;  }
 
+/* ─── Top section: canvas + Next Launches strip ──────── */
+#lp-canvas-top {
+    max-width:1400px; margin:0 auto;
+    padding:0 14px;
+    display:grid; gap:14px;
+    margin-bottom:18px;
+}
+
+/* Next Launches strip — horizontal scroll of cards */
+#lp-strip { padding:12px 16px 14px; }
+.lp-strip-hd {
+    display:flex; align-items:baseline; justify-content:space-between;
+    margin-bottom:10px;
+}
+.lp-strip-hd h2 {
+    font-size:.95rem; font-weight:800; color:#eef; letter-spacing:.02em;
+}
+.lp-strip-sub {
+    font-size:.66rem; color:#778; font-family:monospace; letter-spacing:.04em;
+}
+.lp-strip-track {
+    display:flex; gap:10px;
+    overflow-x:auto; overflow-y:hidden;
+    padding-bottom:6px;
+    scrollbar-width:thin;
+    scroll-snap-type:x proximity;
+}
+.lp-strip-track::-webkit-scrollbar { height:5px; }
+.lp-strip-track::-webkit-scrollbar-thumb { background:rgba(0,200,200,.3); border-radius:3px; }
+.lp-strip-empty {
+    font-size:.78rem; color:#778; padding:14px 8px; font-style:italic;
+}
+.lp-strip-card {
+    flex:0 0 220px;
+    background:rgba(15,10,35,.78);
+    border:1px solid rgba(255,255,255,.08);
+    border-left:3px solid rgba(255,255,255,.12);
+    border-radius:8px;
+    padding:9px 11px;
+    cursor:pointer;
+    text-align:left;
+    font-family:inherit;
+    color:inherit;
+    transition:transform .12s, border-color .15s, background .15s;
+    scroll-snap-align:start;
+    display:flex; flex-direction:column; gap:4px;
+}
+.lp-strip-card:hover {
+    border-color:rgba(0,200,200,.35);
+    background:rgba(15,10,35,.92);
+    transform:translateY(-2px);
+}
+.lp-strip-card--active {
+    border-color:#0cc;
+    border-left-color:#0cc;
+    background:rgba(0,200,200,.06);
+    box-shadow:0 0 0 1px rgba(0,200,200,.25);
+}
+.lp-strip-card--green  { border-left-color:#4c8; }
+.lp-strip-card--yellow { border-left-color:#fa0; }
+.lp-strip-card--red    { border-left-color:#f44; }
+.lp-strip-row {
+    display:flex; justify-content:space-between; align-items:center; gap:6px;
+}
+.lp-strip-provider {
+    font-size:.58rem; color:#9ab; text-transform:uppercase;
+    letter-spacing:.1em; font-weight:700;
+}
+.lp-strip-verdict {
+    font-size:.56rem; font-weight:800; padding:1px 6px;
+    border-radius:3px; border:1px solid; font-family:monospace; letter-spacing:.06em;
+}
+.lp-strip-name {
+    font-size:.84rem; font-weight:700; color:#eef; line-height:1.25;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.lp-strip-veh {
+    display:inline-flex; align-items:center; gap:5px;
+    font-size:.66rem;
+    background:rgba(255,140,40,.12);
+    border:1px solid rgba(255,140,40,.28);
+    color:#fc7;
+    border-radius:4px;
+    padding:2px 7px;
+    font-family:monospace; font-weight:700;
+    letter-spacing:.04em;
+    align-self:flex-start;
+    max-width:100%;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.lp-strip-veh--unknown {
+    background:rgba(255,255,255,.04);
+    border-color:rgba(255,255,255,.12);
+    color:#99a;
+}
+.lp-strip-veh-icon { display:inline-block; }
+.lp-strip-pad {
+    font-size:.62rem; color:#778; font-family:monospace;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.lp-strip-cd {
+    font-size:.72rem; font-weight:800; color:#0cc;
+    font-family:monospace; letter-spacing:.04em;
+}
+
 /* Vehicle canvas */
 #lp-vehicle { padding:14px 16px 18px; }
 
@@ -861,6 +966,133 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
     <span id="lp-status">Initializing…</span>
 </div>
 
+<!-- ─── Top: 3D vehicle canvas + Next Launches strip ─────────────────── -->
+<section id="lp-canvas-top">
+
+    <!-- 3D Vehicle Canvas (relocated from below) -->
+    <div class="lp-panel" id="lp-vehicle">
+        <div class="lh-section-hd">
+            <h2>Vehicle Visualization · Generic</h2>
+            <p>Procedural 3D placeholders — built from primitives, not licensed models. Click a launch below or pick a vehicle to preview the matching stack.</p>
+        </div>
+
+        <!-- Vehicle + variant selector row -->
+        <div class="lh-vehicle-picker">
+            <div class="lh-vp-group">
+                <span class="lh-vp-label">Vehicle</span>
+                <button type="button" class="lh-vp-btn lh-vp-btn--on" data-vehicle="shuttle"  data-variant="">Space Shuttle</button>
+                <button type="button" class="lh-vp-btn"               data-vehicle="falcon9"  data-variant="block5">Falcon 9</button>
+                <button type="button" class="lh-vp-btn"               data-vehicle="starship" data-variant="v2">Starship</button>
+            </div>
+            <div class="lh-vp-group lh-vp-variants" id="lh-vp-variants-starship" hidden>
+                <span class="lh-vp-label">Starship</span>
+                <button type="button" class="lh-vp-btn" data-vehicle="starship" data-variant="v1">V1</button>
+                <button type="button" class="lh-vp-btn lh-vp-btn--on" data-vehicle="starship" data-variant="v2">V2</button>
+                <button type="button" class="lh-vp-btn" data-vehicle="starship" data-variant="v3">V3</button>
+                <button type="button" class="lh-vp-btn" data-vehicle="starship" data-variant="future">Future ✱</button>
+            </div>
+            <div class="lh-vp-group lh-vp-variants" id="lh-vp-variants-falcon9" hidden>
+                <span class="lh-vp-label">Falcon</span>
+                <button type="button" class="lh-vp-btn lh-vp-btn--on" data-vehicle="falcon9" data-variant="block5">Block 5</button>
+                <button type="button" class="lh-vp-btn"               data-vehicle="falcon9" data-variant="block5-crew">Crew Dragon</button>
+                <button type="button" class="lh-vp-btn"               data-vehicle="falcon9" data-variant="heavy">Heavy</button>
+            </div>
+        </div>
+
+        <div class="lh-vehicle-wrap">
+            <div class="lh-vehicle-canvas-host">
+                <canvas id="lh-vehicle-canvas"></canvas>
+
+                <!-- View presets — overlay top-left -->
+                <div class="lh-vehicle-views" role="group" aria-label="Camera view">
+                    <button type="button" class="lh-view lh-view--on" data-view="threequarter">3⁄4</button>
+                    <button type="button" class="lh-view"            data-view="front">Front</button>
+                    <button type="button" class="lh-view"            data-view="side">Side</button>
+                    <button type="button" class="lh-view"            data-view="top">Top</button>
+                    <button type="button" class="lh-view"            data-view="closeup">Engines</button>
+                </div>
+
+                <!-- Toggles — overlay top-right -->
+                <div class="lh-vehicle-toggles" role="group" aria-label="Display toggles">
+                    <button type="button" class="lh-liftoff" id="lh-liftoff" title="Liftoff animation">▶ Liftoff</button>
+                    <button type="button" class="lh-toggle lh-toggle--on" data-toggle="autoRotate" title="Auto-rotate camera">⟳ Auto</button>
+                    <button type="button" class="lh-toggle"               data-toggle="plume"      title="Engine plume">▲ Plume</button>
+                    <button type="button" class="lh-toggle"               data-toggle="vectors"    title="Per-engine thrust vectors + CoM">⇣ Vectors</button>
+                    <button type="button" class="lh-toggle lh-toggle--on" data-toggle="pad"        title="Launch pad + tower">⌂ Pad</button>
+                </div>
+
+                <!-- Force-balance HUD — bottom-right, only shown when Vectors is on -->
+                <div class="lh-force" id="lh-force" hidden>
+                    <div class="lh-force-hd">FORCE BALANCE</div>
+                    <svg class="lh-force-svg" viewBox="-60 -110 120 220">
+                        <rect x="-4" y="-8" width="8" height="20" fill="#666" rx="1"/>
+                        <polygon points="-4,-8 4,-8 0,-14" fill="#888"/>
+                        <line id="lh-fd-thrust" x1="0" y1="0" x2="0" y2="-50"
+                              stroke="#5fc97f" stroke-width="3" stroke-linecap="round"/>
+                        <polygon id="lh-fd-thrust-head" points="-5,-50 5,-50 0,-60" fill="#5fc97f"/>
+                        <text x="14" y="-30" fill="#5fc97f" font-size="9" font-family="monospace">T 0.0</text>
+                        <line id="lh-fd-grav" x1="0" y1="14" x2="0" y2="50"
+                              stroke="#f55" stroke-width="2" stroke-linecap="round"/>
+                        <polygon id="lh-fd-grav-head" points="-4,50 4,50 0,58" fill="#f55"/>
+                        <text x="14" y="35" fill="#f55" font-size="9" font-family="monospace">W 0.0</text>
+                        <line id="lh-fd-net" x1="-30" y1="0" x2="-30" y2="-30"
+                              stroke="#fc7" stroke-width="2" stroke-linecap="round"/>
+                        <polygon id="lh-fd-net-head" points="-34,-30 -26,-30 -30,-38" fill="#fc7"/>
+                        <text x="-58" y="-18" fill="#fc7" font-size="9" font-family="monospace">Δ 0.0</text>
+                    </svg>
+                    <div class="lh-force-foot">
+                        <span class="lh-force-leg lh-force-leg--t">Thrust</span>
+                        <span class="lh-force-leg lh-force-leg--w">Weight</span>
+                        <span class="lh-force-leg lh-force-leg--n">Net</span>
+                    </div>
+                </div>
+
+                <!-- Mission Elapsed Time HUD — bottom-left, only shown during liftoff -->
+                <div class="lh-met" id="lh-met" hidden>
+                    <div class="lh-met-row">
+                        <span class="lh-met-k">MET</span>
+                        <span class="lh-met-v" id="lh-met-v">T-03.0</span>
+                        <span class="lh-met-phase" id="lh-met-phase">Standby</span>
+                    </div>
+                    <div class="lh-met-row lh-met-row--data">
+                        <span class="lh-met-tile">
+                            <span class="lh-met-tile-k">THR</span>
+                            <span class="lh-met-tile-v" id="lh-met-thrust">0.0 / 0.0 MN</span>
+                        </span>
+                        <span class="lh-met-tile">
+                            <span class="lh-met-tile-k">%</span>
+                            <span class="lh-met-tile-v" id="lh-met-throttle">0%</span>
+                        </span>
+                        <span class="lh-met-tile">
+                            <span class="lh-met-tile-k">G</span>
+                            <span class="lh-met-tile-v" id="lh-met-g">0.00</span>
+                        </span>
+                    </div>
+                </div>
+
+                <div class="lh-vehicle-watermark">Procedural · For illustration only</div>
+            </div>
+            <aside class="lh-vehicle-meta" id="lh-vehicle-meta">
+                <!-- Filled dynamically by initVehicleCanvas onVehicleChange -->
+            </aside>
+        </div>
+    </div>
+
+    <!-- Next Launches strip — horizontally scrollable cards, each declares
+         the matching 3D model. Clicking a card auto-binds the canvas via
+         the existing roster→model bridge. -->
+    <div class="lp-panel" id="lp-strip">
+        <div class="lp-strip-hd">
+            <h2>Next Launches</h2>
+            <span class="lp-strip-sub" id="lp-strip-sub">Loading upcoming launches…</span>
+        </div>
+        <div class="lp-strip-track" id="lp-strip-track">
+            <div class="lp-strip-empty">Awaiting roster…</div>
+        </div>
+    </div>
+
+</section>
+
 <div id="lp-app">
 
     <!-- Left: Filters -->
@@ -921,119 +1153,6 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
             <p>Every milestone flight, plotted chronologically. Click a marker to jump to the program above. Scroll horizontally to span 1961 → today.</p>
         </div>
         <div id="lh-timeline-root"></div>
-    </div>
-
-    <!-- 3D Vehicle Canvas -->
-    <div class="lp-panel" id="lp-vehicle">
-        <div class="lh-section-hd">
-            <h2>Vehicle Visualization · Generic</h2>
-            <p>Procedural 3D placeholders — built from primitives, not licensed models. Surrogates for the real article until operator permissions land.</p>
-        </div>
-
-        <!-- Vehicle + variant selector row -->
-        <div class="lh-vehicle-picker">
-            <div class="lh-vp-group">
-                <span class="lh-vp-label">Vehicle</span>
-                <button type="button" class="lh-vp-btn lh-vp-btn--on" data-vehicle="shuttle"  data-variant="">Space Shuttle</button>
-                <button type="button" class="lh-vp-btn"               data-vehicle="falcon9"  data-variant="block5">Falcon 9</button>
-                <button type="button" class="lh-vp-btn"               data-vehicle="starship" data-variant="v2">Starship</button>
-            </div>
-            <div class="lh-vp-group lh-vp-variants" id="lh-vp-variants-starship" hidden>
-                <span class="lh-vp-label">Starship</span>
-                <button type="button" class="lh-vp-btn" data-vehicle="starship" data-variant="v1">V1</button>
-                <button type="button" class="lh-vp-btn lh-vp-btn--on" data-vehicle="starship" data-variant="v2">V2</button>
-                <button type="button" class="lh-vp-btn" data-vehicle="starship" data-variant="v3">V3</button>
-                <button type="button" class="lh-vp-btn" data-vehicle="starship" data-variant="future">Future ✱</button>
-            </div>
-            <div class="lh-vp-group lh-vp-variants" id="lh-vp-variants-falcon9" hidden>
-                <span class="lh-vp-label">Falcon</span>
-                <button type="button" class="lh-vp-btn lh-vp-btn--on" data-vehicle="falcon9" data-variant="block5">Block 5</button>
-                <button type="button" class="lh-vp-btn"               data-vehicle="falcon9" data-variant="block5-crew">Crew Dragon</button>
-                <button type="button" class="lh-vp-btn"               data-vehicle="falcon9" data-variant="heavy">Heavy</button>
-            </div>
-        </div>
-
-        <div class="lh-vehicle-wrap">
-            <div class="lh-vehicle-canvas-host">
-                <canvas id="lh-vehicle-canvas"></canvas>
-
-                <!-- View presets — overlay top-left -->
-                <div class="lh-vehicle-views" role="group" aria-label="Camera view">
-                    <button type="button" class="lh-view lh-view--on" data-view="threequarter">3⁄4</button>
-                    <button type="button" class="lh-view"            data-view="front">Front</button>
-                    <button type="button" class="lh-view"            data-view="side">Side</button>
-                    <button type="button" class="lh-view"            data-view="top">Top</button>
-                    <button type="button" class="lh-view"            data-view="closeup">Engines</button>
-                </div>
-
-                <!-- Toggles — overlay top-right -->
-                <div class="lh-vehicle-toggles" role="group" aria-label="Display toggles">
-                    <button type="button" class="lh-liftoff" id="lh-liftoff" title="Liftoff animation">▶ Liftoff</button>
-                    <button type="button" class="lh-toggle lh-toggle--on" data-toggle="autoRotate" title="Auto-rotate camera">⟳ Auto</button>
-                    <button type="button" class="lh-toggle"               data-toggle="plume"      title="Engine plume">▲ Plume</button>
-                    <button type="button" class="lh-toggle"               data-toggle="vectors"    title="Per-engine thrust vectors + CoM">⇣ Vectors</button>
-                    <button type="button" class="lh-toggle lh-toggle--on" data-toggle="pad"        title="Launch pad + tower">⌂ Pad</button>
-                </div>
-
-                <!-- Force-balance HUD — bottom-right, only shown when Vectors is on -->
-                <div class="lh-force" id="lh-force" hidden>
-                    <div class="lh-force-hd">FORCE BALANCE</div>
-                    <svg class="lh-force-svg" viewBox="-60 -110 120 220">
-                        <!-- Vehicle silhouette in the middle -->
-                        <rect x="-4" y="-8" width="8" height="20" fill="#666" rx="1"/>
-                        <polygon points="-4,-8 4,-8 0,-14" fill="#888"/>
-                        <!-- Thrust arrow (up) -->
-                        <line id="lh-fd-thrust" x1="0" y1="0" x2="0" y2="-50"
-                              stroke="#5fc97f" stroke-width="3" stroke-linecap="round"/>
-                        <polygon id="lh-fd-thrust-head" points="-5,-50 5,-50 0,-60" fill="#5fc97f"/>
-                        <text x="14" y="-30" fill="#5fc97f" font-size="9" font-family="monospace">T 0.0</text>
-                        <!-- Gravity arrow (down) -->
-                        <line id="lh-fd-grav" x1="0" y1="14" x2="0" y2="50"
-                              stroke="#f55" stroke-width="2" stroke-linecap="round"/>
-                        <polygon id="lh-fd-grav-head" points="-4,50 4,50 0,58" fill="#f55"/>
-                        <text x="14" y="35" fill="#f55" font-size="9" font-family="monospace">W 0.0</text>
-                        <!-- Net (lateral / vertical residual) -->
-                        <line id="lh-fd-net" x1="-30" y1="0" x2="-30" y2="-30"
-                              stroke="#fc7" stroke-width="2" stroke-linecap="round"/>
-                        <polygon id="lh-fd-net-head" points="-34,-30 -26,-30 -30,-38" fill="#fc7"/>
-                        <text x="-58" y="-18" fill="#fc7" font-size="9" font-family="monospace">Δ 0.0</text>
-                    </svg>
-                    <div class="lh-force-foot">
-                        <span class="lh-force-leg lh-force-leg--t">Thrust</span>
-                        <span class="lh-force-leg lh-force-leg--w">Weight</span>
-                        <span class="lh-force-leg lh-force-leg--n">Net</span>
-                    </div>
-                </div>
-
-                <!-- Mission Elapsed Time HUD — bottom-left, only shown during liftoff -->
-                <div class="lh-met" id="lh-met" hidden>
-                    <div class="lh-met-row">
-                        <span class="lh-met-k">MET</span>
-                        <span class="lh-met-v" id="lh-met-v">T-03.0</span>
-                        <span class="lh-met-phase" id="lh-met-phase">Standby</span>
-                    </div>
-                    <div class="lh-met-row lh-met-row--data">
-                        <span class="lh-met-tile">
-                            <span class="lh-met-tile-k">THR</span>
-                            <span class="lh-met-tile-v" id="lh-met-thrust">0.0 / 0.0 MN</span>
-                        </span>
-                        <span class="lh-met-tile">
-                            <span class="lh-met-tile-k">%</span>
-                            <span class="lh-met-tile-v" id="lh-met-throttle">0%</span>
-                        </span>
-                        <span class="lh-met-tile">
-                            <span class="lh-met-tile-k">G</span>
-                            <span class="lh-met-tile-v" id="lh-met-g">0.00</span>
-                        </span>
-                    </div>
-                </div>
-
-                <div class="lh-vehicle-watermark">Procedural · For illustration only</div>
-            </div>
-            <aside class="lh-vehicle-meta" id="lh-vehicle-meta">
-                <!-- Filled dynamically by initVehicleCanvas onVehicleChange -->
-            </aside>
-        </div>
     </div>
 
 </section>
@@ -1235,7 +1354,121 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
                     });
                 });
                 api.setVehicle(vehicleId, variantId || undefined);
+
+                // Sync the Next-Launches strip — highlight whichever card
+                // matches the just-selected launch. Stash the id globally
+                // so re-renders of the strip preserve the highlight.
+                window.__lpSelectedId = l.id;
+                const stripCards = document.querySelectorAll('.lp-strip-card');
+                stripCards.forEach(c => c.classList.toggle('lp-strip-card--active',
+                    String(c.dataset.id) === String(l.id)));
             });
+
+            // ── Next Launches strip ───────────────────────────────────────
+            // Renders a horizontally-scrollable card per upcoming launch,
+            // each declaring the matching 3D model. Clicking a card
+            // simulates a click on the corresponding roster card, which
+            // re-uses launch-planner.js's existing selectLaunch() flow
+            // (loads weather, fires lp:launch-selected, auto-binds canvas).
+            const stripTrack = document.getElementById('lp-strip-track');
+            const stripSub   = document.getElementById('lp-strip-sub');
+
+            function fmtCountdown(iso) {
+                if (!iso) return '—';
+                const ms = new Date(iso).getTime() - Date.now();
+                if (!Number.isFinite(ms)) return '—';
+                if (ms < 0) return 'PAST';
+                const s = Math.floor(ms / 1000);
+                const d = Math.floor(s / 86400);
+                const h = Math.floor((s % 86400) / 3600);
+                const m = Math.floor((s % 3600) / 60);
+                if (d > 0) return `T-${d}d ${h}h`;
+                if (h > 0) return `T-${h}h ${m}m`;
+                return `T-${m}m`;
+            }
+
+            function vehBadgeHtml(l) {
+                const v = vehicleForLaunch(l);
+                if (!v) {
+                    const fallback = (l.vehicle || 'Unknown').slice(0, 24);
+                    return `<span class="lp-strip-veh lp-strip-veh--unknown">${esc(fallback)}</span>`;
+                }
+                const labels = {
+                    'shuttle':                 'Space Shuttle',
+                    'starship-v1':             'Starship V1',
+                    'starship-v2':             'Starship V2',
+                    'starship-v3':             'Starship V3',
+                    'starship-future':         'Starship Future',
+                    'falcon9-block5':          'Falcon 9 Block 5',
+                    'falcon9-block5-crew':     'Falcon 9 + Crew Dragon',
+                    'falcon9-heavy':           'Falcon Heavy',
+                };
+                const key = `${v[0]}${v[1] ? '-' + v[1] : ''}`;
+                const label = labels[key] || `${v[0]}${v[1] ? ' ' + v[1] : ''}`;
+                return `<span class="lp-strip-veh">▶ ${esc(label)}</span>`;
+            }
+
+            function verdictTag(l) {
+                const v = l._score?.verdict;
+                if (!v) return '';
+                const colors = { green: '#4c8', yellow: '#fa0', red: '#f44' };
+                const labels = { green: 'GO', yellow: 'HOLD', red: 'NO-GO' };
+                const c = colors[v]; const t = labels[v];
+                return `<span class="lp-strip-verdict" style="color:${c};border-color:${c}55;background:${c}22">${t}</span>`;
+            }
+
+            function renderStrip(launches) {
+                if (!launches || !launches.length) {
+                    stripTrack.innerHTML = '<div class="lp-strip-empty">No upcoming launches in window.</div>';
+                    stripSub.textContent = '';
+                    return;
+                }
+                const top = launches.slice(0, 12);
+                stripSub.textContent = `Top ${top.length} of ${launches.length} · click to load model`;
+                stripTrack.innerHTML = top.map(l => {
+                    const v = l._score?.verdict;
+                    const cls = v ? `lp-strip-card--${v}` : '';
+                    const isActive = String(l.id) === String(window.__lpSelectedId || '');
+                    return `
+                        <button type="button" class="lp-strip-card ${cls}${isActive ? ' lp-strip-card--active' : ''}"
+                                data-id="${esc(l.id)}">
+                            <div class="lp-strip-row">
+                                <span class="lp-strip-provider">${esc(l.provider || '')}</span>
+                                ${verdictTag(l)}
+                            </div>
+                            <div class="lp-strip-name">${esc(l.name || 'Untitled')}</div>
+                            ${vehBadgeHtml(l)}
+                            <div class="lp-strip-pad">${esc(l.pad?.location || l.pad?.name || '')}</div>
+                            <div class="lp-strip-cd" data-net="${esc(l.net_iso || '')}">${esc(fmtCountdown(l.net_iso))}</div>
+                        </button>
+                    `;
+                }).join('');
+
+                // Wire each card to forward clicks to the matching roster card.
+                stripTrack.querySelectorAll('.lp-strip-card').forEach(card => {
+                    card.addEventListener('click', () => {
+                        const id = card.dataset.id;
+                        const rosterCard = document.querySelector(
+                            `#lp-roster [data-launch-id="${CSS.escape(id)}"]`);
+                        if (rosterCard) {
+                            rosterCard.click();
+                            rosterCard.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                        }
+                    });
+                });
+            }
+
+            document.addEventListener('lp:launches-loaded', (e) => {
+                renderStrip(e.detail?.launches || []);
+            });
+
+            // Tick the strip's countdowns once a second.
+            setInterval(() => {
+                document.querySelectorAll('.lp-strip-cd').forEach(el => {
+                    const iso = el.dataset.net;
+                    if (iso) el.textContent = fmtCountdown(iso);
+                });
+            }, 1000);
 
             const metThrust   = document.getElementById('lh-met-thrust');
             const metThrottle = document.getElementById('lh-met-throttle');
