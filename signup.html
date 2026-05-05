@@ -8,8 +8,8 @@
 <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sign Up — Parker Physics App</title>
-    <meta name="description" content="Create your Parker Physics account and start exploring interactive astrophysics simulations powered by WebGL and live NASA/NOAA data.">
+    <title>Sign Up — Parkers Physics App</title>
+    <meta name="description" content="Create your Parkers Physics account and start exploring interactive astrophysics simulations powered by WebGL and live NASA/NOAA data.">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -243,6 +243,18 @@
 </head>
 <body>
 
+<!-- Funnel + page analytics — same eager-load pattern as signin.html.
+     telemetry.js installs window.onerror autocapture before any auth
+     code runs; analytics.js sets up GA4 + the consent-gated event
+     pipeline; funnel.step('signup_view') is the first event in the
+     sign-up journey. -->
+<script type="module">
+    import './js/telemetry.js';
+    import './js/analytics.js';
+    import { funnel } from './js/auth-funnel.js';
+    funnel.step('signup_view');
+</script>
+
 <!-- ═══════════════════════════════════════════════════════ NAV ═══ -->
 <link rel="stylesheet" href="js/nav-styles.css">
 <nav></nav>
@@ -256,7 +268,7 @@
         <div class="auth-side">
             <img src="ParkerPhaysics_logo1.png" class="auth-side-logo" alt="Logo">
             <h2>Explore the Universe</h2>
-            <p>Join Parker Physics and get access to real-time astrophysics simulations powered by WebGL, live NASA/NOAA data feeds, and more.</p>
+            <p>Join Parkers Physics and get access to real-time astrophysics simulations powered by WebGL, live NASA/NOAA data feeds, and more.</p>
             <ul class="side-features">
                 <li><span class="dot"></span> 17 interactive simulations</li>
                 <li><span class="dot"></span> Live solar wind &amp; Kp index</li>
@@ -375,7 +387,7 @@
 </main>
 
 <footer>
-    <p>© 2026 Parker Physics App &nbsp;·&nbsp; <a href="pricing.html">Pricing</a> &nbsp;·&nbsp; <a href="signin.html">Sign In</a> &nbsp;·&nbsp; <a href="index.html">Home</a></p>
+    <p>© 2026 Parkers Physics App &nbsp;·&nbsp; <a href="pricing.html">Pricing</a> &nbsp;·&nbsp; <a href="signin.html">Sign In</a> &nbsp;·&nbsp; <a href="index.html">Home</a></p>
     <p style="margin-top:.4rem;font-size:.78rem;">
         <a href="privacy.html">Privacy Policy</a> &nbsp;·&nbsp;
         <a href="eula.html">EULA</a> &nbsp;·&nbsp;
@@ -391,13 +403,23 @@
         applyClassInvite,
         isClassInvite,
     } from './js/admin-invites.js';
+    import { funnel } from './js/auth-funnel.js';
+    import { analytics } from './js/analytics.js';
 
     await auth.ready();
-    if (auth.isSignedIn()) { window.location.href = 'dashboard.html'; }
+    if (auth.isSignedIn()) {
+        // Already-signed-in landing on /signup — same idempotency story as
+        // signin.html: identify before redirect so the dashboard page_view
+        // attaches to the user.
+        const u = auth.getUser();
+        if (u?.id) analytics.identify(u.id, { plan: u.plan, role: u.role });
+        funnel.step('signup_already_signed_in');
+        window.location.href = 'dashboard.html';
+    }
     // applyInvitePlan handles plan-comp invites; applyClassInvite handles
     // educator/institution seat invites that attach the student to a
     // parent_account_id without billing them.
-    window._ppAuth = { auth, validateInviteCode, applyInvitePlan, applyClassInvite, isClassInvite };
+    window._ppAuth = { auth, validateInviteCode, applyInvitePlan, applyClassInvite, isClassInvite, analytics };
 
     // ── Invite code: URL pre-fill + live validation ──────────────────────
     // The ?code= and ?email= params are populated by the magic link sent
@@ -426,6 +448,7 @@
         }
         statusEl.textContent = 'Checking…';
         statusEl.style.color = '#778';
+        funnel.step('signup_invite_entered', { source: urlCode === code ? 'url' : 'manual' });
         const res = await validateInviteCode(code, email || null);
         if (res.ok) {
             const _PLAN_LABELS = {
@@ -453,10 +476,20 @@
                 if (typeof window.selectPlan === 'function') window.selectPlan(res.plan);
             }
             _validatedInvite = res;
+            funnel.step('signup_invite_validated', {
+                ok:        true,
+                plan:      res.plan || null,
+                class_seat: !!res.isClassSeat,
+                targeted:  !!res.isTargeted,
+            });
         } else {
             statusEl.textContent = `✗ ${res.error || 'Invalid code'}`;
             statusEl.style.color = '#ffaaaa';
             _validatedInvite = null;
+            funnel.step('signup_invite_validated', {
+                ok:     false,
+                reason: String(res.error || 'invalid').slice(0, 80),
+            });
         }
     }
 
@@ -490,6 +523,13 @@
         advanced:    ' advanced-plan',
         institution: ' institution-plan',
     };
+    // Funnel helper — populated by js/auth-funnel.js's window-side-effect.
+    // Same fallback pattern as signin.html so a module-load failure
+    // never breaks the sign-up form.
+    const _funnel = (typeof window !== 'undefined' && window.ppFunnel) || {
+        step: () => {}, stepDeferred: () => {}, id: () => null,
+    };
+
     function selectPlan(val) {
         document.querySelectorAll('.plan-pill').forEach(p => p.classList.remove('selected'));
         const pill = document.getElementById(planMap[val]);
@@ -504,14 +544,40 @@
     // tier the invite was issued for.
     window.selectPlan = selectPlan;
     selectPlan(urlPlan);
+    _funnel.step('signup_plan_initial', { plan: urlPlan, source: _rawUrlPlan ? 'url' : 'default' });
 
     document.querySelectorAll('.plan-pill').forEach(pill => {
-        pill.addEventListener('click', () => selectPlan(pill.querySelector('input').value));
+        pill.addEventListener('click', () => {
+            const planVal = pill.querySelector('input').value;
+            selectPlan(planVal);
+            _funnel.step('signup_plan_selected', { plan: planVal });
+        });
+    });
+
+    // ── Time-to-first-interaction signal ─────────────────────────────
+    let _engaged = false;
+    const _engageMs = Date.now();
+    function _markEngagement(field) {
+        if (_engaged) return;
+        _engaged = true;
+        _funnel.step('signup_first_interaction', {
+            field,
+            ms_to_engage: Date.now() - _engageMs,
+        });
+    }
+    ['first-name','last-name','email','password','code'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('focus', () => _markEngagement(id), { once: true });
     });
 
     // ── Password strength ───────────────────────────────────────────
     const pwInput = document.getElementById('password');
     const pwBar   = document.getElementById('pw-bar');
+    // Track the highest score the user reached during typing — a single
+    // funnel event when they peak (debounced via "stronger than before").
+    // Captures users who started weak but improved without spamming an
+    // event on every keystroke.
+    let _pwMaxScore = -1;
     pwInput.addEventListener('input', () => {
         const v = pwInput.value;
         let score = 0;
@@ -524,12 +590,27 @@
         const color = score < 2 ? '#ff4444' : score < 4 ? '#ffd700' : '#4eff91';
         pwBar.style.width = pct + '%';
         pwBar.style.background = color;
+        if (score > _pwMaxScore) {
+            _pwMaxScore = score;
+            // Emit only when crossing a strength tier so the table
+            // doesn't fill with one row per keystroke.
+            if (score === 2 || score === 4 || score === 5) {
+                _funnel.step('signup_password_strength', { score, max: 5 });
+            }
+        }
+    });
+
+    // Terms checkbox toggle — the legal-acceptance step is the last
+    // thing that gates form submission.
+    document.getElementById('terms')?.addEventListener('change', e => {
+        if (e.target.checked) _funnel.step('signup_terms_checked');
     });
 
     // ── Form validation & submit ────────────────────────────────────
     document.getElementById('signup-form').addEventListener('submit', function(e) {
         e.preventDefault();
         let valid = true;
+        const _failedFields = [];
 
         const fields = [
             { id: 'first-name', err: 'err-first',  check: v => v.trim().length > 0 },
@@ -543,15 +624,29 @@
             const ok  = f.check(inp.value);
             inp.classList.toggle('error', !ok);
             err.classList.toggle('visible', !ok);
-            if (!ok) valid = false;
+            if (!ok) { valid = false; _failedFields.push(f.id); }
         });
 
         const terms = document.getElementById('terms');
         const termsErr = document.getElementById('err-terms');
-        if (!terms.checked) { termsErr.classList.add('visible'); valid = false; }
-        else { termsErr.classList.remove('visible'); }
+        if (!terms.checked) {
+            termsErr.classList.add('visible'); valid = false; _failedFields.push('terms');
+        } else {
+            termsErr.classList.remove('visible');
+        }
 
-        if (!valid) return;
+        if (!valid) {
+            _funnel.step('signup_validation_error', { fields: _failedFields });
+            return;
+        }
+
+        const _selectedPlan = document.querySelector('.plan-pill.selected input')?.value || 'free';
+        const _hasInvite = (typeof window._ppGetInvite === 'function') && !!window._ppGetInvite();
+        _funnel.step('signup_submit', {
+            plan:    _selectedPlan,
+            invite:  _hasInvite,
+            pw_score_max: _pwMaxScore,
+        });
 
         const btn = document.getElementById('btn-submit');
         btn.disabled = true;
@@ -600,6 +695,10 @@
                     errEl.textContent = result.error || 'Signup failed — try a different email';
                     errEl.classList.add('visible');
                 }
+                _funnel.step('signup_failed', {
+                    plan:   _selectedPlan,
+                    reason: String(result.error || 'unknown').slice(0, 120),
+                });
                 return;
             }
 
@@ -664,12 +763,35 @@
                     confirmMsg = result.message || 'Check your email for a confirmation link.';
                 }
                 if (msgEl) msgEl.textContent = confirmMsg;
+                _funnel.step('signup_email_confirmation_required', {
+                    plan:           _selectedPlan,
+                    invite:         _hasInvite,
+                    class_seat:     !!classSeatApplied,
+                    invite_comped:  !!invitedComp,
+                });
                 return;
             }
 
             // Signup succeeded without email confirmation
             document.getElementById('form-view').style.display = 'none';
             document.getElementById('success-view').classList.add('show');
+            _funnel.step('signup_succeeded', {
+                plan:           _selectedPlan,
+                invite:         _hasInvite,
+                class_seat:     !!classSeatApplied,
+                invite_comped:  !!invitedComp,
+                elapsed_ms:     Date.now() - _engageMs,
+                pw_score_max:   _pwMaxScore,
+            });
+            // Identify so subsequent page_view events on dashboard attach
+            // to the new user_id. fetchProfile already ran above.
+            try {
+                const u = auth.getUser?.();
+                if (u?.id) {
+                    const { analytics } = await import('./js/analytics.js');
+                    analytics.identify(u.id, { plan: u.plan, role: u.role });
+                }
+            } catch {}
 
             // Stamp a localStorage flag so the dashboard's welcome wizard
             // fires on the next page load. Stripe checkout redirect (paid
@@ -743,7 +865,7 @@
                 const msgEl = document.querySelector('#success-view p');
                 if (classSeatApplied) {
                     const plabel = parentPlan ? parentPlan.charAt(0).toUpperCase() + parentPlan.slice(1) : 'class';
-                    if (msgEl) msgEl.innerHTML = `Welcome! You've joined a Parker Physics ${plabel} class.<br><a href="dashboard.html" style="color:#a080ff;">Open your dashboard →</a>`;
+                    if (msgEl) msgEl.innerHTML = `Welcome! You've joined a Parkers Physics ${plabel} class.<br><a href="dashboard.html" style="color:#a080ff;">Open your dashboard →</a>`;
                 } else if (invitedComp) {
                     if (msgEl) msgEl.innerHTML = `Welcome! Your invite unlocked the <strong>${invite.plan.charAt(0).toUpperCase() + invite.plan.slice(1)}</strong> plan.<br><a href="dashboard.html" style="color:#a080ff;">Open your dashboard →</a>`;
                 }

@@ -463,6 +463,12 @@ use std::cell::RefCell;
 
 thread_local! {
     static REGISTRY: RefCell<Vec<Option<Sgp4State>>> = RefCell::new(Vec::new());
+    // Persistent scratch buffer for `registry_propagate_into`. Sized
+    // up once on the first call and reused every frame, so the hot
+    // path allocates zero (vs. the older `registry_propagate` which
+    // returned a fresh `Vec<f32>` and triggered a per-frame
+    // wasm-bindgen → JS Float32Array conversion + alloc).
+    static OUT_BUFFER: RefCell<Vec<f32>> = RefCell::new(Vec::new());
 }
 
 #[wasm_bindgen]
@@ -517,6 +523,64 @@ pub fn registry_remove(idx: u32) {
         let i = idx as usize;
         if i < reg.len() { reg[i] = None; }
     });
+}
+
+/// Zero-allocation companion to `registry_propagate`. Writes the
+/// same [x, y, z] triplets directly into the supplied JS
+/// `Float32Array`, which is typically backed by a SharedArrayBuffer
+/// the main thread is already using as the THREE position
+/// attribute. One memcpy from a thread-local Rust scratch buffer
+/// (`OUT_BUFFER`) to the JS-side typed array; no per-frame
+/// `Vec<f32>` allocation, no per-frame wasm-bindgen → Float32Array
+/// conversion.
+///
+/// Returns the slot count actually written (= registered sats).
+/// `out` MUST be at least 3 × registry_len() floats long; if it's
+/// shorter we write what fits and return that count, leaving the
+/// remainder of the registry untouched. Caller can detect this by
+/// comparing the return to its expected slot count.
+#[wasm_bindgen]
+pub fn registry_propagate_into(now_jd: f64, gmst_rad: f64, scale: f64, out: &js_sys::Float32Array) -> usize {
+    let cos_g = gmst_rad.cos();
+    let sin_g = gmst_rad.sin();
+    let scl   = scale as f32;
+
+    REGISTRY.with(|r| {
+        let reg  = r.borrow();
+        let n    = reg.len();
+        let want = n * 3;
+        let cap  = (out.length() as usize).min(want);
+
+        OUT_BUFFER.with(|b| {
+            let mut buf = b.borrow_mut();
+            if buf.len() < cap { buf.resize(cap, f32::NAN); }
+            // Pre-fill NaN so blank slots / decayed sats land on a
+            // sentinel JS-side without an explicit branch per slot.
+            for v in buf[..cap].iter_mut() { *v = f32::NAN; }
+
+            for (i, slot) in reg.iter().enumerate() {
+                let off = i * 3;
+                if off + 3 > cap { break; }
+                let Some(state) = slot else { continue; };
+                let tsince = (now_jd - state.tle.epoch_jd) * MIN_PER_DAY;
+                let Ok((p, _v)) = sgp4_propagate(state, tsince) else { continue; };
+
+                let x_ecef =  cos_g * p[0] + sin_g * p[1];
+                let y_ecef = -sin_g * p[0] + cos_g * p[1];
+                let z_ecef =  p[2];
+
+                buf[off]     = (x_ecef as f32) * scl;
+                buf[off + 1] = (z_ecef as f32) * scl;
+                buf[off + 2] = (-y_ecef as f32) * scl;
+            }
+
+            // Single bulk copy from wasm linear memory into the JS
+            // Float32Array. wasm-bindgen lowers this to one memcpy.
+            out.subarray(0, cap as u32).copy_from(&buf[..cap]);
+        });
+
+        cap / 3
+    })
 }
 
 /// Propagate every registered sat to JD = `now_jd`, rotate TEME →

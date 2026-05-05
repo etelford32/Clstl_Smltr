@@ -8,7 +8,7 @@
 <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mission Planner — Patched-Conic Trajectory Simulator · Parker Physics</title>
+<title>Mission Planner — Patched-Conic Trajectory Simulator · Parkers Physics</title>
 <meta name="description" content="Visual mission planner with real patched-conic trajectories. Launch rockets to LEO/GEO, plan lunar transfers with TLI/LOI Δv, and run heliocentric Hohmann transfers to Mars with C3, v∞, and pork-chop window scans.">
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
@@ -122,6 +122,64 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
     box-shadow:inset 0 0 12px rgba(102,255,170,.2);
 }
 
+/* Δv budget panel ──────────────────────────────────── */
+.mp-dv-budget {
+    margin-top:10px;
+    background:rgba(0,0,0,.3);
+    border:1px solid rgba(255,255,255,.1);
+    border-radius:8px; padding:10px 12px;
+    font-family:monospace; font-size:.7rem;
+}
+.mp-dv-row { display:flex; justify-content:space-between; gap:10px; line-height:1.5; }
+.mp-dv-row .k { color:#aab; }
+.mp-dv-row .v { color:#cfd; font-weight:700; }
+.mp-dv-row.mp-dv-margin { margin-top:4px; padding-top:4px; border-top:1px dashed rgba(255,255,255,.08); }
+.mp-dv-row.mp-dv-margin .v { font-size:.8rem; }
+.mp-dv-margin.ok    .v { color:#66ffaa; }
+.mp-dv-margin.tight .v { color:#ffcc66; }
+.mp-dv-margin.short .v { color:#ff7766; }
+.mp-dv-bar {
+    margin-top:6px; height:6px; border-radius:3px;
+    background:rgba(255,255,255,.06); overflow:hidden;
+}
+.mp-dv-bar-fill {
+    height:100%; background:#66ffaa;
+    transition:width .25s ease, background-color .25s ease;
+}
+.mp-dv-bar-fill.tight { background:#ffcc66; }
+.mp-dv-bar-fill.short { background:#ff7766; }
+.mp-dv-breakdown { margin-top:5px; color:#88a; font-size:.62rem; line-height:1.4; }
+.mp-launch-btn.tight { box-shadow:0 0 0 2px rgba(255,204,102,.4) inset; }
+.mp-launch-btn.short {
+    background:linear-gradient(180deg, #aa3322, #771a11);
+    box-shadow:0 4px 12px rgba(170,51,34,.45);
+}
+
+/* Time controls ────────────────────────────────────── */
+.mp-time-display {
+    font-family:monospace; font-size:.84rem; color:#cfd0e0;
+    background:rgba(0,0,0,.35); border:1px solid rgba(255,255,255,.08);
+    border-radius:6px; padding:6px 10px; margin-bottom:6px; text-align:center;
+}
+.mp-time-bar { display:flex; gap:2px; margin-bottom:4px; }
+.mp-time-bar > button {
+    flex:1; background:rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.12);
+    color:#cfd0e0; padding:6px 0;
+    font-family:monospace; font-size:.78rem; font-weight:700;
+    cursor:pointer; transition:all .15s;
+}
+.mp-time-bar > button + button { border-left:none; }
+.mp-time-bar > button:first-child { border-top-left-radius:6px; border-bottom-left-radius:6px; }
+.mp-time-bar > button:last-child  { border-top-right-radius:6px; border-bottom-right-radius:6px; }
+.mp-time-bar > button:hover { border-color:rgba(102,255,170,.45); color:#fff; }
+.mp-time-bar > button.on {
+    background:rgba(102,170,255,.16); color:#88bbff; border-color:#4488cc;
+}
+.mp-time-bar > button.paused {
+    background:rgba(255,120,120,.18); color:#ffaaaa; border-color:#aa6666;
+}
+
 /* Plan readout ─────────────────────────────────────── */
 .mp-plan {
     margin-top:10px;
@@ -232,16 +290,31 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
 <div id="mp-app">
 
     <aside class="mp-panel" id="mp-controls">
-        <div class="mp-label">View</div>
+        <div class="mp-label">Focus</div>
         <div class="mp-mode-toggle">
-            <button id="mp-mode-geo"   class="mp-mode-btn on"  type="button">🌍 Earth System</button>
-            <button id="mp-mode-helio" class="mp-mode-btn"     type="button">☀️ Heliocentric</button>
+            <button id="mp-focus-earth"   class="mp-mode-btn on" type="button">🌍 Earth</button>
+            <button id="mp-focus-moon"    class="mp-mode-btn"    type="button">🌙 Moon</button>
+            <button id="mp-focus-mars"    class="mp-mode-btn"    type="button">♂ Mars</button>
+            <button id="mp-focus-sun"     class="mp-mode-btn"    type="button">☀️ Sun</button>
+        </div>
+        <div class="mp-mode-toggle" style="margin-top:4px;">
+            <button id="mp-focus-jupiter" class="mp-mode-btn"    type="button">♃ Jupiter</button>
+            <button id="mp-focus-saturn"  class="mp-mode-btn"    type="button">♄ Saturn</button>
+            <button id="mp-focus-system"  class="mp-mode-btn"    type="button">🌌 Inner</button>
+            <button id="mp-focus-outer"   class="mp-mode-btn"    type="button">🪐 Outer</button>
         </div>
 
-        <div class="mp-label">Launch Site</div>
+        <div class="mp-label">Origin Body</div>
+        <div class="mp-mode-toggle">
+            <button id="mp-origin-earth" class="mp-mode-btn on"  type="button" data-body="earth">🌍 Earth</button>
+            <button id="mp-origin-moon"  class="mp-mode-btn"     type="button" data-body="moon">🌙 Moon</button>
+            <button id="mp-origin-mars"  class="mp-mode-btn"     type="button" data-body="mars">♂ Mars</button>
+        </div>
+
+        <div class="mp-label">Origin Pad</div>
         <select id="mp-site" class="mp-select"></select>
 
-        <div class="mp-label">Target Orbit / Destination</div>
+        <div class="mp-label">Destination</div>
         <select id="mp-target" class="mp-select"></select>
 
         <div class="mp-label">Payload Name</div>
@@ -259,19 +332,26 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
             <span class="mp-time" id="mp-lunar-tof-val">5.4 d</span>
         </div>
 
+        <div class="mp-label">Vehicle</div>
+        <select id="mp-mission-vehicle" class="mp-select"></select>
+
+        <div id="mp-dv-budget" class="mp-dv-budget">
+            <div class="mp-dv-row"><span class="k">Δv required</span><span class="v" id="mp-dv-required">—</span></div>
+            <div class="mp-dv-row"><span class="k">Δv available</span><span class="v" id="mp-dv-available">—</span></div>
+            <div class="mp-dv-row"><span class="k">Mass m₀ / m_dry</span><span class="v" id="mp-dv-mass">—</span></div>
+            <div class="mp-dv-row mp-dv-margin"><span class="k">Margin</span><span class="v" id="mp-dv-margin-val">—</span></div>
+            <div class="mp-dv-bar"><div class="mp-dv-bar-fill" id="mp-dv-bar-fill"></div></div>
+            <div class="mp-dv-breakdown" id="mp-dv-breakdown"></div>
+        </div>
+
         <button id="mp-find-window" class="mp-secondary-btn" type="button" style="margin-top:10px;">🔍 Find Next Launch Window</button>
-        <button id="mp-porkchop"    class="mp-secondary-btn" type="button" style="margin-top:6px;">🗺️ Run Pork-Chop Scan (Mars)</button>
+        <button id="mp-porkchop"    class="mp-secondary-btn" type="button" style="margin-top:6px;">🗺️ Run Pork-Chop Scan</button>
         <button id="mp-launch"      class="mp-launch-btn"    type="button">🚀 Launch</button>
 
         <div class="mp-section-divider"></div>
 
-        <div class="mp-label">Multi-leg Tour (chained Lambert)</div>
-        <select id="mp-tour-preset" class="mp-select">
-            <option value="veem">V-E-E-M · Earth → Venus → Earth → Mars</option>
-            <option value="evvm">V-V-M · Earth → Venus → Venus → Mars</option>
-            <option value="eve">V-E · Earth → Venus → Earth (BepiColombo-like)</option>
-            <option value="em">Direct · Earth → Mars (reference)</option>
-        </select>
+        <div class="mp-label">Multi-leg Tour (chained Lambert + gravity assists)</div>
+        <select id="mp-tour-preset" class="mp-select"></select>
         <button id="mp-tour-optimize" class="mp-secondary-btn" type="button" style="margin-top:6px;">🌌 Optimize + Run Tour</button>
 
         <div class="mp-section-divider"></div>
@@ -315,22 +395,38 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
 
         <div class="mp-section-divider"></div>
 
-        <div class="mp-label">Time Scale</div>
+        <div class="mp-label">Scenario Time</div>
+        <div class="mp-time-display" id="mp-time-display">— UTC</div>
+
+        <div class="mp-time-bar" role="toolbar" aria-label="Time playback">
+            <button id="mp-time-pause" type="button" title="Pause / Play">⏸</button>
+            <button id="mp-time-back-d" type="button" title="−1 day">«</button>
+            <button id="mp-time-back-h" type="button" title="−1 hour">‹</button>
+            <button id="mp-time-fwd-h"  type="button" title="+1 hour">›</button>
+            <button id="mp-time-fwd-d"  type="button" title="+1 day">»</button>
+            <button id="mp-time-now"    type="button" title="Reset to now">⌖</button>
+        </div>
+
+        <div class="mp-time-bar" role="toolbar" aria-label="Playback rate">
+            <button class="mp-time-preset" data-rate="0.000694" type="button">×min</button>
+            <button class="mp-time-preset" data-rate="0.04167"  type="button">×hour</button>
+            <button class="mp-time-preset on" data-rate="1"     type="button">×day</button>
+            <button class="mp-time-preset" data-rate="7"        type="button">×week</button>
+        </div>
+
+        <div class="mp-label">Scrub (± days from anchor)</div>
+        <div class="mp-row">
+            <input id="mp-jd-scrub" class="mp-input" type="range" min="-365" max="365" step="0.05" value="0">
+            <span class="mp-time" id="mp-jd-scrub-val">+0.0d</span>
+        </div>
+
+        <div class="mp-label">Animation Speed</div>
         <div class="mp-row">
             <input id="mp-timescale" class="mp-input" type="range" min="0.25" max="8" step="0.25" value="1">
             <span class="mp-time" id="mp-timescale-val">1.0×</span>
         </div>
 
-        <div class="mp-label">Sim Days / Sec (planet drift)</div>
-        <div class="mp-row">
-            <input id="mp-simrate" class="mp-input" type="range" min="0" max="60" step="1" value="2">
-            <span class="mp-time" id="mp-simrate-val">2 d/s</span>
-        </div>
-
-        <button id="mp-focus-earth" class="mp-secondary-btn" type="button">Focus: Earth</button>
-        <button id="mp-focus-moon"  class="mp-secondary-btn" type="button">Focus: Moon</button>
-        <button id="mp-focus-sun"   class="mp-secondary-btn" type="button">Focus: Sun (helio)</button>
-        <button id="mp-clear"       class="mp-secondary-btn" type="button" style="border-color:rgba(255,120,120,.4); color:#ffaaaa;">Clear All Vehicles</button>
+        <button id="mp-clear" class="mp-secondary-btn" type="button" style="border-color:rgba(255,120,120,.4); color:#ffaaaa;">Clear All Vehicles</button>
 
         <div class="mp-label">Mission Log</div>
         <div id="mp-log" class="mp-log"><div class="mp-log-row"><span class="t">--:--</span>Ready for launch.</div></div>
@@ -339,7 +435,6 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
     <main>
         <div id="mp-3d-wrap">
             <div id="mp-3d" aria-label="3D mission planner viewport"></div>
-            <div id="mp-mode-badge">🌍 Earth System</div>
             <div id="mp-hud">
                 <div class="hud-title">Mission Status</div>
                 <div class="hud-row"><span class="k">Rockets in flight</span><span class="v" id="hud-rockets">0</span></div>
@@ -350,13 +445,14 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
                 <div class="hud-row"><span class="k">Scenario JD</span><span class="v" id="hud-jd">—</span></div>
             </div>
         </div>
-        <p id="mp-3d-help"><strong>Drag</strong> orbit · <strong>Scroll</strong> zoom · <strong>Right-drag</strong> pan · Geo: 1 unit = R⊕ · Helio: 1 AU = 4 units · planets at live ephemeris</p>
+        <p id="mp-3d-help"><strong>Drag</strong> orbit · <strong>Scroll</strong> zoom · <strong>Right-drag</strong> pan · 1 unit = 1 R⊕ · 1 AU ≈ 23 456 units · all 8 planets at real radii + live ephemeris · LOD scaling for far-view visibility</p>
     </main>
 
 </div>
 
 <script type="module">
-import { initMissionPlanner, LAUNCH_SITES, TARGET_ORBITS } from './js/mission-planner-3d.js';
+import { initMissionPlanner, LAUNCH_SITES, TARGET_ORBITS,
+         MOON_BASES, MARS_BIOMES, MISSION_ROUTES } from './js/mission-planner-3d.js';
 import { simulateAscent, compareBodies, LAUNCH_BODIES, LAUNCH_VEHICLES } from './js/launch-physics.js';
 import { jdNow } from './js/horizons.js';
 
@@ -364,13 +460,48 @@ import { jdNow } from './js/horizons.js';
 const siteSel   = document.getElementById('mp-site');
 const targetSel = document.getElementById('mp-target');
 const payloadIn = document.getElementById('mp-payload');
-siteSel.innerHTML   = LAUNCH_SITES.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
-targetSel.innerHTML = TARGET_ORBITS.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+const originBtns = document.querySelectorAll('[data-body]');
+let currentOriginBody = 'earth';
+
+function padsFor(body) {
+    if (body === 'moon') return MOON_BASES;
+    if (body === 'mars') return MARS_BIOMES;
+    return LAUNCH_SITES;
+}
+function destLabelFor(routeKey) {
+    // Earth-origin destinations come from TARGET_ORBITS; cross-body routes
+    // come from MISSION_ROUTES so we read the human label there.
+    const fromEarth = TARGET_ORBITS.find(t => t.id === routeKey);
+    if (fromEarth) return fromEarth.name;
+    return routeKey;
+}
+function refreshOriginUI() {
+    const pads = padsFor(currentOriginBody);
+    siteSel.innerHTML = pads.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+    const routes = MISSION_ROUTES.filter(r => r.from === currentOriginBody);
+    targetSel.innerHTML = routes
+        .map(r => `<option value="${r.to}">${r.label}</option>`).join('');
+}
+originBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+        originBtns.forEach(b => b.classList.remove('on'));
+        btn.classList.add('on');
+        currentOriginBody = btn.dataset.body;
+        marsWindow = null;                   // stale window when origin moves
+        refreshOriginUI();
+        // Re-evaluate which auxiliary controls are relevant (e.g. lunar
+        // TOF slider for moon→earth).
+        if (typeof updateTargetUI === 'function') updateTargetUI();
+        if (typeof refreshDvBudget === 'function') refreshDvBudget();
+    });
+});
+refreshOriginUI();
 
 // ── Hero stats ──────────────────────────────────────────────────────
+const padCount = LAUNCH_SITES.length + MOON_BASES.length + MARS_BIOMES.length;
 document.getElementById('mp-hero-stats').innerHTML = `
-    <span class="mp-stat"><strong>${LAUNCH_SITES.length}</strong>launch sites</span>
-    <span class="mp-stat"><strong>${TARGET_ORBITS.length}</strong>target orbits</span>
+    <span class="mp-stat"><strong>${padCount}</strong>launch pads (Earth/Moon/Mars)</span>
+    <span class="mp-stat"><strong>${MISSION_ROUTES.length}</strong>routes</span>
     <span class="mp-stat"><strong>μ⊕ = 398 600</strong>km³/s²</span>
     <span class="mp-stat"><strong>μ☉ = 1.327×10¹¹</strong>km³/s²</span>
     <span class="mp-stat"><strong>Live</strong>Earth/Mars/Moon ephemerides</span>
@@ -533,15 +664,45 @@ function renderPlan(plan) {
             <div class="mp-plan-row"><span class="k">Δv (MOI)</span><span class="v">${plan.dv_moi_kms.toFixed(3)} km/s</span></div>
             <div class="mp-plan-row"><span class="k">Total Δv</span><span class="v">${plan.dv_total_kms.toFixed(3)} km/s</span></div>
         `;
+    } else if (plan.kind === 'mars-to-earth' || plan.kind === 'moon-to-mars' ||
+               plan.kind === 'moon-to-earth' || plan.kind?.startsWith('earth-to-')) {
+        const titles = {
+            'mars-to-earth':    '⟲ Mars → Earth (Lambert · 3D)',
+            'moon-to-mars':     '🌙→♂ Moon → Mars (Lambert · 3D)',
+            'moon-to-earth':    '🌙→🌍 Moon → Earth (lunar return)',
+            'earth-to-jupiter': '♃ Earth → Jupiter (Lambert · 3D)',
+            'earth-to-saturn':  '♄ Earth → Saturn (Lambert · 3D)',
+            'earth-to-uranus':  '⛢ Earth → Uranus (Lambert · 3D)',
+            'earth-to-neptune': '♆ Earth → Neptune (Lambert · 3D)',
+        };
+        const yrs = plan.tof_d / 365.25;
+        planEl.innerHTML = `
+            <div class="mp-plan-title">${titles[plan.kind] ?? plan.kind}</div>
+            <div class="mp-plan-row"><span class="k">Depart</span><span class="v">${jdToISO(plan.jd_depart)}</span></div>
+            <div class="mp-plan-row"><span class="k">Arrive</span><span class="v">${jdToISO(plan.jd_arrive)}</span></div>
+            <div class="mp-plan-row"><span class="k">TOF</span><span class="v">${plan.tof_d.toFixed(0)} d (${yrs.toFixed(2)} yr)</span></div>
+            <div class="mp-plan-row"><span class="k">Δv depart</span><span class="v">${plan.dv_depart_kms.toFixed(3)} km/s</span></div>
+            <div class="mp-plan-row"><span class="k">Δv arrive</span><span class="v">${plan.dv_arrive_kms.toFixed(3)} km/s</span></div>
+            <div class="mp-plan-row"><span class="k">Total Δv</span><span class="v">${plan.dv_total_kms.toFixed(3)} km/s</span></div>
+            ${plan.c3_earth_km2s2 ? `<div class="mp-plan-row"><span class="k">C3 Earth</span><span class="v">${plan.c3_earth_km2s2.toFixed(2)} km²/s²</span></div>` : ''}
+            ${plan.v_inf_depart_kms ? `<div class="mp-plan-row"><span class="k">v∞ depart</span><span class="v">${plan.v_inf_depart_kms.toFixed(3)} km/s</span></div>` : ''}
+            ${plan.v_inf_arrive_kms ? `<div class="mp-plan-row"><span class="k">v∞ arrive</span><span class="v">${plan.v_inf_arrive_kms.toFixed(3)} km/s</span></div>` : ''}
+        `;
     }
 }
 
-// ── Mode badge ──────────────────────────────────────────────────────
-function setModeUI(mode) {
-    document.getElementById('mp-mode-geo').classList.toggle('on',   mode === 'geo');
-    document.getElementById('mp-mode-helio').classList.toggle('on', mode === 'helio');
-    document.getElementById('mp-mode-badge').textContent =
-        mode === 'helio' ? '☀️ Heliocentric' : '🌍 Earth System';
+// ── Focus toggle highlight ──────────────────────────────────────────
+// The renderer now uses one unified scene; the old 🌍/☀️ mode toggle has
+// been replaced by Earth / Moon / Mars / Sun / System focus presets that
+// just retarget the camera. Keep `setModeUI` as a compat shim for the
+// `'mode'` event path (does nothing visible now; could reflect the
+// auto-focus inferred from a launch destination if we want to highlight
+// the matching focus button).
+function setModeUI(/* mode */) { /* no-op */ }
+function setFocusUI(focusId) {
+    for (const id of ['earth','moon','mars','sun','jupiter','saturn','system','outer']) {
+        document.getElementById(`mp-focus-${id}`)?.classList.toggle('on', id === focusId);
+    }
 }
 
 // ── Mount the 3D scene ──────────────────────────────────────────────
@@ -561,8 +722,32 @@ const planner = initMissionPlanner({
             renderPlan(ev.plan);
         } else if (ev.type === 'lunar-captured') {
             pushLog(`🛰️ LOI · ${ev.payloadName} captured into ${(ev.plan.r_capt_km - 1737).toFixed(0)} km lunar orbit`, 'capture');
-        } else if (ev.type === 'mars-captured') {
-            pushLog(`🛰️ MOI · ${ev.payloadName} arrived at Mars`, 'capture');
+        } else if (ev.type === 'lunar-captured') {
+            // Keep the lunar capture's altitude readout — it has plan-specific
+            // info (r_capt_km in km) that the generic handler would lose.
+            pushLog(`🌙 LOI · ${ev.payloadName} captured into ${(ev.plan.r_capt_km - 1737).toFixed(0)} km lunar orbit`, 'capture');
+        } else if (ev.type?.endsWith('-captured')) {
+            // Generic capture-event handler driven by INSERTION_LABELS so the
+            // wording for each body lives in one place (planner.INSERTION_LABELS
+            // → trajectory module). Falls back gracefully if a new body is
+            // added without a label entry.
+            const bodyKey = ev.type.replace('-captured', '');
+            const lbl     = planner.INSERTION_LABELS?.[bodyKey];
+            const disp    = planner.PLANET_DISPLAY?.[bodyKey];
+            const tag     = lbl?.abbr ?? bodyKey.toUpperCase();
+            const long    = lbl?.long ?? `${bodyKey} orbit insertion`;
+            const sym     = disp?.symbol ?? '🛰️';
+            pushLog(`${sym} ${tag} · ${ev.payloadName} — ${long}`, 'capture');
+        } else if (ev.type === 'lunar-return-arrived') {
+            pushLog(`🛰️ EOI · ${ev.payloadName} captured into LEO from Moon`, 'capture');
+        } else if (ev.type === 'launched-helio') {
+            const p = ev.plan;
+            pushLog(`🚀 ${ev.route} · ${ev.payloadName} · Δv=${p.dv_total_kms.toFixed(2)} km/s · v∞₀=${p.v_inf_depart_kms.toFixed(2)} · TOF=${p.tof_d.toFixed(0)} d`, 'transfer');
+            renderPlan(p);
+        } else if (ev.type === 'launched-lunar-return') {
+            const p = ev.plan;
+            pushLog(`🌙 ${ev.route} · ${ev.payloadName} · Δv=${p.dv_total_kms.toFixed(2)} km/s · TOF=${p.tof_d.toFixed(1)} d`, 'transfer');
+            renderPlan(p);
         } else if (ev.type === 'launched-tour') {
             pushLog(`🌌 Tour ${ev.payloadName} launched · ${ev.plan.legs.length} legs · ${ev.plan.tof_total_d.toFixed(0)}d total`, 'transfer');
         } else if (ev.type === 'tour-leg') {
@@ -584,9 +769,180 @@ const planner = initMissionPlanner({
     },
 });
 
+// Populate the tour-preset dropdown from TOUR_PRESETS so newly added
+// gravity-assist sequences (Voyager 2, Cassini, etc.) show up without
+// touching the HTML.
+{
+    const tourSel = document.getElementById('mp-tour-preset');
+    tourSel.innerHTML = Object.entries(planner.TOUR_PRESETS)
+        .map(([id, p]) => `<option value="${id}">${p.name}</option>`)
+        .join('');
+}
+
 // ── Mars window state (depart, arrive) — set by Find/Pork-Chop/click ──
 let marsWindow = null;          // { jd_depart, jd_arrive }
 let lastPorkchop = null;        // result from porkchopMars
+
+// ── Δv budget (Tsiolkovsky gating) ──────────────────────────────────
+// Available Δv = Isp · g₀ · ln(m₀ / m_dry). Required Δv = surface ascent
+// to a low parking orbit + transfer plan's dv_total_kms (when applicable)
+// + a coarse Hohmann delta for high Earth orbits (MEO/GEO). The required
+// number is recomputed on every UI change that affects it.
+const G0 = 9.80665;
+const missionVehicleSel = document.getElementById('mp-mission-vehicle');
+missionVehicleSel.innerHTML = Object.values(LAUNCH_VEHICLES)
+    .map(v => `<option value="${v.id}">${v.name}</option>`).join('');
+missionVehicleSel.value = 'heavy';
+
+// Heuristic ascent loss budgets, calibrated against simulateAscent for
+// each origin body. Used so the Δv readout updates instantly on UI change
+// instead of running the full ~5 ms ascent integrator on every event.
+const ASCENT_LOSS = {
+    earth: { g_loss: 1.7, d_loss: 0.15, s_loss: 0.30, default_alt_km: 400 },
+    moon:  { g_loss: 0.10, d_loss: 0.0, s_loss: 0.20, default_alt_km: 100 },
+    mars:  { g_loss: 0.50, d_loss: 0.04, s_loss: 0.30, default_alt_km: 400 },
+};
+const BODY_PHYS = {
+    earth: { R_km: 6378.137, mu_km3s2: 398600.4418 },
+    moon:  { R_km: 1737.4,   mu_km3s2: 4902.800066 },
+    mars:  { R_km: 3389.5,   mu_km3s2: 42828.37   },
+};
+
+function dvAvailableKms(vehicle) {
+    return vehicle.Isp_s * G0 * Math.log(1 / vehicle.dry_frac) / 1000;
+}
+function ascentDvKms(originBody, alt_km = null) {
+    const phys = BODY_PHYS[originBody];
+    const loss = ASCENT_LOSS[originBody];
+    const r_km = phys.R_km + (alt_km ?? loss.default_alt_km);
+    const v_circ = Math.sqrt(phys.mu_km3s2 / r_km);
+    return v_circ + loss.g_loss + loss.d_loss + loss.s_loss;
+}
+// Coarse two-burn Hohmann transfer between LEO and a higher Earth orbit.
+function leoToHigherEarthDv(target_alt_km) {
+    const r1 = 6378.137 + 400;
+    const r2 = 6378.137 + target_alt_km;
+    const mu = 398600.4418;
+    const a  = (r1 + r2) / 2;
+    const v1   = Math.sqrt(mu / r1);
+    const v_p  = Math.sqrt(mu * (2/r1 - 1/a));
+    const v_a  = Math.sqrt(mu * (2/r2 - 1/a));
+    const v2   = Math.sqrt(mu / r2);
+    return Math.abs(v_p - v1) + Math.abs(v2 - v_a);
+}
+
+function dvRequiredKms() {
+    const origin   = currentOriginBody;
+    const destId   = targetSel.value;
+    const ascent   = ascentDvKms(origin);
+    let transfer   = 0;
+    let label      = '';
+    try {
+        if (origin === 'earth') {
+            if (destId === 'leo' || destId === 'sso') {
+                label = 'ascent only';
+            } else if (destId === 'meo' || destId === 'geo') {
+                const target = TARGET_ORBITS.find(t => t.id === destId);
+                transfer = leoToHigherEarthDv(target.alt_km);
+                label    = `ascent + Hohmann to ${destId.toUpperCase()}`;
+            } else if (destId === 'moon') {
+                const tof = parseFloat(lunarTofRange.value);
+                const plan = planner.planLunarLambert({
+                    jd_depart: planner.getScenarioJD(),
+                    tof_d: tof,
+                    parking_inc_deg: parseFloat(parkIncRange.value),
+                });
+                transfer = plan.dv_total_kms;
+                label    = 'ascent + TLI + LOI';
+            } else if (destId === 'mars') {
+                const jd_d = marsWindow ? marsWindow.jd_depart : planner.getScenarioJD();
+                const jd_a = marsWindow ? marsWindow.jd_arrive : (jd_d + 258);
+                const plan = planner.planMarsLambert({
+                    jd_depart: jd_d, jd_arrive: jd_a,
+                    parking_inc_deg: parseFloat(parkIncRange.value),
+                });
+                transfer = plan.dv_total_kms;
+                label    = 'ascent + TMI + MOI';
+            } else if (['jupiter','saturn','uranus','neptune'].includes(destId)) {
+                // Outer-planet Lambert (Hohmann-default TOF — multi-year).
+                const plan = planner.planEarthToOuterLambert({
+                    planet:    destId,
+                    jd_depart: planner.getScenarioJD(),
+                    parking_inc_deg: parseFloat(parkIncRange.value),
+                });
+                transfer = plan.dv_total_kms;
+                label    = `ascent + TXI + capture (${(plan.tof_d/365.25).toFixed(1)} yr TOF)`;
+            }
+        } else if (origin === 'mars' && destId === 'earth') {
+            const plan = planner.planMarsToEarthLambert({
+                jd_depart: planner.getScenarioJD(),
+                jd_arrive: planner.getScenarioJD() + 258,
+            });
+            transfer = plan.dv_total_kms;
+            label    = 'ascent + TEI + EOI';
+        } else if (origin === 'moon' && destId === 'mars') {
+            const plan = planner.planMoonToMarsLambert({
+                jd_depart: planner.getScenarioJD(),
+                jd_arrive: planner.getScenarioJD() + 258,
+            });
+            transfer = plan.dv_total_kms;
+            label    = 'ascent + helio Lambert + MOI';
+        } else if (origin === 'moon' && destId === 'earth') {
+            const tof = parseFloat(lunarTofRange.value);
+            const plan = planner.planMoonToEarthLambert({
+                jd_depart: planner.getScenarioJD(),
+                tof_d: tof,
+            });
+            transfer = plan.dv_total_kms;
+            label    = 'ascent + TEI + EOI';
+        }
+    } catch (e) {
+        // Lambert can fail at degenerate dates; fall back to ascent only.
+        label = 'ascent only (transfer infeasible at this date)';
+    }
+    return { ascent, transfer, total: ascent + transfer, label };
+}
+
+const dvReqEl   = document.getElementById('mp-dv-required');
+const dvAvailEl = document.getElementById('mp-dv-available');
+const dvMassEl  = document.getElementById('mp-dv-mass');
+const dvMargEl  = document.getElementById('mp-dv-margin-val');
+const dvMargRow = dvMargEl.parentElement;
+const dvBarFill = document.getElementById('mp-dv-bar-fill');
+const dvBreakEl = document.getElementById('mp-dv-breakdown');
+const launchBtn = document.getElementById('mp-launch');
+
+function refreshDvBudget() {
+    const vehicle = LAUNCH_VEHICLES[missionVehicleSel.value];
+    const avail   = dvAvailableKms(vehicle);
+    const req     = dvRequiredKms();
+    const margin  = avail - req.total;
+
+    dvReqEl.textContent   = `${req.total.toFixed(2)} km/s`;
+    dvAvailEl.textContent = `${avail.toFixed(2)} km/s`;
+    dvMassEl.textContent  = `${(vehicle.m0_kg/1000).toFixed(1)} t / ${(vehicle.m0_kg*vehicle.dry_frac/1000).toFixed(1)} t`;
+    dvMargEl.textContent  = `${margin >= 0 ? '+' : ''}${margin.toFixed(2)} km/s`;
+    dvBreakEl.textContent = `${req.label} · ascent ${req.ascent.toFixed(2)} + transfer ${req.transfer.toFixed(2)} km/s`;
+
+    const ratio = Math.max(0, Math.min(1, req.total / Math.max(0.1, avail)));
+    dvBarFill.style.width = `${(ratio * 100).toFixed(1)}%`;
+
+    let cls;
+    if (margin < 0)        cls = 'short';
+    else if (margin < 1.0) cls = 'tight';
+    else                   cls = 'ok';
+    dvMargRow.classList.remove('ok', 'tight', 'short');
+    dvMargRow.classList.add(cls);
+    dvBarFill.classList.remove('tight', 'short');
+    if (cls !== 'ok') dvBarFill.classList.add(cls);
+    launchBtn.classList.remove('tight', 'short');
+    if (cls !== 'ok') launchBtn.classList.add(cls);
+    launchBtn.textContent = cls === 'short' ? '🚫 Δv shortfall — Launch anyway?'
+                          : cls === 'tight' ? '🚀 Launch (tight margin)'
+                          :                   '🚀 Launch';
+}
+
+missionVehicleSel.addEventListener('change', refreshDvBudget);
 
 // Parking inclination slider
 const parkIncRange = document.getElementById('mp-park-inc');
@@ -602,13 +958,18 @@ parkIncRange.addEventListener('input', () => {
         });
         renderPlan(plan);
     }
+    refreshDvBudget();
 });
-// Default parking inclination = launch site latitude.
+// Default parking inclination = launch site latitude (Earth pads only).
 siteSel.addEventListener('change', () => {
-    const s = LAUNCH_SITES.find(x => x.id === siteSel.value);
-    if (!s) return;
-    parkIncRange.value = Math.abs(s.lat).toFixed(1);
-    parkIncVal.textContent = `${Math.abs(s.lat).toFixed(1)}°`;
+    if (currentOriginBody === 'earth') {
+        const s = LAUNCH_SITES.find(x => x.id === siteSel.value);
+        if (s) {
+            parkIncRange.value = Math.abs(s.lat).toFixed(1);
+            parkIncVal.textContent = `${Math.abs(s.lat).toFixed(1)}°`;
+        }
+    }
+    refreshDvBudget();
 });
 
 // Lunar TOF slider — show only when "Lunar transfer" is the selected target.
@@ -618,9 +979,11 @@ const lunarTofRange = document.getElementById('mp-lunar-tof');
 const lunarTofVal   = document.getElementById('mp-lunar-tof-val');
 
 function updateTargetUI() {
-    const isMoon = targetSel.value === 'moon';
-    lunarTofRow.style.display   = isMoon ? '' : 'none';
-    lunarTofLabel.style.display = isMoon ? '' : 'none';
+    const isMoon       = targetSel.value === 'moon';
+    const isMoonReturn = currentOriginBody === 'moon' && targetSel.value === 'earth';
+    const showLunarTof = isMoon || isMoonReturn;
+    lunarTofRow.style.display   = showLunarTof ? '' : 'none';
+    lunarTofLabel.style.display = showLunarTof ? '' : 'none';
     if (isMoon) {
         // Re-cost on target change.
         const tof = parseFloat(lunarTofRange.value);
@@ -631,8 +994,22 @@ function updateTargetUI() {
         });
         renderPlan(plan);
     }
+    // Porkchop button label reflects the destination so the user knows
+    // which planet's window will be scanned.
+    const porkBtn = document.getElementById('mp-porkchop');
+    const t = targetSel.value;
+    const planetCap = t.charAt(0).toUpperCase() + t.slice(1);
+    if (['mars','jupiter','saturn','uranus','neptune'].includes(t)) {
+        porkBtn.textContent = `🗺️ Run Pork-Chop Scan (${planetCap})`;
+        porkBtn.disabled = false;
+        porkBtn.style.opacity = '1';
+    } else {
+        porkBtn.textContent = `🗺️ Run Pork-Chop Scan`;
+        porkBtn.disabled = true;
+        porkBtn.style.opacity = '0.5';
+    }
 }
-targetSel.addEventListener('change', updateTargetUI);
+targetSel.addEventListener('change', () => { updateTargetUI(); refreshDvBudget(); });
 lunarTofRange.addEventListener('input', () => {
     const v = parseFloat(lunarTofRange.value);
     lunarTofVal.textContent = `${v.toFixed(2)} d`;
@@ -644,23 +1021,45 @@ lunarTofRange.addEventListener('input', () => {
         });
         renderPlan(plan);
     }
+    refreshDvBudget();
 });
 
 // ── Wire controls ───────────────────────────────────────────────────
 document.getElementById('mp-launch').addEventListener('click', () => {
     const opts = {
-        siteId:   siteSel.value,
-        targetId: targetSel.value,
-        payloadName: (payloadIn.value || 'Payload').trim(),
+        originBody:      currentOriginBody,
+        originId:        siteSel.value,
+        destinationBody: targetSel.value,        // 'earth' / 'mars' for cross-body
+        destinationId:   targetSel.value,        // 'leo' / 'moon' / etc. for Earth-origin
+        payloadName:     (payloadIn.value || 'Payload').trim(),
         parking_inc_deg: parseFloat(parkIncRange.value),
     };
-    if (targetSel.value === 'mars' && marsWindow) {
+    // Mars-window override applies to Earth↔Mars only (porkchop is Earth/Mars).
+    if (currentOriginBody === 'earth' && targetSel.value === 'mars' && marsWindow) {
         opts.windowJD = marsWindow.jd_depart;
         opts.arriveJD = marsWindow.jd_arrive;
     }
-    if (targetSel.value === 'moon') {
+    // Lunar TOF applies to outbound or return lunar transfers.
+    if (targetSel.value === 'moon' || (currentOriginBody === 'moon' && targetSel.value === 'earth')) {
         opts.lunar_tof_d = parseFloat(lunarTofRange.value);
     }
+
+    // Δv budget audit — log the rocket-equation result and warn (but
+    // still launch) if the vehicle is short.
+    const vehicle = LAUNCH_VEHICLES[missionVehicleSel.value];
+    const avail = dvAvailableKms(vehicle);
+    const req   = dvRequiredKms();
+    const margin = avail - req.total;
+    opts.vehicleId = vehicle.id;
+    opts.dvBudget  = { vehicle: vehicle.name, avail, required: req.total, margin };
+    if (margin < 0) {
+        pushLog(`⚠️ ${vehicle.name}: Δv shortfall ${margin.toFixed(2)} km/s (need ${req.total.toFixed(2)}, have ${avail.toFixed(2)}). Launching anyway — flight will run out of propellant.`, 'window');
+    } else if (margin < 1.0) {
+        pushLog(`⚠️ ${vehicle.name}: tight Δv margin +${margin.toFixed(2)} km/s · ${req.label}`, 'window');
+    } else {
+        pushLog(`✓ ${vehicle.name}: Δv margin +${margin.toFixed(2)} km/s · ${req.label}`, 'deploy');
+    }
+
     planner.launch(opts);
 });
 
@@ -694,42 +1093,75 @@ document.getElementById('mp-find-window').addEventListener('click', () => {
         const plan = planner.findLunarWindow({ jd_start: jdNow() });
         renderPlan(plan);
         pushLog(`🔍 Lunar window · TOF ${plan.tof_d.toFixed(1)} d · Δv ${plan.dv_total_kms.toFixed(2)} km/s`, 'window');
-    } else if (tgt.id === 'mars') {
-        runMarsPorkchop();   // Lambert pork-chop is the proper window finder
+    } else if (['mars','jupiter','saturn','uranus','neptune'].includes(tgt.id)) {
+        runPlanetPorkchop(tgt.id);
     } else {
         pushLog(`No window scan needed for ${tgt.name} — orbit is geometric, not phase-dependent.`, 'window');
     }
 });
 
-document.getElementById('mp-porkchop').addEventListener('click', runMarsPorkchop);
+document.getElementById('mp-porkchop').addEventListener('click', () => {
+    const planet = ['mars','jupiter','saturn','uranus','neptune'].includes(targetSel.value)
+        ? targetSel.value : 'mars';
+    runPlanetPorkchop(planet);
+});
 
-function runMarsPorkchop() {
-    pushLog(`⏳ Pork-chop scan: 80×80 Lamberts over the next 1.5 yr…`, 'window');
+// Per-planet porkchop search ranges. Departure windows grow with the
+// synodic period; arrival windows reach further out for slower transfers.
+// Numbers are days from "now" — scaled so each scan covers at least one
+// synodic cycle plus a generous TOF spread.
+const _PORKCHOP_RANGES = {
+    mars:    { dep_max:   540, arr_min:   90, arr_max:   900, n: 80 },
+    jupiter: { dep_max:   780, arr_min:  365, arr_max:  2200, n: 60 },
+    saturn:  { dep_max:   400, arr_min:  900, arr_max:  4500, n: 60 },
+    uranus:  { dep_max:   400, arr_min: 2500, arr_max:  9000, n: 50 },
+    neptune: { dep_max:   400, arr_min: 5000, arr_max: 15000, n: 50 },
+};
+
+function runPlanetPorkchop(planet) {
+    const range = _PORKCHOP_RANGES[planet];
+    if (!range) { pushLog(`Pork-chop not supported for ${planet}.`, 'window'); return; }
+    const N = range.n;
+    pushLog(`⏳ ${planet[0].toUpperCase()+planet.slice(1)} pork-chop scan: ${N}×${N} Lamberts…`, 'window');
     setTimeout(() => {
         const inc = parseFloat(parkIncRange.value);
         const today = jdNow();
-        const pc = planner.porkchopMars({
+        const pc = planner.porkchop({
+            planet,
             jd_dep_min: today,
-            jd_dep_max: today + 540,        // ~1.5 yr departure window
-            jd_arr_min: today + 90,
-            jd_arr_max: today + 540 + 360,  // up to 360-day TOFs
-            n_dep: 80, n_arr: 80,
+            jd_dep_max: today + range.dep_max,
+            jd_arr_min: today + range.arr_min,
+            jd_arr_max: today + range.arr_max,
+            n_dep: N, n_arr: N,
             parking_inc_deg: inc,
         });
         lastPorkchop = pc;
         if (!Number.isFinite(pc.best.dv)) {
-            pushLog(`Pork-chop scan found no feasible trajectories. Try a wider window.`, 'window');
+            pushLog(`Pork-chop scan found no feasible trajectories for ${planet}. Try a wider window.`, 'window');
             return;
         }
+        // Cache the chosen (depart, arrive) window. We reuse the existing
+        // marsWindow slot for any planet — the launch dispatcher picks the
+        // right route by the destination dropdown, not the planet name.
         marsWindow = { jd_depart: pc.best.jd_dep, jd_arrive: pc.best.jd_arr };
         renderPorkchop(pc);
-        const plan = planner.planMarsLambert({
-            jd_depart: pc.best.jd_dep,
-            jd_arrive: pc.best.jd_arr,
-            parking_inc_deg: inc,
-        });
+        let plan;
+        if (planet === 'mars') {
+            plan = planner.planMarsLambert({
+                jd_depart: pc.best.jd_dep, jd_arrive: pc.best.jd_arr,
+                parking_inc_deg: inc,
+            });
+        } else {
+            plan = planner.planEarthToOuterLambert({
+                planet,
+                jd_depart: pc.best.jd_dep, jd_arrive: pc.best.jd_arr,
+                parking_inc_deg: inc,
+            });
+        }
         renderPlan(plan);
-        pushLog(`🔍 Pork-chop best · depart ${jdToISO(pc.best.jd_dep)} → arrive ${jdToISO(pc.best.jd_arr)} · TOF ${pc.best.tof_d.toFixed(0)}d · C3 ${pc.best.c3.toFixed(1)} · Δv ${pc.best.dv.toFixed(2)} km/s`, 'window');
+        const yrs = pc.best.tof_d / 365.25;
+        pushLog(`🔍 ${planet} pork-chop best · depart ${jdToISO(pc.best.jd_dep)} → arrive ${jdToISO(pc.best.jd_arr)} · TOF ${pc.best.tof_d.toFixed(0)} d (${yrs.toFixed(1)} yr) · C3 ${pc.best.c3.toFixed(1)} · Δv ${pc.best.dv.toFixed(2)} km/s`, 'window');
+        refreshDvBudget();
     }, 30);
 }
 
@@ -815,6 +1247,7 @@ pcCanvas.addEventListener('click', (ev) => {
     });
     renderPlan(plan);
     pushLog(`📍 Selected · depart ${jdToISO(jd_dep)} → arrive ${jdToISO(jd_arr)} · Δv ${plan.dv_total_kms.toFixed(2)} km/s`, 'window');
+    refreshDvBudget();
     // Re-render heatmap to refresh the optimum marker (no recompute needed).
     renderPorkchop(lastPorkchop);
     // And overlay the user's pick:
@@ -848,12 +1281,14 @@ function viridis(t) {
     ];
 }
 
-document.getElementById('mp-mode-geo').addEventListener('click',   () => { planner.setMode('geo');   setModeUI('geo'); });
-document.getElementById('mp-mode-helio').addEventListener('click', () => { planner.setMode('helio'); setModeUI('helio'); });
-
-document.getElementById('mp-focus-earth').addEventListener('click', () => { planner.setMode('geo'); setModeUI('geo'); planner.focusEarth(); });
-document.getElementById('mp-focus-moon').addEventListener('click',  () => { planner.setMode('geo'); setModeUI('geo'); planner.focusMoon(); });
-document.getElementById('mp-focus-sun').addEventListener('click',   () => { planner.setMode('helio'); setModeUI('helio'); planner.focusSun(); });
+document.getElementById('mp-focus-earth'  ).addEventListener('click', () => { planner.focusEarth();        setFocusUI('earth'); });
+document.getElementById('mp-focus-moon'   ).addEventListener('click', () => { planner.focusMoon();         setFocusUI('moon'); });
+document.getElementById('mp-focus-mars'   ).addEventListener('click', () => { planner.focusMars();         setFocusUI('mars'); });
+document.getElementById('mp-focus-sun'    ).addEventListener('click', () => { planner.focusSun();          setFocusUI('sun'); });
+document.getElementById('mp-focus-jupiter').addEventListener('click', () => { planner.focusJupiter();      setFocusUI('jupiter'); });
+document.getElementById('mp-focus-saturn' ).addEventListener('click', () => { planner.focusSaturn();       setFocusUI('saturn'); });
+document.getElementById('mp-focus-system' ).addEventListener('click', () => { planner.focusSystem();       setFocusUI('system'); });
+document.getElementById('mp-focus-outer'  ).addEventListener('click', () => { planner.focusOuterSystem();  setFocusUI('outer'); });
 
 document.getElementById('mp-clear').addEventListener('click', () => {
     planner.clear();
@@ -862,25 +1297,93 @@ document.getElementById('mp-clear').addEventListener('click', () => {
     refreshHUD();
 });
 
+// ── Time controls ───────────────────────────────────────────────────
+// Speed presets feed setSimDaysPerSec (planet drift rate, days/real-second).
+// Pause flips timeScale to 0 so spacecraft animations halt too. Step buttons
+// nudge scenarioJD without changing playback. Scrub slider tracks a ±365 d
+// offset from an anchor (initially "now") for fast date scanning.
 const tsRange = document.getElementById('mp-timescale');
 const tsVal   = document.getElementById('mp-timescale-val');
 tsRange.addEventListener('input', () => {
     const v = parseFloat(tsRange.value);
-    planner.setTimeScale(v);
+    if (!timeState.paused) planner.setTimeScale(v);
     tsVal.textContent = `${v.toFixed(2)}×`;
 });
 
-const srRange = document.getElementById('mp-simrate');
-const srVal   = document.getElementById('mp-simrate-val');
-srRange.addEventListener('input', () => {
-    const v = parseFloat(srRange.value);
-    planner.setSimDaysPerSec(v);
-    srVal.textContent = `${v} d/s`;
+const tdEl       = document.getElementById('mp-time-display');
+const pauseBtn   = document.getElementById('mp-time-pause');
+const jdScrub    = document.getElementById('mp-jd-scrub');
+const jdScrubVal = document.getElementById('mp-jd-scrub-val');
+const timeState  = {
+    paused:        false,
+    rate_d_per_s:  1.0,                 // matches initial ".on" preset (×day)
+    scrubAnchor:   planner.getScenarioJD(),
+};
+
+function fmtJD(jd) {
+    const ms = (jd - 2440587.5) * 86400 * 1000;
+    return new Date(ms).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+}
+function syncScrub() {
+    const off = planner.getScenarioJD() - timeState.scrubAnchor;
+    const c = Math.max(-365, Math.min(365, off));
+    jdScrub.value = String(c);
+    jdScrubVal.textContent = `${off >= 0 ? '+' : ''}${off.toFixed(1)}d`;
+}
+function refreshTimeUI() {
+    tdEl.textContent = fmtJD(planner.getScenarioJD());
+    syncScrub();
+}
+function setPaused(p) {
+    timeState.paused = p;
+    if (p) {
+        planner.setTimeScale(0);
+        pauseBtn.textContent = '▶';
+        pauseBtn.classList.add('paused');
+    } else {
+        planner.setTimeScale(parseFloat(tsRange.value));
+        pauseBtn.textContent = '⏸';
+        pauseBtn.classList.remove('paused');
+    }
+}
+pauseBtn.addEventListener('click', () => setPaused(!timeState.paused));
+
+function step(deltaJD) {
+    planner.setScenarioJD(planner.getScenarioJD() + deltaJD);
+    refreshTimeUI();
+}
+document.getElementById('mp-time-back-d').addEventListener('click', () => step(-1));
+document.getElementById('mp-time-back-h').addEventListener('click', () => step(-1/24));
+document.getElementById('mp-time-fwd-h' ).addEventListener('click', () => step( 1/24));
+document.getElementById('mp-time-fwd-d' ).addEventListener('click', () => step( 1));
+document.getElementById('mp-time-now'   ).addEventListener('click', () => {
+    const jd = jdNow();
+    timeState.scrubAnchor = jd;
+    planner.setScenarioJD(jd);
+    refreshTimeUI();
 });
-planner.setSimDaysPerSec(parseFloat(srRange.value));
+
+document.querySelectorAll('.mp-time-preset').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.mp-time-preset').forEach(b => b.classList.remove('on'));
+        btn.classList.add('on');
+        timeState.rate_d_per_s = parseFloat(btn.dataset.rate);
+        planner.setSimDaysPerSec(timeState.rate_d_per_s);
+    });
+});
+
+jdScrub.addEventListener('input', () => {
+    const off = parseFloat(jdScrub.value);
+    planner.setScenarioJD(timeState.scrubAnchor + off);
+    jdScrubVal.textContent = `${off >= 0 ? '+' : ''}${off.toFixed(1)}d`;
+    tdEl.textContent = fmtJD(planner.getScenarioJD());
+});
+
+planner.setSimDaysPerSec(timeState.rate_d_per_s);
+refreshTimeUI();
 
 // ── HUD heartbeat (Scenario JD ticks even with no missions) ─────────
-setInterval(refreshHUD, 500);
+setInterval(() => { refreshHUD(); refreshTimeUI(); }, 250);
 
 // ── Launch Physics Lab ──────────────────────────────────────────────
 const lpBodySel    = document.getElementById('mp-launch-body');
@@ -1044,6 +1547,11 @@ document.getElementById('mp-launch-cmp').addEventListener('click', () => {
         lpChartWrap.style.display = 'none';
     }, 30);
 });
+
+// Initial Δv budget render once planner + UI are wired.
+refreshDvBudget();
+// Sync porkchop button label / disabled state to the initial destination.
+updateTargetUI();
 
 // ── Auto-launch a starter LEO so the page never looks empty ─────────
 setTimeout(() => {

@@ -49,5 +49,6 @@ data/history/archive-daily.bin
 
 # npm — devDependencies only (Playwright); we never check in node_modules.
 node_modules/
+package-lock.json
 test-results/
 playwright-report/

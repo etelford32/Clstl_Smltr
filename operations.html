@@ -8,7 +8,7 @@
 <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Operations — Fleet & Debris Console · Parker Physics</title>
+<title>Operations — Fleet & Debris Console · Parkers Physics</title>
 <meta name="description" content="Predictions-first satellite operations console. Real-time start with forward scrub to +14 days — fleet drag and decay forecasts, pairwise conjunction prediction against the public debris catalog, and full provenance on every number. PRO Preview — open beta.">
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
@@ -505,6 +505,88 @@ body {
 #op-scrub-row {
     display:flex; align-items:center; gap:10px; flex-wrap:wrap;
 }
+
+/* ─── Conjunction timeline ─────────────────────────────── */
+.op-conj-timeline {
+    position: relative;
+    width: 100%;
+    height: 22px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid rgba(255,255,255,.05);
+    overflow: visible;
+}
+.op-conj-timeline--empty {
+    height: 6px;
+    margin-bottom: 4px;
+    border-bottom-color: rgba(255,255,255,.025);
+}
+.op-conj-tick {
+    position: absolute;
+    bottom: 4px;
+    width: 6px;
+    height: 14px;
+    padding: 0;
+    border: 0;
+    border-radius: 2px;
+    background: rgba(0,200,200,.5);
+    cursor: pointer;
+    transform: translateX(-50%);
+    transition: transform .12s, box-shadow .12s, height .12s;
+}
+.op-conj-tick:hover, .op-conj-tick:focus {
+    outline: none;
+    transform: translateX(-50%) scaleY(1.2);
+    box-shadow: 0 0 6px currentColor;
+    height: 18px;
+}
+.op-conj-tick-low  { background: rgba(0,200,200,.65);  color: rgba(0,200,200,1); }
+.op-conj-tick-med  { background: rgba(255,200,80,.78); color: rgba(255,200,80,1); }
+.op-conj-tick-high { background: rgba(255,80,120,.85); color: rgba(255,80,120,1); }
+
+.op-conj-timeline-tip {
+    position: absolute;
+    z-index: 40;
+    background: rgba(8,14,20,.96);
+    border: 1px solid rgba(0,200,200,.35);
+    border-radius: 5px;
+    padding: 6px 9px;
+    color: #cef;
+    font-size: .68rem;
+    line-height: 1.35;
+    pointer-events: none;
+    box-shadow: 0 6px 16px rgba(0,0,0,.5);
+    min-width: 220px;
+    max-width: 320px;
+    white-space: nowrap;
+}
+.op-conj-timeline-tip-row1 {
+    display: flex; align-items: baseline; gap: 5px;
+    color: #0ff; font-weight: 700;
+    margin-bottom: 2px;
+    overflow: hidden; text-overflow: ellipsis;
+}
+.op-conj-timeline-tip-prim,
+.op-conj-timeline-tip-sec {
+    overflow: hidden; text-overflow: ellipsis;
+    min-width: 0; max-width: 130px;
+}
+.op-conj-timeline-tip-arrow { color: #678; }
+.op-conj-timeline-tip-row2 {
+    display: flex; gap: 8px;
+    color: #9bd; font-family: monospace; font-size: .62rem;
+}
+.op-conj-timeline-tip-miss { font-weight: 700; }
+.op-conj-timeline-tip-miss-low  { color: #0fa; }
+.op-conj-timeline-tip-miss-med  { color: #fc8; }
+.op-conj-timeline-tip-miss-high { color: #f8a; }
+.op-conj-timeline-tip-dv { color: #fc8; }
+
+@media (max-width: 760px), (pointer: coarse) {
+    .op-conj-timeline { height: 26px; }
+    .op-conj-tick { width: 8px; height: 18px; }
+    .op-conj-timeline-tip { font-size: .72rem; }
+}
+
 .op-scrub-btn {
     background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.12);
     color:#aab; font:inherit; font-size:.7rem; font-weight:600;
@@ -1121,6 +1203,243 @@ body {
     fill: rgba(255,180,80,.95);
     stroke: rgba(0,0,0,.4);
     stroke-width: 0.5;
+}
+
+/* ─── Maneuver what-if ─────────────────────────────────── */
+.op-mvr-empty {
+    color: #556; font-size: .72rem; line-height: 1.5;
+    padding: 6px 0;
+}
+.op-mvr-meta {
+    display: flex; flex-direction: column; gap: 4px;
+    margin-bottom: 6px;
+    font-size: .7rem;
+}
+.op-mvr-asset, .op-mvr-burn {
+    display: flex; align-items: baseline; gap: 6px;
+    flex-wrap: wrap;
+}
+.op-mvr-asset-tag {
+    font-size: .58rem; color: #678;
+    text-transform: uppercase; letter-spacing: .08em;
+    min-width: 36px;
+}
+.op-mvr-asset-name {
+    color: #cef; font-weight: 700;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    flex: 1; min-width: 0; max-width: 180px;
+}
+.op-mvr-asset-id {
+    color: #678; font-family: monospace; font-size: .62rem;
+}
+.op-mvr-burn-time {
+    color: #9bd; font-family: monospace; font-size: .68rem;
+    flex: 1; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.op-mvr-burn-tag {
+    color: #0fa; font-size: .58rem;
+    background: rgba(0,200,200,.08);
+    padding: 0 4px; border-radius: 2px;
+    margin-left: 4px;
+}
+.op-mvr-mini {
+    background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.12);
+    color: #aab;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: .62rem;
+    cursor: pointer;
+}
+.op-mvr-mini:hover { color: #fff; border-color: rgba(255,255,255,.25); }
+.op-mvr-dv {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 8px;
+    padding: 6px 0;
+    border-top: 1px solid rgba(255,255,255,.04);
+    border-bottom: 1px solid rgba(255,255,255,.04);
+    margin-bottom: 6px;
+}
+.op-mvr-dv-row {
+    display: flex; align-items: center; gap: 6px;
+    font-size: .68rem;
+}
+.op-mvr-dv-label {
+    color: #9bd; font-family: monospace; font-size: .65rem;
+    min-width: 50px;
+}
+.op-mvr-dv-row input {
+    flex: 1; min-width: 0;
+    background: rgba(0,200,200,.05);
+    border: 1px solid rgba(0,200,200,.18);
+    color: #cef;
+    font: inherit; font-family: monospace; font-size: .7rem;
+    padding: 3px 5px;
+    border-radius: 3px;
+    text-align: right;
+}
+.op-mvr-dv-row input:focus {
+    outline: none;
+    border-color: #0cc;
+    background: rgba(0,200,200,.1);
+}
+.op-mvr-dv-total {
+    grid-column: 1 / -1;
+    display: flex; align-items: baseline; gap: 8px;
+    padding-top: 4px;
+    border-top: 1px dashed rgba(255,255,255,.05);
+}
+.op-mvr-dv-mag {
+    color: #0ff; font-family: monospace; font-weight: 700;
+    flex: 1;
+}
+.op-mvr-list {
+    list-style: none; margin: 0; padding: 0;
+    display: flex; flex-direction: column; gap: 2px;
+    max-height: 220px;
+    overflow-y: auto;
+}
+.op-mvr-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto auto auto;
+    align-items: baseline;
+    column-gap: 6px;
+    padding: 5px 6px;
+    border-radius: 3px;
+    font-size: .68rem;
+    border-left: 3px solid transparent;
+}
+.op-mvr-row-safer  { border-left-color: rgba(0,255,170,.55); background: rgba(0,255,170,.04); }
+.op-mvr-row-closer { border-left-color: rgba(255,80,120,.6); background: rgba(255,80,120,.05); }
+.op-mvr-row-flat   { border-left-color: rgba(255,255,255,.05); }
+.op-mvr-name {
+    color: #cef;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    min-width: 0;
+}
+.op-mvr-old, .op-mvr-new {
+    font-family: monospace;
+    text-align: right;
+}
+.op-mvr-miss-low  { color: #9bd; }
+.op-mvr-miss-med  { color: #fc8; }
+.op-mvr-miss-high { color: #f8a; }
+.op-mvr-arrow {
+    color: #678; font-weight: 700;
+    text-align: center; min-width: 14px;
+}
+.op-mvr-row-safer  .op-mvr-arrow { color: #0fa; }
+.op-mvr-row-closer .op-mvr-arrow { color: #f8a; }
+.op-mvr-ahead {
+    color: #678; font-family: monospace; font-size: .6rem;
+}
+.op-mvr-caveat {
+    margin-top: 6px;
+    color: #678; font-size: .6rem;
+    font-style: italic;
+    border-top: 1px dashed rgba(255,255,255,.05);
+    padding-top: 6px;
+}
+
+/* ─── Orbit Inspector ─────────────────────────────────── */
+.op-orbit-empty {
+    color: #556; font-size: .72rem; line-height: 1.5;
+    padding: 6px 0;
+}
+.op-orbit-head {
+    display: flex; align-items: baseline; gap: 6px;
+    margin-bottom: 6px;
+}
+.op-orbit-name {
+    color: #cef; font-weight: 700;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    flex: 1; min-width: 0;
+}
+.op-orbit-id {
+    color: #678; font-family: monospace; font-size: .64rem;
+}
+.op-orbit-group {
+    font-family: monospace; font-size: .58rem;
+    color: #9bd;
+    background: rgba(0,200,200,.08);
+    padding: 0 5px; border-radius: 2px;
+}
+.op-orbit-elements {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 6px;
+    font-size: .68rem;
+}
+.op-orbit-elements td {
+    padding: 2px 4px;
+    border-bottom: 1px solid rgba(255,255,255,.04);
+}
+.op-orbit-elements tr:last-child td { border-bottom: 0; }
+.op-orbit-cell-k {
+    color: #9bd; font-family: monospace;
+    width: 52px;
+}
+.op-orbit-cell-v {
+    color: #cef; font-family: monospace; text-align: right;
+}
+.op-orbit-unit {
+    color: #678; font-size: .58rem;
+}
+.op-orbit-derived {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 4px 8px;
+    padding: 6px 0;
+    border-top: 1px solid rgba(255,255,255,.04);
+    border-bottom: 1px solid rgba(255,255,255,.04);
+    margin-bottom: 6px;
+    font-size: .66rem;
+}
+.op-orbit-tag {
+    font-size: .56rem; color: #678;
+    text-transform: uppercase; letter-spacing: .08em;
+    margin-right: 4px;
+}
+.op-orbit-spark {
+    width: 100%;
+    height: 44px;
+    margin: 4px 0 6px;
+    background: rgba(0,200,200,.04);
+    border-radius: 3px;
+    display: block;
+}
+.op-orbit-spark-line {
+    fill: none;
+    stroke: rgba(0,255,200,.7);
+    stroke-width: 1.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.op-orbit-spark-label {
+    fill: rgba(155,200,220,.55);
+    font-family: monospace;
+    font-size: 8px;
+}
+.op-orbit-rates {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 4px 8px;
+    padding-top: 6px;
+    font-size: .66rem;
+}
+.op-orbit-rate-title {
+    grid-column: 1 / -1;
+    font-size: .58rem; color: #678;
+    text-transform: uppercase; letter-spacing: .08em;
+}
+.op-orbit-caveat {
+    margin-top: 6px;
+    color: #678; font-size: .6rem;
+    font-style: italic;
+    border-top: 1px dashed rgba(255,255,255,.05);
+    padding-top: 6px;
 }
 
 /* ─── Prop Budget ──────────────────────────────────────── */
@@ -1774,6 +2093,24 @@ body {
             <div id="op-prop-body"></div>
         </div>
         <div class="op-panel">
+            <h2 style="display:flex;align-items:baseline;gap:8px"
+                title="Linearised free-flight projection of an RTN Δv applied at burn time. Advisory only.">
+                Maneuver · what-if
+            </h2>
+            <div id="op-mvr-body">
+                <div class="op-mvr-empty">Select a fleet asset to preview a maneuver.</div>
+            </div>
+        </div>
+        <div class="op-panel">
+            <h2 style="display:flex;align-items:baseline;gap:8px"
+                title="TLE elements, J2 secular drifts, and altitude profile for the currently selected asset.">
+                Orbit · inspector
+            </h2>
+            <div id="op-orbit-body">
+                <div class="op-orbit-empty">Select a satellite to inspect its orbit.</div>
+            </div>
+        </div>
+        <div class="op-panel">
             <h2>Export</h2>
             <div class="op-coming">
                 <b>Coming next.</b> JSON + CSV open to all. CDM export is
@@ -1785,6 +2122,10 @@ body {
 
     <!-- Bottom: scrub strip -->
     <div id="op-scrub" class="op-panel">
+        <!-- Conjunction timeline: severity-coloured ticks aligned to
+             the scrub track's X axis. Empty until the first screen. -->
+        <div id="op-conj-timeline-host" class="op-conj-timeline op-conj-timeline--empty"
+             title="Conjunctions across the time-bus window. Click a tick to scrub to TCA."></div>
         <div id="op-scrub-row">
             <button class="op-scrub-btn" id="op-tc-home" title="Jump to −1 day (start of window)">⏮</button>
             <button class="op-scrub-btn" id="op-tc-back" title="Step back 1 hour (←)">⏪</button>
@@ -1849,6 +2190,9 @@ import {
 } from './js/operations/decision-deck.js';
 import { OperationsVisuals }  from './js/operations/visuals.js';
 import { mountGlobePicker }   from './js/operations/globe-picker.js';
+import { mountConjTimeline }  from './js/operations/conj-timeline.js';
+import { mountManeuverPanel } from './js/operations/maneuver.js';
+import { mountOrbitInspector } from './js/operations/orbit-inspector.js';
 import { showToast }          from './js/operations/toast.js';
 import * as bPlane            from './js/operations/b-plane.js';
 import * as densityMap        from './js/operations/density-map.js';
@@ -2096,6 +2440,42 @@ const conjDeck = mountConjunctions(myFleet, fleet.tracker, {
         bPlane.showConjunction(conj);
         visuals.showConjunction(conj);
     },
+});
+
+// Conjunction timeline strip — sits above the scrub track and shares
+// its X axis. Lets operators triage 50+ conjunctions at a glance.
+mountConjTimeline({
+    host:    document.getElementById('op-conj-timeline-host'),
+    deck:    conjDeck,
+    tracker: fleet.tracker,
+    onSelect:      (id)   => visuals.setSelectedAsset(id),
+    onConjunction: (conj) => {
+        bPlane.showConjunction(conj);
+        visuals.showConjunction(conj);
+    },
+});
+
+// Maneuver "what-if" panel — RTN Δv inputs + linearised projection
+// of the resulting miss-distance shift across the active asset's
+// conjunctions. Listens to the same selection bus the picker / deck
+// use so cycling through fleet rows updates the panel without
+// extra plumbing.
+mountManeuverPanel({
+    host:           document.getElementById('op-mvr-body'),
+    deck:           conjDeck,
+    tracker:        fleet.tracker,
+    getSelectedId:  () => visuals.getSelectedAsset(),
+    onSelectChange: (fn) => visuals.onSelectionChange(fn),
+});
+
+// Per-asset orbit & perturbation inspector — TLE elements, J2
+// secular drifts, altitude profile over one orbit. Reads from
+// the same selection bus as the maneuver panel.
+mountOrbitInspector({
+    host:           document.getElementById('op-orbit-body'),
+    tracker:        fleet.tracker,
+    getSelectedId:  () => visuals.getSelectedAsset(),
+    onSelectChange: (fn) => visuals.onSelectionChange(fn),
 });
 
 bPlane.mountBPlane();

@@ -11,7 +11,7 @@ is shipped.
 
 | key            | label         | price            | seats | self-serve | notes                                                                |
 | -------------- | ------------- | ---------------- | ----- | ---------- | -------------------------------------------------------------------- |
-| `educator`     | Educator      | $25 / mo         | 30    | Yes        | Embed permission, classroom license, "Powered by Parker Physics" req'd |
+| `educator`     | Educator      | $25 / mo         | 30    | Yes        | Embed permission, classroom license, "Powered by Parkers Physics" req'd |
 | `institution`  | Institution   | $500 / mo        | 200   | Yes        | Site license, custom branding, priority support                       |
 | `enterprise`   | Enterprise    | Contact for quote| custom | Lead form | Satellite ops, FinServ, custom API/data; no published price            |
 
@@ -36,7 +36,7 @@ the Checkout API rejects it. Lead capture writes to a new
      - `branding JSONB DEFAULT '{}'::jsonb` — `{ logo_url, primary_color, footer_text }`
        for institution custom branding.
      - `attribution_required BOOLEAN DEFAULT FALSE` — `TRUE` for educator
-       (renders the "Powered by Parker Physics" badge regardless of preference).
+       (renders the "Powered by Parkers Physics" badge regardless of preference).
    - New table `enterprise_leads` (id, name, org, email, role, use_case, message,
      status, created_at, contacted_at) with RLS: insert open, select admin-only.
 2. ***Stripe dashboard:*** create three products + prices, capture the price IDs:

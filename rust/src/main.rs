@@ -8,6 +8,8 @@ mod simulation;
 
 use camera::{camera_controller, handle_exit};
 use prediction::feature_extract::{update_solar_features, SolarFeaturesPlugin};
+#[cfg(target_arch = "wasm32")]
+use prediction::flare_ml::check_pending_weights;
 use prediction::flare_ml::{run_flare_prediction, FlareMLPrediction};
 use prediction::solar_wind::{update_live_wind, LiveWindPlugin, LiveWindSpeed};
 use rendering::hud::{setup_hud, update_hud};
@@ -61,6 +63,10 @@ fn main() {
                 update_live_wind,
                 update_solar_features,
                 // 1. ML flare prediction.
+                // WASM: apply any JS-uploaded weights before inference runs.
+                #[cfg(target_arch = "wasm32")]
+                check_pending_weights
+                    .after(update_solar_features),
                 run_flare_prediction
                     .after(update_solar_features),
                 // 2. Velocity field + wind scale.

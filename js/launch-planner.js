@@ -1302,6 +1302,12 @@ async function init() {
 
     renderStatus(`${state.launches.length} launches · updated ${new Date(data.fetched_at).toLocaleTimeString()}`);
 
+    // Broadcast the loaded roster so the top-of-page Next-Launches strip
+    // can render alongside the 3D canvas.
+    document.dispatchEvent(new CustomEvent('lp:launches-loaded', {
+        detail: { launches: state.launches, fetched_at: data.fetched_at },
+    }));
+
     // Kick off weather prefetch for the first 8 launches so initial sort reflects verdicts.
     const soon = state.launches.slice(0, 8);
     await Promise.all(soon.map(l => ensureWeather(l).catch(() => null)));
@@ -1363,6 +1369,9 @@ function wireControls() {
             state.weatherCache.clear();
             state.scoreCache.clear();
             state.selectedId = null;
+            document.dispatchEvent(new CustomEvent('lp:launches-loaded', {
+                detail: { launches: state.launches, fetched_at: data.fetched_at },
+            }));
             applyFilters();
             renderProviderFilters();
             renderRoster();

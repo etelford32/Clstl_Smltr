@@ -49,7 +49,7 @@ infrastructure.
    create one named e.g. `parker-physics-prod`).
 2. **APIs & Services → OAuth consent screen**:
    * User Type: **External**.
-   * App name: `Parker Physics`.
+   * App name: `Parkers Physics`.
    * User support email: a real human inbox.
    * App logo: 120×120 transparent PNG of the brand mark
      (use `ParkersPhysics_logo2.jpg` resized).
@@ -170,7 +170,7 @@ step 2 references it.
 1. Open https://developer.apple.com/account/resources/identifiers/list
 2. Click **+** (top of the table), choose **App IDs** → Continue.
 3. Type: **App** → Continue.
-4. Description: `Parker Physics` (free-form; only shown to you).
+4. Description: `Parkers Physics` (free-form; only shown to you).
 5. Bundle ID: **Explicit**: `com.parkerphysics.app`.
 6. **Capabilities** — scroll the long list, find **Sign in with Apple**
    and tick it. (No "Configure" needed at the App ID level — that
@@ -183,7 +183,7 @@ The "Services ID" is what Supabase actually authenticates against —
 it represents the *web* surface of the App ID we just created.
 
 1. Same page → **+** → **Services IDs** → Continue.
-2. Description: `Parker Physics web sign-in`.
+2. Description: `Parkers Physics web sign-in`.
 3. Identifier: `com.parkerphysics.signin`.
    * NOT the same as the App ID; pick something distinct (we suffix
      `.signin`). Apple validates uniqueness across all Apple
@@ -220,7 +220,7 @@ on every auth attempt. Apple does not let you re-download it — save
 the .p8 file to a password manager on the spot.
 
 1. https://developer.apple.com/account/resources/authkeys/list
-2. **+** (top of table) → Key Name: `Parker Physics Sign in with Apple`.
+2. **+** (top of table) → Key Name: `Parkers Physics Sign in with Apple`.
 3. Tick **Sign in with Apple** → click **Configure**.
 4. In the modal: pick `com.parkerphysics.app` (the App ID from step 1)
    as the Primary App ID. Save.
