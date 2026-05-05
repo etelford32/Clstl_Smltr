@@ -1855,7 +1855,7 @@ const canvasWrap = document.getElementById('canvas-wrap');
 canvasWrap.appendChild(renderer.domElement);
 
 // ── Post-processing pipeline: Bloom + Radial diffusion ────────────────────────
-let composer, bloomPass;
+let composer, bloomPass, radialDiffusePass;
 {
     const W = canvasWrap.clientWidth  || 1280;
     const H = canvasWrap.clientHeight || 720;
@@ -1882,9 +1882,15 @@ let composer, bloomPass;
     // spread — matching the streamer/plume morphology in real coronagraph images.
     const diffuseShader = {
         uniforms: {
-            tDiffuse:   { value: null },
-            resolution: { value: new THREE.Vector2(W, H) },
-            center:     { value: new THREE.Vector2(0.5, 0.5) },
+            tDiffuse:        { value: null },
+            resolution:      { value: new THREE.Vector2(W, H) },
+            center:          { value: new THREE.Vector2(0.5, 0.5) },
+            // Phase 4.1 — when a flare flash makes the limb extremely bright,
+            // the radial gather × 0.07 still produces a giant horizontal
+            // "death laser". This uniform dampens the multiplier and clamps
+            // the gathered HDR magnitude so flares don't blow out the
+            // postprocess pipeline.
+            uFlareIntensity: { value: 0.0 },
         },
         vertexShader: /* glsl */`
             varying vec2 vUv;
@@ -1895,6 +1901,7 @@ let composer, bloomPass;
             uniform sampler2D tDiffuse;
             uniform vec2      resolution;
             uniform vec2      center;
+            uniform float     uFlareIntensity;
             varying vec2      vUv;
 
             void main() {
@@ -1932,14 +1939,25 @@ let composer, bloomPass;
                 }
                 accum /= wSum;
 
+                // Phase 4.1 — clamp the per-channel HDR gather so an over-
+                // bright limb (e.g. flare flash) can't drive the radial-ray
+                // contribution to blow-out levels. 1.6 is well above any
+                // calm-corona limb but capped enough to kill the death-laser.
+                vec3 accumClamped = min(accum.rgb, vec3(1.6));
+
+                // Dampen the gather strength during flares: the flash
+                // already saturates the photosphere shader; the radial
+                // pass adding more on top is what produced the giant
+                // horizontal rays in the screenshot. 0.07 → 0.018 at peak.
+                float strength = mix(0.07, 0.018, clamp(uFlareIntensity, 0.0, 1.0));
+
                 // Add the gathered limb light to the original pixel.
-                // Scale by mask so the effect fades smoothly at both edges.
-                // Reduced intensity for analytical clarity — structure > glow.
-                gl_FragColor = orig + accum * mask * 0.07;
+                gl_FragColor = vec4(orig.rgb + accumClamped * mask * strength, orig.a);
             }
         `,
     };
-    composer.addPass(new ShaderPass(diffuseShader));
+    radialDiffusePass = new ShaderPass(diffuseShader);
+    composer.addPass(radialDiffusePass);
 
     // ── Space occlusion — corona-to-space shadow boundary ────────────────────
     // Final pass: smoothly darkens pixels beyond the bright corona annulus,
@@ -4887,6 +4905,13 @@ function animate() {
         uniforms.u_flare_intensity.value *= 0.950;
     } else {
         uniforms.u_flare_intensity.value = 0.0;
+    }
+
+    // Phase 4.1 — keep the radial-corona-diffusion pass in sync with the
+    // current flare flash so the gather strength + HDR clamp dampen the
+    // horizontal "death laser" during M/X events.
+    if (radialDiffusePass) {
+        radialDiffusePass.uniforms.uFlareIntensity.value = uniforms.u_flare_intensity.value;
     }
 
     // Phase 3.1 — when the ribbon fade envelope (exp(-u_flare_t/175))
