@@ -34,7 +34,7 @@ const RESEND_API   = 'https://api.resend.com/emails';
 const RESEND_KEY   = process.env.RESEND_API_KEY || '';
 const FROM_EMAIL   = process.env.INVITE_FROM_EMAIL
                   || process.env.ALERT_FROM_EMAIL
-                  || 'Parker Physics <invites@parkerphysics.com>';
+                  || 'Parkers Physics <invites@parkerphysics.com>';
 const APP_URL      = process.env.APP_URL || 'https://parkerphysics.com';
 
 // Plans that include seat capacity. Admins bypass via role check.
@@ -191,13 +191,13 @@ function buildInviteHtml({ recipientEmail, link, code, inviterName, planLabel })
 <body style="margin:0;padding:0;background:#0a0a14;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">
 <div style="max-width:520px;margin:0 auto;padding:24px 20px">
   <div style="text-align:center;margin-bottom:20px">
-    <span style="font-size:1.1rem;font-weight:800;background:linear-gradient(45deg,#ffd700,#ff8c00);-webkit-background-clip:text;-webkit-text-fill-color:transparent">Parker Physics</span>
+    <span style="font-size:1.1rem;font-weight:800;background:linear-gradient(45deg,#ffd700,#ff8c00);-webkit-background-clip:text;-webkit-text-fill-color:transparent">Parkers Physics</span>
   </div>
   <div style="background:#12111a;border:1px solid #222;border-radius:12px;padding:24px;margin-bottom:16px">
     <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:#80d4ff;font-weight:700;margin-bottom:14px">Class invite — ${escHtml(planLabel)}</div>
     <h2 style="margin:0 0 12px;font-size:1.25rem;color:#e8f4ff;font-weight:700">You're in.</h2>
     <p style="margin:0 0 18px;font-size:.92rem;color:#aab;line-height:1.6">
-      ${inviter} added you to their Parker Physics class. Real-time space-weather data, satellite tracking, and 17+ interactive astrophysics simulations — at no cost to you while you're enrolled.
+      ${inviter} added you to their Parkers Physics class. Real-time space-weather data, satellite tracking, and 17+ interactive astrophysics simulations — at no cost to you while you're enrolled.
     </p>
     <div style="text-align:center;margin:24px 0">
       <a href="${escHtml(link)}" style="display:inline-block;padding:12px 28px;background:linear-gradient(45deg,#ff8c00,#ffd700);color:#000;font-weight:700;border-radius:8px;text-decoration:none;font-size:.9rem">Accept &amp; create your account →</a>
@@ -267,7 +267,7 @@ export default async function handler(req) {
         }
     }
 
-    const subject = `You've been added to a Parker Physics class`;
+    const subject = `You've been added to a Parkers Physics class`;
     const allowed = await checkRate({
         userId:    auth.user_id,
         recipient: recipientEmail,

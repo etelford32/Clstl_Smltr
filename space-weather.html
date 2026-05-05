@@ -9,7 +9,7 @@
 <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Space Weather · Parker Physics App</title>
+<title>Space Weather · Parkers Physics App</title>
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 html { scroll-behavior: smooth; }
@@ -2494,9 +2494,9 @@ nav {
             </div>
         </div>
 
-        <!-- ── Upper Atmosphere (Parker Physics DSMC surrogate) ─────────────── -->
+        <!-- ── Upper Atmosphere (Parkers Physics DSMC surrogate) ─────────────── -->
         <div class="data-card" id="ua-card">
-            <h3>Upper Atmosphere · Thermosphere<span class="src-chip live" id="src-ua" title="Parker Physics DSMC surrogate. MSIS-style Jacchia exponential until SPARTA tables ship; then SPARTA-refined.">Parker · DSMC</span></h3>
+            <h3>Upper Atmosphere · Thermosphere<span class="src-chip live" id="src-ua" title="Parkers Physics DSMC surrogate. MSIS-style Jacchia exponential until SPARTA tables ship; then SPARTA-refined.">Parker · DSMC</span></h3>
             <div class="param-row">
                 <span class="param-name">ρ @ ISS (~420 km)</span>
                 <span class="param-val" id="ua-rho-iss">–</span>
@@ -4692,7 +4692,7 @@ window.openImg = function(thumb) {
     /**
      * Feeds the Upper Atmosphere card from the live Kp value in the page.
      * Reads #kp-val, converts to Ap via the standard SWPC table, and asks
-     * the Parker Physics engine for a getSnapshot() at 200/400/600 km +
+     * the Parkers Physics engine for a getSnapshot() at 200/400/600 km +
      * a 40-point mini-density profile.
      */
     import { getSnapshot, density, SPECIES }
