@@ -1,5 +1,5 @@
 {
-  "name": "Parker Physics App",
+  "name": "Parkers Physics App",
   "short_name": "ParkerPhysics",
   "description": "Real-time astrophysics simulations powered by WebGL, Rust/WASM, and live NASA/NOAA space weather data.",
   "start_url": "/",

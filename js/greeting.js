@@ -58,7 +58,7 @@ function timeGreeting() {
 const NEW_USER_MESSAGES = [
     name => `Welcome aboard, ${name}! Ready to explore the cosmos?`,
     name => `Hey ${name}! Your astrophysics journey starts now.`,
-    name => `Welcome to Parker Physics, ${name}! Let's discover the universe together.`,
+    name => `Welcome to Parkers Physics, ${name}! Let's discover the universe together.`,
 ];
 
 // ── Returning user greetings ─────────────────────────────────────────────────

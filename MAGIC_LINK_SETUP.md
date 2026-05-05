@@ -77,7 +77,7 @@ Supabase Dashboard → **Authentication → Email Templates** →
 **Magic Link** tab.
 
 Replace the **Message body** field with the HTML below. Subject
-line: `Your Parker Physics sign-in link` (no template variables —
+line: `Your Parkers Physics sign-in link` (no template variables —
 the link itself goes in the body).
 
 > The template uses Supabase's Liquid-style variables — `{{ .ConfirmationURL }}` is the magic link, `{{ .Email }}` is the user's address. Don't change those tokens.
@@ -89,7 +89,7 @@ the link itself goes in the body).
 <div style="max-width:560px;margin:0 auto;padding:28px 22px">
 
   <div style="text-align:center;margin-bottom:22px">
-    <span style="font-size:1.05rem;font-weight:800;background:linear-gradient(45deg,#ffd700,#ff8c00);-webkit-background-clip:text;-webkit-text-fill-color:transparent;letter-spacing:.04em">Parker Physics</span>
+    <span style="font-size:1.05rem;font-weight:800;background:linear-gradient(45deg,#ffd700,#ff8c00);-webkit-background-clip:text;-webkit-text-fill-color:transparent;letter-spacing:.04em">Parkers Physics</span>
   </div>
 
   <div style="background:#12111a;border:1px solid #2a2440;border-radius:12px;padding:26px 24px;margin-bottom:18px">
@@ -100,7 +100,7 @@ the link itself goes in the body).
     </p>
 
     <div style="margin:18px 0">
-      <a href="{{ .ConfirmationURL }}" style="display:inline-block;padding:13px 28px;background:linear-gradient(45deg,#ff8c00,#ffd700);color:#000;font-weight:700;border-radius:8px;text-decoration:none;font-size:.94rem">Sign in to Parker Physics →</a>
+      <a href="{{ .ConfirmationURL }}" style="display:inline-block;padding:13px 28px;background:linear-gradient(45deg,#ff8c00,#ffd700);color:#000;font-weight:700;border-radius:8px;text-decoration:none;font-size:.94rem">Sign in to Parkers Physics →</a>
     </div>
 
     <div style="font-size:.78rem;color:#888;line-height:1.6;border-top:1px solid #2a2440;padding-top:16px;margin-top:18px">
@@ -114,7 +114,7 @@ the link itself goes in the body).
   </div>
 
   <p style="margin:0;font-size:.7rem;color:#556;text-align:center;line-height:1.5">
-    Parker Physics · <a href="https://parkerphysics.com" style="color:#778;text-decoration:none">parkerphysics.com</a><br>
+    Parkers Physics · <a href="https://parkerphysics.com" style="color:#778;text-decoration:none">parkerphysics.com</a><br>
     Real-time space-weather + 17 interactive simulations.
   </p>
 
@@ -137,7 +137,7 @@ recipient only sees one email per request).
 3. Enter your email → submit. The form should swap to the
    "Check your email" panel showing the address you entered.
 4. Open the inbox. You should see the branded email with the
-   "Sign in to Parker Physics" button. Click it.
+   "Sign in to Parkers Physics" button. Click it.
 5. You should land on `/auth-callback.html` for ~1 s, then bounce
    to `/dashboard.html` signed in.
 6. SQL Editor:

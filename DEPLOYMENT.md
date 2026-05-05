@@ -1,4 +1,4 @@
-# Parker Physics — Deployment Guide
+# Parkers Physics — Deployment Guide
 
 End-to-end deployment for **parkersphysics.com**: the static front-end +
 Vercel Edge Functions in `/api/**`, the Supabase database + auth, the
@@ -194,8 +194,8 @@ Environment Variables, scope = Production):
 | `SUPABASE_URL` | every `/api/*` endpoint | no |
 | `SUPABASE_SERVICE_KEY` | every `/api/*` endpoint (service_role, server-only) | **yes** |
 | `RESEND_API_KEY` | `/api/alerts/email`, `/api/cron/daily-forecast-digest`, `/api/invites/send` | **yes** |
-| `INVITE_FROM_EMAIL` | optional; defaults to `Parker Physics <invites@parkersphysics.com>` | no |
-| `ALERT_FROM_EMAIL` | optional; defaults to `Parker Physics Alerts <alerts@parkersphysics.com>` | no |
+| `INVITE_FROM_EMAIL` | optional; defaults to `Parkers Physics <invites@parkersphysics.com>` | no |
+| `ALERT_FROM_EMAIL` | optional; defaults to `Parkers Physics Alerts <alerts@parkersphysics.com>` | no |
 | `APP_URL` | optional; defaults to `https://parkersphysics.com` (used in invite magic links) | no |
 | `STRIPE_SECRET_KEY` | paid tiers (Stripe API calls from `/api/stripe/*`) | **yes** |
 | `STRIPE_BASIC_PRICE_ID` / `STRIPE_BASIC_YEARLY_PRICE_ID` | Basic monthly + optional yearly | no |

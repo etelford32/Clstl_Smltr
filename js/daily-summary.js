@@ -232,7 +232,7 @@ export class DailySummaryEngine {
         }
 
         lines.push('');
-        lines.push('— Parker Physics · parkerphysics.com');
+        lines.push('— Parkers Physics · parkerphysics.com');
 
         return lines.join('\n');
     }
