@@ -2261,10 +2261,12 @@ const sunFS = /* glsl */`
         ) * 0.18;
         vec3 gPos   = vPosition * 10.5 + dwarp + vec3(u_time * 0.0065 * u_rot);
         vec2 gCell  = voronoi(gPos);
-        // Use d2-d1 for cell-boundary detection: dark narrow lanes where d2≈d1,
-        // bright broad interiors where d2>>d1 — matches SDO/HMI granulation morphology.
-        float laneD  = smoothstep(0.04, 0.28, gCell.y - gCell.x);  // 0=dark lane, 1=bright interior
-        float granLight = mix(0.40, 1.0, laneD);                    // lane contrast: 40% → 100% (deeper lanes)
+        // Crisper cell structure: narrower lane-transition for sharp dark
+        // edges between bright cell interiors. Adds a subtle radial-bulge
+        // brightness so each cell reads as 3D rather than flat.
+        float laneD     = smoothstep(0.02, 0.16, gCell.y - gCell.x);   // 0=lane, 1=interior
+        float cellBulge = 1.0 - 0.18 * smoothstep(0.0, 0.30, gCell.x); // bright centre, slightly dim edge
+        float granLight = mix(0.32, 1.04, laneD) * cellBulge;
 
         // ── Fine sub-granulation turbulence ─────────────────────────────────
         float fineTurb = fbm(vPosition * 30.0 + vec3(u_time * 0.012), 4) * 0.08;
@@ -2291,28 +2293,46 @@ const sunFS = /* glsl */`
         }
         microflare = min(microflare, 1.0) * 0.65;
 
-        // ── Active latitude belt ───────────────────────────────────────────────
-        float spotBelt = smoothstep(0.12, 0.18, abs(lat)) * smoothstep(0.64, 0.52, abs(lat));
+        // ── Active-belt softener ───────────────────────────────────────────────
+        // The old code multiplied AR features by smoothstep((|lat|-0.12)/0.06)
+        // × smoothstep((0.64-|lat|)/0.12), creating a sharp belt at ±7°..37°
+        // that read as "Jupiter bands" at high activity. Replaced with a soft
+        // polar fall-off — spots can appear anywhere up to ~57° latitude with
+        // a smooth taper toward the poles, no sharp belt edges.
+        float spotBelt = 1.0 - smoothstep(1.0, 1.45, abs(lat));
+
+        // Isotropic AR-noise basis. The previous (rotLon × 2.2, lat × 5.5)
+        // basis squeezed the lat axis 2.5× tighter than lon, producing
+        // latitude-aligned bands in facNoise/spotNoise/penNoise even before
+        // spotBelt was applied. We now sample a 3D rotated-position so noise
+        // is fully isotropic — no preferred axis, no banding.
+        float arRotAngle = u_time * 0.014 * u_rot * diffRot;
+        float cAR = cos(arRotAngle), sAR = sin(arRotAngle);
+        vec3 arPos = vec3(
+            cAR * vPosition.x - sAR * vPosition.z,
+            vPosition.y,
+            sAR * vPosition.x + cAR * vPosition.z
+        );
 
         // ── Facular brightening (bright network near spots, limb-visible) ──────
         // Facula appear bright near limb (μ<0.5) due to hot walls of flux tubes
-        float facNoise = fbm(vec3(rotLon * 2.2, lat * 5.5, u_time * 0.0012), 4);
+        float facNoise = fbm(arPos * 8.0, 4);
         float facular  = smoothstep(0.58, 0.80, facNoise) * spotBelt
                         * (1.0 - mu) * (1.0 - mu) * u_activity * 0.60;
 
         // ── Sunspot umbra + penumbra ───────────────────────────────────────────
-        float spotNoise   = fbm(vec3(rotLon * 1.6, lat * 4.2, u_time * 0.0004), 4);
+        float spotNoise   = fbm(arPos * 6.5, 4);
         float spotThresh  = 0.78 - u_activity * 0.32;
         float umbra       = smoothstep(spotThresh, spotThresh - 0.13, spotNoise) * spotBelt;
         float penThresh   = spotThresh + 0.17;
-        float penNoise    = fbm(vec3(rotLon * 1.6, lat * 4.2, u_time * 0.0004 + 4.7), 4);
+        float penNoise    = fbm(arPos * 6.5 + vec3(4.7), 4);
         float penumbra    = smoothstep(penThresh, penThresh - 0.09, penNoise) * spotBelt * (1.0 - umbra);
 
         // Penumbra fibrils — radial striation texture in the grey ring
-        float fibrils = vnoise(vec3(rotLon * 12.0, lat * 12.0, u_time * 0.006)) * 0.18;
+        float fibrils = vnoise(arPos * 38.0) * 0.18;
 
         // ── Active-region flare brightening ───────────────────────────────────
-        float flareNoise  = vnoise(vec3(rotLon * 4.0, lat * 7.5, u_time * 0.12));
+        float flareNoise  = vnoise(arPos * 14.0 + vec3(u_time * 0.12));
         float flareActive = smoothstep(0.82, 0.95, flareNoise) * spotBelt * u_activity;
 
         // ── 5-term limb darkening law (Neckel & Labs 1994, G-star approx.) ────
@@ -3779,7 +3799,44 @@ function triggerPositionFlare(lat_deg, lon_deg, cls) {
 // Hot magnetic field line arcs (1–3 MK) over active regions.
 // Blue-white at apex (high-T), warm gold near footpoints.
 // Co-rotates with photosphere via loopGroup.rotation.y = solarRotAngle.
+//
+// Phase 4 — Alfvén-wave transverse oscillations: each loop's vertex shader
+// displaces points perpendicular to the loop's local tangent by a standing-
+// wave envelope sin(πs) × sin(uTime·freq + phase). Random per-loop freq
+// (1.6..3.2 rad/sim-time, period ~3–6 sim-sec) and phase produce a chorus
+// of independently oscillating loops, matching the post-flare kink-mode
+// oscillations observed by SDO/AIA.
 let loopGroup = null;
+
+const LOOP_VS = /* glsl */`
+    attribute float aS;       // [0,1] arclength fraction along the loop
+    attribute vec3  aTangent; // unit tangent at this vertex (precomputed)
+    varying vec3 vColor;
+    uniform float uTime;
+    uniform float uAmp;       // R☉ — peak displacement at apex
+    uniform float uFreq;      // rad / sim-time
+    uniform float uPhase;     // [0, 2π)
+    void main() {
+        vec3 p = position;
+        vec3 outward = normalize(p);
+        // Transverse direction: perpendicular to both tangent and radial.
+        vec3 nLoop = normalize(cross(aTangent, outward) + vec3(1e-6));
+        // Standing-wave envelope: anchored at footpoints, max at apex.
+        float envelope = sin(3.141592653589793 * aS);
+        float wave = sin(uTime * uFreq + uPhase) * uAmp * envelope;
+        // 70% transverse + 30% radial bobbing — looks like a kink mode.
+        vec3 disp = nLoop * wave + outward * (wave * 0.30);
+        vColor = color;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(p + disp, 1.0);
+    }
+`;
+const LOOP_FS = /* glsl */`
+    varying vec3 vColor;
+    uniform float uOpacity;
+    void main() {
+        gl_FragColor = vec4(vColor, uOpacity);
+    }
+`;
 
 function buildCoronalLoops() {
     if (loopGroup) { scene.remove(loopGroup); loopGroup = null; }
@@ -3843,12 +3900,64 @@ function buildCoronalLoops() {
                 THREE.MathUtils.lerp(0.20, 1.00, heatFrac)
             );
             const baseOp = 0.20 + areaNorm * 0.22 + (isComplex ? 0.09 : 0);
-            const mat = new THREE.LineBasicMaterial({
-                color: col, transparent: true, opacity: baseOp,
-                depthWrite: false, blending: THREE.AdditiveBlending,
+
+            // ── Build geometry with per-vertex aS + aTangent for the
+            // Alfvén-wave vertex shader. Vertex colour set per-vertex
+            // so the existing apex-blue/footpoint-gold gradient stays.
+            const positions = new Float32Array(pts.length * 3);
+            const colors    = new Float32Array(pts.length * 3);
+            const aSarr     = new Float32Array(pts.length);
+            const aTangArr  = new Float32Array(pts.length * 3);
+            for (let i = 0; i < pts.length; i++) {
+                const p = pts[i];
+                positions[i*3]   = p.x;
+                positions[i*3+1] = p.y;
+                positions[i*3+2] = p.z;
+                colors[i*3]   = col.r;
+                colors[i*3+1] = col.g;
+                colors[i*3+2] = col.b;
+                aSarr[i] = i / (pts.length - 1);
+                // Tangent via central finite difference (forward at endpoints).
+                const a = pts[Math.max(0, i - 1)];
+                const b = pts[Math.min(pts.length - 1, i + 1)];
+                const tx = b.x - a.x, ty = b.y - a.y, tz = b.z - a.z;
+                const tl = Math.hypot(tx, ty, tz) || 1;
+                aTangArr[i*3]   = tx / tl;
+                aTangArr[i*3+1] = ty / tl;
+                aTangArr[i*3+2] = tz / tl;
+            }
+
+            const geom = new THREE.BufferGeometry();
+            geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geom.setAttribute('color',    new THREE.BufferAttribute(colors, 3));
+            geom.setAttribute('aS',       new THREE.BufferAttribute(aSarr, 1));
+            geom.setAttribute('aTangent', new THREE.BufferAttribute(aTangArr, 3));
+
+            // Per-loop Alfvén parameters: jittered freq → chorus of
+            // independently oscillating loops; complex ARs oscillate
+            // a touch wider (post-flare kink-mode amplitude scales with
+            // free magnetic energy).
+            const alfvenAmp   = (0.0035 + Math.random() * 0.0025) * (isComplex ? 1.4 : 1.0);
+            const alfvenFreq  = 1.6 + Math.random() * 1.6;       // rad / sim-time
+            const alfvenPhase = Math.random() * Math.PI * 2;
+
+            const mat = new THREE.ShaderMaterial({
+                vertexShader:   LOOP_VS,
+                fragmentShader: LOOP_FS,
+                vertexColors:   true,
+                transparent:    true,
+                depthWrite:     false,
+                blending:       THREE.AdditiveBlending,
+                uniforms: {
+                    uTime:    { value: 0 },
+                    uOpacity: { value: baseOp },
+                    uAmp:     { value: alfvenAmp },
+                    uFreq:    { value: alfvenFreq },
+                    uPhase:   { value: alfvenPhase },
+                },
             });
-            mat.userData = { baseOp, phase: Math.random() * Math.PI * 2 };
-            loopGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
+            mat.userData = { baseOp, phase: alfvenPhase };
+            loopGroup.add(new THREE.Line(geom, mat));
         }
     });
 
@@ -4810,13 +4919,16 @@ function animate() {
         });
     }
 
-    // Coronal loops — co-rotate with photosphere, pulse opacity
+    // Coronal loops — co-rotate with photosphere, pulse opacity, animate Alfvén waves
     if (loopGroup) {
         loopGroup.rotation.y = solarRotAngle;
         loopGroup.children.forEach(line => {
+            const u = line.material.uniforms;
+            if (!u || !u.uTime) return;
+            u.uTime.value = t;
             const ud = line.material.userData;
             if (ud.baseOp !== undefined)
-                line.material.opacity = ud.baseOp * (0.55 + 0.45 * Math.sin(t * 1.8 + ud.phase));
+                u.uOpacity.value = ud.baseOp * (0.55 + 0.45 * Math.sin(t * 1.8 + ud.phase));
         });
     }
 
