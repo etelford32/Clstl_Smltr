@@ -225,4 +225,103 @@ export function resetPanelPosition(panel, { id } = {}) {
     panel.style.left = panel.style.top = panel.style.right = panel.style.bottom = '';
 }
 
+// ── Size persistence (companion to position persistence) ───────────────────
+//
+// Native CSS `resize:both` writes width/height to element.style on user
+// drag — but it's session-volatile. This helper hooks a ResizeObserver
+// and writes the dimensions to localStorage so a returning visitor
+// lands at the same panel size. Independent from makePanelDraggable so
+// either can be used without the other.
+//
+// Storage key: `${STORAGE_PREFIX}-size-${id}` (separate from position
+// to keep migration / reset surgical — clearing position doesn't
+// clobber size, and vice versa).
+
+const SIZE_STORAGE_SUFFIX = '-size-';
+
+function _readSize(id) {
+    try {
+        const raw = localStorage.getItem(STORAGE_PREFIX + SIZE_STORAGE_SUFFIX + id);
+        if (!raw) return null;
+        const obj = JSON.parse(raw);
+        if (!obj || !Number.isFinite(obj.width) || !Number.isFinite(obj.height)) return null;
+        return obj;
+    } catch (_) { return null; }
+}
+
+function _writeSize(id, w, h) {
+    try {
+        localStorage.setItem(
+            STORAGE_PREFIX + SIZE_STORAGE_SUFFIX + id,
+            JSON.stringify({ width: w, height: h }),
+        );
+    } catch (_) {}
+}
+
+/**
+ * Persist a panel's resize-handle interactions to localStorage. Reapplies
+ * stored dimensions on init (clamped to viewport) and listens via
+ * ResizeObserver for subsequent user-driven resizes.
+ *
+ * Honors the panel's own min-width / max-width / max-height CSS
+ * constraints — we never write a value the layout would refuse.
+ *
+ * Idempotent: calling twice on the same panel is a no-op after the
+ * first wire-up.
+ */
+export function makePanelResizable(panel, { id, persist = true, debounceMs = 250 } = {}) {
+    if (!panel || panel.dataset.resizableWired === '1') return;
+    panel.dataset.resizableWired = '1';
+    const storageId = id ?? panel.id;
+
+    // Apply stored size on init. We only set width/height — the panel's
+    // min/max CSS rules clamp anything pathological (e.g. a stored size
+    // from a wider monitor that doesn't fit on the current viewport).
+    if (persist) {
+        const stored = _readSize(storageId);
+        if (stored) {
+            panel.style.width  = `${stored.width}px`;
+            panel.style.height = `${stored.height}px`;
+        }
+    }
+
+    if (!persist || typeof ResizeObserver === 'undefined') return;
+
+    // Debounced write — ResizeObserver fires on every pixel during a
+    // drag, and we don't want to thrash localStorage. 250 ms after the
+    // last change is fine for "save what the user settled on."
+    let timer = null;
+    const ro = new ResizeObserver(entries => {
+        for (const entry of entries) {
+            // contentBoxSize is preferred; fall back to contentRect for
+            // older Safari. Both are in CSS pixels.
+            let w, h;
+            if (entry.contentBoxSize?.length) {
+                w = entry.contentBoxSize[0].inlineSize;
+                h = entry.contentBoxSize[0].blockSize;
+            } else {
+                w = entry.contentRect.width;
+                h = entry.contentRect.height;
+            }
+            // Add the panel's padding+border so the stored value matches
+            // what the user sees on the next reload (offsetWidth/Height
+            // includes padding+border, which is what `style.width:px`
+            // implies under box-sizing:border-box).
+            w = panel.offsetWidth;
+            h = panel.offsetHeight;
+            clearTimeout(timer);
+            timer = setTimeout(() => _writeSize(storageId, w, h), debounceMs);
+        }
+    });
+    ro.observe(panel);
+}
+
+/** Reset a persisted size back to the CSS default. */
+export function resetPanelSize(panel, { id } = {}) {
+    if (!panel) return;
+    const storageId = id ?? panel.id;
+    try { localStorage.removeItem(STORAGE_PREFIX + SIZE_STORAGE_SUFFIX + storageId); } catch (_) {}
+    panel.style.width = panel.style.height = '';
+}
+
 export default makePanelDraggable;
