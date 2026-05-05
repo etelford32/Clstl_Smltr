@@ -3792,6 +3792,64 @@ function buildCoronalLoops() {
 // Co-rotates with photosphere via fieldLineGroup.rotation.y = solarRotAngle.
 let fieldLineGroup = null;
 
+// ── ?debug=field — Phase 1 PFSS-lite tracer validation viewer ─────────────────
+// When enabled, the WASM-driven field-line atlas (rust-sunfield) is rendered
+// alongside the legacy axisymmetric lines as colour-coded LineSegments:
+//   gold = closed loops · cyan = open + · magenta = open − · green = PIL-anchored
+// The atlas is also cached in module-level state for upcoming prominence /
+// flare shaders to sample (see js/field-atlas.js).
+const DEBUG_FIELD_ATLAS = new URLSearchParams(location.search).get('debug') === 'field';
+let _fieldAtlasModulePromise = null;
+let debugFieldAtlasGroup = null;
+
+if (DEBUG_FIELD_ATLAS) {
+    _fieldAtlasModulePromise = (async () => {
+        try {
+            const mod = await import('./js/field-atlas.js');
+            await mod.ensureFieldAtlasWasm();
+            console.log('[debug=field] field-atlas WASM ready');
+            return mod;
+        } catch (e) {
+            console.warn('[debug=field] init failed:', e);
+            return null;
+        }
+    })();
+}
+
+async function rebuildDebugFieldAtlas() {
+    if (!DEBUG_FIELD_ATLAS || !_fieldAtlasModulePromise) return;
+    const mod = await _fieldAtlasModulePromise;
+    if (!mod || !scene) return;
+
+    const ars   = mod.arsFromLiveRegions(liveRegions, parseLoc);
+    const holes = mod.defaultPolarHoles(uniforms?.u_activity?.value ?? 0.5);
+    const ssR   = parseFloat(document.getElementById('sl-source-surface')?.value);
+    const params = {
+        sourceSurface: Number.isFinite(ssR) ? ssR : 2.5,
+        seedsPerAr: 28, seedsGlobal: 192, samplesPerLine: 64, maxLines: 1500,
+    };
+
+    const t0 = performance.now();
+    const atlas = mod.computeFieldAtlas(ars, holes, params);
+    const dt = performance.now() - t0;
+
+    // Replace previous debug mesh.
+    if (debugFieldAtlasGroup) {
+        scene.remove(debugFieldAtlasGroup);
+        mod.disposeFieldDebugMesh(debugFieldAtlasGroup);
+        debugFieldAtlasGroup = null;
+    }
+    const mesh = mod.buildFieldDebugMesh(atlas, { opacity: 0.9 });
+    mesh.userData.label = 'PFSS-lite atlas (debug)';
+    scene.add(mesh);
+    debugFieldAtlasGroup = mesh;
+
+    // Also pack textures so Phase 2/3 shaders can pick them up immediately.
+    mod.buildFieldTextures(atlas);
+
+    console.log(`[debug=field] ${atlas.lineCount} lines (${ars.length} ARs) in ${dt.toFixed(1)} ms`);
+}
+
 function buildFieldLines() {
     if (fieldLineGroup) { scene.remove(fieldLineGroup); fieldLineGroup = null; }
     fieldLineGroup = new THREE.Group();
@@ -4081,6 +4139,9 @@ function buildFieldLines() {
 
     scene.add(fieldLineGroup);
     fieldLineGroup.visible = document.getElementById('tog-fieldlines')?.checked ?? true;
+
+    // Mirror the rebuild trigger into the WASM-driven debug atlas (no-op unless ?debug=field).
+    rebuildDebugFieldAtlas();
 }
 
 // ─── SOLAR PROMINENCES ────────────────────────────────────────────────────────
