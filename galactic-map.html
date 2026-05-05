@@ -423,9 +423,12 @@ canvas { display:block; width:100% !important; height:100% !important; }
 
         <div class="sb-hd" style="margin-top:16px">Galactic Showpieces</div>
         <div class="legend-item"><div class="legend-dot" style="background:#ff66aa"></div>H II region (Orion, Eagle, Carina)</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#aa66ff"></div>Pulsar wind nebula (Crab)</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#66aaff"></div>SN remnant (Cas A)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#aa66ff"></div>Pulsar wind nebula (Crab, Vela)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#66aaff"></div>SN remnant (Cas A, Vela SNR)</div>
         <div class="legend-item"><div class="legend-dot" style="background:#ffeecc"></div>LBV / Homunculus (η Car)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#55ffcc"></div>Planetary nebula (Helix)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ddeeff;border:1px solid #444"></div>Stellar BH binary (Cyg X-1)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ffcc88"></div>WR pinwheel (WR 104)</div>
 
         <div class="sb-hd" style="margin-top:16px">Sun's Orbit Around Sgr A*</div>
         <div style="font-size:10px;color:#666;line-height:1.6">
@@ -1365,6 +1368,84 @@ const CATALOG = [
             ['Central compact object', 'Neutron star (no detectable pulsations)'],
             ['Brightest', 'Strongest extrasolar radio source (Cas A / 3C 461)'],
             ['Notable imagery', 'Light-echo "movies" + JWST NIRCam/MIRI 2023'],
+        ],
+        isShowpiece: true,
+    },
+    {
+        id: 'helix_nebula', name: 'Helix Nebula (NGC 7293) — "Eye of God"', abbr: 'Helix',
+        type: 'Planetary Nebula',
+        l: 36.16, b: -57.12, dist: 655,
+        temp: 110000, spectral: 'PN',
+        color: 0x88ddcc, glowColor: 0x66ccaa, size: 0.85,
+        desc: 'The closest planetary nebula to Earth and a textbook example of late-stage stellar death. Its central white dwarf (WD 2226-210) ionises a slowly-expanding shell of gas shed by the progenitor red giant ~10,500 years ago. Hubble revealed ~40,000 "cometary knots" — dense globules of gas with comet-like tails — embedded in the shell. Often nicknamed the "Eye of God."',
+        props: [
+            ['Type', 'Planetary Nebula (post-AGB shell)'],
+            ['Distance', '~655 ly (~200 pc)'],
+            ['Galactic l / b', '36.16° / −57.12°'],
+            ['Diameter', '~2.87 ly main ring (~6 ly with halo)'],
+            ['Age', '~10,500 yr'],
+            ['Central white dwarf', 'WD 2226-210 — Teff ~120,000 K, 0.62 M☉'],
+            ['Notable feature', '~40,000 "cometary knots" (HST imagery)'],
+            ['Apparent magnitude', '+7.6'],
+        ],
+        isShowpiece: true,
+    },
+    {
+        id: 'cygnus_x1', name: 'Cygnus X-1 (HDE 226868)', abbr: 'Cyg X-1',
+        type: 'Stellar Black Hole X-ray Binary',
+        l: 71.33, b: 3.07, dist: 7240,
+        temp: 31000, spectral: 'O9.7Iab + BH',
+        color: 0x88ccff, glowColor: 0xddccff, size: 0.95,
+        desc: 'The first object ever widely accepted as a black hole (Webster & Murdin / Bolton 1971). A 21 M☉ stellar-mass BH accretes from the ~40 M☉ supergiant HDE 226868 in a 5.6-day orbit. Persistent X-ray emission from the inner accretion disk and a faint relativistic jet inflate a ~25-ly radio nebula in the surrounding ISM. The 1974 Hawking–Thorne wager was settled in 1990 in favour of "yes, it\'s a black hole."',
+        props: [
+            ['Type', 'High-Mass X-ray Binary (HMXB) / Stellar BH'],
+            ['Distance', '~7,240 ly (2.22 kpc)'],
+            ['Galactic l / b', '71.33° / +3.07°'],
+            ['Black hole mass', '~21.2 ± 2 M☉ (Miller-Jones+ 2021)'],
+            ['Companion', 'HDE 226868 — O9.7 Iab supergiant, ~40 M☉'],
+            ['Orbital period', '5.6 d'],
+            ['Spin', 'a* > 0.95 (near-extremal Kerr)'],
+            ['Discovery', 'X-ray rocket (Bowyer+ 1965); BH-confirmed 1971'],
+            ['Inflated radio nebula', '~25 ly diameter (jet impacts ISM)'],
+        ],
+        isShowpiece: true,
+    },
+    {
+        id: 'wr_104', name: 'WR 104 — "Pinwheel"', abbr: 'WR 104',
+        type: 'Wolf-Rayet Pinwheel Binary',
+        l: 2.78, b: -1.01, dist: 7240,
+        temp: 45000, spectral: 'WC9 + OB',
+        color: 0xffddaa, glowColor: 0xffaa66, size: 0.80,
+        desc: 'A binary system whose Wolf-Rayet primary (WC9) and OB companion drive colliding stellar winds that condense dust into a brilliant Archimedean-spiral "pinwheel," first imaged with the Keck aperture-masking interferometer (Tuthill et al. 1999). The pinwheel rotates with the 220-day orbit. Its rotation axis appears to point near Earth — fueling debate over whether it could deliver a long GRB if the system goes supernova, though more recent measurements suggest the axis is misaligned.',
+        props: [
+            ['Type', 'WR + OB binary, dust-spiral system'],
+            ['Distance', '~7,240 ly (2.22 kpc; Soulain+ 2018)'],
+            ['Galactic l / b', '2.78° / −1.01°'],
+            ['Components', 'WC9 (~10 M☉) + OB companion (~20 M☉)'],
+            ['Orbital period', '~241.5 d (one full pinwheel turn)'],
+            ['Pinwheel diameter', '~200 AU (~3 mas) imaged'],
+            ['Discovery', 'Keck aperture masking — Tuthill et al. 1999'],
+            ['Notable concern', 'GRB candidate (axis controversy)'],
+        ],
+        isShowpiece: true,
+    },
+    {
+        id: 'vela_pulsar', name: 'Vela Pulsar + Vela SNR (PSR B0833-45)', abbr: 'Vela PSR',
+        type: 'Young Pulsar + SNR',
+        l: 263.55, b: -2.79, dist: 959,
+        temp: 0, spectral: 'PSR',
+        color: 0xccaaff, glowColor: 0x9966ff, size: 0.90,
+        desc: 'A young (~11,400-yr) glitching pulsar embedded in its own ~110-ly supernova remnant. The 89 ms pulsar drives a Chandra-imaged X-ray jet and pulsar wind nebula. Periodic "glitches" — sudden spin-up events — make it a key target for neutron-star superfluid physics. The host SNR is the closest large supernova remnant to Earth.',
+        props: [
+            ['Type', 'Young Pulsar + Plerion + Shell SNR'],
+            ['Distance', '~959 ly (294 pc; Caraveo+ 2001 HST parallax)'],
+            ['Galactic l / b', '263.55° / −2.79°'],
+            ['Pulsar period', '89 ms'],
+            ['Spin-down age', '~11,400 yr'],
+            ['Spin-down luminosity', '~7 × 10³⁶ erg/s'],
+            ['SNR diameter', '~110 ly (8°-on-sky)'],
+            ['Notable behavior', 'Frequent glitches (spin-up steps)'],
+            ['Imaging', 'Chandra X-ray jet + ROSAT/eROSITA shell'],
         ],
         isShowpiece: true,
     },
@@ -5119,6 +5200,453 @@ function makeSpriteFromCanvas(painter, scale) {
     showpieceAnims.push({ obj: g, kind: 'cas_a', shock, inner, t0: 0 });
 })();
 
+// ── Helix Nebula (NGC 7293) — "Eye of God" planetary nebula ───────────
+(function buildHelixNebula() {
+    const obj = CATALOG.find(s => s.id === 'helix_nebula');
+    if (!obj) return;
+    const g = new THREE.Group();
+    g.position.copy(obj.pos3);
+
+    // Outer faint hydrogen halo (slightly elongated)
+    const outerHalo = new THREE.Mesh(
+        new THREE.RingGeometry(2.2, 3.2, 96),
+        new THREE.MeshBasicMaterial({
+            color: 0xff7766, transparent: true, opacity: 0.30,
+            side: THREE.DoubleSide, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+        })
+    );
+    g.add(outerHalo);
+
+    // Outer red hydrogen ring
+    const redRing = new THREE.Mesh(
+        new THREE.RingGeometry(1.4, 2.1, 96),
+        new THREE.MeshBasicMaterial({
+            color: 0xff5544, transparent: true, opacity: 0.55,
+            side: THREE.DoubleSide, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+        })
+    );
+    g.add(redRing);
+
+    // Inner cyan/green O III ring
+    const oiiiRing = new THREE.Mesh(
+        new THREE.RingGeometry(0.55, 1.45, 96),
+        new THREE.MeshBasicMaterial({
+            color: 0x55ffcc, transparent: true, opacity: 0.62,
+            side: THREE.DoubleSide, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+        })
+    );
+    g.add(oiiiRing);
+
+    // Inner hot bubble
+    const innerGlow = makeSpriteFromCanvas((cx, S) => {
+        cx.translate(S/2, S/2);
+        const gr = cx.createRadialGradient(0,0,0, 0,0, S/2);
+        gr.addColorStop(0,    'rgba(180,255,220,0.55)');
+        gr.addColorStop(0.4,  'rgba(120,200,180,0.20)');
+        gr.addColorStop(1,    'rgba(40,80,80,0.0)');
+        cx.fillStyle = gr;
+        cx.beginPath(); cx.arc(0,0, S/2, 0, Math.PI*2); cx.fill();
+    }, 1.4);
+    g.add(innerGlow);
+
+    // Cometary knots — small radial dark dots on inner edge of red ring
+    const KNOT_N = 80;
+    const knotGeo = new THREE.BufferGeometry();
+    const knotPos = new Float32Array(KNOT_N * 3);
+    const knotSz  = new Float32Array(KNOT_N);
+    for (let i = 0; i < KNOT_N; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const r = 1.0 + Math.random() * 0.7;
+        knotPos[i*3]   = r * Math.cos(a);
+        knotPos[i*3+1] = (Math.random() - 0.5) * 0.05;
+        knotPos[i*3+2] = r * Math.sin(a);
+        knotSz[i]      = 50 + Math.random() * 40;
+    }
+    knotGeo.setAttribute('position', new THREE.BufferAttribute(knotPos, 3));
+    knotGeo.setAttribute('size',     new THREE.BufferAttribute(knotSz, 1));
+    const knotMat = new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false,
+        blending: THREE.MultiplyBlending,
+        uniforms: { uScale: { value: renderer.getPixelRatio() } },
+        vertexShader: `
+            attribute float size;
+            uniform float uScale;
+            void main() {
+                vec4 mvp = modelViewMatrix * vec4(position, 1.0);
+                gl_PointSize = size * uScale / -mvp.z;
+                gl_PointSize = clamp(gl_PointSize, 0.5, 7.0);
+                gl_Position = projectionMatrix * mvp;
+            }
+        `,
+        fragmentShader: `
+            void main() {
+                float d = length(gl_PointCoord - 0.5) * 2.0;
+                float a = 1.0 - smoothstep(0.0, 1.0, d);
+                vec3 dark = vec3(0.25, 0.10, 0.08);
+                gl_FragColor = vec4(mix(vec3(1.0), dark, a * 0.85), 1.0);
+            }
+        `,
+    });
+    g.add(new THREE.Points(knotGeo, knotMat));
+
+    // Central white dwarf — tiny bright pinprick
+    g.add(new THREE.Mesh(
+        new THREE.SphereGeometry(0.06, 10, 10),
+        new THREE.MeshBasicMaterial({ color: 0xffffff })
+    ));
+    const wdHalo = makeSpriteFromCanvas((cx, S) => {
+        cx.translate(S/2, S/2);
+        const gr = cx.createRadialGradient(0,0,0, 0,0, S/2);
+        gr.addColorStop(0,   'rgba(255,255,255,1.0)');
+        gr.addColorStop(0.3, 'rgba(180,210,255,0.50)');
+        gr.addColorStop(1,   'rgba(60,100,200,0.0)');
+        cx.fillStyle = gr;
+        cx.beginPath(); cx.arc(0,0, S/2, 0, Math.PI*2); cx.fill();
+    }, 0.6);
+    g.add(wdHalo);
+
+    // Tilt the nebula a bit for visual interest
+    g.rotation.x = 0.35;
+    g.rotation.z = 0.18;
+
+    g.userData.isShowpiece = 'helix_nebula';
+    scene.add(g);
+    showpieceGroups.helix_nebula = g;
+    showpieceAnims.push({ obj: g, kind: 'breathe', t0: Math.random() * 6 });
+})();
+
+// ── Cygnus X-1 — first known stellar BH + supergiant companion ────────
+(function buildCygnusX1() {
+    const obj = CATALOG.find(s => s.id === 'cygnus_x1');
+    if (!obj) return;
+    const g = new THREE.Group();
+    g.position.copy(obj.pos3);
+
+    // Inflated radio nebula bubble (~25 ly diameter)
+    const bubble = new THREE.Mesh(
+        new THREE.SphereGeometry(12.5, 24, 24),
+        new THREE.MeshBasicMaterial({
+            color: 0x4477aa, transparent: true, opacity: 0.10,
+            side: THREE.DoubleSide, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+        })
+    );
+    g.add(bubble);
+    // Inner brighter bubble rim
+    const bubbleRim = new THREE.Mesh(
+        new THREE.SphereGeometry(12.5, 24, 24),
+        new THREE.MeshBasicMaterial({
+            color: 0x6699cc, transparent: true, opacity: 0.12,
+            side: THREE.BackSide, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+        })
+    );
+    g.add(bubbleRim);
+
+    // Supergiant companion HDE 226868 — bright blue O-star, offset slightly
+    const companion = new THREE.Mesh(
+        new THREE.SphereGeometry(0.20, 14, 14),
+        new THREE.MeshBasicMaterial({ color: 0xaaccff })
+    );
+    companion.position.set(0.55, 0.0, 0.0);
+    g.add(companion);
+    const compHalo = makeSpriteFromCanvas((cx, S) => {
+        cx.translate(S/2, S/2);
+        const gr = cx.createRadialGradient(0,0,0, 0,0, S/2);
+        gr.addColorStop(0,    'rgba(220,235,255,1.0)');
+        gr.addColorStop(0.25, 'rgba(140,180,255,0.55)');
+        gr.addColorStop(1,    'rgba(40,80,200,0.0)');
+        cx.fillStyle = gr;
+        cx.beginPath(); cx.arc(0,0, S/2, 0, Math.PI*2); cx.fill();
+    }, 1.4);
+    compHalo.position.set(0.55, 0.0, 0.0);
+    g.add(compHalo);
+
+    // Black hole accretion disk — small bright ring with hot inner edge
+    const diskGroup = new THREE.Group();
+    diskGroup.position.set(-0.25, 0.0, 0.0);
+    diskGroup.rotation.x = 1.2;     // tilt
+    g.add(diskGroup);
+
+    // Inner hot disk (white/cyan)
+    diskGroup.add(new THREE.Mesh(
+        new THREE.RingGeometry(0.04, 0.10, 48),
+        new THREE.MeshBasicMaterial({
+            color: 0xddeeff, side: THREE.DoubleSide,
+            transparent: true, opacity: 0.80, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+        })
+    ));
+    // Mid disk (gold)
+    diskGroup.add(new THREE.Mesh(
+        new THREE.RingGeometry(0.10, 0.18, 48),
+        new THREE.MeshBasicMaterial({
+            color: 0xffcc66, side: THREE.DoubleSide,
+            transparent: true, opacity: 0.55, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+        })
+    ));
+    // Outer disk (deep red/orange) plus material flow from companion
+    diskGroup.add(new THREE.Mesh(
+        new THREE.RingGeometry(0.18, 0.32, 48),
+        new THREE.MeshBasicMaterial({
+            color: 0xff6633, side: THREE.DoubleSide,
+            transparent: true, opacity: 0.30, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+        })
+    ));
+
+    // Mass-transfer stream — line from companion toward BH
+    g.add(new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(0.40, 0.0, 0.0),
+            new THREE.Vector3(-0.10, 0.02, 0.02),
+        ]),
+        new THREE.LineBasicMaterial({ color: 0xff9966, transparent: true, opacity: 0.55 })
+    ));
+
+    // Black hole event-horizon sphere (occluding)
+    const ehSphere = new THREE.Mesh(
+        new THREE.SphereGeometry(0.04, 16, 16),
+        new THREE.MeshBasicMaterial({ color: 0x000000 })
+    );
+    ehSphere.position.set(-0.25, 0.0, 0.0);
+    g.add(ehSphere);
+
+    // Twin polar X-ray jets along disk axis (perpendicular to disk plane)
+    const jetMat = new THREE.LineBasicMaterial({ color: 0xddeeff, transparent: true, opacity: 0.80 });
+    [1, -1].forEach(s => {
+        const jet = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(-0.25, 0, 0),
+                new THREE.Vector3(-0.25, s * 11, 0),
+            ]),
+            jetMat
+        );
+        // Match disk tilt
+        jet.rotation.x = 1.2;
+        g.add(jet);
+        // Wide envelope
+        const env = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.08, 0.6, 11, 12, 1, true),
+            new THREE.MeshBasicMaterial({
+                color: 0x6699cc, side: THREE.DoubleSide,
+                transparent: true, opacity: 0.18, depthWrite: false,
+                blending: THREE.AdditiveBlending,
+            })
+        );
+        env.position.set(-0.25, s * 5.5, 0);
+        env.rotation.x = 1.2;
+        g.add(env);
+    });
+
+    g.userData.isShowpiece = 'cygnus_x1';
+    scene.add(g);
+    showpieceGroups.cygnus_x1 = g;
+    showpieceAnims.push({
+        obj: g, kind: 'cyg_x1', diskGroup, companion, compHalo, t0: 0,
+    });
+})();
+
+// ── WR 104 — colliding-wind dust pinwheel ─────────────────────────────
+(function buildWR104() {
+    const obj = CATALOG.find(s => s.id === 'wr_104');
+    if (!obj) return;
+    const g = new THREE.Group();
+    g.position.copy(obj.pos3);
+
+    // Pinwheel spiral group (rotates as a whole)
+    const spiralGroup = new THREE.Group();
+    g.add(spiralGroup);
+
+    // Build an Archimedean spiral as a polyline (~3 turns)
+    const TURNS = 3;
+    const STEPS = 320;
+    const pts = [];
+    for (let i = 0; i <= STEPS; i++) {
+        const t = i / STEPS;
+        const a = t * TURNS * Math.PI * 2;
+        const r = 0.05 + t * 1.25;     // ly — visible scale
+        pts.push(new THREE.Vector3(r * Math.cos(a), 0, r * Math.sin(a)));
+    }
+    spiralGroup.add(new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(pts),
+        new THREE.LineBasicMaterial({ color: 0xffcc88, transparent: true, opacity: 0.70 })
+    ));
+
+    // Second arm offset 180° (binary creates two intertwined dust arms)
+    const pts2 = pts.map(p => new THREE.Vector3(-p.x, p.y, -p.z));
+    spiralGroup.add(new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(pts2),
+        new THREE.LineBasicMaterial({ color: 0xffaa66, transparent: true, opacity: 0.55 })
+    ));
+
+    // Sprinkle bright dust nodes along the spirals
+    const NODE_N = 60;
+    const nodeGeo = new THREE.BufferGeometry();
+    const nodePos = new Float32Array(NODE_N * 3);
+    const nodeSz  = new Float32Array(NODE_N);
+    for (let i = 0; i < NODE_N; i++) {
+        const t = (i / NODE_N) + Math.random() * 0.02;
+        const a = t * TURNS * Math.PI * 2;
+        const r = 0.05 + t * 1.25;
+        const arm = i % 2 === 0 ? 1 : -1;
+        nodePos[i*3]   = arm * r * Math.cos(a);
+        nodePos[i*3+1] = (Math.random() - 0.5) * 0.04;
+        nodePos[i*3+2] = arm * r * Math.sin(a);
+        nodeSz[i]      = 60 + Math.random() * 70;
+    }
+    nodeGeo.setAttribute('position', new THREE.BufferAttribute(nodePos, 3));
+    nodeGeo.setAttribute('size',     new THREE.BufferAttribute(nodeSz, 1));
+    const nodeMat = new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        uniforms: { uScale: { value: renderer.getPixelRatio() } },
+        vertexShader: `
+            attribute float size;
+            uniform float uScale;
+            void main() {
+                vec4 mvp = modelViewMatrix * vec4(position, 1.0);
+                gl_PointSize = size * uScale / -mvp.z;
+                gl_PointSize = clamp(gl_PointSize, 1.0, 9.0);
+                gl_Position = projectionMatrix * mvp;
+            }
+        `,
+        fragmentShader: `
+            void main() {
+                float d = length(gl_PointCoord - 0.5) * 2.0;
+                float a = 1.0 - smoothstep(0.0, 1.0, d);
+                gl_FragColor = vec4(1.0, 0.78, 0.45, a * 0.85);
+            }
+        `,
+    });
+    spiralGroup.add(new THREE.Points(nodeGeo, nodeMat));
+
+    // Central WR + OB binary — bright blue+yellow point pair
+    const wrStar = new THREE.Mesh(
+        new THREE.SphereGeometry(0.10, 12, 12),
+        new THREE.MeshBasicMaterial({ color: 0xfff5cc })
+    );
+    g.add(wrStar);
+    const obStar = new THREE.Mesh(
+        new THREE.SphereGeometry(0.07, 10, 10),
+        new THREE.MeshBasicMaterial({ color: 0xaaccff })
+    );
+    obStar.position.set(0.05, 0, 0);
+    g.add(obStar);
+
+    // Bright central glow
+    const coreGlow = makeSpriteFromCanvas((cx, S) => {
+        cx.translate(S/2, S/2);
+        const gr = cx.createRadialGradient(0,0,0, 0,0, S/2);
+        gr.addColorStop(0,    'rgba(255,255,220,1.0)');
+        gr.addColorStop(0.20, 'rgba(255,210,150,0.60)');
+        gr.addColorStop(0.55, 'rgba(255,140,80,0.18)');
+        gr.addColorStop(1,    'rgba(180,60,30,0.0)');
+        cx.fillStyle = gr;
+        cx.beginPath(); cx.arc(0,0, S/2, 0, Math.PI*2); cx.fill();
+    }, 0.5);
+    g.add(coreGlow);
+
+    g.userData.isShowpiece = 'wr_104';
+    scene.add(g);
+    showpieceGroups.wr_104 = g;
+    showpieceAnims.push({ obj: g, kind: 'pinwheel', spiralGroup, t0: 0 });
+})();
+
+// ── Vela Pulsar + Vela SNR ───────────────────────────────────────────
+(function buildVelaSNR() {
+    const obj = CATALOG.find(s => s.id === 'vela_pulsar');
+    if (!obj) return;
+    const g = new THREE.Group();
+    g.position.copy(obj.pos3);
+
+    // Large diffuse SNR shell (~110 ly) — extended outer halo
+    g.add(makeSpriteFromCanvas((cx, S) => {
+        cx.translate(S/2, S/2);
+        const grad = cx.createRadialGradient(0,0, S/4, 0,0, S/2);
+        grad.addColorStop(0,    'rgba(180,150,255,0.0)');
+        grad.addColorStop(0.55, 'rgba(150,120,220,0.30)');
+        grad.addColorStop(0.75, 'rgba(220,200,255,0.42)');
+        grad.addColorStop(1,    'rgba(60,40,140,0.0)');
+        cx.fillStyle = grad;
+        cx.beginPath(); cx.arc(0,0, S/2, 0, Math.PI*2); cx.fill();
+        // A handful of irregular bright filament arcs
+        cx.globalCompositeOperation = 'screen';
+        for (let i = 0; i < 12; i++) {
+            const a = Math.random() * Math.PI * 2;
+            const r = 70 + Math.random() * 40;
+            cx.strokeStyle = `rgba(${180+Math.random()*60|0},${150+Math.random()*60|0},255,${0.18+Math.random()*0.22})`;
+            cx.lineWidth = 1.0 + Math.random();
+            cx.beginPath();
+            cx.arc(0,0, r, a, a + 0.25 + Math.random()*0.30);
+            cx.stroke();
+        }
+    }, 90));
+
+    // Inner pulsar wind nebula glow
+    const pwn = new THREE.Mesh(
+        new THREE.SphereGeometry(3.0, 24, 24),
+        new THREE.MeshBasicMaterial({
+            color: 0x7766ff, transparent: true, opacity: 0.30,
+            side: THREE.DoubleSide, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+        })
+    );
+    g.add(pwn);
+
+    // Bipolar pulsar X-ray jets (Chandra-imaged)
+    const jetMat = new THREE.LineBasicMaterial({ color: 0xccbbff, transparent: true, opacity: 0.85 });
+    [1, -1].forEach(s => {
+        g.add(new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(0, 0, 0),
+                new THREE.Vector3(0, s * 5.0, 0),
+            ]),
+            jetMat
+        ));
+        // Soft cone envelope
+        const cone = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.05, 0.6, 5.0, 14, 1, true),
+            new THREE.MeshBasicMaterial({
+                color: 0x9988ff, side: THREE.DoubleSide,
+                transparent: true, opacity: 0.20, depthWrite: false,
+                blending: THREE.AdditiveBlending,
+            })
+        );
+        cone.position.y = s * 2.5;
+        g.add(cone);
+    });
+
+    // Central pulsar pinprick + halo
+    const pulsar = new THREE.Mesh(
+        new THREE.SphereGeometry(0.12, 12, 12),
+        new THREE.MeshBasicMaterial({ color: 0xffffff })
+    );
+    g.add(pulsar);
+    const halo = makeSpriteFromCanvas((cx, S) => {
+        cx.translate(S/2, S/2);
+        const gr = cx.createRadialGradient(0,0,0, 0,0, S/2);
+        gr.addColorStop(0,    'rgba(255,255,255,1.0)');
+        gr.addColorStop(0.25, 'rgba(180,160,255,0.55)');
+        gr.addColorStop(1,    'rgba(80,60,180,0.0)');
+        cx.fillStyle = gr;
+        cx.beginPath(); cx.arc(0,0, S/2, 0, Math.PI*2); cx.fill();
+    }, 0.9);
+    g.add(halo);
+
+    // Tilt jets so they don't align trivially with the disk
+    g.rotation.z = 0.55;
+
+    g.userData.isShowpiece = 'vela_pulsar';
+    scene.add(g);
+    showpieceGroups.vela_pulsar = g;
+    showpieceAnims.push({ obj: g, kind: 'vela', pulsar, halo, t0: 0 });
+})();
+
 // ══════════════════════════════════════════════════════════════════════════
 //  M31 COLLISION TRAJECTORY
 //  Andromeda is approaching at ~110 km/s; merger in ~4.5 Gyr.
@@ -5981,6 +6509,40 @@ function updateShowpieces(t, camDistFromOrigin) {
             case 'eta_car': {
                 // LBV brightness breath
                 if (a.halo) a.halo.scale.setScalar(1.6 * (0.9 + 0.35 * Math.sin(t * 0.45 + a.t0)));
+                break;
+            }
+            case 'cyg_x1': {
+                // Slowly orbit the supergiant companion around the BH disk
+                // (real period 5.6 d — sped up so it reads on screen).
+                const omega = 0.45;   // rad/s of wall time
+                const orbR  = 0.55;
+                const phase = t * omega;
+                if (a.companion) {
+                    a.companion.position.set(
+                        orbR * Math.cos(phase),
+                        0,
+                        orbR * Math.sin(phase) * 0.4,    // slightly inclined orbit
+                    );
+                }
+                if (a.compHalo && a.companion) {
+                    a.compHalo.position.copy(a.companion.position);
+                }
+                if (a.diskGroup) {
+                    a.diskGroup.rotation.z += 0.06;       // accretion-disk spin
+                }
+                break;
+            }
+            case 'pinwheel': {
+                // WR 104 binary period 240 d — accelerated so the spiral rotates
+                // visibly. Real pinwheel turns once per orbit.
+                if (a.spiralGroup) a.spiralGroup.rotation.y += 0.012;
+                break;
+            }
+            case 'vela': {
+                // Slow brightness flicker (89 ms in reality — visualised at ~3 Hz)
+                const pulse = 0.6 + 0.4 * (0.5 + 0.5 * Math.sin(t * 18));
+                if (a.pulsar) a.pulsar.scale.setScalar(0.9 + 0.4 * pulse);
+                if (a.halo)   a.halo.scale.setScalar(1.0 * (0.85 + 0.55 * pulse));
                 break;
             }
             case 'breathe':
