@@ -2227,6 +2227,8 @@ import {
 } from './js/precip-forecast.js';
 import { AtmosphereClimatology }    from './js/atmosphere-climatology.js';
 import { makeAtmosphereForecasters } from './js/atmosphere-forecast.js';
+import { makeWeatherFlowForecasters } from './js/weather-flow.js';
+import { TracerSkillTracker } from './js/tracer-skill-tracker.js';
 import { createWeatherOverlay } from './js/weather-overlay.js';
 import { StormWatchPanel } from './js/storm-watch-panel.js';
 import { StormTrackOverlay } from './js/storm-track-overlay.js';
@@ -4553,6 +4555,34 @@ wxForecastRegistry.register(new PrecipFusionForecaster({
     climatology: precipClimatology,
     biasTracker: precipBiasTracker,
 }));
+
+// ── Advective nowcasting (Phase 3 of WEATHER_FORECAST_PLAN.md) ──────────
+// Two more forecasters competing on the same Murphy-skill leaderboard:
+//   wind-advection-v1 — semi-Lagrangian transport using stored U/V.
+//                       Strong for moving fronts where AR/persistence
+//                       lose by definition (no spatial awareness).
+//   optical-flow-v1   — Lucas-Kanade on a *learned-weight* tracer
+//                       blend of the cloud channels, then semi-
+//                       Lagrangian with the LK velocity. The
+//                       TracerSkillTracker harvests per-channel MSE
+//                       from the validator and re-weights mid+high
+//                       cloud higher than low (where the steering
+//                       flow lives), adapting based on which channels
+//                       LK has historically predicted accurately.
+// Both produce full 9-channel CHW frames so the validator scores them
+// per-channel exactly like persistence.
+const opticalFlowSkillTracker = new TracerSkillTracker({
+    modelId:  'optical-flow-v1',
+    channels: [5, 6, 7],   // cloud_low / cloud_mid / cloud_high (CHW indices)
+    horizonH: 3,           // LK-relevant short horizon; longer horizons
+                           // start being dominated by AR / climatology
+                           // in the registry, not LK itself.
+    priorWeights: [0.20, 0.45, 0.35],
+});
+for (const F of makeWeatherFlowForecasters({ skillTracker: opticalFlowSkillTracker })) {
+    wxForecastRegistry.register(F);
+}
+window._opticalFlowSkillTracker = opticalFlowSkillTracker;   // dev-console handle
 
 // ── Cloud + wind forecasters ─────────────────────────────────────────────
 // Same trio (Climatology / AnomalyPersistence / AnomalyAR) as precip,
