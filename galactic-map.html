@@ -192,6 +192,49 @@ canvas { display:block; width:100% !important; height:100% !important; }
 }
 #coord-display span { color:#a0d8ff; }
 
+/* ─── Sun-orbit time-control panel (top-left, under HUD) ───── */
+#sun-time-panel {
+    position:absolute; left:14px; top:240px; z-index:100;
+    background:rgba(8,4,16,0.85); border:1px solid rgba(255,200,80,0.30);
+    border-radius:9px; padding:9px 12px 8px;
+    color:#ddd; backdrop-filter:blur(8px); width:262px;
+    font-size:11px; line-height:1.35;
+}
+#sun-time-panel h4 {
+    margin:0 0 6px; font-size:12px; color:#ffcc66;
+    font-weight:600; letter-spacing:.02em;
+}
+.stp-row { display:flex; align-items:center; gap:7px; padding:3px 0; }
+.stp-row .stp-label { color:#999; min-width:42px; font-size:10px; }
+.stp-row .stp-val   { color:#ffcc66; font-weight:600; min-width:78px; font-size:10px;
+                      text-align:right; font-variant-numeric:tabular-nums; }
+.stp-row input[type=range] { flex:1; height:4px; accent-color:#ffaa44; cursor:pointer; }
+.stp-btnrow { display:flex; gap:6px; margin-bottom:5px; }
+.stp-btn {
+    background:rgba(255,200,80,0.12); border:1px solid rgba(255,200,80,0.35);
+    color:#ffcc66; padding:4px 10px; border-radius:5px; cursor:pointer;
+    font-family:inherit; font-size:11px; font-weight:600; transition:all .15s;
+    flex-shrink:0;
+}
+.stp-btn:hover  { background:rgba(255,200,80,0.25); }
+.stp-btn.active { background:rgba(255,200,80,0.45); color:#fff; border-color:#ffd58a; }
+.stp-readout {
+    color:#aaa; font-size:10.5px; padding-top:5px; margin-top:3px;
+    border-top:1px solid rgba(255,255,255,0.08);
+    display:flex; flex-wrap:wrap; column-gap:14px; row-gap:2px;
+}
+.stp-readout .stp-rk { color:#888; }
+.stp-readout span.stp-rv { color:#ffcc66; font-weight:600;
+                           font-variant-numeric:tabular-nums; }
+@media (max-width:1024px) {
+    #sun-time-panel { width:230px; top:auto; bottom:64px;
+                      font-size:10.5px; padding:7px 9px 6px; }
+    #sun-time-panel h4 { font-size:11px; }
+}
+@media (max-width:600px) {
+    #sun-time-panel { display:none; }   /* phone — too cramped, slider-only HUD instead */
+}
+
 /* ─── Sidebar ─────────────────────────────────────────────────── */
 #sidebar {
     width:290px; min-width:290px;
@@ -316,6 +359,33 @@ canvas { display:block; width:100% !important; height:100% !important; }
             </div>
             <div title="Sun's orbital phase around Sgr A* — 0% / 100% places the Sun at the +x side of the disk (current epoch).">
                 <span class="label">Orbital phase: </span><span class="val" id="hud-galactic-phase">—</span>
+            </div>
+        </div>
+
+        <!-- Sun-orbit time controls -->
+        <div id="sun-time-panel"
+             title="Drag the time slider to scrub the Sun's position around Sgr A*. Hit ▶ Live to resume real-time tracking.">
+            <h4>☉ Sun's Orbit — Time Controls</h4>
+            <div class="stp-btnrow">
+                <button id="stp-live"  class="stp-btn active" title="Snap to t = 0 (today) and resume live advance">▶ Live</button>
+                <button id="stp-pause" class="stp-btn"        title="Pause / play simulation">⏸ Pause</button>
+                <button id="stp-reset" class="stp-btn"        title="Reset to today's epoch but stay paused">⟲ Today</button>
+            </div>
+            <div class="stp-row" title="Galactic-year offset from the present epoch (negative = past, positive = future).">
+                <span class="stp-label">Time</span>
+                <input id="stp-scrub" type="range" min="-450" max="450" step="0.1" value="0">
+                <span class="stp-val" id="stp-scrub-val">0 Myr</span>
+            </div>
+            <div class="stp-row" title="Simulation speed — how many Myr of orbital evolution elapse per real second.">
+                <span class="stp-label">Speed</span>
+                <input id="stp-speed" type="range" min="-2" max="2" step="0.05" value="0.574">
+                <span class="stp-val" id="stp-speed-val">3.75 Myr/s</span>
+            </div>
+            <div class="stp-readout">
+                <span><span class="stp-rk">v☉ </span><span class="stp-rv" id="stp-vel">220.0 km/s</span></span>
+                <span><span class="stp-rk">Z </span><span class="stp-rv" id="stp-z">+65 ly</span></span>
+                <span><span class="stp-rk">period </span><span class="stp-rv">225 Myr</span></span>
+                <span><span class="stp-rk">bobble </span><span class="stp-rv">67 Myr</span></span>
             </div>
         </div>
 
@@ -4208,12 +4278,40 @@ scene.add(ringsGroup);
 //  seconds (3.75 Myr per real second of viewing) so the user sees the motion.
 //  The phase reflects an arbitrary "now" reference (current epoch = θ₀).
 // ══════════════════════════════════════════════════════════════════════════
-const SUN_R = 26673;            // Sun-GC distance (ly)
-const SUN_PERIOD_MYR = 225;     // Galactic year (Myr)
-const SUN_ANIM_SECS  = 60;      // wall-clock seconds per simulated orbit
-let   sunOrbitEnabled = true;   // toggled via UI
-let   simGalacticYr   = 0;      // current Sun-orbit phase in Myr (advances each frame)
-const SUN_THETA0      = 0;      // orbital angle at simGalacticYr = 0 (current epoch)
+// ── Sun-orbit physical parameters ────────────────────────────────────────
+//
+// Galactic-plane circular orbit:
+//   R₀ = 26,673 ly  (Sun-GC distance, GRAVITY 2019)
+//   T_orbit = 225 Myr ("galactic year") → v_circ ≈ 220 km/s
+//
+// VERTICAL OSCILLATION ("the bobble") — Holmberg+ 2009, Bovy 2017
+//   The Sun is currently ~20 pc (~65 ly) above the galactic mid-plane
+//   moving NORTH at W_⊙ ≈ +7.25 km/s (Schönrich+ 2010). It oscillates
+//   through the disk on a much shorter period than the full orbit:
+//     T_vert    ≈ 67 Myr  (one full up-down cycle)
+//     Z_amp     ≈ 250 ly  (~76 pc — peak excursion above/below the plane)
+//   So during one ~225 Myr orbit, the Sun crosses the disk plane
+//   about 6–7 times. This is the source of every "the Sun has crossed
+//   the galactic plane X times since the dinosaurs went extinct" trivia.
+//
+//   Phase tuned so at simGalacticYr = 0 (today, the "Live" reference)
+//   Z = +65 ly and W = +7.25 km/s, matching the modern measurements.
+const SUN_R               = 26673;           // ly
+const SUN_PERIOD_MYR      = 225;             // Myr (full circular orbit)
+const SUN_VERT_PERIOD_MYR = 67;              // Myr (vertical oscillation)
+const SUN_VERT_AMP_LY     = 250;             // ly (peak |Z|)
+const SUN_VERT_PHASE0     = Math.asin(65 / 250);  // ≈ 0.264 rad (Z=+65 ly today)
+const KMS_PER_LY_PER_MYR  = 0.29979;         // 1 ly·Myr⁻¹ in km/s
+
+// Live-mode default speed: 1 wall-second = (225/60) Myr = 3.75 Myr/s.
+const SUN_LIVE_MYR_PER_SEC_DEFAULT = SUN_PERIOD_MYR / 60;
+
+// Time-control state machine (driven by UI panel / live button)
+let sunOrbitEnabled = true;     // toggled via the existing "☉ Sun's orbit" toggle
+let simGalacticYr   = 0;        // current orbital epoch (Myr; 0 = today)
+let liveMode        = true;     // true → simGalacticYr advances each frame
+let simSpeedMyrPerSec = SUN_LIVE_MYR_PER_SEC_DEFAULT;
+const SUN_THETA0      = 0;      // orbital angle at simGalacticYr = 0
 const sunOrbitObjects = [];     // group of meshes scaled by zoom
 
 const sunOrbitGroup = new THREE.Group();
@@ -4333,15 +4431,51 @@ scene.add(sunOrbitGroup);
     sunOrbitObjects.push({ obj: sunLabel, role: 'label', baseW: 2200, baseH: 550 });
 })();
 
-// Returns Sun's orbital position and velocity unit vector for a given galactic
-// year offset (Myr from the current epoch; 0 = now, +ve = future, -ve = past).
+// Returns the Sun's orbital state at a given galactic-year offset (Myr from
+// the current epoch; 0 = today, +ve = future, -ve = past).
+//
+// Combines the in-plane circular motion (220 km/s) with the disk-vertical
+// epicyclic "bobble" (67 Myr period, ±250 ly amplitude). The Z-phase is
+// tuned so today's Sun matches the measured values: Z = +65 ly, W = +7.25 km/s.
+//
+// Returns:
+//   pos       Vector3 position in scene coords (ly)
+//   vel       Vector3 unit velocity vector (for the arrow)
+//   theta     orbital angle (rad)
+//   z         vertical offset above/below disk (ly)
+//   v_total   speed (km/s)
+//   v_circ    circular component (km/s)
+//   v_vert    vertical (bobble) component (km/s, +ve = north)
 function sunOrbitState(galacticYr) {
+    // ── Circular motion in the disk plane ────────────────────────
     const theta = SUN_THETA0 + (galacticYr / SUN_PERIOD_MYR) * Math.PI * 2;
     const cs = Math.cos(theta), sn = Math.sin(theta);
-    const pos = new THREE.Vector3(SUN_R * cs, 20, SUN_R * sn);
-    // Velocity direction: tangent to circle in the prograde sense (+z at θ=0)
-    const vel = new THREE.Vector3(-sn, 0, cs).normalize();
-    return { pos, vel, theta };
+
+    // Circular speed (ly/Myr) and tangent direction (perp. to radius)
+    const v_circ_lymyr = SUN_R * 2 * Math.PI / SUN_PERIOD_MYR;
+    const tx = -sn * v_circ_lymyr;
+    const tz =  cs * v_circ_lymyr;
+
+    // ── Vertical oscillation ("the bobble") ──────────────────────
+    const vphase = SUN_VERT_PHASE0 + (galacticYr / SUN_VERT_PERIOD_MYR) * Math.PI * 2;
+    const z      = SUN_VERT_AMP_LY * Math.sin(vphase);
+    const vy_lymyr = SUN_VERT_AMP_LY * (2 * Math.PI / SUN_VERT_PERIOD_MYR) * Math.cos(vphase);
+
+    // ── 3D position + unit velocity ──────────────────────────────
+    const pos = new THREE.Vector3(SUN_R * cs, z, SUN_R * sn);
+    const vmag_lymyr = Math.hypot(tx, vy_lymyr, tz);
+    const vel = new THREE.Vector3(
+        tx / vmag_lymyr,
+        vy_lymyr / vmag_lymyr,
+        tz / vmag_lymyr,
+    );
+
+    return {
+        pos, vel, theta, z,
+        v_total: vmag_lymyr   * KMS_PER_LY_PER_MYR,
+        v_circ:  v_circ_lymyr * KMS_PER_LY_PER_MYR,
+        v_vert:  vy_lymyr     * KMS_PER_LY_PER_MYR,
+    };
 }
 
 // ── Scale-break boundary ─────────────────────────────────────────────────
@@ -7133,6 +7267,53 @@ document.getElementById('tog-sun-orbit').addEventListener('change', e => {
     sunOrbitEnabled = e.target.checked;
     if (!sunOrbitEnabled) sunOrbitGroup.visible = false;
 });
+
+// ── Time-control panel wiring ──────────────────────────────────────────
+(function wireSunTimeControls() {
+    const liveBtn  = document.getElementById('stp-live');
+    const pauseBtn = document.getElementById('stp-pause');
+    const resetBtn = document.getElementById('stp-reset');
+    const scrub    = document.getElementById('stp-scrub');
+    const speed    = document.getElementById('stp-speed');
+    if (!liveBtn || !scrub || !speed) return;
+
+    function setLive(on) {
+        liveMode = on;
+        liveBtn.classList.toggle('active',  on);
+        pauseBtn.classList.toggle('active', !on);
+    }
+    function setSimSpeedFromSlider(v) {
+        // Slider in log-space: -2..+2 → 0.01..100 Myr/s
+        const x = parseFloat(v);
+        simSpeedMyrPerSec = Math.pow(10, x);
+    }
+
+    liveBtn.addEventListener('click', () => {
+        // ▶ Live snaps the time scrub back to today (t=0) and resumes
+        simGalacticYr = 0;
+        scrub.value = '0';
+        setLive(true);
+    });
+    pauseBtn.addEventListener('click', () => {
+        // ⏸ pause stops the clock at the current epoch (keeps simGalacticYr)
+        setLive(false);
+    });
+    resetBtn.addEventListener('click', () => {
+        simGalacticYr = 0;
+        scrub.value = '0';
+        setLive(false);
+    });
+    scrub.addEventListener('input', (e) => {
+        simGalacticYr = parseFloat(e.target.value);
+        // Any user scrub disengages live mode — they're driving now.
+        setLive(false);
+    });
+    speed.addEventListener('input', (e) => {
+        setSimSpeedFromSlider(e.target.value);
+    });
+    // Initialise speed from default slider value
+    setSimSpeedFromSlider(speed.value);
+})();
 document.getElementById('tog-showpieces').addEventListener('change', e => {
     const v = e.target.checked;
     Object.values(showpieceGroups).forEach(g => { g.visible = v; });
@@ -7539,8 +7720,9 @@ function animate() {
 
 // ══════════════════════════════════════════════════════════════════════════
 //  SUN-ORBIT ANIMATION
-//  One simulated Galactic year (225 Myr) every SUN_ANIM_SECS wall-clock seconds.
-//  Updates Sun marker, glow, velocity arrow, label, and trail ribbon.
+//  Drives the animated Sun marker around its orbit through Sgr A*.
+//  In LIVE MODE the simGalacticYr advances at simSpeedMyrPerSec; the user
+//  can override with the time-scrub slider, which sets liveMode=false.
 //  Visible only at galaxy zoom and inward (would clutter universe view).
 // ══════════════════════════════════════════════════════════════════════════
 function updateSunOrbit(dt, camDistFromOrigin) {
@@ -7551,11 +7733,18 @@ function updateSunOrbit(dt, camDistFromOrigin) {
     sunOrbitGroup.visible = showOrbit;
     if (!showOrbit) return;
 
-    // Advance galactic-year clock
-    simGalacticYr += (SUN_PERIOD_MYR / SUN_ANIM_SECS) * dt;
-    if (simGalacticYr >= SUN_PERIOD_MYR) simGalacticYr -= SUN_PERIOD_MYR;
+    // Advance galactic-year clock — only in live mode. Scrubbing sets the
+    // value directly and stays paused until "▶ Live" is hit again.
+    if (liveMode) {
+        simGalacticYr += simSpeedMyrPerSec * dt;
+        // Wrap into the slider's range (±2 full orbits) so the indicator
+        // stays accurate even after very long live runs at high speed.
+        if (simGalacticYr >  450) simGalacticYr -= 900;
+        if (simGalacticYr < -450) simGalacticYr += 900;
+    }
 
-    const { pos, vel } = sunOrbitState(simGalacticYr);
+    const state = sunOrbitState(simGalacticYr);
+    const { pos, vel } = state;
     const camDist = camera.position.distanceTo(pos);
     const sizeBoost = Math.max(1, camDist / 8000);  // scale-up at galaxy zoom
 
@@ -7618,13 +7807,39 @@ function updateSunOrbit(dt, camDistFromOrigin) {
         }
     });
 
-    // Update HUD readouts (computed lazily — only the fields we maintain)
-    const phasePct = (simGalacticYr / SUN_PERIOD_MYR) * 100;
-    const phaseDeg = (simGalacticYr / SUN_PERIOD_MYR) * 360;
+    // ── Update HUD + time-control panel readouts every frame ──────────
+    const fmtMyr = (v) => {
+        if (Math.abs(v) < 0.01) return '0 Myr';
+        if (Math.abs(v) < 1)    return v.toFixed(2) + ' Myr';
+        return v.toFixed(1) + ' Myr';
+    };
+    // Reduce simGalacticYr to (-period/2, +period/2] ONLY for the orbital
+    // phase readout — leave the simulation clock free-running so the user
+    // can scrub deep past/future without wraparound surprises.
+    const phaseMyr = ((simGalacticYr % SUN_PERIOD_MYR) + SUN_PERIOD_MYR) % SUN_PERIOD_MYR;
+    const phasePct = (phaseMyr / SUN_PERIOD_MYR) * 100;
+    const phaseDeg = (phaseMyr / SUN_PERIOD_MYR) * 360;
+
     const elGY = document.getElementById('hud-galactic-yr');
     const elGP = document.getElementById('hud-galactic-phase');
-    if (elGY) elGY.textContent = simGalacticYr.toFixed(1) + ' Myr  /  225 Myr';
+    if (elGY) elGY.textContent = (simGalacticYr >= 0 ? '+' : '') + fmtMyr(simGalacticYr)
+        + '  ·  ' + (liveMode ? '▶ live' : '⏸ scrub');
     if (elGP) elGP.textContent = phasePct.toFixed(1) + '%  (θ = ' + phaseDeg.toFixed(0) + '°)';
+
+    // ── Time-control panel readouts (live velocity / Z / speed) ───────
+    const elV  = document.getElementById('stp-vel');
+    const elZ  = document.getElementById('stp-z');
+    const elSV = document.getElementById('stp-scrub-val');
+    const elSP = document.getElementById('stp-speed-val');
+    const elScrub = document.getElementById('stp-scrub');
+    if (elV)  elV.textContent  = state.v_total.toFixed(1) + ' km/s';
+    if (elZ)  elZ.textContent  = (state.z >= 0 ? '+' : '') + state.z.toFixed(0) + ' ly';
+    if (elSV) elSV.textContent = (simGalacticYr >= 0 ? '+' : '') + simGalacticYr.toFixed(1) + ' Myr';
+    if (elSP) elSP.textContent = simSpeedMyrPerSec.toFixed(2) + ' Myr/s';
+    // Keep slider in sync while in live mode (don't fight a user drag)
+    if (elScrub && liveMode && document.activeElement !== elScrub) {
+        elScrub.value = String(simGalacticYr);
+    }
 }
 
 // ══════════════════════════════════════════════════════════════════════════
