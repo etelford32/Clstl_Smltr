@@ -1465,6 +1465,19 @@ nav {
                     <span class="lyr-status" data-layer="alerts"></span>
                 </label>
 
+                <label class="lyr-featured-row" for="feat-lyr-storm-tracks"
+                       title="5-day kinematic forecast cones for every active tropical cyclone worldwide. Click a card in Storm Watch to focus a single storm's cone. Note: kinematic extrapolation, not NHC's official forecast.">
+                    <input type="checkbox" id="feat-lyr-storm-tracks" data-mirror="lyr-storm-tracks">
+                    <span class="lyr-featured-text">
+                        <span class="lyr-featured-name">
+                            <span class="lyr-featured-icon">🛰️</span>Storm Tracks
+                            <span class="lyr-featured-badge">new</span>
+                        </span>
+                        <span class="lyr-featured-desc">5-day forecast cones for active cyclones</span>
+                    </span>
+                    <span class="lyr-status" data-layer="storm-tracks"></span>
+                </label>
+
                 <label class="lyr-featured-row" for="feat-lyr-earthquakes"
                        title="USGS earthquakes M2.5+ in the past 30 days. Marker size scales with magnitude; pulse rate slows for the largest events.">
                     <input type="checkbox" id="feat-lyr-earthquakes" data-mirror="lyr-earthquakes">
@@ -1505,6 +1518,7 @@ nav {
                 </label>
                 <label class="lyr"><input type="checkbox" id="lyr-isobars" checked><span class="lyr-status" data-layer="isobars" title="waiting"></span><label for="lyr-isobars">Isobars</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-alerts"><span class="lyr-status" data-layer="alerts" title="waiting"></span><label for="lyr-alerts">Storm Alerts</label></label>
+                <label class="lyr" title="5-day kinematic extrapolation cone for every active tropical cyclone. NOT NHC's official forecast — this is a great-circle projection of current motion with NHC's published average track-error radii applied for the cone width. Click a storm card to focus its cone."><input type="checkbox" id="lyr-storm-tracks"><span class="lyr-status" data-layer="storm-tracks" title="waiting"></span><label for="lyr-storm-tracks">Storm Tracks (5-day)</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-earthquakes"><span class="lyr-status" data-layer="earthquakes" title="waiting"></span><label for="lyr-earthquakes">Earthquakes</label></label>
             </div>
             <!-- Atmospheric profile sub-group: derived overlays that share
@@ -1673,6 +1687,16 @@ nav {
         <div class="ir">
             <span class="ik">Aurora Power</span>
             <span class="iv" id="ip-aurora">—</span>
+        </div>
+        <!-- Aurora forecast — blended persistence + AR(3) + Kp-regression
+             prediction at +1/+3/+6/+24 h. Populated by AuroraForecaster
+             once AuroraHistory has accumulated ~12 samples (~1 h of
+             OVATION data). Renders as four small chips so the user can
+             read "next 24 h doubles" at a glance. -->
+        <div class="ir" id="ip-aurora-forecast-row" style="align-items:flex-start;display:none;">
+            <span class="ik" style="padding-top:1px;">Forecast</span>
+            <span id="ip-aurora-forecast" class="iv"
+                  style="display:flex;flex-wrap:wrap;gap:3px;justify-content:flex-end;font-size:9.5px;line-height:1.3;"></span>
         </div>
 
         <!-- (hidden legacy element for JS compat) -->
@@ -2201,8 +2225,12 @@ import {
     PrecipAnomalyARForecaster,
     PrecipFusionForecaster,
 } from './js/precip-forecast.js';
+import { AtmosphereClimatology }    from './js/atmosphere-climatology.js';
+import { makeAtmosphereForecasters } from './js/atmosphere-forecast.js';
 import { createWeatherOverlay } from './js/weather-overlay.js';
 import { StormWatchPanel } from './js/storm-watch-panel.js';
+import { StormTrackOverlay } from './js/storm-track-overlay.js';
+import { extrapolateStormTrack, interpolateTrackAtHour } from './js/storm-forecast.js';
 import { makePanelDraggable, resetPanelPosition } from './js/draggable-panel.js';
 import { NWSAlerts, ALERT_COLORS, ALERT_CSS_COLORS, ALERT_PULSE_FREQ, SEVERITY_ORDER, classifyAlertEvent } from './js/nws-alerts.js';
 import { getAlertIconTexture, precomputeAlertIcons } from './js/alert-icons.js';
@@ -2220,6 +2248,8 @@ import {
     fieldAlignedCurrent, substormIndex, cmeTransitTime,
 } from './js/solar-wind-magnetosphere.js';
 import { SolarWeatherHistory, seedSyntheticHistory } from './js/solar-weather-history.js';
+import { AuroraHistory } from './js/aurora-history.js';
+import { forecastAurora as predictAurora, AURORA_HORIZONS_H } from './js/aurora-forecast.js';
 import { SolarWeatherForecaster } from './js/solar-weather-forecast.js';
 import { SatelliteFeed } from './js/satellite-feed.js';
 import { EarthObsFeed, EARTH_OBS_LAYERS } from './js/earth-obs-feed.js';
@@ -2770,6 +2800,43 @@ window.addEventListener('storm-update', e => {
     _updateLayerTooltips();
 });
 
+// ── Storm tracks: 5-day kinematic forecast cones for every active storm ──
+// Uses the same storm-update event the cloud shader is already
+// consuming. The overlay rebuilds tracks each tick; frequency is fine
+// because the NHC feed only refreshes every ~30 minutes and the
+// triangle counts are tiny (≤ 8 storms × ~150 verts each).
+//
+// The cone is a *kinematic extrapolation* (storm-forecast.js), not the
+// official NHC 5-day forecast. UI labelling makes that distinction
+// explicit so users don't mistake it for an evacuation product.
+const stormTrackOverlay = new StormTrackOverlay({
+    THREE,
+    earthMesh,
+    geoToXYZ,
+    extrapolate: extrapolateStormTrack,
+    interpolateAtHour: interpolateTrackAtHour,
+}).start();
+window._stormTrackOverlay = stormTrackOverlay;   // dev console handle
+
+// Forecast-time scrubber → overlay scrubber dots. The Storm Watch
+// panel owns the slider; both surfaces update on the storm-scrub-change
+// window event. Auto-enabling the layer on first non-zero scrub gives
+// new users an immediate "the dot moved on the globe" feedback that
+// makes the scrubber's purpose obvious without needing a tutorial.
+let _stormScrubHasAutoEnabled = false;
+window.addEventListener('storm-scrub-change', (ev) => {
+    const hours = ev?.detail?.hours ?? 0;
+    stormTrackOverlay.setScrubHours(hours);
+    if (hours > 0 && !_stormScrubHasAutoEnabled && !stormTrackOverlay.isVisible()) {
+        const t = document.getElementById('lyr-storm-tracks');
+        if (t && !t.checked) {
+            t.checked = true;
+            t.dispatchEvent(new Event('change'));
+        }
+        _stormScrubHasAutoEnabled = true;
+    }
+});
+
 // ═══════════════════════════════════════════════════════════════
 //  MOUSE → LAT/LON (raycaster)
 // ═══════════════════════════════════════════════════════════════
@@ -2858,9 +2925,97 @@ swFeed.start();
 // Cache last solar wind state for animate() loop
 let _lastSwState = {};
 
+// ── Aurora history + forecaster ─────────────────────────────────────────
+// AuroraHistory persists OVATION hemispheric-power samples across
+// reloads (IDB-backed, 30-day retention). The forecaster blends AR(3)
+// on log1p(power) with a Kp-regression projection driven by SWPC's
+// 3-day Kp forecast. HUD chips paint the +1/+3/+6/+24 h headline.
+//
+// Why this lives at module scope: the history needs to start absorbing
+// samples before any UI renders, so it's created here and the swpc-
+// update handler below ingests on every tick.
+const auroraHistory = new AuroraHistory();
+auroraHistory.open().catch(err => {
+    console.info('[earth] aurora history open failed:', err?.message);
+});
+window._auroraHistory = auroraHistory;   // dev-console handle
+
+// Render the four-chip forecast strip in the SW panel. Hidden until the
+// blended forecaster produces something meaningful (≥ persistence + AR
+// available). One textContent + classList write per chip — no layout
+// thrash even when the SW feed updates mid-sub-second.
+function _paintAuroraForecast() {
+    const row = document.getElementById('ip-aurora-forecast-row');
+    const wrap = document.getElementById('ip-aurora-forecast');
+    if (!row || !wrap) return;
+    // Build a {0,1,3,6,24} → kp lookup from the SWPC 3-day forecast.
+    // Each kp_forecast row carries { time_tag, kp_index, observed }
+    // — we pick the one closest to t_now + horizon.
+    const kpFc = _lastSwState?.kp_forecast ?? [];
+    const tNow = Date.now();
+    const kpAt = { 0: _lastSwState?.kp ?? null };
+    for (const h of [1, 3, 6, 24]) {
+        const target = tNow + h * 3_600_000;
+        let best = null, bestDt = Infinity;
+        for (const r of kpFc) {
+            const t = r.time_tag instanceof Date ? r.time_tag.getTime()
+                    : Date.parse(r.time_tag);
+            if (!Number.isFinite(t)) continue;
+            const dt = Math.abs(t - target);
+            if (dt < bestDt) { bestDt = dt; best = r; }
+        }
+        kpAt[h] = best ? (best.kp_index ?? best.kp ?? null) : kpAt[0];
+    }
+    const bzNow = _lastSwState?.solar_wind?.bz ?? 0;
+    const bzAt  = { 0: bzNow, 1: bzNow, 3: bzNow, 6: bzNow, 24: bzNow };
+
+    const fc = predictAurora({
+        history: auroraHistory,
+        kpForecast: kpAt,
+        bzForecast: bzAt,
+    });
+    if (!fc) { row.style.display = 'none'; return; }
+
+    row.style.display = 'flex';
+    const chips = [];
+    for (const h of AURORA_HORIZONS_H) {
+        const f = fc.frames[h];
+        if (!f || (f.north_gw == null && f.south_gw == null)) continue;
+        const n = f.north_gw != null ? Math.round(f.north_gw) : '—';
+        // Colour the chip by north-hemi predicted intensity — matches
+        // the activity buckets in api/noaa/aurora.js.
+        let bg = 'rgba(80,120,200,.15)', fg = '#9bd';
+        if (f.north_gw >= 100)      { bg = 'rgba(255,80,120,.20)'; fg = '#ff7090'; }
+        else if (f.north_gw >= 50)  { bg = 'rgba(255,160,80,.18)'; fg = '#ffb070'; }
+        else if (f.north_gw >= 20)  { bg = 'rgba(180,220,80,.18)'; fg = '#cfdf60'; }
+        else if (f.north_gw >= 5)   { bg = 'rgba(120,200,160,.18)'; fg = '#88dab0'; }
+        chips.push(
+            `<span title="+${h}h: N≈${n} GW · S≈${f.south_gw != null ? Math.round(f.south_gw) : '—'} GW"
+                   style="padding:2px 6px;border-radius:4px;background:${bg};color:${fg};font-variant-numeric:tabular-nums;">
+                +${h}h ${n}<small style="opacity:.65;">GW</small>
+             </span>`
+        );
+    }
+    wrap.innerHTML = chips.join('');
+}
+
 window.addEventListener('swpc-update', e => {
     const sw = e.detail;           // e.detail IS the full state
     _lastSwState = sw;
+    // Ingest into AuroraHistory FIRST so the forecaster painter at the
+    // bottom of this handler sees the freshest sample. The bin key is
+    // 5-minute-rounded so a swpc burst of multiple updates inside a
+    // single OVATION cadence collapses to one row in IDB.
+    if (Number.isFinite(sw.aurora_power_north) || Number.isFinite(sw.aurora_power_south)) {
+        auroraHistory.ingest({
+            t:              Date.now(),
+            north_gw:       sw.aurora_power_north,
+            south_gw:       sw.aurora_power_south,
+            kp:             sw.kp,
+            bz:             sw.solar_wind?.bz,
+            forecastTimeMs: sw.aurora_forecast_ms,
+        });
+    }
     const d  = sw.derived ?? {};
     const kp = sw.kp ?? 0;
     const storm = Math.min(5, Math.floor(kp / 1.67));
@@ -3019,6 +3174,12 @@ window.addEventListener('swpc-update', e => {
     // ── Aurora visibility for user's location
     updateUserAuroraVis(kp);
 
+    // ── Aurora forecast strip (4 chips: +1h, +3h, +6h, +24h).
+    // Paints AFTER the history ingest at the top of this handler so the
+    // forecaster runs on the freshest sample. Cheap: ≤8 K samples × O(N)
+    // OLS, well under one frame on mobile.
+    _paintAuroraForecast();
+
     // ── Magnetosphere geometry: driven by SunEarthCoupling (lag-corrected)
     // SunEarthCoupling.start() listens to 'swpc-update' and calls
     // magnetosphere.update() with the L1-propagation-delay-corrected state.
@@ -3106,6 +3267,37 @@ document.getElementById('lyr-wind').addEventListener('change', e => {
     wireOverlay('lyr-precip-rate', 'precip-rate');
     wireOverlay('lyr-mist',        'mist');
 }
+
+// Storm Tracks — 5-day kinematic forecast cones. The overlay rebuilds
+// itself off the storm-update event regardless of visibility (it's
+// cheap, ~150 verts × ≤8 storms), so toggling on/off is just a flip
+// of the parent group's visible flag.
+document.getElementById('lyr-storm-tracks')?.addEventListener('change', e => {
+    stormTrackOverlay.setVisible(e.target.checked);
+    // When toggling OFF, also clear any pinned highlight so re-toggling
+    // ON later doesn't surprise the user with a focus from last session.
+    if (!e.target.checked) stormTrackOverlay.setHighlightedStormId(null);
+});
+
+// Status pip for the storm-tracks layer — listens to storm-update so
+// the user gets the same green/grey/red feedback as every other feed.
+window.addEventListener('storm-update', (ev) => {
+    const status = ev?.detail?.status;
+    const count  = (ev?.detail?.storms ?? []).length;
+    const state =
+        status === 'live'    ? 'loaded'   :
+        status === 'offline' ? 'error'    :
+                               'fetching';
+    const title =
+        state === 'loaded' ? `${count} active storm${count === 1 ? '' : 's'} · NHC`
+        : state === 'error' ? 'NHC feed unreachable'
+        :                     'awaiting NHC update';
+    document.querySelectorAll('.lyr-status[data-layer="storm-tracks"]').forEach(pip => {
+        pip.classList.remove('st-idle', 'st-fetching', 'st-loaded', 'st-error');
+        pip.classList.add(`st-${state}`);
+        pip.title = title;
+    });
+});
 
 // ── FEATURED highlights ↔ canonical-toggle sync ───────────────────────────
 // Each row in the Featured section carries `data-mirror="lyr-..."`
@@ -4362,6 +4554,55 @@ wxForecastRegistry.register(new PrecipFusionForecaster({
     biasTracker: precipBiasTracker,
 }));
 
+// ── Cloud + wind forecasters ─────────────────────────────────────────────
+// Same trio (Climatology / AnomalyPersistence / AnomalyAR) as precip,
+// generalised through the AtmosphereClimatology + makeAtmosphereForecasters
+// factory. Each set has its own IDB store so the priors don't crowd
+// each other's schema and we can evolve them independently. Channel
+// indices match weather-history.js's CHW layout:
+//   wind   = U(3) + V(4)   — signed, non-clamped
+//   clouds = low(5) + mid(6) + high(7)  — bounded [0,1], clamped ≥ 0
+const cloudClimatology = new AtmosphereClimatology({
+    channels: [5, 6, 7],
+    dbName:   'cloud_clim_v1',
+});
+const windClimatology = new AtmosphereClimatology({
+    channels: [3, 4],
+    dbName:   'wind_clim_v1',
+});
+
+// Open both stores in parallel; once ready, backfill from the live
+// history ring so the priors get a head start from anything already
+// warmed up. Subscribe to live ingests for the rest of the session.
+Promise.all([cloudClimatology.open(), windClimatology.open()])
+    .then(() => {
+        const seed = (frame) => {
+            cloudClimatology.ingest(frame);
+            windClimatology.ingest(frame);
+        };
+        for (const fr of wxGridHistory.all()) seed(fr);
+        document.addEventListener('weather-history-ingest', (ev) => {
+            const f = ev?.detail?.frame;
+            if (f) seed(f);
+        });
+        // Now that the stores are open, register the six forecasters
+        // (3 cloud + 3 wind). The validator picks them up automatically
+        // via the existing weather-forecast-update event subscription.
+        for (const F of makeAtmosphereForecasters({
+            climatology: cloudClimatology, idPrefix: 'cloud', clampNeg: true,
+        })) wxForecastRegistry.register(F);
+        for (const F of makeAtmosphereForecasters({
+            climatology: windClimatology, idPrefix: 'wind', clampNeg: false,
+        })) wxForecastRegistry.register(F);
+        // Re-run the registry now that the new forecasters are
+        // registered — without this kick the cloud/wind models would
+        // miss the next ingest cycle (~1 hour) before producing output.
+        if (wxGridHistory.size > 0) wxForecastRegistry.runAll();
+    })
+    .catch(err => {
+        console.info('[earth] cloud/wind climatology open failed:', err?.message);
+    });
+
 // Flush climatology + bias to disk on tab hide so a refresh doesn't lose
 // the last batch of in-memory updates. visibilitychange fires on
 // backgrounding, reload, and close; cheap insurance against losing
@@ -4370,6 +4611,8 @@ document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
         precipClimatology.flushNow();
         precipBiasTracker.flushNow();
+        cloudClimatology.flushNow();
+        windClimatology.flushNow();
     }
 });
 
@@ -8059,6 +8302,9 @@ _backdrop.addEventListener('click', _closeMobilePanel);
     // change-event dispatch on first render to align mesh visibility
     // with their default-unchecked state.
     'lyr-humidity', 'lyr-precip-rate', 'lyr-mist',
+    // Storm-tracks layer (5-day kinematic forecast cones). Default off
+    // — the cones can clutter the globe at small zoom levels.
+    'lyr-storm-tracks',
 ].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.dispatchEvent(new Event('change'));
@@ -8093,6 +8339,21 @@ document.addEventListener('click', e => {
 // change what the globe paints.
 const stormWatchPanel = new StormWatchPanel({
     onStormClick: (lat, lon) => flyToLatLon(lat, lon),
+    // Hover or click on a card focuses the matching cone — but only
+    // when the Storm Tracks overlay is visible (toggled via lyr-storm
+    // -tracks). Auto-enable the overlay when the user pins a storm by
+    // click so newcomers immediately see the cone the panel just
+    // pointed at; hover alone doesn't toggle visibility.
+    onStormFocus: (id, _storm) => {
+        stormTrackOverlay.setHighlightedStormId(id);
+        if (id && !stormTrackOverlay.isVisible()) {
+            const t = document.getElementById('lyr-storm-tracks');
+            if (t && !t.checked) {
+                t.checked = true;
+                t.dispatchEvent(new Event('change'));
+            }
+        }
+    },
 });
 stormWatchPanel.mount();
 window._stormWatchPanel = stormWatchPanel;   // dev console handle
