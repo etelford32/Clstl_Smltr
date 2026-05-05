@@ -443,6 +443,20 @@ export function mountConjunctions(fleet, tracker, opts = {}) {
     let autoRescreen = true;             // anchor follows the time cursor
     let autoTimer    = null;             // debounce handle
     const expanded   = new Set();        // primary norad IDs that are expanded
+    // Subscribers for row-update events. The conjunction timeline
+    // strip listens here so it can re-render its tick marks whenever
+    // a screen completes.
+    const rowSubs = new Set();
+    function notifyRows() {
+        const snap = {
+            rows:     lastRows,
+            epochMs:  lastEpochMs,
+            horizonH: horizonHours(),
+        };
+        for (const fn of rowSubs) {
+            try { fn(snap); } catch (err) { console.warn('[mountConjunctions] subscriber threw:', err); }
+        }
+    }
 
     // How far the cursor can drift from the anchor before the panel
     // is considered "stale". The auto-rescreen path triggers a fresh
@@ -593,6 +607,7 @@ export function mountConjunctions(fleet, tracker, opts = {}) {
             }));
             lastRows = rows;
             renderRows(rows);
+            notifyRows();
 
             const totalConj = rows.reduce((s, r) => s + r.conjs.length, 0);
             setStatus(
@@ -797,6 +812,7 @@ export function mountConjunctions(fleet, tracker, opts = {}) {
         if (n === 0) {
             lastRows = [];
             renderRows([]);
+            notifyRows();
         }
         const status = root.querySelector('#op-conj-status');
         if (status && (status.dataset.kind === 'idle' || status.dataset.kind === 'empty' || status.dataset.kind === 'clear')) {
@@ -821,6 +837,20 @@ export function mountConjunctions(fleet, tracker, opts = {}) {
 
     return {
         rescreen: screen,
+        /**
+         * Subscribe to row updates. The timeline strip uses this to
+         * keep its tick marks in sync with what the screener last
+         * returned. Fires immediately with the current snapshot so
+         * subscribers can paint without waiting for the next screen.
+         * Returns an unsubscribe thunk.
+         */
+        subscribeRows(fn) {
+            rowSubs.add(fn);
+            try {
+                fn({ rows: lastRows, epochMs: lastEpochMs, horizonH: horizonHours() });
+            } catch (_) {}
+            return () => rowSubs.delete(fn);
+        },
         /**
          * One-shot screen: the current fleet vs. a single secondary
          * (the user's right-clicked target). Doesn't disturb the
