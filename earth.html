@@ -174,8 +174,102 @@ nav {
 #layer-panel h3 { color:#00c6ff; font-size:10px; text-transform:uppercase;
     letter-spacing:.8px; margin-bottom:10px; }
 .lyr { display:flex; align-items:center; gap:8px; margin-bottom:7px; cursor:pointer; }
-.lyr input[type=checkbox] { accent-color:#00c6ff; width:13px; height:13px; flex-shrink:0; }
 .lyr label { color:#b0c8d8; font-size:11px; cursor:pointer; user-select:none; line-height:1.3; }
+
+/* ─── 3D pill-toggle switch (replaces stock <input type=checkbox>) ────────
+   Visible affordance > a 13 px square. We hide the native checkbox
+   and synthesise a 30 × 16 pill with a 12 px knob using ::before /
+   ::after pseudo-elements. Colour scheme:
+     OFF — graphite track, mid-grey knob, deep inset shadow (concave).
+     ON  — cyan-blue gradient track with a thin cyan rim glow, white
+           knob slid right, drop-shadow underneath (raised).
+   Both states use a slight 1 px highlight on the top edge of the knob
+   to fake a curved bevel without textures.
+   The track and knob each have transition rules so flipping the
+   checkbox animates the state change in ~140 ms — fast enough that
+   power users don't feel slowed down, slow enough to register as
+   intentional. */
+.lyr input[type=checkbox],
+.lyr-featured-row input[type=checkbox] {
+    -webkit-appearance: none;
+    appearance: none;
+    position: relative;
+    width: 30px;            /* track width */
+    height: 16px;
+    flex-shrink: 0;
+    margin: 0;
+    cursor: pointer;
+    background: linear-gradient(180deg, rgba(0,0,0,.55) 0%, rgba(255,255,255,.04) 100%);
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 999px;
+    box-shadow:
+        inset 0 1px 2px rgba(0,0,0,.55),
+        inset 0 -1px 0 rgba(255,255,255,.04);
+    transition: background .14s ease, border-color .14s ease, box-shadow .18s ease;
+}
+.lyr input[type=checkbox]::before,
+.lyr-featured-row input[type=checkbox]::before {
+    content: '';
+    position: absolute;
+    top: 1px; left: 1px;
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: linear-gradient(180deg, #b8c0c8 0%, #6a747e 100%);
+    box-shadow:
+        0 1px 1px rgba(0,0,0,.5),
+        inset 0 1px 0 rgba(255,255,255,.35),
+        inset 0 -1px 0 rgba(0,0,0,.25);
+    transition: transform .16s cubic-bezier(.5,.2,.3,1.4), background .14s ease;
+}
+.lyr input[type=checkbox]:checked,
+.lyr-featured-row input[type=checkbox]:checked {
+    background: linear-gradient(180deg, #0099c8 0%, #00d4ff 100%);
+    border-color: rgba(0,210,255,.55);
+    box-shadow:
+        0 0 6px rgba(0,210,255,.45),
+        inset 0 1px 1px rgba(255,255,255,.18),
+        inset 0 -1px 1px rgba(0,0,0,.25);
+}
+.lyr input[type=checkbox]:checked::before,
+.lyr-featured-row input[type=checkbox]:checked::before {
+    transform: translateX(14px);
+    background: linear-gradient(180deg, #ffffff 0%, #d8eef6 100%);
+    box-shadow:
+        0 1px 2px rgba(0,0,0,.45),
+        inset 0 1px 0 rgba(255,255,255,.95),
+        inset 0 -1px 0 rgba(0,170,210,.20);
+}
+/* Hover: lift the knob slightly so the toggle reads as alive. */
+.lyr:hover input[type=checkbox]:not(:checked)::before,
+.lyr-featured-row:hover input[type=checkbox]:not(:checked)::before {
+    background: linear-gradient(180deg, #ccd4dc 0%, #7e8892 100%);
+}
+.lyr:hover input[type=checkbox]:checked,
+.lyr-featured-row:hover input[type=checkbox]:checked {
+    box-shadow:
+        0 0 8px rgba(0,210,255,.65),
+        inset 0 1px 1px rgba(255,255,255,.25),
+        inset 0 -1px 1px rgba(0,0,0,.25);
+}
+/* Focus ring for keyboard navigation — inset so it doesn't break the
+   pill silhouette. */
+.lyr input[type=checkbox]:focus-visible,
+.lyr-featured-row input[type=checkbox]:focus-visible {
+    outline: 2px solid rgba(0,210,255,.55);
+    outline-offset: 2px;
+}
+/* Featured rows host larger pills — bigger tap target, more prominent. */
+.lyr-featured-row input[type=checkbox] {
+    width: 34px; height: 18px;
+    margin-top: 0;
+}
+.lyr-featured-row input[type=checkbox]::before {
+    width: 14px; height: 14px;
+    top: 1px; left: 1px;
+}
+.lyr-featured-row input[type=checkbox]:checked::before {
+    transform: translateX(16px);
+}
 .lyr-sep { border:none; border-top:1px solid rgba(255,255,255,.07); margin:8px 0; }
 /* Per-layer data-status pip. Grey = idle (feed hasn't fired yet),
    amber pulsing = fetching, green = loaded, red = error. hover on
@@ -213,6 +307,60 @@ nav {
 }
 .lyr-section.collapsed .lyr-section-body {
     max-height:0; opacity:0;
+}
+
+/* ─── FEATURED highlights — pinned at top of layer panel ─────────
+   The discoverability win: a curated list of the 5-6 highest-leverage
+   toggles, each with a one-line description so a first-time visitor
+   understands what flipping the checkbox actually does. The same toggle
+   IDs live in the deep sections below; the featured row is a *visible
+   shortcut*, not a duplicate state — clicking either propagates via the
+   `change` event the underlying handler already listens for. */
+.lyr-section.featured {
+    border-top:none; margin-top:0; padding-top:6px;
+    background:linear-gradient(180deg, rgba(0,200,255,.08) 0%, rgba(0,200,255,0) 100%);
+    border-radius:6px 6px 0 0; padding:6px 4px 8px;
+    margin-bottom:4px;
+}
+.lyr-section.featured .lyr-section-hdr span {
+    color:#0bd; font-weight:700; font-size:.66rem;
+    letter-spacing:.10em;
+}
+.lyr-section.featured .lyr-section-hdr .lyr-chevron { color:#0bd; }
+.lyr-featured-tip {
+    font-size:9px; color:#779; line-height:1.45;
+    padding:0 4px 6px; font-style:italic;
+}
+.lyr-featured-row {
+    display:flex; align-items:flex-start; gap:8px;
+    padding:5px 4px; border-radius:4px;
+    transition:background .15s;
+    cursor:pointer;
+}
+.lyr-featured-row:hover { background:rgba(0,200,255,.06); }
+.lyr-featured-row input[type=checkbox] {
+    accent-color:#00c6ff; width:14px; height:14px; flex-shrink:0;
+    margin-top:1px;
+}
+.lyr-featured-row .lyr-featured-text { flex:1; min-width:0; line-height:1.3; }
+.lyr-featured-row .lyr-featured-name {
+    display:flex; align-items:center; gap:5px;
+    font-size:11.5px; color:#cfe9f5; font-weight:600;
+}
+.lyr-featured-row .lyr-featured-icon {
+    font-size:13px; line-height:1; opacity:.85;
+}
+.lyr-featured-row .lyr-featured-desc {
+    font-size:9.5px; color:#7a91a4; margin-top:1px; font-weight:400;
+}
+.lyr-featured-row .lyr-featured-badge {
+    font-size:8px; color:#0bd;
+    background:rgba(0,200,255,.14);
+    padding:1px 5px; border-radius:8px;
+    letter-spacing:.05em; text-transform:uppercase; font-weight:600;
+}
+.lyr-featured-row .lyr-status {
+    margin-left:auto; align-self:center;
 }
 
 /* ─── Info panel ─────────────────────────────────────────────── */
@@ -928,7 +1076,7 @@ nav {
     .hud-title { grid-column: 1 / -1; margin-bottom: 2px; }
 
     /* All side panels: slide up from bottom as sheets */
-    #layer-panel, #info-panel, #wx-panel, #loc-panel {
+    #layer-panel, #info-panel, #wx-panel, #loc-panel, #storm-watch-panel {
         position: absolute; z-index: 75;
         left: 0; right: 0; bottom: 56px; top: auto;
         width: 100%; max-height: 72vh; overflow-y: auto;
@@ -940,10 +1088,16 @@ nav {
     #layer-panel.panel-open,
     #info-panel.panel-open,
     #wx-panel.panel-open,
-    #loc-panel.panel-open { transform: translateY(0); }
+    #loc-panel.panel-open,
+    #storm-watch-panel.panel-open { transform: translateY(0); }
     /* On mobile the dock button drives panel-open; until tapped, the
        loc-panel stays off-screen so the globe is unobstructed. */
     #loc-panel:not(.panel-open) { transform: translateY(110%); }
+    /* Same default-hidden rule for storm-watch — power users tap the
+       🌀 dock button to surface it. Without this rule the panel would
+       appear stuck mid-screen before tap because its desktop default
+       position doesn't translate to the mobile sheet layout. */
+    #storm-watch-panel:not(.panel-open) { transform: translateY(110%); }
 
     /* Show close button on mobile */
     .panel-close { display: block; }
@@ -1221,6 +1375,110 @@ nav {
         </div>
         <div class="panel-body">
 
+        <!-- ── FEATURED HIGHLIGHTS ──────────────────────────────────────
+             Discoverability layer for first-time visitors. Each row is a
+             *mirror* of a canonical toggle in the deep sections below
+             (different id prefix `feat-` to avoid duplicate ids). The
+             change handler keeps the two surfaces in sync, so flipping
+             either one drives the same underlying visual state. -->
+        <div class="lyr-section featured" data-lyr-section="featured">
+            <div class="lyr-section-hdr">
+                <span>✨ Featured Highlights</span>
+                <span class="lyr-chevron">▾</span>
+            </div>
+            <div class="lyr-section-body">
+                <div class="lyr-featured-tip">
+                    Click any layer to toggle. Hover any control for details.
+                    More layers below — explore freely.
+                </div>
+
+                <label class="lyr-featured-row" for="feat-lyr-wind"
+                       title="Animated streaming particles showing live global wind direction and speed (Open-Meteo, ~hourly).">
+                    <input type="checkbox" id="feat-lyr-wind" data-mirror="lyr-wind" checked>
+                    <span class="lyr-featured-text">
+                        <span class="lyr-featured-name">
+                            <span class="lyr-featured-icon">🌬️</span>Wind Currents
+                        </span>
+                        <span class="lyr-featured-desc">Live streaming particles trace global wind flow</span>
+                    </span>
+                    <span class="lyr-status" data-layer="wind"></span>
+                </label>
+
+                <label class="lyr-featured-row" for="feat-lyr-precip-rate"
+                       title="Open-Meteo precipitation rate as a NEXRAD-style radar palette. Storm cells light up red/magenta; drizzle is whisper-thin green.">
+                    <input type="checkbox" id="feat-lyr-precip-rate" data-mirror="lyr-precip-rate">
+                    <span class="lyr-featured-text">
+                        <span class="lyr-featured-name">
+                            <span class="lyr-featured-icon">🌧️</span>Precipitation Rate
+                            <span class="lyr-featured-badge">new</span>
+                        </span>
+                        <span class="lyr-featured-desc">Storms light up in real time, NEXRAD-style</span>
+                    </span>
+                </label>
+
+                <label class="lyr-featured-row" for="feat-lyr-humidity"
+                       title="Relative humidity (%) painted as a moisture sheet. Tan = parched air, blue = saturated. Below 30% RH the overlay is invisible so dry regions don't get a useless tint.">
+                    <input type="checkbox" id="feat-lyr-humidity" data-mirror="lyr-humidity">
+                    <span class="lyr-featured-text">
+                        <span class="lyr-featured-name">
+                            <span class="lyr-featured-icon">💧</span>Humidity
+                            <span class="lyr-featured-badge">new</span>
+                        </span>
+                        <span class="lyr-featured-desc">See where the air is dry vs saturated</span>
+                    </span>
+                </label>
+
+                <label class="lyr-featured-row" for="feat-lyr-mist"
+                       title="Derived from RH × low-cloud fraction — picks out fog and haze pockets where the near-surface atmosphere is both saturated and clouded. Coastal valleys and tropical convergence zones glow soft white.">
+                    <input type="checkbox" id="feat-lyr-mist" data-mirror="lyr-mist">
+                    <span class="lyr-featured-text">
+                        <span class="lyr-featured-name">
+                            <span class="lyr-featured-icon">🌫️</span>Mist &amp; Fog
+                            <span class="lyr-featured-badge">new</span>
+                        </span>
+                        <span class="lyr-featured-desc">Coastal fog, valley mist, dense haze pockets</span>
+                    </span>
+                </label>
+
+                <label class="lyr-featured-row" for="feat-lyr-obs-topo-relief"
+                       title="NASA Blue Marble shaded relief with bathymetry — continental elevation and ocean-floor topography in one hypsometric ramp. The 'altitude' view: peaks are white, abyss is deep blue.">
+                    <input type="checkbox" id="feat-lyr-obs-topo-relief" data-mirror="lyr-obs-topo-relief">
+                    <span class="lyr-featured-text">
+                        <span class="lyr-featured-name">
+                            <span class="lyr-featured-icon">⛰️</span>Terrain &amp; Bathymetry
+                            <span class="lyr-featured-badge">new</span>
+                        </span>
+                        <span class="lyr-featured-desc">Continental elevation + ocean-floor relief</span>
+                    </span>
+                    <span class="lyr-status" data-layer="topo-relief"></span>
+                </label>
+
+                <label class="lyr-featured-row" for="feat-lyr-alerts"
+                       title="Active US National Weather Service severe-weather alerts (tornado, hurricane, flood, etc.) plotted on the globe with severity-coded pulses.">
+                    <input type="checkbox" id="feat-lyr-alerts" data-mirror="lyr-alerts">
+                    <span class="lyr-featured-text">
+                        <span class="lyr-featured-name">
+                            <span class="lyr-featured-icon">⚡</span>Storm Alerts
+                        </span>
+                        <span class="lyr-featured-desc">Live NWS severe-weather warnings</span>
+                    </span>
+                    <span class="lyr-status" data-layer="alerts"></span>
+                </label>
+
+                <label class="lyr-featured-row" for="feat-lyr-earthquakes"
+                       title="USGS earthquakes M2.5+ in the past 30 days. Marker size scales with magnitude; pulse rate slows for the largest events.">
+                    <input type="checkbox" id="feat-lyr-earthquakes" data-mirror="lyr-earthquakes">
+                    <span class="lyr-featured-text">
+                        <span class="lyr-featured-name">
+                            <span class="lyr-featured-icon">🌋</span>Earthquakes
+                        </span>
+                        <span class="lyr-featured-desc">USGS M2.5+ quakes, last 30 days</span>
+                    </span>
+                    <span class="lyr-status" data-layer="earthquakes"></span>
+                </label>
+            </div>
+        </div>
+
         <!-- ── Surface & Atmosphere ── -->
         <div class="lyr-section" data-lyr-section="surface">
             <div class="lyr-section-hdr"><span>SURFACE &amp; ATMOSPHERE</span><span class="lyr-chevron">▾</span></div>
@@ -1248,7 +1506,27 @@ nav {
                 <label class="lyr"><input type="checkbox" id="lyr-isobars" checked><span class="lyr-status" data-layer="isobars" title="waiting"></span><label for="lyr-isobars">Isobars</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-alerts"><span class="lyr-status" data-layer="alerts" title="waiting"></span><label for="lyr-alerts">Storm Alerts</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-earthquakes"><span class="lyr-status" data-layer="earthquakes" title="waiting"></span><label for="lyr-earthquakes">Earthquakes</label></label>
-            </div></div>
+            </div>
+            <!-- Atmospheric profile sub-group: derived overlays that share
+                 the existing weather DataTextures (no new fetches). Keeping
+                 them visually clustered makes "what's in the air right now"
+                 a single discoverable cluster instead of three loose
+                 checkboxes. -->
+            <div style="margin-top:8px;padding-top:6px;border-top:1px dashed rgba(255,255,255,.05)">
+                <div style="font-size:.6rem;color:#446;letter-spacing:.08em;margin-bottom:4px">ATMOSPHERIC PROFILE</div>
+                <div class="lyr-grid">
+                    <label class="lyr" title="Relative humidity (%): tan = dry, blue = saturated. Hidden below 30% RH so deserts stay readable.">
+                        <input type="checkbox" id="lyr-humidity"><label for="lyr-humidity">Humidity (RH)</label>
+                    </label>
+                    <label class="lyr" title="Open-Meteo precipitation rate as a NEXRAD-style radar palette (mm/hr).">
+                        <input type="checkbox" id="lyr-precip-rate"><label for="lyr-precip-rate">Precip Rate</label>
+                    </label>
+                    <label class="lyr" title="Mist and fog: gated on RH ≥ 85% AND low-cloud fraction ≥ 0.3. Coastal valleys and tropical convergence zones glow soft white.">
+                        <input type="checkbox" id="lyr-mist"><label for="lyr-mist">Mist &amp; Fog</label>
+                    </label>
+                </div>
+            </div>
+            </div>
         </div>
 
         <!-- ── Magnetosphere ── -->
@@ -1280,6 +1558,7 @@ nav {
                 <label class="lyr"><input type="checkbox" id="lyr-obs-cloud-thickness"><span class="lyr-status" data-layer="cloud-thickness" title="waiting"></span><label for="lyr-obs-cloud-thickness">Cloud Thickness (analytic, off by default)</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-obs-fires"><span class="lyr-status" data-layer="fires"           title="waiting"></span><label for="lyr-obs-fires">Active Fires</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-obs-snow"><span class="lyr-status" data-layer="snow"            title="waiting"></span><label for="lyr-obs-snow">Snow Cover</label></label>
+                <label class="lyr" title="NASA Blue Marble shaded relief with bathymetry — continental elevation + ocean-floor topography rendered as a hypsometric tint."><input type="checkbox" id="lyr-obs-topo-relief"><span class="lyr-status" data-layer="topo-relief" title="waiting"></span><label for="lyr-obs-topo-relief">Terrain &amp; Bathymetry</label></label>
             </div></div>
         </div>
 
@@ -1696,6 +1975,18 @@ nav {
             Forecast skill (MAE)
         </div>
         <div id="wx-skill-grid" class="wx-skill-grid">awaiting first forecast…</div>
+        <!-- Precipitation deep-dive coverage HUD.
+             Two one-line readouts: climatology coverage (per-cell ×
+             local-hour bins with ≥3 samples) and the bias-tracker pair
+             count. Both grow as the page is left open / re-opened.
+             They're the user-visible signal that "more historical
+             analysis = better predictions" is materialising. -->
+        <div id="wx-precip-coverage"
+             style="margin-top:6px;font-family:monospace;font-size:9.5px;color:#557;line-height:1.55;"
+             title="Long-memory diagnostics for the precipitation forecasters. Climatology improves the diurnal-cycle prior; bias pairings improve the Open-Meteo ↔ NASA fusion correction.">
+            <div id="wx-clim-cov">climatology: warming up…</div>
+            <div id="wx-bias-cov">fusion bias: awaiting NASA pairings…</div>
+        </div>
         <hr class="ir-sep">
         <!-- NWS alert summary. The 🔔 Get Alerts CTA is intentionally
              promoted into the Storm Alerts row (instead of being buried
@@ -1802,6 +2093,9 @@ nav {
         <button class="mtb-btn" data-panel="wx-panel">
             <span class="mtb-icon">🌦</span>Weather
         </button>
+        <button class="mtb-btn" data-panel="storm-watch-panel">
+            <span class="mtb-icon">🌀</span>Storms
+        </button>
         <a href="space-weather.html" class="mtb-btn" style="text-decoration:none">
             <span class="mtb-icon">⚡</span>Full Data
         </a>
@@ -1898,6 +2192,18 @@ import { WeatherHistory }       from './js/weather-history.js';
 import { WeatherFrameResolver } from './js/weather-frame-resolver.js';
 import { ForecastRegistry, PersistenceForecaster, CHANNEL_NAMES, FORECAST_HORIZONS_H } from './js/weather-forecast.js';
 import { WeatherForecastValidator } from './js/weather-forecast-validation.js';
+import { PrecipClimatology }        from './js/precip-climatology.js';
+import { PrecipBiasTracker }        from './js/precip-bias-tracker.js';
+import { NasaPrecipExtractor }      from './js/nasa-precip-extractor.js';
+import {
+    PrecipClimatologyForecaster,
+    PrecipAnomalyPersistenceForecaster,
+    PrecipAnomalyARForecaster,
+    PrecipFusionForecaster,
+} from './js/precip-forecast.js';
+import { createWeatherOverlay } from './js/weather-overlay.js';
+import { StormWatchPanel } from './js/storm-watch-panel.js';
+import { makePanelDraggable, resetPanelPosition } from './js/draggable-panel.js';
 import { NWSAlerts, ALERT_COLORS, ALERT_CSS_COLORS, ALERT_PULSE_FREQ, SEVERITY_ORDER, classifyAlertEvent } from './js/nws-alerts.js';
 import { getAlertIconTexture, precomputeAlertIcons } from './js/alert-icons.js';
 import { IsobarLayer, geoWindMs, ISOBAR_LEVELS } from './js/isobar-engine.js';
@@ -2348,6 +2654,35 @@ cloudU.u_cloud_layers.value.wrapT     = THREE.ClampToEdgeWrapping;
 cloudU.u_cloud_layers.value.flipY = true;
 cloudU.u_cloud_layers.value.needsUpdate = true;
 
+// ── Derived weather overlays — humidity / precip / mist ───────────────────
+// Three thin shells parented to earthMesh, each reading the same
+// u_weather + u_cloud_layers DataTextures the surface/cloud shaders use.
+// No new fetches; the shader picks one of three colour ramps via mode
+// uniform. Visibility is driven entirely by the layer-panel checkboxes.
+//
+// `u_has_data` stays 0 until the first real weather frame ingests, so
+// these layers paint nothing while we're still on the procedural
+// fallback (the zero-initialised DataTexture would otherwise paint every
+// pixel as "max humidity / no precip" which is misleading).
+const _weatherOverlays = {
+    humidity:    createWeatherOverlay({
+        THREE, radius: R_EARTH * 1.0035, icoLevel: ICO_LEVEL, mode: 'humidity',
+        weatherTexture: earthU.u_weather.value,
+        cloudTexture:   cloudU.u_cloud_layers.value,
+    }),
+    'precip-rate': createWeatherOverlay({
+        THREE, radius: R_EARTH * 1.0040, icoLevel: ICO_LEVEL, mode: 'precip-rate',
+        weatherTexture: earthU.u_weather.value,
+        cloudTexture:   cloudU.u_cloud_layers.value,
+    }),
+    mist: createWeatherOverlay({
+        THREE, radius: R_EARTH * 1.0028, icoLevel: ICO_LEVEL, mode: 'mist',
+        weatherTexture: earthU.u_weather.value,
+        cloudTexture:   cloudU.u_cloud_layers.value,
+    }),
+};
+for (const ov of Object.values(_weatherOverlays)) earthMesh.add(ov.mesh);
+
 // Live cloud imagery is delivered by SatelliteFeed below — it polls a
 // GOES-East / GOES-West / Himawari / Meteosat geostationary mosaic with
 // MODIS polar fill every 10 minutes (see js/satellite-feed.js → cloud-imagery.js)
@@ -2754,6 +3089,63 @@ document.getElementById('lyr-wind').addEventListener('change', e => {
     windParticles.setVisible(e.target.checked);
     windArrows.setVisible(e.target.checked);
 });
+// Derived weather overlays — share the existing weather DataTextures, no
+// new fetches. The shader's u_has_data uniform keeps them blank until a
+// real (non-procedural) frame arrives, so toggling them on before the
+// first feed tick simply waits rather than painting garbage.
+{
+    const wireOverlay = (toggleId, mode) => {
+        const el = document.getElementById(toggleId);
+        if (!el) return;
+        el.addEventListener('change', e => {
+            const ov = _weatherOverlays[mode];
+            if (ov) ov.mesh.visible = e.target.checked;
+        });
+    };
+    wireOverlay('lyr-humidity',   'humidity');
+    wireOverlay('lyr-precip-rate', 'precip-rate');
+    wireOverlay('lyr-mist',        'mist');
+}
+
+// ── FEATURED highlights ↔ canonical-toggle sync ───────────────────────────
+// Each row in the Featured section carries `data-mirror="lyr-..."`
+// pointing at the canonical checkbox in the deep sections. We bind both
+// directions: featured.click → canonical.click → underlying handler;
+// canonical.change → featured.checked update so the surfaces stay
+// consistent when the user toggles via the deep panel.
+{
+    const featuredCheckboxes = document.querySelectorAll('input[data-mirror]');
+    for (const fc of featuredCheckboxes) {
+        const targetId = fc.dataset.mirror;
+        const canonical = document.getElementById(targetId);
+        if (!canonical) {
+            // Featured row references a toggle that doesn't exist yet —
+            // disabled rather than throwing so a later refactor doesn't
+            // brick the panel.
+            fc.disabled = true;
+            continue;
+        }
+        // Initial state mirrors canonical.
+        fc.checked = canonical.checked;
+
+        // Featured → canonical: dispatching a synthetic click drives the
+        // canonical checkbox through its existing change handler, which
+        // is what actually flips the visual state. This avoids us having
+        // to know what the canonical handler does — we just delegate.
+        fc.addEventListener('change', () => {
+            if (canonical.checked !== fc.checked) {
+                canonical.checked = fc.checked;
+                canonical.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        });
+
+        // Canonical → featured: keep the featured surface in sync when
+        // the user (or other code) flips the deep-section checkbox.
+        canonical.addEventListener('change', () => {
+            if (fc.checked !== canonical.checked) fc.checked = canonical.checked;
+        });
+    }
+}
 document.getElementById('lyr-rotate').addEventListener('change', e => {
     controls.autoRotate = e.target.checked;
 });
@@ -3899,6 +4291,88 @@ wxFeed.backfill(wxGridHistory, 24).then(n => {
 const wxForecastRegistry = new ForecastRegistry({ history: wxGridHistory });
 wxForecastRegistry.register(new PersistenceForecaster());
 
+// ── Precipitation deep-dive: long-memory climatology + anomaly models ─────
+// PrecipClimatology survives reloads (IDB) and accumulates a per-cell ×
+// per-local-hour running mean of the precip channel forever. Once it has
+// material coverage (>~14 days), the anomaly forecasters below have a
+// physically meaningful prior to subtract — that's how a model beats
+// raw persistence at >12 h horizons where the diurnal cycle dominates.
+const precipClimatology = new PrecipClimatology();
+precipClimatology.open().then(() => {
+    // Backfill any frames already in the history ring (from IDB warmup)
+    // so the climatology benefits from the past 24 h immediately.
+    for (const fr of wxGridHistory.all()) {
+        precipClimatology.ingest(fr);
+    }
+    // Subscribe to live ingests for the rest of the session.
+    document.addEventListener('weather-history-ingest', (ev) => {
+        const f = ev?.detail?.frame;
+        if (f) precipClimatology.ingest(f);
+    });
+}).catch(err => {
+    console.info('[earth] precip climatology open failed:', err?.message);
+});
+
+// NASA IMERG colour-ramp inverter — gives us an *observed* precip field
+// independent of Open-Meteo's modelled one. Listens for the existing
+// earth-obs-update event; no extra fetch.
+const nasaPrecipExtractor = new NasaPrecipExtractor({ gridW: 72, gridH: 36 });
+nasaPrecipExtractor.start();
+
+// Per-cell EWMA bias tracker for fusion. Subscribes to live model frames
+// (weather-history-ingest) and NASA observations (nasa-precip-update);
+// pairs them within a generous lag window and folds the difference into
+// a per-cell bias estimate that survives reloads via IDB.
+const precipBiasTracker = new PrecipBiasTracker();
+precipBiasTracker.open().then(() => {
+    // Backfill modelled frames already in the ring so the tracker can
+    // pair against them as soon as the first NASA observation lands.
+    for (const fr of wxGridHistory.all()) precipBiasTracker.ingestModel(fr);
+    document.addEventListener('weather-history-ingest', (ev) => {
+        const f = ev?.detail?.frame;
+        if (f) precipBiasTracker.ingestModel(f);
+    });
+    window.addEventListener('nasa-precip-update', (ev) => {
+        const d = ev?.detail;
+        if (!d) return;
+        precipBiasTracker.ingestObservation(d).then(res => {
+            if (res?.paired) {
+                // A new pair updates the bias → re-run the registry so
+                // the fusion forecaster's next emission reflects the
+                // freshly-corrected field, rather than waiting up to an
+                // hour for the next history ingest.
+                wxForecastRegistry.runAll();
+                _paintPrecipCoverage();
+            }
+        });
+    });
+}).catch(err => {
+    console.info('[earth] precip bias tracker open failed:', err?.message);
+});
+
+// Register the four precip-specialised forecasters. Each implements the
+// same Forecaster interface as PersistenceForecaster, so the validator
+// scores them against persistence-v1 automatically and the SW-panel
+// skill table picks them up on the next render pass.
+wxForecastRegistry.register(new PrecipClimatologyForecaster({ climatology: precipClimatology }));
+wxForecastRegistry.register(new PrecipAnomalyPersistenceForecaster({ climatology: precipClimatology }));
+wxForecastRegistry.register(new PrecipAnomalyARForecaster({ climatology: precipClimatology }));
+wxForecastRegistry.register(new PrecipFusionForecaster({
+    climatology: precipClimatology,
+    biasTracker: precipBiasTracker,
+}));
+
+// Flush climatology + bias to disk on tab hide so a refresh doesn't lose
+// the last batch of in-memory updates. visibilitychange fires on
+// backgrounding, reload, and close; cheap insurance against losing
+// forever-history data.
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+        precipClimatology.flushNow();
+        precipBiasTracker.flushNow();
+    }
+});
+
 const wxForecastValidator = new WeatherForecastValidator({ history: wxGridHistory });
 // Best-effort: validator.start() awaits IDB open. Don't block the page.
 wxForecastValidator.start().catch(err => {
@@ -3946,6 +4420,44 @@ function _paintForecastSkill(summary) {
         }
         html += '</div>';
     }
+
+    // Precipitation deep-dive section: rank every registered model by
+    // its precip MAE so the user can watch the climatology + anomaly
+    // models warm up vs persistence over the first few days. Murphy
+    // skill (1 - MSE_model/MSE_persistence) is shown when both sides
+    // have ≥5 samples — below that threshold we just show MAE.
+    const precipModels = Object.keys(summary)
+        .filter(m => summary[m]?.precip)
+        .sort();
+    if (precipModels.length > 1) {
+        html += '<div class="skill-row skill-head" style="margin-top:6px;"><span>precip</span>';
+        for (const h of FORECAST_HORIZONS_H) html += `<span>${h}h</span>`;
+        html += '</div>';
+        for (const model of precipModels) {
+            const short = model.replace(/^precip-/, '').replace(/-v1$/, '');
+            html += `<div class="skill-row"><span class="skill-ch" title="${model}">${short}</span>`;
+            const ref = summary['persistence-v1']?.precip;
+            for (const h of FORECAST_HORIZONS_H) {
+                const m = summary[model].precip?.[h];
+                const r = ref?.[h];
+                const n = m?.n | 0;
+                let cell = '—';
+                let title = `n=${n}`;
+                if (Number.isFinite(m?.mae)) {
+                    if (model === 'persistence-v1' || !Number.isFinite(r?.mse) || (r?.n | 0) < 5 || n < 5) {
+                        cell = m.mae.toFixed(2);
+                    } else {
+                        const skill = 1 - (m.mse / r.mse);
+                        cell = (skill * 100).toFixed(0) + '%';
+                        title += ` MAE=${m.mae.toFixed(2)} skill=${skill.toFixed(2)}`;
+                    }
+                }
+                html += `<span class="skill-cell" title="${title}">${cell}</span>`;
+            }
+            html += '</div>';
+        }
+    }
+
     root.innerHTML = html;
 }
 document.addEventListener('weather-forecast-validation-update', (ev) => {
@@ -3954,6 +4466,54 @@ document.addEventListener('weather-forecast-validation-update', (ev) => {
 // Initial paint with whatever the validator already has on disk so the
 // table isn't blank on a fresh page load with prior history.
 _paintForecastSkill(wxForecastValidator.summary());
+
+// ── Precipitation long-memory coverage HUD ────────────────────────────────
+// Two readouts under the skill grid: climatology coverage (per-cell ×
+// local-hour bins with ≥3 samples) and bias-tracker pairings. Both grow
+// monotonically with usage, so a returning user can see at a glance
+// that the forecasters' priors got stronger since last visit.
+function _paintPrecipCoverage() {
+    const climEl = document.getElementById('wx-clim-cov');
+    const biasEl = document.getElementById('wx-bias-cov');
+    if (!climEl || !biasEl) return;
+
+    // Pull the live coarse-grid resolution from the most recent history
+    // frame — falling back to the default 72×36 for fresh sessions.
+    const newest = wxGridHistory.recent(1);
+    const gridW = newest?.gridW ?? 72;
+    const gridH = newest?.gridH ?? 36;
+
+    const cov = precipClimatology.coverage({ gridW, gridH, minN: 3 });
+    if (cov.total === 0) {
+        climEl.textContent = 'climatology: warming up…';
+    } else {
+        const pct = (cov.frac * 100).toFixed(0);
+        // populated/total counts (cell × local-hour) bins; the whole
+        // store is gridW·gridH·24 entries.
+        climEl.textContent = `clim: ${pct}% bins ≥3 samples (${cov.populated}/${cov.total})`;
+        climEl.style.color = cov.frac > 0.5 ? '#7a8' : (cov.frac > 0.1 ? '#aa8' : '#557');
+    }
+
+    const biasDiag = precipBiasTracker.diagnostics({ gridW, gridH });
+    if (biasDiag.totalPairs === 0) {
+        biasEl.textContent = 'fusion: awaiting NASA pairings…';
+    } else {
+        biasEl.textContent =
+            `fusion: ${biasDiag.totalPairs} pairs · |bias| med ${biasDiag.medianAbsBias.toFixed(2)} mm/hr`;
+        biasEl.style.color = biasDiag.totalPairs > 10 ? '#7a8' : '#aa8';
+    }
+}
+
+// Repaint coverage on every history ingest (climatology grows by N·gridH·gridW
+// bins per ingest) and on validator-update events (proxy for forecast cycles).
+// Bias pairings re-trigger the painter inside the bias-tracker subscriber
+// above, so the HUD also lights up immediately when NASA observations land.
+document.addEventListener('weather-history-ingest', _paintPrecipCoverage);
+document.addEventListener('weather-forecast-validation-update', _paintPrecipCoverage);
+// Initial paint — the climatology may already be hot from IDB warmup.
+// Defer one tick so PrecipClimatology.open()'s async backfill has a
+// chance to complete before we sample coverage.
+setTimeout(_paintPrecipCoverage, 500);
 
 // ═══════════════════════════════════════════════════════════════
 //  SATELLITE FEED — NASA GIBS GOES-16 + MODIS cloud imagery
@@ -4385,6 +4945,14 @@ function updateWeatherTextures(weatherBuf, wBuf, cloudBuf) {
 document.addEventListener('weather-update', e => {
     const { weatherBuffer, windBuffer, cloudBuffer, meta } = e.detail;
     updateWeatherTextures(weatherBuffer, windBuffer, cloudBuffer);
+
+    // Lift the "no data yet" guard on the derived weather overlays
+    // (humidity / precip-rate / mist). Skip when the feed flags itself
+    // as the procedural demo — those buffers carry uniform fake values
+    // that would render as a featureless globe-wide haze.
+    if (!meta?.demo) {
+        for (const ov of Object.values(_weatherOverlays)) ov.setHasData(true);
+    }
 
     // Rebuild isobar contours from the fresh pressure field
     isobarLayer.update(weatherBuffer);
@@ -6958,15 +7526,29 @@ function _setUserPin(lat, lon) {
 
 function _flyToUserLocation() {
     if (_userLat == null) return;
-    // Transform geographic coords through current Earth rotation to world space
-    const localPos = geoToXYZ(_userLat, _userLon);
-    const worldPos = localPos.clone().applyEuler(earthMesh.rotation);
+    flyToLatLon(_userLat, _userLon);
+}
 
+/**
+ * Generic "fly the camera to a lat/lon" hook. The user-pin button uses
+ * this; the StormWatchPanel uses it via window.flyToLatLon (exposed
+ * below). Both go through the same animation state so a click while
+ * a previous fly is still resolving overrides smoothly.
+ */
+function flyToLatLon(lat, lon) {
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    const localPos = geoToXYZ(lat, lon);
+    const worldPos = localPos.clone().applyEuler(earthMesh.rotation);
     _flyFrom.copy(camera.position);
-    _flyAimAt.copy(worldPos).multiplyScalar(0.1);      // aim near surface centre
+    _flyAimAt.copy(worldPos).multiplyScalar(0.1);
     _flyTarget   = worldPos.clone().multiplyScalar(4.2);
     _flyProgress = 0;
 }
+// Surface as a global so the StormWatchPanel (and any future module
+// living outside this script) can drive the camera without needing to
+// import the Three.js scene state directly. Single-purpose hook —
+// callers don't get raw access to camera/controls.
+window.flyToLatLon = flyToLatLon;
 
 // ═══════════════════════════════════════════════════════════════
 //  AURORA VISIBILITY FOR USER'S LOCATION
@@ -7436,17 +8018,17 @@ document.querySelectorAll('.mtb-btn[data-panel]').forEach(btn => {
     btn.addEventListener('click', () => _openMobilePanel(btn.dataset.panel));
 });
 
-// Panel close buttons
-document.querySelectorAll('.panel-close[data-close]').forEach(btn => {
-    btn.addEventListener('click', () => {
-        const id = btn.dataset.close;
-        document.getElementById(id)?.classList.remove('panel-open');
-        if (_openPanel === id) {
-            _openPanel = null;
-            _backdrop.style.display = 'none';
-            document.querySelector(`.mtb-btn[data-panel="${id}"]`)?.classList.remove('active');
-        }
-    });
+// Panel close buttons — delegated so dynamically-mounted panels work too.
+document.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('.panel-close[data-close]');
+    if (!btn) return;
+    const id = btn.dataset.close;
+    document.getElementById(id)?.classList.remove('panel-open');
+    if (_openPanel === id) {
+        _openPanel = null;
+        _backdrop.style.display = 'none';
+        document.querySelector(`.mtb-btn[data-panel="${id}"]`)?.classList.remove('active');
+    }
 });
 
 // Backdrop tap → close
@@ -7472,6 +8054,11 @@ _backdrop.addEventListener('click', _closeMobilePanel);
     'lyr-tropic', 'lyr-subsolar', 'lyr-weather', 'lyr-wind', 'lyr-jet',
     'lyr-isobars', 'lyr-alerts', 'lyr-earthquakes', 'lyr-iss',
     'lyr-rotate',
+    // Derived weather overlays (humidity / precip-rate / mist) — share
+    // the existing weather DataTextures, so they need the same synthetic
+    // change-event dispatch on first render to align mesh visibility
+    // with their default-unchecked state.
+    'lyr-humidity', 'lyr-precip-rate', 'lyr-mist',
 ].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.dispatchEvent(new Event('change'));
@@ -7480,23 +8067,41 @@ _backdrop.addEventListener('click', _closeMobilePanel);
 // ═══════════════════════════════════════════════════════════════
 //  PANEL MINIMIZE
 // ═══════════════════════════════════════════════════════════════
-document.querySelectorAll('[data-minimize-btn]').forEach(btn => {
-    btn.addEventListener('click', e => {
-        e.stopPropagation();
-        const id    = btn.dataset.minimizeBtn;
-        const panel = document.getElementById(id);
-        if (!panel) return;
-        const minimized = panel.classList.toggle('panel-minimized');
-        btn.textContent = minimized ? '▸' : '▾';
-        try { localStorage.setItem('earth-panel-min-' + id, minimized ? '1' : '0'); } catch {}
-    });
+// Document-level delegation so dynamically-mounted panels (e.g.
+// StormWatchPanel, instantiated later in the script) also pick up the
+// minimise behaviour without us having to remember to re-bind.
+document.addEventListener('click', e => {
+    const btn = e.target.closest('[data-minimize-btn]');
+    if (!btn) return;
+    e.stopPropagation();
+    const id    = btn.dataset.minimizeBtn;
+    const panel = document.getElementById(id);
+    if (!panel) return;
+    const minimized = panel.classList.toggle('panel-minimized');
+    btn.textContent = minimized ? '▸' : '▾';
+    try { localStorage.setItem('earth-panel-min-' + id, minimized ? '1' : '0'); } catch {}
 });
+
+// ═══════════════════════════════════════════════════════════════
+//  STORM WATCH PANEL — top-5 active cyclones worldwide
+// ═══════════════════════════════════════════════════════════════
+// Mount BEFORE the minimise/draggable wiring below so the panel's
+// dynamically-built header is present when state restore runs.
+// Subscribes to the existing 'storm-update' event from StormFeed (which
+// has been running since the early init block); the cloud shader keeps
+// painting eye markers independently, so toggling this panel off doesn't
+// change what the globe paints.
+const stormWatchPanel = new StormWatchPanel({
+    onStormClick: (lat, lon) => flyToLatLon(lat, lon),
+});
+stormWatchPanel.mount();
+window._stormWatchPanel = stormWatchPanel;   // dev console handle
 
 // Restore minimized states on load. Each panel can have an HTML default
 // (e.g. info-panel ships minimized so first-time visitors see the globe);
 // localStorage overrides the default in either direction once the user
 // explicitly toggles the panel.
-['layer-panel', 'info-panel', 'wx-panel', 'loc-panel'].forEach(id => {
+['layer-panel', 'info-panel', 'wx-panel', 'loc-panel', 'storm-watch-panel'].forEach(id => {
     try {
         const panel = document.getElementById(id);
         if (!panel) return;
@@ -7509,6 +8114,32 @@ document.querySelectorAll('[data-minimize-btn]').forEach(btn => {
         const btn = panel.querySelector('[data-minimize-btn]');
         if (btn) btn.textContent = minimized ? '▸' : '▾';
     } catch {}
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  DRAGGABLE PANELS — every chrome panel responds to header drag
+// ═══════════════════════════════════════════════════════════════
+// The header doubles as a minimise click handler; draggable-panel.js
+// distinguishes drag-from-click via a 4 px movement threshold, so a
+// quick tap still toggles minimise as before. Stored positions are
+// re-clamped to the viewport on resize/orientation change so a phone
+// in portrait never strands a panel off-screen.
+['layer-panel', 'info-panel', 'wx-panel', 'loc-panel', 'storm-watch-panel'].forEach(id => {
+    const panel = document.getElementById(id);
+    if (panel) makePanelDraggable(panel);
+});
+
+// Convenience: double-clicking a panel header resets its position to
+// CSS default. A "reset layout" button could call this too — for now
+// the gesture is enough of an escape hatch if the user drags a panel
+// somewhere awkward and wants it back where it started.
+document.querySelectorAll('.panel-header').forEach(hdr => {
+    hdr.addEventListener('dblclick', (ev) => {
+        // Don't reset when the user double-clicks a button inside the header.
+        if (ev.target.closest('.panel-btn')) return;
+        const panel = hdr.parentElement;
+        if (panel) resetPanelPosition(panel);
+    });
 });
 
 // ═══════════════════════════════════════════════════════════════
