@@ -28,6 +28,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
     jdNow, moonGeocentric, earthHeliocentric, marsHeliocentric,
     mercuryHeliocentric, venusHeliocentric,
+    jupiterHeliocentric, saturnHeliocentric,
+    uranusHeliocentric,  neptuneHeliocentric,
 } from './horizons.js';
 import {
     KM_PER_AU, R_EARTH, R_MOON, SOI_MOON, SOI_MARS, SECONDS_PER_DAY,
@@ -193,6 +195,10 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         mercury:      world.planets.mercury.group,
         venus:        world.planets.venus.group,
         mars:         world.planets.mars.group,
+        jupiter:      world.planets.jupiter.group,
+        saturn:       world.planets.saturn.group,
+        uranus:       world.planets.uranus.group,
+        neptune:      world.planets.neptune.group,
         planets:      world.planets,
     };
 
@@ -953,18 +959,26 @@ export function initMissionPlanner({ container, onEvent } = {}) {
     // Earth is scaled via earthTilt so the Moon (sibling in earthSystem)
     // and the lunar orbit ring stay at their real heliocentric offsets.
     // Moon stays at real size and relies on its halo sprite at distance.
-    const MIN_ANGULAR = 0.012;
+    const MIN_ANGULAR  = 0.012;
+    // Cap the upscale so that flying out to Neptune (~30 AU) doesn't inflate
+    // a 0.5 R⊕ Mars to span the entire inner solar system. Beyond the cap
+    // bodies dim into halos / sub-pixel dots, which is fine — at that range
+    // the relevant frame is the outer planets anyway.
+    const MAX_LOD_SCALE = 2000;
     const _camWorld    = new THREE.Vector3();
     const _bodyWorld   = new THREE.Vector3();
     function lodScale(distance, realRadius) {
         const angular = realRadius / Math.max(1e-3, distance);
-        return angular < MIN_ANGULAR ? MIN_ANGULAR / angular : 1.0;
+        if (angular >= MIN_ANGULAR) return 1.0;
+        return Math.min(MAX_LOD_SCALE, MIN_ANGULAR / angular);
     }
     function applyPlanetLOD() {
         world.camera.getWorldPosition(_camWorld);
 
-        // Inner-planet groups
-        for (const handle of [hel.planets.mercury, hel.planets.venus, hel.planets.mars]) {
+        // All planet groups (inner + outer). Each handle exposes realRadius
+        // (set in buildWorldScene) — no special-casing per body.
+        for (const key of ['mercury','venus','mars','jupiter','saturn','uranus','neptune']) {
+            const handle = hel.planets[key];
             handle.group.getWorldPosition(_bodyWorld);
             handle.group.scale.setScalar(
                 lodScale(_camWorld.distanceTo(_bodyWorld), handle.realRadius));
@@ -1001,16 +1015,22 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         // Sun spin (purely cosmetic).
         hel.sun.rotation.y += dt * 0.04;
 
-        // Update inner-planet positions from live ephemeris at scenarioJD.
+        // Update planet positions from live ephemeris at scenarioJD.
         // (Earth's position is handled by updateEarthSystem, which moves
         // the parented earthSystem group; that's why we don't update
-        // hel.earth here anymore.)
-        const mVec  = marsHeliocentric(state.scenarioJD);
-        const meVec = mercuryHeliocentric(state.scenarioJD);
-        const vVec  = venusHeliocentric(state.scenarioJD);
-        hel.mars.position.copy   (eclipticToVec3(mVec.lon_rad,  mVec.lat_rad,  mVec.dist_AU  * AU_TO_SCENE));
-        hel.mercury.position.copy(eclipticToVec3(meVec.lon_rad, meVec.lat_rad, meVec.dist_AU * AU_TO_SCENE));
-        hel.venus.position.copy  (eclipticToVec3(vVec.lon_rad,  vVec.lat_rad,  vVec.dist_AU  * AU_TO_SCENE));
+        // hel.earth here.)
+        const planetEphem = [
+            [hel.mercury, mercuryHeliocentric(state.scenarioJD)],
+            [hel.venus,   venusHeliocentric  (state.scenarioJD)],
+            [hel.mars,    marsHeliocentric   (state.scenarioJD)],
+            [hel.jupiter, jupiterHeliocentric(state.scenarioJD)],
+            [hel.saturn,  saturnHeliocentric (state.scenarioJD)],
+            [hel.uranus,  uranusHeliocentric (state.scenarioJD)],
+            [hel.neptune, neptuneHeliocentric(state.scenarioJD)],
+        ];
+        for (const [group, eph] of planetEphem) {
+            group.position.copy(eclipticToVec3(eph.lon_rad, eph.lat_rad, eph.dist_AU * AU_TO_SCENE));
+        }
 
         // Drive procedural-skin axial rotation + sun-direction lighting so
         // the lit hemisphere always faces the (origin) Sun. Done after
@@ -1018,9 +1038,9 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         // current position to compute uSunDir.
         if (hel.planets) {
             const sunPos = new THREE.Vector3(0, 0, 0);
-            updateOrreryPlanet(hel.planets.mercury, state.scenarioJD, sunPos);
-            updateOrreryPlanet(hel.planets.venus,   state.scenarioJD, sunPos);
-            updateOrreryPlanet(hel.planets.mars,    state.scenarioJD, sunPos);
+            for (const key of ['mercury','venus','mars','jupiter','saturn','uranus','neptune']) {
+                updateOrreryPlanet(hel.planets[key], state.scenarioJD, sunPos);
+            }
             applyPlanetLOD();
         }
 
@@ -1224,19 +1244,38 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         world.controls.target.copy(mWorld);
         world.camera.position.set(mWorld.x * 1.001, mWorld.y + 8, mWorld.z * 1.001 + 8);
     }
-    function focusMars() {
-        const mP = hel.mars.position;
-        world.controls.target.copy(mP);
-        const dir = mP.clone().normalize();
-        world.camera.position.copy(mP).add(dir.multiplyScalar(20));
+    function focusMars() { _focusPlanet(hel.mars, 20); }
+    function focusJupiter() {
+        // Jupiter is huge (10.96 R⊕) — pull back further so it fits.
+        _focusPlanet(hel.jupiter, hel.planets.jupiter.realRadius * 4);
+    }
+    function focusSaturn() {
+        // Saturn's ring system extends to ~2.4× planet radius; frame both.
+        _focusPlanet(hel.saturn, hel.planets.saturn.realRadius * 6);
+    }
+    function _focusPlanet(group, distance) {
+        const p = group.position;
+        world.controls.target.copy(p);
+        const dir = p.clone().normalize();
+        // Approach along the radial direction so the Sun lights the visible
+        // face. Tilt slightly above the ecliptic for a 3/4 view.
+        world.camera.position.copy(p)
+            .add(dir.multiplyScalar(distance))
+            .add(new THREE.Vector3(0, distance * 0.4, 0));
     }
     function focusSun() {
         world.controls.target.set(0, 0, 0);
         world.camera.position.set(0, 0.5 * AU_TO_SCENE, 1.0 * AU_TO_SCENE);
     }
     function focusSystem() {
+        // Frame the inner solar system (Mercury through Mars).
         world.controls.target.set(0, 0, 0);
         world.camera.position.set(0, 1.5 * AU_TO_SCENE, 2.5 * AU_TO_SCENE);
+    }
+    function focusOuterSystem() {
+        // Pull back so Neptune's orbit (30 AU) is comfortably in frame.
+        world.controls.target.set(0, 0, 0);
+        world.camera.position.set(0, 22 * AU_TO_SCENE, 38 * AU_TO_SCENE);
     }
 
     // Seed initial body positions (zero-dt update so earthSystem.position
@@ -1259,8 +1298,11 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         focusEarth,
         focusMoon,
         focusMars,
+        focusJupiter,
+        focusSaturn,
         focusSun,
         focusSystem,
+        focusOuterSystem,
         getStats: () => ({
             rockets:        state.rockets.length,
             payloads:       state.payloads.length,
@@ -1307,10 +1349,12 @@ function buildWorldScene(renderer, w, h) {
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true; controls.dampingFactor = 0.08;
     controls.minDistance = 1.4;
-    controls.maxDistance = 2.0 * AU_TO_SCENE;     // past Mars orbit
+    controls.maxDistance = 35.0 * AU_TO_SCENE;    // past Neptune (~30 AU)
 
     scene.add(new THREE.AmbientLight(0x303048, 0.45));
-    addStarfield(scene, 2400, 0.8 * AU_TO_SCENE);
+    // Starfield must enclose the whole solar system, including Neptune
+    // at 30 AU; bump the radius so the user never flies past the stars.
+    addStarfield(scene, 3200, 50 * AU_TO_SCENE);
 
     // ── Sun: photosphere + corona shells + lens flare + PointLight ─────────
     const SUN_R = 70;  // ~64% of real Sun radius (109 R⊕); plenty visible
@@ -1351,30 +1395,51 @@ function buildWorldScene(renderer, w, h) {
     sunLabel.position.set(0, SUN_R * 1.6, 0);
     scene.add(sunLabel);
 
-    // ── Heliocentric orbit rings (Mercury / Venus / Earth / Mars) ──────────
+    // ── Heliocentric orbit rings (Mercury through Neptune) ─────────────────
     const orbits = [
-        { r: 0.387 * AU_TO_SCENE, color: 0x886655 },
-        { r: 0.723 * AU_TO_SCENE, color: 0xc8b88a },
-        { r: 1.000 * AU_TO_SCENE, color: 0x4488cc },
-        { r: 1.524 * AU_TO_SCENE, color: 0xc05530 },
+        { r:  0.387 * AU_TO_SCENE, color: 0x886655 },   // Mercury
+        { r:  0.723 * AU_TO_SCENE, color: 0xc8b88a },   // Venus
+        { r:  1.000 * AU_TO_SCENE, color: 0x4488cc },   // Earth
+        { r:  1.524 * AU_TO_SCENE, color: 0xc05530 },   // Mars
+        { r:  5.203 * AU_TO_SCENE, color: 0xd4a060 },   // Jupiter
+        { r:  9.537 * AU_TO_SCENE, color: 0xd9c97a },   // Saturn
+        { r: 19.191 * AU_TO_SCENE, color: 0x9fd6e0 },   // Uranus
+        { r: 30.069 * AU_TO_SCENE, color: 0x4f7adb },   // Neptune
     ];
     for (const o of orbits) scene.add(makeRingLine(o.r, o.color, 0.6));
 
-    // ── Inner planets via procedural orrery skins ──────────────────────────
+    // ── Planets via procedural orrery skins ────────────────────────────────
     // Bodies are built at their REAL radii so that flying close (e.g.,
-    // Olympia Base on Mars) shows correct relative scale: Mars (0.531 R⊕)
-    // really is half of Earth. From AU-scale viewing distance the meshes
-    // would be sub-pixel, so the unified tick scales them up uniformly via
-    // applyPlanetLOD() to maintain a minimum on-screen angular size. The
-    // stylised landing pad / dome / beacon on each surface scales with the
-    // group, so Olympia Base reads at every zoom.
-    const MARS_R    = R_MARS  / R_EARTH;     // 0.531
-    const VENUS_R   = 6051.8  / R_EARTH;     // 0.949
-    const MERCURY_R = 2439.7  / R_EARTH;     // 0.382
+    // Olympia Base on Mars or a Saturn-ring grazer) shows correct relative
+    // scale. From AU-scale viewing distance the meshes would be sub-pixel,
+    // so the unified tick scales them up uniformly via applyPlanetLOD() to
+    // maintain a minimum on-screen angular size. Stylised surface decals
+    // (landing pads, beacons, Saturn's rings) scale with each planet group
+    // so they read at every zoom.
+    //
+    // Real radii in R⊕ (R_EARTH = 6378.137 km):
+    //   Mercury 2439.7  / 6378 = 0.382       Jupiter 69911 / 6378 = 10.96
+    //   Venus   6051.8  / 6378 = 0.949       Saturn  58232 / 6378 =  9.13
+    //   Mars    3389.5  / 6378 = 0.531       Uranus  25362 / 6378 =  3.98
+    //                                        Neptune 24622 / 6378 =  3.86
+    const MERCURY_R = 2439.7  / R_EARTH;
+    const VENUS_R   = 6051.8  / R_EARTH;
+    const MARS_R    = R_MARS  / R_EARTH;
+    const JUPITER_R = 69911   / R_EARTH;
+    const SATURN_R  = 58232   / R_EARTH;
+    const URANUS_R  = 25362   / R_EARTH;
+    const NEPTUNE_R = 24622   / R_EARTH;
     const mercuryP = makeOrreryPlanet('mercury', MERCURY_R, 0xaa9988);
     const venusP   = makeOrreryPlanet('venus',   VENUS_R,   0xffeebb);
     const marsP    = makeOrreryPlanet('mars',    MARS_R,    0xffaa77);
-    scene.add(mercuryP.group, venusP.group, marsP.group);
+    const jupiterP = makeOrreryPlanet('jupiter', JUPITER_R, 0xd4a060);
+    const saturnP  = makeOrreryPlanet('saturn',  SATURN_R,  0xd9c97a);
+    const uranusP  = makeOrreryPlanet('uranus',  URANUS_R,  0x9fd6e0);
+    const neptuneP = makeOrreryPlanet('neptune', NEPTUNE_R, 0x4f7adb);
+    scene.add(
+        mercuryP.group, venusP.group, marsP.group,
+        jupiterP.group, saturnP.group, uranusP.group, neptuneP.group,
+    );
 
     // Mars surface bases (Olympia Base) ride the spinning Mars surface.
     for (const biome of MARS_BIOMES) {
@@ -1384,9 +1449,17 @@ function buildWorldScene(renderer, w, h) {
     const mercuryLabel = makeBodyLabel('Mercury', '#bba', 1.4);
     const venusLabel   = makeBodyLabel('Venus',   '#fec', 1.6);
     const marsLabel    = makeBodyLabel('Mars',    '#f96', 1.6);
+    const jupiterLabel = makeBodyLabel('Jupiter', '#fda', 1.8);
+    const saturnLabel  = makeBodyLabel('Saturn',  '#fec', 1.8);
+    const uranusLabel  = makeBodyLabel('Uranus',  '#9fe', 1.6);
+    const neptuneLabel = makeBodyLabel('Neptune', '#7af', 1.6);
     mercuryP.group.add(mercuryLabel); mercuryLabel.position.set(0, MERCURY_R * 1.8, 0);
-    venusP.group.add(venusLabel);     venusLabel.position.set(0, VENUS_R   * 1.8, 0);
-    marsP.group.add(marsLabel);       marsLabel.position.set(0, MARS_R    * 1.8, 0);
+    venusP.group.add(venusLabel);     venusLabel.position.set(0,  VENUS_R   * 1.8, 0);
+    marsP.group.add(marsLabel);       marsLabel.position.set(0,   MARS_R    * 1.8, 0);
+    jupiterP.group.add(jupiterLabel); jupiterLabel.position.set(0, JUPITER_R * 1.4, 0);
+    saturnP.group.add(saturnLabel);   saturnLabel.position.set(0,  SATURN_R  * 2.6, 0);
+    uranusP.group.add(uranusLabel);   uranusLabel.position.set(0,  URANUS_R  * 1.8, 0);
+    neptuneP.group.add(neptuneLabel); neptuneLabel.position.set(0, NEPTUNE_R * 1.8, 0);
 
     // ── Earth System group (parented to scene root, repositioned each frame
     //     to Earth's heliocentric position by updateEarthSystem). ───────────
@@ -1482,13 +1555,20 @@ function buildWorldScene(renderer, w, h) {
     mercuryP.realRadius = MERCURY_R;
     venusP.realRadius   = VENUS_R;
     marsP.realRadius    = MARS_R;
+    jupiterP.realRadius = JUPITER_R;
+    saturnP.realRadius  = SATURN_R;
+    uranusP.realRadius  = URANUS_R;
+    neptuneP.realRadius = NEPTUNE_R;
 
     return {
         scene, camera, controls,
         earthSystem, earth, earthTilt, earthSkinU,
         grid, atmo, moon, earthHalo, moonHalo,
         sun, sunGlow, flare, sunLight,
-        planets: { mercury: mercuryP, venus: venusP, mars: marsP },
+        planets: {
+            mercury: mercuryP, venus:   venusP,   mars:    marsP,
+            jupiter: jupiterP, saturn:  saturnP,  uranus:  uranusP, neptune: neptuneP,
+        },
     };
 }
 
