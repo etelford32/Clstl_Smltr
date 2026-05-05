@@ -145,6 +145,8 @@ void main() {
         bundleScale = epScale;
         // anti-sag activates during erupt+fade stages
         epAntiSag = clamp(aClassParams.y - 0.2, 0.0, 1.0);
+    } else if (classId == 6) {                          // RAIN — post-flare arcade
+        bundleScale = 0.70;                             // moderately tight loops
     }
 
     float halfR = uBundleHalfRadius * bundleScale;
@@ -176,9 +178,13 @@ void main() {
     }
 
     // Apex sag — cool plasma sags; EP class flips it to anti-sag (rising).
+    // RAIN class: gentle sag (the arcade is hot enough to support itself);
+    // the rain visual comes from droplets sliding *along* the loops, not
+    // from sag.
     float sagMag = 0.005 * (classId == 5 ? mix(1.0, -1.4, epAntiSag) : 1.0);
     if (classId == 1) sagMag *= 1.20;                   // IP slightly heavier
     if (classId == 3) sagMag *= 0.4;                    // HEDGEROW: less arching
+    if (classId == 6) sagMag *= 0.3;                    // RAIN: hot loops, minimal sag
     float sag = sagMag * sin(PI * aS) * sin(PI * aS);
 
     // Alfvén transverse oscillation. Different per-thread phase produces a
@@ -190,6 +196,10 @@ void main() {
     if (classId == 5) {                                 // EP: erupt motion
         alfvenAmp *= 1.0 + 4.0 * epAntiSag;
         alfvenFreq *= 1.4;
+    }
+    if (classId == 6) {                                 // RAIN: condensation jiggle
+        alfvenAmp *= 0.6;
+        alfvenFreq = 1.2;
     }
     float wob = sin(uTime * alfvenFreq + aThreadId * 13.0 + aS * 4.0)
               * alfvenAmp * sin(PI * aS);
@@ -246,16 +256,20 @@ void main() {
     else if (classId == 3) { scrollSpeed = 0.55; flowSign = -1.0; dashFreq = 22.0; } // HEDGEROW
     else if (classId == 4) { scrollSpeed = 0.40; }                    // TORNADO
     else if (classId == 5) { scrollSpeed = 0.85; flowSign = 1.0;  dashFreq = 8.0; }  // EP
+    else if (classId == 6) { scrollSpeed = 0.50; flowSign = -1.0; dashFreq = 22.0; } // RAIN — droplets fall
 
     float scrollPhase = (vS - flowSign * uTime * scrollSpeed) * dashFreq
                       + vThreadId * 6.28;
     float dashes = 0.5 + 0.5 * sin(scrollPhase);
-    dashes = pow(dashes, 1.6);
+    // RAIN: sharper dashes → tight bright droplets between dim gaps (the
+    // characteristic "beads on a string" visual of coronal rain).
+    dashes = pow(dashes, classId == 6 ? 2.6 : 1.6);
 
     // ── Per-thread brightening cycle ───────────────────────────────
     float cycleFreq = 0.42;
     if (classId == 2) cycleFreq = 0.85;            // ARP twitchier
     if (classId == 5) cycleFreq = 1.30;            // EP very fast
+    if (classId == 6) cycleFreq = 0.30;            // RAIN: slower, condensation timescale
     float bright = 0.65 + 0.35 * sin(uTime * cycleFreq + vThreadId * 9.7);
 
     // ── Arch shape: brighter at footpoints AND apex, slight mid-loop dip.
@@ -294,32 +308,39 @@ void main() {
                   coolCol, smoothstep(0.5, 1.0, coolingT));
     }
 
-    // ── EP age fade — bundle goes brighter then dims as it detaches ─
-    float epFade = 1.0;
+    // ── Class-driven alpha modulator (EP fade-out + RAIN viz envelope) ─
+    float classFade = 1.0;
     if (classId == 5) {
-        epFade = vClassParams.w;                  // 0..1 alpha modulator
+        classFade = vClassParams.w;               // EP: 0..1 alpha modulator
+    } else if (classId == 6) {
+        classFade = vClassParams.y;               // RAIN: viz scale (fade-in/out)
     }
 
     float intensity = vBundleNorm * archShape * bright
                     * (0.55 + 0.45 * dashes)
-                    * edge * epFade;
+                    * edge * classFade;
 
     // ── On-disk vs limb mode (unified shader, premultiplied-alpha blend).
     vec3 toCam = normalize(uCameraPos - vWorldPos);
     float facing = dot(vSurfaceNormal, toCam);
     float disk = smoothstep(0.10, 0.45, facing);
 
-    // Disk: dark Hα absorption (premultiplied black with alpha = intensity).
-    // EP loses absorption strength as it lifts off — it should look bright
-    // even on disk because it's geometrically rising above the photosphere.
-    float diskAlpha = intensity * 0.85 * (1.0 - 0.6 * float(classId == 5));
-    vec3  colDisk = vec3(0.0);
+    // Disk: cool prominences absorb chromospheric Hα → render as dark
+    // filaments (premultiplied black with alpha = intensity).  Hot
+    // classes (EP rising, RAIN arcade) instead emit on top of the disk
+    // as well, so we mix the bright limb colour into the disk path.
+    float emitOnDisk = 0.0;
+    if (classId == 5) emitOnDisk = 0.6;                // EP: mostly emit
+    if (classId == 6) emitOnDisk = 0.85;               // RAIN: emit dominant
+    float diskAlpha = intensity * 0.85 * (1.0 - emitOnDisk);
+    vec3  colDisk = col * intensity * 1.6 * emitOnDisk;
     float aDisk   = clamp(diskAlpha, 0.0, 0.92);
 
     // Limb: bright Hα emission (premultiplied colour, alpha = 0).
     float limbBoost = 1.6;
     if (classId == 2) limbBoost = 2.1;            // ARP punchier
     if (classId == 5) limbBoost = 2.8;            // EP very bright
+    if (classId == 6) limbBoost = 2.2;            // RAIN: hot arcade glows hard
     vec3  colLimb = col * intensity * limbBoost;
     float aLimb   = 0.0;
 

@@ -36,6 +36,19 @@ const EP_ERUPT_DURATION  = 8.0;
 const EP_FADE_DURATION   = 4.0;
 const EP_TOTAL           = EP_DESTAB_DURATION + EP_ERUPT_DURATION + EP_FADE_DURATION;
 
+// ── Post-flare arcade (RAIN class) timeline (Phase 3.3) ──
+//   t=0       : flare onset
+//   t=30      : first (lowest) arcade loop appears, hot at 10 MK
+//   t=30..120 : arcade fills upward — taller loops born progressively later
+//               as reconnection moves to higher field lines
+//   t=120..340: cooling progression 10 MK → 1 MK → 50 kK with rain droplets
+//               sliding apex→footpoint, bright Hα impacts at the chromosphere
+//   t > 340   : arcade fades, classifier reverts arcade lines to invisible
+const RAIN_FLARE_TO_ARCADE_DELAY = 30.0;
+const RAIN_ARCADE_FILL_DURATION  = 90.0;
+const RAIN_ARCADE_COOL_DURATION  = 220.0;
+const RAIN_TOTAL = RAIN_FLARE_TO_ARCADE_DELAY + RAIN_ARCADE_FILL_DURATION + RAIN_ARCADE_COOL_DURATION;
+
 const EP_FLARE_INTENSITY_GATE = 0.25;  // u_flare_intensity above this = flare in progress
 const EP_FLARE_RADIUS_RAD     = 25 * Math.PI / 180; // AR within ~25° of flare = EP candidate
 
@@ -52,6 +65,11 @@ const CLASS_WEIGHT = Object.freeze({
 
 // ─── state cache ───────────────────────────────────────────────────
 const _state = new Map();    // key → { classId, stateEnter, lastSeen }
+
+// Per-AR post-flare arcade tracker (RAIN class). Keyed by AR index;
+// value: { flareStartT } — sim-time when the flare was first detected
+// for this AR. Cleared after RAIN_TOTAL elapses.
+const _flareArs = new Map();
 
 function _bundleKey(arNum, lineIdx) { return arNum + ':' + lineIdx; }
 
@@ -95,6 +113,16 @@ export function classifyBundles({
 
     // Which AR (if any) is currently the flare host?
     const flareArIndex = _findFlareAr(arsByIndex, flareIntensity, flareLatRad, flareLonRad);
+
+    // Maintain per-AR post-flare arcade tracker. New flare detection on an
+    // AR seeds an entry; the entry decays out after RAIN_TOTAL sim-seconds
+    // so the post-flare arcade has a finite lifetime even without re-flares.
+    if (flareArIndex >= 0 && !_flareArs.has(flareArIndex)) {
+        _flareArs.set(flareArIndex, { flareStartT: time });
+    }
+    for (const [k, v] of _flareArs.entries()) {
+        if (time - v.flareStartT > RAIN_TOTAL) _flareArs.delete(k);
+    }
 
     for (let i = 0; i < atlas.lineCount; i++) {
         const m0 = i * META_STRIDE;
@@ -197,6 +225,64 @@ export function classifyBundles({
         });
     }
 
+    // ── Second pass: post-flare arcade (RAIN class) ──────────────────
+    // For each AR currently in the flare-arcade tracker, pull its
+    // arcade-seeded closed loops (kind=0 — these are the AR-anchored
+    // loops, NOT the PIL-anchored ones used by EP). Sort by apex height
+    // ascending; spawn the lowest loops first and progressively taller
+    // ones over RAIN_ARCADE_FILL_DURATION as reconnection moves up. Each
+    // loop then runs its own cooling-T progression independently.
+    if (_flareArs.size > 0) {
+        const arcadeByAr = new Map();
+        for (let i = 0; i < atlas.lineCount; i++) {
+            const m0 = i * META_STRIDE;
+            if (meta[m0] !== 0)     continue;          // closed only
+            if (meta[m0 + 1] !== 0) continue;          // arcade-seeded only (kind=0)
+            const arIdx = meta[m0 + 2] | 0;
+            if (arIdx < 0 || !_flareArs.has(arIdx)) continue;
+            const apex   = meta[m0 + 3];
+            const length = meta[m0 + 4];
+            if (!arcadeByAr.has(arIdx)) arcadeByAr.set(arIdx, []);
+            arcadeByAr.get(arIdx).push({ lineIdx: i, apex, length });
+        }
+
+        for (const [arIdx, arcLines] of arcadeByAr) {
+            const { flareStartT } = _flareArs.get(arIdx);
+            arcLines.sort((p, q) => p.apex - q.apex);
+            const N = arcLines.length;
+            for (let k = 0; k < N; k++) {
+                const { lineIdx, apex, length } = arcLines[k];
+                const apexFrac = N > 1 ? k / (N - 1) : 0;
+                const spawnT   = flareStartT
+                               + RAIN_FLARE_TO_ARCADE_DELAY
+                               + apexFrac * RAIN_ARCADE_FILL_DURATION;
+                const age = time - spawnT;
+                if (age < 0) continue;                  // not yet born
+
+                const coolingT = _clamp(age / RAIN_ARCADE_COOL_DURATION, 0, 1);
+                if (coolingT >= 1.0) continue;          // fully cooled & faded
+
+                // Visibility envelope: ramp in over 5 sim-sec from spawn,
+                // ramp out over the last 15% of the cooling window.
+                const fadeIn  = _clamp(age / 5.0, 0, 1);
+                const fadeOut = _clamp((1.0 - coolingT) / 0.15, 0, 1);
+                const vizScale = fadeIn * fadeOut;
+
+                const baseWeight = _clamp(apex / 0.05, 0, 1) * _clamp(length / 0.30, 0, 1);
+                const weight     = Math.max(0.04, baseWeight) * CLASS_WEIGHT[CLASS.RAIN] * vizScale;
+
+                bundles.push({
+                    lineIdx,
+                    classId: CLASS.RAIN,
+                    weight,
+                    params: new Float32Array([coolingT, vizScale, 0, 0]),
+                    stateAge: age,
+                    arIndex: arIdx,
+                });
+            }
+        }
+    }
+
     // ── GC stale state entries (line dropped from atlas) ──────────────
     if (_state.size > 256) {
         for (const [k, v] of _state.entries()) {
@@ -208,7 +294,7 @@ export function classifyBundles({
 }
 
 /** Reset all classifier state. Call when the AR list is wholesale-replaced. */
-export function resetClassifierState() { _state.clear(); }
+export function resetClassifierState() { _state.clear(); _flareArs.clear(); }
 
 // ─── helpers ────────────────────────────────────────────────────────
 
