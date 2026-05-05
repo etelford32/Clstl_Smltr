@@ -215,6 +215,60 @@ nav {
     max-height:0; opacity:0;
 }
 
+/* ─── FEATURED highlights — pinned at top of layer panel ─────────
+   The discoverability win: a curated list of the 5-6 highest-leverage
+   toggles, each with a one-line description so a first-time visitor
+   understands what flipping the checkbox actually does. The same toggle
+   IDs live in the deep sections below; the featured row is a *visible
+   shortcut*, not a duplicate state — clicking either propagates via the
+   `change` event the underlying handler already listens for. */
+.lyr-section.featured {
+    border-top:none; margin-top:0; padding-top:6px;
+    background:linear-gradient(180deg, rgba(0,200,255,.08) 0%, rgba(0,200,255,0) 100%);
+    border-radius:6px 6px 0 0; padding:6px 4px 8px;
+    margin-bottom:4px;
+}
+.lyr-section.featured .lyr-section-hdr span {
+    color:#0bd; font-weight:700; font-size:.66rem;
+    letter-spacing:.10em;
+}
+.lyr-section.featured .lyr-section-hdr .lyr-chevron { color:#0bd; }
+.lyr-featured-tip {
+    font-size:9px; color:#779; line-height:1.45;
+    padding:0 4px 6px; font-style:italic;
+}
+.lyr-featured-row {
+    display:flex; align-items:flex-start; gap:8px;
+    padding:5px 4px; border-radius:4px;
+    transition:background .15s;
+    cursor:pointer;
+}
+.lyr-featured-row:hover { background:rgba(0,200,255,.06); }
+.lyr-featured-row input[type=checkbox] {
+    accent-color:#00c6ff; width:14px; height:14px; flex-shrink:0;
+    margin-top:1px;
+}
+.lyr-featured-row .lyr-featured-text { flex:1; min-width:0; line-height:1.3; }
+.lyr-featured-row .lyr-featured-name {
+    display:flex; align-items:center; gap:5px;
+    font-size:11.5px; color:#cfe9f5; font-weight:600;
+}
+.lyr-featured-row .lyr-featured-icon {
+    font-size:13px; line-height:1; opacity:.85;
+}
+.lyr-featured-row .lyr-featured-desc {
+    font-size:9.5px; color:#7a91a4; margin-top:1px; font-weight:400;
+}
+.lyr-featured-row .lyr-featured-badge {
+    font-size:8px; color:#0bd;
+    background:rgba(0,200,255,.14);
+    padding:1px 5px; border-radius:8px;
+    letter-spacing:.05em; text-transform:uppercase; font-weight:600;
+}
+.lyr-featured-row .lyr-status {
+    margin-left:auto; align-self:center;
+}
+
 /* ─── Info panel ─────────────────────────────────────────────── */
 #info-panel {
     position:absolute; bottom:52px; right:10px; z-index:50;
@@ -1221,6 +1275,110 @@ nav {
         </div>
         <div class="panel-body">
 
+        <!-- ── FEATURED HIGHLIGHTS ──────────────────────────────────────
+             Discoverability layer for first-time visitors. Each row is a
+             *mirror* of a canonical toggle in the deep sections below
+             (different id prefix `feat-` to avoid duplicate ids). The
+             change handler keeps the two surfaces in sync, so flipping
+             either one drives the same underlying visual state. -->
+        <div class="lyr-section featured" data-lyr-section="featured">
+            <div class="lyr-section-hdr">
+                <span>✨ Featured Highlights</span>
+                <span class="lyr-chevron">▾</span>
+            </div>
+            <div class="lyr-section-body">
+                <div class="lyr-featured-tip">
+                    Click any layer to toggle. Hover any control for details.
+                    More layers below — explore freely.
+                </div>
+
+                <label class="lyr-featured-row" for="feat-lyr-wind"
+                       title="Animated streaming particles showing live global wind direction and speed (Open-Meteo, ~hourly).">
+                    <input type="checkbox" id="feat-lyr-wind" data-mirror="lyr-wind" checked>
+                    <span class="lyr-featured-text">
+                        <span class="lyr-featured-name">
+                            <span class="lyr-featured-icon">🌬️</span>Wind Currents
+                        </span>
+                        <span class="lyr-featured-desc">Live streaming particles trace global wind flow</span>
+                    </span>
+                    <span class="lyr-status" data-layer="wind"></span>
+                </label>
+
+                <label class="lyr-featured-row" for="feat-lyr-precip-rate"
+                       title="Open-Meteo precipitation rate as a NEXRAD-style radar palette. Storm cells light up red/magenta; drizzle is whisper-thin green.">
+                    <input type="checkbox" id="feat-lyr-precip-rate" data-mirror="lyr-precip-rate">
+                    <span class="lyr-featured-text">
+                        <span class="lyr-featured-name">
+                            <span class="lyr-featured-icon">🌧️</span>Precipitation Rate
+                            <span class="lyr-featured-badge">new</span>
+                        </span>
+                        <span class="lyr-featured-desc">Storms light up in real time, NEXRAD-style</span>
+                    </span>
+                </label>
+
+                <label class="lyr-featured-row" for="feat-lyr-humidity"
+                       title="Relative humidity (%) painted as a moisture sheet. Tan = parched air, blue = saturated. Below 30% RH the overlay is invisible so dry regions don't get a useless tint.">
+                    <input type="checkbox" id="feat-lyr-humidity" data-mirror="lyr-humidity">
+                    <span class="lyr-featured-text">
+                        <span class="lyr-featured-name">
+                            <span class="lyr-featured-icon">💧</span>Humidity
+                            <span class="lyr-featured-badge">new</span>
+                        </span>
+                        <span class="lyr-featured-desc">See where the air is dry vs saturated</span>
+                    </span>
+                </label>
+
+                <label class="lyr-featured-row" for="feat-lyr-mist"
+                       title="Derived from RH × low-cloud fraction — picks out fog and haze pockets where the near-surface atmosphere is both saturated and clouded. Coastal valleys and tropical convergence zones glow soft white.">
+                    <input type="checkbox" id="feat-lyr-mist" data-mirror="lyr-mist">
+                    <span class="lyr-featured-text">
+                        <span class="lyr-featured-name">
+                            <span class="lyr-featured-icon">🌫️</span>Mist &amp; Fog
+                            <span class="lyr-featured-badge">new</span>
+                        </span>
+                        <span class="lyr-featured-desc">Coastal fog, valley mist, dense haze pockets</span>
+                    </span>
+                </label>
+
+                <label class="lyr-featured-row" for="feat-lyr-obs-topo-relief"
+                       title="NASA Blue Marble shaded relief with bathymetry — continental elevation and ocean-floor topography in one hypsometric ramp. The 'altitude' view: peaks are white, abyss is deep blue.">
+                    <input type="checkbox" id="feat-lyr-obs-topo-relief" data-mirror="lyr-obs-topo-relief">
+                    <span class="lyr-featured-text">
+                        <span class="lyr-featured-name">
+                            <span class="lyr-featured-icon">⛰️</span>Terrain &amp; Bathymetry
+                            <span class="lyr-featured-badge">new</span>
+                        </span>
+                        <span class="lyr-featured-desc">Continental elevation + ocean-floor relief</span>
+                    </span>
+                    <span class="lyr-status" data-layer="topo-relief"></span>
+                </label>
+
+                <label class="lyr-featured-row" for="feat-lyr-alerts"
+                       title="Active US National Weather Service severe-weather alerts (tornado, hurricane, flood, etc.) plotted on the globe with severity-coded pulses.">
+                    <input type="checkbox" id="feat-lyr-alerts" data-mirror="lyr-alerts">
+                    <span class="lyr-featured-text">
+                        <span class="lyr-featured-name">
+                            <span class="lyr-featured-icon">⚡</span>Storm Alerts
+                        </span>
+                        <span class="lyr-featured-desc">Live NWS severe-weather warnings</span>
+                    </span>
+                    <span class="lyr-status" data-layer="alerts"></span>
+                </label>
+
+                <label class="lyr-featured-row" for="feat-lyr-earthquakes"
+                       title="USGS earthquakes M2.5+ in the past 30 days. Marker size scales with magnitude; pulse rate slows for the largest events.">
+                    <input type="checkbox" id="feat-lyr-earthquakes" data-mirror="lyr-earthquakes">
+                    <span class="lyr-featured-text">
+                        <span class="lyr-featured-name">
+                            <span class="lyr-featured-icon">🌋</span>Earthquakes
+                        </span>
+                        <span class="lyr-featured-desc">USGS M2.5+ quakes, last 30 days</span>
+                    </span>
+                    <span class="lyr-status" data-layer="earthquakes"></span>
+                </label>
+            </div>
+        </div>
+
         <!-- ── Surface & Atmosphere ── -->
         <div class="lyr-section" data-lyr-section="surface">
             <div class="lyr-section-hdr"><span>SURFACE &amp; ATMOSPHERE</span><span class="lyr-chevron">▾</span></div>
@@ -1248,7 +1406,27 @@ nav {
                 <label class="lyr"><input type="checkbox" id="lyr-isobars" checked><span class="lyr-status" data-layer="isobars" title="waiting"></span><label for="lyr-isobars">Isobars</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-alerts"><span class="lyr-status" data-layer="alerts" title="waiting"></span><label for="lyr-alerts">Storm Alerts</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-earthquakes"><span class="lyr-status" data-layer="earthquakes" title="waiting"></span><label for="lyr-earthquakes">Earthquakes</label></label>
-            </div></div>
+            </div>
+            <!-- Atmospheric profile sub-group: derived overlays that share
+                 the existing weather DataTextures (no new fetches). Keeping
+                 them visually clustered makes "what's in the air right now"
+                 a single discoverable cluster instead of three loose
+                 checkboxes. -->
+            <div style="margin-top:8px;padding-top:6px;border-top:1px dashed rgba(255,255,255,.05)">
+                <div style="font-size:.6rem;color:#446;letter-spacing:.08em;margin-bottom:4px">ATMOSPHERIC PROFILE</div>
+                <div class="lyr-grid">
+                    <label class="lyr" title="Relative humidity (%): tan = dry, blue = saturated. Hidden below 30% RH so deserts stay readable.">
+                        <input type="checkbox" id="lyr-humidity"><label for="lyr-humidity">Humidity (RH)</label>
+                    </label>
+                    <label class="lyr" title="Open-Meteo precipitation rate as a NEXRAD-style radar palette (mm/hr).">
+                        <input type="checkbox" id="lyr-precip-rate"><label for="lyr-precip-rate">Precip Rate</label>
+                    </label>
+                    <label class="lyr" title="Mist and fog: gated on RH ≥ 85% AND low-cloud fraction ≥ 0.3. Coastal valleys and tropical convergence zones glow soft white.">
+                        <input type="checkbox" id="lyr-mist"><label for="lyr-mist">Mist &amp; Fog</label>
+                    </label>
+                </div>
+            </div>
+            </div>
         </div>
 
         <!-- ── Magnetosphere ── -->
@@ -1280,6 +1458,7 @@ nav {
                 <label class="lyr"><input type="checkbox" id="lyr-obs-cloud-thickness"><span class="lyr-status" data-layer="cloud-thickness" title="waiting"></span><label for="lyr-obs-cloud-thickness">Cloud Thickness (analytic, off by default)</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-obs-fires"><span class="lyr-status" data-layer="fires"           title="waiting"></span><label for="lyr-obs-fires">Active Fires</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-obs-snow"><span class="lyr-status" data-layer="snow"            title="waiting"></span><label for="lyr-obs-snow">Snow Cover</label></label>
+                <label class="lyr" title="NASA Blue Marble shaded relief with bathymetry — continental elevation + ocean-floor topography rendered as a hypsometric tint."><input type="checkbox" id="lyr-obs-topo-relief"><span class="lyr-status" data-layer="topo-relief" title="waiting"></span><label for="lyr-obs-topo-relief">Terrain &amp; Bathymetry</label></label>
             </div></div>
         </div>
 
@@ -1919,6 +2098,7 @@ import {
     PrecipAnomalyARForecaster,
     PrecipFusionForecaster,
 } from './js/precip-forecast.js';
+import { createWeatherOverlay } from './js/weather-overlay.js';
 import { NWSAlerts, ALERT_COLORS, ALERT_CSS_COLORS, ALERT_PULSE_FREQ, SEVERITY_ORDER, classifyAlertEvent } from './js/nws-alerts.js';
 import { getAlertIconTexture, precomputeAlertIcons } from './js/alert-icons.js';
 import { IsobarLayer, geoWindMs, ISOBAR_LEVELS } from './js/isobar-engine.js';
@@ -2369,6 +2549,35 @@ cloudU.u_cloud_layers.value.wrapT     = THREE.ClampToEdgeWrapping;
 cloudU.u_cloud_layers.value.flipY = true;
 cloudU.u_cloud_layers.value.needsUpdate = true;
 
+// ── Derived weather overlays — humidity / precip / mist ───────────────────
+// Three thin shells parented to earthMesh, each reading the same
+// u_weather + u_cloud_layers DataTextures the surface/cloud shaders use.
+// No new fetches; the shader picks one of three colour ramps via mode
+// uniform. Visibility is driven entirely by the layer-panel checkboxes.
+//
+// `u_has_data` stays 0 until the first real weather frame ingests, so
+// these layers paint nothing while we're still on the procedural
+// fallback (the zero-initialised DataTexture would otherwise paint every
+// pixel as "max humidity / no precip" which is misleading).
+const _weatherOverlays = {
+    humidity:    createWeatherOverlay({
+        THREE, radius: R_EARTH * 1.0035, icoLevel: ICO_LEVEL, mode: 'humidity',
+        weatherTexture: earthU.u_weather.value,
+        cloudTexture:   cloudU.u_cloud_layers.value,
+    }),
+    'precip-rate': createWeatherOverlay({
+        THREE, radius: R_EARTH * 1.0040, icoLevel: ICO_LEVEL, mode: 'precip-rate',
+        weatherTexture: earthU.u_weather.value,
+        cloudTexture:   cloudU.u_cloud_layers.value,
+    }),
+    mist: createWeatherOverlay({
+        THREE, radius: R_EARTH * 1.0028, icoLevel: ICO_LEVEL, mode: 'mist',
+        weatherTexture: earthU.u_weather.value,
+        cloudTexture:   cloudU.u_cloud_layers.value,
+    }),
+};
+for (const ov of Object.values(_weatherOverlays)) earthMesh.add(ov.mesh);
+
 // Live cloud imagery is delivered by SatelliteFeed below — it polls a
 // GOES-East / GOES-West / Himawari / Meteosat geostationary mosaic with
 // MODIS polar fill every 10 minutes (see js/satellite-feed.js → cloud-imagery.js)
@@ -2775,6 +2984,63 @@ document.getElementById('lyr-wind').addEventListener('change', e => {
     windParticles.setVisible(e.target.checked);
     windArrows.setVisible(e.target.checked);
 });
+// Derived weather overlays — share the existing weather DataTextures, no
+// new fetches. The shader's u_has_data uniform keeps them blank until a
+// real (non-procedural) frame arrives, so toggling them on before the
+// first feed tick simply waits rather than painting garbage.
+{
+    const wireOverlay = (toggleId, mode) => {
+        const el = document.getElementById(toggleId);
+        if (!el) return;
+        el.addEventListener('change', e => {
+            const ov = _weatherOverlays[mode];
+            if (ov) ov.mesh.visible = e.target.checked;
+        });
+    };
+    wireOverlay('lyr-humidity',   'humidity');
+    wireOverlay('lyr-precip-rate', 'precip-rate');
+    wireOverlay('lyr-mist',        'mist');
+}
+
+// ── FEATURED highlights ↔ canonical-toggle sync ───────────────────────────
+// Each row in the Featured section carries `data-mirror="lyr-..."`
+// pointing at the canonical checkbox in the deep sections. We bind both
+// directions: featured.click → canonical.click → underlying handler;
+// canonical.change → featured.checked update so the surfaces stay
+// consistent when the user toggles via the deep panel.
+{
+    const featuredCheckboxes = document.querySelectorAll('input[data-mirror]');
+    for (const fc of featuredCheckboxes) {
+        const targetId = fc.dataset.mirror;
+        const canonical = document.getElementById(targetId);
+        if (!canonical) {
+            // Featured row references a toggle that doesn't exist yet —
+            // disabled rather than throwing so a later refactor doesn't
+            // brick the panel.
+            fc.disabled = true;
+            continue;
+        }
+        // Initial state mirrors canonical.
+        fc.checked = canonical.checked;
+
+        // Featured → canonical: dispatching a synthetic click drives the
+        // canonical checkbox through its existing change handler, which
+        // is what actually flips the visual state. This avoids us having
+        // to know what the canonical handler does — we just delegate.
+        fc.addEventListener('change', () => {
+            if (canonical.checked !== fc.checked) {
+                canonical.checked = fc.checked;
+                canonical.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        });
+
+        // Canonical → featured: keep the featured surface in sync when
+        // the user (or other code) flips the deep-section checkbox.
+        canonical.addEventListener('change', () => {
+            if (fc.checked !== canonical.checked) fc.checked = canonical.checked;
+        });
+    }
+}
 document.getElementById('lyr-rotate').addEventListener('change', e => {
     controls.autoRotate = e.target.checked;
 });
@@ -4574,6 +4840,14 @@ function updateWeatherTextures(weatherBuf, wBuf, cloudBuf) {
 document.addEventListener('weather-update', e => {
     const { weatherBuffer, windBuffer, cloudBuffer, meta } = e.detail;
     updateWeatherTextures(weatherBuffer, windBuffer, cloudBuffer);
+
+    // Lift the "no data yet" guard on the derived weather overlays
+    // (humidity / precip-rate / mist). Skip when the feed flags itself
+    // as the procedural demo — those buffers carry uniform fake values
+    // that would render as a featureless globe-wide haze.
+    if (!meta?.demo) {
+        for (const ov of Object.values(_weatherOverlays)) ov.setHasData(true);
+    }
 
     // Rebuild isobar contours from the fresh pressure field
     isobarLayer.update(weatherBuffer);
@@ -7661,6 +7935,11 @@ _backdrop.addEventListener('click', _closeMobilePanel);
     'lyr-tropic', 'lyr-subsolar', 'lyr-weather', 'lyr-wind', 'lyr-jet',
     'lyr-isobars', 'lyr-alerts', 'lyr-earthquakes', 'lyr-iss',
     'lyr-rotate',
+    // Derived weather overlays (humidity / precip-rate / mist) — share
+    // the existing weather DataTextures, so they need the same synthetic
+    // change-event dispatch on first render to align mesh visibility
+    // with their default-unchecked state.
+    'lyr-humidity', 'lyr-precip-rate', 'lyr-mist',
 ].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.dispatchEvent(new Event('change'));
