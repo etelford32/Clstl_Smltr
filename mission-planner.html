@@ -122,6 +122,31 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
     box-shadow:inset 0 0 12px rgba(102,255,170,.2);
 }
 
+/* Time controls ────────────────────────────────────── */
+.mp-time-display {
+    font-family:monospace; font-size:.84rem; color:#cfd0e0;
+    background:rgba(0,0,0,.35); border:1px solid rgba(255,255,255,.08);
+    border-radius:6px; padding:6px 10px; margin-bottom:6px; text-align:center;
+}
+.mp-time-bar { display:flex; gap:2px; margin-bottom:4px; }
+.mp-time-bar > button {
+    flex:1; background:rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.12);
+    color:#cfd0e0; padding:6px 0;
+    font-family:monospace; font-size:.78rem; font-weight:700;
+    cursor:pointer; transition:all .15s;
+}
+.mp-time-bar > button + button { border-left:none; }
+.mp-time-bar > button:first-child { border-top-left-radius:6px; border-bottom-left-radius:6px; }
+.mp-time-bar > button:last-child  { border-top-right-radius:6px; border-bottom-right-radius:6px; }
+.mp-time-bar > button:hover { border-color:rgba(102,255,170,.45); color:#fff; }
+.mp-time-bar > button.on {
+    background:rgba(102,170,255,.16); color:#88bbff; border-color:#4488cc;
+}
+.mp-time-bar > button.paused {
+    background:rgba(255,120,120,.18); color:#ffaaaa; border-color:#aa6666;
+}
+
 /* Plan readout ─────────────────────────────────────── */
 .mp-plan {
     margin-top:10px;
@@ -315,16 +340,35 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
 
         <div class="mp-section-divider"></div>
 
-        <div class="mp-label">Time Scale</div>
+        <div class="mp-label">Scenario Time</div>
+        <div class="mp-time-display" id="mp-time-display">— UTC</div>
+
+        <div class="mp-time-bar" role="toolbar" aria-label="Time playback">
+            <button id="mp-time-pause" type="button" title="Pause / Play">⏸</button>
+            <button id="mp-time-back-d" type="button" title="−1 day">«</button>
+            <button id="mp-time-back-h" type="button" title="−1 hour">‹</button>
+            <button id="mp-time-fwd-h"  type="button" title="+1 hour">›</button>
+            <button id="mp-time-fwd-d"  type="button" title="+1 day">»</button>
+            <button id="mp-time-now"    type="button" title="Reset to now">⌖</button>
+        </div>
+
+        <div class="mp-time-bar" role="toolbar" aria-label="Playback rate">
+            <button class="mp-time-preset" data-rate="0.000694" type="button">×min</button>
+            <button class="mp-time-preset" data-rate="0.04167"  type="button">×hour</button>
+            <button class="mp-time-preset on" data-rate="1"     type="button">×day</button>
+            <button class="mp-time-preset" data-rate="7"        type="button">×week</button>
+        </div>
+
+        <div class="mp-label">Scrub (± days from anchor)</div>
+        <div class="mp-row">
+            <input id="mp-jd-scrub" class="mp-input" type="range" min="-365" max="365" step="0.05" value="0">
+            <span class="mp-time" id="mp-jd-scrub-val">+0.0d</span>
+        </div>
+
+        <div class="mp-label">Animation Speed</div>
         <div class="mp-row">
             <input id="mp-timescale" class="mp-input" type="range" min="0.25" max="8" step="0.25" value="1">
             <span class="mp-time" id="mp-timescale-val">1.0×</span>
-        </div>
-
-        <div class="mp-label">Sim Days / Sec (planet drift)</div>
-        <div class="mp-row">
-            <input id="mp-simrate" class="mp-input" type="range" min="0" max="60" step="1" value="2">
-            <span class="mp-time" id="mp-simrate-val">2 d/s</span>
         </div>
 
         <button id="mp-focus-earth" class="mp-secondary-btn" type="button">Focus: Earth</button>
@@ -862,25 +906,93 @@ document.getElementById('mp-clear').addEventListener('click', () => {
     refreshHUD();
 });
 
+// ── Time controls ───────────────────────────────────────────────────
+// Speed presets feed setSimDaysPerSec (planet drift rate, days/real-second).
+// Pause flips timeScale to 0 so spacecraft animations halt too. Step buttons
+// nudge scenarioJD without changing playback. Scrub slider tracks a ±365 d
+// offset from an anchor (initially "now") for fast date scanning.
 const tsRange = document.getElementById('mp-timescale');
 const tsVal   = document.getElementById('mp-timescale-val');
 tsRange.addEventListener('input', () => {
     const v = parseFloat(tsRange.value);
-    planner.setTimeScale(v);
+    if (!timeState.paused) planner.setTimeScale(v);
     tsVal.textContent = `${v.toFixed(2)}×`;
 });
 
-const srRange = document.getElementById('mp-simrate');
-const srVal   = document.getElementById('mp-simrate-val');
-srRange.addEventListener('input', () => {
-    const v = parseFloat(srRange.value);
-    planner.setSimDaysPerSec(v);
-    srVal.textContent = `${v} d/s`;
+const tdEl       = document.getElementById('mp-time-display');
+const pauseBtn   = document.getElementById('mp-time-pause');
+const jdScrub    = document.getElementById('mp-jd-scrub');
+const jdScrubVal = document.getElementById('mp-jd-scrub-val');
+const timeState  = {
+    paused:        false,
+    rate_d_per_s:  1.0,                 // matches initial ".on" preset (×day)
+    scrubAnchor:   planner.getScenarioJD(),
+};
+
+function fmtJD(jd) {
+    const ms = (jd - 2440587.5) * 86400 * 1000;
+    return new Date(ms).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+}
+function syncScrub() {
+    const off = planner.getScenarioJD() - timeState.scrubAnchor;
+    const c = Math.max(-365, Math.min(365, off));
+    jdScrub.value = String(c);
+    jdScrubVal.textContent = `${off >= 0 ? '+' : ''}${off.toFixed(1)}d`;
+}
+function refreshTimeUI() {
+    tdEl.textContent = fmtJD(planner.getScenarioJD());
+    syncScrub();
+}
+function setPaused(p) {
+    timeState.paused = p;
+    if (p) {
+        planner.setTimeScale(0);
+        pauseBtn.textContent = '▶';
+        pauseBtn.classList.add('paused');
+    } else {
+        planner.setTimeScale(parseFloat(tsRange.value));
+        pauseBtn.textContent = '⏸';
+        pauseBtn.classList.remove('paused');
+    }
+}
+pauseBtn.addEventListener('click', () => setPaused(!timeState.paused));
+
+function step(deltaJD) {
+    planner.setScenarioJD(planner.getScenarioJD() + deltaJD);
+    refreshTimeUI();
+}
+document.getElementById('mp-time-back-d').addEventListener('click', () => step(-1));
+document.getElementById('mp-time-back-h').addEventListener('click', () => step(-1/24));
+document.getElementById('mp-time-fwd-h' ).addEventListener('click', () => step( 1/24));
+document.getElementById('mp-time-fwd-d' ).addEventListener('click', () => step( 1));
+document.getElementById('mp-time-now'   ).addEventListener('click', () => {
+    const jd = jdNow();
+    timeState.scrubAnchor = jd;
+    planner.setScenarioJD(jd);
+    refreshTimeUI();
 });
-planner.setSimDaysPerSec(parseFloat(srRange.value));
+
+document.querySelectorAll('.mp-time-preset').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.mp-time-preset').forEach(b => b.classList.remove('on'));
+        btn.classList.add('on');
+        timeState.rate_d_per_s = parseFloat(btn.dataset.rate);
+        planner.setSimDaysPerSec(timeState.rate_d_per_s);
+    });
+});
+
+jdScrub.addEventListener('input', () => {
+    const off = parseFloat(jdScrub.value);
+    planner.setScenarioJD(timeState.scrubAnchor + off);
+    jdScrubVal.textContent = `${off >= 0 ? '+' : ''}${off.toFixed(1)}d`;
+    tdEl.textContent = fmtJD(planner.getScenarioJD());
+});
+
+planner.setSimDaysPerSec(timeState.rate_d_per_s);
+refreshTimeUI();
 
 // ── HUD heartbeat (Scenario JD ticks even with no missions) ─────────
-setInterval(refreshHUD, 500);
+setInterval(() => { refreshHUD(); refreshTimeUI(); }, 250);
 
 // ── Launch Physics Lab ──────────────────────────────────────────────
 const lpBodySel    = document.getElementById('mp-launch-body');
