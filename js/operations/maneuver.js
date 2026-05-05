@@ -3,21 +3,38 @@
  *
  * Lets an operator type an RTN Δv at a chosen burn time and see the
  * predicted shift in miss distance for every existing conjunction
- * involving the selected asset. The model is a deliberately simple
- * free-flight linearisation:
+ * involving the selected asset. The model is the Clohessy-Wiltshire
+ * (Hill-frame) state transition matrix in the rotating RTN frame
+ * attached to a circular chief:
  *
- *   Δv_eci = Δv_R · R̂ + Δv_T · T̂ + Δv_N · N̂   (RTN at burn time)
- *   Δr(TCA) ≈ Δv_eci · (t_tca − t_burn)         (no orbit dynamics)
- *   miss_new ≈ |miss_old + Δr|
+ *   Δr_R(τ) =  (sin(nτ)/n) Δv_R + (2(1 − cos(nτ))/n) Δv_T
+ *   Δr_T(τ) = −(2(1 − cos(nτ))/n) Δv_R + ((4 sin(nτ) − 3nτ)/n) Δv_T
+ *   Δr_N(τ) =  (sin(nτ)/n) Δv_N
  *
- * Pros: instantaneous, intuitive, reveals direction-of-motion
- *   intuition (+T extends along-track miss, +R lifts radial gap, +N
- *   shifts cross-track plane). No worker round-trip needed.
+ * Δr is then rotated from the RTN basis at TCA into TEME and added
+ * to the conjunction's miss vector; |miss + Δr| is the predicted
+ * new miss distance.
  *
- * Cons: ignores Earth gravity over the coast → off by 5–15 % for
- *   sub-day horizons, more for multi-day. Does NOT account for the
- *   possibility that the new orbit's actual TCA shifts in time.
- *   Treat as an advisory mental model, not a flight-dynamics tool.
+ * Why CW over free-flight: for a coast time approaching one orbital
+ * period (~90 min in LEO), free-flight (Δr = Δv·τ) misses two
+ * dominant gravity-driven effects — the along-track secular drift
+ * from a tangential burn (energy change → period change → phase
+ * walk) and the cross-track sinusoid that returns to zero each
+ * orbit. CW captures both in closed form. Reduces to free-flight
+ * for small nτ, so short-coast intuition is preserved.
+ *
+ * Caveats:
+ *   - CW assumes a *circular* chief. Operational LEO sats are
+ *     typically e < 0.005, well within tolerance. For e > 0.05 the
+ *     along-track / radial coupling drifts off the closed-form
+ *     prediction — the panel degrades the caveat copy in that case.
+ *   - Does NOT model the chief-secondary relative dynamics; the
+ *     secondary's path is held fixed (it didn't burn, after all).
+ *   - The new orbit's actual TCA may shift in time vs. the original
+ *     screen's TCA. CW evaluates Δr at the original t_tca, which is
+ *     close enough for advisory work but not a maneuver plan.
+ *   - For production planning use a dedicated FDS / numerical
+ *     integrator with full force model.
  *
  * The panel re-renders on:
  *   - selection change      (which asset's conjunctions to use)
@@ -137,48 +154,98 @@ export function mountManeuverPanel(opts = {}) {
     }
 
     /**
-     * Evaluate the linearised model: for each conjunction of the
-     * selected asset, return { conj, oldMissKm, newMissKm,
-     *                          dtSec, sense: 'safer'|'closer'|'flat' }.
+     * Clohessy-Wiltshire (Hill) state transition matrix — position
+     * perturbation at time τ from an impulsive Δv at τ = 0, expressed
+     * in the rotating RTN frame attached to a circular chief orbit
+     * with mean motion `n` (rad/s).
+     *
+     *   Δr_R(τ) =  (sin(nτ)/n) Δv_R + (2(1 − cos(nτ))/n) Δv_T
+     *   Δr_T(τ) = −(2(1 − cos(nτ))/n) Δv_R + ((4 sin(nτ) − 3nτ)/n) Δv_T
+     *   Δr_N(τ) =  (sin(nτ)/n) Δv_N
+     *
+     * Reduces to the free-flight Δr ≈ Δv·τ for small nτ, but
+     * captures the secular along-track drift after a along-track
+     * burn (energy change → period change → phase walk) and the
+     * cross-track sinusoid that returns to zero each orbit. Both
+     * effects are dominant over τ approaching one orbital period
+     * (~90 min in LEO), where free-flight is wildly wrong.
+     *
+     * Assumes a *circular* chief; for elliptical orbits use the
+     * Yamanaka-Ankersen STM (not yet wired). LEO operational sats
+     * are typically e < 0.005, well within CW accuracy.
+     *
+     * Inputs are RTN at burn time, in km/s. Output is in km, in the
+     * RTN basis at TCA (the rotating frame, evaluated at τ).
+     */
+    function applyCwStm(dvR_kms, dvT_kms, dvN_kms, nRadSec, tauSec) {
+        const nt    = nRadSec * tauSec;
+        const sNT   = Math.sin(nt);
+        const cNT   = Math.cos(nt);
+        const invN  = 1 / nRadSec;
+        const oneMC = 1 - cNT;
+
+        return {
+            r: ( sNT * invN)             * dvR_kms + (2 * oneMC * invN)        * dvT_kms,
+            t: -(2 * oneMC * invN)       * dvR_kms + ((4 * sNT - 3 * nt) * invN) * dvT_kms,
+            n: ( sNT * invN)             * dvN_kms,
+        };
+    }
+
+    /**
+     * Evaluate the CW model: for each conjunction of the selected
+     * asset, return { conj, oldMissKm, newMissKm, dtSec,
+     *                 sense: 'safer'|'closer'|'flat' }.
+     *
+     * Δv at burn time → CW STM → Δr in RTN_τ → rotate to TEME via
+     * the RTN basis at TCA → add to miss_vec → take magnitude.
      */
     function projectShifts() {
         if (!selectedAsset?.tle || !selectedAsset.conjs?.length) return [];
         const tle = selectedAsset.tle;
         const epochJd = tleEpochToJd(tle);
 
-        // Burn time → tsBurn min past epoch.
+        // Burn time → tsBurn min past epoch (used only to confirm
+        // the asset is propagable; CW doesn't need the burn-time
+        // basis because Δv is already in RTN coordinates input by
+        // the operator).
         const jdBurn = burnMs / 86400000 + 2440587.5;
-        const tsBurn = (jdBurn - epochJd) * MIN_PER_DAY;
+        const tsBurnMin = (jdBurn - epochJd) * MIN_PER_DAY;
+        const burnBasis = rtnBasisAt(tle, tsBurnMin);
+        if (!burnBasis) return [];
 
-        const basis = rtnBasisAt(tle, tsBurn);
-        if (!basis) return [];
+        // Mean motion in rad/s. tle.mean_motion is in revs/day.
+        const nRadSec = (tle.mean_motion * 2 * Math.PI) / 86400;
+        if (!Number.isFinite(nRadSec) || nRadSec <= 0) return [];
 
-        // Δv in km/s (input is m/s). RTN → ECI/TEME.
+        // Δv in km/s (input is m/s).
         const dvR_kms = (dvR || 0) / 1000;
         const dvT_kms = (dvT || 0) / 1000;
         const dvN_kms = (dvN || 0) / 1000;
-        const dvECI = {
-            x: dvR_kms * basis.Rhat.x + dvT_kms * basis.That.x + dvN_kms * basis.Nhat.x,
-            y: dvR_kms * basis.Rhat.y + dvT_kms * basis.That.y + dvN_kms * basis.Nhat.y,
-            z: dvR_kms * basis.Rhat.z + dvT_kms * basis.That.z + dvN_kms * basis.Nhat.z,
-        };
 
         const out = [];
         for (const c of selectedAsset.conjs) {
-            if (!Number.isFinite(c.tca_ms) || !c.miss_vec) {
-                // Need the full miss vector for the projection. Skip
-                // rows that pre-date the v_rel/miss_vec additions.
-                continue;
-            }
-            const dtSec = (c.tca_ms - burnMs) / 1000;
-            // Free-flight position perturbation.
-            const drx = dvECI.x * dtSec;
-            const dry = dvECI.y * dtSec;
-            const drz = dvECI.z * dtSec;
-            // miss_new = miss_old + Δr (vector add), then magnitude.
-            const mx = c.miss_vec.x + drx;
-            const my = c.miss_vec.y + dry;
-            const mz = c.miss_vec.z + drz;
+            if (!Number.isFinite(c.tca_ms) || !c.miss_vec) continue;
+
+            const dtSec  = (c.tca_ms - burnMs) / 1000;
+            const drRtn  = applyCwStm(dvR_kms, dvT_kms, dvN_kms, nRadSec, dtSec);
+
+            // RTN basis at TCA — Δr_RTN(τ) is expressed in the
+            // *rotating* frame's axes at time τ, which are the same
+            // as the unperturbed chief's RTN axes at TCA in TEME.
+            const jdTca   = c.tca_ms / 86400000 + 2440587.5;
+            const tsTca   = (jdTca - epochJd) * MIN_PER_DAY;
+            const tcaBasis = rtnBasisAt(tle, tsTca);
+            if (!tcaBasis) continue;
+
+            const drTeme = {
+                x: drRtn.r * tcaBasis.Rhat.x + drRtn.t * tcaBasis.That.x + drRtn.n * tcaBasis.Nhat.x,
+                y: drRtn.r * tcaBasis.Rhat.y + drRtn.t * tcaBasis.That.y + drRtn.n * tcaBasis.Nhat.y,
+                z: drRtn.r * tcaBasis.Rhat.z + drRtn.t * tcaBasis.That.z + drRtn.n * tcaBasis.Nhat.z,
+            };
+
+            const mx = c.miss_vec.x + drTeme.x;
+            const my = c.miss_vec.y + drTeme.y;
+            const mz = c.miss_vec.z + drTeme.z;
             const newMissKm = Math.hypot(mx, my, mz);
             const oldMissKm = c.dist_km;
             const delta = newMissKm - oldMissKm;
@@ -212,6 +279,19 @@ export function mountManeuverPanel(opts = {}) {
         const burnLine = burnLockedToSim
             ? `${fmtUtc(burnMs)} <span class="op-mvr-burn-tag">⟂ sim</span>`
             : `${fmtUtc(burnMs)}`;
+
+        // Caveat text depends on the asset's eccentricity. CW assumes
+        // a circular chief; for e ≳ 0.05 the along-track / radial
+        // coupling drifts off the closed-form prediction. LEO ops
+        // sats typically e < 0.005, well within CW accuracy.
+        const ecc = selectedAsset?.tle?.eccentricity ?? 0;
+        const periodMin = selectedAsset?.tle?.period_min ?? null;
+        const periodHint = Number.isFinite(periodMin)
+            ? ` Orbital period ${periodMin.toFixed(0)} min — CW captures one full revolution.`
+            : '';
+        const eccCaveat = ecc > 0.05
+            ? `Clohessy-Wiltshire STM (RTN, circular chief) — eccentricity ${ecc.toFixed(3)} is high; CW degrades. Treat as advisory.`
+            : `Clohessy-Wiltshire STM (RTN, circular chief).${periodHint} Advisory only — for production planning use a dedicated FDS.`;
 
         const list = shifts.length === 0
             ? `<li class="op-mvr-empty">${selectedAsset.conjs?.length
@@ -269,7 +349,7 @@ export function mountManeuverPanel(opts = {}) {
             </div>
             <ul class="op-mvr-list">${list}</ul>
             <div class="op-mvr-caveat">
-                Linearised free-flight (Δr ≈ Δv·Δt). Advisory only — coast-time gravity unmodelled.
+                ${eccCaveat}
             </div>
         `;
 
