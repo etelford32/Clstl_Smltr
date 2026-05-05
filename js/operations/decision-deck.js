@@ -88,7 +88,35 @@ function decayLifetimeDays(tle, f107, ap) {
     return months * 30;
 }
 
-function decayWithSigma(tle, f107Mid, sigF107, apMid, sigAp) {
+/**
+ * Instantaneous semi-major-axis decay rate (km/day) at the current
+ * orbit. Backed by the same baseLifetimeMonths(perigee) model the
+ * lifetime estimate uses, so the two numbers can never diverge:
+ *
+ *   - lifetime at current perigee p₀ = L₀
+ *   - lifetime at perigee p₀ − Δ     = L₁
+ *   - time to drift from p₀ to p₀−Δ  = L₀ − L₁
+ *   - dā/dt                         ≈ −Δ / (L₀ − L₁)  (km/day)
+ *
+ * Δ defaults to 25 km — large enough to survive a piecewise
+ * transition in baseLifetimeMonths without going to zero, small
+ * enough to be a useful local estimate. Returns 0 for orbits the
+ * model treats as effectively stable (perigee ≥ 1000 km) and for
+ * any input where the lifetime is non-finite.
+ */
+export function deltaAPerDay(tle, f107, ap, perigeeStepKm = 25) {
+    const perigee = altPerigeeKmFromTle(tle);
+    if (!Number.isFinite(perigee) || perigee >= 1000) return 0;
+    const L0 = decayLifetimeDays(tle, f107, ap);
+    if (!Number.isFinite(L0)) return 0;
+    const tleLower = { ...tle, perigee_km: Math.max(120, perigee - perigeeStepKm) };
+    const L1 = decayLifetimeDays(tleLower, f107, ap);
+    if (!Number.isFinite(L1)) return 0;
+    const days = L0 - L1;
+    return days > 0 ? -perigeeStepKm / days : 0;
+}
+
+export function decayWithSigma(tle, f107Mid, sigF107, apMid, sigAp) {
     const mid = decayLifetimeDays(tle, f107Mid, apMid);
     if (mid == null || !Number.isFinite(mid)) return { lifetime_days: mid, sigma_days: 0, perigee_km: altPerigeeKmFromTle(tle) };
 
@@ -109,7 +137,7 @@ function decayWithSigma(tle, f107Mid, sigF107, apMid, sigAp) {
 }
 
 /** Format days into the most legible coarse unit. */
-function fmtLifetime(days) {
+export function fmtLifetime(days) {
     if (!Number.isFinite(days)) return '∞';
     if (days > 36500) return '>100 yr';
     if (days > 365)   return `${(days / 365.25).toFixed(1)} yr`;

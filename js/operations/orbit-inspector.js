@@ -29,6 +29,8 @@
  */
 
 import { propagate, tleEpochToJd, getWasmSgp4 } from '../satellite-tracker.js';
+import { decayWithSigma, deltaAPerDay, fmtLifetime } from './decision-deck.js';
+import { provStore } from './provenance.js';
 
 const MIN_PER_DAY = 1440;
 const RE_KM       = 6378.135;     // WGS-72, matches the SGP4 propagator
@@ -159,6 +161,86 @@ function renderAltSpark(altitudes, perigeeKm, apogeeKm) {
     `;
 }
 
+/**
+ * Drag + decay block. Pulls live F10.7 / Ap from provStore (same
+ * source the prop-budget panel uses) and combines them with the
+ * shared King-Hele surrogate via decayWithSigma + deltaAPerDay so
+ * the inspector and Decay Watch can never diverge.
+ *
+ * Renders three numbers:
+ *   - dā/dt  (km/day, signed; negative = decaying, ≈0 for stable
+ *     orbits above 1000 km)
+ *   - lifetime (formatted into the most legible coarse unit)
+ *   - 1σ band on lifetime (forecast spread + ±25 % B*
+ *     uncertainty in quadrature)
+ *
+ * The active F10.7 / Ap are echoed in a one-line subscript so an
+ * operator can tell at a glance whether the projection is
+ * climatology or live-storm conditions.
+ */
+function renderDragSection(tle) {
+    if (!Number.isFinite(tle?.perigee_km)) return '';
+
+    // Live indices via provStore. Climatology defaults match the
+    // Decay Watch panel so the two read identically when the SWPC
+    // bridge hasn't landed yet.
+    const f107Mid = provStore.get('idx.f107')?.value ?? 150;
+    const apMid   = provStore.get('idx.ap')?.value   ?? 15;
+    const sigF107 = provStore.get('idx.f107')?.sigma ?? 12;
+    const sigAp   = provStore.get('idx.ap')?.sigma   ?? 4;
+
+    const decay   = decayWithSigma(tle, f107Mid, sigF107, apMid, sigAp);
+    const dadtDay = deltaAPerDay(tle, f107Mid, apMid);
+
+    const lifeStr = decay?.lifetime_days != null
+        ? fmtLifetime(decay.lifetime_days)
+        : '—';
+    const sigStr = (decay && Number.isFinite(decay.sigma_days))
+        ? `±${fmtLifetime(decay.sigma_days)}`
+        : '';
+
+    // dā/dt readout. For LEO under 600 km we get tens of
+    // metres/day; for higher orbits we trickle into the cm/day
+    // regime — switch unit so the digits stay readable.
+    const ratePerDayKm = dadtDay;          // negative or 0
+    const absKmDay     = Math.abs(ratePerDayKm);
+    let rateStr;
+    if (!Number.isFinite(ratePerDayKm) || absKmDay === 0) {
+        rateStr = '— stable';
+    } else if (absKmDay >= 0.1) {
+        rateStr = `${ratePerDayKm.toFixed(2)} km/day`;
+    } else if (absKmDay >= 0.001) {
+        rateStr = `${(ratePerDayKm * 1000).toFixed(0)} m/day`;
+    } else {
+        rateStr = `${(ratePerDayKm * 1e5).toFixed(1)} cm/day`;
+    }
+
+    // Year framing for operators who think in horizons rather
+    // than days. Empty when the model treats the orbit as
+    // effectively stable.
+    const ratePerYearStr = (Number.isFinite(ratePerDayKm) && absKmDay > 0)
+        ? `${(ratePerDayKm * 365.25).toFixed(1)} km/yr`
+        : '';
+
+    return `
+        <div class="op-orbit-rates">
+            <div class="op-orbit-rate-title" title="Atmospheric drag drives semi-major axis decay; rate is the slope of the lifetime model at the current perigee.">
+                Drag &amp; decay
+                <span class="op-orbit-rate-conds">F10.7 ${f107Mid.toFixed(0)} · Ap ${apMid.toFixed(0)}</span>
+            </div>
+            <div title="Instantaneous rate of change of semi-major axis at the current perigee, derived by differencing the lifetime model.">
+                <span class="op-orbit-tag">dā/dt</span>${rateStr}
+            </div>
+            <div title="Same rate expressed annually for horizon-style framing.">
+                <span class="op-orbit-tag">/yr</span>${ratePerYearStr || '—'}
+            </div>
+            <div title="Time until perigee re-entry, with a 1σ band combining solar-index forecast spread and ±25 % B* uncertainty in quadrature.">
+                <span class="op-orbit-tag">life</span>${lifeStr}<span class="op-orbit-unit"> ${sigStr}</span>
+            </div>
+        </div>
+    `;
+}
+
 export function mountOrbitInspector(opts = {}) {
     const {
         host,
@@ -261,9 +343,12 @@ export function mountOrbitInspector(opts = {}) {
                 ` : `<div class="op-orbit-empty">elements out of range</div>`}
             </div>
 
+            ${renderDragSection(tle)}
+
             <div class="op-orbit-caveat">
-                Mean elements (TLE / Brouwer-Lyddane). For osculating
-                elements at sim time and drag-driven Δa rate, see follow-ups.
+                Mean elements (TLE / Brouwer-Lyddane). Drag rate +
+                lifetime use the same King-Hele-style surrogate as
+                Decay Watch, modulated by live SWPC F10.7 / Ap.
             </div>
         `;
     }
@@ -271,6 +356,15 @@ export function mountOrbitInspector(opts = {}) {
     const offSel = onSelectChange((id) => {
         selectedId = id;
         render();
+    });
+
+    // SWPC indices feed the drag/decay numbers. When the bridge
+    // promotes climatology to live values (or a storm rolls in) we
+    // want the panel to repaint without waiting for a selection
+    // change. Filter to just the fields we read so we don't repaint
+    // on unrelated provStore writes.
+    const offProv = provStore.subscribe?.((key) => {
+        if (key === 'idx.f107' || key === 'idx.ap') render();
     });
 
     // Re-render when fresh TLEs arrive for the currently selected
@@ -295,6 +389,7 @@ export function mountOrbitInspector(opts = {}) {
     return {
         dispose() {
             offSel?.();
+            offProv?.();
             if (pollTimer) clearTimeout(pollTimer);
         },
     };
