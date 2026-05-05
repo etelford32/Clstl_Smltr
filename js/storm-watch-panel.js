@@ -282,6 +282,49 @@ function injectStyle() {
 #${PANEL_ID} .sw-scrub-tick {
     flex-shrink:0; font-variant-numeric: tabular-nums;
 }
+#${PANEL_ID} .sw-scrub-chips {
+    display:flex; gap:4px; margin-top:5px;
+    /* Equal-fill so each chip has a comfortable tap target on phones —
+       Apple's iOS HIG recommends ≥ 44 px square; we hit ~38 px which
+       reads as ergonomic without crowding the panel. */
+    justify-content:space-between;
+}
+#${PANEL_ID} .sw-scrub-chip {
+    flex:1; min-width:0;
+    background:rgba(255,160,80,.08);
+    color:#caac8d;
+    border:1px solid rgba(255,160,80,.18);
+    border-radius:4px;
+    font:600 9.5px/1.4 inherit;
+    letter-spacing:.04em;
+    padding:4px 0;
+    cursor:pointer;
+    text-align:center;
+    transition:background .12s, color .12s, border-color .12s, transform .08s;
+    /* Force the chip to behave as a button regardless of its host
+       form. Phones occasionally apply a default vertical-align that
+       leaves D-chips a pixel out of line with the slider rail. */
+    -webkit-appearance:none; appearance:none;
+    font-variant-numeric: tabular-nums;
+}
+#${PANEL_ID} .sw-scrub-chip:hover {
+    background:rgba(255,160,80,.18);
+    color:#ffd9b8;
+    border-color:rgba(255,160,80,.35);
+}
+#${PANEL_ID} .sw-scrub-chip:active {
+    transform:scale(.95);
+}
+#${PANEL_ID} .sw-scrub-chip.active {
+    /* Currently selected day — mirror the active-card highlight in
+       the cone palette so the user can read "this slider is parked
+       at D3" at a glance even when they're not looking at the
+       readout above. */
+    background:linear-gradient(180deg, rgba(255,160,80,.32) 0%, rgba(255,140,60,.22) 100%);
+    color:#fff;
+    border-color:rgba(255,180,100,.55);
+    box-shadow:0 0 6px rgba(255,160,80,.30), inset 0 1px 0 rgba(255,255,255,.18);
+}
 #${PANEL_ID} .sw-card .sw-scrub-line {
     /* Per-card "at +Nh" projected position. Hidden when scrubHours=0
        so cards aren't bloated with redundant info on first paint. */
@@ -332,6 +375,21 @@ function buildPanelDOM() {
                            min="0" max="${MAX_SCRUB_H}" step="6" value="0"
                            aria-label="Forecast hours from now">
                     <span class="sw-scrub-tick">+${MAX_SCRUB_H}h</span>
+                </div>
+                <!-- Snap-to-day chips. One-tap shortcuts to the
+                     standard NHC verification horizons; especially
+                     useful on phones where the slider thumb is too
+                     small to land precisely on a single day boundary.
+                     Each chip's data-hour drives _setScrubHours
+                     directly so the slider, readouts, and globe dots
+                     all advance together. -->
+                <div class="sw-scrub-chips" id="${PANEL_ID}-scrub-chips" role="group"
+                     aria-label="Snap to forecast day">
+                    <button type="button" class="sw-scrub-chip" data-hour="24"  title="+24 hours from now">D1</button>
+                    <button type="button" class="sw-scrub-chip" data-hour="48"  title="+48 hours from now">D2</button>
+                    <button type="button" class="sw-scrub-chip" data-hour="72"  title="+72 hours from now">D3</button>
+                    <button type="button" class="sw-scrub-chip" data-hour="96"  title="+96 hours from now">D4</button>
+                    <button type="button" class="sw-scrub-chip" data-hour="120" title="+120 hours from now (5-day cone tip)">D5</button>
                 </div>
             </div>
             <div id="${PANEL_ID}-list"></div>
@@ -450,10 +508,11 @@ export class StormWatchPanel {
 
         // ── Scrubber wiring ─────────────────────────────────────────
         this._scrubEls = {
-            range: this._panel.querySelector(`#${PANEL_ID}-scrub-range`),
-            hLabel: this._panel.querySelector(`#${PANEL_ID}-scrub-h`),
-            tLabel: this._panel.querySelector(`#${PANEL_ID}-scrub-time`),
-            reset:  this._panel.querySelector(`#${PANEL_ID}-scrub-reset`),
+            range:    this._panel.querySelector(`#${PANEL_ID}-scrub-range`),
+            hLabel:   this._panel.querySelector(`#${PANEL_ID}-scrub-h`),
+            tLabel:   this._panel.querySelector(`#${PANEL_ID}-scrub-time`),
+            reset:    this._panel.querySelector(`#${PANEL_ID}-scrub-reset`),
+            chipsBox: this._panel.querySelector(`#${PANEL_ID}-scrub-chips`),
         };
         if (this._scrubEls.range) {
             this._scrubEls.range.value = String(this._scrubHours);
@@ -467,7 +526,17 @@ export class StormWatchPanel {
         }
         this._scrubEls.reset?.addEventListener('click', () => {
             this._setScrubHours(0, { fromUser: true });
-            if (this._scrubEls.range) this._scrubEls.range.value = '0';
+        });
+        // Snap-to-day chips. Click delegation on the row keeps the
+        // listener count at one regardless of how many chips we add
+        // later (e.g. a future "D6 / extended forecast" entry once
+        // backend support lands).
+        this._scrubEls.chipsBox?.addEventListener('click', (ev) => {
+            const btn = ev.target.closest('.sw-scrub-chip[data-hour]');
+            if (!btn) return;
+            const h = parseInt(btn.dataset.hour, 10);
+            if (!Number.isFinite(h)) return;
+            this._setScrubHours(h, { fromUser: true });
         });
 
         window.addEventListener('storm-update', this._onUpdate);
@@ -543,6 +612,24 @@ export class StormWatchPanel {
         }
         if (this._scrubEls?.tLabel) {
             this._scrubEls.tLabel.textContent = formatScrubTime(this._issueMs + h * 3_600_000);
+        }
+        // Keep the slider thumb position in sync when state changes via
+        // a non-slider source (chip tap, reset button, mount-time
+        // restore from localStorage). String comparison guards against
+        // an extra 'input' event loop.
+        if (this._scrubEls?.range && this._scrubEls.range.value !== String(h)) {
+            this._scrubEls.range.value = String(h);
+        }
+        // Highlight the matching D-chip (or none, when scrubHours is
+        // not exactly on a day boundary — the slider lets the user
+        // park between chips, e.g. +36 h, in which case nothing gets
+        // the .active state and the readout above carries the answer).
+        if (this._scrubEls?.chipsBox) {
+            const chips = this._scrubEls.chipsBox.querySelectorAll('.sw-scrub-chip[data-hour]');
+            for (const chip of chips) {
+                const chipH = parseInt(chip.dataset.hour, 10);
+                chip.classList.toggle('active', chipH === h);
+            }
         }
         // Update per-card projected position lines without doing a
         // full innerHTML rewrite — the cards' own data isn't changing,
