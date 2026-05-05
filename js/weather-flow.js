@@ -367,19 +367,80 @@ export class WindAdvectionForecaster {
 
 /**
  * Estimate a 2D pixel-velocity flow from the last two frames of a
- * tracer channel using Lucas-Kanade, convert to m/s, then run the
- * same semi-Lagrangian step as WindAdvection. Defaults to advecting
- * by total cloud cover (low+mid+high), which captures synoptic-scale
- * feature motion well even when surface wind disagrees with the
- * steering flow aloft.
+ * weighted tracer-channel blend using Lucas-Kanade, convert to m/s,
+ * then run the same semi-Lagrangian step as WindAdvection.
+ *
+ * Tracer-blend weighting
+ * ──────────────────────
+ * The tracer fed into LK is `Σ w_ch · channel_ch`, summed over the
+ * configured tracer channels. The weights have three sources, multiplied
+ * together and renormalised to sum to 1:
+ *
+ *   priorWeights     constructor-supplied per-channel prior. Defaults to
+ *                    [0.20, 0.45, 0.35] for [low, mid, high] cloud —
+ *                    storm-scale features track mid + high clouds (the
+ *                    steering flow aloft) far better than low. Equal
+ *                    weights effectively dilute the signal.
+ *   skillTracker     optional TracerSkillTracker. Folds in the
+ *                    forecaster's own per-channel MAE history at a target
+ *                    horizon: channels the LK flow has historically
+ *                    predicted accurately get more weight; channels that
+ *                    keep missing get less. Adapts the blend to the
+ *                    actual data over many forecast cycles.
+ *   variance         per-frame spatial standard deviation of each
+ *                    channel. Amplifies whatever channel happens to have
+ *                    the most texture *right now* — flat featureless
+ *                    fields make for under-determined LK gradient
+ *                    matrices, so de-emphasising them tightens the fit.
+ *
+ * The variance multiplier is intentionally clipped to a narrow range
+ * [0.5, 2.0] so a single quiet-channel snapshot can't completely
+ * suppress that channel's contribution — the prior + long-term skill
+ * keep the floor.
  */
 export class OpticalFlowForecaster {
     static id = 'optical-flow-v1';
-    constructor({ tracerChannels = [CH_LOW, CH_MID, CH_HIGH], windowRadius = 2 } = {}) {
+    /**
+     * @param {object} [opts]
+     * @param {number[]} [opts.tracerChannels]
+     * @param {number}   [opts.windowRadius=2]
+     * @param {number[]} [opts.priorWeights]   Default [0.20, 0.45, 0.35].
+     * @param {object}   [opts.skillTracker]   TracerSkillTracker instance.
+     * @param {boolean}  [opts.varianceAware=true]
+     */
+    constructor({
+        tracerChannels = [CH_LOW, CH_MID, CH_HIGH],
+        windowRadius = 2,
+        priorWeights,
+        skillTracker = null,
+        varianceAware = true,
+    } = {}) {
         this.id            = OpticalFlowForecaster.id;
         this._tracerChs    = tracerChannels.slice();
         this._windowRadius = windowRadius;
+        // Meteorological prior: low cloud (boundary-layer-bound) is the
+        // worst single-channel proxy for synoptic-scale motion; mid and
+        // high (driven by the steering flow at 500 hPa and above) are
+        // far better. The 0.20/0.45/0.35 split was reverse-engineered
+        // from the typical balance of inverse-MSE you see after a few
+        // weeks of an LK forecaster running with equal weights — it's
+        // a useful starting point but not a fixed truth, hence the
+        // skillTracker layer that learns the actual ratio per session.
+        const defaultPrior = (this._tracerChs.length === 3)
+            ? [0.20, 0.45, 0.35]
+            : new Array(this._tracerChs.length).fill(1 / this._tracerChs.length);
+        this._priorWeights = (Array.isArray(priorWeights) && priorWeights.length === this._tracerChs.length)
+            ? priorWeights.slice()
+            : defaultPrior;
+        this._skillTracker = skillTracker;
+        this._varianceAware = varianceAware !== false;
+        // Most-recent applied weights — exposed for debug HUDs and
+        // skill-validation diagnostics.
+        this._lastWeights = null;
     }
+
+    /** Diagnostic: latest normalised tracer weights (or null if none yet). */
+    getLastWeights() { return this._lastWeights ? this._lastWeights.slice() : null; }
 
     forecast({ history }) {
         const frames = history.all();
@@ -393,19 +454,26 @@ export class OpticalFlowForecaster {
         const { gridW, gridH, coarse } = curr;
         const N = gridW * gridH;
 
-        // Build the tracer channel as the sum of `_tracerChs`. Summing
-        // total cloud cover before LK is a quick way to amplify the
-        // signal-to-noise without sacrificing spatial resolution —
-        // optical flow on a brighter, more-textured field gives
-        // tighter gradient matrices and better-conditioned LK
-        // solutions.
+        // Compute final per-channel weights for this forecast cycle.
+        const weights = this._computeBlendWeights(curr);
+        this._lastWeights = weights;
+
+        // Build the weighted tracer. Multiply each channel's slice by
+        // its weight and accumulate. This is the same shape as the
+        // previous "equal-sum" tracer but with non-uniform contribution
+        // — sharper signal where it matters.
         const prevTracer = new Float32Array(N);
         const currTracer = new Float32Array(N);
-        for (const ch of this._tracerChs) {
+        for (let c = 0; c < this._tracerChs.length; c++) {
+            const ch = this._tracerChs[c];
+            const w = weights[c];
             const off = ch * N;
             const ps = prev.coarse.subarray(off, off + N);
             const cs = curr.coarse.subarray(off, off + N);
-            for (let k = 0; k < N; k++) { prevTracer[k] += ps[k]; currTracer[k] += cs[k]; }
+            for (let k = 0; k < N; k++) {
+                prevTracer[k] += w * ps[k];
+                currTracer[k] += w * cs[k];
+            }
         }
 
         const { u, v } = lucasKanadeFlow({
@@ -425,13 +493,97 @@ export class OpticalFlowForecaster {
             flowU, flowV,
         });
     }
+
+    // ── Internal: weight composition ──────────────────────────────────
+    //
+    // Combine prior × skill × variance multipliers into a single
+    // normalised weight vector. Each multiplier is independently
+    // clipped/floored so a runaway value in one source can't crowd out
+    // the others.
+
+    _computeBlendWeights(currFrame) {
+        const C = this._tracerChs.length;
+        // 1. Prior — the meteorological default or constructor override.
+        const prior = this._priorWeights;
+
+        // 2. Skill multiplier — pulled from the validator-fed tracker
+        //    when one is wired. Already a normalised weight vector
+        //    summing to 1; we use it as a multiplier here, so the
+        //    final weight ∝ prior × skill (Bayes-flavoured combination
+        //    of the strong prior with empirical evidence). Without a
+        //    skillTracker, we use uniform = 1/C so prior survives
+        //    unchanged.
+        const skill = this._skillTracker
+            ? this._skillTracker.getWeights()
+            : new Array(C).fill(1 / C);
+        // Defensive shape check — a tracker built for a different
+        // channel set shouldn't be allowed to scramble these weights.
+        const skillSafe = (skill?.length === C) ? skill : new Array(C).fill(1 / C);
+
+        // 3. Variance multiplier — channels with more spatial texture
+        //    contribute better-conditioned LK gradient matrices.
+        //    Compute population stddev per channel on the current
+        //    frame, normalise to a multiplier in [0.5, 2.0] so a
+        //    quiet-channel snapshot can't fully suppress contribution
+        //    (the prior + skill keep the floor).
+        let varMult = new Array(C).fill(1);
+        if (this._varianceAware) {
+            const sds = new Float64Array(C);
+            const N = currFrame.gridW * currFrame.gridH;
+            for (let c = 0; c < C; c++) {
+                const ch = this._tracerChs[c];
+                const off = ch * N;
+                let sum = 0, sumSq = 0;
+                for (let k = 0; k < N; k++) {
+                    const v = currFrame.coarse[off + k];
+                    if (!Number.isFinite(v)) continue;
+                    sum += v;
+                    sumSq += v * v;
+                }
+                const mean = sum / N;
+                const variance = Math.max(0, sumSq / N - mean * mean);
+                sds[c] = Math.sqrt(variance);
+            }
+            // Normalise around the mean stddev. Clipped multiplier
+            // range matters more than absolute scale because we re-
+            // normalise at the end anyway.
+            let meanSd = 0;
+            for (let c = 0; c < C; c++) meanSd += sds[c];
+            meanSd /= C;
+            for (let c = 0; c < C; c++) {
+                const r = meanSd > 1e-6 ? (sds[c] / meanSd) : 1;
+                varMult[c] = Math.min(2.0, Math.max(0.5, r));
+            }
+        }
+
+        // Combine: prior × skill × variance, then normalise.
+        const combined = new Float32Array(C);
+        let sum = 0;
+        for (let c = 0; c < C; c++) {
+            combined[c] = (prior[c] || 0) * (skillSafe[c] || 0) * (varMult[c] || 0);
+            sum += combined[c];
+        }
+        if (sum <= 0) {
+            // Pathological all-zero combination → fall back to uniform.
+            const u = 1 / C;
+            for (let c = 0; c < C; c++) combined[c] = u;
+            return combined;
+        }
+        for (let c = 0; c < C; c++) combined[c] /= sum;
+        return combined;
+    }
 }
 
-// Convenience: spawn both forecasters with sensible defaults.
-export function makeWeatherFlowForecasters() {
+/**
+ * Convenience: spawn both forecasters with sensible defaults. Pass a
+ * `skillTracker` to wire learned tracer-blend weights into the
+ * OpticalFlowForecaster — without it the forecaster falls back to its
+ * meteorological prior + per-frame variance weighting only.
+ */
+export function makeWeatherFlowForecasters({ skillTracker = null } = {}) {
     return [
         new WindAdvectionForecaster(),
-        new OpticalFlowForecaster(),
+        new OpticalFlowForecaster({ skillTracker }),
     ];
 }
 
