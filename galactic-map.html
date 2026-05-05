@@ -407,6 +407,10 @@ canvas { display:block; width:100% !important; height:100% !important; }
             <input type="checkbox" id="tog-fermi" checked>
             <label for="tog-fermi">⊕ Fermi Bubbles</label>
         </div>
+        <div class="tog-row" title="Tidal stream from the disrupting Sagittarius Dwarf Spheroidal — wraps the entire MW halo.">
+            <input type="checkbox" id="tog-sgr-stream" checked>
+            <label for="tog-sgr-stream">⤳ Sagittarius Stream</label>
+        </div>
 
         <div class="sb-hd" style="margin-top:16px">Spectral Type Legend</div>
         <div class="legend-item"><div class="legend-dot" style="background:#88aaff"></div>O/B — hot blue/white</div>
@@ -443,6 +447,14 @@ canvas { display:block; width:100% !important; height:100% !important; }
         <div class="legend-item"><div class="legend-dot" style="background:#241408;border:1px solid #663"></div>Mid-plane dust band (silhouettes bulge)</div>
         <div class="legend-item"><div class="legend-dot" style="background:#4488cc"></div>Galactic warp (outer disk bend)</div>
         <div class="legend-item"><div class="legend-dot" style="background:#99bbff;opacity:.5"></div>Circumgalactic halo (hot corona)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ddc086"></div>Sagittarius Stream (tidal arc, polar)</div>
+
+        <div class="sb-hd" style="margin-top:16px">Sgr A* Environment</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ff5566"></div>G2 gas cloud (2014 close-pass)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ff9a55"></div>Mini-spiral (Sgr A West) gas streamers</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#fff1c2"></div>IRS 16 / IRS 13 young clusters</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ffa050"></div>EHT photon ring + Doppler crescent</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#aaccff"></div>S-stars S2/S1/S12/S14/S29/S38/S55/S62</div>
 
         <div class="sb-hd" style="margin-top:16px">Sun's Orbit Around Sgr A*</div>
         <div style="font-size:10px;color:#666;line-height:1.6">
@@ -483,8 +495,13 @@ const DAYS_PER_YR = 365.25;
 
 let sstarWasm = null;  // set after async init below
 
-// Map S-star catalog ids → WASM star_id indices (S2=0, S1=1, S12=2, S14=3)
-const SSTAR_WASM_IDS = { s2: 0, s1: 1, s12: 2, s14: 3 };
+// Map S-star catalog ids → WASM star_id indices.  Order must match the Rust
+// CATALOG[] in rust-sstar/src/lib.rs (S2=0, S1=1, S12=2, S14=3, S29=4,
+// S38=5, S55=6, S62=7).
+const SSTAR_WASM_IDS = {
+    s2: 0, s1: 1, s12: 2, s14: 3,
+    s29: 4, s38: 5, s55: 6, s62: 7,
+};
 
 function dateToJD(d) {
     let y = d.getUTCFullYear(), m = d.getUTCMonth() + 1;
@@ -523,6 +540,10 @@ sstarOrbitGroup.visible = false;  // toggled by camera distance
             const { telemetry } = await import('./js/telemetry.js');
             telemetry.recordPerf('wasm_sstar_init_failed', -1);
         } catch {}
+        // WASM failed — still build static-orbit guides so the GC interior
+        // isn't an empty void. buildStaticSstarOrbits is defined later in
+        // this module so we defer to ensure it's resolvable.
+        try { buildStaticSstarOrbits(); } catch {}
     }
 })();
 
@@ -773,6 +794,52 @@ const CATALOG = [
             ['Semi-major axis', '~0.010 ly from GC'],
             ['Eccentricity', '~0.82'],
             ['Orbital period', '~19 yr (estimated)'],
+        ],
+    },
+    {
+        id: 's29', name: 'S29', abbr: 'S29', type: 'B-type [S-star]',
+        l: 0, b: 0, dist: 26673,
+        isSstar: true, gcOffset: [0.0184, 0.0026, 0.0091],   // ~0.021 ly from GC
+        temp: 22000, spectral: 'B',
+        color: 0xaabbff, size: 0.13,
+        desc: 'B-type main-sequence star tracked by GRAVITY since 2019. Its orbit and rapid periapsis passage in 2021 contributed to the most precise post-Newtonian test of Sgr A*\'s mass to date.',
+        props: [
+            ['Spectral type', 'B-type MS'],
+            ['Semi-major axis', '~0.0218 ly (~1380 AU)'],
+            ['Orbital period', '~90 yr'],
+            ['Eccentricity', '~0.97'],
+            ['Notable', '2021 periapsis at 13 AU — closest in the cluster'],
+        ],
+    },
+    {
+        id: 's55', name: 'S55 (S0-102)', abbr: 'S55', type: 'B [S-star]',
+        l: 0, b: 0, dist: 26673,
+        isSstar: true, gcOffset: [0.0066, -0.0029, 0.0048],  // ~0.0086 ly
+        temp: 20000, spectral: 'B',
+        color: 0xb0c8ff, size: 0.12,
+        desc: 'Originally catalogued as S0-102 by the UCLA Galactic Center Group. With a 12.8-year period it briefly held the title of shortest orbit until S62 and S4711 were found. Used together with S2 to test relativity at the GC.',
+        props: [
+            ['Spectral type', 'B-type MS'],
+            ['Semi-major axis', '~870 AU'],
+            ['Orbital period', '12.8 yr'],
+            ['Eccentricity', '~0.74'],
+            ['Discoverer', 'UCLA Keck Galactic Center Group (2012)'],
+        ],
+    },
+    {
+        id: 's62', name: 'S62', abbr: 'S62', type: 'B [S-star]',
+        l: 0, b: 0, dist: 26673,
+        isSstar: true, gcOffset: [0.0033, 0.0013, -0.0022],  // ~0.0042 ly
+        temp: 21000, spectral: 'B',
+        color: 0x99bbff, size: 0.11,
+        desc: 'Among the closest and fastest-orbiting S-stars known. Periapsis brings it within ~16 AU of Sgr A*, where it reaches ~10% of light speed and undergoes measurable Schwarzschild precession.',
+        props: [
+            ['Spectral type', 'B-type MS'],
+            ['Semi-major axis', '~480 AU'],
+            ['Orbital period', '9.9 yr (Peißker+ 2020)'],
+            ['Eccentricity', '~0.976'],
+            ['Periapsis speed', '~26,000 km/s (~8.7% c)'],
+            ['Notable', 'Measurable GR precession; closest S-star to date'],
         ],
     },
 
@@ -1503,6 +1570,101 @@ const CATALOG = [
             ['Mass', '~6.5 × 10⁸ M☉'],
             ['Diameter', '~7,000 ly'],
             ['Notable', 'Cepheid period-luminosity calibration'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: 'fornax_dsph', name: 'Fornax Dwarf Spheroidal', abbr: 'Fornax dSph',
+        type: 'Dwarf Spheroidal Galaxy',
+        l: 237.10, b: -65.65, dist: 460_000,
+        isIntergalactic: true,
+        temp: 4500, spectral: 'K',
+        color: 0xccbb88, size: 2.0,
+        desc: 'One of the most luminous Milky Way satellite dwarfs. Hosts six globular clusters — an unusual richness for so small a system — and shows multiple stellar populations spanning ~10 Gyr of star formation, suggesting it has a complex chemical history. Heavily dark-matter dominated.',
+        props: [
+            ['Type', 'Dwarf Spheroidal (dSph)'],
+            ['Distance', '~460,000 ly (~138 kpc)'],
+            ['Galactic l / b', '237.10° / −65.65°'],
+            ['Stellar mass', '~2 × 10⁷ M☉'],
+            ['Diameter', '~5,000 ly'],
+            ['Globular clusters', '6 (incl. NGC 1049)'],
+            ['Notable', 'Multi-epoch SF; high M/L ratio'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: 'sculptor_dsph', name: 'Sculptor Dwarf Spheroidal', abbr: 'Sculptor dSph',
+        type: 'Dwarf Spheroidal Galaxy',
+        l: 287.53, b: -83.16, dist: 290_000,
+        isIntergalactic: true,
+        temp: 4500, spectral: 'K',
+        color: 0xddccaa, size: 1.8,
+        desc: 'The first dwarf galaxy ever discovered (Shapley, 1938). A tiny spherical clump of ancient (~13 Gyr) metal-poor stars at the south galactic pole. Heavily dominated by dark matter. The progenitor of much of the southern halo stellar inventory.',
+        props: [
+            ['Type', 'Dwarf Spheroidal (dSph)'],
+            ['Distance', '~290,000 ly (~86 kpc)'],
+            ['Galactic l / b', '287.53° / −83.16°'],
+            ['Stellar mass', '~2 × 10⁶ M☉'],
+            ['Age', '~13 Gyr (mostly ancient)'],
+            ['Discovery', 'Harlow Shapley, 1938'],
+            ['Notable', 'First dwarf galaxy ever found'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: 'draco_dsph', name: 'Draco Dwarf Spheroidal', abbr: 'Draco dSph',
+        type: 'Dwarf Spheroidal Galaxy',
+        l: 86.37, b: 34.72, dist: 250_000,
+        isIntergalactic: true,
+        temp: 4400, spectral: 'K',
+        color: 0xeebb99, size: 1.5,
+        desc: 'A textbook ultra-faint dwarf with one of the highest mass-to-light ratios known (~440), making it a key target for indirect dark matter searches (γ-ray, neutrino). Star formation effectively shut off ~10 Gyr ago.',
+        props: [
+            ['Type', 'Dwarf Spheroidal (dSph)'],
+            ['Distance', '~250,000 ly (~76 kpc)'],
+            ['Galactic l / b', '86.37° / +34.72°'],
+            ['Stellar mass', '~3 × 10⁵ M☉'],
+            ['Mass-to-light', '~440 (extreme DM dominance)'],
+            ['SF history', 'Quenched ~10 Gyr ago'],
+            ['Notable', 'Premier dark-matter search target'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: 'leo1_dsph', name: 'Leo I Dwarf Spheroidal', abbr: 'Leo I',
+        type: 'Dwarf Spheroidal Galaxy',
+        l: 225.99, b: 49.11, dist: 820_000,
+        isIntergalactic: true,
+        temp: 4700, spectral: 'K',
+        color: 0xddbb99, size: 1.7,
+        desc: 'The most distant of the "classical" Milky Way dwarf spheroidals — at ~820 kly, near the Local Group escape velocity. Recent kinematic studies hint at an unusually massive (~3 × 10⁶ M☉) central black hole relative to its tiny stellar mass.',
+        props: [
+            ['Type', 'Dwarf Spheroidal (dSph)'],
+            ['Distance', '~820,000 ly (~250 kpc)'],
+            ['Galactic l / b', '225.99° / +49.11°'],
+            ['Stellar mass', '~5 × 10⁶ M☉'],
+            ['Diameter', '~1,000 ly'],
+            ['Possible central BH', '~3 × 10⁶ M☉ (Bustamante-Rosell+ 2021)'],
+            ['Notable', 'Largest velocity vs Milky Way'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: 'antlia2_dsph', name: 'Antlia 2 Dwarf', abbr: 'Antlia 2',
+        type: 'Dwarf Spheroidal Galaxy',
+        l: 264.9, b: 11.2, dist: 422_000,
+        isIntergalactic: true,
+        temp: 4400, spectral: 'K',
+        color: 0xc8b099, size: 1.4,
+        desc: 'A "ghostly" ultra-low-surface-brightness dwarf discovered in Gaia DR2 (Torrealba+ 2019). At ~12,000 ly across it rivals the Large Magellanic Cloud in size yet is 10,000× fainter. Its trajectory may have created a long-suspected dark-matter perturbation in the Milky Way disk.',
+        props: [
+            ['Type', 'Ultra-Diffuse Dwarf Spheroidal'],
+            ['Distance', '~422,000 ly (~130 kpc)'],
+            ['Galactic l / b', '264.9° / +11.2°'],
+            ['Diameter', '~12,000 ly (LMC-class)'],
+            ['Surface brightness', '~31.9 mag/arcsec² (extreme)'],
+            ['Discovery', 'Gaia DR2 — Torrealba+ 2019'],
+            ['Notable', 'Possible cause of MW disk DM-perturbation'],
         ],
         isCluster: true,
     },
@@ -3511,6 +3673,18 @@ const galacticWarp = (function buildGalacticWarp() {
 //  Disk tilted ~14° off galactic plane (Sgr A*'s spin axis ~26° from z-axis).
 // ══════════════════════════════════════════════════════════════════════════
 const sgraDiskRings = [];  // [[mesh, angularVelocity], ...] — filled in IIFE, used in animate()
+// Visual scaling group — all Sgr A* volumetrics live in here so the entire
+// system can be smoothly shrunk as the camera zooms toward the GC.
+// Animate() updates `sgraVisualGroup.scale` based on camDistFromOrigin so the
+// 80–3000 ly halos don't drown out the 0.01 ly S-star orbits at close zoom.
+const sgraVisualGroup = new THREE.Group();
+scene.add(sgraVisualGroup);
+// Bulge halos live in their own sub-group so we can fade them independently
+// from the disk/EHT inner image at the very closest zoom levels.
+const sgraBulgeGroup  = new THREE.Group();
+const sgraInnerGroup  = new THREE.Group();
+sgraVisualGroup.add(sgraBulgeGroup);
+sgraVisualGroup.add(sgraInnerGroup);
 
 (function buildGCGlow() {
     // ── Galactic bulge / nuclear star cluster glow halos ──────────────────
@@ -3521,7 +3695,7 @@ const sgraDiskRings = [];  // [[mesh, angularVelocity], ...] — filled in IIFE,
         [100,  0xffddaa, 0.14],
         [30,   0xfff0cc, 0.22],
     ].forEach(([r, c, o]) => {
-        scene.add(new THREE.Mesh(
+        sgraBulgeGroup.add(new THREE.Mesh(
             new THREE.SphereGeometry(r, 16, 16),
             new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: o,
                 depthWrite: false, blending: THREE.AdditiveBlending })
@@ -3529,7 +3703,7 @@ const sgraDiskRings = [];  // [[mesh, angularVelocity], ...] — filled in IIFE,
     });
 
     // ── Event horizon — black drop sphere (occludes background) ──────────
-    scene.add(new THREE.Mesh(
+    sgraInnerGroup.add(new THREE.Mesh(
         new THREE.SphereGeometry(7, 32, 32),
         new THREE.MeshBasicMaterial({ color: 0x000000, depthWrite: true })
     ));
@@ -3564,7 +3738,7 @@ const sgraDiskRings = [];  // [[mesh, angularVelocity], ...] — filled in IIFE,
             depthWrite: false, blending: THREE.AdditiveBlending,
         }));
         photonRing.scale.setScalar(22);
-        scene.add(photonRing);
+        sgraInnerGroup.add(photonRing);
     })();
 
     // ── Accretion disk (tilted ~14° off galactic plane) ───────────────────
@@ -3572,7 +3746,7 @@ const sgraDiskRings = [];  // [[mesh, angularVelocity], ...] — filled in IIFE,
     const diskGroup = new THREE.Group();
     diskGroup.rotation.x = 0.24;   // ~14° tilt from galactic midplane
     diskGroup.rotation.z = 0.18;   // slight roll for visual variety
-    scene.add(diskGroup);
+    sgraInnerGroup.add(diskGroup);
 
     // Temperature-gradient canvas texture spanning the full disk face
     (function() {
@@ -3675,7 +3849,322 @@ const sgraDiskRings = [];  // [[mesh, angularVelocity], ...] — filled in IIFE,
 })();
 
 // ══════════════════════════════════════════════════════════════════════════
-//  GALACTIC COORDINATE GRID
+//  SAGITTARIUS A* ENVIRONMENT  — extra detail around the GC
+//
+//  Adds layers visible at progressively closer zoom levels:
+//    • Nuclear star cluster — dense halo of red giants in inner ~30 ly
+//    • IRS 16 + IRS 13 clusters — bright young O/WR stars
+//    • Mini-spiral (Sgr A West) — Northern Arm + Eastern Arm + Bar
+//      ionised gas streamers
+//    • G2 gas cloud trajectory — the famous 2014 close-pass ellipse
+//    • Polarisation field around the EHT photon ring
+//    • Doppler-boosted high-fidelity EHT inner image (separate from photon
+//      ring sprite — captures the bright bottom crescent)
+//
+//  All live in `sgraInnerGroup` so they shrink with the rest of the BH
+//  visualisation as the camera approaches.
+// ══════════════════════════════════════════════════════════════════════════
+const g2Trajectory = { line: null, marker: null, baseT0: 0 };
+
+(function buildGCEnvironment() {
+    // ── Nuclear star cluster — dense halo of points 5–35 ly from Sgr A* ──
+    {
+        const N = 1500;
+        const pos = new Float32Array(N * 3);
+        const col = new Float32Array(N * 3);
+        const sz  = new Float32Array(N);
+        for (let i = 0; i < N; i++) {
+            const r = 4 + Math.pow(Math.random(), 1.4) * 32;
+            const phi = Math.acos(2 * Math.random() - 1);
+            const th  = Math.random() * Math.PI * 2;
+            pos[i*3]   = r * Math.sin(phi) * Math.cos(th);
+            pos[i*3+1] = r * Math.cos(phi) * 0.78;
+            pos[i*3+2] = r * Math.sin(phi) * Math.sin(th);
+            // Red-giant dominated: warm yellow-orange
+            const tint = 0.6 + Math.random() * 0.4;
+            col[i*3]   = 1.0 * tint;
+            col[i*3+1] = (0.75 + Math.random() * 0.2) * tint;
+            col[i*3+2] = (0.45 + Math.random() * 0.15) * tint;
+            sz[i]      = 4 + Math.random() * 7;
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        geo.setAttribute('color',    new THREE.BufferAttribute(col, 3));
+        geo.setAttribute('size',     new THREE.BufferAttribute(sz, 1));
+        const mat = new THREE.ShaderMaterial({
+            vertexColors: true, transparent: true, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            uniforms: { uScale: { value: renderer.getPixelRatio() } },
+            vertexShader: `
+                attribute float size;
+                varying vec3 vCol;
+                uniform float uScale;
+                void main() {
+                    vCol = color;
+                    vec4 mvp = modelViewMatrix * vec4(position, 1.0);
+                    gl_PointSize = size * uScale / -mvp.z;
+                    gl_PointSize = clamp(gl_PointSize, 0.5, 8.0);
+                    gl_Position = projectionMatrix * mvp;
+                }
+            `,
+            fragmentShader: `
+                varying vec3 vCol;
+                void main() {
+                    float d = length(gl_PointCoord - 0.5) * 2.0;
+                    float a = 1.0 - smoothstep(0.05, 1.0, d);
+                    gl_FragColor = vec4(vCol, a * 0.85);
+                }
+            `,
+        });
+        sgraInnerGroup.add(new THREE.Points(geo, mat));
+    }
+
+    // ── IRS 16 cluster — ~10 bright young O/WR stars at 0.04–0.4 ly ──────
+    // (Visualised at exaggerated 1–6 ly for visibility around the disk.)
+    {
+        const irs16 = [
+            { x:  3.2, y:  0.4, z:  0.6, c: 0xffe9b8 }, // IRS 16 SW (LBV)
+            { x:  4.1, y: -0.2, z: -1.4, c: 0xfff1c2 }, // IRS 16 NE
+            { x:  2.0, y:  1.1, z:  2.5, c: 0xfff0b0 }, // IRS 16 C
+            { x:  5.5, y:  0.0, z:  0.8, c: 0xffe0a0 }, // IRS 16 NW
+            { x: -1.8, y:  0.2, z:  3.6, c: 0xfff5d0 }, // IRS 16 CC
+            { x: -3.4, y: -0.3, z: -2.1, c: 0xffd29a }, // bright supergiant
+        ];
+        irs16.forEach(({ x, y, z, c }) => {
+            const star = new THREE.Mesh(
+                new THREE.SphereGeometry(0.18, 10, 10),
+                new THREE.MeshBasicMaterial({ color: c })
+            );
+            star.position.set(x, y, z);
+            sgraInnerGroup.add(star);
+            // Glow halo
+            const cv = document.createElement('canvas');
+            cv.width = cv.height = 64;
+            const cx = cv.getContext('2d');
+            const gr = cx.createRadialGradient(32,32,0, 32,32,32);
+            gr.addColorStop(0,    'rgba(255,240,200,1.0)');
+            gr.addColorStop(0.3,  'rgba(255,210,140,0.5)');
+            gr.addColorStop(1,    'rgba(255,160,80,0.0)');
+            cx.fillStyle = gr; cx.fillRect(0,0,64,64);
+            const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+                map: new THREE.CanvasTexture(cv), transparent: true,
+                depthWrite: false, blending: THREE.AdditiveBlending,
+            }));
+            sp.scale.setScalar(1.4);
+            sp.position.set(x, y, z);
+            sgraInnerGroup.add(sp);
+        });
+    }
+
+    // ── IRS 13E cluster — putative IMBH host ────────────────────────────
+    // Compact group of ~6 He-rich stars at ~0.13 pc east of Sgr A*.
+    {
+        const center = new THREE.Vector3(-1.2, -0.3, -3.0);   // exaggerated
+        for (let i = 0; i < 5; i++) {
+            const off = new THREE.Vector3(
+                (Math.random() - 0.5) * 0.45,
+                (Math.random() - 0.5) * 0.18,
+                (Math.random() - 0.5) * 0.45,
+            );
+            const star = new THREE.Mesh(
+                new THREE.SphereGeometry(0.14, 10, 10),
+                new THREE.MeshBasicMaterial({ color: 0xfff5e0 })
+            );
+            star.position.copy(center).add(off);
+            sgraInnerGroup.add(star);
+        }
+    }
+
+    // ── Mini-spiral (Sgr A West) — Northern Arm + Bar + Eastern Arm ─────
+    // Curved gas streamers feeding the central parsec, ionised by IRS 16.
+    function buildArm(controlPts, color, opacity) {
+        // Sample a Catmull-Rom-ish spline through the control points
+        const curve = new THREE.CatmullRomCurve3(
+            controlPts.map(([x,y,z]) => new THREE.Vector3(x,y,z)),
+            false, 'catmullrom', 0.4,
+        );
+        const pts = curve.getPoints(120);
+        const positions = new Float32Array(pts.length * 3);
+        const colors    = new Float32Array(pts.length * 3);
+        const sizes     = new Float32Array(pts.length);
+        const r0 = (color >> 16 & 255) / 255;
+        const g0 = (color >> 8  & 255) / 255;
+        const b0 = (color       & 255) / 255;
+        pts.forEach((p, i) => {
+            // Add small jitter perpendicular to curve for stream thickness
+            const jx = (Math.random() - 0.5) * 0.7;
+            const jy = (Math.random() - 0.5) * 0.4;
+            const jz = (Math.random() - 0.5) * 0.7;
+            positions[i*3]   = p.x + jx;
+            positions[i*3+1] = p.y + jy;
+            positions[i*3+2] = p.z + jz;
+            // Brightness pulses along the arm
+            const b = 0.7 + 0.3 * Math.sin(i * 0.45);
+            colors[i*3]   = r0 * b;
+            colors[i*3+1] = g0 * b;
+            colors[i*3+2] = b0 * b;
+            sizes[i]      = 6 + Math.random() * 8;
+        });
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geo.setAttribute('color',    new THREE.BufferAttribute(colors, 3));
+        geo.setAttribute('size',     new THREE.BufferAttribute(sizes, 1));
+        const mat = new THREE.ShaderMaterial({
+            vertexColors: true, transparent: true, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            uniforms: { uScale: { value: renderer.getPixelRatio() } },
+            vertexShader: `
+                attribute float size;
+                varying vec3 vCol;
+                uniform float uScale;
+                void main() {
+                    vCol = color;
+                    vec4 mvp = modelViewMatrix * vec4(position, 1.0);
+                    gl_PointSize = size * uScale / -mvp.z;
+                    gl_PointSize = clamp(gl_PointSize, 1.0, 14.0);
+                    gl_Position = projectionMatrix * mvp;
+                }
+            `,
+            fragmentShader: `
+                varying vec3 vCol;
+                void main() {
+                    float d = length(gl_PointCoord - 0.5) * 2.0;
+                    float a = 1.0 - smoothstep(0.05, 1.0, d);
+                    a = pow(a, 1.4);
+                    gl_FragColor = vec4(vCol, a * ${opacity.toFixed(3)});
+                }
+            `,
+        });
+        sgraInnerGroup.add(new THREE.Points(geo, mat));
+        // Faint connecting line for backbone
+        sgraInnerGroup.add(new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints(pts),
+            new THREE.LineBasicMaterial({
+                color, transparent: true, opacity: opacity * 0.3,
+            })
+        ));
+    }
+    // Northern Arm — sweeps from north, curves around Sgr A*, loops south
+    buildArm([
+        [ 1.2,  6.0,  4.0],
+        [ 0.4,  3.5,  1.8],
+        [-1.0,  1.4, -0.4],
+        [-2.6,  0.6, -2.8],
+        [-3.5, -0.4, -5.4],
+    ], 0xff9a55, 0.55);
+    // Eastern Arm — orange streamer feeding from the east
+    buildArm([
+        [-7.0,  0.6,  3.8],
+        [-4.3,  0.3,  1.2],
+        [-2.0,  0.0, -0.7],
+        [-0.3, -0.4, -1.4],
+        [ 1.6, -0.5, -1.0],
+    ], 0xffaa66, 0.50);
+    // Bar — central east-west streamer
+    buildArm([
+        [-4.5, -0.4, -1.0],
+        [-2.0, -0.1, -0.4],
+        [ 0.8,  0.2,  0.2],
+        [ 3.4,  0.5,  0.6],
+    ], 0xffcc88, 0.45);
+
+    // ── G2 gas cloud trajectory (close pass 2014) ────────────────────────
+    // Highly eccentric (e≈0.97) ~300-yr orbit with periapsis ~36 light-hr
+    // = ~0.0042 ly from Sgr A*. We render the trajectory at exaggerated
+    // ~3 ly periapsis so it's visible alongside the disk.
+    {
+        const a = 24, e = 0.94;            // semi-major axis (ly), eccentricity
+        const periapsis = a * (1 - e);     // ~1.4 ly
+        const pts = [];
+        const N = 240;
+        for (let i = 0; i <= N; i++) {
+            const M = (i / N) * Math.PI * 2;     // mean anomaly
+            // Solve Kepler's eq E - e sin E = M (Newton iter)
+            let E = M;
+            for (let k = 0; k < 5; k++) E -= (E - e * Math.sin(E) - M) / (1 - e * Math.cos(E));
+            const x = a * (Math.cos(E) - e);
+            const y = a * Math.sqrt(1 - e*e) * Math.sin(E);
+            pts.push(new THREE.Vector3(x, 0.4 * Math.sin(M * 1.2), y));
+        }
+        // Tilt the orbit out of the disk plane
+        const orb = new THREE.Group();
+        orb.rotation.set(0.7, 0.4, 0.2);
+        const orbLine = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints(pts),
+            new THREE.LineBasicMaterial({
+                color: 0xff5566, transparent: true, opacity: 0.55,
+                depthWrite: false,
+            })
+        );
+        orb.add(orbLine);
+        g2Trajectory.line = orb;
+
+        // Animated G2 marker — smudged red sprite
+        const cv = document.createElement('canvas');
+        cv.width = cv.height = 128;
+        const cx = cv.getContext('2d');
+        const gr = cx.createRadialGradient(64,64,0, 64,64,64);
+        gr.addColorStop(0,   'rgba(255,180,180,1.0)');
+        gr.addColorStop(0.3, 'rgba(255,90,90,0.55)');
+        gr.addColorStop(1,   'rgba(180,30,40,0.0)');
+        cx.fillStyle = gr; cx.fillRect(0,0,128,128);
+        const marker = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: new THREE.CanvasTexture(cv), transparent: true,
+            depthWrite: false, blending: THREE.AdditiveBlending,
+        }));
+        marker.scale.setScalar(2.2);
+        orb.add(marker);
+        g2Trajectory.marker = marker;
+        g2Trajectory.path = pts;
+        g2Trajectory.tilt = orb;
+        sgraInnerGroup.add(orb);
+    }
+
+    // ── EHT high-fidelity inner image (donut + bottom crescent) ─────────
+    // Slightly inside the photon ring sprite — provides the iconic look at
+    // the very innermost zoom.
+    {
+        const cv = document.createElement('canvas');
+        cv.width = cv.height = 512;
+        const cx = cv.getContext('2d');
+        // Black shadow at center
+        cx.fillStyle = 'rgba(0,0,0,0)';
+        cx.fillRect(0,0,512,512);
+        // Donut ring
+        cx.translate(256, 256);
+        const ring = cx.createRadialGradient(0,0, 90, 0,0, 220);
+        ring.addColorStop(0,    'rgba(0,0,0,0.0)');
+        ring.addColorStop(0.18, 'rgba(0,0,0,0.0)');
+        ring.addColorStop(0.42, 'rgba(255,170,80,0.95)');
+        ring.addColorStop(0.55, 'rgba(255,200,100,0.65)');
+        ring.addColorStop(0.85, 'rgba(180,90,40,0.18)');
+        ring.addColorStop(1,    'rgba(120,40,20,0.0)');
+        cx.fillStyle = ring;
+        cx.beginPath(); cx.arc(0,0, 240, 0, Math.PI*2); cx.fill();
+        // Doppler-boosted bright crescent (south side, gas approaching us)
+        cx.globalCompositeOperation = 'screen';
+        const cres = cx.createRadialGradient(0, 80, 30, 0, 80, 200);
+        cres.addColorStop(0,   'rgba(255,255,220,1.0)');
+        cres.addColorStop(0.4, 'rgba(255,230,160,0.65)');
+        cres.addColorStop(1,   'rgba(255,180,80,0.0)');
+        cx.fillStyle = cres;
+        cx.beginPath(); cx.arc(0, 80, 200, 0, Math.PI*2); cx.fill();
+        // Three "hot spots" reported in EHT 2022 paper (visualised statically)
+        [[140, -60, 22], [-90, 100, 18], [80, 130, 14]].forEach(([x,y,r]) => {
+            const sg = cx.createRadialGradient(x,y, 0, x,y, r);
+            sg.addColorStop(0,   'rgba(255,255,200,0.85)');
+            sg.addColorStop(1,   'rgba(255,180,80,0.0)');
+            cx.fillStyle = sg;
+            cx.beginPath(); cx.arc(x,y, r, 0, Math.PI*2); cx.fill();
+        });
+        const eht = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: new THREE.CanvasTexture(cv), transparent: true,
+            depthWrite: false, blending: THREE.AdditiveBlending,
+        }));
+        eht.scale.setScalar(14);
+        sgraInnerGroup.add(eht);
+    }
+})();
 //  - Distance rings from GC (every 5 kly)
 //  - Galactic longitude radials from GC (every 30°)
 //  - Sun's orbital circle at 26,673 ly
@@ -3958,7 +4447,14 @@ raycaster.params.Points.threshold = 5;
 // Base sphere radius (ly) used for geometry — this is tiny; updateLabelScales
 // scales it up adaptively so it's always clickable at any zoom level.
 // Keeping it small prevents the "blob cluster" problem at local zoom.
-const BASE_SPHERE_R = { sgr_a: 80, default: 0.15 };
+// Per-class raycaster sphere radii.  Sgr A* and S-stars need *small* meshes
+// because they're rendered with custom volumetrics; the old 80 ly raycaster
+// produced an opaque dark-amber prison wall at GC zoom.
+const BASE_SPHERE_R = {
+    sgr_a:   0.6,      // tiny + transparent (real EH ≈ 1.3 µly; 0.6 is room for clicking)
+    sstar:   0.0008,   // ~50 AU — tighter than even S2's ~120 AU periapsis
+    default: 0.15,
+};
 
 function hexToRgb(h) { return { r:(h>>16)&255, g:(h>>8)&255, b:h&255 }; }
 
@@ -4507,6 +5003,12 @@ function buildGalaxySprite(s, pos) {
         txs0506:          'quasar',
         j0529_4351:       'quasar',
         sag_dwarf:        'irregular',
+        // Local Group dwarf spheroidals
+        fornax_dsph:      'elliptical',
+        sculptor_dsph:    'elliptical',
+        draco_dsph:       'elliptical',
+        leo1_dsph:        'elliptical',
+        antlia2_dsph:     'elliptical',
     };
     const spriteType = typeMap[s.id] || 'elliptical';
     const colorHex = s.glowColor ?? s.color;
@@ -4530,9 +5032,19 @@ CATALOG.forEach(s => {
     const pos = s.pos3;
 
     // ── Raycasting sphere (tiny base, scaled adaptively) ────────
-    const baseR = s.isGC ? BASE_SPHERE_R.sgr_a : BASE_SPHERE_R.default;
+    const baseR = s.isGC    ? BASE_SPHERE_R.sgr_a
+                : s.isSstar ? BASE_SPHERE_R.sstar
+                : BASE_SPHERE_R.default;
     const geo = new THREE.SphereGeometry(baseR, 8, 8);
-    const mat = new THREE.MeshBasicMaterial({ color: s.color });
+    // Sgr A* + S-star raycasters are invisible — only there to catch clicks.
+    // Real visuals come from the IIFE-built volumetrics + WASM-tracked stars.
+    const transparentRaycaster = s.isGC || s.isSstar;
+    const mat = new THREE.MeshBasicMaterial({
+        color: s.color,
+        transparent: transparentRaycaster,
+        opacity:     transparentRaycaster ? 0 : 1,
+        depthWrite:  !transparentRaycaster,
+    });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.copy(pos);
     mesh.userData.starId = s.id;
@@ -4605,7 +5117,10 @@ CATALOG.forEach(s => {
 
 scene.add(sstarOrbitGroup);
 
-const SSTAR_COLORS = { s2: 0xffd700, s1: 0x00ced1, s12: 0xff6347, s14: 0xda70d6, s38: 0x88ff88 };
+const SSTAR_COLORS = {
+    s2:  0xffd700, s1:  0x00ced1, s12: 0xff6347, s14: 0xda70d6,
+    s29: 0xa6e3ff, s38: 0x88ff88, s55: 0xffaaff, s62: 0xffff66,
+};
 
 /** Convert WASM AU output [x_east, y_north, z_los] → Three.js scene coords (ly) */
 function wasmAUToScene(x_au, y_au, z_au) {
@@ -4665,6 +5180,58 @@ function buildSstarOrbits() {
     });
 
     console.log('S-star orbits built:', sstarOrbitLines.length, 'paths');
+    buildStaticSstarOrbits();
+}
+
+/**
+ * Build approximate elliptical orbit guides for S-stars when the WASM
+ * propagator is unavailable (offline / build failed). When WASM IS loaded
+ * this function is a no-op for any catalog id present in SSTAR_WASM_IDS —
+ * those stars get exact Keplerian + 1PN ellipses from buildSstarOrbits().
+ *
+ * The fallback orientation is approximate (random-but-deterministic per
+ * star seed) but gives every S-star a visible loop even without WASM.
+ */
+function buildStaticSstarOrbits() {
+    // [id, semi-major (ly), eccentricity, color, randAxisSeed]
+    const staticDefs = [
+        ['s29', 0.0218, 0.97,  0xddccff, 0.42],
+        ['s55', 0.0137, 0.74,  0x99ccff, 1.85],
+        ['s62', 0.0076, 0.976, 0xffaaff, 3.10],
+        ['s38', 0.0103, 0.82,  0xaaccff, 2.60],
+    ];
+    staticDefs.forEach(([id, a, e, color, seed]) => {
+        // Skip if WASM is present and tracking this star — we already have
+        // an exact ellipse from buildSstarOrbits().
+        if (sstarWasm && id in SSTAR_WASM_IDS) return;
+        const s = CATALOG.find(c => c.id === id);
+        if (!s) return;
+        const b = a * Math.sqrt(1 - e * e);
+        const N = 220;
+        const pts = [];
+        for (let i = 0; i <= N; i++) {
+            const E = (i / N) * Math.PI * 2;     // eccentric anomaly
+            // Standard ellipse with focus at origin (Sgr A*)
+            const x = a * (Math.cos(E) - e);
+            const y = b * Math.sin(E);
+            pts.push(new THREE.Vector3(x, 0, y));
+        }
+        // Random-but-deterministic 3D rotation based on the seed, so each
+        // S-star orbit lies in its own plane (real S-cluster has near-isotropic
+        // orbit orientations).
+        const ax = Math.sin(seed * 1.7) * 1.4;
+        const ay = Math.cos(seed * 0.9) * 1.1;
+        const az = Math.sin(seed * 2.3) * 0.7;
+        const lineGeo = new THREE.BufferGeometry().setFromPoints(pts);
+        const lineMat = new THREE.LineBasicMaterial({
+            color, transparent: true, opacity: 0.55, depthWrite: false,
+        });
+        const line = new THREE.Line(lineGeo, lineMat);
+        line.rotation.set(ax, ay, az);
+        line.userData.sstarOrbit = id;
+        sstarOrbitGroup.add(line);
+        sstarOrbitLines.push(line);
+    });
 }
 
 /** Update S-star positions from WASM propagation (called each frame) */
@@ -4674,7 +5241,7 @@ function updateSstarPositions(dt) {
     // Advance simulation time
     simJD += dt * simTimeScale * DAYS_PER_YR;
 
-    // Propagate all 4 stars in one WASM call (32 f64s)
+    // Propagate all S-stars in one WASM call (8 f64s per star).
     let allData;
     try { allData = sstarWasm.propagate_all(simJD); } catch (_) { return; }
 
@@ -5154,6 +5721,133 @@ let mwOuterSprite = null;
         sizeAttenuation: true,
     });
     scene.add(new THREE.Points(streamGeo, streamMat));
+})();
+
+// ══════════════════════════════════════════════════════════════════════════
+//  SAGITTARIUS STREAM — tidal arc from the disrupting Sgr Dwarf Spheroidal
+//
+//  The Sgr dSph has been shedding stars for ~4 Gyr while orbiting the
+//  Milky Way on a high-inclination polar orbit. Its tidal stream wraps
+//  the entire MW halo — over 400,000 ly long — with leading and trailing
+//  arms that loop above and below the disk multiple times. Detected in
+//  2MASS, SDSS and Gaia stellar over-densities.
+//
+//  We render an analytic representation: an inclined elliptical orbit
+//  populated with 1,500 stream particles, with surface density modulated
+//  along the arc to give visible "leading"/"trailing" segments.
+// ══════════════════════════════════════════════════════════════════════════
+const sgrStream = (function buildSgrStream() {
+    const sgrDwarf = CATALOG.find(s => s.id === 'sag_dwarf');
+    if (!sgrDwarf) return null;
+
+    // Orbital parameters of the Sgr dSph (rough — Law & Majewski 2010):
+    //   apocenter ~80 kpc, pericenter ~14 kpc, inclination ~85° to disk
+    const A   = 70_000;     // semi-major axis (ly) — slightly compressed
+    const B   = 38_000;     // semi-minor axis (ly)
+    const TILT_X = 1.45;    // ~83° tilt (almost polar)
+    const TILT_Z = 0.35;    // small in-plane rotation (orbital ascending node)
+
+    const N = 1500;
+    const pos = new Float32Array(N * 3);
+    const col = new Float32Array(N * 3);
+    const sz  = new Float32Array(N);
+
+    for (let i = 0; i < N; i++) {
+        // Sample around the ellipse — biased toward two density peaks (the
+        // leading/trailing arms accumulate stars at certain orbital phases).
+        const u = Math.random();
+        // Two Gaussian-ish density peaks at θ ≈ 0.25 and 0.65
+        let phi;
+        if (u < 0.55) {
+            phi = 0.25 * Math.PI * 2 + (Math.random() - 0.5) * 0.6 * Math.PI;
+        } else {
+            phi = 0.65 * Math.PI * 2 + (Math.random() - 0.5) * 0.55 * Math.PI;
+        }
+        // Add some scatter perpendicular to the orbit (stream thickness ~3 kpc)
+        const dr = (Math.random() - 0.5) * 6000;
+        const dz = (Math.random() - 0.5) * 4000;
+        // Position on the ellipse in the orbit's own plane (xy)
+        const r = (A + dr) * Math.cos(phi);
+        const t = (B + dr) * Math.sin(phi);
+        // Apply tilt: rotate around X then Z to bring polar orbit to scene frame
+        // R_x(TILT_X): (x, y*cos − z*sin, y*sin + z*cos)
+        const cx = Math.cos(TILT_X), sx = Math.sin(TILT_X);
+        const cz = Math.cos(TILT_Z), sz_ = Math.sin(TILT_Z);
+        const x0 = r;
+        const y0 = t * cx - dz * sx;
+        const z0 = t * sx + dz * cx;
+        pos[i*3]   = x0 * cz - z0 * sz_;
+        pos[i*3+1] = y0;
+        pos[i*3+2] = x0 * sz_ + z0 * cz;
+        // Color — pale yellow stream (old metal-poor stars), slightly
+        // brighter near the dSph progenitor.
+        const tint = 0.6 + Math.random() * 0.35;
+        col[i*3]   = 1.00 * tint;
+        col[i*3+1] = 0.92 * tint;
+        col[i*3+2] = 0.70 * tint;
+        sz[i]      = 240 + Math.random() * 320;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('color',    new THREE.BufferAttribute(col, 3));
+    geo.setAttribute('size',     new THREE.BufferAttribute(sz, 1));
+    const mat = new THREE.ShaderMaterial({
+        vertexColors: true, transparent: true, depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        uniforms: { uScale: { value: renderer.getPixelRatio() } },
+        vertexShader: `
+            attribute float size;
+            varying vec3 vCol;
+            uniform float uScale;
+            void main() {
+                vCol = color;
+                vec4 mvp = modelViewMatrix * vec4(position, 1.0);
+                gl_PointSize = size * uScale / -mvp.z;
+                gl_PointSize = clamp(gl_PointSize, 0.6, 7.0);
+                gl_Position = projectionMatrix * mvp;
+            }
+        `,
+        fragmentShader: `
+            varying vec3 vCol;
+            void main() {
+                float d = length(gl_PointCoord - 0.5) * 2.0;
+                float a = 1.0 - smoothstep(0.05, 1.0, d);
+                a = pow(a, 1.6);
+                gl_FragColor = vec4(vCol, a * 0.45);
+            }
+        `,
+    });
+    const pts = new THREE.Points(geo, mat);
+    scene.add(pts);
+
+    // Faint backbone line through the orbit (helps the eye trace the arc)
+    {
+        const linePts = [];
+        const cx = Math.cos(TILT_X), sx = Math.sin(TILT_X);
+        const cz = Math.cos(TILT_Z), sz_ = Math.sin(TILT_Z);
+        for (let i = 0; i <= 220; i++) {
+            const phi = (i / 220) * Math.PI * 2;
+            const r = A * Math.cos(phi);
+            const t = B * Math.sin(phi);
+            const x0 = r;
+            const y0 = t * cx;
+            const z0 = t * sx;
+            linePts.push(new THREE.Vector3(
+                x0 * cz - z0 * sz_,
+                y0,
+                x0 * sz_ + z0 * cz,
+            ));
+        }
+        scene.add(new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints(linePts),
+            new THREE.LineBasicMaterial({
+                color: 0xddc086, transparent: true, opacity: 0.15,
+                depthWrite: false,
+            })
+        ));
+    }
+
+    return pts;
 })();
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -6532,6 +7226,9 @@ document.getElementById('tog-showpieces').addEventListener('change', e => {
 document.getElementById('tog-fermi').addEventListener('change', e => {
     fermiBubbles.visible = e.target.checked;
 });
+document.getElementById('tog-sgr-stream').addEventListener('change', e => {
+    if (sgrStream) sgrStream.visible = e.target.checked;
+});
 
 // ══════════════════════════════════════════════════════════════════════════
 //  ZOOM BUTTONS
@@ -6618,14 +7315,42 @@ function updateLabelScales() {
         const mesh   = starMeshes[s.id];
         const baseR  = mesh.userData.baseR;
         const minR   = camDist * 0.004;
-        const drawR  = Math.max(baseR, minR);
+        let   drawR  = Math.max(baseR, minR);
+        // ── Sgr A* + S-star LOD overrides ─────────────────────────
+        // These objects all live within ~0.05 ly of the GC; the regular
+        // grow-with-camDist rule blows them up to galaxy-scale and makes the
+        // GC interior unviewable. Cap aggressively + hide when far away.
+        if (s.isGC) {
+            // Raycaster scales lightly so Sgr A* stays clickable; visuals
+            // come from sgraVisualGroup (handled elsewhere).
+            drawR = Math.min(drawR, camDist * 0.012);
+        } else if (s.isSstar) {
+            // Hard cap the rendered radius — never let an S-star become a blob
+            // bigger than its own orbit. Hide entirely beyond ~6 ly camDist.
+            drawR = Math.min(drawR, 0.0035);
+        }
         if (mesh) mesh.scale.setScalar(drawR / baseR);
 
         // ── Glow sprite ─────────────────────────────────────────
         const glow     = starGlows[s.id];
         const baseGlow = glow.userData.baseGlow;
         const minGlow  = camDist * 0.012;
-        if (glow) glow.scale.setScalar(Math.max(baseGlow, minGlow));
+        let   glowR    = Math.max(baseGlow, minGlow);
+        if (s.isGC) {
+            // Soft Sgr A* halo — let the IIFE volumetrics carry the look,
+            // not the generic glow sprite.
+            glowR = Math.min(glowR, camDist * 0.02);
+        } else if (s.isSstar) {
+            glowR = Math.min(glowR, 0.012);
+        }
+        if (glow) glow.scale.setScalar(glowR);
+
+        // S-stars only meaningful at GC zoom — fade out as the camera pulls away
+        if (s.isSstar) {
+            const visibleClose = camDist < 6;
+            if (mesh)  mesh.visible  = visibleClose;
+            if (glow)  glow.visible  = visibleClose;
+        }
 
         // ── Galaxy sprite ─────────────────────────────────────────
         const gxSpr = galaxySprites[s.id];
@@ -6774,12 +7499,20 @@ function animate() {
     const camDistFromOrigin = camera.position.length();
 
     // ── S-star WASM orbital propagation ──────────────────────────
-    // Update positions every frame (single WASM call for all 4 stars).
+    // Update positions every frame (single WASM call for all 8 S-stars).
     // Show orbit paths only when zoomed close to galactic center (< 2 ly).
     updateSstarPositions(dt);
-    const showSstarOrbits = camDistFromOrigin < 2;
-    if (sstarOrbitGroup.visible !== showSstarOrbits) {
-        sstarOrbitGroup.visible = showSstarOrbits;
+    // S-star orbits are now visible across a much wider window — they're the
+    // signature feature of the GC interior so they should show up the moment
+    // the camera approaches Sgr A*.  Fade-in via opacity rather than abrupt
+    // visibility flip.
+    const showSstarOrbits = camDistFromOrigin < 30;
+    sstarOrbitGroup.visible = showSstarOrbits;
+    if (showSstarOrbits) {
+        const fadeIn = 1 - Math.min(1, Math.max(0, (camDistFromOrigin - 6) / 24));
+        sstarOrbitLines.forEach(line => {
+            if (line.material) line.material.opacity = 0.35 + 0.55 * fadeIn;
+        });
     }
 
     // ── Sgr A* glow pulse + disk differential rotation ───────────
@@ -6791,6 +7524,47 @@ function animate() {
     }
     // Keplerian differential rotation: inner rings spin faster (v ∝ r^{-1/2})
     sgraDiskRings.forEach(([ring, omega]) => { ring.rotation.z += omega; });
+
+    // ── G2 gas-cloud marker — slow Keplerian sweep, slows at apoapsis ───
+    if (g2Trajectory.marker && g2Trajectory.path) {
+        const N = g2Trajectory.path.length;
+        // Position parameter cycles every 30 s of wallclock; speed up near
+        // periapsis (low index) just for visual pizazz.
+        const u = (t * 0.033) % 1;
+        // Bias u toward the periapsis side via a smooth nonlinear warp
+        const bias = u < 0.5 ? Math.pow(u * 2, 0.7) * 0.5 : 0.5 + (1 - Math.pow((1 - u) * 2, 0.7)) * 0.5;
+        const idx = Math.floor(bias * (N - 1));
+        const p = g2Trajectory.path[idx];
+        if (p) g2Trajectory.marker.position.copy(p);
+    }
+
+    // ── Sgr A* visual scaling (zoom-aware shrink) ────────────────
+    // The exaggerated 8–3000 ly halos work great at galaxy zoom but blot out
+    // the 0.01-ly S-star orbits when the camera dives into the GC.  Apply a
+    // smooth shrink to the inner core (event horizon, EHT image, accretion
+    // disk, jets) and a separate falloff to the bulge halos so the inner
+    // BH visuals collapse to roughly S-star scale at close zoom.
+    {
+        // Inner-group (EHT + disk + jets) baseline radius is ~220 ly; we want
+        // it to look authentic at galaxy zoom and shrink to ~0.05 ly (≈3×
+        // S2 perihelion) when the camera is inside ~1 ly of the GC.
+        const camD = camDistFromOrigin;
+        // Smooth interp 1 ly→6 ly→200 ly→far
+        let innerScale;
+        if (camD < 1)        innerScale = 0.0005;        // collapse to nearly nothing
+        else if (camD < 6)   innerScale = 0.0005 + (camD - 1)/5  * (0.05 - 0.0005);
+        else if (camD < 200) innerScale = 0.05  + (camD - 6)/194 * (1.0 - 0.05);
+        else                 innerScale = 1.0;
+        sgraInnerGroup.scale.setScalar(innerScale);
+
+        // Bulge halos (30–3000 ly): hide entirely at GC zoom, full scale at galaxy.
+        let bulgeScale;
+        if (camD < 200)      bulgeScale = 0;
+        else if (camD < 1500) bulgeScale = (camD - 200) / 1300;
+        else                  bulgeScale = 1.0;
+        sgraBulgeGroup.scale.setScalar(bulgeScale);
+        sgraBulgeGroup.visible = bulgeScale > 0.001;
+    }
 
     // ── Ton 618 — Keplerian differential disk rotation ────────────
     scene.traverse(obj => {
