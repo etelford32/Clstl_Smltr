@@ -34,6 +34,8 @@ import {
     probabilityOfCollision, pcRisk, recommendDeltaV,
     formatDeltaV, deltaVToFuelKg,
 } from './collision-avoidance.js';
+import { buildAnalyticsBundle }
+    from './upper-atmosphere-space-weather-analytics.js';
 
 // ── Palette (matches the globe's density ramp in spirit) ────────────────────
 const SPECIES_COLORS = {
@@ -762,6 +764,7 @@ export class UpperAtmosphereUI {
             };
             this._applySolarWindToGlobe();
             this._paintSolarWindStats();
+            this._paintSpaceWeatherAnalytics();
         });
     }
 
@@ -878,8 +881,211 @@ export class UpperAtmosphereUI {
         this._paintStats();
         this._paintLayerControls();
         this._paintSourcePill();
+        this._paintSpaceWeatherAnalytics();
+        this._paintMesosphereStatus();
 
         if (this.useBackend) this._scheduleBackendRefresh();
+    }
+
+    /**
+     * Paint the operator-grade space-weather analytics panel — turns
+     * the (F10.7, Ap, Bz) state into actionable headlines: SWPC G-tier,
+     * Dst, drag forecast, HF blackout score, GIC threat, polar-cap
+     * absorption, NLC visibility, aurora-edge latitude.
+     */
+    _paintSpaceWeatherAnalytics() {
+        const box = this.el.swAnalytics;
+        if (!box) return;
+        const { f107, ap } = this.state;
+        const sw = this._liveBusValues || {};
+        const a = buildAnalyticsBundle({
+            f107, ap,
+            bz:        Number.isFinite(sw.bz) ? sw.bz : 0,
+            monthIdx:  new Date().getUTCMonth(),
+            hemisphere:'N',
+        });
+
+        const dragRow = `
+            <div class="ua-sw-row" style="border-left-color:${a.gStorm.color}">
+                <span class="ua-sw-k">drag</span>
+                <span class="ua-sw-v" style="color:${a.gStorm.color}">
+                    +${a.drag.excessPct.toFixed(0)} %
+                </span>
+                <span class="ua-sw-tail">
+                    T∞ ${a.drag.Tinf_K.toFixed(0)} K<br>
+                    ISS ${a.drag.issFuelKgDay.toFixed(1)} kg/d
+                </span>
+                <span class="ua-sw-bar"><span class="ua-sw-bar-fill"
+                    style="width:${Math.min(100, Math.max(2, a.drag.excessPct * 0.4 + 2)).toFixed(0)}%;
+                           background:${a.gStorm.color}"></span></span>
+            </div>`;
+
+        const stormRow = `
+            <div class="ua-sw-row" style="border-left-color:${a.gStorm.color}">
+                <span class="ua-sw-k">storm</span>
+                <span class="ua-sw-v" style="color:${a.gStorm.color}">
+                    ${a.gStorm.tier}
+                    <span class="ua-sw-tag" style="background:${a.gStorm.color}22;color:${a.gStorm.color}">
+                        ${a.gStorm.label}
+                    </span>
+                </span>
+                <span class="ua-sw-tail">Ap ${ap}</span>
+            </div>`;
+
+        const dstColor = a.dst < -250 ? '#ff3060' :
+                         a.dst < -100 ? '#ff8050' :
+                         a.dst < -50  ? '#ffcc60' :
+                                        '#80c890';
+        const dstRow = `
+            <div class="ua-sw-row" style="border-left-color:${dstColor}">
+                <span class="ua-sw-k">Dst proxy</span>
+                <span class="ua-sw-v" style="color:${dstColor}">
+                    ${a.dst.toFixed(0)} nT
+                </span>
+                <span class="ua-sw-tail">ring current</span>
+            </div>`;
+
+        const hfPct  = (a.hf.score * 100).toFixed(0);
+        const hfColor= a.hf.score > 0.7 ? '#ff5070' :
+                       a.hf.score > 0.4 ? '#ffaa50' :
+                       a.hf.score > 0.2 ? '#ffcc60' : '#80c890';
+        const rTag = a.hf.rTier
+            ? `<span class="ua-sw-tag" style="background:${hfColor}22;color:${hfColor}">${a.hf.rTier.tier}</span>`
+            : '';
+        const hfRow = `
+            <div class="ua-sw-row" style="border-left-color:${hfColor}">
+                <span class="ua-sw-k">HF abs</span>
+                <span class="ua-sw-v" style="color:${hfColor}">${hfPct} %${rTag}</span>
+                <span class="ua-sw-tail">D-region<br>F10.7 + auroral</span>
+                <span class="ua-sw-bar"><span class="ua-sw-bar-fill"
+                    style="width:${hfPct}%;background:${hfColor}"></span></span>
+            </div>`;
+
+        const gicRow = `
+            <div class="ua-sw-row" style="border-left-color:${a.gic.color}">
+                <span class="ua-sw-k">GIC risk</span>
+                <span class="ua-sw-v" style="color:${a.gic.color}">
+                    ${a.gic.tier.toUpperCase()}
+                </span>
+                <span class="ua-sw-tail">dB/dt ≈ ${a.gic.dBdt.toFixed(0)} nT/min</span>
+            </div>`;
+
+        const pcaRow = `
+            <div class="ua-sw-row" style="border-left-color:${a.pca.color}">
+                <span class="ua-sw-k">PCA</span>
+                <span class="ua-sw-v" style="color:${a.pca.color}">
+                    ${a.pca.tier.toUpperCase()}
+                </span>
+                <span class="ua-sw-tail">${
+                    a.pca.active ? `&gt; ${a.pca.latDeg}° lat` : 'no SEP cap'
+                }</span>
+            </div>`;
+
+        const nlcColor = a.nlc > 0.6 ? '#9eecff' :
+                         a.nlc > 0.2 ? '#80b8c8' : '#556';
+        const nlcRow = `
+            <div class="ua-sw-row" style="border-left-color:${nlcColor}">
+                <span class="ua-sw-k">NLC viz</span>
+                <span class="ua-sw-v" style="color:${nlcColor}">
+                    ${(a.nlc * 100).toFixed(0)} %
+                </span>
+                <span class="ua-sw-tail">summer<br>mesopause</span>
+            </div>`;
+
+        const aurRow = `
+            <div class="ua-sw-row" style="border-left-color:#ff60c0">
+                <span class="ua-sw-k">aurora</span>
+                <span class="ua-sw-v" style="color:#ff80d0">
+                    ≥ ${a.auroraEdgeDeg.toFixed(0)}°
+                </span>
+                <span class="ua-sw-tail">equatorward<br>edge (geomag)</span>
+            </div>`;
+
+        box.innerHTML = stormRow + dstRow + dragRow + hfRow + gicRow + pcaRow + nlcRow + aurRow;
+    }
+
+    /**
+     * Render a status row for each phenomena overlay (NLC, EEJ, AE, Sq).
+     * Mostly informational — this panel doesn't toggle the overlays
+     * (the globe drives them from setState), but it tells the user what
+     * they're looking at on the 3D scene.
+     */
+    _paintMesosphereStatus() {
+        const box = this.el.mesosphereBox;
+        if (!box) return;
+        const { f107, ap } = this.state;
+        const monthIdx = new Date().getUTCMonth();
+
+        // NLC seasonality — match the globe's calculation.
+        const nlcWindow = (peakM) => {
+            const d = Math.abs(((monthIdx - peakM + 12) % 12));
+            const dist = Math.min(d, 12 - d);
+            return Math.max(0, Math.cos(dist / 1.5 * Math.PI / 2));
+        };
+        const nlcN = nlcWindow(5.7);
+        const nlcS = nlcWindow(11.7);
+        const nlcOn = Math.max(nlcN, nlcS) > 0.15;
+
+        const eejBase = Math.min(1, Math.max(0, (f107 - 70) / 200));
+        const aeNorm  = Math.min(1, ap / 100);
+        const sqBase  = Math.min(1, Math.max(0, (f107 - 70) / 180))
+                      / (1 + ap / 80);
+
+        const fmtPct = v => `${(v * 100).toFixed(0)}%`;
+        const tag = (v) => v > 0.5
+            ? `<span class="ua-meso-state" style="color:#0fc">ACTIVE</span>`
+            : v > 0.15
+            ? `<span class="ua-meso-state" style="color:#fc6">faint</span>`
+            : `<span class="ua-meso-state" style="color:#556">off</span>`;
+
+        const rows = [
+            {
+                color: '#9eecff',
+                name:  'Noctilucent clouds',
+                meta:  `83 km · summer mesopause · NH ${fmtPct(nlcN)} / SH ${fmtPct(nlcS)}`,
+                active: nlcOn,
+                v: Math.max(nlcN, nlcS),
+            },
+            {
+                color: '#c0ff60',
+                name:  'Equatorial electrojet',
+                meta:  `110 km · dayside EUV current · F10.7 driver ${fmtPct(eejBase)}`,
+                active: eejBase > 0.05,
+                v: eejBase,
+            },
+            {
+                color: '#ff6dd2',
+                name:  'Auroral electrojets',
+                meta:  `110 km · ±67° lat · Ap-driven · ${fmtPct(aeNorm)}`,
+                active: aeNorm > 0.10,
+                v: aeNorm,
+            },
+            {
+                color: '#fff0a8',
+                name:  'Sq vortex pair',
+                meta:  `110 km · noon ±30° lat · quiet-time dynamo · ${fmtPct(sqBase)}`,
+                active: sqBase > 0.10,
+                v: sqBase,
+            },
+            {
+                color: '#ffd890',
+                name:  'Sporadic meteor flux',
+                meta:  '80-100 km · ~10 t/day worldwide · always on',
+                active: true,
+                v: 1,
+            },
+        ];
+
+        box.innerHTML = rows.map(r => `
+            <div class="ua-meso-row${r.active ? '' : ' ua-meso--off'}">
+                <span class="ua-meso-dot" style="background:${r.color};color:${r.color}"></span>
+                <span>
+                    <span class="ua-meso-name" style="color:${r.color}">${r.name}</span>
+                    <span class="ua-meso-meta">${r.meta}</span>
+                </span>
+                ${tag(r.v)}
+            </div>
+        `).join('');
     }
 
     _scheduleBackendRefresh() {
