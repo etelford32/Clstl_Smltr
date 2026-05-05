@@ -1465,6 +1465,19 @@ nav {
                     <span class="lyr-status" data-layer="alerts"></span>
                 </label>
 
+                <label class="lyr-featured-row" for="feat-lyr-storm-tracks"
+                       title="5-day kinematic forecast cones for every active tropical cyclone worldwide. Click a card in Storm Watch to focus a single storm's cone. Note: kinematic extrapolation, not NHC's official forecast.">
+                    <input type="checkbox" id="feat-lyr-storm-tracks" data-mirror="lyr-storm-tracks">
+                    <span class="lyr-featured-text">
+                        <span class="lyr-featured-name">
+                            <span class="lyr-featured-icon">🛰️</span>Storm Tracks
+                            <span class="lyr-featured-badge">new</span>
+                        </span>
+                        <span class="lyr-featured-desc">5-day forecast cones for active cyclones</span>
+                    </span>
+                    <span class="lyr-status" data-layer="storm-tracks"></span>
+                </label>
+
                 <label class="lyr-featured-row" for="feat-lyr-earthquakes"
                        title="USGS earthquakes M2.5+ in the past 30 days. Marker size scales with magnitude; pulse rate slows for the largest events.">
                     <input type="checkbox" id="feat-lyr-earthquakes" data-mirror="lyr-earthquakes">
@@ -1505,6 +1518,7 @@ nav {
                 </label>
                 <label class="lyr"><input type="checkbox" id="lyr-isobars" checked><span class="lyr-status" data-layer="isobars" title="waiting"></span><label for="lyr-isobars">Isobars</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-alerts"><span class="lyr-status" data-layer="alerts" title="waiting"></span><label for="lyr-alerts">Storm Alerts</label></label>
+                <label class="lyr" title="5-day kinematic extrapolation cone for every active tropical cyclone. NOT NHC's official forecast — this is a great-circle projection of current motion with NHC's published average track-error radii applied for the cone width. Click a storm card to focus its cone."><input type="checkbox" id="lyr-storm-tracks"><span class="lyr-status" data-layer="storm-tracks" title="waiting"></span><label for="lyr-storm-tracks">Storm Tracks (5-day)</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-earthquakes"><span class="lyr-status" data-layer="earthquakes" title="waiting"></span><label for="lyr-earthquakes">Earthquakes</label></label>
             </div>
             <!-- Atmospheric profile sub-group: derived overlays that share
@@ -2203,6 +2217,8 @@ import {
 } from './js/precip-forecast.js';
 import { createWeatherOverlay } from './js/weather-overlay.js';
 import { StormWatchPanel } from './js/storm-watch-panel.js';
+import { StormTrackOverlay } from './js/storm-track-overlay.js';
+import { extrapolateStormTrack } from './js/storm-forecast.js';
 import { makePanelDraggable, resetPanelPosition } from './js/draggable-panel.js';
 import { NWSAlerts, ALERT_COLORS, ALERT_CSS_COLORS, ALERT_PULSE_FREQ, SEVERITY_ORDER, classifyAlertEvent } from './js/nws-alerts.js';
 import { getAlertIconTexture, precomputeAlertIcons } from './js/alert-icons.js';
@@ -2770,6 +2786,23 @@ window.addEventListener('storm-update', e => {
     _updateLayerTooltips();
 });
 
+// ── Storm tracks: 5-day kinematic forecast cones for every active storm ──
+// Uses the same storm-update event the cloud shader is already
+// consuming. The overlay rebuilds tracks each tick; frequency is fine
+// because the NHC feed only refreshes every ~30 minutes and the
+// triangle counts are tiny (≤ 8 storms × ~150 verts each).
+//
+// The cone is a *kinematic extrapolation* (storm-forecast.js), not the
+// official NHC 5-day forecast. UI labelling makes that distinction
+// explicit so users don't mistake it for an evacuation product.
+const stormTrackOverlay = new StormTrackOverlay({
+    THREE,
+    earthMesh,
+    geoToXYZ,
+    extrapolate: extrapolateStormTrack,
+}).start();
+window._stormTrackOverlay = stormTrackOverlay;   // dev console handle
+
 // ═══════════════════════════════════════════════════════════════
 //  MOUSE → LAT/LON (raycaster)
 // ═══════════════════════════════════════════════════════════════
@@ -3106,6 +3139,37 @@ document.getElementById('lyr-wind').addEventListener('change', e => {
     wireOverlay('lyr-precip-rate', 'precip-rate');
     wireOverlay('lyr-mist',        'mist');
 }
+
+// Storm Tracks — 5-day kinematic forecast cones. The overlay rebuilds
+// itself off the storm-update event regardless of visibility (it's
+// cheap, ~150 verts × ≤8 storms), so toggling on/off is just a flip
+// of the parent group's visible flag.
+document.getElementById('lyr-storm-tracks')?.addEventListener('change', e => {
+    stormTrackOverlay.setVisible(e.target.checked);
+    // When toggling OFF, also clear any pinned highlight so re-toggling
+    // ON later doesn't surprise the user with a focus from last session.
+    if (!e.target.checked) stormTrackOverlay.setHighlightedStormId(null);
+});
+
+// Status pip for the storm-tracks layer — listens to storm-update so
+// the user gets the same green/grey/red feedback as every other feed.
+window.addEventListener('storm-update', (ev) => {
+    const status = ev?.detail?.status;
+    const count  = (ev?.detail?.storms ?? []).length;
+    const state =
+        status === 'live'    ? 'loaded'   :
+        status === 'offline' ? 'error'    :
+                               'fetching';
+    const title =
+        state === 'loaded' ? `${count} active storm${count === 1 ? '' : 's'} · NHC`
+        : state === 'error' ? 'NHC feed unreachable'
+        :                     'awaiting NHC update';
+    document.querySelectorAll('.lyr-status[data-layer="storm-tracks"]').forEach(pip => {
+        pip.classList.remove('st-idle', 'st-fetching', 'st-loaded', 'st-error');
+        pip.classList.add(`st-${state}`);
+        pip.title = title;
+    });
+});
 
 // ── FEATURED highlights ↔ canonical-toggle sync ───────────────────────────
 // Each row in the Featured section carries `data-mirror="lyr-..."`
@@ -8059,6 +8123,9 @@ _backdrop.addEventListener('click', _closeMobilePanel);
     // change-event dispatch on first render to align mesh visibility
     // with their default-unchecked state.
     'lyr-humidity', 'lyr-precip-rate', 'lyr-mist',
+    // Storm-tracks layer (5-day kinematic forecast cones). Default off
+    // — the cones can clutter the globe at small zoom levels.
+    'lyr-storm-tracks',
 ].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.dispatchEvent(new Event('change'));
@@ -8093,6 +8160,21 @@ document.addEventListener('click', e => {
 // change what the globe paints.
 const stormWatchPanel = new StormWatchPanel({
     onStormClick: (lat, lon) => flyToLatLon(lat, lon),
+    // Hover or click on a card focuses the matching cone — but only
+    // when the Storm Tracks overlay is visible (toggled via lyr-storm
+    // -tracks). Auto-enable the overlay when the user pins a storm by
+    // click so newcomers immediately see the cone the panel just
+    // pointed at; hover alone doesn't toggle visibility.
+    onStormFocus: (id, _storm) => {
+        stormTrackOverlay.setHighlightedStormId(id);
+        if (id && !stormTrackOverlay.isVisible()) {
+            const t = document.getElementById('lyr-storm-tracks');
+            if (t && !t.checked) {
+                t.checked = true;
+                t.dispatchEvent(new Event('change'));
+            }
+        }
+    },
 });
 stormWatchPanel.mount();
 window._stormWatchPanel = stormWatchPanel;   // dev console handle

@@ -142,6 +142,14 @@ function injectStyle() {
     border-color:rgba(255,160,80,.30);
     transform:translateY(-1px);
 }
+#${PANEL_ID} .sw-card.active {
+    /* Pinned card after click — stronger tint than hover so the
+       user can see which storm's cone the globe is highlighting
+       without the cursor on the card. */
+    background:rgba(255,160,80,.18);
+    border-color:rgba(255,160,80,.55);
+    box-shadow:0 0 10px rgba(255,160,80,.20);
+}
 #${PANEL_ID} .sw-card:last-child { margin-bottom:0; }
 #${PANEL_ID} .sw-row1 {
     display:flex; align-items:center; gap:6px;
@@ -225,17 +233,24 @@ export class StormWatchPanel {
      * @param {(lat:number, lon:number) => void} [opts.onStormClick]
      *   Optional callback when the user clicks a storm card; defaults to
      *   `window.flyToLatLon` if exposed by earth.html.
+     * @param {(stormId:string|null, storm:object|null) => void} [opts.onStormFocus]
+     *   Optional callback fired when the user hovers OR clicks a storm
+     *   card. The storm-track overlay uses this to highlight the
+     *   selected cone on the globe and dim the rest. Receives nulls
+     *   when the user mouses out of the panel.
      * @param {number} [opts.maxStorms=5]
      */
-    constructor({ onStormClick, maxStorms = 5 } = {}) {
+    constructor({ onStormClick, onStormFocus, maxStorms = 5 } = {}) {
         this._maxStorms    = maxStorms;
         this._onStormClick = onStormClick;
+        this._onStormFocus = onStormFocus;
         this._panel        = null;
         this._listEl       = null;
         this._countEl      = null;
         this._footEl       = null;
         this._pulseEl      = null;
         this._lastDetail   = null;
+        this._activeId     = null;        // last hovered/clicked storm id
         this._onUpdate     = this._onUpdate.bind(this);
     }
 
@@ -258,7 +273,41 @@ export class StormWatchPanel {
             const lat = parseFloat(card.dataset.lat);
             const lon = parseFloat(card.dataset.lon);
             if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+            // A click pins the focus to this storm — separate from
+            // hover-driven focus so a quick mouse-out doesn't
+            // immediately clear it. Re-clicking the same card toggles
+            // the pin off.
+            const id = card.dataset.id || null;
+            if (this._pinnedId === id) {
+                this._pinnedId = null;
+                this._setActiveStorm(null);
+            } else {
+                this._pinnedId = id;
+                this._setActiveStorm(id);
+            }
             this._flyTo(lat, lon);
+        });
+
+        // Hover focus — highlight the corresponding cone on the globe
+        // while the mouse is over a card. Pointer events keep the
+        // behaviour consistent across mouse and touch (a tap fires
+        // pointerover before click, so we get a brief highlight even
+        // on touch devices). Hover focus only applies when no storm
+        // is pinned; otherwise the pinned highlight wins.
+        this._listEl.addEventListener('pointerover', (ev) => {
+            if (this._pinnedId) return;
+            const card = ev.target.closest('.sw-card');
+            if (!card) return;
+            this._setActiveStorm(card.dataset.id || null);
+        });
+        this._listEl.addEventListener('pointerout', (ev) => {
+            if (this._pinnedId) return;
+            // Only clear when the pointer actually leaves the list
+            // entirely — moving between two cards keeps a focus
+            // active.
+            if (!ev.relatedTarget || !this._listEl.contains(ev.relatedTarget)) {
+                this._setActiveStorm(null);
+            }
         });
 
         window.addEventListener('storm-update', this._onUpdate);
@@ -297,6 +346,38 @@ export class StormWatchPanel {
         }
     }
 
+    /**
+     * Mark one card as "active" — adds the visual highlight class and
+     * notifies the host (earth.html) so the storm-track overlay can
+     * brighten the matching cone and dim the rest. Idempotent.
+     */
+    _setActiveStorm(id) {
+        if (id === this._activeId) return;
+        this._activeId = id;
+        // Update DOM highlight class without re-rendering the whole list.
+        if (this._listEl) {
+            this._listEl.querySelectorAll('.sw-card.active').forEach(el => el.classList.remove('active'));
+            if (id) {
+                const card = this._listEl.querySelector(`.sw-card[data-id="${CSS.escape(id)}"]`);
+                if (card) card.classList.add('active');
+            }
+        }
+        // Look up the full storm object so the host can drive overlays
+        // that need more than the id (e.g. cone tints by classification).
+        let storm = null;
+        if (id && this._lastDetail?.storms) {
+            storm = this._lastDetail.storms.find(s => s.id === id) ?? null;
+        }
+        if (typeof this._onStormFocus === 'function') {
+            this._onStormFocus(id, storm);
+        }
+        // Also fire a window event so any other consumer (e.g. a future
+        // analytics pane or the layer panel's status pip) can react.
+        window.dispatchEvent(new CustomEvent('storm-watch-focus', {
+            detail: { id, storm },
+        }));
+    }
+
     _render() {
         if (!this._listEl) return;
 
@@ -330,8 +411,27 @@ export class StormWatchPanel {
                         ? 'NHC feed unreachable — retrying.'
                         : 'No active tropical cyclones worldwide right now. 🌊'}
                 </div>`;
+            // No storms left — drop any lingering active focus so the
+            // overlay clears and the host's onStormFocus fires with null.
+            if (this._activeId || this._pinnedId) {
+                this._pinnedId = null;
+                this._setActiveStorm(null);
+            }
         } else {
             this._listEl.innerHTML = ranked.map(s => this._cardHtml(s)).join('');
+            // If the previously-active storm dissipated, clear focus.
+            // Otherwise re-apply the active class to the same card after
+            // the innerHTML rewrite wiped it.
+            if (this._activeId) {
+                const stillThere = ranked.some(s => s.id === this._activeId);
+                if (!stillThere) {
+                    this._pinnedId = null;
+                    this._setActiveStorm(null);
+                } else {
+                    const card = this._listEl.querySelector(`.sw-card[data-id="${CSS.escape(this._activeId)}"]`);
+                    if (card) card.classList.add('active');
+                }
+            }
         }
 
         if (this._footEl) {
