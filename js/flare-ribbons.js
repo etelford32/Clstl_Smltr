@@ -33,6 +33,12 @@ const META_STRIDE = 8;
 let _texture = null;
 let _buffer  = null;
 
+// Most recent set of conjugate footpoint pairs (one per PIL-closed loop of
+// the flaring AR), preserved across updateRibbonsForAr calls so the HXR
+// kernel system can pick them up without re-walking the atlas. Cleared on
+// clearRibbons() / failed updates.
+let _currentPairs = [];
+
 function _ensureTexture() {
     if (_texture) return _texture;
     _buffer  = new Float32Array(TEX_W * TEX_H * 4);
@@ -48,6 +54,15 @@ function _ensureTexture() {
 
 /** Returns the singleton ribbon DataTexture (creating it on first call). */
 export function getRibbonTexture() { return _ensureTexture(); }
+
+/**
+ * Conjugate footpoint pairs from the most recent updateRibbonsForAr().
+ * Each entry is `{ a: [x,y,z], b: [x,y,z], apex, lineIdx }` where a/b are
+ * unit-sphere positions of the two loop footpoints (opposite sides of the
+ * PIL by construction). Empty array if no flare is active or no PIL
+ * bundles were found. The HXR kernel system reads this directly.
+ */
+export function getCurrentFootpointPairs() { return _currentPairs; }
 
 /** Maximum points per ribbon in the texture (matches the shader loop). */
 export const MAX_RIBBON_POINTS = MAX_POINTS;
@@ -65,36 +80,44 @@ export const MAX_RIBBON_POINTS = MAX_POINTS;
 export function updateRibbonsForAr(atlas, arIdx) {
     _ensureTexture();
     _buffer.fill(0);
+    _currentPairs = [];
 
     if (!atlas || atlas.lineCount === 0 || arIdx < 0) {
         _texture.needsUpdate = true;
         return 0;
     }
 
-    const ribbons = _collectFootpoints(atlas, arIdx);
-    if (!ribbons || ribbons.A.length < 2 || ribbons.B.length < 2) {
+    const collected = _collectFootpoints(atlas, arIdx);
+    if (!collected || collected.A.length < 2 || collected.B.length < 2) {
         _texture.needsUpdate = true;
         return 0;
     }
 
+    // Preserve the conjugate pairing (A[i] and B[i] are from the same line)
+    // separately from the texture, which sorts each side along the PIL axis.
+    _currentPairs = collected.pairs;
+
     // Sort each ribbon along the dominant axis of the combined point set
     // so the polyline doesn't zig-zag (the shader assumes adjacent texels
     // are adjacent ribbon points).
-    const axis = _principalAxis([...ribbons.A, ...ribbons.B]);
+    const A = collected.A.slice();
+    const B = collected.B.slice();
+    const axis = _principalAxis([...A, ...B]);
     const projSort = (a, b) => _dot3(a, axis) - _dot3(b, axis);
-    ribbons.A.sort(projSort);
-    ribbons.B.sort(projSort);
+    A.sort(projSort);
+    B.sort(projSort);
 
-    _writeRibbon(_buffer, 0, ribbons.A);
-    _writeRibbon(_buffer, 1, ribbons.B);
+    _writeRibbon(_buffer, 0, A);
+    _writeRibbon(_buffer, 1, B);
     _texture.needsUpdate = true;
-    return Math.min(ribbons.A.length, ribbons.B.length, MAX_POINTS);
+    return Math.min(A.length, B.length, MAX_POINTS);
 }
 
 /** Clear the ribbon texture (signal the shader to use the legacy fallback). */
 export function clearRibbons() {
     if (!_buffer) return;
     _buffer.fill(0);
+    _currentPairs = [];
     _texture.needsUpdate = true;
 }
 
@@ -108,6 +131,7 @@ function _collectFootpoints(atlas, arIdx) {
 
     const A = [];
     const B = [];
+    const pairs = [];
     for (let i = 0; i < atlas.lineCount; i++) {
         const m0 = i * META_STRIDE;
         if (meta[m0]     !== 0) continue;        // closed only
@@ -125,11 +149,14 @@ function _collectFootpoints(atlas, arIdx) {
         // Only count footpoints actually on the photosphere (within 1% of unit).
         if (Math.abs(aLen - 1.0) > 0.02 || Math.abs(bLen - 1.0) > 0.02) continue;
 
-        A.push([ax / aLen, ay / aLen, az / aLen]);
-        B.push([bx / bLen, by / bLen, bz / bLen]);
+        const a = [ax / aLen, ay / aLen, az / aLen];
+        const b = [bx / bLen, by / bLen, bz / bLen];
+        A.push(a);
+        B.push(b);
+        pairs.push({ a, b, apex: meta[m0 + 3], lineIdx: i });
     }
     if (A.length === 0) return null;
-    return { A, B };
+    return { A, B, pairs };
 }
 
 // ─── principal axis (power iteration on covariance) ─────────────────

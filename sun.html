@@ -3898,18 +3898,25 @@ if (DEBUG_ANY_ATLAS) {
 
 let _scorecardModule = null;
 let _flareRibbonsModule = null;
+let _flareHxrModule = null;
+let _flareHxrSystem = null;
 
-// Phase 3.1 — flare-ribbons loads whenever an atlas might be available.
-// Independently of ?debug=prominence: live SWPC flares can light up the
-// PIL ribbons too, as long as the atlas got built (which happens under
-// ?debug=field or ?debug=prominence).
+// Phase 3.1 / 3.2 — flare-ribbons + HXR-kernels load whenever an atlas
+// might be available. Independent of ?debug=prominence: live SWPC flares
+// can light up the PIL ribbons + HXR footpoints too, as long as the atlas
+// got built (which happens under ?debug=field or ?debug=prominence).
 if (DEBUG_ANY_ATLAS) {
     (async () => {
         try {
-            _flareRibbonsModule = await import('./js/flare-ribbons.js');
-            console.log('[flare-ribbons] module loaded');
+            const [r, h] = await Promise.all([
+                import('./js/flare-ribbons.js'),
+                import('./js/flare-hxr-kernels.js'),
+            ]);
+            _flareRibbonsModule = r;
+            _flareHxrModule = h;
+            console.log('[flare-ribbons + hxr] modules loaded');
         } catch (e) {
-            console.warn('[flare-ribbons] init failed:', e);
+            console.warn('[flare-ribbons / hxr] init failed:', e);
         }
     })();
 }
@@ -3970,6 +3977,20 @@ function _refreshFlareRibbons(latRad, lonRad) {
         console.log(`[flare-ribbons] AR #${bestArIdx} → ${n}-pt polyline ribbons`);
     } else {
         uniforms.u_flare_ribbons_active.value = 0.0;
+    }
+
+    // Phase 3.2 — light up the HXR footpoint kernels with the same atlas
+    // pair data. The conjugate pairing is preserved by flare-ribbons so
+    // each pair gets two kernels (one per loop foot, opposite ribbons).
+    if (_flareHxrModule && _flareRibbonsModule) {
+        if (!_flareHxrSystem) {
+            _flareHxrSystem = _flareHxrModule.createHxrKernelSystem({ scene });
+        }
+        const pairs = _flareRibbonsModule.getCurrentFootpointPairs();
+        _flareHxrSystem.update(pairs);
+        if (pairs.length > 0) {
+            console.log(`[flare-hxr] ${_flareHxrSystem.activeKernels} kernels (${pairs.length} pairs)`);
+        }
     }
 }
 
@@ -4739,6 +4760,13 @@ function animate() {
     // distance loop for invisible geometry.
     if (uniforms.u_flare_ribbons_active.value > 0.5 && uniforms.u_flare_t.value > 700.0) {
         uniforms.u_flare_ribbons_active.value = 0.0;
+    }
+
+    // Phase 3.2 — HXR kernel envelope is short (sin × exp, gone by ~30 s).
+    // The system itself drops instanceCount to 0 once we're past the
+    // envelope; we just keep ticking time + flareT so the strobe animates.
+    if (_flareHxrSystem) {
+        _flareHxrSystem.tick(uniforms.u_time.value, uniforms.u_flare_t.value);
     }
 
     // Rotate region marker group with the photosphere texture
