@@ -1696,6 +1696,18 @@ nav {
             Forecast skill (MAE)
         </div>
         <div id="wx-skill-grid" class="wx-skill-grid">awaiting first forecast…</div>
+        <!-- Precipitation deep-dive coverage HUD.
+             Two one-line readouts: climatology coverage (per-cell ×
+             local-hour bins with ≥3 samples) and the bias-tracker pair
+             count. Both grow as the page is left open / re-opened.
+             They're the user-visible signal that "more historical
+             analysis = better predictions" is materialising. -->
+        <div id="wx-precip-coverage"
+             style="margin-top:6px;font-family:monospace;font-size:9.5px;color:#557;line-height:1.55;"
+             title="Long-memory diagnostics for the precipitation forecasters. Climatology improves the diurnal-cycle prior; bias pairings improve the Open-Meteo ↔ NASA fusion correction.">
+            <div id="wx-clim-cov">climatology: warming up…</div>
+            <div id="wx-bias-cov">fusion bias: awaiting NASA pairings…</div>
+        </div>
         <hr class="ir-sep">
         <!-- NWS alert summary. The 🔔 Get Alerts CTA is intentionally
              promoted into the Storm Alerts row (instead of being buried
@@ -1899,11 +1911,13 @@ import { WeatherFrameResolver } from './js/weather-frame-resolver.js';
 import { ForecastRegistry, PersistenceForecaster, CHANNEL_NAMES, FORECAST_HORIZONS_H } from './js/weather-forecast.js';
 import { WeatherForecastValidator } from './js/weather-forecast-validation.js';
 import { PrecipClimatology }        from './js/precip-climatology.js';
+import { PrecipBiasTracker }        from './js/precip-bias-tracker.js';
 import { NasaPrecipExtractor }      from './js/nasa-precip-extractor.js';
 import {
     PrecipClimatologyForecaster,
     PrecipAnomalyPersistenceForecaster,
     PrecipAnomalyARForecaster,
+    PrecipFusionForecaster,
 } from './js/precip-forecast.js';
 import { NWSAlerts, ALERT_COLORS, ALERT_CSS_COLORS, ALERT_PULSE_FREQ, SEVERITY_ORDER, classifyAlertEvent } from './js/nws-alerts.js';
 import { getAlertIconTexture, precomputeAlertIcons } from './js/alert-icons.js';
@@ -3934,19 +3948,58 @@ precipClimatology.open().then(() => {
 const nasaPrecipExtractor = new NasaPrecipExtractor({ gridW: 72, gridH: 36 });
 nasaPrecipExtractor.start();
 
-// Register the three precip-specialised forecasters. Each implements the
+// Per-cell EWMA bias tracker for fusion. Subscribes to live model frames
+// (weather-history-ingest) and NASA observations (nasa-precip-update);
+// pairs them within a generous lag window and folds the difference into
+// a per-cell bias estimate that survives reloads via IDB.
+const precipBiasTracker = new PrecipBiasTracker();
+precipBiasTracker.open().then(() => {
+    // Backfill modelled frames already in the ring so the tracker can
+    // pair against them as soon as the first NASA observation lands.
+    for (const fr of wxGridHistory.all()) precipBiasTracker.ingestModel(fr);
+    document.addEventListener('weather-history-ingest', (ev) => {
+        const f = ev?.detail?.frame;
+        if (f) precipBiasTracker.ingestModel(f);
+    });
+    window.addEventListener('nasa-precip-update', (ev) => {
+        const d = ev?.detail;
+        if (!d) return;
+        precipBiasTracker.ingestObservation(d).then(res => {
+            if (res?.paired) {
+                // A new pair updates the bias → re-run the registry so
+                // the fusion forecaster's next emission reflects the
+                // freshly-corrected field, rather than waiting up to an
+                // hour for the next history ingest.
+                wxForecastRegistry.runAll();
+                _paintPrecipCoverage();
+            }
+        });
+    });
+}).catch(err => {
+    console.info('[earth] precip bias tracker open failed:', err?.message);
+});
+
+// Register the four precip-specialised forecasters. Each implements the
 // same Forecaster interface as PersistenceForecaster, so the validator
 // scores them against persistence-v1 automatically and the SW-panel
 // skill table picks them up on the next render pass.
 wxForecastRegistry.register(new PrecipClimatologyForecaster({ climatology: precipClimatology }));
 wxForecastRegistry.register(new PrecipAnomalyPersistenceForecaster({ climatology: precipClimatology }));
 wxForecastRegistry.register(new PrecipAnomalyARForecaster({ climatology: precipClimatology }));
+wxForecastRegistry.register(new PrecipFusionForecaster({
+    climatology: precipClimatology,
+    biasTracker: precipBiasTracker,
+}));
 
-// Flush climatology to disk on tab hide so a refresh doesn't lose the
-// last batch of in-memory updates. visibilitychange fires on backgrounding,
-// reload, and close; cheap insurance against losing forever-history data.
+// Flush climatology + bias to disk on tab hide so a refresh doesn't lose
+// the last batch of in-memory updates. visibilitychange fires on
+// backgrounding, reload, and close; cheap insurance against losing
+// forever-history data.
 document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') precipClimatology.flushNow();
+    if (document.visibilityState === 'hidden') {
+        precipClimatology.flushNow();
+        precipBiasTracker.flushNow();
+    }
 });
 
 const wxForecastValidator = new WeatherForecastValidator({ history: wxGridHistory });
@@ -4042,6 +4095,54 @@ document.addEventListener('weather-forecast-validation-update', (ev) => {
 // Initial paint with whatever the validator already has on disk so the
 // table isn't blank on a fresh page load with prior history.
 _paintForecastSkill(wxForecastValidator.summary());
+
+// ── Precipitation long-memory coverage HUD ────────────────────────────────
+// Two readouts under the skill grid: climatology coverage (per-cell ×
+// local-hour bins with ≥3 samples) and bias-tracker pairings. Both grow
+// monotonically with usage, so a returning user can see at a glance
+// that the forecasters' priors got stronger since last visit.
+function _paintPrecipCoverage() {
+    const climEl = document.getElementById('wx-clim-cov');
+    const biasEl = document.getElementById('wx-bias-cov');
+    if (!climEl || !biasEl) return;
+
+    // Pull the live coarse-grid resolution from the most recent history
+    // frame — falling back to the default 72×36 for fresh sessions.
+    const newest = wxGridHistory.recent(1);
+    const gridW = newest?.gridW ?? 72;
+    const gridH = newest?.gridH ?? 36;
+
+    const cov = precipClimatology.coverage({ gridW, gridH, minN: 3 });
+    if (cov.total === 0) {
+        climEl.textContent = 'climatology: warming up…';
+    } else {
+        const pct = (cov.frac * 100).toFixed(0);
+        // populated/total counts (cell × local-hour) bins; the whole
+        // store is gridW·gridH·24 entries.
+        climEl.textContent = `clim: ${pct}% bins ≥3 samples (${cov.populated}/${cov.total})`;
+        climEl.style.color = cov.frac > 0.5 ? '#7a8' : (cov.frac > 0.1 ? '#aa8' : '#557');
+    }
+
+    const biasDiag = precipBiasTracker.diagnostics({ gridW, gridH });
+    if (biasDiag.totalPairs === 0) {
+        biasEl.textContent = 'fusion: awaiting NASA pairings…';
+    } else {
+        biasEl.textContent =
+            `fusion: ${biasDiag.totalPairs} pairs · |bias| med ${biasDiag.medianAbsBias.toFixed(2)} mm/hr`;
+        biasEl.style.color = biasDiag.totalPairs > 10 ? '#7a8' : '#aa8';
+    }
+}
+
+// Repaint coverage on every history ingest (climatology grows by N·gridH·gridW
+// bins per ingest) and on validator-update events (proxy for forecast cycles).
+// Bias pairings re-trigger the painter inside the bias-tracker subscriber
+// above, so the HUD also lights up immediately when NASA observations land.
+document.addEventListener('weather-history-ingest', _paintPrecipCoverage);
+document.addEventListener('weather-forecast-validation-update', _paintPrecipCoverage);
+// Initial paint — the climatology may already be hot from IDB warmup.
+// Defer one tick so PrecipClimatology.open()'s async backfill has a
+// chance to complete before we sample coverage.
+setTimeout(_paintPrecipCoverage, 500);
 
 // ═══════════════════════════════════════════════════════════════
 //  SATELLITE FEED — NASA GIBS GOES-16 + MODIS cloud imagery

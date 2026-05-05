@@ -45,10 +45,13 @@ Precipitation specifically benefits because:
 | Phase | Module | Status |
 |---|---|---|
 | Persistence baseline | `weather-forecast.js::PersistenceForecaster` | shipped (prior session) |
-| Climatology floor | `PrecipClimatologyForecaster` | **shipped this session** |
-| Anomaly persistence | `PrecipAnomalyPersistenceForecaster` | **shipped this session** |
-| Pooled AR(3) on log-anomaly | `PrecipAnomalyARForecaster` | **shipped this session** |
-| Cross-validation w/ NASA observation | `NasaPrecipExtractor` (emits `nasa-precip-update`) | **shipped this session** |
+| Climatology floor | `PrecipClimatologyForecaster` | shipped |
+| Anomaly persistence | `PrecipAnomalyPersistenceForecaster` | shipped |
+| Pooled AR(3) on log-anomaly | `PrecipAnomalyARForecaster` | shipped |
+| Cross-validation w/ NASA observation | `NasaPrecipExtractor` (emits `nasa-precip-update`) | shipped |
+| Per-cell bias EWMA tracker | `PrecipBiasTracker` (IDB-persisted, paired on `nasa-precip-update`) | **shipped this session** |
+| Bias-corrected fusion forecast | `PrecipFusionForecaster` (modelled − bias → anomaly → climatology) | **shipped this session** |
+| Long-memory coverage HUD | `#wx-precip-coverage` in `wx-panel` | **shipped this session** |
 | Optical-flow / advective nowcast (Phase 3) | `js/weather-flow.js` | next session |
 | Server-trained NN (Phase 4) | requires 30 d retention bump | gated on backend |
 
@@ -77,16 +80,20 @@ Yes — and the architecture is now wired to make it happen automatically.
 
 ## What to do next session
 
-1. **Bias-correction forecaster.** New `PrecipFusionForecaster` that
-   blends Open-Meteo with the rolling bias estimate from
-   `nasa-precip-update`. Cheap once the extractor is in place.
-2. **Coverage HUD.** Surface `precipClimatology.coverage()` in the SW
-   panel so the user can watch the long-memory store fill up.
-3. **Optical-flow nowcast (`weather-flow.js`).** Phase 3 of the
+1. **Optical-flow nowcast (`weather-flow.js`).** Phase 3 of the
    `WEATHER_FORECAST_PLAN.md` — earns the "watch the storm move" UX.
-4. **Server-side cold archive (`EARTH_ML_FIRST_PRINCIPLES.md` Phase
+   Particularly strong for moving features (fronts, low-pressure
+   systems) where AR/persistence struggle.
+2. **AMSR2 second observation source.** Activate `precip-amsr2` in
+   `EarthObsFeed`, extend `NasaPrecipExtractor` to pair against it,
+   and feed both observations into the bias tracker for a microwave-
+   only cross-check on the IMERG fusion product.
+3. **Server-side cold archive (`EARTH_ML_FIRST_PRINCIPLES.md` Phase
    0a).** Bump `weather_grid_cache` retention from 72 h → 720 h (30
    days). Unlocks Phase 4 NN training.
+4. **Per-channel fusion.** The fusion idea generalises beyond precip:
+   SST has GHRSST (observation) vs Open-Meteo's surface field. Same
+   bias-tracker pattern with a per-channel parameterisation.
 
 ## Open questions
 

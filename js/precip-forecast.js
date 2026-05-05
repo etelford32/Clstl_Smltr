@@ -307,4 +307,131 @@ export class PrecipAnomalyARForecaster {
     }
 }
 
+// ── Fusion forecaster (Open-Meteo bias-corrected with NASA IMERG) ─────────
+
+/**
+ * Bias-corrects the modelled precip field using the per-cell EWMA bias
+ * tracked by PrecipBiasTracker, then anomaly-persists the corrected
+ * field through every horizon.
+ *
+ * Pipeline at a glance:
+ *
+ *      modelled_now[k]                       (Open-Meteo, raw)
+ *   −  bias[k]                               (EWMA model − observation)
+ *   =  fused_now[k]                          ("best current estimate" of obs)
+ *
+ *      anomaly[k] = fused_now[k] − climatology(t_now)[k]
+ *      forecast(t + h)[k] = anomaly[k] + climatology(t + h)[k]
+ *
+ * Why this should beat the pure climatology + anomaly forecasters:
+ *
+ *   - Climatology + raw modelled anomaly suffers from any *systematic*
+ *     model bias — a chronically wet GFS cell stays chronically wet in
+ *     the forecast.
+ *   - Subtracting the EWMA bias removes the systematic component without
+ *     touching the *transient* (storm-scale) anomaly that we actually
+ *     want to project forward.
+ *
+ * Failure modes and their handling:
+ *
+ *   - No bias yet (tracker hasn't seen any pairings): fall through to
+ *     raw anomaly persistence. Strictly no worse than
+ *     PrecipAnomalyPersistenceForecaster in that regime.
+ *   - No climatology yet: fall through to bias-corrected persistence in
+ *     mm/hr units. Still likely better than persistence alone if the
+ *     bias is established, equivalent if both are empty.
+ */
+export class PrecipFusionForecaster {
+    static id = 'precip-fusion-v1';
+
+    /**
+     * @param {object} opts
+     * @param {import('./precip-climatology.js').PrecipClimatology} opts.climatology
+     * @param {import('./precip-bias-tracker.js').PrecipBiasTracker}  opts.biasTracker
+     * @param {number} [opts.minBiasPairs=3]  Minimum paired samples before
+     *   the bias correction is trusted; below this, falls through to
+     *   uncorrected anomaly persistence.
+     */
+    constructor({ climatology, biasTracker, minBiasPairs = 3 }) {
+        if (!climatology)  throw new Error('PrecipFusionForecaster: climatology required');
+        if (!biasTracker)  throw new Error('PrecipFusionForecaster: biasTracker required');
+        this.id = PrecipFusionForecaster.id;
+        this._clim   = climatology;
+        this._bias   = biasTracker;
+        this._minPairs = minBiasPairs;
+    }
+
+    forecast({ history }) {
+        const frames = history.all();
+        if (frames.length === 0) return null;
+        const newest = frames[frames.length - 1];
+        const { t, gridW, gridH, coarse } = newest;
+        const N = gridW * gridH;
+        const off = PRECIP_CHANNEL * N;
+        const obsPrecip = coarse.subarray(off, off + N);
+
+        // Per-cell bias (mm/hr). null when the tracker is cold; we
+        // continue without a correction term in that case.
+        const bias = this._bias.getBias({ gridW, gridH, minPairs: this._minPairs });
+
+        // Build the fused "best current estimate" field at the issue
+        // time. Clamp ≥ 0 — bias correction can drag a low modelled
+        // value below zero and negative precip is unphysical.
+        const fusedNow = new Float32Array(N);
+        if (bias) {
+            for (let k = 0; k < N; k++) {
+                const corrected = (obsPrecip[k] || 0) - bias[k];
+                fusedNow[k] = corrected > 0 ? corrected : 0;
+            }
+        } else {
+            fusedNow.set(obsPrecip);
+        }
+
+        // Anomaly w.r.t. climatology at the issue time.
+        const climNow = this._clim.sample({ targetMs: t, gridW, gridH });
+        const anom    = new Float32Array(N);
+        if (climNow) {
+            for (let k = 0; k < N; k++) anom[k] = fusedNow[k] - climNow[k];
+        }
+        // else: anom stays zero → forecast equals climatology(target_h),
+        // which is the climatology-floor fallback. Consistent with the
+        // other anomaly-based forecasters here.
+
+        const out = {};
+        const targets = {};
+        for (const h of FORECAST_HORIZONS_H) {
+            const targetMs = t + h * 3_600_000;
+            targets[h] = targetMs;
+            const frame = new Float32Array(N * NUM_CHANNELS);
+            fillNonPrecipFromLatest(frame, coarse, gridW, gridH);
+
+            const climTarget = this._clim.sample({ targetMs, gridW, gridH });
+            const fc = new Float32Array(N);
+            if (climTarget) {
+                for (let k = 0; k < N; k++) fc[k] = climTarget[k] + anom[k];
+            } else {
+                // No climatology at target hour — best we can do is
+                // persist the fused current field forward unchanged.
+                fc.set(fusedNow);
+            }
+            clampNonNegative(fc);
+            frame.set(fc, off);
+            out[h] = frame;
+        }
+
+        return {
+            model_id: this.id,
+            issued_ms: t,
+            horizons: FORECAST_HORIZONS_H.slice(),
+            gridW, gridH,
+            frames: out,
+            target_ms: targets,
+            _meta: {
+                bias_applied: bias != null,
+                bias_pairs:   this._bias.diagnostics({ gridW, gridH }).totalPairs,
+            },
+        };
+    }
+}
+
 export { PRECIP_CHANNEL };
