@@ -64,10 +64,12 @@ jobs:
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to:   type=local,dest=/tmp/.buildx-cache-new,mode=max
 
-      # Avoid unbounded cache growth.
+      # Avoid unbounded cache growth. Strip stale lock files first so a
+      # crashed builder run on the previous job can't poison the next
+      # one's cache directory.
       - name: Rotate buildx cache
         run: |
-          rm -rf /tmp/.buildx-cache
+          rm -rf /tmp/.buildx-cache /tmp/.buildx-cache-new/.lock 2>/dev/null || true
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
 
       - name: Seed bootstrap SPARTA tables
@@ -86,10 +88,11 @@ jobs:
             if curl -fs "$DSMC_API_URL/health" >/dev/null; then
               echo "healthy after $i s"; exit 0
             fi
+            echo "Attempt $i: /health not ready, waiting..."
             sleep 1
           done
           echo "DSMC /health never responded — dumping logs"
-          docker compose -f dsmc/docker-compose.ci.yml logs --no-color dsmc
+          docker compose -f dsmc/docker-compose.ci.yml logs --no-color dsmc | tail -400
           exit 1
 
       - name: Verify profile endpoint returns SPARTA-bootstrap model
