@@ -3838,14 +3838,18 @@ if (DEBUG_ANY_ATLAS) {
     })();
 }
 
+let _scorecardModule = null;
+
 if (DEBUG_PROMINENCE) {
     _prominenceModulePromise = (async () => {
         try {
-            const [bundleMod, classifierMod] = await Promise.all([
+            const [bundleMod, classifierMod, scorecardMod] = await Promise.all([
                 import('./js/prominence-bundle.js'),
                 import('./js/prominence-classifier.js'),
+                import('./js/eruption-scorecard.js'),
             ]);
-            console.log('[prominence] bundle + classifier modules loaded');
+            _scorecardModule = scorecardMod;
+            console.log('[prominence] bundle + classifier + scorecard modules loaded');
             return { bundle: bundleMod, classifier: classifierMod };
         } catch (e) {
             console.warn('[prominence] init failed:', e);
@@ -3928,6 +3932,33 @@ function _eruptNearestFilament() {
                 `${ew}${String(Math.round(Math.abs(lonDeg))).padStart(2,'0')}`;
     status(`▲ Erupting bundle #${bestIdx} at ${loc}`);
     console.log(`[erupt] manual EP triggered on bundle ${bestIdx} at ${loc} (cos∠cam=${bestDot.toFixed(2)})`);
+
+    // ── Educational scorecard (manual eruptions only) ────────────────────────
+    // Compute metrics now from the bundle's current state, schedule the card
+    // to slide in ~5 sim-seconds later (just after the impulsive flash so the
+    // visual eruption catches the eye first).
+    if (_scorecardModule && _promClassifierRef) {
+        // Re-classify so we have the current bundle entry (incl. EP params).
+        const bundles = _promClassifierRef.classifyBundles({
+            atlas: _promCachedAtlas,
+            liveRegions,
+            time:           uniforms.u_time.value,
+            flareIntensity: uniforms.u_flare_intensity.value,
+            flareLatRad:    uniforms.u_flare_lat.value,
+            flareLonRad:    uniforms.u_flare_lon.value,
+        });
+        const target = bundles.find(b => b.lineIdx === bestIdx) || bundles[0];
+        const metrics = _scorecardModule.computeMetrics({
+            atlas:   _promCachedAtlas,
+            lineIdx: bestIdx,
+            bundle:  target,
+            liveRegions,
+        });
+        _scorecardModule.show(metrics, {
+            delaySec: 5,
+            simSpeed: simSpeed,
+        });
+    }
 }
 
 async function rebuildDebugFieldAtlas() {
