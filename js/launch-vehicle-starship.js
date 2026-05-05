@@ -27,6 +27,7 @@
  */
 
 import * as THREE from 'three';
+import { ENGINES } from './launch-engines.js';
 
 // ── Colors ───────────────────────────────────────────────────────────────────
 // Stainless steel is the whole point — high metalness, slight blue tint, and
@@ -607,14 +608,25 @@ export function buildStarship({ variant = 'v2', params: override = {} } = {}) {
     root.add(shipPlume);
     plumes.push(shipPlume);
 
+    // Thrust — V1 + V2 use Raptor 2; V3 + future use Raptor 3. Numbers
+    // come from public IAC slides + Musk public statements (Raptor 3 SL
+    // thrust is a stated target rather than confirmed test-stand).
+    const useR3 = (variant === 'v3' || variant === 'future');
+    const eng   = useR3 ? ENGINES.raptor_3 : ENGINES.raptor_2;
+    const liftoffKn = P.boosterEngines * eng.sl_kn;
+    const massT = variant === 'v1'  ? 5000
+                : variant === 'v2'  ? 5200
+                : variant === 'v3'  ? 6500
+                :                     10000;
+
     // Stack info for the side panel.
     const info = {
         name:           P.label,
         years:          P.years,
         height_m:       totalH.toFixed(1),
         diameter_m:     P.diameter.toFixed(1),
-        booster_engines:P.boosterEngines,
-        ship_engines:   P.shipEngines,
+        booster_engines: `${P.boosterEngines} × ${eng.name}`,
+        ship_engines:    `${P.shipEngines} × ${eng.name}`,
         // Public approximations — let's not pretend these are spec.
         liftoff_mass_t: variant === 'v1'    ? '5,000'
                       : variant === 'v2'    ? '5,200'
@@ -625,9 +637,58 @@ export function buildStarship({ variant = 'v2', params: override = {} } = {}) {
                       : variant === 'v3'    ? '~200'
                       :                       '~400',
         notes:          P.notes,
+        thrust: {
+            liftoff_kn:    liftoffKn,
+            liftoff_mn:    liftoffKn / 1000,
+            per_engine_kn: eng.sl_kn,
+            engine_count:  P.boosterEngines,
+            booster_engine: eng.name,
+            upper_engine:   eng.name,
+            propellant:    eng.propellant,
+            twr_initial:   liftoffKn / (massT * 9.80665),
+            mass_t:        massT,
+            ref_id:        variant === 'v1'     ? 'starship_v1'
+                         : variant === 'v2'     ? 'starship_v2'
+                         : variant === 'v3'     ? 'starship_v3'
+                         :                        'starship_future',
+        },
     };
 
-    return { root, plumes, height: totalH, info };
+    // Engine layout — concentric rings on the booster + cluster on the
+    // ship, mirroring buildRaptorCluster's geometry. Used by the thrust-
+    // vector overlay. Inner rings gimbal; outer ring is fixed.
+    const SR = P.diameter / 2;
+    const bellR = Math.max(0.55, SR * 0.16);
+    function ringLayout(counts, plateRadius, baseY, gimbalRings) {
+        const out = [];
+        const innerEdge = bellR * 1.2;
+        for (let ringIdx = 0; ringIdx < counts.length; ringIdx++) {
+            const n = counts[ringIdx];
+            const ringR = ringIdx === 0
+                ? bellR * 1.3
+                : innerEdge + (plateRadius - innerEdge - bellR) *
+                  (ringIdx / Math.max(1, counts.length - 1));
+            for (let i = 0; i < n; i++) {
+                const a = (i / n) * Math.PI * 2 + (ringIdx % 2 ? Math.PI / n : 0);
+                out.push({
+                    x: Math.cos(a) * ringR,
+                    y: baseY,
+                    z: Math.sin(a) * ringR,
+                    thrust_kn: eng.sl_kn,
+                    gimbal:    ringIdx < gimbalRings,
+                    ring: ringIdx === 0 ? 'inner'
+                        : ringIdx === counts.length - 1 ? 'outer' : 'mid',
+                });
+            }
+        }
+        return out;
+    }
+
+    const boosterEngines = ringLayout(P.boosterRings, SR * 0.95, -1.4, P.boosterRings.length - 1);
+    const shipEngines    = ringLayout(P.shipRings,    SR * 0.85, P.boosterLen + P.ringLen - 0.8, 1);
+    const engineLayout = { boosterEngines, upperEngines: shipEngines };
+
+    return { root, plumes, height: totalH, info, engineLayout };
 }
 
 export const STARSHIP_VARIANT_IDS = Object.keys(STARSHIP_VARIANTS);
