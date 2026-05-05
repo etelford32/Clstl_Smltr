@@ -34,6 +34,8 @@ import { buildStarship } from './launch-vehicle-starship.js';
 import { buildFalcon9 } from './launch-vehicle-falcon9.js';
 import { buildPad as buildPadInfra, tickBeacons } from './launch-pad-3d.js';
 import { createMissionClock } from './launch-mission-clock.js';
+import { ENGINES } from './launch-engines.js';
+import { buildThrustOverlay, tickThrustOverlay } from './launch-thrust-overlay.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -754,22 +756,63 @@ function buildShuttleVehicle() {
     root.position.y = 4.2;
     const height = DIM.ET_LEN;     // ~47 m; slightly under 56 m stack but
                                    // close enough for camera framing.
+
+    // Thrust at liftoff: 2 SRBs (12.5 MN each) + 3 SSMEs (1.86 MN each) =
+    // 30.58 MN. SRBs are the dominant contributor; SSMEs run continuously
+    // through ascent while SRBs separate at T+125 s.
+    const liftoffKn = 2 * ENGINES.rsrm.sl_kn + 3 * ENGINES.rs_25.sl_kn;
+    const massT = 2030;
+
+    // Engine layout — 2 SRBs flanking ET (no gimbal), 3 SSMEs on orbiter
+    // aft (gimbal). Coordinates match buildShuttleStack().
+    const srbOffset = DIM.ET_R + DIM.SRB_R + 0.4;
+    const orbiterZ  = DIM.ET_R + DIM.ORBITER_FUSE_R + 0.4;
+    const engineLayout = {
+        boosterEngines: [
+            { x: -srbOffset, y: -1.7, z: 0, thrust_kn: ENGINES.rsrm.sl_kn,
+              gimbal: false, ring: 'srb' },
+            { x:  srbOffset, y: -1.7, z: 0, thrust_kn: ENGINES.rsrm.sl_kn,
+              gimbal: false, ring: 'srb' },
+        ],
+        upperEngines: [
+            { x:  0,   y: 0.5, z: orbiterZ, thrust_kn: ENGINES.rs_25.sl_kn,
+              gimbal: true, ring: 'ssme' },
+            { x: -1.2, y: 0.5, z: orbiterZ, thrust_kn: ENGINES.rs_25.sl_kn,
+              gimbal: true, ring: 'ssme' },
+            { x:  1.2, y: 0.5, z: orbiterZ, thrust_kn: ENGINES.rs_25.sl_kn,
+              gimbal: true, ring: 'ssme' },
+        ],
+    };
+
     return {
         root,
         plumes: root.userData.plumes,
         height,
         padId: 'lc39a',
+        engineLayout,
         info: {
             name:           'Space Shuttle (STS)',
             years:          '1981 — 2011',
             height_m:       '56.1',
             diameter_m:     '8.4 (ET)',
-            booster_engines:'2 SRBs',
-            ship_engines:   '3 SSMEs',
+            booster_engines:'2 × RSRM Solid',
+            ship_engines:   '3 × RS-25 (SSME)',
             liftoff_mass_t: '2,030',
             leo_payload_t:  '27.5',
             pad:            'KSC LC-39A',
             notes:          '135 missions, ISS construction, Hubble servicing.',
+            thrust: {
+                liftoff_kn:    liftoffKn,
+                liftoff_mn:    liftoffKn / 1000,
+                per_engine_kn: ENGINES.rsrm.sl_kn,
+                engine_count:  5,
+                booster_engine: ENGINES.rsrm.name,
+                upper_engine:   ENGINES.rs_25.name,
+                propellant:    'APCP (SRB) + LH2/LOX (SSME)',
+                twr_initial:   liftoffKn / (massT * 9.80665),
+                mass_t:        massT,
+                ref_id:        'shuttle',
+            },
         },
     };
 }
@@ -861,6 +904,8 @@ export function initVehicleCanvas(canvas, opts = {}) {
     // ── Mission clock (drives liftoff animation) ──────────────────────────
     const missionClock = createMissionClock();
     let missionActive = false;
+    // Thrust-vector overlay state (toggleable; persists across vehicle swaps)
+    let vectorsOn = false;
     // Save baseline scene parameters so we can restore after a flight.
     const baseFogColor   = scene.fog.color.clone();
     const baseFogDensity = scene.fog.density;
@@ -953,12 +998,21 @@ export function initVehicleCanvas(canvas, opts = {}) {
         }
 
         const v = builder(variant);
+
+        // Build a thrust-vector overlay matching this vehicle's engine
+        // layout. Parented to the vehicle root so it inherits liftoff
+        // pitch/roll transforms automatically.
+        const thrustOverlay = buildThrustOverlay(v);
+        thrustOverlay.visible = vectorsOn;            // honor user toggle across vehicle changes
+        v.root.add(thrustOverlay);
+
         current = {
             id, variant, ...v,
             basePadY: v.root.position.y,
             baseTargetY: 0,
             baseCamY: 0,
             lastAltitude: 0,
+            thrustOverlay,
             // Per-pad trail width — wider for Stage 0's 33-engine cluster.
             trailWidthM: (v.padId === 'mechazilla') ? 14 : 9,
         };
@@ -1126,6 +1180,13 @@ export function initVehicleCanvas(canvas, opts = {}) {
 
         for (const p of current.plumes) tickPlume(p, t, throttle);
         tickBeacons(padState.beacons, t);
+        // Thrust-vector overlay — read live throttle + mission time.
+        if (current.thrustOverlay && current.thrustOverlay.visible) {
+            tickThrustOverlay(current.thrustOverlay, {
+                throttle: missionActive ? throttle : (vectorsOn ? 0.05 : 0),
+                T:        missionActive ? missionClock.T : 0,
+            });
+        }
         renderer.render(scene, camera);
         rafId = requestAnimationFrame(tick);
     }
@@ -1149,6 +1210,10 @@ export function initVehicleCanvas(canvas, opts = {}) {
     }
     function setPad(on)        { if (padState.root) padState.root.visible = !!on; }
     function setAutoRotate(on) { controls.autoRotate = !!on; }
+    function setVectors(on) {
+        vectorsOn = !!on;
+        if (current.thrustOverlay) current.thrustOverlay.visible = vectorsOn;
+    }
 
     return {
         dispose() {
@@ -1170,11 +1235,37 @@ export function initVehicleCanvas(canvas, opts = {}) {
         setAutoRotate,
         setPlume,
         setPad,
+        setVectors,
         setVehicle,
         liftoff,
         cancelLiftoff,
         get isAscending() { return missionActive; },
         get missionT()    { return missionClock.T; },
         get currentInfo() { return current.info; },
+        // Live thrust + g-force readout for the MET HUD. Returns:
+        //   { throttle, thrust_mn, twr, g, mass_t }
+        // Mass loss approximated as 35% over the clip (T-3 → T+50) so
+        // T/W rises through ascent, mirroring real propellant burn-off.
+        getLiveThrust() {
+            const info = current.info;
+            const t = info?.thrust;
+            if (!t) return null;
+            const throttle = missionActive
+                ? missionClock.snapshot().throttle
+                : 0;
+            const T = missionActive ? missionClock.T : 0;
+            const massFrac = Math.max(0.55, 1 - 0.35 * Math.max(0, Math.min(1, T / 50)));
+            const massNow  = t.mass_t * massFrac;
+            const liveKn   = t.liftoff_kn * throttle;
+            const twr      = liveKn / (massNow * 9.80665);
+            return {
+                throttle,
+                thrust_mn:  liveKn / 1000,
+                thrust_max_mn: t.liftoff_mn,
+                twr,
+                g:          twr,                        // felt g-force ≈ TWR
+                mass_t:     Math.round(massNow),
+            };
+        },
     };
 }
