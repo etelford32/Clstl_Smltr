@@ -2225,6 +2225,8 @@ import {
     PrecipAnomalyARForecaster,
     PrecipFusionForecaster,
 } from './js/precip-forecast.js';
+import { AtmosphereClimatology }    from './js/atmosphere-climatology.js';
+import { makeAtmosphereForecasters } from './js/atmosphere-forecast.js';
 import { createWeatherOverlay } from './js/weather-overlay.js';
 import { StormWatchPanel } from './js/storm-watch-panel.js';
 import { StormTrackOverlay } from './js/storm-track-overlay.js';
@@ -4552,6 +4554,55 @@ wxForecastRegistry.register(new PrecipFusionForecaster({
     biasTracker: precipBiasTracker,
 }));
 
+// ── Cloud + wind forecasters ─────────────────────────────────────────────
+// Same trio (Climatology / AnomalyPersistence / AnomalyAR) as precip,
+// generalised through the AtmosphereClimatology + makeAtmosphereForecasters
+// factory. Each set has its own IDB store so the priors don't crowd
+// each other's schema and we can evolve them independently. Channel
+// indices match weather-history.js's CHW layout:
+//   wind   = U(3) + V(4)   — signed, non-clamped
+//   clouds = low(5) + mid(6) + high(7)  — bounded [0,1], clamped ≥ 0
+const cloudClimatology = new AtmosphereClimatology({
+    channels: [5, 6, 7],
+    dbName:   'cloud_clim_v1',
+});
+const windClimatology = new AtmosphereClimatology({
+    channels: [3, 4],
+    dbName:   'wind_clim_v1',
+});
+
+// Open both stores in parallel; once ready, backfill from the live
+// history ring so the priors get a head start from anything already
+// warmed up. Subscribe to live ingests for the rest of the session.
+Promise.all([cloudClimatology.open(), windClimatology.open()])
+    .then(() => {
+        const seed = (frame) => {
+            cloudClimatology.ingest(frame);
+            windClimatology.ingest(frame);
+        };
+        for (const fr of wxGridHistory.all()) seed(fr);
+        document.addEventListener('weather-history-ingest', (ev) => {
+            const f = ev?.detail?.frame;
+            if (f) seed(f);
+        });
+        // Now that the stores are open, register the six forecasters
+        // (3 cloud + 3 wind). The validator picks them up automatically
+        // via the existing weather-forecast-update event subscription.
+        for (const F of makeAtmosphereForecasters({
+            climatology: cloudClimatology, idPrefix: 'cloud', clampNeg: true,
+        })) wxForecastRegistry.register(F);
+        for (const F of makeAtmosphereForecasters({
+            climatology: windClimatology, idPrefix: 'wind', clampNeg: false,
+        })) wxForecastRegistry.register(F);
+        // Re-run the registry now that the new forecasters are
+        // registered — without this kick the cloud/wind models would
+        // miss the next ingest cycle (~1 hour) before producing output.
+        if (wxGridHistory.size > 0) wxForecastRegistry.runAll();
+    })
+    .catch(err => {
+        console.info('[earth] cloud/wind climatology open failed:', err?.message);
+    });
+
 // Flush climatology + bias to disk on tab hide so a refresh doesn't lose
 // the last batch of in-memory updates. visibilitychange fires on
 // backgrounding, reload, and close; cheap insurance against losing
@@ -4560,6 +4611,8 @@ document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
         precipClimatology.flushNow();
         precipBiasTracker.flushNow();
+        cloudClimatology.flushNow();
+        windClimatology.flushNow();
     }
 });
 
