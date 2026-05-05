@@ -888,6 +888,214 @@ export function planLunarLambert({
     return best;
 }
 
+// ── Cross-body return / inter-base routes ─────────────────────────────────
+//
+// All three routes are thin wrappers around the existing Lambert solver.
+// They share the same plan shape (`kind`, `method`, `dv_*_kms`, `sample()`,
+// arrival/departure body states) so the renderer can dispatch them through
+// one helio-arc animator.
+
+/**
+ * Heliocentric state of the Moon at JD: Earth_helio + Moon_geo (translated).
+ * Both are returned in km. Velocity is via centered finite difference.
+ */
+function moonHelioState(jd, dt = _DT_VEL_DAYS) {
+    const e_now = planetState(earthHeliocentric, jd);
+    const m_now = moonGeoState(jd);
+    const r = [e_now.r[0] + m_now.r[0], e_now.r[1] + m_now.r[1], e_now.r[2] + m_now.r[2]];
+    const v = [e_now.v[0] + m_now.v[0], e_now.v[1] + m_now.v[1], e_now.v[2] + m_now.v[2]];
+    return { r, v };
+}
+
+/**
+ * Mars → Earth heliocentric Lambert. Mirror of planMarsLambert with the
+ * endpoints swapped: depart from a low Mars orbit, arrive at a low Earth
+ * parking orbit. EDL is left for the renderer (capture into LEO is what
+ * we report numerically).
+ */
+export function planMarsToEarthLambert({
+    jd_depart           = jdNow(),
+    jd_arrive           = jdNow() + 260,
+    parking_alt_mars_km = 400,
+    target_alt_km       = 300,
+    parking_inc_deg     = 0,
+    capture_inc_deg     = null,
+    prograde            = true,
+} = {}) {
+    if (jd_arrive <= jd_depart) throw new Error('planMarsToEarthLambert: jd_arrive must be > jd_depart');
+
+    const tof_s = (jd_arrive - jd_depart) * SECONDS_PER_DAY;
+    const m = planetState(marsHeliocentric,  jd_depart);
+    const e = planetState(earthHeliocentric, jd_arrive);
+
+    const sol = lambert(m.r, e.r, tof_s, MU_SUN, { prograde });
+    const v_inf_m = vSub(sol.v1, m.v);
+    const v_inf_e = vSub(sol.v2, e.v);
+
+    const r_park_m = R_MARS  + parking_alt_mars_km;
+    const r_park_e = R_EARTH + target_alt_km;
+
+    const dep = departureBurnFromParking({
+        r_park_km: r_park_m, mu: MU_MARS,
+        v_inf_vec: v_inf_m, i_park_rad: parking_inc_deg * D2R,
+    });
+    const arr = arrivalBurnIntoOrbit({
+        r_capt_km: r_park_e, mu: MU_EARTH,
+        v_inf_vec: v_inf_e,
+        i_capt_rad: capture_inc_deg == null ? null : capture_inc_deg * D2R,
+    });
+
+    return {
+        kind: 'mars-to-earth',
+        method: 'lambert',
+        jd_depart, jd_arrive, tof_d: jd_arrive - jd_depart, tof_s,
+        depart_state_kms: m, arrive_state_kms: e,
+        lambert: sol,
+        v_inf_depart_kms: vNorm(v_inf_m),
+        v_inf_arrive_kms: vNorm(v_inf_e),
+        c3_depart_km2s2:  vNorm(v_inf_m) ** 2,
+        dv_depart_kms:    dep.dv_kms,
+        dv_arrive_kms:    arr.dv_kms,
+        dv_total_kms:     dep.dv_kms + arr.dv_kms,
+        sample: () => sampleKeplerArc(m.r, sol.v1, tof_s, MU_SUN, 96),
+    };
+}
+
+/**
+ * Moon → Mars heliocentric Lambert. Departs from the Moon's heliocentric
+ * position (Earth_helio + Moon_geo), arrives at Mars. The Δv reported at
+ * departure is for an injection from a circular low lunar orbit; the small
+ * heliocentric offset between Moon and Earth is what makes this cheaper or
+ * more expensive than a direct Earth → Mars depending on Moon phase.
+ */
+export function planMoonToMarsLambert({
+    jd_depart           = jdNow(),
+    jd_arrive           = jdNow() + 260,
+    parking_alt_moon_km = 100,
+    target_alt_mars_km  = 400,
+    parking_inc_deg     = 0,
+    capture_inc_deg     = null,
+    prograde            = true,
+} = {}) {
+    if (jd_arrive <= jd_depart) throw new Error('planMoonToMarsLambert: jd_arrive must be > jd_depart');
+
+    const tof_s = (jd_arrive - jd_depart) * SECONDS_PER_DAY;
+    const moon = moonHelioState(jd_depart);
+    const mars = planetState(marsHeliocentric, jd_arrive);
+
+    const sol = lambert(moon.r, mars.r, tof_s, MU_SUN, { prograde });
+    const v_inf_moon = vSub(sol.v1, moon.v);
+    const v_inf_mars = vSub(sol.v2, mars.v);
+
+    const r_park_moon = R_MOON + parking_alt_moon_km;
+    const r_park_mars = R_MARS + target_alt_mars_km;
+
+    const dep = departureBurnFromParking({
+        r_park_km: r_park_moon, mu: MU_MOON,
+        v_inf_vec: v_inf_moon, i_park_rad: parking_inc_deg * D2R,
+    });
+    const arr = arrivalBurnIntoOrbit({
+        r_capt_km: r_park_mars, mu: MU_MARS,
+        v_inf_vec: v_inf_mars,
+        i_capt_rad: capture_inc_deg == null ? null : capture_inc_deg * D2R,
+    });
+
+    return {
+        kind: 'moon-to-mars',
+        method: 'lambert',
+        jd_depart, jd_arrive, tof_d: jd_arrive - jd_depart, tof_s,
+        depart_state_kms: moon, arrive_state_kms: mars,
+        lambert: sol,
+        v_inf_depart_kms: vNorm(v_inf_moon),
+        v_inf_arrive_kms: vNorm(v_inf_mars),
+        c3_depart_km2s2:  vNorm(v_inf_moon) ** 2,
+        dv_depart_kms:    dep.dv_kms,
+        dv_arrive_kms:    arr.dv_kms,
+        dv_total_kms:     dep.dv_kms + arr.dv_kms,
+        sample: () => sampleKeplerArc(moon.r, sol.v1, tof_s, MU_SUN, 96),
+    };
+}
+
+/**
+ * Moon → Earth geocentric Lambert (lunar return). Sweeps the burn-angle
+ * parameter the same way planLunarLambert does, but with the Moon as the
+ * departure point and a low Earth parking orbit as the arrival.
+ */
+export function planMoonToEarthLambert({
+    jd_depart           = jdNow(),
+    tof_d               = 4.5,
+    parking_alt_moon_km = 100,
+    target_alt_earth_km = 300,
+    n_theta             = 30,
+} = {}) {
+    const tof_s = tof_d * SECONDS_PER_DAY;
+    const r_moon  = R_MOON  + parking_alt_moon_km;
+    const r_earth = R_EARTH + target_alt_earth_km;
+
+    const moonState = moonGeoState(jd_depart);
+    const r1        = moonState.r;
+    const r1_mag    = vNorm(r1);
+    const r1_unit   = [r1[0]/r1_mag, r1[1]/r1_mag, r1[2]/r1_mag];
+
+    // Build an in-plane perpendicular by crossing r1 with +Z, mirror of
+    // planLunarLambert's geometry (same caveat at the lunar pole).
+    const z = [0, 0, 1];
+    const cross = vCross(r1_unit, z);
+    const cm = vNorm(cross);
+    const perp = [cross[0]/cm, cross[1]/cm, cross[2]/cm];
+
+    let best = null;
+    for (let i = 0; i < n_theta; i++) {
+        const theta = (60 + (200 - 60) * (i / (n_theta - 1))) * D2R;
+        const c = Math.cos(theta), s = Math.sin(theta);
+        const r2 = [
+            r_earth * (c * r1_unit[0] + s * perp[0]),
+            r_earth * (c * r1_unit[1] + s * perp[1]),
+            r_earth * (c * r1_unit[2] + s * perp[2]),
+        ];
+
+        let sol;
+        try { sol = lambert(r1, r2, tof_s, MU_EARTH); }
+        catch (_) { continue; }
+
+        // Δv at the Moon: we depart from a circular low lunar orbit, so
+        // the departure burn is from v_circ_moon along the prograde tangent
+        // up to v_hyp at perilune, plus the difference between the helio
+        // arc's initial velocity and the Moon's own velocity (v∞).
+        const v_inf_vec  = vSub(sol.v1, moonState.v);
+        const v_inf      = vNorm(v_inf_vec);
+        const v_perilune_hyp = Math.sqrt(v_inf*v_inf + 2 * MU_MOON / r_moon);
+        const v_circ_moon    = Math.sqrt(MU_MOON / r_moon);
+        const dv_dep         = v_perilune_hyp - v_circ_moon;
+
+        // Δv at Earth: insert into a circular low Earth orbit at r_earth.
+        const v_at_r2 = vNorm(sol.v2);
+        const v_circ_e = Math.sqrt(MU_EARTH / r_earth);
+        const dv_arr   = Math.abs(v_at_r2 - v_circ_e);
+
+        const total = dv_dep + dv_arr;
+        if (!best || total < best.dv_total_kms) {
+            best = {
+                kind: 'moon-to-earth',
+                method: 'lambert',
+                jd_depart, jd_arrive: jd_depart + tof_d,
+                tof_d, tof_s,
+                burn_angle_deg: theta * R2D,
+                r1, r2, r_park_km: r_moon, r_capt_km: r_earth,
+                lambert: sol,
+                dv_depart_kms: dv_dep,
+                dv_arrive_kms: dv_arr,
+                dv_total_kms:  total,
+                v_inf_moon_kms: v_inf,
+                moon_at_departure: moonGeocentric(jd_depart),
+                sample: () => sampleKeplerArc(r1, sol.v1, tof_s, MU_EARTH, 96),
+            };
+        }
+    }
+    if (!best) throw new Error(`planMoonToEarthLambert: no feasible Lambert at TOF=${tof_d}d`);
+    return best;
+}
+
 // ── Tour planner: chained Lambert legs ──────────────────────────────────────
 //
 // Sequence is an array of {from, to, tof_d} hops. Each hop solves Lambert
