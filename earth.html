@@ -260,6 +260,157 @@ html.theme-light body {
     color: var(--c-text-primary);
 }
 
+/* ═══ Light-theme rule overrides ════════════════════════════════════════
+   Stuff that *can't* be expressed by re-declaring a single token —
+   gradient stops with multiple hard-coded colours, layered shadows
+   that combine multiple tokens, decorative effects that need a
+   light-mode-specific recipe rather than just a colour swap.
+
+   Selector pattern: `html.theme-light <selector>, body.theme-light
+   <selector>` so the rule fires regardless of which ancestor carries
+   the class (matches the activation hook below). Each block is
+   self-contained — annotated with what it's compensating for. */
+
+/* The .lyr / .lyr-featured-row pill toggle's :checked gradient is a
+   continuous hue ramp from a darker stop to a brighter stop. Both
+   stops were hard-coded for dark theme; on light backgrounds the
+   bright #00d4ff top reads almost white and the contrast against
+   the white knob disappears. Light-theme version uses two darker
+   stops so the pill stays visibly cyan against an off-white panel. */
+html.theme-light .lyr input[type=checkbox]:checked,
+html.theme-light .lyr-featured-row input[type=checkbox]:checked,
+body.theme-light .lyr input[type=checkbox]:checked,
+body.theme-light .lyr-featured-row input[type=checkbox]:checked {
+    background: linear-gradient(180deg, #006a90 0%, #0099c8 100%);
+}
+/* Pill knob in OFF state — dark-grey gradient looked perfect on a
+   dark track but reads nearly invisible on a light track. Use a
+   slightly desaturated mid-grey so the OFF state still has a
+   discernible shape. */
+html.theme-light .lyr input[type=checkbox]::before,
+html.theme-light .lyr-featured-row input[type=checkbox]::before,
+body.theme-light .lyr input[type=checkbox]::before,
+body.theme-light .lyr-featured-row input[type=checkbox]::before {
+    background: linear-gradient(180deg, #f5f7fa 0%, #b0b8c0 100%);
+}
+/* Pill knob ON state — the bright-white knob slid right looked
+   perfect against the dark cyan track, but on the lighter cyan
+   gradient (#006a90 → #0099c8) the white knob's white-on-cyan
+   contrast is fine — leave it alone. */
+
+/* loc-panel hero — layered shadow uses a navy-tinted outer drop,
+   purple nebula glow, and teal inner glow.  The navy drop is
+   tinted-on-tinted; on light backgrounds the same numbers become a
+   muddy charcoal grey halo around the panel. Re-tune with lighter
+   navy alpha + a higher-luminance teal accent. The purple stays
+   inline — it's a one-off that still reads OK on light because
+   the alpha is already low. */
+html.theme-light #loc-panel,
+body.theme-light #loc-panel {
+    background:
+        radial-gradient(120% 80% at 8% -10%, var(--c-loc-soft), transparent 60%),
+        radial-gradient(140% 100% at 110% 110%, rgba(127,90,255,.08), transparent 65%),
+        linear-gradient(180deg, rgba(252,254,255,.96), rgba(232,240,250,.96));
+    border-color: var(--c-loc-border);
+    box-shadow:
+        0 18px 44px rgba(20,40,80,.10),
+        0 0 0 1px rgba(127,90,255,.06),
+        0 0 26px rgba(var(--c-loc-rgb),.14),
+        inset 0 1px 0 rgba(255,255,255,.50),
+        inset 0 0 32px rgba(var(--c-loc-rgb),.04);
+}
+/* loc-panel pulse keyframes — same logic for the animated extreme
+   stop. We override the animation's @keyframes via a fresh
+   declaration; CSS can't @keyframes-override per theme directly so
+   we change the animation reference. The dark-theme original keeps
+   its name; the light variant runs `loc-panel-pulse-light`. */
+html.theme-light #loc-panel,
+body.theme-light #loc-panel {
+    animation-name: loc-panel-pulse-light;
+}
+@keyframes loc-panel-pulse-light {
+    0%, 100% {
+        box-shadow:
+            0 18px 44px rgba(20,40,80,.10),
+            0 0 0 1px rgba(127,90,255,.06),
+            0 0 22px rgba(var(--c-loc-rgb),.14),
+            inset 0 1px 0 rgba(255,255,255,.50),
+            inset 0 0 32px rgba(var(--c-loc-rgb),.04);
+    }
+    50% {
+        box-shadow:
+            0 18px 50px rgba(20,40,80,.12),
+            0 0 0 1px rgba(127,90,255,.10),
+            0 0 36px rgba(var(--c-loc-rgb),.30),
+            inset 0 1px 0 rgba(255,255,255,.65),
+            inset 0 0 36px rgba(var(--c-loc-rgb),.08);
+    }
+}
+/* loc-panel starfield speckle — bright-white-on-dark dots become
+   invisible on a near-white panel. Switch to dark navy speckle
+   that reads as subtle texture on light. */
+html.theme-light #loc-panel::before,
+body.theme-light #loc-panel::before {
+    background-image:
+        radial-gradient(1px 1px at 18% 22%, rgba(20,40,80,.45), transparent 60%),
+        radial-gradient(1px 1px at 72% 14%, rgba(40,80,140,.40), transparent 60%),
+        radial-gradient(1.5px 1.5px at 42% 78%, rgba(0,146,106,.45), transparent 60%),
+        radial-gradient(1px 1px at 88% 64%, rgba(80,60,140,.35), transparent 60%),
+        radial-gradient(1px 1px at 30% 56%, rgba(20,40,80,.30), transparent 60%);
+    opacity: .4;
+    mix-blend-mode: multiply;     /* darken-only blend on light bg */
+}
+
+/* Storm-watch panel chrome — the orange family already shifts via
+   --c-storm-rgb token, but two surfaces need an explicit override:
+   the `.sw-card.active` highlight glow (its 0 0 10px is calibrated
+   for a dark backdrop), and the slider track gradient (hard-coded
+   stops can't be tokenised continuously). */
+html.theme-light #storm-watch-panel .sw-card.active,
+body.theme-light #storm-watch-panel .sw-card.active {
+    /* Lighter active-highlight glow on a light surface — the dark-theme
+       0.20 alpha drowned out the card content. */
+    box-shadow: 0 0 8px rgba(var(--c-storm-rgb), .14);
+}
+/* Storm-watch slider track — keep the same hue ramp but bump the
+   alpha so the gradient survives on a light backdrop. */
+html.theme-light #storm-watch-panel .sw-scrub-row2 input[type=range],
+body.theme-light #storm-watch-panel .sw-scrub-row2 input[type=range] {
+    background: linear-gradient(90deg,
+        rgba(58, 138, 203, .75) 0%,
+        rgba(245, 159,  59, .75) 60%,
+        rgba(216,  52,  95, .75) 100%);
+}
+/* Storm-watch slider thumb on light — the white-to-cream gradient
+   loses contrast against a light track. Darken slightly. */
+html.theme-light #storm-watch-panel .sw-scrub-row2 input[type=range]::-webkit-slider-thumb,
+body.theme-light #storm-watch-panel .sw-scrub-row2 input[type=range]::-webkit-slider-thumb {
+    background: linear-gradient(180deg, #fff 0%, #ffba88 100%);
+    border-color: rgba(217, 106, 26, .65);
+    box-shadow: 0 0 4px rgba(217, 106, 26, .45), inset 0 1px 0 rgba(255, 255, 255, .80);
+}
+
+/* Aurora-power "fc-chip" intensity backgrounds inside the SW HUD
+   are tuned for a dark surface (low-alpha rgba over near-black).
+   On light, increase saturation so the chip still reads. */
+html.theme-light .ip-aurora-forecast-chip,
+body.theme-light .ip-aurora-forecast-chip {
+    /* Selectors apply if/when chip rules ever pull a class. The
+       current implementation uses inline styles, so this is a
+       placeholder for the next refactor — annotated rather than
+       silently absent. */
+}
+
+/* Marketing gradient near the dashboard CTAs uses two hard-coded
+   stops (cyan #00c6ff → purple #7b2ff7). On light the cyan stop
+   washes out; deepen it to match the theme's --c-accent. */
+html.theme-light .sim-card-title-gradient,
+body.theme-light .sim-card-title-gradient {
+    background: linear-gradient(135deg, #0085b0, #5a1fbb);
+    -webkit-background-clip: text;
+    background-clip: text;
+}
+
 body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#ddd;
     font-family:'Segoe UI',system-ui,sans-serif; }
 
@@ -1072,6 +1223,47 @@ nav {
     border-color: var(--c-accent);
 }
 
+/* ─── Theme toggle ──────────────────────────────────────────────────
+   Tiny floating button at top-right (just below nav, clear of the
+   layer-panel which sits at top:10px right:10px). Single-icon
+   button — moon/sun glyph swaps based on which theme is active.
+   Cycles through the same setEarthTheme() hook the URL param + dev
+   console use, so it persists via localStorage automatically. */
+#theme-toggle {
+    position: fixed;
+    top: 60px; right: 12px;
+    z-index: 70;
+    width: 32px; height: 32px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--c-surface-1);
+    border: 1px solid var(--c-accent-border);
+    border-radius: 50%;
+    color: var(--c-text-secondary);
+    cursor: pointer; font-size: 16px; line-height: 1;
+    backdrop-filter: var(--blur-glass);
+    -webkit-backdrop-filter: var(--blur-glass);
+    box-shadow: var(--shadow-panel);
+    transition: background .15s, color .15s, border-color .15s, transform .12s;
+    touch-action: manipulation;
+    /* Respect any reduced-motion preference: skip the rotate-on-hover
+       animation when the OS has flagged motion-sensitivity. */
+}
+#theme-toggle:hover {
+    color: var(--c-accent);
+    border-color: var(--c-accent);
+    transform: rotate(15deg);
+}
+#theme-toggle:active { transform: scale(.92) rotate(15deg); }
+@media (prefers-reduced-motion: reduce) {
+    #theme-toggle, #theme-toggle:hover, #theme-toggle:active { transform: none; }
+}
+@media (max-width: 640px) {
+    /* On phones the layer-panel turns into a slide-up sheet via the
+       bottom toolbar, so the top-right corner is free. Move the
+       theme button up to where the layer-panel button sat. */
+    #theme-toggle { top: 56px; right: 10px; width: 30px; height: 30px; font-size: 14px; }
+}
+
 /* ─── Panel minimize / drag chrome ──────────────────────────────── */
 .panel-header {
     display: flex; align-items: center; justify-content: space-between;
@@ -1826,6 +2018,80 @@ nav {
 <link rel="stylesheet" href="js/nav-styles.css">
 <nav></nav>
 <script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("earth");</script>
+
+<!-- ── Theme toggle button ─────────────────────────────────────────
+     The 🌗 glyph swaps to ☀ / 🌙 in the inline script below based on
+     resolved theme. Click cycles dark ↔ light via setEarthTheme().
+     A second click after the user has explicitly chosen sticks to
+     the manual choice; calling setEarthTheme('auto') from the dev
+     console reverts to OS preference. -->
+<button id="theme-toggle" type="button"
+        title="Toggle theme (long-press to follow OS)"
+        aria-label="Toggle light/dark theme">🌗</button>
+<script>
+(function() {
+    const btn = document.getElementById('theme-toggle');
+    if (!btn) return;
+    // Update the glyph to reflect *what clicking does next*: when
+    // dark, show 🌞 (clicking goes to light); when light, show 🌙
+    // (clicking goes to dark). The 🌗 default is a neutral fallback
+    // for the brief window before the activation hook resolves.
+    function syncGlyph() {
+        const isLight = document.documentElement.classList.contains('theme-light')
+                     || document.body?.classList.contains('theme-light');
+        btn.textContent = isLight ? '🌙' : '🌞';
+        btn.setAttribute('aria-pressed', String(isLight));
+    }
+    syncGlyph();
+
+    btn.addEventListener('click', () => {
+        const isLight = document.documentElement.classList.contains('theme-light')
+                     || document.body?.classList.contains('theme-light');
+        // Tap toggles between dark and light. The "auto" mode is
+        // available via long-press OR via window.setEarthTheme('auto')
+        // — exposed below for users who want to revert to OS-following
+        // without rebinding. Avoiding a 3-state cycle in the click
+        // handler keeps the affordance simple: tap = swap.
+        if (typeof window.setEarthTheme === 'function') {
+            window.setEarthTheme(isLight ? 'dark' : 'light');
+        }
+        syncGlyph();
+    });
+
+    // Long-press → 'auto' (revert to OS preference). 600 ms is the
+    // standard mobile long-press threshold; works on touch + mouse.
+    let pressTimer = null;
+    function startPress() {
+        clearTimeout(pressTimer);
+        pressTimer = setTimeout(() => {
+            if (typeof window.setEarthTheme === 'function') {
+                window.setEarthTheme('auto');
+                syncGlyph();
+                // Subtle confirmation flash so the user knows the
+                // long-press registered; the rotate animation
+                // doubles as feedback.
+                btn.style.transition = 'transform .25s ease';
+                btn.style.transform = 'rotate(360deg)';
+                setTimeout(() => { btn.style.transform = ''; }, 250);
+            }
+            pressTimer = null;
+        }, 600);
+    }
+    function cancelPress() {
+        clearTimeout(pressTimer);
+        pressTimer = null;
+    }
+    btn.addEventListener('pointerdown', startPress);
+    btn.addEventListener('pointerup',   cancelPress);
+    btn.addEventListener('pointerleave', cancelPress);
+    btn.addEventListener('pointercancel', cancelPress);
+
+    // Stay in sync if setEarthTheme() is called from dev console.
+    // Poll on visibility change is enough — the user only inspects
+    // the button when looking at the page.
+    document.addEventListener('visibilitychange', syncGlyph);
+})();
+</script>
 
 <!-- ─── App ──────────────────────────────────────────────────── -->
 <div id="app">
