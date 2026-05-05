@@ -108,7 +108,8 @@ const META_STRIDE: usize = 8;
 //   [4] total length (R☉)
 //   [5] foot_a_lat (rad, photospheric end A; NaN if open at A)
 //   [6] foot_a_lon (rad)
-//   [7] reserved   (twist — Phase 2)
+//   [7] twist      (rad — accumulated tangent rotation about spine axis;
+//                    > ~2π → one full turn → tornado-class candidate)
 
 #[wasm_bindgen]
 impl FieldAtlas {
@@ -202,11 +203,12 @@ pub fn compute_field_lines(input: JsValue) -> Result<FieldAtlas, JsValue> {
         for V3 { x, y, z } in &line.tangents { tangents.extend_from_slice(&[*x, *y, *z]); }
 
         // Foot A: first sample if it sits on the photosphere.
+        // Inverse of from_lat_lon (y-up): lat = asin(y), lon = atan2(x, z).
         let foot_a = line.samples[0];
         let r0 = foot_a.len();
         let (lat_a, lon_a) = if (r0 - 1.0).abs() < 0.01 {
-            let lat = foot_a.z.clamp(-1.0, 1.0).asin();
-            let lon = foot_a.y.atan2(foot_a.x);
+            let lat = foot_a.y.clamp(-1.0, 1.0).asin();
+            let lon = foot_a.x.atan2(foot_a.z);
             (lat, lon)
         } else {
             (f32::NAN, f32::NAN)
@@ -220,7 +222,7 @@ pub fn compute_field_lines(input: JsValue) -> Result<FieldAtlas, JsValue> {
             line.total_length,
             lat_a,
             lon_a,
-            0.0, // twist (reserved)
+            line.twist,
         ]);
         line_count += 1;
     }

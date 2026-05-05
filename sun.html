@@ -9,7 +9,7 @@
 <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>The Sun — G2V · Parker Physics App</title>
+<title>The Sun — G2V · Parkers Physics App</title>
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 html { height:auto; overflow-y:auto; }
@@ -1030,6 +1030,14 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
                         <input type="range" id="sl-bline-density" min="10" max="100" step="5" value="50">
                         <span class="vdisp" id="disp-bline-density" style="font-size:10px">50%</span>
                     </div>
+                    <!-- Phase 2.3 — manual EP trigger. Hidden unless ?debug=prominence. -->
+                    <div class="ctrl" id="erupt-row" style="margin-top:6px;padding-left:22px;display:none">
+                        <button id="btn-erupt-nearest" class="cv-btn"
+                                style="font-size:11px;padding:4px 10px;background:#3a1a10;border-color:#ff5522;color:#ffaa66">
+                            ⚡ Erupt nearest filament
+                        </button>
+                        <span id="erupt-status" style="font-size:10px;color:#888;margin-left:6px"></span>
+                    </div>
                 </div>
             </div>
 
@@ -1795,6 +1803,13 @@ const uniforms = {
     u_flare_lat:         { value: 0.0  },  // radians
     u_flare_lon:         { value: 0.0  },  // radians
     u_flare_t:           { value: 999.0 }, // simulation-time units (dt=0.01/frame)
+
+    // Phase 3.1 — PIL-anchored two-ribbon geometry. See js/flare-ribbons.js.
+    // The DataTexture is attached lazily on the first ribbon update so
+    // sun.html doesn't depend on the WASM atlas being available at boot.
+    t_flare_ribbons:        { value: null },
+    u_flare_ribbons_active: { value: 0.0 },
+    u_flare_ribbons_count:  { value: 0   },
     // ── Live Kp — drives corona storm glow and bloom strength ──
     u_kp_norm:           { value: 0.22 },  // Kp/9 [0-1]
     // ── Flare white-light intensity — brief whole-disk flash at flare onset ──
@@ -2102,6 +2117,40 @@ const sunFS = /* glsl */`
     uniform float u_flare_lat;       // heliographic latitude of most recent M/X flare (radians)
     uniform float u_flare_lon;       // heliographic longitude (radians)
     uniform float u_flare_t;         // simulation-time elapsed since flare onset (0 = just fired)
+
+    // Phase 3.1 — PIL-anchored two-ribbon geometry. When the atlas is
+    // available and a flaring AR has PIL bundles, we feed the actual
+    // footpoint polylines via this texture (32 × 2 RGBA float; row 0 =
+    // ribbon A, row 1 = ribbon B; .xyz = unit photosphere position;
+    // .w = 1 valid / 0 padding). Otherwise we fall back to the legacy
+    // straight east-west ribbons.
+    uniform sampler2D t_flare_ribbons;
+    uniform float u_flare_ribbons_active;   // 0 = legacy fallback, 1 = use texture
+    uniform float u_flare_ribbons_count;    // valid points per ribbon (≤32)
+
+    // Minimum great-circle-ish distance from a unit-sphere fragment position
+    // to the polyline encoded in row 'rowI' of t_flare_ribbons. Each
+    // segment treated as a 3D chord; cheap and visually indistinguishable
+    // from a true great-circle arc at the small angular widths we use.
+    float ribbonDist(vec3 p, float rowI) {
+        float minD = 1e6;
+        int N = int(u_flare_ribbons_count);
+        float v = (rowI + 0.5) / 2.0;
+        for (int i = 0; i < 31; i++) {
+            if (i >= N - 1) break;
+            float ua = (float(i)     + 0.5) / 32.0;
+            float ub = (float(i + 1) + 0.5) / 32.0;
+            vec4 pa = texture2D(t_flare_ribbons, vec2(ua, v));
+            vec4 pb = texture2D(t_flare_ribbons, vec2(ub, v));
+            if (pa.w < 0.5 || pb.w < 0.5) break;
+            vec3 ab = pb.xyz - pa.xyz;
+            float L2 = max(dot(ab, ab), 1e-9);
+            float t  = clamp(dot(p - pa.xyz, ab) / L2, 0.0, 1.0);
+            vec3 closest = pa.xyz + t * ab;
+            minD = min(minD, length(p - closest));
+        }
+        return minD;
+    }
     uniform float u_flare_intensity; // 0-1 white-light flash intensity at flare onset
     varying vec3  vNormal;
     varying vec3  vPosition;
@@ -2334,17 +2383,36 @@ const sunFS = /* glsl */`
             col += vec3(2.6, 2.1, 1.2) * uvKern * kernBoost * u_showFlares;
 
             // ── Hα ribbon pair (AIA 304 Å proxy) ────────────────────────────
-            // Two parallel arcs straddling the polarity-inversion line (PIL).
-            // PIL is approximately E-W so ribbons are offset in the N/S (lat) direction.
-            // Both ribbons diverge away from the PIL as reconnection proceeds.
-            float dlat   = lat - u_flare_lat;                          // N-S offset from flare
-            float dlon_c = (lon - u_flare_lon) * cos(u_flare_lat);     // great-circle-corrected E-W
-            // E-W envelope: ribbons are elongated along the PIL direction
-            float lonEnv = exp(-dlon_c * dlon_c / (0.10 + u_flare_t * 4.0e-5));
-            float sep    = 0.020 + u_flare_t * 2.5e-5;    // separation grows with reconnection
-            float rWid   = 0.005 + u_flare_t * 6.0e-6;    // ribbon width grows (chromospheric evaporation)
-            float rib1   = exp(-pow((dlat - sep) / rWid, 2.0)) * lonEnv;   // N ribbon
-            float rib2   = exp(-pow((dlat + sep) / rWid, 2.0)) * lonEnv;   // S ribbon
+            // Two arcs straddling the polarity-inversion line (PIL). When the
+            // PFSS atlas has supplied real PIL footpoint geometry for this
+            // AR (u_flare_ribbons_active > 0), we sample those polylines;
+            // otherwise we fall back to the legacy straight east-west arcs
+            // offset N/S from the flare site.
+            float rib1, rib2;
+            if (u_flare_ribbons_active > 0.5) {
+                // Use the world-space fragment position directly. (Earlier
+                // code reconstructed it from the (lat,lon) varyings, but
+                // those use atan(z,x) so the round-trip swapped X and Z
+                // and the polyline-distance test collapsed to ≈0
+                // everywhere — no visible ribbons.)
+                vec3 p3 = normalize(vPosition);
+                float d1 = ribbonDist(p3, 0.0);
+                float d2 = ribbonDist(p3, 1.0);
+                // Width grows with chromospheric evaporation (3D chord
+                // distance ≈ angular distance on a unit sphere at small d).
+                float rWid3 = 0.012 + u_flare_t * 1.2e-5;
+                rib1 = exp(-d1 * d1 / (rWid3 * rWid3));
+                rib2 = exp(-d2 * d2 / (rWid3 * rWid3));
+            } else {
+                // Legacy fallback — straight E-W arcs offset N/S in lat.
+                float dlat   = lat - u_flare_lat;                       // N-S offset from flare
+                float dlon_c = (lon - u_flare_lon) * cos(u_flare_lat);  // great-circle-corrected E-W
+                float lonEnv = exp(-dlon_c * dlon_c / (0.10 + u_flare_t * 4.0e-5));
+                float sep    = 0.020 + u_flare_t * 2.5e-5;    // separation grows with reconnection
+                float rWid   = 0.005 + u_flare_t * 6.0e-6;    // ribbon width grows
+                rib1 = exp(-pow((dlat - sep) / rWid, 2.0)) * lonEnv;
+                rib2 = exp(-pow((dlat + sep) / rWid, 2.0)) * lonEnv;
+            }
             float ribMask = (rib1 + rib2) * fDecay * 0.85;
             // Colour: UV white at onset → Hα red as it cools
             vec3 ribHot  = vec3(1.6, 1.3, 0.9);    // bright UV continuum
@@ -3792,32 +3860,260 @@ function buildCoronalLoops() {
 // Co-rotates with photosphere via fieldLineGroup.rotation.y = solarRotAngle.
 let fieldLineGroup = null;
 
-// ── ?debug=field — Phase 1 PFSS-lite tracer validation viewer ─────────────────
-// When enabled, the WASM-driven field-line atlas (rust-sunfield) is rendered
-// alongside the legacy axisymmetric lines as colour-coded LineSegments:
-//   gold = closed loops · cyan = open + · magenta = open − · green = PIL-anchored
-// The atlas is also cached in module-level state for upcoming prominence /
-// flare shaders to sample (see js/field-atlas.js).
-const DEBUG_FIELD_ATLAS = new URLSearchParams(location.search).get('debug') === 'field';
-let _fieldAtlasModulePromise = null;
-let debugFieldAtlasGroup = null;
+// ── ?debug= — Phase 1 PFSS atlas + Phase 2 prominence-bundle scaffolds ───────
+// Both flags share the same WASM atlas; they're composable:
+//   ?debug=field                — colour-coded field-line LineSegments
+//   ?debug=prominence           — instanced microhair bundles (QP class)
+//   ?debug=field,prominence     — both
+// Prominence quality tier:
+//   ?promq=low|mid|high         — peak active thread budget (default mid)
+const _debugFlagSet = new Set(
+    String(new URLSearchParams(location.search).get('debug') || '')
+        .toLowerCase().split(/[\s,;]+/).filter(Boolean));
+const DEBUG_FIELD_ATLAS  = _debugFlagSet.has('field');
+const DEBUG_PROMINENCE   = _debugFlagSet.has('prominence') || _debugFlagSet.has('prom');
+const DEBUG_ANY_ATLAS    = DEBUG_FIELD_ATLAS || DEBUG_PROMINENCE;
+const PROMINENCE_QUALITY = (new URLSearchParams(location.search).get('promq') || 'mid').toLowerCase();
 
-if (DEBUG_FIELD_ATLAS) {
+let _fieldAtlasModulePromise   = null;
+let _prominenceModulePromise   = null;
+let debugFieldAtlasGroup       = null;
+let prominenceBundleSystem     = null;
+// per-frame state cache (populated by rebuildDebugFieldAtlas, consumed by animate())
+let _promCachedAtlas       = null;
+let _promCachedTextures    = null;
+let _promClassifierRef     = null;
+
+if (DEBUG_ANY_ATLAS) {
     _fieldAtlasModulePromise = (async () => {
         try {
             const mod = await import('./js/field-atlas.js');
             await mod.ensureFieldAtlasWasm();
-            console.log('[debug=field] field-atlas WASM ready');
+            console.log('[sunfield] field-atlas WASM ready');
             return mod;
         } catch (e) {
-            console.warn('[debug=field] init failed:', e);
+            console.warn('[sunfield] init failed:', e);
             return null;
         }
     })();
 }
 
+let _scorecardModule = null;
+let _flareRibbonsModule = null;
+let _flareHxrModule = null;
+let _flareHxrSystem = null;
+
+// Phase 3.1 / 3.2 — flare-ribbons + HXR-kernels load whenever an atlas
+// might be available. Independent of ?debug=prominence: live SWPC flares
+// can light up the PIL ribbons + HXR footpoints too, as long as the atlas
+// got built (which happens under ?debug=field or ?debug=prominence).
+if (DEBUG_ANY_ATLAS) {
+    (async () => {
+        try {
+            const [r, h] = await Promise.all([
+                import('./js/flare-ribbons.js'),
+                import('./js/flare-hxr-kernels.js'),
+            ]);
+            _flareRibbonsModule = r;
+            _flareHxrModule = h;
+            console.log('[flare-ribbons + hxr] modules loaded');
+        } catch (e) {
+            console.warn('[flare-ribbons / hxr] init failed:', e);
+        }
+    })();
+}
+
+if (DEBUG_PROMINENCE) {
+    _prominenceModulePromise = (async () => {
+        try {
+            const [bundleMod, classifierMod, scorecardMod] = await Promise.all([
+                import('./js/prominence-bundle.js'),
+                import('./js/prominence-classifier.js'),
+                import('./js/eruption-scorecard.js'),
+            ]);
+            _scorecardModule = scorecardMod;
+            console.log('[prominence] bundle + classifier + scorecard modules loaded');
+            return { bundle: bundleMod, classifier: classifierMod };
+        } catch (e) {
+            console.warn('[prominence] init failed:', e);
+            return null;
+        }
+    })();
+
+    // Reveal the manual erupt UI and wire the click handler.
+    const eruptRow = document.getElementById('erupt-row');
+    const eruptBtn = document.getElementById('btn-erupt-nearest');
+    if (eruptRow) eruptRow.style.display = '';
+    if (eruptBtn) eruptBtn.addEventListener('click', _eruptNearestFilament);
+}
+
+// ── Phase 3.1: refresh PIL-anchored two-ribbon geometry for the photosphere ──
+// Called by both the manual erupt button and the live SWPC auto-flare path.
+// Picks the AR closest to (latRad, lonRad), pulls its PIL footpoints from the
+// cached atlas, and uploads them as a polyline texture for the photosphere
+// fragment shader. Falls through silently when no atlas / no ribbons —
+// shader keeps using the legacy straight-arc fallback.
+function _refreshFlareRibbons(latRad, lonRad) {
+    if (!_flareRibbonsModule) {
+        console.log('[flare-ribbons] module not loaded yet — legacy ribbons render');
+        return;
+    }
+    if (!_promCachedAtlas) {
+        console.log('[flare-ribbons] no atlas — load with ?debug=prominence and wait for AR feed');
+        return;
+    }
+
+    // Find the live AR closest to the flare site (must match meta[2] arIdx).
+    let bestArIdx = -1, bestDist = 25 * Math.PI / 180;
+    for (let i = 0; i < liveRegions.length; i++) {
+        const ll = parseLoc(liveRegions[i].loc);
+        if (!ll) continue;
+        const arLat = ll.lat * Math.PI / 180;
+        const arLon = ll.lon * Math.PI / 180;
+        const c = Math.sin(latRad) * Math.sin(arLat) +
+                  Math.cos(latRad) * Math.cos(arLat) * Math.cos(lonRad - arLon);
+        const d = Math.acos(Math.max(-1, Math.min(1, c)));
+        if (d < bestDist) { bestDist = d; bestArIdx = i; }
+    }
+    if (bestArIdx < 0) {
+        console.log(`[flare-ribbons] no AR within 25° of flare site — legacy ribbons render`);
+        return;
+    }
+
+    const n = _flareRibbonsModule.updateRibbonsForAr(_promCachedAtlas, bestArIdx);
+    if (n >= 2) {
+        if (!uniforms.t_flare_ribbons.value) {
+            uniforms.t_flare_ribbons.value = _flareRibbonsModule.getRibbonTexture();
+        }
+        uniforms.u_flare_ribbons_count.value  = n;
+        uniforms.u_flare_ribbons_active.value = 1.0;
+        console.log(`[flare-ribbons] AR #${bestArIdx} → ${n}-pt polyline ribbons`);
+    } else {
+        uniforms.u_flare_ribbons_active.value = 0.0;
+        console.log(`[flare-ribbons] AR #${bestArIdx} has no PIL bundles in atlas — legacy ribbons render`);
+    }
+
+    // Phase 3.2 — light up the HXR footpoint kernels with the same atlas
+    // pair data. The conjugate pairing is preserved by flare-ribbons so
+    // each pair gets two kernels (one per loop foot, opposite ribbons).
+    if (_flareHxrModule && _flareRibbonsModule) {
+        if (!_flareHxrSystem) {
+            _flareHxrSystem = _flareHxrModule.createHxrKernelSystem({ scene });
+        }
+        const pairs = _flareRibbonsModule.getCurrentFootpointPairs();
+        _flareHxrSystem.update(pairs);
+        if (pairs.length > 0) {
+            console.log(`[flare-hxr] ${_flareHxrSystem.activeKernels} kernels (${pairs.length} pairs)`);
+        }
+    }
+}
+
+// ── Manual EP trigger (Phase 2.3) ────────────────────────────────────────────
+// Picks the PIL-anchored bundle whose mid-arclength sample is most aligned
+// with the camera's view direction, then fires a synthetic flare at that
+// bundle's location. The classifier reads u_flare_* uniforms every frame, so
+// it picks up the trigger automatically and walks the bundle through the
+// destabilizing → erupting → fade state machine.
+function _eruptNearestFilament() {
+    const status = (msg) => {
+        const el = document.getElementById('erupt-status');
+        if (el) el.textContent = msg;
+    };
+
+    if (!_promCachedAtlas || !prominenceBundleSystem) {
+        if (!DEBUG_PROMINENCE) {
+            status('Reload with ?debug=prominence to enable.');
+        } else if (!_promCachedAtlas) {
+            status('PIL atlas not ready — wait for the AR feed.');
+        } else {
+            status('Bundle system not ready — try again.');
+        }
+        return;
+    }
+
+    // Camera-pointed sub-camera point on the photosphere (the bundle most
+    // visible to the user wins).
+    const subCam = camera.position.clone().normalize();
+
+    const atlas = _promCachedAtlas;
+    const meta  = atlas.meta;
+    const positions = atlas.positions;
+    const spl   = atlas.samplesPerLine;
+    const sIdx  = Math.floor(spl / 2);
+    const STRIDE = 8;
+
+    let bestIdx = -1;
+    let bestDot = -Infinity;
+    let bestLat = 0, bestLon = 0;
+    for (let i = 0; i < atlas.lineCount; i++) {
+        const m0 = i * STRIDE;
+        if (meta[m0] !== 0 || meta[m0 + 1] !== 2) continue;  // PIL-closed only
+        const o = (i * spl + sIdx) * 3;
+        const x = positions[o], y = positions[o + 1], z = positions[o + 2];
+        const r = Math.sqrt(x * x + y * y + z * z);
+        if (r < 0.5) continue;
+        const dx = x / r, dy = y / r, dz = z / r;
+        const dot = dx * subCam.x + dy * subCam.y + dz * subCam.z;
+        if (dot > bestDot) {
+            bestDot = dot; bestIdx = i;
+            // Inverse of WASM from_lat_lon (y-up): lat = asin(y), lon = atan2(x, z).
+            bestLat = Math.asin(Math.max(-1, Math.min(1, dy)));
+            bestLon = Math.atan2(dx, dz);
+        }
+    }
+
+    if (bestIdx < 0) {
+        status('No PIL bundles available.');
+        return;
+    }
+
+    // Fire synthetic flare. u_flare_intensity decays exponentially in animate(),
+    // but the classifier's wasErupting check holds the bundle in EP for 16 s.
+    uniforms.u_flare_lat.value       = bestLat;
+    uniforms.u_flare_lon.value       = bestLon;
+    uniforms.u_flare_intensity.value = 1.0;
+    uniforms.u_flare_t.value         = 0.0;
+    _refreshFlareRibbons(bestLat, bestLon);
+
+    const latDeg = bestLat * 180 / Math.PI;
+    const lonDeg = bestLon * 180 / Math.PI;
+    const ns = latDeg >= 0 ? 'N' : 'S';
+    const ew = lonDeg >= 0 ? 'W' : 'E';
+    const loc = `${ns}${String(Math.round(Math.abs(latDeg))).padStart(2,'0')}` +
+                `${ew}${String(Math.round(Math.abs(lonDeg))).padStart(2,'0')}`;
+    status(`▲ Erupting bundle #${bestIdx} at ${loc}`);
+    console.log(`[erupt] manual EP triggered on bundle ${bestIdx} at ${loc} (cos∠cam=${bestDot.toFixed(2)})`);
+
+    // ── Educational scorecard (manual eruptions only) ────────────────────────
+    // Compute metrics now from the bundle's current state, schedule the card
+    // to slide in ~5 sim-seconds later (just after the impulsive flash so the
+    // visual eruption catches the eye first).
+    if (_scorecardModule && _promClassifierRef) {
+        // Re-classify so we have the current bundle entry (incl. EP params).
+        const bundles = _promClassifierRef.classifyBundles({
+            atlas: _promCachedAtlas,
+            liveRegions,
+            time:           uniforms.u_time.value,
+            flareIntensity: uniforms.u_flare_intensity.value,
+            flareLatRad:    uniforms.u_flare_lat.value,
+            flareLonRad:    uniforms.u_flare_lon.value,
+        });
+        const target = bundles.find(b => b.lineIdx === bestIdx) || bundles[0];
+        const metrics = _scorecardModule.computeMetrics({
+            atlas:   _promCachedAtlas,
+            lineIdx: bestIdx,
+            bundle:  target,
+            liveRegions,
+        });
+        _scorecardModule.show(metrics, {
+            delaySec: 5,
+            simSpeed: simSpeed,
+        });
+    }
+}
+
 async function rebuildDebugFieldAtlas() {
-    if (!DEBUG_FIELD_ATLAS || !_fieldAtlasModulePromise) return;
+    if (!DEBUG_ANY_ATLAS || !_fieldAtlasModulePromise) return;
     const mod = await _fieldAtlasModulePromise;
     if (!mod || !scene) return;
 
@@ -3831,23 +4127,61 @@ async function rebuildDebugFieldAtlas() {
 
     const t0 = performance.now();
     const atlas = mod.computeFieldAtlas(ars, holes, params);
+    const textures = mod.buildFieldTextures(atlas);
     const dt = performance.now() - t0;
 
-    // Replace previous debug mesh.
-    if (debugFieldAtlasGroup) {
-        scene.remove(debugFieldAtlasGroup);
-        mod.disposeFieldDebugMesh(debugFieldAtlasGroup);
-        debugFieldAtlasGroup = null;
+    // ── ?debug=field: colour-coded LineSegments overlay ────────────────────
+    if (DEBUG_FIELD_ATLAS) {
+        if (debugFieldAtlasGroup) {
+            scene.remove(debugFieldAtlasGroup);
+            mod.disposeFieldDebugMesh(debugFieldAtlasGroup);
+            debugFieldAtlasGroup = null;
+        }
+        const mesh = mod.buildFieldDebugMesh(atlas, { opacity: 0.9 });
+        mesh.userData.label = 'PFSS-lite atlas (debug)';
+        scene.add(mesh);
+        debugFieldAtlasGroup = mesh;
     }
-    const mesh = mod.buildFieldDebugMesh(atlas, { opacity: 0.9 });
-    mesh.userData.label = 'PFSS-lite atlas (debug)';
-    scene.add(mesh);
-    debugFieldAtlasGroup = mesh;
 
-    // Also pack textures so Phase 2/3 shaders can pick them up immediately.
-    mod.buildFieldTextures(atlas);
+    // ── ?debug=prominence: microhair bundle system ─────────────────────────
+    if (DEBUG_PROMINENCE && _prominenceModulePromise && textures) {
+        const promMods = await _prominenceModulePromise;
+        if (promMods) {
+            const { bundle: bMod, classifier: cMod } = promMods;
+            if (!prominenceBundleSystem) {
+                prominenceBundleSystem = bMod.createProminenceBundleSystem({
+                    scene,
+                    quality: bMod.getQualityFromString(PROMINENCE_QUALITY),
+                });
+                console.log(`[prominence] system created (quality=${prominenceBundleSystem.quality}, budget=${prominenceBundleSystem.threadBudget})`);
+            }
 
-    console.log(`[debug=field] ${atlas.lineCount} lines (${ars.length} ARs) in ${dt.toFixed(1)} ms`);
+            // Cache for the per-frame classifier tick in animate().
+            _promCachedAtlas    = atlas;
+            _promCachedTextures = textures;
+            _promClassifierRef  = cMod;
+
+            // One-shot classify + log so the console reflects new AR state.
+            const bundles = cMod.classifyBundles({
+                atlas,
+                liveRegions,
+                time: uniforms?.u_time?.value ?? 0,
+                flareIntensity: uniforms?.u_flare_intensity?.value ?? 0,
+                flareLatRad:    uniforms?.u_flare_lat?.value,
+                flareLonRad:    uniforms?.u_flare_lon?.value,
+            });
+            prominenceBundleSystem.update(atlas, textures, {
+                activity: uniforms?.u_activity?.value ?? 0.5,
+                bundles,
+            });
+            const counts = bundles.reduce((m, b) => { m[b.classId] = (m[b.classId] || 0) + 1; return m; }, {});
+            const NAMES = ['QP','IP','ARP','HEDGEROW','TORNADO','EP','RAIN'];
+            const summary = Object.keys(counts).map(k => `${NAMES[k]}=${counts[k]}`).join(' ');
+            console.log(`[prominence] ${bundles.length} bundles · ${prominenceBundleSystem.activeThreads} threads · ${summary}`);
+        }
+    }
+
+    console.log(`[sunfield] ${atlas.lineCount} lines (${ars.length} ARs) in ${dt.toFixed(1)} ms`);
 }
 
 function buildFieldLines() {
@@ -4408,6 +4742,26 @@ function animate() {
     const dt = 0.010 * simSpeed;
     uniforms.u_time.value += dt;
 
+    // Phase 2 prominence bundles — re-classify each frame so EP state machines
+    // and class transitions evolve smoothly. Then tick uniforms (time, camera
+    // position for the on-disk/limb mode switch). No-op if ?debug=prominence
+    // wasn't set or the atlas hasn't been built yet.
+    if (prominenceBundleSystem && _promCachedAtlas && _promCachedTextures && _promClassifierRef) {
+        const bundles = _promClassifierRef.classifyBundles({
+            atlas: _promCachedAtlas,
+            liveRegions,
+            time:           uniforms.u_time.value,
+            flareIntensity: uniforms.u_flare_intensity.value,
+            flareLatRad:    uniforms.u_flare_lat.value,
+            flareLonRad:    uniforms.u_flare_lon.value,
+        });
+        prominenceBundleSystem.update(_promCachedAtlas, _promCachedTextures, {
+            activity: uniforms.u_activity.value,
+            bundles,
+        });
+        prominenceBundleSystem.tick(uniforms.u_time.value, camera.position);
+    }
+
     // Accumulate solar rotation to match photosphere UV scroll rate:
     // Shader shifts UV.x by (u_time * 0.004 * u_rot) per time unit
     // → rotation angle per frame = dt * 0.004 * u_rot * 2π radians
@@ -4418,6 +4772,21 @@ function animate() {
         uniforms.u_flare_intensity.value *= 0.950;
     } else {
         uniforms.u_flare_intensity.value = 0.0;
+    }
+
+    // Phase 3.1 — when the ribbon fade envelope (exp(-u_flare_t/175))
+    // has dropped well below visibility, switch the photosphere shader
+    // back to its cheap legacy path so we're not running the polyline-
+    // distance loop for invisible geometry.
+    if (uniforms.u_flare_ribbons_active.value > 0.5 && uniforms.u_flare_t.value > 700.0) {
+        uniforms.u_flare_ribbons_active.value = 0.0;
+    }
+
+    // Phase 3.2 — HXR kernel envelope is short (sin × exp, gone by ~30 s).
+    // The system itself drops instanceCount to 0 once we're past the
+    // envelope; we just keep ticking time + flareT so the strobe animates.
+    if (_flareHxrSystem) {
+        _flareHxrSystem.tick(uniforms.u_time.value, uniforms.u_flare_t.value);
     }
 
     // Rotate region marker group with the photosphere texture
@@ -5773,6 +6142,7 @@ window.addEventListener('swpc-update', (ev) => {
             uniforms.u_flare_lat.value = lat_r;
             uniforms.u_flare_lon.value = lon_r;
             uniforms.u_flare_t.value   = 0.0;   // reset: ribbons appear immediately
+            _refreshFlareRibbons(lat_r, lon_r);
 
             // ── Position-accurate 3D ring flash ──────────────────────────────
             triggerPositionFlare(latDeg, lonDeg, clsCh);

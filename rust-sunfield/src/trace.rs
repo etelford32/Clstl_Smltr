@@ -21,6 +21,7 @@ pub struct TracedLine {
     pub topology: Topology,
     pub apex_height: f32,    // max(r) − 1 along the line
     pub total_length: f32,
+    pub twist: f32,          // accumulated tangent rotation about the spine axis [rad]
 }
 
 pub struct TraceParams {
@@ -73,13 +74,60 @@ pub fn trace_line(field: &Field, seed: V3, p: &TraceParams) -> Option<TracedLine
 
     let apex = samples.iter().map(|s| s.len()).fold(0.0f32, f32::max) - 1.0;
 
+    let twist = compute_twist(&samples, &tangents);
+
     Some(TracedLine {
         samples,
         tangents,
         topology,
         apex_height: apex,
         total_length: total_len,
+        twist,
     })
+}
+
+/// Accumulated rotation of the tangent vector about the spine axis between
+/// the two endpoints, summed sample-by-sample. Used by the prominence
+/// classifier to detect tornado-class bundles (twist > ~2π → one full turn).
+///
+/// Algorithm: project each tangent onto the plane perpendicular to the
+/// chord (start → end), then sum the signed angle deltas between adjacent
+/// projections about that chord axis. Robust for low-twist (~0) lines and
+/// reasonable for highly-twisted ropes up to ~3 turns.
+fn compute_twist(samples: &[V3], tangents: &[V3]) -> f32 {
+    let n = samples.len();
+    if n < 4 { return 0.0; }
+    let chord = V3::sub(samples[n - 1], samples[0]);
+    let chord_len = chord.len();
+    if chord_len < 1e-4 { return 0.0; }
+    let axis = V3::mul(chord, 1.0 / chord_len);
+
+    let project_perp = |v: V3| -> V3 {
+        let along = V3::dot(v, axis);
+        let perp = V3::new(v.x - along * axis.x, v.y - along * axis.y, v.z - along * axis.z);
+        let l = perp.len();
+        if l < 1e-6 { V3::ZERO } else { V3::mul(perp, 1.0 / l) }
+    };
+
+    let mut twist = 0.0f32;
+    let mut prev = project_perp(tangents[0]);
+    for i in 1..n {
+        let cur = project_perp(tangents[i]);
+        // Skip degenerate steps where either projection is ~zero.
+        if prev.len() < 0.5 || cur.len() < 0.5 { prev = cur; continue; }
+        let cos_t = V3::dot(prev, cur).clamp(-1.0, 1.0);
+        // signed via cross · axis
+        let cross = V3::new(
+            prev.y * cur.z - prev.z * cur.y,
+            prev.z * cur.x - prev.x * cur.z,
+            prev.x * cur.y - prev.y * cur.x,
+        );
+        let sin_t = V3::dot(cross, axis);
+        let dtheta = sin_t.atan2(cos_t);
+        twist += dtheta;
+        prev = cur;
+    }
+    twist
 }
 
 // ───────────────────────────────────────────────────────────────────

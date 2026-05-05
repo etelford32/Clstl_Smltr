@@ -58,7 +58,7 @@ const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABAS
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SECRET_KEY || '';
 const RESEND_API   = 'https://api.resend.com/emails';
 const RESEND_KEY   = process.env.RESEND_API_KEY || '';
-const FROM_EMAIL   = process.env.ALERT_FROM_EMAIL || 'Parker Physics Alerts <alerts@parkerphysics.com>';
+const FROM_EMAIL   = process.env.ALERT_FROM_EMAIL || 'Parkers Physics Alerts <alerts@parkerphysics.com>';
 const CRON_SECRET  = process.env.CRON_SECRET || '';
 
 const OPEN_METEO   = 'https://api.open-meteo.com/v1/forecast';
@@ -485,7 +485,7 @@ function buildDigestHtml({ label, city, forecast, plan }) {
 <body style="margin:0;padding:0;background:#0a0a14;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">
 <div style="max-width:600px;margin:0 auto;padding:24px 20px">
   <div style="text-align:center;margin-bottom:18px">
-    <span style="font-size:1.05rem;font-weight:800;background:linear-gradient(45deg,#ffd700,#ff8c00);-webkit-background-clip:text;-webkit-text-fill-color:transparent">Parker Physics</span>
+    <span style="font-size:1.05rem;font-weight:800;background:linear-gradient(45deg,#ffd700,#ff8c00);-webkit-background-clip:text;-webkit-text-fill-color:transparent">Parkers Physics</span>
     <div style="font-size:.66rem;color:#667;text-transform:uppercase;letter-spacing:.1em;margin-top:2px">${escHtml(planLabel)}</div>
   </div>
   <div style="background:#12111a;border:1px solid #222;border-radius:12px;padding:20px;margin-bottom:14px">

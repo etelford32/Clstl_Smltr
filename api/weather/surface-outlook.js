@@ -79,7 +79,7 @@ export default async function handler(req) {
         : _partial(vortex, teleco);
 
     return jsonOk({
-        source: 'Parker Physics surface-outlook · vortex × AO/NAO combiner',
+        source: 'Parkers Physics surface-outlook · vortex × AO/NAO combiner',
         as_of:  new Date().toISOString(),
         degraded: !haveBoth,
         degraded_reason: haveBoth ? null

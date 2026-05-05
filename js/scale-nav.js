@@ -1,5 +1,5 @@
 /**
- * scale-nav.js — Cross-scale zoom navigation for Parker Physics App
+ * scale-nav.js — Cross-scale zoom navigation for Parkers Physics App
  *
  * Provides an animated zoom hierarchy breadcrumb that appears in every
  * simulation page's nav bar and enables seamless transitions between

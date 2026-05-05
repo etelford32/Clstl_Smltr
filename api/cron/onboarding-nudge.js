@@ -51,7 +51,7 @@ const RESEND_KEY   = process.env.RESEND_API_KEY || '';
 const FROM_EMAIL   = process.env.WELCOME_FROM_EMAIL
                   || process.env.INVITE_FROM_EMAIL
                   || process.env.ALERT_FROM_EMAIL
-                  || 'Parker Physics <welcome@parkerphysics.com>';
+                  || 'Parkers Physics <welcome@parkerphysics.com>';
 const APP_URL      = process.env.APP_URL || 'https://parkerphysics.com';
 const CRON_SECRET  = process.env.CRON_SECRET || '';
 
@@ -107,7 +107,7 @@ function buildNudgeHtml({ name, plan }) {
 <div style="max-width:560px;margin:0 auto;padding:28px 22px">
 
   <div style="text-align:center;margin-bottom:22px">
-    <span style="font-size:1.05rem;font-weight:800;background:linear-gradient(45deg,#ffd700,#ff8c00);-webkit-background-clip:text;-webkit-text-fill-color:transparent;letter-spacing:.04em">Parker Physics</span>
+    <span style="font-size:1.05rem;font-weight:800;background:linear-gradient(45deg,#ffd700,#ff8c00);-webkit-background-clip:text;-webkit-text-fill-color:transparent;letter-spacing:.04em">Parkers Physics</span>
   </div>
 
   <div style="background:#12111a;border:1px solid #2a2440;border-radius:12px;padding:26px 24px;margin-bottom:18px">
@@ -200,7 +200,7 @@ async function sendNudgeEmail({ to, name, plan }) {
         body: JSON.stringify({
             from:    FROM_EMAIL,
             to,
-            subject: `Finish setting up Parker Physics`,
+            subject: `Finish setting up Parkers Physics`,
             html:    buildNudgeHtml({ name, plan }),
         }),
         signal: AbortSignal.timeout(10_000),

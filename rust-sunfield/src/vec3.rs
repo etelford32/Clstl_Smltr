@@ -22,10 +22,14 @@ impl V3 {
     }
 
     /// Heliographic (lat, lon) on a sphere of radius `r` → Cartesian.
-    /// x axis points toward (lat=0, lon=0); z axis is solar rotation axis.
+    /// Convention matches the consuming Three.js scene (sun.html):
+    ///   • +y axis is the solar rotation axis (polar)
+    ///   • lat=0, lon=0 lies on +z (the sub-Earth point at the central meridian)
+    ///   • +lon increases westward in heliographic convention but here we use
+    ///     a right-handed frame where +lon rotates from +z toward +x.
     #[inline]
     pub fn from_lat_lon(lat: f32, lon: f32, r: f32) -> V3 {
         let cl = lat.cos();
-        V3::new(r * cl * lon.cos(), r * cl * lon.sin(), r * lat.sin())
+        V3::new(r * cl * lon.sin(), r * lat.sin(), r * cl * lon.cos())
     }
 }

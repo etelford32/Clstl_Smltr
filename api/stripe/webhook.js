@@ -34,7 +34,7 @@ const SUPABASE_KEY      = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABA
 // deployment without env vars still notifies the owner.
 const RESEND_API        = 'https://api.resend.com/emails';
 const RESEND_KEY        = process.env.RESEND_API_KEY || '';
-const FROM_EMAIL        = process.env.ALERT_FROM_EMAIL || 'Parker Physics <noreply@parkerphysics.com>';
+const FROM_EMAIL        = process.env.ALERT_FROM_EMAIL || 'Parkers Physics <noreply@parkerphysics.com>';
 const SUB_NOTIFY_EMAIL  = process.env.SUBSCRIPTION_NOTIFY_EMAIL || 'etelford32@gmail.com';
 const APP_URL           = process.env.APP_URL || 'https://parkerphysics.com';
 
@@ -194,10 +194,10 @@ async function notifyOwner({ kind, plan, userId, amountCents, currency, periodEn
                    :            'New subscriber';
     const headlineColor = isCancel ? '#ff8c00' : isTrial ? '#9bff66' : '#4eff91';
     const subject  = isCancel
-        ? `[Parker Physics] Subscription canceled — ${plan || '?'}`
+        ? `[Parkers Physics] Subscription canceled — ${plan || '?'}`
         : isTrial
-        ? `[Parker Physics] Trial started — ${plan || '?'}${trialCode ? ` · ${trialCode}` : ''}`
-        : `[Parker Physics] New subscriber — ${plan || '?'}`;
+        ? `[Parkers Physics] Trial started — ${plan || '?'}${trialCode ? ` · ${trialCode}` : ''}`
+        : `[Parkers Physics] New subscriber — ${plan || '?'}`;
     const amount = (typeof amountCents === 'number' && currency && amountCents > 0)
         ? `${(amountCents / 100).toFixed(2)} ${currency.toUpperCase()}`
         : isTrial ? '$0 (trial)' : '—';

@@ -1,5 +1,5 @@
 /**
- * attribution-badge.js — "Powered by Parker Physics" attribution.
+ * attribution-badge.js — "Powered by Parkers Physics" attribution.
  *
  * Renders a fixed-position badge whenever the signed-in user is on a tier
  * that requires it. Currently only the Educator tier has this requirement
@@ -25,7 +25,7 @@ function _build() {
     a.href = 'https://parkerphysics.com';
     a.target = '_blank';
     a.rel = 'noopener noreferrer';
-    a.textContent = 'Powered by Parker Physics';
+    a.textContent = 'Powered by Parkers Physics';
     a.style.cssText = [
         'position:fixed',
         'right:14px',

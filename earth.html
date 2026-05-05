@@ -9,7 +9,7 @@
 <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Earth View — Parker Physics App</title>
+<title>Earth View — Parkers Physics App</title>
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 html { height:auto; overflow-y:auto; }
@@ -572,10 +572,83 @@ nav {
 /* ─── Weather analysis panel ─────────────────────────────────── */
 #wx-panel {
     position:absolute; bottom:52px; left:10px; z-index:50;
-    background:rgba(0,0,0,.72); backdrop-filter:blur(8px);
-    border:1px solid rgba(0,200,255,.18); border-radius:9px;
-    padding:12px 14px; width:190px; font-size:11px;
+    /* Layered glassy fill — subtle cyan in the top-left fading to a
+       deeper navy elsewhere so the panel reads as a 3D card pulling
+       light from above-left. Matches the storm-watch + featured-row
+       palette so the side-panel family looks like one design system. */
+    background:
+        radial-gradient(120% 90% at 0% 0%, rgba(0,210,255,.10), transparent 55%),
+        linear-gradient(180deg, rgba(6,12,22,.86), rgba(2,4,12,.92));
+    backdrop-filter:blur(12px) saturate(1.15);
+    -webkit-backdrop-filter:blur(12px) saturate(1.15);
+    border:1px solid rgba(0,200,255,.22); border-radius:10px;
+    padding:10px 12px 12px; font-size:11px;
+    /* Default size — width is what users have always seen; min/max give
+       resize handles room without letting the user drag the panel into
+       a useless 1×1 sliver. */
+    width:240px;
+    min-width:200px;
+    max-width:min(420px, calc(100vw - 30px));
+    /* The panel grows up to ~70% of the viewport before scrolling its
+       inner body. Combining max-height + overflow:hidden on the root +
+       overflow:auto on .panel-body gives us "drag to resize, scroll
+       inside the body" instead of the previous "content escapes off
+       screen" behaviour. */
+    max-height:min(70vh, calc(100vh - 80px));
+    /* Native CSS resize. The drag handle appears bottom-right and
+       respects the min/max bounds above. Only enables when the panel
+       isn't minimised — see .panel-minimized override below. */
+    resize:both;
+    overflow:hidden;
+    box-shadow:0 4px 22px rgba(0, 16, 40, .55);
 }
+/* Inner body becomes the scroll container — keeps the header + drag
+   handle + minimise/close pinned while the dense weather content
+   scrolls. The body needs an explicit max-height that's panel-height
+   minus the header to wire the scroll cleanly. */
+#wx-panel .panel-body {
+    max-height:calc(70vh - 56px);
+    overflow-y:auto; overflow-x:hidden;
+    padding-right:4px;          /* breathing room for the scrollbar */
+    /* Smooth-scroll inside the panel for keyboard PgUp/PgDn — feels
+       intentional rather than abrupt. */
+    scroll-behavior:smooth;
+}
+#wx-panel .panel-body::-webkit-scrollbar { width:4px; }
+#wx-panel .panel-body::-webkit-scrollbar-thumb {
+    background:rgba(0,200,255,.30); border-radius:2px;
+}
+#wx-panel .panel-body::-webkit-scrollbar-track { background:transparent; }
+/* Minimised panels shouldn't show the resize handle — body collapses
+   to 0, dragging the corner down would just stretch a header. */
+#wx-panel.panel-minimized {
+    resize:none;
+    max-height:none;
+}
+#wx-panel.panel-minimized .panel-body {
+    max-height:0; padding:0; overflow:hidden;
+}
+/* The native CSS-resize handle is barely visible by default — paint a
+   small tactile diagonal in the corner so users find it. Only shown
+   on hover or when interacting; doesn't compete with the panel's
+   actual content for attention. */
+#wx-panel::after {
+    content:'';
+    position:absolute; right:3px; bottom:3px;
+    width:10px; height:10px;
+    background:
+        linear-gradient(135deg,
+            transparent 0%, transparent 45%,
+            rgba(0,200,255,.45) 45%, rgba(0,200,255,.45) 55%,
+            transparent 55%, transparent 70%,
+            rgba(0,200,255,.30) 70%, rgba(0,200,255,.30) 80%,
+            transparent 80%);
+    pointer-events:none;        /* the underlying CSS resize handle
+                                   does the real work; we just paint */
+    opacity:.5; transition:opacity .15s;
+}
+#wx-panel:hover::after { opacity:.95; }
+#wx-panel.panel-minimized::after { display:none; }
 #wx-panel h3 { color:#00c6ff; font-size:10px; text-transform:uppercase;
     letter-spacing:.8px; margin-bottom:9px; }
 #wx-status-dot { width:7px; height:7px; border-radius:50%; background:#888;
@@ -605,6 +678,40 @@ nav {
 .wx-skill-grid .skill-head span { text-align: right; }
 .wx-skill-grid .skill-ch        { color: #99a; }
 .wx-skill-grid .skill-cell      { text-align: right; color: #aac; }
+
+/* ── Wind-advection learner HUD ─────────────────────────────────
+   Tiny bar chart showing α[h] per-horizon at a glance. Each bar is
+   stacked: the filled portion = α value (0..1). Colour walks
+   amber → cyan as the learner converges from "untrained" toward
+   "physics-trusted." */
+.wx-flow-gain-row {
+    display: grid; grid-template-columns: 36px 1fr;
+    gap: 4px; align-items: center; padding-top: 2px;
+}
+.wx-flow-gain-label { color: #557; font-size: 9px; }
+.wx-flow-gain-bars  {
+    display: grid; grid-template-columns: repeat(5, 1fr);
+    gap: 3px; align-items: end;
+    height: 22px;
+}
+.wx-flow-gain-cell {
+    position: relative; height: 100%;
+    background: rgba(255,255,255,.045);
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 2px;
+    overflow: hidden;
+}
+.wx-flow-gain-fill {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    transition: height .25s ease, background .25s ease;
+}
+.wx-flow-gain-h {
+    /* Horizon label centered at the top of each bar. */
+    position: absolute; top: 0; left: 0; right: 0;
+    text-align: center; font-size: 8px; color: #779;
+    pointer-events: none;
+    letter-spacing: .04em;
+}
 .wx-k { color:#4a6a80; }
 .wx-v { color:#a0d8f0; font-weight:600; }
 
@@ -670,20 +777,47 @@ nav {
 /* ─── Panel minimize / drag chrome ──────────────────────────────── */
 .panel-header {
     display: flex; align-items: center; justify-content: space-between;
-    cursor: pointer; user-select: none; padding-bottom: 2px;
+    cursor: grab; user-select: none;
+    padding: 4px 4px 7px;
+    /* Subtle bottom rule under the header so the grab-handle reads as
+       a separate region from the body. Matches the storm-watch panel
+       chrome that already shipped and creates a cohesive look across
+       every panel in the family. */
+    border-bottom: 1px solid rgba(255,255,255,.06);
+    margin-bottom: 6px;
 }
-.panel-header h3 { margin: 0; flex: 1; }
+.panel-header:active { cursor: grabbing; }
+.panel-header h3 { margin: 0; flex: 1; font-weight: 600; }
 .panel-actions { display: flex; gap: 4px; align-items: center; flex-shrink: 0; }
 .panel-btn {
-    background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.12);
-    border-radius: 4px; color: #6a8a9a; cursor: pointer; font-size: 11px;
-    width: 22px; height: 22px; display: flex; align-items: center;
-    justify-content: center; padding: 0; touch-action: manipulation;
-    transition: background .15s, color .15s; flex-shrink: 0; line-height: 1;
+    /* Slightly larger, slightly more contrast than before — these were
+       hard to hit on touch devices and visually disappeared next to
+       the new dense status content. 24×24 is right at the ergonomic
+       floor for a tap target without crowding the title. */
+    background: rgba(255,255,255,.06);
+    border: 1px solid rgba(255,255,255,.10);
+    border-radius: 5px;
+    color: #7a98a8; cursor: pointer; font-size: 11px;
+    width: 24px; height: 24px;
+    display: flex; align-items: center; justify-content: center;
+    padding: 0; touch-action: manipulation;
+    transition: background .15s, color .15s, border-color .15s, transform .08s;
+    flex-shrink: 0; line-height: 1;
 }
-.panel-btn:hover { background: rgba(0,200,255,.15); color: #00c6ff; }
+.panel-btn:hover {
+    background: rgba(0,200,255,.15); color: #00c6ff;
+    border-color: rgba(0,200,255,.30);
+}
+.panel-btn:active { transform: scale(.92); }
 .panel-body { overflow: hidden; transition: max-height .3s ease, opacity .25s; }
 .panel-minimized .panel-body { max-height: 0 !important; opacity: 0; }
+/* When minimised, drop the border under the header — there's nothing
+   below it, so the line just hangs off the chin. */
+.panel-minimized .panel-header {
+    border-bottom-color: transparent;
+    margin-bottom: 0;
+    padding-bottom: 4px;
+}
 
 /* Data source status badges */
 .ds-badge {
@@ -1465,6 +1599,19 @@ nav {
                     <span class="lyr-status" data-layer="alerts"></span>
                 </label>
 
+                <label class="lyr-featured-row" for="feat-lyr-storm-tracks"
+                       title="5-day kinematic forecast cones for every active tropical cyclone worldwide. Click a card in Storm Watch to focus a single storm's cone. Note: kinematic extrapolation, not NHC's official forecast.">
+                    <input type="checkbox" id="feat-lyr-storm-tracks" data-mirror="lyr-storm-tracks">
+                    <span class="lyr-featured-text">
+                        <span class="lyr-featured-name">
+                            <span class="lyr-featured-icon">🛰️</span>Storm Tracks
+                            <span class="lyr-featured-badge">new</span>
+                        </span>
+                        <span class="lyr-featured-desc">5-day forecast cones for active cyclones</span>
+                    </span>
+                    <span class="lyr-status" data-layer="storm-tracks"></span>
+                </label>
+
                 <label class="lyr-featured-row" for="feat-lyr-earthquakes"
                        title="USGS earthquakes M2.5+ in the past 30 days. Marker size scales with magnitude; pulse rate slows for the largest events.">
                     <input type="checkbox" id="feat-lyr-earthquakes" data-mirror="lyr-earthquakes">
@@ -1505,6 +1652,7 @@ nav {
                 </label>
                 <label class="lyr"><input type="checkbox" id="lyr-isobars" checked><span class="lyr-status" data-layer="isobars" title="waiting"></span><label for="lyr-isobars">Isobars</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-alerts"><span class="lyr-status" data-layer="alerts" title="waiting"></span><label for="lyr-alerts">Storm Alerts</label></label>
+                <label class="lyr" title="5-day kinematic extrapolation cone for every active tropical cyclone. NOT NHC's official forecast — this is a great-circle projection of current motion with NHC's published average track-error radii applied for the cone width. Click a storm card to focus its cone."><input type="checkbox" id="lyr-storm-tracks"><span class="lyr-status" data-layer="storm-tracks" title="waiting"></span><label for="lyr-storm-tracks">Storm Tracks (5-day)</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-earthquakes"><span class="lyr-status" data-layer="earthquakes" title="waiting"></span><label for="lyr-earthquakes">Earthquakes</label></label>
             </div>
             <!-- Atmospheric profile sub-group: derived overlays that share
@@ -1673,6 +1821,16 @@ nav {
         <div class="ir">
             <span class="ik">Aurora Power</span>
             <span class="iv" id="ip-aurora">—</span>
+        </div>
+        <!-- Aurora forecast — blended persistence + AR(3) + Kp-regression
+             prediction at +1/+3/+6/+24 h. Populated by AuroraForecaster
+             once AuroraHistory has accumulated ~12 samples (~1 h of
+             OVATION data). Renders as four small chips so the user can
+             read "next 24 h doubles" at a glance. -->
+        <div class="ir" id="ip-aurora-forecast-row" style="align-items:flex-start;display:none;">
+            <span class="ik" style="padding-top:1px;">Forecast</span>
+            <span id="ip-aurora-forecast" class="iv"
+                  style="display:flex;flex-wrap:wrap;gap:3px;justify-content:flex-end;font-size:9.5px;line-height:1.3;"></span>
         </div>
 
         <!-- (hidden legacy element for JS compat) -->
@@ -1987,6 +2145,26 @@ nav {
             <div id="wx-clim-cov">climatology: warming up…</div>
             <div id="wx-bias-cov">fusion bias: awaiting NASA pairings…</div>
         </div>
+        <!-- Wind-advection learner HUD strip.
+             Two readouts the validator-fed learners produce:
+               1. Current steadiness scalar from WindShearProxy ("how
+                  steady has the wind been the past few hours?"). Drives
+                  the runtime gain modulation.
+               2. Per-horizon learned gain α[h] from AdvectionGainTracker.
+                  Bar chart shows the trust the system has placed in the
+                  semi-Lagrangian step at each horizon, learned from
+                  validator MSE feedback.
+             Both update on storm-watch / forecast-validation events,
+             so a returning visitor sees the prior maturing visually. -->
+        <div id="wx-flow-learner"
+             style="margin-top:6px;font-family:monospace;font-size:9.5px;color:#557;line-height:1.55;"
+             title="What the wind-advection learners have decided. Steadiness reflects current shear (1=calm, 0=turbulent). The bars are per-horizon trust in the physics step (1=full advection, 0=falls back to persistence).">
+            <div id="wx-flow-steadiness">flow steadiness: warming up…</div>
+            <div id="wx-flow-gain-row" class="wx-flow-gain-row" style="display:none;">
+                <span class="wx-flow-gain-label">α[h]</span>
+                <div class="wx-flow-gain-bars" id="wx-flow-gain-bars"></div>
+            </div>
+        </div>
         <hr class="ir-sep">
         <!-- NWS alert summary. The 🔔 Get Alerts CTA is intentionally
              promoted into the Storm Alerts row (instead of being buried
@@ -2201,9 +2379,17 @@ import {
     PrecipAnomalyARForecaster,
     PrecipFusionForecaster,
 } from './js/precip-forecast.js';
+import { AtmosphereClimatology }    from './js/atmosphere-climatology.js';
+import { makeAtmosphereForecasters } from './js/atmosphere-forecast.js';
+import { makeWeatherFlowForecasters } from './js/weather-flow.js';
+import { TracerSkillTracker } from './js/tracer-skill-tracker.js';
+import { WindShearProxy } from './js/wind-shear-proxy.js';
+import { AdvectionGainTracker } from './js/advection-gain-tracker.js';
 import { createWeatherOverlay } from './js/weather-overlay.js';
 import { StormWatchPanel } from './js/storm-watch-panel.js';
-import { makePanelDraggable, resetPanelPosition } from './js/draggable-panel.js';
+import { StormTrackOverlay } from './js/storm-track-overlay.js';
+import { extrapolateStormTrack, interpolateTrackAtHour } from './js/storm-forecast.js';
+import { makePanelDraggable, resetPanelPosition, makePanelResizable, resetPanelSize } from './js/draggable-panel.js';
 import { NWSAlerts, ALERT_COLORS, ALERT_CSS_COLORS, ALERT_PULSE_FREQ, SEVERITY_ORDER, classifyAlertEvent } from './js/nws-alerts.js';
 import { getAlertIconTexture, precomputeAlertIcons } from './js/alert-icons.js';
 import { IsobarLayer, geoWindMs, ISOBAR_LEVELS } from './js/isobar-engine.js';
@@ -2220,6 +2406,8 @@ import {
     fieldAlignedCurrent, substormIndex, cmeTransitTime,
 } from './js/solar-wind-magnetosphere.js';
 import { SolarWeatherHistory, seedSyntheticHistory } from './js/solar-weather-history.js';
+import { AuroraHistory } from './js/aurora-history.js';
+import { forecastAurora as predictAurora, AURORA_HORIZONS_H } from './js/aurora-forecast.js';
 import { SolarWeatherForecaster } from './js/solar-weather-forecast.js';
 import { SatelliteFeed } from './js/satellite-feed.js';
 import { EarthObsFeed, EARTH_OBS_LAYERS } from './js/earth-obs-feed.js';
@@ -2770,6 +2958,43 @@ window.addEventListener('storm-update', e => {
     _updateLayerTooltips();
 });
 
+// ── Storm tracks: 5-day kinematic forecast cones for every active storm ──
+// Uses the same storm-update event the cloud shader is already
+// consuming. The overlay rebuilds tracks each tick; frequency is fine
+// because the NHC feed only refreshes every ~30 minutes and the
+// triangle counts are tiny (≤ 8 storms × ~150 verts each).
+//
+// The cone is a *kinematic extrapolation* (storm-forecast.js), not the
+// official NHC 5-day forecast. UI labelling makes that distinction
+// explicit so users don't mistake it for an evacuation product.
+const stormTrackOverlay = new StormTrackOverlay({
+    THREE,
+    earthMesh,
+    geoToXYZ,
+    extrapolate: extrapolateStormTrack,
+    interpolateAtHour: interpolateTrackAtHour,
+}).start();
+window._stormTrackOverlay = stormTrackOverlay;   // dev console handle
+
+// Forecast-time scrubber → overlay scrubber dots. The Storm Watch
+// panel owns the slider; both surfaces update on the storm-scrub-change
+// window event. Auto-enabling the layer on first non-zero scrub gives
+// new users an immediate "the dot moved on the globe" feedback that
+// makes the scrubber's purpose obvious without needing a tutorial.
+let _stormScrubHasAutoEnabled = false;
+window.addEventListener('storm-scrub-change', (ev) => {
+    const hours = ev?.detail?.hours ?? 0;
+    stormTrackOverlay.setScrubHours(hours);
+    if (hours > 0 && !_stormScrubHasAutoEnabled && !stormTrackOverlay.isVisible()) {
+        const t = document.getElementById('lyr-storm-tracks');
+        if (t && !t.checked) {
+            t.checked = true;
+            t.dispatchEvent(new Event('change'));
+        }
+        _stormScrubHasAutoEnabled = true;
+    }
+});
+
 // ═══════════════════════════════════════════════════════════════
 //  MOUSE → LAT/LON (raycaster)
 // ═══════════════════════════════════════════════════════════════
@@ -2858,9 +3083,97 @@ swFeed.start();
 // Cache last solar wind state for animate() loop
 let _lastSwState = {};
 
+// ── Aurora history + forecaster ─────────────────────────────────────────
+// AuroraHistory persists OVATION hemispheric-power samples across
+// reloads (IDB-backed, 30-day retention). The forecaster blends AR(3)
+// on log1p(power) with a Kp-regression projection driven by SWPC's
+// 3-day Kp forecast. HUD chips paint the +1/+3/+6/+24 h headline.
+//
+// Why this lives at module scope: the history needs to start absorbing
+// samples before any UI renders, so it's created here and the swpc-
+// update handler below ingests on every tick.
+const auroraHistory = new AuroraHistory();
+auroraHistory.open().catch(err => {
+    console.info('[earth] aurora history open failed:', err?.message);
+});
+window._auroraHistory = auroraHistory;   // dev-console handle
+
+// Render the four-chip forecast strip in the SW panel. Hidden until the
+// blended forecaster produces something meaningful (≥ persistence + AR
+// available). One textContent + classList write per chip — no layout
+// thrash even when the SW feed updates mid-sub-second.
+function _paintAuroraForecast() {
+    const row = document.getElementById('ip-aurora-forecast-row');
+    const wrap = document.getElementById('ip-aurora-forecast');
+    if (!row || !wrap) return;
+    // Build a {0,1,3,6,24} → kp lookup from the SWPC 3-day forecast.
+    // Each kp_forecast row carries { time_tag, kp_index, observed }
+    // — we pick the one closest to t_now + horizon.
+    const kpFc = _lastSwState?.kp_forecast ?? [];
+    const tNow = Date.now();
+    const kpAt = { 0: _lastSwState?.kp ?? null };
+    for (const h of [1, 3, 6, 24]) {
+        const target = tNow + h * 3_600_000;
+        let best = null, bestDt = Infinity;
+        for (const r of kpFc) {
+            const t = r.time_tag instanceof Date ? r.time_tag.getTime()
+                    : Date.parse(r.time_tag);
+            if (!Number.isFinite(t)) continue;
+            const dt = Math.abs(t - target);
+            if (dt < bestDt) { bestDt = dt; best = r; }
+        }
+        kpAt[h] = best ? (best.kp_index ?? best.kp ?? null) : kpAt[0];
+    }
+    const bzNow = _lastSwState?.solar_wind?.bz ?? 0;
+    const bzAt  = { 0: bzNow, 1: bzNow, 3: bzNow, 6: bzNow, 24: bzNow };
+
+    const fc = predictAurora({
+        history: auroraHistory,
+        kpForecast: kpAt,
+        bzForecast: bzAt,
+    });
+    if (!fc) { row.style.display = 'none'; return; }
+
+    row.style.display = 'flex';
+    const chips = [];
+    for (const h of AURORA_HORIZONS_H) {
+        const f = fc.frames[h];
+        if (!f || (f.north_gw == null && f.south_gw == null)) continue;
+        const n = f.north_gw != null ? Math.round(f.north_gw) : '—';
+        // Colour the chip by north-hemi predicted intensity — matches
+        // the activity buckets in api/noaa/aurora.js.
+        let bg = 'rgba(80,120,200,.15)', fg = '#9bd';
+        if (f.north_gw >= 100)      { bg = 'rgba(255,80,120,.20)'; fg = '#ff7090'; }
+        else if (f.north_gw >= 50)  { bg = 'rgba(255,160,80,.18)'; fg = '#ffb070'; }
+        else if (f.north_gw >= 20)  { bg = 'rgba(180,220,80,.18)'; fg = '#cfdf60'; }
+        else if (f.north_gw >= 5)   { bg = 'rgba(120,200,160,.18)'; fg = '#88dab0'; }
+        chips.push(
+            `<span title="+${h}h: N≈${n} GW · S≈${f.south_gw != null ? Math.round(f.south_gw) : '—'} GW"
+                   style="padding:2px 6px;border-radius:4px;background:${bg};color:${fg};font-variant-numeric:tabular-nums;">
+                +${h}h ${n}<small style="opacity:.65;">GW</small>
+             </span>`
+        );
+    }
+    wrap.innerHTML = chips.join('');
+}
+
 window.addEventListener('swpc-update', e => {
     const sw = e.detail;           // e.detail IS the full state
     _lastSwState = sw;
+    // Ingest into AuroraHistory FIRST so the forecaster painter at the
+    // bottom of this handler sees the freshest sample. The bin key is
+    // 5-minute-rounded so a swpc burst of multiple updates inside a
+    // single OVATION cadence collapses to one row in IDB.
+    if (Number.isFinite(sw.aurora_power_north) || Number.isFinite(sw.aurora_power_south)) {
+        auroraHistory.ingest({
+            t:              Date.now(),
+            north_gw:       sw.aurora_power_north,
+            south_gw:       sw.aurora_power_south,
+            kp:             sw.kp,
+            bz:             sw.solar_wind?.bz,
+            forecastTimeMs: sw.aurora_forecast_ms,
+        });
+    }
     const d  = sw.derived ?? {};
     const kp = sw.kp ?? 0;
     const storm = Math.min(5, Math.floor(kp / 1.67));
@@ -3019,6 +3332,12 @@ window.addEventListener('swpc-update', e => {
     // ── Aurora visibility for user's location
     updateUserAuroraVis(kp);
 
+    // ── Aurora forecast strip (4 chips: +1h, +3h, +6h, +24h).
+    // Paints AFTER the history ingest at the top of this handler so the
+    // forecaster runs on the freshest sample. Cheap: ≤8 K samples × O(N)
+    // OLS, well under one frame on mobile.
+    _paintAuroraForecast();
+
     // ── Magnetosphere geometry: driven by SunEarthCoupling (lag-corrected)
     // SunEarthCoupling.start() listens to 'swpc-update' and calls
     // magnetosphere.update() with the L1-propagation-delay-corrected state.
@@ -3106,6 +3425,37 @@ document.getElementById('lyr-wind').addEventListener('change', e => {
     wireOverlay('lyr-precip-rate', 'precip-rate');
     wireOverlay('lyr-mist',        'mist');
 }
+
+// Storm Tracks — 5-day kinematic forecast cones. The overlay rebuilds
+// itself off the storm-update event regardless of visibility (it's
+// cheap, ~150 verts × ≤8 storms), so toggling on/off is just a flip
+// of the parent group's visible flag.
+document.getElementById('lyr-storm-tracks')?.addEventListener('change', e => {
+    stormTrackOverlay.setVisible(e.target.checked);
+    // When toggling OFF, also clear any pinned highlight so re-toggling
+    // ON later doesn't surprise the user with a focus from last session.
+    if (!e.target.checked) stormTrackOverlay.setHighlightedStormId(null);
+});
+
+// Status pip for the storm-tracks layer — listens to storm-update so
+// the user gets the same green/grey/red feedback as every other feed.
+window.addEventListener('storm-update', (ev) => {
+    const status = ev?.detail?.status;
+    const count  = (ev?.detail?.storms ?? []).length;
+    const state =
+        status === 'live'    ? 'loaded'   :
+        status === 'offline' ? 'error'    :
+                               'fetching';
+    const title =
+        state === 'loaded' ? `${count} active storm${count === 1 ? '' : 's'} · NHC`
+        : state === 'error' ? 'NHC feed unreachable'
+        :                     'awaiting NHC update';
+    document.querySelectorAll('.lyr-status[data-layer="storm-tracks"]').forEach(pip => {
+        pip.classList.remove('st-idle', 'st-fetching', 'st-loaded', 'st-error');
+        pip.classList.add(`st-${state}`);
+        pip.title = title;
+    });
+});
 
 // ── FEATURED highlights ↔ canonical-toggle sync ───────────────────────────
 // Each row in the Featured section carries `data-mirror="lyr-..."`
@@ -4362,6 +4712,100 @@ wxForecastRegistry.register(new PrecipFusionForecaster({
     biasTracker: precipBiasTracker,
 }));
 
+// ── Advective nowcasting (Phase 3 of WEATHER_FORECAST_PLAN.md) ──────────
+// Two more forecasters competing on the same Murphy-skill leaderboard:
+//   wind-advection-v1 — semi-Lagrangian transport using stored U/V.
+//                       Strong for moving fronts where AR/persistence
+//                       lose by definition (no spatial awareness).
+//   optical-flow-v1   — Lucas-Kanade on a *learned-weight* tracer
+//                       blend of the cloud channels, then semi-
+//                       Lagrangian with the LK velocity. The
+//                       TracerSkillTracker harvests per-channel MSE
+//                       from the validator and re-weights mid+high
+//                       cloud higher than low (where the steering
+//                       flow lives), adapting based on which channels
+//                       LK has historically predicted accurately.
+// Both produce full 9-channel CHW frames so the validator scores them
+// per-channel exactly like persistence.
+const opticalFlowSkillTracker = new TracerSkillTracker({
+    modelId:  'optical-flow-v1',
+    channels: [5, 6, 7],   // cloud_low / cloud_mid / cloud_high (CHW indices)
+    horizonH: 3,           // LK-relevant short horizon; longer horizons
+                           // start being dominated by AR / climatology
+                           // in the registry, not LK itself.
+    priorWeights: [0.20, 0.45, 0.35],
+});
+// Wind-advection gain learner: per-horizon scalar α[h] ∈ [0, 1] that
+// fades the semi-Lagrangian step toward persistence at horizons where
+// the steady-flow assumption breaks. Modulated at runtime by a shear
+// proxy ("how steady has the wind been the past few hours?").
+const advectionGainTracker = new AdvectionGainTracker({
+    modelId:  'wind-advection-v1',
+    horizons: FORECAST_HORIZONS_H,
+    referenceModel: 'persistence-v1',
+});
+const windShearProxy = new WindShearProxy();
+for (const F of makeWeatherFlowForecasters({
+    skillTracker: opticalFlowSkillTracker,
+    gainTracker:  advectionGainTracker,
+    shearProxy:   windShearProxy,
+})) {
+    wxForecastRegistry.register(F);
+}
+// Dev-console handles for tweaking + inspection.
+window._opticalFlowSkillTracker = opticalFlowSkillTracker;
+window._advectionGainTracker    = advectionGainTracker;
+window._windShearProxy          = windShearProxy;
+
+// ── Cloud + wind forecasters ─────────────────────────────────────────────
+// Same trio (Climatology / AnomalyPersistence / AnomalyAR) as precip,
+// generalised through the AtmosphereClimatology + makeAtmosphereForecasters
+// factory. Each set has its own IDB store so the priors don't crowd
+// each other's schema and we can evolve them independently. Channel
+// indices match weather-history.js's CHW layout:
+//   wind   = U(3) + V(4)   — signed, non-clamped
+//   clouds = low(5) + mid(6) + high(7)  — bounded [0,1], clamped ≥ 0
+const cloudClimatology = new AtmosphereClimatology({
+    channels: [5, 6, 7],
+    dbName:   'cloud_clim_v1',
+});
+const windClimatology = new AtmosphereClimatology({
+    channels: [3, 4],
+    dbName:   'wind_clim_v1',
+});
+
+// Open both stores in parallel; once ready, backfill from the live
+// history ring so the priors get a head start from anything already
+// warmed up. Subscribe to live ingests for the rest of the session.
+Promise.all([cloudClimatology.open(), windClimatology.open()])
+    .then(() => {
+        const seed = (frame) => {
+            cloudClimatology.ingest(frame);
+            windClimatology.ingest(frame);
+        };
+        for (const fr of wxGridHistory.all()) seed(fr);
+        document.addEventListener('weather-history-ingest', (ev) => {
+            const f = ev?.detail?.frame;
+            if (f) seed(f);
+        });
+        // Now that the stores are open, register the six forecasters
+        // (3 cloud + 3 wind). The validator picks them up automatically
+        // via the existing weather-forecast-update event subscription.
+        for (const F of makeAtmosphereForecasters({
+            climatology: cloudClimatology, idPrefix: 'cloud', clampNeg: true,
+        })) wxForecastRegistry.register(F);
+        for (const F of makeAtmosphereForecasters({
+            climatology: windClimatology, idPrefix: 'wind', clampNeg: false,
+        })) wxForecastRegistry.register(F);
+        // Re-run the registry now that the new forecasters are
+        // registered — without this kick the cloud/wind models would
+        // miss the next ingest cycle (~1 hour) before producing output.
+        if (wxGridHistory.size > 0) wxForecastRegistry.runAll();
+    })
+    .catch(err => {
+        console.info('[earth] cloud/wind climatology open failed:', err?.message);
+    });
+
 // Flush climatology + bias to disk on tab hide so a refresh doesn't lose
 // the last batch of in-memory updates. visibilitychange fires on
 // backgrounding, reload, and close; cheap insurance against losing
@@ -4370,6 +4814,8 @@ document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
         precipClimatology.flushNow();
         precipBiasTracker.flushNow();
+        cloudClimatology.flushNow();
+        windClimatology.flushNow();
     }
 });
 
@@ -4458,6 +4904,53 @@ function _paintForecastSkill(summary) {
         }
     }
 
+    // Flow-based forecasters (advection-driven). These shine on
+    // moving fields (T, U, V, RH advected by wind / cloud-feature
+    // motion); we average their Murphy skill across those four
+    // channels per horizon so the user sees one number per cell. We
+    // skip channel-by-channel breakouts here — that level of detail
+    // belongs in a power-user table, not the SW panel headline.
+    const FLOW_MODELS = [
+        { id: 'wind-advection-v1', short: 'wind-adv' },
+        { id: 'optical-flow-v1',  short: 'opt-flow' },
+    ].filter(m => summary[m.id]);   // hide rows for unregistered/cold models
+    if (FLOW_MODELS.length > 0) {
+        html += '<div class="skill-row skill-head" style="margin-top:6px;"><span>flow</span>';
+        for (const h of FORECAST_HORIZONS_H) html += `<span>${h}h</span>`;
+        html += '</div>';
+        for (const { id, short } of FLOW_MODELS) {
+            html += `<div class="skill-row"><span class="skill-ch" title="${id}">${short}</span>`;
+            for (const h of FORECAST_HORIZONS_H) {
+                // Average MSE of model and persistence across VISIBLE_CHANNELS,
+                // gated on every channel having ≥5 matched targets so we
+                // don't paint a meaningless headline number while the
+                // model is still warming up.
+                let mseM = 0, mseR = 0, nMin = Infinity;
+                let valid = true;
+                for (const ch of VISIBLE_CHANNELS) {
+                    const m = summary[id]?.[ch]?.[h];
+                    const r = summary['persistence-v1']?.[ch]?.[h];
+                    if (!m || !r || !Number.isFinite(m.mse) || !Number.isFinite(r.mse) || r.mse <= 0) {
+                        valid = false; break;
+                    }
+                    mseM += m.mse; mseR += r.mse;
+                    nMin = Math.min(nMin, m.n | 0, r.n | 0);
+                }
+                let cell = '—';
+                let title = `model=${id} h=${h}h`;
+                if (valid && nMin >= 5) {
+                    const skill = 1 - (mseM / mseR);
+                    cell = (skill * 100).toFixed(0) + '%';
+                    title += ` n=${nMin} avg-skill=${skill.toFixed(2)} (T+U+V+RH)`;
+                } else {
+                    title += ` n=${Number.isFinite(nMin) ? nMin : 0}`;
+                }
+                html += `<span class="skill-cell" title="${title}">${cell}</span>`;
+            }
+            html += '</div>';
+        }
+    }
+
     root.innerHTML = html;
 }
 document.addEventListener('weather-forecast-validation-update', (ev) => {
@@ -4514,6 +5007,101 @@ document.addEventListener('weather-forecast-validation-update', _paintPrecipCove
 // Defer one tick so PrecipClimatology.open()'s async backfill has a
 // chance to complete before we sample coverage.
 setTimeout(_paintPrecipCoverage, 500);
+
+// ── Wind-advection learner HUD ────────────────────────────────────────────
+// Paints two diagnostics for the gain + shear learners introduced in
+// the last commit:
+//   1. Current steadiness scalar (how steady the wind has been the past
+//      ~6 h) — drives the runtime gain modulation.
+//   2. Per-horizon learned α[h] (how trustworthy the system thinks
+//      each horizon's advection step is, given the validator's MSE
+//      feedback so far).
+//
+// Bars are stacked vertically: filled portion = α value (0..1).
+// Colour walks amber (low trust) → cyan (high trust) as the learner
+// converges. Hover any bar for the exact number + sample count.
+function _paintFlowLearner() {
+    const stEl = document.getElementById('wx-flow-steadiness');
+    const row  = document.getElementById('wx-flow-gain-row');
+    const bars = document.getElementById('wx-flow-gain-bars');
+    if (!stEl || !row || !bars) return;
+
+    // Steadiness — refresh from the proxy (passing the live history
+    // ring so the scalar reflects current conditions, not whatever
+    // the last forecast cycle computed). Cheap; one cos(lat)-weighted
+    // pass over ≤6 frames × 2 channels × 2592 cells.
+    const steadiness = windShearProxy.refresh(wxGridHistory);
+    const sd = windShearProxy.diagnostics();
+    if (sd.n_frames < 2) {
+        stEl.textContent = 'flow steadiness: warming up…';
+        stEl.style.color = '#557';
+    } else {
+        // Three buckets: turbulent (red), mixed (amber), steady (cyan).
+        // Thresholds match the AdvectionGainTracker's skill→target ramps
+        // so the colour story tracks the learner's behaviour.
+        const colour = steadiness > 0.65 ? '#7adcc8'
+                     : steadiness > 0.35 ? '#d8c060'
+                     :                     '#d87a60';
+        stEl.innerHTML =
+            `flow steadiness: <span style="color:${colour}">${steadiness.toFixed(2)}</span>` +
+            ` <span style="opacity:.6">(shear ${sd.shear_ms.toFixed(1)} m/s, ${sd.n_frames} frames)</span>`;
+        stEl.style.color = '#779';
+    }
+
+    // Per-horizon gain bars. The tracker hands us a {horizon: gain}
+    // map; we render a fixed [1, 3, 6, 12, 24] order so the bar
+    // positions are stable as the user watches the learner converge.
+    const gains = advectionGainTracker.getAllGains();
+    const horizons = FORECAST_HORIZONS_H;
+    const sampleCount = advectionGainTracker.sampleCount;
+    if (sampleCount === 0 && horizons.every(h => Math.abs(gains[h] - 1) < 1e-3)) {
+        // Cold start — every gain is at the prior 1.0. Hide the bars
+        // until the learner has any evidence; rendering five identical
+        // full bars is meaningless visual noise.
+        row.style.display = 'none';
+        return;
+    }
+    row.style.display = 'grid';
+
+    let html = '';
+    for (const h of horizons) {
+        const g = Math.max(0, Math.min(1, gains[h] ?? 1));
+        const heightPct = (g * 100).toFixed(1);
+        // Amber → cyan ramp. Below 0.35 = amber, above 0.65 = cyan,
+        // linear blend in between. Mirrors the steadiness colour rule
+        // so a "trust the physics" bar reads in the same hue family
+        // as a "wind has been steady" readout.
+        const amber = [216, 192, 96];
+        const cyan  = [122, 220, 200];
+        const t = Math.max(0, Math.min(1, (g - 0.35) / 0.30));
+        const r = Math.round(amber[0] + (cyan[0] - amber[0]) * t);
+        const gC = Math.round(amber[1] + (cyan[1] - amber[1]) * t);
+        const b = Math.round(amber[2] + (cyan[2] - amber[2]) * t);
+        const fill = `rgb(${r},${gC},${b})`;
+        const title = `+${h}h  α_learned=${g.toFixed(2)}  ` +
+                      `α_eff=${(g * (Number.isFinite(steadiness) ? steadiness : 1)).toFixed(2)}  ` +
+                      `(${sampleCount} validator updates)`;
+        html += `
+            <div class="wx-flow-gain-cell" title="${title}">
+                <div class="wx-flow-gain-fill" style="height:${heightPct}%;background:${fill}"></div>
+                <div class="wx-flow-gain-h">${h}h</div>
+            </div>`;
+    }
+    bars.innerHTML = html;
+}
+
+// Steadiness moves on every new history frame (it integrates the past
+// 6 h of (U, V) variance); learned α moves on every validator-update
+// (one per cron cycle). Subscribing to both gives the user-visible
+// diagnostic the most-natural cadence — a fresh frame nudges the
+// runtime modulator, a fresh validation cycle nudges the learned
+// trust.
+document.addEventListener('weather-history-ingest', _paintFlowLearner);
+document.addEventListener('advection-gain-update',  _paintFlowLearner);
+document.addEventListener('weather-forecast-validation-update', _paintFlowLearner);
+// Initial paint — the gain tracker may have a non-trivial state from
+// localStorage. Defer one tick so the constructor's load completes.
+setTimeout(_paintFlowLearner, 500);
 
 // ═══════════════════════════════════════════════════════════════
 //  SATELLITE FEED — NASA GIBS GOES-16 + MODIS cloud imagery
@@ -4889,24 +5477,76 @@ setTimeout(() => {
     });
 }, 10000);
 
+// Status palette for the NASA observation rows. Each status maps to a
+// dot colour + label so the user can read "this layer's pipeline is
+// healthy / off / errored" at a glance instead of decoding a "—".
+const _OBS_STATE_PALETTE = {
+    live:     { dot: '#4fc97f', label: 'live' },     // green — fresh data on screen
+    fetching: { dot: '#ffaa22', label: 'fetching' }, // amber — request in flight
+    idle:     { dot: '#556',    label: 'off'      }, // grey — never polled (toggle off)
+    error:    { dot: '#ff4444', label: 'error'    }, // red — last fetch failed
+};
+
 function _updateObsStatusPanel(meta) {
     const el = document.getElementById('obs-status-list');
     if (!el) return;
 
+    // Two buckets: layers that have actually been polled (status != idle
+    // OR have a stored updated timestamp) get a full row; layers that
+    // are off get summarised as a single "N more available — toggle
+    // to enable" line. This stops the panel from filling with "—"
+    // entries that look broken when the pipeline is fine.
     const entries = Object.entries(meta);
     if (entries.length === 0) {
         el.innerHTML = '<span style="color:#445">No layers active</span>';
         return;
     }
+    const active = [];
+    const idle   = [];
+    for (const [id, m] of entries) {
+        // "Active" = anything that's not strictly the cold idle state.
+        // A layer that errored on its first poll still counts as active
+        // (the user toggled it; the pipeline tried; the row should
+        // reflect that, errors and all).
+        if (m.status === 'idle' && !m.updated) idle.push([id, m]);
+        else                                   active.push([id, m]);
+    }
 
-    el.innerHTML = entries.map(([id, m]) => {
-        const dot = m.status === 'live'
-            ? '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#4fc97f;margin-right:4px"></span>'
-            : '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#ff4444;margin-right:4px"></span>';
-        const ago = m.updated ? _timeAgo(m.updated) : '—';
-        const layer = m.layer;
-        return `<div style="margin-bottom:3px" title="${layer?.description ?? ''}\nLatency: ${layer?.latency ?? '?'}\nUnit: ${layer?.unit ?? '?'}\nColor: ${layer?.colorRamp ?? '?'}">${dot}<strong>${layer?.name ?? id}</strong> <span style="color:#556">· ${ago} · ${layer?.latency ?? ''}</span></div>`;
-    }).join('');
+    let html = '';
+    if (active.length) {
+        html += active.map(([id, m]) => {
+            const palette = _OBS_STATE_PALETTE[m.status] ?? _OBS_STATE_PALETTE.idle;
+            const ago = m.updated ? _timeAgo(m.updated) : palette.label;
+            const layer = m.layer;
+            const subtitle = m.status === 'error'
+                ? (m.error ?? 'fetch failed')
+                : (layer?.latency ?? '');
+            return `<div style="margin-bottom:3px"
+                title="${layer?.description ?? ''}\nLatency: ${layer?.latency ?? '?'}\nUnit: ${layer?.unit ?? '?'}\nColor: ${layer?.colorRamp ?? '?'}">
+                <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${palette.dot};margin-right:4px"></span>
+                <strong>${layer?.name ?? id}</strong>
+                <span style="color:#556">· ${ago} · ${subtitle}</span>
+            </div>`;
+        }).join('');
+    }
+    if (idle.length) {
+        // Idle row — collapsed summary so users see "what else is in
+        // here" without each layer pretending to be a broken active
+        // row. The list is pulled from the layer.name field for
+        // readability.
+        const names = idle.map(([_id, m]) => m.layer?.name ?? _id).join(', ');
+        html += `<div style="margin-top:6px;padding-top:5px;border-top:1px dashed rgba(255,255,255,.06);
+                     color:#556;font-size:9.5px;line-height:1.45;"
+                title="Toggle these layers in the Layers panel to start polling them.">
+                <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#556;margin-right:4px;opacity:.6"></span>
+                ${idle.length} more available
+                <span style="opacity:.7"> — ${names}</span>
+            </div>`;
+    }
+    if (!html) {
+        html = '<span style="color:#445">No layers active</span>';
+    }
+    el.innerHTML = html;
 }
 
 window.addEventListener('satellite-update', e => {
@@ -8059,6 +8699,27 @@ _backdrop.addEventListener('click', _closeMobilePanel);
     // change-event dispatch on first render to align mesh visibility
     // with their default-unchecked state.
     'lyr-humidity', 'lyr-precip-rate', 'lyr-mist',
+    // Storm-tracks layer (5-day kinematic forecast cones). Default off
+    // — the cones can clutter the globe at small zoom levels.
+    'lyr-storm-tracks',
+    // Magnetosphere meshes — MagnetosphereEngine constructor sets every
+    // _layers flag to true (the default for stand-alone use of the
+    // engine), but on the Earth page we want them all hidden until the
+    // user opts in. The synthetic dispatch reconciles the engine's
+    // optimistic default with the HTML's "all unchecked" default.
+    // Without this entry the bug user-reported on the toggles shows
+    // up: clicking the checkbox to "on" actually hides the already-
+    // visible mesh (state inverted), and second click re-shows it
+    // — the perception is "the toggle is broken on first try."
+    'lyr-magnetopause', 'lyr-bowshock', 'lyr-magnetosheath',
+    'lyr-reconnection', 'lyr-cusps', 'lyr-belts', 'lyr-plasma',
+    // Exosphere / geocorona / charge-exchange — same story: the engine
+    // initialises each shell visible; the HTML defaults them off. Sync
+    // here.
+    'lyr-exosphere', 'lyr-geocorona', 'lyr-chex',
+    // CME shockfront — handled by its own ?.addEventListener so missing
+    // checkbox would silently skip; safe to include.
+    'lyr-cme',
 ].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.dispatchEvent(new Event('change'));
@@ -8093,6 +8754,21 @@ document.addEventListener('click', e => {
 // change what the globe paints.
 const stormWatchPanel = new StormWatchPanel({
     onStormClick: (lat, lon) => flyToLatLon(lat, lon),
+    // Hover or click on a card focuses the matching cone — but only
+    // when the Storm Tracks overlay is visible (toggled via lyr-storm
+    // -tracks). Auto-enable the overlay when the user pins a storm by
+    // click so newcomers immediately see the cone the panel just
+    // pointed at; hover alone doesn't toggle visibility.
+    onStormFocus: (id, _storm) => {
+        stormTrackOverlay.setHighlightedStormId(id);
+        if (id && !stormTrackOverlay.isVisible()) {
+            const t = document.getElementById('lyr-storm-tracks');
+            if (t && !t.checked) {
+                t.checked = true;
+                t.dispatchEvent(new Event('change'));
+            }
+        }
+    },
 });
 stormWatchPanel.mount();
 window._stormWatchPanel = stormWatchPanel;   // dev console handle
@@ -8129,16 +8805,28 @@ window._stormWatchPanel = stormWatchPanel;   // dev console handle
     if (panel) makePanelDraggable(panel);
 });
 
-// Convenience: double-clicking a panel header resets its position to
-// CSS default. A "reset layout" button could call this too — for now
-// the gesture is enough of an escape hatch if the user drags a panel
-// somewhere awkward and wants it back where it started.
+// Resize persistence — only the wx-panel currently advertises CSS
+// `resize:both` because it's the densest panel and the one users
+// reported as "needing to be bigger." Adding more panels here is a
+// CSS edit (resize:both + min/max) plus another id in this list.
+['wx-panel'].forEach(id => {
+    const panel = document.getElementById(id);
+    if (panel) makePanelResizable(panel);
+});
+
+// Convenience: double-clicking a panel header resets BOTH position and
+// size to their CSS defaults. The single gesture is intentional —
+// users who drag a panel into a corner OR resize it to something
+// useless want one undo, not two. resetPanelSize is a no-op for
+// panels without resize wired.
 document.querySelectorAll('.panel-header').forEach(hdr => {
     hdr.addEventListener('dblclick', (ev) => {
         // Don't reset when the user double-clicks a button inside the header.
         if (ev.target.closest('.panel-btn')) return;
         const panel = hdr.parentElement;
-        if (panel) resetPanelPosition(panel);
+        if (!panel) return;
+        resetPanelPosition(panel);
+        resetPanelSize(panel);
     });
 });
 

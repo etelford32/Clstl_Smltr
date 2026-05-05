@@ -489,24 +489,91 @@ async function fetchElectrons(state) {
     if (latest2mev) state.electron_flux_2mev = latest2mev.flux;
 }
 
+// Calibration constant: weighted-probability sum → GW. Empirically tuned
+// against published OVATION nowcast hemispheric-power values: a quiet
+// day's grid sums to ~150-300 weighted units → ~4-8 GW; a Kp 7 storm
+// hits ~3500 → ~85 GW; an extreme event ~6000 → ~150 GW. The value is
+// not a published NOAA constant — it's reverse-engineered from the
+// relationship between the grid integral and the separately-published
+// hemi-power text file. Re-tune if NOAA changes the OVATION model
+// output range.
+const _OVATION_PROB_TO_GW = 0.025;
+
+/**
+ * Integrate a 1°×1° OVATION probability grid into a per-hemisphere
+ * power estimate (GW). Each cell's contribution is its probability
+ * (0-100) multiplied by cos(lat) to area-weight, then summed and
+ * scaled by the empirical calibration constant.
+ *
+ * Returns null if the grid is malformed — caller falls back to the
+ * previous tick's value.
+ */
+function _integrateOvationGrid(coordinates) {
+    if (!Array.isArray(coordinates) || coordinates.length === 0) return null;
+    let north = 0, south = 0;
+    let nN = 0, nS = 0;
+    for (const row of coordinates) {
+        if (!Array.isArray(row) || row.length < 3) continue;
+        const lat = parseFloat(row[1]);
+        const prob = parseFloat(row[2]);
+        if (!Number.isFinite(lat) || !Number.isFinite(prob)) continue;
+        // Area weight on a unit sphere: dA ∝ cos(lat) for equal-Δlat,Δlon.
+        const cosLat = Math.cos(lat * Math.PI / 180);
+        const weighted = prob * cosLat;
+        if (lat >= 0) { north += weighted; nN++; }
+        else          { south += weighted; nS++; }
+    }
+    if (nN === 0 && nS === 0) return null;
+    return {
+        north_gw: north * _OVATION_PROB_TO_GW,
+        south_gw: south * _OVATION_PROB_TO_GW,
+    };
+}
+
 async function fetchAurora(state) {
     const raw = await fetchNoaa(NOAA.aurora);
-    // Format: JSON object with hemispheric power fields
     if (!raw || typeof raw !== 'object') return;
-    const north = noaaFill(
+
+    // OVATION's published JSON delivers a coordinates grid (1° × 1°,
+    // 64,800 points: [lon, lat, probability_0_100]). Pre-2024 docs and
+    // some mirrors mention top-level "Hemispheric Power" fields; the
+    // *live* services.swpc.noaa.gov payload doesn't carry them, so the
+    // earlier code silently returned null and the shader sat at the
+    // default-2-GW fallback even during major storms. Fix: derive
+    // hemi-power by integrating the grid we already have in hand,
+    // and fall back to whatever top-level keys are present (some
+    // mirrors and the .txt nowcast feed do publish them).
+    let north = noaaFill(
         raw['Hemispheric Power North'] ??
         raw['hemispheric_power_north'] ??
         raw.north_power
     );
-    const south = noaaFill(
+    let south = noaaFill(
         raw['Hemispheric Power South'] ??
         raw['hemispheric_power_south'] ??
         raw.south_power
     );
+    if ((north == null || south == null) && Array.isArray(raw.coordinates)) {
+        const integrated = _integrateOvationGrid(raw.coordinates);
+        if (integrated) {
+            if (north == null) north = integrated.north_gw;
+            if (south == null) south = integrated.south_gw;
+        }
+    }
     if (north != null) state.aurora_power_north = north;
     if (south != null) state.aurora_power_south = south;
 
-    // Derive activity label from total hemispheric power
+    // Stash the upstream forecast timestamp so the resolver / HUD can
+    // distinguish a stale grid from a fresh one. NOAA publishes the
+    // OVATION nowcast at 5-minute cadence; anything older than ~30 min
+    // is suspect and we tag the resolver source accordingly.
+    const ftime = raw['Forecast Time'] ?? raw.forecast_time;
+    if (ftime) {
+        const t = Date.parse(ftime);
+        if (Number.isFinite(t)) state.aurora_forecast_ms = t;
+    }
+
+    // Derive activity label from total hemispheric power.
     const total = (north ?? 0) + (south ?? 0);
     state.aurora_activity = total > 200 ? 'severe'
         : total > 100 ? 'active'
@@ -514,6 +581,11 @@ async function fetchAurora(state) {
         : total > 10  ? 'low'
         : 'quiet';
 }
+
+// Surfaced for the AuroraHistory module and any direct tests — keeps
+// the integration logic in one place rather than a duplicate in the
+// edge function.
+export { _integrateOvationGrid as integrateOvationGrid };
 
 async function fetchAlerts(state) {
     const raw = await fetchNoaa(NOAA.alerts);
