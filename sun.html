@@ -2232,9 +2232,14 @@ const sunFS = /* glsl */`
         vec3  vDir = normalize(vViewDir);
         float mu   = max(dot(nrm, vDir), 0.0);
 
-        // Spherical coordinates
+        // Spherical coordinates. Convention: y is the solar rotation axis,
+        // +z points toward the sub-Earth observer. lon = atan(x, z) so that
+        // a fragment at heliographic (lat, lon) — built via vec3(cos(lat)
+        // sin(lon), sin(lat), cos(lat) cos(lon)) — gives back the same lon.
+        // Comparisons against u_flare_lon (which is set by JS as
+        // heliographic radians) are then correct.
         float lat = asin(clamp(vPosition.y, -1.0, 1.0));
-        float lon = atan(vPosition.z, vPosition.x);
+        float lon = atan(vPosition.x, vPosition.z);
 
         // Differential rotation (Snodgrass 1990): Ω(lat) = A + B sin²(lat) + C sin⁴(lat)
         float sinLat2 = sin(lat) * sin(lat);
@@ -2390,10 +2395,10 @@ const sunFS = /* glsl */`
             // offset N/S from the flare site.
             float rib1, rib2;
             if (u_flare_ribbons_active > 0.5) {
-                // Reconstruct fragment position on the unit sphere from the
-                // (lat, lon) varyings already in scope (matches Three.js
-                // y-up convention used everywhere in this file).
-                vec3 p3 = vec3(cos(lat) * sin(lon), sin(lat), cos(lat) * cos(lon));
+                // Use the world-space fragment position directly — same
+                // coordinate frame as the WASM-derived ribbon polyline,
+                // so the polyline-distance test discriminates correctly.
+                vec3 p3 = normalize(vPosition);
                 float d1 = ribbonDist(p3, 0.0);
                 float d2 = ribbonDist(p3, 1.0);
                 // Width grows with chromospheric evaporation (3D chord
@@ -2603,7 +2608,8 @@ const chromoFS = /* glsl */`
 
         // ── Chromospheric flare brightening (Hα ribbons) ─────────────────────
         float lat_c   = asin(clamp(n3d.y, -1.0, 1.0));
-        float lon_c   = atan(n3d.z, n3d.x);
+        // lon = atan(x, z) so heliographic comparisons with u_flare_lon work.
+        float lon_c   = atan(n3d.x, n3d.z);
         float cos_df  = sin(lat_c)*sin(u_flare_lat) + cos(lat_c)*cos(u_flare_lat)*cos(lon_c - u_flare_lon);
         float df_c    = acos(clamp(cos_df, -1.0, 1.0));
         float chromoFl = exp(-df_c*df_c / 0.075) * exp(-u_flare_t / 90.0) * u_flare_intensity;
@@ -2800,7 +2806,8 @@ const trFS = /* glsl */`
         // X-ray + EUV irradiance spikes within seconds of flare onset,
         // rapidly heating the transition region across the visible disk.
         float lat_t  = asin(clamp(n3d.y, -1.0, 1.0));
-        float lon_t  = atan(n3d.z, n3d.x);
+        // lon = atan(x, z) so heliographic comparisons with u_flare_lon work.
+        float lon_t  = atan(n3d.x, n3d.z);
         float cos_df = sin(lat_t)*sin(u_flare_lat) + cos(lat_t)*cos(u_flare_lat)*cos(lon_t - u_flare_lon);
         float df_t   = acos(clamp(cos_df, -1.0, 1.0));
         // Localized brightening near flare site (fast impulsive phase)
@@ -2889,7 +2896,8 @@ const coronaFS = /* glsl */`
         vec3  vd  = normalize(vViewDir);
         float rim = 1.0 - max(dot(n3d, vd), 0.0);
         float lat = asin(clamp(n3d.y, -1.0, 1.0));
-        float lon = atan(n3d.z, n3d.x) + u_time * 0.0025 * u_rot;
+        // lon = atan(x, z) so heliographic comparisons with u_flare_lon work.
+        float lon = atan(n3d.x, n3d.z) + u_time * 0.0025 * u_rot;
 
         // ── Coronal hole mask ─────────────────────────────────────────────────
         // Polar coronal holes: dark (open B-field, fast wind escapes freely).
@@ -3091,7 +3099,7 @@ const outerGlowFS = /* glsl */`
         float beltAlph = beltW * pow(rim, 2.5) * (0.04 + u_kp_norm * 0.08 + u_activity * 0.05);
 
         // Slow animated streamer tendrils (Parker-spiral phase drift)
-        float lon    = atan(N.z, N.x);
+        float lon    = atan(N.x, N.z);
         float tPhase = u_time * 0.04;
         float tendril = sin(lon * 3.0 + tPhase) * sin(lon * 7.0 - tPhase * 1.7);
         tendril = smoothstep(0.3, 0.9, tendril) * beltW * pow(rim, 3.5)
@@ -3952,7 +3960,14 @@ if (DEBUG_PROMINENCE) {
 // fragment shader. Falls through silently when no atlas / no ribbons —
 // shader keeps using the legacy straight-arc fallback.
 function _refreshFlareRibbons(latRad, lonRad) {
-    if (!_flareRibbonsModule || !_promCachedAtlas) return;
+    if (!_flareRibbonsModule) {
+        console.log('[flare-ribbons] module not loaded yet — legacy ribbons render');
+        return;
+    }
+    if (!_promCachedAtlas) {
+        console.log('[flare-ribbons] no atlas — load with ?debug=prominence and wait for AR feed');
+        return;
+    }
 
     // Find the live AR closest to the flare site (must match meta[2] arIdx).
     let bestArIdx = -1, bestDist = 25 * Math.PI / 180;
@@ -3966,6 +3981,10 @@ function _refreshFlareRibbons(latRad, lonRad) {
         const d = Math.acos(Math.max(-1, Math.min(1, c)));
         if (d < bestDist) { bestDist = d; bestArIdx = i; }
     }
+    if (bestArIdx < 0) {
+        console.log(`[flare-ribbons] no AR within 25° of flare site — legacy ribbons render`);
+        return;
+    }
 
     const n = _flareRibbonsModule.updateRibbonsForAr(_promCachedAtlas, bestArIdx);
     if (n >= 2) {
@@ -3977,6 +3996,7 @@ function _refreshFlareRibbons(latRad, lonRad) {
         console.log(`[flare-ribbons] AR #${bestArIdx} → ${n}-pt polyline ribbons`);
     } else {
         uniforms.u_flare_ribbons_active.value = 0.0;
+        console.log(`[flare-ribbons] AR #${bestArIdx} has no PIL bundles in atlas — legacy ribbons render`);
     }
 
     // Phase 3.2 — light up the HXR footpoint kernels with the same atlas
@@ -4007,7 +4027,13 @@ function _eruptNearestFilament() {
     };
 
     if (!_promCachedAtlas || !prominenceBundleSystem) {
-        status('PIL atlas not ready yet — wait for AR feed.');
+        if (!DEBUG_PROMINENCE) {
+            status('Reload with ?debug=prominence to enable.');
+        } else if (!_promCachedAtlas) {
+            status('PIL atlas not ready — wait for the AR feed.');
+        } else {
+            status('Bundle system not ready — try again.');
+        }
         return;
     }
 

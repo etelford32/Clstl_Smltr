@@ -192,6 +192,49 @@ canvas { display:block; width:100% !important; height:100% !important; }
 }
 #coord-display span { color:#a0d8ff; }
 
+/* ─── Sun-orbit time-control panel (top-left, under HUD) ───── */
+#sun-time-panel {
+    position:absolute; left:14px; top:240px; z-index:100;
+    background:rgba(8,4,16,0.85); border:1px solid rgba(255,200,80,0.30);
+    border-radius:9px; padding:9px 12px 8px;
+    color:#ddd; backdrop-filter:blur(8px); width:262px;
+    font-size:11px; line-height:1.35;
+}
+#sun-time-panel h4 {
+    margin:0 0 6px; font-size:12px; color:#ffcc66;
+    font-weight:600; letter-spacing:.02em;
+}
+.stp-row { display:flex; align-items:center; gap:7px; padding:3px 0; }
+.stp-row .stp-label { color:#999; min-width:42px; font-size:10px; }
+.stp-row .stp-val   { color:#ffcc66; font-weight:600; min-width:78px; font-size:10px;
+                      text-align:right; font-variant-numeric:tabular-nums; }
+.stp-row input[type=range] { flex:1; height:4px; accent-color:#ffaa44; cursor:pointer; }
+.stp-btnrow { display:flex; gap:6px; margin-bottom:5px; }
+.stp-btn {
+    background:rgba(255,200,80,0.12); border:1px solid rgba(255,200,80,0.35);
+    color:#ffcc66; padding:4px 10px; border-radius:5px; cursor:pointer;
+    font-family:inherit; font-size:11px; font-weight:600; transition:all .15s;
+    flex-shrink:0;
+}
+.stp-btn:hover  { background:rgba(255,200,80,0.25); }
+.stp-btn.active { background:rgba(255,200,80,0.45); color:#fff; border-color:#ffd58a; }
+.stp-readout {
+    color:#aaa; font-size:10.5px; padding-top:5px; margin-top:3px;
+    border-top:1px solid rgba(255,255,255,0.08);
+    display:flex; flex-wrap:wrap; column-gap:14px; row-gap:2px;
+}
+.stp-readout .stp-rk { color:#888; }
+.stp-readout span.stp-rv { color:#ffcc66; font-weight:600;
+                           font-variant-numeric:tabular-nums; }
+@media (max-width:1024px) {
+    #sun-time-panel { width:230px; top:auto; bottom:64px;
+                      font-size:10.5px; padding:7px 9px 6px; }
+    #sun-time-panel h4 { font-size:11px; }
+}
+@media (max-width:600px) {
+    #sun-time-panel { display:none; }   /* phone — too cramped, slider-only HUD instead */
+}
+
 /* ─── Sidebar ─────────────────────────────────────────────────── */
 #sidebar {
     width:290px; min-width:290px;
@@ -316,6 +359,33 @@ canvas { display:block; width:100% !important; height:100% !important; }
             </div>
             <div title="Sun's orbital phase around Sgr A* — 0% / 100% places the Sun at the +x side of the disk (current epoch).">
                 <span class="label">Orbital phase: </span><span class="val" id="hud-galactic-phase">—</span>
+            </div>
+        </div>
+
+        <!-- Sun-orbit time controls -->
+        <div id="sun-time-panel"
+             title="Drag the time slider to scrub the Sun's position around Sgr A*. Hit ▶ Live to resume real-time tracking.">
+            <h4>☉ Sun's Orbit — Time Controls</h4>
+            <div class="stp-btnrow">
+                <button id="stp-live"  class="stp-btn active" title="Snap to t = 0 (today) and resume live advance">▶ Live</button>
+                <button id="stp-pause" class="stp-btn"        title="Pause / play simulation">⏸ Pause</button>
+                <button id="stp-reset" class="stp-btn"        title="Reset to today's epoch but stay paused">⟲ Today</button>
+            </div>
+            <div class="stp-row" title="Galactic-year offset from the present epoch (negative = past, positive = future).">
+                <span class="stp-label">Time</span>
+                <input id="stp-scrub" type="range" min="-450" max="450" step="0.1" value="0">
+                <span class="stp-val" id="stp-scrub-val">0 Myr</span>
+            </div>
+            <div class="stp-row" title="Simulation speed — how many Myr of orbital evolution elapse per real second.">
+                <span class="stp-label">Speed</span>
+                <input id="stp-speed" type="range" min="-2" max="2" step="0.05" value="0.574">
+                <span class="stp-val" id="stp-speed-val">3.75 Myr/s</span>
+            </div>
+            <div class="stp-readout">
+                <span><span class="stp-rk">v☉ </span><span class="stp-rv" id="stp-vel">220.0 km/s</span></span>
+                <span><span class="stp-rk">Z </span><span class="stp-rv" id="stp-z">+65 ly</span></span>
+                <span><span class="stp-rk">period </span><span class="stp-rv">225 Myr</span></span>
+                <span><span class="stp-rk">bobble </span><span class="stp-rv">67 Myr</span></span>
             </div>
         </div>
 
@@ -2547,8 +2617,27 @@ const container = document.getElementById('canvas-wrap');
 const W = () => container.clientWidth;
 const H = () => container.clientHeight;
 
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+// ── Mobile / low-power detection ───────────────────────────────────────────
+// Used throughout the file to halve particle counts, skip expensive layers,
+// and clamp pixel ratio. Conservative — anything <800px wide, hardware
+// concurrency <=4, or a touch-only pointer is treated as mobile.
+const isMobile = (() => {
+    const ua = (navigator.userAgent || '').toLowerCase();
+    if (/iphone|ipad|ipod|android|mobile|tablet/.test(ua)) return true;
+    if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches
+        && Math.min(window.innerWidth, window.innerHeight) < 900) return true;
+    if (Math.min(window.innerWidth, window.innerHeight) < 600) return true;
+    return false;
+})();
+const lodScale = isMobile ? 0.45 : 1.0;   // scale particle counts by this
+console.log('[GalacticMap] mobile-mode =', isMobile, ' lodScale =', lodScale);
+
+const renderer = new THREE.WebGLRenderer({
+    antialias: !isMobile,                 // skip MSAA on mobile (big win)
+    alpha: false,
+    powerPreference: 'high-performance',
+});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1.5 : 2));
 renderer.setSize(W(), H());
 renderer.setClearColor(0x000005, 1);
 container.appendChild(renderer.domElement);
@@ -2873,7 +2962,7 @@ function flyToStar(s) {
 //  GALAXY PARTICLE SYSTEM
 // ══════════════════════════════════════════════════════════════════════════
 function buildGalaxy() {
-    const N = 120000;
+    const N = Math.round(120000 * lodScale);
     const positions = new Float32Array(N * 3);
     const colors    = new Float32Array(N * 3);
     const sizes     = new Float32Array(N);
@@ -3084,7 +3173,7 @@ const galaxyDust = (function buildDustLanes() {
     const MAX_WINDING = 13.5;
     const ARM_STARTS  = [0.0, Math.PI/2, Math.PI, 3*Math.PI/2];
     const ORION_OFF   = -(Math.PI + 10.252 - 2*Math.PI);
-    const N = 6500;
+    const N = Math.round(6500 * lodScale);
     const pos = new Float32Array(N * 3);
     const sz  = new Float32Array(N);
     let idx = 0;
@@ -3146,7 +3235,7 @@ const galaxyDust = (function buildDustLanes() {
 //  enveloping the disk (real MW: extends to ~150 kly with declining ρ ∝ r⁻³).
 // ══════════════════════════════════════════════════════════════════════════
 const galaxyHalo = (function buildStellarHalo() {
-    const N = 7000;
+    const N = Math.round(7000 * lodScale);
     const pos = new Float32Array(N * 3);
     const col = new Float32Array(N * 3);
     const sz  = new Float32Array(N);
@@ -3270,55 +3359,6 @@ const galaxyHII = (function buildHIIRegions() {
 })();
 
 // ══════════════════════════════════════════════════════════════════════════
-//  GALACTIC DISK GLOW  — a soft additive emission halo that gives the
-//  Milky Way its "lit-from-within" cinematic appearance at galaxy zoom.
-//  Two perpendicular elliptical sprites (one face-on, one edge-on) that
-//  blend together in 3D regardless of viewing angle.
-// ══════════════════════════════════════════════════════════════════════════
-const mwInnerGlow = (function buildMilkyWayGlow() {
-    function makeDiskGlowSprite(scale, edgeOn) {
-        const C = 256;
-        const cv = document.createElement('canvas');
-        cv.width = cv.height = C;
-        const ctx = cv.getContext('2d');
-        if (edgeOn) {
-            // Edge-on: thin lens silhouette
-            ctx.translate(C/2, C/2);
-            const g = ctx.createRadialGradient(0,0, 6, 0,0, C/2);
-            g.addColorStop(0,    'rgba(255,235,200,0.55)');
-            g.addColorStop(0.10, 'rgba(255,210,150,0.40)');
-            g.addColorStop(0.40, 'rgba(220,150,80,0.18)');
-            g.addColorStop(1,    'rgba(180,80,40,0.0)');
-            ctx.fillStyle = g;
-            ctx.scale(1.0, 0.13);  // squashed → lens shape
-            ctx.beginPath(); ctx.arc(0,0, C/2, 0, Math.PI*2); ctx.fill();
-        } else {
-            // Face-on: soft glow with brighter core
-            ctx.translate(C/2, C/2);
-            const g = ctx.createRadialGradient(0,0, 0, 0,0, C/2);
-            g.addColorStop(0,    'rgba(255,235,190,0.65)');
-            g.addColorStop(0.06, 'rgba(255,210,140,0.42)');
-            g.addColorStop(0.30, 'rgba(220,140,70,0.18)');
-            g.addColorStop(0.65, 'rgba(150,60,30,0.06)');
-            g.addColorStop(1,    'rgba(70,20,10,0.0)');
-            ctx.fillStyle = g;
-            ctx.beginPath(); ctx.arc(0,0, C/2, 0, Math.PI*2); ctx.fill();
-        }
-        const sp = new THREE.Sprite(new THREE.SpriteMaterial({
-            map: new THREE.CanvasTexture(cv), transparent: true,
-            depthWrite: false, blending: THREE.AdditiveBlending,
-        }));
-        sp.scale.setScalar(scale);
-        return sp;
-    }
-    const group = new THREE.Group();
-    const faceOn = makeDiskGlowSprite(110000, false);
-    group.add(faceOn);
-    scene.add(group);
-    return group;
-})();
-
-// ══════════════════════════════════════════════════════════════════════════
 //  GLOBULAR CLUSTERS (halo) — bright pinpricks scattered through the halo.
 //  Real MW: ~150 clusters orbit in the halo, mass 10⁴–10⁶ M☉ each.
 // ══════════════════════════════════════════════════════════════════════════
@@ -3387,41 +3427,75 @@ const fermiBubbles = (function buildFermiBubbles() {
     const group = new THREE.Group();
     const BUBBLE_H   = 25000;   // half-height (ly) — real ~10–12 kpc
     const BUBBLE_W   = 14000;   // half-width
-    const SHELL_LAYERS = [
-        { c: 0x6644aa, op: 0.10 },   // outermost faint violet
-        { c: 0x9966dd, op: 0.16 },   // mid layer
-        { c: 0xccaaff, op: 0.22 },   // bright inner edge
-    ];
-    [+1, -1].forEach(sign => {
-        SHELL_LAYERS.forEach(({ c, op }, i) => {
-            const scale = 1.0 - i * 0.18;
-            const shell = new THREE.Mesh(
-                new THREE.SphereGeometry(BUBBLE_W * scale, 32, 24),
-                new THREE.MeshBasicMaterial({
-                    color: c, transparent: true, opacity: op,
-                    side: THREE.BackSide, depthWrite: false,
-                    blending: THREE.AdditiveBlending,
-                })
-            );
-            // Stretch into an elongated lobe and shift up/down from disk
-            shell.scale.set(1.0, BUBBLE_H * scale / (BUBBLE_W * scale), 1.0);
-            shell.position.y = sign * BUBBLE_H * 0.85;
-            group.add(shell);
+
+    // Render the lobes as VOLUMETRIC POINT CLOUDS shaped into a real hourglass
+    // profile (narrow at GC, wide at the lobe top, tapering to a soft cap).
+    // No more glossy additive shell-spheres — those read as flat purple orbs
+    // when the camera is above/below the disk.
+    {
+        const N = isMobile ? 1400 : 2800;
+        const pos = new Float32Array(N * 3);
+        const col = new Float32Array(N * 3);
+        const sz  = new Float32Array(N);
+        let idx = 0;
+        for (let i = 0; i < N; i++) {
+            const sign = Math.random() < 0.5 ? 1 : -1;
+            // Vertical parameter: 0 at the GC waist, 1 at the lobe tip
+            const u = Math.pow(Math.random(), 0.85);
+            // Hourglass radial profile — narrow waist (3 kly) → wide
+            // shoulder (BUBBLE_W) → soft taper to ~0.55·W at tip.
+            const radial =
+                3000 + (BUBBLE_W - 3000) * Math.sin(u * Math.PI * 0.92);
+            const theta = Math.random() * Math.PI * 2;
+            // Sample slightly inside the surface (~thickness 18%)
+            const t = 0.82 + Math.random() * 0.18;
+            const r = radial * t;
+            pos[idx*3]   = r * Math.cos(theta);
+            pos[idx*3+1] = sign * (1500 + u * (BUBBLE_H - 1500));
+            pos[idx*3+2] = r * Math.sin(theta);
+            // Color: warm violet near the disk → cooler magenta toward tip
+            const tone = 0.4 + 0.6 * (1 - u);
+            col[idx*3]   = (0.55 + 0.30 * (1 - u)) * tone;
+            col[idx*3+1] = (0.30 + 0.10 * (1 - u)) * tone;
+            col[idx*3+2] = (0.85 + 0.10 * u)       * tone;
+            sz[idx]      = 200 + Math.random() * 280;
+            idx++;
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        geo.setAttribute('color',    new THREE.BufferAttribute(col, 3));
+        geo.setAttribute('size',     new THREE.BufferAttribute(sz, 1));
+        const mat = new THREE.ShaderMaterial({
+            vertexColors: true, transparent: true, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            uniforms: { uScale: { value: renderer.getPixelRatio() } },
+            vertexShader: `
+                attribute float size;
+                varying vec3 vCol;
+                uniform float uScale;
+                void main() {
+                    vCol = color;
+                    vec4 mvp = modelViewMatrix * vec4(position, 1.0);
+                    gl_PointSize = size * uScale / -mvp.z;
+                    gl_PointSize = clamp(gl_PointSize, 0.5, 14.0);
+                    gl_Position = projectionMatrix * mvp;
+                }
+            `,
+            fragmentShader: `
+                varying vec3 vCol;
+                void main() {
+                    float d = length(gl_PointCoord - 0.5) * 2.0;
+                    float a = 1.0 - smoothstep(0.0, 1.0, d);
+                    a = pow(a, 1.8);
+                    gl_FragColor = vec4(vCol, a * 0.45);
+                }
+            `,
         });
-        // Bright "bubble cap" at the top/bottom edge
-        const cap = new THREE.Mesh(
-            new THREE.SphereGeometry(BUBBLE_W * 0.55, 24, 18),
-            new THREE.MeshBasicMaterial({
-                color: 0xeeccff, transparent: true, opacity: 0.20,
-                depthWrite: false, blending: THREE.AdditiveBlending,
-            })
-        );
-        cap.position.y = sign * (BUBBLE_H * 1.55);
-        group.add(cap);
-    });
+        group.add(new THREE.Points(geo, mat));
+    }
 
     // Filament wisps along the bubble walls — stochastic vertical streaks
-    const N = 320;
+    const N = isMobile ? 160 : 320;
     const pos = new Float32Array(N * 3);
     const col = new Float32Array(N * 3);
     const sz  = new Float32Array(N);
@@ -3487,7 +3561,7 @@ const fermiBubbles = (function buildFermiBubbles() {
 //  edge-on angle, not just along the existing per-arm dust patches.
 // ══════════════════════════════════════════════════════════════════════════
 const midplaneDust = (function buildMidplaneDust() {
-    const N = 9000;
+    const N = Math.round(9000 * lodScale);
     const pos = new Float32Array(N * 3);
     const sz  = new Float32Array(N);
     let idx = 0;
@@ -3534,41 +3608,6 @@ const midplaneDust = (function buildMidplaneDust() {
     const pts = new THREE.Points(geo, mat);
     scene.add(pts);
     return pts;
-})();
-
-// ══════════════════════════════════════════════════════════════════════════
-//  CIRCUMGALACTIC HALO  — faint hot coronal gas surrounding the disk
-//
-//  Real MW: a ~10⁶ K X-ray-emitting halo of ionised gas extends out to
-//  ~300 kpc (~1 Mly). We render it as a translucent oblate shell that
-//  becomes visible at galaxy zoom and gives the disk a halo glow when
-//  viewed edge-on.
-// ══════════════════════════════════════════════════════════════════════════
-const circumgalacticHalo = (function buildCircumgalacticHalo() {
-    const halo = new THREE.Mesh(
-        new THREE.SphereGeometry(58000, 36, 24),
-        new THREE.MeshBasicMaterial({
-            color: 0x4466aa, transparent: true, opacity: 0.05,
-            side: THREE.BackSide, depthWrite: false,
-            blending: THREE.AdditiveBlending,
-        })
-    );
-    halo.scale.set(1.0, 0.55, 1.0);     // oblate
-    scene.add(halo);
-    // Bright inner edge
-    const inner = new THREE.Mesh(
-        new THREE.SphereGeometry(38000, 32, 22),
-        new THREE.MeshBasicMaterial({
-            color: 0x99bbff, transparent: true, opacity: 0.045,
-            side: THREE.BackSide, depthWrite: false,
-            blending: THREE.AdditiveBlending,
-        })
-    );
-    inner.scale.set(1.0, 0.42, 1.0);
-    scene.add(inner);
-    const group = new THREE.Group();
-    group.add(halo); group.add(inner);
-    return group;
 })();
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -3687,59 +3726,118 @@ sgraVisualGroup.add(sgraBulgeGroup);
 sgraVisualGroup.add(sgraInnerGroup);
 
 (function buildGCGlow() {
-    // ── Galactic bulge / nuclear star cluster glow halos ──────────────────
-    [
-        [3000, 0xff5500, 0.010],
-        [1400, 0xff8800, 0.025],
-        [500,  0xffaa44, 0.065],
-        [100,  0xffddaa, 0.14],
-        [30,   0xfff0cc, 0.22],
-    ].forEach(([r, c, o]) => {
-        sgraBulgeGroup.add(new THREE.Mesh(
-            new THREE.SphereGeometry(r, 16, 16),
-            new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: o,
-                depthWrite: false, blending: THREE.AdditiveBlending })
-        ));
-    });
+    // ── Galactic bulge / nuclear star cluster — REAL 3D STAR CLOUD ────────
+    // Replaces five flat additive sphere "halos" with a triaxial particle
+    // cloud (~5 k stars) that reads as 3D from any angle. Density follows a
+    // Hernquist-like profile (ρ ∝ r⁻²) out to ~3000 ly, with vertical squash
+    // for the boxy/peanut bulge.
+    {
+        const N = Math.round(5500 * lodScale);
+        const pos = new Float32Array(N * 3);
+        const col = new Float32Array(N * 3);
+        const sz  = new Float32Array(N);
+        for (let i = 0; i < N; i++) {
+            // Inverse-CDF sampling for Hernquist-ish ρ ∝ r⁻²:
+            // r = 3000 · u^1.6 keeps a strong central concentration.
+            const r = Math.pow(Math.random(), 1.6) * 3000;
+            const phi = Math.acos(2 * Math.random() - 1);
+            const th  = Math.random() * Math.PI * 2;
+            pos[i*3]   = r * Math.sin(phi) * Math.cos(th);
+            pos[i*3+1] = r * Math.cos(phi) * 0.55;       // oblate / boxy
+            pos[i*3+2] = r * Math.sin(phi) * Math.sin(th);
+            // Color gradient: blazing white near centre → amber → deep red
+            // Fade follows r so the inner cluster glows hottest.
+            const t = Math.min(1, r / 3000);
+            const fade = Math.pow(1 - t, 0.85);
+            col[i*3]   = (1.00 - 0.10 * t) * (0.55 + 0.45 * fade);
+            col[i*3+1] = (0.78 - 0.30 * t) * (0.55 + 0.45 * fade);
+            col[i*3+2] = (0.45 - 0.30 * t) * (0.40 + 0.40 * fade);
+            sz[i]      = 18 + Math.random() * 28;
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        geo.setAttribute('color',    new THREE.BufferAttribute(col, 3));
+        geo.setAttribute('size',     new THREE.BufferAttribute(sz, 1));
+        const mat = new THREE.ShaderMaterial({
+            vertexColors: true, transparent: true, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            uniforms: { uScale: { value: renderer.getPixelRatio() } },
+            vertexShader: `
+                attribute float size;
+                varying vec3 vCol;
+                uniform float uScale;
+                void main() {
+                    vCol = color;
+                    vec4 mvp = modelViewMatrix * vec4(position, 1.0);
+                    gl_PointSize = size * uScale / -mvp.z;
+                    gl_PointSize = clamp(gl_PointSize, 0.4, 9.0);
+                    gl_Position = projectionMatrix * mvp;
+                }
+            `,
+            fragmentShader: `
+                varying vec3 vCol;
+                void main() {
+                    float d = length(gl_PointCoord - 0.5) * 2.0;
+                    float a = 1.0 - smoothstep(0.05, 1.0, d);
+                    a = pow(a, 1.4);
+                    gl_FragColor = vec4(vCol, a * 0.85);
+                }
+            `,
+        });
+        sgraBulgeGroup.add(new THREE.Points(geo, mat));
+    }
 
-    // ── Event horizon — black drop sphere (occludes background) ──────────
+    // ── Event horizon — proper 3D black sphere (occludes background) ─────
+    // (Slightly smaller and higher tessellation than before so its silhouette
+    // is unambiguous against the photon-ring torus.)
     sgraInnerGroup.add(new THREE.Mesh(
-        new THREE.SphereGeometry(7, 32, 32),
+        new THREE.SphereGeometry(6, 48, 48),
         new THREE.MeshBasicMaterial({ color: 0x000000, depthWrite: true })
     ));
 
-    // ── Photon ring sprite — the EHT crescent ────────────────────────────
-    // A thin bright ring at the shadow edge; one side boosted by Doppler.
-    (function() {
-        const cv = document.createElement('canvas');
-        cv.width = cv.height = 512;
-        const cx = cv.getContext('2d');
-        // Outer ring glow
-        const rg = cx.createRadialGradient(256,256, 120, 256,256, 256);
-        rg.addColorStop(0,   'rgba(255,220,140,0.0)');
-        rg.addColorStop(0.48,'rgba(255,210,120,0.50)');
-        rg.addColorStop(0.60,'rgba(255,245,210,0.95)');
-        rg.addColorStop(0.70,'rgba(255,230,160,0.45)');
-        rg.addColorStop(1.0, 'rgba(255,180,60,0.0)');
-        cx.fillStyle = rg; cx.fillRect(0,0,512,512);
-        // Doppler bright arc — left side (approaching gas)
-        cx.save(); cx.translate(256,256);
-        const ag = cx.createRadialGradient(-30, 0, 100, 0, 0, 220);
-        ag.addColorStop(0,   'rgba(255,255,220,0.0)');
-        ag.addColorStop(0.55,'rgba(255,255,220,0.55)');
-        ag.addColorStop(0.75,'rgba(255,220,140,0.18)');
-        ag.addColorStop(1,   'rgba(255,220,140,0.0)');
-        cx.fillStyle = ag;
-        cx.beginPath(); cx.arc(0,0,220, 0.45*Math.PI, 1.55*Math.PI); cx.closePath();
-        cx.fill();
-        cx.restore();
-        const photonRing = new THREE.Sprite(new THREE.SpriteMaterial({
-            map: new THREE.CanvasTexture(cv), transparent: true,
-            depthWrite: false, blending: THREE.AdditiveBlending,
-        }));
-        photonRing.scale.setScalar(22);
-        sgraInnerGroup.add(photonRing);
-    })();
+    // ── Photon ring — REAL 3D TORUS GEOMETRY (no more sprite) ────────────
+    // Three nested torus rings of varying tube radius and tilt give a
+    // proper 3D ring whose perspective foreshortens correctly when the
+    // camera orbits above/below the disk plane. Doppler-boost is achieved
+    // with a per-vertex color attribute brightening one azimuthal half.
+    {
+        // The Sgr A* spin axis is roughly perpendicular to the GC-bar plane;
+        // we tilt the ring ~25° off the galactic disk for visual interest.
+        const ringGroup = new THREE.Group();
+        ringGroup.rotation.x = 0.32;
+        ringGroup.rotation.z = 0.18;
+        sgraInnerGroup.add(ringGroup);
+
+        function makeDopplerTorus(majorR, tubeR, segs, ringSegs, intensity) {
+            const geo = new THREE.TorusGeometry(majorR, tubeR, segs, ringSegs);
+            const colors = new Float32Array(geo.attributes.position.count * 3);
+            const pos = geo.attributes.position;
+            for (let i = 0; i < pos.count; i++) {
+                const x = pos.getX(i), z = pos.getZ(i);
+                // Azimuth in ring plane (x-z); approaching side at φ≈π/2
+                const phi = Math.atan2(z, x);
+                const dop = Math.max(0, Math.sin(phi - 0.4));   // Doppler factor
+                const boost = 1.0 + dop * intensity;
+                colors[i*3]   = Math.min(1.0, 1.0 * boost * 0.9);
+                colors[i*3+1] = Math.min(1.0, 0.80 * boost * 0.85);
+                colors[i*3+2] = Math.min(1.0, 0.45 * boost * 0.7);
+            }
+            geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            return new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+                vertexColors: true,
+                transparent: true, opacity: 0.85,
+                depthWrite: false, blending: THREE.AdditiveBlending,
+            }));
+        }
+        // Bright thin photon ring (innermost — at 1.5 r_s)
+        ringGroup.add(makeDopplerTorus(8.5, 0.9,  16, 96, 1.8));
+        // Mid-ring (lensed n=1 photon orbit — slightly fatter)
+        ringGroup.add(makeDopplerTorus(10.2, 1.7,  12, 80, 1.4));
+        // Outer halo wash (broader, dimmer)
+        const outer = makeDopplerTorus(12.5, 4.5, 12, 64, 0.9);
+        outer.material.opacity = 0.22;
+        ringGroup.add(outer);
+    }
 
     // ── Accretion disk (tilted ~14° off galactic plane) ───────────────────
     // diskGroup carries the tilt; rings rotate independently inside it.
@@ -3748,27 +3846,46 @@ sgraVisualGroup.add(sgraInnerGroup);
     diskGroup.rotation.z = 0.18;   // slight roll for visual variety
     sgraInnerGroup.add(diskGroup);
 
-    // Temperature-gradient canvas texture spanning the full disk face
-    (function() {
-        const cv = document.createElement('canvas');
-        cv.width = cv.height = 512;
-        const cx = cv.getContext('2d');
-        const tg = cx.createRadialGradient(256,256, 50, 256,256, 256);
-        tg.addColorStop(0,    'rgba(255,255,255,0.0)');   // inside EH shadow
-        tg.addColorStop(0.10, 'rgba(255,255,255,0.90)');  // ISCO — blazing white
-        tg.addColorStop(0.22, 'rgba(255,220,100,0.82)');  // hot inner — gold
-        tg.addColorStop(0.40, 'rgba(255,140,30,0.68)');   // mid — amber
-        tg.addColorStop(0.58, 'rgba(210,55,8,0.46)');     // warm outer — orange-red
-        tg.addColorStop(0.75, 'rgba(130,18,3,0.26)');     // cool outer — deep red
-        tg.addColorStop(1,    'rgba(50,5,0,0.0)');
-        cx.fillStyle = tg; cx.fillRect(0,0,512,512);
-        const face = new THREE.Sprite(new THREE.SpriteMaterial({
-            map: new THREE.CanvasTexture(cv), transparent: true,
+    // Temperature-gradient disk face — REAL 3D RING with radial color shader
+    // (no more camera-facing sprite that flips perpendicular when you orbit
+    //  the disk). The ring lives in the diskGroup tilt plane so it
+    //  foreshortens correctly when viewed edge-on.
+    {
+        const ringGeo = new THREE.RingGeometry(8, 220, 192, 16);
+        // Compute per-vertex temperature gradient color
+        const colors = new Float32Array(ringGeo.attributes.position.count * 3);
+        const pos = ringGeo.attributes.position;
+        for (let i = 0; i < pos.count; i++) {
+            const x = pos.getX(i), y = pos.getY(i);
+            const r = Math.hypot(x, y);
+            // 0 at inner edge → 1 at outer edge
+            const t = Math.min(1, Math.max(0, (r - 8) / (220 - 8)));
+            // Blackbody-ish gradient: white → gold → amber → red → dark
+            // Doppler-boost the approaching side (azimuth ~π/2)
+            const phi = Math.atan2(y, x);
+            const dop = Math.max(0, Math.sin(phi - 0.3));
+            const boost = 1.0 + dop * 0.85;
+            let R, G, B;
+            if (t < 0.10)       { R = 1.0; G = 1.0; B = 1.0; }
+            else if (t < 0.30)  { const u = (t-0.10)/0.20; R = 1.0; G = 1.0 - u*0.20; B = 1.0 - u*0.55; }
+            else if (t < 0.55)  { const u = (t-0.30)/0.25; R = 1.0; G = 0.80 - u*0.40; B = 0.45 - u*0.35; }
+            else if (t < 0.80)  { const u = (t-0.55)/0.25; R = 1.0 - u*0.25; G = 0.40 - u*0.30; B = 0.10 - u*0.06; }
+            else                { const u = (t-0.80)/0.20; R = 0.75 - u*0.55; G = 0.10 - u*0.10; B = 0.04 - u*0.04; }
+            // Outer fade-to-zero
+            const fade = (t < 0.85) ? 1.0 : (1.0 - (t - 0.85) / 0.15);
+            colors[i*3]   = Math.min(1.0, R * boost * fade);
+            colors[i*3+1] = Math.min(1.0, G * boost * fade);
+            colors[i*3+2] = Math.min(1.0, B * boost * fade);
+        }
+        ringGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        const ringMat = new THREE.MeshBasicMaterial({
+            vertexColors: true,
+            side: THREE.DoubleSide,
+            transparent: true, opacity: 0.85,
             depthWrite: false, blending: THREE.AdditiveBlending,
-        }));
-        face.scale.setScalar(380);
-        diskGroup.add(face);
-    })();
+        });
+        diskGroup.add(new THREE.Mesh(ringGeo, ringMat));
+    }
 
     // Individual Keplerian rings (differential rotation)
     [
@@ -3869,7 +3986,7 @@ const g2Trajectory = { line: null, marker: null, baseT0: 0 };
 (function buildGCEnvironment() {
     // ── Nuclear star cluster — dense halo of points 5–35 ly from Sgr A* ──
     {
-        const N = 1500;
+        const N = Math.round(1500 * lodScale);
         const pos = new Float32Array(N * 3);
         const col = new Float32Array(N * 3);
         const sz  = new Float32Array(N);
@@ -4120,50 +4237,10 @@ const g2Trajectory = { line: null, marker: null, baseT0: 0 };
         sgraInnerGroup.add(orb);
     }
 
-    // ── EHT high-fidelity inner image (donut + bottom crescent) ─────────
-    // Slightly inside the photon ring sprite — provides the iconic look at
-    // the very innermost zoom.
-    {
-        const cv = document.createElement('canvas');
-        cv.width = cv.height = 512;
-        const cx = cv.getContext('2d');
-        // Black shadow at center
-        cx.fillStyle = 'rgba(0,0,0,0)';
-        cx.fillRect(0,0,512,512);
-        // Donut ring
-        cx.translate(256, 256);
-        const ring = cx.createRadialGradient(0,0, 90, 0,0, 220);
-        ring.addColorStop(0,    'rgba(0,0,0,0.0)');
-        ring.addColorStop(0.18, 'rgba(0,0,0,0.0)');
-        ring.addColorStop(0.42, 'rgba(255,170,80,0.95)');
-        ring.addColorStop(0.55, 'rgba(255,200,100,0.65)');
-        ring.addColorStop(0.85, 'rgba(180,90,40,0.18)');
-        ring.addColorStop(1,    'rgba(120,40,20,0.0)');
-        cx.fillStyle = ring;
-        cx.beginPath(); cx.arc(0,0, 240, 0, Math.PI*2); cx.fill();
-        // Doppler-boosted bright crescent (south side, gas approaching us)
-        cx.globalCompositeOperation = 'screen';
-        const cres = cx.createRadialGradient(0, 80, 30, 0, 80, 200);
-        cres.addColorStop(0,   'rgba(255,255,220,1.0)');
-        cres.addColorStop(0.4, 'rgba(255,230,160,0.65)');
-        cres.addColorStop(1,   'rgba(255,180,80,0.0)');
-        cx.fillStyle = cres;
-        cx.beginPath(); cx.arc(0, 80, 200, 0, Math.PI*2); cx.fill();
-        // Three "hot spots" reported in EHT 2022 paper (visualised statically)
-        [[140, -60, 22], [-90, 100, 18], [80, 130, 14]].forEach(([x,y,r]) => {
-            const sg = cx.createRadialGradient(x,y, 0, x,y, r);
-            sg.addColorStop(0,   'rgba(255,255,200,0.85)');
-            sg.addColorStop(1,   'rgba(255,180,80,0.0)');
-            cx.fillStyle = sg;
-            cx.beginPath(); cx.arc(x,y, r, 0, Math.PI*2); cx.fill();
-        });
-        const eht = new THREE.Sprite(new THREE.SpriteMaterial({
-            map: new THREE.CanvasTexture(cv), transparent: true,
-            depthWrite: false, blending: THREE.AdditiveBlending,
-        }));
-        eht.scale.setScalar(14);
-        sgraInnerGroup.add(eht);
-    }
+    // (the old camera-facing EHT sprite was removed — its job is now done
+    //  properly in 3D by the photon-ring torus + tilted accretion-disk
+    //  rings, so the iconic donut-with-crescent look survives but doesn't
+    //  flatten when the camera orbits above/below the disk plane.)
 })();
 //  - Distance rings from GC (every 5 kly)
 //  - Galactic longitude radials from GC (every 30°)
@@ -4201,12 +4278,40 @@ scene.add(ringsGroup);
 //  seconds (3.75 Myr per real second of viewing) so the user sees the motion.
 //  The phase reflects an arbitrary "now" reference (current epoch = θ₀).
 // ══════════════════════════════════════════════════════════════════════════
-const SUN_R = 26673;            // Sun-GC distance (ly)
-const SUN_PERIOD_MYR = 225;     // Galactic year (Myr)
-const SUN_ANIM_SECS  = 60;      // wall-clock seconds per simulated orbit
-let   sunOrbitEnabled = true;   // toggled via UI
-let   simGalacticYr   = 0;      // current Sun-orbit phase in Myr (advances each frame)
-const SUN_THETA0      = 0;      // orbital angle at simGalacticYr = 0 (current epoch)
+// ── Sun-orbit physical parameters ────────────────────────────────────────
+//
+// Galactic-plane circular orbit:
+//   R₀ = 26,673 ly  (Sun-GC distance, GRAVITY 2019)
+//   T_orbit = 225 Myr ("galactic year") → v_circ ≈ 220 km/s
+//
+// VERTICAL OSCILLATION ("the bobble") — Holmberg+ 2009, Bovy 2017
+//   The Sun is currently ~20 pc (~65 ly) above the galactic mid-plane
+//   moving NORTH at W_⊙ ≈ +7.25 km/s (Schönrich+ 2010). It oscillates
+//   through the disk on a much shorter period than the full orbit:
+//     T_vert    ≈ 67 Myr  (one full up-down cycle)
+//     Z_amp     ≈ 250 ly  (~76 pc — peak excursion above/below the plane)
+//   So during one ~225 Myr orbit, the Sun crosses the disk plane
+//   about 6–7 times. This is the source of every "the Sun has crossed
+//   the galactic plane X times since the dinosaurs went extinct" trivia.
+//
+//   Phase tuned so at simGalacticYr = 0 (today, the "Live" reference)
+//   Z = +65 ly and W = +7.25 km/s, matching the modern measurements.
+const SUN_R               = 26673;           // ly
+const SUN_PERIOD_MYR      = 225;             // Myr (full circular orbit)
+const SUN_VERT_PERIOD_MYR = 67;              // Myr (vertical oscillation)
+const SUN_VERT_AMP_LY     = 250;             // ly (peak |Z|)
+const SUN_VERT_PHASE0     = Math.asin(65 / 250);  // ≈ 0.264 rad (Z=+65 ly today)
+const KMS_PER_LY_PER_MYR  = 0.29979;         // 1 ly·Myr⁻¹ in km/s
+
+// Live-mode default speed: 1 wall-second = (225/60) Myr = 3.75 Myr/s.
+const SUN_LIVE_MYR_PER_SEC_DEFAULT = SUN_PERIOD_MYR / 60;
+
+// Time-control state machine (driven by UI panel / live button)
+let sunOrbitEnabled = true;     // toggled via the existing "☉ Sun's orbit" toggle
+let simGalacticYr   = 0;        // current orbital epoch (Myr; 0 = today)
+let liveMode        = true;     // true → simGalacticYr advances each frame
+let simSpeedMyrPerSec = SUN_LIVE_MYR_PER_SEC_DEFAULT;
+const SUN_THETA0      = 0;      // orbital angle at simGalacticYr = 0
 const sunOrbitObjects = [];     // group of meshes scaled by zoom
 
 const sunOrbitGroup = new THREE.Group();
@@ -4326,15 +4431,51 @@ scene.add(sunOrbitGroup);
     sunOrbitObjects.push({ obj: sunLabel, role: 'label', baseW: 2200, baseH: 550 });
 })();
 
-// Returns Sun's orbital position and velocity unit vector for a given galactic
-// year offset (Myr from the current epoch; 0 = now, +ve = future, -ve = past).
+// Returns the Sun's orbital state at a given galactic-year offset (Myr from
+// the current epoch; 0 = today, +ve = future, -ve = past).
+//
+// Combines the in-plane circular motion (220 km/s) with the disk-vertical
+// epicyclic "bobble" (67 Myr period, ±250 ly amplitude). The Z-phase is
+// tuned so today's Sun matches the measured values: Z = +65 ly, W = +7.25 km/s.
+//
+// Returns:
+//   pos       Vector3 position in scene coords (ly)
+//   vel       Vector3 unit velocity vector (for the arrow)
+//   theta     orbital angle (rad)
+//   z         vertical offset above/below disk (ly)
+//   v_total   speed (km/s)
+//   v_circ    circular component (km/s)
+//   v_vert    vertical (bobble) component (km/s, +ve = north)
 function sunOrbitState(galacticYr) {
+    // ── Circular motion in the disk plane ────────────────────────
     const theta = SUN_THETA0 + (galacticYr / SUN_PERIOD_MYR) * Math.PI * 2;
     const cs = Math.cos(theta), sn = Math.sin(theta);
-    const pos = new THREE.Vector3(SUN_R * cs, 20, SUN_R * sn);
-    // Velocity direction: tangent to circle in the prograde sense (+z at θ=0)
-    const vel = new THREE.Vector3(-sn, 0, cs).normalize();
-    return { pos, vel, theta };
+
+    // Circular speed (ly/Myr) and tangent direction (perp. to radius)
+    const v_circ_lymyr = SUN_R * 2 * Math.PI / SUN_PERIOD_MYR;
+    const tx = -sn * v_circ_lymyr;
+    const tz =  cs * v_circ_lymyr;
+
+    // ── Vertical oscillation ("the bobble") ──────────────────────
+    const vphase = SUN_VERT_PHASE0 + (galacticYr / SUN_VERT_PERIOD_MYR) * Math.PI * 2;
+    const z      = SUN_VERT_AMP_LY * Math.sin(vphase);
+    const vy_lymyr = SUN_VERT_AMP_LY * (2 * Math.PI / SUN_VERT_PERIOD_MYR) * Math.cos(vphase);
+
+    // ── 3D position + unit velocity ──────────────────────────────
+    const pos = new THREE.Vector3(SUN_R * cs, z, SUN_R * sn);
+    const vmag_lymyr = Math.hypot(tx, vy_lymyr, tz);
+    const vel = new THREE.Vector3(
+        tx / vmag_lymyr,
+        vy_lymyr / vmag_lymyr,
+        tz / vmag_lymyr,
+    );
+
+    return {
+        pos, vel, theta, z,
+        v_total: vmag_lymyr   * KMS_PER_LY_PER_MYR,
+        v_circ:  v_circ_lymyr * KMS_PER_LY_PER_MYR,
+        v_vert:  vy_lymyr     * KMS_PER_LY_PER_MYR,
+    };
 }
 
 // ── Scale-break boundary ─────────────────────────────────────────────────
@@ -5474,101 +5615,9 @@ function updateSstarPositions(dt) {
     g.userData.diskRings  = diskRings;   // [[mesh, omega], ...]
 })();
 
-// ══════════════════════════════════════════════════════════════════════════
-//  MILKY WAY — OUTSIDE VIEW SPRITE
-//  Visible only when camera is far enough away to "look back" at our galaxy.
-//  Drawn as a barred spiral with a central bar, 4 arms, and a bulge.
-//  Positioned at origin, flat in the galactic plane (XZ, y=0 in scene).
-//  Note: THREE.Sprite always faces camera, so this looks correct from above.
-// ══════════════════════════════════════════════════════════════════════════
-let mwOuterSprite = null;
-(function buildMWOuterSprite() {
-    const S = 512, cx = S / 2;
-    const cv = document.createElement('canvas');
-    cv.width = cv.height = S;
-    const ctx = cv.getContext('2d');
-
-    // ── Core bulge ─────────────────────────────────────────────
-    const bulgeGrad = ctx.createRadialGradient(cx,cx, 0, cx,cx, 54);
-    bulgeGrad.addColorStop(0,   'rgba(255,240,200,0.95)');
-    bulgeGrad.addColorStop(0.35,'rgba(255,200,120,0.80)');
-    bulgeGrad.addColorStop(1,   'rgba(200,150,60,0.0)');
-    ctx.fillStyle = bulgeGrad; ctx.fillRect(0,0,S,S);
-
-    // ── Central bar ─────────────────────────────────────────────
-    ctx.save();
-    ctx.translate(cx, cx);
-    ctx.rotate(0.3);
-    const barGrad = ctx.createLinearGradient(-80, 0, 80, 0);
-    barGrad.addColorStop(0,   'rgba(200,150,50,0.0)');
-    barGrad.addColorStop(0.3, 'rgba(255,220,140,0.55)');
-    barGrad.addColorStop(0.5, 'rgba(255,235,180,0.65)');
-    barGrad.addColorStop(0.7, 'rgba(255,220,140,0.55)');
-    barGrad.addColorStop(1,   'rgba(200,150,50,0.0)');
-    ctx.fillStyle = barGrad;
-    ctx.beginPath();
-    ctx.ellipse(0, 0, 80, 14, 0, 0, Math.PI*2);
-    ctx.fill();
-    ctx.restore();
-
-    // ── 4 Spiral arms (Perseus, Sagittarius, Norma, Orion) ──────
-    const armColors = [
-        'rgba(180,200,255,{a})',  // Perseus — blue-white young stars
-        'rgba(255,220,160,{a})',  // Sagittarius — inner, warmer
-        'rgba(255,180,100,{a})',  // Norma — inner, orange
-        'rgba(200,220,255,{a})',  // Orion/Local — blue-white
-    ];
-    for (let arm = 0; arm < 4; arm++) {
-        ctx.save();
-        ctx.translate(cx, cx);
-        ctx.rotate(arm * Math.PI / 2 + 0.3);
-        for (let i = 0; i < 300; i++) {
-            const angle  = i * 0.055;
-            const radius = 20 + i * 0.58;
-            if (radius > cx * 0.92) break;
-            const x = radius * Math.cos(angle);
-            const y = radius * Math.sin(angle) * 0.95;
-            const alpha = Math.max(0, 0.50 - radius / (cx * 1.4));
-            const w = Math.max(0.5, 4.5 - radius / 80);
-            ctx.beginPath();
-            ctx.arc(x, y, w, 0, Math.PI*2);
-            ctx.fillStyle = armColors[arm].replace('{a}', alpha.toFixed(3));
-            ctx.fill();
-        }
-        ctx.restore();
-    }
-
-    // ── Outer halo ───────────────────────────────────────────────
-    const haloGrad = ctx.createRadialGradient(cx,cx, S*0.25, cx,cx, cx);
-    haloGrad.addColorStop(0,   'rgba(200,180,255,0.08)');
-    haloGrad.addColorStop(1,   'rgba(100,80,160,0.0)');
-    ctx.fillStyle = haloGrad; ctx.fillRect(0,0,S,S);
-
-    // ── Sun marker (tiny dot at correct position) ─────────────
-    // Sun is 26,673 ly from GC; MW diameter ~100,000 ly.
-    // On a 512-px canvas covering 120,000 ly → px/ly = 512/120000 ≈ 0.00427
-    // Sun offset: 26,673 * 0.00427 ≈ 113.8 px from center, in +x direction (scene x)
-    const sunR = 26673 / 120000 * S;
-    ctx.beginPath();
-    ctx.arc(cx + sunR, cx, 3.5, 0, Math.PI*2);
-    ctx.fillStyle = 'rgba(255,255,200,0.9)';
-    ctx.fill();
-    // Small label
-    ctx.font = 'bold 11px sans-serif';
-    ctx.fillStyle = 'rgba(255,255,180,0.75)';
-    ctx.fillText('☀', cx + sunR + 5, cx - 4);
-
-    mwOuterSprite = new THREE.Sprite(new THREE.SpriteMaterial({
-        map: new THREE.CanvasTexture(cv),
-        transparent: true, depthWrite: false,
-        blending: THREE.AdditiveBlending,
-    }));
-    // 120,000 scene units = galaxy diameter — matches the actual galactic disk scale
-    mwOuterSprite.scale.setScalar(120000);
-    mwOuterSprite.position.set(0, 0, 0);
-    mwOuterSprite.visible = false;  // hidden until universe zoom
-    scene.add(mwOuterSprite);
-})();
+// (removed flat 2D MW outer-view sprite — the 3D particle disk + dust lanes
+//  already provide the proper edge-on look from any angle, so a billboarded
+//  spiral painting was both redundant and visually flat.)
 
 // ══════════════════════════════════════════════════════════════════════════
 //  M87 — ONE-SIDED RELATIVISTIC JET
@@ -5747,7 +5796,7 @@ const sgrStream = (function buildSgrStream() {
     const TILT_X = 1.45;    // ~83° tilt (almost polar)
     const TILT_Z = 0.35;    // small in-plane rotation (orbital ascending node)
 
-    const N = 1500;
+    const N = Math.round(1500 * lodScale);
     const pos = new Float32Array(N * 3);
     const col = new Float32Array(N * 3);
     const sz  = new Float32Array(N);
@@ -6954,7 +7003,7 @@ const universeGuides = [];   // mesh objects toggled by camera distance
 
     // ── Cosmic-web background — sparse point cloud filling the log-compressed
     // shell so the universe view doesn't feel completely empty between markers.
-    const N = 1400;
+    const N = Math.round(1400 * lodScale);
     const pos = new Float32Array(N * 3);
     const col = new Float32Array(N * 3);
     for (let i = 0; i < N; i++) {
@@ -7199,7 +7248,6 @@ document.getElementById('tog-galaxy').addEventListener('change', e => {
     galaxyHalo.visible   = v;
     galaxyHII.visible    = v;
     galaxyDust.visible   = v;
-    mwInnerGlow.visible  = v;
     midplaneDust.visible = v;
     galacticWarp.visible = v;
 });
@@ -7219,6 +7267,53 @@ document.getElementById('tog-sun-orbit').addEventListener('change', e => {
     sunOrbitEnabled = e.target.checked;
     if (!sunOrbitEnabled) sunOrbitGroup.visible = false;
 });
+
+// ── Time-control panel wiring ──────────────────────────────────────────
+(function wireSunTimeControls() {
+    const liveBtn  = document.getElementById('stp-live');
+    const pauseBtn = document.getElementById('stp-pause');
+    const resetBtn = document.getElementById('stp-reset');
+    const scrub    = document.getElementById('stp-scrub');
+    const speed    = document.getElementById('stp-speed');
+    if (!liveBtn || !scrub || !speed) return;
+
+    function setLive(on) {
+        liveMode = on;
+        liveBtn.classList.toggle('active',  on);
+        pauseBtn.classList.toggle('active', !on);
+    }
+    function setSimSpeedFromSlider(v) {
+        // Slider in log-space: -2..+2 → 0.01..100 Myr/s
+        const x = parseFloat(v);
+        simSpeedMyrPerSec = Math.pow(10, x);
+    }
+
+    liveBtn.addEventListener('click', () => {
+        // ▶ Live snaps the time scrub back to today (t=0) and resumes
+        simGalacticYr = 0;
+        scrub.value = '0';
+        setLive(true);
+    });
+    pauseBtn.addEventListener('click', () => {
+        // ⏸ pause stops the clock at the current epoch (keeps simGalacticYr)
+        setLive(false);
+    });
+    resetBtn.addEventListener('click', () => {
+        simGalacticYr = 0;
+        scrub.value = '0';
+        setLive(false);
+    });
+    scrub.addEventListener('input', (e) => {
+        simGalacticYr = parseFloat(e.target.value);
+        // Any user scrub disengages live mode — they're driving now.
+        setLive(false);
+    });
+    speed.addEventListener('input', (e) => {
+        setSimSpeedFromSlider(e.target.value);
+    });
+    // Initialise speed from default slider value
+    setSimSpeedFromSlider(speed.value);
+})();
 document.getElementById('tog-showpieces').addEventListener('change', e => {
     const v = e.target.checked;
     Object.values(showpieceGroups).forEach(g => { g.visible = v; });
@@ -7586,11 +7681,6 @@ function animate() {
         ton618Glow.scale.setScalar(Math.max(bg, mg) * pulse);
     }
 
-    // ── MW outer sprite: show only in universe view ───────────────
-    if (mwOuterSprite) {
-        mwOuterSprite.visible = camDistFromOrigin > 140000;
-    }
-
     // ── Universe-scale reference guides (LG / Laniakea / Cosmic Dawn rings
     //    + cosmic-web filament background) — universe view only.
     {
@@ -7630,8 +7720,9 @@ function animate() {
 
 // ══════════════════════════════════════════════════════════════════════════
 //  SUN-ORBIT ANIMATION
-//  One simulated Galactic year (225 Myr) every SUN_ANIM_SECS wall-clock seconds.
-//  Updates Sun marker, glow, velocity arrow, label, and trail ribbon.
+//  Drives the animated Sun marker around its orbit through Sgr A*.
+//  In LIVE MODE the simGalacticYr advances at simSpeedMyrPerSec; the user
+//  can override with the time-scrub slider, which sets liveMode=false.
 //  Visible only at galaxy zoom and inward (would clutter universe view).
 // ══════════════════════════════════════════════════════════════════════════
 function updateSunOrbit(dt, camDistFromOrigin) {
@@ -7642,11 +7733,18 @@ function updateSunOrbit(dt, camDistFromOrigin) {
     sunOrbitGroup.visible = showOrbit;
     if (!showOrbit) return;
 
-    // Advance galactic-year clock
-    simGalacticYr += (SUN_PERIOD_MYR / SUN_ANIM_SECS) * dt;
-    if (simGalacticYr >= SUN_PERIOD_MYR) simGalacticYr -= SUN_PERIOD_MYR;
+    // Advance galactic-year clock — only in live mode. Scrubbing sets the
+    // value directly and stays paused until "▶ Live" is hit again.
+    if (liveMode) {
+        simGalacticYr += simSpeedMyrPerSec * dt;
+        // Wrap into the slider's range (±2 full orbits) so the indicator
+        // stays accurate even after very long live runs at high speed.
+        if (simGalacticYr >  450) simGalacticYr -= 900;
+        if (simGalacticYr < -450) simGalacticYr += 900;
+    }
 
-    const { pos, vel } = sunOrbitState(simGalacticYr);
+    const state = sunOrbitState(simGalacticYr);
+    const { pos, vel } = state;
     const camDist = camera.position.distanceTo(pos);
     const sizeBoost = Math.max(1, camDist / 8000);  // scale-up at galaxy zoom
 
@@ -7709,13 +7807,39 @@ function updateSunOrbit(dt, camDistFromOrigin) {
         }
     });
 
-    // Update HUD readouts (computed lazily — only the fields we maintain)
-    const phasePct = (simGalacticYr / SUN_PERIOD_MYR) * 100;
-    const phaseDeg = (simGalacticYr / SUN_PERIOD_MYR) * 360;
+    // ── Update HUD + time-control panel readouts every frame ──────────
+    const fmtMyr = (v) => {
+        if (Math.abs(v) < 0.01) return '0 Myr';
+        if (Math.abs(v) < 1)    return v.toFixed(2) + ' Myr';
+        return v.toFixed(1) + ' Myr';
+    };
+    // Reduce simGalacticYr to (-period/2, +period/2] ONLY for the orbital
+    // phase readout — leave the simulation clock free-running so the user
+    // can scrub deep past/future without wraparound surprises.
+    const phaseMyr = ((simGalacticYr % SUN_PERIOD_MYR) + SUN_PERIOD_MYR) % SUN_PERIOD_MYR;
+    const phasePct = (phaseMyr / SUN_PERIOD_MYR) * 100;
+    const phaseDeg = (phaseMyr / SUN_PERIOD_MYR) * 360;
+
     const elGY = document.getElementById('hud-galactic-yr');
     const elGP = document.getElementById('hud-galactic-phase');
-    if (elGY) elGY.textContent = simGalacticYr.toFixed(1) + ' Myr  /  225 Myr';
+    if (elGY) elGY.textContent = (simGalacticYr >= 0 ? '+' : '') + fmtMyr(simGalacticYr)
+        + '  ·  ' + (liveMode ? '▶ live' : '⏸ scrub');
     if (elGP) elGP.textContent = phasePct.toFixed(1) + '%  (θ = ' + phaseDeg.toFixed(0) + '°)';
+
+    // ── Time-control panel readouts (live velocity / Z / speed) ───────
+    const elV  = document.getElementById('stp-vel');
+    const elZ  = document.getElementById('stp-z');
+    const elSV = document.getElementById('stp-scrub-val');
+    const elSP = document.getElementById('stp-speed-val');
+    const elScrub = document.getElementById('stp-scrub');
+    if (elV)  elV.textContent  = state.v_total.toFixed(1) + ' km/s';
+    if (elZ)  elZ.textContent  = (state.z >= 0 ? '+' : '') + state.z.toFixed(0) + ' ly';
+    if (elSV) elSV.textContent = (simGalacticYr >= 0 ? '+' : '') + simGalacticYr.toFixed(1) + ' Myr';
+    if (elSP) elSP.textContent = simSpeedMyrPerSec.toFixed(2) + ' Myr/s';
+    // Keep slider in sync while in live mode (don't fight a user drag)
+    if (elScrub && liveMode && document.activeElement !== elScrub) {
+        elScrub.value = String(simGalacticYr);
+    }
 }
 
 // ══════════════════════════════════════════════════════════════════════════

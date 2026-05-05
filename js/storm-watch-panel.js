@@ -119,31 +119,42 @@ function injectStyle() {
     if (document.getElementById(STYLE_ID)) return;
     const style = document.createElement('style');
     style.id = STYLE_ID;
+    // CSS custom properties cascade into dynamically-injected stylesheets
+    // exactly like static ones — every var(--c-storm), var(--c-text-*),
+    // and var(--sp-*) below pulls from the :root tokens declared in
+    // earth.html. That means a future palette tweak (try a coral
+    // accent instead of amber) is a single token change, not a
+    // 30-rgba-call rewrite of this string.
     style.textContent = `
 #${PANEL_ID} {
     position: absolute; top: 130px; left: 10px; z-index: 60;
     width: 240px; max-width: calc(100vw - 20px);
-    background: rgba(8,10,18,.86); backdrop-filter: blur(10px);
-    border: 1px solid rgba(255,160,80,.28); border-radius: 9px;
-    padding: 10px 11px 8px;
-    font-size: 11px; color: #d6dee6;
-    box-shadow: 0 6px 24px rgba(0,0,0,.45);
+    background: var(--c-surface-1, rgba(8,10,18,.86));
+    backdrop-filter: var(--blur-glass, blur(10px));
+    border: 1px solid var(--c-storm-border, rgba(var(--c-storm-rgb),.28));
+    border-radius: var(--r-lg, 9px);
+    padding: var(--sp-5, 10px) 11px var(--sp-4, 8px);
+    font-size: 11px; color: var(--c-text-primary, #d6dee6);
+    box-shadow: var(--shadow-panel, 0 6px 24px rgba(0,0,0,.45));
     transition: transform .18s ease;
 }
 #${PANEL_ID}.panel-minimized .panel-body { max-height: 0; opacity: 0; }
 #${PANEL_ID} .panel-header {
     display:flex; align-items:center; justify-content:space-between;
-    cursor:pointer; user-select:none; padding-bottom:6px;
-    border-bottom:1px solid rgba(255,255,255,.06); margin-bottom:6px;
+    cursor:pointer; user-select:none; padding-bottom: var(--sp-3, 6px);
+    border-bottom:1px solid var(--c-border-faint, rgba(255,255,255,.06));
+    margin-bottom: var(--sp-3, 6px);
 }
 #${PANEL_ID} .panel-header h3 {
-    margin:0; font-size:11px; color:#ffb066; letter-spacing:.6px;
+    margin:0; font-size:11px; color: var(--c-storm, #ffb066);
+    letter-spacing:.6px;
     text-transform:uppercase; font-weight:600;
-    display:flex; align-items:center; gap:6px;
+    display:flex; align-items:center; gap: var(--sp-3, 6px);
 }
 #${PANEL_ID} .sw-pulse {
     width:7px; height:7px; border-radius:50%;
-    background:#ff9050; box-shadow:0 0 8px #ff9050;
+    background: var(--c-storm, #ff9050);
+    box-shadow: 0 0 8px var(--c-storm-glow, #ff9050);
     animation: sw-pulse 1.6s ease-in-out infinite;
 }
 #${PANEL_ID} .sw-pulse.offline { background:#555; box-shadow:none; animation:none; }
@@ -153,7 +164,7 @@ function injectStyle() {
 }
 #${PANEL_ID} .panel-body { overflow:hidden; transition:max-height .3s ease, opacity .25s; max-height:60vh; overflow-y:auto; }
 #${PANEL_ID} .panel-body::-webkit-scrollbar { width:3px; }
-#${PANEL_ID} .panel-body::-webkit-scrollbar-thumb { background:rgba(255,160,80,.25); border-radius:2px; }
+#${PANEL_ID} .panel-body::-webkit-scrollbar-thumb { background:rgba(var(--c-storm-rgb),.25); border-radius:2px; }
 #${PANEL_ID} .sw-empty {
     text-align:center; padding:14px 6px;
     color:#778; font-size:10.5px; font-style:italic;
@@ -166,17 +177,17 @@ function injectStyle() {
     transition:background .15s, transform .12s, border-color .15s;
 }
 #${PANEL_ID} .sw-card:hover {
-    background:rgba(255,160,80,.10);
-    border-color:rgba(255,160,80,.30);
+    background:rgba(var(--c-storm-rgb),.10);
+    border-color:rgba(var(--c-storm-rgb),.30);
     transform:translateY(-1px);
 }
 #${PANEL_ID} .sw-card.active {
     /* Pinned card after click — stronger tint than hover so the
        user can see which storm's cone the globe is highlighting
        without the cursor on the card. */
-    background:rgba(255,160,80,.18);
-    border-color:rgba(255,160,80,.55);
-    box-shadow:0 0 10px rgba(255,160,80,.20);
+    background:rgba(var(--c-storm-rgb),.18);
+    border-color:rgba(var(--c-storm-rgb),.55);
+    box-shadow:0 0 10px rgba(var(--c-storm-rgb),.20);
 }
 #${PANEL_ID} .sw-card:last-child { margin-bottom:0; }
 #${PANEL_ID} .sw-row1 {
@@ -227,8 +238,8 @@ function injectStyle() {
 #${PANEL_ID} .sw-scrub {
     border-radius:5px; padding:6px 8px 7px;
     margin-bottom:7px;
-    background:linear-gradient(180deg, rgba(255,160,80,.10) 0%, rgba(255,160,80,.02) 100%);
-    border:1px solid rgba(255,160,80,.18);
+    background:linear-gradient(180deg, rgba(var(--c-storm-rgb),.10) 0%, rgba(var(--c-storm-rgb),.02) 100%);
+    border:1px solid rgba(var(--c-storm-rgb),.18);
 }
 #${PANEL_ID} .sw-scrub-row1 {
     display:flex; align-items:center; justify-content:space-between;
@@ -245,13 +256,13 @@ function injectStyle() {
     white-space:nowrap;
 }
 #${PANEL_ID} .sw-scrub-reset {
-    background:rgba(255,160,80,.16); color:#ffb070;
-    border:1px solid rgba(255,160,80,.30); border-radius:3px;
+    background:rgba(var(--c-storm-rgb),.16); color:#ffb070;
+    border:1px solid rgba(var(--c-storm-rgb),.30); border-radius:3px;
     font-size:9px; cursor:pointer; padding:1px 6px;
     line-height:1.4; transition:background .15s, color .15s;
 }
 #${PANEL_ID} .sw-scrub-reset:hover {
-    background:rgba(255,160,80,.28); color:#fff;
+    background:rgba(var(--c-storm-rgb),.28); color:#fff;
 }
 #${PANEL_ID} .sw-scrub-row2 {
     display:flex; align-items:center; gap:6px;
@@ -291,9 +302,9 @@ function injectStyle() {
 }
 #${PANEL_ID} .sw-scrub-chip {
     flex:1; min-width:0;
-    background:rgba(255,160,80,.08);
+    background:rgba(var(--c-storm-rgb),.08);
     color:#caac8d;
-    border:1px solid rgba(255,160,80,.18);
+    border:1px solid rgba(var(--c-storm-rgb),.18);
     border-radius:4px;
     font:600 9.5px/1.4 inherit;
     letter-spacing:.04em;
@@ -308,9 +319,9 @@ function injectStyle() {
     font-variant-numeric: tabular-nums;
 }
 #${PANEL_ID} .sw-scrub-chip:hover {
-    background:rgba(255,160,80,.18);
+    background:rgba(var(--c-storm-rgb),.18);
     color:#ffd9b8;
-    border-color:rgba(255,160,80,.35);
+    border-color:rgba(var(--c-storm-rgb),.35);
 }
 #${PANEL_ID} .sw-scrub-chip:active {
     transform:scale(.95);
@@ -320,10 +331,10 @@ function injectStyle() {
        the cone palette so the user can read "this slider is parked
        at D3" at a glance even when they're not looking at the
        readout above. */
-    background:linear-gradient(180deg, rgba(255,160,80,.32) 0%, rgba(255,140,60,.22) 100%);
+    background:linear-gradient(180deg, rgba(var(--c-storm-rgb),.32) 0%, rgba(255,140,60,.22) 100%);
     color:#fff;
     border-color:rgba(255,180,100,.55);
-    box-shadow:0 0 6px rgba(255,160,80,.30), inset 0 1px 0 rgba(255,255,255,.18);
+    box-shadow:0 0 6px rgba(var(--c-storm-rgb),.30), inset 0 1px 0 rgba(255,255,255,.18);
 }
 #${PANEL_ID} .sw-card .sw-scrub-line {
     /* Per-card "at +Nh" projected position. Hidden when scrubHours=0

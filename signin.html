@@ -224,6 +224,21 @@
 </head>
 <body>
 
+<!-- Funnel + page analytics. Loaded eagerly (not lazily) so:
+     ✱ telemetry.js's window.onerror autocapture sees pre-auth crashes
+     ✱ analytics.js fires page_view + Web Vitals for the sign-in route
+     ✱ funnel.step('signin_view') is the first event in the sign-in
+       journey — every later step stitches to it via funnel_id
+     The funnel module is anonymous-safe and consent-free; analytics
+     module is consent-gated (it gates GA4 + analytics_events writes
+     on ppConsent.has('analytics')). -->
+<script type="module">
+    import './js/telemetry.js';
+    import './js/analytics.js';
+    import { funnel } from './js/auth-funnel.js';
+    funnel.step('signin_view');
+</script>
+
 <!-- ═══════════════════════════════════════════════════════ NAV ═══ -->
 <link rel="stylesheet" href="js/nav-styles.css">
 <nav></nav>
@@ -390,19 +405,58 @@
 
 <script type="module">
     import { auth } from './js/auth.js';
+    import { analytics } from './js/analytics.js';
+    import { funnel } from './js/auth-funnel.js';
     // Wait for Supabase to initialize, then check if already signed in
     await auth.ready();
     if (auth.isSignedIn()) {
+        // Already-signed-in landings on /signin are a meaningful funnel
+        // event in their own right — they tell us how often a user
+        // bookmarked /signin and a returning session restore beat them
+        // to the punch. Identify before redirecting so the page_view
+        // on dashboard attaches to a known user_id.
+        const u = auth.getUser();
+        if (u?.id) analytics.identify(u.id, { plan: u.plan, role: u.role });
+        funnel.step('signin_already_signed_in');
         window.location.href = 'dashboard.html';
     }
     // Expose auth to the non-module script below
-    window._ppAuth = { auth };
+    window._ppAuth = { auth, analytics };
 </script>
 <script>
+    // ── Funnel helper (window-scoped, exposed by js/auth-funnel.js) ─
+    // Module scripts above already loaded auth-funnel.js, which sets
+    // window.ppFunnel as a side-effect. The classic <script> below
+    // can't `import`, so we read it from window. Guarded so a module-
+    // load failure doesn't take the whole sign-in page down with it.
+    const _funnel = (typeof window !== 'undefined' && window.ppFunnel) || {
+        step: () => {}, stepDeferred: () => {}, id: () => null,
+    };
+
+    // ── Time-to-first-interaction signal ────────────────────────────
+    // Fires once on the first focus of any input on the form. Indicates
+    // how long the user spent on the page before engaging — a slow
+    // hesitation is a UX smell (label clarity, autofocus missing, etc).
+    let _engaged = false;
+    const _engageMs = Date.now();
+    function _markEngagement(field) {
+        if (_engaged) return;
+        _engaged = true;
+        _funnel.step('signin_first_interaction', {
+            field,
+            ms_to_engage: Date.now() - _engageMs,
+        });
+    }
+    ['email','password','reset-email'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('focus', () => _markEngagement(id), { once: true });
+    });
+
     // ── Forgot password toggle ──────────────────────────────────────
     document.getElementById('forgot-btn').addEventListener('click', () => {
         document.getElementById('signin-view').style.display = 'none';
         document.getElementById('reset-view').classList.add('show');
+        _funnel.step('password_reset_view');
     });
     document.getElementById('back-btn').addEventListener('click', () => {
         document.getElementById('signin-view').style.display = '';
@@ -443,12 +497,16 @@
         document.getElementById('login-alert').classList.remove('show');
     }
 
-    document.getElementById('magic-toggle').addEventListener('click', () => setMagicMode(!_magicMode));
+    document.getElementById('magic-toggle').addEventListener('click', () => {
+        setMagicMode(!_magicMode);
+        _funnel.step('signin_method_selected', { method: _magicMode ? 'magic_link' : 'password' });
+    });
     document.getElementById('magic-back').addEventListener('click', () => {
         // Flip back to password form from the "check your email" panel.
         document.getElementById('magic-sent').style.display = 'none';
         document.getElementById('signin-form').style.display = '';
         setMagicMode(false);
+        _funnel.step('magic_link_back_to_password');
     });
 
     // Resend countdown — re-arms the magic-resend button after 60 s.
@@ -516,6 +574,7 @@
     document.getElementById('magic-resend').addEventListener('click', async () => {
         const emailVal = document.getElementById('email').value;
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailVal)) return;
+        _funnel.step('magic_link_resend_clicked');
         startResendCooldown(60);
         await sendMagicLink(emailVal);
     });
@@ -523,6 +582,7 @@
     document.getElementById('signin-form').addEventListener('submit', function(e) {
         e.preventDefault();
         let valid = true;
+        const _failedFields = [];
 
         const email = document.getElementById('email');
         const pw    = document.getElementById('password');
@@ -531,7 +591,7 @@
         const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value);
         email.classList.toggle('error', !emailOk);
         document.getElementById('err-email').classList.toggle('visible', !emailOk);
-        if (!emailOk) valid = false;
+        if (!emailOk) { valid = false; _failedFields.push('email'); }
 
         // Password validation only applies in password mode. In magic-
         // link mode the field is hidden + irrelevant.
@@ -539,10 +599,20 @@
             const pwOk = pw.value.length > 0;
             pw.classList.toggle('error', !pwOk);
             document.getElementById('err-pw').classList.toggle('visible', !pwOk);
-            if (!pwOk) valid = false;
+            if (!pwOk) { valid = false; _failedFields.push('password'); }
         }
 
-        if (!valid) return;
+        if (!valid) {
+            _funnel.step('signin_validation_error', {
+                method: _magicMode ? 'magic_link' : 'password',
+                fields: _failedFields,
+            });
+            return;
+        }
+        _funnel.step('signin_submit', {
+            method:   _magicMode ? 'magic_link' : 'password',
+            remember: !!remember,
+        });
 
         // Magic-link branch — short-circuits the rest of the password flow.
         if (_magicMode) {
@@ -557,6 +627,10 @@
                     document.getElementById('alert-msg').textContent =
                         result.error || "Couldn't send link — try again in a moment.";
                     document.getElementById('login-alert').classList.add('show');
+                    _funnel.step('signin_failed', {
+                        method: 'magic_link',
+                        reason: String(result.error || 'unknown').slice(0, 120),
+                    });
                     return;
                 }
                 // Hide the form, show the "check your email" panel,
@@ -566,6 +640,10 @@
                 document.getElementById('magic-sent-email').textContent = email.value;
                 document.getElementById('magic-sent').style.display = '';
                 startResendCooldown(60);
+                // The user has handed off to email — the rest of the funnel
+                // (auth_callback_*) lands on /auth-callback when they click
+                // the link. This stage closes the loop on /signin.html.
+                _funnel.step('magic_link_sent');
             })();
             return;
         }
@@ -599,6 +677,18 @@
                     errEl.classList.add('visible');
                     pw.classList.add('error');
                 }
+                // Funnel: enriched signin_failed (method, retry count, reason).
+                // The legacy /api/auth/log-failure POST below stays — it
+                // hashes email server-side for the auth_failures table; the
+                // funnel event lives in client_telemetry without PII so the
+                // two pipelines complement rather than duplicate.
+                let _retriesNow = 0;
+                try { _retriesNow = +(sessionStorage.getItem('pp_signin_attempts') || 0); } catch {}
+                _funnel.step('signin_failed', {
+                    method:      'password',
+                    reason:      String(result.error || 'unknown').slice(0, 120),
+                    retry_count: _retriesNow + 1,
+                });
                 // Failed-signin counter — survives the page lifetime so the
                 // eventual successful signin can stamp how many retries it
                 // took. Local sessionStorage proxy is the fallback signal
@@ -646,12 +736,29 @@
             // Telemetry: successful signin. Pass the retry count so the
             // admin auth-flow card can highlight users who had to fight
             // the form. Reset the counter for a clean next session.
+            let _retries = 0;
             try {
-                let retries = 0;
-                try { retries = +(sessionStorage.getItem('pp_signin_attempts') || 0); } catch {}
+                try { _retries = +(sessionStorage.getItem('pp_signin_attempts') || 0); } catch {}
                 try { sessionStorage.removeItem('pp_signin_attempts'); } catch {}
                 const { logActivation } = await import('./js/activation.js');
-                logActivation('signin_succeeded', { retry_count: retries });
+                logActivation('signin_succeeded', { retry_count: _retries });
+            } catch {}
+            // Funnel: anonymous-safe success event. Lives in client_telemetry
+            // alongside every preceding stage from this funnel_id, so the
+            // admin can reconstruct the full journey for any user. Also
+            // identify() so subsequent page_views attach to the user.
+            try {
+                const u = (window._ppAuth?.auth?.getUser?.()) || null;
+                _funnel.step('signin_succeeded', {
+                    method:        'password',
+                    retry_count:   _retries,
+                    elapsed_ms:    Date.now() - _engageMs,
+                    plan:          u?.plan || null,
+                    role:          u?.role || null,
+                });
+                if (u?.id && window._ppAuth?.analytics?.identify) {
+                    window._ppAuth.analytics.identify(u.id, { plan: u.plan, role: u.role });
+                }
             } catch {}
             // Perf: time from page-navigation start to a successful
             // login. Captures the form-fill + supabase round-trip path
@@ -680,7 +787,11 @@
         const ok = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(resetEmail.value);
         resetEmail.classList.toggle('error', !ok);
         document.getElementById('err-reset-email').classList.toggle('visible', !ok);
-        if (!ok) return;
+        if (!ok) {
+            _funnel.step('signin_validation_error', { method: 'password_reset', fields: ['reset-email'] });
+            return;
+        }
+        _funnel.step('password_reset_requested');
 
         // Disable submit while processing
         const btn = this.querySelector('button[type=submit]');
