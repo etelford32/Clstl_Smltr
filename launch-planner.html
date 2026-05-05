@@ -17,6 +17,101 @@ html { height:auto; overflow-y:auto; }
 body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; color:#d0cce8;
     font-family:'Segoe UI', system-ui, sans-serif; }
 
+/* ─── Collapsible panels ─────────────────────────────── */
+/* Any [data-collapse-id] panel pairs an .lp-collapse-hd header with an
+   .lp-collapse-body that hides when the panel has --collapsed. The header
+   gets a rotating chevron via the JS (.lp-collapse-chev). */
+.lp-collapse-hd {
+    display:flex; align-items:baseline; gap:8px;
+    user-select:none;
+    -webkit-user-select:none;
+    transition:opacity .15s;
+}
+.lp-collapse-hd:hover { opacity:.85; }
+.lp-collapse-chev {
+    margin-left:auto;
+    font-size:.7rem;
+    color:#9ab;
+    transition:transform .2s ease;
+    flex-shrink:0;
+}
+.lp-panel--collapsed .lp-collapse-chev { transform:rotate(-90deg); }
+.lp-panel--collapsed .lp-collapse-body { display:none; }
+.lp-panel--collapsed { padding-bottom:8px !important; }
+.lp-panel--collapsed .lh-section-hd p,
+.lp-panel--collapsed .lh-section-sub,
+.lp-panel--collapsed .lp-strip-sub { display:none; }
+
+/* Filters panel header (no built-in header, we added one) */
+.lp-filters-hd { margin-bottom:10px; padding-bottom:6px;
+    border-bottom:1px solid rgba(255,255,255,.06); }
+.lp-filters-hd h3 {
+    font-size:.74rem; font-weight:800; color:#cde;
+    letter-spacing:.06em; text-transform:uppercase;
+}
+
+/* ─── Draggable overlay state ───────────────────────── */
+.lp-drag-handle { cursor:grab; }
+.lp-drag-handle:active { cursor:grabbing; }
+.lp-dragging {
+    box-shadow:0 12px 32px rgba(0,0,0,.6), 0 0 0 1px rgba(0,200,200,.4) !important;
+    z-index:5 !important;
+    opacity:.96;
+    user-select:none; -webkit-user-select:none;
+}
+
+/* ─── Density / compact mode ─────────────────────────── */
+/* Default styling continues as-is; [data-density="compact"] tightens the
+   most space-hungry blocks. Toggled via the ⇲ button in the canvas header. */
+body[data-density="compact"] .lp-panel { padding:9px 12px; }
+body[data-density="compact"] #lp-vehicle { padding:9px 12px 12px; }
+body[data-density="compact"] .lh-section-hd h2 { font-size:.92rem; }
+body[data-density="compact"] .lh-section-hd p,
+body[data-density="compact"] .lh-section-sub { display:none; }
+body[data-density="compact"] .lh-vehicle-picker { padding:4px 6px; gap:8px; margin:2px 0 8px; }
+body[data-density="compact"] .lh-vp-btn { font-size:.66rem; padding:3px 9px; }
+body[data-density="compact"] .lh-vp-label { font-size:.56rem; }
+body[data-density="compact"] .lh-vehicle-canvas-host { min-height:300px; aspect-ratio:16/9; }
+body[data-density="compact"] .lh-vehicle-wrap { grid-template-columns:1fr 240px; gap:10px; }
+body[data-density="compact"] .lh-vehicle-stats { gap:4px; }
+body[data-density="compact"] .lh-vehicle-stat { padding:4px 6px; }
+body[data-density="compact"] .lh-vehicle-stat-k { font-size:.54rem; margin-bottom:1px; }
+body[data-density="compact"] .lh-vehicle-stat-v { font-size:.72rem; }
+body[data-density="compact"] .lh-vehicle-name { font-size:.88rem; }
+body[data-density="compact"] .lh-thrust-card { padding:8px 10px; gap:7px; }
+body[data-density="compact"] .lh-thrust-v { font-size:.95rem; }
+body[data-density="compact"] .lh-thrust-row { font-size:.56rem; padding:1px 0; }
+body[data-density="compact"] .lh-thrust-row { grid-template-columns:74px 1fr 32px; gap:5px; }
+body[data-density="compact"] .lp-strip-card { flex-basis:178px; padding:7px 9px; gap:3px; }
+body[data-density="compact"] .lp-strip-name { font-size:.78rem; }
+body[data-density="compact"] .lp-strip-veh  { font-size:.6rem; padding:1px 5px; }
+body[data-density="compact"] .lp-strip-pad  { font-size:.58rem; }
+body[data-density="compact"] .lp-strip-cd   { font-size:.66rem; }
+body[data-density="compact"] #lp-app { gap:10px; padding:10px; }
+body[data-density="compact"] .lp-card { padding:9px 11px; }
+body[data-density="compact"] .lp-card-name { font-size:.9rem; }
+body[data-density="compact"] .lp-chip { font-size:.66rem; padding:3px 9px; }
+
+/* Compact-mode button in canvas header */
+.lp-density-btn {
+    margin-left:auto;
+    background:rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.12);
+    color:#9ab;
+    font-size:.62rem; font-weight:700; letter-spacing:.06em;
+    padding:3px 10px;
+    border-radius:5px;
+    cursor:pointer;
+    font-family:inherit;
+    transition:all .15s;
+}
+.lp-density-btn:hover { border-color:rgba(0,200,200,.5); color:#0ff; }
+body[data-density="compact"] .lp-density-btn {
+    background:rgba(0,200,200,.16);
+    border-color:#0cc;
+    color:#0ff;
+}
+
 /* ─── App layout ─────────────────────────────────────── */
 #lp-app {
     display:grid;
@@ -722,7 +817,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
     border:1px solid rgba(255,80,40,.35);
     border-radius:6px;
     font-family:'Consolas', 'Monaco', monospace;
-    pointer-events:none;
+    /* draggable — pointer-events stay enabled */
 }
 .lh-met-row {
     display:flex; align-items:center; gap:8px;
@@ -766,7 +861,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
     border:1px solid rgba(255,140,40,.32);
     border-radius:8px;
     padding:8px 8px 6px;
-    pointer-events:none;
+    /* draggable — pointer-events stay enabled */
     font-family:'Consolas','Monaco',monospace;
 }
 .lh-force-hd {
@@ -970,11 +1065,14 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
 <section id="lp-canvas-top">
 
     <!-- 3D Vehicle Canvas (relocated from below) -->
-    <div class="lp-panel" id="lp-vehicle">
-        <div class="lh-section-hd">
+    <div class="lp-panel" id="lp-vehicle" data-collapse-id="vehicle">
+        <div class="lh-section-hd lp-collapse-hd">
             <h2>Vehicle Visualization · Generic</h2>
-            <p>Procedural 3D placeholders — built from primitives, not licensed models. Click a launch below or pick a vehicle to preview the matching stack.</p>
+            <p class="lh-section-sub">Procedural 3D placeholders — click a launch or pick a vehicle to preview the matching stack.</p>
+            <button type="button" class="lp-density-btn" id="lp-density-btn" title="Toggle compact display"
+                    aria-label="Toggle compact display">⇲ Compact</button>
         </div>
+        <div class="lp-collapse-body">
 
         <!-- Vehicle + variant selector row -->
         <div class="lh-vehicle-picker">
@@ -1076,18 +1174,21 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
                 <!-- Filled dynamically by initVehicleCanvas onVehicleChange -->
             </aside>
         </div>
+        </div><!-- /.lp-collapse-body -->
     </div>
 
     <!-- Next Launches strip — horizontally scrollable cards, each declares
          the matching 3D model. Clicking a card auto-binds the canvas via
          the existing roster→model bridge. -->
-    <div class="lp-panel" id="lp-strip">
-        <div class="lp-strip-hd">
+    <div class="lp-panel" id="lp-strip" data-collapse-id="strip">
+        <div class="lp-strip-hd lp-collapse-hd">
             <h2>Next Launches</h2>
             <span class="lp-strip-sub" id="lp-strip-sub">Loading upcoming launches…</span>
         </div>
-        <div class="lp-strip-track" id="lp-strip-track">
-            <div class="lp-strip-empty">Awaiting roster…</div>
+        <div class="lp-collapse-body">
+            <div class="lp-strip-track" id="lp-strip-track">
+                <div class="lp-strip-empty">Awaiting roster…</div>
+            </div>
         </div>
     </div>
 
@@ -1096,25 +1197,30 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
 <div id="lp-app">
 
     <!-- Left: Filters -->
-    <aside class="lp-panel" id="lp-filters">
-        <div class="lp-label">Window</div>
-        <div class="lp-chip-row">
-            <button type="button" class="lp-chip" data-window-days="7">7 days</button>
-            <button type="button" class="lp-chip" data-window-days="30">30 days</button>
-            <button type="button" class="lp-chip lp-chip--on" data-window-days="90">90 days</button>
+    <aside class="lp-panel" id="lp-filters" data-collapse-id="filters">
+        <div class="lp-filters-hd lp-collapse-hd">
+            <h3>Filters</h3>
         </div>
+        <div class="lp-collapse-body">
+            <div class="lp-label">Window</div>
+            <div class="lp-chip-row">
+                <button type="button" class="lp-chip" data-window-days="7">7 days</button>
+                <button type="button" class="lp-chip" data-window-days="30">30 days</button>
+                <button type="button" class="lp-chip lp-chip--on" data-window-days="90">90 days</button>
+            </div>
 
-        <div class="lp-label">Weather Verdict</div>
-        <div class="lp-chip-row">
-            <button type="button" class="lp-chip lp-chip--on" data-verdict-filter="all">All</button>
-            <button type="button" class="lp-chip lp-chip--green" data-verdict-filter="green">GO</button>
-            <button type="button" class="lp-chip lp-chip--yellow" data-verdict-filter="yellow">HOLD</button>
-            <button type="button" class="lp-chip lp-chip--red" data-verdict-filter="red">NO-GO</button>
-        </div>
+            <div class="lp-label">Weather Verdict</div>
+            <div class="lp-chip-row">
+                <button type="button" class="lp-chip lp-chip--on" data-verdict-filter="all">All</button>
+                <button type="button" class="lp-chip lp-chip--green" data-verdict-filter="green">GO</button>
+                <button type="button" class="lp-chip lp-chip--yellow" data-verdict-filter="yellow">HOLD</button>
+                <button type="button" class="lp-chip lp-chip--red" data-verdict-filter="red">NO-GO</button>
+            </div>
 
-        <div class="lp-label">Launch Provider</div>
-        <div class="lp-chip-row" id="lp-providers">
-            <span style="font-size:.72rem;color:#556;font-style:italic">Loading…</span>
+            <div class="lp-label">Launch Provider</div>
+            <div class="lp-chip-row" id="lp-providers">
+                <span style="font-size:.72rem;color:#556;font-style:italic">Loading…</span>
+            </div>
         </div>
     </aside>
 
@@ -1138,21 +1244,25 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
 <section id="lp-history">
 
     <!-- Achievement Runs -->
-    <div class="lp-panel" id="lp-achievements">
-        <div class="lh-section-hd">
+    <div class="lp-panel" id="lp-achievements" data-collapse-id="achievements">
+        <div class="lh-section-hd lp-collapse-hd">
             <h2>Achievement Runs</h2>
             <p>Program-scale milestone flights from NASA and SpaceX — the launches that opened doors no one had walked through before.</p>
         </div>
-        <div id="lh-achievements-root"></div>
+        <div class="lp-collapse-body">
+            <div id="lh-achievements-root"></div>
+        </div>
     </div>
 
     <!-- Historic Timeline -->
-    <div class="lp-panel" id="lp-timeline">
-        <div class="lh-section-hd">
+    <div class="lp-panel" id="lp-timeline" data-collapse-id="timeline">
+        <div class="lh-section-hd lp-collapse-hd">
             <h2>Historic Timeline</h2>
             <p>Every milestone flight, plotted chronologically. Click a marker to jump to the program above. Scroll horizontally to span 1961 → today.</p>
         </div>
-        <div id="lh-timeline-root"></div>
+        <div class="lp-collapse-body">
+            <div id="lh-timeline-root"></div>
+        </div>
     </div>
 
 </section>
@@ -1162,6 +1272,23 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
     import { renderAchievements, renderTimeline } from './js/launch-history.js';
     import { initVehicleCanvas } from './js/launch-vehicle-3d.js';
     import { REFERENCE_THRUSTS, REFERENCE_MAX_MN } from './js/launch-engines.js';
+    import {
+        wireAllCollapsibles, makeDraggable,
+        initDensity, toggleDensity,
+    } from './js/launch-ui-panels.js';
+
+    // Apply persisted density setting before any rendering so cards lay out
+    // at the correct size on first paint.
+    initDensity();
+    // Wire up every [data-collapse-id] panel for click-to-collapse. Strip
+    // and Filters default to expanded; the user toggles from there.
+    wireAllCollapsibles();
+    // Density button in the vehicle-panel header — toggles the body's
+    // data-density attribute, which CSS uses to retighten everything.
+    document.getElementById('lp-density-btn')?.addEventListener('click', e => {
+        e.stopPropagation();
+        toggleDensity();
+    });
 
     renderAchievements(document.getElementById('lh-achievements-root'));
     renderTimeline(document.getElementById('lh-timeline-root'));
@@ -1292,6 +1419,20 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
                     metEl.hidden = true;
                 },
             });
+
+            // ── Draggable canvas overlays ─────────────────────────────────
+            // Pointer-drag any of the four overlays to a custom position;
+            // double-click the panel header to snap back to default.
+            const dragTargets = [
+                ['.lh-vehicle-views',   'views'],
+                ['.lh-vehicle-toggles', 'toggles'],
+                ['#lh-met',             'met'],
+                ['#lh-force',           'force'],
+            ];
+            for (const [sel, key] of dragTargets) {
+                const el = document.querySelector(sel);
+                if (el) makeDraggable(el, { key });
+            }
 
             // ── Roster → 3D auto-bind ─────────────────────────────────────
             // launch-planner.js dispatches `lp:launch-selected` whenever a
