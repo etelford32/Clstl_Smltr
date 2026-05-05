@@ -227,12 +227,69 @@
     </footer>
 
     <script type="module">
-        import init from './star_renderer.js';
+        import init, {
+            set_live_wind_speed,
+            set_solar_features,
+            load_flare_model_weights,
+        } from './star_renderer.js';
+
+        // Feature index constants must match prediction/feature_extract.rs order.
+        // [0] xray_flux_norm  [1] xray_deriv      [2] wind_speed_norm
+        // [3] wind_trend       [4] bz_southward    [5] density_norm
+        // [6] radio_flux_norm  [7] ar_count_norm   [8] ar_mag_class_norm
+        // [9] flare_rate_norm  [10] hours_since_m  [11] cme_speed_norm
+
+        function clamp01(v) { return Math.max(0, Math.min(1, v)); }
+
+        // Poll solar wind API (60 s cadence) → push speed + Bz features.
+        function startWindBridge() {
+            const URL    = '/api/solar-wind/wind-speed';
+            const POLL   = 60_000;
+            let lastNorm = 0.5;
+
+            async function fetch_and_push() {
+                try {
+                    const res  = await fetch(URL);
+                    if (!res.ok) return;
+                    const body = await res.json();
+                    const cur  = body?.data?.current;
+                    if (!cur) return;
+
+                    const norm = clamp01(cur.speed_norm ?? 0.5);
+                    const kmS  = cur.speed_km_s ?? 450;
+                    set_live_wind_speed(norm, kmS);
+
+                    // Features derived from the wind response.
+                    const trend = clamp01((norm - lastNorm + 1) / 2); // -1..1 → 0..1
+                    lastNorm    = norm;
+
+                    // Bz: bz_nt is negative = southward; clamp southward portion to 0..1.
+                    const bzRaw      = cur.bz_nt ?? 0;
+                    const bzSouth    = clamp01(-bzRaw / 30);
+                    const densityNorm = clamp01(((cur.density_cc ?? 5) - 1) / 24);
+
+                    // Push the wind-derived subset of the 12-feature vector.
+                    // Full vector uses set_solar_features(Float32Array of length 12);
+                    // partial updates go through set_solar_feature(index, value).
+                    const feats = new Float32Array(12);
+                    feats.fill(0);
+                    feats[2] = norm;           // wind_speed_norm
+                    feats[3] = trend;          // wind_trend
+                    feats[4] = bzSouth;        // bz_southward_norm
+                    feats[5] = densityNorm;    // density_norm
+                    set_solar_features(feats);
+                } catch (_) {}
+            }
+
+            fetch_and_push();
+            setInterval(fetch_and_push, POLL);
+        }
 
         async function run() {
             try {
                 await init();
                 document.getElementById('loading').classList.add('hidden');
+                startWindBridge();
             } catch (error) {
                 console.error('Failed to initialize WASM:', error);
                 document.getElementById('loading').innerHTML = `
