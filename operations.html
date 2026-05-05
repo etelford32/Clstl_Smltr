@@ -1343,6 +1343,105 @@ body {
     padding-top: 6px;
 }
 
+/* ─── Orbit Inspector ─────────────────────────────────── */
+.op-orbit-empty {
+    color: #556; font-size: .72rem; line-height: 1.5;
+    padding: 6px 0;
+}
+.op-orbit-head {
+    display: flex; align-items: baseline; gap: 6px;
+    margin-bottom: 6px;
+}
+.op-orbit-name {
+    color: #cef; font-weight: 700;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    flex: 1; min-width: 0;
+}
+.op-orbit-id {
+    color: #678; font-family: monospace; font-size: .64rem;
+}
+.op-orbit-group {
+    font-family: monospace; font-size: .58rem;
+    color: #9bd;
+    background: rgba(0,200,200,.08);
+    padding: 0 5px; border-radius: 2px;
+}
+.op-orbit-elements {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 6px;
+    font-size: .68rem;
+}
+.op-orbit-elements td {
+    padding: 2px 4px;
+    border-bottom: 1px solid rgba(255,255,255,.04);
+}
+.op-orbit-elements tr:last-child td { border-bottom: 0; }
+.op-orbit-cell-k {
+    color: #9bd; font-family: monospace;
+    width: 52px;
+}
+.op-orbit-cell-v {
+    color: #cef; font-family: monospace; text-align: right;
+}
+.op-orbit-unit {
+    color: #678; font-size: .58rem;
+}
+.op-orbit-derived {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 4px 8px;
+    padding: 6px 0;
+    border-top: 1px solid rgba(255,255,255,.04);
+    border-bottom: 1px solid rgba(255,255,255,.04);
+    margin-bottom: 6px;
+    font-size: .66rem;
+}
+.op-orbit-tag {
+    font-size: .56rem; color: #678;
+    text-transform: uppercase; letter-spacing: .08em;
+    margin-right: 4px;
+}
+.op-orbit-spark {
+    width: 100%;
+    height: 44px;
+    margin: 4px 0 6px;
+    background: rgba(0,200,200,.04);
+    border-radius: 3px;
+    display: block;
+}
+.op-orbit-spark-line {
+    fill: none;
+    stroke: rgba(0,255,200,.7);
+    stroke-width: 1.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.op-orbit-spark-label {
+    fill: rgba(155,200,220,.55);
+    font-family: monospace;
+    font-size: 8px;
+}
+.op-orbit-rates {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 4px 8px;
+    padding-top: 6px;
+    font-size: .66rem;
+}
+.op-orbit-rate-title {
+    grid-column: 1 / -1;
+    font-size: .58rem; color: #678;
+    text-transform: uppercase; letter-spacing: .08em;
+}
+.op-orbit-caveat {
+    margin-top: 6px;
+    color: #678; font-size: .6rem;
+    font-style: italic;
+    border-top: 1px dashed rgba(255,255,255,.05);
+    padding-top: 6px;
+}
+
 /* ─── Prop Budget ──────────────────────────────────────── */
 .op-prop-headline {
     display: flex; align-items: baseline; gap: 10px;
@@ -2003,6 +2102,15 @@ body {
             </div>
         </div>
         <div class="op-panel">
+            <h2 style="display:flex;align-items:baseline;gap:8px"
+                title="TLE elements, J2 secular drifts, and altitude profile for the currently selected asset.">
+                Orbit · inspector
+            </h2>
+            <div id="op-orbit-body">
+                <div class="op-orbit-empty">Select a satellite to inspect its orbit.</div>
+            </div>
+        </div>
+        <div class="op-panel">
             <h2>Export</h2>
             <div class="op-coming">
                 <b>Coming next.</b> JSON + CSV open to all. CDM export is
@@ -2084,6 +2192,7 @@ import { OperationsVisuals }  from './js/operations/visuals.js';
 import { mountGlobePicker }   from './js/operations/globe-picker.js';
 import { mountConjTimeline }  from './js/operations/conj-timeline.js';
 import { mountManeuverPanel } from './js/operations/maneuver.js';
+import { mountOrbitInspector } from './js/operations/orbit-inspector.js';
 import { showToast }          from './js/operations/toast.js';
 import * as bPlane            from './js/operations/b-plane.js';
 import * as densityMap        from './js/operations/density-map.js';
@@ -2354,6 +2463,16 @@ mountConjTimeline({
 mountManeuverPanel({
     host:           document.getElementById('op-mvr-body'),
     deck:           conjDeck,
+    tracker:        fleet.tracker,
+    getSelectedId:  () => visuals.getSelectedAsset(),
+    onSelectChange: (fn) => visuals.onSelectionChange(fn),
+});
+
+// Per-asset orbit & perturbation inspector — TLE elements, J2
+// secular drifts, altitude profile over one orbit. Reads from
+// the same selection bus as the maneuver panel.
+mountOrbitInspector({
+    host:           document.getElementById('op-orbit-body'),
     tracker:        fleet.tracker,
     getSelectedId:  () => visuals.getSelectedAsset(),
     onSelectChange: (fn) => visuals.onSelectionChange(fn),
