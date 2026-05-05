@@ -203,11 +203,12 @@ pub fn compute_field_lines(input: JsValue) -> Result<FieldAtlas, JsValue> {
         for V3 { x, y, z } in &line.tangents { tangents.extend_from_slice(&[*x, *y, *z]); }
 
         // Foot A: first sample if it sits on the photosphere.
+        // Inverse of from_lat_lon (y-up): lat = asin(y), lon = atan2(x, z).
         let foot_a = line.samples[0];
         let r0 = foot_a.len();
         let (lat_a, lon_a) = if (r0 - 1.0).abs() < 0.01 {
-            let lat = foot_a.z.clamp(-1.0, 1.0).asin();
-            let lon = foot_a.y.atan2(foot_a.x);
+            let lat = foot_a.y.clamp(-1.0, 1.0).asin();
+            let lon = foot_a.x.atan2(foot_a.z);
             (lat, lon)
         } else {
             (f32::NAN, f32::NAN)

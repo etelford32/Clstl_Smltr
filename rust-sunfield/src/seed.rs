@@ -39,12 +39,13 @@ pub fn build_seeds(ars: &[Ar], field: &Field, budget: SeedBudget) -> Vec<Seed> {
     // ── Per-AR arcade seeds: ring around AR at low altitude
     for (i, ar) in ars.iter().enumerate() {
         let er = V3::from_lat_lon(ar.lat_rad, ar.lon_rad, 1.0);
+        // Local tangent frame at AR centre (y-up convention — matches field.rs).
         let e_lat = V3::new(
-            -ar.lat_rad.sin() * ar.lon_rad.cos(),
             -ar.lat_rad.sin() * ar.lon_rad.sin(),
              ar.lat_rad.cos(),
+            -ar.lat_rad.sin() * ar.lon_rad.cos(),
         );
-        let e_lon = V3::new(-ar.lon_rad.sin(), ar.lon_rad.cos(), 0.0);
+        let e_lon = V3::new( ar.lon_rad.cos(), 0.0, -ar.lon_rad.sin());
 
         let n = budget.per_ar.max(1);
         let radius_rad = 0.04 + 0.06 * ar.area.clamp(0.0, 1.0); // 0.04..0.10 rad
@@ -60,12 +61,12 @@ pub fn build_seeds(ars: &[Ar], field: &Field, budget: SeedBudget) -> Vec<Seed> {
         }
     }
 
-    // ── Global Fibonacci grid for quiet-sun + holes
+    // ── Global Fibonacci grid for quiet-sun + holes (y-up convention)
     let g = budget.global as i32;
     if g > 0 {
         let phi = std::f32::consts::PI * (3.0 - (5.0f32).sqrt()); // golden angle
         for i in 0..g {
-            let y = 1.0 - 2.0 * (i as f32 + 0.5) / g as f32; // (-1, 1)
+            let y = 1.0 - 2.0 * (i as f32 + 0.5) / g as f32; // (-1, 1) — polar axis
             let r = (1.0 - y * y).max(0.0).sqrt();
             let theta = phi * i as f32;
             let p = V3::new(r * theta.cos(), y, r * theta.sin());

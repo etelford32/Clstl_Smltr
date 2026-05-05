@@ -1030,6 +1030,14 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
                         <input type="range" id="sl-bline-density" min="10" max="100" step="5" value="50">
                         <span class="vdisp" id="disp-bline-density" style="font-size:10px">50%</span>
                     </div>
+                    <!-- Phase 2.3 — manual EP trigger. Hidden unless ?debug=prominence. -->
+                    <div class="ctrl" id="erupt-row" style="margin-top:6px;padding-left:22px;display:none">
+                        <button id="btn-erupt-nearest" class="cv-btn"
+                                style="font-size:11px;padding:4px 10px;background:#3a1a10;border-color:#ff5522;color:#ffaa66">
+                            ⚡ Erupt nearest filament
+                        </button>
+                        <span id="erupt-status" style="font-size:10px;color:#888;margin-left:6px"></span>
+                    </div>
                 </div>
             </div>
 
@@ -3830,20 +3838,127 @@ if (DEBUG_ANY_ATLAS) {
     })();
 }
 
+let _scorecardModule = null;
+
 if (DEBUG_PROMINENCE) {
     _prominenceModulePromise = (async () => {
         try {
-            const [bundleMod, classifierMod] = await Promise.all([
+            const [bundleMod, classifierMod, scorecardMod] = await Promise.all([
                 import('./js/prominence-bundle.js'),
                 import('./js/prominence-classifier.js'),
+                import('./js/eruption-scorecard.js'),
             ]);
-            console.log('[prominence] bundle + classifier modules loaded');
+            _scorecardModule = scorecardMod;
+            console.log('[prominence] bundle + classifier + scorecard modules loaded');
             return { bundle: bundleMod, classifier: classifierMod };
         } catch (e) {
             console.warn('[prominence] init failed:', e);
             return null;
         }
     })();
+
+    // Reveal the manual erupt UI and wire the click handler.
+    const eruptRow = document.getElementById('erupt-row');
+    const eruptBtn = document.getElementById('btn-erupt-nearest');
+    if (eruptRow) eruptRow.style.display = '';
+    if (eruptBtn) eruptBtn.addEventListener('click', _eruptNearestFilament);
+}
+
+// ── Manual EP trigger (Phase 2.3) ────────────────────────────────────────────
+// Picks the PIL-anchored bundle whose mid-arclength sample is most aligned
+// with the camera's view direction, then fires a synthetic flare at that
+// bundle's location. The classifier reads u_flare_* uniforms every frame, so
+// it picks up the trigger automatically and walks the bundle through the
+// destabilizing → erupting → fade state machine.
+function _eruptNearestFilament() {
+    const status = (msg) => {
+        const el = document.getElementById('erupt-status');
+        if (el) el.textContent = msg;
+    };
+
+    if (!_promCachedAtlas || !prominenceBundleSystem) {
+        status('PIL atlas not ready yet — wait for AR feed.');
+        return;
+    }
+
+    // Camera-pointed sub-camera point on the photosphere (the bundle most
+    // visible to the user wins).
+    const subCam = camera.position.clone().normalize();
+
+    const atlas = _promCachedAtlas;
+    const meta  = atlas.meta;
+    const positions = atlas.positions;
+    const spl   = atlas.samplesPerLine;
+    const sIdx  = Math.floor(spl / 2);
+    const STRIDE = 8;
+
+    let bestIdx = -1;
+    let bestDot = -Infinity;
+    let bestLat = 0, bestLon = 0;
+    for (let i = 0; i < atlas.lineCount; i++) {
+        const m0 = i * STRIDE;
+        if (meta[m0] !== 0 || meta[m0 + 1] !== 2) continue;  // PIL-closed only
+        const o = (i * spl + sIdx) * 3;
+        const x = positions[o], y = positions[o + 1], z = positions[o + 2];
+        const r = Math.sqrt(x * x + y * y + z * z);
+        if (r < 0.5) continue;
+        const dx = x / r, dy = y / r, dz = z / r;
+        const dot = dx * subCam.x + dy * subCam.y + dz * subCam.z;
+        if (dot > bestDot) {
+            bestDot = dot; bestIdx = i;
+            // Inverse of WASM from_lat_lon (y-up): lat = asin(y), lon = atan2(x, z).
+            bestLat = Math.asin(Math.max(-1, Math.min(1, dy)));
+            bestLon = Math.atan2(dx, dz);
+        }
+    }
+
+    if (bestIdx < 0) {
+        status('No PIL bundles available.');
+        return;
+    }
+
+    // Fire synthetic flare. u_flare_intensity decays exponentially in animate(),
+    // but the classifier's wasErupting check holds the bundle in EP for 16 s.
+    uniforms.u_flare_lat.value       = bestLat;
+    uniforms.u_flare_lon.value       = bestLon;
+    uniforms.u_flare_intensity.value = 1.0;
+    uniforms.u_flare_t.value         = 0.0;
+
+    const latDeg = bestLat * 180 / Math.PI;
+    const lonDeg = bestLon * 180 / Math.PI;
+    const ns = latDeg >= 0 ? 'N' : 'S';
+    const ew = lonDeg >= 0 ? 'W' : 'E';
+    const loc = `${ns}${String(Math.round(Math.abs(latDeg))).padStart(2,'0')}` +
+                `${ew}${String(Math.round(Math.abs(lonDeg))).padStart(2,'0')}`;
+    status(`▲ Erupting bundle #${bestIdx} at ${loc}`);
+    console.log(`[erupt] manual EP triggered on bundle ${bestIdx} at ${loc} (cos∠cam=${bestDot.toFixed(2)})`);
+
+    // ── Educational scorecard (manual eruptions only) ────────────────────────
+    // Compute metrics now from the bundle's current state, schedule the card
+    // to slide in ~5 sim-seconds later (just after the impulsive flash so the
+    // visual eruption catches the eye first).
+    if (_scorecardModule && _promClassifierRef) {
+        // Re-classify so we have the current bundle entry (incl. EP params).
+        const bundles = _promClassifierRef.classifyBundles({
+            atlas: _promCachedAtlas,
+            liveRegions,
+            time:           uniforms.u_time.value,
+            flareIntensity: uniforms.u_flare_intensity.value,
+            flareLatRad:    uniforms.u_flare_lat.value,
+            flareLonRad:    uniforms.u_flare_lon.value,
+        });
+        const target = bundles.find(b => b.lineIdx === bestIdx) || bundles[0];
+        const metrics = _scorecardModule.computeMetrics({
+            atlas:   _promCachedAtlas,
+            lineIdx: bestIdx,
+            bundle:  target,
+            liveRegions,
+        });
+        _scorecardModule.show(metrics, {
+            delaySec: 5,
+            simSpeed: simSpeed,
+        });
+    }
 }
 
 async function rebuildDebugFieldAtlas() {

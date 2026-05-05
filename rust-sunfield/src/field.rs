@@ -114,15 +114,15 @@ pub fn build_field(ars: &[Ar], holes: &[Hole]) -> Field {
     for ar in ars {
         let r0 = 1.0 - BURIAL_DEPTH;
 
-        // Local frame at the AR centre.
+        // Local frame at the AR centre (y-up convention).
         let er = V3::from_lat_lon(ar.lat_rad, ar.lon_rad, 1.0);
-        // ê_lat (north) and ê_lon (east) on a unit sphere
+        // ê_lat (north) and ê_lon (east) on a unit sphere — derivatives of er.
         let e_lat = V3::new(
-            -ar.lat_rad.sin() * ar.lon_rad.cos(),
             -ar.lat_rad.sin() * ar.lon_rad.sin(),
              ar.lat_rad.cos(),
+            -ar.lat_rad.sin() * ar.lon_rad.cos(),
         );
-        let e_lon = V3::new(-ar.lon_rad.sin(), ar.lon_rad.cos(), 0.0);
+        let e_lon = V3::new( ar.lon_rad.cos(), 0.0, -ar.lon_rad.sin());
 
         // Dipole moment direction: tangent plane, tilted from east-west by
         // Joy's law. Sign of moment = polarity (leading magnetic sense).
