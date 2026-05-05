@@ -2232,9 +2232,14 @@ const sunFS = /* glsl */`
         vec3  vDir = normalize(vViewDir);
         float mu   = max(dot(nrm, vDir), 0.0);
 
-        // Spherical coordinates
+        // Spherical coordinates. Convention: y is the solar rotation axis,
+        // +z points toward the sub-Earth observer. lon = atan(x, z) so that
+        // a fragment at heliographic (lat, lon) — built via vec3(cos(lat)
+        // sin(lon), sin(lat), cos(lat) cos(lon)) — gives back the same lon.
+        // Comparisons against u_flare_lon (which is set by JS as
+        // heliographic radians) are then correct.
         float lat = asin(clamp(vPosition.y, -1.0, 1.0));
-        float lon = atan(vPosition.z, vPosition.x);
+        float lon = atan(vPosition.x, vPosition.z);
 
         // Differential rotation (Snodgrass 1990): Ω(lat) = A + B sin²(lat) + C sin⁴(lat)
         float sinLat2 = sin(lat) * sin(lat);
@@ -2390,11 +2395,9 @@ const sunFS = /* glsl */`
             // offset N/S from the flare site.
             float rib1, rib2;
             if (u_flare_ribbons_active > 0.5) {
-                // Use the world-space fragment position directly. (Earlier
-                // code reconstructed it from the (lat,lon) varyings, but
-                // those use atan(z,x) so the round-trip swapped X and Z
-                // and the polyline-distance test collapsed to ≈0
-                // everywhere — no visible ribbons.)
+                // Use the world-space fragment position directly — same
+                // coordinate frame as the WASM-derived ribbon polyline,
+                // so the polyline-distance test discriminates correctly.
                 vec3 p3 = normalize(vPosition);
                 float d1 = ribbonDist(p3, 0.0);
                 float d2 = ribbonDist(p3, 1.0);
@@ -2605,7 +2608,8 @@ const chromoFS = /* glsl */`
 
         // ── Chromospheric flare brightening (Hα ribbons) ─────────────────────
         float lat_c   = asin(clamp(n3d.y, -1.0, 1.0));
-        float lon_c   = atan(n3d.z, n3d.x);
+        // lon = atan(x, z) so heliographic comparisons with u_flare_lon work.
+        float lon_c   = atan(n3d.x, n3d.z);
         float cos_df  = sin(lat_c)*sin(u_flare_lat) + cos(lat_c)*cos(u_flare_lat)*cos(lon_c - u_flare_lon);
         float df_c    = acos(clamp(cos_df, -1.0, 1.0));
         float chromoFl = exp(-df_c*df_c / 0.075) * exp(-u_flare_t / 90.0) * u_flare_intensity;
@@ -2802,7 +2806,8 @@ const trFS = /* glsl */`
         // X-ray + EUV irradiance spikes within seconds of flare onset,
         // rapidly heating the transition region across the visible disk.
         float lat_t  = asin(clamp(n3d.y, -1.0, 1.0));
-        float lon_t  = atan(n3d.z, n3d.x);
+        // lon = atan(x, z) so heliographic comparisons with u_flare_lon work.
+        float lon_t  = atan(n3d.x, n3d.z);
         float cos_df = sin(lat_t)*sin(u_flare_lat) + cos(lat_t)*cos(u_flare_lat)*cos(lon_t - u_flare_lon);
         float df_t   = acos(clamp(cos_df, -1.0, 1.0));
         // Localized brightening near flare site (fast impulsive phase)
@@ -2891,7 +2896,8 @@ const coronaFS = /* glsl */`
         vec3  vd  = normalize(vViewDir);
         float rim = 1.0 - max(dot(n3d, vd), 0.0);
         float lat = asin(clamp(n3d.y, -1.0, 1.0));
-        float lon = atan(n3d.z, n3d.x) + u_time * 0.0025 * u_rot;
+        // lon = atan(x, z) so heliographic comparisons with u_flare_lon work.
+        float lon = atan(n3d.x, n3d.z) + u_time * 0.0025 * u_rot;
 
         // ── Coronal hole mask ─────────────────────────────────────────────────
         // Polar coronal holes: dark (open B-field, fast wind escapes freely).
@@ -3093,7 +3099,7 @@ const outerGlowFS = /* glsl */`
         float beltAlph = beltW * pow(rim, 2.5) * (0.04 + u_kp_norm * 0.08 + u_activity * 0.05);
 
         // Slow animated streamer tendrils (Parker-spiral phase drift)
-        float lon    = atan(N.z, N.x);
+        float lon    = atan(N.x, N.z);
         float tPhase = u_time * 0.04;
         float tendril = sin(lon * 3.0 + tPhase) * sin(lon * 7.0 - tPhase * 1.7);
         tendril = smoothstep(0.3, 0.9, tendril) * beltW * pow(rim, 3.5)
