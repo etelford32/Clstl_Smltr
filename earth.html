@@ -2229,6 +2229,8 @@ import { AtmosphereClimatology }    from './js/atmosphere-climatology.js';
 import { makeAtmosphereForecasters } from './js/atmosphere-forecast.js';
 import { makeWeatherFlowForecasters } from './js/weather-flow.js';
 import { TracerSkillTracker } from './js/tracer-skill-tracker.js';
+import { WindShearProxy } from './js/wind-shear-proxy.js';
+import { AdvectionGainTracker } from './js/advection-gain-tracker.js';
 import { createWeatherOverlay } from './js/weather-overlay.js';
 import { StormWatchPanel } from './js/storm-watch-panel.js';
 import { StormTrackOverlay } from './js/storm-track-overlay.js';
@@ -4579,10 +4581,27 @@ const opticalFlowSkillTracker = new TracerSkillTracker({
                            // in the registry, not LK itself.
     priorWeights: [0.20, 0.45, 0.35],
 });
-for (const F of makeWeatherFlowForecasters({ skillTracker: opticalFlowSkillTracker })) {
+// Wind-advection gain learner: per-horizon scalar α[h] ∈ [0, 1] that
+// fades the semi-Lagrangian step toward persistence at horizons where
+// the steady-flow assumption breaks. Modulated at runtime by a shear
+// proxy ("how steady has the wind been the past few hours?").
+const advectionGainTracker = new AdvectionGainTracker({
+    modelId:  'wind-advection-v1',
+    horizons: FORECAST_HORIZONS_H,
+    referenceModel: 'persistence-v1',
+});
+const windShearProxy = new WindShearProxy();
+for (const F of makeWeatherFlowForecasters({
+    skillTracker: opticalFlowSkillTracker,
+    gainTracker:  advectionGainTracker,
+    shearProxy:   windShearProxy,
+})) {
     wxForecastRegistry.register(F);
 }
-window._opticalFlowSkillTracker = opticalFlowSkillTracker;   // dev-console handle
+// Dev-console handles for tweaking + inspection.
+window._opticalFlowSkillTracker = opticalFlowSkillTracker;
+window._advectionGainTracker    = advectionGainTracker;
+window._windShearProxy          = windShearProxy;
 
 // ── Cloud + wind forecasters ─────────────────────────────────────────────
 // Same trio (Climatology / AnomalyPersistence / AnomalyAR) as precip,
@@ -4724,6 +4743,53 @@ function _paintForecastSkill(summary) {
                         cell = (skill * 100).toFixed(0) + '%';
                         title += ` MAE=${m.mae.toFixed(2)} skill=${skill.toFixed(2)}`;
                     }
+                }
+                html += `<span class="skill-cell" title="${title}">${cell}</span>`;
+            }
+            html += '</div>';
+        }
+    }
+
+    // Flow-based forecasters (advection-driven). These shine on
+    // moving fields (T, U, V, RH advected by wind / cloud-feature
+    // motion); we average their Murphy skill across those four
+    // channels per horizon so the user sees one number per cell. We
+    // skip channel-by-channel breakouts here — that level of detail
+    // belongs in a power-user table, not the SW panel headline.
+    const FLOW_MODELS = [
+        { id: 'wind-advection-v1', short: 'wind-adv' },
+        { id: 'optical-flow-v1',  short: 'opt-flow' },
+    ].filter(m => summary[m.id]);   // hide rows for unregistered/cold models
+    if (FLOW_MODELS.length > 0) {
+        html += '<div class="skill-row skill-head" style="margin-top:6px;"><span>flow</span>';
+        for (const h of FORECAST_HORIZONS_H) html += `<span>${h}h</span>`;
+        html += '</div>';
+        for (const { id, short } of FLOW_MODELS) {
+            html += `<div class="skill-row"><span class="skill-ch" title="${id}">${short}</span>`;
+            for (const h of FORECAST_HORIZONS_H) {
+                // Average MSE of model and persistence across VISIBLE_CHANNELS,
+                // gated on every channel having ≥5 matched targets so we
+                // don't paint a meaningless headline number while the
+                // model is still warming up.
+                let mseM = 0, mseR = 0, nMin = Infinity;
+                let valid = true;
+                for (const ch of VISIBLE_CHANNELS) {
+                    const m = summary[id]?.[ch]?.[h];
+                    const r = summary['persistence-v1']?.[ch]?.[h];
+                    if (!m || !r || !Number.isFinite(m.mse) || !Number.isFinite(r.mse) || r.mse <= 0) {
+                        valid = false; break;
+                    }
+                    mseM += m.mse; mseR += r.mse;
+                    nMin = Math.min(nMin, m.n | 0, r.n | 0);
+                }
+                let cell = '—';
+                let title = `model=${id} h=${h}h`;
+                if (valid && nMin >= 5) {
+                    const skill = 1 - (mseM / mseR);
+                    cell = (skill * 100).toFixed(0) + '%';
+                    title += ` n=${nMin} avg-skill=${skill.toFixed(2)} (T+U+V+RH)`;
+                } else {
+                    title += ` n=${Number.isFinite(nMin) ? nMin : 0}`;
                 }
                 html += `<span class="skill-cell" title="${title}">${cell}</span>`;
             }
