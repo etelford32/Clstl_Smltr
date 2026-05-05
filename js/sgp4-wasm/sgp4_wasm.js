@@ -166,6 +166,36 @@ export function registry_propagate(now_jd, gmst_rad, scale) {
 }
 
 /**
+ * Zero-allocation companion to `registry_propagate`. Writes the
+ * same [x, y, z] triplets directly into the supplied JS
+ * `Float32Array`, which is typically backed by a SharedArrayBuffer
+ * the main thread is already using as the THREE position
+ * attribute. One memcpy from a thread-local Rust scratch buffer
+ * (`OUT_BUFFER`) to the JS-side typed array; no per-frame
+ * `Vec<f32>` allocation, no per-frame wasm-bindgen → Float32Array
+ * conversion.
+ *
+ * Returns the slot count actually written (= registered sats).
+ * `out` MUST be at least 3 × registry_len() floats long; if it's
+ * shorter we write what fits and return that count, leaving the
+ * remainder of the registry untouched. Caller can detect this by
+ * comparing the return to its expected slot count.
+ * @param {number} now_jd
+ * @param {number} gmst_rad
+ * @param {number} scale
+ * @param {Float32Array} out
+ * @returns {number}
+ */
+export function registry_propagate_into(now_jd, gmst_rad, scale, out) {
+    try {
+        const ret = wasm.registry_propagate_into(now_jd, gmst_rad, scale, addBorrowedObject(out));
+        return ret >>> 0;
+    } finally {
+        heap[stack_pointer++] = undefined;
+    }
+}
+
+/**
  * Mark a slot as removed. The slot is kept (so subsequent indices
  * don't shift) but propagation skips it.
  * @param {number} idx
@@ -191,12 +221,23 @@ function __wbg_get_imports() {
         __wbg___wbindgen_throw_9c75d47bf9e7731e: function(arg0, arg1) {
             throw new Error(getStringFromWasm0(arg0, arg1));
         },
+        __wbg_length_5693120f2a64a00d: function(arg0) {
+            const ret = getObject(arg0).length;
+            return ret;
+        },
         __wbg_new_2fad8ca02fd00684: function() {
             const ret = new Object();
             return addHeapObject(ret);
         },
+        __wbg_set_15b3678c712ded6b: function(arg0, arg1, arg2) {
+            getObject(arg0).set(getArrayF32FromWasm0(arg1, arg2));
+        },
         __wbg_set_6be42768c690e380: function(arg0, arg1, arg2) {
             getObject(arg0)[takeObject(arg1)] = takeObject(arg2);
+        },
+        __wbg_subarray_2a79e7a5db50bc18: function(arg0, arg1, arg2) {
+            const ret = getObject(arg0).subarray(arg1 >>> 0, arg2 >>> 0);
+            return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000001: function(arg0) {
             // Cast intrinsic for `F64 -> Externref`.
@@ -212,6 +253,9 @@ function __wbg_get_imports() {
             const ret = getObject(arg0);
             return addHeapObject(ret);
         },
+        __wbindgen_object_drop_ref: function(arg0) {
+            takeObject(arg0);
+        },
     };
     return {
         __proto__: null,
@@ -226,6 +270,12 @@ function addHeapObject(obj) {
 
     heap[idx] = obj;
     return idx;
+}
+
+function addBorrowedObject(obj) {
+    if (stack_pointer == 1) throw new Error('out of js stack');
+    heap[--stack_pointer] = obj;
+    return stack_pointer;
 }
 
 function dropObject(idx) {
@@ -330,6 +380,8 @@ function passStringToWasm0(arg, malloc, realloc) {
     WASM_VECTOR_LEN = offset;
     return ptr;
 }
+
+let stack_pointer = 1024;
 
 function takeObject(idx) {
     const ret = getObject(idx);
