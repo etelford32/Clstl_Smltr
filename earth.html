@@ -174,8 +174,102 @@ nav {
 #layer-panel h3 { color:#00c6ff; font-size:10px; text-transform:uppercase;
     letter-spacing:.8px; margin-bottom:10px; }
 .lyr { display:flex; align-items:center; gap:8px; margin-bottom:7px; cursor:pointer; }
-.lyr input[type=checkbox] { accent-color:#00c6ff; width:13px; height:13px; flex-shrink:0; }
 .lyr label { color:#b0c8d8; font-size:11px; cursor:pointer; user-select:none; line-height:1.3; }
+
+/* ─── 3D pill-toggle switch (replaces stock <input type=checkbox>) ────────
+   Visible affordance > a 13 px square. We hide the native checkbox
+   and synthesise a 30 × 16 pill with a 12 px knob using ::before /
+   ::after pseudo-elements. Colour scheme:
+     OFF — graphite track, mid-grey knob, deep inset shadow (concave).
+     ON  — cyan-blue gradient track with a thin cyan rim glow, white
+           knob slid right, drop-shadow underneath (raised).
+   Both states use a slight 1 px highlight on the top edge of the knob
+   to fake a curved bevel without textures.
+   The track and knob each have transition rules so flipping the
+   checkbox animates the state change in ~140 ms — fast enough that
+   power users don't feel slowed down, slow enough to register as
+   intentional. */
+.lyr input[type=checkbox],
+.lyr-featured-row input[type=checkbox] {
+    -webkit-appearance: none;
+    appearance: none;
+    position: relative;
+    width: 30px;            /* track width */
+    height: 16px;
+    flex-shrink: 0;
+    margin: 0;
+    cursor: pointer;
+    background: linear-gradient(180deg, rgba(0,0,0,.55) 0%, rgba(255,255,255,.04) 100%);
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 999px;
+    box-shadow:
+        inset 0 1px 2px rgba(0,0,0,.55),
+        inset 0 -1px 0 rgba(255,255,255,.04);
+    transition: background .14s ease, border-color .14s ease, box-shadow .18s ease;
+}
+.lyr input[type=checkbox]::before,
+.lyr-featured-row input[type=checkbox]::before {
+    content: '';
+    position: absolute;
+    top: 1px; left: 1px;
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: linear-gradient(180deg, #b8c0c8 0%, #6a747e 100%);
+    box-shadow:
+        0 1px 1px rgba(0,0,0,.5),
+        inset 0 1px 0 rgba(255,255,255,.35),
+        inset 0 -1px 0 rgba(0,0,0,.25);
+    transition: transform .16s cubic-bezier(.5,.2,.3,1.4), background .14s ease;
+}
+.lyr input[type=checkbox]:checked,
+.lyr-featured-row input[type=checkbox]:checked {
+    background: linear-gradient(180deg, #0099c8 0%, #00d4ff 100%);
+    border-color: rgba(0,210,255,.55);
+    box-shadow:
+        0 0 6px rgba(0,210,255,.45),
+        inset 0 1px 1px rgba(255,255,255,.18),
+        inset 0 -1px 1px rgba(0,0,0,.25);
+}
+.lyr input[type=checkbox]:checked::before,
+.lyr-featured-row input[type=checkbox]:checked::before {
+    transform: translateX(14px);
+    background: linear-gradient(180deg, #ffffff 0%, #d8eef6 100%);
+    box-shadow:
+        0 1px 2px rgba(0,0,0,.45),
+        inset 0 1px 0 rgba(255,255,255,.95),
+        inset 0 -1px 0 rgba(0,170,210,.20);
+}
+/* Hover: lift the knob slightly so the toggle reads as alive. */
+.lyr:hover input[type=checkbox]:not(:checked)::before,
+.lyr-featured-row:hover input[type=checkbox]:not(:checked)::before {
+    background: linear-gradient(180deg, #ccd4dc 0%, #7e8892 100%);
+}
+.lyr:hover input[type=checkbox]:checked,
+.lyr-featured-row:hover input[type=checkbox]:checked {
+    box-shadow:
+        0 0 8px rgba(0,210,255,.65),
+        inset 0 1px 1px rgba(255,255,255,.25),
+        inset 0 -1px 1px rgba(0,0,0,.25);
+}
+/* Focus ring for keyboard navigation — inset so it doesn't break the
+   pill silhouette. */
+.lyr input[type=checkbox]:focus-visible,
+.lyr-featured-row input[type=checkbox]:focus-visible {
+    outline: 2px solid rgba(0,210,255,.55);
+    outline-offset: 2px;
+}
+/* Featured rows host larger pills — bigger tap target, more prominent. */
+.lyr-featured-row input[type=checkbox] {
+    width: 34px; height: 18px;
+    margin-top: 0;
+}
+.lyr-featured-row input[type=checkbox]::before {
+    width: 14px; height: 14px;
+    top: 1px; left: 1px;
+}
+.lyr-featured-row input[type=checkbox]:checked::before {
+    transform: translateX(16px);
+}
 .lyr-sep { border:none; border-top:1px solid rgba(255,255,255,.07); margin:8px 0; }
 /* Per-layer data-status pip. Grey = idle (feed hasn't fired yet),
    amber pulsing = fetching, green = loaded, red = error. hover on
@@ -982,7 +1076,7 @@ nav {
     .hud-title { grid-column: 1 / -1; margin-bottom: 2px; }
 
     /* All side panels: slide up from bottom as sheets */
-    #layer-panel, #info-panel, #wx-panel, #loc-panel {
+    #layer-panel, #info-panel, #wx-panel, #loc-panel, #storm-watch-panel {
         position: absolute; z-index: 75;
         left: 0; right: 0; bottom: 56px; top: auto;
         width: 100%; max-height: 72vh; overflow-y: auto;
@@ -994,10 +1088,16 @@ nav {
     #layer-panel.panel-open,
     #info-panel.panel-open,
     #wx-panel.panel-open,
-    #loc-panel.panel-open { transform: translateY(0); }
+    #loc-panel.panel-open,
+    #storm-watch-panel.panel-open { transform: translateY(0); }
     /* On mobile the dock button drives panel-open; until tapped, the
        loc-panel stays off-screen so the globe is unobstructed. */
     #loc-panel:not(.panel-open) { transform: translateY(110%); }
+    /* Same default-hidden rule for storm-watch — power users tap the
+       🌀 dock button to surface it. Without this rule the panel would
+       appear stuck mid-screen before tap because its desktop default
+       position doesn't translate to the mobile sheet layout. */
+    #storm-watch-panel:not(.panel-open) { transform: translateY(110%); }
 
     /* Show close button on mobile */
     .panel-close { display: block; }
@@ -1993,6 +2093,9 @@ nav {
         <button class="mtb-btn" data-panel="wx-panel">
             <span class="mtb-icon">🌦</span>Weather
         </button>
+        <button class="mtb-btn" data-panel="storm-watch-panel">
+            <span class="mtb-icon">🌀</span>Storms
+        </button>
         <a href="space-weather.html" class="mtb-btn" style="text-decoration:none">
             <span class="mtb-icon">⚡</span>Full Data
         </a>
@@ -2099,6 +2202,8 @@ import {
     PrecipFusionForecaster,
 } from './js/precip-forecast.js';
 import { createWeatherOverlay } from './js/weather-overlay.js';
+import { StormWatchPanel } from './js/storm-watch-panel.js';
+import { makePanelDraggable, resetPanelPosition } from './js/draggable-panel.js';
 import { NWSAlerts, ALERT_COLORS, ALERT_CSS_COLORS, ALERT_PULSE_FREQ, SEVERITY_ORDER, classifyAlertEvent } from './js/nws-alerts.js';
 import { getAlertIconTexture, precomputeAlertIcons } from './js/alert-icons.js';
 import { IsobarLayer, geoWindMs, ISOBAR_LEVELS } from './js/isobar-engine.js';
@@ -7421,15 +7526,29 @@ function _setUserPin(lat, lon) {
 
 function _flyToUserLocation() {
     if (_userLat == null) return;
-    // Transform geographic coords through current Earth rotation to world space
-    const localPos = geoToXYZ(_userLat, _userLon);
-    const worldPos = localPos.clone().applyEuler(earthMesh.rotation);
+    flyToLatLon(_userLat, _userLon);
+}
 
+/**
+ * Generic "fly the camera to a lat/lon" hook. The user-pin button uses
+ * this; the StormWatchPanel uses it via window.flyToLatLon (exposed
+ * below). Both go through the same animation state so a click while
+ * a previous fly is still resolving overrides smoothly.
+ */
+function flyToLatLon(lat, lon) {
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    const localPos = geoToXYZ(lat, lon);
+    const worldPos = localPos.clone().applyEuler(earthMesh.rotation);
     _flyFrom.copy(camera.position);
-    _flyAimAt.copy(worldPos).multiplyScalar(0.1);      // aim near surface centre
+    _flyAimAt.copy(worldPos).multiplyScalar(0.1);
     _flyTarget   = worldPos.clone().multiplyScalar(4.2);
     _flyProgress = 0;
 }
+// Surface as a global so the StormWatchPanel (and any future module
+// living outside this script) can drive the camera without needing to
+// import the Three.js scene state directly. Single-purpose hook —
+// callers don't get raw access to camera/controls.
+window.flyToLatLon = flyToLatLon;
 
 // ═══════════════════════════════════════════════════════════════
 //  AURORA VISIBILITY FOR USER'S LOCATION
@@ -7899,17 +8018,17 @@ document.querySelectorAll('.mtb-btn[data-panel]').forEach(btn => {
     btn.addEventListener('click', () => _openMobilePanel(btn.dataset.panel));
 });
 
-// Panel close buttons
-document.querySelectorAll('.panel-close[data-close]').forEach(btn => {
-    btn.addEventListener('click', () => {
-        const id = btn.dataset.close;
-        document.getElementById(id)?.classList.remove('panel-open');
-        if (_openPanel === id) {
-            _openPanel = null;
-            _backdrop.style.display = 'none';
-            document.querySelector(`.mtb-btn[data-panel="${id}"]`)?.classList.remove('active');
-        }
-    });
+// Panel close buttons — delegated so dynamically-mounted panels work too.
+document.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('.panel-close[data-close]');
+    if (!btn) return;
+    const id = btn.dataset.close;
+    document.getElementById(id)?.classList.remove('panel-open');
+    if (_openPanel === id) {
+        _openPanel = null;
+        _backdrop.style.display = 'none';
+        document.querySelector(`.mtb-btn[data-panel="${id}"]`)?.classList.remove('active');
+    }
 });
 
 // Backdrop tap → close
@@ -7948,23 +8067,41 @@ _backdrop.addEventListener('click', _closeMobilePanel);
 // ═══════════════════════════════════════════════════════════════
 //  PANEL MINIMIZE
 // ═══════════════════════════════════════════════════════════════
-document.querySelectorAll('[data-minimize-btn]').forEach(btn => {
-    btn.addEventListener('click', e => {
-        e.stopPropagation();
-        const id    = btn.dataset.minimizeBtn;
-        const panel = document.getElementById(id);
-        if (!panel) return;
-        const minimized = panel.classList.toggle('panel-minimized');
-        btn.textContent = minimized ? '▸' : '▾';
-        try { localStorage.setItem('earth-panel-min-' + id, minimized ? '1' : '0'); } catch {}
-    });
+// Document-level delegation so dynamically-mounted panels (e.g.
+// StormWatchPanel, instantiated later in the script) also pick up the
+// minimise behaviour without us having to remember to re-bind.
+document.addEventListener('click', e => {
+    const btn = e.target.closest('[data-minimize-btn]');
+    if (!btn) return;
+    e.stopPropagation();
+    const id    = btn.dataset.minimizeBtn;
+    const panel = document.getElementById(id);
+    if (!panel) return;
+    const minimized = panel.classList.toggle('panel-minimized');
+    btn.textContent = minimized ? '▸' : '▾';
+    try { localStorage.setItem('earth-panel-min-' + id, minimized ? '1' : '0'); } catch {}
 });
+
+// ═══════════════════════════════════════════════════════════════
+//  STORM WATCH PANEL — top-5 active cyclones worldwide
+// ═══════════════════════════════════════════════════════════════
+// Mount BEFORE the minimise/draggable wiring below so the panel's
+// dynamically-built header is present when state restore runs.
+// Subscribes to the existing 'storm-update' event from StormFeed (which
+// has been running since the early init block); the cloud shader keeps
+// painting eye markers independently, so toggling this panel off doesn't
+// change what the globe paints.
+const stormWatchPanel = new StormWatchPanel({
+    onStormClick: (lat, lon) => flyToLatLon(lat, lon),
+});
+stormWatchPanel.mount();
+window._stormWatchPanel = stormWatchPanel;   // dev console handle
 
 // Restore minimized states on load. Each panel can have an HTML default
 // (e.g. info-panel ships minimized so first-time visitors see the globe);
 // localStorage overrides the default in either direction once the user
 // explicitly toggles the panel.
-['layer-panel', 'info-panel', 'wx-panel', 'loc-panel'].forEach(id => {
+['layer-panel', 'info-panel', 'wx-panel', 'loc-panel', 'storm-watch-panel'].forEach(id => {
     try {
         const panel = document.getElementById(id);
         if (!panel) return;
@@ -7977,6 +8114,32 @@ document.querySelectorAll('[data-minimize-btn]').forEach(btn => {
         const btn = panel.querySelector('[data-minimize-btn]');
         if (btn) btn.textContent = minimized ? '▸' : '▾';
     } catch {}
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  DRAGGABLE PANELS — every chrome panel responds to header drag
+// ═══════════════════════════════════════════════════════════════
+// The header doubles as a minimise click handler; draggable-panel.js
+// distinguishes drag-from-click via a 4 px movement threshold, so a
+// quick tap still toggles minimise as before. Stored positions are
+// re-clamped to the viewport on resize/orientation change so a phone
+// in portrait never strands a panel off-screen.
+['layer-panel', 'info-panel', 'wx-panel', 'loc-panel', 'storm-watch-panel'].forEach(id => {
+    const panel = document.getElementById(id);
+    if (panel) makePanelDraggable(panel);
+});
+
+// Convenience: double-clicking a panel header resets its position to
+// CSS default. A "reset layout" button could call this too — for now
+// the gesture is enough of an escape hatch if the user drags a panel
+// somewhere awkward and wants it back where it started.
+document.querySelectorAll('.panel-header').forEach(hdr => {
+    hdr.addEventListener('dblclick', (ev) => {
+        // Don't reset when the user double-clicks a button inside the header.
+        if (ev.target.closest('.panel-btn')) return;
+        const panel = hdr.parentElement;
+        if (panel) resetPanelPosition(panel);
+    });
 });
 
 // ═══════════════════════════════════════════════════════════════
