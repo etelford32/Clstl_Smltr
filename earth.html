@@ -572,10 +572,83 @@ nav {
 /* ─── Weather analysis panel ─────────────────────────────────── */
 #wx-panel {
     position:absolute; bottom:52px; left:10px; z-index:50;
-    background:rgba(0,0,0,.72); backdrop-filter:blur(8px);
-    border:1px solid rgba(0,200,255,.18); border-radius:9px;
-    padding:12px 14px; width:190px; font-size:11px;
+    /* Layered glassy fill — subtle cyan in the top-left fading to a
+       deeper navy elsewhere so the panel reads as a 3D card pulling
+       light from above-left. Matches the storm-watch + featured-row
+       palette so the side-panel family looks like one design system. */
+    background:
+        radial-gradient(120% 90% at 0% 0%, rgba(0,210,255,.10), transparent 55%),
+        linear-gradient(180deg, rgba(6,12,22,.86), rgba(2,4,12,.92));
+    backdrop-filter:blur(12px) saturate(1.15);
+    -webkit-backdrop-filter:blur(12px) saturate(1.15);
+    border:1px solid rgba(0,200,255,.22); border-radius:10px;
+    padding:10px 12px 12px; font-size:11px;
+    /* Default size — width is what users have always seen; min/max give
+       resize handles room without letting the user drag the panel into
+       a useless 1×1 sliver. */
+    width:240px;
+    min-width:200px;
+    max-width:min(420px, calc(100vw - 30px));
+    /* The panel grows up to ~70% of the viewport before scrolling its
+       inner body. Combining max-height + overflow:hidden on the root +
+       overflow:auto on .panel-body gives us "drag to resize, scroll
+       inside the body" instead of the previous "content escapes off
+       screen" behaviour. */
+    max-height:min(70vh, calc(100vh - 80px));
+    /* Native CSS resize. The drag handle appears bottom-right and
+       respects the min/max bounds above. Only enables when the panel
+       isn't minimised — see .panel-minimized override below. */
+    resize:both;
+    overflow:hidden;
+    box-shadow:0 4px 22px rgba(0, 16, 40, .55);
 }
+/* Inner body becomes the scroll container — keeps the header + drag
+   handle + minimise/close pinned while the dense weather content
+   scrolls. The body needs an explicit max-height that's panel-height
+   minus the header to wire the scroll cleanly. */
+#wx-panel .panel-body {
+    max-height:calc(70vh - 56px);
+    overflow-y:auto; overflow-x:hidden;
+    padding-right:4px;          /* breathing room for the scrollbar */
+    /* Smooth-scroll inside the panel for keyboard PgUp/PgDn — feels
+       intentional rather than abrupt. */
+    scroll-behavior:smooth;
+}
+#wx-panel .panel-body::-webkit-scrollbar { width:4px; }
+#wx-panel .panel-body::-webkit-scrollbar-thumb {
+    background:rgba(0,200,255,.30); border-radius:2px;
+}
+#wx-panel .panel-body::-webkit-scrollbar-track { background:transparent; }
+/* Minimised panels shouldn't show the resize handle — body collapses
+   to 0, dragging the corner down would just stretch a header. */
+#wx-panel.panel-minimized {
+    resize:none;
+    max-height:none;
+}
+#wx-panel.panel-minimized .panel-body {
+    max-height:0; padding:0; overflow:hidden;
+}
+/* The native CSS-resize handle is barely visible by default — paint a
+   small tactile diagonal in the corner so users find it. Only shown
+   on hover or when interacting; doesn't compete with the panel's
+   actual content for attention. */
+#wx-panel::after {
+    content:'';
+    position:absolute; right:3px; bottom:3px;
+    width:10px; height:10px;
+    background:
+        linear-gradient(135deg,
+            transparent 0%, transparent 45%,
+            rgba(0,200,255,.45) 45%, rgba(0,200,255,.45) 55%,
+            transparent 55%, transparent 70%,
+            rgba(0,200,255,.30) 70%, rgba(0,200,255,.30) 80%,
+            transparent 80%);
+    pointer-events:none;        /* the underlying CSS resize handle
+                                   does the real work; we just paint */
+    opacity:.5; transition:opacity .15s;
+}
+#wx-panel:hover::after { opacity:.95; }
+#wx-panel.panel-minimized::after { display:none; }
 #wx-panel h3 { color:#00c6ff; font-size:10px; text-transform:uppercase;
     letter-spacing:.8px; margin-bottom:9px; }
 #wx-status-dot { width:7px; height:7px; border-radius:50%; background:#888;
@@ -704,20 +777,47 @@ nav {
 /* ─── Panel minimize / drag chrome ──────────────────────────────── */
 .panel-header {
     display: flex; align-items: center; justify-content: space-between;
-    cursor: pointer; user-select: none; padding-bottom: 2px;
+    cursor: grab; user-select: none;
+    padding: 4px 4px 7px;
+    /* Subtle bottom rule under the header so the grab-handle reads as
+       a separate region from the body. Matches the storm-watch panel
+       chrome that already shipped and creates a cohesive look across
+       every panel in the family. */
+    border-bottom: 1px solid rgba(255,255,255,.06);
+    margin-bottom: 6px;
 }
-.panel-header h3 { margin: 0; flex: 1; }
+.panel-header:active { cursor: grabbing; }
+.panel-header h3 { margin: 0; flex: 1; font-weight: 600; }
 .panel-actions { display: flex; gap: 4px; align-items: center; flex-shrink: 0; }
 .panel-btn {
-    background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.12);
-    border-radius: 4px; color: #6a8a9a; cursor: pointer; font-size: 11px;
-    width: 22px; height: 22px; display: flex; align-items: center;
-    justify-content: center; padding: 0; touch-action: manipulation;
-    transition: background .15s, color .15s; flex-shrink: 0; line-height: 1;
+    /* Slightly larger, slightly more contrast than before — these were
+       hard to hit on touch devices and visually disappeared next to
+       the new dense status content. 24×24 is right at the ergonomic
+       floor for a tap target without crowding the title. */
+    background: rgba(255,255,255,.06);
+    border: 1px solid rgba(255,255,255,.10);
+    border-radius: 5px;
+    color: #7a98a8; cursor: pointer; font-size: 11px;
+    width: 24px; height: 24px;
+    display: flex; align-items: center; justify-content: center;
+    padding: 0; touch-action: manipulation;
+    transition: background .15s, color .15s, border-color .15s, transform .08s;
+    flex-shrink: 0; line-height: 1;
 }
-.panel-btn:hover { background: rgba(0,200,255,.15); color: #00c6ff; }
+.panel-btn:hover {
+    background: rgba(0,200,255,.15); color: #00c6ff;
+    border-color: rgba(0,200,255,.30);
+}
+.panel-btn:active { transform: scale(.92); }
 .panel-body { overflow: hidden; transition: max-height .3s ease, opacity .25s; }
 .panel-minimized .panel-body { max-height: 0 !important; opacity: 0; }
+/* When minimised, drop the border under the header — there's nothing
+   below it, so the line just hangs off the chin. */
+.panel-minimized .panel-header {
+    border-bottom-color: transparent;
+    margin-bottom: 0;
+    padding-bottom: 4px;
+}
 
 /* Data source status badges */
 .ds-badge {
@@ -2289,7 +2389,7 @@ import { createWeatherOverlay } from './js/weather-overlay.js';
 import { StormWatchPanel } from './js/storm-watch-panel.js';
 import { StormTrackOverlay } from './js/storm-track-overlay.js';
 import { extrapolateStormTrack, interpolateTrackAtHour } from './js/storm-forecast.js';
-import { makePanelDraggable, resetPanelPosition } from './js/draggable-panel.js';
+import { makePanelDraggable, resetPanelPosition, makePanelResizable, resetPanelSize } from './js/draggable-panel.js';
 import { NWSAlerts, ALERT_COLORS, ALERT_CSS_COLORS, ALERT_PULSE_FREQ, SEVERITY_ORDER, classifyAlertEvent } from './js/nws-alerts.js';
 import { getAlertIconTexture, precomputeAlertIcons } from './js/alert-icons.js';
 import { IsobarLayer, geoWindMs, ISOBAR_LEVELS } from './js/isobar-engine.js';
@@ -5377,24 +5477,76 @@ setTimeout(() => {
     });
 }, 10000);
 
+// Status palette for the NASA observation rows. Each status maps to a
+// dot colour + label so the user can read "this layer's pipeline is
+// healthy / off / errored" at a glance instead of decoding a "—".
+const _OBS_STATE_PALETTE = {
+    live:     { dot: '#4fc97f', label: 'live' },     // green — fresh data on screen
+    fetching: { dot: '#ffaa22', label: 'fetching' }, // amber — request in flight
+    idle:     { dot: '#556',    label: 'off'      }, // grey — never polled (toggle off)
+    error:    { dot: '#ff4444', label: 'error'    }, // red — last fetch failed
+};
+
 function _updateObsStatusPanel(meta) {
     const el = document.getElementById('obs-status-list');
     if (!el) return;
 
+    // Two buckets: layers that have actually been polled (status != idle
+    // OR have a stored updated timestamp) get a full row; layers that
+    // are off get summarised as a single "N more available — toggle
+    // to enable" line. This stops the panel from filling with "—"
+    // entries that look broken when the pipeline is fine.
     const entries = Object.entries(meta);
     if (entries.length === 0) {
         el.innerHTML = '<span style="color:#445">No layers active</span>';
         return;
     }
+    const active = [];
+    const idle   = [];
+    for (const [id, m] of entries) {
+        // "Active" = anything that's not strictly the cold idle state.
+        // A layer that errored on its first poll still counts as active
+        // (the user toggled it; the pipeline tried; the row should
+        // reflect that, errors and all).
+        if (m.status === 'idle' && !m.updated) idle.push([id, m]);
+        else                                   active.push([id, m]);
+    }
 
-    el.innerHTML = entries.map(([id, m]) => {
-        const dot = m.status === 'live'
-            ? '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#4fc97f;margin-right:4px"></span>'
-            : '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#ff4444;margin-right:4px"></span>';
-        const ago = m.updated ? _timeAgo(m.updated) : '—';
-        const layer = m.layer;
-        return `<div style="margin-bottom:3px" title="${layer?.description ?? ''}\nLatency: ${layer?.latency ?? '?'}\nUnit: ${layer?.unit ?? '?'}\nColor: ${layer?.colorRamp ?? '?'}">${dot}<strong>${layer?.name ?? id}</strong> <span style="color:#556">· ${ago} · ${layer?.latency ?? ''}</span></div>`;
-    }).join('');
+    let html = '';
+    if (active.length) {
+        html += active.map(([id, m]) => {
+            const palette = _OBS_STATE_PALETTE[m.status] ?? _OBS_STATE_PALETTE.idle;
+            const ago = m.updated ? _timeAgo(m.updated) : palette.label;
+            const layer = m.layer;
+            const subtitle = m.status === 'error'
+                ? (m.error ?? 'fetch failed')
+                : (layer?.latency ?? '');
+            return `<div style="margin-bottom:3px"
+                title="${layer?.description ?? ''}\nLatency: ${layer?.latency ?? '?'}\nUnit: ${layer?.unit ?? '?'}\nColor: ${layer?.colorRamp ?? '?'}">
+                <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${palette.dot};margin-right:4px"></span>
+                <strong>${layer?.name ?? id}</strong>
+                <span style="color:#556">· ${ago} · ${subtitle}</span>
+            </div>`;
+        }).join('');
+    }
+    if (idle.length) {
+        // Idle row — collapsed summary so users see "what else is in
+        // here" without each layer pretending to be a broken active
+        // row. The list is pulled from the layer.name field for
+        // readability.
+        const names = idle.map(([_id, m]) => m.layer?.name ?? _id).join(', ');
+        html += `<div style="margin-top:6px;padding-top:5px;border-top:1px dashed rgba(255,255,255,.06);
+                     color:#556;font-size:9.5px;line-height:1.45;"
+                title="Toggle these layers in the Layers panel to start polling them.">
+                <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#556;margin-right:4px;opacity:.6"></span>
+                ${idle.length} more available
+                <span style="opacity:.7"> — ${names}</span>
+            </div>`;
+    }
+    if (!html) {
+        html = '<span style="color:#445">No layers active</span>';
+    }
+    el.innerHTML = html;
 }
 
 window.addEventListener('satellite-update', e => {
@@ -8550,6 +8702,24 @@ _backdrop.addEventListener('click', _closeMobilePanel);
     // Storm-tracks layer (5-day kinematic forecast cones). Default off
     // — the cones can clutter the globe at small zoom levels.
     'lyr-storm-tracks',
+    // Magnetosphere meshes — MagnetosphereEngine constructor sets every
+    // _layers flag to true (the default for stand-alone use of the
+    // engine), but on the Earth page we want them all hidden until the
+    // user opts in. The synthetic dispatch reconciles the engine's
+    // optimistic default with the HTML's "all unchecked" default.
+    // Without this entry the bug user-reported on the toggles shows
+    // up: clicking the checkbox to "on" actually hides the already-
+    // visible mesh (state inverted), and second click re-shows it
+    // — the perception is "the toggle is broken on first try."
+    'lyr-magnetopause', 'lyr-bowshock', 'lyr-magnetosheath',
+    'lyr-reconnection', 'lyr-cusps', 'lyr-belts', 'lyr-plasma',
+    // Exosphere / geocorona / charge-exchange — same story: the engine
+    // initialises each shell visible; the HTML defaults them off. Sync
+    // here.
+    'lyr-exosphere', 'lyr-geocorona', 'lyr-chex',
+    // CME shockfront — handled by its own ?.addEventListener so missing
+    // checkbox would silently skip; safe to include.
+    'lyr-cme',
 ].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.dispatchEvent(new Event('change'));
@@ -8635,16 +8805,28 @@ window._stormWatchPanel = stormWatchPanel;   // dev console handle
     if (panel) makePanelDraggable(panel);
 });
 
-// Convenience: double-clicking a panel header resets its position to
-// CSS default. A "reset layout" button could call this too — for now
-// the gesture is enough of an escape hatch if the user drags a panel
-// somewhere awkward and wants it back where it started.
+// Resize persistence — only the wx-panel currently advertises CSS
+// `resize:both` because it's the densest panel and the one users
+// reported as "needing to be bigger." Adding more panels here is a
+// CSS edit (resize:both + min/max) plus another id in this list.
+['wx-panel'].forEach(id => {
+    const panel = document.getElementById(id);
+    if (panel) makePanelResizable(panel);
+});
+
+// Convenience: double-clicking a panel header resets BOTH position and
+// size to their CSS defaults. The single gesture is intentional —
+// users who drag a panel into a corner OR resize it to something
+// useless want one undo, not two. resetPanelSize is a no-op for
+// panels without resize wired.
 document.querySelectorAll('.panel-header').forEach(hdr => {
     hdr.addEventListener('dblclick', (ev) => {
         // Don't reset when the user double-clicks a button inside the header.
         if (ev.target.closest('.panel-btn')) return;
         const panel = hdr.parentElement;
-        if (panel) resetPanelPosition(panel);
+        if (!panel) return;
+        resetPanelPosition(panel);
+        resetPanelSize(panel);
     });
 });
 
