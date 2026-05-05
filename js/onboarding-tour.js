@@ -34,7 +34,7 @@ const STEPS_BY_PERSONA = {
     educator: [
         {
             title: 'Welcome, instructor',
-            body: 'Your Parker Physics class is live. The first thing to do is invite your students — they\'ll get a magic link, sign up free, and inherit your plan automatically.',
+            body: 'Your Parkers Physics class is live. The first thing to do is invite your students — they\'ll get a magic link, sign up free, and inherit your plan automatically.',
             icon: '&#127979;',
             target: null,
             cta: 'Show me how',
@@ -62,7 +62,7 @@ const STEPS_BY_PERSONA = {
         },
         {
             title: 'You\'re ready to teach',
-            body: 'Tip: every page carries a "Powered by Parker Physics" badge for your students — that\'s the educator-tier licensing terms in action. Solar Maximum is now; the data is rich.',
+            body: 'Tip: every page carries a "Powered by Parkers Physics" badge for your students — that\'s the educator-tier licensing terms in action. Solar Maximum is now; the data is rich.',
             icon: '&#127775;',
             target: null,
             cta: 'Start teaching',
@@ -73,7 +73,7 @@ const STEPS_BY_PERSONA = {
     student: [
         {
             title: 'Welcome to your class',
-            body: 'You\'ve joined a Parker Physics class — your instructor\'s plan covers full access. No card on file, no upgrade pitch.',
+            body: 'You\'ve joined a Parkers Physics class — your instructor\'s plan covers full access. No card on file, no upgrade pitch.',
             icon: '&#127891;',
             target: null,
             cta: 'Show me around',
@@ -146,7 +146,7 @@ const STEPS_BY_PERSONA = {
     // upgraded" pitch on the alerts step.
     default: [
         {
-            title: 'Welcome to Parker Physics',
+            title: 'Welcome to Parkers Physics',
             body: 'Your personal astrophysics command center — powered by live NASA and NOAA satellite data, updated every 60 seconds.',
             icon: '&#128640;',
             target: null,

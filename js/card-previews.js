@@ -55,7 +55,7 @@ function noise(x, y) {
   return n - Math.floor(n);
 }
 
-// ── Poster scenes (Parker Physics palette: UV / pink / lightning) ───────────
+// ── Poster scenes (Parkers Physics palette: UV / pink / lightning) ───────────
 
 function drawEarth(ctx, w, h, t) {
   ctx.clearRect(0, 0, w, h);

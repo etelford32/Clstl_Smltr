@@ -166,7 +166,7 @@ export function initNav(activeId = '') {
     const isSignedIn = !!auth;
     const isAdmin = auth?.role === 'admin' || auth?.role === 'superadmin';
 
-    // Educator tier carries a "Powered by Parker Physics" attribution
+    // Educator tier carries a "Powered by Parkers Physics" attribution
     // requirement. Mount the badge once; it self-renders on auth-changed
     // so a plan switch toggles visibility without a reload. Cheap to
     // import even when no badge is shown — the module is ~1.5kb.
@@ -186,9 +186,9 @@ export function initNav(activeId = '') {
     }
 
     let html = `
-        <a href="index.html" class="nav-brand" aria-label="Parker Physics home">
-            <img src="${LOGO_IMG}" class="nav-logo-img" alt="Parker Physics">
-            Parker Physics
+        <a href="index.html" class="nav-brand" aria-label="Parkers Physics home">
+            <img src="${LOGO_IMG}" class="nav-logo-img" alt="Parkers Physics">
+            Parkers Physics
         </a>
         <button type="button" class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">
             <span class="burger-line"></span>

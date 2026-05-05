@@ -209,7 +209,7 @@ class AuthManager {
         return _cfgCanUseEmbed(this.getPlan(), this.getRole());
     }
 
-    /** Tiers that may replace the Parker Physics branding with their own. */
+    /** Tiers that may replace the Parkers Physics branding with their own. */
     hasCustomBranding() {
         return _cfgHasCustomBranding(this.getPlan());
     }
@@ -232,7 +232,7 @@ class AuthManager {
     }
 
     /**
-     * True when the user's tier requires the "Powered by Parker Physics"
+     * True when the user's tier requires the "Powered by Parkers Physics"
      * attribution badge to render. Reads the server-side flag if available
      * (set by the sync_tier_derived_columns trigger), else falls back to
      * the plan name. Educator is the only paid tier where attribution is

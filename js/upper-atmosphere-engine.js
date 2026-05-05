@@ -1,5 +1,5 @@
 /**
- * upper-atmosphere-engine.js — Parker Physics thermosphere/exosphere surrogate
+ * upper-atmosphere-engine.js — Parkers Physics thermosphere/exosphere surrogate
  * ═══════════════════════════════════════════════════════════════════════════
  * Pure-JS, zero-dependency physics surrogate for the upper atmosphere
  * (80–2000 km). Mirrors the Jacchia-style exponential fallback in
@@ -742,7 +742,7 @@ function _quietGW() {
 /**
  * Fetch current NOAA indices (F10.7, Kp, Ap) for "Live NOAA" buttons.
  * Preference order:
- *   1. Parker Physics DSMC backend — GET /v1/atmosphere/indices
+ *   1. Parkers Physics DSMC backend — GET /v1/atmosphere/indices
  *      (already pre-ingested by the Belay supervisor; fastest, cached).
  *   2. NOAA SWPC direct JSON endpoints (CORS-enabled).
  *      f107_cm_flux.json  → { flux: SFU, ... }[]      — daily F10.7
