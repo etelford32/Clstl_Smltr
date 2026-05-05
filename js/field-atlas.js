@@ -124,14 +124,23 @@ export function buildFieldTextures(atlas) {
     // META_STRIDE = 8 → 2 RGBA pixels per line.
     const meta = new THREE.DataTexture(atlas.meta, META_STRIDE / 4, h, THREE.RGBAFormat, THREE.FloatType);
 
-    for (const t of [positions, tangents, meta]) {
-        t.minFilter = THREE.NearestFilter;
-        t.magFilter = THREE.NearestFilter;
+    // Positions / tangents need linear filter so the bundle shader can sample
+    // continuously along arclength (s) as a vertex coordinate. Meta is per-line
+    // integer-ish data (topology, seed-kind, AR index) — must stay nearest.
+    for (const t of [positions, tangents]) {
+        t.minFilter = THREE.LinearFilter;
+        t.magFilter = THREE.LinearFilter;
         t.wrapS = THREE.ClampToEdgeWrapping;
         t.wrapT = THREE.ClampToEdgeWrapping;
         t.generateMipmaps = false;
         t.needsUpdate = true;
     }
+    meta.minFilter = THREE.NearestFilter;
+    meta.magFilter = THREE.NearestFilter;
+    meta.wrapS = THREE.ClampToEdgeWrapping;
+    meta.wrapT = THREE.ClampToEdgeWrapping;
+    meta.generateMipmaps = false;
+    meta.needsUpdate = true;
 
     _lastTextures = { positions, tangents, meta, atlasRef: atlas };
     return _lastTextures;

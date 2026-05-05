@@ -108,7 +108,8 @@ const META_STRIDE: usize = 8;
 //   [4] total length (R☉)
 //   [5] foot_a_lat (rad, photospheric end A; NaN if open at A)
 //   [6] foot_a_lon (rad)
-//   [7] reserved   (twist — Phase 2)
+//   [7] twist      (rad — accumulated tangent rotation about spine axis;
+//                    > ~2π → one full turn → tornado-class candidate)
 
 #[wasm_bindgen]
 impl FieldAtlas {
@@ -220,7 +221,7 @@ pub fn compute_field_lines(input: JsValue) -> Result<FieldAtlas, JsValue> {
             line.total_length,
             lat_a,
             lon_a,
-            0.0, // twist (reserved)
+            line.twist,
         ]);
         line_count += 1;
     }
