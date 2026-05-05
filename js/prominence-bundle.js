@@ -10,11 +10,10 @@
 // per-thread animation (counter-streaming, brightening cycles, Alfvén
 // oscillation).
 //
-// First cut: QP (quiescent-class) only. The shader has hooks for the other
-// six classes (IP, ARP, hedgerow, tornado, eruptive, post-flare rain) but
-// branching on classId comes in the next pass — for now everything renders
-// as QP. The point of this scaffold is the *pipeline*: WASM → atlas → field
-// textures → instanced bundle → screen.
+// All seven classes (QP, IP, ARP, HEDGEROW, TORNADO, EP, RAIN) share this
+// shader; class-specific behaviors are switched on aClassId + aClassParams.
+// The classifier in js/prominence-classifier.js decides class per bundle
+// from the atlas + live AR/flare feed.
 //
 // On-disk vs limb is unified via premultiplied-alpha custom blending:
 //   src factor = ONE,  dst factor = ONE_MINUS_SRC_ALPHA.
@@ -83,6 +82,7 @@ attribute float aThreadId;    // [0,1] thread id within bundle (per-instance)
 attribute vec2  aOffset;      // (Nfrac, Bfrac) lateral offset within bundle frame
 attribute float aBundleNorm;  // [0,1] brightness normalisation (length × apex)
 attribute float aClassId;     // CLASS.* — selects behavior in vert + frag
+attribute vec4  aClassParams; // class-specific parameters (see classifier)
 
 uniform sampler2D tFieldPositions;   // RGBA float, W=samplesPerLine, H=lineCount
 uniform sampler2D tFieldTangents;
@@ -90,17 +90,24 @@ uniform float uLineCount;
 uniform float uTime;
 uniform float uActivity;
 uniform float uThreadHalfWidth;       // R☉ — physical thread half-width
-uniform float uBundleHalfRadius;      // R☉ — bundle lateral radius
+uniform float uBundleHalfRadius;      // R☉ — bundle lateral radius (QP nominal)
 
 varying float vS;
 varying float vT;
 varying float vThreadId;
 varying float vBundleNorm;
 varying float vClassId;
+varying vec4  vClassParams;
 varying vec3  vWorldPos;
 varying vec3  vSurfaceNormal;
 
 #define PI 3.141592653589793
+
+// Rotate vector v around a unit axis by angle (Rodrigues).
+vec3 rotAroundAxis(vec3 v, vec3 axis, float angle) {
+    float c = cos(angle), s = sin(angle);
+    return v * c + cross(axis, v) * s + axis * dot(axis, v) * (1.0 - c);
+}
 
 void main() {
     float lineV = (aLineIdx + 0.5) / uLineCount;
@@ -112,19 +119,78 @@ void main() {
     vec3 N = normalize(cross(T, outward) + vec3(1e-6));
     vec3 B = normalize(cross(N, T));
 
-    // Lateral offset within the bundle (each thread sits in its own column).
-    vec3 lateral = N * (aOffset.x * uBundleHalfRadius)
-                 + B * (aOffset.y * uBundleHalfRadius);
+    int classId = int(aClassId + 0.5);
 
-    // Apex sag: cool plasma sags toward the photosphere. Sin(πs) puts max
-    // displacement at the loop apex; magnitude scales with class.
-    float sagMag = 0.005;                         // QP: gentle, ~3.5 Mm
+    // ── Class-specific bundle frame & lateral offset ─────────────────
+    float bundleScale  = 1.0;   // multiplies uBundleHalfRadius
+    float verticality  = 0.0;   // 0 = normal, 1 = full radial drape (HEDGEROW)
+    float helicalTurns = 0.0;   // signed, full turns over the line  (TORNADO)
+    float twistRad     = 0.0;   // rigid bundle-frame rotation       (ARP)
+    float epScale      = 1.0;   // EP bundle radius growth
+    float epAntiSag    = 0.0;   // EP rises (anti-sag); 0..1
+
+    if (classId == 1) {                                 // IP
+        bundleScale = 1.10;
+    } else if (classId == 2) {                          // ARP
+        bundleScale = 0.55;
+        twistRad    = aClassParams.x;                   // moderate rigid twist
+    } else if (classId == 3) {                          // HEDGEROW
+        bundleScale = 0.85;
+        verticality = aClassParams.x;
+    } else if (classId == 4) {                          // TORNADO
+        bundleScale = 0.70;
+        helicalTurns = aClassParams.x;
+    } else if (classId == 5) {                          // EP
+        epScale   = aClassParams.z;                     // 1..8 over the eruption
+        bundleScale = epScale;
+        // anti-sag activates during erupt+fade stages
+        epAntiSag = clamp(aClassParams.y - 0.2, 0.0, 1.0);
+    }
+
+    float halfR = uBundleHalfRadius * bundleScale;
+
+    // Lateral offset within the bundle frame.
+    vec3 lateral;
+    if (classId == 4) {
+        // TORNADO: helical winding. Each thread sits on a circle at radius
+        // |aOffset|, and the whole circle rotates with arclength so the
+        // bundle looks like a rope.
+        float r = halfR * length(aOffset) * 0.9;
+        float phase = atan(aOffset.y, aOffset.x);
+        float angle = helicalTurns * 2.0 * PI * aS + phase + aThreadId * 0.7;
+        lateral = N * (cos(angle) * r) + B * (sin(angle) * r);
+    } else {
+        vec3 dirN = N;
+        vec3 dirB = B;
+        if (twistRad != 0.0) {
+            // Rigid bundle-frame rotation around the local tangent.
+            float a = twistRad * aS;
+            dirN = rotAroundAxis(N, T, a);
+            dirB = rotAroundAxis(B, T, a);
+        }
+        // HEDGEROW: blend the B (flat) direction toward outward — produces
+        // the wall/curtain look where threads stack vertically.
+        vec3 flat = mix(dirB, outward, verticality);
+        lateral = dirN * (aOffset.x * halfR)
+                + flat * (aOffset.y * halfR * (1.0 + 0.6 * verticality));
+    }
+
+    // Apex sag — cool plasma sags; EP class flips it to anti-sag (rising).
+    float sagMag = 0.005 * (classId == 5 ? mix(1.0, -1.4, epAntiSag) : 1.0);
+    if (classId == 1) sagMag *= 1.20;                   // IP slightly heavier
+    if (classId == 3) sagMag *= 0.4;                    // HEDGEROW: less arching
     float sag = sagMag * sin(PI * aS) * sin(PI * aS);
 
     // Alfvén transverse oscillation. Different per-thread phase produces a
-    // shimmer rather than a synchronised wave. Disabled at low-end activity.
-    float alfvenAmp = 0.0012 * (0.5 + 0.5 * uActivity);  // ~0.85 Mm peak
-    float alfvenFreq = 0.85;                              // ~7 s period
+    // shimmer rather than a synchronised wave.
+    float alfvenAmp = 0.0012 * (0.5 + 0.5 * uActivity);
+    float alfvenFreq = 0.85;
+    if (classId == 2) alfvenFreq = 1.6;                 // ARP: faster
+    if (classId == 4) alfvenFreq = 1.8;                 // TORNADO: faster
+    if (classId == 5) {                                 // EP: erupt motion
+        alfvenAmp *= 1.0 + 4.0 * epAntiSag;
+        alfvenFreq *= 1.4;
+    }
     float wob = sin(uTime * alfvenFreq + aThreadId * 13.0 + aS * 4.0)
               * alfvenAmp * sin(PI * aS);
 
@@ -133,13 +199,14 @@ void main() {
 
     vec3 pos = P + lateral - outward * sag + N * wob + widen;
 
-    vWorldPos = pos;
+    vWorldPos      = pos;
     vSurfaceNormal = outward;
-    vS = aS;
-    vT = aT;
-    vThreadId = aThreadId;
-    vBundleNorm = aBundleNorm;
-    vClassId = aClassId;
+    vS             = aS;
+    vT             = aT;
+    vThreadId      = aThreadId;
+    vBundleNorm    = aBundleNorm;
+    vClassId       = aClassId;
+    vClassParams   = aClassParams;
 
     gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
 }
@@ -153,6 +220,7 @@ varying float vT;
 varying float vThreadId;
 varying float vBundleNorm;
 varying float vClassId;
+varying vec4  vClassParams;
 varying vec3  vWorldPos;
 varying vec3  vSurfaceNormal;
 
@@ -163,64 +231,97 @@ uniform vec3  uCameraPos;
 #define PI 3.141592653589793
 
 void main() {
+    int classId = int(vClassId + 0.5);
+
     // ── Counter-streaming flow ──────────────────────────────────────
     // Adjacent threads carry plasma in opposite directions at ~10–25 km/s.
-    // Sign chosen by thread id parity → bright dashes scrolling either way.
+    // HEDGEROW: all threads downflow only ("falling rain" curtain look).
+    // EP: fast outflow, no counter-streaming (everything moves with eruption).
     float flowSign = (mod(floor(vThreadId * 47.0), 2.0) < 1.0) ? 1.0 : -1.0;
     float scrollSpeed = 0.18;
-    float scrollPhase = (vS - flowSign * uTime * scrollSpeed) * 14.0
+    float dashFreq = 14.0;
+
+    if (classId == 1)      { scrollSpeed = 0.22; }                    // IP
+    else if (classId == 2) { scrollSpeed = 0.32; flowSign *= 1.0;  }  // ARP — faster
+    else if (classId == 3) { scrollSpeed = 0.55; flowSign = -1.0; dashFreq = 22.0; } // HEDGEROW
+    else if (classId == 4) { scrollSpeed = 0.40; }                    // TORNADO
+    else if (classId == 5) { scrollSpeed = 0.85; flowSign = 1.0;  dashFreq = 8.0; }  // EP
+
+    float scrollPhase = (vS - flowSign * uTime * scrollSpeed) * dashFreq
                       + vThreadId * 6.28;
     float dashes = 0.5 + 0.5 * sin(scrollPhase);
-    dashes = pow(dashes, 1.6);                  // sharper bright bands
+    dashes = pow(dashes, 1.6);
 
     // ── Per-thread brightening cycle ───────────────────────────────
-    // Real threads cycle bright/dim on ~minute timescales (thermal
-    // non-equilibrium). Different phases per thread → bundle shimmers.
-    float bright = 0.65 + 0.35 * sin(uTime * 0.42 + vThreadId * 9.7);
+    float cycleFreq = 0.42;
+    if (classId == 2) cycleFreq = 0.85;            // ARP twitchier
+    if (classId == 5) cycleFreq = 1.30;            // EP very fast
+    float bright = 0.65 + 0.35 * sin(uTime * cycleFreq + vThreadId * 9.7);
 
     // ── Arch shape: brighter at footpoints AND apex, slight mid-loop dip.
     float foot = pow(sin(PI * vS), 0.6);
     float archShape = 0.45 + 0.55 * foot;
 
     // ── Ribbon edge softening (anti-aliased thread edges). ─────────
-    float edge = 1.0 - abs(vT);
-    edge = smoothstep(0.0, 0.3, edge);
+    float edge = smoothstep(0.0, 0.3, 1.0 - abs(vT));
 
     // ── Hα palette, cool→warm along arclength. ─────────────────────
-    // Footpoints: red-pink (~7000 K base). Apex: pink-magenta (cooler core).
     vec3 colFoot = vec3(0.92, 0.22, 0.34);
     vec3 colApex = vec3(0.88, 0.46, 0.68);
     vec3 col = mix(colFoot, colApex, foot);
 
-    // ── Class-specific tint (QP only for now; hooks in place). ─────
-    if (vClassId > 0.5 && vClassId < 1.5) {       // IP
-        col *= vec3(1.05, 0.95, 0.95);
-    } else if (vClassId > 1.5 && vClassId < 2.5) {// ARP
-        col = mix(col, vec3(1.00, 0.42, 0.30), 0.35);
-    } else if (vClassId > 4.5 && vClassId < 5.5) {// EP — blueshift toward white-blue
-        col = mix(col, vec3(0.85, 0.92, 1.10), 0.55);
+    // ── Class-specific tint and final colour adjustments ───────────
+    if (classId == 1) {                                              // IP
+        col *= vec3(1.04, 0.96, 0.94);
+    } else if (classId == 2) {                                       // ARP
+        col = mix(col, vec3(1.00, 0.42, 0.30), 0.40);
+    } else if (classId == 3) {                                       // HEDGEROW
+        col = mix(col, vec3(0.94, 0.30, 0.22), 0.30);
+    } else if (classId == 4) {                                       // TORNADO
+        // Twist hue: subtle violet undertone toward the tornado axis
+        col = mix(col, vec3(0.85, 0.30, 0.55), 0.25);
+    } else if (classId == 5) {                                       // EP
+        // Doppler blueshift increases through the erupt stage.
+        float stage = vClassParams.y;
+        float blue  = clamp((stage > 0.5) ? (stage - 0.5) * 2.0 : 0.0, 0.0, 1.0);
+        col = mix(col, vec3(0.85, 0.92, 1.20), 0.35 + 0.40 * blue);
+    } else if (classId == 6) {                                       // RAIN (Phase 3 hook)
+        float coolingT = vClassParams.x;
+        vec3 hotCol  = vec3(0.30, 0.85, 0.95);    // 131/94 Å teal
+        vec3 midCol  = vec3(1.00, 0.80, 0.30);    // 171 Å gold
+        vec3 coolCol = vec3(0.95, 0.30, 0.30);    // 304 Å red
+        col = mix(mix(hotCol, midCol, smoothstep(0.0, 0.5, coolingT)),
+                  coolCol, smoothstep(0.5, 1.0, coolingT));
     }
-    // QP (0), HEDGEROW (3), TORNADO (4), RAIN (6) → palette unchanged for now.
+
+    // ── EP age fade — bundle goes brighter then dims as it detaches ─
+    float epFade = 1.0;
+    if (classId == 5) {
+        epFade = vClassParams.w;                  // 0..1 alpha modulator
+    }
 
     float intensity = vBundleNorm * archShape * bright
                     * (0.55 + 0.45 * dashes)
-                    * edge;
+                    * edge * epFade;
 
     // ── On-disk vs limb mode (unified shader, premultiplied-alpha blend).
-    // facing > 0 → outward normal points toward the camera → on-disk.
-    // facing < 0 → outward normal points away from camera → limb / off-limb.
     vec3 toCam = normalize(uCameraPos - vWorldPos);
     float facing = dot(vSurfaceNormal, toCam);
     float disk = smoothstep(0.10, 0.45, facing);
 
-    // Disk path: dark Hα absorption — black premultiplied with intensity.
+    // Disk: dark Hα absorption (premultiplied black with alpha = intensity).
+    // EP loses absorption strength as it lifts off — it should look bright
+    // even on disk because it's geometrically rising above the photosphere.
+    float diskAlpha = intensity * 0.85 * (1.0 - 0.6 * float(classId == 5));
     vec3  colDisk = vec3(0.0);
-    float aDisk = clamp(intensity * 0.85, 0.0, 0.92);
+    float aDisk   = clamp(diskAlpha, 0.0, 0.92);
 
-    // Limb path: bright Hα emission — colour premultiplied with intensity,
-    // alpha 0 so it adds on top of the existing scene.
-    vec3  colLimb = col * intensity * 1.6;
-    float aLimb = 0.0;
+    // Limb: bright Hα emission (premultiplied colour, alpha = 0).
+    float limbBoost = 1.6;
+    if (classId == 2) limbBoost = 2.1;            // ARP punchier
+    if (classId == 5) limbBoost = 2.8;            // EP very bright
+    vec3  colLimb = col * intensity * limbBoost;
+    float aLimb   = 0.0;
 
     vec3  outRgb = mix(colLimb, colDisk, disk);
     float outA   = mix(aLimb,   aDisk,   disk);
@@ -261,17 +362,19 @@ export function createProminenceBundleSystem({ scene, quality = 'mid' } = {}) {
     // re-create the geometry. setDrawRange() lets us tell Three.js how many
     // instances to actually render.
     const MAX_INSTANCES = THREAD_BUDGETS.high;
-    const aLineIdx    = new Float32Array(MAX_INSTANCES);
-    const aThreadId   = new Float32Array(MAX_INSTANCES);
-    const aOffset     = new Float32Array(MAX_INSTANCES * 2);
-    const aBundleNorm = new Float32Array(MAX_INSTANCES);
-    const aClassId    = new Float32Array(MAX_INSTANCES);
+    const aLineIdx     = new Float32Array(MAX_INSTANCES);
+    const aThreadId    = new Float32Array(MAX_INSTANCES);
+    const aOffset      = new Float32Array(MAX_INSTANCES * 2);
+    const aBundleNorm  = new Float32Array(MAX_INSTANCES);
+    const aClassId     = new Float32Array(MAX_INSTANCES);
+    const aClassParams = new Float32Array(MAX_INSTANCES * 4);
 
-    stripGeom.setAttribute('aLineIdx',    new THREE.InstancedBufferAttribute(aLineIdx, 1));
-    stripGeom.setAttribute('aThreadId',   new THREE.InstancedBufferAttribute(aThreadId, 1));
-    stripGeom.setAttribute('aOffset',     new THREE.InstancedBufferAttribute(aOffset, 2));
-    stripGeom.setAttribute('aBundleNorm', new THREE.InstancedBufferAttribute(aBundleNorm, 1));
-    stripGeom.setAttribute('aClassId',    new THREE.InstancedBufferAttribute(aClassId, 1));
+    stripGeom.setAttribute('aLineIdx',     new THREE.InstancedBufferAttribute(aLineIdx, 1));
+    stripGeom.setAttribute('aThreadId',    new THREE.InstancedBufferAttribute(aThreadId, 1));
+    stripGeom.setAttribute('aOffset',      new THREE.InstancedBufferAttribute(aOffset, 2));
+    stripGeom.setAttribute('aBundleNorm',  new THREE.InstancedBufferAttribute(aBundleNorm, 1));
+    stripGeom.setAttribute('aClassId',     new THREE.InstancedBufferAttribute(aClassId, 1));
+    stripGeom.setAttribute('aClassParams', new THREE.InstancedBufferAttribute(aClassParams, 4));
     stripGeom.instanceCount = 0;
 
     const uniforms = {
@@ -320,7 +423,7 @@ export function createProminenceBundleSystem({ scene, quality = 'mid' } = {}) {
 
         update(atlas, textures, opts = {}) {
             updateInstances(atlas, textures, _budget, {
-                aLineIdx, aThreadId, aOffset, aBundleNorm, aClassId,
+                aLineIdx, aThreadId, aOffset, aBundleNorm, aClassId, aClassParams,
             }, stripGeom, uniforms, opts);
         },
 
@@ -340,11 +443,10 @@ export function createProminenceBundleSystem({ scene, quality = 'mid' } = {}) {
 
 // ─── Instance assignment ────────────────────────────────────────────
 //
-// Walks the atlas, picks PIL-anchored closed loops as bundle parents, and
-// distributes the thread budget across them proportional to a soft
-// length × apex weight. Trivial PILs aren't culled — they're attenuated
-// via aBundleNorm so they fade toward zero brightness instead of vanishing
-// abruptly.
+// Walks the bundle list produced by the classifier and distributes the
+// thread budget across them. Trivial PILs aren't culled — they're already
+// attenuated by the classifier via the weight factor (apex × length × class
+// multiplier), so they fade toward zero brightness instead of vanishing.
 
 const META_STRIDE = 8;
 
@@ -359,84 +461,90 @@ function updateInstances(atlas, textures, budget, attrs, geom, uniforms, opts) {
     uniforms.uLineCount.value = atlas.lineCount;
     if (typeof opts.activity === 'number') uniforms.uActivity.value = opts.activity;
 
-    // 1. Collect candidate bundle parent lines: PIL-anchored CLOSED loops.
-    //    (closed = topology 0; PIL = seedKind 2)
-    const candidates = [];
-    const meta = atlas.meta;
-    for (let i = 0; i < atlas.lineCount; i++) {
-        const m0 = i * META_STRIDE;
-        const topology = meta[m0];
-        const seedKind = meta[m0 + 1];
-        if (topology !== 0 || seedKind !== 2) continue;
-        const apex   = meta[m0 + 3];
-        const length = meta[m0 + 4];
-        // Soft-clamp normalisation: brightness scales with size but is
-        // already capped, so trivial PILs render dim instead of getting
-        // visually overdone (per design).
-        const weight = clamp(apex / 0.05, 0, 1) * clamp(length / 0.30, 0, 1);
-        candidates.push({ i, apex, length, weight });
-    }
-
-    if (candidates.length === 0) {
+    // Classifier-supplied bundle list (already class-tagged + weighted).
+    // Falls back to a built-in QP-only filter if no classifier output is
+    // provided — keeps the module usable on its own.
+    const bundles = opts.bundles || _fallbackQpBundles(atlas);
+    if (bundles.length === 0) {
         geom.instanceCount = 0;
         return;
     }
 
-    // 2. Distribute the thread budget across candidates proportional to
-    //    weight, but with a floor (every bundle gets at least 1 thread).
-    const totalW = candidates.reduce((s, c) => s + Math.max(0.05, c.weight), 0);
-    let remaining = Math.min(budget, THREAD_BUDGETS.high);
-    const allocs = candidates.map(c => {
-        const share = (Math.max(0.05, c.weight) / totalW) * budget;
-        return Math.max(1, Math.round(share));
-    });
-    // Trim if over-budget (rounding can push us over).
+    // Distribute the thread budget across bundles proportional to weight,
+    // with a floor of 1 thread/bundle.
+    const totalW = bundles.reduce((s, b) => s + Math.max(0.04, b.weight), 0);
+    const allocs = bundles.map(b => Math.max(1, Math.round((Math.max(0.04, b.weight) / totalW) * budget)));
     let allocSum = allocs.reduce((s, n) => s + n, 0);
-    while (allocSum > remaining && allocs.some(n => n > 1)) {
+    while (allocSum > budget && allocs.some(n => n > 1)) {
         const idx = allocs.indexOf(Math.max(...allocs));
         allocs[idx] -= 1;
         allocSum -= 1;
     }
 
-    // 3. Fill instance attributes. A small deterministic PRNG keeps
-    //    thread positions stable across atlas updates with the same input.
-    const aLineIdx    = attrs.aLineIdx;
-    const aThreadId   = attrs.aThreadId;
-    const aOffset     = attrs.aOffset;
-    const aBundleNorm = attrs.aBundleNorm;
-    const aClassId    = attrs.aClassId;
+    const aLineIdx     = attrs.aLineIdx;
+    const aThreadId    = attrs.aThreadId;
+    const aOffset      = attrs.aOffset;
+    const aBundleNorm  = attrs.aBundleNorm;
+    const aClassId     = attrs.aClassId;
+    const aClassParams = attrs.aClassParams;
 
     let n = 0;
-    for (let bi = 0; bi < candidates.length; bi++) {
-        const cand = candidates[bi];
+    for (let bi = 0; bi < bundles.length; bi++) {
+        const bundle = bundles[bi];
         const nThreads = allocs[bi];
-        const norm = clamp(0.20 + 0.80 * cand.weight, 0, 1);
-        const rng = mulberry32(0x9E3779B9 ^ (cand.i * 0x85EBCA6B));
+        const norm = clamp(0.20 + 0.80 * bundle.weight, 0, 1);
+        const rng = mulberry32(0x9E3779B9 ^ (bundle.lineIdx * 0x85EBCA6B));
+
+        // Tornado bundles want threads spread on a circle, not a disc.
+        // For everything else, sqrt(r) gives uniform area coverage.
+        const useRing = bundle.classId === CLASS.TORNADO;
 
         for (let ti = 0; ti < nThreads; ti++) {
             if (n >= MAX_INSTANCES) break;
-            const tid = (ti + 0.5) / nThreads;     // [0,1]
-            // Lateral offset: uniform in a 2D disc within the bundle frame.
-            const r = Math.sqrt(rng()) * 1.0;
+            const tid = (ti + 0.5) / nThreads;
+            const r = useRing ? (0.7 + 0.3 * rng()) : Math.sqrt(rng());
             const a = rng() * Math.PI * 2;
-            aLineIdx[n]    = cand.i;
-            aThreadId[n]   = tid;
+            aLineIdx[n]      = bundle.lineIdx;
+            aThreadId[n]     = tid;
             aOffset[n * 2    ] = Math.cos(a) * r;
-            aOffset[n * 2 + 1] = Math.sin(a) * r * 0.6; // squash B-direction (loop is wider than tall)
-            aBundleNorm[n] = norm;
-            aClassId[n]    = CLASS.QP;
+            aOffset[n * 2 + 1] = Math.sin(a) * r * (useRing ? 1.0 : 0.6);
+            aBundleNorm[n]   = norm;
+            aClassId[n]      = bundle.classId;
+            const p = bundle.params;
+            const o4 = n * 4;
+            aClassParams[o4    ] = p ? p[0] : 0;
+            aClassParams[o4 + 1] = p ? p[1] : 0;
+            aClassParams[o4 + 2] = p ? p[2] : 0;
+            aClassParams[o4 + 3] = p ? p[3] : 0;
             n++;
         }
         if (n >= MAX_INSTANCES) break;
     }
 
-    // 4. Mark attributes dirty + tell Three.js how many instances to draw.
-    geom.attributes.aLineIdx.needsUpdate    = true;
-    geom.attributes.aThreadId.needsUpdate   = true;
-    geom.attributes.aOffset.needsUpdate     = true;
-    geom.attributes.aBundleNorm.needsUpdate = true;
-    geom.attributes.aClassId.needsUpdate    = true;
+    geom.attributes.aLineIdx.needsUpdate     = true;
+    geom.attributes.aThreadId.needsUpdate    = true;
+    geom.attributes.aOffset.needsUpdate      = true;
+    geom.attributes.aBundleNorm.needsUpdate  = true;
+    geom.attributes.aClassId.needsUpdate     = true;
+    geom.attributes.aClassParams.needsUpdate = true;
     geom.instanceCount = n;
+}
+
+/** Self-contained fallback when no classifier output is supplied: every
+ *  PIL-anchored closed loop becomes a QP bundle. Keeps the module usable
+ *  in isolation (e.g. unit tests). */
+function _fallbackQpBundles(atlas) {
+    const meta = atlas.meta;
+    const out = [];
+    for (let i = 0; i < atlas.lineCount; i++) {
+        const m0 = i * META_STRIDE;
+        if (meta[m0] !== 0 || meta[m0 + 1] !== 2) continue;
+        const apex = meta[m0 + 3], length = meta[m0 + 4];
+        const w = clamp(apex / 0.05, 0, 1) * clamp(length / 0.30, 0, 1);
+        out.push({ lineIdx: i, classId: CLASS.QP, weight: Math.max(0.04, w),
+                   params: [0, 0, 0, 0], stateAge: 0 });
+    }
+    return out;
 }
 
 const MAX_INSTANCES = THREAD_BUDGETS.high;
