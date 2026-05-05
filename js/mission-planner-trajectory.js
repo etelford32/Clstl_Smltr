@@ -65,6 +65,37 @@ export const SOI_SATURN   =  54400000;
 export const SOI_URANUS   =  51700000;
 export const SOI_NEPTUNE  =  86700000;
 
+// ── Per-target orbital-insertion labels ───────────────────────────────────
+// Single source of truth for the abbreviations used in mission-log entries
+// ("🛰️ JOI · ${spacecraft} captured at Jupiter") and tooltip strings. The
+// abbreviations follow real mission convention (Galileo's "JOI", Cassini's
+// "SOI", etc.). Edit here to change the wording everywhere.
+export const INSERTION_LABELS = {
+    moon:    { abbr: 'LOI', long: 'Lunar Orbit Insertion'    },
+    mercury: { abbr: 'MOI', long: 'Mercury Orbit Insertion'  },
+    venus:   { abbr: 'VOI', long: 'Venus Orbit Insertion'    },
+    earth:   { abbr: 'EOI', long: 'Earth Orbit Insertion'    },
+    mars:    { abbr: 'MOI', long: 'Mars Orbit Insertion'     },
+    jupiter: { abbr: 'JOI', long: 'Jupiter Orbit Insertion'  },
+    saturn:  { abbr: 'SOI', long: 'Saturn Orbit Insertion'   },
+    uranus:  { abbr: 'UOI', long: 'Uranus Orbit Insertion'   },
+    neptune: { abbr: 'NOI', long: 'Neptune Orbit Insertion'  },
+};
+
+// Symbol + display name for each body, used by tour readouts and the UI
+// label renderers so log lines can read "♃ Jupiter" instead of "jupiter".
+export const PLANET_DISPLAY = {
+    mercury: { symbol: '☿',  name: 'Mercury' },
+    venus:   { symbol: '♀',  name: 'Venus'   },
+    earth:   { symbol: '🌍', name: 'Earth'   },
+    moon:    { symbol: '🌙', name: 'Moon'    },
+    mars:    { symbol: '♂',  name: 'Mars'    },
+    jupiter: { symbol: '♃',  name: 'Jupiter' },
+    saturn:  { symbol: '♄',  name: 'Saturn'  },
+    uranus:  { symbol: '⛢',  name: 'Uranus'  },
+    neptune: { symbol: '♆',  name: 'Neptune' },
+};
+
 // Mean orbital radii (km)
 export const R_EARTH_HELIO = 1.00000011 * KM_PER_AU;   // mean Earth orbit
 export const R_MARS_HELIO  = 1.523679   * KM_PER_AU;   // mean Mars orbit
@@ -776,9 +807,115 @@ export function porkchopMars({
         n_dep, n_arr,
         jd_dep_min, jd_dep_max, jd_arr_min, jd_arr_max,
         dv, c3, vinfA, tof_d: tofD, best,
+        planet: 'mars',
     };
 }
 
+// ── Generic outer-planet porkchop ───────────────────────────────────────────
+//
+// Same algorithm as porkchopMars but parameterized by destination body, so
+// the UI can scan Jupiter / Saturn / Uranus / Neptune windows the same way
+// it scans Mars. Per-planet defaults (parking altitude, Δv clip threshold,
+// minimum TOF) come from _PORKCHOP_TARGETS below.
+const _PORKCHOP_TARGETS = {
+    mars:    { ephFn: marsHeliocentric,    R_km: R_MARS,    mu: MU_MARS,
+               default_alt_km:  400, dv_clip_kms:  25, min_tof_d:   30 },
+    jupiter: { ephFn: jupiterHeliocentric, R_km: R_JUPITER, mu: MU_JUPITER,
+               default_alt_km: 5000, dv_clip_kms:  90, min_tof_d:  300 },
+    saturn:  { ephFn: saturnHeliocentric,  R_km: R_SATURN,  mu: MU_SATURN,
+               default_alt_km: 5000, dv_clip_kms:  60, min_tof_d:  600 },
+    uranus:  { ephFn: uranusHeliocentric,  R_km: R_URANUS,  mu: MU_URANUS,
+               default_alt_km: 3000, dv_clip_kms:  45, min_tof_d: 1500 },
+    neptune: { ephFn: neptuneHeliocentric, R_km: R_NEPTUNE, mu: MU_NEPTUNE,
+               default_alt_km: 3000, dv_clip_kms:  35, min_tof_d: 3000 },
+};
+
+export function porkchop({
+    planet,                    // 'mars' | 'jupiter' | 'saturn' | 'uranus' | 'neptune'
+    jd_dep_min, jd_dep_max, jd_arr_min, jd_arr_max,
+    n_dep = 60, n_arr = 60,
+    parking_alt_km     = 300,
+    target_alt_km      = null,
+    parking_inc_deg    = 28.5,
+    prograde           = true,
+    dv_clip_kms        = null,
+} = {}) {
+    const cfg = _PORKCHOP_TARGETS[planet];
+    if (!cfg) throw new Error(`porkchop: unknown planet "${planet}"`);
+    const _alt  = target_alt_km ?? cfg.default_alt_km;
+    const _clip = dv_clip_kms   ?? cfg.dv_clip_kms;
+    const min_tof_s = cfg.min_tof_d * SECONDS_PER_DAY;
+
+    const dv    = new Float32Array(n_dep * n_arr);
+    const c3    = new Float32Array(n_dep * n_arr);
+    const vinfA = new Float32Array(n_dep * n_arr);
+    const tofD  = new Float32Array(n_dep * n_arr);
+    let best = { dv: Infinity, i: 0, j: 0, jd_dep: 0, jd_arr: 0, c3: 0, vinfA: 0, tof_d: 0 };
+
+    const deps = new Array(n_dep);
+    for (let i = 0; i < n_dep; i++) {
+        const jd = jd_dep_min + (jd_dep_max - jd_dep_min) * (i / (n_dep - 1));
+        deps[i] = { jd, state: planetState(earthHeliocentric, jd) };
+    }
+    const arrs = new Array(n_arr);
+    for (let j = 0; j < n_arr; j++) {
+        const jd = jd_arr_min + (jd_arr_max - jd_arr_min) * (j / (n_arr - 1));
+        arrs[j] = { jd, state: planetState(cfg.ephFn, jd) };
+    }
+
+    const r_park_e = R_EARTH  + parking_alt_km;
+    const r_park_t = cfg.R_km + _alt;
+    const v_circ_t = Math.sqrt(cfg.mu / r_park_t);
+
+    for (let i = 0; i < n_dep; i++) {
+        const D = deps[i];
+        for (let j = 0; j < n_arr; j++) {
+            const A = arrs[j];
+            const idx = i * n_arr + j;
+            const tof = (A.jd - D.jd) * SECONDS_PER_DAY;
+            if (tof < min_tof_s) {
+                dv[idx] = NaN; c3[idx] = NaN; vinfA[idx] = NaN; tofD[idx] = NaN;
+                continue;
+            }
+            try {
+                const sol   = lambert(D.state.r, A.state.r, tof, MU_SUN, { prograde });
+                const vie   = vSub(sol.v1, D.state.v);
+                const vit   = vSub(sol.v2, A.state.v);
+                const vie_n = vNorm(vie), vit_n = vNorm(vit);
+
+                const v_park_e = Math.sqrt(MU_EARTH / r_park_e);
+                const v_hyp_e  = Math.sqrt(vie_n*vie_n + 2*MU_EARTH / r_park_e);
+                const v_hyp_t  = Math.sqrt(vit_n*vit_n + 2*cfg.mu / r_park_t);
+
+                const tilt   = Math.abs(Math.abs(declination(vie)) - parking_inc_deg * D2R);
+                const dv_dep = combinedBurnDV(v_park_e, v_hyp_e, tilt);
+                const dv_arr = v_hyp_t - v_circ_t;
+                const total  = dv_dep + dv_arr;
+
+                if (Number.isFinite(total) && total < _clip) {
+                    dv[idx]    = total;
+                    c3[idx]    = vie_n * vie_n;
+                    vinfA[idx] = vit_n;
+                    tofD[idx]  = A.jd - D.jd;
+                    if (total < best.dv) {
+                        best = { dv: total, i, j, jd_dep: D.jd, jd_arr: A.jd,
+                                 c3: vie_n*vie_n, vinfA: vit_n, tof_d: A.jd - D.jd };
+                    }
+                } else {
+                    dv[idx] = NaN; c3[idx] = NaN; vinfA[idx] = NaN; tofD[idx] = NaN;
+                }
+            } catch (_) {
+                dv[idx] = NaN; c3[idx] = NaN; vinfA[idx] = NaN; tofD[idx] = NaN;
+            }
+        }
+    }
+    return {
+        n_dep, n_arr, planet,
+        jd_dep_min, jd_dep_max, jd_arr_min, jd_arr_max,
+        dv, c3, vinfA, tof_d: tofD, best,
+        dv_clip_kms: _clip,
+    };
+}
 
 // ── Lunar Lambert (geocentric, with TOF as a knob) ──────────────────────────
 //
@@ -1218,11 +1355,15 @@ const _BODY_FNS = {
     venus:   venusHeliocentric,
     earth:   earthHeliocentric,
     mars:    marsHeliocentric,
+    jupiter: jupiterHeliocentric,
+    saturn:  saturnHeliocentric,
+    uranus:  uranusHeliocentric,
+    neptune: neptuneHeliocentric,
 };
 
 export const TOUR_PRESETS = {
     veem: {
-        name: 'V-E-E-M Earth → Venus → Earth → Mars (Galileo-style)',
+        name: 'V-E-E-M Earth → Venus → Earth → Mars (Galileo-Mars-style)',
         depart: 'earth',
         legs: [
             { to: 'venus', tof_d: 130 },
@@ -1250,6 +1391,70 @@ export const TOUR_PRESETS = {
             { to: 'venus', tof_d: 150 },
             { to: 'venus', tof_d: 225 },     // ~Venus year
             { to: 'mars',  tof_d: 320 },
+        ],
+    },
+    // ── Outer-planet gravity-assist tours ───────────────────────────────────
+    juno: {
+        // E-E-J: Earth flyby gravity assist before Jupiter capture (JUNO).
+        name: 'E-E-J Earth → Earth → Jupiter (JUNO gravity assist)',
+        depart: 'earth',
+        legs: [
+            { to: 'earth',   tof_d:  730 },   // 2-yr Earth-return loop
+            { to: 'jupiter', tof_d: 1100 },
+        ],
+    },
+    galileo: {
+        // V-E-E-J: Venus + 2 Earth flybys to Jupiter (Galileo).
+        name: 'V-E-E-J Earth → Venus → Earth → Earth → Jupiter (Galileo)',
+        depart: 'earth',
+        legs: [
+            { to: 'venus',   tof_d: 130 },
+            { to: 'earth',   tof_d: 360 },
+            { to: 'earth',   tof_d: 730 },    // 2-yr Earth-Earth resonance
+            { to: 'jupiter', tof_d: 1100 },
+        ],
+    },
+    cassini: {
+        // V-V-E-J-S: Cassini's actual Saturn-arrival sequence (1997-2004).
+        name: 'V-V-E-J-S Earth → Venus → Venus → Earth → Jupiter → Saturn (Cassini)',
+        depart: 'earth',
+        legs: [
+            { to: 'venus',   tof_d: 175 },
+            { to: 'venus',   tof_d: 425 },    // Venus-Venus 2:3 resonance
+            { to: 'earth',   tof_d: 60  },
+            { to: 'jupiter', tof_d: 580 },
+            { to: 'saturn',  tof_d: 950 },
+        ],
+    },
+    voyager1: {
+        // E-J-S: Voyager 1 flew straight to Saturn after Jupiter slingshot.
+        name: 'E-J-S Earth → Jupiter → Saturn (Voyager 1 outer mission)',
+        depart: 'earth',
+        legs: [
+            { to: 'jupiter', tof_d:  640 },
+            { to: 'saturn',  tof_d:  680 },
+        ],
+    },
+    voyager2: {
+        // E-J-S-U-N: Voyager 2's Grand Tour — only spacecraft to hit all four.
+        name: 'E-J-S-U-N Earth → Jupiter → Saturn → Uranus → Neptune (Voyager 2 Grand Tour)',
+        depart: 'earth',
+        legs: [
+            { to: 'jupiter', tof_d:  690 },
+            { to: 'saturn',  tof_d:  730 },
+            { to: 'uranus',  tof_d: 1640 },
+            { to: 'neptune', tof_d: 1290 },
+        ],
+    },
+    new_horizons: {
+        // E-J-(Pluto): New Horizons-style — Jupiter slingshot then deep
+        // outer-system cruise. We end at Neptune since Pluto isn't in the
+        // ephemeris model.
+        name: 'E-J-N Earth → Jupiter → Neptune (New Horizons-style cruise)',
+        depart: 'earth',
+        legs: [
+            { to: 'jupiter', tof_d:  410 },
+            { to: 'neptune', tof_d: 3200 },
         ],
     },
 };

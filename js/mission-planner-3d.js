@@ -38,8 +38,9 @@ import {
     planMarsTransfer, planMarsLambert,
     planMarsToEarthLambert, planMoonToMarsLambert, planMoonToEarthLambert,
     planEarthToOuterLambert,
-    findLunarLaunchWindow, findMarsLaunchWindow, porkchopMars,
+    findLunarLaunchWindow, findMarsLaunchWindow, porkchopMars, porkchop,
     planTour, optimizeTour, TOUR_PRESETS,
+    INSERTION_LABELS, PLANET_DISPLAY,
     flybyAssessment, flybyMaxTurnAngle, flybyPeriapsisForTurn,
     hohmannPositionAt,
 } from './mission-planner-trajectory.js';
@@ -1372,6 +1373,10 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         findLunarWindow:  findLunarLaunchWindow,
         findMarsWindow:   findMarsLaunchWindow,
         porkchopMars,
+        porkchop,
+        // Per-target labels (insertion abbreviations + symbol/name) — used
+        // by the HTML log + plan readout for consistent wording.
+        INSERTION_LABELS, PLANET_DISPLAY,
         // Tour planning
         planTour, optimizeTour, TOUR_PRESETS,
         launchTour: (opts) => launchTour(opts),
