@@ -407,6 +407,29 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
 </head>
 <body>
 
+<!-- Landing-page analytics: identical bootstrap to signin/signup so the
+     funnel sees `landing_view` as the first stage in any user's
+     conversion path. CTAs below carry data-funnel-cta="…" attributes
+     and are picked up by a delegated click listener that fires
+     `landing_cta_click` with the cta name. -->
+<script type="module">
+    import './js/telemetry.js';
+    import './js/analytics.js';
+    import { funnel } from './js/auth-funnel.js';
+    funnel.step('landing_view');
+
+    // Delegated click capture for any element with data-funnel-cta.
+    // One listener for the whole page keeps perf/memory bounded
+    // regardless of how many CTAs marketing adds later.
+    document.addEventListener('click', (e) => {
+        const a = e.target?.closest?.('[data-funnel-cta]');
+        if (!a) return;
+        const cta = a.getAttribute('data-funnel-cta');
+        const dest = a.getAttribute('href') || null;
+        funnel.step('landing_cta_click', { cta, dest });
+    }, { capture: true, passive: true });
+</script>
+
 <script type="importmap">
 {"imports":{
     "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
@@ -429,7 +452,7 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
     <h1 class="hero-h1">Space-Grade Data<br>in your palm</h1>
     <p class="hero-sub">Hold the cosmos in your hand. Watch the Sun's corona breathe with live NOAA flux, feel a coronal mass ejection slam Earth's magnetosphere in real time, and drift through Wolf-Rayet winds and the gravitational dance of binary stars — every field line modeled from the equations NASA publishes, every photon rendered in your browser. For researchers who need precision, educators who need wonder, and anyone who has ever looked up and wanted the universe a little closer.</p>
     <div class="hero-cta" role="group" aria-label="Primary actions">
-      <a href="galactic-map.html" class="btn-matrix" id="hero-cta-primary" data-explore-tour-start aria-label="Start the guided tour: galaxy, real-time solar system, and sign-up"><span class="matrix-rain" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="matrix-label">Explore the App</span></a>
+      <a href="galactic-map.html" class="btn-matrix" id="hero-cta-primary" data-explore-tour-start data-funnel-cta="hero_explore" aria-label="Start the guided tour: galaxy, real-time solar system, and sign-up"><span class="matrix-rain" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="matrix-label">Explore the App</span></a>
       <a href="earth.html" class="btn-portal" data-explore-demo-start aria-label="Start the live data demo tour: Earth, Sun, Space Weather, Operations, sign-up"><span class="portal-depth" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="portal-label">Explore Live Demo <span aria-hidden="true">→</span></span></a>
     </div>
     <div class="hero-stats" role="list" aria-label="App statistics">
@@ -579,7 +602,7 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
           <li>Basic space weather dashboard</li>
           <li>Community access</li>
         </ul>
-        <a href="signup.html?plan=free" class="price-btn free-btn" aria-label="Get started with the free plan">Get Started Free</a>
+        <a href="signup.html?plan=free" class="price-btn free-btn" data-funnel-cta="pricing_free" aria-label="Get started with the free plan">Get Started Free</a>
       </div>
 
       <div class="price-card popular fade-in">
@@ -594,7 +617,7 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
           <li>Real-time storm alerts</li>
           <li>Email support</li>
         </ul>
-        <a href="signup.html?plan=basic" class="price-btn basic-btn" aria-label="Start the Basic plan for $10 per month">Start Basic — $10/mo</a>
+        <a href="signup.html?plan=basic" class="price-btn basic-btn" data-funnel-cta="pricing_basic" aria-label="Start the Basic plan for $10 per month">Start Basic — $10/mo</a>
       </div>
 
       <div class="price-card fade-in">
@@ -608,7 +631,7 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
           <li>Solar wind prediction models</li>
           <li>Priority &amp; dedicated support</li>
         </ul>
-        <a href="signup.html?plan=advanced" class="price-btn adv-btn" aria-label="Start the Advanced plan for $100 per month">Start Advanced — $100/mo</a>
+        <a href="signup.html?plan=advanced" class="price-btn adv-btn" data-funnel-cta="pricing_advanced" aria-label="Start the Advanced plan for $100 per month">Start Advanced — $100/mo</a>
       </div>
 
     </div>
@@ -622,8 +645,8 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
     <h2 class="section-h2 fade-in" id="cta-heading">Start your journey through the cosmos</h2>
     <p class="section-sub fade-in" style="margin:0 auto 36px">Join researchers, educators, and space enthusiasts already using Parkers Physics to understand solar storms, track space weather, and explore the universe — for free.</p>
     <div class="cta-actions fade-in">
-      <a href="signup.html" class="btn-primary" aria-label="Create your free Parkers Physics account">Create Free Account</a>
-      <a href="pricing.html" class="btn-secondary" aria-label="View all pricing plans">View All Plans</a>
+      <a href="signup.html" class="btn-primary" data-funnel-cta="final_cta_signup" aria-label="Create your free Parker Physics account">Create Free Account</a>
+      <a href="pricing.html" class="btn-secondary" data-funnel-cta="final_cta_pricing" aria-label="View all pricing plans">View All Plans</a>
     </div>
     <p class="cta-note fade-in">No credit card required · Cancel anytime · Free tier always available</p>
   </div>
@@ -659,8 +682,8 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
         <div class="footer-links">
           <a href="pricing.html">Pricing</a>
           <a href="dashboard.html">Dashboard</a>
-          <a href="signin.html">Sign In</a>
-          <a href="signup.html">Create Account</a>
+          <a href="signin.html" data-funnel-cta="footer_signin">Sign In</a>
+          <a href="signup.html" data-funnel-cta="footer_signup">Create Account</a>
         </div>
       </nav>
 
