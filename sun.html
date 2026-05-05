@@ -3106,6 +3106,74 @@ const coronaMesh = new THREE.Mesh(
 );
 scene.add(coronaMesh);
 
+// ─── Phase 4.3: AIA-style volumetric corona renderer ─────────────────────────
+// Mounts js/corona-volumetric.js (16-step DEM raymarch with 6 AIA channels,
+// per-AR loop arcades, coronal-hole subtraction, channel-aware filament
+// extinction) as the active corona renderer, replacing the legacy coronaFS
+// at r=2.5 unless ?corona=legacy is on the URL.
+//
+// Channel selection: ?coronaChannel=171|193|211|304|94|131|white (default 171).
+const _coronaMode    = (new URLSearchParams(location.search).get('corona') || 'volumetric').toLowerCase();
+const _coronaChannel = (new URLSearchParams(location.search).get('coronaChannel') || '171');
+let volumetricCorona = null;
+
+if (_coronaMode === 'volumetric' || _coronaMode === 'vol') {
+    (async () => {
+        try {
+            const mod = await import('./js/corona-volumetric-mount.js');
+            volumetricCorona = mod.mountVolumetricCorona({
+                scene,
+                baseUniforms: uniforms,
+                channel:      _coronaChannel,
+            });
+            // Hide the legacy coronaMesh so the two corona renderers don't
+            // double-up. Toggle stays wired so the user's "Corona" checkbox
+            // controls the volumetric mesh once it's mounted.
+            coronaMesh.visible = false;
+            const togCorona = document.getElementById('tog-corona');
+            if (togCorona) {
+                togCorona.addEventListener('change', e => {
+                    volumetricCorona.setVisible(e.target.checked);
+                });
+                volumetricCorona.setVisible(togCorona.checked !== false);
+            }
+            // Initial population from whatever liveRegions are loaded.
+            _refreshVolumetricCorona();
+            console.log(`[corona-vol] mounted (channel=${_coronaChannel})`);
+        } catch (e) {
+            console.warn('[corona-vol] init failed, falling back to legacy:', e);
+            coronaMesh.visible = true;
+        }
+    })();
+}
+
+// Build AR/hole inputs from liveRegions + the activity-driven default polar
+// holes (sun.html doesn't have a live coronal-hole feed yet — synthetic).
+function _refreshVolumetricCorona() {
+    if (!volumetricCorona) return;
+    const ars = (liveRegions || []).map(r => {
+        const ll = parseLoc(r.loc);
+        if (!ll) return null;
+        const m = String(r.mag || '').toLowerCase();
+        const isComplex = m.includes('delta') || m.includes('gamma')
+                       || m.includes('bg')    || m.includes('bgd');
+        return {
+            latRad:  ll.lat * Math.PI / 180,
+            lonRad:  ll.lon * Math.PI / 180,
+            area:    Math.max(0.05, Math.min(1, (r.area || 50) / 800)),
+            complex: isComplex,
+        };
+    }).filter(Boolean);
+
+    const activity = uniforms.u_activity?.value ?? 0.5;
+    const polarSize = 0.30 + 0.30 * (1 - activity);
+    const holes = [
+        { latRad:  85 * Math.PI / 180, lonRad:   0,        depth: polarSize },
+        { latRad: -85 * Math.PI / 180, lonRad:   Math.PI,  depth: polarSize },
+    ];
+    volumetricCorona.update(ars, holes);
+}
+
 // ─── OUTER CORONA / HELIOSPHERE GLOW (r=4.0) ─────────────────────────────────
 const outerGlowFS = /* glsl */`
     varying vec3 vNormal;
@@ -4923,6 +4991,17 @@ function animate() {
         radialDiffusePass.uniforms.uFlareIntensity.value = uniforms.u_flare_intensity.value;
     }
 
+    // Phase 4.3 — keep the volumetric corona's per-frame inputs synced.
+    // Flare lat/lon as a vec2; GOES X-ray flux normalized by X-class peak.
+    if (volumetricCorona) {
+        volumetricCorona.tickFlareLatLon(
+            uniforms.u_flare_lat.value,
+            uniforms.u_flare_lon.value
+        );
+        const xrayN = liveXrayFlux ? Math.max(0, Math.min(1, liveXrayFlux / 1e-4)) : 0;
+        volumetricCorona.setXrayNorm(xrayN);
+    }
+
     // Phase 3.1 — when the ribbon fade envelope (exp(-u_flare_t/175))
     // has dropped well below visibility, switch the photosphere shader
     // back to its cheap legacy path so we're not running the polyline-
@@ -5343,6 +5422,10 @@ function buildRegionMarkers() {
     });
 
     scene.add(regionGroup);
+
+    // Phase 4.3 — keep the volumetric corona's AR slots in sync with the
+    // marker geometry so loops/filaments/holes track live SWPC updates.
+    _refreshVolumetricCorona();
 }
 
 // ── Panel DOM update ─────────────────────────────────────────────────────
