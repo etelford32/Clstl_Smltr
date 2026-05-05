@@ -338,6 +338,10 @@ canvas { display:block; width:100% !important; height:100% !important; }
             <button id="zoom-hood">Neighborhood (&lt;1 kly)</button>
             <button id="zoom-arm">Local Arm (&lt;10 kly)</button>
             <button id="zoom-galaxy" class="active">Galaxy</button>
+            <button id="zoom-edge_on" title="Cinematic edge-on disk profile — dust lanes + peanut bulge"
+                    style="border-color:rgba(255,160,80,.45); color:#ffcc99;">
+                ✦ Edge-on
+            </button>
             <button id="zoom-universe" title="Log-scale — distances compressed beyond 60 kly">Universe ⚠ log</button>
         </div>
 
@@ -399,6 +403,10 @@ canvas { display:block; width:100% !important; height:100% !important; }
             <input type="checkbox" id="tog-showpieces" checked>
             <label for="tog-showpieces">✦ Galactic showpieces (visuals)</label>
         </div>
+        <div class="tog-row" title="Twin γ-ray lobes inflated above and below Sgr A* (Fermi-LAT 2010).">
+            <input type="checkbox" id="tog-fermi" checked>
+            <label for="tog-fermi">⊕ Fermi Bubbles</label>
+        </div>
 
         <div class="sb-hd" style="margin-top:16px">Spectral Type Legend</div>
         <div class="legend-item"><div class="legend-dot" style="background:#88aaff"></div>O/B — hot blue/white</div>
@@ -429,6 +437,12 @@ canvas { display:block; width:100% !important; height:100% !important; }
         <div class="legend-item"><div class="legend-dot" style="background:#55ffcc"></div>Planetary nebula (Helix)</div>
         <div class="legend-item"><div class="legend-dot" style="background:#ddeeff;border:1px solid #444"></div>Stellar BH binary (Cyg X-1)</div>
         <div class="legend-item"><div class="legend-dot" style="background:#ffcc88"></div>WR pinwheel (WR 104)</div>
+
+        <div class="sb-hd" style="margin-top:16px">Edge-on Disk Profile</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#9966dd"></div>Fermi Bubbles (±25 kly γ-ray lobes)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#241408;border:1px solid #663"></div>Mid-plane dust band (silhouettes bulge)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#4488cc"></div>Galactic warp (outer disk bend)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#99bbff;opacity:.5"></div>Circumgalactic halo (hot corona)</div>
 
         <div class="sb-hd" style="margin-top:16px">Sun's Orbit Around Sgr A*</div>
         <div style="font-size:10px;color:#666;line-height:1.6">
@@ -2425,25 +2439,69 @@ const ZOOM_PRESETS = {
         target: new THREE.Vector3(0, 0, 0),
         label: 'Universe (log scale)', radius: 600000,
     },
+    edge_on: {
+        // Camera in the disk plane, far from GC, looking through the Milky Way
+        // edge-on so the dust lanes form a black band silhouetted against the
+        // bulge and the peanut/X-shape of the bar is unmistakable.
+        // Slightly above the midplane (y = 600) so the dust doesn't lie *exactly*
+        // on the line of sight — gives the disk visible thickness.
+        pos: new THREE.Vector3(78000, 700, 28000),
+        target: new THREE.Vector3(0, 0, 0),
+        label: 'Edge-on (disk profile)', radius: 100000,
+        // — Cinematic transition descriptor (consumed by flyToCinematic) —
+        cinematic: {
+            duration: 5200,
+            // Pull the camera high above the disk first, then swing down into
+            // the plane → reveals the spiral from above before flattening it.
+            via:    new THREE.Vector3(45000, 110000, 45000),
+            viaT:   0.35,            // bezier control weight
+            // FOV breath — opens up at peak for a sweeping wide-angle moment.
+            fovStart: 50, fovPeak: 78, fovEnd: 36,
+            fovPeakT: 0.55,
+            // Camera roll — tilts the up vector progressively for drama, then
+            // settles back to upright at the destination.
+            rollPeakDeg: 14,
+            rollPeakT:   0.6,
+            // Slight micro-shake during the motion for kinetic feel.
+            shake: 90,
+            // Auto-orbit after arrival: camera slowly orbits GC in disk plane.
+            postOrbit: { speedDegPerSec: 1.6, dampMs: 9000 },
+        },
+    },
 };
 
 let currentZoom = 'galaxy';
 let flyRaf = null; // active fly animation handle
+// Auto-orbit state — set by cinematic landings, advanced in animate(),
+// cleared the moment the user grabs the camera.
+let autoOrbit = null; // { axis, target, speed, dampUntil }
 
 // Cancel any in-progress fly when user starts dragging
 controls.addEventListener('start', () => {
     if (flyRaf) { cancelAnimationFrame(flyRaf); flyRaf = null; }
+    autoOrbit = null;
 });
+
+// Easing helpers
+const easeInOutCubic  = x => x < 0.5 ? 4*x*x*x : 1 - Math.pow(-2*x + 2, 3) / 2;
+const easeOutQuint    = x => 1 - Math.pow(1 - x, 5);
+const easeInOutQuint  = x => x < 0.5 ? 16*x*x*x*x*x : 1 - Math.pow(-2*x + 2, 5) / 2;
+// Smooth pulse on [0,1] peaking at p (used for FOV/roll breaths)
+const peakPulse = (t, p) => {
+    if (t <= p) return 0.5 - 0.5 * Math.cos(Math.PI * (t / Math.max(p, 1e-6)));
+    return 0.5 + 0.5 * Math.cos(Math.PI * ((t - p) / Math.max(1 - p, 1e-6)));
+};
 
 function flyToPos(camPos, lookAt, duration = 1400) {
     if (flyRaf) { cancelAnimationFrame(flyRaf); flyRaf = null; }
+    autoOrbit = null;
     const startCam  = camera.position.clone();
     const startLook = controls.target.clone();
     const t0 = performance.now();
 
     function step(now) {
         const raw  = Math.min((now - t0) / duration, 1);
-        const ease = raw < 0.5 ? 2*raw*raw : -1 + (4 - 2*raw)*raw;
+        const ease = easeInOutCubic(raw);
         camera.position.lerpVectors(startCam,  camPos, ease);
         controls.target.lerpVectors(startLook, lookAt, ease);
         controls.update();
@@ -2452,12 +2510,140 @@ function flyToPos(camPos, lookAt, duration = 1400) {
     flyRaf = requestAnimationFrame(step);
 }
 
+// Cinematic flight with quadratic-Bezier waypoint, FOV breath, camera-roll
+// pulse, optional micro-shake, and a post-arrival auto-orbit drift.
+//
+// opts = {
+//   duration, via, viaT,
+//   fovStart, fovPeak, fovEnd, fovPeakT,
+//   rollPeakDeg, rollPeakT, shake,
+//   postOrbit: { speedDegPerSec, dampMs },
+// }
+function flyToCinematic(camPos, lookAt, opts = {}) {
+    if (flyRaf) { cancelAnimationFrame(flyRaf); flyRaf = null; }
+    autoOrbit = null;
+
+    const startCam  = camera.position.clone();
+    const startLook = controls.target.clone();
+    const startFov  = camera.fov;
+    const startUp   = camera.up.clone();
+
+    const duration  = opts.duration ?? 3500;
+    const via       = opts.via ?? null;
+    const viaT      = opts.viaT ?? 0.45;
+    const fovStart  = opts.fovStart ?? startFov;
+    const fovPeak   = opts.fovPeak  ?? null;
+    const fovEnd    = opts.fovEnd   ?? fovStart;
+    const fovPeakT  = opts.fovPeakT ?? 0.55;
+    const rollDeg   = opts.rollPeakDeg ?? 0;
+    const rollT     = opts.rollPeakT ?? 0.55;
+    const shake     = opts.shake ?? 0;
+
+    // Precompute via-control: build a quadratic-Bezier tangent that passes
+    // CLOSE to the via waypoint at parameter viaT.
+    // For quadratic Bezier B(t) = (1−t)²P0 + 2(1−t)t P1 + t² P2,
+    // we choose P1 so that B(viaT) ≈ via:
+    //   P1 = ( via − (1−t)² P0 − t² P2 ) / (2(1−t)t)
+    let bezierMid = null;
+    if (via) {
+        const t = viaT;
+        const oneMinusT = 1 - t;
+        bezierMid = via.clone()
+            .sub(startCam.clone().multiplyScalar(oneMinusT * oneMinusT))
+            .sub(camPos.clone().multiplyScalar(t * t))
+            .multiplyScalar(1 / (2 * oneMinusT * t));
+    }
+
+    const t0 = performance.now();
+    function step(now) {
+        const raw  = Math.min((now - t0) / duration, 1);
+        const ease = easeInOutQuint(raw);
+
+        // Position interpolation — bezier if a waypoint was supplied
+        if (bezierMid) {
+            const u = ease;
+            const oneMinusU = 1 - u;
+            const a = startCam.clone().multiplyScalar(oneMinusU * oneMinusU);
+            const b = bezierMid.clone().multiplyScalar(2 * oneMinusU * u);
+            const c = camPos.clone().multiplyScalar(u * u);
+            camera.position.copy(a.add(b).add(c));
+        } else {
+            camera.position.lerpVectors(startCam, camPos, ease);
+        }
+        controls.target.lerpVectors(startLook, lookAt, easeInOutCubic(raw));
+
+        // FOV breath — peaks at fovPeakT
+        if (fovPeak !== null) {
+            const u = peakPulse(raw, fovPeakT);
+            // Triangle blend: start→peak (rising) then peak→end (falling)
+            const baseLine = fovStart + (fovEnd - fovStart) * raw;
+            camera.fov = baseLine + (fovPeak - baseLine) * u;
+        } else {
+            camera.fov = fovStart + (fovEnd - fovStart) * raw;
+        }
+        camera.updateProjectionMatrix();
+
+        // Camera roll — twist the up vector temporarily for drama
+        if (rollDeg !== 0) {
+            const u = peakPulse(raw, rollT);
+            const angle = rollDeg * u * Math.PI / 180;
+            // Rotate up around the view direction (camera→target axis)
+            const view = controls.target.clone().sub(camera.position).normalize();
+            const axis = view;
+            const baseUp = new THREE.Vector3(0, 1, 0);
+            const rolled = baseUp.clone().applyAxisAngle(axis, angle);
+            camera.up.copy(rolled);
+        } else {
+            camera.up.lerpVectors(startUp, new THREE.Vector3(0,1,0), raw);
+        }
+
+        // Micro-shake — high-frequency triangle noise, falls off as we land
+        if (shake > 0) {
+            const intensity = shake * (1 - Math.abs(2*raw - 1));   // peaks mid-flight
+            // Cheap deterministic-ish triangle shake
+            const sx = Math.sin(now * 0.0091) + Math.sin(now * 0.0241 + 1.3);
+            const sy = Math.sin(now * 0.0177 + 2.1) + Math.sin(now * 0.0121 + 0.5);
+            const sz = Math.sin(now * 0.0203 + 3.7) + Math.sin(now * 0.0157 + 4.2);
+            camera.position.x += sx * intensity * 0.5;
+            camera.position.y += sy * intensity * 0.3;
+            camera.position.z += sz * intensity * 0.5;
+        }
+
+        controls.update();
+        if (raw < 1) {
+            flyRaf = requestAnimationFrame(step);
+        } else {
+            // Restore upright camera + canonical FOV exactly on landing
+            camera.up.set(0, 1, 0);
+            camera.fov = fovEnd;
+            camera.updateProjectionMatrix();
+            controls.update();
+            // Engage auto-orbit if requested
+            if (opts.postOrbit) {
+                autoOrbit = {
+                    target: lookAt.clone(),
+                    speed:  (opts.postOrbit.speedDegPerSec ?? 1.5) * Math.PI / 180,
+                    dampUntil: performance.now() + (opts.postOrbit.dampMs ?? 8000),
+                };
+            }
+            flyRaf = null;
+        }
+    }
+    flyRaf = requestAnimationFrame(step);
+}
+
 function flyTo(preset, duration = 1400) {
-    const { pos, target } = ZOOM_PRESETS[preset];
-    flyToPos(pos, target, duration);
+    const cfg = ZOOM_PRESETS[preset];
+    const { pos, target, cinematic } = cfg;
+    if (cinematic) {
+        flyToCinematic(pos, target, { ...cinematic, duration: cinematic.duration ?? duration });
+    } else {
+        flyToPos(pos, target, duration);
+    }
     currentZoom = preset;
     document.querySelectorAll('#zoom-bar button').forEach(b => b.classList.remove('active'));
-    document.getElementById('zoom-' + preset).classList.add('active');
+    const btn = document.getElementById('zoom-' + preset);
+    if (btn) btn.classList.add('active');
     // hud-view is now updated live every frame in updateCoordDisplay() so
     // it reflects the actual inverse-mapped camera distance, not the preset
     // label.  No need to set anything here.
@@ -3024,6 +3210,257 @@ const mwInnerGlow = (function buildMilkyWayGlow() {
         `,
     });
     scene.add(new THREE.Points(geo, mat));
+})();
+
+// ══════════════════════════════════════════════════════════════════════════
+//  FERMI BUBBLES  — twin γ-ray lobes inflated above and below the GC
+//
+//  Real MW feature (Su, Slatyer & Finkbeiner 2010; Fermi-LAT 1–100 GeV map):
+//  two ~25,000 ly-tall lobes of relativistic plasma extending perpendicular
+//  to the disk from Sgr A*. Likely a fossil of past AGN activity ~6 Myr ago.
+//  We render them as a pair of stretched, tilt-rendered ellipsoids with
+//  faint blue-violet additive shells + filament wisps.
+// ══════════════════════════════════════════════════════════════════════════
+const fermiBubbles = (function buildFermiBubbles() {
+    const group = new THREE.Group();
+    const BUBBLE_H   = 25000;   // half-height (ly) — real ~10–12 kpc
+    const BUBBLE_W   = 14000;   // half-width
+    const SHELL_LAYERS = [
+        { c: 0x6644aa, op: 0.10 },   // outermost faint violet
+        { c: 0x9966dd, op: 0.16 },   // mid layer
+        { c: 0xccaaff, op: 0.22 },   // bright inner edge
+    ];
+    [+1, -1].forEach(sign => {
+        SHELL_LAYERS.forEach(({ c, op }, i) => {
+            const scale = 1.0 - i * 0.18;
+            const shell = new THREE.Mesh(
+                new THREE.SphereGeometry(BUBBLE_W * scale, 32, 24),
+                new THREE.MeshBasicMaterial({
+                    color: c, transparent: true, opacity: op,
+                    side: THREE.BackSide, depthWrite: false,
+                    blending: THREE.AdditiveBlending,
+                })
+            );
+            // Stretch into an elongated lobe and shift up/down from disk
+            shell.scale.set(1.0, BUBBLE_H * scale / (BUBBLE_W * scale), 1.0);
+            shell.position.y = sign * BUBBLE_H * 0.85;
+            group.add(shell);
+        });
+        // Bright "bubble cap" at the top/bottom edge
+        const cap = new THREE.Mesh(
+            new THREE.SphereGeometry(BUBBLE_W * 0.55, 24, 18),
+            new THREE.MeshBasicMaterial({
+                color: 0xeeccff, transparent: true, opacity: 0.20,
+                depthWrite: false, blending: THREE.AdditiveBlending,
+            })
+        );
+        cap.position.y = sign * (BUBBLE_H * 1.55);
+        group.add(cap);
+    });
+
+    // Filament wisps along the bubble walls — stochastic vertical streaks
+    const N = 320;
+    const pos = new Float32Array(N * 3);
+    const col = new Float32Array(N * 3);
+    const sz  = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+        const sign = Math.random() < 0.5 ? 1 : -1;
+        // sample on the lobe surface (parametric ellipsoid)
+        const u = Math.random();
+        const v = Math.random() * Math.PI * 2;
+        const phi = u * Math.PI;     // 0..π
+        const r = BUBBLE_W * Math.sin(phi) * (0.85 + Math.random() * 0.25);
+        const y = BUBBLE_H * Math.cos(phi);
+        pos[i*3]   = r * Math.cos(v);
+        pos[i*3+1] = sign * (y + (sign > 0 ? BUBBLE_H * 0.3 : -BUBBLE_H * 0.3));
+        pos[i*3+2] = r * Math.sin(v);
+        const tint = 0.7 + Math.random() * 0.3;
+        col[i*3]   = 0.62 * tint;
+        col[i*3+1] = 0.45 * tint;
+        col[i*3+2] = 0.95 * tint;
+        sz[i]      = 320 + Math.random() * 480;
+    }
+    const fGeo = new THREE.BufferGeometry();
+    fGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    fGeo.setAttribute('color',    new THREE.BufferAttribute(col, 3));
+    fGeo.setAttribute('size',     new THREE.BufferAttribute(sz, 1));
+    const fMat = new THREE.ShaderMaterial({
+        vertexColors: true, transparent: true, depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        uniforms: { uScale: { value: renderer.getPixelRatio() } },
+        vertexShader: `
+            attribute float size;
+            varying vec3 vCol;
+            uniform float uScale;
+            void main() {
+                vCol = color;
+                vec4 mvp = modelViewMatrix * vec4(position, 1.0);
+                gl_PointSize = size * uScale / -mvp.z;
+                gl_PointSize = clamp(gl_PointSize, 1.0, 18.0);
+                gl_Position = projectionMatrix * mvp;
+            }
+        `,
+        fragmentShader: `
+            varying vec3 vCol;
+            void main() {
+                float d = length(gl_PointCoord - 0.5) * 2.0;
+                float a = 1.0 - smoothstep(0.0, 1.0, d);
+                a = pow(a, 1.8);
+                gl_FragColor = vec4(vCol, a * 0.55);
+            }
+        `,
+    });
+    group.add(new THREE.Points(fGeo, fMat));
+
+    scene.add(group);
+    return group;
+})();
+
+// ══════════════════════════════════════════════════════════════════════════
+//  MID-PLANE DUST BAND  — dramatic edge-on dust silhouette
+//
+//  When viewed edge-on the Milky Way looks like a glowing lens bisected by
+//  a black dust band (compare NGC 891). We add a thin disk-shaped sprite of
+//  multiply-blended dust at y=0 so the dust silhouette is visible from any
+//  edge-on angle, not just along the existing per-arm dust patches.
+// ══════════════════════════════════════════════════════════════════════════
+const midplaneDust = (function buildMidplaneDust() {
+    const N = 9000;
+    const pos = new Float32Array(N * 3);
+    const sz  = new Float32Array(N);
+    let idx = 0;
+    for (let i = 0; i < N; i++) {
+        // Sample disk: log-uniform radius 2–48 kly, exponential in r
+        const r = 2000 + Math.pow(Math.random(), 0.7) * 46000;
+        if (r > 48000) { i--; continue; }
+        const a = Math.random() * Math.PI * 2;
+        // Vertical scale height — TIGHTLY confined to midplane (~120 ly)
+        const y = (Math.random() - 0.5) * 240 * Math.exp(-r / 30000);
+        pos[idx*3]   = r * Math.cos(a);
+        pos[idx*3+1] = y;
+        pos[idx*3+2] = r * Math.sin(a);
+        sz[idx]      = 180 + Math.random() * 260;
+        idx++;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos.subarray(0, idx*3), 3));
+    geo.setAttribute('size',     new THREE.BufferAttribute(sz.subarray(0, idx), 1));
+    const mat = new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false,
+        blending: THREE.MultiplyBlending,
+        uniforms: { uScale: { value: renderer.getPixelRatio() } },
+        vertexShader: `
+            attribute float size;
+            uniform float uScale;
+            void main() {
+                vec4 mvp = modelViewMatrix * vec4(position, 1.0);
+                gl_PointSize = size * uScale / -mvp.z;
+                gl_PointSize = clamp(gl_PointSize, 0.4, 7.5);
+                gl_Position = projectionMatrix * mvp;
+            }
+        `,
+        fragmentShader: `
+            void main() {
+                float d = length(gl_PointCoord - 0.5) * 2.0;
+                float a = 1.0 - smoothstep(0.05, 1.0, d);
+                a = pow(a, 1.4);
+                vec3 dark = vec3(0.18, 0.10, 0.06);
+                gl_FragColor = vec4(mix(vec3(1.0), dark, a * 0.78), 1.0);
+            }
+        `,
+    });
+    const pts = new THREE.Points(geo, mat);
+    scene.add(pts);
+    return pts;
+})();
+
+// ══════════════════════════════════════════════════════════════════════════
+//  CIRCUMGALACTIC HALO  — faint hot coronal gas surrounding the disk
+//
+//  Real MW: a ~10⁶ K X-ray-emitting halo of ionised gas extends out to
+//  ~300 kpc (~1 Mly). We render it as a translucent oblate shell that
+//  becomes visible at galaxy zoom and gives the disk a halo glow when
+//  viewed edge-on.
+// ══════════════════════════════════════════════════════════════════════════
+const circumgalacticHalo = (function buildCircumgalacticHalo() {
+    const halo = new THREE.Mesh(
+        new THREE.SphereGeometry(58000, 36, 24),
+        new THREE.MeshBasicMaterial({
+            color: 0x4466aa, transparent: true, opacity: 0.05,
+            side: THREE.BackSide, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+        })
+    );
+    halo.scale.set(1.0, 0.55, 1.0);     // oblate
+    scene.add(halo);
+    // Bright inner edge
+    const inner = new THREE.Mesh(
+        new THREE.SphereGeometry(38000, 32, 22),
+        new THREE.MeshBasicMaterial({
+            color: 0x99bbff, transparent: true, opacity: 0.045,
+            side: THREE.BackSide, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+        })
+    );
+    inner.scale.set(1.0, 0.42, 1.0);
+    scene.add(inner);
+    const group = new THREE.Group();
+    group.add(halo); group.add(inner);
+    return group;
+})();
+
+// ══════════════════════════════════════════════════════════════════════════
+//  GALACTIC WARP  — outer disk warp visualised as bent ribbon edge
+//
+//  Real MW: HI 21cm + Cepheid surveys (Skowron+ 2019) reveal a clear
+//  sinusoidal warp in the outer disk — north-bound on one side, south-bound
+//  on the other. We render the warp as a large translucent ribbon Mesh
+//  whose y-coordinate follows W(R, φ) = h₀ * sin(φ - φ₀) * f(R/R_w),
+//  visible mainly at galaxy zoom and from oblique angles (incl. edge-on).
+// ══════════════════════════════════════════════════════════════════════════
+const galacticWarp = (function buildGalacticWarp() {
+    const RING_N = 80, RAD_N = 24;
+    const R0 = 18000, R1 = 56000;
+    const PHI0 = 1.2;     // azimuth of the line-of-nodes (rad)
+    const H0  = 4500;     // peak warp amplitude (ly, exaggerated for visibility)
+    // Build a strip mesh as an annular ring with Y modulated by the warp.
+    const positions = new Float32Array((RING_N + 1) * (RAD_N + 1) * 3);
+    const indices   = [];
+    let idx = 0;
+    for (let j = 0; j <= RAD_N; j++) {
+        const r = R0 + (R1 - R0) * (j / RAD_N);
+        // Warp grows like (R/R0 - 1)^1.4 in the outer disk
+        const warpAmp = H0 * Math.pow(Math.max(0, r/R0 - 0.6), 1.4);
+        for (let i = 0; i <= RING_N; i++) {
+            const phi = (i / RING_N) * Math.PI * 2;
+            const y = warpAmp * Math.sin(phi - PHI0);
+            positions[idx*3]   = r * Math.cos(phi);
+            positions[idx*3+1] = y;
+            positions[idx*3+2] = r * Math.sin(phi);
+            idx++;
+        }
+    }
+    for (let j = 0; j < RAD_N; j++) {
+        for (let i = 0; i < RING_N; i++) {
+            const a = j * (RING_N + 1) + i;
+            const b = a + 1;
+            const c = a + (RING_N + 1);
+            const d = c + 1;
+            indices.push(a, b, c, b, d, c);
+        }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.setIndex(indices);
+    geo.computeVertexNormals();
+    const mat = new THREE.MeshBasicMaterial({
+        color: 0x4488cc, transparent: true, opacity: 0.06,
+        side: THREE.DoubleSide, depthWrite: false,
+        blending: THREE.AdditiveBlending,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    scene.add(mesh);
+    return mesh;
 })();
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -6069,6 +6506,8 @@ document.getElementById('tog-galaxy').addEventListener('change', e => {
     galaxyHII.visible    = v;
     galaxyDust.visible   = v;
     mwInnerGlow.visible  = v;
+    midplaneDust.visible = v;
+    galacticWarp.visible = v;
 });
 document.getElementById('tog-grid').addEventListener('change', e => {
     ringsGroup.visible = e.target.checked;
@@ -6090,6 +6529,9 @@ document.getElementById('tog-showpieces').addEventListener('change', e => {
     const v = e.target.checked;
     Object.values(showpieceGroups).forEach(g => { g.visible = v; });
 });
+document.getElementById('tog-fermi').addEventListener('change', e => {
+    fermiBubbles.visible = e.target.checked;
+});
 
 // ══════════════════════════════════════════════════════════════════════════
 //  ZOOM BUTTONS
@@ -6098,6 +6540,7 @@ document.getElementById('zoom-local').addEventListener('click',    () => { setIg
 document.getElementById('zoom-hood').addEventListener('click',     () => { setIgmFocus(null); flyTo('hood'); });
 document.getElementById('zoom-arm').addEventListener('click',      () => { setIgmFocus(null); flyTo('arm'); });
 document.getElementById('zoom-galaxy').addEventListener('click',   () => { setIgmFocus(null); flyTo('galaxy'); });
+document.getElementById('zoom-edge_on').addEventListener('click',  () => { setIgmFocus(null); flyTo('edge_on'); });
 document.getElementById('zoom-universe').addEventListener('click', () => flyTo('universe', 2200));
 document.getElementById('igm-back-btn').addEventListener('click',  () => { setIgmFocus(null); flyTo('galaxy', 2400); });
 
@@ -6301,6 +6744,31 @@ function animate() {
     requestAnimationFrame(animate);
     const dt = clock.getDelta();
     t += dt;
+
+    // ── Cinematic auto-orbit drift (post-landing) ────────────────
+    // Slowly orbit the camera around the active target until either the
+    // damping window expires or the user grabs the controls.
+    if (autoOrbit) {
+        const now = performance.now();
+        if (now > autoOrbit.dampUntil) {
+            autoOrbit = null;
+        } else {
+            // Fade speed down as we approach the damping endpoint
+            const remaining = (autoOrbit.dampUntil - now) / 9000;
+            const fade = Math.max(0, Math.min(1, remaining));
+            const omega = autoOrbit.speed * fade;
+            const angle = omega * dt;
+            const c = Math.cos(angle), s = Math.sin(angle);
+            const tx = autoOrbit.target.x, tz = autoOrbit.target.z;
+            const dx = camera.position.x - tx;
+            const dz = camera.position.z - tz;
+            camera.position.x = tx + dx * c - dz * s;
+            camera.position.z = tz + dx * s + dz * c;
+            camera.lookAt(autoOrbit.target);
+            controls.target.copy(autoOrbit.target);
+        }
+    }
+
     controls.update();
 
     const camDistFromOrigin = camera.position.length();
