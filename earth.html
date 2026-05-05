@@ -13,6 +13,113 @@
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 html { height:auto; overflow-y:auto; }
+
+/* ═══ Design tokens ═══════════════════════════════════════════════════
+   Single source of truth for every panel's colour, spacing, radii, and
+   surface effects. Tweak a token here and every panel that consumes it
+   updates in lockstep — the alternative is hand-editing 50+ inline
+   rgba() calls and inconsistent multiples of 4px scattered across
+   collaborator PRs.
+
+   Organised by *semantic role* (accent, storm, status, surface) rather
+   than by raw colour. That way swapping the cyan family for a teal one
+   is a single token change, not a search-and-replace exercise.
+
+   Tokens are also exposed as `--*-rgb` triplets where they're embedded
+   inside rgba() calls — modern browsers can't substitute a hex token
+   into rgba(), so we carry the components separately. Pattern:
+       border: 1px solid rgba(var(--c-accent-rgb), .22);
+   ──────────────────────────────────────────────────────────────────── */
+:root {
+    /* ── Primary chrome accent — cyan family.
+         Used by every weather/atmosphere/info panel border and
+         scrollbar; the visual signature of the Earth page chrome. */
+    --c-accent:               #00c6ff;
+    --c-accent-rgb:           0, 200, 255;
+    --c-accent-soft:          rgba(0, 200, 255, .15);
+    --c-accent-border:        rgba(0, 200, 255, .22);
+    --c-accent-border-hi:     rgba(0, 200, 255, .30);
+    --c-accent-glow:          rgba(0, 210, 255, .55);
+    --c-accent-bg-overlay:    rgba(0, 210, 255, .10);
+
+    /* ── Storm-watch / cyclone accent — amber family. */
+    --c-storm:                #ffb066;
+    --c-storm-rgb:            255, 160, 80;
+    --c-storm-soft:           rgba(255, 160, 80, .12);
+    --c-storm-border:         rgba(255, 160, 80, .28);
+    --c-storm-border-hi:      rgba(255, 160, 80, .55);
+    --c-storm-glow:           rgba(255, 160, 80, .55);
+    --c-storm-bg-overlay:     rgba(255, 160, 80, .10);
+
+    /* ── Location/sun accent — teal-mint family. */
+    --c-loc:                  #5fffd0;
+    --c-loc-rgb:              95, 255, 208;
+    --c-loc-soft:             rgba(95, 255, 208, .18);
+    --c-loc-border:           rgba(95, 255, 208, .45);
+
+    /* ── Status palette (live / fetching / error / idle dots).
+         Single source of truth for the .lyr-status pips, the
+         NASA-obs row dots, and the Storm Watch pulse. */
+    --c-status-live:          #4fc97f;
+    --c-status-live-glow:     rgba(79, 201, 127, .55);
+    --c-status-fetching:      #ffaa22;
+    --c-status-fetch-glow:    rgba(255, 170, 34, .60);
+    --c-status-error:         #ff4422;
+    --c-status-error-glow:    rgba(255, 68, 34, .65);
+    --c-status-idle:          #556;
+
+    /* ── Surface fills — used for every panel's frosted-glass
+         background. Layered radial-gradient overlays on top of these
+         give each panel its own subtle hue without diverging the
+         underlying value scale. */
+    --c-surface-1:            rgba(6, 10, 22, .86);
+    --c-surface-2:            rgba(2, 4, 12, .92);
+
+    /* ── Text scale — five tiers from headline to faint metadata.
+         The skill-grid and storm-watch use slightly different mid-
+         greys; the tokens preserve those differences so a refactor
+         doesn't accidentally flatten the hierarchy. */
+    --c-text-primary:         #d6dee6;     /* card titles, primary readouts */
+    --c-text-secondary:       #b0c8d8;     /* layer labels, body copy */
+    --c-text-muted:           #7a98a8;     /* descriptors, captions */
+    --c-text-faint:           #557;        /* metadata, ago timestamps */
+    --c-text-skill:           #88b;        /* skill-grid — distinct from chrome */
+
+    /* ── Border/separator levels. */
+    --c-border-faint:         rgba(255, 255, 255, .06);
+    --c-border-soft:          rgba(255, 255, 255, .10);
+    --c-border-medium:        rgba(255, 255, 255, .14);
+
+    /* ── Spacing rhythm — 2 px base, doubled at each step. Every
+         panel padding, gap, and row spacing pulls from this scale.
+         Mixing in arbitrary px values is the historical reason the
+         layout looked subtly inconsistent across panels. */
+    --sp-1:                   2px;
+    --sp-2:                   4px;
+    --sp-3:                   6px;
+    --sp-4:                   8px;
+    --sp-5:                   10px;
+    --sp-6:                   12px;
+    --sp-7:                   14px;
+    --sp-8:                   16px;
+
+    /* ── Border radii. */
+    --r-sm:                   4px;         /* badges, buttons */
+    --r-md:                   6px;         /* sub-cards inside a panel */
+    --r-lg:                   9px;         /* legacy panel default */
+    --r-xl:                   10px;        /* current panel default */
+    --r-2xl:                  14px;        /* loc-panel hero */
+
+    /* ── Surface effects. */
+    --blur-glass:             blur(12px) saturate(1.15);
+    --shadow-panel:           0 4px 22px rgba(0, 16, 40, .55);
+
+    /* ── Transition speeds. */
+    --t-fast:                 .12s ease;
+    --t-snap:                 .15s ease;
+    --t-medium:               .25s ease;
+}
+
 body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#ddd;
     font-family:'Segoe UI',system-ui,sans-serif; }
 
@@ -223,10 +330,13 @@ nav {
 }
 .lyr input[type=checkbox]:checked,
 .lyr-featured-row input[type=checkbox]:checked {
+    /* "On" state — accent gradient. The two stops are slight shade
+       variations of var(--c-accent); keep them inline so the gradient
+       stays a continuous hue ramp rather than a flat fill. */
     background: linear-gradient(180deg, #0099c8 0%, #00d4ff 100%);
-    border-color: rgba(0,210,255,.55);
+    border-color: var(--c-accent-glow);
     box-shadow:
-        0 0 6px rgba(0,210,255,.45),
+        0 0 6px rgba(var(--c-accent-rgb), .45),
         inset 0 1px 1px rgba(255,255,255,.18),
         inset 0 -1px 1px rgba(0,0,0,.25);
 }
@@ -247,7 +357,7 @@ nav {
 .lyr:hover input[type=checkbox]:checked,
 .lyr-featured-row:hover input[type=checkbox]:checked {
     box-shadow:
-        0 0 8px rgba(0,210,255,.65),
+        0 0 8px rgba(var(--c-accent-rgb), .65),
         inset 0 1px 1px rgba(255,255,255,.25),
         inset 0 -1px 1px rgba(0,0,0,.25);
 }
@@ -255,7 +365,7 @@ nav {
    pill silhouette. */
 .lyr input[type=checkbox]:focus-visible,
 .lyr-featured-row input[type=checkbox]:focus-visible {
-    outline: 2px solid rgba(0,210,255,.55);
+    outline: 2px solid var(--c-accent-glow);
     outline-offset: 2px;
 }
 /* Featured rows host larger pills — bigger tap target, more prominent. */
@@ -278,14 +388,23 @@ nav {
    any red before the user reaches for a layer. */
 .lyr-status {
     display:inline-block; width:7px; height:7px; border-radius:50%;
-    background:#556; flex-shrink:0; box-shadow:none; transition:background .2s, box-shadow .2s;
+    background: var(--c-status-idle);
+    flex-shrink:0; box-shadow:none;
+    transition: background .2s, box-shadow .2s;
 }
 .lyr-status.st-fetching {
-    background:#ffaa22; box-shadow:0 0 3px rgba(255,170,34,.6);
+    background: var(--c-status-fetching);
+    box-shadow: 0 0 3px var(--c-status-fetch-glow);
     animation: lyrStatusPulse 1.2s ease-in-out infinite;
 }
-.lyr-status.st-loaded { background:#4fc97f; box-shadow:0 0 4px rgba(79,201,127,.55); }
-.lyr-status.st-error  { background:#ff4422; box-shadow:0 0 4px rgba(255,68,34,.65); }
+.lyr-status.st-loaded {
+    background: var(--c-status-live);
+    box-shadow: 0 0 4px var(--c-status-live-glow);
+}
+.lyr-status.st-error {
+    background: var(--c-status-error);
+    box-shadow: 0 0 4px var(--c-status-error-glow);
+}
 @keyframes lyrStatusPulse { 0%,100% { opacity:.55; } 50% { opacity:1; } }
 
 /* ─── Collapsible section groups inside layer panel ─────────── */
@@ -317,29 +436,35 @@ nav {
    shortcut*, not a duplicate state — clicking either propagates via the
    `change` event the underlying handler already listens for. */
 .lyr-section.featured {
-    border-top:none; margin-top:0; padding-top:6px;
-    background:linear-gradient(180deg, rgba(0,200,255,.08) 0%, rgba(0,200,255,0) 100%);
-    border-radius:6px 6px 0 0; padding:6px 4px 8px;
-    margin-bottom:4px;
+    border-top:none; margin-top:0; padding-top: var(--sp-3);
+    /* Gradient accent on the FEATURED block — same hue as the chrome
+       border, just lower opacity so it lands as a soft tint behind
+       the toggle list rather than a hard band. */
+    background: linear-gradient(180deg,
+        rgba(var(--c-accent-rgb), .08) 0%,
+        rgba(var(--c-accent-rgb), 0) 100%);
+    border-radius: var(--r-md) var(--r-md) 0 0;
+    padding: var(--sp-3) var(--sp-2) var(--sp-4);
+    margin-bottom: var(--sp-2);
 }
 .lyr-section.featured .lyr-section-hdr span {
-    color:#0bd; font-weight:700; font-size:.66rem;
+    color: var(--c-accent); font-weight:700; font-size:.66rem;
     letter-spacing:.10em;
 }
-.lyr-section.featured .lyr-section-hdr .lyr-chevron { color:#0bd; }
+.lyr-section.featured .lyr-section-hdr .lyr-chevron { color: var(--c-accent); }
 .lyr-featured-tip {
     font-size:9px; color:#779; line-height:1.45;
-    padding:0 4px 6px; font-style:italic;
+    padding:0 var(--sp-2) var(--sp-3); font-style:italic;
 }
 .lyr-featured-row {
-    display:flex; align-items:flex-start; gap:8px;
-    padding:5px 4px; border-radius:4px;
-    transition:background .15s;
+    display:flex; align-items:flex-start; gap: var(--sp-4);
+    padding: 5px var(--sp-2); border-radius: var(--r-sm);
+    transition: background var(--t-snap);
     cursor:pointer;
 }
-.lyr-featured-row:hover { background:rgba(0,200,255,.06); }
+.lyr-featured-row:hover { background: rgba(var(--c-accent-rgb), .06); }
 .lyr-featured-row input[type=checkbox] {
-    accent-color:#00c6ff; width:14px; height:14px; flex-shrink:0;
+    accent-color: var(--c-accent); width:14px; height:14px; flex-shrink:0;
     margin-top:1px;
 }
 .lyr-featured-row .lyr-featured-text { flex:1; min-width:0; line-height:1.3; }
@@ -577,12 +702,12 @@ nav {
        light from above-left. Matches the storm-watch + featured-row
        palette so the side-panel family looks like one design system. */
     background:
-        radial-gradient(120% 90% at 0% 0%, rgba(0,210,255,.10), transparent 55%),
-        linear-gradient(180deg, rgba(6,12,22,.86), rgba(2,4,12,.92));
-    backdrop-filter:blur(12px) saturate(1.15);
-    -webkit-backdrop-filter:blur(12px) saturate(1.15);
-    border:1px solid rgba(0,200,255,.22); border-radius:10px;
-    padding:10px 12px 12px; font-size:11px;
+        radial-gradient(120% 90% at 0% 0%, var(--c-accent-bg-overlay), transparent 55%),
+        linear-gradient(180deg, var(--c-surface-1), var(--c-surface-2));
+    backdrop-filter: var(--blur-glass);
+    -webkit-backdrop-filter: var(--blur-glass);
+    border:1px solid var(--c-accent-border); border-radius: var(--r-xl);
+    padding: var(--sp-5) var(--sp-6) var(--sp-6); font-size:11px;
     /* Default size — width is what users have always seen; min/max give
        resize handles room without letting the user drag the panel into
        a useless 1×1 sliver. */
@@ -600,7 +725,7 @@ nav {
        isn't minimised — see .panel-minimized override below. */
     resize:both;
     overflow:hidden;
-    box-shadow:0 4px 22px rgba(0, 16, 40, .55);
+    box-shadow: var(--shadow-panel);
 }
 /* Inner body becomes the scroll container — keeps the header + drag
    handle + minimise/close pinned while the dense weather content
@@ -609,14 +734,14 @@ nav {
 #wx-panel .panel-body {
     max-height:calc(70vh - 56px);
     overflow-y:auto; overflow-x:hidden;
-    padding-right:4px;          /* breathing room for the scrollbar */
+    padding-right: var(--sp-2);     /* breathing room for the scrollbar */
     /* Smooth-scroll inside the panel for keyboard PgUp/PgDn — feels
        intentional rather than abrupt. */
     scroll-behavior:smooth;
 }
 #wx-panel .panel-body::-webkit-scrollbar { width:4px; }
 #wx-panel .panel-body::-webkit-scrollbar-thumb {
-    background:rgba(0,200,255,.30); border-radius:2px;
+    background: var(--c-accent-border-hi); border-radius:2px;
 }
 #wx-panel .panel-body::-webkit-scrollbar-track { background:transparent; }
 /* Minimised panels shouldn't show the resize handle — body collapses
@@ -639,13 +764,15 @@ nav {
     background:
         linear-gradient(135deg,
             transparent 0%, transparent 45%,
-            rgba(0,200,255,.45) 45%, rgba(0,200,255,.45) 55%,
+            rgba(var(--c-accent-rgb), .45) 45%,
+            rgba(var(--c-accent-rgb), .45) 55%,
             transparent 55%, transparent 70%,
-            rgba(0,200,255,.30) 70%, rgba(0,200,255,.30) 80%,
+            rgba(var(--c-accent-rgb), .30) 70%,
+            rgba(var(--c-accent-rgb), .30) 80%,
             transparent 80%);
     pointer-events:none;        /* the underlying CSS resize handle
                                    does the real work; we just paint */
-    opacity:.5; transition:opacity .15s;
+    opacity:.5; transition:opacity var(--t-snap);
 }
 #wx-panel:hover::after { opacity:.95; }
 #wx-panel.panel-minimized::after { display:none; }
@@ -778,45 +905,46 @@ nav {
 .panel-header {
     display: flex; align-items: center; justify-content: space-between;
     cursor: grab; user-select: none;
-    padding: 4px 4px 7px;
+    padding: var(--sp-2) var(--sp-2) 7px;
     /* Subtle bottom rule under the header so the grab-handle reads as
        a separate region from the body. Matches the storm-watch panel
        chrome that already shipped and creates a cohesive look across
        every panel in the family. */
-    border-bottom: 1px solid rgba(255,255,255,.06);
-    margin-bottom: 6px;
+    border-bottom: 1px solid var(--c-border-faint);
+    margin-bottom: var(--sp-3);
 }
 .panel-header:active { cursor: grabbing; }
 .panel-header h3 { margin: 0; flex: 1; font-weight: 600; }
-.panel-actions { display: flex; gap: 4px; align-items: center; flex-shrink: 0; }
+.panel-actions { display: flex; gap: var(--sp-2); align-items: center; flex-shrink: 0; }
 .panel-btn {
-    /* Slightly larger, slightly more contrast than before — these were
-       hard to hit on touch devices and visually disappeared next to
-       the new dense status content. 24×24 is right at the ergonomic
-       floor for a tap target without crowding the title. */
+    /* 24×24 sits right at the ergonomic floor for a tap target without
+       crowding the title. Token-driven palette so a future palette
+       tweak (e.g. trying an amber hover state) is a single :root
+       change. */
     background: rgba(255,255,255,.06);
-    border: 1px solid rgba(255,255,255,.10);
+    border: 1px solid var(--c-border-soft);
     border-radius: 5px;
-    color: #7a98a8; cursor: pointer; font-size: 11px;
+    color: var(--c-text-muted); cursor: pointer; font-size: 11px;
     width: 24px; height: 24px;
     display: flex; align-items: center; justify-content: center;
     padding: 0; touch-action: manipulation;
-    transition: background .15s, color .15s, border-color .15s, transform .08s;
+    transition: background var(--t-snap), color var(--t-snap),
+                border-color var(--t-snap), transform .08s;
     flex-shrink: 0; line-height: 1;
 }
 .panel-btn:hover {
-    background: rgba(0,200,255,.15); color: #00c6ff;
-    border-color: rgba(0,200,255,.30);
+    background: var(--c-accent-soft); color: var(--c-accent);
+    border-color: var(--c-accent-border-hi);
 }
 .panel-btn:active { transform: scale(.92); }
-.panel-body { overflow: hidden; transition: max-height .3s ease, opacity .25s; }
+.panel-body { overflow: hidden; transition: max-height .3s ease, opacity var(--t-medium); }
 .panel-minimized .panel-body { max-height: 0 !important; opacity: 0; }
 /* When minimised, drop the border under the header — there's nothing
    below it, so the line just hangs off the chin. */
 .panel-minimized .panel-header {
     border-bottom-color: transparent;
     margin-bottom: 0;
-    padding-bottom: 4px;
+    padding-bottom: var(--sp-2);
 }
 
 /* Data source status badges */
