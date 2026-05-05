@@ -605,6 +605,40 @@ nav {
 .wx-skill-grid .skill-head span { text-align: right; }
 .wx-skill-grid .skill-ch        { color: #99a; }
 .wx-skill-grid .skill-cell      { text-align: right; color: #aac; }
+
+/* ── Wind-advection learner HUD ─────────────────────────────────
+   Tiny bar chart showing α[h] per-horizon at a glance. Each bar is
+   stacked: the filled portion = α value (0..1). Colour walks
+   amber → cyan as the learner converges from "untrained" toward
+   "physics-trusted." */
+.wx-flow-gain-row {
+    display: grid; grid-template-columns: 36px 1fr;
+    gap: 4px; align-items: center; padding-top: 2px;
+}
+.wx-flow-gain-label { color: #557; font-size: 9px; }
+.wx-flow-gain-bars  {
+    display: grid; grid-template-columns: repeat(5, 1fr);
+    gap: 3px; align-items: end;
+    height: 22px;
+}
+.wx-flow-gain-cell {
+    position: relative; height: 100%;
+    background: rgba(255,255,255,.045);
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 2px;
+    overflow: hidden;
+}
+.wx-flow-gain-fill {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    transition: height .25s ease, background .25s ease;
+}
+.wx-flow-gain-h {
+    /* Horizon label centered at the top of each bar. */
+    position: absolute; top: 0; left: 0; right: 0;
+    text-align: center; font-size: 8px; color: #779;
+    pointer-events: none;
+    letter-spacing: .04em;
+}
 .wx-k { color:#4a6a80; }
 .wx-v { color:#a0d8f0; font-weight:600; }
 
@@ -2010,6 +2044,26 @@ nav {
              title="Long-memory diagnostics for the precipitation forecasters. Climatology improves the diurnal-cycle prior; bias pairings improve the Open-Meteo ↔ NASA fusion correction.">
             <div id="wx-clim-cov">climatology: warming up…</div>
             <div id="wx-bias-cov">fusion bias: awaiting NASA pairings…</div>
+        </div>
+        <!-- Wind-advection learner HUD strip.
+             Two readouts the validator-fed learners produce:
+               1. Current steadiness scalar from WindShearProxy ("how
+                  steady has the wind been the past few hours?"). Drives
+                  the runtime gain modulation.
+               2. Per-horizon learned gain α[h] from AdvectionGainTracker.
+                  Bar chart shows the trust the system has placed in the
+                  semi-Lagrangian step at each horizon, learned from
+                  validator MSE feedback.
+             Both update on storm-watch / forecast-validation events,
+             so a returning visitor sees the prior maturing visually. -->
+        <div id="wx-flow-learner"
+             style="margin-top:6px;font-family:monospace;font-size:9.5px;color:#557;line-height:1.55;"
+             title="What the wind-advection learners have decided. Steadiness reflects current shear (1=calm, 0=turbulent). The bars are per-horizon trust in the physics step (1=full advection, 0=falls back to persistence).">
+            <div id="wx-flow-steadiness">flow steadiness: warming up…</div>
+            <div id="wx-flow-gain-row" class="wx-flow-gain-row" style="display:none;">
+                <span class="wx-flow-gain-label">α[h]</span>
+                <div class="wx-flow-gain-bars" id="wx-flow-gain-bars"></div>
+            </div>
         </div>
         <hr class="ir-sep">
         <!-- NWS alert summary. The 🔔 Get Alerts CTA is intentionally
@@ -4853,6 +4907,101 @@ document.addEventListener('weather-forecast-validation-update', _paintPrecipCove
 // Defer one tick so PrecipClimatology.open()'s async backfill has a
 // chance to complete before we sample coverage.
 setTimeout(_paintPrecipCoverage, 500);
+
+// ── Wind-advection learner HUD ────────────────────────────────────────────
+// Paints two diagnostics for the gain + shear learners introduced in
+// the last commit:
+//   1. Current steadiness scalar (how steady the wind has been the past
+//      ~6 h) — drives the runtime gain modulation.
+//   2. Per-horizon learned α[h] (how trustworthy the system thinks
+//      each horizon's advection step is, given the validator's MSE
+//      feedback so far).
+//
+// Bars are stacked vertically: filled portion = α value (0..1).
+// Colour walks amber (low trust) → cyan (high trust) as the learner
+// converges. Hover any bar for the exact number + sample count.
+function _paintFlowLearner() {
+    const stEl = document.getElementById('wx-flow-steadiness');
+    const row  = document.getElementById('wx-flow-gain-row');
+    const bars = document.getElementById('wx-flow-gain-bars');
+    if (!stEl || !row || !bars) return;
+
+    // Steadiness — refresh from the proxy (passing the live history
+    // ring so the scalar reflects current conditions, not whatever
+    // the last forecast cycle computed). Cheap; one cos(lat)-weighted
+    // pass over ≤6 frames × 2 channels × 2592 cells.
+    const steadiness = windShearProxy.refresh(wxGridHistory);
+    const sd = windShearProxy.diagnostics();
+    if (sd.n_frames < 2) {
+        stEl.textContent = 'flow steadiness: warming up…';
+        stEl.style.color = '#557';
+    } else {
+        // Three buckets: turbulent (red), mixed (amber), steady (cyan).
+        // Thresholds match the AdvectionGainTracker's skill→target ramps
+        // so the colour story tracks the learner's behaviour.
+        const colour = steadiness > 0.65 ? '#7adcc8'
+                     : steadiness > 0.35 ? '#d8c060'
+                     :                     '#d87a60';
+        stEl.innerHTML =
+            `flow steadiness: <span style="color:${colour}">${steadiness.toFixed(2)}</span>` +
+            ` <span style="opacity:.6">(shear ${sd.shear_ms.toFixed(1)} m/s, ${sd.n_frames} frames)</span>`;
+        stEl.style.color = '#779';
+    }
+
+    // Per-horizon gain bars. The tracker hands us a {horizon: gain}
+    // map; we render a fixed [1, 3, 6, 12, 24] order so the bar
+    // positions are stable as the user watches the learner converge.
+    const gains = advectionGainTracker.getAllGains();
+    const horizons = FORECAST_HORIZONS_H;
+    const sampleCount = advectionGainTracker.sampleCount;
+    if (sampleCount === 0 && horizons.every(h => Math.abs(gains[h] - 1) < 1e-3)) {
+        // Cold start — every gain is at the prior 1.0. Hide the bars
+        // until the learner has any evidence; rendering five identical
+        // full bars is meaningless visual noise.
+        row.style.display = 'none';
+        return;
+    }
+    row.style.display = 'grid';
+
+    let html = '';
+    for (const h of horizons) {
+        const g = Math.max(0, Math.min(1, gains[h] ?? 1));
+        const heightPct = (g * 100).toFixed(1);
+        // Amber → cyan ramp. Below 0.35 = amber, above 0.65 = cyan,
+        // linear blend in between. Mirrors the steadiness colour rule
+        // so a "trust the physics" bar reads in the same hue family
+        // as a "wind has been steady" readout.
+        const amber = [216, 192, 96];
+        const cyan  = [122, 220, 200];
+        const t = Math.max(0, Math.min(1, (g - 0.35) / 0.30));
+        const r = Math.round(amber[0] + (cyan[0] - amber[0]) * t);
+        const gC = Math.round(amber[1] + (cyan[1] - amber[1]) * t);
+        const b = Math.round(amber[2] + (cyan[2] - amber[2]) * t);
+        const fill = `rgb(${r},${gC},${b})`;
+        const title = `+${h}h  α_learned=${g.toFixed(2)}  ` +
+                      `α_eff=${(g * (Number.isFinite(steadiness) ? steadiness : 1)).toFixed(2)}  ` +
+                      `(${sampleCount} validator updates)`;
+        html += `
+            <div class="wx-flow-gain-cell" title="${title}">
+                <div class="wx-flow-gain-fill" style="height:${heightPct}%;background:${fill}"></div>
+                <div class="wx-flow-gain-h">${h}h</div>
+            </div>`;
+    }
+    bars.innerHTML = html;
+}
+
+// Steadiness moves on every new history frame (it integrates the past
+// 6 h of (U, V) variance); learned α moves on every validator-update
+// (one per cron cycle). Subscribing to both gives the user-visible
+// diagnostic the most-natural cadence — a fresh frame nudges the
+// runtime modulator, a fresh validation cycle nudges the learned
+// trust.
+document.addEventListener('weather-history-ingest', _paintFlowLearner);
+document.addEventListener('advection-gain-update',  _paintFlowLearner);
+document.addEventListener('weather-forecast-validation-update', _paintFlowLearner);
+// Initial paint — the gain tracker may have a non-trivial state from
+// localStorage. Defer one tick so the constructor's load completes.
+setTimeout(_paintFlowLearner, 500);
 
 // ═══════════════════════════════════════════════════════════════
 //  SATELLITE FEED — NASA GIBS GOES-16 + MODIS cloud imagery
