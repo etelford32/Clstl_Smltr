@@ -297,9 +297,17 @@ export function lkPixelsToMs({ u, v, gridW, gridH, framePeriodSec }) {
  * FORECAST_HORIZONS_H, advecting each channel using the supplied
  * (flowU, flowV) velocity field. Used by both forecasters; only the
  * source of the velocity field differs between them.
+ *
+ * gainAtHour(h) is an optional per-horizon multiplier ∈ [0, 1] applied
+ * to (flowU, flowV) before the advection step. It exists so the wind-
+ * advection forecaster can blend toward persistence at long horizons
+ * where the steady-flow assumption breaks; gainAtHour(h)=1 for every h
+ * recovers the unscaled physics step. We scale by allocating a fresh
+ * Float32Array only when the gain ≠ 1 — keeps the common case
+ * allocation-free.
  */
 function buildAdvectedHorizons({
-    history, modelId, flowU, flowV,
+    history, modelId, flowU, flowV, gainAtHour = null,
 }) {
     const frames = history.all();
     if (frames.length === 0) return null;
@@ -309,15 +317,26 @@ function buildAdvectedHorizons({
 
     const out = {};
     const targets = {};
+    const meta = gainAtHour ? { gain_per_horizon: {} } : null;
     for (const h of FORECAST_HORIZONS_H) {
         const targetMs = t + h * 3_600_000;
         targets[h] = targetMs;
+
+        const gain = gainAtHour ? Math.max(0, Math.min(1, gainAtHour(h))) : 1;
+        if (meta) meta.gain_per_horizon[h] = gain;
+        let useU = flowU, useV = flowV;
+        if (gain !== 1) {
+            useU = new Float32Array(N);
+            useV = new Float32Array(N);
+            for (let k = 0; k < N; k++) { useU[k] = flowU[k] * gain; useV[k] = flowV[k] * gain; }
+        }
+
         const frame = new Float32Array(N * NUM_CHANNELS);
         for (let ch = 0; ch < NUM_CHANNELS; ch++) {
             const off = ch * N;
             const slice = coarse.subarray(off, off + N);
             const advected = semiLagrangianAdvect({
-                field: slice, flowU, flowV, gridW, gridH, hoursAhead: h,
+                field: slice, flowU: useU, flowV: useV, gridW, gridH, hoursAhead: h,
             });
             frame.set(advected, off);
         }
@@ -327,6 +346,7 @@ function buildAdvectedHorizons({
         model_id: modelId, issued_ms: t,
         horizons: FORECAST_HORIZONS_H.slice(),
         gridW, gridH, frames: out, target_ms: targets,
+        ...(meta ? { _meta: meta } : {}),
     };
 }
 
@@ -334,18 +354,56 @@ function buildAdvectedHorizons({
  * Forecast = displace the current frame backward along the stored
  * U/V wind vectors. Physical: standard semi-Lagrangian transport.
  *
- * Honest limitations:
+ * Honest limitations of the bare physics step:
  *   - Single-step backward Euler with steady-state flow assumption.
  *     For h > 6 h the wind itself evolves more than the back-trajectory
- *     accounts for. We accept this — it's the simplest version of the
- *     scheme and the validator will tell us where it breaks.
+ *     accounts for, and the forecast can become *worse than persistence*.
  *   - Wind is sampled at the destination cell, not along the
  *     trajectory. Mid-point or RK2 integration would be a small
  *     accuracy bump; not yet justified by skill scores.
+ *
+ * Learned gain + runtime modulator
+ * ────────────────────────────────
+ * To address the long-horizon failure mode without dropping the model
+ * entirely, the forecaster scales (U, V) by a horizon-specific gain
+ * before advecting:
+ *
+ *   α_eff(h) = α_learned[h] · steadiness
+ *
+ * Where:
+ *   α_learned[h] is a per-horizon scalar in [0, 1] tuned by the
+ *   validator's MSE feedback (AdvectionGainTracker). Drifts toward 1
+ *   when advection beats persistence; toward 0 when it loses.
+ *   steadiness is a runtime "Bz-style" scalar from WindShearProxy.
+ *   1 = wind has been steady the past few hours; 0 = wildly shifting.
+ *
+ * α_eff = 0 walks back zero distance ⇒ forecast ≡ current frame ≡
+ * persistence baseline. α_eff = 1 is the original physics step.
+ *
+ * Both knobs are optional — the forecaster degrades gracefully to the
+ * pure physics step when neither is supplied (gain = 1 for all h).
  */
 export class WindAdvectionForecaster {
     static id = 'wind-advection-v1';
-    constructor() { this.id = WindAdvectionForecaster.id; }
+    /**
+     * @param {object} [opts]
+     * @param {object} [opts.gainTracker]  AdvectionGainTracker instance.
+     *   If present, α_learned[h] is read per-forecast via getGain(h).
+     * @param {object} [opts.shearProxy]   WindShearProxy instance. If
+     *   present, refresh()'d once per forecast and the resulting
+     *   steadiness scalar multiplies α_learned[h].
+     */
+    constructor({ gainTracker = null, shearProxy = null } = {}) {
+        this.id           = WindAdvectionForecaster.id;
+        this._gainTracker = gainTracker;
+        this._shearProxy  = shearProxy;
+        // Diagnostic — last computed (steadiness, α_learned, α_eff)
+        // exposed for the SW-panel HUD or dev console.
+        this._lastDiag = null;
+    }
+
+    /** Last applied effective-gain diagnostic, or null if no forecast yet. */
+    getLastDiag() { return this._lastDiag; }
 
     forecast({ history }) {
         const frames = history.all();
@@ -357,11 +415,37 @@ export class WindAdvectionForecaster {
         // needed, the channels are already in m/s.
         const flowU = coarse.subarray(CH_U * N, (CH_U + 1) * N);
         const flowV = coarse.subarray(CH_V * N, (CH_V + 1) * N);
-        return buildAdvectedHorizons({
-            history,
-            modelId: this.id,
-            flowU, flowV,
+
+        // Compose the per-horizon gain. Refresh the shear proxy once
+        // per forecast call (≤ 1 per cron cycle) — the steadiness
+        // scalar is the same for every horizon, modulating each by
+        // the same multiplier. Per-horizon variation comes from the
+        // learned α_learned[h].
+        const steadiness = this._shearProxy
+            ? this._shearProxy.refresh(history)
+            : 1.0;
+        const gainTracker = this._gainTracker;
+        const gainAtHour = (h) => {
+            const learned = gainTracker ? gainTracker.getGain(h) : 1.0;
+            return learned * steadiness;
+        };
+        // Stash diagnostics — actual numbers populate after the
+        // helper runs and we read its _meta hook.
+        const result = buildAdvectedHorizons({
+            history, modelId: this.id, flowU, flowV, gainAtHour,
         });
+        if (result) {
+            this._lastDiag = {
+                steadiness,
+                shear_ms:    this._shearProxy?.diagnostics().shear_ms ?? null,
+                alpha_per_h: result._meta?.gain_per_horizon ?? null,
+                alpha_learned_per_h: gainTracker
+                    ? gainTracker.getAllGains()
+                    : null,
+                t: Date.now(),
+            };
+        }
+        return result;
     }
 }
 
@@ -575,14 +659,25 @@ export class OpticalFlowForecaster {
 }
 
 /**
- * Convenience: spawn both forecasters with sensible defaults. Pass a
- * `skillTracker` to wire learned tracer-blend weights into the
- * OpticalFlowForecaster — without it the forecaster falls back to its
- * meteorological prior + per-frame variance weighting only.
+ * Convenience: spawn both forecasters with sensible defaults.
+ *
+ * @param {object} [opts]
+ * @param {object} [opts.skillTracker]  TracerSkillTracker for the
+ *   OpticalFlowForecaster. Without it, the forecaster falls back to
+ *   meteorological prior + per-frame variance weighting only.
+ * @param {object} [opts.gainTracker]   AdvectionGainTracker for the
+ *   WindAdvectionForecaster. Without it, the forecaster runs the bare
+ *   physics step (gain = 1 at every horizon).
+ * @param {object} [opts.shearProxy]    WindShearProxy. Without it,
+ *   steadiness = 1 (no runtime modulation of the gain).
  */
-export function makeWeatherFlowForecasters({ skillTracker = null } = {}) {
+export function makeWeatherFlowForecasters({
+    skillTracker = null,
+    gainTracker  = null,
+    shearProxy   = null,
+} = {}) {
     return [
-        new WindAdvectionForecaster(),
+        new WindAdvectionForecaster({ gainTracker, shearProxy }),
         new OpticalFlowForecaster({ skillTracker }),
     ];
 }
