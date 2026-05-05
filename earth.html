@@ -2218,7 +2218,7 @@ import {
 import { createWeatherOverlay } from './js/weather-overlay.js';
 import { StormWatchPanel } from './js/storm-watch-panel.js';
 import { StormTrackOverlay } from './js/storm-track-overlay.js';
-import { extrapolateStormTrack } from './js/storm-forecast.js';
+import { extrapolateStormTrack, interpolateTrackAtHour } from './js/storm-forecast.js';
 import { makePanelDraggable, resetPanelPosition } from './js/draggable-panel.js';
 import { NWSAlerts, ALERT_COLORS, ALERT_CSS_COLORS, ALERT_PULSE_FREQ, SEVERITY_ORDER, classifyAlertEvent } from './js/nws-alerts.js';
 import { getAlertIconTexture, precomputeAlertIcons } from './js/alert-icons.js';
@@ -2800,8 +2800,28 @@ const stormTrackOverlay = new StormTrackOverlay({
     earthMesh,
     geoToXYZ,
     extrapolate: extrapolateStormTrack,
+    interpolateAtHour: interpolateTrackAtHour,
 }).start();
 window._stormTrackOverlay = stormTrackOverlay;   // dev console handle
+
+// Forecast-time scrubber → overlay scrubber dots. The Storm Watch
+// panel owns the slider; both surfaces update on the storm-scrub-change
+// window event. Auto-enabling the layer on first non-zero scrub gives
+// new users an immediate "the dot moved on the globe" feedback that
+// makes the scrubber's purpose obvious without needing a tutorial.
+let _stormScrubHasAutoEnabled = false;
+window.addEventListener('storm-scrub-change', (ev) => {
+    const hours = ev?.detail?.hours ?? 0;
+    stormTrackOverlay.setScrubHours(hours);
+    if (hours > 0 && !_stormScrubHasAutoEnabled && !stormTrackOverlay.isVisible()) {
+        const t = document.getElementById('lyr-storm-tracks');
+        if (t && !t.checked) {
+            t.checked = true;
+            t.dispatchEvent(new Event('change'));
+        }
+        _stormScrubHasAutoEnabled = true;
+    }
+});
 
 // ═══════════════════════════════════════════════════════════════
 //  MOUSE → LAT/LON (raycaster)

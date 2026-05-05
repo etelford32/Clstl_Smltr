@@ -50,6 +50,7 @@ const CLASS_COLOR = {
 const R_CENTERLINE = 1.012;
 const R_CONE       = 1.011;     // just under the centerline, so dash reads on top of fill
 const R_HORIZON    = 1.014;     // dot markers above the dash line
+const R_SCRUB      = 1.018;     // scrubber dot — sits above all other markers
 
 // 1 nautical mile expressed as a fraction of Earth's mean radius — used
 // to convert NHC error radii into great-circle angular distance.
@@ -127,11 +128,16 @@ export class StormTrackOverlay {
      *   Pure function returning {points, ...} — typically
      *   extrapolateStormTrack from storm-forecast.js.
      */
-    constructor({ THREE, earthMesh, geoToXYZ, extrapolate }) {
+    constructor({ THREE, earthMesh, geoToXYZ, extrapolate, interpolateAtHour }) {
         this._THREE      = THREE;
         this._earthMesh  = earthMesh;
         this._geoToXYZ   = geoToXYZ;
         this._extrapolate = extrapolate;
+        // Optional pure helper from storm-forecast.js — called per
+        // storm on every setScrubHours() to compute the slerp position.
+        // When omitted the scrubber dots are silently disabled (the
+        // overlay still renders the static cones).
+        this._interpolateAtHour = interpolateAtHour;
 
         // Group holds every per-storm sub-group so we can flip visibility
         // for the entire overlay with a single mesh.visible = false.
@@ -141,9 +147,19 @@ export class StormTrackOverlay {
         this._root.renderOrder = 6;     // above ocean currents (5), below jet (7)
         earthMesh.add(this._root);
 
-        // id → { centerline, cone, horizonGroup, classification, dim, isHighlighted }
+        // id → { centerline, cone, horizonGroup, scrub, storm, track, classification, color }
         this._tracks = new Map();
         this._highlightedId = null;
+        // Current scrub-hours setting (0 = "now", up to MAX_SCRUB_H).
+        // Stored so re-builds (on storm-update) can replay the scrubber
+        // dots without waiting for the next slider event.
+        this._scrubHours = 0;
+
+        // Shared geometry for the scrubber dot — one allocation, every
+        // track points its mesh at this. Saves allocations during fast
+        // rebuild bursts when many storms are active simultaneously.
+        this._scrubGeom = new THREE.SphereGeometry(0.006, 12, 12);
+        this._scrubHaloGeom = new THREE.SphereGeometry(0.012, 16, 12);
 
         // Listener handle for storm-update; `start()` attaches.
         this._onStormUpdate = this._onStormUpdate.bind(this);
@@ -182,9 +198,27 @@ export class StormTrackOverlay {
         }
     }
 
+    /** Current scrub-hours setting (0..MAX). Used by tests / debug HUDs. */
+    getScrubHours() { return this._scrubHours; }
+
     /** Manually push storms (useful for tests or pre-feed seeding). */
     setStorms(storms) {
         this._rebuild(storms ?? []);
+    }
+
+    /**
+     * Place a "where will the storm be at +Nh" dot on every active
+     * track. Hour 0 hides every scrubber dot (the eye marker the cloud
+     * shader paints already covers "now"). Higher hours interpolate
+     * along the great-circle track between bracketing forecast
+     * waypoints — see interpolateTrackAtHour() in storm-forecast.js.
+     */
+    setScrubHours(hours) {
+        const h = Math.max(0, hours | 0);
+        this._scrubHours = h;
+        for (const [, track] of this._tracks) {
+            this._refreshScrubMarker(track);
+        }
     }
 
     // ── Internal ──────────────────────────────────────────────────────
@@ -250,15 +284,26 @@ export class StormTrackOverlay {
         if (cone)       group.add(cone);
         if (horizons)   group.add(horizons);
 
-        this._root.add(group);
-        this._tracks.set(id, {
+        // Scrubber dot — built lazily inside _refreshScrubMarker so
+        // when scrubHours=0 we don't allocate a hidden mesh per track.
+        const trackEntry = {
             group,
             centerline,
             cone,
             horizons,
+            scrub: null,           // { dot, halo } once allocated
+            storm,                 // cached for interpolation
+            track: fc,             // cached extrapolation result
             classification: storm.classification,
             color,
-        });
+        };
+        this._root.add(group);
+        this._tracks.set(id, trackEntry);
+
+        // If the user already had the slider parked at +Nh from a
+        // previous mount, surface the dot immediately so the rebuild
+        // doesn't lose state.
+        if (this._scrubHours > 0) this._refreshScrubMarker(trackEntry);
     }
 
     _removeTrack(id) {
@@ -294,6 +339,82 @@ export class StormTrackOverlay {
                     child.material.transparent = true;
                 }
             });
+        }
+        // Scrubber stays bright on the highlighted track so the
+        // "where is this storm at +Nh?" answer never gets faded out.
+        if (track.scrub) {
+            const baseOpDot  = 1.0;
+            const baseOpHalo = 0.45;
+            track.scrub.dot.material.opacity  = visIntensity * baseOpDot;
+            track.scrub.halo.material.opacity = visIntensity * baseOpHalo;
+        }
+    }
+
+    /**
+     * Build (lazily) and reposition the scrubber dot for one track.
+     * Hides the dot when scrubHours is 0 — the cloud shader's eye
+     * marker already paints "now," and a second dot at the same point
+     * just makes the headline storm look duplicated.
+     */
+    _refreshScrubMarker(track) {
+        if (!track) return;
+        const THREE = this._THREE;
+        const h = this._scrubHours;
+
+        if (h === 0) {
+            if (track.scrub) {
+                track.scrub.dot.visible  = false;
+                track.scrub.halo.visible = false;
+            }
+            return;
+        }
+        if (!this._interpolateAtHour) return;   // helper not provided
+        const proj = this._interpolateAtHour({
+            storm: track.storm,
+            track: track.track,
+            hour: h,
+        });
+        if (!proj) return;
+
+        if (!track.scrub) {
+            // Lazy build — first scrub frame for this track. Two
+            // meshes: a small bright dot (the answer) and a wider
+            // soft halo (so the dot reads at globe scale even when
+            // the storm sits in a busy patch of the cone).
+            const dotMat = new THREE.MeshBasicMaterial({
+                color: track.color,
+                transparent: true,
+                opacity: 1.0,
+                depthWrite: false,
+            });
+            const haloMat = new THREE.MeshBasicMaterial({
+                color: track.color,
+                transparent: true,
+                opacity: 0.45,
+                depthWrite: false,
+            });
+            const dot  = new THREE.Mesh(this._scrubGeom,     dotMat);
+            const halo = new THREE.Mesh(this._scrubHaloGeom, haloMat);
+            dot.renderOrder  = 7;
+            halo.renderOrder = 6;
+            track.group.add(halo);
+            track.group.add(dot);
+            track.scrub = { dot, halo };
+        }
+
+        const pos = this._geoToXYZ(proj.lat, proj.lon)
+                        .normalize()
+                        .multiplyScalar(R_SCRUB);
+        track.scrub.dot.position.copy(pos);
+        track.scrub.halo.position.copy(pos);
+        track.scrub.dot.visible  = true;
+        track.scrub.halo.visible = true;
+        // Re-apply dim state in case this track is currently faded —
+        // a freshly-built scrub mesh starts at full opacity and would
+        // otherwise punch through the dim shroud.
+        if (this._highlightedId != null) {
+            const highlighted = this._tracks.get(this._highlightedId);
+            if (highlighted && highlighted !== track) this._applyDim(track, true);
         }
     }
 

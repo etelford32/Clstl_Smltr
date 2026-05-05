@@ -31,6 +31,17 @@
  * builder so a future split-into-component is a one-file move.
  */
 
+import { extrapolateStormTrack, interpolateTrackAtHour, FORECAST_HORIZONS_H }
+    from './storm-forecast.js';
+
+// Maximum scrubber hour. Locked to the last published NHC horizon so the
+// slider can't drag the user past where our error radii are defined.
+const MAX_SCRUB_H = FORECAST_HORIZONS_H[FORECAST_HORIZONS_H.length - 1];   // 120
+
+// Persist the scrub position so a returning user lands back at the same
+// look-ahead. Stored as plain integer hours; defaults to 0 (= "now").
+const SCRUB_STORAGE_KEY = 'earth-storm-scrub-hours-v1';
+
 // Saffir–Simpson cutoffs for sustained wind (knots). Used to assign a
 // hurricane category and pick the badge tint.
 const CATEGORY_CUTOFFS_KT = [64, 83, 96, 113, 137];   // Cat 1..5 lower bounds
@@ -80,6 +91,23 @@ function formatLatLon(lat, lon) {
     const ns = lat >= 0 ? 'N' : 'S';
     const ew = lon >= 0 ? 'E' : 'W';
     return `${Math.abs(lat).toFixed(1)}° ${ns}, ${Math.abs(lon).toFixed(1)}° ${ew}`;
+}
+
+// Scrubber readout — UTC date/time at issue + hours offset. Hand-rolled
+// rather than Intl.DateTimeFormat so the output is deterministic across
+// locales and platform abbreviations (some Linux + Node combos render
+// "Sept" instead of "Sep" via Intl, which makes the fixed-width readout
+// jitter as the user scrubs).
+const _DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const _MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function formatScrubTime(utcMs) {
+    const d = new Date(utcMs);
+    const dow = _DOW[d.getUTCDay()];
+    const dom = String(d.getUTCDate()).padStart(2, '0');
+    const mon = _MON[d.getUTCMonth()];
+    const hh  = String(d.getUTCHours()).padStart(2, '0');
+    const mm  = String(d.getUTCMinutes()).padStart(2, '0');
+    return `${dow} ${dom} ${mon} · ${hh}:${mm} UTC`;
 }
 
 // ── DOM scaffolding ────────────────────────────────────────────────────────
@@ -196,6 +224,75 @@ function injectStyle() {
     padding-top:4px; border-top:1px dashed rgba(255,255,255,.06);
     text-align:right;
 }
+#${PANEL_ID} .sw-scrub {
+    border-radius:5px; padding:6px 8px 7px;
+    margin-bottom:7px;
+    background:linear-gradient(180deg, rgba(255,160,80,.10) 0%, rgba(255,160,80,.02) 100%);
+    border:1px solid rgba(255,160,80,.18);
+}
+#${PANEL_ID} .sw-scrub-row1 {
+    display:flex; align-items:center; justify-content:space-between;
+    gap:6px; margin-bottom:3px;
+    font-size:10px; color:#ffc89a;
+}
+#${PANEL_ID} .sw-scrub-h {
+    font-weight:700; color:#ffd9b8; letter-spacing:.04em;
+    font-variant-numeric: tabular-nums;
+}
+#${PANEL_ID} .sw-scrub-time {
+    font-size:9.5px; color:#a89788;
+    font-variant-numeric: tabular-nums;
+    white-space:nowrap;
+}
+#${PANEL_ID} .sw-scrub-reset {
+    background:rgba(255,160,80,.16); color:#ffb070;
+    border:1px solid rgba(255,160,80,.30); border-radius:3px;
+    font-size:9px; cursor:pointer; padding:1px 6px;
+    line-height:1.4; transition:background .15s, color .15s;
+}
+#${PANEL_ID} .sw-scrub-reset:hover {
+    background:rgba(255,160,80,.28); color:#fff;
+}
+#${PANEL_ID} .sw-scrub-row2 {
+    display:flex; align-items:center; gap:6px;
+    font-size:8.5px; color:#7a6757;
+}
+#${PANEL_ID} .sw-scrub-row2 input[type=range] {
+    flex:1; -webkit-appearance:none; appearance:none;
+    height:4px; border-radius:2px;
+    background:linear-gradient(90deg,
+        rgba(58,138,203,.55) 0%,
+        rgba(245,159,59,.55) 60%,
+        rgba(216,52,95,.55) 100%);
+    outline:none; cursor:pointer; margin:0;
+}
+#${PANEL_ID} .sw-scrub-row2 input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance:none; appearance:none;
+    width:13px; height:13px; border-radius:50%;
+    background:linear-gradient(180deg, #fff 0%, #ffd9b8 100%);
+    box-shadow:0 0 4px rgba(255,200,150,.7), inset 0 1px 0 rgba(255,255,255,.8);
+    border:1px solid rgba(255,200,150,.7);
+    cursor:grab;
+}
+#${PANEL_ID} .sw-scrub-row2 input[type=range]::-moz-range-thumb {
+    width:13px; height:13px; border-radius:50%; border:1px solid rgba(255,200,150,.7);
+    background:linear-gradient(180deg, #fff 0%, #ffd9b8 100%);
+    box-shadow:0 0 4px rgba(255,200,150,.7);
+}
+#${PANEL_ID} .sw-scrub-tick {
+    flex-shrink:0; font-variant-numeric: tabular-nums;
+}
+#${PANEL_ID} .sw-card .sw-scrub-line {
+    /* Per-card "at +Nh" projected position. Hidden when scrubHours=0
+       so cards aren't bloated with redundant info on first paint. */
+    display:none;
+    margin-top:2px;
+    font-size:9.5px; color:#ffc89a;
+    font-variant-numeric: tabular-nums;
+}
+#${PANEL_ID}.scrubbing .sw-card .sw-scrub-line {
+    display:block;
+}
 @media (max-width: 640px) {
     #${PANEL_ID} {
         width: 230px; top: auto; bottom: 70px; left: 10px;
@@ -218,6 +315,25 @@ function buildPanelDOM() {
             </div>
         </div>
         <div class="panel-body">
+            <!-- Forecast-time scrubber. Drives every visible card's "at
+                 +Nh" position readout AND (via storm-scrub-change) the
+                 globe overlay's per-track scrubber dots. Sits ABOVE the
+                 storm list so it stays visible when the panel is short
+                 on vertical space. -->
+            <div class="sw-scrub" id="${PANEL_ID}-scrub" aria-label="Forecast time scrubber">
+                <div class="sw-scrub-row1">
+                    <span><span id="${PANEL_ID}-scrub-h" class="sw-scrub-h">now</span></span>
+                    <span class="sw-scrub-time" id="${PANEL_ID}-scrub-time"></span>
+                    <button class="sw-scrub-reset" id="${PANEL_ID}-scrub-reset" title="Snap to now">↺</button>
+                </div>
+                <div class="sw-scrub-row2">
+                    <span class="sw-scrub-tick">0h</span>
+                    <input type="range" id="${PANEL_ID}-scrub-range"
+                           min="0" max="${MAX_SCRUB_H}" step="6" value="0"
+                           aria-label="Forecast hours from now">
+                    <span class="sw-scrub-tick">+${MAX_SCRUB_H}h</span>
+                </div>
+            </div>
             <div id="${PANEL_ID}-list"></div>
             <div class="sw-foot" id="${PANEL_ID}-foot">awaiting NHC feed…</div>
         </div>
@@ -240,10 +356,11 @@ export class StormWatchPanel {
      *   when the user mouses out of the panel.
      * @param {number} [opts.maxStorms=5]
      */
-    constructor({ onStormClick, onStormFocus, maxStorms = 5 } = {}) {
+    constructor({ onStormClick, onStormFocus, onScrubChange, maxStorms = 5 } = {}) {
         this._maxStorms    = maxStorms;
         this._onStormClick = onStormClick;
         this._onStormFocus = onStormFocus;
+        this._onScrubChange = onScrubChange;
         this._panel        = null;
         this._listEl       = null;
         this._countEl      = null;
@@ -251,6 +368,27 @@ export class StormWatchPanel {
         this._pulseEl      = null;
         this._lastDetail   = null;
         this._activeId     = null;        // last hovered/clicked storm id
+        // Scrubber state. Restored from localStorage so a returning user
+        // keeps their look-ahead position; defaults to 0 ("now") for
+        // first-time visitors so the panel doesn't look mysteriously
+        // future-dated.
+        this._scrubHours = 0;
+        try {
+            const stored = parseInt(localStorage.getItem(SCRUB_STORAGE_KEY), 10);
+            if (Number.isFinite(stored) && stored >= 0 && stored <= MAX_SCRUB_H) {
+                this._scrubHours = stored;
+            }
+        } catch (_) {}
+        // Cached per-storm forecast track so per-card "at +Nh" lookups
+        // don't re-extrapolate every scrub frame. Keyed by storm id;
+        // invalidated on each storm-update.
+        this._trackCache = new Map();
+        // The wall-clock issue time of the current scrub epoch. Anchors
+        // the time readout: "+36h · Fri 18 Sep 09:00 UTC" needs us to
+        // know what "+36h" means in calendar terms. Refreshed on every
+        // storm-update so the readout slowly walks forward as the feed
+        // updates.
+        this._issueMs = Date.now();
         this._onUpdate     = this._onUpdate.bind(this);
     }
 
@@ -310,11 +448,40 @@ export class StormWatchPanel {
             }
         });
 
+        // ── Scrubber wiring ─────────────────────────────────────────
+        this._scrubEls = {
+            range: this._panel.querySelector(`#${PANEL_ID}-scrub-range`),
+            hLabel: this._panel.querySelector(`#${PANEL_ID}-scrub-h`),
+            tLabel: this._panel.querySelector(`#${PANEL_ID}-scrub-time`),
+            reset:  this._panel.querySelector(`#${PANEL_ID}-scrub-reset`),
+        };
+        if (this._scrubEls.range) {
+            this._scrubEls.range.value = String(this._scrubHours);
+            // 'input' fires continuously while the user drags — that's
+            // the live-scrub experience we want. 'change' alone would
+            // only fire on release.
+            this._scrubEls.range.addEventListener('input', (ev) => {
+                const h = parseInt(ev.target.value, 10);
+                this._setScrubHours(Number.isFinite(h) ? h : 0, { fromUser: true });
+            });
+        }
+        this._scrubEls.reset?.addEventListener('click', () => {
+            this._setScrubHours(0, { fromUser: true });
+            if (this._scrubEls.range) this._scrubEls.range.value = '0';
+        });
+
         window.addEventListener('storm-update', this._onUpdate);
 
         // Initial paint with an empty state so the panel is never blank
         // — the user sees a hint while the first feed tick arrives.
         this._render();
+        // Apply restored scrub state to the readouts + class (we can
+        // already paint the time even before any storms arrive).
+        this._applyScrubVisuals();
+        // Notify the host overlay of the restored scrub hour exactly
+        // once at mount time, so it lands a scrubber dot if the layer
+        // was already on. fromUser:false keeps storage stable.
+        this._emitScrubChange();
         return this;
     }
 
@@ -331,7 +498,95 @@ export class StormWatchPanel {
 
     _onUpdate(ev) {
         this._lastDetail = ev?.detail ?? null;
+        // Anchor the scrubber's time readout to the moment the panel
+        // received the latest feed update. The user shouldn't see the
+        // "+36h · Fri ..." readout drift between feed ticks just
+        // because real-world clock time is advancing.
+        this._issueMs = Date.now();
+        // Invalidate per-storm track cache; new feed = new positions.
+        this._trackCache.clear();
         this._render();
+        // Re-emit so the overlay's scrubber dots track newly-arrived
+        // storms (and lose dots for storms that dissipated).
+        this._emitScrubChange();
+    }
+
+    /**
+     * Change the scrub-hours state, re-paint the readouts, and notify
+     * downstream consumers (host callback + window event). Idempotent.
+     * fromUser=true persists the choice to localStorage so the next
+     * page load restores the same look-ahead; fromUser=false (e.g.
+     * mount-time replay) skips the write.
+     */
+    _setScrubHours(hours, { fromUser = false } = {}) {
+        const h = Math.max(0, Math.min(MAX_SCRUB_H, hours | 0));
+        if (h === this._scrubHours) return;
+        this._scrubHours = h;
+        if (fromUser) {
+            try { localStorage.setItem(SCRUB_STORAGE_KEY, String(h)); } catch (_) {}
+        }
+        this._applyScrubVisuals();
+        this._emitScrubChange();
+    }
+
+    /** Push the current scrub state to subscribers + per-card readouts. */
+    _applyScrubVisuals() {
+        const h = this._scrubHours;
+        // Drive the .scrubbing class on the panel — CSS uses it to
+        // reveal each card's .sw-scrub-line. Doing it via class rather
+        // than per-card style writes keeps the DOM mutation cheap when
+        // the user is actively dragging the slider.
+        if (this._panel) this._panel.classList.toggle('scrubbing', h > 0);
+
+        if (this._scrubEls?.hLabel) {
+            this._scrubEls.hLabel.textContent = h === 0 ? 'now' : `+${h}h`;
+        }
+        if (this._scrubEls?.tLabel) {
+            this._scrubEls.tLabel.textContent = formatScrubTime(this._issueMs + h * 3_600_000);
+        }
+        // Update per-card projected position lines without doing a
+        // full innerHTML rewrite — the cards' own data isn't changing,
+        // only the scrub-derived projection is.
+        if (this._listEl) {
+            this._listEl.querySelectorAll('.sw-card').forEach(card => {
+                const id = card.dataset.id;
+                const line = card.querySelector('.sw-scrub-line');
+                if (!line) return;
+                if (h === 0) { line.textContent = ''; return; }
+                const proj = this._projectStorm(id, h);
+                line.textContent = proj
+                    ? `↪ +${h}h: ${formatLatLon(proj.lat, proj.lon)}`
+                    : `↪ +${h}h: track unavailable`;
+            });
+        }
+    }
+
+    _emitScrubChange() {
+        const detail = {
+            hours:    this._scrubHours,
+            issuedAt: this._issueMs,
+            targetMs: this._issueMs + this._scrubHours * 3_600_000,
+        };
+        if (typeof this._onScrubChange === 'function') this._onScrubChange(detail);
+        window.dispatchEvent(new CustomEvent('storm-scrub-change', { detail }));
+    }
+
+    /**
+     * Compute the projected (lat, lon) for one storm at the requested
+     * forecast hour. Caches the extrapolated track per storm id so a
+     * fast slider drag doesn't re-run the kinematic stepper on every
+     * 'input' event.
+     */
+    _projectStorm(stormId, hour) {
+        const storm = this._lastDetail?.storms?.find(s => s.id === stormId);
+        if (!storm) return null;
+        let track = this._trackCache.get(stormId);
+        if (!track) {
+            track = extrapolateStormTrack(storm);
+            if (!track) return null;
+            this._trackCache.set(stormId, track);
+        }
+        return interpolateTrackAtHour({ storm, track, hour });
     }
 
     _flyTo(lat, lon) {
@@ -438,6 +693,10 @@ export class StormWatchPanel {
             const updated = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             this._footEl.textContent = `Source: NHC CurrentStorms · updated ${updated}`;
         }
+
+        // Re-apply scrub readouts after the cards rewrote — the new
+        // .sw-scrub-line nodes need their text content populated.
+        this._applyScrubVisuals();
     }
 
     _cardHtml(s) {
@@ -476,6 +735,7 @@ export class StormWatchPanel {
                             : '—'}
                     </span>
                 </div>
+                <div class="sw-scrub-line" data-storm-id="${s.id ?? ''}"></div>
             </div>`;
     }
 }

@@ -188,6 +188,113 @@ export function extrapolateStormTrack(storm) {
     };
 }
 
+// ── Track interpolation ────────────────────────────────────────────────────
+//
+// Given a storm + its extrapolated track, return the projected position
+// at any hour in [0, max horizon]. The Storm Watch scrubber feeds this
+// every time the user moves the slider — the panel paints the resulting
+// {lat, lon} as the card's "at +Nh" readout, and the globe overlay
+// places a glowing dot at the same point. Pure function so both
+// callers can share it without coupling to Three.js.
+//
+// Interpolation method:
+//   - hour ≤ 0           → snap to the storm's current position
+//   - hour between two
+//     bracketing wpts H1, H2 → great-circle slerp on the unit-sphere
+//     positions of the bracket, with the fraction (hour - H1)/(H2 - H1)
+//   - hour ≥ last wpt    → clamp to the final waypoint (we don't extrapolate
+//                          past the published cone — the error radii beyond
+//                          120 h grow non-linearly and we'd be making up
+//                          numbers that look authoritative).
+//
+// errorNm is interpolated linearly between bracket radii; it's used for
+// the cone-radius footprint of the scrubber dot's halo.
+
+const D2R_LOCAL = Math.PI / 180;
+
+function _latLonToVec(lat, lon) {
+    const φ = lat * D2R_LOCAL, λ = lon * D2R_LOCAL;
+    const c = Math.cos(φ);
+    return { x: c * Math.cos(λ), y: c * Math.sin(λ), z: Math.sin(φ) };
+}
+function _vecToLatLon(v) {
+    const lat = Math.atan2(v.z, Math.sqrt(v.x * v.x + v.y * v.y)) / D2R_LOCAL;
+    const lon = Math.atan2(v.y, v.x) / D2R_LOCAL;
+    return { lat, lon };
+}
+function _slerp(a, b, t) {
+    let dot = a.x * b.x + a.y * b.y + a.z * b.z;
+    dot = Math.max(-1, Math.min(1, dot));
+    const ω = Math.acos(dot);
+    if (ω < 1e-6) return { x: a.x, y: a.y, z: a.z };
+    const sω = Math.sin(ω);
+    const wa = Math.sin((1 - t) * ω) / sω;
+    const wb = Math.sin(t * ω) / sω;
+    return { x: a.x * wa + b.x * wb, y: a.y * wa + b.y * wb, z: a.z * wa + b.z * wb };
+}
+
+/**
+ * @param {object} args
+ * @param {object} args.storm  — current storm (provides the t=0 position)
+ * @param {object} args.track  — extrapolateStormTrack(storm) result
+ * @param {number} args.hour   — forecast hour (0..maxHorizon)
+ * @returns {{lat, lon, errorNm, hour, fromHour, toHour, frac, clamped}}
+ *   `clamped`: true when the requested hour fell outside [0, last horizon]
+ *   and we returned an endpoint instead of an interpolation.
+ */
+export function interpolateTrackAtHour({ storm, track, hour }) {
+    if (!storm || !track || !Array.isArray(track.points) || track.points.length === 0) {
+        return null;
+    }
+    const cur = { lat: +storm.lat, lon: +storm.lon, hour: 0, errorNm: 0 };
+    if (!Number.isFinite(cur.lat) || !Number.isFinite(cur.lon)) return null;
+
+    if (!(hour > 0)) {
+        return { ...cur, hour: 0, fromHour: 0, toHour: 0, frac: 0, clamped: hour < 0 };
+    }
+    const lastPoint = track.points[track.points.length - 1];
+    if (hour >= lastPoint.hour) {
+        return {
+            lat: lastPoint.lat, lon: lastPoint.lon, errorNm: lastPoint.errorNm,
+            hour: lastPoint.hour, fromHour: lastPoint.hour, toHour: lastPoint.hour,
+            frac: 1, clamped: hour > lastPoint.hour,
+        };
+    }
+    // Find bracketing pair.
+    let from = cur, to = track.points[0];
+    if (hour > track.points[0].hour) {
+        for (let i = 1; i < track.points.length; i++) {
+            if (hour <= track.points[i].hour) {
+                from = track.points[i - 1];
+                to   = track.points[i];
+                break;
+            }
+        }
+    }
+    const span = to.hour - from.hour;
+    const frac = span > 0 ? (hour - from.hour) / span : 0;
+
+    // Great-circle interpolation between the bracket positions.
+    const va = _latLonToVec(from.lat, from.lon);
+    const vb = _latLonToVec(to.lat,   to.lon);
+    const vi = _slerp(va, vb, frac);
+    // Re-normalise (slerp should keep |v|=1 but float drift accumulates).
+    const len = Math.hypot(vi.x, vi.y, vi.z) || 1;
+    vi.x /= len; vi.y /= len; vi.z /= len;
+    const ll = _vecToLatLon(vi);
+    const errorNm = (from.errorNm ?? 0) * (1 - frac) + (to.errorNm ?? 0) * frac;
+    return {
+        lat:      ll.lat,
+        lon:      ll.lon,
+        errorNm,
+        hour,
+        fromHour: from.hour,
+        toHour:   to.hour,
+        frac,
+        clamped:  false,
+    };
+}
+
 // Helpers exposed for tests / direct callers.
 export { destinationPoint, initialBearing, ERROR_RADIUS_NM, EARTH_RADIUS_NM };
 export default extrapolateStormTrack;
