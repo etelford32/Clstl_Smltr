@@ -2990,7 +2990,11 @@ const coronaFS = /* glsl */`
         cbpMask *= (0.4 + u_activity * 0.9) * (1.0 - poleHole * 0.5);
 
         // ── Compose alpha ────────────────────────────────────────────────────
-        float base = pow(rim, 2.4) * 0.42;
+        // Phase 4.2 — relaxed rim power (2.4 → 1.9) and brighter base
+        // (0.42 → 0.62) so the corona reads as present across a wider
+        // limb annulus instead of as a thin grazing-only halo. Streamer/
+        // HCS/plume morphology unchanged — just more visible.
+        float base = pow(rim, 1.9) * 0.62;
         float alpha = base * (
             // Streamer belt contribution (dimmed at coronal holes)
             helmetBelt * (0.70 + rayStr * actFactor) * (1.0 - poleHole * 0.72) +
@@ -3003,7 +3007,7 @@ const coronaFS = /* glsl */`
         );
         // Coronal bright points add localised alpha spikes on/near disk face
         alpha += cbpMask * pow(max(1.0 - rim, 0.0), 0.5) * 0.35;
-        alpha = clamp(alpha, 0.0, 0.92);
+        alpha = clamp(alpha, 0.0, 0.97);
 
         // ── Colour ───────────────────────────────────────────────────────────
         // K-corona (Thomson-scattered photospheric light): warm yellow-white.
@@ -3183,7 +3187,12 @@ const outerGlowFS = /* glsl */`
         col   = mix(col, vec3(0.80, 0.88, 1.00), u_electron_norm * 0.15);
         alpha += u_electron_norm * pow(rim, 4.0) * 0.05;
 
-        gl_FragColor = vec4(col, alpha);
+        // Phase 4.2 — global mute on the outer-glow alpha. This sphere
+        // was the "purple haze" that drowned out the inner corona shader
+        // structure (helmet streamers / HCS / plumes / CBPs) at r=2.5.
+        // Cut by 0.4× so the data-driven storm / aurora / IMF cues
+        // remain visible but the haze no longer dominates.
+        gl_FragColor = vec4(col, alpha * 0.40);
     }
 `;
 scene.add(new THREE.Mesh(new THREE.SphereGeometry(4.0, 24, 24),
