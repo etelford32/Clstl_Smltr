@@ -2390,10 +2390,12 @@ const sunFS = /* glsl */`
             // offset N/S from the flare site.
             float rib1, rib2;
             if (u_flare_ribbons_active > 0.5) {
-                // Reconstruct fragment position on the unit sphere from the
-                // (lat, lon) varyings already in scope (matches Three.js
-                // y-up convention used everywhere in this file).
-                vec3 p3 = vec3(cos(lat) * sin(lon), sin(lat), cos(lat) * cos(lon));
+                // Use the world-space fragment position directly. (Earlier
+                // code reconstructed it from the (lat,lon) varyings, but
+                // those use atan(z,x) so the round-trip swapped X and Z
+                // and the polyline-distance test collapsed to ≈0
+                // everywhere — no visible ribbons.)
+                vec3 p3 = normalize(vPosition);
                 float d1 = ribbonDist(p3, 0.0);
                 float d2 = ribbonDist(p3, 1.0);
                 // Width grows with chromospheric evaporation (3D chord
@@ -3952,7 +3954,14 @@ if (DEBUG_PROMINENCE) {
 // fragment shader. Falls through silently when no atlas / no ribbons —
 // shader keeps using the legacy straight-arc fallback.
 function _refreshFlareRibbons(latRad, lonRad) {
-    if (!_flareRibbonsModule || !_promCachedAtlas) return;
+    if (!_flareRibbonsModule) {
+        console.log('[flare-ribbons] module not loaded yet — legacy ribbons render');
+        return;
+    }
+    if (!_promCachedAtlas) {
+        console.log('[flare-ribbons] no atlas — load with ?debug=prominence and wait for AR feed');
+        return;
+    }
 
     // Find the live AR closest to the flare site (must match meta[2] arIdx).
     let bestArIdx = -1, bestDist = 25 * Math.PI / 180;
@@ -3966,6 +3975,10 @@ function _refreshFlareRibbons(latRad, lonRad) {
         const d = Math.acos(Math.max(-1, Math.min(1, c)));
         if (d < bestDist) { bestDist = d; bestArIdx = i; }
     }
+    if (bestArIdx < 0) {
+        console.log(`[flare-ribbons] no AR within 25° of flare site — legacy ribbons render`);
+        return;
+    }
 
     const n = _flareRibbonsModule.updateRibbonsForAr(_promCachedAtlas, bestArIdx);
     if (n >= 2) {
@@ -3977,6 +3990,7 @@ function _refreshFlareRibbons(latRad, lonRad) {
         console.log(`[flare-ribbons] AR #${bestArIdx} → ${n}-pt polyline ribbons`);
     } else {
         uniforms.u_flare_ribbons_active.value = 0.0;
+        console.log(`[flare-ribbons] AR #${bestArIdx} has no PIL bundles in atlas — legacy ribbons render`);
     }
 
     // Phase 3.2 — light up the HXR footpoint kernels with the same atlas
@@ -4007,7 +4021,13 @@ function _eruptNearestFilament() {
     };
 
     if (!_promCachedAtlas || !prominenceBundleSystem) {
-        status('PIL atlas not ready yet — wait for AR feed.');
+        if (!DEBUG_PROMINENCE) {
+            status('Reload with ?debug=prominence to enable.');
+        } else if (!_promCachedAtlas) {
+            status('PIL atlas not ready — wait for the AR feed.');
+        } else {
+            status('Bundle system not ready — try again.');
+        }
         return;
     }
 
