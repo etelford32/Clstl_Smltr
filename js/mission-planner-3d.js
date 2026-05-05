@@ -34,6 +34,7 @@ import {
     R_EARTH_HELIO, R_MARS_HELIO,
     planLunarTransfer, planLunarLambert,
     planMarsTransfer, planMarsLambert,
+    planMarsToEarthLambert, planMoonToMarsLambert, planMoonToEarthLambert,
     findLunarLaunchWindow, findMarsLaunchWindow, porkchopMars,
     planTour, optimizeTour, TOUR_PRESETS,
     flybyAssessment, flybyMaxTurnAngle, flybyPeriapsisForTurn,
@@ -66,6 +67,28 @@ export const LAUNCH_SITES = [
 //     Olympus Mons coordinates so the dome sits where it ought to). ──────────
 export const MARS_BIOMES = [
     { id: 'olympia', name: 'Olympia Base', lat: 18.65, lon: 226.2 },
+];
+
+// ── Moon surface bases (anchored to real Apollo / Artemis coordinates). ───
+export const MOON_BASES = [
+    { id: 'tranquility', name: 'Tranquility Base', lat:  0.674, lon:  23.473 },
+];
+
+// ── Origin → destination route catalogue. The launcher reads this list to
+//     decide which trajectory function to call for a given (origin,
+//     destination) pair. `body` keys: 'earth' | 'moon' | 'mars'. ───────────
+export const MISSION_ROUTES = [
+    // Earth-centric (existing)
+    { from: 'earth', to: 'leo',   label: 'Earth → LEO',          frame: 'geo'   },
+    { from: 'earth', to: 'sso',   label: 'Earth → SSO',          frame: 'geo'   },
+    { from: 'earth', to: 'meo',   label: 'Earth → MEO (GPS)',    frame: 'geo'   },
+    { from: 'earth', to: 'geo',   label: 'Earth → GEO',          frame: 'geo'   },
+    { from: 'earth', to: 'moon',  label: 'Earth → Moon',         frame: 'geo'   },
+    { from: 'earth', to: 'mars',  label: 'Earth → Mars',         frame: 'helio' },
+    // New cross-body routes
+    { from: 'mars',  to: 'earth', label: 'Mars → Earth',         frame: 'helio' },
+    { from: 'moon',  to: 'mars',  label: 'Moon → Mars',          frame: 'helio' },
+    { from: 'moon',  to: 'earth', label: 'Moon → Earth',         frame: 'geo'   },
 ];
 
 export const TARGET_ORBITS = [
@@ -166,28 +189,84 @@ export function initMissionPlanner({ container, onEvent } = {}) {
     }
 
     // ── Public API: launch ──────────────────────────────────────────────────
+    // Dispatches by (origin body, destination key). Two call forms accepted:
+    //
+    //   • Legacy: { siteId, targetId, ... }            — origin is implicit
+    //                                                    Earth, target keyed
+    //                                                    on TARGET_ORBITS.id
+    //   • New:    { originBody, originId,              — explicit origin pad
+    //              destinationBody, destinationId, ... } on Earth/Moon/Mars
+    //
+    // The dispatcher resolves origin → pad object, then matches MISSION_ROUTES
+    // to pick a trajectory function (planMarsLambert, planMarsToEarthLambert,
+    // planMoonToMarsLambert, planMoonToEarthLambert, etc.).
     function launch({
         siteId, targetId,
+        originBody, originId, destinationBody, destinationId,
         payloadName     = 'PayloadSat-1',
         windowJD        = null,
-        arriveJD        = null,                // Mars only — Lambert TOF
-        parking_inc_deg = null,                // overrides launch-site latitude
-        lunar_tof_d     = null,                // lunar Lambert TOF override
+        arriveJD        = null,
+        parking_inc_deg = null,
+        lunar_tof_d     = null,
     }) {
-        const site   = LAUNCH_SITES.find(s => s.id === siteId)   || state.site;
-        const target = TARGET_ORBITS.find(t => t.id === targetId) || state.target;
-        state.site   = site;
-        state.target = target;
-
-        if (target.frame !== state.mode) setMode(target.frame);
-
-        if (target.id === 'moon') {
-            return launchLunar({ site, target, payloadName, windowJD, parking_inc_deg, lunar_tof_d });
+        // Legacy single-origin form: Earth surface → TARGET_ORBITS entry.
+        if (siteId !== undefined && originBody === undefined) {
+            originBody     = 'earth';
+            originId       = siteId;
+            destinationBody = null;
+            destinationId  = targetId;
         }
-        if (target.id === 'mars') {
-            return launchMars({ site, target, payloadName, windowJD, arriveJD, parking_inc_deg });
+
+        const origin = resolveOrigin(originBody, originId);
+        if (!origin) throw new Error(`launch: unknown origin ${originBody}/${originId}`);
+        state.site = origin.pad;
+
+        // For Earth-origin keep legacy targetId semantics (LEO/GEO/etc.).
+        if (originBody === 'earth') {
+            const target = TARGET_ORBITS.find(t => t.id === destinationId) || state.target;
+            state.target = target;
+            if (target.frame !== state.mode) setMode(target.frame);
+
+            if (target.id === 'moon') {
+                return launchLunar({ site: origin.pad, target, payloadName, windowJD, parking_inc_deg, lunar_tof_d });
+            }
+            if (target.id === 'mars') {
+                return launchMars({ site: origin.pad, target, payloadName, windowJD, arriveJD, parking_inc_deg });
+            }
+            return launchNearEarth({ site: origin.pad, target, payloadName });
         }
-        return launchNearEarth({ site, target, payloadName });
+
+        // New cross-body routes. destinationBody must be supplied.
+        const routeKey = `${originBody}->${destinationBody}`;
+        if (routeKey === 'mars->earth') {
+            if (state.mode !== 'helio') setMode('helio');
+            return launchMarsToEarth({ origin, payloadName, windowJD, arriveJD });
+        }
+        if (routeKey === 'moon->mars') {
+            if (state.mode !== 'helio') setMode('helio');
+            return launchMoonToMars({ origin, payloadName, windowJD, arriveJD });
+        }
+        if (routeKey === 'moon->earth') {
+            if (state.mode !== 'geo') setMode('geo');
+            return launchMoonToEarth({ origin, payloadName, windowJD, lunar_tof_d });
+        }
+        throw new Error(`launch: unsupported route ${routeKey}`);
+    }
+
+    function resolveOrigin(body, id) {
+        if (body === 'earth' || body === undefined) {
+            const pad = LAUNCH_SITES.find(s => s.id === id) || LAUNCH_SITES[0];
+            return { body: 'earth', pad };
+        }
+        if (body === 'moon') {
+            const pad = MOON_BASES.find(b => b.id === id) || MOON_BASES[0];
+            return { body: 'moon', pad };
+        }
+        if (body === 'mars') {
+            const pad = MARS_BIOMES.find(b => b.id === id) || MARS_BIOMES[0];
+            return { body: 'mars', pad };
+        }
+        return null;
     }
 
     // ── Near-Earth launch (LEO/SSO/MEO/GEO) — geo frame ─────────────────────
@@ -401,6 +480,149 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             0xffcc66, 800, 1.4);
 
         onEvent?.({ type: 'launched-mars', site, target, payloadName, plan });
+        return m;
+    }
+
+    // ── Generic helio Lambert launcher ──────────────────────────────────────
+    // Mars→Earth and Moon→Mars share the exact same animation needs as
+    // launchMars: sample the Lambert arc into helio scene units, drop a
+    // spacecraft at sample 0, walk it to sample N-1 over a TOF-scaled wall
+    // duration. The only differences are the kind tag, the SOI body at
+    // arrival, and the trail / arc colors. We reuse state.marsMissions as
+    // the storage list because the tick loop already animates anything
+    // there with phase==='cruise'.
+    function _launchHelioLambert({ plan, kind, payloadName, arrival_soi_km, arc_color, trail_color, route_label }) {
+        const samples_km = plan.sample();
+        const N = samples_km.length;
+        const auMul = HELIO_UNIT_AU / KM_PER_AU;
+        const arcPos = new Float32Array(N * 3);
+        for (let i = 0; i < N; i++) {
+            const r = samples_km[i];
+            arcPos[i*3+0] =  r[0] * auMul;
+            arcPos[i*3+1] =  r[2] * auMul;
+            arcPos[i*3+2] = -r[1] * auMul;
+        }
+        const arcGeom = new THREE.BufferGeometry();
+        arcGeom.setAttribute('position', new THREE.BufferAttribute(arcPos, 3));
+        const arcLine = new THREE.Line(arcGeom, new THREE.LineBasicMaterial({
+            color: arc_color, transparent: true, opacity: 0.85,
+        }));
+        hel.scene.add(arcLine);
+
+        const soiScene = arrival_soi_km * auMul;
+        const soiMesh = new THREE.Mesh(
+            new THREE.SphereGeometry(soiScene, 16, 12),
+            new THREE.MeshBasicMaterial({ color: arc_color, wireframe: true,
+                transparent: true, opacity: 0.25 }),
+        );
+        soiMesh.position.set(arcPos[(N-1)*3+0], arcPos[(N-1)*3+1], arcPos[(N-1)*3+2]);
+        hel.scene.add(soiMesh);
+
+        const craft = new THREE.Mesh(
+            new THREE.SphereGeometry(0.05, 12, 8),
+            new THREE.MeshBasicMaterial({ color: 0xffeecc }),
+        );
+        hel.scene.add(craft);
+        const trail = makeTrail(hel.scene, 1200, trail_color, 0.7);
+
+        const m = {
+            kind,
+            plan, arcPos, N,
+            craft, arcLine, soiMesh,
+            ...trail,
+            startedAt: state.elapsed,
+            durSec: Math.max(8, plan.tof_d * (30 / 260)),
+            phase:  'cruise',
+            payloadName,
+        };
+        state.marsMissions.push(m);
+
+        spawnBurnFlash(hel.scene,
+            new THREE.Vector3(arcPos[0], arcPos[1], arcPos[2]),
+            0xffcc66, 800, 1.4);
+
+        onEvent?.({ type: 'launched-helio', kind, route: route_label, payloadName, plan });
+        return m;
+    }
+
+    // ── Mars → Earth (helio Lambert) ────────────────────────────────────────
+    function launchMarsToEarth({ origin, payloadName, windowJD, arriveJD }) {
+        const jd_depart = windowJD ?? state.scenarioJD ?? jdNow();
+        const jd_arrive = arriveJD ?? (jd_depart + 258);
+        const plan = planMarsToEarthLambert({ jd_depart, jd_arrive });
+        return _launchHelioLambert({
+            plan, kind: 'mars-to-earth', payloadName,
+            arrival_soi_km: 924000,           // SOI of Earth
+            arc_color: 0x66ccff, trail_color: 0x66aaff,
+            route_label: `${origin.pad.name} → Earth`,
+        });
+    }
+
+    // ── Moon → Mars (helio Lambert from Moon's heliocentric position) ───────
+    function launchMoonToMars({ origin, payloadName, windowJD, arriveJD }) {
+        const jd_depart = windowJD ?? state.scenarioJD ?? jdNow();
+        const jd_arrive = arriveJD ?? (jd_depart + 258);
+        const plan = planMoonToMarsLambert({ jd_depart, jd_arrive });
+        return _launchHelioLambert({
+            plan, kind: 'moon-to-mars', payloadName,
+            arrival_soi_km: SOI_MARS,
+            arc_color: 0xff99cc, trail_color: 0xff77bb,
+            route_label: `${origin.pad.name} → Mars`,
+        });
+    }
+
+    // ── Moon → Earth (geocentric Lambert) ───────────────────────────────────
+    // Lives in the geo frame; spacecraft starts at the Moon's geocentric
+    // position and arcs back into a low Earth parking orbit. Mission shape
+    // matches the existing lunarMissions list so the geo tick walks it.
+    function launchMoonToEarth({ origin, payloadName, windowJD, lunar_tof_d }) {
+        const jd_depart = windowJD ?? state.scenarioJD ?? jdNow();
+        const tof_d     = lunar_tof_d ?? 4.5;
+        const plan = planMoonToEarthLambert({ jd_depart, tof_d });
+
+        const samples_km = plan.sample();
+        const N = samples_km.length;
+        const arcPos = new Float32Array(N * 3);
+        for (let i = 0; i < N; i++) {
+            const r = samples_km[i];
+            arcPos[i*3+0] =  r[0] / GEO_UNIT_KM;
+            arcPos[i*3+1] =  r[2] / GEO_UNIT_KM;
+            arcPos[i*3+2] = -r[1] / GEO_UNIT_KM;
+        }
+        const arcGeom = new THREE.BufferGeometry();
+        arcGeom.setAttribute('position', new THREE.BufferAttribute(arcPos, 3));
+        const arcLine = new THREE.Line(arcGeom, new THREE.LineBasicMaterial({
+            color: 0x66ddff, transparent: true, opacity: 0.85,
+        }));
+        geo.scene.add(arcLine);
+
+        const craft = new THREE.Mesh(
+            new THREE.SphereGeometry(0.04, 12, 8),
+            new THREE.MeshBasicMaterial({ color: 0x66ddff }),
+        );
+        geo.scene.add(craft);
+        const trail = makeTrail(geo.scene, 800, 0x66ddff, 0.7);
+
+        const m = {
+            kind: 'moon-to-earth',
+            plan, arcPos, N_arc: N,
+            craft, arcLine, ellLine: null, parkRing: null, soiMesh: null, captureRing: null,
+            ...trail,
+            startedAt: state.elapsed,
+            transferStart: state.elapsed,    // skip ascent phase entirely
+            durSec: Math.max(8, plan.tof_d * 6),
+            phase: 'transfer',
+            payloadName,
+            site: origin.pad,
+            target: { id: 'earth-return', name: 'Earth (LEO return)', frame: 'geo' },
+        };
+        state.lunarMissions.push(m);
+
+        spawnBurnFlash(geo.scene,
+            new THREE.Vector3(arcPos[0], arcPos[1], arcPos[2]),
+            0x66ddff, 800, 1.2);
+
+        onEvent?.({ type: 'launched-lunar-return', payloadName, plan, route: `${origin.pad.name} → Earth` });
         return m;
     }
 
@@ -633,15 +855,24 @@ export function initMissionPlanner({ container, onEvent } = {}) {
                 m.craft.position.copy(pos);
                 pushTrail(m, pos);
 
-                // Detect SOI entry.
-                const distToMoon = pos.distanceTo(m.soiMesh.position);
-                if (distToMoon <= SOI_MOON_SCENE && !m.captureRing) {
-                    captureLunar(m);
+                // Detect SOI entry — only meaningful for outbound lunar
+                // missions. Moon→Earth returns have no Moon-SOI mesh.
+                if (m.soiMesh) {
+                    const distToMoon = pos.distanceTo(m.soiMesh.position);
+                    if (distToMoon <= SOI_MOON_SCENE && !m.captureRing) {
+                        captureLunar(m);
+                    }
                 }
 
                 if (u >= 1) {
-                    m.phase = 'captured';
-                    if (!m.captureRing) captureLunar(m);
+                    if (m.kind === 'moon-to-earth') {
+                        m.phase = 'arrived';
+                        spawnBurnFlash(geo.scene, pos.clone(), 0x66ffaa, 1000, 1.4);
+                        onEvent?.({ type: 'lunar-return-arrived', payloadName: m.payloadName, plan: m.plan });
+                    } else {
+                        m.phase = 'captured';
+                        if (!m.captureRing) captureLunar(m);
+                    }
                 }
                 continue;
             }
@@ -727,7 +958,16 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             if (u >= 1) {
                 m.phase = 'arrived';
                 spawnBurnFlash(hel.scene, m.craft.position.clone(), 0x66ffaa, 1100, 1.6);
-                onEvent?.({ type: 'mars-captured', payloadName: m.payloadName, plan: m.plan });
+                // Per-kind arrival event so the UI log reads correctly.
+                const arrivalEvents = {
+                    'mars':         'mars-captured',
+                    'mars-to-earth':'earth-captured',
+                    'moon-to-mars': 'mars-captured',
+                };
+                onEvent?.({
+                    type: arrivalEvents[m.kind] || 'helio-arrived',
+                    payloadName: m.payloadName, plan: m.plan,
+                });
             }
         }
 
@@ -920,6 +1160,9 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         planLunarLambert,
         planMars:         planMarsTransfer,
         planMarsLambert,
+        planMarsToEarthLambert,
+        planMoonToMarsLambert,
+        planMoonToEarthLambert,
         findLunarWindow:  findLunarLaunchWindow,
         findMarsWindow:   findMarsLaunchWindow,
         porkchopMars,
@@ -1002,6 +1245,12 @@ function buildGeoScene(renderer, w, h) {
         new THREE.MeshPhongMaterial({ color: 0xb8b8b8, emissive: 0x333333 }),
     );
     scene.add(moon);
+
+    // Pin lunar bases (Tranquility Base, etc.) to the Moon mesh so they
+    // ride its position updates.
+    for (const base of MOON_BASES) {
+        addMoonBiome(moon, MOON_R_SCENE, base);
+    }
 
     // Reference lunar-orbit ring (mean distance, equatorial — purely visual).
     const moonRingMean = makeRingLine(384400 / R_EARTH, 0x444466, 0.35);
@@ -1353,6 +1602,78 @@ function addMarsBiome(marsSurface, planetRadius, biome) {
 }
 
 /**
+ * Plant a lunar base on the Moon mesh in the geo scene. Same pattern as
+ * addMarsBiome but greyscale so it reads against the lunar regolith. The
+ * base is intentionally small in scene units (Moon is MOON_R_SCENE ≈ 0.27
+ * units) so its sprite label is the part that actually reads from orbit.
+ */
+function addMoonBiome(moonMesh, planetRadius, base) {
+    const surfacePoint = latLonToVec3(base.lat, base.lon, planetRadius);
+    const up           = surfacePoint.clone().normalize();
+
+    const group = new THREE.Group();
+    group.position.copy(surfacePoint);
+    group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
+
+    const padR = planetRadius * 0.13;
+
+    // Reflective metallic landing pad.
+    const pad = new THREE.Mesh(
+        new THREE.CircleGeometry(padR, 24),
+        new THREE.MeshBasicMaterial({
+            color: 0x556677, transparent: true, opacity: 0.9,
+            side: THREE.DoubleSide, depthWrite: false,
+        }),
+    );
+    pad.rotation.x = -Math.PI / 2;
+    pad.position.y = planetRadius * 0.001;
+    group.add(pad);
+
+    // Cyan additive ring — calls out the base on the dark lunar surface.
+    const padRing = new THREE.Mesh(
+        new THREE.RingGeometry(padR, padR * 1.15, 32),
+        new THREE.MeshBasicMaterial({
+            color: 0x66ddff, transparent: true, opacity: 0.85,
+            side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+            depthWrite: false,
+        }),
+    );
+    padRing.rotation.x = -Math.PI / 2;
+    padRing.position.y = planetRadius * 0.0015;
+    group.add(padRing);
+
+    // Hab dome — translucent grey-blue.
+    const dome = new THREE.Mesh(
+        new THREE.SphereGeometry(planetRadius * 0.085, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2),
+        new THREE.MeshPhongMaterial({
+            color: 0xbbcce0, emissive: 0x223344, emissiveIntensity: 0.5,
+            transparent: true, opacity: 0.55, shininess: 100,
+            side: THREE.DoubleSide,
+        }),
+    );
+    dome.position.y = planetRadius * 0.001;
+    group.add(dome);
+
+    // Beacon for orbital visibility.
+    const beacon = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: makeRadialGradientTexture(0x88ddff, 0),
+        transparent: true, opacity: 0.85,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false, depthTest: false,
+    }));
+    beacon.scale.set(planetRadius * 0.7, planetRadius * 0.7, 1);
+    beacon.position.y = planetRadius * 0.20;
+    group.add(beacon);
+
+    const label = makeBodyLabel(base.name, '#88ddff', 0.7);
+    label.position.y = planetRadius * 0.55;
+    group.add(label);
+
+    moonMesh.add(group);
+    return group;
+}
+
+/**
  * Schematic B-plane visualisation at a flyby body. Real B-plane geometry
  * is microscopic at AU scale (Earth's SOI is 0.025 helio units), so this
  * is intentionally rendered ~150× oversized for educational clarity.
@@ -1615,6 +1936,7 @@ function clearAll(state, geo, hel) {
         if (m.parkRing)    geo.scene.remove(m.parkRing);
         if (m.soiMesh)     geo.scene.remove(m.soiMesh);
         if (m.captureRing) geo.scene.remove(m.captureRing);
+        if (m.arcLine)     geo.scene.remove(m.arcLine);
     }
     for (const m of state.marsMissions) {
         hel.scene.remove(m.craft); hel.scene.remove(m.trail);

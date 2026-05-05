@@ -263,10 +263,17 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
             <button id="mp-mode-helio" class="mp-mode-btn"     type="button">☀️ Heliocentric</button>
         </div>
 
-        <div class="mp-label">Launch Site</div>
+        <div class="mp-label">Origin Body</div>
+        <div class="mp-mode-toggle">
+            <button id="mp-origin-earth" class="mp-mode-btn on"  type="button" data-body="earth">🌍 Earth</button>
+            <button id="mp-origin-moon"  class="mp-mode-btn"     type="button" data-body="moon">🌙 Moon</button>
+            <button id="mp-origin-mars"  class="mp-mode-btn"     type="button" data-body="mars">♂ Mars</button>
+        </div>
+
+        <div class="mp-label">Origin Pad</div>
         <select id="mp-site" class="mp-select"></select>
 
-        <div class="mp-label">Target Orbit / Destination</div>
+        <div class="mp-label">Destination</div>
         <select id="mp-target" class="mp-select"></select>
 
         <div class="mp-label">Payload Name</div>
@@ -400,7 +407,8 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
 </div>
 
 <script type="module">
-import { initMissionPlanner, LAUNCH_SITES, TARGET_ORBITS } from './js/mission-planner-3d.js';
+import { initMissionPlanner, LAUNCH_SITES, TARGET_ORBITS,
+         MOON_BASES, MARS_BIOMES, MISSION_ROUTES } from './js/mission-planner-3d.js';
 import { simulateAscent, compareBodies, LAUNCH_BODIES, LAUNCH_VEHICLES } from './js/launch-physics.js';
 import { jdNow } from './js/horizons.js';
 
@@ -408,13 +416,47 @@ import { jdNow } from './js/horizons.js';
 const siteSel   = document.getElementById('mp-site');
 const targetSel = document.getElementById('mp-target');
 const payloadIn = document.getElementById('mp-payload');
-siteSel.innerHTML   = LAUNCH_SITES.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
-targetSel.innerHTML = TARGET_ORBITS.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+const originBtns = document.querySelectorAll('[data-body]');
+let currentOriginBody = 'earth';
+
+function padsFor(body) {
+    if (body === 'moon') return MOON_BASES;
+    if (body === 'mars') return MARS_BIOMES;
+    return LAUNCH_SITES;
+}
+function destLabelFor(routeKey) {
+    // Earth-origin destinations come from TARGET_ORBITS; cross-body routes
+    // come from MISSION_ROUTES so we read the human label there.
+    const fromEarth = TARGET_ORBITS.find(t => t.id === routeKey);
+    if (fromEarth) return fromEarth.name;
+    return routeKey;
+}
+function refreshOriginUI() {
+    const pads = padsFor(currentOriginBody);
+    siteSel.innerHTML = pads.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+    const routes = MISSION_ROUTES.filter(r => r.from === currentOriginBody);
+    targetSel.innerHTML = routes
+        .map(r => `<option value="${r.to}">${r.label}</option>`).join('');
+}
+originBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+        originBtns.forEach(b => b.classList.remove('on'));
+        btn.classList.add('on');
+        currentOriginBody = btn.dataset.body;
+        marsWindow = null;                   // stale window when origin moves
+        refreshOriginUI();
+        // Re-evaluate which auxiliary controls are relevant (e.g. lunar
+        // TOF slider for moon→earth).
+        if (typeof updateTargetUI === 'function') updateTargetUI();
+    });
+});
+refreshOriginUI();
 
 // ── Hero stats ──────────────────────────────────────────────────────
+const padCount = LAUNCH_SITES.length + MOON_BASES.length + MARS_BIOMES.length;
 document.getElementById('mp-hero-stats').innerHTML = `
-    <span class="mp-stat"><strong>${LAUNCH_SITES.length}</strong>launch sites</span>
-    <span class="mp-stat"><strong>${TARGET_ORBITS.length}</strong>target orbits</span>
+    <span class="mp-stat"><strong>${padCount}</strong>launch pads (Earth/Moon/Mars)</span>
+    <span class="mp-stat"><strong>${MISSION_ROUTES.length}</strong>routes</span>
     <span class="mp-stat"><strong>μ⊕ = 398 600</strong>km³/s²</span>
     <span class="mp-stat"><strong>μ☉ = 1.327×10¹¹</strong>km³/s²</span>
     <span class="mp-stat"><strong>Live</strong>Earth/Mars/Moon ephemerides</span>
@@ -577,6 +619,23 @@ function renderPlan(plan) {
             <div class="mp-plan-row"><span class="k">Δv (MOI)</span><span class="v">${plan.dv_moi_kms.toFixed(3)} km/s</span></div>
             <div class="mp-plan-row"><span class="k">Total Δv</span><span class="v">${plan.dv_total_kms.toFixed(3)} km/s</span></div>
         `;
+    } else if (plan.kind === 'mars-to-earth' || plan.kind === 'moon-to-mars' || plan.kind === 'moon-to-earth') {
+        const titles = {
+            'mars-to-earth': '⟲ Mars → Earth (Lambert · 3D)',
+            'moon-to-mars':  '🌙→♂ Moon → Mars (Lambert · 3D)',
+            'moon-to-earth': '🌙→🌍 Moon → Earth (lunar return)',
+        };
+        planEl.innerHTML = `
+            <div class="mp-plan-title">${titles[plan.kind]}</div>
+            <div class="mp-plan-row"><span class="k">Depart</span><span class="v">${jdToISO(plan.jd_depart)}</span></div>
+            <div class="mp-plan-row"><span class="k">Arrive</span><span class="v">${jdToISO(plan.jd_arrive)}</span></div>
+            <div class="mp-plan-row"><span class="k">TOF</span><span class="v">${plan.tof_d.toFixed(1)} days</span></div>
+            <div class="mp-plan-row"><span class="k">Δv depart</span><span class="v">${plan.dv_depart_kms.toFixed(3)} km/s</span></div>
+            <div class="mp-plan-row"><span class="k">Δv arrive</span><span class="v">${plan.dv_arrive_kms.toFixed(3)} km/s</span></div>
+            <div class="mp-plan-row"><span class="k">Total Δv</span><span class="v">${plan.dv_total_kms.toFixed(3)} km/s</span></div>
+            ${plan.v_inf_depart_kms ? `<div class="mp-plan-row"><span class="k">v∞ depart</span><span class="v">${plan.v_inf_depart_kms.toFixed(3)} km/s</span></div>` : ''}
+            ${plan.v_inf_arrive_kms ? `<div class="mp-plan-row"><span class="k">v∞ arrive</span><span class="v">${plan.v_inf_arrive_kms.toFixed(3)} km/s</span></div>` : ''}
+        `;
     }
 }
 
@@ -607,6 +666,18 @@ const planner = initMissionPlanner({
             pushLog(`🛰️ LOI · ${ev.payloadName} captured into ${(ev.plan.r_capt_km - 1737).toFixed(0)} km lunar orbit`, 'capture');
         } else if (ev.type === 'mars-captured') {
             pushLog(`🛰️ MOI · ${ev.payloadName} arrived at Mars`, 'capture');
+        } else if (ev.type === 'earth-captured') {
+            pushLog(`🛰️ EOI · ${ev.payloadName} arrived back at Earth`, 'capture');
+        } else if (ev.type === 'lunar-return-arrived') {
+            pushLog(`🛰️ EOI · ${ev.payloadName} captured into LEO from Moon`, 'capture');
+        } else if (ev.type === 'launched-helio') {
+            const p = ev.plan;
+            pushLog(`🚀 ${ev.route} · ${ev.payloadName} · Δv=${p.dv_total_kms.toFixed(2)} km/s · v∞₀=${p.v_inf_depart_kms.toFixed(2)} · TOF=${p.tof_d.toFixed(0)} d`, 'transfer');
+            renderPlan(p);
+        } else if (ev.type === 'launched-lunar-return') {
+            const p = ev.plan;
+            pushLog(`🌙 ${ev.route} · ${ev.payloadName} · Δv=${p.dv_total_kms.toFixed(2)} km/s · TOF=${p.tof_d.toFixed(1)} d`, 'transfer');
+            renderPlan(p);
         } else if (ev.type === 'launched-tour') {
             pushLog(`🌌 Tour ${ev.payloadName} launched · ${ev.plan.legs.length} legs · ${ev.plan.tof_total_d.toFixed(0)}d total`, 'transfer');
         } else if (ev.type === 'tour-leg') {
@@ -662,9 +733,11 @@ const lunarTofRange = document.getElementById('mp-lunar-tof');
 const lunarTofVal   = document.getElementById('mp-lunar-tof-val');
 
 function updateTargetUI() {
-    const isMoon = targetSel.value === 'moon';
-    lunarTofRow.style.display   = isMoon ? '' : 'none';
-    lunarTofLabel.style.display = isMoon ? '' : 'none';
+    const isMoon       = targetSel.value === 'moon';
+    const isMoonReturn = currentOriginBody === 'moon' && targetSel.value === 'earth';
+    const showLunarTof = isMoon || isMoonReturn;
+    lunarTofRow.style.display   = showLunarTof ? '' : 'none';
+    lunarTofLabel.style.display = showLunarTof ? '' : 'none';
     if (isMoon) {
         // Re-cost on target change.
         const tof = parseFloat(lunarTofRange.value);
@@ -693,16 +766,20 @@ lunarTofRange.addEventListener('input', () => {
 // ── Wire controls ───────────────────────────────────────────────────
 document.getElementById('mp-launch').addEventListener('click', () => {
     const opts = {
-        siteId:   siteSel.value,
-        targetId: targetSel.value,
-        payloadName: (payloadIn.value || 'Payload').trim(),
+        originBody:      currentOriginBody,
+        originId:        siteSel.value,
+        destinationBody: targetSel.value,        // 'earth' / 'mars' for cross-body
+        destinationId:   targetSel.value,        // 'leo' / 'moon' / etc. for Earth-origin
+        payloadName:     (payloadIn.value || 'Payload').trim(),
         parking_inc_deg: parseFloat(parkIncRange.value),
     };
-    if (targetSel.value === 'mars' && marsWindow) {
+    // Mars-window override applies to Earth↔Mars only (porkchop is Earth/Mars).
+    if (currentOriginBody === 'earth' && targetSel.value === 'mars' && marsWindow) {
         opts.windowJD = marsWindow.jd_depart;
         opts.arriveJD = marsWindow.jd_arrive;
     }
-    if (targetSel.value === 'moon') {
+    // Lunar TOF applies to outbound or return lunar transfers.
+    if (targetSel.value === 'moon' || (currentOriginBody === 'moon' && targetSel.value === 'earth')) {
         opts.lunar_tof_d = parseFloat(lunarTofRange.value);
     }
     planner.launch(opts);
