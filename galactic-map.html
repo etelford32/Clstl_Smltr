@@ -774,7 +774,7 @@ const CATALOG = [
         l: 0, b: 0, dist: 26673,
         temp: 0, spectral: 'SMBH',
         color: 0x110800, glowColor: 0xff7700, size: 5.0,
-        desc: 'Supermassive black hole at the center of the Milky Way. Mass ~4.15 million M☉. Directly imaged by the Event Horizon Telescope in May 2022, revealing the characteristic crescent of emission and shadow predicted by general relativity. Surrounded by the S-star cluster whose orbits provide the most direct gravitational proof of its mass.',
+        desc: 'Supermassive black hole at the center of the Milky Way. Mass ~4.15 million M☉. Directly imaged by the Event Horizon Telescope in May 2022, revealing the characteristic crescent of emission and shadow predicted by general relativity. Surrounded by the S-star cluster whose orbits provide the most direct gravitational proof of its mass. Unlike M87, Sgr A* is a quiescent LLAGN with no bright relativistic jet — only faint, contested ~15–30 ly candidate outflows seen at radio (Brunthaler+ 2018, Royster+ 2019) and X-ray (Li+ 2013) wavelengths.',
         props: [
             ['Type', 'Supermassive Black Hole (Kerr)'],
             ['Mass', '4.154 × 10⁶ M☉'],
@@ -786,6 +786,7 @@ const CATALOG = [
             ['Associated cluster', 'S-star cluster (~30 known orbits)'],
             ['First EHT image', 'May 12, 2022 (240 μJy at 228 GHz)'],
             ['Accretion rate', '~10⁻⁸–10⁻⁷ M☉/yr (quiescent LLAGN)'],
+            ['Jets', '15–30 ly candidate outflow (faint, contested)'],
         ],
         link: 'sagittarius.html', isGC: true,
     },
@@ -4016,15 +4017,21 @@ sgraVisualGroup.add(sgraInnerGroup);
         sgraDiskRings.push([cnd, 0.000060]);
     }
 
-    // ── Relativistic jets along Sgr A*'s spin axis (shader-based) ────────
+    // ── Sgr A* candidate "jets" — minimalist, observation-driven ─────────
     //
-    // Each jet is a high-segment cylinder with a fragment shader that:
-    //   • brightens toward the spine (Doppler beaming)
-    //   • adds two-octave fBM turbulence advected outward
-    //   • cool-shifts toward the tip (synchrotron cooling)
-    //   • fades into the termination knot
+    // Sgr A* is a quiescent low-luminosity AGN (Ṁ ~10⁻⁸ M☉/yr, ~10⁻⁹ L_Edd)
+    // with NO bright relativistic jet like M87. What HAS been observed is a
+    // set of contested faint linear features at radio + X-ray wavelengths,
+    // typically only ~15–30 ly long, and barely above the noise floor:
     //
-    // The wider envelope cylinder shares the same shader at lower opacity.
+    //   • Li, Morris+ 2013     — Chandra X-ray bipolar "finger" ~15 ly
+    //   • Brunthaler+ 2018     — VLBA polarized linear feature ~30 ly
+    //   • Royster, Yusef-Zadeh+ 2019 — radio jet candidate, ~15 ly extent
+    //
+    // We render that as TWO short, narrow, very faint shader columns —
+    // dim violet/red synchrotron tone, no bright termination shock, no
+    // glowing spine. At galaxy zoom they're nearly invisible (which is
+    // realistic); they only become noticeable at GC zoom.
     const jetVert = `
         varying vec3 vLocal;
         void main() {
@@ -4051,45 +4058,43 @@ sgraVisualGroup.add(sgraInnerGroup);
             return v;
         }
         void main() {
-            // Distance from spine, normalised by the cylinder's outer radius
             float rad = length(vLocal.xz) / uRadius;
-            // Position along the jet (0 = base, 1 = tip)
             float along = clamp(abs(vLocal.y) / uJetLen, 0.0, 1.0);
 
-            // Base brightness: Doppler-beam concentrated near spine
-            float beam = exp(-rad * rad * 4.5);
-            // Synchrotron cooling along jet — hot blue-white near base,
-            // cooler indigo near tip
-            vec3 colHot  = vec3(0.85, 0.96, 1.0);
-            vec3 colCool = vec3(0.36, 0.42, 0.95);
+            // Spine concentration (narrower than M87-class jets)
+            float beam = exp(-rad * rad * 6.5);
+
+            // Synchrotron radio tone — dim violet near the base shading
+            // toward dark plum at the tip. NOT the glowing white-blue of a
+            // real relativistic jet.
+            vec3 colHot  = vec3(0.62, 0.45, 0.78);   // dim violet
+            vec3 colCool = vec3(0.30, 0.12, 0.42);   // dark plum
             vec3 col = mix(colHot, colCool, along);
 
-            // Plasma turbulence — two layers advected outward at different rates
-            float adv = uTime * 0.6 * sign(vLocal.y + 0.0001);
-            float n1  = fbm2(vec2(atan(vLocal.z, vLocal.x) * 1.8, vLocal.y * 0.10 - adv));
-            float n2  = fbm2(vec2(atan(vLocal.z, vLocal.x) * 3.6 + 7.3, vLocal.y * 0.22 - adv * 0.7));
-            float turb = mix(n1, n2, 0.45);
+            // Single low-amplitude turbulence layer — wisps, not knots.
+            float adv = uTime * 0.35 * sign(vLocal.y + 0.0001);
+            float n   = fbm2(vec2(atan(vLocal.z, vLocal.x) * 1.6,
+                                  vLocal.y * 0.45 - adv));
+            // Subtle inhomogeneity — never bright enough to read as a knot.
+            float wisp = (0.55 + 0.45 * n);
 
-            // Knots / instabilities — sparse bright clumps that pulse
-            float knot = pow(max(0.0, n2 - 0.62), 2.0) * 6.5;
+            // Quick fade — observed length is ~15–30 ly so the column
+            // visibly thins after ~70% of the rendered length.
+            float fade = 1.0 - smoothstep(0.55, 1.0, along);
 
-            float bright = (0.45 + 0.65 * turb) * beam + knot * beam * 0.7;
-            // Fade toward tip
-            float tipFade = 1.0 - smoothstep(0.85, 1.0, along);
-            float alpha = uOpacity * bright * tipFade;
-            gl_FragColor = vec4(col * (0.6 + bright * 0.7), alpha);
+            float alpha = uOpacity * beam * wisp * fade;
+            gl_FragColor = vec4(col * (0.5 + wisp * 0.4), alpha);
         }
     `;
 
     [1, -1].forEach(dir => {
-        const jetLen = 220;
-        const radCore = 7.5;          // core jet outer radius
-        const radEnv  = 20.0;         // soft envelope outer radius
+        // Realistic length matching Royster+ 2019 / Brunthaler+ 2018 (~25 ly)
+        const jetLen = 25;
+        const radCore = 0.6;          // very narrow spine column
+        const radEnv  = 2.0;          // soft halo envelope
 
         function makeJetCylinder(rad, opacity, segs) {
-            // Cylinder half-length oriented along +Y, narrow base → wide tip
-            // (we'll re-orient by `dir` after construction)
-            const geo = new THREE.CylinderGeometry(rad * 0.15, rad, jetLen, segs, 1, true);
+            const geo = new THREE.CylinderGeometry(rad * 0.20, rad, jetLen, segs, 1, true);
             const mat = new THREE.ShaderMaterial({
                 uniforms: {
                     uTime:    { value: 0 },
@@ -4109,26 +4114,12 @@ sgraVisualGroup.add(sgraInnerGroup);
             sgraShaderMats.push(mat);
             return m;
         }
-        diskGroup.add(makeJetCylinder(radCore, 0.85, 28));
-        diskGroup.add(makeJetCylinder(radEnv,  0.18, 28));
+        // Core column + soft envelope (both deliberately faint)
+        diskGroup.add(makeJetCylinder(radCore, 0.32, 20));
+        diskGroup.add(makeJetCylinder(radEnv,  0.07, 20));
 
-        // Bright pinpoint spine line — kept for unmistakable axis cue
-        diskGroup.add(new THREE.Line(
-            new THREE.BufferGeometry().setFromPoints([
-                new THREE.Vector3(0, 0, 0),
-                new THREE.Vector3(0, dir * jetLen, 0),
-            ]),
-            new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55 })
-        ));
-
-        // Termination-shock knot — soft additive blob
-        const knot = new THREE.Mesh(
-            new THREE.SphereGeometry(9, 16, 16),
-            new THREE.MeshBasicMaterial({ color: 0x88ccff, transparent: true, opacity: 0.45,
-                depthWrite: false, blending: THREE.AdditiveBlending })
-        );
-        knot.position.y = dir * jetLen;
-        diskGroup.add(knot);
+        // No bright spine line, no termination-shock knot — those are
+        // M87-style features and Sgr A*'s observations don't show them.
     });
 })();
 
