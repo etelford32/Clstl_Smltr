@@ -495,8 +495,13 @@ const DAYS_PER_YR = 365.25;
 
 let sstarWasm = null;  // set after async init below
 
-// Map S-star catalog ids → WASM star_id indices (S2=0, S1=1, S12=2, S14=3)
-const SSTAR_WASM_IDS = { s2: 0, s1: 1, s12: 2, s14: 3 };
+// Map S-star catalog ids → WASM star_id indices.  Order must match the Rust
+// CATALOG[] in rust-sstar/src/lib.rs (S2=0, S1=1, S12=2, S14=3, S29=4,
+// S38=5, S55=6, S62=7).
+const SSTAR_WASM_IDS = {
+    s2: 0, s1: 1, s12: 2, s14: 3,
+    s29: 4, s38: 5, s55: 6, s62: 7,
+};
 
 function dateToJD(d) {
     let y = d.getUTCFullYear(), m = d.getUTCMonth() + 1;
@@ -5112,7 +5117,10 @@ CATALOG.forEach(s => {
 
 scene.add(sstarOrbitGroup);
 
-const SSTAR_COLORS = { s2: 0xffd700, s1: 0x00ced1, s12: 0xff6347, s14: 0xda70d6, s38: 0x88ff88 };
+const SSTAR_COLORS = {
+    s2:  0xffd700, s1:  0x00ced1, s12: 0xff6347, s14: 0xda70d6,
+    s29: 0xa6e3ff, s38: 0x88ff88, s55: 0xffaaff, s62: 0xffff66,
+};
 
 /** Convert WASM AU output [x_east, y_north, z_los] → Three.js scene coords (ly) */
 function wasmAUToScene(x_au, y_au, z_au) {
@@ -5176,10 +5184,13 @@ function buildSstarOrbits() {
 }
 
 /**
- * Build approximate elliptical orbit guides for S-stars NOT covered by the
- * WASM module (S29, S55, S62, S38). Uses each star's catalog gcOffset as a
- * rough periapsis vector and a tabulated semi-major axis / eccentricity.
- * The orientation is approximate but gives every S-star a visible loop.
+ * Build approximate elliptical orbit guides for S-stars when the WASM
+ * propagator is unavailable (offline / build failed). When WASM IS loaded
+ * this function is a no-op for any catalog id present in SSTAR_WASM_IDS —
+ * those stars get exact Keplerian + 1PN ellipses from buildSstarOrbits().
+ *
+ * The fallback orientation is approximate (random-but-deterministic per
+ * star seed) but gives every S-star a visible loop even without WASM.
  */
 function buildStaticSstarOrbits() {
     // [id, semi-major (ly), eccentricity, color, randAxisSeed]
@@ -5190,6 +5201,9 @@ function buildStaticSstarOrbits() {
         ['s38', 0.0103, 0.82,  0xaaccff, 2.60],
     ];
     staticDefs.forEach(([id, a, e, color, seed]) => {
+        // Skip if WASM is present and tracking this star — we already have
+        // an exact ellipse from buildSstarOrbits().
+        if (sstarWasm && id in SSTAR_WASM_IDS) return;
         const s = CATALOG.find(c => c.id === id);
         if (!s) return;
         const b = a * Math.sqrt(1 - e * e);
@@ -5227,7 +5241,7 @@ function updateSstarPositions(dt) {
     // Advance simulation time
     simJD += dt * simTimeScale * DAYS_PER_YR;
 
-    // Propagate all 4 stars in one WASM call (32 f64s)
+    // Propagate all S-stars in one WASM call (8 f64s per star).
     let allData;
     try { allData = sstarWasm.propagate_all(simJD); } catch (_) { return; }
 
@@ -7485,7 +7499,7 @@ function animate() {
     const camDistFromOrigin = camera.position.length();
 
     // ── S-star WASM orbital propagation ──────────────────────────
-    // Update positions every frame (single WASM call for all 4 stars).
+    // Update positions every frame (single WASM call for all 8 S-stars).
     // Show orbit paths only when zoomed close to galactic center (< 2 ly).
     updateSstarPositions(dt);
     // S-star orbits are now visible across a much wider window — they're the

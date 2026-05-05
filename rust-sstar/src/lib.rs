@@ -80,9 +80,9 @@ struct SStar {
     period: f64,        // Orbital period [yr]
 }
 
-const NUM_STARS: usize = 4;
+const NUM_STARS: usize = 8;
 
-/// Published orbital elements for the four primary S-stars.
+/// Published orbital elements for the eight tracked S-stars.
 ///
 /// Semi-major axes converted: a_au = a_arcsec × 8178 pc
 const CATALOG: [SStar; NUM_STARS] = [
@@ -124,6 +124,48 @@ const CATALOG: [SStar; NUM_STARS] = [
         a_arcsec: 0.225, a_au: 1840.1,
         e: 0.9761, i_deg: 100.59, omega_deg: 226.38, w_deg: 334.59,
         t_peri: 2000.12, period: 38.0,
+    },
+    // ── S29 ───────────────────────────────────────────────────
+    // Tracked through its 2021 periapsis by GRAVITY+ — among the
+    // tightest "fast" passages: ~13 AU at periapsis. Wide orbit
+    // (~90 yr period) makes it a long-baseline GR target.
+    // Source: GRAVITY Collaboration (2022, A&A 657, A82); Habibi+ (2017)
+    SStar {
+        name: "S29", spectral: "B-MS", mass_msun: 12.0,
+        a_arcsec: 0.397, a_au: 3247.1,
+        e: 0.728, i_deg: 91.8, omega_deg: 158.4, w_deg: 350.2,
+        t_peri: 2025.96, period: 124.0,
+    },
+    // ── S38 ───────────────────────────────────────────────────
+    // Hot B-type S-star with high eccentricity, retrograde orbit.
+    // Source: Boehle et al. (2016) / Gillessen et al. (2017)
+    SStar {
+        name: "S38", spectral: "B0V", mass_msun: 7.0,
+        a_arcsec: 0.139, a_au: 1136.7,
+        e: 0.81, i_deg: 171.0, omega_deg: 100.4, w_deg: 17.99,
+        t_peri: 2003.15, period: 19.2,
+    },
+    // ── S55 (S0-102) ──────────────────────────────────────────
+    // The "second S2" — UCLA's discovery of a 12.8-yr orbiter
+    // that briefly held the shortest known S-star period.
+    // Source: Meyer et al. (2012, Science 338, 84); Gillessen+ 2017
+    SStar {
+        name: "S55", spectral: "B-MS", mass_msun: 7.0,
+        a_arcsec: 0.105, a_au: 858.7,
+        e: 0.7209, i_deg: 92.6, omega_deg: 197.1, w_deg: 311.0,
+        t_peri: 2009.34, period: 12.8,
+    },
+    // ── S62 ───────────────────────────────────────────────────
+    // Closest periapsis claimed in the S-star census (~16 AU at
+    // 8.7% c). Discovery is debated — some authors argue the data
+    // are blended with S29's track. Visualised here on Peißker+
+    // 2020 elements as a "tracked candidate."
+    // Source: Peißker et al. (2020, ApJ 899, 50)
+    SStar {
+        name: "S62", spectral: "B-MS", mass_msun: 6.0,
+        a_arcsec: 0.0905, a_au: 740.1,
+        e: 0.976, i_deg: 72.8, omega_deg: 120.7, w_deg: 42.6,
+        t_peri: 2003.33, period: 9.9,
     },
 ];
 
@@ -342,7 +384,7 @@ pub fn propagate_sstar(star_id: u32, jd: f64) -> Result<Vec<f64>, JsValue> {
 /// Propagate ALL S-stars to a Julian Date in one call.
 ///
 /// Returns flat array `[x₀,y₀,z₀,vx₀,vy₀,vz₀,r₀,vr₀, x₁,y₁,...]`
-/// with 8 values per star × 4 stars = 32 f64s total.
+/// with 8 values per star × NUM_STARS stars = 8·NUM_STARS f64s total.
 /// Efficient for animation loops (single WASM call per frame).
 #[wasm_bindgen]
 pub fn propagate_all(jd: f64) -> Vec<f64> {
