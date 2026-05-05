@@ -1803,6 +1803,13 @@ const uniforms = {
     u_flare_lat:         { value: 0.0  },  // radians
     u_flare_lon:         { value: 0.0  },  // radians
     u_flare_t:           { value: 999.0 }, // simulation-time units (dt=0.01/frame)
+
+    // Phase 3.1 — PIL-anchored two-ribbon geometry. See js/flare-ribbons.js.
+    // The DataTexture is attached lazily on the first ribbon update so
+    // sun.html doesn't depend on the WASM atlas being available at boot.
+    t_flare_ribbons:        { value: null },
+    u_flare_ribbons_active: { value: 0.0 },
+    u_flare_ribbons_count:  { value: 0   },
     // ── Live Kp — drives corona storm glow and bloom strength ──
     u_kp_norm:           { value: 0.22 },  // Kp/9 [0-1]
     // ── Flare white-light intensity — brief whole-disk flash at flare onset ──
@@ -2110,6 +2117,40 @@ const sunFS = /* glsl */`
     uniform float u_flare_lat;       // heliographic latitude of most recent M/X flare (radians)
     uniform float u_flare_lon;       // heliographic longitude (radians)
     uniform float u_flare_t;         // simulation-time elapsed since flare onset (0 = just fired)
+
+    // Phase 3.1 — PIL-anchored two-ribbon geometry. When the atlas is
+    // available and a flaring AR has PIL bundles, we feed the actual
+    // footpoint polylines via this texture (32 × 2 RGBA float; row 0 =
+    // ribbon A, row 1 = ribbon B; .xyz = unit photosphere position;
+    // .w = 1 valid / 0 padding). Otherwise we fall back to the legacy
+    // straight east-west ribbons.
+    uniform sampler2D t_flare_ribbons;
+    uniform float u_flare_ribbons_active;   // 0 = legacy fallback, 1 = use texture
+    uniform float u_flare_ribbons_count;    // valid points per ribbon (≤32)
+
+    // Minimum great-circle-ish distance from a unit-sphere fragment position
+    // to the polyline encoded in row 'rowI' of t_flare_ribbons. Each
+    // segment treated as a 3D chord; cheap and visually indistinguishable
+    // from a true great-circle arc at the small angular widths we use.
+    float ribbonDist(vec3 p, float rowI) {
+        float minD = 1e6;
+        int N = int(u_flare_ribbons_count);
+        float v = (rowI + 0.5) / 2.0;
+        for (int i = 0; i < 31; i++) {
+            if (i >= N - 1) break;
+            float ua = (float(i)     + 0.5) / 32.0;
+            float ub = (float(i + 1) + 0.5) / 32.0;
+            vec4 pa = texture2D(t_flare_ribbons, vec2(ua, v));
+            vec4 pb = texture2D(t_flare_ribbons, vec2(ub, v));
+            if (pa.w < 0.5 || pb.w < 0.5) break;
+            vec3 ab = pb.xyz - pa.xyz;
+            float L2 = max(dot(ab, ab), 1e-9);
+            float t  = clamp(dot(p - pa.xyz, ab) / L2, 0.0, 1.0);
+            vec3 closest = pa.xyz + t * ab;
+            minD = min(minD, length(p - closest));
+        }
+        return minD;
+    }
     uniform float u_flare_intensity; // 0-1 white-light flash intensity at flare onset
     varying vec3  vNormal;
     varying vec3  vPosition;
@@ -2342,17 +2383,34 @@ const sunFS = /* glsl */`
             col += vec3(2.6, 2.1, 1.2) * uvKern * kernBoost * u_showFlares;
 
             // ── Hα ribbon pair (AIA 304 Å proxy) ────────────────────────────
-            // Two parallel arcs straddling the polarity-inversion line (PIL).
-            // PIL is approximately E-W so ribbons are offset in the N/S (lat) direction.
-            // Both ribbons diverge away from the PIL as reconnection proceeds.
-            float dlat   = lat - u_flare_lat;                          // N-S offset from flare
-            float dlon_c = (lon - u_flare_lon) * cos(u_flare_lat);     // great-circle-corrected E-W
-            // E-W envelope: ribbons are elongated along the PIL direction
-            float lonEnv = exp(-dlon_c * dlon_c / (0.10 + u_flare_t * 4.0e-5));
-            float sep    = 0.020 + u_flare_t * 2.5e-5;    // separation grows with reconnection
-            float rWid   = 0.005 + u_flare_t * 6.0e-6;    // ribbon width grows (chromospheric evaporation)
-            float rib1   = exp(-pow((dlat - sep) / rWid, 2.0)) * lonEnv;   // N ribbon
-            float rib2   = exp(-pow((dlat + sep) / rWid, 2.0)) * lonEnv;   // S ribbon
+            // Two arcs straddling the polarity-inversion line (PIL). When the
+            // PFSS atlas has supplied real PIL footpoint geometry for this
+            // AR (u_flare_ribbons_active > 0), we sample those polylines;
+            // otherwise we fall back to the legacy straight east-west arcs
+            // offset N/S from the flare site.
+            float rib1, rib2;
+            if (u_flare_ribbons_active > 0.5) {
+                // Reconstruct fragment position on the unit sphere from the
+                // (lat, lon) varyings already in scope (matches Three.js
+                // y-up convention used everywhere in this file).
+                vec3 p3 = vec3(cos(lat) * sin(lon), sin(lat), cos(lat) * cos(lon));
+                float d1 = ribbonDist(p3, 0.0);
+                float d2 = ribbonDist(p3, 1.0);
+                // Width grows with chromospheric evaporation (3D chord
+                // distance ≈ angular distance on a unit sphere at small d).
+                float rWid3 = 0.012 + u_flare_t * 1.2e-5;
+                rib1 = exp(-d1 * d1 / (rWid3 * rWid3));
+                rib2 = exp(-d2 * d2 / (rWid3 * rWid3));
+            } else {
+                // Legacy fallback — straight E-W arcs offset N/S in lat.
+                float dlat   = lat - u_flare_lat;                       // N-S offset from flare
+                float dlon_c = (lon - u_flare_lon) * cos(u_flare_lat);  // great-circle-corrected E-W
+                float lonEnv = exp(-dlon_c * dlon_c / (0.10 + u_flare_t * 4.0e-5));
+                float sep    = 0.020 + u_flare_t * 2.5e-5;    // separation grows with reconnection
+                float rWid   = 0.005 + u_flare_t * 6.0e-6;    // ribbon width grows
+                rib1 = exp(-pow((dlat - sep) / rWid, 2.0)) * lonEnv;
+                rib2 = exp(-pow((dlat + sep) / rWid, 2.0)) * lonEnv;
+            }
             float ribMask = (rib1 + rib2) * fDecay * 0.85;
             // Colour: UV white at onset → Hα red as it cools
             vec3 ribHot  = vec3(1.6, 1.3, 0.9);    // bright UV continuum
@@ -3839,6 +3897,22 @@ if (DEBUG_ANY_ATLAS) {
 }
 
 let _scorecardModule = null;
+let _flareRibbonsModule = null;
+
+// Phase 3.1 — flare-ribbons loads whenever an atlas might be available.
+// Independently of ?debug=prominence: live SWPC flares can light up the
+// PIL ribbons too, as long as the atlas got built (which happens under
+// ?debug=field or ?debug=prominence).
+if (DEBUG_ANY_ATLAS) {
+    (async () => {
+        try {
+            _flareRibbonsModule = await import('./js/flare-ribbons.js');
+            console.log('[flare-ribbons] module loaded');
+        } catch (e) {
+            console.warn('[flare-ribbons] init failed:', e);
+        }
+    })();
+}
 
 if (DEBUG_PROMINENCE) {
     _prominenceModulePromise = (async () => {
@@ -3862,6 +3936,41 @@ if (DEBUG_PROMINENCE) {
     const eruptBtn = document.getElementById('btn-erupt-nearest');
     if (eruptRow) eruptRow.style.display = '';
     if (eruptBtn) eruptBtn.addEventListener('click', _eruptNearestFilament);
+}
+
+// ── Phase 3.1: refresh PIL-anchored two-ribbon geometry for the photosphere ──
+// Called by both the manual erupt button and the live SWPC auto-flare path.
+// Picks the AR closest to (latRad, lonRad), pulls its PIL footpoints from the
+// cached atlas, and uploads them as a polyline texture for the photosphere
+// fragment shader. Falls through silently when no atlas / no ribbons —
+// shader keeps using the legacy straight-arc fallback.
+function _refreshFlareRibbons(latRad, lonRad) {
+    if (!_flareRibbonsModule || !_promCachedAtlas) return;
+
+    // Find the live AR closest to the flare site (must match meta[2] arIdx).
+    let bestArIdx = -1, bestDist = 25 * Math.PI / 180;
+    for (let i = 0; i < liveRegions.length; i++) {
+        const ll = parseLoc(liveRegions[i].loc);
+        if (!ll) continue;
+        const arLat = ll.lat * Math.PI / 180;
+        const arLon = ll.lon * Math.PI / 180;
+        const c = Math.sin(latRad) * Math.sin(arLat) +
+                  Math.cos(latRad) * Math.cos(arLat) * Math.cos(lonRad - arLon);
+        const d = Math.acos(Math.max(-1, Math.min(1, c)));
+        if (d < bestDist) { bestDist = d; bestArIdx = i; }
+    }
+
+    const n = _flareRibbonsModule.updateRibbonsForAr(_promCachedAtlas, bestArIdx);
+    if (n >= 2) {
+        if (!uniforms.t_flare_ribbons.value) {
+            uniforms.t_flare_ribbons.value = _flareRibbonsModule.getRibbonTexture();
+        }
+        uniforms.u_flare_ribbons_count.value  = n;
+        uniforms.u_flare_ribbons_active.value = 1.0;
+        console.log(`[flare-ribbons] AR #${bestArIdx} → ${n}-pt polyline ribbons`);
+    } else {
+        uniforms.u_flare_ribbons_active.value = 0.0;
+    }
 }
 
 // ── Manual EP trigger (Phase 2.3) ────────────────────────────────────────────
@@ -3923,6 +4032,7 @@ function _eruptNearestFilament() {
     uniforms.u_flare_lon.value       = bestLon;
     uniforms.u_flare_intensity.value = 1.0;
     uniforms.u_flare_t.value         = 0.0;
+    _refreshFlareRibbons(bestLat, bestLon);
 
     const latDeg = bestLat * 180 / Math.PI;
     const lonDeg = bestLon * 180 / Math.PI;
@@ -4621,6 +4731,14 @@ function animate() {
         uniforms.u_flare_intensity.value *= 0.950;
     } else {
         uniforms.u_flare_intensity.value = 0.0;
+    }
+
+    // Phase 3.1 — when the ribbon fade envelope (exp(-u_flare_t/175))
+    // has dropped well below visibility, switch the photosphere shader
+    // back to its cheap legacy path so we're not running the polyline-
+    // distance loop for invisible geometry.
+    if (uniforms.u_flare_ribbons_active.value > 0.5 && uniforms.u_flare_t.value > 700.0) {
+        uniforms.u_flare_ribbons_active.value = 0.0;
     }
 
     // Rotate region marker group with the photosphere texture
@@ -5976,6 +6094,7 @@ window.addEventListener('swpc-update', (ev) => {
             uniforms.u_flare_lat.value = lat_r;
             uniforms.u_flare_lon.value = lon_r;
             uniforms.u_flare_t.value   = 0.0;   // reset: ribbons appear immediately
+            _refreshFlareRibbons(lat_r, lon_r);
 
             // ── Position-accurate 3D ring flash ──────────────────────────────
             triggerPositionFlare(latDeg, lonDeg, clsCh);
