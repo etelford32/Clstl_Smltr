@@ -39,7 +39,7 @@ import * as THREE              from 'three';
 import { propagate, tleEpochToJd } from '../satellite-tracker.js';
 import { geo }                  from '../geo/coords.js';
 import { timeBus }              from './time-bus.js';
-import { rtnBasis, tleAgeUncertainty } from './uncertainty.js';
+import { rtnBasis, tleAgeUncertainty, combinedMissEnvelope } from './uncertainty.js';
 import { provStore }            from './provenance.js';
 
 const RE_KM        = 6378.135;
@@ -49,6 +49,19 @@ const TRAIL_POINTS         = 30;        // 30 samples (basic streak)
 const TRAIL_SPAN_MIN       = 30;        // 30 min look-ahead (basic streak)
 const TRAIL_DT_MIN         = TRAIL_SPAN_MIN / TRAIL_POINTS;
 const TRAIL_REBUILD_FRAMES = 60;        // ~1 s
+
+// Extended orbit trail — drawn for the *selected asset* and the
+// *active conjunction's secondary*. Operators read the dot for
+// where, the trail for which way + how soon. Past leg fades so the
+// motion direction is unambiguous (bright = future).
+const EXT_TRAIL_PAST_MIN    = 30;
+const EXT_TRAIL_FUTURE_MIN  = 90;
+const EXT_TRAIL_TOTAL_MIN   = EXT_TRAIL_PAST_MIN + EXT_TRAIL_FUTURE_MIN;
+const EXT_TRAIL_DT_MIN      = 1;
+const EXT_TRAIL_POINTS      = (EXT_TRAIL_TOTAL_MIN / EXT_TRAIL_DT_MIN) + 1;
+const EXT_TRAIL_REBUILD_FRAMES = 30;    // ~0.5 s — fast enough to track scrubs
+const EXT_PRIMARY_HEX       = 0x00ffcc; // teal — your asset
+const EXT_SECONDARY_HEX     = 0xff7099; // pink — the threat
 
 const RISK_POINTS          = 50;        // 50 samples over one orbit
 const RISK_NEAR_KM         = 100;       // probe distance for "any debris near"
@@ -152,6 +165,16 @@ export class OperationsVisuals {
         this._tcaSecondary = null;
         this._tcaConnector = null;
 
+        // Extended orbit trails for the selected asset and the
+        // active conjunction's secondary. Distinct colors + a past
+        // → future fade so direction of motion is obvious.
+        this._extTrailGroup = new THREE.Group();
+        this._extTrailGroup.name = 'op-ext-trails';
+        this._extTrailGroup.visible = false;
+        this._scene.add(this._extTrailGroup);
+        this._extPrimary   = null;   // THREE.Line (selected asset)
+        this._extSecondary = null;   // THREE.Line (conjunction secondary)
+
         // Per-orbit risk trail (replaces the basic streak when set).
         this._riskLine = null;
         this._riskGeo  = null;
@@ -196,6 +219,11 @@ export class OperationsVisuals {
             this._frame = 0;
         }
 
+        // Selection drives the primary leg of the extended trail —
+        // refresh now rather than waiting up to ~0.5 s for the
+        // throttle so click-to-select feels instant.
+        this._rebuildExtTrails(timeBus.getState().simTimeMs);
+
         for (const fn of this._selectionSubs) {
             try { fn(this._selectedNorad); } catch (_) {}
         }
@@ -236,6 +264,7 @@ export class OperationsVisuals {
         if (this._frame % DV_REBUILD_FRAMES    === 1) this._refreshDeltaV(simTimeMs);
         if (this._frame % RING_REBUILD_FRAMES  === 1) this._refreshRing(simTimeMs);
         if (this._frame % RISK_REBUILD_FRAMES  === 1) this._rebuildRiskTrail(simTimeMs);
+        if (this._frame % EXT_TRAIL_REBUILD_FRAMES === 1) this._rebuildExtTrails(simTimeMs);
         if (this._activeConj && this._frame % RING_REBUILD_FRAMES === 1) {
             this._refreshCovTubes(simTimeMs);
         }
@@ -311,6 +340,102 @@ export class OperationsVisuals {
             t.line.material.color.set(id === this._selectedNorad ? 0x00ffcc : 0x0099ff);
             t.line.material.opacity = id === this._selectedNorad ? 0.85 : 0.45;
         }
+    }
+
+    /* ─── Extended orbit trails (selected + conjunction secondary) ── */
+
+    _ensureExtTrail(which) {
+        let line = which === 'primary' ? this._extPrimary : this._extSecondary;
+        if (line) return line;
+
+        const positions = new Float32Array(EXT_TRAIL_POINTS * 3);
+        const colors    = new Float32Array(EXT_TRAIL_POINTS * 3);
+
+        // Per-vertex color carries the past→future fade. LineBasicMaterial
+        // doesn't honour per-vertex alpha (it's an unlit line, only the
+        // material's opacity lands in the fragment shader), so we
+        // attenuate the RGB instead — same visual effect on a dark
+        // background.
+        const baseHex = which === 'primary' ? EXT_PRIMARY_HEX : EXT_SECONDARY_HEX;
+        const base = new THREE.Color(baseHex);
+        const pastSamples = EXT_TRAIL_PAST_MIN / EXT_TRAIL_DT_MIN;
+        for (let i = 0; i < EXT_TRAIL_POINTS; i++) {
+            // Past leg ramps 0.18 → 1.0; current point onward stays at 1.0.
+            const fade = i < pastSamples
+                ? 0.18 + 0.82 * (i / pastSamples)
+                : 1.0;
+            colors[i * 3]     = base.r * fade;
+            colors[i * 3 + 1] = base.g * fade;
+            colors[i * 3 + 2] = base.b * fade;
+        }
+
+        const bufGeo = new THREE.BufferGeometry();
+        bufGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        bufGeo.setAttribute('color',    new THREE.BufferAttribute(colors,    3));
+        const mat = new THREE.LineBasicMaterial({
+            vertexColors: true,
+            transparent:  true,
+            opacity:      0.9,
+            depthWrite:   false,
+        });
+        line = new THREE.Line(bufGeo, mat);
+        line.frustumCulled = false;
+        line.renderOrder = 11;   // above the dot layer
+        this._extTrailGroup.add(line);
+
+        if (which === 'primary') this._extPrimary   = line;
+        else                     this._extSecondary = line;
+        return line;
+    }
+
+    _fillExtTrail(which, tle, jdNow, gmstRad) {
+        if (!tle) return false;
+        const line = this._ensureExtTrail(which);
+        line.visible = true;
+        const epochJd = tleEpochToJd(tle);
+        const tsBase  = (jdNow - epochJd) * MIN_PER_DAY;
+        const arr = line.geometry.attributes.position.array;
+
+        // Like the basic streak, all samples render in the *current*
+        // ECEF frame so the trail registers cleanly against the
+        // satellite dot. Past leg is i ∈ [0, EXT_TRAIL_PAST_MIN);
+        // present is i = EXT_TRAIL_PAST_MIN; future runs to the end.
+        for (let i = 0; i < EXT_TRAIL_POINTS; i++) {
+            const dtMin  = -EXT_TRAIL_PAST_MIN + i * EXT_TRAIL_DT_MIN;
+            const tsince = tsBase + dtMin;
+            temeToScene(tle, tsince, this._kmToScene, gmstRad, _scnB);
+            arr[i * 3]     = _scnB.x;
+            arr[i * 3 + 1] = _scnB.y;
+            arr[i * 3 + 2] = _scnB.z;
+        }
+        line.geometry.attributes.position.needsUpdate = true;
+        line.geometry.computeBoundingSphere();
+        return true;
+    }
+
+    _rebuildExtTrails(simTimeMs) {
+        const primaryId = this._selectedNorad;
+        const conj      = this._activeConj;
+
+        const primTle = primaryId != null
+            ? (this.tracker.getSatellite?.(primaryId)?.tle ?? null)
+            : null;
+        const secTle  = conj?.secondaryTle ?? null;
+
+        if (!primTle && !secTle) {
+            this._extTrailGroup.visible = false;
+            return;
+        }
+        this._extTrailGroup.visible = true;
+
+        const jdNow   = jdFromMs(simTimeMs);
+        const gmstRad = geo.greenwichSiderealTimeFromJD(jdNow);
+
+        if (primTle) this._fillExtTrail('primary', primTle, jdNow, gmstRad);
+        else if (this._extPrimary)   this._extPrimary.visible   = false;
+
+        if (secTle) this._fillExtTrail('secondary', secTle, jdNow, gmstRad);
+        else if (this._extSecondary) this._extSecondary.visible = false;
     }
 
     /* ─── Δv coloring ──────────────────────────────────────── */
@@ -427,6 +552,8 @@ export class OperationsVisuals {
             this._activeConj = null;
             this._covGroup.visible = false;
             this._tcaGroup.visible = false;
+            // Drop the secondary leg of the extended trail.
+            this._rebuildExtTrails(timeBus.getState().simTimeMs);
             return;
         }
         this._activeConj = conj;
@@ -434,6 +561,10 @@ export class OperationsVisuals {
         this._covGroup.visible = true;
         this._refreshCovTubes(timeBus.getState().simTimeMs);
         this._refreshTcaGlyphs();
+        // Bring up the secondary trail next to the primary so the
+        // converging geometry is visible the moment the row is
+        // clicked.
+        this._rebuildExtTrails(timeBus.getState().simTimeMs);
 
         provStore.set('conj.miss.combined', {
             value: conj.missKm,
@@ -547,6 +678,41 @@ export class OperationsVisuals {
         this._tcaConnector = new THREE.Line(lineGeo, lineMat);
         this._tcaConnector.frustumCulled = false;
         this._tcaGroup.add(this._tcaConnector);
+
+        // Encounter tube: a translucent cylinder around the connector
+        // whose radius encodes combined-σ (Vallado age-map). When the
+        // tube's radius approaches half the miss distance the
+        // visualization screams "the uncertainty is comparable to the
+        // pass distance" without an operator having to read numbers.
+        // Geometry is unit radius / unit length along Y; we rotate
+        // it once so the +Z axis becomes the long axis (lookAt's
+        // convention), then scale per-frame.
+        const tubeGeo = new THREE.CylinderGeometry(1, 1, 1, 20, 1, true);
+        tubeGeo.rotateX(Math.PI / 2);   // align long axis with +Z
+        const tubeMat = new THREE.MeshBasicMaterial({
+            color: 0xffaa66, transparent: true, opacity: 0.18,
+            depthWrite: false, side: THREE.DoubleSide,
+        });
+        this._encounterTube = new THREE.Mesh(tubeGeo, tubeMat);
+        this._encounterTube.frustumCulled = false;
+        this._encounterTube.visible = false;
+        this._tcaGroup.add(this._encounterTube);
+
+        // v_rel arrow at TCA — origin at primary's TCA position,
+        // pointing in the direction the secondary's relative motion
+        // vector takes it. ArrowHelper's three sub-meshes (line +
+        // cone) are rebuilt via setDirection / setLength per frame
+        // so we don't allocate THREE objects on the hot path.
+        this._vRelArrow = new THREE.ArrowHelper(
+            new THREE.Vector3(0, 0, 1),
+            new THREE.Vector3(),
+            0.06,            // initial length in scene units (~380 km)
+            0xffd070,
+            0.018,           // head length
+            0.010,           // head width
+        );
+        this._vRelArrow.visible = false;
+        this._tcaGroup.add(this._vRelArrow);
     }
 
     /**
@@ -584,7 +750,82 @@ export class OperationsVisuals {
         this._tcaConnector.geometry.attributes.position.needsUpdate = true;
         this._tcaConnector.geometry.computeBoundingSphere();
 
+        // Encounter tube + v_rel arrow. Both anchor at TCA — they
+        // stay parked alongside the connector while the user
+        // scrubs sim time.
+        this._refreshEncounterTube(pA, pB, gmstTca, c);
+
         this._tcaGroup.visible = true;
+    }
+
+    /**
+     * Wrap the connector line in a translucent cylinder whose radius
+     * is the combined-σ (Vallado age-map, isotropic mean) at TCA, and
+     * draw a 3D arrow at the primary's TCA position pointing in the
+     * scene-frame v_rel direction.
+     *
+     * Combined-σ comes from `tleAgeUncertainty` × 2 in quadrature
+     * (independent uncertainties); we collapse the 3-axis ellipsoid
+     * to an isotropic radius — operators read a single number more
+     * reliably than three. Capped at 50 km so a stale TLE doesn't
+     * paint a tube the size of the Earth.
+     */
+    _refreshEncounterTube(pA, pB, gmstTca, conj) {
+        if (!this._encounterTube) return;
+
+        const km = this._kmToScene;
+
+        // Combined σ.
+        const ap = provStore.get('idx.ap')?.value ?? 15;
+        const aSig = tleAgeUncertainty(conj.assetTle,     conj.tcaMs, ap);
+        const bSig = tleAgeUncertainty(conj.secondaryTle, conj.tcaMs, ap);
+        const env  = combinedMissEnvelope(
+            { sigmaAlong: aSig.along, sigmaCross: aSig.cross, sigmaRadial: aSig.radial },
+            { sigmaAlong: bSig.along, sigmaCross: bSig.cross, sigmaRadial: bSig.radial },
+        );
+        const sigmaKm = Math.min(
+            50,
+            Math.sqrt((env.sigmaAlong ** 2 + env.sigmaCross ** 2 + env.sigmaRadial ** 2) / 3),
+        );
+        const radius  = Math.max(sigmaKm * km, 0.001); // floor so the tube is always visible
+
+        const dir = _scnA.copy(pB).sub(pA);
+        const len = dir.length();
+        if (len > 1e-6) {
+            const mid = _scnB.copy(pA).add(pB).multiplyScalar(0.5);
+            this._encounterTube.position.copy(mid);
+            // Cylinder geometry was rotated to long-axis = +Z. lookAt
+            // points +Z toward the target — so set up = +Y is fine.
+            this._encounterTube.lookAt(pB);
+            this._encounterTube.scale.set(radius, radius, len);
+            this._encounterTube.visible = true;
+        } else {
+            this._encounterTube.visible = false;
+        }
+
+        // v_rel arrow. The conjunction screener returns v_rel in the
+        // TEME inertial frame (km/s); rotate to scene-frame using
+        // TCA-time GMST so the arrow tracks the parked TCA pins.
+        if (conj.vRel) {
+            _temeA.set(conj.vRel.x, conj.vRel.y, conj.vRel.z);
+            const vScene = new THREE.Vector3();
+            geo.eciToEcef(_temeA, gmstTca, vScene);
+            const vMag = vScene.length();
+            if (vMag > 1e-6) {
+                vScene.divideScalar(vMag);          // normalize to direction
+                this._vRelArrow.position.copy(pA);
+                this._vRelArrow.setDirection(vScene);
+                // Fixed scene length so the arrow stays readable
+                // regardless of |v_rel|; magnitude is in the b-plane
+                // footer + the conjunction-row's Δv pill.
+                this._vRelArrow.setLength(0.06, 0.018, 0.010);
+                this._vRelArrow.visible = true;
+            } else {
+                this._vRelArrow.visible = false;
+            }
+        } else {
+            this._vRelArrow.visible = false;
+        }
     }
 
     /**
