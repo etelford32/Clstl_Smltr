@@ -3792,32 +3792,62 @@ function buildCoronalLoops() {
 // Co-rotates with photosphere via fieldLineGroup.rotation.y = solarRotAngle.
 let fieldLineGroup = null;
 
-// ── ?debug=field — Phase 1 PFSS-lite tracer validation viewer ─────────────────
-// When enabled, the WASM-driven field-line atlas (rust-sunfield) is rendered
-// alongside the legacy axisymmetric lines as colour-coded LineSegments:
-//   gold = closed loops · cyan = open + · magenta = open − · green = PIL-anchored
-// The atlas is also cached in module-level state for upcoming prominence /
-// flare shaders to sample (see js/field-atlas.js).
-const DEBUG_FIELD_ATLAS = new URLSearchParams(location.search).get('debug') === 'field';
-let _fieldAtlasModulePromise = null;
-let debugFieldAtlasGroup = null;
+// ── ?debug= — Phase 1 PFSS atlas + Phase 2 prominence-bundle scaffolds ───────
+// Both flags share the same WASM atlas; they're composable:
+//   ?debug=field                — colour-coded field-line LineSegments
+//   ?debug=prominence           — instanced microhair bundles (QP class)
+//   ?debug=field,prominence     — both
+// Prominence quality tier:
+//   ?promq=low|mid|high         — peak active thread budget (default mid)
+const _debugFlagSet = new Set(
+    String(new URLSearchParams(location.search).get('debug') || '')
+        .toLowerCase().split(/[\s,;]+/).filter(Boolean));
+const DEBUG_FIELD_ATLAS  = _debugFlagSet.has('field');
+const DEBUG_PROMINENCE   = _debugFlagSet.has('prominence') || _debugFlagSet.has('prom');
+const DEBUG_ANY_ATLAS    = DEBUG_FIELD_ATLAS || DEBUG_PROMINENCE;
+const PROMINENCE_QUALITY = (new URLSearchParams(location.search).get('promq') || 'mid').toLowerCase();
 
-if (DEBUG_FIELD_ATLAS) {
+let _fieldAtlasModulePromise   = null;
+let _prominenceModulePromise   = null;
+let debugFieldAtlasGroup       = null;
+let prominenceBundleSystem     = null;
+// per-frame state cache (populated by rebuildDebugFieldAtlas, consumed by animate())
+let _promCachedAtlas       = null;
+let _promCachedTextures    = null;
+let _promClassifierRef     = null;
+
+if (DEBUG_ANY_ATLAS) {
     _fieldAtlasModulePromise = (async () => {
         try {
             const mod = await import('./js/field-atlas.js');
             await mod.ensureFieldAtlasWasm();
-            console.log('[debug=field] field-atlas WASM ready');
+            console.log('[sunfield] field-atlas WASM ready');
             return mod;
         } catch (e) {
-            console.warn('[debug=field] init failed:', e);
+            console.warn('[sunfield] init failed:', e);
+            return null;
+        }
+    })();
+}
+
+if (DEBUG_PROMINENCE) {
+    _prominenceModulePromise = (async () => {
+        try {
+            const [bundleMod, classifierMod] = await Promise.all([
+                import('./js/prominence-bundle.js'),
+                import('./js/prominence-classifier.js'),
+            ]);
+            console.log('[prominence] bundle + classifier modules loaded');
+            return { bundle: bundleMod, classifier: classifierMod };
+        } catch (e) {
+            console.warn('[prominence] init failed:', e);
             return null;
         }
     })();
 }
 
 async function rebuildDebugFieldAtlas() {
-    if (!DEBUG_FIELD_ATLAS || !_fieldAtlasModulePromise) return;
+    if (!DEBUG_ANY_ATLAS || !_fieldAtlasModulePromise) return;
     const mod = await _fieldAtlasModulePromise;
     if (!mod || !scene) return;
 
@@ -3831,23 +3861,61 @@ async function rebuildDebugFieldAtlas() {
 
     const t0 = performance.now();
     const atlas = mod.computeFieldAtlas(ars, holes, params);
+    const textures = mod.buildFieldTextures(atlas);
     const dt = performance.now() - t0;
 
-    // Replace previous debug mesh.
-    if (debugFieldAtlasGroup) {
-        scene.remove(debugFieldAtlasGroup);
-        mod.disposeFieldDebugMesh(debugFieldAtlasGroup);
-        debugFieldAtlasGroup = null;
+    // ── ?debug=field: colour-coded LineSegments overlay ────────────────────
+    if (DEBUG_FIELD_ATLAS) {
+        if (debugFieldAtlasGroup) {
+            scene.remove(debugFieldAtlasGroup);
+            mod.disposeFieldDebugMesh(debugFieldAtlasGroup);
+            debugFieldAtlasGroup = null;
+        }
+        const mesh = mod.buildFieldDebugMesh(atlas, { opacity: 0.9 });
+        mesh.userData.label = 'PFSS-lite atlas (debug)';
+        scene.add(mesh);
+        debugFieldAtlasGroup = mesh;
     }
-    const mesh = mod.buildFieldDebugMesh(atlas, { opacity: 0.9 });
-    mesh.userData.label = 'PFSS-lite atlas (debug)';
-    scene.add(mesh);
-    debugFieldAtlasGroup = mesh;
 
-    // Also pack textures so Phase 2/3 shaders can pick them up immediately.
-    mod.buildFieldTextures(atlas);
+    // ── ?debug=prominence: microhair bundle system ─────────────────────────
+    if (DEBUG_PROMINENCE && _prominenceModulePromise && textures) {
+        const promMods = await _prominenceModulePromise;
+        if (promMods) {
+            const { bundle: bMod, classifier: cMod } = promMods;
+            if (!prominenceBundleSystem) {
+                prominenceBundleSystem = bMod.createProminenceBundleSystem({
+                    scene,
+                    quality: bMod.getQualityFromString(PROMINENCE_QUALITY),
+                });
+                console.log(`[prominence] system created (quality=${prominenceBundleSystem.quality}, budget=${prominenceBundleSystem.threadBudget})`);
+            }
 
-    console.log(`[debug=field] ${atlas.lineCount} lines (${ars.length} ARs) in ${dt.toFixed(1)} ms`);
+            // Cache for the per-frame classifier tick in animate().
+            _promCachedAtlas    = atlas;
+            _promCachedTextures = textures;
+            _promClassifierRef  = cMod;
+
+            // One-shot classify + log so the console reflects new AR state.
+            const bundles = cMod.classifyBundles({
+                atlas,
+                liveRegions,
+                time: uniforms?.u_time?.value ?? 0,
+                flareIntensity: uniforms?.u_flare_intensity?.value ?? 0,
+                flareLatRad:    uniforms?.u_flare_lat?.value,
+                flareLonRad:    uniforms?.u_flare_lon?.value,
+            });
+            prominenceBundleSystem.update(atlas, textures, {
+                activity: uniforms?.u_activity?.value ?? 0.5,
+                bundles,
+            });
+            const counts = bundles.reduce((m, b) => { m[b.classId] = (m[b.classId] || 0) + 1; return m; }, {});
+            const NAMES = ['QP','IP','ARP','HEDGEROW','TORNADO','EP','RAIN'];
+            const summary = Object.keys(counts).map(k => `${NAMES[k]}=${counts[k]}`).join(' ');
+            console.log(`[prominence] ${bundles.length} bundles · ${prominenceBundleSystem.activeThreads} threads · ${summary}`);
+        }
+    }
+
+    console.log(`[sunfield] ${atlas.lineCount} lines (${ars.length} ARs) in ${dt.toFixed(1)} ms`);
 }
 
 function buildFieldLines() {
@@ -4407,6 +4475,26 @@ function animate() {
     requestAnimationFrame(animate);
     const dt = 0.010 * simSpeed;
     uniforms.u_time.value += dt;
+
+    // Phase 2 prominence bundles — re-classify each frame so EP state machines
+    // and class transitions evolve smoothly. Then tick uniforms (time, camera
+    // position for the on-disk/limb mode switch). No-op if ?debug=prominence
+    // wasn't set or the atlas hasn't been built yet.
+    if (prominenceBundleSystem && _promCachedAtlas && _promCachedTextures && _promClassifierRef) {
+        const bundles = _promClassifierRef.classifyBundles({
+            atlas: _promCachedAtlas,
+            liveRegions,
+            time:           uniforms.u_time.value,
+            flareIntensity: uniforms.u_flare_intensity.value,
+            flareLatRad:    uniforms.u_flare_lat.value,
+            flareLonRad:    uniforms.u_flare_lon.value,
+        });
+        prominenceBundleSystem.update(_promCachedAtlas, _promCachedTextures, {
+            activity: uniforms.u_activity.value,
+            bundles,
+        });
+        prominenceBundleSystem.tick(uniforms.u_time.value, camera.position);
+    }
 
     // Accumulate solar rotation to match photosphere UV scroll rate:
     // Shader shifts UV.x by (u_time * 0.004 * u_rot) per time unit
