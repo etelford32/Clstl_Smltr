@@ -774,7 +774,7 @@ const CATALOG = [
         l: 0, b: 0, dist: 26673,
         temp: 0, spectral: 'SMBH',
         color: 0x110800, glowColor: 0xff7700, size: 5.0,
-        desc: 'Supermassive black hole at the center of the Milky Way. Mass ~4.15 million M☉. Directly imaged by the Event Horizon Telescope in May 2022, revealing the characteristic crescent of emission and shadow predicted by general relativity. Surrounded by the S-star cluster whose orbits provide the most direct gravitational proof of its mass.',
+        desc: 'Supermassive black hole at the center of the Milky Way. Mass ~4.15 million M☉. Directly imaged by the Event Horizon Telescope in May 2022, revealing the characteristic crescent of emission and shadow predicted by general relativity. Surrounded by the S-star cluster whose orbits provide the most direct gravitational proof of its mass. Unlike M87, Sgr A* is a quiescent LLAGN with no bright relativistic jet — only faint, contested ~15–30 ly candidate outflows seen at radio (Brunthaler+ 2018, Royster+ 2019) and X-ray (Li+ 2013) wavelengths.',
         props: [
             ['Type', 'Supermassive Black Hole (Kerr)'],
             ['Mass', '4.154 × 10⁶ M☉'],
@@ -786,6 +786,7 @@ const CATALOG = [
             ['Associated cluster', 'S-star cluster (~30 known orbits)'],
             ['First EHT image', 'May 12, 2022 (240 μJy at 228 GHz)'],
             ['Accretion rate', '~10⁻⁸–10⁻⁷ M☉/yr (quiescent LLAGN)'],
+            ['Jets', '15–30 ly candidate outflow (faint, contested)'],
         ],
         link: 'sagittarius.html', isGC: true,
     },
@@ -3711,7 +3712,8 @@ const galacticWarp = (function buildGalacticWarp() {
 //
 //  Disk tilted ~14° off galactic plane (Sgr A*'s spin axis ~26° from z-axis).
 // ══════════════════════════════════════════════════════════════════════════
-const sgraDiskRings = [];  // [[mesh, angularVelocity], ...] — filled in IIFE, used in animate()
+const sgraDiskRings  = [];  // [[mesh, angularVelocity], ...] — filled in IIFE, used in animate()
+const sgraShaderMats = [];  // ShaderMaterial[] — uTime updated each frame for hot-spot / Doppler animation
 // Visual scaling group — all Sgr A* volumetrics live in here so the entire
 // system can be smoothly shrunk as the camera zooms toward the GC.
 // Animate() updates `sgraVisualGroup.scale` based on camDistFromOrigin so the
@@ -3795,48 +3797,75 @@ sgraVisualGroup.add(sgraInnerGroup);
         new THREE.MeshBasicMaterial({ color: 0x000000, depthWrite: true })
     ));
 
-    // ── Photon ring — REAL 3D TORUS GEOMETRY (no more sprite) ────────────
-    // Three nested torus rings of varying tube radius and tilt give a
-    // proper 3D ring whose perspective foreshortens correctly when the
-    // camera orbits above/below the disk plane. Doppler-boost is achieved
-    // with a per-vertex color attribute brightening one azimuthal half.
+    // ── Photon ring — proper GR sub-ring stack via ShaderMaterial ────────
+    //
+    // General relativity predicts an INFINITE series of sub-rings at the
+    // critical impact parameter b_c ≈ 5.2 r_s, each n+1 orbit being
+    // exp(-π) ≈ 4.3% as bright as the previous (Gralla, Holz & Wald 2019).
+    // We render the first three: n=0 thin bright ring, n=1 slightly inside,
+    // n=2 a barely-visible whisper. All Doppler-boosted on the approaching
+    // (south) side via a fragment shader.
     {
-        // The Sgr A* spin axis is roughly perpendicular to the GC-bar plane;
-        // we tilt the ring ~25° off the galactic disk for visual interest.
         const ringGroup = new THREE.Group();
         ringGroup.rotation.x = 0.32;
         ringGroup.rotation.z = 0.18;
         sgraInnerGroup.add(ringGroup);
 
-        function makeDopplerTorus(majorR, tubeR, segs, ringSegs, intensity) {
-            const geo = new THREE.TorusGeometry(majorR, tubeR, segs, ringSegs);
-            const colors = new Float32Array(geo.attributes.position.count * 3);
-            const pos = geo.attributes.position;
-            for (let i = 0; i < pos.count; i++) {
-                const x = pos.getX(i), z = pos.getZ(i);
-                // Azimuth in ring plane (x-z); approaching side at φ≈π/2
-                const phi = Math.atan2(z, x);
-                const dop = Math.max(0, Math.sin(phi - 0.4));   // Doppler factor
-                const boost = 1.0 + dop * intensity;
-                colors[i*3]   = Math.min(1.0, 1.0 * boost * 0.9);
-                colors[i*3+1] = Math.min(1.0, 0.80 * boost * 0.85);
-                colors[i*3+2] = Math.min(1.0, 0.45 * boost * 0.7);
+        // Shared shader chunks
+        const photonVert = `
+            varying float vPhi;
+            varying float vR;
+            void main() {
+                vec4 mvp = modelViewMatrix * vec4(position, 1.0);
+                gl_Position = projectionMatrix * mvp;
+                // Ring-plane azimuth (XZ in local space, since ring lies in XY here)
+                vPhi = atan(position.y, position.x);
+                vR   = length(position.xy);
             }
-            geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-            return new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-                vertexColors: true,
-                transparent: true, opacity: 0.85,
-                depthWrite: false, blending: THREE.AdditiveBlending,
-            }));
+        `;
+        const photonFrag = `
+            precision highp float;
+            uniform float uTime;
+            uniform float uOpacity;
+            uniform vec3  uColor;
+            uniform float uDopplerStrength;
+            varying float vPhi;
+            varying float vR;
+            void main() {
+                // Doppler beam: slowly rotates to mimic the approaching arc
+                // sweeping around as the disk turns.
+                float beam = max(0.0, sin(vPhi - 0.4 - uTime * 0.05));
+                float boost = 1.0 + uDopplerStrength * pow(beam, 1.4);
+                vec3 col = uColor * boost;
+                gl_FragColor = vec4(col, uOpacity);
+            }
+        `;
+        function makePhotonRing(majorR, tubeR, segs, ringSegs, opacity, doppler) {
+            const geo = new THREE.TorusGeometry(majorR, tubeR, segs, ringSegs);
+            const mat = new THREE.ShaderMaterial({
+                uniforms: {
+                    uTime: { value: 0 },
+                    uOpacity: { value: opacity },
+                    uColor: { value: new THREE.Color(1.0, 0.82, 0.50) },
+                    uDopplerStrength: { value: doppler },
+                },
+                vertexShader: photonVert,
+                fragmentShader: photonFrag,
+                transparent: true, depthWrite: false,
+                blending: THREE.AdditiveBlending,
+            });
+            const m = new THREE.Mesh(geo, mat);
+            sgraShaderMats.push(mat);
+            return m;
         }
-        // Bright thin photon ring (innermost — at 1.5 r_s)
-        ringGroup.add(makeDopplerTorus(8.5, 0.9,  16, 96, 1.8));
-        // Mid-ring (lensed n=1 photon orbit — slightly fatter)
-        ringGroup.add(makeDopplerTorus(10.2, 1.7,  12, 80, 1.4));
-        // Outer halo wash (broader, dimmer)
-        const outer = makeDopplerTorus(12.5, 4.5, 12, 64, 0.9);
-        outer.material.opacity = 0.22;
-        ringGroup.add(outer);
+        // n=0 — primary photon ring (brightest)
+        ringGroup.add(makePhotonRing( 8.5, 0.55, 16, 128, 0.95, 2.0));
+        // n=1 — first sub-ring (4.3% intensity, slightly tighter)
+        ringGroup.add(makePhotonRing( 8.0, 0.18, 12, 128, 0.40, 2.4));
+        // n=2 — second sub-ring (0.18% intensity, threadlike)
+        ringGroup.add(makePhotonRing( 7.85, 0.06, 10, 128, 0.12, 2.7));
+        // Outer halo wash (the 'shadow boundary' bright annulus)
+        ringGroup.add(makePhotonRing(11.0, 3.4,  16,  96, 0.16, 1.0));
     }
 
     // ── Accretion disk (tilted ~14° off galactic plane) ───────────────────
@@ -3846,45 +3875,116 @@ sgraVisualGroup.add(sgraInnerGroup);
     diskGroup.rotation.z = 0.18;   // slight roll for visual variety
     sgraInnerGroup.add(diskGroup);
 
-    // Temperature-gradient disk face — REAL 3D RING with radial color shader
-    // (no more camera-facing sprite that flips perpendicular when you orbit
-    //  the disk). The ring lives in the diskGroup tilt plane so it
-    //  foreshortens correctly when viewed edge-on.
+    // Turbulent accretion disk — fragment-shader temperature gradient with
+    // Keplerian shear, animated hot-spots, and rotation-locked Doppler beam.
+    //
+    //   • Radial blackbody ramp (white core → gold → amber → red rim)
+    //   • Differential rotation: φ_eff(r,t) = φ - ω(r)·t with ω ∝ r^{-3/2}
+    //   • Two layers of fBM noise advected with the shear → boiling plasma
+    //   • Gaussian Doppler beam centred on the approaching side
+    //   • Soft fade at inner ISCO and outer rim
     {
-        const ringGeo = new THREE.RingGeometry(8, 220, 192, 16);
-        // Compute per-vertex temperature gradient color
-        const colors = new Float32Array(ringGeo.attributes.position.count * 3);
-        const pos = ringGeo.attributes.position;
-        for (let i = 0; i < pos.count; i++) {
-            const x = pos.getX(i), y = pos.getY(i);
-            const r = Math.hypot(x, y);
-            // 0 at inner edge → 1 at outer edge
-            const t = Math.min(1, Math.max(0, (r - 8) / (220 - 8)));
-            // Blackbody-ish gradient: white → gold → amber → red → dark
-            // Doppler-boost the approaching side (azimuth ~π/2)
-            const phi = Math.atan2(y, x);
-            const dop = Math.max(0, Math.sin(phi - 0.3));
-            const boost = 1.0 + dop * 0.85;
-            let R, G, B;
-            if (t < 0.10)       { R = 1.0; G = 1.0; B = 1.0; }
-            else if (t < 0.30)  { const u = (t-0.10)/0.20; R = 1.0; G = 1.0 - u*0.20; B = 1.0 - u*0.55; }
-            else if (t < 0.55)  { const u = (t-0.30)/0.25; R = 1.0; G = 0.80 - u*0.40; B = 0.45 - u*0.35; }
-            else if (t < 0.80)  { const u = (t-0.55)/0.25; R = 1.0 - u*0.25; G = 0.40 - u*0.30; B = 0.10 - u*0.06; }
-            else                { const u = (t-0.80)/0.20; R = 0.75 - u*0.55; G = 0.10 - u*0.10; B = 0.04 - u*0.04; }
-            // Outer fade-to-zero
-            const fade = (t < 0.85) ? 1.0 : (1.0 - (t - 0.85) / 0.15);
-            colors[i*3]   = Math.min(1.0, R * boost * fade);
-            colors[i*3+1] = Math.min(1.0, G * boost * fade);
-            colors[i*3+2] = Math.min(1.0, B * boost * fade);
-        }
-        ringGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-        const ringMat = new THREE.MeshBasicMaterial({
-            vertexColors: true,
+        const ringGeo = new THREE.RingGeometry(7.5, 220, 256, 32);
+        const ringMat = new THREE.ShaderMaterial({
+            uniforms: {
+                uTime: { value: 0 },
+                uInnerR: { value: 7.5 },
+                uOuterR: { value: 220.0 },
+            },
+            vertexShader: `
+                varying vec2 vXY;
+                void main() {
+                    vXY = position.xy;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                precision highp float;
+                varying vec2 vXY;
+                uniform float uTime;
+                uniform float uInnerR;
+                uniform float uOuterR;
+
+                // Hash + value-noise + 3-octave fBM
+                float hash(vec2 p) {
+                    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+                }
+                float vnoise(vec2 p) {
+                    vec2 i = floor(p), f = fract(p);
+                    f = f * f * (3.0 - 2.0 * f);
+                    float a = hash(i);
+                    float b = hash(i + vec2(1.0, 0.0));
+                    float c = hash(i + vec2(0.0, 1.0));
+                    float d = hash(i + vec2(1.0, 1.0));
+                    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+                }
+                float fbm(vec2 p) {
+                    float v = 0.0, a = 0.5;
+                    for (int i = 0; i < 3; i++) {
+                        v += a * vnoise(p);
+                        p *= 2.0;
+                        a *= 0.5;
+                    }
+                    return v;
+                }
+
+                void main() {
+                    float r   = length(vXY);
+                    float phi = atan(vXY.y, vXY.x);
+                    float t   = clamp((r - uInnerR) / (uOuterR - uInnerR), 0.0, 1.0);
+
+                    // Blackbody-ish temperature ramp
+                    vec3 col;
+                    if (t < 0.08)      col = vec3(1.0, 1.0, 1.0);
+                    else if (t < 0.25) {
+                        float u = (t - 0.08) / 0.17;
+                        col = mix(vec3(1.0), vec3(1.0, 0.85, 0.55), u);
+                    } else if (t < 0.50) {
+                        float u = (t - 0.25) / 0.25;
+                        col = mix(vec3(1.0, 0.85, 0.55), vec3(1.0, 0.55, 0.18), u);
+                    } else if (t < 0.78) {
+                        float u = (t - 0.50) / 0.28;
+                        col = mix(vec3(1.0, 0.55, 0.18), vec3(0.78, 0.16, 0.05), u);
+                    } else {
+                        float u = (t - 0.78) / 0.22;
+                        col = mix(vec3(0.78, 0.16, 0.05), vec3(0.18, 0.03, 0.0), u);
+                    }
+
+                    // Keplerian shear: ω(r) ∝ r^{-3/2}. Inner annuli race
+                    // around the BH; outer ones plod. Phase advected by t.
+                    float omega    = 4.5 * pow(max(r, uInnerR), -1.5);
+                    float phiAdv   = phi - omega * uTime * 12.0;
+
+                    // Two-layer fBM in the (radial, sheared-azimuth) plane,
+                    // sampled at slightly different scales for a plasma feel.
+                    float n1 = fbm(vec2(phiAdv * 1.6, r * 0.18));
+                    float n2 = fbm(vec2(phiAdv * 4.0 + 11.3, r * 0.42 + uTime * 0.2));
+                    float turb = mix(n1, n2, 0.45);
+
+                    // Hot-spot field — sparse high peaks ride along the shear.
+                    float hot = pow(max(0.0, fbm(vec2(phiAdv * 2.7, r * 0.30 + uTime * 0.15)) - 0.55), 2.5) * 5.0;
+
+                    // Modulate brightness with turbulence + hotspots
+                    float brightness = mix(0.55, 1.4, turb) + hot;
+
+                    // Doppler beam — Gaussian peak on approaching side
+                    float beam = exp(-pow((sin(phi - 0.3) - 1.0), 2.0) * 1.5);
+                    brightness *= 1.0 + beam * 0.95;
+
+                    // Soft inner ISCO fade + outer rim fade
+                    float innerFade = smoothstep(uInnerR, uInnerR * 1.3, r);
+                    float outerFade = 1.0 - smoothstep(uOuterR * 0.78, uOuterR, r);
+                    float alpha = 0.85 * innerFade * outerFade;
+
+                    gl_FragColor = vec4(col * brightness, alpha);
+                }
+            `,
             side: THREE.DoubleSide,
-            transparent: true, opacity: 0.85,
-            depthWrite: false, blending: THREE.AdditiveBlending,
+            transparent: true, depthWrite: false,
+            blending: THREE.AdditiveBlending,
         });
         diskGroup.add(new THREE.Mesh(ringGeo, ringMat));
+        sgraShaderMats.push(ringMat);
     }
 
     // Individual Keplerian rings (differential rotation)
@@ -3917,51 +4017,109 @@ sgraVisualGroup.add(sgraInnerGroup);
         sgraDiskRings.push([cnd, 0.000060]);
     }
 
-    // ── Relativistic jets along Sgr A*'s spin axis ────────────────────────
-    // Sgr A*'s jets are faint but observed at radio/X-ray wavelengths.
-    // Extended to ±220 ly (real ~0.1–1 pc per knot; rendered for visibility).
+    // ── Sgr A* candidate "jets" — minimalist, observation-driven ─────────
+    //
+    // Sgr A* is a quiescent low-luminosity AGN (Ṁ ~10⁻⁸ M☉/yr, ~10⁻⁹ L_Edd)
+    // with NO bright relativistic jet like M87. What HAS been observed is a
+    // set of contested faint linear features at radio + X-ray wavelengths,
+    // typically only ~15–30 ly long, and barely above the noise floor:
+    //
+    //   • Li, Morris+ 2013     — Chandra X-ray bipolar "finger" ~15 ly
+    //   • Brunthaler+ 2018     — VLBA polarized linear feature ~30 ly
+    //   • Royster, Yusef-Zadeh+ 2019 — radio jet candidate, ~15 ly extent
+    //
+    // We render that as TWO short, narrow, very faint shader columns —
+    // dim violet/red synchrotron tone, no bright termination shock, no
+    // glowing spine. At galaxy zoom they're nearly invisible (which is
+    // realistic); they only become noticeable at GC zoom.
+    const jetVert = `
+        varying vec3 vLocal;
+        void main() {
+            vLocal = position;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+    `;
+    const jetFrag = `
+        precision highp float;
+        uniform float uTime;
+        uniform float uOpacity;
+        uniform float uJetLen;
+        uniform float uRadius;
+        varying vec3 vLocal;
+        float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+        float vnoise(vec2 p){
+            vec2 i=floor(p),f=fract(p); f=f*f*(3.0-2.0*f);
+            float a=hash(i),b=hash(i+vec2(1,0)),c=hash(i+vec2(0,1)),d=hash(i+vec2(1,1));
+            return mix(mix(a,b,f.x), mix(c,d,f.x), f.y);
+        }
+        float fbm2(vec2 p){
+            float v=0.0,a=0.55;
+            for(int i=0;i<2;i++){v+=a*vnoise(p); p*=2.1; a*=0.5;}
+            return v;
+        }
+        void main() {
+            float rad = length(vLocal.xz) / uRadius;
+            float along = clamp(abs(vLocal.y) / uJetLen, 0.0, 1.0);
+
+            // Spine concentration (narrower than M87-class jets)
+            float beam = exp(-rad * rad * 6.5);
+
+            // Synchrotron radio tone — dim violet near the base shading
+            // toward dark plum at the tip. NOT the glowing white-blue of a
+            // real relativistic jet.
+            vec3 colHot  = vec3(0.62, 0.45, 0.78);   // dim violet
+            vec3 colCool = vec3(0.30, 0.12, 0.42);   // dark plum
+            vec3 col = mix(colHot, colCool, along);
+
+            // Single low-amplitude turbulence layer — wisps, not knots.
+            float adv = uTime * 0.35 * sign(vLocal.y + 0.0001);
+            float n   = fbm2(vec2(atan(vLocal.z, vLocal.x) * 1.6,
+                                  vLocal.y * 0.45 - adv));
+            // Subtle inhomogeneity — never bright enough to read as a knot.
+            float wisp = (0.55 + 0.45 * n);
+
+            // Quick fade — observed length is ~15–30 ly so the column
+            // visibly thins after ~70% of the rendered length.
+            float fade = 1.0 - smoothstep(0.55, 1.0, along);
+
+            float alpha = uOpacity * beam * wisp * fade;
+            gl_FragColor = vec4(col * (0.5 + wisp * 0.4), alpha);
+        }
+    `;
+
     [1, -1].forEach(dir => {
-        const jetLen = 220;
-        const baseTip = dir > 0 ? 0 : 6;
-        const baseBot = dir > 0 ? 6 : 0;
+        // Realistic length matching Royster+ 2019 / Brunthaler+ 2018 (~25 ly)
+        const jetLen = 25;
+        const radCore = 0.6;          // very narrow spine column
+        const radEnv  = 2.0;          // soft halo envelope
 
-        // Bright inner core cone
-        const core = new THREE.Mesh(
-            new THREE.CylinderGeometry(baseTip, baseBot, jetLen, 24, 1, true),
-            new THREE.MeshBasicMaterial({ color: 0xaaddff, side: THREE.DoubleSide,
-                transparent: true, opacity: 0.55, depthWrite: false,
-                blending: THREE.AdditiveBlending })
-        );
-        core.position.y = dir * jetLen / 2;
-        diskGroup.add(core);
+        function makeJetCylinder(rad, opacity, segs) {
+            const geo = new THREE.CylinderGeometry(rad * 0.20, rad, jetLen, segs, 1, true);
+            const mat = new THREE.ShaderMaterial({
+                uniforms: {
+                    uTime:    { value: 0 },
+                    uOpacity: { value: opacity },
+                    uJetLen:  { value: jetLen },
+                    uRadius:  { value: rad },
+                },
+                vertexShader: jetVert,
+                fragmentShader: jetFrag,
+                side: THREE.DoubleSide,
+                transparent: true, depthWrite: false,
+                blending: THREE.AdditiveBlending,
+            });
+            const m = new THREE.Mesh(geo, mat);
+            m.position.y = dir * jetLen / 2;
+            if (dir < 0) m.rotation.x = Math.PI;
+            sgraShaderMats.push(mat);
+            return m;
+        }
+        // Core column + soft envelope (both deliberately faint)
+        diskGroup.add(makeJetCylinder(radCore, 0.32, 20));
+        diskGroup.add(makeJetCylinder(radEnv,  0.07, 20));
 
-        // Soft wide envelope (3× wider)
-        const env = new THREE.Mesh(
-            new THREE.CylinderGeometry(baseTip * 3, baseBot * 3, jetLen, 24, 1, true),
-            new THREE.MeshBasicMaterial({ color: 0x5588cc, side: THREE.DoubleSide,
-                transparent: true, opacity: 0.14, depthWrite: false,
-                blending: THREE.AdditiveBlending })
-        );
-        env.position.y = dir * jetLen / 2;
-        diskGroup.add(env);
-
-        // Bright spine line
-        diskGroup.add(new THREE.Line(
-            new THREE.BufferGeometry().setFromPoints([
-                new THREE.Vector3(0, 0, 0),
-                new THREE.Vector3(0, dir * jetLen, 0),
-            ]),
-            new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.75 })
-        ));
-
-        // Jet knot / termination shock blob
-        const knot = new THREE.Mesh(
-            new THREE.SphereGeometry(9, 12, 12),
-            new THREE.MeshBasicMaterial({ color: 0x88ccff, transparent: true, opacity: 0.45,
-                depthWrite: false, blending: THREE.AdditiveBlending })
-        );
-        knot.position.y = dir * jetLen;
-        diskGroup.add(knot);
+        // No bright spine line, no termination-shock knot — those are
+        // M87-style features and Sgr A*'s observations don't show them.
     });
 })();
 
@@ -4242,6 +4400,83 @@ const g2Trajectory = { line: null, marker: null, baseT0: 0 };
     //  rings, so the iconic donut-with-crescent look survives but doesn't
     //  flatten when the camera orbits above/below the disk plane.)
 })();
+
+// ══════════════════════════════════════════════════════════════════════════
+//  SUN-DIRECTION INDICATOR (visible only at GC zoom)
+//
+//  When the camera is deep inside the Galactic Centre and you can no longer
+//  see the disk, it's easy to lose orientation. This little arrow + label
+//  always points toward the Sun (which sits at +x ≈ 26,673 ly in the GCC
+//  frame) and labels the distance, scaled with camera distance so it
+//  remains the same screen size at any zoom.
+// ══════════════════════════════════════════════════════════════════════════
+const sunDirIndicator = (function buildSunDirIndicator() {
+    const group = new THREE.Group();
+    scene.add(group);
+
+    // Bright shaft toward +x (Sun direction)
+    const lineGeo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(0, 0, 0),
+        new THREE.Vector3(1, 0, 0),
+    ]);
+    const lineMat = new THREE.LineBasicMaterial({
+        color: 0xffd76a, transparent: true, opacity: 0.85,
+    });
+    const shaft = new THREE.Line(lineGeo, lineMat);
+    group.add(shaft);
+
+    // Arrowhead cone (along +x)
+    const arrowMat = new THREE.MeshBasicMaterial({
+        color: 0xfff0a0, transparent: true, opacity: 0.95,
+    });
+    const arrow = new THREE.Mesh(
+        new THREE.ConeGeometry(0.15, 0.4, 12),
+        arrowMat,
+    );
+    arrow.rotation.z = -Math.PI / 2;   // point along +x
+    group.add(arrow);
+
+    // Label sprite — drawn once, scaled per-frame
+    const cv = document.createElement('canvas');
+    cv.width = 512; cv.height = 96;
+    const cx = cv.getContext('2d');
+    cx.font = 'bold 30px Segoe UI, sans-serif';
+    cx.fillStyle = 'rgba(255,235,150,0.95)';
+    cx.textAlign = 'left';
+    cx.textBaseline = 'middle';
+    cx.fillText('☉ → Sun', 8, 32);
+    cx.font = '20px Segoe UI, sans-serif';
+    cx.fillStyle = 'rgba(220,200,150,0.85)';
+    cx.fillText('26,673 ly  (8.178 kpc)', 8, 64);
+    const label = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: new THREE.CanvasTexture(cv),
+        transparent: true, depthWrite: false,
+    }));
+    group.add(label);
+
+    return { group, shaft, arrow, label };
+})();
+
+// Per-frame update: scale the indicator by camera distance so it always
+// reads as a consistent screen size, and only show it inside ~150 ly.
+function updateSunDirIndicator(camDistFromOrigin) {
+    const visible = camDistFromOrigin < 150;
+    sunDirIndicator.group.visible = visible;
+    if (!visible) return;
+    // Length of the arrow scales with camera distance (~30% of FOV).
+    const L = camDistFromOrigin * 0.45;
+    // Shaft from origin to tip
+    const arr = sunDirIndicator.shaft.geometry.attributes.position.array;
+    arr[0] = 0; arr[1] = 0; arr[2] = 0;
+    arr[3] = L; arr[4] = 0; arr[5] = 0;
+    sunDirIndicator.shaft.geometry.attributes.position.needsUpdate = true;
+    // Arrowhead at tip
+    sunDirIndicator.arrow.position.set(L, 0, 0);
+    sunDirIndicator.arrow.scale.setScalar(L * 0.18);
+    // Label slightly past arrowhead
+    sunDirIndicator.label.position.set(L * 1.10, L * 0.06, 0);
+    sunDirIndicator.label.scale.set(L * 0.40, L * 0.075, 1);
+}
 //  - Distance rings from GC (every 5 kly)
 //  - Galactic longitude radials from GC (every 30°)
 //  - Sun's orbital circle at 26,673 ly
@@ -7619,6 +7854,11 @@ function animate() {
     }
     // Keplerian differential rotation: inner rings spin faster (v ∝ r^{-1/2})
     sgraDiskRings.forEach(([ring, omega]) => { ring.rotation.z += omega; });
+    // Drive ShaderMaterial uTime uniforms (accretion-disk turbulence,
+    // photon-ring Doppler beam, jet plasma noise — all share the same clock)
+    for (const m of sgraShaderMats) m.uniforms.uTime.value = t;
+    // Sun-direction indicator — only at GC zoom
+    updateSunDirIndicator(camDistFromOrigin);
 
     // ── G2 gas-cloud marker — slow Keplerian sweep, slows at apoapsis ───
     if (g2Trajectory.marker && g2Trajectory.path) {
@@ -7634,22 +7874,26 @@ function animate() {
     }
 
     // ── Sgr A* visual scaling (zoom-aware shrink) ────────────────
-    // The exaggerated 8–3000 ly halos work great at galaxy zoom but blot out
-    // the 0.01-ly S-star orbits when the camera dives into the GC.  Apply a
-    // smooth shrink to the inner core (event horizon, EHT image, accretion
-    // disk, jets) and a separate falloff to the bulge halos so the inner
-    // BH visuals collapse to roughly S-star scale at close zoom.
+    // Real S-star orbits span 0.005–0.09 ly. The exaggerated 8–220 ly Sgr A*
+    // visuals would otherwise blot them out completely at GC zoom. We shrink
+    // the inner BH stack along a smooth ramp so:
+    //   camD ≤ 0.5 ly  → scale ≈ 5e-5   → EH ≈ 3×10⁻⁴ ly ≈ 19 AU (≈ S62 periapsis)
+    //   camD ≈ 2 ly    → scale ≈ 3e-4   → EH ≈ 1.8×10⁻³ ly ≈ 115 AU
+    //   camD ≈ 10 ly   → scale ≈ 0.005  → EH ≈ 0.03 ly (bigger than S2 orbit, OK)
+    //   camD ≈ 50 ly   → scale ≈ 0.04   → EH ≈ 0.24 ly
+    //   camD ≈ 500 ly  → scale ≈ 0.4    → EH ≈ 2.4 ly
+    //   camD ≥ 2000    → scale = 1.0    → full visualisation
     {
-        // Inner-group (EHT + disk + jets) baseline radius is ~220 ly; we want
-        // it to look authentic at galaxy zoom and shrink to ~0.05 ly (≈3×
-        // S2 perihelion) when the camera is inside ~1 ly of the GC.
         const camD = camDistFromOrigin;
-        // Smooth interp 1 ly→6 ly→200 ly→far
+        // Quadratic-ish ramp via clamped log: scale = pow(camD/2000, 1.45),
+        // then min-floor 5e-5 so the BH never disappears entirely.
         let innerScale;
-        if (camD < 1)        innerScale = 0.0005;        // collapse to nearly nothing
-        else if (camD < 6)   innerScale = 0.0005 + (camD - 1)/5  * (0.05 - 0.0005);
-        else if (camD < 200) innerScale = 0.05  + (camD - 6)/194 * (1.0 - 0.05);
-        else                 innerScale = 1.0;
+        if (camD < 0.5)        innerScale = 5e-5;
+        else if (camD >= 2000) innerScale = 1.0;
+        else {
+            // Smooth: y = pow(camD/2000, 1.45) over [0.5, 2000]
+            innerScale = Math.max(5e-5, Math.pow(camD / 2000, 1.45));
+        }
         sgraInnerGroup.scale.setScalar(innerScale);
 
         // Bulge halos (30–3000 ly): hide entirely at GC zoom, full scale at galaxy.
