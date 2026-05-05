@@ -669,20 +669,27 @@ function renderPlan(plan) {
             <div class="mp-plan-row"><span class="k">Δv (MOI)</span><span class="v">${plan.dv_moi_kms.toFixed(3)} km/s</span></div>
             <div class="mp-plan-row"><span class="k">Total Δv</span><span class="v">${plan.dv_total_kms.toFixed(3)} km/s</span></div>
         `;
-    } else if (plan.kind === 'mars-to-earth' || plan.kind === 'moon-to-mars' || plan.kind === 'moon-to-earth') {
+    } else if (plan.kind === 'mars-to-earth' || plan.kind === 'moon-to-mars' ||
+               plan.kind === 'moon-to-earth' || plan.kind?.startsWith('earth-to-')) {
         const titles = {
-            'mars-to-earth': '⟲ Mars → Earth (Lambert · 3D)',
-            'moon-to-mars':  '🌙→♂ Moon → Mars (Lambert · 3D)',
-            'moon-to-earth': '🌙→🌍 Moon → Earth (lunar return)',
+            'mars-to-earth':    '⟲ Mars → Earth (Lambert · 3D)',
+            'moon-to-mars':     '🌙→♂ Moon → Mars (Lambert · 3D)',
+            'moon-to-earth':    '🌙→🌍 Moon → Earth (lunar return)',
+            'earth-to-jupiter': '♃ Earth → Jupiter (Lambert · 3D)',
+            'earth-to-saturn':  '♄ Earth → Saturn (Lambert · 3D)',
+            'earth-to-uranus':  '⛢ Earth → Uranus (Lambert · 3D)',
+            'earth-to-neptune': '♆ Earth → Neptune (Lambert · 3D)',
         };
+        const yrs = plan.tof_d / 365.25;
         planEl.innerHTML = `
-            <div class="mp-plan-title">${titles[plan.kind]}</div>
+            <div class="mp-plan-title">${titles[plan.kind] ?? plan.kind}</div>
             <div class="mp-plan-row"><span class="k">Depart</span><span class="v">${jdToISO(plan.jd_depart)}</span></div>
             <div class="mp-plan-row"><span class="k">Arrive</span><span class="v">${jdToISO(plan.jd_arrive)}</span></div>
-            <div class="mp-plan-row"><span class="k">TOF</span><span class="v">${plan.tof_d.toFixed(1)} days</span></div>
+            <div class="mp-plan-row"><span class="k">TOF</span><span class="v">${plan.tof_d.toFixed(0)} d (${yrs.toFixed(2)} yr)</span></div>
             <div class="mp-plan-row"><span class="k">Δv depart</span><span class="v">${plan.dv_depart_kms.toFixed(3)} km/s</span></div>
             <div class="mp-plan-row"><span class="k">Δv arrive</span><span class="v">${plan.dv_arrive_kms.toFixed(3)} km/s</span></div>
             <div class="mp-plan-row"><span class="k">Total Δv</span><span class="v">${plan.dv_total_kms.toFixed(3)} km/s</span></div>
+            ${plan.c3_earth_km2s2 ? `<div class="mp-plan-row"><span class="k">C3 Earth</span><span class="v">${plan.c3_earth_km2s2.toFixed(2)} km²/s²</span></div>` : ''}
             ${plan.v_inf_depart_kms ? `<div class="mp-plan-row"><span class="k">v∞ depart</span><span class="v">${plan.v_inf_depart_kms.toFixed(3)} km/s</span></div>` : ''}
             ${plan.v_inf_arrive_kms ? `<div class="mp-plan-row"><span class="k">v∞ arrive</span><span class="v">${plan.v_inf_arrive_kms.toFixed(3)} km/s</span></div>` : ''}
         `;
@@ -724,6 +731,14 @@ const planner = initMissionPlanner({
             pushLog(`🛰️ MOI · ${ev.payloadName} arrived at Mars`, 'capture');
         } else if (ev.type === 'earth-captured') {
             pushLog(`🛰️ EOI · ${ev.payloadName} arrived back at Earth`, 'capture');
+        } else if (ev.type === 'jupiter-captured') {
+            pushLog(`🛰️ JOI · ${ev.payloadName} captured at Jupiter`, 'capture');
+        } else if (ev.type === 'saturn-captured') {
+            pushLog(`🛰️ SOI · ${ev.payloadName} captured at Saturn`, 'capture');
+        } else if (ev.type === 'uranus-captured') {
+            pushLog(`🛰️ UOI · ${ev.payloadName} captured at Uranus`, 'capture');
+        } else if (ev.type === 'neptune-captured') {
+            pushLog(`🛰️ NOI · ${ev.payloadName} captured at Neptune`, 'capture');
         } else if (ev.type === 'lunar-return-arrived') {
             pushLog(`🛰️ EOI · ${ev.payloadName} captured into LEO from Moon`, 'capture');
         } else if (ev.type === 'launched-helio') {
@@ -839,6 +854,15 @@ function dvRequiredKms() {
                 });
                 transfer = plan.dv_total_kms;
                 label    = 'ascent + TMI + MOI';
+            } else if (['jupiter','saturn','uranus','neptune'].includes(destId)) {
+                // Outer-planet Lambert (Hohmann-default TOF — multi-year).
+                const plan = planner.planEarthToOuterLambert({
+                    planet:    destId,
+                    jd_depart: planner.getScenarioJD(),
+                    parking_inc_deg: parseFloat(parkIncRange.value),
+                });
+                transfer = plan.dv_total_kms;
+                label    = `ascent + TXI + capture (${(plan.tof_d/365.25).toFixed(1)} yr TOF)`;
             }
         } else if (origin === 'mars' && destId === 'earth') {
             const plan = planner.planMarsToEarthLambert({

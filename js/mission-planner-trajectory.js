@@ -23,6 +23,8 @@
 import {
     jdNow, moonGeocentric, earthHeliocentric, marsHeliocentric,
     mercuryHeliocentric, venusHeliocentric,
+    jupiterHeliocentric, saturnHeliocentric,
+    uranusHeliocentric,  neptuneHeliocentric,
 } from './horizons.js';
 import {
     lambert, lambertAll,
@@ -36,20 +38,32 @@ export const D2R = Math.PI / 180;
 export const R2D = 180 / Math.PI;
 
 // Gravitational parameters (km³/s²)
-export const MU_EARTH = 398600.4418;
-export const MU_SUN   = 1.32712440018e11;
-export const MU_MOON  = 4902.800066;
-export const MU_MARS  = 42828.37;
+export const MU_EARTH    = 398600.4418;
+export const MU_SUN      = 1.32712440018e11;
+export const MU_MOON     = 4902.800066;
+export const MU_MARS     = 42828.37;
+export const MU_JUPITER  = 1.26686534e8;
+export const MU_SATURN   = 3.7931187e7;
+export const MU_URANUS   = 5.793939e6;
+export const MU_NEPTUNE  = 6.836529e6;
 
 // Body radii (km)
-export const R_EARTH = 6378.137;
-export const R_MOON  = 1737.4;
-export const R_MARS  = 3389.5;
+export const R_EARTH   = 6378.137;
+export const R_MOON    = 1737.4;
+export const R_MARS    = 3389.5;
+export const R_JUPITER = 69911;
+export const R_SATURN  = 58232;
+export const R_URANUS  = 25362;
+export const R_NEPTUNE = 24622;
 
 // Sphere-of-influence radii (km), classic Tisserand definition.
-export const SOI_EARTH = 924000;
-export const SOI_MOON  =  66100;
-export const SOI_MARS  = 577000;
+export const SOI_EARTH    =    924000;
+export const SOI_MOON     =     66100;
+export const SOI_MARS     =    577000;
+export const SOI_JUPITER  =  48200000;
+export const SOI_SATURN   =  54400000;
+export const SOI_URANUS   =  51700000;
+export const SOI_NEPTUNE  =  86700000;
 
 // Mean orbital radii (km)
 export const R_EARTH_HELIO = 1.00000011 * KM_PER_AU;   // mean Earth orbit
@@ -1094,6 +1108,97 @@ export function planMoonToEarthLambert({
     }
     if (!best) throw new Error(`planMoonToEarthLambert: no feasible Lambert at TOF=${tof_d}d`);
     return best;
+}
+
+// ── Outer-planet Lambert (Jupiter / Saturn / Uranus / Neptune) ──────────────
+//
+// Same shape as planMarsLambert — heliocentric Lambert from Earth at
+// jd_depart to the target planet at jd_arrive — but generalised over the
+// destination body so we can fly Voyager-style direct missions to any
+// outer planet. Real missions use gravity assists; first-pass plan reports
+// the unaided Δv so the user can see how steep an outer-planet capture is.
+//
+// Default time-of-flight follows the Hohmann transfer time (Earth_orbit →
+// target_orbit half-ellipse). Real missions trade longer TOF for a smaller
+// C3 by leaving the Hohmann window; the generic Lambert solver works for
+// any (depart, arrive) pair so users can dial that in via the time slider.
+const _OUTER_PLANET_CFG = {
+    jupiter: {
+        ephFn: jupiterHeliocentric, R_km: R_JUPITER, mu: MU_JUPITER,
+        default_target_alt_km:  5000,    // ~10 RJ low-Jupiter orbit
+        default_tof_d:          1000,    // ~Hohmann
+    },
+    saturn: {
+        ephFn: saturnHeliocentric,  R_km: R_SATURN,  mu: MU_SATURN,
+        default_target_alt_km:  5000,
+        default_tof_d:          2200,
+    },
+    uranus: {
+        ephFn: uranusHeliocentric,  R_km: R_URANUS,  mu: MU_URANUS,
+        default_target_alt_km:  3000,
+        default_tof_d:          5800,
+    },
+    neptune: {
+        ephFn: neptuneHeliocentric, R_km: R_NEPTUNE, mu: MU_NEPTUNE,
+        default_target_alt_km:  3000,
+        default_tof_d:         11200,
+    },
+};
+
+export function planEarthToOuterLambert({
+    planet,                                  // 'jupiter' | 'saturn' | 'uranus' | 'neptune'
+    jd_depart           = jdNow(),
+    jd_arrive           = null,
+    parking_alt_km      = 300,
+    target_alt_km       = null,
+    parking_inc_deg     = 28.5,
+    capture_inc_deg     = null,
+    prograde            = true,
+} = {}) {
+    const cfg = _OUTER_PLANET_CFG[planet];
+    if (!cfg) throw new Error(`planEarthToOuterLambert: unknown planet ${planet}`);
+
+    const _jd_arrive = jd_arrive ?? (jd_depart + cfg.default_tof_d);
+    const _alt_km    = target_alt_km ?? cfg.default_target_alt_km;
+    if (_jd_arrive <= jd_depart) throw new Error('planEarthToOuterLambert: jd_arrive must be > jd_depart');
+
+    const tof_s = (_jd_arrive - jd_depart) * SECONDS_PER_DAY;
+    const e = planetState(earthHeliocentric, jd_depart);
+    const t = planetState(cfg.ephFn,         _jd_arrive);
+
+    const sol = lambert(e.r, t.r, tof_s, MU_SUN, { prograde });
+    const v_inf_e = vSub(sol.v1, e.v);
+    const v_inf_t = vSub(sol.v2, t.v);
+
+    const r_park_e = R_EARTH   + parking_alt_km;
+    const r_park_t = cfg.R_km  + _alt_km;
+
+    const dep = departureBurnFromParking({
+        r_park_km: r_park_e, mu: MU_EARTH,
+        v_inf_vec: v_inf_e, i_park_rad: parking_inc_deg * D2R,
+    });
+    const arr = arrivalBurnIntoOrbit({
+        r_capt_km: r_park_t, mu: cfg.mu,
+        v_inf_vec: v_inf_t,
+        i_capt_rad: capture_inc_deg == null ? null : capture_inc_deg * D2R,
+    });
+
+    return {
+        kind: `earth-to-${planet}`,
+        method: 'lambert',
+        jd_depart, jd_arrive: _jd_arrive,
+        tof_d: _jd_arrive - jd_depart, tof_s,
+        depart_state_kms: e, arrive_state_kms: t,
+        lambert: sol,
+        v_inf_depart_kms: vNorm(v_inf_e),
+        v_inf_arrive_kms: vNorm(v_inf_t),
+        c3_earth_km2s2:   vNorm(v_inf_e) ** 2,
+        c3_arrive_km2s2:  vNorm(v_inf_t) ** 2,
+        dv_depart_kms:    dep.dv_kms,
+        dv_arrive_kms:    arr.dv_kms,
+        dv_total_kms:     dep.dv_kms + arr.dv_kms,
+        sample: () => sampleKeplerArc(e.r, sol.v1, tof_s, MU_SUN, 96),
+    };
 }
 
 // ── Tour planner: chained Lambert legs ──────────────────────────────────────

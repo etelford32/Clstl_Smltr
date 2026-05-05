@@ -32,11 +32,12 @@ import {
     uranusHeliocentric,  neptuneHeliocentric,
 } from './horizons.js';
 import {
-    KM_PER_AU, R_EARTH, R_MOON, SOI_MOON, SOI_MARS, SECONDS_PER_DAY,
+    KM_PER_AU, R_EARTH, R_MOON, R_MARS, SOI_MOON, SOI_MARS, SECONDS_PER_DAY,
     R_EARTH_HELIO, R_MARS_HELIO,
     planLunarTransfer, planLunarLambert,
     planMarsTransfer, planMarsLambert,
     planMarsToEarthLambert, planMoonToMarsLambert, planMoonToEarthLambert,
+    planEarthToOuterLambert,
     findLunarLaunchWindow, findMarsLaunchWindow, porkchopMars,
     planTour, optimizeTour, TOUR_PRESETS,
     flybyAssessment, flybyMaxTurnAngle, flybyPeriapsisForTurn,
@@ -89,16 +90,20 @@ export const MOON_BASES = [
 //     destination) pair. `body` keys: 'earth' | 'moon' | 'mars'. ───────────
 export const MISSION_ROUTES = [
     // Earth-centric (existing)
-    { from: 'earth', to: 'leo',   label: 'Earth → LEO',          frame: 'geo'   },
-    { from: 'earth', to: 'sso',   label: 'Earth → SSO',          frame: 'geo'   },
-    { from: 'earth', to: 'meo',   label: 'Earth → MEO (GPS)',    frame: 'geo'   },
-    { from: 'earth', to: 'geo',   label: 'Earth → GEO',          frame: 'geo'   },
-    { from: 'earth', to: 'moon',  label: 'Earth → Moon',         frame: 'geo'   },
-    { from: 'earth', to: 'mars',  label: 'Earth → Mars',         frame: 'helio' },
-    // New cross-body routes
-    { from: 'mars',  to: 'earth', label: 'Mars → Earth',         frame: 'helio' },
-    { from: 'moon',  to: 'mars',  label: 'Moon → Mars',          frame: 'helio' },
-    { from: 'moon',  to: 'earth', label: 'Moon → Earth',         frame: 'geo'   },
+    { from: 'earth', to: 'leo',     label: 'Earth → LEO',          frame: 'geo'   },
+    { from: 'earth', to: 'sso',     label: 'Earth → SSO',          frame: 'geo'   },
+    { from: 'earth', to: 'meo',     label: 'Earth → MEO (GPS)',    frame: 'geo'   },
+    { from: 'earth', to: 'geo',     label: 'Earth → GEO',          frame: 'geo'   },
+    { from: 'earth', to: 'moon',    label: 'Earth → Moon',         frame: 'geo'   },
+    { from: 'earth', to: 'mars',    label: 'Earth → Mars',         frame: 'helio' },
+    { from: 'earth', to: 'jupiter', label: 'Earth → Jupiter',      frame: 'helio' },
+    { from: 'earth', to: 'saturn',  label: 'Earth → Saturn',       frame: 'helio' },
+    { from: 'earth', to: 'uranus',  label: 'Earth → Uranus',       frame: 'helio' },
+    { from: 'earth', to: 'neptune', label: 'Earth → Neptune',      frame: 'helio' },
+    // Cross-body returns
+    { from: 'mars',  to: 'earth',   label: 'Mars → Earth',         frame: 'helio' },
+    { from: 'moon',  to: 'mars',    label: 'Moon → Mars',          frame: 'helio' },
+    { from: 'moon',  to: 'earth',   label: 'Moon → Earth',         frame: 'geo'   },
 ];
 
 export const TARGET_ORBITS = [
@@ -107,7 +112,11 @@ export const TARGET_ORBITS = [
     { id: 'meo',  name: 'MEO · 20 200 km (GPS)',  alt_km:  20200, inc_deg: 55,            frame: 'geo' },
     { id: 'geo',  name: 'GEO · 35 786 km',        alt_km:  35786, inc_deg: 0,             frame: 'geo' },
     { id: 'moon', name: 'Lunar transfer (TLI)',   alt_km: 384400,                         frame: 'geo',   isTransfer: 'moon' },
-    { id: 'mars', name: 'Mars transfer (TMI)',    alt_km: 78340000,                       frame: 'helio', isTransfer: 'mars' },
+    { id: 'mars',    name: 'Mars transfer (TMI)',     alt_km:    78340000,                  frame: 'helio', isTransfer: 'mars'    },
+    { id: 'jupiter', name: 'Jupiter (Lambert · ~3 yr)',alt_km:   628000000,                  frame: 'helio', isTransfer: 'jupiter' },
+    { id: 'saturn',  name: 'Saturn  (Lambert · ~6 yr)',alt_km:  1280000000,                  frame: 'helio', isTransfer: 'saturn'  },
+    { id: 'uranus',  name: 'Uranus  (Lambert · ~16 yr)',alt_km: 2720000000,                  frame: 'helio', isTransfer: 'uranus'  },
+    { id: 'neptune', name: 'Neptune (Lambert · ~31 yr)',alt_km: 4350000000,                  frame: 'helio', isTransfer: 'neptune' },
 ];
 
 const DEG = Math.PI / 180;
@@ -287,6 +296,11 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             }
             if (target.id === 'mars') {
                 return launchMars({ site: origin.pad, target, payloadName, windowJD, arriveJD, parking_inc_deg });
+            }
+            if (['jupiter','saturn','uranus','neptune'].includes(target.id)) {
+                return launchOuterPlanet({
+                    site: origin.pad, target, payloadName, windowJD, arriveJD, parking_inc_deg,
+                });
             }
             return launchNearEarth({ site: origin.pad, target, payloadName });
         }
@@ -610,6 +624,36 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             arrival_soi_km: 924000,           // SOI of Earth
             arc_color: 0x66ccff, trail_color: 0x66aaff,
             route_label: `${origin.pad.name} → Earth`,
+        });
+    }
+
+    // ── Earth → outer planet (Jupiter / Saturn / Uranus / Neptune) ─────────
+    // Heliocentric Lambert from Earth at depart JD to the target planet at
+    // arrival JD. Default arrival is one Hohmann TOF after depart, set by
+    // planEarthToOuterLambert. Reuses the helio cruise animation pipeline
+    // via _launchHelioLambert; per-target SOI mesh + arc tint give each
+    // mission a recognisable colour.
+    const _OUTER_PLANET_LOOK = {
+        jupiter: { color: 0xd4a060, soi: 48200000, label: 'Jupiter' },
+        saturn:  { color: 0xd9c97a, soi: 54400000, label: 'Saturn'  },
+        uranus:  { color: 0x9fd6e0, soi: 51700000, label: 'Uranus'  },
+        neptune: { color: 0x4f7adb, soi: 86700000, label: 'Neptune' },
+    };
+    function launchOuterPlanet({ site, target, payloadName, windowJD, arriveJD, parking_inc_deg }) {
+        const planetKey = target.id;
+        const look = _OUTER_PLANET_LOOK[planetKey];
+        const jd_depart = windowJD ?? state.scenarioJD ?? jdNow();
+        const plan = planEarthToOuterLambert({
+            planet: planetKey,
+            jd_depart,
+            jd_arrive: arriveJD,                  // null → Hohmann default
+            parking_inc_deg: parking_inc_deg ?? Math.abs(site.lat),
+        });
+        return _launchHelioLambert({
+            plan, kind: `earth-to-${planetKey}`, payloadName,
+            arrival_soi_km: look.soi,
+            arc_color: look.color, trail_color: look.color,
+            route_label: `${site.name} → ${look.label}`,
         });
     }
 
@@ -1067,9 +1111,13 @@ export function initMissionPlanner({ container, onEvent } = {}) {
                 spawnBurnFlash(hel.scene, m.craft.position.clone(), 0x66ffaa, 1100, 1.6);
                 // Per-kind arrival event so the UI log reads correctly.
                 const arrivalEvents = {
-                    'mars':         'mars-captured',
-                    'mars-to-earth':'earth-captured',
-                    'moon-to-mars': 'mars-captured',
+                    'mars':            'mars-captured',
+                    'mars-to-earth':   'earth-captured',
+                    'moon-to-mars':    'mars-captured',
+                    'earth-to-jupiter':'jupiter-captured',
+                    'earth-to-saturn': 'saturn-captured',
+                    'earth-to-uranus': 'uranus-captured',
+                    'earth-to-neptune':'neptune-captured',
                 };
                 onEvent?.({
                     type: arrivalEvents[m.kind] || 'helio-arrived',
@@ -1320,6 +1368,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         planMarsToEarthLambert,
         planMoonToMarsLambert,
         planMoonToEarthLambert,
+        planEarthToOuterLambert,
         findLunarWindow:  findLunarLaunchWindow,
         findMarsWindow:   findMarsLaunchWindow,
         porkchopMars,
