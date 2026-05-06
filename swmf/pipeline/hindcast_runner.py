@@ -171,18 +171,20 @@ def _load_fixture_mhd(fixture_dir: Path) -> list[dict]:
     return samples
 
 
-def _load_real_mhd(run_dir: Path) -> list[dict]:
+def _load_real_mhd(run_dir: Path,
+                   *,
+                   window_start: Optional[datetime] = None,
+                   window_end:   Optional[datetime] = None) -> list[dict]:
     """
-    Parse a finished BATS-R-US run for Φ_PC and HPI timeseries. The real
-    extraction is component-specific (read IDL ASCII, integrate Poynting
-    flux on the polar cap, etc.) — wired up in Phase 1 once we have a
-    completed run to look at. For now this raises so dry-run is the only
-    path that's smoke-testable.
+    Read Φ_PC and HPI from the SWMF/IE (Ridley Ionosphere) log file
+    written under `run_dir`. See `parse_ie_log.py` for the format
+    contract and column-name fallbacks.
     """
-    raise NotImplementedError(
-        "Real BATS-R-US output parsing is Phase 1 work. "
-        "Run with --dry-run for now."
-    )
+    from pipeline.parse_ie_log import find_ie_log, parse_ie_log
+    log_path = find_ie_log(run_dir)
+    return parse_ie_log(log_path,
+                        start_utc=window_start,
+                        end_utc=window_end)
 
 
 # ── Driver ────────────────────────────────────────────────────────────────────
@@ -194,6 +196,7 @@ def replay(
     out_dir: Path,
     dry_run: bool = True,
     fit: Optional[PseudoApFit] = None,
+    run_dir: Optional[Path] = None,
 ) -> Path:
     """
     Replay one event and write its hindcast JSON. Returns the output path.
@@ -209,9 +212,13 @@ def replay(
         raw_samples = _load_fixture_mhd(fixture_dir)
         source = "fixture"
     else:
-        run_dir = Path(os.environ.get("RUNS_DIR", "/data/runs")) / event_id
-        log.info("Real replay of %s from %s", event_id, run_dir)
-        raw_samples = _load_real_mhd(run_dir)
+        rd = run_dir or (Path(os.environ.get("RUNS_DIR", "/data/runs")) / event_id)
+        log.info("Real replay of %s from %s", event_id, rd)
+        raw_samples = _load_real_mhd(
+            rd,
+            window_start=event.window_start,
+            window_end=event.window_end,
+        )
         source = "batsrus"
 
     # Apply pseudo-Ap regression sample-by-sample.
@@ -262,7 +269,9 @@ def _build_argparser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     p.add_argument("--event", required=True, choices=sorted(EVENTS.keys()))
     p.add_argument("--dry-run", action="store_true",
-                   help="Use fixture data instead of launching BATS-R-US.")
+                   help="Use fixture data instead of parsing a SWMF run.")
+    p.add_argument("--run-dir", type=Path, default=None,
+                   help="Override RUNS_DIR/<event_id> when parsing a real run.")
     p.add_argument("--fixtures", type=Path,
                    default=Path("swmf/fixtures/hindcast"),
                    help="Fixture root (one subdir per event).")
@@ -291,6 +300,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             fixtures_dir=args.fixtures,
             out_dir=args.out,
             dry_run=args.dry_run,
+            run_dir=args.run_dir,
         )
     except (FileNotFoundError, NotImplementedError) as exc:
         log.error("%s", exc)
