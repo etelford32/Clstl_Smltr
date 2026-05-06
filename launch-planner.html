@@ -1410,8 +1410,13 @@ body[data-density="compact"] .lp-density-btn {
                     renderMeta(info);
                     showVariantRow(id);
                     // Refresh the force diagram if it's visible — different
-                    // vehicle, very different thrust/weight ratio.
-                    if (typeof updateForceDiagram === 'function') updateForceDiagram();
+                    // vehicle, very different thrust/weight ratio. Deferred
+                    // because the very first onVehicleChange fires
+                    // synchronously inside initVehicleCanvas, before forceEl
+                    // and api have left their TDZ.
+                    queueMicrotask(() => {
+                        if (typeof updateForceDiagram === 'function') updateForceDiagram();
+                    });
                 },
                 onLiftoffEnd: () => {
                     liftoffBtn.classList.remove('lh-liftoff--ascending');
