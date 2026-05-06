@@ -271,6 +271,14 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         simDaysPerSec: 1,
         // Live ephemeris JD that drives planet positions.
         scenarioJD: jdNow(),
+        // Auto-frame on launch — when true, a launch automatically chases
+        // the new spacecraft via followMission(). Toggleable from the UI.
+        autoFrame:  true,
+        // Auto-incrementing mission ID so the UI can address a specific
+        // mission (telemetry panel, "follow this one" actions). All five
+        // mission collections (rockets, payloads, lunar, mars, tours)
+        // pull from this counter so IDs are unique across kinds.
+        nextMissionId: 1,
     };
 
     // Surface markers — parented to the spinning Earth so labels stay pinned
@@ -339,6 +347,193 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         if (mode !== 'geo' && mode !== 'helio') return;
         state.mode = mode;
         onEvent?.({ type: 'mode', mode });
+    }
+
+    // ── Auto-frame on launch ─────────────────────────────────────────────
+    // Each launch* helper calls autoFrame(mission) right after the mission
+    // is pushed to its state collection. When state.autoFrame is enabled
+    // (default true), we delay 500 ms so the user sees the rocket lift off
+    // from the pad before the camera takes over and chases the spacecraft.
+    // Disabling the toggle keeps the camera wherever the user pointed it.
+    function autoFrame(mission) {
+        if (!state.autoFrame) return;
+        if (!mission) return;
+        setTimeout(() => {
+            // Re-check that the mission is still active when the timeout
+            // fires — the user may have hit Clear All in the meantime.
+            const stillActive =
+                state.rockets.includes(mission)        ||
+                state.payloads.includes(mission)       ||
+                state.lunarMissions.includes(mission)  ||
+                state.marsMissions.includes(mission)   ||
+                state.tours.includes(mission);
+            if (!stillActive) return;
+            followMission(mission);
+        }, 500);
+    }
+    function setAutoFrame(on) { state.autoFrame = !!on; }
+    function getAutoFrame()    { return state.autoFrame; }
+
+    // ── Mission telemetry ────────────────────────────────────────────────
+    // listActiveMissions() snapshots every active mission across all five
+    // collections. getMissionDetail(id) returns a frame-fresh telemetry
+    // record for one mission: phase, progress, distance to target, plan
+    // summary. The UI calls getMissionDetail() each tick for the followed
+    // mission to drive the live HUD card.
+    function _allMissions() {
+        return [
+            ...state.rockets,
+            ...state.payloads,
+            ...state.lunarMissions,
+            ...state.marsMissions,
+            ...state.tours,
+        ];
+    }
+    function listActiveMissions() {
+        return _allMissions().map(m => ({
+            id:          m.id,
+            kind:        m.kind || 'mission',
+            payloadName: m.payloadName,
+            phase:       m.phase || (m.target && m.mesh ? 'orbit' : ''),
+            startedAt:   m.startedAt || 0,
+            durSec:      m.durSec || m.totalDur || null,
+        }));
+    }
+    function getMissionDetail(id) {
+        let m = _allMissions().find(x => x.id === id);
+        if (!m) return null;
+        // Once an ascent rocket has deployed, the actual moving body is
+        // the payload (rocket mesh goes static at orbit insertion). Both
+        // share an id; prefer the payload so the HUD + chase cam track
+        // the orbiting craft instead of the parked booster.
+        if (m.kind === 'near' && m.phase === 'deployed') {
+            const payload = state.payloads.find(p => p.id === id);
+            if (payload) m = payload;
+        }
+        const elapsed = state.elapsed - (m.startedAt || 0);
+        const dur     = m.durSec ?? m.totalDur ?? null;
+        const progress = dur ? Math.min(1, Math.max(0, elapsed / dur)) : null;
+
+        // Spacecraft world position (covers all kinds: ascent rocket has
+        // .group, lunar/mars/tour have .craft, deployed payload has .mesh).
+        const obj = m.craft || m.group || m.mesh;
+        const pos = new THREE.Vector3();
+        if (obj) obj.getWorldPosition(pos);
+
+        // Distance to target body in scene units (1 unit = R⊕). Best-
+        // effort heuristics by mission kind so the HUD has a meaningful
+        // "to target" readout.
+        let targetName = null, distance_units = null;
+        if (m.kind === 'lunar' && m.phase !== 'arrived') {
+            const moon = new THREE.Vector3();
+            world.moon.getWorldPosition(moon);
+            distance_units = pos.distanceTo(moon);
+            targetName = 'Moon';
+        } else if (m.kind === 'mars') {
+            distance_units = pos.distanceTo(hel.mars.position);
+            targetName = 'Mars';
+        } else if (m.kind === 'moon-to-earth' || m.kind === 'mars-to-earth') {
+            distance_units = pos.distanceTo(world.earthSystem.position);
+            targetName = 'Earth';
+        } else if (m.kind === 'earth-to-jupiter' || m.kind === 'moon-to-mars'
+                || m.kind === 'earth-to-saturn'  || m.kind === 'earth-to-uranus'
+                || m.kind === 'earth-to-neptune') {
+            // Helio cruise to outer body — find the planet group.
+            const target = m.kind.split('-to-')[1];
+            if (hel.planets[target]) {
+                distance_units = pos.distanceTo(hel.planets[target].group.position);
+                targetName = target.charAt(0).toUpperCase() + target.slice(1);
+            }
+        } else if (m.kind === 'near' || m.kind === 'payload') {
+            // Altitude above Earth surface (Earth-relative position).
+            const earthCenter = world.earthSystem.position;
+            const alt_units = pos.distanceTo(earthCenter) - 1.0;   // R⊕ units
+            distance_units = alt_units;
+            targetName = 'Earth (altitude)';
+        }
+
+        return {
+            id:           m.id,
+            kind:         m.kind || 'mission',
+            payloadName:  m.payloadName,
+            phase:        m.phase || '',
+            elapsed_s:    Math.max(0, elapsed),
+            duration_s:   dur,
+            progress,
+            distance_units,
+            targetName,
+            // Plan summary (Δv / TOF / etc.) — present for trajectory missions.
+            plan:         m.plan || null,
+            // Origin pad (if known).
+            originId:     m.site?.id || null,
+        };
+    }
+
+    // ── Skip-to-next-event time-warp ─────────────────────────────────────
+    // Find the soonest mission "phase transition" or arrival across every
+    // active mission, then advance state.elapsed (which drives mission
+    // animation interpolation) and state.scenarioJD (which drives planet
+    // ephemerides) so all bodies + spacecraft jump to that moment in one
+    // step. Trail polylines will skip the intermediate samples — that's
+    // expected; the static trajectory arcs (Lambert / Hohmann polylines)
+    // remain fully drawn so the path stays visible.
+    function _nextEventTime() {
+        let next = Infinity;
+        let label = null;
+        for (const r of state.rockets) {
+            if (r.phase === 'ascent') {
+                const t = r.startedAt + r.ascentDur;
+                if (t > state.elapsed && t < next) { next = t; label = `${r.payloadName} deploys`; }
+            }
+        }
+        for (const m of state.lunarMissions) {
+            if (m.phase === 'ascent') {
+                const t = m.startedAt + m.ascentDur;
+                if (t > state.elapsed && t < next) { next = t; label = `${m.payloadName} TLI`; }
+            }
+            if (m.phase === 'transfer' && m.transferStart != null) {
+                const t = m.transferStart + m.durSec;
+                if (t > state.elapsed && t < next) { next = t; label = `${m.payloadName} captures`; }
+            }
+        }
+        for (const m of state.marsMissions) {
+            if (m.phase === 'cruise') {
+                const t = m.startedAt + m.durSec;
+                if (t > state.elapsed && t < next) { next = t; label = `${m.payloadName} arrives`; }
+            }
+        }
+        for (const m of state.tours) {
+            if (m.phase === 'cruise') {
+                const t = m.startedAt + m.totalDur;
+                if (t > state.elapsed && t < next) { next = t; label = `${m.payloadName} tour ends`; }
+            }
+        }
+        if (!isFinite(next)) return null;
+        return { time: next, label };
+    }
+    function getNextEvent() {
+        const ev = _nextEventTime();
+        if (!ev) return null;
+        return {
+            label:     ev.label,
+            in_seconds: ev.time - state.elapsed,
+        };
+    }
+    function skipToNextEvent() {
+        const ev = _nextEventTime();
+        if (!ev) return null;
+        // Add a tiny epsilon so the interpolation actually crosses the
+        // phase boundary (e.g. ascent → deployed) rather than landing
+        // right at u=1.0 which the loop treats as "still ascending".
+        const dt = (ev.time - state.elapsed) + 0.001;
+        if (dt <= 0) return null;
+        state.elapsed   += dt;
+        state.scenarioJD += dt * state.simDaysPerSec;
+        // One synchronous tick so positions, trails, and phase
+        // transitions catch up before the next render frame.
+        updateEarthSystem(0);
+        updateHelio(0);
+        return { advanced_seconds: dt, label: ev.label };
     }
 
     // ── Public API: launch ──────────────────────────────────────────────────
@@ -458,6 +653,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         const trail  = makeTrail(geo.scene, 600, 0xffaa33, 0.85);
 
         const r = {
+            id: state.nextMissionId++,
             kind: 'near', group: rocket, ...trail,
             site, target, payloadName,
             startPos, ascNode, planeNormal, rOrbit, inc,
@@ -465,6 +661,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             phase: 'ascent',
         };
         state.rockets.push(r);
+        autoFrame(r);
         onEvent?.({ type: 'launched', site, target, payloadName });
         return r;
     }
@@ -557,6 +754,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         const trail = makeTrail(geo.scene, 800, 0x66ddff, 0.7);
 
         const m = {
+            id: state.nextMissionId++,
             kind: 'lunar',
             plan,
             craft, ellLine, parkRing, soiMesh,
@@ -575,6 +773,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             arcPos, N_arc,
         };
         state.lunarMissions.push(m);
+        autoFrame(m);
 
         onEvent?.({ type: 'launched-lunar', site, target, payloadName, plan });
         return m;
@@ -635,6 +834,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         const trail = makeTrail(hel.scene, 1200, 0xff8855, 0.7);
 
         const m = {
+            id: state.nextMissionId++,
             kind: 'mars',
             plan, arcPos, N,
             craft, arcLine, soiMesh,
@@ -646,6 +846,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             payloadName, site, target,
         };
         state.marsMissions.push(m);
+        autoFrame(m);
 
         // TMI burn flash at Earth's helio position at departure.
         spawnBurnFlash(hel.scene,
@@ -699,6 +900,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         const trail = makeTrail(hel.scene, 1200, trail_color, 0.7);
 
         const m = {
+            id: state.nextMissionId++,
             kind,
             plan, arcPos, N,
             craft, arcLine, soiMesh,
@@ -709,6 +911,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             payloadName,
         };
         state.marsMissions.push(m);
+        autoFrame(m);
 
         spawnBurnFlash(hel.scene,
             new THREE.Vector3(arcPos[0], arcPos[1], arcPos[2]),
@@ -807,6 +1010,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         const trail = makeTrail(geo.scene, 800, 0x66ddff, 0.7);
 
         const m = {
+            id: state.nextMissionId++,
             kind: 'moon-to-earth',
             plan, arcPos, N_arc: N,
             craft, arcLine, ellLine: null, parkRing: null, soiMesh: null, captureRing: null,
@@ -820,6 +1024,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             target: { id: 'earth-return', name: 'Earth (LEO return)', frame: 'geo' },
         };
         state.lunarMissions.push(m);
+        autoFrame(m);
 
         spawnBurnFlash(geo.scene,
             new THREE.Vector3(arcPos[0], arcPos[1], arcPos[2]),
@@ -920,15 +1125,20 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         const totalDur = Math.max(15, plan.tof_total_d * (45 / 800));   // ~45 s for an 800-d tour
 
         const m = {
+            id: state.nextMissionId++,
             kind: 'tour',
             plan, legGeoms, craft, ...trail,
             startedAt: state.elapsed,
             totalDur,
+            // tours don't carry a `durSec`; mirror it for the unified
+            // mission-event scanner used by skipToNextEvent.
+            durSec: totalDur,
             phase: 'cruise',
             payloadName,
             currentLeg: 0,
         };
         state.tours.push(m);
+        autoFrame(m);
 
         onEvent?.({ type: 'launched-tour', payloadName, plan });
         return m;
@@ -1320,7 +1530,12 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         const visualPeriod = Math.max(4, Math.min(45, period_s / 900));
         const omega = (2 * Math.PI) / visualPeriod;
 
+        // Inherit the rocket's mission id so the deploy doesn't fragment
+        // the telemetry — the rocket and its payload are the same mission
+        // from the user's perspective.
         state.payloads.push({
+            id: r.id,
+            kind: 'payload',
             mesh: p, ring,
             trail, trailGeom, trailIndex: 0,
             r: r.rOrbit, theta: 0, omega,
@@ -1328,6 +1543,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             planeNormal: r.planeNormal.clone(),
             payloadName: r.payloadName,
             target: r.target,
+            startedAt: state.elapsed,
         });
 
         onEvent?.({
@@ -1613,19 +1829,26 @@ export function initMissionPlanner({ container, onEvent } = {}) {
     function followMission(mission) {
         const m = mission || pickActiveMission();
         if (!m) return null;
-        const obj = m.craft || m.group || m.mesh;
-        if (!obj) return null;
-        // Chase from above + sideways. Distance scales with frame so the
-        // camera doesn't get stuck inside the spacecraft on heliocentric
-        // arcs (where positions are at AU scale) — but stays close enough
-        // on Earth-relative ascents that the rocket fills the frame.
-        // Use a fixed 3 R⊕ box: small for ascent, still tight for cruises
-        // but enough to show the trail.
+        const id = m.id;
+        // Track by mission ID rather than caching an Object3D — that way
+        // when an ascent rocket deploys its payload, the chase cam auto-
+        // redirects to the orbiting craft instead of staring at the
+        // parked booster.
+        const resolveObj = () => {
+            const payload = state.payloads.find(p => p.id === id);
+            if (payload) return payload.mesh || payload.craft || payload.group;
+            const cur = _allMissions().find(x => x.id === id);
+            return cur ? (cur.craft || cur.group || cur.mesh) : null;
+        };
+        // Chase from above + sideways at a fixed 3 R⊕ box: small enough
+        // for an Earth-relative ascent to fill the frame, big enough on
+        // a heliocentric arc to keep the trail visible.
         const offset = new THREE.Vector3(2.0, 1.5, 2.0);
         flyCameraTo({
             getTargetPos: () => {
+                const obj = resolveObj();
                 const v = new THREE.Vector3();
-                obj.getWorldPosition(v);
+                if (obj) obj.getWorldPosition(v);
                 return v;
             },
             offset,
@@ -1818,6 +2041,16 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         flyToPad,
         followMission,
         getFocusInfo,
+        // Auto-frame on launch (default ON) — chase the new spacecraft.
+        setAutoFrame,
+        getAutoFrame,
+        // Mission telemetry — the UI calls these every tick to drive the
+        // live "Active Mission" HUD card.
+        listActiveMissions,
+        getMissionDetail,
+        // Time-warp: jump to the next mission arrival / phase transition.
+        getNextEvent,
+        skipToNextEvent,
         // Pad weather scaffold — colored ring on each pad marker, Launch
         // button gating, "wait for window" surfacing. Live data lands later.
         setPadWeather,
