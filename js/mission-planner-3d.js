@@ -1329,6 +1329,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         getter: null,                          // () → THREE.Vector3 (body's world pos)
         lastPos: new THREE.Vector3(),
         anim:    null,                         // active animation (see flyCameraTo)
+        name:    'earth',                      // current focus label, drives HUD readout
     };
 
     function flyCameraTo({
@@ -1338,7 +1339,9 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         minDist = null,                        // OrbitControls clamp post-animation
         maxDist = null,
         follow  = true,                        // track body after animation completes
+        name    = null,                        // focus label (HUD)
     }) {
+        if (name) followState.name = name;
         followState.anim = {
             fromPos:    world.camera.position.clone(),
             fromTarget: world.controls.target.clone(),
@@ -1432,6 +1435,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             offset:       sunLitOffset(getEarth(), 5.5),
             minDist:      1.05,
             maxDist:      HELIO_MAX,
+            name:         'earth',
         });
     }
     function focusMoon() {
@@ -1440,12 +1444,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             world.moon.getWorldPosition(v);
             return v;
         };
-        // Approach Moon from the side that faces the Sun, tipped up so
-        // Earth's lit hemisphere shows in the background.
-        const moonPos = getMoon();
         const earthPos = world.earthSystem.position;
-        // sunward in scene coords (Sun is origin); offset along Earth→Sun
-        // direction so we view the Moon's lit face with Earth visible.
         const sunward = earthPos.clone();
         if (sunward.lengthSq() < 1e-6) sunward.set(-1, 0, 0);
         sunward.normalize().multiplyScalar(-1);
@@ -1457,18 +1456,17 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             offset,
             minDist:      MOON_R_SCENE * 1.15,
             maxDist:      HELIO_MAX,
+            name:         'moon',
         });
     }
-    function focusMars() {
-        _focusPlanet(hel.mars, hel.planets.mars.realRadius);
-    }
-    function focusJupiter() {
-        _focusPlanet(hel.jupiter, hel.planets.jupiter.realRadius);
-    }
-    function focusSaturn() {
-        _focusPlanet(hel.saturn, hel.planets.saturn.realRadius);
-    }
-    function _focusPlanet(group, realR) {
+    function focusMars()    { _focusPlanet(hel.mars,    hel.planets.mars.realRadius,    'mars'); }
+    function focusMercury() { _focusPlanet(hel.mercury, hel.planets.mercury.realRadius, 'mercury'); }
+    function focusVenus()   { _focusPlanet(hel.venus,   hel.planets.venus.realRadius,   'venus'); }
+    function focusJupiter() { _focusPlanet(hel.jupiter, hel.planets.jupiter.realRadius, 'jupiter'); }
+    function focusSaturn()  { _focusPlanet(hel.saturn,  hel.planets.saturn.realRadius,  'saturn'); }
+    function focusUranus()  { _focusPlanet(hel.uranus,  hel.planets.uranus.realRadius,  'uranus'); }
+    function focusNeptune() { _focusPlanet(hel.neptune, hel.planets.neptune.realRadius, 'neptune'); }
+    function _focusPlanet(group, realR, name) {
         const distance = realR * 6;             // pull back to fit body + halo
         const minDist  = realR * 1.05;
         flyCameraTo({
@@ -1476,6 +1474,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             offset:       sunLitOffset(group.position, distance),
             minDist,
             maxDist:      HELIO_MAX,
+            name,
         });
     }
     function focusSun() {
@@ -1485,6 +1484,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             minDist:      SUN_MIN,
             maxDist:      HELIO_MAX,
             follow:       false,
+            name:         'sun',
         });
     }
     function focusSystem() {
@@ -1494,6 +1494,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             minDist:      SUN_MIN,
             maxDist:      HELIO_MAX,
             follow:       false,
+            name:         'system',
         });
     }
     function focusOuterSystem() {
@@ -1503,7 +1504,141 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             minDist:      SUN_MIN,
             maxDist:      HELIO_MAX,
             follow:       false,
+            name:         'outer',
         });
+    }
+
+    // ── Follow an active mission (chase camera) ─────────────────────────
+    // Picks the most-recently-launched active spacecraft (or one passed
+    // explicitly) and tracks its world position. Useful while watching an
+    // ascent rocket leave the pad, a lunar transfer cross to the Moon, or
+    // a Mars cruise sweep through a Lambert arc. Distance is set small so
+    // the spacecraft stays visible as a discrete object rather than a dot.
+    //
+    // Returns the followed mission object (with .payloadName, .kind) so
+    // the UI can show "Following: <name>", or null if no active missions.
+    function pickActiveMission() {
+        const allActive = [
+            ...state.rockets      .filter(r => r.phase === 'ascent'),
+            ...state.lunarMissions.filter(m => m.phase !== 'arrived'),
+            ...state.marsMissions .filter(m => m.phase !== 'arrived'),
+            ...state.tours        .filter(t => t.phase !== 'arrived'),
+            ...state.payloads,    // deployed orbiters keep cycling
+        ];
+        if (!allActive.length) return null;
+        // Most recent first.
+        allActive.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
+        return allActive[0];
+    }
+    function followMission(mission) {
+        const m = mission || pickActiveMission();
+        if (!m) return null;
+        const obj = m.craft || m.group || m.mesh;
+        if (!obj) return null;
+        // Chase from above + sideways. Distance scales with frame so the
+        // camera doesn't get stuck inside the spacecraft on heliocentric
+        // arcs (where positions are at AU scale) — but stays close enough
+        // on Earth-relative ascents that the rocket fills the frame.
+        // Use a fixed 3 R⊕ box: small for ascent, still tight for cruises
+        // but enough to show the trail.
+        const offset = new THREE.Vector3(2.0, 1.5, 2.0);
+        flyCameraTo({
+            getTargetPos: () => {
+                const v = new THREE.Vector3();
+                obj.getWorldPosition(v);
+                return v;
+            },
+            offset,
+            minDist: 0.05,        // ≈ 320 km when zooming in
+            maxDist: HELIO_MAX,
+            name:    'mission',
+        });
+        return m;
+    }
+
+    // ── Generic "fly to body by name" — used by click-to-focus and the
+    //     keyboard shortcuts. Routes to the appropriate focus function. ──
+    function flyToBody(name) {
+        switch (name) {
+            case 'sun':      focusSun();          return;
+            case 'mercury':  focusMercury();      return;
+            case 'venus':    focusVenus();        return;
+            case 'earth':    focusEarth();        return;
+            case 'moon':     focusMoon();         return;
+            case 'mars':     focusMars();         return;
+            case 'jupiter':  focusJupiter();      return;
+            case 'saturn':   focusSaturn();       return;
+            case 'uranus':   focusUranus();       return;
+            case 'neptune':  focusNeptune();      return;
+            case 'system':   focusSystem();       return;
+            case 'outer':    focusOuterSystem();  return;
+        }
+    }
+
+    // ── Click-to-focus on planets / Sun ─────────────────────────────────
+    // A click on the canvas fires a raycaster from the camera through the
+    // pixel and intersects against every focusable body. Walking up the
+    // parent chain of the closest hit lets us figure out which body was
+    // clicked even though planets are nested groups (group → surface →
+    // mesh). Resolved name is then routed through flyToBody so all entry
+    // points (UI buttons, keyboard, click) share one camera pipeline.
+    const focusables = [
+        { obj: world.sun,            name: 'sun'     },
+        { obj: world.earthSystem,    name: 'earth'   },
+        { obj: world.moon,           name: 'moon'    },
+        { obj: world.planets.mercury.group, name: 'mercury' },
+        { obj: world.planets.venus.group,   name: 'venus'   },
+        { obj: world.planets.mars.group,    name: 'mars'    },
+        { obj: world.planets.jupiter.group, name: 'jupiter' },
+        { obj: world.planets.saturn.group,  name: 'saturn'  },
+        { obj: world.planets.uranus.group,  name: 'uranus'  },
+        { obj: world.planets.neptune.group, name: 'neptune' },
+    ];
+    const _raycaster = new THREE.Raycaster();
+    const _mouse     = new THREE.Vector2();
+    let   _mouseDown = null;
+    renderer.domElement.addEventListener('pointerdown', (ev) => {
+        // Track press position so a click that's actually a drag (orbit)
+        // doesn't accidentally trigger a focus change.
+        _mouseDown = { x: ev.clientX, y: ev.clientY, t: performance.now() };
+    });
+    renderer.domElement.addEventListener('pointerup', (ev) => {
+        if (!_mouseDown) return;
+        const dx = ev.clientX - _mouseDown.x;
+        const dy = ev.clientY - _mouseDown.y;
+        const dt = performance.now() - _mouseDown.t;
+        _mouseDown = null;
+        if (dx*dx + dy*dy > 25 || dt > 400) return;   // drag, not click
+        const rect = renderer.domElement.getBoundingClientRect();
+        _mouse.x =  ((ev.clientX - rect.left) / rect.width)  * 2 - 1;
+        _mouse.y = -((ev.clientY - rect.top)  / rect.height) * 2 + 1;
+        _raycaster.setFromCamera(_mouse, world.camera);
+        const objs = focusables.map(f => f.obj);
+        const hits = _raycaster.intersectObjects(objs, true);
+        if (!hits.length) return;
+        // Walk parent chain to find which top-level focusable owns the hit.
+        let node = hits[0].object;
+        while (node) {
+            const f = focusables.find(f => f.obj === node);
+            if (f) {
+                flyToBody(f.name);
+                onEvent?.({ type: 'focus', target: f.name });
+                return;
+            }
+            node = node.parent;
+        }
+    });
+
+    // ── Public state for the UI: name + live distance of the focused body
+    //     so the HUD can render a "Focused: Mars (1.42 AU)" indicator. The
+    //     distance is camera-to-target, computed live so the readout
+    //     ticks down as the user zooms in. ────────────────────────────────
+    function getFocusInfo() {
+        const target = followState.getter ? followState.getter() : world.controls.target;
+        return {
+            name:           followState.name,
+            distance_units: world.camera.position.distanceTo(target),
+        };
     }
 
     // ── Fly to a specific launch pad on its parent body ─────────────────
@@ -1556,6 +1691,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             offset,
             minDist,
             maxDist: HELIO_MAX,
+            name:    body,         // pad's parent body drives HUD label
         });
     }
 
@@ -1589,12 +1725,19 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         focusEarth,
         focusMoon,
         focusMars,
+        focusMercury,
+        focusVenus,
         focusJupiter,
         focusSaturn,
+        focusUranus,
+        focusNeptune,
         focusSun,
         focusSystem,
         focusOuterSystem,
+        flyToBody,
         flyToPad,
+        followMission,
+        getFocusInfo,
         getStats: () => ({
             rockets:        state.rockets.length,
             payloads:       state.payloads.length,
