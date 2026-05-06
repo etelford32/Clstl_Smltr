@@ -503,15 +503,29 @@ nav {
         </div>
         <div id="panel-body">
 
-            <!-- Camera presets -->
+            <!-- Camera presets + modes -->
             <div class="sec" id="sec-cam">
                 <div class="sec-hd"><span>Camera</span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
+                    <div style="font-size:9px;color:#665;text-transform:uppercase;letter-spacing:.5px;margin:2px 0 4px">Mode</div>
                     <div class="btn-row">
-                        <button id="cam-top" class="active">Top</button>
+                        <button id="cam-mode-free"  class="active" title="Freeform fly camera (F)">⟿ Free</button>
+                        <button id="cam-mode-lock"  title="Lock onto selected body (L)">⊙ Lock</button>
+                    </div>
+                    <div style="font-size:9px;color:#665;text-transform:uppercase;letter-spacing:.5px;margin:8px 0 4px">Presets</div>
+                    <div class="btn-row">
+                        <button id="cam-top">Top</button>
                         <button id="cam-iso">Isometric</button>
                         <button id="cam-sun">Sun View</button>
                         <button id="cam-earth">Earth View</button>
+                    </div>
+                    <div id="cam-lock-info" style="margin-top:6px;font-size:9px;color:#665;line-height:1.4;display:none">
+                        Locked on <span id="cam-lock-name" style="color:#ffd700">—</span>.
+                        Drag to orbit · scroll to zoom · L again or F to release.
+                    </div>
+                    <div style="margin-top:6px;font-size:8.5px;color:#445;line-height:1.4">
+                        Hotkeys: <b>F</b> free · <b>L</b> lock · <b>T</b> toggle ·
+                        <b>1</b>‑<b>4</b> presets · <b>[ ]</b> prev/next body
                     </div>
                 </div>
             </div>
@@ -617,6 +631,11 @@ nav {
             <div class="sd-stat"><span class="sd-stat-k">Accuracy (dist)</span><span class="sd-stat-v">&lt; 0.1% all planets</span></div>
             <div class="sd-stat"><span class="sd-stat-k">Valid range</span><span class="sd-stat-v">1800 – 2200 AD</span></div>
             <div class="sd-stat"><span class="sd-stat-k">JPL Horizons</span><span class="sd-stat-v" id="sd-horizons-status">checking…</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Time base</span><span class="sd-stat-v" id="sd-time-base">JD-anchored (deterministic)</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Earth-system worker</span><span class="sd-stat-v" id="sd-worker-status">spawning…</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Ground-truth hash</span><span class="sd-stat-v" id="sd-worker-hash">—</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Series window</span><span class="sd-stat-v" id="sd-worker-window">—</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Moon residual (km)</span><span class="sd-stat-v" id="sd-worker-resid">—</span></div>
         </div>
 
         <div class="sd-card">
@@ -679,6 +698,7 @@ import {
     propagateMoonKepler, sampleMoonOrbit, moonKmToScene, muOfParent,
 } from './js/planet-moons.js';
 import { JovianSystem } from './js/jovian-system.js';
+import { EarthSimBridge } from './js/earth-sim-bridge.js';
 
 // ── Scale breadcrumb + page fade-in ──────────────────────────────────────────
 initScaleNav('solar');
@@ -2602,6 +2622,9 @@ function selectBody(p) {
             <tr><td>Mass</td><td>1.989×10³⁰ kg</td></tr>
             <tr><td>Luminosity</td><td>3.83×10²⁶ W</td></tr>
             <tr><td>Age</td><td>4.6 Gyr</td></tr>`;
+        targetBody = null;
+        // Drop out of lock mode — Sun is always at world origin so 'free' is correct.
+        if (typeof cameraMode !== 'undefined') { cameraMode = 'free'; _setModeUI?.(); }
     } else {
         hudBody.textContent   = p.name;
         panelName.textContent = p.name;
@@ -2611,11 +2634,15 @@ function selectBody(p) {
         // Show Earth heliophysics panel only for Earth
         document.getElementById('sec-earth-sw').style.display =
             p.name === 'Earth' ? '' : 'none';
-        // Snap camera to orbit altitude on next update
         targetBody = p;
+        // Auto-engage lock mode so the freshly-selected body actually gets tracked.
+        // The animate loop reads `cameraMode` and only follows when it's 'lock'.
+        if (typeof setCamLock === 'function') setCamLock(p);
     }
 }
 let targetBody = null;
+// `cameraMode` is declared in the CAMERA section below; selectBody only touches
+// it via the typeof-guarded branches above, so calling order is safe.
 
 // ─── Raycaster for click-to-select ───────────────────────────
 const raycaster = new THREE.Raycaster();
@@ -2681,6 +2708,12 @@ const SECONDS_PER_YEAR = 365.25 * 86400;
 let simSpeed   = 1.0;       // real-time multiplier
 let timeUnit   = 'sec';     // 'sec' or 'day'
 const UNIT_FACTOR = { sec: 1, day: 86400 };
+
+// Time-base anchor — see the deterministic-time block in the animate loop.
+// `_simAnchor = { wallMs, simTime, simSpeed }`; null forces a re-anchor on the
+// next frame.
+let _simAnchor = null;
+function _resetSimAnchor() { _simAnchor = null; }
 function _fmtSimSpeed(spd) {
     if (spd === 0) return '⏸';
     const v = spd / UNIT_FACTOR[timeUnit];
@@ -2709,6 +2742,31 @@ function _fmtSimDate(d) {
 // (~0.01° or less) so there is no visible jump.
 const _ephemSvc = new EphemerisService();
 _ephemSvc.load();
+
+// ── Earth-system off-thread propagator ───────────────────────────────────────
+// Bridges to js/earth-sim-worker.js (a module Web Worker) which propagates
+// the Moon, Phobos, and Deimos in deterministic Keplerian form against the
+// current sim JD. Used (a) to ground the on-screen positions in JD-anchored
+// truth and (b) to drive a residual readout that catches drift if the main
+// thread's analytic pipeline ever diverges from the worker.
+const earthBridge = new EarthSimBridge();
+let _lastWorkerStatus = 'spawning…';
+let _lastResidualKm   = 0;
+earthBridge.onUpdate = (s) => {
+    _lastWorkerStatus = `live · ${s.count} samples`;
+    const hashEl   = document.getElementById('sd-worker-hash');
+    const winEl    = document.getElementById('sd-worker-window');
+    const statusEl = document.getElementById('sd-worker-status');
+    if (hashEl)   hashEl.textContent   = (s.hash || '—').slice(0, 16);
+    if (winEl)    winEl.textContent    = `${(s.dt_s * (s.count - 1)).toFixed(1)} s · Δt=${s.dt_s.toFixed(2)} s`;
+    if (statusEl) statusEl.textContent = _lastWorkerStatus;
+};
+earthBridge.onError = (err) => {
+    _lastWorkerStatus = 'unavailable';
+    const statusEl = document.getElementById('sd-worker-status');
+    if (statusEl) { statusEl.textContent = 'unavailable'; statusEl.style.color = '#aa6644'; }
+    console.warn('[earth-sim-bridge]', err);
+};
 
 window.addEventListener('ephemeris-ready', ev => {
     const ep         = ev.detail;
@@ -2741,28 +2799,122 @@ document.getElementById('sl-speed').addEventListener('input', function(){
 });
 
 // ═══════════════════════════════════════════════════════
-//  CAMERA PRESETS
+//  CAMERA — modes (free / lock) and presets
 // ═══════════════════════════════════════════════════════
+//
+// 'free'  → standard OrbitControls around a static target (Sun by default).
+//           Camera presets (top / iso / sun / earth) snap into this mode.
+// 'lock'  → controls.target glues to the selected body, but the user keeps
+//           full orbit/zoom freedom *around* the locked target. The relative
+//           offset from target → camera is preserved frame-to-frame, so the
+//           body sits in the centre of the view while moving with its orbit.
+//
+// `targetBody` is set by selectBody(); `cameraMode` controls how the animate
+// loop reacts to that selection. The "Sun" case (selectBody(null)) flips the
+// mode back to 'free' centred on the Sun.
+
 const CAM = {
     top:    { pos:[0,55,0],    t:[0,0,0] },
     iso:    { pos:[28,20,28],  t:[0,0,0] },
     sun:    { pos:[0,1.5,10],  t:[0,0,0] },
     earth:  { pos:[simDist(1.0)+1, 1.0, simDist(1.0)+1], t:[simDist(1.0),0,0] },
 };
+
+let cameraMode = 'free';            // 'free' | 'lock'
+const _camOffset = new THREE.Vector3(); // camera − target, preserved during lock
+
+function _setModeUI() {
+    const free = document.getElementById('cam-mode-free');
+    const lock = document.getElementById('cam-mode-lock');
+    free?.classList.toggle('active', cameraMode === 'free');
+    lock?.classList.toggle('active', cameraMode === 'lock');
+    const info = document.getElementById('cam-lock-info');
+    const name = document.getElementById('cam-lock-name');
+    if (info) info.style.display = (cameraMode === 'lock' && targetBody) ? '' : 'none';
+    if (name && targetBody) name.textContent = targetBody.name ?? '—';
+}
+
+/** Distance the camera should sit from a body in lock mode. Scales with the
+ *  body's *visual* radius so moons (visR ≈ 0.005) get a tight follow while
+ *  Jupiter (radius ≈ 1.4) gets a wider establishing shot. */
+function _lockDistance(body) {
+    const r = Math.max(body?.radius ?? 0.05, 0.005);
+    return Math.max(r * 8, 0.35);
+}
+
+/** Snap camera into lock mode around the given body, preserving the user's
+ *  current view direction so it doesn't feel like a teleport. */
+function setCamLock(body) {
+    if (!body || !body.mesh) return false;
+    cameraMode = 'lock';
+    targetBody = body;
+    const tp = body.mesh.position;
+    // Preserve current view direction; just rescale to the new lock distance.
+    const dir = new THREE.Vector3().subVectors(camera.position, controls.target).normalize();
+    const dist = _lockDistance(body);
+    _camOffset.copy(dir).multiplyScalar(dist);
+    camera.position.copy(tp).add(_camOffset);
+    controls.target.copy(tp);
+    controls.update();
+    _setModeUI();
+    return true;
+}
+
+function setCamFree() {
+    cameraMode = 'free';
+    _setModeUI();
+}
+
 function setCam(name) {
-    document.querySelectorAll('.btn-row button[id^=cam]').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('#cam-top,#cam-iso,#cam-sun,#cam-earth')
+            .forEach(b => b.classList.remove('active'));
     document.getElementById('cam-'+name)?.classList.add('active');
     const p = CAM[name];
     if (!p) return;
     camera.position.set(...p.pos);
     controls.target.set(...p.t);
     controls.update();
-    targetBody = null;
+    cameraMode = 'free';
+    _setModeUI();
 }
 ['top','iso','sun','earth'].forEach(n=>{
     document.getElementById('cam-'+n).addEventListener('click',()=>setCam(n));
 });
 document.getElementById('btn-center').addEventListener('click', ()=>setCam('top'));
+document.getElementById('cam-mode-free').addEventListener('click', () => {
+    setCamFree();
+});
+document.getElementById('cam-mode-lock').addEventListener('click', () => {
+    if (targetBody) setCamLock(targetBody);
+});
+
+// ── Hotkeys: F=free, L=lock, T=toggle, 1-4=presets, [ ]=prev/next body ───────
+const _PRESET_KEYS = { '1':'top', '2':'iso', '3':'sun', '4':'earth' };
+window.addEventListener('keydown', (ev) => {
+    // Don't capture while typing in inputs
+    const tgt = ev.target;
+    if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable)) return;
+    const k = ev.key.toLowerCase();
+    if (_PRESET_KEYS[k]) { setCam(_PRESET_KEYS[k]); ev.preventDefault(); return; }
+    if (k === 'f') { setCamFree();                    ev.preventDefault(); return; }
+    if (k === 'l') { if (targetBody) setCamLock(targetBody); ev.preventDefault(); return; }
+    if (k === 't') {
+        if (cameraMode === 'lock') setCamFree();
+        else if (targetBody)       setCamLock(targetBody);
+        ev.preventDefault();
+        return;
+    }
+    if (k === '[' || k === ']') {
+        // Cycle through the all-bodies list (Sun + planets + moons)
+        const flat = [null, ...PLANETS];
+        for (const p of PLANETS) if (p.moons) for (const m of p.moons) flat.push(m);
+        const cur = flat.indexOf(selectedBody);
+        const dir = (k === ']') ? 1 : -1;
+        const nxt = flat[((cur + dir) + flat.length) % flat.length];
+        selectBody(nxt);
+        ev.preventDefault();
+    }
+});
 
 // ═══════════════════════════════════════════════════════
 //  RESIZE
@@ -2782,10 +2934,12 @@ resize();
 //  TIME CONTROLS — jump, warp, date picker
 // ═══════════════════════════════════════════════════════
 
-// Jump by a delta in years (modifies simTime)
+// Jump by a delta in years (modifies simTime). Resets the deterministic
+// time-base anchor so subsequent frames flow from the new simTime.
 function _jumpSimTime(deltaYears) {
     simTime += deltaYears;
     _ephemEpoch = _ephemEpoch ?? { simTime: 0, date: new Date() };
+    _resetSimAnchor();
 }
 
 // Jump to a specific Date
@@ -2793,6 +2947,7 @@ function _jumpToDate(date) {
     if (!_ephemEpoch) return;
     const deltaMs = date.getTime() - _ephemEpoch.date.getTime();
     simTime = _ephemEpoch.simTime + deltaMs / (365.25 * 86400e3);
+    _resetSimAnchor();
 }
 
 // Snap to real-time
@@ -2806,6 +2961,7 @@ function _goLive() {
     document.getElementById('sl-speed').value = 1;
     document.getElementById('disp-speed').textContent = txt;
     document.getElementById('hud-speed').textContent = txt;
+    _resetSimAnchor();
 }
 
 // Navigation buttons
@@ -2940,6 +3096,20 @@ function _updateDataSection() {
 
 setInterval(_updateDataSection, 500);
 
+// Worker residual readout — refreshed at the same cadence as the data panel
+// to avoid thrashing the DOM every frame. Sub-metre values are colour-coded
+// green; anything above 1 km (which would be alarming) flips to amber.
+setInterval(() => {
+    const el = document.getElementById('sd-worker-resid');
+    if (!el) return;
+    const km = _lastResidualKm;
+    if (!Number.isFinite(km)) { el.textContent = '—'; return; }
+    if (km < 1e-3)      { el.textContent = `${(km * 1e6).toFixed(2)} mm`; el.style.color = '#4f8'; }
+    else if (km < 1)    { el.textContent = `${(km * 1e3).toFixed(2)} m`;  el.style.color = '#7c5'; }
+    else if (km < 100)  { el.textContent = `${km.toFixed(2)} km`;          el.style.color = '#f90'; }
+    else                { el.textContent = `${km.toFixed(0)} km`;          el.style.color = '#f44'; }
+}, 500);
+
 // ── Space weather stats in data section ───────────────────────────────────────
 window.addEventListener('swpc-update', ev => {
     const sw = ev.detail;
@@ -2982,11 +3152,22 @@ function animate() {
     sunUniforms.u_time.value += 0.01;
     const t = sunUniforms.u_time.value;
 
-    // Advance simulation time.  simTime is in units of Earth orbital periods
-    // (years).  simSpeed is a real-time multiplier: 1 means 1 sim-second per
-    // real-second (true real-time), so 1 real year of wall-clock at 1× = 1
-    // sim year.  _frameDt is the actual frame interval in real seconds.
-    simTime += (simSpeed * _frameDt) / SECONDS_PER_YEAR;
+    // ── Deterministic JD-anchored time base ───────────────────────────────────
+    //
+    // Instead of accumulating `simTime += simSpeed * _frameDt` each frame —
+    // which drifts with float rounding and changes if the framerate hiccups —
+    // we maintain an *anchor* (wall_ms, simTime, simSpeed). Every frame we
+    // recompute simTime as a closed-form function of the elapsed wall-clock
+    // and the current speed. Pausing/unpausing or slowing down then re-anchors
+    // without losing precision, and the resulting JD fed into the Keplerian
+    // propagators is identical for the same (anchor, now, simSpeed) tuple
+    // regardless of frame rate.
+    if (!_simAnchor || _simAnchor.simSpeed !== simSpeed) {
+        _simAnchor = { wallMs: _nowMs, simTime, simSpeed };
+    } else {
+        const dWall = (_nowMs - _simAnchor.wallMs) / 1000;
+        simTime = _simAnchor.simTime + (_simAnchor.simSpeed * dWall) / SECONDS_PER_YEAR;
+    }
 
     // Update HUD date — real calendar date derived from ephemeris epoch + elapsed sim-years
     if (_ephemEpoch) {
@@ -3028,6 +3209,27 @@ function animate() {
         _updateMoonPosition(moonRecords[i], _simJD);
     }
 
+    // ── Off-thread ground-truth ───────────────────────────────────────────────
+    // The worker runs the same Keplerian propagation deterministically off the
+    // main thread. We refresh its time-series buffer ~4×/sec and compare the
+    // current sample against the main thread's analytic propagation. Both pipe-
+    // lines use identical math on the same JD, so the residual reports float
+    // rounding (sub-metre) — a non-zero drift would indicate a real bug.
+    earthBridge.maintain(_simJD, simSpeed);
+    const _truth = earthBridge.sample(_simJD);
+    if (_truth && moonRecords.length) {
+        const earthRec = moonRecords.find(r => r.parentKey === 'earth');
+        if (earthRec) {
+            // Both worker and main thread emit parent-equatorial km; subtract
+            // before applying any frame rotation.
+            const localEq = propagateMoonKepler(earthRec.cfg, earthRec.mu_km3_s2, _simJD);
+            const dx = _truth.moon[0] - localEq.x;
+            const dy = _truth.moon[1] - localEq.y;
+            const dz = _truth.moon[2] - localEq.z;
+            _lastResidualKm = Math.hypot(dx, dy, dz);
+        }
+    }
+
     // ── Earth heliophysics objects: follow Earth's orbital position ───────────
     const ep = earthP.mesh.position;
     msMesh.position.copy(ep);
@@ -3056,12 +3258,20 @@ function animate() {
     updateCoronalRain(sunUniforms.u_flare_str.value);
     updateProminences(t, sunUniforms.u_flare_str.value);
 
-    // Smooth camera follow if body selected
-    if (targetBody) {
+    // ── Camera mode ───────────────────────────────────────────────────────────
+    //
+    // 'free'  → OrbitControls run unmodified; user has full fly/zoom.
+    // 'lock'  → controls.target is glued to targetBody.mesh.position. We track
+    //           the (camera − target) offset so the body stays centred while
+    //           the user freely orbits/zooms around it via OrbitControls.
+    if (cameraMode === 'lock' && targetBody && targetBody.mesh) {
         const tp = targetBody.mesh.position;
-        const offset = new THREE.Vector3(targetBody.radius * 8, targetBody.radius * 4, targetBody.radius * 8);
-        camera.position.lerp(tp.clone().add(offset), 0.03);
-        controls.target.lerp(tp, 0.05);
+        // Capture how the user has been orbiting (camera − previous target)
+        // and re-apply it around the new target position. This gives a clean
+        // body-centric view even as the moon swings around its parent.
+        _camOffset.subVectors(camera.position, controls.target);
+        controls.target.copy(tp);
+        camera.position.copy(tp).add(_camOffset);
     }
 
     controls.update();
