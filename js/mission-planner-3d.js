@@ -78,6 +78,34 @@ export const LAUNCH_SITES = [
     { id: 'plesetsk',    name: 'Plesetsk (RUS)',         lat: 62.957, lon:  40.583 },
 ];
 
+// ── Weather statuses — drives the colored ring on each pad marker and the
+//     Launch button gating in the UI. The actual weather data is supplied
+//     by an external feed via setPadWeather(); the planner renders whatever
+//     it's told. Status semantics:
+//
+//       go        — clear conditions, launch is unconstrained
+//       caution   — marginal (high winds, lightning nearby) — proceed with care
+//       scrub     — outside flight rules (storm, freezing, etc.) — blocks launch
+//       unknown   — no weather data (default, neutral grey)
+//
+//     The Launch button gating in mission-planner.html consults
+//     getPadWeather(currentBody, currentPadId).status before allowing a
+//     launch; 'scrub' disables the button, 'caution' shows a warning,
+//     'go' clears it. The visual ring color matches.
+export const WEATHER_STATUSES = ['go', 'caution', 'scrub', 'unknown'];
+export const WEATHER_COLORS = {
+    go:      0x66ff77,
+    caution: 0xffcc44,
+    scrub:   0xff5544,
+    unknown: 0x778899,
+};
+const WEATHER_RING_OPACITY = {
+    go:      0.85,
+    caution: 0.95,
+    scrub:   1.00,
+    unknown: 0.30,         // subtle so empty data doesn't shout at users
+};
+
 // ── Mars surface bases — anchored to real landed-mission and proposed-
 //     outpost coordinates so the colony domes sit at recognisable locations
 //     (Olympus Mons / Jezero / Gale / Utopia Planitia). ─────────────────────
@@ -263,6 +291,43 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         padMarkers.set(`moon:${id}`, world.moonBaseMarkers[id]);
     }
 
+    // ── Pad weather state ─────────────────────────────────────────────────
+    // Each pad starts with status='unknown' so the visual ring renders
+    // (subtly grey) before the upcoming weather feed populates real data.
+    // setPadWeather(body, padId, status, message?) is the single public
+    // entry point; it updates the ring color, stores the record, and
+    // emits a 'pad-weather' event so the UI can re-evaluate the Launch
+    // button state. Records carry a millisecond timestamp so consumers
+    // can show staleness ("data 12 min old").
+    const padWeather = new Map();
+    for (const key of padMarkers.keys()) {
+        padWeather.set(key, { status: 'unknown', message: '', updated_at: Date.now() });
+    }
+    function setPadWeather(body, padId, status, message = '') {
+        const key = `${body}:${padId}`;
+        const marker = padMarkers.get(key);
+        if (!marker) return false;
+        const s = WEATHER_STATUSES.includes(status) ? status : 'unknown';
+        const rec = { status: s, message, updated_at: Date.now() };
+        padWeather.set(key, rec);
+        applyMarkerWeather(marker, s);
+        onEvent?.({ type: 'pad-weather', body, padId, ...rec });
+        return true;
+    }
+    function getPadWeather(body, padId) {
+        return padWeather.get(`${body}:${padId}`)
+            || { status: 'unknown', message: '', updated_at: 0 };
+    }
+    function listPadWeather() {
+        // Snapshot for the UI to render a "weather report" panel later.
+        const out = [];
+        for (const [key, rec] of padWeather.entries()) {
+            const [body, padId] = key.split(':');
+            out.push({ body, padId, ...rec });
+        }
+        return out;
+    }
+
     // ── Focus presets (mode toggle replaced) ────────────────────────────────
     // setMode just records the geo/helio frame for legacy code paths. The
     // renderer doesn't switch scenes anymore, and we deliberately DO NOT
@@ -296,6 +361,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         arriveJD        = null,
         parking_inc_deg = null,
         lunar_tof_d     = null,
+        force           = false,         // bypass weather scrub gate (programmatic / overrides)
     }) {
         // Legacy single-origin form: Earth surface → TARGET_ORBITS entry.
         if (siteId !== undefined && originBody === undefined) {
@@ -307,6 +373,20 @@ export function initMissionPlanner({ container, onEvent } = {}) {
 
         const origin = resolveOrigin(originBody, originId);
         if (!origin) throw new Error(`launch: unknown origin ${originBody}/${originId}`);
+
+        // Weather gate — refuse to launch off a scrubbed pad unless the
+        // caller passed `force: true`. The HTML UI already disables the
+        // Launch button on scrub, but defense-in-depth: programmatic
+        // calls + tests + future scripted scenarios all flow through here.
+        const wx = getPadWeather(originBody || 'earth', origin.pad.id);
+        if (wx.status === 'scrub' && !force) {
+            onEvent?.({
+                type: 'launch-scrubbed',
+                site: origin.pad, body: originBody || 'earth',
+                weather: wx, payloadName,
+            });
+            return null;
+        }
         state.site = origin.pad;
 
         // For Earth-origin keep legacy targetId semantics (LEO/GEO/etc.).
@@ -1738,6 +1818,13 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         flyToPad,
         followMission,
         getFocusInfo,
+        // Pad weather scaffold — colored ring on each pad marker, Launch
+        // button gating, "wait for window" surfacing. Live data lands later.
+        setPadWeather,
+        getPadWeather,
+        listPadWeather,
+        WEATHER_STATUSES,
+        WEATHER_COLORS,
         getStats: () => ({
             rockets:        state.rockets.length,
             payloads:       state.payloads.length,
@@ -2057,6 +2144,74 @@ function makeBodyLabel(text, cssColor = '#ccddff', sizeMul = 1) {
 }
 
 /**
+ * Procedural ring texture (white, with a soft outer glow). Used by the
+ * pad-weather sprite so a single texture can be tinted to any status
+ * color via SpriteMaterial.color. Cached at module scope so we share the
+ * same GPU texture across every pad in the scene.
+ */
+let _weatherRingTexture = null;
+function makeWeatherRingTexture() {
+    if (_weatherRingTexture) return _weatherRingTexture;
+    const N = 128;
+    const c = document.createElement('canvas');
+    c.width = c.height = N;
+    const ctx = c.getContext('2d');
+    // Soft outer glow (drawn first, behind the crisp ring).
+    ctx.shadowColor = 'rgba(255,255,255,0.55)';
+    ctx.shadowBlur  = 14;
+    ctx.lineWidth   = 10;
+    ctx.strokeStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(N/2, N/2, N * 0.40, 0, Math.PI * 2);
+    ctx.stroke();
+    // Crisp inner ring on top.
+    ctx.shadowBlur  = 0;
+    ctx.lineWidth   = 6;
+    ctx.beginPath();
+    ctx.arc(N/2, N/2, N * 0.40, 0, Math.PI * 2);
+    ctx.stroke();
+    _weatherRingTexture = new THREE.CanvasTexture(c);
+    _weatherRingTexture.needsUpdate = true;
+    return _weatherRingTexture;
+}
+
+/**
+ * Camera-facing weather indicator that sits next to a pad marker. Color +
+ * opacity track the pad's current weather status (go / caution / scrub /
+ * unknown). depthTest is on so the ring properly occludes behind the
+ * planet limb when on the far side, depthWrite off so the ring doesn't
+ * occlude other transparent additive layers.
+ */
+function makeWeatherSprite(scale) {
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+        map:        makeWeatherRingTexture(),
+        color:      WEATHER_COLORS.unknown,
+        transparent: true,
+        opacity:    WEATHER_RING_OPACITY.unknown,
+        blending:   THREE.AdditiveBlending,
+        depthWrite: false,
+    }));
+    sprite.scale.set(scale, scale, 1);
+    sprite.userData.kind = 'pad-weather';
+    return sprite;
+}
+
+/**
+ * Update a marker's weather ring to a new status. Tints the sprite color
+ * and opacity to match the WEATHER_COLORS / WEATHER_RING_OPACITY tables.
+ * The marker group must have userData.weatherSprite set at construction
+ * (every pad marker function does this).
+ */
+function applyMarkerWeather(markerGroup, status) {
+    const s = WEATHER_STATUSES.includes(status) ? status : 'unknown';
+    const sprite = markerGroup?.userData?.weatherSprite;
+    if (!sprite) return;
+    sprite.material.color.setHex(WEATHER_COLORS[s]);
+    sprite.material.opacity = WEATHER_RING_OPACITY[s];
+    sprite.material.needsUpdate = true;
+}
+
+/**
  * Plant a launch-site marker on the rotating Earth mesh.
  *
  * Renders a glowing orange dot tipped slightly off the surface, an additive
@@ -2104,6 +2259,14 @@ function addLaunchSiteMarker(earthMesh, site) {
     const label = makeBodyLabel(siteShortName(site), '#ffd6a0', 0.7);
     label.position.copy(up.clone().multiplyScalar(1.0 + postLen + 0.10));
     group.add(label);
+
+    // Weather ring — sits a hair above the dot, default unknown/grey. The
+    // mission-planner UI calls setPadWeather(...) to retint to go / caution
+    // / scrub once the upcoming weather feed is wired up.
+    const weather = makeWeatherSprite(0.085);
+    weather.position.copy(up.clone().multiplyScalar(1.0 + postLen + 0.02));
+    group.add(weather);
+    group.userData.weatherSprite = weather;
 
     earthMesh.add(group);
     return group;
@@ -2202,6 +2365,13 @@ function addMarsBiome(marsSurface, planetRadius, biome) {
     label.position.y = planetRadius * 0.48;
     group.add(label);
 
+    // Weather ring (camera-facing) above the colony, sized so it's
+    // readable from orbit without overwhelming the dome at close zoom.
+    const weather = makeWeatherSprite(planetRadius * 0.55);
+    weather.position.y = planetRadius * 0.72;
+    group.add(weather);
+    group.userData.weatherSprite = weather;
+
     marsSurface.add(group);
     return group;
 }
@@ -2273,6 +2443,15 @@ function addMoonBiome(moonMesh, planetRadius, base) {
     const label = makeBodyLabel(base.name, '#88ddff', 0.7);
     label.position.y = planetRadius * 0.55;
     group.add(label);
+
+    // Weather ring — same scaffold as Mars/Earth pads. Lunar "weather"
+    // is more about plasma / micrometeoroid environment + sun angle on
+    // permanently-shadowed regions; the API doesn't care, it just takes
+    // a status string from the future feed.
+    const weather = makeWeatherSprite(planetRadius * 0.85);
+    weather.position.y = planetRadius * 0.85;
+    group.add(weather);
+    group.userData.weatherSprite = weather;
 
     moonMesh.add(group);
     return group;
