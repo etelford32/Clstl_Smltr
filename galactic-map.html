@@ -12,6 +12,150 @@
 <title>Galactic Map — Parkers Physics App</title>
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+/* ─── Design tokens (mirrors DESIGN_TOKENS.md / earth.html) ─── */
+:root {
+    --c-accent:           #00c6ff;
+    --c-accent-rgb:       0, 200, 255;
+    --c-accent-soft:      rgba(0, 200, 255, .15);
+    --c-accent-border:    rgba(0, 200, 255, .22);
+    --c-accent-border-hi: rgba(0, 200, 255, .30);
+    --c-accent-glow:      rgba(0, 200, 255, .55);
+    --c-accent-bg-overlay: rgba(0, 200, 255, .10);
+
+    --c-storm:            #ffb066;
+    --c-storm-rgb:        255, 160, 80;
+    --c-storm-soft:       rgba(255, 160, 80, .12);
+    --c-storm-border:     rgba(255, 160, 80, .28);
+    --c-storm-border-hi:  rgba(255, 160, 80, .55);
+    --c-storm-glow:       rgba(255, 160, 80, .55);
+    --c-storm-bg-overlay: rgba(255, 160, 80, .10);
+
+    --c-surface-1:        rgba(6, 10, 22, .86);
+    --c-surface-2:        rgba(2, 4, 12, .92);
+
+    --c-text-primary:     #d6dee6;
+    --c-text-secondary:   #b0c8d8;
+    --c-text-muted:       #7a98a8;
+    --c-text-faint:       #557;
+
+    --c-border-faint:     rgba(255, 255, 255, .06);
+    --c-border-soft:      rgba(255, 255, 255, .10);
+    --c-border-medium:    rgba(255, 255, 255, .14);
+
+    --sp-2: 4px;  --sp-3: 6px;  --sp-4: 8px;
+    --sp-5: 10px; --sp-6: 12px; --sp-7: 14px; --sp-8: 16px;
+
+    --r-sm: 4px; --r-md: 6px; --r-xl: 10px;
+
+    --blur-glass:    blur(12px) saturate(1.15);
+    --shadow-panel:  0 4px 22px rgba(0, 16, 40, .55);
+
+    --t-fast:   .12s ease;
+    --t-snap:   .15s ease;
+    --t-medium: .25s ease;
+}
+@media (max-width: 640px) {
+    :root {
+        --sp-4: 7px; --sp-5: 8px; --sp-6: 10px; --sp-7: 12px;
+        --r-xl: 8px;
+        --blur-glass: blur(8px) saturate(1.10);
+        --shadow-panel: 0 2px 14px rgba(0, 16, 40, .50);
+    }
+}
+
+/* ─── Shared draggable / minimizable panel chrome ─── */
+.gp-panel {
+    position: absolute; z-index: 100;
+    background: linear-gradient(180deg, var(--c-surface-1), var(--c-surface-2));
+    border: 1px solid var(--c-accent-border);
+    border-radius: var(--r-xl);
+    backdrop-filter: var(--blur-glass);
+    -webkit-backdrop-filter: var(--blur-glass);
+    box-shadow: var(--shadow-panel);
+    color: var(--c-text-secondary);
+    font-size: 12px; line-height: 1.55;
+    transition: border-color var(--t-snap), box-shadow var(--t-snap);
+    overflow: hidden;
+}
+.gp-panel::before {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    border-radius: inherit;
+    background: radial-gradient(circle at 25% 0%, var(--c-accent-bg-overlay), transparent 65%);
+}
+.gp-panel.is-storm { border-color: var(--c-storm-border); }
+.gp-panel.is-storm::before {
+    background: radial-gradient(circle at 25% 0%, var(--c-storm-bg-overlay), transparent 65%);
+}
+.gp-panel:hover { border-color: var(--c-accent-border-hi); }
+.gp-panel.is-storm:hover { border-color: var(--c-storm-border-hi); }
+.gp-panel.gp-dragging { box-shadow: 0 8px 36px rgba(0, 200, 255, .25), var(--shadow-panel); }
+.gp-panel.is-storm.gp-dragging { box-shadow: 0 8px 36px rgba(255, 160, 80, .25), var(--shadow-panel); }
+
+.gp-header {
+    display: flex; align-items: center; gap: var(--sp-3);
+    padding: var(--sp-4) var(--sp-5) var(--sp-4) var(--sp-6);
+    border-bottom: 1px solid var(--c-border-faint);
+    cursor: grab; user-select: none;
+    position: relative;
+    transition: border-color var(--t-snap);
+}
+.gp-header:active { cursor: grabbing; }
+.gp-grip {
+    flex-shrink: 0; width: 9px; height: 14px; opacity: .35;
+    background-image: radial-gradient(circle, var(--c-text-muted) 1px, transparent 1.4px);
+    background-size: 4px 4px;
+    transition: opacity var(--t-snap);
+}
+.gp-header:hover .gp-grip { opacity: .65; }
+.gp-title {
+    flex: 1; min-width: 0;
+    font-size: 13px; font-weight: 700; letter-spacing: .02em;
+    color: var(--c-accent);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.gp-panel.is-storm .gp-title { color: var(--c-storm); }
+.gp-min-btn {
+    flex-shrink: 0;
+    background: transparent; border: 1px solid var(--c-border-soft);
+    color: var(--c-text-muted);
+    width: 22px; height: 20px; padding: 0;
+    border-radius: var(--r-sm);
+    font-family: inherit; font-size: 13px; font-weight: 700;
+    line-height: 1; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: background var(--t-snap), color var(--t-snap), border-color var(--t-snap);
+}
+.gp-min-btn:hover {
+    color: var(--c-text-primary);
+    background: var(--c-accent-soft);
+    border-color: var(--c-accent-border-hi);
+}
+.gp-panel.is-storm .gp-min-btn:hover {
+    background: var(--c-storm-soft);
+    border-color: var(--c-storm-border-hi);
+}
+.gp-min-btn::before { content: '−'; }
+.gp-panel.minimized .gp-min-btn::before { content: '+'; }
+
+.gp-body {
+    padding: var(--sp-5) var(--sp-6) var(--sp-5);
+    overflow: hidden;
+    transition: max-height var(--t-medium) ease,
+                padding-top var(--t-medium) ease,
+                padding-bottom var(--t-medium) ease,
+                opacity var(--t-medium) ease;
+    max-height: 1200px;
+    position: relative;
+}
+.gp-panel.minimized .gp-header { border-bottom-color: transparent; }
+.gp-panel.minimized .gp-body {
+    max-height: 0;
+    padding-top: 0; padding-bottom: 0;
+    opacity: 0;
+    pointer-events: none;
+}
+
 html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#ddd;
     font-family:'Segoe UI',system-ui,sans-serif; }
 
@@ -141,15 +285,30 @@ canvas { display:block; width:100% !important; height:100% !important; }
 
 /* ─── HUD (top-left) ─────────────────────────────────────────── */
 #hud {
-    position:absolute; top:14px; left:14px; z-index:100;
-    background:rgba(0,0,0,0.72); border:1px solid rgba(160,120,255,0.25);
-    border-radius:10px; padding:12px 16px; backdrop-filter:blur(8px);
-    pointer-events:none; font-size:12px; line-height:1.6; min-width:220px;
+    top: 14px; left: 14px;
+    width: 246px;
 }
-#hud h3 { margin:0 0 6px; font-size:14px; color:#c090ff; }
-#hud .label { color:#777; font-size:10px; }
-#hud .val { color:#a0d8ff; font-weight:600; }
-#hud .sep { border-top:1px solid rgba(255,255,255,0.07); margin:6px 0; }
+#hud .gp-body { padding: var(--sp-4) var(--sp-6) var(--sp-5); }
+#hud .hud-row {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: var(--sp-3);
+    padding: 2px 0;
+    cursor: help;
+    border-radius: var(--r-sm);
+    transition: background var(--t-snap);
+}
+#hud .hud-row:hover { background: var(--c-accent-soft); }
+#hud .hud-row .label {
+    color: var(--c-text-muted); font-size: 10.5px; letter-spacing: .02em;
+    flex-shrink: 0;
+}
+#hud .hud-row .val {
+    color: var(--c-text-primary); font-weight: 600;
+    font-variant-numeric: tabular-nums; font-size: 11.5px;
+    text-align: right; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#hud .sep { border-top: 1px solid var(--c-border-faint); margin: var(--sp-3) 0; }
 
 /* ─── Zoom Toolbar (bottom-centre) ──────────────────────────── */
 #zoom-bar {
@@ -192,47 +351,73 @@ canvas { display:block; width:100% !important; height:100% !important; }
 }
 #coord-display span { color:#a0d8ff; }
 
-/* ─── Sun-orbit time-control panel (top-left, under HUD) ───── */
+/* ─── Sun-orbit time-control panel ───────────────────────────── */
 #sun-time-panel {
-    position:absolute; left:14px; top:240px; z-index:100;
-    background:rgba(8,4,16,0.85); border:1px solid rgba(255,200,80,0.30);
-    border-radius:9px; padding:9px 12px 8px;
-    color:#ddd; backdrop-filter:blur(8px); width:262px;
-    font-size:11px; line-height:1.35;
+    left: 14px; top: 280px;
+    width: 274px;
+    font-size: 11.5px; line-height: 1.4;
 }
-#sun-time-panel h4 {
-    margin:0 0 6px; font-size:12px; color:#ffcc66;
-    font-weight:600; letter-spacing:.02em;
+#sun-time-panel .gp-body { padding: var(--sp-4) var(--sp-6) var(--sp-5); }
+.stp-row {
+    display: flex; align-items: center; gap: var(--sp-3);
+    padding: 3px 0;
+    border-radius: var(--r-sm);
+    cursor: help;
 }
-.stp-row { display:flex; align-items:center; gap:7px; padding:3px 0; }
-.stp-row .stp-label { color:#999; min-width:42px; font-size:10px; }
-.stp-row .stp-val   { color:#ffcc66; font-weight:600; min-width:78px; font-size:10px;
-                      text-align:right; font-variant-numeric:tabular-nums; }
-.stp-row input[type=range] { flex:1; height:4px; accent-color:#ffaa44; cursor:pointer; }
-.stp-btnrow { display:flex; gap:6px; margin-bottom:5px; }
+.stp-row .stp-label {
+    color: var(--c-text-muted); min-width: 44px; font-size: 10.5px;
+    letter-spacing: .02em;
+}
+.stp-row .stp-val {
+    color: var(--c-storm); font-weight: 600; min-width: 82px;
+    font-size: 10.5px; text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+.stp-row input[type=range] {
+    flex: 1; height: 4px; accent-color: var(--c-storm);
+    cursor: pointer;
+}
+.stp-btnrow {
+    display: flex; gap: var(--sp-3); margin-bottom: var(--sp-3);
+}
 .stp-btn {
-    background:rgba(255,200,80,0.12); border:1px solid rgba(255,200,80,0.35);
-    color:#ffcc66; padding:4px 10px; border-radius:5px; cursor:pointer;
-    font-family:inherit; font-size:11px; font-weight:600; transition:all .15s;
-    flex-shrink:0;
+    background: var(--c-storm-soft);
+    border: 1px solid var(--c-storm-border);
+    color: var(--c-storm);
+    padding: 4px 10px;
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    font-family: inherit; font-size: 11px; font-weight: 600;
+    transition: background var(--t-snap), border-color var(--t-snap),
+                color var(--t-snap), transform var(--t-fast);
+    flex-shrink: 0;
 }
-.stp-btn:hover  { background:rgba(255,200,80,0.25); }
-.stp-btn.active { background:rgba(255,200,80,0.45); color:#fff; border-color:#ffd58a; }
+.stp-btn:hover  { background: rgba(var(--c-storm-rgb), .25); border-color: var(--c-storm-border-hi); }
+.stp-btn:active { transform: scale(.94); }
+.stp-btn.active {
+    background: rgba(var(--c-storm-rgb), .45);
+    color: #fff; border-color: var(--c-storm);
+    box-shadow: 0 0 0 1px var(--c-storm-glow) inset;
+}
 .stp-readout {
-    color:#aaa; font-size:10.5px; padding-top:5px; margin-top:3px;
-    border-top:1px solid rgba(255,255,255,0.08);
-    display:flex; flex-wrap:wrap; column-gap:14px; row-gap:2px;
+    color: var(--c-text-muted); font-size: 10.5px;
+    padding-top: var(--sp-3); margin-top: var(--sp-3);
+    border-top: 1px solid var(--c-border-faint);
+    display: flex; flex-wrap: wrap; column-gap: var(--sp-7); row-gap: 2px;
 }
-.stp-readout .stp-rk { color:#888; }
-.stp-readout span.stp-rv { color:#ffcc66; font-weight:600;
-                           font-variant-numeric:tabular-nums; }
-@media (max-width:1024px) {
-    #sun-time-panel { width:230px; top:auto; bottom:64px;
-                      font-size:10.5px; padding:7px 9px 6px; }
-    #sun-time-panel h4 { font-size:11px; }
+.stp-readout .stp-rk { color: var(--c-text-faint); }
+.stp-readout span.stp-rv {
+    color: var(--c-storm); font-weight: 600;
+    font-variant-numeric: tabular-nums;
 }
-@media (max-width:600px) {
-    #sun-time-panel { display:none; }   /* phone — too cramped, slider-only HUD instead */
+@media (max-width: 1024px) {
+    #sun-time-panel {
+        width: 240px; top: auto; bottom: 64px;
+        font-size: 10.5px;
+    }
+}
+@media (max-width: 600px) {
+    #sun-time-panel { display: none; }   /* phone — too cramped, slider-only HUD instead */
 }
 
 /* ─── Sidebar ─────────────────────────────────────────────────── */
@@ -341,51 +526,78 @@ canvas { display:block; width:100% !important; height:100% !important; }
 <div id="app">
     <div id="canvas-wrap" data-preview-stage="1">
         <!-- HUD top-left -->
-        <div id="hud">
-            <h3>⬡ Galactic Map</h3>
-            <div><span class="label">Selected: </span><span class="val" id="hud-name">—</span></div>
-            <div><span class="label">Dist from Sun: </span><span class="val" id="hud-dist">—</span></div>
-            <div class="sep"></div>
-            <div><span class="label">Galactic l: </span><span class="val" id="hud-l">—</span></div>
-            <div><span class="label">Galactic b: </span><span class="val" id="hud-b">—</span></div>
-            <div class="sep"></div>
-            <div><span class="label">Dist from GC: </span><span class="val" id="hud-gc">—</span></div>
-            <div title="Real cosmological distance from the Sun corresponding to the camera's position (inverse log-mapping beyond 60 kly)">
-                <span class="label">Cam → Sun: </span><span class="val" id="hud-view">—</span>
+        <div id="hud" class="gp-panel" data-panel-key="hud">
+            <div class="gp-header" data-drag-handle>
+                <span class="gp-grip" aria-hidden="true"></span>
+                <span class="gp-title">⬡ Galactic Map</span>
+                <button type="button" class="gp-min-btn" data-min-btn
+                        title="Minimize panel" aria-label="Minimize Galactic Map panel"></button>
             </div>
-            <div class="sep"></div>
-            <div title="Time elapsed in the Sun's current orbit around Sgr A*. One full Galactic year ≈ 225 Myr.">
-                <span class="label">Galactic year: </span><span class="val" id="hud-galactic-yr">—</span>
-            </div>
-            <div title="Sun's orbital phase around Sgr A* — 0% / 100% places the Sun at the +x side of the disk (current epoch).">
-                <span class="label">Orbital phase: </span><span class="val" id="hud-galactic-phase">—</span>
+            <div class="gp-body">
+                <div class="hud-row" title="The currently selected object (clicked star, S-star, galaxy, or other catalog entry).">
+                    <span class="label">Selected</span><span class="val" id="hud-name">—</span>
+                </div>
+                <div class="hud-row" title="Heliocentric distance — straight-line distance from the Sun to the selected object, in light-years (ly), parsecs (pc), or kiloparsecs (kpc).">
+                    <span class="label">Dist from Sun</span><span class="val" id="hud-dist">—</span>
+                </div>
+                <div class="sep"></div>
+                <div class="hud-row" title="Galactic longitude (l): angle in the galactic plane measured eastward from the direction of Sgr A*. 0° points at the Galactic Center, 90° points along the Sun's orbital motion.">
+                    <span class="label">Galactic l</span><span class="val" id="hud-l">—</span>
+                </div>
+                <div class="hud-row" title="Galactic latitude (b): angle above/below the galactic plane. 0° = in the disk, +90° = north galactic pole, −90° = south galactic pole.">
+                    <span class="label">Galactic b</span><span class="val" id="hud-b">—</span>
+                </div>
+                <div class="sep"></div>
+                <div class="hud-row" title="Distance from the Galactic Center (Sgr A*) to the selected object. The Sun itself sits at 26,673 ly (8.178 kpc) from the GC.">
+                    <span class="label">Dist from GC</span><span class="val" id="hud-gc">—</span>
+                </div>
+                <div class="hud-row" title="Real cosmological distance from the Sun corresponding to the camera's position. Beyond 60 kly the radial axis is log-compressed; this readout reverses that mapping to show the true distance.">
+                    <span class="label">Cam → Sun</span><span class="val" id="hud-view">—</span>
+                </div>
+                <div class="sep"></div>
+                <div class="hud-row" title="Simulation epoch offset — how far past or future the time-controls have scrubbed the Sun's orbit around Sgr A* from today. One full Galactic year ≈ 225 Myr.">
+                    <span class="label">Galactic year</span><span class="val" id="hud-galactic-yr">—</span>
+                </div>
+                <div class="hud-row" title="Sun's orbital phase around Sgr A*. 0% / 100% places the Sun at the +x side of the galactic disk (current epoch reference).">
+                    <span class="label">Orbital phase</span><span class="val" id="hud-galactic-phase">—</span>
+                </div>
             </div>
         </div>
 
         <!-- Sun-orbit time controls -->
-        <div id="sun-time-panel"
-             title="Drag the time slider to scrub the Sun's position around Sgr A*. Hit ▶ Live to resume real-time tracking.">
-            <h4>☉ Sun's Orbit — Time Controls</h4>
-            <div class="stp-btnrow">
-                <button id="stp-live"  class="stp-btn active" title="Snap to t = 0 (today) and resume live advance">▶ Live</button>
-                <button id="stp-pause" class="stp-btn"        title="Pause / play simulation">⏸ Pause</button>
-                <button id="stp-reset" class="stp-btn"        title="Reset to today's epoch but stay paused">⟲ Today</button>
+        <div id="sun-time-panel" class="gp-panel is-storm" data-panel-key="sun-time">
+            <div class="gp-header" data-drag-handle
+                 title="Drag this header to move the panel. Hit the − button to minimize.">
+                <span class="gp-grip" aria-hidden="true"></span>
+                <span class="gp-title">☉ Sun's Orbit — Time Controls</span>
+                <button type="button" class="gp-min-btn" data-min-btn
+                        title="Minimize panel" aria-label="Minimize Sun orbit panel"></button>
             </div>
-            <div class="stp-row" title="Galactic-year offset from the present epoch (negative = past, positive = future).">
-                <span class="stp-label">Time</span>
-                <input id="stp-scrub" type="range" min="-450" max="450" step="0.1" value="0">
-                <span class="stp-val" id="stp-scrub-val">0 Myr</span>
-            </div>
-            <div class="stp-row" title="Simulation speed — how many Myr of orbital evolution elapse per real second.">
-                <span class="stp-label">Speed</span>
-                <input id="stp-speed" type="range" min="-2" max="2" step="0.05" value="0.574">
-                <span class="stp-val" id="stp-speed-val">3.75 Myr/s</span>
-            </div>
-            <div class="stp-readout">
-                <span><span class="stp-rk">v☉ </span><span class="stp-rv" id="stp-vel">220.0 km/s</span></span>
-                <span><span class="stp-rk">Z </span><span class="stp-rv" id="stp-z">+65 ly</span></span>
-                <span><span class="stp-rk">period </span><span class="stp-rv">225 Myr</span></span>
-                <span><span class="stp-rk">bobble </span><span class="stp-rv">67 Myr</span></span>
+            <div class="gp-body">
+                <div class="stp-btnrow">
+                    <button id="stp-live"  class="stp-btn active"
+                            title="Snap the simulation back to t = 0 (today) and resume live advance at the current speed.">▶ Live</button>
+                    <button id="stp-pause" class="stp-btn"
+                            title="Pause the simulation clock at the current epoch. Scrubbing the Time slider also pauses.">⏸ Pause</button>
+                    <button id="stp-reset" class="stp-btn"
+                            title="Reset the epoch to today (t = 0) but stay paused — useful before stepping forward by hand.">⟲ Today</button>
+                </div>
+                <div class="stp-row" title="Time scrubber — galactic-year offset from the present epoch. Negative values rewind the Sun's orbit; positive values fast-forward. Range ±450 Myr ≈ ±2 full galactic years.">
+                    <span class="stp-label">Time</span>
+                    <input id="stp-scrub" type="range" min="-450" max="450" step="0.1" value="0">
+                    <span class="stp-val" id="stp-scrub-val">0 Myr</span>
+                </div>
+                <div class="stp-row" title="Simulation speed — how many Myr of orbital evolution elapse per real second of wall-clock time. Log-scale slider: 0.01 → 100 Myr/s.">
+                    <span class="stp-label">Speed</span>
+                    <input id="stp-speed" type="range" min="-2" max="2" step="0.05" value="0.574">
+                    <span class="stp-val" id="stp-speed-val">3.75 Myr/s</span>
+                </div>
+                <div class="stp-readout">
+                    <span title="Sun's instantaneous orbital speed around Sgr A* (Local Standard of Rest, ~220 km/s today)."><span class="stp-rk">v☉ </span><span class="stp-rv" id="stp-vel">220.0 km/s</span></span>
+                    <span title="Sun's vertical (Z) excursion above/below the galactic mid-plane, oscillating with the ~67 Myr 'bobble' period."><span class="stp-rk">Z </span><span class="stp-rv" id="stp-z">+65 ly</span></span>
+                    <span title="One full orbit of the Sun around Sgr A* — a Galactic year."><span class="stp-rk">period </span><span class="stp-rv">225 Myr</span></span>
+                    <span title="Vertical oscillation period of the Sun crossing the galactic disk."><span class="stp-rk">bobble </span><span class="stp-rv">67 Myr</span></span>
+                </div>
             </div>
         </div>
 
@@ -7577,6 +7789,129 @@ document.getElementById('igm-back-btn').addEventListener('click',  () => { setIg
 document.getElementById('sidebar-toggle').addEventListener('click', () => {
     document.getElementById('sidebar').classList.toggle('collapsed');
 });
+
+// ══════════════════════════════════════════════════════════════════════════
+//  DRAGGABLE / MINIMIZABLE PANEL CHROME
+//  Wires every .gp-panel: click [−]/[+] to collapse, drag header to move.
+//  Position + collapsed state persisted per panel-key in localStorage.
+// ══════════════════════════════════════════════════════════════════════════
+(function wireDraggablePanels() {
+    const STORAGE_PREFIX = 'pp.gmap.panel.';
+
+    function loadState(key) {
+        try {
+            const raw = localStorage.getItem(STORAGE_PREFIX + key);
+            return raw ? JSON.parse(raw) : null;
+        } catch { return null; }
+    }
+    function saveState(key, state) {
+        try { localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(state)); }
+        catch { /* quota or disabled — silent fallback */ }
+    }
+
+    function clampToViewport(panel, x, y) {
+        const w = panel.offsetWidth;
+        const h = panel.offsetHeight;
+        // Keep at least 40px of the panel on-screen so the user can always grab it
+        const KEEP = 40;
+        const maxX = window.innerWidth  - KEEP;
+        const maxY = window.innerHeight - KEEP;
+        const minX = -(w - KEEP);
+        const minY = 0;
+        return [Math.min(maxX, Math.max(minX, x)),
+                Math.min(maxY, Math.max(minY, y))];
+    }
+
+    function applyPosition(panel, x, y) {
+        panel.style.left  = x + 'px';
+        panel.style.top   = y + 'px';
+        // Drop any right/bottom anchors so left/top take effect cleanly
+        panel.style.right  = 'auto';
+        panel.style.bottom = 'auto';
+    }
+
+    document.querySelectorAll('.gp-panel').forEach(panel => {
+        const key = panel.dataset.panelKey || panel.id;
+        const header = panel.querySelector('[data-drag-handle]');
+        const minBtn = panel.querySelector('[data-min-btn]');
+        if (!header) return;
+
+        // ── Restore persisted state ────────────────────────────────
+        const state = loadState(key);
+        if (state) {
+            if (state.minimized) panel.classList.add('minimized');
+            if (typeof state.x === 'number' && typeof state.y === 'number') {
+                const [cx, cy] = clampToViewport(panel, state.x, state.y);
+                applyPosition(panel, cx, cy);
+            }
+        }
+
+        // ── Minimize button ────────────────────────────────────────
+        if (minBtn) {
+            minBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                panel.classList.toggle('minimized');
+                const cur = loadState(key) || {};
+                cur.minimized = panel.classList.contains('minimized');
+                saveState(key, cur);
+                minBtn.title = cur.minimized ? 'Expand panel' : 'Minimize panel';
+            });
+        }
+
+        // ── Drag via pointer events ────────────────────────────────
+        let dragging = false;
+        let startX = 0, startY = 0;
+        let originX = 0, originY = 0;
+        let pointerId = null;
+
+        header.addEventListener('pointerdown', (e) => {
+            // Don't start a drag from the minimize button or any focused control
+            if (e.target.closest('[data-min-btn]')) return;
+            if (e.button !== undefined && e.button !== 0) return;
+
+            dragging = true;
+            pointerId = e.pointerId;
+            const rect = panel.getBoundingClientRect();
+            originX = rect.left;
+            originY = rect.top;
+            startX = e.clientX;
+            startY = e.clientY;
+            panel.classList.add('gp-dragging');
+            try { header.setPointerCapture(pointerId); } catch {}
+            e.preventDefault();
+        });
+
+        header.addEventListener('pointermove', (e) => {
+            if (!dragging || e.pointerId !== pointerId) return;
+            const dx = e.clientX - startX;
+            const dy = e.clientY - startY;
+            const [nx, ny] = clampToViewport(panel, originX + dx, originY + dy);
+            applyPosition(panel, nx, ny);
+        });
+
+        function endDrag(e) {
+            if (!dragging || (pointerId !== null && e.pointerId !== pointerId)) return;
+            dragging = false;
+            panel.classList.remove('gp-dragging');
+            try { header.releasePointerCapture(pointerId); } catch {}
+            pointerId = null;
+            const rect = panel.getBoundingClientRect();
+            const cur = loadState(key) || {};
+            cur.x = rect.left;
+            cur.y = rect.top;
+            saveState(key, cur);
+        }
+        header.addEventListener('pointerup',     endDrag);
+        header.addEventListener('pointercancel', endDrag);
+
+        // Re-clamp on viewport resize so panels don't end up off-screen
+        window.addEventListener('resize', () => {
+            const rect = panel.getBoundingClientRect();
+            const [cx, cy] = clampToViewport(panel, rect.left, rect.top);
+            if (cx !== rect.left || cy !== rect.top) applyPosition(panel, cx, cy);
+        });
+    });
+})();
 
 // ══════════════════════════════════════════════════════════════════════════
 //  NAV (hamburger + dropdown)
