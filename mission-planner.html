@@ -360,6 +360,16 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
             <button id="mp-cam-follow"    class="mp-mode-btn"    type="button" title="F" style="flex:1.2;">🎥 Follow Mission</button>
             <button id="mp-cam-reset"     class="mp-mode-btn"    type="button" title="R">⟲ Reset</button>
         </div>
+        <div class="mp-mode-toggle" style="margin-top:4px;" title="Camera mode — 'Lock' tracks the focused body, 'Free' decouples">
+            <button id="mp-cam-mode-lock" class="mp-mode-btn on" type="button" title="Lock camera onto current focus (L)">⊙ Lock</button>
+            <button id="mp-cam-mode-free" class="mp-mode-btn"    type="button" title="Free-fly camera (Shift+F)">⟿ Free</button>
+        </div>
+        <div id="mp-sim-truth" style="margin-top:6px; padding:6px 8px; background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.06); border-radius:6px; font-size:10px; color:#778; line-height:1.45; font-family:monospace;">
+            <div><span style="color:#556;">Time base:</span> JD-anchored</div>
+            <div><span style="color:#556;">Worker:</span> <span id="mp-sim-worker-status">spawning…</span></div>
+            <div><span style="color:#556;">GT hash:</span> <span id="mp-sim-worker-hash">—</span></div>
+            <div><span style="color:#556;">Moon residual:</span> <span id="mp-sim-worker-resid">—</span></div>
+        </div>
 
         <div class="mp-label">Origin Body</div>
         <div class="mp-mode-toggle">
@@ -514,7 +524,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
                 <div class="hud-row"><span class="k">Scenario JD</span><span class="v" id="hud-jd">—</span></div>
             </div>
         </div>
-        <p id="mp-3d-help"><strong>Drag</strong> orbit · <strong>Scroll</strong> zoom · <strong>Right-drag</strong> pan · <strong>Click a body</strong> to focus it · <strong>Keys 1–9</strong> presets · <strong>F</strong> follow active mission · <strong>R</strong> reset to Earth · <strong>📷</strong> drops camera above selected pad · 1 unit = 1 R⊕ · 1 AU ≈ 23 456 units</p>
+        <p id="mp-3d-help"><strong>Drag</strong> orbit · <strong>Scroll</strong> zoom · <strong>Right-drag</strong> pan · <strong>Click a body</strong> to focus it · <strong>Keys 1–9</strong> presets · <strong>F</strong> follow active mission · <strong>Shift+F</strong> free-fly · <strong>L</strong> lock to focus · <strong>R</strong> reset to Earth · <strong>📷</strong> drops camera above selected pad · 1 unit = 1 R⊕ · 1 AU ≈ 23 456 units</p>
     </main>
 
 </div>
@@ -1460,6 +1470,10 @@ function viridis(t) {
 function focusBody(name) {
     planner.flyToBody(name);
     setFocusUI(name);
+    // Focus presets implicitly engage lock mode — the planner's flyCameraTo()
+    // ends with `follow=true` and writes followState.getter, so reflect that
+    // in the camera-mode toggle UI.
+    setCamModeUI('lock');
 }
 for (const id of FOCUS_IDS) {
     document.getElementById(`mp-focus-${id}`)?.addEventListener('click', () => focusBody(id));
@@ -1479,6 +1493,57 @@ document.getElementById('mp-cam-reset').addEventListener('click', () => {
     focusBody('earth');
     pushLog('⟲ Camera reset to Earth', 'window');
 });
+
+// ── Camera mode (free / lock) ────────────────────────────────────────────────
+// 'lock' (default): the camera tracks the most recently focused body; the
+//                   user can still drag-orbit / scroll-zoom around it.
+// 'free':           OrbitControls operates on a static target — bodies drift
+//                   through frame as they move along their orbits.
+//
+// `setCamModeUI` is the single source of truth for which button is .on; it
+// also reflects mid-session changes triggered by Shift+F or by selecting a
+// new focus preset.
+function setCamModeUI(mode) {
+    const lockBtn = document.getElementById('mp-cam-mode-lock');
+    const freeBtn = document.getElementById('mp-cam-mode-free');
+    if (lockBtn) lockBtn.classList.toggle('on', mode === 'lock');
+    if (freeBtn) freeBtn.classList.toggle('on', mode === 'free');
+}
+document.getElementById('mp-cam-mode-free').addEventListener('click', () => {
+    planner.setFreeCam();
+    setCamModeUI('free');
+    pushLog('⟿ Camera released (free fly)', 'window');
+});
+document.getElementById('mp-cam-mode-lock').addEventListener('click', () => {
+    if (planner.lockCurrentFocus()) {
+        setCamModeUI('lock');
+        pushLog('⊙ Camera locked to current focus', 'window');
+    } else {
+        pushLog('⊙ No focus body to lock onto — use a focus preset first', 'window');
+    }
+});
+
+// ── Earth-system worker readout ─────────────────────────────────────────────
+// Polls the bridge status every 500 ms and formats hash/residual into the
+// mp-sim-truth panel. Sub-mm residuals are coloured green; > 100 km flips
+// amber so any future model swap that breaks the on-screen Moon stands out.
+setInterval(() => {
+    if (!planner.getEarthBridgeStatus) return;
+    const s = planner.getEarthBridgeStatus();
+    const statusEl = document.getElementById('mp-sim-worker-status');
+    const hashEl   = document.getElementById('mp-sim-worker-hash');
+    const residEl  = document.getElementById('mp-sim-worker-resid');
+    if (statusEl) statusEl.textContent = s.status || '—';
+    if (hashEl)   hashEl.textContent   = (s.hash || '—').slice(0, 12);
+    if (residEl) {
+        const km = s.residualKm;
+        if (!Number.isFinite(km))   { residEl.textContent = '—';                          residEl.style.color = '#778'; }
+        else if (km < 1)            { residEl.textContent = `${(km * 1e3).toFixed(1)} m`; residEl.style.color = '#7c5'; }
+        else if (km < 100)          { residEl.textContent = `${km.toFixed(2)} km`;        residEl.style.color = '#7c5'; }
+        else if (km < 5_000)        { residEl.textContent = `${km.toFixed(0)} km`;        residEl.style.color = '#bb8'; }
+        else                        { residEl.textContent = `${km.toFixed(0)} km`;        residEl.style.color = '#f90'; }
+    }
+}, 500);
 
 // Fly camera to currently-selected origin pad. Routes Earth pads to Earth,
 // Moon bases to the Moon, Mars colonies to Mars — and highlights the
@@ -1504,11 +1569,25 @@ window.addEventListener('keydown', (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const k = e.key.toLowerCase();
     if (KEY_MAP[k]) { focusBody(KEY_MAP[k]); e.preventDefault(); return; }
-    if (k === 'f') {
+    if (k === 'f' && e.shiftKey) {
+        // Shift+F → release the camera into free-fly
+        planner.setFreeCam();
+        setCamModeUI('free');
+        pushLog('⟿ Camera released (free fly)', 'window');
+        e.preventDefault();
+    } else if (k === 'f') {
         const m = planner.followMission();
         if (m) {
             setFocusUI('mission');
+            setCamModeUI('lock');
             pushLog(`🎥 Camera following ${m.payloadName || 'active mission'}`, 'window');
+        }
+        e.preventDefault();
+    } else if (k === 'l') {
+        // L → lock camera onto the most-recent focus body
+        if (planner.lockCurrentFocus()) {
+            setCamModeUI('lock');
+            pushLog('⊙ Camera locked to current focus', 'window');
         }
         e.preventDefault();
     } else if (k === 'r') {
