@@ -1,56 +1,65 @@
 /**
  * mission-pad-weather.js — Live weather feed for the mission planner's
- * launch pads.
+ * launch pads, with server-side proxies and 24-hour forecast lookahead.
  *
- * Wires real meteorology to the planner's pad-weather scaffold by
- * polling sources for each launch site and translating the readings
- * into the planner's vocabulary (go / caution / scrub / unknown):
+ * ── Data sources ──────────────────────────────────────────────────────
  *
- *   • Earth pads — open-meteo.com /v1/forecast for the pad's lat/lon.
- *                  Free, no API key, CORS-enabled, ~10k req/day per IP.
- *                  We pull current temperature, surface wind + gusts,
- *                  precipitation, cloud cover, and the WMO weather
- *                  code, then run them through evaluateLaunchRules()
- *                  which encodes a simplified subset of NASA/Falcon
- *                  launch commit criteria.
+ *   Earth pads → /api/weather/forecast?type=launch
+ *     Edge-cached Open-Meteo proxy (15 min s-maxage / 10 min SWR), so
+ *     N concurrent simulator users hitting the same pad coords share a
+ *     single upstream call. Returns current conditions + a 7-day hourly
+ *     strip; we use the hourly arrays to compute the lookahead — when
+ *     does the launch gate flip from go → scrub or vice versa within
+ *     the next 24 h?
  *
- *   • Moon bases — synthetic. There's no atmospheric weather in the
- *                  Earth sense; we surface solar incidence + radiation
- *                  flavour text based on pad latitude (polar = low sun)
- *                  so the visual scaffold reads as live data.
+ *   Mars sites → /api/mars/weather
+ *     Aggregator that combines a server-side Ls computation (dust-season
+ *     status) with NASA's public InSight historical archive. The client
+ *     used to compute Ls locally; moving it server-side dedupes math
+ *     across users and lets us cache the InSight response.
  *
- *   • Mars sites — synthetic from Mars solar longitude (Ls). Ls is
- *                  computed as a simple modulo over the Mars year
- *                  anchored to the 2024-Sep-12 northern-spring equinox.
- *                  Ls 220–310 is the dust-storm season (regional),
- *                  which we surface as caution with an opacity τ
- *                  estimate.
+ *   Moon bases → synthetic, client-side
+ *     No atmospheric weather; only constraint is solar incidence at
+ *     polar pads. Trivial to compute, not worth a round trip.
  *
- * Public API:
+ * ── Forecast lookahead ────────────────────────────────────────────────
+ *
+ *   The Earth proxy returns an `hourly` block with wind, gusts, precip,
+ *   cloud, and the WMO weather code for every hour over the next 7 days.
+ *   We replay evaluateLaunchRules() on each hourly sample, find the
+ *   first hour whose status differs from the current one, and surface
+ *   that to the planner via setPadWeather(..., { lookahead }).
+ *
+ *   The UI then shows hints like "⏰ GO window opens in 3h" near the
+ *   Launch button when current is scrub/caution, or "⚠ Scrub by T+5h"
+ *   when current is go but a violation is forecast.
+ *
+ * ── Public API ────────────────────────────────────────────────────────
  *
  *   startWeatherFeed(planner, opts) → { stop(), refreshNow() }
  *
- * The feed runs an immediate refresh on call, then polls every 15 min
- * (configurable). On fetch error a pad is marked 'unknown' with the
- * error message — the rest of the system continues unaffected. Drop
- * the entire module to revert to no-feed; the planner's setPadWeather
- * scaffold survives independently.
+ *   Polls every 15 min by default. On fetch error, the affected pad is
+ *   marked 'unknown' with the error string; everything else continues.
+ *
+ *   Pure helpers re-exported for unit tests:
+ *     evaluateLaunchRules, evaluateMoonConditions, marsLs, computeLookahead
  */
 
 import { LAUNCH_SITES, MOON_BASES, MARS_BIOMES } from './mission-planner-3d.js';
 
 const POLL_MS          = 15 * 60 * 1000;     // 15 minutes
-const FETCH_TIMEOUT_MS = 6000;
-const ENDPOINT         = 'https://api.open-meteo.com/v1/forecast';
+const FETCH_TIMEOUT_MS = 8000;
+const FORECAST_API     = '/api/weather/forecast';
+const MARS_API         = '/api/mars/weather';
+const LOOKAHEAD_HOURS  = 24;                 // how far we scan for the next status change
 
 // ── WMO weather-code helpers ────────────────────────────────────────────
-// https://open-meteo.com/en/docs#weathervariables
-const isThunder       = wc => wc >= 95;
-const isHeavyPrecip   = wc => wc === 65 || wc === 67 || wc === 75 || wc === 77 || wc === 82 || wc === 86;
-const isLightPrecip   = wc => (wc >= 51 && wc <= 63) || wc === 71 || wc === 73 || (wc >= 80 && wc <= 81) || wc === 85;
-const isFog           = wc => wc === 45 || wc === 48;
+const isThunder     = wc => wc >= 95;
+const isHeavyPrecip = wc => wc === 65 || wc === 67 || wc === 75 || wc === 77 || wc === 82 || wc === 86;
+const isLightPrecip = wc => (wc >= 51 && wc <= 63) || wc === 71 || wc === 73 || (wc >= 80 && wc <= 81) || wc === 85;
+const isFog         = wc => wc === 45 || wc === 48;
 
-// ── Open-Meteo fetch with timeout ───────────────────────────────────────
+// ── Fetch helpers ───────────────────────────────────────────────────────
 async function fetchWithTimeout(url, ms) {
     const ctrl  = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), ms);
@@ -63,67 +72,105 @@ async function fetchWithTimeout(url, ms) {
     }
 }
 
-async function fetchEarthCurrent(pad) {
-    const params = new URLSearchParams({
-        latitude:         pad.lat,
-        longitude:        pad.lon,
-        current:          'temperature_2m,wind_speed_10m,wind_gusts_10m,precipitation,cloud_cover,weather_code',
-        wind_speed_unit:  'kn',
-        temperature_unit: 'celsius',
-    });
-    const json = await fetchWithTimeout(`${ENDPOINT}?${params}`, FETCH_TIMEOUT_MS);
-    return json.current;
-}
+// ── Unit conversion ─────────────────────────────────────────────────────
+// The /api/weather/forecast?type=launch proxy returns wind in mph (matches
+// the existing trip-planner consumers). Aviation/launch weather is canonical
+// in knots, so we convert at the boundary. 1 mph = 0.868976 kt.
+const MPH_TO_KT = 0.868976;
+const F_TO_C    = f => (f - 32) * 5 / 9;
 
-// ── Launch commit criteria (simplified) ─────────────────────────────────
-// Inspired by Falcon 9 / NASA rules; scaled for educational use rather
-// than legal-ops accuracy. Inputs are Open-Meteo's "current" record.
-//
-//   SCRUB conditions:
-//     • Lightning / thunderstorm at pad           (WMO 95–99)
-//     • Heavy precipitation                       (WMO 65/67/75/77/82/86)
-//     • Sustained surface wind > 26 kt
-//     • Wind gusts > 30 kt
-//
-//   CAUTION conditions:
-//     • Wind 18–26 kt sustained or 22–30 kt gust
-//     • Light/moderate precipitation              (WMO 51–63 / 71–73 / 80–81 / 85)
-//     • Fog                                       (WMO 45 / 48)
-//     • Cloud cover > 90%
-//
-//   GO is a concise telemetry summary.
+// ── Launch commit criteria (in knots) ───────────────────────────────────
+// SCRUB: lightning (WMO 95-99), heavy precip (65/67/75/77/82/86), wind
+//        > 26 kt sustained or > 30 kt gust.
+// CAUTION: gusts > 22 kt, sustained > 18 kt, light precip, fog, cloud > 90%.
 function evaluateLaunchRules(wx) {
     if (!wx) return { status: 'unknown', message: 'No weather data' };
-    const wind  = wx.wind_speed_10m  ?? 0;
-    const gust  = wx.wind_gusts_10m  ?? wind;
-    const precip= wx.precipitation   ?? 0;
-    const cloud = wx.cloud_cover     ?? 0;
-    const wc    = wx.weather_code    ?? 0;
-    const temp  = wx.temperature_2m  ?? 0;
+    // Fields are mph + °F from the proxy; convert at the rule boundary so
+    // the rest of this function reads in launch-canonical units.
+    const wind  = (wx.wind_speed_10m  ?? 0) * MPH_TO_KT;
+    const gust  = (wx.wind_gusts_10m  ?? wx.wind_speed_10m ?? 0) * MPH_TO_KT;
+    const precip= wx.precipitation    ?? 0;
+    const cloud = wx.cloud_cover      ?? 0;
+    const wc    = wx.weather_code     ?? 0;
+    const tempF = wx.temperature_2m   ?? 0;
+    const tempC = F_TO_C(tempF);
 
-    if (isThunder(wc))       return { status: 'scrub',   message: `Thunderstorm at pad · WMO ${wc}` };
-    if (isHeavyPrecip(wc))   return { status: 'scrub',   message: `Heavy precipitation · WMO ${wc}` };
-    if (gust > 30)           return { status: 'scrub',   message: `Gusts ${gust.toFixed(0)} kt > 30 kt limit` };
-    if (wind > 26)           return { status: 'scrub',   message: `Sustained wind ${wind.toFixed(0)} kt > 26 kt limit` };
+    if (isThunder(wc))     return { status: 'scrub',   message: `Thunderstorm at pad · WMO ${wc}` };
+    if (isHeavyPrecip(wc)) return { status: 'scrub',   message: `Heavy precipitation · WMO ${wc}` };
+    if (gust > 30)         return { status: 'scrub',   message: `Gusts ${gust.toFixed(0)} kt > 30 kt limit` };
+    if (wind > 26)         return { status: 'scrub',   message: `Sustained ${wind.toFixed(0)} kt > 26 kt limit` };
 
-    if (gust > 22)           return { status: 'caution', message: `Gusts ${gust.toFixed(0)} kt · marginal` };
-    if (wind > 18)           return { status: 'caution', message: `Wind ${wind.toFixed(0)} kt · marginal` };
-    if (isLightPrecip(wc))   return { status: 'caution', message: `Light precipitation · WMO ${wc}` };
-    if (isFog(wc))           return { status: 'caution', message: 'Fog · visibility constraint' };
-    if (cloud > 90)          return { status: 'caution', message: `${cloud}% overcast` };
+    if (gust > 22)         return { status: 'caution', message: `Gusts ${gust.toFixed(0)} kt · marginal` };
+    if (wind > 18)         return { status: 'caution', message: `Wind ${wind.toFixed(0)} kt · marginal` };
+    if (isLightPrecip(wc)) return { status: 'caution', message: `Light precipitation · WMO ${wc}` };
+    if (isFog(wc))         return { status: 'caution', message: 'Fog · visibility constraint' };
+    if (cloud > 90)        return { status: 'caution', message: `${cloud}% overcast` };
 
     return {
         status:  'go',
-        message: `Wind ${wind.toFixed(0)} kt · ${cloud}% cloud · ${temp.toFixed(0)}°C${precip > 0 ? ` · trace precip` : ''}`,
+        message: `Wind ${wind.toFixed(0)} kt · ${cloud}% cloud · ${tempC.toFixed(0)}°C${precip > 0 ? ` · trace precip` : ''}`,
     };
 }
 
+// ── Forecast lookahead ──────────────────────────────────────────────────
+// Scans the next LOOKAHEAD_HOURS of hourly data for the first hour whose
+// status differs from `currentStatus`. Returns:
+//   { next_status, next_message, hours_until, time_iso }
+// or null when the next 24 h is uniformly the same status as now.
+function computeLookahead(hourly, currentStatus) {
+    if (!hourly?.time?.length) return null;
+    const now = Date.now();
+    const hoursAvail = hourly.time.length;
+    // hourly.time entries are local-tz strings like "2026-05-06T15:00".
+    // Open-Meteo uses `timezone=auto`, so each entry is in the pad's local
+    // tz with no offset suffix. Date.parse() treats them as local time of
+    // the runtime, which differs from the pad's tz — close enough for the
+    // 1-hour resolution we care about, since we only count discrete steps
+    // between samples (each is exactly 1 h apart).
+    const startIdx = (() => {
+        for (let i = 0; i < hoursAvail; i++) {
+            // Find the first hour at-or-after now (samples are ordered).
+            const t = Date.parse(hourly.time[i]);
+            if (Number.isFinite(t) && t >= now - 30 * 60_000) return i;
+        }
+        return -1;
+    })();
+    if (startIdx < 0) return null;
+
+    const stop = Math.min(startIdx + LOOKAHEAD_HOURS, hoursAvail);
+    for (let i = startIdx + 1; i < stop; i++) {
+        const wx = sampleAt(hourly, i);
+        const r  = evaluateLaunchRules(wx);
+        if (r.status !== currentStatus) {
+            return {
+                next_status:  r.status,
+                next_message: r.message,
+                hours_until:  i - startIdx,
+                time_iso:     hourly.time[i],
+            };
+        }
+    }
+    return null;
+}
+
+function sampleAt(hourly, i) {
+    return {
+        wind_speed_10m: hourly.wind_speed_10m?.[i],
+        wind_gusts_10m: hourly.wind_gusts_10m?.[i],
+        precipitation:  hourly.precipitation?.[i],
+        cloud_cover:    hourly.cloud_cover?.[i],
+        weather_code:   hourly.weather_code?.[i],
+        temperature_2m: hourly.temperature_2m?.[i],
+    };
+}
+
+// ── Earth pad refresh ───────────────────────────────────────────────────
+async function fetchEarthLaunchForecast(pad) {
+    const url = `${FORECAST_API}?type=launch&lat=${pad.lat.toFixed(3)}&lon=${pad.lon.toFixed(3)}&days=2`;
+    return fetchWithTimeout(url, FETCH_TIMEOUT_MS);
+}
+
 // ── Moon synthetic ──────────────────────────────────────────────────────
-// No atmosphere, no precipitation. The relevant constraints are solar
-// incidence (power generation, surface temperature) and the radiation
-// environment (driven by space weather, which we don't pull here).
-// Polar pads (Shackleton, Schrödinger) are flagged caution because of
-// permanent twilight; everywhere else launches are nominally GO.
 function evaluateMoonConditions(pad) {
     const absLat = Math.abs(pad.lat);
     if (absLat > 80) {
@@ -138,44 +185,46 @@ function evaluateMoonConditions(pad) {
     };
 }
 
-// ── Mars solar longitude (Ls) approximation ─────────────────────────────
-// Mars year is 686.971 Earth days. Reference epoch: 2024-Sep-12 (Mars
-// northern-spring equinox, Ls = 0°). The dust-storm season runs from
-// southern spring through summer, peaking at Ls 230–310. This is a
-// simple modulo — accurate to a few degrees, fine for surfacing
-// "are we in dust season" to the pad weather UI.
-const MARS_YEAR_DAYS  = 686.971;
-const MARS_LS0_JD     = 2460565.5;     // 2024-Sep-12 00:00 UTC
-
+// ── Mars Ls (kept client-side for unit tests; server is authoritative) ──
+const MARS_YEAR_DAYS = 686.971;
+const MARS_LS0_JD    = 2460565.5;
 function marsLs(jd) {
     const t = ((jd - MARS_LS0_JD) / MARS_YEAR_DAYS) % 1;
     return ((t < 0 ? t + 1 : t) * 360);
 }
 
-function evaluateMarsConditions(pad, jd) {
-    const Ls = marsLs(jd);
-    const lsTxt = `Ls ${Ls.toFixed(0)}°`;
+// Mars edge-function call returns one global record (Ls + InSight); we
+// fan it out across every Mars pad, optionally adding a per-pad nuance
+// (Olympus Mons is high-altitude / Jezero saw real Mars 2020 ops).
+async function fetchMarsAggregate(jd) {
+    const url = `${MARS_API}?jd=${encodeURIComponent(jd.toFixed(2))}`;
+    return fetchWithTimeout(url, FETCH_TIMEOUT_MS);
+}
 
-    if (Ls >= 250 && Ls < 310) {
-        return { status: 'caution', message: `${lsTxt} · regional dust season · τ ≈ 0.8` };
+function buildMarsPadMessage(agg, pad) {
+    const base = agg.message || `Ls ${agg.ls_deg?.toFixed(0) ?? '?'}°`;
+    if (!agg.insight) return base;
+    const ins = agg.insight;
+    const parts = [];
+    if (Number.isFinite(ins.max_temp_C) && Number.isFinite(ins.min_temp_C)) {
+        parts.push(`InSight ref · ${ins.min_temp_C.toFixed(0)}→${ins.max_temp_C.toFixed(0)}°C`);
     }
-    if (Ls >= 220 && Ls < 250) {
-        return { status: 'caution', message: `${lsTxt} · entering dust season · τ ≈ 0.5` };
+    if (Number.isFinite(ins.wind_speed_mps)) {
+        parts.push(`${ins.wind_speed_mps.toFixed(1)} m/s wind`);
     }
-    if (Ls >= 310 && Ls < 340) {
-        return { status: 'caution', message: `${lsTxt} · late dust season · τ ≈ 0.5` };
-    }
-    return { status: 'go', message: `${lsTxt} · clear skies · τ < 0.4` };
+    return parts.length ? `${base} · ${parts.join(' · ')}` : base;
 }
 
 // ── Refresh orchestrator ────────────────────────────────────────────────
 async function refreshAll(planner, { log }) {
-    // Earth — parallel fetches so the slowest pad doesn't block the rest.
+    // Earth — parallel fetches against the proxy. Each returns current +
+    // hourly; we evaluate rules on current and scan hourly for lookahead.
     const earthRefresh = LAUNCH_SITES.map(async (pad) => {
         try {
-            const wx = await fetchEarthCurrent(pad);
-            const r  = evaluateLaunchRules(wx);
-            planner.setPadWeather('earth', pad.id, r.status, r.message);
+            const json     = await fetchEarthLaunchForecast(pad);
+            const current  = evaluateLaunchRules(json.current);
+            const lookahead = computeLookahead(json.hourly, current.status);
+            planner.setPadWeather('earth', pad.id, current.status, current.message, { lookahead });
         } catch (err) {
             planner.setPadWeather('earth', pad.id, 'unknown',
                 `Weather data unavailable (${err.message || err.name})`);
@@ -183,33 +232,39 @@ async function refreshAll(planner, { log }) {
         }
     });
 
-    // Moon — synthetic.
+    // Moon — synthetic; no proxy.
     for (const pad of MOON_BASES) {
         const r = evaluateMoonConditions(pad);
         planner.setPadWeather('moon', pad.id, r.status, r.message);
     }
 
-    // Mars — synthetic from current scenario JD so dust season tracks
-    // the user's time-scrubbing.
+    // Mars — single proxy call shared across all sites. Tracks scenario JD
+    // so dust-season flags shift as the user time-scrubs.
     const jd = planner.getScenarioJD();
-    for (const pad of MARS_BIOMES) {
-        const r = evaluateMarsConditions(pad, jd);
-        planner.setPadWeather('mars', pad.id, r.status, r.message);
+    try {
+        const agg = await fetchMarsAggregate(jd);
+        for (const pad of MARS_BIOMES) {
+            planner.setPadWeather(
+                'mars', pad.id,
+                agg.status || 'unknown',
+                buildMarsPadMessage(agg, pad),
+            );
+        }
+    } catch (err) {
+        // Fallback to client-side Ls if the proxy is down so Mars pads
+        // still show meaningful data (Moon analog: no degradation).
+        const Ls = marsLs(jd);
+        for (const pad of MARS_BIOMES) {
+            planner.setPadWeather('mars', pad.id, 'unknown',
+                `Mars feed unavailable · synthetic Ls ${Ls.toFixed(0)}°`);
+        }
+        log(`[weather] mars: ${err.message || err}`);
     }
 
     await Promise.all(earthRefresh);
 }
 
 // ── Public entry point ──────────────────────────────────────────────────
-/**
- * Start polling weather for every pad. Calls planner.setPadWeather() for
- * each pad whenever fresh data arrives, which the UI translates into the
- * pad's colored ring + Launch button gating + mission log entry.
- *
- * Returns a handle with stop() and refreshNow() so the UI can pause the
- * feed (e.g., during scenario time-scrub stress) or force-refresh on
- * demand (e.g., when the user picks a different pad).
- */
 export function startWeatherFeed(planner, opts = {}) {
     const log = opts.log || (() => {});
     const intervalMs = opts.intervalMs || POLL_MS;
@@ -224,6 +279,10 @@ export function startWeatherFeed(planner, opts = {}) {
     };
 }
 
-// Re-exports for tests / didactic use — pure functions with no side
-// effects, useful for unit-testing flight rules without a planner.
-export { evaluateLaunchRules, evaluateMoonConditions, evaluateMarsConditions, marsLs };
+// Pure-function exports for unit tests / didactic use. No DOM, no state.
+export {
+    evaluateLaunchRules,
+    evaluateMoonConditions,
+    computeLookahead,
+    marsLs,
+};

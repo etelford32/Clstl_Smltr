@@ -318,14 +318,26 @@ export function initMissionPlanner({ container, onEvent } = {}) {
     // can show staleness ("data 12 min old").
     const padWeather = new Map();
     for (const key of padMarkers.keys()) {
-        padWeather.set(key, { status: 'unknown', message: '', updated_at: Date.now() });
+        padWeather.set(key, { status: 'unknown', message: '', lookahead: null, updated_at: Date.now() });
     }
-    function setPadWeather(body, padId, status, message = '') {
+    /**
+     * Update one pad's weather record. The optional `opts.lookahead` carries
+     * a forecast change-point (next status flip in the next 24 h) so the UI
+     * can surface "GO window opens in 3h" / "scrub by T+5h" hints near the
+     * Launch button. Shape:
+     *   { next_status, next_message, hours_until, time_iso }
+     */
+    function setPadWeather(body, padId, status, message = '', opts = {}) {
         const key = `${body}:${padId}`;
         const marker = padMarkers.get(key);
         if (!marker) return false;
         const s = WEATHER_STATUSES.includes(status) ? status : 'unknown';
-        const rec = { status: s, message, updated_at: Date.now() };
+        const rec = {
+            status:     s,
+            message,
+            lookahead:  opts.lookahead || null,
+            updated_at: Date.now(),
+        };
         padWeather.set(key, rec);
         applyMarkerWeather(marker, s);
         onEvent?.({ type: 'pad-weather', body, padId, ...rec });
@@ -333,7 +345,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
     }
     function getPadWeather(body, padId) {
         return padWeather.get(`${body}:${padId}`)
-            || { status: 'unknown', message: '', updated_at: 0 };
+            || { status: 'unknown', message: '', lookahead: null, updated_at: 0 };
     }
     function listPadWeather() {
         // Snapshot for the UI to render a "weather report" panel later.
