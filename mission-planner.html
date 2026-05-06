@@ -171,6 +171,26 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
 }
 .mp-pad-weather .mp-wx-label { font-weight:700; }
 .mp-pad-weather .mp-wx-msg   { color:#88a; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mp-pad-weather .mp-wx-refresh {
+    flex:0 0 auto;
+    background:transparent;
+    border:1px solid rgba(255,255,255,.14);
+    color:#aab;
+    border-radius:4px;
+    padding:1px 5px;
+    font-size:.75rem; line-height:1;
+    cursor:pointer;
+    transition:transform .35s, color .15s, border-color .15s;
+}
+.mp-pad-weather .mp-wx-refresh:hover {
+    color:#fff;
+    border-color:rgba(102,255,170,.5);
+}
+.mp-pad-weather .mp-wx-refresh.spinning { animation: mp-wx-spin .9s linear infinite; }
+@keyframes mp-wx-spin {
+    0%   { transform:rotate(0deg);   }
+    100% { transform:rotate(360deg); }
+}
 .mp-pad-weather.mp-wx-go      { border-color:rgba(102,255,119,.45); color:#9efc9e; }
 .mp-pad-weather.mp-wx-go      .mp-wx-dot { background:#66ff77; box-shadow:0 0 8px rgba(102,255,119,.7); }
 .mp-pad-weather.mp-wx-caution { border-color:rgba(255,204,68,.45);  color:#ffd994; }
@@ -292,7 +312,45 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
     min-width:240px; max-width:300px;
     pointer-events:none;
 }
-.mp-mission-hud .hud-title { color:#ffaa66; }
+.mp-mission-hud .hud-title {
+    color:#ffaa66;
+    display:flex; justify-content:space-between; align-items:center;
+}
+.mp-mission-hud .mp-mhud-count {
+    color:#aab; font-weight:600; font-size:.65rem;
+    background:rgba(255,255,255,.06);
+    padding:1px 6px; border-radius:8px;
+}
+.mp-mission-hud .mp-mhud-count[hidden] { display:none; }
+.mp-mission-hud .mp-mhud-select {
+    pointer-events:auto;            /* HUD parent disables mouse input by default */
+    width:100%; margin:6px 0 4px;
+    background:rgba(0,0,0,.45);
+    border:1px solid rgba(255,170,102,.32);
+    color:#ffd6a0; font-family:monospace; font-size:.74rem; font-weight:700;
+    border-radius:5px; padding:5px 7px;
+}
+.mp-mission-hud .mp-mhud-select:focus {
+    outline:none;
+    border-color:#ffaa66;
+    box-shadow:0 0 0 2px rgba(255,170,102,.22);
+}
+.mp-mission-hud .mp-mhud-select option {
+    background:#0d0820; color:#ffd6a0;
+}
+.mp-mission-hud .mp-mhud-follow {
+    pointer-events:auto;
+    width:100%; margin:0 0 6px;
+    background:rgba(255,170,102,.10);
+    border:1px solid rgba(255,170,102,.30);
+    color:#ffd6a0; font-family:monospace; font-size:.7rem; font-weight:700;
+    padding:5px 8px; border-radius:5px; cursor:pointer;
+    transition:background .15s, border-color .15s;
+}
+.mp-mission-hud .mp-mhud-follow:hover {
+    background:rgba(255,170,102,.22);
+    border-color:#ffaa66;
+}
 .mp-mission-hud[hidden]    { display:none; }
 .mp-mhud-bar {
     margin:6px 0 4px;
@@ -414,6 +472,8 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
             <span class="mp-wx-dot"></span>
             <span class="mp-wx-label">Weather: no data</span>
             <span class="mp-wx-msg" id="mp-pad-weather-msg"></span>
+            <button id="mp-pad-weather-refresh" class="mp-wx-refresh" type="button"
+                    title="Refresh weather feed for all pads">↻</button>
         </div>
 
         <div class="mp-label">Destination</div>
@@ -550,8 +610,13 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
                 <div class="hud-row"><span class="k">Scenario JD</span><span class="v" id="hud-jd">—</span></div>
             </div>
             <div id="mp-mission-hud" class="mp-mission-hud" hidden>
-                <div class="hud-title">Active Mission</div>
-                <div class="hud-row"><span class="k" id="mp-mhud-name">—</span><span class="v" id="mp-mhud-kind">—</span></div>
+                <div class="hud-title">
+                    <span>Active Mission</span>
+                    <span class="mp-mhud-count" id="mp-mhud-count"></span>
+                </div>
+                <select id="mp-mhud-select" class="mp-mhud-select" aria-label="Active mission selector"></select>
+                <button id="mp-mhud-follow" class="mp-mhud-follow" type="button" title="Chase the selected mission (F)">🎥 Chase this mission</button>
+                <div class="hud-row"><span class="k">Kind</span><span class="v" id="mp-mhud-kind">—</span></div>
                 <div class="hud-row"><span class="k">Phase</span><span class="v" id="mp-mhud-phase">—</span></div>
                 <div class="hud-row"><span class="k" id="mp-mhud-target-k">To target</span><span class="v" id="mp-mhud-target-v">—</span></div>
                 <div class="hud-row"><span class="k">Elapsed / TOF</span><span class="v" id="mp-mhud-elapsed">—</span></div>
@@ -570,6 +635,7 @@ import { initMissionPlanner, LAUNCH_SITES, TARGET_ORBITS,
          MOON_BASES, MARS_BIOMES, MISSION_ROUTES } from './js/mission-planner-3d.js';
 import { simulateAscent, compareBodies, LAUNCH_BODIES, LAUNCH_VEHICLES } from './js/launch-physics.js';
 import { jdNow } from './js/horizons.js';
+import { startWeatherFeed } from './js/mission-pad-weather.js';
 
 // ── Populate dropdowns ──────────────────────────────────────────────
 const siteSel   = document.getElementById('mp-site');
@@ -1517,16 +1583,28 @@ for (const id of FOCUS_IDS) {
 
 // Camera action buttons.
 let followedMissionId = null;     // tracks which mission the HUD shows
-document.getElementById('mp-cam-follow').addEventListener('click', () => {
-    const m = planner.followMission();
-    if (m) {
-        followedMissionId = m.id;
-        setFocusUI('mission');
-        pushLog(`🎥 Camera following ${m.payloadName || 'active mission'}`, 'window');
-    } else {
+// Single source of truth for chase-cam engagement. Three UI paths route
+// here (Follow button, HUD's Chase-this-mission button, F keyboard
+// shortcut). Logic: chase whichever mission the HUD dropdown shows; if
+// nothing is shown, fall back to the most-recently-launched active
+// mission. Updates followedMissionId so the HUD stays in sync.
+function chaseSelectedMission() {
+    const all = planner.listActiveMissions();
+    if (!all.length) {
         pushLog('🎥 No active mission to follow', 'window');
+        return null;
     }
-});
+    const sel = parseInt(mhudSelect?.value, 10);
+    const id  = Number.isFinite(sel) && all.some(x => x.id === sel) ? sel : null;
+    const m   = id != null ? planner.followMission({ id })
+                            : planner.followMission();   // most recent
+    if (!m) return null;
+    followedMissionId = m.id;
+    setFocusUI('mission');
+    pushLog(`🎥 Chasing ${m.payloadName || 'mission'} (#${m.id})`, 'window');
+    return m;
+}
+document.getElementById('mp-cam-follow').addEventListener('click', chaseSelectedMission);
 document.getElementById('mp-cam-reset').addEventListener('click', () => {
     followedMissionId = null;
     focusBody('earth');
@@ -1608,6 +1686,8 @@ window.addEventListener('keydown', (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const k = e.key.toLowerCase();
     if (KEY_MAP[k]) { focusBody(KEY_MAP[k]); e.preventDefault(); return; }
+    if (k === 'f') {
+        chaseSelectedMission();
     if (k === 'f' && e.shiftKey) {
         // Shift+F → release the camera into free-fly
         planner.setFreeCam();
@@ -1749,11 +1829,16 @@ refreshTimeUI();
 
 // ── Active Mission HUD ──────────────────────────────────────────────
 // Pulls live telemetry from planner.getMissionDetail(id) on every
-// heartbeat. The "active" mission is whichever one the user has
-// followed most recently (Follow button or auto-frame on launch).
-// When that mission ends or is cleared, the HUD hides itself.
+// heartbeat. The "active" mission is whichever one the user picks via
+// the dropdown — defaulting to the most-recently-launched mission so a
+// fresh launch auto-shows in the HUD without a click. The dropdown
+// repopulates only when the SET of mission IDs changes (not when phases
+// change), so the user's selection is preserved as missions tick
+// through ascent → cruise → captured states.
 const missionHud   = document.getElementById('mp-mission-hud');
-const mhudName     = document.getElementById('mp-mhud-name');
+const mhudSelect   = document.getElementById('mp-mhud-select');
+const mhudCount    = document.getElementById('mp-mhud-count');
+const mhudFollowBtn= document.getElementById('mp-mhud-follow');
 const mhudKind     = document.getElementById('mp-mhud-kind');
 const mhudPhase    = document.getElementById('mp-mhud-phase');
 const mhudTargetK  = document.getElementById('mp-mhud-target-k');
@@ -1779,6 +1864,57 @@ const KIND_DISPLAY = {
     tour:           '🌌 tour',
     mission:        'mission',
 };
+const KIND_ICON = {
+    near:'🚀', payload:'🛰', lunar:'🌙', 'moon-to-earth':'🌙', mars:'♂',
+    'mars-to-earth':'♂', 'moon-to-mars':'🌙', 'earth-to-jupiter':'♃',
+    'earth-to-saturn':'♄', 'earth-to-uranus':'⛢', 'earth-to-neptune':'♆',
+    tour:'🌌',
+};
+
+// Re-populates the dropdown only when the SET of mission IDs changes,
+// so the user's selection isn't blown away every 250 ms. Returns the
+// mission ID currently selected (which may have been auto-fallen-back
+// to most-recent if the previous selection vanished).
+let _lastDropdownIds = '';
+function syncMissionDropdown(active) {
+    const idsKey = active.map(m => m.id).join(',');
+    if (idsKey !== _lastDropdownIds) {
+        const opts = active
+            .slice()
+            .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))
+            .map(m => {
+                const icon = KIND_ICON[m.kind] || '·';
+                return `<option value="${m.id}">${icon} ${m.payloadName} · #${m.id}</option>`;
+            }).join('');
+        mhudSelect.innerHTML = opts;
+        _lastDropdownIds = idsKey;
+    }
+    // Resolve which mission to show: prefer user's pick, else fall back
+    // to most recent so a fresh launch auto-surfaces.
+    let id = followedMissionId;
+    if (!id || !active.some(m => m.id === id)) {
+        const recent = active.slice().sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))[0];
+        id = recent?.id;
+    }
+    if (id != null) mhudSelect.value = String(id);
+    return id;
+}
+
+// Dropdown change → switch which mission the HUD shows. Doesn't re-fly
+// the camera (otherwise switching missions in a list would yank the
+// view); use the explicit "🎥 Chase this mission" button or F shortcut
+// for that.
+mhudSelect.addEventListener('change', () => {
+    const id = parseInt(mhudSelect.value, 10);
+    if (Number.isFinite(id)) {
+        followedMissionId = id;
+        refreshMissionHud();
+    }
+});
+
+// HUD's Chase-this-mission button → same shared entry as the global
+// Follow button + F shortcut, so the dropdown selection is honored.
+mhudFollowBtn.addEventListener('click', chaseSelectedMission);
 function fmtSeconds(s) {
     if (s == null) return '—';
     if (s < 60)   return `${s.toFixed(1)} s`;
@@ -1786,24 +1922,32 @@ function fmtSeconds(s) {
     return `${(s/60).toFixed(0)} min`;
 }
 function refreshMissionHud() {
-    // If the followed mission is gone (cleared / arrived), pick the most
-    // recent active one so the panel auto-handoffs as missions roll over.
+    // listActiveMissions() snapshots every active mission across rockets,
+    // payloads, lunar, mars, and tours. When the list is empty, hide the
+    // card entirely and reset the followed-id so the next launch surfaces
+    // cleanly via the most-recent fallback.
     const active = planner.listActiveMissions();
     if (!active.length) {
         missionHud.hidden = true;
         followedMissionId = null;
+        _lastDropdownIds = '';
         return;
     }
-    let id = followedMissionId;
-    if (!id || !active.some(m => m.id === id)) {
-        // Fall back to most recent (highest startedAt).
-        active.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
-        id = active[0].id;
+    missionHud.hidden = false;
+    // Sync the dropdown (re-populates only when the set of IDs changes)
+    // and resolve which mission the rest of the panel should describe.
+    const id = syncMissionDropdown(active);
+    // Show a "(N)" count in the title once there's more than one
+    // mission so the user knows the dropdown is meaningful.
+    if (active.length > 1) {
+        mhudCount.textContent = `${active.length} active`;
+        mhudCount.hidden = false;
+    } else {
+        mhudCount.hidden = true;
     }
+    if (id == null) { missionHud.hidden = true; return; }
     const d = planner.getMissionDetail(id);
     if (!d) { missionHud.hidden = true; return; }
-    missionHud.hidden = false;
-    mhudName.textContent  = d.payloadName || `mission #${d.id}`;
     mhudKind.textContent  = KIND_DISPLAY[d.kind] || d.kind;
     mhudPhase.textContent = d.phase || '—';
     if (d.targetName) {
@@ -2010,22 +2154,31 @@ updateTargetUI();
 // the upcoming weather feed pushes real data via setPadWeather().
 updatePadWeatherUI();
 
-// ── Pad-weather demo seed ──────────────────────────────────────────
-// Nothing populates the pad weather feed yet, but the visual + gating
-// scaffold is wired and ready. We seed a handful of plausible defaults
-// here so the colored ring / badge / Launch gate are exercise-able
-// before the real feed lands. Once it does, just delete this block —
-// the same setPadWeather() entry point is what the feed will use.
-setTimeout(() => {
-    planner.setPadWeather('earth', 'ksc',         'go',      'Clear · 12 kt easterly · ceiling 30 kft');
-    planner.setPadWeather('earth', 'starbase',    'caution', 'Marginal upper-level winds');
-    planner.setPadWeather('earth', 'vandy',       'go',      'Marine layer 200 ft · winds calm');
-    planner.setPadWeather('earth', 'kourou',      'scrub',   'Tropical squall line within 20 nmi');
-    planner.setPadWeather('earth', 'baikonur',    'caution', 'Icing layer 4–8 km · monitor');
-    planner.setPadWeather('earth', 'tanegashima', 'go',      'High pressure · light NE breeze');
-    planner.setPadWeather('moon',  'shackleton',  'go',      'Solar incidence nominal');
-    planner.setPadWeather('mars',  'jezero',      'caution', 'Regional dust opacity τ ≈ 0.6');
-}, 600);
+// ── Live pad-weather feed ──────────────────────────────────────────
+// Earth pads pull current conditions from open-meteo.com (free, no
+// API key, CORS-enabled, ~10k req/day per IP). Wind / gust / precip /
+// cloud / WMO weather code are translated into go / caution / scrub
+// by mission-pad-weather.js using simplified launch commit criteria.
+// Moon and Mars pads use synthetic models (polar twilight, Mars Ls
+// dust season). The feed polls every 15 min; UI updates flow through
+// planner.setPadWeather() which retints rings, refreshes the badge,
+// and logs to the mission journal automatically.
+const wxFeed = startWeatherFeed(planner, {
+    log: (msg) => console.warn('[mission-planner]', msg),
+});
+// Manual-refresh button on the pad weather badge. Spins while the
+// fetch is in flight so the user gets instant feedback that the click
+// landed (Open-Meteo usually responds in well under a second).
+const wxRefreshBtn = document.getElementById('mp-pad-weather-refresh');
+wxRefreshBtn.addEventListener('click', async () => {
+    wxRefreshBtn.classList.add('spinning');
+    try {
+        await wxFeed.refreshNow();
+        pushLog('🌦 Pad weather feed refreshed', 'window');
+    } finally {
+        wxRefreshBtn.classList.remove('spinning');
+    }
+});
 
 // ── Auto-launch a starter LEO so the page never looks empty ─────────
 setTimeout(() => {
