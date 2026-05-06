@@ -19,13 +19,39 @@
 
 import { provStore } from './provenance.js';
 
-const REFRESH_MS = 60 * 60 * 1000;   // 1 hour
-const ENDPOINT   = '/api/celestrak/aristotle?sort=range&limit=25';
+const REFRESH_MS       = 60 * 60 * 1000;   // 1 hour — happy path
+const ERROR_RETRY_MS   = 5  * 60 * 1000;   // 5 min while upstream is unhappy
+const ENDPOINT         = '/api/celestrak/aristotle?sort=range&limit=25';
+const CACHE_KEY        = 'op:aristotle:last';
+const CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1000;   // 6 h before stale fallback expires
 
 let _root        = null;
 let _timer       = null;
 let _onSelect    = null;       // (noradId) => void — wired by operations.html
 let _lastFetched = null;
+let _inError     = false;      // toggles the faster retry cadence
+
+function readCache() {
+    try {
+        const raw = sessionStorage.getItem(CACHE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed?.fetched || !Array.isArray(parsed?.conjunctions)) return null;
+        const ageMs = Date.now() - new Date(parsed.fetched).getTime();
+        if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > CACHE_MAX_AGE_MS) return null;
+        return parsed;
+    } catch { return null; }
+}
+
+function writeCache(data) {
+    try { sessionStorage.setItem(CACHE_KEY, JSON.stringify(data)); }
+    catch { /* quota / disabled storage — non-fatal */ }
+}
+
+function scheduleNext() {
+    if (_timer) clearTimeout(_timer);
+    _timer = setTimeout(refresh, _inError ? ERROR_RETRY_MS : REFRESH_MS);
+}
 
 /**
  * Mount the Aristotle panel. Pass a click handler so a row click can
@@ -37,12 +63,19 @@ export function mountAristotle(rootEl, opts = {}) {
     _onSelect = opts.onSelect ?? null;
     if (!_root) return () => {};
 
-    _root.innerHTML = `<div class="op-deck-empty">Loading conjunction feed…</div>`;
+    // Render cached rows immediately if we have any so the panel never
+    // shows a blank loader on tab-switch / SPA-style remount.
+    const cached = readCache();
+    if (cached) {
+        _lastFetched = cached.fetched;
+        renderRows(cached);
+    } else {
+        _root.innerHTML = `<div class="op-deck-empty">Loading conjunction feed…</div>`;
+    }
     refresh();
-    _timer = setInterval(refresh, REFRESH_MS);
 
     return () => {
-        if (_timer) clearInterval(_timer);
+        if (_timer) clearTimeout(_timer);
         _timer = null;
     };
 }
@@ -52,12 +85,16 @@ export async function refresh() {
     if (!_root) return;
     try {
         const res = await fetch(ENDPOINT);
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         if (!res.ok || data.error) {
-            renderError(data.error || `HTTP ${res.status}`, data.detail);
+            handleFailure(data.error || `HTTP ${res.status}`, data.detail);
             return;
         }
         _lastFetched = data.fetched;
+        _inError = false;
+        if ((data.conjunctions ?? []).length > 0) {
+            writeCache(data);
+        }
         renderRows(data);
         // Provenance: bind the conjunction count so the data dictionary
         // export captures Aristotle's contribution. Source attribution
@@ -75,7 +112,26 @@ export async function refresh() {
                        + '12 h refresh upstream.',
         });
     } catch (err) {
-        renderError(err.message);
+        handleFailure(err.message);
+    } finally {
+        scheduleNext();
+    }
+}
+
+/**
+ * Centralised failure path — falls back to a cached payload (rendered
+ * with a stale banner) when one is available, so a flaky upstream
+ * doesn't blank the panel. Only renders the hard-error state when we
+ * have nothing usable to show.
+ */
+function handleFailure(msg, detail) {
+    _inError = true;
+    const cached = readCache();
+    if (cached?.conjunctions?.length) {
+        _lastFetched = cached.fetched;
+        renderRows(cached, { staleReason: msg });
+    } else {
+        renderError(msg, detail);
     }
 }
 
@@ -101,9 +157,10 @@ function renderError(msg, detail) {
         ?.addEventListener('click', () => refresh());
 }
 
-function renderRows(data) {
+function renderRows(data, opts = {}) {
     if (!_root) return;
     const rows = data.conjunctions ?? [];
+    const staleReason = opts.staleReason ?? null;
 
     if (rows.length === 0) {
         const warn = data.warning === 'parser-no-rows'
@@ -126,7 +183,15 @@ function renderRows(data) {
         : ageMin < 60 ? `${ageMin} min ago`
         : `${Math.round(ageMin / 60)} h ago`;
 
+    const staleBanner = staleReason
+        ? `<div style="font-size:.66rem;color:#fc6;margin-bottom:6px;
+                       font-family:monospace;border-left:2px solid #fc6;padding-left:6px">
+             showing cached rows — live feed: ${esc(staleReason)}
+           </div>`
+        : '';
+
     let html = `
+        ${staleBanner}
         <div style="display:flex;justify-content:space-between;align-items:baseline;
                     font-size:.66rem;color:#778;margin-bottom:6px;font-family:monospace">
             <span>top ${rows.length} by min range</span>

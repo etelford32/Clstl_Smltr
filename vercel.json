@@ -252,6 +252,10 @@
       "destination": "/contact-enterprise.html"
     },
     {
+      "source": "/feedback",
+      "destination": "/feedback.html"
+    },
+    {
       "source": "/for-educators",
       "destination": "/for-educators.html"
     },
