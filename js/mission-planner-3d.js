@@ -67,23 +67,33 @@ const SOI_MOON_SCENE  = SOI_MOON / GEO_UNIT_KM;
 
 // ── Launch sites ────────────────────────────────────────────────────────────
 export const LAUNCH_SITES = [
-    { id: 'ksc',     name: 'Kennedy SC (USA)',     lat: 28.573, lon: -80.649 },
-    { id: 'baikonur',name: 'Baikonur (KAZ)',       lat: 45.965, lon:  63.305 },
-    { id: 'kourou',  name: 'Kourou (FRA)',         lat:  5.236, lon: -52.768 },
-    { id: 'starbase',name: 'Starbase (USA)',       lat: 25.997, lon: -97.155 },
-    { id: 'wenchang',name: 'Wenchang (CHN)',       lat: 19.614, lon: 110.951 },
-    { id: 'vandy',   name: 'Vandenberg (USA)',     lat: 34.742, lon:-120.572 },
+    { id: 'ksc',         name: 'Kennedy SC (USA)',       lat: 28.573, lon: -80.649 },
+    { id: 'baikonur',    name: 'Baikonur (KAZ)',         lat: 45.965, lon:  63.305 },
+    { id: 'kourou',      name: 'Kourou (FRA)',           lat:  5.236, lon: -52.768 },
+    { id: 'starbase',    name: 'Starbase (USA)',         lat: 25.997, lon: -97.155 },
+    { id: 'wenchang',    name: 'Wenchang (CHN)',         lat: 19.614, lon: 110.951 },
+    { id: 'vandy',       name: 'Vandenberg (USA)',       lat: 34.742, lon:-120.572 },
+    { id: 'tanegashima', name: 'Tanegashima (JPN)',      lat: 30.400, lon: 130.969 },
+    { id: 'sriharikota', name: 'Sriharikota (IND)',      lat: 13.720, lon:  80.230 },
+    { id: 'plesetsk',    name: 'Plesetsk (RUS)',         lat: 62.957, lon:  40.583 },
 ];
 
-// ── Mars surface bases (gamification — fictional but anchored to real
-//     Olympus Mons coordinates so the dome sits where it ought to). ──────────
+// ── Mars surface bases — anchored to real landed-mission and proposed-
+//     outpost coordinates so the colony domes sit at recognisable locations
+//     (Olympus Mons / Jezero / Gale / Utopia Planitia). ─────────────────────
 export const MARS_BIOMES = [
-    { id: 'olympia', name: 'Olympia Base', lat: 18.65, lon: 226.2 },
+    { id: 'olympia', name: 'Olympia Base',     lat:  18.65, lon: 226.20 },  // ~ Olympus Mons summit
+    { id: 'jezero',  name: 'Jezero Outpost',   lat:  18.44, lon:  77.45 },  // Mars 2020 / Perseverance
+    { id: 'gale',    name: 'Gale Crater Base', lat:  -5.40, lon: 137.81 },  // MSL / Curiosity
+    { id: 'utopia',  name: 'Utopia Planitia',  lat:  49.70, lon: 117.50 },  // Viking 2 / Tianwen-1 area
 ];
 
-// ── Moon surface bases (anchored to real Apollo / Artemis coordinates). ───
+// ── Moon surface bases — Apollo + Artemis-region coordinates. ─────────────
 export const MOON_BASES = [
-    { id: 'tranquility', name: 'Tranquility Base', lat:  0.674, lon:  23.473 },
+    { id: 'tranquility', name: 'Tranquility Base', lat:   0.674, lon:  23.473 },  // Apollo 11
+    { id: 'shackleton',  name: 'Shackleton Stn',   lat: -89.660, lon:   0.000 },  // Lunar South Pole / Artemis
+    { id: 'imbrium',     name: 'Mare Imbrium',     lat:  32.800, lon: -15.600 },  // Apollo 15 / proposed outpost
+    { id: 'schrodinger', name: 'Schrödinger Bsn',  lat: -75.000, lon: 132.400 },  // Far-side proposal
 ];
 
 // ── Origin → destination route catalogue. The launcher reads this list to
@@ -238,18 +248,31 @@ export function initMissionPlanner({ container, onEvent } = {}) {
     // Surface markers — parented to the spinning Earth so labels stay pinned
     // to real lat/lon as the planet rotates. Each site gets a small base
     // disk + glowing dot + canvas-sprite label naming the actual pad.
+    // We also keep a Map so flyToPad can look up the marker's live world
+    // position (which moves with both the planet's heliocentric drift and
+    // its diurnal rotation). Mars / Moon biome markers are constructed in
+    // buildWorldScene and surfaced via world.marsBiomeMarkers / .moonBaseMarkers.
+    const padMarkers = new Map();   // key: `${body}:${id}` → Object3D
     for (const s of LAUNCH_SITES) {
-        addLaunchSiteMarker(geo.earth, s);
+        padMarkers.set(`earth:${s.id}`, addLaunchSiteMarker(geo.earth, s));
+    }
+    for (const id in world.marsBiomeMarkers) {
+        padMarkers.set(`mars:${id}`, world.marsBiomeMarkers[id]);
+    }
+    for (const id in world.moonBaseMarkers) {
+        padMarkers.set(`moon:${id}`, world.moonBaseMarkers[id]);
     }
 
     // ── Focus presets (mode toggle replaced) ────────────────────────────────
-    // setMode is kept as a no-op compat shim that just retargets the camera.
-    // The renderer doesn't switch scenes anymore.
+    // setMode just records the geo/helio frame for legacy code paths. The
+    // renderer doesn't switch scenes anymore, and we deliberately DO NOT
+    // retarget the camera here — auto-flipping the framing on every launch
+    // was disorienting (e.g. firing a Mars mission would yank the user from
+    // Earth to a Sun view). The user now has explicit Focus buttons + the
+    // Fly-to-pad control to pick where the camera lives.
     function setMode(mode) {
         if (mode !== 'geo' && mode !== 'helio') return;
         state.mode = mode;
-        if (mode === 'geo')   focusEarth();
-        else                  focusSun();
         onEvent?.({ type: 'mode', mode });
     }
 
@@ -843,6 +866,9 @@ export function initMissionPlanner({ container, onEvent } = {}) {
 
         updateEarthSystem(dt);   // earthSystem heliocentric pos + Earth-frame anims
         updateHelio(dt);          // Sun spin + Mercury/Venus/Mars + helio cruises
+        // Camera animation + body-follow translation must run AFTER body
+        // positions update so the rig is locked to current world coords.
+        updateCameraSystem();
         world.controls.update();
         renderer.render(world.scene, world.camera);
 
@@ -1279,60 +1305,276 @@ export function initMissionPlanner({ container, onEvent } = {}) {
     });
     ro.observe(container);
 
-    // Focus presets — set OrbitControls target + camera position relative
-    // to whichever body the user wants centered. All use world coordinates
-    // since planets move (Earth at 1 AU from Sun, etc.).
-    function focusEarth() {
-        const eP = world.earthSystem.position;
-        world.controls.target.copy(eP);
-        world.camera.position.set(eP.x + 3.5, eP.y + 2.4, eP.z + 4.6);
+    // ── Camera follow + animated transitions ────────────────────────────
+    // The previous one-shot focus presets snapped the camera to a body's
+    // position at click time — but every body except the Sun is moving
+    // (Earth orbits the Sun once a year in scene coords, the Moon orbits
+    // Earth, Mars drifts heliocentrically). So the framing was lost
+    // within a few seconds of clicking. The new system:
+    //
+    //   1. flyCameraTo() animates the camera + OrbitControls target along
+    //      a cubic ease toward an offset relative to the body. Because the
+    //      offset is re-evaluated against the body's current world position
+    //      each frame, the animation lands cleanly even while the body
+    //      drifts.
+    //   2. After the animation, follow.getter is set to the body's
+    //      world-position function. Each subsequent frame, both the
+    //      camera and the OrbitControls target are translated by the
+    //      body's per-frame delta. The user can still orbit / zoom freely
+    //      because their input modifies the offset relative to the target.
+    //   3. minDistance / maxDistance are updated to match the body so the
+    //      user can zoom close to small bodies (Moon at 0.27 R⊕, Mars at
+    //      0.53 R⊕) without OrbitControls clamping them out.
+    const followState = {
+        getter: null,                          // () → THREE.Vector3 (body's world pos)
+        lastPos: new THREE.Vector3(),
+        anim:    null,                         // active animation (see flyCameraTo)
+    };
+
+    function flyCameraTo({
+        getTargetPos,                          // () → Vector3 of body to focus
+        offset,                                // Vector3 from body to camera
+        dur     = 0.85,                        // seconds
+        minDist = null,                        // OrbitControls clamp post-animation
+        maxDist = null,
+        follow  = true,                        // track body after animation completes
+    }) {
+        followState.anim = {
+            fromPos:    world.camera.position.clone(),
+            fromTarget: world.controls.target.clone(),
+            getTargetPos,
+            offset:     offset.clone(),
+            t0:         performance.now() / 1000,
+            dur,
+            minDist, maxDist, follow,
+        };
     }
-    function focusMoon() {
-        const mWorld = new THREE.Vector3();
-        world.moon.getWorldPosition(mWorld);
-        world.controls.target.copy(mWorld);
-        world.camera.position.set(mWorld.x * 1.001, mWorld.y + 8, mWorld.z * 1.001 + 8);
+
+    function updateCameraSystem() {
+        const a = followState.anim;
+        if (a) {
+            // First tick: relax the OrbitControls distance clamp so the
+            // lerped camera position isn't snapped back when crossing
+            // body-radius boundaries (e.g., flying from Earth orbit to
+            // Mars hover, where the per-body minDistance differs).
+            if (!a.clampRelaxed) {
+                a.savedMin = world.controls.minDistance;
+                a.savedMax = world.controls.maxDistance;
+                world.controls.minDistance = 1e-3;
+                world.controls.maxDistance = HELIO_MAX;
+                a.clampRelaxed = true;
+            }
+            const t = (performance.now() / 1000 - a.t0) / a.dur;
+            const u = Math.min(1, Math.max(0, t));
+            const e = easeInOutCubic(u);
+            const curTarget = a.getTargetPos();
+            const curCam    = curTarget.clone().add(a.offset);
+            world.camera.position.lerpVectors(a.fromPos, curCam, e);
+            world.controls.target.lerpVectors(a.fromTarget, curTarget, e);
+            if (u >= 1) {
+                world.controls.minDistance = a.minDist != null ? a.minDist : a.savedMin;
+                world.controls.maxDistance = a.maxDist != null ? a.maxDist : a.savedMax;
+                if (a.follow) {
+                    followState.getter = a.getTargetPos;
+                    followState.lastPos.copy(curTarget);
+                } else {
+                    followState.getter = null;
+                }
+                followState.anim = null;
+            }
+            return;
+        }
+        if (followState.getter) {
+            const cur = followState.getter();
+            const dx = cur.x - followState.lastPos.x;
+            const dy = cur.y - followState.lastPos.y;
+            const dz = cur.z - followState.lastPos.z;
+            if (dx*dx + dy*dy + dz*dz > 1e-12) {
+                world.camera.position.x += dx;
+                world.camera.position.y += dy;
+                world.camera.position.z += dz;
+                world.controls.target.x  += dx;
+                world.controls.target.y  += dy;
+                world.controls.target.z  += dz;
+                followState.lastPos.copy(cur);
+            }
+        }
     }
-    function focusMars() { _focusPlanet(hel.mars, 20); }
-    function focusJupiter() {
-        // Jupiter is huge (10.96 R⊕) — pull back further so it fits.
-        _focusPlanet(hel.jupiter, hel.planets.jupiter.realRadius * 4);
-    }
-    function focusSaturn() {
-        // Saturn's ring system extends to ~2.4× planet radius; frame both.
-        _focusPlanet(hel.saturn, hel.planets.saturn.realRadius * 6);
-    }
-    function _focusPlanet(group, distance) {
-        const p = group.position;
-        world.controls.target.copy(p);
-        const dir = p.clone().normalize();
-        // Approach along the radial direction so the Sun lights the visible
-        // face. Tilt slightly above the ecliptic for a 3/4 view.
-        world.camera.position.copy(p)
-            .add(dir.multiplyScalar(distance))
+
+    // Place the camera on the SUN-LIT side of the body. dirToSun = -bodyPos
+    // normalized (since the Sun sits at scene origin). The lit hemisphere
+    // faces the Sun, so we want the camera between the Sun and the body
+    // (with a slight upward + sideways offset for a 3/4 view).
+    function sunLitOffset(bodyPos, distance) {
+        const sunward = bodyPos.clone();
+        if (sunward.lengthSq() < 1e-6) sunward.set(-1, 0, 0);
+        sunward.normalize().multiplyScalar(-1);                 // body → Sun
+        // Sideways perpendicular to sunward and ecliptic up.
+        const side = new THREE.Vector3(0, 1, 0).cross(sunward);
+        if (side.lengthSq() < 1e-6) side.set(1, 0, 0);
+        side.normalize();
+        // Mix: 60% toward Sun, 50% sideways, 35% above ecliptic.
+        return sunward.multiplyScalar(distance * 0.6)
+            .add(side.multiplyScalar(distance * 0.5))
             .add(new THREE.Vector3(0, distance * 0.4, 0));
     }
+
+    // Focus presets — these now drive flyCameraTo so transitions are smooth
+    // and bodies stay framed as they drift. minDistance is set per-body so
+    // the user can fly close to small bodies (Moon 0.27 R⊕, Mars 0.53 R⊕).
+    const SUN_MIN  = 80;
+    const HELIO_MAX = 50.0 * AU_TO_SCENE;
+
+    function focusEarth() {
+        const getEarth = () => world.earthSystem.position.clone();
+        flyCameraTo({
+            getTargetPos: getEarth,
+            offset:       sunLitOffset(getEarth(), 5.5),
+            minDist:      1.05,
+            maxDist:      HELIO_MAX,
+        });
+    }
+    function focusMoon() {
+        const getMoon = () => {
+            const v = new THREE.Vector3();
+            world.moon.getWorldPosition(v);
+            return v;
+        };
+        // Approach Moon from the side that faces the Sun, tipped up so
+        // Earth's lit hemisphere shows in the background.
+        const moonPos = getMoon();
+        const earthPos = world.earthSystem.position;
+        // sunward in scene coords (Sun is origin); offset along Earth→Sun
+        // direction so we view the Moon's lit face with Earth visible.
+        const sunward = earthPos.clone();
+        if (sunward.lengthSq() < 1e-6) sunward.set(-1, 0, 0);
+        sunward.normalize().multiplyScalar(-1);
+        const offset = sunward.multiplyScalar(0.6)
+            .add(new THREE.Vector3(0, 0.45, 0))
+            .normalize().multiplyScalar(MOON_R_SCENE * 8);
+        flyCameraTo({
+            getTargetPos: getMoon,
+            offset,
+            minDist:      MOON_R_SCENE * 1.15,
+            maxDist:      HELIO_MAX,
+        });
+    }
+    function focusMars() {
+        _focusPlanet(hel.mars, hel.planets.mars.realRadius);
+    }
+    function focusJupiter() {
+        _focusPlanet(hel.jupiter, hel.planets.jupiter.realRadius);
+    }
+    function focusSaturn() {
+        _focusPlanet(hel.saturn, hel.planets.saturn.realRadius);
+    }
+    function _focusPlanet(group, realR) {
+        const distance = realR * 6;             // pull back to fit body + halo
+        const minDist  = realR * 1.05;
+        flyCameraTo({
+            getTargetPos: () => group.position.clone(),
+            offset:       sunLitOffset(group.position, distance),
+            minDist,
+            maxDist:      HELIO_MAX,
+        });
+    }
     function focusSun() {
-        world.controls.target.set(0, 0, 0);
-        world.camera.position.set(0, 0.5 * AU_TO_SCENE, 1.0 * AU_TO_SCENE);
+        flyCameraTo({
+            getTargetPos: () => new THREE.Vector3(0, 0, 0),
+            offset:       new THREE.Vector3(0, 0.5 * AU_TO_SCENE, 1.0 * AU_TO_SCENE),
+            minDist:      SUN_MIN,
+            maxDist:      HELIO_MAX,
+            follow:       false,
+        });
     }
     function focusSystem() {
-        // Frame the inner solar system (Mercury through Mars).
-        world.controls.target.set(0, 0, 0);
-        world.camera.position.set(0, 1.5 * AU_TO_SCENE, 2.5 * AU_TO_SCENE);
+        flyCameraTo({
+            getTargetPos: () => new THREE.Vector3(0, 0, 0),
+            offset:       new THREE.Vector3(0, 1.5 * AU_TO_SCENE, 2.5 * AU_TO_SCENE),
+            minDist:      SUN_MIN,
+            maxDist:      HELIO_MAX,
+            follow:       false,
+        });
     }
     function focusOuterSystem() {
-        // Pull back so Neptune's orbit (30 AU) is comfortably in frame.
-        world.controls.target.set(0, 0, 0);
-        world.camera.position.set(0, 22 * AU_TO_SCENE, 38 * AU_TO_SCENE);
+        flyCameraTo({
+            getTargetPos: () => new THREE.Vector3(0, 0, 0),
+            offset:       new THREE.Vector3(0, 22 * AU_TO_SCENE, 38 * AU_TO_SCENE),
+            minDist:      SUN_MIN,
+            maxDist:      HELIO_MAX,
+            follow:       false,
+        });
+    }
+
+    // ── Fly to a specific launch pad on its parent body ─────────────────
+    // The camera follows the BODY CENTER (not the rotating pad) at a close
+    // hover-distance, with the initial radial offset chosen so the pad is
+    // centered in the frame at arrival. As the planet spins, the pad
+    // sweeps past the view (this feels right — like watching a launch site
+    // turn around the limb), and the body's heliocentric drift is handled
+    // by the follow translation. We don't track the pad's per-frame
+    // rotation because rotating the camera with the planet would make the
+    // surface look static and the framing disorienting at close zoom.
+    function flyToPad(body, padId) {
+        const key = `${body}:${padId}`;
+        const marker = padMarkers.get(key);
+        if (!marker) return;
+        let radius, getCenter;
+        if (body === 'earth') {
+            radius    = 1.0;
+            getCenter = () => world.earthSystem.position.clone();
+        } else if (body === 'moon') {
+            radius    = MOON_R_SCENE;
+            getCenter = () => {
+                const v = new THREE.Vector3();
+                world.moon.getWorldPosition(v);
+                return v;
+            };
+        } else if (body === 'mars') {
+            radius    = hel.planets.mars.realRadius;
+            getCenter = () => hel.mars.position.clone();
+        } else {
+            return;
+        }
+        // Distance from body center: surface is at `radius`, hover above
+        // surface at radius * 1.6 (so ~60% of body radius above ground —
+        // close enough to read the pad, far enough to see context).
+        const distance = radius * 1.6;
+        const minDist  = radius * 1.02;
+        // Direction from body center through the pad, at this instant.
+        const padWorld = new THREE.Vector3();
+        marker.getWorldPosition(padWorld);
+        const radialOut = padWorld.clone().sub(getCenter());
+        if (radialOut.lengthSq() < 1e-9) radialOut.set(0, 1, 0);
+        radialOut.normalize();
+        // Add a slight upward tilt so we look down at the surface, not
+        // straight at the limb.
+        const offset = radialOut.multiplyScalar(distance)
+            .add(new THREE.Vector3(0, radius * 0.3, 0));
+        flyCameraTo({
+            getTargetPos: getCenter,
+            offset,
+            minDist,
+            maxDist: HELIO_MAX,
+        });
     }
 
     // Seed initial body positions (zero-dt update so earthSystem.position
-    // reflects today's heliocentric Earth before first render), then frame
-    // the camera on Earth.
+    // reflects today's heliocentric Earth before first render). The
+    // initial framing is set directly (no animation) so the user lands on
+    // Earth instantly when the page loads.
     updateEarthSystem(0);
     updateHelio(0);
-    focusEarth();
+    {
+        const eP = world.earthSystem.position;
+        const offset = sunLitOffset(eP, 5.5);
+        world.controls.target.copy(eP);
+        world.camera.position.copy(eP).add(offset);
+        world.controls.minDistance = 1.05;
+        world.controls.maxDistance = HELIO_MAX;
+        followState.getter = () => world.earthSystem.position.clone();
+        followState.lastPos.copy(eP);
+    }
 
     requestAnimationFrame(tick);
 
@@ -1352,6 +1594,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         focusSun,
         focusSystem,
         focusOuterSystem,
+        flyToPad,
         getStats: () => ({
             rockets:        state.rockets.length,
             payloads:       state.payloads.length,
@@ -1495,9 +1738,12 @@ function buildWorldScene(renderer, w, h) {
         jupiterP.group, saturnP.group, uranusP.group, neptuneP.group,
     );
 
-    // Mars surface bases (Olympia Base) ride the spinning Mars surface.
+    // Mars surface bases (Olympia Base, Jezero, Gale, Utopia) ride the
+    // spinning Mars surface. Capture each marker group so flyToPad can
+    // resolve a pad's live world position later.
+    const marsBiomeMarkers = {};
     for (const biome of MARS_BIOMES) {
-        addMarsBiome(marsP.surface, MARS_R, biome);
+        marsBiomeMarkers[biome.id] = addMarsBiome(marsP.surface, MARS_R, biome);
     }
 
     const mercuryLabel = makeBodyLabel('Mercury', '#bba', 1.4);
@@ -1577,8 +1823,9 @@ function buildWorldScene(renderer, w, h) {
     );
     earthSystem.add(moon);
 
+    const moonBaseMarkers = {};
     for (const base of MOON_BASES) {
-        addMoonBiome(moon, MOON_R_SCENE, base);
+        moonBaseMarkers[base.id] = addMoonBiome(moon, MOON_R_SCENE, base);
     }
 
     const moonHalo = new THREE.Sprite(new THREE.SpriteMaterial({
@@ -1623,6 +1870,7 @@ function buildWorldScene(renderer, w, h) {
             mercury: mercuryP, venus:   venusP,   mars:    marsP,
             jupiter: jupiterP, saturn:  saturnP,  uranus:  uranusP, neptune: neptuneP,
         },
+        marsBiomeMarkers, moonBaseMarkers,
     };
 }
 
@@ -1678,6 +1926,10 @@ function addLaunchSiteMarker(earthMesh, site) {
     const surface = latLonToVec3(site.lat, site.lon, 1.0);
     const up      = surface.clone().normalize();
 
+    // Group all marker elements so callers can grab a single Object3D
+    // reference (used by flyToPad for current world position).
+    const group = new THREE.Group();
+
     // Small thin post connects the surface to the dot — sells the "this
     // pad is here" idea against the textured globe.
     const postLen = 0.06;
@@ -1685,19 +1937,17 @@ function addLaunchSiteMarker(earthMesh, site) {
         new THREE.CylinderGeometry(0.004, 0.004, postLen, 6),
         new THREE.MeshBasicMaterial({ color: 0xffcc66, transparent: true, opacity: 0.85 }),
     );
-    // Cylinder default axis is +Y; orient along the local up vector.
     post.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
     post.position.copy(up.clone().multiplyScalar(1.0 + postLen * 0.5));
-    earthMesh.add(post);
+    group.add(post);
 
     const dot = new THREE.Mesh(
         new THREE.SphereGeometry(0.022, 14, 10),
         new THREE.MeshBasicMaterial({ color: 0xffaa33 }),
     );
     dot.position.copy(up.clone().multiplyScalar(1.0 + postLen));
-    earthMesh.add(dot);
+    group.add(dot);
 
-    // Additive flare so the marker stays visible on the night side.
     const flare = new THREE.Sprite(new THREE.SpriteMaterial({
         map: makeRadialGradientTexture(0xffd07a, 0),
         transparent: true, opacity: 0.85,
@@ -1706,12 +1956,14 @@ function addLaunchSiteMarker(earthMesh, site) {
     }));
     flare.position.copy(dot.position);
     flare.scale.set(0.13, 0.13, 1);
-    earthMesh.add(flare);
+    group.add(flare);
 
-    // Canvas label — short name only so we don't clutter the globe.
     const label = makeBodyLabel(siteShortName(site), '#ffd6a0', 0.7);
     label.position.copy(up.clone().multiplyScalar(1.0 + postLen + 0.10));
-    earthMesh.add(label);
+    group.add(label);
+
+    earthMesh.add(group);
+    return group;
 }
 
 function siteShortName(site) {
