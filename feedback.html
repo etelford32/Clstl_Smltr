@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Feedback &amp; Devlog — Parkers Physics</title>
+    <meta name="description" content="Request features, report bugs, and follow the latest changes shipping in the Parkers Physics app.">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a0a2e 100%);
+            color: #fff; min-height: 100vh; display: flex; flex-direction: column;
+        }
+        nav { position: sticky; top: 0; z-index: 600; height: 54px; background: rgba(4,2,16,.94); backdrop-filter: blur(14px); border-bottom: 1px solid rgba(255,200,0,.12); display: flex; align-items: center; padding: 0 16px; gap: 10px; }
+
+        main { flex: 1; max-width: 1080px; margin: 0 auto; padding: 3rem 24px 4rem; width: 100%; }
+
+        .hero h1 {
+            font-size: 2.4rem; font-weight: 800;
+            background: linear-gradient(45deg, #ffd700, #ff8c00);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+            margin-bottom: .6rem;
+        }
+        .hero p { color: #aab; font-size: 1.05rem; max-width: 720px; line-height: 1.65; }
+
+        .layout { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 28px; margin-top: 2.4rem; }
+        @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } }
+
+        .panel {
+            background: rgba(255,255,255,.04);
+            border: 1px solid rgba(255,255,255,.08);
+            border-radius: 14px; padding: 24px 22px;
+        }
+        .panel h2 { font-size: 1.1rem; color: #ffd700; margin-bottom: 14px; font-weight: 700; }
+        .panel .panel-sub { font-size: .82rem; color: #889; margin-top: -8px; margin-bottom: 16px; line-height: 1.55; }
+
+        .type-grid {
+            display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;
+            margin-bottom: 16px;
+        }
+        @media (max-width: 540px) { .type-grid { grid-template-columns: 1fr; } }
+        .type-opt {
+            display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+            padding: 11px 12px; cursor: pointer;
+            background: rgba(255,255,255,.04);
+            border: 1px solid rgba(255,255,255,.08); border-radius: 8px;
+            transition: border-color .15s, background .15s;
+        }
+        .type-opt input { display: none; }
+        .type-opt .t-label { font-size: .88rem; color: #fff; font-weight: 600; }
+        .type-opt .t-sub   { font-size: .72rem; color: #889; }
+        .type-opt:has(input:checked) {
+            border-color: rgba(255,215,0,.5);
+            background: rgba(255,215,0,.06);
+        }
+        .type-opt:has(input:checked) .t-label { color: #ffd700; }
+
+        .form-group { margin-bottom: 14px; }
+        .form-group label {
+            display: block; font-size: .76rem; color: #888; font-weight: 600;
+            margin-bottom: 5px; letter-spacing: .04em; text-transform: uppercase;
+        }
+        .form-group input, .form-group textarea, .form-group select {
+            width: 100%; padding: 11px 14px;
+            background: rgba(255,255,255,.06);
+            border: 1px solid rgba(255,255,255,.12); border-radius: 8px;
+            color: #fff; font-family: inherit; font-size: .92rem;
+            transition: border-color .2s; outline: none;
+        }
+        .form-group input:focus, .form-group textarea:focus, .form-group select:focus { border-color: rgba(255,215,0,.5); }
+        .form-group textarea { resize: vertical; min-height: 130px; }
+        .form-group .hint { font-size: .72rem; color: #667; margin-top: 4px; }
+
+        /* Honeypot — hidden from real users; bots fill it and trip the filter. */
+        .hp-field {
+            position: absolute; left: -10000px; width: 1px; height: 1px;
+            overflow: hidden; opacity: 0;
+        }
+
+        .submit-btn {
+            width: 100%; padding: 13px; border-radius: 8px; border: none;
+            background: linear-gradient(45deg, #ffd700, #ff8c00);
+            color: #0a0a1a; font-family: inherit; font-size: 1rem; font-weight: 700;
+            cursor: pointer; transition: opacity .2s, transform .15s;
+        }
+        .submit-btn:hover { opacity: .9; transform: translateY(-1px); }
+        .submit-btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+
+        .status-msg {
+            margin-top: 14px; padding: 10px 14px; border-radius: 8px;
+            font-size: .88rem; display: none;
+        }
+        .status-msg.ok      { background: rgba(78,255,145,.08); border: 1px solid rgba(78,255,145,.3); color: #4eff91; display: block; }
+        .status-msg.err     { background: rgba(255,80,80,.08);  border: 1px solid rgba(255,80,80,.3);  color: #ff8080; display: block; }
+
+        /* ── Devlog ─────────────────────────────────────────────────── */
+        .devlog { display: flex; flex-direction: column; gap: 18px; }
+        .release {
+            border-left: 2px solid rgba(255,215,0,.35);
+            padding: 2px 0 4px 16px;
+        }
+        .release-head {
+            display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px;
+            margin-bottom: 8px;
+        }
+        .release-tag {
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: .78rem; color: #ffd700; font-weight: 700;
+            background: rgba(255,215,0,.08);
+            padding: 2px 8px; border-radius: 999px;
+            border: 1px solid rgba(255,215,0,.25);
+        }
+        .release-date { font-size: .76rem; color: #667; }
+        .release-title { font-size: .98rem; color: #fff; font-weight: 600; }
+        .change-list { list-style: none; }
+        .change-list li {
+            font-size: .85rem; color: #cdd; line-height: 1.55;
+            padding: 4px 0 4px 16px; position: relative;
+        }
+        .change-list li::before {
+            content: ''; position: absolute; left: 0; top: 13px;
+            width: 6px; height: 6px; border-radius: 50%;
+        }
+        .change-list li.feat::before { background: #4eff91; }
+        .change-list li.fix::before  { background: #ff8c00; }
+        .change-list li.perf::before { background: #6aa6ff; }
+        .change-list li .kind {
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: .68rem; text-transform: uppercase;
+            margin-right: 6px; opacity: .85;
+        }
+        .change-list li.feat .kind { color: #4eff91; }
+        .change-list li.fix  .kind { color: #ff8c00; }
+        .change-list li.perf .kind { color: #6aa6ff; }
+
+        .devlog-foot {
+            margin-top: 18px; font-size: .78rem; color: #667;
+            border-top: 1px solid rgba(255,255,255,.06);
+            padding-top: 14px;
+        }
+        .devlog-foot a { color: #a080ff; text-decoration: none; }
+        .devlog-foot a:hover { color: #c0a8ff; }
+
+        footer { text-align: center; padding: 2rem; color: #444; font-size: .8rem; border-top: 1px solid rgba(255,255,255,.06); }
+        footer a { color: #666; text-decoration: none; }
+        footer a:hover { color: #ffd700; }
+    </style>
+</head>
+<body>
+
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("feedback");</script>
+
+<main>
+    <div class="hero">
+        <h1>Feedback &amp; Devlog</h1>
+        <p>Tell us what to build next, flag a bug you've hit, or check what's shipped recently. Every submission lands in the team's inbox — we read all of them.</p>
+    </div>
+
+    <div class="layout">
+        <!-- ── Submission form ────────────────────────────────────── -->
+        <div class="panel">
+            <h2>Send feedback</h2>
+            <p class="panel-sub">Pick a category, give us enough detail to reproduce or scope the work, and (optionally) leave an email if you want a reply.</p>
+
+            <form id="feedback-form" novalidate>
+                <label style="display:block;font-size:.76rem;color:#888;font-weight:600;margin-bottom:8px;letter-spacing:.04em;text-transform:uppercase">Category</label>
+                <div class="type-grid" role="radiogroup" aria-label="Feedback category">
+                    <label class="type-opt">
+                        <input type="radio" name="kind" value="feature_request" checked>
+                        <span class="t-label">Feature request</span>
+                        <span class="t-sub">Something you'd like to see</span>
+                    </label>
+                    <label class="type-opt">
+                        <input type="radio" name="kind" value="bug_report">
+                        <span class="t-label">Bug report</span>
+                        <span class="t-sub">Something broken or wrong</span>
+                    </label>
+                    <label class="type-opt">
+                        <input type="radio" name="kind" value="general">
+                        <span class="t-label">General</span>
+                        <span class="t-sub">Praise, questions, ideas</span>
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label for="page">Page or simulator <span style="font-weight:400;color:#778;text-transform:none">(optional)</span></label>
+                    <select id="page" name="page">
+                        <option value="">— Not page-specific —</option>
+                        <option value="earth">Earth Weather</option>
+                        <option value="moon">Moon</option>
+                        <option value="operations">Operations</option>
+                        <option value="satellites">Satellites</option>
+                        <option value="launch-planner">Launch Planner</option>
+                        <option value="upper-atmosphere">Upper Atmosphere</option>
+                        <option value="space-weather">Space Weather</option>
+                        <option value="threejs">Solar System</option>
+                        <option value="sun">The Sun</option>
+                        <option value="missions">Space Missions</option>
+                        <option value="mission-planner">Mission Planner</option>
+                        <option value="galactic-map">Galaxy</option>
+                        <option value="sirius">Sirius Binary</option>
+                        <option value="betelgeuse">Betelgeuse</option>
+                        <option value="vega">Vega</option>
+                        <option value="achernar">Achernar</option>
+                        <option value="wr102">WR-102</option>
+                        <option value="star3d">Sirius Planetary</option>
+                        <option value="ton618">TON 618</option>
+                        <option value="sagittarius">Sagittarius A*</option>
+                        <option value="black-hole-fluid">Black Hole Accretion</option>
+                        <option value="solar-fluid">Solar Fluid</option>
+                        <option value="stellar-wind">Stellar Wind</option>
+                        <option value="star2d">2D Stellar Modeler</option>
+                        <option value="star2d-advanced">Advanced 2D Solar</option>
+                        <option value="gravity-lab">Gravity Lab</option>
+                        <option value="time-machine">Orbital Time Machine</option>
+                        <option value="dashboard">Dashboard</option>
+                        <option value="account">Account</option>
+                        <option value="pricing">Pricing</option>
+                        <option value="signin">Sign in / Sign up</option>
+                        <option value="other">Other</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="subject">Subject</label>
+                    <input type="text" id="subject" name="subject" required maxlength="160" placeholder="One-line summary">
+                </div>
+
+                <div class="form-group">
+                    <label for="message">Details</label>
+                    <textarea id="message" name="message" required maxlength="4000" placeholder="For bugs: what you did, what you expected, what happened. Include browser + device if it helps. For feature requests: what problem would this solve?"></textarea>
+                    <div class="hint">Up to 4,000 characters.</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="email">Email <span style="font-weight:400;color:#778;text-transform:none">(optional, only if you want a reply)</span></label>
+                    <input type="email" id="email" name="email" maxlength="200" autocomplete="email" placeholder="you@example.com">
+                </div>
+
+                <!-- Honeypot — bots fill this; humans never see it -->
+                <div class="hp-field" aria-hidden="true">
+                    <label for="hp_field">Leave this field empty</label>
+                    <input type="text" id="hp_field" name="hp_field" tabindex="-1" autocomplete="off">
+                </div>
+
+                <button type="submit" class="submit-btn" id="submit-btn">Send feedback →</button>
+                <div class="status-msg" id="status-msg"></div>
+            </form>
+        </div>
+
+        <!-- ── Devlog ──────────────────────────────────────────────── -->
+        <div class="panel">
+            <h2>Recent changes</h2>
+            <p class="panel-sub">A curated digest of the most recent shipped fixes, features, and performance work. Newest first.</p>
+
+            <div class="devlog">
+                <div class="release">
+                    <div class="release-head">
+                        <span class="release-tag">2026-05-06</span>
+                        <span class="release-title">Galactic Map polish</span>
+                    </div>
+                    <ul class="change-list">
+                        <li class="fix"><span class="kind">fix</span>Aspect-aware camera FOV — wide-view stretching is gone on ultrawide monitors.</li>
+                        <li class="feat"><span class="kind">feat</span>Galactic Map HUD and Sun-orbit panels are now minimizable and draggable.</li>
+                        <li class="feat"><span class="kind">feat</span>Unified <code>gp-panel</code> chrome across the sidebar, zoom bar, and coordinate display.</li>
+                    </ul>
+                </div>
+
+                <div class="release">
+                    <div class="release-head">
+                        <span class="release-tag">2026-05-04</span>
+                        <span class="release-title">Mission Planner overhaul</span>
+                    </div>
+                    <ul class="change-list">
+                        <li class="fix"><span class="kind">fix</span>Repaired broken camera that froze on first load.</li>
+                        <li class="feat"><span class="kind">feat</span>Intuitive solar-system navigation — click any body to focus and frame it.</li>
+                    </ul>
+                </div>
+
+                <div class="release">
+                    <div class="release-head">
+                        <span class="release-tag">2026-05-02</span>
+                        <span class="release-title">Sun simulator — Phase 4.6 / 4.7</span>
+                    </div>
+                    <ul class="change-list">
+                        <li class="fix"><span class="kind">fix</span>Active-region feed wipe regression — flares now persist across data refreshes.</li>
+                        <li class="perf"><span class="kind">perf</span>Sun mesh LOD — coarser geometry when zoomed out, no visible quality loss.</li>
+                        <li class="perf"><span class="kind">perf</span>Baked fBm noise to a 256² atlas — fewer per-frame shader ops on low-end GPUs.</li>
+                    </ul>
+                </div>
+
+                <div class="release">
+                    <div class="release-head">
+                        <span class="release-tag">2026-04-30</span>
+                        <span class="release-title">Home page refresh</span>
+                    </div>
+                    <ul class="change-list">
+                        <li class="feat"><span class="kind">feat</span>New Upper Atmosphere card, refocused Earth card, refreshed live stats.</li>
+                        <li class="feat"><span class="kind">feat</span>Operations page: re-entry refinement plus published sprint status doc.</li>
+                    </ul>
+                </div>
+
+                <div class="release">
+                    <div class="release-head">
+                        <span class="release-tag">2026-04-28</span>
+                        <span class="release-title">Earth + Solar System</span>
+                    </div>
+                    <ul class="change-list">
+                        <li class="feat"><span class="kind">feat</span>Earth LOD pipeline now wired to live NASA precipitation data.</li>
+                        <li class="feat"><span class="kind">feat</span>Solar System orrery: full time-controls (play / pause / scrub).</li>
+                        <li class="feat"><span class="kind">feat</span>Galilean moons merged into the main scene as a Yoshida-4 N-body solve.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="devlog-foot">
+                Looking for the full commit history? Browse the source on
+                <a href="https://github.com/etelford32/clstl_smltr" target="_blank" rel="noopener">GitHub</a>.
+            </div>
+        </div>
+    </div>
+</main>
+
+<footer>
+    <p>© 2026 Parkers Physics App &nbsp;·&nbsp; <a href="index.html">Home</a> &nbsp;·&nbsp; <a href="pricing.html">Pricing</a> &nbsp;·&nbsp; <a href="contact-enterprise.html">Enterprise</a></p>
+</footer>
+
+<script>
+    const form = document.getElementById('feedback-form');
+    const btn = document.getElementById('submit-btn');
+    const status = document.getElementById('status-msg');
+
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        status.className = 'status-msg';
+        status.textContent = '';
+
+        const fd = new FormData(form);
+        const payload = {
+            kind:    fd.get('kind'),
+            page:    fd.get('page')?.trim() || undefined,
+            subject: fd.get('subject')?.trim(),
+            message: fd.get('message')?.trim(),
+            email:   fd.get('email')?.trim().toLowerCase() || undefined,
+            hp_field: fd.get('hp_field') || '',
+            user_agent: navigator.userAgent || undefined,
+            url: location.href,
+        };
+
+        if (!payload.subject || !payload.message) {
+            status.className = 'status-msg err';
+            status.textContent = 'Subject and details are required.';
+            return;
+        }
+        if (payload.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.email)) {
+            status.className = 'status-msg err';
+            status.textContent = 'That email address looks invalid.';
+            return;
+        }
+
+        btn.disabled = true;
+        btn.textContent = 'Sending…';
+
+        try {
+            const res = await fetch('/api/contact/feedback', {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify(payload),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok && data.ok) {
+                form.reset();
+                status.className = 'status-msg ok';
+                status.textContent = 'Thanks — your feedback is in the queue. We read every submission.';
+                btn.textContent = 'Sent ✓';
+                btn.disabled = true;
+            } else {
+                status.className = 'status-msg err';
+                status.textContent = data.detail || data.error || 'Something went wrong. Please try again in a moment.';
+                btn.disabled = false;
+                btn.textContent = 'Send feedback →';
+            }
+        } catch (err) {
+            status.className = 'status-msg err';
+            status.textContent = 'Network error. Please try again in a moment.';
+            btn.disabled = false;
+            btn.textContent = 'Send feedback →';
+        }
+    });
+</script>
+</body>
+</html>

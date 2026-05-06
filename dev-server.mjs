@@ -116,6 +116,7 @@ const API_ROUTES = {
     '/api/class/invite':           'api/class/invite.js',
     '/api/class/roster':           'api/class/roster.js',
     '/api/contact/enterprise':     'api/contact/enterprise.js',
+    '/api/contact/feedback':       'api/contact/feedback.js',
 };
 
 // Cache imported edge-function modules (stateless, so caching is safe)
