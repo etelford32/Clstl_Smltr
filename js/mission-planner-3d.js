@@ -357,6 +357,138 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         return out;
     }
 
+    // ── Lightning + convective radar overlays ─────────────────────────────
+    // Both layers are parented to the spinning Earth mesh so they ride
+    // axial tilt + diurnal rotation and stay pinned to real lat/lon. The
+    // outer feed module polls /api/lightning/strikes per pad and
+    // /api/nws/convective globally, then pushes the data here via
+    // setLightningStrikes() / setConvectiveAlerts(). The planner just
+    // renders — no fetch logic in this module.
+    //
+    // Visibility is toggleable via setRadarOverlay(on); when off, the
+    // overlay groups are detached from the scene entirely (cheaper than
+    // hiding 100+ sprites individually). Default off so a fresh user
+    // doesn't see a wall of red dots over Florida and wonder what's
+    // going on — they opt in via the ⚡ Radar button.
+    const radarState = {
+        on:           false,
+        strikesGroup: new THREE.Group(),
+        alertsGroup:  new THREE.Group(),
+        // Last data we were given, so toggling on re-renders with the
+        // current state instead of waiting for the next feed tick.
+        lastStrikes:  [],
+        lastAlerts:   null,
+    };
+    radarState.strikesGroup.visible = false;
+    radarState.alertsGroup.visible  = false;
+    geo.earth.add(radarState.strikesGroup);
+    geo.earth.add(radarState.alertsGroup);
+
+    function setRadarOverlay(on) {
+        radarState.on = !!on;
+        radarState.strikesGroup.visible = radarState.on;
+        radarState.alertsGroup.visible  = radarState.on;
+        // If turning on and we have stale data, re-emit so positions
+        // refresh and the scene reflects what the feed last saw.
+        if (radarState.on) {
+            if (radarState.lastStrikes.length) _renderStrikes(radarState.lastStrikes);
+            if (radarState.lastAlerts)         _renderAlerts(radarState.lastAlerts);
+        }
+        return radarState.on;
+    }
+    function getRadarOverlay() { return radarState.on; }
+
+    function setLightningStrikes(strikes) {
+        radarState.lastStrikes = Array.isArray(strikes) ? strikes : [];
+        if (radarState.on) _renderStrikes(radarState.lastStrikes);
+    }
+    function _renderStrikes(strikes) {
+        // Drop the previous frame's sprites. Sprites are cheap; rebuild
+        // each tick rather than diffing, since strike sets churn fast
+        // (1 min cache window) and N is small (typically < 200).
+        while (radarState.strikesGroup.children.length) {
+            const c = radarState.strikesGroup.children[0];
+            radarState.strikesGroup.remove(c);
+            // Sprite material's map texture is shared across instances
+            // (same gradient), so disposing per-sprite would orphan it
+            // for the remaining sprites. Just drop the node refs and let
+            // GC handle them; THREE shares the texture.
+        }
+        for (const s of strikes) {
+            if (!Number.isFinite(s.lat) || !Number.isFinite(s.lon)) continue;
+            const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+                map:        _radarStrikeTexture(),
+                color:      0xffaa44,
+                transparent: true,
+                // Older strikes fade. age_min comes from the proxy in
+                // 0.1-min precision; clamp 0..60 then map to 0.85..0.15.
+                opacity:    0.85 - 0.7 * Math.min(1, Math.max(0, (s.age_min ?? 0) / 60)),
+                blending:   THREE.AdditiveBlending,
+                depthWrite: false,
+                depthTest:  true,
+            }));
+            sprite.scale.set(0.05, 0.05, 1);
+            sprite.position.copy(latLonToVec3(s.lat, s.lon, 1.005));
+            radarState.strikesGroup.add(sprite);
+        }
+    }
+    let _radarStrikeTex = null;
+    function _radarStrikeTexture() {
+        // Shared across every strike sprite — one canvas allocation,
+        // one GPU upload. The gradient's tint comes from the sprite
+        // material's `color` field, so a single white-ish texture is
+        // enough for any future color scheme (warning vs watch).
+        if (_radarStrikeTex) return _radarStrikeTex;
+        _radarStrikeTex = makeRadialGradientTexture(0xffffff, 0);
+        return _radarStrikeTex;
+    }
+
+    function setConvectiveAlerts(geojson) {
+        radarState.lastAlerts = geojson || null;
+        if (radarState.on) _renderAlerts(radarState.lastAlerts);
+    }
+    function _renderAlerts(geojson) {
+        // Drop previous polylines + dispose their geometries. Lines hold
+        // BufferGeometry that we *do* want to free since each alert
+        // renders a unique outline.
+        while (radarState.alertsGroup.children.length) {
+            const c = radarState.alertsGroup.children[0];
+            radarState.alertsGroup.remove(c);
+            c.geometry?.dispose?.();
+            c.material?.dispose?.();
+        }
+        const features = geojson?.features || [];
+        for (const f of features) {
+            const event = f?.properties?.event || '';
+            // Warning > Watch — warnings are imminent, watches are
+            // "conditions favorable". Color-grade so the user can read
+            // the severity at a glance.
+            const isWarning = /Warning/i.test(event);
+            const color = isWarning ? 0xff5544 : 0xffaa44;
+            const opacity = isWarning ? 0.85 : 0.55;
+            const polys = _extractPolygons(f.geometry);
+            for (const ring of polys) {
+                if (ring.length < 2) continue;
+                const points = ring.map(([lon, lat]) => latLonToVec3(lat, lon, 1.003));
+                const geom = new THREE.BufferGeometry().setFromPoints(points);
+                const line = new THREE.Line(geom, new THREE.LineBasicMaterial({
+                    color, transparent: true, opacity,
+                    depthTest: true, depthWrite: false,
+                }));
+                radarState.alertsGroup.add(line);
+            }
+        }
+    }
+    function _extractPolygons(g) {
+        // Flatten Polygon / MultiPolygon into a list of rings (each ring
+        // is an array of [lon, lat] vertices). GeoJSON nests up to 4 deep
+        // for MultiPolygon: [polygons[ rings[ vertices[lon,lat] ] ] ].
+        if (!g) return [];
+        if (g.type === 'Polygon')      return g.coordinates || [];
+        if (g.type === 'MultiPolygon') return (g.coordinates || []).flat();
+        return [];
+    }
+
     // ── Focus presets (mode toggle replaced) ────────────────────────────────
     // setMode just records the geo/helio frame for legacy code paths. The
     // renderer doesn't switch scenes anymore, and we deliberately DO NOT
@@ -2214,6 +2346,13 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         listPadWeather,
         WEATHER_STATUSES,
         WEATHER_COLORS,
+        // Lightning + convective radar overlays. The feed module pushes
+        // strikes / NWS alerts here; the planner just renders them on
+        // the spinning Earth mesh. Toggle visibility via setRadarOverlay.
+        setLightningStrikes,
+        setConvectiveAlerts,
+        setRadarOverlay,
+        getRadarOverlay,
         getStats: () => ({
             rockets:        state.rockets.length,
             payloads:       state.payloads.length,
