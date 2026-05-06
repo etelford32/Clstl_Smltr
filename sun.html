@@ -5151,6 +5151,12 @@ const fpsEl = document.getElementById('fps-display');
 // Declared here so animate() (below) can access them before the NOAA section
 let regionGroup   = null; // THREE.Group containing all AR markers
 let solarRotAngle = 0;    // accumulated rotation matching photosphere UV shift
+// Live-data slots — forward-declared so animate()'s first synchronous tick
+// (which reads liveXrayFlux/liveRegions/liveFlares) doesn't hit a TDZ
+// ReferenceError that would abort the rest of module execution.
+let liveRegions   = [];   // [{num, loc, area, z, mag, nspot}, ...]
+let liveFlares    = [];   // [{time, cls, loc, reg}, ...]
+let liveXrayFlux  = null; // W/m² (latest GOES reading)
 
 // ANIMATE
 function animate() {
@@ -5506,9 +5512,8 @@ document.getElementById('sl-rot').addEventListener('input', function() {
 // ══════════════════════════════════════════════════════════════════════════
 const SWPC = 'https://services.swpc.noaa.gov';
 
-let liveRegions   = [];   // [{num, loc, area, z, mag, nspot}, ...]
-let liveFlares    = [];   // [{time, cls, loc, reg}, ...]
-let liveXrayFlux  = null; // W/m² (latest GOES reading)
+// liveRegions / liveFlares / liveXrayFlux are forward-declared near animate()
+// to avoid a TDZ ReferenceError on the first synchronous frame.
 
 // ── Default snapshot — Solar Cycle 25 peak, March 13 2026 ─────────────────
 // Loaded immediately on startup so the sim has a meaningful state before
