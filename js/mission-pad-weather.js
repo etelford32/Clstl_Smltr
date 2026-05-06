@@ -47,11 +47,19 @@
 
 import { LAUNCH_SITES, MOON_BASES, MARS_BIOMES } from './mission-planner-3d.js';
 
-const POLL_MS          = 15 * 60 * 1000;     // 15 minutes
+const POLL_MS          = 15 * 60 * 1000;     // 15 minutes (forecasts)
+const RADAR_POLL_MS    = 90 * 1000;          // 90 s (lightning + convective)
 const FETCH_TIMEOUT_MS = 8000;
 const FORECAST_API     = '/api/weather/forecast';
 const MARS_API         = '/api/mars/weather';
+const STRIKES_API      = '/api/lightning/strikes';
+const CONVECTIVE_API   = '/api/nws/convective';
 const LOOKAHEAD_HOURS  = 24;                 // how far we scan for the next status change
+// Per-pad lightning query window. 100 km radius / 60 min lookback is
+// LLCC-Rule-9 territory (10 nmi ≈ 18.5 km) padded for VLF localization
+// uncertainty. Going wider just buries the user in distant strikes.
+const STRIKES_RADIUS_KM = 100;
+const STRIKES_WINDOW_MIN = 60;
 
 // ── WMO weather-code helpers ────────────────────────────────────────────
 const isThunder     = wc => wc >= 95;
@@ -170,6 +178,15 @@ async function fetchEarthLaunchForecast(pad) {
     return fetchWithTimeout(url, FETCH_TIMEOUT_MS);
 }
 
+// Cache the most recent `hourly` block per Earth pad so the forecast
+// sparkline under the Launch button has data to render without making
+// a second fetch — the launch-type proxy already returns 7 days × hourly
+// fields, we just need to keep them alongside the per-pad weather record.
+const _hourlyCache = new Map();   // padId → hourly block
+export function getEarthPadHourly(padId) {
+    return _hourlyCache.get(padId) || null;
+}
+
 // ── Moon synthetic ──────────────────────────────────────────────────────
 function evaluateMoonConditions(pad) {
     const absLat = Math.abs(pad.lat);
@@ -200,6 +217,17 @@ function marsLs(jd) {
 async function fetchMarsAggregate(jd) {
     const url = `${MARS_API}?jd=${encodeURIComponent(jd.toFixed(2))}`;
     return fetchWithTimeout(url, FETCH_TIMEOUT_MS);
+}
+
+// Cache the most recent Mars aggregate so the rover-dashboard panel can
+// render the full per-rover detail (sol / temps / pressure / wind /
+// season / opacity) without making a parallel fetch — we already pulled
+// the data once during the pad-weather refresh, no point asking again.
+let _lastMarsAggregate = null;
+let _lastMarsAggregateAt = 0;
+export function getLatestMarsAggregate() {
+    if (!_lastMarsAggregate) return null;
+    return { ...(_lastMarsAggregate), fetched_at: _lastMarsAggregateAt };
 }
 
 // Pad → rover mapping, by closest geographic proximity:
@@ -261,9 +289,12 @@ async function refreshAll(planner, { log }) {
     // hourly; we evaluate rules on current and scan hourly for lookahead.
     const earthRefresh = LAUNCH_SITES.map(async (pad) => {
         try {
-            const json     = await fetchEarthLaunchForecast(pad);
-            const current  = evaluateLaunchRules(json.current);
+            const json      = await fetchEarthLaunchForecast(pad);
+            const current   = evaluateLaunchRules(json.current);
             const lookahead = computeLookahead(json.hourly, current.status);
+            // Stash hourly for the forecast sparkline. Same response, no
+            // extra fetch — keeps the graph in lockstep with the badge.
+            if (json.hourly) _hourlyCache.set(pad.id, json.hourly);
             planner.setPadWeather('earth', pad.id, current.status, current.message, { lookahead });
         } catch (err) {
             planner.setPadWeather('earth', pad.id, 'unknown',
@@ -279,10 +310,14 @@ async function refreshAll(planner, { log }) {
     }
 
     // Mars — single proxy call shared across all sites. Tracks scenario JD
-    // so dust-season flags shift as the user time-scrubs.
+    // so dust-season flags shift as the user time-scrubs. The full
+    // aggregate (with the per-rover map) is also cached for the dashboard
+    // panel via getLatestMarsAggregate().
     const jd = planner.getScenarioJD();
     try {
         const agg = await fetchMarsAggregate(jd);
+        _lastMarsAggregate   = agg;
+        _lastMarsAggregateAt = Date.now();
         for (const pad of MARS_BIOMES) {
             planner.setPadWeather(
                 'mars', pad.id,
@@ -304,18 +339,72 @@ async function refreshAll(planner, { log }) {
     await Promise.all(earthRefresh);
 }
 
+// ── Lightning + convective radar refresh ───────────────────────────────
+// Lightning strikes are queried per pad (the proxy takes lat/lon/radius
+// and bbox-translates that to a Blitzortung tile request). We dedupe by
+// strike timestamp so two pads in close proximity don't double-render
+// the same flash. Convective is one global call that returns every
+// active US-domain Severe-Thunderstorm + Tornado warning/watch.
+async function refreshRadar(planner, { log }) {
+    // Strikes — one fetch per Earth pad in parallel. Same edge-cache
+    // dedup as the forecast endpoint, so concurrent users hitting the
+    // same pad coords share a single Blitzortung upstream call.
+    const seen = new Set();
+    const allStrikes = [];
+    await Promise.all(LAUNCH_SITES.map(async (pad) => {
+        try {
+            const url = `${STRIKES_API}?lat=${pad.lat.toFixed(3)}&lon=${pad.lon.toFixed(3)}`
+                      + `&radius_km=${STRIKES_RADIUS_KM}&window_min=${STRIKES_WINDOW_MIN}`;
+            const json = await fetchWithTimeout(url, FETCH_TIMEOUT_MS);
+            for (const s of json?.strikes || []) {
+                const key = `${s.ts}|${s.lat}|${s.lon}`;
+                if (seen.has(key)) continue;
+                seen.add(key);
+                allStrikes.push(s);
+            }
+        } catch (err) {
+            log(`[weather] strikes/${pad.id}: ${err.message || err}`);
+        }
+    }));
+    if (typeof planner.setLightningStrikes === 'function') {
+        planner.setLightningStrikes(allStrikes);
+    }
+
+    // Convective alerts — one global GeoJSON. Cached 3 min at the edge.
+    try {
+        const json = await fetchWithTimeout(CONVECTIVE_API, FETCH_TIMEOUT_MS);
+        if (typeof planner.setConvectiveAlerts === 'function') {
+            planner.setConvectiveAlerts(json);
+        }
+    } catch (err) {
+        log(`[weather] convective: ${err.message || err}`);
+    }
+}
+
 // ── Public entry point ──────────────────────────────────────────────────
 export function startWeatherFeed(planner, opts = {}) {
     const log = opts.log || (() => {});
-    const intervalMs = opts.intervalMs || POLL_MS;
-    let timer = null;
-    refreshAll(planner, { log });
-    timer = setInterval(() => refreshAll(planner, { log }), intervalMs);
+    const intervalMs      = opts.intervalMs      || POLL_MS;
+    const radarIntervalMs = opts.radarIntervalMs || RADAR_POLL_MS;
+    // Two independent timers: forecasts refresh on POLL_MS (~15 min,
+    // matches Open-Meteo's hourly model cycle), radar on RADAR_POLL_MS
+    // (~90 s, matches the Blitzortung tile cache window). Decoupling
+    // means a long-running forecast fetch can't gum up strike refreshes,
+    // and the user toggling the radar overlay doesn't have to wait for
+    // the next forecast tick to see strikes appear.
+    let forecastTimer = null;
+    let radarTimer    = null;
+    refreshAll  (planner, { log });
+    refreshRadar(planner, { log });
+    forecastTimer = setInterval(() => refreshAll  (planner, { log }), intervalMs);
+    radarTimer    = setInterval(() => refreshRadar(planner, { log }), radarIntervalMs);
     return {
         stop: () => {
-            if (timer) { clearInterval(timer); timer = null; }
+            if (forecastTimer) { clearInterval(forecastTimer); forecastTimer = null; }
+            if (radarTimer)    { clearInterval(radarTimer);    radarTimer    = null; }
         },
-        refreshNow: () => refreshAll(planner, { log }),
+        refreshNow:      () => refreshAll  (planner, { log }),
+        refreshRadarNow: () => refreshRadar(planner, { log }),
     };
 }
 

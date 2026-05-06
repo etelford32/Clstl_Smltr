@@ -191,6 +191,15 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
     0%   { transform:rotate(0deg);   }
     100% { transform:rotate(360deg); }
 }
+/* Radar toggle button — sits next to the manual refresh ↻ button.
+   When active, the ⚡ icon glows orange-red to telegraph that the
+   3D Earth has the strike+storm overlay turned on. */
+.mp-pad-weather #mp-radar-toggle.on {
+    background:rgba(255,85,68,.18);
+    border-color:rgba(255,85,68,.6);
+    color:#ffaa66;
+    box-shadow:0 0 8px rgba(255,170,68,.35);
+}
 
 /* Forecast lookahead — small two-line hint that sits between the pad
    weather badge and the Launch button. Renders only when the next 24 h
@@ -245,6 +254,44 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
     transform:none;
     box-shadow:none;
     cursor:not-allowed;
+}
+
+/* 24-h forecast sparkline ──────────────────────────────────────────
+   Sits under the Launch button. Two stacked traces — wind/gust as a
+   line, precipitation as bars — with a vertical highlight at the
+   simulator's current scenario hour. Clicking any hour time-warps
+   scenarioJD to that moment. */
+.mp-forecast-wrap {
+    margin-top:10px;
+    background:rgba(0,0,0,.30);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:8px;
+    padding:8px 10px 6px;
+}
+.mp-forecast-wrap[hidden] { display:none; }
+.mp-forecast-title {
+    font-family:monospace; font-size:.62rem;
+    color:#aab; letter-spacing:.04em;
+    display:flex; gap:6px; align-items:center;
+    margin-bottom:4px;
+}
+.mp-forecast-legend { color:#778; }
+.mp-fc-sw {
+    display:inline-block; width:8px; height:2px;
+    margin:0 3px 1px 0; vertical-align:middle;
+}
+.mp-fc-sw-wind   { background:#ffaa66; }
+.mp-fc-sw-precip { background:#66aaff; }
+.mp-pad-forecast {
+    display:block; width:100%; max-width:280px;
+    background:#020108;
+    border-radius:5px;
+    cursor:pointer;
+}
+.mp-forecast-hint {
+    margin-top:3px;
+    font-family:monospace; font-size:.6rem;
+    color:#667; text-align:center;
 }
 .mp-launch-btn.mp-launch-caution {
     background:linear-gradient(180deg, #b88822, #886611);
@@ -330,6 +377,75 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
 #mp-hud .hud-row { display:flex; justify-content:space-between; gap:10px; padding:1px 0; }
 #mp-hud .hud-row .k { color:#88a; }
 #mp-hud .hud-row .v { color:#fff; font-weight:700; }
+/* Mars Rover Dashboard ──────────────────────────────────────────────
+   Top-left card on the 3D viewport. Hidden until the user focuses Mars
+   (or a Mars surface pad), then expands to show the latest readings
+   from every public NASA in-situ feed (Curiosity REMS, Perseverance
+   MEDA, InSight historical). Click the title bar to collapse to a
+   single-line summary; click again to expand. */
+.mp-mars-dash {
+    position:absolute; top:12px; left:12px;
+    background:rgba(6,4,18,.85); backdrop-filter:blur(8px);
+    border:1px solid rgba(255,170,102,.35);
+    border-radius:8px;
+    font-family:monospace; font-size:.72rem;
+    color:#cfd;
+    min-width:240px; max-width:300px;
+    pointer-events:auto;
+    box-shadow:0 4px 16px rgba(0,0,0,.35);
+}
+.mp-mars-dash[hidden] { display:none; }
+.mp-mars-dash-toggle {
+    width:100%; display:flex; align-items:center; gap:8px;
+    background:transparent; border:0;
+    color:#ffaa66;
+    font-family:monospace; font-size:.7rem; font-weight:800;
+    padding:8px 12px;
+    cursor:pointer;
+    text-transform:uppercase; letter-spacing:.08em;
+    border-radius:8px;
+}
+.mp-mars-dash-toggle:hover { color:#ffd6a0; background:rgba(255,170,102,.06); }
+.mp-mars-dash-toggle:focus-visible { outline:2px solid rgba(255,170,102,.6); outline-offset:-2px; }
+.mp-mars-dash-title   { flex:1; text-align:left; }
+.mp-mars-dash-count   { color:#aab; font-weight:600; font-size:.62rem; text-transform:none; letter-spacing:0; }
+.mp-mars-dash-chevron { color:#aab; transition:transform .2s ease; }
+.mp-mars-dash.expanded .mp-mars-dash-chevron { transform:rotate(180deg); }
+.mp-mars-dash:not(.expanded) .mp-mars-dash-body { display:none; }
+.mp-mars-dash-body    { padding:0 10px 10px; }
+.mp-mars-dash-ls {
+    color:#aab; font-size:.66rem;
+    padding:6px 0;
+    border-top:1px dashed rgba(255,170,102,.18);
+    margin-bottom:8px;
+    line-height:1.45;
+}
+.mp-mars-rover {
+    margin-bottom:8px; padding:6px 8px;
+    background:rgba(0,0,0,.30);
+    border-radius:5px;
+    border-left:3px solid #ffaa66;
+}
+.mp-mars-rover:last-child         { margin-bottom:0; }
+.mp-mars-rover-offline {
+    border-left-color:#778899;
+    color:#88a;
+}
+.mp-rov-name {
+    color:#ffd6a0; font-weight:700; font-size:.7rem;
+    margin-bottom:4px;
+    display:flex; justify-content:space-between; align-items:baseline; gap:8px;
+}
+.mp-rov-name .mp-rov-source { color:#88a; font-weight:400; font-size:.58rem; }
+.mp-mars-rover-offline .mp-rov-name { color:#aab; }
+.mp-rov-status { color:#88a; font-size:.64rem; font-style:italic; }
+.mp-rov-row {
+    display:flex; justify-content:space-between; gap:8px;
+    padding:1px 0; font-size:.64rem;
+}
+.mp-rov-row .k { color:#88a; }
+.mp-rov-row .v { color:#fff; font-weight:700; text-align:right; }
+
 .mp-mission-hud {
     /* Sits at the bottom-right so it doesn't fight the Mission Status
        card at top-right. Bumps up slightly when the help bar is visible. */
@@ -503,6 +619,9 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
             <span class="mp-wx-msg" id="mp-pad-weather-msg"></span>
             <button id="mp-pad-weather-refresh" class="mp-wx-refresh" type="button"
                     title="Refresh weather feed for all pads">↻</button>
+            <button id="mp-radar-toggle" class="mp-wx-refresh" type="button"
+                    title="Toggle lightning + storm radar overlay on the 3D Earth"
+                    aria-pressed="false">⚡</button>
         </div>
         <div id="mp-pad-lookahead" class="mp-pad-lookahead" hidden></div>
 
@@ -539,6 +658,20 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
         <button id="mp-find-window" class="mp-secondary-btn" type="button" style="margin-top:10px;">🔍 Find Next Launch Window</button>
         <button id="mp-porkchop"    class="mp-secondary-btn" type="button" style="margin-top:6px;">🗺️ Run Pork-Chop Scan</button>
         <button id="mp-launch"      class="mp-launch-btn"    type="button">🚀 Launch</button>
+
+        <div id="mp-forecast-wrap" class="mp-forecast-wrap" hidden>
+            <div class="mp-forecast-title">
+                <span>🌬 24-h forecast · </span>
+                <span class="mp-forecast-legend">
+                    <span class="mp-fc-sw mp-fc-sw-wind"></span>wind/gust ·
+                    <span class="mp-fc-sw mp-fc-sw-precip"></span>precip
+                </span>
+            </div>
+            <canvas id="mp-pad-forecast" class="mp-pad-forecast"
+                    width="280" height="80"
+                    title="Click an hour to time-warp the simulator there"></canvas>
+            <div class="mp-forecast-hint" id="mp-forecast-hint">click an hour to time-warp</div>
+        </div>
 
         <div class="mp-section-divider"></div>
 
@@ -639,6 +772,18 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
                 <div class="hud-row"><span class="k">Tours active</span><span class="v" id="hud-tours">0</span></div>
                 <div class="hud-row"><span class="k">Scenario JD</span><span class="v" id="hud-jd">—</span></div>
             </div>
+            <div id="mp-mars-dashboard" class="mp-mars-dash expanded" hidden>
+                <button id="mp-mars-dash-toggle" class="mp-mars-dash-toggle" type="button"
+                        aria-expanded="true" aria-controls="mp-mars-dash-body">
+                    <span class="mp-mars-dash-title">🤖 Mars Rovers</span>
+                    <span class="mp-mars-dash-count" id="mp-mars-dash-count">— / 3</span>
+                    <span class="mp-mars-dash-chevron" aria-hidden="true">⌄</span>
+                </button>
+                <div class="mp-mars-dash-body" id="mp-mars-dash-body">
+                    <div class="mp-mars-dash-ls" id="mp-mars-dash-ls">—</div>
+                    <div class="mp-mars-rovers" id="mp-mars-rovers"></div>
+                </div>
+            </div>
             <div id="mp-mission-hud" class="mp-mission-hud" hidden>
                 <div class="hud-title">
                     <span>Active Mission</span>
@@ -665,7 +810,7 @@ import { initMissionPlanner, LAUNCH_SITES, TARGET_ORBITS,
          MOON_BASES, MARS_BIOMES, MISSION_ROUTES } from './js/mission-planner-3d.js';
 import { simulateAscent, compareBodies, LAUNCH_BODIES, LAUNCH_VEHICLES } from './js/launch-physics.js';
 import { jdNow } from './js/horizons.js';
-import { startWeatherFeed } from './js/mission-pad-weather.js';
+import { startWeatherFeed, getLatestMarsAggregate, getEarthPadHourly } from './js/mission-pad-weather.js';
 
 // ── Populate dropdowns ──────────────────────────────────────────────
 const siteSel   = document.getElementById('mp-site');
@@ -932,6 +1077,18 @@ function setFocusUI(focusId) {
     }
     // Following / free-cam highlight on the action buttons.
     document.getElementById('mp-cam-follow')?.classList.toggle('on', focusId === 'mission');
+    // Mars rover dashboard: only render when Mars is the active focus
+    // (or a Mars surface pad — that path also calls setFocusUI('mars')).
+    // Hidden everywhere else so it doesn't fight the Mission Status HUD
+    // for screen real estate.
+    const dash = document.getElementById('mp-mars-dashboard');
+    if (dash) {
+        const showMars = focusId === 'mars';
+        dash.hidden = !showMars;
+        if (showMars && typeof refreshMarsDashboard === 'function') {
+            refreshMarsDashboard();
+        }
+    }
 }
 const FOCUS_DISPLAY = {
     earth: 'Earth', moon: 'Moon', mars: 'Mars', sun: 'Sun',
@@ -1013,6 +1170,26 @@ const planner = initMissionPlanner({
             if (typeof updatePadWeatherUI === 'function'
                 && ev.body === currentOriginBody && ev.padId === siteSel?.value) {
                 updatePadWeatherUI();
+                if (typeof renderForecastGraph === 'function' && ev.body === 'earth') {
+                    // Cached hourly was just refreshed for this pad —
+                    // redraw the sparkline so the user sees fresh data.
+                    renderForecastGraph();
+                }
+            }
+            // The Mars rover dashboard pulls from the cached aggregate,
+            // which the pad-weather refresh just repopulated. If the
+            // panel is currently visible (focus = mars), re-render it
+            // so the "updated X seconds ago" + per-rover detail stay
+            // fresh without needing the user to re-click Focus Mars.
+            // Use a live querySelector here rather than the closured
+            // const because pad-weather events can fire before the
+            // dashboard wiring block runs (planner init is much earlier
+            // in the script than the dashboard helper definitions).
+            if (ev.body === 'mars') {
+                const dash = document.getElementById('mp-mars-dashboard');
+                if (dash && !dash.hidden && typeof refreshMarsDashboard === 'function') {
+                    refreshMarsDashboard();
+                }
             }
             const tag = ev.status === 'scrub'   ? '🛑'
                       : ev.status === 'caution' ? '⚠'
@@ -1287,11 +1464,17 @@ function updatePadWeatherUI() {
         refreshDvBudget();   // restore Δv-margin text
     }
 }
-siteSel.addEventListener('change', updatePadWeatherUI);
+siteSel.addEventListener('change', () => {
+    updatePadWeatherUI();
+    if (typeof renderForecastGraph === 'function') renderForecastGraph();
+});
 // Also re-run on origin-body switch since refreshOriginUI() resets the
 // dropdown contents (handler is wired further up via originBtns).
 document.querySelectorAll('[data-body]').forEach(btn => {
-    btn.addEventListener('click', () => setTimeout(updatePadWeatherUI, 0));
+    btn.addEventListener('click', () => setTimeout(() => {
+        updatePadWeatherUI();
+        if (typeof renderForecastGraph === 'function') renderForecastGraph();
+    }, 0));
 });
 
 // Parking inclination slider
@@ -2240,9 +2423,311 @@ wxRefreshBtn.addEventListener('click', async () => {
     try {
         await wxFeed.refreshNow();
         pushLog('🌦 Pad weather feed refreshed', 'window');
+        renderForecastGraph();
     } finally {
         wxRefreshBtn.classList.remove('spinning');
     }
+});
+
+// ⚡ Radar overlay toggle. Off by default so a fresh user doesn't see
+// strike sprites + warning polygons on first load with no context.
+// First click also kicks an immediate radar refresh so the overlay
+// appears with current data instead of waiting for the 90 s tick.
+const radarToggleBtn = document.getElementById('mp-radar-toggle');
+radarToggleBtn.addEventListener('click', async () => {
+    const next = !planner.getRadarOverlay();
+    planner.setRadarOverlay(next);
+    radarToggleBtn.classList.toggle('on', next);
+    radarToggleBtn.setAttribute('aria-pressed', next ? 'true' : 'false');
+    if (next) {
+        pushLog('⚡ Lightning radar ON · live strike + storm overlay', 'window');
+        radarToggleBtn.classList.add('spinning');
+        try { await wxFeed.refreshRadarNow(); }
+        finally { radarToggleBtn.classList.remove('spinning'); }
+    } else {
+        pushLog('⚡ Lightning radar OFF', 'window');
+    }
+});
+
+// ── 24-h forecast sparkline (Earth pads only) ──────────────────────
+// Reads the cached hourly block populated by the weather feed and
+// draws two stacked traces: wind/gust as a line, precipitation as
+// bars. A vertical band highlights the hour matching scenarioJD.
+// Clicking any hour sets scenarioJD to that moment so the user can
+// peek "what does Mars / planet positions look like in 5 hours?"
+// without scrubbing the slider.
+const FORECAST_HOURS = 24;
+const fcWrap   = document.getElementById('mp-forecast-wrap');
+const fcCanvas = document.getElementById('mp-pad-forecast');
+const fcHint   = document.getElementById('mp-forecast-hint');
+const fcCtx    = fcCanvas.getContext('2d');
+// Last frame's start index + bar geometry — stashed so the click
+// handler can map mouse X back to a future hour offset without
+// recomputing layout.
+let _fcLayout = null;
+
+function renderForecastGraph() {
+    // Earth pads only: Moon / Mars don't return Open-Meteo data.
+    if (currentOriginBody !== 'earth') {
+        fcWrap.hidden = true;
+        return;
+    }
+    const padId = siteSel.value;
+    const hourly = getEarthPadHourly(padId);
+    if (!hourly?.time?.length) {
+        fcWrap.hidden = true;
+        return;
+    }
+
+    // Walk the hourly samples to find the first one at-or-after now,
+    // mirroring the lookahead computation in mission-pad-weather.js so
+    // the cursor + sparkline agree on what "+0h" means.
+    const now = Date.now();
+    let startIdx = 0;
+    for (let i = 0; i < hourly.time.length; i++) {
+        const t = Date.parse(hourly.time[i]);
+        if (Number.isFinite(t) && t >= now - 30 * 60_000) { startIdx = i; break; }
+    }
+    const end = Math.min(startIdx + FORECAST_HOURS, hourly.time.length);
+    const N = end - startIdx;
+    if (N < 2) { fcWrap.hidden = true; return; }
+    fcWrap.hidden = false;
+
+    // Pull next-24-h slices.
+    const winds = [], gusts = [], precs = [];
+    for (let i = startIdx; i < end; i++) {
+        winds.push(hourly.wind_speed_10m?.[i] ?? 0);
+        gusts.push(hourly.wind_gusts_10m?.[i] ?? hourly.wind_speed_10m?.[i] ?? 0);
+        precs.push(hourly.precipitation?.[i]   ?? 0);
+    }
+    const maxWind = Math.max(20, ...winds, ...gusts);   // floor at 20 mph
+    const maxPrec = Math.max(1.5, ...precs);            // floor at 1.5 mm
+
+    const ctx = fcCtx;
+    const W = fcCanvas.width;
+    const H = fcCanvas.height;
+    ctx.fillStyle = '#020108';
+    ctx.fillRect(0, 0, W, H);
+
+    const PAD_L = 22, PAD_R = 6, PAD_T = 14, PAD_B = 12;
+    const w = W - PAD_L - PAD_R;
+    const h = H - PAD_T - PAD_B;
+    const dx = w / Math.max(1, N - 1);
+
+    // Faint horizontal grid at 50% wind (helps eyeball gust margin).
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.beginPath();
+    ctx.moveTo(PAD_L, PAD_T + h / 2);
+    ctx.lineTo(PAD_L + w, PAD_T + h / 2);
+    ctx.stroke();
+
+    // Cursor — vertical band on the hour matching scenarioJD.
+    const scenarioJD = planner.getScenarioJD();
+    const scenarioMs = (scenarioJD - 2440587.5) * 86_400_000;
+    let cursorIdx = -1;
+    for (let i = 0; i < N; i++) {
+        const t = Date.parse(hourly.time[startIdx + i]);
+        if (Number.isFinite(t) && Math.abs(t - scenarioMs) <= 30 * 60_000) {
+            cursorIdx = i; break;
+        }
+    }
+    if (cursorIdx >= 0) {
+        const cx = PAD_L + cursorIdx * dx;
+        ctx.fillStyle = 'rgba(102, 255, 170, 0.18)';
+        ctx.fillRect(cx - dx * 0.45, PAD_T, dx * 0.9, h);
+    }
+
+    // Precipitation bars (blue, half-height).
+    ctx.fillStyle = 'rgba(102, 170, 255, 0.75)';
+    for (let i = 0; i < N; i++) {
+        const p = precs[i];
+        if (p <= 0) continue;
+        const bh = (p / maxPrec) * h * 0.45;
+        const bx = PAD_L + i * dx - dx * 0.4;
+        ctx.fillRect(bx, PAD_T + h - bh, dx * 0.8, bh);
+    }
+
+    // Gust line (lighter dashed orange).
+    ctx.strokeStyle = 'rgba(255,170,102,0.45)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([2, 2]);
+    ctx.beginPath();
+    for (let i = 0; i < N; i++) {
+        const x = PAD_L + i * dx;
+        const y = PAD_T + h - (gusts[i] / maxWind) * h;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Wind line (solid orange) on top.
+    ctx.strokeStyle = '#ffaa66';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let i = 0; i < N; i++) {
+        const x = PAD_L + i * dx;
+        const y = PAD_T + h - (winds[i] / maxWind) * h;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    // Axis labels.
+    ctx.font = '8px monospace';
+    ctx.fillStyle = '#778';
+    ctx.textAlign = 'left';
+    ctx.fillText('+0h', PAD_L, H - 2);
+    ctx.textAlign = 'right';
+    ctx.fillText(`+${N - 1}h`, PAD_L + w, H - 2);
+    // Wind scale on the left margin.
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#ffaa66';
+    ctx.fillText(`${maxWind.toFixed(0)} mph`, PAD_L - 2, PAD_T + 8);
+    if (maxPrec > 0.1) {
+        ctx.fillStyle = '#66aaff';
+        ctx.textAlign = 'left';
+        ctx.fillText(`${maxPrec.toFixed(1)} mm`, PAD_L + 2, PAD_T + 8);
+    }
+
+    _fcLayout = { startIdx, N, PAD_L, dx, hourly };
+    // Status hint reflects whether the cursor is inside the strip.
+    fcHint.textContent = cursorIdx >= 0
+        ? `cursor at +${cursorIdx}h · click to time-warp`
+        : 'click an hour to time-warp';
+}
+
+fcCanvas.addEventListener('click', (ev) => {
+    if (!_fcLayout) return;
+    const { startIdx, N, PAD_L, dx, hourly } = _fcLayout;
+    const rect = fcCanvas.getBoundingClientRect();
+    // Canvas backing-store px ≠ CSS px; scale.
+    const scaleX = fcCanvas.width / rect.width;
+    const x = (ev.clientX - rect.left) * scaleX;
+    const idx = Math.round((x - PAD_L) / dx);
+    const clamped = Math.max(0, Math.min(N - 1, idx));
+    const i = startIdx + clamped;
+    const tMs = Date.parse(hourly.time[i]);
+    if (!Number.isFinite(tMs)) return;
+    const targetJD = tMs / 86_400_000 + 2440587.5;
+    timeState.scrubAnchor = targetJD;
+    planner.setScenarioJD(targetJD);
+    refreshTimeUI();
+    renderForecastGraph();   // move the cursor highlight
+    pushLog(`⏰ Time-warped to forecast +${clamped}h (${hourly.time[i]} local)`, 'window');
+});
+
+// ── Mars Rover Dashboard ────────────────────────────────────────────
+// Renders the per-rover detail (sol, terrestrial date, temp range,
+// pressure, wind, season, opacity) for each public NASA in-situ feed
+// the proxy aggregated. Visibility is gated by the focus state — the
+// panel only renders when the user is looking at Mars, so it doesn't
+// fight the other HUD cards for screen space the rest of the time.
+const marsDashEl    = document.getElementById('mp-mars-dashboard');
+const marsDashBody  = document.getElementById('mp-mars-dash-body');
+const marsDashLs    = document.getElementById('mp-mars-dash-ls');
+const marsDashCount = document.getElementById('mp-mars-dash-count');
+const marsRoversEl  = document.getElementById('mp-mars-rovers');
+const marsDashToggle= document.getElementById('mp-mars-dash-toggle');
+
+// Display metadata per rover key (matches the planner-side ROVER_LABEL
+// in mission-pad-weather.js but with longer human names for the panel).
+const ROVER_DISPLAY = {
+    curiosity:    { name: 'Curiosity',    long: 'NASA MSL REMS' },
+    perseverance: { name: 'Perseverance', long: 'NASA Mars 2020 MEDA' },
+    insight:      { name: 'InSight',      long: 'NASA InSight Weather' },
+};
+
+function escHtml(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => (
+        { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]
+    ));
+}
+function ageLabel(ms) {
+    const d = Math.max(0, Date.now() - ms) / 1000;
+    if (d < 60)   return `${d.toFixed(0)} s ago`;
+    if (d < 3600) return `${(d/60).toFixed(0)} min ago`;
+    return `${(d/3600).toFixed(1)} h ago`;
+}
+
+function renderRover(key, r) {
+    const meta = ROVER_DISPLAY[key] || { name: key, long: '' };
+    if (!r || !r.active) {
+        const reason = (r && r.reason) ? r.reason : 'no data';
+        return `
+            <div class="mp-mars-rover mp-mars-rover-offline">
+                <div class="mp-rov-name">
+                    <span>${escHtml(meta.name)}</span>
+                    <span class="mp-rov-source">${escHtml(meta.long)}</span>
+                </div>
+                <div class="mp-rov-status">offline · ${escHtml(reason)}</div>
+            </div>
+        `;
+    }
+    const rows = [];
+    if (r.location)         rows.push(['Location', r.location]);
+    if (Number.isFinite(r.sol))    rows.push(['Sol', String(r.sol)]);
+    if (r.terrestrial_date) rows.push(['Date', r.terrestrial_date]);
+    if (r.season)           rows.push(['Season', r.season]);
+    if (Number.isFinite(r.ls_deg)) rows.push(['Ls', `${r.ls_deg.toFixed(1)}°`]);
+    if (Number.isFinite(r.min_temp_C) || Number.isFinite(r.max_temp_C)) {
+        const min = Number.isFinite(r.min_temp_C) ? `${r.min_temp_C.toFixed(0)}°C` : '—';
+        const max = Number.isFinite(r.max_temp_C) ? `${r.max_temp_C.toFixed(0)}°C` : '—';
+        rows.push(['Temp', `${min} → ${max}`]);
+    }
+    if (Number.isFinite(r.avg_temp_C))    rows.push(['Avg temp', `${r.avg_temp_C.toFixed(1)}°C`]);
+    if (Number.isFinite(r.pressure_pa))   rows.push(['Pressure', `${r.pressure_pa.toFixed(0)} Pa`]);
+    if (Number.isFinite(r.wind_speed_mps))rows.push(['Wind', `${r.wind_speed_mps.toFixed(1)} m/s`]);
+    if (r.atmo_opacity)     rows.push(['Opacity', r.atmo_opacity]);
+    if (r.sunrise && r.sunset) rows.push(['Sun', `${r.sunrise} – ${r.sunset}`]);
+    if (r.note)             rows.push(['Note', r.note]);
+    const rowsHtml = rows.map(([k, v]) =>
+        `<div class="mp-rov-row"><span class="k">${escHtml(k)}</span><span class="v">${escHtml(v)}</span></div>`
+    ).join('');
+    return `
+        <div class="mp-mars-rover mp-mars-rover-active">
+            <div class="mp-rov-name">
+                <span>${escHtml(meta.name)}</span>
+                <span class="mp-rov-source">${escHtml(meta.long)}</span>
+            </div>
+            ${rowsHtml}
+        </div>
+    `;
+}
+
+function refreshMarsDashboard() {
+    // Look up elements at call time so this function works even if it
+    // ever fires before the dashboard's const block runs (e.g. via an
+    // early event during planner init). The DOM nodes themselves are
+    // present from page load — only the cached refs would TDZ.
+    const dash   = document.getElementById('mp-mars-dashboard');
+    if (!dash || dash.hidden) return;
+    const lsEl    = document.getElementById('mp-mars-dash-ls');
+    const countEl = document.getElementById('mp-mars-dash-count');
+    const listEl  = document.getElementById('mp-mars-rovers');
+    if (!lsEl || !countEl || !listEl) return;
+    const agg = getLatestMarsAggregate();
+    if (!agg) {
+        lsEl.textContent    = 'Awaiting feed…';
+        countEl.textContent = '— / 3';
+        listEl.innerHTML    = '<div class="mp-rov-status" style="padding:6px 8px;">No data yet — feed runs every 15 min</div>';
+        return;
+    }
+    const rovers = agg.rovers || {};
+    const total  = Object.keys(rovers).length || 3;
+    const active = Object.values(rovers).filter(r => r && r.active).length;
+    countEl.textContent = `${active} / ${total} live`;
+    const fetchedTxt = agg.fetched_at ? ` · updated ${ageLabel(agg.fetched_at)}` : '';
+    lsEl.textContent    = (agg.message || '—') + fetchedTxt;
+    // Render in fixed order so the panel is stable across refreshes
+    // even if the JSON key order ever shifts upstream.
+    const order = ['curiosity', 'perseverance', 'insight'];
+    listEl.innerHTML = order.map(k => renderRover(k, rovers[k])).join('');
+}
+
+// Title bar collapses / expands the body. ARIA attribute kept in sync
+// for assistive tech.
+marsDashToggle.addEventListener('click', () => {
+    const expanded = marsDashEl.classList.toggle('expanded');
+    marsDashToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
 });
 
 // ── Auto-launch a starter LEO so the page never looks empty ─────────
