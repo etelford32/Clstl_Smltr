@@ -47,6 +47,10 @@ celestial_scene.json
 data/history/archive-hourly/
 data/history/archive-daily.bin
 
+# Hindcast harness — runtime outputs only (Phase 0 validation).
+# Source fixtures live under swmf/fixtures/ and dsmc/fixtures/.
+data/hindcast/
+
 # npm — devDependencies only (Playwright); we never check in node_modules.
 node_modules/
 package-lock.json
