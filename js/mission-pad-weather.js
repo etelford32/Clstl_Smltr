@@ -193,24 +193,64 @@ function marsLs(jd) {
     return ((t < 0 ? t + 1 : t) * 360);
 }
 
-// Mars edge-function call returns one global record (Ls + InSight); we
-// fan it out across every Mars pad, optionally adding a per-pad nuance
-// (Olympus Mons is high-altitude / Jezero saw real Mars 2020 ops).
+// Mars edge-function call returns one global record (Ls + a `rovers` map
+// with one record per public NASA in-situ feed). The client maps each
+// pad to its closest rover so the Mars site shows real surface data
+// (when the feed is online) instead of just synthetic Ls flavour.
 async function fetchMarsAggregate(jd) {
     const url = `${MARS_API}?jd=${encodeURIComponent(jd.toFixed(2))}`;
     return fetchWithTimeout(url, FETCH_TIMEOUT_MS);
 }
 
+// Pad → rover mapping, by closest geographic proximity:
+//   Jezero Outpost     ≡ Mars 2020 / Perseverance   (sits in Jezero Crater)
+//   Gale Crater Base   ≡ Curiosity / MSL            (sits in Gale Crater)
+//   Utopia Planitia    ≈ InSight                    (closest active feed)
+//   Olympia Base       — none; Olympus Mons has no surface assets
+const PAD_ROVER_MAP = {
+    jezero:  'perseverance',
+    gale:    'curiosity',
+    utopia:  'insight',
+    olympia: null,
+};
+
+// Display labels for the rover that filled in a pad's reading. Kept short
+// so the badge message stays one line.
+const ROVER_LABEL = {
+    insight:      'InSight ref',
+    curiosity:    'MSL REMS',
+    perseverance: 'M2020 MEDA',
+};
+
+/**
+ * Build a per-pad weather message that combines the global synthetic Ls
+ * status with the closest active rover's most recent surface reading.
+ * Format:
+ *   "Ls 315° · late dust season · τ ≈ 0.5 · MSL REMS sol 4400: -87→-3°C, 905 Pa"
+ *
+ * If no rover data is available (mapped rover is offline, or pad has no
+ * mapping), we fall through to the synthetic-only message so the badge
+ * still shows something meaningful.
+ */
 function buildMarsPadMessage(agg, pad) {
     const base = agg.message || `Ls ${agg.ls_deg?.toFixed(0) ?? '?'}°`;
-    if (!agg.insight) return base;
-    const ins = agg.insight;
+    const roverKey = PAD_ROVER_MAP[pad.id];
+    const rover = roverKey ? agg.rovers?.[roverKey] : null;
+    if (!rover || !rover.active) return base;
+    const label = ROVER_LABEL[roverKey] || roverKey;
     const parts = [];
-    if (Number.isFinite(ins.max_temp_C) && Number.isFinite(ins.min_temp_C)) {
-        parts.push(`InSight ref · ${ins.min_temp_C.toFixed(0)}→${ins.max_temp_C.toFixed(0)}°C`);
+    if (Number.isFinite(rover.sol))
+        parts.push(`${label} sol ${rover.sol}`);
+    else
+        parts.push(label);
+    if (Number.isFinite(rover.max_temp_C) && Number.isFinite(rover.min_temp_C)) {
+        parts.push(`${rover.min_temp_C.toFixed(0)}→${rover.max_temp_C.toFixed(0)}°C`);
     }
-    if (Number.isFinite(ins.wind_speed_mps)) {
-        parts.push(`${ins.wind_speed_mps.toFixed(1)} m/s wind`);
+    if (Number.isFinite(rover.pressure_pa)) {
+        parts.push(`${rover.pressure_pa.toFixed(0)} Pa`);
+    }
+    if (Number.isFinite(rover.wind_speed_mps)) {
+        parts.push(`${rover.wind_speed_mps.toFixed(1)} m/s`);
     }
     return parts.length ? `${base} · ${parts.join(' · ')}` : base;
 }
