@@ -43,8 +43,9 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator, Optional
-from urllib.request import urlopen
-from urllib.error import URLError
+import time
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
 
 log = logging.getLogger("dsmc.fetch_historical_indices")
 
@@ -53,6 +54,28 @@ GFZ_URL = ("https://kp.gfz-potsdam.de/app/files/"
 
 # 3-hour bin centres relative to UT midnight, in hours.
 BIN_OFFSETS_HOURS = [1.5, 4.5, 7.5, 10.5, 13.5, 16.5, 19.5, 22.5]
+
+
+def _probe_urls(urls: list[str], *, timeout_s: float = 8.0) -> int:
+    """HEAD each URL; print one line per URL; return count of failures.
+    405 is treated as success (HEAD-not-allowed but server reachable)."""
+    failures = 0
+    for url in urls:
+        t0 = time.monotonic()
+        try:
+            with urlopen(Request(url, method="HEAD"), timeout=timeout_s) as r:
+                status = str(r.status)
+                if r.status >= 400 and r.status != 405:
+                    failures += 1
+        except HTTPError as exc:
+            status = str(exc.code)
+            if exc.code >= 400 and exc.code != 405:
+                failures += 1
+        except (URLError, OSError) as exc:
+            status = f"ERR({exc.__class__.__name__})"
+            failures += 1
+        print(f"  {status:>16}  {time.monotonic() - t0:5.2f}s  {url}")
+    return failures
 
 
 def _download(url: str = GFZ_URL, *, timeout_s: float = 90.0) -> str:
@@ -134,12 +157,17 @@ def main(argv: Optional[list[str]] = None) -> int:
     p.add_argument("--out", type=Path,
                    default=Path("dsmc/fixtures/hindcast/feb_2022_starlink/historical_ap.csv"))
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--smoke-test", action="store_true",
+                   help="HEAD-probe the GFZ URL and report status; "
+                        "exits non-zero if it looks broken.")
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args(argv)
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    if args.smoke_test:
+        return 1 if _probe_urls([GFZ_URL]) else 0
     try:
         fetch(_parse_when(args.start), _parse_when(args.end),
               out_path=args.out, dry_run=args.dry_run)

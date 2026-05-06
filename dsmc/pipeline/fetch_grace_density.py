@@ -73,8 +73,9 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable, Iterator, Optional
-from urllib.request import urlopen
-from urllib.error import URLError
+import time
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
 
 log = logging.getLogger("dsmc.fetch_grace_density")
 
@@ -93,6 +94,28 @@ def _format_url(template: str, day: datetime) -> str:
     return template.format(Y=f"{day.year:04d}",
                            M=f"{day.month:02d}",
                            D=f"{day.day:02d}")
+
+
+def _probe_urls(urls: list[str], *, timeout_s: float = 8.0) -> int:
+    """HEAD each URL; print one line per URL; return count of failures.
+    405 is treated as success (HEAD-not-allowed but server reachable)."""
+    failures = 0
+    for url in urls:
+        t0 = time.monotonic()
+        try:
+            with urlopen(Request(url, method="HEAD"), timeout=timeout_s) as r:
+                status = str(r.status)
+                if r.status >= 400 and r.status != 405:
+                    failures += 1
+        except HTTPError as exc:
+            status = str(exc.code)
+            if exc.code >= 400 and exc.code != 405:
+                failures += 1
+        except (URLError, OSError) as exc:
+            status = f"ERR({exc.__class__.__name__})"
+            failures += 1
+        print(f"  {status:>16}  {time.monotonic() - t0:5.2f}s  {url}")
+    return failures
 
 
 def _download(url: str, *, timeout_s: float = 90.0) -> str:
@@ -194,6 +217,10 @@ def main(argv: Optional[list[str]] = None) -> int:
                    default=Path("dsmc/fixtures/hindcast/feb_2022_starlink/grace_fo_density.csv"))
     p.add_argument("--dry-run", action="store_true",
                    help="With --remote-template, print URLs and exit.")
+    p.add_argument("--smoke-test", action="store_true",
+                   help="HEAD-probe each derived URL and report status; "
+                        "requires --remote-template; exits non-zero if any "
+                        "look broken.")
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args(argv)
     logging.basicConfig(
@@ -206,6 +233,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     columns = tuple(c.strip() for c in args.columns.split(","))
     if "t" not in columns:
         log.error("--columns must contain a 't' column"); return 2
+
+    if args.smoke_test:
+        if not args.remote_template:
+            log.error("--smoke-test requires --remote-template"); return 2
+        urls = [_format_url(args.remote_template, d) for d in _days(start, end)]
+        return 1 if _probe_urls(urls) else 0
 
     if args.dry_run:
         if not args.remote_template:
