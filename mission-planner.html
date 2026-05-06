@@ -281,6 +281,30 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
 #mp-hud .hud-row { display:flex; justify-content:space-between; gap:10px; padding:1px 0; }
 #mp-hud .hud-row .k { color:#88a; }
 #mp-hud .hud-row .v { color:#fff; font-weight:700; }
+.mp-mission-hud {
+    /* Sits at the bottom-right so it doesn't fight the Mission Status
+       card at top-right. Bumps up slightly when the help bar is visible. */
+    position:absolute; bottom:12px; right:12px;
+    background:rgba(6,4,18,.85); backdrop-filter:blur(8px);
+    border:1px solid rgba(255,170,102,.32);
+    border-radius:8px; padding:10px 12px;
+    font-family:monospace; font-size:.72rem; color:#cfd;
+    min-width:240px; max-width:300px;
+    pointer-events:none;
+}
+.mp-mission-hud .hud-title { color:#ffaa66; }
+.mp-mission-hud[hidden]    { display:none; }
+.mp-mhud-bar {
+    margin:6px 0 4px;
+    height:5px; border-radius:3px;
+    background:rgba(255,255,255,.08); overflow:hidden;
+}
+.mp-mhud-bar-fill {
+    height:100%; width:0%;
+    background:linear-gradient(90deg, #66ddff, #ffaa66);
+    transition:width .25s ease;
+}
+
 #mp-mode-badge {
     position:absolute; top:12px; left:12px;
     background:rgba(6,4,18,.85); backdrop-filter:blur(8px);
@@ -357,8 +381,9 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
             <button id="mp-focus-outer"   class="mp-mode-btn"    type="button" title="8">🪐 Outer</button>
         </div>
         <div class="mp-mode-toggle" style="margin-top:4px;">
-            <button id="mp-cam-follow"    class="mp-mode-btn"    type="button" title="F" style="flex:1.2;">🎥 Follow Mission</button>
-            <button id="mp-cam-reset"     class="mp-mode-btn"    type="button" title="R">⟲ Reset</button>
+            <button id="mp-cam-follow"    class="mp-mode-btn"    type="button" title="F · Follow active mission" style="flex:1.2;">🎥 Follow</button>
+            <button id="mp-cam-autoframe" class="mp-mode-btn on" type="button" title="Auto-chase new launches (toggle)" style="flex:1.2;">🎬 Auto</button>
+            <button id="mp-cam-reset"     class="mp-mode-btn"    type="button" title="R · Reset to Earth">⟲ Reset</button>
         </div>
 
         <div class="mp-label">Origin Body</div>
@@ -472,6 +497,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
             <button id="mp-time-fwd-h"  type="button" title="+1 hour">›</button>
             <button id="mp-time-fwd-d"  type="button" title="+1 day">»</button>
             <button id="mp-time-now"    type="button" title="Reset to now">⌖</button>
+            <button id="mp-time-skip"   type="button" title="Skip to next mission event (T)" style="flex:1.4; color:#ffcc66;">⏭ next event</button>
         </div>
 
         <div class="mp-time-bar" role="toolbar" aria-label="Playback rate">
@@ -513,8 +539,18 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
                 <div class="hud-row"><span class="k">Tours active</span><span class="v" id="hud-tours">0</span></div>
                 <div class="hud-row"><span class="k">Scenario JD</span><span class="v" id="hud-jd">—</span></div>
             </div>
+            <div id="mp-mission-hud" class="mp-mission-hud" hidden>
+                <div class="hud-title">Active Mission</div>
+                <div class="hud-row"><span class="k" id="mp-mhud-name">—</span><span class="v" id="mp-mhud-kind">—</span></div>
+                <div class="hud-row"><span class="k">Phase</span><span class="v" id="mp-mhud-phase">—</span></div>
+                <div class="hud-row"><span class="k" id="mp-mhud-target-k">To target</span><span class="v" id="mp-mhud-target-v">—</span></div>
+                <div class="hud-row"><span class="k">Elapsed / TOF</span><span class="v" id="mp-mhud-elapsed">—</span></div>
+                <div class="mp-mhud-bar"><div class="mp-mhud-bar-fill" id="mp-mhud-bar"></div></div>
+                <div class="hud-row" id="mp-mhud-dv-row" style="display:none;"><span class="k">Δv total</span><span class="v" id="mp-mhud-dv">—</span></div>
+                <div class="hud-row" id="mp-mhud-next-row" style="border-top:1px dashed rgba(255,255,255,.08); padding-top:4px; margin-top:4px;"><span class="k">Next event in</span><span class="v" id="mp-mhud-next">—</span></div>
+            </div>
         </div>
-        <p id="mp-3d-help"><strong>Drag</strong> orbit · <strong>Scroll</strong> zoom · <strong>Right-drag</strong> pan · <strong>Click a body</strong> to focus it · <strong>Keys 1–9</strong> presets · <strong>F</strong> follow active mission · <strong>R</strong> reset to Earth · <strong>📷</strong> drops camera above selected pad · 1 unit = 1 R⊕ · 1 AU ≈ 23 456 units</p>
+        <p id="mp-3d-help"><strong>Drag</strong> orbit · <strong>Scroll</strong> zoom · <strong>Right-drag</strong> pan · <strong>Click a body</strong> to focus it · <strong>Keys 1–9</strong> presets · <strong>F</strong> follow mission · <strong>T</strong> skip to next event · <strong>R</strong> reset · <strong>📷</strong> drops camera above selected pad · 1 unit = 1 R⊕ · 1 AU ≈ 23 456 units</p>
     </main>
 
 </div>
@@ -1466,9 +1502,11 @@ for (const id of FOCUS_IDS) {
 }
 
 // Camera action buttons.
+let followedMissionId = null;     // tracks which mission the HUD shows
 document.getElementById('mp-cam-follow').addEventListener('click', () => {
     const m = planner.followMission();
     if (m) {
+        followedMissionId = m.id;
         setFocusUI('mission');
         pushLog(`🎥 Camera following ${m.payloadName || 'active mission'}`, 'window');
     } else {
@@ -1476,8 +1514,19 @@ document.getElementById('mp-cam-follow').addEventListener('click', () => {
     }
 });
 document.getElementById('mp-cam-reset').addEventListener('click', () => {
+    followedMissionId = null;
     focusBody('earth');
     pushLog('⟲ Camera reset to Earth', 'window');
+});
+
+// Auto-frame toggle. Default ON; planner reads state on each launch.
+const autoFrameBtn = document.getElementById('mp-cam-autoframe');
+autoFrameBtn.addEventListener('click', () => {
+    const next = !planner.getAutoFrame();
+    planner.setAutoFrame(next);
+    autoFrameBtn.classList.toggle('on', next);
+    pushLog(next ? '🎬 Auto-frame ON · launches will be chased'
+                 : '🎬 Auto-frame OFF · camera stays put on launch', 'window');
 });
 
 // Fly camera to currently-selected origin pad. Routes Earth pads to Earth,
@@ -1507,12 +1556,17 @@ window.addEventListener('keydown', (e) => {
     if (k === 'f') {
         const m = planner.followMission();
         if (m) {
+            followedMissionId = m.id;
             setFocusUI('mission');
             pushLog(`🎥 Camera following ${m.payloadName || 'active mission'}`, 'window');
         }
         e.preventDefault();
     } else if (k === 'r') {
+        followedMissionId = null;
         focusBody('earth');
+        e.preventDefault();
+    } else if (k === 't') {
+        skipToNextEvent();
         e.preventDefault();
     }
 });
@@ -1590,6 +1644,21 @@ document.getElementById('mp-time-now'   ).addEventListener('click', () => {
     refreshTimeUI();
 });
 
+// Skip to next mission event — finds the soonest upcoming arrival /
+// phase transition and warps both elapsed (mission animation) and
+// scenarioJD (planet ephemerides) to that moment in one step.
+function skipToNextEvent() {
+    const r = planner.skipToNextEvent();
+    if (!r) {
+        pushLog('⏭ No upcoming mission events to skip to', 'window');
+        return;
+    }
+    refreshTimeUI();
+    const days = r.advanced_seconds * timeState.rate_d_per_s;
+    pushLog(`⏭ Warped ahead → ${r.label} (+${r.advanced_seconds.toFixed(1)} s wall · ~${days.toFixed(2)} d sim)`, 'window');
+}
+document.getElementById('mp-time-skip').addEventListener('click', skipToNextEvent);
+
 document.querySelectorAll('.mp-time-preset').forEach(btn => {
     btn.addEventListener('click', () => {
         document.querySelectorAll('.mp-time-preset').forEach(b => b.classList.remove('on'));
@@ -1609,8 +1678,97 @@ jdScrub.addEventListener('input', () => {
 planner.setSimDaysPerSec(timeState.rate_d_per_s);
 refreshTimeUI();
 
+// ── Active Mission HUD ──────────────────────────────────────────────
+// Pulls live telemetry from planner.getMissionDetail(id) on every
+// heartbeat. The "active" mission is whichever one the user has
+// followed most recently (Follow button or auto-frame on launch).
+// When that mission ends or is cleared, the HUD hides itself.
+const missionHud   = document.getElementById('mp-mission-hud');
+const mhudName     = document.getElementById('mp-mhud-name');
+const mhudKind     = document.getElementById('mp-mhud-kind');
+const mhudPhase    = document.getElementById('mp-mhud-phase');
+const mhudTargetK  = document.getElementById('mp-mhud-target-k');
+const mhudTargetV  = document.getElementById('mp-mhud-target-v');
+const mhudElapsed  = document.getElementById('mp-mhud-elapsed');
+const mhudBar      = document.getElementById('mp-mhud-bar');
+const mhudDvRow    = document.getElementById('mp-mhud-dv-row');
+const mhudDv       = document.getElementById('mp-mhud-dv');
+const mhudNextRow  = document.getElementById('mp-mhud-next-row');
+const mhudNext     = document.getElementById('mp-mhud-next');
+const KIND_DISPLAY = {
+    near:           '🚀 ascent',
+    payload:        '🛰 orbit',
+    lunar:          '🌙 lunar',
+    'moon-to-earth':'🌙→🌍 return',
+    mars:           '♂ Mars',
+    'mars-to-earth':'♂→🌍 return',
+    'moon-to-mars': '🌙→♂',
+    'earth-to-jupiter':'♃ cruise',
+    'earth-to-saturn': '♄ cruise',
+    'earth-to-uranus': '⛢ cruise',
+    'earth-to-neptune':'♆ cruise',
+    tour:           '🌌 tour',
+    mission:        'mission',
+};
+function fmtSeconds(s) {
+    if (s == null) return '—';
+    if (s < 60)   return `${s.toFixed(1)} s`;
+    if (s < 3600) return `${(s/60).toFixed(1)} min`;
+    return `${(s/60).toFixed(0)} min`;
+}
+function refreshMissionHud() {
+    // If the followed mission is gone (cleared / arrived), pick the most
+    // recent active one so the panel auto-handoffs as missions roll over.
+    const active = planner.listActiveMissions();
+    if (!active.length) {
+        missionHud.hidden = true;
+        followedMissionId = null;
+        return;
+    }
+    let id = followedMissionId;
+    if (!id || !active.some(m => m.id === id)) {
+        // Fall back to most recent (highest startedAt).
+        active.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
+        id = active[0].id;
+    }
+    const d = planner.getMissionDetail(id);
+    if (!d) { missionHud.hidden = true; return; }
+    missionHud.hidden = false;
+    mhudName.textContent  = d.payloadName || `mission #${d.id}`;
+    mhudKind.textContent  = KIND_DISPLAY[d.kind] || d.kind;
+    mhudPhase.textContent = d.phase || '—';
+    if (d.targetName) {
+        mhudTargetK.textContent = `To ${d.targetName}`;
+        mhudTargetV.textContent = fmtDistance(d.distance_units);
+    } else {
+        mhudTargetK.textContent = 'Target';
+        mhudTargetV.textContent = '—';
+    }
+    if (d.duration_s) {
+        const tof_d = d.duration_s * (timeState?.rate_d_per_s ?? 1);
+        mhudElapsed.textContent = `${fmtSeconds(d.elapsed_s)} / ${fmtSeconds(d.duration_s)} (~${tof_d.toFixed(1)} d sim)`;
+        mhudBar.style.width = `${((d.progress ?? 0) * 100).toFixed(1)}%`;
+    } else {
+        mhudElapsed.textContent = `${fmtSeconds(d.elapsed_s)} elapsed`;
+        mhudBar.style.width = '0%';
+    }
+    if (d.plan?.dv_total_kms != null) {
+        mhudDvRow.style.display = '';
+        mhudDv.textContent = `${d.plan.dv_total_kms.toFixed(2)} km/s`;
+    } else {
+        mhudDvRow.style.display = 'none';
+    }
+    const ev = planner.getNextEvent();
+    if (ev && ev.in_seconds > 0) {
+        mhudNextRow.style.display = '';
+        mhudNext.textContent = `${fmtSeconds(ev.in_seconds)} · ${ev.label}`;
+    } else {
+        mhudNextRow.style.display = 'none';
+    }
+}
+
 // ── HUD heartbeat (Scenario JD ticks even with no missions) ─────────
-setInterval(() => { refreshHUD(); refreshTimeUI(); }, 250);
+setInterval(() => { refreshHUD(); refreshTimeUI(); refreshMissionHud(); }, 250);
 
 // ── Launch Physics Lab ──────────────────────────────────────────────
 const lpBodySel    = document.getElementById('mp-launch-body');
