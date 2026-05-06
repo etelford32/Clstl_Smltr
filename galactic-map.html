@@ -137,6 +137,24 @@
 }
 .gp-min-btn::before { content: '−'; }
 .gp-panel.minimized .gp-min-btn::before { content: '+'; }
+/* `.gp-close-btn` shares the chrome with `.gp-min-btn` but renders its own
+   character (×) without the auto-injected −/+ glyph. */
+.gp-close-btn {
+    flex-shrink: 0;
+    background: transparent; border: 1px solid var(--c-border-soft);
+    color: var(--c-text-muted);
+    width: 22px; height: 20px; padding: 0;
+    border-radius: var(--r-sm);
+    font-family: inherit; font-size: 14px; font-weight: 700;
+    line-height: 1; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: background var(--t-snap), color var(--t-snap), border-color var(--t-snap);
+}
+.gp-close-btn:hover {
+    color: #fff;
+    background: rgba(255, 80, 80, 0.25);
+    border-color: rgba(255, 80, 80, 0.55);
+}
 
 .gp-body {
     padding: var(--sp-5) var(--sp-6) var(--sp-5);
@@ -661,6 +679,129 @@ canvas { display:block; width:100% !important; height:100% !important; }
 }
 .legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 
+/* ─── Object Profile floating card ───────────────────────────── */
+#object-profile {
+    left: 14px; top: 480px;
+    width: 320px;
+    z-index: 110;            /* above sun-time-panel so it can overlap if needed */
+    opacity: 0;
+    transform: translateY(8px);
+    pointer-events: none;
+    transition: opacity var(--t-medium), transform var(--t-medium);
+}
+#object-profile.visible {
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
+}
+#object-profile .gp-body { padding: 0; }
+#object-profile .op-hero {
+    padding: var(--sp-5) var(--sp-6) var(--sp-4);
+    background: radial-gradient(circle at 70% 0%,
+                rgba(var(--c-accent-rgb), .22), transparent 65%);
+    border-bottom: 1px solid var(--c-border-faint);
+}
+#object-profile .op-name {
+    font-size: 17px; font-weight: 700;
+    color: var(--c-text-primary); letter-spacing: .01em;
+    margin-bottom: var(--sp-2); line-height: 1.2;
+    word-wrap: break-word;
+}
+#object-profile .op-type {
+    display: inline-block;
+    font-size: 10.5px; font-weight: 600;
+    color: var(--c-accent);
+    background: var(--c-accent-soft);
+    border: 1px solid var(--c-accent-border);
+    padding: 2px 8px;
+    border-radius: 999px;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+#object-profile .op-desc {
+    padding: var(--sp-4) var(--sp-6);
+    font-size: 11px; line-height: 1.55;
+    color: var(--c-text-muted);
+    border-bottom: 1px solid var(--c-border-faint);
+    max-height: 130px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--c-accent-border) transparent;
+}
+#object-profile .op-stats {
+    padding: var(--sp-3) var(--sp-6);
+    max-height: 240px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--c-accent-border) transparent;
+}
+#object-profile .op-stat {
+    display: flex; justify-content: space-between; align-items: baseline;
+    gap: var(--sp-3);
+    padding: 3px 0;
+    border-bottom: 1px solid var(--c-border-faint);
+    font-size: 11px;
+}
+#object-profile .op-stat:last-child { border-bottom: none; }
+#object-profile .op-stat .op-k { color: var(--c-text-muted); flex-shrink: 0; }
+#object-profile .op-stat .op-v {
+    color: var(--c-text-primary); font-variant-numeric: tabular-nums;
+    text-align: right;
+    word-break: break-word;
+}
+#object-profile .op-actions {
+    padding: var(--sp-4) var(--sp-6);
+    display: flex; gap: var(--sp-3); flex-wrap: wrap;
+    border-top: 1px solid var(--c-border-faint);
+}
+#object-profile .op-btn {
+    flex: 1 1 auto; min-width: 100px;
+    text-align: center;
+    background: var(--c-accent-soft);
+    border: 1px solid var(--c-accent-border);
+    color: var(--c-accent);
+    padding: 6px 12px;
+    border-radius: var(--r-sm);
+    font-size: 11px; font-family: inherit; font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background var(--t-snap), border-color var(--t-snap), color var(--t-snap), transform var(--t-fast);
+}
+#object-profile .op-btn:hover {
+    background: rgba(var(--c-accent-rgb), .30);
+    border-color: var(--c-accent-border-hi);
+    color: var(--c-text-primary);
+}
+#object-profile .op-btn:active { transform: scale(.96); }
+#object-profile .op-btn.op-btn-primary {
+    background: rgba(var(--c-accent-rgb), .35);
+    color: #fff;
+    border-color: var(--c-accent);
+    box-shadow: 0 0 0 1px var(--c-accent-glow) inset;
+}
+#object-profile .op-btn.op-btn-primary:hover {
+    background: rgba(var(--c-accent-rgb), .50);
+}
+#object-profile .op-empty {
+    padding: var(--sp-5) var(--sp-6);
+    color: var(--c-text-faint); font-size: 11px;
+    text-align: center; line-height: 1.55;
+}
+
+@media (max-width: 1024px) {
+    #object-profile {
+        top: auto; bottom: 80px;
+        width: 280px;
+    }
+}
+@media (max-width: 600px) {
+    #object-profile {
+        left: 8px; right: 8px;
+        bottom: 80px;
+        width: auto;
+    }
+}
+
 /* ─── Space Weather link button ─────────────────────────────────── */
 .cv-btn {
     position: absolute; z-index: 60;
@@ -778,6 +919,25 @@ canvas { display:block; width:100% !important; height:100% !important; }
         <a href="space-weather.html" class="cv-btn" id="btn-sw"
            title="Live Space Weather Data — solar wind, geomagnetic, CME activity"
            style="top:14px;right:340px;">⚡ Weather</a>
+
+        <!-- Object Profile floating card (populated when an object is selected) -->
+        <div id="object-profile" class="gp-panel" data-panel-key="object-profile">
+            <div class="gp-header" data-drag-handle
+                 title="Drag to move. Hit × to deselect; − to minimize.">
+                <span class="gp-grip" aria-hidden="true"></span>
+                <span class="gp-title">📇 Object Profile</span>
+                <button type="button" class="gp-min-btn" data-min-btn
+                        title="Minimize panel" aria-label="Minimize Object Profile panel"></button>
+                <button type="button" class="gp-close-btn" id="op-close-btn"
+                        title="Deselect this object" aria-label="Deselect"
+                        style="margin-left:4px;">×</button>
+            </div>
+            <div class="gp-body" id="op-body">
+                <div class="op-empty">
+                    Click any object in the scene or in the Catalog &amp; Display panel to see its profile here.
+                </div>
+            </div>
+        </div>
 
         <!-- Zoom presets (bottom-centre) -->
         <div id="zoom-bar" class="gp-panel" data-panel-key="zoom-bar">
@@ -5334,6 +5494,62 @@ const starGlows   = {};
 const starLabels  = {};
 const starSprites = {};
 
+// ── Selection ring + halo (one shared sprite pair, follows selected object) ──
+// A pulsing cyan ring + soft halo make the selected object unambiguous at any
+// zoom. Both sprites are scaled per-frame in updateLabelScales so they stay
+// proportional to the selected object's apparent screen size.
+function makeSelectionRingTexture() {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 256;
+    const ctx = cv.getContext('2d');
+    // Outer crisp ring
+    ctx.strokeStyle = 'rgba(0, 200, 255, 0.95)';
+    ctx.lineWidth   = 5;
+    ctx.beginPath(); ctx.arc(128, 128, 108, 0, Math.PI * 2); ctx.stroke();
+    // Inner thin guideline ring
+    ctx.strokeStyle = 'rgba(0, 200, 255, 0.45)';
+    ctx.lineWidth   = 2;
+    ctx.beginPath(); ctx.arc(128, 128, 88, 0, Math.PI * 2); ctx.stroke();
+    // Four corner ticks for "reticle" feel
+    ctx.strokeStyle = 'rgba(0, 200, 255, 0.85)';
+    ctx.lineWidth   = 3;
+    ctx.lineCap     = 'round';
+    [0, Math.PI / 2, Math.PI, Math.PI * 1.5].forEach(a => {
+        const x1 = 128 + Math.cos(a) * 118, y1 = 128 + Math.sin(a) * 118;
+        const x2 = 128 + Math.cos(a) * 134, y2 = 128 + Math.sin(a) * 134;
+        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    });
+    return new THREE.CanvasTexture(cv);
+}
+function makeSelectionHaloTexture() {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 256;
+    const ctx = cv.getContext('2d');
+    const grad = ctx.createRadialGradient(128, 128, 30, 128, 128, 128);
+    grad.addColorStop(0,    'rgba(0, 200, 255, 0.55)');
+    grad.addColorStop(0.45, 'rgba(0, 200, 255, 0.18)');
+    grad.addColorStop(1,    'rgba(0, 200, 255, 0.00)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 256, 256);
+    return new THREE.CanvasTexture(cv);
+}
+const selectionRing = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: makeSelectionRingTexture(),
+    transparent: true, depthWrite: false, depthTest: false,
+}));
+selectionRing.renderOrder = 999;
+selectionRing.visible = false;
+scene.add(selectionRing);
+
+const selectionHalo = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: makeSelectionHaloTexture(),
+    transparent: true, depthWrite: false, depthTest: false,
+    blending: THREE.AdditiveBlending,
+}));
+selectionHalo.renderOrder = 998;
+selectionHalo.visible = false;
+scene.add(selectionHalo);
+
 const raycaster = new THREE.Raycaster();
 raycaster.params.Points.threshold = 5;
 
@@ -5983,23 +6199,75 @@ CATALOG.forEach(s => {
     if (s.isIntergalactic) buildGalaxySprite(s, pos);
 
     // ── Text label sprite ───────────────────────────────────────
+    // Two pre-rendered textures per label — `default` and `selected`. The
+    // selected variant is brighter, larger, and gets a faint outline + cyan
+    // halo behind the text so the object stands out unambiguously when
+    // chosen. We pre-build both up-front and swap the sprite's `.map` from
+    // selectStar() to avoid per-frame canvas churn.
+    const LBL_W = 768, LBL_H = 144;
+    function paintLabel(canvas, selected) {
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, LBL_W, LBL_H);
+        // Subtle pill backdrop when selected, transparent otherwise
+        if (selected) {
+            ctx.fillStyle = 'rgba(0, 200, 255, 0.18)';
+            const rx = 16;
+            ctx.beginPath();
+            ctx.moveTo(rx, 0);
+            ctx.lineTo(LBL_W - rx, 0);
+            ctx.quadraticCurveTo(LBL_W, 0, LBL_W, rx);
+            ctx.lineTo(LBL_W, LBL_H - rx);
+            ctx.quadraticCurveTo(LBL_W, LBL_H, LBL_W - rx, LBL_H);
+            ctx.lineTo(rx, LBL_H);
+            ctx.quadraticCurveTo(0, LBL_H, 0, LBL_H - rx);
+            ctx.lineTo(0, rx);
+            ctx.quadraticCurveTo(0, 0, rx, 0);
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(0, 200, 255, 0.65)';
+            ctx.lineWidth   = 3;
+            ctx.stroke();
+        }
+        // Title (object name / abbr)
+        const titleColor = selected ? '#ffffff'
+                         : s.isGC   ? '#ffaa44'
+                         : s.isSstar ? '#aaddff'
+                                     : 'rgba(230,220,255,0.96)';
+        ctx.font = `bold ${selected ? 56 : 48}px Segoe UI, sans-serif`;
+        ctx.fillStyle = titleColor;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        // Soft text shadow for readability against busy backgrounds
+        ctx.shadowColor = 'rgba(0,0,0,0.85)';
+        ctx.shadowBlur  = selected ? 6 : 4;
+        ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 1;
+        ctx.fillText(s.abbr, 12, 6);
+        // Type / subtitle
+        ctx.font = `${selected ? 30 : 28}px Segoe UI, sans-serif`;
+        ctx.fillStyle = selected ? 'rgba(190, 230, 255, 0.95)'
+                                 : 'rgba(170, 155, 220, 0.82)';
+        ctx.shadowBlur = 3;
+        ctx.fillText(s.type, 12, selected ? 70 : 64);
+        ctx.shadowColor = 'transparent';
+    }
     const lCanvas = document.createElement('canvas');
-    lCanvas.width = 512; lCanvas.height = 96;
-    const lctx = lCanvas.getContext('2d');
-    lctx.font = 'bold 32px Segoe UI, sans-serif';
-    lctx.fillStyle = s.isGC ? '#ffaa44' : s.isSstar ? '#aaddff' : 'rgba(230,220,255,0.95)';
-    lctx.textAlign = 'left';
-    lctx.textBaseline = 'top';
-    lctx.fillText(s.abbr, 6, 4);
-    lctx.font = '22px Segoe UI, sans-serif';
-    lctx.fillStyle = 'rgba(160,145,210,0.80)';
-    lctx.fillText(s.type, 6, 44);
+    lCanvas.width = LBL_W; lCanvas.height = LBL_H;
+    paintLabel(lCanvas, false);
     const lTex = new THREE.CanvasTexture(lCanvas);
+
+    const lCanvasSel = document.createElement('canvas');
+    lCanvasSel.width = LBL_W; lCanvasSel.height = LBL_H;
+    paintLabel(lCanvasSel, true);
+    const lTexSel = new THREE.CanvasTexture(lCanvasSel);
+
     const label = new THREE.Sprite(new THREE.SpriteMaterial({
         map: lTex, transparent: true, depthWrite: false,
     }));
     label.position.copy(pos);
-    label.scale.set(1, 0.19, 1); // placeholder; updated every frame
+    label.scale.set(1, LBL_H / LBL_W, 1);  // placeholder; updated every frame
+    label.userData.texDefault  = lTex;
+    label.userData.texSelected = lTexSel;
+    label.userData.aspect      = LBL_H / LBL_W;
     scene.add(label);
     starLabels[s.id] = label;
 });
@@ -7890,11 +8158,44 @@ CATALOG.forEach(s => {
 // ══════════════════════════════════════════════════════════════════════════
 let selectedId = null;
 
-function selectStar(id, doFly = false) {
-    // Restore previous selection color
+// Tiny HTML-escape helper for catalog strings — defends against the (very
+// unlikely) case of HTML metachars sneaking in via a description.
+const escHtml = (str) => String(str).replace(/[&<>"']/g, m => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]
+));
+
+function deselectStar() {
     if (selectedId && starMeshes[selectedId]) {
         const prev = CATALOG.find(s => s.id === selectedId);
         if (prev) starMeshes[selectedId].material.color.setHex(prev.color);
+        // Restore the prior label's default texture
+        const prevLbl = starLabels[selectedId];
+        if (prevLbl && prevLbl.userData.texDefault) {
+            prevLbl.material.map = prevLbl.userData.texDefault;
+            prevLbl.material.needsUpdate = true;
+        }
+    }
+    selectedId = null;
+    document.querySelectorAll('.star-item').forEach(el => el.classList.remove('selected'));
+    selectionRing.visible = false;
+    selectionHalo.visible = false;
+    // Reset the profile card to its empty state
+    const op = document.getElementById('object-profile');
+    const opBody = document.getElementById('op-body');
+    if (op)     op.classList.remove('visible');
+    if (opBody) opBody.innerHTML = '<div class="op-empty">Click any object in the scene or in the Catalog &amp; Display panel to see its profile here.</div>';
+}
+
+function selectStar(id, doFly = false) {
+    // Restore previous selection color + label
+    if (selectedId && starMeshes[selectedId]) {
+        const prev = CATALOG.find(s => s.id === selectedId);
+        if (prev) starMeshes[selectedId].material.color.setHex(prev.color);
+        const prevLbl = starLabels[selectedId];
+        if (prevLbl && prevLbl.userData.texDefault) {
+            prevLbl.material.map = prevLbl.userData.texDefault;
+            prevLbl.material.needsUpdate = true;
+        }
     }
     document.querySelectorAll('.star-item').forEach(el => el.classList.remove('selected'));
 
@@ -7902,9 +8203,14 @@ function selectStar(id, doFly = false) {
     const s = CATALOG.find(s => s.id === id);
     if (!s) return;
 
-    // Highlight selected star white
+    // Highlight selected star white + swap to selected-label texture
     starMeshes[id].material.color.setHex(0xffffff);
     document.getElementById('li-' + id)?.classList.add('selected');
+    const lbl = starLabels[id];
+    if (lbl && lbl.userData.texSelected) {
+        lbl.material.map = lbl.userData.texSelected;
+        lbl.material.needsUpdate = true;
+    }
 
     // ── HUD update (scientific notation) ────────────────────────
     document.getElementById('hud-name').textContent = s.name;
@@ -7917,8 +8223,7 @@ function selectStar(id, doFly = false) {
     document.getElementById('hud-gc').textContent =
         s.isGC ? '0 ly' : fmtDist(s.gcDist);
 
-    // ── Info panel ───────────────────────────────────────────────
-    // Add computed galactic coordinate rows
+    // ── Build the property rows used by both surfaces ────────────
     const coordRows = s.isGC ? [] : s.isSstar ? [
         ['Galactic l / b', '≈ 0° / 0° (galactic center direction)'],
         ['Distance from Sun', fmtDist(s.dist)],
@@ -7939,23 +8244,69 @@ function selectStar(id, doFly = false) {
         ['Scene coords (ly)',  `(${s.pos3.x.toFixed(1)}, ${s.pos3.y.toFixed(1)}, ${s.pos3.z.toFixed(1)})`],
     ];
     const allProps = [...coordRows, ...s.props];
-    const rowsHtml = allProps.map(([k, v]) =>
-        `<div class="ip-row"><span class="ip-k">${k}</span><span class="ip-v">${v}</span></div>`
-    ).join('');
-    const linkHtml = s.link
-        ? `<a href="${s.link}" class="info-link">Open Simulation →</a>` : '';
 
+    // ── Sidebar info panel (summary surface) ─────────────────────
+    const sidebarRowsHtml = allProps.map(([k, v]) =>
+        `<div class="ip-row"><span class="ip-k">${escHtml(k)}</span><span class="ip-v">${escHtml(v)}</span></div>`
+    ).join('');
+    const sidebarLinkHtml = s.link
+        ? `<a href="${escHtml(s.link)}" class="info-link">Open Simulation →</a>` : '';
     document.getElementById('info-panel').innerHTML = `
-        <h3>${s.name}</h3>
-        <div class="ip-type">${s.type}</div>
-        <div style="font-size:10.5px;color:#888;margin:6px 0 8px;line-height:1.55">${s.desc}</div>
-        ${rowsHtml}
-        ${linkHtml}
+        <h3>${escHtml(s.name)}</h3>
+        <div class="ip-type">${escHtml(s.type)}</div>
+        <div style="font-size:10.5px;color:var(--c-text-muted);margin:6px 0 8px;line-height:1.55">${escHtml(s.desc)}</div>
+        ${sidebarRowsHtml}
+        ${sidebarLinkHtml}
     `;
+
+    // ── Floating profile card (primary surface) ──────────────────
+    const profileRowsHtml = allProps.map(([k, v]) =>
+        `<div class="op-stat"><span class="op-k">${escHtml(k)}</span><span class="op-v">${escHtml(v)}</span></div>`
+    ).join('');
+    const profileLinkHtml = s.link
+        ? `<a href="${escHtml(s.link)}" class="op-btn op-btn-primary"
+              title="Open the dedicated simulator page for this object">Open Simulation →</a>` : '';
+    const focusBtnHtml = s.isIntergalactic
+        ? `<button type="button" class="op-btn" id="op-focus-btn"
+                   title="Make this object the camera's orbit center">Focus Camera</button>` : '';
+    const flyBtnHtml = `<button type="button" class="op-btn" id="op-fly-btn"
+                                title="Fly the camera to this object">Fly To</button>`;
+    document.getElementById('op-body').innerHTML = `
+        <div class="op-hero">
+            <div class="op-name">${escHtml(s.name)}</div>
+            <span class="op-type">${escHtml(s.type)}</span>
+        </div>
+        <div class="op-desc">${escHtml(s.desc)}</div>
+        <div class="op-stats">${profileRowsHtml}</div>
+        <div class="op-actions">
+            ${flyBtnHtml}${focusBtnHtml}${profileLinkHtml}
+        </div>
+    `;
+    document.getElementById('object-profile').classList.add('visible');
+
+    // Wire profile-card buttons (re-bound on every selection — content is
+    // freshly rendered, so prior listeners are discarded with the old DOM).
+    const flyBtn = document.getElementById('op-fly-btn');
+    if (flyBtn) flyBtn.addEventListener('click', () => flyToStar(s));
+    const focusBtn = document.getElementById('op-focus-btn');
+    if (focusBtn) focusBtn.addEventListener('click', () => {
+        if (s.isIntergalactic) { setIgmFocus(s); flyToStar(s); }
+    });
+
+    // Auto-expand the sidebar's "Selected Object" section so the user
+    // sees the summary mirror without having to hunt for it.
+    const selDetails = document.querySelector('details.gp-section[data-section-key="selected"]');
+    if (selDetails && !selDetails.open) selDetails.open = true;
 
     // ── Fly camera near this object ──────────────────────────────
     if (doFly) flyToStar(s);
 }
+
+// Wire the profile-card close button once at module load
+document.getElementById('op-close-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    deselectStar();
+});
 
 // Select Sun initially (no fly — camera starts at galaxy view)
 selectStar('sun', false);
@@ -8187,8 +8538,9 @@ document.getElementById('igm-back-btn').addEventListener('click',  () => { setIg
         let pointerId = null;
 
         header.addEventListener('pointerdown', (e) => {
-            // Don't start a drag from the minimize button or any focused control
-            if (e.target.closest('[data-min-btn]')) return;
+            // Don't start a drag from any button in the header — minimize,
+            // close, or any custom control
+            if (e.target.closest('button')) return;
             if (e.button !== undefined && e.button !== 0) return;
 
             dragging = true;
@@ -8351,13 +8703,28 @@ function updateLabelScales() {
         }
 
         // ── Label sprite ─────────────────────────────────────────
+        // Size by the label's *own* distance from the camera (not the orbit
+        // target's distance) so labels keep a consistent screen size whether
+        // they're in front of or behind the look-at point. Selected gets a
+        // 1.6× boost so it visually pops out of the surrounding field.
         const lbl  = starLabels[s.id];
         if (lbl) {
-            const lw = camDist * 0.055;
-            const lh = lw * (96 / 512);
+            const distToObj = camera.position.distanceTo(s.pos3);
+            const isSel     = s.id === selectedId;
+            // Bumped from 0.055 → 0.090 so labels are readable at all zooms
+            const baseMul   = 0.090;
+            // For very close zoom (< 200 ly) give labels a small extra nudge
+            // because the surrounding glow halos are already large.
+            const closeBoost = camDist < 200 ? 1 + (200 - Math.max(camDist, 50)) / 600 : 1;
+            const selBoost   = isSel ? 1.65 : 1.0;
+            const lw         = distToObj * baseMul * closeBoost * selBoost;
+            const lh         = lw * (lbl.userData.aspect || 0.1875);
             lbl.scale.set(lw, lh, 1);
             const off = Math.max(drawR, baseGlow, minGlow) * 0.55 + lw * 0.04;
             lbl.position.set(s.pos3.x + off, s.pos3.y + lh * 0.6, s.pos3.z);
+
+            // Selected label always rendered above neighbours
+            lbl.renderOrder = isSel ? 5 : 0;
 
             // Hide intergalactic labels when close to MW (not useful at galactic scale)
             // Show them in universe view or when the camera is near the object itself
@@ -8365,7 +8732,8 @@ function updateLabelScales() {
                 const camToObj = camera.position.distanceTo(s.pos3);
                 const nearObj  = camToObj < s.pos3.distanceTo(SUN3) * 0.4;
                 const universeView = camDist > 200000;
-                lbl.visible = nearObj || universeView;
+                // Selected intergalactic labels stay visible regardless of zoom
+                lbl.visible = isSel || nearObj || universeView;
             }
         }
 
@@ -8438,6 +8806,30 @@ function updateLabelScales() {
         // Only show arm labels in arm-zoom range — not at galaxy overview or local zoom
         l.visible = document.getElementById('tog-arms').checked && camDist > 4000 && camDist < 45000;
     });
+
+    // ── Selection ring + halo (follows the selected object) ───────────
+    if (selectedId) {
+        const sel = CATALOG.find(c => c.id === selectedId);
+        if (sel && !sel.isHeader) {
+            const distToSel = camera.position.distanceTo(sel.pos3);
+            // Ring sized to ~6% of the apparent screen-space "radius" so it
+            // sits comfortably outside the object's glow at every zoom.
+            const ringSz = distToSel * 0.060;
+            // Soft pulse — 0.92× → 1.10× over a ~1 s cycle
+            const pulse  = 1.0 + 0.09 * Math.sin(performance.now() * 0.005);
+            selectionRing.position.copy(sel.pos3);
+            selectionRing.scale.setScalar(ringSz * pulse);
+            selectionRing.visible = true;
+            selectionHalo.position.copy(sel.pos3);
+            selectionHalo.scale.setScalar(ringSz * 1.45 * pulse);
+            // Halo opacity varies opposite to ring scale for depth
+            selectionHalo.material.opacity = 0.45 + 0.25 * Math.sin(performance.now() * 0.005);
+            selectionHalo.visible = true;
+        }
+    } else {
+        selectionRing.visible = false;
+        selectionHalo.visible = false;
+    }
 }
 
 // ══════════════════════════════════════════════════════════════════════════
