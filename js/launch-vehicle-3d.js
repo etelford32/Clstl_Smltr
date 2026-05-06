@@ -594,7 +594,12 @@ function buildShuttleStack() {
     // and the cockpit (+Z) faces the camera-side viewer. No Y-rotation
     // needed — the local frame already matches the desired world frame.
     const orbiter = buildOrbiter();
-    orbiter.position.set(0, DIM.ORBITER_LEN * 0.5 + 0.5, DIM.ET_R + DIM.ORBITER_FUSE_R + 0.4);
+    // Raise the orbiter so the SSME bell exits clear the MLP deck (deck top
+    // sits at world y=4.2, root.position.y=4.2, so the SSME exit at stack
+    // y_local needs to clear y=0). With the previous +0.5 m mount offset
+    // the lower bells were sinking ~0.3 m into the deck because the deck
+    // flame trench is narrower in Z than the orbiter's engine cluster.
+    orbiter.position.set(0, DIM.ORBITER_LEN * 0.5 + 1.5, DIM.ET_R + DIM.ORBITER_FUSE_R + 0.4);
     stack.add(orbiter);
 
     // Plume — one under each SRB, one under the SSME cluster. Positioned at
@@ -609,10 +614,11 @@ function buildShuttleStack() {
         stack.add(p);
     }
     // SSME bells exit at orbiter-local y = -L*0.46 - 1.9 ≈ -19.0; with the
-    // orbiter mounted at stack-y = L*0.5 + 0.5, that puts the cluster exit at
-    // stack-y ≈ -0.05. Round to 0 and offset the plume base by a small gap.
+    // orbiter mounted at stack-y = L*0.5 + 1.5, that puts the cluster exit at
+    // stack-y ≈ 1.0. Place the plume's base just below the bells so the cone
+    // emerges from the nozzle exit, not somewhere inside the engine.
     const ssmeP = buildPlume();
-    ssmeP.position.set(0, 0.0, DIM.ET_R + DIM.ORBITER_FUSE_R + 0.4);
+    ssmeP.position.set(0, 1.0, DIM.ET_R + DIM.ORBITER_FUSE_R + 0.4);
     plumes.push(ssmeP);
     stack.add(ssmeP);
 
@@ -700,33 +706,72 @@ function buildStarfield() {
 }
 
 // ── Camera presets ───────────────────────────────────────────────────────────
-// Presets are *ratios* of the current vehicle's stack height, plus an offset
-// from the stack base, so the same preset frames a 56 m shuttle on its MLP
-// and a 150 m starship on the OLM equally well. setView() re-evaluates
-// these for the active vehicle each call.
+// Each preset is a unit-length direction vector from the framing target
+// outward to the camera, plus an optional target-Y bias and distance multiplier.
+// Distance is computed from the vehicle's actual world-space bounding box
+// (so a 56 m shuttle and a 125 m starship are both fit-to-frame), the
+// camera FOV, and the canvas aspect — meaning the rocket actually centers
+// in the viewport instead of relying on hardcoded fractions.
 //
-// Each ratio is interpreted as:
-//   pos.y  →  baseY + posY * height
-//   target →  baseY + targetYFrac * height
-// where baseY is the world-Y of the vehicle's base (top of MLP / OLM table).
+//   targetBias.y  → bbox.center.y + bias * bbox.size.y   (negative aims lower)
+//   distMul       → multiply fit-distance for tighter / wider shots
 
-const VIEW_RATIOS = {
-    threequarter: { pos: [1.10, 0.65, 1.40], targetYFrac: 0.45 },
-    front:        { pos: [0.0,  0.55, 2.20], targetYFrac: 0.45 },
-    side:         { pos: [2.20, 0.55, 0.0],  targetYFrac: 0.45 },
-    top:          { pos: [0.0,  3.00, 0.001], targetYFrac: 0.4 },
-    closeup:      { pos: [0.55, 0.35, 0.70], targetYFrac: 0.20 },
+const VIEW_PRESETS = {
+    threequarter: { dir: [ 0.62, 0.30,  0.85], biasY:  0.00, distMul: 1.10 },
+    front:        { dir: [ 0.00, 0.18,  1.00], biasY:  0.00, distMul: 1.20 },
+    side:         { dir: [ 1.00, 0.18,  0.00], biasY:  0.00, distMul: 1.20 },
+    top:          { dir: [ 0.00, 1.00,  0.001], biasY:  0.00, distMul: 0.85 },
+    closeup:      { dir: [ 0.55, 0.20,  0.78], biasY: -0.48, distMul: 0.28 },
 };
 
-function viewForVehicle(name, vehicle) {
-    const v = VIEW_RATIOS[name];
-    if (!v) return null;
-    const h = vehicle.height;
-    const baseY = vehicle.root.position.y;
-    return {
-        pos:    [v.pos[0] * h, baseY + v.pos[1] * h, v.pos[2] * h],
-        target: [0, baseY + v.targetYFrac * h, 0],
-    };
+// Compute world-space bounding box of just the visible vehicle hardware,
+// excluding the engine plume cones (off by default + huge when on) and the
+// pad-anchored ascent trail (lives on the scene root).
+function computeVehicleBBox(vehicleRoot) {
+    vehicleRoot.updateMatrixWorld(true);
+    const bbox = new THREE.Box3();
+    vehicleRoot.traverse(o => {
+        if (!o.isMesh) return;
+        // Skip plume groups (children named 'Plume') so an invisible cone
+        // doesn't bloat the bbox.
+        let p = o;
+        while (p) {
+            if (p.name === 'Plume') return;
+            p = p.parent;
+        }
+        bbox.expandByObject(o);
+    });
+    return bbox;
+}
+
+function frameForView(name, vehicle, fovDeg, aspect) {
+    const preset = VIEW_PRESETS[name] || VIEW_PRESETS.threequarter;
+    const bbox = vehicle.bbox || new THREE.Box3();
+    const center = bbox.getCenter(new THREE.Vector3());
+    const size   = bbox.getSize(new THREE.Vector3());
+
+    // Bias the look-at along Y for presets that want to favor a section of
+    // the stack (e.g. closeup pulls the eye toward the engines).
+    center.y += preset.biasY * size.y;
+
+    // Fit the larger of vertical extent and horizontal extent (modulated by
+    // canvas aspect) to the viewport. 1.05 = 5 % padding so the silhouette
+    // doesn't kiss the frame edge.
+    const halfFovV = (fovDeg * Math.PI / 180) / 2;
+    const halfFovH = Math.atan(Math.tan(halfFovV) * aspect);
+    const halfV = Math.max(size.y, 1) * 0.5 * 1.05;
+    const halfH = Math.max(size.x, size.z, 1) * 0.5 * 1.05;
+    const distFitV = halfV / Math.tan(halfFovV);
+    const distFitH = halfH / Math.tan(halfFovH);
+    let dist = Math.max(distFitV, distFitH) * preset.distMul;
+
+    // Clamp so we don't punch through the near plane on tiny vehicles or
+    // sail past the far plane on huge ones.
+    dist = Math.max(dist, 8);
+
+    const dir = new THREE.Vector3(...preset.dir).normalize();
+    const pos = center.clone().addScaledVector(dir, dist);
+    return { pos: pos.toArray(), target: center.toArray(), dist };
 }
 
 function tween(from, to, ms, onUpdate, onDone) {
@@ -775,11 +820,11 @@ function buildShuttleVehicle() {
               gimbal: false, ring: 'srb' },
         ],
         upperEngines: [
-            { x:  0,   y: 0.5, z: orbiterZ, thrust_kn: ENGINES.rs_25.sl_kn,
+            { x:  0,   y: 1.5, z: orbiterZ, thrust_kn: ENGINES.rs_25.sl_kn,
               gimbal: true, ring: 'ssme' },
-            { x: -1.2, y: 0.5, z: orbiterZ, thrust_kn: ENGINES.rs_25.sl_kn,
+            { x: -1.2, y: 1.0, z: orbiterZ, thrust_kn: ENGINES.rs_25.sl_kn,
               gimbal: true, ring: 'ssme' },
-            { x:  1.2, y: 0.5, z: orbiterZ, thrust_kn: ENGINES.rs_25.sl_kn,
+            { x:  1.2, y: 1.0, z: orbiterZ, thrust_kn: ENGINES.rs_25.sl_kn,
               gimbal: true, ring: 'ssme' },
         ],
     };
@@ -875,7 +920,11 @@ export function initVehicleCanvas(canvas, opts = {}) {
     horizon.position.y = -1;
     scene.add(horizon);
 
-    const camera = new THREE.PerspectiveCamera(32, 1, 0.5, 8000);
+    // Default FOV is intentionally a touch wider than a stills lens (38°
+    // ≈ 50 mm equivalent) so the rocket has a sense of presence without
+    // looking like a telephoto-flat travel postcard. Cycle via setFOV().
+    let cameraFov = 38;
+    const camera = new THREE.PerspectiveCamera(cameraFov, 1, 0.5, 8000);
 
     // ── Lighting ────────────────────────────────────────────────────────────
     scene.add(new THREE.HemisphereLight(0x6688aa, 0x2a1830, 0.55));
@@ -934,9 +983,19 @@ export function initVehicleCanvas(canvas, opts = {}) {
     const controls = new OrbitControls(camera, canvas);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
-    controls.maxPolarAngle = Math.PI * 0.95;
+    // Allow looking slightly above horizon (so 'Top' preset can swing wide)
+    // while still preventing flipping past zenith.
+    controls.maxPolarAngle = Math.PI * 0.96;
+    controls.minPolarAngle = 0.05;
     controls.autoRotate = opts.autoRotate ?? true;
     controls.autoRotateSpeed = 0.45;
+    // Pan = right-click drag on desktop, two-finger drag on touch. Pan in
+    // screen-space so it feels predictable regardless of camera tilt.
+    controls.enablePan = true;
+    controls.screenSpacePanning = true;
+    controls.panSpeed = 0.9;
+    controls.rotateSpeed = 0.8;
+    controls.zoomSpeed = 0.9;
 
     // ── Vehicle state (mutable — replaced by setVehicle) ───────────────────
     let current = {
@@ -946,6 +1005,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
         plumes: [],
         height: 1,
         info: null,
+        bbox: new THREE.Box3(),
         // Mutated each frame during liftoff:
         basePadY: 0,         // pad-top Y captured on vehicle build
         baseTargetY: 0,      // controls.target.y captured on vehicle build
@@ -953,6 +1013,9 @@ export function initVehicleCanvas(canvas, opts = {}) {
         lastAltitude: 0,
         trailWidthM: 9,      // pad-specific trail width
     };
+    // Track which preset is active so recenter() can re-frame using the
+    // user's current choice rather than always slamming back to threequarter.
+    let currentViewName = 'threequarter';
 
     function disposeMeshes(obj) {
         obj.traverse(o => {
@@ -1006,8 +1069,11 @@ export function initVehicleCanvas(canvas, opts = {}) {
         thrustOverlay.visible = vectorsOn;            // honor user toggle across vehicle changes
         v.root.add(thrustOverlay);
 
+        scene.add(v.root);
+
         current = {
             id, variant, ...v,
+            bbox: computeVehicleBBox(v.root),
             basePadY: v.root.position.y,
             baseTargetY: 0,
             baseCamY: 0,
@@ -1016,17 +1082,23 @@ export function initVehicleCanvas(canvas, opts = {}) {
             // Per-pad trail width — wider for Stage 0's 33-engine cluster.
             trailWidthM: (v.padId === 'mechazilla') ? 14 : 9,
         };
-        scene.add(v.root);
 
         // Swap pad infrastructure to whichever site this vehicle flies from.
         swapPad(v.padId);
 
-        // Re-fit camera + shadow camera to the new height + base.
-        const view = viewForVehicle('threequarter', current);
+        // A new vehicle starts framed from the canonical 3/4 angle so the
+        // UI highlight (which the host page resets to 3/4 on every vehicle
+        // pick) always matches what the camera is doing.
+        currentViewName = 'threequarter';
+        // Re-fit camera + shadow camera using the vehicle's actual bbox.
+        const aspect = camera.aspect || 16/10;
+        const view = frameForView(currentViewName, current, cameraFov, aspect);
         camera.position.set(...view.pos);
         controls.target.set(...view.target);
-        controls.minDistance = v.height * 0.45;
-        controls.maxDistance = v.height * 4.5;
+        // Distance bounds: tight enough to crop in on engines, loose enough
+        // to take in the full pad complex with room to breathe.
+        controls.minDistance = Math.max(view.dist * 0.18, 6);
+        controls.maxDistance = view.dist * 5.0;
         fitShadowCameraToVehicle(current);
 
         // Capture camera/target Y for liftoff offset math.
@@ -1133,10 +1205,11 @@ export function initVehicleCanvas(canvas, opts = {}) {
         if (typeof opts.onLiftoffEnd === 'function') opts.onLiftoffEnd();
     }
 
-    // Initial vehicle.
-    setVehicle(opts.vehicle || 'shuttle', opts.variant);
-
     // ── Resize handling ────────────────────────────────────────────────────
+    // Sized BEFORE the initial setVehicle so frameForView sees the correct
+    // canvas aspect from the very first frame — otherwise the default 1:1
+    // PerspectiveCamera aspect leads to a tall, low-margin fit on a 16:10
+    // canvas and the rocket spills out the sides.
     function resize() {
         const w = canvas.clientWidth || 600;
         const h = canvas.clientHeight || 400;
@@ -1147,6 +1220,9 @@ export function initVehicleCanvas(canvas, opts = {}) {
     resize();
     const ro = new ResizeObserver(resize);
     ro.observe(canvas);
+
+    // Initial vehicle.
+    setVehicle(opts.vehicle || 'shuttle', opts.variant);
 
     // ── Render loop (paused when off-screen) ───────────────────────────────
     let running = true;
@@ -1194,8 +1270,10 @@ export function initVehicleCanvas(canvas, opts = {}) {
 
     // ── Public API ─────────────────────────────────────────────────────────
     function setView(name) {
-        const view = viewForVehicle(name, current);
-        if (!view) return;
+        if (!VIEW_PRESETS[name]) return;
+        currentViewName = name;
+        const aspect = camera.aspect || 16/10;
+        const view = frameForView(name, current, cameraFov, aspect);
         const fromPos = camera.position.toArray();
         const fromTgt = controls.target.toArray();
         const wasAuto = controls.autoRotate;
@@ -1203,6 +1281,50 @@ export function initVehicleCanvas(canvas, opts = {}) {
         tween(fromPos, view.pos, 800, p => camera.position.set(p[0], p[1], p[2]));
         tween(fromTgt, view.target, 800, p => controls.target.set(p[0], p[1], p[2]),
               () => { controls.autoRotate = wasAuto; });
+    }
+
+    // Dolly along the current view direction without changing target.
+    // factor < 1 zooms in (closer to subject); > 1 zooms out.
+    function setZoom(factor) {
+        const dir = camera.position.clone().sub(controls.target);
+        const dist = dir.length();
+        const next = THREE.MathUtils.clamp(dist * factor,
+            controls.minDistance, controls.maxDistance);
+        dir.setLength(next);
+        camera.position.copy(controls.target).add(dir);
+    }
+
+    // Snap back to the vehicle-bbox center using the current preset; useful
+    // after the user pans / orbits into deep space.
+    function recenter() {
+        setView(currentViewName || 'threequarter');
+    }
+
+    // FOV cycler: 28 (tele) → 38 (default) → 52 (wide). Acts like a lens
+    // swap — we dolly the camera along its current axis so the subject
+    // subtends the same vertical angle after the FOV change. That preserves
+    // any panning the user has done instead of yanking them back to the
+    // preset.
+    function setFOV(deg) {
+        const next = THREE.MathUtils.clamp(deg, 18, 80);
+        if (Math.abs(next - cameraFov) < 0.5) return;
+        const prevHalf = Math.tan((cameraFov * Math.PI / 180) / 2);
+        const nextHalf = Math.tan((next      * Math.PI / 180) / 2);
+        cameraFov = next;
+        camera.fov = cameraFov;
+        camera.updateProjectionMatrix();
+        const dir = camera.position.clone().sub(controls.target);
+        const dist = dir.length();
+        const newDist = dist * (prevHalf / nextHalf);
+        dir.setLength(THREE.MathUtils.clamp(newDist,
+            controls.minDistance, controls.maxDistance));
+        camera.position.copy(controls.target).add(dir);
+    }
+    function cycleFOV() {
+        const cycle = [28, 38, 52];
+        const i = cycle.findIndex(v => Math.abs(v - cameraFov) < 1);
+        setFOV(cycle[(i + 1 + cycle.length) % cycle.length] || 38);
+        return cameraFov;
     }
 
     function setPlume(on) {
@@ -1237,8 +1359,13 @@ export function initVehicleCanvas(canvas, opts = {}) {
         setPad,
         setVectors,
         setVehicle,
+        setZoom,
+        setFOV,
+        cycleFOV,
+        recenter,
         liftoff,
         cancelLiftoff,
+        get fov() { return cameraFov; },
         get isAscending() { return missionActive; },
         get missionT()    { return missionClock.T; },
         get currentInfo() { return current.info; },
