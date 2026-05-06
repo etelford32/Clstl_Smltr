@@ -2,15 +2,25 @@
 """
 build_hindcast_fixture.py — generate synthetic hindcast fixtures
 ==================================================================
-Builds plausible-but-fake fixtures for the Feb 2022 Starlink event so
-the Phase-0 harness (swmf/pipeline/hindcast_runner.py +
-dsmc/pipeline/validate_density.py) can be exercised end-to-end without
-real L1 IMF or GRACE-FO data on disk.
+Builds plausible-but-fake fixtures so the Phase-0 harness
+(swmf/pipeline/hindcast_runner.py + dsmc/pipeline/validate_density.py)
+is exercisable end-to-end without real L1 IMF or GRACE-FO data on disk.
 
-Outputs (relative to repo root):
-  swmf/fixtures/hindcast/feb_2022_starlink/mhd_output.json
-  dsmc/fixtures/hindcast/feb_2022_starlink/historical_ap.csv
-  dsmc/fixtures/hindcast/feb_2022_starlink/grace_fo_density.csv
+Two fixtures land:
+
+  feb_2022_starlink — placeholder-FAIL fixture. The pseudo-Ap regression
+                      v0 placeholder over-predicts vs the truth Ap, so
+                      the harness emits FAIL. Pins the negative case.
+
+  synthetic_pass    — pass-the-gate fixture. Constructed so candidate
+                      density matches truth exactly while baseline (using
+                      coarse 3-hour Ap) lags fine reality, yielding ~100%
+                      skill. Pins the positive case so we know the gate
+                      logic isn't one-sided.
+
+Outputs land under:
+  swmf/fixtures/hindcast/<event>/{mhd_output.json,run/IE/IONO/IE_log_*.dat}
+  dsmc/fixtures/hindcast/<event>/{historical_ap.csv,grace_fo_density.csv}
 
 Run from the repo root:
   python3 scripts/build_hindcast_fixture.py
@@ -163,3 +173,128 @@ print(f"  {MHD_DIR/'mhd_output.json'}    ({len(mhd_samples)} MHD samples)")
 print(f"  {TRUTH_DIR/'historical_ap.csv'}")
 print(f"  {TRUTH_DIR/'grace_fo_density.csv'}")
 print(f"  {ie_log_path}                 (SWMF/IE log)")
+
+
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  synthetic_pass — pass-the-gate fixture                                  ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+#
+# Construction:
+#   * Window: 12 hours, all storm-flagged (Ap ≥ 39 throughout) so the
+#     n_storm == n_total path is exercised and skill_storm_pct is real.
+#   * Fine Ap signal: 80 + 30·sin(2π t / 3h). Mean stays at 80 (which is
+#     also where the 3-hour bin centres land — sin(kπ) = 0 — so coarse Ap
+#     is constant at 80), but oscillates ±30 between centres.
+#   * Truth densities = MSIS-fallback(fine Ap) — the validator's inline
+#     fallback formula, replicated below.
+#   * Hindcast pseudo-Ap = fine Ap exactly (best-case MHD). The IE log
+#     fixture sets Φ_PC = HPI = fine Ap so the v0 placeholder regression
+#     0.45·Φ_PC + 0.55·HPI yields fine Ap unchanged.
+#   * Historical Ap CSV at 3-hour bin centres = 80 (since sin(kπ)=0).
+#   * Result: candidate density ≈ truth (residuals zero), baseline density
+#     uses ap=80 (constant), residuals are non-zero everywhere except at
+#     bin centres → skill ≫ 25% → PASS.
+
+EVENT_PASS = "synthetic_pass"
+START_P = datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc)
+END_P   = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
+F107_P  = 110.0
+
+MHD_DIR_P   = REPO / "swmf" / "fixtures" / "hindcast" / EVENT_PASS
+TRUTH_DIR_P = REPO / "dsmc" / "fixtures" / "hindcast" / EVENT_PASS
+RUN_DIR_P   = REPO / "swmf" / "fixtures" / "hindcast" / EVENT_PASS / "run" / "IE" / "IONO"
+MHD_DIR_P.mkdir(parents=True, exist_ok=True)
+TRUTH_DIR_P.mkdir(parents=True, exist_ok=True)
+RUN_DIR_P.mkdir(parents=True, exist_ok=True)
+
+
+def _fine_ap(t: datetime) -> float:
+    """Storm-class fine Ap signal: 80 + 30·sin(2π t / 3h). Always ≥39."""
+    h_since_start = (t - START_P).total_seconds() / 3600.0
+    return 80.0 + 30.0 * math.sin(2.0 * math.pi * h_since_start / 3.0)
+
+
+# 1. mhd_output.json — direct write (fixture-mode dry-run path)
+mhd_samples_p = []
+for t in _hours(START_P, END_P, step_min=5):
+    ap_t = _fine_ap(t)
+    mhd_samples_p.append({
+        "t":         t.isoformat().replace("+00:00", "Z"),
+        # v0 regression: 0.45·Φ_PC + 0.55·HPI; setting both = ap_t recovers ap_t.
+        "phi_pc_kv": round(ap_t, 3),
+        "hpi_gw":    round(ap_t, 3),
+    })
+(MHD_DIR_P / "mhd_output.json").write_text(json.dumps({
+    "event_id": EVENT_PASS,
+    "schema":   "mhd_output_v0",
+    "samples":  mhd_samples_p,
+}, indent=2))
+
+
+# 2. historical_ap.csv — bin centres at 1.5h, 4.5h, 7.5h, 10.5h.
+#    sin(kπ) = 0 at every centre, so Ap = 80 there (still storm-flagged).
+with (TRUTH_DIR_P / "historical_ap.csv").open("w", newline="") as fh:
+    w = csv.writer(fh)
+    w.writerow(["t", "ap", "f107_sfu"])
+    for hours in (1.5, 4.5, 7.5, 10.5):
+        t = START_P + timedelta(hours=hours)
+        w.writerow([
+            t.isoformat().replace("+00:00", "Z"),
+            f"{_fine_ap(t):.1f}",
+            f"{F107_P:.1f}",
+        ])
+
+
+# 3. grace_fo_density.csv — truth densities driven by FINE ap (the
+#    candidate sees this exactly via pseudo-Ap; baseline sees 80
+#    everywhere via coarse step-interp).
+def _msis_fallback(alt_km: float, f107: float, ap: float) -> float:
+    """Replica of validate_density._load_density_fn._fallback above 150 km.
+    If the validator's formula changes, regenerate this fixture."""
+    T = max(900.0 + 2.0 * (f107 - 150.0) + 3.0 * ap, 500.0)
+    H = 0.053 * T
+    rho_150 = 2.0e-9
+    return rho_150 * math.exp(-(alt_km - 150.0) / H)
+
+
+with (TRUTH_DIR_P / "grace_fo_density.csv").open("w", newline="") as fh:
+    w = csv.writer(fh)
+    w.writerow(["t", "alt_km", "lat_deg", "lon_deg", "density_kg_m3"])
+    # Hourly truth samples — 12 across the window. Stagger off the bin
+    # centres so candidate-vs-baseline differ at every truth point.
+    for h in range(12):
+        t = START_P + timedelta(hours=h, minutes=15)
+        rho = _msis_fallback(490.0, F107_P, _fine_ap(t))
+        w.writerow([
+            t.isoformat().replace("+00:00", "Z"),
+            "490.0", "0.00", "0.00", f"{rho:.6e}",
+        ])
+
+
+# 4. SWMF/IE log fixture — same column convention as feb_2022 case;
+#    Φ_PC = HPI = fine_Ap so v0 regression recovers ap_pseudo == fine_Ap.
+ie_lines_p = [
+    "# SWMF/IE integrated quantities log — synthetic_pass",
+    "step year mo dy hr mn sc cpcpn cpcps hpn hps",
+]
+for i, t in enumerate(_hours(START_P, END_P, step_min=5)):
+    ap_t = _fine_ap(t)
+    # No hemispheric asymmetry needed for this fixture; both hemispheres
+    # carry the same value so max() and sum() recover the desired aggregates.
+    cpcp_n = cpcp_s = ap_t          # → max() = ap_t  → Φ_PC = ap_t
+    hp_n = hp_s = ap_t / 2.0        # → sum() = ap_t  → HPI  = ap_t
+    ie_lines_p.append(
+        f"{i:6d} {t.year:4d} {t.month:2d} {t.day:2d} "
+        f"{t.hour:2d} {t.minute:2d} {t.second:2d} "
+        f"{cpcp_n:8.3f} {cpcp_s:8.3f} {hp_n:8.3f} {hp_s:8.3f}"
+    )
+ie_log_path_p = RUN_DIR_P / f"IE_log_e{START_P.strftime('%Y%m%d-%H%M%S')}.dat"
+ie_log_path_p.write_text("\n".join(ie_lines_p) + "\n")
+
+
+print()
+print(f"Wrote fixture for {EVENT_PASS}:")
+print(f"  {MHD_DIR_P/'mhd_output.json'}    ({len(mhd_samples_p)} MHD samples)")
+print(f"  {TRUTH_DIR_P/'historical_ap.csv'}")
+print(f"  {TRUTH_DIR_P/'grace_fo_density.csv'}")
+print(f"  {ie_log_path_p}                 (SWMF/IE log)")

@@ -127,6 +127,16 @@ EVENTS: dict[str, Event] = {
         storm_class="quiet",
         notes="Null-result control: pseudo-Ap and real Ap should agree.",
     ),
+    "synthetic_pass": Event(
+        event_id="synthetic_pass",
+        label="Synthetic pass-the-gate fixture",
+        window_start=_utc(2024, 1, 1),
+        window_end=datetime(2024, 1, 1, 12, tzinfo=timezone.utc),
+        storm_class="synthetic",
+        notes="Built so the harness emits PASS end-to-end. Used to verify "
+              "the gate logic isn't one-sided after the placeholder-FAIL "
+              "case in feb_2022_starlink. Not a real event.",
+    ),
 }
 
 
