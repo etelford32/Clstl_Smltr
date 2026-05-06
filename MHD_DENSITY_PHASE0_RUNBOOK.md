@@ -141,30 +141,30 @@ runner kills on `IMF_MAX_AGE_MIN` warnings (harmless in hindcast).
 
 ### 6. Extract Φ_PC and HPI → write the hindcast JSON
 
-This is the only Phase-0 module not yet written:
-`swmf/pipeline/hindcast_runner._load_real_mhd()` currently raises
-`NotImplementedError`. The job is to read the BATS-R-US ASCII output
-in `runs/feb_2022_starlink/`, integrate the polar-cap potential and
-the auroral particle-precipitation power, and emit one row per output
-cadence.
-
-Until that's wired, you can short-circuit by hand-converting the
-SWMF/IM ionosphere output to the same JSON shape — fields:
-`{t, phi_pc_kv, hpi_gw}`. Then save to
-`data/hindcast/feb_2022_starlink_hindcast.json`.
-
-After that, re-run the runner so the v0 placeholder regression fills
-in `ap_pseudo`:
+`swmf/pipeline/parse_ie_log.py` reads the SWMF Ridley Ionosphere Model
+log under the run directory and emits the
+`(t, phi_pc_kv, hpi_gw)` timeseries. `hindcast_runner.py` calls it
+automatically when run without `--dry-run`:
 
 ```sh
 cd swmf
 python3 -m pipeline.hindcast_runner --event feb_2022_starlink \
-  --dry-run --fixtures fixtures/hindcast \
-  --out ../data/hindcast
+  --run-dir runs/feb_2022_starlink \
+  --out ../data/hindcast -v
 ```
 
-(`--dry-run` reads the JSON we just wrote in step 6 — the hand-written
-real one — and runs `PseudoApFit` over it.)
+The parser searches several common IE log locations
+(`IE/IONO/IE_log_*.dat`, `IE_log*.dat`, …) and matches column names
+case-insensitively against an alias table (`cpcpn|CPCPNorth|cpcp_n`,
+etc.). If your SWMF build emits a column name we don't recognise, run
+`parse_ie_log` standalone with `--aliases-json` to extend the table —
+the runner will pick the same aliases up automatically once they're
+saved.
+
+`Φ_PC = max(CPCP_N, CPCP_S)` and `HPI = HP_N + HP_S` are the
+hemispheric-asymmetry-aware aggregates the regression expects. If the
+regression later wants per-hemisphere terms, change the parser to emit
+both rather than the aggregates.
 
 ### 7. Fit (a, b, c) by OLS against historical Ap
 
