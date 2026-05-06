@@ -290,18 +290,28 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
 <div id="mp-app">
 
     <aside class="mp-panel" id="mp-controls">
-        <div class="mp-label">Focus</div>
+        <div class="mp-label">Focus <span style="font-weight:400; text-transform:none; letter-spacing:0; color:#778; font-family:monospace;">· keys 1–9 · click 3D · F follow · R reset</span></div>
         <div class="mp-mode-toggle">
-            <button id="mp-focus-earth"   class="mp-mode-btn on" type="button">🌍 Earth</button>
-            <button id="mp-focus-moon"    class="mp-mode-btn"    type="button">🌙 Moon</button>
-            <button id="mp-focus-mars"    class="mp-mode-btn"    type="button">♂ Mars</button>
-            <button id="mp-focus-sun"     class="mp-mode-btn"    type="button">☀️ Sun</button>
+            <button id="mp-focus-earth"   class="mp-mode-btn on" type="button" title="1">🌍 Earth</button>
+            <button id="mp-focus-moon"    class="mp-mode-btn"    type="button" title="2">🌙 Moon</button>
+            <button id="mp-focus-mars"    class="mp-mode-btn"    type="button" title="3">♂ Mars</button>
+            <button id="mp-focus-sun"     class="mp-mode-btn"    type="button" title="4">☀️ Sun</button>
         </div>
         <div class="mp-mode-toggle" style="margin-top:4px;">
-            <button id="mp-focus-jupiter" class="mp-mode-btn"    type="button">♃ Jupiter</button>
-            <button id="mp-focus-saturn"  class="mp-mode-btn"    type="button">♄ Saturn</button>
-            <button id="mp-focus-system"  class="mp-mode-btn"    type="button">🌌 Inner</button>
-            <button id="mp-focus-outer"   class="mp-mode-btn"    type="button">🪐 Outer</button>
+            <button id="mp-focus-mercury" class="mp-mode-btn"    type="button">☿ Mercury</button>
+            <button id="mp-focus-venus"   class="mp-mode-btn"    type="button">♀ Venus</button>
+            <button id="mp-focus-jupiter" class="mp-mode-btn"    type="button" title="5">♃ Jupiter</button>
+            <button id="mp-focus-saturn"  class="mp-mode-btn"    type="button" title="6">♄ Saturn</button>
+        </div>
+        <div class="mp-mode-toggle" style="margin-top:4px;">
+            <button id="mp-focus-uranus"  class="mp-mode-btn"    type="button">⛢ Uranus</button>
+            <button id="mp-focus-neptune" class="mp-mode-btn"    type="button">♆ Neptune</button>
+            <button id="mp-focus-system"  class="mp-mode-btn"    type="button" title="7">🌌 Inner</button>
+            <button id="mp-focus-outer"   class="mp-mode-btn"    type="button" title="8">🪐 Outer</button>
+        </div>
+        <div class="mp-mode-toggle" style="margin-top:4px;">
+            <button id="mp-cam-follow"    class="mp-mode-btn"    type="button" title="F" style="flex:1.2;">🎥 Follow Mission</button>
+            <button id="mp-cam-reset"     class="mp-mode-btn"    type="button" title="R">⟲ Reset</button>
         </div>
 
         <div class="mp-label">Origin Body</div>
@@ -442,7 +452,9 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
             <div id="mp-3d" aria-label="3D mission planner viewport"></div>
             <div id="mp-hud">
                 <div class="hud-title">Mission Status</div>
-                <div class="hud-row"><span class="k">Rockets in flight</span><span class="v" id="hud-rockets">0</span></div>
+                <div class="hud-row"><span class="k">📷 Focus</span><span class="v" id="hud-focus">Earth</span></div>
+                <div class="hud-row"><span class="k">Distance</span><span class="v" id="hud-focus-dist">—</span></div>
+                <div class="hud-row" style="border-top:1px dashed rgba(255,255,255,.08); padding-top:4px; margin-top:4px;"><span class="k">Rockets in flight</span><span class="v" id="hud-rockets">0</span></div>
                 <div class="hud-row"><span class="k">Near-Earth payloads</span><span class="v" id="hud-payloads">0</span></div>
                 <div class="hud-row"><span class="k">Lunar missions</span><span class="v" id="hud-lunar">0</span></div>
                 <div class="hud-row"><span class="k">Mars missions</span><span class="v" id="hud-mars">0</span></div>
@@ -450,7 +462,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
                 <div class="hud-row"><span class="k">Scenario JD</span><span class="v" id="hud-jd">—</span></div>
             </div>
         </div>
-        <p id="mp-3d-help"><strong>Drag</strong> orbit · <strong>Scroll</strong> zoom · <strong>Right-drag</strong> pan · <strong>Focus buttons</strong> follow a body as it drifts · <strong>📷 Fly to pad</strong> drops you above the selected launch site · 1 unit = 1 R⊕ · 1 AU ≈ 23 456 units</p>
+        <p id="mp-3d-help"><strong>Drag</strong> orbit · <strong>Scroll</strong> zoom · <strong>Right-drag</strong> pan · <strong>Click a body</strong> to focus it · <strong>Keys 1–9</strong> presets · <strong>F</strong> follow active mission · <strong>R</strong> reset to Earth · <strong>📷</strong> drops camera above selected pad · 1 unit = 1 R⊕ · 1 AU ≈ 23 456 units</p>
     </main>
 
 </div>
@@ -525,6 +537,16 @@ function pushLog(text, lvl='') {
 }
 
 // ── HUD updaters ────────────────────────────────────────────────────
+// Distance display picks the most natural unit for the scale: tight
+// near-Earth zooms read in km, mid-range in R⊕, heliocentric in AU.
+function fmtDistance(units) {
+    if (units == null) return '—';
+    const km = units * 6378.137;            // 1 unit = 1 R⊕ = 6378 km
+    if (km < 5000)        return `${km.toFixed(0)} km`;
+    if (units < 100)      return `${units.toFixed(2)} R⊕`;
+    const AU = units / 23454.78;            // 1 AU ≈ 23 455 R⊕
+    return `${AU.toFixed(3)} AU`;
+}
 function refreshHUD() {
     const s = planner.getStats();
     document.getElementById('hud-rockets').textContent  = s.rockets;
@@ -533,6 +555,11 @@ function refreshHUD() {
     document.getElementById('hud-mars').textContent     = s.marsMissions;
     document.getElementById('hud-tours').textContent    = s.tours ?? 0;
     document.getElementById('hud-jd').textContent       = planner.getScenarioJD().toFixed(2);
+    const f = planner.getFocusInfo?.();
+    if (f) {
+        document.getElementById('hud-focus').textContent      = FOCUS_DISPLAY[f.name] || f.name;
+        document.getElementById('hud-focus-dist').textContent = fmtDistance(f.distance_units);
+    }
 }
 
 // ── Plan-readout renderer ───────────────────────────────────────────
@@ -704,11 +731,21 @@ function renderPlan(plan) {
 // auto-focus inferred from a launch destination if we want to highlight
 // the matching focus button).
 function setModeUI(/* mode */) { /* no-op */ }
+const FOCUS_IDS = ['earth','moon','mars','sun','mercury','venus','jupiter','saturn','uranus','neptune','system','outer'];
 function setFocusUI(focusId) {
-    for (const id of ['earth','moon','mars','sun','jupiter','saturn','system','outer']) {
+    for (const id of FOCUS_IDS) {
         document.getElementById(`mp-focus-${id}`)?.classList.toggle('on', id === focusId);
     }
+    // Following / free-cam highlight on the action buttons.
+    document.getElementById('mp-cam-follow')?.classList.toggle('on', focusId === 'mission');
 }
+const FOCUS_DISPLAY = {
+    earth: 'Earth', moon: 'Moon', mars: 'Mars', sun: 'Sun',
+    mercury: 'Mercury', venus: 'Venus', jupiter: 'Jupiter', saturn: 'Saturn',
+    uranus: 'Uranus', neptune: 'Neptune',
+    system: 'Inner Solar System', outer: 'Outer Solar System',
+    mission: 'Mission', free: 'Free',
+};
 
 // ── Mount the 3D scene ──────────────────────────────────────────────
 const planner = initMissionPlanner({
@@ -769,6 +806,11 @@ const planner = initMissionPlanner({
             pushLog(`🛰️ Tour complete · captured at ${ev.plan.last_body}`, 'capture');
         } else if (ev.type === 'mode') {
             setModeUI(ev.mode);
+        } else if (ev.type === 'focus') {
+            // 3D click-to-focus: keep button highlight + log in sync.
+            setFocusUI(ev.target);
+            const name = FOCUS_DISPLAY[ev.target] || ev.target;
+            pushLog(`📷 Focused ${name}`, 'window');
         }
         refreshHUD();
     },
@@ -1286,25 +1328,67 @@ function viridis(t) {
     ];
 }
 
-document.getElementById('mp-focus-earth'  ).addEventListener('click', () => { planner.focusEarth();        setFocusUI('earth'); });
-document.getElementById('mp-focus-moon'   ).addEventListener('click', () => { planner.focusMoon();         setFocusUI('moon'); });
-document.getElementById('mp-focus-mars'   ).addEventListener('click', () => { planner.focusMars();         setFocusUI('mars'); });
-document.getElementById('mp-focus-sun'    ).addEventListener('click', () => { planner.focusSun();          setFocusUI('sun'); });
-document.getElementById('mp-focus-jupiter').addEventListener('click', () => { planner.focusJupiter();      setFocusUI('jupiter'); });
-document.getElementById('mp-focus-saturn' ).addEventListener('click', () => { planner.focusSaturn();       setFocusUI('saturn'); });
-document.getElementById('mp-focus-system' ).addEventListener('click', () => { planner.focusSystem();       setFocusUI('system'); });
-document.getElementById('mp-focus-outer'  ).addEventListener('click', () => { planner.focusOuterSystem();  setFocusUI('outer'); });
+// Single source of truth for camera transitions: every focus button, the
+// keyboard shortcuts, and the click-to-focus event in the 3D scene route
+// through here so the highlight + log + HUD always stay in sync.
+function focusBody(name) {
+    planner.flyToBody(name);
+    setFocusUI(name);
+}
+for (const id of FOCUS_IDS) {
+    document.getElementById(`mp-focus-${id}`)?.addEventListener('click', () => focusBody(id));
+}
+
+// Camera action buttons.
+document.getElementById('mp-cam-follow').addEventListener('click', () => {
+    const m = planner.followMission();
+    if (m) {
+        setFocusUI('mission');
+        pushLog(`🎥 Camera following ${m.payloadName || 'active mission'}`, 'window');
+    } else {
+        pushLog('🎥 No active mission to follow', 'window');
+    }
+});
+document.getElementById('mp-cam-reset').addEventListener('click', () => {
+    focusBody('earth');
+    pushLog('⟲ Camera reset to Earth', 'window');
+});
 
 // Fly camera to currently-selected origin pad. Routes Earth pads to Earth,
-// Moon bases to the Moon, Mars colonies to Mars — and clears the focus
-// highlight since we're zoomed in on a specific surface point, not the
-// whole body.
+// Moon bases to the Moon, Mars colonies to Mars — and highlights the
+// parent body since we're zoomed in on its surface.
 document.getElementById('mp-fly-pad').addEventListener('click', () => {
     const padId = siteSel.value;
     if (!padId) return;
     planner.flyToPad(currentOriginBody, padId);
-    setFocusUI(currentOriginBody);   // highlight the parent body
+    setFocusUI(currentOriginBody);
     pushLog(`📷 Flying to ${siteSel.selectedOptions[0]?.textContent || padId}`, 'window');
+});
+
+// Keyboard shortcuts. Skipped while typing in any text-entry control so
+// "F" / "R" / digits don't yank the camera while editing payload names or
+// numeric ranges.
+const KEY_MAP = {
+    '1': 'earth', '2': 'moon', '3': 'mars', '4': 'sun',
+    '5': 'jupiter', '6': 'saturn', '7': 'system', '8': 'outer',
+    '9': 'venus', '0': 'mercury',
+};
+window.addEventListener('keydown', (e) => {
+    if (e.target.matches('input, textarea, select')) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const k = e.key.toLowerCase();
+    if (KEY_MAP[k]) { focusBody(KEY_MAP[k]); e.preventDefault(); return; }
+    if (k === 'f') {
+        const m = planner.followMission();
+        if (m) {
+            setFocusUI('mission');
+            pushLog(`🎥 Camera following ${m.payloadName || 'active mission'}`, 'window');
+        }
+        e.preventDefault();
+    } else if (k === 'r') {
+        focusBody('earth');
+        e.preventDefault();
+    }
 });
 
 document.getElementById('mp-clear').addEventListener('click', () => {
