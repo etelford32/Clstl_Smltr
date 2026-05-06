@@ -312,7 +312,12 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
         </div>
 
         <div class="mp-label">Origin Pad</div>
-        <select id="mp-site" class="mp-select"></select>
+        <div class="mp-row">
+            <select id="mp-site" class="mp-select" style="flex:1;"></select>
+            <button id="mp-fly-pad" class="mp-secondary-btn" type="button"
+                    style="margin-top:0; flex:0 0 auto; padding:8px 10px;"
+                    title="Fly camera to selected pad">📷</button>
+        </div>
 
         <div class="mp-label">Destination</div>
         <select id="mp-target" class="mp-select"></select>
@@ -445,7 +450,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
                 <div class="hud-row"><span class="k">Scenario JD</span><span class="v" id="hud-jd">—</span></div>
             </div>
         </div>
-        <p id="mp-3d-help"><strong>Drag</strong> orbit · <strong>Scroll</strong> zoom · <strong>Right-drag</strong> pan · 1 unit = 1 R⊕ · 1 AU ≈ 23 456 units · all 8 planets at real radii + live ephemeris · LOD scaling for far-view visibility</p>
+        <p id="mp-3d-help"><strong>Drag</strong> orbit · <strong>Scroll</strong> zoom · <strong>Right-drag</strong> pan · <strong>Focus buttons</strong> follow a body as it drifts · <strong>📷 Fly to pad</strong> drops you above the selected launch site · 1 unit = 1 R⊕ · 1 AU ≈ 23 456 units</p>
     </main>
 
 </div>
@@ -1289,6 +1294,18 @@ document.getElementById('mp-focus-jupiter').addEventListener('click', () => { pl
 document.getElementById('mp-focus-saturn' ).addEventListener('click', () => { planner.focusSaturn();       setFocusUI('saturn'); });
 document.getElementById('mp-focus-system' ).addEventListener('click', () => { planner.focusSystem();       setFocusUI('system'); });
 document.getElementById('mp-focus-outer'  ).addEventListener('click', () => { planner.focusOuterSystem();  setFocusUI('outer'); });
+
+// Fly camera to currently-selected origin pad. Routes Earth pads to Earth,
+// Moon bases to the Moon, Mars colonies to Mars — and clears the focus
+// highlight since we're zoomed in on a specific surface point, not the
+// whole body.
+document.getElementById('mp-fly-pad').addEventListener('click', () => {
+    const padId = siteSel.value;
+    if (!padId) return;
+    planner.flyToPad(currentOriginBody, padId);
+    setFocusUI(currentOriginBody);   // highlight the parent body
+    pushLog(`📷 Flying to ${siteSel.selectedOptions[0]?.textContent || padId}`, 'window');
+});
 
 document.getElementById('mp-clear').addEventListener('click', () => {
     planner.clear();
