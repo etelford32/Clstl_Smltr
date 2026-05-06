@@ -2718,9 +2718,24 @@ const sunFS = /* glsl */`
     }
 `;
 
-const sunGeo  = new THREE.SphereGeometry(1.0, 128, 128);
+// Phase 4.7 — sun mesh LOD. Three SphereGeometries at decreasing
+// tessellation, wrapped in a THREE.LOD that auto-switches based on
+// camera distance to the sun's centre. Saves ~75% of the sphere's
+// vertex shader cost when zoomed out without any visible quality loss
+// (smooth-shaded sphere rounds out at far distances anyway).
+//
+//   High  (128×128 = 16 384 verts) — within ~3.5 R☉, the default view
+//   Mid   ( 72×72  =  5 256 verts) — 3.5–10 R☉, common orbit + Wide
+//   Low   ( 40×30  =  1 240 verts) — beyond 10 R☉, distant overview
+//
+// All three share the same sunMat ShaderMaterial so the GPU compiles
+// the photosphere shader once and rebinds attributes per level.
 const sunMat  = new THREE.ShaderMaterial({ vertexShader:sunVS, fragmentShader:sunFS, uniforms });
-scene.add(new THREE.Mesh(sunGeo, sunMat));
+const sunLOD  = new THREE.LOD();
+sunLOD.addLevel(new THREE.Mesh(new THREE.SphereGeometry(1.0, 128, 128), sunMat),  0.0);
+sunLOD.addLevel(new THREE.Mesh(new THREE.SphereGeometry(1.0,  72,  72), sunMat),  3.5);
+sunLOD.addLevel(new THREE.Mesh(new THREE.SphereGeometry(1.0,  40,  30), sunMat), 10.0);
+scene.add(sunLOD);
 
 // ─── CHROMOSPHERE (r=1.15) — Ca H&K / Hα pink-red layer ──────────────────────
 const glowVS = /* glsl */`
@@ -6686,10 +6701,15 @@ window.addEventListener('swpc-update', (ev) => {
             };
         }).filter(r => r.num && parseLoc(r.loc));
 
-        // Only rebuild if the region set actually changed
+        // Only rebuild if the region set actually changed AND the new feed
+        // has at least one parseable AR — otherwise an empty/malformed T3
+        // payload would wipe the default-data + last-good-cached regions
+        // and leave the sun without sunspots or 3D markers (regression
+        // observed when the SpaceWeatherFeed delivers a row with no
+        // parseable loc string).
         const newKey = newRegs.map(r => r.num).sort().join(',');
         const oldKey = liveRegions.map(r => r.num).sort().join(',');
-        if (newKey !== oldKey) {
+        if (newRegs.length > 0 && newKey !== oldKey) {
             liveRegions = newRegs;
             _regionsChanged = true;
         }
