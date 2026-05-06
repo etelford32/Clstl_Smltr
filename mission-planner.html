@@ -171,6 +171,26 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
 }
 .mp-pad-weather .mp-wx-label { font-weight:700; }
 .mp-pad-weather .mp-wx-msg   { color:#88a; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mp-pad-weather .mp-wx-refresh {
+    flex:0 0 auto;
+    background:transparent;
+    border:1px solid rgba(255,255,255,.14);
+    color:#aab;
+    border-radius:4px;
+    padding:1px 5px;
+    font-size:.75rem; line-height:1;
+    cursor:pointer;
+    transition:transform .35s, color .15s, border-color .15s;
+}
+.mp-pad-weather .mp-wx-refresh:hover {
+    color:#fff;
+    border-color:rgba(102,255,170,.5);
+}
+.mp-pad-weather .mp-wx-refresh.spinning { animation: mp-wx-spin .9s linear infinite; }
+@keyframes mp-wx-spin {
+    0%   { transform:rotate(0deg);   }
+    100% { transform:rotate(360deg); }
+}
 .mp-pad-weather.mp-wx-go      { border-color:rgba(102,255,119,.45); color:#9efc9e; }
 .mp-pad-weather.mp-wx-go      .mp-wx-dot { background:#66ff77; box-shadow:0 0 8px rgba(102,255,119,.7); }
 .mp-pad-weather.mp-wx-caution { border-color:rgba(255,204,68,.45);  color:#ffd994; }
@@ -442,6 +462,8 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
             <span class="mp-wx-dot"></span>
             <span class="mp-wx-label">Weather: no data</span>
             <span class="mp-wx-msg" id="mp-pad-weather-msg"></span>
+            <button id="mp-pad-weather-refresh" class="mp-wx-refresh" type="button"
+                    title="Refresh weather feed for all pads">↻</button>
         </div>
 
         <div class="mp-label">Destination</div>
@@ -603,6 +625,7 @@ import { initMissionPlanner, LAUNCH_SITES, TARGET_ORBITS,
          MOON_BASES, MARS_BIOMES, MISSION_ROUTES } from './js/mission-planner-3d.js';
 import { simulateAscent, compareBodies, LAUNCH_BODIES, LAUNCH_VEHICLES } from './js/launch-physics.js';
 import { jdNow } from './js/horizons.js';
+import { startWeatherFeed } from './js/mission-pad-weather.js';
 
 // ── Populate dropdowns ──────────────────────────────────────────────
 const siteSel   = document.getElementById('mp-site');
@@ -2055,22 +2078,31 @@ updateTargetUI();
 // the upcoming weather feed pushes real data via setPadWeather().
 updatePadWeatherUI();
 
-// ── Pad-weather demo seed ──────────────────────────────────────────
-// Nothing populates the pad weather feed yet, but the visual + gating
-// scaffold is wired and ready. We seed a handful of plausible defaults
-// here so the colored ring / badge / Launch gate are exercise-able
-// before the real feed lands. Once it does, just delete this block —
-// the same setPadWeather() entry point is what the feed will use.
-setTimeout(() => {
-    planner.setPadWeather('earth', 'ksc',         'go',      'Clear · 12 kt easterly · ceiling 30 kft');
-    planner.setPadWeather('earth', 'starbase',    'caution', 'Marginal upper-level winds');
-    planner.setPadWeather('earth', 'vandy',       'go',      'Marine layer 200 ft · winds calm');
-    planner.setPadWeather('earth', 'kourou',      'scrub',   'Tropical squall line within 20 nmi');
-    planner.setPadWeather('earth', 'baikonur',    'caution', 'Icing layer 4–8 km · monitor');
-    planner.setPadWeather('earth', 'tanegashima', 'go',      'High pressure · light NE breeze');
-    planner.setPadWeather('moon',  'shackleton',  'go',      'Solar incidence nominal');
-    planner.setPadWeather('mars',  'jezero',      'caution', 'Regional dust opacity τ ≈ 0.6');
-}, 600);
+// ── Live pad-weather feed ──────────────────────────────────────────
+// Earth pads pull current conditions from open-meteo.com (free, no
+// API key, CORS-enabled, ~10k req/day per IP). Wind / gust / precip /
+// cloud / WMO weather code are translated into go / caution / scrub
+// by mission-pad-weather.js using simplified launch commit criteria.
+// Moon and Mars pads use synthetic models (polar twilight, Mars Ls
+// dust season). The feed polls every 15 min; UI updates flow through
+// planner.setPadWeather() which retints rings, refreshes the badge,
+// and logs to the mission journal automatically.
+const wxFeed = startWeatherFeed(planner, {
+    log: (msg) => console.warn('[mission-planner]', msg),
+});
+// Manual-refresh button on the pad weather badge. Spins while the
+// fetch is in flight so the user gets instant feedback that the click
+// landed (Open-Meteo usually responds in well under a second).
+const wxRefreshBtn = document.getElementById('mp-pad-weather-refresh');
+wxRefreshBtn.addEventListener('click', async () => {
+    wxRefreshBtn.classList.add('spinning');
+    try {
+        await wxFeed.refreshNow();
+        pushLog('🌦 Pad weather feed refreshed', 'window');
+    } finally {
+        wxRefreshBtn.classList.remove('spinning');
+    }
+});
 
 // ── Auto-launch a starter LEO so the page never looks empty ─────────
 setTimeout(() => {
