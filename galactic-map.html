@@ -274,7 +274,7 @@ nav {
 
 /* ─── App shell ───────────────────────────────────────────────── */
 #app {
-    position:relative; width:100%; height:calc(100vh - 48px);
+    position:relative; width:100%; height:calc(100vh - 50px);
     display:flex; overflow:hidden;
 }
 #canvas-wrap {
@@ -3133,7 +3133,35 @@ renderer.setClearColor(0x000005, 1);
 container.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(50, W() / H(), 0.1, 10_000_000);
+
+// ── Aspect-aware vertical FOV ───────────────────────────────────────────
+// PerspectiveCamera holds vertical FOV constant, so horizontal FOV scales
+// linearly with aspect.  On a 16:9 (or wider) monitor, a 50° vertical FOV
+// produces a horizontal FOV ≳ 80° — that's where wide-angle perspective
+// distortion at screen edges starts to read as "stretched".  On a portrait
+// phone (aspect ~0.5), the same 50° vertical FOV gives a horizontal FOV of
+// only ~27° — the galaxy disk gets clipped on the sides.
+//
+// `adaptiveFovV` clamps the *horizontal* FOV into a comfortable range
+// [MIN_H_FOV, MAX_H_FOV] by adjusting vertical FOV when the natural
+// horizontal FOV would otherwise blow out of range.  The result: framing
+// stays roughly consistent across desktop, ultrawide, tablet, and phone.
+const REF_FOV_V = 50;          // vertical FOV (°) used as the design baseline
+function adaptiveFovV(refFovV = REF_FOV_V) {
+    const aspect = (W() || 1) / (H() || 1);
+    const refV_rad = refFovV * Math.PI / 180;
+    const hFovDeg = 2 * Math.atan(Math.tan(refV_rad / 2) * aspect) * 180 / Math.PI;
+    const MAX_H_FOV = 72;      // beyond → fisheye / wide-angle distortion
+    const MIN_H_FOV = 50;      // below  → galaxy clipped on portrait phones
+    let targetH;
+    if (hFovDeg > MAX_H_FOV)      targetH = MAX_H_FOV;
+    else if (hFovDeg < MIN_H_FOV) targetH = MIN_H_FOV;
+    else                          return refFovV;                // already comfortable
+    const newV = 2 * Math.atan(Math.tan(targetH * Math.PI / 180 / 2) / aspect) * 180 / Math.PI;
+    return Math.max(30, Math.min(72, newV));                     // safety clamp
+}
+
+const camera = new THREE.PerspectiveCamera(adaptiveFovV(), W() / H(), 0.1, 10_000_000);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
@@ -8415,10 +8443,25 @@ function updateLabelScales() {
 // ══════════════════════════════════════════════════════════════════════════
 //  RESIZE
 // ══════════════════════════════════════════════════════════════════════════
-window.addEventListener('resize', () => {
-    camera.aspect = W() / H();
+function resizeRenderer() {
+    const w = W(), h = H();
+    camera.aspect = w / h;
+    camera.fov    = adaptiveFovV();
     camera.updateProjectionMatrix();
-    renderer.setSize(W(), H());
+    renderer.setSize(w, h);
+}
+
+window.addEventListener('resize', resizeRenderer);
+
+// Some browsers (especially mobile Safari) report the wrong viewport size
+// briefly during nav-bar settle / orientation change. Re-run shortly after
+// init and after orientation changes so the canvas locks onto the final
+// layout.
+requestAnimationFrame(resizeRenderer);
+window.addEventListener('orientationchange', () => {
+    // Two passes: one immediate, one after the URL bar / safe-area settles.
+    resizeRenderer();
+    setTimeout(resizeRenderer, 350);
 });
 
 // ══════════════════════════════════════════════════════════════════════════
