@@ -330,6 +330,75 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
 #mp-hud .hud-row { display:flex; justify-content:space-between; gap:10px; padding:1px 0; }
 #mp-hud .hud-row .k { color:#88a; }
 #mp-hud .hud-row .v { color:#fff; font-weight:700; }
+/* Mars Rover Dashboard ──────────────────────────────────────────────
+   Top-left card on the 3D viewport. Hidden until the user focuses Mars
+   (or a Mars surface pad), then expands to show the latest readings
+   from every public NASA in-situ feed (Curiosity REMS, Perseverance
+   MEDA, InSight historical). Click the title bar to collapse to a
+   single-line summary; click again to expand. */
+.mp-mars-dash {
+    position:absolute; top:12px; left:12px;
+    background:rgba(6,4,18,.85); backdrop-filter:blur(8px);
+    border:1px solid rgba(255,170,102,.35);
+    border-radius:8px;
+    font-family:monospace; font-size:.72rem;
+    color:#cfd;
+    min-width:240px; max-width:300px;
+    pointer-events:auto;
+    box-shadow:0 4px 16px rgba(0,0,0,.35);
+}
+.mp-mars-dash[hidden] { display:none; }
+.mp-mars-dash-toggle {
+    width:100%; display:flex; align-items:center; gap:8px;
+    background:transparent; border:0;
+    color:#ffaa66;
+    font-family:monospace; font-size:.7rem; font-weight:800;
+    padding:8px 12px;
+    cursor:pointer;
+    text-transform:uppercase; letter-spacing:.08em;
+    border-radius:8px;
+}
+.mp-mars-dash-toggle:hover { color:#ffd6a0; background:rgba(255,170,102,.06); }
+.mp-mars-dash-toggle:focus-visible { outline:2px solid rgba(255,170,102,.6); outline-offset:-2px; }
+.mp-mars-dash-title   { flex:1; text-align:left; }
+.mp-mars-dash-count   { color:#aab; font-weight:600; font-size:.62rem; text-transform:none; letter-spacing:0; }
+.mp-mars-dash-chevron { color:#aab; transition:transform .2s ease; }
+.mp-mars-dash.expanded .mp-mars-dash-chevron { transform:rotate(180deg); }
+.mp-mars-dash:not(.expanded) .mp-mars-dash-body { display:none; }
+.mp-mars-dash-body    { padding:0 10px 10px; }
+.mp-mars-dash-ls {
+    color:#aab; font-size:.66rem;
+    padding:6px 0;
+    border-top:1px dashed rgba(255,170,102,.18);
+    margin-bottom:8px;
+    line-height:1.45;
+}
+.mp-mars-rover {
+    margin-bottom:8px; padding:6px 8px;
+    background:rgba(0,0,0,.30);
+    border-radius:5px;
+    border-left:3px solid #ffaa66;
+}
+.mp-mars-rover:last-child         { margin-bottom:0; }
+.mp-mars-rover-offline {
+    border-left-color:#778899;
+    color:#88a;
+}
+.mp-rov-name {
+    color:#ffd6a0; font-weight:700; font-size:.7rem;
+    margin-bottom:4px;
+    display:flex; justify-content:space-between; align-items:baseline; gap:8px;
+}
+.mp-rov-name .mp-rov-source { color:#88a; font-weight:400; font-size:.58rem; }
+.mp-mars-rover-offline .mp-rov-name { color:#aab; }
+.mp-rov-status { color:#88a; font-size:.64rem; font-style:italic; }
+.mp-rov-row {
+    display:flex; justify-content:space-between; gap:8px;
+    padding:1px 0; font-size:.64rem;
+}
+.mp-rov-row .k { color:#88a; }
+.mp-rov-row .v { color:#fff; font-weight:700; text-align:right; }
+
 .mp-mission-hud {
     /* Sits at the bottom-right so it doesn't fight the Mission Status
        card at top-right. Bumps up slightly when the help bar is visible. */
@@ -639,6 +708,18 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
                 <div class="hud-row"><span class="k">Tours active</span><span class="v" id="hud-tours">0</span></div>
                 <div class="hud-row"><span class="k">Scenario JD</span><span class="v" id="hud-jd">—</span></div>
             </div>
+            <div id="mp-mars-dashboard" class="mp-mars-dash expanded" hidden>
+                <button id="mp-mars-dash-toggle" class="mp-mars-dash-toggle" type="button"
+                        aria-expanded="true" aria-controls="mp-mars-dash-body">
+                    <span class="mp-mars-dash-title">🤖 Mars Rovers</span>
+                    <span class="mp-mars-dash-count" id="mp-mars-dash-count">— / 3</span>
+                    <span class="mp-mars-dash-chevron" aria-hidden="true">⌄</span>
+                </button>
+                <div class="mp-mars-dash-body" id="mp-mars-dash-body">
+                    <div class="mp-mars-dash-ls" id="mp-mars-dash-ls">—</div>
+                    <div class="mp-mars-rovers" id="mp-mars-rovers"></div>
+                </div>
+            </div>
             <div id="mp-mission-hud" class="mp-mission-hud" hidden>
                 <div class="hud-title">
                     <span>Active Mission</span>
@@ -665,7 +746,7 @@ import { initMissionPlanner, LAUNCH_SITES, TARGET_ORBITS,
          MOON_BASES, MARS_BIOMES, MISSION_ROUTES } from './js/mission-planner-3d.js';
 import { simulateAscent, compareBodies, LAUNCH_BODIES, LAUNCH_VEHICLES } from './js/launch-physics.js';
 import { jdNow } from './js/horizons.js';
-import { startWeatherFeed } from './js/mission-pad-weather.js';
+import { startWeatherFeed, getLatestMarsAggregate } from './js/mission-pad-weather.js';
 
 // ── Populate dropdowns ──────────────────────────────────────────────
 const siteSel   = document.getElementById('mp-site');
@@ -932,6 +1013,18 @@ function setFocusUI(focusId) {
     }
     // Following / free-cam highlight on the action buttons.
     document.getElementById('mp-cam-follow')?.classList.toggle('on', focusId === 'mission');
+    // Mars rover dashboard: only render when Mars is the active focus
+    // (or a Mars surface pad — that path also calls setFocusUI('mars')).
+    // Hidden everywhere else so it doesn't fight the Mission Status HUD
+    // for screen real estate.
+    const dash = document.getElementById('mp-mars-dashboard');
+    if (dash) {
+        const showMars = focusId === 'mars';
+        dash.hidden = !showMars;
+        if (showMars && typeof refreshMarsDashboard === 'function') {
+            refreshMarsDashboard();
+        }
+    }
 }
 const FOCUS_DISPLAY = {
     earth: 'Earth', moon: 'Moon', mars: 'Mars', sun: 'Sun',
@@ -1013,6 +1106,21 @@ const planner = initMissionPlanner({
             if (typeof updatePadWeatherUI === 'function'
                 && ev.body === currentOriginBody && ev.padId === siteSel?.value) {
                 updatePadWeatherUI();
+            }
+            // The Mars rover dashboard pulls from the cached aggregate,
+            // which the pad-weather refresh just repopulated. If the
+            // panel is currently visible (focus = mars), re-render it
+            // so the "updated X seconds ago" + per-rover detail stay
+            // fresh without needing the user to re-click Focus Mars.
+            // Use a live querySelector here rather than the closured
+            // const because pad-weather events can fire before the
+            // dashboard wiring block runs (planner init is much earlier
+            // in the script than the dashboard helper definitions).
+            if (ev.body === 'mars') {
+                const dash = document.getElementById('mp-mars-dashboard');
+                if (dash && !dash.hidden && typeof refreshMarsDashboard === 'function') {
+                    refreshMarsDashboard();
+                }
             }
             const tag = ev.status === 'scrub'   ? '🛑'
                       : ev.status === 'caution' ? '⚠'
@@ -2243,6 +2351,121 @@ wxRefreshBtn.addEventListener('click', async () => {
     } finally {
         wxRefreshBtn.classList.remove('spinning');
     }
+});
+
+// ── Mars Rover Dashboard ────────────────────────────────────────────
+// Renders the per-rover detail (sol, terrestrial date, temp range,
+// pressure, wind, season, opacity) for each public NASA in-situ feed
+// the proxy aggregated. Visibility is gated by the focus state — the
+// panel only renders when the user is looking at Mars, so it doesn't
+// fight the other HUD cards for screen space the rest of the time.
+const marsDashEl    = document.getElementById('mp-mars-dashboard');
+const marsDashBody  = document.getElementById('mp-mars-dash-body');
+const marsDashLs    = document.getElementById('mp-mars-dash-ls');
+const marsDashCount = document.getElementById('mp-mars-dash-count');
+const marsRoversEl  = document.getElementById('mp-mars-rovers');
+const marsDashToggle= document.getElementById('mp-mars-dash-toggle');
+
+// Display metadata per rover key (matches the planner-side ROVER_LABEL
+// in mission-pad-weather.js but with longer human names for the panel).
+const ROVER_DISPLAY = {
+    curiosity:    { name: 'Curiosity',    long: 'NASA MSL REMS' },
+    perseverance: { name: 'Perseverance', long: 'NASA Mars 2020 MEDA' },
+    insight:      { name: 'InSight',      long: 'NASA InSight Weather' },
+};
+
+function escHtml(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => (
+        { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]
+    ));
+}
+function ageLabel(ms) {
+    const d = Math.max(0, Date.now() - ms) / 1000;
+    if (d < 60)   return `${d.toFixed(0)} s ago`;
+    if (d < 3600) return `${(d/60).toFixed(0)} min ago`;
+    return `${(d/3600).toFixed(1)} h ago`;
+}
+
+function renderRover(key, r) {
+    const meta = ROVER_DISPLAY[key] || { name: key, long: '' };
+    if (!r || !r.active) {
+        const reason = (r && r.reason) ? r.reason : 'no data';
+        return `
+            <div class="mp-mars-rover mp-mars-rover-offline">
+                <div class="mp-rov-name">
+                    <span>${escHtml(meta.name)}</span>
+                    <span class="mp-rov-source">${escHtml(meta.long)}</span>
+                </div>
+                <div class="mp-rov-status">offline · ${escHtml(reason)}</div>
+            </div>
+        `;
+    }
+    const rows = [];
+    if (r.location)         rows.push(['Location', r.location]);
+    if (Number.isFinite(r.sol))    rows.push(['Sol', String(r.sol)]);
+    if (r.terrestrial_date) rows.push(['Date', r.terrestrial_date]);
+    if (r.season)           rows.push(['Season', r.season]);
+    if (Number.isFinite(r.ls_deg)) rows.push(['Ls', `${r.ls_deg.toFixed(1)}°`]);
+    if (Number.isFinite(r.min_temp_C) || Number.isFinite(r.max_temp_C)) {
+        const min = Number.isFinite(r.min_temp_C) ? `${r.min_temp_C.toFixed(0)}°C` : '—';
+        const max = Number.isFinite(r.max_temp_C) ? `${r.max_temp_C.toFixed(0)}°C` : '—';
+        rows.push(['Temp', `${min} → ${max}`]);
+    }
+    if (Number.isFinite(r.avg_temp_C))    rows.push(['Avg temp', `${r.avg_temp_C.toFixed(1)}°C`]);
+    if (Number.isFinite(r.pressure_pa))   rows.push(['Pressure', `${r.pressure_pa.toFixed(0)} Pa`]);
+    if (Number.isFinite(r.wind_speed_mps))rows.push(['Wind', `${r.wind_speed_mps.toFixed(1)} m/s`]);
+    if (r.atmo_opacity)     rows.push(['Opacity', r.atmo_opacity]);
+    if (r.sunrise && r.sunset) rows.push(['Sun', `${r.sunrise} – ${r.sunset}`]);
+    if (r.note)             rows.push(['Note', r.note]);
+    const rowsHtml = rows.map(([k, v]) =>
+        `<div class="mp-rov-row"><span class="k">${escHtml(k)}</span><span class="v">${escHtml(v)}</span></div>`
+    ).join('');
+    return `
+        <div class="mp-mars-rover mp-mars-rover-active">
+            <div class="mp-rov-name">
+                <span>${escHtml(meta.name)}</span>
+                <span class="mp-rov-source">${escHtml(meta.long)}</span>
+            </div>
+            ${rowsHtml}
+        </div>
+    `;
+}
+
+function refreshMarsDashboard() {
+    // Look up elements at call time so this function works even if it
+    // ever fires before the dashboard's const block runs (e.g. via an
+    // early event during planner init). The DOM nodes themselves are
+    // present from page load — only the cached refs would TDZ.
+    const dash   = document.getElementById('mp-mars-dashboard');
+    if (!dash || dash.hidden) return;
+    const lsEl    = document.getElementById('mp-mars-dash-ls');
+    const countEl = document.getElementById('mp-mars-dash-count');
+    const listEl  = document.getElementById('mp-mars-rovers');
+    if (!lsEl || !countEl || !listEl) return;
+    const agg = getLatestMarsAggregate();
+    if (!agg) {
+        lsEl.textContent    = 'Awaiting feed…';
+        countEl.textContent = '— / 3';
+        listEl.innerHTML    = '<div class="mp-rov-status" style="padding:6px 8px;">No data yet — feed runs every 15 min</div>';
+        return;
+    }
+    const rovers = agg.rovers || {};
+    const total  = Object.keys(rovers).length || 3;
+    const active = Object.values(rovers).filter(r => r && r.active).length;
+    countEl.textContent = `${active} / ${total} live`;
+    const fetchedTxt = agg.fetched_at ? ` · updated ${ageLabel(agg.fetched_at)}` : '';
+    lsEl.textContent    = (agg.message || '—') + fetchedTxt;
+    // Render in fixed order so the panel is stable across refreshes
+    // even if the JSON key order ever shifts upstream.
+    const order = ['curiosity', 'perseverance', 'insight'];
+    listEl.innerHTML = order.map(k => renderRover(k, rovers[k])).join('');
+}
+
+// Title bar collapses / expands the body. ARIA attribute kept in sync
+// for assistive tech.
+marsDashToggle.addEventListener('click', () => {
+    const expanded = marsDashEl.classList.toggle('expanded');
+    marsDashToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
 });
 
 // ── Auto-launch a starter LEO so the page never looks empty ─────────

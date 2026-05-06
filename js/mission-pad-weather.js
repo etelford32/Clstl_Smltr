@@ -202,6 +202,17 @@ async function fetchMarsAggregate(jd) {
     return fetchWithTimeout(url, FETCH_TIMEOUT_MS);
 }
 
+// Cache the most recent Mars aggregate so the rover-dashboard panel can
+// render the full per-rover detail (sol / temps / pressure / wind /
+// season / opacity) without making a parallel fetch — we already pulled
+// the data once during the pad-weather refresh, no point asking again.
+let _lastMarsAggregate = null;
+let _lastMarsAggregateAt = 0;
+export function getLatestMarsAggregate() {
+    if (!_lastMarsAggregate) return null;
+    return { ...(_lastMarsAggregate), fetched_at: _lastMarsAggregateAt };
+}
+
 // Pad → rover mapping, by closest geographic proximity:
 //   Jezero Outpost     ≡ Mars 2020 / Perseverance   (sits in Jezero Crater)
 //   Gale Crater Base   ≡ Curiosity / MSL            (sits in Gale Crater)
@@ -279,10 +290,14 @@ async function refreshAll(planner, { log }) {
     }
 
     // Mars — single proxy call shared across all sites. Tracks scenario JD
-    // so dust-season flags shift as the user time-scrubs.
+    // so dust-season flags shift as the user time-scrubs. The full
+    // aggregate (with the per-rover map) is also cached for the dashboard
+    // panel via getLatestMarsAggregate().
     const jd = planner.getScenarioJD();
     try {
         const agg = await fetchMarsAggregate(jd);
+        _lastMarsAggregate   = agg;
+        _lastMarsAggregateAt = Date.now();
         for (const pad of MARS_BIOMES) {
             planner.setPadWeather(
                 'mars', pad.id,
