@@ -19,11 +19,12 @@ const FPS = 24;
 const FRAME_MS = 1000 / FPS;
 
 const SIM_URLS = {
-  earth:           'earth.html?preview=1',
-  sun:             'sun.html?preview=1',
-  'space-weather': 'space-weather.html?preview=1',
-  stars:           'star3d.html?preview=1',
-  galaxy:          'galactic-map.html?preview=1',
+  earth:             'earth.html?preview=1',
+  sun:               'sun.html?preview=1',
+  'space-weather':   'space-weather.html?preview=1',
+  'upper-atmosphere':'upper-atmosphere.html?preview=1',
+  stars:             'star3d.html?preview=1',
+  galaxy:            'galactic-map.html?preview=1',
 };
 
 // ── Canvas poster helpers ───────────────────────────────────────────────────
@@ -290,8 +291,50 @@ function drawGalaxy(ctx, w, h, t) {
   ctx.globalCompositeOperation = 'source-over';
 }
 
+function drawUpperAtmosphere(ctx, w, h, t) {
+  ctx.clearRect(0, 0, w, h);
+  const cx = w * 0.5, cy = h * 0.6, rEarth = Math.min(w, h) * 0.22;
+  // starfield
+  ctx.fillStyle = '#fff';
+  for (let i = 0; i < 50; i++) {
+    const sx = noise(i, 0.7) * w, sy = noise(i, 0.8) * h * 0.7;
+    ctx.globalAlpha = 0.25 + noise(i, 0.9) * 0.4;
+    ctx.beginPath(); ctx.arc(sx, sy, 0.4 * DPR, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  // atmospheric shells: thermosphere → exosphere
+  const shells = [
+    { r: 1.55, col: 'rgba(77,220,153,0.00)' },
+    { r: 1.42, col: 'rgba(77,220,153,0.10)' },
+    { r: 1.30, col: 'rgba(120,255,200,0.22)' },
+    { r: 1.18, col: 'rgba(140,255,220,0.32)' },
+  ];
+  for (const s of shells) {
+    ctx.fillStyle = radGrad(ctx, cx, cy, rEarth, rEarth * s.r, [
+      [0, 'rgba(77,220,153,0)'], [1, s.col],
+    ]);
+    ctx.beginPath(); ctx.arc(cx, cy, rEarth * s.r, 0, Math.PI * 2); ctx.fill();
+  }
+  // density pulse — storm puffing the thermosphere
+  const pulse = 1 + 0.04 * Math.sin(t * 1.2);
+  ctx.strokeStyle = `rgba(180,255,220,${0.35 + 0.15 * Math.sin(t * 1.2)})`;
+  ctx.lineWidth = 0.6 * DPR;
+  ctx.beginPath(); ctx.arc(cx, cy, rEarth * 1.45 * pulse, 0, Math.PI * 2); ctx.stroke();
+  // Earth body
+  ctx.fillStyle = radGrad(ctx, cx - rEarth * 0.35, cy - rEarth * 0.35, 0, rEarth, [
+    [0, '#3aa9ff'], [0.6, '#0a4480'], [1, '#02152e'],
+  ]);
+  ctx.beginPath(); ctx.arc(cx, cy, rEarth, 0, Math.PI * 2); ctx.fill();
+  // limb glow
+  ctx.fillStyle = radGrad(ctx, cx, cy, rEarth * 0.95, rEarth * 1.1, [
+    [0, 'rgba(140,255,220,0)'], [1, 'rgba(140,255,220,0.55)'],
+  ]);
+  ctx.beginPath(); ctx.arc(cx, cy, rEarth * 1.1, 0, Math.PI * 2); ctx.fill();
+}
+
 const SCENES = {
   earth: drawEarth, sun: drawSun, 'space-weather': drawSpaceWeather,
+  'upper-atmosphere': drawUpperAtmosphere,
   stars: drawStars, galaxy: drawGalaxy,
 };
 
