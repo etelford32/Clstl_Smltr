@@ -199,6 +199,25 @@ function renderDragSection(tle) {
         ? `±${fmtLifetime(decay.sigma_days)}`
         : '';
 
+    // Reentry-imminent flag. The fine-grained baseLifetimeMonths
+    // buckets (90-200 km) collapse lifetime smoothly toward zero
+    // below ~150 km; once we're under a day the operator needs a
+    // visible alarm — a small number alone is too easy to miss in
+    // a panel full of small numbers.
+    const lifeDays = decay?.lifetime_days ?? Infinity;
+    let reentryBadge = '';
+    if (Number.isFinite(lifeDays)) {
+        if (lifeDays < 0.25) {
+            reentryBadge = `<span class="op-orbit-reentry op-orbit-reentry--now">REENTRY · &lt; 6 h</span>`;
+        } else if (lifeDays < 1) {
+            reentryBadge = `<span class="op-orbit-reentry op-orbit-reentry--now">REENTRY · &lt; 1 day</span>`;
+        } else if (lifeDays < 7) {
+            reentryBadge = `<span class="op-orbit-reentry op-orbit-reentry--soon">REENTRY · ${Math.round(lifeDays)} d</span>`;
+        } else if (lifeDays < 30) {
+            reentryBadge = `<span class="op-orbit-reentry op-orbit-reentry--watch">decay watch · ${Math.round(lifeDays)} d</span>`;
+        }
+    }
+
     // dā/dt readout. For LEO under 600 km we get tens of
     // metres/day; for higher orbits we trickle into the cm/day
     // regime — switch unit so the digits stay readable.
@@ -223,9 +242,10 @@ function renderDragSection(tle) {
         : '';
 
     return `
-        <div class="op-orbit-rates">
+        <div class="op-orbit-rates op-orbit-drag">
             <div class="op-orbit-rate-title" title="Atmospheric drag drives semi-major axis decay; rate is the slope of the lifetime model at the current perigee.">
                 Drag &amp; decay
+                ${reentryBadge}
                 <span class="op-orbit-rate-conds">F10.7 ${f107Mid.toFixed(0)} · Ap ${apMid.toFixed(0)}</span>
             </div>
             <div title="Instantaneous rate of change of semi-major axis at the current perigee, derived by differencing the lifetime model.">
