@@ -1446,6 +1446,35 @@ body {
     padding: 0 5px;
     border-radius: 2px;
 }
+.op-orbit-reentry {
+    font-family: monospace;
+    font-size: .58rem;
+    font-weight: 800;
+    letter-spacing: .06em;
+    padding: 1px 6px;
+    border-radius: 3px;
+    text-transform: uppercase;
+}
+.op-orbit-reentry--now {
+    color: #fff;
+    background: rgba(255, 60, 90, 0.85);
+    box-shadow: 0 0 8px rgba(255, 60, 90, 0.55);
+    animation: op-orbit-reentry-pulse 1.4s ease-in-out infinite;
+}
+.op-orbit-reentry--soon {
+    color: #fda;
+    background: rgba(255, 160, 60, 0.32);
+    border: 1px solid rgba(255, 160, 60, 0.6);
+}
+.op-orbit-reentry--watch {
+    color: #fdc;
+    background: rgba(255, 200, 80, 0.18);
+    border: 1px solid rgba(255, 200, 80, 0.4);
+}
+@keyframes op-orbit-reentry-pulse {
+    0%, 100% { box-shadow: 0 0 8px rgba(255, 60, 90, 0.55); }
+    50%      { box-shadow: 0 0 14px rgba(255, 60, 90, 0.95); }
+}
 .op-orbit-caveat {
     margin-top: 6px;
     color: #678; font-size: .6rem;

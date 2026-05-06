@@ -62,7 +62,22 @@ function altPerigeeKmFromTle(tle) {
 function baseLifetimeMonths(perigeeKm) {
     // Calibrated against NASA / ESA reference points: ISS at 415 km ≈ 2-3 yr
     // without reboost, HST at 540 km ≈ ~30 yr, ~800 km LEO ≈ 200+ yr.
-    if (perigeeKm < 200) return 0.5;
+    //
+    // The < 200 km regime is now resolved at 20-km granularity instead
+    // of a single 0.5-month bucket — below ~200 km the thermosphere
+    // density doubles every ~30 km of altitude loss (Jacchia / NRLMSIS),
+    // so a flat plateau hides the very signal an operator needs:
+    // "this thing is hours from re-entry, not weeks." Numbers below
+    // are calibrated to the King-Hele table and to known reentry
+    // events (e.g., Tiangong-1 reentered ~2 days after dropping below
+    // 170 km).
+    if (perigeeKm <  90) return 0.0007;   // ~30 min — definitely past entry interface
+    if (perigeeKm < 110) return 0.007;    // ~5 hours
+    if (perigeeKm < 130) return 0.025;    // ~18 hours
+    if (perigeeKm < 150) return 0.07;     // ~2 days
+    if (perigeeKm < 170) return 0.17;     // ~5 days
+    if (perigeeKm < 190) return 0.33;     // ~10 days
+    if (perigeeKm < 200) return 0.5;      // ~15 days
     if (perigeeKm < 250) return 1.5;
     if (perigeeKm < 300) return 4;
     if (perigeeKm < 350) return 9;
@@ -109,7 +124,10 @@ export function deltaAPerDay(tle, f107, ap, perigeeStepKm = 25) {
     if (!Number.isFinite(perigee) || perigee >= 1000) return 0;
     const L0 = decayLifetimeDays(tle, f107, ap);
     if (!Number.isFinite(L0)) return 0;
-    const tleLower = { ...tle, perigee_km: Math.max(120, perigee - perigeeStepKm) };
+    // Lower step floor at 80 km so the rate stays meaningful inside
+    // the fine-grained reentry regime (90-200 km buckets in
+    // baseLifetimeMonths). Below 80 km the satellite has reentered.
+    const tleLower = { ...tle, perigee_km: Math.max(80, perigee - perigeeStepKm) };
     const L1 = decayLifetimeDays(tleLower, f107, ap);
     if (!Number.isFinite(L1)) return 0;
     const days = L0 - L1;
