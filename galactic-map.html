@@ -312,44 +312,106 @@ canvas { display:block; width:100% !important; height:100% !important; }
 
 /* ─── Zoom Toolbar (bottom-centre) ──────────────────────────── */
 #zoom-bar {
-    position:absolute; bottom:18px; left:50%; transform:translateX(-50%);
-    display:flex; gap:6px; z-index:100;
+    bottom: 18px; left: 50%;
+    /* `transform` works alongside left:50% only until the user drags.
+       After drag, JS sets explicit left/top and clears the transform. */
+    transform: translateX(-50%);
+    max-width: calc(100vw - 28px);
+}
+#zoom-bar.gp-positioned { transform: none; }   /* set by JS once dragged */
+#zoom-bar .gp-body {
+    padding: var(--sp-3) var(--sp-4);
+    display: flex; gap: var(--sp-3); flex-wrap: wrap;
+    align-items: center;
 }
 #zoom-bar button {
-    background:rgba(0,0,0,0.75); border:1px solid rgba(255,255,255,0.18);
-    border-radius:6px; color:#ccc; padding:6px 14px; font-size:11px;
-    cursor:pointer; font-family:inherit; transition:all .18s;
-    backdrop-filter:blur(8px);
+    background: var(--c-accent-soft);
+    border: 1px solid var(--c-accent-border);
+    border-radius: var(--r-sm);
+    color: var(--c-text-secondary);
+    padding: 5px 12px;
+    font-size: 11px; font-family: inherit;
+    cursor: pointer;
+    transition: background var(--t-snap), border-color var(--t-snap),
+                color var(--t-snap), transform var(--t-fast);
+    flex-shrink: 0;
 }
-#zoom-bar button:hover { background:rgba(160,100,255,0.25); border-color:#a060ff; color:#fff; }
-#zoom-bar button.active { background:rgba(160,100,255,0.35); border-color:#c090ff; color:#fff; font-weight:600; }
+#zoom-bar button:hover {
+    background: rgba(var(--c-accent-rgb), .25);
+    border-color: var(--c-accent-border-hi);
+    color: var(--c-text-primary);
+}
+#zoom-bar button:active { transform: scale(.96); }
+#zoom-bar button.active {
+    background: rgba(var(--c-accent-rgb), .40);
+    border-color: var(--c-accent);
+    color: #fff; font-weight: 600;
+    box-shadow: 0 0 0 1px var(--c-accent-glow) inset;
+}
+.zb-sep {
+    display: inline-block; width: 1px; height: 18px;
+    background: var(--c-border-soft);
+    margin: 0 var(--sp-2);
+    align-self: center; flex-shrink: 0;
+}
 
 /* ─── Intergalactic focus bar ────────────────────────────────── */
 #igm-focus-bar {
-    position:absolute; bottom:54px; left:50%; transform:translateX(-50%);
-    display:flex; align-items:center; gap:10px; z-index:100;
-    background:rgba(0,5,20,0.82); border:1px solid rgba(80,160,255,0.35);
-    border-radius:8px; padding:7px 14px; backdrop-filter:blur(10px);
-    font-size:11px; color:#aac8ff;
+    position: absolute; bottom: 76px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: var(--sp-5);
+    z-index: 100;
+    background: linear-gradient(180deg, var(--c-surface-1), var(--c-surface-2));
+    border: 1px solid var(--c-accent-border);
+    border-radius: var(--r-md);
+    padding: var(--sp-3) var(--sp-6);
+    backdrop-filter: var(--blur-glass);
+    -webkit-backdrop-filter: var(--blur-glass);
+    box-shadow: var(--shadow-panel);
+    font-size: 11px; color: var(--c-text-secondary);
 }
 #igm-back-btn {
-    background:rgba(40,80,180,0.4); border:1px solid rgba(80,140,255,0.5);
-    border-radius:5px; color:#88bbff; padding:4px 10px; font-size:10.5px;
-    cursor:pointer; font-family:inherit; transition:all .15s;
+    background: var(--c-accent-soft);
+    border: 1px solid var(--c-accent-border);
+    border-radius: var(--r-sm);
+    color: var(--c-accent);
+    padding: 4px 10px; font-size: 10.5px;
+    cursor: pointer; font-family: inherit;
+    transition: background var(--t-snap), border-color var(--t-snap), color var(--t-snap);
 }
-#igm-back-btn:hover { background:rgba(60,110,220,0.5); color:#fff; }
-#igm-focus-name { font-weight:700; color:#ddeeff; font-size:12px; }
-#igm-focus-type { color:#6688aa; font-size:10px; }
-#igm-focus-dist { color:#88bbff; font-size:10.5px; margin-left:4px; }
+#igm-back-btn:hover {
+    background: rgba(var(--c-accent-rgb), .25);
+    border-color: var(--c-accent-border-hi);
+    color: var(--c-text-primary);
+}
+#igm-focus-name { font-weight: 700; color: var(--c-text-primary); font-size: 12px; }
+#igm-focus-type { color: var(--c-text-muted); font-size: 10px; }
+#igm-focus-dist { color: var(--c-accent); font-size: 10.5px; margin-left: var(--sp-2);
+                  font-variant-numeric: tabular-nums; }
 
 /* ─── Coord crosshair display (bottom-left) ─────────────────── */
 #coord-display {
-    position:absolute; bottom:18px; left:14px; z-index:100;
-    background:rgba(0,0,0,0.65); border:1px solid rgba(255,255,255,0.1);
-    border-radius:7px; padding:8px 12px; font-size:11px; color:#888;
-    backdrop-filter:blur(6px); pointer-events:none; line-height:1.7;
+    bottom: 18px; left: 14px;
+    font-size: 11px; line-height: 1.55;
+    width: 280px;
 }
-#coord-display span { color:#a0d8ff; }
+#coord-display .gp-body {
+    padding: var(--sp-3) var(--sp-5) var(--sp-4);
+    color: var(--c-text-muted);
+}
+#coord-display .cd-row {
+    display: flex; justify-content: space-between; align-items: baseline;
+    gap: var(--sp-3);
+    padding: 1px 0;
+    border-radius: var(--r-sm);
+    cursor: help;
+    transition: background var(--t-snap);
+}
+#coord-display .cd-row:hover { background: var(--c-accent-soft); }
+#coord-display .cd-row .cd-k { color: var(--c-text-faint); font-size: 10.5px; }
+#coord-display .cd-row .cd-v {
+    color: var(--c-accent); font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
 
 /* ─── Sun-orbit time-control panel ───────────────────────────── */
 #sun-time-panel {
@@ -420,93 +482,205 @@ canvas { display:block; width:100% !important; height:100% !important; }
     #sun-time-panel { display: none; }   /* phone — too cramped, slider-only HUD instead */
 }
 
-/* ─── Sidebar ─────────────────────────────────────────────────── */
+/* ─── Sidebar (right-anchored gp-panel) ──────────────────────── */
 #sidebar {
-    width:290px; min-width:290px;
-    background:rgba(6,4,20,0.97);
-    border-left:1px solid rgba(160,100,255,0.15);
-    overflow-y:auto; overflow-x:hidden;
-    padding:14px; font-size:12px; z-index:200;
-    transition:margin-right .3s ease, opacity .3s ease;
+    top: 0; right: 0;
+    width: 308px;
+    max-height: calc(100vh - 50px - 4px);
+    z-index: 200;
+    /* `gp-panel` already provides the surface fill, glass blur, border, and
+       shadow. The sidebar is the largest panel, so its body needs its own
+       scroll context. */
 }
-#sidebar.collapsed { margin-right:-290px; opacity:0; pointer-events:none; }
-#sidebar-toggle {
-    position:absolute; top:14px; right:14px; z-index:300;
-    background:rgba(0,0,0,0.7); border:1px solid rgba(160,100,255,0.35);
-    color:#c090ff; padding:5px 11px; border-radius:6px; cursor:pointer;
-    font-size:12px; font-family:inherit; backdrop-filter:blur(8px);
-    transition:all .2s;
+#sidebar .gp-body {
+    padding: var(--sp-4) var(--sp-5) var(--sp-5);
+    overflow-y: auto;
+    overflow-x: hidden;
+    max-height: calc(100vh - 50px - 4px - 40px);   /* viewport − nav − header */
+    scrollbar-width: thin;
+    scrollbar-color: var(--c-accent-border) transparent;
 }
-#sidebar-toggle:hover { background:rgba(160,100,255,0.2); }
+#sidebar .gp-body::-webkit-scrollbar { width: 8px; }
+#sidebar .gp-body::-webkit-scrollbar-track { background: transparent; }
+#sidebar .gp-body::-webkit-scrollbar-thumb {
+    background: var(--c-accent-border);
+    border-radius: 4px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+}
+#sidebar .gp-body::-webkit-scrollbar-thumb:hover {
+    background: var(--c-accent-border-hi);
+    background-clip: padding-box;
+}
 
-/* sidebar section */
-.sb-hd {
-    font-size:10px; font-weight:700; color:#7766aa; letter-spacing:1px;
-    text-transform:uppercase; margin:14px 0 6px;
-    padding-bottom:4px; border-bottom:1px solid rgba(255,255,255,0.06);
+/* sidebar collapsible sections (native <details>/<summary>) */
+.gp-section { margin: 0; padding: 0; border: none; background: transparent; }
+.gp-section + .gp-section { margin-top: var(--sp-2); }
+.gp-section[open] > .gp-section-hdr { color: var(--c-accent); }
+.gp-section-hdr {
+    list-style: none;   /* drop default disclosure marker */
+    cursor: pointer;
+    position: sticky; top: 0; z-index: 5;
+    display: flex; align-items: center; gap: var(--sp-3);
+    padding: var(--sp-3) var(--sp-2) var(--sp-3) var(--sp-2);
+    margin: 0 calc(-1 * var(--sp-2));  /* bleed to body edges so sticky covers fully */
+    font-size: 10px; font-weight: 700;
+    color: var(--c-text-muted);
+    letter-spacing: .12em; text-transform: uppercase;
+    border-top: 1px solid var(--c-border-faint);
+    background: linear-gradient(180deg,
+        var(--c-surface-2) 0%,
+        rgba(2, 4, 12, .82) 100%);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    transition: color var(--t-snap);
 }
-.sb-hd:first-child { margin-top:0; }
+.gp-section-hdr::-webkit-details-marker { display: none; }
+.gp-section:first-of-type > .gp-section-hdr { border-top: none; }
+.gp-section-hdr:hover { color: var(--c-accent); }
+.gp-section-hdr::after {
+    content: '▾';
+    margin-left: auto;
+    font-size: 10px;
+    color: var(--c-text-faint);
+    transition: transform var(--t-snap), color var(--t-snap);
+}
+.gp-section:not([open]) > .gp-section-hdr::after { transform: rotate(-90deg); }
+.gp-section-hdr:hover::after { color: var(--c-accent); }
+.gp-section-body {
+    padding: var(--sp-3) 0 var(--sp-4);
+}
+
+/* legacy class — kept as alias for any inline references */
+.sb-hd {
+    font-size: 10px; font-weight: 700;
+    color: var(--c-text-muted); letter-spacing: .12em;
+    text-transform: uppercase;
+    margin: var(--sp-6) 0 var(--sp-3);
+    padding-bottom: var(--sp-2);
+    border-bottom: 1px solid var(--c-border-faint);
+}
+.sb-hd:first-child { margin-top: 0; }
 
 /* star list items */
 .star-item {
-    display:flex; align-items:center; gap:8px;
-    padding:7px 9px; border-radius:7px; cursor:pointer;
-    transition:background .15s; margin-bottom:2px;
-    border:1px solid transparent;
+    display: flex; align-items: center; gap: var(--sp-4);
+    padding: var(--sp-3) var(--sp-4);
+    border-radius: var(--r-md);
+    cursor: pointer;
+    transition: background var(--t-snap), border-color var(--t-snap);
+    margin-bottom: 2px;
+    border: 1px solid transparent;
 }
-.star-item:hover { background:rgba(255,255,255,.06); }
-.star-item.selected { background:rgba(160,100,255,.15); border-color:rgba(160,100,255,.4); }
-.star-item.igm-item { border-left:2px solid rgba(80,140,255,0.3); }
-.star-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
-.star-name { font-weight:600; font-size:11.5px; }
-.star-type { font-size:10px; color:#666; }
-.star-dist { font-size:10px; color:#888; margin-left:auto; white-space:nowrap; }
+.star-item:hover {
+    background: var(--c-accent-soft);
+    border-color: var(--c-accent-border);
+}
+.star-item.selected {
+    background: rgba(var(--c-accent-rgb), .18);
+    border-color: var(--c-accent-border-hi);
+}
+.star-item.igm-item { border-left: 2px solid var(--c-accent-border); }
+.star-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.star-name { font-weight: 600; font-size: 11.5px; color: var(--c-text-secondary); }
+.star-type { font-size: 10px; color: var(--c-text-faint); }
+.star-dist {
+    font-size: 10px; color: var(--c-text-muted); margin-left: auto;
+    white-space: nowrap; font-variant-numeric: tabular-nums;
+}
 .star-section-hdr {
-    font-size:9.5px; font-weight:700; letter-spacing:.12em;
-    text-transform:uppercase; color:#4488cc; opacity:0.8;
-    padding:10px 9px 4px; border-top:1px solid rgba(80,140,255,0.2);
-    margin-top:6px;
+    font-size: 9.5px; font-weight: 700; letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--c-accent); opacity: .75;
+    padding: var(--sp-5) var(--sp-4) var(--sp-3);
+    border-top: 1px solid var(--c-border-faint);
+    margin-top: var(--sp-3);
 }
 
-/* info panel */
+/* info panel — selected-object readout */
 #info-panel {
-    background:rgba(255,255,255,.03); border:1px solid rgba(160,100,255,.15);
-    border-radius:8px; padding:12px; margin-top:8px;
+    background: var(--c-accent-soft);
+    border: 1px solid var(--c-accent-border);
+    border-radius: var(--r-md);
+    padding: var(--sp-6);
+    margin-top: var(--sp-3);
 }
-#info-panel h3 { font-size:14px; color:#e0d0ff; margin-bottom:2px; }
-#info-panel .ip-type { font-size:11px; color:#888; margin-bottom:8px; }
-.ip-row { display:flex; justify-content:space-between; padding:2px 0;
-    border-bottom:1px solid rgba(255,255,255,.04); font-size:11px; }
-.ip-row .ip-k { color:#888; }
-.ip-row .ip-v { color:#a0d8ff; }
-#info-link {
-    display:inline-block; margin-top:10px; padding:5px 12px;
-    background:rgba(160,100,255,.2); border:1px solid rgba(160,100,255,.4);
-    border-radius:5px; color:#c090ff; text-decoration:none; font-size:11px;
-    transition:all .15s;
+#info-panel h3 {
+    font-size: 14px; color: var(--c-text-primary);
+    margin-bottom: 2px; letter-spacing: .01em;
 }
-#info-link:hover { background:rgba(160,100,255,.35); }
-#info-link.hidden { display:none; }
+#info-panel .ip-type {
+    font-size: 11px; color: var(--c-text-muted);
+    margin-bottom: var(--sp-4);
+}
+.ip-row {
+    display: flex; justify-content: space-between;
+    padding: 2px 0; font-size: 11px;
+    border-bottom: 1px solid var(--c-border-faint);
+}
+.ip-row .ip-k { color: var(--c-text-muted); }
+.ip-row .ip-v {
+    color: var(--c-text-primary); font-variant-numeric: tabular-nums;
+}
+.info-link {
+    display: inline-block; margin-top: var(--sp-5);
+    padding: 5px 12px;
+    background: var(--c-accent-soft);
+    border: 1px solid var(--c-accent-border);
+    border-radius: var(--r-sm);
+    color: var(--c-accent);
+    text-decoration: none; font-size: 11px;
+    transition: background var(--t-snap), border-color var(--t-snap), color var(--t-snap);
+}
+.info-link:hover {
+    background: rgba(var(--c-accent-rgb), .30);
+    border-color: var(--c-accent-border-hi);
+    color: var(--c-text-primary);
+}
+.info-link.hidden { display: none; }
 
-/* checkbox/toggle row */
-.tog-row { display:flex; align-items:center; gap:6px; padding:4px 0; cursor:pointer; }
-.tog-row input { accent-color:#a060ff; }
-.tog-row label { font-size:11px; color:#bbb; cursor:pointer; }
+/* checkbox / toggle row */
+.tog-row {
+    display: flex; align-items: center; gap: var(--sp-3);
+    padding: var(--sp-2) var(--sp-2);
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    transition: background var(--t-snap);
+}
+.tog-row:hover { background: var(--c-accent-soft); }
+.tog-row input { accent-color: var(--c-accent); }
+.tog-row label {
+    font-size: 11px; color: var(--c-text-secondary); cursor: pointer;
+    flex: 1;
+}
 
 /* legend */
-.legend-item { display:flex; align-items:center; gap:6px; margin:3px 0; font-size:10px; color:#888; }
-.legend-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.legend-item {
+    display: flex; align-items: center; gap: var(--sp-3);
+    margin: 3px 0; font-size: 10px; color: var(--c-text-muted);
+}
+.legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 
 /* ─── Space Weather link button ─────────────────────────────────── */
 .cv-btn {
     position: absolute; z-index: 60;
-    background: rgba(4,2,20,.80); backdrop-filter: blur(8px);
-    border: 1px solid rgba(160,100,255,.30); border-radius: 7px;
-    color: #c090ff; cursor: pointer; font-family: inherit;
-    font-size: 12px; padding: 6px 11px; transition: all .2s;
+    background: linear-gradient(180deg, var(--c-surface-1), var(--c-surface-2));
+    backdrop-filter: var(--blur-glass);
+    -webkit-backdrop-filter: var(--blur-glass);
+    border: 1px solid var(--c-accent-border);
+    border-radius: var(--r-md);
+    color: var(--c-accent);
+    cursor: pointer; font-family: inherit;
+    font-size: 12px; padding: 6px 11px;
+    transition: background var(--t-snap), border-color var(--t-snap), color var(--t-snap);
     touch-action: manipulation; text-decoration: none; display: inline-block;
+    box-shadow: var(--shadow-panel);
 }
-.cv-btn:hover { background: rgba(160,100,255,.18); border-color:#a060ff; }
+.cv-btn:hover {
+    background: var(--c-accent-soft);
+    border-color: var(--c-accent-border-hi);
+    color: var(--c-text-primary);
+}
 </style>
 </head>
 <body>
@@ -601,162 +775,265 @@ canvas { display:block; width:100% !important; height:100% !important; }
             </div>
         </div>
 
-        <!-- Sidebar toggle -->
-        <button id="sidebar-toggle">☰ Panel</button>
-        <a href="space-weather.html" class="cv-btn" id="btn-sw" title="Live Space Weather Data" style="top:14px;right:120px;">⚡ Weather</a>
+        <a href="space-weather.html" class="cv-btn" id="btn-sw"
+           title="Live Space Weather Data — solar wind, geomagnetic, CME activity"
+           style="top:14px;right:340px;">⚡ Weather</a>
 
         <!-- Zoom presets (bottom-centre) -->
-        <div id="zoom-bar">
-            <!-- Cross-scale zoom out: go to Solar System simulator -->
-            <button id="zoom-solar-system"
-                    title="Zoom into the Solar System simulator (threejs.html)"
-                    style="border-color:rgba(255,220,60,.35);color:#ffdd66;">
-                ☀️ Solar Sys.
-            </button>
-            <span style="display:inline-block;width:1px;height:18px;
-                  background:rgba(255,255,255,.12);margin:0 4px;vertical-align:middle;
-                  align-self:center;flex-shrink:0;"></span>
-            <button id="zoom-local">Local (&lt;50 ly)</button>
-            <button id="zoom-hood">Neighborhood (&lt;1 kly)</button>
-            <button id="zoom-arm">Local Arm (&lt;10 kly)</button>
-            <button id="zoom-galaxy" class="active">Galaxy</button>
-            <button id="zoom-edge_on" title="Cinematic edge-on disk profile — dust lanes + peanut bulge"
-                    style="border-color:rgba(255,160,80,.45); color:#ffcc99;">
-                ✦ Edge-on
-            </button>
-            <button id="zoom-universe" title="Log-scale — distances compressed beyond 60 kly">Universe ⚠ log</button>
+        <div id="zoom-bar" class="gp-panel" data-panel-key="zoom-bar">
+            <div class="gp-header" data-drag-handle
+                 title="View presets — jump between scale tiers from the Solar System out to a log-compressed universe view.">
+                <span class="gp-grip" aria-hidden="true"></span>
+                <span class="gp-title">🔭 View Presets</span>
+                <button type="button" class="gp-min-btn" data-min-btn
+                        title="Minimize panel" aria-label="Minimize zoom presets panel"></button>
+            </div>
+            <div class="gp-body">
+                <button id="zoom-solar-system" class="zb-btn-solar"
+                        title="Cross-scale zoom out — open the Solar System simulator (threejs.html).">
+                    ☀️ Solar Sys.
+                </button>
+                <span class="zb-sep" aria-hidden="true"></span>
+                <button id="zoom-local"
+                        title="Frame the Sun's immediate stellar neighborhood (within ~50 ly).">Local (&lt;50 ly)</button>
+                <button id="zoom-hood"
+                        title="Local stellar neighborhood (within ~1,000 ly).">Neighborhood (&lt;1 kly)</button>
+                <button id="zoom-arm"
+                        title="The Sun's spiral-arm context (Orion Spur and adjacent arms, ~10,000 ly).">Local Arm (&lt;10 kly)</button>
+                <button id="zoom-galaxy" class="active"
+                        title="Whole-galaxy view — frames the Milky Way disk and the Sun's orbit around Sgr A*.">Galaxy</button>
+                <button id="zoom-edge_on" class="zb-btn-edge"
+                        title="Cinematic edge-on disk profile — dust lanes, peanut-shaped bulge, and Fermi bubbles.">
+                    ✦ Edge-on
+                </button>
+                <button id="zoom-universe" class="zb-btn-warn"
+                        title="Log-scale universe view — distances beyond 60 kly are radially compressed so extragalactic targets fit on screen.">Universe ⚠ log</button>
+            </div>
         </div>
 
         <!-- Intergalactic focus bar — shown when orbiting a galaxy/quasar -->
         <div id="igm-focus-bar" style="display:none">
-            <button id="igm-back-btn">← Milky Way</button>
-            <span id="igm-focus-name">—</span>
-            <span id="igm-focus-type">—</span>
-            <span id="igm-focus-dist">—</span>
+            <button id="igm-back-btn"
+                    title="Return to the whole-Milky-Way view.">← Milky Way</button>
+            <span id="igm-focus-name" title="Currently focused extragalactic object.">—</span>
+            <span id="igm-focus-type" title="Object classification.">—</span>
+            <span id="igm-focus-dist" title="Heliocentric distance to this object.">—</span>
         </div>
 
         <!-- Coord display (bottom-left) -->
-        <div id="coord-display">
-            Galactic coords (heliocentric) &nbsp;|&nbsp;
-            l = <span id="cd-l">0.000°</span> &nbsp;
-            b = <span id="cd-b">0.000°</span> &nbsp;
-            d<sub>GC</sub> = <span id="cd-dgc">26,673 ly</span>
+        <div id="coord-display" class="gp-panel" data-panel-key="coord-display">
+            <div class="gp-header" data-drag-handle
+                 title="Heliocentric galactic coordinates — what the camera is currently looking from.">
+                <span class="gp-grip" aria-hidden="true"></span>
+                <span class="gp-title">🧭 Camera — Galactic Coords</span>
+                <button type="button" class="gp-min-btn" data-min-btn
+                        title="Minimize panel" aria-label="Minimize coordinate panel"></button>
+            </div>
+            <div class="gp-body">
+                <div class="cd-row" title="Galactic longitude (l) of the camera's heliocentric line of sight. 0° = toward Sgr A*; 90° = direction of the Sun's orbital motion.">
+                    <span class="cd-k">l (longitude)</span>
+                    <span class="cd-v" id="cd-l">0.000°</span>
+                </div>
+                <div class="cd-row" title="Galactic latitude (b) of the camera's heliocentric line of sight. 0° = galactic plane; +90° = north pole; −90° = south pole.">
+                    <span class="cd-k">b (latitude)</span>
+                    <span class="cd-v" id="cd-b">0.000°</span>
+                </div>
+                <div class="cd-row" title="Distance from the camera to the Galactic Center (Sgr A*). The Sun itself is at 26,673 ly (8.178 kpc) from the GC.">
+                    <span class="cd-k">d<sub>GC</sub></span>
+                    <span class="cd-v" id="cd-dgc">26,673 ly</span>
+                </div>
+            </div>
         </div>
     </div>
 
-    <!-- Sidebar -->
-    <div id="sidebar">
-        <div class="sb-hd">Galactic Objects</div>
-        <div id="star-list"></div>
+    <!-- Sidebar — catalog, info, display toggles, legend, reference -->
+    <div id="sidebar" class="gp-panel" data-panel-key="sidebar">
+        <div class="gp-header" data-drag-handle
+             title="Drag to detach this panel from the right edge. Hit − to minimize, then drag the header anywhere on screen.">
+            <span class="gp-grip" aria-hidden="true"></span>
+            <span class="gp-title">🛰 Catalog &amp; Display</span>
+            <button type="button" class="gp-min-btn" data-min-btn
+                    title="Minimize panel" aria-label="Minimize Catalog &amp; Display panel"></button>
+        </div>
+        <div class="gp-body">
+            <details class="gp-section" data-section-key="objects" open>
+                <summary class="gp-section-hdr"
+                         title="Browse every star, S-star, galaxy, quasar, and showpiece. Click an entry to fly the camera to it.">
+                    Galactic Objects
+                </summary>
+                <div class="gp-section-body">
+                    <div id="star-list"></div>
+                </div>
+            </details>
 
-        <div class="sb-hd" style="margin-top:16px">Selected Object</div>
-        <div id="info-panel">
-            <div style="color:#555;font-size:11px;text-align:center;padding:10px 0">
-                Click a star to see details
-            </div>
-        </div>
+            <details class="gp-section" data-section-key="selected" open>
+                <summary class="gp-section-hdr"
+                         title="Detailed properties of the currently-selected object — physical type, distance, mass, links to dedicated simulator pages where available.">
+                    Selected Object
+                </summary>
+                <div class="gp-section-body">
+                    <div id="info-panel">
+                        <div style="color:var(--c-text-faint);font-size:11px;text-align:center;padding:var(--sp-5) 0">
+                            Click a star to see details
+                        </div>
+                    </div>
+                </div>
+            </details>
 
-        <div class="sb-hd" style="margin-top:16px">Display</div>
-        <div class="tog-row">
-            <input type="checkbox" id="tog-galaxy" checked>
-            <label for="tog-galaxy">Galaxy background</label>
-        </div>
-        <div class="tog-row">
-            <input type="checkbox" id="tog-grid" checked>
-            <label for="tog-grid">GC distance rings</label>
-        </div>
-        <div class="tog-row">
-            <input type="checkbox" id="tog-arms" checked>
-            <label for="tog-arms">Arm labels</label>
-        </div>
-        <div class="tog-row">
-            <input type="checkbox" id="tog-labels" checked>
-            <label for="tog-labels">Star labels</label>
-        </div>
-        <div class="tog-row">
-            <input type="checkbox" id="tog-plane" checked>
-            <label for="tog-plane">Galactic plane</label>
-        </div>
-        <div class="tog-row" title="Animated Sun marker tracing its orbit around Sgr A* (one orbit ≈ 225 Myr).">
-            <input type="checkbox" id="tog-sun-orbit" checked>
-            <label for="tog-sun-orbit">☉ Sun's orbit around Sgr A*</label>
-        </div>
-        <div class="tog-row" title="Custom 3D visuals for nebulae and supernova remnants (Orion, Crab, Eagle, Carina, η Car, Cas A).">
-            <input type="checkbox" id="tog-showpieces" checked>
-            <label for="tog-showpieces">✦ Galactic showpieces (visuals)</label>
-        </div>
-        <div class="tog-row" title="Twin γ-ray lobes inflated above and below Sgr A* (Fermi-LAT 2010).">
-            <input type="checkbox" id="tog-fermi" checked>
-            <label for="tog-fermi">⊕ Fermi Bubbles</label>
-        </div>
-        <div class="tog-row" title="Tidal stream from the disrupting Sagittarius Dwarf Spheroidal — wraps the entire MW halo.">
-            <input type="checkbox" id="tog-sgr-stream" checked>
-            <label for="tog-sgr-stream">⤳ Sagittarius Stream</label>
-        </div>
+            <details class="gp-section" data-section-key="display" open>
+                <summary class="gp-section-hdr"
+                         title="Toggle visualization layers — galaxy background, distance rings, arm labels, the Sun's orbit trail, Fermi bubbles, and the Sagittarius tidal stream.">
+                    Display
+                </summary>
+                <div class="gp-section-body">
+                    <div class="tog-row" title="Faint spiral-arm + bulge background plate that gives the scene its galactic context.">
+                        <input type="checkbox" id="tog-galaxy" checked>
+                        <label for="tog-galaxy">Galaxy background</label>
+                    </div>
+                    <div class="tog-row" title="Concentric distance rings centered on Sgr A* — annotated in kly so you can read the Sun's 26.7 kly orbital radius at a glance.">
+                        <input type="checkbox" id="tog-grid" checked>
+                        <label for="tog-grid">GC distance rings</label>
+                    </div>
+                    <div class="tog-row" title="Spiral-arm labels: Orion Spur, Sagittarius, Perseus, Scutum-Centaurus, Norma, Outer arm.">
+                        <input type="checkbox" id="tog-arms" checked>
+                        <label for="tog-arms">Arm labels</label>
+                    </div>
+                    <div class="tog-row" title="Floating name labels next to each catalog star — useful when zoomed into the local neighborhood.">
+                        <input type="checkbox" id="tog-labels" checked>
+                        <label for="tog-labels">Star labels</label>
+                    </div>
+                    <div class="tog-row" title="The galactic plane (b = 0°) rendered as a translucent disk — helps orient when the camera is far above or below.">
+                        <input type="checkbox" id="tog-plane" checked>
+                        <label for="tog-plane">Galactic plane</label>
+                    </div>
+                    <div class="tog-row" title="Animated Sun marker tracing its orbit around Sgr A* (one orbit ≈ 225 Myr).">
+                        <input type="checkbox" id="tog-sun-orbit" checked>
+                        <label for="tog-sun-orbit">☉ Sun's orbit around Sgr A*</label>
+                    </div>
+                    <div class="tog-row" title="Custom 3D visuals for nebulae and supernova remnants (Orion, Crab, Eagle, Carina, η Car, Cas A).">
+                        <input type="checkbox" id="tog-showpieces" checked>
+                        <label for="tog-showpieces">✦ Galactic showpieces (visuals)</label>
+                    </div>
+                    <div class="tog-row" title="Twin γ-ray lobes inflated above and below Sgr A* (Fermi-LAT 2010).">
+                        <input type="checkbox" id="tog-fermi" checked>
+                        <label for="tog-fermi">⊕ Fermi Bubbles</label>
+                    </div>
+                    <div class="tog-row" title="Tidal stream from the disrupting Sagittarius Dwarf Spheroidal — wraps the entire MW halo.">
+                        <input type="checkbox" id="tog-sgr-stream" checked>
+                        <label for="tog-sgr-stream">⤳ Sagittarius Stream</label>
+                    </div>
+                </div>
+            </details>
 
-        <div class="sb-hd" style="margin-top:16px">Spectral Type Legend</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#88aaff"></div>O/B — hot blue/white</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#ccddff"></div>A — white/blue-white</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#ffffee"></div>F — yellow-white</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#ffff88"></div>G — yellow (Sun-like)</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#ffaa44"></div>K — orange</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#ff4400"></div>M — red</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#aaddff;opacity:.7"></div>Cluster / other</div>
+            <details class="gp-section" data-section-key="legend-spectral">
+                <summary class="gp-section-hdr"
+                         title="Stellar color = spectral class. From hot blue (O/B) through Sun-like yellow (G) to cool red (M).">
+                    Spectral Type Legend
+                </summary>
+                <div class="gp-section-body">
+                    <div class="legend-item"><div class="legend-dot" style="background:#88aaff"></div>O/B — hot blue/white</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#ccddff"></div>A — white/blue-white</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#ffffee"></div>F — yellow-white</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#ffff88"></div>G — yellow (Sun-like)</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#ffaa44"></div>K — orange</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#ff4400"></div>M — red</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#aaddff;opacity:.7"></div>Cluster / other</div>
+                </div>
+            </details>
 
-        <div class="sb-hd" style="margin-top:16px">Extragalactic Symbols</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#aaccff"></div>Galaxy (spiral / elliptical / dwarf)</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#ffaa00"></div>Quasar / AGN — bright point + spikes</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#ff3300"></div>Cosmic Dawn galaxy (z &gt; 6)</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#aa44ff"></div>Gamma-Ray Burst</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#9966ff"></div>Lensed star (caustic crossing)</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#6688ff"></div>Great Wall / cosmic filament</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#c080ff"></div>Supercluster</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#554477;border:1px solid #888"></div>Cosmic void (negative space)</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#3366ff"></div>Galaxy cluster (ICM glow)</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#ffe0a0"></div>Supergiant cD galaxy</div>
+            <details class="gp-section" data-section-key="legend-extragalactic">
+                <summary class="gp-section-hdr"
+                         title="Symbols used for objects beyond the Milky Way — galaxies, quasars, GRBs, lensed stars, large-scale structure.">
+                    Extragalactic Symbols
+                </summary>
+                <div class="gp-section-body">
+                    <div class="legend-item"><div class="legend-dot" style="background:#aaccff"></div>Galaxy (spiral / elliptical / dwarf)</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#ffaa00"></div>Quasar / AGN — bright point + spikes</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#ff3300"></div>Cosmic Dawn galaxy (z &gt; 6)</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#aa44ff"></div>Gamma-Ray Burst</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#9966ff"></div>Lensed star (caustic crossing)</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#6688ff"></div>Great Wall / cosmic filament</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#c080ff"></div>Supercluster</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#554477;border:1px solid #888"></div>Cosmic void (negative space)</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#3366ff"></div>Galaxy cluster (ICM glow)</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#ffe0a0"></div>Supergiant cD galaxy</div>
+                </div>
+            </details>
 
-        <div class="sb-hd" style="margin-top:16px">Galactic Showpieces</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#ff66aa"></div>H II region (Orion, Eagle, Carina)</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#aa66ff"></div>Pulsar wind nebula (Crab, Vela)</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#66aaff"></div>SN remnant (Cas A, Vela SNR)</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#ffeecc"></div>LBV / Homunculus (η Car)</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#55ffcc"></div>Planetary nebula (Helix)</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#ddeeff;border:1px solid #444"></div>Stellar BH binary (Cyg X-1)</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#ffcc88"></div>WR pinwheel (WR 104)</div>
+            <details class="gp-section" data-section-key="legend-showpieces">
+                <summary class="gp-section-hdr"
+                         title="Hand-crafted 3D visuals for famous Milky Way nebulae, remnants, and stellar oddities.">
+                    Galactic Showpieces
+                </summary>
+                <div class="gp-section-body">
+                    <div class="legend-item"><div class="legend-dot" style="background:#ff66aa"></div>H II region (Orion, Eagle, Carina)</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#aa66ff"></div>Pulsar wind nebula (Crab, Vela)</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#66aaff"></div>SN remnant (Cas A, Vela SNR)</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#ffeecc"></div>LBV / Homunculus (η Car)</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#55ffcc"></div>Planetary nebula (Helix)</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#ddeeff;border:1px solid #444"></div>Stellar BH binary (Cyg X-1)</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#ffcc88"></div>WR pinwheel (WR 104)</div>
+                </div>
+            </details>
 
-        <div class="sb-hd" style="margin-top:16px">Edge-on Disk Profile</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#9966dd"></div>Fermi Bubbles (±25 kly γ-ray lobes)</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#241408;border:1px solid #663"></div>Mid-plane dust band (silhouettes bulge)</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#4488cc"></div>Galactic warp (outer disk bend)</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#99bbff;opacity:.5"></div>Circumgalactic halo (hot corona)</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#ddc086"></div>Sagittarius Stream (tidal arc, polar)</div>
+            <details class="gp-section" data-section-key="legend-edge-on">
+                <summary class="gp-section-hdr"
+                         title="Visible only in the cinematic Edge-on view — disk profile, dust band, warp, halo, and the polar Sagittarius arc.">
+                    Edge-on Disk Profile
+                </summary>
+                <div class="gp-section-body">
+                    <div class="legend-item"><div class="legend-dot" style="background:#9966dd"></div>Fermi Bubbles (±25 kly γ-ray lobes)</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#241408;border:1px solid #663"></div>Mid-plane dust band (silhouettes bulge)</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#4488cc"></div>Galactic warp (outer disk bend)</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#99bbff;opacity:.5"></div>Circumgalactic halo (hot corona)</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#ddc086"></div>Sagittarius Stream (tidal arc, polar)</div>
+                </div>
+            </details>
 
-        <div class="sb-hd" style="margin-top:16px">Sgr A* Environment</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#ff5566"></div>G2 gas cloud (2014 close-pass)</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#ff9a55"></div>Mini-spiral (Sgr A West) gas streamers</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#fff1c2"></div>IRS 16 / IRS 13 young clusters</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#ffa050"></div>EHT photon ring + Doppler crescent</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#aaccff"></div>S-stars S2/S1/S12/S14/S29/S38/S55/S62</div>
+            <details class="gp-section" data-section-key="legend-sgra">
+                <summary class="gp-section-hdr"
+                         title="Inner-parsec environment around the supermassive black hole — gas streams, young clusters, EHT photon ring, S-stars.">
+                    Sgr A* Environment
+                </summary>
+                <div class="gp-section-body">
+                    <div class="legend-item"><div class="legend-dot" style="background:#ff5566"></div>G2 gas cloud (2014 close-pass)</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#ff9a55"></div>Mini-spiral (Sgr A West) gas streamers</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#fff1c2"></div>IRS 16 / IRS 13 young clusters</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#ffa050"></div>EHT photon ring + Doppler crescent</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#aaccff"></div>S-stars S2/S1/S12/S14/S29/S38/S55/S62</div>
+                </div>
+            </details>
 
-        <div class="sb-hd" style="margin-top:16px">Sun's Orbit Around Sgr A*</div>
-        <div style="font-size:10px;color:#666;line-height:1.6">
-            <strong style="color:#ffcc77">Radius:</strong> 26,673 ly (8.178 kpc).<br>
-            <strong style="color:#ffcc77">Speed:</strong> ~220 km/s (LSR).<br>
-            <strong style="color:#ffcc77">Period:</strong> ~225 Myr — one Galactic year.<br>
-            <strong style="color:#ffcc77">Direction:</strong> toward galactic l = 90°.<br>
-            Animated marker advances 1 full orbit every 60&nbsp;s.<br>
-            Yellow tick marks every 25 Myr; amber trail shows the last ~80 Myr.
-        </div>
+            <details class="gp-section" data-section-key="ref-orbit">
+                <summary class="gp-section-hdr"
+                         title="Vital statistics of the Sun's orbit around Sgr A* — what the Time Controls panel is animating.">
+                    Sun's Orbit Around Sgr A*
+                </summary>
+                <div class="gp-section-body" style="font-size:10px;color:var(--c-text-muted);line-height:1.6">
+                    <strong style="color:var(--c-storm)">Radius:</strong> 26,673 ly (8.178 kpc).<br>
+                    <strong style="color:var(--c-storm)">Speed:</strong> ~220 km/s (LSR).<br>
+                    <strong style="color:var(--c-storm)">Period:</strong> ~225 Myr — one Galactic year.<br>
+                    <strong style="color:var(--c-storm)">Direction:</strong> toward galactic l = 90°.<br>
+                    Animated marker advances 1 full orbit every 60&nbsp;s.<br>
+                    Yellow tick marks every 25 Myr; amber trail shows the last ~80 Myr.
+                </div>
+            </details>
 
-        <div class="sb-hd" style="margin-top:16px">Coordinate Reference</div>
-        <div style="font-size:10px;color:#666;line-height:1.6">
-            <strong style="color:#999">Galactic longitude (l):</strong> 0° = toward Sgr A*, 90° = rotation direction.<br>
-            <strong style="color:#999">Galactic latitude (b):</strong> 0° = galactic plane, +90° = north pole.<br>
-            <strong style="color:#999">Origin:</strong> Sagittarius A* (Galactic Center).<br>
-            <strong style="color:#999">Sun–GC distance:</strong> 26,673 ly (8.178 kpc).<br>
-            Drag to orbit · Scroll to zoom<br>
-            Click a star → fly to it + show data.<br>
-            Distances in ly / pc / kpc (scientific).
+            <details class="gp-section" data-section-key="ref-coords">
+                <summary class="gp-section-hdr"
+                         title="The galactic coordinate system — what l, b, and dGC mean and how to interact with the scene.">
+                    Coordinate Reference
+                </summary>
+                <div class="gp-section-body" style="font-size:10px;color:var(--c-text-muted);line-height:1.6">
+                    <strong style="color:var(--c-text-secondary)">Galactic longitude (l):</strong> 0° = toward Sgr A*, 90° = rotation direction.<br>
+                    <strong style="color:var(--c-text-secondary)">Galactic latitude (b):</strong> 0° = galactic plane, +90° = north pole.<br>
+                    <strong style="color:var(--c-text-secondary)">Origin:</strong> Sagittarius A* (Galactic Center).<br>
+                    <strong style="color:var(--c-text-secondary)">Sun–GC distance:</strong> 26,673 ly (8.178 kpc).<br>
+                    Drag to orbit · Scroll to zoom<br>
+                    Click a star → fly to it + show data.<br>
+                    Distances in ly / pc / kpc (scientific).
+                </div>
+            </details>
         </div>
     </div>
 </div>
@@ -7784,50 +8061,57 @@ document.getElementById('zoom-universe').addEventListener('click', () => flyTo('
 document.getElementById('igm-back-btn').addEventListener('click',  () => { setIgmFocus(null); flyTo('galaxy', 2400); });
 
 // ══════════════════════════════════════════════════════════════════════════
-//  SIDEBAR TOGGLE
-// ══════════════════════════════════════════════════════════════════════════
-document.getElementById('sidebar-toggle').addEventListener('click', () => {
-    document.getElementById('sidebar').classList.toggle('collapsed');
-});
-
-// ══════════════════════════════════════════════════════════════════════════
 //  DRAGGABLE / MINIMIZABLE PANEL CHROME
 //  Wires every .gp-panel: click [−]/[+] to collapse, drag header to move.
 //  Position + collapsed state persisted per panel-key in localStorage.
+//  Also persists per-section <details> open state inside .gp-panel.
 // ══════════════════════════════════════════════════════════════════════════
 (function wireDraggablePanels() {
     const STORAGE_PREFIX = 'pp.gmap.panel.';
+    const SECTION_PREFIX = 'pp.gmap.section.';
 
-    function loadState(key) {
+    function loadState(prefix, key) {
         try {
-            const raw = localStorage.getItem(STORAGE_PREFIX + key);
+            const raw = localStorage.getItem(prefix + key);
             return raw ? JSON.parse(raw) : null;
         } catch { return null; }
     }
-    function saveState(key, state) {
-        try { localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(state)); }
+    function saveState(prefix, key, state) {
+        try { localStorage.setItem(prefix + key, JSON.stringify(state)); }
         catch { /* quota or disabled — silent fallback */ }
     }
 
-    function clampToViewport(panel, x, y) {
+    // Returns the panel's offset parent's viewport rect, falling back to
+    // the document element if there is no positioned ancestor.
+    function offsetParentRect(panel) {
+        const op = panel.offsetParent || document.body;
+        return op.getBoundingClientRect();
+    }
+
+    // Clamp viewport-space (clientX/Y) coords so the panel keeps at least
+    // KEEP px on screen. Returns viewport-space coords.
+    function clampToViewport(panel, clientX, clientY) {
         const w = panel.offsetWidth;
-        const h = panel.offsetHeight;
-        // Keep at least 40px of the panel on-screen so the user can always grab it
         const KEEP = 40;
         const maxX = window.innerWidth  - KEEP;
         const maxY = window.innerHeight - KEEP;
         const minX = -(w - KEEP);
         const minY = 0;
-        return [Math.min(maxX, Math.max(minX, x)),
-                Math.min(maxY, Math.max(minY, y))];
+        return [Math.min(maxX, Math.max(minX, clientX)),
+                Math.min(maxY, Math.max(minY, clientY))];
     }
 
-    function applyPosition(panel, x, y) {
-        panel.style.left  = x + 'px';
-        panel.style.top   = y + 'px';
-        // Drop any right/bottom anchors so left/top take effect cleanly
+    // Write a viewport-space (clientX/Y) position to the panel as
+    // offset-parent-relative left/top. Also drops CSS anchors and
+    // CSS-driven transforms (e.g. the zoom-bar's translateX(-50%) centring)
+    // so pixel coordinates become authoritative.
+    function applyPosition(panel, clientX, clientY) {
+        const op = offsetParentRect(panel);
+        panel.style.left   = (clientX - op.left) + 'px';
+        panel.style.top    = (clientY - op.top)  + 'px';
         panel.style.right  = 'auto';
         panel.style.bottom = 'auto';
+        panel.classList.add('gp-positioned');
     }
 
     document.querySelectorAll('.gp-panel').forEach(panel => {
@@ -7837,7 +8121,7 @@ document.getElementById('sidebar-toggle').addEventListener('click', () => {
         if (!header) return;
 
         // ── Restore persisted state ────────────────────────────────
-        const state = loadState(key);
+        const state = loadState(STORAGE_PREFIX, key);
         if (state) {
             if (state.minimized) panel.classList.add('minimized');
             if (typeof state.x === 'number' && typeof state.y === 'number') {
@@ -7851,12 +8135,22 @@ document.getElementById('sidebar-toggle').addEventListener('click', () => {
             minBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 panel.classList.toggle('minimized');
-                const cur = loadState(key) || {};
+                const cur = loadState(STORAGE_PREFIX, key) || {};
                 cur.minimized = panel.classList.contains('minimized');
-                saveState(key, cur);
+                saveState(STORAGE_PREFIX, key, cur);
                 minBtn.title = cur.minimized ? 'Expand panel' : 'Minimize panel';
             });
         }
+
+        // ── Persist <details> section open/closed state ────────────
+        panel.querySelectorAll('details.gp-section[data-section-key]').forEach(d => {
+            const sk = d.dataset.sectionKey;
+            const sState = loadState(SECTION_PREFIX, sk);
+            if (sState && typeof sState.open === 'boolean') d.open = sState.open;
+            d.addEventListener('toggle', () => {
+                saveState(SECTION_PREFIX, sk, { open: d.open });
+            });
+        });
 
         // ── Drag via pointer events ────────────────────────────────
         let dragging = false;
@@ -7896,16 +8190,19 @@ document.getElementById('sidebar-toggle').addEventListener('click', () => {
             try { header.releasePointerCapture(pointerId); } catch {}
             pointerId = null;
             const rect = panel.getBoundingClientRect();
-            const cur = loadState(key) || {};
+            const cur = loadState(STORAGE_PREFIX, key) || {};
             cur.x = rect.left;
             cur.y = rect.top;
-            saveState(key, cur);
+            saveState(STORAGE_PREFIX, key, cur);
         }
         header.addEventListener('pointerup',     endDrag);
         header.addEventListener('pointercancel', endDrag);
 
         // Re-clamp on viewport resize so panels don't end up off-screen
         window.addEventListener('resize', () => {
+            // Only clamp panels that have been explicitly positioned — leave
+            // CSS-anchored panels (right:0, bottom:18px, etc.) on their anchors.
+            if (!panel.classList.contains('gp-positioned')) return;
             const rect = panel.getBoundingClientRect();
             const [cx, cy] = clampToViewport(panel, rect.left, rect.top);
             if (cx !== rect.left || cy !== rect.top) applyPosition(panel, cx, cy);
