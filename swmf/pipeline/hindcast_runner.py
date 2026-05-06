@@ -153,6 +153,29 @@ class PseudoApFit:
     def formula(self) -> str:
         return f"Ap* = {self.a:+.3f} + {self.b:+.3f}·Φ_PC[kV] + {self.c:+.3f}·HPI[GW]"
 
+    @classmethod
+    def from_json(cls, path: Path) -> "PseudoApFit":
+        """
+        Load coefficients from the JSON written by
+        `dsmc.pipeline.fit_pseudo_ap`. Required keys: a, b, c. Optional:
+        version (defaults to the file's basename so reports trace back
+        to the source fit).
+        """
+        payload = json.loads(path.read_text())
+        try:
+            a = float(payload["a"])
+            b = float(payload["b"])
+            c = float(payload["c"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(
+                f"{path} is not a valid pseudo-Ap fit JSON "
+                f"(need numeric a, b, c): {exc}"
+            ) from exc
+        return cls(
+            version=str(payload.get("version", path.stem)),
+            a=a, b=b, c=c,
+        )
+
 
 # ── Fixture loader ────────────────────────────────────────────────────────────
 
@@ -277,6 +300,9 @@ def _build_argparser() -> argparse.ArgumentParser:
                    help="Fixture root (one subdir per event).")
     p.add_argument("--out", type=Path, default=Path("data/hindcast"),
                    help="Where to write the per-event JSON output.")
+    p.add_argument("--regression-json", type=Path, default=None,
+                   help="Pseudo-Ap fit JSON (from dsmc.pipeline.fit_pseudo_ap). "
+                        "Overrides the v0-placeholder coefficients.")
     p.add_argument("--list", action="store_true", help="List events and exit.")
     p.add_argument("-v", "--verbose", action="store_true")
     return p
@@ -294,6 +320,11 @@ def main(argv: Optional[list[str]] = None) -> int:
             print(f"  {e.event_id:24s} {e.storm_class:5s}  {e.label}")
         return 0
 
+    fit = (PseudoApFit.from_json(args.regression_json)
+           if args.regression_json else None)
+    if fit is not None:
+        log.info("Using fitted regression %s: %s", fit.version, fit.formula)
+
     try:
         replay(
             args.event,
@@ -301,6 +332,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             out_dir=args.out,
             dry_run=args.dry_run,
             run_dir=args.run_dir,
+            fit=fit,
         )
     except (FileNotFoundError, NotImplementedError) as exc:
         log.error("%s", exc)

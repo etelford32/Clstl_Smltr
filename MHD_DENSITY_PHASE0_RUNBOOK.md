@@ -40,8 +40,25 @@ storm peak + start of recovery; the SSC is at ~2022-02-03T22:00Z).
 
 ## Day 1 — pull the inputs
 
-All three fetchers support `--dry-run` to show the URLs without hitting
-the network. Run dry first to confirm proxy/firewall, then for real.
+All three fetchers support two no-download modes: `--dry-run` prints
+the URLs they'd fetch (zero network), and `--smoke-test` does a HEAD
+probe of each URL and reports the HTTP status. Always run smoke-test
+first — it tells you in 3 seconds whether the proxy, DNS, and
+endpoints are alive before you commit to a full pull.
+
+```sh
+cd swmf  && python3 -m pipeline.fetch_omni_imf --start 2022-02-03 --end 2022-02-05 --smoke-test
+cd dsmc  && python3 -m pipeline.fetch_historical_indices --start 2022-02-03 --end 2022-02-05 --smoke-test
+cd dsmc  && python3 -m pipeline.fetch_grace_density --start 2022-02-03 --end 2022-02-05 \
+            --remote-template 'http://thermosphere.tudelft.nl/acceldata/GraceFO/v02/density/{Y}/grcfo_density_{Y}_{M}_{D}.txt' \
+            --smoke-test
+```
+
+Reading the output: 200/206 means good; 405 means the server doesn't
+allow HEAD but the real GET will work; 4xx/5xx means the URL or auth
+is broken; `ERR(URLError)` means DNS or TCP failed (firewall, network
+config). Exit code is non-zero if any URL failed, so you can wire these
+into a CI gate later.
 
 ### 1. L1 IMF from OMNI
 
@@ -182,12 +199,22 @@ HPI), and R² ≥ 0.7 on a single-event fit. If R² is much lower, either
 the BATS-R-US run didn't capture the storm or the Ap pairing is
 mistimed (3-hour bins vs 5-min MHD samples → check `_step_lookup`).
 
-Plug the fitted `(a, b, c)` back into
-`swmf/pipeline/hindcast_runner.PseudoApFit` (replace the
-`v0-placeholder` defaults) and re-run the runner to update
-`ap_pseudo` in the hindcast JSON. *(A future refinement: have the
-runner accept a `--regression-json` flag so the fit feeds back without
-a code edit.)*
+Feed the fit back into the runner with `--regression-json`; no code
+edit needed:
+
+```sh
+cd swmf
+python3 -m pipeline.hindcast_runner --event feb_2022_starlink \
+  --run-dir runs/feb_2022_starlink \
+  --regression-json ../data/hindcast/feb_2022_starlink_pseudo_ap_fit.json \
+  --out ../data/hindcast -v
+```
+
+The hindcast JSON now carries the fitted `(a, b, c)` in its
+`regression` field, and `ap_pseudo` is recomputed sample-by-sample
+with the new coefficients. The validator picks the regression up
+automatically on the next step — what version of `ap_pseudo` you fed
+in is recorded in the residual report.
 
 **Day 2 done when:** `data/hindcast/feb_2022_starlink_hindcast.json`
 contains real `phi_pc_kv`, `hpi_gw`, and post-fit `ap_pseudo`.
