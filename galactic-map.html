@@ -145,25 +145,45 @@ canvas { display:block; width:100% !important; height:100% !important; }
     background:rgba(0,0,0,0.72); border:1px solid rgba(160,120,255,0.25);
     border-radius:10px; padding:12px 16px; backdrop-filter:blur(8px);
     pointer-events:none; font-size:12px; line-height:1.6; min-width:220px;
+    max-width:calc(100vw - 28px);
 }
 #hud h3 { margin:0 0 6px; font-size:14px; color:#c090ff; }
 #hud .label { color:#777; font-size:10px; }
 #hud .val { color:#a0d8ff; font-weight:600; }
 #hud .sep { border-top:1px solid rgba(255,255,255,0.07); margin:6px 0; }
+/* Collapse toggle (mobile only) */
+#hud-collapse {
+    display:none; position:absolute; top:6px; right:8px;
+    background:rgba(160,100,255,0.15); border:1px solid rgba(160,120,255,0.35);
+    color:#c090ff; padding:2px 8px; border-radius:5px; cursor:pointer;
+    font-family:inherit; font-size:11px; pointer-events:auto;
+}
+body.hud-collapsed #hud .hud-extra { display:none; }
+body.hud-collapsed #hud { padding:6px 32px 6px 12px; min-width:0; }
+body.hud-collapsed #hud h3 { display:none; }
 
 /* ─── Zoom Toolbar (bottom-centre) ──────────────────────────── */
 #zoom-bar {
     position:absolute; bottom:18px; left:50%; transform:translateX(-50%);
     display:flex; gap:6px; z-index:100;
+    max-width:calc(100vw - 24px); overflow-x:auto; overflow-y:hidden;
+    -webkit-overflow-scrolling:touch;
+    /* Hide scrollbar but keep scrolling functional on mobile */
+    scrollbar-width:none;
 }
+#zoom-bar::-webkit-scrollbar { display:none; }
 #zoom-bar button {
     background:rgba(0,0,0,0.75); border:1px solid rgba(255,255,255,0.18);
     border-radius:6px; color:#ccc; padding:6px 14px; font-size:11px;
     cursor:pointer; font-family:inherit; transition:all .18s;
-    backdrop-filter:blur(8px);
+    backdrop-filter:blur(8px); flex-shrink:0; white-space:nowrap;
+    min-height:32px;
 }
 #zoom-bar button:hover { background:rgba(160,100,255,0.25); border-color:#a060ff; color:#fff; }
 #zoom-bar button.active { background:rgba(160,100,255,0.35); border-color:#c090ff; color:#fff; font-weight:600; }
+/* Show/hide spans within zoom buttons based on screen size */
+.zb-long { display:inline; }
+.zb-short { display:none; }
 
 /* ─── Intergalactic focus bar ────────────────────────────────── */
 #igm-focus-bar {
@@ -231,8 +251,88 @@ canvas { display:block; width:100% !important; height:100% !important; }
                       font-size:10.5px; padding:7px 9px 6px; }
     #sun-time-panel h4 { font-size:11px; }
 }
+
+/* ─── Mini sun-time panel (mobile only) ─────────────────────── */
+#sun-time-mini {
+    display:none;
+    position:absolute; left:50%; transform:translateX(-50%);
+    bottom:60px; z-index:101;
+    background:rgba(8,4,16,0.92); border:1px solid rgba(255,200,80,0.35);
+    border-radius:8px; padding:6px 10px;
+    color:#ddd; backdrop-filter:blur(6px);
+    width:calc(100vw - 28px); max-width:420px;
+    font-size:11px; line-height:1.3;
+}
+#sun-time-mini .stm-row { display:flex; align-items:center; gap:7px; padding:2px 0; }
+#sun-time-mini .stm-btn {
+    background:rgba(255,200,80,0.15); border:1px solid rgba(255,200,80,0.4);
+    color:#ffcc66; padding:6px 12px; border-radius:5px; cursor:pointer;
+    font-family:inherit; font-size:11px; font-weight:600;
+    flex-shrink:0; min-height:30px;
+}
+#sun-time-mini .stm-btn.active {
+    background:rgba(255,200,80,0.45); color:#fff; border-color:#ffd58a;
+}
+#sun-time-mini input[type=range] { flex:1; height:6px; accent-color:#ffaa44;
+                                    cursor:pointer; min-height:30px; }
+#sun-time-mini .stm-val {
+    color:#ffcc66; font-weight:600; font-size:10px; flex-shrink:0;
+    font-variant-numeric:tabular-nums; min-width:64px; text-align:right;
+}
+
+/* ─── Tablet (≤768 px) ──────────────────────────────────────── */
+@media (max-width:768px) {
+    #hud { font-size:11px; padding:8px 12px; min-width:160px; }
+    #hud h3 { font-size:13px; }
+    #hud-collapse { display:block; }
+    #zoom-bar button { padding:8px 12px; font-size:11px; min-height:38px; }
+    .zb-long { display:none; }
+    .zb-short { display:inline; }
+    #coord-display { font-size:10px; padding:5px 9px; }
+}
+
+/* ─── Phone portrait (≤600 px) ─────────────────────────────── */
 @media (max-width:600px) {
-    #sun-time-panel { display:none; }   /* phone — too cramped, slider-only HUD instead */
+    /* Coord display redundant with HUD on small screens */
+    #coord-display { display:none; }
+    /* Hide the full Sun-time panel; replace with the mini bar */
+    #sun-time-panel { display:none; }
+    #sun-time-mini  { display:block; }
+    /* HUD starts collapsed on phones — Click ⤢ to expand */
+    body.is-mobile #hud { padding:5px 30px 5px 11px; min-width:0;
+                          font-size:11px; max-width:calc(100vw - 70px); }
+    body.is-mobile.hud-expanded #hud { padding:9px 32px 9px 13px; }
+    #hud-collapse { top:4px; right:6px; padding:2px 7px; font-size:10px; }
+    /* Sidebar: full-width drawer slides in from the right */
+    #sidebar { position:absolute; right:0; top:0; bottom:0; width:88vw;
+               max-width:340px; min-width:0; box-shadow:-6px 0 20px rgba(0,0,0,0.45);
+               margin-right:0; transition:transform .3s ease, opacity .3s ease;
+               z-index:500; }
+    #sidebar.collapsed { transform:translateX(100%); opacity:0;
+                         pointer-events:none; margin-right:0; }
+    #sidebar-toggle { padding:8px 12px; font-size:13px; min-height:40px; }
+    /* Bigger zoom-bar buttons; drop the Solar Sys label */
+    #zoom-bar { gap:4px; bottom:14px; }
+    #zoom-bar button { padding:8px 10px; font-size:11px; min-height:38px; }
+    #zoom-solar-system span:not([class]) { display:none; }   /* keep just the ☀️ */
+}
+
+/* ─── Small phone (≤380 px) ────────────────────────────────── */
+@media (max-width:380px) {
+    #hud { font-size:10px; }
+    #hud h3 { font-size:12px; }
+    #zoom-bar button { padding:7px 8px; font-size:10px; min-height:34px; }
+    #sun-time-mini { font-size:10px; padding:5px 8px; bottom:54px; }
+    #sun-time-mini .stm-btn { padding:5px 9px; font-size:10px; min-height:28px; }
+}
+
+/* ─── Landscape phone (short height) ────────────────────────── */
+@media (max-height:500px) and (orientation:landscape) {
+    #hud { padding:6px 10px; font-size:10px; }
+    #hud h3 { font-size:11px; }
+    #zoom-bar { bottom:10px; gap:4px; }
+    #zoom-bar button { padding:5px 9px; font-size:10px; min-height:28px; }
+    #sun-time-mini { display:none; }   /* not enough vertical room */
 }
 
 /* ─── Sidebar ─────────────────────────────────────────────────── */
@@ -342,10 +442,11 @@ canvas { display:block; width:100% !important; height:100% !important; }
     <div id="canvas-wrap" data-preview-stage="1">
         <!-- HUD top-left -->
         <div id="hud">
+            <button id="hud-collapse" type="button" title="Toggle full HUD">⤢</button>
             <h3>⬡ Galactic Map</h3>
             <div><span class="label">Selected: </span><span class="val" id="hud-name">—</span></div>
             <div><span class="label">Dist from Sun: </span><span class="val" id="hud-dist">—</span></div>
-            <div class="sep"></div>
+            <div class="hud-extra"><div class="sep"></div>
             <div><span class="label">Galactic l: </span><span class="val" id="hud-l">—</span></div>
             <div><span class="label">Galactic b: </span><span class="val" id="hud-b">—</span></div>
             <div class="sep"></div>
@@ -359,7 +460,7 @@ canvas { display:block; width:100% !important; height:100% !important; }
             </div>
             <div title="Sun's orbital phase around Sgr A* — 0% / 100% places the Sun at the +x side of the disk (current epoch).">
                 <span class="label">Orbital phase: </span><span class="val" id="hud-galactic-phase">—</span>
-            </div>
+            </div></div>
         </div>
 
         <!-- Sun-orbit time controls -->
@@ -389,6 +490,23 @@ canvas { display:block; width:100% !important; height:100% !important; }
             </div>
         </div>
 
+        <!-- Mobile-only mini Sun-time controls (replaces the full panel <600 px) -->
+        <div id="sun-time-mini">
+            <div class="stm-row">
+                <button id="stm-live" class="stm-btn active" type="button">▶ Live</button>
+                <input id="stm-scrub" type="range" min="-450" max="450" step="0.1" value="0">
+                <span class="stm-val" id="stm-scrub-val">0 Myr</span>
+            </div>
+            <div class="stm-row">
+                <span class="stm-val" style="text-align:left; min-width:auto; color:#aaa">v☉</span>
+                <span class="stm-val" id="stm-vel">220 km/s</span>
+                <span class="stm-val" style="text-align:left; min-width:auto; color:#aaa">Z</span>
+                <span class="stm-val" id="stm-z">+65 ly</span>
+                <span class="stm-val" style="text-align:left; min-width:auto; color:#aaa">×</span>
+                <span class="stm-val" id="stm-speed">3.75 Myr/s</span>
+            </div>
+        </div>
+
         <!-- Sidebar toggle -->
         <button id="sidebar-toggle">☰ Panel</button>
         <a href="space-weather.html" class="cv-btn" id="btn-sw" title="Live Space Weather Data" style="top:14px;right:120px;">⚡ Weather</a>
@@ -404,15 +522,19 @@ canvas { display:block; width:100% !important; height:100% !important; }
             <span style="display:inline-block;width:1px;height:18px;
                   background:rgba(255,255,255,.12);margin:0 4px;vertical-align:middle;
                   align-self:center;flex-shrink:0;"></span>
-            <button id="zoom-local">Local (&lt;50 ly)</button>
-            <button id="zoom-hood">Neighborhood (&lt;1 kly)</button>
-            <button id="zoom-arm">Local Arm (&lt;10 kly)</button>
-            <button id="zoom-galaxy" class="active">Galaxy</button>
+            <button id="zoom-local"   title="Solar-neighborhood zoom (<50 ly)"
+                ><span class="zb-long">Local (&lt;50 ly)</span><span class="zb-short">Local</span></button>
+            <button id="zoom-hood"    title="Stellar-neighborhood zoom (<1 kly)"
+                ><span class="zb-long">Neighborhood (&lt;1 kly)</span><span class="zb-short">Hood</span></button>
+            <button id="zoom-arm"     title="Local Arm zoom (<10 kly)"
+                ><span class="zb-long">Local Arm (&lt;10 kly)</span><span class="zb-short">Arm</span></button>
+            <button id="zoom-galaxy" class="active" title="Full galaxy view"
+                ><span class="zb-long">Galaxy</span><span class="zb-short">Galaxy</span></button>
             <button id="zoom-edge_on" title="Cinematic edge-on disk profile — dust lanes + peanut bulge"
-                    style="border-color:rgba(255,160,80,.45); color:#ffcc99;">
-                ✦ Edge-on
-            </button>
-            <button id="zoom-universe" title="Log-scale — distances compressed beyond 60 kly">Universe ⚠ log</button>
+                    style="border-color:rgba(255,160,80,.45); color:#ffcc99;"
+                ><span class="zb-long">✦ Edge-on</span><span class="zb-short">✦</span></button>
+            <button id="zoom-universe" title="Log-scale — distances compressed beyond 60 kly"
+                ><span class="zb-long">Universe ⚠ log</span><span class="zb-short">Universe</span></button>
         </div>
 
         <!-- Intergalactic focus bar — shown when orbiting a galaxy/quasar -->
@@ -2648,11 +2770,20 @@ const camera = new THREE.PerspectiveCamera(50, W() / H(), 0.1, 10_000_000);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
-controls.dampingFactor = 0.06;
+controls.dampingFactor = isMobile ? 0.10 : 0.06;   // a touch more inertia on touch
 controls.screenSpacePanning = true;
 controls.minDistance = 0.5;
 controls.maxDistance = 1_200_000;   // raised from 900k to give breathing room for cosmic-dawn shell at ~220k
-controls.zoomSpeed = 1.4;
+controls.zoomSpeed   = isMobile ? 2.0 : 1.4;       // pinch-to-zoom feels sluggish below ~1.8
+controls.rotateSpeed = isMobile ? 0.85 : 1.0;      // a tad gentler so the disk doesn't whip around
+controls.panSpeed    = isMobile ? 0.85 : 1.0;
+// Explicit touch mapping — 1-finger rotates, 2-finger pinches (zoom) + pans
+controls.touches = {
+    ONE: THREE.TOUCH.ROTATE,
+    TWO: THREE.TOUCH.DOLLY_PAN,
+};
+// Flag the body so CSS can target touch-mode UI tweaks
+if (isMobile) document.body.classList.add('is-mobile');
 
 // ── Sun reference point ─────────────────────────────────────────────────
 const SUN3 = SUN_GC.clone(); // convenience alias
@@ -7504,50 +7635,86 @@ document.getElementById('tog-sun-orbit').addEventListener('change', e => {
 });
 
 // ── Time-control panel wiring ──────────────────────────────────────────
+//
+// Two parallel UIs share the same simulation state machine:
+//   #sun-time-panel — full desktop / tablet panel (Live/Pause/Today + speed)
+//   #sun-time-mini  — compact mobile bar (Live + scrub + readouts)
+// Both interact via the same `liveMode`, `simGalacticYr`, `simSpeedMyrPerSec`
+// globals; updateSunOrbit() pulls live state values into both readouts each
+// frame.
 (function wireSunTimeControls() {
     const liveBtn  = document.getElementById('stp-live');
     const pauseBtn = document.getElementById('stp-pause');
     const resetBtn = document.getElementById('stp-reset');
     const scrub    = document.getElementById('stp-scrub');
     const speed    = document.getElementById('stp-speed');
+    const mLive    = document.getElementById('stm-live');
+    const mScrub   = document.getElementById('stm-scrub');
     if (!liveBtn || !scrub || !speed) return;
 
     function setLive(on) {
         liveMode = on;
         liveBtn.classList.toggle('active',  on);
         pauseBtn.classList.toggle('active', !on);
+        if (mLive) mLive.classList.toggle('active', on);
     }
     function setSimSpeedFromSlider(v) {
-        // Slider in log-space: -2..+2 → 0.01..100 Myr/s
         const x = parseFloat(v);
         simSpeedMyrPerSec = Math.pow(10, x);
     }
 
     liveBtn.addEventListener('click', () => {
-        // ▶ Live snaps the time scrub back to today (t=0) and resumes
         simGalacticYr = 0;
         scrub.value = '0';
+        if (mScrub) mScrub.value = '0';
         setLive(true);
     });
-    pauseBtn.addEventListener('click', () => {
-        // ⏸ pause stops the clock at the current epoch (keeps simGalacticYr)
-        setLive(false);
-    });
+    pauseBtn.addEventListener('click', () => setLive(false));
     resetBtn.addEventListener('click', () => {
         simGalacticYr = 0;
         scrub.value = '0';
+        if (mScrub) mScrub.value = '0';
         setLive(false);
     });
     scrub.addEventListener('input', (e) => {
         simGalacticYr = parseFloat(e.target.value);
-        // Any user scrub disengages live mode — they're driving now.
+        if (mScrub) mScrub.value = e.target.value;
         setLive(false);
     });
-    speed.addEventListener('input', (e) => {
-        setSimSpeedFromSlider(e.target.value);
-    });
-    // Initialise speed from default slider value
+    speed.addEventListener('input', (e) => setSimSpeedFromSlider(e.target.value));
     setSimSpeedFromSlider(speed.value);
+
+    // Mobile mini-bar: only Live + scrub. (Speed is fixed at the desktop
+    // slider's value; mobile users prioritise simplicity over breadth.)
+    if (mLive && mScrub) {
+        mLive.addEventListener('click', () => {
+            simGalacticYr = 0;
+            mScrub.value = '0'; scrub.value = '0';
+            setLive(true);
+        });
+        mScrub.addEventListener('input', (e) => {
+            simGalacticYr = parseFloat(e.target.value);
+            scrub.value = e.target.value;
+            setLive(false);
+        });
+    }
+})();
+
+// ── HUD collapse toggle (mobile) ───────────────────────────────────────
+(function wireHudCollapse() {
+    const btn = document.getElementById('hud-collapse');
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+        document.body.classList.toggle('hud-collapsed');
+        const collapsed = document.body.classList.contains('hud-collapsed');
+        btn.textContent = collapsed ? '⤡' : '⤢';
+        document.body.classList.toggle('hud-expanded', !collapsed);
+    });
+    // Default-collapsed on phones to keep the canvas open
+    if (window.innerWidth <= 600) {
+        document.body.classList.add('hud-collapsed');
+        btn.textContent = '⤡';
+    }
 })();
 document.getElementById('tog-showpieces').addEventListener('change', e => {
     const v = e.target.checked;
@@ -7781,13 +7948,35 @@ function updateLabelScales() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-//  RESIZE
+//  RESIZE / ORIENTATION CHANGE
+//  Updates the camera + renderer for the new viewport AND re-evaluates the
+//  small-screen body classes that drive the responsive media-query bundle
+//  (so going landscape→portrait without reloading still re-fits the UI).
 // ══════════════════════════════════════════════════════════════════════════
-window.addEventListener('resize', () => {
+function reapplyResponsiveClasses() {
+    const w = window.innerWidth;
+    document.body.classList.toggle('is-mobile', w <= 600);
+    // Auto-collapse the HUD when crossing into phone width (don't auto-expand
+    // — preserves user's manual toggle if they enlarge the window).
+    if (w <= 600 && !document.body.classList.contains('hud-collapsed')
+        && !document.body.classList.contains('hud-expanded')) {
+        document.body.classList.add('hud-collapsed');
+        const btn = document.getElementById('hud-collapse');
+        if (btn) btn.textContent = '⤡';
+    }
+}
+function handleResize() {
     camera.aspect = W() / H();
     camera.updateProjectionMatrix();
     renderer.setSize(W(), H());
-});
+    reapplyResponsiveClasses();
+}
+window.addEventListener('resize', handleResize, { passive: true });
+window.addEventListener('orientationchange', () => {
+    // Slight delay so the browser settles the new viewport dimensions
+    setTimeout(handleResize, 120);
+}, { passive: true });
+reapplyResponsiveClasses();
 
 // ══════════════════════════════════════════════════════════════════════════
 //  ANIMATION LOOP
@@ -8071,18 +8260,35 @@ function updateSunOrbit(dt, camDistFromOrigin) {
     if (elGP) elGP.textContent = phasePct.toFixed(1) + '%  (θ = ' + phaseDeg.toFixed(0) + '°)';
 
     // ── Time-control panel readouts (live velocity / Z / speed) ───────
+    const velStr = state.v_total.toFixed(1) + ' km/s';
+    const zStr   = (state.z >= 0 ? '+' : '') + state.z.toFixed(0) + ' ly';
+    const tStr   = (simGalacticYr >= 0 ? '+' : '') + simGalacticYr.toFixed(1) + ' Myr';
+    const spStr  = simSpeedMyrPerSec.toFixed(2) + ' Myr/s';
+    // Desktop / tablet panel
     const elV  = document.getElementById('stp-vel');
     const elZ  = document.getElementById('stp-z');
     const elSV = document.getElementById('stp-scrub-val');
     const elSP = document.getElementById('stp-speed-val');
     const elScrub = document.getElementById('stp-scrub');
-    if (elV)  elV.textContent  = state.v_total.toFixed(1) + ' km/s';
-    if (elZ)  elZ.textContent  = (state.z >= 0 ? '+' : '') + state.z.toFixed(0) + ' ly';
-    if (elSV) elSV.textContent = (simGalacticYr >= 0 ? '+' : '') + simGalacticYr.toFixed(1) + ' Myr';
-    if (elSP) elSP.textContent = simSpeedMyrPerSec.toFixed(2) + ' Myr/s';
-    // Keep slider in sync while in live mode (don't fight a user drag)
+    if (elV)  elV.textContent  = velStr;
+    if (elZ)  elZ.textContent  = zStr;
+    if (elSV) elSV.textContent = tStr;
+    if (elSP) elSP.textContent = spStr;
     if (elScrub && liveMode && document.activeElement !== elScrub) {
         elScrub.value = String(simGalacticYr);
+    }
+    // Mobile mini-bar mirrors the same readouts
+    const mV  = document.getElementById('stm-vel');
+    const mZ  = document.getElementById('stm-z');
+    const mSV = document.getElementById('stm-scrub-val');
+    const mSp = document.getElementById('stm-speed');
+    const mScrub = document.getElementById('stm-scrub');
+    if (mV)  mV.textContent  = velStr;
+    if (mZ)  mZ.textContent  = zStr;
+    if (mSV) mSV.textContent = tStr;
+    if (mSp) mSp.textContent = spStr;
+    if (mScrub && liveMode && document.activeElement !== mScrub) {
+        mScrub.value = String(simGalacticYr);
     }
 }
 
