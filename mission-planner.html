@@ -155,6 +155,53 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
     box-shadow:0 4px 12px rgba(170,51,34,.45);
 }
 
+/* Pad weather badge ─────────────────────────────────── */
+.mp-pad-weather {
+    margin-top:6px;
+    display:flex; align-items:center; gap:6px;
+    font-family:monospace; font-size:.7rem;
+    padding:5px 8px; border-radius:6px;
+    border:1px solid rgba(255,255,255,.08);
+    background:rgba(0,0,0,.25); color:#aab;
+}
+.mp-pad-weather .mp-wx-dot {
+    width:8px; height:8px; border-radius:50%;
+    background:#778899; box-shadow:0 0 6px rgba(255,255,255,.18);
+    flex:0 0 auto;
+}
+.mp-pad-weather .mp-wx-label { font-weight:700; }
+.mp-pad-weather .mp-wx-msg   { color:#88a; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mp-pad-weather.mp-wx-go      { border-color:rgba(102,255,119,.45); color:#9efc9e; }
+.mp-pad-weather.mp-wx-go      .mp-wx-dot { background:#66ff77; box-shadow:0 0 8px rgba(102,255,119,.7); }
+.mp-pad-weather.mp-wx-caution { border-color:rgba(255,204,68,.45);  color:#ffd994; }
+.mp-pad-weather.mp-wx-caution .mp-wx-dot { background:#ffcc44; box-shadow:0 0 8px rgba(255,204,68,.75); }
+.mp-pad-weather.mp-wx-scrub   { border-color:rgba(255,85,68,.55);   color:#ff9e91; }
+.mp-pad-weather.mp-wx-scrub   .mp-wx-dot { background:#ff5544; box-shadow:0 0 10px rgba(255,85,68,.85); animation: mp-wx-pulse 1.4s ease-in-out infinite; }
+.mp-pad-weather.mp-wx-unknown { /* default greys above */ }
+@keyframes mp-wx-pulse {
+    0%,100% { transform:scale(1);   box-shadow:0 0 8px rgba(255,85,68,.6);  }
+    50%     { transform:scale(1.25); box-shadow:0 0 14px rgba(255,85,68,1); }
+}
+/* Launch button gates against weather. Scrub fully disables; caution
+   keeps it active but tints amber so the user knows they're going
+   despite a marginal forecast. */
+.mp-launch-btn.mp-launch-scrub {
+    background:linear-gradient(180deg, #553333, #331a1a);
+    box-shadow:none;
+    cursor:not-allowed;
+    opacity:0.6;
+}
+.mp-launch-btn:disabled,
+.mp-launch-btn:disabled:hover {
+    transform:none;
+    box-shadow:none;
+    cursor:not-allowed;
+}
+.mp-launch-btn.mp-launch-caution {
+    background:linear-gradient(180deg, #b88822, #886611);
+    box-shadow:0 4px 12px rgba(255,180,80,.32);
+}
+
 /* Time controls ────────────────────────────────────── */
 .mp-time-display {
     font-family:monospace; font-size:.84rem; color:#cfd0e0;
@@ -327,6 +374,11 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
             <button id="mp-fly-pad" class="mp-secondary-btn" type="button"
                     style="margin-top:0; flex:0 0 auto; padding:8px 10px;"
                     title="Fly camera to selected pad">📷</button>
+        </div>
+        <div id="mp-pad-weather" class="mp-pad-weather mp-wx-unknown" title="Pad weather feed">
+            <span class="mp-wx-dot"></span>
+            <span class="mp-wx-label">Weather: no data</span>
+            <span class="mp-wx-msg" id="mp-pad-weather-msg"></span>
         </div>
 
         <div class="mp-label">Destination</div>
@@ -811,6 +863,30 @@ const planner = initMissionPlanner({
             setFocusUI(ev.target);
             const name = FOCUS_DISPLAY[ev.target] || ev.target;
             pushLog(`📷 Focused ${name}`, 'window');
+        } else if (ev.type === 'pad-weather') {
+            // External feed pushed new weather for a pad. If it's the one
+            // currently selected, refresh the badge + Launch gate. Always
+            // log a one-line status so the mission log doubles as a
+            // weather diary.
+            if (typeof updatePadWeatherUI === 'function'
+                && ev.body === currentOriginBody && ev.padId === siteSel?.value) {
+                updatePadWeatherUI();
+            }
+            const tag = ev.status === 'scrub'   ? '🛑'
+                      : ev.status === 'caution' ? '⚠'
+                      : ev.status === 'go'      ? '✅'
+                      :                           '⏷';
+            const padName = LAUNCH_SITES.find(s => s.id === ev.padId)?.name
+                         || MOON_BASES.find(b => b.id === ev.padId)?.name
+                         || MARS_BIOMES.find(b => b.id === ev.padId)?.name
+                         || ev.padId;
+            const msg = ev.message ? ` · ${ev.message}` : '';
+            pushLog(`${tag} ${padName}: ${ev.status.toUpperCase()}${msg}`, 'window');
+        } else if (ev.type === 'launch-scrubbed') {
+            // launch() refused because the pad is on weather hold. Surface
+            // a clear "wait for window" message instead of silently doing
+            // nothing — the user clicked Launch, they deserve feedback.
+            pushLog(`🛑 Launch SCRUBBED · ${ev.site.name} on weather hold${ev.weather.message ? ' · ' + ev.weather.message : ''}`, 'transfer');
         }
         refreshHUD();
     },
@@ -990,6 +1066,56 @@ function refreshDvBudget() {
 }
 
 missionVehicleSel.addEventListener('change', refreshDvBudget);
+
+// ── Pad weather UI ──────────────────────────────────────────────────
+// Reflects the current pad's weather status onto the badge under the
+// Origin Pad selector and gates the Launch button. Sources of update:
+//   • origin-body / pad selection changes      (user picked a different pad)
+//   • 'pad-weather' onEvent from the planner   (external feed pushed new data)
+//   • boot                                     (initial render to "no data")
+const WX_LABEL = {
+    go:      'Weather: GO',
+    caution: 'Weather: caution',
+    scrub:   'Weather: SCRUB · stand down',
+    unknown: 'Weather: no data',
+};
+const padWxBadge = document.getElementById('mp-pad-weather');
+const padWxLabel = padWxBadge.querySelector('.mp-wx-label');
+const padWxMsg   = document.getElementById('mp-pad-weather-msg');
+function updatePadWeatherUI() {
+    const padId = siteSel.value;
+    if (!padId) return;
+    const wx = planner.getPadWeather(currentOriginBody, padId);
+    padWxBadge.classList.remove('mp-wx-go','mp-wx-caution','mp-wx-scrub','mp-wx-unknown');
+    padWxBadge.classList.add(`mp-wx-${wx.status}`);
+    padWxLabel.textContent = WX_LABEL[wx.status] || WX_LABEL.unknown;
+    padWxMsg.textContent   = wx.message || '';
+    // Gate the Launch button. Scrub fully disables; caution annotates;
+    // go / unknown delegate text back to the Δv-margin renderer so the
+    // "tight margin" / "Δv shortfall" wording isn't lost.
+    launchBtn.classList.remove('mp-launch-scrub','mp-launch-caution');
+    if (wx.status === 'scrub') {
+        launchBtn.classList.add('mp-launch-scrub');
+        launchBtn.disabled    = true;
+        launchBtn.textContent = '🛑 SCRUBBED — wait for window';
+        launchBtn.title       = wx.message || 'Pad weather is outside flight rules';
+    } else if (wx.status === 'caution') {
+        launchBtn.classList.add('mp-launch-caution');
+        launchBtn.disabled    = false;
+        launchBtn.textContent = '⚠ Launch (weather caution)';
+        launchBtn.title       = wx.message || 'Marginal conditions — proceed with care';
+    } else {
+        launchBtn.disabled    = false;
+        launchBtn.title       = '';
+        refreshDvBudget();   // restore Δv-margin text
+    }
+}
+siteSel.addEventListener('change', updatePadWeatherUI);
+// Also re-run on origin-body switch since refreshOriginUI() resets the
+// dropdown contents (handler is wired further up via originBtns).
+document.querySelectorAll('[data-body]').forEach(btn => {
+    btn.addEventListener('click', () => setTimeout(updatePadWeatherUI, 0));
+});
 
 // Parking inclination slider
 const parkIncRange = document.getElementById('mp-park-inc');
@@ -1653,12 +1779,32 @@ document.getElementById('mp-launch-cmp').addEventListener('click', () => {
 refreshDvBudget();
 // Sync porkchop button label / disabled state to the initial destination.
 updateTargetUI();
+// Initial weather badge render. Status is 'unknown' for every pad until
+// the upcoming weather feed pushes real data via setPadWeather().
+updatePadWeatherUI();
+
+// ── Pad-weather demo seed ──────────────────────────────────────────
+// Nothing populates the pad weather feed yet, but the visual + gating
+// scaffold is wired and ready. We seed a handful of plausible defaults
+// here so the colored ring / badge / Launch gate are exercise-able
+// before the real feed lands. Once it does, just delete this block —
+// the same setPadWeather() entry point is what the feed will use.
+setTimeout(() => {
+    planner.setPadWeather('earth', 'ksc',         'go',      'Clear · 12 kt easterly · ceiling 30 kft');
+    planner.setPadWeather('earth', 'starbase',    'caution', 'Marginal upper-level winds');
+    planner.setPadWeather('earth', 'vandy',       'go',      'Marine layer 200 ft · winds calm');
+    planner.setPadWeather('earth', 'kourou',      'scrub',   'Tropical squall line within 20 nmi');
+    planner.setPadWeather('earth', 'baikonur',    'caution', 'Icing layer 4–8 km · monitor');
+    planner.setPadWeather('earth', 'tanegashima', 'go',      'High pressure · light NE breeze');
+    planner.setPadWeather('moon',  'shackleton',  'go',      'Solar incidence nominal');
+    planner.setPadWeather('mars',  'jezero',      'caution', 'Regional dust opacity τ ≈ 0.6');
+}, 600);
 
 // ── Auto-launch a starter LEO so the page never looks empty ─────────
 setTimeout(() => {
     payloadIn.value = 'Demo-LEO-1';
     planner.launch({ siteId: 'ksc', targetId: 'leo', payloadName: 'Demo-LEO-1' });
-}, 800);
+}, 1200);
 </script>
 
 </body>
