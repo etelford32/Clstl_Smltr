@@ -102,6 +102,7 @@ const API_ROUTES = {
     '/api/weather/forecast':       'api/weather/forecast.js',
     '/api/lightning/strikes':      'api/lightning/strikes.js',
     '/api/nws/convective':         'api/nws/convective.js',
+    '/api/mars/weather':           'api/mars/weather.js',
     '/api/storms':                 'api/storms.js',
 
     // ── Auth / billing / invites / class / contact ────────────────────────

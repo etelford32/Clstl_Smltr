@@ -191,6 +191,35 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
     0%   { transform:rotate(0deg);   }
     100% { transform:rotate(360deg); }
 }
+
+/* Forecast lookahead — small two-line hint that sits between the pad
+   weather badge and the Launch button. Renders only when the next 24 h
+   contains a status change worth surfacing (otherwise stays hidden). */
+.mp-pad-lookahead {
+    margin-top:4px;
+    padding:4px 8px;
+    border-radius:5px;
+    font-family:monospace; font-size:.66rem;
+    line-height:1.4;
+    border-left:3px solid transparent;
+}
+.mp-pad-lookahead[hidden]              { display:none; }
+.mp-pad-lookahead.mp-look-up           {        /* status improving (→ go) */
+    background:rgba(102,255,119,.08);
+    border-left-color:#66ff77;
+    color:#aef0a0;
+}
+.mp-pad-lookahead.mp-look-down         {        /* status worsening (go → scrub/caution) */
+    background:rgba(255,170,68,.08);
+    border-left-color:#ffaa44;
+    color:#ffd994;
+}
+.mp-pad-lookahead .mp-look-when {
+    font-weight:700; color:inherit;
+}
+.mp-pad-lookahead .mp-look-detail {
+    color:#88a; font-weight:400; opacity:.85;
+}
 .mp-pad-weather.mp-wx-go      { border-color:rgba(102,255,119,.45); color:#9efc9e; }
 .mp-pad-weather.mp-wx-go      .mp-wx-dot { background:#66ff77; box-shadow:0 0 8px rgba(102,255,119,.7); }
 .mp-pad-weather.mp-wx-caution { border-color:rgba(255,204,68,.45);  color:#ffd994; }
@@ -475,6 +504,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
             <button id="mp-pad-weather-refresh" class="mp-wx-refresh" type="button"
                     title="Refresh weather feed for all pads">↻</button>
         </div>
+        <div id="mp-pad-lookahead" class="mp-pad-lookahead" hidden></div>
 
         <div class="mp-label">Destination</div>
         <select id="mp-target" class="mp-select"></select>
@@ -1191,9 +1221,37 @@ const WX_LABEL = {
     scrub:   'Weather: SCRUB · stand down',
     unknown: 'Weather: no data',
 };
-const padWxBadge = document.getElementById('mp-pad-weather');
-const padWxLabel = padWxBadge.querySelector('.mp-wx-label');
-const padWxMsg   = document.getElementById('mp-pad-weather-msg');
+const padWxBadge     = document.getElementById('mp-pad-weather');
+const padWxLabel     = padWxBadge.querySelector('.mp-wx-label');
+const padWxMsg       = document.getElementById('mp-pad-weather-msg');
+const padLookaheadEl = document.getElementById('mp-pad-lookahead');
+// Severity ranking for the lookahead direction logic. Higher number = worse.
+// "go → caution" is mp-look-down (worsening); "scrub → go" is mp-look-up.
+const WX_SEVERITY = { go: 0, unknown: 0, caution: 1, scrub: 2 };
+function fmtHoursUntil(h) {
+    if (!Number.isFinite(h)) return '';
+    if (h < 1)  return 'within the hour';
+    if (h < 2)  return 'in 1 hour';
+    return `in ${h} hours`;
+}
+function renderLookahead(currentStatus, lookahead) {
+    if (!lookahead) { padLookaheadEl.hidden = true; return; }
+    const cur  = WX_SEVERITY[currentStatus] ?? 0;
+    const next = WX_SEVERITY[lookahead.next_status] ?? 0;
+    const direction = next < cur ? 'up' : 'down';   // up = improving
+    const verb = lookahead.next_status === 'go'      ? 'GO window opens'
+               : lookahead.next_status === 'scrub'   ? 'SCRUB expected'
+               : lookahead.next_status === 'caution' ? 'caution onset'
+               :                                       'change';
+    const when   = fmtHoursUntil(lookahead.hours_until);
+    const detail = lookahead.next_message || '';
+    padLookaheadEl.classList.remove('mp-look-up', 'mp-look-down');
+    padLookaheadEl.classList.add(direction === 'up' ? 'mp-look-up' : 'mp-look-down');
+    padLookaheadEl.innerHTML =
+        `⏰ <span class="mp-look-when">${verb} ${when}</span>` +
+        (detail ? ` <span class="mp-look-detail">· ${detail}</span>` : '');
+    padLookaheadEl.hidden = false;
+}
 function updatePadWeatherUI() {
     const padId = siteSel.value;
     if (!padId) return;
@@ -1202,6 +1260,7 @@ function updatePadWeatherUI() {
     padWxBadge.classList.add(`mp-wx-${wx.status}`);
     padWxLabel.textContent = WX_LABEL[wx.status] || WX_LABEL.unknown;
     padWxMsg.textContent   = wx.message || '';
+    renderLookahead(wx.status, wx.lookahead);
     // Gate the Launch button. Scrub fully disables; caution annotates;
     // go / unknown delegate text back to the Δv-margin renderer so the
     // "tight margin" / "Δv shortfall" wording isn't lost.
@@ -1209,7 +1268,13 @@ function updatePadWeatherUI() {
     if (wx.status === 'scrub') {
         launchBtn.classList.add('mp-launch-scrub');
         launchBtn.disabled    = true;
-        launchBtn.textContent = '🛑 SCRUBBED — wait for window';
+        // If the forecast says GO is imminent, wire the wait time into
+        // the button label so the user knows whether to time-warp or
+        // pick a different pad.
+        const wait = wx.lookahead && wx.lookahead.next_status === 'go'
+                   ? ` · GO ${fmtHoursUntil(wx.lookahead.hours_until)}`
+                   : '';
+        launchBtn.textContent = `🛑 SCRUBBED${wait}`;
         launchBtn.title       = wx.message || 'Pad weather is outside flight rules';
     } else if (wx.status === 'caution') {
         launchBtn.classList.add('mp-launch-caution');
