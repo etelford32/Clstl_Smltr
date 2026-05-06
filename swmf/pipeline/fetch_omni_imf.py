@@ -50,8 +50,9 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable, Iterator, Optional
-from urllib.request import urlopen
-from urllib.error import URLError
+import time
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
 
 log = logging.getLogger("swmf.fetch_omni_imf")
 
@@ -93,6 +94,36 @@ def _urls_for_window(start: datetime, end: datetime) -> list[str]:
             cursor = cursor.replace(month=cursor.month + 1)
     return [f"{OMNI_BASE}/omni_min{y:04d}{m:02d}.asc"
             for (y, m) in sorted(seen)]
+
+
+def _probe_urls(urls: list[str], *, timeout_s: float = 8.0) -> int:
+    """
+    HEAD each URL with a short timeout, print one line per URL with the
+    HTTP status code and round-trip time, return the count of URLs that
+    look broken (network error, 4xx other than 405, 5xx).
+
+    405 is *not* a failure — a few static-file servers reject HEAD but
+    are otherwise reachable; the real fetch (a GET) will work fine.
+    """
+    failures = 0
+    for url in urls:
+        t0 = time.monotonic()
+        status: str
+        try:
+            with urlopen(Request(url, method="HEAD"), timeout=timeout_s) as r:
+                status = str(r.status)
+                if r.status >= 400 and r.status != 405:
+                    failures += 1
+        except HTTPError as exc:
+            status = str(exc.code)
+            if exc.code >= 400 and exc.code != 405:
+                failures += 1
+        except (URLError, OSError) as exc:
+            status = f"ERR({exc.__class__.__name__})"
+            failures += 1
+        dur = time.monotonic() - t0
+        print(f"  {status:>16}  {dur:5.2f}s  {url}")
+    return failures
 
 
 def _download(url: str, *, timeout_s: float = 60.0) -> str:
@@ -189,6 +220,9 @@ def _build_argparser() -> argparse.ArgumentParser:
                    default=Path("swmf/fixtures/hindcast/feb_2022_starlink/imf_l1.dat"))
     p.add_argument("--dry-run", action="store_true",
                    help="Print URLs that would be fetched and exit.")
+    p.add_argument("--smoke-test", action="store_true",
+                   help="HEAD-probe each URL and report status; "
+                        "exits non-zero if any look broken.")
     p.add_argument("-v", "--verbose", action="store_true")
     return p
 
@@ -206,6 +240,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    if args.smoke_test:
+        urls = _urls_for_window(_parse_when(args.start), _parse_when(args.end))
+        return 1 if _probe_urls(urls) else 0
     try:
         fetch(_parse_when(args.start), _parse_when(args.end),
               out_path=args.out, dry_run=args.dry_run)
