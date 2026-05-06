@@ -45,6 +45,7 @@ import {
     hohmannPositionAt,
 } from './mission-planner-trajectory.js';
 import { sampleKeplerArc } from './mission-planner-lambert.js';
+import { EarthSimBridge } from './earth-sim-bridge.js';
 import {
     EARTH_VERT, EARTH_FRAG,
     createEarthUniforms, loadEarthTextures,
@@ -271,6 +272,13 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         simDaysPerSec: 1,
         // Live ephemeris JD that drives planet positions.
         scenarioJD: jdNow(),
+        // Deterministic JD-anchored time base. Each frame we compute
+        //   elapsed    = anchor.elapsed     + (wall_now − anchor.wall) · timeScale
+        //   scenarioJD = anchor.scenarioJD  + (wall_now − anchor.wall) · timeScale · simDaysPerSec
+        // so framerate hiccups, tab throttling, and pause/resume don't drift
+        // the propagation. Re-anchored when timeScale, simDaysPerSec, or
+        // scenarioJD are externally mutated.
+        simAnchor: null,
         // Auto-frame on launch — when true, a launch automatically chases
         // the new spacecraft via followMission(). Toggleable from the UI.
         autoFrame:  true,
@@ -280,6 +288,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         // pull from this counter so IDs are unique across kinds.
         nextMissionId: 1,
     };
+    function _resetSimAnchor() { state.simAnchor = null; }
 
     // Surface markers — parented to the spinning Earth so labels stay pinned
     // to real lat/lon as the planet rotates. Each site gets a small base
@@ -1150,12 +1159,42 @@ export function initMissionPlanner({ container, onEvent } = {}) {
     // update heliocentric planet positions + cruise spacecraft, then render
     // the one scene through the one camera.
     function tick() {
-        const dt = state.clock.getDelta() * state.timeScale;
-        state.elapsed += dt;
-        state.scenarioJD += dt * state.simDaysPerSec;
+        // ── Deterministic JD-anchored time base ──────────────────────────────
+        // Replaces `clock.getDelta() * timeScale` accumulation with an anchor
+        // (wall_ms, elapsed, scenarioJD, timeScale, simDaysPerSec) that is
+        // re-evaluated on every frame as a closed-form function of wall-clock.
+        // Pausing (timeScale=0), framerate hiccups, and tab-throttling no
+        // longer drift the propagation; scrubbing re-anchors automatically.
+        const _wallNow = performance.now();
+        if (!state.simAnchor ||
+            state.simAnchor.timeScale     !== state.timeScale ||
+            state.simAnchor.simDaysPerSec !== state.simDaysPerSec) {
+            state.simAnchor = {
+                wallMs:        _wallNow,
+                elapsed:       state.elapsed,
+                scenarioJD:    state.scenarioJD,
+                timeScale:     state.timeScale,
+                simDaysPerSec: state.simDaysPerSec,
+            };
+            // Reset the THREE.Clock so its getDelta() accumulator doesn't
+            // surface elsewhere (kept as a fall-back for legacy callers).
+            state.clock.getDelta();
+        }
+        const dWall    = (_wallNow - state.simAnchor.wallMs) / 1000;
+        const newElapsed = state.simAnchor.elapsed + dWall * state.simAnchor.timeScale;
+        const dt         = Math.max(0, newElapsed - state.elapsed);  // monotonic frame slice
+        state.elapsed    = newElapsed;
+        state.scenarioJD = state.simAnchor.scenarioJD + dWall * state.simAnchor.timeScale * state.simAnchor.simDaysPerSec;
 
         updateEarthSystem(dt);   // earthSystem heliocentric pos + Earth-frame anims
         updateHelio(dt);          // Sun spin + Mercury/Venus/Mars + helio cruises
+        // Off-thread Earth-system ground truth: the worker propagates Moon /
+        // Phobos / Deimos / Earth heliocentric in deterministic Keplerian form
+        // and emits an FNV-1a hash per reply. The simSpeed argument is "sim
+        // seconds per real second" — here, timeScale × simDaysPerSec × 86400.
+        const simSpdSecPerSec = state.simAnchor.timeScale * state.simAnchor.simDaysPerSec * 86400;
+        earthBridge.maintain(state.scenarioJD, simSpdSecPerSec);
+        _updateEarthBridgeResidual();
         // Camera animation + body-follow translation must run AFTER body
         // positions update so the rig is locked to current world coords.
         updateCameraSystem();
@@ -1601,6 +1640,67 @@ export function initMissionPlanner({ container, onEvent } = {}) {
     });
     ro.observe(container);
 
+    // ── Earth-system off-thread propagator ──────────────────────────────────
+    // Bridges to js/earth-sim-worker.js, which propagates Moon, Phobos,
+    // Deimos, and Earth heliocentric in deterministic Keplerian form and
+    // returns a transferable Float32Array buffer plus an FNV-1a hash. We
+    // surface the latest hash + window + residual to the host page (mission-
+    // planner.html) for ground-truth verification.
+    const earthBridge = new EarthSimBridge();
+    const earthBridgeStatus = {
+        ready:   false,
+        status:  'spawning…',
+        hash:    null,
+        window_s:null,
+        dt_s:    null,
+        count:   null,
+        residualKm: NaN,
+        // The planner's on-screen Moon comes from Meeus chapter 47
+        // (moonGeocentric) — geocentric ecliptic spherical coords. The worker
+        // emits parent-equatorial Cartesian km from Keplerian elements. The
+        // residual is therefore the cross-model disagreement at the same JD
+        // (~thousands of km is normal); a *change* in the residual at fixed
+        // JD between page-loads would indicate a determinism failure.
+        residualSrc: 'meeus_vs_kepler',
+    };
+    earthBridge.onUpdate = (s) => {
+        earthBridgeStatus.ready    = true;
+        earthBridgeStatus.status   = `live · ${s.count} samples`;
+        earthBridgeStatus.hash     = s.hash;
+        earthBridgeStatus.dt_s     = s.dt_s;
+        earthBridgeStatus.count    = s.count;
+        earthBridgeStatus.window_s = s.dt_s * (s.count - 1);
+    };
+    earthBridge.onError = (err) => {
+        earthBridgeStatus.status = 'unavailable';
+        // eslint-disable-next-line no-console
+        console.warn('[mission-planner-3d] earth-sim worker unavailable:', err);
+    };
+
+    function _updateEarthBridgeResidual() {
+        const truth = earthBridge.sample(state.scenarioJD);
+        if (!truth) return;
+        // Convert Meeus geocentric ecliptic (lon, lat, dist_km) to a Cartesian
+        // vector in km. The worker's parent-equatorial frame is rotated from
+        // the ecliptic by Earth's obliquity (≈23.44°); we apply the inverse
+        // here so both vectors live in the *same* frame before subtraction.
+        const m  = moonGeocentric(state.scenarioJD);
+        const cl = Math.cos(m.lat_rad);
+        const ex = m.dist_km * cl * Math.cos(m.lon_rad);
+        const ey = m.dist_km * cl * Math.sin(m.lon_rad);
+        const ez = m.dist_km * Math.sin(m.lat_rad);
+        // Rotate ecliptic → Earth equator about the X axis by +obliquity.
+        const obliq = 23.4393 * Math.PI / 180;
+        const cT = Math.cos(obliq), sT = Math.sin(obliq);
+        const eqx = ex;
+        const eqy = ey * cT + ez * sT;
+        const eqz = -ey * sT + ez * cT;
+        const dx = truth.moon[0] - eqx;
+        const dy = truth.moon[1] - eqy;
+        const dz = truth.moon[2] - eqz;
+        earthBridgeStatus.residualKm = Math.hypot(dx, dy, dz);
+    }
+
     // ── Camera follow + animated transitions ────────────────────────────
     // The previous one-shot focus presets snapped the camera to a body's
     // position at click time — but every body except the Sun is moving
@@ -1626,6 +1726,11 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         lastPos: new THREE.Vector3(),
         anim:    null,                         // active animation (see flyCameraTo)
         name:    'earth',                      // current focus label, drives HUD readout
+        // The most recent body-tracking getter, retained even when the user
+        // drops into 'free' mode, so a subsequent Lock can re-engage the same
+        // focus without re-animating. Cleared explicitly via setFreeCam(true).
+        lastGetter: null,
+        lastName:   'earth',
     };
 
     function flyCameraTo({
@@ -1674,7 +1779,9 @@ export function initMissionPlanner({ container, onEvent } = {}) {
                 world.controls.minDistance = a.minDist != null ? a.minDist : a.savedMin;
                 world.controls.maxDistance = a.maxDist != null ? a.maxDist : a.savedMax;
                 if (a.follow) {
-                    followState.getter = a.getTargetPos;
+                    followState.getter      = a.getTargetPos;
+                    followState.lastGetter  = a.getTargetPos;
+                    followState.lastName    = followState.name;
                     followState.lastPos.copy(curTarget);
                 } else {
                     followState.getter = null;
@@ -2011,8 +2118,39 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         world.camera.position.copy(eP).add(offset);
         world.controls.minDistance = 1.05;
         world.controls.maxDistance = HELIO_MAX;
-        followState.getter = () => world.earthSystem.position.clone();
+        followState.getter     = () => world.earthSystem.position.clone();
+        followState.lastGetter = followState.getter;
+        followState.lastName   = 'earth';
         followState.lastPos.copy(eP);
+    }
+
+    // ── Camera mode (free / lock) ────────────────────────────────────────────
+    // 'lock' (default): followState.getter is set, so the camera tracks the
+    //                   most recently focused body and the user can orbit /
+    //                   zoom freely around it.
+    // 'free':           getter is nulled — OrbitControls operates on a static
+    //                   target wherever the user last left it.
+    //
+    // Toggling Free → Lock re-uses `followState.lastGetter` (the most recent
+    // body-tracking function), seeding `lastPos` to the body's current world
+    // position so the first follow frame is jitter-free.
+    function setFreeCam(forget = false) {
+        followState.getter = null;
+        if (forget) {
+            followState.lastGetter = null;
+            followState.lastName   = null;
+        }
+    }
+    function lockCurrentFocus() {
+        const g = followState.lastGetter;
+        if (!g) return false;
+        followState.getter = g;
+        followState.lastPos.copy(g());
+        if (followState.lastName) followState.name = followState.lastName;
+        return true;
+    }
+    function getCameraMode() {
+        return followState.getter ? 'lock' : 'free';
     }
 
     requestAnimationFrame(tick);
@@ -2021,9 +2159,15 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         launch,
         setMode,
         getMode: () => state.mode,
-        setTimeScale: (x) => { state.timeScale = Math.max(0, Math.min(50, x)); },
+        setTimeScale: (x) => {
+            state.timeScale = Math.max(0, Math.min(50, x));
+            _resetSimAnchor();
+        },
         getTimeScale: () => state.timeScale,
-        setSimDaysPerSec: (x) => { state.simDaysPerSec = Math.max(0, x); },
+        setSimDaysPerSec: (x) => {
+            state.simDaysPerSec = Math.max(0, x);
+            _resetSimAnchor();
+        },
         clear: () => clearAll(state, geo, hel),
         focusEarth,
         focusMoon,
@@ -2066,7 +2210,26 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             tours:          state.tours.length,
         }),
         getScenarioJD: () => state.scenarioJD,
-        setScenarioJD: (jd) => { state.scenarioJD = jd; },
+        setScenarioJD: (jd) => { state.scenarioJD = jd; _resetSimAnchor(); },
+        // Camera mode — free / lock. Lock re-engages tracking on the most
+        // recently focused body without re-animating; free leaves the camera
+        // static at its current target. The focus presets (focusEarth, etc.)
+        // implicitly set lock.
+        setFreeCam,
+        lockCurrentFocus,
+        getCameraMode,
+        // Earth-system off-thread propagator status — surfaced to the host
+        // page for ground-truth verification (worker hash + residual readout).
+        getEarthBridgeStatus: () => ({
+            ready:      earthBridgeStatus.ready,
+            status:     earthBridgeStatus.status,
+            hash:       earthBridgeStatus.hash,
+            window_s:   earthBridgeStatus.window_s,
+            dt_s:       earthBridgeStatus.dt_s,
+            count:      earthBridgeStatus.count,
+            residualKm: earthBridgeStatus.residualKm,
+            residualSrc: earthBridgeStatus.residualSrc,
+        }),
         // Trajectory planners — also useful from the UI for read-only previews.
         planLunar:        planLunarTransfer,
         planLunarLambert,
