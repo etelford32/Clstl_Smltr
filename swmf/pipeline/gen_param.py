@@ -332,6 +332,66 @@ def generate_hindcast_run(
     return run_dir, param
 
 
+# ── Coupled GM + IE generator (Phase-0 hindcast that produces IE log) ────────
+
+def generate_gm_ie_run(
+    start_time: datetime,
+    sim_hours: float,
+    event_label: str,
+    imf_file: str,
+    f107_sfu: float,
+    nproc_total: int = 4,
+) -> tuple[Path, Path]:
+    """
+    Generate a coupled GM + IE run. Output writes both PARAM.in (from
+    config/PARAM.in.GM_IE) and LAYOUT.in (from config/LAYOUT.in.GM_IE)
+    into the run directory.
+
+    Unlike generate_hindcast_run (which uses the IH-only inline template),
+    this function reads the on-disk template files so they can be diffed
+    against a known-good operational PARAM.in without touching this code.
+
+    Returns (run_dir, param_in_path).
+    """
+    if sim_hours <= 0:
+        raise ValueError("sim_hours must be positive")
+    if nproc_total < 2:
+        raise ValueError("GM+IE coupled run needs >= 2 MPI ranks (1 for IE)")
+
+    ts_str  = start_time.strftime("%Y%m%dT%H%M%S")
+    run_dir = RUNS_DIR / f"gm_ie_{event_label}_{ts_str}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    param_template_path  = CONFIG_DIR / "PARAM.in.GM_IE"
+    layout_template_path = CONFIG_DIR / "LAYOUT.in.GM_IE"
+    if not param_template_path.exists():
+        raise FileNotFoundError(f"missing template: {param_template_path}")
+    if not layout_template_path.exists():
+        raise FileNotFoundError(f"missing template: {layout_template_path}")
+
+    sub = {
+        "YEAR":         f"{start_time.year:04d}",
+        "MONTH":        f"{start_time.month:02d}",
+        "DAY":          f"{start_time.day:02d}",
+        "HOUR":         f"{start_time.hour:02d}",
+        "MINUTE":       f"{start_time.minute:02d}",
+        "STOP_TIME_S":  f"{sim_hours * 3600.0:.1f}",
+        "IMF_FILE":     imf_file,
+        "F107_SFU":     f"{f107_sfu:.1f}",
+    }
+
+    param_text  = Template(param_template_path.read_text()).substitute(sub)
+    layout_text = layout_template_path.read_text()    # no substitution today
+
+    param_out  = run_dir / "PARAM.in"
+    layout_out = run_dir / "LAYOUT.in"
+    param_out.write_text(param_text)
+    layout_out.write_text(layout_text)
+    log.info("Wrote %s and %s", param_out, layout_out)
+    log.info("Run with: mpiexec -n %d %s", nproc_total, "/opt/swmf/SWMF.exe")
+    return run_dir, param_out
+
+
 # ── CLI ────────────────────────────────────────────────────────────────────────
 
 def main() -> None:

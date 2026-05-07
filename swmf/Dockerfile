@@ -1,8 +1,20 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# SWMF / BATS-R-US containerization — Phase 0
+# SWMF / BATS-R-US containerization — Phase 0 + Phase 1
+#
+# Components built into SWMF.exe:
+#   SC — Solar Corona              (1 → 24 R☉)
+#   IH — Inner Heliosphere         (24 R☉ → 2 AU; supplies upstream BC for GM)
+#   GM — Geo-magnetosphere         (BATS-R-US around Earth)
+#   IE — Ionosphere Electrodynamics (Ridley_serial; emits the IE log file
+#                                    parse_ie_log.py reads for Φ_PC + HPI)
+#
+# The GM + IE additions over the previous SC+IH-only build are what make
+# the Phase-0 pseudo-Ap regression actually computable — IH alone forecasts
+# solar wind at L1 but does not produce magnetospheric energy inputs.
 #
 # Multi-stage build:
 #   Stage 1 (builder) — clone + compile SWMF with gfortran + OpenMPI
+#                       (~30-50 min on a 4-core machine for the coupled build)
 #   Stage 2 (runtime) — slim image with binaries + Python pipeline
 #
 # Build:   docker build -t parkerphysics/swmf:latest .
@@ -41,13 +53,24 @@ RUN update-alternatives --install /usr/bin/gfortran gfortran /usr/bin/gfortran-1
  && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100
 
 # Clone SWMF (Apache 2 license — https://github.com/SWMFsoftware/SWMF)
-# Phase 0: SC (Solar Corona) + IH (Inner Heliosphere) components only
+# Components built here:
+#   SC — Solar Corona              (1 → 24 R☉)
+#   IH — Inner Heliosphere         (24 R☉ → 2+ AU; passes solar wind to GM)
+#   GM — Geo-magnetosphere         (BATS-R-US around Earth)
+#   IE — Ionosphere Electrodynamics (Ridley_serial; needed for Φ_PC + HPI
+#                                    timeseries that pseudo-Ap regresses on)
 # Force HTTPS for all github.com submodules (SWMFsoftware .gitmodules uses SSH URLs)
 WORKDIR /opt
 RUN git config --global url."https://github.com/".insteadOf "git@github.com:" \
  && git clone --depth=1 https://github.com/SWMFsoftware/SWMF.git swmf \
  && cd swmf \
- && git submodule update --init --recursive BATL SC/BATSRUS IH/BATSRUS share
+ && git submodule update --init --recursive \
+        BATL \
+        SC/BATSRUS \
+        IH/BATSRUS \
+        GM/BATSRUS \
+        IE/Ridley_serial \
+        share
 
 WORKDIR /opt/swmf
 
@@ -56,21 +79,34 @@ WORKDIR /opt/swmf
 RUN perl Config.pl -install -compiler=gfortran -mpi=openmpi \
  && perl Config.pl -v
 
-# Configure SC (Solar Corona) and IH (Inner Heliosphere) components
-# SC: 1–24 R☉  |  IH: 24 R☉ → 2+ AU
-RUN perl Config.pl -v -SC -IH
+# Configure all four components for the coupled hindcast run.
+# SC: 1–24 R☉   |  IH: 24 R☉ → 2 AU  |  GM: Earth magnetosphere  |  IE: Ridley
+# If submodule paths drift in a future SWMF release, run `git submodule status`
+# in /opt/swmf and update the COPY lines in stage 2 plus the -GM/-IE arg here.
+RUN perl Config.pl -v -SC -IH -GM/BATSRUS -IE/Ridley_serial
 
-# Compile — use all available cores; typically takes 20-30 min on a 4-core machine
-# SWMF= the coupled model, PostIDL = output converter
+# Compile — use all available cores; coupled SWMF build typically takes
+# 30-50 min on a 4-core machine (vs. 20-30 for SC+IH alone).
+# SWMF= the coupled binary, PostIDL = output converter
 RUN make -j$(nproc) SWMF \
  && make -j$(nproc) PIDL
 
-# Build standalone IH/BATSRUS for simpler solar wind runs (Phase 0 default)
+# Build standalone IH/BATSRUS for simpler solar-wind-only runs (Phase 0 IH-only fallback)
 WORKDIR /opt/swmf/IH/BATSRUS
 RUN make -j$(nproc) BATSRUS
 
+# Build standalone GM/BATSRUS for magnetosphere-only smoke tests
+WORKDIR /opt/swmf/GM/BATSRUS
+RUN make -j$(nproc) BATSRUS
+
+WORKDIR /opt/swmf
+
 # Verify binaries
-RUN ls -la /opt/swmf/bin/ && echo "SWMF build OK"
+RUN ls -la /opt/swmf/bin/ \
+ && ls -la /opt/swmf/IH/BATSRUS/BATSRUS.exe \
+            /opt/swmf/GM/BATSRUS/BATSRUS.exe \
+            /opt/swmf/SWMF.exe \
+ && echo "SWMF coupled-build OK"
 
 # ── Stage 2: runtime image ─────────────────────────────────────────────────────
 FROM ubuntu:22.04 AS runtime
@@ -78,7 +114,7 @@ FROM ubuntu:22.04 AS runtime
 ENV DEBIAN_FRONTEND=noninteractive
 ENV SWMF_ROOT=/opt/swmf
 ENV SWMF_BIN=/opt/swmf/bin
-ENV PATH="${SWMF_BIN}:/opt/swmf/IH/BATSRUS:${PATH}"
+ENV PATH="${SWMF_BIN}:/opt/swmf/IH/BATSRUS:/opt/swmf/GM/BATSRUS:${PATH}"
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
@@ -94,11 +130,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     supervisor curl \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Copy compiled SWMF binaries from builder
+# Copy compiled SWMF binaries from builder.
+# SWMF.exe is the coupled binary that runs SC + IH + GM + IE together.
+# Per-component BATSRUS.exes are kept for standalone smoke tests.
 COPY --from=builder /opt/swmf/bin/          /opt/swmf/bin/
 COPY --from=builder /opt/swmf/IH/BATSRUS/BATSRUS.exe  /opt/swmf/IH/BATSRUS/BATSRUS.exe
 COPY --from=builder /opt/swmf/SC/BATSRUS/BATSRUS.exe  /opt/swmf/SC/BATSRUS/BATSRUS.exe
+COPY --from=builder /opt/swmf/GM/BATSRUS/BATSRUS.exe  /opt/swmf/GM/BATSRUS/BATSRUS.exe
 COPY --from=builder /opt/swmf/SWMF.exe      /opt/swmf/SWMF.exe
+
+# IE/Ridley_serial is a serial Fortran component — its compiled object
+# files live alongside the SWMF binary and are linked into SWMF.exe.
+# Nothing extra to copy at runtime; the COPY above for SWMF.exe is enough.
 
 # Copy SWMF Scripts and utilities
 COPY --from=builder /opt/swmf/share/Scripts /opt/swmf/share/Scripts
