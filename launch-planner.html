@@ -768,6 +768,23 @@ body[data-density="compact"] .lp-density-btn {
     border-color:rgba(0,200,200,.5);
     color:#0ff;
 }
+/* Camera-control buttons (zoom/recenter/fov) — visually distinct from
+   view presets so they don't get a persistent --on state when clicked. */
+.lh-view-sep {
+    width:1px; align-self:stretch;
+    margin:2px 3px;
+    background:rgba(255,255,255,.12);
+}
+.lh-view--cam {
+    color:#9bd; font-weight:600;
+    min-width:1.6rem; text-align:center;
+    padding:5px 7px;
+}
+.lh-view--cam:active {
+    background:rgba(120,180,255,.18);
+    border-color:rgba(120,180,255,.4);
+    color:#cdf;
+}
 .lh-toggle--on {
     background:rgba(255,140,40,.18);
     border-color:rgba(255,140,40,.45);
@@ -1108,6 +1125,11 @@ body[data-density="compact"] .lp-density-btn {
                     <button type="button" class="lh-view"            data-view="side">Side</button>
                     <button type="button" class="lh-view"            data-view="top">Top</button>
                     <button type="button" class="lh-view"            data-view="closeup">Engines</button>
+                    <span class="lh-view-sep" aria-hidden="true"></span>
+                    <button type="button" class="lh-view lh-view--cam" data-cam="zoom-in"  title="Zoom in">＋</button>
+                    <button type="button" class="lh-view lh-view--cam" data-cam="zoom-out" title="Zoom out">−</button>
+                    <button type="button" class="lh-view lh-view--cam" data-cam="recenter" title="Recenter on stack">⊙</button>
+                    <button type="button" class="lh-view lh-view--cam" data-cam="fov" id="lh-cam-fov" title="Cycle field of view (28°/38°/52°)">38°</button>
                 </div>
 
                 <!-- Toggles — overlay top-right -->
@@ -1369,7 +1391,9 @@ body[data-density="compact"] .lp-density-btn {
                 ${info.pad ? `<div class="lh-vehicle-pad"><span class="lh-vehicle-pad-k">Pad</span> ${esc(info.pad)}</div>` : ''}
                 <div class="lh-vehicle-note">${esc(info.notes || '')}</div>
                 <div class="lh-vehicle-note" style="opacity:.7;font-size:.6rem">
-                    Drag to orbit · scroll to zoom · use overlay buttons for preset views.
+                    Drag to orbit · right-drag (or two-finger) to pan · scroll to zoom ·
+                    overlay buttons set preset views, dolly in/out, recenter the stack,
+                    and cycle FOV (28°/38°/52°).
                 </div>
             `;
         }
@@ -1686,16 +1710,33 @@ body[data-density="compact"] .lp-density-btn {
                     btn.classList.add('lh-vp-btn--on');
                     api.setVehicle(v, var_);
                     // Reset view to threequarter on vehicle change.
-                    document.querySelectorAll('.lh-view').forEach(b => b.classList.toggle('lh-view--on', b.dataset.view === 'threequarter'));
+                    document.querySelectorAll('.lh-view[data-view]').forEach(b => b.classList.toggle('lh-view--on', b.dataset.view === 'threequarter'));
                 });
             });
 
-            // View-preset buttons
+            // View-preset + camera-control buttons
+            const fovBtn = document.getElementById('lh-cam-fov');
             document.querySelectorAll('.lh-view').forEach(btn => {
                 btn.addEventListener('click', () => {
-                    document.querySelectorAll('.lh-view').forEach(b => b.classList.remove('lh-view--on'));
+                    // Camera action buttons (zoom / recenter / fov) — no
+                    // sticky --on state; they're transient commands.
+                    const cam = btn.dataset.cam;
+                    if (cam) {
+                        if (cam === 'zoom-in')  api.setZoom?.(0.78);
+                        if (cam === 'zoom-out') api.setZoom?.(1.28);
+                        if (cam === 'recenter') api.recenter?.();
+                        if (cam === 'fov' && api.cycleFOV) {
+                            const fov = api.cycleFOV();
+                            if (fovBtn) fovBtn.textContent = `${Math.round(fov)}°`;
+                        }
+                        return;
+                    }
+                    // View presets — sticky highlight.
+                    const view = btn.dataset.view;
+                    if (!view) return;
+                    document.querySelectorAll('.lh-view[data-view]').forEach(b => b.classList.remove('lh-view--on'));
                     btn.classList.add('lh-view--on');
-                    api.setView(btn.dataset.view);
+                    api.setView(view);
                 });
             });
 
