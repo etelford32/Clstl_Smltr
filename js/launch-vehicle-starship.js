@@ -377,6 +377,15 @@ function buildSuperHeavy(P) {
     aft.castShadow = true;
     g.add(aft);
 
+    // Common-dome seam — visible weld line between the LOX and CH4 tanks.
+    // Real Super Heavy has two ring weld bands; sample one as a thin ring.
+    const cdSeam = new THREE.Mesh(
+        new THREE.CylinderGeometry(R * 1.004, R * 1.004, 0.22, 64, 1, true),
+        flatMat(COLORS.steelDark, 0.5, 0.6)
+    );
+    cdSeam.position.y = L * 0.42;
+    g.add(cdSeam);
+
     // Chines — two raised stiffener strakes running most of the booster
     // length. Visible Block 2 detail.
     const chineGeo = new THREE.BoxGeometry(0.4, L * 0.85, 0.4);
@@ -479,6 +488,24 @@ function buildShip(P) {
     );
     band.position.y = 1.5;
     g.add(band);
+
+    // Header tank band — narrow darker stripe ~70% up the ship marking the
+    // landing-prop header tank seam. Distinctive Starship V2 visual cue.
+    const headerBand = new THREE.Mesh(
+        new THREE.CylinderGeometry(R * 1.005, R * 1.005, 0.45, 64, 1, true),
+        flatMat(COLORS.steelDark, 0.55, 0.7)
+    );
+    headerBand.position.y = bodyLen * 0.74;
+    g.add(headerBand);
+
+    // Common-dome seam mid-ship — thin steel ring marking the separation
+    // between LOX (lower) and CH4 (upper) tanks.
+    const domeSeam = new THREE.Mesh(
+        new THREE.CylinderGeometry(R * 1.004, R * 1.004, 0.18, 64, 1, true),
+        flatMat(COLORS.steelDark, 0.5, 0.6)
+    );
+    domeSeam.position.y = bodyLen * 0.45;
+    g.add(domeSeam);
 
     // Forward flaps — high on the ship, small, leaning leeward.
     const flapMat = steelMat({ tint: COLORS.fin, roughness: 0.45 });

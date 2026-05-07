@@ -362,7 +362,7 @@ function buildLC39A() {
 
 // ── Mechazilla / Stage 0 (Starship) ──────────────────────────────────────────
 
-function buildMechazilla() {
+function buildMechazilla(opts = {}) {
     const root = new THREE.Group();
     root.name = 'Mechazilla';
     const beacons = [];
@@ -372,10 +372,16 @@ function buildMechazilla() {
         size: 360, padSize: 70, padColor: PAD_COLORS.concrete,
     }));
 
+    // OLM scaling: hole + table grow with the booster so a wider stack
+    // doesn't collide with the table edge. Default sized for a 9 m
+    // Starship; widens automatically for the 12 m future variant.
+    const boosterR = (opts.boosterDiameter || 9.0) / 2;
+    const holeR    = Math.max(4.0, boosterR * 0.7);          // accommodates engine cluster
+    const olmRingR = Math.max(9.0, boosterR * 1.5);          // hex table outer radius
+
     // Orbital Launch Mount (OLM) — 6-legged hexagonal table the booster
     // sits on. Real OLM legs are ~20 m tall.
     const olmH = 20;
-    const olmRingR = 9;        // hexagonal table outer radius
     const olm = new THREE.Group();
     // 6 legs
     for (let i = 0; i < 6; i++) {
@@ -399,7 +405,7 @@ function buildMechazilla() {
     }
     tableShape.closePath();
     const hole = new THREE.Path();
-    hole.absarc(0, 0, 4.0, 0, Math.PI * 2, true);
+    hole.absarc(0, 0, holeR, 0, Math.PI * 2, true);
     tableShape.holes.push(hole);
     const tableGeo = new THREE.ExtrudeGeometry(tableShape, { depth: 1.4, bevelEnabled: false });
     const table = new THREE.Mesh(tableGeo, flatMat(PAD_COLORS.fssOrange, 0.7, 0.15));
@@ -409,14 +415,17 @@ function buildMechazilla() {
     table.receiveShadow = true;
     olm.add(table);
 
-    // Hold-down clamps — 20 small posts around the inner ring of the table.
+    // Hold-down clamps — 20 small posts around the inner ring of the table,
+    // hugging the booster's outer radius rather than a fixed circle so they
+    // line up with the booster aft skirt regardless of variant.
+    const clampR = boosterR * 1.04;
     for (let i = 0; i < 20; i++) {
         const a = (i / 20) * Math.PI * 2;
         const clamp = new THREE.Mesh(
             new THREE.BoxGeometry(0.5, 0.7, 0.5),
             steelMat(PAD_COLORS.steelDark, 0.5, 0.5)
         );
-        clamp.position.set(Math.cos(a) * 4.6, olmH + 1.7, Math.sin(a) * 4.6);
+        clamp.position.set(Math.cos(a) * clampR, olmH + 1.7, Math.sin(a) * clampR);
         clamp.castShadow = true;
         olm.add(clamp);
     }
@@ -444,9 +453,11 @@ function buildMechazilla() {
     olm.position.y = 0;
     root.add(olm);
 
-    // Water deluge plate — flat steel plate at the base under the OLM.
+    // Water deluge plate — flat steel plate at the base under the OLM,
+    // sized just past the hole so it catches the full booster exhaust.
+    const delugeR = Math.max(7, holeR + 3);
     const deluge = new THREE.Mesh(
-        new THREE.CylinderGeometry(7, 7, 0.5, 32),
+        new THREE.CylinderGeometry(delugeR, delugeR, 0.5, 32),
         flatMat(PAD_COLORS.steel, 0.4, 0.6)
     );
     deluge.position.y = 0.25;
@@ -606,7 +617,152 @@ function buildMechazilla() {
     return { root, beacons };
 }
 
-// ── Generic pad (fallback) ───────────────────────────────────────────────────
+// ── Falcon TEL pad (SLC-40 / LC-39A Falcon configuration) ────────────────────
+// Falcon 9 launches from a comparatively spartan deck: a flat concrete pad,
+// a vertical strongback (Transporter-Erector-Launcher) on one side carrying
+// the umbilical Ts, four lightning conductor towers at the perimeter, and a
+// flame trench beneath the booster. No FSS, no rotating service structure —
+// SpaceX integrates horizontally and erects right before launch.
+
+function buildFalconTEL() {
+    const root = new THREE.Group();
+    root.name = 'FalconTEL';
+    const beacons = [];
+
+    root.add(buildGroundPlane({ size: 280, padSize: 50, padColor: PAD_COLORS.concrete }));
+
+    // Pad deck — modest concrete platform under the booster. Top is at
+    // y=4.2 to match the rest of the launch-planner's vehicle baseline.
+    const deck = new THREE.Mesh(
+        new THREE.BoxGeometry(22, 4.2, 22),
+        flatMat(PAD_COLORS.concreteLight, 0.92)
+    );
+    deck.position.y = 2.1;
+    deck.castShadow = true;
+    deck.receiveShadow = true;
+    root.add(deck);
+
+    // Flame trench — narrow black slot under the octaweb, centered.
+    const trench = new THREE.Mesh(
+        new THREE.BoxGeometry(7, 5.0, 7),
+        new THREE.MeshBasicMaterial({ color: 0x000000 })
+    );
+    trench.position.y = 1.7;
+    root.add(trench);
+
+    // Hold-down clamps — 4 small steel posts at the corners of a square
+    // sized for the Falcon 9's 3.66 m booster (Falcon Heavy mates with
+    // additional clamps off-pad-axis, but a single set reads fine).
+    const clampMat = steelMat(PAD_COLORS.steelDark, 0.4, 0.55);
+    for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+        const clamp = new THREE.Mesh(
+            new THREE.BoxGeometry(0.55, 0.9, 0.55),
+            clampMat
+        );
+        clamp.position.set(Math.cos(a) * 2.5, 4.65, Math.sin(a) * 2.5);
+        clamp.castShadow = true;
+        root.add(clamp);
+    }
+
+    // Strongback (Transporter-Erector) — tall vertical truss on -Z (south)
+    // running from deck to ~payload-fairing height. Real strongback is on
+    // the side away from the wind; we put it on -Z so it's visible from a
+    // 3/4 view without occluding the rocket from the camera-facing side.
+    const sbX = 0;
+    const sbZ = -3.5;          // a couple metres clear of the booster (R≈1.83)
+    const sbH = 60;            // top reaches ~S2 / fairing seam
+    const sb = buildLatticeTower({
+        height: sbH, footprint: 3.4, color: PAD_COLORS.fssOrange, bandStep: 8,
+    });
+    sb.position.set(sbX, 4.2, sbZ);
+    root.add(sb);
+
+    // Strongback hinge cradle — squat box at the base, in line with the
+    // erector pivot.
+    const hinge = new THREE.Mesh(
+        new THREE.BoxGeometry(5.2, 1.6, 4.4),
+        flatMat(PAD_COLORS.fssOrange, 0.55)
+    );
+    hinge.position.set(sbX, 5.0, sbZ - 0.6);
+    hinge.castShadow = true;
+    root.add(hinge);
+
+    // Umbilical Ts — horizontal yellow arms from the strongback toward the
+    // rocket. One at booster aft (+5 m above deck), one at S2 (+45 m), one
+    // at fairing/Dragon (+55 m). Each arm tip stops just shy of the rocket
+    // so it reads as "connected" without z-fighting.
+    const umbMat = flatMat(PAD_COLORS.chopstickYellow, 0.6, 0.2);
+    function buildUmb(yWorld, length, headW = 1.6, headH = 1.2) {
+        const arm = new THREE.Group();
+        const spine = new THREE.Mesh(
+            new THREE.BoxGeometry(0.6, 0.6, length),
+            umbMat
+        );
+        spine.position.z = length / 2;
+        spine.castShadow = true;
+        arm.add(spine);
+        const head = new THREE.Mesh(
+            new THREE.BoxGeometry(headW, headH, 0.9),
+            umbMat
+        );
+        head.position.z = length;
+        head.castShadow = true;
+        arm.add(head);
+        arm.position.set(sbX, yWorld, sbZ + 0.6);
+        return arm;
+    }
+    // sbZ = -3.5; rocket surface at z=-1.83. Arm length ≈ 1.0 m so head
+    // sits at z ≈ -2.5, just outside the rocket.
+    root.add(buildUmb(4.2 +  6, 1.1));     // booster aft umbilical
+    root.add(buildUmb(4.2 + 42, 1.0));     // interstage / S2
+    root.add(buildUmb(4.2 + 56, 0.9));     // fairing / Dragon
+
+    // Four lightning conductor towers spaced around the pad perimeter — thin
+    // tall lattices each capped with a red aviation beacon. (Real SLC-40 has
+    // four such towers; LC-39A inherited similar protection during the
+    // Falcon era.)
+    const ltOffset = 70;
+    for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+        const lt = buildLatticeTower({
+            height: 95, footprint: 3.6, color: PAD_COLORS.steelDark, bandStep: 11,
+        });
+        lt.position.set(Math.cos(a) * ltOffset, 0, Math.sin(a) * ltOffset);
+        root.add(lt);
+
+        const tip = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.12, 0.12, 12, 10),
+            steelMat(PAD_COLORS.steelDark, 0.4, 0.7)
+        );
+        tip.position.set(Math.cos(a) * ltOffset, 95 + 6, Math.sin(a) * ltOffset);
+        tip.castShadow = true;
+        root.add(tip);
+
+        const beaconM = buildBeacon({ color: PAD_COLORS.beaconRed, intensity: 1.8 });
+        beaconM.position.set(Math.cos(a) * ltOffset, 95 + 13, Math.sin(a) * ltOffset);
+        root.add(beaconM);
+        beacons.push({ mesh: beaconM, phase: i * 0.6, color: PAD_COLORS.beaconRed });
+    }
+
+    // Strongback-top beacon
+    const sbBeacon = buildBeacon({ color: PAD_COLORS.beaconRed, intensity: 2.0 });
+    sbBeacon.position.set(sbX, 4.2 + sbH + 1, sbZ);
+    root.add(sbBeacon);
+    beacons.push({ mesh: sbBeacon, phase: 0.3, color: PAD_COLORS.beaconRed });
+
+    // Two ground floodlights flanking the deck to throw a little ambient
+    // illumination onto the booster aft.
+    for (const xs of [-1, 1]) {
+        const fl = buildFloodlight({ height: 14 });
+        fl.position.set(xs * 14, 0, 8);
+        fl.rotation.y = -xs * Math.PI / 2.4;
+        root.add(fl);
+    }
+
+    return { root, beacons };
+}
+
 
 function buildGenericPad() {
     const root = new THREE.Group();
@@ -646,14 +802,19 @@ function buildGenericPad() {
 // ── Public dispatcher ────────────────────────────────────────────────────────
 
 const PAD_BUILDERS = {
-    lc39a:      buildLC39A,
-    mechazilla: buildMechazilla,
-    generic:    buildGenericPad,
+    lc39a:       buildLC39A,
+    mechazilla:  buildMechazilla,
+    falcon_tel:  buildFalconTEL,
+    generic:     buildGenericPad,
 };
 
-export function buildPad(id = 'generic') {
+// opts: optional builder hints — { boosterDiameter } adapts shared geometry
+// like the OLM table hole so a wider booster (e.g. the 12 m future Starship
+// concept) doesn't collide with the table. Each pad builder may ignore or
+// honor opts; unsupported builders just receive no argument.
+export function buildPad(id = 'generic', opts = {}) {
     const builder = PAD_BUILDERS[id] || PAD_BUILDERS.generic;
-    return builder();
+    return builder(opts);
 }
 
 // Animate beacons — call from the framework's tick loop with current time t

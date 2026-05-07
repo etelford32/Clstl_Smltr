@@ -225,6 +225,17 @@ function buildSRB() {
         g.add(strut);
     }
 
+    // Forward frustum + parachute compartment — short cylindrical section
+    // just below the nose cone, slightly wider than the casing, painted
+    // gray to differentiate from the white casing. Real SRB has this band
+    // recovering the recovery-system parachutes.
+    const frustum = new THREE.Mesh(
+        new THREE.CylinderGeometry(R * 1.02, R * 1.02, 1.6, 32, 1, true),
+        mkMat(COLORS.srbAft, { roughness: 0.55 })
+    );
+    frustum.position.y = L * 0.86;
+    g.add(frustum);
+
     // SRB nozzle — exposed bell at the very base. Built via lathe so the bell
     // contour is curved, not just a cone.
     const nozPts = [];
@@ -297,12 +308,18 @@ function buildOrbiter() {
     }
 
     // Cockpit hump + windows. Hump: clipped sphere on the +Z (back) side near
-    // the nose. Windows: 6 dark wedge panels on the front face of the hump.
+    // the nose. Sphere is rotated so its dome curves +Z (up out of fuselage)
+    // with the flat opening at -Z; we sit it just above the fuselage spine
+    // (z = R*0.85, fuselage radius at this Y is ~R*0.85 along the lathe
+    // taper) so the opening hides flush against the spine instead of cutting
+    // a seam through the body 1 m below the surface.
+    const cockpitR = R * 0.95;
     const cockpit = new THREE.Mesh(
-        new THREE.SphereGeometry(R * 0.95, 28, 18, 0, Math.PI * 2, 0, Math.PI * 0.55),
+        new THREE.SphereGeometry(cockpitR, 32, 18, 0, Math.PI * 2, 0, Math.PI * 0.55),
         mkMat(COLORS.orbiterWhite, { roughness: 0.5 })
     );
-    cockpit.position.set(0, L * 0.31, R * 0.55);
+    const cockpitY = L * 0.31;
+    cockpit.position.set(0, cockpitY, R * 0.85);
     cockpit.rotation.x = Math.PI / 2;
     cockpit.castShadow = true;
     g.add(cockpit);
@@ -317,14 +334,22 @@ function buildOrbiter() {
         clearcoat: 1.0,
         clearcoatRoughness: 0.05,
     });
-    // 6 forward windows in two rows of three.
+    // 6 forward windows in two rows of three. Each window sits on the
+    // dome's forward-facing surface — z derived from the sphere equation so
+    // the panes follow the dome's curve regardless of where we mounted the
+    // hump.
     const winGeo = new THREE.BoxGeometry(0.8, 0.55, 0.2);
     for (let row = 0; row < 2; row++) {
         for (let col = -1; col <= 1; col++) {
             const w = new THREE.Mesh(winGeo, winMat);
-            const yOff = L * 0.31 + 0.55 + row * 0.6;
+            const yOff = cockpitY + 0.55 + row * 0.6;
             const xOff = col * 0.95;
-            w.position.set(xOff, yOff, R * 1.32);
+            const yFromDome = yOff - cockpitY;
+            const zOnDome   = Math.sqrt(
+                Math.max(0, cockpitR * cockpitR - yFromDome * yFromDome - xOff * xOff)
+            );
+            const zPos = R * 0.85 + zOnDome - 0.08;
+            w.position.set(xOff, yOff, zPos);
             w.rotation.x = -0.32;          // slight forward rake
             g.add(w);
         }
@@ -396,6 +421,8 @@ function buildOrbiter() {
     g.add(tail);
 
     // OMS pods — twin elongated bumps at the aft top, flanking the SSMEs.
+    // Each pod gets a small black aft thruster cap so the silhouette reads
+    // as the real OMS/RCS bays rather than a smooth blob.
     for (const xSign of [-1, 1]) {
         const oms = new THREE.Mesh(
             new THREE.CapsuleGeometry(0.85, 3.4, 8, 16),
@@ -405,16 +432,51 @@ function buildOrbiter() {
         oms.position.set(xSign * 1.7, -L * 0.40, R * 0.5);
         oms.castShadow = true;
         g.add(oms);
+
+        const omsCap = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.55, 0.7, 0.5, 14),
+            mkMat(COLORS.tile, { roughness: 0.85 })
+        );
+        omsCap.rotation.x = Math.PI / 2;
+        omsCap.position.set(xSign * 1.7, -L * 0.46 + 0.3, R * 0.5);
+        omsCap.castShadow = true;
+        g.add(omsCap);
     }
 
-    // Body flap — small box hanging below the SSMEs.
+    // Aft thermal-blanket band — distinctive dark band wrapping the orbiter
+    // aft just forward of the SSME cluster. Sells the silhouette as the
+    // real STS rather than a generic white-fuselage.
+    const aftBand = new THREE.Mesh(
+        new THREE.CylinderGeometry(R * 1.025, R * 1.025, 1.6, 48, 1, true),
+        mkMat(COLORS.tile, { roughness: 0.9 })
+    );
+    aftBand.position.y = -L * 0.43;
+    aftBand.castShadow = true;
+    g.add(aftBand);
+
+    // Body flap — fence-like control surface hanging BELOW the SSMEs on the
+    // belly side. Position it just outside the fuselage radius (z=-R-0.05)
+    // so it actually reads as a flap, not as a slab buried in the spine.
     const bodyFlap = new THREE.Mesh(
-        new THREE.BoxGeometry(R * 1.6, 0.4, 1.6),
+        new THREE.BoxGeometry(R * 1.6, 0.4, 1.7),
         mkMat(COLORS.tile, { roughness: 0.85 })
     );
-    bodyFlap.position.set(0, -L * 0.49, -R * 0.4);
+    bodyFlap.position.set(0, -L * 0.46 - 1.2, -R * 0.4);
+    bodyFlap.rotation.x = -0.18;     // slight nose-up angle, neutral trim
     bodyFlap.castShadow = true;
     g.add(bodyFlap);
+
+    // Forward RCS module — black thruster ports on the orbiter nose belly
+    // (real shuttle has 14 thrusters in the FRCS). Render as 4 small dark
+    // squares for the silhouette.
+    for (const dx of [-0.55, -0.18, 0.18, 0.55]) {
+        const port = new THREE.Mesh(
+            new THREE.BoxGeometry(0.22, 0.12, 0.22),
+            mkMat(COLORS.tile, { roughness: 0.95 })
+        );
+        port.position.set(dx, L * 0.43, -R * 0.78);
+        g.add(port);
+    }
 
     // SSMEs — 3 bell-shaped engines, 1 high-center + 2 lower flanking.
     const ssmePositions = [
@@ -920,6 +982,7 @@ function buildFalcon9Vehicle(variant = 'block5') {
     // Falcon 9 sits on a TEL (transporter-erector-launcher) at LC-39A /
     // SLC-40 — pad-deck top is at world y = 4.2 (matches MLP top).
     built.root.position.y = 4.2;
+    built.padId = 'falcon_tel';
     if (built.info) built.info.pad = 'KSC LC-39A / CCSFS SLC-40';
     return built;
 }
@@ -1007,7 +1070,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
     // ── Pad (replaced per vehicle in setVehicle) ──────────────────────────
     let padState = { root: null, beacons: [] };
 
-    function swapPad(padId) {
+    function swapPad(padId, opts = {}) {
         if (padState.root) {
             scene.remove(padState.root);
             padState.root.traverse(o => {
@@ -1018,7 +1081,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
                 }
             });
         }
-        const built = buildPadInfra(padId || 'generic');
+        const built = buildPadInfra(padId || 'generic', opts);
         scene.add(built.root);
         padState = built;
     }
@@ -1085,7 +1148,11 @@ export function initVehicleCanvas(canvas, opts = {}) {
         key.shadow.camera.near   = 30;
         key.shadow.camera.far    = h * 6;
         key.shadow.camera.updateProjectionMatrix();
-        // Aim the key light at the middle of the stack.
+        // Position the key light proportional to vehicle height so a 200 m
+        // future-Starship is still lit from above instead of from its
+        // mid-section. Aim at the bbox center.
+        const lightY = baseY + h * 1.05;
+        key.position.set(h * 0.85, lightY, h * 0.55);
         key.target.position.set(0, baseY + h * 0.5, 0);
         key.target.updateMatrixWorld();
         scene.add(key.target);
@@ -1128,7 +1195,10 @@ export function initVehicleCanvas(canvas, opts = {}) {
         };
 
         // Swap pad infrastructure to whichever site this vehicle flies from.
-        swapPad(v.padId);
+        // Pass the booster diameter so adaptive pads (Mechazilla) can size
+        // their hole + clamp ring to the actual stack.
+        const padOpts = { boosterDiameter: parseFloat(v.info?.diameter_m) || undefined };
+        swapPad(v.padId, padOpts);
 
         // A new vehicle starts framed from the canonical 3/4 angle so the
         // UI highlight (which the host page resets to 3/4 on every vehicle

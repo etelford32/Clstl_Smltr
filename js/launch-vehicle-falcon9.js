@@ -16,7 +16,7 @@
  *   plumes  Array of plume Groups (one per booster + one for upper stage).
  *   height  Stack height in metres (for camera framing).
  *   info    Display metadata (name, year, engine counts, etc.).
- *   padId   Preferred pad id ('lc39a' for KSC / SLC-40 stand-in).
+ *   padId   Preferred pad id ('falcon_tel' — generic Falcon strongback pad).
  */
 
 import * as THREE from 'three';
@@ -291,6 +291,26 @@ function buildBoosterCore(P, { isSideCore = false } = {}) {
     ow.position.y = 0;
     g.add(ow);
 
+    // Cold-gas RCS pods — 4 small dark squares near the top of the booster
+    // (above the interstage) that handle attitude after stage separation.
+    if (!isSideCore) {
+        const rcsMat = flatMat(COLORS.boosterSoot, 0.85);
+        for (let i = 0; i < 4; i++) {
+            const a = (i / 4) * Math.PI * 2;
+            const port = new THREE.Mesh(
+                new THREE.BoxGeometry(0.45, 0.3, 0.18),
+                rcsMat
+            );
+            port.position.set(
+                Math.cos(a) * R * 1.005,
+                L - 4.0,
+                Math.sin(a) * R * 1.005,
+            );
+            port.rotation.y = -a;
+            g.add(port);
+        }
+    }
+
     // Landing legs (4)
     if (P.landingLegs) {
         for (let i = 0; i < 4; i++) {
@@ -375,13 +395,32 @@ function buildInterstage(P) {
     body.receiveShadow = true;
     g.add(body);
 
-    // Subtle horizontal panel seam at the top
-    const seam = new THREE.Mesh(
+    // Subtle horizontal panel seams at top and bottom — sells the interstage
+    // as a discrete section rather than a continuous body.
+    const seamMat = flatMat(0xb8b4a8, 0.6);
+    const seamTop = new THREE.Mesh(
         new THREE.CylinderGeometry(R * 1.005, R * 1.005, 0.15, 36, 1, true),
-        flatMat(0xb8b4a8, 0.6)
+        seamMat
     );
-    seam.position.y = L - 0.15;
-    g.add(seam);
+    seamTop.position.y = L - 0.15;
+    g.add(seamTop);
+    const seamBot = new THREE.Mesh(
+        new THREE.CylinderGeometry(R * 1.005, R * 1.005, 0.12, 36, 1, true),
+        seamMat
+    );
+    seamBot.position.y = 0.15;
+    g.add(seamBot);
+
+    // Soot dust ring near the bottom — reused boosters arrive carrying a
+    // faint soot rim that wraps the interstage too. Subtle.
+    const sootDust = new THREE.Mesh(
+        new THREE.CylinderGeometry(R * 1.004, R * 1.004, 0.6, 36, 1, true),
+        flatMat(COLORS.boosterSoot, 0.85)
+    );
+    sootDust.material.transparent = true;
+    sootDust.material.opacity = 0.45;
+    sootDust.position.y = 0.6;
+    g.add(sootDust);
 
     return g;
 }
@@ -529,6 +568,27 @@ function buildCrewDragon(P) {
     );
     shield.position.y = trunkH;
     g.add(shield);
+
+    // SuperDraco abort engine bumps — 4 pairs of integrated thruster pods
+    // bulging from the capsule body. Each pair is a small lengthwise bump
+    // running up the capsule sidewall. Distinctive Dragon 2 feature.
+    const sdMat = flatMat(COLORS.dragonGray, 0.55, 0.2);
+    for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2 + Math.PI / 8;
+        const pod = new THREE.Mesh(
+            new THREE.BoxGeometry(0.5, capH * 0.7, 0.42),
+            sdMat
+        );
+        const yMid = trunkH + capH * 0.45;
+        pod.position.set(
+            Math.cos(a) * stageR * 0.9,
+            yMid,
+            Math.sin(a) * stageR * 0.9,
+        );
+        pod.rotation.y = -a;
+        pod.castShadow = true;
+        g.add(pod);
+    }
 
     // Nose cone (closed) — protects the docking adapter on ascent. Hinged
     // open in real flight at T+~6 min. We render closed for static stack.
@@ -731,7 +791,7 @@ export function buildFalcon9({ variant = 'block5', params: override = {} } = {})
 
     return {
         root, plumes, height: visualH, info,
-        padId: 'lc39a', engineLayout,
+        padId: 'falcon_tel', engineLayout,
     };
 }
 
