@@ -241,6 +241,14 @@
     <priority>0.6</priority>
   </url>
 
+  <!-- ── ENTERPRISE / CONTACT ──────────────────────────────────────────── -->
+  <url>
+    <loc>https://parkersphysics.com/contact-enterprise.html</loc>
+    <lastmod>2026-05-07</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+
   <!-- ── LEGAL ─────────────────────────────────────────────────────────── -->
   <url>
     <loc>https://parkersphysics.com/privacy</loc>

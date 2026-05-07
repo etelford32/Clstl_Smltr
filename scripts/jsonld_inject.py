@@ -309,6 +309,59 @@ EDUCATORS_FAQ: list[tuple[str, str]] = [
 ]
 
 
+LEGAL_PAGES: list[tuple[str, str, str, str]] = [
+    (
+        "privacy.html",
+        f"{SITE}/privacy",
+        "PrivacyPolicy",
+        "How Parkers Physics collects, uses, and safeguards personal data.",
+    ),
+    (
+        "eula.html",
+        f"{SITE}/eula",
+        "TermsOfService",
+        "End-User License Agreement for the Parkers Physics App and APIs.",
+    ),
+    (
+        "api-policy.html",
+        f"{SITE}/api-policy",
+        "WebPage",
+        "API access tiers, attribution requirements, and acceptable-use rules for the Parkers Physics public APIs.",
+    ),
+    (
+        "contact-enterprise.html",
+        f"{SITE}/contact-enterprise.html",
+        "ContactPage",
+        "Enterprise contact for satellite operators, financial-services teams, and research labs.",
+    ),
+    (
+        "signup.html",
+        f"{SITE}/signup",
+        "WebPage",
+        "Create a free Parkers Physics account to access live NASA and NOAA-driven astrophysics simulations.",
+    ),
+    (
+        "signin.html",
+        f"{SITE}/signin",
+        "WebPage",
+        "Sign in to Parkers Physics to manage your subscription, classroom seats, and saved simulation locations.",
+    ),
+]
+
+
+def legal_node(canonical_url: str, schema_type: str, description: str) -> dict:
+    return {
+        "@context": "https://schema.org",
+        "@type": schema_type,
+        "@id": f"{canonical_url}#page",
+        "url": canonical_url,
+        "description": description,
+        "isPartOf": {"@id": WEBSITE_ID},
+        "publisher": {"@id": ORG_ID},
+        "inLanguage": "en-US",
+    }
+
+
 def faq_node(faq_id: str, items: list[tuple[str, str]]) -> dict:
     return {
         "@type": "FAQPage",
@@ -423,6 +476,17 @@ def main() -> None:
             continue
         if process_sim(path, canonical_url, name, desc, subcat):
             print(f"  + {slug} (SoftwareApplication)")
+
+    for slug, canonical_url, schema_type, desc in LEGAL_PAGES:
+        path = ROOT / slug
+        if not path.exists():
+            continue
+        node = legal_node(canonical_url, schema_type, desc)
+        html = path.read_text(encoding="utf-8")
+        new_html = upsert(html, node, node["@id"])
+        if new_html != html:
+            path.write_text(new_html, encoding="utf-8")
+            print(f"  + {slug} ({schema_type})")
 
     pricing = ROOT / "pricing.html"
     if process_faq(pricing, f"{SITE}/pricing#faq", PRICING_FAQ):
