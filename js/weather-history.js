@@ -72,7 +72,15 @@
 const NUM_CHANNELS = 9;
 
 // Default 24h window at 1-hr cadence — matches /api/weather/grid CACHE_TTL.
-const TIER = { name: 'tier_1h', cadence_ms: 3_600_000, max_rows: 24 };
+// Past tier is durable (IDB-backed). Forecast tier is in-memory only —
+// see _forecastRing notes below for why.
+const TIER          = { name: 'tier_1h', cadence_ms: 3_600_000, max_rows: 24 };
+// Forecast horizon: 14 days of hourly U/V/T/P/RH/cloud/precip frames.
+// Sized to match time-bus FUTURE_MS so a user can scrub the whole bus
+// future window without falling off the end of the ring. The forecast
+// feeder lazy-loads in chunks; until it lands, the ring is empty and
+// bracket() falls back to the past-tier-only path.
+const FORECAST_CAPACITY = 14 * 24;
 
 const DB_NAME    = 'weather_grid_v1';
 const DB_VERSION = 1;
@@ -129,6 +137,12 @@ export class WeatherHistory {
         this._dbOk  = false;
         this._ready = false;
         this._ring  = new RingBuffer(TIER.max_rows);
+        // Forecast tier — in-memory only. Stale forecasts are worse than
+        // no forecast (you'd see the wrong "future" until the next fetch
+        // overwrites it), so we deliberately don't persist these to IDB.
+        // Cleared on page load; re-fetched lazily on first future scrub.
+        // Capacity covers the full time-bus FUTURE_MS window.
+        this._forecastRing = new RingBuffer(FORECAST_CAPACITY);
         // Last hour-key we ingested into IDB. Used to skip the put when
         // an in-flight refresh produces another sample inside the same
         // hour — the ring buffer dedupes by key, but skipping IDB avoids
@@ -260,6 +274,13 @@ export class WeatherHistory {
             this._idbPut(rec);
         }
 
+        // The observation just landed for `key`. Drop any forecast
+        // record at or before this hour — the prediction has been
+        // superseded by ground truth, and leaving it would let
+        // bracket() return a stale forecast row when scrubbing through
+        // the recent past.
+        this.purgeStaleForecasts(key);
+
         // Notify subscribers (forecaster registry, validator, future ML
         // pipelines) that a fresh observation is in the ring. The detail
         // object hands over the same record we just stored — receivers
@@ -284,6 +305,70 @@ export class WeatherHistory {
         }
         return -1;
     }
+    _forecastRingIndexOfKey(key) {
+        for (let i = 0; i < this._forecastRing._cap; i++) {
+            const entry = this._forecastRing._buf[i];
+            if (entry && entry.t === key) return i;
+        }
+        return -1;
+    }
+
+    /**
+     * Persist a fresh *forecast* coarse frame. Same shape as ingest()
+     * but the record is marked `isForecast: true` and lands in the
+     * in-memory forecast ring instead of the durable past tier. Caller
+     * is the WeatherForecastFeed; one record per forecast hour.
+     *
+     * Replaces existing entries at the same hour-key (the feed re-runs
+     * periodically and newer model output supersedes the older one).
+     */
+    ingestForecast({ t, fetchedAt, source, gridW, gridH, coarse } = {}) {
+        if (!this._ready) return;
+        if (!Number.isFinite(t) || !Number.isFinite(gridW) || !Number.isFinite(gridH)) return;
+        if (!(coarse instanceof Float32Array)) return;
+        if (coarse.length !== gridW * gridH * NUM_CHANNELS) {
+            console.warn('[WeatherHistory] forecast ingest skipped — coarse length mismatch',
+                coarse.length, 'vs', gridW * gridH * NUM_CHANNELS);
+            return;
+        }
+        const key = _hourKey(t);
+        const rec = {
+            t:          key,
+            fetchedAt:  Number.isFinite(fetchedAt) ? fetchedAt : Date.now(),
+            source:     source ?? null,
+            gridW, gridH,
+            coarse:     new Float32Array(coarse),
+            isForecast: true,
+        };
+        const existingIdx = this._forecastRingIndexOfKey(key);
+        if (existingIdx >= 0) {
+            this._forecastRing._buf[existingIdx] = rec;
+        } else {
+            this._forecastRing.push(rec);
+        }
+    }
+
+    /**
+     * Drop forecast frames at or before `tCutoffMs` (default: now).
+     * Called when the past-tier ingests an observation that overlaps
+     * an old forecast hour — the observation supersedes the prediction
+     * for that hour, so the forecast row should be discarded to avoid
+     * a stale "future" appearing in the past after a session crosses
+     * an hour boundary.
+     */
+    purgeStaleForecasts(tCutoffMs = Date.now()) {
+        const cap   = this._forecastRing._cap;
+        for (let i = 0; i < cap; i++) {
+            const entry = this._forecastRing._buf[i];
+            if (entry && entry.t <= tCutoffMs) {
+                this._forecastRing._buf[i] = undefined;
+            }
+        }
+    }
+
+    /** All forecast frames in the ring, oldest first. */
+    allForecasts() { return this._forecastRing.toArray(); }
+    get forecastSize() { return this._forecastRing.size; }
 
     _idbPut(rec) {
         try {
@@ -357,15 +442,27 @@ export class WeatherHistory {
      *
      * The clamp behaviour means scrubbing past the ends of history shows
      * the nearest-edge frame frozen, rather than blanking the globe.
+     *
+     * Bracket merges the past-tier ring with the in-memory forecast ring
+     * so the resolver sees one continuous series across now. The merge
+     * is a sort-on-read (cheap: ≤24 + ≤336 entries); we don't materialise
+     * a single buffer because the rings have different lifecycles.
      */
     bracket(tMs) {
-        const arr = this._ring.toArray();
+        const past     = this._ring.toArray();
+        const forecast = this._forecastRing.toArray();
+        // Merge by t. Both inputs are oldest-first; we sort to absorb any
+        // overlap (e.g. a forecast hour that's just become past while the
+        // session was open and hasn't been purged yet — observation wins
+        // when keys collide because past.entries() is appended first then
+        // sortStable preserves order on equal keys).
+        const arr = past.length === 0 ? forecast
+                  : forecast.length === 0 ? past
+                  : [...past, ...forecast].sort((a, b) => a.t - b.t);
         if (arr.length === 0) return null;
         if (arr.length === 1) return { before: arr[0], after: null, frac: 0 };
 
-        // Binary search for the first index with t > tMs. (Ring is
-        // oldest-first; t is monotonic non-decreasing because we key
-        // on hour-rounded timestamps and only ingest forward.)
+        // Binary search for the first index with t > tMs.
         let lo = 0, hi = arr.length;
         while (lo < hi) {
             const mid = (lo + hi) >> 1;
