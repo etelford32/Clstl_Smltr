@@ -599,8 +599,52 @@ function buildShuttleStack() {
     // y_local needs to clear y=0). With the previous +0.5 m mount offset
     // the lower bells were sinking ~0.3 m into the deck because the deck
     // flame trench is narrower in Z than the orbiter's engine cluster.
-    orbiter.position.set(0, DIM.ORBITER_LEN * 0.5 + 1.5, DIM.ET_R + DIM.ORBITER_FUSE_R + 0.4);
+    const orbiterY = DIM.ORBITER_LEN * 0.5 + 1.5;
+    orbiter.position.set(0, orbiterY, DIM.ET_R + DIM.ORBITER_FUSE_R + 0.4);
     stack.add(orbiter);
+
+    // Attach hardware bridging the 0.4 m gap between the ET and the orbiter
+    // belly + the SRBs. The real shuttle has a forward bipod attaching the
+    // orbiter to the ET intertank and two aft struts at the orbiter aft;
+    // each SRB has a forward attach strut + aft sway brace. We render
+    // simplified cylindrical struts so the orbiter and SRBs visibly mate
+    // with the ET instead of floating beside it.
+    const strutMat   = mkMat(COLORS.metalDark, { roughness: 0.45, metalness: 0.7 });
+    const strutGapZ  = DIM.ET_R + 0.05;                        // strut tail at ET surface
+    const strutLenZ  = (DIM.ET_R + DIM.ORBITER_FUSE_R + 0.4) - DIM.ET_R - DIM.ORBITER_FUSE_R; // 0.4
+    function addOrbiterAttach(yLocal) {
+        const strut = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.18, 0.18, 0.55, 12),
+            strutMat
+        );
+        strut.rotation.x = Math.PI / 2;                        // along Z
+        strut.position.set(0, yLocal, DIM.ET_R + 0.27);
+        strut.castShadow = true;
+        stack.add(strut);
+    }
+    addOrbiterAttach(orbiterY +  6.5);   // forward bipod (ET intertank area)
+    addOrbiterAttach(orbiterY - 12);     // aft attach upper
+    addOrbiterAttach(orbiterY - 15.5);   // aft attach lower
+
+    // SRB forward + aft attach brackets — small cylindrical fittings between
+    // each SRB casing and the ET. Forward attach mid-tank, aft attach near
+    // the LH2 base. Mirrored on both SRBs.
+    const srbStrutLen = (srbOffset) - DIM.ET_R - DIM.SRB_R; // = 0.4
+    function addSRBAttach(xSign, yLocal) {
+        const strut = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.16, 0.16, srbStrutLen + 0.15, 10),
+            strutMat
+        );
+        strut.rotation.z = Math.PI / 2;                        // along X
+        const midX = xSign * (DIM.ET_R + (srbStrutLen / 2));
+        strut.position.set(midX, yLocal, 0);
+        strut.castShadow = true;
+        stack.add(strut);
+    }
+    for (const s of [-1, 1]) {
+        addSRBAttach(s, DIM.ET_LEN * 0.55);   // forward attach (mid-stack)
+        addSRBAttach(s, DIM.ET_LEN * 0.10);   // aft attach (lower LH2)
+    }
 
     // Plume — one under each SRB, one under the SSME cluster. Positioned at
     // the bell exits in stack-local space so the cones emerge from the right

@@ -467,7 +467,7 @@ function buildMechazilla() {
     // the tower toward the stack at ~booster-catch height (~80 m).
     const armColor = PAD_COLORS.chopstickYellow;
     const armMat = flatMat(armColor, 0.55, 0.2);
-    function buildChopstickArm(z) {
+    function buildChopstickArm(z, swingRad) {
         const arm = new THREE.Group();
         // Spine — long box from hinge outboard
         const spine = new THREE.Mesh(new THREE.BoxGeometry(20, 1.2, 1.8), armMat);
@@ -484,22 +484,29 @@ function buildMechazilla() {
         hinge.position.set(0.5, 0, 0);
         hinge.castShadow = true;
         arm.add(hinge);
-        // Z-axis offset (one arm in -Z, other in +Z)
+        // Z-axis offset (one arm in -Z, other in +Z) and swung outboard so
+        // the spine doesn't ghost through the booster while it sits on the
+        // OLM. Real chopsticks swing ~60° away from the catch axis when the
+        // stack is integrated and waiting for launch.
         arm.position.set(towerX + 4, 80, z);
+        arm.rotation.y = swingRad;
         return arm;
     }
-    root.add(buildChopstickArm(-3.5));
-    root.add(buildChopstickArm( 3.5));
+    root.add(buildChopstickArm(-3.5, -1.05));   // swung -Z away from rocket
+    root.add(buildChopstickArm( 3.5,  1.05));   // mirror
 
     // Quick-Disconnect (QD) arm — slimmer arm at ship hot-stage-ring height
-    // (~95 m) for ship fuel/electrical umbilicals. Drawn slightly retracted.
+    // (~95 m) for ship fuel/electrical umbilicals. Sized so the umbilical
+    // head reaches the ship surface (~4.5 m from rocket axis) without the
+    // spine punching through the ship body. Hinged at the inboard tower
+    // face, length = tower-edge to ship-surface = ~10 m.
     const qd = new THREE.Group();
-    const qdSpine = new THREE.Mesh(new THREE.BoxGeometry(14, 1.0, 1.4), armMat);
-    qdSpine.position.set(7, 0, 0);
+    const qdSpine = new THREE.Mesh(new THREE.BoxGeometry(10, 1.0, 1.4), armMat);
+    qdSpine.position.set(5, 0, 0);
     qdSpine.castShadow = true;
     qd.add(qdSpine);
     const qdHead = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.4, 2.2), armMat);
-    qdHead.position.set(13.5, 0, 0);
+    qdHead.position.set(10.2, 0, 0);
     qdHead.castShadow = true;
     qd.add(qdHead);
     qd.position.set(towerX + 4, 95, 0);
