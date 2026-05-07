@@ -28,6 +28,7 @@
 
 import * as THREE from 'three';
 import { ENGINES } from './launch-engines.js';
+import { buildPlume as buildPlumeShared } from './launch-plume.js';
 
 // ── Colors ───────────────────────────────────────────────────────────────────
 // Stainless steel is the whole point — high metalness, slight blue tint, and
@@ -377,6 +378,15 @@ function buildSuperHeavy(P) {
     aft.castShadow = true;
     g.add(aft);
 
+    // Common-dome seam — visible weld line between the LOX and CH4 tanks.
+    // Real Super Heavy has two ring weld bands; sample one as a thin ring.
+    const cdSeam = new THREE.Mesh(
+        new THREE.CylinderGeometry(R * 1.004, R * 1.004, 0.22, 64, 1, true),
+        flatMat(COLORS.steelDark, 0.5, 0.6)
+    );
+    cdSeam.position.y = L * 0.42;
+    g.add(cdSeam);
+
     // Chines — two raised stiffener strakes running most of the booster
     // length. Visible Block 2 detail.
     const chineGeo = new THREE.BoxGeometry(0.4, L * 0.85, 0.4);
@@ -480,6 +490,24 @@ function buildShip(P) {
     band.position.y = 1.5;
     g.add(band);
 
+    // Header tank band — narrow darker stripe ~70% up the ship marking the
+    // landing-prop header tank seam. Distinctive Starship V2 visual cue.
+    const headerBand = new THREE.Mesh(
+        new THREE.CylinderGeometry(R * 1.005, R * 1.005, 0.45, 64, 1, true),
+        flatMat(COLORS.steelDark, 0.55, 0.7)
+    );
+    headerBand.position.y = bodyLen * 0.74;
+    g.add(headerBand);
+
+    // Common-dome seam mid-ship — thin steel ring marking the separation
+    // between LOX (lower) and CH4 (upper) tanks.
+    const domeSeam = new THREE.Mesh(
+        new THREE.CylinderGeometry(R * 1.004, R * 1.004, 0.18, 64, 1, true),
+        flatMat(COLORS.steelDark, 0.5, 0.6)
+    );
+    domeSeam.position.y = bodyLen * 0.45;
+    g.add(domeSeam);
+
     // Forward flaps — high on the ship, small, leaning leeward.
     const flapMat = steelMat({ tint: COLORS.fin, roughness: 0.45 });
     const fwdRoot = bodyLen - P.forwardFlapLen * 0.9;
@@ -536,35 +564,19 @@ function buildShip(P) {
 }
 
 // ── Plume (Raptor methalox — blue/teal flame) ────────────────────────────────
-// One-time builder shared between booster + ship clusters. The framework's
-// tickPlume() animates these at the same cadence as the shuttle's plumes.
+// Wraps the shared plume builder with Raptor methalox colors — the cool
+// blue/teal hue is the iconic CH4-rich exhaust signature.
 
 function buildRaptorPlume(radius, length) {
-    const g = new THREE.Group();
-    g.name = 'StarshipPlume';
-    g.visible = false;
-
-    const layers = [
-        { color: COLORS.plumeCore,  r: radius * 0.55, len: length * 0.55, opacity: 0.95 },
-        { color: COLORS.plumeMid,   r: radius * 1.0,  len: length * 0.85, opacity: 0.6  },
-        { color: COLORS.plumeOuter, r: radius * 1.6,  len: length,        opacity: 0.3  },
-    ];
-    for (const L of layers) {
-        const cone = new THREE.Mesh(
-            new THREE.ConeGeometry(L.r, L.len, 32, 1, true),
-            new THREE.MeshBasicMaterial({
-                color: L.color, transparent: true, opacity: L.opacity,
-                blending: THREE.AdditiveBlending, depthWrite: false,
-                side: THREE.DoubleSide,
-            })
-        );
-        cone.rotation.x = Math.PI;
-        cone.position.y = -L.len / 2;
-        cone.userData.baseOpacity = L.opacity;
-        cone.userData.baseLen     = L.len;
-        g.add(cone);
-    }
-    return g;
+    return buildPlumeShared({
+        coreRadius:  radius * 0.55, coreLen:  length * 0.55,
+        midRadius:   radius * 1.0,  midLen:   length * 0.85,
+        outerRadius: radius * 1.6,  outerLen: length,
+        coreColor:  COLORS.plumeCore,
+        midColor:   COLORS.plumeMid,
+        outerColor: COLORS.plumeOuter,
+        name: 'StarshipPlume',
+    });
 }
 
 // ── Public builder ───────────────────────────────────────────────────────────
