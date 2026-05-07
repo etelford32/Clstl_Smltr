@@ -51,6 +51,10 @@ data/history/archive-daily.bin
 # Source fixtures live under swmf/fixtures/ and dsmc/fixtures/.
 data/hindcast/
 
+# Jacchia surrogate vs. NRLMSISE-00 residual sweeps — runtime outputs.
+# Regenerate via: python -m dsmc.pipeline.jacchia_residuals
+data/jacchia_residuals/
+
 # npm — devDependencies only (Playwright); we never check in node_modules.
 node_modules/
 package-lock.json
