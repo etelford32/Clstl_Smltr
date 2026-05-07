@@ -13,142 +13,227 @@
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 html { height:auto; overflow-y:auto; }
+
+/* ─── Design tokens (mirrors DESIGN_TOKENS.md / earth.html) ────────
+   Three accent families:
+     • cyan  (--c-accent*)  — primary chrome (HUD, info panels, plan rows)
+     • amber (--c-storm*)   — warnings, Mars hooks, mission-HUD
+     • green (--c-launch*)  — page signature, restricted to the Launch
+                              button + hero gradient + go-status pads
+   Spacing / radii / blur / shadow / transitions match the rest of the
+   site so a single token tweak ripples everywhere. */
+:root {
+    --c-accent:           #00c6ff;
+    --c-accent-rgb:       0, 200, 255;
+    --c-accent-soft:      rgba(0, 200, 255, .15);
+    --c-accent-border:    rgba(0, 200, 255, .22);
+    --c-accent-border-hi: rgba(0, 200, 255, .30);
+    --c-accent-glow:      rgba(0, 200, 255, .55);
+    --c-accent-bg-overlay: rgba(0, 200, 255, .10);
+
+    --c-storm:            #ffb066;
+    --c-storm-rgb:        255, 160, 80;
+    --c-storm-soft:       rgba(255, 160, 80, .12);
+    --c-storm-border:     rgba(255, 160, 80, .28);
+    --c-storm-border-hi:  rgba(255, 160, 80, .55);
+    --c-storm-glow:       rgba(255, 160, 80, .55);
+    --c-storm-bg-overlay: rgba(255, 160, 80, .10);
+
+    /* Launch-green — restricted to the planner page (one consumer family,
+       like loc-panel on earth.html). Don't reach for it elsewhere. */
+    --c-launch:           #66ffaa;
+    --c-launch-rgb:       102, 255, 170;
+    --c-launch-soft:      rgba(102, 255, 170, .14);
+    --c-launch-border:    rgba(102, 255, 170, .30);
+    --c-launch-border-hi: rgba(102, 255, 170, .55);
+    --c-launch-glow:      rgba(102, 255, 170, .55);
+
+    --c-status-live:      #4fc97f;
+    --c-status-fetching:  #ffaa22;
+    --c-status-error:     #ff4422;
+
+    --c-surface-1:        rgba(6, 10, 22, .86);
+    --c-surface-2:        rgba(2, 4, 12, .92);
+    --c-surface-inset:    rgba(0, 0, 0, .30);
+
+    --c-text-primary:     #d6dee6;
+    --c-text-secondary:   #b0c8d8;
+    --c-text-muted:       #7a98a8;
+    --c-text-faint:       #557;
+
+    --c-border-faint:     rgba(255, 255, 255, .06);
+    --c-border-soft:      rgba(255, 255, 255, .10);
+    --c-border-medium:    rgba(255, 255, 255, .14);
+
+    --sp-1: 2px;  --sp-2: 4px;  --sp-3: 6px;  --sp-4: 8px;
+    --sp-5: 10px; --sp-6: 12px; --sp-7: 14px; --sp-8: 16px;
+
+    --r-sm: 4px; --r-md: 6px; --r-lg: 9px; --r-xl: 10px; --r-2xl: 14px;
+
+    --blur-glass:    blur(12px) saturate(1.15);
+    --shadow-panel:  0 4px 22px rgba(0, 16, 40, .55);
+
+    --t-fast:   .12s ease;
+    --t-snap:   .15s ease;
+    --t-medium: .25s ease;
+}
+@media (max-width: 640px) {
+    :root {
+        --sp-2: 3px; --sp-3: 5px; --sp-4: 7px;
+        --sp-5: 8px; --sp-6: 10px; --sp-7: 12px; --sp-8: 14px;
+        --r-xl: 8px; --r-2xl: 12px;
+        --blur-glass: blur(8px) saturate(1.10);
+        --shadow-panel: 0 2px 14px rgba(0, 16, 40, .50);
+    }
+}
+
 body { width:100%; min-height:100vh; overflow-x:hidden;
-    background:#040210; color:#d0cce8;
+    background:#040210; color:var(--c-text-primary);
     font-family:'Segoe UI', system-ui, sans-serif; }
 
 #mp-hero {
-    padding:22px 24px 14px;
-    background:linear-gradient(180deg, rgba(102,255,170,.07), rgba(4,2,16,0));
-    border-bottom:1px solid rgba(102,255,170,.14);
+    padding: var(--sp-7) var(--sp-8) var(--sp-6);
+    background:
+        radial-gradient(120% 90% at 0% 0%, rgba(var(--c-launch-rgb),.10), transparent 55%),
+        linear-gradient(180deg, rgba(var(--c-launch-rgb),.07), rgba(4,2,16,0));
+    border-bottom:1px solid var(--c-launch-border);
 }
 #mp-hero h1 {
     font-size:1.55rem; font-weight:800;
-    background:linear-gradient(100deg,#fff 28%, #66ffaa);
+    background:linear-gradient(100deg,#fff 28%, var(--c-launch));
     -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
-    margin-bottom:6px;
+    margin-bottom: var(--sp-3);
 }
-#mp-hero p { font-size:.88rem; color:#aab; line-height:1.55; max-width:820px; }
-#mp-hero-stats { margin-top:12px; display:flex; gap:10px; flex-wrap:wrap; }
+#mp-hero p { font-size:.88rem; color: var(--c-text-muted); line-height:1.55; max-width:820px; }
+#mp-hero-stats { margin-top: var(--sp-6); display:flex; gap: var(--sp-5); flex-wrap:wrap; }
 .mp-stat {
-    font-size:.72rem; color:#aab; font-family:monospace;
-    background:rgba(255,255,255,.03);
-    border:1px solid rgba(255,255,255,.08);
-    border-radius:6px; padding:6px 12px;
+    font-size:.72rem; color: var(--c-text-muted); font-family:monospace;
+    background: rgba(255,255,255,.03);
+    border:1px solid var(--c-border-soft);
+    border-radius: var(--r-md);
+    padding: var(--sp-3) var(--sp-6);
 }
-.mp-stat strong { color:#66ffaa; font-weight:800; margin-right:6px; }
+.mp-stat strong { color: var(--c-launch); font-weight:800; margin-right: var(--sp-3); }
 
 #mp-app {
-    display:grid; grid-template-columns: 320px 1fr; gap:16px;
-    padding:16px 24px 48px; max-width:1500px; margin:0 auto;
+    display:grid; grid-template-columns: 320px 1fr; gap: var(--sp-8);
+    padding: var(--sp-8) var(--sp-8) 48px; max-width:1500px; margin:0 auto;
 }
 @media (max-width:980px) {
-    #mp-app { grid-template-columns:1fr; padding:12px; gap:12px; }
+    #mp-app { grid-template-columns:1fr; padding: var(--sp-6); gap: var(--sp-6); }
 }
 .mp-panel {
-    background:rgba(10,6,28,.72); backdrop-filter:blur(14px);
-    border:1px solid rgba(255,255,255,.08);
-    border-radius:12px; padding:14px 16px;
+    background:
+        radial-gradient(120% 90% at 0% 0%, var(--c-accent-bg-overlay), transparent 55%),
+        linear-gradient(180deg, var(--c-surface-1), var(--c-surface-2));
+    backdrop-filter: var(--blur-glass);
+    -webkit-backdrop-filter: var(--blur-glass);
+    border:1px solid var(--c-accent-border);
+    border-radius: var(--r-xl);
+    padding: var(--sp-7) var(--sp-7);
+    box-shadow: var(--shadow-panel);
 }
 .mp-label {
-    font-size:.66rem; color:#778; text-transform:uppercase;
-    letter-spacing:.1em; font-weight:700; margin-bottom:8px; margin-top:14px;
+    font-size:.66rem; color: var(--c-text-muted); text-transform:uppercase;
+    letter-spacing:.1em; font-weight:700;
+    margin-bottom: var(--sp-4); margin-top: var(--sp-7);
 }
 .mp-label:first-child { margin-top:0; }
 
 .mp-input, .mp-select {
     width:100%;
-    background:rgba(255,255,255,.04);
-    border:1px solid rgba(255,255,255,.12);
-    color:#e6e6f0;
-    border-radius:6px;
-    padding:8px 10px;
+    background: rgba(255,255,255,.04);
+    border:1px solid var(--c-border-medium);
+    color: var(--c-text-primary);
+    border-radius: var(--r-md);
+    padding: var(--sp-4) var(--sp-5);
     font-size:.82rem; font-family:inherit;
+    transition: border-color var(--t-snap), box-shadow var(--t-snap);
 }
 .mp-input:focus, .mp-select:focus {
-    border-color:#66ffaa; outline:none;
-    box-shadow:0 0 0 2px rgba(102,255,170,.18);
+    border-color: var(--c-accent); outline:none;
+    box-shadow: 0 0 0 2px rgba(var(--c-accent-rgb), .22);
 }
 
 .mp-launch-btn {
-    margin-top:18px;
+    margin-top: var(--sp-7);
     width:100%;
-    background:linear-gradient(180deg, #1aa66b, #0d8a55);
+    background: linear-gradient(180deg, #1aa66b, #0d8a55);
     color:#fff; border:none;
-    border-radius:8px;
-    padding:12px;
+    border-radius: var(--r-lg);
+    padding: var(--sp-6);
     font-size:.92rem; font-weight:800;
     letter-spacing:.04em; text-transform:uppercase;
     cursor:pointer;
-    box-shadow:0 4px 12px rgba(26,166,107,.3);
-    transition:transform .12s, box-shadow .12s;
+    box-shadow: 0 4px 12px rgba(var(--c-launch-rgb), .26);
+    transition: transform var(--t-fast), box-shadow var(--t-fast);
 }
-.mp-launch-btn:hover { transform:translateY(-1px); box-shadow:0 6px 18px rgba(26,166,107,.45); }
+.mp-launch-btn:hover { transform:translateY(-1px); box-shadow: 0 6px 18px rgba(var(--c-launch-rgb), .42); }
 .mp-launch-btn:active { transform:translateY(0); }
 
 .mp-secondary-btn {
-    margin-top:8px; width:100%;
-    background:rgba(255,255,255,.05);
-    border:1px solid rgba(255,255,255,.14);
-    color:#cfd0e0;
-    border-radius:6px; padding:8px;
+    margin-top: var(--sp-4); width:100%;
+    background: rgba(255,255,255,.05);
+    border:1px solid var(--c-border-medium);
+    color: var(--c-text-secondary);
+    border-radius: var(--r-md); padding: var(--sp-4);
     font-size:.78rem; font-weight:600; cursor:pointer;
-    transition:all .15s;
+    transition: border-color var(--t-snap), color var(--t-snap), background var(--t-snap);
 }
-.mp-secondary-btn:hover { border-color:rgba(102,255,170,.45); color:#fff; }
+.mp-secondary-btn:hover { border-color: var(--c-accent-border-hi); color: var(--c-text-primary); }
 
-.mp-row { display:flex; gap:8px; align-items:center; }
+.mp-row { display:flex; gap: var(--sp-4); align-items:center; }
 .mp-row > .mp-input { flex:1; }
 .mp-row .mp-time {
-    font-family:monospace; font-size:.76rem; color:#88a;
+    font-family:monospace; font-size:.76rem; color: var(--c-text-faint);
     min-width:48px; text-align:right;
 }
 
 /* View-mode toggle ─────────────────────────────────── */
-.mp-mode-toggle { display:flex; gap:0; border-radius:6px; overflow:hidden; }
+.mp-mode-toggle { display:flex; gap:0; border-radius: var(--r-md); overflow:hidden; }
 .mp-mode-btn {
-    flex:1; background:rgba(255,255,255,.04);
-    border:1px solid rgba(255,255,255,.12);
-    color:#aab; padding:8px 10px;
+    flex:1; background: rgba(255,255,255,.04);
+    border:1px solid var(--c-border-medium);
+    color: var(--c-text-muted); padding: var(--sp-4) var(--sp-5);
     font-size:.74rem; font-weight:700; cursor:pointer;
-    transition:all .15s;
+    transition: color var(--t-snap), background var(--t-snap), border-color var(--t-snap);
 }
 .mp-mode-btn + .mp-mode-btn { border-left:none; }
-.mp-mode-btn:hover { color:#fff; }
+.mp-mode-btn:hover { color: var(--c-text-primary); }
 .mp-mode-btn.on {
-    background:rgba(102,255,170,.16);
-    color:#66ffaa;
-    border-color:#3aa67a;
-    box-shadow:inset 0 0 12px rgba(102,255,170,.2);
+    background: var(--c-launch-soft);
+    color: var(--c-launch);
+    border-color: var(--c-launch-border);
+    box-shadow: inset 0 0 12px rgba(var(--c-launch-rgb), .20);
 }
 
 /* Δv budget panel ──────────────────────────────────── */
 .mp-dv-budget {
-    margin-top:10px;
-    background:rgba(0,0,0,.3);
-    border:1px solid rgba(255,255,255,.1);
-    border-radius:8px; padding:10px 12px;
+    margin-top: var(--sp-5);
+    background: var(--c-surface-inset);
+    border:1px solid var(--c-border-soft);
+    border-radius: var(--r-lg); padding: var(--sp-5) var(--sp-6);
     font-family:monospace; font-size:.7rem;
 }
-.mp-dv-row { display:flex; justify-content:space-between; gap:10px; line-height:1.5; }
-.mp-dv-row .k { color:#aab; }
-.mp-dv-row .v { color:#cfd; font-weight:700; }
-.mp-dv-row.mp-dv-margin { margin-top:4px; padding-top:4px; border-top:1px dashed rgba(255,255,255,.08); }
+.mp-dv-row { display:flex; justify-content:space-between; gap: var(--sp-5); line-height:1.5; }
+.mp-dv-row .k { color: var(--c-text-muted); }
+.mp-dv-row .v { color: var(--c-text-primary); font-weight:700; }
+.mp-dv-row.mp-dv-margin { margin-top: var(--sp-2); padding-top: var(--sp-2); border-top:1px dashed var(--c-border-faint); }
 .mp-dv-row.mp-dv-margin .v { font-size:.8rem; }
-.mp-dv-margin.ok    .v { color:#66ffaa; }
-.mp-dv-margin.tight .v { color:#ffcc66; }
-.mp-dv-margin.short .v { color:#ff7766; }
+.mp-dv-margin.ok    .v { color: var(--c-launch); }
+.mp-dv-margin.tight .v { color: #ffcc66; }
+.mp-dv-margin.short .v { color: #ff7766; }
 .mp-dv-bar {
-    margin-top:6px; height:6px; border-radius:3px;
-    background:rgba(255,255,255,.06); overflow:hidden;
+    margin-top: var(--sp-3); height:6px; border-radius:3px;
+    background: rgba(255,255,255,.06); overflow:hidden;
 }
 .mp-dv-bar-fill {
-    height:100%; background:#66ffaa;
-    transition:width .25s ease, background-color .25s ease;
+    height:100%; background: var(--c-launch);
+    transition: width var(--t-medium), background-color var(--t-medium);
 }
 .mp-dv-bar-fill.tight { background:#ffcc66; }
 .mp-dv-bar-fill.short { background:#ff7766; }
-.mp-dv-breakdown { margin-top:5px; color:#88a; font-size:.62rem; line-height:1.4; }
+.mp-dv-breakdown { margin-top: var(--sp-3); color: var(--c-text-faint); font-size:.62rem; line-height:1.4; }
 .mp-launch-btn.tight { box-shadow:0 0 0 2px rgba(255,204,102,.4) inset; }
 .mp-launch-btn.short {
     background:linear-gradient(180deg, #aa3322, #771a11);
@@ -298,55 +383,166 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
     box-shadow:0 4px 12px rgba(255,180,80,.32);
 }
 
-/* Time controls ────────────────────────────────────── */
+/* Time controls ──────────────────────────────────────────────────────
+   The simulation clock — display + transport bar + speed presets +
+   sim-window scrubber. Anchors visually with cyan chrome (info-panel
+   family) so it reads as data instrumentation rather than launch UI. */
 .mp-time-display {
-    font-family:monospace; font-size:.84rem; color:#cfd0e0;
-    background:rgba(0,0,0,.35); border:1px solid rgba(255,255,255,.08);
-    border-radius:6px; padding:6px 10px; margin-bottom:6px; text-align:center;
+    font-family:monospace; font-size:.84rem; color: var(--c-text-primary);
+    background: var(--c-surface-inset);
+    border:1px solid var(--c-accent-border);
+    border-radius: var(--r-md);
+    padding: var(--sp-3) var(--sp-5); margin-bottom: var(--sp-3); text-align:center;
+    letter-spacing:.02em;
 }
-.mp-time-bar { display:flex; gap:2px; margin-bottom:4px; }
+.mp-time-display .mp-time-day { color: var(--c-text-muted); font-size:.66rem; margin-left: var(--sp-3); }
+.mp-time-bar { display:flex; gap: var(--sp-1); margin-bottom: var(--sp-2); }
 .mp-time-bar > button {
-    flex:1; background:rgba(255,255,255,.04);
-    border:1px solid rgba(255,255,255,.12);
-    color:#cfd0e0; padding:6px 0;
+    flex:1; background: rgba(255,255,255,.04);
+    border:1px solid var(--c-border-medium);
+    color: var(--c-text-secondary); padding: var(--sp-3) 0;
     font-family:monospace; font-size:.78rem; font-weight:700;
-    cursor:pointer; transition:all .15s;
+    cursor:pointer;
+    transition: color var(--t-snap), background var(--t-snap), border-color var(--t-snap);
 }
 .mp-time-bar > button + button { border-left:none; }
-.mp-time-bar > button:first-child { border-top-left-radius:6px; border-bottom-left-radius:6px; }
-.mp-time-bar > button:last-child  { border-top-right-radius:6px; border-bottom-right-radius:6px; }
-.mp-time-bar > button:hover { border-color:rgba(102,255,170,.45); color:#fff; }
+.mp-time-bar > button:first-child { border-top-left-radius: var(--r-md); border-bottom-left-radius: var(--r-md); }
+.mp-time-bar > button:last-child  { border-top-right-radius: var(--r-md); border-bottom-right-radius: var(--r-md); }
+.mp-time-bar > button:hover { border-color: var(--c-accent-border-hi); color: var(--c-text-primary); }
 .mp-time-bar > button.on {
-    background:rgba(102,170,255,.16); color:#88bbff; border-color:#4488cc;
+    background: var(--c-accent-soft); color: var(--c-accent);
+    border-color: var(--c-accent-border-hi);
+    box-shadow: inset 0 0 10px rgba(var(--c-accent-rgb), .18);
 }
 .mp-time-bar > button.paused {
-    background:rgba(255,120,120,.18); color:#ffaaaa; border-color:#aa6666;
+    background: rgba(255, 120, 120, .18); color:#ffaaaa; border-color:#aa6666;
+}
+
+/* Sim-window timeline ─────────────────────────────────────────────
+   Visualises scenario JD's position between simStartJD..simEndJD as a
+   draggable slider. Bound-edge buttons jump to start/end; the chip
+   glows orange when the clock has clamped against an edge. */
+.mp-window {
+    margin-top: var(--sp-3);
+    background: var(--c-surface-inset);
+    border:1px solid var(--c-accent-border);
+    border-radius: var(--r-lg);
+    padding: var(--sp-4) var(--sp-5) var(--sp-5);
+}
+.mp-window-row {
+    display:flex; gap: var(--sp-3); align-items:center;
+    font-family:monospace; font-size:.66rem;
+    color: var(--c-text-muted);
+}
+.mp-window-row .mp-window-edge {
+    flex:0 0 auto;
+    background: rgba(255,255,255,.04);
+    border:1px solid var(--c-border-medium);
+    color: var(--c-text-secondary);
+    padding: 2px var(--sp-3);
+    border-radius: var(--r-sm);
+    font:inherit; font-weight:700; cursor:pointer;
+    transition: border-color var(--t-snap), color var(--t-snap);
+}
+.mp-window-row .mp-window-edge:hover {
+    border-color: var(--c-accent-border-hi); color: var(--c-text-primary);
+}
+.mp-window-row .mp-window-stamp { font-weight:700; color: var(--c-text-secondary); }
+.mp-window-input {
+    flex:1; min-width:0;
+    background: transparent;
+    border:1px dashed var(--c-border-faint);
+    color: var(--c-text-secondary);
+    font: inherit; font-weight:700;
+    padding: 2px var(--sp-2); border-radius: var(--r-sm);
+}
+.mp-window-input:focus {
+    outline:none;
+    border-color: var(--c-accent-border-hi);
+    background: rgba(var(--c-accent-rgb), .06);
+    color: var(--c-text-primary);
+}
+.mp-window-track {
+    margin: var(--sp-3) 0 var(--sp-2);
+    width:100%; -webkit-appearance:none; appearance:none;
+    background: transparent;
+}
+.mp-window-track::-webkit-slider-runnable-track {
+    height:6px; border-radius:3px;
+    background: linear-gradient(90deg,
+        var(--c-launch-soft) 0%,
+        var(--c-accent-soft) 50%,
+        var(--c-storm-soft) 100%);
+    border:1px solid var(--c-border-soft);
+}
+.mp-window-track::-moz-range-track {
+    height:6px; border-radius:3px;
+    background: linear-gradient(90deg,
+        var(--c-launch-soft), var(--c-accent-soft), var(--c-storm-soft));
+    border:1px solid var(--c-border-soft);
+}
+.mp-window-track::-webkit-slider-thumb {
+    -webkit-appearance:none; appearance:none;
+    width:14px; height:14px; margin-top:-5px;
+    background: var(--c-accent);
+    border-radius:50%;
+    box-shadow: 0 0 8px var(--c-accent-glow);
+    cursor:grab;
+}
+.mp-window-track::-moz-range-thumb {
+    width:14px; height:14px;
+    background: var(--c-accent);
+    border:none; border-radius:50%;
+    box-shadow: 0 0 8px var(--c-accent-glow);
+    cursor:grab;
+}
+.mp-window-meta {
+    display:flex; justify-content:space-between; gap: var(--sp-3);
+    font-family:monospace; font-size:.62rem; color: var(--c-text-faint);
+}
+.mp-window-meta strong { color: var(--c-text-secondary); font-weight:700; }
+.mp-window-flag {
+    display:inline-flex; align-items:center; gap: var(--sp-2);
+    margin-top: var(--sp-3);
+    padding: var(--sp-2) var(--sp-4);
+    background: var(--c-storm-soft);
+    border:1px solid var(--c-storm-border);
+    border-radius: var(--r-sm);
+    font-family:monospace; font-size:.62rem;
+    color: var(--c-storm); font-weight:700;
+}
+.mp-window-flag[hidden] { display:none; }
+.mp-window-flag::before {
+    content:''; width:6px; height:6px; border-radius:50%;
+    background: var(--c-storm);
+    box-shadow: 0 0 6px var(--c-storm-glow);
 }
 
 /* Plan readout ─────────────────────────────────────── */
 .mp-plan {
-    margin-top:10px;
-    background:rgba(0,0,0,.3);
-    border:1px solid rgba(255,255,255,.08);
-    border-radius:8px; padding:10px 12px;
-    font-family:monospace; font-size:.72rem; color:#cfd;
+    margin-top: var(--sp-5);
+    background: var(--c-surface-inset);
+    border:1px solid var(--c-border-soft);
+    border-radius: var(--r-lg); padding: var(--sp-5) var(--sp-6);
+    font-family:monospace; font-size:.72rem; color: var(--c-text-secondary);
 }
 .mp-plan-title {
     color:#ff99dd; font-weight:800; font-size:.66rem;
-    letter-spacing:.12em; text-transform:uppercase; margin-bottom:8px;
+    letter-spacing:.12em; text-transform:uppercase; margin-bottom: var(--sp-4);
 }
-.mp-plan-row { display:flex; justify-content:space-between; gap:10px; padding:2px 0; }
-.mp-plan-row .k { color:#88a; }
-.mp-plan-row .v { color:#fff; font-weight:700; }
-.mp-plan-row .v.warn { color:#ffaa66; }
-.mp-plan-empty { color:#667; font-style:italic; }
+.mp-plan-row { display:flex; justify-content:space-between; gap: var(--sp-5); padding:2px 0; }
+.mp-plan-row .k { color: var(--c-text-muted); }
+.mp-plan-row .v { color: var(--c-text-primary); font-weight:700; }
+.mp-plan-row .v.warn { color: var(--c-storm); }
+.mp-plan-empty { color: var(--c-text-faint); font-style:italic; }
 
 /* 3D Viewport ──────────────────────────────────────── */
 #mp-3d-wrap {
-    background:rgba(0,0,0,.5);
-    border:1px solid rgba(255,255,255,.08);
-    border-radius:12px; overflow:hidden;
+    background: rgba(0,0,0,.5);
+    border:1px solid var(--c-border-soft);
+    border-radius: var(--r-xl); overflow:hidden;
     position:relative;
+    box-shadow: var(--shadow-panel);
 }
 #mp-3d {
     width:100%; height:580px;
@@ -355,28 +551,34 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
 @media (max-width:980px) { #mp-3d { height:440px; } }
 
 #mp-3d-help {
-    padding:8px 14px;
-    font-size:.68rem; color:#778; font-family:monospace; letter-spacing:.04em;
-    border-top:1px solid rgba(255,255,255,.06);
+    padding: var(--sp-4) var(--sp-7);
+    font-size:.68rem; color: var(--c-text-faint); font-family:monospace; letter-spacing:.04em;
+    border-top:1px solid var(--c-border-faint);
 }
-#mp-3d-help strong { color:#66ffaa; font-weight:700; }
+#mp-3d-help strong { color: var(--c-launch); font-weight:700; }
 
 #mp-hud {
     position:absolute; top:12px; right:12px;
-    background:rgba(6,4,18,.85); backdrop-filter:blur(8px);
-    border:1px solid rgba(102,255,170,.2);
-    border-radius:8px; padding:10px 12px;
-    font-family:monospace; font-size:.72rem; color:#cfd;
+    background:
+        radial-gradient(120% 90% at 100% 0%, var(--c-accent-bg-overlay), transparent 55%),
+        linear-gradient(180deg, var(--c-surface-1), var(--c-surface-2));
+    backdrop-filter: var(--blur-glass);
+    -webkit-backdrop-filter: var(--blur-glass);
+    border:1px solid var(--c-accent-border);
+    border-radius: var(--r-xl);
+    padding: var(--sp-5) var(--sp-6);
+    font-family:monospace; font-size:.72rem; color: var(--c-text-secondary);
     min-width:220px;
     pointer-events:none;
+    box-shadow: var(--shadow-panel);
 }
 #mp-hud .hud-title {
-    color:#66ffaa; font-weight:800; font-size:.66rem;
-    letter-spacing:.12em; text-transform:uppercase; margin-bottom:6px;
+    color: var(--c-accent); font-weight:800; font-size:.66rem;
+    letter-spacing:.12em; text-transform:uppercase; margin-bottom: var(--sp-3);
 }
-#mp-hud .hud-row { display:flex; justify-content:space-between; gap:10px; padding:1px 0; }
-#mp-hud .hud-row .k { color:#88a; }
-#mp-hud .hud-row .v { color:#fff; font-weight:700; }
+#mp-hud .hud-row { display:flex; justify-content:space-between; gap: var(--sp-5); padding:1px 0; }
+#mp-hud .hud-row .k { color: var(--c-text-muted); }
+#mp-hud .hud-row .v { color: var(--c-text-primary); font-weight:700; }
 /* Perf HUD ────────────────────────────────────────────────────────────
    Bottom-right toggleable overlay (Shift+P). Off by default — when
    enabled the planner module also flips its profiler on so the
@@ -408,14 +610,18 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
    single-line summary; click again to expand. */
 .mp-mars-dash {
     position:absolute; top:12px; left:12px;
-    background:rgba(6,4,18,.85); backdrop-filter:blur(8px);
-    border:1px solid rgba(255,170,102,.35);
-    border-radius:8px;
+    background:
+        radial-gradient(120% 90% at 0% 0%, var(--c-storm-bg-overlay), transparent 55%),
+        linear-gradient(180deg, var(--c-surface-1), var(--c-surface-2));
+    backdrop-filter: var(--blur-glass);
+    -webkit-backdrop-filter: var(--blur-glass);
+    border:1px solid var(--c-storm-border);
+    border-radius: var(--r-xl);
     font-family:monospace; font-size:.72rem;
-    color:#cfd;
+    color: var(--c-text-secondary);
     min-width:240px; max-width:300px;
     pointer-events:auto;
-    box-shadow:0 4px 16px rgba(0,0,0,.35);
+    box-shadow: var(--shadow-panel);
 }
 .mp-mars-dash[hidden] { display:none; }
 .mp-mars-dash-toggle {
@@ -473,12 +679,17 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
     /* Sits at the bottom-right so it doesn't fight the Mission Status
        card at top-right. Bumps up slightly when the help bar is visible. */
     position:absolute; bottom:12px; right:12px;
-    background:rgba(6,4,18,.85); backdrop-filter:blur(8px);
-    border:1px solid rgba(255,170,102,.32);
-    border-radius:8px; padding:10px 12px;
-    font-family:monospace; font-size:.72rem; color:#cfd;
+    background:
+        radial-gradient(120% 90% at 100% 100%, var(--c-storm-bg-overlay), transparent 55%),
+        linear-gradient(180deg, var(--c-surface-1), var(--c-surface-2));
+    backdrop-filter: var(--blur-glass);
+    -webkit-backdrop-filter: var(--blur-glass);
+    border:1px solid var(--c-storm-border);
+    border-radius: var(--r-xl); padding: var(--sp-5) var(--sp-6);
+    font-family:monospace; font-size:.72rem; color: var(--c-text-secondary);
     min-width:240px; max-width:300px;
     pointer-events:none;
+    box-shadow: var(--shadow-panel);
 }
 .mp-mission-hud .hud-title {
     color:#ffaa66;
@@ -534,35 +745,46 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
 #mp-mode-badge {
     position:absolute; top:12px; left:12px;
     background:rgba(6,4,18,.85); backdrop-filter:blur(8px);
-    border:1px solid rgba(102,255,170,.2);
-    border-radius:8px; padding:6px 10px;
-    font-family:monospace; font-size:.7rem; color:#66ffaa;
+    border:1px solid var(--c-launch-border);
+    border-radius: var(--r-md); padding: var(--sp-3) var(--sp-5);
+    font-family:monospace; font-size:.7rem; color: var(--c-launch);
     text-transform:uppercase; letter-spacing:.1em; font-weight:800;
     pointer-events:none;
 }
 
 .mp-log {
-    margin-top:10px;
+    margin-top: var(--sp-5);
     max-height:200px; overflow-y:auto;
-    background:rgba(0,0,0,.35);
-    border:1px solid rgba(255,255,255,.06);
-    border-radius:8px;
-    padding:8px 10px;
+    background: var(--c-surface-inset);
+    border:1px solid var(--c-border-faint);
+    border-radius: var(--r-lg);
+    padding: var(--sp-4) var(--sp-5);
     font-family:monospace; font-size:.7rem;
-    color:#bcd;
+    color: var(--c-text-secondary);
 }
 .mp-log-row { padding:3px 0; border-bottom:1px dashed rgba(255,255,255,.04); }
 .mp-log-row:last-child { border-bottom:0; }
-.mp-log-row .t { color:#66ffaa; margin-right:6px; }
+.mp-log-row .t { color: var(--c-launch); margin-right: var(--sp-3); }
 .mp-log-row .lvl-launch  { color:#ffcc66; }
-.mp-log-row .lvl-deploy  { color:#66ffaa; }
+.mp-log-row .lvl-deploy  { color: var(--c-launch); }
 .mp-log-row .lvl-transfer{ color:#ff99dd; }
-.mp-log-row .lvl-window  { color:#aaccff; }
+.mp-log-row .lvl-window  { color: var(--c-accent); }
 .mp-log-row .lvl-capture { color:#ffeecc; }
 
 .mp-section-divider {
-    margin:14px -16px;
-    border-top:1px solid rgba(255,255,255,.06);
+    margin: var(--sp-7) calc(-1 * var(--sp-7));
+    border-top:1px solid var(--c-border-faint);
+}
+
+/* Subtle scrollbar on the controls aside + log so the page chrome
+   matches the cyan family. Webkit only — Firefox keeps system styling. */
+#mp-controls,
+#mp-log { scrollbar-width: thin; scrollbar-color: var(--c-accent-border-hi) transparent; }
+#mp-controls::-webkit-scrollbar,
+#mp-log::-webkit-scrollbar { width:6px; }
+#mp-controls::-webkit-scrollbar-thumb,
+#mp-log::-webkit-scrollbar-thumb {
+    background: var(--c-accent-border-hi); border-radius:3px;
 }
 </style>
 <link rel="stylesheet" href="js/nav-styles.css">
@@ -615,11 +837,11 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
             <button id="mp-cam-mode-lock" class="mp-mode-btn on" type="button" title="Lock camera onto current focus (L)">⊙ Lock</button>
             <button id="mp-cam-mode-free" class="mp-mode-btn"    type="button" title="Free-fly camera (Shift+F)">⟿ Free</button>
         </div>
-        <div id="mp-sim-truth" style="margin-top:6px; padding:6px 8px; background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.06); border-radius:6px; font-size:10px; color:#778; line-height:1.45; font-family:monospace;">
-            <div><span style="color:#556;">Time base:</span> JD-anchored</div>
-            <div><span style="color:#556;">Worker:</span> <span id="mp-sim-worker-status">spawning…</span></div>
-            <div><span style="color:#556;">GT hash:</span> <span id="mp-sim-worker-hash">—</span></div>
-            <div><span style="color:#556;">Moon residual:</span> <span id="mp-sim-worker-resid">—</span></div>
+        <div id="mp-sim-truth" style="margin-top:var(--sp-3); padding:var(--sp-3) var(--sp-4); background:var(--c-surface-inset); border:1px solid var(--c-border-faint); border-radius:var(--r-md); font-size:10px; color:var(--c-text-muted); line-height:1.45; font-family:monospace;">
+            <div><span style="color:var(--c-text-faint);">Time base:</span> JD-anchored</div>
+            <div><span style="color:var(--c-text-faint);">Worker:</span> <span id="mp-sim-worker-status">spawning…</span></div>
+            <div><span style="color:var(--c-text-faint);">GT hash:</span> <span id="mp-sim-worker-hash">—</span></div>
+            <div><span style="color:var(--c-text-faint);">Moon residual:</span> <span id="mp-sim-worker-resid">—</span></div>
         </div>
 
         <div class="mp-label">Origin Body</div>
@@ -743,11 +965,11 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
 
         <div class="mp-section-divider"></div>
 
-        <div class="mp-label">Scenario Time</div>
+        <div class="mp-label">Simulation Clock <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--c-text-faint); font-family:monospace;">· Space pauses</span></div>
         <div class="mp-time-display" id="mp-time-display">— UTC</div>
 
         <div class="mp-time-bar" role="toolbar" aria-label="Time playback">
-            <button id="mp-time-pause" type="button" title="Pause / Play">⏸</button>
+            <button id="mp-time-pause" type="button" title="Pause / Play (Space)">⏸</button>
             <button id="mp-time-back-d" type="button" title="−1 day">«</button>
             <button id="mp-time-back-h" type="button" title="−1 hour">‹</button>
             <button id="mp-time-fwd-h"  type="button" title="+1 hour">›</button>
@@ -763,10 +985,32 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
             <button class="mp-time-preset" data-rate="7"        type="button">×week</button>
         </div>
 
-        <div class="mp-label">Scrub (± days from anchor)</div>
-        <div class="mp-row">
-            <input id="mp-jd-scrub" class="mp-input" type="range" min="-365" max="365" step="0.05" value="0">
-            <span class="mp-time" id="mp-jd-scrub-val">+0.0d</span>
+        <!-- Simulation window — start/end JD bounds + timeline scrubber.
+             The big slider is the cursor between sim-start and sim-end;
+             the start/end stamps are click-to-edit (ISO-8601 date) and the
+             [⇤] / [⇥] buttons jump straight to either edge. The amber
+             flag pops out when the clock has clamped against an edge. -->
+        <div class="mp-window" aria-label="Simulation window">
+            <div class="mp-window-row">
+                <button id="mp-sim-start-btn" class="mp-window-edge" type="button" title="Jump to window start">⇤</button>
+                <span style="color:var(--c-text-faint);">start</span>
+                <input id="mp-sim-start-input" class="mp-window-input" type="date" aria-label="Sim start date">
+            </div>
+            <input id="mp-window-track" class="mp-window-track" type="range"
+                   min="0" max="1000" step="1" value="0"
+                   aria-label="Scenario time inside simulation window">
+            <div class="mp-window-row">
+                <button id="mp-sim-end-btn" class="mp-window-edge" type="button" title="Jump to window end">⇥</button>
+                <span style="color:var(--c-text-faint);">end</span>
+                <input id="mp-sim-end-input" class="mp-window-input" type="date" aria-label="Sim end date">
+            </div>
+            <div class="mp-window-meta">
+                <span><strong id="mp-window-elapsed">+0.0 d</strong> elapsed</span>
+                <span><strong id="mp-window-remaining">— d</strong> remaining</span>
+            </div>
+            <div id="mp-window-flag" class="mp-window-flag" hidden>
+                <span id="mp-window-flag-msg">Reached end of window — paused.</span>
+            </div>
         </div>
 
         <div class="mp-label">Animation Speed</div>
@@ -775,7 +1019,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
             <span class="mp-time" id="mp-timescale-val">1.0×</span>
         </div>
 
-        <button id="mp-clear" class="mp-secondary-btn" type="button" style="border-color:rgba(255,120,120,.4); color:#ffaaaa;">Clear All Vehicles</button>
+        <button id="mp-clear" class="mp-secondary-btn" type="button" style="border-color:rgba(255,120,120,.40); color:#ffaaaa;">Clear All Vehicles</button>
 
         <div class="mp-label">Mission Log</div>
         <div id="mp-log" class="mp-log"><div class="mp-log-row"><span class="t">--:--</span>Ready for launch.</div></div>
@@ -2056,8 +2300,9 @@ document.getElementById('mp-clear').addEventListener('click', () => {
 // ── Time controls ───────────────────────────────────────────────────
 // Speed presets feed setSimDaysPerSec (planet drift rate, days/real-second).
 // Pause flips timeScale to 0 so spacecraft animations halt too. Step buttons
-// nudge scenarioJD without changing playback. Scrub slider tracks a ±365 d
-// offset from an anchor (initially "now") for fast date scanning.
+// nudge scenarioJD without changing playback. The sim-window scrubber maps
+// the slider 0..1000 onto [simStartJD, simEndJD] so dragging does not need
+// recalibrating when the user widens / narrows the window.
 const tsRange = document.getElementById('mp-timescale');
 const tsVal   = document.getElementById('mp-timescale-val');
 tsRange.addEventListener('input', () => {
@@ -2068,27 +2313,87 @@ tsRange.addEventListener('input', () => {
 
 const tdEl       = document.getElementById('mp-time-display');
 const pauseBtn   = document.getElementById('mp-time-pause');
-const jdScrub    = document.getElementById('mp-jd-scrub');
-const jdScrubVal = document.getElementById('mp-jd-scrub-val');
+const winTrack   = document.getElementById('mp-window-track');
+const winStartIn = document.getElementById('mp-sim-start-input');
+const winEndIn   = document.getElementById('mp-sim-end-input');
+const winStartBt = document.getElementById('mp-sim-start-btn');
+const winEndBt   = document.getElementById('mp-sim-end-btn');
+const winElapsed = document.getElementById('mp-window-elapsed');
+const winRemain  = document.getElementById('mp-window-remaining');
+const winFlag    = document.getElementById('mp-window-flag');
+const winFlagMsg = document.getElementById('mp-window-flag-msg');
+
 const timeState  = {
     paused:        false,
     rate_d_per_s:  1.0,                 // matches initial ".on" preset (×day)
-    scrubAnchor:   planner.getScenarioJD(),
+    // simStartJD/simEndJD shadow the planner's bounds so we can render the
+    // scrubber + ISO date inputs without round-tripping through getSimBounds
+    // every frame. Kept in sync via setBounds() below.
+    simStartJD:    planner.getScenarioJD() - 180,
+    simEndJD:      planner.getScenarioJD() + 180,
 };
+// Tell the planner about the initial window so its tick clamps right away.
+planner.setSimBounds(timeState.simStartJD, timeState.simEndJD);
 
+// JD ↔ ISO YYYY-MM-DD round-trip. The <input type="date"> control speaks
+// ISO-8601 dates; we lose the H:M:S precision, but the user picking a
+// boundary at midnight UTC is the right granularity for a sim-window.
+function jdToISODate(jd) {
+    const ms = (jd - 2440587.5) * 86_400_000;
+    return new Date(ms).toISOString().slice(0, 10);
+}
+function isoDateToJD(iso) {
+    const ms = Date.parse(iso + 'T00:00:00Z');
+    if (!Number.isFinite(ms)) return null;
+    return ms / 86_400_000 + 2440587.5;
+}
 function fmtJD(jd) {
     const ms = (jd - 2440587.5) * 86400 * 1000;
-    return new Date(ms).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+    const d = new Date(ms);
+    const iso = d.toISOString().slice(0, 16).replace('T', ' ');
+    const day = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getUTCDay()];
+    return `${iso} UTC <span class="mp-time-day">${day}</span>`;
 }
-function syncScrub() {
-    const off = planner.getScenarioJD() - timeState.scrubAnchor;
-    const c = Math.max(-365, Math.min(365, off));
-    jdScrub.value = String(c);
-    jdScrubVal.textContent = `${off >= 0 ? '+' : ''}${off.toFixed(1)}d`;
+
+function syncWindowTrack() {
+    const jd  = planner.getScenarioJD();
+    const span = Math.max(1e-9, timeState.simEndJD - timeState.simStartJD);
+    const frac = (jd - timeState.simStartJD) / span;
+    const v = Math.max(0, Math.min(1000, Math.round(frac * 1000)));
+    winTrack.value = String(v);
+    const elapsed   = jd - timeState.simStartJD;
+    const remaining = timeState.simEndJD - jd;
+    winElapsed.textContent = `${elapsed >= 0 ? '+' : ''}${elapsed.toFixed(1)} d`;
+    winRemain.textContent  = `${remaining.toFixed(1)} d`;
 }
+
+// Paint the start/end ISO inputs from the live state (used on init + after
+// "Reset to now" rebases the window).
+function renderWindowEdges() {
+    winStartIn.value = jdToISODate(timeState.simStartJD);
+    winEndIn.value   = jdToISODate(timeState.simEndJD);
+}
+
+function setBounds(startJD, endJD) {
+    // Guard: keep at least 1 day of width so the slider math doesn't divide
+    // by zero. Swap if user inverted the dates.
+    if (endJD <= startJD) endJD = startJD + 1;
+    timeState.simStartJD = startJD;
+    timeState.simEndJD   = endJD;
+    planner.setSimBounds(startJD, endJD);
+    renderWindowEdges();
+    refreshTimeUI();
+    if (winFlag.hidden === false) winFlag.hidden = true;
+}
+
 function refreshTimeUI() {
-    tdEl.textContent = fmtJD(planner.getScenarioJD());
-    syncScrub();
+    tdEl.innerHTML = fmtJD(planner.getScenarioJD());
+    syncWindowTrack();
+    // Auto-clear the bound flag once the user has scrubbed back inside the
+    // window or unpaused with a non-zero rate (planner side already cleared
+    // simBoundHit on setScenarioJD; mirror that here).
+    const b = planner.getSimBounds();
+    if (!b.hit && !winFlag.hidden) winFlag.hidden = true;
 }
 function setPaused(p) {
     timeState.paused = p;
@@ -2114,10 +2419,87 @@ document.getElementById('mp-time-fwd-h' ).addEventListener('click', () => step( 
 document.getElementById('mp-time-fwd-d' ).addEventListener('click', () => step( 1));
 document.getElementById('mp-time-now'   ).addEventListener('click', () => {
     const jd = jdNow();
-    timeState.scrubAnchor = jd;
+    // Re-anchor the sim window to "now" with the same width the user had
+    // before — feels less destructive than collapsing it back to ±180 d.
+    const halfWidth = (timeState.simEndJD - timeState.simStartJD) / 2;
+    setBounds(jd - halfWidth, jd + halfWidth);
     planner.setScenarioJD(jd);
     refreshTimeUI();
 });
+
+// Sim-window edge controls.  Date inputs commit on `change` (Enter / blur);
+// the ⇤ / ⇥ buttons jump the clock to either edge without touching bounds.
+winStartIn.addEventListener('change', () => {
+    const jd = isoDateToJD(winStartIn.value);
+    if (jd != null) setBounds(jd, timeState.simEndJD);
+    else renderWindowEdges();
+});
+winEndIn.addEventListener('change', () => {
+    const jd = isoDateToJD(winEndIn.value);
+    if (jd != null) setBounds(timeState.simStartJD, jd);
+    else renderWindowEdges();
+});
+winStartBt.addEventListener('click', () => {
+    planner.setScenarioJD(timeState.simStartJD);
+    refreshTimeUI();
+});
+winEndBt.addEventListener('click', () => {
+    planner.setScenarioJD(timeState.simEndJD);
+    refreshTimeUI();
+});
+
+// Drag the timeline scrubber → maps 0..1000 onto the JD window. We pause
+// the clock while the user is actively dragging (pointerdown..pointerup)
+// so the cursor doesn't fight the auto-advance.
+let _winDragWasPaused = null;
+const onWinDragStart = () => {
+    if (_winDragWasPaused === null) {
+        _winDragWasPaused = timeState.paused;
+        if (!timeState.paused) setPaused(true);
+    }
+};
+const onWinDragEnd = () => {
+    if (_winDragWasPaused !== null) {
+        if (!_winDragWasPaused) setPaused(false);
+        _winDragWasPaused = null;
+    }
+};
+winTrack.addEventListener('pointerdown', onWinDragStart);
+winTrack.addEventListener('pointerup',   onWinDragEnd);
+winTrack.addEventListener('pointercancel', onWinDragEnd);
+winTrack.addEventListener('input', () => {
+    const frac = parseFloat(winTrack.value) / 1000;
+    const jd   = timeState.simStartJD + frac * (timeState.simEndJD - timeState.simStartJD);
+    planner.setScenarioJD(jd);
+    refreshTimeUI();
+});
+
+// Bound-hit toast — the planner emits 'mp:sim-bound' once per edge-touch
+// from a non-zero rate. Surfaces an amber chip + nudges the pause button
+// to reflect the auto-pause that just happened in the tick.
+window.addEventListener('mp:sim-bound', (ev) => {
+    const edge = ev.detail?.edge;
+    winFlagMsg.textContent = edge === 'end'
+        ? 'Reached end of window — clock paused. Extend the end date or jump back.'
+        : 'Reached start of window — clock paused. Extend the start date or jump forward.';
+    winFlag.hidden = false;
+    timeState.paused = true;
+    pauseBtn.textContent = '▶';
+    pauseBtn.classList.add('paused');
+    pushLog(`⏹ Sim clock hit ${edge} of window — paused`, 'window');
+});
+
+// Space toggles pause (skip when typing in inputs / selects so we don't
+// hijack the date pickers / payload-name field).
+window.addEventListener('keydown', (e) => {
+    if (e.code !== 'Space') return;
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
+    e.preventDefault();
+    setPaused(!timeState.paused);
+});
+
+renderWindowEdges();
 
 // Skip to next mission event — finds the soonest upcoming arrival /
 // phase transition and warps both elapsed (mission animation) and
@@ -2127,6 +2509,13 @@ function skipToNextEvent() {
     if (!r) {
         pushLog('⏭ No upcoming mission events to skip to', 'window');
         return;
+    }
+    // If the warp landed past the current sim-end, auto-extend the window
+    // a comfortable 30 d past the new cursor — otherwise the next tick
+    // would slam scenarioJD back to the bound and feel broken.
+    const jd = planner.getScenarioJD();
+    if (jd > timeState.simEndJD - 1) {
+        setBounds(timeState.simStartJD, jd + 30);
     }
     refreshTimeUI();
     const days = r.advanced_seconds * timeState.rate_d_per_s;
@@ -2141,13 +2530,6 @@ document.querySelectorAll('.mp-time-preset').forEach(btn => {
         timeState.rate_d_per_s = parseFloat(btn.dataset.rate);
         planner.setSimDaysPerSec(timeState.rate_d_per_s);
     });
-});
-
-jdScrub.addEventListener('input', () => {
-    const off = parseFloat(jdScrub.value);
-    planner.setScenarioJD(timeState.scrubAnchor + off);
-    jdScrubVal.textContent = `${off >= 0 ? '+' : ''}${off.toFixed(1)}d`;
-    tdEl.textContent = fmtJD(planner.getScenarioJD());
 });
 
 planner.setSimDaysPerSec(timeState.rate_d_per_s);
@@ -2686,7 +3068,6 @@ fcCanvas.addEventListener('click', (ev) => {
     const tMs = Date.parse(hourly.time[i]);
     if (!Number.isFinite(tMs)) return;
     const targetJD = tMs / 86_400_000 + 2440587.5;
-    timeState.scrubAnchor = targetJD;
     planner.setScenarioJD(targetJD);
     refreshTimeUI();
     renderForecastGraph();   // move the cursor highlight

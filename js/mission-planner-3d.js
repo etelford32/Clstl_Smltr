@@ -298,8 +298,25 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         // mission collections (rockets, payloads, lunar, mars, tours)
         // pull from this counter so IDs are unique across kinds.
         nextMissionId: 1,
+        // Simulation window — start/end JD bounds for the scenario clock.
+        // The tick clamps scenarioJD inside [startJD, endJD]; reaching
+        // either edge with a non-zero rate auto-pauses (timeScale → 0)
+        // and emits an 'mp:sim-bound' CustomEvent so the host UI can
+        // surface a "reached end of window" affordance. Defaults span
+        // ±180 days around the spawn-time JD. setSimBounds(s,e) replaces
+        // both; null on either side disables that side's clamp.
+        simStartJD:  jdNow() - 180,
+        simEndJD:    jdNow() + 180,
+        simBoundHit: null,            // 'start' | 'end' | null (last edge hit)
     };
     function _resetSimAnchor() { state.simAnchor = null; }
+    function _emitSimBound(edge) {
+        try {
+            window.dispatchEvent(new CustomEvent('mp:sim-bound', {
+                detail: { edge, jd: state.scenarioJD },
+            }));
+        } catch (_) { /* SSR / non-browser host */ }
+    }
 
     // Burn-flash + persistent marker in one call.  The flash fades inside
     // ~1 s; the marker persists until clearAll() so the trail keeps a
@@ -1356,6 +1373,30 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         const dt         = Math.max(0, newElapsed - state.elapsed);  // monotonic frame slice
         state.elapsed    = newElapsed;
         state.scenarioJD = state.simAnchor.scenarioJD + dWall * state.simAnchor.timeScale * state.simAnchor.simDaysPerSec;
+
+        // Sim-window clamp. When scenarioJD walks past either bound at a
+        // non-zero rate we pin it to the edge, kill timeScale, and emit a
+        // single 'mp:sim-bound' so the host UI can flash a "reached end"
+        // chip. simBoundHit is cleared the next time the user changes the
+        // bounds, scrubs back inside, or unpauses with rate>0.
+        const _rate = state.timeScale * state.simDaysPerSec;
+        if (_rate !== 0 && Number.isFinite(state.simStartJD) && state.scenarioJD < state.simStartJD) {
+            state.scenarioJD = state.simStartJD;
+            if (state.simBoundHit !== 'start') {
+                state.simBoundHit = 'start';
+                _emitSimBound('start');
+            }
+            state.timeScale = 0;
+            _resetSimAnchor();
+        } else if (_rate !== 0 && Number.isFinite(state.simEndJD) && state.scenarioJD > state.simEndJD) {
+            state.scenarioJD = state.simEndJD;
+            if (state.simBoundHit !== 'end') {
+                state.simBoundHit = 'end';
+                _emitSimBound('end');
+            }
+            state.timeScale = 0;
+            _resetSimAnchor();
+        }
 
         prof.frameStart();
         prof.measure('earth',  () => updateEarthSystem(dt));   // earthSystem heliocentric pos + Earth-frame anims
@@ -2425,7 +2466,38 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             tours:          state.tours.length,
         }),
         getScenarioJD: () => state.scenarioJD,
-        setScenarioJD: (jd) => { state.scenarioJD = jd; _resetSimAnchor(); },
+        setScenarioJD: (jd) => {
+            // Clamp manual jumps inside the sim window so the user can't
+            // jam the clock past the end-of-window guard.
+            let clamped = jd;
+            if (Number.isFinite(state.simStartJD)) clamped = Math.max(state.simStartJD, clamped);
+            if (Number.isFinite(state.simEndJD))   clamped = Math.min(state.simEndJD,   clamped);
+            state.scenarioJD = clamped;
+            // Scrubbing back inside the window clears the bound-flag so a
+            // subsequent edge-hit re-fires the toast.
+            state.simBoundHit = null;
+            _resetSimAnchor();
+        },
+        // Sim window — start/end JD bounds for the scenario clock. Either
+        // value may be null to disable that side's clamp. The current
+        // scenarioJD is re-clamped inside the new bounds.
+        setSimBounds: (startJD, endJD) => {
+            state.simStartJD = Number.isFinite(startJD) ? startJD : null;
+            state.simEndJD   = Number.isFinite(endJD)   ? endJD   : null;
+            if (Number.isFinite(state.simStartJD) && state.scenarioJD < state.simStartJD) {
+                state.scenarioJD = state.simStartJD;
+            }
+            if (Number.isFinite(state.simEndJD) && state.scenarioJD > state.simEndJD) {
+                state.scenarioJD = state.simEndJD;
+            }
+            state.simBoundHit = null;
+            _resetSimAnchor();
+        },
+        getSimBounds: () => ({
+            startJD: state.simStartJD,
+            endJD:   state.simEndJD,
+            hit:     state.simBoundHit,
+        }),
         // Camera mode — free / lock. Lock re-engages tracking on the most
         // recently focused body without re-animating; free leaves the camera
         // static at its current target. The focus presets (focusEarth, etc.)
