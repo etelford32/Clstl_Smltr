@@ -28,6 +28,7 @@
 
 import * as THREE from 'three';
 import { ENGINES } from './launch-engines.js';
+import { buildPlume as buildPlumeShared } from './launch-plume.js';
 
 // ── Colors ───────────────────────────────────────────────────────────────────
 // Stainless steel is the whole point — high metalness, slight blue tint, and
@@ -563,35 +564,19 @@ function buildShip(P) {
 }
 
 // ── Plume (Raptor methalox — blue/teal flame) ────────────────────────────────
-// One-time builder shared between booster + ship clusters. The framework's
-// tickPlume() animates these at the same cadence as the shuttle's plumes.
+// Wraps the shared plume builder with Raptor methalox colors — the cool
+// blue/teal hue is the iconic CH4-rich exhaust signature.
 
 function buildRaptorPlume(radius, length) {
-    const g = new THREE.Group();
-    g.name = 'StarshipPlume';
-    g.visible = false;
-
-    const layers = [
-        { color: COLORS.plumeCore,  r: radius * 0.55, len: length * 0.55, opacity: 0.95 },
-        { color: COLORS.plumeMid,   r: radius * 1.0,  len: length * 0.85, opacity: 0.6  },
-        { color: COLORS.plumeOuter, r: radius * 1.6,  len: length,        opacity: 0.3  },
-    ];
-    for (const L of layers) {
-        const cone = new THREE.Mesh(
-            new THREE.ConeGeometry(L.r, L.len, 32, 1, true),
-            new THREE.MeshBasicMaterial({
-                color: L.color, transparent: true, opacity: L.opacity,
-                blending: THREE.AdditiveBlending, depthWrite: false,
-                side: THREE.DoubleSide,
-            })
-        );
-        cone.rotation.x = Math.PI;
-        cone.position.y = -L.len / 2;
-        cone.userData.baseOpacity = L.opacity;
-        cone.userData.baseLen     = L.len;
-        g.add(cone);
-    }
-    return g;
+    return buildPlumeShared({
+        coreRadius:  radius * 0.55, coreLen:  length * 0.55,
+        midRadius:   radius * 1.0,  midLen:   length * 0.85,
+        outerRadius: radius * 1.6,  outerLen: length,
+        coreColor:  COLORS.plumeCore,
+        midColor:   COLORS.plumeMid,
+        outerColor: COLORS.plumeOuter,
+        name: 'StarshipPlume',
+    });
 }
 
 // ── Public builder ───────────────────────────────────────────────────────────

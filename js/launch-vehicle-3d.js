@@ -36,6 +36,7 @@ import { buildPad as buildPadInfra, tickBeacons } from './launch-pad-3d.js';
 import { createMissionClock } from './launch-mission-clock.js';
 import { ENGINES } from './launch-engines.js';
 import { buildThrustOverlay, tickThrustOverlay } from './launch-thrust-overlay.js';
+import { buildPlume as buildPlumeShared, tickPlume } from './launch-plume.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -538,59 +539,19 @@ function buildSSME() {
     return g;
 }
 
-// ── Engine plume (animated) ──────────────────────────────────────────────────
-// Three nested additive cones: hot core (white-yellow), mid (orange), outer
-// (smoky tail). Their lengths and opacities flicker via setters in the tick
-// loop. Plume only renders when enabled — call setPlume(true).
+// ── Engine plume ────────────────────────────────────────────────────────────
+// Wraps the shared plume builder with shuttle-flavored colors. See
+// js/launch-plume.js for the shock-diamond + bell-flare implementation.
 
 function buildPlume() {
-    const g = new THREE.Group();
-    g.name = 'Plume';
-    g.visible = false;     // off by default; toggled by UI
-
-    const layers = [
-        { color: COLORS.plumeCore,  r: 0.4,  len: 18, opacity: 0.95 },
-        { color: COLORS.plumeMid,   r: 0.8,  len: 26, opacity: 0.55 },
-        { color: COLORS.plumeOuter, r: 1.4,  len: 36, opacity: 0.25 },
-    ];
-
-    for (const L of layers) {
-        const cone = new THREE.Mesh(
-            new THREE.ConeGeometry(L.r, L.len, 28, 1, true),
-            new THREE.MeshBasicMaterial({
-                color: L.color,
-                transparent: true,
-                opacity: L.opacity,
-                blending: THREE.AdditiveBlending,
-                depthWrite: false,
-                side: THREE.DoubleSide,
-            })
-        );
-        // Cone default has tip at +Y and base at -Y; we want plume going DOWN
-        // (-Y) from a position attached to engine bell exits.
-        cone.rotation.x = Math.PI;
-        cone.position.y = -L.len / 2;
-        cone.userData.baseOpacity = L.opacity;
-        cone.userData.baseLen = L.len;
-        g.add(cone);
-    }
-    return g;
-}
-
-function tickPlume(plume, t, throttle = 1) {
-    if (!plume.visible) return;
-    // Subtle flicker — 4 Hz core, 2 Hz outer, slight phase.
-    // Throttle drives length + width + opacity together so the plume
-    // visibly shrinks during a max-Q throttle bucket and grows back.
-    const wMul = 0.25 + 0.75 * throttle;       // never quite zero so the
-                                                // bell isn't visibly bare
-    const lMul = 0.30 + 0.70 * throttle;
-    plume.children.forEach((cone, i) => {
-        const flicker = 1 + Math.sin(t * (4 - i) * 1.5 + i) * 0.04;
-        const w = wMul * flicker;
-        cone.scale.set(w, lMul, w);
-        cone.material.opacity = cone.userData.baseOpacity * throttle *
-            (0.92 + Math.sin(t * (6 - i) + i * 2) * 0.08);
+    return buildPlumeShared({
+        coreRadius:  0.4, coreLen:  18,
+        midRadius:   0.8, midLen:   26,
+        outerRadius: 1.4, outerLen: 36,
+        coreColor:  COLORS.plumeCore,
+        midColor:   COLORS.plumeMid,
+        outerColor: COLORS.plumeOuter,
+        name: 'Plume',
     });
 }
 
@@ -616,11 +577,12 @@ function buildAscentTrail() {
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.wrapS = THREE.RepeatWrapping;
 
+    // Tapered cylinder — bottom radius 1.6× top so the column reads like a
+    // real exhaust trail: tight under the rocket (recent exhaust), wider
+    // and more diffuse near the pad (older, dispersed). Default cylinder
+    // geometry's top is at +Y.
     const trail = new THREE.Mesh(
-        // Open-ended cylinder; UVs map vertical → V so the gradient runs
-        // top→bottom along the column. Default cylinder geometry has its
-        // "top" at +Y, which we orient as "near the rocket" by flipping.
-        new THREE.CylinderGeometry(1, 1, 1, 24, 1, true),
+        new THREE.CylinderGeometry(1.0, 1.6, 1, 28, 1, true),
         new THREE.MeshBasicMaterial({
             map: tex,
             transparent: true,
@@ -632,6 +594,69 @@ function buildAscentTrail() {
     );
     trail.visible = false;
     return trail;
+}
+
+// ── Pad steam vents (water deluge) ───────────────────────────────────────────
+// Rocket pads suppress acoustic energy at ignition by dumping millions of
+// gallons of water through deck nozzles; the result is a curtain of white
+// steam clouds boiling off the deck. Modelled as 10 small additive spheres
+// scattered around the deck whose scale + opacity grow and fade on a per-
+// puff phase, gated to the ignition / early-ascent window.
+function buildPadSteam() {
+    const g = new THREE.Group();
+    g.name = 'PadSteam';
+    g.visible = false;
+
+    const N = 10;
+    for (let i = 0; i < N; i++) {
+        const angle  = (i / N) * Math.PI * 2 + Math.random() * 0.4;
+        const radius = 6 + Math.random() * 8;
+        const puff = new THREE.Mesh(
+            new THREE.SphereGeometry(2.4 + Math.random() * 1.2, 12, 10),
+            new THREE.MeshBasicMaterial({
+                color: 0xf0f3f8,
+                transparent: true,
+                opacity: 0.0,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false,
+                fog: false,
+            })
+        );
+        puff.position.set(
+            Math.cos(angle) * radius,
+            0.5 + Math.random() * 0.6,
+            Math.sin(angle) * radius,
+        );
+        puff.userData.phase = Math.random() * Math.PI * 2;
+        puff.userData.baseScale = 0.6 + Math.random() * 0.5;
+        g.add(puff);
+    }
+    return g;
+}
+
+function tickPadSteam(steam, T, throttle) {
+    if (!steam) return;
+    // Active from T-3 (ignition spool-up) through T+8 (rocket clear of pad).
+    const active = T > -3.2 && T < 8;
+    steam.visible = active && throttle > 0.05;
+    if (!steam.visible) return;
+    // Envelope: rises 0 → 1 over T-3..T-0.5 (ignition surge), holds, then
+    // fades 1 → 0 over T+5..T+8 as the rocket climbs out of view of the pad.
+    let env;
+    if (T < -0.5)      env = (T + 3) / 2.5;
+    else if (T < 5)    env = 1;
+    else               env = Math.max(0, 1 - (T - 5) / 3);
+
+    steam.children.forEach((puff, i) => {
+        const phase = puff.userData.phase;
+        const base  = puff.userData.baseScale;
+        // Each puff has its own slow grow-and-fade over ~2 s, plus a small
+        // jitter on position so the cloud volume looks alive.
+        const cycle = 0.5 + 0.5 * Math.sin(T * 1.4 + phase);
+        const s = base * (0.6 + 1.6 * cycle) * (0.6 + 0.4 * env);
+        puff.scale.setScalar(s);
+        puff.material.opacity = 0.65 * cycle * env;
+    });
 }
 
 // ── Stack assembly ───────────────────────────────────────────────────────────
@@ -1056,6 +1081,8 @@ export function initVehicleCanvas(canvas, opts = {}) {
     // ── Ascent trail (pad-anchored, world-space) ──────────────────────────
     const trail = buildAscentTrail();
     scene.add(trail);
+    const padSteam = buildPadSteam();
+    scene.add(padSteam);
 
     // ── Mission clock (drives liftoff animation) ──────────────────────────
     const missionClock = createMissionClock();
@@ -1229,10 +1256,33 @@ export function initVehicleCanvas(canvas, opts = {}) {
     // pose, plume throttle, exhaust trail, sky/fog tint, pad fade, and a
     // 1:1 camera follow that preserves the user's orbital framing.
     function applyMissionState(s) {
+        // Hold-down release "twang" — at T=0 the real shuttle SRBs fire,
+        // hold-down posts release, and the stack springs upward by ~15 cm
+        // before settling into ascent. Add a damped sine kick that decays
+        // over the first ~1 s so the launch reads with a satisfying jolt.
+        const T = s.T;
+        let twang = 0;
+        if (T >= 0 && T < 1.2) {
+            const decay = Math.exp(-T * 3.2);
+            twang = 0.55 * decay * Math.sin(T * Math.PI * 5);
+        }
+
         // Vehicle pose
-        current.root.position.y = current.basePadY + s.altitude;
+        current.root.position.y = current.basePadY + s.altitude + twang;
         current.root.rotation.y = s.roll;
         current.root.rotation.x = -s.pitch;
+
+        // High-frequency vibration during liftoff & first 12 s of ascent —
+        // tiny lateral wobble suggesting acoustic loading without making
+        // the rocket look broken.
+        const vibAmp = (T > -0.5 && T < 12) ? 0.02 + 0.03 * Math.max(0, 1 - T / 12) : 0;
+        if (vibAmp > 0) {
+            current.root.position.x = Math.sin(T * 41) * vibAmp;
+            current.root.position.z = Math.cos(T * 47) * vibAmp;
+        } else {
+            current.root.position.x = 0;
+            current.root.position.z = 0;
+        }
 
         // Camera follow: target rises with the vehicle, camera position
         // rises by the same Δ so the user-chosen orbital framing is
@@ -1256,6 +1306,12 @@ export function initVehicleCanvas(canvas, opts = {}) {
             trail.visible = false;
         }
 
+        // Pad steam vents — visible only in the ignition + early-ascent
+        // window. Anchored to the pad deck (basePadY), independent of the
+        // rocket's altitude.
+        padSteam.position.y = current.basePadY - 4;
+        tickPadSteam(padSteam, T, s.throttle);
+
         // Sky / fog — tint toward upper-atmosphere black + clear out fog
         // density as the rocket climbs.
         scene.fog.color.copy(baseFogColor).lerp(skyEndColor, s.skyMix);
@@ -1263,6 +1319,24 @@ export function initVehicleCanvas(canvas, opts = {}) {
 
         // Pad fade
         applyPadOpacity(s.padOpacity);
+    }
+
+    // Compute a small camera shake offset for the loudest acoustic window —
+    // ignition + first few seconds of liftoff. Returned as a {x,y,z} delta
+    // that the caller adds before render and removes after, so the offset
+    // doesn't get fed back into OrbitControls' damping target.
+    function shakeOffsetFor(T) {
+        if (T < -0.5 || T > 5) return null;
+        const env = T < 0
+            ? Math.max(0, (T + 0.5) / 0.5) * 0.6   // ignition build
+            : Math.max(0, 1 - T / 5);              // post-liftoff decay
+        if (env <= 0) return null;
+        const amp = 0.08 * env;
+        return {
+            x: Math.sin(T * 73 + 0.7) * amp,
+            y: Math.sin(T * 83 + 1.3) * amp,
+            z: Math.sin(T * 79 + 2.1) * amp,
+        };
     }
 
     // Walks the pad's mesh tree applying an opacity. Idempotent.
@@ -1299,8 +1373,9 @@ export function initVehicleCanvas(canvas, opts = {}) {
         missionActive = false;
         missionClock.reset();
 
-        // Reset vehicle pose
-        current.root.position.y = current.basePadY;
+        // Reset vehicle pose — including the per-frame vibration offset
+        // and twang in X/Z that the launch loop accumulated.
+        current.root.position.set(0, current.basePadY, 0);
         current.root.rotation.set(0, 0, 0);
 
         // Restore camera/target to where they were before liftoff.
@@ -1310,6 +1385,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
 
         // Restore scene state
         trail.visible = false;
+        padSteam.visible = false;
         scene.fog.color.copy(baseFogColor);
         scene.fog.density = baseFogDensity;
         applyPadOpacity(1);
@@ -1370,6 +1446,15 @@ export function initVehicleCanvas(canvas, opts = {}) {
 
         for (const p of current.plumes) tickPlume(p, t, throttle);
         tickBeacons(padState.beacons, t);
+        // Camera shake — applied just before render and undone right after,
+        // so the offset shows in this frame but isn't fed back into
+        // OrbitControls' damping next tick.
+        const shake = missionActive ? shakeOffsetFor(missionClock.T) : null;
+        if (shake) {
+            camera.position.x += shake.x;
+            camera.position.y += shake.y;
+            camera.position.z += shake.z;
+        }
         // Thrust-vector overlay — read live throttle + mission time.
         if (current.thrustOverlay && current.thrustOverlay.visible) {
             tickThrustOverlay(current.thrustOverlay, {
@@ -1378,6 +1463,11 @@ export function initVehicleCanvas(canvas, opts = {}) {
             });
         }
         renderer.render(scene, camera);
+        if (shake) {
+            camera.position.x -= shake.x;
+            camera.position.y -= shake.y;
+            camera.position.z -= shake.z;
+        }
         rafId = requestAnimationFrame(tick);
     }
     tick();

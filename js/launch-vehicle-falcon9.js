@@ -21,6 +21,7 @@
 
 import * as THREE from 'three';
 import { ENGINES } from './launch-engines.js';
+import { buildPlume as buildPlumeShared } from './launch-plume.js';
 
 // ── Colors ───────────────────────────────────────────────────────────────────
 
@@ -605,33 +606,19 @@ function buildCrewDragon(P) {
 }
 
 // ── Plume (Merlin kerolox — bright orange-yellow) ────────────────────────────
+// Wraps the shared plume builder with Merlin's distinctive RP-1 + LOX
+// orange-yellow flame palette.
 
 function buildKeroloxPlume(radius, length) {
-    const g = new THREE.Group();
-    g.name = 'Falcon9Plume';
-    g.visible = false;
-
-    const layers = [
-        { color: COLORS.plumeCore,  r: radius * 0.55, len: length * 0.55, opacity: 0.95 },
-        { color: COLORS.plumeMid,   r: radius * 1.0,  len: length * 0.85, opacity: 0.65 },
-        { color: COLORS.plumeOuter, r: radius * 1.55, len: length,        opacity: 0.30 },
-    ];
-    for (const L of layers) {
-        const cone = new THREE.Mesh(
-            new THREE.ConeGeometry(L.r, L.len, 28, 1, true),
-            new THREE.MeshBasicMaterial({
-                color: L.color, transparent: true, opacity: L.opacity,
-                blending: THREE.AdditiveBlending, depthWrite: false,
-                side: THREE.DoubleSide,
-            })
-        );
-        cone.rotation.x = Math.PI;
-        cone.position.y = -L.len / 2;
-        cone.userData.baseOpacity = L.opacity;
-        cone.userData.baseLen     = L.len;
-        g.add(cone);
-    }
-    return g;
+    return buildPlumeShared({
+        coreRadius:  radius * 0.55, coreLen:  length * 0.55,
+        midRadius:   radius * 1.0,  midLen:   length * 0.85,
+        outerRadius: radius * 1.55, outerLen: length,
+        coreColor:  COLORS.plumeCore,
+        midColor:   COLORS.plumeMid,
+        outerColor: COLORS.plumeOuter,
+        name: 'Falcon9Plume',
+    });
 }
 
 // ── Public builder ───────────────────────────────────────────────────────────
