@@ -144,6 +144,41 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
 }
 @media (max-width: 640px) { #halpha-panel { display:none; } }
 
+#sed-panel {
+    position:absolute; right:12px; bottom:60px; z-index:50;
+    background: rgba(4,2,16,.78); backdrop-filter: blur(8px);
+    border: 1px solid rgba(180,120,255,.22); border-radius: 8px;
+    padding: 8px 10px 6px; pointer-events: none;
+    width: 280px;
+    display:none;
+}
+#sed-panel.show { display:block; }
+#sed-panel .sp-title {
+    font-size:10px; color:#c8a8ff; letter-spacing:.6px;
+    text-transform:uppercase; margin-bottom:2px;
+    display:flex; justify-content:space-between; align-items:center;
+}
+#sed-panel .sp-title .tag {
+    color:#ffd080; font-weight:600; font-size:9.5px; text-transform:none; letter-spacing:0;
+}
+#sed-canvas { display:block; width:100%; height:120px; border-radius:4px;
+    background: linear-gradient(180deg, rgba(20,15,40,.55), rgba(8,4,18,.65)); }
+#sed-panel .sp-axis {
+    display:flex; justify-content:space-between;
+    font-size:9px; color:#666; margin-top:1px;
+}
+#sed-panel .sp-legend {
+    display:flex; gap:10px; font-size:9px; color:#888; margin-top:3px;
+    justify-content:center;
+}
+#sed-panel .sp-legend span::before {
+    content: '\25A0  '; margin-right:1px;
+}
+#sed-panel .sp-legend .lp { color:#90c8ff; }
+#sed-panel .sp-legend .ld { color:#ff80a8; }
+#sed-panel .sp-legend .lt { color:#fff0c8; }
+@media (max-width: 720px) { #sed-panel { display:none !important; } }
+
 #mode-pill {
     position:absolute; top:60px; left:12px; z-index:50;
     background: rgba(4,2,16,.72); backdrop-filter: blur(8px);
@@ -203,6 +238,13 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
             <div class="hp-title"><span>Synthetic Hα 656.28 nm</span><span class="vr" id="hp-vr">V/R = 1.00</span></div>
             <canvas id="halpha-canvas" width="480" height="170"></canvas>
             <div class="hp-axis"><span>−800</span><span>0 km/s</span><span>+800</span></div>
+        </div>
+
+        <div id="sed-panel">
+            <div class="sp-title"><span>Spectral Energy Distribution</span><span class="tag" id="sp-tag">i = 65°</span></div>
+            <canvas id="sed-canvas" width="560" height="240"></canvas>
+            <div class="sp-axis"><span>0.1 µm</span><span>1 µm</span><span>10 µm</span></div>
+            <div class="sp-legend"><span class="lp">photosphere</span><span class="ld">disk</span><span class="lt">total</span></div>
         </div>
 
         <div id="backdrop"></div>
@@ -317,6 +359,10 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
                     <div class="toggle-row">
                         <input type="checkbox" id="tog-binary">
                         <label for="tog-binary">Achernar B (companion + orbit)</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-sed" checked>
+                        <label for="tog-sed">Spectral Energy Distribution panel</label>
                     </div>
                 </div>
             </div>
@@ -1320,6 +1366,337 @@ document.getElementById('sl-nrp-per').addEventListener('input', e => {
 });
 
 // ────────────────────────────────────────────────────────────────
+//  SPECTRAL ENERGY DISTRIBUTION
+// ────────────────────────────────────────────────────────────────
+//
+//  We render F_λ in two pieces and overplot:
+//
+//   1. Photosphere — integrate B_λ(T(θ)) μ dA over the *visible*
+//      hemisphere of the Roche figure with current gravity-darkening
+//      law and ω. The integral depends on inclination, so the SED
+//      hardens as the camera moves toward the pole (this is the
+//      classical Be aspect-angle effect).
+//
+//   2. Disk — optically-thin H II free-free / free-bound continuum,
+//          ε_ν ∝ n_e n_p T^(-1/2) g_ff(ν, T)        (in units of erg/s/Hz/cm³)
+//      converted to F_λ = F_ν · c/λ². We add the Balmer (364.6 nm)
+//      and Paschen (820.4 nm) discontinuities — diagnostic of disk
+//      density and temperature — and bolt on Gaussian-broadened
+//      Hα/Hβ/Brγ emission lines for visual context.
+//
+//  Both curves and their sum are drawn on log–log axes from 0.1 µm
+//  to 10 µm; the IR excess is the canonical Be-star observable.
+//
+const sedCanvas = document.getElementById('sed-canvas');
+const sedCtx    = sedCanvas.getContext('2d');
+const sedTag    = document.getElementById('sp-tag');
+const SED_W = sedCanvas.width, SED_H = sedCanvas.height;
+
+const SED_NL = 96;
+const sedLam = new Float32Array(SED_NL);         // wavelength grid, nm
+{
+    const lo = 100.0, hi = 10000.0;              // 0.1–10 µm
+    for (let i = 0; i < SED_NL; i++) {
+        sedLam[i] = lo * Math.pow(hi / lo, i / (SED_NL - 1));
+    }
+}
+
+// Fibonacci-spiral surface samples on the unit sphere (we map to Roche r(θ)
+// on the fly). 240 points is plenty for a smooth SED at 80 wavelengths.
+const SED_NS = 240;
+const sedDir = new Float32Array(SED_NS * 3);
+for (let i = 0; i < SED_NS; i++) {
+    const phi = i * Math.PI * (3 - Math.sqrt(5));
+    const ct  = 1 - 2 * (i + 0.5) / SED_NS;
+    const st  = Math.sqrt(Math.max(0, 1 - ct * ct));
+    sedDir[i*3]   = st * Math.cos(phi);
+    sedDir[i*3+1] = ct;
+    sedDir[i*3+2] = st * Math.sin(phi);
+}
+
+// Planck B_λ(T), arbitrary scaling.  We work in shape-only units:
+//   B_λ(T) ∝ (1/λ⁵) / (exp(hc/λkT) − 1)
+const HC_KB = 1.4387769e7;   // hc/k in nm·K
+function planckBlam(lamNm, T) {
+    const x = HC_KB / (lamNm * T);
+    if (x > 80) return 0;
+    const exp = Math.exp(x);
+    if (exp - 1 < 1e-20) return 0;
+    const lam5 = Math.pow(lamNm, 5);
+    return 1.0 / (lam5 * (exp - 1));
+}
+
+// Gaunt-factor proxy g_ff(λ, T) — slow logarithmic dependence; we use a
+// dimensionally-correct approximation good enough for the visual.
+function gauntFF(lamNm, T) {
+    const lam_um = lamNm * 1e-3;
+    return 0.55 * (Math.log(4.955e-2 / lam_um) + 1.5 * Math.log(T)) / 8.0 + 1.0;
+}
+
+const sedPhot  = new Float32Array(SED_NL);
+const sedDisk  = new Float32Array(SED_NL);
+const sedTotal = new Float32Array(SED_NL);
+
+const _sedView = new THREE.Vector3();
+const _sedTmp  = new THREE.Vector3();
+
+function computeSED() {
+    // ── 1. Resolve current physics state from uniforms ───────────────
+    const R     = Math.max(uniforms.u_axis_ratio.value, 1.0);
+    const beta  = Math.min(2 * (R - 1) / (R*R*R), 0.293);
+    const gPole = 1.0;
+    const gEq   = Math.max(1.0 / (R*R) - beta * R, 1e-3);
+    const Tpole = uniforms.u_t_pole.value;
+    const Teq   = uniforms.u_t_eq.value;
+    const w     = Math.sqrt(beta / (8/27));
+    const beta_eff = (uniforms.u_gd_model.value < 0.5)
+        ? uniforms.u_beta_gd.value
+        : (0.25 - 0.0746*w*w - 0.0238*w*w*w*w);
+
+    // View direction in the star's local frame (so it lines up with our
+    // surface samples). starGroup only rotates around y, so this is just
+    // a single rotation by −starGroup.rotation.y.
+    _sedView.copy(camera.position);
+    starGroup.worldToLocal(_sedView).normalize();
+    const vx = _sedView.x, vy = _sedView.y, vz = _sedView.z;
+
+    // ── 2. Photosphere integrand ────────────────────────────────────
+    sedPhot.fill(0);
+    let totalArea = 0;
+    for (let i = 0; i < SED_NS; i++) {
+        const dx = sedDir[i*3], dy = sedDir[i*3+1], dz = sedDir[i*3+2];
+        const sin2 = Math.max(0, 1 - dy*dy);
+        const sinT = Math.sqrt(sin2);
+
+        // Roche radius (5 fixed-point iterations is plenty)
+        let r = 1;
+        for (let k = 0; k < 5; k++) r = 1 + 0.5 * beta * r*r*r * sin2;
+
+        // g_eff = -∇Φ = −r̂/r² + β·ϱ·ϱ̂
+        const cyl = Math.hypot(dx, dz);
+        const cx  = cyl > 1e-6 ? dx / cyl : 0;
+        const cz  = cyl > 1e-6 ? dz / cyl : 0;
+        const rho = r * sinT;
+        const gx = -dx / (r*r) + beta * rho * cx;
+        const gy = -dy / (r*r);
+        const gz = -dz / (r*r) + beta * rho * cz;
+        const gMag = Math.hypot(gx, gy, gz);
+        const gFrac = Math.max(0, Math.min(1, (gMag - gEq) / Math.max(gPole - gEq, 1e-3)));
+        const gd = Math.pow(gFrac, beta_eff / 0.25);
+        const T  = Teq + gd * (Tpole - Teq);
+
+        // Outward normal = -ĝ
+        const nx = -gx / gMag, ny = -gy / gMag, nz = -gz / gMag;
+        const mu = Math.max(0, nx*vx + ny*vy + nz*vz);
+
+        // Differential area: r² for the Roche figure mapped from a unit
+        // sphere is a reasonable shape proxy (good to <5% for our R≤1.56).
+        const wA = r * r * mu;
+        if (wA <= 0) continue;
+        totalArea += wA;
+
+        for (let k = 0; k < SED_NL; k++) {
+            sedPhot[k] += wA * planckBlam(sedLam[k], T);
+        }
+    }
+    // Normalise photosphere so peak ~1 (we'll renormalise globally at draw time).
+    if (totalArea > 0) {
+        const inv = 1 / totalArea;
+        for (let k = 0; k < SED_NL; k++) sedPhot[k] *= inv;
+    }
+
+    // ── 3. Disk free-free + free-bound continuum + emission lines ────
+    sedDisk.fill(0);
+    if (uniforms.u_disk_active.value > 0.5) {
+        const Tdisk  = 0.6 * Tpole;     // typical Be disk T_eff (FUV-irradiated)
+        const Rin    = R * 1.05;
+        const Rout   = uniforms.u_disk_outer.value;
+        // Emission-measure proxy: ∫ n²·H(r) dr ∝ (1 - (Rin/Rout)^…) — combine
+        // outer extent and the user density slider into one normaliser.
+        const massProxy = (Rout - Rin) * Math.pow(Rout / Rin, 1.5);
+        const norm = uniforms.u_disk_rho.value * massProxy;
+
+        for (let k = 0; k < SED_NL; k++) {
+            const lam = sedLam[k];
+            // F_ν,ff ∝ T^(-1/2) g_ff. Convert to F_λ = F_ν c/λ² ⇒ F_λ ∝ g_ff/λ².
+            let ff = gauntFF(lam, Tdisk) / (lam * lam) * Math.pow(Tdisk / 10000, -0.5);
+
+            // Balmer continuum (n=2) — emission edge at 364.6 nm. Smooth jump.
+            // Below the limit we are in the Lyman continuum (much weaker), above
+            // it the recombination cascade pumps up the visible continuum.
+            const balmer = 1.0 + 1.6 * Math.exp(-Math.pow((lam - 364.6) / 14, 2)) * (lam > 364.6 ? 1 : 0.25);
+            // Paschen continuum edge at 820.4 nm
+            const paschen = 1.0 + 0.45 * Math.exp(-Math.pow((lam - 820.4) / 22, 2)) * (lam > 820.4 ? 1 : 0.4);
+            // Brackett edge at 1458 nm (smaller)
+            const brackett = 1.0 + 0.20 * Math.exp(-Math.pow((lam - 1458) / 35, 2)) * (lam > 1458 ? 1 : 0.55);
+
+            ff *= balmer * paschen * brackett;
+            sedDisk[k] = ff * norm * 4.0e7;
+
+            // Emission lines on top of the disk continuum
+            const lineAt = (l0, sigma, amp) => {
+                const dl = lam - l0;
+                return amp * Math.exp(-(dl*dl) / (2 * sigma * sigma));
+            };
+            sedDisk[k] += norm * (
+                lineAt(656.28, 3.0, 1.6e7)   // Hα
+              + lineAt(486.13, 2.5, 0.55e7)  // Hβ
+              + lineAt(434.05, 2.0, 0.22e7)  // Hγ
+              + lineAt(2166.0, 12.0, 0.30e7) // Brγ
+              + lineAt(5169.0, 8.0,  0.04e7) // Fe II 5169 (placeholder for Fe-II forest)
+            );
+        }
+    }
+
+    // ── 4. Total ────────────────────────────────────────────────────
+    for (let k = 0; k < SED_NL; k++) sedTotal[k] = sedPhot[k] + sedDisk[k];
+}
+
+// Wavelength → x pixel (log scale, 100 → 10000 nm)
+function sedX(lamNm) {
+    const t = (Math.log10(lamNm) - 2) / 2;   // 100 → 0, 10000 → 1
+    return t * SED_W;
+}
+// Flux → y pixel (log scale; we set vmin/vmax dynamically per draw)
+function sedY(F, logFmin, logFmax) {
+    if (F <= 0) return SED_H;
+    const t = (Math.log10(F) - logFmin) / (logFmax - logFmin);
+    return SED_H * (1 - Math.max(0, Math.min(1, t)));
+}
+
+function drawSED() {
+    if (!sedPanel.classList.contains('show')) return;
+    computeSED();
+
+    // Auto-scale vertical range from current data (with floor)
+    let fmax = 0;
+    for (let k = 0; k < SED_NL; k++) fmax = Math.max(fmax, sedTotal[k]);
+    if (fmax < 1e-30) fmax = 1;
+    const logFmax = Math.log10(fmax) + 0.20;
+    const logFmin = logFmax - 4.5;       // 4.5 dex of dynamic range
+
+    // Update inclination tag
+    sedTag.textContent = `i = ${Math.round(state.inclination)}°`;
+
+    // ── grid + frame ────────────────────────────────────────────────
+    sedCtx.clearRect(0, 0, SED_W, SED_H);
+    sedCtx.lineWidth = 1;
+    sedCtx.strokeStyle = 'rgba(180,120,255,0.10)';
+    // vertical decade lines
+    for (let lam = 100; lam <= 10000; lam *= 10) {
+        const x = sedX(lam);
+        sedCtx.beginPath(); sedCtx.moveTo(x, 0); sedCtx.lineTo(x, SED_H); sedCtx.stroke();
+        // minor lines
+        for (let m = 2; m <= 9; m++) {
+            const xm = sedX(lam * m);
+            if (xm < SED_W) {
+                sedCtx.strokeStyle = 'rgba(180,120,255,0.04)';
+                sedCtx.beginPath(); sedCtx.moveTo(xm, 0); sedCtx.lineTo(xm, SED_H); sedCtx.stroke();
+                sedCtx.strokeStyle = 'rgba(180,120,255,0.10)';
+            }
+        }
+    }
+    // horizontal decade lines
+    sedCtx.strokeStyle = 'rgba(180,120,255,0.08)';
+    for (let f = Math.ceil(logFmin); f <= Math.floor(logFmax); f++) {
+        const y = sedY(Math.pow(10, f), logFmin, logFmax);
+        sedCtx.beginPath(); sedCtx.moveTo(0, y); sedCtx.lineTo(SED_W, y); sedCtx.stroke();
+    }
+
+    // photometric bands shaded
+    const bands = [
+        { lo: 380,  hi: 440,  c: 'rgba(80,120,255,0.06)', n: 'B' },
+        { lo: 500,  hi: 590,  c: 'rgba(110,255,140,0.05)', n: 'V' },
+        { lo: 1100, hi: 1330, c: 'rgba(255,180,80,0.05)',  n: 'J' },
+        { lo: 1500, hi: 1800, c: 'rgba(255,140,80,0.05)',  n: 'H' },
+        { lo: 2000, hi: 2400, c: 'rgba(255,100,100,0.05)', n: 'K' },
+    ];
+    sedCtx.font = '8px system-ui';
+    for (const b of bands) {
+        const x0 = sedX(b.lo), x1 = sedX(b.hi);
+        sedCtx.fillStyle = b.c;
+        sedCtx.fillRect(x0, 0, x1 - x0, SED_H);
+        sedCtx.fillStyle = 'rgba(220,220,255,0.35)';
+        sedCtx.fillText(b.n, (x0 + x1) / 2 - 3, 9);
+    }
+
+    // ── photosphere curve ──────────────────────────────────────────
+    sedCtx.strokeStyle = '#90c8ff';
+    sedCtx.lineWidth = 1.4;
+    sedCtx.beginPath();
+    for (let k = 0; k < SED_NL; k++) {
+        const x = sedX(sedLam[k]);
+        const y = sedY(sedPhot[k], logFmin, logFmax);
+        if (k === 0) sedCtx.moveTo(x, y); else sedCtx.lineTo(x, y);
+    }
+    sedCtx.stroke();
+
+    // ── disk curve ─────────────────────────────────────────────────
+    if (uniforms.u_disk_active.value > 0.5) {
+        sedCtx.strokeStyle = '#ff80a8';
+        sedCtx.lineWidth = 1.2;
+        sedCtx.beginPath();
+        let started = false;
+        for (let k = 0; k < SED_NL; k++) {
+            if (sedDisk[k] <= 0) continue;
+            const x = sedX(sedLam[k]);
+            const y = sedY(sedDisk[k], logFmin, logFmax);
+            if (!started) { sedCtx.moveTo(x, y); started = true; }
+            else sedCtx.lineTo(x, y);
+        }
+        sedCtx.stroke();
+    }
+
+    // ── total curve (filled) ───────────────────────────────────────
+    sedCtx.strokeStyle = '#fff0c8';
+    sedCtx.lineWidth = 1.6;
+    sedCtx.fillStyle = 'rgba(255,240,200,0.10)';
+    sedCtx.beginPath();
+    sedCtx.moveTo(0, SED_H);
+    for (let k = 0; k < SED_NL; k++) {
+        const x = sedX(sedLam[k]);
+        const y = sedY(sedTotal[k], logFmin, logFmax);
+        sedCtx.lineTo(x, y);
+    }
+    sedCtx.lineTo(SED_W, SED_H); sedCtx.closePath(); sedCtx.fill();
+    sedCtx.beginPath();
+    for (let k = 0; k < SED_NL; k++) {
+        const x = sedX(sedLam[k]);
+        const y = sedY(sedTotal[k], logFmin, logFmax);
+        if (k === 0) sedCtx.moveTo(x, y); else sedCtx.lineTo(x, y);
+    }
+    sedCtx.stroke();
+
+    // ── line markers (Hα, Brγ) ─────────────────────────────────────
+    const marks = [
+        { lam: 364.6,  label: 'Bal' },
+        { lam: 656.28, label: 'Hα'  },
+        { lam: 820.4,  label: 'Pa'  },
+        { lam: 2166,   label: 'Brγ' },
+    ];
+    sedCtx.fillStyle = 'rgba(200,160,255,0.55)';
+    sedCtx.font = '9px system-ui';
+    for (const m of marks) {
+        const x = sedX(m.lam);
+        sedCtx.fillRect(x, SED_H - 9, 1, 9);
+        sedCtx.fillText(m.label, x + 2, SED_H - 1);
+    }
+}
+
+const sedPanel = document.getElementById('sed-panel');
+sedPanel.classList.add('show');
+document.getElementById('tog-sed').addEventListener('change', e => {
+    sedPanel.classList.toggle('show', e.target.checked);
+});
+
+// Throttle SED redraws — the hemispheric integration is the most expensive
+// per-frame op on the page; ~5 fps is plenty for diagnostics.
+let sedLast = 0;
+function maybeDrawSED(now) {
+    if (now - sedLast > 200) { drawSED(); sedLast = now; }
+}
+
+// ────────────────────────────────────────────────────────────────
 //  SYNTHETIC Hα LINE PROFILE
 // ────────────────────────────────────────────────────────────────
 //   For a Keplerian disk in optically thin emission, the emergent
@@ -1522,6 +1899,7 @@ function animate() {
 
     const now = performance.now();
     maybeDrawHalpha(now);
+    maybeDrawSED(now);
 
     fpsF++;
     if (now - fpsT >= 500) {
