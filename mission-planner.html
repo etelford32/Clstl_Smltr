@@ -1934,8 +1934,6 @@ window.addEventListener('keydown', (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const k = e.key.toLowerCase();
     if (KEY_MAP[k]) { focusBody(KEY_MAP[k]); e.preventDefault(); return; }
-    if (k === 'f') {
-        chaseSelectedMission();
     if (k === 'f' && e.shiftKey) {
         // Shift+F → release the camera into free-fly
         planner.setFreeCam();
@@ -1943,13 +1941,7 @@ window.addEventListener('keydown', (e) => {
         pushLog('⟿ Camera released (free fly)', 'window');
         e.preventDefault();
     } else if (k === 'f') {
-        const m = planner.followMission();
-        if (m) {
-            followedMissionId = m.id;
-            setFocusUI('mission');
-            setCamModeUI('lock');
-            pushLog(`🎥 Camera following ${m.payloadName || 'active mission'}`, 'window');
-        }
+        chaseSelectedMission();
         e.preventDefault();
     } else if (k === 'l') {
         // L → lock camera onto the most-recent focus body
