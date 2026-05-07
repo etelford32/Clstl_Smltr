@@ -270,6 +270,10 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         lunarMissions: [],// active lunar transfers (Earth-relative)
         marsMissions:  [],// active heliocentric Lambert cruises
         tours:         [],// active multi-leg tours
+        // Persistent burn-point markers — small additive crosshairs left at
+        // every Δv impulse along a trail.  Cleared by clearAll().  Each
+        // entry is { scene, sprite } so the marker disposes with its host.
+        burnMarkers:   [],
         clock:      new THREE.Clock(),
         elapsed:    0,
         timeScale:  1,
@@ -296,6 +300,22 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         nextMissionId: 1,
     };
     function _resetSimAnchor() { state.simAnchor = null; }
+
+    // Burn-flash + persistent marker in one call.  The flash fades inside
+    // ~1 s; the marker persists until clearAll() so the trail keeps a
+    // readable record of where the impulses happened.
+    function flashAndMark(scene, position, color = 0xffaa33, life_ms = 700, sizeMul = 1) {
+        spawnBurnFlash(scene, position, color, life_ms, sizeMul);
+        const sprite = spawnBurnMarker(scene, position, color, sizeMul);
+        state.burnMarkers.push({ scene, sprite });
+    }
+    // Pulse a body — expanding ring centered on a body, parented to the
+    // same scene as the body so the ring tracks any heliocentric drift.
+    // mesh.position is the right local-space coordinate inside `scene`.
+    function pulseBody(scene, mesh, color = 0x66ffaa, baseRadius = 1.5, life_ms = 1100) {
+        if (!mesh) return;
+        spawnBodyPulse(scene, mesh.position.clone(), color, baseRadius, life_ms);
+    }
 
     // Surface markers — parented to the spinning Earth so labels stay pinned
     // to real lat/lon as the planet rotates. Each site gets a small base
@@ -1008,8 +1028,8 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         state.marsMissions.push(m);
         autoFrame(m);
 
-        // TMI burn flash at Earth's helio position at departure.
-        spawnBurnFlash(hel.scene,
+        // TMI burn flash + persistent marker at Earth's helio position at departure.
+        flashAndMark(hel.scene,
             new THREE.Vector3(arcPos[0], arcPos[1], arcPos[2]),
             0xffcc66, 800, 1.4);
 
@@ -1073,7 +1093,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         state.marsMissions.push(m);
         autoFrame(m);
 
-        spawnBurnFlash(hel.scene,
+        flashAndMark(hel.scene,
             new THREE.Vector3(arcPos[0], arcPos[1], arcPos[2]),
             0xffcc66, 800, 1.4);
 
@@ -1186,7 +1206,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         state.lunarMissions.push(m);
         autoFrame(m);
 
-        spawnBurnFlash(geo.scene,
+        flashAndMark(geo.scene,
             new THREE.Vector3(arcPos[0], arcPos[1], arcPos[2]),
             0x66ddff, 800, 1.2);
 
@@ -1276,8 +1296,8 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         hel.scene.add(craft);
         const trail = makeTrail(hel.scene, 1500, 0xffeecc, 0.7);
 
-        // Burn flash at the start of the tour (TMI from Earth).
-        spawnBurnFlash(hel.scene,
+        // Burn flash + persistent marker at the start of the tour (TMI from Earth).
+        flashAndMark(hel.scene,
             new THREE.Vector3(legGeoms[0].arcPos[0], legGeoms[0].arcPos[1], legGeoms[0].arcPos[2]),
             0xffcc66, 800, 1.4);
 
@@ -1439,7 +1459,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
                 if (u >= 1) {
                     m.phase = 'transfer';
                     m.transferStart = state.elapsed;
-                    spawnBurnFlash(geo.scene, pos.clone(), 0xffcc66, 700, 0.8);
+                    flashAndMark(geo.scene, pos.clone(), 0xffcc66, 700, 0.8);
                 }
                 continue;
             }
@@ -1480,7 +1500,10 @@ export function initMissionPlanner({ container, onEvent } = {}) {
                 if (u >= 1) {
                     if (m.kind === 'moon-to-earth') {
                         m.phase = 'arrived';
-                        spawnBurnFlash(geo.scene, pos.clone(), 0x66ffaa, 1000, 1.4);
+                        flashAndMark(geo.scene, pos.clone(), 0x66ffaa, 1000, 1.4);
+                        // Earth is the parent of geo.scene (earthSystem) — pulse
+                        // the planet itself to acknowledge arrival.
+                        pulseBody(geo.scene, geo.earth, 0x66ffaa, 1.6, 1100);
                         onEvent?.({ type: 'lunar-return-arrived', payloadName: m.payloadName, plan: m.plan });
                     } else {
                         m.phase = 'captured';
@@ -1554,7 +1577,9 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             new THREE.Vector3(0, 0, 1),
             0xffeecc, 0.85,
         );
-        spawnBurnFlash(geo.scene, geo.moon.position.clone(), 0x66ffaa, 900, 0.6);
+        flashAndMark(geo.scene, geo.moon.position.clone(), 0x66ffaa, 900, 0.6);
+        // Pulse the Moon to acknowledge SOI capture.
+        pulseBody(geo.scene, geo.moon, 0x66ffaa, 0.5, 1100);
         m.captureRing.position.copy(geo.moon.position);
         geo.scene.add(m.captureRing);
         m.capturePeri    = new THREE.Vector3(1, 0, 0);
@@ -1621,7 +1646,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             pushTrail(m, m.craft.position);
             if (u >= 1) {
                 m.phase = 'arrived';
-                spawnBurnFlash(hel.scene, m.craft.position.clone(), 0x66ffaa, 1100, 1.6);
+                flashAndMark(hel.scene, m.craft.position.clone(), 0x66ffaa, 1100, 1.6);
                 // Per-kind arrival event so the UI log reads correctly.
                 const arrivalEvents = {
                     'mars':            'mars-captured',
@@ -1632,6 +1657,19 @@ export function initMissionPlanner({ container, onEvent } = {}) {
                     'earth-to-uranus': 'uranus-captured',
                     'earth-to-neptune':'neptune-captured',
                 };
+                // Pulse the captured body so the user can spot the SOI entry
+                // even when the craft itself is too small to track at zoom.
+                const pulseTargets = {
+                    'mars':            { mesh: hel.mars,    r: 1.4 },
+                    'mars-to-earth':   { mesh: hel.earth,   r: 1.6 },
+                    'moon-to-mars':    { mesh: hel.mars,    r: 1.4 },
+                    'earth-to-jupiter':{ mesh: hel.jupiter, r: 3.0 },
+                    'earth-to-saturn': { mesh: hel.saturn,  r: 2.6 },
+                    'earth-to-uranus': { mesh: hel.uranus,  r: 2.2 },
+                    'earth-to-neptune':{ mesh: hel.neptune, r: 2.2 },
+                };
+                const pt = pulseTargets[m.kind];
+                if (pt) pulseBody(hel.scene, pt.mesh, 0x66ffaa, pt.r, 1300);
                 onEvent?.({
                     type: arrivalEvents[m.kind] || 'helio-arrived',
                     payloadName: m.payloadName, plan: m.plan,
@@ -1657,9 +1695,9 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             }
             if (legIdx >= t.legGeoms.length) {
                 t.phase = 'arrived';
-                // Final capture flash at the last body.
+                // Final capture flash + persistent marker at the last body.
                 const last = t.legGeoms[t.legGeoms.length - 1];
-                spawnBurnFlash(hel.scene, new THREE.Vector3(
+                flashAndMark(hel.scene, new THREE.Vector3(
                     last.arcPos[(last.N-1)*3+0], last.arcPos[(last.N-1)*3+1], last.arcPos[(last.N-1)*3+2],
                 ), 0x66ffaa, 1100, 1.6);
                 onEvent?.({ type: 'tour-arrived', payloadName: t.payloadName, plan: t.plan });
@@ -1669,14 +1707,22 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             // Notify on leg transitions.
             if (legIdx !== t.currentLeg) {
                 t.currentLeg = legIdx;
-                // Flyby flash at the body the spacecraft just crossed.
+                // Flyby flash at the body the spacecraft just crossed.  A
+                // ballistic flyby has no Δv impulse so it gets the cyan flash
+                // only — no persistent burn marker.  Powered flybys (orange)
+                // do drop a marker so the tour's impulse points stay readable.
                 if (legIdx > 0) {
                     const prev = t.legGeoms[legIdx - 1];
                     const f = prev.leg.flyby_at_arrival;
                     const flashColor = f && f.ballistic ? 0x66ddff : 0xff8855;
-                    spawnBurnFlash(hel.scene, new THREE.Vector3(
+                    const flyPos = new THREE.Vector3(
                         prev.arcPos[(prev.N-1)*3+0], prev.arcPos[(prev.N-1)*3+1], prev.arcPos[(prev.N-1)*3+2],
-                    ), flashColor, 900, f && f.ballistic ? 1.0 : 1.4);
+                    );
+                    if (f && f.ballistic) {
+                        spawnBurnFlash(hel.scene, flyPos, flashColor, 900, 1.0);
+                    } else {
+                        flashAndMark(hel.scene, flyPos, flashColor, 900, 1.4);
+                    }
                 }
                 onEvent?.({
                     type: 'tour-leg', payloadName: t.payloadName,
@@ -1741,6 +1787,11 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             target: r.target,
             startedAt: state.elapsed,
         });
+
+        // Pulse Earth on circularization so the user sees *which* body
+        // the new payload just inserted around.  Subtle ring; the orbit
+        // ring + trail carry the rest of the visual weight.
+        pulseBody(geo.scene, geo.earth, 0x66ffaa, 1.5, 900);
 
         onEvent?.({
             type: 'deployed',
@@ -3156,6 +3207,54 @@ function makeBPlaneLabel(b) {
  * Spawn a brief additive flash at a position to signal a Δv burn.
  * Auto-fades and removes itself from the scene.
  */
+/**
+ * Persistent crosshair-style marker dropped at a Δv impulse point. Stays
+ * until the scene is cleared so the user can read the burn locations off
+ * the trail after the brief flash has faded. Caller is responsible for
+ * tracking the returned sprite so it can be removed in clearAll().
+ */
+function spawnBurnMarker(scene, position, color = 0xffaa33, sizeMul = 1) {
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: makeRadialGradientTexture(color, 0.35),
+        transparent: true, opacity: 0.7,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false, depthTest: false,
+    }));
+    sprite.position.copy(position);
+    const s = 0.22 * sizeMul;
+    sprite.scale.set(s, s, 1);
+    scene.add(sprite);
+    return sprite;
+}
+
+/**
+ * Expanding additive ring centered on a body — used to acknowledge SOI
+ * captures and arrivals. Faces the ecliptic plane (XZ) which reads well
+ * for both the heliocentric overview and the Earth-system close-up.
+ */
+function spawnBodyPulse(scene, position, color = 0x66ffaa, baseRadius = 1.5, life_ms = 1100) {
+    const geom = new THREE.RingGeometry(baseRadius * 0.95, baseRadius * 1.05, 64);
+    const mat  = new THREE.MeshBasicMaterial({
+        color, transparent: true, opacity: 0.85,
+        blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+        depthWrite: false, depthTest: false,
+    });
+    const ring = new THREE.Mesh(geom, mat);
+    ring.position.copy(position);
+    ring.rotation.x = -Math.PI / 2;
+    scene.add(ring);
+    const start = performance.now();
+    const tick = () => {
+        const t = (performance.now() - start) / life_ms;
+        if (t >= 1) { scene.remove(ring); mat.dispose(); geom.dispose(); return; }
+        const s = 1 + 4 * t;
+        ring.scale.set(s, s, 1);
+        mat.opacity = (1 - t) * 0.85;
+        requestAnimationFrame(tick);
+    };
+    tick();
+}
+
 function spawnBurnFlash(scene, position, color = 0xffaa33, life_ms = 700, sizeMul = 1) {
     const flash = new THREE.Sprite(new THREE.SpriteMaterial({
         map: makeRadialGradientTexture(color, 0),
@@ -3299,9 +3398,15 @@ function clearAll(state, geo, hel) {
             if (lg.bPlaneViz) hel.scene.remove(lg.bPlaneViz);
         }
     }
+    for (const bm of state.burnMarkers || []) {
+        bm.scene.remove(bm.sprite);
+        bm.sprite.material?.map?.dispose?.();
+        bm.sprite.material?.dispose?.();
+    }
     state.rockets.length        = 0;
     state.payloads.length       = 0;
     state.lunarMissions.length  = 0;
     state.marsMissions.length   = 0;
     if (state.tours) state.tours.length = 0;
+    if (state.burnMarkers) state.burnMarkers.length = 0;
 }
