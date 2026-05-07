@@ -884,6 +884,14 @@ export class UpperAtmosphereUI {
         this._paintSpaceWeatherAnalytics();
         this._paintMesosphereStatus();
 
+        // Notify trajectory analyzer that ρ profile has changed so any
+        // open analysis re-runs against the new state.
+        try {
+            window.dispatchEvent(new CustomEvent('ua-profile-update', {
+                detail: { f107: this.state.f107, ap: this.state.ap }
+            }));
+        } catch (_) { /* SSR / no-window — ignore */ }
+
         if (this.useBackend) this._scheduleBackendRefresh();
     }
 
