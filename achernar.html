@@ -300,6 +300,16 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
                         <input type="range" id="sl-incl" min="0" max="90" step="1" value="65">
                         <span class="vdisp" id="disp-incl">65°</span>
                     </div>
+                    <div class="ctrl">
+                        <label>Diff. rot α₂</label>
+                        <input type="range" id="sl-diffrot" min="0" max="0.30" step="0.005" value="0.10">
+                        <span class="vdisp" id="disp-diffrot">0.10</span>
+                    </div>
+                    <div style="font-size:10px;color:#666;line-height:1.5;margin-top:6px">
+                        Surface law Ω(θ)=Ω<sub>eq</sub>(1−α₂cos²θ); poles spin slower
+                        than the equator. Drives latitude-dependent noise drift and
+                        equatorial shear that feeds the disk.
+                    </div>
                 </div>
             </div>
 
@@ -336,7 +346,7 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
                     </div>
                     <div class="toggle-row">
                         <input type="checkbox" id="tog-jet" checked>
-                        <label for="tog-jet">Polar wind glow</label>
+                        <label for="tog-jet">Polar radiative wind (CAK)</label>
                     </div>
                     <div class="toggle-row">
                         <input type="checkbox" id="tog-axis">
@@ -349,6 +359,36 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
                     <div class="toggle-row">
                         <input type="checkbox" id="tog-sed" checked>
                         <label for="tog-sed">Spectral Energy Distribution panel</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-outflow" checked>
+                        <label for="tog-outflow">Decretion outflow particles</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-twistor">
+                        <label for="tog-twistor">Twistor (Robinson) congruence</label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sec">
+                <div class="sec-hd"><span>Outflow Activity</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="ctrl">
+                        <label>Burst amp.</label>
+                        <input type="range" id="sl-burst-amp" min="0" max="1.5" step="0.05" value="0.65">
+                        <span class="vdisp" id="disp-burst-amp">0.65</span>
+                    </div>
+                    <div class="ctrl">
+                        <label>Burst per.</label>
+                        <input type="range" id="sl-burst-per" min="2.0" max="20.0" step="0.5" value="8.0">
+                        <span class="vdisp" id="disp-burst-per">8.0 s</span>
+                    </div>
+                    <div style="font-size:10px;color:#666;line-height:1.5;margin-top:6px">
+                        Episodic equatorial mass-loss bursts (Achernar feeds &amp;
+                        sheds its disk on multi-year cycles; we compress to
+                        seconds for visualisation). Particles inherit Keplerian
+                        v<sub>φ</sub> + viscous v<sub>r</sub> = α (c<sub>s</sub>/v<sub>K</sub>)² v<sub>K</sub>.
                     </div>
                 </div>
             </div>
@@ -548,6 +588,21 @@ const uniforms = {
     u_nrp_omega:   { value: 2.0 * Math.PI / 1.26 }, // angular freq matching 1.26 d period (visualisation rate)
     u_doppler_amp: { value: 1.0 },    // saturation factor for Doppler colormap
     u_disk_inv_model: { value: new THREE.Matrix4() },
+
+    // ── Differential rotation ────────────────────────────────────
+    // Solar-style law:  Ω(θ)/Ω_eq = 1 − α₂ cos²θ
+    // Reiners & Royer 2004 measure |α| < 0.05 for early-type rapid
+    // rotators; we let the user push it harder to make the effect
+    // visible. α=0 ⇒ rigid body.
+    u_diffrot_alpha: { value: 0.10 },
+    u_diffrot_phase: { value: 0.0 },  // ∫Ω_eq dt — drives the noise drift integrator
+
+    // ── Episodic decretion outburst envelope ─────────────────────
+    // 1 + amp · max(0, sin(2π t / P)) — pulses the inner-disk
+    // particle injection rate (the "feeding" episodes Achernar
+    // shows on year-decade timescales).
+    u_outburst_amp: { value: 0.65 },
+    u_outburst_per: { value: 8.0  },   // visualisation period (s)
 };
 
 const state = { spin: 1.0, inclination: 65, viewMode: 0 };
@@ -619,6 +674,7 @@ const starVS = /* glsl */`
     uniform float u_nrp_active;
     uniform float u_nrp_amp;
     uniform float u_nrp_omega;
+    uniform float u_diffrot_alpha;
 
     varying vec3  vNormal;
     varying vec3  vPosObj;     // surface position in object space
@@ -627,6 +683,7 @@ const starVS = /* glsl */`
     varying float vSinLat;     // |sin(latitude)| for noise/granulation
     varying float vDoppler;    // line-of-sight velocity, normalised to ±v_eq
     varying float vTheta;      // co-latitude, for ELR computation in FS
+    varying float vCosThSq;    // cos²θ — needed in FS for differential-rotation drift
 
     ${ROCHE_GLSL}
 
@@ -680,14 +737,16 @@ const starVS = /* glsl */`
         vViewDir = normalize(-mv.xyz);
 
         // ── Line-of-sight velocity for Doppler view mode.
-        //   Rigid rotation Ω̂ = ŷ ⇒ v⃗ = Ω̂ × r⃗ = (-r_z, 0, r_x) × ω.
-        //   Scaled to ±1 at the limb of the equator (rho = R).
-        vec3 vRot      = vec3(-surfPos.z, 0.0, surfPos.x) * u_v_eq;     // object-space velocity
-        vec3 vRotMV    = (modelViewMatrix * vec4(vRot, 0.0)).xyz;       // view-space (no translation)
-        vec3 viewVec   = normalize(mv.xyz);                             // toward fragment from camera
+        //   Differential rotation:  Ω(θ)/Ω_eq = 1 − α₂ cos²θ
+        //   ⇒ v⃗ = Ω(θ)·(-r_z, 0, r_x).  Scaled to ±1 at the limb of the equator.
+        float omegaFrac = 1.0 - u_diffrot_alpha * cosTheta * cosTheta;
+        vec3  vRot   = vec3(-surfPos.z, 0.0, surfPos.x) * u_v_eq * omegaFrac;
+        vec3  vRotMV = (modelViewMatrix * vec4(vRot, 0.0)).xyz;
+        vec3  viewVec = normalize(mv.xyz);
         // Positive = receding (red-shift)
         float vlos = dot(vRotMV, viewVec);
         vDoppler = clamp(vlos / max(u_v_eq * u_axis_ratio, 1e-3), -1.0, 1.0);
+        vCosThSq = cosTheta * cosTheta;
 
         gl_Position = projectionMatrix * mv;
     }
@@ -704,6 +763,8 @@ const starFS = /* glsl */`
     uniform float u_gd_model;     // 0 = von Zeipel, 1 = ELR
     uniform float u_view_mode;    // 0 continuum, 1 Doppler, 2 T-map
     uniform float u_doppler_amp;
+    uniform float u_diffrot_alpha;
+    uniform float u_diffrot_phase;   // ∫Ω_eq dt — body-frame phase integral
 
     varying vec3  vNormal;
     varying vec3  vPosObj;
@@ -712,6 +773,7 @@ const starFS = /* glsl */`
     varying float vSinLat;
     varying float vDoppler;
     varying float vTheta;
+    varying float vCosThSq;
 
     // 3D value-noise FBM (mild surface granulation).
     float h3(vec3 p){ p = fract(p*vec3(127.1,311.7,74.7)); p += dot(p,p+19.19); return fract(p.x*p.y*p.z); }
@@ -811,8 +873,17 @@ const starFS = /* glsl */`
         vec3 base = planckRGB(T);
 
         // ─── Granulation (B-star: very thin convection — minimal) ─────
-        float gran = fbm(vPosObj * 4.5 + vec3(u_time * 0.005));
-        float surf = 0.93 + 0.10 * gran;
+        // Differential-rotation latitude shear: rotate the noise sampling
+        // by Δφ(θ) = -α₂ · cos²θ · ∫Ω_eq dt.  In the body frame (which
+        // co-rotates at Ω_eq) the equator stays fixed; latitudes far from
+        // the equator drift backward, so high-latitude features visibly
+        // lag the equator.  This is the classical solar surface tracer.
+        float dphi   = -u_diffrot_alpha * vCosThSq * u_diffrot_phase;
+        float cdp    = cos(dphi), sdp = sin(dphi);
+        vec2  xzShr  = mat2(cdp, -sdp, sdp, cdp) * vec2(vPosObj.x, vPosObj.z);
+        vec3  granP  = vec3(xzShr.x, vPosObj.y, xzShr.y);
+        float gran   = fbm(granP * 4.5 + vec3(u_time * 0.005));
+        float surf   = 0.93 + 0.10 * gran;
 
         // ─── Limb darkening (Claret quadratic, B6V V-band-ish) ────────
         // I(μ) = 1 − a(1−μ) − b(1−μ)²,  a≈0.32, b≈0.28
@@ -822,7 +893,7 @@ const starFS = /* glsl */`
         vec3 col = base * surf * limb;
 
         // Photospheric flicker — barely visible, just a touch of life
-        float flick = fbm(vPosObj * 7.5 + vec3(u_time * 0.04)) * 2.0 - 1.0;
+        float flick = fbm(granP * 7.5 + vec3(u_time * 0.04)) * 2.0 - 1.0;
         col *= 1.0 + 0.025 * flick;
 
         // ─── Fresnel chromospheric rim (hotter than disk) ─────────────
@@ -896,18 +967,31 @@ const rimMesh = new THREE.Mesh(
 starGroup.add(rimMesh);
 
 // ────────────────────────────────────────────────────────────────
-//  POLAR-WIND GLOW (bipolar enhancement along the rotation axis)
+//  POLAR RADIATIVE-WIND ENHANCEMENT
 // ────────────────────────────────────────────────────────────────
-const jetVS = /* glsl */`
+//  Achernar is *not* a jet source — main-sequence Be stars do not
+//  launch collimated outflows. What VLTI/AMBER + interferometric
+//  imaging (Kervella & Domiciano de Souza 2006) actually shows is a
+//  faster, hotter *radiative wind* over the gravity-bright pole:
+//  the higher T_eff at the pole boosts radiation pressure, so the
+//  CAK line-driven wind there has a higher mass loss per unit area
+//  and a larger terminal velocity.  That produces a diffuse,
+//  flared bipolar excess in continuum images — not a collimated
+//  jet.  We render that as a wide, soft, expanding cone with
+//  azimuthal turbulence rather than the previous narrow cylinder.
+//
+const windVS = /* glsl */`
     varying vec3 vObj;
     void main() {
         vObj = position;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
     }
 `;
-const jetFS = /* glsl */`
-    uniform float u_time; uniform float u_t_pole;
+const windFS = /* glsl */`
+    uniform float u_time;
+    uniform float u_t_pole;
     varying vec3 vObj;
+
     vec3 planckRGB(float T){
         float t = clamp(T,1000.0,40000.0)*0.01; float r,g,b;
         if (t<=66.0){ r=1.0; g=0.39008158*log(max(t,1.0))-0.63184144; }
@@ -916,26 +1000,58 @@ const jetFS = /* glsl */`
         else b=0.54320679*log(t-10.0)-1.19625409;
         return clamp(vec3(r,g,b),0.0,1.4);
     }
+
+    // Hash-based turbulence (no need for full FBM here)
+    float h(vec3 p){ p = fract(p*vec3(127.1,311.7,74.7)); p += dot(p,p+19.19); return fract(p.x*p.y*p.z); }
+    float vn(vec3 p){
+        vec3 i=floor(p), f=fract(p), u=f*f*(3.0-2.0*f);
+        return mix(mix(mix(h(i),h(i+vec3(1,0,0)),u.x),
+                       mix(h(i+vec3(0,1,0)),h(i+vec3(1,1,0)),u.x), u.y),
+                   mix(mix(h(i+vec3(0,0,1)),h(i+vec3(1,0,1)),u.x),
+                       mix(h(i+vec3(0,1,1)),h(i+vec3(1,1,1)),u.x), u.y), u.z);
+    }
+
     void main() {
-        // Distance from rotation axis (Y), and along-axis distance.
-        float rxz = length(vec2(vObj.x, vObj.z));
+        float rxz  = length(vec2(vObj.x, vObj.z));
         float yAbs = abs(vObj.y);
-        // Gaussian collimation along axis, fading with height.
-        float core = exp(-pow(rxz / 0.55, 2.0)) * exp(-pow(yAbs / 1.6, 1.5));
-        float a = core * 0.55 * (0.9 + 0.1*sin(u_time*2.0 + yAbs*4.0));
-        vec3 c = planckRGB(u_t_pole * 1.10) * 1.2;
+
+        // Geometric cone — radial profile widens with height.
+        // We don't want a hard "cylinder" silhouette: use a soft
+        // Gaussian whose width grows ∝ yAbs (free expansion).
+        float coneR = 0.45 + 0.55 * yAbs;     // wind expansion half-angle
+        float radial = exp(-pow(rxz / coneR, 2.0));
+
+        // Along-axis density falls super-exponentially; CAK winds
+        // accelerate to v∞ within a few R★, then density ∝ 1/r²·v.
+        float vRad   = 1.0 - exp(-yAbs / 1.4);   // velocity build-up
+        float density = (1.0 - 0.6 * vRad) * exp(-pow(yAbs / 3.4, 1.6));
+
+        // Helical streak turbulence advected outward (gives the wind
+        // visible texture so it doesn't read as a static glow).
+        float advY = yAbs - u_time * 0.55;
+        float turb = 0.55 + 0.45 * vn(vec3(vObj.x*2.5, advY*1.6, vObj.z*2.5));
+
+        float a = radial * density * turb * 0.42
+                * (0.92 + 0.08 * sin(u_time*1.7 + yAbs*2.2));
+
+        // Wind plasma is hotter than the photospheric pole (CAK
+        // shock-heated), and bluer-shifted in continuum.
+        vec3 c = planckRGB(u_t_pole * 1.18) * 1.25;
         gl_FragColor = vec4(c, a);
     }
 `;
-const jetGeo = new THREE.CylinderGeometry(0.85, 0.05, 4.4, 24, 1, true);
-const jetMat = new THREE.ShaderMaterial({
-    vertexShader:jetVS, fragmentShader:jetFS, uniforms,
+// Inverted truncated cone — narrow base at the pole, flaring outward.
+// CylinderGeometry(radiusTop=1.7, radiusBottom=0.35, height=5.6).
+const windGeo = new THREE.CylinderGeometry(1.7, 0.35, 5.6, 36, 1, true);
+const windMat = new THREE.ShaderMaterial({
+    vertexShader:windVS, fragmentShader:windFS, uniforms,
     transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.DoubleSide,
 });
-const jetTop    = new THREE.Mesh(jetGeo, jetMat);
-const jetBottom = new THREE.Mesh(jetGeo, jetMat);
-jetTop.position.y    =  2.2;
-jetBottom.position.y = -2.2;
+const jetTop    = new THREE.Mesh(windGeo, windMat);
+const jetBottom = new THREE.Mesh(windGeo, windMat);
+// Position so the narrow base sits ~at the polar surface (y≈±1).
+jetTop.position.y    =  3.6;
+jetBottom.position.y = -3.6;
 jetBottom.rotation.x = Math.PI;
 starGroup.add(jetTop, jetBottom);
 
@@ -1107,6 +1223,292 @@ const diskMat = new THREE.ShaderMaterial({
 });
 const disk = new THREE.Mesh(diskGeo, diskMat);
 starGroup.add(disk);
+
+// ────────────────────────────────────────────────────────────────
+//  ROBINSON / TWISTOR NULL-CONGRUENCE OVERLAY
+// ────────────────────────────────────────────────────────────────
+//
+//  Penrose's twistor space ℙT ≅ ℂℙ³ encodes Minkowski-space null
+//  geodesics as points.  The unique non-trivial null geodesic
+//  congruence with non-zero twist is the Robinson congruence —
+//  when you slice it at a fixed time, the world-lines project
+//  onto a family of *Villarceau circles* that fibre nested tori
+//  around an axis.  Each torus is a single "twistor", and the
+//  Villarceau fibration realises the Hopf fibration S³ → S² of
+//  spinor space.
+//
+//  Why include it on a Be star?  Two reasons:
+//
+//   1. It's the cleanest geometric way to draw a *quasi-Keplerian
+//      shear flow with non-zero vorticity*: each torus's particles
+//      share the same specific angular momentum but different
+//      orbital phase — exactly the structure of a thin disk.
+//      Project the y-axis to the rotation axis and the inner-disk
+//      shear *is* a Robinson congruence projection.
+//
+//   2. The m=1 one-armed-oscillation mode that drives Be-disk
+//      V/R cycles is naturally encoded by the helical phasing of
+//      neighbouring twistors — it's the projection of a slowly
+//      rotating cell in twistor space.
+//
+//  Each particle carries (R_torus, r_torus, α₀, q) where q is
+//  the rational ratio between toroidal and poloidal phase
+//  velocities (q=1 gives an exact Villarceau circle; q≠1 gives
+//  a winding "torus knot" trajectory that fills the torus).
+//  Colour encodes α₀ — the twistor phase — through a periodic
+//  wheel so you can read the congruence structure at a glance.
+//
+const TWIST_N = 2400;
+const twistPos   = new Float32Array(TWIST_N * 3);
+const twistCol   = new Float32Array(TWIST_N * 3);
+const twistParam = new Float32Array(TWIST_N * 5);   // R, r, α₀, q, ωφ
+
+(function initTwistors() {
+    for (let i = 0; i < TWIST_N; i++) {
+        // Distribute torus radii so the congruence covers ~2.0–6.0 R_eq,
+        // matching the disk extent.  Bias inward (more particles in the
+        // bright inner disk).
+        const u  = Math.pow(Math.random(), 0.6);
+        const Rt = 2.0 + 4.0 * u;
+        // Minor radius scales with H(r) of the disk: ~5% scale-height.
+        const rt = 0.04 + 0.08 * u + 0.05 * Math.random();
+        const a0 = Math.random() * Math.PI * 2;
+        // Mix of "Hopf" (q=1) and slightly winding (q=2,3) trajectories.
+        const choice = Math.random();
+        const q  = choice < 0.6 ? 1 : (choice < 0.9 ? 2 : 3);
+        // Toroidal angular speed — slower at large R (visualisation only).
+        const w  = 0.20 / Math.sqrt(Rt);
+        twistParam[i*5]   = Rt;
+        twistParam[i*5+1] = rt;
+        twistParam[i*5+2] = a0;
+        twistParam[i*5+3] = q;
+        twistParam[i*5+4] = w;
+
+        // Colour by twistor phase α₀ — wrap a HSV wheel through
+        // the Penrose-style purple→cyan→magenta palette.
+        const t = a0 / (Math.PI * 2);
+        const h = t * 6;
+        const c = 0.9, x = c * (1 - Math.abs(((h) % 2) - 1));
+        let R = 0, G = 0, B = 0;
+        if (h < 1)      { R=c; G=x; B=0; }
+        else if (h < 2) { R=x; G=c; B=0; }
+        else if (h < 3) { R=0; G=c; B=x; }
+        else if (h < 4) { R=0; G=x; B=c; }
+        else if (h < 5) { R=x; G=0; B=c; }
+        else            { R=c; G=0; B=x; }
+        // Blend toward Penrose-paper purple
+        twistCol[i*3]   = 0.5 * R + 0.5 * 0.78;
+        twistCol[i*3+1] = 0.5 * G + 0.5 * 0.55;
+        twistCol[i*3+2] = 0.5 * B + 0.5 * 1.00;
+    }
+})();
+
+const twistGeo = new THREE.BufferGeometry();
+twistGeo.setAttribute('position', new THREE.BufferAttribute(twistPos, 3));
+twistGeo.setAttribute('color',    new THREE.BufferAttribute(twistCol, 3));
+const twistMat = new THREE.PointsMaterial({
+    size: 0.045, sizeAttenuation: true, vertexColors: true,
+    transparent: true, opacity: 0.85, depthWrite: false,
+    blending: THREE.AdditiveBlending,
+});
+const twistPoints = new THREE.Points(twistGeo, twistMat);
+twistPoints.visible = false;
+starGroup.add(twistPoints);
+
+function updateTwistors(t) {
+    if (!twistPoints.visible) return;
+    const arr = twistPos;
+    for (let i = 0; i < TWIST_N; i++) {
+        const Rt = twistParam[i*5];
+        const rt = twistParam[i*5+1];
+        const a0 = twistParam[i*5+2];
+        const q  = twistParam[i*5+3];
+        const w  = twistParam[i*5+4];
+
+        // Toroidal phase φ (around the rotation axis) and poloidal
+        // phase ψ (around the cross-section); their rational ratio
+        // gives Villarceau / torus-knot trajectories.
+        const phi = w * t + a0;
+        const psi = q * w * t + 2 * a0;
+
+        const cR = Rt + rt * Math.cos(psi);
+        arr[i*3]   = cR * Math.cos(phi);
+        arr[i*3+1] = rt * Math.sin(psi);
+        arr[i*3+2] = cR * Math.sin(phi);
+    }
+    twistGeo.attributes.position.needsUpdate = true;
+}
+
+// ────────────────────────────────────────────────────────────────
+//  DECRETION OUTFLOW PARTICLES (the actual mass-loss mechanism)
+// ────────────────────────────────────────────────────────────────
+//
+//  Be stars decrete — they don't accrete.  Material near the
+//  equator is spun up to local Keplerian velocity (helped by NRP
+//  pulsation pumping angular momentum into the surface layers)
+//  and is then transported *outward* by viscous angular-momentum
+//  redistribution.  The Lee-Saio-Osaki / Carciofi-Bjorkman model:
+//
+//      Σ̇_out = (1/r) ∂/∂r [ ν Σ r ∂(rv_φ)/∂r ]
+//      ν = α c_s² / Ω_K   (Shakura-Sunyaev, adapted for decretion)
+//
+//  In a thin Keplerian disk this gives a slow outward radial drift
+//
+//      v_r ≈  α (c_s / v_K)² v_K
+//
+//  superposed on the dominant azimuthal Keplerian motion.  We
+//  simulate ~1800 tracer particles each with state (r, φ, age):
+//
+//   • φ̇ = Ω_K(r) = r^(-3/2)         (Keplerian, scene units)
+//   • ṙ = drift_speed                  (outward, viscous)
+//   • injection rate at R_eq modulated by an outburst envelope
+//     1 + amp · max(0, sin(2π t/P))²  — Achernar's well-known
+//     episodic disk-feeding behaviour.
+//
+//  Particle is recycled when r > R_outer.
+//
+const OUT_N = 1800;
+const outPos = new Float32Array(OUT_N * 3);
+const outCol = new Float32Array(OUT_N * 3);
+const outR   = new Float32Array(OUT_N);
+const outPhi = new Float32Array(OUT_N);
+const outAge = new Float32Array(OUT_N);     // seconds since launch
+const outLife = new Float32Array(OUT_N);    // expected lifetime (cosmetic)
+
+(function initOutflow() {
+    for (let i = 0; i < OUT_N; i++) {
+        outR[i]    = 1e9;       // start "dead" — they will be respawned
+        outPhi[i]  = 0;
+        outAge[i]  = 1e9;
+        outLife[i] = 0;
+    }
+})();
+const outGeo = new THREE.BufferGeometry();
+outGeo.setAttribute('position', new THREE.BufferAttribute(outPos, 3));
+outGeo.setAttribute('color',    new THREE.BufferAttribute(outCol, 3));
+const outMat = new THREE.PointsMaterial({
+    size: 0.060, sizeAttenuation: true, vertexColors: true,
+    transparent: true, opacity: 0.92, depthWrite: false,
+    blending: THREE.AdditiveBlending,
+});
+const outPoints = new THREE.Points(outGeo, outMat);
+outPoints.visible = true;
+starGroup.add(outPoints);
+
+// Random-launch helper (Box-Muller for Gaussian z thickness)
+function gauss() {
+    const u1 = Math.max(Math.random(), 1e-6), u2 = Math.random();
+    return Math.sqrt(-2*Math.log(u1)) * Math.cos(2*Math.PI*u2);
+}
+
+// Temperature-coloured palette for outflow:
+//   inner (T~10 kK)   → soft cyan
+//   bulk  (T~7-9 kK)  → magenta
+//   outer (T~5 kK)    → dim red
+function outflowColor(rNorm, dst) {
+    // rNorm in [0,1]: 0 inner, 1 outer
+    const t = Math.min(1, Math.max(0, rNorm));
+    // linear blend cyan → magenta → red
+    const cR = (1-t)*0.55 + t*1.00;
+    const cG = (1-t)*0.85 + t*0.20;
+    const cB = (1-t)*1.00 + t*0.30;
+    dst[0] = cR; dst[1] = cG; dst[2] = cB;
+}
+
+let outTimeAccum = 0;
+const _outCol = new Float32Array(3);
+
+function updateOutflow(t, dt) {
+    if (!outPoints.visible) {
+        // Hide all
+        for (let i = 0; i < OUT_N; i++) {
+            outPos[i*3] = 0; outPos[i*3+1] = 1e6; outPos[i*3+2] = 0;
+            outCol[i*3] = 0; outCol[i*3+1] = 0; outCol[i*3+2] = 0;
+        }
+        outGeo.attributes.position.needsUpdate = true;
+        outGeo.attributes.color.needsUpdate    = true;
+        return;
+    }
+
+    if (uniforms.u_disk_active.value < 0.5) {
+        // Disk shed (shell phase): suppress injection but let existing
+        // particles drift out and dim, mimicking a "diluting" envelope.
+    }
+
+    const Rin    = uniforms.u_axis_ratio.value * 1.05;   // inner edge
+    const Rout   = uniforms.u_disk_outer.value;          // outer edge
+    const alpha  = 0.0095;                                // viscosity proxy
+    const cs2_vk2 = 0.012;                                // (c_s / v_K)² for B-star disk
+    const drift0  = alpha * cs2_vk2;                      // base v_r/v_K
+
+    // Outburst envelope — sin² so it's positive, no negative injection.
+    const burstPer = Math.max(uniforms.u_outburst_per.value, 0.5);
+    const burstAmp = uniforms.u_outburst_amp.value;
+    const burst = Math.pow(Math.max(0, Math.sin(Math.PI * t / burstPer)), 2);
+    const injectionRate = (0.55 + 0.45 * burstAmp * burst) * uniforms.u_disk_rho.value
+                        * (uniforms.u_disk_active.value > 0.5 ? 1.0 : 0.10);
+
+    // Differential rotation of the surface biases the equatorial
+    // "feeding" zone: the equator launches mass at exactly v_K, so
+    // boosted spin (state.spin) increases the launch rate.
+    const launchPerSec = 220 * injectionRate * Math.max(0.2, state.spin);
+    outTimeAccum += dt * launchPerSec;
+    let nLaunch = Math.floor(outTimeAccum);
+    outTimeAccum -= nLaunch;
+
+    // ── Step 1: respawn dead particles, re-using slots
+    for (let i = 0; i < OUT_N && nLaunch > 0; i++) {
+        if (outR[i] >= Rout || outAge[i] >= outLife[i]) {
+            outR[i]    = Rin + 0.02 * Math.random();
+            outPhi[i]  = Math.random() * Math.PI * 2;
+            outAge[i]  = 0;
+            // Lifetime sets the scale-height envelope: longer-lived
+            // particles drift further out before recycling.
+            outLife[i] = 8 + 14 * Math.random();
+            nLaunch--;
+        }
+    }
+
+    // ── Step 2: integrate every live particle
+    const drift_visual = drift0 * 1.85;        // visualisation boost
+    for (let i = 0; i < OUT_N; i++) {
+        const r = outR[i];
+        if (r >= Rout || outAge[i] >= outLife[i]) {
+            // Hide off-screen until next respawn
+            outPos[i*3]   = 0;
+            outPos[i*3+1] = 1e6;
+            outPos[i*3+2] = 0;
+            continue;
+        }
+        // Keplerian Ω = r^(-3/2), with a small differential boost so
+        // outer rings clearly lag inner rings in this visualisation.
+        const omegaK = Math.pow(r, -1.5) * 0.45;
+        outPhi[i] += omegaK * dt;
+        // Viscous radial drift v_r = drift0 · v_K
+        const vr = drift_visual * Math.pow(r, -0.5);
+        outR[i] += vr * dt;
+        outAge[i] += dt;
+
+        // Vertical thickness: thin Gaussian envelope ~ 0.05 R (puffs
+        // up slightly at larger r per H(r) ∝ r^1.5 / r ∝ r^0.5)
+        const z = 0.04 * Math.sqrt(r) * gauss() * 0.5;
+
+        outPos[i*3]   = r * Math.cos(outPhi[i]);
+        outPos[i*3+1] = z;
+        outPos[i*3+2] = r * Math.sin(outPhi[i]);
+
+        // Colour: age-fade × radial palette × burst-glow
+        const rNorm = (r - Rin) / Math.max(Rout - Rin, 0.1);
+        outflowColor(rNorm, _outCol);
+        const ageFrac = outAge[i] / outLife[i];
+        const bright  = (1 - ageFrac * 0.6) * (0.55 + 0.55 * burst);
+        outCol[i*3]   = _outCol[0] * bright;
+        outCol[i*3+1] = _outCol[1] * bright;
+        outCol[i*3+2] = _outCol[2] * bright;
+    }
+    outGeo.attributes.position.needsUpdate = true;
+    outGeo.attributes.color.needsUpdate    = true;
+}
 
 // ────────────────────────────────────────────────────────────────
 //  ROTATION-AXIS HELPER
@@ -1282,6 +1684,10 @@ document.getElementById('sl-incl').addEventListener('input', e => {
     camera.position.set(0, d*Math.sin(el), d*Math.cos(el));
     controls.update();
 });
+document.getElementById('sl-diffrot').addEventListener('input', e => {
+    uniforms.u_diffrot_alpha.value = +e.target.value;
+    document.getElementById('disp-diffrot').textContent = (+e.target.value).toFixed(3);
+});
 
 document.getElementById('tog-disk').addEventListener('change', e => {
     uniforms.u_disk_active.value = e.target.checked ? 1.0 : 0.0;
@@ -1300,6 +1706,17 @@ document.getElementById('tog-corona').addEventListener('change', e => { rimMesh.
 document.getElementById('tog-jet').addEventListener('change',    e => { jetTop.visible = jetBottom.visible = e.target.checked; });
 document.getElementById('tog-axis').addEventListener('change',   e => { axisLine.visible = e.target.checked; });
 document.getElementById('tog-binary').addEventListener('change', e => { binaryGroup.visible = e.target.checked; });
+document.getElementById('tog-outflow').addEventListener('change',e => { outPoints.visible = e.target.checked; });
+document.getElementById('tog-twistor').addEventListener('change',e => { twistPoints.visible = e.target.checked; });
+
+document.getElementById('sl-burst-amp').addEventListener('input', e => {
+    uniforms.u_outburst_amp.value = +e.target.value;
+    document.getElementById('disp-burst-amp').textContent = (+e.target.value).toFixed(2);
+});
+document.getElementById('sl-burst-per').addEventListener('input', e => {
+    uniforms.u_outburst_per.value = +e.target.value;
+    document.getElementById('disp-burst-per').textContent = (+e.target.value).toFixed(1) + ' s';
+});
 
 // ── Gravity-darkening model selector ─────────────────────────────
 const modePill = document.getElementById('mode-pill');
@@ -1856,7 +2273,12 @@ function animate() {
     const dt = clock.getDelta();
     uniforms.u_time.value += dt;
 
-    starGroup.rotation.y += dt * 0.45 * state.spin;
+    // Body-frame rotation: rigid spin at Ω_eq.  Differential rotation
+    // is applied *inside* shaders/particle systems via u_diffrot_phase,
+    // not by adding latitude-dependent rotation to starGroup.
+    const omegaEqVis = 0.45 * state.spin;
+    starGroup.rotation.y    += dt * omegaEqVis;
+    uniforms.u_diffrot_phase.value += dt * omegaEqVis;
 
     // Update equatorial rotational velocity (Roche units) for shader Doppler:
     //   v_eq² = ω² R_eq² = β R_eq²,  β = rocheBeta(R)
@@ -1870,6 +2292,16 @@ function animate() {
     disk.updateMatrixWorld(true);
     _invTmp.copy(disk.matrixWorld).invert();
     uniforms.u_disk_inv_model.value.copy(_invTmp);
+
+    // Particle systems live in the star's body frame.  Note:
+    //   • twistors use absolute u_time (their toroidal phase
+    //     is intrinsic to the congruence, not tied to the body).
+    //   • outflow particles must subtract the body rotation if we
+    //     want them to "lag" the surface — for now we let them
+    //     co-rotate with starGroup, which makes the prograde
+    //     Keplerian motion read as differential vs. the surface.
+    updateTwistors(uniforms.u_time.value);
+    updateOutflow(uniforms.u_time.value, dt);
 
     // Achernar B orbital motion.
     if (binaryGroup.visible) {
