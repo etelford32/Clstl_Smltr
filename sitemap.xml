@@ -135,6 +135,13 @@
 
   <!-- ── PLANETARY SCIENCE ─────────────────────────────────────────────── -->
   <url>
+    <loc>https://parkersphysics.com/threejs.html</loc>
+    <lastmod>2026-05-07</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+
+  <url>
     <loc>https://parkersphysics.com/jupiter-system.html</loc>
     <lastmod>2026-05-07</lastmod>
     <changefreq>monthly</changefreq>

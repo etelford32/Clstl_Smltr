@@ -206,6 +206,12 @@ SIMS: dict[str, tuple[str, str, str, str]] = {
         "Real-time tracker for 25,000+ satellites and debris objects using SGP4 propagation in WebAssembly. Search, filter, and visualize orbital regimes.",
         "Space situational awareness",
     ),
+    "threejs.html": (
+        f"{SITE}/threejs.html",
+        "Solar System Orrery",
+        "Interactive 3D solar-system orrery with the Sun, eight planets, dwarf planets, major moons, and the asteroid belt. Keplerian orbits driven by NASA JPL ephemerides.",
+        "Planetary science simulation",
+    ),
 }
 
 PRICING_FAQ: list[tuple[str, str]] = [

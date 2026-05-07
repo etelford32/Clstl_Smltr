@@ -165,6 +165,11 @@ PAGES: dict[str, tuple[str, str, str]] = {
         "Satellite Tracker — Parkers Physics",
         "Real-time tracker for 25,000+ satellites and debris objects using SGP4 propagation in WebAssembly. Search, filter, and visualize orbital regimes.",
     ),
+    "threejs.html": (
+        "/threejs.html",
+        "Solar System Orrery — Parkers Physics",
+        "Interactive 3D solar-system orrery with the Sun, eight planets, dwarf planets, major moons, and the asteroid belt. Keplerian orbits driven by NASA JPL ephemerides.",
+    ),
     "privacy.html": (
         "/privacy",
         "Privacy Policy — Parkers Physics",
