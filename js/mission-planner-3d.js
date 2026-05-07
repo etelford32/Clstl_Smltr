@@ -51,6 +51,7 @@ import {
     createEarthUniforms, loadEarthTextures,
 } from './earth-skin.js';
 import { makeOrreryPlanet, updateOrreryPlanet } from './orrery-skins.js';
+import { PerfProfiler } from './perf-profiler.js';
 
 // ── Scene scales ────────────────────────────────────────────────────────────
 // Unified scene: 1 unit = 1 R⊕ (≈ 6378 km). Earth orbits Sun at ~23 456 R⊕
@@ -207,6 +208,12 @@ export function initMissionPlanner({ container, onEvent } = {}) {
     renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
     renderer.setSize(w(), h());
     container.appendChild(renderer.domElement);
+
+    // Frame-section profiler — wraps the tick so the host page can surface
+    // FPS / frame-ms / draw stats on demand. Disabled by default so the
+    // measure() wrappers no-op until the HUD is shown (Shift+P from the host).
+    const prof = new PerfProfiler();
+    prof.enable(false);
 
     // ── Unified world scene ─────────────────────────────────────────────────
     // One Scene + Camera + OrbitControls. `world.earthSystem` is a Group
@@ -1330,20 +1337,26 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         state.elapsed    = newElapsed;
         state.scenarioJD = state.simAnchor.scenarioJD + dWall * state.simAnchor.timeScale * state.simAnchor.simDaysPerSec;
 
-        updateEarthSystem(dt);   // earthSystem heliocentric pos + Earth-frame anims
-        updateHelio(dt);          // Sun spin + Mercury/Venus/Mars + helio cruises
+        prof.frameStart();
+        prof.measure('earth',  () => updateEarthSystem(dt));   // earthSystem heliocentric pos + Earth-frame anims
+        prof.measure('helio',  () => updateHelio(dt));          // Sun spin + Mercury/Venus/Mars + helio cruises
         // Off-thread Earth-system ground truth: the worker propagates Moon /
         // Phobos / Deimos / Earth heliocentric in deterministic Keplerian form
         // and emits an FNV-1a hash per reply. The simSpeed argument is "sim
         // seconds per real second" — here, timeScale × simDaysPerSec × 86400.
         const simSpdSecPerSec = state.simAnchor.timeScale * state.simAnchor.simDaysPerSec * 86400;
-        earthBridge.maintain(state.scenarioJD, simSpdSecPerSec);
-        _updateEarthBridgeResidual();
+        prof.measure('bridge', () => {
+            earthBridge.maintain(state.scenarioJD, simSpdSecPerSec);
+            _updateEarthBridgeResidual();
+        });
         // Camera animation + body-follow translation must run AFTER body
         // positions update so the rig is locked to current world coords.
-        updateCameraSystem();
-        world.controls.update();
-        renderer.render(world.scene, world.camera);
+        prof.measure('camera', () => {
+            updateCameraSystem();
+            world.controls.update();
+        });
+        prof.measure('render', () => renderer.render(world.scene, world.camera));
+        prof.frameEnd(renderer.info);
 
         requestAnimationFrame(tick);
     }
@@ -2402,6 +2415,11 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         launchTour: (opts) => launchTour(opts),
         // Gravity-assist primitives (exposed for didactic UI uses)
         flybyAssessment, flybyMaxTurnAngle, flybyPeriapsisForTurn,
+        // Frame profiler — host page toggles this on for the on-screen perf
+        // HUD. While disabled, the measure() wrappers in the tick are no-ops.
+        setPerfEnabled: (v) => prof.enable(v),
+        isPerfEnabled:  () => prof.enabled,
+        getPerfSnapshot: () => prof.snapshot(),
     };
 }
 

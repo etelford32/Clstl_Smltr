@@ -377,6 +377,29 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
 #mp-hud .hud-row { display:flex; justify-content:space-between; gap:10px; padding:1px 0; }
 #mp-hud .hud-row .k { color:#88a; }
 #mp-hud .hud-row .v { color:#fff; font-weight:700; }
+/* Perf HUD ────────────────────────────────────────────────────────────
+   Bottom-right toggleable overlay (Shift+P). Off by default — when
+   enabled the planner module also flips its profiler on so the
+   measure() wrappers stop no-op'ing. */
+#mp-perf {
+    position:absolute; bottom:12px; right:12px;
+    background:rgba(6,4,18,.85); backdrop-filter:blur(8px);
+    border:1px solid rgba(255,200,80,.25);
+    border-radius:8px; padding:8px 10px;
+    font-family:monospace; font-size:.66rem; color:#fed;
+    min-width:170px; pointer-events:none;
+}
+#mp-perf .perf-title {
+    color:#ffc850; font-weight:800; font-size:.6rem;
+    letter-spacing:.12em; text-transform:uppercase; margin-bottom:4px;
+}
+#mp-perf .perf-row { display:flex; justify-content:space-between; gap:10px; padding:1px 0; }
+#mp-perf .perf-row .k { color:#a98; }
+#mp-perf .perf-row .v { color:#fff; }
+#mp-perf .perf-row .v.warn { color:#f90; }
+#mp-perf .perf-row .v.bad  { color:#f55; }
+#mp-perf .perf-sec { color:#aab; font-size:.6rem; margin-top:4px; padding-top:4px;
+                     border-top:1px dashed rgba(255,255,255,.08); white-space:pre; }
 /* Mars Rover Dashboard ──────────────────────────────────────────────
    Top-left card on the 3D viewport. Hidden until the user focuses Mars
    (or a Mars surface pad), then expands to show the latest readings
@@ -771,6 +794,14 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
                 <div class="hud-row"><span class="k">Mars missions</span><span class="v" id="hud-mars">0</span></div>
                 <div class="hud-row"><span class="k">Tours active</span><span class="v" id="hud-tours">0</span></div>
                 <div class="hud-row"><span class="k">Scenario JD</span><span class="v" id="hud-jd">—</span></div>
+            </div>
+            <div id="mp-perf" hidden>
+                <div class="perf-title">Perf · Shift+P to hide</div>
+                <div class="perf-row"><span class="k">FPS</span><span class="v" id="perf-fps">—</span></div>
+                <div class="perf-row"><span class="k">Frame</span><span class="v" id="perf-frame">—</span></div>
+                <div class="perf-row"><span class="k">Draw calls</span><span class="v" id="perf-calls">—</span></div>
+                <div class="perf-row"><span class="k">Triangles</span><span class="v" id="perf-tris">—</span></div>
+                <div class="perf-sec" id="perf-sections">—</div>
             </div>
             <div id="mp-mars-dashboard" class="mp-mars-dash expanded" hidden>
                 <button id="mp-mars-dash-toggle" class="mp-mars-dash-toggle" type="button"
@@ -1910,6 +1941,55 @@ setInterval(() => {
     }
 }, 500);
 
+// ── Perf HUD (Shift+P) ──────────────────────────────────────────────────────
+// Toggleable corner overlay backed by the planner's PerfProfiler.  When
+// hidden we also disable the profiler so the per-section timing wrappers
+// in the tick stop running performance.now() on every measure() call.
+const perfPanel  = document.getElementById('mp-perf');
+const perfFps    = document.getElementById('perf-fps');
+const perfFrame  = document.getElementById('perf-frame');
+const perfCalls  = document.getElementById('perf-calls');
+const perfTris   = document.getElementById('perf-tris');
+const perfSecs   = document.getElementById('perf-sections');
+let perfTimer = null;
+function paintPerf() {
+    if (!planner.getPerfSnapshot) return;
+    const snap = planner.getPerfSnapshot();
+    const fps  = snap.fps;
+    perfFps.textContent   = fps > 0 ? fps.toFixed(0) : '—';
+    perfFps.className     = 'v' + (fps && fps < 30 ? ' bad' : fps && fps < 50 ? ' warn' : '');
+    const frame = snap.sections.find(s => s.name === 'frame');
+    if (frame) {
+        const ms = frame.ema;
+        perfFrame.textContent = `${ms.toFixed(1)} ms (peak ${frame.peak.toFixed(1)})`;
+        perfFrame.className   = 'v' + (ms > 33 ? ' bad' : ms > 20 ? ' warn' : '');
+    } else {
+        perfFrame.textContent = '—';
+    }
+    const r = snap.renderer;
+    perfCalls.textContent = r ? String(r.calls ?? '—') : '—';
+    perfTris.textContent  = r ? (r.triangles ?? 0).toLocaleString() : '—';
+    // Per-section EMA breakdown (skip the synthetic 'frame' total).
+    const lines = snap.sections
+        .filter(s => s.name !== 'frame')
+        .slice(0, 6)
+        .map(s => `${s.name.padEnd(7)}${s.ema.toFixed(2).padStart(6)} ms`)
+        .join('\n');
+    perfSecs.textContent = lines || '—';
+}
+function setPerfHud(on) {
+    if (on) {
+        perfPanel.hidden = false;
+        planner.setPerfEnabled?.(true);
+        if (!perfTimer) perfTimer = setInterval(paintPerf, 250);
+        paintPerf();
+    } else {
+        perfPanel.hidden = true;
+        planner.setPerfEnabled?.(false);
+        if (perfTimer) { clearInterval(perfTimer); perfTimer = null; }
+    }
+}
+
 // Fly camera to currently-selected origin pad. Routes Earth pads to Earth,
 // Moon bases to the Moon, Mars colonies to Mars — and highlights the
 // parent body since we're zoomed in on its surface.
@@ -1934,6 +2014,12 @@ window.addEventListener('keydown', (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const k = e.key.toLowerCase();
     if (KEY_MAP[k]) { focusBody(KEY_MAP[k]); e.preventDefault(); return; }
+    if (k === 'p' && e.shiftKey) {
+        // Shift+P → toggle the perf HUD (and the underlying profiler)
+        setPerfHud(perfPanel.hidden);
+        e.preventDefault();
+        return;
+    }
     if (k === 'f' && e.shiftKey) {
         // Shift+F → release the camera into free-fly
         planner.setFreeCam();
