@@ -1487,6 +1487,12 @@ export class AtmosphereGlobe {
             probe.mesh.userData.tleEpoch  = sat.epoch;
         }
 
+        // Stash the raw TLE lines on the probe so the trajectory
+        // analyzer can run SGP4 directly without a second fetch.
+        if (sat.line1 && sat.line2) {
+            probe.tleLines = { line1: sat.line1, line2: sat.line2, epoch: sat.epoch };
+        }
+
         // Rebuild the orbital-path polyline from the new elements.
         this._refreshOrbitalPath(probe);
         // And the conjunction-screener lookup table — its sampling is
@@ -1522,6 +1528,147 @@ export class AtmosphereGlobe {
      * { total, live, fetchedAt } or null if no fetch has resolved yet.
      * UI uses this to paint the "Live TLE · 2h ago" freshness pill.
      */
+    /**
+     * Lookup raw TLE lines for one tracked probe by id, if they were
+     * fetched live. Returns null when the probe is still on fallback
+     * mean elements or the spec has no NORAD ID.
+     */
+    getProbeTle(id) {
+        const probe = this._satProbes?.[id];
+        return probe?.tleLines || null;
+    }
+
+    /**
+     * Lightweight metadata bundle for the trajectory analyzer.
+     */
+    getProbeMeta(id) {
+        const probe = this._satProbes?.[id];
+        if (!probe) return null;
+        return {
+            id,
+            name:    probe.spec.name,
+            color:   probe.spec.color,
+            altKm:   probe.spec.altitudeKm,
+            noradId: probe.spec.orbital?.noradId,
+            inclinationDeg: probe.spec.orbital?.inclinationDeg,
+            tleLines: probe.tleLines || null,
+        };
+    }
+
+    // ── Live-catalog overlay (full active + debris cloud) ────────────────
+    // Lazy-instantiated on the first enableCatalogGroup() call. Reuses the
+    // shared SatelliteTracker class — its Rust-WASM SGP4 batch path handles
+    // tens of thousands of objects per frame. We attach it under the same
+    // scene as the rest of the globe so day/night and atmosphere cohorts
+    // stay aligned.
+    async enableCatalogGroup(group) {
+        const tracker = await this._ensureCatalogTracker();
+        if (!tracker) return { ok: false, reason: 'tracker init failed' };
+        try {
+            const added = await tracker.loadGroup(group);
+            return { ok: true, count: added ?? 0, total: tracker._satellites.length };
+        } catch (err) {
+            return { ok: false, reason: String(err?.message || err) };
+        }
+    }
+
+    /** Hide / forget one catalog group. */
+    disableCatalogGroup(group) {
+        const t = this._catalogTracker;
+        if (!t) return false;
+        // SatelliteTracker doesn't expose a per-group remove that
+        // truly drops slots; the cheap operation is to toggle visibility.
+        // Slots stay registered (cheap on the WASM side) but are not drawn.
+        if (t._groups?.has?.(group)) {
+            t.setGroupVisible?.(group, false);
+        }
+        return true;
+    }
+
+    /** Re-show a previously disabled group without re-fetching. */
+    showCatalogGroup(group) {
+        const t = this._catalogTracker;
+        if (!t) return false;
+        t.setGroupVisible?.(group, true);
+        return true;
+    }
+
+    /** Snapshot of catalog state — used by the toggle-bar status line. */
+    getCatalogStatus() {
+        const t = this._catalogTracker;
+        if (!t) return { total: 0, groups: [] };
+        return {
+            total: t._satellites?.length || 0,
+            groups: Array.from(t._groups || []).map(([name, info]) => ({
+                name, count: info.count, visible: info.visible !== false,
+            })),
+        };
+    }
+
+    async _ensureCatalogTracker() {
+        if (this._catalogTracker) return this._catalogTracker;
+        if (this._catalogTrackerLoading) return this._catalogTrackerLoading;
+        this._catalogTrackerLoading = (async () => {
+            try {
+                const mod = await import('./satellite-tracker.js');
+                // Earth radius = 1 in scene units; tracker handles km→scene.
+                // showOrbits=false avoids per-sat orbit-trail meshes (we
+                // do that on the named refs instead).
+                const tracker = new mod.SatelliteTracker(this._scene, 1.0, {
+                    maxSatellites: 35000,
+                    showOrbits: false,
+                });
+                // Make tracker points clickable for analysis. The
+                // tracker rebuilds its Points mesh on each add-sats batch,
+                // so we keep `_extraHittable` in sync with the live mesh
+                // instead of appending stale references.
+                this._catalogTracker = tracker;
+                this._extraHittable = this._extraHittable || [];
+                const syncHittable = () => {
+                    // Drop any prior catalog mesh and patch in the current
+                    // one. Other hittables (debris cloud, satellite
+                    // probes) live under different mesh refs so we only
+                    // touch the one tagged as the tracker's points mesh.
+                    this._extraHittable = this._extraHittable.filter(
+                        o => o.userData?.kind !== 'catalog-cloud'
+                    );
+                    if (tracker._pointsMesh) {
+                        tracker._pointsMesh.userData = tracker._pointsMesh.userData || {};
+                        tracker._pointsMesh.userData.kind = 'catalog-cloud';
+                        this._extraHittable.push(tracker._pointsMesh);
+                    }
+                };
+                syncHittable();
+                window.addEventListener('satellites-loaded', syncHittable);
+                return tracker;
+            } catch (err) {
+                console.warn('[upper-atmosphere] catalog tracker init failed:', err);
+                this._catalogTrackerLoading = null;
+                return null;
+            }
+        })();
+        return this._catalogTrackerLoading;
+    }
+
+    /** Resolve a catalog raycast hit to a sat record (TLE + name + alt). */
+    _resolveCatalogHit(hit) {
+        const t = this._catalogTracker;
+        if (!t || !hit || hit.object !== t._pointsMesh) return null;
+        const sat = t._satellites?.[hit.index];
+        if (!sat) return null;
+        return {
+            kind:   'catalog-point',
+            id:     `catalog-${sat.tle?.norad_id ?? hit.index}`,
+            name:   sat.tle?.name || `NORAD ${sat.tle?.norad_id ?? '—'}`,
+            altKm:  sat.alt,
+            color:  '#0cc',
+            noradId: sat.tle?.norad_id,
+            line1:  sat.tle?.line1,
+            line2:  sat.tle?.line2,
+            tooltip: `Click to analyze trajectory · alt ${(sat.alt ?? 0).toFixed(0)} km`,
+        };
+    }
+
     getTleSummary() {
         return this._tleSummary || null;
     }
@@ -2971,6 +3118,10 @@ export class AtmosphereGlobe {
             // userData; the recursive=true raycast finds them via
             // their parent groups.
             ...(this._cascade ? [this._cascade.group] : []),
+            // Live-catalog Points cloud — populated lazily by
+            // enableCatalogGroup(). Each point picks per-index back to
+            // a TLE record via _resolveCatalogHit.
+            ...(this._extraHittable || []),
         ];
 
         // Recursive: the ISS sprite carries a child halo mesh; if we
@@ -2997,6 +3148,9 @@ export class AtmosphereGlobe {
          */
         const _userDataForHit = (hit) => {
             if (!hit) return {};
+            // Live-catalog cloud hit → resolve to a specific TLE.
+            const catUd = this._resolveCatalogHit?.(hit);
+            if (catUd) return catUd;
             // Debris cloud hit → resolve to a specific piece.
             if (hit.object === this._debrisCloud
                 && Number.isFinite(hit.index)
@@ -3081,6 +3235,23 @@ export class AtmosphereGlobe {
                 this.flyToISS();
             } else if (ud?.kind === 'debris-piece' && Number.isFinite(ud.debrisIdx)) {
                 this.flyToDebris(ud.debrisIdx);
+            } else if (ud?.kind === 'catalog-point' && (ud.line1 || ud.noradId)) {
+                // Click on any live-catalog point → push into the
+                // trajectory analyzer panel. Pass TLE inline if we have
+                // it; analyzer falls back to /api/celestrak/tle?norad=
+                // otherwise.
+                try {
+                    window.dispatchEvent(new CustomEvent('ua-analyze-sat', {
+                        detail: {
+                            id:    ud.id,
+                            name:  ud.name,
+                            color: ud.color,
+                            line1: ud.line1,
+                            line2: ud.line2,
+                            noradId: ud.noradId,
+                        }
+                    }));
+                } catch (_) { /* ignore */ }
             }
         };
         this.canvas.addEventListener('mousemove', onMove);
@@ -3204,6 +3375,13 @@ export class AtmosphereGlobe {
         // drop the shell's opacity so the user can see through the layer
         // they're standing in. Cheap — five comparisons per frame.
         if (this._shells) this._fadeShellsForCameraAltitude();
+
+        // Live-catalog tracker — propagate every loaded sat via Rust
+        // SGP4 WASM. The tracker handles SAB / worker / batch fast-paths
+        // internally; we just feed it wall-clock time.
+        if (this._catalogTracker?.tick) {
+            this._catalogTracker.tick(Date.now());
+        }
 
         this._renderer.render(this._scene, this._camera);
     }

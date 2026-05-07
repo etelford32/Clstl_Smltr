@@ -374,6 +374,78 @@ input[type=range]::-moz-range-thumb {
 .ua-lc-regime--free-molecular { color:#ff9060; }
 .ua-lc-regime--unknown        { color:#778; }
 
+/* ─── Trajectory analysis panel ───────────────────────── */
+.ua-traj-panel { display:flex; flex-direction:column; gap:8px; }
+.ua-traj-empty {
+    font-size:.7rem; color:#7a8;
+    padding:14px; border:1px dashed rgba(140,160,200,.18);
+    border-radius:6px; text-align:center; line-height:1.5;
+}
+.ua-traj-head {
+    display:flex; align-items:center; gap:10px;
+    padding:6px 8px; background:rgba(0,200,200,.06);
+    border:1px solid rgba(0,200,200,.18); border-radius:6px;
+}
+.ua-traj-head .ua-traj-name {
+    font-weight:700; color:#cef; font-size:.78rem;
+    flex:1; min-width:0; text-overflow:ellipsis; overflow:hidden;
+    white-space:nowrap;
+}
+.ua-traj-head .ua-traj-meta {
+    font-size:.66rem; color:#9ab; font-family:monospace;
+}
+.ua-traj-head button {
+    background:transparent; border:1px solid rgba(255,120,120,.4);
+    color:#f88; font-size:.65rem; padding:2px 6px; border-radius:3px;
+    cursor:pointer;
+}
+.ua-traj-head button:hover { background:rgba(255,120,120,.12); }
+.ua-traj-controls {
+    display:grid; grid-template-columns:auto 1fr auto;
+    gap:4px 8px; align-items:center;
+    font-size:.66rem; color:#9ab; font-family:monospace;
+}
+.ua-traj-controls input[type=range] { accent-color:#0cc; }
+.ua-traj-controls .ua-traj-val { color:#0cc; min-width:64px; text-align:right; }
+.ua-traj-osc {
+    display:grid; grid-template-columns:1fr 1fr;
+    gap:2px 10px; font-size:.68rem; font-family:monospace;
+    padding:6px 8px; background:rgba(8,4,28,.5);
+    border:1px solid rgba(140,160,200,.16); border-radius:6px;
+}
+.ua-traj-osc .ua-k { color:#9ab; }
+.ua-traj-osc .ua-v { color:#cef; text-align:right; }
+.ua-traj-charts { display:flex; flex-direction:column; gap:6px; }
+.ua-traj-charts svg {
+    width:100%; height:auto; display:block;
+    border:1px solid rgba(140,160,200,.14); border-radius:6px;
+}
+.ua-traj-status {
+    font-size:.62rem; color:#7a8; font-style:italic; padding:2px 0;
+}
+
+/* ─── Catalog overlay ──────────────────────────────────── */
+.ua-catalog-toggles {
+    display:flex; flex-wrap:wrap; gap:5px; margin-top:4px;
+}
+.ua-catalog-toggles label {
+    font-size:.64rem; padding:2px 7px; border-radius:3px;
+    background:rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.12);
+    cursor:pointer; user-select:none;
+    display:inline-flex; align-items:center; gap:4px;
+}
+.ua-catalog-toggles label.on {
+    background:rgba(0,200,200,.10);
+    border-color:rgba(0,200,200,.4);
+    color:#0cc;
+}
+.ua-catalog-toggles input { display:none; }
+.ua-catalog-status {
+    font-size:.62rem; color:#7a8; font-family:monospace;
+    margin-top:4px;
+}
+
 /* ─── Satellite drag analysis ──────────────────────────── */
 .ua-tle-pill {
     display:inline-flex; align-items:center; gap:5px;
@@ -906,6 +978,48 @@ input[type=range]::-moz-range-thumb {
         </div>
 
         <div class="ua-panel" style="margin-bottom:14px;">
+            <h2>Trajectory analysis</h2>
+            <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:8px">
+                Deterministic SGP4 forward propagation with an analytic
+                RK4 drag-decay overlay. Pick any tracked sat above (or
+                click any catalog point on the globe) — Rust SGP4 sweeps
+                the truth orbit, then RK4 integrates
+                <code style="color:#0cc">da/dt = −BC·ρ(h)·v·a</code>
+                using the live ρ profile. Compare SGP4 truth (solid) vs
+                analytic decay (dashed). Drag pressure
+                q = ½·ρ(h)·v² uses the <em>real</em> SGP4 speed
+                — perigee/apogee variation visible for eccentric orbits.
+            </p>
+            <div id="ua-traj" class="ua-traj-panel">
+                <div class="ua-traj-empty">
+                    Click a satellite row in the drag panel above (or any
+                    catalog point on the globe) to begin trajectory analysis.
+                </div>
+            </div>
+        </div>
+
+        <div class="ua-panel" style="margin-bottom:14px;">
+            <h2>Live catalog overlay</h2>
+            <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:8px">
+                Live TLE-driven cloud propagated via Rust SGP4 WASM at
+                full frame rate. Toggle catalogs to see all tracked
+                objects. Click any point to drop into the trajectory
+                analyzer above.
+            </p>
+            <div class="ua-catalog-toggles" id="ua-catalog-toggles">
+                <label data-group="active"><input type="checkbox"> active <span style="color:#88aacc">●</span></label>
+                <label data-group="starlink"><input type="checkbox"> starlink <span style="color:#ccddff">●</span></label>
+                <label data-group="oneweb"><input type="checkbox"> oneweb <span style="color:#4488ff">●</span></label>
+                <label data-group="iridium"><input type="checkbox"> iridium <span style="color:#ff66aa">●</span></label>
+                <label data-group="gps-ops"><input type="checkbox"> gps <span style="color:#00ff88">●</span></label>
+                <label data-group="weather"><input type="checkbox"> weather <span style="color:#ffdd44">●</span></label>
+                <label data-group="science"><input type="checkbox"> science <span style="color:#cc66ff">●</span></label>
+                <label data-group="debris"><input type="checkbox"> debris <span style="color:#ff2200">●</span></label>
+            </div>
+            <div class="ua-catalog-status" id="ua-catalog-status">no catalogs loaded</div>
+        </div>
+
+        <div class="ua-panel" style="margin-bottom:14px;">
             <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px">
                 <h2 style="margin:0">Conjunction watch</h2>
                 <span id="ua-debris-pill" class="ua-tle-pill ua-tle-pill--pending"
@@ -1352,6 +1466,375 @@ input[type=range]::-moz-range-thumb {
     });
     document.getElementById('ua-substorm-auto')?.addEventListener('change', (e) => {
         window.__ua?.globe?.setSubstormAuto?.(e.target.checked);
+    });
+
+    /* ─── Live catalog overlay ───────────────────────────────────────────
+       Toggle bar in #ua-catalog-toggles wires checkboxes to
+       globe.enableCatalogGroup / disableCatalogGroup. The status line
+       under the bar shows the running total + per-group counts. The
+       actual cloud rendering and click→analyze handoff lives inside
+       the globe (catalogTracker + _resolveCatalogHit). */
+    (function wireCatalogToggles() {
+        const bar = document.getElementById('ua-catalog-toggles');
+        const status = document.getElementById('ua-catalog-status');
+        if (!bar) return;
+        const refreshStatus = () => {
+            if (!status) return;
+            const s = globe.getCatalogStatus?.();
+            if (!s || s.total === 0) {
+                status.textContent = 'no catalogs loaded · click any group to begin';
+                return;
+            }
+            const groups = s.groups
+                .map(g => `${g.name}:${g.count}${g.visible ? '' : '⊘'}`).join(' · ');
+            status.textContent = `total ${s.total.toLocaleString()} · ${groups}`;
+        };
+        bar.addEventListener('change', async (e) => {
+            const inp = e.target;
+            if (!inp || inp.tagName !== 'INPUT') return;
+            const label = inp.closest('label[data-group]');
+            if (!label) return;
+            const group = label.dataset.group;
+            label.classList.toggle('on', inp.checked);
+            if (status) status.textContent = inp.checked
+                ? `loading ${group}…`
+                : `hiding ${group}…`;
+            try {
+                if (inp.checked) {
+                    // First time → loadGroup; subsequent → just show.
+                    const s = globe.getCatalogStatus?.();
+                    const known = s?.groups?.find(g => g.name === group);
+                    if (known) {
+                        globe.showCatalogGroup?.(group);
+                    } else {
+                        await globe.enableCatalogGroup(group);
+                    }
+                } else {
+                    globe.disableCatalogGroup(group);
+                }
+            } catch (err) {
+                console.warn('[catalog]', group, err);
+            }
+            refreshStatus();
+        });
+        // Bumped on each successful CelesTrak fetch.
+        window.addEventListener('satellites-loaded', refreshStatus);
+        window.addEventListener('satellites-load-failed', (e) => {
+            if (status) status.textContent =
+                `load failed: ${e.detail?.group || 'unknown'} — ${e.detail?.error || 'see console'}`;
+        });
+        refreshStatus();
+    })();
+
+    /* ─── Trajectory analysis panel ──────────────────────────────────────
+       Hooked up via:
+         - Click on a row in #ua-sat-drag    → analyze that named probe
+         - 'ua-analyze-sat' window event     → analyze any catalog point
+                                              (dispatched by globe/click).
+       The analyzer pulls the TLE lines stashed on the globe probe (or
+       from the event detail), runs Rust SGP4 + RK4 drag-decay against
+       the engine's current ρ profile, and renders inline SVG plots.
+       Re-runs on slider changes (horizon / BC / ρ-scale). */
+    import('./js/upper-atmosphere-trajectory-analysis.js').then(mod => {
+        const {
+            TrajectoryAnalyzer, SGP4_COL, DRAG_COL,
+            buildSvgChart, sliceColumn, dragPressureSeries,
+        } = mod;
+
+        const analyzer = new TrajectoryAnalyzer();
+        const trajBox  = document.getElementById('ua-traj');
+        if (!trajBox) return;
+
+        let currentTarget = null;          // { id, name, color, line1, line2, ... }
+        let lastResult    = null;
+        let runToken      = 0;
+        let opts = {
+            horizonHr:  24,
+            sampleMin:   5,
+            bcM2PerKg:   0.020,
+            rhoScale:    1.0,
+        };
+
+        const fmt = (v, d = 2) =>
+            Number.isFinite(v) ? v.toFixed(d) : '—';
+        const fmtExp = (v, d = 2) =>
+            Number.isFinite(v) ? v.toExponential(d) : '—';
+
+        function renderEmpty() {
+            trajBox.innerHTML =
+                '<div class="ua-traj-empty">Click a satellite row in the drag panel above'
+              + ' (or any catalog point on the globe) to begin trajectory analysis.</div>';
+        }
+
+        function renderRunning(target) {
+            trajBox.innerHTML =
+                `<div class="ua-traj-head"><span class="ua-traj-name" style="color:${target.color || '#0cc'}">${target.name}</span>`
+              + `<span class="ua-traj-meta">analyzing…</span></div>`;
+        }
+
+        function renderError(target, msg) {
+            trajBox.innerHTML =
+                `<div class="ua-traj-head"><span class="ua-traj-name" style="color:${target.color || '#f88'}">${target.name}</span>`
+              + `<button data-act="close">×</button></div>`
+              + `<div class="ua-traj-status" style="color:#f88">${msg}</div>`;
+            trajBox.querySelector('[data-act=close]')?.addEventListener('click', () => {
+                currentTarget = null; lastResult = null; renderEmpty();
+            });
+        }
+
+        function renderResult(target, res) {
+            const sgp4Stride = res.sgp4.stride;
+            const sgp4 = res.sgp4.data;
+            const nSamp = res.sgp4.n;
+
+            // Time axis in hours since "now"
+            const tHrs = new Float64Array(nSamp);
+            for (let i = 0; i < nSamp; i++) {
+                const tMin = sgp4[i * sgp4Stride + SGP4_COL.T_MIN];
+                tHrs[i] = (tMin - res.now.tsinceMin) / 60.0;
+            }
+            const altKm   = sliceColumn(sgp4, sgp4Stride, SGP4_COL.ALT_KM, nSamp);
+            const speed   = sliceColumn(sgp4, sgp4Stride, SGP4_COL.SPEED, nSamp);
+            const ecc     = sliceColumn(sgp4, sgp4Stride, SGP4_COL.ECC,   nSamp);
+            const inc     = sliceColumn(sgp4, sgp4Stride, SGP4_COL.INC_DEG, nSamp);
+
+            // Drag pressure q from real SGP4 speed + sampled ρ.
+            const profileSamples = window.__ua?.ui?.profile?.samples || [];
+            const qPa = dragPressureSeries(sgp4, profileSamples);
+            const qmPa = new Float64Array(qPa.length);
+            for (let i = 0; i < qPa.length; i++) qmPa[i] = qPa[i] * 1000;
+
+            // RK4 decay overlay (analytic) — convert minutes-since-epoch
+            // axis to "hours since now" so it overlays on the SGP4 chart.
+            let dragHrs = null, dragAlt = null, dadt = null, dragSpd = null;
+            if (res.drag) {
+                const ds = res.drag.stride, dd = res.drag.data, dn = res.drag.n;
+                dragHrs = new Float64Array(dn);
+                dragAlt = new Float64Array(dn);
+                dadt    = new Float64Array(dn);
+                dragSpd = new Float64Array(dn);
+                for (let i = 0; i < dn; i++) {
+                    // RK4 t starts at 0 = "now"; SGP4 t is minutes since epoch.
+                    dragHrs[i] = dd[i * ds + DRAG_COL.T_MIN] / 60.0;
+                    dragAlt[i] = dd[i * ds + DRAG_COL.ALT_KM];
+                    dadt[i]    = dd[i * ds + DRAG_COL.DA_DT_KM_DAY];
+                    dragSpd[i] = dd[i * ds + DRAG_COL.SPEED_KMS];
+                }
+            }
+
+            // Osculating-element row.
+            const o = res.osc || {};
+            const tleLine = res.tle.info;
+            const oscHtml = `
+                <div class="ua-traj-osc">
+                    <span class="ua-k">a (sma)</span>          <span class="ua-v">${fmt(o.sma_km, 2)} km</span>
+                    <span class="ua-k">e</span>                <span class="ua-v">${fmt(o.ecc, 5)}</span>
+                    <span class="ua-k">i</span>                <span class="ua-v">${fmt(o.inc_deg, 2)}°</span>
+                    <span class="ua-k">RAAN (Ω)</span>          <span class="ua-v">${fmt(o.raan_deg, 1)}°</span>
+                    <span class="ua-k">arg perigee (ω)</span>    <span class="ua-v">${fmt(o.arg_perigee_deg, 1)}°</span>
+                    <span class="ua-k">true anomaly (ν)</span>   <span class="ua-v">${fmt(o.true_anomaly_deg, 1)}°</span>
+                    <span class="ua-k">perigee alt</span>        <span class="ua-v">${fmt(o.perigee_alt_km, 1)} km</span>
+                    <span class="ua-k">apogee alt</span>         <span class="ua-v">${fmt(o.apogee_alt_km, 1)} km</span>
+                    <span class="ua-k">period</span>             <span class="ua-v">${fmt(o.period_min, 2)} min</span>
+                    <span class="ua-k">|v| now</span>            <span class="ua-v">${fmt(o.speed_km_s, 4)} km/s</span>
+                    <span class="ua-k">altitude now</span>       <span class="ua-v">${fmt(o.altitude_km, 1)} km</span>
+                    <span class="ua-k">B*</span>                 <span class="ua-v">${fmtExp(tleLine.bstar, 3)} 1/er</span>
+                </div>`;
+
+            // Headline + close button + meta
+            const metaTxt = `NORAD ${tleLine.norad_id} · TLE epoch ${new Date(res.tle.epochMs).toISOString().slice(0,16)}Z`;
+
+            // Build chart series. Altitude: SGP4 truth + RK4 dashed.
+            const altChart = buildSvgChart({
+                width: 380, height: 140,
+                title: 'Altitude (SGP4 truth · RK4 dashed)',
+                yLabel: 'km',
+                series: [
+                    { x: tHrs, y: altKm, color: target.color || '#0cc', label: 'SGP4' },
+                    ...(dragHrs ? [{ x: dragHrs, y: dragAlt, color: '#fc6', label: 'RK4 ρv·BC', dashed: true }] : []),
+                ],
+                nowX: 0,
+            });
+            const speedChart = buildSvgChart({
+                width: 380, height: 110,
+                title: '|v| (TEME, SGP4)',
+                yLabel: 'km/s',
+                series: [
+                    { x: tHrs, y: speed, color: '#9cf', label: '|v|' },
+                    ...(dragHrs ? [{ x: dragHrs, y: dragSpd, color: '#fc6', label: 'RK4 v=√(μ/a)', dashed: true }] : []),
+                ],
+                nowX: 0,
+            });
+            const qChart = buildSvgChart({
+                width: 380, height: 110,
+                title: 'Drag pressure q = ½·ρ(h)·v²  (log)',
+                yLabel: 'mPa',
+                yLog: true,
+                series: [{ x: tHrs, y: qmPa, color: '#f88', label: 'q' }],
+                nowX: 0,
+            });
+            // Decay rate (km/day, negative). Show only if RK4 ran.
+            const decayChart = dragHrs ? buildSvgChart({
+                width: 380, height: 100,
+                title: 'da/dt (analytic decay rate)',
+                yLabel: 'km/day',
+                series: [{ x: dragHrs, y: dadt, color: '#fc6', label: 'da/dt' }],
+                nowX: 0,
+            }) : '';
+
+            const liftFootnote = dragHrs
+                ? `<div class="ua-traj-status">RK4: BC=${opts.bcM2PerKg.toFixed(3)} m²/kg · ρ scale=${opts.rhoScale.toFixed(2)} · `
+                + `${res.drag.n} samples / ${(res.drag.n * opts.sampleMin / 60).toFixed(1)} h</div>`
+                : `<div class="ua-traj-status">RK4 overlay needs a non-empty ρ profile.</div>`;
+
+            trajBox.innerHTML = `
+                <div class="ua-traj-head">
+                    <span class="ua-traj-name" style="color:${target.color || '#0cc'}">${target.name}</span>
+                    <span class="ua-traj-meta">${metaTxt}</span>
+                    <button data-act="close" title="Close analyzer">×</button>
+                </div>
+                <div class="ua-traj-controls">
+                    <span>horizon</span>
+                    <input type="range" data-opt="horizonHr" min="1" max="240" step="1" value="${opts.horizonHr}">
+                    <span class="ua-traj-val">${opts.horizonHr} h</span>
+
+                    <span>step</span>
+                    <input type="range" data-opt="sampleMin" min="1" max="60" step="1" value="${opts.sampleMin}">
+                    <span class="ua-traj-val">${opts.sampleMin} min</span>
+
+                    <span>BC (CdA/m)</span>
+                    <input type="range" data-opt="bcM2PerKg" min="0.005" max="0.080" step="0.001" value="${opts.bcM2PerKg}">
+                    <span class="ua-traj-val">${opts.bcM2PerKg.toFixed(3)} m²/kg</span>
+
+                    <span>ρ scale</span>
+                    <input type="range" data-opt="rhoScale" min="0.2" max="3.0" step="0.05" value="${opts.rhoScale}">
+                    <span class="ua-traj-val">${opts.rhoScale.toFixed(2)}×</span>
+                </div>
+                ${oscHtml}
+                <div class="ua-traj-charts">
+                    ${altChart}
+                    ${speedChart}
+                    ${qChart}
+                    ${decayChart}
+                </div>
+                ${liftFootnote}`;
+
+            trajBox.querySelector('[data-act=close]')?.addEventListener('click', () => {
+                currentTarget = null; lastResult = null; renderEmpty();
+            });
+            trajBox.querySelectorAll('input[type=range]').forEach(inp => {
+                inp.addEventListener('input', () => {
+                    const k = inp.dataset.opt;
+                    const v = parseFloat(inp.value);
+                    if (k && Number.isFinite(v)) {
+                        opts[k] = v;
+                        const span = inp.nextElementSibling;
+                        if (span && span.classList.contains('ua-traj-val')) {
+                            span.textContent =
+                                k === 'horizonHr' ? `${v} h` :
+                                k === 'sampleMin' ? `${v} min` :
+                                k === 'bcM2PerKg' ? `${v.toFixed(3)} m²/kg` :
+                                                    `${v.toFixed(2)}×`;
+                        }
+                    }
+                });
+                inp.addEventListener('change', () => { run(); });
+            });
+        }
+
+        async function run() {
+            if (!currentTarget) return;
+            const myToken = ++runToken;
+            const target = currentTarget;
+            renderRunning(target);
+            try {
+                const profileSamples = window.__ua?.ui?.profile?.samples || [];
+                const result = await analyzer.analyze({
+                    line1: target.line1, line2: target.line2,
+                    horizonHr: opts.horizonHr,
+                    sampleMin: opts.sampleMin,
+                    bcM2PerKg: opts.bcM2PerKg,
+                    rhoScale:  opts.rhoScale,
+                    profileSamples,
+                });
+                if (myToken !== runToken) return;     // superseded
+                lastResult = result;
+                renderResult(target, result);
+            } catch (err) {
+                console.warn('[ua-traj] analyze failed:', err);
+                if (myToken !== runToken) return;
+                renderError(target, String(err?.message || err));
+            }
+        }
+
+        // Public API for external triggers.
+        async function analyzeBy({ id, name, color, line1, line2, noradId }) {
+            // If only id was given, ask the globe for the live TLE lines.
+            if ((!line1 || !line2) && id && window.__ua?.globe) {
+                const meta = window.__ua.globe.getProbeMeta(id);
+                if (meta?.tleLines) {
+                    line1 = meta.tleLines.line1;
+                    line2 = meta.tleLines.line2;
+                    name  = meta.name;
+                    color = meta.color;
+                    noradId = meta.noradId;
+                }
+            }
+            // No TLE yet (live fetch hasn't landed). Try /api/celestrak/tle directly.
+            if ((!line1 || !line2) && noradId) {
+                try {
+                    const r = await fetch(`/api/celestrak/tle?norad=${noradId}`);
+                    if (r.ok) {
+                        const j = await r.json();
+                        const sat = j?.satellites?.[0];
+                        if (sat?.line1 && sat?.line2) {
+                            line1 = sat.line1; line2 = sat.line2;
+                            name = name || sat.name;
+                        }
+                    }
+                } catch (_) { /* fall through */ }
+            }
+            if (!line1 || !line2) {
+                renderError({ name: name || id || 'satellite', color },
+                    'No live TLE available. Wait for live TLEs to load and retry.');
+                return;
+            }
+            currentTarget = { id, name: name || id, color: color || '#0cc',
+                              line1, line2, noradId };
+            run();
+        }
+
+        // Drag-panel rows: replace existing fly-to-camera with analyze-only
+        // when the user clicks the row's nameplate. We piggy-back on the
+        // existing data-sat-id attribute that the UI already sets.
+        document.addEventListener('click', (e) => {
+            const row = e.target.closest('.ua-sat-row');
+            if (!row || !row.dataset.satId) return;
+            // Modifier-click flies the camera; bare click runs analysis.
+            if (e.altKey || e.metaKey) return;
+            e.preventDefault();
+            e.stopPropagation();
+            analyzeBy({ id: row.dataset.satId });
+        }, true);
+
+        // Globe / external dispatcher: dispatch
+        //   new CustomEvent('ua-analyze-sat', { detail: { id|noradId|line1+line2, name, color } })
+        // and the panel runs.
+        window.addEventListener('ua-analyze-sat', (e) => {
+            if (!e.detail) return;
+            analyzeBy(e.detail);
+        });
+
+        // Re-run when ρ profile changes (engine state slider).
+        window.addEventListener('ua-profile-update', () => {
+            if (currentTarget) run();
+        });
+
+        renderEmpty();
+        // Expose for devtools.
+        window.__uaTraj = { analyzeBy, getResult: () => lastResult, opts };
+    }).catch(err => {
+        console.warn('[upper-atmosphere] trajectory-analysis module failed:', err);
     });
 </script>
 
