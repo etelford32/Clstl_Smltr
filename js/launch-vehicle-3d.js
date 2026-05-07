@@ -1391,10 +1391,16 @@ export function initVehicleCanvas(canvas, opts = {}) {
         current.root.position.set(0, current.basePadY, 0);
         current.root.rotation.set(0, 0, 0);
 
-        // Restore camera/target to where they were before liftoff.
-        controls.target.y -= current.lastAltitude;
-        camera.position.y -= current.lastAltitude;
+        // Restore camera/target to the baseline captured in setVehicle().
+        // Symmetric with liftoff() — subtracting lastAltitude only undoes
+        // the follow's own translation and ignores any vertical drift the
+        // user (or damping) introduced mid-ascent, which compounds across
+        // launch/cancel cycles. Snapping y back to base zeroes that drift.
+        // X/Z are left so the user's azimuth/orbit survives the cancel.
+        controls.target.y    = current.baseTargetY;
+        camera.position.y    = current.baseCamY;
         current.lastAltitude = 0;
+        controls.update();
 
         // Restore scene state
         trail.visible = false;
