@@ -320,6 +320,21 @@ nav {
 #coord-tip .ct-title { color: var(--c-accent); font-size:9px; text-transform:uppercase;
     letter-spacing:.6px; margin-bottom:2px; }
 #coord-tip .ct-val { color:#a0d8f0; font-weight:600; }
+/* Per-layer numerical readouts in the hover tooltip. One row per active
+   readout toggle (rd-*); rebuilt every mousemove. Each row is a small
+   icon + value pair. Container is hidden when no readouts are on, so
+   the tooltip collapses back to lat/lon for users who never opted in. */
+#coord-tip #ct-readouts {
+    display:none; margin-top:5px; padding-top:4px;
+    border-top:1px solid rgba(255,255,255,.08);
+}
+#coord-tip #ct-readouts.show { display:block; }
+#coord-tip .ct-readout {
+    color:#cfe6f5; font-size:10px; font-weight:500;
+    line-height:1.45; white-space:nowrap;
+}
+#coord-tip .ct-readout .ct-rd-icon { display:inline-block; width:14px; }
+#coord-tip .ct-readout .ct-rd-val  { color:#ffd9a8; font-weight:600; }
 
 /* ─── Layer panel ────────────────────────────────────────────── */
 #layer-panel {
@@ -443,6 +458,46 @@ nav {
     transform: translateX(16px);
 }
 .lyr-sep { border:none; border-top:1px solid rgba(255,255,255,.07); margin:8px 0; }
+/* ─── Per-layer "show numbers on hover" toggle ─────────────────
+   A small "#" pill that sits to the right of a layer label. Visually
+   subordinate to the main pill toggle so it doesn't compete for
+   attention. Off by default; when on, the cursor tooltip gains a
+   numerical readout for that layer's data field. */
+.lyr-rd {
+    margin-left: auto;       /* shove to the row's right edge */
+    display: inline-flex; align-items: center; gap: 0;
+    cursor: pointer;
+}
+.lyr-rd input[type=checkbox] {
+    /* Override the default .lyr pill — readout toggle is its own widget */
+    -webkit-appearance: none; appearance: none;
+    position: absolute; opacity: 0; pointer-events: none;
+    width: 0; height: 0; margin: 0;
+}
+.lyr-rd .lyr-rd-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 16px; border-radius: 4px;
+    background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.08);
+    color: #6b7d8a; font-size: 10px; font-weight: 700;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    transition: background .14s, color .14s, border-color .14s;
+    user-select: none;
+}
+.lyr-rd:hover .lyr-rd-badge {
+    background: rgba(255,255,255,.07);
+    color: #a0c4d8;
+}
+.lyr-rd input[type=checkbox]:checked ~ .lyr-rd-badge {
+    background: linear-gradient(180deg, rgba(255,179,102,.85), rgba(214,128,40,.9));
+    border-color: rgba(255,179,102,.6);
+    color: #1a0e00;
+    box-shadow: 0 0 6px rgba(255,179,102,.35);
+}
+.lyr-rd input[type=checkbox]:focus-visible ~ .lyr-rd-badge {
+    outline: 1px solid rgba(255,179,102,.7);
+    outline-offset: 1px;
+}
 /* Per-layer data-status pip. Grey = idle (feed hasn't fired yet),
    amber pulsing = fetching, green = loaded, red = error. hover on
    the pip shows the feed's last-known reason via title=.  Rendered
@@ -1903,7 +1958,9 @@ nav {
         <div class="ct-title">Position</div>
         <div class="ct-val" id="ct-lat">—</div>
         <div class="ct-val" id="ct-lon">—</div>
-        <div class="ct-wind" id="ct-wind" style="display:none;margin-top:4px;padding-top:3px;border-top:1px solid rgba(255,255,255,.08);color:#ffb366;font-size:10px;font-weight:500">—</div>
+        <!-- Per-layer numerical readouts. Rows are appended dynamically in
+             updateCoords() based on which #-toggles (rd-*) are active. -->
+        <div id="ct-readouts"></div>
     </div>
 
     <!-- Layer controls -->
@@ -2040,7 +2097,7 @@ nav {
         <div class="lyr-section" data-lyr-section="surface">
             <div class="lyr-section-hdr"><span>SURFACE &amp; ATMOSPHERE</span><span class="lyr-chevron">▾</span></div>
             <div class="lyr-section-body"><div class="lyr-grid">
-                <label class="lyr"><input type="checkbox" id="lyr-clouds" checked><span class="lyr-status" data-layer="clouds" title="waiting"></span><label for="lyr-clouds">Cloud Cover</label></label>
+                <div class="lyr"><input type="checkbox" id="lyr-clouds" checked><span class="lyr-status" data-layer="clouds" title="waiting"></span><label for="lyr-clouds">Cloud Cover</label><label class="lyr-rd" for="rd-clouds" title="Show cloud cover (%) on cursor hover"><input type="checkbox" id="rd-clouds"><span class="lyr-rd-badge">#</span></label></div>
                 <label class="lyr" title="Disable procedural fill — show only measured cloud cover, with hatched no-data regions where the satellite mosaic didn't see (poles, between-disc gaps)."><input type="checkbox" id="lyr-research-mode"><label for="lyr-research-mode">Research Mode (measured-only)</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-atm"><label for="lyr-atm">Atmosphere</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-aurora"><span class="lyr-status" data-layer="aurora" title="waiting for SWPC"></span><label for="lyr-aurora">Aurora</label></label>
@@ -2055,12 +2112,12 @@ nav {
         <div class="lyr-section" data-lyr-section="weather">
             <div class="lyr-section-hdr"><span>WEATHER</span><span class="lyr-chevron">▾</span></div>
             <div class="lyr-section-body"><div class="lyr-grid">
-                <label class="lyr"><input type="checkbox" id="lyr-weather"><span class="lyr-status" data-layer="weather-temp" title="waiting"></span><label for="lyr-weather">Weather (temp)</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-wind"    checked><span class="lyr-status" data-layer="wind" title="waiting"></span><label for="lyr-wind">Wind Particles</label></label>
-                <label class="lyr" title="Highlight wind &gt; 30 m/s (108 km/h) — the operational jet-stream threshold">
+                <div class="lyr"><input type="checkbox" id="lyr-weather"><span class="lyr-status" data-layer="weather-temp" title="waiting"></span><label for="lyr-weather">Weather (temp)</label><label class="lyr-rd" for="rd-temp" title="Show temperature (°C) on cursor hover"><input type="checkbox" id="rd-temp"><span class="lyr-rd-badge">#</span></label></div>
+                <div class="lyr"><input type="checkbox" id="lyr-wind"    checked><span class="lyr-status" data-layer="wind" title="waiting"></span><label for="lyr-wind">Wind Particles</label><label class="lyr-rd" for="rd-wind" title="Show surface wind (10 m, m/s + km/h + bearing) on cursor hover"><input type="checkbox" id="rd-wind"><span class="lyr-rd-badge">#</span></label></div>
+                <div class="lyr" title="Highlight wind &gt; 30 m/s (108 km/h) — the operational jet-stream threshold">
                     <input type="checkbox" id="lyr-jet"><span class="lyr-status" data-layer="jet" title="waiting"></span><label for="lyr-jet">Jet Stream</label>
-                </label>
-                <label class="lyr"><input type="checkbox" id="lyr-isobars" checked><span class="lyr-status" data-layer="isobars" title="waiting"></span><label for="lyr-isobars">Isobars</label></label>
+                </div>
+                <div class="lyr"><input type="checkbox" id="lyr-isobars" checked><span class="lyr-status" data-layer="isobars" title="waiting"></span><label for="lyr-isobars">Isobars</label><label class="lyr-rd" for="rd-pressure" title="Show surface pressure (hPa) on cursor hover"><input type="checkbox" id="rd-pressure"><span class="lyr-rd-badge">#</span></label></div>
                 <label class="lyr"><input type="checkbox" id="lyr-alerts"><span class="lyr-status" data-layer="alerts" title="waiting"></span><label for="lyr-alerts">Storm Alerts</label></label>
                 <label class="lyr" title="5-day kinematic extrapolation cone for every active tropical cyclone. NOT NHC's official forecast — this is a great-circle projection of current motion with NHC's published average track-error radii applied for the cone width. Click a storm card to focus its cone."><input type="checkbox" id="lyr-storm-tracks"><span class="lyr-status" data-layer="storm-tracks" title="waiting"></span><label for="lyr-storm-tracks">Storm Tracks (5-day)</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-earthquakes"><span class="lyr-status" data-layer="earthquakes" title="waiting"></span><label for="lyr-earthquakes">Earthquakes</label></label>
@@ -2073,15 +2130,18 @@ nav {
             <div style="margin-top:8px;padding-top:6px;border-top:1px dashed rgba(255,255,255,.05)">
                 <div style="font-size:.6rem;color:#446;letter-spacing:.08em;margin-bottom:4px">ATMOSPHERIC PROFILE</div>
                 <div class="lyr-grid">
-                    <label class="lyr" title="Relative humidity (%): tan = dry, blue = saturated. Hidden below 30% RH so deserts stay readable.">
+                    <div class="lyr" title="Relative humidity (%): tan = dry, blue = saturated. Hidden below 30% RH so deserts stay readable.">
                         <input type="checkbox" id="lyr-humidity"><label for="lyr-humidity">Humidity (RH)</label>
-                    </label>
-                    <label class="lyr" title="Open-Meteo precipitation rate as a NEXRAD-style radar palette (mm/hr).">
+                        <label class="lyr-rd" for="rd-humidity" title="Show relative humidity (%) on cursor hover"><input type="checkbox" id="rd-humidity"><span class="lyr-rd-badge">#</span></label>
+                    </div>
+                    <div class="lyr" title="Open-Meteo precipitation rate as a NEXRAD-style radar palette (mm/hr).">
                         <input type="checkbox" id="lyr-precip-rate"><label for="lyr-precip-rate">Precip Rate</label>
-                    </label>
-                    <label class="lyr" title="Mist and fog: gated on RH ≥ 85% AND low-cloud fraction ≥ 0.3. Coastal valleys and tropical convergence zones glow soft white.">
+                        <label class="lyr-rd" for="rd-precip" title="Show precipitation rate (mm/hr) on cursor hover"><input type="checkbox" id="rd-precip"><span class="lyr-rd-badge">#</span></label>
+                    </div>
+                    <div class="lyr" title="Mist and fog: gated on RH ≥ 85% AND low-cloud fraction ≥ 0.3. Coastal valleys and tropical convergence zones glow soft white.">
                         <input type="checkbox" id="lyr-mist"><label for="lyr-mist">Mist &amp; Fog</label>
-                    </label>
+                        <label class="lyr-rd" for="rd-mist" title="Show RH (%) and low-cloud fraction on cursor hover"><input type="checkbox" id="rd-mist"><span class="lyr-rd-badge">#</span></label>
+                    </div>
                 </div>
             </div>
             </div>
@@ -3444,23 +3504,102 @@ function updateCoords(uv) {
     document.getElementById('h-lon').textContent  = fmtLon(lon);
     document.getElementById('h-lt').textContent   = lt;
 
-    // Wind probe at the cursor's geographic point. Uses the same bilinear
-    // sample the particle advection uses, so the readout and the streaks
-    // can't disagree. Hidden when wind data isn't loaded or the sample
-    // is below the 0.05 m/s resolution floor (procedural fallback / calm).
-    const tipWind = document.getElementById('ct-wind');
-    if (tipWind) {
+    // Per-layer numerical readouts. Each rd-* toggle is paired with a
+    // layer pill toggle in the layer panel; ticking the # badge surfaces
+    // that layer's value at the cursor here. Off by default — users opt
+    // in per-layer so the tooltip stays minimal (lat/lon only) until they
+    // ask for more. Bilinear sampling shares the same buffer + row order
+    // the shaders read from, so the readout cannot disagree with what
+    // the user sees painted on the globe.
+    _renderHoverReadouts(lat, lon);
+
+    tipEl.classList.add('show');
+}
+
+// Build the rows shown under #ct-readouts on every mousemove. Cheap:
+// 7 cheap bilinear samples + a few innerHTML writes. Returns nothing.
+function _renderHoverReadouts(lat, lon) {
+    const box = document.getElementById('ct-readouts');
+    if (!box) return;
+    const rows = [];
+
+    // Wind — uses the existing windParticles.lookupWind() so the readout
+    // exactly matches the streaks (decoded from the same windBuffer with
+    // the same bilinear weights).
+    if (document.getElementById('rd-wind')?.checked) {
         const w = windParticles.lookupWind(lat, lon);
         if (w && w.speedMs > 0) {
             const kmh = w.speedMs * 3.6;
             const dir = Math.round(w.dirFromDeg);
-            tipWind.textContent = `🌬 ${w.speedMs.toFixed(1)} m/s (${kmh.toFixed(0)} km/h) from ${dir}° ${compass16(w.dirFromDeg)}`;
-            tipWind.style.display = 'block';
-        } else {
-            tipWind.style.display = 'none';
+            rows.push(`<div class="ct-readout"><span class="ct-rd-icon">🌬</span>` +
+                `<span class="ct-rd-val">${w.speedMs.toFixed(1)} m/s</span> ` +
+                `(${kmh.toFixed(0)} km/h) from ${dir}° ${compass16(w.dirFromDeg)}</div>`);
+        } else if (w) {
+            rows.push(`<div class="ct-readout"><span class="ct-rd-icon">🌬</span>calm</div>`);
         }
     }
-    tipEl.classList.add('show');
+
+    // T / P / RH all share weatherBuffer — sample once if any of them are on.
+    const wantTemp = document.getElementById('rd-temp')?.checked;
+    const wantPres = document.getElementById('rd-pressure')?.checked;
+    const wantRh   = document.getElementById('rd-humidity')?.checked;
+    const wantMist = document.getElementById('rd-mist')?.checked;
+    let wx = null;
+    if (wantTemp || wantPres || wantRh || wantMist) wx = _sampleWeatherAt(lat, lon);
+    if (wantTemp && wx) {
+        const f = wx.tempC * 9/5 + 32;
+        rows.push(`<div class="ct-readout"><span class="ct-rd-icon">🌡</span>` +
+            `<span class="ct-rd-val">${wx.tempC.toFixed(1)} °C</span> (${f.toFixed(0)} °F)</div>`);
+    }
+    if (wantPres && wx) {
+        rows.push(`<div class="ct-readout"><span class="ct-rd-icon">📊</span>` +
+            `<span class="ct-rd-val">${wx.presHpa.toFixed(0)} hPa</span></div>`);
+    }
+    if (wantRh && wx) {
+        rows.push(`<div class="ct-readout"><span class="ct-rd-icon">💧</span>` +
+            `<span class="ct-rd-val">${wx.rhPct.toFixed(0)}%</span> RH</div>`);
+    }
+
+    // Clouds + precip share cloudBuffer.
+    const wantClouds = document.getElementById('rd-clouds')?.checked;
+    const wantPrecip = document.getElementById('rd-precip')?.checked;
+    let cl = null;
+    if (wantClouds || wantPrecip || wantMist) cl = _sampleCloudAt(lat, lon);
+    if (wantClouds && cl) {
+        // Random-overlap formula for total cover from low/mid/high fractions.
+        // Matches how meteorologists report "cloud cover %" in METARs.
+        const fl = cl.clLow / 100, fm = cl.clMid / 100, fh = cl.clHigh / 100;
+        const total = (1 - (1 - fl) * (1 - fm) * (1 - fh)) * 100;
+        rows.push(`<div class="ct-readout"><span class="ct-rd-icon">☁︎</span>` +
+            `<span class="ct-rd-val">${total.toFixed(0)}%</span> ` +
+            `(L${cl.clLow.toFixed(0)} M${cl.clMid.toFixed(0)} H${cl.clHigh.toFixed(0)})</div>`);
+    }
+    if (wantPrecip && cl) {
+        // Decoder caps at 10 mm/hr; show "10+" when at the ceiling so users
+        // know the displayed value is clipped, not the true rate.
+        const p = cl.precipMmHr;
+        const txt = p >= 9.95 ? '10+ mm/hr' : `${p.toFixed(p < 1 ? 2 : 1)} mm/hr`;
+        rows.push(`<div class="ct-readout"><span class="ct-rd-icon">🌧</span>` +
+            `<span class="ct-rd-val">${txt}</span></div>`);
+    }
+
+    // Mist & fog — derived from RH × low-cloud (matches the layer's gating
+    // RH ≥ 85 % AND low-cloud ≥ 30 %). Shows both inputs so the user can
+    // see which one is keeping the layer dim/bright at this point.
+    if (wantMist && wx && cl) {
+        const fog = (wx.rhPct >= 85 && cl.clLow >= 30) ? 'fog likely' : 'clear';
+        rows.push(`<div class="ct-readout"><span class="ct-rd-icon">🌫</span>` +
+            `<span class="ct-rd-val">${fog}</span> ` +
+            `(RH ${wx.rhPct.toFixed(0)}% · low-cloud ${cl.clLow.toFixed(0)}%)</div>`);
+    }
+
+    if (rows.length) {
+        box.innerHTML = rows.join('');
+        box.classList.add('show');
+    } else {
+        box.innerHTML = '';
+        box.classList.remove('show');
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -4782,6 +4921,66 @@ const windArrows       = new WindArrows(earthMesh, (lat, lon, out) =>
     windParticles._lookupWind(lat, lon, out));
 const solarWindParticles = new SolarWindParticles(scene, 3000, SUN_EQ);
 
+// ── Hover readout: latest weather/cloud buffers + point samplers ───────────
+// Latest TEX_W×TEX_H Float32 RGBA buffers, kept as module-level refs so the
+// hover tooltip can sample point values on every mousemove without going
+// through the WeatherFeed event payload. Rewritten in the weather-update
+// handler. null until the first feed lands; samplers must guard for that.
+let _lastWeatherBuf = null;   // R=T-norm, G=P-norm, B=RH-norm, A=speed-norm
+let _lastCloudBuf   = null;   // R=cl_low, G=cl_mid, B=cl_high, A=precip/10
+
+// Bilinear-sample a 4-channel Float32 buffer at (lat,lon). Same row/col
+// convention as WindParticles._lookupWind: longitude wraps, row 0 = 90°S.
+// Writes raw normalised channel values (0..1) into out[0..3]; returns false
+// if the buffer isn't loaded yet so callers can skip the readout.
+function _sampleRGBA4(buf, lat, lon, out) {
+    if (!buf) return false;
+    const fx = (lon / 360 + 0.5) * TEX_W;
+    const fy = (lat + 90) / 180 * (TEX_H - 1);
+    let x0 = Math.floor(fx);
+    const y0 = Math.max(0, Math.min(TEX_H - 2, Math.floor(fy)));
+    const tx = fx - x0;
+    const ty = fy - y0;
+    x0 = ((x0 % TEX_W) + TEX_W) % TEX_W;
+    const x1 = (x0 + 1) % TEX_W;
+    const y1 = y0 + 1;
+    const i00 = (y0 * TEX_W + x0) * 4;
+    const i10 = (y0 * TEX_W + x1) * 4;
+    const i01 = (y1 * TEX_W + x0) * 4;
+    const i11 = (y1 * TEX_W + x1) * 4;
+    const w00 = (1 - tx) * (1 - ty);
+    const w10 = tx * (1 - ty);
+    const w01 = (1 - tx) * ty;
+    const w11 = tx * ty;
+    for (let c = 0; c < 4; c++) {
+        out[c] = buf[i00+c]*w00 + buf[i10+c]*w10 + buf[i01+c]*w01 + buf[i11+c]*w11;
+    }
+    return true;
+}
+
+// Decode the normalised weatherBuffer back into physical units.
+// Encoding lives in weather-feed.js _processRows() — keep these constants
+// in sync with that file. Returns null when no feed has landed yet.
+const _wxSampleTmp = new Float32Array(4);
+function _sampleWeatherAt(lat, lon) {
+    if (!_sampleRGBA4(_lastWeatherBuf, lat, lon, _wxSampleTmp)) return null;
+    return {
+        tempC:   _wxSampleTmp[0] * 110 - 60,    // -60…+50 °C
+        presHpa: _wxSampleTmp[1] * 210 + 850,   // 850…1060 hPa
+        rhPct:   _wxSampleTmp[2] * 100,         //   0…100 %
+        speedMs: _wxSampleTmp[3] * MAX_WIND_MS, //   0…60 m/s
+    };
+}
+function _sampleCloudAt(lat, lon) {
+    if (!_sampleRGBA4(_lastCloudBuf, lat, lon, _wxSampleTmp)) return null;
+    return {
+        clLow:       _wxSampleTmp[0] * 100,     //   0…100 %
+        clMid:       _wxSampleTmp[1] * 100,
+        clHigh:      _wxSampleTmp[2] * 100,
+        precipMmHr:  _wxSampleTmp[3] * 10,      //   0…10  mm/hr (capped)
+    };
+}
+
 // ── Wind-scale legend ──────────────────────────────────────────────────
 // Paint the blue → white → magenta particle ramp into the wx-panel
 // canvas at init so the colours the user sees streaming across the globe
@@ -5995,6 +6194,13 @@ function updateWeatherTextures(weatherBuf, wBuf, cloudBuf) {
 document.addEventListener('weather-update', e => {
     const { weatherBuffer, windBuffer, cloudBuffer, meta } = e.detail;
     updateWeatherTextures(weatherBuffer, windBuffer, cloudBuffer);
+
+    // Stash references so the hover tooltip can bilinear-sample point
+    // values (T/P/RH, cloud cover, precip rate) without rerouting through
+    // the event payload. WeatherFeed reuses the same Float32Array each
+    // refresh, so these are stable references — no clone needed.
+    _lastWeatherBuf = weatherBuffer;
+    _lastCloudBuf   = cloudBuffer;
 
     // Lift the "no data yet" guard on the derived weather overlays
     // (humidity / precip-rate / mist). Skip when the feed flags itself
