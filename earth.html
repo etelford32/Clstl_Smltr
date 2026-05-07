@@ -2698,18 +2698,20 @@ nav {
              resolver listens via animate()'s tick; the input handler
              writes simTimeMs so satellites + sun + weather all replay
              together. -->
-        <!-- Range covers -10080..+4320 minutes (= -7d past .. +3d future).
-             "Now" sits at value=0, which the CSS paints at 70 % across the
-             track. Past frames are real observations; future frames are
-             forecast (currently a persistence stand-in until the
-             weather-forecast pipeline lands). -->
+        <!-- Range covers -10080..+20160 minutes (= -7d past .. +14d future),
+             matching the time-bus PAST_MS/FUTURE_MS window. "Now" sits at
+             value=0, which falls one-third across the track (predictions
+             outweigh history). Past frames are real observations; future
+             frames lerp through the forecast ring (Open-Meteo bulk fetch,
+             see WeatherForecastFeed) until they exceed +14 d, at which point
+             the bus clamps. -->
         <div id="tc-scrub-row">
             <span class="tc-scrub-edge">−1w</span>
             <input type="range" id="tc-scrub"
-                   min="-10080" max="4320" step="1" value="0"
-                   aria-label="Time scrub — drag left for up to 1 week of history, right for up to 3 days of forecast"
-                   title="Drag left to replay (up to 1 week back) or right to preview (up to 3 days ahead)">
-            <span class="tc-scrub-edge right">+3d</span>
+                   min="-10080" max="20160" step="1" value="0"
+                   aria-label="Time scrub — drag left for up to 1 week of history, right for up to 14 days of forecast"
+                   title="Drag left to replay (up to 1 week back) or right to preview (up to 14 days ahead)">
+            <span class="tc-scrub-edge right">+2w</span>
         </div>
         <div id="tc-buttons-row">
             <button class="tc-btn" id="tc-play" title="Pause">⏸</button>
@@ -2896,6 +2898,12 @@ import { GEO_GLSL } from './js/geo/coords.glsl.js';
 import { SatelliteTracker } from './js/satellite-tracker.js';
 import { solarPosition, sunTimes, compass16 } from './js/sun-altitude.js';
 import { nextPasses } from './js/pass-predictor.js';
+// Shared simulation-time bus. Lives in /operations/ for historical reasons
+// — it was originally Operations-only — but is now the cross-page clock for
+// any view that scrubs forecast/replay (Earth page time-controls, Operations
+// console scrub strip). Single rAF loop, ≤10 Hz subscriber emit; renderers
+// that need 60 Hz call getState() inline from their own animate loop.
+import { timeBus } from './js/operations/time-bus.js';
 import {
     EARTH_VERT, EARTH_FRAG, CLOUD_VERT, CLOUD_FRAG, ATM_VERT, ATM_FRAG,
     AURORA_VERT, AURORA_FRAG,
@@ -8244,11 +8252,10 @@ let lastT = 0;
 const _sunDirScratch = new THREE.Vector3();
 
 // ── Simulation-time state ──────────────────────────────────────────────
-// One simTimeMs variable is the source of truth for every TIME-sensitive
-// part of the scene — sun direction, sub-solar point, sun card, ISS pass
-// card, on-globe solar markers, and (via WeatherFrameResolver) the
-// 24-hour wind/temp/cloud replay. It advances by real-dt × simSpeed
-// unless paused.
+// `simTimeMs` mirrors the shared time-bus on every animate frame — it's
+// the source of truth for sun direction, sub-solar point, sun card, ISS
+// pass card, on-globe solar markers, and (via WeatherFrameResolver) the
+// wind/temp/cloud scrubber. The bus owns advance; we just read it.
 //
 // Earth's ROTATION is intentionally NOT tied to simTimeMs — it's a
 // separate concern controlled by the user-facing "Planet rotation"
@@ -8257,10 +8264,36 @@ const _sunDirScratch = new THREE.Vector3();
 // scrubber: drag back -6 h and the terminator + weather + satellites
 // move while the geometry stays put, so analysts can park their gaze
 // on a region and watch conditions evolve over it.
-let simTimeMs = Date.now();
-let simSpeed  = 1;                  // sim seconds per real second
-let simPaused = false;
-let _realLast = performance.now();
+//
+// Local UI mirrors of bus state. simSpeed/simPaused only drive the
+// time-control buttons' visual active state and the choice of bus mode
+// to enter on resume — the bus itself is canonical. Kept as locals so a
+// pause-then-resume restores the user's last selected speed without
+// having to plumb that intent through the bus.
+timeBus.start();
+let simTimeMs = timeBus.getState().simTimeMs;
+let simSpeed  = 1;                  // last user-selected speed for resume
+let simPaused = false;              // mirrors bus mode==='scrub'
+
+// Subscribe to bus state so external writes (Operations console, or
+// keyboard shortcuts on either page) propagate to Earth's UI. Throttled
+// to ≤10 Hz by the bus itself; cheap to re-evaluate.
+timeBus.subscribe((snap) => {
+    simTimeMs = snap.simTimeMs;
+    simPaused = (snap.mode === 'scrub');
+    if (snap.speed && snap.speed !== simSpeed) simSpeed = snap.speed;
+    // Reflect mode → button visuals. Done unconditionally; the DOM diff
+    // is cheap and keeps Earth's UI honest if the bus flipped without
+    // going through Earth's own handlers.
+    const playBtn = document.getElementById('tc-play');
+    if (playBtn) {
+        playBtn.textContent = simPaused ? '▶' : '⏸';
+        playBtn.title       = simPaused ? 'Resume' : 'Pause';
+    }
+    document.querySelectorAll('.tc-btn[data-speed]').forEach(btn => {
+        btn.classList.toggle('active', Number(btn.dataset.speed) === simSpeed);
+    });
+});
 
 // ── Planet-rotation state ──────────────────────────────────────────────
 // `planetRotationEnabled = true`  → earthMesh.rotation.y follows
@@ -8324,30 +8357,49 @@ function _fmtSimOffset(d) {
     if (abs < 86400) return `${sign}${(abs / 3600).toFixed(1)}h`;
     return `${sign}${(abs / 86400).toFixed(1)}d`;
 }
+// Bus-mode policy — keep in one place so all four entry points (play
+// button, speed buttons, Now button, slider drag) map consistently:
+//   speed=1  + playing → 'live'    (real-time advance)
+//   speed>1  + playing → 'replay'  (anchored advance at speed×)
+//   any      + paused  → 'scrub'   (frozen at simTimeMs)
+function _applyTimeBusMode() {
+    if (simPaused) {
+        timeBus.setMode('scrub');
+    } else if (simSpeed === 1) {
+        timeBus.setMode('live');
+    } else {
+        timeBus.setSpeed(simSpeed);
+        timeBus.setMode('replay');
+    }
+}
 function _setSimSpeed(speed) {
     simSpeed = speed;
     document.querySelectorAll('.tc-btn[data-speed]').forEach(btn => {
         btn.classList.toggle('active', Number(btn.dataset.speed) === speed);
     });
+    timeBus.setSpeed(speed);
+    // If currently playing, picking a different speed should re-pick the
+    // mode — flipping 1× ↔ N× crosses the live↔replay boundary. While
+    // paused, keep mode='scrub' and let resume re-evaluate.
+    if (!simPaused) _applyTimeBusMode();
 }
 function _setSimPaused(paused) {
     simPaused = paused;
     const b = document.getElementById('tc-play');
     if (b) { b.textContent = paused ? '▶' : '⏸'; b.title = paused ? 'Resume' : 'Pause'; }
+    _applyTimeBusMode();
 }
 function _jumpToNow() {
-    simTimeMs = Date.now();
-    // Snap the scrub bar back to live so the renderer's mode flips
-    // immediately on the next animate frame. We bypass the normal
-    // writeback skip-while-focused logic here because this is an
-    // explicit user command (Now button or N keypress), not the
-    // animate loop trying to track natural advance.
+    // Atomic: jump simTime + flip to live in one bus call so there's no
+    // intermediate frame where the resolver sees scrub-at-now (which
+    // it'd treat as a replay tick) before the mode switch lands.
+    timeBus.setSimTime(Date.now(), { mode: 'live' });
+    if (simPaused) {
+        simPaused = false;
+        const b = document.getElementById('tc-play');
+        if (b) { b.textContent = '⏸'; b.title = 'Pause'; }
+    }
     if (_scrubEl) _scrubEl.value = 0;
-    // Resume natural advance. If the user was paused because they
-    // were exploring the past (auto-pause on slider drag), Now means
-    // "back to live" — including time moving again. If they want to
-    // freeze at "now" they can still hit Space.
-    if (simPaused) _setSimPaused(false);
 }
 
 document.getElementById('tc-play')?.addEventListener('click', () => _setSimPaused(!simPaused));
@@ -8370,16 +8422,18 @@ const _scrubEl = document.getElementById('tc-scrub');
 if (_scrubEl) {
     _scrubEl.addEventListener('input', () => {
         const minutesFromNow = Number(_scrubEl.value);
-        // value is "minutes from now" in [-10080, +4320]. Negative = past
-        // (replay observations); positive = future (forecast preview).
-        simTimeMs = Date.now() + minutesFromNow * 60_000;
-        // Auto-pause whenever the user parks anywhere off "now" so the
-        // view doesn't drift under them at simSpeed×. Now/N or the
-        // play button resumes natural advance.
-        if (minutesFromNow !== 0 && !simPaused) _setSimPaused(true);
+        // value is "minutes from now" in [-10080, +20160] (-7d / +14d).
+        // Negative = past (replay observations); positive = future
+        // (forecast preview through the WeatherForecastFeed ring).
+        // setSimTime({ fromUser: true }) makes the bus auto-flip to
+        // 'scrub' mode if it was live/replay — no manual pause toggle
+        // needed. Local simPaused is mirrored back via the subscription.
+        timeBus.setSimTime(Date.now() + minutesFromNow * 60_000,
+                           { fromUser: true });
     });
-    // Resume playback on release if the user dragged back to "now" —
-    // otherwise leave them paused at the historical moment they chose.
+    // Resume natural advance on release if the user dragged back to
+    // "now" — otherwise leave them paused at the historical/forecast
+    // instant they chose.
     _scrubEl.addEventListener('change', () => {
         if (Number(_scrubEl.value) === 0 && simPaused) _setSimPaused(false);
     });
@@ -8402,12 +8456,12 @@ function animate() {
     const dt = Math.min(t - lastT, 0.1);  // cap dt at 100 ms (tab unfocus recovery)
     lastT = t;
 
-    // ── Advance simulation time by real-world dt × speed multiplier.
-    // performance.now() is monotonic and unaffected by wall-clock changes,
-    // so tab backgrounding and NTP adjustments don't jolt the sim.
-    const realNow = performance.now();
-    if (!simPaused) simTimeMs += (realNow - _realLast) * simSpeed;
-    _realLast = realNow;
+    // ── Read sim time from the shared bus.
+    // Bus owns advance (live ticks at wall-clock, replay anchored at
+    // setMode time × speed). Reading getState() inline is the documented
+    // 60 Hz path; the throttled subscribe(...) above handles UI mirror
+    // updates at ≤10 Hz where that's enough.
+    simTimeMs = timeBus.getState().simTimeMs;
 
     // ── Weather frame resolution ─────────────────────────────────────────
     // resolver.tick decides — based on simTimeMs vs wall-clock — whether
@@ -8424,12 +8478,12 @@ function animate() {
     // out from under the user mid-drag.
     if (_scrubEl && document.activeElement !== _scrubEl) {
         const minutesAgo = (simTimeMs - Date.now()) / 60_000;
-        // Slider domain is [-10080, +4320] minutes (= -7d .. +3d).
-        // Sun + satellites are deterministic in both directions; the
-        // weather resolver clamps anything outside its bracket window to
-        // the nearest available frame, so future scrub is visually a
-        // persistence forecast until the predictive pipeline lands.
-        const clamped = Math.max(-10080, Math.min(4320, minutesAgo));
+        // Slider domain is [-10080, +20160] minutes (-7d .. +14d), matching
+        // time-bus PAST_MS/FUTURE_MS. Sun + satellites are deterministic
+        // in both directions; the weather resolver brackets against the
+        // history+forecast rings (forecast feeder lazy-loads on first
+        // future scrub).
+        const clamped = Math.max(-10080, Math.min(20160, minutesAgo));
         // Only write if it actually changed by at least a step (1 min)
         // — avoids triggering UA-side restyles every frame on idle.
         if (Math.abs(clamped - Number(_scrubEl.value)) >= 1) {
