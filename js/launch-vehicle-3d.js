@@ -1360,6 +1360,19 @@ export function initVehicleCanvas(canvas, opts = {}) {
 
     function liftoff() {
         if (missionActive) { cancelLiftoff(); return; }
+
+        // Re-baseline vertical follow before the delta-tracking loop runs.
+        // lastAltitude must equal the y-offset already in the camera, or
+        // the first `dy = altitude - lastAltitude` snaps the camera by the
+        // stale residual. Snap target.y / camera.y back to the framing
+        // captured by setVehicle() and leave x/z alone so the user's
+        // azimuth/orbit survives. controls.update() flushes any damping
+        // residual so it can't race the manual y-writes next frame.
+        current.lastAltitude = 0;
+        controls.target.y    = current.baseTargetY;
+        camera.position.y    = current.baseCamY;
+        controls.update();
+
         missionClock.start();
         missionActive = true;
         // Force plume on so you can actually see the engines fire.
