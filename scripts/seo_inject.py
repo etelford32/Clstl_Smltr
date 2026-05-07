@@ -165,6 +165,21 @@ PAGES: dict[str, tuple[str, str, str]] = {
         "Satellite Tracker — Parkers Physics",
         "Real-time tracker for 25,000+ satellites and debris objects using SGP4 propagation in WebAssembly. Search, filter, and visualize orbital regimes.",
     ),
+    "privacy.html": (
+        "/privacy",
+        "Privacy Policy — Parkers Physics",
+        "How Parkers Physics collects, uses, and safeguards personal data. GDPR, CCPA, and state-privacy-law disclosures for our website, API, and simulations.",
+    ),
+    "eula.html": (
+        "/eula",
+        "End-User License Agreement — Parkers Physics",
+        "End-User License Agreement for the Parkers Physics App. Terms of use, refunds, accuracy disclosures, and API attribution requirements.",
+    ),
+    "api-policy.html": (
+        "/api-policy",
+        "API Policy — Parkers Physics",
+        "API access tiers, attribution requirements, rate limits, and acceptable-use rules for the Parkers Physics public and authenticated APIs.",
+    ),
 }
 
 CANONICAL_RE = re.compile(r'<link\s+rel=["\']canonical["\']', re.IGNORECASE)
