@@ -2710,12 +2710,42 @@ function buildWorldScene(renderer, w, h) {
     );
     earth.add(grid);
 
+    // Earth atmosphere — view-dependent fresnel rim plus day/night
+    // modulation from the same u_sun_dir uniform that drives the surface
+    // terminator.  Sharing the uniform means a single write in the tick
+    // keeps the atmosphere in lock-step with the day/night line on the
+    // ground; the rim glows on the sunlit limb and fades to a dim
+    // ambient floor on the night limb.
     const atmo = new THREE.Mesh(
         new THREE.SphereGeometry(1.045, 48, 32),
-        new THREE.MeshBasicMaterial({
-            color: 0x66aaff, transparent: true, opacity: 0.18,
+        new THREE.ShaderMaterial({
+            transparent: true, depthWrite: false,
             side: THREE.BackSide, blending: THREE.AdditiveBlending,
-            depthWrite: false,
+            uniforms: {
+                uColor:   { value: new THREE.Color(0x66aaff) },
+                uK:       { value: 1.4 },
+                u_sun_dir: earthSkinU.u_sun_dir,    // shared with EarthSkin
+            },
+            vertexShader: `
+                varying vec3 vN;          // camera-space normal (fresnel)
+                varying vec3 vWorldN;     // world-space normal  (sun)
+                void main() {
+                    vN      = normalize(normalMatrix * normal);
+                    vWorldN = normalize(mat3(modelMatrix) * normal);
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }`,
+            fragmentShader: `
+                uniform vec3  uColor;
+                uniform float uK;
+                uniform vec3  u_sun_dir;
+                varying vec3  vN;
+                varying vec3  vWorldN;
+                void main() {
+                    float fres = pow(1.0 - abs(vN.z), 2.0);
+                    float lit  = max(dot(vWorldN, normalize(u_sun_dir)), 0.0);
+                    float intensity = 0.18 + 0.82 * lit;
+                    gl_FragColor = vec4(uColor, fres * 0.55 * uK * intensity);
+                }`,
         }),
     );
     earthTilt.add(atmo);
