@@ -107,6 +107,43 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
 .note-text { font-size:10px; color:#555; line-height:1.6; }
 .note-text strong { color:#a070d0; }
 .note-text p + p { margin-top:5px; }
+
+/* ── research-grade additions ─────────────────────────────── */
+#halpha-panel {
+    position:absolute; left:12px; bottom:16px; z-index:50;
+    background: rgba(4,2,16,.78); backdrop-filter: blur(8px);
+    border: 1px solid rgba(180,120,255,.22); border-radius: 8px;
+    padding: 8px 10px 6px; pointer-events: none;
+    width: 240px;
+}
+#halpha-panel .hp-title {
+    font-size:10px; color:#c8a8ff; letter-spacing:.6px;
+    text-transform:uppercase; margin-bottom:2px;
+    display:flex; justify-content:space-between; align-items:center;
+}
+#halpha-panel .hp-title .vr { color:#ffb0d0; font-weight:600; }
+#halpha-canvas { display:block; width:100%; height:84px; border-radius:4px;
+    background: linear-gradient(180deg, rgba(80,30,90,.18), rgba(30,5,40,.30)); }
+#halpha-panel .hp-axis {
+    display:flex; justify-content:space-between;
+    font-size:9px; color:#666; margin-top:1px;
+}
+@media (max-width: 640px) { #halpha-panel { display:none; } }
+
+#mode-pill {
+    position:absolute; top:60px; left:12px; z-index:50;
+    background: rgba(4,2,16,.72); backdrop-filter: blur(8px);
+    border: 1px solid rgba(180,120,255,.22); border-radius: 8px;
+    padding: 4px 9px; font-size: 10px; color:#c8a8ff; letter-spacing:.5px;
+    pointer-events: none;
+}
+.btn-row.threecol button { flex:1; min-width:0; }
+
+.legend-bar {
+    height:8px; border-radius:2px; margin:6px 0 2px;
+    background: linear-gradient(90deg, #2050ff 0%, #6080ff 25%, #ddd 50%, #ff6080 75%, #ff2050 100%);
+}
+.legend-row { display:flex; justify-content:space-between; font-size:9px; color:#888; }
 </style>
 </head>
 <body>
@@ -135,13 +172,25 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
             <div>v<sub>eq</sub>: <span class="val" id="hud-veq">285</span> <span class="dim">km/s</span></div>
             <div>ω/ω<sub>crit</sub>: <span class="val" id="hud-omega">0.97</span></div>
             <div class="sep"></div>
+            <div>v sin i: <span class="val" id="hud-vsini">258</span> <span class="dim">km/s</span></div>
+            <div>L: <span class="val" id="hud-lum">3 150</span> <span class="dim">L☉</span></div>
             <div>Decretion disk: <span class="vh" id="hud-disk">active</span></div>
+            <div>Disk H(R<sub>eq</sub>): <span class="val" id="hud-h">0.04</span> <span class="dim">R<sub>eq</sub></span></div>
             <div>FPS: <span id="fps-display">--</span></div>
             <div class="dim" style="margin-top:3px">Drag · Pinch · Scroll</div>
         </div>
         <button class="cv-btn" id="btn-panel-open">☰ Controls</button>
         <a href="space-weather.html" class="cv-btn" id="btn-sw" title="Live Space Weather Data">⚡ Weather</a>
         <button class="cv-btn" id="btn-center" title="Reset camera">⊙ Center</button>
+
+        <div id="mode-pill">Continuum · von Zeipel β=0.25</div>
+
+        <div id="halpha-panel">
+            <div class="hp-title"><span>Synthetic Hα 656.28 nm</span><span class="vr" id="hp-vr">V/R = 1.00</span></div>
+            <canvas id="halpha-canvas" width="480" height="170"></canvas>
+            <div class="hp-axis"><span>−800</span><span>0 km/s</span><span>+800</span></div>
+        </div>
+
         <div id="backdrop"></div>
     </div>
 
@@ -178,6 +227,20 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
                         <label>β<sub>GD</sub></label>
                         <input type="range" id="sl-betagd" min="0.05" max="0.40" step="0.01" value="0.25">
                         <span class="vdisp" id="disp-betagd">0.25</span>
+                    </div>
+                    <div style="font-size:10px;color:#666;line-height:1.45;margin-top:6px">
+                        <strong style="color:#a070d0">Gravity darkening law</strong>
+                    </div>
+                    <div class="btn-row threecol" id="gd-row">
+                        <button id="gd-vz" class="active">von Zeipel '24</button>
+                        <button id="gd-elr">ELR '11</button>
+                    </div>
+                    <div style="font-size:9.5px;color:#666;line-height:1.45">
+                        ELR (Espinosa Lara &amp; Rieutord 2011) self-consistently
+                        solves the radiative-flux divergence for a Roche figure
+                        and yields β<sub>eff</sub>≈0.21 at ω/ω<sub>c</sub>=0.85,
+                        weakening the equator-pole T contrast vs the classical
+                        β=0.25 von Zeipel theorem.
                     </div>
                 </div>
             </div>
@@ -237,6 +300,63 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
                         <input type="checkbox" id="tog-axis">
                         <label for="tog-axis">Show rotation axis</label>
                     </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-binary">
+                        <label for="tog-binary">Achernar B (companion + orbit)</label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sec">
+                <div class="sec-hd"><span>Non-Radial Pulsation</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-nrp">
+                        <label for="tog-nrp">Activate ℓ=2 m=2 prograde mode</label>
+                    </div>
+                    <div class="ctrl">
+                        <label>Amplitude</label>
+                        <input type="range" id="sl-nrp-amp" min="0" max="0.04" step="0.001" value="0.012">
+                        <span class="vdisp" id="disp-nrp-amp">0.012 R<sub>p</sub></span>
+                    </div>
+                    <div class="ctrl">
+                        <label>Period</label>
+                        <input type="range" id="sl-nrp-per" min="0.5" max="2.0" step="0.05" value="1.26">
+                        <span class="vdisp" id="disp-nrp-per">1.26 d</span>
+                    </div>
+                    <div style="font-size:9.5px;color:#666;line-height:1.5;margin-top:6px">
+                        Achernar exhibits multi-periodic g-mode pulsations
+                        (Vinicius+ 2006, Goss+ 2011) with detected periods
+                        of 0.7–1.7 d. The dominant mode appears prograde
+                        (ℓ=m=2), distorting the surface as a travelling
+                        equatorial bulge — likely the angular-momentum
+                        driver of disk ejection.
+                    </div>
+                </div>
+            </div>
+
+            <div class="sec">
+                <div class="sec-hd"><span>View Mode</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="btn-row threecol" id="view-row">
+                        <button id="view-cont" class="active">Continuum</button>
+                        <button id="view-dopp">Doppler v<sub>los</sub></button>
+                        <button id="view-temp">T<sub>eff</sub> map</button>
+                    </div>
+                    <div id="legend-doppler" style="display:none">
+                        <div class="legend-bar"></div>
+                        <div class="legend-row"><span>−v<sub>eq</sub></span><span>0</span><span>+v<sub>eq</sub></span></div>
+                    </div>
+                    <div id="legend-temp" style="display:none">
+                        <div class="legend-bar" style="background:linear-gradient(90deg,#ff5030,#ffaa50,#ffe0a0,#fffdf0,#cce0ff)"></div>
+                        <div class="legend-row"><span>T<sub>eq</sub></span><span></span><span>T<sub>pole</sub></span></div>
+                    </div>
+                    <div style="font-size:9.5px;color:#666;line-height:1.5;margin-top:6px">
+                        Doppler maps the line-of-sight rotational velocity
+                        v⃗·n̂<sub>view</sub> = (Ω̂×r⃗)·n̂. This is the direct
+                        observable in long-baseline interferometric
+                        differential phase (e.g. AMBER, PIONIER).
+                    </div>
                 </div>
             </div>
 
@@ -255,21 +375,40 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
                 <div class="sec-hd"><span>Reference Data</span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
                     <table class="dtbl">
-                        <tr><td colspan="2" class="hdr">Achernar</td></tr>
+                        <tr><td colspan="2" class="hdr">Achernar A — α Eri</td></tr>
                         <tr><td>Spectral type</td><td>B6 Vep</td></tr>
-                        <tr><td>T<sub>eff</sub> (pole)</td><td>~17 000 K</td></tr>
-                        <tr><td>T<sub>eff</sub> (equator)</td><td>~10 000 K</td></tr>
-                        <tr><td>R<sub>polar</sub></td><td>7.3 R☉</td></tr>
-                        <tr><td>R<sub>equatorial</sub></td><td>11.4 R☉</td></tr>
-                        <tr><td>Axis ratio</td><td>1.56</td></tr>
-                        <tr><td>Mass</td><td>6.7 M☉</td></tr>
-                        <tr><td>Luminosity</td><td>~3 150 L☉</td></tr>
-                        <tr><td>v<sub>eq</sub> sin i</td><td>~250 km/s</td></tr>
-                        <tr><td>v<sub>eq</sub></td><td>~285 km/s</td></tr>
-                        <tr><td>ω / ω<sub>crit</sub></td><td>~0.97</td></tr>
-                        <tr><td>Inclination</td><td>~65°</td></tr>
-                        <tr><td>Distance</td><td>42.7 pc (139 ly)</td></tr>
-                        <tr><td>Apparent mag</td><td>0.46</td></tr>
+                        <tr><td>HD / HIP</td><td>10144 / 7588</td></tr>
+                        <tr><td>Distance (Hipparcos)</td><td>42.75 pc (139 ly)</td></tr>
+                        <tr><td>V mag</td><td>0.46</td></tr>
+                        <tr><td>Mass</td><td>6.7 ± 0.4 M☉</td></tr>
+                        <tr><td>Luminosity</td><td>3 150 ± 230 L☉</td></tr>
+                        <tr><td colspan="2" class="hdr">VLTI/VINCI · Domiciano '03</td></tr>
+                        <tr><td>R<sub>eq</sub>/R<sub>pol</sub></td><td>1.56 ± 0.05</td></tr>
+                        <tr><td>2a / 2b (uniform-disk)</td><td>2.53 / 1.62 mas</td></tr>
+                        <tr><td colspan="2" class="hdr">VLTI/PIONIER · Domiciano '14</td></tr>
+                        <tr><td>R<sub>eq</sub></td><td>9.16 ± 0.23 R☉</td></tr>
+                        <tr><td>R<sub>pol</sub></td><td>6.78 ± 0.13 R☉</td></tr>
+                        <tr><td>R<sub>eq</sub>/R<sub>pol</sub></td><td>1.352 ± 0.044</td></tr>
+                        <tr><td>T<sub>eff</sub> (pole)</td><td>17 124 ± 350 K</td></tr>
+                        <tr><td>T<sub>eff</sub> (equator)</td><td>12 673 ± 260 K</td></tr>
+                        <tr><td>v<sub>eq</sub> sin i</td><td>257 ± 30 km/s</td></tr>
+                        <tr><td>v<sub>eq</sub></td><td>298 ± 27 km/s</td></tr>
+                        <tr><td>ω / ω<sub>crit</sub></td><td>0.838 ± 0.040</td></tr>
+                        <tr><td>Inclination i</td><td>60.6° ± 7°</td></tr>
+                        <tr><td>PA (rotation axis)</td><td>34.9° ± 1°</td></tr>
+                        <tr><td colspan="2" class="hdr">Achernar B (companion)</td></tr>
+                        <tr><td>Spectral type</td><td>A1V–A3V</td></tr>
+                        <tr><td>Mass</td><td>1.7 ± 0.3 M☉</td></tr>
+                        <tr><td>Period</td><td>~14.3 yr</td></tr>
+                        <tr><td>Semi-major axis</td><td>~12.3 AU (290 mas)</td></tr>
+                        <tr><td>Eccentricity</td><td>0.72</td></tr>
+                        <tr><td>Discovery</td><td>Kervella+ 2008</td></tr>
+                        <tr><td colspan="2" class="hdr">Disk (Hα emission)</td></tr>
+                        <tr><td>Surface density Σ(r)</td><td>∝ r<sup>−n</sup>, n≈2.0–3.5</td></tr>
+                        <tr><td>Scale height</td><td>H(r) ∝ r<sup>1.5</sup></td></tr>
+                        <tr><td>Temperature</td><td>~0.6 T<sub>eff,pol</sub></td></tr>
+                        <tr><td>Outer radius</td><td>~2–6 R<sub>eq</sub> (variable)</td></tr>
+                        <tr><td>Last shed event</td><td>2013 → reformed 2014</td></tr>
                     </table>
                 </div>
             </div>
@@ -280,13 +419,32 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
                     <div class="note-text">
                         <p><strong>Roche figure</strong>: surface = isopotential of Φ<sub>grav</sub>+Φ<sub>cent</sub>.
                            Solved iteratively per-vertex: r = 1 + (β/2)·r³·sin²θ in polar units.
-                           Surface normal taken from −∇Φ.</p>
-                        <p><strong>von Zeipel gravity darkening</strong>: T(θ) = T<sub>pole</sub>·(g(θ)/g<sub>pole</sub>)<sup>β</sup>
-                           with β=0.25 for radiative envelopes (B-stars). Equator emits at &lt;60% of polar T<sub>eff</sub>.</p>
-                        <p><strong>Planck colour</strong>: per-vertex T mapped to RGB via Tanner-Helland blackbody fit
-                           — not an A-star piecewise approximation.</p>
-                        <p><strong>Be decretion disk</strong>: ionized H plasma ~10⁴ K in Keplerian rotation,
-                           ρ ∝ r<sup>−3.5</sup>, emitting Hα (656 nm). Variable — Achernar episodically sheds &amp; reforms it.</p>
+                           Surface normal taken from −∇Φ; the Roche-critical limit β = 8/27 ≈ 0.296 corresponds
+                           to ω/ω<sub>c</sub> = 1 (R<sub>eq</sub>/R<sub>p</sub> = 1.5).</p>
+                        <p><strong>Gravity darkening</strong>: classical von Zeipel '24 gives T(θ) ∝ g<sub>eff</sub>(θ)<sup>β</sup>
+                           with β = 0.25 for radiative envelopes. Espinosa Lara &amp; Rieutord '11 self-consistently
+                           solve the radiative-flux-conservation equation on the Roche surface and find
+                           β<sub>eff</sub> falls toward ~0.18 as ω → ω<sub>c</sub>; we use a fitted
+                           closed-form to their Fig. 4.</p>
+                        <p><strong>Planck colour</strong>: per-fragment T mapped to RGB via Tanner-Helland blackbody fit
+                           with seam-smoothing across 6600 K so gravity-darkened B-star equators don't band.</p>
+                        <p><strong>Limb darkening</strong>: Claret quadratic
+                           I(μ)/I(1) = 1 − a(1 − μ) − b(1 − μ)², a=0.32, b=0.28 (B6V V-band-ish).</p>
+                        <p><strong>Be viscous decretion disk</strong> (Lee, Saio &amp; Osaki '91; Carciofi &amp;
+                           Bjorkman '08): isothermal H II plasma in Keplerian rotation,
+                           ρ(r,z) = ρ₀ (R<sub>eq</sub>/r)<sup>n</sup>·exp(−z²/2H²) with H(r) ∝ r<sup>1.5</sup>.
+                           We render the disk as a true 3D volume — front-to-back raymarched emission
+                           with τ-attenuation. Edge-on lines of sight pierce more plasma → strong Hα limb.</p>
+                        <p><strong>Doppler v<sub>los</sub> map</strong> reproduces what optical/IR
+                           interferometers (AMBER, PIONIER, GRAVITY) measure as differential phase
+                           — directly maps Ω̂ × r⃗ projected on the line of sight.</p>
+                        <p><strong>Non-radial pulsation</strong>: the surface displacement δr ∝ Y<sub>2</sub><sup>2</sup> ∝ sin²θ·cos(2φ − σt)
+                           is the prograde sectoral g-mode candidate driver of Achernar's episodic disk
+                           ejection (Vinicius+ '06, Goss+ '11).</p>
+                        <p><strong>Synthetic Hα profile</strong>: emission from the Keplerian disk is
+                           computed by integrating Σ(r)·δ(v − v<sub>K</sub>(r) sin i cos φ) over the disk;
+                           rotational broadening of the photospheric component uses the Gray uniform-disk profile.
+                           The V/R asymmetry is an m=1 disk-precession proxy.</p>
                     </div>
                 </div>
             </div>
@@ -333,12 +491,20 @@ const uniforms = {
     u_t_pole:      { value: 17000.0 },
     u_t_eq:        { value: 10000.0 },
     u_beta_gd:     { value: 0.25 },   // von Zeipel exponent
+    u_gd_model:    { value: 0.0 },    // 0 = von Zeipel, 1 = Espinosa Lara & Rieutord '11
     u_disk_active: { value: 1.0 },
     u_disk_rho:    { value: 1.0 },
     u_disk_outer:  { value: 3.6 },
+    u_view_mode:   { value: 0.0 },    // 0 continuum, 1 Doppler v_los, 2 T-map
+    u_v_eq:        { value: 1.0 },    // equatorial rotational velocity (Roche units, GM=Rp=1)
+    u_nrp_active:  { value: 0.0 },
+    u_nrp_amp:     { value: 0.012 },
+    u_nrp_omega:   { value: 2.0 * Math.PI / 1.26 }, // angular freq matching 1.26 d period (visualisation rate)
+    u_doppler_amp: { value: 1.0 },    // saturation factor for Doppler colormap
+    u_disk_inv_model: { value: new THREE.Matrix4() },
 };
 
-const state = { spin: 1.0, inclination: 65 };
+const state = { spin: 1.0, inclination: 65, viewMode: 0 };
 
 // ────────────────────────────────────────────────────────────────
 //  SCENE
@@ -402,12 +568,19 @@ const ROCHE_GLSL = /* glsl */`
 
 const starVS = /* glsl */`
     uniform float u_axis_ratio;
+    uniform float u_time;
+    uniform float u_v_eq;
+    uniform float u_nrp_active;
+    uniform float u_nrp_amp;
+    uniform float u_nrp_omega;
 
     varying vec3  vNormal;
     varying vec3  vPosObj;     // surface position in object space
     varying vec3  vViewDir;
     varying float vGravFrac;   // 0 at equator, 1 at pole — drives gravity darkening
     varying float vSinLat;     // |sin(latitude)| for noise/granulation
+    varying float vDoppler;    // line-of-sight velocity, normalised to ±v_eq
+    varying float vTheta;      // co-latitude, for ELR computation in FS
 
     ${ROCHE_GLSL}
 
@@ -417,10 +590,21 @@ const starVS = /* glsl */`
         float cosTheta  = dir.y;                                  // y = rotation axis
         float sin2theta = max(0.0, 1.0 - cosTheta * cosTheta);
         float sinTheta  = sqrt(sin2theta);
+        float theta     = acos(clamp(cosTheta, -1.0, 1.0));
+        vTheta = theta;
 
         float R    = max(u_axis_ratio, 1.0);
         float beta = rocheBeta(R);
         float r    = rocheRadius(beta, sin2theta);
+
+        // ── Non-radial pulsation: ℓ=2, m=2 prograde wave on the surface.
+        //   Y_2^2 ∝ sin²θ · cos(2φ - σt)  (σ in observer frame).
+        //   For Achernar this is a candidate driver for episodic disk ejection.
+        float phi = atan(dir.z, dir.x);
+        if (u_nrp_active > 0.5) {
+            float Y22  = sin2theta * cos(2.0 * phi - u_nrp_omega * u_time);
+            r += u_nrp_amp * Y22;
+        }
 
         // World-space surface point. Polar radius = 1, so equator stretches to R naturally.
         vec3 surfPos = dir * r;
@@ -448,6 +632,17 @@ const starVS = /* glsl */`
 
         vec4 mv  = modelViewMatrix * vec4(surfPos, 1.0);
         vViewDir = normalize(-mv.xyz);
+
+        // ── Line-of-sight velocity for Doppler view mode.
+        //   Rigid rotation Ω̂ = ŷ ⇒ v⃗ = Ω̂ × r⃗ = (-r_z, 0, r_x) × ω.
+        //   Scaled to ±1 at the limb of the equator (rho = R).
+        vec3 vRot      = vec3(-surfPos.z, 0.0, surfPos.x) * u_v_eq;     // object-space velocity
+        vec3 vRotMV    = (modelViewMatrix * vec4(vRot, 0.0)).xyz;       // view-space (no translation)
+        vec3 viewVec   = normalize(mv.xyz);                             // toward fragment from camera
+        // Positive = receding (red-shift)
+        float vlos = dot(vRotMV, viewVec);
+        vDoppler = clamp(vlos / max(u_v_eq * u_axis_ratio, 1e-3), -1.0, 1.0);
+
         gl_Position = projectionMatrix * mv;
     }
 `;
@@ -460,12 +655,17 @@ const starFS = /* glsl */`
     uniform float u_t_eq;
     uniform float u_beta_gd;
     uniform float u_axis_ratio;
+    uniform float u_gd_model;     // 0 = von Zeipel, 1 = ELR
+    uniform float u_view_mode;    // 0 continuum, 1 Doppler, 2 T-map
+    uniform float u_doppler_amp;
 
     varying vec3  vNormal;
     varying vec3  vPosObj;
     varying vec3  vViewDir;
     varying float vGravFrac;
     varying float vSinLat;
+    varying float vDoppler;
+    varying float vTheta;
 
     // 3D value-noise FBM (mild surface granulation).
     float h3(vec3 p){ p = fract(p*vec3(127.1,311.7,74.7)); p += dot(p,p+19.19); return fract(p.x*p.y*p.z); }
@@ -502,17 +702,66 @@ const starFS = /* glsl */`
         return clamp(vec3(r, g, b), 0.0, 1.4);
     }
 
+    // ELR (Espinosa Lara & Rieutord 2011) effective β_GD as a function
+    // of the rotation parameter w = ω/ω_crit. Smooth fit over the published
+    // numerical solution table (their Fig. 4): β_eff falls from 0.25 at
+    // rest to ~0.18 at w=1. For Achernar (w≈0.84) → β_eff ≈ 0.213.
+    float elrBetaEff(float w) {
+        return 0.25 - 0.0746 * w * w - 0.0238 * w * w * w * w;
+    }
+
     void main() {
         vec3  N   = normalize(vNormal);
         vec3  V   = normalize(vViewDir);
         float mu  = max(dot(N, V), 0.0);
 
         // ─── Gravity darkening ────────────────────────────────────────
-        // vGravFrac maps [g_eq → g_pole] to [0 → 1]. The von Zeipel
-        // exponent reshapes the falloff between the user-set endpoints.
-        float gd = pow(vGravFrac, u_beta_gd / 0.25);
+        // β_eff selected by model: classical von Zeipel uses the user slider;
+        // ELR derives it self-consistently from the Roche rotation.
+        float beta_user = u_beta_gd;
+        float R         = max(u_axis_ratio, 1.0);
+        float beta_rot  = clamp(2.0 * (R - 1.0) / (R*R*R), 0.0, 0.293);
+        float w         = sqrt(beta_rot / (8.0 / 27.0));   // ω/ω_crit
+        float beta_elr  = elrBetaEff(clamp(w, 0.0, 1.0));
+        float beta_eff  = mix(beta_user, beta_elr, u_gd_model);
+
+        float gd = pow(vGravFrac, beta_eff / 0.25);
         float T  = mix(u_t_eq, u_t_pole, gd);
 
+        // ─── View-mode dispatch ───────────────────────────────────────
+        // Doppler v_los map: blue receding…red approaching with neutral mid.
+        if (u_view_mode > 0.5 && u_view_mode < 1.5) {
+            float omu_v  = 1.0 - mu;
+            float limb_v = clamp(1.0 - 0.32 * omu_v - 0.28 * omu_v * omu_v, 0.0, 1.0);
+            float d  = clamp(vDoppler * u_doppler_amp, -1.0, 1.0);
+            vec3 cBlue  = vec3(0.18, 0.32, 1.00);
+            vec3 cWhite = vec3(0.92, 0.92, 0.92);
+            vec3 cRed   = vec3(1.00, 0.18, 0.28);
+            vec3 col    = d < 0.0 ? mix(cWhite, cBlue, -d)
+                                  : mix(cWhite, cRed,   d);
+            // mild luminance tag from gravity darkening so we still see geometry
+            col *= (0.55 + 0.45 * gd) * limb_v * 1.1;
+            gl_FragColor = vec4(col, 1.0);
+            return;
+        }
+        // Pure T_eff thermal map (no Doppler/granulation/limb)
+        if (u_view_mode > 1.5) {
+            float omu_t  = 1.0 - mu;
+            float limb_t = clamp(1.0 - 0.20 * omu_t, 0.0, 1.0);
+            // Inferno-style temperature ramp gd∈[0,1] → equator(cool) → pole(hot)
+            vec3 c0 = vec3(0.50, 0.05, 0.10);   // equator (cool)
+            vec3 c1 = vec3(1.00, 0.40, 0.10);
+            vec3 c2 = vec3(1.00, 0.80, 0.40);
+            vec3 c3 = vec3(0.90, 0.95, 1.00);   // pole (hot)
+            vec3 col = mix(mix(c0, c1, smoothstep(0.0, 0.33, gd)),
+                           mix(c2, c3, smoothstep(0.66, 1.0, gd)),
+                           smoothstep(0.33, 0.66, gd));
+            col *= limb_t * 1.15;
+            gl_FragColor = vec4(col, 1.0);
+            return;
+        }
+
+        // ─── Continuum (default) ──────────────────────────────────────
         vec3 base = planckRGB(T);
 
         // ─── Granulation (B-star: very thin convection — minimal) ─────
@@ -645,27 +894,33 @@ jetBottom.rotation.x = Math.PI;
 starGroup.add(jetTop, jetBottom);
 
 // ────────────────────────────────────────────────────────────────
-//  BE-STAR DECRETION DISK — Hα-emitting plasma in Keplerian rotation
+//  BE-STAR DECRETION DISK — 3D volumetric Hα-emitting plasma
 // ────────────────────────────────────────────────────────────────
 //
-//  Rendered as a flat ring in the equatorial plane. The fragment shader:
-//   – Uses local (x,z) coords from the disk mesh to recover r and φ.
-//   – Surface density Σ(r) ∝ r^-3.5 (Be-star canonical).
-//   – Emits in Hα — narrow band centred at 656 nm. We add a faint
-//     Brackett-γ (~2.16 μm) tinge that we render as a dark-red wash.
-//   – Keplerian shear: clumps rotate at φ̇(r) ∝ r^-1.5. We rotate
-//     the noise sample by that phase so inner clumps overtake outer.
-//   – Optical depth approximated by view-angle thickening: the disk
-//     gets brighter when seen edge-on.
+//  We render the disk as a true volume (Carciofi & Bjorkman 2006/2008
+//  viscous-decretion model):
+//
+//     ρ(r,z) = ρ₀ (R_eq/r)^n · exp(-z²/2H(r)²)        Σ ∝ r^-(n-1.5)
+//     H(r)  = H₀ · (r/R_eq)^1.5                         (vertical hydrostatic
+//                                                        equilibrium, isothermal)
+//     v_φ(r) = √(GM/r)                                  (Keplerian)
+//
+//  A box mesh covering the disk volume is raymarched in the fragment
+//  shader. We accumulate emission with absorption (front-to-back integration).
+//  Edge-on lines of sight pierce more plasma → much brighter Hα limb;
+//  pole-on views show the canonical face-on H II disk.
 //
 const diskVS = /* glsl */`
-    varying vec2 vXZ;
-    varying vec3 vWorld;
+    uniform mat4 u_disk_inv_model;
+    varying vec3 vObj;
+    varying vec3 vCamObj;
     void main() {
-        vXZ = position.xy;             // RingGeometry lives in XY plane locally
-        vec4 wp = modelMatrix * vec4(position, 1.0);
-        vWorld  = wp.xyz;
-        gl_Position = projectionMatrix * viewMatrix * wp;
+        vObj = position;
+        // camera position in object space (CPU supplies inverse model matrix
+        // for WebGL1 compatibility — no inverse() in GLSL ES 1.00).
+        vec4 cObj = u_disk_inv_model * vec4(cameraPosition, 1.0);
+        vCamObj = cObj.xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
     }
 `;
 const diskFS = /* glsl */`
@@ -675,69 +930,136 @@ const diskFS = /* glsl */`
     uniform float u_disk_active;
     uniform float u_disk_rho;
     uniform float u_disk_outer;
-    uniform vec3  cameraPosition;
-    varying vec2  vXZ;
-    varying vec3  vWorld;
+    uniform float u_t_pole;
+    varying vec3 vObj;
+    varying vec3 vCamObj;
 
-    float h2(vec2 p){ p=fract(p*vec2(127.1,311.7)); p+=dot(p,p+45.32); return fract(p.x*p.y); }
-    float vn2(vec2 p){
-        vec2 i=floor(p), f=fract(p), u=f*f*(3.0-2.0*f);
-        return mix(mix(h2(i),h2(i+vec2(1,0)),u.x),
-                   mix(h2(i+vec2(0,1)),h2(i+vec2(1,1)),u.x), u.y);
+    // Hash & 3D value-noise FBM for clumps and spiral-density structure.
+    float h3(vec3 p){ p=fract(p*vec3(127.1,311.7,74.7)); p+=dot(p,p+19.19); return fract(p.x*p.y*p.z); }
+    float vn3(vec3 p){
+        vec3 i=floor(p), f=fract(p), u=f*f*(3.0-2.0*f);
+        return mix(mix(mix(h3(i),h3(i+vec3(1,0,0)),u.x),
+                       mix(h3(i+vec3(0,1,0)),h3(i+vec3(1,1,0)),u.x), u.y),
+                   mix(mix(h3(i+vec3(0,0,1)),h3(i+vec3(1,0,1)),u.x),
+                       mix(h3(i+vec3(0,1,1)),h3(i+vec3(1,1,1)),u.x), u.y), u.z);
     }
-    float fbm2(vec2 p){ float v=0.0,a=0.5; for(int k=0;k<5;k++){ v+=a*vn2(p); p=p*2.13+vec2(7.3,11.7); a*=0.5; } return v; }
+    float fbm3(vec3 p){ float v=0.0,a=0.5; for(int k=0;k<4;k++){ v+=a*vn3(p); p=p*2.07+vec3(13.7,5.3,21.1); a*=0.5; } return v; }
+
+    // Slab–ray intersection in object space: y in [-Hbox,+Hbox], radial in [0,Router].
+    // Returns vec2(tNear, tFar); tFar<tNear ⇒ miss.
+    vec2 raySlab(vec3 ro, vec3 rd, float Hbox, float Router) {
+        // y-slab
+        float t1 = (-Hbox - ro.y) / (abs(rd.y) > 1e-6 ? rd.y : 1e-6);
+        float t2 = ( Hbox - ro.y) / (abs(rd.y) > 1e-6 ? rd.y : 1e-6);
+        float tNearY = min(t1, t2);
+        float tFarY  = max(t1, t2);
+        // radial cylinder y² + z² (no y), here cylinder around y axis: x²+z² < Router²
+        float a = rd.x*rd.x + rd.z*rd.z;
+        float b = 2.0 * (ro.x*rd.x + ro.z*rd.z);
+        float c = ro.x*ro.x + ro.z*ro.z - Router*Router;
+        float tNearR = -1e9, tFarR = 1e9;
+        if (a > 1e-8) {
+            float disc = b*b - 4.0*a*c;
+            if (disc > 0.0) {
+                float s = sqrt(disc);
+                tNearR = (-b - s) / (2.0*a);
+                tFarR  = (-b + s) / (2.0*a);
+            } else {
+                return vec2(1.0, -1.0); // miss
+            }
+        } else if (c > 0.0) { return vec2(1.0, -1.0); }
+
+        return vec2(max(tNearY, tNearR), min(tFarY, tFarR));
+    }
+
+    // Density at (r_cyl, y) in the Be disk.  r already = sqrt(x²+z²).
+    float diskDensity(float r, float y, float phiSheared, float Rinner, float Router) {
+        if (r < Rinner) return 0.0;
+        if (r > Router) return 0.0;
+        // Power-law radial: ρ₀(r) ∝ r^-n, n=3.5 (canonical Σ_disc ∝ r^-2 with H∝r^1.5)
+        float n = 3.5;
+        float rho0 = pow(Rinner / r, n);
+        // Vertical hydrostatic Gaussian, H ∝ r^1.5, with c_s/v_phi ~ 0.025 at r=Rinner.
+        float H = 0.025 * Rinner * pow(r / Rinner, 1.5);
+        float vert = exp(-0.5 * (y*y) / max(H*H, 1e-8));
+        // Soft inner & outer edges so the volume integral stays finite & smooth.
+        float t      = (r - Rinner) / max(Router - Rinner, 1e-3);
+        float edges  = smoothstep(0.0, 0.05, t) * smoothstep(1.0, 0.88, t);
+        // Spiral / clump structure (m≈1 one-armed oscillation reported in Be disks),
+        // sheared by Keplerian rate.
+        float clump = 0.55 + 0.45 * fbm3(vec3(r * 1.7, y * 4.0, phiSheared * 1.4))
+                                 * (0.6 + 0.4 * sin(phiSheared * 1.0));
+        return rho0 * vert * edges * clump;
+    }
 
     void main() {
         if (u_disk_active < 0.5) discard;
 
-        float r = length(vXZ);
-        float Rinner = u_axis_ratio * 1.05;     // hugs the equatorial bulge
+        float Rinner = u_axis_ratio * 1.05;     // disk hugs the equatorial bulge
         float Router = u_disk_outer;
-        if (r < Rinner || r > Router) discard;
+        float Hbox   = 0.025 * Rinner * pow(Router / Rinner, 1.5) * 4.0;  // ±4σ envelope
 
-        float phi = atan(vXZ.y, vXZ.x);
-        // Keplerian angular velocity ω(r) ∝ r^-1.5 (in Rp-scaled time).
-        float kepler = pow(max(r, 0.001), -1.5);
-        float shearedPhi = phi - kepler * u_time * 0.55;
+        vec3 ro = vCamObj;
+        vec3 rd = normalize(vObj - vCamObj);
 
-        // Sample noise in (r, sheared-φ): gives differentially-rotating clumps.
-        vec2  uv     = vec2(r * 1.4, shearedPhi * 1.7);
-        float clump  = 0.55 + 0.45 * fbm2(uv) * (0.6 + 0.4*sin(shearedPhi*4.0));
+        vec2 tt = raySlab(ro, rd, Hbox, Router);
+        if (tt.y < tt.x) discard;
+        float t0 = max(tt.x, 0.0);
+        float t1 = tt.y;
+        if (t1 - t0 < 1e-3) discard;
 
-        // Surface density Σ(r) ∝ r^-3.5 (Be-disk canonical, Carciofi & Bjorkman 2006).
-        float t       = (r - Rinner) / max(Router - Rinner, 1e-3);
-        float sigma   = pow(Rinner / r, 3.5);
-        float edges   = smoothstep(0.0, 0.08, t) * smoothstep(1.0, 0.85, t);
-        float density = sigma * clump * edges * u_disk_rho;
+        // Clamp the integration length so we don't blow out FPS on extreme angles
+        float L = min(t1 - t0, 24.0);
 
-        // View-angle thickening: edge-on lines of sight see more emitting plasma.
-        // The disk lies in y=0; cosA ≈ |dot(view, up)|.
-        vec3  toCam   = normalize(cameraPosition - vWorld);
-        float cosA    = clamp(abs(toCam.y), 0.05, 1.0);
-        float pathlen = 1.0 / cosA;
+        const int NSTEPS = 32;
+        float dl = L / float(NSTEPS);
+        vec3  p  = ro + rd * t0;
+        vec3 stepVec = rd * dl;
 
-        float alpha = clamp(density * pathlen * 0.65, 0.0, 0.95);
+        // Hα emission colour with mild inner-edge hot tinge (T~T_pole/2 → Hα + faint blue).
+        vec3 halpha   = vec3(1.00, 0.20, 0.32);
+        vec3 hotInner = vec3(1.00, 0.55, 0.75);
 
-        // ── Colour: Hα 656 nm dominant, faint Brγ wash, slight inner-edge heating
-        vec3 halpha = vec3(1.00, 0.18, 0.32);   // deep red, slight pink at limb
-        vec3 brackett = vec3(0.55, 0.15, 0.45); // far-red / IR rendered as plum
-        vec3 col = mix(halpha, brackett, smoothstep(Rinner, Router, r) * 0.45);
+        vec3  acc = vec3(0.0);
+        float trans = 1.0;
 
-        // Inner rim slightly hotter — fade toward bright pink near Rinner
-        float innerHot = 1.0 - smoothstep(Rinner, Rinner * 1.4, r);
-        col = mix(col, vec3(1.0, 0.55, 0.75), innerHot * 0.30);
+        for (int i = 0; i < NSTEPS; ++i) {
+            float r   = length(vec2(p.x, p.z));
+            float phi = atan(p.z, p.x);
+            // Keplerian shear of the structure pattern
+            float kep = pow(max(r, 0.05), -1.5);
+            float phiSheared = phi - kep * u_time * 0.55;
 
-        gl_FragColor = vec4(col * (0.7 + 0.6*clump), alpha);
+            float dens = diskDensity(r, p.y, phiSheared, Rinner, Router);
+            dens *= u_disk_rho;
+
+            // Inner rim is hotter (FUV-irradiated) → blend toward pinker
+            float innerHot = 1.0 - smoothstep(Rinner, Rinner * 1.5, r);
+            vec3 emiss = mix(halpha, hotInner, innerHot * 0.55);
+
+            // Volumetric front-to-back integration (emission + absorption)
+            float dT = clamp(dens * 0.30, 0.0, 0.40);
+            acc   += trans * emiss * dens * dl * 0.85;
+            trans *= 1.0 - dT;
+            if (trans < 0.01) break;
+
+            p += stepVec;
+        }
+
+        float alpha = clamp(1.0 - trans, 0.0, 0.96);
+        // Emission gain
+        gl_FragColor = vec4(acc * 1.20, alpha);
     }
 `;
-const diskGeo = new THREE.RingGeometry(1.0, 6.0, 192, 8);
+// Disk volume: a flat slab enclosing the gas. Sized for the largest outer
+// radius (6 R_eq) and the tallest scale-height envelope (~±1.2 R_p).
+const diskGeo = new THREE.BoxGeometry(14.0, 3.0, 14.0);
 const diskMat = new THREE.ShaderMaterial({
     vertexShader:diskVS, fragmentShader:diskFS, uniforms,
     transparent:true, depthWrite:false,
-    blending:THREE.AdditiveBlending, side:THREE.DoubleSide,
+    blending:THREE.AdditiveBlending, side:THREE.BackSide,
 });
 const disk = new THREE.Mesh(diskGeo, diskMat);
-disk.rotation.x = Math.PI / 2;     // ring → equatorial (XZ) plane
 starGroup.add(disk);
 
 // ────────────────────────────────────────────────────────────────
@@ -751,6 +1073,82 @@ const axisLine = new THREE.Line(axisGeo,
 axisLine.computeLineDistances();
 axisLine.visible = false;
 starGroup.add(axisLine);
+
+// ────────────────────────────────────────────────────────────────
+//  ACHERNAR B — A1V–A3V companion (Kervella & Domiciano de Souza 2008)
+// ────────────────────────────────────────────────────────────────
+//   a ≈ 12.3 AU, e ≈ 0.72, P ≈ 14.3 yr, m_B ≈ 1.7 M☉.
+//   Achernar A's R_eq ≈ 9.16 R☉ ≈ 0.0426 AU, so the orbital
+//   semi-major in scene units (R_pol = 1) is huge (~290 R_eq).
+//   We compress the orbit visually so the companion is on-screen,
+//   and label it as "schematic".
+//
+const binaryGroup = new THREE.Group();
+binaryGroup.visible = false;
+
+// Companion star — small white-ish A-type
+const companion = new THREE.Mesh(
+    new THREE.SphereGeometry(0.12, 32, 24),
+    new THREE.ShaderMaterial({
+        uniforms: { u_time: uniforms.u_time },
+        vertexShader: `
+            varying vec3 vN; varying vec3 vV;
+            void main(){
+                vN = normalize(normalMatrix * normal);
+                vec4 mv = modelViewMatrix * vec4(position,1.0);
+                vV = normalize(-mv.xyz);
+                gl_Position = projectionMatrix * mv;
+            }
+        `,
+        fragmentShader: `
+            uniform float u_time;
+            varying vec3 vN; varying vec3 vV;
+            void main(){
+                float mu = max(dot(normalize(vN), normalize(vV)), 0.0);
+                float omu = 1.0 - mu;
+                float limb = clamp(1.0 - 0.34*omu - 0.20*omu*omu, 0.0, 1.0);
+                vec3 base = vec3(0.96, 0.98, 1.00);   // ~9000 K
+                float fres = pow(omu, 4.0);
+                gl_FragColor = vec4(base * limb * 1.8 + vec3(0.65,0.78,1.00) * fres * 0.5, 1.0);
+            }
+        `,
+    })
+);
+binaryGroup.add(companion);
+
+// Schematic orbital ellipse (a = 8 in scene units, e = 0.72)
+const orbitA = 8.0, orbitE = 0.72;
+const orbitPts = [];
+for (let k = 0; k <= 256; k++) {
+    const E = (k / 256) * Math.PI * 2;
+    const x = orbitA * (Math.cos(E) - orbitE);
+    const z = orbitA * Math.sqrt(1 - orbitE*orbitE) * Math.sin(E);
+    orbitPts.push(x, 0, z);
+}
+const orbitGeo = new THREE.BufferGeometry();
+orbitGeo.setAttribute('position', new THREE.Float32BufferAttribute(orbitPts, 3));
+const orbitLine = new THREE.Line(orbitGeo,
+    new THREE.LineDashedMaterial({ color:0x80a8ff, dashSize:0.20, gapSize:0.15, transparent:true, opacity:0.45 }));
+orbitLine.computeLineDistances();
+binaryGroup.add(orbitLine);
+
+// Tilt orbit roughly to its observed plane (~70° from line of sight)
+binaryGroup.rotation.x = -0.30;
+binaryGroup.rotation.z =  0.18;
+scene.add(binaryGroup);
+
+// State for solving Kepler's equation for the companion's animated position.
+const binaryState = {
+    M0: 0.0,
+    P:  18.0,    // visualisation period (s in scene time)
+    a:  orbitA,
+    e:  orbitE,
+};
+function solveKepler(M, e) {
+    let E = M + e * Math.sin(M);
+    for (let i = 0; i < 6; i++) E = E - (E - e*Math.sin(E) - M) / (1 - e*Math.cos(E));
+    return E;
+}
 
 // ────────────────────────────────────────────────────────────────
 //  LIGHTING (mostly cosmetic — shaders are emissive)
@@ -855,6 +1253,217 @@ document.getElementById('sl-disk-out').addEventListener('input', e => {
 document.getElementById('tog-corona').addEventListener('change', e => { rimMesh.visible = e.target.checked; });
 document.getElementById('tog-jet').addEventListener('change',    e => { jetTop.visible = jetBottom.visible = e.target.checked; });
 document.getElementById('tog-axis').addEventListener('change',   e => { axisLine.visible = e.target.checked; });
+document.getElementById('tog-binary').addEventListener('change', e => { binaryGroup.visible = e.target.checked; });
+
+// ── Gravity-darkening model selector ─────────────────────────────
+const modePill = document.getElementById('mode-pill');
+function refreshModePill() {
+    const law = uniforms.u_gd_model.value < 0.5
+        ? `von Zeipel β=${uniforms.u_beta_gd.value.toFixed(2)}`
+        : `ELR '11`;
+    const mode = ['Continuum', 'Doppler v_los', 'T_eff map'][state.viewMode];
+    modePill.textContent = `${mode} · ${law}`;
+}
+document.getElementById('gd-vz').addEventListener('click', () => {
+    uniforms.u_gd_model.value = 0.0;
+    document.getElementById('gd-vz').classList.add('active');
+    document.getElementById('gd-elr').classList.remove('active');
+    refreshModePill();
+});
+document.getElementById('gd-elr').addEventListener('click', () => {
+    uniforms.u_gd_model.value = 1.0;
+    document.getElementById('gd-elr').classList.add('active');
+    document.getElementById('gd-vz').classList.remove('active');
+    refreshModePill();
+});
+
+// ── View mode (continuum / Doppler / T-map) ──────────────────────
+function setViewMode(idx) {
+    state.viewMode = idx;
+    uniforms.u_view_mode.value = idx;
+    document.querySelectorAll('#view-row button').forEach(b => b.classList.remove('active'));
+    document.getElementById(['view-cont','view-dopp','view-temp'][idx]).classList.add('active');
+    document.getElementById('legend-doppler').style.display = idx === 1 ? 'block' : 'none';
+    document.getElementById('legend-temp').style.display    = idx === 2 ? 'block' : 'none';
+    refreshModePill();
+}
+document.getElementById('view-cont').addEventListener('click', () => setViewMode(0));
+document.getElementById('view-dopp').addEventListener('click', () => setViewMode(1));
+document.getElementById('view-temp').addEventListener('click', () => setViewMode(2));
+
+// ── Non-radial pulsation ─────────────────────────────────────────
+document.getElementById('tog-nrp').addEventListener('change', e => {
+    uniforms.u_nrp_active.value = e.target.checked ? 1.0 : 0.0;
+});
+document.getElementById('sl-nrp-amp').addEventListener('input', e => {
+    uniforms.u_nrp_amp.value = +e.target.value;
+    document.getElementById('disp-nrp-amp').innerHTML = (+e.target.value).toFixed(3) + ' R<sub>p</sub>';
+});
+document.getElementById('sl-nrp-per').addEventListener('input', e => {
+    const P = +e.target.value;
+    uniforms.u_nrp_omega.value = 2.0 * Math.PI / P;
+    document.getElementById('disp-nrp-per').textContent = P.toFixed(2) + ' d';
+});
+
+// ────────────────────────────────────────────────────────────────
+//  SYNTHETIC Hα LINE PROFILE
+// ────────────────────────────────────────────────────────────────
+//   For a Keplerian disk in optically thin emission, the emergent
+//   Hα profile is a convolution of:
+//      φ(v) = ∫ Σ(r) · δ(v − v_φ(r) sin i sin φ) r dr dφ
+//   For inclination i:
+//     i = 90° (edge-on)  → strongly double-peaked, V/R≈1
+//     i = 0°  (pole-on)  → narrow single peak (no projection)
+//   Photospheric absorption is added underneath as a broad Gaussian
+//   from rotational broadening (v_eq sin i).
+//
+const hpCanvas = document.getElementById('halpha-canvas');
+const hpCtx    = hpCanvas.getContext('2d');
+const hpVR     = document.getElementById('hp-vr');
+const HP_W = hpCanvas.width, HP_H = hpCanvas.height;
+const HP_NV = 96;
+const hpProfile = new Float32Array(HP_NV);
+
+function drawHalphaProfile() {
+    // ── Compute v_eq sin i from current state.
+    const v_eq = 298 * state.spin;                              // km/s
+    const sinI = Math.sin(state.inclination * Math.PI / 180);
+    const cosI = Math.cos(state.inclination * Math.PI / 180);
+    const vSinI = v_eq * sinI;
+    document.getElementById('hud-vsini').textContent = Math.round(vSinI);
+
+    const Rin  = uniforms.u_axis_ratio.value * 1.05;
+    const Rout = uniforms.u_disk_outer.value;
+    // Disk inner Keplerian velocity ≈ v_eq · sqrt(R_eq / r_inner) → ≈ v_eq.
+    // Outer  ≈ v_eq · sqrt(R_eq / r_outer).
+    const vMaxDisk = v_eq * Math.sqrt(uniforms.u_axis_ratio.value / Rin) * sinI;  // km/s
+    const vMinDisk = v_eq * Math.sqrt(uniforms.u_axis_ratio.value / Rout) * sinI;
+
+    // Velocity grid: −800 … +800 km/s
+    const VMAX = 800;
+
+    hpProfile.fill(0);
+    const diskOn = uniforms.u_disk_active.value > 0.5;
+    const diskRho = uniforms.u_disk_rho.value;
+
+    if (diskOn) {
+        // Build the disk emission profile by integrating Σ(r) ∝ r^-2 (column),
+        // weighted by the Doppler-shifted contribution at each radius.
+        const NR = 80;
+        for (let ir = 0; ir < NR; ir++) {
+            const r = Rin + (Rout - Rin) * (ir + 0.5) / NR;
+            const vK = v_eq * Math.sqrt(uniforms.u_axis_ratio.value / r) * sinI;
+            const sigma = Math.pow(Rin / r, 2.0);  // surface density
+            const ringWeight = sigma * r * (Rout - Rin) / NR;
+            // For each azimuth, contribute to v(φ)=vK·cos(φ)
+            const NPHI = 36;
+            for (let ip = 0; ip < NPHI; ip++) {
+                const phi = (ip / NPHI) * Math.PI * 2;
+                const v = vK * Math.cos(phi);
+                // Accumulate with a small thermal width (~12 km/s)
+                const idx = (v / VMAX + 1) * 0.5 * HP_NV;
+                const i0  = Math.max(0, Math.floor(idx) - 2);
+                const i1  = Math.min(HP_NV - 1, Math.floor(idx) + 2);
+                for (let k = i0; k <= i1; k++) {
+                    const vv = (k / HP_NV * 2 - 1) * VMAX;
+                    const w = Math.exp(-(vv - v) * (vv - v) / (2 * 18 * 18));
+                    hpProfile[k] += ringWeight * w * diskRho;
+                }
+            }
+        }
+    }
+
+    // Photospheric absorption — broad rotational profile, v_eq sin i FWHM
+    // (Be stars: Hα core fills with disk emission; we use an absorption depth
+    // proportional to (1 − sigma_disk) to roughly emulate that shell→emission
+    // continuum.)
+    const photDepth = diskOn ? 0.65 : 1.0;
+    const photProfile = new Float32Array(HP_NV);
+    for (let k = 0; k < HP_NV; k++) {
+        const v = (k / HP_NV * 2 - 1) * VMAX;
+        // Rotation profile: I(v) = 1 − A·sqrt(1 − (v/vSinI)²) (uniform-disk)
+        const x = v / Math.max(vSinI, 5);
+        photProfile[k] = (Math.abs(x) < 1) ? Math.sqrt(1 - x * x) * photDepth : 0;
+    }
+
+    // Compose: continuum=1, minus absorption, plus emission.
+    // Normalise emission to a sensible peak.
+    let emax = 0; for (let k = 0; k < HP_NV; k++) emax = Math.max(emax, hpProfile[k]);
+    const eScale = (emax > 0) ? 0.85 / emax : 0;
+    const flux = new Float32Array(HP_NV);
+    for (let k = 0; k < HP_NV; k++) {
+        flux[k] = 1.0 - 0.55 * photProfile[k] + hpProfile[k] * eScale;
+    }
+
+    // V/R asymmetry: caused by m=1 disk eccentricity. We use a phase-modulated
+    // perturbation derived from the disk's bulk noise pattern.
+    const t = uniforms.u_time.value;
+    const eps = 0.06 * Math.sin(t * 0.13);    // slow V/R cycle
+    for (let k = 0; k < HP_NV; k++) {
+        const v = (k / HP_NV * 2 - 1) * VMAX;
+        if (v < 0) flux[k] *= (1 + eps);
+        else       flux[k] *= (1 - eps);
+    }
+
+    // Draw
+    hpCtx.clearRect(0, 0, HP_W, HP_H);
+    // grid
+    hpCtx.strokeStyle = 'rgba(180,120,255,0.10)';
+    hpCtx.lineWidth = 1;
+    for (let y = 0; y < HP_H; y += HP_H / 4) {
+        hpCtx.beginPath(); hpCtx.moveTo(0, y); hpCtx.lineTo(HP_W, y); hpCtx.stroke();
+    }
+    // continuum
+    hpCtx.strokeStyle = 'rgba(180,180,180,0.30)';
+    hpCtx.beginPath();
+    const yCont = HP_H * (1 - 1.0 / 1.6);
+    hpCtx.moveTo(0, yCont); hpCtx.lineTo(HP_W, yCont); hpCtx.stroke();
+    // line-centre
+    hpCtx.strokeStyle = 'rgba(180,120,255,0.30)';
+    hpCtx.beginPath(); hpCtx.moveTo(HP_W/2, 0); hpCtx.lineTo(HP_W/2, HP_H); hpCtx.stroke();
+    // profile
+    hpCtx.strokeStyle = '#ff6080';
+    hpCtx.lineWidth = 1.5;
+    hpCtx.fillStyle = 'rgba(255,80,140,0.18)';
+    hpCtx.beginPath();
+    hpCtx.moveTo(0, HP_H);
+    for (let k = 0; k < HP_NV; k++) {
+        const x = (k / (HP_NV - 1)) * HP_W;
+        const y = HP_H * (1 - flux[k] / 1.6);
+        hpCtx.lineTo(x, y);
+    }
+    hpCtx.lineTo(HP_W, HP_H); hpCtx.closePath(); hpCtx.fill();
+    hpCtx.beginPath();
+    for (let k = 0; k < HP_NV; k++) {
+        const x = (k / (HP_NV - 1)) * HP_W;
+        const y = HP_H * (1 - flux[k] / 1.6);
+        if (k === 0) hpCtx.moveTo(x, y); else hpCtx.lineTo(x, y);
+    }
+    hpCtx.stroke();
+
+    // V/R numerical readout (peak ratio)
+    let vPeak = 0, rPeak = 0;
+    const half = (HP_NV / 2) | 0;
+    for (let k = 0; k < half; k++) vPeak = Math.max(vPeak, flux[k]);
+    for (let k = half; k < HP_NV; k++) rPeak = Math.max(rPeak, flux[k]);
+    const vr = (rPeak > 0) ? vPeak / rPeak : 1;
+    hpVR.textContent = `V/R = ${vr.toFixed(2)}`;
+
+    // Disk H readout
+    document.getElementById('hud-h').textContent =
+        (0.025 * Math.pow(uniforms.u_axis_ratio.value, 1.5)).toFixed(3);
+    // Luminosity scales ∝ (R_eq/R_eq0)² × <T⁴> — show modest variation
+    const LR = (uniforms.u_axis_ratio.value / 1.56);
+    const LT = Math.pow((0.6 * uniforms.u_t_eq.value + 0.4 * uniforms.u_t_pole.value) / 14000, 4);
+    const Lum = Math.round(3150 * LR * LR * LT);
+    document.getElementById('hud-lum').textContent = Lum.toLocaleString('en-US').replace(',', ' ');
+}
+
+// Throttle Hα redraws to ~12 fps to spare the main thread.
+let hpLast = 0;
+function maybeDrawHalpha(now) {
+    if (now - hpLast > 80) { drawHalphaProfile(); hpLast = now; }
+}
 
 // ────────────────────────────────────────────────────────────────
 //  ANIMATE
@@ -863,6 +1472,8 @@ let fpsF = 0, fpsT = performance.now();
 const fpsEl = document.getElementById('fps-display');
 const clock = new THREE.Clock();
 
+const _invTmp = new THREE.Matrix4();
+
 function animate() {
     requestAnimationFrame(animate);
     const dt = clock.getDelta();
@@ -870,17 +1481,42 @@ function animate() {
 
     starGroup.rotation.y += dt * 0.45 * state.spin;
 
+    // Update equatorial rotational velocity (Roche units) for shader Doppler:
+    //   v_eq² = ω² R_eq² = β R_eq²,  β = rocheBeta(R)
+    {
+        const R    = Math.max(uniforms.u_axis_ratio.value, 1.0);
+        const beta = Math.min(2*(R-1)/(R*R*R), 0.293);
+        uniforms.u_v_eq.value = Math.sqrt(beta) * R * state.spin;
+    }
+
+    // Disk world→object inverse for the volumetric raymarcher.
+    disk.updateMatrixWorld(true);
+    _invTmp.copy(disk.matrixWorld).invert();
+    uniforms.u_disk_inv_model.value.copy(_invTmp);
+
+    // Achernar B orbital motion.
+    if (binaryGroup.visible) {
+        const M = (uniforms.u_time.value / binaryState.P) * 2 * Math.PI + binaryState.M0;
+        const E = solveKepler(M, binaryState.e);
+        const x = binaryState.a * (Math.cos(E) - binaryState.e);
+        const z = binaryState.a * Math.sqrt(1 - binaryState.e*binaryState.e) * Math.sin(E);
+        companion.position.set(x, 0, z);
+    }
+
     controls.update();
     renderer.render(scene, camera);
 
-    fpsF++;
     const now = performance.now();
+    maybeDrawHalpha(now);
+
+    fpsF++;
     if (now - fpsT >= 500) {
         fpsEl.textContent = Math.round(fpsF * 1000 / (now - fpsT));
         fpsF = 0; fpsT = now;
     }
 }
 animate();
+refreshModePill();
 
 console.log('%c[Achernar Simulator — α Eridani (B6 Vep)]', 'color:#c8a8ff;font-weight:bold;font-size:13px');
 console.log('  Roche-figure surface · von Zeipel gravity-darkening · Planck blackbody · Be decretion disk');
