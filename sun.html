@@ -2,6 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<!-- perf-hints:start -->
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" crossorigin>
+<!-- perf-hints:end -->
+
 <script src="js/preview-mode.js"></script>
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
 <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
@@ -813,42 +819,42 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
                 <div class="sdo-strip" id="sdo-strip">
                     <div class="sdo-img-btn" data-label="AIA 304 Å · Chromosphere · 50 000 K"
                          onclick="sdoOpen('https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0304.jpg','AIA 304 Å · Chromosphere · ~50 000 K')">
-                        <img id="sdo-304" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0304.jpg" alt="AIA 304">
+                        <img id="sdo-304" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0304.jpg" alt="AIA 304" loading="lazy" decoding="async">
                         <span>AIA 304 Å<br>Chromosphere</span>
                     </div>
                     <div class="sdo-img-btn" data-label="AIA 171 Å · Coronal loops · 600 000 K"
                          onclick="sdoOpen('https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0171.jpg','AIA 171 Å · Coronal loops · ~600 000 K')">
-                        <img id="sdo-171" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0171.jpg" alt="AIA 171">
+                        <img id="sdo-171" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0171.jpg" alt="AIA 171" loading="lazy" decoding="async">
                         <span>AIA 171 Å<br>Coronal loops</span>
                     </div>
                     <div class="sdo-img-btn" data-label="AIA 193 Å · Active corona · 1.5 MK"
                          onclick="sdoOpen('https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0193.jpg','AIA 193 Å · Active corona · ~1.5 MK')">
-                        <img id="sdo-193" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0193.jpg" alt="AIA 193">
+                        <img id="sdo-193" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0193.jpg" alt="AIA 193" loading="lazy" decoding="async">
                         <span>AIA 193 Å<br>Active corona</span>
                     </div>
                     <div class="sdo-img-btn" data-label="AIA 211 Å · Active regions · 2 MK"
                          onclick="sdoOpen('https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0211.jpg','AIA 211 Å · Active regions · ~2 MK')">
-                        <img id="sdo-211" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0211.jpg" alt="AIA 211">
+                        <img id="sdo-211" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0211.jpg" alt="AIA 211" loading="lazy" decoding="async">
                         <span>AIA 211 Å<br>Active regions</span>
                     </div>
                     <div class="sdo-img-btn" data-label="AIA 131 Å · Flare plasma · 10 MK"
                          onclick="sdoOpen('https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0131.jpg','AIA 131 Å · Flare plasma · ~10 MK')">
-                        <img id="sdo-131" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0131.jpg" alt="AIA 131">
+                        <img id="sdo-131" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0131.jpg" alt="AIA 131" loading="lazy" decoding="async">
                         <span>AIA 131 Å<br>Flare plasma</span>
                     </div>
                     <div class="sdo-img-btn" data-label="HMI Magnetogram · B-field"
                          onclick="sdoOpen('https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_HMIB.jpg','HMI Magnetogram · Line-of-sight B-field')">
-                        <img id="sdo-hmib" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_HMIB.jpg" alt="HMI Mag">
+                        <img id="sdo-hmib" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_HMIB.jpg" alt="HMI Mag" loading="lazy" decoding="async">
                         <span>HMI Mag<br>B-field LOS</span>
                     </div>
                     <div class="sdo-img-btn" data-label="HMI Intensitygram · Sunspots"
                          onclick="sdoOpen('https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_HMIIC.jpg','HMI Intensitygram · Photosphere / sunspots')">
-                        <img id="sdo-hmic" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_HMIIC.jpg" alt="HMI IC">
+                        <img id="sdo-hmic" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_HMIIC.jpg" alt="HMI IC" loading="lazy" decoding="async">
                         <span>HMI IC<br>Photosphere</span>
                     </div>
                     <div class="sdo-img-btn" data-label="SOHO LASCO C2 · Inner corona 2–6 R☉"
                          onclick="sdoOpen('https://soho.nascom.nasa.gov/data/realtime/c2/1024/latest.jpg','SOHO LASCO C2 · Inner corona 2–6 R☉')">
-                        <img id="sdo-c2" src="https://soho.nascom.nasa.gov/data/realtime/c2/512/latest.jpg" alt="LASCO C2">
+                        <img id="sdo-c2" src="https://soho.nascom.nasa.gov/data/realtime/c2/512/latest.jpg" alt="LASCO C2" loading="lazy" decoding="async">
                         <span>LASCO C2<br>2–6 R☉</span>
                     </div>
                 </div>
