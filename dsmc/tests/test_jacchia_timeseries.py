@@ -159,7 +159,9 @@ def test_lagged_regression_detects_injected_signal() -> None:
 
     X, y, names, kept = attach_lag_features(samples, indices,
                                              lags_h=DEFAULT_LAGS_H)
-    base, lagged = fit_baseline_vs_lagged(X, y, names, lags_h=DEFAULT_LAGS_H)
+    base, lagged, interactions = fit_baseline_vs_lagged(
+        X, y, names, lags_h=DEFAULT_LAGS_H,
+    )
     # Baseline can't see 12-h lag → should be much worse than lagged.
     assert lagged.rmse < 0.05, f"lagged RMSE too high: {lagged.rmse}"
     assert base.rmse > 4 * lagged.rmse, (
@@ -169,6 +171,9 @@ def test_lagged_regression_detects_injected_signal() -> None:
     # The lagged fit's ap_lag_12h coefficient should land near 0.01.
     coef = lagged.coefficients["ap_lag_12h"]
     assert 0.005 < coef < 0.015, f"recovered coefficient off: {coef}"
+    # Interactions adds *more* parameters; shouldn't be worse than lagged.
+    assert interactions.rmse <= lagged.rmse + 1e-6
+    assert interactions.r2  >= lagged.r2  - 1e-6
 
 
 # ─── ACF basics ──────────────────────────────────────────────────────────────
