@@ -2838,8 +2838,9 @@ import {
     clearSavedLocations, formatLocalClock, dayNightBadge,
 } from './js/earth-saved-locations.js';
 import { WeatherFeed, TEX_W, TEX_H, MAX_WIND_MS } from './js/weather-feed.js';
-import { WeatherHistory }       from './js/weather-history.js';
-import { WeatherFrameResolver } from './js/weather-frame-resolver.js';
+import { WeatherHistory }        from './js/weather-history.js';
+import { WeatherFrameResolver }  from './js/weather-frame-resolver.js';
+import { WeatherForecastFeed }   from './js/weather-forecast-feed.js';
 import { ForecastRegistry, PersistenceForecaster, CHANNEL_NAMES, FORECAST_HORIZONS_H } from './js/weather-forecast.js';
 import { WeatherForecastValidator } from './js/weather-forecast-validation.js';
 import { PrecipClimatology }        from './js/precip-climatology.js';
@@ -5243,6 +5244,36 @@ wxResolver = new WeatherFrameResolver({ feed: wxFeed, history: wxGridHistory });
 // from a fresh disk store (warmed history would already serve replay).
 wxFeed.backfill(wxGridHistory, 24).then(n => {
     if (n > 0) wxResolver?.invalidate();
+});
+
+// ── Forecast feed (lazy) ───────────────────────────────────────────────────
+// Fetches +24 h of hourly U/V/T/P/RH/cloud/precip from Open-Meteo's bulk
+// forecast endpoint and pushes each hour into wxGridHistory's forecast
+// ring. fetchOnce() is idempotent and coalesces concurrent calls — the
+// future-scrub watcher below can fire on every drag without triggering
+// a second network triplet. Empty until the user actually scrubs forward,
+// matching the user-direction "lazy-load" choice and keeping page-load
+// network budget tight.
+const wxForecastFeed = new WeatherForecastFeed({ history: wxGridHistory });
+
+// On the first future-scrub tick, kick the fetch. Subsequent future
+// scrubs are no-ops thanks to fetchOnce()'s in-flight + age guards.
+// We hook the time-bus snapshot rather than the slider input so the
+// trigger fires regardless of how simTime moved (slider drag, Operations
+// console, keyboard step).
+const _futureFetchUnsub = timeBus.subscribe((snap) => {
+    if (snap.simTimeMs > Date.now() + 30 * 60_000) {
+        // Fire-and-forget; the resolver re-renders on
+        // 'weather-forecast-ingest' below once frames land.
+        wxForecastFeed.fetchOnce();
+    }
+});
+
+// Re-bracket on forecast ingest so the slider's current position picks
+// up the fresh forecast frames immediately, instead of waiting for the
+// resolver's redraw threshold (60 s of sim-time movement) to expire.
+document.addEventListener('weather-forecast-ingest', () => {
+    wxResolver?.invalidate();
 });
 
 // ── Forecaster registry + skill validator ──────────────────────────────────
