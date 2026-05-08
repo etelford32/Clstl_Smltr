@@ -34,6 +34,9 @@ serde_json = "1"
 crossbeam-channel = "0.5"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+# wasm-bindgen schema versions are coupled exactly between the Rust crate
+# (locked here via Cargo.lock) and wasm-bindgen-cli (pinned in
+# .github/workflows/build-wasm.yml). When bumping, update both.
 wasm-bindgen = "0.2"
 # VideoFrame feature required: .cargo/config.toml sets web_sys_unstable_apis,
 # which activates glow's VideoFrame WebGL code paths; without this feature the

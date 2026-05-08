@@ -1,6 +1,9 @@
 # Rust build artifacts
 /target/
-Cargo.lock
+# Cargo.lock IS committed for this binary crate — it's an application,
+# not a library, so we want CI / collaborators to use the exact same dep
+# graph (especially for the strict wasm-bindgen schema-version coupling
+# between the Rust crate and wasm-bindgen-cli).
 
 # WASM build outputs (keep index.html template)
 www/*.wasm
