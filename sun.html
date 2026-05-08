@@ -2013,6 +2013,17 @@ const uniforms = {
     u_arSpots:              { value: Array.from({length: 8}, () => new THREE.Vector4(0, 0, 0, 0)) },
     u_arSpotCount:          { value: 0 },
 
+    // ── Layer-isolation flags (driven by Solar Layers toggles) ──────────
+    // u_chromoIso: 1.0 when chromosphere is visible but photosphere is not,
+    //   so chromoFS boosts on-disk alpha and renders as a coherent shell
+    //   instead of a faint corona-style halo.
+    // u_photIso:   1.0 when photosphere is visible but chromosphere is not,
+    //   so the photosphere reveals its upper-altitude features (faculae,
+    //   limb spicule fringe, brighter network) that the chromosphere shell
+    //   would normally occlude.
+    u_chromoIso:            { value: 0.0 },
+    u_photIso:              { value: 0.0 },
+
     // Phase 4.6 — pre-baked 4-octave fbm noise atlas. Photosphere shader
     // samples this once per axis (triplanar) instead of computing fbm
     // procedurally per fragment — collapses ~13 noise samples per pixel
@@ -2418,6 +2429,8 @@ const sunFS = /* glsl */`
         return minD;
     }
     uniform float u_flare_intensity; // 0-1 white-light flash intensity at flare onset
+    uniform float u_chromoIso;       // 1.0 when chromosphere isolated (this shader inactive)
+    uniform float u_photIso;         // 1.0 when photosphere is isolated (boost upper-layer features)
     varying vec3  vNormal;
     varying vec3  vPosition;
     varying vec3  vViewDir;
@@ -2555,7 +2568,33 @@ const sunFS = /* glsl */`
         // brightness so each cell reads as 3D rather than flat.
         float laneD     = smoothstep(0.02, 0.16, gCell.y - gCell.x);   // 0=lane, 1=interior
         float cellBulge = 1.0 - 0.18 * smoothstep(0.0, 0.30, gCell.x); // bright centre, slightly dim edge
-        float granLight = mix(0.32, 1.04, laneD) * cellBulge;
+
+        // ── Schwarzschild centre-to-limb contrast attenuation ─────────────
+        // Granulation contrast (~16% intensity ratio at disk centre) drops
+        // toward the limb because we're sampling a higher, cooler part of
+        // the photosphere where convection has overshot and decoupled. The
+        // band of lane/interior brightnesses compresses toward a common mean.
+        float schw    = pow(mu, 0.5);                              // 1 at centre, ~0.55 at μ=0.3
+        float bright  = mix(0.78, 1.04, schw);                     // cell interior maximum
+        float dark    = mix(0.78, 0.32, schw);                     // dark-lane minimum
+        float granLight = mix(dark, bright, laneD) * cellBulge;
+
+        // ── Granule lifetime breathing ────────────────────────────────────
+        // Real granules form (~30 s rise), live (~5–10 min), then fade as
+        // mass piles up at the boundary. Cheap proxy: hash the integer
+        // cell-grid position to a per-cell phase, sin-modulate brightness.
+        vec3 cellGrid = floor(gPos);
+        float cellSeed  = hash(cellGrid);
+        float cellPhase = cellSeed * 6.2832;
+        // Two-tone breath: slow main lifecycle (~3 sim-sec ≈ 5 min) +
+        // fast micro-flicker (~0.6 sim-sec) for sub-granule turbulence.
+        float granLife  = 0.5 + 0.5 * sin(u_time * 1.85 + cellPhase * 3.7);
+        float granJit   = 0.5 + 0.5 * sin(u_time * 9.2  + cellPhase * 17.0);
+        granLight *= 0.85 + granLife * 0.22 * laneD + granJit * 0.05 * laneD;
+        // "Exploding granule" rare bright burst: cells whose seed falls in
+        // the top 6% of [0,1] flash bright at random phase (~3% of frames).
+        float explode = smoothstep(0.94, 0.99, cellSeed) * pow(granLife, 6.0);
+        granLight *= 1.0 + explode * 0.45;
 
         // ── Fine sub-granulation turbulence ─────────────────────────────────
         float fineTurb = fbmTex(vPosition * 30.0 + vec3(u_time * 0.012)) * 0.08;
@@ -2632,9 +2671,45 @@ const sunFS = /* glsl */`
                 float az = atan(dot(d, north), dot(d, east));
                 float fib = 0.5 + 0.5 * sin(az * 28.0);
                 fib       = mix(fib, 0.5 + 0.5 * sin(az * 13.0), 0.35);
-                p_k *= mix(0.65, 1.20, fib);                 // ±35% intensity
-                fibrils  = max(fibrils, fib * 0.18);
+
+                // ── Evershed outflow streaks ──────────────────────────
+                // Penumbral plasma flows radially outward at ~6 km/s.
+                // Visualise as bright fronts migrating in ang (radial)
+                // direction over time, modulated by azimuth so streaks
+                // do not form perfect concentric rings.
+                float everPhase = ang * 220.0 - u_time * 0.85 + az * 5.0;
+                float ever = pow(0.5 + 0.5 * sin(everPhase), 4.0);     // sharp bright crests
+                p_k *= mix(0.65, 1.20, fib) * (1.0 + ever * 0.18);
+                fibrils  = max(fibrils, fib * 0.18 + ever * 0.10);
+
+                // ── Wilson depression — limb-side asymmetry ───────────
+                // Sunspots sit ~500 km below the photosphere. Near the
+                // limb, the wall facing the viewer brightens (we see into
+                // the hot wall) while the far wall darkens. Project the
+                // view direction into the AR tangent frame and dot with d.
+                vec3 viewProj = normalize(vDir - dot(vDir, arSP) * arSP + vec3(1e-6));
+                float toView  = dot(d, viewProj);
+                float wilson  = (1.0 - mu) * toView * 0.42;            // strong only near limb
+                p_k *= 1.0 + wilson;
+
+                // ── Penumbral grains — bright migrating spots ─────────
+                // Sub-resolution bright features that travel inward from
+                // the outer penumbra at ~0.5–1 km/s. Implemented as a
+                // noise pattern that scrolls in -ang over time.
+                float pgrN = vnoise(vec3(az * 22.0, ang * 280.0 + u_time * 0.55, 0.0));
+                float pgr  = pow(smoothstep(0.62, 0.85, pgrN), 2.0);
+                p_k *= 1.0 + pgr * 0.30;
             }
+
+            // ── Light bridges — bright crossings within umbra ───────────
+            // Some umbrae host narrow bright bridges of plage-temperature
+            // plasma cleaving the dark core. Visible inside u_k only.
+            float lbN = vnoise(vec3(arSP * 14.0 + vec3(u_time * 0.05)));
+            float lbridge = smoothstep(0.62, 0.86, lbN) * u_k * 0.60;
+            // Bridge brightness ~ penumbra-ish; we'll add it after the
+            // umbra darkens the colour, via the umbra blackbody mix below.
+            // Subtract from u_k so the bridge region escapes the umbra mix.
+            u_k = max(0.0, u_k - lbridge * 0.85);
 
             // Facular ring — wider zone outside the penumbra, visible mainly
             // near the limb (Wilson depression of bright walls). Suppressed
@@ -2790,8 +2865,34 @@ const sunFS = /* glsl */`
             }
         }
 
+        // ── Pores — small dark magnetic concentrations in network lanes ────
+        // Pores are tiny sunspot-like features (<3500 km) without a
+        // penumbra. They cluster in intergranular lanes where flux tubes
+        // emerge. Implemented as a sparse threshold of high-frequency
+        // noise gated to lanes (laneMask) and outside any AR umbra.
+        float poreNoise = vnoise(vPosition * 80.0 + vec3(u_time * 0.005));
+        float pore = smoothstep(0.94, 0.97, poreNoise) * laneMask
+                   * (1.0 - umbra) * (1.0 - penumbra) * 0.55;
+        col *= 1.0 - pore * u_showSpots;
+
+        // ── 5-minute p-mode oscillations — global photospheric ringing ─────
+        // Acoustic standing waves trapped beneath the photosphere modulate
+        // brightness at ~5 minutes (~3.5 sim-sec). Very subtle — just enough
+        // to make the surface "ring" when zoomed in.
+        float pmode = sin(u_time * (6.2832 / 3.5));
+        col *= 1.0 + pmode * 0.025;
+
         // ── Limb darkening ─────────────────────────────────────────────────────
         col *= limb;
+
+        // ── Photosphere isolation: when chromosphere is hidden, reveal a bit ──
+        // more of the upper-altitude colouring (warmer rim, brighter spicule
+        // fringe) so the photosphere reads as a complete picture on its own.
+        if (u_photIso > 0.5) {
+            // Stronger spicule fringe + chromospheric tint at extreme limb
+            float isoRim = pow(1.0 - mu, 3.0);
+            col += vec3(1.10, 0.32, 0.10) * isoRim * 0.40;
+        }
 
         // ── HDR amplification — drives the bloom glow ─────────────────────────
         // Kept moderate so granulation contrast and sunspot detail remain visible.
@@ -3060,6 +3161,7 @@ const chromoFS = /* glsl */`
     uniform float u_flare_lon;
     uniform float u_flare_intensity;
     uniform vec4  u_arSpots[8];   // active-region positions (xyz) + signed area (w)
+    uniform float u_chromoIso;    // 1.0 when photosphere hidden — boost on-disk presence
     varying vec3 vNormal;
     varying vec3 vViewDir;
 
@@ -3184,7 +3286,21 @@ const chromoFS = /* glsl */`
                     + (network * 0.18 + plageStruct * 0.32) * diskFactor
                     - (fibDark + filDark) * diskFactor * 0.45;
         alpha *= 1.0 + pmode * 0.6;
-        alpha  = clamp(alpha, 0.0, 0.82);
+
+        // ── Isolation mode — render as a full Hα disk when photosphere off ──
+        // Without the photosphere underneath, the limb-only chromosphere reads
+        // as just a hollow halo. Boost on-disk alpha and add a flat baseline
+        // emission floor so the Hα disk shows through as a coherent shell.
+        if (u_chromoIso > 0.5) {
+            float isoFloor = (0.42 + network * 0.20 + plageStruct * 0.30
+                                  - fibDark * 0.55 - filDark * 0.70) * diskFactor;
+            alpha = max(alpha, isoFloor);
+            // Slight cooling of the disk colour to distinguish it from the
+            // photosphere look — pulls toward deeper Hα red, then plage on top.
+            col = mix(col, hAlpha * 1.15, diskFactor * 0.35);
+            col = mix(col, caKplage,      plageStruct * 0.45);
+        }
+        alpha = clamp(alpha, 0.0, u_chromoIso > 0.5 ? 0.95 : 0.82);
 
         // ══════════════════════════════════════════════════════════════════
         //  8. Colour — Hα-dominated, plage adds Ca K, dark threads cool tint
@@ -3231,10 +3347,13 @@ const chromoFS = /* glsl */`
         gl_FragColor = vec4(col, alpha);
     }
 `;
+// DoubleSide so isolation mode renders both the rim halo (back-facing geom)
+// and the disk shell (front-facing) cleanly. Alpha-rim falloff in the shader
+// keeps front-side disk emission subtle when the photosphere is also visible.
 const chromoMesh = new THREE.Mesh(
     new THREE.SphereGeometry(1.06, 48, 48),
     new THREE.ShaderMaterial({ vertexShader:glowVS, fragmentShader:chromoFS, uniforms,
-        transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.BackSide })
+        transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.DoubleSide })
 );
 scene.add(chromoMesh);
 
@@ -5761,6 +5880,16 @@ function _setLayerActive(rowId, on) {
     const row = document.getElementById(rowId);
     if (row) row.classList.toggle('on', on);
 }
+// Update isolation uniforms based on which atmospheric layers are visible.
+// Isolation = exactly one of {photosphere, chromosphere} is on. Drives:
+//   • u_photIso  → photosphere reveals upper-altitude features alone
+//   • u_chromoIso → chromosphere renders as a coherent disk shell alone
+function _refreshLayerIsolation() {
+    const phOn = sunLOD.visible;
+    const chOn = chromoMesh.visible;
+    uniforms.u_photIso.value   = (phOn && !chOn) ? 1.0 : 0.0;
+    uniforms.u_chromoIso.value = (chOn && !phOn) ? 1.0 : 0.0;
+}
 document.getElementById('tog-core')?.addEventListener('change', e => {
     coreMesh.visible = e.target.checked;
     _setLayerActive('lr-core', e.target.checked);
@@ -5776,10 +5905,12 @@ document.getElementById('tog-convective')?.addEventListener('change', e => {
 document.getElementById('tog-photosphere')?.addEventListener('change', e => {
     sunLOD.visible = e.target.checked;
     _setLayerActive('lr-photosphere', e.target.checked);
+    _refreshLayerIsolation();
 });
 document.getElementById('tog-chrom').addEventListener('change',  e => {
     chromoMesh.visible = e.target.checked;
     _setLayerActive('lr-chrom', e.target.checked);
+    _refreshLayerIsolation();
 });
 document.getElementById('tog-corona').addEventListener('change', e => {
     coronaMesh.visible = e.target.checked;
