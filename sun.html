@@ -2021,8 +2021,12 @@ const uniforms = {
     //   so the photosphere reveals its upper-altitude features (faculae,
     //   limb spicule fringe, brighter network) that the chromosphere shell
     //   would normally occlude.
+    // u_trIso:     1.0 when transition region is visible but both photosphere
+    //   and chromosphere are hidden — TR shader lifts on-disk emission so
+    //   the EUV moss + footpoint network reads as a coherent disk shell.
     u_chromoIso:            { value: 0.0 },
     u_photIso:              { value: 0.0 },
+    u_trIso:                { value: 0.0 },
 
     // Phase 4.6 — pre-baked 4-octave fbm noise atlas. Photosphere shader
     // samples this once per axis (triplanar) instead of computing fbm
@@ -3476,25 +3480,49 @@ const spiculeFS = /* glsl */`
     }
 }
 
-// ─── TRANSITION REGION (r=1.04) — thin EUV emission shell ────────────────────
-// The transition region is a <2 000 km layer where coronal temperature jumps from
-// ~10 000 K (chromosphere) to ~1 000 000 K (corona).  Brightest in He II 304 Å
-// (orange-red, ~50 000 K) and EUV 171 Å (teal, ~600 000 K).
+// ─── TRANSITION REGION (r=1.04) — bleeding-edge multi-channel EUV shell ──────
 //
-// Rendered as a very steep rim-brightened shell — the thinness (pow(rim,5))
-// produces a sharp orange ring at the solar limb, layered inside the chromosphere.
-// During flares this shell flashes dramatically as the EUV irradiance spikes.
+// The transition region is the <2 000 km layer where coronal temperature
+// jumps from ~10 000 K (chromosphere) to ~1 000 000 K (corona). It's
+// dominated in EUV imaging by:
+//
+//   • He II 304 Å  (50 kK)   — orange-red base layer, broad chromospheric
+//     interface, the dominant TR emission in disk-integrated SDO imagery.
+//   • C IV 1600 Å (100 kK)   — pinkish UV continuum, lights up flare
+//     ribbons (chromospheric footpoints of reconnecting loops).
+//   • Fe IX 171 Å (700 kK)   — teal-green hot moss / footpoint network
+//     at the chromospheric anchors of hot coronal loops.
+//
+// Bleeding-edge features (no longer just a thin orange ring):
+//
+//   • EUV moss — bright reticulated mottle at supergranule boundaries,
+//     dramatically intensified in plage regions sampled from u_arSpots.
+//     This is the "spongy" footpoint-network pattern from AIA 171/195.
+//   • Filament shadows — dark sinuous absorption threads against the bright
+//     TR background, the on-disk view of prominences (cool dense Hα plasma
+//     blocking EUV emission from below).
+//   • Plage moss intensification — Worley-cell mottle in 8° halos around
+//     each AR position; reads as the bright ribbons + footpoint nests
+//     observers see in 304 Å movies.
+//   • p-mode coupling — 3-min and 5-min sine modulation matches IRIS
+//     observations of TR oscillations.
+//   • Isolation mode — when the TR is the only atmospheric layer visible,
+//     boost on-disk emission so the shell renders as a coherent moss-
+//     speckled disk instead of a faint rim halo.
 const trFS = /* glsl */`
     precision highp float;
     uniform float u_time;
     uniform float u_activity;
-    uniform float u_f107_norm;       // F10.7 [0-1]
-    uniform float u_electron_norm;   // GOES electron flux [0-1]
-    uniform float u_kp_norm;         // Kp/9 [0-1]
+    uniform float u_f107_norm;
+    uniform float u_electron_norm;
+    uniform float u_kp_norm;
     uniform float u_flare_t;
     uniform float u_flare_lat;
     uniform float u_flare_lon;
     uniform float u_flare_intensity;
+    uniform float u_trIso;            // isolation lift when only TR is visible
+    uniform vec4  u_arSpots[8];       // active-region positions (xyz) + signed area (w)
+    uniform int   u_arSpotCount;
     varying vec3 vNormal;
     varying vec3 vViewDir;
 
@@ -3504,6 +3532,21 @@ const trFS = /* glsl */`
         return mix(mix(mix(h(i),h(i+vec3(1,0,0)),u.x),mix(h(i+vec3(0,1,0)),h(i+vec3(1,1,0)),u.x),u.y),
                    mix(mix(h(i+vec3(0,0,1)),h(i+vec3(1,0,1)),u.x),mix(h(i+vec3(0,1,1)),h(i+vec3(1,1,1)),u.x),u.y),u.z);
     }
+    // Cellular Worley-ish: difference-of-noise gives mottle blobs with
+    // sharp lanes between them — the canonical EUV-moss texture.
+    float worley(vec3 p) {
+        float a = vn(p);
+        float b = vn(p + vec3(0.31, 0.17, 0.62));
+        return abs(a - b);
+    }
+    // Domain-warped FBM — fluid-looking direction-coherent texture used
+    // to grow filament threads along an emergent direction field.
+    float warpedFBM(vec3 p, float t) {
+        vec3 q = vec3(vn(p + vec3(0.0, 0.0, t * 0.05)),
+                      vn(p + vec3(5.2, 1.3, t * 0.04)),
+                      vn(p + vec3(2.8, 6.7, t * 0.03)));
+        return vn(p + q * 1.8);
+    }
 
     void main() {
         vec3  n3d = normalize(vNormal);
@@ -3511,58 +3554,155 @@ const trFS = /* glsl */`
         float mu  = max(dot(n3d, vd), 0.0);
         float rim = 1.0 - mu;
 
-        // Sharp ring — TR is ~2 Mm thick (~0.003 R☉), so very steep falloff
+        float lat_t = asin(clamp(n3d.y, -1.0, 1.0));
+        float lon_t = atan(n3d.x, n3d.z);
+
+        // ══════════════════════════════════════════════════════════════════
+        //  1. Network footpoints — supergranule-edge bright network
+        //  Cellular noise at supergranule scale (~30 Mm). Bright cell
+        //  edges (network lanes), dark interiors (internetwork). The TR
+        //  is brightest where chromospheric Ca II network channels concentrate.
+        // ══════════════════════════════════════════════════════════════════
+        float sg     = vn(n3d * 7.0 + vec3(u_time * 0.010));
+        float mottle = worley(n3d * 14.0 + vec3(u_time * 0.018));
+        float network = smoothstep(0.32, 0.55, mottle);
+        float intern  = 1.0 - smoothstep(0.10, 0.30, mottle);
+
+        // ══════════════════════════════════════════════════════════════════
+        //  2. EUV moss — fine reticulated mottle at hot-loop footpoints
+        //  Real moss is the chromospheric footprint of hot coronal loops,
+        //  visible in 171 Å as a dense bright "spongy" pattern. We use
+        //  multi-octave Worley + threshold to get the mottled signature.
+        // ══════════════════════════════════════════════════════════════════
+        float moss1 = worley(n3d * 26.0 + vec3(u_time * 0.020));
+        float moss2 = worley(n3d * 48.0 - vec3(u_time * 0.014, 0.0, 1.7));
+        float mossPattern = smoothstep(0.18, 0.34, moss1) * smoothstep(0.10, 0.28, moss2);
+        // Intensify moss in network lanes (where loops anchor)
+        mossPattern *= 0.45 + network * 0.85;
+
+        // ══════════════════════════════════════════════════════════════════
+        //  3. Plage moss intensification — bright halos around active regions
+        //  Sample u_arSpots and add a moss-density boost within ~8° angular
+        //  distance of each AR. Reads as the bright EUV plage/ribbon network
+        //  observers see in 304/195/171 Å under active regions.
+        // ══════════════════════════════════════════════════════════════════
+        float plageGate = 0.0;
+        for (int i = 0; i < 8; i++) {
+            if (i >= u_arSpotCount) break;
+            vec4 ar = u_arSpots[i];
+            if (length(ar.xyz) < 0.5) continue;
+            float arDot = dot(n3d, normalize(ar.xyz));
+            float arAng = acos(clamp(arDot, -1.0, 1.0));
+            float intensity = clamp(abs(ar.w), 0.0, 1.0);
+            // Halo width broadens with AR area; capped at ~10°
+            float halo = exp(-arAng * arAng / (0.014 + intensity * 0.026));
+            plageGate += halo * (0.55 + intensity * 0.85);
+        }
+        plageGate = clamp(plageGate, 0.0, 1.6);
+        float plageMoss = mossPattern * (1.0 + plageGate * 1.8);
+
+        // ══════════════════════════════════════════════════════════════════
+        //  4. Filament shadows — dark sinuous absorption threads on disk
+        //  Cool dense Hα filaments lying above the chromosphere block EUV
+        //  emission from below, producing dark sinuous threads against the
+        //  bright TR background. Use a domain-warped low-freq pattern with
+        //  sharp threshold for elongated thread structure.
+        // ══════════════════════════════════════════════════════════════════
+        vec3 dirField = vec3(vn(n3d * 4.0), vn(n3d * 4.0 + 11.0), vn(n3d * 4.0 + 23.0));
+        dirField = normalize(dirField - 0.5 + 0.001);
+        float fil1 = vn(n3d * 2.4 + dirField * 3.5 + vec3(u_time * 0.005, 0.0, 0.0));
+        float fil2 = vn(n3d * 5.6 + vec3(0.0, u_time * 0.008, 0.0));
+        float filMask = smoothstep(0.66, 0.74, fil1) * smoothstep(0.40, 0.62, fil2);
+        // Filaments only on disk (off-limb they are prominences, handled separately)
+        float filDark = filMask * (1.0 - rim * 1.5) * 0.65;
+
+        // ══════════════════════════════════════════════════════════════════
+        //  5. p-mode oscillations — 3-min and 5-min TR ringing
+        // ══════════════════════════════════════════════════════════════════
+        float pmodePhase = vn(n3d * 1.8) * 6.2832;
+        float pmode3 = sin(u_time * (6.2832 / 2.0) + pmodePhase) * 0.05;
+        float pmode5 = sin(u_time * (6.2832 / 3.5) + pmodePhase * 1.7) * 0.08;
+        float pmode  = pmode3 + pmode5;
+
+        // ══════════════════════════════════════════════════════════════════
+        //  6. Compose alpha — sharp rim ring + on-disk moss + flares
+        // ══════════════════════════════════════════════════════════════════
+        // Sharp rim ring — TR is ~2 Mm thick (~0.003 R☉)
         float baseAlpha = pow(rim, 5.0) * (0.60 + u_activity * 0.30);
 
-        // Texture: bright patches at coronal loop footpoints (flux tube heating)
-        float fpPatch = smoothstep(0.62, 0.80, vn(n3d * 15.0 + vec3(u_time * 0.016)));
-        baseAlpha  += fpPatch * pow(rim, 2.8) * 0.24 * u_activity;
+        // On-disk moss + plage contribution (rim-attenuated)
+        float diskFactor = pow(1.0 - rim, 2.0);
+        float diskAlpha  = (mossPattern * 0.18 + plageMoss * 0.32 + network * 0.10) * diskFactor;
 
-        // ── Flare EUV flash ───────────────────────────────────────────────────
-        // X-ray + EUV irradiance spikes within seconds of flare onset,
-        // rapidly heating the transition region across the visible disk.
-        float lat_t  = asin(clamp(n3d.y, -1.0, 1.0));
-        // lon = atan(x, z) so heliographic comparisons with u_flare_lon work.
-        float lon_t  = atan(n3d.x, n3d.z);
+        // Flare brightening
         float cos_df = sin(lat_t)*sin(u_flare_lat) + cos(lat_t)*cos(u_flare_lat)*cos(lon_t - u_flare_lon);
         float df_t   = acos(clamp(cos_df, -1.0, 1.0));
-        // Localized brightening near flare site (fast impulsive phase)
         float localFl  = exp(-df_t*df_t / 0.055) * exp(-u_flare_t / 30.0) * u_flare_intensity;
-        // Global EUV irradiance increase (slower gradual phase — lights up whole TR ring)
         float globalFl = exp(-u_flare_t / 60.0) * u_flare_intensity * 0.55;
-        float alpha    = clamp(baseAlpha + localFl * 0.80 + globalFl * pow(rim, 3.5), 0.0, 0.88);
 
-        // ── Colour ────────────────────────────────────────────────────────────
-        // Quiescent: AIA 304 Å He II orange-red (50 000 K)
-        // With activity: blends toward AIA 171 Å teal-gold (600 000 K loop footpoints)
-        // Flare: flashes white-UV at impulsive phase, then cools back
-        vec3 trOrange = vec3(1.00, 0.42, 0.10);   // He II 304 Å
-        vec3 tr171    = vec3(0.72, 0.90, 0.55);   // AIA 171 Å teal-green footpoints
-        vec3 trUV     = vec3(1.00, 0.88, 0.70);   // impulsive EUV flash
+        float alpha = baseAlpha
+                    + diskAlpha
+                    - filDark * 0.45 * diskFactor
+                    + localFl * 0.80
+                    + globalFl * pow(rim, 3.5);
+        alpha *= 1.0 + pmode * 0.5;
 
-        vec3 col = mix(trOrange, tr171, u_activity * 0.35 + pow(rim, 4.0) * 0.20);
+        // ── Isolation lift: when only TR is visible, render full disk shell
+        if (u_trIso > 0.5) {
+            float isoFloor = (0.42 + mossPattern * 0.20 + plageMoss * 0.30
+                                  - filDark * 0.50) * diskFactor;
+            alpha = max(alpha, isoFloor);
+        }
+        alpha = clamp(alpha, 0.0, u_trIso > 0.5 ? 0.95 : 0.90);
+
+        // ══════════════════════════════════════════════════════════════════
+        //  7. Multi-channel composite color
+        //
+        //   He II 304 Å (50 kK)   — orange-red base
+        //   C IV 1600 Å (100 kK)  — warm pink, flare ribbons
+        //   Fe IX 171 Å (700 kK)  — teal-green hot moss footpoints
+        //   Impulsive flash       — bright UV-white at flare onset
+        // ══════════════════════════════════════════════════════════════════
+        vec3 he304     = vec3(1.00, 0.42, 0.10);   // He II 304 Å
+        vec3 civ1600   = vec3(1.00, 0.62, 0.55);   // C IV 1600 Å
+        vec3 fe171     = vec3(0.72, 0.95, 0.55);   // Fe IX 171 Å hot moss
+        vec3 trUV      = vec3(1.00, 0.88, 0.70);   // impulsive EUV flash
+        vec3 filCool   = vec3(0.40, 0.10, 0.04);   // filament absorption
+
+        // Base 304 Å warmed by activity → 171 Å hot moss
+        vec3 col = mix(he304, fe171, u_activity * 0.35 + pow(rim, 4.0) * 0.20);
+        // Plage moss adds 171 Å + 1600 Å mix where ARs anchor hot loops
+        col = mix(col, fe171, plageMoss * 0.45 * diskFactor);
+        col = mix(col, civ1600, network * 0.18 * diskFactor);
+        // Filament shadows pull color toward dark cool absorption
+        col = mix(col, filCool, filDark * 0.7);
+        // Flare flash → impulsive UV-white
         col = mix(col, trUV, (localFl + globalFl * 0.5) * 0.80);
+        // p-mode shimmer
+        col *= 1.0 + pmode * 0.10;
 
-        // ── F10.7 solar cycle: hotter TR at solar maximum ─────────────────────
-        // More loop footpoints, stronger He II 304 Å emission ring
-        alpha = clamp(alpha * (1.0 + u_f107_norm * 0.45), 0.0, 0.90);
-        col   = mix(col, tr171 * 1.2, u_f107_norm * 0.20);
+        // ── F10.7 solar cycle: hotter, more emissive TR at solar maximum
+        alpha = clamp(alpha * (1.0 + u_f107_norm * 0.45), 0.0, u_trIso > 0.5 ? 0.97 : 0.92);
+        col   = mix(col, fe171 * 1.2, u_f107_norm * 0.20);
 
-        // ── Electron flux: EUV / soft X-ray brightening from SEP events ────────
-        // Penetrating energetic electrons produce intense EUV at loop footpoints
+        // ── Energetic electron flux: EUV brightening at footpoints
         col  += vec3(0.60, 0.88, 1.20) * u_electron_norm * pow(rim, 3.0) * 0.35;
-        alpha = clamp(alpha + u_electron_norm * pow(rim, 3.5) * 0.12, 0.0, 0.90);
+        alpha = clamp(alpha + u_electron_norm * pow(rim, 3.5) * 0.12, 0.0, u_trIso > 0.5 ? 0.97 : 0.92);
 
-        // ── Kp geomagnetic activity: broader TR ring during storms ─────────────
-        alpha = clamp(alpha * (1.0 + u_kp_norm * 0.22), 0.0, 0.90);
+        // ── Kp storm: broader, brighter TR ring during geomagnetic activity
+        alpha = clamp(alpha * (1.0 + u_kp_norm * 0.22), 0.0, u_trIso > 0.5 ? 0.97 : 0.92);
 
         gl_FragColor = vec4(col, alpha);
     }
 `;
+// DoubleSide so isolation mode renders both rim halo (back-facing geom)
+// and the disk shell (front-facing) cleanly. Rim-localised alpha falloff
+// in the shader keeps the front-side contribution subtle when other
+// atmospheric layers are co-rendered.
 const trMesh = new THREE.Mesh(
     new THREE.SphereGeometry(1.04, 48, 48),
     new THREE.ShaderMaterial({ vertexShader: glowVS, fragmentShader: trFS, uniforms,
-        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.BackSide })
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide })
 );
 scene.add(trMesh);
 
@@ -6456,14 +6596,19 @@ function _setLayerActive(rowId, on) {
     if (row) row.classList.toggle('on', on);
 }
 // Update isolation uniforms based on which atmospheric layers are visible.
-// Isolation = exactly one of {photosphere, chromosphere} is on. Drives:
-//   • u_photIso  → photosphere reveals upper-altitude features alone
-//   • u_chromoIso → chromosphere renders as a coherent disk shell alone
+//   • u_photIso  → photosphere alone (no chromosphere): reveals upper-
+//     altitude features that chromosphere shell would normally occlude.
+//   • u_chromoIso → chromosphere alone (no photosphere): renders as a
+//     coherent Hα disk shell instead of a faint rim halo.
+//   • u_trIso    → TR alone (no photosphere, no chromosphere): lifts on-
+//     disk EUV-moss + footpoint emission so it reads as a coherent shell.
 function _refreshLayerIsolation() {
     const phOn = sunLOD.visible;
     const chOn = chromoMesh.visible;
+    const trOn = trMesh.visible;
     uniforms.u_photIso.value   = (phOn && !chOn) ? 1.0 : 0.0;
     uniforms.u_chromoIso.value = (chOn && !phOn) ? 1.0 : 0.0;
+    uniforms.u_trIso.value     = (trOn && !phOn && !chOn) ? 1.0 : 0.0;
 }
 document.getElementById('tog-core')?.addEventListener('change', e => {
     coreMesh.visible = e.target.checked;
@@ -6496,7 +6641,11 @@ document.getElementById('tog-nanoflares')?.addEventListener('change', e => {
     if (_nanoflareSystem?.points) _nanoflareSystem.points.visible = e.target.checked;
 });
 document.getElementById('tog-prom').addEventListener('change',   e => { if (promGroup)  promGroup.visible  = e.target.checked; });
-document.getElementById('tog-tr').addEventListener('change',     e => { trMesh.visible = e.target.checked; });
+document.getElementById('tog-tr').addEventListener('change', e => {
+    trMesh.visible = e.target.checked;
+    _setLayerActive('lr-tr', e.target.checked);
+    _refreshLayerIsolation();
+});
 document.getElementById('tog-fieldlines').addEventListener('change', e => { if (fieldLineGroup) fieldLineGroup.visible = e.target.checked; });
 document.getElementById('sl-bline-density').addEventListener('input', function() {
     document.getElementById('disp-bline-density').textContent = this.value + '%';
