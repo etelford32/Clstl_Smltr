@@ -48,6 +48,12 @@ JSONLD_RE = re.compile(
 IMG_RE = re.compile(r"<img\b([^>]*)>", re.I)
 ALT_RE = re.compile(r'\balt=["\'](.*?)["\']', re.I)
 A_HREF_RE = re.compile(r'<a\b[^>]*\bhref=["\']([^"\']+)["\']', re.I)
+IMPORTMAP_RE = re.compile(
+    r'<script\s+type=["\']importmap["\']\s*>', re.I
+)
+MODULEPRELOAD_RE = re.compile(
+    r'<link\s+[^>]*\brel=["\']modulepreload["\']', re.I
+)
 
 
 def strip_html(s: str) -> str:
@@ -104,6 +110,19 @@ def audit_file(path: Path) -> dict:
         if h.startswith(("http://", "https://")) and SITE not in h
     )
 
+    # Importmap / modulepreload ordering. A modulepreload (or any module
+    # load) that appears before the <script type="importmap"> invalidates
+    # the import map per the HTML spec, breaking bare specifiers like
+    # `import 'three'`. Record both positions and a verdict.
+    imap_m = IMPORTMAP_RE.search(html)
+    mpre_m = MODULEPRELOAD_RE.search(html)
+    importmap_pos = imap_m.start() if imap_m else -1
+    modulepreload_pos = mpre_m.start() if mpre_m else -1
+    if importmap_pos >= 0 and modulepreload_pos >= 0:
+        importmap_order_ok = modulepreload_pos > importmap_pos
+    else:
+        importmap_order_ok = True  # nothing to check
+
     return {
         "title": title,
         "title_len": len(title),
@@ -122,6 +141,9 @@ def audit_file(path: Path) -> dict:
         "links_internal": internal,
         "links_external": external,
         "size_kb": round(len(html) / 1024, 1),
+        "importmap_pos": importmap_pos,
+        "modulepreload_pos": modulepreload_pos,
+        "importmap_order_ok": importmap_order_ok,
     }
 
 
@@ -185,6 +207,12 @@ def main() -> None:
             )
         if a["og_image"] and not a["og_image"].startswith(("http://", "https://")):
             issues.append(f"  relative og:image: {name} -> {a['og_image']}")
+        if not a["importmap_order_ok"]:
+            issues.append(
+                f"  modulepreload before importmap: {name} "
+                f"(modulepreload@{a['modulepreload_pos']} < importmap@{a['importmap_pos']}) — "
+                f"will invalidate the importmap and break bare specifiers like `import 'three'`"
+            )
 
     # Sitemap entries that don't resolve to a file
     print(f"\n# Sitemap URLs not resolving to a local HTML file:")

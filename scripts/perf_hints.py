@@ -6,10 +6,18 @@ Adds (when missing):
 - <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 - <link rel="modulepreload" href="<three.module.js>" crossorigin>
 
-Insertion point: immediately after the <meta charset=...> line so the
-hints are processed as early as possible during HTML parsing. The block
-is fenced with HTML comments so re-running the script replaces in place
-rather than appending.
+CRITICAL placement: the block goes IMMEDIATELY AFTER the
+<script type="importmap"> closing tag, not earlier in <head>. A
+modulepreload counts as a module load; per the HTML spec, once any
+module has started loading the import map is invalidated and bare
+specifiers like `import 'three'` fail with "was not remapped to
+anything". Putting the modulepreload after the importmap keeps the
+specifier-resolution working.
+
+The block is fenced with HTML comments so re-running the script
+replaces in place rather than appending. If an old version of this
+script placed the block earlier in <head>, this version REMOVES that
+old block before inserting the new one in the correct location.
 """
 from __future__ import annotations
 import re
@@ -20,12 +28,15 @@ ROOT = Path(__file__).resolve().parent.parent
 THREE_MODULE_URL_RE = re.compile(
     r'(https://cdn\.jsdelivr\.net/npm/three@[^"\']+/build/three\.module\.js)'
 )
-META_CHARSET_RE = re.compile(r'<meta\s+charset=["\'][^"\']+["\']\s*/?>', re.I)
+IMPORTMAP_RE = re.compile(
+    r'<script\s+type=["\']importmap["\']\s*>.*?</script>', re.S | re.I
+)
 
 BLOCK_START = "<!-- perf-hints:start -->"
 BLOCK_END = "<!-- perf-hints:end -->"
 EXISTING_BLOCK_RE = re.compile(
-    re.escape(BLOCK_START) + r".*?" + re.escape(BLOCK_END), re.S
+    r"\n?" + re.escape(BLOCK_START) + r".*?" + re.escape(BLOCK_END) + r"\n?",
+    re.S,
 )
 
 
@@ -44,19 +55,21 @@ def process(path: Path) -> bool:
     m = THREE_MODULE_URL_RE.search(html)
     if not m:
         return False
-    block = hints_block(m.group(1))
+    three_url = m.group(1)
 
-    if EXISTING_BLOCK_RE.search(html):
-        new_html = EXISTING_BLOCK_RE.sub(block, html)
-    else:
-        meta = META_CHARSET_RE.search(html)
-        if not meta:
-            return False
-        insert_at = meta.end()
-        prefix = html[:insert_at]
-        if not prefix.endswith("\n"):
-            prefix += "\n"
-        new_html = prefix + block + "\n" + html[insert_at:]
+    # Always start by stripping any prior block (it may be in the wrong
+    # position from a previous version of this script).
+    html_clean = EXISTING_BLOCK_RE.sub("", html)
+
+    # Locate the importmap. Without one, bare-specifier modules can't
+    # resolve and modulepreload is the wrong tool — skip.
+    imap = IMPORTMAP_RE.search(html_clean)
+    if not imap:
+        return False
+
+    block = hints_block(three_url)
+    insert_at = imap.end()
+    new_html = html_clean[:insert_at] + "\n" + block + html_clean[insert_at:]
 
     if new_html == html:
         return False
