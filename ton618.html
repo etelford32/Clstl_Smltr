@@ -495,6 +495,86 @@ select {
         </div>
 
         <div>
+            <div class="sec-title">Lyman-α blob (host halo)</div>
+            <div class="toggle-row">
+                <input type="checkbox" id="showLab">
+                <label for="showLab">Render Lyα halo around BH (<i>Phase 2.1</i>)</label>
+            </div>
+            <div class="ctrl">
+                <label>Powering mechanism</label>
+                <select id="labMechanism">
+                    <option value="0">Gravitational cooling (j ∝ ρ²)</option>
+                    <option value="1" selected>AGN photoionization (j ∝ ρ Φ/r²)</option>
+                    <option value="2">Shock heating (filament edges)</option>
+                </select>
+            </div>
+            <div class="ctrl">
+                <label>Outer radius r<sub>LAB</sub> [kpc]</label>
+                <input type="range" id="s-lab-r" min="30" max="800" step="5" value="460">
+                <div class="val" id="v-lab-r">460 kpc  (Slug-class)</div>
+            </div>
+            <div class="ctrl">
+                <label>Inner cavity r<sub>inner</sub> [kpc]</label>
+                <input type="range" id="s-lab-rin" min="0.5" max="50" step="0.5" value="8">
+                <div class="val" id="v-lab-rin">8.0 kpc</div>
+            </div>
+            <div class="ctrl">
+                <label>Density slope α  (ρ ∝ r<sup>−α</sup>)</label>
+                <input type="range" id="s-lab-alpha" min="0.5" max="3" step="0.05" value="1.8">
+                <div class="val" id="v-lab-alpha">1.80</div>
+            </div>
+            <div class="ctrl">
+                <label>Clumping amplitude</label>
+                <input type="range" id="s-lab-clump" min="0" max="1" step="0.02" value="0.55">
+                <div class="val" id="v-lab-clump">0.55</div>
+            </div>
+            <div class="ctrl">
+                <label>Filament anisotropy</label>
+                <input type="range" id="s-lab-fil" min="0" max="1" step="0.02" value="0.45">
+                <div class="val" id="v-lab-fil">0.45</div>
+            </div>
+            <div class="ctrl">
+                <label>Brightness</label>
+                <input type="range" id="s-lab-i" min="0" max="4" step="0.05" value="0.85">
+                <div class="val" id="v-lab-i">0.85×</div>
+            </div>
+            <div class="sep" style="margin:6px 0"></div>
+            <div class="ctrl">
+                <label>Redshift z  (line center λ<sub>obs</sub> = 121.567(1+z) nm)</label>
+                <input type="range" id="s-lab-z" min="0" max="6" step="0.01" value="2.219">
+                <div class="val" id="v-lab-z">z = 2.219  (TON 618;  λ<sub>obs</sub> ≈ 391 nm)</div>
+            </div>
+            <div class="ctrl">
+                <label>Bulk outflow v<sub>out</sub> at r<sub>LAB</sub> [km/s]</label>
+                <input type="range" id="s-lab-vout" min="0" max="1500" step="10" value="600">
+                <div class="val" id="v-lab-vout">600 km/s  (typical AGN-driven)</div>
+            </div>
+            <div class="ctrl">
+                <label>Outflow profile β  (v(r) = v<sub>out</sub>(r/r<sub>LAB</sub>)<sup>β</sup>)</label>
+                <input type="range" id="s-lab-beta" min="0" max="1.5" step="0.05" value="0.5">
+                <div class="val" id="v-lab-beta">0.50  (mild acceleration)</div>
+            </div>
+            <div class="ctrl">
+                <label>log N<sub>HI</sub>  (central column [cm⁻²])</label>
+                <input type="range" id="s-lab-nhi" min="18" max="22.5" step="0.1" value="20.5">
+                <div class="val" id="v-lab-nhi">20.5  (DLA-class)</div>
+            </div>
+            <div class="ctrl">
+                <label>Neufeld resonance suppression</label>
+                <input type="range" id="s-lab-neufeld" min="0" max="1" step="0.02" value="0.7">
+                <div class="val" id="v-lab-neufeld">0.70</div>
+            </div>
+            <div class="note">Per-cell Lyα peak Doppler-shifted by the local
+                radial outflow (homologous flow → halo redshifted relative to
+                the line center). Neufeld escape probability
+                P<sub>esc</sub> = 1 / (1 + 1.8(aτ₀)<sup>1/3</sup>) suppresses
+                emission in dense cores, where photons random-walk in
+                frequency before diffusing out. (1+z)⁻⁴ surface-brightness
+                dimming applied. Reference: Neufeld 1990, Bonilha 1979,
+                Cantalupo et al. 2014.</div>
+        </div>
+
+        <div>
             <div class="sec-title">Overlays</div>
             <div class="toggle-row">
                 <input type="checkbox" id="showGrid">
@@ -735,6 +815,64 @@ select {
     bindRange('s-lindblad-rp', 'v-lindblad-rp',
         (v) => `${v.toFixed(1)} M`, (v) => app.setLindbladRp(v));
 
+    // ── Lyman-α blob (Phase 2.1) ─────────────────────────────────
+    $('showLab').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showLab) app.toggleLab();
+    });
+    $('labMechanism').addEventListener('change', (e) => app.setLabMechanism(+e.target.value));
+    bindRange('s-lab-r', 'v-lab-r',
+        (v) => v >= 350 && v <= 500 ? `${(v|0)} kpc  (Slug-class)`
+            : v < 150 ? `${(v|0)} kpc  (compact LAB)`
+            : v > 600 ? `${(v|0)} kpc  (super-Slug)`
+            : `${(v|0)} kpc`,
+        (v) => app.setLabRadiusKpc(v));
+    bindRange('s-lab-rin', 'v-lab-rin',
+        (v) => `${v.toFixed(1)} kpc`, (v) => app.setLabInnerKpc(v));
+    bindRange('s-lab-alpha', 'v-lab-alpha',
+        (v) => v.toFixed(2), (v) => app.setLabAlpha(v));
+    bindRange('s-lab-clump', 'v-lab-clump',
+        (v) => v.toFixed(2), (v) => app.setLabClump(v));
+    bindRange('s-lab-fil', 'v-lab-fil',
+        (v) => v.toFixed(2), (v) => app.setLabFilament(v));
+    bindRange('s-lab-i', 'v-lab-i',
+        (v) => `${v.toFixed(2)}×`, (v) => app.setLabIntensity(v));
+    bindRange('s-lab-z', 'v-lab-z',
+        (v) => {
+            const lam = (121.567 * (1 + v)).toFixed(0);
+            const tag = Math.abs(v - 2.219) < 0.05 ? 'TON 618' :
+                        v < 0.5  ? 'low-z'   :
+                        v < 1.5  ? 'cosmic noon precursor' :
+                        v < 3.5  ? 'cosmic noon' :
+                        v < 5.5  ? 'reionization tail' :
+                                   'reionization';
+            return `z = ${v.toFixed(3)}  (${tag};  λ<sub>obs</sub> ≈ ${lam} nm)`;
+        },
+        (v) => app.setLabZ(v));
+    bindRange('s-lab-vout', 'v-lab-vout',
+        (v) => v < 100 ? `${(v|0)} km/s  (quiescent)` :
+               v < 400 ? `${(v|0)} km/s  (warm outflow)` :
+               v < 900 ? `${(v|0)} km/s  (typical AGN-driven)` :
+                         `${(v|0)} km/s  (super-wind)`,
+        (v) => app.setLabOutflow(v));
+    bindRange('s-lab-beta', 'v-lab-beta',
+        (v) => v < 0.2 ? `${v.toFixed(2)}  (uniform)` :
+               v < 0.7 ? `${v.toFixed(2)}  (mild acceleration)` :
+                         `${v.toFixed(2)}  (steep accel.)`,
+        (v) => app.setLabOutflowBeta(v));
+    bindRange('s-lab-nhi', 'v-lab-nhi',
+        (v) => v < 19  ? `${v.toFixed(1)}  (sub-LLS)` :
+               v < 20  ? `${v.toFixed(1)}  (LLS-class)` :
+               v < 20.3 ? `${v.toFixed(1)}  (sub-DLA)` :
+               v < 21.5 ? `${v.toFixed(1)}  (DLA-class)` :
+                          `${v.toFixed(1)}  (proximate-DLA / molecular)`,
+        (v) => app.setLabLogNHI(v));
+    bindRange('s-lab-neufeld', 'v-lab-neufeld',
+        (v) => v < 0.05 ? `${v.toFixed(2)}  (off — pure emission)` :
+               v < 0.4  ? `${v.toFixed(2)}  (mild)` :
+               v < 0.8  ? `${v.toFixed(2)}  (full)` :
+                          `${v.toFixed(2)}  (extreme)`,
+        (v) => app.setLabNeufeld(v));
+
     // ── Disk warp (B5) ───────────────────────────────────────────
     $('diskWarp').addEventListener('change', (e) => {
         if (e.target.checked !== app.state.diskWarpOn) app.toggleWarp();
@@ -796,7 +934,7 @@ select {
         inspector.style.display = 'block';
         const bRel = r.b_impact / r.b_crit;
         const fmtPct = (x) => Math.abs(x) < 1e-6 ? '0.000 %' : x.toExponential(3) + ' %';
-        inspBody.textContent = [
+        const lines = [
             `pixel (${r._click_x}, ${r._click_y})   spin a = ${(r.spin ?? 0).toFixed(3)}`,
             `term       : ${r.term.toUpperCase()}`,
             `verdict    : ${r.verdict}`,
@@ -811,7 +949,19 @@ select {
             `E   drift  : ${fmtPct(r.E_drift_pct)}    (Killing ∂_t)`,
             `L_z drift  : ${fmtPct(r.L_drift_pct)}    (Killing ∂_φ)`,
             `Q   drift  : ${fmtPct(r.Q_drift_pct ?? 0)}    (Carter)`,
-        ].join('\n');
+        ];
+        if (r.lab_polarization_fraction != null) {
+            lines.push(
+                `─── LAB sightline (Lyα halo) ────────────────`,
+                `λ_obs       : ${r.lab_lambda_obs_nm.toFixed(2)} nm`,
+                `R_half      : ${r.lab_R_half_kpc.toFixed(2)} kpc`,
+                `τ₀(central) : ${r.lab_tau0_central.toExponential(2)}`,
+                `P_esc(cen)  : ${r.lab_P_esc_central.toFixed(3)}`,
+                `f_pol       : ${(r.lab_polarization_fraction * 100).toFixed(2)} %  (max 15 %, tangential)`,
+                `PA_pol      : ${r.lab_polarization_PA_deg.toFixed(1)}°  (perpendicular to projected radial)`,
+            );
+        }
+        inspBody.textContent = lines.join('\n');
     });
 
     const flyToggle = $('flyMode');

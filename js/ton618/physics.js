@@ -350,6 +350,121 @@ export function hawkingTemperatureK() {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 2.1 — Lyman-α blob diagnostics.
+// ---------------------------------------------------------------------------
+// Compute observable quantities from the user's LAB parameters so the HUD
+// can report L_Lyα, half-light radius, central optical depth, escape
+// fraction, and the asymptotic Doppler peak displacement. None of this
+// runs in the shader; the shader does the actual rendering, this just
+// lets the user see what they've dialed in.
+//
+// References:
+//   Cantalupo et al. 2014       — Slug nebula discovery / luminosity
+//   Steidel et al. 2000         — Lyman-α blobs at z ~ 3
+//   Neufeld 1990, Bonilha 1979  — resonance-line escape / peak displacement
+//   Cantalupo et al. 2008       — fluorescent Lyα in cooling halos
+
+const LAB_VOIGT_a0    = 4.7e-4;     // Voigt parameter at T = 10⁴ K
+const LAB_LYA_REST_NM = 121.567;    // Lyα rest-frame wavelength
+
+// Half-light radius for the LAB density profile ρ ∝ (r_in/r)^α (with the
+// soft outer cutoff already baked in). Cooling-mechanism luminosity goes
+// as ρ², photoionization as ρ/r², shock as ρ²·|∇ρ|. For HUD purposes we
+// use a closed-form for cooling (it dominates when fully ionized) and
+// numerically integrate to find the half-light radius.
+function _labLumDensity(r, params) {
+    const { rInner, rOuter, alpha, mechanism } = params;
+    if (r < rInner || r > rOuter * 1.2) return 0;
+    const rho = Math.pow(rInner / Math.max(r, 1e-3), alpha);
+    const taper = 1 - Math.max(0, Math.min(1, (r - rOuter * 0.7) / (rOuter * 0.3)));
+    const rhoT = rho * taper;
+    if (mechanism === 1) return rhoT * (rInner * rInner) / Math.max(r * r, 1);   // photoionization
+    if (mechanism === 2) return rhoT * rhoT * 0.6;                                // shock proxy
+    return rhoT * rhoT;                                                            // cooling
+}
+
+export function labDiagnostics(labState) {
+    const {
+        intensity, radiusKpc, innerKpc, alpha, clump, filament,
+        mechanism, z, outflowKms, outflowBeta,
+        logNHI, tempK, neufeld,
+    } = labState;
+
+    // Observer-frame line center (Doppler-shifted by cosmology).
+    const lambda_obs_nm = LAB_LYA_REST_NM * (1 + z);
+
+    // Voigt parameter at user gas temperature.
+    const a_voigt = LAB_VOIGT_a0 * Math.sqrt(1e4 / Math.max(tempK, 1e3));
+    // Line-center optical depth from central column density (σ₀ ≈ 5.9e-14 cm² · √(10⁴/T)).
+    const sigma_0  = 5.9e-14 * Math.sqrt(1e4 / Math.max(tempK, 1e3));
+    const N_HI_cen = Math.pow(10, logNHI);
+    const tau0_cen = N_HI_cen * sigma_0;
+    // Neufeld escape probability at the central column.
+    const aTau3       = Math.pow(a_voigt * tau0_cen, 1 / 3);
+    const P_esc_pure  = 1 / (1 + 1.8 * aTau3);
+    const P_esc_cen   = 1 + (P_esc_pure - 1) * neufeld;     // user-blended
+    // Neufeld peak Doppler displacement Δν_peak ≈ 0.92 (a τ₀)^{1/3} Doppler widths.
+    // Convert to km/s: Δv = c · Δν/ν₀ · √(2 k_B T / m_p) / c. Doppler width
+    // v_th ≈ 12.85 √(T/10⁴) km/s for hydrogen.
+    const v_th_kms   = 12.85 * Math.sqrt(Math.max(tempK, 1e3) / 1e4);
+    const peak_kms   = 0.92 * aTau3 * v_th_kms;             // each peak from line center
+
+    // Numerically integrate luminosity ∝ ∫ j(r) 4π r² dr (in arbitrary units —
+    // intensity slider absorbs the absolute calibration).
+    const params = { rInner: innerKpc, rOuter: radiusKpc, alpha, mechanism };
+    const N = 120;
+    const lr0 = Math.log(innerKpc);
+    const lr1 = Math.log(radiusKpc * 1.05);
+    let totalL = 0;
+    const cumulative = new Float64Array(N + 1);
+    const radii = new Float64Array(N + 1);
+    for (let i = 0; i <= N; ++i) {
+        const u = i / N;
+        const r = Math.exp(lr0 + (lr1 - lr0) * u);
+        const j = _labLumDensity(r, params);
+        const dV = 4 * Math.PI * r * r * (r - (i > 0 ? Math.exp(lr0 + (lr1 - lr0) * (i - 1) / N) : 0));
+        totalL += j * dV * P_esc_cen;       // P_esc applied uniformly (proxy)
+        cumulative[i] = totalL;
+        radii[i] = r;
+    }
+    // Half-light radius.
+    const half = totalL / 2;
+    let R_half_kpc = radiusKpc * 0.5;
+    for (let i = 1; i <= N; ++i) {
+        if (cumulative[i] >= half) {
+            const f = (half - cumulative[i - 1]) / Math.max(cumulative[i] - cumulative[i - 1], 1e-9);
+            R_half_kpc = radii[i - 1] + f * (radii[i] - radii[i - 1]);
+            break;
+        }
+    }
+
+    // Calibrate to a Slug-class luminosity. The user's "intensity" slider
+    // multiplies a reference 10⁴⁴ erg/s anchor; the dimensionless integral
+    // value is normalized to that reference at the default settings.
+    // Reference integral value at defaults (Slug-class) ≈ ~8e2 in our units.
+    const L_ref_erg_s   = 1.0e44;
+    const integral_ref  = 8.0e2;     // empirical at defaults; user can re-calibrate
+    const L_Lya_erg_s   = intensity * (totalL / integral_ref) * L_ref_erg_s;
+
+    // (1+z)⁻⁴ surface-brightness dimming for context.
+    const SB_dim = Math.pow(1 + z, -4);
+
+    return {
+        lambda_obs_nm,
+        a_voigt,
+        N_HI_central:        N_HI_cen,
+        tau0_central:        tau0_cen,
+        P_esc_central:       P_esc_cen,
+        peak_displacement_kms: peak_kms,
+        v_thermal_kms:       v_th_kms,
+        R_half_kpc,
+        L_Lya_erg_s,
+        SB_dim_factor:       SB_dim,
+        outflow_at_rLAB:     outflowKms,
+    };
+}
+
+// ---------------------------------------------------------------------------
 // Convenience: bundle everything for the HUD at a given observer state.
 // ---------------------------------------------------------------------------
 // `spin` ∈ [0, 0.999) is treated as a *diagnostic* quantity: the geodesic

@@ -18,6 +18,13 @@ export const R_S_METERS = 2 * G_SI * TON618_MASS_SOLAR * M_SUN_KG / (C_SI * C_SI
 // Geometric mass unit M in meters = r_s / 2.
 export const M_METERS = R_S_METERS / 2;
 
+// 1 kpc in meters; M expressed in kpc (~3.155 × 10⁻⁶ for TON 618).
+// The Phase 2.1 LAB raymarch needs this as a shader uniform so density
+// profiles can be specified in physically-meaningful kpc units while the
+// integrator stays in geometric M.
+export const KPC_M    = 3.0857e19;
+export const M_IN_KPC = M_METERS / KPC_M;
+
 // Convert a length in geometric units (r_geom, i.e. multiples of M) to human scales.
 export function formatLength(r_geom) {
     const meters = r_geom * M_METERS;
