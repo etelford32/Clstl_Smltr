@@ -3566,7 +3566,30 @@ const trMesh = new THREE.Mesh(
 );
 scene.add(trMesh);
 
-// ─── CORONA (r=2.5) — white-light corona with ray structure ───────────────────
+// ─── CORONA (r=2.5) — multi-T DEM emission + PFSS streamers + polar plumes ───
+//
+// Bleeding-edge corona renderer composing the realistic AIA EUV palette
+// from a synthetic differential emission measure (DEM) profile:
+//
+//   • Fe IX 171 Å (0.7 MK)   — gold-yellow, dominant in quiet Sun + plumes
+//   • Fe XII 193 Å (1.6 MK)  — emerald, the workhorse channel of the corona
+//   • Fe XIV 211 Å (2.0 MK)  — purple-magenta, lights up active-region loops
+//   • Fe XVIII 94 Å (6.3 MK) — green-teal, hot flare loop emission
+//
+// Local plasma temperature is computed per-fragment from the magnetic
+// topology (open vs closed field, AR proximity, flare proximity); each
+// emission line samples that temperature with a Gaussian DEM response,
+// and the four line intensities additively composite into the final color.
+//
+// Streamer geometry is PFSS-driven: the heliospheric current sheet (HCS)
+// is a tilted-dipole undulation that gets *locally perturbed* by every
+// active region in u_arSpots[8] — each AR pushes the HCS toward its own
+// latitude with a longitudinally-localised gaussian kick, producing the
+// azimuthal "ballerina skirt" warps you see in white-light eclipse data.
+//
+// Polar plumes: anisotropic radial-stretched fine noise with a tight
+// polar-only mask + multi-frequency longitudinal striping, so the plumes
+// read as fine bright streaks at the rim instead of soft halos.
 const coronaFS = /* glsl */`
     precision highp float;
     uniform float u_time;
@@ -3574,22 +3597,23 @@ const coronaFS = /* glsl */`
     uniform float u_rot;
     uniform float u_wind_speed_norm;
     uniform float u_bz_sw;
-    uniform float u_kp_norm;        // Kp/9 — geomagnetic storm intensity [0-1]
-    uniform float u_flare_lat;      // active flare position — same as sunFS
+    uniform float u_kp_norm;
+    uniform float u_flare_lat;
     uniform float u_flare_lon;
     uniform float u_flare_t;
-    // ── Additional live NOAA channels ──
-    uniform float u_aurora_north;   // OVATION north aurora power/600 [0-1]
-    uniform float u_aurora_south;   // OVATION south aurora power/600 [0-1]
-    uniform float u_storm_level;    // NOAA G-scale 0-5
-    uniform float u_bt_norm;        // total IMF / 30 nT [0-1]
-    uniform float u_f107_norm;      // F10.7 solar cycle [0-1]
-    uniform float u_electron_norm;  // GOES >2MeV electron flux [0-1]
-    uniform float u_dst_norm;       // -Dst/200 nT [0-1]
+    uniform float u_flare_intensity;
+    uniform float u_aurora_north;
+    uniform float u_aurora_south;
+    uniform float u_storm_level;
+    uniform float u_bt_norm;
+    uniform float u_f107_norm;
+    uniform float u_electron_norm;
+    uniform float u_dst_norm;
+    uniform vec4  u_arSpots[8];   // active-region positions/area for PFSS streamer kicks
+    uniform int   u_arSpotCount;
     varying vec3 vNormal;
     varying vec3 vViewDir;
 
-    // ── Noise helpers ──────────────────────────────────────────────────────────
     float h(vec3 p){ p=fract(p*vec3(127.1,311.7,74.7)); p+=dot(p,p+19.19); return fract(p.x*p.y*p.z); }
     float vn(vec3 p){
         vec3 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);
@@ -3607,169 +3631,286 @@ const coronaFS = /* glsl */`
         return v;
     }
 
+    // Gaussian temperature response in log10(T) space — the standard way to
+    // synthesise an AIA channel response from a DEM. logT_local is the local
+    // plasma temperature; logT_line is the formation T of the spectral line.
+    float lineResp(float logT_local, float logT_line, float sigma) {
+        float dt = logT_local - logT_line;
+        return exp(-dt * dt / (2.0 * sigma * sigma));
+    }
+
     void main() {
         vec3  n3d = normalize(vNormal);
         vec3  vd  = normalize(vViewDir);
-        float rim = 1.0 - max(dot(n3d, vd), 0.0);
+        float mu  = max(dot(n3d, vd), 0.0);
+        float rim = 1.0 - mu;
         float lat = asin(clamp(n3d.y, -1.0, 1.0));
-        // lon = atan(x, z) so heliographic comparisons with u_flare_lon work.
         float lon = atan(n3d.x, n3d.z) + u_time * 0.0025 * u_rot;
 
-        // ── Coronal hole mask ─────────────────────────────────────────────────
-        // Polar coronal holes: dark (open B-field, fast wind escapes freely).
-        // Equatorial holes: present at solar minimum, reduce at maximum.
-        float poleHole  = smoothstep(0.50, 0.72, abs(lat));   // 1 = hole at pole
-        float actFactor = 0.5 + u_activity * 1.2;
+        // ══════════════════════════════════════════════════════════════════
+        //  1.  PFSS-style HCS — tilted dipole + per-AR perturbations
+        //
+        //  The heliospheric current sheet undulates as a tilted-dipole
+        //  with the polarity-reversal warp ("ballerina skirt"). Each
+        //  active region in u_arSpots locally pushes the HCS toward its
+        //  own latitude — emergent flux drags the source-surface neutral
+        //  line. Sum these gaussian kicks for a real PFSS-style HCS.
+        // ══════════════════════════════════════════════════════════════════
+        float dipoleTilt = 0.18;                            // ~10° dipole tilt
+        float hcsWave = sin(lon * 1.0) * dipoleTilt
+                      + sin(lon * 2.5 + u_time * 0.008) * 0.12
+                      + sin(lon * 1.2 - u_time * 0.005) * 0.07;
+        hcsWave += u_bz_sw * 0.08;                          // live IMF Bz biases tilt
 
-        // ── Helmet streamer belt ──────────────────────────────────────────────
-        // Broad equatorial belt of closed B-field loops containing the HCS.
-        // Width broadens with activity and Kp (high Kp = more closed field + storms).
+        // PFSS active-region perturbations
+        for (int k = 0; k < 8; k++) {
+            if (k >= u_arSpotCount) break;
+            vec3 ar = u_arSpots[k].xyz;
+            if (length(ar) < 0.5) continue;
+            float arLat = asin(clamp(ar.y, -1.0, 1.0));
+            float arLon = atan(ar.x, ar.z);
+            float dlon  = lon - arLon;
+            // wrap to [-π, π]
+            dlon = mod(dlon + 3.14159265, 6.2831853) - 3.14159265;
+            float kickW = 0.55;                             // gaussian width in lon
+            float kick  = exp(-dlon * dlon / (kickW * kickW));
+            float intensity = clamp(abs(u_arSpots[k].w), 0.0, 1.0);
+            // Push HCS toward the AR's latitude (sign matters)
+            hcsWave += (arLat - hcsWave) * kick * intensity * 0.35;
+        }
+
+        float hcsDist  = lat - hcsWave;
+        float hcs      = exp(-hcsDist * hcsDist / 0.018) * (0.45 + u_kp_norm * 0.42);
+
+        // ══════════════════════════════════════════════════════════════════
+        //  2.  Closed-field "helmet" mask + coronal-hole mask
+        //
+        //  The PFSS streamer belt forms where field lines close (low |hcs
+        //  Dist|). Coronal holes form where field lines stay open (poles
+        //  + away from streamer belt). Together they partition the corona
+        //  into hot-closed and cool-open zones.
+        // ══════════════════════════════════════════════════════════════════
         float beltW    = 0.30 + u_activity * 0.28 + u_kp_norm * 0.07;
-        float helmetBelt = exp(-lat * lat / (beltW * beltW));
+        float helmetBelt = exp(-hcsDist * hcsDist / (beltW * beltW));
+        float poleHole  = smoothstep(0.50, 0.72, abs(lat)) * (1.0 - helmetBelt * 0.8);
+        float openField = clamp(poleHole + (1.0 - helmetBelt) * 0.35, 0.0, 1.0);
 
-        // ── Heliospheric current sheet (HCS) ─────────────────────────────────
-        // Undulates ±10–30° about the equatorial plane following Bz polarity.
-        // The "ballerina skirt" — strongest coronal density feature.
-        float hcsWave = sin(lon * 2.5 + u_time * 0.008) * 0.22 +
-                        sin(lon * 1.2 - u_time * 0.005) * 0.12;
-        hcsWave += u_bz_sw * 0.08;   // live IMF Bz tilts the sheet
-        float hcsDist = lat - hcsWave;
-        // HCS brightens during geomagnetic storms (high Kp = active current sheet)
-        float hcs     = exp(-hcsDist * hcsDist / 0.018) * (0.45 + u_kp_norm * 0.42);
+        // ══════════════════════════════════════════════════════════════════
+        //  3.  Per-AR streamer rays — bright radial offshoots above ARs
+        //
+        //  Real PFSS shows that emergent active regions sprout streamer
+        //  rays where their closed-field cusps interface with the open
+        //  field. Each AR adds a localised ray that brightens the streamer
+        //  belt directly above its longitude.
+        // ══════════════════════════════════════════════════════════════════
+        float arRayBoost = 0.0;
+        float arHotProb  = 0.0;          // fraction of fragment near a hot AR
+        for (int k = 0; k < 8; k++) {
+            if (k >= u_arSpotCount) break;
+            vec3 ar = u_arSpots[k].xyz;
+            if (length(ar) < 0.5) continue;
+            float arLat = asin(clamp(ar.y, -1.0, 1.0));
+            float arLon = atan(ar.x, ar.z);
+            float dlon  = mod((lon - arLon) + 3.14159265, 6.2831853) - 3.14159265;
+            float intensity = clamp(abs(u_arSpots[k].w), 0.0, 1.0);
+            // Ray in longitude (narrow), in latitude (broader, anchored to HCS).
+            float rayLon  = exp(-dlon * dlon / 0.04);
+            float rayLat  = exp(-(lat - arLat) * (lat - arLat) / 0.10);
+            arRayBoost   += rayLon * rayLat * intensity * 0.85;
+            // Hot AR proximity drives Fe XIV / Fe XVIII contributions
+            float arAngDist = acos(clamp(dot(n3d, normalize(ar)), -1.0, 1.0));
+            arHotProb = max(arHotProb, exp(-arAngDist * arAngDist / 0.20) * intensity);
+        }
 
-        // ── Helmet streamer fine ray structure ────────────────────────────────
-        // Elongated radial plumes within the streamer belt.
+        // ══════════════════════════════════════════════════════════════════
+        //  4.  Helmet-streamer fine ray structure
+        // ══════════════════════════════════════════════════════════════════
         float streamer1 = fbm6(vec3(lon * 1.8, lat * 2.2, u_time * 0.003));
         float streamer2 = vn( vec3(lon * 7.0, lat * 9.0,  u_time * 0.011));
         float streamer3 = fbm4(vec3(lon * 0.8, lat * 1.2, u_time * 0.0015));
         float rayStr    = streamer1 * 0.50 + streamer2 * 0.25 + streamer3 * 0.25;
+        float actFactor = 0.5 + u_activity * 1.2;
 
-        // ── Polar plumes ──────────────────────────────────────────────────────
-        // Narrow bright structures along open B-field lines above coronal holes.
-        // Rotate slowly with the polar field.
-        float plumeLon  = lon * 4.0 + u_time * 0.004;
-        float plumeLat  = abs(lat);
-        float plumeMask = smoothstep(0.58, 0.75, plumeLat);  // only near poles
-        float plumeTex  = max(0.0, cos(plumeLon) * cos(plumeLon * 2.3) * 0.5 + 0.5);
-        plumeTex       *= fbm4(vec3(lon * 5.0, plumeLat * 6.0, u_time * 0.006));
-        float plume     = plumeMask * plumeTex * 1.0;
+        // ══════════════════════════════════════════════════════════════════
+        //  5.  Polar plumes — fine radial streaks, multi-freq striping
+        //
+        //  Real polar plumes are very narrow (~30 Mm at 1 R, fanning out
+        //  to ~150 Mm at 5 R). On a 2D shell at r=2.5 they read as fine
+        //  longitudinal stripes inside the polar coronal-hole mask. Use a
+        //  multi-frequency stripe pattern + a turbulence modulator so the
+        //  plume widths and intensities vary realistically.
+        // ══════════════════════════════════════════════════════════════════
+        float plumeLat   = abs(lat);
+        float plumeMask  = smoothstep(0.52, 0.78, plumeLat);   // tight polar gating
+        float plumeFlow  = u_time * 0.004;
+        // Multi-frequency stripes: 24, 38, 67 plumes/turn create realistic
+        // unevenly-spaced plume distribution (low-frequency packs of plumes).
+        float stripe1 = sin(lon * 24.0 + plumeFlow);
+        float stripe2 = sin(lon * 38.0 - plumeFlow * 1.7);
+        float stripe3 = sin(lon * 67.0 + plumeFlow * 0.6 + plumeLat * 5.0);
+        float stripe  = pow(max(0.0, stripe1 * 0.5 + stripe2 * 0.30 + stripe3 * 0.20), 4.0);
+        // Turbulence modulator carves bright/dim plume bundles.
+        float plumeTurb = fbm4(vec3(lon * 5.5, plumeLat * 8.0, u_time * 0.006));
+        float plume     = plumeMask * stripe * (0.45 + plumeTurb * 0.85);
 
-        // ── Pseudo-streamer / secondary bright regions ────────────────────────
+        // ── Pseudo-streamer ──
         float pseudoStr = fbm4(vec3(lon * 3.5, lat * 4.5, u_time * 0.005))
-                        * smoothstep(0.3, 0.5, abs(lat)) * smoothstep(0.7, 0.5, abs(lat));
+                        * smoothstep(0.3, 0.5, abs(lat))
+                        * smoothstep(0.7, 0.5, abs(lat));
 
-        // ── Coronal bright points (CBP) — X-ray/EUV-bright compact loops ─────
-        // ~100–200 present on the sun at any time; lifetime hours–days; size ~5–10 Mm.
-        // In the corona shell (r=2.5) they appear as tiny bright dots scattered
-        // across the disk, more numerous during high activity.
+        // ── Coronal bright points ──
         float cbp1 = vn(vec3(lon * 22.0 + u_time * 0.006, lat * 22.0, u_time * 0.004));
         float cbp2 = vn(vec3(lon * 18.0 - u_time * 0.005, lat * 18.0 + u_time * 0.003, 1.7));
         float cbpMask = smoothstep(0.88, 0.96, cbp1) * smoothstep(0.86, 0.94, cbp2);
         cbpMask *= (0.4 + u_activity * 0.9) * (1.0 - poleHole * 0.5);
 
-        // ── Compose alpha ────────────────────────────────────────────────────
-        // Phase 4.2 — relaxed rim power (2.4 → 1.9) and brighter base
-        // (0.42 → 0.62) so the corona reads as present across a wider
-        // limb annulus instead of as a thin grazing-only halo. Streamer/
-        // HCS/plume morphology unchanged — just more visible.
+        // ══════════════════════════════════════════════════════════════════
+        //  6.  Local plasma temperature (log10(T/K))
+        //
+        //  Coronal hole:  log T ≈ 5.95  (≈ 0.9 MK)  — fast-wind source
+        //  Quiet Sun:     log T ≈ 6.18  (≈ 1.5 MK)  — Fe XII dominant
+        //  Active region: log T ≈ 6.32  (≈ 2.1 MK)  — Fe XIV dominant
+        //  Flare loops:   log T ≈ 6.85  (≈ 7.0 MK)  — Fe XVIII / Fe XXI
+        //
+        //  We ride a log-T value across these zones based on local
+        //  topology + flare proximity, then sample line responses.
+        // ══════════════════════════════════════════════════════════════════
+        float logT_open   = 5.95;
+        float logT_quiet  = 6.18;
+        float logT_active = 6.32;
+        float logT_flare  = 6.85;
+
+        // Base T: blend hole↔quiet by openness
+        float logT = mix(logT_quiet, logT_open, clamp(openField - 0.15, 0.0, 1.0));
+        // AR/streamer-belt ridge nudges T upward
+        logT = mix(logT, logT_active, clamp(helmetBelt * (0.35 + arHotProb * 1.2), 0.0, 1.0));
+
+        // Flare-region temperature spike (decays over u_flare_t)
+        float cos_df = sin(lat) * sin(u_flare_lat)
+                     + cos(lat) * cos(u_flare_lat) * cos(lon - u_flare_lon);
+        float df_c   = acos(clamp(cos_df, -1.0, 1.0));
+        float flareGate = exp(-df_c * df_c / 0.040)
+                        * exp(-u_flare_t / 200.0) * u_flare_intensity;
+        logT = mix(logT, logT_flare, clamp(flareGate, 0.0, 1.0));
+
+        // ══════════════════════════════════════════════════════════════════
+        //  7.  Multi-T emission line responses (Gaussian DEM in log-T)
+        // ══════════════════════════════════════════════════════════════════
+        float fe9   = lineResp(logT, 5.85, 0.10);   // 171 Å
+        float fe12  = lineResp(logT, 6.20, 0.12);   // 193 Å
+        float fe14  = lineResp(logT, 6.30, 0.13);   // 211 Å
+        float fe18  = lineResp(logT, 6.80, 0.18);   // 94 Å (flare hot)
+
+        // Local density proxy — combines streamer/plume/CBP/AR-ray structure
+        float density =
+              helmetBelt * (0.85 + rayStr * actFactor) * (1.0 - poleHole * 0.7)
+            + hcs * (0.70 + 0.40 * u_activity)
+            + plume * 0.85
+            + pseudoStr * 0.30 * u_activity
+            + arRayBoost * 0.95;
+        density = max(density, 0.06);
+        density *= 1.0 + u_f107_norm * 0.40;        // solar-cycle scaling
+
+        // Density-weighted line intensities
+        float i9   = fe9   * density;
+        float i12  = fe12  * density;
+        float i14  = fe14  * density;
+        float i18  = fe18  * density;
+
+        // ══════════════════════════════════════════════════════════════════
+        //  8.  Compose alpha (rim-dominant, density-driven)
+        // ══════════════════════════════════════════════════════════════════
         float base = pow(rim, 1.9) * 0.62;
-        float alpha = base * (
-            // Streamer belt contribution (dimmed at coronal holes)
-            helmetBelt * (0.70 + rayStr * actFactor) * (1.0 - poleHole * 0.72) +
-            // HCS ridge
-            hcs * (0.8 + 0.4 * u_activity) +
-            // Polar plumes
-            plume * 0.90 +
-            // Pseudo-streamers
-            pseudoStr * 0.35 * u_activity
-        );
-        // Coronal bright points add localised alpha spikes on/near disk face
+        float alpha = base * density;
         alpha += cbpMask * pow(max(1.0 - rim, 0.0), 0.5) * 0.35;
+        alpha += flareGate * pow(rim, 1.4) * 0.45;
         alpha = clamp(alpha, 0.0, 0.97);
 
-        // ── Colour ───────────────────────────────────────────────────────────
-        // K-corona (Thomson-scattered photospheric light): warm yellow-white.
-        // Polar plumes: cooler, slightly blue-white.
-        // HCS: slightly enhanced yellow (enhanced density).
-        vec3 kCorona   = vec3(1.00, 0.96, 0.80);  // inner K-corona
-        vec3 outerCor  = vec3(0.88, 0.92, 1.00);  // outer corona / F-corona dust scatter
-        vec3 plumeCol  = vec3(0.90, 0.95, 1.00);  // polar plume — blue-white
-        vec3 hcsCol    = vec3(1.05, 0.98, 0.72);  // HCS ridge — enhanced yellow
-        vec3 cbpCol    = vec3(0.60, 1.00, 0.90);  // CBP — AIA 193 Å blue-green
+        // ══════════════════════════════════════════════════════════════════
+        //  9.  Composite line color — additive AIA-style
+        //
+        //  AIA convention pseudocolors:
+        //    171 Å: warm gold
+        //    193 Å: emerald-green
+        //    211 Å: magenta-purple
+        //     94 Å: green-teal (flare hot)
+        //
+        //  These additively combine to the green-gold "everything corona"
+        //  composite that EUV observers know from SDO movies.
+        // ══════════════════════════════════════════════════════════════════
+        vec3 col171 = vec3(1.00, 0.78, 0.32);
+        vec3 col193 = vec3(0.40, 1.10, 0.55);
+        vec3 col211 = vec3(0.95, 0.55, 0.95);
+        vec3 col94  = vec3(0.30, 1.00, 0.85);
 
-        vec3 col = mix(kCorona, outerCor, rim * rim);
-        col = mix(col, plumeCol, plume * 0.55);
-        col = mix(col, hcsCol, hcs * 0.4);
-        col = mix(col, cbpCol, cbpMask * pow(max(1.0 - rim, 0.0), 0.4) * 0.70);
+        vec3 col = i9 * col171 + i12 * col193 + i14 * col211 + i18 * col94;
 
-        // CME / fast solar wind: outer corona shifts blue-white (hot electrons)
-        // u_wind_speed_norm: 0=slow wind, 1=CME/fast stream
+        // K-corona Thomson-scattered photospheric light is yellow-white
+        // and tracks density (not T) — add as a base layer so quiet rim
+        // is creamy and the EUV emission overlays as colour shifts.
+        vec3 kCorona  = vec3(1.00, 0.96, 0.80);
+        vec3 outerCor = vec3(0.88, 0.92, 1.00);
+        vec3 kLayer   = mix(kCorona, outerCor, rim * rim) * density * 0.55;
+        col += kLayer;
+
+        // HCS density bump → yellow-gold tint
+        col += vec3(1.05, 0.90, 0.55) * hcs * 0.40;
+
+        // CBPs — small bright Fe XII green dots
+        col += col193 * cbpMask * pow(max(1.0 - rim, 0.0), 0.4) * 0.55;
+
+        // ── Coronal-hole darkening: subtract ~50% emission inside holes
+        // (open-field plasma is at lower density even before T effects).
+        col *= 1.0 - poleHole * 0.45;
+
+        // ══════════════════════════════════════════════════════════════════
+        // 10.  Live-data couplings (preserved from previous shader)
+        // ══════════════════════════════════════════════════════════════════
+        // CME / fast wind
         col = mix(col, vec3(0.80, 0.88, 1.00), u_wind_speed_norm * 0.22 * pow(rim, 1.5));
-
-        // Geomagnetic storm: HCS ridge takes on orange-gold tint (enhanced compression)
+        // Geomagnetic storm: HCS warm tint
         col = mix(col, vec3(1.08, 0.85, 0.45), u_kp_norm * hcs * 0.55);
 
-        // Subtle corona-wide activity brightening
+        // Subtle corona-wide activity pulse
         float pulse = 1.0 + 0.07 * sin(u_time * 2.6 + lon) * u_activity;
 
-        // ── Flare-driven coronal brightening (post-flare loop arcade in corona) ─
-        // Directly above the flare site, the corona brightens as reconnected
-        // field lines fill with ~10–30 MK plasma — the "post-flare arcade".
-        // Visible in white-light as a density enhancement and in EUV as a hot loop.
+        // Flare arcade brightening above flare site
         {
-            float cos_df = sin(lat) * sin(u_flare_lat)
-                         + cos(lat) * cos(u_flare_lat) * cos(lon - u_flare_lon);
-            float df_c   = acos(clamp(cos_df, -1.0, 1.0));
-            // Wide gaussian: loops spread over ±0.25 rad (~175 Mm) in corona
             float cSig   = 0.20;
             float cGlow  = exp(-df_c * df_c / (cSig * cSig))
                          * exp(-u_flare_t / 280.0) * 0.55;
-            // Hot EUV colour in lower corona, fading to K-corona white above
-            col = mix(col, vec3(0.60, 1.10, 1.30), cGlow * rim);
+            col = mix(col, col94 * 1.6, cGlow * rim);
             alpha += cGlow * pow(rim, 1.6) * 0.35;
         }
 
-        // ── OVATION aurora power → polar coronal hole brightening ─────────────────
-        // High aurora power = more open field at poles = brighter polar plumes.
-        // At the Sun: polar coronal holes are the source of fast solar wind and
-        // the origin of the aurora-producing field lines at Earth.
-        float poleFac_n = smoothstep(0.55, 0.92, lat);    // North polar region
-        float poleFac_s = smoothstep(0.55, 0.92, -lat);   // South polar region
+        // OVATION aurora power → bright polar plumes
+        float poleFac_n = smoothstep(0.55, 0.92,  lat);
+        float poleFac_s = smoothstep(0.55, 0.92, -lat);
         float auroraGlow = poleFac_n * u_aurora_north * 0.70
                          + poleFac_s * u_aurora_south * 0.70;
-        // Coronal hole fast-wind streams: cool blue-green polar plumes
         vec3 auroraPlume = mix(vec3(0.55, 0.88, 1.00), vec3(0.45, 1.00, 0.75),
                             (u_aurora_north + u_aurora_south) * 0.5);
         col   += auroraPlume * auroraGlow * pow(rim, 1.8) * 1.2;
         alpha += auroraGlow * pow(rim, 2.2) * 0.30;
 
-        // ── G-scale geomagnetic storm: corona-wide brightening + red-orange tint ─
-        // During major storms, the compressed dayside corona and enhanced current
-        // sheet glow brighter; the electron density increases.
+        // G-scale storm: corona-wide compression tint
         float stormNorm = u_storm_level / 5.0;
         col   = mix(col, col * vec3(1.35, 0.82, 0.60), stormNorm * 0.38);
         alpha *= 1.0 + stormNorm * 0.28;
 
-        // ── Total IMF: stronger B-field → brighter/sharper streamer belt ─────────
-        // Stronger total IMF means more compressed magnetic flux in the HCS,
-        // making the streamer belt denser and the HCS tilt angle more pronounced.
+        // Total IMF: streamer belt sharper
         col   *= 1.0 + helmetBelt * u_bt_norm * 0.50;
         alpha *= 1.0 + u_bt_norm * 0.20;
 
-        // ── F10.7 solar cycle: global corona brightness ────────────────────────
-        // At solar maximum the corona is hotter, denser, and more structured.
-        col   *= 1.0 + u_f107_norm * 0.35;
-        alpha *= 1.0 + u_f107_norm * 0.28;
+        // F10.7: brightness scaling (already partly in density above)
+        col   *= 1.0 + u_f107_norm * 0.20;
+        alpha *= 1.0 + u_f107_norm * 0.18;
 
-        // ── Energetic electron flux: blue-white coronal hazing ─────────────────
-        // High-energy electrons scatter off the coronal plasma adding a faint
-        // blue-UV glow; also signals enhanced solar activity.
+        // High-energy electrons: blue-UV haze
         col  = mix(col, vec3(0.55, 0.80, 1.20) * (col * 0.6 + 0.4), u_electron_norm * 0.30);
         alpha += u_electron_norm * pow(rim, 2.5) * 0.10;
 
-        // ── Dst ring-current: compressed solar wind pressure glow ──────────────
-        // Enhanced Dst reflects stronger solar wind compression on the dayside;
-        // warm amber-white tint in K-corona from increased electron density.
+        // Dst ring-current: amber on dayside streamer
         float dstBoost = u_dst_norm * helmetBelt;
         col  = mix(col, vec3(1.05, 0.88, 0.60), dstBoost * 0.18);
         alpha += dstBoost * pow(rim, 3.2) * 0.08;
@@ -3784,14 +3925,16 @@ const coronaMesh = new THREE.Mesh(
 );
 scene.add(coronaMesh);
 
-// ─── Phase 4.3: AIA-style volumetric corona renderer ─────────────────────────
-// Mounts js/corona-volumetric.js (16-step DEM raymarch with 6 AIA channels,
-// per-AR loop arcades, coronal-hole subtraction, channel-aware filament
-// extinction) as the active corona renderer, replacing the legacy coronaFS
-// at r=2.5 unless ?corona=legacy is on the URL.
+// ─── Corona renderer selection ───────────────────────────────────────────────
+// Three options, controlled by ?corona=… URL param:
 //
-// Channel selection: ?coronaChannel=171|193|211|304|94|131|white (default 171).
-const _coronaMode    = (new URLSearchParams(location.search).get('corona') || 'volumetric').toLowerCase();
+//   multit (default) — the new multi-T DEM composite shader above, blending
+//     Fe IX 171 Å + Fe XII 193 Å + Fe XIV 211 Å + Fe XVIII 94 Å in a single
+//     pass with PFSS-driven HCS perturbations and fine polar plumes.
+//   volumetric       — js/corona-volumetric.js: 16-step DEM raymarch, single
+//     AIA channel selectable via ?coronaChannel=171|193|211|304|94|131.
+//   legacy           — alias for multit (the legacy shader was rewritten).
+const _coronaMode    = (new URLSearchParams(location.search).get('corona') || 'multit').toLowerCase();
 const _coronaChannel = (new URLSearchParams(location.search).get('coronaChannel') || '171');
 let volumetricCorona = null;
 
