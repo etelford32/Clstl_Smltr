@@ -105,6 +105,21 @@ uniform float u_lab_log_NHI;             // log10 central column density [cm⁻�
 uniform float u_lab_temp_K;              // gas temperature, default 1e4 K
 uniform float u_lab_neufeld;             // 0..1 blend: 0 = pure emission, 1 = full Neufeld suppression
 
+// ── Phase 2.2 — anisotropic resonance scattering + double-peak ──────
+// Rayleigh-like scattering polarizes Lyα photons to ≤ 100 % at right
+// angles; observed LABs reach ~5–15 %. We track Stokes Q/U alongside
+// intensity through the raymarch and surface the result as a sparse
+// vector overlay on the rendered image.
+uniform int   u_show_pol_vectors;        // 1 = render polarization tick overlay
+uniform float u_lab_pol_max;             // f_pol cap (typical 0.10–0.15)
+uniform int   u_lab_double_peak;         // 1 = render Neufeld twin-Gaussian peaks
+// Camera right and up vectors expressed in the same Cartesian frame the
+// LAB raymarch uses (BH-centered, y-up polar). Lets us project the
+// per-cell radial direction onto the screen plane for the polarization PA.
+uniform vec3  u_cam_right_cart;
+uniform vec3  u_cam_up_cart;
+uniform vec3  u_cam_forward_cart;
+
 // ── B1 — Vertical disk structure (Shakura-Sunyaev slab) ─────────────
 uniform float u_disk_h_over_r;           // characteristic H/r at the inner edge (0..0.4)
 
@@ -1314,7 +1329,64 @@ vec3 wavelength_to_rgb(float lam_nm) {
 //   pos_M  — Cartesian position of the escape (in M units).
 //   dir    — unit photon direction at escape (asymptotic direction toward source).
 // Returns observer-frame additive Lyα emission (linear RGB, before tone map).
-vec3 lab_volume_emission(vec3 pos_M, vec3 dir) {
+// Per-cell line color. Phase 2.1 used a single observer-frame Lyα peak.
+// Phase 2.2 splits into Neufeld's twin Gaussians at ν₀ ± 0.92(aτ₀)^{1/3}·ν_th
+// when u_lab_double_peak == 1. Outflow + Neufeld give the canonical asymmetric
+// red-dominated profile: in the cell's rest frame Lyα photons are *destroyed*
+// at line center (resonance trapping) and emerge displaced by ±Δν_peak
+// Doppler widths; an outflow shifts each peak by v_los/c, then suppresses
+// the blue side because blueshifted photons re-encounter the line core in
+// the foreground gas and resonantly scatter again.
+vec3 lab_cell_color(float rho, float v_los_kms, float lam0_obs_nm) {
+    const float C_KMS = 299792.458;
+    float lam_center = lam0_obs_nm * (1.0 + v_los_kms / C_KMS);
+
+    if (u_lab_double_peak == 0) return wavelength_to_rgb(lam_center);
+
+    // Voigt parameter at gas temperature.
+    float a_voigt = 4.7e-4 * sqrt(1.0e4 / max(u_lab_temp_K, 1.0e3));
+    // Local optical-depth proxy from the local density × central column.
+    float tau0   = max(pow(10.0, u_lab_log_NHI) * rho * 5.9e-14, 1.0);
+    // Peak displacement in km/s. v_th ≈ 12.85 √(T/10⁴ K).
+    float v_th   = 12.85 * sqrt(max(u_lab_temp_K, 1.0e3) / 1.0e4);
+    float dv_peak_kms = 0.92 * pow(a_voigt * tau0, 1.0 / 3.0) * v_th;
+
+    float lam_red  = lam0_obs_nm * (1.0 + (v_los_kms + dv_peak_kms) / C_KMS);
+    float lam_blue = lam0_obs_nm * (1.0 + (v_los_kms - dv_peak_kms) / C_KMS);
+
+    // Outflow asymmetry: blue peak suppressed when net flow is outward
+    // (photons in the blue wing are more likely to scatter again on
+    // foreground gas). Empirical fit: w_blue = exp(−2 v_los/v_th) for
+    // v_los > 0, capped at 0.05; w_red = 1 always. Matches the observed
+    // double-peak ratios in real LABs (Verhamme 2006).
+    float w_blue = clamp(exp(-2.0 * max(v_los_kms, 0.0) / max(v_th, 10.0)), 0.05, 1.0);
+    return wavelength_to_rgb(lam_red) + w_blue * wavelength_to_rgb(lam_blue);
+}
+
+// Phase function for resonance scattering. We use the Rayleigh-like form
+// f_pol(μ) = (1 − μ²) / (1 + μ²) where μ = cos(θ_scat) is the cosine of the
+// scattering angle (incident from BH along q̂, scattered along −dir to
+// observer). Maxes at μ = 0 (right-angle scatter), zero forward/back.
+float lab_pol_fraction(vec3 q_hat, vec3 ray_dir) {
+    float mu = clamp(dot(q_hat, -ray_dir), -1.0, 1.0);
+    float mu2 = mu * mu;
+    return (1.0 - mu2) / max(1.0 + mu2, 1.0e-3);
+}
+
+// Project the cell's radial direction onto the screen plane and return
+// the Stokes-frame angle of polarization (perpendicular to the projected
+// radial → tangential pattern around the BH).
+float lab_pol_PA(vec3 q_hat) {
+    // Right and up are pre-supplied in the same Cartesian frame as q_hat.
+    float sR = dot(q_hat, u_cam_right_cart);
+    float sU = dot(q_hat, u_cam_up_cart);
+    // PA of projected radial direction; polarization is perpendicular.
+    float pa_radial = atan(sU, sR);
+    return pa_radial + 1.5707963;            // +π/2 = 90°
+}
+
+vec3 lab_volume_emission(vec3 pos_M, vec3 dir, out vec2 stokes_QU) {
+    stokes_QU = vec2(0.0);
     if (u_show_lab == 0 || u_lab_intensity <= 0.0) return vec3(0.0);
 
     // Convert to kpc once; march in kpc along the ray's path length s.
@@ -1324,14 +1396,9 @@ vec3 lab_volume_emission(vec3 pos_M, vec3 dir) {
     float ds = s_max / float(N);
     vec3 acc = vec3(0.0);
 
-    // Rest-frame Lyα at 121.6 nm, redshifted to the user's z. 1+z applied
-    // once at line-center; per-cell Doppler from outflow rides on top.
+    // Rest-frame Lyα at 121.6 nm, redshifted to the user's z.
     float lam0_obs_nm = 121.567 * (1.0 + u_lab_z);
-    const float C_KMS = 299792.458;
-
-    // (1+z)⁻⁴ surface-brightness dimming. For TON 618 (z≈2.22) this is
-    // 1/(3.219)⁴ ≈ 0.0093 — already an order of magnitude. We pre-multiply
-    // it into the integral so the user's intensity slider lives in O(1).
+    // (1+z)⁻⁴ surface-brightness dimming.
     float dim_z4 = 1.0 / pow(1.0 + u_lab_z, 4.0);
 
     for (int i = 0; i < N; ++i) {
@@ -1345,22 +1412,61 @@ vec3 lab_volume_emission(vec3 pos_M, vec3 dir) {
         float vmag_kms = u_lab_outflow_kms
                        * pow(clamp(r_q / max(u_lab_radius_kpc, 1.0e-3), 0.0, 1.0),
                              max(u_lab_outflow_beta, 0.0));
-        // LOS Doppler (cell receding from observer along dir → +ve shift).
-        // Photon arrived at observer along (-dir); cell velocity along q̂.
-        // For an observer interior to the halo, q̂ · (-dir) ≈ −1 for nearby
-        // cells, ≈ +1 for far-side cells (still receding by homologous flow).
-        float v_los_kms = -vmag_kms * dot(normalize(q), dir);
-        float lam_obs   = lam0_obs_nm * (1.0 + v_los_kms / C_KMS);
-        vec3  cell_col  = wavelength_to_rgb(lam_obs);
+        vec3 q_hat = (r_q > 1.0e-6) ? (q / r_q) : vec3(0.0, 1.0, 0.0);
+        float v_los_kms = -vmag_kms * dot(q_hat, dir);
 
-        // Resonance escape multiplier (denser cells radiate less efficiently
-        // because their photons random-walk longer before diffusing out).
+        // Per-cell color (twin-peak Neufeld profile when enabled).
+        vec3 cell_col = lab_cell_color(rho, v_los_kms, lam0_obs_nm);
+
+        // Resonance escape multiplier.
         float P_esc = lab_neufeld_pesc(rho);
         float j     = lab_emissivity(q, rho) * P_esc;
 
-        acc += cell_col * j * ds;
+        // Direct emission (intensity contribution).
+        vec3  contrib_I = cell_col * j * ds;
+        acc += contrib_I;
+
+        // ── Polarization (Stokes Q, U) — Rayleigh-like phase function ─
+        // Only the *scattered* fraction is polarized; direct-emitted
+        // photons are unpolarized. Scattering fraction proxy: optical-depth
+        // weighted, capped at unity. f_scat ≈ 1 − P_esc gives a clean
+        // "more scattered when more trapped" relation.
+        float f_scat = clamp(1.0 - P_esc, 0.0, 1.0);
+        float f_pol  = u_lab_pol_max * f_scat * lab_pol_fraction(q_hat, dir);
+        float pa     = lab_pol_PA(q_hat);
+        float I_lum  = dot(contrib_I, vec3(0.299, 0.587, 0.114));
+        // Polarization is a directionless line, so Stokes uses 2*PA.
+        // Sign: Q = +I·f·cos(2*PA), U = +I·f·sin(2*PA), with PA already
+        // perpendicular to the radial.
+        stokes_QU.x += I_lum * f_pol * cos(2.0 * pa);
+        stokes_QU.y += I_lum * f_pol * sin(2.0 * pa);
     }
-    return acc * u_lab_intensity * dim_z4 * 100.0;   // 100× restores O(1) under the (1+z)⁻⁴ dimming
+
+    float scale = u_lab_intensity * dim_z4 * 100.0;
+    stokes_QU *= scale;
+    return acc * scale;
+}
+
+// Sparse polarization-vector tick overlay.
+//   GRID — pixel pitch; ticks render at every cell center.
+//   length — proportional to f_pol relative to the cap u_lab_pol_max.
+// Computed in screen-pixel space directly; each pixel asks "am I inside
+// the tick that belongs to my grid cell?" and contributes a faint white
+// luminance modulation.
+vec3 lab_pol_tick_overlay(vec2 fragCoord, float f_pol_norm, float pa_pol) {
+    if (u_show_pol_vectors == 0 || f_pol_norm < 0.02) return vec3(0.0);
+    const float GRID = 36.0;
+    vec2 cell   = floor(fragCoord / GRID);
+    vec2 center = (cell + 0.5) * GRID;
+    vec2 d      = fragCoord - center;
+    // Half-length = up to 0.42 cell at full f_pol, scaling linearly.
+    float half_len = GRID * 0.42 * clamp(f_pol_norm, 0.0, 1.0);
+    float c = cos(pa_pol), s = sin(pa_pol);
+    float along =  d.x * c + d.y * s;
+    float perp  = -d.x * s + d.y * c;
+    float w_along = step(abs(along), half_len);
+    float w_perp  = smoothstep(1.6, 0.0, abs(perp));
+    return vec3(0.55, 0.65, 0.70) * w_along * w_perp * 0.85;
 }
 
 vec3 outgoing_direction(float y[8]) {
@@ -1422,6 +1528,7 @@ void main() {
                                    sin(th_e) * sin(ph_e));
 
     vec3 color;
+    vec2 lab_stokes = vec2(0.0);
     if (term == 1) {
         // Horizon capture: pitch black.
         color = vec3(0.0);
@@ -1429,24 +1536,34 @@ void main() {
         // Escape to celestial sphere.
         vec3 dir = outgoing_direction(y);
         color = celestial_sphere(dir);
-        // LAB volumetric halo (Phase 2.1) — accumulate Lyα emission along
-        // the asymptotic continuation of the geodesic in flat space.
-        color += lab_volume_emission(escape_pos_M, dir);
+        // LAB volumetric halo (Phase 2.1+2.2) — accumulate Lyα emission
+        // along the asymptotic continuation of the geodesic in flat space,
+        // tracking Stokes Q/U for the polarization overlay.
+        color += lab_volume_emission(escape_pos_M, dir, lab_stokes);
     } else if (term == 4) {
         // Opaque disk hit.
         color = disk_rgb;
     } else if (term == 5) {
         // Translucent path: ray ultimately escaped (or got captured) AFTER
-        // accumulating disk emission. Composite emission over background.
-        // We re-derive the "background" by inspecting y[1]: if r drifted to
-        // r_far we use the celestial sphere, otherwise it was captured.
+        // accumulating disk emission.
         vec3 dir5 = outgoing_direction(y);
         vec3 background = (y[1] >= u_r_far) ? celestial_sphere(dir5) : vec3(0.0);
-        if (y[1] >= u_r_far) background += lab_volume_emission(escape_pos_M, dir5);
+        if (y[1] >= u_r_far) background += lab_volume_emission(escape_pos_M, dir5, lab_stokes);
         color = background + disk_rgb;
     } else {
         // Step budget exhausted.
         color = vec3(0.02, 0.0, 0.02);
+    }
+
+    // Polarization vector overlay — sparse ticks at a coarse pixel grid.
+    if (u_show_pol_vectors == 1 && u_show_lab == 1) {
+        float I_lum = max(dot(color, vec3(0.299, 0.587, 0.114)), 1.0e-3);
+        float f_pol = length(lab_stokes) / I_lum;
+        float pa_pol = 0.5 * atan(lab_stokes.y, lab_stokes.x);
+        // Cap normalization at the user's f_pol_max so the longest tick
+        // corresponds to the maximum-polarization cell (≈ 1.0 length).
+        float f_pol_norm = clamp(f_pol / max(u_lab_pol_max, 1.0e-3), 0.0, 1.0);
+        color += lab_pol_tick_overlay(gl_FragCoord.xy, f_pol_norm, pa_pol);
     }
 
     // Per-step overlays (grid + photon-sphere glow) always composite on top.

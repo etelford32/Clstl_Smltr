@@ -161,12 +161,29 @@ export function rebuildBasis(cam) {
 // Pack camera state for the shader.
 export function cameraUniforms(cam, resolution) {
     rebuildBasis(cam);
+    // Cartesian projections of forward/right/up — needed by the LAB
+    // polarization overlay (Phase 2.2) which projects per-cell radial
+    // directions onto the screen plane to compute the tangential PA.
+    const sT = Math.sin(cam.theta), cT = Math.cos(cam.theta);
+    const sP = Math.sin(cam.phi),   cP = Math.cos(cam.phi);
+    const er = [sT * cP,  cT, sT * sP];
+    const et = [cT * cP, -sT, cT * sP];
+    const ep = [-sP,       0,      cP];
+    const b  = cam.basis;
+    const toCart = (col) => [
+        b[col*3+0] * er[0] + b[col*3+1] * et[0] + b[col*3+2] * ep[0],
+        b[col*3+0] * er[1] + b[col*3+1] * et[1] + b[col*3+2] * ep[1],
+        b[col*3+0] * er[2] + b[col*3+1] * et[2] + b[col*3+2] * ep[2],
+    ];
     return {
         width:    resolution.width,
         height:   resolution.height,
         fovY:     cam.fovY,
         camPos:   [0.0, cam.r, cam.theta, cam.phi],
         camBasis: Array.from(cam.basis),
+        camForwardCart: toCart(0),
+        camUpCart:      toCart(1),
+        camRightCart:   toCart(2),
     };
 }
 
