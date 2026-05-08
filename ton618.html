@@ -934,7 +934,7 @@ select {
         inspector.style.display = 'block';
         const bRel = r.b_impact / r.b_crit;
         const fmtPct = (x) => Math.abs(x) < 1e-6 ? '0.000 %' : x.toExponential(3) + ' %';
-        inspBody.textContent = [
+        const lines = [
             `pixel (${r._click_x}, ${r._click_y})   spin a = ${(r.spin ?? 0).toFixed(3)}`,
             `term       : ${r.term.toUpperCase()}`,
             `verdict    : ${r.verdict}`,
@@ -949,7 +949,19 @@ select {
             `E   drift  : ${fmtPct(r.E_drift_pct)}    (Killing ∂_t)`,
             `L_z drift  : ${fmtPct(r.L_drift_pct)}    (Killing ∂_φ)`,
             `Q   drift  : ${fmtPct(r.Q_drift_pct ?? 0)}    (Carter)`,
-        ].join('\n');
+        ];
+        if (r.lab_polarization_fraction != null) {
+            lines.push(
+                `─── LAB sightline (Lyα halo) ────────────────`,
+                `λ_obs       : ${r.lab_lambda_obs_nm.toFixed(2)} nm`,
+                `R_half      : ${r.lab_R_half_kpc.toFixed(2)} kpc`,
+                `τ₀(central) : ${r.lab_tau0_central.toExponential(2)}`,
+                `P_esc(cen)  : ${r.lab_P_esc_central.toFixed(3)}`,
+                `f_pol       : ${(r.lab_polarization_fraction * 100).toFixed(2)} %  (max 15 %, tangential)`,
+                `PA_pol      : ${r.lab_polarization_PA_deg.toFixed(1)}°  (perpendicular to projected radial)`,
+            );
+        }
+        inspBody.textContent = lines.join('\n');
     });
 
     const flyToggle = $('flyMode');

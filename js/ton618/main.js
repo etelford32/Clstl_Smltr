@@ -14,7 +14,7 @@ import {
 } from './camera.js';
 import { formatLength, PHOTON_RING_RS, R_HORIZON_GEOM, M_IN_KPC } from './units.js';
 import { measurePhotonRing } from './validation.js';
-import { diagnostics } from './physics.js';
+import { diagnostics, labDiagnostics } from './physics.js';
 import { createMinimap } from './minimap.js';
 import { traceRay } from './inspector.js';
 
@@ -319,6 +319,61 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         );
         result._click_x = x | 0;
         result._click_y = y | 0;
+        // Polarization estimate for LAB-bound rays. Real Lyα RT codes solve
+        // anisotropic resonance scattering; we approximate with a
+        // single-scatter geometric fit: f_pol scales with the projected
+        // angle between the photon's escape direction and the radial line
+        // from the BH at the cell's last scatter (centrally illuminated,
+        // tangential polarization, capped at f_max).
+        if (state.showLab && result.escaped && result.escape_dir) {
+            const d = result.escape_dir;
+            // Project the radial-from-BH direction onto the screen-perp plane.
+            // Use the first density-weighted intercept ≈ R_half along dir
+            // from the BH (origin in M units).
+            const labD = labDiagnostics({
+                intensity:   state.labIntensity,
+                radiusKpc:   state.labRadiusKpc,
+                innerKpc:    state.labInnerKpc,
+                alpha:       state.labAlpha,
+                clump:       state.labClump,
+                filament:    state.labFilament,
+                mechanism:   state.labMechanism,
+                z:           state.labZ,
+                outflowKms:  state.labOutflowKms,
+                outflowBeta: state.labOutflowBeta,
+                logNHI:      state.labLogNHI,
+                tempK:       state.labTempK,
+                neufeld:     state.labNeufeld,
+            });
+            const r_scat_M = labD.R_half_kpc / state.mInKpc;     // ~ projected scatter point in M
+            const sx = d[0] * r_scat_M, sy = d[1] * r_scat_M, sz = d[2] * r_scat_M;
+            const sLen = Math.hypot(sx, sy, sz) || 1;
+            const cos_th_scat = (sx * d[0] + sy * d[1] + sz * d[2]) / sLen;    // ≈ 1 if escape colinear with scatter point
+            const sin2 = Math.max(0, 1 - cos_th_scat * cos_th_scat);
+            // Polarization fraction: tangential-Rayleigh-like, capped at 15 %.
+            const F_MAX = 0.15;
+            const f_pol = F_MAX * sin2;
+            // Position angle: perpendicular to projected radial direction (north of east in screen plane).
+            // For HUD purposes we report the 3-D PA as the angle of the projected radial in (right, up) plane.
+            const b = state.cam.basis;
+            const fwd   = [b[0], b[1], b[2]];
+            const upv   = [b[3], b[4], b[5]];
+            const rgt   = [b[6], b[7], b[8]];
+            const sUnit = [sx / sLen, sy / sLen, sz / sLen];
+            // Project sUnit into screen plane (perpendicular to forward).
+            const dotF = sUnit[0]*fwd[0] + sUnit[1]*fwd[1] + sUnit[2]*fwd[2];
+            const projS = [sUnit[0] - dotF*fwd[0], sUnit[1] - dotF*fwd[1], sUnit[2] - dotF*fwd[2]];
+            const sR = projS[0]*rgt[0] + projS[1]*rgt[1] + projS[2]*rgt[2];
+            const sU = projS[0]*upv[0] + projS[1]*upv[1] + projS[2]*upv[2];
+            // Tangential PA = perpendicular to (sR, sU).
+            const pa_deg = (Math.atan2(sR, sU) * 180 / Math.PI + 90 + 360) % 180;
+            result.lab_polarization_fraction = f_pol;
+            result.lab_polarization_PA_deg   = pa_deg;
+            result.lab_lambda_obs_nm         = labD.lambda_obs_nm;
+            result.lab_R_half_kpc            = labD.R_half_kpc;
+            result.lab_tau0_central          = labD.tau0_central;
+            result.lab_P_esc_central         = labD.P_esc_central;
+        }
         onInspect.forEach((cb) => cb(result));
     });
 
@@ -498,6 +553,23 @@ function updateHUD(hud, state, backend, backendName) {
     const cam = state.cam;
     const L = formatLength(cam.r);
     const d = diagnostics(cam, state.mdotRel, state.spin);
+    // LAB diagnostics (only computed when the user has the halo on, so we
+    // don't pay the 120-step luminosity integral every frame for nothing).
+    const labD = state.showLab ? labDiagnostics({
+        intensity:   state.labIntensity,
+        radiusKpc:   state.labRadiusKpc,
+        innerKpc:    state.labInnerKpc,
+        alpha:       state.labAlpha,
+        clump:       state.labClump,
+        filament:    state.labFilament,
+        mechanism:   state.labMechanism,
+        z:           state.labZ,
+        outflowKms:  state.labOutflowKms,
+        outflowBeta: state.labOutflowBeta,
+        logNHI:      state.labLogNHI,
+        tempK:       state.labTempK,
+        neufeld:     state.labNeufeld,
+    }) : null;
 
     const obsLabels = ['static', 'Painlevé in-fall', 'ZAMO', 'Keplerian (eq.)'];
     const obs = obsLabels[cam.observerType] ?? '?';
@@ -560,5 +632,15 @@ function updateHUD(hud, state, backend, backendName) {
         `anim: ${animTag}    LOD: ${state.autoLOD ? `auto ×${state.motionScaleMul.toFixed(2)}` : 'fixed'}`,
         `resolution ${backend.canvas.width}×${backend.canvas.height}   max_steps=${state.maxSteps}`,
     ];
+    if (labD) {
+        const mechName = ['cooling', 'photoionization', 'shock'][state.labMechanism] ?? '?';
+        lines.push(
+            `─── Lyα blob (${mechName}) ───────────────────`,
+            `λ_obs = ${labD.lambda_obs_nm.toFixed(2)} nm   z = ${state.labZ.toFixed(3)}   R_half = ${fmt(labD.R_half_kpc, 3)} kpc`,
+            `L_Lyα ≈ ${labD.L_Lya_erg_s.toExponential(2)} erg/s   v_out(r_LAB) = ${state.labOutflowKms|0} km/s`,
+            `log τ₀(cen) = ${Math.log10(Math.max(labD.tau0_central,1)).toFixed(2)}   P_esc(cen) = ${labD.P_esc_central.toFixed(3)}   Δv_peak = ±${labD.peak_displacement_kms.toFixed(0)} km/s`,
+            `(1+z)⁻⁴ dim = ${labD.SB_dim_factor.toExponential(2)}   N_HI(cen) = ${labD.N_HI_central.toExponential(2)} cm⁻²`,
+        );
+    }
     hud.textContent = lines.join('\n');
 }
