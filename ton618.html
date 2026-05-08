@@ -495,6 +495,57 @@ select {
         </div>
 
         <div>
+            <div class="sec-title">Lyman-α blob (host halo)</div>
+            <div class="toggle-row">
+                <input type="checkbox" id="showLab">
+                <label for="showLab">Render Lyα halo around BH (<i>Phase 2.1</i>)</label>
+            </div>
+            <div class="ctrl">
+                <label>Powering mechanism</label>
+                <select id="labMechanism">
+                    <option value="0">Gravitational cooling (j ∝ ρ²)</option>
+                    <option value="1" selected>AGN photoionization (j ∝ ρ Φ/r²)</option>
+                    <option value="2">Shock heating (filament edges)</option>
+                </select>
+            </div>
+            <div class="ctrl">
+                <label>Outer radius r<sub>LAB</sub> [kpc]</label>
+                <input type="range" id="s-lab-r" min="30" max="800" step="5" value="460">
+                <div class="val" id="v-lab-r">460 kpc  (Slug-class)</div>
+            </div>
+            <div class="ctrl">
+                <label>Inner cavity r<sub>inner</sub> [kpc]</label>
+                <input type="range" id="s-lab-rin" min="0.5" max="50" step="0.5" value="8">
+                <div class="val" id="v-lab-rin">8.0 kpc</div>
+            </div>
+            <div class="ctrl">
+                <label>Density slope α  (ρ ∝ r<sup>−α</sup>)</label>
+                <input type="range" id="s-lab-alpha" min="0.5" max="3" step="0.05" value="1.8">
+                <div class="val" id="v-lab-alpha">1.80</div>
+            </div>
+            <div class="ctrl">
+                <label>Clumping amplitude</label>
+                <input type="range" id="s-lab-clump" min="0" max="1" step="0.02" value="0.55">
+                <div class="val" id="v-lab-clump">0.55</div>
+            </div>
+            <div class="ctrl">
+                <label>Filament anisotropy</label>
+                <input type="range" id="s-lab-fil" min="0" max="1" step="0.02" value="0.45">
+                <div class="val" id="v-lab-fil">0.45</div>
+            </div>
+            <div class="ctrl">
+                <label>Brightness</label>
+                <input type="range" id="s-lab-i" min="0" max="4" step="0.05" value="0.85">
+                <div class="val" id="v-lab-i">0.85×</div>
+            </div>
+            <div class="note">Volumetric raymarch in flat space, started where
+                the geodesic escapes r<sub>far</sub>. Defaults match UM287's
+                "Slug" nebula — 460 kpc, ~10⁴⁴ erg/s, AGN-photoionized.
+                Spectrum + Neufeld resonance escape land in <i>Phase 2.1
+                part 2/3</i>.</div>
+        </div>
+
+        <div>
             <div class="sec-title">Overlays</div>
             <div class="toggle-row">
                 <input type="checkbox" id="showGrid">
@@ -734,6 +785,28 @@ select {
     });
     bindRange('s-lindblad-rp', 'v-lindblad-rp',
         (v) => `${v.toFixed(1)} M`, (v) => app.setLindbladRp(v));
+
+    // ── Lyman-α blob (Phase 2.1) ─────────────────────────────────
+    $('showLab').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showLab) app.toggleLab();
+    });
+    $('labMechanism').addEventListener('change', (e) => app.setLabMechanism(+e.target.value));
+    bindRange('s-lab-r', 'v-lab-r',
+        (v) => v >= 350 && v <= 500 ? `${(v|0)} kpc  (Slug-class)`
+            : v < 150 ? `${(v|0)} kpc  (compact LAB)`
+            : v > 600 ? `${(v|0)} kpc  (super-Slug)`
+            : `${(v|0)} kpc`,
+        (v) => app.setLabRadiusKpc(v));
+    bindRange('s-lab-rin', 'v-lab-rin',
+        (v) => `${v.toFixed(1)} kpc`, (v) => app.setLabInnerKpc(v));
+    bindRange('s-lab-alpha', 'v-lab-alpha',
+        (v) => v.toFixed(2), (v) => app.setLabAlpha(v));
+    bindRange('s-lab-clump', 'v-lab-clump',
+        (v) => v.toFixed(2), (v) => app.setLabClump(v));
+    bindRange('s-lab-fil', 'v-lab-fil',
+        (v) => v.toFixed(2), (v) => app.setLabFilament(v));
+    bindRange('s-lab-i', 'v-lab-i',
+        (v) => `${v.toFixed(2)}×`, (v) => app.setLabIntensity(v));
 
     // ── Disk warp (B5) ───────────────────────────────────────────
     $('diskWarp').addEventListener('change', (e) => {

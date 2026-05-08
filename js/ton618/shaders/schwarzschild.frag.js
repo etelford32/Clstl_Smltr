@@ -81,6 +81,24 @@ uniform float u_far_shortcut_r;          // r threshold for far-field straight-l
 // ── Phase 1 — Kerr spin parameter (M = 1) ───────────────────────────
 uniform float u_spin;                    // a/M ∈ [0, 0.999); a=0 ↔ Schwarzschild
 
+// ── Phase 2.1 — Lyman-α blob (Slug-class defaults) ──────────────────
+// LAB lives at host-galaxy scale (~10²–10⁵ M_kpc beyond r_far). We
+// raymarch a procedural neutral-hydrogen density field in flat space
+// from the geodesic's escape point outward along its asymptotic
+// direction, accumulating Lyα emissivity modulated by the Neufeld
+// resonance-escape probability. Reference target: UM287's "Slug"
+// nebula (Cantalupo et al. 2014) — 460 kpc, ~10⁴⁴ erg s⁻¹.
+uniform int   u_show_lab;
+uniform float u_lab_intensity;           // overall brightness multiplier
+uniform float u_lab_radius_kpc;          // outer blob radius
+uniform float u_lab_inner_kpc;           // central ionized cavity radius
+uniform float u_lab_alpha;               // density power-law slope ρ ∝ r^{−α}
+uniform float u_lab_clump;               // 0..1 clumping amplitude (drives variance C)
+uniform float u_lab_filament;            // 0..1 cosmic-web-aligned anisotropy
+uniform vec3  u_lab_filament_axis;       // unit vector — major filament direction
+uniform float u_M_in_kpc;                // 1 unit M expressed in kpc (TON 618: ~3.16e-6)
+uniform int   u_lab_mechanism;           // 0=cooling, 1=photoionization, 2=shock
+
 // ── B1 — Vertical disk structure (Shakura-Sunyaev slab) ─────────────
 uniform float u_disk_h_over_r;           // characteristic H/r at the inner edge (0..0.4)
 
@@ -1112,6 +1130,142 @@ void trace(inout float y[8], out int term, out int steps_taken, out float affine
 // p_μ; raise indices via k^μ = g^{μν} p_ν before mapping into Cartesian.
 // At large r the Kerr metric goes to flat Minkowski, so the direction
 // extracted from k^μ is the photon's asymptotic direction.
+// ---------------------------------------------------------------------------
+// Phase 2.1 — Lyman-α blob (host-galaxy halo around the BH).
+// ---------------------------------------------------------------------------
+// Coordinate convention here is *flat space*, kpc units. The volumetric
+// raymarch starts where the geodesic escapes the strong-field zone
+// (r ≈ r_far ≪ r_LAB) and continues outward along the photon's asymptotic
+// direction, accumulating Lyα emissivity along the way. The radial scale
+// gap between the inner GR sim (r_far ≈ 1200 M ≈ 4 × 10⁻³ kpc for TON 618)
+// and the LAB outer radius (~ 460 kpc Slug-class) is enormous, so the LAB
+// path is essentially "the celestial sphere with thickness."
+//
+// Density model (NFW-like with central ionized cavity):
+//   ρ(r) = ρ₀ · (r_inner / r)^α       for r > r_inner
+//        = 0                            for r < r_inner   (Strömgren cavity)
+// Clumping and filament anisotropy ride on top as multiplicative noise.
+
+// Hash + 3-D value noise.
+float hash13(vec3 p) {
+    p = fract(p * vec3(0.1031, 0.11369, 0.13787));
+    p += dot(p, p.yxz + 19.19);
+    return fract((p.x + p.y) * p.z);
+}
+float vnoise3(vec3 p) {
+    vec3 i = floor(p);
+    vec3 f = fract(p);
+    vec3 w = f * f * (3.0 - 2.0 * f);
+    float n000 = hash13(i + vec3(0,0,0));
+    float n100 = hash13(i + vec3(1,0,0));
+    float n010 = hash13(i + vec3(0,1,0));
+    float n110 = hash13(i + vec3(1,1,0));
+    float n001 = hash13(i + vec3(0,0,1));
+    float n101 = hash13(i + vec3(1,0,1));
+    float n011 = hash13(i + vec3(0,1,1));
+    float n111 = hash13(i + vec3(1,1,1));
+    float nx00 = mix(n000, n100, w.x);
+    float nx10 = mix(n010, n110, w.x);
+    float nx01 = mix(n001, n101, w.x);
+    float nx11 = mix(n011, n111, w.x);
+    float nxy0 = mix(nx00, nx10, w.y);
+    float nxy1 = mix(nx01, nx11, w.y);
+    return mix(nxy0, nxy1, w.z);
+}
+
+// Anisotropic 4-octave fBm. The filament axis stretches the noise along
+// itself, suggesting a cosmic-web filament passing through the LAB.
+float lab_fbm(vec3 p_kpc) {
+    float a = 0.5, fr = 0.04;        // fundamental scale ~25 kpc
+    float s = 0.0;
+    // Build an aspect-stretched coordinate when filament > 0.
+    vec3 axis = normalize(u_lab_filament_axis + vec3(1e-4, 0, 0));
+    float stretch = 1.0 + 2.0 * u_lab_filament;     // up to 3:1 along axis
+    for (int o = 0; o < 4; ++o) {
+        vec3 q = p_kpc * fr;
+        // Stretch by reducing frequency along the filament axis.
+        q -= axis * (dot(q, axis) * (1.0 - 1.0 / stretch));
+        s += a * (vnoise3(q + float(o) * 17.13) - 0.5);
+        a  *= 0.55;
+        fr *= 2.07;
+    }
+    return s;            // ≈ −0.5..+0.5
+}
+
+// Neutral-hydrogen density at position p_kpc relative to BH.
+//   ρ(r) ∝ (r_inner / r)^α  for r > r_inner, 0 inside (ionized cavity).
+//   Multiplied by (1 + clump · fbm) for clumping; (1 + filament*0.5) along axis.
+float lab_density(vec3 p_kpc) {
+    float r = length(p_kpc);
+    if (r < u_lab_inner_kpc || r > u_lab_radius_kpc * 1.2) return 0.0;
+    float radial = pow(u_lab_inner_kpc / max(r, 1e-3), u_lab_alpha);
+    // Soft outer cutoff so emission tapers smoothly past r_LAB.
+    float taper = 1.0 - smoothstep(u_lab_radius_kpc * 0.7, u_lab_radius_kpc, r);
+    radial *= taper;
+    float fbm = lab_fbm(p_kpc);
+    float clump = 1.0 + u_lab_clump * 2.5 * fbm;
+    return max(radial * clump, 0.0);
+}
+
+// Per-mechanism emissivity j_Lyα (arbitrary units).
+//   0 — gravitational cooling: j ∝ ρ² · Λ(T) (recombination + collisional).
+//       Spatially smoother, dense filaments dominate.
+//   1 — photoionization (AGN-driven): j ∝ ρ · Φ_ion / r².
+//       Centrally peaked, drops as inverse-square from the source.
+//   2 — shock heating: j ∝ ρ² · |∇·v| proxy via fbm gradient → fragmented.
+float lab_emissivity(vec3 p_kpc, float rho) {
+    if (rho <= 0.0) return 0.0;
+    if (u_lab_mechanism == 1) {
+        float r2 = max(dot(p_kpc, p_kpc), 1.0);     // kpc²
+        return rho / r2 * (u_lab_inner_kpc * u_lab_inner_kpc + 1.0);
+    }
+    if (u_lab_mechanism == 2) {
+        // Shock proxy: noise gradient magnitude — bright at edges of clumps.
+        float h = 1.0;
+        float dx = lab_fbm(p_kpc + vec3(h,0,0)) - lab_fbm(p_kpc - vec3(h,0,0));
+        float dy = lab_fbm(p_kpc + vec3(0,h,0)) - lab_fbm(p_kpc - vec3(0,h,0));
+        float dz = lab_fbm(p_kpc + vec3(0,0,h)) - lab_fbm(p_kpc - vec3(0,0,h));
+        float grad = sqrt(dx*dx + dy*dy + dz*dz);
+        return rho * rho * grad * 4.0;
+    }
+    // default: gravitational cooling — recombination ∝ ρ² (T≈10⁴ K assumed).
+    return rho * rho;
+}
+
+// Volumetric raymarch through the LAB starting at the geodesic escape point.
+//   pos_M  — Cartesian position of the escape (in M units).
+//   dir    — unit photon direction at escape (asymptotic direction toward source).
+// Returns observer-frame additive Lyα emission (linear RGB, before tone map).
+vec3 lab_volume_emission(vec3 pos_M, vec3 dir) {
+    if (u_show_lab == 0 || u_lab_intensity <= 0.0) return vec3(0.0);
+
+    // Convert to kpc once; march in kpc along the ray's path length s.
+    vec3 pos_kpc = pos_M * u_M_in_kpc;
+    // Path length needed to traverse the LAB: ray could enter near r₀ and
+    // exit near +2 r_LAB on the far side (when the BH is between us and
+    // the rim). 2.5× the outer radius is a conservative upper bound.
+    float s_max = 2.5 * u_lab_radius_kpc;
+    const int N = 48;
+    float ds = s_max / float(N);
+    vec3 acc = vec3(0.0);
+    // Lyα observer-frame color baseline (Phase 2.1 part 3 will replace this
+    // with a velocity-shifted spectral mapping). At z = 2.219 the line
+    // shifts to λ_obs ≈ 391 nm — a deep violet, with a faint UV tail that
+    // we approximate by leaning the blue heavily.
+    vec3 color_base = vec3(0.30, 0.20, 1.10);
+    for (int i = 0; i < N; ++i) {
+        float s = (float(i) + 0.5) * ds;
+        vec3 q  = pos_kpc + dir * s;
+        float rho = lab_density(q);
+        if (rho <= 0.0) continue;
+        float j = lab_emissivity(q, rho);
+        acc += color_base * j * ds;
+    }
+    // Cosmological surface-brightness dimming (1+z)⁻⁴ is folded into the
+    // intensity slider for now; an explicit z-aware mapping ships in part 3.
+    return acc * u_lab_intensity;
+}
+
 vec3 outgoing_direction(float y[8]) {
     float r     = y[1];
     float th    = y[2];
@@ -1161,6 +1315,15 @@ void main() {
     vec3 volume_rgb;
     trace(y, term, steps, aff, disk_rgb, grid_rgb, volume_rgb);
 
+    // Escape-point Cartesian position (M units) — needed for the LAB
+    // raymarch which works in flat space beyond r_far.
+    float r_e  = y[1];
+    float th_e = y[2];
+    float ph_e = y[3];
+    vec3 escape_pos_M = r_e * vec3(sin(th_e) * cos(ph_e),
+                                   cos(th_e),
+                                   sin(th_e) * sin(ph_e));
+
     vec3 color;
     if (term == 1) {
         // Horizon capture: pitch black.
@@ -1169,6 +1332,9 @@ void main() {
         // Escape to celestial sphere.
         vec3 dir = outgoing_direction(y);
         color = celestial_sphere(dir);
+        // LAB volumetric halo (Phase 2.1) — accumulate Lyα emission along
+        // the asymptotic continuation of the geodesic in flat space.
+        color += lab_volume_emission(escape_pos_M, dir);
     } else if (term == 4) {
         // Opaque disk hit.
         color = disk_rgb;
@@ -1177,9 +1343,9 @@ void main() {
         // accumulating disk emission. Composite emission over background.
         // We re-derive the "background" by inspecting y[1]: if r drifted to
         // r_far we use the celestial sphere, otherwise it was captured.
-        vec3 background = (y[1] >= u_r_far)
-            ? celestial_sphere(outgoing_direction(y))
-            : vec3(0.0);
+        vec3 dir5 = outgoing_direction(y);
+        vec3 background = (y[1] >= u_r_far) ? celestial_sphere(dir5) : vec3(0.0);
+        if (y[1] >= u_r_far) background += lab_volume_emission(escape_pos_M, dir5);
         color = background + disk_rgb;
     } else {
         // Step budget exhausted.

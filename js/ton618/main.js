@@ -12,7 +12,7 @@ import {
     integrate, startTransition,
     OBSERVER_TYPES, PRESETS,
 } from './camera.js';
-import { formatLength, PHOTON_RING_RS, R_HORIZON_GEOM } from './units.js';
+import { formatLength, PHOTON_RING_RS, R_HORIZON_GEOM, M_IN_KPC } from './units.js';
 import { measurePhotonRing } from './validation.js';
 import { diagnostics } from './physics.js';
 import { createMinimap } from './minimap.js';
@@ -102,6 +102,22 @@ export async function boot({ canvas, hud, minimapCanvas }) {
 
         // ── Time controls (B6) ─────────────────────────────────────────
         timeMax:          200.0,      // user-adjustable scrubber upper bound (s)
+
+        // ── Phase 2.1 — Lyman-α blob (Slug-class defaults) ────────────
+        // Off by default; toggle to render the host-galaxy halo. Defaults
+        // anchored to UM287's "Slug" nebula (Cantalupo et al. 2014):
+        // 460 kpc outer radius, ~10⁴⁴ erg/s, photoionization-dominated.
+        showLab:          false,
+        labIntensity:     0.85,        // overall multiplier (slider)
+        labRadiusKpc:     460.0,       // Slug outer extent
+        labInnerKpc:      8.0,         // central ionized cavity
+        labAlpha:         1.8,         // density slope ρ ∝ r^{-α}
+        labClump:         0.55,        // 0..1 clumping amplitude
+        labFilament:      0.45,        // 0..1 cosmic-web anisotropy
+        labFilamentAxis:  [0.6, 0.0, 0.8],   // unit vector
+        labMechanism:     1,           // 0=cooling, 1=photoionization, 2=shock
+        // Pre-converted constant: 1 M expressed in kpc for TON 618.
+        mInKpc:           M_IN_KPC,
 
         // Animation pump.
         animate:        true,
@@ -199,6 +215,17 @@ export async function boot({ canvas, hud, minimapCanvas }) {
             diskWarpAngle:    state.diskWarpAngle,
             diskWarpPsi:      state.diskWarpPsi,
             spin:             state.spin,
+            // Phase 2.1 — Lyman-α blob
+            showLab:          state.showLab,
+            labIntensity:     state.labIntensity,
+            labRadiusKpc:     state.labRadiusKpc,
+            labInnerKpc:      state.labInnerKpc,
+            labAlpha:         state.labAlpha,
+            labClump:         state.labClump,
+            labFilament:      state.labFilament,
+            labFilamentAxis:  state.labFilamentAxis,
+            labMechanism:     state.labMechanism,
+            mInKpc:           state.mInKpc,
         });
         backend.draw();
         updateHUD(hud, state, backend, name);
@@ -350,6 +377,20 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         setWarpPsi(deg)    { state.diskWarpPsi   = (deg * Math.PI) / 180; state.dirty = true; },
         setTime(t)         { state.timeAccum = Math.max(0, t); state.dirty = true; },
         getTime()          { return state.timeAccum; },
+        // ── Phase 2.1 — Lyman-α blob ───────────────────────────────────
+        toggleLab()         { state.showLab = !state.showLab; state.dirty = true; return state.showLab; },
+        setLabIntensity(v)  { state.labIntensity  = Math.max(0, Math.min(8, v)); state.dirty = true; },
+        setLabRadiusKpc(v)  { state.labRadiusKpc  = Math.max(state.labInnerKpc * 1.5, Math.min(2000, v)); state.dirty = true; },
+        setLabInnerKpc(v)   { state.labInnerKpc   = Math.max(0.1, Math.min(state.labRadiusKpc * 0.5, v)); state.dirty = true; },
+        setLabAlpha(v)      { state.labAlpha      = Math.max(0.2, Math.min(4, v)); state.dirty = true; },
+        setLabClump(v)      { state.labClump      = Math.max(0, Math.min(1, v)); state.dirty = true; },
+        setLabFilament(v)   { state.labFilament   = Math.max(0, Math.min(1, v)); state.dirty = true; },
+        setLabMechanism(m)  {
+            state.labMechanism = (typeof m === 'string')
+                ? ({ cooling: 0, photoionization: 1, shock: 2 })[m] ?? 1
+                : Math.max(0, Math.min(2, m | 0));
+            state.dirty = true;
+        },
         triggerQPOFlare(strength = 1.0, halfLifeSeconds = 2.5) {
             // Half-life in *real* seconds of the user's clock; converts to a
             // decay rate. Spawns a flare at the inner edge that the QPO loop
