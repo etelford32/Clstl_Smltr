@@ -205,7 +205,10 @@ async def health():
         },
         "belay":   _belay.snapshot(),
     }
-    return JSONResponse(payload, status_code=200 if overall == "healthy" else 503)
+    # "degraded" still serves profiles via climatology fallback, so it
+    # is a 200. Reserve 503 for the case where the service literally
+    # can't respond — which would already crash before reaching here.
+    return JSONResponse(payload, status_code=200)
 
 
 @app.get("/v1/atmosphere/density", tags=["atmosphere"],
