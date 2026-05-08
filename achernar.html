@@ -251,6 +251,11 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
             <div>Decretion disk: <span class="vh" id="hud-disk">active</span></div>
             <div>Disk H(R<sub>eq</sub>): <span class="val" id="hud-h">0.04</span> <span class="dim">R<sub>eq</sub></span></div>
             <div>Outburst: <span class="vh" id="hud-burst">build</span> <span class="dim" id="hud-burst-pct">0%</span></div>
+            <div class="sep"></div>
+            <div>Ṁ<sub>pol</sub>: <span class="val" id="hud-mdot-pol">2.1</span><span class="dim">×10⁻¹⁰ M☉/yr</span></div>
+            <div>v<sub>∞,pol</sub>: <span class="val" id="hud-vinf">1450</span> <span class="dim">km/s</span></div>
+            <div>Ṁ<sub>eq</sub>: <span class="val" id="hud-mdot-eq">3.5</span><span class="dim">×10⁻⁹ M☉/yr</span></div>
+            <div>v<sub>K</sub>(R<sub>eq</sub>): <span class="val" id="hud-vk">325</span> <span class="dim">km/s</span></div>
             <div>FPS: <span id="fps-display">--</span></div>
             <div class="dim" style="margin-top:3px">Drag · Pinch · Scroll</div>
         </div>
@@ -386,7 +391,11 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
                     </div>
                     <div class="toggle-row">
                         <input type="checkbox" id="tog-jet" checked>
-                        <label for="tog-jet">Polar radiative wind (CAK)</label>
+                        <label for="tog-jet">Polar radiative wind glow (CAK)</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-pwind" checked>
+                        <label for="tog-pwind">Polar wind tracer particles</label>
                     </div>
                     <div class="toggle-row">
                         <input type="checkbox" id="tog-axis">
@@ -433,6 +442,24 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
                         sheds its disk on multi-year cycles; we compress to
                         seconds for visualisation). Particles inherit Keplerian
                         v<sub>φ</sub> + viscous v<sub>r</sub> = α (c<sub>s</sub>/v<sub>K</sub>)² v<sub>K</sub>.
+                    </div>
+                </div>
+            </div>
+
+            <div class="sec">
+                <div class="sec-hd"><span>Twistor Congruence</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="ctrl">
+                        <label>Helicity h<sub>T</sub></label>
+                        <input type="range" id="sl-twist-h" min="-1.5" max="1.5" step="0.05" value="0">
+                        <span class="vdisp" id="disp-twist-h">0.00</span>
+                    </div>
+                    <div style="font-size:10px;color:#666;line-height:1.5;margin-top:6px">
+                        h<sub>T</sub> = 0 → pure Hopf fibration (Z·Z̄ = 0, fibers
+                        close as Villarceau circles). h<sub>T</sub> ≠ 0 →
+                        Robinson congruence: φ<sub>base</sub> drifts with α, fibers
+                        spiral instead of close, encoding non-zero twistor norm.
+                        Sign of h<sub>T</sub> sets the chirality.
                     </div>
                 </div>
             </div>
@@ -647,6 +674,12 @@ const uniforms = {
     // shows on year-decade timescales).
     u_outburst_amp: { value: 0.65 },
     u_outburst_per: { value: 8.0  },   // visualisation period (s)
+
+    // ── Robinson-congruence helicity ─────────────────────────────
+    // 0 → pure null (Hopf fibration, fibers close).
+    // ±N → twistor norm Z·Z̄ ≠ 0 → Robinson congruence, fibers
+    // spiral and don't close (non-null helicity / chirality).
+    u_twist_helicity: { value: 0.0 },
 };
 
 const state = { spin: 1.0, inclination: 65, viewMode: 0 };
@@ -1291,81 +1324,89 @@ starGroup.add(disk);
 // ────────────────────────────────────────────────────────────────
 //
 //  Penrose's twistor space ℙT ≅ ℂℙ³ encodes Minkowski-space null
-//  geodesics as points.  The unique non-trivial null geodesic
-//  congruence with non-zero twist is the Robinson congruence —
-//  when you slice it at a fixed time, the world-lines project
-//  onto a family of *Villarceau circles* that fibre nested tori
-//  around an axis.  Each torus is a single "twistor", and the
-//  Villarceau fibration realises the Hopf fibration S³ → S² of
-//  spinor space.
+//  geodesics as points.  A *Robinson congruence* is the family of
+//  null geodesics that meet a single non-null twistor Z ∈ ℙT.
+//  Sliced at constant time, the rays project onto ℝ³ as nested
+//  Villarceau circles — the **stereographic image of the Hopf
+//  fibration** S³ → S².  We render that fibration directly:
 //
-//  Why include it on a Be star?  Two reasons:
+//      • Sample a particle's *base point* (η, φ_b) on S² (the
+//        target of the Hopf map h: S³ → S²).
+//      • Sample the particle's *fiber phase* α₀.
+//      • Compute its position on S³ ⊂ ℂ²:
+//            z₁ = cos(η/2) · e^{i α}
+//            z₂ = sin(η/2) · e^{i (q·α − φ_b)}     α = α₀ + ω·t
+//        (q = 1 ⇒ pure Hopf circle, q > 1 ⇒ (1, q) torus knot.)
+//      • Project stereographically from (0, 0, 0, 1) ∈ S³:
+//            P(u, v, w, x) = (u, v, w) / (1 − x)
+//        and re-axis so Hopf-Z = scene-y (rotation axis) and the
+//        Hopf unit circle (η = 0) lies in the scene equatorial
+//        plane (xz).
 //
-//   1. It's the cleanest geometric way to draw a *quasi-Keplerian
-//      shear flow with non-zero vorticity*: each torus's particles
-//      share the same specific angular momentum but different
-//      orbital phase — exactly the structure of a thin disk.
-//      Project the y-axis to the rotation axis and the inner-disk
-//      shear *is* a Robinson congruence projection.
+//  Helicity slider h_T deforms the congruence away from pure
+//  null:  φ_b drifts with α at rate h_T·ω, breaking fiber closure
+//  and producing the *twisted* Robinson congruence with non-zero
+//  vorticity — the geometric encoding of twistor norm Z·Z̄ ≠ 0.
+//  At h_T = 0 you see the pure Hopf fibration; cranking h_T
+//  generates Robinson's logarithmic-spiral fibers.
 //
-//   2. The m=1 one-armed-oscillation mode that drives Be-disk
-//      V/R cycles is naturally encoded by the helical phasing of
-//      neighbouring twistors — it's the projection of a slowly
-//      rotating cell in twistor space.
-//
-//  Each particle carries (R_torus, r_torus, α₀, q) where q is
-//  the rational ratio between toroidal and poloidal phase
-//  velocities (q=1 gives an exact Villarceau circle; q≠1 gives
-//  a winding "torus knot" trajectory that fills the torus).
-//  Colour encodes α₀ — the twistor phase — through a periodic
-//  wheel so you can read the congruence structure at a glance.
+//  Twistors live in the *inertial* frame (parented to scene, not
+//  starGroup) because they are a property of spacetime, not of the
+//  rotating body — so the congruence stays geometrically still
+//  while the star spins inside it.
 //
 const TWIST_N = 1600;
-const twistPos   = new Float32Array(TWIST_N * 3);
-const twistCol   = new Float32Array(TWIST_N * 3);
-const twistParam = new Float32Array(TWIST_N * 5);   // R, r, α₀, q, ωφ
+const twistPos    = new Float32Array(TWIST_N * 3);
+const twistCol    = new Float32Array(TWIST_N * 3);
+const twistEta    = new Float32Array(TWIST_N);    // S² latitude of base point
+const twistPhiB0  = new Float32Array(TWIST_N);    // S² longitude of base point
+const twistAlpha0 = new Float32Array(TWIST_N);    // initial fiber phase
+const twistQ      = new Float32Array(TWIST_N);    // (1, q) torus-knot index
+const TWIST_SCALE = 2.5;                           // scene-units per Hopf radius
+const TWIST_OMEGA = 0.45;                          // twistor U(1) phase rate
 
 (function initTwistors() {
     for (let i = 0; i < TWIST_N; i++) {
-        // Distribute torus radii so the congruence covers ~2.0–6.0 R_eq,
-        // matching the disk extent.  Bias inward (more particles in the
-        // bright inner disk).
-        const u  = Math.pow(Math.random(), 0.6);
-        const Rt = 2.0 + 4.0 * u;
-        // Minor radius scales with H(r) of the disk: ~5% scale-height.
-        const rt = 0.04 + 0.08 * u + 0.05 * Math.random();
-        const a0 = Math.random() * Math.PI * 2;
-        // Mix of "Hopf" (q=1) and slightly winding (q=2,3) trajectories.
-        const choice = Math.random();
-        const q  = choice < 0.6 ? 1 : (choice < 0.9 ? 2 : 3);
-        // Toroidal angular speed — slower at large R (visualisation only).
-        const w  = 0.20 / Math.sqrt(Rt);
-        twistParam[i*5]   = Rt;
-        twistParam[i*5+1] = rt;
-        twistParam[i*5+2] = a0;
-        twistParam[i*5+3] = q;
-        twistParam[i*5+4] = w;
+        // η ∈ (0.18, π − 0.10): away from the singular Hopf fibers
+        //   (η = 0 ⇒ unit circle in equatorial plane;
+        //    η = π ⇒ entire rotation axis through ∞).
+        // We bias toward intermediate latitudes so the bulk of the
+        // cloud lies on the visible nested-tori shells rather than
+        // hugging the axis or the equatorial ring.
+        const u   = (i + 0.5) / TWIST_N;
+        const eta = 0.18 + (Math.PI - 0.28) * u;
+        twistEta[i]    = eta;
+        // Golden-spiral base longitude (≈ uniform on S²).
+        twistPhiB0[i]  = (i * Math.PI * (3 - Math.sqrt(5))) % (Math.PI * 2);
+        twistAlpha0[i] = Math.random() * Math.PI * 2;
+        // 65 % pure Hopf (q = 1), 25 % torus-knot (q = 2), 10 % (q = 3).
+        const c = Math.random();
+        twistQ[i] = c < 0.65 ? 1 : (c < 0.90 ? 2 : 3);
 
-        // Colour by twistor phase α₀ — wrap a HSV wheel through
-        // the Penrose-style purple→cyan→magenta palette.  Particles on
-        // larger tori (the disk's outer fibres) are dimmed so the inner
-        // Hopf-fibration structure stays readable through the cloud.
-        const t = a0 / (Math.PI * 2);
-        const h = t * 6;
-        const c = 0.9, x = c * (1 - Math.abs(((h) % 2) - 1));
+        // Colour: cyclic wheel by α₀ blended with η-tinted tone so the
+        // nested-tori layering is readable.  Inner shells (small η) →
+        // warm magenta; outer shells (η → π) → cool indigo.
+        const tA = twistAlpha0[i] / (Math.PI * 2);
+        const hA = tA * 6;
+        const cM = 0.9, xM = cM * (1 - Math.abs(((hA) % 2) - 1));
         let R = 0, G = 0, B = 0;
-        if (h < 1)      { R=c; G=x; B=0; }
-        else if (h < 2) { R=x; G=c; B=0; }
-        else if (h < 3) { R=0; G=c; B=x; }
-        else if (h < 4) { R=0; G=x; B=c; }
-        else if (h < 5) { R=x; G=0; B=c; }
-        else            { R=c; G=0; B=x; }
-        // Outer-torus dimming: ∝ 1/Rt so the cloud doesn't wash out.
-        const dim = 0.55 + 0.40 * (2.0 / Math.max(Rt, 2.0));
-        // Blend toward Penrose-paper purple
-        twistCol[i*3]   = (0.5 * R + 0.5 * 0.78) * dim;
-        twistCol[i*3+1] = (0.5 * G + 0.5 * 0.55) * dim;
-        twistCol[i*3+2] = (0.5 * B + 0.5 * 1.00) * dim;
+        if (hA < 1)      { R=cM; G=xM; B=0;  }
+        else if (hA < 2) { R=xM; G=cM; B=0;  }
+        else if (hA < 3) { R=0;  G=cM; B=xM; }
+        else if (hA < 4) { R=0;  G=xM; B=cM; }
+        else if (hA < 5) { R=xM; G=0;  B=cM; }
+        else             { R=cM; G=0;  B=xM; }
+        // Latitudinal tint (warm at equator → cool toward axis)
+        const lat = (eta - Math.PI/2) / (Math.PI/2);  // −1 (equator) … +1 (pole)
+        const tintR = 0.78 + 0.10 * lat;
+        const tintG = 0.55 - 0.05 * lat;
+        const tintB = 1.00 - 0.10 * lat;
+        // Dim particles on the most extreme tori so the structure stays
+        // readable when many shells overlap.
+        const dim = 0.65 + 0.30 * (1 - Math.abs(lat));
+        twistCol[i*3]   = (0.45 * R + 0.55 * tintR) * dim;
+        twistCol[i*3+1] = (0.45 * G + 0.55 * tintG) * dim;
+        twistCol[i*3+2] = (0.45 * B + 0.55 * tintB) * dim;
     }
 })();
 
@@ -1374,33 +1415,65 @@ twistGeo.setAttribute('position', new THREE.BufferAttribute(twistPos, 3));
 twistGeo.setAttribute('color',    new THREE.BufferAttribute(twistCol, 3));
 const twistMat = new THREE.PointsMaterial({
     size: 0.038, sizeAttenuation: true, vertexColors: true,
-    transparent: true, opacity: 0.65, depthWrite: false,
+    transparent: true, opacity: 0.70, depthWrite: false,
     blending: THREE.AdditiveBlending,
 });
 const twistPoints = new THREE.Points(twistGeo, twistMat);
 twistPoints.visible = false;
-starGroup.add(twistPoints);
+// Inertial frame: twistors are a spacetime structure, not a body overlay.
+scene.add(twistPoints);
 
 function updateTwistors(t) {
     if (!twistPoints.visible) return;
     const arr = twistPos;
+    const omega = TWIST_OMEGA;
+    const helicity = uniforms.u_twist_helicity.value;
+    const SCALE = TWIST_SCALE;
+    let nHidden = 0;
+
     for (let i = 0; i < TWIST_N; i++) {
-        const Rt = twistParam[i*5];
-        const rt = twistParam[i*5+1];
-        const a0 = twistParam[i*5+2];
-        const q  = twistParam[i*5+3];
-        const w  = twistParam[i*5+4];
+        const eta      = twistEta[i];
+        const phiBase0 = twistPhiB0[i];
+        const alpha0   = twistAlpha0[i];
+        const q        = twistQ[i];
 
-        // Toroidal phase φ (around the rotation axis) and poloidal
-        // phase ψ (around the cross-section); their rational ratio
-        // gives Villarceau / torus-knot trajectories.
-        const phi = w * t + a0;
-        const psi = q * w * t + 2 * a0;
+        // Twistor U(1) phase advance + base-point drift driven by helicity.
+        // h_T ≠ 0 untwists / twists the fibers, taking us off the pure-Hopf
+        // submanifold (Z·Z̄ = 0) into the generic non-null Robinson family.
+        const alpha   = alpha0   + omega * t;
+        const phiBase = phiBase0 + helicity * omega * t * 0.30;
 
-        const cR = Rt + rt * Math.cos(psi);
-        arr[i*3]   = cR * Math.cos(phi);
-        arr[i*3+1] = rt * Math.sin(psi);
-        arr[i*3+2] = cR * Math.sin(phi);
+        const cN = Math.cos(eta * 0.5);
+        const sN = Math.sin(eta * 0.5);
+        const cA = Math.cos(alpha);
+        const sA = Math.sin(alpha);
+        const aMb = q * alpha - phiBase;
+        const cAB = Math.cos(aMb);
+        const sAB = Math.sin(aMb);
+
+        // S³ embedding ⊂ ℂ²
+        const u = cN * cA;
+        const v = cN * sA;
+        const w = sN * cAB;
+        const x = sN * sAB;
+
+        // Stereographic projection from (0, 0, 0, 1)
+        const D = 1.0 - x;
+        if (D < 0.06) {
+            // Particle at projection-point singularity this frame —
+            // hide it just for this tick (it'll come back next frame).
+            arr[i*3]   = 1e3;
+            arr[i*3+1] = 1e3;
+            arr[i*3+2] = 1e3;
+            nHidden++;
+            continue;
+        }
+        // Hopf coords (X, Y, Z)_h = (u, v, w)/D.
+        // Re-axis so the Hopf Z-axis (degenerate fiber) ↔ scene y-axis,
+        // and the Hopf η = 0 unit circle (in xy_h plane) ↔ scene xz plane.
+        arr[i*3]   = SCALE * u / D;
+        arr[i*3+1] = SCALE * w / D;
+        arr[i*3+2] = SCALE * v / D;
     }
     twistGeo.attributes.position.needsUpdate = true;
 }
@@ -1434,8 +1507,13 @@ function updateTwistors(t) {
 //  Particle is recycled when r > R_outer.
 //
 const OUT_N = 1800;
-const outPos = new Float32Array(OUT_N * 3);
-const outCol = new Float32Array(OUT_N * 3);
+// Each particle is rendered as a 2-vertex line segment: a *head* (current
+// position) and a *tail* offset by −v_world·τ so each particle wears a
+// velocity-aligned streak. This makes the Keplerian shear and viscous
+// outward drift visually obvious without storing per-particle history.
+const OUT_TAIL_TAU = 0.42;          // motion-blur time, scene seconds
+const outPos = new Float32Array(OUT_N * 2 * 3);     // head + tail
+const outCol = new Float32Array(OUT_N * 2 * 3);
 const outR   = new Float32Array(OUT_N);
 const outPhi = new Float32Array(OUT_N);
 const outAge = new Float32Array(OUT_N);     // seconds since launch
@@ -1452,12 +1530,12 @@ const outLife = new Float32Array(OUT_N);    // expected lifetime (cosmetic)
 const outGeo = new THREE.BufferGeometry();
 outGeo.setAttribute('position', new THREE.BufferAttribute(outPos, 3));
 outGeo.setAttribute('color',    new THREE.BufferAttribute(outCol, 3));
-const outMat = new THREE.PointsMaterial({
-    size: 0.060, sizeAttenuation: true, vertexColors: true,
-    transparent: true, opacity: 0.92, depthWrite: false,
+const outMat = new THREE.LineBasicMaterial({
+    vertexColors: true,
+    transparent: true, depthWrite: false,
     blending: THREE.AdditiveBlending,
 });
-const outPoints = new THREE.Points(outGeo, outMat);
+const outPoints = new THREE.LineSegments(outGeo, outMat);
 outPoints.visible = true;
 starGroup.add(outPoints);
 
@@ -1488,19 +1566,14 @@ const hudBurstPct = document.getElementById('hud-burst-pct');
 
 function updateOutflow(t, dt) {
     if (!outPoints.visible) {
-        // Hide all
-        for (let i = 0; i < OUT_N; i++) {
+        // Hide all line segments off-screen
+        for (let i = 0; i < OUT_N * 2; i++) {
             outPos[i*3] = 0; outPos[i*3+1] = 1e6; outPos[i*3+2] = 0;
             outCol[i*3] = 0; outCol[i*3+1] = 0; outCol[i*3+2] = 0;
         }
         outGeo.attributes.position.needsUpdate = true;
         outGeo.attributes.color.needsUpdate    = true;
         return;
-    }
-
-    if (uniforms.u_disk_active.value < 0.5) {
-        // Disk shed (shell phase): suppress injection but let existing
-        // particles drift out and dim, mimicking a "diluting" envelope.
     }
 
     const Rin    = uniforms.u_axis_ratio.value * 1.05;   // inner edge
@@ -1514,8 +1587,9 @@ function updateOutflow(t, dt) {
     const burstAmp = uniforms.u_outburst_amp.value;
     const burstPhase = (t % burstPer) / burstPer;       // 0 → 1 within a cycle
     const burst = Math.pow(Math.sin(Math.PI * burstPhase), 2);
+    const diskOn = uniforms.u_disk_active.value > 0.5;
     const injectionRate = (0.55 + 0.45 * burstAmp * burst) * uniforms.u_disk_rho.value
-                        * (uniforms.u_disk_active.value > 0.5 ? 1.0 : 0.10);
+                        * (diskOn ? 1.0 : 0.10);
 
     // Update HUD: sin² peaks at φ = 0.5; before that = "build", after = "shed".
     if (hudBurst) {
@@ -1534,11 +1608,28 @@ function updateOutflow(t, dt) {
     let nLaunch = Math.floor(outTimeAccum);
     outTimeAccum -= nLaunch;
 
+    // NRP m=2 prograde mode locks the launch azimuth to the two surface
+    // antinodes:   2φ_b − σt = 0  →  φ_antinode = (σt)/2 mod π.
+    // When NRP is active, ~75% of new particles are spawned in a tight
+    // Gaussian around one of the two antinodes — reproducing the
+    // "two-armed feeding" pattern observed in real Be stars during NRP-
+    // driven outbursts (Rivinius et al.).  When NRP is off we sample
+    // φ uniformly so the disk feeds isotropically.
+    const nrpOn      = uniforms.u_nrp_active.value > 0.5;
+    const sigmaT     = uniforms.u_nrp_omega.value * uniforms.u_time.value;
+    const antinode   = 0.5 * sigmaT;       // body-frame angle of arm 1
+    const armSpread  = 0.42;               // ~24° half-width
+
     // ── Step 1: respawn dead particles, re-using slots
     for (let i = 0; i < OUT_N && nLaunch > 0; i++) {
         if (outR[i] >= Rout || outAge[i] >= outLife[i]) {
             outR[i]    = Rin + 0.02 * Math.random();
-            outPhi[i]  = Math.random() * Math.PI * 2;
+            if (nrpOn && Math.random() < 0.75) {
+                const arm = Math.random() < 0.5 ? antinode : antinode + Math.PI;
+                outPhi[i] = arm + armSpread * gauss();
+            } else {
+                outPhi[i] = Math.random() * Math.PI * 2;
+            }
             outAge[i]  = 0;
             // Lifetime sets the scale-height envelope: longer-lived
             // particles drift further out before recycling.
@@ -1558,15 +1649,24 @@ function updateOutflow(t, dt) {
     //  ride the equator. Beyond R_eq, Ω_K < Ω_body ⇒ Δφ < 0 ⇒
     //  particles visibly *lag* the surface, the correct shear sign.
     //
+    //  Tail vertex of each line segment is offset by −v_world·τ; here
+    //  v_world is the *inertial-frame* velocity expressed in body-frame
+    //  components (so it composes correctly with starGroup's rotation
+    //  applied at draw time):
+    //      v_x = -sin φ · (Ω_K · r)  +  cos φ · v_r
+    //      v_z =  cos φ · (Ω_K · r)  +  sin φ · v_r
+    //
     const drift_visual = drift0 * 1.85;        // visualisation boost
     const omegaBody    = 0.45 * state.spin;
+    const tau          = OUT_TAIL_TAU;
     for (let i = 0; i < OUT_N; i++) {
         const r = outR[i];
+        const head = i * 6;          // index of head x in outPos
+        const tail = i * 6 + 3;      // index of tail x
+
         if (r >= Rout || outAge[i] >= outLife[i]) {
-            // Hide off-screen until next respawn
-            outPos[i*3]   = 0;
-            outPos[i*3+1] = 1e6;
-            outPos[i*3+2] = 0;
+            outPos[head]   = 0; outPos[head+1] = 1e6; outPos[head+2] = 0;
+            outPos[tail]   = 0; outPos[tail+1] = 1e6; outPos[tail+2] = 0;
             continue;
         }
         const omegaK = Math.pow(r, -1.5) * 0.45;     // inertial Keplerian rate
@@ -1580,21 +1680,158 @@ function updateOutflow(t, dt) {
         // up slightly at larger r per H(r) ∝ r^1.5 / r ∝ r^0.5)
         const z = 0.04 * Math.sqrt(r) * gauss() * 0.5;
 
-        outPos[i*3]   = r * Math.cos(outPhi[i]);
-        outPos[i*3+1] = z;
-        outPos[i*3+2] = r * Math.sin(outPhi[i]);
+        const cf = Math.cos(outPhi[i]);
+        const sf = Math.sin(outPhi[i]);
+        const headX = r * cf;
+        const headY = z;
+        const headZ = r * sf;
+
+        // Inertial-frame velocity in body-frame coords (see comment above)
+        const vTan_world = omegaK * r;
+        const vWx = -sf * vTan_world + cf * vr;
+        const vWz =  cf * vTan_world + sf * vr;
+
+        outPos[head]   = headX;
+        outPos[head+1] = headY;
+        outPos[head+2] = headZ;
+        outPos[tail]   = headX - vWx * tau;
+        outPos[tail+1] = headY;          // negligible vertical motion
+        outPos[tail+2] = headZ - vWz * tau;
 
         // Colour: age-fade × radial palette × burst-glow
         const rNorm = (r - Rin) / Math.max(Rout - Rin, 0.1);
         outflowColor(rNorm, _outCol);
         const ageFrac = outAge[i] / outLife[i];
         const bright  = (1 - ageFrac * 0.6) * (0.55 + 0.55 * burst);
-        outCol[i*3]   = _outCol[0] * bright;
-        outCol[i*3+1] = _outCol[1] * bright;
-        outCol[i*3+2] = _outCol[2] * bright;
+        // Head full bright, tail dimmed to ~25 % so the streak fades
+        // smoothly behind the particle.
+        outCol[head]   = _outCol[0] * bright;
+        outCol[head+1] = _outCol[1] * bright;
+        outCol[head+2] = _outCol[2] * bright;
+        outCol[tail]   = _outCol[0] * bright * 0.25;
+        outCol[tail+1] = _outCol[1] * bright * 0.25;
+        outCol[tail+2] = _outCol[2] * bright * 0.25;
     }
     outGeo.attributes.position.needsUpdate = true;
     outGeo.attributes.color.needsUpdate    = true;
+}
+
+// ────────────────────────────────────────────────────────────────
+//  POLAR CAK WIND TRACER PARTICLES
+// ────────────────────────────────────────────────────────────────
+//
+//  Tracer particles for the gravity-darkening-enhanced polar wind.
+//  Each particle is launched from a polar cap (cos θ ≥ 0.65) with
+//  random azimuth, then accelerated radially outward following the
+//  classical CAK β-law:
+//
+//      v(r) = v_∞ · (1 − R★/r)^β      β ≈ 0.85
+//
+//  In our scene units (R_pole = 1), the velocity ramps from 0 at the
+//  surface to a terminal v_∞ ≈ 1 (visualisation rate) by r ≈ 4–5.
+//  Particles die at r > 9 or after 12 s and respawn at the polar cap.
+//
+//  Why "tracers" rather than the volumetric cone alone?  The cone is
+//  a static glow; tracers show actual material *in motion* — you can
+//  see the acceleration zone (sparse close to the star, dense far
+//  out as the wind decelerates the spawn-rate visually) and the
+//  approximate streamline geometry.  Together with the cone shader
+//  they produce a wind that reads as both density + flow.
+//
+const PWIND_N = 600;
+const pwPos   = new Float32Array(PWIND_N * 3);
+const pwCol   = new Float32Array(PWIND_N * 3);
+const pwR     = new Float32Array(PWIND_N);   // heliocentric distance
+const pwLatC  = new Float32Array(PWIND_N);   // signed cos θ (hemisphere ±)
+const pwPhi   = new Float32Array(PWIND_N);
+const pwAge   = new Float32Array(PWIND_N);
+const pwLife  = new Float32Array(PWIND_N);
+const PWIND_VINF = 1.05;                      // visualisation terminal v
+const PWIND_BETA = 0.85;
+const PWIND_RMAX = 9.0;
+
+(function initPWind() {
+    for (let i = 0; i < PWIND_N; i++) {
+        pwR[i] = 1e9; pwAge[i] = 1e9; pwLife[i] = 0;
+    }
+})();
+const pwGeo = new THREE.BufferGeometry();
+pwGeo.setAttribute('position', new THREE.BufferAttribute(pwPos, 3));
+pwGeo.setAttribute('color',    new THREE.BufferAttribute(pwCol, 3));
+const pwMat = new THREE.PointsMaterial({
+    size: 0.045, sizeAttenuation: true, vertexColors: true,
+    transparent: true, opacity: 0.85, depthWrite: false,
+    blending: THREE.AdditiveBlending,
+});
+const pwPoints = new THREE.Points(pwGeo, pwMat);
+pwPoints.visible = true;
+starGroup.add(pwPoints);
+
+let pwTimeAccum = 0;
+
+function updatePWind(t, dt) {
+    if (!pwPoints.visible) return;
+
+    // Mass-loss rate scales with luminosity ∝ T_pole^4 (CAK):
+    //   Ṁ_polar ∝ L^(1/α'),  α' ≈ 0.6–0.7 for B stars.
+    //   Use injection rate as a proxy.
+    const tNorm = uniforms.u_t_pole.value / 17000.0;
+    const launchPerSec = 70 * Math.pow(tNorm, 4 / 0.65);
+    pwTimeAccum += dt * launchPerSec;
+    let nLaunch = Math.floor(pwTimeAccum);
+    pwTimeAccum -= nLaunch;
+
+    // ── Step 1: respawn dead tracers from the polar caps
+    for (let i = 0; i < PWIND_N && nLaunch > 0; i++) {
+        if (pwR[i] >= PWIND_RMAX || pwAge[i] >= pwLife[i]) {
+            // Sample cos θ uniformly in [0.55, 1) → polar cap (~57° half-angle)
+            const cAbs = 0.55 + 0.45 * Math.random();
+            const hemi = Math.random() < 0.5 ? 1 : -1;
+            pwLatC[i] = hemi * cAbs;
+            pwPhi[i]  = Math.random() * Math.PI * 2;
+            pwR[i]    = 1.04;
+            pwAge[i]  = 0;
+            pwLife[i] = 8 + 8 * Math.random();
+            nLaunch--;
+        }
+    }
+
+    // ── Step 2: radial CAK β-law advance + colour
+    for (let i = 0; i < PWIND_N; i++) {
+        const r = pwR[i];
+        if (r >= PWIND_RMAX || pwAge[i] >= pwLife[i]) {
+            pwPos[i*3] = 0; pwPos[i*3+1] = 1e6; pwPos[i*3+2] = 0;
+            continue;
+        }
+        // β-law radial velocity, 0 at base → v_∞ asymptote.
+        const u = 1.0 - 1.0 / r;
+        const vRad = (u <= 0) ? 0.02 : PWIND_VINF * Math.pow(u, PWIND_BETA);
+        pwR[i] += vRad * dt * 0.85;
+        pwAge[i] += dt;
+
+        const cosT = pwLatC[i];
+        const sinT = Math.sqrt(Math.max(0, 1 - cosT*cosT));
+        const cf = Math.cos(pwPhi[i]);
+        const sf = Math.sin(pwPhi[i]);
+        const r2 = pwR[i];
+        pwPos[i*3]   = r2 * sinT * cf;
+        pwPos[i*3+1] = r2 * cosT;
+        pwPos[i*3+2] = r2 * sinT * sf;
+
+        // Colour: tracer is hot (T_pole · 1.18) shocked plasma at the
+        // base, cooling/fading as the wind expands and recombines.
+        const rNorm = Math.min(1, (r2 - 1) / (PWIND_RMAX - 1));
+        // Inner = bright pale-blue (recombining hot plasma)
+        // Outer = pale magenta-pink (cool thinning wind)
+        const tCool = Math.pow(rNorm, 0.6);
+        const speedFactor = vRad / PWIND_VINF;     // 0..1
+        const bright = (0.45 + 0.55 * speedFactor) * (1 - 0.4 * pwAge[i]/pwLife[i]);
+        pwCol[i*3]   = (0.65 + 0.35 * tCool) * bright;
+        pwCol[i*3+1] = (0.85 - 0.45 * tCool) * bright;
+        pwCol[i*3+2] = (1.00 - 0.30 * tCool) * bright;
+    }
+    pwGeo.attributes.position.needsUpdate = true;
+    pwGeo.attributes.color.needsUpdate    = true;
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -1892,6 +2129,7 @@ document.getElementById('sl-disk-out').addEventListener('input', e => {
 
 document.getElementById('tog-corona').addEventListener('change', e => { rimMesh.visible = e.target.checked; });
 document.getElementById('tog-jet').addEventListener('change',    e => { jetTop.visible = jetBottom.visible = e.target.checked; });
+document.getElementById('tog-pwind').addEventListener('change',  e => { pwPoints.visible = e.target.checked; });
 document.getElementById('tog-axis').addEventListener('change',   e => { axisLine.visible = e.target.checked; });
 document.getElementById('tog-drgrid').addEventListener('change', e => setDRRingsVisible(e.target.checked));
 document.getElementById('tog-binary').addEventListener('change', e => { binaryGroup.visible = e.target.checked; });
@@ -1905,6 +2143,10 @@ document.getElementById('sl-burst-amp').addEventListener('input', e => {
 document.getElementById('sl-burst-per').addEventListener('input', e => {
     uniforms.u_outburst_per.value = +e.target.value;
     document.getElementById('disp-burst-per').textContent = (+e.target.value).toFixed(1) + ' s';
+});
+document.getElementById('sl-twist-h').addEventListener('input', e => {
+    uniforms.u_twist_helicity.value = +e.target.value;
+    document.getElementById('disp-twist-h').textContent = (+e.target.value).toFixed(2);
 });
 
 // ── Gravity-darkening model selector ─────────────────────────────
@@ -2449,6 +2691,60 @@ function maybeDrawHalpha(now) {
 }
 
 // ────────────────────────────────────────────────────────────────
+//  MASS-LOSS HUD
+// ────────────────────────────────────────────────────────────────
+//
+//  Numerical anchors are tied to canonical Achernar numbers
+//  (M ≈ 6.4 M☉, R_pole ≈ 7.3 R☉) and scale with the live sliders:
+//
+//   • Ṁ_polar (CAK)  ∝  L^(1/α') ∝ (T_pole·R_pole²)^(1/α'),   α' ≈ 0.65
+//                        — sub-linear growth in T_pole over the slider range.
+//   • v_∞,polar       ≈  2.5 · v_esc(R_pole) = 2.5·√(2GM/R_pole)
+//   • Ṁ_eq            scales with disk density × outburst envelope ×
+//                        spin (≈ 0 if rotation is sub-critical).
+//   • v_K(R_eq)       ≈  v_K(R_pole) / √(R_eq/R_pole)
+//
+const VESC_POLE_KMS = 579;            // √(2GM/R_pole) for Achernar A
+const MDOT_POL_REF  = 2.1;            // 10⁻¹⁰ M☉/yr at T_pole = 17 kK
+
+const hudMdotPol = document.getElementById('hud-mdot-pol');
+const hudVinf    = document.getElementById('hud-vinf');
+const hudMdotEq  = document.getElementById('hud-mdot-eq');
+const hudVk      = document.getElementById('hud-vk');
+
+function updateMdotHUD() {
+    const Tp = uniforms.u_t_pole.value;
+    const R  = Math.max(uniforms.u_axis_ratio.value, 1.0);
+    const beta = Math.min(2*(R-1)/(R*R*R), 0.293);
+    const burstAmp = uniforms.u_outburst_amp.value;
+
+    // Polar wind: Ṁ ∝ T_pole^(4/α') / M^((α'-1)/α')   for fixed M, ∝ T^(4/α')
+    const tNorm = Tp / 17000.0;
+    const mdotPol = MDOT_POL_REF * Math.pow(tNorm, 4 / 0.65);  // 10⁻¹⁰ M☉/yr
+    if (hudMdotPol) hudMdotPol.textContent = mdotPol.toFixed(2);
+
+    // v_∞ scales weakly with v_esc; v_esc(pole) is fixed by M, R_pole.
+    // Slight T-dependence from the CAK driving:  v_∞ / v_esc ≈ 2.0–2.6
+    const vInf = VESC_POLE_KMS * (2.20 + 0.45 * (tNorm - 1.0));
+    if (hudVinf) hudVinf.textContent = Math.round(vInf);
+
+    // Equatorial decretion mass loss: scales with ρ × spin × (1+amp·burst)
+    // and cuts off when sub-critical (the Roche-mass-loss mechanism shuts
+    // down well below v_K).  burstPeak set to 1 for HUD averaging.
+    const subcrit = Math.sqrt(beta / (8/27));  // ω/ω_crit
+    const fSubCrit = Math.max(0, Math.min(1, (subcrit - 0.55) / 0.40));
+    const mdotEq = (1.4 + 2.5 * burstAmp) * fSubCrit
+                 * uniforms.u_disk_rho.value
+                 * Math.max(0.2, state.spin)
+                 * (uniforms.u_disk_active.value > 0.5 ? 1 : 0.20);   // 10⁻⁹ M☉/yr
+    if (hudMdotEq) hudMdotEq.textContent = mdotEq.toFixed(2);
+
+    // Keplerian velocity at the equator
+    const vK = VESC_POLE_KMS / Math.sqrt(2 * R);
+    if (hudVk) hudVk.textContent = Math.round(vK);
+}
+
+// ────────────────────────────────────────────────────────────────
 //  ANIMATE
 // ────────────────────────────────────────────────────────────────
 let fpsF = 0, fpsT = performance.now();
@@ -2491,7 +2787,9 @@ function animate() {
     //     Keplerian motion read as differential vs. the surface.
     updateTwistors(uniforms.u_time.value);
     updateOutflow(uniforms.u_time.value, dt);
+    updatePWind(uniforms.u_time.value, dt);
     updateDRRings();
+    updateMdotHUD();
 
     // Achernar B orbital motion.
     if (binaryGroup.visible) {
