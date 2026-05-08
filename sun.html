@@ -350,6 +350,29 @@ nav {
 .toggle-row { display:flex; align-items:center; margin:6px 0; gap:8px; font-size:11px; }
 .toggle-row label { color:#888; flex:1; cursor:pointer; }
 .toggle-row input[type=checkbox] { width:14px; height:14px; cursor:pointer; accent-color:#ff8c00; }
+
+/* Solar Layers panel — prominent structural toggles */
+.sec-layers .sec-hd { background:linear-gradient(90deg,rgba(255,140,0,.18),rgba(255,80,0,.10)); color:#ffd080; }
+.sec-layers .sec-bd { padding:8px 9px; }
+.layer-grp { font-size:9px; color:#a8784a; text-transform:uppercase; letter-spacing:.9px;
+    margin:6px 0 4px; padding-bottom:3px; border-bottom:1px dashed rgba(255,140,0,.18); font-weight:700; }
+.layer-grp:first-child { margin-top:0; }
+.layer-row { margin:3px 0; padding:4px 6px; border-radius:4px;
+    background:rgba(255,140,0,.03); border-left:3px solid transparent; transition:all .15s; }
+.layer-row:hover { background:rgba(255,140,0,.10); }
+.layer-row label { display:flex; align-items:center; gap:6px; flex:1; }
+.layer-row .layer-name { color:#ffd080; font-weight:600; flex:0 0 auto; }
+.layer-row .layer-meta { color:#7a5a3a; font-size:10px; margin-left:auto; font-style:italic; }
+.layer-row.on { border-left-color:#ff8c00; background:rgba(255,140,0,.08); }
+.layer-dot { display:inline-block; width:10px; height:10px; border-radius:50%; flex:0 0 auto;
+    box-shadow:0 0 6px currentColor; }
+.layer-dot.core   { background:#fff5b0; color:#ffe060; }
+.layer-dot.rz     { background:#ffaa44; color:#ff8800; }
+.layer-dot.cz     { background:#ff7722; color:#ff5500; }
+.layer-dot.ph     { background:#ffcc66; color:#ffaa33; }
+.layer-dot.ch     { background:#ff5544; color:#ff2200; }
+.layer-dot.tr     { background:#ff8855; color:#ff6622; }
+.layer-dot.co     { background:#aaccff; color:#88aaff; }
 .note-text { font-size:10px; color:#555; line-height:1.6; }
 .note-text strong { color:#cc8040; }
 .note-text ul { margin:6px 0 0 14px; list-style:disc; }
@@ -1018,8 +1041,72 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
                 </div>
             </div>
 
+            <div class="sec sec-layers">
+                <div class="sec-hd"><span>☉ Solar Layers</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="layer-grp">Interior</div>
+                    <div class="toggle-row layer-row" id="lr-core">
+                        <input type="checkbox" id="tog-core">
+                        <label for="tog-core">
+                            <span class="layer-dot core"></span>
+                            <span class="layer-name">Core</span>
+                            <span class="layer-meta">~15 MK · fusion</span>
+                        </label>
+                    </div>
+                    <div class="toggle-row layer-row" id="lr-radiative">
+                        <input type="checkbox" id="tog-radiative">
+                        <label for="tog-radiative">
+                            <span class="layer-dot rz"></span>
+                            <span class="layer-name">Radiative Zone</span>
+                            <span class="layer-meta">photon diffusion</span>
+                        </label>
+                    </div>
+                    <div class="toggle-row layer-row" id="lr-convective">
+                        <input type="checkbox" id="tog-convective">
+                        <label for="tog-convective">
+                            <span class="layer-dot cz"></span>
+                            <span class="layer-name">Convective Zone</span>
+                            <span class="layer-meta">granulation</span>
+                        </label>
+                    </div>
+                    <div class="layer-grp">Atmosphere</div>
+                    <div class="toggle-row layer-row on" id="lr-photosphere">
+                        <input type="checkbox" id="tog-photosphere" checked>
+                        <label for="tog-photosphere">
+                            <span class="layer-dot ph"></span>
+                            <span class="layer-name">Photosphere</span>
+                            <span class="layer-meta">visible surface · 5800 K</span>
+                        </label>
+                    </div>
+                    <div class="toggle-row layer-row on" id="lr-chrom">
+                        <input type="checkbox" id="tog-chrom" checked>
+                        <label for="tog-chrom">
+                            <span class="layer-dot ch"></span>
+                            <span class="layer-name">Chromosphere</span>
+                            <span class="layer-meta">Hα · 10⁴ K</span>
+                        </label>
+                    </div>
+                    <div class="toggle-row layer-row on" id="lr-tr">
+                        <input type="checkbox" id="tog-tr" checked>
+                        <label for="tog-tr">
+                            <span class="layer-dot tr"></span>
+                            <span class="layer-name">Transition Region</span>
+                            <span class="layer-meta">EUV 304 Å · 10⁵ K</span>
+                        </label>
+                    </div>
+                    <div class="toggle-row layer-row on" id="lr-corona">
+                        <input type="checkbox" id="tog-corona" checked>
+                        <label for="tog-corona">
+                            <span class="layer-dot co"></span>
+                            <span class="layer-name">Corona</span>
+                            <span class="layer-meta">white light · 10⁶ K</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
             <div class="sec">
-                <div class="sec-hd"><span>Layers</span><span class="arrow">▼</span></div>
+                <div class="sec-hd"><span>Activity &amp; Phenomena</span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
                     <div class="toggle-row">
                         <input type="checkbox" id="tog-spots" checked>
@@ -1028,14 +1115,6 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
                     <div class="toggle-row">
                         <input type="checkbox" id="tog-flares" checked>
                         <label for="tog-flares">Active region flares</label>
-                    </div>
-                    <div class="toggle-row">
-                        <input type="checkbox" id="tog-chrom" checked>
-                        <label for="tog-chrom">Chromosphere (Ca H&amp;K)</label>
-                    </div>
-                    <div class="toggle-row">
-                        <input type="checkbox" id="tog-corona" checked>
-                        <label for="tog-corona">Corona (white light)</label>
                     </div>
                     <div class="toggle-row">
                         <input type="checkbox" id="tog-wind" checked>
@@ -1052,10 +1131,6 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
                     <div class="toggle-row">
                         <input type="checkbox" id="tog-prom" checked>
                         <label for="tog-prom">Prominences / filaments</label>
-                    </div>
-                    <div class="toggle-row">
-                        <input type="checkbox" id="tog-tr" checked>
-                        <label for="tog-tr">Transition region (EUV 304 Å)</label>
                     </div>
                     <div class="toggle-row">
                         <input type="checkbox" id="tog-fieldlines" checked>
@@ -2773,6 +2848,167 @@ sunLOD.addLevel(new THREE.Mesh(new THREE.SphereGeometry(1.0,  72,  72), sunMat),
 sunLOD.addLevel(new THREE.Mesh(new THREE.SphereGeometry(1.0,  40,  30), sunMat), 10.0);
 scene.add(sunLOD);
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  ☉ INTERIOR LAYERS — cutaway-style ghost shells for the structural layers
+//  that normally lie buried inside the photosphere. Each layer renders with
+//  depthTest:false + additive blending so it reads as an X-ray-style cutaway
+//  through the disk when toggled on. Fragment shaders encode each layer's
+//  physics: thermonuclear core, photon random walk, convective granulation.
+//  Hidden by default — they're educational overlays, not the primary view.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Shared interior-layer vertex shader — passes normal + view direction.
+const interiorVS = /* glsl */`
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    varying vec3 vWorldPos;
+    void main() {
+        vNormal   = normalize(normalMatrix * normal);
+        vec4 mv   = modelViewMatrix * vec4(position, 1.0);
+        vViewDir  = normalize(-mv.xyz);
+        vWorldPos = position;
+        gl_Position = projectionMatrix * mv;
+    }
+`;
+
+// ── CORE (r=0.25) — pp-chain fusion at 15 MK, 150 g/cm³ ─────────────────────
+// Visualisation: pulsing thermonuclear plasma. Brightness modulated by a
+// fast (1.4 s) p-p chain rate noise + slow (8 s) density wave.
+const coreFS = /* glsl */`
+    precision highp float;
+    uniform float u_time;
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    varying vec3 vWorldPos;
+    float h(vec3 p){ p=fract(p*vec3(127.1,311.7,74.7)); p+=dot(p,p+19.19); return fract(p.x*p.y*p.z); }
+    float vn(vec3 p){
+        vec3 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);
+        return mix(mix(mix(h(i),h(i+vec3(1,0,0)),u.x),mix(h(i+vec3(0,1,0)),h(i+vec3(1,1,0)),u.x),u.y),
+                   mix(mix(h(i+vec3(0,0,1)),h(i+vec3(1,0,1)),u.x),mix(h(i+vec3(0,1,1)),h(i+vec3(1,1,1)),u.x),u.y),u.z);
+    }
+    void main() {
+        float mu  = max(dot(normalize(vNormal), normalize(vViewDir)), 0.0);
+        float rim = 1.0 - mu;
+        // p-p chain rate proxy: high-freq noise modulating a hot white core.
+        float ppRate = vn(vWorldPos * 18.0 + vec3(u_time * 0.7));
+        float dWave  = 0.5 + 0.5 * sin(u_time * 0.78 + length(vWorldPos) * 9.0);
+        float energy = 0.55 + 0.30 * ppRate + 0.25 * dWave;
+        // Center white-hot, edge red-orange (15 MK → 7 MK at the radiative boundary)
+        vec3 hotCore = vec3(1.00, 0.96, 0.78);   // 15 MK blackbody-ish white
+        vec3 outer   = vec3(1.00, 0.55, 0.18);   // edge of core, cooler
+        vec3 col = mix(hotCore, outer, rim * 0.6);
+        col *= energy;
+        // Sharp filamentary plasma streaks
+        float fil = smoothstep(0.62, 0.92, vn(vWorldPos * 8.0 + vec3(u_time * 0.20)));
+        col += vec3(1.0, 0.85, 0.50) * fil * 0.35;
+        // Alpha falls off at rim so it reads as a glowing volumetric ball
+        float a = (0.55 + energy * 0.35) * (0.65 + 0.35 * mu);
+        gl_FragColor = vec4(col, a);
+    }
+`;
+
+// ── RADIATIVE ZONE (0.25 → 0.7 R) — photon diffusion, 7 MK → 2 MK ──────────
+// Visualisation: stratified concentric "stress" rings + bright photon-walk
+// sparkles representing the random-walk diffusion that takes ~170 000 years.
+const radiativeFS = /* glsl */`
+    precision highp float;
+    uniform float u_time;
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    varying vec3 vWorldPos;
+    float h(vec3 p){ p=fract(p*vec3(127.1,311.7,74.7)); p+=dot(p,p+19.19); return fract(p.x*p.y*p.z); }
+    float vn(vec3 p){
+        vec3 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);
+        return mix(mix(mix(h(i),h(i+vec3(1,0,0)),u.x),mix(h(i+vec3(0,1,0)),h(i+vec3(1,1,0)),u.x),u.y),
+                   mix(mix(h(i+vec3(0,0,1)),h(i+vec3(1,0,1)),u.x),mix(h(i+vec3(0,1,1)),h(i+vec3(1,1,1)),u.x),u.y),u.z);
+    }
+    void main() {
+        float mu  = max(dot(normalize(vNormal), normalize(vViewDir)), 0.0);
+        float rim = 1.0 - mu;
+        // Stratified shells — photons diffuse outward; each shell at slightly
+        // lower T (Wien displacement reddens with radius).
+        float r = length(vWorldPos);
+        float shells = 0.5 + 0.5 * sin(r * 50.0 + u_time * 0.4);
+        // Random-walk sparkles: short-lived bright pixels representing
+        // individual photon scatter events.
+        float walk = vn(vWorldPos * 26.0 + vec3(u_time * 1.2, 0.0, 0.0));
+        float spark = pow(walk, 16.0) * 1.8;
+        vec3 hot   = vec3(1.00, 0.78, 0.32);   // 7 MK
+        vec3 cool  = vec3(1.00, 0.42, 0.10);   // 2 MK boundary with CZ
+        vec3 col = mix(hot, cool, 0.5 + 0.3 * sin(r * 12.0));
+        col *= 0.45 + shells * 0.30;
+        col += vec3(1.0, 0.95, 0.70) * spark;
+        // Stronger at limb to read as a hollow shell
+        float a = (0.30 + 0.35 * rim) * (0.55 + 0.45 * shells);
+        gl_FragColor = vec4(col, a);
+    }
+`;
+
+// ── CONVECTIVE ZONE (0.7 → 1.0 R) — Bénard-style turnover, ~2 MK → 5800 K ─
+// Visualisation: granulation cell pattern with hot upwellings (bright)
+// and cool downflows (dark lanes). Cells turn over on ~10 sim-second cycles.
+const convectiveFS = /* glsl */`
+    precision highp float;
+    uniform float u_time;
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    varying vec3 vWorldPos;
+    float h(vec3 p){ p=fract(p*vec3(127.1,311.7,74.7)); p+=dot(p,p+19.19); return fract(p.x*p.y*p.z); }
+    float vn(vec3 p){
+        vec3 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);
+        return mix(mix(mix(h(i),h(i+vec3(1,0,0)),u.x),mix(h(i+vec3(0,1,0)),h(i+vec3(1,1,0)),u.x),u.y),
+                   mix(mix(h(i+vec3(0,0,1)),h(i+vec3(1,0,1)),u.x),mix(h(i+vec3(0,1,1)),h(i+vec3(1,1,1)),u.x),u.y),u.z);
+    }
+    // Cellular (Worley-like) approximation via difference-of-noise → Bénard cells
+    float cell(vec3 p) {
+        float a = vn(p);
+        float b = vn(p + vec3(0.31, 0.17, 0.62));
+        return abs(a - b);   // dark at cell centres, bright at edges (or vice versa)
+    }
+    void main() {
+        float mu  = max(dot(normalize(vNormal), normalize(vViewDir)), 0.0);
+        float rim = 1.0 - mu;
+        vec3 n3d = normalize(vWorldPos);
+        // Two scales of cells: supergranule (~30 Mm) + giant cells (~200 Mm)
+        float sg = cell(n3d *  9.0 + vec3(u_time * 0.05));
+        float gc = cell(n3d *  3.5 + vec3(u_time * 0.012));
+        // Cell interiors (hot upwellings) bright, lanes dark
+        float upwell = smoothstep(0.10, 0.32, sg) * smoothstep(0.05, 0.25, gc);
+        upwell = 1.0 - upwell;
+        vec3 hot  = vec3(1.00, 0.65, 0.25);   // hot rising plasma
+        vec3 lane = vec3(0.45, 0.18, 0.05);   // sinking dark lanes
+        vec3 col = mix(lane, hot, upwell);
+        // Shear streaks across the surface (toroidal velocity shear)
+        float shear = vn(n3d * vec3(40.0, 8.0, 40.0) + vec3(0.0, u_time * 0.18, 0.0));
+        col += vec3(1.0, 0.7, 0.3) * pow(shear, 3.0) * 0.20;
+        float a = (0.32 + 0.35 * rim) * (0.55 + upwell * 0.45);
+        gl_FragColor = vec4(col, a);
+    }
+`;
+
+function _makeInteriorMesh(radius, fragmentShader, segments) {
+    const seg = segments || 64;
+    const mat = new THREE.ShaderMaterial({
+        vertexShader: interiorVS,
+        fragmentShader,
+        uniforms,
+        transparent: true,
+        depthWrite:  false,
+        depthTest:   false,            // shows through the photosphere when toggled on
+        blending:    THREE.AdditiveBlending,
+        side:        THREE.FrontSide,
+    });
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(radius, seg, seg), mat);
+    mesh.visible    = false;           // off by default — educational overlay
+    mesh.renderOrder = -1;             // draw before atmospheric layers so they additively mix
+    return mesh;
+}
+
+const coreMesh        = _makeInteriorMesh(0.25, coreFS,        48);
+const radiativeMesh   = _makeInteriorMesh(0.70, radiativeFS,   64);
+const convectiveMesh  = _makeInteriorMesh(0.97, convectiveFS,  72);
+scene.add(coreMesh, radiativeMesh, convectiveMesh);
+
 // ─── CHROMOSPHERE (r=1.15) — Ca H&K / Hα pink-red layer ──────────────────────
 const glowVS = /* glsl */`
     varying vec3 vNormal; varying vec3 vViewDir;
@@ -2793,6 +3029,25 @@ const glowVS = /* glsl */`
 //   Spicules: radial plasma jets (5–10 Mm tall, 20–100 km/s), concentrated at
 //   supergranule boundaries.  Appear as fine radial hair-like structures at limb.
 //   Type II spicules are faster (50–300 km/s) and may heat to TR temperatures.
+// ── Bleeding-edge chromosphere shader ────────────────────────────────────
+//
+// Models that the real chromosphere is a deeply non-uniform layer dominated
+// by magnetic structuring at supergranule scales (~30 Mm cells). What the
+// eye sees in Hα filtergrams and what this shader now reproduces:
+//
+//   • Mottle/rosette pattern — Worley-style cellular noise; bright cell
+//     edges (network) flank dark interiors (internetwork).
+//   • Fibril carpet — anisotropic stretched noise oriented along a swirly
+//     direction field, mimicking the dark Hα fibrils anchored at network.
+//   • Plage emission — bright Ca II K halos sampled from u_arSpots[8] so
+//     active regions visibly brighten the chromosphere in real time.
+//   • Filaments — dark sinuous threads on the disk (cool absorption against
+//     bright background Hα), thresholded directional noise.
+//   • p-mode oscillations — 3-min and 5-min sine modulation of local
+//     brightness, the same chromospheric oscillations SDO/IRIS observe.
+//   • Spicule forest at the limb — radial-stretched noise + sharp threshold,
+//     visibility ramping with rim angle.
+//   • Flare ribbons + global Hα flash, F10.7-cycle modulation, EUV excitation.
 const chromoFS = /* glsl */`
     precision highp float;
     uniform float u_time;
@@ -2804,6 +3059,7 @@ const chromoFS = /* glsl */`
     uniform float u_flare_lat;
     uniform float u_flare_lon;
     uniform float u_flare_intensity;
+    uniform vec4  u_arSpots[8];   // active-region positions (xyz) + signed area (w)
     varying vec3 vNormal;
     varying vec3 vViewDir;
 
@@ -2813,6 +3069,20 @@ const chromoFS = /* glsl */`
         return mix(mix(mix(h(i),h(i+vec3(1,0,0)),u.x),mix(h(i+vec3(0,1,0)),h(i+vec3(1,1,0)),u.x),u.y),
                    mix(mix(h(i+vec3(0,0,1)),h(i+vec3(1,0,1)),u.x),mix(h(i+vec3(0,1,1)),h(i+vec3(1,1,1)),u.x),u.y),u.z);
     }
+    // Cellular Worley-ish: difference of two phase-shifted noises bunches
+    // into mottle-like blobs with sharp lanes between them.
+    float worley(vec3 p) {
+        float a = vn(p);
+        float b = vn(p + vec3(0.31, 0.17, 0.62));
+        return abs(a - b);
+    }
+    // Domain-warp: produces a fluid-looking direction-coherent texture.
+    float warpedFBM(vec3 p, float t) {
+        vec3 q = vec3(vn(p + vec3(0.0, 0.0, t * 0.05)),
+                      vn(p + vec3(5.2, 1.3, t * 0.04)),
+                      vn(p + vec3(2.8, 6.7, t * 0.03)));
+        return vn(p + q * 1.8);
+    }
 
     void main() {
         vec3  n3d = normalize(vNormal);
@@ -2820,94 +3090,142 @@ const chromoFS = /* glsl */`
         float mu  = max(dot(n3d, vd), 0.0);
         float rim = 1.0 - mu;
 
-        // ── Spicule forest — radial jets with directional structure ──────────
-        // Type I spicules: ~1000 km spacing, 5–10 Mm tall, 20–40 km/s.
-        // Type II (fast): 50–300 km/s, hotter, contribute to coronal heating.
-        //
-        // DIRECTIONALITY: spicules point radially outward from the solar surface.
-        // At the limb (high rim) we see them edge-on as fine radial streaks.
-        // Face-on (low rim) they're foreshortened and nearly invisible.
-        //
-        // We achieve this by stretching noise along the radial (normal) direction
-        // and modulating visibility by rim angle.
+        // ── Heliographic coordinates (used for plage + flare ribbons) ─────────
+        float lat_c = asin(clamp(n3d.y, -1.0, 1.0));
+        float lon_c = atan(n3d.x, n3d.z);
 
-        // Radial-stretched coordinate: elongate noise along the surface normal
-        // to create streak-like patterns that look like radial jets at the limb
-        vec3 radialCoord = n3d * 22.0 + n3d * vn(n3d * 6.0) * 4.0;
+        // ══════════════════════════════════════════════════════════════════
+        //  1. p-mode oscillations — 3-min and 5-min chromospheric ringing
+        //  Real chromosphere oscillates globally at 3-min (umbral) and
+        //  5-min (k-omega) periods. Map sim-time so each cycle reads at
+        //  ~2 and ~3.5 sim-seconds with small spatial coherence pattern.
+        // ══════════════════════════════════════════════════════════════════
+        float pmodePhase = vn(n3d * 1.8) * 6.2832;   // spatial coherence patches
+        float pmode3 = sin(u_time * (6.2832 / 2.0) + pmodePhase) * 0.06;
+        float pmode5 = sin(u_time * (6.2832 / 3.5) + pmodePhase * 1.7) * 0.10;
+        float pmode  = pmode3 + pmode5;
+
+        // ══════════════════════════════════════════════════════════════════
+        //  2. Mottle / rosette pattern — supergranule-scale cellular noise
+        //  Hα filtergrams show a "salt and pepper" carpet: bright network
+        //  on cell boundaries, dark internetwork inside.
+        // ══════════════════════════════════════════════════════════════════
+        float sg = vn(n3d * 7.0 + vec3(u_time * 0.010));      // supergranules
+        float mg = vn(n3d * 22.0 + vec3(u_time * 0.025));     // mesogranules
+        float mottle  = worley(n3d * 14.0 + vec3(u_time * 0.018));
+        // Network: bright thin lanes between cells (high mottle, peaked).
+        float network = smoothstep(0.32, 0.55, mottle);
+        // Internetwork: dark cell interiors.
+        float intern  = 1.0 - smoothstep(0.10, 0.30, mottle);
+
+        // ══════════════════════════════════════════════════════════════════
+        //  3. Fibril carpet — anisotropic stretched noise, swirly direction
+        //  Real fibrils are dark elongated threads anchored at network
+        //  flux concentrations, fanning out along magnetic field lines.
+        // ══════════════════════════════════════════════════════════════════
+        // Direction field: derivative-style swirly bias from low-freq noise.
+        vec3 dir = vec3(vn(n3d * 4.0), vn(n3d * 4.0 + 11.0), vn(n3d * 4.0 + 23.0));
+        dir = normalize(dir - 0.5 + 0.001);
+        // Stretch the sample coord along that direction → coherent threads.
+        vec3 fibCoord = n3d * 30.0 + dir * 14.0;
+        float fibrils = warpedFBM(fibCoord, u_time);
+        float fibThreads = smoothstep(0.42, 0.62, fibrils) - smoothstep(0.62, 0.82, fibrils);
+        // Fibrils show as DARK threads on disk (absorption), faint at limb.
+        float fibDark = fibThreads * (1.0 - rim * 0.7) * 0.35;
+
+        // ══════════════════════════════════════════════════════════════════
+        //  4. Filaments — dark sinuous threads (on-disk view of prominences)
+        //  Use very low-freq directional noise + sharp threshold for elongated
+        //  features distinct from fibrils.
+        // ══════════════════════════════════════════════════════════════════
+        float fil1 = vn(n3d * 2.2 + dir * 3.0 + vec3(u_time * 0.005, 0.0, 0.0));
+        float fil2 = vn(n3d * 5.0 + vec3(0.0, u_time * 0.008, 0.0));
+        float filMask = smoothstep(0.66, 0.74, fil1) * smoothstep(0.40, 0.62, fil2);
+        // Filaments only appear on disk, not at limb (where they'd be prominences).
+        float filDark = filMask * (1.0 - rim * 1.5) * 0.55;
+
+        // ══════════════════════════════════════════════════════════════════
+        //  5. Plage — bright Ca II K emission near active regions
+        //  Sample u_arSpots and add bright halo extending ~6° around each.
+        // ══════════════════════════════════════════════════════════════════
+        float plage = 0.0;
+        for (int i = 0; i < 8; i++) {
+            vec4 ar = u_arSpots[i];
+            if (length(ar.xyz) < 0.5) continue;             // empty slot
+            float arDot = dot(n3d, normalize(ar.xyz));
+            float arAng = acos(clamp(arDot, -1.0, 1.0));    // angular distance
+            float intensity = clamp(abs(ar.w), 0.0, 1.0);   // |normalised area|
+            // Halo width broadens with active region size.
+            float halo = exp(-arAng * arAng / (0.012 + intensity * 0.020));
+            plage += halo * (0.55 + intensity * 0.65);
+        }
+        plage = clamp(plage, 0.0, 1.4);
+        // Plage modulates network — bright Ca K rosettes, granular structure.
+        float plageStruct = plage * (0.6 + 0.4 * network);
+
+        // ══════════════════════════════════════════════════════════════════
+        //  6. Spicule forest — radial-stretched noise, limb-dominant
+        //  Type II spicules concentrate at supergranule boundaries (high sg).
+        // ══════════════════════════════════════════════════════════════════
+        vec3 radialCoord = n3d * 22.0 + n3d * mg * 4.0;
         float sp_fine  = vn(radialCoord + vec3(u_time * 0.035, 0.0, 0.0));
-        float sp_ultra = vn(n3d * 50.0 + vec3(0.0, u_time * 0.055, 0.0));
-        float sp_sgb   = vn(n3d *  7.0 + vec3(u_time * 0.010));  // supergranule boundaries
-
-        // Spicule intensity: combination of fine jets + ultrafine + supergranule modulation
-        float spicule = sp_fine * 0.40 + sp_ultra * 0.30 + sp_sgb * 0.30;
-
-        // Sharpened jet peaks: make spicules more discrete (threshold → sharp jets)
-        float jets = smoothstep(0.45, 0.72, spicule);
-
-        // Spicules are brightest at the limb (seen in emission against space)
-        // and nearly invisible on disk (face-on: foreshortened, optically thin)
+        float sp_ultra = vn(n3d * 50.0  + vec3(0.0, u_time * 0.055, 0.0));
+        float spicule  = sp_fine * 0.40 + sp_ultra * 0.30 + sg * 0.30;
+        float jets     = smoothstep(0.45, 0.72, spicule);
+        // Concentrate jets at supergranule boundaries (network zones).
+        jets *= 0.6 + network * 0.6;
         float limbSpicule = pow(rim, 2.2) * (0.45 + jets * 0.75 * u_activity);
 
-        // ── Chromospheric network (Ca K bright network at supergranule edges) ──
-        // On-disk pattern visible in Ca K filtergrams: bright cell boundaries
-        // surrounding dark supergranule interiors.  Very faint in broadband.
-        float network = smoothstep(0.55, 0.78, sp_sgb) * 0.15 * u_activity;
+        // ══════════════════════════════════════════════════════════════════
+        //  7. Compose alpha — limb-dominant + on-disk network/plage
+        // ══════════════════════════════════════════════════════════════════
+        float diskFactor = pow(1.0 - rim, 2.0);
+        float alpha = limbSpicule
+                    + (network * 0.18 + plageStruct * 0.32) * diskFactor
+                    - (fibDark + filDark) * diskFactor * 0.45;
+        alpha *= 1.0 + pmode * 0.6;
+        alpha  = clamp(alpha, 0.0, 0.82);
 
-        // Alpha: limb-dominated with subtle on-disk network
-        // Steep rim power keeps disk nearly transparent (realistic: chromosphere
-        // is invisible in white light except at the limb during eclipse)
-        float alpha = clamp(limbSpicule + network * pow(1.0 - rim, 2.0), 0.0, 0.75);
+        // ══════════════════════════════════════════════════════════════════
+        //  8. Colour — Hα-dominated, plage adds Ca K, dark threads cool tint
+        // ══════════════════════════════════════════════════════════════════
+        vec3 hAlpha    = vec3(0.95, 0.18, 0.06);   // Hα 656 nm
+        vec3 hAlphaHot = vec3(1.00, 0.40, 0.22);
+        vec3 caKrose   = vec3(0.92, 0.38, 0.42);
+        vec3 caKplage  = vec3(1.00, 0.62, 0.30);   // bright plage
+        vec3 topGlow   = vec3(1.00, 0.55, 0.35);
+        vec3 fibCool   = vec3(0.45, 0.10, 0.04);   // dark fibril/filament absorption
 
-        // ── Colour: Hα-dominated emission spectrum ──────────────────────────
-        // The real chromosphere is overwhelmingly RED in visible light.
-        // Hα 656 nm dominates at all heights. Ca H&K adds a subtle rose/pink
-        // tint but does NOT produce visible purple in broadband imaging.
-        //
-        // Temperature gradient: base (4400 K, deep red) → top (25000 K, pink-white)
-        vec3 hAlpha    = vec3(0.95, 0.18, 0.06);   // Hα 656 nm — deep emission red
-        vec3 hAlphaHot = vec3(1.00, 0.40, 0.22);   // heated Hα — brighter, warmer red
-        vec3 caKrose   = vec3(0.92, 0.38, 0.42);   // Ca K contribution — rose-pink (NOT purple)
-        vec3 topGlow   = vec3(1.00, 0.55, 0.35);   // upper chromosphere → TR approach
-
-        // Base: deep Hα red.  With height (rim): warms toward pink-white
-        // as temperature increases toward the transition region.
         vec3 col = mix(hAlpha, hAlphaHot, rim * 0.6 + u_activity * 0.2);
-
-        // Subtle Ca K rose tint: only at extreme limb, never dominant
-        col = mix(col, caKrose, pow(rim, 4.5) * 0.25);
-
-        // Upper chromosphere approaches TR temperatures: warm pink-white
-        col = mix(col, topGlow, pow(rim, 6.0) * u_activity * 0.35);
-
-        // Network: slightly more orange (Ca K plage emission)
-        col = mix(col, vec3(1.00, 0.50, 0.25), network * 0.4);
-
-        // Spicule jets: individual jets are brighter, slightly bluer (hotter tips)
+        col = mix(col, caKrose,   pow(rim, 4.5) * 0.25);
+        col = mix(col, topGlow,   pow(rim, 6.0) * u_activity * 0.35);
+        // Network slightly orange from Ca K
+        col = mix(col, vec3(1.00, 0.50, 0.25), network * 0.30 * diskFactor);
+        // Plage — bright orange-pink Ca K halo
+        col = mix(col, caKplage, plageStruct * 0.55);
+        // Spicules — slightly bluer hot tips
         col = mix(col, vec3(1.00, 0.45, 0.30), jets * pow(rim, 2.5) * 0.3);
+        // Fibrils + filaments — pull color toward dark Hα absorption
+        col = mix(col, fibCool, (fibDark + filDark) * 0.7);
+        // p-mode brightness shimmer (very subtle)
+        col *= 1.0 + pmode * 0.12;
 
-        // ── Chromospheric flare brightening (Hα ribbons) ─────────────────────
-        float lat_c   = asin(clamp(n3d.y, -1.0, 1.0));
-        // lon = atan(x, z) so heliographic comparisons with u_flare_lon work.
-        float lon_c   = atan(n3d.x, n3d.z);
+        // ══════════════════════════════════════════════════════════════════
+        //  9. Flare ribbons (Hα) + global flash + F10.7 cycle + EUV/Kp
+        // ══════════════════════════════════════════════════════════════════
         float cos_df  = sin(lat_c)*sin(u_flare_lat) + cos(lat_c)*cos(u_flare_lat)*cos(lon_c - u_flare_lon);
         float df_c    = acos(clamp(cos_df, -1.0, 1.0));
         float chromoFl = exp(-df_c*df_c / 0.075) * exp(-u_flare_t / 90.0) * u_flare_intensity;
         float globalFl = u_flare_intensity * 0.15 * pow(rim, 1.5);
-        alpha = clamp(alpha + chromoFl * 0.70 + globalFl, 0.0, 0.88);
-        // Flare ribbons are brilliant Hα red, global flash is pale pink
+        alpha = clamp(alpha + chromoFl * 0.70 + globalFl, 0.0, 0.92);
         col = mix(col, hAlpha * 1.6, chromoFl * 0.80);
         col = mix(col, vec3(1.00, 0.65, 0.45), globalFl * 0.5);
 
-        // ── F10.7 solar cycle: hotter, more emissive chromosphere at max ─────
         float cycleBoost = 1.0 + u_f107_norm * 0.45;
-        alpha = clamp(alpha * cycleBoost, 0.0, 0.88);
+        alpha = clamp(alpha * cycleBoost, 0.0, 0.92);
         col   = mix(col, col * vec3(1.05, 0.92, 0.82), u_f107_norm * 0.20);
-
-        // ── Electron flux: EUV excitation adds warm white glow ───────────────
         col  += vec3(0.80, 0.65, 0.50) * u_electron_norm * rim * 0.15;
-        alpha = clamp(alpha + u_electron_norm * rim * 0.06, 0.0, 0.88);
-
-        // ── Kp storm: enhanced network and limb emission ─────────────────────
+        alpha = clamp(alpha + u_electron_norm * rim * 0.06, 0.0, 0.92);
         col *= 1.0 + u_kp_norm * u_kp_norm * 0.12;
 
         gl_FragColor = vec4(col, alpha);
@@ -5437,8 +5755,36 @@ scene.add(new THREE.AmbientLight(0x100800, 0.3));
 // Toggles
 document.getElementById('tog-spots').addEventListener('change',  e => { uniforms.u_showSpots.value  = e.target.checked ? 1.0 : 0.0; });
 document.getElementById('tog-flares').addEventListener('change', e => { uniforms.u_showFlares.value = e.target.checked ? 1.0 : 0.0; });
-document.getElementById('tog-chrom').addEventListener('change',  e => { chromoMesh.visible  = e.target.checked; });
-document.getElementById('tog-corona').addEventListener('change', e => { coronaMesh.visible  = e.target.checked; });
+
+// ── Solar Layers panel — wire each structural layer to its mesh ──────────
+function _setLayerActive(rowId, on) {
+    const row = document.getElementById(rowId);
+    if (row) row.classList.toggle('on', on);
+}
+document.getElementById('tog-core')?.addEventListener('change', e => {
+    coreMesh.visible = e.target.checked;
+    _setLayerActive('lr-core', e.target.checked);
+});
+document.getElementById('tog-radiative')?.addEventListener('change', e => {
+    radiativeMesh.visible = e.target.checked;
+    _setLayerActive('lr-radiative', e.target.checked);
+});
+document.getElementById('tog-convective')?.addEventListener('change', e => {
+    convectiveMesh.visible = e.target.checked;
+    _setLayerActive('lr-convective', e.target.checked);
+});
+document.getElementById('tog-photosphere')?.addEventListener('change', e => {
+    sunLOD.visible = e.target.checked;
+    _setLayerActive('lr-photosphere', e.target.checked);
+});
+document.getElementById('tog-chrom').addEventListener('change',  e => {
+    chromoMesh.visible = e.target.checked;
+    _setLayerActive('lr-chrom', e.target.checked);
+});
+document.getElementById('tog-corona').addEventListener('change', e => {
+    coronaMesh.visible = e.target.checked;
+    _setLayerActive('lr-corona', e.target.checked);
+});
 document.getElementById('tog-loops').addEventListener('change',  e => { if (loopGroup)  loopGroup.visible  = e.target.checked; });
 document.getElementById('tog-nanoflares')?.addEventListener('change', e => {
     if (_nanoflareSystem?.points) _nanoflareSystem.points.visible = e.target.checked;
