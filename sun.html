@@ -2,6 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<!-- perf-hints:start -->
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" crossorigin>
+<!-- perf-hints:end -->
+
 <script src="js/preview-mode.js"></script>
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
 <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
@@ -45,9 +51,9 @@ nav {
     -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
     margin-right:2px;
 }
-.nav-logo-img { height:30px; width:auto; border-radius:50%; flex-shrink:0; }
+
 /* nav-menu stretches to fill all remaining space */
-.nav-menu { display:flex; align-items:center; gap:4px; flex:1; min-width:0; }
+
 .nav-item {
     padding:5px 10px; background:rgba(255,255,255,.07);
     border:1px solid rgba(255,255,255,.12); border-radius:5px;
@@ -55,8 +61,7 @@ nav {
     transition:background .2s, border-color .2s; flex-shrink:0;
 }
 .nav-item:hover { background:rgba(255,255,255,.16); border-color:rgba(255,200,0,.4); color:#fff; }
-.nav-item.active { background:linear-gradient(45deg,#ff8c00,#ffd700); border-color:#ff8c00; color:#000; font-weight:600; }
-.nav-drop { position:relative; flex-shrink:0; }
+
 .nav-drop-btn {
     padding:5px 10px; background:rgba(255,255,255,.07);
     border:1px solid rgba(255,255,255,.12); border-radius:5px;
@@ -64,7 +69,7 @@ nav {
     transition:background .2s, border-color .2s; white-space:nowrap;
 }
 .nav-drop-btn:hover { background:rgba(255,255,255,.16); color:#fff; }
-.nav-drop-btn.active { background:linear-gradient(45deg,#ff8c00,#ffd700); border-color:#ff8c00; color:#000; font-weight:600; }
+
 /* Rich dropdown panel */
 .nav-drop-menu {
     display:block; position:absolute; top:calc(100% + 5px); left:0;
@@ -85,29 +90,23 @@ nav {
     padding:7px 16px; text-decoration:none; transition:background .15s;
 }
 .nav-drop-link:hover { background:rgba(255,255,255,.07); }
-.nav-drop-link.active .ndl-title { color:#ffd700 !important; font-weight:600; }
+
 .nav-drop-link.active .ndl-icon  { opacity:1; }
 .ndl-icon  { font-size:1.05rem; width:20px; text-align:center; flex-shrink:0; opacity:.72; }
-.ndl-body  { display:flex; flex-direction:column; gap:1px; }
+
 .ndl-title { color:#c8c8c8; font-size:.82rem; font-weight:500; line-height:1.25; }
 .ndl-sub   { color:#484e60; font-size:.70rem; line-height:1.2; }
 .nav-drop-link:hover .ndl-title { color:#fff; }
 .nav-drop-link:hover .ndl-sub   { color:#7a8090; }
 /* Section label inside dropdown */
-.nav-drop-section {
-    padding:7px 16px 3px; font-size:.63rem; font-weight:700;
-    letter-spacing:.09em; color:#3d4255; text-transform:uppercase;
-    border-top:1px solid rgba(255,255,255,.06); margin-top:3px;
-}
-.nav-drop-section:first-child { border-top:none; margin-top:0; padding-top:4px; }
+
 /* Spacer that pushes auth buttons to the far right */
-.nav-spacer { flex:1; }
+
 /* Auth */
-.nav-auth-sep { width:1px; height:22px; background:rgba(255,255,255,.15); margin:0 3px; flex-shrink:0; }
-.nav-login  { background:transparent !important; border-color:rgba(255,255,255,.22) !important; color:#bbb !important; }
+
 .nav-login:hover  { background:rgba(255,255,255,.1) !important; color:#fff !important; border-color:rgba(255,255,255,.4) !important; }
 .nav-signup { background:linear-gradient(45deg,#ff8c00,#ffd700) !important; border-color:#ff8c00 !important; color:#000 !important; font-weight:700 !important; letter-spacing:.01em; }
-.nav-signup:hover { filter:brightness(1.12) !important; }
+
 /* Burger */
 .nav-burger {
     display:none; margin-left:auto;
@@ -748,6 +747,8 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
 </script>
 </head>
 <body>
+<h1 data-seo-h1 style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0">The Sun — G2V Star Simulator</h1>
+
 
 <script type="importmap">
 {
@@ -811,42 +812,42 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
                 <div class="sdo-strip" id="sdo-strip">
                     <div class="sdo-img-btn" data-label="AIA 304 Å · Chromosphere · 50 000 K"
                          onclick="sdoOpen('https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0304.jpg','AIA 304 Å · Chromosphere · ~50 000 K')">
-                        <img id="sdo-304" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0304.jpg" alt="AIA 304">
+                        <img id="sdo-304" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0304.jpg" alt="AIA 304" loading="lazy" decoding="async">
                         <span>AIA 304 Å<br>Chromosphere</span>
                     </div>
                     <div class="sdo-img-btn" data-label="AIA 171 Å · Coronal loops · 600 000 K"
                          onclick="sdoOpen('https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0171.jpg','AIA 171 Å · Coronal loops · ~600 000 K')">
-                        <img id="sdo-171" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0171.jpg" alt="AIA 171">
+                        <img id="sdo-171" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0171.jpg" alt="AIA 171" loading="lazy" decoding="async">
                         <span>AIA 171 Å<br>Coronal loops</span>
                     </div>
                     <div class="sdo-img-btn" data-label="AIA 193 Å · Active corona · 1.5 MK"
                          onclick="sdoOpen('https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0193.jpg','AIA 193 Å · Active corona · ~1.5 MK')">
-                        <img id="sdo-193" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0193.jpg" alt="AIA 193">
+                        <img id="sdo-193" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0193.jpg" alt="AIA 193" loading="lazy" decoding="async">
                         <span>AIA 193 Å<br>Active corona</span>
                     </div>
                     <div class="sdo-img-btn" data-label="AIA 211 Å · Active regions · 2 MK"
                          onclick="sdoOpen('https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0211.jpg','AIA 211 Å · Active regions · ~2 MK')">
-                        <img id="sdo-211" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0211.jpg" alt="AIA 211">
+                        <img id="sdo-211" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0211.jpg" alt="AIA 211" loading="lazy" decoding="async">
                         <span>AIA 211 Å<br>Active regions</span>
                     </div>
                     <div class="sdo-img-btn" data-label="AIA 131 Å · Flare plasma · 10 MK"
                          onclick="sdoOpen('https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0131.jpg','AIA 131 Å · Flare plasma · ~10 MK')">
-                        <img id="sdo-131" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0131.jpg" alt="AIA 131">
+                        <img id="sdo-131" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0131.jpg" alt="AIA 131" loading="lazy" decoding="async">
                         <span>AIA 131 Å<br>Flare plasma</span>
                     </div>
                     <div class="sdo-img-btn" data-label="HMI Magnetogram · B-field"
                          onclick="sdoOpen('https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_HMIB.jpg','HMI Magnetogram · Line-of-sight B-field')">
-                        <img id="sdo-hmib" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_HMIB.jpg" alt="HMI Mag">
+                        <img id="sdo-hmib" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_HMIB.jpg" alt="HMI Mag" loading="lazy" decoding="async">
                         <span>HMI Mag<br>B-field LOS</span>
                     </div>
                     <div class="sdo-img-btn" data-label="HMI Intensitygram · Sunspots"
                          onclick="sdoOpen('https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_HMIIC.jpg','HMI Intensitygram · Photosphere / sunspots')">
-                        <img id="sdo-hmic" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_HMIIC.jpg" alt="HMI IC">
+                        <img id="sdo-hmic" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_HMIIC.jpg" alt="HMI IC" loading="lazy" decoding="async">
                         <span>HMI IC<br>Photosphere</span>
                     </div>
                     <div class="sdo-img-btn" data-label="SOHO LASCO C2 · Inner corona 2–6 R☉"
                          onclick="sdoOpen('https://soho.nascom.nasa.gov/data/realtime/c2/1024/latest.jpg','SOHO LASCO C2 · Inner corona 2–6 R☉')">
-                        <img id="sdo-c2" src="https://soho.nascom.nasa.gov/data/realtime/c2/512/latest.jpg" alt="LASCO C2">
+                        <img id="sdo-c2" src="https://soho.nascom.nasa.gov/data/realtime/c2/512/latest.jpg" alt="LASCO C2" loading="lazy" decoding="async">
                         <span>LASCO C2<br>2–6 R☉</span>
                     </div>
                 </div>
@@ -855,7 +856,7 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
 
         <!-- SDO Full-image overlay -->
         <div id="sdo-overlay" onclick="this.classList.remove('show')">
-            <img id="sdo-ovr-img" src="" alt="">
+            <img id="sdo-ovr-img" src="" alt="NASA SDO solar imagery overlay">
             <span id="sdo-ovr-lbl"></span>
         </div>
 
