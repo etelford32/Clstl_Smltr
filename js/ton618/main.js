@@ -198,6 +198,7 @@ export async function boot({ canvas, hud, minimapCanvas }) {
             diskWarpOn:       state.diskWarpOn,
             diskWarpAngle:    state.diskWarpAngle,
             diskWarpPsi:      state.diskWarpPsi,
+            spin:             state.spin,
         });
         backend.draw();
         updateHUD(hud, state, backend, name);
@@ -274,6 +275,7 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         const result = traceRay(
             { x, y, width: rect.width, height: rect.height },
             state.cam,
+            state.spin,
         );
         result._click_x = x | 0;
         result._click_y = y | 0;
@@ -320,6 +322,11 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         setMdotRel(v)     { state.mdotRel = Math.max(0, Math.min(10.0, v)); state.dirty = true; },
         setSpin(a) {
             state.spin = Math.max(0, Math.min(0.999, a));
+            // Slide the camera collision floor along with the horizon —
+            // r_+(a) = 1 + √(1−a²) — so the user can fly closer at high spin.
+            const r_plus = 1 + Math.sqrt(Math.max(1 - state.spin * state.spin, 0));
+            state.cam.rMin = r_plus + 0.05;
+            if (state.cam.r < state.cam.rMin) state.cam.r = state.cam.rMin;
             if (state.autoSnapIscoToSpin) {
                 // Snap diskInner to prograde ISCO(a). Imported lazily.
                 import('./physics.js').then(({ kerrIsco }) => {
@@ -408,7 +415,7 @@ export async function boot({ canvas, hud, minimapCanvas }) {
             state.showHotspot = false;
             state.showPhotonSphere = false;
             render();
-            const result = measurePhotonRing(backend, state.cam);
+            const result = measurePhotonRing(backend, state.cam, state.spin);
             // restore
             state.cam.r = saved.r; state.cam.theta = saved.theta; state.cam.phi = saved.phi;
             state.cam.yaw = saved.yaw; state.cam.pitch = saved.pitch; state.cam.roll = saved.roll;
@@ -469,11 +476,11 @@ function updateHUD(hud, state, backend, backendName) {
         `circular v/c (eq.)     = ${fmt(d.v_orbital, 4)}    γ_orb = ${fmt(d.gamma_orbit, 4)}`,
         `circular period (eq.)  = ${fmt(d.period_orbit_years, 3)} yr`,
         `─── landmarks & thermodynamics ─────────────────`,
-        `[render] horizon r_h = ${d.r_horizon} M   photon sphere = ${d.r_photon} M   ISCO = ${d.r_isco} M`,
+        `[Schw. ref] r_h=${d.r_horizon}M   photon sphere=${d.r_photon}M   ISCO=${d.r_isco}M`,
         `[Kerr a=${d.spin.toFixed(3)}] r₊=${fmt(d.r_plus_kerr,3)}M  ISCO_pro=${fmt(d.r_isco_kerr_pro,3)}M  ISCO_retro=${fmt(d.r_isco_kerr_retro,3)}M`,
         `[Kerr] r_ph_pro=${fmt(d.r_photon_kerr_pro,3)}M  r_ph_retro=${fmt(d.r_photon_kerr_retro,3)}M  r_ergo(eq)=${fmt(d.r_ergo_eq_kerr,3)}M`,
         `[Kerr] Ω_H=${fmt(d.omega_horizon_kerr,4)} 1/M   η_NT(pro)=${(d.eta_kerr_pro*100).toFixed(2)}%`,
-        `photon ring (analytic Schw.) ${PHOTON_RING_RS.toFixed(4)} r_s = ${d.b_crit.toFixed(4)} M`,
+        `photon ring (Schw. analytic) ${PHOTON_RING_RS.toFixed(4)} r_s = ${d.b_crit.toFixed(4)} M`,
         `horizon area A = ${fmt(d.horizon_area_m2, 3)} m²`,
         `Bekenstein S/k = ${fmt(d.bekenstein_entropy_over_k, 3)}    T_H = ${fmt(d.T_hawking_K, 3)} K`,
         `─── disk luminosity ───────────────────────────`,

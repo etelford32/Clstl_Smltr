@@ -1,18 +1,26 @@
-// Schwarzschild ray-tracing fragment shader.
+// Kerr ray-tracing fragment shader  (Phase 1).
 //
-// Integrates null geodesics of the Schwarzschild metric in (t, r, theta, phi)
-// coordinates on an 8D phase space y = (t, r, th, ph, k^t, k^r, k^th, k^ph)
-// using an embedded RK4(5) Cash-Karp scheme with adaptive step control.
+// Integrates null geodesics of the Kerr metric in Boyer-Lindquist (BL)
+// coordinates (t, r, θ, φ) using the Hamiltonian form on the covariant
+// 4-momentum p_μ. Cash-Karp RK4(5) adaptive step on the 8-D phase space
+//     y = (t, r, θ, φ, p_t, p_r, p_θ, p_φ).
 //
-// Units: geometrized, M = 1. Horizon at r = 2.
+// Why covariant momenta: in BL the metric is t- and φ-independent, so
+// p_t and p_φ are *exactly* conserved by Hamilton's equations
+//     dp_μ/dλ = −(1/2) ∂_μ g^{αβ} p_α p_β,
+// which kills two of the four ODEs by construction. The photon energy
+// E = −p_t and axial angular momentum L_z = p_φ stay fixed; combined
+// with the on-shell constraint p^μ p_μ = 0, that's three of the four
+// integrals of motion (Carter Q is the fourth, computed in the inspector).
 //
-// Pixel -> ray construction: static observer tetrad in Schwarzschild coords.
-// A stationary observer at (r, theta) has orthonormal frame
-//     e_{(t)}^mu = (1/sqrt(f), 0, 0, 0)
-//     e_{(r)}^mu = (0, sqrt(f), 0, 0)
-//     e_{(th)}^mu = (0, 0, 1/r, 0)
-//     e_{(ph)}^mu = (0, 0, 0, 1/(r sin theta))
-// where f = 1 - 2M/r. Camera orientation is constructed in this frame.
+// Units: geometrized, M = 1. Outer horizon r₊ = 1 + √(1 − a²); the
+// renderer pre-terminates rays just outside r₊ so the BL coordinate
+// singularity at Δ = 0 never fires inside an RK stage.
+//
+// Observer tetrad: ZAMO (zero-angular-momentum observer, Bardeen-Press-
+// Teukolsky 1972) — locally non-rotating, valid everywhere outside r₊
+// including inside the ergosphere where a static observer is impossible.
+// Reduces to the Schwarzschild static tetrad continuously at a = 0.
 
 export const SCHWARZSCHILD_FRAG = /* glsl */ `#version 300 es
 precision highp float;
@@ -70,6 +78,9 @@ uniform float u_fe_intensity;
 
 uniform float u_far_shortcut_r;          // r threshold for far-field straight-line termination (M)
 
+// ── Phase 1 — Kerr spin parameter (M = 1) ───────────────────────────
+uniform float u_spin;                    // a/M ∈ [0, 0.999); a=0 ↔ Schwarzschild
+
 // ── B1 — Vertical disk structure (Shakura-Sunyaev slab) ─────────────
 uniform float u_disk_h_over_r;           // characteristic H/r at the inner edge (0..0.4)
 
@@ -86,50 +97,108 @@ uniform float u_disk_warp_psi;           // tilt axis azimuth (rad)
 #define PI 3.14159265358979323846
 
 // ---------------------------------------------------------------------------
-// Geodesic RHS for null rays in Schwarzschild
+// Kerr metric in Boyer-Lindquist coordinates (M = 1).
 // ---------------------------------------------------------------------------
-// d x^mu / d lambda = k^mu
-// d k^mu / d lambda = - Gamma^mu_{alpha beta} k^alpha k^beta
+//   Σ  ≡ r² + a²cos²θ
+//   Δ  ≡ r² − 2r + a²
+//   A  ≡ (r² + a²)² − a² Δ sin²θ        (sometimes written Σ_φ or A)
+// Outer/inner horizons r_± = 1 ± √(1 − a²).
+//
+// Inverse-metric components (only nonzero):
+//   g^tt   = −A / (Σ Δ)
+//   g^tφ   = −2 a r / (Σ Δ)
+//   g^rr   =  Δ / Σ
+//   g^θθ   =  1 / Σ
+//   g^φφ   =  (Δ − a² sin²θ) / (Σ Δ sin²θ)
+// ---------------------------------------------------------------------------
+
+// Outer horizon r₊(a) — used by the trace loop and the rhs clamp so
+// intermediate RK stages never see Δ ≤ 0.
+float kerr_r_plus() {
+    float a = clamp(u_spin, 0.0, 0.999);
+    return 1.0 + sqrt(max(1.0 - a * a, 0.0));
+}
+
+// Pack the 5 nonzero inverse-metric components into vec4 + float so we can
+// pass them around without struct gymnastics in WebGL2 shaders.
+//   xx = g^tt, xy = g^tφ, xz = g^rr, xw = g^θθ, fifth = g^φφ.
+void kerr_inv_metric(float r, float th, out vec4 g4, out float gPP) {
+    float a   = clamp(u_spin, 0.0, 0.999);
+    float a2  = a * a;
+    float r2  = r * r;
+    float sth = sin(th);
+    float cth = cos(th);
+    float s2  = max(sth * sth, 1.0e-8);
+    float Sigma = r2 + a2 * cth * cth;
+    float Delta = r2 - 2.0 * r + a2;
+    // Clamp Δ away from zero — only relevant if a stage briefly pushes inside r₊.
+    float DeltaSafe = (Delta > 1.0e-5) ? Delta : 1.0e-5;
+    float A     = (r2 + a2) * (r2 + a2) - a2 * DeltaSafe * s2;
+    float invSD = 1.0 / (Sigma * DeltaSafe);
+    g4.x = -A           * invSD;                 // g^tt
+    g4.y = -2.0 * a * r * invSD;                 // g^tφ
+    g4.z =  DeltaSafe / Sigma;                   // g^rr
+    g4.w =  1.0 / Sigma;                         // g^θθ
+    gPP  = (DeltaSafe - a2 * s2) / (Sigma * DeltaSafe * s2);
+}
+
+// Hamiltonian: H = (1/2) g^{αβ} p_α p_β. Used to evaluate the on-shell
+// constraint H = 0 and (numerically) ∂_r H, ∂_θ H for the momentum RHS.
+float kerr_hamiltonian(float r, float th, float pt, float pr, float pth, float pph) {
+    vec4  g4; float gPP;
+    kerr_inv_metric(r, th, g4, gPP);
+    return 0.5 * (g4.x * pt * pt
+                  + 2.0 * g4.y * pt * pph
+                  + g4.z * pr * pr
+                  + g4.w * pth * pth
+                  + gPP  * pph * pph);
+}
+
+// ---------------------------------------------------------------------------
+// Geodesic RHS — Hamilton's equations on the 8-D phase space (x^μ, p_μ).
+// ---------------------------------------------------------------------------
+//   dx^μ/dλ = +∂H/∂p_μ = g^{μν} p_ν
+//   dp_μ/dλ = −∂H/∂x^μ = −(1/2) ∂_μ g^{αβ} p_α p_β
+//
+// Killing vectors of Kerr ∂_t and ∂_φ ⇒ dp_t/dλ = dp_φ/dλ = 0 exactly,
+// no matter what the integrator does. We compute ∂_r H and ∂_θ H by
+// central differences in the metric coefficients — at single-precision
+// the truncation error of the central difference (~h²) and the round-off
+// (~ε/h) cross at h ≈ 1e-3 for typical r, θ values. Two extra metric
+// evaluations per axis, four per RHS — cheap.
 void rhs(in float y[8], out float d[8]) {
-    // r is clamped just outside the horizon so intermediate RK stages that
-    // briefly overshoot still produce finite values (f > 0). The outer loop
-    // pre-terminates any accepted state with r <= 2M + eps.
-    float r    = max(y[1], 2.0 * M + 1.0e-3);
-    float th   = y[2];
-    float kt   = y[4];
-    float kr   = y[5];
-    float kth  = y[6];
-    float kph  = y[7];
+    float a = clamp(u_spin, 0.0, 0.999);
+    float r_plus = 1.0 + sqrt(max(1.0 - a * a, 0.0));
+    float r   = max(y[1], r_plus + 1.0e-3);
+    float th  = y[2];
+    // sin θ is kept away from 0 inside kerr_inv_metric (s2 = max(sin²θ, 1e-8)),
+    // so we don't need an extra clamp on θ here.
+    float pt  = y[4], pr = y[5], pth = y[6], pph = y[7];
 
-    float f      = 1.0 - 2.0 * M / r;
-    float sinth  = sin(th);
-    float costh  = cos(th);
+    vec4  g4; float gPP;
+    kerr_inv_metric(r, th, g4, gPP);
 
-    // keep sin(theta) away from 0 so cot(theta) is finite
-    float sinth_s = (abs(sinth) < 1.0e-4) ? ((sinth >= 0.0) ? 1.0e-4 : -1.0e-4) : sinth;
+    // dx^μ/dλ = g^{μν} p_ν
+    d[0] = g4.x * pt + g4.y * pph;          // dt/dλ
+    d[1] = g4.z * pr;                       // dr/dλ
+    d[2] = g4.w * pth;                      // dθ/dλ
+    d[3] = g4.y * pt + gPP * pph;           // dφ/dλ
 
-    d[0] = kt;
-    d[1] = kr;
-    d[2] = kth;
-    d[3] = kph;
+    // p_t and p_φ are conserved (Killing). Set their derivatives to zero;
+    // the integrator will hold them rock-stable to round-off.
+    d[4] = 0.0;
+    d[7] = 0.0;
 
-    // Gamma^t_{tr} = M / (r^2 f)
-    d[4] = -2.0 * (M / (r * r * f)) * kt * kr;
-
-    // Gamma^r_{tt} = M f / r^2
-    // Gamma^r_{rr} = -M / (r^2 f)
-    // Gamma^r_{th th} = -(r - 2M) = -r f
-    // Gamma^r_{ph ph} = -(r - 2M) sin^2 th
-    d[5] =
-        - (M * f / (r * r)) * kt * kt
-        + (M / (r * r * f)) * kr * kr
-        + r * f * (kth * kth + sinth * sinth * kph * kph);
-
-    // Gamma^th_{r th} = 1/r, Gamma^th_{ph ph} = -sin th cos th
-    d[6] = -(2.0 / r) * kr * kth + sinth * costh * kph * kph;
-
-    // Gamma^ph_{r ph} = 1/r, Gamma^ph_{th ph} = cot th
-    d[7] = -(2.0 / r) * kr * kph - 2.0 * (costh / sinth_s) * kth * kph;
+    // dp_r/dλ = −(1/2) ∂_r g^{αβ} p_α p_β  via central difference on H.
+    // dp_θ/dλ = −(1/2) ∂_θ g^{αβ} p_α p_β  similarly.
+    float h_r  = max(1.0e-3 * r, 1.0e-4);
+    float h_th = 1.0e-3;
+    float H_rp = kerr_hamiltonian(r + h_r, th,        pt, pr, pth, pph);
+    float H_rm = kerr_hamiltonian(max(r - h_r, r_plus + 1.0e-4), th, pt, pr, pth, pph);
+    float H_tp = kerr_hamiltonian(r, th + h_th, pt, pr, pth, pph);
+    float H_tm = kerr_hamiltonian(r, th - h_th, pt, pr, pth, pph);
+    d[5] = -(H_rp - H_rm) / (2.0 * h_r);
+    d[6] = -(H_tp - H_tm) / (2.0 * h_th);
 }
 
 // ---------------------------------------------------------------------------
@@ -269,6 +338,28 @@ vec3 celestial_sphere(vec3 dir) {
 //   col 2 = right
 // Photon 3-direction in the tetrad frame is: forward + u*tan_x*right + v*tan_y*up
 // then normalized, and the full tetrad 4-momentum is k^{a} = (1, n_r, n_th, n_ph).
+// Build the initial ray on the 8-D phase space (x^μ, p_μ) from the ZAMO
+// tetrad of Bardeen-Press-Teukolsky 1972. ZAMO ("locally non-rotating")
+// is the natural Kerr observer: timelike everywhere outside r₊, smoothly
+// degenerates to the Schwarzschild static frame at a = 0, and stays
+// physically valid inside the ergosphere (where a true static observer
+// is forbidden because g_tt > 0).
+//
+//   ZAMO tetrad in BL coordinates:
+//     e_t̂ = (1/α)(1, 0, 0, ω)         timelike
+//     e_r̂ = (0, √(Δ/Σ), 0, 0)
+//     e_θ̂ = (0, 0, 1/√Σ, 0)
+//     e_φ̂ = (0, 0, 0, 1/(sin θ √(A/Σ)))
+//   where α = √(ΣΔ/A) is the lapse and ω = 2ar/A is the frame-dragging
+//   angular velocity.
+//
+// For u_observer_type == 3 ("Keplerian") in the equatorial plane and
+// r > r_isco_pro(a), we boost the ZAMO tetrad in +φ̂ by the Kerr
+// prograde Kepler velocity v_K = (Ω − ω)·√(g_φφ_proper)/α.
+//
+// Free-fall (PG-analog, observer_type == 1) lands in Phase 1.1; for now
+// we fall back to ZAMO so the slider doesn't produce silently-wrong
+// physics.
 void build_initial_ray(vec2 ndc, out float y0[8]) {
     float aspect = u_resolution.x / u_resolution.y;
     float tan_y  = tan(0.5 * u_fov_y);
@@ -282,65 +373,95 @@ void build_initial_ray(vec2 ndc, out float y0[8]) {
                               + up_t    * (ndc.y * tan_y)
                               + right_t * (ndc.x * tan_x));
 
-    // Map tetrad components back to coordinate k^mu.
-    float r     = u_cam_pos.y;
-    float th    = u_cam_pos.z;
-    float f     = 1.0 - 2.0 * M / r;
-    float sqf   = sqrt(max(f, 1.0e-6));
-    float sinth = max(abs(sin(th)), 1.0e-4) * sign(sin(th) + (sin(th) == 0.0 ? 1.0 : 0.0));
+    // Unpack camera coordinates and Kerr functions at (r, θ).
+    float r   = u_cam_pos.y;
+    float th  = u_cam_pos.z;
+    float a   = clamp(u_spin, 0.0, 0.999);
+    float a2  = a * a;
+    float r2  = r * r;
+    float sth = sin(th);
+    float cth = cos(th);
+    float s2  = max(sth * sth, 1.0e-8);
+    float Sigma = r2 + a2 * cth * cth;
+    float Delta = max(r2 - 2.0 * r + a2, 1.0e-5);
+    float A     = (r2 + a2) * (r2 + a2) - a2 * Delta * s2;
+    float alpha = sqrt(max(Sigma * Delta / A, 1.0e-9));     // ZAMO lapse
+    float omega = 2.0 * a * r / A;                          // frame dragging
 
-    float kt_coord, kr_coord, kth_coord, kph_coord;
+    // Photon contravariant 4-momentum from ZAMO tetrad legs:
+    //   k^μ = e_(â)^μ  k^(â)            where  k^(â) = (1, n_r, n_θ, n_φ).
     float n_r  = n_tetrad.x;
     float n_th = n_tetrad.y;
     float n_ph = n_tetrad.z;
 
-    if (u_observer_type == 1) {
-        // Free-fall (Painleve-Gullstrand): infall from rest at infinity.
-        //   u^mu = (1/f, -sqrt(2M/r), 0, 0).
-        // Boosted radial tetrad vector: e_(r)^mu = (-sqrt(2M/r)/f, 1, 0, 0).
-        // theta and phi tetrad legs unchanged from static frame.
-        float v = sqrt(2.0 * M / r);
-        kt_coord  = (1.0 - n_r * v) / max(f, 1.0e-6);
-        kr_coord  = -v + n_r;
-        kth_coord = n_th / r;
-        kph_coord = n_ph / (r * sinth);
-    } else if (u_observer_type == 3 && abs(th - 0.5 * PI) < 0.05 && r > 3.0 * M + 0.01) {
-        // Prograde circular Keplerian orbit (equator only, r > 3M).
-        //   Omega_K = sqrt(M / r^3) (coordinate)
-        //   v_local = sqrt(M / (r - 2M)) (in static frame, +phi direction)
-        //   gamma   = 1 / sqrt(1 - 3M/r)
-        // Boost static tetrad in +phi -> rotate (e_t, e_ph).
-        float v_orb     = sqrt(M / (r - 2.0 * M));
-        float gamma_orb = 1.0 / sqrt(1.0 - 3.0 * M / r);
-        // boosted basis (in coord components):
-        //   e_(t)'  = gamma * (1/sqf, 0, 0, v_orb / (r sinth))
-        //   e_(ph)' = gamma * (v_orb/sqf, 0, 0, 1/(r sinth))
-        //   e_(r)', e_(th)' unchanged from static
-        float et_t  = gamma_orb / sqf;
-        float et_ph = gamma_orb * v_orb / (r * sinth);
-        float ep_t  = gamma_orb * v_orb / sqf;
-        float ep_ph = gamma_orb / (r * sinth);
+    float kt_co, kr_co, kth_co, kph_co;
 
-        kt_coord  = et_t   + n_ph * ep_t;
-        kr_coord  = n_r * sqf;
-        kth_coord = n_th / r;
-        kph_coord = et_ph + n_ph * ep_ph;
+    // Optional Keplerian boost (equator + valid prograde circular). The
+    // boost is applied in the (t̂, φ̂) plane of the ZAMO frame, leaving
+    // radial and polar legs unchanged. We accept any equatorial radius —
+    // the v-clamp below catches the photon-sphere singularity (v → 1) and
+    // the bracket > 0 guard catches retrograde-bound orbits.
+    bool use_kepler = (u_observer_type == 3) &&
+                      (abs(th - 0.5 * PI) < 0.05);
+    if (use_kepler) {
+        // Kerr prograde equatorial Kepler angular velocity (M = 1):
+        //   Ω_K = 1 / (r^{3/2} + a)
+        float OmegaK = 1.0 / (pow(r, 1.5) + a);
+        // ZAMO-frame 3-velocity of the Keplerian orbiter, +φ̂ direction.
+        // v = (Ω − ω) · √(g_φφ_proper) / α   with g_φφ_proper = (A/Σ) sin²θ.
+        float gPhiPhi_proper = (A / Sigma) * s2;
+        float v = (OmegaK - omega) * sqrt(max(gPhiPhi_proper, 0.0)) / max(alpha, 1.0e-6);
+        v = clamp(v, -0.9999, 0.9999);
+        float gamma = 1.0 / sqrt(1.0 - v * v);
+        // Boosted timelike & azimuthal tetrad legs:
+        float k_that =  gamma * (1.0           +  v * n_ph);
+        float k_phat =  gamma * (n_ph          +  v * 1.0);
+        float k_rhat =  n_r;
+        float k_thhat = n_th;
+        // Push back to BL contravariant components.
+        kt_co  = (1.0 / alpha) * k_that;
+        kr_co  = sqrt(Delta / Sigma) * k_rhat;
+        kth_co = (1.0 / sqrt(Sigma)) * k_thhat;
+        kph_co = (omega / alpha) * k_that
+                 + (1.0 / (sqrt(max(A / Sigma, 1.0e-9)) * abs(sth))) * k_phat;
     } else {
-        // Static / ZAMO observer (identical for Schwarzschild). Valid only r > 2M.
-        kt_coord  = 1.0 / sqf;
-        kr_coord  = n_r * sqf;
-        kth_coord = n_th / r;
-        kph_coord = n_ph / (r * sinth);
+        // ZAMO (covers static & free-fall slots in this Phase 1 build).
+        float k_that  = 1.0;
+        float k_rhat  = n_r;
+        float k_thhat = n_th;
+        float k_phat  = n_ph;
+        kt_co  = (1.0 / alpha) * k_that;
+        kr_co  = sqrt(Delta / Sigma) * k_rhat;
+        kth_co = (1.0 / sqrt(Sigma)) * k_thhat;
+        kph_co = (omega / alpha) * k_that
+                 + (1.0 / (sqrt(max(A / Sigma, 1.0e-9)) * abs(sth))) * k_phat;
     }
+
+    // Lower indices: p_μ = g_{μν} k^ν.
+    //   g_tt   = −(1 − 2r/Σ)
+    //   g_tφ   = −2 a r sin²θ / Σ
+    //   g_rr   = Σ / Δ
+    //   g_θθ   = Σ
+    //   g_φφ   = (A/Σ) sin²θ
+    float g_tt = -(1.0 - 2.0 * r / Sigma);
+    float g_tphi = -2.0 * a * r * s2 / Sigma;
+    float g_rr = Sigma / Delta;
+    float g_thth = Sigma;
+    float g_phph = (A / Sigma) * s2;
+
+    float p_t  = g_tt   * kt_co + g_tphi * kph_co;
+    float p_r  = g_rr   * kr_co;
+    float p_th = g_thth * kth_co;
+    float p_ph = g_tphi * kt_co + g_phph * kph_co;
 
     y0[0] = u_cam_pos.x;     // t
     y0[1] = r;
     y0[2] = th;
-    y0[3] = u_cam_pos.w;     // phi
-    y0[4] = kt_coord;
-    y0[5] = kr_coord;
-    y0[6] = kth_coord;
-    y0[7] = kph_coord;
+    y0[3] = u_cam_pos.w;     // φ
+    y0[4] = p_t;
+    y0[5] = p_r;
+    y0[6] = p_th;
+    y0[7] = p_ph;
 }
 
 // ---------------------------------------------------------------------------
@@ -443,19 +564,36 @@ float mri_fbm(float lnr, float ph_local, float t) {
 //   • intensity invariant I_obs = g^4 · I_emit (Liouville/Boltzmann)
 //   • optional orbiting hot-spot at u_hotspot_radius
 // ---------------------------------------------------------------------------
-vec3 disk_emission(float r, float ph, float kt, float kph) {
+// 'pt', 'pph' here are the photon's covariant 4-momentum components
+// p_t and p_φ at the disk-cell crossing (the Phase 1 state vector
+// stores p_μ, not k^μ). The g-factor is the metric-independent form
+//   g = E_obs / E_emit = (−p_μ u^μ_obs) / (−p_μ u^μ_emit).
+// We absorb the observer's normalization (E_obs ≡ −p_t at infinity = 1)
+// into the photon's energy so the formula reduces to
+//   g = 1 / (−p_μ u^μ_emit) = 1 / (−p_t·u^t − p_φ·u^φ).
+vec3 disk_emission(float r, float ph, float pt, float pph) {
     if (r < u_disk_inner || r > u_disk_outer) return vec3(0.0);
 
-    // ── Keplerian 4-velocity at equator ───────────────────────────────
-    float fac_orb = 1.0 - 3.0 * M / r;
-    if (fac_orb <= 0.0) return vec3(0.0);          // no circular orbit r < 3M
-
-    float ut    = 1.0 / sqrt(fac_orb);
-    float Omega = pow(r, -1.5);                    // M = 1
+    // ── Kerr equatorial prograde Keplerian 4-velocity (M = 1) ─────────
+    //   Ω_K = 1 / (r^{3/2} + a)
+    //   u^t = (r^{3/2} + a) / √(r² · (r − 3 + 2 a r^{−1/2}))    Bardeen-Press-Teukolsky
+    // Equivalent form via direct normalization u_μ u^μ = −1:
+    //   bracket = (1 − 2/r) + 4 a Ω/r − (r² + a² + 2 a²/r) Ω²
+    //   u^t = 1/√bracket,   u^φ = Ω u^t
+    // Reduces to Schwarzschild's u^t = 1/√(1 − 3/r) at a = 0.
+    float a      = clamp(u_spin, 0.0, 0.999);
+    float OmegaK = 1.0 / (pow(r, 1.5) + a);
+    float bracket = (1.0 - 2.0 / r)
+                  + 4.0 * a * OmegaK / r
+                  - (r * r + a * a + 2.0 * a * a / r) * OmegaK * OmegaK;
+    if (bracket <= 0.0) return vec3(0.0);          // unbound / past r_ms
+    float ut    = 1.0 / sqrt(bracket);
+    float Omega = OmegaK;                          // local alias
     float uph   = Omega * ut;
 
     // ── g-factor ──────────────────────────────────────────────────────
-    float E_emit = (1.0 - 2.0 * M / r) * kt * ut - r * r * kph * uph;
+    // E_emit = −p_μ u^μ = −(p_t·u^t + p_φ·u^φ).
+    float E_emit = -(pt * ut + pph * uph);
     E_emit = max(E_emit, 1.0e-3);
     float g = 1.0 / E_emit;
     float bright = pow(g, 4.0);
@@ -745,31 +883,52 @@ vec3 photon_sphere_glow(float y_prev[8], float y_new[8]) {
 // ---------------------------------------------------------------------------
 vec3 volume_emission(float y_prev[8], float y_new[8], float h_step) {
     vec3 out_rgb = vec3(0.0);
-    float r  = 0.5 * (y_prev[1] + y_new[1]);
-    float th = 0.5 * (y_prev[2] + y_new[2]);
-    float kt = 0.5 * (y_prev[4] + y_new[4]);
-    float kr = 0.5 * (y_prev[5] + y_new[5]);
+    float r   = 0.5 * (y_prev[1] + y_new[1]);
+    float th  = 0.5 * (y_prev[2] + y_new[2]);
+    // Photon covariant 4-momentum at the cell midpoint.
+    float pt  = 0.5 * (y_prev[4] + y_new[4]);
+    float pr  = 0.5 * (y_prev[5] + y_new[5]);
+    float pph = 0.5 * (y_prev[7] + y_new[7]);
 
-    if (r <= 2.0 * M + 0.01) return out_rgb;
+    float r_plus = kerr_r_plus();
+    if (r <= r_plus + 0.01) return out_rgb;
 
-    float f_h = max(1.0 - 2.0 * M / r, 1.0e-3);
-    float sqf = sqrt(f_h);
+    // Kerr ZAMO-frame structure (used for both the jet 4-velocity build
+    // and the corona/wind tinting).
+    float a   = clamp(u_spin, 0.0, 0.999);
+    float a2  = a * a;
+    float r2  = r * r;
+    float sth = sin(th);
+    float s2  = max(sth * sth, 1.0e-6);
+    float Sigma = r2 + a2 * cos(th) * cos(th);
+    float Delta = max(r2 - 2.0 * r + a2, 1.0e-5);
+    float A     = (r2 + a2) * (r2 + a2) - a2 * Delta * s2;
+    float alpha = sqrt(max(Sigma * Delta / A, 1.0e-9));   // ZAMO lapse
+    float omega = 2.0 * a * r / A;                        // frame dragging
+    // Aliases for legacy Schwarzschild call sites that referenced sqf:
+    float f_h = max(1.0 - 2.0 / r, 1.0e-3);
 
     // ── Bipolar relativistic jets ───────────────────────────────────
     if (u_show_jets == 1) {
         // angular distance from nearest pole
         float th_axis = min(th, PI - th);
         if (th_axis < u_jet_open && r < u_jet_r_max) {
-            // Jet 4-velocity: bulk flow outward along ±r̂. Sign chosen by hemisphere.
+            // Jet 4-velocity: bulk flow outward along ±r̂_ZAMO. Sign chosen
+            // by hemisphere. We parametrize in the ZAMO orthonormal frame
+            // (u_(t̂), u_(r̂)) = (γ, ±γβ), then push to BL contravariant:
+            //   u^t = γ/α            ,  u^r = ±γβ √(Δ/Σ)
+            //   u^φ = γω/α           ,  u^θ = 0
+            // (the φ-component picks up the frame-dragging shift even
+            // though the bulk flow has no φ-velocity in the local frame).
             float beta_sign = (th < 0.5 * PI) ? 1.0 : -1.0;
-            float beta = u_jet_velocity * beta_sign;
+            float beta = u_jet_velocity;
             float gamma_j = 1.0 / sqrt(max(1.0 - beta * beta, 1.0e-6));
-            float ut = gamma_j / sqf;
-            float ur = gamma_j * beta * sqf;
+            float ut  = gamma_j / alpha;
+            float ur  = beta_sign * gamma_j * beta * sqrt(Delta / Sigma);
+            float uph = gamma_j * omega / alpha;
 
-            // E_emit = -g_{μν} k^μ u^ν   (signature -+++ on Schwarzschild)
-            //        = (1 − 2M/r) kt ut − kr ur / (1 − 2M/r)
-            float E_emit = (1.0 - 2.0 * M / r) * kt * ut - kr * ur / f_h;
+            // E_emit = −p_μ u^μ. (Note: p_θ * u^θ = 0 since u^θ = 0.)
+            float E_emit = -(pt * ut + pph * uph) - pr * ur;
             E_emit = max(E_emit, 1.0e-3);
             float delta = 1.0 / E_emit;                            // Doppler factor
 
@@ -855,16 +1014,20 @@ void trace(inout float y[8], out int term, out int steps_taken, out float affine
     int   crossings = 0;
     bool  translucent = (u_disk_mode == 1);
 
+    float r_plus_local = kerr_r_plus();
+
     for (int step = 0; step < 4096; ++step) {
         if (step >= u_max_steps) break;
 
-        if (y[1] <= 2.0 * M + HORIZON_EPS) { term = 1; return; }
-        if (y[1] >= u_r_far)                { term = 2; return; }
+        if (y[1] <= r_plus_local + HORIZON_EPS) { term = 1; return; }
+        if (y[1] >= u_r_far)                    { term = 2; return; }
 
         // Far-field straight-line shortcut: once we're well outside the
         // photon sphere and moving outward, the geodesic is essentially a
         // straight line on the celestial sphere. Skip the rest of the
         // integration — saves up to 30-50 % of step budget at wide views.
+        // With covariant momenta the sign of dr/dλ = g^rr p_r = (Δ/Σ) p_r
+        // matches sign(p_r), so y[5] > 0 still flags an outward-bound ray.
         if (u_far_shortcut_r > 0.0 && y[1] > u_far_shortcut_r && y[5] > 0.0) {
             term = (tau_total > 0.0) ? 5 : 2;
             return;
@@ -928,7 +1091,7 @@ void trace(inout float y[8], out int term, out int steps_taken, out float affine
         volume_rgb += volume_emission(y_prev, y, h);
 
         float r = y[1];
-        if (r <= 2.0 * M + HORIZON_EPS) { term = 1; return; }
+        if (r <= r_plus_local + HORIZON_EPS) { term = 1; return; }
         if (r >= u_r_far) {
             // Escaped — but the user may have accumulated translucent disk
             // emission on the way out; surface it via term = 5.
@@ -944,15 +1107,26 @@ void trace(inout float y[8], out int term, out int steps_taken, out float affine
     term = (tau_total > 0.0) ? 5 : 3;
 }
 
-// Convert outgoing (r, theta, phi, k^r, k^theta, k^phi) at large r to
-// an asymptotic Cartesian direction for celestial-sphere lookup.
+// Convert the outgoing 8-state at large r to an asymptotic Cartesian
+// direction for celestial-sphere lookup. State stores covariant momenta
+// p_μ; raise indices via k^μ = g^{μν} p_ν before mapping into Cartesian.
+// At large r the Kerr metric goes to flat Minkowski, so the direction
+// extracted from k^μ is the photon's asymptotic direction.
 vec3 outgoing_direction(float y[8]) {
     float r     = y[1];
     float th    = y[2];
     float ph    = y[3];
-    float kr    = y[5];
-    float kth   = y[6];
-    float kph   = y[7];
+    float pt    = y[4];
+    float pr    = y[5];
+    float pth   = y[6];
+    float pph   = y[7];
+
+    vec4 g4; float gPP;
+    kerr_inv_metric(r, th, g4, gPP);
+    // k^r = g^rr p_r;  k^θ = g^θθ p_θ;  k^φ = g^tφ p_t + g^φφ p_φ
+    float kr  = g4.z * pr;
+    float kth = g4.w * pth;
+    float kph = g4.y * pt + gPP * pph;
 
     float sinth = sin(th);
     float costh = cos(th);
@@ -960,9 +1134,9 @@ vec3 outgoing_direction(float y[8]) {
     float cosph = cos(ph);
 
     // velocity in an orthonormal radial/tangential frame
-    float vx_sph = kr;          // radial
-    float vy_sph = r * kth;     // theta
-    float vz_sph = r * sinth * kph;  // phi
+    float vx_sph = kr;
+    float vy_sph = r * kth;
+    float vz_sph = r * sinth * kph;
 
     // unit vectors in Cartesian
     vec3 er = vec3(sinth * cosph, costh, sinth * sinph);

@@ -64,6 +64,7 @@ export function createWebGL2Backend(canvas) {
         diskWarpOn:       gl.getUniformLocation(program, 'u_disk_warp_on'),
         diskWarpAngle:    gl.getUniformLocation(program, 'u_disk_warp_angle'),
         diskWarpPsi:      gl.getUniformLocation(program, 'u_disk_warp_psi'),
+        spin:             gl.getUniformLocation(program, 'u_spin'),
     };
 
     function resize(w, h) {
@@ -124,6 +125,7 @@ export function createWebGL2Backend(canvas) {
         gl.uniform1i(uLoc.diskWarpOn,       u.diskWarpOn ? 1 : 0);
         gl.uniform1f(uLoc.diskWarpAngle,    u.diskWarpAngle    ?? 0.0);
         gl.uniform1f(uLoc.diskWarpPsi,      u.diskWarpPsi      ?? 0.0);
+        gl.uniform1f(uLoc.spin,             u.spin             ?? 0.0);
     }
 
     function draw() {

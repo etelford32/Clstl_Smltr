@@ -22,7 +22,7 @@
 <meta name="twitter:description" content="Research-grade visualization of TON 618, a ~66 billion solar mass quasar. Compare its event horizon to the solar system and Milky Way at scale.">
 <meta name="twitter:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
 
-<meta name="description" content="Research-grade Kerr geodesic observatory for TON 618, the most massive known black hole. Phase 0.5: Schwarzschild baseline with RK45 null-geodesic ray tracing and a 3D god-mode camera.">
+<meta name="description" content="Research-grade Kerr geodesic observatory for TON 618, the most massive known black hole. Phase 1: rotating Kerr metric integrated on the GPU via Hamilton's equations, with ZAMO tetrads, spin-correct ISCO and shadow.">
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family:'Courier New',monospace; background:#000; color:#ccc; display:flex; flex-direction:column; min-height:100vh; overflow:hidden; }
@@ -180,7 +180,7 @@ select {
 <div id="app">
     <div id="canvas-area">
         <canvas id="glCanvas"></canvas>
-        <div id="hud-title">Phase 0.5 · Schwarzschild · RK45 · 3D God-mode Camera</div>
+        <div id="hud-title">Phase 1 · Kerr (Hamilton, BL) · ZAMO tetrad · RK45 · 3D God-mode Camera</div>
         <div id="hud">booting…</div>
         <div id="minimap-wrap">
             <div class="mm-label">god-view · top / side</div>
@@ -203,12 +203,13 @@ select {
 
     <aside id="panel">
         <div>
-            <div class="shader-badge">▸ WebGL2 · RK45 · Tetrad-3DOF</div>
-            <div class="sec-title"><span class="phase-pill">Phase 0.5</span> Observatory</div>
+            <div class="shader-badge">▸ WebGL2 · Kerr-BL · Hamilton · ZAMO</div>
+            <div class="sec-title"><span class="phase-pill">Phase 1</span> Observatory</div>
             <div class="note">Research-grade Kerr geodesic observatory for TON 618
-                (M ≈ 6.6×10¹⁰ M☉). Schwarzschild baseline with a 3D god-mode camera
-                that can sit in any of three physical observer frames. Spin remains
-                <i>a = 0</i> until Phase 1 lands.</div>
+                (M ≈ 6.6×10¹⁰ M☉). Hamilton's equations on the 8-D phase space
+                (x<sup>μ</sup>, p<sub>μ</sub>) in Boyer-Lindquist coords; p<sub>t</sub> = −E
+                and p<sub>φ</sub> = L<sub>z</sub> conserved by construction. ZAMO tetrad
+                replaces the static frame so the camera survives the ergosphere.</div>
         </div>
 
         <div>
@@ -250,7 +251,7 @@ select {
         <div>
             <div class="sec-title">Black-hole geometry</div>
             <div class="ctrl">
-                <label>Spin a / M  <span style="color:#888">[diagnostic — render is Schwarzschild]</span></label>
+                <label>Spin a / M  <span style="color:#76d18a">[live · drives the geodesic kernel]</span></label>
                 <input type="range" id="s-spin" min="0" max="0.998" step="0.002" value="0">
                 <div class="val" id="v-spin">0.000  (Schwarzschild)</div>
             </div>
@@ -258,10 +259,11 @@ select {
                 <input type="checkbox" id="snapIsco" checked>
                 <label for="snapIsco">Snap r_inner → ISCO_prograde(a)</label>
             </div>
-            <div class="note">Spin updates the Kerr landmarks (r₊, ISCO_pro/retro,
-                ergosphere, photon spheres) and thermodynamics (κ, T_H, A, η_NT)
-                in the HUD live. The ray-traced shadow stays Schwarzschild
-                until the Kerr metric lands in <b>Phase 1</b>.</div>
+            <div class="note">Phase 1: spin drives the metric in the shader, the
+                ZAMO tetrad reconstruction, the disk's Keplerian g-factor, the
+                photon-ring shape, the ergosphere geometry, and the camera's
+                horizon-aware floor r<sub>+</sub>(a). At a → 0 the integrator
+                continuously degenerates back to Schwarzschild.</div>
         </div>
 
         <div>
@@ -538,31 +540,38 @@ select {
         <div>
             <div class="sec-title">Validation</div>
             <button class="btn" id="btnValidate">⊙ Measure photon ring</button>
-            <div class="note">Expected apparent ring radius at infinity:
-                <b>b_crit = 3√3 M ≈ 5.196 M</b> = <b>2.598 r_s</b>
-                (Bardeen-Press-Teukolsky, Schwarzschild).</div>
+            <div class="note">At a = 0: <b>b_crit = 3√3 M ≈ 5.196 M</b> = <b>2.598 r_s</b>
+                (Bardeen-Press-Teukolsky 1972). At a &gt; 0 the shadow rim becomes
+                asymmetric — the column-extent measurement here is a single-axis
+                proxy; full Bardeen 1973 contour validation lands in Phase 1.5.</div>
         </div>
 
         <div class="sep"></div>
         <div class="info-box">
-            <b>Phase 0.5 physics</b><br>
-            <span style="color:#ffaa44">① Tetrads:</span> three physically distinct
-            local Lorentz frames — static, Painlevé-Gullstrand free-faller, prograde
-            Keplerian. Each gives a different aberration / Doppler response.<br>
-            <span style="color:#ffaa44">② Ray construction:</span> pixel → local
-            3-direction → null 4-momentum k^μ via the active tetrad.<br>
-            <span style="color:#ffaa44">③ Integration:</span> Cash-Karp RK4(5)
-            adaptive on 8-D phase space (t, r, θ, φ, k^t, k^r, k^θ, k^φ).<br>
-            <span style="color:#ffaa44">④ Termination:</span> horizon capture at
-            r ≲ 2M, or escape past r_far = 1200 M onto the celestial sphere.<br>
-            <span style="color:#ffaa44">⑤ HUD/mini-map:</span> live γ_static,
-            tidal Δa/L, free-fall &amp; orbital v/c, proper distance / light-time
-            to horizon, ISCO &amp; photon-sphere overlays.
+            <b>Phase 1 physics</b><br>
+            <span style="color:#ffaa44">① Metric:</span> Kerr in Boyer-Lindquist
+            (Σ = r²+a²cos²θ, Δ = r²−2r+a², A = (r²+a²)²−a²Δsin²θ). Reduces
+            continuously to Schwarzschild at a = 0.<br>
+            <span style="color:#ffaa44">② Geodesics:</span> Hamilton's equations
+            on (x<sup>μ</sup>, p<sub>μ</sub>) — p<sub>t</sub> and p<sub>φ</sub> exactly
+            conserved (Killing vectors). ∂<sub>r</sub>H, ∂<sub>θ</sub>H by central
+            difference.<br>
+            <span style="color:#ffaa44">③ Tetrad:</span> ZAMO frame (Bardeen-
+            Press-Teukolsky 1972) — locally non-rotating, valid through the
+            ergosphere; Keplerian boost in the equatorial plane.<br>
+            <span style="color:#ffaa44">④ Termination:</span> horizon capture
+            at r ≲ r<sub>+</sub>(a) = 1+√(1−a²), or escape past r<sub>far</sub> = 1200 M.<br>
+            <span style="color:#ffaa44">⑤ Disk:</span> spin-correct Kerr
+            Keplerian Ω<sub>K</sub> = 1/(r<sup>3/2</sup>+a) drives the Doppler
+            asymmetry; ISCO snaps to BPT-1972 prograde value.<br>
+            <span style="color:#ffaa44">⑥ Inspector:</span> click any pixel to
+            re-run the geodesic in JS and read off E, L<sub>z</sub>, Carter Q,
+            their drift, b, r<sub>min</sub>, total Δφ.
         </div>
         <div class="note">
             UI note: TON 618 mass is <i>measured</i> (virial/SED);
-            spin <i>a = 0.95</i> (Phase 1 default) is <i>inferred</i>;
-            super-Eddington phases are <i>hypothetical</i>.
+            high spin <i>a ≈ 0.95</i> is <i>inferred</i>; super-Eddington
+            phases are <i>hypothetical</i>.
         </div>
     </aside>
 </div>
@@ -786,19 +795,20 @@ select {
         const bRel = r.b_impact / r.b_crit;
         const fmtPct = (x) => Math.abs(x) < 1e-6 ? '0.000 %' : x.toExponential(3) + ' %';
         inspBody.textContent = [
-            `pixel (${r._click_x}, ${r._click_y})`,
+            `pixel (${r._click_x}, ${r._click_y})   spin a = ${(r.spin ?? 0).toFixed(3)}`,
             `term       : ${r.term.toUpperCase()}`,
             `verdict    : ${r.verdict}`,
-            `impact b   : ${r.b_impact.toFixed(4)} M  (b/b_crit = ${bRel.toFixed(4)})`,
-            `b_crit     : ${r.b_crit.toFixed(4)} M`,
-            `r_min      : ${r.r_min.toFixed(3)} M   (horizon = 2M, photon sphere = 3M)`,
+            `impact b   : ${r.b_impact.toFixed(4)} M  (b/b_crit_Schw = ${bRel.toFixed(4)})`,
+            `b_crit     : ${r.b_crit.toFixed(4)} M  (Schwarzschild ref)`,
+            `r_min      : ${r.r_min.toFixed(3)} M   (horizon r₊ = ${r.r_horizon.toFixed(3)}M, ISCO_pro = ${(r.r_isco_pro ?? 6).toFixed(3)}M)`,
             `r_max      : ${r.r_max.toFixed(3)} M`,
             `Δφ total   : ${(r.deflection_total).toFixed(3)} rad   (${(r.deflection_total*180/Math.PI).toFixed(1)}°)`,
             `eq. crossings: ${r.equator_crossings}`,
             `steps      : ${r.steps}`,
-            `─── conservation drift (RK4 fixed-step) ───`,
-            `E drift    : ${fmtPct(r.E_drift_pct)}`,
-            `L_z drift  : ${fmtPct(r.L_drift_pct)}`,
+            `─── conservation drift (RK4 fixed-step, Hamilton form) ───`,
+            `E   drift  : ${fmtPct(r.E_drift_pct)}    (Killing ∂_t)`,
+            `L_z drift  : ${fmtPct(r.L_drift_pct)}    (Killing ∂_φ)`,
+            `Q   drift  : ${fmtPct(r.Q_drift_pct ?? 0)}    (Carter)`,
         ].join('\n');
     });
 
@@ -846,15 +856,20 @@ select {
                 v.textContent = 'validation failed: no shadow detected';
                 return;
             }
+            const aTag = result.kerr_regime
+                ? `Kerr rim (a = ${result.spin.toFixed(3)}) — column extent only`
+                : 'Schwarzschild';
             const pass = Math.abs(result.error_pct) < 1.0;
             v.textContent = [
-                `PHOTON RING VALIDATION`,
+                `PHOTON RING / SHADOW MEASUREMENT  (${aTag})`,
                 `  measured b  = ${result.b_measured.toFixed(4)} M`,
-                `  expected b  = ${result.b_expected.toFixed(4)} M`,
+                `  schw b_crit = ${result.b_expected.toFixed(4)} M`,
                 `  measured    = ${result.ring_rs.toFixed(4)} r_s`,
-                `  expected    = ${result.ring_rs_expected.toFixed(4)} r_s`,
-                `  error       = ${result.error_pct.toFixed(3)} %`,
-                `  status      = ${pass ? 'PASS (< 1%)' : 'ATTN (> 1%)'}`,
+                `  schw expect = ${result.ring_rs_expected.toFixed(4)} r_s`,
+                `  delta       = ${result.error_pct.toFixed(3)} %`,
+                result.kerr_regime
+                    ? `  status      = INFO (Kerr — analytic rim is asymmetric; see Phase 1.5)`
+                    : `  status      = ${pass ? 'PASS (< 1%)' : 'ATTN (> 1%)'}`,
             ].join('\n');
         }, 50);
     });
