@@ -248,6 +248,23 @@ select {
         </div>
 
         <div>
+            <div class="sec-title">Black-hole geometry</div>
+            <div class="ctrl">
+                <label>Spin a / M  <span style="color:#888">[diagnostic — render is Schwarzschild]</span></label>
+                <input type="range" id="s-spin" min="0" max="0.998" step="0.002" value="0">
+                <div class="val" id="v-spin">0.000  (Schwarzschild)</div>
+            </div>
+            <div class="toggle-row">
+                <input type="checkbox" id="snapIsco" checked>
+                <label for="snapIsco">Snap r_inner → ISCO_prograde(a)</label>
+            </div>
+            <div class="note">Spin updates the Kerr landmarks (r₊, ISCO_pro/retro,
+                ergosphere, photon spheres) and thermodynamics (κ, T_H, A, η_NT)
+                in the HUD live. The ray-traced shadow stays Schwarzschild
+                until the Kerr metric lands in <b>Phase 1</b>.</div>
+        </div>
+
+        <div>
             <div class="sec-title">Camera presets</div>
             <div class="btn-row">
                 <button class="btn-sm" data-preset="far-equator">far · equator</button>
@@ -301,28 +318,103 @@ select {
         </div>
 
         <div>
+            <div class="sec-title">Disk dynamics</div>
+            <div class="ctrl">
+                <label>Vertical thickness H/r (Shakura-Sunyaev slab)</label>
+                <input type="range" id="s-disk-h" min="0" max="0.4" step="0.005" value="0">
+                <div class="val" id="v-disk-h">0.000  (razor-thin)</div>
+            </div>
+            <div class="ctrl">
+                <label>MRI turbulence amplitude</label>
+                <input type="range" id="s-mri" min="0" max="1.4" step="0.02" value="0.6">
+                <div class="val" id="v-mri">0.60</div>
+            </div>
+            <div class="note">Slab thickness puffs at the inner edge like a slim
+                disk; emission integrates volumetrically through the slab so
+                multi-image lensing (top/bottom of the far disk) shows through
+                automatically. Razor-thin (0) keeps the original equator-only
+                intersection for speed. MRI strength drives anisotropic 4-octave
+                fBm that evolves at the local Keplerian rate Ω(r).</div>
+        </div>
+
+        <div>
             <div class="sec-title">Animation</div>
             <div class="toggle-row">
                 <input type="checkbox" id="anim" checked>
-                <label for="anim">Animate (Keplerian shear + hot-spot)</label>
+                <label for="anim">Animate (Keplerian shear + hot-spots)</label>
             </div>
             <div class="ctrl">
                 <label>Speed (× Ω<sub>K</sub>(r))</label>
                 <input type="range" id="s-anim" min="0" max="20" step="0.5" value="1">
                 <div class="val" id="v-anim">1.0×</div>
             </div>
-            <div class="toggle-row">
+            <div class="ctrl">
+                <label>Time scrubber t [s]</label>
+                <input type="range" id="s-time" min="0" max="200" step="0.05" value="0">
+                <div class="val" id="v-time">0.00 s  (t<sub>real</sub> ≈ —)</div>
+            </div>
+            <div class="btn-row" style="margin-top:6px;">
+                <button class="btn-sm" id="btnPause">⏸ pause</button>
+                <button class="btn-sm" id="btnQPO">⚡ QPO flare</button>
+            </div>
+            <div class="toggle-row" style="margin-top:8px;">
                 <input type="checkbox" id="showHotspot" checked>
-                <label for="showHotspot">Orbiting hot-spot</label>
+                <label for="showHotspot">Orbiting hot-spot field</label>
             </div>
             <div class="ctrl">
-                <label>Hot-spot r [M]</label>
+                <label>Number of hot-spots</label>
+                <input type="range" id="s-nspots" min="1" max="8" step="1" value="1">
+                <div class="val" id="v-nspots">1</div>
+            </div>
+            <div class="ctrl">
+                <label>Anchor hot-spot r [M]</label>
                 <input type="range" id="s-hot-r" min="3.5" max="40" step="0.1" value="6.5">
                 <div class="val" id="v-hot-r">6.5 M</div>
             </div>
-            <div class="note">The disk pattern shears at the local Ω(r) ∝ r<sup>−3/2</sup>,
-                so inner orbits visibly out-pace outer ones — the same physics
-                that drives MRI turbulence.</div>
+            <div class="note">Each spot rides the same g-factor pipeline as
+                the disk — approaching side brightens, receding side dims —
+                physically correct Doppler asymmetry. Spot 0 is steady-state;
+                spots 1+ pulse with sin² lifetimes (random duty cycles).
+                The QPO flare button injects a transient brightness boost
+                near the inner edge with a 2.5 s half-life.</div>
+        </div>
+
+        <div>
+            <div class="sec-title">Density-wave structure</div>
+            <div class="toggle-row">
+                <input type="checkbox" id="showLindblad">
+                <label for="showLindblad">Highlight m=2 Lindblad resonances</label>
+            </div>
+            <div class="ctrl">
+                <label>Pattern-speed anchor r<sub>p</sub> [M]</label>
+                <input type="range" id="s-lindblad-rp" min="6" max="60" step="0.5" value="12">
+                <div class="val" id="v-lindblad-rp">12.0 M</div>
+            </div>
+            <div class="note">For pattern speed Ω<sub>p</sub>=Ω<sub>K</sub>(r<sub>p</sub>),
+                the m=2 inner / outer Lindblad resonances sit at r<sub>p</sub>·0.630
+                and r<sub>p</sub>·1.310 (κ ≈ Ω<sub>K</sub> for Schwarzschild Keplerian).</div>
+        </div>
+
+        <div>
+            <div class="sec-title">Disk warp (Bardeen-Petterson)</div>
+            <div class="toggle-row">
+                <input type="checkbox" id="diskWarp">
+                <label for="diskWarp">Tilt disk plane</label>
+            </div>
+            <div class="ctrl">
+                <label>Tilt angle α</label>
+                <input type="range" id="s-warp-a" min="0" max="60" step="0.5" value="0">
+                <div class="val" id="v-warp-a">0°</div>
+            </div>
+            <div class="ctrl">
+                <label>Tilt azimuth ψ</label>
+                <input type="range" id="s-warp-p" min="0" max="360" step="1" value="0">
+                <div class="val" id="v-warp-p">0°</div>
+            </div>
+            <div class="note">Stub: rotates the disk normal away from the metric
+                pole. In Phase 1 Lense-Thirring torque (∝ a) drives a real
+                radial warp profile β(r) with the Bardeen-Petterson transition
+                radius r<sub>BP</sub>.</div>
         </div>
 
         <div>
@@ -504,6 +596,22 @@ select {
     bindRange('s-fov',   'v-fov',   (v) => `${v.toFixed(0)}°`,
         (v) => { app.setFov(v); });
 
+    bindRange('s-spin', 'v-spin',
+        (v) => {
+            let label;
+            if (v < 0.01)      label = 'Schwarzschild';
+            else if (v < 0.3)  label = 'slow rotator';
+            else if (v < 0.7)  label = 'moderate spin';
+            else if (v < 0.95) label = 'fast spin';
+            else if (v < 0.998)label = 'near-extremal';
+            else               label = 'extremal limit';
+            return `${v.toFixed(3)}  (${label})`;
+        },
+        (v) => app.setSpin(v));
+    $('snapIsco').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.autoSnapIscoToSpin) app.toggleAutoSnapIsco();
+    });
+
     $('observer').addEventListener('change', (e) => app.setObserverType(e.target.value));
     $('quality').addEventListener('change', (e) => app.setQuality(e.target.value));
     $('showRing').addEventListener('change', () => app.toggleRing());
@@ -548,6 +656,82 @@ select {
         (v) => `${v.toFixed(1)}×`, (v) => app.setAnimSpeed(v));
     bindRange('s-hot-r', 'v-hot-r',
         (v) => `${v.toFixed(1)} M`, (v) => app.setHotspotRadius(v));
+
+    // ── Disk dynamics (B1, B2) ────────────────────────────────────
+    bindRange('s-disk-h', 'v-disk-h',
+        (v) => v < 0.005 ? '0.000  (razor-thin)' :
+               v < 0.05  ? `${v.toFixed(3)}  (thin)` :
+               v < 0.15  ? `${v.toFixed(3)}  (standard)` :
+               v < 0.3   ? `${v.toFixed(3)}  (slim)` :
+                           `${v.toFixed(3)}  (super-slim)`,
+        (v) => app.setDiskHOverR(v));
+    bindRange('s-mri', 'v-mri',
+        (v) => v.toFixed(2), (v) => app.setMriStrength(v));
+
+    // ── Multi-hot-spot field (B4) ─────────────────────────────────
+    bindRange('s-nspots', 'v-nspots',
+        (v) => `${v|0}`, (v) => app.setNHotspots(v));
+
+    // ── Time scrubber + pause + QPO (B6, B7) ──────────────────────
+    const sTime = $('s-time');
+    const vTime = $('v-time');
+    function fmtTimeLabel(t) {
+        // Convert sim-seconds into TON 618 real-time. The shader sees
+        // t_eff = u_time · shear_speed in geometric M-units, and one M-unit of
+        // time is M_meters/c real seconds at TON 618 mass.
+        const d = app.diagnostics();
+        const realSec = t * app.state.diskShearSpeed * d.sim_seconds_per_M;
+        const yr = realSec / (3600 * 24 * 365.25);
+        const orbits = (d.isco_period_seconds > 0) ? (realSec / d.isco_period_seconds) : null;
+        const s = `${t.toFixed(2)} s`;
+        let real;
+        if (yr < 1/365)         real = `${(realSec).toFixed(1)} s_real`;
+        else if (yr < 1)        real = `${(yr*365).toFixed(1)} d`;
+        else if (yr < 1000)     real = `${yr.toFixed(1)} yr`;
+        else                    real = `${yr.toExponential(2)} yr`;
+        const orbStr = (orbits != null) ? `, ${orbits.toFixed(2)} ISCO orb` : '';
+        return `${s}  (≈ ${real}${orbStr})`;
+    }
+    sTime.addEventListener('input', () => {
+        const t = +sTime.value;
+        app.setTime(t);
+        vTime.innerHTML = fmtTimeLabel(t);
+    });
+    // Mirror simulation time back into the scrubber while playing.
+    setInterval(() => {
+        if (!document.activeElement || document.activeElement.id !== 's-time') {
+            const t = app.getTime();
+            if (t > +sTime.max) sTime.max = (Math.ceil(t / 100) * 100).toString();
+            sTime.value = t.toFixed(2);
+            vTime.innerHTML = fmtTimeLabel(t);
+        }
+    }, 250);
+
+    $('btnPause').addEventListener('click', () => {
+        if (app.state.animate) app.toggleAnim();
+        else                   app.toggleAnim();
+        $('btnPause').textContent = app.state.animate ? '⏸ pause' : '▶ play';
+        $('anim').checked = app.state.animate;
+    });
+    $('btnQPO').addEventListener('click', () => {
+        app.triggerQPOFlare(1.0, 2.5);
+    });
+
+    // ── Lindblad resonance overlay (B3) ──────────────────────────
+    $('showLindblad').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showLindblad) app.toggleLindblad();
+    });
+    bindRange('s-lindblad-rp', 'v-lindblad-rp',
+        (v) => `${v.toFixed(1)} M`, (v) => app.setLindbladRp(v));
+
+    // ── Disk warp (B5) ───────────────────────────────────────────
+    $('diskWarp').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.diskWarpOn) app.toggleWarp();
+    });
+    bindRange('s-warp-a', 'v-warp-a',
+        (v) => `${v.toFixed(0)}°`, (v) => app.setWarpAngle(v));
+    bindRange('s-warp-p', 'v-warp-p',
+        (v) => `${v.toFixed(0)}°`, (v) => app.setWarpPsi(v));
 
     // ── Multi-component radiation controls ─────────────────────────
     $('showJets').addEventListener('change', (e) => {

@@ -81,6 +81,28 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         // the disk emission scaling.
         mdotRel:          0.10,
 
+        // ── Kerr spin (diagnostic-only until Phase 1 lands the metric) ──
+        // The renderer currently integrates Schwarzschild geodesics, but
+        // every Kerr landmark (ISCO, r_+, ergosphere, η_NT, T_H, A) updates
+        // live so the HUD reports the rotating geometry the user is dialing.
+        spin:             0.0,
+        autoSnapIscoToSpin: true,    // when spin changes, set diskInner to ISCO_pro(a)
+
+        // ── Disk dynamics (Track B) ────────────────────────────────────
+        diskHOverR:       0.0,        // Shakura-Sunyaev slab thickness; 0 = razor-thin
+        mriStrength:      0.6,        // MRI turbulence amplitude (0..1)
+        nHotspots:        1,          // 1..8 procedural Keplerian flare cells
+        qpoFlare:         0.0,        // 0..1 transient flare envelope (B7 preset)
+        qpoFlareDecay:    0.0,        // exponential decay rate while flaring
+        showLindblad:     false,
+        lindbladRp:       12.0,       // pattern-speed anchor radius (M)
+        diskWarpOn:       false,
+        diskWarpAngle:    0.0,
+        diskWarpPsi:      0.0,
+
+        // ── Time controls (B6) ─────────────────────────────────────────
+        timeMax:          200.0,      // user-adjustable scrubber upper bound (s)
+
         // Animation pump.
         animate:        true,
         animSpeed:      1.0,
@@ -166,6 +188,16 @@ export async function boot({ canvas, hud, minimapCanvas }) {
             showFeLine:       state.showFeLine,
             feIntensity:      state.feIntensity,
             farShortcutR:     state.farShortcutR,
+            // Track B
+            diskHOverR:       state.diskHOverR,
+            mriStrength:      state.mriStrength,
+            nHotspots:        state.nHotspots,
+            qpoFlare:         state.qpoFlare,
+            showLindblad:     state.showLindblad,
+            lindbladRp:       state.lindbladRp,
+            diskWarpOn:       state.diskWarpOn,
+            diskWarpAngle:    state.diskWarpAngle,
+            diskWarpPsi:      state.diskWarpPsi,
         });
         backend.draw();
         updateHUD(hud, state, backend, name);
@@ -213,6 +245,13 @@ export async function boot({ canvas, hud, minimapCanvas }) {
                               state.showJets || state.showCorona ||
                               state.showWind || state.showFeLine)) {
             state.timeAccum += dt * state.animSpeed;
+            state.dirty = true;
+        }
+
+        // QPO flare envelope decay (B7).
+        if (state.qpoFlare > 1e-3) {
+            state.qpoFlare *= Math.exp(-state.qpoFlareDecay * dt);
+            if (state.qpoFlare < 1e-3) state.qpoFlare = 0;
             state.dirty = true;
         }
 
@@ -279,6 +318,39 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         setWindIntensity(v){ state.windIntensity = Math.max(0, Math.min(0.5, v)); state.dirty = true; },
         setFeIntensity(v) { state.feIntensity = Math.max(0, Math.min(5.0, v)); state.dirty = true; },
         setMdotRel(v)     { state.mdotRel = Math.max(0, Math.min(10.0, v)); state.dirty = true; },
+        setSpin(a) {
+            state.spin = Math.max(0, Math.min(0.999, a));
+            if (state.autoSnapIscoToSpin) {
+                // Snap diskInner to prograde ISCO(a). Imported lazily.
+                import('./physics.js').then(({ kerrIsco }) => {
+                    const r_isco = kerrIsco(state.spin, +1);
+                    state.diskInner = Math.max(2.5, Math.min(state.diskOuter - 0.5, r_isco));
+                    state.dirty = true;
+                });
+            }
+            state.dirty = true;
+        },
+        toggleAutoSnapIsco() { state.autoSnapIscoToSpin = !state.autoSnapIscoToSpin; return state.autoSnapIscoToSpin; },
+
+        // ── Track B setters ────────────────────────────────────────────
+        setDiskHOverR(v)   { state.diskHOverR  = Math.max(0, Math.min(0.45, v)); state.dirty = true; },
+        setMriStrength(v)  { state.mriStrength = Math.max(0, Math.min(1.5, v)); state.dirty = true; },
+        setNHotspots(n)    { state.nHotspots   = Math.max(0, Math.min(8, n | 0)); state.dirty = true; },
+        toggleLindblad()   { state.showLindblad = !state.showLindblad; state.dirty = true; return state.showLindblad; },
+        setLindbladRp(v)   { state.lindbladRp  = Math.max(state.diskInner, Math.min(state.diskOuter, v)); state.dirty = true; },
+        toggleWarp()       { state.diskWarpOn  = !state.diskWarpOn; state.dirty = true; return state.diskWarpOn; },
+        setWarpAngle(deg)  { state.diskWarpAngle = (Math.max(0, Math.min(70, deg)) * Math.PI) / 180; state.dirty = true; },
+        setWarpPsi(deg)    { state.diskWarpPsi   = (deg * Math.PI) / 180; state.dirty = true; },
+        setTime(t)         { state.timeAccum = Math.max(0, t); state.dirty = true; },
+        getTime()          { return state.timeAccum; },
+        triggerQPOFlare(strength = 1.0, halfLifeSeconds = 2.5) {
+            // Half-life in *real* seconds of the user's clock; converts to a
+            // decay rate. Spawns a flare at the inner edge that the QPO loop
+            // brightens for a few orbits, then exponentially decays.
+            state.qpoFlare      = Math.max(0, Math.min(1, strength));
+            state.qpoFlareDecay = Math.log(2) / Math.max(0.1, halfLifeSeconds);
+            state.dirty = true;
+        },
         setFarShortcutR(v){ state.farShortcutR = Math.max(0, v); state.dirty = true; },
         toggleAutoLOD()   { state.autoLOD = !state.autoLOD; if (!state.autoLOD) { state.motionScaleMul = 1.0; resize(); } return state.autoLOD; },
 
@@ -308,7 +380,7 @@ export async function boot({ canvas, hud, minimapCanvas }) {
             state.dirty = true;
             return true;
         },
-        diagnostics() { return diagnostics(state.cam); },
+        diagnostics() { return diagnostics(state.cam, state.mdotRel, state.spin); },
         runPhotonRingValidation() {
             const saved = {
                 r: state.cam.r, theta: state.cam.theta, phi: state.cam.phi,
@@ -358,7 +430,7 @@ function updateHUD(hud, state, backend, backendName) {
     if (!hud) return;
     const cam = state.cam;
     const L = formatLength(cam.r);
-    const d = diagnostics(cam, state.mdotRel);
+    const d = diagnostics(cam, state.mdotRel, state.spin);
 
     const obsLabels = ['static', 'Painlevé in-fall', 'ZAMO', 'Keplerian (eq.)'];
     const obs = obsLabels[cam.observerType] ?? '?';
@@ -397,8 +469,11 @@ function updateHUD(hud, state, backend, backendName) {
         `circular v/c (eq.)     = ${fmt(d.v_orbital, 4)}    γ_orb = ${fmt(d.gamma_orbit, 4)}`,
         `circular period (eq.)  = ${fmt(d.period_orbit_years, 3)} yr`,
         `─── landmarks & thermodynamics ─────────────────`,
-        `horizon r_h = ${d.r_horizon} M   photon sphere = ${d.r_photon} M   ISCO = ${d.r_isco} M`,
-        `photon ring (analytic) ${PHOTON_RING_RS.toFixed(4)} r_s = ${d.b_crit.toFixed(4)} M`,
+        `[render] horizon r_h = ${d.r_horizon} M   photon sphere = ${d.r_photon} M   ISCO = ${d.r_isco} M`,
+        `[Kerr a=${d.spin.toFixed(3)}] r₊=${fmt(d.r_plus_kerr,3)}M  ISCO_pro=${fmt(d.r_isco_kerr_pro,3)}M  ISCO_retro=${fmt(d.r_isco_kerr_retro,3)}M`,
+        `[Kerr] r_ph_pro=${fmt(d.r_photon_kerr_pro,3)}M  r_ph_retro=${fmt(d.r_photon_kerr_retro,3)}M  r_ergo(eq)=${fmt(d.r_ergo_eq_kerr,3)}M`,
+        `[Kerr] Ω_H=${fmt(d.omega_horizon_kerr,4)} 1/M   η_NT(pro)=${(d.eta_kerr_pro*100).toFixed(2)}%`,
+        `photon ring (analytic Schw.) ${PHOTON_RING_RS.toFixed(4)} r_s = ${d.b_crit.toFixed(4)} M`,
         `horizon area A = ${fmt(d.horizon_area_m2, 3)} m²`,
         `Bekenstein S/k = ${fmt(d.bekenstein_entropy_over_k, 3)}    T_H = ${fmt(d.T_hawking_K, 3)} K`,
         `─── disk luminosity ───────────────────────────`,

@@ -54,6 +54,16 @@ export function createWebGL2Backend(canvas) {
         showFeLine:       gl.getUniformLocation(program, 'u_show_fe_line'),
         feIntensity:      gl.getUniformLocation(program, 'u_fe_intensity'),
         farShortcutR:     gl.getUniformLocation(program, 'u_far_shortcut_r'),
+        // B1 / B2 / B3 / B4 / B5 / B7
+        diskHOverR:       gl.getUniformLocation(program, 'u_disk_h_over_r'),
+        mriStrength:      gl.getUniformLocation(program, 'u_mri_strength'),
+        nHotspots:        gl.getUniformLocation(program, 'u_n_hotspots'),
+        qpoFlare:         gl.getUniformLocation(program, 'u_qpo_flare'),
+        showLindblad:     gl.getUniformLocation(program, 'u_show_lindblad'),
+        lindbladRp:       gl.getUniformLocation(program, 'u_lindblad_rp'),
+        diskWarpOn:       gl.getUniformLocation(program, 'u_disk_warp_on'),
+        diskWarpAngle:    gl.getUniformLocation(program, 'u_disk_warp_angle'),
+        diskWarpPsi:      gl.getUniformLocation(program, 'u_disk_warp_psi'),
     };
 
     function resize(w, h) {
@@ -104,6 +114,16 @@ export function createWebGL2Backend(canvas) {
         gl.uniform1i(uLoc.showFeLine,       u.showFeLine ? 1 : 0);
         gl.uniform1f(uLoc.feIntensity,      u.feIntensity      ?? 0.6);
         gl.uniform1f(uLoc.farShortcutR,     u.farShortcutR     ?? 120.0);
+        // B1 / B2 / B3 / B4 / B5 / B7
+        gl.uniform1f(uLoc.diskHOverR,       u.diskHOverR       ?? 0.0);
+        gl.uniform1f(uLoc.mriStrength,      u.mriStrength      ?? 0.6);
+        gl.uniform1i(uLoc.nHotspots,        u.nHotspots        ?? 1);
+        gl.uniform1f(uLoc.qpoFlare,         u.qpoFlare         ?? 0.0);
+        gl.uniform1i(uLoc.showLindblad,     u.showLindblad ? 1 : 0);
+        gl.uniform1f(uLoc.lindbladRp,       u.lindbladRp       ?? 12.0);
+        gl.uniform1i(uLoc.diskWarpOn,       u.diskWarpOn ? 1 : 0);
+        gl.uniform1f(uLoc.diskWarpAngle,    u.diskWarpAngle    ?? 0.0);
+        gl.uniform1f(uLoc.diskWarpPsi,      u.diskWarpPsi      ?? 0.0);
     }
 
     function draw() {

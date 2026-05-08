@@ -20,6 +20,118 @@ import {
 export const R_ISCO_GEOM = 6.0;          // ISCO radius for Schwarzschild (M = 1)
 export const R_MARGINAL_BOUND = 4.0;     // marginally bound circular orbit
 export const SURFACE_GRAVITY = 1.0 / (4.0 * R_HORIZON_GEOM / 2.0); // kappa = 1/(4M) in geometrized
+
+// ---------------------------------------------------------------------------
+// Kerr diagnostics (Boyer-Lindquist landmarks).
+// ---------------------------------------------------------------------------
+// All formulas in geometrized units, M = 1, |a| ∈ [0, 1).
+// Returns the outer/inner horizon r_± = M ± √(M² − a²).
+export function kerrHorizons(a) {
+    const aa = Math.min(Math.abs(a), 0.999999);
+    const root = Math.sqrt(Math.max(1.0 - aa * aa, 0));
+    return { r_plus: 1.0 + root, r_minus: 1.0 - root };
+}
+
+// Static-limit / ergosphere outer surface: r_ergo(θ) = M + √(M² − a²cos²θ).
+// At the equator θ = π/2 it sits at 2M (same as Schwarzschild horizon).
+// At the poles it touches r_+.
+export function kerrErgosphere(a, theta = Math.PI / 2) {
+    const aa = Math.min(Math.abs(a), 0.999999);
+    const c = Math.cos(theta);
+    return 1.0 + Math.sqrt(Math.max(1.0 - aa * aa * c * c, 0));
+}
+
+// Bardeen-Press-Teukolsky 1972 ISCO for a Kerr black hole.
+// prograde sign = +1 (corotating), retrograde sign = −1.
+//   Z1 = 1 + (1 − a²)^(1/3) [(1 + a)^(1/3) + (1 − a)^(1/3)]
+//   Z2 = √(3 a² + Z1²)
+//   r_isco = 3 + Z2 ∓ √[(3 − Z1)(3 + Z1 + 2 Z2)]
+export function kerrIsco(a, sign = +1) {
+    const aa = Math.max(-0.999999, Math.min(0.999999, a));
+    const cube = (x) => Math.cbrt(x);
+    const Z1 = 1 + cube(1 - aa * aa) * (cube(1 + aa) + cube(1 - aa));
+    const Z2 = Math.sqrt(3 * aa * aa + Z1 * Z1);
+    const inner = (3 - Z1) * (3 + Z1 + 2 * Z2);
+    if (inner < 0) return 1.0;     // shouldn't happen for |a| < 1
+    return 3 + Z2 - sign * Math.sqrt(inner);
+}
+
+// Photon sphere radii (equatorial circular photon orbits) — prograde/retrograde.
+// Bardeen 1972: r_ph = 2M{1 + cos[(2/3) arccos(∓a/M)]}.
+export function kerrPhotonSphere(a, sign = +1) {
+    const aa = Math.max(-0.999999, Math.min(0.999999, a));
+    return 2 * (1 + Math.cos((2 / 3) * Math.acos(-sign * aa)));
+}
+
+// Marginally bound radius (parabolic capture from infinity):
+//   r_mb = 2M − a + 2√(M(M − a))   for prograde; +a, M+a for retrograde.
+export function kerrMarginallyBound(a, sign = +1) {
+    const aa = Math.max(-0.999999, Math.min(0.999999, a));
+    return 2 - sign * aa + 2 * Math.sqrt(Math.max(1 - sign * aa, 0));
+}
+
+// Specific energy of a circular Keplerian orbit at r (Bardeen-Press-Teukolsky):
+//   E/m = (r² − 2Mr ± a √(Mr)) / (r √(r² − 3Mr ± 2a√(Mr)))
+// Returns null if the orbit is not stable (denom imaginary).
+export function kerrCircularEnergy(r, a, sign = +1) {
+    const sqrtMr = Math.sqrt(r);
+    const denom2 = r * r - 3 * r + sign * 2 * a * sqrtMr;
+    if (denom2 <= 0 || r <= 0) return null;
+    const num = r * r - 2 * r + sign * a * sqrtMr;
+    return num / (r * Math.sqrt(denom2));
+}
+
+// Novikov-Thorne radiative efficiency η = 1 − E_isco / m c² for Kerr.
+// At a = 0 → 0.0572 (Schwarzschild). At a → 1 prograde → 0.4226 (max).
+// Retrograde tops out at ~0.038 because ISCO recedes to 9M.
+export function kerrEfficiency(a, sign = +1) {
+    const r_isco = kerrIsco(a, sign);
+    const E = kerrCircularEnergy(r_isco, a, sign);
+    if (E == null) return novikovThorneEfficiency();
+    return 1 - E;
+}
+
+// Frame-dragging angular velocity at the outer horizon: Ω_H = a / (r_+² + a²)
+// = a / (2 M r_+). Geometric units.
+export function kerrHorizonOmega(a) {
+    const { r_plus } = kerrHorizons(a);
+    const aa = Math.min(Math.abs(a), 0.999999);
+    return aa / (2 * r_plus);
+}
+
+// Surface gravity κ_K = (r_+ − r_−) / (2(r_+² + a²)) = √(M² − a²) / (2 M r_+).
+// Geometric units → 1/M. Reduces to 1/(4M) for a=0.
+export function kerrSurfaceGravity(a) {
+    const aa = Math.min(Math.abs(a), 0.999999);
+    const { r_plus, r_minus } = kerrHorizons(aa);
+    return (r_plus - r_minus) / (2 * (r_plus * r_plus + aa * aa));
+}
+
+// Horizon area (Kerr): A = 8π M (M + √(M² − a²)) = 8π M r_+.
+// Geometric (M = 1): A = 8π r_+. Returns SI m² when scaled by M_METERS².
+export function kerrHorizonAreaM2() {
+    return 16 * Math.PI * M_METERS * M_METERS;   // overridden below for spin-aware version
+}
+
+// Spin-aware horizon area in m². For a = 0 returns 16π M².
+export function kerrHorizonAreaSI(a) {
+    const { r_plus } = kerrHorizons(a);
+    return 8 * Math.PI * r_plus * M_METERS * M_METERS;
+}
+
+// Hawking temperature for a Kerr BH: T_H = (ℏ κ) / (2π k_B c) with κ above.
+// At a = 0 reduces to ℏ c³ / (8π G M k_B). Returns Kelvin.
+export function kerrHawkingTemperatureK(a) {
+    const kappa_geom = kerrSurfaceGravity(a);                        // 1/M
+    const kappa_SI   = kappa_geom * (C_SI * C_SI) / M_METERS;        // 1/s
+    return (HBAR * kappa_SI) / (2 * Math.PI * KBOLTZ);
+}
+
+// Bekenstein-Hawking entropy / k_B for Kerr (in nats, dimensionless).
+export function kerrEntropyOverK(a) {
+    const A = kerrHorizonAreaSI(a);
+    return A / (4.0 * PLANCK_LENGTH * PLANCK_LENGTH);
+}
 // Hawking temperature (Schwarzschild): T_H = hbar c^3 / (8 pi G M k_B). In geometrized
 // units the dimensionful constant is folded in once we plug TON 618's mass below.
 const HBAR     = 1.054571817e-34;
@@ -240,7 +352,11 @@ export function hawkingTemperatureK() {
 // ---------------------------------------------------------------------------
 // Convenience: bundle everything for the HUD at a given observer state.
 // ---------------------------------------------------------------------------
-export function diagnostics(cam, mdot_rel = 0.10) {
+// `spin` ∈ [0, 0.999) is treated as a *diagnostic* quantity: the geodesic
+// kernel currently runs Schwarzschild, but landmark radii (ISCO, ergosphere,
+// r_+) and thermodynamics (T_H, A, η_NT) update so the HUD tells the truth
+// about the rotating geometry the user is dialing in.
+export function diagnostics(cam, mdot_rel = 0.10, spin = 0.0) {
     const r = cam.r;
     const f = Math.max(1 - 2 / r, 0);
     const td = lapse(r);
@@ -252,6 +368,7 @@ export function diagnostics(cam, mdot_rel = 0.10) {
     const T_sec_per_M = M_METERS / C_SI;
     const period_seconds = period_geom * T_sec_per_M;
     const period_years = period_seconds / (3600 * 24 * 365.25);
+
 
     // Convert tidal accel: 1/M^2 in geometric -> SI via c^4 / (G M)^2
     const tidal_SI_factor = Math.pow(C_SI, 4) / (G_SI * M_KG) / (G_SI * M_KG); // 1/(time^2 * length) in SI form
@@ -279,12 +396,26 @@ export function diagnostics(cam, mdot_rel = 0.10) {
     const b_edge = (cam.fovY != null) ? r * Math.tan(0.5 * cam.fovY) : r;
     const defl_rad           = deflectionAngle(b_edge);
 
-    // Black-hole thermodynamics (constants for TON 618).
-    const A_horizon_m2       = horizonArea();
-    const S_over_k           = bekensteinEntropyOverK();
+    // ── Kerr landmarks (diagnostic only — render is Schwarzschild) ───
+    const aSpin = Math.max(0, Math.min(0.999, spin || 0));
+    const { r_plus, r_minus }   = kerrHorizons(aSpin);
+    const r_isco_pro            = kerrIsco(aSpin, +1);
+    const r_isco_retro          = kerrIsco(aSpin, -1);
+    const r_ph_pro              = kerrPhotonSphere(aSpin, +1);
+    const r_ph_retro            = kerrPhotonSphere(aSpin, -1);
+    const r_ergo_eq             = kerrErgosphere(aSpin, Math.PI / 2);
+    const eta_kerr_pro          = kerrEfficiency(aSpin, +1);
+    const Omega_H               = kerrHorizonOmega(aSpin);
 
-    // Accretion luminosity / Eddington fraction.
-    const disk_d             = diskDiagnostics(mdot_rel, R_ISCO_GEOM);
+    // Black-hole thermodynamics. Use Kerr formulas — they reduce to
+    // Schwarzschild values continuously at a = 0.
+    const A_horizon_m2       = kerrHorizonAreaSI(aSpin);
+    const S_over_k           = kerrEntropyOverK(aSpin);
+    const T_H_kerr           = kerrHawkingTemperatureK(aSpin);
+
+    // Accretion luminosity / Eddington fraction. Use spin-aware ISCO so the
+    // Novikov-Thorne efficiency η(a) drives the disk-luminosity HUD.
+    const disk_d             = diskDiagnostics(mdot_rel, r_isco_pro);
 
     return {
         // fundamentals
@@ -339,13 +470,37 @@ export function diagnostics(cam, mdot_rel = 0.10) {
         proper_distance_to_horizon_geom: d_proper_to_horizon,
         light_time_to_horizon_seconds:   t_light_seconds,
 
-        // landmark radii (constants, returned for HUD)
+        // landmark radii (Schwarzschild constants — what the renderer
+        // actually integrates against — kept first so the HUD lines up with
+        // the visible geometry)
         r_horizon:     R_HORIZON_GEOM,
         r_photon:      R_PHOTON_SPHERE,
         r_isco:        R_ISCO_GEOM,
         b_crit:        B_CRIT_GEOM,
 
-        // global thermodynamics
-        T_hawking_K:   hawkingTemperatureK(),
+        // ── Reference clock: ISCO orbit period at the user's spin (used by
+        //    the time scrubber to anchor "1 sim-second ≈ N days" labels).
+        //    Schwarzschild Kepler period in geometric units is 2π r^(3/2);
+        //    Kerr prograde adds an a√r term to the denominator → use the
+        //    full BPT formula for fidelity.
+        isco_period_seconds: 2.0 * Math.PI * (Math.pow(r_isco_pro, 1.5) + aSpin) * T_sec_per_M,
+        isco_period_years:  (2.0 * Math.PI * (Math.pow(r_isco_pro, 1.5) + aSpin) * T_sec_per_M) / (3600 * 24 * 365.25),
+        sim_seconds_per_M:  T_sec_per_M,
+
+        // ── Kerr-derived diagnostics (drive HUD when spin > 0) ──
+        spin:          aSpin,
+        r_plus_kerr:        r_plus,
+        r_minus_kerr:       r_minus,
+        r_isco_kerr_pro:    r_isco_pro,
+        r_isco_kerr_retro:  r_isco_retro,
+        r_photon_kerr_pro:  r_ph_pro,
+        r_photon_kerr_retro: r_ph_retro,
+        r_ergo_eq_kerr:     r_ergo_eq,
+        eta_kerr_pro:       eta_kerr_pro,
+        omega_horizon_kerr: Omega_H,
+        T_hawking_kerr_K:   T_H_kerr,
+
+        // global thermodynamics (Kerr-corrected; reduces to Schwarzschild at a=0)
+        T_hawking_K:   T_H_kerr,
     };
 }

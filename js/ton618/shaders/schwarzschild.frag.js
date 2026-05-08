@@ -38,10 +38,14 @@ uniform float u_disk_brightness;         // overall intensity multiplier
 uniform float u_disk_T_inner;            // Shakura-Sunyaev T(r_in) in Kelvin (visualization-tuned)
 uniform float u_disk_shear_speed;        // multiplier on Keplerian Ω(r) for visible motion
 uniform int   u_disk_mode;               // 0 = opaque, 1 = translucent (RIAF/optically-thin)
-uniform int   u_show_hotspot;            // 1 = render orbiting hot-spot
-uniform float u_hotspot_radius;          // r_hot in M
-uniform float u_hotspot_phi0;            // initial phase
-uniform float u_hotspot_strength;        // brightness scale
+uniform int   u_show_hotspot;            // 1 = render orbiting hot-spot field
+uniform float u_hotspot_radius;          // r_hot in M (anchor for spot-0)
+uniform float u_hotspot_phi0;            // initial phase of spot-0
+uniform float u_hotspot_strength;        // brightness scale (× all spots)
+uniform int   u_n_hotspots;              // 1..8 quasi-random Keplerian flare cells
+uniform float u_qpo_flare;               // 0..1 transient brightness boost (B7 preset)
+uniform int   u_show_lindblad;           // 1 = highlight m=2 Lindblad resonances
+uniform float u_lindblad_rp;             // pattern-speed anchor radius (M)
 uniform int   u_show_grid;               // 1 = draw faint 3D coordinate grid shells
 uniform int   u_show_photon_sphere;      // 1 = highlight photon sphere with translucent shell
 
@@ -65,6 +69,17 @@ uniform int   u_show_fe_line;            // 1 = Fe K-α line emission on inner d
 uniform float u_fe_intensity;
 
 uniform float u_far_shortcut_r;          // r threshold for far-field straight-line termination (M)
+
+// ── B1 — Vertical disk structure (Shakura-Sunyaev slab) ─────────────
+uniform float u_disk_h_over_r;           // characteristic H/r at the inner edge (0..0.4)
+
+// ── B2 — MRI turbulence amplitude (0..1) ────────────────────────────
+uniform float u_mri_strength;
+
+// ── B5 — Bardeen-Petterson disk warp ────────────────────────────────
+uniform int   u_disk_warp_on;            // 1 = tilt the disk plane
+uniform float u_disk_warp_angle;         // tilt angle (rad)
+uniform float u_disk_warp_psi;           // tilt axis azimuth (rad)
 
 #define M 1.0
 #define HORIZON_EPS 1.0e-3
@@ -393,6 +408,30 @@ float vnoise2(vec2 p) {
 }
 
 // ---------------------------------------------------------------------------
+// MRI turbulence model.
+// ---------------------------------------------------------------------------
+// The magneto-rotational instability (Balbus-Hawley 1991) is the angular-
+// momentum-transport mechanism in Keplerian disks. It produces eddies whose
+// turnover time tracks 1/Ω(r), elongated in φ by the local shear (Δv ∝ r dΩ/dr).
+// We model that with anisotropic 4-octave fBm in (log r, ph_local), where
+// ph_local already absorbs Ω(r)·t — so inner cells *evolve* faster than
+// outer cells purely from the kinematics, exactly as physical MRI does.
+float mri_fbm(float lnr, float ph_local, float t) {
+    float a = 0.0;
+    float amp = 0.5;
+    float fr = 1.0;
+    // shear ratio: φ-direction packed denser than r → eddy elongation in φ
+    for (int i = 0; i < 4; ++i) {
+        float jitter = float(i) * 1.7 + 0.2 * t;
+        a += amp * (vnoise2(vec2(2.5 * fr * lnr + jitter,
+                                 9.0 * fr * ph_local - 0.7 * jitter)) - 0.5);
+        amp *= 0.55;
+        fr  *= 2.05;
+    }
+    return a;          // ≈ −0.5..+0.5
+}
+
+// ---------------------------------------------------------------------------
 // Accretion-disk emission model (thin disk in equatorial plane).
 // ---------------------------------------------------------------------------
 // Uses:
@@ -421,16 +460,44 @@ vec3 disk_emission(float r, float ph, float kt, float kph) {
     float g = 1.0 / E_emit;
     float bright = pow(g, 4.0);
 
-    // ── Keplerian-sheared structure ───────────────────────────────────
+    // ── Keplerian-sheared coordinates ─────────────────────────────────
     // Co-rotating azimuthal coordinate: ph_local = ph - Ω(r) · t · speed.
-    float ph_local = ph - Omega * u_time * u_disk_shear_speed;
-    float spiral_phase = 4.0 * ph_local - 3.5 * log(r / u_disk_inner);
-    float spiral = 0.55 + 0.45 * sin(spiral_phase);
+    // The shear speed multiplier compresses real-time "decade-scale"
+    // disk dynamics into watchable seconds without altering the *relative*
+    // rate at which inner orbits outpace outer ones.
+    float t_eff   = u_time * u_disk_shear_speed;
+    float ph_local = ph - Omega * t_eff;
+    float lnr      = log(r);
 
-    // 2-D value-noise turbulence in (log r, ph_local) — sheared with the flow.
-    float n1 = vnoise2(vec2(2.0 * log(r), 6.0 * ph_local));
-    float n2 = vnoise2(vec2(6.0 * log(r), 14.0 * ph_local + 1.7));
-    float turb = 0.55 + 0.30 * n1 + 0.15 * n2;
+    // ── MRI turbulence (Balbus-Hawley, anisotropic fBm) ──────────────
+    // The MRI is the actual angular-momentum-transport mechanism in real
+    // disks. We model it as anisotropic noise elongated in φ by the local
+    // shear and evolving at 1/Ω(r). Strength controlled by u_mri_strength.
+    float mri = mri_fbm(lnr, ph_local, t_eff * 0.07);
+    float turb = clamp(0.65 + u_mri_strength * (1.6 * mri), 0.15, 1.45);
+
+    // ── Optional density-wave spiral (m=2, weak) ──────────────────────
+    // We retain a faint global m=2 spiral as a reminder that real disks
+    // exhibit MRI + standing density waves; amplitude is small so the
+    // pattern doesn't dominate the more physically-grounded MRI noise.
+    float spiral_phase = 2.0 * ph_local - 2.6 * lnr;
+    float spiral       = 0.92 + 0.08 * sin(spiral_phase);
+
+    // ── Lindblad resonance highlight (m=2 OLR / ILR) ──────────────────
+    // Pattern speed Ω_p ≡ Ω_K(r_p). Resonances at r where
+    //   Ω(r) = Ω_p ± κ/m, κ ≈ Ω_K (Schwarzschild Keplerian),
+    // m = 2: ratios Ω/Ω_p = 0.5 (OLR) and 1.5 (ILR), giving
+    //   r_OLR = r_p · 1.5^(2/3) ≈ 1.31 r_p,
+    //   r_ILR = r_p · 0.5^(2/3) ≈ 0.63 r_p.
+    float lindblad_w = 0.0;
+    if (u_show_lindblad == 1 && u_lindblad_rp > 0.0) {
+        float r_olr = u_lindblad_rp * 1.31037;
+        float r_ilr = u_lindblad_rp * 0.62996;
+        float w_olr = exp(-pow((r - r_olr) / 0.5, 2.0));
+        float w_ilr = exp(-pow((r - r_ilr) / 0.5, 2.0));
+        float w_p   = exp(-pow((r - u_lindblad_rp) / 0.45, 2.0));
+        lindblad_w = w_olr + w_ilr + 0.6 * w_p;
+    }
 
     // ── Radial brightness profile: smooth inner roll-off, exponential fall ─
     float uu     = (r - u_disk_inner) / max(u_disk_outer - u_disk_inner, 0.1);
@@ -446,6 +513,11 @@ vec3 disk_emission(float r, float ph, float kt, float kph) {
     // mostly from the bright factor. This avoids the disk going to neutral
     // white when bright is huge.
     vec3 emission = col * bright * radial * spiral * turb;
+
+    // Lindblad rings: mild blue-shifted accent, additive on top of disk.
+    if (lindblad_w > 0.0) {
+        emission += vec3(0.45, 0.65, 1.10) * lindblad_w * bright * radial * 0.45;
+    }
 
     // ── Fe K-α 6.4 keV line on the inner disk ────────────────────────
     // The line is monoenergetic in the rest frame; in the observer's frame it
@@ -464,31 +536,94 @@ vec3 disk_emission(float r, float ph, float kt, float kph) {
         emission += fe_col * fe_w * g_line * u_fe_intensity * radial * 1.6;
     }
 
-    // ── Orbiting hot-spot (Keplerian at u_hotspot_radius) ─────────────
-    if (u_show_hotspot == 1) {
-        float r_h     = u_hotspot_radius;
-        float Omega_h = pow(r_h, -1.5);
-        float ph_h    = u_hotspot_phi0 + Omega_h * u_time * u_disk_shear_speed;
-        float dphi    = mod(ph - ph_h + PI, 2.0 * PI) - PI;
-        float dr      = (r - r_h);
-        // Keplerian elongation: hot-spots shear into ribbons in (r, phi).
-        float gauss = exp(-(dphi * dphi) / 0.05 - (dr * dr) / 0.6);
-        // Hot-spot is hotter than the ambient disk -> bluer.
-        vec3 hot_col = blackbody_rgb(min(40000.0, T_obs * 1.6 + 4000.0));
-        emission += hot_col * gauss * bright * u_hotspot_strength;
+    // ── Orbiting hot-spot field (multi-spot Doppler-correct) ─────────
+    // Each spot is a Keplerian flare cell at r_h, sheared into a ribbon
+    // along φ by the differential rotation. Brightness rides the *same*
+    // g-factor as the ambient disk (Liouville: I_obs = g⁴ I_emit), so the
+    // approaching side of every spot brightens and the receding side dims
+    // — matching how real disk hot-spots show up in time-resolved EHT data.
+    if (u_show_hotspot == 1 && u_n_hotspots > 0) {
+        const int N_MAX = 8;
+        for (int i = 0; i < N_MAX; ++i) {
+            if (i >= u_n_hotspots) break;
+            float idf = float(i) + 1.0;
+            // Deterministic spot parameters (no per-frame state).
+            // Spot 0 honors the legacy single-spot slider; spots 1..N-1
+            // procedurally fill the disk.
+            float r_h, phi0, lifetime, sz_phi, sz_r;
+            if (i == 0) {
+                r_h      = u_hotspot_radius;
+                phi0     = u_hotspot_phi0;
+                lifetime = 14.0;
+                sz_phi   = 0.05;
+                sz_r     = 0.6;
+            } else {
+                float h1 = fract(idf * 0.71370 + 0.123);
+                float h2 = fract(idf * 0.31415 + 0.541);
+                float h3 = fract(idf * 0.17290 + 0.879);
+                r_h      = mix(u_disk_inner * 1.05, u_disk_outer * 0.55, h1);
+                phi0     = 6.2831853 * h2;
+                lifetime = 6.0 + 16.0 * h3;
+                sz_phi   = 0.04 + 0.05 * fract(idf * 0.43);
+                sz_r     = 0.45 + 0.55 * fract(idf * 0.91);
+            }
+            float Omega_h = pow(r_h, -1.5);
+            float ph_h    = phi0 + Omega_h * t_eff;
+            float dphi    = mod(ph - ph_h + PI, 2.0 * PI) - PI;
+            float dr      = (r - r_h);
+            float gauss   = exp(-(dphi * dphi) / max(sz_phi, 0.005)
+                                - (dr * dr) / max(sz_r, 0.05));
+            // Birth-death envelope: half-sine over each lifetime cycle.
+            // Spot 0 is steady-state (legacy behavior).
+            float life_w = 1.0;
+            if (i > 0) {
+                float age = mod(t_eff * 0.20 + idf * 13.7, lifetime);
+                float s = sin(PI * age / lifetime);
+                life_w = s * s;
+            }
+            // Hot-spot is hotter than the ambient disk -> bluer. Use
+            // ambient g-factor so Doppler asymmetry is preserved.
+            vec3 hot_col = blackbody_rgb(min(40000.0, T_obs * 1.6 + 4000.0));
+            float qpo_boost = 1.0 + 4.0 * u_qpo_flare * exp(-pow((r - u_disk_inner * 1.1) / 1.2, 2.0));
+            emission += hot_col * gauss * bright * life_w * u_hotspot_strength * qpo_boost;
+        }
     }
 
     return emission * u_disk_brightness;
 }
 
-// Detect equatorial-plane crossing inside [r_in, r_out]. Returns 1 if hit.
-// On hit, refines (r, phi, k^t, k^phi) to the crossing point by linear interp
-// in cos(theta), and writes them out.
+// "Vertical-relative-to-disk" coordinate: cos(θ_disk) where the disk normal
+// is tilted from the metric pole by u_disk_warp_angle around azimuth
+// u_disk_warp_psi. At α = 0 reduces to cos(θ). Used for both the slab
+// occupancy test and the equator-crossing detector below.
+float cos_theta_disk(float th, float ph) {
+    if (u_disk_warp_on == 0) return cos(th);
+    float a = u_disk_warp_angle;
+    float ca = cos(a);
+    float sa = sin(a);
+    return sa * sin(th) * cos(ph - u_disk_warp_psi) + ca * cos(th);
+}
+
+// Disk half-thickness profile. Shakura-Sunyaev says H(r) ∝ c_s/Ω_K, which
+// for an isothermal slab gives H/r ≈ const at large r and a slim-disk
+// puff (H/r → 1) as r → r_in. We model that with the user-set H/r at the
+// inner edge, fading like (r/r_in)^{-1/4} so the inner edge is thicker
+// than the outer disk — visually correct slim-disk geometry.
+float disk_half_thickness(float r_cyl) {
+    if (u_disk_h_over_r <= 0.005) return 0.0;
+    float r_in = max(u_disk_inner, 1.0e-3);
+    float ratio = pow(max(r_cyl / r_in, 1.0e-3), -0.25);
+    float H_over_r = u_disk_h_over_r * (0.7 + 0.6 * ratio);
+    return H_over_r * r_cyl;
+}
+
+// Detect equatorial-plane (or warped-disk-plane) crossing inside [r_in, r_out].
+// Returns 1 if hit, refining (r, phi, k^t, k^phi) by linear interp in cos θ_disk.
 int disk_intersect(float y_prev[8], float y_new[8],
                    out float r_hit, out float phi_hit,
                    out float kt_hit, out float kph_hit) {
-    float costh_o = cos(y_prev[2]);
-    float costh_n = cos(y_new[2]);
+    float costh_o = cos_theta_disk(y_prev[2], y_prev[3]);
+    float costh_n = cos_theta_disk(y_new[2],  y_new[3]);
     if (costh_o * costh_n >= 0.0) return 0;                   // no sign change
 
     float r_n = y_new[1];
@@ -501,6 +636,63 @@ int disk_intersect(float y_prev[8], float y_new[8],
     kph_hit = mix(y_prev[7], y_new[7], t);
     if (r_hit < u_disk_inner || r_hit > u_disk_outer) return 0;
     return 1;
+}
+
+// Per-RK-step volumetric contribution from the slab disk (B1). When H/r > 0
+// this is the dominant disk path; the equator-crossing test above becomes a
+// degenerate special case (slab thickness → 0). Returns added emission and
+// optical depth in the supplied accumulators.
+void disk_slab_step(float y_prev[8], float y_new[8], float h_step,
+                    inout vec3 disk_rgb, inout float tau_total,
+                    out int term_out) {
+    term_out = 0;
+    if (u_show_disk == 0 || u_disk_h_over_r <= 0.005) return;
+
+    float r_mid  = 0.5 * (y_prev[1] + y_new[1]);
+    float th_mid = 0.5 * (y_prev[2] + y_new[2]);
+    float ph_mid = 0.5 * (y_prev[3] + y_new[3]);
+    float c_disk = cos_theta_disk(th_mid, ph_mid);
+    float r_cyl  = r_mid * sqrt(max(1.0 - c_disk * c_disk, 0.0));
+    float z_disk = r_mid * c_disk;
+
+    if (r_cyl < u_disk_inner || r_cyl > u_disk_outer) return;
+
+    float H = disk_half_thickness(r_cyl);
+    if (H <= 0.0) return;
+    float zh = z_disk / H;
+    if (abs(zh) > 3.0) return;                 // outside ~3σ slab
+
+    float vert = exp(-zh * zh);                 // Gaussian vertical profile
+
+    // k^μ midpoint for the g-factor inside disk_emission (which expects
+    // (kt, kph) of the photon at the slab cell — we pass midpoint values).
+    float kt_mid  = 0.5 * (y_prev[4] + y_new[4]);
+    float kph_mid = 0.5 * (y_prev[7] + y_new[7]);
+
+    vec3 emit = disk_emission(r_cyl, ph_mid, kt_mid, kph_mid) * vert;
+
+    // Per-step optical-depth contribution. The 0.25 prefactor calibrates the
+    // slab so a face-on traversal of the entire H column yields τ ≈ 1 in
+    // opaque mode; tweakable without affecting physics.
+    float dtau_per_M = 0.25 * vert;
+    float dtau = dtau_per_M * h_step;
+
+    bool translucent = (u_disk_mode == 1);
+    if (translucent) {
+        // Translucent (RIAF) mode: lower opacity per unit length so multiple
+        // lensed images stack. Maintain the existing translucent feel.
+        dtau *= 0.45;
+        float w = max(1.0 - tau_total, 0.0);
+        disk_rgb  += emit * dtau * w;
+        tau_total += dtau;
+        if (tau_total >= 0.985) { term_out = 5; return; }
+    } else {
+        // Opaque slab: standard front-to-back compositing.
+        float w = max(1.0 - tau_total, 0.0);
+        disk_rgb  += emit * dtau * w;
+        tau_total += dtau;
+        if (tau_total >= 0.98) { term_out = 4; return; }
+    }
 }
 
 // 3-D coordinate grid: faint glow when the ray crosses a small angular
@@ -697,8 +889,13 @@ void trace(inout float y[8], out int term, out int steps_taken, out float affine
         affine_used += h;
         steps_taken = step + 1;
 
-        // Disk crossing test on accepted sub-arc.
-        if (u_show_disk == 1) {
+        // Disk crossing test on accepted sub-arc. Two paths:
+        //   • Razor-thin (H/r ≈ 0): equatorial-crossing intersection — fast,
+        //     analytically correct for the limit, and used by the photon-ring
+        //     validation harness which disables the disk anyway.
+        //   • Volumetric slab (H/r > 0): per-step accumulation through the
+        //     Shakura-Sunyaev slab; multi-image stacking is automatic.
+        if (u_show_disk == 1 && u_disk_h_over_r <= 0.005) {
             float r_h, ph_h, kt_h, kph_h;
             if (disk_intersect(y_prev, y, r_h, ph_h, kt_h, kph_h) == 1) {
                 vec3 emit = disk_emission(r_h, ph_h, kt_h, kph_h);
@@ -717,6 +914,10 @@ void trace(inout float y[8], out int term, out int steps_taken, out float affine
                     return;
                 }
             }
+        } else if (u_show_disk == 1) {
+            int slab_term;
+            disk_slab_step(y_prev, y, h, disk_rgb, tau_total, slab_term);
+            if (slab_term != 0) { term = slab_term; return; }
         }
 
         // Per-step overlays.
