@@ -196,6 +196,34 @@ export function traceRay(pixel, cam, spin = 0) {
 
     const dphi = y[3] - phi0;
 
+    // Final state in Cartesian — needed by the LAB polarization estimator
+    // in main.js (the photon's escape direction is what the LAB sees).
+    const r_f  = y[1];
+    const th_f = y[2];
+    const ph_f = y[3];
+    const escape_pos_M = [
+        r_f * Math.sin(th_f) * Math.cos(ph_f),
+        r_f * Math.cos(th_f),
+        r_f * Math.sin(th_f) * Math.sin(ph_f),
+    ];
+    // Raise indices to get k^μ at the end state, then convert to a
+    // Cartesian asymptotic direction (matches outgoing_direction in shader).
+    const [, , gRR_f, gThTh_f, gPP_f] = kerrInvMetric(r_f, th_f, a);
+    const gTP_f = -2 * a * r_f / (Math.max(r_f * r_f - 2 * r_f + a * a, 1e-5) * (r_f * r_f + a * a * Math.cos(th_f) ** 2));
+    const kr_f  = gRR_f * y[5];
+    const kth_f = gThTh_f * y[6];
+    const kph_f = gTP_f * y[4] + gPP_f * y[7];
+    const sth_f2 = Math.sin(th_f), cth_f2 = Math.cos(th_f);
+    const sph_f2 = Math.sin(ph_f), cph_f2 = Math.cos(ph_f);
+    const er_f = [sth_f2 * cph_f2,  cth_f2, sth_f2 * sph_f2];
+    const et_f = [cth_f2 * cph_f2, -sth_f2, cth_f2 * sph_f2];
+    const ep_f = [-sph_f2,           0,     cph_f2];
+    let dxv = kr_f * er_f[0] + r_f * kth_f * et_f[0] + r_f * sth_f2 * kph_f * ep_f[0];
+    let dyv = kr_f * er_f[1] + r_f * kth_f * et_f[1] + r_f * sth_f2 * kph_f * ep_f[1];
+    let dzv = kr_f * er_f[2] + r_f * kth_f * et_f[2] + r_f * sth_f2 * kph_f * ep_f[2];
+    const dlen = Math.hypot(dxv, dyv, dzv) || 1;
+    const escape_dir = [dxv / dlen, dyv / dlen, dzv / dlen];
+
     // Spin-corrected landmark radii for the inspector readout.
     const r_isco_pro = kerrIsco(a, +1);
 
@@ -221,6 +249,8 @@ export function traceRay(pixel, cam, spin = 0) {
         L_drift_pct:        100 * (L_final - L0) / Math.max(Math.abs(L0), 1e-9),
         Q_drift_pct:        100 * (Q_final - Q0) / Math.max(Math.abs(Q0), 1e-9),
         equator_crossings:  crossings_eq,
+        escape_pos_M,
+        escape_dir,
         captured:           term === 'horizon',
         escaped:            term === 'escape',
         verdict:            (Math.abs(b_imp) < B_CRIT_GEOM)
