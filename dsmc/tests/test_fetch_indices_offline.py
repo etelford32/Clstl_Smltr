@@ -119,6 +119,16 @@ def test_checked_in_fixtures_match_backfill() -> None:
         ("gannon_may_2024",     "2024-05-08", "2024-05-14"),
         ("halloween_oct_2003",  "2003-10-27", "2003-11-05"),
         ("st_patrick_mar_2015", "2015-03-15", "2015-03-21"),
+        # Cycle 23 / 24 / 25 backfill — added to widen the F10.7
+        # distribution before the v1 retrain.
+        ("bastille_jul_2000",   "2000-07-12", "2000-07-18"),
+        ("november_2004",       "2004-11-06", "2004-11-12"),
+        ("december_2006",       "2006-12-12", "2006-12-18"),
+        ("june_2015",           "2015-06-21", "2015-06-26"),
+        ("september_2017",      "2017-09-06", "2017-09-12"),
+        ("solar_min_dec_2019",  "2019-12-08", "2019-12-13"),
+        ("march_2024",          "2024-03-22", "2024-03-27"),
+        ("october_2024",        "2024-10-08", "2024-10-13"),
     ]
     for event, start, end in cases:
         fixture = (REPO / "dsmc" / "fixtures" / "hindcast"
