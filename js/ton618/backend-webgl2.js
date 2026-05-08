@@ -82,6 +82,13 @@ export function createWebGL2Backend(canvas) {
         labLogNHI:        gl.getUniformLocation(program, 'u_lab_log_NHI'),
         labTempK:         gl.getUniformLocation(program, 'u_lab_temp_K'),
         labNeufeld:       gl.getUniformLocation(program, 'u_lab_neufeld'),
+        // Phase 2.2 — anisotropic scattering / polarization / double-peak
+        showPolVectors:   gl.getUniformLocation(program, 'u_show_pol_vectors'),
+        labPolMax:        gl.getUniformLocation(program, 'u_lab_pol_max'),
+        labDoublePeak:    gl.getUniformLocation(program, 'u_lab_double_peak'),
+        camRightCart:     gl.getUniformLocation(program, 'u_cam_right_cart'),
+        camUpCart:        gl.getUniformLocation(program, 'u_cam_up_cart'),
+        camForwardCart:   gl.getUniformLocation(program, 'u_cam_forward_cart'),
     };
 
     function resize(w, h) {
@@ -161,6 +168,15 @@ export function createWebGL2Backend(canvas) {
         gl.uniform1f(uLoc.labLogNHI,        u.labLogNHI        ?? 20.5);
         gl.uniform1f(uLoc.labTempK,         u.labTempK         ?? 1.0e4);
         gl.uniform1f(uLoc.labNeufeld,       u.labNeufeld       ?? 0.7);
+        gl.uniform1i(uLoc.showPolVectors,   u.showPolVectors ? 1 : 0);
+        gl.uniform1f(uLoc.labPolMax,        u.labPolMax        ?? 0.12);
+        gl.uniform1i(uLoc.labDoublePeak,    u.labDoublePeak ? 1 : 0);
+        const cr = u.camRightCart   ?? [1, 0, 0];
+        const cu = u.camUpCart      ?? [0, 1, 0];
+        const cf = u.camForwardCart ?? [0, 0, 1];
+        gl.uniform3f(uLoc.camRightCart,   cr[0], cr[1], cr[2]);
+        gl.uniform3f(uLoc.camUpCart,      cu[0], cu[1], cu[2]);
+        gl.uniform3f(uLoc.camForwardCart, cf[0], cf[1], cf[2]);
     }
 
     function draw() {
