@@ -26,6 +26,7 @@ import {
     fetchProfile,
     fetchLiveIndices,
 } from './upper-atmosphere-engine.js';
+import { getRealtimeDriver } from './upper-atmosphere-realtime.js';
 import { ATMOSPHERIC_LAYER_SCHEMA } from './upper-atmosphere-layers.js';
 import { layerPhysics } from './upper-atmosphere-physics.js';
 import { DEBRIS_FAMILIES } from './debris-catalog.js';
@@ -76,6 +77,9 @@ export class UpperAtmosphereUI {
         this._refreshInflight = null;
         this._refreshTimer = null;
 
+        this._realtimeEnabled = true;
+        this._userPinnedKey   = null;   // 'f107'|'ap' if user moved a slider
+        this._userPinnedAt    = 0;
         this._bindInputs();
         this._renderPresets();
         this._renderLayerLegend();
@@ -84,6 +88,7 @@ export class UpperAtmosphereUI {
         this._bindLiveButton();
         this._bindSourcePill();
         this._bindSwpcEventBus();
+        this._bindRealtimeBus();
         this._bindCameraControls();
         this._bindTleFreshnessBus();
         this._bindResize();
@@ -780,6 +785,60 @@ export class UpperAtmosphereUI {
         });
     }
 
+    /**
+     * Subscribe to the realtime driver's per-tick state. Between SWPC
+     * fetches the driver runs a Burton-style ring-current integrator
+     * off the upstream solar wind and produces a continuously-updated
+     * Ap surrogate; we feed that straight into the engine state. Slider
+     * moves "pin" the corresponding key for ~10 s so the realtime push
+     * doesn't fight the user mid-drag.
+     */
+    _bindRealtimeBus() {
+        // Mirror solar-wind values into _liveBusValues so the existing
+        // panels keep working when swpc-update isn't available but the
+        // driver is producing a current state vector.
+        window.addEventListener('ua-realtime-tick', (e) => {
+            if (!this._realtimeEnabled) return;
+            const s = e?.detail; if (!s) return;
+            this._liveBusValues = {
+                f107:    s.f107,
+                kp:      s.kp,
+                bz:      s.bz,
+                speed:   s.v,
+                density: s.n,
+                dst:     s.dst,
+            };
+            // Apply state — but skip whichever key the user just moved.
+            const pinExpired = (Date.now() - this._userPinnedAt) > 10_000;
+            const partial = {};
+            if (this._userPinnedKey !== 'f107' || pinExpired)
+                partial.f107 = s.f107;
+            if (this._userPinnedKey !== 'ap' || pinExpired)
+                partial.ap = s.ap;
+            // Skip the redraw round-trip if nothing actually changed.
+            const changed =
+                ('f107' in partial && Math.abs((partial.f107 || 0) - this.state.f107) > 0.5) ||
+                ('ap'   in partial && Math.abs((partial.ap   || 0) - this.state.ap)   > 0.5);
+            if (changed) {
+                this.setState(partial);
+            } else {
+                this._applySolarWindToGlobe();
+                this._paintSolarWindStats();
+                this._paintSpaceWeatherAnalytics();
+            }
+        });
+    }
+
+    /**
+     * Toggle the realtime driver on/off. When off, sliders stay where
+     * the user left them and the page behaves like the legacy "static"
+     * mode. The driver itself keeps running in the background so the
+     * history strip continues to fill.
+     */
+    setRealtimeEnabled(on) {
+        this._realtimeEnabled = !!on;
+    }
+
     // Push the latest solar-wind plasma state to the globe + the side
     // panel. Called whenever swpc-update fires, when the user clicks the
     // live-NOAA button, or once on boot with climatology defaults so the
@@ -1152,6 +1211,12 @@ export class UpperAtmosphereUI {
             el.value = String(this.state[key]);
             el.addEventListener('input', () => {
                 this.state[key] = cast(el.value);
+                // F10.7 / Ap moves pin against realtime push for ~10 s
+                // so the realtime driver doesn't fight the user.
+                if (key === 'f107' || key === 'ap') {
+                    this._userPinnedKey = key;
+                    this._userPinnedAt  = Date.now();
+                }
                 this.refresh();
             });
         };
