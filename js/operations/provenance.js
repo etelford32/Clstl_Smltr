@@ -307,7 +307,7 @@ function copyCitation(key, rec, btn) {
         for (const k of rec.inputs) lines.push(`    - ${k}`);
     }
     lines.push(`  scenario: ${scenario.getHash?.() ?? ''}`);
-    lines.push(`  source:   Parker Physics Operations`);
+    lines.push(`  source:   Parkers Physics Operations`);
     const text = lines.join('\n');
 
     navigator.clipboard?.writeText(text).then(() => {

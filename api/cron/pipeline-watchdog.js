@@ -28,7 +28,7 @@
  *                            been alerted, but doesn't send mail.
  *                            Useful for verifying the threshold logic
  *                            in staging without fanning out emails.)
- *   ALERT_FROM_EMAIL       (optional, default 'Parker Physics Alerts
+ *   ALERT_FROM_EMAIL       (optional, default 'Parkers Physics Alerts
  *                            <alerts@parkersphysics.com>')
  *   ALERT_OPS_EMAIL        (required for sends — operator inbox)
  *   CRON_SECRET            (optional but recommended)
@@ -50,7 +50,7 @@ const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABAS
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SECRET_KEY || '';
 const CRON_SECRET  = process.env.CRON_SECRET || '';
 const RESEND_KEY   = process.env.RESEND_API_KEY || '';
-const FROM_EMAIL   = process.env.ALERT_FROM_EMAIL || 'Parker Physics Alerts <alerts@parkersphysics.com>';
+const FROM_EMAIL   = process.env.ALERT_FROM_EMAIL || 'Parkers Physics Alerts <alerts@parkersphysics.com>';
 const OPS_EMAIL    = process.env.ALERT_OPS_EMAIL  || '';
 // Slack webhook URL (incoming-webhook integration). When set the
 // watchdog mirrors heartbeat alerts to Slack and uses Slack as the
@@ -271,8 +271,8 @@ function buildPerfResolvedSlackBlocks(rows) {
 async function sendPerfEmailFallback(rows, isResolved = false) {
     if (!RESEND_KEY || !OPS_EMAIL) return null;
     const subject = isResolved
-        ? `[Parker Physics] ${PERF_METRIC} recovered on ${rows.length} route${rows.length === 1 ? '' : 's'}`
-        : `[Parker Physics] ${PERF_METRIC} regression on ${rows.length} route${rows.length === 1 ? '' : 's'}`;
+        ? `[Parkers Physics] ${PERF_METRIC} recovered on ${rows.length} route${rows.length === 1 ? '' : 's'}`
+        : `[Parkers Physics] ${PERF_METRIC} regression on ${rows.length} route${rows.length === 1 ? '' : 's'}`;
     const lines = isResolved
         ? rows.map(r => `  ${r.route}  (was p95 ${r.last_p95 ? Math.round(r.last_p95) : '?'} ms)`)
         : rows.map(r => `  ${r.route}  p95 ${Math.round(r.p95)} ms  (${r.samples} samples)`);

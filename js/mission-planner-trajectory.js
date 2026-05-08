@@ -23,6 +23,8 @@
 import {
     jdNow, moonGeocentric, earthHeliocentric, marsHeliocentric,
     mercuryHeliocentric, venusHeliocentric,
+    jupiterHeliocentric, saturnHeliocentric,
+    uranusHeliocentric,  neptuneHeliocentric,
 } from './horizons.js';
 import {
     lambert, lambertAll,
@@ -36,20 +38,63 @@ export const D2R = Math.PI / 180;
 export const R2D = 180 / Math.PI;
 
 // Gravitational parameters (km³/s²)
-export const MU_EARTH = 398600.4418;
-export const MU_SUN   = 1.32712440018e11;
-export const MU_MOON  = 4902.800066;
-export const MU_MARS  = 42828.37;
+export const MU_EARTH    = 398600.4418;
+export const MU_SUN      = 1.32712440018e11;
+export const MU_MOON     = 4902.800066;
+export const MU_MARS     = 42828.37;
+export const MU_JUPITER  = 1.26686534e8;
+export const MU_SATURN   = 3.7931187e7;
+export const MU_URANUS   = 5.793939e6;
+export const MU_NEPTUNE  = 6.836529e6;
 
 // Body radii (km)
-export const R_EARTH = 6378.137;
-export const R_MOON  = 1737.4;
-export const R_MARS  = 3389.5;
+export const R_EARTH   = 6378.137;
+export const R_MOON    = 1737.4;
+export const R_MARS    = 3389.5;
+export const R_JUPITER = 69911;
+export const R_SATURN  = 58232;
+export const R_URANUS  = 25362;
+export const R_NEPTUNE = 24622;
 
 // Sphere-of-influence radii (km), classic Tisserand definition.
-export const SOI_EARTH = 924000;
-export const SOI_MOON  =  66100;
-export const SOI_MARS  = 577000;
+export const SOI_EARTH    =    924000;
+export const SOI_MOON     =     66100;
+export const SOI_MARS     =    577000;
+export const SOI_JUPITER  =  48200000;
+export const SOI_SATURN   =  54400000;
+export const SOI_URANUS   =  51700000;
+export const SOI_NEPTUNE  =  86700000;
+
+// ── Per-target orbital-insertion labels ───────────────────────────────────
+// Single source of truth for the abbreviations used in mission-log entries
+// ("🛰️ JOI · ${spacecraft} captured at Jupiter") and tooltip strings. The
+// abbreviations follow real mission convention (Galileo's "JOI", Cassini's
+// "SOI", etc.). Edit here to change the wording everywhere.
+export const INSERTION_LABELS = {
+    moon:    { abbr: 'LOI', long: 'Lunar Orbit Insertion'    },
+    mercury: { abbr: 'MOI', long: 'Mercury Orbit Insertion'  },
+    venus:   { abbr: 'VOI', long: 'Venus Orbit Insertion'    },
+    earth:   { abbr: 'EOI', long: 'Earth Orbit Insertion'    },
+    mars:    { abbr: 'MOI', long: 'Mars Orbit Insertion'     },
+    jupiter: { abbr: 'JOI', long: 'Jupiter Orbit Insertion'  },
+    saturn:  { abbr: 'SOI', long: 'Saturn Orbit Insertion'   },
+    uranus:  { abbr: 'UOI', long: 'Uranus Orbit Insertion'   },
+    neptune: { abbr: 'NOI', long: 'Neptune Orbit Insertion'  },
+};
+
+// Symbol + display name for each body, used by tour readouts and the UI
+// label renderers so log lines can read "♃ Jupiter" instead of "jupiter".
+export const PLANET_DISPLAY = {
+    mercury: { symbol: '☿',  name: 'Mercury' },
+    venus:   { symbol: '♀',  name: 'Venus'   },
+    earth:   { symbol: '🌍', name: 'Earth'   },
+    moon:    { symbol: '🌙', name: 'Moon'    },
+    mars:    { symbol: '♂',  name: 'Mars'    },
+    jupiter: { symbol: '♃',  name: 'Jupiter' },
+    saturn:  { symbol: '♄',  name: 'Saturn'  },
+    uranus:  { symbol: '⛢',  name: 'Uranus'  },
+    neptune: { symbol: '♆',  name: 'Neptune' },
+};
 
 // Mean orbital radii (km)
 export const R_EARTH_HELIO = 1.00000011 * KM_PER_AU;   // mean Earth orbit
@@ -762,9 +807,115 @@ export function porkchopMars({
         n_dep, n_arr,
         jd_dep_min, jd_dep_max, jd_arr_min, jd_arr_max,
         dv, c3, vinfA, tof_d: tofD, best,
+        planet: 'mars',
     };
 }
 
+// ── Generic outer-planet porkchop ───────────────────────────────────────────
+//
+// Same algorithm as porkchopMars but parameterized by destination body, so
+// the UI can scan Jupiter / Saturn / Uranus / Neptune windows the same way
+// it scans Mars. Per-planet defaults (parking altitude, Δv clip threshold,
+// minimum TOF) come from _PORKCHOP_TARGETS below.
+const _PORKCHOP_TARGETS = {
+    mars:    { ephFn: marsHeliocentric,    R_km: R_MARS,    mu: MU_MARS,
+               default_alt_km:  400, dv_clip_kms:  25, min_tof_d:   30 },
+    jupiter: { ephFn: jupiterHeliocentric, R_km: R_JUPITER, mu: MU_JUPITER,
+               default_alt_km: 5000, dv_clip_kms:  90, min_tof_d:  300 },
+    saturn:  { ephFn: saturnHeliocentric,  R_km: R_SATURN,  mu: MU_SATURN,
+               default_alt_km: 5000, dv_clip_kms:  60, min_tof_d:  600 },
+    uranus:  { ephFn: uranusHeliocentric,  R_km: R_URANUS,  mu: MU_URANUS,
+               default_alt_km: 3000, dv_clip_kms:  45, min_tof_d: 1500 },
+    neptune: { ephFn: neptuneHeliocentric, R_km: R_NEPTUNE, mu: MU_NEPTUNE,
+               default_alt_km: 3000, dv_clip_kms:  35, min_tof_d: 3000 },
+};
+
+export function porkchop({
+    planet,                    // 'mars' | 'jupiter' | 'saturn' | 'uranus' | 'neptune'
+    jd_dep_min, jd_dep_max, jd_arr_min, jd_arr_max,
+    n_dep = 60, n_arr = 60,
+    parking_alt_km     = 300,
+    target_alt_km      = null,
+    parking_inc_deg    = 28.5,
+    prograde           = true,
+    dv_clip_kms        = null,
+} = {}) {
+    const cfg = _PORKCHOP_TARGETS[planet];
+    if (!cfg) throw new Error(`porkchop: unknown planet "${planet}"`);
+    const _alt  = target_alt_km ?? cfg.default_alt_km;
+    const _clip = dv_clip_kms   ?? cfg.dv_clip_kms;
+    const min_tof_s = cfg.min_tof_d * SECONDS_PER_DAY;
+
+    const dv    = new Float32Array(n_dep * n_arr);
+    const c3    = new Float32Array(n_dep * n_arr);
+    const vinfA = new Float32Array(n_dep * n_arr);
+    const tofD  = new Float32Array(n_dep * n_arr);
+    let best = { dv: Infinity, i: 0, j: 0, jd_dep: 0, jd_arr: 0, c3: 0, vinfA: 0, tof_d: 0 };
+
+    const deps = new Array(n_dep);
+    for (let i = 0; i < n_dep; i++) {
+        const jd = jd_dep_min + (jd_dep_max - jd_dep_min) * (i / (n_dep - 1));
+        deps[i] = { jd, state: planetState(earthHeliocentric, jd) };
+    }
+    const arrs = new Array(n_arr);
+    for (let j = 0; j < n_arr; j++) {
+        const jd = jd_arr_min + (jd_arr_max - jd_arr_min) * (j / (n_arr - 1));
+        arrs[j] = { jd, state: planetState(cfg.ephFn, jd) };
+    }
+
+    const r_park_e = R_EARTH  + parking_alt_km;
+    const r_park_t = cfg.R_km + _alt;
+    const v_circ_t = Math.sqrt(cfg.mu / r_park_t);
+
+    for (let i = 0; i < n_dep; i++) {
+        const D = deps[i];
+        for (let j = 0; j < n_arr; j++) {
+            const A = arrs[j];
+            const idx = i * n_arr + j;
+            const tof = (A.jd - D.jd) * SECONDS_PER_DAY;
+            if (tof < min_tof_s) {
+                dv[idx] = NaN; c3[idx] = NaN; vinfA[idx] = NaN; tofD[idx] = NaN;
+                continue;
+            }
+            try {
+                const sol   = lambert(D.state.r, A.state.r, tof, MU_SUN, { prograde });
+                const vie   = vSub(sol.v1, D.state.v);
+                const vit   = vSub(sol.v2, A.state.v);
+                const vie_n = vNorm(vie), vit_n = vNorm(vit);
+
+                const v_park_e = Math.sqrt(MU_EARTH / r_park_e);
+                const v_hyp_e  = Math.sqrt(vie_n*vie_n + 2*MU_EARTH / r_park_e);
+                const v_hyp_t  = Math.sqrt(vit_n*vit_n + 2*cfg.mu / r_park_t);
+
+                const tilt   = Math.abs(Math.abs(declination(vie)) - parking_inc_deg * D2R);
+                const dv_dep = combinedBurnDV(v_park_e, v_hyp_e, tilt);
+                const dv_arr = v_hyp_t - v_circ_t;
+                const total  = dv_dep + dv_arr;
+
+                if (Number.isFinite(total) && total < _clip) {
+                    dv[idx]    = total;
+                    c3[idx]    = vie_n * vie_n;
+                    vinfA[idx] = vit_n;
+                    tofD[idx]  = A.jd - D.jd;
+                    if (total < best.dv) {
+                        best = { dv: total, i, j, jd_dep: D.jd, jd_arr: A.jd,
+                                 c3: vie_n*vie_n, vinfA: vit_n, tof_d: A.jd - D.jd };
+                    }
+                } else {
+                    dv[idx] = NaN; c3[idx] = NaN; vinfA[idx] = NaN; tofD[idx] = NaN;
+                }
+            } catch (_) {
+                dv[idx] = NaN; c3[idx] = NaN; vinfA[idx] = NaN; tofD[idx] = NaN;
+            }
+        }
+    }
+    return {
+        n_dep, n_arr, planet,
+        jd_dep_min, jd_dep_max, jd_arr_min, jd_arr_max,
+        dv, c3, vinfA, tof_d: tofD, best,
+        dv_clip_kms: _clip,
+    };
+}
 
 // ── Lunar Lambert (geocentric, with TOF as a knob) ──────────────────────────
 //
@@ -888,6 +1039,305 @@ export function planLunarLambert({
     return best;
 }
 
+// ── Cross-body return / inter-base routes ─────────────────────────────────
+//
+// All three routes are thin wrappers around the existing Lambert solver.
+// They share the same plan shape (`kind`, `method`, `dv_*_kms`, `sample()`,
+// arrival/departure body states) so the renderer can dispatch them through
+// one helio-arc animator.
+
+/**
+ * Heliocentric state of the Moon at JD: Earth_helio + Moon_geo (translated).
+ * Both are returned in km. Velocity is via centered finite difference.
+ */
+function moonHelioState(jd, dt = _DT_VEL_DAYS) {
+    const e_now = planetState(earthHeliocentric, jd);
+    const m_now = moonGeoState(jd);
+    const r = [e_now.r[0] + m_now.r[0], e_now.r[1] + m_now.r[1], e_now.r[2] + m_now.r[2]];
+    const v = [e_now.v[0] + m_now.v[0], e_now.v[1] + m_now.v[1], e_now.v[2] + m_now.v[2]];
+    return { r, v };
+}
+
+/**
+ * Mars → Earth heliocentric Lambert. Mirror of planMarsLambert with the
+ * endpoints swapped: depart from a low Mars orbit, arrive at a low Earth
+ * parking orbit. EDL is left for the renderer (capture into LEO is what
+ * we report numerically).
+ */
+export function planMarsToEarthLambert({
+    jd_depart           = jdNow(),
+    jd_arrive           = jdNow() + 260,
+    parking_alt_mars_km = 400,
+    target_alt_km       = 300,
+    parking_inc_deg     = 0,
+    capture_inc_deg     = null,
+    prograde            = true,
+} = {}) {
+    if (jd_arrive <= jd_depart) throw new Error('planMarsToEarthLambert: jd_arrive must be > jd_depart');
+
+    const tof_s = (jd_arrive - jd_depart) * SECONDS_PER_DAY;
+    const m = planetState(marsHeliocentric,  jd_depart);
+    const e = planetState(earthHeliocentric, jd_arrive);
+
+    const sol = lambert(m.r, e.r, tof_s, MU_SUN, { prograde });
+    const v_inf_m = vSub(sol.v1, m.v);
+    const v_inf_e = vSub(sol.v2, e.v);
+
+    const r_park_m = R_MARS  + parking_alt_mars_km;
+    const r_park_e = R_EARTH + target_alt_km;
+
+    const dep = departureBurnFromParking({
+        r_park_km: r_park_m, mu: MU_MARS,
+        v_inf_vec: v_inf_m, i_park_rad: parking_inc_deg * D2R,
+    });
+    const arr = arrivalBurnIntoOrbit({
+        r_capt_km: r_park_e, mu: MU_EARTH,
+        v_inf_vec: v_inf_e,
+        i_capt_rad: capture_inc_deg == null ? null : capture_inc_deg * D2R,
+    });
+
+    return {
+        kind: 'mars-to-earth',
+        method: 'lambert',
+        jd_depart, jd_arrive, tof_d: jd_arrive - jd_depart, tof_s,
+        depart_state_kms: m, arrive_state_kms: e,
+        lambert: sol,
+        v_inf_depart_kms: vNorm(v_inf_m),
+        v_inf_arrive_kms: vNorm(v_inf_e),
+        c3_depart_km2s2:  vNorm(v_inf_m) ** 2,
+        dv_depart_kms:    dep.dv_kms,
+        dv_arrive_kms:    arr.dv_kms,
+        dv_total_kms:     dep.dv_kms + arr.dv_kms,
+        sample: () => sampleKeplerArc(m.r, sol.v1, tof_s, MU_SUN, 96),
+    };
+}
+
+/**
+ * Moon → Mars heliocentric Lambert. Departs from the Moon's heliocentric
+ * position (Earth_helio + Moon_geo), arrives at Mars. The Δv reported at
+ * departure is for an injection from a circular low lunar orbit; the small
+ * heliocentric offset between Moon and Earth is what makes this cheaper or
+ * more expensive than a direct Earth → Mars depending on Moon phase.
+ */
+export function planMoonToMarsLambert({
+    jd_depart           = jdNow(),
+    jd_arrive           = jdNow() + 260,
+    parking_alt_moon_km = 100,
+    target_alt_mars_km  = 400,
+    parking_inc_deg     = 0,
+    capture_inc_deg     = null,
+    prograde            = true,
+} = {}) {
+    if (jd_arrive <= jd_depart) throw new Error('planMoonToMarsLambert: jd_arrive must be > jd_depart');
+
+    const tof_s = (jd_arrive - jd_depart) * SECONDS_PER_DAY;
+    const moon = moonHelioState(jd_depart);
+    const mars = planetState(marsHeliocentric, jd_arrive);
+
+    const sol = lambert(moon.r, mars.r, tof_s, MU_SUN, { prograde });
+    const v_inf_moon = vSub(sol.v1, moon.v);
+    const v_inf_mars = vSub(sol.v2, mars.v);
+
+    const r_park_moon = R_MOON + parking_alt_moon_km;
+    const r_park_mars = R_MARS + target_alt_mars_km;
+
+    const dep = departureBurnFromParking({
+        r_park_km: r_park_moon, mu: MU_MOON,
+        v_inf_vec: v_inf_moon, i_park_rad: parking_inc_deg * D2R,
+    });
+    const arr = arrivalBurnIntoOrbit({
+        r_capt_km: r_park_mars, mu: MU_MARS,
+        v_inf_vec: v_inf_mars,
+        i_capt_rad: capture_inc_deg == null ? null : capture_inc_deg * D2R,
+    });
+
+    return {
+        kind: 'moon-to-mars',
+        method: 'lambert',
+        jd_depart, jd_arrive, tof_d: jd_arrive - jd_depart, tof_s,
+        depart_state_kms: moon, arrive_state_kms: mars,
+        lambert: sol,
+        v_inf_depart_kms: vNorm(v_inf_moon),
+        v_inf_arrive_kms: vNorm(v_inf_mars),
+        c3_depart_km2s2:  vNorm(v_inf_moon) ** 2,
+        dv_depart_kms:    dep.dv_kms,
+        dv_arrive_kms:    arr.dv_kms,
+        dv_total_kms:     dep.dv_kms + arr.dv_kms,
+        sample: () => sampleKeplerArc(moon.r, sol.v1, tof_s, MU_SUN, 96),
+    };
+}
+
+/**
+ * Moon → Earth geocentric Lambert (lunar return). Sweeps the burn-angle
+ * parameter the same way planLunarLambert does, but with the Moon as the
+ * departure point and a low Earth parking orbit as the arrival.
+ */
+export function planMoonToEarthLambert({
+    jd_depart           = jdNow(),
+    tof_d               = 4.5,
+    parking_alt_moon_km = 100,
+    target_alt_earth_km = 300,
+    n_theta             = 30,
+} = {}) {
+    const tof_s = tof_d * SECONDS_PER_DAY;
+    const r_moon  = R_MOON  + parking_alt_moon_km;
+    const r_earth = R_EARTH + target_alt_earth_km;
+
+    const moonState = moonGeoState(jd_depart);
+    const r1        = moonState.r;
+    const r1_mag    = vNorm(r1);
+    const r1_unit   = [r1[0]/r1_mag, r1[1]/r1_mag, r1[2]/r1_mag];
+
+    // Build an in-plane perpendicular by crossing r1 with +Z, mirror of
+    // planLunarLambert's geometry (same caveat at the lunar pole).
+    const z = [0, 0, 1];
+    const cross = vCross(r1_unit, z);
+    const cm = vNorm(cross);
+    const perp = [cross[0]/cm, cross[1]/cm, cross[2]/cm];
+
+    let best = null;
+    for (let i = 0; i < n_theta; i++) {
+        const theta = (60 + (200 - 60) * (i / (n_theta - 1))) * D2R;
+        const c = Math.cos(theta), s = Math.sin(theta);
+        const r2 = [
+            r_earth * (c * r1_unit[0] + s * perp[0]),
+            r_earth * (c * r1_unit[1] + s * perp[1]),
+            r_earth * (c * r1_unit[2] + s * perp[2]),
+        ];
+
+        let sol;
+        try { sol = lambert(r1, r2, tof_s, MU_EARTH); }
+        catch (_) { continue; }
+
+        // Δv at the Moon: we depart from a circular low lunar orbit, so
+        // the departure burn is from v_circ_moon along the prograde tangent
+        // up to v_hyp at perilune, plus the difference between the helio
+        // arc's initial velocity and the Moon's own velocity (v∞).
+        const v_inf_vec  = vSub(sol.v1, moonState.v);
+        const v_inf      = vNorm(v_inf_vec);
+        const v_perilune_hyp = Math.sqrt(v_inf*v_inf + 2 * MU_MOON / r_moon);
+        const v_circ_moon    = Math.sqrt(MU_MOON / r_moon);
+        const dv_dep         = v_perilune_hyp - v_circ_moon;
+
+        // Δv at Earth: insert into a circular low Earth orbit at r_earth.
+        const v_at_r2 = vNorm(sol.v2);
+        const v_circ_e = Math.sqrt(MU_EARTH / r_earth);
+        const dv_arr   = Math.abs(v_at_r2 - v_circ_e);
+
+        const total = dv_dep + dv_arr;
+        if (!best || total < best.dv_total_kms) {
+            best = {
+                kind: 'moon-to-earth',
+                method: 'lambert',
+                jd_depart, jd_arrive: jd_depart + tof_d,
+                tof_d, tof_s,
+                burn_angle_deg: theta * R2D,
+                r1, r2, r_park_km: r_moon, r_capt_km: r_earth,
+                lambert: sol,
+                dv_depart_kms: dv_dep,
+                dv_arrive_kms: dv_arr,
+                dv_total_kms:  total,
+                v_inf_moon_kms: v_inf,
+                moon_at_departure: moonGeocentric(jd_depart),
+                sample: () => sampleKeplerArc(r1, sol.v1, tof_s, MU_EARTH, 96),
+            };
+        }
+    }
+    if (!best) throw new Error(`planMoonToEarthLambert: no feasible Lambert at TOF=${tof_d}d`);
+    return best;
+}
+
+// ── Outer-planet Lambert (Jupiter / Saturn / Uranus / Neptune) ──────────────
+//
+// Same shape as planMarsLambert — heliocentric Lambert from Earth at
+// jd_depart to the target planet at jd_arrive — but generalised over the
+// destination body so we can fly Voyager-style direct missions to any
+// outer planet. Real missions use gravity assists; first-pass plan reports
+// the unaided Δv so the user can see how steep an outer-planet capture is.
+//
+// Default time-of-flight follows the Hohmann transfer time (Earth_orbit →
+// target_orbit half-ellipse). Real missions trade longer TOF for a smaller
+// C3 by leaving the Hohmann window; the generic Lambert solver works for
+// any (depart, arrive) pair so users can dial that in via the time slider.
+const _OUTER_PLANET_CFG = {
+    jupiter: {
+        ephFn: jupiterHeliocentric, R_km: R_JUPITER, mu: MU_JUPITER,
+        default_target_alt_km:  5000,    // ~10 RJ low-Jupiter orbit
+        default_tof_d:          1000,    // ~Hohmann
+    },
+    saturn: {
+        ephFn: saturnHeliocentric,  R_km: R_SATURN,  mu: MU_SATURN,
+        default_target_alt_km:  5000,
+        default_tof_d:          2200,
+    },
+    uranus: {
+        ephFn: uranusHeliocentric,  R_km: R_URANUS,  mu: MU_URANUS,
+        default_target_alt_km:  3000,
+        default_tof_d:          5800,
+    },
+    neptune: {
+        ephFn: neptuneHeliocentric, R_km: R_NEPTUNE, mu: MU_NEPTUNE,
+        default_target_alt_km:  3000,
+        default_tof_d:         11200,
+    },
+};
+
+export function planEarthToOuterLambert({
+    planet,                                  // 'jupiter' | 'saturn' | 'uranus' | 'neptune'
+    jd_depart           = jdNow(),
+    jd_arrive           = null,
+    parking_alt_km      = 300,
+    target_alt_km       = null,
+    parking_inc_deg     = 28.5,
+    capture_inc_deg     = null,
+    prograde            = true,
+} = {}) {
+    const cfg = _OUTER_PLANET_CFG[planet];
+    if (!cfg) throw new Error(`planEarthToOuterLambert: unknown planet ${planet}`);
+
+    const _jd_arrive = jd_arrive ?? (jd_depart + cfg.default_tof_d);
+    const _alt_km    = target_alt_km ?? cfg.default_target_alt_km;
+    if (_jd_arrive <= jd_depart) throw new Error('planEarthToOuterLambert: jd_arrive must be > jd_depart');
+
+    const tof_s = (_jd_arrive - jd_depart) * SECONDS_PER_DAY;
+    const e = planetState(earthHeliocentric, jd_depart);
+    const t = planetState(cfg.ephFn,         _jd_arrive);
+
+    const sol = lambert(e.r, t.r, tof_s, MU_SUN, { prograde });
+    const v_inf_e = vSub(sol.v1, e.v);
+    const v_inf_t = vSub(sol.v2, t.v);
+
+    const r_park_e = R_EARTH   + parking_alt_km;
+    const r_park_t = cfg.R_km  + _alt_km;
+
+    const dep = departureBurnFromParking({
+        r_park_km: r_park_e, mu: MU_EARTH,
+        v_inf_vec: v_inf_e, i_park_rad: parking_inc_deg * D2R,
+    });
+    const arr = arrivalBurnIntoOrbit({
+        r_capt_km: r_park_t, mu: cfg.mu,
+        v_inf_vec: v_inf_t,
+        i_capt_rad: capture_inc_deg == null ? null : capture_inc_deg * D2R,
+    });
+
+    return {
+        kind: `earth-to-${planet}`,
+        method: 'lambert',
+        jd_depart, jd_arrive: _jd_arrive,
+        tof_d: _jd_arrive - jd_depart, tof_s,
+        depart_state_kms: e, arrive_state_kms: t,
+        lambert: sol,
+        v_inf_depart_kms: vNorm(v_inf_e),
+        v_inf_arrive_kms: vNorm(v_inf_t),
+        c3_earth_km2s2:   vNorm(v_inf_e) ** 2,
+        c3_arrive_km2s2:  vNorm(v_inf_t) ** 2,
+        dv_depart_kms:    dep.dv_kms,
+        dv_arrive_kms:    arr.dv_kms,
+        dv_total_kms:     dep.dv_kms + arr.dv_kms,
+        sample: () => sampleKeplerArc(e.r, sol.v1, tof_s, MU_SUN, 96),
+    };
+}
+
 // ── Tour planner: chained Lambert legs ──────────────────────────────────────
 //
 // Sequence is an array of {from, to, tof_d} hops. Each hop solves Lambert
@@ -905,11 +1355,15 @@ const _BODY_FNS = {
     venus:   venusHeliocentric,
     earth:   earthHeliocentric,
     mars:    marsHeliocentric,
+    jupiter: jupiterHeliocentric,
+    saturn:  saturnHeliocentric,
+    uranus:  uranusHeliocentric,
+    neptune: neptuneHeliocentric,
 };
 
 export const TOUR_PRESETS = {
     veem: {
-        name: 'V-E-E-M Earth → Venus → Earth → Mars (Galileo-style)',
+        name: 'V-E-E-M Earth → Venus → Earth → Mars (Galileo-Mars-style)',
         depart: 'earth',
         legs: [
             { to: 'venus', tof_d: 130 },
@@ -937,6 +1391,70 @@ export const TOUR_PRESETS = {
             { to: 'venus', tof_d: 150 },
             { to: 'venus', tof_d: 225 },     // ~Venus year
             { to: 'mars',  tof_d: 320 },
+        ],
+    },
+    // ── Outer-planet gravity-assist tours ───────────────────────────────────
+    juno: {
+        // E-E-J: Earth flyby gravity assist before Jupiter capture (JUNO).
+        name: 'E-E-J Earth → Earth → Jupiter (JUNO gravity assist)',
+        depart: 'earth',
+        legs: [
+            { to: 'earth',   tof_d:  730 },   // 2-yr Earth-return loop
+            { to: 'jupiter', tof_d: 1100 },
+        ],
+    },
+    galileo: {
+        // V-E-E-J: Venus + 2 Earth flybys to Jupiter (Galileo).
+        name: 'V-E-E-J Earth → Venus → Earth → Earth → Jupiter (Galileo)',
+        depart: 'earth',
+        legs: [
+            { to: 'venus',   tof_d: 130 },
+            { to: 'earth',   tof_d: 360 },
+            { to: 'earth',   tof_d: 730 },    // 2-yr Earth-Earth resonance
+            { to: 'jupiter', tof_d: 1100 },
+        ],
+    },
+    cassini: {
+        // V-V-E-J-S: Cassini's actual Saturn-arrival sequence (1997-2004).
+        name: 'V-V-E-J-S Earth → Venus → Venus → Earth → Jupiter → Saturn (Cassini)',
+        depart: 'earth',
+        legs: [
+            { to: 'venus',   tof_d: 175 },
+            { to: 'venus',   tof_d: 425 },    // Venus-Venus 2:3 resonance
+            { to: 'earth',   tof_d: 60  },
+            { to: 'jupiter', tof_d: 580 },
+            { to: 'saturn',  tof_d: 950 },
+        ],
+    },
+    voyager1: {
+        // E-J-S: Voyager 1 flew straight to Saturn after Jupiter slingshot.
+        name: 'E-J-S Earth → Jupiter → Saturn (Voyager 1 outer mission)',
+        depart: 'earth',
+        legs: [
+            { to: 'jupiter', tof_d:  640 },
+            { to: 'saturn',  tof_d:  680 },
+        ],
+    },
+    voyager2: {
+        // E-J-S-U-N: Voyager 2's Grand Tour — only spacecraft to hit all four.
+        name: 'E-J-S-U-N Earth → Jupiter → Saturn → Uranus → Neptune (Voyager 2 Grand Tour)',
+        depart: 'earth',
+        legs: [
+            { to: 'jupiter', tof_d:  690 },
+            { to: 'saturn',  tof_d:  730 },
+            { to: 'uranus',  tof_d: 1640 },
+            { to: 'neptune', tof_d: 1290 },
+        ],
+    },
+    new_horizons: {
+        // E-J-(Pluto): New Horizons-style — Jupiter slingshot then deep
+        // outer-system cruise. We end at Neptune since Pluto isn't in the
+        // ephemeris model.
+        name: 'E-J-N Earth → Jupiter → Neptune (New Horizons-style cruise)',
+        depart: 'earth',
+        legs: [
+            { to: 'jupiter', tof_d:  410 },
+            { to: 'neptune', tof_d: 3200 },
         ],
     },
 };

@@ -30,7 +30,7 @@ const TEST_LAST     = 'User';
 test.describe('Landing Page', () => {
     test('loads and shows hero CTA', async ({ page }) => {
         await page.goto('/');
-        await expect(page).toHaveTitle(/Parker Physics/);
+        await expect(page).toHaveTitle(/Parkers Physics/);
         // Hero CTA should be visible
         const cta = page.locator('a:has-text("Get Started")').first();
         await expect(cta).toBeVisible();

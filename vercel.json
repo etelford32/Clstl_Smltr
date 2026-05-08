@@ -40,6 +40,19 @@
   ],
   "headers": [
     {
+      "source": "/operations.html",
+      "headers": [
+        {
+          "key": "Cross-Origin-Opener-Policy",
+          "value": "same-origin"
+        },
+        {
+          "key": "Cross-Origin-Embedder-Policy",
+          "value": "credentialless"
+        }
+      ]
+    },
+    {
       "source": "/api/stripe/(.*)",
       "headers": [
         {
@@ -237,6 +250,10 @@
     {
       "source": "/contact-enterprise",
       "destination": "/contact-enterprise.html"
+    },
+    {
+      "source": "/feedback",
+      "destination": "/feedback.html"
     },
     {
       "source": "/for-educators",

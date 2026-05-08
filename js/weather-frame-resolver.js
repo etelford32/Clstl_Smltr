@@ -175,12 +175,14 @@ export class WeatherFrameResolver {
      * @param {number} simTimeMs  — single source of truth from animate()
      */
     tick(simTimeMs) {
-        // Future-time clamp. Forecast/replay-into-the-future is the next
-        // module (predictive analytics); for this iteration any sim time
-        // past wall clock collapses to "live".
+        // Future and past flow through the same path. Live bypass kicks
+        // in only when simTimeMs is within liveBypassMs of wall clock
+        // AND the user isn't explicitly forecast-scrubbing (forecast
+        // beats live for any t > now + liveBypassMs because the user
+        // dragged the slider there on purpose).
         const wallNow = Date.now();
-        const tEff   = Math.min(simTimeMs, wallNow);
-        const isLive = (wallNow - tEff) < this._liveBypassMs;
+        const tEff    = simTimeMs;
+        const isLive  = Math.abs(wallNow - tEff) < this._liveBypassMs;
 
         const modeChanged = isLive !== this._lastWasLive;
         const movedEnough = Math.abs(tEff - this._lastRenderT) >= this._redrawThreshMs;
@@ -275,33 +277,39 @@ export class WeatherFrameResolver {
             this._lerpInto(this._cloudScratch,   a.cloudBuf,   b.cloudBuf,   frac);
         }
 
-        // Synthesise replay meta. The wx-panel listener at
+        // Synthesise replay/forecast meta. The wx-panel listener at
         // earth.html:3389-3395 expects `meta.source`, `meta.fetchTime`,
         // `meta.demo`, `meta.loaded`, plus the grid metadata read from
         // _fetchGrid (gridW/H/Deg, cacheAgeSeconds, cacheFetchedAt).
         // We hand it a fully-formed meta so the panel renders correctly
-        // for the historical instant the user is viewing.
+        // for the instant the user is viewing — past or future.
         const baseFrame = br.before ?? br.after;
-        const ageSec    = Math.max(0, Math.floor((Date.now() - baseFrame.t) / 1000));
-        const ageMin    = Math.round(ageSec / 60);
-        const ageLabel  = ageMin < 60
-            ? `${ageMin}m ago`
-            : `${(ageMin / 60).toFixed(1)}h ago`;
+        const isForecast = !!baseFrame.isForecast;
+        const dtSec   = Math.floor((tEff - Date.now()) / 1000);
+        const absSec  = Math.abs(dtSec);
+        const absMin  = Math.round(absSec / 60);
+        const dtLabel = absMin < 60
+            ? `${absMin}m`
+            : `${(absMin / 60).toFixed(1)}h`;
+        const sourceLabel = isForecast
+            ? `forecast · in ${dtLabel}`
+            : `replay · ${dtLabel} ago`;
         const provenance = baseFrame.source ? ` · ${baseFrame.source}` : '';
         const live = this._feed.meta;
         const meta = {
             // Inherit grid metadata + min/max stats from the feed. Stats
-            // pertain to the live frame, not the replay frame, so a
-            // future polish pass would compute these per-frame at
+            // pertain to the live frame, not the replay/forecast frame,
+            // so a future polish pass would compute these per-frame at
             // ingest time (cheap: ~2 ms on the coarse grid).
             ...live,
-            source:    `replay · ${ageLabel}${provenance}`,
+            source:    `${sourceLabel}${provenance}`,
             fetchTime: new Date(baseFrame.fetchedAt ?? baseFrame.t),
             demo:      false,
             loaded:    true,
-            replay:    true,
+            replay:    !isForecast,
+            isForecast,
             replayT:   tEff,
-            cacheAgeSeconds: ageSec,
+            cacheAgeSeconds: Math.max(0, -dtSec),  // 0 for future frames
             cacheFetchedAt:  new Date(baseFrame.fetchedAt ?? baseFrame.t).toISOString(),
             gridW: baseFrame.gridW,
             gridH: baseFrame.gridH,

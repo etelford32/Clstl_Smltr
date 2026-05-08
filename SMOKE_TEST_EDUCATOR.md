@@ -75,7 +75,7 @@ or hard-reload the page.
 ## 3. Confirm the email landed (optional)
 
 If `RESEND_API_KEY` is set: check the throwaway inbox. The email
-subject is `You've been added to a Parker Physics class`. Body
+subject is `You've been added to a Parkers Physics class`. Body
 includes a magic-link button and the raw code.
 
 If you skipped Resend: pull the link from the API response, or run
@@ -109,7 +109,7 @@ Build the link as
 
 **Expect:**
 - Form switches to the success view. Message: `Welcome! You've joined
-  a Parker Physics Enterprise class. Open your dashboard →`
+  a Parkers Physics Enterprise class. Open your dashboard →`
 - Within 2.5s, the page redirects to `/dashboard.html`.
 - The new student dashboard's subscription card reads:
   `Class member · Enterprise — Access provided by your instructor —

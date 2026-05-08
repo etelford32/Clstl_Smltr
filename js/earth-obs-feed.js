@@ -247,6 +247,35 @@ export const EARTH_OBS_LAYERS = [
         opacity:     0.7,  // snow fields — should read clearly on polar ice
         defaultOn:   true,
     },
+    {
+        // Hypsometric / bathymetric tinted relief from NASA Blue Marble.
+        // Static (non-time-varying) imagery — TIME parameter is accepted
+        // but ignored on the backend, so any timeOffset gets us the
+        // canonical 500 m product. We still fetch on a slow cadence so
+        // a CDN flush picks up new tiles eventually.
+        //
+        // This is the "altitude" layer the user asked for: it visualises
+        // continental elevation and ocean depth in a single colour ramp,
+        // grounding the rest of the overlays in physical relief without
+        // needing a separate elevation grid sampler.
+        id:          'topo-relief',
+        gibs:        'BlueMarble_ShadedRelief_Bathymetry',
+        name:        'Terrain & Bathymetry',
+        category:    'land',
+        description: 'NASA Blue Marble shaded relief w/ ocean bathymetry — continental elevation + sea floor topography',
+        unit:        'metres (rendered)',
+        resolution:  { w: 2048, h: 1024 },
+        cadence:     24 * 60 * 60_000,   // 1 day — static imagery, just keep CDN warm
+        latency:     'static (canonical 500 m product)',
+        colorRamp:   'Deep blue (abyss) → cyan (shelf) → green (lowland) → tan → brown (highland) → white (peaks)',
+        format:      'image/jpeg',
+        timeOffset:  1,
+        // High opacity by default — when on, the user is asking to *see*
+        // the relief; we shouldn't mute it the way we mute analytic
+        // hazes like AOD.
+        opacity:     0.85,
+        defaultOn:   false,   // opt-in: most users want live data first
+    },
 ];
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

@@ -47,11 +47,10 @@
  *   back HTML — both paths produce the same row schema documented at
  *   https://celestrak.org/SOCRATES/socrates-format.php.
  */
-import { jsonOk, jsonError, fetchWithTimeout, CORS_HEADERS } from '../_lib/responses.js';
+import { jsonOk, jsonError, fetchWithTimeout } from '../_lib/responses.js';
 
 export const config = { runtime: 'edge' };
 
-const SOCRATES_BASE = 'https://celestrak.org/SOCRATES';
 const CACHE_TTL = 3600;
 const CACHE_SWR = 300;
 
@@ -61,22 +60,38 @@ const CACHE_SWR = 300;
  * and consolidated everything onto table-socrates.php with an ORDER
  * query parameter. The CSV column header is the contract — see
  * https://celestrak.org/SOCRATES/socrates-format.php.
+ *
+ * Two path roots have been observed in the wild — `/SOCRATES/` (the
+ * original) and `/SOCRATES-Plus/` (referenced in some search-result
+ * pages and external docs). They appear to back the same script, but
+ * either can intermittently 403 / redirect, so we cycle through both.
+ *
+ * NAME parameter quirk: passing `NAME=` (empty) renders the search
+ * form rather than running a query, and the ~80-byte stub response
+ * trips our `empty_response` guard. The wildcard "show me everything"
+ * sentinel that CelesTrak's own search-result URLs use is `NAME=,`
+ * (a single comma); we use that to actually pull rows.
  */
-const SOCRATES_TABLE = `${SOCRATES_BASE}/table-socrates.php`;
+const SOCRATES_PATHS = [
+    'https://celestrak.org/SOCRATES/table-socrates.php',
+    'https://celestrak.org/SOCRATES-Plus/table-socrates.php',
+];
 const SORT_PARAM = {
     range: 'MINRANGE',
     prob:  'MAXPROB',
 };
 
-function buildSocratesUrl(sort, limit, format) {
+function buildSocratesUrl(base, sort, limit, format) {
     const q = new URLSearchParams({
-        NAME:   '',
+        NAME:   ',',
         ORDER:  SORT_PARAM[sort] ?? 'MINRANGE',
         MAX:    String(Math.max(1, Math.min(100, limit | 0))),
     });
     if (format === 'csv') q.set('FORMAT', 'CSV');
-    return `${SOCRATES_TABLE}?${q.toString()}`;
+    return `${base}?${q.toString()}`;
 }
+
+const UA = 'ParkerPhysics/1.0 (+https://parkersphysics.com; aristotle-socrates-proxy)';
 
 /**
  * Parse SOCRATES Plus CSV. The format is documented at
@@ -228,46 +243,64 @@ function parseSocratesUtc(s) {
     return new Date(t);
 }
 
+/**
+ * Fetch one upstream variant. Returns { body, contentType } on success,
+ * or throws on transport / HTTP errors. Treats < MIN_BODY_BYTES as a
+ * failure too so the caller can fall through to the next variant
+ * instead of returning a search-form stub up the stack.
+ */
+const MIN_BODY_BYTES = 200;
+
+async function fetchVariant(url, accept) {
+    const res = await fetchWithTimeout(url, {
+        headers: {
+            'User-Agent': UA,
+            'Accept':     accept,
+        },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const contentType = (res.headers.get('content-type') || '').toLowerCase();
+    const body = await res.text();
+    if (!body || body.length < MIN_BODY_BYTES) {
+        throw new Error(`short payload (${body?.length ?? 0} bytes)`);
+    }
+    return { body, contentType };
+}
+
 export default async function handler(request) {
     const url = new URL(request.url);
     const sortParam = (url.searchParams.get('sort') || 'range').toLowerCase();
     const sort = sortParam === 'prob' ? 'prob' : 'range';
     const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get('limit') || '25', 10) || 25));
 
-    // Try CSV first — it's the documented contract and the cleanest to
-    // parse. Some of CelesTrak's table endpoints honour FORMAT=CSV; if
-    // the server hands back HTML instead, we fall through to the HTML
-    // parser below using the same response.
-    const csvUrl  = buildSocratesUrl(sort, limit, 'csv');
-    const htmlUrl = buildSocratesUrl(sort, limit, null);
-
+    // Walk path roots × formats. We prefer CSV (cleaner parse) but the
+    // newer /SOCRATES-Plus/ root sometimes only honours HTML, so each
+    // root is tried in both formats before giving up. Per-attempt errors
+    // are collected so the client can see exactly what upstream did.
+    const attempts = [];
     let body, contentType;
-    try {
-        let res = await fetchWithTimeout(csvUrl, {
-            headers: {
-                'User-Agent': 'ParkerPhysics/1.0 (aristotle-socrates-proxy)',
-                'Accept': 'text/csv, text/plain, text/html;q=0.5',
-            },
-        });
-        if (!res.ok) {
-            res = await fetchWithTimeout(htmlUrl, {
-                headers: {
-                    'User-Agent': 'ParkerPhysics/1.0 (aristotle-socrates-proxy)',
-                    'Accept': 'text/html,application/xhtml+xml',
-                },
-            });
+    outer: for (const base of SOCRATES_PATHS) {
+        for (const fmt of ['csv', 'html']) {
+            const target = buildSocratesUrl(base, sort, limit, fmt === 'csv' ? 'csv' : null);
+            const accept = fmt === 'csv'
+                ? 'text/csv, text/plain, text/html;q=0.5'
+                : 'text/html,application/xhtml+xml';
+            try {
+                const r = await fetchVariant(target, accept);
+                body = r.body;
+                contentType = r.contentType;
+                attempts.push({ url: target, status: 'ok', bytes: body.length });
+                break outer;
+            } catch (e) {
+                attempts.push({ url: target, status: 'error', error: e.message });
+            }
         }
-        if (!res.ok) throw new Error(`SOCRATES HTTP ${res.status}`);
-        contentType = (res.headers.get('content-type') || '').toLowerCase();
-        body = await res.text();
-    } catch (e) {
-        return jsonError('upstream_unavailable', e.message,
-            { source: 'CelesTrak SOCRATES' });
     }
 
-    if (!body || body.length < 100) {
-        return jsonError('empty_response', 'SOCRATES returned an unexpectedly small payload',
-            { source: 'CelesTrak SOCRATES' });
+    if (!body) {
+        return jsonError('upstream_unavailable',
+            'SOCRATES returned no usable payload from any known endpoint',
+            { source: 'CelesTrak SOCRATES', detail: attempts });
     }
 
     // Detect CSV by content-type or by sniffing the first line for the
@@ -295,6 +328,7 @@ export default async function handler(request) {
             conjunctions: [],
             warning: 'parser-no-rows',
             rawBytes: body.length,
+            attempts,
         }, { maxAge: 300, swr: 60 });   // shorter cache so a parser fix lands fast
     }
 

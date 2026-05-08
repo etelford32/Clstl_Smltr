@@ -1,5 +1,5 @@
 /**
- * cookie-consent.js — opt-in consent banner for Parker Physics App
+ * cookie-consent.js — opt-in consent banner for Parkers Physics App
  *
  * Default posture (GDPR/UK GDPR safe): non-essential categories OFF until the
  * user accepts. Honors Global Privacy Control (GPC) as a refusal signal for
@@ -243,7 +243,7 @@ function _renderBanner() {
     bannerEl.innerHTML = `
         <div class="pp-consent-text">
             <strong>Your privacy choices</strong>
-            We use strictly necessary cookies to run Parker Physics App. With your consent, we also use
+            We use strictly necessary cookies to run Parkers Physics App. With your consent, we also use
             functional storage for your preferences and privacy-respecting analytics to improve the service.
             We never use advertising or cross-site tracking. See our
             <a href="/privacy.html">Privacy Policy</a> &middot;

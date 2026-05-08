@@ -39,7 +39,7 @@ const RESEND_API   = 'https://api.resend.com/emails';
 const RESEND_KEY   = process.env.RESEND_API_KEY || '';
 const FROM_EMAIL   = process.env.INVITE_FROM_EMAIL
                   || process.env.ALERT_FROM_EMAIL
-                  || 'Parker Physics <invites@parkerphysics.com>';
+                  || 'Parkers Physics <invites@parkerphysics.com>';
 const APP_URL      = process.env.APP_URL || 'https://parkerphysics.com';
 
 const VALID_PLANS  = new Set(['free', 'tester', 'basic', 'educator', 'advanced', 'institution', 'enterprise']);
@@ -215,13 +215,13 @@ function buildInviteHtml({ recipientName, recipientEmail, plan, link, code, invi
 <body style="margin:0;padding:0;background:#0a0a14;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">
 <div style="max-width:520px;margin:0 auto;padding:24px 20px">
   <div style="text-align:center;margin-bottom:20px">
-    <span style="font-size:1.1rem;font-weight:800;background:linear-gradient(45deg,#ffd700,#ff8c00);-webkit-background-clip:text;-webkit-text-fill-color:transparent">Parker Physics</span>
+    <span style="font-size:1.1rem;font-weight:800;background:linear-gradient(45deg,#ffd700,#ff8c00);-webkit-background-clip:text;-webkit-text-fill-color:transparent">Parkers Physics</span>
   </div>
   <div style="background:#12111a;border:1px solid #222;border-radius:12px;padding:24px;margin-bottom:16px">
     <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:#c080ff;font-weight:700;margin-bottom:14px">You're invited${inviter}</div>
     <h2 style="margin:0 0 12px;font-size:1.25rem;color:#e8f4ff;font-weight:700">${greeting}</h2>
     <p style="margin:0 0 18px;font-size:.92rem;color:#aab;line-height:1.6">
-      You've been invited to join Parker Physics on the <strong style="color:#fff">${escHtml(planLabel)}</strong> tier — a real-time space-weather, satellite tracking, and earth visualization platform.
+      You've been invited to join Parkers Physics on the <strong style="color:#fff">${escHtml(planLabel)}</strong> tier — a real-time space-weather, satellite tracking, and earth visualization platform.
     </p>
     <div style="text-align:center;margin:24px 0">
       <a href="${escHtml(link)}" style="display:inline-block;padding:12px 28px;background:linear-gradient(45deg,#ff8c00,#ffd700);color:#000;font-weight:700;border-radius:8px;text-decoration:none;font-size:.9rem">Accept invite →</a>
@@ -285,7 +285,7 @@ export default async function handler(req) {
     // an admin account is compromised and starts issuing Advanced/
     // Institution invites in bulk, the audit log makes the abuse pattern
     // obvious instead of burying high-value invites among Free ones.
-    const subject = `You're invited to Parker Physics — ${PLAN_LABEL[plan] || 'Free'} tier`;
+    const subject = `You're invited to Parkers Physics — ${PLAN_LABEL[plan] || 'Free'} tier`;
     const allowed = await checkAdminRate({
         userId:    auth.user_id,
         recipient: recipientEmail,

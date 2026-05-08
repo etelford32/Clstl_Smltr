@@ -1,5 +1,5 @@
 # Parker Physics App — robots policy
-# Telford Projects LLC, see https://parkerphysics.app/eula §16
+# Telford Projects LLC, see https://parkersphysics.com/eula §16
 
 # ── Default policy: allow general-purpose search crawlers ────────────────────
 User-agent: *
@@ -121,4 +121,4 @@ Disallow: /
 # EULA §7c and §16.
 
 # ── Sitemap ──────────────────────────────────────────────────────────────────
-Sitemap: https://parkerphysics.app/sitemap.xml
+Sitemap: https://parkersphysics.com/sitemap.xml

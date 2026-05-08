@@ -102,6 +102,7 @@ const API_ROUTES = {
     '/api/weather/forecast':       'api/weather/forecast.js',
     '/api/lightning/strikes':      'api/lightning/strikes.js',
     '/api/nws/convective':         'api/nws/convective.js',
+    '/api/mars/weather':           'api/mars/weather.js',
     '/api/storms':                 'api/storms.js',
 
     // ── Auth / billing / invites / class / contact ────────────────────────
@@ -116,6 +117,7 @@ const API_ROUTES = {
     '/api/class/invite':           'api/class/invite.js',
     '/api/class/roster':           'api/class/roster.js',
     '/api/contact/enterprise':     'api/contact/enterprise.js',
+    '/api/contact/feedback':       'api/contact/feedback.js',
 };
 
 // Cache imported edge-function modules (stateless, so caching is safe)
@@ -234,7 +236,20 @@ async function handleStatic(pathname, nodeRes) {
         const buf  = await readFile(filePath);
         const ext  = extname(filePath).toLowerCase();
         const mime = MIME[ext] ?? 'application/octet-stream';
-        nodeRes.writeHead(200, { 'Content-Type': mime });
+        const headers = { 'Content-Type': mime };
+        // COOP/COEP for the predictions console: lets the page allocate
+        // SharedArrayBuffer (crossOriginIsolated === true) so the
+        // satellite tracker's propagation worker can write directly
+        // into the GPU-bound position attribute. `credentialless` is
+        // the cross-origin-tolerant variant — strips credentials on
+        // cross-origin fetches (jsdelivr / unpkg textures don't need
+        // them) instead of demanding a CORP header from every CDN.
+        // Mirrors the corresponding `headers` block in vercel.json.
+        if (pathname === '/operations.html') {
+            headers['Cross-Origin-Opener-Policy']   = 'same-origin';
+            headers['Cross-Origin-Embedder-Policy'] = 'credentialless';
+        }
+        nodeRes.writeHead(200, headers);
         nodeRes.end(buf);
     } catch {
         nodeRes.writeHead(404, { 'Content-Type': 'text/plain' });

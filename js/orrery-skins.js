@@ -306,20 +306,56 @@ const SHARED_UNIFORMS_FOR = key => ({
     uTime:   { value: 0 },
 });
 
-// ── Atmosphere shell (Fresnel BackSide) ──────────────────────────────
-function makeAtmosphere(color, scale, intensity) {
+// ── Atmosphere shell (Fresnel BackSide, sun-aware) ──────────────────
+// The shell is added at planet-group level so it picks up heliocentric
+// translation but is not subject to the tiltGroup's obliquity rotation
+// (a tilted Fresnel ring would distort with the spin).  uSunDir is in
+// world space — same convention as the shared planet vertex shader.
+//
+// Rim brightness combines two factors:
+//   r = pow(1 - |vN.z|, 2)   ← view-dependent fresnel (camera-space)
+//   l = max(N·L, 0)          ← lambertian on the world-space normal
+// so the lit limb glows at full intensity, the unlit limb stays dark
+// (with a small ambient floor so the rim doesn't disappear entirely
+// when the planet is back-lit and the user is dialing the camera).
+function makeAtmosphere(color, scale, intensity, sunDirUniform = null) {
+    const uniforms = {
+        uColor:  { value: new THREE.Color(color) },
+        uK:      { value: intensity },
+        // Either share a parent's uSunDir uniform (so updateOrreryPlanet
+        // drives both the surface and the atmosphere with one write) or
+        // own one and leave it pointing along +X.  Sharing is cheaper
+        // and keeps day/night perfectly aligned.
+        uSunDir: sunDirUniform || { value: new THREE.Vector3(1, 0, 0) },
+    };
     return new THREE.Mesh(
         new THREE.SphereGeometry(scale, 32, 32),
         new THREE.ShaderMaterial({
-            transparent:true, depthWrite:false, side:THREE.BackSide,
-            blending:THREE.AdditiveBlending,
-            uniforms:{ uColor:{ value:new THREE.Color(color) }, uK:{ value:intensity } },
-            vertexShader:`varying vec3 vN; void main(){ vN=normalize(normalMatrix*normal);
-                gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
-            fragmentShader:`uniform vec3 uColor; uniform float uK; varying vec3 vN;
-                void main(){
-                    float r = pow(1.0 - abs(vN.z), 2.0);
-                    gl_FragColor = vec4(uColor, r * 0.55 * uK);
+            transparent: true, depthWrite: false, side: THREE.BackSide,
+            blending: THREE.AdditiveBlending,
+            uniforms,
+            vertexShader: `
+                varying vec3 vN;          // camera-space normal (fresnel)
+                varying vec3 vWorldN;     // world-space normal  (sun direction)
+                void main() {
+                    vN      = normalize(normalMatrix * normal);
+                    vWorldN = normalize(mat3(modelMatrix) * normal);
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }`,
+            fragmentShader: `
+                uniform vec3  uColor;
+                uniform float uK;
+                uniform vec3  uSunDir;
+                varying vec3  vN;
+                varying vec3  vWorldN;
+                void main() {
+                    float fres = pow(1.0 - abs(vN.z), 2.0);            // limb fresnel
+                    float lit  = max(dot(vWorldN, normalize(uSunDir)), 0.0);
+                    // 0.18 ambient keeps the night limb visible enough
+                    // to read the body's outline; the day limb takes
+                    // the full fresnel × lambertian product.
+                    float intensity = (0.18 + 0.82 * lit);
+                    gl_FragColor = vec4(uColor, fres * 0.55 * uK * intensity);
                 }`,
         }),
     );
@@ -488,11 +524,14 @@ export function makeOrreryPlanet(key, size, colorHex) {
     group.add(tiltGroup);
 
     // Atmosphere — added at group level so it isn't tilted (it'd
-    // distort the Fresnel ring).
+    // distort the Fresnel ring).  Sharing the surface's uSunDir
+    // uniform ties day/night brightness on the limb to the same
+    // sun direction that lights the surface, so updateOrreryPlanet
+    // drives both with a single write per frame.
     const atmK = (key === 'earth' || key === 'venus' || key === 'neptune' || key === 'uranus') ? 1.4
                : (key === 'jupiter' || key === 'saturn') ? 1.0
                : 0.5;
-    group.add(makeAtmosphere(colorHex, size * 1.36, atmK));
+    group.add(makeAtmosphere(colorHex, size * 1.36, atmK, uniforms.uSunDir));
 
     return { group, surface, uniforms, spin: sp, _tiltGroup: tiltGroup };
 }

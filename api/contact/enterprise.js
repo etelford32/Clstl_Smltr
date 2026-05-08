@@ -42,7 +42,7 @@ const SUPABASE_KEY  = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_S
 const RESEND_API    = 'https://api.resend.com/emails';
 const RESEND_KEY    = process.env.RESEND_API_KEY || '';
 const SALES_EMAIL   = process.env.SALES_EMAIL || 'sales@parkerphysics.com';
-const FROM_EMAIL    = process.env.ALERT_FROM_EMAIL || 'Parker Physics <noreply@parkerphysics.com>';
+const FROM_EMAIL    = process.env.ALERT_FROM_EMAIL || 'Parkers Physics <noreply@parkerphysics.com>';
 const APP_URL       = process.env.APP_URL || 'https://parkerphysics.com';
 
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS

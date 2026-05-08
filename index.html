@@ -2,27 +2,46 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<script type="importmap">
+{"imports":{
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+<!-- perf-hints:start -->
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" crossorigin>
+<!-- perf-hints:end --><link rel="icon" type="image/x-icon" href="/favicon.ico">
 <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
 <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Parker Physics — Real-time Astrophysics Simulations</title>
-<meta name="description" content="Scientifically accurate, WebGL-powered astrophysics simulations driven by live NASA and NOAA satellite data. Explore the Sun, Earth's magnetosphere, space weather, and deep space.">
+<title>Parkers Physics — Real-time Astrophysics Simulations</title>
+<link rel="canonical" href="https://parkersphysics.com/">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/">
+<meta property="og:image:alt" content="Parkers Physics — real-time astrophysics simulations">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Parkers Physics — Real-time Astrophysics Simulations">
+<meta name="twitter:description" content="Scientifically accurate, WebGL-powered astrophysics simulations driven by live NASA and NOAA data. Explore the Sun, Earth's magnetosphere, space weather, and deep space.">
+<meta name="twitter:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+
+<meta name="description" content="Scientifically accurate WebGL astrophysics simulations driven by live NASA and NOAA data. Sun, Earth, space weather, and 28+ deep-space simulations.">
 <meta name="theme-color" content="#03010e">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Parker Physics">
-<meta property="og:title" content="Parker Physics — Real-time Astrophysics Simulations">
-<meta property="og:description" content="Live NASA/NOAA data. 17+ WebGL simulations. Free to start.">
-<meta property="og:image" content="ParkersPhysics_logo2.jpg">
+<meta name="apple-mobile-web-app-title" content="Parkers Physics">
+<meta property="og:title" content="Parkers Physics — Real-time Astrophysics Simulations">
+<meta property="og:description" content="Live NASA/NOAA data. 28+ WebGL simulations. 12 live data feeds. Free to start.">
+<meta property="og:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
 <meta property="og:type" content="website">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;800;900&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
-/* ── Parker's Physics design tokens ──────────────────────────────────────── */
+/* ── Parkers Physics design tokens ──────────────────────────────────────── */
 :root{
   /* Type */
   --font-display:'Orbitron','Segoe UI',system-ui,sans-serif;
@@ -70,13 +89,10 @@ img{display:block}
 /* ── NAV ─────────────────────────────────────────────────────────────────── */
 nav{position:sticky;top:0;z-index:600;height:50px;min-height:50px;background:rgba(4,2,16,.95);backdrop-filter:blur(16px);border-bottom:1px solid rgba(255,255,255,.07);display:flex;align-items:center;padding:0 16px;gap:6px}
 .nav-brand{display:flex;align-items:center;gap:8px;font-size:.95rem;font-weight:700;white-space:nowrap;background:linear-gradient(45deg,#ffd700,#ff8c00);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-right:8px}
-.nav-logo-img{height:30px;width:auto;border-radius:50%;flex-shrink:0}
-.nav-menu{display:flex;align-items:center;gap:4px;flex:1;min-width:0}
+
 .nav-item{padding:5px 10px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:5px;color:#ccc;font-size:.8rem;white-space:nowrap;transition:background .2s,border-color .2s;flex-shrink:0}
 .nav-item:hover{background:rgba(255,255,255,.16);border-color:rgba(255,200,0,.4);color:#fff}
-.nav-item.active{background:linear-gradient(45deg,#ff8c00,#ffd700);border-color:#ff8c00;color:#000;font-weight:600}
-.nav-spacer{flex:1}
-.nav-auth-sep{width:1px;height:22px;background:rgba(255,255,255,.15);margin:0 3px;flex-shrink:0}
+
 .nav-login{background:transparent!important;border-color:rgba(255,255,255,.22)!important;color:#bbb!important}
 .nav-login:hover{background:rgba(255,255,255,.1)!important;color:#fff!important;border-color:rgba(255,255,255,.4)!important}
 .nav-signup{background:linear-gradient(45deg,#ff8c00,#ffd700)!important;border-color:#ff8c00!important;color:#000!important;font-weight:700!important}
@@ -404,8 +420,59 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
   .section{padding:60px 16px}
 }
 </style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://parkersphysics.com/#org",
+      "name": "Parkers Physics",
+      "alternateName": "Parker Physics App",
+      "url": "https://parkersphysics.com/",
+      "logo": {
+        "@type": "ImageObject",
+        "url": "https://parkersphysics.com/ParkersPhysics_logo2.jpg"
+      }
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://parkersphysics.com/#website",
+      "name": "Parkers Physics",
+      "url": "https://parkersphysics.com/",
+      "publisher": {
+        "@id": "https://parkersphysics.com/#org"
+      },
+      "inLanguage": "en-US"
+    }
+  ]
+}
+</script>
 </head>
 <body>
+
+<!-- Landing-page analytics: identical bootstrap to signin/signup so the
+     funnel sees `landing_view` as the first stage in any user's
+     conversion path. CTAs below carry data-funnel-cta="…" attributes
+     and are picked up by a delegated click listener that fires
+     `landing_cta_click` with the cta name. -->
+<script type="module">
+    import './js/telemetry.js';
+    import './js/analytics.js';
+    import { funnel } from './js/auth-funnel.js';
+    funnel.step('landing_view');
+
+    // Delegated click capture for any element with data-funnel-cta.
+    // One listener for the whole page keeps perf/memory bounded
+    // regardless of how many CTAs marketing adds later.
+    document.addEventListener('click', (e) => {
+        const a = e.target?.closest?.('[data-funnel-cta]');
+        if (!a) return;
+        const cta = a.getAttribute('data-funnel-cta');
+        const dest = a.getAttribute('href') || null;
+        funnel.step('landing_cta_click', { cta, dest });
+    }, { capture: true, passive: true });
+</script>
 
 <script type="importmap">
 {"imports":{
@@ -422,18 +489,18 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
 <main id="main-content">
 
 <!-- ── HERO ───────────────────────────────────────────────────────────────── -->
-<section id="hero" aria-label="Hero — Parker Physics App">
+<section id="hero" aria-label="Hero — Parkers Physics App">
   <canvas id="hero-canvas" aria-hidden="true"></canvas>
   <div class="hero-content">
     <div class="hero-badge" role="status" aria-live="polite">Live NASA &amp; NOAA Data — Updated Every 60 Seconds</div>
-    <h1 class="hero-h1">Real-time astrophysics<br>at your fingertips</h1>
-    <p class="hero-sub">Explore the Sun's corona, Earth's magnetosphere, space weather events, and deep stellar systems — powered by live satellite feeds and physically accurate WebGL simulations. Built for researchers, educators, and anyone who wants to understand the cosmos that shapes our world.</p>
+    <h1 class="hero-h1">Space-Grade Data<br>in your palm</h1>
+    <p class="hero-sub">Hold the cosmos in your hand. Watch the Sun's corona breathe with live NOAA flux, feel a coronal mass ejection slam Earth's magnetosphere in real time, and drift through Wolf-Rayet winds and the gravitational dance of binary stars — every field line modeled from the equations NASA publishes, every photon rendered in your browser. For researchers who need precision, educators who need wonder, and anyone who has ever looked up and wanted the universe a little closer.</p>
     <div class="hero-cta" role="group" aria-label="Primary actions">
-      <a href="galactic-map.html" class="btn-matrix" id="hero-cta-primary" data-explore-tour-start aria-label="Start the guided tour: galaxy, real-time solar system, and sign-up"><span class="matrix-rain" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="matrix-label">Explore the App</span></a>
+      <a href="galactic-map.html" class="btn-matrix" id="hero-cta-primary" data-explore-tour-start data-funnel-cta="hero_explore" aria-label="Start the guided tour: galaxy, real-time solar system, and sign-up"><span class="matrix-rain" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="matrix-label">Explore the App</span></a>
       <a href="earth.html" class="btn-portal" data-explore-demo-start aria-label="Start the live data demo tour: Earth, Sun, Space Weather, Operations, sign-up"><span class="portal-depth" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="portal-label">Explore Live Demo <span aria-hidden="true">→</span></span></a>
     </div>
     <div class="hero-stats" role="list" aria-label="App statistics">
-      <div class="hero-stat" role="listitem"><span class="hero-stat-num">17+</span><span class="hero-stat-label">Simulations</span></div>
+      <div class="hero-stat" role="listitem"><span class="hero-stat-num">28+</span><span class="hero-stat-label">Simulations</span></div>
       <div class="hero-stat" role="listitem"><span class="hero-stat-num">60s</span><span class="hero-stat-label">Data Refresh</span></div>
       <div class="hero-stat" role="listitem"><span class="hero-stat-num">3D</span><span class="hero-stat-label">WebGL Engine</span></div>
       <div class="hero-stat" role="listitem"><span class="hero-stat-num">Free</span><span class="hero-stat-label">to Start</span></div>
@@ -445,18 +512,28 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
 <section id="simulations" class="section" aria-labelledby="sims-heading">
   <div class="section-inner">
     <div class="section-label fade-in">Simulations</div>
-    <h2 class="section-h2 fade-in" id="sims-heading">Five windows into the solar system</h2>
+    <h2 class="section-h2 fade-in" id="sims-heading">Six windows into the cosmos</h2>
     <p class="section-sub fade-in">Each simulation runs on real physics equations and pulls from live satellite feeds. What you see is what's actually happening — right now.</p>
     <div class="sim-grid">
 
       <article class="sim-card fade-in" style="--accent:#00c6ff;--thumb-bg:linear-gradient(135deg,#001830 0%,#003860 50%,#002040 100%)">
         <div class="sim-thumb" data-preview="earth" aria-hidden="true"><span class="sim-thumb-label">Live Preview</span></div>
         <div class="sim-card-header">
-          <h3 class="sim-card-title">Earth Magnetosphere</h3>
+          <h3 class="sim-card-title">Earth Weather</h3>
           <span class="sim-tier free" aria-label="Available on Free tier">Free</span>
         </div>
-        <p class="sim-card-desc">Real-time 3D bow shock, magnetopause, aurora curtains, and substorm dynamics. Driven by live Kp index, IMF Bz, and solar wind pressure from NOAA SWPC.</p>
-        <a href="earth.html" class="sim-link" aria-label="Explore Earth Magnetosphere simulation" style="--accent:#00c6ff">Explore simulation <span aria-hidden="true">→</span></a>
+        <p class="sim-card-desc">Predictive weather meets space weather on one 3D globe. Live NEXRAD precipitation, NWS severe alerts, hurricane tracks, magnetopause distance, aurora forecasts, and Kp / IMF&nbsp;Bz — with a forecast-skill matrix that shows where the models are confident and where the storms outrun them.</p>
+        <a href="earth.html" class="sim-link" aria-label="Explore Earth Weather simulation" style="--accent:#00c6ff">Explore simulation <span aria-hidden="true">→</span></a>
+      </article>
+
+      <article class="sim-card fade-in" style="--accent:#4ddc99;--thumb-bg:linear-gradient(135deg,#001a14 0%,#003c2e 50%,#001a14 100%)">
+        <div class="sim-thumb" data-preview="upper-atmosphere" aria-hidden="true"><span class="sim-thumb-label">Live Preview</span></div>
+        <div class="sim-card-header">
+          <h3 class="sim-card-title">Upper Atmosphere</h3>
+          <span class="sim-tier basic" aria-label="Available on Basic tier">PRO</span>
+        </div>
+        <p class="sim-card-desc">Thermosphere and exosphere from 80&nbsp;km to 2,000&nbsp;km. Density, temperature, and per-species composition under any F10.7 / Ap state — the drag profile that decides launch windows, satellite phasing, and reentry timing. Replays Starlink Feb&nbsp;2022, Gannon May&nbsp;2024, and AR3842 storm presets in seconds.</p>
+        <a href="upper-atmosphere.html" class="sim-link" aria-label="Explore Upper Atmosphere simulation" style="--accent:#4ddc99">Explore simulation <span aria-hidden="true">→</span></a>
       </article>
 
       <article class="sim-card fade-in" style="--accent:#ffb830;--thumb-bg:linear-gradient(135deg,#1a0800 0%,#3d1500 50%,#1a0800 100%)">
@@ -511,9 +588,9 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
       <div class="stat-item fade-in"><span class="stat-num">50,000</span><span class="stat-desc">GPU particles<br>per scene</span></div>
       <div class="stat-item fade-in"><span class="stat-num">60s</span><span class="stat-desc">Solar wind data<br>refresh rate</span></div>
       <div class="stat-item fade-in"><span class="stat-num">20s</span><span class="stat-desc">Storm mode<br>refresh rate</span></div>
-      <div class="stat-item fade-in"><span class="stat-num">17+</span><span class="stat-desc">Scientific<br>simulations</span></div>
-      <div class="stat-item fade-in"><span class="stat-num">11</span><span class="stat-desc">Live data<br>feeds</span></div>
-      <div class="stat-item fade-in"><span class="stat-num">6</span><span class="stat-desc">Physics models<br>implemented</span></div>
+      <div class="stat-item fade-in"><span class="stat-num">28+</span><span class="stat-desc">Scientific<br>simulations</span></div>
+      <div class="stat-item fade-in"><span class="stat-num">12</span><span class="stat-desc">Live data<br>feeds</span></div>
+      <div class="stat-item fade-in"><span class="stat-num">12+</span><span class="stat-desc">Physics models<br>implemented</span></div>
     </div>
   </div>
 </section>
@@ -538,7 +615,7 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
 <!-- ── FEATURES ───────────────────────────────────────────────────────────── -->
 <section id="features" class="section" aria-labelledby="features-heading">
   <div class="section-inner">
-    <div class="section-label fade-in">Why Parker Physics</div>
+    <div class="section-label fade-in">Why Parkers Physics</div>
     <h2 class="section-h2 fade-in" id="features-heading">Built on real physics. Run on real data.</h2>
     <p class="section-sub fade-in">Most space visualizations are pre-rendered or decorative. Ours compute the physics equations live and pull actual satellite telemetry — the same data NASA mission operators use.</p>
     <div class="features-grid">
@@ -579,7 +656,7 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
           <li>Basic space weather dashboard</li>
           <li>Community access</li>
         </ul>
-        <a href="signup.html?plan=free" class="price-btn free-btn" aria-label="Get started with the free plan">Get Started Free</a>
+        <a href="signup.html?plan=free" class="price-btn free-btn" data-funnel-cta="pricing_free" aria-label="Get started with the free plan">Get Started Free</a>
       </div>
 
       <div class="price-card popular fade-in">
@@ -588,13 +665,13 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
         <div class="price-amount">$10<span> / month</span></div>
         <p class="price-tagline">Full simulation access for researchers, students, and enthusiasts.</p>
         <ul class="price-features" aria-label="Basic tier features">
-          <li>All 17 simulations unlocked</li>
+          <li>All 28+ simulations unlocked</li>
           <li>Full 3D WebGL rendering</li>
           <li>Live NASA DONKI + NOAA feeds</li>
           <li>Real-time storm alerts</li>
           <li>Email support</li>
         </ul>
-        <a href="signup.html?plan=basic" class="price-btn basic-btn" aria-label="Start the Basic plan for $10 per month">Start Basic — $10/mo</a>
+        <a href="signup.html?plan=basic" class="price-btn basic-btn" data-funnel-cta="pricing_basic" aria-label="Start the Basic plan for $10 per month">Start Basic — $10/mo</a>
       </div>
 
       <div class="price-card fade-in">
@@ -608,7 +685,7 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
           <li>Solar wind prediction models</li>
           <li>Priority &amp; dedicated support</li>
         </ul>
-        <a href="signup.html?plan=advanced" class="price-btn adv-btn" aria-label="Start the Advanced plan for $100 per month">Start Advanced — $100/mo</a>
+        <a href="signup.html?plan=advanced" class="price-btn adv-btn" data-funnel-cta="pricing_advanced" aria-label="Start the Advanced plan for $100 per month">Start Advanced — $100/mo</a>
       </div>
 
     </div>
@@ -620,10 +697,10 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
 <section id="cta" aria-labelledby="cta-heading">
   <div class="section-inner">
     <h2 class="section-h2 fade-in" id="cta-heading">Start your journey through the cosmos</h2>
-    <p class="section-sub fade-in" style="margin:0 auto 36px">Join researchers, educators, and space enthusiasts already using Parker Physics to understand solar storms, track space weather, and explore the universe — for free.</p>
+    <p class="section-sub fade-in" style="margin:0 auto 36px">Join researchers, educators, and space enthusiasts already using Parkers Physics to understand solar storms, track space weather, and explore the universe — for free.</p>
     <div class="cta-actions fade-in">
-      <a href="signup.html" class="btn-primary" aria-label="Create your free Parker Physics account">Create Free Account</a>
-      <a href="pricing.html" class="btn-secondary" aria-label="View all pricing plans">View All Plans</a>
+      <a href="signup.html" class="btn-primary" data-funnel-cta="final_cta_signup" aria-label="Create your free Parker Physics account">Create Free Account</a>
+      <a href="pricing.html" class="btn-secondary" data-funnel-cta="final_cta_pricing" aria-label="View all pricing plans">View All Plans</a>
     </div>
     <p class="cta-note fade-in">No credit card required · Cancel anytime · Free tier always available</p>
   </div>
@@ -637,10 +714,10 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
     <div class="footer-grid">
 
       <div class="footer-brand">
-        <img src="ParkersPhysics_logo2.jpg" alt="Parker Physics logo" class="footer-brand-logo">
-        <p class="footer-brand-name">Parker Physics</p>
-        <p class="footer-tagline">Real-time astrophysics at your fingertips.</p>
-        <p class="footer-attribution">&copy; 2026 Parker Physics.<br>All rights reserved.</p>
+        <img src="ParkersPhysics_logo2.jpg" alt="Parkers Physics logo" class="footer-brand-logo">
+        <p class="footer-brand-name">Parkers Physics</p>
+        <p class="footer-tagline">Space-grade data in your palm.</p>
+        <p class="footer-attribution">&copy; 2026 Parkers Physics.<br>All rights reserved.</p>
       </div>
 
       <nav aria-label="Simulations">
@@ -659,8 +736,9 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
         <div class="footer-links">
           <a href="pricing.html">Pricing</a>
           <a href="dashboard.html">Dashboard</a>
-          <a href="signin.html">Sign In</a>
-          <a href="signup.html">Create Account</a>
+          <a href="signin.html" data-funnel-cta="footer_signin">Sign In</a>
+          <a href="signup.html" data-funnel-cta="footer_signup">Create Account</a>
+          <a href="feedback.html">Feedback &amp; Devlog</a>
         </div>
       </nav>
 

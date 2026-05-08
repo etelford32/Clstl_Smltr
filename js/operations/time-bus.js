@@ -21,15 +21,20 @@
  * past the +14d edge (per design: noticeable beats wrap-around).
  */
 
-// Asymmetric window: a short slice of the recent past for context, but
-// a long forward horizon — Operations is a predictions console, so the
-// scrub strip is heavily future-weighted (out to +14 days).
-const PAST_MS     = 1 * 24 * 60 * 60 * 1000;
+// Asymmetric window: −7 days of past observations / +14 days of forecast.
+// The past window is wide enough to cover the Earth-page replay slider's
+// −1w drag (it shares this bus); the long forward horizon stays because
+// Operations is a predictions-first console and the Earth page now also
+// scrubs forecast-grid frames forward.
+const PAST_MS     = 7 * 24 * 60 * 60 * 1000;
 const FUTURE_MS   = 14 * 24 * 60 * 60 * 1000;
 const RANGE_MS    = PAST_MS + FUTURE_MS;
 const EMIT_HZ     = 10;
 const EMIT_PERIOD = 1000 / EMIT_HZ;
-const SPEEDS      = Object.freeze([1, 10, 100, 600, 3600]);
+// 60× added so the Earth-page time-controls (which expose 1×/60×/600×/3600×)
+// can drive the bus without a custom mapping. 10× and 100× stay for the
+// Operations console's finer steppers.
+const SPEEDS      = Object.freeze([1, 10, 60, 100, 600, 3600]);
 
 const state = {
     mode:       'live',

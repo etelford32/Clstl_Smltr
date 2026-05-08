@@ -9,7 +9,21 @@
 <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>The Sun — G2V · Parker Physics App</title>
+<title>The Sun — G2V · Parkers Physics App</title>
+<link rel="canonical" href="https://parkersphysics.com/sun.html">
+<meta name="description" content="Real-time visualization of the Sun's photosphere, corona, magnetic field, and solar flares. Live SDO and GOES X-ray data with MHD-informed flow fields.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/sun.html">
+<meta property="og:title" content="The Sun (G2V) — Parkers Physics">
+<meta property="og:description" content="Real-time visualization of the Sun's photosphere, corona, magnetic field, and solar flares. Live SDO and GOES X-ray data with MHD-informed flow fields.">
+<meta property="og:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+<meta property="og:image:alt" content="Parkers Physics — real-time astrophysics simulations">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="The Sun (G2V) — Parkers Physics">
+<meta name="twitter:description" content="Real-time visualization of the Sun's photosphere, corona, magnetic field, and solar flares. Live SDO and GOES X-ray data with MHD-informed flow fields.">
+<meta name="twitter:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 html { height:auto; overflow-y:auto; }
@@ -31,9 +45,9 @@ nav {
     -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
     margin-right:2px;
 }
-.nav-logo-img { height:30px; width:auto; border-radius:50%; flex-shrink:0; }
+
 /* nav-menu stretches to fill all remaining space */
-.nav-menu { display:flex; align-items:center; gap:4px; flex:1; min-width:0; }
+
 .nav-item {
     padding:5px 10px; background:rgba(255,255,255,.07);
     border:1px solid rgba(255,255,255,.12); border-radius:5px;
@@ -41,8 +55,7 @@ nav {
     transition:background .2s, border-color .2s; flex-shrink:0;
 }
 .nav-item:hover { background:rgba(255,255,255,.16); border-color:rgba(255,200,0,.4); color:#fff; }
-.nav-item.active { background:linear-gradient(45deg,#ff8c00,#ffd700); border-color:#ff8c00; color:#000; font-weight:600; }
-.nav-drop { position:relative; flex-shrink:0; }
+
 .nav-drop-btn {
     padding:5px 10px; background:rgba(255,255,255,.07);
     border:1px solid rgba(255,255,255,.12); border-radius:5px;
@@ -50,7 +63,7 @@ nav {
     transition:background .2s, border-color .2s; white-space:nowrap;
 }
 .nav-drop-btn:hover { background:rgba(255,255,255,.16); color:#fff; }
-.nav-drop-btn.active { background:linear-gradient(45deg,#ff8c00,#ffd700); border-color:#ff8c00; color:#000; font-weight:600; }
+
 /* Rich dropdown panel */
 .nav-drop-menu {
     display:block; position:absolute; top:calc(100% + 5px); left:0;
@@ -71,29 +84,23 @@ nav {
     padding:7px 16px; text-decoration:none; transition:background .15s;
 }
 .nav-drop-link:hover { background:rgba(255,255,255,.07); }
-.nav-drop-link.active .ndl-title { color:#ffd700 !important; font-weight:600; }
+
 .nav-drop-link.active .ndl-icon  { opacity:1; }
 .ndl-icon  { font-size:1.05rem; width:20px; text-align:center; flex-shrink:0; opacity:.72; }
-.ndl-body  { display:flex; flex-direction:column; gap:1px; }
+
 .ndl-title { color:#c8c8c8; font-size:.82rem; font-weight:500; line-height:1.25; }
 .ndl-sub   { color:#484e60; font-size:.70rem; line-height:1.2; }
 .nav-drop-link:hover .ndl-title { color:#fff; }
 .nav-drop-link:hover .ndl-sub   { color:#7a8090; }
 /* Section label inside dropdown */
-.nav-drop-section {
-    padding:7px 16px 3px; font-size:.63rem; font-weight:700;
-    letter-spacing:.09em; color:#3d4255; text-transform:uppercase;
-    border-top:1px solid rgba(255,255,255,.06); margin-top:3px;
-}
-.nav-drop-section:first-child { border-top:none; margin-top:0; padding-top:4px; }
+
 /* Spacer that pushes auth buttons to the far right */
-.nav-spacer { flex:1; }
+
 /* Auth */
-.nav-auth-sep { width:1px; height:22px; background:rgba(255,255,255,.15); margin:0 3px; flex-shrink:0; }
-.nav-login  { background:transparent !important; border-color:rgba(255,255,255,.22) !important; color:#bbb !important; }
+
 .nav-login:hover  { background:rgba(255,255,255,.1) !important; color:#fff !important; border-color:rgba(255,255,255,.4) !important; }
 .nav-signup { background:linear-gradient(45deg,#ff8c00,#ffd700) !important; border-color:#ff8c00 !important; color:#000 !important; font-weight:700 !important; letter-spacing:.01em; }
-.nav-signup:hover { filter:brightness(1.12) !important; }
+
 /* Burger */
 .nav-burger {
     display:none; margin-left:auto;
@@ -712,8 +719,30 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
 }
 #scroll-hint svg { animation: bounce-arrow 1.6s ease-in-out infinite; }
 </style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "@id": "https://parkersphysics.com/sun.html#app",
+  "name": "The Sun (G2V)",
+  "description": "Real-time visualization of the Sun's photosphere, corona, magnetic field, and solar flares. Live SDO and GOES X-ray data with MHD-informed flow fields.",
+  "url": "https://parkersphysics.com/sun.html",
+  "image": "https://parkersphysics.com/ParkersPhysics_logo2.jpg",
+  "applicationCategory": "EducationalApplication",
+  "applicationSubCategory": "Solar physics simulation",
+  "operatingSystem": "Web Browser",
+  "browserRequirements": "Requires JavaScript and WebGL",
+  "isAccessibleForFree": true,
+  "publisher": {
+    "@id": "https://parkersphysics.com/#org"
+  },
+  "inLanguage": "en-US"
+}
+</script>
 </head>
 <body>
+<h1 data-seo-h1 style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0">The Sun — G2V Star Simulator</h1>
+
 
 <script type="importmap">
 {
@@ -723,8 +752,11 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
     }
 }
 </script>
-
-<!-- ─── Nav (shared via nav.js) ──────────────────────────────── -->
+<!-- perf-hints:start -->
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" crossorigin>
+<!-- perf-hints:end --><!-- ─── Nav (shared via nav.js) ──────────────────────────────── -->
 <link rel="stylesheet" href="js/nav-styles.css">
 <nav></nav>
 <script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("sun");</script>
@@ -777,42 +809,42 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
                 <div class="sdo-strip" id="sdo-strip">
                     <div class="sdo-img-btn" data-label="AIA 304 Å · Chromosphere · 50 000 K"
                          onclick="sdoOpen('https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0304.jpg','AIA 304 Å · Chromosphere · ~50 000 K')">
-                        <img id="sdo-304" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0304.jpg" alt="AIA 304">
+                        <img id="sdo-304" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0304.jpg" alt="AIA 304" loading="lazy" decoding="async">
                         <span>AIA 304 Å<br>Chromosphere</span>
                     </div>
                     <div class="sdo-img-btn" data-label="AIA 171 Å · Coronal loops · 600 000 K"
                          onclick="sdoOpen('https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0171.jpg','AIA 171 Å · Coronal loops · ~600 000 K')">
-                        <img id="sdo-171" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0171.jpg" alt="AIA 171">
+                        <img id="sdo-171" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0171.jpg" alt="AIA 171" loading="lazy" decoding="async">
                         <span>AIA 171 Å<br>Coronal loops</span>
                     </div>
                     <div class="sdo-img-btn" data-label="AIA 193 Å · Active corona · 1.5 MK"
                          onclick="sdoOpen('https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0193.jpg','AIA 193 Å · Active corona · ~1.5 MK')">
-                        <img id="sdo-193" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0193.jpg" alt="AIA 193">
+                        <img id="sdo-193" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0193.jpg" alt="AIA 193" loading="lazy" decoding="async">
                         <span>AIA 193 Å<br>Active corona</span>
                     </div>
                     <div class="sdo-img-btn" data-label="AIA 211 Å · Active regions · 2 MK"
                          onclick="sdoOpen('https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0211.jpg','AIA 211 Å · Active regions · ~2 MK')">
-                        <img id="sdo-211" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0211.jpg" alt="AIA 211">
+                        <img id="sdo-211" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0211.jpg" alt="AIA 211" loading="lazy" decoding="async">
                         <span>AIA 211 Å<br>Active regions</span>
                     </div>
                     <div class="sdo-img-btn" data-label="AIA 131 Å · Flare plasma · 10 MK"
                          onclick="sdoOpen('https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0131.jpg','AIA 131 Å · Flare plasma · ~10 MK')">
-                        <img id="sdo-131" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0131.jpg" alt="AIA 131">
+                        <img id="sdo-131" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0131.jpg" alt="AIA 131" loading="lazy" decoding="async">
                         <span>AIA 131 Å<br>Flare plasma</span>
                     </div>
                     <div class="sdo-img-btn" data-label="HMI Magnetogram · B-field"
                          onclick="sdoOpen('https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_HMIB.jpg','HMI Magnetogram · Line-of-sight B-field')">
-                        <img id="sdo-hmib" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_HMIB.jpg" alt="HMI Mag">
+                        <img id="sdo-hmib" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_HMIB.jpg" alt="HMI Mag" loading="lazy" decoding="async">
                         <span>HMI Mag<br>B-field LOS</span>
                     </div>
                     <div class="sdo-img-btn" data-label="HMI Intensitygram · Sunspots"
                          onclick="sdoOpen('https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_HMIIC.jpg','HMI Intensitygram · Photosphere / sunspots')">
-                        <img id="sdo-hmic" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_HMIIC.jpg" alt="HMI IC">
+                        <img id="sdo-hmic" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_HMIIC.jpg" alt="HMI IC" loading="lazy" decoding="async">
                         <span>HMI IC<br>Photosphere</span>
                     </div>
                     <div class="sdo-img-btn" data-label="SOHO LASCO C2 · Inner corona 2–6 R☉"
                          onclick="sdoOpen('https://soho.nascom.nasa.gov/data/realtime/c2/1024/latest.jpg','SOHO LASCO C2 · Inner corona 2–6 R☉')">
-                        <img id="sdo-c2" src="https://soho.nascom.nasa.gov/data/realtime/c2/512/latest.jpg" alt="LASCO C2">
+                        <img id="sdo-c2" src="https://soho.nascom.nasa.gov/data/realtime/c2/512/latest.jpg" alt="LASCO C2" loading="lazy" decoding="async">
                         <span>LASCO C2<br>2–6 R☉</span>
                     </div>
                 </div>
@@ -821,7 +853,7 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
 
         <!-- SDO Full-image overlay -->
         <div id="sdo-overlay" onclick="this.classList.remove('show')">
-            <img id="sdo-ovr-img" src="" alt="">
+            <img id="sdo-ovr-img" src="" alt="NASA SDO solar imagery overlay">
             <span id="sdo-ovr-lbl"></span>
         </div>
 
@@ -1029,6 +1061,23 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
                         <label style="font-size:10px;color:#777">B-line density</label>
                         <input type="range" id="sl-bline-density" min="10" max="100" step="5" value="50">
                         <span class="vdisp" id="disp-bline-density" style="font-size:10px">50%</span>
+                    </div>
+                    <!-- Phase 2.3 — manual EP trigger. Hidden unless ?debug=prominence. -->
+                    <div class="ctrl" id="erupt-row" style="margin-top:6px;padding-left:22px;display:none">
+                        <button id="btn-erupt-nearest" class="cv-btn"
+                                style="font-size:11px;padding:4px 10px;background:#3a1a10;border-color:#ff5522;color:#ffaa66">
+                            ⚡ Erupt nearest filament
+                        </button>
+                        <span id="erupt-status" style="font-size:10px;color:#888;margin-left:6px"></span>
+                    </div>
+                    <!-- Phase 4.5 — two-pass bloom toggles. Each layer is independent. -->
+                    <div class="toggle-row" style="margin-top:6px">
+                        <input type="checkbox" id="tog-bloom-ambient" checked>
+                        <label for="tog-bloom-ambient">Ambient bloom (wide, gentle)</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-bloom-flare" checked>
+                        <label for="tog-bloom-flare">Flare bloom (tight, on-demand)</label>
                     </div>
                 </div>
             </div>
@@ -1771,6 +1820,79 @@ window.addEventListener('soho-update', e => {
 });
 
 // UNIFORMS
+// ─── Phase 4.6: pre-baked noise atlas ────────────────────────────────────────
+// Replaces per-fragment fbm() computation in the photosphere shader with a
+// triplanar-blended 2D texture lookup. Generated once at boot using
+// 4-octave value-noise fbm; tile-seamless via wrapping seed hash so the
+// shader can RepeatWrapping and the texture has no visible joins.
+//
+// Storage: 256² × RGBA8 (256 KB, plenty of dynamic range for noise).
+// Cost saved per fragment: ~13 procedural noise samples → 3 texture
+// reads. ~5× shader speedup in the photosphere fragment.
+function buildNoiseAtlas(size) {
+    // Tile-seamless integer-grid hash. The (x mod size, y mod size) wrap
+    // means seed values repeat with period `size`; combined with a base
+    // grid frequency that divides `size` evenly, the smoothed noise tiles
+    // perfectly.
+    const seed = (x, y) => {
+        const xi = ((x % size) + size) % size;
+        const yi = ((y % size) + size) % size;
+        let h = ((xi * 374761393) ^ (yi * 668265263)) | 0;
+        h = (h ^ (h >>> 13)) * 1274126177;
+        h = (h ^ (h >>> 16)) >>> 0;
+        return h / 0xFFFFFFFF;
+    };
+    const valueNoise = (x, y) => {
+        const xi = Math.floor(x), yi = Math.floor(y);
+        const xf = x - xi, yf = y - yi;
+        const fx = xf * xf * (3 - 2 * xf);
+        const fy = yf * yf * (3 - 2 * yf);
+        const a = seed(xi,     yi);
+        const b = seed(xi + 1, yi);
+        const c = seed(xi,     yi + 1);
+        const d = seed(xi + 1, yi + 1);
+        return a * (1 - fx) * (1 - fy) + b * fx * (1 - fy)
+             + c * (1 - fx) * fy       + d * fx * fy;
+    };
+    const fbm = (x, y) => {
+        let v = 0, amp = 0.5, freq = 1;
+        for (let i = 0; i < 4; i++) {
+            v += amp * valueNoise(x * freq, y * freq);
+            freq *= 2.0; amp *= 0.5;
+        }
+        return v;
+    };
+
+    const baseFreq = 8;            // 8 cells across the texture (tiles cleanly)
+    const raw = new Float32Array(size * size);
+    let lo =  Infinity, hi = -Infinity;
+    for (let py = 0; py < size; py++) {
+        for (let px = 0; px < size; px++) {
+            const v = fbm(px / size * baseFreq, py / size * baseFreq);
+            raw[py * size + px] = v;
+            if (v < lo) lo = v;
+            if (v > hi) hi = v;
+        }
+    }
+    const range = (hi - lo) || 1;
+
+    const data = new Uint8Array(size * size * 4);
+    for (let i = 0; i < raw.length; i++) {
+        const v = Math.round(((raw[i] - lo) / range) * 255);
+        const o = i * 4;
+        data[o] = v; data[o + 1] = v; data[o + 2] = v; data[o + 3] = 255;
+    }
+
+    const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat, THREE.UnsignedByteType);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    tex.generateMipmaps = false;
+    tex.needsUpdate = true;
+    return tex;
+}
+
 const uniforms = {
     u_time:              { value: 0.0 },
     u_teff:              { value: 5778.0 },
@@ -1795,6 +1917,28 @@ const uniforms = {
     u_flare_lat:         { value: 0.0  },  // radians
     u_flare_lon:         { value: 0.0  },  // radians
     u_flare_t:           { value: 999.0 }, // simulation-time units (dt=0.01/frame)
+
+    // Phase 3.1 — PIL-anchored two-ribbon geometry. See js/flare-ribbons.js.
+    // The DataTexture is attached lazily on the first ribbon update so
+    // sun.html doesn't depend on the WASM atlas being available at boot.
+    t_flare_ribbons:        { value: null },
+    u_flare_ribbons_active: { value: 0.0 },
+    u_flare_ribbons_count:  { value: 0   },
+
+    // Phase 4.4 — per-AR sunspot anchoring. Each slot is a vec4: xyz = unit-
+    // sphere position rotated to the current Snodgrass-differential-rotation
+    // frame, w = signed normalised area (positive = simple, negative =
+    // complex β-γ-δ). Updated per-frame in animate() from liveRegions so
+    // umbra/penumbra/faculae render at the actual AR locations instead of
+    // wherever the old noise-blot pattern triggered.
+    u_arSpots:              { value: Array.from({length: 8}, () => new THREE.Vector4(0, 0, 0, 0)) },
+    u_arSpotCount:          { value: 0 },
+
+    // Phase 4.6 — pre-baked 4-octave fbm noise atlas. Photosphere shader
+    // samples this once per axis (triplanar) instead of computing fbm
+    // procedurally per fragment — collapses ~13 noise samples per pixel
+    // to 3 texture lookups. See buildNoiseAtlas() defined just above.
+    u_noiseAtlas:           { value: buildNoiseAtlas(256) },
     // ── Live Kp — drives corona storm glow and bloom strength ──
     u_kp_norm:           { value: 0.22 },  // Kp/9 [0-1]
     // ── Flare white-light intensity — brief whole-disk flash at flare onset ──
@@ -1840,7 +1984,7 @@ const canvasWrap = document.getElementById('canvas-wrap');
 canvasWrap.appendChild(renderer.domElement);
 
 // ── Post-processing pipeline: Bloom + Radial diffusion ────────────────────────
-let composer, bloomPass;
+let composer, bloomAmbient, bloomFlare, radialDiffusePass;
 {
     const W = canvasWrap.clientWidth  || 1280;
     const H = canvasWrap.clientHeight || 720;
@@ -1848,12 +1992,47 @@ let composer, bloomPass;
     composer  = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
 
-    // UnrealBloomPass — minimal bloom, preserving analytical detail.
-    // threshold 0.95 — only brightest flare peaks trigger bloom.
-    // strength 0.15 — subtle glow; surface and coronal structure stay crisp.
-    // radius 0.25 — very tight kernel to avoid washing out field geometry.
-    bloomPass = new UnrealBloomPass(new THREE.Vector2(W, H), 0.15, 0.25, 0.95);
-    composer.addPass(bloomPass);
+    // Phase 4.5 — two-pass bloom. Each pass is independently toggleable
+    // and tuned for one job, so the pipeline isn't a single-compromise
+    // setting that has to serve both calm-corona ambience and impulsive-
+    // flare punch.
+    //
+    //   AMBIENT bloom — wide, gentle, low threshold, always-on.
+    //     Catches the bright limb + coronal streamer structure and gives
+    //     the disk its characteristic glowing-disk feel even at solar
+    //     minimum. Wide radius (0.85) softens HDR edges without making
+    //     individual features blob together.
+    //
+    //   FLARE bloom — tight, high threshold, strength gated by
+    //     u_flare_intensity. Only kicks in for blown-out flare-flash
+    //     pixels; produces the signature impulsive punch without
+    //     blooming the calm-disk pixels around it. Tight radius (0.20)
+    //     keeps the punch localised to the kernel.
+    //
+    // URL flag ?bloom=ambient|flare|both|off (default both) sets initial
+    // visibility; the two checkboxes in the rendering panel override.
+    bloomAmbient = new UnrealBloomPass(new THREE.Vector2(W, H), 0.18, 0.85, 0.55);
+    bloomFlare   = new UnrealBloomPass(new THREE.Vector2(W, H), 0.00, 0.20, 1.10);
+    composer.addPass(bloomAmbient);
+    composer.addPass(bloomFlare);
+
+    {
+        const initBloom = (new URLSearchParams(location.search).get('bloom') || 'both').toLowerCase();
+        const wantAmb = initBloom === 'both' || initBloom === 'ambient';
+        const wantFlr = initBloom === 'both' || initBloom === 'flare';
+        bloomAmbient.enabled = wantAmb;
+        bloomFlare.enabled   = wantFlr;
+        const togA = document.getElementById('tog-bloom-ambient');
+        const togF = document.getElementById('tog-bloom-flare');
+        if (togA) {
+            togA.checked = wantAmb;
+            togA.addEventListener('change', e => { bloomAmbient.enabled = e.target.checked; });
+        }
+        if (togF) {
+            togF.checked = wantFlr;
+            togF.addEventListener('change', e => { bloomFlare.enabled = e.target.checked; });
+        }
+    }
 
     // ── Vectorised limb-corona scatter ───────────────────────────────────────
     // Simulates K-corona Thomson scattering: photons from the bright solar limb
@@ -1867,9 +2046,15 @@ let composer, bloomPass;
     // spread — matching the streamer/plume morphology in real coronagraph images.
     const diffuseShader = {
         uniforms: {
-            tDiffuse:   { value: null },
-            resolution: { value: new THREE.Vector2(W, H) },
-            center:     { value: new THREE.Vector2(0.5, 0.5) },
+            tDiffuse:        { value: null },
+            resolution:      { value: new THREE.Vector2(W, H) },
+            center:          { value: new THREE.Vector2(0.5, 0.5) },
+            // Phase 4.1 — when a flare flash makes the limb extremely bright,
+            // the radial gather × 0.07 still produces a giant horizontal
+            // "death laser". This uniform dampens the multiplier and clamps
+            // the gathered HDR magnitude so flares don't blow out the
+            // postprocess pipeline.
+            uFlareIntensity: { value: 0.0 },
         },
         vertexShader: /* glsl */`
             varying vec2 vUv;
@@ -1880,6 +2065,7 @@ let composer, bloomPass;
             uniform sampler2D tDiffuse;
             uniform vec2      resolution;
             uniform vec2      center;
+            uniform float     uFlareIntensity;
             varying vec2      vUv;
 
             void main() {
@@ -1917,14 +2103,25 @@ let composer, bloomPass;
                 }
                 accum /= wSum;
 
+                // Phase 4.1 — clamp the per-channel HDR gather so an over-
+                // bright limb (e.g. flare flash) can't drive the radial-ray
+                // contribution to blow-out levels. 1.6 is well above any
+                // calm-corona limb but capped enough to kill the death-laser.
+                vec3 accumClamped = min(accum.rgb, vec3(1.6));
+
+                // Dampen the gather strength during flares: the flash
+                // already saturates the photosphere shader; the radial
+                // pass adding more on top is what produced the giant
+                // horizontal rays in the screenshot. 0.07 → 0.018 at peak.
+                float strength = mix(0.07, 0.018, clamp(uFlareIntensity, 0.0, 1.0));
+
                 // Add the gathered limb light to the original pixel.
-                // Scale by mask so the effect fades smoothly at both edges.
-                // Reduced intensity for analytical clarity — structure > glow.
-                gl_FragColor = orig + accum * mask * 0.07;
+                gl_FragColor = vec4(orig.rgb + accumClamped * mask * strength, orig.a);
             }
         `,
     };
-    composer.addPass(new ShaderPass(diffuseShader));
+    radialDiffusePass = new ShaderPass(diffuseShader);
+    composer.addPass(radialDiffusePass);
 
     // ── Space occlusion — corona-to-space shadow boundary ────────────────────
     // Final pass: smoothly darkens pixels beyond the bright corona annulus,
@@ -2102,6 +2299,45 @@ const sunFS = /* glsl */`
     uniform float u_flare_lat;       // heliographic latitude of most recent M/X flare (radians)
     uniform float u_flare_lon;       // heliographic longitude (radians)
     uniform float u_flare_t;         // simulation-time elapsed since flare onset (0 = just fired)
+
+    // Phase 4.4 — per-AR sunspot slots. xyz = rotated unit-sphere AR
+    // position; w = signed area (positive=simple, negative=complex).
+    uniform vec4 u_arSpots[8];
+    uniform int  u_arSpotCount;
+
+    // Phase 3.1 — PIL-anchored two-ribbon geometry. When the atlas is
+    // available and a flaring AR has PIL bundles, we feed the actual
+    // footpoint polylines via this texture (32 × 2 RGBA float; row 0 =
+    // ribbon A, row 1 = ribbon B; .xyz = unit photosphere position;
+    // .w = 1 valid / 0 padding). Otherwise we fall back to the legacy
+    // straight east-west ribbons.
+    uniform sampler2D t_flare_ribbons;
+    uniform float u_flare_ribbons_active;   // 0 = legacy fallback, 1 = use texture
+    uniform float u_flare_ribbons_count;    // valid points per ribbon (≤32)
+
+    // Minimum great-circle-ish distance from a unit-sphere fragment position
+    // to the polyline encoded in row 'rowI' of t_flare_ribbons. Each
+    // segment treated as a 3D chord; cheap and visually indistinguishable
+    // from a true great-circle arc at the small angular widths we use.
+    float ribbonDist(vec3 p, float rowI) {
+        float minD = 1e6;
+        int N = int(u_flare_ribbons_count);
+        float v = (rowI + 0.5) / 2.0;
+        for (int i = 0; i < 31; i++) {
+            if (i >= N - 1) break;
+            float ua = (float(i)     + 0.5) / 32.0;
+            float ub = (float(i + 1) + 0.5) / 32.0;
+            vec4 pa = texture2D(t_flare_ribbons, vec2(ua, v));
+            vec4 pb = texture2D(t_flare_ribbons, vec2(ub, v));
+            if (pa.w < 0.5 || pb.w < 0.5) break;
+            vec3 ab = pb.xyz - pa.xyz;
+            float L2 = max(dot(ab, ab), 1e-9);
+            float t  = clamp(dot(p - pa.xyz, ab) / L2, 0.0, 1.0);
+            vec3 closest = pa.xyz + t * ab;
+            minD = min(minD, length(p - closest));
+        }
+        return minD;
+    }
     uniform float u_flare_intensity; // 0-1 white-light flash intensity at flare onset
     varying vec3  vNormal;
     varying vec3  vPosition;
@@ -2139,6 +2375,26 @@ const sunFS = /* glsl */`
             v += a * vnoise(p); p = p * 2.17 + vec3(31.41, 17.35, 53.17); a *= 0.52;
         }
         return v;
+    }
+
+    // ── Phase 4.6: triplanar texture-based fbm ─────────────────────────────────
+    // Photosphere fragments now sample a pre-baked 4-octave fbm noise atlas
+    // (256² RGBA8, RepeatWrapping) via three orthogonal 2D projections
+    // weighted by |normalized(p)|, instead of computing fbm procedurally.
+    // Replaces ~13 noise samples per fragment with 3 texture reads.
+    uniform sampler2D u_noiseAtlas;
+    float fbmTex(vec3 p) {
+        // Atlas tiles cleanly thanks to RepeatWrapping; the 0.16 scale picks
+        // a feature density that roughly matches the old fbm output range
+        // for the input scales we use (vPosition * 5.5 .. * 30).
+        vec2 uvX = p.yz * 0.16;
+        vec2 uvY = p.xz * 0.16;
+        vec2 uvZ = p.xy * 0.16;
+        vec3 ap = abs(normalize(p + vec3(1e-6)));
+        ap     /= max(ap.x + ap.y + ap.z, 1e-6);
+        return ap.x * texture2D(u_noiseAtlas, uvX).r
+             + ap.y * texture2D(u_noiseAtlas, uvY).r
+             + ap.z * texture2D(u_noiseAtlas, uvZ).r;
     }
 
     // ── Voronoi cellular noise — proper granulation topology ──────────────────
@@ -2183,9 +2439,14 @@ const sunFS = /* glsl */`
         vec3  vDir = normalize(vViewDir);
         float mu   = max(dot(nrm, vDir), 0.0);
 
-        // Spherical coordinates
+        // Spherical coordinates. Convention: y is the solar rotation axis,
+        // +z points toward the sub-Earth observer. lon = atan(x, z) so that
+        // a fragment at heliographic (lat, lon) — built via vec3(cos(lat)
+        // sin(lon), sin(lat), cos(lat) cos(lon)) — gives back the same lon.
+        // Comparisons against u_flare_lon (which is set by JS as
+        // heliographic radians) are then correct.
         float lat = asin(clamp(vPosition.y, -1.0, 1.0));
-        float lon = atan(vPosition.z, vPosition.x);
+        float lon = atan(vPosition.x, vPosition.z);
 
         // Differential rotation (Snodgrass 1990): Ω(lat) = A + B sin²(lat) + C sin⁴(lat)
         float sinLat2 = sin(lat) * sin(lat);
@@ -2199,21 +2460,26 @@ const sunFS = /* glsl */`
         float superGran = smoothstep(0.0, 0.45, sgCell.x) * 0.08;
 
         // ── Granulation (~1 000 km cells) ─────────────────────────────────────
-        // Domain-warp: slow turbulent deformation gives a "boiling" look
+        // Domain-warp: slow turbulent deformation gives a "boiling" look.
+        // Phase 4.6: domain warp + fine turbulence both use the pre-baked
+        // noise atlas via fbmTex (triplanar 2D lookups). Same visual feel,
+        // ~5× cheaper per fragment than the procedural fbm path.
         vec3 dwarp = vec3(
-            fbm(vPosition * 5.5 + vec3(u_time * 0.0032), 3),
-            fbm(vPosition * 5.5 + vec3(u_time * 0.0032 + 1.7), 3),
-            fbm(vPosition * 5.5 + vec3(u_time * 0.0032 + 3.4), 3)
+            fbmTex(vPosition * 5.5 + vec3(u_time * 0.0032)),
+            fbmTex(vPosition * 5.5 + vec3(u_time * 0.0032 + 1.7)),
+            fbmTex(vPosition * 5.5 + vec3(u_time * 0.0032 + 3.4))
         ) * 0.18;
         vec3 gPos   = vPosition * 10.5 + dwarp + vec3(u_time * 0.0065 * u_rot);
         vec2 gCell  = voronoi(gPos);
-        // Use d2-d1 for cell-boundary detection: dark narrow lanes where d2≈d1,
-        // bright broad interiors where d2>>d1 — matches SDO/HMI granulation morphology.
-        float laneD  = smoothstep(0.04, 0.28, gCell.y - gCell.x);  // 0=dark lane, 1=bright interior
-        float granLight = mix(0.40, 1.0, laneD);                    // lane contrast: 40% → 100% (deeper lanes)
+        // Crisper cell structure: narrower lane-transition for sharp dark
+        // edges between bright cell interiors. Adds a subtle radial-bulge
+        // brightness so each cell reads as 3D rather than flat.
+        float laneD     = smoothstep(0.02, 0.16, gCell.y - gCell.x);   // 0=lane, 1=interior
+        float cellBulge = 1.0 - 0.18 * smoothstep(0.0, 0.30, gCell.x); // bright centre, slightly dim edge
+        float granLight = mix(0.32, 1.04, laneD) * cellBulge;
 
         // ── Fine sub-granulation turbulence ─────────────────────────────────
-        float fineTurb = fbm(vPosition * 30.0 + vec3(u_time * 0.012), 4) * 0.08;
+        float fineTurb = fbmTex(vPosition * 30.0 + vec3(u_time * 0.012)) * 0.08;
 
         // ── Magnetic bright points at intergranular lanes ─────────────────────
         // Tiny intense specks where kG flux tubes emerge between granules
@@ -2237,29 +2503,77 @@ const sunFS = /* glsl */`
         }
         microflare = min(microflare, 1.0) * 0.65;
 
-        // ── Active latitude belt ───────────────────────────────────────────────
-        float spotBelt = smoothstep(0.12, 0.18, abs(lat)) * smoothstep(0.64, 0.52, abs(lat));
+        // ── Per-AR sunspot rendering (Phase 4.4) ──────────────────────────────
+        // Replaces the previous noise-blot spotNoise/penNoise/facNoise/flareNoise
+        // pattern with proper umbra + radial-fibril penumbra + facular ring at
+        // exact heliographic positions from liveRegions. Each slot is updated
+        // per-frame on the JS side with Snodgrass differential rotation so
+        // spots co-rotate with the granulation underneath.
+        float umbra       = 0.0;
+        float penumbra    = 0.0;
+        float facular     = 0.0;
+        float flareActive = 0.0;
+        float fibrils     = 0.0;
 
-        // ── Facular brightening (bright network near spots, limb-visible) ──────
-        // Facula appear bright near limb (μ<0.5) due to hot walls of flux tubes
-        float facNoise = fbm(vec3(rotLon * 2.2, lat * 5.5, u_time * 0.0012), 4);
-        float facular  = smoothstep(0.58, 0.80, facNoise) * spotBelt
-                        * (1.0 - mu) * (1.0 - mu) * u_activity * 0.60;
+        vec3 fragUnit = normalize(vPosition);
 
-        // ── Sunspot umbra + penumbra ───────────────────────────────────────────
-        float spotNoise   = fbm(vec3(rotLon * 1.6, lat * 4.2, u_time * 0.0004), 4);
-        float spotThresh  = 0.78 - u_activity * 0.32;
-        float umbra       = smoothstep(spotThresh, spotThresh - 0.13, spotNoise) * spotBelt;
-        float penThresh   = spotThresh + 0.17;
-        float penNoise    = fbm(vec3(rotLon * 1.6, lat * 4.2, u_time * 0.0004 + 4.7), 4);
-        float penumbra    = smoothstep(penThresh, penThresh - 0.09, penNoise) * spotBelt * (1.0 - umbra);
+        for (int k = 0; k < 8; k++) {
+            if (k >= u_arSpotCount) break;
+            vec3  arSP   = normalize(u_arSpots[k].xyz);
+            float arWS   = u_arSpots[k].w;
+            float areaN  = abs(arWS);
+            if (areaN < 0.05) continue;
+            float complexFlag = arWS < 0.0 ? 1.0 : 0.0;
 
-        // Penumbra fibrils — radial striation texture in the grey ring
-        float fibrils = vnoise(vec3(rotLon * 12.0, lat * 12.0, u_time * 0.006)) * 0.18;
+            float cosAng = dot(fragUnit, arSP);
+            if (cosAng < 0.985) continue;          // skip if > ~10° away
+            float ang = acos(clamp(cosAng, -1.0, 1.0));
 
-        // ── Active-region flare brightening ───────────────────────────────────
-        float flareNoise  = vnoise(vec3(rotLon * 4.0, lat * 7.5, u_time * 0.12));
-        float flareActive = smoothstep(0.82, 0.95, flareNoise) * spotBelt * u_activity;
+            // Spot radii scale with normalised area (NOAA millionths/800).
+            // r_umbra ~ 5–25 mrad; r_pen 1.7–2.1× umbra; r_fac 1.3× pen.
+            float r_umbra = 0.005 + areaN * 0.020;
+            float r_pen   = r_umbra * mix(1.7, 2.1, complexFlag);
+            float r_fac   = r_pen * 1.3;
+
+            // Umbra: sharp dark core (smoothstep edge for AA).
+            float u_k = smoothstep(r_umbra, r_umbra * 0.60, ang);
+
+            // Penumbra: gradient ring around umbra.
+            float p_k = smoothstep(r_pen, r_umbra * 1.05, ang) * (1.0 - u_k);
+
+            // Radial fibril structure: project fragment onto the AR's tangent
+            // plane and compute azimuth, then modulate penumbra brightness at
+            // ~28 fibrils per turn (a second harmonic at 13× adds richness).
+            vec3 east  = normalize(vec3(-arSP.z, 0.0, arSP.x) + vec3(1e-6));
+            vec3 north = normalize(cross(arSP, east));
+            vec3 d  = fragUnit - arSP * cosAng;
+            float dlen = length(d);
+            if (dlen > 1e-5) {
+                d /= dlen;
+                float az = atan(dot(d, north), dot(d, east));
+                float fib = 0.5 + 0.5 * sin(az * 28.0);
+                fib       = mix(fib, 0.5 + 0.5 * sin(az * 13.0), 0.35);
+                p_k *= mix(0.65, 1.20, fib);                 // ±35% intensity
+                fibrils  = max(fibrils, fib * 0.18);
+            }
+
+            // Facular ring — wider zone outside the penumbra, visible mainly
+            // near the limb (Wilson depression of bright walls). Suppressed
+            // inside the spot itself.
+            float f_k = smoothstep(r_fac, r_pen, ang) * (1.0 - p_k) * (1.0 - u_k);
+            f_k *= (1.0 - mu) * (1.0 - mu);
+
+            umbra    = max(umbra, u_k);
+            penumbra = max(penumbra, p_k);
+            facular  = max(facular, f_k * 0.55);
+
+            // Active-region UV/EUV brightening — driven by global flare flash,
+            // localised to the AR. Replaces the random-noise flareActive.
+            if (u_flare_intensity > 0.05) {
+                float gate = exp(-ang * ang / 0.0008) * u_flare_intensity;
+                flareActive = max(flareActive, gate * areaN);
+            }
+        }
 
         // ── 5-term limb darkening law (Neckel & Labs 1994, G-star approx.) ────
         // I(μ)/I(1) = Σ aₙ μⁿ  (n=0..5), valid 0 < μ ≤ 1
@@ -2334,17 +2648,34 @@ const sunFS = /* glsl */`
             col += vec3(2.6, 2.1, 1.2) * uvKern * kernBoost * u_showFlares;
 
             // ── Hα ribbon pair (AIA 304 Å proxy) ────────────────────────────
-            // Two parallel arcs straddling the polarity-inversion line (PIL).
-            // PIL is approximately E-W so ribbons are offset in the N/S (lat) direction.
-            // Both ribbons diverge away from the PIL as reconnection proceeds.
-            float dlat   = lat - u_flare_lat;                          // N-S offset from flare
-            float dlon_c = (lon - u_flare_lon) * cos(u_flare_lat);     // great-circle-corrected E-W
-            // E-W envelope: ribbons are elongated along the PIL direction
-            float lonEnv = exp(-dlon_c * dlon_c / (0.10 + u_flare_t * 4.0e-5));
-            float sep    = 0.020 + u_flare_t * 2.5e-5;    // separation grows with reconnection
-            float rWid   = 0.005 + u_flare_t * 6.0e-6;    // ribbon width grows (chromospheric evaporation)
-            float rib1   = exp(-pow((dlat - sep) / rWid, 2.0)) * lonEnv;   // N ribbon
-            float rib2   = exp(-pow((dlat + sep) / rWid, 2.0)) * lonEnv;   // S ribbon
+            // Two arcs straddling the polarity-inversion line (PIL). When the
+            // PFSS atlas has supplied real PIL footpoint geometry for this
+            // AR (u_flare_ribbons_active > 0), we sample those polylines;
+            // otherwise we fall back to the legacy straight east-west arcs
+            // offset N/S from the flare site.
+            float rib1, rib2;
+            if (u_flare_ribbons_active > 0.5) {
+                // Use the world-space fragment position directly — same
+                // coordinate frame as the WASM-derived ribbon polyline,
+                // so the polyline-distance test discriminates correctly.
+                vec3 p3 = normalize(vPosition);
+                float d1 = ribbonDist(p3, 0.0);
+                float d2 = ribbonDist(p3, 1.0);
+                // Width grows with chromospheric evaporation (3D chord
+                // distance ≈ angular distance on a unit sphere at small d).
+                float rWid3 = 0.012 + u_flare_t * 1.2e-5;
+                rib1 = exp(-d1 * d1 / (rWid3 * rWid3));
+                rib2 = exp(-d2 * d2 / (rWid3 * rWid3));
+            } else {
+                // Legacy fallback — straight E-W arcs offset N/S in lat.
+                float dlat   = lat - u_flare_lat;                       // N-S offset from flare
+                float dlon_c = (lon - u_flare_lon) * cos(u_flare_lat);  // great-circle-corrected E-W
+                float lonEnv = exp(-dlon_c * dlon_c / (0.10 + u_flare_t * 4.0e-5));
+                float sep    = 0.020 + u_flare_t * 2.5e-5;    // separation grows with reconnection
+                float rWid   = 0.005 + u_flare_t * 6.0e-6;    // ribbon width grows
+                rib1 = exp(-pow((dlat - sep) / rWid, 2.0)) * lonEnv;
+                rib2 = exp(-pow((dlat + sep) / rWid, 2.0)) * lonEnv;
+            }
             float ribMask = (rib1 + rib2) * fDecay * 0.85;
             // Colour: UV white at onset → Hα red as it cools
             vec3 ribHot  = vec3(1.6, 1.3, 0.9);    // bright UV continuum
@@ -2419,9 +2750,24 @@ const sunFS = /* glsl */`
     }
 `;
 
-const sunGeo  = new THREE.SphereGeometry(1.0, 128, 128);
+// Phase 4.7 — sun mesh LOD. Three SphereGeometries at decreasing
+// tessellation, wrapped in a THREE.LOD that auto-switches based on
+// camera distance to the sun's centre. Saves ~75% of the sphere's
+// vertex shader cost when zoomed out without any visible quality loss
+// (smooth-shaded sphere rounds out at far distances anyway).
+//
+//   High  (128×128 = 16 384 verts) — within ~3.5 R☉, the default view
+//   Mid   ( 72×72  =  5 256 verts) — 3.5–10 R☉, common orbit + Wide
+//   Low   ( 40×30  =  1 240 verts) — beyond 10 R☉, distant overview
+//
+// All three share the same sunMat ShaderMaterial so the GPU compiles
+// the photosphere shader once and rebinds attributes per level.
 const sunMat  = new THREE.ShaderMaterial({ vertexShader:sunVS, fragmentShader:sunFS, uniforms });
-scene.add(new THREE.Mesh(sunGeo, sunMat));
+const sunLOD  = new THREE.LOD();
+sunLOD.addLevel(new THREE.Mesh(new THREE.SphereGeometry(1.0, 128, 128), sunMat),  0.0);
+sunLOD.addLevel(new THREE.Mesh(new THREE.SphereGeometry(1.0,  72,  72), sunMat),  3.5);
+sunLOD.addLevel(new THREE.Mesh(new THREE.SphereGeometry(1.0,  40,  30), sunMat), 10.0);
+scene.add(sunLOD);
 
 // ─── CHROMOSPHERE (r=1.15) — Ca H&K / Hα pink-red layer ──────────────────────
 const glowVS = /* glsl */`
@@ -2537,7 +2883,8 @@ const chromoFS = /* glsl */`
 
         // ── Chromospheric flare brightening (Hα ribbons) ─────────────────────
         float lat_c   = asin(clamp(n3d.y, -1.0, 1.0));
-        float lon_c   = atan(n3d.z, n3d.x);
+        // lon = atan(x, z) so heliographic comparisons with u_flare_lon work.
+        float lon_c   = atan(n3d.x, n3d.z);
         float cos_df  = sin(lat_c)*sin(u_flare_lat) + cos(lat_c)*cos(u_flare_lat)*cos(lon_c - u_flare_lon);
         float df_c    = acos(clamp(cos_df, -1.0, 1.0));
         float chromoFl = exp(-df_c*df_c / 0.075) * exp(-u_flare_t / 90.0) * u_flare_intensity;
@@ -2734,7 +3081,8 @@ const trFS = /* glsl */`
         // X-ray + EUV irradiance spikes within seconds of flare onset,
         // rapidly heating the transition region across the visible disk.
         float lat_t  = asin(clamp(n3d.y, -1.0, 1.0));
-        float lon_t  = atan(n3d.z, n3d.x);
+        // lon = atan(x, z) so heliographic comparisons with u_flare_lon work.
+        float lon_t  = atan(n3d.x, n3d.z);
         float cos_df = sin(lat_t)*sin(u_flare_lat) + cos(lat_t)*cos(u_flare_lat)*cos(lon_t - u_flare_lon);
         float df_t   = acos(clamp(cos_df, -1.0, 1.0));
         // Localized brightening near flare site (fast impulsive phase)
@@ -2823,7 +3171,8 @@ const coronaFS = /* glsl */`
         vec3  vd  = normalize(vViewDir);
         float rim = 1.0 - max(dot(n3d, vd), 0.0);
         float lat = asin(clamp(n3d.y, -1.0, 1.0));
-        float lon = atan(n3d.z, n3d.x) + u_time * 0.0025 * u_rot;
+        // lon = atan(x, z) so heliographic comparisons with u_flare_lon work.
+        float lon = atan(n3d.x, n3d.z) + u_time * 0.0025 * u_rot;
 
         // ── Coronal hole mask ─────────────────────────────────────────────────
         // Polar coronal holes: dark (open B-field, fast wind escapes freely).
@@ -2878,7 +3227,11 @@ const coronaFS = /* glsl */`
         cbpMask *= (0.4 + u_activity * 0.9) * (1.0 - poleHole * 0.5);
 
         // ── Compose alpha ────────────────────────────────────────────────────
-        float base = pow(rim, 2.4) * 0.42;
+        // Phase 4.2 — relaxed rim power (2.4 → 1.9) and brighter base
+        // (0.42 → 0.62) so the corona reads as present across a wider
+        // limb annulus instead of as a thin grazing-only halo. Streamer/
+        // HCS/plume morphology unchanged — just more visible.
+        float base = pow(rim, 1.9) * 0.62;
         float alpha = base * (
             // Streamer belt contribution (dimmed at coronal holes)
             helmetBelt * (0.70 + rayStr * actFactor) * (1.0 - poleHole * 0.72) +
@@ -2891,7 +3244,7 @@ const coronaFS = /* glsl */`
         );
         // Coronal bright points add localised alpha spikes on/near disk face
         alpha += cbpMask * pow(max(1.0 - rim, 0.0), 0.5) * 0.35;
-        alpha = clamp(alpha, 0.0, 0.92);
+        alpha = clamp(alpha, 0.0, 0.97);
 
         // ── Colour ───────────────────────────────────────────────────────────
         // K-corona (Thomson-scattered photospheric light): warm yellow-white.
@@ -2990,6 +3343,74 @@ const coronaMesh = new THREE.Mesh(
 );
 scene.add(coronaMesh);
 
+// ─── Phase 4.3: AIA-style volumetric corona renderer ─────────────────────────
+// Mounts js/corona-volumetric.js (16-step DEM raymarch with 6 AIA channels,
+// per-AR loop arcades, coronal-hole subtraction, channel-aware filament
+// extinction) as the active corona renderer, replacing the legacy coronaFS
+// at r=2.5 unless ?corona=legacy is on the URL.
+//
+// Channel selection: ?coronaChannel=171|193|211|304|94|131|white (default 171).
+const _coronaMode    = (new URLSearchParams(location.search).get('corona') || 'volumetric').toLowerCase();
+const _coronaChannel = (new URLSearchParams(location.search).get('coronaChannel') || '171');
+let volumetricCorona = null;
+
+if (_coronaMode === 'volumetric' || _coronaMode === 'vol') {
+    (async () => {
+        try {
+            const mod = await import('./js/corona-volumetric-mount.js');
+            volumetricCorona = mod.mountVolumetricCorona({
+                scene,
+                baseUniforms: uniforms,
+                channel:      _coronaChannel,
+            });
+            // Hide the legacy coronaMesh so the two corona renderers don't
+            // double-up. Toggle stays wired so the user's "Corona" checkbox
+            // controls the volumetric mesh once it's mounted.
+            coronaMesh.visible = false;
+            const togCorona = document.getElementById('tog-corona');
+            if (togCorona) {
+                togCorona.addEventListener('change', e => {
+                    volumetricCorona.setVisible(e.target.checked);
+                });
+                volumetricCorona.setVisible(togCorona.checked !== false);
+            }
+            // Initial population from whatever liveRegions are loaded.
+            _refreshVolumetricCorona();
+            console.log(`[corona-vol] mounted (channel=${_coronaChannel})`);
+        } catch (e) {
+            console.warn('[corona-vol] init failed, falling back to legacy:', e);
+            coronaMesh.visible = true;
+        }
+    })();
+}
+
+// Build AR/hole inputs from liveRegions + the activity-driven default polar
+// holes (sun.html doesn't have a live coronal-hole feed yet — synthetic).
+function _refreshVolumetricCorona() {
+    if (!volumetricCorona) return;
+    const ars = (liveRegions || []).map(r => {
+        const ll = parseLoc(r.loc);
+        if (!ll) return null;
+        const m = String(r.mag || '').toLowerCase();
+        const isComplex = m.includes('delta') || m.includes('gamma')
+                       || m.includes('bg')    || m.includes('bgd');
+        return {
+            latRad:  ll.lat * Math.PI / 180,
+            lonRad:  ll.lon * Math.PI / 180,
+            area:    Math.max(0.05, Math.min(1, (r.area || 50) / 800)),
+            complex: isComplex,
+        };
+    }).filter(Boolean);
+
+    const activity = uniforms.u_activity?.value ?? 0.5;
+    const polarSize = 0.30 + 0.30 * (1 - activity);
+    const holes = [
+        { latRad:  85 * Math.PI / 180, lonRad:   0,        depth: polarSize },
+        { latRad: -85 * Math.PI / 180, lonRad:   Math.PI,  depth: polarSize },
+    ];
+    volumetricCorona.update(ars, holes);
+}
+
 // ─── OUTER CORONA / HELIOSPHERE GLOW (r=4.0) ─────────────────────────────────
 const outerGlowFS = /* glsl */`
     varying vec3 vNormal;
@@ -3025,7 +3446,7 @@ const outerGlowFS = /* glsl */`
         float beltAlph = beltW * pow(rim, 2.5) * (0.04 + u_kp_norm * 0.08 + u_activity * 0.05);
 
         // Slow animated streamer tendrils (Parker-spiral phase drift)
-        float lon    = atan(N.z, N.x);
+        float lon    = atan(N.x, N.z);
         float tPhase = u_time * 0.04;
         float tendril = sin(lon * 3.0 + tPhase) * sin(lon * 7.0 - tPhase * 1.7);
         tendril = smoothstep(0.3, 0.9, tendril) * beltW * pow(rim, 3.5)
@@ -3071,7 +3492,12 @@ const outerGlowFS = /* glsl */`
         col   = mix(col, vec3(0.80, 0.88, 1.00), u_electron_norm * 0.15);
         alpha += u_electron_norm * pow(rim, 4.0) * 0.05;
 
-        gl_FragColor = vec4(col, alpha);
+        // Phase 4.2 — global mute on the outer-glow alpha. This sphere
+        // was the "purple haze" that drowned out the inner corona shader
+        // structure (helmet streamers / HCS / plumes / CBPs) at r=2.5.
+        // Cut by 0.4× so the data-driven storm / aurora / IMF cues
+        // remain visible but the haze no longer dominates.
+        gl_FragColor = vec4(col, alpha * 0.40);
     }
 `;
 scene.add(new THREE.Mesh(new THREE.SphereGeometry(4.0, 24, 24),
@@ -3705,7 +4131,44 @@ function triggerPositionFlare(lat_deg, lon_deg, cls) {
 // Hot magnetic field line arcs (1–3 MK) over active regions.
 // Blue-white at apex (high-T), warm gold near footpoints.
 // Co-rotates with photosphere via loopGroup.rotation.y = solarRotAngle.
+//
+// Phase 4 — Alfvén-wave transverse oscillations: each loop's vertex shader
+// displaces points perpendicular to the loop's local tangent by a standing-
+// wave envelope sin(πs) × sin(uTime·freq + phase). Random per-loop freq
+// (1.6..3.2 rad/sim-time, period ~3–6 sim-sec) and phase produce a chorus
+// of independently oscillating loops, matching the post-flare kink-mode
+// oscillations observed by SDO/AIA.
 let loopGroup = null;
+
+const LOOP_VS = /* glsl */`
+    attribute float aS;       // [0,1] arclength fraction along the loop
+    attribute vec3  aTangent; // unit tangent at this vertex (precomputed)
+    varying vec3 vColor;
+    uniform float uTime;
+    uniform float uAmp;       // R☉ — peak displacement at apex
+    uniform float uFreq;      // rad / sim-time
+    uniform float uPhase;     // [0, 2π)
+    void main() {
+        vec3 p = position;
+        vec3 outward = normalize(p);
+        // Transverse direction: perpendicular to both tangent and radial.
+        vec3 nLoop = normalize(cross(aTangent, outward) + vec3(1e-6));
+        // Standing-wave envelope: anchored at footpoints, max at apex.
+        float envelope = sin(3.141592653589793 * aS);
+        float wave = sin(uTime * uFreq + uPhase) * uAmp * envelope;
+        // 70% transverse + 30% radial bobbing — looks like a kink mode.
+        vec3 disp = nLoop * wave + outward * (wave * 0.30);
+        vColor = color;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(p + disp, 1.0);
+    }
+`;
+const LOOP_FS = /* glsl */`
+    varying vec3 vColor;
+    uniform float uOpacity;
+    void main() {
+        gl_FragColor = vec4(vColor, uOpacity);
+    }
+`;
 
 function buildCoronalLoops() {
     if (loopGroup) { scene.remove(loopGroup); loopGroup = null; }
@@ -3769,12 +4232,64 @@ function buildCoronalLoops() {
                 THREE.MathUtils.lerp(0.20, 1.00, heatFrac)
             );
             const baseOp = 0.20 + areaNorm * 0.22 + (isComplex ? 0.09 : 0);
-            const mat = new THREE.LineBasicMaterial({
-                color: col, transparent: true, opacity: baseOp,
-                depthWrite: false, blending: THREE.AdditiveBlending,
+
+            // ── Build geometry with per-vertex aS + aTangent for the
+            // Alfvén-wave vertex shader. Vertex colour set per-vertex
+            // so the existing apex-blue/footpoint-gold gradient stays.
+            const positions = new Float32Array(pts.length * 3);
+            const colors    = new Float32Array(pts.length * 3);
+            const aSarr     = new Float32Array(pts.length);
+            const aTangArr  = new Float32Array(pts.length * 3);
+            for (let i = 0; i < pts.length; i++) {
+                const p = pts[i];
+                positions[i*3]   = p.x;
+                positions[i*3+1] = p.y;
+                positions[i*3+2] = p.z;
+                colors[i*3]   = col.r;
+                colors[i*3+1] = col.g;
+                colors[i*3+2] = col.b;
+                aSarr[i] = i / (pts.length - 1);
+                // Tangent via central finite difference (forward at endpoints).
+                const a = pts[Math.max(0, i - 1)];
+                const b = pts[Math.min(pts.length - 1, i + 1)];
+                const tx = b.x - a.x, ty = b.y - a.y, tz = b.z - a.z;
+                const tl = Math.hypot(tx, ty, tz) || 1;
+                aTangArr[i*3]   = tx / tl;
+                aTangArr[i*3+1] = ty / tl;
+                aTangArr[i*3+2] = tz / tl;
+            }
+
+            const geom = new THREE.BufferGeometry();
+            geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geom.setAttribute('color',    new THREE.BufferAttribute(colors, 3));
+            geom.setAttribute('aS',       new THREE.BufferAttribute(aSarr, 1));
+            geom.setAttribute('aTangent', new THREE.BufferAttribute(aTangArr, 3));
+
+            // Per-loop Alfvén parameters: jittered freq → chorus of
+            // independently oscillating loops; complex ARs oscillate
+            // a touch wider (post-flare kink-mode amplitude scales with
+            // free magnetic energy).
+            const alfvenAmp   = (0.0035 + Math.random() * 0.0025) * (isComplex ? 1.4 : 1.0);
+            const alfvenFreq  = 1.6 + Math.random() * 1.6;       // rad / sim-time
+            const alfvenPhase = Math.random() * Math.PI * 2;
+
+            const mat = new THREE.ShaderMaterial({
+                vertexShader:   LOOP_VS,
+                fragmentShader: LOOP_FS,
+                vertexColors:   true,
+                transparent:    true,
+                depthWrite:     false,
+                blending:       THREE.AdditiveBlending,
+                uniforms: {
+                    uTime:    { value: 0 },
+                    uOpacity: { value: baseOp },
+                    uAmp:     { value: alfvenAmp },
+                    uFreq:    { value: alfvenFreq },
+                    uPhase:   { value: alfvenPhase },
+                },
             });
-            mat.userData = { baseOp, phase: Math.random() * Math.PI * 2 };
-            loopGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
+            mat.userData = { baseOp, phase: alfvenPhase };
+            loopGroup.add(new THREE.Line(geom, mat));
         }
     });
 
@@ -3791,6 +4306,330 @@ function buildCoronalLoops() {
 //   • HCS neutral line shown as equatorial current sheet marker
 // Co-rotates with photosphere via fieldLineGroup.rotation.y = solarRotAngle.
 let fieldLineGroup = null;
+
+// ── ?debug= — Phase 1 PFSS atlas + Phase 2 prominence-bundle scaffolds ───────
+// Both flags share the same WASM atlas; they're composable:
+//   ?debug=field                — colour-coded field-line LineSegments
+//   ?debug=prominence           — instanced microhair bundles (QP class)
+//   ?debug=field,prominence     — both
+// Prominence quality tier:
+//   ?promq=low|mid|high         — peak active thread budget (default mid)
+const _debugFlagSet = new Set(
+    String(new URLSearchParams(location.search).get('debug') || '')
+        .toLowerCase().split(/[\s,;]+/).filter(Boolean));
+const DEBUG_FIELD_ATLAS  = _debugFlagSet.has('field');
+const DEBUG_PROMINENCE   = _debugFlagSet.has('prominence') || _debugFlagSet.has('prom');
+const DEBUG_ANY_ATLAS    = DEBUG_FIELD_ATLAS || DEBUG_PROMINENCE;
+const PROMINENCE_QUALITY = (new URLSearchParams(location.search).get('promq') || 'mid').toLowerCase();
+
+let _fieldAtlasModulePromise   = null;
+let _prominenceModulePromise   = null;
+let debugFieldAtlasGroup       = null;
+let prominenceBundleSystem     = null;
+// per-frame state cache (populated by rebuildDebugFieldAtlas, consumed by animate())
+let _promCachedAtlas       = null;
+let _promCachedTextures    = null;
+let _promClassifierRef     = null;
+
+if (DEBUG_ANY_ATLAS) {
+    _fieldAtlasModulePromise = (async () => {
+        try {
+            const mod = await import('./js/field-atlas.js');
+            await mod.ensureFieldAtlasWasm();
+            console.log('[sunfield] field-atlas WASM ready');
+            return mod;
+        } catch (e) {
+            console.warn('[sunfield] init failed:', e);
+            return null;
+        }
+    })();
+}
+
+let _scorecardModule = null;
+let _flareRibbonsModule = null;
+let _flareHxrModule = null;
+let _flareHxrSystem = null;
+
+// Phase 3.1 / 3.2 — flare-ribbons + HXR-kernels load whenever an atlas
+// might be available. Independent of ?debug=prominence: live SWPC flares
+// can light up the PIL ribbons + HXR footpoints too, as long as the atlas
+// got built (which happens under ?debug=field or ?debug=prominence).
+if (DEBUG_ANY_ATLAS) {
+    (async () => {
+        try {
+            const [r, h] = await Promise.all([
+                import('./js/flare-ribbons.js'),
+                import('./js/flare-hxr-kernels.js'),
+            ]);
+            _flareRibbonsModule = r;
+            _flareHxrModule = h;
+            console.log('[flare-ribbons + hxr] modules loaded');
+        } catch (e) {
+            console.warn('[flare-ribbons / hxr] init failed:', e);
+        }
+    })();
+}
+
+if (DEBUG_PROMINENCE) {
+    _prominenceModulePromise = (async () => {
+        try {
+            const [bundleMod, classifierMod, scorecardMod] = await Promise.all([
+                import('./js/prominence-bundle.js'),
+                import('./js/prominence-classifier.js'),
+                import('./js/eruption-scorecard.js'),
+            ]);
+            _scorecardModule = scorecardMod;
+            console.log('[prominence] bundle + classifier + scorecard modules loaded');
+            return { bundle: bundleMod, classifier: classifierMod };
+        } catch (e) {
+            console.warn('[prominence] init failed:', e);
+            return null;
+        }
+    })();
+
+    // Reveal the manual erupt UI and wire the click handler.
+    const eruptRow = document.getElementById('erupt-row');
+    const eruptBtn = document.getElementById('btn-erupt-nearest');
+    if (eruptRow) eruptRow.style.display = '';
+    if (eruptBtn) eruptBtn.addEventListener('click', _eruptNearestFilament);
+}
+
+// ── Phase 3.1: refresh PIL-anchored two-ribbon geometry for the photosphere ──
+// Called by both the manual erupt button and the live SWPC auto-flare path.
+// Picks the AR closest to (latRad, lonRad), pulls its PIL footpoints from the
+// cached atlas, and uploads them as a polyline texture for the photosphere
+// fragment shader. Falls through silently when no atlas / no ribbons —
+// shader keeps using the legacy straight-arc fallback.
+function _refreshFlareRibbons(latRad, lonRad) {
+    if (!_flareRibbonsModule) {
+        console.log('[flare-ribbons] module not loaded yet — legacy ribbons render');
+        return;
+    }
+    if (!_promCachedAtlas) {
+        console.log('[flare-ribbons] no atlas — load with ?debug=prominence and wait for AR feed');
+        return;
+    }
+
+    // Find the live AR closest to the flare site (must match meta[2] arIdx).
+    let bestArIdx = -1, bestDist = 25 * Math.PI / 180;
+    for (let i = 0; i < liveRegions.length; i++) {
+        const ll = parseLoc(liveRegions[i].loc);
+        if (!ll) continue;
+        const arLat = ll.lat * Math.PI / 180;
+        const arLon = ll.lon * Math.PI / 180;
+        const c = Math.sin(latRad) * Math.sin(arLat) +
+                  Math.cos(latRad) * Math.cos(arLat) * Math.cos(lonRad - arLon);
+        const d = Math.acos(Math.max(-1, Math.min(1, c)));
+        if (d < bestDist) { bestDist = d; bestArIdx = i; }
+    }
+    if (bestArIdx < 0) {
+        console.log(`[flare-ribbons] no AR within 25° of flare site — legacy ribbons render`);
+        return;
+    }
+
+    const n = _flareRibbonsModule.updateRibbonsForAr(_promCachedAtlas, bestArIdx);
+    if (n >= 2) {
+        if (!uniforms.t_flare_ribbons.value) {
+            uniforms.t_flare_ribbons.value = _flareRibbonsModule.getRibbonTexture();
+        }
+        uniforms.u_flare_ribbons_count.value  = n;
+        uniforms.u_flare_ribbons_active.value = 1.0;
+        console.log(`[flare-ribbons] AR #${bestArIdx} → ${n}-pt polyline ribbons`);
+    } else {
+        uniforms.u_flare_ribbons_active.value = 0.0;
+        console.log(`[flare-ribbons] AR #${bestArIdx} has no PIL bundles in atlas — legacy ribbons render`);
+    }
+
+    // Phase 3.2 — light up the HXR footpoint kernels with the same atlas
+    // pair data. The conjugate pairing is preserved by flare-ribbons so
+    // each pair gets two kernels (one per loop foot, opposite ribbons).
+    if (_flareHxrModule && _flareRibbonsModule) {
+        if (!_flareHxrSystem) {
+            _flareHxrSystem = _flareHxrModule.createHxrKernelSystem({ scene });
+        }
+        const pairs = _flareRibbonsModule.getCurrentFootpointPairs();
+        _flareHxrSystem.update(pairs);
+        if (pairs.length > 0) {
+            console.log(`[flare-hxr] ${_flareHxrSystem.activeKernels} kernels (${pairs.length} pairs)`);
+        }
+    }
+}
+
+// ── Manual EP trigger (Phase 2.3) ────────────────────────────────────────────
+// Picks the PIL-anchored bundle whose mid-arclength sample is most aligned
+// with the camera's view direction, then fires a synthetic flare at that
+// bundle's location. The classifier reads u_flare_* uniforms every frame, so
+// it picks up the trigger automatically and walks the bundle through the
+// destabilizing → erupting → fade state machine.
+function _eruptNearestFilament() {
+    const status = (msg) => {
+        const el = document.getElementById('erupt-status');
+        if (el) el.textContent = msg;
+    };
+
+    if (!_promCachedAtlas || !prominenceBundleSystem) {
+        if (!DEBUG_PROMINENCE) {
+            status('Reload with ?debug=prominence to enable.');
+        } else if (!_promCachedAtlas) {
+            status('PIL atlas not ready — wait for the AR feed.');
+        } else {
+            status('Bundle system not ready — try again.');
+        }
+        return;
+    }
+
+    // Camera-pointed sub-camera point on the photosphere (the bundle most
+    // visible to the user wins).
+    const subCam = camera.position.clone().normalize();
+
+    const atlas = _promCachedAtlas;
+    const meta  = atlas.meta;
+    const positions = atlas.positions;
+    const spl   = atlas.samplesPerLine;
+    const sIdx  = Math.floor(spl / 2);
+    const STRIDE = 8;
+
+    let bestIdx = -1;
+    let bestDot = -Infinity;
+    let bestLat = 0, bestLon = 0;
+    for (let i = 0; i < atlas.lineCount; i++) {
+        const m0 = i * STRIDE;
+        if (meta[m0] !== 0 || meta[m0 + 1] !== 2) continue;  // PIL-closed only
+        const o = (i * spl + sIdx) * 3;
+        const x = positions[o], y = positions[o + 1], z = positions[o + 2];
+        const r = Math.sqrt(x * x + y * y + z * z);
+        if (r < 0.5) continue;
+        const dx = x / r, dy = y / r, dz = z / r;
+        const dot = dx * subCam.x + dy * subCam.y + dz * subCam.z;
+        if (dot > bestDot) {
+            bestDot = dot; bestIdx = i;
+            // Inverse of WASM from_lat_lon (y-up): lat = asin(y), lon = atan2(x, z).
+            bestLat = Math.asin(Math.max(-1, Math.min(1, dy)));
+            bestLon = Math.atan2(dx, dz);
+        }
+    }
+
+    if (bestIdx < 0) {
+        status('No PIL bundles available.');
+        return;
+    }
+
+    // Fire synthetic flare. u_flare_intensity decays exponentially in animate(),
+    // but the classifier's wasErupting check holds the bundle in EP for 16 s.
+    uniforms.u_flare_lat.value       = bestLat;
+    uniforms.u_flare_lon.value       = bestLon;
+    uniforms.u_flare_intensity.value = 1.0;
+    uniforms.u_flare_t.value         = 0.0;
+    _refreshFlareRibbons(bestLat, bestLon);
+
+    const latDeg = bestLat * 180 / Math.PI;
+    const lonDeg = bestLon * 180 / Math.PI;
+    const ns = latDeg >= 0 ? 'N' : 'S';
+    const ew = lonDeg >= 0 ? 'W' : 'E';
+    const loc = `${ns}${String(Math.round(Math.abs(latDeg))).padStart(2,'0')}` +
+                `${ew}${String(Math.round(Math.abs(lonDeg))).padStart(2,'0')}`;
+    status(`▲ Erupting bundle #${bestIdx} at ${loc}`);
+    console.log(`[erupt] manual EP triggered on bundle ${bestIdx} at ${loc} (cos∠cam=${bestDot.toFixed(2)})`);
+
+    // ── Educational scorecard (manual eruptions only) ────────────────────────
+    // Compute metrics now from the bundle's current state, schedule the card
+    // to slide in ~5 sim-seconds later (just after the impulsive flash so the
+    // visual eruption catches the eye first).
+    if (_scorecardModule && _promClassifierRef) {
+        // Re-classify so we have the current bundle entry (incl. EP params).
+        const bundles = _promClassifierRef.classifyBundles({
+            atlas: _promCachedAtlas,
+            liveRegions,
+            time:           uniforms.u_time.value,
+            flareIntensity: uniforms.u_flare_intensity.value,
+            flareLatRad:    uniforms.u_flare_lat.value,
+            flareLonRad:    uniforms.u_flare_lon.value,
+        });
+        const target = bundles.find(b => b.lineIdx === bestIdx) || bundles[0];
+        const metrics = _scorecardModule.computeMetrics({
+            atlas:   _promCachedAtlas,
+            lineIdx: bestIdx,
+            bundle:  target,
+            liveRegions,
+        });
+        _scorecardModule.show(metrics, {
+            delaySec: 5,
+            simSpeed: simSpeed,
+        });
+    }
+}
+
+async function rebuildDebugFieldAtlas() {
+    if (!DEBUG_ANY_ATLAS || !_fieldAtlasModulePromise) return;
+    const mod = await _fieldAtlasModulePromise;
+    if (!mod || !scene) return;
+
+    const ars   = mod.arsFromLiveRegions(liveRegions, parseLoc);
+    const holes = mod.defaultPolarHoles(uniforms?.u_activity?.value ?? 0.5);
+    const ssR   = parseFloat(document.getElementById('sl-source-surface')?.value);
+    const params = {
+        sourceSurface: Number.isFinite(ssR) ? ssR : 2.5,
+        seedsPerAr: 28, seedsGlobal: 192, samplesPerLine: 64, maxLines: 1500,
+    };
+
+    const t0 = performance.now();
+    const atlas = mod.computeFieldAtlas(ars, holes, params);
+    const textures = mod.buildFieldTextures(atlas);
+    const dt = performance.now() - t0;
+
+    // ── ?debug=field: colour-coded LineSegments overlay ────────────────────
+    if (DEBUG_FIELD_ATLAS) {
+        if (debugFieldAtlasGroup) {
+            scene.remove(debugFieldAtlasGroup);
+            mod.disposeFieldDebugMesh(debugFieldAtlasGroup);
+            debugFieldAtlasGroup = null;
+        }
+        const mesh = mod.buildFieldDebugMesh(atlas, { opacity: 0.9 });
+        mesh.userData.label = 'PFSS-lite atlas (debug)';
+        scene.add(mesh);
+        debugFieldAtlasGroup = mesh;
+    }
+
+    // ── ?debug=prominence: microhair bundle system ─────────────────────────
+    if (DEBUG_PROMINENCE && _prominenceModulePromise && textures) {
+        const promMods = await _prominenceModulePromise;
+        if (promMods) {
+            const { bundle: bMod, classifier: cMod } = promMods;
+            if (!prominenceBundleSystem) {
+                prominenceBundleSystem = bMod.createProminenceBundleSystem({
+                    scene,
+                    quality: bMod.getQualityFromString(PROMINENCE_QUALITY),
+                });
+                console.log(`[prominence] system created (quality=${prominenceBundleSystem.quality}, budget=${prominenceBundleSystem.threadBudget})`);
+            }
+
+            // Cache for the per-frame classifier tick in animate().
+            _promCachedAtlas    = atlas;
+            _promCachedTextures = textures;
+            _promClassifierRef  = cMod;
+
+            // One-shot classify + log so the console reflects new AR state.
+            const bundles = cMod.classifyBundles({
+                atlas,
+                liveRegions,
+                time: uniforms?.u_time?.value ?? 0,
+                flareIntensity: uniforms?.u_flare_intensity?.value ?? 0,
+                flareLatRad:    uniforms?.u_flare_lat?.value,
+                flareLonRad:    uniforms?.u_flare_lon?.value,
+            });
+            prominenceBundleSystem.update(atlas, textures, {
+                activity: uniforms?.u_activity?.value ?? 0.5,
+                bundles,
+            });
+            const counts = bundles.reduce((m, b) => { m[b.classId] = (m[b.classId] || 0) + 1; return m; }, {});
+            const NAMES = ['QP','IP','ARP','HEDGEROW','TORNADO','EP','RAIN'];
+            const summary = Object.keys(counts).map(k => `${NAMES[k]}=${counts[k]}`).join(' ');
+            console.log(`[prominence] ${bundles.length} bundles · ${prominenceBundleSystem.activeThreads} threads · ${summary}`);
+        }
+    }
+
+    console.log(`[sunfield] ${atlas.lineCount} lines (${ars.length} ARs) in ${dt.toFixed(1)} ms`);
+}
 
 function buildFieldLines() {
     if (fieldLineGroup) { scene.remove(fieldLineGroup); fieldLineGroup = null; }
@@ -4081,6 +4920,9 @@ function buildFieldLines() {
 
     scene.add(fieldLineGroup);
     fieldLineGroup.visible = document.getElementById('tog-fieldlines')?.checked ?? true;
+
+    // Mirror the rebuild trigger into the WASM-driven debug atlas (no-op unless ?debug=field).
+    rebuildDebugFieldAtlas();
 }
 
 // ─── SOLAR PROMINENCES ────────────────────────────────────────────────────────
@@ -4327,7 +5169,8 @@ function resize() {
     if (!w || !h) return;
     renderer.setSize(w, h, false);
     composer.setSize(w, h);
-    if (bloomPass) bloomPass.resolution.set(w, h);
+    if (bloomAmbient) bloomAmbient.resolution.set(w, h);
+    if (bloomFlare)   bloomFlare.resolution.set(w, h);
     camera.aspect = w / h; camera.updateProjectionMatrix();
 }
 new ResizeObserver(resize).observe(canvasWrap);
@@ -4340,12 +5183,38 @@ const fpsEl = document.getElementById('fps-display');
 // Declared here so animate() (below) can access them before the NOAA section
 let regionGroup   = null; // THREE.Group containing all AR markers
 let solarRotAngle = 0;    // accumulated rotation matching photosphere UV shift
+// Live-data slots — forward-declared so animate()'s first synchronous tick
+// (which reads liveXrayFlux/liveRegions/liveFlares) doesn't hit a TDZ
+// ReferenceError that would abort the rest of module execution.
+let liveRegions   = [];   // [{num, loc, area, z, mag, nspot}, ...]
+let liveFlares    = [];   // [{time, cls, loc, reg}, ...]
+let liveXrayFlux  = null; // W/m² (latest GOES reading)
 
 // ANIMATE
 function animate() {
     requestAnimationFrame(animate);
     const dt = 0.010 * simSpeed;
     uniforms.u_time.value += dt;
+
+    // Phase 2 prominence bundles — re-classify each frame so EP state machines
+    // and class transitions evolve smoothly. Then tick uniforms (time, camera
+    // position for the on-disk/limb mode switch). No-op if ?debug=prominence
+    // wasn't set or the atlas hasn't been built yet.
+    if (prominenceBundleSystem && _promCachedAtlas && _promCachedTextures && _promClassifierRef) {
+        const bundles = _promClassifierRef.classifyBundles({
+            atlas: _promCachedAtlas,
+            liveRegions,
+            time:           uniforms.u_time.value,
+            flareIntensity: uniforms.u_flare_intensity.value,
+            flareLatRad:    uniforms.u_flare_lat.value,
+            flareLonRad:    uniforms.u_flare_lon.value,
+        });
+        prominenceBundleSystem.update(_promCachedAtlas, _promCachedTextures, {
+            activity: uniforms.u_activity.value,
+            bundles,
+        });
+        prominenceBundleSystem.tick(uniforms.u_time.value, camera.position);
+    }
 
     // Accumulate solar rotation to match photosphere UV scroll rate:
     // Shader shifts UV.x by (u_time * 0.004 * u_rot) per time unit
@@ -4357,6 +5226,77 @@ function animate() {
         uniforms.u_flare_intensity.value *= 0.950;
     } else {
         uniforms.u_flare_intensity.value = 0.0;
+    }
+
+    // Phase 4.1 — keep the radial-corona-diffusion pass in sync with the
+    // current flare flash so the gather strength + HDR clamp dampen the
+    // horizontal "death laser" during M/X events.
+    if (radialDiffusePass) {
+        radialDiffusePass.uniforms.uFlareIntensity.value = uniforms.u_flare_intensity.value;
+    }
+
+    // Phase 4.3 — keep the volumetric corona's per-frame inputs synced.
+    // Flare lat/lon as a vec2; GOES X-ray flux normalized by X-class peak.
+    if (volumetricCorona) {
+        volumetricCorona.tickFlareLatLon(
+            uniforms.u_flare_lat.value,
+            uniforms.u_flare_lon.value
+        );
+        const xrayN = liveXrayFlux ? Math.max(0, Math.min(1, liveXrayFlux / 1e-4)) : 0;
+        volumetricCorona.setXrayNorm(xrayN);
+    }
+
+    // Phase 4.4 — refresh per-AR sunspot slots. Rotates each AR's heliographic
+    // position to the current frame using its latitude-specific Snodgrass
+    // differential rotation rate so spots co-rotate with the granulation
+    // pattern below them. Up to 8 slots; defensive zero-fill of the rest.
+    {
+        const slots = uniforms.u_arSpots.value;
+        const tNow  = uniforms.u_time.value;
+        const rotMul = uniforms.u_rot.value;
+        let n = 0;
+        for (const r of (liveRegions || [])) {
+            if (n >= 8) break;
+            const ll = parseLoc(r.loc);
+            if (!ll) continue;
+            const lat = ll.lat * Math.PI / 180;
+            const lon = ll.lon * Math.PI / 180;
+            const sl2 = Math.sin(lat) * Math.sin(lat);
+            const diffRot = 1.0 - 0.19 * sl2 - 0.09 * sl2 * sl2;
+            const rotAng  = tNow * 0.014 * rotMul * diffRot;
+            const cl = Math.cos(lat);
+            // Carrington-fixed heliographic position
+            const x0 = cl * Math.sin(lon);
+            const y  = Math.sin(lat);
+            const z0 = cl * Math.cos(lon);
+            // Rotate by current angle around Y
+            const c = Math.cos(rotAng), s = Math.sin(rotAng);
+            const x = c * x0 - s * z0;
+            const z = s * x0 + c * z0;
+            // Pack: w = signed area (negative for complex β-γ-δ)
+            const m = String(r.mag || '').toLowerCase();
+            const isComplex = m.includes('delta') || m.includes('gamma') || m.includes('bg');
+            const area = Math.max(0.05, Math.min(1, (r.area || 50) / 800));
+            slots[n].set(x, y, z, isComplex ? -area : area);
+            n++;
+        }
+        for (let i = n; i < 8; i++) slots[i].set(0, 0, 0, 0);
+        uniforms.u_arSpotCount.value = n;
+    }
+
+    // Phase 3.1 — when the ribbon fade envelope (exp(-u_flare_t/175))
+    // has dropped well below visibility, switch the photosphere shader
+    // back to its cheap legacy path so we're not running the polyline-
+    // distance loop for invisible geometry.
+    if (uniforms.u_flare_ribbons_active.value > 0.5 && uniforms.u_flare_t.value > 700.0) {
+        uniforms.u_flare_ribbons_active.value = 0.0;
+    }
+
+    // Phase 3.2 — HXR kernel envelope is short (sin × exp, gone by ~30 s).
+    // The system itself drops instanceCount to 0 once we're past the
+    // envelope; we just keep ticking time + flareT so the strobe animates.
+    if (_flareHxrSystem) {
+        _flareHxrSystem.tick(uniforms.u_time.value, uniforms.u_flare_t.value);
     }
 
     // Rotate region marker group with the photosphere texture
@@ -4374,13 +5314,16 @@ function animate() {
         });
     }
 
-    // Coronal loops — co-rotate with photosphere, pulse opacity
+    // Coronal loops — co-rotate with photosphere, pulse opacity, animate Alfvén waves
     if (loopGroup) {
         loopGroup.rotation.y = solarRotAngle;
         loopGroup.children.forEach(line => {
+            const u = line.material.uniforms;
+            if (!u || !u.uTime) return;
+            u.uTime.value = t;
             const ud = line.material.userData;
             if (ud.baseOp !== undefined)
-                line.material.opacity = ud.baseOp * (0.55 + 0.45 * Math.sin(t * 1.8 + ud.phase));
+                u.uOpacity.value = ud.baseOp * (0.55 + 0.45 * Math.sin(t * 1.8 + ud.phase));
         });
     }
 
@@ -4515,15 +5458,26 @@ function animate() {
     });
 
     controls.update();
-    // Bloom breathes gently with activity, and briefly spikes on flare onset.
-    // Base is deliberately low — the K-corona shader carries ambient glow.
-    // Kp contributes: geomagnetic storms drive visible corona brightening.
-    if (bloomPass) {
-        // Bloom spikes only during flares; base stays very low for analytical clarity.
-        const flareBoost = Math.max(0, 0.30 * Math.exp(-uniforms.u_flare_t.value / 12.0));
-        const baseBloom  = 0.12 + uniforms.u_activity.value * 0.04
-                         + uniforms.u_kp_norm.value * 0.03 + flareBoost;
-        bloomPass.strength = THREE.MathUtils.lerp(bloomPass.strength, baseBloom, 0.04);
+    // Phase 4.5 — drive ambient + flare bloom independently.
+    //
+    //   Ambient: gentle breathing with activity + Kp. No flare component
+    //     so calm sun = calm bloom regardless of how the impulsive flash
+    //     is doing.
+    //   Flare:   strength gated entirely by u_flare_intensity. Zero
+    //     during calm periods (so calm-disk pixels never trigger this
+    //     pass even at threshold 1.10), spikes during M/X impulsive
+    //     flash, decays with the same envelope as the photosphere flash.
+    if (bloomAmbient) {
+        const target = 0.16 + uniforms.u_activity.value * 0.06
+                     + uniforms.u_kp_norm.value * 0.04;
+        bloomAmbient.strength = THREE.MathUtils.lerp(bloomAmbient.strength, target, 0.04);
+    }
+    if (bloomFlare) {
+        const flareI = uniforms.u_flare_intensity.value;
+        // Kick in above 0.15 so micro-pops don't trigger a flash; ramp
+        // sharply so X-class events get the full punch.
+        const target = flareI < 0.15 ? 0.0 : (flareI - 0.15) * 0.55;
+        bloomFlare.strength = THREE.MathUtils.lerp(bloomFlare.strength, target, 0.20);
     }
     composer.render();
     fpsF++;
@@ -4590,9 +5544,8 @@ document.getElementById('sl-rot').addEventListener('input', function() {
 // ══════════════════════════════════════════════════════════════════════════
 const SWPC = 'https://services.swpc.noaa.gov';
 
-let liveRegions   = [];   // [{num, loc, area, z, mag, nspot}, ...]
-let liveFlares    = [];   // [{time, cls, loc, reg}, ...]
-let liveXrayFlux  = null; // W/m² (latest GOES reading)
+// liveRegions / liveFlares / liveXrayFlux are forward-declared near animate()
+// to avoid a TDZ ReferenceError on the first synchronous frame.
 
 // ── Default snapshot — Solar Cycle 25 peak, March 13 2026 ─────────────────
 // Loaded immediately on startup so the sim has a meaningful state before
@@ -4761,6 +5714,10 @@ function buildRegionMarkers() {
     });
 
     scene.add(regionGroup);
+
+    // Phase 4.3 — keep the volumetric corona's AR slots in sync with the
+    // marker geometry so loops/filaments/holes track live SWPC updates.
+    _refreshVolumetricCorona();
 }
 
 // ── Panel DOM update ─────────────────────────────────────────────────────
@@ -5712,6 +6669,7 @@ window.addEventListener('swpc-update', (ev) => {
             uniforms.u_flare_lat.value = lat_r;
             uniforms.u_flare_lon.value = lon_r;
             uniforms.u_flare_t.value   = 0.0;   // reset: ribbons appear immediately
+            _refreshFlareRibbons(lat_r, lon_r);
 
             // ── Position-accurate 3D ring flash ──────────────────────────────
             triggerPositionFlare(latDeg, lonDeg, clsCh);
@@ -5780,10 +6738,15 @@ window.addEventListener('swpc-update', (ev) => {
             };
         }).filter(r => r.num && parseLoc(r.loc));
 
-        // Only rebuild if the region set actually changed
+        // Only rebuild if the region set actually changed AND the new feed
+        // has at least one parseable AR — otherwise an empty/malformed T3
+        // payload would wipe the default-data + last-good-cached regions
+        // and leave the sun without sunspots or 3D markers (regression
+        // observed when the SpaceWeatherFeed delivers a row with no
+        // parseable loc string).
         const newKey = newRegs.map(r => r.num).sort().join(',');
         const oldKey = liveRegions.map(r => r.num).sort().join(',');
-        if (newKey !== oldKey) {
+        if (newRegs.length > 0 && newKey !== oldKey) {
             liveRegions = newRegs;
             _regionsChanged = true;
         }

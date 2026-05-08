@@ -41,6 +41,27 @@ const DEG2RAD  = DEG;         // kept as alias for SGP4 orbital-element conversi
 const RE_KM    = 6378.135;    // WGS-72 (SGP4 standard — distinct from geo.radiusKm)
 const MIN_PER_DAY = 1440;
 
+// Atomics slot indices in the sync Int32Array shared with the
+// propagation worker. Mirrored at the top of
+// js/operations/propagation-worker.js — keep in lockstep.
+//
+// The "true SAB protocol" uses these to coordinate the entire hot
+// tick path without touching postMessage — main bumps REQUEST and
+// Atomics.notify; worker waitAsync's, propagates, bumps PUBLISH and
+// Atomics.notify; main polls PUBLISH each frame and gates the GPU
+// upload on WRITING. add-sats / clear / init still flow over
+// postMessage (rare control plane), and waitAsync yields the worker
+// to the event loop between ticks so those handlers actually run.
+const SYNC_PUBLISH_SLOT = 0;   // worker writes after each completed frame
+const SYNC_WRITING_SLOT = 1;   // 1 while worker is mid-write, 0 when done
+const SYNC_REQUEST_SLOT = 2;   // main writes the next frameId, notifies
+const SYNC_RUNNING_SLOT = 3;   // main writes 0 to terminate the worker tick loop
+
+// Control Float64 slot indices in the parallel ctrl SharedArrayBuffer.
+const CTRL_JD_SLOT      = 0;
+const CTRL_GMST_SLOT    = 1;
+const CTRL_SCALE_SLOT   = 2;
+
 // ── Rust WASM SGP4 (high-performance, loaded async) ────────────────────────
 // Falls back to the JS propagator if WASM isn't available.
 let _wasmSgp4 = null;
@@ -257,19 +278,86 @@ export class SatelliteTracker {
 
         // Off-thread propagation. When a Worker spawns and reports
         // ready, the live tick stops calling WASM in-line and instead
-        // ping-pongs a single ArrayBuffer with the worker (transferable
-        // — no copy across the postMessage boundary). The main thread
-        // never blocks on SGP4 again. Buffer ownership is tracked via
-        // `_workerBuf`: when non-null the main thread holds it and
-        // can post a tick; when null a tick is in flight.
+        // hands the work to the worker. Two transports:
+        //
+        //   - SAB ("shared")     : crossOriginIsolated === true. We
+        //     allocate a SharedArrayBuffer once, pass it to the worker,
+        //     and use the same memory as the THREE position attribute.
+        //     Tick messages carry only jd/gmst/scale; the worker writes
+        //     directly into the SAB; the main thread sets needsUpdate
+        //     and reads lat/lon from the same buffer. Zero CPU copies.
+        //
+        //   - Transferable       : not isolated (older browser, no
+        //     COOP/COEP, mobile Safari). Single ArrayBuffer ping-pongs
+        //     between main and worker via postMessage transfer.
+        //
+        // Both share the same _workerInFlight / _workerSyncedTo
+        // bookkeeping; the difference is only in how positions
+        // surface.
         this._worker          = null;
         this._workerReady     = false;
         this._workerSyncedTo  = 0;          // sats already shipped to the worker
-        this._workerBuf       = null;       // Float32Array, our half of the ping-pong
+        this._workerBuf       = null;       // transferable: Float32Array, our half of the ping-pong
         this._workerInFlight  = false;
         this._workerFrameId   = 0;
         this._workerLastFrame = 0;          // most recent frameId that landed
         this._workerEnabled   = (typeof Worker !== 'undefined');
+
+        // SAB fast path. crossOriginIsolated requires COOP/COEP to be
+        // set on the document; vercel.json + dev-server.mjs add them
+        // on /operations.html. Pages without those headers (or
+        // browsers that don't honour `credentialless` — Safari today)
+        // see crossOriginIsolated === false and stay on the
+        // transferable path.
+        //
+        // _syncSab is a tiny (16-byte) SAB carrying an Int32Array we
+        // use as an Atomics fence between the worker's SAB writes
+        // and the main thread's gl.bufferData read. Slot 0 is the
+        // publish counter (worker writes after each completed
+        // frame), slot 1 is the writing flag (1 while writes are in
+        // progress, 0 when done). Without the fence, a slow render
+        // could in principle overlap a worker write — bounded but
+        // visually torn. With it, we just defer the upload one frame
+        // when the writing flag is set.
+        const isolated = typeof self !== 'undefined'
+            && self.crossOriginIsolated
+            && typeof SharedArrayBuffer !== 'undefined';
+        this._posSab        = null;
+        this._syncSab       = null;
+        this._syncView      = null;
+        this._ctrlSab       = null;
+        this._ctrlView      = null;
+        this._sabReady      = false;             // worker has accepted the SAB
+        this._lastUploadedFrame = 0;             // frameId we last uploaded for
+        // Atomics.waitAsync is what lets the worker stay coordinated
+        // via SAB without burning a postMessage per frame. Falls
+        // back to the message-driven path on engines that don't
+        // support it (Chrome <87, FF <89, Safari <15.4).
+        this._atomicsTickEnabled = isolated && typeof Atomics?.waitAsync === 'function';
+        if (isolated) {
+            try {
+                this._posSab   = new SharedArrayBuffer(this._maxSats * 3 * 4);
+                this._syncSab  = new SharedArrayBuffer(16);
+                this._syncView = new Int32Array(this._syncSab);
+                if (this._atomicsTickEnabled) {
+                    this._ctrlSab  = new SharedArrayBuffer(24);
+                    this._ctrlView = new Float64Array(this._ctrlSab);
+                    // Worker starts the tick loop; main marks RUNNING=1
+                    // so the worker's loop doesn't shut down before the
+                    // first tick lands.
+                    Atomics.store(this._syncView, SYNC_RUNNING_SLOT, 1);
+                }
+            } catch (err) {
+                console.debug('[SatTracker] SAB alloc failed, transferable path only:', err.message);
+                this._posSab = null;
+                this._syncSab = null;
+                this._syncView = null;
+                this._ctrlSab = null;
+                this._ctrlView = null;
+                this._atomicsTickEnabled = false;
+            }
+        }
+
         if (this._workerEnabled) this._spawnWorker();
 
         // Shell visualization group
@@ -713,7 +801,16 @@ export class SatelliteTracker {
             this._pointsMesh.geometry.dispose();
         }
         const n = this._satellites.length;
-        const posArr = new Float32Array(n * 3);
+        // SAB fast path: the position attribute is a Float32Array
+        // view over the shared SAB the worker is also writing to. As
+        // n grows we re-wrap the view; the SAB itself was sized to
+        // maxSats at construction so we never reallocate. WebGL's
+        // bufferData reads through the typed array view, which works
+        // regardless of whether the underlying buffer is an
+        // ArrayBuffer or a SharedArrayBuffer.
+        const posArr = this._posSab
+            ? new Float32Array(this._posSab, 0, n * 3)
+            : new Float32Array(n * 3);
         const colArr = new Float32Array(n * 3);
 
         const overrides = this._colorOverrides;
@@ -792,11 +889,22 @@ export class SatelliteTracker {
 
     _teardownWorker() {
         if (!this._worker) return;
+        // Signal the Atomics tick loop to drop out of waitAsync, then
+        // terminate. The notify is needed because the worker is
+        // parked in waitAsync — without it, terminate still works
+        // but waitAsync may keep its promise pending until GC.
+        if (this._syncView) {
+            try {
+                Atomics.store(this._syncView, SYNC_RUNNING_SLOT, 0);
+                Atomics.notify(this._syncView, SYNC_REQUEST_SLOT, 1);
+            } catch (_) { /* sync view may already be detached */ }
+        }
         try { this._worker.terminate(); } catch (_) {}
-        this._worker         = null;
-        this._workerEnabled  = false;
-        this._workerReady    = false;
-        this._workerInFlight = false;
+        this._worker             = null;
+        this._workerEnabled      = false;
+        this._workerReady        = false;
+        this._workerInFlight     = false;
+        this._atomicsTickEnabled = false;
         // _workerBuf is whatever's lying around; main-batch path will
         // allocate its own.
     }
@@ -805,23 +913,40 @@ export class SatelliteTracker {
         if (msg.type === 'ready') {
             if (msg.ok && msg.hasRegistry) {
                 this._workerReady = true;
+                // If the page is crossOriginIsolated and we got a SAB
+                // allocated, hand it over now. The worker will switch
+                // to shared-memory mode for ticks.
+                if (this._posSab) {
+                    this._worker.postMessage({
+                        type:           'init-shared',
+                        sab:            this._posSab,
+                        syncSab:        this._syncSab ?? null,
+                        ctrlSab:        this._ctrlSab ?? null,
+                        atomicsTickRequested: !!this._atomicsTickEnabled,
+                    });
+                }
                 // Ship every sat we already know about.
                 this._workerSync();
             } else {
-                // WASM didn't load in the worker — fall back permanently.
                 console.debug('[SatTracker] worker WASM init failed:', msg.error || 'no registry');
                 this._teardownWorker();
             }
             return;
         }
-        if (msg.type === 'add-ack' || msg.type === 'clear-ack') {
+        if (msg.type === 'shared-ready') {
+            if (msg.ok) {
+                this._sabReady = true;
+            } else {
+                console.debug('[SatTracker] worker rejected SAB, falling back to transferable:', msg.error);
+                this._posSab   = null;
+                this._sabReady = false;
+            }
             return;
         }
+        if (msg.type === 'add-ack' || msg.type === 'clear-ack') return;
         if (msg.type === 'positions') {
             this._workerInFlight = false;
             this._workerLastFrame = msg.frameId;
-            const buf = new Float32Array(msg.buffer);
-            this._workerBuf = buf;
 
             if (msg.mismatch) {
                 // Slot count drifted — re-ship everything and skip
@@ -831,12 +956,87 @@ export class SatelliteTracker {
                 this._workerSync();
                 return;
             }
-            this._uploadPositionsFromBuffer(buf, msg.slots);
+
+            if (this._sabReady && msg.buffer == null) {
+                // SAB path: positions are already in shared memory
+                // (which the THREE position attribute is a view over).
+                // Just refresh lat/lon and tell the GPU to re-upload.
+                this._refreshFromSab(msg.slots, msg.frameId);
+            } else {
+                // Transferable path: wrap a view, copy in.
+                const buf = new Float32Array(msg.buffer);
+                this._workerBuf = buf;
+                this._uploadPositionsFromBuffer(buf, msg.slots);
+            }
             return;
         }
         if (msg.type === 'error') {
             console.warn('[SatTracker] worker error:', msg.error);
             return;
+        }
+    }
+
+    /**
+     * SAB-mode counterpart to _uploadPositionsFromBuffer. The position
+     * attribute already shares memory with the worker, so there's
+     * nothing to copy — we just walk the buffer for lat/lon recovery
+     * and the highlight sprite, and flag the attribute as dirty so
+     * the next render uploads it to the GPU.
+     *
+     * Atomics fence: read the worker's writing flag with
+     * Atomics.load. Pairs with the worker's Atomics.store before its
+     * SAB writes, so this load is the synchronization edge that
+     * makes those writes visible. If the flag is set we skip the
+     * needsUpdate (uploading mid-write would tear positions); the
+     * next 'positions' message will retry. We still do lat/lon
+     * recovery — the read is still a valid snapshot for tooltip /
+     * cohort consumers, just not for GPU upload.
+     */
+    _refreshFromSab(slotCount, frameId) {
+        if (!this._positions || !this._posSab) return;
+        const writing = this._syncView
+            ? Atomics.load(this._syncView, SYNC_WRITING_SLOT)
+            : 0;
+        const view = this._positions.array;
+        const n = Math.min(slotCount, this._satellites.length);
+        const kmToScene = this._earthR / RE_KM;
+        let dirty = false;
+        for (let i = 0; i < n; i++) {
+            const off = i * 3;
+            const x = view[off];
+            const y = view[off + 1];
+            const z = view[off + 2];
+            if (x !== x) continue;   // NaN — keep last known position
+            dirty = true;
+
+            const sat = this._satellites[i];
+            const sx = x / kmToScene;
+            const sy = y / kmToScene;
+            const sz = z / kmToScene;
+            const r  = Math.sqrt(sx * sx + sy * sy + sz * sz);
+            if (r > 1e-9) {
+                const cy = sy / r;
+                sat.lat = Math.asin(cy < -1 ? -1 : cy > 1 ? 1 : cy) * RAD;
+                sat.lon = Math.atan2(-sz, sx) * RAD;
+                sat.alt = r - RE_KM;
+            }
+            if (this._highlightNoradId != null
+                && sat.tle.norad_id === this._highlightNoradId
+                && this._highlightSprite) {
+                this._highlightSprite.position.set(x, y, z);
+            }
+        }
+        if (dirty && !writing && Number.isFinite(frameId)) {
+            // Safe to upload — worker has finished writes for this
+            // frame. Without the fence we'd unconditionally set
+            // needsUpdate and risk a torn gl.bufferData on slow GPUs.
+            this._positions.needsUpdate = true;
+            this._lastUploadedFrame = frameId;
+        } else if (dirty && !this._syncView) {
+            // No sync SAB available (browser doesn't support it for
+            // some reason) — fall back to the previous behaviour:
+            // assume the postMessage barrier is enough.
+            this._positions.needsUpdate = true;
         }
     }
 
@@ -956,28 +1156,88 @@ export class SatelliteTracker {
 
         // Worker path (preferred). The worker has its own WASM
         // registry; the main thread keeps it in sync via add-sats
-        // messages and ping-pongs a single transferable buffer for
-        // positions. We never block on the worker — if it's still
-        // busy when this frame fires, positions stay one frame stale
-        // (visually invisible at 60 fps).
+        // messages. Two transports converge here:
+        //
+        //   - SAB    : tick is a tiny header message; the worker
+        //              writes positions straight into the shared
+        //              memory the THREE position attribute is a view
+        //              over.
+        //   - Xfer   : a Float32Array's buffer ping-pongs across
+        //              postMessage transfer.
+        //
+        // Either way we hold at most one outstanding tick — if the
+        // worker hasn't acked yet, this frame skips and positions
+        // stay one frame stale (invisible at 60 fps).
         if (this._workerReady && this._workerEnabled) {
             this._workerSync();
-            if (this._workerBuf && !this._workerInFlight) {
+
+            // Atomics-only protocol: zero postMessage on the hot tick
+            // path. Main writes (jd, gmst, scale) into a shared
+            // Float64 control SAB, bumps REQUEST in the sync SAB,
+            // and Atomics.notify wakes the worker (which is parked
+            // in waitAsync). Each frame we also poll PUBLISH for the
+            // most recent worker-completed frame; if newer than the
+            // last one we uploaded for, refresh lat/lon and flag the
+            // GPU upload (gated on the WRITING flag).
+            if (this._atomicsTickEnabled && this._sabReady) {
+                const published = Atomics.load(this._syncView, SYNC_PUBLISH_SLOT);
+                if (published !== this._lastUploadedFrame) {
+                    this._refreshFromSab(this._workerSyncedTo, published);
+                }
+
+                // Write control + bump request. The 32-bit wrap on the
+                // request id is fine: PUBLISH and REQUEST are
+                // compared with !== so a wrap-around still triggers
+                // an upload and wakes the worker.
+                this._ctrlView[CTRL_JD_SLOT]    = jd;
+                this._ctrlView[CTRL_GMST_SLOT]  = gmstRad;
+                this._ctrlView[CTRL_SCALE_SLOT] = kmToScene;
+                const id = (this._workerFrameId + 1) | 0;
+                this._workerFrameId = id;
+                Atomics.store(this._syncView, SYNC_REQUEST_SLOT, id);
+                Atomics.notify(this._syncView, SYNC_REQUEST_SLOT, 1);
+                return;
+            }
+
+            if (this._workerInFlight) return;
+
+            // postMessage protocol — the previous fast path. Defers
+            // the post to a microtask so the worker's next SAB write
+            // begins only after this frame's renderer.render() call
+            // has completed gl.bufferData. The Atomics fence in
+            // _refreshFromSab is the safety net.
+            if (this._sabReady) {
+                this._workerInFlight = true;
+                const frameId        = ++this._workerFrameId;
+                queueMicrotask(() => {
+                    this._worker?.postMessage({
+                        type:           'tick',
+                        jd, gmst:        gmstRad,
+                        scale:           kmToScene,
+                        frameId,
+                        expectedSlots:   this._workerSyncedTo,
+                    });
+                });
+                return;
+            }
+            if (this._workerBuf) {
                 const buf = this._workerBuf;
                 this._workerBuf       = null;
                 this._workerInFlight  = true;
                 const frameId         = ++this._workerFrameId;
-                this._worker.postMessage(
-                    {
-                        type:           'tick',
-                        jd, gmst:        gmstRad,
-                        scale:           kmToScene,
-                        buffer:          buf.buffer,
-                        frameId,
-                        expectedSlots:   this._workerSyncedTo,
-                    },
-                    [buf.buffer],
-                );
+                queueMicrotask(() => {
+                    this._worker?.postMessage(
+                        {
+                            type:           'tick',
+                            jd, gmst:        gmstRad,
+                            scale:           kmToScene,
+                            buffer:          buf.buffer,
+                            frameId,
+                            expectedSlots:   this._workerSyncedTo,
+                        },
+                        [buf.buffer],
+                    );
+                });
             }
             return;
         }

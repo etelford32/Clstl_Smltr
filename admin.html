@@ -8,7 +8,7 @@
 <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin — Parker Physics App</title>
+    <title>Admin — Parkers Physics App</title>
     <link rel="stylesheet" href="js/nav-styles.css">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -156,8 +156,11 @@
     "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
 }}
 </script>
-
-<nav></nav>
+<!-- perf-hints:start -->
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" crossorigin>
+<!-- perf-hints:end --><nav></nav>
 <script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("admin");</script>
 
 <div class="auth-gate" id="auth-gate">
@@ -758,7 +761,7 @@
 </main>
 
 <footer>
-    <p>&copy; 2026 Parker Physics &middot; <a href="index.html">Home</a> &middot; <a href="dashboard.html">Dashboard</a></p>
+    <p>&copy; 2026 Parkers Physics &middot; <a href="index.html">Home</a> &middot; <a href="dashboard.html">Dashboard</a></p>
 </footer>
 
 <script type="module">

@@ -1,0 +1,66 @@
+name: Dashboard console probe
+
+# Watches https://www.parkersphysics.com/dashboard.html for Tier-1 regressions
+# (uncaught exceptions in the page module, which cascade into a dead UI per
+# AUTH_FLOW_REVIEW.md / the Tier-1 analysis). Runs every 4 hours plus on
+# manual dispatch. When a probe fails, the workflow's annotated logs surface
+# the first uncaught exception + stack — same data a human would dig out of
+# DevTools, just collected by automation.
+
+on:
+  schedule:
+    - cron: '17 */4 * * *'   # every 4 hours, offset to avoid the top of the hour
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'Dashboard URL to probe'
+        required: false
+        default: 'https://www.parkersphysics.com/dashboard.html'
+
+permissions:
+  contents: read
+  issues: write   # to (re)open a tracking issue when a probe fails
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run probe
+        id: probe
+        env:
+          PROBE_URL: ${{ inputs.url || 'https://www.parkersphysics.com/dashboard.html' }}
+          PROBE_JSON: '0'
+        run: |
+          set +e
+          npm run -s probe:dashboard | tee probe-output.txt
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload probe output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-probe-${{ github.run_id }}
+          path: probe-output.txt
+          retention-days: 14
+
+      - name: Fail job on uncaught exception
+        if: steps.probe.outputs.exit_code != '0'
+        run: |
+          echo "::error::Dashboard probe failed — see probe-output.txt artifact"
+          exit 1

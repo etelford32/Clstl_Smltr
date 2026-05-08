@@ -33,7 +33,7 @@ const NAV_DROPDOWNS = [
         label: 'Earth',
         id: 'earth-menu',
         items: [
-            { href: 'earth.html',             label: 'Earth',               sub: '3D globe with live data layers',       tier: 'public',   icon: '🌍' },
+            { href: 'earth.html',             label: 'Earth Weather',       sub: 'Predictive weather + magnetosphere',   tier: 'public',   icon: '🌍' },
             { href: 'moon.html',              label: 'Moon',                sub: 'Lunar radiation environment',          tier: 'public',   icon: '🌙' },
             { href: 'operations.html',        label: 'Operations',          sub: 'Fleet & debris analysis console',      tier: 'public',   icon: '🛰️', badge: 'PRO PREVIEW', id: 'operations' },
             { href: 'satellites.html',        label: 'Satellites',          sub: 'Real-time orbital tracking',           tier: 'advanced', icon: '🛰️', badge: 'PRO' },
@@ -46,7 +46,7 @@ const NAV_DROPDOWNS = [
         id: 'space-weather',
         items: [
             { href: 'space-weather.html', label: 'Space Weather',  sub: 'Live solar & geomagnetic data',   tier: 'public', icon: '🌤️', id: 'weather' },
-            { href: 'threejs.html',       label: 'Solar System',   sub: 'Interactive 3D orrery',           tier: 'public', icon: '🪐', id: 'solar' },
+            { href: 'threejs.html',       label: 'Solar System',   sub: '31 moons · live Galilean N-body', tier: 'public', icon: '🪐', id: 'solar' },
             { href: 'sun.html',           label: 'The Sun',        sub: 'Real-time solar surface view',    tier: 'public', icon: '☀️' },
             { href: 'missions.html',      label: 'Space Missions', sub: 'Inner solar system fleet roster', tier: 'public', icon: '🛸', id: 'missions' },
             { href: 'mission-planner.html', label: 'Mission Planner', sub: 'Launch rockets · plan Moon & Mars trips', tier: 'public', icon: '🎯', badge: 'NEW', id: 'mission-planner' },
@@ -83,7 +83,8 @@ const NAV_DROPDOWNS = [
             { href: 'star2d.html',            label: '2D Stellar Modeler',   sub: 'HR diagram + classification',     tier: 'public', icon: '📊' },
             { href: 'star2d-advanced.html',   label: 'Advanced 2D Solar',    sub: 'CME, Parker spirals, fluid',      tier: 'free',   icon: '🔬' },
             { href: 'gravity-lab.html',       label: 'Gravity Lab',          sub: 'Live N-body · moons & resonances', tier: 'public', icon: '🪐', badge: 'NEW', id: 'gravity-lab' },
-            { href: 'jupiter-system.html',    label: 'Jovian System',        sub: 'Galilean moons · Laplace resonance live', tier: 'public', icon: '🪐', badge: 'NEW', id: 'jupiter-system' },
+            // Jovian System merged into the live Solar System orrery (threejs.html).
+            // Galilean moons now run inside the main scene via Yoshida-4 N-body.
             { href: 'time-machine.html',      label: 'Orbital Time Machine', sub: 'N-body propagation · ±10 kyr to ±1 Myr', tier: 'public', icon: '⏳', badge: 'IN DEV', id: 'time-machine' },
             { href: 'rust.html',              label: 'Rust/WASM Engine',     sub: 'WebAssembly compute module',      tier: 'free',   icon: '⚙️' },
         ],
@@ -165,7 +166,7 @@ export function initNav(activeId = '') {
     const isSignedIn = !!auth;
     const isAdmin = auth?.role === 'admin' || auth?.role === 'superadmin';
 
-    // Educator tier carries a "Powered by Parker Physics" attribution
+    // Educator tier carries a "Powered by Parkers Physics" attribution
     // requirement. Mount the badge once; it self-renders on auth-changed
     // so a plan switch toggles visibility without a reload. Cheap to
     // import even when no badge is shown — the module is ~1.5kb.
@@ -185,9 +186,9 @@ export function initNav(activeId = '') {
     }
 
     let html = `
-        <a href="index.html" class="nav-brand" aria-label="Parker Physics home">
-            <img src="${LOGO_IMG}" class="nav-logo-img" alt="Parker Physics">
-            Parker Physics
+        <a href="index.html" class="nav-brand" aria-label="Parkers Physics home">
+            <img src="${LOGO_IMG}" class="nav-logo-img" alt="Parkers Physics">
+            Parkers Physics
         </a>
         <button type="button" class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">
             <span class="burger-line"></span>

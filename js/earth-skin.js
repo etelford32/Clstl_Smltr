@@ -874,7 +874,16 @@ float vnoise(vec2 p) {
 }
 
 void main() {
-    if (u_enabled < 0.5 || u_kp < 1.5) discard;
+    // Hard kill on toggle off — that is the users intent. We do NOT
+    // also discard on low Kp the way the previous version did: that
+    // made the toggle silently no-op during quiet periods (Kp below
+    // 1.5 is most of the time at solar minimum), so users would flip
+    // the checkbox and see no visual response, concluding "the toggle
+    // is broken." Instead, the shader always runs while u_enabled is
+    // on; a quiet-period multiplier (quietGate below) softly fades
+    // the band toward zero alpha so the visual story is "I see the
+    // oval is there, it is just dim because nothing is happening."
+    if (u_enabled < 0.5) discard;
 
     // UV reconstructed from interpolated object-space normal (see EARTH_VERT
     // for the rationale). Feed it straight into the same helpers used by the
@@ -890,11 +899,19 @@ void main() {
     float absLat      = 90.0 - min(magCoLatDeg, 180.0 - magCoLatDeg);
     float lonDeg      = uvToLatLonDeg(vUv).y;
 
+    // For visualisation only — when actual Kp is below the climatological
+    // floor we *render* as if Kp were 1.5 so the oval has a visible band
+    // even at solar minimum. This is purely cosmetic; the actual
+    // physical inputs (band width, ray gating, colour ramp) still respond
+    // to the live Kp via kpEff.  quietGate later fades the alpha back
+    // down so quiet periods don't lie about activity.
+    float kpDisplay = max(u_kp, 1.5);
+
     // Effective storm strength — Kp plus a Bz-south kicker so a fresh
     // southward turning shoves the oval equatorward immediately, without
     // having to wait for the Kp index to catch up.
     float bz      = clamp(u_bz_south, 0.0, 1.0);
-    float kpEff   = u_kp + bz * 1.8;
+    float kpEff   = kpDisplay + bz * 1.8;
 
     // Equatorward boundary (deg). Matches js/user-location.js#auroraVisibility
     // with a -Bz shift added so reconnection-driven expansion shows visibly.
@@ -972,10 +989,18 @@ void main() {
     // Fade in over Kp_eff 1.5 → 3.
     float kpGate = smoothstep(1.5, 3.0, kpEff);
 
+    // Quiet-period gate — at the actual Kp 0 the oval renders at ~30%
+    // of its full alpha; at Kp ≥ 2 it's at full strength. Combined
+    // with the kpDisplay floor above, this gives the user a visible
+    // "the toggle is on, here's where the oval lives" indicator
+    // during solar minimum without overstating the activity.
+    float quietGate = mix(0.30, 1.0, smoothstep(0.0, 2.0, u_kp));
+
     float intensity = band * pulse * nightM * kpGate * rayGlow * powerBoost + substorm * band * nightM;
     float curtain   = 0.55 + 0.45 * eq;
 
-    gl_FragColor = vec4(col * intensity * curtain * 1.8, clamp(intensity * 0.85, 0.0, 1.0));
+    gl_FragColor = vec4(col * intensity * curtain * 1.8 * quietGate,
+                        clamp(intensity * 0.85 * quietGate, 0.0, 1.0));
 }`;
 
 // ═══════════════════════════════════════════════════════════════════════════════

@@ -559,6 +559,7 @@ export class AtmosphereGlobe {
             console.debug('[upper-atmosphere] debris load skipped:', err?.message || err);
         });
         this._buildAltitudeRing();
+        this._buildAtmosphericPhenomena();
         this._buildSolarWind();
         this._buildMagneticCascade();
         if (this.opts.stars) this._initStars();
@@ -829,6 +830,9 @@ export class AtmosphereGlobe {
         // Drive the sun's emission visuals from F10.7 — corona glow,
         // streamer brightness/length, core temperature.
         this.setF107(f107);
+
+        // Refresh phenomena layer intensities (NLC, EEJ, AE rings, Sq).
+        this._updateAtmosphericPhenomena({ f107, ap });
 
         // Drive the magnetic-field cascade — solar EUV + precipitation
         // packets flowing down dipole L-shells into the auroral oval.
@@ -1483,6 +1487,12 @@ export class AtmosphereGlobe {
             probe.mesh.userData.tleEpoch  = sat.epoch;
         }
 
+        // Stash the raw TLE lines on the probe so the trajectory
+        // analyzer can run SGP4 directly without a second fetch.
+        if (sat.line1 && sat.line2) {
+            probe.tleLines = { line1: sat.line1, line2: sat.line2, epoch: sat.epoch };
+        }
+
         // Rebuild the orbital-path polyline from the new elements.
         this._refreshOrbitalPath(probe);
         // And the conjunction-screener lookup table — its sampling is
@@ -1518,6 +1528,147 @@ export class AtmosphereGlobe {
      * { total, live, fetchedAt } or null if no fetch has resolved yet.
      * UI uses this to paint the "Live TLE · 2h ago" freshness pill.
      */
+    /**
+     * Lookup raw TLE lines for one tracked probe by id, if they were
+     * fetched live. Returns null when the probe is still on fallback
+     * mean elements or the spec has no NORAD ID.
+     */
+    getProbeTle(id) {
+        const probe = this._satProbes?.[id];
+        return probe?.tleLines || null;
+    }
+
+    /**
+     * Lightweight metadata bundle for the trajectory analyzer.
+     */
+    getProbeMeta(id) {
+        const probe = this._satProbes?.[id];
+        if (!probe) return null;
+        return {
+            id,
+            name:    probe.spec.name,
+            color:   probe.spec.color,
+            altKm:   probe.spec.altitudeKm,
+            noradId: probe.spec.orbital?.noradId,
+            inclinationDeg: probe.spec.orbital?.inclinationDeg,
+            tleLines: probe.tleLines || null,
+        };
+    }
+
+    // ── Live-catalog overlay (full active + debris cloud) ────────────────
+    // Lazy-instantiated on the first enableCatalogGroup() call. Reuses the
+    // shared SatelliteTracker class — its Rust-WASM SGP4 batch path handles
+    // tens of thousands of objects per frame. We attach it under the same
+    // scene as the rest of the globe so day/night and atmosphere cohorts
+    // stay aligned.
+    async enableCatalogGroup(group) {
+        const tracker = await this._ensureCatalogTracker();
+        if (!tracker) return { ok: false, reason: 'tracker init failed' };
+        try {
+            const added = await tracker.loadGroup(group);
+            return { ok: true, count: added ?? 0, total: tracker._satellites.length };
+        } catch (err) {
+            return { ok: false, reason: String(err?.message || err) };
+        }
+    }
+
+    /** Hide / forget one catalog group. */
+    disableCatalogGroup(group) {
+        const t = this._catalogTracker;
+        if (!t) return false;
+        // SatelliteTracker doesn't expose a per-group remove that
+        // truly drops slots; the cheap operation is to toggle visibility.
+        // Slots stay registered (cheap on the WASM side) but are not drawn.
+        if (t._groups?.has?.(group)) {
+            t.setGroupVisible?.(group, false);
+        }
+        return true;
+    }
+
+    /** Re-show a previously disabled group without re-fetching. */
+    showCatalogGroup(group) {
+        const t = this._catalogTracker;
+        if (!t) return false;
+        t.setGroupVisible?.(group, true);
+        return true;
+    }
+
+    /** Snapshot of catalog state — used by the toggle-bar status line. */
+    getCatalogStatus() {
+        const t = this._catalogTracker;
+        if (!t) return { total: 0, groups: [] };
+        return {
+            total: t._satellites?.length || 0,
+            groups: Array.from(t._groups || []).map(([name, info]) => ({
+                name, count: info.count, visible: info.visible !== false,
+            })),
+        };
+    }
+
+    async _ensureCatalogTracker() {
+        if (this._catalogTracker) return this._catalogTracker;
+        if (this._catalogTrackerLoading) return this._catalogTrackerLoading;
+        this._catalogTrackerLoading = (async () => {
+            try {
+                const mod = await import('./satellite-tracker.js');
+                // Earth radius = 1 in scene units; tracker handles km→scene.
+                // showOrbits=false avoids per-sat orbit-trail meshes (we
+                // do that on the named refs instead).
+                const tracker = new mod.SatelliteTracker(this._scene, 1.0, {
+                    maxSatellites: 35000,
+                    showOrbits: false,
+                });
+                // Make tracker points clickable for analysis. The
+                // tracker rebuilds its Points mesh on each add-sats batch,
+                // so we keep `_extraHittable` in sync with the live mesh
+                // instead of appending stale references.
+                this._catalogTracker = tracker;
+                this._extraHittable = this._extraHittable || [];
+                const syncHittable = () => {
+                    // Drop any prior catalog mesh and patch in the current
+                    // one. Other hittables (debris cloud, satellite
+                    // probes) live under different mesh refs so we only
+                    // touch the one tagged as the tracker's points mesh.
+                    this._extraHittable = this._extraHittable.filter(
+                        o => o.userData?.kind !== 'catalog-cloud'
+                    );
+                    if (tracker._pointsMesh) {
+                        tracker._pointsMesh.userData = tracker._pointsMesh.userData || {};
+                        tracker._pointsMesh.userData.kind = 'catalog-cloud';
+                        this._extraHittable.push(tracker._pointsMesh);
+                    }
+                };
+                syncHittable();
+                window.addEventListener('satellites-loaded', syncHittable);
+                return tracker;
+            } catch (err) {
+                console.warn('[upper-atmosphere] catalog tracker init failed:', err);
+                this._catalogTrackerLoading = null;
+                return null;
+            }
+        })();
+        return this._catalogTrackerLoading;
+    }
+
+    /** Resolve a catalog raycast hit to a sat record (TLE + name + alt). */
+    _resolveCatalogHit(hit) {
+        const t = this._catalogTracker;
+        if (!t || !hit || hit.object !== t._pointsMesh) return null;
+        const sat = t._satellites?.[hit.index];
+        if (!sat) return null;
+        return {
+            kind:   'catalog-point',
+            id:     `catalog-${sat.tle?.norad_id ?? hit.index}`,
+            name:   sat.tle?.name || `NORAD ${sat.tle?.norad_id ?? '—'}`,
+            altKm:  sat.alt,
+            color:  '#0cc',
+            noradId: sat.tle?.norad_id,
+            line1:  sat.tle?.line1,
+            line2:  sat.tle?.line2,
+            tooltip: `Click to analyze trajectory · alt ${(sat.alt ?? 0).toFixed(0)} km`,
+        };
+    }
+
     getTleSummary() {
         return this._tleSummary || null;
     }
@@ -1952,6 +2103,300 @@ export class AtmosphereGlobe {
         this._ring.rotation.x = Math.PI / 2;
         this._ring.rotation.y = 0.4;
         this._scene.add(this._ring);
+    }
+
+    /**
+     * Mesosphere phenomena + thermospheric currents — the missing
+     * "middle atmosphere" visualisation layer between the rim glow and
+     * the auroral oval.
+     *
+     * Built once; intensity + visibility tracked from setState() so the
+     * NLC band only lights up during the local hemisphere's summer
+     * window, the equatorial electrojet brightens with EUV (F10.7), and
+     * the auroral electrojet ring scales with Ap.
+     *
+     *   • NLC band   — two thin polar discs at 83 km, lat |φ| > 55°,
+     *                  cyan, summer-hemisphere-only intensity.
+     *   • EEJ ring   — equatorial electrojet at 110 km on the equator,
+     *                  yellow-green, dayside-tilted (the real EEJ is
+     *                  daylit-only but a full ring reads cleaner).
+     *   • Sq vortex pair — paired markers near ±30° lat at 110 km on
+     *                  the dayside, showing the classic two-cell Sq
+     *                  current system.
+     *   • Auroral EJ — magenta torus at 110 km along the auroral oval
+     *                  centerline — the visible analogue of the AE/AL
+     *                  current intensity.
+     *   • Meteor flux — 200 short streaks in the 80-100 km mesosphere
+     *                  hinting at the diurnal sporadic-meteor input.
+     */
+    _buildAtmosphericPhenomena() {
+        this._phenomenaGroup = new THREE.Group();
+        this._phenomenaGroup.name = 'atmospheric-phenomena';
+
+        // ── Noctilucent cloud caps (mesopause, ~83 km) ────────────────
+        // One thin torus per polar cap. The torus is centred on the y
+        // axis at sin(latRefDeg) and given a major radius cos(latRefDeg)
+        // so the ring lives at lat = latRefDeg on a sphere of radius
+        // (1 + 83/R_E). Keeping these as simple rings avoids the cost
+        // of a custom polar-cap shell.
+        const rNlc = 1 + 83 / R_EARTH_KM;
+        const latRef = 65 * Math.PI / 180;
+        const nlcMajor = rNlc * Math.cos(latRef);
+        const nlcY     = rNlc * Math.sin(latRef);
+        this._nlcGroup = new THREE.Group();
+        this._nlcGroup.name = 'nlc-band';
+        for (const sign of [+1, -1]) {
+            const ring = _ringMesh(nlcMajor, 0.0024, 0x9eecff, 0.0);
+            ring.position.y = nlcY * sign;
+            // Already lying in xz plane via _ringMesh; that matches a
+            // latitude line, so no extra rotation is needed.
+            ring.userData = {
+                kind: 'nlc-band',
+                hemisphere: sign > 0 ? 'N' : 'S',
+                tooltip: 'Noctilucent clouds — water-ice particles at ~83 km. '
+                       + 'Visible only in the summer-hemisphere mesopause window '
+                       + '(~50-65° lat, dawn/dusk twilight).',
+            };
+            this._nlcGroup.add(ring);
+        }
+        this._phenomenaGroup.add(this._nlcGroup);
+
+        // ── Equatorial electrojet (EEJ, ~110 km, ±3° lat) ─────────────
+        // Single bright ring on the geographic equator at 110 km. The
+        // real EEJ is a narrow eastward jet centred on the magnetic
+        // equator with a ±3° half-width — visualisation-grade is fine.
+        const rEej = 1 + 110 / R_EARTH_KM;
+        this._eejRing = _ringMesh(rEej, 0.0030, 0xc0ff60, 0.18);
+        this._eejRing.userData = {
+            kind: 'eej',
+            tooltip: 'Equatorial Electrojet — eastward dayside ionospheric current '
+                   + 'at ~110 km, driven by the daily E×B tidal dynamo. '
+                   + 'Brightens with F10.7 (EUV ionisation).',
+        };
+        this._phenomenaGroup.add(this._eejRing);
+
+        // ── Auroral electrojet ring (AE/AL surrogate, ~110 km) ────────
+        // Pair of rings at lat ±67° on the same 110 km shell. Brightens
+        // with Ap and modulates with substorm phase from the substorm
+        // controller.
+        const aeLat = 67 * Math.PI / 180;
+        const aeMajor = rEej * Math.cos(aeLat);
+        const aeY     = rEej * Math.sin(aeLat);
+        this._aeGroup = new THREE.Group();
+        this._aeGroup.name = 'ae-rings';
+        for (const sign of [+1, -1]) {
+            const ring = _ringMesh(aeMajor, 0.0028, 0xff6dd2, 0.12);
+            ring.position.y = aeY * sign;
+            ring.userData = {
+                kind: 'ae-ring',
+                hemisphere: sign > 0 ? 'N' : 'S',
+                tooltip: 'Auroral Electrojet — westward (AL) and eastward (AU) '
+                       + 'currents at ~110 km along the auroral oval. '
+                       + 'Brightens with Ap; intensifies during substorm expansion.',
+            };
+            this._aeGroup.add(ring);
+        }
+        this._phenomenaGroup.add(this._aeGroup);
+
+        // ── Sq quiet-time vortex markers (~110 km, dayside ±30° lat) ──
+        // Two soft glowing spheres marking the centres of the daytime
+        // Sq current loops. Visualisation-only — the real Sq vortex is
+        // a 2-D current-system that shifts with local time.
+        this._sqGroup = new THREE.Group();
+        this._sqGroup.name = 'sq-vortices';
+        const sqLat = 30 * Math.PI / 180;
+        const sqMajor = rEej * Math.cos(sqLat);
+        const sqY     = rEej * Math.sin(sqLat);
+        for (const sign of [+1, -1]) {
+            const sphere = new THREE.Mesh(
+                new THREE.SphereGeometry(0.020, 18, 14),
+                new THREE.MeshBasicMaterial({
+                    color: 0xfff0a8,
+                    transparent: true,
+                    opacity: 0.0,
+                    blending: THREE.AdditiveBlending,
+                    depthWrite: false,
+                }),
+            );
+            sphere.userData = {
+                _sign:   sign,
+                _major:  sqMajor,
+                _y:      sqY * sign,
+                kind:    'sq-vortex',
+                hemisphere: sign > 0 ? 'N' : 'S',
+                tooltip: 'Sq current cell — daytime ionospheric dynamo vortex centre. '
+                       + 'Two cells (one per hemisphere) drive a ~30 nT '
+                       + 'magnetic-field perturbation at the surface.',
+            };
+            this._sqGroup.add(sphere);
+        }
+        this._phenomenaGroup.add(this._sqGroup);
+
+        // ── Mesospheric meteor flux (80-100 km, point streaks) ────────
+        // Static Points cloud — positions are chosen on a thin spherical
+        // shell at altitudes 80-100 km. Visual only; per-frame phase is
+        // baked into the shader via a sin(time + offset) opacity term so
+        // points blink as if they were ionising trails.
+        const meteorN = 240;
+        const positions = new Float32Array(meteorN * 3);
+        const phases    = new Float32Array(meteorN);
+        for (let i = 0; i < meteorN; i++) {
+            const u = Math.random();
+            const v = Math.random();
+            const theta = 2 * Math.PI * u;
+            const phi   = Math.acos(2 * v - 1);
+            const altKm = 80 + 20 * Math.random();
+            const r = 1 + altKm / R_EARTH_KM;
+            positions[i * 3 + 0] = r * Math.sin(phi) * Math.cos(theta);
+            positions[i * 3 + 1] = r * Math.cos(phi);
+            positions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
+            phases[i] = Math.random() * Math.PI * 2;
+        }
+        const meteorGeo = new THREE.BufferGeometry();
+        meteorGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        meteorGeo.setAttribute('aPhase',   new THREE.BufferAttribute(phases, 1));
+        const meteorMat = new THREE.ShaderMaterial({
+            uniforms: {
+                uTime:      { value: 0 },
+                uIntensity: { value: 0.0 },
+            },
+            vertexShader: /* glsl */`
+                attribute float aPhase;
+                uniform float uTime;
+                varying float vBlink;
+                void main() {
+                    float blink = 0.5 + 0.5 * sin(uTime * 2.0 + aPhase * 6.28);
+                    vBlink = pow(blink, 4.0);
+                    vec4 mv = modelViewMatrix * vec4(position, 1.0);
+                    gl_Position = projectionMatrix * mv;
+                    gl_PointSize = 1.5 + 2.5 * vBlink;
+                }
+            `,
+            fragmentShader: /* glsl */`
+                uniform float uIntensity;
+                varying float vBlink;
+                void main() {
+                    vec2 uv = gl_PointCoord - vec2(0.5);
+                    float r = length(uv);
+                    if (r > 0.5) discard;
+                    float a = (1.0 - r * 2.0) * vBlink * uIntensity;
+                    gl_FragColor = vec4(1.0, 0.85, 0.5, a);
+                }
+            `,
+            transparent: true,
+            depthWrite:  false,
+            blending:    THREE.AdditiveBlending,
+        });
+        this._meteorPoints = new THREE.Points(meteorGeo, meteorMat);
+        this._meteorPoints.userData = {
+            kind:    'meteor-flux',
+            tooltip: 'Sporadic-meteor mass-deposition zone (80-100 km). '
+                   + '~10 t/day worldwide; lifts metallic-ion layers. '
+                   + 'Brightens during the major showers (Perseids, Geminids).',
+        };
+        this._phenomenaGroup.add(this._meteorPoints);
+
+        this._scene.add(this._phenomenaGroup);
+
+        // Seed initial intensities — refined by setState().
+        this._updateAtmosphericPhenomena({
+            f107: 150, ap: 15,
+            monthIdx: new Date().getUTCMonth(),
+        });
+    }
+
+    /**
+     * Drive the phenomena layer's per-element intensities from the
+     * current (F10.7, Ap) state plus the calendar month (for NLC
+     * seasonality). Called from setState() and once at boot.
+     */
+    _updateAtmosphericPhenomena({ f107 = 150, ap = 15, monthIdx = null } = {}) {
+        if (!this._phenomenaGroup) return;
+        const m = (monthIdx == null) ? new Date().getUTCMonth() : monthIdx;
+
+        // NLC seasonality — peaks ~20 d after summer solstice.
+        // North hemisphere peak: late June (m≈5.7); south: late December.
+        const nlcWindow = (peakM) => {
+            const d = Math.abs(((m - peakM + 12) % 12));
+            const dist = Math.min(d, 12 - d);
+            return Math.max(0, Math.cos(dist / 1.5 * Math.PI / 2));
+        };
+        const nlcN = nlcWindow(5.7);
+        const nlcS = nlcWindow(11.7);
+        if (this._nlcGroup) {
+            this._nlcGroup.children.forEach(ring => {
+                const isN = ring.userData.hemisphere === 'N';
+                ring.material.opacity = (isN ? nlcN : nlcS) * 0.55;
+            });
+        }
+
+        // Equatorial electrojet brightens with F10.7 (EUV → conductivity)
+        // and dampens slightly during the strongest storms (counter-EEJ
+        // events around noon).
+        if (this._eejRing) {
+            const eejBase = Math.min(1, Math.max(0, (f107 - 70) / 200));
+            const counter = ap > 100 ? 0.4 : 1.0;          // proxy for CEJ
+            this._eejRing.material.opacity = 0.18 + 0.55 * eejBase * counter;
+        }
+
+        // Auroral electrojet rings track Ap (storm intensity).
+        if (this._aeGroup) {
+            const ae = Math.min(1, ap / 100);
+            this._aeGroup.children.forEach(r => {
+                r.material.opacity = 0.10 + 0.65 * ae;
+            });
+        }
+
+        // Sq vortex strength scales with EUV ionisation (F10.7) and
+        // *declines* during storms (storm-time ionospheric dynamo
+        // disruption).
+        if (this._sqGroup) {
+            const sq = Math.min(1, Math.max(0, (f107 - 70) / 180));
+            const stormDamp = 1 / (1 + ap / 80);
+            this._sqGroup.children.forEach(s => {
+                s.material.opacity = 0.30 * sq * stormDamp;
+            });
+        }
+
+        // Meteor-flux blink intensity — slight diurnal modulation handled
+        // in the shader, but the master brightness rides at a fixed
+        // baseline so users always see something.
+        if (this._meteorPoints) {
+            this._meteorPoints.material.uniforms.uIntensity.value = 0.85;
+        }
+
+        // Cache so the per-frame _stepPhenomena keeps Sq vortices on the
+        // dayside as the Earth rotates the sun-direction.
+        this._phenomenaState = { f107, ap, monthIdx: m };
+    }
+
+    /**
+     * Per-frame update for phenomena — slides Sq vortices to track
+     * local-noon (subsolar longitude) and ticks the meteor shader's
+     * uTime so the points blink. Cheap; runs every frame.
+     */
+    _stepPhenomena(elapsedSec) {
+        if (!this._phenomenaGroup) return;
+        if (this._meteorPoints) {
+            this._meteorPoints.material.uniforms.uTime.value = elapsedSec;
+        }
+        if (this._sqGroup && this._sunDir) {
+            // Place each vortex on the dayside (along +sun direction)
+            // at lat ±30° on the 110 km shell. Use the sun direction
+            // already cached on the globe (subsolar geometry).
+            const sun = this._sunDir.clone().normalize();
+            // Build a frame: y-up = world Y, x = projection of sun on
+            // the equatorial plane.
+            const eqSun = new THREE.Vector3(sun.x, 0, sun.z);
+            if (eqSun.lengthSq() < 1e-6) eqSun.set(1, 0, 0);
+            eqSun.normalize();
+            for (const s of this._sqGroup.children) {
+                const sign = s.userData._sign;
+                const major = s.userData._major;
+                const y     = s.userData._y;
+                s.position.set(eqSun.x * major, y, eqSun.z * major);
+            }
+        }
     }
 
     _buildSolarWind() {
@@ -2673,6 +3118,10 @@ export class AtmosphereGlobe {
             // userData; the recursive=true raycast finds them via
             // their parent groups.
             ...(this._cascade ? [this._cascade.group] : []),
+            // Live-catalog Points cloud — populated lazily by
+            // enableCatalogGroup(). Each point picks per-index back to
+            // a TLE record via _resolveCatalogHit.
+            ...(this._extraHittable || []),
         ];
 
         // Recursive: the ISS sprite carries a child halo mesh; if we
@@ -2699,6 +3148,9 @@ export class AtmosphereGlobe {
          */
         const _userDataForHit = (hit) => {
             if (!hit) return {};
+            // Live-catalog cloud hit → resolve to a specific TLE.
+            const catUd = this._resolveCatalogHit?.(hit);
+            if (catUd) return catUd;
             // Debris cloud hit → resolve to a specific piece.
             if (hit.object === this._debrisCloud
                 && Number.isFinite(hit.index)
@@ -2783,6 +3235,23 @@ export class AtmosphereGlobe {
                 this.flyToISS();
             } else if (ud?.kind === 'debris-piece' && Number.isFinite(ud.debrisIdx)) {
                 this.flyToDebris(ud.debrisIdx);
+            } else if (ud?.kind === 'catalog-point' && (ud.line1 || ud.noradId)) {
+                // Click on any live-catalog point → push into the
+                // trajectory analyzer panel. Pass TLE inline if we have
+                // it; analyzer falls back to /api/celestrak/tle?norad=
+                // otherwise.
+                try {
+                    window.dispatchEvent(new CustomEvent('ua-analyze-sat', {
+                        detail: {
+                            id:    ud.id,
+                            name:  ud.name,
+                            color: ud.color,
+                            line1: ud.line1,
+                            line2: ud.line2,
+                            noradId: ud.noradId,
+                        }
+                    }));
+                } catch (_) { /* ignore */ }
             }
         };
         this.canvas.addEventListener('mousemove', onMove);
@@ -2887,6 +3356,7 @@ export class AtmosphereGlobe {
         if (this._satProbes) this._stepSatellites(t);
         if (this._debris)    this._stepDebris(t);
         if (this._constellationClouds) this._stepConstellations(t);
+        if (this._phenomenaGroup) this._stepPhenomena(t);
         // Track the hovered debris with a face-on cyan reticle so
         // users can tell which of 50 identical-looking pink dots the
         // tooltip is describing. Cheap; just position + scale + lookAt.
@@ -2905,6 +3375,13 @@ export class AtmosphereGlobe {
         // drop the shell's opacity so the user can see through the layer
         // they're standing in. Cheap — five comparisons per frame.
         if (this._shells) this._fadeShellsForCameraAltitude();
+
+        // Live-catalog tracker — propagate every loaded sat via Rust
+        // SGP4 WASM. The tracker handles SAB / worker / batch fast-paths
+        // internally; we just feed it wall-clock time.
+        if (this._catalogTracker?.tick) {
+            this._catalogTracker.tick(Date.now());
+        }
 
         this._renderer.render(this._scene, this._camera);
     }

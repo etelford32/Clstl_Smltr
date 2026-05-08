@@ -1,4 +1,4 @@
-# Security Policy — Parker Physics App / Telford Projects LLC
+# Security Policy — Parkers Physics App / Telford Projects LLC
 
 This document is the responsible-disclosure policy referenced from
 [`/.well-known/security.txt`](./.well-known/security.txt).

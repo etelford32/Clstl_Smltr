@@ -306,7 +306,7 @@ function render() {
             : `<p>You skipped location — set one anytime from the dashboard or <a href="/account.html" style="color:#a080ff">/account</a>.</p>`;
         body = `
             <span class="pp-wiz-eyebrow">All set</span>
-            <h2>You're done. Welcome to Parker Physics.</h2>
+            <h2>You're done. Welcome to Parkers Physics.</h2>
             ${locLine}
             <p style="font-size:.82rem">From here:</p>
             <ul style="margin:0 0 14px 18px;font-size:.82rem;color:#cdd;line-height:1.7">

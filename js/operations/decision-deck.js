@@ -62,7 +62,22 @@ function altPerigeeKmFromTle(tle) {
 function baseLifetimeMonths(perigeeKm) {
     // Calibrated against NASA / ESA reference points: ISS at 415 km ≈ 2-3 yr
     // without reboost, HST at 540 km ≈ ~30 yr, ~800 km LEO ≈ 200+ yr.
-    if (perigeeKm < 200) return 0.5;
+    //
+    // The < 200 km regime is now resolved at 20-km granularity instead
+    // of a single 0.5-month bucket — below ~200 km the thermosphere
+    // density doubles every ~30 km of altitude loss (Jacchia / NRLMSIS),
+    // so a flat plateau hides the very signal an operator needs:
+    // "this thing is hours from re-entry, not weeks." Numbers below
+    // are calibrated to the King-Hele table and to known reentry
+    // events (e.g., Tiangong-1 reentered ~2 days after dropping below
+    // 170 km).
+    if (perigeeKm <  90) return 0.0007;   // ~30 min — definitely past entry interface
+    if (perigeeKm < 110) return 0.007;    // ~5 hours
+    if (perigeeKm < 130) return 0.025;    // ~18 hours
+    if (perigeeKm < 150) return 0.07;     // ~2 days
+    if (perigeeKm < 170) return 0.17;     // ~5 days
+    if (perigeeKm < 190) return 0.33;     // ~10 days
+    if (perigeeKm < 200) return 0.5;      // ~15 days
     if (perigeeKm < 250) return 1.5;
     if (perigeeKm < 300) return 4;
     if (perigeeKm < 350) return 9;
@@ -88,7 +103,38 @@ function decayLifetimeDays(tle, f107, ap) {
     return months * 30;
 }
 
-function decayWithSigma(tle, f107Mid, sigF107, apMid, sigAp) {
+/**
+ * Instantaneous semi-major-axis decay rate (km/day) at the current
+ * orbit. Backed by the same baseLifetimeMonths(perigee) model the
+ * lifetime estimate uses, so the two numbers can never diverge:
+ *
+ *   - lifetime at current perigee p₀ = L₀
+ *   - lifetime at perigee p₀ − Δ     = L₁
+ *   - time to drift from p₀ to p₀−Δ  = L₀ − L₁
+ *   - dā/dt                         ≈ −Δ / (L₀ − L₁)  (km/day)
+ *
+ * Δ defaults to 25 km — large enough to survive a piecewise
+ * transition in baseLifetimeMonths without going to zero, small
+ * enough to be a useful local estimate. Returns 0 for orbits the
+ * model treats as effectively stable (perigee ≥ 1000 km) and for
+ * any input where the lifetime is non-finite.
+ */
+export function deltaAPerDay(tle, f107, ap, perigeeStepKm = 25) {
+    const perigee = altPerigeeKmFromTle(tle);
+    if (!Number.isFinite(perigee) || perigee >= 1000) return 0;
+    const L0 = decayLifetimeDays(tle, f107, ap);
+    if (!Number.isFinite(L0)) return 0;
+    // Lower step floor at 80 km so the rate stays meaningful inside
+    // the fine-grained reentry regime (90-200 km buckets in
+    // baseLifetimeMonths). Below 80 km the satellite has reentered.
+    const tleLower = { ...tle, perigee_km: Math.max(80, perigee - perigeeStepKm) };
+    const L1 = decayLifetimeDays(tleLower, f107, ap);
+    if (!Number.isFinite(L1)) return 0;
+    const days = L0 - L1;
+    return days > 0 ? -perigeeStepKm / days : 0;
+}
+
+export function decayWithSigma(tle, f107Mid, sigF107, apMid, sigAp) {
     const mid = decayLifetimeDays(tle, f107Mid, apMid);
     if (mid == null || !Number.isFinite(mid)) return { lifetime_days: mid, sigma_days: 0, perigee_km: altPerigeeKmFromTle(tle) };
 
@@ -109,7 +155,7 @@ function decayWithSigma(tle, f107Mid, sigF107, apMid, sigAp) {
 }
 
 /** Format days into the most legible coarse unit. */
-function fmtLifetime(days) {
+export function fmtLifetime(days) {
     if (!Number.isFinite(days)) return '∞';
     if (days > 36500) return '>100 yr';
     if (days > 365)   return `${(days / 365.25).toFixed(1)} yr`;
@@ -443,6 +489,20 @@ export function mountConjunctions(fleet, tracker, opts = {}) {
     let autoRescreen = true;             // anchor follows the time cursor
     let autoTimer    = null;             // debounce handle
     const expanded   = new Set();        // primary norad IDs that are expanded
+    // Subscribers for row-update events. The conjunction timeline
+    // strip listens here so it can re-render its tick marks whenever
+    // a screen completes.
+    const rowSubs = new Set();
+    function notifyRows() {
+        const snap = {
+            rows:     lastRows,
+            epochMs:  lastEpochMs,
+            horizonH: horizonHours(),
+        };
+        for (const fn of rowSubs) {
+            try { fn(snap); } catch (err) { console.warn('[mountConjunctions] subscriber threw:', err); }
+        }
+    }
 
     // How far the cursor can drift from the anchor before the panel
     // is considered "stale". The auto-rescreen path triggers a fresh
@@ -593,6 +653,7 @@ export function mountConjunctions(fleet, tracker, opts = {}) {
             }));
             lastRows = rows;
             renderRows(rows);
+            notifyRows();
 
             const totalConj = rows.reduce((s, r) => s + r.conjs.length, 0);
             setStatus(
@@ -797,6 +858,7 @@ export function mountConjunctions(fleet, tracker, opts = {}) {
         if (n === 0) {
             lastRows = [];
             renderRows([]);
+            notifyRows();
         }
         const status = root.querySelector('#op-conj-status');
         if (status && (status.dataset.kind === 'idle' || status.dataset.kind === 'empty' || status.dataset.kind === 'clear')) {
@@ -821,6 +883,20 @@ export function mountConjunctions(fleet, tracker, opts = {}) {
 
     return {
         rescreen: screen,
+        /**
+         * Subscribe to row updates. The timeline strip uses this to
+         * keep its tick marks in sync with what the screener last
+         * returned. Fires immediately with the current snapshot so
+         * subscribers can paint without waiting for the next screen.
+         * Returns an unsubscribe thunk.
+         */
+        subscribeRows(fn) {
+            rowSubs.add(fn);
+            try {
+                fn({ rows: lastRows, epochMs: lastEpochMs, horizonH: horizonHours() });
+            } catch (_) {}
+            return () => rowSubs.delete(fn);
+        },
         /**
          * One-shot screen: the current fleet vs. a single secondary
          * (the user's right-clicked target). Doesn't disturb the

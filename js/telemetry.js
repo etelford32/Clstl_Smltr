@@ -225,6 +225,49 @@ class Telemetry {
         });
     }
 
+    /**
+     * Record a stage in the intro / sign-in / sign-up funnel.
+     *
+     * Funnel events are 100% sampled (NOT 25% like vitals/perf) — they're
+     * conversion-critical and the volume is bounded by the size of the
+     * authentication flow, not the size of the active user base.
+     *
+     * Stage names live in supabase-auth-funnel-migration.sql's stages CTE.
+     * Anything else still gets logged but won't show up in the funnel
+     * summary RPC's ordered output.
+     *
+     * @param {string} stage     Canonical stage id (e.g. 'signin_view').
+     * @param {object} [metadata] Stage-specific properties. Keep it small;
+     *                            no PII, no email, no full UA strings.
+     */
+    recordFunnel(stage, metadata = {}) {
+        if (!stage || typeof stage !== 'string') return;
+        const payload = { stage: stage.slice(0, 80), ...metadata };
+        // Bound metadata serialised size so a buggy caller can't blow the
+        // 4 KB row cap and force the RPC to truncate to its fingerprint
+        // shape (which would lose the stage field).
+        try {
+            const s = JSON.stringify(payload);
+            if (s.length > 1500) {
+                this._enqueue({
+                    kind:     'auth_funnel',
+                    severity: 'info',
+                    metadata: {
+                        stage:    payload.stage,
+                        truncated: true,
+                        original_size: s.length,
+                    },
+                });
+                return;
+            }
+        } catch { /* fall through with raw payload */ }
+        this._enqueue({
+            kind:     'auth_funnel',
+            severity: 'info',
+            metadata: payload,
+        });
+    }
+
     // ── Internals ───────────────────────────────────────────────────
 
     _enqueue(event) {
