@@ -24,7 +24,11 @@ jobs:
         sudo apt-get install -y binaryen
 
     - name: Install wasm-bindgen-cli
-      run: cargo install wasm-bindgen-cli --version 0.2.120 --locked
+      # Schema versions between the CLI and the wasm-bindgen Rust crate must
+      # match exactly. Bevy 0.17.x resolves to wasm-bindgen 0.2.121, so the
+      # CLI tracks that. When bumping Bevy or wasm-bindgen, update *both*
+      # this version pin and the `--precise` step in "Build WASM" below.
+      run: cargo install wasm-bindgen-cli --version 0.2.121 --locked
 
     - name: Cache cargo registry
       uses: actions/cache@v4
@@ -47,6 +51,12 @@ jobs:
     - name: Build WASM
       run: |
         cd rust
+        # rust/Cargo.lock is gitignored, so CI freshly resolves the dep
+        # graph each run. Generate a lockfile and pin wasm-bindgen to the
+        # same version the CLI was installed at — otherwise the next
+        # 0.2.x release will mismatch the CLI's schema and break the build.
+        cargo generate-lockfile
+        cargo update -p wasm-bindgen --precise 0.2.121
         cargo build --release --target wasm32-unknown-unknown
         wasm-bindgen --out-dir www --target web \
           target/wasm32-unknown-unknown/release/star_renderer.wasm
