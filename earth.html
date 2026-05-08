@@ -2167,7 +2167,7 @@ nav {
             <div class="lyr-section-body"><div class="lyr-grid">
                 <div class="lyr"><input type="checkbox" id="lyr-weather"><span class="lyr-status" data-layer="weather-temp" title="waiting"></span><label for="lyr-weather">Weather (temp)</label><label class="lyr-rd" for="rd-temp" title="Show temperature (°C) on cursor hover"><input type="checkbox" id="rd-temp"><span class="lyr-rd-badge">#</span></label></div>
                 <div class="lyr"><input type="checkbox" id="lyr-wind"    checked><span class="lyr-status" data-layer="wind" title="waiting"></span><label for="lyr-wind">Wind Particles</label><label class="lyr-rd" for="rd-wind" title="Show surface wind (10 m, m/s + km/h + bearing) on cursor hover"><input type="checkbox" id="rd-wind"><span class="lyr-rd-badge">#</span></label></div>
-                <div class="lyr" title="Highlight wind &gt; 30 m/s (108 km/h) — the operational jet-stream threshold">
+                <div class="lyr" title="Highlight wind &gt; 18 m/s (65 km/h) — surface-wind proxy for the polar/subtropical jet (Open-Meteo only delivers 10 m winds)">
                     <input type="checkbox" id="lyr-jet"><span class="lyr-status" data-layer="jet" title="waiting"></span><label for="lyr-jet">Jet Stream</label>
                 </div>
                 <div class="lyr"><input type="checkbox" id="lyr-isobars" checked><span class="lyr-status" data-layer="isobars" title="waiting"></span><label for="lyr-isobars">Isobars</label><label class="lyr-rd" for="rd-pressure" title="Show surface pressure (hPa) on cursor hover"><input type="checkbox" id="rd-pressure"><span class="lyr-rd-badge">#</span></label></div>
@@ -9708,6 +9708,13 @@ const _layerRegistry = {
     'lyr-tropic':         () => tropicGroup.visible,
     'lyr-subsolar':       () => subsolarMarker.group.visible,
     'lyr-weather':        () => (earthU.u_weather_on?.value ?? 0) > 0.5,
+    // Jet-stream ribbons live on a private group inside JetstreamOverlay;
+    // the only public surface is the boolean we drive in setVisible(). Read
+    // it back through the group reference so the integrity check can spot
+    // drift (e.g. checkbox flipped but setVisible never ran). Falls through
+    // to the checkbox state when the overlay hasn't been constructed yet.
+    'lyr-jet':            () => jetstreamOverlay?.visible
+                               ?? document.getElementById('lyr-jet')?.checked ?? false,
     // NASA Earth Observations — each id maps to the dynamically-created
     // overlay mesh. _obsOverlays is populated lazily by _createObsOverlay,
     // so fall through to the checkbox's own state when the mesh hasn't
