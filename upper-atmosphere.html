@@ -817,6 +817,103 @@ input[type=range]::-moz-range-thumb {
     text-align:center; min-width:46px;
 }
 
+/* ─── Time controls + live HUD ─────────────────────────── */
+.ua-time-hud {
+    display:flex; flex-wrap:wrap; align-items:center; gap:8px;
+    margin-bottom:8px;
+    font-family:monospace; font-size:.72rem;
+}
+.ua-time-clock {
+    color:#0ff; font-weight:700; letter-spacing:.04em;
+    padding:3px 8px; border-radius:4px;
+    background:rgba(0,200,200,.08);
+    border:1px solid rgba(0,200,200,.25);
+}
+.ua-time-clock.ua-time-paused { color:#fc6; border-color:rgba(255,200,90,.4); background:rgba(255,200,90,.08); }
+.ua-time-clock.ua-time-replay { color:#f7c; border-color:rgba(255,120,200,.4); background:rgba(255,120,200,.08); }
+.ua-time-mode {
+    font-size:.62rem; color:#9ab; text-transform:uppercase; letter-spacing:.1em;
+}
+.ua-time-age {
+    font-size:.62rem; color:#778;
+}
+.ua-time-age.ua-time-stale { color:#fa8; }
+
+.ua-time-row {
+    display:flex; flex-wrap:wrap; gap:4px; margin-bottom:6px;
+    align-items:center;
+}
+.ua-time-btn {
+    font-family:monospace; font-size:.7rem; font-weight:700;
+    padding:5px 8px; border-radius:5px;
+    border:1px solid rgba(255,255,255,.16);
+    background:rgba(255,255,255,.04);
+    color:#cde; cursor:pointer;
+    transition:all .12s;
+    min-width:34px; text-align:center;
+}
+.ua-time-btn:hover { border-color:#0cc; color:#0ff; }
+.ua-time-btn.ua-time-on {
+    background:rgba(0,200,200,.18);
+    border-color:#0cc; color:#0ff;
+    box-shadow:0 0 6px rgba(0,200,200,.4);
+}
+.ua-time-btn.ua-time-emph {
+    background:rgba(255,200,0,.10);
+    border-color:rgba(255,200,0,.4); color:#fc6;
+}
+.ua-time-btn.ua-time-emph:hover { background:rgba(255,200,0,.20); color:#ffe; }
+
+.ua-time-scrub-row {
+    display:flex; align-items:center; gap:8px; margin-top:4px;
+}
+.ua-time-scrub-row input[type=range] {
+    flex:1; margin:0;
+}
+.ua-time-scrub-tick {
+    font-family:monospace; font-size:.6rem; color:#667;
+    min-width:48px; text-align:right;
+}
+.ua-time-strip {
+    position:relative;
+    height:32px;
+    margin-top:6px;
+    background:rgba(0,0,0,.4);
+    border:1px solid rgba(0,200,200,.18);
+    border-radius:4px;
+    overflow:hidden;
+}
+.ua-time-strip canvas { width:100%; height:100%; display:block; }
+.ua-time-cursor {
+    position:absolute; top:0; bottom:0;
+    width:2px; background:#fc6;
+    box-shadow:0 0 6px #fc6;
+    pointer-events:none;
+}
+.ua-time-strip-hint {
+    font-size:.58rem; color:#667;
+    margin-top:3px; font-family:monospace;
+    display:flex; justify-content:space-between;
+}
+
+/* ─── Auto-refresh pill ───────────────────────────────── */
+.ua-refresh-pill {
+    display:inline-flex; align-items:center; gap:5px;
+    padding:3px 8px; border-radius:999px;
+    font-family:monospace; font-size:.62rem;
+    border:1px solid rgba(0,200,200,.22);
+    background:rgba(0,200,200,.05);
+    color:#9cf;
+}
+.ua-refresh-pill::before {
+    content:""; width:6px; height:6px; border-radius:50%;
+    background:#0fc; box-shadow:0 0 4px #0fc;
+    animation:uaPulse 2s ease-in-out infinite;
+}
+.ua-refresh-pill.ua-refresh-stale::before { background:#fa6; box-shadow:0 0 4px #fa6; }
+.ua-refresh-pill.ua-refresh-off::before { background:#556; box-shadow:none; animation:none; }
+@keyframes uaPulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
 /* ─── Scrollbar polish ─────────────────────────────────── */
 ::-webkit-scrollbar { width:6px; height:6px; }
 ::-webkit-scrollbar-thumb { background:rgba(0,200,200,.3); border-radius:3px; }
@@ -932,15 +1029,75 @@ input[type=range]::-moz-range-thumb {
                 <div class="ua-range-legend"><span>0 (calm)</span><span>400 (severe storm)</span></div>
             </div>
 
-            <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap">
+            <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap;align-items:center">
                 <button id="ua-live-btn" type="button" class="ua-chip ua-chip--live"
                         title="Fetch current F10.7 and Kp from NOAA SWPC and apply to the sliders">
                     ⚡ Use live NOAA
                 </button>
+                <label class="ua-chip" style="cursor:pointer;display:inline-flex;gap:5px;align-items:center"
+                       title="When enabled, F10.7 / Ap auto-refresh on a schedule and the Burton-style ring-current proxy continuously updates Ap from the live solar-wind bus.">
+                    <input type="checkbox" id="ua-realtime-toggle" checked
+                           style="vertical-align:middle;accent-color:#0cc">
+                    realtime
+                </label>
+                <span id="ua-refresh-pill" class="ua-refresh-pill ua-refresh-off" title="Auto-refresh status">
+                    <span id="ua-refresh-pill-text">idle</span>
+                </span>
                 <span id="ua-live-status" class="ua-dim" style="font-size:.64rem;align-self:center;font-style:italic"></span>
             </div>
 
             <div id="ua-summary"><span class="ua-dim">Pick a preset above to load archived storm indices, or sweep the sliders.</span></div>
+        </div>
+
+        <div class="ua-panel" style="margin-bottom:14px;">
+            <h2>Time controls · sim clock</h2>
+            <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:10px">
+                Steers the master sim-clock. <strong>Live</strong> tracks
+                wall-clock and applies SWPC + Burton-driven Ap as it
+                arrives; pause to freeze, scrub the strip below to
+                replay any of the last 72 h of buffered conditions.
+                Time-warp accelerates the substorm controller, the
+                aurora drive, and the globe's day/night terminator.
+            </p>
+
+            <div class="ua-time-hud">
+                <span id="ua-time-clock" class="ua-time-clock">--:--:-- UTC</span>
+                <span id="ua-time-mode" class="ua-time-mode">LIVE · 1×</span>
+                <span id="ua-time-age" class="ua-time-age">data —</span>
+            </div>
+
+            <div class="ua-time-row" id="ua-time-transport">
+                <button class="ua-time-btn" data-ua-time-act="rew"   title="Reverse −1× (replay)">⏪</button>
+                <button class="ua-time-btn" data-ua-time-act="pause" title="Pause / resume (Space)">⏸</button>
+                <button class="ua-time-btn" data-ua-time-act="play"  title="Resume real-time (1×)">▶</button>
+                <button class="ua-time-btn ua-time-emph" data-ua-time-act="now"
+                        title="Snap to wall clock and resume live (Home)">⌛ NOW</button>
+            </div>
+
+            <div class="ua-time-row" id="ua-time-rates" title="Time-warp multiplier">
+                <button class="ua-time-btn" data-ua-rate="-3600">−1h/s</button>
+                <button class="ua-time-btn" data-ua-rate="-60"  >−1m/s</button>
+                <button class="ua-time-btn" data-ua-rate="0.25" >¼×</button>
+                <button class="ua-time-btn ua-time-on" data-ua-rate="1">1×</button>
+                <button class="ua-time-btn" data-ua-rate="10"   >10×</button>
+                <button class="ua-time-btn" data-ua-rate="60"   >1m/s</button>
+                <button class="ua-time-btn" data-ua-rate="600"  >10m/s</button>
+                <button class="ua-time-btn" data-ua-rate="3600" >1h/s</button>
+            </div>
+
+            <div class="ua-time-scrub-row">
+                <span class="ua-time-scrub-tick" id="ua-time-scrub-lo">−72h</span>
+                <input type="range" id="ua-time-scrub" min="0" max="1000" value="1000" step="1">
+                <span class="ua-time-scrub-tick" id="ua-time-scrub-hi">now</span>
+            </div>
+
+            <div class="ua-time-strip" id="ua-time-strip" title="Buffered space-weather history — Ap (orange), |Bz| (cyan)">
+                <canvas id="ua-time-strip-canvas"></canvas>
+                <div class="ua-time-cursor" id="ua-time-strip-cursor" style="left:100%"></div>
+            </div>
+            <div class="ua-time-strip-hint">
+                <span>Ap</span><span>|Bz|</span><span>72 h ring · 30 s resolution</span>
+            </div>
         </div>
 
         <div class="ua-panel" style="margin-bottom:14px;">
@@ -1320,6 +1477,7 @@ input[type=range]::-moz-range-thumb {
     import * as engine from './js/upper-atmosphere-engine.js';
     import { AtmosphereGlobe } from './js/upper-atmosphere-globe.js';
     import { UpperAtmosphereUI } from './js/upper-atmosphere-ui.js';
+    import { getRealtimeDriver } from './js/upper-atmosphere-realtime.js';
 
     const canvas = document.getElementById('ua-globe');
     const globe = new AtmosphereGlobe(canvas, { cameraDistance: 3.2 });
@@ -1558,6 +1716,282 @@ input[type=range]::-moz-range-thumb {
                 `load failed: ${e.detail?.group || 'unknown'} — ${e.detail?.error || 'see console'}`;
         });
         refreshStatus();
+    })();
+
+    /* ─── Realtime driver + sim-clock + time controls ────────────────────
+       The driver fuses NOAA SWPC indices (F10.7 hourly, Kp 1-min) with
+       the swpc-update solar-wind bus (Bz, v, n) into a Burton-style
+       Dst* integrator. Between SWPC ticks the integrator produces a
+       continuously-evolving Ap-surrogate that the UI applies to the
+       engine, so density/temperature respond to incoming southward Bz
+       in real time instead of stair-stepping every 3 hours.
+
+       Time controls steer a sim-clock layer that lets the user pause,
+       time-warp, or scrub the last 72 h of buffered conditions.
+       The globe's substorm controller is put in 'realtime' mode by
+       default so substorm cadence matches wall-clock rather than the
+       compressed 30-second demo. */
+    (function wireRealtimeAndTimeControls() {
+        const driver = getRealtimeDriver();
+        driver.start();
+        // Default the substorm controller to realtime cadence.
+        try { globe.setSubstormMode?.('realtime'); } catch (_) {}
+        const subRtInput = document.getElementById('ua-substorm-realtime');
+        if (subRtInput) subRtInput.checked = true;
+
+        // ── Auto-refresh pill (data freshness) ─────────────────────────
+        const refreshPill = document.getElementById('ua-refresh-pill');
+        const refreshTxt  = document.getElementById('ua-refresh-pill-text');
+        const realtimeToggle = document.getElementById('ua-realtime-toggle');
+
+        realtimeToggle?.addEventListener('change', (e) => {
+            ui.setRealtimeEnabled?.(e.target.checked);
+            if (refreshPill) {
+                refreshPill.classList.toggle('ua-refresh-off', !e.target.checked);
+                if (refreshTxt) refreshTxt.textContent = e.target.checked ? 'live' : 'manual';
+            }
+        });
+
+        function fmtAge(ms) {
+            const s = Math.max(0, Math.round(ms / 1000));
+            if (s < 60)    return `${s}s`;
+            if (s < 3600)  return `${Math.round(s / 60)}m`;
+            return `${(s / 3600).toFixed(1)}h`;
+        }
+
+        // ── Time-control DOM ──────────────────────────────────────────
+        const clockEl   = document.getElementById('ua-time-clock');
+        const modeEl    = document.getElementById('ua-time-mode');
+        const ageEl     = document.getElementById('ua-time-age');
+        const transport = document.getElementById('ua-time-transport');
+        const ratesRow  = document.getElementById('ua-time-rates');
+        const scrubEl   = document.getElementById('ua-time-scrub');
+        const scrubLo   = document.getElementById('ua-time-scrub-lo');
+        const scrubHi   = document.getElementById('ua-time-scrub-hi');
+        const stripEl   = document.getElementById('ua-time-strip');
+        const stripCanv = document.getElementById('ua-time-strip-canvas');
+        const stripCur  = document.getElementById('ua-time-strip-cursor');
+
+        // Transport buttons.
+        transport?.addEventListener('click', (e) => {
+            const act = e.target?.dataset?.uaTimeAct;
+            if (!act) return;
+            const s = driver.getState();
+            if (act === 'pause') {
+                driver.setMode(s.mode === 'paused' ? (s.scrubbing ? 'warp' : 'live') : 'paused',
+                               s.mode === 'paused' && s.scrubbing ? 1 : undefined);
+            } else if (act === 'play') {
+                // If scrubbed back, resume forward at 1× warp so the user
+                // can replay through buffered history; otherwise snap live.
+                const back = (Date.now() - s.simTimeMs) > 90_000;
+                if (back) driver.setMode('warp', 1);
+                else      driver.setMode('live');
+            } else if (act === 'now') {
+                driver.jumpToNow();
+            } else if (act === 'rew') {
+                driver.setMode('warp', -60);
+            }
+        });
+
+        // Rate buttons.
+        ratesRow?.addEventListener('click', (e) => {
+            const r = e.target?.dataset?.uaRate;
+            if (r === undefined) return;
+            const v = parseFloat(r);
+            if (!Number.isFinite(v)) return;
+            if (v === 1) driver.setMode('live');
+            else        driver.setMode('warp', v);
+            // Visual selection.
+            for (const btn of ratesRow.querySelectorAll('[data-ua-rate]')) {
+                btn.classList.toggle('ua-time-on',
+                    parseFloat(btn.dataset.uaRate) === v);
+            }
+        });
+
+        // Scrubber: 0..1000 maps to [-72h..now].
+        const SCRUB_SPAN = 72 * 60 * 60 * 1000;
+        let scrubbing = false;
+        scrubEl?.addEventListener('input', () => {
+            scrubbing = true;
+            const frac = parseFloat(scrubEl.value) / 1000;
+            const ms = Date.now() - SCRUB_SPAN * (1 - frac);
+            driver.scrubTo(ms);
+        });
+        scrubEl?.addEventListener('change', () => { scrubbing = false; });
+
+        // Keyboard: Space = pause toggle, Home = NOW, [ / ] = step rate.
+        const RATE_LADDER = [-3600, -60, -1, 0.25, 1, 10, 60, 600, 3600];
+        document.addEventListener('keydown', (ev) => {
+            // Don't hijack typing into inputs.
+            const tag = (ev.target?.tagName || '').toLowerCase();
+            if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+            if (ev.code === 'Space') {
+                ev.preventDefault();
+                const s = driver.getState();
+                driver.setMode(s.mode === 'paused' ? 'live' : 'paused');
+            } else if (ev.code === 'Home') {
+                ev.preventDefault();
+                driver.jumpToNow();
+            } else if (ev.key === ']') {
+                const s = driver.getState();
+                const i = RATE_LADDER.indexOf(s.rate);
+                const nx = RATE_LADDER[Math.min(RATE_LADDER.length - 1, (i < 0 ? 4 : i) + 1)];
+                if (nx === 1) driver.setMode('live'); else driver.setMode('warp', nx);
+            } else if (ev.key === '[') {
+                const s = driver.getState();
+                const i = RATE_LADDER.indexOf(s.rate);
+                const nx = RATE_LADDER[Math.max(0, (i < 0 ? 4 : i) - 1)];
+                if (nx === 1) driver.setMode('live'); else driver.setMode('warp', nx);
+            }
+        });
+
+        // ── HUD paint loop ─────────────────────────────────────────────
+        function fmtClock(ms) {
+            const d = new Date(ms);
+            const pad = (n) => String(n).padStart(2, '0');
+            const today = new Date();
+            const sameDay = d.getUTCFullYear() === today.getUTCFullYear()
+                         && d.getUTCMonth() === today.getUTCMonth()
+                         && d.getUTCDate() === today.getUTCDate();
+            const hms = `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+            return sameDay
+                ? `${hms} UTC`
+                : `${d.getUTCMonth() + 1}/${d.getUTCDate()} ${hms} UTC`;
+        }
+
+        function paintHud(s) {
+            if (!clockEl) return;
+            clockEl.textContent = fmtClock(s.simTimeMs);
+            clockEl.classList.toggle('ua-time-paused', s.mode === 'paused');
+            clockEl.classList.toggle('ua-time-replay', s.scrubbing || s.rate < 0);
+            modeEl.textContent =
+                s.mode === 'live'   ? 'LIVE · 1×' :
+                s.mode === 'paused' ? 'PAUSED' :
+                                      `WARP · ${s.rate >= 0 ? '+' : ''}${s.rate}×`;
+            // Data-age — pick the older of F10.7 / Ap fetches.
+            const ageMs = (s.f107At && s.apAt)
+                ? Math.max(Date.now() - s.f107At, Date.now() - s.apAt)
+                : 0;
+            if (ageEl) {
+                if (!s.f107At && !s.apAt) {
+                    ageEl.textContent = 'data —';
+                    ageEl.classList.remove('ua-time-stale');
+                } else {
+                    ageEl.textContent = `data ${fmtAge(ageMs)} · ${s.source}`;
+                    ageEl.classList.toggle('ua-time-stale', ageMs > 30 * 60_000);
+                }
+            }
+            // Refresh pill.
+            if (refreshPill && refreshTxt) {
+                if (!realtimeToggle?.checked) {
+                    refreshPill.className = 'ua-refresh-pill ua-refresh-off';
+                    refreshTxt.textContent = 'manual';
+                } else if (!s.f107At && !s.apAt) {
+                    refreshPill.className = 'ua-refresh-pill ua-refresh-stale';
+                    refreshTxt.textContent = 'fetching…';
+                } else {
+                    const stale = ageMs > 30 * 60_000;
+                    refreshPill.className =
+                        'ua-refresh-pill' + (stale ? ' ua-refresh-stale' : '');
+                    refreshTxt.textContent = `live · ${fmtAge(ageMs)} ago`;
+                }
+            }
+            // Scrub thumb (skip while user is dragging).
+            if (scrubEl && !scrubbing) {
+                const frac = 1 - (Date.now() - s.simTimeMs) / SCRUB_SPAN;
+                scrubEl.value = String(Math.max(0, Math.min(1000, Math.round(frac * 1000))));
+            }
+            // Strip cursor.
+            if (stripCur) {
+                const frac = 1 - (Date.now() - s.simTimeMs) / SCRUB_SPAN;
+                stripCur.style.left = `${Math.max(0, Math.min(1, frac)) * 100}%`;
+            }
+            // Rate-button highlight.
+            if (ratesRow) {
+                for (const btn of ratesRow.querySelectorAll('[data-ua-rate]')) {
+                    const r = parseFloat(btn.dataset.uaRate);
+                    const on = (s.mode === 'live' && r === 1) ||
+                               (s.mode === 'warp' && r === s.rate);
+                    btn.classList.toggle('ua-time-on', on);
+                }
+            }
+        }
+
+        // ── History strip (Ap + |Bz|) ──────────────────────────────────
+        function paintStrip() {
+            if (!stripCanv) return;
+            const dpr = window.devicePixelRatio || 1;
+            const cssW = stripEl.clientWidth, cssH = stripEl.clientHeight;
+            if (stripCanv.width !== cssW * dpr || stripCanv.height !== cssH * dpr) {
+                stripCanv.width = cssW * dpr;
+                stripCanv.height = cssH * dpr;
+            }
+            const ctx = stripCanv.getContext('2d');
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.clearRect(0, 0, cssW, cssH);
+
+            const hist = driver.getHistory();
+            if (!hist.length) {
+                ctx.fillStyle = '#446';
+                ctx.font = '10px monospace';
+                ctx.fillText('buffering history…', 8, 18);
+                return;
+            }
+            const wall = Date.now();
+            const t0 = wall - SCRUB_SPAN;
+            const xOf = (t) => ((t - t0) / SCRUB_SPAN) * cssW;
+
+            // Ap line — log-ish scale (0..400 → 0..1).
+            const yAp  = (ap) => cssH - (Math.log10(1 + Math.max(0, ap)) / Math.log10(401)) * (cssH - 4) - 2;
+            // |Bz| line — linear 0..30 nT clamped.
+            const yBz  = (bz) => cssH - (Math.min(30, Math.abs(bz)) / 30) * (cssH - 4) - 2;
+
+            ctx.lineWidth = 1.4;
+            ctx.strokeStyle = '#fc6';
+            ctx.beginPath();
+            for (let i = 0; i < hist.length; i++) {
+                const p = hist[i];
+                const x = xOf(p.t), y = yAp(p.ap);
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            ctx.strokeStyle = '#0cf';
+            ctx.beginPath();
+            for (let i = 0; i < hist.length; i++) {
+                const p = hist[i];
+                const x = xOf(p.t), y = yBz(p.bz);
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+        }
+
+        // Click-to-scrub on the strip.
+        stripEl?.addEventListener('click', (e) => {
+            const rect = stripEl.getBoundingClientRect();
+            const frac = (e.clientX - rect.left) / rect.width;
+            const ms = Date.now() - SCRUB_SPAN * (1 - frac);
+            driver.scrubTo(ms);
+        });
+
+        // Per-tick HUD paint.
+        window.addEventListener('ua-realtime-tick', (e) => paintHud(e.detail));
+        // Strip repaint on every history push (every ~30 s).
+        window.addEventListener('ua-realtime-history', paintStrip);
+        // Smooth cursor + clock at 4 Hz so the seconds field ticks.
+        setInterval(() => paintHud(driver.getState()), 250);
+        // Repaint strip on resize.
+        window.addEventListener('resize', () => requestAnimationFrame(paintStrip));
+        // Initial paint.
+        paintStrip();
+        paintHud(driver.getState());
+        if (refreshPill) {
+            refreshPill.classList.remove('ua-refresh-off');
+            refreshTxt && (refreshTxt.textContent = 'live · waiting…');
+        }
+
+        // Expose for devtools.
+        window.__uaRealtime = driver;
     })();
 
     /* ─── Trajectory analysis panel ──────────────────────────────────────
