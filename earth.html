@@ -1476,6 +1476,27 @@ nav {
 #tc-scrub:focus::-webkit-slider-thumb { box-shadow: 0 0 10px rgba(0,200,200,.7); }
 #tc-scrub:focus::-moz-range-thumb     { box-shadow: 0 0 10px rgba(0,200,200,.7); }
 
+/* Forecast-loading indicator. Sits as a third row inside #time-controls,
+   only rendered while WeatherForecastFeed has a chunked triplet in
+   flight. The amber palette matches the readout-toggle pill so the
+   user reads "warm = forecast" consistently across the UI. */
+#tc-forecast-status {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 9px; color: #ffb366;
+    padding-top: 4px; margin-top: 1px;
+    border-top: 1px dashed rgba(255,179,102,.2);
+    letter-spacing: .04em;
+}
+.tc-fc-spinner {
+    display: inline-block; width: 9px; height: 9px;
+    border: 1.5px solid rgba(255,179,102,.25);
+    border-top-color: rgba(255,179,102,.95);
+    border-radius: 50%;
+    animation: tc-fc-spin 0.9s linear infinite;
+    flex-shrink: 0;
+}
+@keyframes tc-fc-spin { to { transform: rotate(360deg); } }
+
 /* On mobile the #mobile-toolbar lives at bottom:0 / height:56px, so the
    scrub bar rides 8 px above it.  On desktop the toolbar is hidden so
    bottom:12px is fine. */
@@ -2761,6 +2782,15 @@ nav {
                 <span class="tc-time"   id="tc-time-utc">—</span>
                 <span class="tc-offset" id="tc-time-offset">now</span>
             </span>
+        </div>
+        <!-- Forecast-loading indicator. Shown when WeatherForecastFeed is
+             fetching a hour-batch (start event) and hidden on end event.
+             Title-tooltip exposes the requested range so power users know
+             which hours are in flight. Hidden by default — presence here
+             would clutter the UI for users who never scrub forward. -->
+        <div id="tc-forecast-status" style="display:none">
+            <span class="tc-fc-spinner"></span>
+            <span id="tc-forecast-status-text">fetching forecast…</span>
         </div>
     </div>
 
@@ -5281,26 +5311,27 @@ wxFeed.backfill(wxGridHistory, 24).then(n => {
     if (n > 0) wxResolver?.invalidate();
 });
 
-// ── Forecast feed (lazy) ───────────────────────────────────────────────────
-// Fetches +24 h of hourly U/V/T/P/RH/cloud/precip from Open-Meteo's bulk
-// forecast endpoint and pushes each hour into wxGridHistory's forecast
-// ring. fetchOnce() is idempotent and coalesces concurrent calls — the
-// future-scrub watcher below can fire on every drag without triggering
-// a second network triplet. Empty until the user actually scrubs forward,
-// matching the user-direction "lazy-load" choice and keeping page-load
-// network budget tight.
+// ── Forecast feed (progressive, lazy) ──────────────────────────────────────
+// Fetches hourly U/V/T/P/RH/cloud/precip from Open-Meteo's bulk forecast
+// endpoint in 24-hour batches and pushes each hour into wxGridHistory's
+// forecast ring. ensureLoadedUntil(targetMs) is idempotent and only
+// issues a chunked triplet for the uncovered tail — first +6h scrub
+// fetches +24h (~2-3 MB JSON), deeper scrubs trickle in the next batch
+// without re-fetching the head. Empty until the user actually scrubs
+// forward, keeping page-load network budget tight.
 const wxForecastFeed = new WeatherForecastFeed({ history: wxGridHistory });
 
-// On the first future-scrub tick, kick the fetch. Subsequent future
-// scrubs are no-ops thanks to fetchOnce()'s in-flight + age guards.
-// We hook the time-bus snapshot rather than the slider input so the
-// trigger fires regardless of how simTime moved (slider drag, Operations
+// On every future-scrub tick, ensure the forecast ring covers the
+// scrub position plus a 6-hour prefetch buffer. The feed dedupes
+// against its `_loadedUntilMs` and only fires a chunked triplet for
+// the uncovered tail — first +6h scrub fetches +24h, next +20h scrub
+// fetches +24..+48h, etc. We hook the time-bus snapshot so the trigger
+// fires regardless of how simTime moved (slider drag, Operations
 // console, keyboard step).
+const PREFETCH_MS = 6 * 60 * 60_000;
 const _futureFetchUnsub = timeBus.subscribe((snap) => {
     if (snap.simTimeMs > Date.now() + 30 * 60_000) {
-        // Fire-and-forget; the resolver re-renders on
-        // 'weather-forecast-ingest' below once frames land.
-        wxForecastFeed.fetchOnce();
+        wxForecastFeed.ensureLoadedUntil(snap.simTimeMs + PREFETCH_MS);
     }
 });
 
@@ -5310,6 +5341,47 @@ const _futureFetchUnsub = timeBus.subscribe((snap) => {
 document.addEventListener('weather-forecast-ingest', () => {
     wxResolver?.invalidate();
 });
+
+// Forecast-loading indicator. Tracks WeatherForecastFeed's start/end
+// events; shows a small "fetching forecast HHh-HHh…" badge inside the
+// time-controls row while a chunked triplet is in flight, then hides
+// the badge on completion (or shows "forecast unavailable" briefly on
+// error so the user isn't left wondering why future scrub still clamps).
+{
+    const tcStatus = document.getElementById('tc-forecast-status');
+    const tcText   = document.getElementById('tc-forecast-status-text');
+    const _fmtH = (ms) => {
+        const h = (ms - Date.now()) / 3_600_000;
+        const sign = h >= 0 ? '+' : '−';
+        return `${sign}${Math.abs(h).toFixed(0)}h`;
+    };
+    let _errClearTimer = 0;
+    document.addEventListener('weather-forecast-fetch-start', (ev) => {
+        if (!tcStatus || !tcText) return;
+        clearTimeout(_errClearTimer);
+        const r = ev?.detail?.range;
+        tcText.textContent = r
+            ? `fetching forecast ${_fmtH(r.startMs)}…${_fmtH(r.endMs)}`
+            : 'fetching forecast…';
+        tcStatus.style.display = 'flex';
+        tcStatus.style.color   = '#ffb366';
+    });
+    document.addEventListener('weather-forecast-fetch-end', (ev) => {
+        if (!tcStatus || !tcText) return;
+        if (ev?.detail?.error) {
+            tcText.textContent     = 'forecast unavailable';
+            tcStatus.style.color   = '#ff7766';
+            tcStatus.style.display = 'flex';
+            // Keep the error visible for a few seconds, then fade — the
+            // resolver clamps gracefully so the user can keep scrubbing.
+            _errClearTimer = setTimeout(() => {
+                tcStatus.style.display = 'none';
+            }, 5000);
+        } else {
+            tcStatus.style.display = 'none';
+        }
+    });
+}
 
 // ── Forecaster registry + skill validator ──────────────────────────────────
 // Phase 1 of the predictive-analytics ladder (see WEATHER_FORECAST_PLAN.md
