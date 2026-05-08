@@ -193,6 +193,149 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
     background: linear-gradient(90deg, #2050ff 0%, #6080ff 25%, #ddd 50%, #ff6080 75%, #ff2050 100%);
 }
 .legend-row { display:flex; justify-content:space-between; font-size:9px; color:#888; }
+
+/* ── UI flair: category accents, icons, smoother sections ─── */
+.sec { --acc: 180,120,255; }
+.sec[data-cat="geom"]    { --acc: 200,168,255; }
+.sec[data-cat="rot"]     { --acc: 255,200,128; }
+.sec[data-cat="disk"]    { --acc: 255,140,180; }
+.sec[data-cat="layers"]  { --acc: 140,200,255; }
+.sec[data-cat="outflow"] { --acc: 140,255,180; }
+.sec[data-cat="twist"]   { --acc: 255,140,224; }
+.sec[data-cat="nrp"]     { --acc: 255,224,128; }
+.sec[data-cat="time"]    { --acc: 200,200,200; }
+
+.sec { border-left: 2px solid rgba(var(--acc), .55); }
+.sec-hd {
+    background: linear-gradient(90deg,
+        rgba(var(--acc), .14) 0%,
+        rgba(180,120,255, .07) 70%);
+    color: rgba(var(--acc), 1);
+    transition: background .18s;
+}
+.sec-hd:hover {
+    background: linear-gradient(90deg,
+        rgba(var(--acc), .26) 0%,
+        rgba(180,120,255, .14) 70%);
+}
+.sec-hd .icon {
+    display:inline-block; width:14px; text-align:center;
+    margin-right:5px; opacity:.85; font-size:11px;
+}
+.sec-hd .group {
+    display:flex; align-items:center; gap:0;
+}
+
+/* Slider focus glow + accent-coloured thumb when active */
+.ctrl input[type=range]:focus { outline: none; }
+.ctrl input[type=range]:active::-webkit-slider-thumb {
+    box-shadow: 0 0 14px rgba(var(--acc), .9), 0 0 4px rgba(var(--acc), .6);
+    background: rgb(var(--acc));
+}
+.ctrl input[type=range]:active::-moz-range-thumb {
+    box-shadow: 0 0 14px rgba(var(--acc), .9);
+    background: rgb(var(--acc));
+}
+.ctrl input[type=range]::-webkit-slider-runnable-track {
+    background: linear-gradient(90deg, rgba(var(--acc), .28), rgba(var(--acc), .14));
+}
+.ctrl label[title] { cursor: help; border-bottom:1px dotted rgba(255,255,255,.15); }
+
+/* Preset bar above the section list */
+#preset-bar {
+    display:flex; gap:5px; padding:8px 0 10px; flex-wrap:wrap;
+    border-bottom:1px dashed rgba(180,120,255,.18); margin-bottom:8px;
+}
+#preset-bar button {
+    flex:1; min-width:64px; padding:6px 4px;
+    background: linear-gradient(180deg, rgba(180,120,255,.12), rgba(180,120,255,.04));
+    border:1px solid rgba(180,120,255,.30); border-radius:5px;
+    color:#dab8ff; cursor:pointer; font-family:inherit; font-size:10px;
+    letter-spacing:.4px; transition: all .15s;
+}
+#preset-bar button:hover {
+    background: linear-gradient(180deg, rgba(180,120,255,.32), rgba(180,120,255,.10));
+    transform: translateY(-1px); border-color:#b080ff;
+    box-shadow: 0 4px 12px rgba(180,120,255,.20);
+}
+#preset-bar button:active { transform: translateY(0); }
+#preset-bar .preset-label {
+    flex:0 0 100%; font-size:9px; color:#666; letter-spacing:.6px;
+    text-transform:uppercase; margin-bottom:2px;
+}
+
+/* Header collapse-all button */
+#panel-tools {
+    display:flex; gap:4px; align-items:center;
+}
+#btn-collapse-all {
+    background:transparent; border:1px solid rgba(255,255,255,.10);
+    color:#888; font-size:11px; cursor:pointer; padding:3px 7px;
+    border-radius:4px; transition: all .15s; font-family:inherit;
+}
+#btn-collapse-all:hover { color:#c8a8ff; border-color:rgba(180,120,255,.4); }
+
+/* HUD collapse */
+#hud { position: relative; transition: padding .2s, min-width .2s; }
+#hud-toggle {
+    position:absolute; top:6px; right:6px; cursor:pointer; pointer-events:auto;
+    color:#666; font-size:11px; padding:2px 6px; border-radius:3px;
+    background: transparent; border: 1px solid transparent;
+    transition: color .15s, background .15s, border .15s; user-select:none;
+    font-family:inherit;
+}
+#hud-toggle:hover { color:#c8a8ff; background: rgba(180,120,255,.10); border-color:rgba(180,120,255,.25); }
+#hud.collapsed > div:not(#hud-toggle):not(.always-show) { display:none; }
+#hud.collapsed h3 { margin-bottom:0; padding-right:30px; }
+#hud.collapsed { min-width:140px; padding:8px 14px; }
+
+/* Smoother body height transition (fall back to display:none when fully collapsed) */
+.sec-bd { transition: opacity .2s; }
+.sec.closed .sec-bd { opacity: 0; }
+.sec.closed .sec-hd { background-image: linear-gradient(90deg,
+        rgba(var(--acc), .06) 0%,
+        rgba(180,120,255, .03) 70%); }
+
+/* Tooltip / hint chip on slider value when hovered */
+.vdisp { position:relative; }
+
+/* Small "info" chip after some labels */
+.info-chip {
+    display:inline-block; width:11px; height:11px; line-height:10px;
+    text-align:center; font-size:9px; color:#aaa;
+    border:1px solid rgba(255,255,255,.20); border-radius:50%;
+    margin-left:3px; cursor:help; vertical-align:1px;
+}
+.info-chip:hover { color:#fff; border-color:#b080ff; }
+
+/* Sub-headers inside sections (for grouped layer toggles) */
+.subhd {
+    font-size:9px; color:#666; letter-spacing:.7px; text-transform:uppercase;
+    margin:8px 0 3px; padding-bottom:2px;
+    border-bottom: 1px dashed rgba(255,255,255,.06);
+}
+.subhd:first-child { margin-top:0; }
+
+/* Pause / time-rate row */
+#time-rate-row { display:flex; align-items:center; gap:6px; margin:4px 0; }
+#btn-pause {
+    flex:0 0 28px; height:24px; padding:0; font-size:11px;
+    background: rgba(180,120,255,.14); border:1px solid rgba(180,120,255,.30);
+    border-radius:5px; color:#c8a8ff; cursor:pointer; transition: all .15s;
+}
+#btn-pause.active {
+    background: rgba(255,180,80,.30); border-color:#ffb050; color:#ffe0a0;
+}
+
+/* Improved scrollbar */
+#panel-body::-webkit-scrollbar { width:6px; }
+#panel-body::-webkit-scrollbar-track { background: rgba(255,255,255,.02); }
+#panel-body::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, rgba(180,120,255,.35), rgba(180,120,255,.18));
+    border-radius:3px;
+}
+#panel-body::-webkit-scrollbar-thumb:hover { background: rgba(180,120,255,.55); }
+
 </style>
 <script type="application/ld+json">
 {
@@ -238,7 +381,8 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
 <div id="app">
     <div id="canvas-wrap">
         <div id="hud">
-            <h3>ACHERNAR — α Eridani</h3>
+            <button id="hud-toggle" title="Collapse / expand HUD">−</button>
+            <h3 class="always-show">ACHERNAR — α Eridani</h3>
             <div class="sub">B6 Vep · Be-type rapid rotator</div>
             <div>T<sub>pole</sub>: <span class="val" id="hud-tpole">17 000</span> <span class="dim">K</span></div>
             <div>T<sub>eq</sub>: <span class="val" id="hud-teq">10 000</span> <span class="dim">K</span></div>
@@ -288,12 +432,23 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
                 <div class="panel-sub">B6 Vep · 42.7 pc · 9th-brightest star</div>
                 <div class="panel-badge">Roche figure · von Zeipel · Be disk</div>
             </div>
-            <button id="btn-panel-close">✕</button>
+            <div id="panel-tools">
+                <button id="btn-collapse-all" title="Collapse / expand all sections">⇅</button>
+                <button id="btn-panel-close">✕</button>
+            </div>
         </div>
         <div id="panel-body">
 
-            <div class="sec">
-                <div class="sec-hd"><span>Stellar Geometry</span><span class="arrow">▼</span></div>
+            <div id="preset-bar">
+                <div class="preset-label">Quick presets</div>
+                <button id="ps-default" title="Restore Achernar canonical state">Achernar</button>
+                <button id="ps-burst"   title="Outburst peak: max disk density + NRP">Outburst</button>
+                <button id="ps-shell"   title="Shell phase: disk shed (2013-style)">Shell</button>
+                <button id="ps-crit"    title="Near-critical rotation, no disk">Critical</button>
+            </div>
+
+            <div class="sec" data-cat="geom">
+                <div class="sec-hd"><span class="group"><span class="icon">✦</span><span>Stellar Geometry</span></span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
                     <div class="ctrl">
                         <label>R<sub>eq</sub>/R<sub>pol</sub></label>
@@ -332,11 +487,11 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
                 </div>
             </div>
 
-            <div class="sec">
-                <div class="sec-hd"><span>Rotation</span><span class="arrow">▼</span></div>
+            <div class="sec" data-cat="rot">
+                <div class="sec-hd"><span class="group"><span class="icon">↻</span><span>Rotation</span></span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
                     <div class="ctrl">
-                        <label>Spin rate</label>
+                        <label title="Visual rotation rate of the body in scene units. 0 = stop. Double-click to reset.">Spin rate</label>
                         <input type="range" id="sl-spin" min="0" max="3.0" step="0.05" value="1.0">
                         <span class="vdisp" id="disp-spin">1.00×</span>
                     </div>
@@ -358,8 +513,8 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
                 </div>
             </div>
 
-            <div class="sec">
-                <div class="sec-hd"><span>Decretion Disk</span><span class="arrow">▼</span></div>
+            <div class="sec" data-cat="disk">
+                <div class="sec-hd"><span class="group"><span class="icon">◐</span><span>Decretion Disk</span></span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
                     <div class="toggle-row">
                         <input type="checkbox" id="tog-disk" checked>
@@ -382,13 +537,24 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
                 </div>
             </div>
 
-            <div class="sec">
-                <div class="sec-hd"><span>Layers</span><span class="arrow">▼</span></div>
+            <div class="sec" data-cat="layers">
+                <div class="sec-hd"><span class="group"><span class="icon">☷</span><span>Visual Layers</span></span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
+                    <div class="subhd">Star surface &amp; atmosphere</div>
                     <div class="toggle-row">
                         <input type="checkbox" id="tog-corona" checked>
                         <label for="tog-corona">Chromospheric rim</label>
                     </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-axis">
+                        <label for="tog-axis">Rotation axis line</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-drgrid">
+                        <label for="tog-drgrid">DR latitude grid (±30°, ±60°)</label>
+                    </div>
+
+                    <div class="subhd">Outflow &amp; math overlays</div>
                     <div class="toggle-row">
                         <input type="checkbox" id="tog-jet" checked>
                         <label for="tog-jet">Polar radiative wind glow (CAK)</label>
@@ -398,34 +564,34 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
                         <label for="tog-pwind">Polar wind tracer particles</label>
                     </div>
                     <div class="toggle-row">
-                        <input type="checkbox" id="tog-axis">
-                        <label for="tog-axis">Show rotation axis</label>
+                        <input type="checkbox" id="tog-outflow" checked>
+                        <label for="tog-outflow">Decretion outflow streaks</label>
                     </div>
                     <div class="toggle-row">
-                        <input type="checkbox" id="tog-drgrid">
-                        <label for="tog-drgrid">DR latitude grid (±30°, ±60°)</label>
+                        <input type="checkbox" id="tog-twistor">
+                        <label for="tog-twistor">Twistor (Robinson) congruence</label>
                     </div>
+
+                    <div class="subhd">External &amp; diagnostic</div>
                     <div class="toggle-row">
                         <input type="checkbox" id="tog-binary">
                         <label for="tog-binary">Achernar B (companion + orbit)</label>
                     </div>
                     <div class="toggle-row">
                         <input type="checkbox" id="tog-sed" checked>
-                        <label for="tog-sed">Spectral Energy Distribution panel</label>
+                        <label for="tog-sed">SED diagnostic panel</label>
                     </div>
-                    <div class="toggle-row">
-                        <input type="checkbox" id="tog-outflow" checked>
-                        <label for="tog-outflow">Decretion outflow particles</label>
-                    </div>
-                    <div class="toggle-row">
-                        <input type="checkbox" id="tog-twistor">
-                        <label for="tog-twistor">Twistor (Robinson) congruence</label>
+
+                    <div class="btn-row" style="margin-top:8px">
+                        <button id="btn-layers-allon" title="Show every visual layer">All on</button>
+                        <button id="btn-layers-essentials" title="Default Achernar layers only">Essentials</button>
+                        <button id="btn-layers-alloff" title="Hide every overlay (clean view)">All off</button>
                     </div>
                 </div>
             </div>
 
-            <div class="sec">
-                <div class="sec-hd"><span>Outflow Activity</span><span class="arrow">▼</span></div>
+            <div class="sec" data-cat="outflow">
+                <div class="sec-hd"><span class="group"><span class="icon">⤴</span><span>Outflow Activity</span></span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
                     <div class="ctrl">
                         <label>Burst amp.</label>
@@ -446,8 +612,8 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
                 </div>
             </div>
 
-            <div class="sec">
-                <div class="sec-hd"><span>Twistor Congruence</span><span class="arrow">▼</span></div>
+            <div class="sec" data-cat="twist">
+                <div class="sec-hd"><span class="group"><span class="icon">∞</span><span>Twistor Congruence</span></span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
                     <div class="ctrl">
                         <label>Helicity h<sub>T</sub></label>
@@ -464,8 +630,8 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
                 </div>
             </div>
 
-            <div class="sec">
-                <div class="sec-hd"><span>Non-Radial Pulsation</span><span class="arrow">▼</span></div>
+            <div class="sec" data-cat="nrp">
+                <div class="sec-hd"><span class="group"><span class="icon">∿</span><span>Non-Radial Pulsation</span></span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
                     <div class="toggle-row">
                         <input type="checkbox" id="tog-nrp">
@@ -492,8 +658,25 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
                 </div>
             </div>
 
-            <div class="sec">
-                <div class="sec-hd"><span>View Mode</span><span class="arrow">▼</span></div>
+            <div class="sec" data-cat="time">
+                <div class="sec-hd"><span class="group"><span class="icon">⏱</span><span>Time Controls</span></span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div id="time-rate-row">
+                        <button id="btn-pause" title="Pause / resume the simulation clock">▶</button>
+                        <label style="flex:0 0 56px; font-size:11px; color:#888">Time ×</label>
+                        <input type="range" id="sl-timerate" min="0" max="4.0" step="0.05" value="1.0" style="flex:1">
+                        <span class="vdisp" id="disp-timerate">1.00×</span>
+                    </div>
+                    <div style="font-size:9.5px;color:#666;line-height:1.5;margin-top:6px">
+                        Global multiplier on simulation Δt. Affects body rotation,
+                        outflow integrators, NRP phase, twistor U(1) advance, and
+                        outburst envelope. Pause freezes everything but the camera.
+                    </div>
+                </div>
+            </div>
+
+            <div class="sec" data-cat="layers">
+                <div class="sec-hd"><span class="group"><span class="icon">◎</span><span>View Mode</span></span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
                     <div class="btn-row threecol" id="view-row">
                         <button id="view-cont" class="active">Continuum</button>
@@ -626,8 +809,62 @@ document.getElementById('btn-panel-close').addEventListener('click',
 backdrop.addEventListener('click',
     () => { panel.classList.remove('open'); backdrop.classList.remove('show'); });
 
+// ── Section open/closed state + localStorage persistence ──────
+const SEC_STATE_KEY = 'achernar_sec_state_v1';
+function persistSecState() {
+    const s = {};
+    document.querySelectorAll('.sec[data-cat]').forEach(sec => {
+        s[sec.dataset.cat] = sec.classList.contains('closed');
+    });
+    try { localStorage.setItem(SEC_STATE_KEY, JSON.stringify(s)); } catch {}
+}
+function loadSecState() {
+    let s = {};
+    try { s = JSON.parse(localStorage.getItem(SEC_STATE_KEY) || '{}'); } catch {}
+    document.querySelectorAll('.sec[data-cat]').forEach(sec => {
+        if (s[sec.dataset.cat]) sec.classList.add('closed');
+    });
+}
+loadSecState();
+
 document.querySelectorAll('.sec-hd').forEach(hd => {
-    hd.addEventListener('click', () => hd.closest('.sec').classList.toggle('closed'));
+    hd.addEventListener('click', () => {
+        hd.closest('.sec').classList.toggle('closed');
+        persistSecState();
+    });
+});
+
+// ── Collapse-all / expand-all toggle ──────────────────────────
+document.getElementById('btn-collapse-all').addEventListener('click', () => {
+    const secs = document.querySelectorAll('#panel-body .sec');
+    const allClosed = [...secs].every(s => s.classList.contains('closed'));
+    secs.forEach(s => s.classList.toggle('closed', !allClosed));
+    persistSecState();
+});
+
+// ── HUD collapse ──────────────────────────────────────────────
+const hud       = document.getElementById('hud');
+const hudToggle = document.getElementById('hud-toggle');
+hudToggle.addEventListener('click', () => {
+    hud.classList.toggle('collapsed');
+    hudToggle.textContent = hud.classList.contains('collapsed') ? '+' : '−';
+    try { localStorage.setItem('achernar_hud_collapsed',
+        hud.classList.contains('collapsed') ? '1' : '0'); } catch {}
+});
+try {
+    if (localStorage.getItem('achernar_hud_collapsed') === '1') {
+        hud.classList.add('collapsed');
+        hudToggle.textContent = '+';
+    }
+} catch {}
+
+// ── Slider double-click → reset to default ────────────────────
+document.querySelectorAll('input[type=range]').forEach(s => {
+    s.dataset.defaultValue = s.value;
+    s.addEventListener('dblclick', () => {
+        s.value = s.dataset.defaultValue;
+        s.dispatchEvent(new Event('input', { bubbles: true }));
+    });
 });
 
 // ────────────────────────────────────────────────────────────────
@@ -2185,6 +2422,123 @@ document.getElementById('view-cont').addEventListener('click', () => setViewMode
 document.getElementById('view-dopp').addEventListener('click', () => setViewMode(1));
 document.getElementById('view-temp').addEventListener('click', () => setViewMode(2));
 
+// ────────────────────────────────────────────────────────────────
+//  TIME CONTROLS — global Δt multiplier + pause
+// ────────────────────────────────────────────────────────────────
+state.timeRate = 1.0;
+state.paused   = false;
+const btnPause = document.getElementById('btn-pause');
+const slTimeR  = document.getElementById('sl-timerate');
+const dispTimeR = document.getElementById('disp-timerate');
+btnPause.addEventListener('click', () => {
+    state.paused = !state.paused;
+    btnPause.classList.toggle('active', state.paused);
+    btnPause.textContent = state.paused ? '⏸' : '▶';
+});
+slTimeR.addEventListener('input', e => {
+    state.timeRate = +e.target.value;
+    dispTimeR.textContent = state.timeRate.toFixed(2) + '×';
+});
+
+// ────────────────────────────────────────────────────────────────
+//  LAYER BATCH BUTTONS — All on / Essentials / All off
+// ────────────────────────────────────────────────────────────────
+const layerToggleIDs = [
+    'tog-corona', 'tog-axis', 'tog-drgrid',
+    'tog-jet', 'tog-pwind', 'tog-outflow', 'tog-twistor',
+    'tog-binary', 'tog-sed',
+];
+const layerEssentials = new Set([
+    'tog-corona', 'tog-jet', 'tog-pwind', 'tog-outflow', 'tog-sed',
+]);
+function setLayer(id, on) {
+    const el = document.getElementById(id);
+    if (!el || el.checked === on) return;
+    el.checked = on;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+}
+document.getElementById('btn-layers-allon').addEventListener('click', () => {
+    layerToggleIDs.forEach(id => setLayer(id, true));
+});
+document.getElementById('btn-layers-essentials').addEventListener('click', () => {
+    layerToggleIDs.forEach(id => setLayer(id, layerEssentials.has(id)));
+});
+document.getElementById('btn-layers-alloff').addEventListener('click', () => {
+    layerToggleIDs.forEach(id => setLayer(id, false));
+});
+
+// ────────────────────────────────────────────────────────────────
+//  QUICK PRESETS — apply slider/toggle batches that match named
+//  Achernar regimes.  Each preset dispatches the matching event so
+//  every existing handler runs (HUD numbers, Roche surface, disk
+//  shaders, Hα profile etc all stay in sync automatically).
+// ────────────────────────────────────────────────────────────────
+function setSlider(id, v) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.value = v;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+const PRESETS = {
+    // Canonical Achernar A as currently observed (post-2014 disk reform).
+    default: () => {
+        setSlider('sl-ratio',  1.56);
+        setSlider('sl-tpole',  17000);
+        setSlider('sl-teq',    10000);
+        setSlider('sl-betagd', 0.25);
+        setSlider('sl-spin',   1.00);
+        setSlider('sl-incl',   65);
+        setSlider('sl-diffrot',0.10);
+        setSlider('sl-disk-rho', 1.00);
+        setSlider('sl-disk-out', 3.6);
+        setSlider('sl-burst-amp', 0.65);
+        setSlider('sl-burst-per', 8.0);
+        setSlider('sl-twist-h', 0.0);
+        setSlider('sl-nrp-amp', 0.012);
+        setSlider('sl-nrp-per', 1.26);
+        setLayer('tog-disk', true);
+        setLayer('tog-nrp', false);
+        setLayer('tog-twistor', false);
+        ['tog-corona','tog-jet','tog-pwind','tog-outflow','tog-sed']
+            .forEach(id => setLayer(id, true));
+        setLayer('tog-axis', false); setLayer('tog-drgrid', false);
+        setLayer('tog-binary', false);
+    },
+    // Inner-disk feeding outburst: max density, NRP on, tight burst period.
+    burst: () => {
+        PRESETS.default();
+        setSlider('sl-disk-rho', 2.20);
+        setSlider('sl-burst-amp', 1.30);
+        setSlider('sl-burst-per', 5.0);
+        setSlider('sl-tpole', 18500);
+        setLayer('tog-nrp', true);
+        setLayer('tog-outflow', true);
+    },
+    // Disk shed (2013 shell-phase analogue).
+    shell: () => {
+        PRESETS.default();
+        setSlider('sl-disk-rho', 0.35);
+        setSlider('sl-disk-out', 2.8);
+        setSlider('sl-burst-amp', 0.10);
+        setLayer('tog-disk', false);    // disk currently shed
+    },
+    // Near-critical rotation, no disk — pure photospheric oblateness study.
+    crit: () => {
+        PRESETS.default();
+        setSlider('sl-ratio', 1.56);
+        setSlider('sl-spin',  2.10);
+        setSlider('sl-diffrot', 0.20);
+        setLayer('tog-disk', false);
+        setLayer('tog-outflow', false);
+        setLayer('tog-pwind', true);
+        setLayer('tog-drgrid', true);
+    },
+};
+document.getElementById('ps-default').addEventListener('click', PRESETS.default);
+document.getElementById('ps-burst').addEventListener('click',   PRESETS.burst);
+document.getElementById('ps-shell').addEventListener('click',   PRESETS.shell);
+document.getElementById('ps-crit').addEventListener('click',    PRESETS.crit);
+
 // ── Non-radial pulsation ─────────────────────────────────────────
 document.getElementById('tog-nrp').addEventListener('change', e => {
     uniforms.u_nrp_active.value = e.target.checked ? 1.0 : 0.0;
@@ -2755,7 +3109,12 @@ const _invTmp = new THREE.Matrix4();
 
 function animate() {
     requestAnimationFrame(animate);
-    const dt = clock.getDelta();
+    // Wall-clock Δt × user-set time multiplier × pause gate.  Δt = 0 when
+    // paused freezes every integrator (rotation, outflows, NRP, twistors,
+    // outburst envelope, time uniform) without affecting camera/orbit
+    // controls or the renderer itself.
+    const wallDt = clock.getDelta();
+    const dt = state.paused ? 0 : wallDt * state.timeRate;
     uniforms.u_time.value += dt;
 
     // Body-frame rotation: rigid spin at Ω_eq.  Differential rotation
