@@ -396,6 +396,10 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
                         <label for="tog-axis">Show rotation axis</label>
                     </div>
                     <div class="toggle-row">
+                        <input type="checkbox" id="tog-drgrid">
+                        <label for="tog-drgrid">DR latitude grid (±30°, ±60°)</label>
+                    </div>
+                    <div class="toggle-row">
                         <input type="checkbox" id="tog-binary">
                         <label for="tog-binary">Achernar B (companion + orbit)</label>
                     </div>
@@ -1026,12 +1030,15 @@ starGroup.add(rimMesh);
 const windVS = /* glsl */`
     varying float vAlt;       // height above polar surface (≥0, world-space)
     varying vec2  vRadXZ;     // (x,z) of vertex in world frame
-    varying float vObjY;      // sign of polar hemisphere (+1 north / −1 south)
+    varying float vViewAlign; // |ŷ · v̂| — 1 if viewer is along the rotation axis
     void main() {
         vec4 wp = modelMatrix * vec4(position, 1.0);
-        vAlt   = max(0.0, abs(wp.y) - 1.0);     // 0 at polar surface, growing outward
-        vRadXZ = wp.xz;                          // perpendicular distance from rotation axis
-        vObjY  = sign(wp.y);
+        vAlt   = max(0.0, abs(wp.y) - 1.0);
+        vRadXZ = wp.xz;
+        // Camera-to-vertex unit vector — used to fade the cone away when
+        // the viewer looks straight down the rotation axis (pole-on).
+        vec3 vDir  = normalize(cameraPosition - wp.xyz);
+        vViewAlign = abs(vDir.y);
         gl_Position = projectionMatrix * viewMatrix * wp;
     }
 `;
@@ -1040,7 +1047,7 @@ const windFS = /* glsl */`
     uniform float u_t_pole;
     varying float vAlt;
     varying vec2  vRadXZ;
-    varying float vObjY;
+    varying float vViewAlign;
 
     vec3 planckRGB(float T){
         float t = clamp(T,1000.0,40000.0)*0.01; float r,g,b;
@@ -1080,25 +1087,36 @@ const windFS = /* glsl */`
         float a = radial * density * turb * 0.46
                 * (0.92 + 0.08 * sin(u_time*1.7 + vAlt*2.2));
 
+        // Pole-on view rejection: when the viewer looks down the rotation
+        // axis we see the cone end-on, which fills the whole frame and
+        // overpowers the disk.  Smoothly fade alpha as the viewing
+        // direction approaches ŷ.  No effect outside ~25° of the pole.
+        float poleFade = 1.0 - 0.85 * smoothstep(0.72, 0.96, vViewAlign);
+        a *= poleFade;
+
         // Wind plasma is hotter than the photospheric pole (CAK shock-heated).
         vec3 c = planckRGB(u_t_pole * 1.18) * 1.25;
         gl_FragColor = vec4(c, a);
     }
 `;
 // Inverted truncated cone — narrow base at the pole, flaring outward.
-// CylinderGeometry(radiusTop=1.7, radiusBottom=0.35, height=5.6).
-const windGeo = new THREE.CylinderGeometry(1.7, 0.35, 5.6, 36, 1, true);
+// Height 4.5 (capped to keep the cone *inside* the disk's outer extent
+// at typical settings: R_outer slider tops out at 6 R_eq, so the wind
+// at world-y ≈ ±5.3 stays comfortably inside the frame).
+const WIND_HEIGHT = 4.5;
+const windGeo = new THREE.CylinderGeometry(1.45, 0.35, WIND_HEIGHT, 36, 1, true);
 const windMat = new THREE.ShaderMaterial({
     vertexShader:windVS, fragmentShader:windFS, uniforms,
     transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.DoubleSide,
 });
 const jetTop    = new THREE.Mesh(windGeo, windMat);
 const jetBottom = new THREE.Mesh(windGeo, windMat);
-// Position so the narrow base of each cone sits *just outside* the polar
-// surface (R_pole = 1).  Geometry y goes from −2.8 to +2.8; we want the
-// narrow end (y=−2.8 in local coords) at world-y ≈ +1.05 → offset = 3.85.
-jetTop.position.y    =  3.85;
-jetBottom.position.y = -3.85;
+// Anchor the narrow base 0.05 R outside the polar surface (R_pole = 1).
+//   geometry y ∈ [−H/2, +H/2];  narrow end at y = −H/2.
+//   want narrow end at world-y = +1.05 ⇒ offset = 1.05 + H/2.
+const WIND_OFFSET = 1.05 + WIND_HEIGHT / 2;
+jetTop.position.y    =  WIND_OFFSET;
+jetBottom.position.y = -WIND_OFFSET;
 jetBottom.rotation.x = Math.PI;
 starGroup.add(jetTop, jetBottom);
 
@@ -1595,6 +1613,105 @@ axisLine.visible = false;
 starGroup.add(axisLine);
 
 // ────────────────────────────────────────────────────────────────
+//  DIFFERENTIAL-ROTATION LATITUDE GRID
+// ────────────────────────────────────────────────────────────────
+//
+//  Five dashed parallels traced on the *Roche surface* itself (not a
+//  sphere) at θ = 30°, 60°, 90° (equator), 120°, 150°.  Each ring is
+//  its own Object3D parented to starGroup, so the parent transform
+//  carries the body's solid-body Ω_eq rotation.  We then set each
+//  ring's local rotation.y to
+//      Δφ(θ) = -α₂ · cos²θ · ∫Ω_eq dt
+//  so the inertial-frame rotation rate of the ring is
+//      Ω_eq + Δφ̇ = Ω_eq · (1 − α₂ cos²θ) = Ω(θ)
+//  exactly the surface-shader DR law.  Result: at α₂ > 0 the polar
+//  rings visibly drift backward versus the equator — the same tracer
+//  helioseismologists use to map the Sun's DR.
+//
+//  Rings are rebuilt whenever the equatorial:polar ratio R changes,
+//  because r_Roche(θ) is a function of R.
+//
+const DR_RING_THETAS = [
+    { thetaDeg:  30, label: '+60° lat' },
+    { thetaDeg:  60, label: '+30° lat' },
+    { thetaDeg:  90, label: ' equator' },
+    { thetaDeg: 120, label: '−30° lat' },
+    { thetaDeg: 150, label: '−60° lat' },
+];
+
+const drRings = [];   // { mesh, cosTheta, geometry }
+
+function buildRingPositions(thetaRad, R, n = 192) {
+    // Roche radius at this latitude
+    const cosT = Math.cos(thetaRad);
+    const sin2 = 1 - cosT * cosT;
+    const sinT = Math.sqrt(sin2);
+    const beta = Math.min(2 * (R - 1) / (R*R*R), 0.293);
+    let r = 1;
+    for (let k = 0; k < 6; k++) r = 1 + 0.5 * beta * r*r*r * sin2;
+    const rSurf = r * 1.005;   // bias just above the surface to avoid z-fighting
+
+    // n+1 verts so the line closes cleanly under LineDashedMaterial.
+    const positions = new Float32Array((n + 1) * 3);
+    for (let i = 0; i <= n; i++) {
+        const phi = (i / n) * Math.PI * 2;
+        positions[i*3]   = rSurf * sinT * Math.cos(phi);
+        positions[i*3+1] = rSurf * cosT;
+        positions[i*3+2] = rSurf * sinT * Math.sin(phi);
+    }
+    return positions;
+}
+
+function rebuildDRRings() {
+    const R = Math.max(uniforms.u_axis_ratio.value, 1.0);
+    for (const ring of drRings) {
+        const newPos = buildRingPositions(ring.cosTheta.theta, R);
+        ring.geometry.setAttribute('position', new THREE.BufferAttribute(newPos, 3));
+        ring.geometry.attributes.position.needsUpdate = true;
+        ring.mesh.computeLineDistances();
+    }
+}
+
+(function initDRRings() {
+    for (const def of DR_RING_THETAS) {
+        const theta = def.thetaDeg * Math.PI / 180;
+        const cosT  = Math.cos(theta);
+        const isEq  = Math.abs(def.thetaDeg - 90) < 1;
+        const geo   = new THREE.BufferGeometry();
+        geo.setAttribute('position',
+            new THREE.BufferAttribute(buildRingPositions(theta, uniforms.u_axis_ratio.value), 3));
+        const mat = new THREE.LineDashedMaterial({
+            color: isEq ? 0xffd080 : 0xc8a8ff,
+            dashSize: 0.10, gapSize: 0.08,
+            transparent: true,
+            opacity: isEq ? 0.85 : 0.55,
+        });
+        const line = new THREE.Line(geo, mat);
+        line.computeLineDistances();
+        const wrapper = new THREE.Object3D();    // separate group for per-ring DR rotation
+        wrapper.add(line);
+        wrapper.visible = false;
+        starGroup.add(wrapper);
+        drRings.push({ mesh: line, wrapper, cosTheta: { theta, value: cosT, value2: cosT*cosT }, geometry: geo, isEquator: isEq });
+    }
+})();
+
+let drRingsVisible = false;
+function setDRRingsVisible(v) {
+    drRingsVisible = v;
+    for (const r of drRings) r.wrapper.visible = v;
+}
+function updateDRRings() {
+    if (!drRingsVisible) return;
+    const phase = uniforms.u_diffrot_phase.value;
+    const alpha = uniforms.u_diffrot_alpha.value;
+    for (const r of drRings) {
+        // Δφ(θ) = −α₂ · cos²θ · ∫Ω_eq dt — body-frame backward drift
+        r.wrapper.rotation.y = -alpha * r.cosTheta.value2 * phase;
+    }
+}
+
+// ────────────────────────────────────────────────────────────────
 //  ACHERNAR B — A1V–A3V companion (Kervella & Domiciano de Souza 2008)
 // ────────────────────────────────────────────────────────────────
 //   a ≈ 12.3 AU, e ≈ 0.72, P ≈ 14.3 yr, m_B ≈ 1.7 M☉.
@@ -1725,6 +1842,8 @@ document.getElementById('sl-ratio').addEventListener('input', e => {
     const beta = Math.min(2*(v-1)/(v*v*v), 0.293);
     const ratioCrit = Math.sqrt(beta / (8/27));
     document.getElementById('hud-omega').textContent = ratioCrit.toFixed(2);
+    // Roche surface changed shape — rebuild DR latitude rings.
+    rebuildDRRings();
 });
 document.getElementById('sl-tpole').addEventListener('input', e => {
     const v = +e.target.value;
@@ -1777,6 +1896,7 @@ document.getElementById('sl-disk-out').addEventListener('input', e => {
 document.getElementById('tog-corona').addEventListener('change', e => { rimMesh.visible = e.target.checked; });
 document.getElementById('tog-jet').addEventListener('change',    e => { jetTop.visible = jetBottom.visible = e.target.checked; });
 document.getElementById('tog-axis').addEventListener('change',   e => { axisLine.visible = e.target.checked; });
+document.getElementById('tog-drgrid').addEventListener('change', e => setDRRingsVisible(e.target.checked));
 document.getElementById('tog-binary').addEventListener('change', e => { binaryGroup.visible = e.target.checked; });
 document.getElementById('tog-outflow').addEventListener('change',e => { outPoints.visible = e.target.checked; });
 document.getElementById('tog-twistor').addEventListener('change',e => { twistPoints.visible = e.target.checked; });
@@ -2374,6 +2494,7 @@ function animate() {
     //     Keplerian motion read as differential vs. the surface.
     updateTwistors(uniforms.u_time.value);
     updateOutflow(uniforms.u_time.value, dt);
+    updateDRRings();
 
     // Achernar B orbital motion.
     if (binaryGroup.visible) {
