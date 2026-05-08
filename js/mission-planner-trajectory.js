@@ -65,6 +65,14 @@ export const SOI_SATURN   =  54400000;
 export const SOI_URANUS   =  51700000;
 export const SOI_NEPTUNE  =  86700000;
 
+// Default parking-orbit inclination (deg). 28.5° is the latitude of
+// Kennedy SC — the historic reference for US human-rated launches and
+// most US Mars/Moon/outer-planet missions, hence a sensible default.
+// Callers should pass an explicit `parking_inc_deg` matching their
+// launch site (or, for SSO/debris-shell targets where the parking
+// orbit IS the destination, the target inclination).
+export const DEFAULT_PARKING_INC_DEG = 28.5;
+
 // ── Per-target orbital-insertion labels ───────────────────────────────────
 // Single source of truth for the abbreviations used in mission-log entries
 // ("🛰️ JOI · ${spacecraft} captured at Jupiter") and tooltip strings. The
@@ -499,11 +507,22 @@ export function arrivalBurnIntoOrbit({ r_capt_km, mu, v_inf_vec, i_capt_rad = nu
 //   • Δv_mag = ||v∞_out| − |v∞_in||  (tangential burn at periapsis)
 //   • Δv_dir = 2·v∞·sin((α_req − α_max)/2)  (when α_req > α_max)
 
+// Per-body data for the flyby model. min_alt_km is the smallest
+// periapsis altitude considered ballistically feasible; for the gas
+// giants this is well above the cloud tops to clear the inner ring
+// system + radiation belts (Galileo and JUNO actually flew lower at
+// Jupiter, but those are heavily-shielded missions). Without entries
+// here, planTour throws on any tour that uses the body as an
+// intermediate flyby (Cassini, Voyager-2, etc.).
 const FLYBY_BODIES = {
-    mercury: { mu: 22032.1,  r_km: 2439.7, min_alt_km: 200 },
-    venus:   { mu: 324859.0, r_km: 6051.8, min_alt_km: 200 },
-    earth:   { mu: MU_EARTH, r_km: R_EARTH, min_alt_km: 300 },
-    mars:    { mu: MU_MARS,  r_km: R_MARS,  min_alt_km: 200 },
+    mercury: { mu: 22032.1,    r_km: 2439.7,   min_alt_km:   200 },
+    venus:   { mu: 324859.0,   r_km: 6051.8,   min_alt_km:   200 },
+    earth:   { mu: MU_EARTH,   r_km: R_EARTH,  min_alt_km:   300 },
+    mars:    { mu: MU_MARS,    r_km: R_MARS,   min_alt_km:   200 },
+    jupiter: { mu: MU_JUPITER, r_km: R_JUPITER, min_alt_km: 5000 },
+    saturn:  { mu: MU_SATURN,  r_km: R_SATURN,  min_alt_km: 5000 },
+    uranus:  { mu: MU_URANUS,  r_km: R_URANUS,  min_alt_km: 4000 },
+    neptune: { mu: MU_NEPTUNE, r_km: R_NEPTUNE, min_alt_km: 4000 },
 };
 
 /** Maximum natural flyby turn angle (radians) at given r_p and v∞. */
@@ -653,7 +672,7 @@ export function planMarsLambert({
     jd_arrive           = jdNow() + 260,
     parking_alt_km      = 300,
     target_alt_mars_km  = 400,
-    parking_inc_deg     = 28.5,    // KSC default
+    parking_inc_deg     = DEFAULT_PARKING_INC_DEG,
     capture_inc_deg     = null,    // null = ignore arrival plane change
     prograde            = true,
 } = {}) {
@@ -736,9 +755,15 @@ export function porkchopMars({
     n_dep = 60, n_arr = 60,
     parking_alt_km     = 300,
     target_alt_mars_km = 400,
-    parking_inc_deg    = 28.5,
+    parking_inc_deg    = DEFAULT_PARKING_INC_DEG,
     prograde           = true,
     dv_clip_kms        = 25,        // cells above this map to NaN
+    // Maximum revolution count to try at each cell. M=0 alone leaves
+    // "no solution" patches at long TOFs that span more than one
+    // synodic period; M=1 fills those in (Type III/IV transfers) and
+    // also picks up cheaper Δv solutions on the long-TOF side of each
+    // window. Set to 0 to restore the legacy single-rev scan.
+    max_rev            = 1,
 } = {}) {
     const dv    = new Float32Array(n_dep * n_arr);
     const c3    = new Float32Array(n_dep * n_arr);
@@ -758,6 +783,11 @@ export function porkchopMars({
         arrs[j] = { jd, state: planetState(marsHeliocentric, jd) };
     }
 
+    const r_park_e = R_EARTH + parking_alt_km;
+    const r_park_m = R_MARS  + target_alt_mars_km;
+    const v_park_e = Math.sqrt(MU_EARTH / r_park_e);
+    const v_circ_m = Math.sqrt(MU_MARS  / r_park_m);
+
     for (let i = 0; i < n_dep; i++) {
         const D = deps[i];
         for (let j = 0; j < n_arr; j++) {
@@ -768,37 +798,40 @@ export function porkchopMars({
                 dv[idx] = NaN; c3[idx] = NaN; vinfA[idx] = NaN; tofD[idx] = NaN;
                 continue;
             }
-            try {
-                const sol = lambert(D.state.r, A.state.r, tof, MU_SUN, { prograde });
+            // Try every Lambert branch (M=0..max_rev, both branches
+            // for M≥1) and keep the cheapest valid total Δv. lambertAll
+            // catches throws internally, so an empty result just means
+            // no branch converged — leave the cell NaN.
+            const sols = max_rev > 0
+                ? lambertAll(D.state.r, A.state.r, tof, MU_SUN, { prograde, maxM: max_rev })
+                : (() => { try { return [lambert(D.state.r, A.state.r, tof, MU_SUN, { prograde })]; }
+                          catch (_) { return []; } })();
+
+            let cell = null;
+            for (const sol of sols) {
                 const vie = vSub(sol.v1, D.state.v);
                 const vim = vSub(sol.v2, A.state.v);
                 const vie_n = vNorm(vie), vim_n = vNorm(vim);
+                const v_hyp_e = Math.sqrt(vie_n*vie_n + 2*MU_EARTH / r_park_e);
+                const v_hyp_m = Math.sqrt(vim_n*vim_n + 2*MU_MARS  / r_park_m);
+                const tilt    = Math.abs(Math.abs(declination(vie)) - parking_inc_deg * D2R);
+                const dv_dep  = combinedBurnDV(v_park_e, v_hyp_e, tilt);
+                const dv_arr  = v_hyp_m - v_circ_m;
+                const total   = dv_dep + dv_arr;
+                if (!Number.isFinite(total) || total >= dv_clip_kms) continue;
+                if (!cell || total < cell.total) cell = { total, vie_n, vim_n };
+            }
 
-                const r_park_e = R_EARTH + parking_alt_km;
-                const r_park_m = R_MARS  + target_alt_mars_km;
-                const v_park_e = Math.sqrt(MU_EARTH / r_park_e);
-                const v_hyp_e  = Math.sqrt(vie_n*vie_n + 2*MU_EARTH / r_park_e);
-                const v_circ_m = Math.sqrt(MU_MARS / r_park_m);
-                const v_hyp_m  = Math.sqrt(vim_n*vim_n + 2*MU_MARS / r_park_m);
-
-                const tilt = Math.abs(Math.abs(declination(vie)) - parking_inc_deg * D2R);
-                const dv_dep = combinedBurnDV(v_park_e, v_hyp_e, tilt);
-                const dv_arr = v_hyp_m - v_circ_m;
-                const total  = dv_dep + dv_arr;
-
-                if (Number.isFinite(total) && total < dv_clip_kms) {
-                    dv[idx]    = total;
-                    c3[idx]    = vie_n * vie_n;
-                    vinfA[idx] = vim_n;
-                    tofD[idx]  = A.jd - D.jd;
-                    if (total < best.dv) {
-                        best = { dv: total, i, j, jd_dep: D.jd, jd_arr: A.jd,
-                                 c3: vie_n*vie_n, vinfA: vim_n, tof_d: A.jd - D.jd };
-                    }
-                } else {
-                    dv[idx] = NaN; c3[idx] = NaN; vinfA[idx] = NaN; tofD[idx] = NaN;
+            if (cell) {
+                dv[idx]    = cell.total;
+                c3[idx]    = cell.vie_n * cell.vie_n;
+                vinfA[idx] = cell.vim_n;
+                tofD[idx]  = A.jd - D.jd;
+                if (cell.total < best.dv) {
+                    best = { dv: cell.total, i, j, jd_dep: D.jd, jd_arr: A.jd,
+                             c3: cell.vie_n*cell.vie_n, vinfA: cell.vim_n, tof_d: A.jd - D.jd };
                 }
-            } catch (_) {
+            } else {
                 dv[idx] = NaN; c3[idx] = NaN; vinfA[idx] = NaN; tofD[idx] = NaN;
             }
         }
@@ -807,6 +840,7 @@ export function porkchopMars({
         n_dep, n_arr,
         jd_dep_min, jd_dep_max, jd_arr_min, jd_arr_max,
         dv, c3, vinfA, tof_d: tofD, best,
+        max_rev,
         planet: 'mars',
     };
 }
@@ -836,9 +870,14 @@ export function porkchop({
     n_dep = 60, n_arr = 60,
     parking_alt_km     = 300,
     target_alt_km      = null,
-    parking_inc_deg    = 28.5,
+    parking_inc_deg    = DEFAULT_PARKING_INC_DEG,
     prograde           = true,
     dv_clip_kms        = null,
+    // M=0 alone leaves "no solution" gaps at TOFs > 1 synodic period
+    // — outer-planet scans hit this routinely. M=1 fills the gaps and
+    // also captures cheaper multi-rev branches on long Saturn/Uranus
+    // /Neptune transfers. Set to 0 to restore single-rev behavior.
+    max_rev            = 1,
 } = {}) {
     const cfg = _PORKCHOP_TARGETS[planet];
     if (!cfg) throw new Error(`porkchop: unknown planet "${planet}"`);
@@ -867,6 +906,8 @@ export function porkchop({
     const r_park_t = cfg.R_km + _alt;
     const v_circ_t = Math.sqrt(cfg.mu / r_park_t);
 
+    const v_park_e = Math.sqrt(MU_EARTH / r_park_e);
+
     for (let i = 0; i < n_dep; i++) {
         const D = deps[i];
         for (let j = 0; j < n_arr; j++) {
@@ -877,34 +918,40 @@ export function porkchop({
                 dv[idx] = NaN; c3[idx] = NaN; vinfA[idx] = NaN; tofD[idx] = NaN;
                 continue;
             }
-            try {
-                const sol   = lambert(D.state.r, A.state.r, tof, MU_SUN, { prograde });
+            // Multi-rev sweep: keep the cheapest valid total Δv across
+            // all M=0..max_rev branches. lambertAll swallows per-branch
+            // failures internally, so an empty list just means no
+            // branch converged for this cell.
+            const sols = max_rev > 0
+                ? lambertAll(D.state.r, A.state.r, tof, MU_SUN, { prograde, maxM: max_rev })
+                : (() => { try { return [lambert(D.state.r, A.state.r, tof, MU_SUN, { prograde })]; }
+                          catch (_) { return []; } })();
+
+            let cell = null;
+            for (const sol of sols) {
                 const vie   = vSub(sol.v1, D.state.v);
                 const vit   = vSub(sol.v2, A.state.v);
                 const vie_n = vNorm(vie), vit_n = vNorm(vit);
+                const v_hyp_e = Math.sqrt(vie_n*vie_n + 2*MU_EARTH / r_park_e);
+                const v_hyp_t = Math.sqrt(vit_n*vit_n + 2*cfg.mu   / r_park_t);
+                const tilt    = Math.abs(Math.abs(declination(vie)) - parking_inc_deg * D2R);
+                const dv_dep  = combinedBurnDV(v_park_e, v_hyp_e, tilt);
+                const dv_arr  = v_hyp_t - v_circ_t;
+                const total   = dv_dep + dv_arr;
+                if (!Number.isFinite(total) || total >= _clip) continue;
+                if (!cell || total < cell.total) cell = { total, vie_n, vit_n };
+            }
 
-                const v_park_e = Math.sqrt(MU_EARTH / r_park_e);
-                const v_hyp_e  = Math.sqrt(vie_n*vie_n + 2*MU_EARTH / r_park_e);
-                const v_hyp_t  = Math.sqrt(vit_n*vit_n + 2*cfg.mu / r_park_t);
-
-                const tilt   = Math.abs(Math.abs(declination(vie)) - parking_inc_deg * D2R);
-                const dv_dep = combinedBurnDV(v_park_e, v_hyp_e, tilt);
-                const dv_arr = v_hyp_t - v_circ_t;
-                const total  = dv_dep + dv_arr;
-
-                if (Number.isFinite(total) && total < _clip) {
-                    dv[idx]    = total;
-                    c3[idx]    = vie_n * vie_n;
-                    vinfA[idx] = vit_n;
-                    tofD[idx]  = A.jd - D.jd;
-                    if (total < best.dv) {
-                        best = { dv: total, i, j, jd_dep: D.jd, jd_arr: A.jd,
-                                 c3: vie_n*vie_n, vinfA: vit_n, tof_d: A.jd - D.jd };
-                    }
-                } else {
-                    dv[idx] = NaN; c3[idx] = NaN; vinfA[idx] = NaN; tofD[idx] = NaN;
+            if (cell) {
+                dv[idx]    = cell.total;
+                c3[idx]    = cell.vie_n * cell.vie_n;
+                vinfA[idx] = cell.vit_n;
+                tofD[idx]  = A.jd - D.jd;
+                if (cell.total < best.dv) {
+                    best = { dv: cell.total, i, j, jd_dep: D.jd, jd_arr: A.jd,
+                             c3: cell.vie_n*cell.vie_n, vinfA: cell.vit_n, tof_d: A.jd - D.jd };
                 }
-            } catch (_) {
+            } else {
                 dv[idx] = NaN; c3[idx] = NaN; vinfA[idx] = NaN; tofD[idx] = NaN;
             }
         }
@@ -914,6 +961,7 @@ export function porkchop({
         jd_dep_min, jd_dep_max, jd_arr_min, jd_arr_max,
         dv, c3, vinfA, tof_d: tofD, best,
         dv_clip_kms: _clip,
+        max_rev,
     };
 }
 
@@ -954,7 +1002,7 @@ export function planLunarLambert({
     tof_d               = 5.0,
     parking_alt_km      = 300,
     target_alt_moon_km  = 100,
-    parking_inc_deg     = 28.5,
+    parking_inc_deg     = DEFAULT_PARKING_INC_DEG,
     n_theta             = 30,           // burn-angle samples
 } = {}) {
     const jd     = jd_depart;
@@ -1288,7 +1336,7 @@ export function planEarthToOuterLambert({
     jd_arrive           = null,
     parking_alt_km      = 300,
     target_alt_km       = null,
-    parking_inc_deg     = 28.5,
+    parking_inc_deg     = DEFAULT_PARKING_INC_DEG,
     capture_inc_deg     = null,
     prograde            = true,
 } = {}) {
@@ -1464,7 +1512,7 @@ export function planTour({
     sequence            = TOUR_PRESETS.veem,
     parking_alt_km      = 300,
     target_alt_capt_km  = 400,
-    parking_inc_deg     = 28.5,
+    parking_inc_deg     = DEFAULT_PARKING_INC_DEG,
 } = {}) {
     const fromKey = sequence.depart;
     const fromFn  = _BODY_FNS[fromKey];
@@ -1600,11 +1648,32 @@ export function optimizeTour({
     jd_depart_range_days = 540,        // search ± half this around jd_start
     jd_depart_steps      = 12,
     tof_range_days       = 80,         // search ± half this around the preset TOF
-    tof_steps            = 5,
+    // Per-leg TOF resolution. When null (default) it's derived from
+    // target_evals so the search budget stays roughly constant across
+    // tour complexities — see the comment on `target_evals` below.
+    tof_steps            = null,
     parking_alt_km       = 300,
-    parking_inc_deg      = 28.5,
+    parking_inc_deg      = DEFAULT_PARKING_INC_DEG,
     target_alt_capt_km   = 400,
+    // ── Adaptive search budget ───────────────────────────────────────
+    // Total evaluations = jd_depart_steps × tof_steps^N (where N is
+    // the leg count). The legacy fixed grid (12 × 5^N) gave 60 evals
+    // for a direct shot but 38 000 for a 5-leg Cassini/Voyager-2
+    // tour — the former too coarse, the latter slow enough to lock
+    // the UI for several seconds.
+    //
+    // We instead pick tof_steps so the total lands near `target_evals`
+    // regardless of N, then clamp to [3, 12] so very short tours still
+    // get a usable grid and very long ones don't drift too coarse.
+    target_evals         = 3000,
 } = {}) {
+    const N = sequence.legs.length;
+    if (tof_steps == null) {
+        const per_dep    = Math.max(1, target_evals / Math.max(1, jd_depart_steps));
+        const raw        = Math.pow(per_dep, 1 / Math.max(1, N));
+        tof_steps        = Math.max(3, Math.min(12, Math.round(raw)));
+    }
+
     const baseTofs = sequence.legs.map(l => l.tof_d);
     const tofChoices = baseTofs.map(t => {
         const out = [];
@@ -1642,15 +1711,31 @@ export function optimizeTour({
                     parking_alt_km, parking_inc_deg, target_alt_capt_km,
                 });
                 // Total Δv now already bundles powered-flyby cost into
-                // dv_total_kms. Add a small penalty for ultra-low flyby
-                // altitudes (< 500 km) — physically possible but operationally
-                // risky, and a softer penalty drives the optimizer away from
-                // marginal solutions.
+                // dv_total_kms. Add small soft penalties so the optimizer
+                // discriminates between near-equivalent dv totals.
+                //
+                // 1. Ultra-low flyby altitudes (< 500 km) — physically
+                //    possible but operationally risky.
                 let altitudePenalty = 0;
                 if (plan.min_flyby_altitude_km != null && plan.min_flyby_altitude_km < 500) {
                     altitudePenalty = (500 - plan.min_flyby_altitude_km) * 0.001;
                 }
-                const cost = plan.dv_total_kms + altitudePenalty;
+                // 2. Capture-plane misalignment — the arrival v∞ at the
+                //    final body has some declination relative to the
+                //    ecliptic. The capture burn here is computed as a
+                //    tangential-only impulse (planTour ignores the
+                //    plane-change cost on arrival), so the optimizer
+                //    can't otherwise see this trade-off and will happily
+                //    pick high-declination arrivals. Penalize them with
+                //    a small linear term so cleaner capture geometries
+                //    win the tiebreak.
+                let capturePenalty = 0;
+                const lastLeg = plan.legs[plan.legs.length - 1];
+                if (lastLeg?.v_inf_arrive_vec) {
+                    const dec_rad = Math.abs(declination(lastLeg.v_inf_arrive_vec));
+                    capturePenalty = 0.5 * dec_rad;     // ~0.26 km/s at 30°
+                }
+                const cost = plan.dv_total_kms + altitudePenalty + capturePenalty;
                 if (!best || cost < best.cost) {
                     best = { cost, plan, jd_depart, tofs: legs.map(l => l.tof_d) };
                 }
@@ -1659,7 +1744,8 @@ export function optimizeTour({
     }
 
     if (!best) throw new Error('optimizeTour: no feasible solution found in search space');
-    best.plan._optimized = true;
-    best.plan._search_evals = total;
+    best.plan._optimized      = true;
+    best.plan._search_evals   = total;
+    best.plan._tof_steps      = tof_steps;
     return best.plan;
 }

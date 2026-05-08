@@ -152,14 +152,20 @@ export const MISSION_ROUTES = [
 
 export const TARGET_ORBITS = [
     { id: 'leo',  name: 'LEO · 400 km',           alt_km:    400,                         frame: 'geo' },
-    { id: 'sso',  name: 'SSO · 600 km',           alt_km:    600, inc_deg: 97.8,          frame: 'geo' },
+    // SSO and the debris shell are direct-insertion targets — the
+    // parking orbit IS the destination orbit, so the host page snaps
+    // the parking-inc slider to `inc_deg`. MEO/GEO are NOT marked
+    // because they're reached via a parking LEO + Hohmann transfer,
+    // so parking inclination follows launch-site latitude there.
+    { id: 'sso',  name: 'SSO · 600 km',           alt_km:    600, inc_deg: 97.8,          frame: 'geo', direct_insertion: true },
     // FY-1C ASAT shell: 865 km / 98.6° SSO. Selecting this preset mounts
     // the ~2 600-fragment debris cloud as a Three.js Points overlay
     // (loaded from CelesTrak via mission-planner-debris.js) so the user
     // parks inside the actual hazard, not next to it.
     { id: 'fengyun-1c-shell',
       name: 'FY-1C debris shell · 865 km · 98.6°',
-      alt_km:    865, inc_deg: 98.6, frame: 'geo', debrisOverlay: 'fengyun-1c' },
+      alt_km:    865, inc_deg: 98.6, frame: 'geo',
+      direct_insertion: true, debrisOverlay: 'fengyun-1c' },
     { id: 'meo',  name: 'MEO · 20 200 km (GPS)',  alt_km:  20200, inc_deg: 55,            frame: 'geo' },
     { id: 'geo',  name: 'GEO · 35 786 km',        alt_km:  35786, inc_deg: 0,             frame: 'geo' },
     { id: 'moon', name: 'Lunar transfer (TLI)',   alt_km: 384400,                         frame: 'geo',   isTransfer: 'moon' },
