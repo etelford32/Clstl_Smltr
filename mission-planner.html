@@ -1837,15 +1837,14 @@ parkIncRange.addEventListener('input', () => {
     }
     refreshDvBudget();
 });
-// Default parking inclination = launch site latitude (Earth pads only).
+// Default parking inclination = launch site latitude — unless the
+// destination is a direct-insertion target (SSO / FY-1C shell), in
+// which case the parking orbit must match the target inclination
+// regardless of where you launch from. Pass through updateTargetUI()
+// so the same auto-snap rule applies whether the change came from
+// the site dropdown or the target dropdown.
 siteSel.addEventListener('change', () => {
-    if (currentOriginBody === 'earth') {
-        const s = LAUNCH_SITES.find(x => x.id === siteSel.value);
-        if (s) {
-            parkIncRange.value = Math.abs(s.lat).toFixed(1);
-            parkIncVal.textContent = `${Math.abs(s.lat).toFixed(1)}°`;
-        }
-    }
+    if (currentOriginBody === 'earth') updateTargetUI();
     refreshDvBudget();
 });
 
@@ -1869,6 +1868,26 @@ function updateTargetUI() {
     const tgt = TARGET_ORBITS.find(t => t.id === targetSel.value);
     if (planner?.setDebrisOverlay) {
         planner.setDebrisOverlay(tgt?.debrisOverlay ?? null);
+    }
+
+    // Parking-inclination auto-snap. For `direct_insertion` targets
+    // (SSO, FY-1C shell) the parking orbit IS the destination, so the
+    // slider should match the target's inclination — otherwise the
+    // engine charges a fake plane-change cost computed against the
+    // 28.5° default. For everything else (LEO/MEO/GEO/Moon/Mars/...),
+    // keep parking inclination at the launch-site latitude.
+    if (currentOriginBody === 'earth') {
+        let inc = null;
+        if (tgt?.direct_insertion && Number.isFinite(tgt.inc_deg)) {
+            inc = tgt.inc_deg;
+        } else {
+            const s = LAUNCH_SITES.find(x => x.id === siteSel.value);
+            if (s) inc = Math.abs(s.lat);
+        }
+        if (Number.isFinite(inc)) {
+            parkIncRange.value     = inc.toFixed(1);
+            parkIncVal.textContent = `${inc.toFixed(1)}°`;
+        }
     }
     if (isMoon) {
         // Re-cost on target change.
