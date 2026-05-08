@@ -1046,6 +1046,10 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
                         <label for="tog-loops">Coronal loops (AR)</label>
                     </div>
                     <div class="toggle-row">
+                        <input type="checkbox" id="tog-nanoflares" checked>
+                        <label for="tog-nanoflares">Nanoflares (loop sparks)</label>
+                    </div>
+                    <div class="toggle-row">
                         <input type="checkbox" id="tog-prom" checked>
                         <label for="tog-prom">Prominences / filaments</label>
                     </div>
@@ -4170,6 +4174,284 @@ const LOOP_FS = /* glsl */`
     }
 `;
 
+// ─── NANOFLARES (Phase 1: loop-anchored Poisson sparks) ──────────────────────
+// Tiny stochastic heating events fired along every coronal loop. Each loop
+// has its own Poisson timer; events are drawn from a power-law energy
+// distribution (Lu & Hamilton-style flare statistics, dN/dE ∝ E^-α).
+// "Big" events trigger short avalanche bursts of follow-up sparks nearby —
+// a nod to the SOC dynamics that Phase 2 will compute properly.
+//
+// Each spark renders as an additive Gaussian point sprite anchored to the
+// loop curve, with energy-driven color (cool gold → blue-white teal),
+// peak size, lifetime, and rapid-rise/exp-decay envelope mimicking
+// observed EUV nanoflare lightcurves.
+const NANOFLARE_POOL_SIZE   = 768;   // total simultaneous sparks
+const NANOFLARE_ALPHA       = 2.2;   // power-law slope (typical observed range 1.8–2.5)
+const NANOFLARE_E_MIN       = 0.001;
+const NANOFLARE_E_MAX       = 1.0;
+
+const NANOFLARE_VS = /* glsl */`
+    attribute float aSize;
+    attribute float aAlpha;
+    varying vec3 vColor;
+    varying float vAlpha;
+    uniform float uPixelRatio;
+    void main() {
+        vColor  = color;
+        vAlpha  = aAlpha;
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        gl_Position  = projectionMatrix * mv;
+        // Perspective size attenuation; clamp to avoid singularities.
+        gl_PointSize = aSize * uPixelRatio * (260.0 / max(-mv.z, 0.001));
+    }
+`;
+const NANOFLARE_FS = /* glsl */`
+    varying vec3 vColor;
+    varying float vAlpha;
+    void main() {
+        vec2 uv = gl_PointCoord - 0.5;
+        float r2 = dot(uv, uv);
+        if (r2 > 0.25) discard;
+        // Hot stellar core + softer halo — mimics unresolved EUV brightening
+        float core = exp(-r2 * 70.0);
+        float halo = exp(-r2 *  9.0) * 0.30;
+        gl_FragColor = vec4(vColor, (core + halo) * vAlpha);
+    }
+`;
+
+let _nanoflareSystem = null;
+let _coronalLoopCurves = [];   // per-loop: { points: Vec3[], rate, nextEventT }
+
+// Inverse-CDF sampling of dN/dE ∝ E^-α on [emin, emax].
+function _sampleNanoflareEnergy() {
+    const a1 = 1 - NANOFLARE_ALPHA;
+    const u  = Math.random();
+    const lo = Math.pow(NANOFLARE_E_MIN, a1);
+    const hi = Math.pow(NANOFLARE_E_MAX, a1);
+    return Math.pow(lo + u * (hi - lo), 1 / a1);
+}
+
+function _initNanoflareSystem() {
+    if (_nanoflareSystem) return;
+
+    const positions = new Float32Array(NANOFLARE_POOL_SIZE * 3);
+    const colors    = new Float32Array(NANOFLARE_POOL_SIZE * 3);
+    const sizes     = new Float32Array(NANOFLARE_POOL_SIZE);
+    const alphas    = new Float32Array(NANOFLARE_POOL_SIZE);
+
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geom.setAttribute('color',    new THREE.BufferAttribute(colors, 3));
+    geom.setAttribute('aSize',    new THREE.BufferAttribute(sizes, 1));
+    geom.setAttribute('aAlpha',   new THREE.BufferAttribute(alphas, 1));
+
+    const mat = new THREE.ShaderMaterial({
+        vertexShader:   NANOFLARE_VS,
+        fragmentShader: NANOFLARE_FS,
+        vertexColors:   true,
+        transparent:    true,
+        depthWrite:     false,
+        blending:       THREE.AdditiveBlending,
+        uniforms: {
+            uPixelRatio: { value: Math.min(window.devicePixelRatio || 1, 2) },
+        },
+    });
+
+    const points = new THREE.Points(geom, mat);
+    points.frustumCulled = false;
+
+    const pool = new Array(NANOFLARE_POOL_SIZE);
+    for (let i = 0; i < NANOFLARE_POOL_SIZE; i++) {
+        pool[i] = { alive: false, t0: 0, life: 1, peakSize: 1, peakAlpha: 0 };
+    }
+
+    _nanoflareSystem = {
+        points, geom, positions, colors, sizes, alphas, pool,
+        nextSlot:  0,
+        liveCount: 0,
+    };
+}
+
+function _spawnNanoflare(loopIdx, sArc, energyE) {
+    if (!_nanoflareSystem) return;
+    const curve = _coronalLoopCurves[loopIdx];
+    if (!curve || !curve.points || !curve.points.length) return;
+
+    const sys = _nanoflareSystem;
+    const pts = curve.points;
+
+    const idxF = Math.max(0, Math.min(1, sArc)) * (pts.length - 1);
+    const i0   = Math.max(0, Math.min(pts.length - 2, Math.floor(idxF)));
+    const f    = idxF - i0;
+    const p0 = pts[i0], p1 = pts[i0 + 1];
+    const px = p0.x * (1 - f) + p1.x * f;
+    const py = p0.y * (1 - f) + p1.y * f;
+    const pz = p0.z * (1 - f) + p1.z * f;
+
+    // Round-robin slot allocation overwrites the oldest sprite.
+    const slot = sys.nextSlot;
+    sys.nextSlot = (slot + 1) % NANOFLARE_POOL_SIZE;
+
+    // Energy → 0..1 normalized log-energy → visual properties.
+    const eNorm = Math.min(1, Math.max(0,
+        (Math.log10(energyE) - Math.log10(NANOFLARE_E_MIN)) /
+        (Math.log10(NANOFLARE_E_MAX) - Math.log10(NANOFLARE_E_MIN))
+    ));
+    const peakSize  = 1.6 + eNorm * 5.4;
+    const peakAlpha = 0.50 + eNorm * 0.45;
+    const life      = 0.30 + eNorm * 1.20;   // sim-seconds
+
+    // EUV color ramp: low-E warm gold (chromospheric tail) → mid white →
+    // high-E blue-white teal (Fe XVIII / Fe XXI hot-channel signature).
+    let r, gC, b;
+    if (eNorm < 0.5) {
+        const k = eNorm * 2;
+        r  = 1.00;
+        gC = 0.78 + k * 0.18;
+        b  = 0.32 + k * 0.42;
+    } else {
+        const k = (eNorm - 0.5) * 2;
+        r  = 1.00 - k * 0.45;
+        gC = 0.96 - k * 0.10;
+        b  = 0.74 + k * 0.30;
+    }
+
+    const ent = sys.pool[slot];
+    ent.alive     = true;
+    ent.t0        = uniforms.u_time.value;
+    ent.life      = life;
+    ent.peakSize  = peakSize;
+    ent.peakAlpha = peakAlpha;
+
+    // Tiny radial lift so sparks sit in the coronal plasma, not embedded
+    // in the loop tube (improves additive-blend visibility against the disk).
+    const lift = 1.0 + 0.004 + eNorm * 0.004;
+    sys.positions[slot * 3]     = px * lift;
+    sys.positions[slot * 3 + 1] = py * lift;
+    sys.positions[slot * 3 + 2] = pz * lift;
+    sys.colors[slot * 3]     = r;
+    sys.colors[slot * 3 + 1] = gC;
+    sys.colors[slot * 3 + 2] = b;
+    sys.sizes[slot]  = peakSize * 0.6;   // start small, grow to peak
+    sys.alphas[slot] = 0.0;              // alpha ramps in over rise
+}
+
+function _updateNanoflares(t) {
+    if (!_nanoflareSystem || !loopGroup || !_coronalLoopCurves.length) return;
+    if (!_nanoflareSystem.points.visible) return;
+
+    const sys = _nanoflareSystem;
+
+    // ── Per-loop Poisson event scheduling ──
+    // Burst-spawn until each loop's nextEventT catches up with current t.
+    for (let li = 0; li < _coronalLoopCurves.length; li++) {
+        const curve = _coronalLoopCurves[li];
+        if (curve.nextEventT === undefined) curve.nextEventT = t + Math.random() * 0.4;
+
+        let safety = 0;
+        while (t >= curve.nextEventT && safety++ < 6) {
+            // Triangular dist centered on apex (s=0.5): u1+u2 averaged.
+            // Real nanoflares cluster where current sheets concentrate —
+            // along the loop's apex and at PIL footpoints.
+            const sArc = (Math.random() + Math.random()) * 0.5;
+
+            const E = _sampleNanoflareEnergy();
+            _spawnNanoflare(li, sArc, E);
+
+            // Avalanche burst: a "big" event (top decade of energy) has a
+            // chance to cascade into 2–4 follow-up sparks nearby. Pre-figures
+            // the SOC dynamics that Phase 2 will compute on a stress grid.
+            if (E > 0.25 && Math.random() < 0.40) {
+                const burst = 2 + ((Math.random() * 3) | 0);
+                for (let bi = 0; bi < burst; bi++) {
+                    const sNear = Math.max(0, Math.min(1, sArc + (Math.random() - 0.5) * 0.18));
+                    _spawnNanoflare(li, sNear, _sampleNanoflareEnergy() * 0.4);
+                }
+            }
+
+            // Schedule next event from exponential inter-arrival distribution.
+            const rate = curve.rate || 6.0;
+            curve.nextEventT += -Math.log(Math.max(1e-6, Math.random())) / rate;
+        }
+    }
+
+    // ── Per-spark envelope update ──
+    let liveCount = 0;
+    const positions = sys.positions, sizes = sys.sizes, alphas = sys.alphas;
+    for (let i = 0; i < NANOFLARE_POOL_SIZE; i++) {
+        const ent = sys.pool[i];
+        if (!ent.alive) {
+            if (alphas[i] !== 0) { alphas[i] = 0; sizes[i] = 0; }
+            continue;
+        }
+        const age = (t - ent.t0) / ent.life;
+        if (age >= 1.0) {
+            ent.alive = false;
+            alphas[i] = 0; sizes[i] = 0;
+            continue;
+        }
+        // Lightcurve envelope: rapid rise (~15% of life), exp decay tail.
+        let env;
+        if (age < 0.15) env = age / 0.15;
+        else            env = Math.exp(-(age - 0.15) * 4.5);
+        alphas[i] = ent.peakAlpha * env;
+        sizes[i]  = ent.peakSize  * (0.55 + 0.45 * env);
+        liveCount++;
+    }
+
+    sys.liveCount = liveCount;
+    sys.geom.attributes.position.needsUpdate = true;
+    sys.geom.attributes.color.needsUpdate    = true;
+    sys.geom.attributes.aSize.needsUpdate    = true;
+    sys.geom.attributes.aAlpha.needsUpdate   = true;
+
+    // Optional global heating term other shaders can tap into.
+    if (uniforms.u_nanoflare_heat) {
+        const target = liveCount / NANOFLARE_POOL_SIZE;
+        const cur    = uniforms.u_nanoflare_heat.value;
+        uniforms.u_nanoflare_heat.value = cur + (target - cur) * 0.05;
+    }
+}
+
+// Snapshot every coronal loop's curve points after buildCoronalLoops,
+// then attach the spark Points object as a child of loopGroup so sparks
+// co-rotate with the photosphere automatically.
+function _rebuildNanoflares() {
+    _coronalLoopCurves = [];
+    if (!loopGroup || !loopGroup.children?.length) {
+        if (_nanoflareSystem?.points && _nanoflareSystem.points.parent) {
+            _nanoflareSystem.points.parent.remove(_nanoflareSystem.points);
+        }
+        return;
+    }
+
+    loopGroup.children.forEach(line => {
+        const posAttr = line.geometry?.getAttribute('position');
+        if (!posAttr) return;
+        const n = posAttr.count;
+        const pts = new Array(n);
+        for (let i = 0; i < n; i++) {
+            pts[i] = new THREE.Vector3(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i));
+        }
+        // Per-loop Poisson rate (events/sim-sec). Jittered so loops don't
+        // fire in lockstep; total system fires ~loops × rate sparks/sec.
+        const rate = 4.0 + Math.random() * 6.0;
+        _coronalLoopCurves.push({ points: pts, rate, nextEventT: undefined });
+    });
+
+    _initNanoflareSystem();
+
+    // Re-parent under loopGroup so spark positions inherit solar rotation.
+    const pts = _nanoflareSystem.points;
+    if (pts.parent !== loopGroup) {
+        if (pts.parent) pts.parent.remove(pts);
+        loopGroup.add(pts);
+    }
+    // Visibility tracks the same toggle as loops by default (UI may override).
+    const tog = document.getElementById('tog-nanoflares');
+    pts.visible = tog ? tog.checked : true;
+}
+
 function buildCoronalLoops() {
     if (loopGroup) { scene.remove(loopGroup); loopGroup = null; }
     if (!liveRegions.length) return;
@@ -4295,6 +4577,9 @@ function buildCoronalLoops() {
 
     scene.add(loopGroup);
     loopGroup.visible = document.getElementById('tog-loops')?.checked !== false;
+
+    // Refresh the loop-anchored nanoflare system with the new curves.
+    _rebuildNanoflares();
 }
 
 // ─── MAGNETIC FIELD LINES — global dipole/quadrupole topology ────────────────
@@ -5155,6 +5440,9 @@ document.getElementById('tog-flares').addEventListener('change', e => { uniforms
 document.getElementById('tog-chrom').addEventListener('change',  e => { chromoMesh.visible  = e.target.checked; });
 document.getElementById('tog-corona').addEventListener('change', e => { coronaMesh.visible  = e.target.checked; });
 document.getElementById('tog-loops').addEventListener('change',  e => { if (loopGroup)  loopGroup.visible  = e.target.checked; });
+document.getElementById('tog-nanoflares')?.addEventListener('change', e => {
+    if (_nanoflareSystem?.points) _nanoflareSystem.points.visible = e.target.checked;
+});
 document.getElementById('tog-prom').addEventListener('change',   e => { if (promGroup)  promGroup.visible  = e.target.checked; });
 document.getElementById('tog-tr').addEventListener('change',     e => { trMesh.visible = e.target.checked; });
 document.getElementById('tog-fieldlines').addEventListener('change', e => { if (fieldLineGroup) fieldLineGroup.visible = e.target.checked; });
@@ -5351,6 +5639,9 @@ function animate() {
                 u.uOpacity.value = ud.baseOp * (0.55 + 0.45 * Math.sin(t * 1.8 + ud.phase));
         });
     }
+
+    // Nanoflares — Poisson sparks anchored to each loop's curve.
+    _updateNanoflares(t);
 
     // Prominences — co-rotate, slow MHD wave oscillation + eruption fade
     if (promGroup) {
