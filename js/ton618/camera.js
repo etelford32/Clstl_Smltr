@@ -29,11 +29,19 @@
 // orthonormal triad expressed in the local tetrad basis (r-hat, theta-hat,
 // phi-hat) and is uploaded to the shader as a 3x3 matrix.
 
-import { lapse } from './physics.js';
+import { lapse, kerrHorizons } from './physics.js';
 
-const CAM_R_MIN = 2.05;          // never cross the static-tetrad horizon
-const CAM_R_MAX = 5000.0;
-const THETA_EPS = 0.02;
+const CAM_R_MIN_FLOOR = 2.05;   // legacy floor for a = 0 (Schwarzschild)
+const CAM_R_MAX       = 5000.0;
+const THETA_EPS       = 0.02;
+
+// Dynamic minimum camera radius: just outside the Kerr outer horizon,
+// r_+(a) = 1 + √(1 − a²). At a = 0 this reduces to 2.05 exactly.
+function camRMin(spin = 0) {
+    const a = Math.max(0, Math.min(0.999, spin || 0));
+    const { r_plus } = kerrHorizons(a);
+    return r_plus + 0.05;
+}
 
 export const OBSERVER_TYPES = {
     static:    0,
@@ -54,10 +62,13 @@ export const PRESETS = {
 
 export function createCamera(opts = {}) {
     const cam = {
-        // observer position in Schwarzschild coords (M = 1)
+        // observer position in BL coords (M = 1)
         r:     opts.r     ?? 30.0,
         theta: opts.theta ?? Math.PI / 2,
         phi:   opts.phi   ?? 0.0,
+        // Lower bound on r — kept in sync with the Kerr horizon by main.js
+        // whenever the spin slider moves. Default = Schwarzschild a = 0.
+        rMin:  CAM_R_MIN_FLOOR,
         // orientation: yaw/pitch/roll in radians. Defaults look toward origin.
         yaw:   opts.yaw   ?? 0.0,
         pitch: opts.pitch ?? 0.0,
@@ -188,7 +199,7 @@ export function integrate(cam, dt) {
         const up  = subVec(cam.basis, 1);
         const rgt = subVec(cam.basis, 2);
         const sinT = Math.max(Math.abs(Math.sin(cam.theta)), 1e-3);
-        const r = Math.max(cam.r, CAM_R_MIN);
+        const r = Math.max(cam.r, cam.rMin);
 
         // Combine thrusts into a single tetrad-frame velocity vector.
         const tx = cam.thrustForward * fwd[0] + cam.thrustRight * rgt[0] + cam.thrustUp * up[0];
@@ -226,7 +237,7 @@ export function integrate(cam, dt) {
     cam.roll  += cam.vRoll  * dt;
 
     // ── clamp to safe domain ───────────────────────────────────────────
-    cam.r     = clamp(cam.r,     CAM_R_MIN, CAM_R_MAX);
+    cam.r     = clamp(cam.r,     cam.rMin, CAM_R_MAX);
     cam.theta = clamp(cam.theta, THETA_EPS, Math.PI - THETA_EPS);
     cam.phi   = wrap(cam.phi);
     cam.pitch = clamp(cam.pitch, -Math.PI / 2 + 0.001, Math.PI / 2 - 0.001);
@@ -343,7 +354,7 @@ export function attachControls(canvas, cam, onChange) {
     canvas.addEventListener('wheel', (e) => {
         e.preventDefault();
         const factor = Math.exp(e.deltaY * 0.0009);
-        cam.r = clamp(cam.r * factor, CAM_R_MIN, CAM_R_MAX);
+        cam.r = clamp(cam.r * factor, cam.rMin, CAM_R_MAX);
         cam.transition = null;
         onChange?.();
     }, { passive: false });

@@ -1,17 +1,21 @@
-// Phase 0 validation harness.
+// Photon-ring validation harness.
 //
-// Measures the apparent radius of the Schwarzschild photon ring by sweeping
-// a column of pixels at the image center and finding the largest impact
-// parameter for which the geodesic is captured by the horizon.
+// Measures the apparent vertical extent of the dark shadow column at the
+// center of the image. At a = 0 (Schwarzschild) the analytic answer is
+//   b_crit = 3√3 M  ≈  5.1961524 M
+//          = 2.5980762 r_s
+// (Bardeen-Press-Teukolsky 1972 → Bardeen 1973).
 //
-// Expected: b_crit = 3 sqrt(3) M = 5.1961524... in units of M.
-//           In units of r_s that is 2.5980762...
-//
-// The test assumes the camera is at large r, pointed at the hole, centered.
+// At a > 0 the shadow rim is no longer a perfect circle: it pinches on
+// the prograde side and bulges on the retrograde side (the famous Kerr
+// "D-shape" cardioid), so a vertical column through the image center
+// measures roughly the *unweighted* extent. We continue to compare
+// against the Schwarzschild b_crit and report the deviation; a Kerr-
+// specific contour validator (Bardeen 1973 fig. 1) lands in Phase 1.5.
 
 import { B_CRIT_GEOM, PHOTON_RING_RS } from './units.js';
 
-export function measurePhotonRing(backend, cam) {
+export function measurePhotonRing(backend, cam, spin = 0) {
     // Read back the center column as rendered. Dark pixels near the center
     // are the shadow; find the largest-|y| dark pixel.
     const gl = backend.gl;
@@ -43,11 +47,13 @@ export function measurePhotonRing(backend, cam) {
     const b_measured = cam.r * apparent_tan;
 
     return {
+        spin,
         b_measured,
-        b_expected:   B_CRIT_GEOM,
-        ring_rs:      b_measured / 2,
+        b_expected:       B_CRIT_GEOM,            // Schwarzschild analytic
+        ring_rs:          b_measured / 2,
         ring_rs_expected: PHOTON_RING_RS,
-        error_pct:    100 * (b_measured - B_CRIT_GEOM) / B_CRIT_GEOM,
-        shadow_pixels: shadow_pixels * 2,
+        error_pct:        100 * (b_measured - B_CRIT_GEOM) / B_CRIT_GEOM,
+        shadow_pixels:    shadow_pixels * 2,
+        kerr_regime:      spin > 0.01,            // hint for the UI to label "Kerr rim"
     };
 }
