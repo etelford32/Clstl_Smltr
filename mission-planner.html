@@ -1467,6 +1467,36 @@ const planner = initMissionPlanner({
             }
         } else if (ev.type === 'tour-arrived') {
             pushLog(`🛰️ Tour complete · captured at ${ev.plan.last_body}`, 'capture');
+        } else if (ev.type === 'debris-overlay') {
+            // Debris-shell overlay lifecycle (FY-1C, etc). 'loading' fires
+            // before the CelesTrak fetch resolves; 'ready' carries the
+            // sample stats so the operator sees what just got mounted;
+            // 'error' / 'empty' / 'unsupported' surface load problems.
+            const tag = ev.id ? ev.id.toUpperCase() : 'debris';
+            if (ev.status === 'loading') {
+                pushLog(`☁️ ${tag} cloud · loading TLEs from CelesTrak…`, 'window');
+            } else if (ev.status === 'ready') {
+                const s = ev.stats || {};
+                pushLog(
+                    `☁️ ${tag} cloud · ${s.count} fragments · `
+                    + `alt ${s.minAltKm?.toFixed(0)}–${s.maxAltKm?.toFixed(0)} km `
+                    + `(median ${s.medianAltKm?.toFixed(0)} km)`,
+                    'capture',
+                );
+                pushLog(
+                    `   ↳ FY-1C ASAT debris from 11 Jan 2007 SC-19 intercept · `
+                    + `≥40% of fragments still on orbit · cloud persists for centuries`,
+                    'window',
+                );
+            } else if (ev.status === 'cleared') {
+                pushLog(`☁️ Debris overlay cleared`, 'window');
+            } else if (ev.status === 'empty') {
+                pushLog(`☁️ ${tag} cloud · CelesTrak returned no fragments (try again later)`, 'warn');
+            } else if (ev.status === 'unsupported') {
+                pushLog(`☁️ ${tag} cloud · not yet wired up`, 'warn');
+            } else if (ev.status === 'error') {
+                pushLog(`☁️ ${tag} cloud · load failed (${ev.message})`, 'warn');
+            }
         } else if (ev.type === 'mode') {
             setModeUI(ev.mode);
         } else if (ev.type === 'focus') {
@@ -1593,7 +1623,9 @@ function dvRequiredKms() {
     let label      = '';
     try {
         if (origin === 'earth') {
-            if (destId === 'leo' || destId === 'sso') {
+            if (destId === 'leo' || destId === 'sso' || destId === 'fengyun-1c-shell') {
+                // FY-1C shell rides the same direct-insertion budget as
+                // SSO — same altitude band, same launch profile.
                 label = 'ascent only';
             } else if (destId === 'meo' || destId === 'geo') {
                 const target = TARGET_ORBITS.find(t => t.id === destId);
@@ -1829,6 +1861,15 @@ function updateTargetUI() {
     const showLunarTof = isMoon || isMoonReturn;
     lunarTofRow.style.display   = showLunarTof ? '' : 'none';
     lunarTofLabel.style.display = showLunarTof ? '' : 'none';
+
+    // Debris-shell overlay — when the selected destination is tagged
+    // `debrisOverlay` in TARGET_ORBITS (FY-1C today; Cosmos 1408 etc.
+    // later), ask the planner to load+mount the matching cloud.
+    // Otherwise unmount any cloud that's currently up.
+    const tgt = TARGET_ORBITS.find(t => t.id === targetSel.value);
+    if (planner?.setDebrisOverlay) {
+        planner.setDebrisOverlay(tgt?.debrisOverlay ?? null);
+    }
     if (isMoon) {
         // Re-cost on target change.
         const tof = parseFloat(lunarTofRange.value);

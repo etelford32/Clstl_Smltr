@@ -52,6 +52,7 @@ import {
 } from './earth-skin.js';
 import { makeOrreryPlanet, updateOrreryPlanet } from './orrery-skins.js';
 import { PerfProfiler } from './perf-profiler.js';
+import { loadFY1CDebris, createDebrisCloud } from './mission-planner-debris.js';
 
 // ── Scene scales ────────────────────────────────────────────────────────────
 // Unified scene: 1 unit = 1 R⊕ (≈ 6378 km). Earth orbits Sun at ~23 456 R⊕
@@ -133,6 +134,8 @@ export const MISSION_ROUTES = [
     // Earth-centric (existing)
     { from: 'earth', to: 'leo',     label: 'Earth → LEO',          frame: 'geo'   },
     { from: 'earth', to: 'sso',     label: 'Earth → SSO',          frame: 'geo'   },
+    { from: 'earth', to: 'fengyun-1c-shell',
+                                    label: 'Earth → FY-1C debris shell (865 km)', frame: 'geo' },
     { from: 'earth', to: 'meo',     label: 'Earth → MEO (GPS)',    frame: 'geo'   },
     { from: 'earth', to: 'geo',     label: 'Earth → GEO',          frame: 'geo'   },
     { from: 'earth', to: 'moon',    label: 'Earth → Moon',         frame: 'geo'   },
@@ -150,6 +153,13 @@ export const MISSION_ROUTES = [
 export const TARGET_ORBITS = [
     { id: 'leo',  name: 'LEO · 400 km',           alt_km:    400,                         frame: 'geo' },
     { id: 'sso',  name: 'SSO · 600 km',           alt_km:    600, inc_deg: 97.8,          frame: 'geo' },
+    // FY-1C ASAT shell: 865 km / 98.6° SSO. Selecting this preset mounts
+    // the ~2 600-fragment debris cloud as a Three.js Points overlay
+    // (loaded from CelesTrak via mission-planner-debris.js) so the user
+    // parks inside the actual hazard, not next to it.
+    { id: 'fengyun-1c-shell',
+      name: 'FY-1C debris shell · 865 km · 98.6°',
+      alt_km:    865, inc_deg: 98.6, frame: 'geo', debrisOverlay: 'fengyun-1c' },
     { id: 'meo',  name: 'MEO · 20 200 km (GPS)',  alt_km:  20200, inc_deg: 55,            frame: 'geo' },
     { id: 'geo',  name: 'GEO · 35 786 km',        alt_km:  35786, inc_deg: 0,             frame: 'geo' },
     { id: 'moon', name: 'Lunar transfer (TLI)',   alt_km: 384400,                         frame: 'geo',   isTransfer: 'moon' },
@@ -274,6 +284,12 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         // every Δv impulse along a trail.  Cleared by clearAll().  Each
         // entry is { scene, sprite } so the marker disposes with its host.
         burnMarkers:   [],
+        // Active debris-shell overlay (e.g. FY-1C cloud). At most one
+        // mounted at a time.  Shape: { id, cloud, status, abort } where
+        // `cloud` is the createDebrisCloud handle and `abort` is an
+        // AbortController used to cancel an in-flight TLE fetch when the
+        // user moves off the preset before the load resolves.
+        debrisOverlay: null,
         clock:      new THREE.Clock(),
         elapsed:    0,
         timeScale:  1,
@@ -332,6 +348,84 @@ export function initMissionPlanner({ container, onEvent } = {}) {
     function pulseBody(scene, mesh, color = 0x66ffaa, baseRadius = 1.5, life_ms = 1100) {
         if (!mesh) return;
         spawnBodyPulse(scene, mesh.position.clone(), color, baseRadius, life_ms);
+    }
+
+    // ── Debris overlay lifecycle ──────────────────────────────────────────
+    // Mount/unmount a fragmentation-event debris cloud on the Earth-system
+    // group. At most one cloud is mounted at a time; calling
+    // setDebrisOverlay(null) (or with the same id twice) is a no-op.
+    // The cloud propagates against state.scenarioJD on every tick via
+    // updateEarthSystem, so it tracks the simulation clock.
+    function setDebrisOverlay(id) {
+        // Same overlay already mounted — nothing to do.
+        if (state.debrisOverlay && state.debrisOverlay.id === id) return;
+
+        // Tear down whatever's mounted now (and cancel any in-flight load).
+        if (state.debrisOverlay) {
+            try { state.debrisOverlay.abort?.abort(); } catch (_) {}
+            try { state.debrisOverlay.cloud?.dispose(); } catch (_) {}
+            state.debrisOverlay = null;
+        }
+        if (id == null) {
+            onEvent?.({ type: 'debris-overlay', status: 'cleared' });
+            return;
+        }
+
+        // Currently only FY-1C is wired through. Other families (Cosmos
+        // 1408, IR-33/2251, Mission Shakti) can hang off this same shape
+        // by adding fetch routes to mission-planner-debris.js.
+        if (id !== 'fengyun-1c') {
+            onEvent?.({ type: 'debris-overlay', status: 'unsupported', id });
+            return;
+        }
+
+        const abort = new AbortController();
+        const slot  = { id, cloud: null, status: 'loading', abort };
+        state.debrisOverlay = slot;
+        onEvent?.({ type: 'debris-overlay', status: 'loading', id });
+
+        loadFY1CDebris({ count: 600, signal: abort.signal })
+            .then(records => {
+                // The user may have changed targets while we were waiting.
+                if (state.debrisOverlay !== slot) return;
+                if (!records.length) {
+                    slot.status = 'empty';
+                    onEvent?.({ type: 'debris-overlay', status: 'empty', id });
+                    return;
+                }
+                const cloud = createDebrisCloud({
+                    parent:    world.earthSystem,
+                    records,
+                    kmToScene: KM_TO_SCENE,
+                    color:     0xff3060,         // FY-1C catalog signature
+                    pointSize: 0.012,
+                });
+                slot.cloud  = cloud;
+                slot.status = 'ready';
+                cloud.update(state.scenarioJD);
+                onEvent?.({
+                    type:   'debris-overlay',
+                    status: 'ready',
+                    id,
+                    stats:  cloud.getStats(),
+                });
+            })
+            .catch(err => {
+                if (state.debrisOverlay !== slot) return;
+                slot.status = 'error';
+                onEvent?.({
+                    type:    'debris-overlay',
+                    status:  'error',
+                    id,
+                    message: err?.message || String(err),
+                });
+            });
+    }
+
+    function getDebrisOverlay() {
+        if (!state.debrisOverlay) return null;
+        const o = state.debrisOverlay;
+        return { id: o.id, status: o.status, stats: o.cloud?.getStats?.() ?? null };
     }
 
     // Surface markers — parented to the spinning Earth so labels stay pinned
@@ -1454,6 +1548,14 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             moonNow.dist_km / GEO_UNIT_KM,
         ));
 
+        // Debris overlay (FY-1C / Cosmos 1408 / etc) — propagate every
+        // fragment from its TLE epoch to the current scenarioJD. The
+        // cloud is a single Points draw; this is one tight loop per
+        // frame regardless of N.
+        if (state.debrisOverlay?.cloud) {
+            state.debrisOverlay.cloud.update(state.scenarioJD);
+        }
+
         // ── Near-Earth ascent rockets ───────────────────────────────────────
         for (const r of state.rockets) {
             if (r.phase !== 'ascent') continue;
@@ -2418,6 +2520,11 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             _resetSimAnchor();
         },
         clear: () => clearAll(state, geo, hel),
+        // Debris-shell overlay — mount the FY-1C (or future) fragmentation
+        // cloud on the Earth system. The host page calls setDebrisOverlay
+        // when a debris-tagged TARGET_ORBITS entry is selected.
+        setDebrisOverlay,
+        getDebrisOverlay,
         focusEarth,
         focusMoon,
         focusMars,
@@ -3511,4 +3618,12 @@ function clearAll(state, geo, hel) {
     state.marsMissions.length   = 0;
     if (state.tours) state.tours.length = 0;
     if (state.burnMarkers) state.burnMarkers.length = 0;
+    // Debris overlay — abort an in-flight TLE fetch and dispose any
+    // mounted cloud. Done after the missions so the user sees a clean
+    // tear-down when "Clear" is hit.
+    if (state.debrisOverlay) {
+        try { state.debrisOverlay.abort?.abort(); } catch (_) {}
+        try { state.debrisOverlay.cloud?.dispose(); } catch (_) {}
+        state.debrisOverlay = null;
+    }
 }
