@@ -518,7 +518,10 @@ export class UpperAtmosphereUI {
         window.addEventListener('ua-tle-update', () => this._paintTleFreshness());
         window.addEventListener('ua-debris-update', () => this._paintDebrisPill());
         clearInterval(this._tleAgeTimer);
-        this._tleAgeTimer = setInterval(() => this._paintTleFreshness(), 60_000);
+        this._tleAgeTimer = setInterval(() => {
+            this._paintTleFreshness();
+            this._paintDebrisPill();
+        }, 60_000);
         this._paintDebrisPill();
     }
 
@@ -532,7 +535,16 @@ export class UpperAtmosphereUI {
             label.textContent = 'fetching debris…';
         } else {
             pill.className = 'ua-tle-pill ua-tle-pill--live';
-            label.textContent = `${n} debris tracked · LEO`;
+            // Surface freshness so users can see the cloud is being kept
+            // current against the live 18 SDS catalog (refresh fires
+            // hourly + on tab refocus when stale).
+            const fetchedAt = this.globe?._debrisFetchedAt;
+            let suffix = '';
+            if (Number.isFinite(fetchedAt)) {
+                const ageS = Math.max(0, (Date.now() - fetchedAt) / 1000);
+                suffix = ` · ${_ageString(ageS)}`;
+            }
+            label.textContent = `${n} debris tracked · LEO${suffix}`;
         }
     }
 

@@ -2444,6 +2444,15 @@ function mountLayerPanel(fleet) {
 
     fleet.onChange(() => {
         const counts = fleet.counts();
+        // Sync checkbox state — fleet.setLayerOn() may toggle peers off
+        // (composite-vs-per-event mutual exclusion for debris layers),
+        // and that needs to reflect in the panel without the user being
+        // the one to uncheck the box.
+        root.querySelectorAll('.op-layer-cb').forEach(cb => {
+            const id = cb.dataset.layer;
+            const want = fleet.isOn(id);
+            if (cb.checked !== want) cb.checked = want;
+        });
         root.querySelectorAll('[data-layer-count]').forEach(el => {
             const id = el.dataset.layerCount;
             const layer = layers.find(l => l.id === id);

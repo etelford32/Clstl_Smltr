@@ -210,13 +210,37 @@ const GROUP_COLORS = {
     'amateur':       new THREE.Color(0x66ffcc),  // teal — Ham radio
     'visual':        new THREE.Color(0xffffaa),  // pale yellow — Bright objects
     'active':        new THREE.Color(0x88aacc),  // muted blue — All active
-    'debris':        new THREE.Color(0xff2200),  // danger red — Debris
+    'debris':        new THREE.Color(0xff2200),  // danger red — Debris (composite)
+    // Per-event debris groups, colored to match debris-catalog.js families so
+    // the satellites globe and the upper-atmosphere globe agree on what each
+    // breakup cloud looks like. Hot reds → ASAT clouds, amber/peach → CZ-6A
+    // upper-stage breakups, etc.
+    'fengyun-1c-debris':  new THREE.Color(0xff3060),  // FY-1C ASAT (2007) — largest single event
+    'cosmos-1408-debris': new THREE.Color(0xff5070),  // C1408 ASAT (2021) — ISS shell hazard
+    'iridium-33-debris':  new THREE.Color(0xff7040),  // Iridium 33 collision (2009)
+    'cosmos-2251-debris': new THREE.Color(0xff9050),  // Cosmos 2251 collision (2009)
     'last-30-days':  new THREE.Color(0x00ffaa),  // mint — Recent launches
     'geo':           new THREE.Color(0xffaa00),  // amber — Geostationary
     'planet':        new THREE.Color(0x88ff88),  // light green — Planet Labs
     'search':        new THREE.Color(0x00ffcc),  // original cyan — Manual search
     '_default':      new THREE.Color(0x00ffcc),  // fallback
 };
+
+// Set of CelesTrak group IDs that represent tracked debris. Used by
+// altitude-cohort + conjunction-screening helpers so a per-event toggle
+// (just FY-1C, just Cosmos 1408, etc.) is still treated as "debris" when
+// counting hazards in a sat's shell. Keep this in lockstep with
+// GROUP_COLORS / GROUP_MAP / debris-catalog.js families.
+export const DEBRIS_GROUP_IDS = new Set([
+    'debris',
+    'fengyun-1c-debris',
+    'cosmos-1408-debris',
+    'iridium-33-debris',
+    'cosmos-2251-debris',
+]);
+
+/** True when a group id represents a tracked-debris layer. */
+export function isDebrisGroup(group) { return DEBRIS_GROUP_IDS.has(group); }
 
 /** Get the color for a constellation group. */
 export function getGroupColor(group) {
@@ -454,7 +478,13 @@ export class SatelliteTracker {
             horizonH  = 24,
             stepMin   = 10,
         } = opts;
-        return this.screenConjunctions(noradId, horizonH, stepMin, withinKm, 'debris');
+        // Screen against every loaded debris layer — the composite 'debris'
+        // group OR any of the per-event subgroups (FY-1C, C-1408, IR-33,
+        // C-2251) the user may have toggled on individually.
+        return this.screenConjunctions(
+            noradId, horizonH, stepMin, withinKm,
+            [...DEBRIS_GROUP_IDS],
+        );
     }
 
     /**
@@ -478,8 +508,8 @@ export class SatelliteTracker {
             if (s.tle.norad_id === excludeId) continue;
             if (!Number.isFinite(s.alt))      continue;
             if (s.alt < lo || s.alt > hi)     continue;
-            if (s.group === 'debris') debris++;
-            else                      active++;
+            if (DEBRIS_GROUP_IDS.has(s.group)) debris++;
+            else                               active++;
         }
         return { debris, active, total: debris + active, bandKm };
     }
@@ -519,6 +549,13 @@ export class SatelliteTracker {
         const matches = (g) => {
             if (group == null) return true;
             if (Array.isArray(group)) return group.includes(g);
+            // 'debris' is treated as the union of every loaded debris
+            // layer (the composite + the four per-event groups). Without
+            // this, callers asking for the "debris catalog" would miss
+            // anything the user loaded via a per-event toggle (FY-1C,
+            // Cosmos 1408, etc.) and the density map / conjunction
+            // screener would silently undercount hazards.
+            if (group === 'debris') return DEBRIS_GROUP_IDS.has(g);
             return g === group;
         };
         return this._satellites

@@ -21,9 +21,30 @@
 
 import { SatelliteTracker } from '../satellite-tracker.js';
 
+// Per-event debris layer ids — mutually exclusive with the composite
+// 'debris' layer so the same NORAD ID isn't double-counted across the
+// fleet's screener, scenario hash, and decision deck. The composite
+// pulls the union of all four; the per-event layers let an operator
+// isolate (or reproduce) a single fragmentation cloud — most often
+// FY-1C, the largest single debris-generating event in history.
+export const DEBRIS_EVENT_LAYER_IDS = Object.freeze([
+    'fengyun-1c-debris',
+    'cosmos-1408-debris',
+    'iridium-33-debris',
+    'cosmos-2251-debris',
+]);
+
 export const LAYER_CATALOG = Object.freeze([
     { id: 'stations',     label: 'Space Stations',     section: 'Missions',         on: true,  group: 'stations'     },
-    { id: 'debris',       label: 'Tracked Debris',     section: 'Hazards',          on: true,  group: 'debris'       },
+    { id: 'debris',       label: 'Tracked Debris (composite)', section: 'Hazards',  on: true,  group: 'debris'       },
+    // Per-event debris clouds. Default-off (composite covers them) so an
+    // operator opting in is explicitly choosing single-event focus. Each
+    // is a real CelesTrak group, propagated via SGP4 alongside the rest
+    // of the fleet — full-fidelity debris context, not a sample.
+    { id: 'fengyun-1c-debris',  label: 'FY-1C ASAT (2007)',     section: 'Debris events', on: false, group: 'fengyun-1c-debris'  },
+    { id: 'cosmos-1408-debris', label: 'Cosmos 1408 ASAT (2021)', section: 'Debris events', on: false, group: 'cosmos-1408-debris' },
+    { id: 'iridium-33-debris',  label: 'Iridium 33 (2009)',     section: 'Debris events', on: false, group: 'iridium-33-debris'  },
+    { id: 'cosmos-2251-debris', label: 'Cosmos 2251 (2009)',    section: 'Debris events', on: false, group: 'cosmos-2251-debris' },
     { id: 'starlink',     label: 'Starlink',           section: 'Mega-constellations', on: false, group: 'starlink'  },
     { id: 'oneweb',       label: 'OneWeb',             section: 'Mega-constellations', on: false, group: 'oneweb'    },
     { id: 'iridium',      label: 'Iridium',            section: 'Mega-constellations', on: false, group: 'iridium'   },
@@ -119,11 +140,35 @@ export class OperationsFleet {
     /**
      * Toggle a layer on/off. First flip-on triggers a fetch; subsequent
      * toggles are pure visibility flips on the tracker.
+     *
+     * Composite-vs-per-event mutual exclusion: enabling the composite
+     * `debris` layer turns off any per-event debris layers (and vice
+     * versa). Without this, every FY-1C / C-1408 / IR-33 / C-2251
+     * fragment would render twice (once from the composite, once from
+     * the per-event group), polluting the screener and the deck.
      */
     async setLayerOn(id, on) {
         const layer = LAYER_CATALOG.find(l => l.id === id);
         if (!layer) return;
         const want = !!on;
+        if (this._on.get(id) === want) return;
+
+        if (want) {
+            if (id === 'debris') {
+                for (const evId of DEBRIS_EVENT_LAYER_IDS) {
+                    if (this._on.get(evId)) await this._setLayerOnInternal(evId, false);
+                }
+            } else if (DEBRIS_EVENT_LAYER_IDS.includes(id)) {
+                if (this._on.get('debris')) await this._setLayerOnInternal('debris', false);
+            }
+        }
+
+        await this._setLayerOnInternal(id, want);
+    }
+
+    async _setLayerOnInternal(id, want) {
+        const layer = LAYER_CATALOG.find(l => l.id === id);
+        if (!layer) return;
         if (this._on.get(id) === want) return;
         this._on.set(id, want);
 
@@ -136,7 +181,6 @@ export class OperationsFleet {
                 this._loading.delete(id);
             }
         }
-        // hasGroup() may still be false if the load failed — guard.
         if (this.tracker.hasGroup(layer.group)) {
             this.tracker.setGroupVisible(layer.group, want);
         }
