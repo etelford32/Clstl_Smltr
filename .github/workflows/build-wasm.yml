@@ -24,6 +24,10 @@ jobs:
         sudo apt-get install -y binaryen
 
     - name: Install wasm-bindgen-cli
+      # Schema versions between the CLI and the wasm-bindgen Rust crate must
+      # match exactly. The Rust-side version is locked by rust/Cargo.lock
+      # (which IS committed for this binary crate) — keep this CLI pin in
+      # sync with whatever wasm-bindgen version is in that lockfile.
       run: cargo install wasm-bindgen-cli --version 0.2.121 --locked
 
     - name: Cache cargo registry
@@ -47,7 +51,11 @@ jobs:
     - name: Build WASM
       run: |
         cd rust
-        cargo build --release --target wasm32-unknown-unknown
+        # Build using the committed Cargo.lock — every version, including
+        # wasm-bindgen, is pinned there. To bump dependencies, run
+        # `cargo update` locally, commit the resulting Cargo.lock, and
+        # update the wasm-bindgen-cli `--version` above to match.
+        cargo build --release --locked --target wasm32-unknown-unknown
         wasm-bindgen --out-dir www --target web \
           target/wasm32-unknown-unknown/release/star_renderer.wasm
         wasm-opt -Oz www/star_renderer_bg.wasm -o www/star_renderer_bg.wasm
