@@ -311,22 +311,55 @@ def _ols(X: np.ndarray, y: np.ndarray, names: list[str], label: str) -> FitResul
 def fit_baseline_vs_lagged(
     X: np.ndarray, y: np.ndarray, names: list[str], *,
     lags_h: Sequence[float],
-) -> tuple[FitResult, FitResult]:
+) -> tuple[FitResult, FitResult, FitResult]:
     """
-    Two fits over the *same* sample set:
-      baseline: drops the lag columns (Ap_lag_*) and dAp/dt.
-      lagged:   uses the full design matrix.
+    Three fits over the *same* sample set:
+      baseline:     spatial features + instantaneous (Ap_t, F10.7).
+      lagged:       baseline + linear Ap lags + dAp/dt.
+      interactions: lagged + nonlinear interactions —
+                    Ap_t², Ap_t·Ap_lag_{3,12}h, Ap_lag_3h·dAp/dt.
+
     Sharing the sample set is essential — otherwise we'd be comparing
     fits on different rows and the RMSE delta would conflate sample
     selection with feature richness.
+
+    Why the interaction model? The linear lag model has been observed to
+    add <1% R² across all four reference storms (Feb 2022, Gannon, Halloween,
+    St Patrick) even though the residual ACF stays at 0.4-0.6 across 12 h.
+    That mismatch — persistent residual memory but no linear-lag signal —
+    is the classic signature of *nonlinear* temporal structure: heating
+    saturation, recovery exponentials, double-storm coupling. If the
+    interaction model beats the lagged model materially, an LSTM (which
+    learns these nonlinearities automatically) has clear headroom. If it
+    doesn't, the temporal information genuinely isn't recoverable from
+    Ap-history alone — extend the feature set instead (IMF Bz, sub-storm
+    onsets, F10.7 history).
     """
     lag_cols = {f"ap_lag_{int(L)}h" for L in lags_h} | {"dap_dt_per_h"}
-    keep_idx = [i for i, nm in enumerate(names) if nm not in lag_cols]
-    base_names = [names[i] for i in keep_idx]
-    Xb = X[:, keep_idx]
+    base_idx = [i for i, nm in enumerate(names) if nm not in lag_cols]
+    base_names = [names[i] for i in base_idx]
+    Xb = X[:, base_idx]
     base = _ols(Xb, y, base_names, "baseline (instantaneous only)")
-    lagged = _ols(X, y, names, "lagged (with driver history)")
-    return base, lagged
+    lagged = _ols(X, y, names, "lagged (linear driver history)")
+
+    # Interaction features. We only build the ones whose ingredient
+    # columns exist — this keeps the model usable even when the caller
+    # passes a non-default `lags_h` set.
+    j_ap   = names.index("ap_t")
+    j_lag3  = names.index("ap_lag_3h")  if "ap_lag_3h"  in names else None
+    j_lag12 = names.index("ap_lag_12h") if "ap_lag_12h" in names else None
+    j_dap   = names.index("dap_dt_per_h")
+    extras: list[tuple[str, np.ndarray]] = [("ap_t_sq", X[:, j_ap] ** 2)]
+    if j_lag3 is not None:
+        extras.append(("ap_t_x_ap_lag_3h", X[:, j_ap] * X[:, j_lag3]))
+        extras.append(("ap_lag_3h_x_dap_dt", X[:, j_lag3] * X[:, j_dap]))
+    if j_lag12 is not None:
+        extras.append(("ap_t_x_ap_lag_12h", X[:, j_ap] * X[:, j_lag12]))
+    Xi = np.column_stack([X] + [c for _, c in extras])
+    inter_names = list(names) + [n for n, _ in extras]
+    interactions = _ols(Xi, y, inter_names,
+                        "interactions (nonlinear driver history)")
+    return base, lagged, interactions
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -418,15 +451,18 @@ def render_markdown(
     event_id: str, *,
     backend: str,
     indices: list[IndexRow],
-    base: FitResult, lagged: FitResult,
+    base: FitResult, lagged: FitResult, interactions: FitResult,
     acf: dict[float, float],
     n_kept: int, n_dropped: int,
 ) -> str:
-    rmse_gain = base.rmse - lagged.rmse
-    r2_gain = lagged.r2 - base.r2
-    pct_var_explained_by_history = (
-        (lagged.r2 - base.r2) * 100.0 if math.isfinite(lagged.r2) else float("nan")
-    )
+    rmse_gain_lin = base.rmse - lagged.rmse
+    r2_gain_lin = lagged.r2 - base.r2
+    rmse_gain_nl = base.rmse - interactions.rmse
+    r2_gain_nl = interactions.r2 - base.r2
+    pct_var_lin = (r2_gain_lin * 100.0
+                   if math.isfinite(lagged.r2) else float("nan"))
+    pct_var_nl  = (r2_gain_nl * 100.0
+                   if math.isfinite(interactions.r2) else float("nan"))
     ap_min = min(r.ap for r in indices)
     ap_max = max(r.ap for r in indices)
     f107_min = min(r.f107_sfu for r in indices)
@@ -443,33 +479,42 @@ def render_markdown(
         f"* **Samples kept after lag windowing:** {n_kept} "
         f"(dropped {n_dropped} with insufficient history)",
         "",
-        "## OLS comparison",
+        "## OLS comparison — three nested models",
         "",
-        "Both fits regress `log10(ρ_jacchia / ρ_msis)` on the design matrix.",
-        "Baseline sees only spatial features + instantaneous (Ap, F10.7).",
-        "Lagged adds Ap at lags {3,6,12,24} h and a 6-hour central dAp/dt.",
+        "All three fits regress `log10(ρ_jacchia / ρ_msis)` on the same row set.",
+        "Baseline sees only spatial features + instantaneous (Ap_t, F10.7).",
+        "Lagged adds linear Ap at {3,6,12,24} h plus a 6-hour central dAp/dt.",
+        "Interactions adds nonlinear terms: Ap_t², Ap_t·Ap_lag_{3,12}h, "
+        "Ap_lag_3h·dAp/dt.",
         "",
-        "| Model                          |    n |  k | RMSE (dex) |   R² |",
-        "|--------------------------------|------|----|------------|------|",
-        f"| {base.name:<30s} | {base.n:>4d} | {base.k:>2d} | "
+        "| Model                                  |    n |  k | RMSE (dex) |   R² |",
+        "|----------------------------------------|------|----|------------|------|",
+        f"| {base.name:<38s} | {base.n:>4d} | {base.k:>2d} | "
         f"     {base.rmse:.3f} | {base.r2:+.3f} |",
-        f"| {lagged.name:<30s} | {lagged.n:>4d} | {lagged.k:>2d} | "
+        f"| {lagged.name:<38s} | {lagged.n:>4d} | {lagged.k:>2d} | "
         f"     {lagged.rmse:.3f} | {lagged.r2:+.3f} |",
+        f"| {interactions.name:<38s} | {interactions.n:>4d} | "
+        f"{interactions.k:>2d} | "
+        f"     {interactions.rmse:.3f} | {interactions.r2:+.3f} |",
         "",
-        f"**Gain from driver history:** "
-        f"ΔRMSE = {rmse_gain:+.3f} dex, "
-        f"ΔR² = {r2_gain:+.3f} "
-        f"(history explains {pct_var_explained_by_history:+.1f}% additional variance)",
+        f"**Linear-history gain:**     "
+        f"ΔRMSE = {rmse_gain_lin:+.3f} dex, "
+        f"ΔR² = {r2_gain_lin:+.3f} "
+        f"({pct_var_lin:+.1f}% additional variance)",
+        f"**Nonlinear-history gain:**  "
+        f"ΔRMSE = {rmse_gain_nl:+.3f} dex, "
+        f"ΔR² = {r2_gain_nl:+.3f} "
+        f"({pct_var_nl:+.1f}% additional variance)",
         "",
-        "Reading the gain:",
-        "* If `ΔR² ≳ 0.05`, an LSTM has real temporal headroom — it can",
-        "  also model nonlinear driver-history interactions a linear fit can't.",
-        "* If `ΔR² < 0.01`, the residual is essentially memoryless on this",
-        "  window; an LSTM is unlikely to beat a feed-forward MLP. Spend",
-        "  the complexity budget on richer instantaneous features instead.",
-        "* If `ΔR²` is large but `lagged.R² < 0.3`, the residual is dominated",
-        "  by drivers neither model sees (LST/lat phasing, F10.7 history,",
-        "  IMF Bz, sub-storm onsets) — extend the feature set.",
+        "Reading the gains:",
+        "* `linear ΔR² ≳ 0.05` → simple lag-feature MLP wins; LSTM is overkill.",
+        "* `linear ΔR² < 0.01` but `nonlinear ΔR² ≳ 0.03` → **LSTM justified**.",
+        "  The temporal information is encoded as nonlinear interactions",
+        "  (heating saturation, delay-coupled response). An LSTM hidden",
+        "  state can learn these; a linear lagged regression cannot.",
+        "* Both ≈ 0 → temporal Ap-history doesn't contain the signal.",
+        "  Spend the complexity budget on richer instantaneous features",
+        "  (LST/lat phasing, F10.7 history, IMF Bz, sub-storm onsets).",
         "",
         "## Lagged-driver coefficients (in dex per Ap unit)",
         "",
@@ -566,9 +611,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     log.info("Lag features attached: %d kept, %d dropped (insufficient history)",
              n_kept, n_dropped)
 
-    base, lagged = fit_baseline_vs_lagged(X, y, names, lags_h=args.lags)
-    log.info("Baseline RMSE %.3f dex (R² %+.3f); Lagged RMSE %.3f dex (R² %+.3f)",
-             base.rmse, base.r2, lagged.rmse, lagged.r2)
+    base, lagged, interactions = fit_baseline_vs_lagged(X, y, names, lags_h=args.lags)
+    log.info("Baseline RMSE %.3f dex (R² %+.3f); Lagged RMSE %.3f dex (R² %+.3f); "
+             "Interactions RMSE %.3f dex (R² %+.3f)",
+             base.rmse, base.r2, lagged.rmse, lagged.r2,
+             interactions.rmse, interactions.r2)
 
     # ACF runs on the full timeseries, not the post-lag-drop subset —
     # otherwise the longest lag is always NaN by construction.
@@ -591,15 +638,18 @@ def main(argv: Optional[list[str]] = None) -> int:
         "n_samples_fit":    n_kept,
         "n_samples_dropped": n_dropped,
         "lags_h": list(args.lags),
-        "fit_baseline": asdict(base),
-        "fit_lagged":   asdict(lagged),
-        "delta_rmse_dex": base.rmse - lagged.rmse,
-        "delta_r2":       lagged.r2 - base.r2,
+        "fit_baseline":     asdict(base),
+        "fit_lagged":       asdict(lagged),
+        "fit_interactions": asdict(interactions),
+        "delta_rmse_lin_dex":    base.rmse - lagged.rmse,
+        "delta_r2_lin":          lagged.r2 - base.r2,
+        "delta_rmse_nonlin_dex": base.rmse - interactions.rmse,
+        "delta_r2_nonlin":       interactions.r2 - base.r2,
         "residual_acf":   {str(int(k)): v for k, v in acf.items()},
     }, indent=2))
     md_path.write_text(render_markdown(
         event_id, backend=backend, indices=indices,
-        base=base, lagged=lagged, acf=acf,
+        base=base, lagged=lagged, interactions=interactions, acf=acf,
         n_kept=n_kept, n_dropped=n_dropped,
     ))
     log.info("Wrote %s, %s, %s", csv_path, json_path, md_path)

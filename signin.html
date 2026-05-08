@@ -9,6 +9,19 @@
 <link rel="manifest" href="/manifest.json">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sign In — Parkers Physics App</title>
+<link rel="canonical" href="https://parkersphysics.com/signin">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/signin">
+<meta property="og:title" content="Sign In — Parkers Physics">
+<meta property="og:description" content="Sign in to Parkers Physics to manage your subscription, classroom seats, and saved simulation locations.">
+<meta property="og:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+<meta property="og:image:alt" content="Parkers Physics — real-time astrophysics simulations">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Sign In — Parkers Physics">
+<meta name="twitter:description" content="Sign in to Parkers Physics to manage your subscription, classroom seats, and saved simulation locations.">
+<meta name="twitter:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+
     <meta name="description" content="Sign in to your Parkers Physics account and access interactive astrophysics simulations powered by WebGL and live NASA/NOAA data.">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -114,7 +127,7 @@
             0%,100% { filter: drop-shadow(0 0 24px rgba(255,180,0,.5)); }
             50%      { filter: drop-shadow(0 0 40px rgba(255,200,0,.75)) drop-shadow(0 0 60px rgba(128,64,255,.4)); }
         }
-        .auth-side h2 {
+        .auth-side h1, .auth-side h2 {
             font-size: 1.45rem; font-weight: 800; margin-bottom: 10px;
             background: linear-gradient(45deg,#ffd700,#ff8c00);
             -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
@@ -221,6 +234,22 @@
         footer a { color: #555; text-decoration: none; }
         footer a:hover { color: #ffd700; }
     </style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebPage",
+  "@id": "https://parkersphysics.com/signin#page",
+  "url": "https://parkersphysics.com/signin",
+  "description": "Sign in to Parkers Physics to manage your subscription, classroom seats, and saved simulation locations.",
+  "isPartOf": {
+    "@id": "https://parkersphysics.com/#website"
+  },
+  "publisher": {
+    "@id": "https://parkersphysics.com/#org"
+  },
+  "inLanguage": "en-US"
+}
+</script>
 </head>
 <body>
 
@@ -251,7 +280,7 @@
         <!-- Left panel -->
         <div class="auth-side">
             <img src="ParkerPhaysics_logo1.png" class="auth-side-logo" alt="Parkers Physics Logo">
-            <h2>Welcome Back</h2>
+            <h1>Sign In — Welcome Back</h1>
             <p>Sign in to resume your astrophysics journey — real-time simulations and live space weather await.</p>
             <div class="side-stat-row">
                 <div class="side-stat">

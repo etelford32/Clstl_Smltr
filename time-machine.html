@@ -8,7 +8,7 @@
 <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Orbital Time Machine — Deep-Time N-Body Propagation · Parkers Physics</title>
+<title>Orbital Time Machine — N-Body · Parkers Physics</title>
 <link rel="canonical" href="https://parkersphysics.com/time-machine.html">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Parkers Physics">
@@ -807,8 +807,11 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
     }
 }
 </script>
-
-<nav></nav>
+<!-- perf-hints:start -->
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" crossorigin>
+<!-- perf-hints:end --><nav></nav>
 <script type="module">import { initNav } from "./js/nav.js?v=20260503"; initNav("time-machine");</script>
 
 <div id="tm-hero">

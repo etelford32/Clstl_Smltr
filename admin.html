@@ -156,8 +156,11 @@
     "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
 }}
 </script>
-
-<nav></nav>
+<!-- perf-hints:start -->
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" crossorigin>
+<!-- perf-hints:end --><nav></nav>
 <script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("admin");</script>
 
 <div class="auth-gate" id="auth-gate">

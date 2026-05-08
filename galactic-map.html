@@ -206,9 +206,9 @@ nav {
     -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
     margin-right:2px;
 }
-.nav-logo-img { height:30px; width:auto; border-radius:50%; flex-shrink:0; }
+
 /* nav-menu stretches to fill all remaining space */
-.nav-menu { display:flex; align-items:center; gap:4px; flex:1; min-width:0; }
+
 .nav-item {
     padding:5px 10px; background:rgba(255,255,255,.07);
     border:1px solid rgba(255,255,255,.12); border-radius:5px;
@@ -216,8 +216,7 @@ nav {
     transition:background .2s, border-color .2s; flex-shrink:0;
 }
 .nav-item:hover { background:rgba(255,255,255,.16); border-color:rgba(255,200,0,.4); color:#fff; }
-.nav-item.active { background:linear-gradient(45deg,#ff8c00,#ffd700); border-color:#ff8c00; color:#000; font-weight:600; }
-.nav-drop { position:relative; flex-shrink:0; }
+
 .nav-drop-btn {
     padding:5px 10px; background:rgba(255,255,255,.07);
     border:1px solid rgba(255,255,255,.12); border-radius:5px;
@@ -225,7 +224,7 @@ nav {
     transition:background .2s, border-color .2s; white-space:nowrap;
 }
 .nav-drop-btn:hover { background:rgba(255,255,255,.16); color:#fff; }
-.nav-drop-btn.active { background:linear-gradient(45deg,#ff8c00,#ffd700); border-color:#ff8c00; color:#000; font-weight:600; }
+
 /* Rich dropdown panel */
 .nav-drop-menu {
     display:block; position:absolute; top:calc(100% + 5px); left:0;
@@ -246,29 +245,23 @@ nav {
     padding:7px 16px; text-decoration:none; transition:background .15s;
 }
 .nav-drop-link:hover { background:rgba(255,255,255,.07); }
-.nav-drop-link.active .ndl-title { color:#ffd700 !important; font-weight:600; }
+
 .nav-drop-link.active .ndl-icon  { opacity:1; }
 .ndl-icon  { font-size:1.05rem; width:20px; text-align:center; flex-shrink:0; opacity:.72; }
-.ndl-body  { display:flex; flex-direction:column; gap:1px; }
+
 .ndl-title { color:#c8c8c8; font-size:.82rem; font-weight:500; line-height:1.25; }
 .ndl-sub   { color:#484e60; font-size:.70rem; line-height:1.2; }
 .nav-drop-link:hover .ndl-title { color:#fff; }
 .nav-drop-link:hover .ndl-sub   { color:#7a8090; }
 /* Section label inside dropdown */
-.nav-drop-section {
-    padding:7px 16px 3px; font-size:.63rem; font-weight:700;
-    letter-spacing:.09em; color:#3d4255; text-transform:uppercase;
-    border-top:1px solid rgba(255,255,255,.06); margin-top:3px;
-}
-.nav-drop-section:first-child { border-top:none; margin-top:0; padding-top:4px; }
+
 /* Spacer that pushes auth buttons to the far right */
-.nav-spacer { flex:1; }
+
 /* Auth */
-.nav-auth-sep { width:1px; height:22px; background:rgba(255,255,255,.15); margin:0 3px; flex-shrink:0; }
-.nav-login  { background:transparent !important; border-color:rgba(255,255,255,.22) !important; color:#bbb !important; }
+
 .nav-login:hover  { background:rgba(255,255,255,.1) !important; color:#fff !important; border-color:rgba(255,255,255,.4) !important; }
 .nav-signup { background:linear-gradient(45deg,#ff8c00,#ffd700) !important; border-color:#ff8c00 !important; color:#000 !important; font-weight:700 !important; letter-spacing:.01em; }
-.nav-signup:hover { filter:brightness(1.12) !important; }
+
 /* Burger */
 .nav-burger {
     display:none; margin-left:auto;
@@ -317,6 +310,35 @@ canvas { display:block; width:100% !important; height:100% !important; }
 
 /* ─── HUD (top-left) ─────────────────────────────────────────── */
 #hud {
+    position:absolute; top:14px; left:14px; z-index:100;
+    background:rgba(0,0,0,0.72); border:1px solid rgba(160,120,255,0.25);
+    border-radius:10px; padding:12px 16px; backdrop-filter:blur(8px);
+    pointer-events:none; font-size:12px; line-height:1.6; min-width:220px;
+    max-width:calc(100vw - 28px);
+}
+#hud h3 { margin:0 0 6px; font-size:14px; color:#c090ff; }
+#hud .label { color:#777; font-size:10px; }
+#hud .val { color:#a0d8ff; font-weight:600; }
+#hud .sep { border-top:1px solid rgba(255,255,255,0.07); margin:6px 0; }
+/* Collapse toggle (mobile only) */
+#hud-collapse {
+    display:none; position:absolute; top:6px; right:8px;
+    background:rgba(160,100,255,0.15); border:1px solid rgba(160,120,255,0.35);
+    color:#c090ff; padding:2px 8px; border-radius:5px; cursor:pointer;
+    font-family:inherit; font-size:11px; pointer-events:auto;
+}
+body.hud-collapsed #hud .hud-extra { display:none; }
+body.hud-collapsed #hud { padding:6px 32px 6px 12px; min-width:0; }
+body.hud-collapsed #hud h3 { display:none; }
+
+/* ─── Zoom Toolbar (bottom-centre) ──────────────────────────── */
+#zoom-bar {
+    position:absolute; bottom:18px; left:50%; transform:translateX(-50%);
+    display:flex; gap:6px; z-index:100;
+    max-width:calc(100vw - 24px); overflow-x:auto; overflow-y:hidden;
+    -webkit-overflow-scrolling:touch;
+    /* Hide scrollbar but keep scrolling functional on mobile */
+    scrollbar-width:none;
     top: 14px; left: 14px;
     width: 246px;
 }
@@ -356,7 +378,19 @@ canvas { display:block; width:100% !important; height:100% !important; }
     display: flex; gap: var(--sp-3); flex-wrap: wrap;
     align-items: center;
 }
+#zoom-bar::-webkit-scrollbar { display:none; }
 #zoom-bar button {
+    background:rgba(0,0,0,0.75); border:1px solid rgba(255,255,255,0.18);
+    border-radius:6px; color:#ccc; padding:6px 14px; font-size:11px;
+    cursor:pointer; font-family:inherit; transition:all .18s;
+    backdrop-filter:blur(8px); flex-shrink:0; white-space:nowrap;
+    min-height:32px;
+}
+#zoom-bar button:hover { background:rgba(160,100,255,0.25); border-color:#a060ff; color:#fff; }
+#zoom-bar button.active { background:rgba(160,100,255,0.35); border-color:#c090ff; color:#fff; font-weight:600; }
+/* Show/hide spans within zoom buttons based on screen size */
+.zb-long { display:inline; }
+.zb-short { display:none; }
     background: var(--c-accent-soft);
     border: 1px solid var(--c-accent-border);
     border-radius: var(--r-sm);
@@ -504,6 +538,88 @@ canvas { display:block; width:100% !important; height:100% !important; }
     color: var(--c-storm); font-weight: 600;
     font-variant-numeric: tabular-nums;
 }
+
+/* ─── Mini sun-time panel (mobile only) ─────────────────────── */
+#sun-time-mini {
+    display:none;
+    position:absolute; left:50%; transform:translateX(-50%);
+    bottom:60px; z-index:101;
+    background:rgba(8,4,16,0.92); border:1px solid rgba(255,200,80,0.35);
+    border-radius:8px; padding:6px 10px;
+    color:#ddd; backdrop-filter:blur(6px);
+    width:calc(100vw - 28px); max-width:420px;
+    font-size:11px; line-height:1.3;
+}
+#sun-time-mini .stm-row { display:flex; align-items:center; gap:7px; padding:2px 0; }
+#sun-time-mini .stm-btn {
+    background:rgba(255,200,80,0.15); border:1px solid rgba(255,200,80,0.4);
+    color:#ffcc66; padding:6px 12px; border-radius:5px; cursor:pointer;
+    font-family:inherit; font-size:11px; font-weight:600;
+    flex-shrink:0; min-height:30px;
+}
+#sun-time-mini .stm-btn.active {
+    background:rgba(255,200,80,0.45); color:#fff; border-color:#ffd58a;
+}
+#sun-time-mini input[type=range] { flex:1; height:6px; accent-color:#ffaa44;
+                                    cursor:pointer; min-height:30px; }
+#sun-time-mini .stm-val {
+    color:#ffcc66; font-weight:600; font-size:10px; flex-shrink:0;
+    font-variant-numeric:tabular-nums; min-width:64px; text-align:right;
+}
+
+/* ─── Tablet (≤768 px) ──────────────────────────────────────── */
+@media (max-width:768px) {
+    #hud { font-size:11px; padding:8px 12px; min-width:160px; }
+    #hud h3 { font-size:13px; }
+    #hud-collapse { display:block; }
+    #zoom-bar button { padding:8px 12px; font-size:11px; min-height:38px; }
+    .zb-long { display:none; }
+    .zb-short { display:inline; }
+    #coord-display { font-size:10px; padding:5px 9px; }
+}
+
+/* ─── Phone portrait (≤600 px) ─────────────────────────────── */
+@media (max-width:600px) {
+    /* Coord display redundant with HUD on small screens */
+    #coord-display { display:none; }
+    /* Hide the full Sun-time panel; replace with the mini bar */
+    #sun-time-panel { display:none; }
+    #sun-time-mini  { display:block; }
+    /* HUD starts collapsed on phones — Click ⤢ to expand */
+    body.is-mobile #hud { padding:5px 30px 5px 11px; min-width:0;
+                          font-size:11px; max-width:calc(100vw - 70px); }
+    body.is-mobile.hud-expanded #hud { padding:9px 32px 9px 13px; }
+    #hud-collapse { top:4px; right:6px; padding:2px 7px; font-size:10px; }
+    /* Sidebar: full-width drawer slides in from the right */
+    #sidebar { position:absolute; right:0; top:0; bottom:0; width:88vw;
+               max-width:340px; min-width:0; box-shadow:-6px 0 20px rgba(0,0,0,0.45);
+               margin-right:0; transition:transform .3s ease, opacity .3s ease;
+               z-index:500; }
+    #sidebar.collapsed { transform:translateX(100%); opacity:0;
+                         pointer-events:none; margin-right:0; }
+    #sidebar-toggle { padding:8px 12px; font-size:13px; min-height:40px; }
+    /* Bigger zoom-bar buttons; drop the Solar Sys label */
+    #zoom-bar { gap:4px; bottom:14px; }
+    #zoom-bar button { padding:8px 10px; font-size:11px; min-height:38px; }
+    #zoom-solar-system span:not([class]) { display:none; }   /* keep just the ☀️ */
+}
+
+/* ─── Small phone (≤380 px) ────────────────────────────────── */
+@media (max-width:380px) {
+    #hud { font-size:10px; }
+    #hud h3 { font-size:12px; }
+    #zoom-bar button { padding:7px 8px; font-size:10px; min-height:34px; }
+    #sun-time-mini { font-size:10px; padding:5px 8px; bottom:54px; }
+    #sun-time-mini .stm-btn { padding:5px 9px; font-size:10px; min-height:28px; }
+}
+
+/* ─── Landscape phone (short height) ────────────────────────── */
+@media (max-height:500px) and (orientation:landscape) {
+    #hud { padding:6px 10px; font-size:10px; }
+    #hud h3 { font-size:11px; }
+    #zoom-bar { bottom:10px; gap:4px; }
+    #zoom-bar button { padding:5px 9px; font-size:10px; min-height:28px; }
+    #sun-time-mini { display:none; }   /* not enough vertical room */
 @media (max-width: 1024px) {
     #sun-time-panel {
         width: 240px; top: auto; bottom: 64px;
@@ -859,6 +975,8 @@ canvas { display:block; width:100% !important; height:100% !important; }
 </script>
 </head>
 <body>
+<h1 data-seo-h1 style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0">Milky Way Galactic Map</h1>
+
 
 <script type="importmap">
 {
@@ -868,13 +986,37 @@ canvas { display:block; width:100% !important; height:100% !important; }
     }
 }
 </script>
-<link rel="stylesheet" href="js/nav-styles.css">
+<!-- perf-hints:start -->
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" crossorigin>
+<!-- perf-hints:end --><link rel="stylesheet" href="js/nav-styles.css">
 <nav></nav>
 <script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("galactic");</script>
 
 <div id="app">
     <div id="canvas-wrap" data-preview-stage="1">
         <!-- HUD top-left -->
+        <div id="hud">
+            <button id="hud-collapse" type="button" title="Toggle full HUD">⤢</button>
+            <h3>⬡ Galactic Map</h3>
+            <div><span class="label">Selected: </span><span class="val" id="hud-name">—</span></div>
+            <div><span class="label">Dist from Sun: </span><span class="val" id="hud-dist">—</span></div>
+            <div class="hud-extra"><div class="sep"></div>
+            <div><span class="label">Galactic l: </span><span class="val" id="hud-l">—</span></div>
+            <div><span class="label">Galactic b: </span><span class="val" id="hud-b">—</span></div>
+            <div class="sep"></div>
+            <div><span class="label">Dist from GC: </span><span class="val" id="hud-gc">—</span></div>
+            <div title="Real cosmological distance from the Sun corresponding to the camera's position (inverse log-mapping beyond 60 kly)">
+                <span class="label">Cam → Sun: </span><span class="val" id="hud-view">—</span>
+            </div>
+            <div class="sep"></div>
+            <div title="Time elapsed in the Sun's current orbit around Sgr A*. One full Galactic year ≈ 225 Myr.">
+                <span class="label">Galactic year: </span><span class="val" id="hud-galactic-yr">—</span>
+            </div>
+            <div title="Sun's orbital phase around Sgr A* — 0% / 100% places the Sun at the +x side of the disk (current epoch).">
+                <span class="label">Orbital phase: </span><span class="val" id="hud-galactic-phase">—</span>
+            </div></div>
         <div id="hud" class="gp-panel" data-panel-key="hud">
             <div class="gp-header" data-drag-handle>
                 <span class="gp-grip" aria-hidden="true"></span>
@@ -3359,11 +3501,20 @@ const camera = new THREE.PerspectiveCamera(adaptiveFovV(), W() / H(), 0.1, 10_00
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
-controls.dampingFactor = 0.06;
+controls.dampingFactor = isMobile ? 0.10 : 0.06;   // a touch more inertia on touch
 controls.screenSpacePanning = true;
 controls.minDistance = 0.5;
 controls.maxDistance = 1_200_000;   // raised from 900k to give breathing room for cosmic-dawn shell at ~220k
-controls.zoomSpeed = 1.4;
+controls.zoomSpeed   = isMobile ? 2.0 : 1.4;       // pinch-to-zoom feels sluggish below ~1.8
+controls.rotateSpeed = isMobile ? 0.85 : 1.0;      // a tad gentler so the disk doesn't whip around
+controls.panSpeed    = isMobile ? 0.85 : 1.0;
+// Explicit touch mapping — 1-finger rotates, 2-finger pinches (zoom) + pans
+controls.touches = {
+    ONE: THREE.TOUCH.ROTATE,
+    TWO: THREE.TOUCH.DOLLY_PAN,
+};
+// Flag the body so CSS can target touch-mode UI tweaks
+if (isMobile) document.body.classList.add('is-mobile');
 
 // ── Sun reference point ─────────────────────────────────────────────────
 const SUN3 = SUN_GC.clone(); // convenience alias
@@ -8406,50 +8557,86 @@ document.getElementById('tog-sun-orbit').addEventListener('change', e => {
 });
 
 // ── Time-control panel wiring ──────────────────────────────────────────
+//
+// Two parallel UIs share the same simulation state machine:
+//   #sun-time-panel — full desktop / tablet panel (Live/Pause/Today + speed)
+//   #sun-time-mini  — compact mobile bar (Live + scrub + readouts)
+// Both interact via the same `liveMode`, `simGalacticYr`, `simSpeedMyrPerSec`
+// globals; updateSunOrbit() pulls live state values into both readouts each
+// frame.
 (function wireSunTimeControls() {
     const liveBtn  = document.getElementById('stp-live');
     const pauseBtn = document.getElementById('stp-pause');
     const resetBtn = document.getElementById('stp-reset');
     const scrub    = document.getElementById('stp-scrub');
     const speed    = document.getElementById('stp-speed');
+    const mLive    = document.getElementById('stm-live');
+    const mScrub   = document.getElementById('stm-scrub');
     if (!liveBtn || !scrub || !speed) return;
 
     function setLive(on) {
         liveMode = on;
         liveBtn.classList.toggle('active',  on);
         pauseBtn.classList.toggle('active', !on);
+        if (mLive) mLive.classList.toggle('active', on);
     }
     function setSimSpeedFromSlider(v) {
-        // Slider in log-space: -2..+2 → 0.01..100 Myr/s
         const x = parseFloat(v);
         simSpeedMyrPerSec = Math.pow(10, x);
     }
 
     liveBtn.addEventListener('click', () => {
-        // ▶ Live snaps the time scrub back to today (t=0) and resumes
         simGalacticYr = 0;
         scrub.value = '0';
+        if (mScrub) mScrub.value = '0';
         setLive(true);
     });
-    pauseBtn.addEventListener('click', () => {
-        // ⏸ pause stops the clock at the current epoch (keeps simGalacticYr)
-        setLive(false);
-    });
+    pauseBtn.addEventListener('click', () => setLive(false));
     resetBtn.addEventListener('click', () => {
         simGalacticYr = 0;
         scrub.value = '0';
+        if (mScrub) mScrub.value = '0';
         setLive(false);
     });
     scrub.addEventListener('input', (e) => {
         simGalacticYr = parseFloat(e.target.value);
-        // Any user scrub disengages live mode — they're driving now.
+        if (mScrub) mScrub.value = e.target.value;
         setLive(false);
     });
-    speed.addEventListener('input', (e) => {
-        setSimSpeedFromSlider(e.target.value);
-    });
-    // Initialise speed from default slider value
+    speed.addEventListener('input', (e) => setSimSpeedFromSlider(e.target.value));
     setSimSpeedFromSlider(speed.value);
+
+    // Mobile mini-bar: only Live + scrub. (Speed is fixed at the desktop
+    // slider's value; mobile users prioritise simplicity over breadth.)
+    if (mLive && mScrub) {
+        mLive.addEventListener('click', () => {
+            simGalacticYr = 0;
+            mScrub.value = '0'; scrub.value = '0';
+            setLive(true);
+        });
+        mScrub.addEventListener('input', (e) => {
+            simGalacticYr = parseFloat(e.target.value);
+            scrub.value = e.target.value;
+            setLive(false);
+        });
+    }
+})();
+
+// ── HUD collapse toggle (mobile) ───────────────────────────────────────
+(function wireHudCollapse() {
+    const btn = document.getElementById('hud-collapse');
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+        document.body.classList.toggle('hud-collapsed');
+        const collapsed = document.body.classList.contains('hud-collapsed');
+        btn.textContent = collapsed ? '⤡' : '⤢';
+        document.body.classList.toggle('hud-expanded', !collapsed);
+    });
+    // Default-collapsed on phones to keep the canvas open
+    if (window.innerWidth <= 600) {
+        document.body.classList.add('hud-collapsed');
+        btn.textContent = '⤡';
+    }
 })();
 document.getElementById('tog-showpieces').addEventListener('change', e => {
     const v = e.target.checked;
@@ -8867,8 +9054,35 @@ function updateLabelScales() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-//  RESIZE
+//  RESIZE / ORIENTATION CHANGE
+//  Updates the camera + renderer for the new viewport AND re-evaluates the
+//  small-screen body classes that drive the responsive media-query bundle
+//  (so going landscape→portrait without reloading still re-fits the UI).
 // ══════════════════════════════════════════════════════════════════════════
+function reapplyResponsiveClasses() {
+    const w = window.innerWidth;
+    document.body.classList.toggle('is-mobile', w <= 600);
+    // Auto-collapse the HUD when crossing into phone width (don't auto-expand
+    // — preserves user's manual toggle if they enlarge the window).
+    if (w <= 600 && !document.body.classList.contains('hud-collapsed')
+        && !document.body.classList.contains('hud-expanded')) {
+        document.body.classList.add('hud-collapsed');
+        const btn = document.getElementById('hud-collapse');
+        if (btn) btn.textContent = '⤡';
+    }
+}
+function handleResize() {
+    camera.aspect = W() / H();
+    camera.updateProjectionMatrix();
+    renderer.setSize(W(), H());
+    reapplyResponsiveClasses();
+}
+window.addEventListener('resize', handleResize, { passive: true });
+window.addEventListener('orientationchange', () => {
+    // Slight delay so the browser settles the new viewport dimensions
+    setTimeout(handleResize, 120);
+}, { passive: true });
+reapplyResponsiveClasses();
 function resizeRenderer() {
     const w = W(), h = H();
     camera.aspect = w / h;
@@ -9172,18 +9386,35 @@ function updateSunOrbit(dt, camDistFromOrigin) {
     if (elGP) elGP.textContent = phasePct.toFixed(1) + '%  (θ = ' + phaseDeg.toFixed(0) + '°)';
 
     // ── Time-control panel readouts (live velocity / Z / speed) ───────
+    const velStr = state.v_total.toFixed(1) + ' km/s';
+    const zStr   = (state.z >= 0 ? '+' : '') + state.z.toFixed(0) + ' ly';
+    const tStr   = (simGalacticYr >= 0 ? '+' : '') + simGalacticYr.toFixed(1) + ' Myr';
+    const spStr  = simSpeedMyrPerSec.toFixed(2) + ' Myr/s';
+    // Desktop / tablet panel
     const elV  = document.getElementById('stp-vel');
     const elZ  = document.getElementById('stp-z');
     const elSV = document.getElementById('stp-scrub-val');
     const elSP = document.getElementById('stp-speed-val');
     const elScrub = document.getElementById('stp-scrub');
-    if (elV)  elV.textContent  = state.v_total.toFixed(1) + ' km/s';
-    if (elZ)  elZ.textContent  = (state.z >= 0 ? '+' : '') + state.z.toFixed(0) + ' ly';
-    if (elSV) elSV.textContent = (simGalacticYr >= 0 ? '+' : '') + simGalacticYr.toFixed(1) + ' Myr';
-    if (elSP) elSP.textContent = simSpeedMyrPerSec.toFixed(2) + ' Myr/s';
-    // Keep slider in sync while in live mode (don't fight a user drag)
+    if (elV)  elV.textContent  = velStr;
+    if (elZ)  elZ.textContent  = zStr;
+    if (elSV) elSV.textContent = tStr;
+    if (elSP) elSP.textContent = spStr;
     if (elScrub && liveMode && document.activeElement !== elScrub) {
         elScrub.value = String(simGalacticYr);
+    }
+    // Mobile mini-bar mirrors the same readouts
+    const mV  = document.getElementById('stm-vel');
+    const mZ  = document.getElementById('stm-z');
+    const mSV = document.getElementById('stm-scrub-val');
+    const mSp = document.getElementById('stm-speed');
+    const mScrub = document.getElementById('stm-scrub');
+    if (mV)  mV.textContent  = velStr;
+    if (mZ)  mZ.textContent  = zStr;
+    if (mSV) mSV.textContent = tStr;
+    if (mSp) mSp.textContent = spStr;
+    if (mScrub && liveMode && document.activeElement !== mScrub) {
+        mScrub.value = String(simGalacticYr);
     }
 }
 

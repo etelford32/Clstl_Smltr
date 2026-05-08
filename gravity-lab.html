@@ -8,7 +8,7 @@
 <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Gravity Lab — Live Newtonian N-Body Simulation · Parkers Physics</title>
+<title>Gravity Lab — N-Body Simulator · Parkers Physics</title>
 <link rel="canonical" href="https://parkersphysics.com/gravity-lab.html">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Parkers Physics">
@@ -22,7 +22,7 @@
 <meta name="twitter:description" content="Browser-based Newtonian N-body sandbox with adaptive integrators. Build solar systems, binaries, and chaotic three-body configurations in real time.">
 <meta name="twitter:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
 
-<meta name="description" content="Watch real Newtonian gravity run on the major moon systems of the solar system. Earth-Moon and Jupiter's Galilean moons including the Laplace 4:2:1 resonance, integrated live with a Yoshida-4 symplectic N-body solver.">
+<meta name="description" content="Browser-based Newtonian N-body sandbox. Build solar systems, binaries, and chaotic three-body configurations with adaptive integrators.">
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 html, body { height:100%; }
@@ -366,7 +366,11 @@ canvas.gl-resonance-canvas {
     }
 }
 </script>
-<script type="application/ld+json">
+<!-- perf-hints:start -->
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" crossorigin>
+<!-- perf-hints:end --><script type="application/ld+json">
 {
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",

@@ -22,7 +22,7 @@
 <meta name="twitter:description" content="Live tracker for the inner solar system fleet: Parker Solar Probe, JWST, Mars rovers, lunar landers, and more. Real-time positions and mission telemetry.">
 <meta name="twitter:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
 
-<meta name="description" content="Live roster of 24+ inner-solar-system space missions — Parker Solar Probe, Solar Orbiter, SOHO, SDO, BepiColombo, DART, Psyche, and every spacecraft measuring the Sun, inner planets, and near-Earth asteroids.">
+<meta name="description" content="Live tracker for the inner solar system fleet: Parker Solar Probe, JWST, Mars rovers, lunar landers, and more — real-time positions and telemetry.">
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 html { height:auto; overflow-y:auto; }
@@ -208,7 +208,11 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
     "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
 }}
 </script>
-<script type="application/ld+json">
+<!-- perf-hints:start -->
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" crossorigin>
+<!-- perf-hints:end --><script type="application/ld+json">
 {
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",

@@ -8,7 +8,11 @@
     "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
 }}
 </script>
-<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<!-- perf-hints:start -->
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" crossorigin>
+<!-- perf-hints:end --><link rel="icon" type="image/x-icon" href="/favicon.ico">
 <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
 <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
@@ -24,7 +28,7 @@
 <meta name="twitter:description" content="Scientifically accurate, WebGL-powered astrophysics simulations driven by live NASA and NOAA data. Explore the Sun, Earth's magnetosphere, space weather, and deep space.">
 <meta name="twitter:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
 
-<meta name="description" content="Scientifically accurate, WebGL-powered astrophysics simulations driven by live NASA and NOAA satellite data. Explore the Sun, Earth's magnetosphere, space weather, and deep space.">
+<meta name="description" content="Scientifically accurate WebGL astrophysics simulations driven by live NASA and NOAA data. Sun, Earth, space weather, and 28+ deep-space simulations.">
 <meta name="theme-color" content="#03010e">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -85,13 +89,10 @@ img{display:block}
 /* ── NAV ─────────────────────────────────────────────────────────────────── */
 nav{position:sticky;top:0;z-index:600;height:50px;min-height:50px;background:rgba(4,2,16,.95);backdrop-filter:blur(16px);border-bottom:1px solid rgba(255,255,255,.07);display:flex;align-items:center;padding:0 16px;gap:6px}
 .nav-brand{display:flex;align-items:center;gap:8px;font-size:.95rem;font-weight:700;white-space:nowrap;background:linear-gradient(45deg,#ffd700,#ff8c00);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-right:8px}
-.nav-logo-img{height:30px;width:auto;border-radius:50%;flex-shrink:0}
-.nav-menu{display:flex;align-items:center;gap:4px;flex:1;min-width:0}
+
 .nav-item{padding:5px 10px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:5px;color:#ccc;font-size:.8rem;white-space:nowrap;transition:background .2s,border-color .2s;flex-shrink:0}
 .nav-item:hover{background:rgba(255,255,255,.16);border-color:rgba(255,200,0,.4);color:#fff}
-.nav-item.active{background:linear-gradient(45deg,#ff8c00,#ffd700);border-color:#ff8c00;color:#000;font-weight:600}
-.nav-spacer{flex:1}
-.nav-auth-sep{width:1px;height:22px;background:rgba(255,255,255,.15);margin:0 3px;flex-shrink:0}
+
 .nav-login{background:transparent!important;border-color:rgba(255,255,255,.22)!important;color:#bbb!important}
 .nav-login:hover{background:rgba(255,255,255,.1)!important;color:#fff!important;border-color:rgba(255,255,255,.4)!important}
 .nav-signup{background:linear-gradient(45deg,#ff8c00,#ffd700)!important;border-color:#ff8c00!important;color:#000!important;font-weight:700!important}
