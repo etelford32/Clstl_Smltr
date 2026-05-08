@@ -355,15 +355,26 @@ export class WeatherHistory {
      * for that hour, so the forecast row should be discarded to avoid
      * a stale "future" appearing in the past after a session crosses
      * an hour boundary.
+     *
+     * Implementation: compact survivors and rebuild the ring's state.
+     * In-place sentinel-blanking would leave _size out of sync with
+     * the buffer and corrupt toArray()/bracket().
      */
     purgeStaleForecasts(tCutoffMs = Date.now()) {
-        const cap   = this._forecastRing._cap;
+        const cap = this._forecastRing._cap;
+        const survivors = [];
         for (let i = 0; i < cap; i++) {
             const entry = this._forecastRing._buf[i];
-            if (entry && entry.t <= tCutoffMs) {
-                this._forecastRing._buf[i] = undefined;
-            }
+            if (entry && entry.t > tCutoffMs) survivors.push(entry);
         }
+        // Sort by t so the rebuilt ring stays oldest-first (purge can
+        // skip entries from the middle of the ring, breaking the head
+        // ordering otherwise).
+        survivors.sort((a, b) => a.t - b.t);
+        this._forecastRing._buf  = new Array(cap);
+        this._forecastRing._head = 0;
+        this._forecastRing._size = 0;
+        for (const r of survivors) this._forecastRing.push(r);
     }
 
     /** All forecast frames in the ring, oldest first. */
