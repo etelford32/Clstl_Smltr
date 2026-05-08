@@ -1282,6 +1282,36 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
                         </div>
                     </div>
 
+                    <!-- Tachocline Dynamo — Parker αΩ mean-field simulation -->
+                    <div style="margin-top:8px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px">
+                        <div style="font-size:9px;color:#665;font-weight:600;letter-spacing:.06em;margin-bottom:4px">TACHOCLINE DYNAMO (αΩ)</div>
+                        <div class="toggle-row">
+                            <input type="checkbox" id="tog-tachocline">
+                            <label for="tog-tachocline">Show tachocline shell</label>
+                        </div>
+                        <div class="toggle-row">
+                            <input type="checkbox" id="tog-fluxropes">
+                            <label for="tog-fluxropes">Show buoyant flux ropes</label>
+                        </div>
+                        <table class="dtbl">
+                            <tr><td>Sim-time</td><td id="dyn-time">–</td></tr>
+                            <tr><td>Cycle phase</td><td id="dyn-phase">–</td></tr>
+                            <tr><td>Polarity</td><td id="dyn-polarity">–</td></tr>
+                            <tr><td>Peak |B<sub>φ</sub>|</td><td id="dyn-maxbphi">–</td></tr>
+                            <tr><td>Peak latitude</td><td id="dyn-peaklat">–</td></tr>
+                            <tr><td>Polar B<sub>p</sub></td><td id="dyn-polarbp">–</td></tr>
+                            <tr><td>Active belt</td><td id="dyn-belt">–</td></tr>
+                        </table>
+                        <div style="margin-top:6px;font-size:9px;color:#665;font-weight:600;letter-spacing:.06em;margin-bottom:4px">BUTTERFLY DIAGRAM</div>
+                        <canvas id="dynamo-butterfly" width="260" height="120"
+                            style="width:100%;height:auto;display:block;border-radius:6px;background:#0a0500"></canvas>
+                        <div style="font-size:9px;color:#777;margin-top:3px;text-align:center">
+                            B<sub>φ</sub>(λ, t) — equator-ward migration over the 22-yr cycle ·
+                            <span style="color:#ff8844">+</span> /
+                            <span style="color:#3388ff">−</span>
+                        </div>
+                    </div>
+
                     <!-- Rotation -->
                     <div style="margin-top:8px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px">
                         <div style="font-size:9px;color:#665;font-weight:600;letter-spacing:.06em;margin-bottom:4px">ROTATION</div>
@@ -1656,6 +1686,7 @@ import {
     aggregateFusionStats, radialProfile, PhotonPool,
     L_SUN_W, R_SUN_M, AU_M,
 } from './js/solar-interior-engine.js';
+import { SolarDynamo } from './js/solar-dynamo.js';
 import { EffectComposer }     from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass }         from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass }    from 'three/addons/postprocessing/UnrealBloomPass.js';
@@ -2056,6 +2087,15 @@ const uniforms = {
     // wherever the old noise-blot pattern triggered.
     u_arSpots:              { value: Array.from({length: 8}, () => new THREE.Vector4(0, 0, 0, 0)) },
     u_arSpotCount:          { value: 0 },
+
+    // ── Tachocline dynamo state (live from SolarDynamo.step) ─────────────
+    // 32-entry latitudinal toroidal-field array, range roughly [-1, +1]
+    // after the αΩ feedback equilibrates. Sampled by tachoFS to drive
+    // the polarity-coloured shear bands on the tachocline shell, and by
+    // the buoyant-flux-rope visualiser to decide when ropes erupt.
+    u_dynamoBphi:           { value: new Float32Array(32) },
+    u_dynamoCyclePhase:     { value: 0.0 },
+    u_dynamoPolarity:       { value: 1.0 },
 
     // ── Layer-isolation flags (driven by Solar Layers toggles) ──────────
     // u_chromoIso: 1.0 when chromosphere is visible but photosphere is not,
@@ -3250,6 +3290,362 @@ const coreMesh        = _makeInteriorMesh(0.25, coreFS,        48);
 const radiativeMesh   = _makeInteriorMesh(0.70, radiativeFS,   64);
 const convectiveMesh  = _makeInteriorMesh(0.97, convectiveFS,  72);
 scene.add(coreMesh, radiativeMesh, convectiveMesh);
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ── TACHOCLINE DYNAMO (r=0.713) — Parker αΩ shear-layer simulation ──────
+//
+//  The tachocline is the thin shear layer between the rigidly-rotating
+//  radiative interior and the differentially-rotating convective zone.
+//  Mean-field αΩ dynamo theory pins this surface as the canonical
+//  source of the solar magnetic cycle: the latitudinal Ω-shear winds
+//  the seed poloidal field into kilogauss toroidal flux ropes, which
+//  rise via magnetic buoyancy through the convective zone to emerge
+//  at the photosphere as bipolar sunspots.
+//
+//  This block ties the live SolarDynamo (Parker αΩ ODE + meridional
+//  drift + diffusion in latitude) into two visual layers:
+//
+//    1. Tachocline shell — physics-driven ShaderMaterial that samples
+//       the live Bφ(λ) uniform to drive polarity-coloured shear bands
+//       flowing in φ at the local Ω(λ) rate. Field-aligned anisotropic
+//       noise traces helical magnetic structure; current-sheet ridges
+//       render as brilliant ribbons where ∂Bφ/∂λ peaks.
+//
+//    2. Buoyant flux ropes — 3D THREE.Line tubes that emerge from the
+//       tachocline at latitudes where |Bφ| breaches a buoyancy
+//       threshold, rise radially through the convective zone with a
+//       helical twist proportional to local |Bφ|, and dissipate when
+//       they reach the photosphere base. This is flux emergence —
+//       the physical link between dynamo and surface activity.
+//
+//  All driven by a single instance of SolarDynamo running coupled
+//  poloidal/toroidal ODEs each frame; the 22-year solar cycle reads
+//  visually over ~22 sim-seconds, so users watch polarity reversal
+//  and equator-ward butterfly migration unfold in real time.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const _solarDynamo = new SolarDynamo();
+// Spin the dynamo for a short burn-in so we don't start at zero Bφ
+for (let i = 0; i < 280; i++) _solarDynamo.step(0.05);
+
+// ── Tachocline shell shader ─────────────────────────────────────────────
+const tachoFS = /* glsl */`
+    precision highp float;
+    uniform float u_time;
+    uniform float u_rot;
+    uniform float u_dynamoBphi[32];
+    uniform float u_dynamoCyclePhase;
+    uniform float u_dynamoPolarity;
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    varying vec3 vWorldPos;
+
+    float h(vec3 p){ p=fract(p*vec3(127.1,311.7,74.7)); p+=dot(p,p+19.19); return fract(p.x*p.y*p.z); }
+    float vn(vec3 p){
+        vec3 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);
+        return mix(mix(mix(h(i),h(i+vec3(1,0,0)),u.x),mix(h(i+vec3(0,1,0)),h(i+vec3(1,1,0)),u.x),u.y),
+                   mix(mix(h(i+vec3(0,0,1)),h(i+vec3(1,0,1)),u.x),mix(h(i+vec3(0,1,1)),h(i+vec3(1,1,1)),u.x),u.y),u.z);
+    }
+    float fbm3(vec3 p){
+        float v=0.0,a=0.5;
+        for(int k=0;k<3;k++){v+=a*vn(p);p=p*2.1+vec3(31.41,17.35,53.17);a*=0.5;}
+        return v;
+    }
+
+    // Linear-interpolate the live Bphi(lat) uniform array (32 bins).
+    // lat ∈ [-π/2, π/2] mapped to index space.
+    float bphiAt(float lat) {
+        float f = ((lat + 1.5707963) / 3.1415927) * 32.0 - 0.5;
+        f = clamp(f, 0.0, 30.999);
+        int   i = int(floor(f));
+        float t = f - float(i);
+        // Manual array-index lookup — WebGL1 doesn't allow [int] indexing on
+        // uniform float arrays portably; unroll with a small linear search.
+        float a = 0.0, b = 0.0;
+        for (int k = 0; k < 32; k++) {
+            if (k == i)     a = u_dynamoBphi[k];
+            if (k == i + 1) b = u_dynamoBphi[k];
+        }
+        return mix(a, b, t);
+    }
+
+    // Snodgrass differential rotation Ω(λ) − rigid radiative Ω. Used to
+    // give the shear bands their latitudinal flow speed at the tachocline.
+    float dOmega(float lat) {
+        float sl = sin(lat);
+        return (1.0 - 0.19 * sl * sl - 0.09 * sl * sl * sl * sl) - 0.93;
+    }
+
+    void main() {
+        float mu  = max(dot(normalize(vNormal), normalize(vViewDir)), 0.0);
+        float rim = 1.0 - mu;
+        vec3  n3d = normalize(vWorldPos);
+        float lat = asin(clamp(n3d.y, -1.0, 1.0));
+        float lon = atan(n3d.x, n3d.z);
+
+        float Bphi    = bphiAt(lat);
+        float absBphi = abs(Bphi);
+
+        // ── Sheared phase coordinate ──────────────────────────────────
+        // φ′ = φ − ω(λ)·t scrolls bands at the local differential rate.
+        // Fast at equator, slow at poles → produces visible torsional
+        // oscillation reading.
+        float omegaLat = dOmega(lat);
+        float phiPrime = lon + omegaLat * u_time * 0.18 * u_rot;
+
+        // ── Field-aligned anisotropic noise — helical magnetic texture ──
+        // Sample noise in a stretched coordinate where the φ direction is
+        // compressed (long aligned filaments) and λ direction is wide.
+        vec3 fieldCoord = vec3(
+            phiPrime * 0.9,
+            lat * 6.0,
+            u_time * 0.05 + Bphi * 1.6
+        );
+        float fil = fbm3(fieldCoord);
+        float filaments = smoothstep(0.42, 0.62, fil);
+
+        // ── Current-sheet ridges — bright lines where ∂Bφ/∂λ is large ──
+        // Approximate the latitudinal derivative by sampling Bphi just
+        // above and below the fragment's latitude.
+        float Bphi_n  = bphiAt(lat + 0.05);
+        float Bphi_s  = bphiAt(lat - 0.05);
+        float dBphi   = abs(Bphi_n - Bphi_s);
+        float currentSheet = pow(smoothstep(0.06, 0.20, dBphi), 2.5);
+
+        // ── Toroidal flux band envelope ──────────────────────────────
+        // Modulates the band by current |Bφ| at this latitude — strong
+        // bands at high-|Bφ| latitudes, dim elsewhere.
+        float bandStrength = pow(absBphi, 0.75);
+
+        // ── Tachocline edge envelope: cuts the shell to a thin ring at
+        // the tachocline radius (we render this on a sphere so it shows
+        // as the whole sphere; restrict alpha to give a band feel).
+        float thinShell = pow(rim, 0.6);
+
+        // ── Compose alpha ──
+        float alpha = (bandStrength * 0.55 + filaments * 0.18 + currentSheet * 0.42)
+                    * thinShell * 0.95;
+        alpha = clamp(alpha, 0.0, 0.95);
+
+        // ── Polarity-coloured palette ──
+        // Positive Bφ → warm orange-red flux rope; negative → cool blue.
+        // K-corona-style yellow-white at near-zero |Bφ| (quiet tachocline).
+        vec3 hotPos  = vec3(1.00, 0.40, 0.10);    // toroidal +
+        vec3 hotNeg  = vec3(0.20, 0.55, 1.20);    // toroidal − (electric blue)
+        vec3 quiet   = vec3(0.85, 0.78, 0.55);    // weak field, neutral gold
+        vec3 sheet   = vec3(1.00, 0.95, 0.65);    // current-sheet brightness
+        float polSign = clamp(Bphi * 4.0, -1.0, 1.0);
+        vec3 polCol = mix(hotNeg, hotPos, polSign * 0.5 + 0.5);
+        vec3 col    = mix(quiet, polCol, smoothstep(0.05, 0.45, absBphi));
+        col += sheet * currentSheet * 0.55;
+        col += vec3(1.00, 0.80, 0.40) * filaments * bandStrength * 0.30;
+
+        // Cycle-phase shimmer: subtle pulse synchronised to the 22-yr cycle
+        col *= 0.92 + 0.18 * sin(u_dynamoCyclePhase * 6.2832 * 2.0);
+
+        // Soft Reinhard so the sum doesn't blow when current sheets stack
+        col = col / (1.0 + col * 0.45);
+
+        gl_FragColor = vec4(col, alpha);
+    }
+`;
+
+const tachoMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(0.713, 96, 64),
+    new THREE.ShaderMaterial({
+        vertexShader:   interiorVS,
+        fragmentShader: tachoFS,
+        uniforms,
+        transparent:    true,
+        depthWrite:     false,
+        depthTest:      false,
+        blending:       THREE.AdditiveBlending,
+        side:           THREE.DoubleSide,
+    })
+);
+tachoMesh.visible    = false;     // off by default — toggle in Solar Layers
+tachoMesh.renderOrder = -1;
+scene.add(tachoMesh);
+
+// ── Buoyant flux ropes — emerge from tachocline → rise to photosphere ─
+// 3D THREE.Line tubes that fire stochastically when the live Bφ at a
+// given latitude exceeds the buoyancy threshold. Each rope is a helical
+// curve from r=0.71 to r=1.02 with twist rate ∝ |Bφ|; lifetime ~2.5
+// sim-seconds, then dissipates. Visualises flux emergence — the
+// physical link from dynamo to sunspot.
+const _fluxRopeGroup = new THREE.Group();
+_fluxRopeGroup.visible = false;
+scene.add(_fluxRopeGroup);
+
+const FLUX_ROPE_POOL = 12;
+const FLUX_ROPE_SEGMENTS = 28;
+const _fluxRopes = [];
+const FLUXROPE_VS = /* glsl */`
+    attribute float aS;
+    attribute vec3  aColor;
+    attribute float aOpacity;
+    varying vec3  vColor;
+    varying float vOpacity;
+    void main() {
+        vColor   = aColor;
+        vOpacity = aOpacity;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+`;
+const FLUXROPE_FS = /* glsl */`
+    precision highp float;
+    varying vec3  vColor;
+    varying float vOpacity;
+    void main() { gl_FragColor = vec4(vColor, vOpacity); }
+`;
+const _fluxRopeMat = new THREE.ShaderMaterial({
+    vertexShader:   FLUXROPE_VS,
+    fragmentShader: FLUXROPE_FS,
+    transparent:    true,
+    depthWrite:     false,
+    depthTest:      false,
+    blending:       THREE.AdditiveBlending,
+});
+
+for (let i = 0; i < FLUX_ROPE_POOL; i++) {
+    const positions = new Float32Array(FLUX_ROPE_SEGMENTS * 3);
+    const colors    = new Float32Array(FLUX_ROPE_SEGMENTS * 3);
+    const opacities = new Float32Array(FLUX_ROPE_SEGMENTS);
+    const aS        = new Float32Array(FLUX_ROPE_SEGMENTS);
+    for (let s = 0; s < FLUX_ROPE_SEGMENTS; s++) aS[s] = s / (FLUX_ROPE_SEGMENTS - 1);
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geom.setAttribute('aColor',   new THREE.BufferAttribute(colors,    3));
+    geom.setAttribute('aOpacity', new THREE.BufferAttribute(opacities, 1));
+    geom.setAttribute('aS',       new THREE.BufferAttribute(aS,        1));
+    const line = new THREE.Line(geom, _fluxRopeMat);
+    line.frustumCulled = false;
+    line.visible = false;
+    line.userData = {
+        positions, colors, opacities,
+        active: false, t0: 0, lat: 0, lon: 0, polarity: 1, strength: 0,
+    };
+    _fluxRopeGroup.add(line);
+    _fluxRopes.push(line);
+}
+
+// Track recent rope-spawn cooldowns per-latitude band so we don't fire
+// dozens of ropes from the same active belt within one frame.
+const _ropeCooldown = new Float32Array(_solarDynamo.NLAT);
+
+function _spawnFluxRope(latRad, polarity, strength, nowSim) {
+    const r = _fluxRopes.find(r => !r.userData.active);
+    if (!r) return;
+    r.userData.active = true;
+    r.userData.t0     = nowSim;
+    r.userData.lat    = latRad;
+    r.userData.lon    = (Math.random() - 0.5) * Math.PI * 2;
+    r.userData.polarity = polarity;
+    r.userData.strength = strength;
+    r.visible = true;
+}
+
+function _stepFluxRopes(t, dt) {
+    if (!_fluxRopeGroup.visible) return;
+    const ROPE_LIFE = 2.5;     // sim-seconds
+    const BUOY_THRESH = 0.42;  // |Bφ| above which a flux rope can erupt
+
+    // Cool down per-latitude
+    for (let i = 0; i < _ropeCooldown.length; i++) {
+        _ropeCooldown[i] = Math.max(0, _ropeCooldown[i] - dt);
+    }
+
+    // Spawn ropes from latitudes whose Bφ has gone supercritical
+    for (let i = 0; i < _solarDynamo.NLAT; i++) {
+        if (_ropeCooldown[i] > 0) continue;
+        const Bphi = _solarDynamo.Bphi[i];
+        const absB = Math.abs(Bphi);
+        if (absB < BUOY_THRESH) continue;
+        // Probability scales with how far above threshold we are
+        const p = Math.min(0.06, (absB - BUOY_THRESH) * 0.18);
+        if (Math.random() < p) {
+            _spawnFluxRope(_solarDynamo.lat[i], Math.sign(Bphi) || 1, absB, t);
+            _ropeCooldown[i] = 0.6 + Math.random() * 0.8;
+        }
+    }
+
+    // Update active ropes — each one is a helical curve from r=0.713 to
+    // r=1.02 with twist proportional to |Bphi| and rising over its lifetime.
+    for (const rope of _fluxRopes) {
+        const ud = rope.userData;
+        if (!ud.active) continue;
+        const age = (t - ud.t0) / ROPE_LIFE;
+        if (age >= 1.0) {
+            ud.active = false;
+            rope.visible = false;
+            const opa = ud.opacities;
+            for (let s = 0; s < FLUX_ROPE_SEGMENTS; s++) opa[s] = 0;
+            rope.geometry.attributes.aOpacity.needsUpdate = true;
+            continue;
+        }
+        // The rope has reached fraction (age) of its full extent. Vertices
+        // beyond that fraction are clamped to the rope head (so it grows).
+        const headFrac = Math.min(1.0, age * 1.4);
+        const lat = ud.lat;
+        const lon = ud.lon;
+        const cl = Math.cos(lat), sl = Math.sin(lat);
+        const co = Math.cos(lon), so = Math.sin(lon);
+        // Local tangent basis at (lat, lon)
+        const east  = [-so, 0, co];
+        const north = [-sl * co, cl, -sl * so];
+        const radial = [cl * co, sl, cl * so];
+        // Twist rate (turns per radial extent) ∝ strength
+        const turns = 1.5 + ud.strength * 4.5;
+        const twist = turns * Math.PI * 2;
+        const helixR = 0.012 + ud.strength * 0.018;
+        const positions = ud.positions;
+        const colors    = ud.colors;
+        const opacities = ud.opacities;
+        // Polarity colour
+        const cR = ud.polarity > 0 ? 1.00 : 0.30;
+        const cG = ud.polarity > 0 ? 0.55 : 0.65;
+        const cB = ud.polarity > 0 ? 0.18 : 1.20;
+        for (let s = 0; s < FLUX_ROPE_SEGMENTS; s++) {
+            const f0 = s / (FLUX_ROPE_SEGMENTS - 1);
+            const f  = Math.min(f0, headFrac);
+            const r  = 0.713 + f * (1.02 - 0.713);
+            const phi = f * twist;
+            // Helical offset in tangent plane
+            const ox = Math.cos(phi) * helixR;
+            const oy = Math.sin(phi) * helixR;
+            const px = radial[0] * r + east[0] * ox + north[0] * oy;
+            const py = radial[1] * r + east[1] * ox + north[1] * oy;
+            const pz = radial[2] * r + east[2] * ox + north[2] * oy;
+            positions[s * 3]     = px;
+            positions[s * 3 + 1] = py;
+            positions[s * 3 + 2] = pz;
+            // Brightness fades along arc + rises over lifetime
+            const ageFade = age < 0.15 ? age / 0.15 : Math.exp(-(age - 0.15) * 2.4);
+            const arcFade = (s <= f0 * (FLUX_ROPE_SEGMENTS - 1)) ? 1.0 : 0.0;
+            opacities[s] = ageFade * arcFade * (0.55 + ud.strength * 0.45);
+            // Hot at footpoints, cooler at apex (real flux ropes ~10 MK in arcade)
+            const heatF = 1.0 - Math.abs(2 * f - 1);   // peaks at midpoint
+            colors[s * 3]     = cR + heatF * 0.08;
+            colors[s * 3 + 1] = cG + heatF * 0.18;
+            colors[s * 3 + 2] = cB + heatF * 0.10;
+        }
+        rope.geometry.attributes.position.needsUpdate = true;
+        rope.geometry.attributes.aColor.needsUpdate   = true;
+        rope.geometry.attributes.aOpacity.needsUpdate = true;
+    }
+}
+
+// ── Step the dynamo + push state into the shader uniforms ──────────────
+function _stepDynamo(dt) {
+    _solarDynamo.step(dt);
+    // Push live Bφ array into shader uniform (Float32Array swap is cheap)
+    const arr = uniforms.u_dynamoBphi.value;
+    const src = _solarDynamo.Bphi;
+    for (let i = 0; i < arr.length && i < src.length; i++) arr[i] = src[i];
+    const d = _solarDynamo.diagnostics();
+    uniforms.u_dynamoCyclePhase.value = d.cyclePhase;
+    uniforms.u_dynamoPolarity.value   = d.polarity;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  ── CORE → RADIATIVE-ZONE LIVE SIMULATION ────────────────────────────────
@@ -7148,6 +7544,18 @@ function animate() {
         _stepPhotonPool();
     }
 
+    // Tachocline αΩ dynamo — step Parker mean-field equations + push state.
+    // dt is sim-seconds (= years of solar time at our 22-yr-cycle scaling),
+    // capped so a frame stall can't blow up the integration.
+    {
+        const dynDt = Math.min(0.06, dt);
+        _stepDynamo(dynDt);
+        // Tachocline shell + buoyant flux ropes co-rotate with the photosphere.
+        if (tachoMesh)      tachoMesh.rotation.y      = solarRotAngle;
+        if (_fluxRopeGroup) _fluxRopeGroup.rotation.y = solarRotAngle;
+        _stepFluxRopes(uniforms.u_time.value, dynDt);
+    }
+
     // Prominences — co-rotate, slow MHD wave oscillation + eruption fade
     if (promGroup) {
         promGroup.rotation.y = solarRotAngle;
@@ -9405,6 +9813,119 @@ function _drawProfileChart() {
 document.getElementById('tog-photon-walks')?.addEventListener('change', e => {
     _photonGroup.visible = e.target.checked;
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ── TACHOCLINE DYNAMO PANEL — butterfly diagram + diagnostics ────────────
+// ═══════════════════════════════════════════════════════════════════════════
+
+document.getElementById('tog-tachocline')?.addEventListener('change', e => {
+    if (tachoMesh) tachoMesh.visible = e.target.checked;
+});
+document.getElementById('tog-fluxropes')?.addEventListener('change', e => {
+    if (_fluxRopeGroup) _fluxRopeGroup.visible = e.target.checked;
+});
+
+// Bφ → polarity colour ramp.
+// Negative Bφ: electric blue.  Positive: hot orange-red.  Black at zero.
+function _bphiColor(b) {
+    const a = Math.min(1, Math.abs(b) * 1.4);
+    if (b >= 0) {
+        // hot positive: orange-red
+        const r = 1.00 * a, g = 0.45 * a, bl = 0.10 * a;
+        return `rgb(${r * 255 | 0}, ${g * 255 | 0}, ${bl * 255 | 0})`;
+    }
+    // cool negative: blue-cyan
+    const r = 0.20 * a, g = 0.55 * a, bl = 1.20 * Math.min(1, a);
+    return `rgb(${r * 255 | 0}, ${g * 255 | 0}, ${Math.min(1, bl) * 255 | 0})`;
+}
+
+// Butterfly diagram: 2D heatmap with latitude on Y axis, time on X axis.
+// Each column samples a snapshot from the dynamo's history ring buffer.
+const _butterflyCanvas = document.getElementById('dynamo-butterfly');
+const _butterflyCtx    = _butterflyCanvas?.getContext('2d');
+function _drawButterfly() {
+    if (!_butterflyCtx) return;
+    const cvs = _butterflyCanvas, ctx = _butterflyCtx;
+    const W = cvs.width, H = cvs.height;
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = '#0a0500';
+    ctx.fillRect(0, 0, W, H);
+    const hist = _solarDynamo.history;
+    if (!hist.length) return;
+    const NLAT = _solarDynamo.NLAT;
+    const HISTLEN = _solarDynamo.HISTORY_LEN;
+    // Map history (oldest...newest) → x [0..W). Latest column = right edge.
+    const colW = W / HISTLEN;
+    const rowH = H / NLAT;
+    // Find max |Bφ| across history for normalisation
+    let amax = 1e-3;
+    for (const s of hist) {
+        for (let i = 0; i < NLAT; i++) {
+            if (Math.abs(s.Bphi[i]) > amax) amax = Math.abs(s.Bphi[i]);
+        }
+    }
+    const norm = 1 / amax;
+    // Render as image-data for speed
+    const img = ctx.createImageData(W, H);
+    // Map latitude i=0 (-π/2) to bottom, i=NLAT-1 (+π/2) to top.
+    for (let xi = 0; xi < HISTLEN; xi++) {
+        const sx = (HISTLEN - hist.length) <= xi
+            ? hist[xi - (HISTLEN - hist.length)]
+            : null;
+        const xPx0 = Math.floor(xi * colW);
+        const xPx1 = Math.floor((xi + 1) * colW);
+        for (let yi = 0; yi < NLAT; yi++) {
+            const lat_idx = NLAT - 1 - yi;   // flip so +lat is up
+            const b = sx ? sx.Bphi[lat_idx] * norm : 0;
+            const ab = Math.min(1, Math.abs(b) * 1.4);
+            let r, g, bl;
+            if (b >= 0) { r = 1.00 * ab; g = 0.45 * ab; bl = 0.10 * ab; }
+            else        { r = 0.20 * ab; g = 0.55 * ab; bl = 1.20 * Math.min(1, ab); }
+            const yPx0 = Math.floor(yi * rowH);
+            const yPx1 = Math.floor((yi + 1) * rowH);
+            for (let py = yPx0; py < yPx1; py++) {
+                for (let px = xPx0; px < xPx1; px++) {
+                    const idx = (py * W + px) * 4;
+                    img.data[idx]     = r * 255 | 0;
+                    img.data[idx + 1] = g * 255 | 0;
+                    img.data[idx + 2] = bl * 255 | 0;
+                    img.data[idx + 3] = 255;
+                }
+            }
+        }
+    }
+    ctx.putImageData(img, 0, 0);
+    // Equator line
+    ctx.strokeStyle = 'rgba(255,255,255,.18)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, H * 0.5);
+    ctx.lineTo(W, H * 0.5);
+    ctx.stroke();
+}
+
+function _updateDynamoPanel() {
+    const d = _solarDynamo.diagnostics();
+    const _s = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+    _s('dyn-time',     d.simTime.toFixed(1) + ' yr');
+    _s('dyn-phase',    (d.cyclePhase * 100).toFixed(0) + '%');
+    _s('dyn-polarity', d.polarity > 0 ? 'positive (+)' : 'negative (−)');
+    _s('dyn-maxbphi',  d.maxBphi.toFixed(2));
+    _s('dyn-peaklat',  d.peakLatDeg.toFixed(1) + '°');
+    _s('dyn-polarbp',  d.polarBp.toFixed(3));
+    _s('dyn-belt',     d.activeBelt
+        ? `${d.activeBelt.min.toFixed(0)}° → ${d.activeBelt.max.toFixed(0)}°`
+        : '—');
+    _drawButterfly();
+}
+
+// Periodic refresh of the dynamo diagnostics + butterfly chart while the
+// Interior section is open. ~5 Hz keeps the panel readable without
+// dominating the main thread.
+setInterval(() => {
+    if (document.getElementById('sec-interior')?.classList.contains('closed')) return;
+    _updateDynamoPanel();
+}, 200);
 
 // ── Interior cross-section cutaway canvas ─────────────────────────────────────
 const _cutawayCanvas = document.getElementById('interior-cutaway');
