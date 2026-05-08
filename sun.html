@@ -1242,6 +1242,46 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
                         </table>
                     </div>
 
+                    <!-- Fusion Engine — global integrated computations -->
+                    <div style="margin-top:8px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px">
+                        <div style="font-size:9px;color:#665;font-weight:600;letter-spacing:.06em;margin-bottom:4px">FUSION ENGINE (computed)</div>
+                        <table class="dtbl">
+                            <tr><td>Total fusion power</td><td id="fe-power">–</td></tr>
+                            <tr><td>pp-chain rate</td><td id="fe-pprate">–</td></tr>
+                            <tr><td>ν flux at Earth</td><td id="fe-nuflux">–</td></tr>
+                            <tr><td>Power from core</td><td id="fe-corepow">–</td></tr>
+                            <tr><td>SSM L vs L<sub>☉</sub></td><td id="fe-lcheck">–</td></tr>
+                        </table>
+                    </div>
+
+                    <!-- Photon Random Walk — Monte Carlo simulation -->
+                    <div style="margin-top:8px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px">
+                        <div style="font-size:9px;color:#665;font-weight:600;letter-spacing:.06em;margin-bottom:4px">PHOTON RANDOM WALK (Monte Carlo)</div>
+                        <div class="toggle-row">
+                            <input type="checkbox" id="tog-photon-walks">
+                            <label for="tog-photon-walks">Show 3D photon trails</label>
+                        </div>
+                        <table class="dtbl">
+                            <tr><td>Walkers</td><td id="fe-walkers">–</td></tr>
+                            <tr><td>Total escapes</td><td id="fe-escapes">–</td></tr>
+                            <tr><td>Mean steps to escape</td><td id="fe-mean-steps">–</td></tr>
+                            <tr><td>MC escape time est.</td><td id="fe-mc-escape">–</td></tr>
+                        </table>
+                    </div>
+
+                    <!-- Radial profile mini-chart -->
+                    <div style="margin-top:8px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px">
+                        <div style="font-size:9px;color:#665;font-weight:600;letter-spacing:.06em;margin-bottom:4px">RADIAL PROFILE</div>
+                        <canvas id="interior-profile" width="260" height="120"
+                            style="width:100%;height:auto;display:block;border-radius:6px;background:#0a0500"></canvas>
+                        <div style="font-size:9px;color:#777;margin-top:3px;text-align:center">
+                            <span style="color:#ff8866">T(r)</span> ·
+                            <span style="color:#ffcc44">ρ(r)</span> ·
+                            <span style="color:#88ddff">L(r)</span> ·
+                            <span style="color:#aa88ff">ε(r)</span>
+                        </div>
+                    </div>
+
                     <!-- Rotation -->
                     <div style="margin-top:8px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px">
                         <div style="font-size:9px;color:#665;font-weight:600;letter-spacing:.06em;margin-bottom:4px">ROTATION</div>
@@ -1612,6 +1652,10 @@ import {
     fusionRate, cumulativeLuminosity, photonEscapeTime, rotationRate,
     convectiveProperties, interiorLayerAt, interiorStateAt,
 } from './js/solar-atmosphere.js';
+import {
+    aggregateFusionStats, radialProfile, PhotonPool,
+    L_SUN_W, R_SUN_M, AU_M,
+} from './js/solar-interior-engine.js';
 import { EffectComposer }     from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass }         from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass }    from 'three/addons/postprocessing/UnrealBloomPass.js';
@@ -2021,8 +2065,12 @@ const uniforms = {
     //   so the photosphere reveals its upper-altitude features (faculae,
     //   limb spicule fringe, brighter network) that the chromosphere shell
     //   would normally occlude.
+    // u_trIso:     1.0 when transition region is visible but both photosphere
+    //   and chromosphere are hidden — TR shader lifts on-disk emission so
+    //   the EUV moss + footpoint network reads as a coherent disk shell.
     u_chromoIso:            { value: 0.0 },
     u_photIso:              { value: 0.0 },
+    u_trIso:                { value: 0.0 },
 
     // Phase 4.6 — pre-baked 4-octave fbm noise atlas. Photosphere shader
     // samples this once per axis (triplanar) instead of computing fbm
@@ -3110,6 +3158,144 @@ const radiativeMesh   = _makeInteriorMesh(0.70, radiativeFS,   64);
 const convectiveMesh  = _makeInteriorMesh(0.97, convectiveFS,  72);
 scene.add(coreMesh, radiativeMesh, convectiveMesh);
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  ── CORE → RADIATIVE-ZONE LIVE SIMULATION ────────────────────────────────
+//
+//  Couples the analytical SSM in solar-atmosphere.js to a real-time photon
+//  random-walk Monte Carlo (PhotonPool from solar-interior-engine.js).
+//  Each walker takes isotropic random steps with length = local displayMFP
+//  (Kramers-scaled so the visible step count grows toward the surface),
+//  then respawns inside the core when it escapes through r ≥ 1.
+//
+//  Rendering: a small THREE.Group hosting one THREE.Line per walker. The
+//  trail vertices are written each frame from the walker's circular
+//  position buffer; a per-vertex aOpacity attribute fades the tail away
+//  toward the head so the recent walk reads as a moving streak.
+//
+//  All trails render with depthTest:false + additive blending, parented
+//  to a group whose visibility tracks the new "Photon walks" toggle so
+//  users can switch the educational overlay on/off independently of the
+//  Core / Radiative-zone toggles.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const PHOTON_COUNT     = 24;
+const PHOTON_TRAIL_LEN = 96;
+
+const _photonPool = new PhotonPool(PHOTON_COUNT, PHOTON_TRAIL_LEN);
+
+const _photonGroup = new THREE.Group();
+_photonGroup.visible = false;       // off by default; Interior section enables it
+scene.add(_photonGroup);
+
+// Per-walker geometry: (trailLen-1) line segments rendered as a single
+// THREE.Line strip with vertex colours fading head→tail.
+const _photonLines = [];
+const PHOTON_VS = /* glsl */`
+    attribute float aOpacity;
+    attribute vec3  aColor;
+    varying float vOpacity;
+    varying vec3  vColor;
+    void main() {
+        vOpacity = aOpacity;
+        vColor   = aColor;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+`;
+const PHOTON_FS = /* glsl */`
+    varying float vOpacity;
+    varying vec3  vColor;
+    void main() { gl_FragColor = vec4(vColor, vOpacity); }
+`;
+const _photonMat = new THREE.ShaderMaterial({
+    vertexShader:   PHOTON_VS,
+    fragmentShader: PHOTON_FS,
+    transparent:    true,
+    depthWrite:     false,
+    depthTest:      false,                 // visible through the photosphere
+    blending:       THREE.AdditiveBlending,
+});
+
+for (let i = 0; i < PHOTON_COUNT; i++) {
+    const positions = new Float32Array(PHOTON_TRAIL_LEN * 3);
+    const colors    = new Float32Array(PHOTON_TRAIL_LEN * 3);
+    const opacities = new Float32Array(PHOTON_TRAIL_LEN);
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geom.setAttribute('aColor',   new THREE.BufferAttribute(colors, 3));
+    geom.setAttribute('aOpacity', new THREE.BufferAttribute(opacities, 1));
+    const line = new THREE.Line(geom, _photonMat);
+    line.frustumCulled = false;
+    line.userData = { positions, colors, opacities };
+    _photonGroup.add(line);
+    _photonLines.push(line);
+}
+
+// Update each line's vertex buffer from the walker's circular trail.
+// Vertices are unrolled head→tail with opacity ramping from 1.0 (head) to
+// 0.0 (tail). Colour gradient encodes radial fraction: deep red at the
+// core (high T, deep), warm gold mid-radiative, pale cyan at the surface.
+function _updatePhotonTrails() {
+    if (!_photonGroup.visible) return;
+    const walkers = _photonPool.walkers;
+    for (let wi = 0; wi < walkers.length; wi++) {
+        const w   = walkers[wi];
+        const ln  = _photonLines[wi];
+        const pos = ln.userData.positions;
+        const col = ln.userData.colors;
+        const opa = ln.userData.opacities;
+        const N   = w.filled;
+        // Read trail oldest→newest: tail is at head (oldest valid), going
+        // forward (modular) up to head-1. Unroll into linear vertex order.
+        for (let i = 0; i < PHOTON_TRAIL_LEN; i++) {
+            const valid = i < N;
+            // Index into the ring buffer. When filled < trailLen, valid
+            // samples sit in slots [0, filled); when full, they sit in
+            // [head, head+trailLen) wrapped.
+            let src;
+            if (w.filled < w.trailLen) src = i;
+            else                       src = (w.head + i) % w.trailLen;
+            const srcI = src * 3;
+            pos[i * 3]     = w.trail[srcI];
+            pos[i * 3 + 1] = w.trail[srcI + 1];
+            pos[i * 3 + 2] = w.trail[srcI + 2];
+
+            // Opacity fade tail→head
+            const f = N > 1 ? (i / (N - 1)) : 1.0;
+            opa[i] = valid ? f * 0.95 : 0.0;
+
+            // Colour by radial fraction at this trail vertex
+            const r = Math.sqrt(pos[i*3]*pos[i*3] + pos[i*3+1]*pos[i*3+1] + pos[i*3+2]*pos[i*3+2]);
+            // Core (r<0.25): deep red-orange. Radiative (0.25-0.71): gold.
+            // Convective (>0.71): pale cyan-white.
+            let cr, cg, cb;
+            if (r < 0.25) {
+                cr = 1.00; cg = 0.45; cb = 0.10;
+            } else if (r < 0.71) {
+                const k = (r - 0.25) / 0.46;
+                cr = 1.00; cg = 0.45 + k * 0.45; cb = 0.10 + k * 0.30;
+            } else {
+                const k = Math.min(1, (r - 0.71) / 0.29);
+                cr = 1.00 - k * 0.50; cg = 0.90 - k * 0.10; cb = 0.40 + k * 0.55;
+            }
+            col[i * 3]     = cr;
+            col[i * 3 + 1] = cg;
+            col[i * 3 + 2] = cb;
+        }
+        ln.geometry.setDrawRange(0, Math.max(0, N));
+        ln.geometry.attributes.position.needsUpdate = true;
+        ln.geometry.attributes.aColor.needsUpdate   = true;
+        ln.geometry.attributes.aOpacity.needsUpdate = true;
+    }
+}
+
+// Per-frame step: bound nSteps so the walk visibly progresses without
+// outrunning the trail buffer. Capped to ~3 steps per walker per frame.
+function _stepPhotonPool() {
+    if (!_photonGroup.visible) return;
+    _photonPool.step(2);
+    _updatePhotonTrails();
+}
+
 // ─── CHROMOSPHERE (r=1.15) — Ca H&K / Hα pink-red layer ──────────────────────
 const glowVS = /* glsl */`
     varying vec3 vNormal; varying vec3 vViewDir;
@@ -3476,25 +3662,49 @@ const spiculeFS = /* glsl */`
     }
 }
 
-// ─── TRANSITION REGION (r=1.04) — thin EUV emission shell ────────────────────
-// The transition region is a <2 000 km layer where coronal temperature jumps from
-// ~10 000 K (chromosphere) to ~1 000 000 K (corona).  Brightest in He II 304 Å
-// (orange-red, ~50 000 K) and EUV 171 Å (teal, ~600 000 K).
+// ─── TRANSITION REGION (r=1.04) — bleeding-edge multi-channel EUV shell ──────
 //
-// Rendered as a very steep rim-brightened shell — the thinness (pow(rim,5))
-// produces a sharp orange ring at the solar limb, layered inside the chromosphere.
-// During flares this shell flashes dramatically as the EUV irradiance spikes.
+// The transition region is the <2 000 km layer where coronal temperature
+// jumps from ~10 000 K (chromosphere) to ~1 000 000 K (corona). It's
+// dominated in EUV imaging by:
+//
+//   • He II 304 Å  (50 kK)   — orange-red base layer, broad chromospheric
+//     interface, the dominant TR emission in disk-integrated SDO imagery.
+//   • C IV 1600 Å (100 kK)   — pinkish UV continuum, lights up flare
+//     ribbons (chromospheric footpoints of reconnecting loops).
+//   • Fe IX 171 Å (700 kK)   — teal-green hot moss / footpoint network
+//     at the chromospheric anchors of hot coronal loops.
+//
+// Bleeding-edge features (no longer just a thin orange ring):
+//
+//   • EUV moss — bright reticulated mottle at supergranule boundaries,
+//     dramatically intensified in plage regions sampled from u_arSpots.
+//     This is the "spongy" footpoint-network pattern from AIA 171/195.
+//   • Filament shadows — dark sinuous absorption threads against the bright
+//     TR background, the on-disk view of prominences (cool dense Hα plasma
+//     blocking EUV emission from below).
+//   • Plage moss intensification — Worley-cell mottle in 8° halos around
+//     each AR position; reads as the bright ribbons + footpoint nests
+//     observers see in 304 Å movies.
+//   • p-mode coupling — 3-min and 5-min sine modulation matches IRIS
+//     observations of TR oscillations.
+//   • Isolation mode — when the TR is the only atmospheric layer visible,
+//     boost on-disk emission so the shell renders as a coherent moss-
+//     speckled disk instead of a faint rim halo.
 const trFS = /* glsl */`
     precision highp float;
     uniform float u_time;
     uniform float u_activity;
-    uniform float u_f107_norm;       // F10.7 [0-1]
-    uniform float u_electron_norm;   // GOES electron flux [0-1]
-    uniform float u_kp_norm;         // Kp/9 [0-1]
+    uniform float u_f107_norm;
+    uniform float u_electron_norm;
+    uniform float u_kp_norm;
     uniform float u_flare_t;
     uniform float u_flare_lat;
     uniform float u_flare_lon;
     uniform float u_flare_intensity;
+    uniform float u_trIso;            // isolation lift when only TR is visible
+    uniform vec4  u_arSpots[8];       // active-region positions (xyz) + signed area (w)
+    uniform int   u_arSpotCount;
     varying vec3 vNormal;
     varying vec3 vViewDir;
 
@@ -3504,6 +3714,21 @@ const trFS = /* glsl */`
         return mix(mix(mix(h(i),h(i+vec3(1,0,0)),u.x),mix(h(i+vec3(0,1,0)),h(i+vec3(1,1,0)),u.x),u.y),
                    mix(mix(h(i+vec3(0,0,1)),h(i+vec3(1,0,1)),u.x),mix(h(i+vec3(0,1,1)),h(i+vec3(1,1,1)),u.x),u.y),u.z);
     }
+    // Cellular Worley-ish: difference-of-noise gives mottle blobs with
+    // sharp lanes between them — the canonical EUV-moss texture.
+    float worley(vec3 p) {
+        float a = vn(p);
+        float b = vn(p + vec3(0.31, 0.17, 0.62));
+        return abs(a - b);
+    }
+    // Domain-warped FBM — fluid-looking direction-coherent texture used
+    // to grow filament threads along an emergent direction field.
+    float warpedFBM(vec3 p, float t) {
+        vec3 q = vec3(vn(p + vec3(0.0, 0.0, t * 0.05)),
+                      vn(p + vec3(5.2, 1.3, t * 0.04)),
+                      vn(p + vec3(2.8, 6.7, t * 0.03)));
+        return vn(p + q * 1.8);
+    }
 
     void main() {
         vec3  n3d = normalize(vNormal);
@@ -3511,58 +3736,155 @@ const trFS = /* glsl */`
         float mu  = max(dot(n3d, vd), 0.0);
         float rim = 1.0 - mu;
 
-        // Sharp ring — TR is ~2 Mm thick (~0.003 R☉), so very steep falloff
+        float lat_t = asin(clamp(n3d.y, -1.0, 1.0));
+        float lon_t = atan(n3d.x, n3d.z);
+
+        // ══════════════════════════════════════════════════════════════════
+        //  1. Network footpoints — supergranule-edge bright network
+        //  Cellular noise at supergranule scale (~30 Mm). Bright cell
+        //  edges (network lanes), dark interiors (internetwork). The TR
+        //  is brightest where chromospheric Ca II network channels concentrate.
+        // ══════════════════════════════════════════════════════════════════
+        float sg     = vn(n3d * 7.0 + vec3(u_time * 0.010));
+        float mottle = worley(n3d * 14.0 + vec3(u_time * 0.018));
+        float network = smoothstep(0.32, 0.55, mottle);
+        float intern  = 1.0 - smoothstep(0.10, 0.30, mottle);
+
+        // ══════════════════════════════════════════════════════════════════
+        //  2. EUV moss — fine reticulated mottle at hot-loop footpoints
+        //  Real moss is the chromospheric footprint of hot coronal loops,
+        //  visible in 171 Å as a dense bright "spongy" pattern. We use
+        //  multi-octave Worley + threshold to get the mottled signature.
+        // ══════════════════════════════════════════════════════════════════
+        float moss1 = worley(n3d * 26.0 + vec3(u_time * 0.020));
+        float moss2 = worley(n3d * 48.0 - vec3(u_time * 0.014, 0.0, 1.7));
+        float mossPattern = smoothstep(0.18, 0.34, moss1) * smoothstep(0.10, 0.28, moss2);
+        // Intensify moss in network lanes (where loops anchor)
+        mossPattern *= 0.45 + network * 0.85;
+
+        // ══════════════════════════════════════════════════════════════════
+        //  3. Plage moss intensification — bright halos around active regions
+        //  Sample u_arSpots and add a moss-density boost within ~8° angular
+        //  distance of each AR. Reads as the bright EUV plage/ribbon network
+        //  observers see in 304/195/171 Å under active regions.
+        // ══════════════════════════════════════════════════════════════════
+        float plageGate = 0.0;
+        for (int i = 0; i < 8; i++) {
+            if (i >= u_arSpotCount) break;
+            vec4 ar = u_arSpots[i];
+            if (length(ar.xyz) < 0.5) continue;
+            float arDot = dot(n3d, normalize(ar.xyz));
+            float arAng = acos(clamp(arDot, -1.0, 1.0));
+            float intensity = clamp(abs(ar.w), 0.0, 1.0);
+            // Halo width broadens with AR area; capped at ~10°
+            float halo = exp(-arAng * arAng / (0.014 + intensity * 0.026));
+            plageGate += halo * (0.55 + intensity * 0.85);
+        }
+        plageGate = clamp(plageGate, 0.0, 1.6);
+        float plageMoss = mossPattern * (1.0 + plageGate * 1.8);
+
+        // ══════════════════════════════════════════════════════════════════
+        //  4. Filament shadows — dark sinuous absorption threads on disk
+        //  Cool dense Hα filaments lying above the chromosphere block EUV
+        //  emission from below, producing dark sinuous threads against the
+        //  bright TR background. Use a domain-warped low-freq pattern with
+        //  sharp threshold for elongated thread structure.
+        // ══════════════════════════════════════════════════════════════════
+        vec3 dirField = vec3(vn(n3d * 4.0), vn(n3d * 4.0 + 11.0), vn(n3d * 4.0 + 23.0));
+        dirField = normalize(dirField - 0.5 + 0.001);
+        float fil1 = vn(n3d * 2.4 + dirField * 3.5 + vec3(u_time * 0.005, 0.0, 0.0));
+        float fil2 = vn(n3d * 5.6 + vec3(0.0, u_time * 0.008, 0.0));
+        float filMask = smoothstep(0.66, 0.74, fil1) * smoothstep(0.40, 0.62, fil2);
+        // Filaments only on disk (off-limb they are prominences, handled separately)
+        float filDark = filMask * (1.0 - rim * 1.5) * 0.65;
+
+        // ══════════════════════════════════════════════════════════════════
+        //  5. p-mode oscillations — 3-min and 5-min TR ringing
+        // ══════════════════════════════════════════════════════════════════
+        float pmodePhase = vn(n3d * 1.8) * 6.2832;
+        float pmode3 = sin(u_time * (6.2832 / 2.0) + pmodePhase) * 0.05;
+        float pmode5 = sin(u_time * (6.2832 / 3.5) + pmodePhase * 1.7) * 0.08;
+        float pmode  = pmode3 + pmode5;
+
+        // ══════════════════════════════════════════════════════════════════
+        //  6. Compose alpha — sharp rim ring + on-disk moss + flares
+        // ══════════════════════════════════════════════════════════════════
+        // Sharp rim ring — TR is ~2 Mm thick (~0.003 R☉)
         float baseAlpha = pow(rim, 5.0) * (0.60 + u_activity * 0.30);
 
-        // Texture: bright patches at coronal loop footpoints (flux tube heating)
-        float fpPatch = smoothstep(0.62, 0.80, vn(n3d * 15.0 + vec3(u_time * 0.016)));
-        baseAlpha  += fpPatch * pow(rim, 2.8) * 0.24 * u_activity;
+        // On-disk moss + plage contribution (rim-attenuated)
+        float diskFactor = pow(1.0 - rim, 2.0);
+        float diskAlpha  = (mossPattern * 0.18 + plageMoss * 0.32 + network * 0.10) * diskFactor;
 
-        // ── Flare EUV flash ───────────────────────────────────────────────────
-        // X-ray + EUV irradiance spikes within seconds of flare onset,
-        // rapidly heating the transition region across the visible disk.
-        float lat_t  = asin(clamp(n3d.y, -1.0, 1.0));
-        // lon = atan(x, z) so heliographic comparisons with u_flare_lon work.
-        float lon_t  = atan(n3d.x, n3d.z);
+        // Flare brightening
         float cos_df = sin(lat_t)*sin(u_flare_lat) + cos(lat_t)*cos(u_flare_lat)*cos(lon_t - u_flare_lon);
         float df_t   = acos(clamp(cos_df, -1.0, 1.0));
-        // Localized brightening near flare site (fast impulsive phase)
         float localFl  = exp(-df_t*df_t / 0.055) * exp(-u_flare_t / 30.0) * u_flare_intensity;
-        // Global EUV irradiance increase (slower gradual phase — lights up whole TR ring)
         float globalFl = exp(-u_flare_t / 60.0) * u_flare_intensity * 0.55;
-        float alpha    = clamp(baseAlpha + localFl * 0.80 + globalFl * pow(rim, 3.5), 0.0, 0.88);
 
-        // ── Colour ────────────────────────────────────────────────────────────
-        // Quiescent: AIA 304 Å He II orange-red (50 000 K)
-        // With activity: blends toward AIA 171 Å teal-gold (600 000 K loop footpoints)
-        // Flare: flashes white-UV at impulsive phase, then cools back
-        vec3 trOrange = vec3(1.00, 0.42, 0.10);   // He II 304 Å
-        vec3 tr171    = vec3(0.72, 0.90, 0.55);   // AIA 171 Å teal-green footpoints
-        vec3 trUV     = vec3(1.00, 0.88, 0.70);   // impulsive EUV flash
+        float alpha = baseAlpha
+                    + diskAlpha
+                    - filDark * 0.45 * diskFactor
+                    + localFl * 0.80
+                    + globalFl * pow(rim, 3.5);
+        alpha *= 1.0 + pmode * 0.5;
 
-        vec3 col = mix(trOrange, tr171, u_activity * 0.35 + pow(rim, 4.0) * 0.20);
+        // ── Isolation lift: when only TR is visible, render full disk shell
+        if (u_trIso > 0.5) {
+            float isoFloor = (0.42 + mossPattern * 0.20 + plageMoss * 0.30
+                                  - filDark * 0.50) * diskFactor;
+            alpha = max(alpha, isoFloor);
+        }
+        alpha = clamp(alpha, 0.0, u_trIso > 0.5 ? 0.95 : 0.90);
+
+        // ══════════════════════════════════════════════════════════════════
+        //  7. Multi-channel composite color
+        //
+        //   He II 304 Å (50 kK)   — orange-red base
+        //   C IV 1600 Å (100 kK)  — warm pink, flare ribbons
+        //   Fe IX 171 Å (700 kK)  — teal-green hot moss footpoints
+        //   Impulsive flash       — bright UV-white at flare onset
+        // ══════════════════════════════════════════════════════════════════
+        vec3 he304     = vec3(1.00, 0.42, 0.10);   // He II 304 Å
+        vec3 civ1600   = vec3(1.00, 0.62, 0.55);   // C IV 1600 Å
+        vec3 fe171     = vec3(0.72, 0.95, 0.55);   // Fe IX 171 Å hot moss
+        vec3 trUV      = vec3(1.00, 0.88, 0.70);   // impulsive EUV flash
+        vec3 filCool   = vec3(0.40, 0.10, 0.04);   // filament absorption
+
+        // Base 304 Å warmed by activity → 171 Å hot moss
+        vec3 col = mix(he304, fe171, u_activity * 0.35 + pow(rim, 4.0) * 0.20);
+        // Plage moss adds 171 Å + 1600 Å mix where ARs anchor hot loops
+        col = mix(col, fe171, plageMoss * 0.45 * diskFactor);
+        col = mix(col, civ1600, network * 0.18 * diskFactor);
+        // Filament shadows pull color toward dark cool absorption
+        col = mix(col, filCool, filDark * 0.7);
+        // Flare flash → impulsive UV-white
         col = mix(col, trUV, (localFl + globalFl * 0.5) * 0.80);
+        // p-mode shimmer
+        col *= 1.0 + pmode * 0.10;
 
-        // ── F10.7 solar cycle: hotter TR at solar maximum ─────────────────────
-        // More loop footpoints, stronger He II 304 Å emission ring
-        alpha = clamp(alpha * (1.0 + u_f107_norm * 0.45), 0.0, 0.90);
-        col   = mix(col, tr171 * 1.2, u_f107_norm * 0.20);
+        // ── F10.7 solar cycle: hotter, more emissive TR at solar maximum
+        alpha = clamp(alpha * (1.0 + u_f107_norm * 0.45), 0.0, u_trIso > 0.5 ? 0.97 : 0.92);
+        col   = mix(col, fe171 * 1.2, u_f107_norm * 0.20);
 
-        // ── Electron flux: EUV / soft X-ray brightening from SEP events ────────
-        // Penetrating energetic electrons produce intense EUV at loop footpoints
+        // ── Energetic electron flux: EUV brightening at footpoints
         col  += vec3(0.60, 0.88, 1.20) * u_electron_norm * pow(rim, 3.0) * 0.35;
-        alpha = clamp(alpha + u_electron_norm * pow(rim, 3.5) * 0.12, 0.0, 0.90);
+        alpha = clamp(alpha + u_electron_norm * pow(rim, 3.5) * 0.12, 0.0, u_trIso > 0.5 ? 0.97 : 0.92);
 
-        // ── Kp geomagnetic activity: broader TR ring during storms ─────────────
-        alpha = clamp(alpha * (1.0 + u_kp_norm * 0.22), 0.0, 0.90);
+        // ── Kp storm: broader, brighter TR ring during geomagnetic activity
+        alpha = clamp(alpha * (1.0 + u_kp_norm * 0.22), 0.0, u_trIso > 0.5 ? 0.97 : 0.92);
 
         gl_FragColor = vec4(col, alpha);
     }
 `;
+// DoubleSide so isolation mode renders both rim halo (back-facing geom)
+// and the disk shell (front-facing) cleanly. Rim-localised alpha falloff
+// in the shader keeps the front-side contribution subtle when other
+// atmospheric layers are co-rendered.
 const trMesh = new THREE.Mesh(
     new THREE.SphereGeometry(1.04, 48, 48),
     new THREE.ShaderMaterial({ vertexShader: glowVS, fragmentShader: trFS, uniforms,
-        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.BackSide })
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide })
 );
 scene.add(trMesh);
 
@@ -4800,6 +5122,7 @@ const NANOFLARE_FS = /* glsl */`
 `;
 
 let _nanoflareSystem = null;
+let _nanoflareHost   = null;   // co-rotating parent group for spark Points (always exists)
 let _coronalLoopCurves = [];   // per-loop: { points: Vec3[], rate, nextEventT }
 
 // Inverse-CDF sampling of dN/dE ∝ E^-α on [emin, emax].
@@ -4844,6 +5167,15 @@ function _initNanoflareSystem() {
     for (let i = 0; i < NANOFLARE_POOL_SIZE; i++) {
         pool[i] = { alive: false, t0: 0, life: 1, peakSize: 1, peakAlpha: 0 };
     }
+
+    // Permanent host group co-rotates with the photosphere so SOC-spawned
+    // surface sparks track AR positions automatically. Decoupled from
+    // loopGroup so the SOC layer works even when no active regions exist.
+    if (!_nanoflareHost) {
+        _nanoflareHost = new THREE.Group();
+        scene.add(_nanoflareHost);
+    }
+    _nanoflareHost.add(points);
 
     _nanoflareSystem = {
         points, geom, positions, colors, sizes, alphas, pool,
@@ -4916,42 +5248,52 @@ function _spawnNanoflare(loopIdx, sArc, energyE) {
     sys.alphas[slot] = 0.0;              // alpha ramps in over rise
 }
 
+let _nanoflarePrevT = 0;
 function _updateNanoflares(t) {
-    if (!_nanoflareSystem || !loopGroup || !_coronalLoopCurves.length) return;
-    if (!_nanoflareSystem.points.visible) return;
+    // Lazy-init the spark pool the first time we run — this lets the SOC
+    // driver work even when there are no coronal loops in the scene yet.
+    if (!_nanoflareSystem) _initNanoflareSystem();
+    if (!_nanoflareSystem || !_nanoflareSystem.points.visible) {
+        _nanoflarePrevT = t;
+        return;
+    }
 
     const sys = _nanoflareSystem;
+    const dt  = Math.max(0.001, Math.min(0.10, t - _nanoflarePrevT));
+    _nanoflarePrevT = t;
 
-    // ── Per-loop Poisson event scheduling ──
-    // Burst-spawn until each loop's nextEventT catches up with current t.
-    for (let li = 0; li < _coronalLoopCurves.length; li++) {
-        const curve = _coronalLoopCurves[li];
-        if (curve.nextEventT === undefined) curve.nextEventT = t + Math.random() * 0.4;
-
-        let safety = 0;
-        while (t >= curve.nextEventT && safety++ < 6) {
-            // Triangular dist centered on apex (s=0.5): u1+u2 averaged.
-            // Real nanoflares cluster where current sheets concentrate —
-            // along the loop's apex and at PIL footpoints.
-            const sArc = (Math.random() + Math.random()) * 0.5;
-
-            const E = _sampleNanoflareEnergy();
-            _spawnNanoflare(li, sArc, E);
-
-            // Avalanche burst: a "big" event (top decade of energy) has a
-            // chance to cascade into 2–4 follow-up sparks nearby. Pre-figures
-            // the SOC dynamics that Phase 2 will compute on a stress grid.
-            if (E > 0.25 && Math.random() < 0.40) {
-                const burst = 2 + ((Math.random() * 3) | 0);
-                for (let bi = 0; bi < burst; bi++) {
-                    const sNear = Math.max(0, Math.min(1, sArc + (Math.random() - 0.5) * 0.18));
-                    _spawnNanoflare(li, sNear, _sampleNanoflareEnergy() * 0.4);
+    // ─── DRIVER ─────────────────────────────────────────────────────────
+    if (_NANOFLARE_DRIVER === 'phase1') {
+        // Legacy per-loop Poisson scheduler (Phase 1).
+        if (loopGroup && _coronalLoopCurves.length) {
+            for (let li = 0; li < _coronalLoopCurves.length; li++) {
+                const curve = _coronalLoopCurves[li];
+                if (curve.nextEventT === undefined) curve.nextEventT = t + Math.random() * 0.4;
+                let safety = 0;
+                while (t >= curve.nextEventT && safety++ < 6) {
+                    const sArc = (Math.random() + Math.random()) * 0.5;
+                    const E = _sampleNanoflareEnergy();
+                    _spawnNanoflare(li, sArc, E);
+                    if (E > 0.25 && Math.random() < 0.40) {
+                        const burst = 2 + ((Math.random() * 3) | 0);
+                        for (let bi = 0; bi < burst; bi++) {
+                            const sNear = Math.max(0, Math.min(1, sArc + (Math.random() - 0.5) * 0.18));
+                            _spawnNanoflare(li, sNear, _sampleNanoflareEnergy() * 0.4);
+                        }
+                    }
+                    const rate = curve.rate || 6.0;
+                    curve.nextEventT += -Math.log(Math.max(1e-6, Math.random())) / rate;
                 }
             }
-
-            // Schedule next event from exponential inter-arrival distribution.
-            const rate = curve.rate || 6.0;
-            curve.nextEventT += -Math.log(Math.max(1e-6, Math.random())) / rate;
+        }
+    } else {
+        // ── PHASE 2 — SOC avalanche grid (default) ────────────────────
+        if (!_nanoflareSOC) _nanoflareSOC = new NanoflareSOC();
+        const arSpots = _socActiveRegions();
+        const events  = _nanoflareSOC.step(dt, arSpots);
+        for (let i = 0; i < events.length; i++) {
+            const ev = events[i];
+            _spawnNanoflareAtSurface(ev.lat, ev.lon, ev.energy);
         }
     }
 
@@ -4993,44 +5335,456 @@ function _updateNanoflares(t) {
     }
 }
 
-// Snapshot every coronal loop's curve points after buildCoronalLoops,
-// then attach the spark Points object as a child of loopGroup so sparks
-// co-rotate with the photosphere automatically.
+// Snapshot every coronal loop's curve points after buildCoronalLoops so
+// the Phase-1 (loop-anchored) driver can sample positions. Phase 2 (SOC)
+// works without loops; this just keeps Phase 1 alive as a fallback driver.
 function _rebuildNanoflares() {
     _coronalLoopCurves = [];
-    if (!loopGroup || !loopGroup.children?.length) {
-        if (_nanoflareSystem?.points && _nanoflareSystem.points.parent) {
-            _nanoflareSystem.points.parent.remove(_nanoflareSystem.points);
-        }
-        return;
+    _initNanoflareSystem();   // ensure host + Points exist regardless of loops
+
+    if (loopGroup && loopGroup.children?.length) {
+        loopGroup.children.forEach(line => {
+            const posAttr = line.geometry?.getAttribute('position');
+            if (!posAttr) return;
+            const n = posAttr.count;
+            const pts = new Array(n);
+            for (let i = 0; i < n; i++) {
+                pts[i] = new THREE.Vector3(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i));
+            }
+            const rate = 4.0 + Math.random() * 6.0;
+            _coronalLoopCurves.push({ points: pts, rate, nextEventT: undefined });
+        });
     }
 
-    loopGroup.children.forEach(line => {
-        const posAttr = line.geometry?.getAttribute('position');
-        if (!posAttr) return;
-        const n = posAttr.count;
-        const pts = new Array(n);
-        for (let i = 0; i < n; i++) {
-            pts[i] = new THREE.Vector3(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i));
-        }
-        // Per-loop Poisson rate (events/sim-sec). Jittered so loops don't
-        // fire in lockstep; total system fires ~loops × rate sparks/sec.
-        const rate = 4.0 + Math.random() * 6.0;
-        _coronalLoopCurves.push({ points: pts, rate, nextEventT: undefined });
-    });
-
-    _initNanoflareSystem();
-
-    // Re-parent under loopGroup so spark positions inherit solar rotation.
-    const pts = _nanoflareSystem.points;
-    if (pts.parent !== loopGroup) {
-        if (pts.parent) pts.parent.remove(pts);
-        loopGroup.add(pts);
-    }
-    // Visibility tracks the same toggle as loops by default (UI may override).
     const tog = document.getElementById('tog-nanoflares');
-    pts.visible = tog ? tog.checked : true;
+    if (_nanoflareSystem?.points) {
+        _nanoflareSystem.points.visible = tog ? tog.checked : true;
+    }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ─── PHASE 2 NANOFLARES — SOC AVALANCHE GRID ───────────────────────────────
+//
+//  Real Lu & Hamilton (1991) self-organised-criticality cellular automaton
+//  on a (lat × lon) sphere grid with coordinated magnetic fields and a
+//  Lorenz-attractor convective forcing layer.
+//
+//  Per-cell state (stored as Float32Array slabs for cache locality):
+//     S         scalar magnetic free-energy stress
+//     Bt, Bp    tangent-frame magnetic field components (Bθ, Bφ)
+//
+//  Forcing (the "drive"):
+//     • A constellation of LORENZ_N=24 Lorenz attractors scattered across
+//       the sphere act as chaotic convective oscillators. Each integrates
+//       dx/dt = σ(y-x), dy/dt = x(ρ-z) - y, dz/dt = xy - βz. The (x,y)
+//       state of each attractor is mapped to a sheared (δBt, δBp) kick
+//       injected into a 5×5 cell neighbourhood at the attractor's location.
+//     • Active regions (u_arSpots) inject extra concentrated stress and
+//       sheared field — the dominant nanoflare driver during high activity.
+//
+//  Stress evaluation (Lorentz coupling):
+//     • At each cell we compute the 2D current density J = (curl B)·ẑ via
+//       finite differences of Bt, Bp on the lat/lon grid.
+//     • Local stress contribution = α·|J|² + β·|B|²  →  the |J×B| Lorentz
+//       force magnitude that real coronal flux tubes accumulate before
+//       reconnection releases it.
+//
+//  Avalanche cascade (the SOC "release"):
+//     • Cells exceeding S_critical relax locally — Bt, Bp average toward
+//       neighbours (potential-field projection), S resets, and the released
+//       energy spawns a nanoflare spark at the cell's heliographic position.
+//     • Cascading: relaxed neighbours often push the next ring above
+//       threshold within the same frame, propagating an avalanche front.
+//       The size distribution of these cascades emerges as the dN/dE ∝ E^-α
+//       power law — no ad-hoc sampling needed; SOC produces it naturally.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const SOC_LAT      = 64;
+const SOC_LON      = 128;
+const SOC_TOTAL    = SOC_LAT * SOC_LON;
+const SOC_S_CRIT   = 0.85;          // critical stress threshold
+const SOC_RELAX    = 0.55;          // field relaxation factor on avalanche
+const SOC_DIFF     = 0.012;         // background ohmic diffusion per step
+const SOC_INJECT   = 0.0040;        // background stress injection per sim-second
+const SOC_AR_BOOST = 0.085;         // AR injection rate per unit area
+const SOC_MAX_PASSES   = 10;
+const SOC_MAX_EVENTS   = 60;        // hard cap on events per frame (prevents pool churn)
+
+const LORENZ_N    = 24;
+const LORENZ_SIGMA = 10.0, LORENZ_RHO = 28.0, LORENZ_BETA = 8.0/3.0;
+
+class NanoflareSOC {
+    constructor() {
+        this.S  = new Float32Array(SOC_TOTAL);
+        this.Bt = new Float32Array(SOC_TOTAL);
+        this.Bp = new Float32Array(SOC_TOTAL);
+        // Scratch buffers reused for diffusion + cascade
+        this._scratch = new Float32Array(SOC_TOTAL);
+
+        // Lorenz oscillator constellation. Position bias toward equator
+        // (where most flux emergence happens) with sin² latitude weighting.
+        this.lorenzPos = new Float32Array(LORENZ_N * 2);   // (lat, lon) per attractor
+        this.lorenzState = new Float32Array(LORENZ_N * 3); // (x, y, z) per attractor
+        for (let i = 0; i < LORENZ_N; i++) {
+            // Equator-biased lat: |lat| < 50° mostly
+            this.lorenzPos[i * 2]     = (Math.random() - 0.5) * Math.PI * 0.55;
+            this.lorenzPos[i * 2 + 1] = (Math.random() - 0.5) * 2 * Math.PI;
+            // Random initial state on the Lorenz attractor
+            this.lorenzState[i * 3]     = (Math.random() - 0.5) * 2.0;
+            this.lorenzState[i * 3 + 1] = (Math.random() - 0.5) * 2.0;
+            this.lorenzState[i * 3 + 2] = 1.0 + Math.random() * 25.0;
+        }
+
+        // Re-usable event buffer (cleared each frame)
+        this.events = [];
+
+        // Initial small B field: smooth random potential-like background
+        for (let i = 0; i < SOC_TOTAL; i++) {
+            this.Bt[i] = (Math.random() - 0.5) * 0.10;
+            this.Bp[i] = (Math.random() - 0.5) * 0.10;
+        }
+
+        // Index helpers
+        this._dlat = Math.PI / SOC_LAT;
+        this._dlon = (2 * Math.PI) / SOC_LON;
+    }
+
+    // RK2 (midpoint) Lorenz integration for the constellation.
+    // dt is sim-seconds; we substep so chaos doesn't blow up at high dt.
+    _stepLorenz(dt) {
+        const STEP = 0.012;                                  // max stable step
+        const subSteps = Math.max(1, Math.ceil(dt / STEP));
+        const h = dt / subSteps;
+        const s = LORENZ_SIGMA, r = LORENZ_RHO, b = LORENZ_BETA;
+        for (let n = 0; n < subSteps; n++) {
+            for (let i = 0; i < LORENZ_N; i++) {
+                const x = this.lorenzState[i * 3];
+                const y = this.lorenzState[i * 3 + 1];
+                const z = this.lorenzState[i * 3 + 2];
+                // Midpoint k1
+                const k1x = s * (y - x);
+                const k1y = x * (r - z) - y;
+                const k1z = x * y - b * z;
+                const xm = x + 0.5 * h * k1x;
+                const ym = y + 0.5 * h * k1y;
+                const zm = z + 0.5 * h * k1z;
+                // Midpoint k2
+                const k2x = s * (ym - xm);
+                const k2y = xm * (r - zm) - ym;
+                const k2z = xm * ym - b * zm;
+                this.lorenzState[i * 3]     = x + h * k2x;
+                this.lorenzState[i * 3 + 1] = y + h * k2y;
+                this.lorenzState[i * 3 + 2] = z + h * k2z;
+            }
+        }
+    }
+
+    // Map (lat, lon) to grid cell index. Wraps in lon, clamps in lat.
+    _cellAt(lat, lon) {
+        let row = Math.floor((lat + Math.PI / 2) / Math.PI * SOC_LAT);
+        if (row < 0) row = 0;
+        else if (row >= SOC_LAT) row = SOC_LAT - 1;
+        let lonN = lon;
+        // Wrap to [-π, π]
+        lonN = lonN - (2 * Math.PI) * Math.floor((lonN + Math.PI) / (2 * Math.PI));
+        let col = Math.floor((lonN + Math.PI) / (2 * Math.PI) * SOC_LON);
+        col = ((col % SOC_LON) + SOC_LON) % SOC_LON;
+        return { row, col, idx: row * SOC_LON + col };
+    }
+
+    // Stress + sheared-field injection from Lorenz constellation + ARs.
+    _injectForcing(dt, arSpots) {
+        // Background uniform injection — scales with sim dt
+        const bg = SOC_INJECT * dt;
+        for (let i = 0; i < SOC_TOTAL; i++) {
+            this.S[i] += bg * (0.6 + Math.random() * 0.8);
+        }
+
+        // Lorenz forcing — sheared field perturbations with chaotic amplitude
+        for (let i = 0; i < LORENZ_N; i++) {
+            const lat = this.lorenzPos[i * 2];
+            const lon = this.lorenzPos[i * 2 + 1];
+            const x   = this.lorenzState[i * 3];
+            const y   = this.lorenzState[i * 3 + 1];
+            const z   = this.lorenzState[i * 3 + 2];
+            // Use Lorenz x,y as sheared field direction; z modulates amplitude
+            // (z varies 0..50, normalize to 0..1 for amplitude)
+            const amp = 0.005 * dt * (0.4 + Math.min(1, z * 0.04));
+            const shearT = x * 0.07 * amp;
+            const shearP = y * 0.07 * amp;
+            // Stress kick proportional to shear² (energy injection = J²)
+            const stressKick = (x * x + y * y) * amp * 0.0008;
+
+            const c = this._cellAt(lat, lon);
+            // 5×5 Gaussian-weighted neighbourhood
+            for (let dr = -2; dr <= 2; dr++) {
+                const row = c.row + dr;
+                if (row < 0 || row >= SOC_LAT) continue;
+                for (let dc = -2; dc <= 2; dc++) {
+                    const col = ((c.col + dc) % SOC_LON + SOC_LON) % SOC_LON;
+                    const r2  = dr * dr + dc * dc;
+                    const w   = Math.exp(-r2 / 4.0);
+                    const ci  = row * SOC_LON + col;
+                    this.Bt[ci] += shearT * w;
+                    this.Bp[ci] += shearP * w;
+                    this.S[ci]  += stressKick * w;
+                }
+            }
+        }
+
+        // Active regions — strong concentrated injection. arSpots is a list
+        // of {latRad, lonRad, area, complex}. Wider footprint than Lorenz
+        // because real ARs span many supergranules.
+        if (arSpots && arSpots.length) {
+            for (const ar of arSpots) {
+                const c = this._cellAt(ar.latRad, ar.lonRad);
+                const stressBoost = SOC_AR_BOOST * dt * Math.max(0.05, ar.area || 0.1)
+                                  * (ar.complex ? 2.4 : 1.0);
+                // Sheared field with direction roughly tangent to current
+                // position — emergent flux ropes have a coherent shear sense.
+                const phase = (ar.latRad * 7.3 + ar.lonRad * 3.1);
+                const shearT = Math.sin(phase) * 0.018 * dt;
+                const shearP = Math.cos(phase) * 0.018 * dt;
+                for (let dr = -3; dr <= 3; dr++) {
+                    const row = c.row + dr;
+                    if (row < 0 || row >= SOC_LAT) continue;
+                    for (let dc = -3; dc <= 3; dc++) {
+                        const col = ((c.col + dc) % SOC_LON + SOC_LON) % SOC_LON;
+                        const r2  = dr * dr + dc * dc;
+                        const w   = Math.exp(-r2 / 6.0);
+                        const ci  = row * SOC_LON + col;
+                        this.S[ci]  += stressBoost * w;
+                        this.Bt[ci] += shearT * w;
+                        this.Bp[ci] += shearP * w;
+                    }
+                }
+            }
+        }
+    }
+
+    // Add a Lorentz-force contribution to S from the local current density.
+    // J = (curl B)·ẑ = ∂Bp/∂lat - ∂Bt/∂lon.
+    // Stress contribution = γ·J² (the magnetic free energy density that
+    // builds in any sheared field; relaxes when the field is reorganised).
+    _accumulateLorentzStress(dt) {
+        const Bt = this.Bt, Bp = this.Bp, S = this.S;
+        const dl = this._dlat, dp = this._dlon;
+        const gamma = 0.045 * dt;
+        // Skip rows 0, last to avoid polar singularities
+        for (let row = 1; row < SOC_LAT - 1; row++) {
+            for (let col = 0; col < SOC_LON; col++) {
+                const i  = row * SOC_LON + col;
+                const iN = (row + 1) * SOC_LON + col;
+                const iS = (row - 1) * SOC_LON + col;
+                const iE = row * SOC_LON + ((col + 1) % SOC_LON);
+                const iW = row * SOC_LON + ((col - 1 + SOC_LON) % SOC_LON);
+                const dBpDt = (Bp[iN] - Bp[iS]) / (2 * dl);
+                const dBtDp = (Bt[iE] - Bt[iW]) / (2 * dp);
+                const J     = dBpDt - dBtDp;
+                S[i] += gamma * J * J;
+            }
+        }
+    }
+
+    // Slow background ohmic diffusion of B — dissipates small-scale field
+    // structure, prevents stress runaway between avalanches.
+    _diffuseField(dt) {
+        const eta = SOC_DIFF * dt;
+        if (eta <= 0) return;
+        const Bt = this.Bt, Bp = this.Bp, scr = this._scratch;
+        // Diffuse Bt
+        for (let row = 1; row < SOC_LAT - 1; row++) {
+            for (let col = 0; col < SOC_LON; col++) {
+                const i  = row * SOC_LON + col;
+                const iN = (row + 1) * SOC_LON + col;
+                const iS = (row - 1) * SOC_LON + col;
+                const iE = row * SOC_LON + ((col + 1) % SOC_LON);
+                const iW = row * SOC_LON + ((col - 1 + SOC_LON) % SOC_LON);
+                const lap = (Bt[iN] + Bt[iS] + Bt[iE] + Bt[iW]) - 4 * Bt[i];
+                scr[i] = Bt[i] + eta * lap;
+            }
+        }
+        for (let row = 1; row < SOC_LAT - 1; row++) {
+            for (let col = 0; col < SOC_LON; col++) {
+                const i = row * SOC_LON + col;
+                Bt[i] = scr[i];
+            }
+        }
+        // Diffuse Bp
+        for (let row = 1; row < SOC_LAT - 1; row++) {
+            for (let col = 0; col < SOC_LON; col++) {
+                const i  = row * SOC_LON + col;
+                const iN = (row + 1) * SOC_LON + col;
+                const iS = (row - 1) * SOC_LON + col;
+                const iE = row * SOC_LON + ((col + 1) % SOC_LON);
+                const iW = row * SOC_LON + ((col - 1 + SOC_LON) % SOC_LON);
+                const lap = (Bp[iN] + Bp[iS] + Bp[iE] + Bp[iW]) - 4 * Bp[i];
+                scr[i] = Bp[i] + eta * lap;
+            }
+        }
+        for (let row = 1; row < SOC_LAT - 1; row++) {
+            for (let col = 0; col < SOC_LON; col++) {
+                const i = row * SOC_LON + col;
+                Bp[i] = scr[i];
+            }
+        }
+    }
+
+    // Multi-pass avalanche cascade. Cells with S > S_crit relax B locally,
+    // emit a nanoflare event, and reset S. Cascading from local relaxation
+    // continues until no cell is supercritical or pass cap is hit.
+    _avalanche() {
+        const events = this.events;
+        events.length = 0;
+        const S = this.S, Bt = this.Bt, Bp = this.Bp;
+        let pass = 0, unstable = true;
+
+        while (unstable && pass < SOC_MAX_PASSES) {
+            unstable = false;
+            for (let row = 1; row < SOC_LAT - 1; row++) {
+                for (let col = 0; col < SOC_LON; col++) {
+                    const i = row * SOC_LON + col;
+                    if (S[i] <= SOC_S_CRIT) continue;
+                    unstable = true;
+                    const excess = S[i] - SOC_S_CRIT;
+
+                    // Field relaxation (local potential-field projection)
+                    const iN = (row + 1) * SOC_LON + col;
+                    const iS = (row - 1) * SOC_LON + col;
+                    const iE = row * SOC_LON + ((col + 1) % SOC_LON);
+                    const iW = row * SOC_LON + ((col - 1 + SOC_LON) % SOC_LON);
+                    const btAvg = (Bt[iN] + Bt[iS] + Bt[iE] + Bt[iW]) * 0.25;
+                    const bpAvg = (Bp[iN] + Bp[iS] + Bp[iE] + Bp[iW]) * 0.25;
+                    Bt[i] = (1 - SOC_RELAX) * Bt[i] + SOC_RELAX * btAvg;
+                    Bp[i] = (1 - SOC_RELAX) * Bp[i] + SOC_RELAX * bpAvg;
+
+                    // Stress reset to ~90% of critical so we cascade rather
+                    // than retrigger the same cell.
+                    S[i] = SOC_S_CRIT * 0.85;
+
+                    // Push a fraction of excess to neighbours — propagates the
+                    // avalanche front. Coefficient < 1 means SOC dissipates;
+                    // the rest is emitted as the nanoflare.
+                    const propagate = excess * 0.65;
+                    const share = propagate * 0.25;
+                    S[iN] += share;
+                    S[iS] += share;
+                    S[iE] += share;
+                    S[iW] += share;
+
+                    // Emit event: convert grid cell back to (lat, lon)
+                    const lat = ((row + 0.5) / SOC_LAT) * Math.PI - Math.PI / 2;
+                    const lon = ((col + 0.5) / SOC_LON) * 2 * Math.PI - Math.PI;
+                    // Energy normalised so most events sit in 1e-3..1, big
+                    // cascading bursts saturate near 1.
+                    const energy = Math.min(1.0, excess * 0.45);
+                    if (events.length < SOC_MAX_EVENTS) {
+                        events.push({ lat, lon, energy });
+                    }
+                }
+            }
+            pass++;
+        }
+        return events;
+    }
+
+    step(dt, arSpots) {
+        // Keep dt bounded — slow frames shouldn't accumulate huge injections.
+        const dtC = Math.max(0.001, Math.min(0.10, dt));
+        this._stepLorenz(dtC);
+        this._injectForcing(dtC, arSpots);
+        this._accumulateLorentzStress(dtC);
+        this._diffuseField(dtC);
+        return this._avalanche();
+    }
+}
+
+let _nanoflareSOC = null;
+
+// Spawn a nanoflare spark at a heliographic surface position. Used by the
+// SOC avalanche pipeline; the loop-anchored _spawnNanoflare path remains
+// available for the legacy Phase 1 driver.
+function _spawnNanoflareAtSurface(latRad, lonRad, energyE) {
+    if (!_nanoflareSystem) return;
+    const sys = _nanoflareSystem;
+
+    // Convert to unit sphere position. Lifted just above the photosphere so
+    // sparks read against the corona.
+    const cl = Math.cos(latRad), sl = Math.sin(latRad);
+    const co = Math.cos(lonRad), so = Math.sin(lonRad);
+    const px = cl * so, py = sl, pz = cl * co;
+
+    const slot = sys.nextSlot;
+    sys.nextSlot = (slot + 1) % NANOFLARE_POOL_SIZE;
+
+    // Map energy to log-normalised eNorm matching the existing palette.
+    const eNorm = Math.min(1, Math.max(0,
+        (Math.log10(Math.max(NANOFLARE_E_MIN, energyE)) - Math.log10(NANOFLARE_E_MIN)) /
+        (Math.log10(NANOFLARE_E_MAX) - Math.log10(NANOFLARE_E_MIN))
+    ));
+    const peakSize  = 1.6 + eNorm * 5.4;
+    const peakAlpha = 0.50 + eNorm * 0.45;
+    const life      = 0.30 + eNorm * 1.20;
+
+    let r, gC, b;
+    if (eNorm < 0.5) {
+        const k = eNorm * 2;
+        r  = 1.00; gC = 0.78 + k * 0.18; b = 0.32 + k * 0.42;
+    } else {
+        const k = (eNorm - 0.5) * 2;
+        r  = 1.00 - k * 0.45; gC = 0.96 - k * 0.10; b = 0.74 + k * 0.30;
+    }
+
+    const ent = sys.pool[slot];
+    ent.alive     = true;
+    ent.t0        = uniforms.u_time.value;
+    ent.life      = life;
+    ent.peakSize  = peakSize;
+    ent.peakAlpha = peakAlpha;
+
+    // Lift slightly above the photosphere — same range as loop spawns.
+    const lift = 1.008 + eNorm * 0.008;
+    sys.positions[slot * 3]     = px * lift;
+    sys.positions[slot * 3 + 1] = py * lift;
+    sys.positions[slot * 3 + 2] = pz * lift;
+    sys.colors[slot * 3]     = r;
+    sys.colors[slot * 3 + 1] = gC;
+    sys.colors[slot * 3 + 2] = b;
+    sys.sizes[slot]  = peakSize * 0.6;
+    sys.alphas[slot] = 0.0;
+}
+
+// Build the AR list the SOC needs from the existing liveRegions array.
+// Cached so we don't reparse every frame.
+let _socArSpotsCache = null;
+let _socArSpotsCacheKey = null;
+function _socActiveRegions() {
+    const liveLen = (typeof liveRegions !== 'undefined' && liveRegions) ? liveRegions.length : 0;
+    const key = `${liveLen}|${liveLen ? liveRegions[0]?.num : ''}|${liveLen ? liveRegions[liveLen-1]?.num : ''}`;
+    if (key === _socArSpotsCacheKey && _socArSpotsCache) return _socArSpotsCache;
+    const out = [];
+    if (liveLen) {
+        for (const r of liveRegions) {
+            const ll = parseLoc(r.loc);
+            if (!ll) continue;
+            const m = String(r.mag || '').toLowerCase();
+            const isComplex = m.includes('delta') || m.includes('gamma');
+            out.push({
+                latRad:  ll.lat * Math.PI / 180,
+                lonRad:  ll.lon * Math.PI / 180,
+                area:    Math.max(0.05, Math.min(1, (r.area || 50) / 800)),
+                complex: isComplex,
+            });
+        }
+    }
+    _socArSpotsCache = out;
+    _socArSpotsCacheKey = key;
+    return out;
+}
+
+// Default driver: Phase 2 SOC. Override with ?nanoflare=phase1 to revert to
+// the original loop-anchored Poisson scheduler for A/B comparison.
+const _NANOFLARE_DRIVER = (new URLSearchParams(location.search).get('nanoflare') || 'soc').toLowerCase();
 
 function buildCoronalLoops() {
     if (loopGroup) { scene.remove(loopGroup); loopGroup = null; }
@@ -6024,14 +6778,19 @@ function _setLayerActive(rowId, on) {
     if (row) row.classList.toggle('on', on);
 }
 // Update isolation uniforms based on which atmospheric layers are visible.
-// Isolation = exactly one of {photosphere, chromosphere} is on. Drives:
-//   • u_photIso  → photosphere reveals upper-altitude features alone
-//   • u_chromoIso → chromosphere renders as a coherent disk shell alone
+//   • u_photIso  → photosphere alone (no chromosphere): reveals upper-
+//     altitude features that chromosphere shell would normally occlude.
+//   • u_chromoIso → chromosphere alone (no photosphere): renders as a
+//     coherent Hα disk shell instead of a faint rim halo.
+//   • u_trIso    → TR alone (no photosphere, no chromosphere): lifts on-
+//     disk EUV-moss + footpoint emission so it reads as a coherent shell.
 function _refreshLayerIsolation() {
     const phOn = sunLOD.visible;
     const chOn = chromoMesh.visible;
+    const trOn = trMesh.visible;
     uniforms.u_photIso.value   = (phOn && !chOn) ? 1.0 : 0.0;
     uniforms.u_chromoIso.value = (chOn && !phOn) ? 1.0 : 0.0;
+    uniforms.u_trIso.value     = (trOn && !phOn && !chOn) ? 1.0 : 0.0;
 }
 document.getElementById('tog-core')?.addEventListener('change', e => {
     coreMesh.visible = e.target.checked;
@@ -6064,7 +6823,11 @@ document.getElementById('tog-nanoflares')?.addEventListener('change', e => {
     if (_nanoflareSystem?.points) _nanoflareSystem.points.visible = e.target.checked;
 });
 document.getElementById('tog-prom').addEventListener('change',   e => { if (promGroup)  promGroup.visible  = e.target.checked; });
-document.getElementById('tog-tr').addEventListener('change',     e => { trMesh.visible = e.target.checked; });
+document.getElementById('tog-tr').addEventListener('change', e => {
+    trMesh.visible = e.target.checked;
+    _setLayerActive('lr-tr', e.target.checked);
+    _refreshLayerIsolation();
+});
 document.getElementById('tog-fieldlines').addEventListener('change', e => { if (fieldLineGroup) fieldLineGroup.visible = e.target.checked; });
 document.getElementById('sl-bline-density').addEventListener('input', function() {
     document.getElementById('disp-bline-density').textContent = this.value + '%';
@@ -6260,8 +7023,18 @@ function animate() {
         });
     }
 
-    // Nanoflares — Poisson sparks anchored to each loop's curve.
+    // Nanoflare host group rotates with the photosphere so SOC-spawned
+    // surface sparks track AR positions even when no coronal loops exist.
+    if (_nanoflareHost) _nanoflareHost.rotation.y = solarRotAngle;
     _updateNanoflares(t);
+
+    // Core → radiative-zone simulation: photon random-walk Monte Carlo.
+    // Trails co-rotate with the photosphere so they track the same frame
+    // as the rest of the interior visualisation.
+    if (_photonGroup) {
+        _photonGroup.rotation.y = solarRotAngle;
+        _stepPhotonPool();
+    }
 
     // Prominences — co-rotate, slow MHD wave oscillation + eruption fade
     if (promGroup) {
@@ -8390,6 +9163,137 @@ function updateInteriorPanel() {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  ── FUSION ENGINE LIVE STATS + RADIAL PROFILE CHART ──────────────────────
+//
+//  Aggregates pp-chain power across the solar volume, neutrino flux at
+//  Earth, and Monte-Carlo random-walk diagnostics every 0.5 s. Cheap
+//  (200-bin trapezoidal integration of the SSM).
+// ═══════════════════════════════════════════════════════════════════════════
+
+function _fmtPower(W) {
+    if (W >= 1e26) return `${(W / 1e26).toFixed(2)}×10²⁶ W`;
+    if (W >= 1e23) return `${(W / 1e23).toFixed(2)}×10²³ W`;
+    return _fmtSciI(W) + ' W';
+}
+function _fmtRate(perSec) {
+    if (perSec >= 1e36) return `${(perSec / 1e36).toFixed(2)}×10³⁶/s`;
+    if (perSec >= 1e30) return `${(perSec / 1e30).toFixed(2)}×10³⁰/s`;
+    return _fmtSciI(perSec) + '/s';
+}
+function _fmtNuFlux(perM2sec) {
+    // Convert m⁻²s⁻¹ → cm⁻²s⁻¹ (the conventional unit)
+    const perCm2 = perM2sec * 1e-4;
+    if (perCm2 >= 1e10) return `${(perCm2 / 1e10).toFixed(2)}×10¹⁰ cm⁻²s⁻¹`;
+    return _fmtSciI(perCm2) + ' cm⁻²s⁻¹';
+}
+
+let _fusionStatsCache = null;
+let _fusionStatsAt    = 0;
+function updateFusionEngineStats() {
+    const now = performance.now();
+    if (!_fusionStatsCache || (now - _fusionStatsAt) > 500) {
+        _fusionStatsCache = aggregateFusionStats(200);
+        _fusionStatsAt    = now;
+    }
+    const s = _fusionStatsCache;
+    const _s = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+    _s('fe-power',   _fmtPower(s.powerW));
+    _s('fe-pprate',  _fmtRate(s.ratesPerSec));
+    _s('fe-nuflux',  _fmtNuFlux(s.neutrinoFluxAtEarth));
+    _s('fe-corepow', `${(s.corePowerFrac * 100).toFixed(1)}% (r<0.25)`);
+    const ratio = s.powerW / L_SUN_W;
+    _s('fe-lcheck',  `${ratio.toFixed(3)}× (${ratio > 0.95 && ratio < 1.05 ? '✓' : '⚠'})`);
+
+    // Photon-pool diagnostics
+    _s('fe-walkers', String(_photonPool.walkers.length));
+    _s('fe-escapes', String(_photonPool.escapes));
+    const meanSteps = _photonPool.escapes > 0
+        ? (_photonPool.totalSteps / _photonPool.escapes)
+        : NaN;
+    _s('fe-mean-steps', isFinite(meanSteps) ? Math.round(meanSteps).toLocaleString() : '—');
+    // MC escape-time estimate: meanSteps × <mfp>·R_sun / c. <mfp> ≈ 0.04 R_sun
+    // averaged over the displayed walk range — a rough display-time anchor.
+    const mfpAvg = 0.04 * R_SUN_M;
+    const tSec   = isFinite(meanSteps) ? meanSteps * mfpAvg / 2.998e8 : NaN;
+    if (!isFinite(tSec)) {
+        _s('fe-mc-escape', '—');
+    } else if (tSec > 86400 * 365.25) {
+        _s('fe-mc-escape', `~${(tSec / (86400 * 365.25)).toFixed(0)} yr`);
+    } else if (tSec > 86400) {
+        _s('fe-mc-escape', `~${(tSec / 86400).toFixed(1)} d`);
+    } else {
+        _s('fe-mc-escape', `~${tSec.toFixed(1)} s`);
+    }
+}
+
+// ── Radial-profile mini-chart ────────────────────────────────────────────
+const _profileCanvas = document.getElementById('interior-profile');
+const _profileCtx    = _profileCanvas?.getContext('2d');
+let _profileData     = null;
+
+function _drawProfileChart() {
+    if (!_profileCtx) return;
+    if (!_profileData) _profileData = radialProfile(96);
+    const cvs = _profileCanvas;
+    const ctx = _profileCtx;
+    ctx.clearRect(0, 0, cvs.width, cvs.height);
+    // Frame
+    ctx.fillStyle = '#0a0500';
+    ctx.fillRect(0, 0, cvs.width, cvs.height);
+    ctx.strokeStyle = 'rgba(255,140,0,.18)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0.5, 0.5, cvs.width - 1, cvs.height - 1);
+    // Vertical guides at the layer boundaries
+    const gx = (rf) => rf * cvs.width;
+    ctx.strokeStyle = 'rgba(255,140,0,.12)';
+    ctx.beginPath();
+    [0.25, 0.713].forEach(rf => { ctx.moveTo(gx(rf), 0); ctx.lineTo(gx(rf), cvs.height); });
+    ctx.stroke();
+
+    const { r, T, rho, eps, Lfrac } = _profileData;
+    const N = r.length;
+    const drawSeries = (vals, color, logMode = false, normTo) => {
+        let lo = Infinity, hi = -Infinity;
+        for (let i = 0; i < N; i++) {
+            let v = vals[i];
+            if (logMode) v = v > 0 ? Math.log10(v) : -30;
+            if (v < lo) lo = v;
+            if (v > hi) hi = v;
+        }
+        if (normTo) { lo = normTo[0]; hi = normTo[1]; }
+        const span = Math.max(1e-9, hi - lo);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        for (let i = 0; i < N; i++) {
+            let v = vals[i];
+            if (logMode) v = v > 0 ? Math.log10(v) : lo;
+            const x = (r[i]) * (cvs.width - 4) + 2;
+            const y = (cvs.height - 6) - ((v - lo) / span) * (cvs.height - 12) + 3;
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+    };
+    // Each series gets its own auto-range (log scale for T, ρ, ε)
+    drawSeries(T,    '#ff8866', true);
+    drawSeries(rho,  '#ffcc44', true);
+    drawSeries(eps,  '#aa88ff', true);
+    drawSeries(Lfrac,'#88ddff', false, [0, 1]);
+
+    // Layer labels
+    ctx.fillStyle = '#665';
+    ctx.font = '8px monospace';
+    ctx.fillText('Core', 4, 10);
+    ctx.fillText('Rad', gx(0.27) + 2, 10);
+    ctx.fillText('Conv', gx(0.72) + 2, 10);
+}
+
+// ── Photon-walks toggle wiring ───────────────────────────────────────────
+document.getElementById('tog-photon-walks')?.addEventListener('change', e => {
+    _photonGroup.visible = e.target.checked;
+});
+
 // ── Interior cross-section cutaway canvas ─────────────────────────────────────
 const _cutawayCanvas = document.getElementById('interior-cutaway');
 const _cutawayCtx    = _cutawayCanvas?.getContext('2d');
@@ -8533,20 +9437,30 @@ document.querySelectorAll('.int-jump').forEach(btn => {
     });
 });
 
-// Hook cutaway redraw into the panel update
+// Hook cutaway redraw + fusion-engine stats + radial profile into the panel update
 const _origUpdateInterior = updateInteriorPanel;
-// Patch: also draw cutaway when panel updates
 {
     const origFn = updateInteriorPanel;
     updateInteriorPanel = function() {
         origFn();
         const slider = document.getElementById('sl-int-radius');
         drawCutaway(slider ? parseFloat(slider.value) : 0.5);
+        updateFusionEngineStats();
+        _drawProfileChart();
     };
 }
 
 // Initial render
 updateInteriorPanel();
+
+// Periodic refresh of the live fusion-engine + photon-walk diagnostics so
+// the Interior panel stays in sync with the running Monte-Carlo simulation
+// (escapes, mean steps) even when the user is not interacting. Cheap —
+// a 200-bin trapezoidal SSM integration runs at most twice per second.
+setInterval(() => {
+    if (document.getElementById('sec-interior')?.classList.contains('closed')) return;
+    updateFusionEngineStats();
+}, 500);
 
 // ═══════════════════════════════════════════════════════════════
 //  SOLAR ATMOSPHERE PANEL — live physics calculations
