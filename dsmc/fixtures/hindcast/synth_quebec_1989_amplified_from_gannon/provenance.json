@@ -1,0 +1,31 @@
+{
+  "synth_id": "synth_quebec_1989_amplified_from_gannon",
+  "template_event": "gannon_may_2024",
+  "template_path": "dsmc/fixtures/hindcast/gannon_may_2024/historical_ap.csv",
+  "scaling": {
+    "ap_factor": 1.0,
+    "f107_factor": 1.5,
+    "extend_storm_3h_bins": 4,
+    "storm_threshold_ap": 80.0,
+    "cap_ap": 400.0,
+    "cap_f107": 1000.0
+  },
+  "description": "March 1989 Quebec-class amplifier on Gannon May 2024. Gannon's geomagnetic profile is closest to 1989's in modern records; we leave Ap untouched and lift F10.7 by 1.5\u00d7 to probe how the predictor handles a flux just past the training maximum.",
+  "citations": [
+    "Allen et al. (1989), EOS 70, 1479",
+    "Boteler (2019), Space Weather 17, 1427"
+  ],
+  "post_scale_summary": {
+    "n_rows": 60,
+    "ap_min": 3.0,
+    "ap_max": 400.0,
+    "f107_min": 320.54999999999995,
+    "f107_max": 349.79999999999995
+  },
+  "warnings": [
+    "Ap saturation: rows reach the 400 ceiling; the index does not resolve magnitude beyond that point.",
+    "F10.7 = 350 SFU exceeds the predictor's training maximum of 315 SFU; predictions here are extrapolations and must be checked for monotonicity / smoothness only, not accuracy."
+  ],
+  "generated_at_utc": "2026-05-08T01:53:18.530218Z",
+  "do_not_train_on_this_fixture": true
+}
