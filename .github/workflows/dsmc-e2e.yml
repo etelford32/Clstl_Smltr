@@ -38,14 +38,14 @@ jobs:
     steps:
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # Docker buildx gives us layer caching via GHA cache.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Cache DSMC image layers
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: /tmp/.buildx-cache
           key: dsmc-buildx-${{ hashFiles('dsmc/Dockerfile', 'dsmc/pipeline/requirements.txt') }}
