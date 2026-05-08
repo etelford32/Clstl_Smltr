@@ -3096,42 +3096,135 @@ const radiativeFS = /* glsl */`
 // ── CONVECTIVE ZONE (0.7 → 1.0 R) — Bénard-style turnover, ~2 MK → 5800 K ─
 // Visualisation: granulation cell pattern with hot upwellings (bright)
 // and cool downflows (dark lanes). Cells turn over on ~10 sim-second cycles.
+// ── CONVECTIVE ZONE (0.7 → 1.0 R) — shares supergranulation basis with photosphere ─
+//
+// The convective zone IS the supergranulation pattern that drives the
+// photospheric granulation we see at r=1.0 from above. To make the
+// cutaway visualisation read as physically continuous, this shader uses
+// the same Voronoi cellular noise function, the same supergranule scale
+// (2.2 cycles per radius — matches photosphere sgPos), the same time
+// evolution rate (0.0008 sim-units) and the same differential-rotation
+// drift (u_rot factor) as the photosphere shader's supergranulation
+// term. Toggle the photosphere off and the convective zone on, and you
+// see the very same supergranule cells that were modulating the granules
+// from above — now visible through the cutaway as the bright Bénard
+// upwellings that lift hot plasma to the surface.
+//
+// Layered on top:
+//   • Giant convective cells (~200 Mm scale, 0.7 cycles per radius)
+//     that group the supergranules into broader convective patterns.
+//   • Heat plumes — bright upwelling cores at supergranule centres
+//     where rising plasma reaches the photosphere base.
+//   • Velocity-shear streaks — anisotropic noise stretched in longitude
+//     to read as the toroidal differential-rotation flow that powers
+//     the Ω-effect at the tachocline.
+//   • Tachocline edge glow — a thin bright rim at the inner shell where
+//     the convective zone meets the radiatively-stable region (the
+//     dynamo source layer).
 const convectiveFS = /* glsl */`
     precision highp float;
     uniform float u_time;
+    uniform float u_rot;
     varying vec3 vNormal;
     varying vec3 vViewDir;
     varying vec3 vWorldPos;
+
+    // Match photosphere sun shader hash + Voronoi exactly so cell
+    // boundaries align across the cutaway.
+    vec3 hash3(vec3 p) {
+        p = fract(p * vec3(443.897, 441.423, 437.195));
+        p += dot(p.zxy, p.yzx + 19.19);
+        return fract(p.xyx * p.yzy * p.zxz);
+    }
     float h(vec3 p){ p=fract(p*vec3(127.1,311.7,74.7)); p+=dot(p,p+19.19); return fract(p.x*p.y*p.z); }
     float vn(vec3 p){
         vec3 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);
         return mix(mix(mix(h(i),h(i+vec3(1,0,0)),u.x),mix(h(i+vec3(0,1,0)),h(i+vec3(1,1,0)),u.x),u.y),
                    mix(mix(h(i+vec3(0,0,1)),h(i+vec3(1,0,1)),u.x),mix(h(i+vec3(0,1,1)),h(i+vec3(1,1,1)),u.x),u.y),u.z);
     }
-    // Cellular (Worley-like) approximation via difference-of-noise → Bénard cells
-    float cell(vec3 p) {
-        float a = vn(p);
-        float b = vn(p + vec3(0.31, 0.17, 0.62));
-        return abs(a - b);   // dark at cell centres, bright at edges (or vice versa)
+    // Worley voronoi — returns (d1, d2): nearest & second-nearest cell distances.
+    // Identical implementation to the photosphere shader so the cell
+    // partition lines up across both layers.
+    vec2 voronoi(vec3 p) {
+        vec3 ip = floor(p), fp = fract(p);
+        float d1 = 1e9, d2 = 1e9;
+        for (int z = -1; z <= 1; z++) {
+            for (int y = -1; y <= 1; y++) {
+                for (int x = -1; x <= 1; x++) {
+                    vec3 nb  = vec3(float(x), float(y), float(z));
+                    vec3 pos = nb - fp + hash3(ip + nb);
+                    float d  = dot(pos, pos);
+                    if (d < d1) { d2 = d1; d1 = d; }
+                    else if (d < d2) { d2 = d; }
+                }
+            }
+        }
+        return vec2(sqrt(d1), sqrt(d2));
     }
+
     void main() {
         float mu  = max(dot(normalize(vNormal), normalize(vViewDir)), 0.0);
         float rim = 1.0 - mu;
+        // Direction from origin (radially outward) — independent of mesh radius.
+        // Photosphere uses vPosition (|v|=1); convective mesh sits at r=0.97
+        // so we normalise to recover the same direction-on-sphere coordinate.
         vec3 n3d = normalize(vWorldPos);
-        // Two scales of cells: supergranule (~30 Mm) + giant cells (~200 Mm)
-        float sg = cell(n3d *  9.0 + vec3(u_time * 0.05));
-        float gc = cell(n3d *  3.5 + vec3(u_time * 0.012));
-        // Cell interiors (hot upwellings) bright, lanes dark
-        float upwell = smoothstep(0.10, 0.32, sg) * smoothstep(0.05, 0.25, gc);
-        upwell = 1.0 - upwell;
-        vec3 hot  = vec3(1.00, 0.65, 0.25);   // hot rising plasma
-        vec3 lane = vec3(0.45, 0.18, 0.05);   // sinking dark lanes
+
+        // ── Supergranulation — SAME basis as the photosphere shader ──
+        // (sgPos = n3d * 2.2 + u_time * 0.0008 * u_rot)
+        // Use voronoi.x (distance to nearest cell centre): cell interiors
+        // are upwellings (low d1, bright); cell boundaries are downflows
+        // (high d1, dark lanes). Identical to the photosphere sgCell.x
+        // term, so the patterns align under the cutaway.
+        vec3  sgPos  = n3d * 2.2 + vec3(u_time * 0.0008 * u_rot);
+        vec2  sgCell = voronoi(sgPos);
+        float sgLane = smoothstep(0.05, 0.32, sgCell.y - sgCell.x);
+        float sgUp   = 1.0 - smoothstep(0.0, 0.30, sgCell.x);
+
+        // ── Giant convective cells (~200 Mm) — broader scale grouping ──
+        vec3  gcPos  = n3d * 0.7 + vec3(u_time * 0.0002 * u_rot);
+        vec2  gcCell = voronoi(gcPos);
+        float gcLane = smoothstep(0.02, 0.40, gcCell.y - gcCell.x);
+
+        // Combined upwell pattern: bright cell interiors at both scales,
+        // dark sinking lanes between them.
+        float upwell = sgLane * 0.65 + gcLane * 0.35;
+
+        // ── Heat plumes — bright cores rising from the radiative boundary ──
+        // Sub-cell hot upwellings centred on supergranule cell interiors.
+        // Pulses on a slow ~3-min timescale (matching real plume lifetime
+        // proxy at the upper convective zone).
+        float plumePulse = 0.5 + 0.5 * sin(u_time * 1.8 + sgCell.x * 17.0);
+        float plume      = pow(sgUp, 2.5) * plumePulse * 0.55;
+
+        // ── Velocity-shear streaks — toroidal differential-rotation flow ──
+        // Anisotropic noise stretched along longitude (the φ direction)
+        // shows the surface-equatorial fast / pole-slow flow.
+        float shear = vn(n3d * vec3(38.0, 8.0, 38.0) + vec3(u_time * 0.18 * u_rot, 0.0, 0.0));
+        shear = pow(max(0.0, shear), 4.0) * 0.18;
+
+        // ── Tachocline edge glow — bright thin rim at the inner shell base ──
+        // The convective-zone mesh sits at r=0.97. The tachocline is the
+        // shear layer at r≈0.713 where the convective zone meets the
+        // radiative zone. Encode this as a glow on the bottom-facing side
+        // of the cutaway (the back-facing geometry from the viewer when
+        // we look "down through" the photosphere).
+        float tachoEdge = pow(rim, 4.0) * 0.30;
+
+        // ── Compose colour ──
+        vec3 hot      = vec3(1.00, 0.62, 0.22);   // hot rising plasma
+        vec3 plumeCol = vec3(1.00, 0.85, 0.40);   // brighter plume cores
+        vec3 lane     = vec3(0.40, 0.16, 0.04);   // sinking dark lanes
+        vec3 tachoCol = vec3(1.00, 0.90, 0.55);   // tachocline edge, dynamo source
+
         vec3 col = mix(lane, hot, upwell);
-        // Shear streaks across the surface (toroidal velocity shear)
-        float shear = vn(n3d * vec3(40.0, 8.0, 40.0) + vec3(0.0, u_time * 0.18, 0.0));
-        col += vec3(1.0, 0.7, 0.3) * pow(shear, 3.0) * 0.20;
-        float a = (0.32 + 0.35 * rim) * (0.55 + upwell * 0.45);
-        gl_FragColor = vec4(col, a);
+        col     += plumeCol * plume;
+        col     += vec3(1.00, 0.70, 0.30) * shear;
+        col     += tachoCol * tachoEdge;
+
+        // Alpha: hollow-shell read — slightly stronger at rim, modulated by upwell
+        float a = (0.30 + 0.32 * rim) * (0.55 + upwell * 0.45) + plume * 0.12;
+        gl_FragColor = vec4(col, clamp(a, 0.0, 0.85));
     }
 `;
 
@@ -3984,7 +4077,9 @@ const coronaFS = /* glsl */`
                       + sin(lon * 1.2 - u_time * 0.005) * 0.07;
         hcsWave += u_bz_sw * 0.08;                          // live IMF Bz biases tilt
 
-        // PFSS active-region perturbations
+        // PFSS active-region perturbations — capped weight so HCS doesn't
+        // get yanked too hard when many ARs cluster in a narrow longitude band.
+        float hcsKickTotal = 0.0;
         for (int k = 0; k < 8; k++) {
             if (k >= u_arSpotCount) break;
             vec3 ar = u_arSpots[k].xyz;
@@ -3992,14 +4087,16 @@ const coronaFS = /* glsl */`
             float arLat = asin(clamp(ar.y, -1.0, 1.0));
             float arLon = atan(ar.x, ar.z);
             float dlon  = lon - arLon;
-            // wrap to [-π, π]
             dlon = mod(dlon + 3.14159265, 6.2831853) - 3.14159265;
-            float kickW = 0.55;                             // gaussian width in lon
+            float kickW = 0.55;
             float kick  = exp(-dlon * dlon / (kickW * kickW));
             float intensity = clamp(abs(u_arSpots[k].w), 0.0, 1.0);
-            // Push HCS toward the AR's latitude (sign matters)
-            hcsWave += (arLat - hcsWave) * kick * intensity * 0.35;
+            float w     = kick * intensity;
+            hcsKickTotal += w;
+            hcsWave += (arLat - hcsWave) * w * 0.22;
         }
+        // Soft cap: if many ARs perturb at this longitude, normalise weights.
+        if (hcsKickTotal > 1.5) hcsWave *= 1.5 / hcsKickTotal;
 
         float hcsDist  = lat - hcsWave;
         float hcs      = exp(-hcsDist * hcsDist / 0.018) * (0.45 + u_kp_norm * 0.42);
@@ -4025,8 +4122,11 @@ const coronaFS = /* glsl */`
         //  field. Each AR adds a localised ray that brightens the streamer
         //  belt directly above its longitude.
         // ══════════════════════════════════════════════════════════════════
+        // Per-AR streamer rays softened: wider longitude gaussian, lower
+        // amplitude, sum capped so a flare-rich cluster of 6+ ARs doesn't
+        // stack into an unrealistic flashlight beam.
         float arRayBoost = 0.0;
-        float arHotProb  = 0.0;          // fraction of fragment near a hot AR
+        float arHotProb  = 0.0;
         for (int k = 0; k < 8; k++) {
             if (k >= u_arSpotCount) break;
             vec3 ar = u_arSpots[k].xyz;
@@ -4035,14 +4135,13 @@ const coronaFS = /* glsl */`
             float arLon = atan(ar.x, ar.z);
             float dlon  = mod((lon - arLon) + 3.14159265, 6.2831853) - 3.14159265;
             float intensity = clamp(abs(u_arSpots[k].w), 0.0, 1.0);
-            // Ray in longitude (narrow), in latitude (broader, anchored to HCS).
-            float rayLon  = exp(-dlon * dlon / 0.04);
+            float rayLon  = exp(-dlon * dlon / 0.07);                   // wider (was 0.04)
             float rayLat  = exp(-(lat - arLat) * (lat - arLat) / 0.10);
-            arRayBoost   += rayLon * rayLat * intensity * 0.85;
-            // Hot AR proximity drives Fe XIV / Fe XVIII contributions
+            arRayBoost   += rayLon * rayLat * intensity * 0.45;          // softer (was 0.85)
             float arAngDist = acos(clamp(dot(n3d, normalize(ar)), -1.0, 1.0));
             arHotProb = max(arHotProb, exp(-arAngDist * arAngDist / 0.20) * intensity);
         }
+        arRayBoost = min(arRayBoost, 1.2);                                // hard cap
 
         // ══════════════════════════════════════════════════════════════════
         //  4.  Helmet-streamer fine ray structure
@@ -4062,18 +4161,19 @@ const coronaFS = /* glsl */`
         //  multi-frequency stripe pattern + a turbulence modulator so the
         //  plume widths and intensities vary realistically.
         // ══════════════════════════════════════════════════════════════════
+        // Polar plumes — softened: lower stripe-peak exponent (no harsh
+        // razor-sharp lines), reduced turbulence amplitude, slightly tighter
+        // polar gating so the plumes stay polar rather than leaking down
+        // into the streamer belt.
         float plumeLat   = abs(lat);
-        float plumeMask  = smoothstep(0.52, 0.78, plumeLat);   // tight polar gating
+        float plumeMask  = smoothstep(0.55, 0.82, plumeLat);
         float plumeFlow  = u_time * 0.004;
-        // Multi-frequency stripes: 24, 38, 67 plumes/turn create realistic
-        // unevenly-spaced plume distribution (low-frequency packs of plumes).
-        float stripe1 = sin(lon * 24.0 + plumeFlow);
-        float stripe2 = sin(lon * 38.0 - plumeFlow * 1.7);
-        float stripe3 = sin(lon * 67.0 + plumeFlow * 0.6 + plumeLat * 5.0);
-        float stripe  = pow(max(0.0, stripe1 * 0.5 + stripe2 * 0.30 + stripe3 * 0.20), 4.0);
-        // Turbulence modulator carves bright/dim plume bundles.
+        float stripe1 = sin(lon * 18.0 + plumeFlow);
+        float stripe2 = sin(lon * 31.0 - plumeFlow * 1.7);
+        float stripe3 = sin(lon * 53.0 + plumeFlow * 0.6 + plumeLat * 5.0);
+        float stripe  = pow(max(0.0, stripe1 * 0.5 + stripe2 * 0.30 + stripe3 * 0.20), 2.5);
         float plumeTurb = fbm4(vec3(lon * 5.5, plumeLat * 8.0, u_time * 0.006));
-        float plume     = plumeMask * stripe * (0.45 + plumeTurb * 0.85);
+        float plume     = plumeMask * stripe * (0.55 + plumeTurb * 0.45);
 
         // ── Pseudo-streamer ──
         float pseudoStr = fbm4(vec3(lon * 3.5, lat * 4.5, u_time * 0.005))
@@ -4123,15 +4223,19 @@ const coronaFS = /* glsl */`
         float fe14  = lineResp(logT, 6.30, 0.13);   // 211 Å
         float fe18  = lineResp(logT, 6.80, 0.18);   // 94 Å (flare hot)
 
-        // Local density proxy — combines streamer/plume/CBP/AR-ray structure
-        float density =
-              helmetBelt * (0.85 + rayStr * actFactor) * (1.0 - poleHole * 0.7)
-            + hcs * (0.70 + 0.40 * u_activity)
-            + plume * 0.85
-            + pseudoStr * 0.30 * u_activity
-            + arRayBoost * 0.95;
-        density = max(density, 0.06);
-        density *= 1.0 + u_f107_norm * 0.40;        // solar-cycle scaling
+        // Local density proxy — capped so the additive sum can't run away
+        // when many active regions, the HCS, and polar plumes all stack at
+        // the same fragment. Soft Reinhard cap: density / (1 + density·k)
+        // keeps low values nearly linear but rolls off the high tail.
+        float densityRaw =
+              helmetBelt * (0.75 + rayStr * actFactor) * (1.0 - poleHole * 0.7)
+            + hcs * (0.55 + 0.35 * u_activity)
+            + plume * 0.65
+            + pseudoStr * 0.25 * u_activity
+            + arRayBoost * 0.55;
+        densityRaw  = max(densityRaw, 0.06);
+        densityRaw *= 1.0 + u_f107_norm * 0.30;
+        float density = densityRaw / (1.0 + densityRaw * 0.35);   // tone-map roll-off
 
         // Density-weighted line intensities
         float i9   = fe9   * density;
@@ -4160,29 +4264,30 @@ const coronaFS = /* glsl */`
         //  These additively combine to the green-gold "everything corona"
         //  composite that EUV observers know from SDO movies.
         // ══════════════════════════════════════════════════════════════════
-        vec3 col171 = vec3(1.00, 0.78, 0.32);
-        vec3 col193 = vec3(0.40, 1.10, 0.55);
-        vec3 col211 = vec3(0.95, 0.55, 0.95);
-        vec3 col94  = vec3(0.30, 1.00, 0.85);
+        // Line palette — toned to <= 1.0 channels so the additive composite
+        // doesn't auto-saturate before the Reinhard step at the end.
+        vec3 col171 = vec3(1.00, 0.75, 0.30);
+        vec3 col193 = vec3(0.38, 0.95, 0.50);
+        vec3 col211 = vec3(0.85, 0.50, 0.88);
+        vec3 col94  = vec3(0.30, 0.92, 0.80);
 
         vec3 col = i9 * col171 + i12 * col193 + i14 * col211 + i18 * col94;
 
-        // K-corona Thomson-scattered photospheric light is yellow-white
-        // and tracks density (not T) — add as a base layer so quiet rim
-        // is creamy and the EUV emission overlays as colour shifts.
+        // K-corona Thomson layer — reduced contribution (was 0.55 → 0.32).
+        // Still gives the rim a cream tone but no longer competes with the
+        // EUV composite for brightness.
         vec3 kCorona  = vec3(1.00, 0.96, 0.80);
         vec3 outerCor = vec3(0.88, 0.92, 1.00);
-        vec3 kLayer   = mix(kCorona, outerCor, rim * rim) * density * 0.55;
+        vec3 kLayer   = mix(kCorona, outerCor, rim * rim) * density * 0.32;
         col += kLayer;
 
-        // HCS density bump → yellow-gold tint
-        col += vec3(1.05, 0.90, 0.55) * hcs * 0.40;
+        // HCS density bump → yellow-gold tint (softer)
+        col += vec3(1.00, 0.88, 0.55) * hcs * 0.28;
 
-        // CBPs — small bright Fe XII green dots
-        col += col193 * cbpMask * pow(max(1.0 - rim, 0.0), 0.4) * 0.55;
+        // CBPs — small bright Fe XII green dots (gentler)
+        col += col193 * cbpMask * pow(max(1.0 - rim, 0.0), 0.4) * 0.40;
 
-        // ── Coronal-hole darkening: subtract ~50% emission inside holes
-        // (open-field plasma is at lower density even before T effects).
+        // Coronal-hole darkening
         col *= 1.0 - poleHole * 0.45;
 
         // ══════════════════════════════════════════════════════════════════
@@ -4220,24 +4325,31 @@ const coronaFS = /* glsl */`
         col   = mix(col, col * vec3(1.35, 0.82, 0.60), stormNorm * 0.38);
         alpha *= 1.0 + stormNorm * 0.28;
 
-        // Total IMF: streamer belt sharper
-        col   *= 1.0 + helmetBelt * u_bt_norm * 0.50;
-        alpha *= 1.0 + u_bt_norm * 0.20;
+        // Total IMF: streamer belt slightly sharper (toned)
+        col   *= 1.0 + helmetBelt * u_bt_norm * 0.30;
+        alpha *= 1.0 + u_bt_norm * 0.15;
 
         // F10.7: brightness scaling (already partly in density above)
-        col   *= 1.0 + u_f107_norm * 0.20;
-        alpha *= 1.0 + u_f107_norm * 0.18;
+        col   *= 1.0 + u_f107_norm * 0.12;
+        alpha *= 1.0 + u_f107_norm * 0.14;
 
         // High-energy electrons: blue-UV haze
-        col  = mix(col, vec3(0.55, 0.80, 1.20) * (col * 0.6 + 0.4), u_electron_norm * 0.30);
-        alpha += u_electron_norm * pow(rim, 2.5) * 0.10;
+        col  = mix(col, vec3(0.55, 0.80, 1.10) * (col * 0.6 + 0.4), u_electron_norm * 0.22);
+        alpha += u_electron_norm * pow(rim, 2.5) * 0.08;
 
         // Dst ring-current: amber on dayside streamer
         float dstBoost = u_dst_norm * helmetBelt;
-        col  = mix(col, vec3(1.05, 0.88, 0.60), dstBoost * 0.18);
-        alpha += dstBoost * pow(rim, 3.2) * 0.08;
+        col  = mix(col, vec3(1.00, 0.86, 0.58), dstBoost * 0.14);
+        alpha += dstBoost * pow(rim, 3.2) * 0.06;
 
-        gl_FragColor = vec4(col * pulse, alpha);
+        col *= pulse;
+
+        // ── Soft Reinhard tone-map — keeps the composite from blowing
+        // out when many channels stack, while keeping the punch in the
+        // bright streamer/AR-ray regions.
+        col = col / (1.0 + col * 0.42);
+
+        gl_FragColor = vec4(col, alpha);
     }
 `;
 const coronaMesh = new THREE.Mesh(
