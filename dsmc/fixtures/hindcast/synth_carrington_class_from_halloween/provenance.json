@@ -1,0 +1,32 @@
+{
+  "synth_id": "synth_carrington_class_from_halloween",
+  "template_event": "halloween_oct_2003",
+  "template_path": "dsmc/fixtures/hindcast/halloween_oct_2003/historical_ap.csv",
+  "scaling": {
+    "ap_factor": 1.0,
+    "f107_factor": 1.5,
+    "extend_storm_3h_bins": 8,
+    "storm_threshold_ap": 80.0,
+    "cap_ap": 400.0,
+    "cap_f107": 1000.0
+  },
+  "description": "Carrington-class extreme: Halloween 2003 with the saturated-Ap plateau extended by 24 h and F10.7 multiplied by 1.5 to model an X40+ class flare-day flux. Tsurutani+2003 estimate Dst \u2248 -1760 nT for 1859, \u2248 4\u00d7 Halloween's -422 nT; in 3-hourly indices that translates to longer dwell at Ap_saturation rather than a higher peak (Ap maxes at 400 by construction).",
+  "citations": [
+    "Tsurutani et al. (2003), JGR 108(A7), 1268",
+    "Cliver & Dietrich (2013), JSWSC 3, A31",
+    "Schrijver et al. (2012), JGR 117, A08103"
+  ],
+  "post_scale_summary": {
+    "n_rows": 88,
+    "ap_min": 0.0,
+    "ap_max": 400.0,
+    "f107_min": 171.0,
+    "f107_max": 841.3499999999999
+  },
+  "warnings": [
+    "Ap saturation: rows reach the 400 ceiling; the index does not resolve magnitude beyond that point.",
+    "F10.7 = 841 SFU exceeds the predictor's training maximum of 315 SFU; predictions here are extrapolations and must be checked for monotonicity / smoothness only, not accuracy."
+  ],
+  "generated_at_utc": "2026-05-08T01:53:18.526283Z",
+  "do_not_train_on_this_fixture": true
+}

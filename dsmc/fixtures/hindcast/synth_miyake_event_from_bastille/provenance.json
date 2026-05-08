@@ -1,0 +1,32 @@
+{
+  "synth_id": "synth_miyake_event_from_bastille",
+  "template_event": "bastille_jul_2000",
+  "template_path": "dsmc/fixtures/hindcast/bastille_jul_2000/historical_ap.csv",
+  "scaling": {
+    "ap_factor": 1.0,
+    "f107_factor": 2.0,
+    "extend_storm_3h_bins": 16,
+    "storm_threshold_ap": 80.0,
+    "cap_ap": 400.0,
+    "cap_f107": 1000.0
+  },
+  "description": "AD 774-775 Miyake-class event modelled by stretching Bastille Day 2000 (the cycle-23 max event with the highest training F10.7 we have at 315 SFU) to a 48-h saturated plateau with 2\u00d7 F10.7. Mekhaldi+2015 estimates 774 AD fluence \u2248 10\u00d7 August 1972; the prolonged plateau models that integrated dose, not the instantaneous peak (which 3-h indices cannot resolve).",
+  "citations": [
+    "Miyake et al. (2012), Nature 486, 240",
+    "Mekhaldi et al. (2015), Nat. Commun. 6, 8611",
+    "Schrijver et al. (2012), JGR 117, A08103"
+  ],
+  "post_scale_summary": {
+    "n_rows": 72,
+    "ap_min": 3.0,
+    "ap_max": 400.0,
+    "f107_min": 407.8,
+    "f107_max": 629.2
+  },
+  "warnings": [
+    "Ap saturation: rows reach the 400 ceiling; the index does not resolve magnitude beyond that point.",
+    "F10.7 = 629 SFU exceeds the predictor's training maximum of 315 SFU; predictions here are extrapolations and must be checked for monotonicity / smoothness only, not accuracy."
+  ],
+  "generated_at_utc": "2026-05-08T01:53:18.527745Z",
+  "do_not_train_on_this_fixture": true
+}

@@ -28,7 +28,13 @@
 html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#ddd;
     font-family:'Segoe UI',system-ui,sans-serif; }
 
-#app { position:relative; width:100%; height:calc(100vh - 48px); overflow:hidden; }
+/* Body is a flex column: nav at top (intrinsic height) and #app fills the
+   remaining viewport regardless of how tall the nav actually renders.  This
+   replaces the old calc(100vh − 48px) which was off-by-2 vs. nav's 50px and
+   had no fallback when the nav wrapped or browser zoom changed font size. */
+body { display: flex; flex-direction: column; }
+
+#app { position:relative; width:100%; flex:1 1 0; min-height:0; overflow:hidden; }
 #canvas-wrap {
     position:absolute; inset:0;
     background: radial-gradient(ellipse at 45% 50%, #060214 0%, #02010a 60%, #000 100%);
@@ -52,26 +58,50 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
 
 .cv-btn {
     position: absolute; z-index: 60;
-    background: rgba(4,2,16,.80); backdrop-filter: blur(8px);
-    border: 1px solid rgba(180,120,255,.30); border-radius: 7px;
+    background: rgba(4,2,16,.82); backdrop-filter: blur(8px);
+    border: 1px solid rgba(180,120,255,.34); border-radius: 8px;
     color: #c8a8ff; cursor: pointer; font-family: inherit;
-    font-size: 12px; padding: 6px 11px; transition: all .2s;
+    font-size: 12px; padding: 8px 12px; transition: all .15s;
     touch-action: manipulation; text-decoration:none;
+    line-height: 1.2; font-weight: 500;
+    box-shadow: 0 2px 8px rgba(0,0,0,.35);
 }
-.cv-btn:hover { background: rgba(120,80,200,.20); border-color:#b080ff; color:#fff; }
+.cv-btn:hover {
+    background: rgba(120,80,200,.28); border-color:#b080ff; color:#fff;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(180,120,255,.30);
+}
+.cv-btn:active { transform: translateY(0); }
+.cv-btn .kbd {
+    display:inline-block; margin-left:6px; padding:1px 5px;
+    font-size:9.5px; font-weight:600; color:#888;
+    background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.14);
+    border-radius:3px; line-height:1.2;
+}
+.cv-btn:hover .kbd { color:#dab8ff; border-color:rgba(180,120,255,.4); }
 #btn-panel-open { top:12px; right:12px; }
 #btn-center     { bottom:16px; right:12px; }
-#btn-sw         { top:12px; right:105px; }
+#btn-sw         { top:12px; right:115px; }
+@media (max-width: 720px) {
+    .cv-btn { font-size: 11px; padding: 7px 10px; }
+    .cv-btn .kbd { display:none; }
+}
 
 #backdrop { display:none; position:absolute; inset:0; z-index:400; background:rgba(0,0,0,.45); cursor:pointer; }
 #backdrop.show { display:block; }
 
 #panel {
-    position:absolute; top:0; right:0; bottom:0; width:min(296px,88vw);
-    background: rgba(3,2,14,.97); backdrop-filter: blur(16px);
+    position:absolute; top:0; right:0; bottom:0; width:min(340px,90vw);
+    background: rgba(3,2,14,.95); backdrop-filter: blur(16px);
     border-left: 1px solid rgba(180,120,255,.18); z-index:450;
     display:flex; flex-direction:column; overflow:hidden;
     transform: translateX(100%); transition: transform .3s cubic-bezier(.4,0,.2,1);
+    box-shadow: -8px 0 24px rgba(0,0,0,.45);
+}
+@media (min-width: 880px) {
+    /* Non-modal on desktop — let the user see the simulation through the
+       panel and keep dragging the camera while controls are open. */
+    #panel { background: rgba(3,2,14,.86); }
 }
 #panel.open { transform: translateX(0); }
 #panel-header { flex-shrink:0; display:flex; align-items:flex-start; justify-content:space-between;
@@ -80,10 +110,12 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
 .panel-sub  { font-size:10px; color:#555; margin-top:2px; }
 .panel-badge { display:inline-block; margin-top:5px; padding:2px 8px; font-size:9px; letter-spacing:.4px;
     background:rgba(180,120,255,.14); border:1px solid rgba(180,120,255,.32); border-radius:10px; color:#dab8ff; }
-#btn-panel-close { flex-shrink:0; margin-left:8px; margin-top:2px;
+#btn-panel-close { flex-shrink:0; margin-left:6px; margin-top:0;
     background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.14);
-    border-radius:5px; color:#888; cursor:pointer; font-size:13px; padding:4px 8px; line-height:1; transition:all .2s; }
-#btn-panel-close:hover { background:rgba(255,80,80,.15); border-color:rgba(255,80,80,.4); color:#ff6060; }
+    border-radius:6px; color:#aaa; cursor:pointer; font-size:16px;
+    width:30px; height:30px; line-height:1; transition:all .15s;
+    display:inline-flex; align-items:center; justify-content:center; }
+#btn-panel-close:hover { background:rgba(255,80,80,.18); border-color:rgba(255,80,80,.5); color:#ff7070; }
 #panel-body { flex:1; overflow-y:auto; overflow-x:hidden; padding:8px; }
 #panel-body::-webkit-scrollbar { width:4px; }
 #panel-body::-webkit-scrollbar-thumb { background:rgba(180,120,255,.35); border-radius:2px; }
@@ -97,13 +129,37 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
 .sec.closed .sec-hd .arrow { transform:rotate(-90deg); }
 .sec-bd { padding:10px 11px; }
 .sec.closed .sec-bd { display:none; }
-.ctrl { display:flex; align-items:center; margin:8px 0; gap:7px; }
-.ctrl label { flex:0 0 70px; font-size:11px; color:#888; }
-.ctrl input[type=range] { flex:1; cursor:pointer; height:28px; padding:10px 0; -webkit-appearance:none; background:transparent; }
-.ctrl input[type=range]::-webkit-slider-runnable-track { height:3px; background:rgba(180,120,255,.28); border-radius:2px; }
-.ctrl input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:18px; height:18px; margin-top:-7.5px; border-radius:50%; background:#a070d0; cursor:pointer; box-shadow:0 0 6px rgba(180,120,255,.5); }
-.ctrl input[type=range]::-moz-range-thumb { width:16px; height:16px; border-radius:50%; background:#a070d0; border:none; }
-.vdisp { flex:0 0 72px; text-align:right; color:#dab8ff; font-size:10px; font-weight:600; }
+.ctrl { display:flex; align-items:center; margin:6px 0; gap:8px; }
+.ctrl label { flex:0 0 76px; font-size:11px; color:#9a9; line-height:1.2; }
+.ctrl input[type=range] {
+    flex:1; cursor:pointer; height:32px; padding:13px 0;
+    -webkit-appearance:none; background:transparent;
+    touch-action: manipulation;
+}
+.ctrl input[type=range]::-webkit-slider-runnable-track {
+    height:4px; background:rgba(180,120,255,.32); border-radius:2px;
+    transition: background .15s;
+}
+.ctrl input[type=range]:hover::-webkit-slider-runnable-track { background:rgba(180,120,255,.55); }
+.ctrl input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance:none; width:22px; height:22px; margin-top:-9px;
+    border-radius:50%; background:#a070d0; cursor:pointer;
+    box-shadow:0 0 6px rgba(180,120,255,.55), 0 1px 4px rgba(0,0,0,.35);
+    border: 2px solid rgba(255,255,255,.10);
+    transition: transform .12s, background .12s;
+}
+.ctrl input[type=range]:hover::-webkit-slider-thumb { transform: scale(1.10); }
+.ctrl input[type=range]::-moz-range-track { height:4px; background:rgba(180,120,255,.32); border-radius:2px; }
+.ctrl input[type=range]::-moz-range-thumb {
+    width:20px; height:20px; border-radius:50%; background:#a070d0;
+    border:2px solid rgba(255,255,255,.10);
+    box-shadow:0 0 6px rgba(180,120,255,.55);
+}
+.vdisp {
+    flex:0 0 80px; text-align:right; color:#e8c8ff;
+    font-size:11px; font-weight:700; letter-spacing:.2px;
+    font-variant-numeric: tabular-nums;
+}
 .dtbl { width:100%; border-collapse:collapse; font-size:11px; }
 .dtbl td { padding:3px 4px; border-bottom:1px solid rgba(255,255,255,.04); vertical-align:top; }
 .dtbl td:first-child { color:#777; width:50%; }
@@ -115,9 +171,18 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
     border-radius:5px; color:#c8a8ff; cursor:pointer; font-family:inherit; font-size:10px; transition:all .15s; }
 .btn-row button:hover { background:rgba(180,120,255,.22); }
 .btn-row button.active { background:rgba(180,120,255,.32); border-color:#b080ff; color:#f0e0ff; }
-.toggle-row { display:flex; align-items:center; margin:6px 0; gap:8px; font-size:11px; }
-.toggle-row label { color:#888; flex:1; cursor:pointer; }
-.toggle-row input[type=checkbox] { width:14px; height:14px; cursor:pointer; accent-color:#a070d0; }
+.toggle-row {
+    display:flex; align-items:center; margin:2px 0; gap:9px;
+    font-size:11px; padding:5px 4px; border-radius:5px;
+    cursor:pointer; transition: background .12s;
+    user-select: none;
+}
+.toggle-row:hover { background: rgba(180,120,255,.06); }
+.toggle-row label { color:#aab; flex:1; cursor:pointer; line-height:1.3; }
+.toggle-row input[type=checkbox] {
+    width:16px; height:16px; cursor:pointer; accent-color:#a070d0;
+    flex-shrink:0;
+}
 .note-text { font-size:10px; color:#555; line-height:1.6; }
 .note-text strong { color:#a070d0; }
 .note-text p + p { margin-top:5px; }
@@ -193,6 +258,149 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
     background: linear-gradient(90deg, #2050ff 0%, #6080ff 25%, #ddd 50%, #ff6080 75%, #ff2050 100%);
 }
 .legend-row { display:flex; justify-content:space-between; font-size:9px; color:#888; }
+
+/* ── UI flair: category accents, icons, smoother sections ─── */
+.sec { --acc: 180,120,255; }
+.sec[data-cat="geom"]    { --acc: 200,168,255; }
+.sec[data-cat="rot"]     { --acc: 255,200,128; }
+.sec[data-cat="disk"]    { --acc: 255,140,180; }
+.sec[data-cat="layers"]  { --acc: 140,200,255; }
+.sec[data-cat="outflow"] { --acc: 140,255,180; }
+.sec[data-cat="twist"]   { --acc: 255,140,224; }
+.sec[data-cat="nrp"]     { --acc: 255,224,128; }
+.sec[data-cat="time"]    { --acc: 200,200,200; }
+
+.sec { border-left: 2px solid rgba(var(--acc), .55); }
+.sec-hd {
+    background: linear-gradient(90deg,
+        rgba(var(--acc), .14) 0%,
+        rgba(180,120,255, .07) 70%);
+    color: rgba(var(--acc), 1);
+    transition: background .18s;
+}
+.sec-hd:hover {
+    background: linear-gradient(90deg,
+        rgba(var(--acc), .26) 0%,
+        rgba(180,120,255, .14) 70%);
+}
+.sec-hd .icon {
+    display:inline-block; width:14px; text-align:center;
+    margin-right:5px; opacity:.85; font-size:11px;
+}
+.sec-hd .group {
+    display:flex; align-items:center; gap:0;
+}
+
+/* Slider focus glow + accent-coloured thumb when active */
+.ctrl input[type=range]:focus { outline: none; }
+.ctrl input[type=range]:active::-webkit-slider-thumb {
+    box-shadow: 0 0 14px rgba(var(--acc), .9), 0 0 4px rgba(var(--acc), .6);
+    background: rgb(var(--acc));
+}
+.ctrl input[type=range]:active::-moz-range-thumb {
+    box-shadow: 0 0 14px rgba(var(--acc), .9);
+    background: rgb(var(--acc));
+}
+.ctrl input[type=range]::-webkit-slider-runnable-track {
+    background: linear-gradient(90deg, rgba(var(--acc), .28), rgba(var(--acc), .14));
+}
+.ctrl label[title] { cursor: help; border-bottom:1px dotted rgba(255,255,255,.15); }
+
+/* Preset bar above the section list */
+#preset-bar {
+    display:flex; gap:5px; padding:8px 0 10px; flex-wrap:wrap;
+    border-bottom:1px dashed rgba(180,120,255,.18); margin-bottom:8px;
+}
+#preset-bar button {
+    flex:1; min-width:64px; padding:6px 4px;
+    background: linear-gradient(180deg, rgba(180,120,255,.12), rgba(180,120,255,.04));
+    border:1px solid rgba(180,120,255,.30); border-radius:5px;
+    color:#dab8ff; cursor:pointer; font-family:inherit; font-size:10px;
+    letter-spacing:.4px; transition: all .15s;
+}
+#preset-bar button:hover {
+    background: linear-gradient(180deg, rgba(180,120,255,.32), rgba(180,120,255,.10));
+    transform: translateY(-1px); border-color:#b080ff;
+    box-shadow: 0 4px 12px rgba(180,120,255,.20);
+}
+#preset-bar button:active { transform: translateY(0); }
+#preset-bar .preset-label {
+    flex:0 0 100%; font-size:9px; color:#666; letter-spacing:.6px;
+    text-transform:uppercase; margin-bottom:2px;
+}
+
+/* Header collapse-all button */
+#panel-tools {
+    display:flex; gap:4px; align-items:center;
+}
+#btn-collapse-all {
+    background:transparent; border:1px solid rgba(255,255,255,.10);
+    color:#888; font-size:11px; cursor:pointer; padding:3px 7px;
+    border-radius:4px; transition: all .15s; font-family:inherit;
+}
+#btn-collapse-all:hover { color:#c8a8ff; border-color:rgba(180,120,255,.4); }
+
+/* HUD collapse */
+#hud { position: relative; transition: padding .2s, min-width .2s; }
+#hud-toggle {
+    position:absolute; top:6px; right:6px; cursor:pointer; pointer-events:auto;
+    color:#666; font-size:11px; padding:2px 6px; border-radius:3px;
+    background: transparent; border: 1px solid transparent;
+    transition: color .15s, background .15s, border .15s; user-select:none;
+    font-family:inherit;
+}
+#hud-toggle:hover { color:#c8a8ff; background: rgba(180,120,255,.10); border-color:rgba(180,120,255,.25); }
+#hud.collapsed > div:not(#hud-toggle):not(.always-show) { display:none; }
+#hud.collapsed h3 { margin-bottom:0; padding-right:30px; }
+#hud.collapsed { min-width:140px; padding:8px 14px; }
+
+/* Smoother body height transition (fall back to display:none when fully collapsed) */
+.sec-bd { transition: opacity .2s; }
+.sec.closed .sec-bd { opacity: 0; }
+.sec.closed .sec-hd { background-image: linear-gradient(90deg,
+        rgba(var(--acc), .06) 0%,
+        rgba(180,120,255, .03) 70%); }
+
+/* Tooltip / hint chip on slider value when hovered */
+.vdisp { position:relative; }
+
+/* Small "info" chip after some labels */
+.info-chip {
+    display:inline-block; width:11px; height:11px; line-height:10px;
+    text-align:center; font-size:9px; color:#aaa;
+    border:1px solid rgba(255,255,255,.20); border-radius:50%;
+    margin-left:3px; cursor:help; vertical-align:1px;
+}
+.info-chip:hover { color:#fff; border-color:#b080ff; }
+
+/* Sub-headers inside sections (for grouped layer toggles) */
+.subhd {
+    font-size:9px; color:#666; letter-spacing:.7px; text-transform:uppercase;
+    margin:8px 0 3px; padding-bottom:2px;
+    border-bottom: 1px dashed rgba(255,255,255,.06);
+}
+.subhd:first-child { margin-top:0; }
+
+/* Pause / time-rate row */
+#time-rate-row { display:flex; align-items:center; gap:6px; margin:4px 0; }
+#btn-pause {
+    flex:0 0 28px; height:24px; padding:0; font-size:11px;
+    background: rgba(180,120,255,.14); border:1px solid rgba(180,120,255,.30);
+    border-radius:5px; color:#c8a8ff; cursor:pointer; transition: all .15s;
+}
+#btn-pause.active {
+    background: rgba(255,180,80,.30); border-color:#ffb050; color:#ffe0a0;
+}
+
+/* Improved scrollbar */
+#panel-body::-webkit-scrollbar { width:6px; }
+#panel-body::-webkit-scrollbar-track { background: rgba(255,255,255,.02); }
+#panel-body::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, rgba(180,120,255,.35), rgba(180,120,255,.18));
+    border-radius:3px;
+}
+#panel-body::-webkit-scrollbar-thumb:hover { background: rgba(180,120,255,.55); }
+
 </style>
 <script type="application/ld+json">
 {
@@ -238,7 +446,8 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
 <div id="app">
     <div id="canvas-wrap">
         <div id="hud">
-            <h3>ACHERNAR — α Eridani</h3>
+            <button id="hud-toggle" title="Collapse / expand HUD">−</button>
+            <h3 class="always-show">ACHERNAR — α Eridani</h3>
             <div class="sub">B6 Vep · Be-type rapid rotator</div>
             <div>T<sub>pole</sub>: <span class="val" id="hud-tpole">17 000</span> <span class="dim">K</span></div>
             <div>T<sub>eq</sub>: <span class="val" id="hud-teq">10 000</span> <span class="dim">K</span></div>
@@ -251,12 +460,17 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
             <div>Decretion disk: <span class="vh" id="hud-disk">active</span></div>
             <div>Disk H(R<sub>eq</sub>): <span class="val" id="hud-h">0.04</span> <span class="dim">R<sub>eq</sub></span></div>
             <div>Outburst: <span class="vh" id="hud-burst">build</span> <span class="dim" id="hud-burst-pct">0%</span></div>
+            <div class="sep"></div>
+            <div>Ṁ<sub>pol</sub>: <span class="val" id="hud-mdot-pol">2.1</span><span class="dim">×10⁻¹⁰ M☉/yr</span></div>
+            <div>v<sub>∞,pol</sub>: <span class="val" id="hud-vinf">1450</span> <span class="dim">km/s</span></div>
+            <div>Ṁ<sub>eq</sub>: <span class="val" id="hud-mdot-eq">3.5</span><span class="dim">×10⁻⁹ M☉/yr</span></div>
+            <div>v<sub>K</sub>(R<sub>eq</sub>): <span class="val" id="hud-vk">325</span> <span class="dim">km/s</span></div>
             <div>FPS: <span id="fps-display">--</span></div>
             <div class="dim" style="margin-top:3px">Drag · Pinch · Scroll</div>
         </div>
-        <button class="cv-btn" id="btn-panel-open">☰ Controls</button>
+        <button class="cv-btn" id="btn-panel-open" title="Open controls (C)">☰ Controls<span class="kbd">C</span></button>
         <a href="space-weather.html" class="cv-btn" id="btn-sw" title="Live Space Weather Data">⚡ Weather</a>
-        <button class="cv-btn" id="btn-center" title="Reset camera">⊙ Center</button>
+        <button class="cv-btn" id="btn-center" title="Reset camera (R)">⊙ Center<span class="kbd">R</span></button>
 
         <div id="mode-pill">Continuum · von Zeipel β=0.25</div>
 
@@ -283,12 +497,23 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
                 <div class="panel-sub">B6 Vep · 42.7 pc · 9th-brightest star</div>
                 <div class="panel-badge">Roche figure · von Zeipel · Be disk</div>
             </div>
-            <button id="btn-panel-close">✕</button>
+            <div id="panel-tools">
+                <button id="btn-collapse-all" title="Collapse / expand all sections">⇅</button>
+                <button id="btn-panel-close">✕</button>
+            </div>
         </div>
         <div id="panel-body">
 
-            <div class="sec">
-                <div class="sec-hd"><span>Stellar Geometry</span><span class="arrow">▼</span></div>
+            <div id="preset-bar">
+                <div class="preset-label">Quick presets</div>
+                <button id="ps-default" title="Restore Achernar canonical state">Achernar</button>
+                <button id="ps-burst"   title="Outburst peak: max disk density + NRP">Outburst</button>
+                <button id="ps-shell"   title="Shell phase: disk shed (2013-style)">Shell</button>
+                <button id="ps-crit"    title="Near-critical rotation, no disk">Critical</button>
+            </div>
+
+            <div class="sec" data-cat="geom">
+                <div class="sec-hd"><span class="group"><span class="icon">✦</span><span>Stellar Geometry</span></span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
                     <div class="ctrl">
                         <label>R<sub>eq</sub>/R<sub>pol</sub></label>
@@ -327,11 +552,11 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
                 </div>
             </div>
 
-            <div class="sec">
-                <div class="sec-hd"><span>Rotation</span><span class="arrow">▼</span></div>
+            <div class="sec" data-cat="rot">
+                <div class="sec-hd"><span class="group"><span class="icon">↻</span><span>Rotation</span></span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
                     <div class="ctrl">
-                        <label>Spin rate</label>
+                        <label title="Visual rotation rate of the body in scene units. 0 = stop. Double-click to reset.">Spin rate</label>
                         <input type="range" id="sl-spin" min="0" max="3.0" step="0.05" value="1.0">
                         <span class="vdisp" id="disp-spin">1.00×</span>
                     </div>
@@ -353,8 +578,8 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
                 </div>
             </div>
 
-            <div class="sec">
-                <div class="sec-hd"><span>Decretion Disk</span><span class="arrow">▼</span></div>
+            <div class="sec" data-cat="disk">
+                <div class="sec-hd"><span class="group"><span class="icon">◐</span><span>Decretion Disk</span></span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
                     <div class="toggle-row">
                         <input type="checkbox" id="tog-disk" checked>
@@ -377,46 +602,61 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
                 </div>
             </div>
 
-            <div class="sec">
-                <div class="sec-hd"><span>Layers</span><span class="arrow">▼</span></div>
+            <div class="sec" data-cat="layers">
+                <div class="sec-hd"><span class="group"><span class="icon">☷</span><span>Visual Layers</span></span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
+                    <div class="subhd">Star surface &amp; atmosphere</div>
                     <div class="toggle-row">
                         <input type="checkbox" id="tog-corona" checked>
                         <label for="tog-corona">Chromospheric rim</label>
                     </div>
                     <div class="toggle-row">
-                        <input type="checkbox" id="tog-jet" checked>
-                        <label for="tog-jet">Polar radiative wind (CAK)</label>
-                    </div>
-                    <div class="toggle-row">
                         <input type="checkbox" id="tog-axis">
-                        <label for="tog-axis">Show rotation axis</label>
+                        <label for="tog-axis">Rotation axis line</label>
                     </div>
                     <div class="toggle-row">
                         <input type="checkbox" id="tog-drgrid">
                         <label for="tog-drgrid">DR latitude grid (±30°, ±60°)</label>
                     </div>
+
+                    <div class="subhd">Outflow &amp; math overlays</div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-jet" checked>
+                        <label for="tog-jet">Polar radiative wind glow (CAK)</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-pwind" checked>
+                        <label for="tog-pwind">Polar wind tracer particles</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-outflow" checked>
+                        <label for="tog-outflow">Decretion outflow streaks</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-twistor">
+                        <label for="tog-twistor">Twistor (Robinson) congruence</label>
+                    </div>
+
+                    <div class="subhd">External &amp; diagnostic</div>
                     <div class="toggle-row">
                         <input type="checkbox" id="tog-binary">
                         <label for="tog-binary">Achernar B (companion + orbit)</label>
                     </div>
                     <div class="toggle-row">
                         <input type="checkbox" id="tog-sed" checked>
-                        <label for="tog-sed">Spectral Energy Distribution panel</label>
+                        <label for="tog-sed">SED diagnostic panel</label>
                     </div>
-                    <div class="toggle-row">
-                        <input type="checkbox" id="tog-outflow" checked>
-                        <label for="tog-outflow">Decretion outflow particles</label>
-                    </div>
-                    <div class="toggle-row">
-                        <input type="checkbox" id="tog-twistor">
-                        <label for="tog-twistor">Twistor (Robinson) congruence</label>
+
+                    <div class="btn-row" style="margin-top:8px">
+                        <button id="btn-layers-allon" title="Show every visual layer">All on</button>
+                        <button id="btn-layers-essentials" title="Default Achernar layers only">Essentials</button>
+                        <button id="btn-layers-alloff" title="Hide every overlay (clean view)">All off</button>
                     </div>
                 </div>
             </div>
 
-            <div class="sec">
-                <div class="sec-hd"><span>Outflow Activity</span><span class="arrow">▼</span></div>
+            <div class="sec" data-cat="outflow">
+                <div class="sec-hd"><span class="group"><span class="icon">⤴</span><span>Outflow Activity</span></span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
                     <div class="ctrl">
                         <label>Burst amp.</label>
@@ -437,8 +677,26 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
                 </div>
             </div>
 
-            <div class="sec">
-                <div class="sec-hd"><span>Non-Radial Pulsation</span><span class="arrow">▼</span></div>
+            <div class="sec" data-cat="twist">
+                <div class="sec-hd"><span class="group"><span class="icon">∞</span><span>Twistor Congruence</span></span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="ctrl">
+                        <label>Helicity h<sub>T</sub></label>
+                        <input type="range" id="sl-twist-h" min="-1.5" max="1.5" step="0.05" value="0">
+                        <span class="vdisp" id="disp-twist-h">0.00</span>
+                    </div>
+                    <div style="font-size:10px;color:#666;line-height:1.5;margin-top:6px">
+                        h<sub>T</sub> = 0 → pure Hopf fibration (Z·Z̄ = 0, fibers
+                        close as Villarceau circles). h<sub>T</sub> ≠ 0 →
+                        Robinson congruence: φ<sub>base</sub> drifts with α, fibers
+                        spiral instead of close, encoding non-zero twistor norm.
+                        Sign of h<sub>T</sub> sets the chirality.
+                    </div>
+                </div>
+            </div>
+
+            <div class="sec" data-cat="nrp">
+                <div class="sec-hd"><span class="group"><span class="icon">∿</span><span>Non-Radial Pulsation</span></span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
                     <div class="toggle-row">
                         <input type="checkbox" id="tog-nrp">
@@ -465,8 +723,25 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
                 </div>
             </div>
 
-            <div class="sec">
-                <div class="sec-hd"><span>View Mode</span><span class="arrow">▼</span></div>
+            <div class="sec" data-cat="time">
+                <div class="sec-hd"><span class="group"><span class="icon">⏱</span><span>Time Controls</span></span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div id="time-rate-row">
+                        <button id="btn-pause" title="Pause / resume the simulation clock">▶</button>
+                        <label style="flex:0 0 56px; font-size:11px; color:#888">Time ×</label>
+                        <input type="range" id="sl-timerate" min="0" max="4.0" step="0.05" value="1.0" style="flex:1">
+                        <span class="vdisp" id="disp-timerate">1.00×</span>
+                    </div>
+                    <div style="font-size:9.5px;color:#666;line-height:1.5;margin-top:6px">
+                        Global multiplier on simulation Δt. Affects body rotation,
+                        outflow integrators, NRP phase, twistor U(1) advance, and
+                        outburst envelope. Pause freezes everything but the camera.
+                    </div>
+                </div>
+            </div>
+
+            <div class="sec" data-cat="layers">
+                <div class="sec-hd"><span class="group"><span class="icon">◎</span><span>View Mode</span></span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
                     <div class="btn-row threecol" id="view-row">
                         <button id="view-cont" class="active">Continuum</button>
@@ -592,15 +867,130 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 // ────────────────────────────────────────────────────────────────
 const panel    = document.getElementById('panel');
 const backdrop = document.getElementById('backdrop');
-document.getElementById('btn-panel-open').addEventListener('click',
-    () => { panel.classList.add('open'); backdrop.classList.add('show'); });
-document.getElementById('btn-panel-close').addEventListener('click',
-    () => { panel.classList.remove('open'); backdrop.classList.remove('show'); });
-backdrop.addEventListener('click',
-    () => { panel.classList.remove('open'); backdrop.classList.remove('show'); });
+const PANEL_KEY = 'achernar_panel_open_v1';
+const isWideViewport = () => window.matchMedia('(min-width: 880px)').matches;
+
+function openPanel(persist = true) {
+    panel.classList.add('open');
+    // On wide viewports the panel doesn't dim the scene (no backdrop) so the
+    // user can keep playing with the simulation while controls are open.
+    if (!isWideViewport()) backdrop.classList.add('show');
+    if (persist) try { localStorage.setItem(PANEL_KEY, '1'); } catch {}
+}
+function closePanel(persist = true) {
+    panel.classList.remove('open');
+    backdrop.classList.remove('show');
+    if (persist) try { localStorage.setItem(PANEL_KEY, '0'); } catch {}
+}
+document.getElementById('btn-panel-open').addEventListener('click',  () => openPanel());
+document.getElementById('btn-panel-close').addEventListener('click', () => closePanel());
+backdrop.addEventListener('click',                                   () => closePanel());
+
+// First-load default: open on desktop, closed on mobile.  Subsequent visits
+// honour the user's last explicit choice.
+{
+    let saved = null;
+    try { saved = localStorage.getItem(PANEL_KEY); } catch {}
+    if (saved === '1' || (saved === null && isWideViewport())) {
+        openPanel(false);
+    }
+}
+
+// ── Keyboard shortcuts ────────────────────────────────────────
+//
+//  Space   pause / resume the simulation
+//  C       toggle the controls panel
+//  H       toggle the HUD
+//  R       reset camera to default inclination view
+//  Esc     close the controls panel
+//  1/2/3   continuum / Doppler / T-map view modes
+//
+//  Ignored when the user is typing in an <input> or contenteditable.
+//
+window.addEventListener('keydown', e => {
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+    switch (e.key) {
+        case ' ':
+            e.preventDefault();
+            document.getElementById('btn-pause').click();
+            break;
+        case 'c': case 'C':
+            (panel.classList.contains('open') ? closePanel : openPanel)();
+            break;
+        case 'h': case 'H':
+            document.getElementById('hud-toggle').click();
+            break;
+        case 'r': case 'R':
+            setCam('incl');
+            break;
+        case 'Escape':
+            if (panel.classList.contains('open')) closePanel();
+            break;
+        case '1': setViewMode(0); break;
+        case '2': setViewMode(1); break;
+        case '3': setViewMode(2); break;
+    }
+});
+
+// ── Section open/closed state + localStorage persistence ──────
+const SEC_STATE_KEY = 'achernar_sec_state_v1';
+function persistSecState() {
+    const s = {};
+    document.querySelectorAll('.sec[data-cat]').forEach(sec => {
+        s[sec.dataset.cat] = sec.classList.contains('closed');
+    });
+    try { localStorage.setItem(SEC_STATE_KEY, JSON.stringify(s)); } catch {}
+}
+function loadSecState() {
+    let s = {};
+    try { s = JSON.parse(localStorage.getItem(SEC_STATE_KEY) || '{}'); } catch {}
+    document.querySelectorAll('.sec[data-cat]').forEach(sec => {
+        if (s[sec.dataset.cat]) sec.classList.add('closed');
+    });
+}
+loadSecState();
 
 document.querySelectorAll('.sec-hd').forEach(hd => {
-    hd.addEventListener('click', () => hd.closest('.sec').classList.toggle('closed'));
+    hd.addEventListener('click', () => {
+        hd.closest('.sec').classList.toggle('closed');
+        persistSecState();
+    });
+});
+
+// ── Collapse-all / expand-all toggle ──────────────────────────
+document.getElementById('btn-collapse-all').addEventListener('click', () => {
+    const secs = document.querySelectorAll('#panel-body .sec');
+    const allClosed = [...secs].every(s => s.classList.contains('closed'));
+    secs.forEach(s => s.classList.toggle('closed', !allClosed));
+    persistSecState();
+});
+
+// ── HUD collapse ──────────────────────────────────────────────
+const hud       = document.getElementById('hud');
+const hudToggle = document.getElementById('hud-toggle');
+hudToggle.addEventListener('click', () => {
+    hud.classList.toggle('collapsed');
+    hudToggle.textContent = hud.classList.contains('collapsed') ? '+' : '−';
+    try { localStorage.setItem('achernar_hud_collapsed',
+        hud.classList.contains('collapsed') ? '1' : '0'); } catch {}
+});
+try {
+    if (localStorage.getItem('achernar_hud_collapsed') === '1') {
+        hud.classList.add('collapsed');
+        hudToggle.textContent = '+';
+    }
+} catch {}
+
+// ── Slider double-click → reset to default ────────────────────
+document.querySelectorAll('input[type=range]').forEach(s => {
+    s.dataset.defaultValue = s.value;
+    s.addEventListener('dblclick', () => {
+        s.value = s.dataset.defaultValue;
+        s.dispatchEvent(new Event('input', { bubbles: true }));
+    });
 });
 
 // ────────────────────────────────────────────────────────────────
@@ -647,6 +1037,12 @@ const uniforms = {
     // shows on year-decade timescales).
     u_outburst_amp: { value: 0.65 },
     u_outburst_per: { value: 8.0  },   // visualisation period (s)
+
+    // ── Robinson-congruence helicity ─────────────────────────────
+    // 0 → pure null (Hopf fibration, fibers close).
+    // ±N → twistor norm Z·Z̄ ≠ 0 → Robinson congruence, fibers
+    // spiral and don't close (non-null helicity / chirality).
+    u_twist_helicity: { value: 0.0 },
 };
 
 const state = { spin: 1.0, inclination: 65, viewMode: 0 };
@@ -1291,81 +1687,89 @@ starGroup.add(disk);
 // ────────────────────────────────────────────────────────────────
 //
 //  Penrose's twistor space ℙT ≅ ℂℙ³ encodes Minkowski-space null
-//  geodesics as points.  The unique non-trivial null geodesic
-//  congruence with non-zero twist is the Robinson congruence —
-//  when you slice it at a fixed time, the world-lines project
-//  onto a family of *Villarceau circles* that fibre nested tori
-//  around an axis.  Each torus is a single "twistor", and the
-//  Villarceau fibration realises the Hopf fibration S³ → S² of
-//  spinor space.
+//  geodesics as points.  A *Robinson congruence* is the family of
+//  null geodesics that meet a single non-null twistor Z ∈ ℙT.
+//  Sliced at constant time, the rays project onto ℝ³ as nested
+//  Villarceau circles — the **stereographic image of the Hopf
+//  fibration** S³ → S².  We render that fibration directly:
 //
-//  Why include it on a Be star?  Two reasons:
+//      • Sample a particle's *base point* (η, φ_b) on S² (the
+//        target of the Hopf map h: S³ → S²).
+//      • Sample the particle's *fiber phase* α₀.
+//      • Compute its position on S³ ⊂ ℂ²:
+//            z₁ = cos(η/2) · e^{i α}
+//            z₂ = sin(η/2) · e^{i (q·α − φ_b)}     α = α₀ + ω·t
+//        (q = 1 ⇒ pure Hopf circle, q > 1 ⇒ (1, q) torus knot.)
+//      • Project stereographically from (0, 0, 0, 1) ∈ S³:
+//            P(u, v, w, x) = (u, v, w) / (1 − x)
+//        and re-axis so Hopf-Z = scene-y (rotation axis) and the
+//        Hopf unit circle (η = 0) lies in the scene equatorial
+//        plane (xz).
 //
-//   1. It's the cleanest geometric way to draw a *quasi-Keplerian
-//      shear flow with non-zero vorticity*: each torus's particles
-//      share the same specific angular momentum but different
-//      orbital phase — exactly the structure of a thin disk.
-//      Project the y-axis to the rotation axis and the inner-disk
-//      shear *is* a Robinson congruence projection.
+//  Helicity slider h_T deforms the congruence away from pure
+//  null:  φ_b drifts with α at rate h_T·ω, breaking fiber closure
+//  and producing the *twisted* Robinson congruence with non-zero
+//  vorticity — the geometric encoding of twistor norm Z·Z̄ ≠ 0.
+//  At h_T = 0 you see the pure Hopf fibration; cranking h_T
+//  generates Robinson's logarithmic-spiral fibers.
 //
-//   2. The m=1 one-armed-oscillation mode that drives Be-disk
-//      V/R cycles is naturally encoded by the helical phasing of
-//      neighbouring twistors — it's the projection of a slowly
-//      rotating cell in twistor space.
-//
-//  Each particle carries (R_torus, r_torus, α₀, q) where q is
-//  the rational ratio between toroidal and poloidal phase
-//  velocities (q=1 gives an exact Villarceau circle; q≠1 gives
-//  a winding "torus knot" trajectory that fills the torus).
-//  Colour encodes α₀ — the twistor phase — through a periodic
-//  wheel so you can read the congruence structure at a glance.
+//  Twistors live in the *inertial* frame (parented to scene, not
+//  starGroup) because they are a property of spacetime, not of the
+//  rotating body — so the congruence stays geometrically still
+//  while the star spins inside it.
 //
 const TWIST_N = 1600;
-const twistPos   = new Float32Array(TWIST_N * 3);
-const twistCol   = new Float32Array(TWIST_N * 3);
-const twistParam = new Float32Array(TWIST_N * 5);   // R, r, α₀, q, ωφ
+const twistPos    = new Float32Array(TWIST_N * 3);
+const twistCol    = new Float32Array(TWIST_N * 3);
+const twistEta    = new Float32Array(TWIST_N);    // S² latitude of base point
+const twistPhiB0  = new Float32Array(TWIST_N);    // S² longitude of base point
+const twistAlpha0 = new Float32Array(TWIST_N);    // initial fiber phase
+const twistQ      = new Float32Array(TWIST_N);    // (1, q) torus-knot index
+const TWIST_SCALE = 2.5;                           // scene-units per Hopf radius
+const TWIST_OMEGA = 0.45;                          // twistor U(1) phase rate
 
 (function initTwistors() {
     for (let i = 0; i < TWIST_N; i++) {
-        // Distribute torus radii so the congruence covers ~2.0–6.0 R_eq,
-        // matching the disk extent.  Bias inward (more particles in the
-        // bright inner disk).
-        const u  = Math.pow(Math.random(), 0.6);
-        const Rt = 2.0 + 4.0 * u;
-        // Minor radius scales with H(r) of the disk: ~5% scale-height.
-        const rt = 0.04 + 0.08 * u + 0.05 * Math.random();
-        const a0 = Math.random() * Math.PI * 2;
-        // Mix of "Hopf" (q=1) and slightly winding (q=2,3) trajectories.
-        const choice = Math.random();
-        const q  = choice < 0.6 ? 1 : (choice < 0.9 ? 2 : 3);
-        // Toroidal angular speed — slower at large R (visualisation only).
-        const w  = 0.20 / Math.sqrt(Rt);
-        twistParam[i*5]   = Rt;
-        twistParam[i*5+1] = rt;
-        twistParam[i*5+2] = a0;
-        twistParam[i*5+3] = q;
-        twistParam[i*5+4] = w;
+        // η ∈ (0.18, π − 0.10): away from the singular Hopf fibers
+        //   (η = 0 ⇒ unit circle in equatorial plane;
+        //    η = π ⇒ entire rotation axis through ∞).
+        // We bias toward intermediate latitudes so the bulk of the
+        // cloud lies on the visible nested-tori shells rather than
+        // hugging the axis or the equatorial ring.
+        const u   = (i + 0.5) / TWIST_N;
+        const eta = 0.18 + (Math.PI - 0.28) * u;
+        twistEta[i]    = eta;
+        // Golden-spiral base longitude (≈ uniform on S²).
+        twistPhiB0[i]  = (i * Math.PI * (3 - Math.sqrt(5))) % (Math.PI * 2);
+        twistAlpha0[i] = Math.random() * Math.PI * 2;
+        // 65 % pure Hopf (q = 1), 25 % torus-knot (q = 2), 10 % (q = 3).
+        const c = Math.random();
+        twistQ[i] = c < 0.65 ? 1 : (c < 0.90 ? 2 : 3);
 
-        // Colour by twistor phase α₀ — wrap a HSV wheel through
-        // the Penrose-style purple→cyan→magenta palette.  Particles on
-        // larger tori (the disk's outer fibres) are dimmed so the inner
-        // Hopf-fibration structure stays readable through the cloud.
-        const t = a0 / (Math.PI * 2);
-        const h = t * 6;
-        const c = 0.9, x = c * (1 - Math.abs(((h) % 2) - 1));
+        // Colour: cyclic wheel by α₀ blended with η-tinted tone so the
+        // nested-tori layering is readable.  Inner shells (small η) →
+        // warm magenta; outer shells (η → π) → cool indigo.
+        const tA = twistAlpha0[i] / (Math.PI * 2);
+        const hA = tA * 6;
+        const cM = 0.9, xM = cM * (1 - Math.abs(((hA) % 2) - 1));
         let R = 0, G = 0, B = 0;
-        if (h < 1)      { R=c; G=x; B=0; }
-        else if (h < 2) { R=x; G=c; B=0; }
-        else if (h < 3) { R=0; G=c; B=x; }
-        else if (h < 4) { R=0; G=x; B=c; }
-        else if (h < 5) { R=x; G=0; B=c; }
-        else            { R=c; G=0; B=x; }
-        // Outer-torus dimming: ∝ 1/Rt so the cloud doesn't wash out.
-        const dim = 0.55 + 0.40 * (2.0 / Math.max(Rt, 2.0));
-        // Blend toward Penrose-paper purple
-        twistCol[i*3]   = (0.5 * R + 0.5 * 0.78) * dim;
-        twistCol[i*3+1] = (0.5 * G + 0.5 * 0.55) * dim;
-        twistCol[i*3+2] = (0.5 * B + 0.5 * 1.00) * dim;
+        if (hA < 1)      { R=cM; G=xM; B=0;  }
+        else if (hA < 2) { R=xM; G=cM; B=0;  }
+        else if (hA < 3) { R=0;  G=cM; B=xM; }
+        else if (hA < 4) { R=0;  G=xM; B=cM; }
+        else if (hA < 5) { R=xM; G=0;  B=cM; }
+        else             { R=cM; G=0;  B=xM; }
+        // Latitudinal tint (warm at equator → cool toward axis)
+        const lat = (eta - Math.PI/2) / (Math.PI/2);  // −1 (equator) … +1 (pole)
+        const tintR = 0.78 + 0.10 * lat;
+        const tintG = 0.55 - 0.05 * lat;
+        const tintB = 1.00 - 0.10 * lat;
+        // Dim particles on the most extreme tori so the structure stays
+        // readable when many shells overlap.
+        const dim = 0.65 + 0.30 * (1 - Math.abs(lat));
+        twistCol[i*3]   = (0.45 * R + 0.55 * tintR) * dim;
+        twistCol[i*3+1] = (0.45 * G + 0.55 * tintG) * dim;
+        twistCol[i*3+2] = (0.45 * B + 0.55 * tintB) * dim;
     }
 })();
 
@@ -1374,33 +1778,65 @@ twistGeo.setAttribute('position', new THREE.BufferAttribute(twistPos, 3));
 twistGeo.setAttribute('color',    new THREE.BufferAttribute(twistCol, 3));
 const twistMat = new THREE.PointsMaterial({
     size: 0.038, sizeAttenuation: true, vertexColors: true,
-    transparent: true, opacity: 0.65, depthWrite: false,
+    transparent: true, opacity: 0.70, depthWrite: false,
     blending: THREE.AdditiveBlending,
 });
 const twistPoints = new THREE.Points(twistGeo, twistMat);
 twistPoints.visible = false;
-starGroup.add(twistPoints);
+// Inertial frame: twistors are a spacetime structure, not a body overlay.
+scene.add(twistPoints);
 
 function updateTwistors(t) {
     if (!twistPoints.visible) return;
     const arr = twistPos;
+    const omega = TWIST_OMEGA;
+    const helicity = uniforms.u_twist_helicity.value;
+    const SCALE = TWIST_SCALE;
+    let nHidden = 0;
+
     for (let i = 0; i < TWIST_N; i++) {
-        const Rt = twistParam[i*5];
-        const rt = twistParam[i*5+1];
-        const a0 = twistParam[i*5+2];
-        const q  = twistParam[i*5+3];
-        const w  = twistParam[i*5+4];
+        const eta      = twistEta[i];
+        const phiBase0 = twistPhiB0[i];
+        const alpha0   = twistAlpha0[i];
+        const q        = twistQ[i];
 
-        // Toroidal phase φ (around the rotation axis) and poloidal
-        // phase ψ (around the cross-section); their rational ratio
-        // gives Villarceau / torus-knot trajectories.
-        const phi = w * t + a0;
-        const psi = q * w * t + 2 * a0;
+        // Twistor U(1) phase advance + base-point drift driven by helicity.
+        // h_T ≠ 0 untwists / twists the fibers, taking us off the pure-Hopf
+        // submanifold (Z·Z̄ = 0) into the generic non-null Robinson family.
+        const alpha   = alpha0   + omega * t;
+        const phiBase = phiBase0 + helicity * omega * t * 0.30;
 
-        const cR = Rt + rt * Math.cos(psi);
-        arr[i*3]   = cR * Math.cos(phi);
-        arr[i*3+1] = rt * Math.sin(psi);
-        arr[i*3+2] = cR * Math.sin(phi);
+        const cN = Math.cos(eta * 0.5);
+        const sN = Math.sin(eta * 0.5);
+        const cA = Math.cos(alpha);
+        const sA = Math.sin(alpha);
+        const aMb = q * alpha - phiBase;
+        const cAB = Math.cos(aMb);
+        const sAB = Math.sin(aMb);
+
+        // S³ embedding ⊂ ℂ²
+        const u = cN * cA;
+        const v = cN * sA;
+        const w = sN * cAB;
+        const x = sN * sAB;
+
+        // Stereographic projection from (0, 0, 0, 1)
+        const D = 1.0 - x;
+        if (D < 0.06) {
+            // Particle at projection-point singularity this frame —
+            // hide it just for this tick (it'll come back next frame).
+            arr[i*3]   = 1e3;
+            arr[i*3+1] = 1e3;
+            arr[i*3+2] = 1e3;
+            nHidden++;
+            continue;
+        }
+        // Hopf coords (X, Y, Z)_h = (u, v, w)/D.
+        // Re-axis so the Hopf Z-axis (degenerate fiber) ↔ scene y-axis,
+        // and the Hopf η = 0 unit circle (in xy_h plane) ↔ scene xz plane.
+        arr[i*3]   = SCALE * u / D;
+        arr[i*3+1] = SCALE * w / D;
+        arr[i*3+2] = SCALE * v / D;
     }
     twistGeo.attributes.position.needsUpdate = true;
 }
@@ -1434,8 +1870,13 @@ function updateTwistors(t) {
 //  Particle is recycled when r > R_outer.
 //
 const OUT_N = 1800;
-const outPos = new Float32Array(OUT_N * 3);
-const outCol = new Float32Array(OUT_N * 3);
+// Each particle is rendered as a 2-vertex line segment: a *head* (current
+// position) and a *tail* offset by −v_world·τ so each particle wears a
+// velocity-aligned streak. This makes the Keplerian shear and viscous
+// outward drift visually obvious without storing per-particle history.
+const OUT_TAIL_TAU = 0.42;          // motion-blur time, scene seconds
+const outPos = new Float32Array(OUT_N * 2 * 3);     // head + tail
+const outCol = new Float32Array(OUT_N * 2 * 3);
 const outR   = new Float32Array(OUT_N);
 const outPhi = new Float32Array(OUT_N);
 const outAge = new Float32Array(OUT_N);     // seconds since launch
@@ -1452,12 +1893,12 @@ const outLife = new Float32Array(OUT_N);    // expected lifetime (cosmetic)
 const outGeo = new THREE.BufferGeometry();
 outGeo.setAttribute('position', new THREE.BufferAttribute(outPos, 3));
 outGeo.setAttribute('color',    new THREE.BufferAttribute(outCol, 3));
-const outMat = new THREE.PointsMaterial({
-    size: 0.060, sizeAttenuation: true, vertexColors: true,
-    transparent: true, opacity: 0.92, depthWrite: false,
+const outMat = new THREE.LineBasicMaterial({
+    vertexColors: true,
+    transparent: true, depthWrite: false,
     blending: THREE.AdditiveBlending,
 });
-const outPoints = new THREE.Points(outGeo, outMat);
+const outPoints = new THREE.LineSegments(outGeo, outMat);
 outPoints.visible = true;
 starGroup.add(outPoints);
 
@@ -1488,19 +1929,14 @@ const hudBurstPct = document.getElementById('hud-burst-pct');
 
 function updateOutflow(t, dt) {
     if (!outPoints.visible) {
-        // Hide all
-        for (let i = 0; i < OUT_N; i++) {
+        // Hide all line segments off-screen
+        for (let i = 0; i < OUT_N * 2; i++) {
             outPos[i*3] = 0; outPos[i*3+1] = 1e6; outPos[i*3+2] = 0;
             outCol[i*3] = 0; outCol[i*3+1] = 0; outCol[i*3+2] = 0;
         }
         outGeo.attributes.position.needsUpdate = true;
         outGeo.attributes.color.needsUpdate    = true;
         return;
-    }
-
-    if (uniforms.u_disk_active.value < 0.5) {
-        // Disk shed (shell phase): suppress injection but let existing
-        // particles drift out and dim, mimicking a "diluting" envelope.
     }
 
     const Rin    = uniforms.u_axis_ratio.value * 1.05;   // inner edge
@@ -1514,8 +1950,9 @@ function updateOutflow(t, dt) {
     const burstAmp = uniforms.u_outburst_amp.value;
     const burstPhase = (t % burstPer) / burstPer;       // 0 → 1 within a cycle
     const burst = Math.pow(Math.sin(Math.PI * burstPhase), 2);
+    const diskOn = uniforms.u_disk_active.value > 0.5;
     const injectionRate = (0.55 + 0.45 * burstAmp * burst) * uniforms.u_disk_rho.value
-                        * (uniforms.u_disk_active.value > 0.5 ? 1.0 : 0.10);
+                        * (diskOn ? 1.0 : 0.10);
 
     // Update HUD: sin² peaks at φ = 0.5; before that = "build", after = "shed".
     if (hudBurst) {
@@ -1534,11 +1971,28 @@ function updateOutflow(t, dt) {
     let nLaunch = Math.floor(outTimeAccum);
     outTimeAccum -= nLaunch;
 
+    // NRP m=2 prograde mode locks the launch azimuth to the two surface
+    // antinodes:   2φ_b − σt = 0  →  φ_antinode = (σt)/2 mod π.
+    // When NRP is active, ~75% of new particles are spawned in a tight
+    // Gaussian around one of the two antinodes — reproducing the
+    // "two-armed feeding" pattern observed in real Be stars during NRP-
+    // driven outbursts (Rivinius et al.).  When NRP is off we sample
+    // φ uniformly so the disk feeds isotropically.
+    const nrpOn      = uniforms.u_nrp_active.value > 0.5;
+    const sigmaT     = uniforms.u_nrp_omega.value * uniforms.u_time.value;
+    const antinode   = 0.5 * sigmaT;       // body-frame angle of arm 1
+    const armSpread  = 0.42;               // ~24° half-width
+
     // ── Step 1: respawn dead particles, re-using slots
     for (let i = 0; i < OUT_N && nLaunch > 0; i++) {
         if (outR[i] >= Rout || outAge[i] >= outLife[i]) {
             outR[i]    = Rin + 0.02 * Math.random();
-            outPhi[i]  = Math.random() * Math.PI * 2;
+            if (nrpOn && Math.random() < 0.75) {
+                const arm = Math.random() < 0.5 ? antinode : antinode + Math.PI;
+                outPhi[i] = arm + armSpread * gauss();
+            } else {
+                outPhi[i] = Math.random() * Math.PI * 2;
+            }
             outAge[i]  = 0;
             // Lifetime sets the scale-height envelope: longer-lived
             // particles drift further out before recycling.
@@ -1558,15 +2012,24 @@ function updateOutflow(t, dt) {
     //  ride the equator. Beyond R_eq, Ω_K < Ω_body ⇒ Δφ < 0 ⇒
     //  particles visibly *lag* the surface, the correct shear sign.
     //
+    //  Tail vertex of each line segment is offset by −v_world·τ; here
+    //  v_world is the *inertial-frame* velocity expressed in body-frame
+    //  components (so it composes correctly with starGroup's rotation
+    //  applied at draw time):
+    //      v_x = -sin φ · (Ω_K · r)  +  cos φ · v_r
+    //      v_z =  cos φ · (Ω_K · r)  +  sin φ · v_r
+    //
     const drift_visual = drift0 * 1.85;        // visualisation boost
     const omegaBody    = 0.45 * state.spin;
+    const tau          = OUT_TAIL_TAU;
     for (let i = 0; i < OUT_N; i++) {
         const r = outR[i];
+        const head = i * 6;          // index of head x in outPos
+        const tail = i * 6 + 3;      // index of tail x
+
         if (r >= Rout || outAge[i] >= outLife[i]) {
-            // Hide off-screen until next respawn
-            outPos[i*3]   = 0;
-            outPos[i*3+1] = 1e6;
-            outPos[i*3+2] = 0;
+            outPos[head]   = 0; outPos[head+1] = 1e6; outPos[head+2] = 0;
+            outPos[tail]   = 0; outPos[tail+1] = 1e6; outPos[tail+2] = 0;
             continue;
         }
         const omegaK = Math.pow(r, -1.5) * 0.45;     // inertial Keplerian rate
@@ -1580,21 +2043,158 @@ function updateOutflow(t, dt) {
         // up slightly at larger r per H(r) ∝ r^1.5 / r ∝ r^0.5)
         const z = 0.04 * Math.sqrt(r) * gauss() * 0.5;
 
-        outPos[i*3]   = r * Math.cos(outPhi[i]);
-        outPos[i*3+1] = z;
-        outPos[i*3+2] = r * Math.sin(outPhi[i]);
+        const cf = Math.cos(outPhi[i]);
+        const sf = Math.sin(outPhi[i]);
+        const headX = r * cf;
+        const headY = z;
+        const headZ = r * sf;
+
+        // Inertial-frame velocity in body-frame coords (see comment above)
+        const vTan_world = omegaK * r;
+        const vWx = -sf * vTan_world + cf * vr;
+        const vWz =  cf * vTan_world + sf * vr;
+
+        outPos[head]   = headX;
+        outPos[head+1] = headY;
+        outPos[head+2] = headZ;
+        outPos[tail]   = headX - vWx * tau;
+        outPos[tail+1] = headY;          // negligible vertical motion
+        outPos[tail+2] = headZ - vWz * tau;
 
         // Colour: age-fade × radial palette × burst-glow
         const rNorm = (r - Rin) / Math.max(Rout - Rin, 0.1);
         outflowColor(rNorm, _outCol);
         const ageFrac = outAge[i] / outLife[i];
         const bright  = (1 - ageFrac * 0.6) * (0.55 + 0.55 * burst);
-        outCol[i*3]   = _outCol[0] * bright;
-        outCol[i*3+1] = _outCol[1] * bright;
-        outCol[i*3+2] = _outCol[2] * bright;
+        // Head full bright, tail dimmed to ~25 % so the streak fades
+        // smoothly behind the particle.
+        outCol[head]   = _outCol[0] * bright;
+        outCol[head+1] = _outCol[1] * bright;
+        outCol[head+2] = _outCol[2] * bright;
+        outCol[tail]   = _outCol[0] * bright * 0.25;
+        outCol[tail+1] = _outCol[1] * bright * 0.25;
+        outCol[tail+2] = _outCol[2] * bright * 0.25;
     }
     outGeo.attributes.position.needsUpdate = true;
     outGeo.attributes.color.needsUpdate    = true;
+}
+
+// ────────────────────────────────────────────────────────────────
+//  POLAR CAK WIND TRACER PARTICLES
+// ────────────────────────────────────────────────────────────────
+//
+//  Tracer particles for the gravity-darkening-enhanced polar wind.
+//  Each particle is launched from a polar cap (cos θ ≥ 0.65) with
+//  random azimuth, then accelerated radially outward following the
+//  classical CAK β-law:
+//
+//      v(r) = v_∞ · (1 − R★/r)^β      β ≈ 0.85
+//
+//  In our scene units (R_pole = 1), the velocity ramps from 0 at the
+//  surface to a terminal v_∞ ≈ 1 (visualisation rate) by r ≈ 4–5.
+//  Particles die at r > 9 or after 12 s and respawn at the polar cap.
+//
+//  Why "tracers" rather than the volumetric cone alone?  The cone is
+//  a static glow; tracers show actual material *in motion* — you can
+//  see the acceleration zone (sparse close to the star, dense far
+//  out as the wind decelerates the spawn-rate visually) and the
+//  approximate streamline geometry.  Together with the cone shader
+//  they produce a wind that reads as both density + flow.
+//
+const PWIND_N = 600;
+const pwPos   = new Float32Array(PWIND_N * 3);
+const pwCol   = new Float32Array(PWIND_N * 3);
+const pwR     = new Float32Array(PWIND_N);   // heliocentric distance
+const pwLatC  = new Float32Array(PWIND_N);   // signed cos θ (hemisphere ±)
+const pwPhi   = new Float32Array(PWIND_N);
+const pwAge   = new Float32Array(PWIND_N);
+const pwLife  = new Float32Array(PWIND_N);
+const PWIND_VINF = 1.05;                      // visualisation terminal v
+const PWIND_BETA = 0.85;
+const PWIND_RMAX = 9.0;
+
+(function initPWind() {
+    for (let i = 0; i < PWIND_N; i++) {
+        pwR[i] = 1e9; pwAge[i] = 1e9; pwLife[i] = 0;
+    }
+})();
+const pwGeo = new THREE.BufferGeometry();
+pwGeo.setAttribute('position', new THREE.BufferAttribute(pwPos, 3));
+pwGeo.setAttribute('color',    new THREE.BufferAttribute(pwCol, 3));
+const pwMat = new THREE.PointsMaterial({
+    size: 0.045, sizeAttenuation: true, vertexColors: true,
+    transparent: true, opacity: 0.85, depthWrite: false,
+    blending: THREE.AdditiveBlending,
+});
+const pwPoints = new THREE.Points(pwGeo, pwMat);
+pwPoints.visible = true;
+starGroup.add(pwPoints);
+
+let pwTimeAccum = 0;
+
+function updatePWind(t, dt) {
+    if (!pwPoints.visible) return;
+
+    // Mass-loss rate scales with luminosity ∝ T_pole^4 (CAK):
+    //   Ṁ_polar ∝ L^(1/α'),  α' ≈ 0.6–0.7 for B stars.
+    //   Use injection rate as a proxy.
+    const tNorm = uniforms.u_t_pole.value / 17000.0;
+    const launchPerSec = 70 * Math.pow(tNorm, 4 / 0.65);
+    pwTimeAccum += dt * launchPerSec;
+    let nLaunch = Math.floor(pwTimeAccum);
+    pwTimeAccum -= nLaunch;
+
+    // ── Step 1: respawn dead tracers from the polar caps
+    for (let i = 0; i < PWIND_N && nLaunch > 0; i++) {
+        if (pwR[i] >= PWIND_RMAX || pwAge[i] >= pwLife[i]) {
+            // Sample cos θ uniformly in [0.55, 1) → polar cap (~57° half-angle)
+            const cAbs = 0.55 + 0.45 * Math.random();
+            const hemi = Math.random() < 0.5 ? 1 : -1;
+            pwLatC[i] = hemi * cAbs;
+            pwPhi[i]  = Math.random() * Math.PI * 2;
+            pwR[i]    = 1.04;
+            pwAge[i]  = 0;
+            pwLife[i] = 8 + 8 * Math.random();
+            nLaunch--;
+        }
+    }
+
+    // ── Step 2: radial CAK β-law advance + colour
+    for (let i = 0; i < PWIND_N; i++) {
+        const r = pwR[i];
+        if (r >= PWIND_RMAX || pwAge[i] >= pwLife[i]) {
+            pwPos[i*3] = 0; pwPos[i*3+1] = 1e6; pwPos[i*3+2] = 0;
+            continue;
+        }
+        // β-law radial velocity, 0 at base → v_∞ asymptote.
+        const u = 1.0 - 1.0 / r;
+        const vRad = (u <= 0) ? 0.02 : PWIND_VINF * Math.pow(u, PWIND_BETA);
+        pwR[i] += vRad * dt * 0.85;
+        pwAge[i] += dt;
+
+        const cosT = pwLatC[i];
+        const sinT = Math.sqrt(Math.max(0, 1 - cosT*cosT));
+        const cf = Math.cos(pwPhi[i]);
+        const sf = Math.sin(pwPhi[i]);
+        const r2 = pwR[i];
+        pwPos[i*3]   = r2 * sinT * cf;
+        pwPos[i*3+1] = r2 * cosT;
+        pwPos[i*3+2] = r2 * sinT * sf;
+
+        // Colour: tracer is hot (T_pole · 1.18) shocked plasma at the
+        // base, cooling/fading as the wind expands and recombines.
+        const rNorm = Math.min(1, (r2 - 1) / (PWIND_RMAX - 1));
+        // Inner = bright pale-blue (recombining hot plasma)
+        // Outer = pale magenta-pink (cool thinning wind)
+        const tCool = Math.pow(rNorm, 0.6);
+        const speedFactor = vRad / PWIND_VINF;     // 0..1
+        const bright = (0.45 + 0.55 * speedFactor) * (1 - 0.4 * pwAge[i]/pwLife[i]);
+        pwCol[i*3]   = (0.65 + 0.35 * tCool) * bright;
+        pwCol[i*3+1] = (0.85 - 0.45 * tCool) * bright;
+        pwCol[i*3+2] = (1.00 - 0.30 * tCool) * bright;
+    }
+    pwGeo.attributes.position.needsUpdate = true;
+    pwGeo.attributes.color.needsUpdate    = true;
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -1892,6 +2492,7 @@ document.getElementById('sl-disk-out').addEventListener('input', e => {
 
 document.getElementById('tog-corona').addEventListener('change', e => { rimMesh.visible = e.target.checked; });
 document.getElementById('tog-jet').addEventListener('change',    e => { jetTop.visible = jetBottom.visible = e.target.checked; });
+document.getElementById('tog-pwind').addEventListener('change',  e => { pwPoints.visible = e.target.checked; });
 document.getElementById('tog-axis').addEventListener('change',   e => { axisLine.visible = e.target.checked; });
 document.getElementById('tog-drgrid').addEventListener('change', e => setDRRingsVisible(e.target.checked));
 document.getElementById('tog-binary').addEventListener('change', e => { binaryGroup.visible = e.target.checked; });
@@ -1905,6 +2506,10 @@ document.getElementById('sl-burst-amp').addEventListener('input', e => {
 document.getElementById('sl-burst-per').addEventListener('input', e => {
     uniforms.u_outburst_per.value = +e.target.value;
     document.getElementById('disp-burst-per').textContent = (+e.target.value).toFixed(1) + ' s';
+});
+document.getElementById('sl-twist-h').addEventListener('input', e => {
+    uniforms.u_twist_helicity.value = +e.target.value;
+    document.getElementById('disp-twist-h').textContent = (+e.target.value).toFixed(2);
 });
 
 // ── Gravity-darkening model selector ─────────────────────────────
@@ -1942,6 +2547,123 @@ function setViewMode(idx) {
 document.getElementById('view-cont').addEventListener('click', () => setViewMode(0));
 document.getElementById('view-dopp').addEventListener('click', () => setViewMode(1));
 document.getElementById('view-temp').addEventListener('click', () => setViewMode(2));
+
+// ────────────────────────────────────────────────────────────────
+//  TIME CONTROLS — global Δt multiplier + pause
+// ────────────────────────────────────────────────────────────────
+state.timeRate = 1.0;
+state.paused   = false;
+const btnPause = document.getElementById('btn-pause');
+const slTimeR  = document.getElementById('sl-timerate');
+const dispTimeR = document.getElementById('disp-timerate');
+btnPause.addEventListener('click', () => {
+    state.paused = !state.paused;
+    btnPause.classList.toggle('active', state.paused);
+    btnPause.textContent = state.paused ? '⏸' : '▶';
+});
+slTimeR.addEventListener('input', e => {
+    state.timeRate = +e.target.value;
+    dispTimeR.textContent = state.timeRate.toFixed(2) + '×';
+});
+
+// ────────────────────────────────────────────────────────────────
+//  LAYER BATCH BUTTONS — All on / Essentials / All off
+// ────────────────────────────────────────────────────────────────
+const layerToggleIDs = [
+    'tog-corona', 'tog-axis', 'tog-drgrid',
+    'tog-jet', 'tog-pwind', 'tog-outflow', 'tog-twistor',
+    'tog-binary', 'tog-sed',
+];
+const layerEssentials = new Set([
+    'tog-corona', 'tog-jet', 'tog-pwind', 'tog-outflow', 'tog-sed',
+]);
+function setLayer(id, on) {
+    const el = document.getElementById(id);
+    if (!el || el.checked === on) return;
+    el.checked = on;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+}
+document.getElementById('btn-layers-allon').addEventListener('click', () => {
+    layerToggleIDs.forEach(id => setLayer(id, true));
+});
+document.getElementById('btn-layers-essentials').addEventListener('click', () => {
+    layerToggleIDs.forEach(id => setLayer(id, layerEssentials.has(id)));
+});
+document.getElementById('btn-layers-alloff').addEventListener('click', () => {
+    layerToggleIDs.forEach(id => setLayer(id, false));
+});
+
+// ────────────────────────────────────────────────────────────────
+//  QUICK PRESETS — apply slider/toggle batches that match named
+//  Achernar regimes.  Each preset dispatches the matching event so
+//  every existing handler runs (HUD numbers, Roche surface, disk
+//  shaders, Hα profile etc all stay in sync automatically).
+// ────────────────────────────────────────────────────────────────
+function setSlider(id, v) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.value = v;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+const PRESETS = {
+    // Canonical Achernar A as currently observed (post-2014 disk reform).
+    default: () => {
+        setSlider('sl-ratio',  1.56);
+        setSlider('sl-tpole',  17000);
+        setSlider('sl-teq',    10000);
+        setSlider('sl-betagd', 0.25);
+        setSlider('sl-spin',   1.00);
+        setSlider('sl-incl',   65);
+        setSlider('sl-diffrot',0.10);
+        setSlider('sl-disk-rho', 1.00);
+        setSlider('sl-disk-out', 3.6);
+        setSlider('sl-burst-amp', 0.65);
+        setSlider('sl-burst-per', 8.0);
+        setSlider('sl-twist-h', 0.0);
+        setSlider('sl-nrp-amp', 0.012);
+        setSlider('sl-nrp-per', 1.26);
+        setLayer('tog-disk', true);
+        setLayer('tog-nrp', false);
+        setLayer('tog-twistor', false);
+        ['tog-corona','tog-jet','tog-pwind','tog-outflow','tog-sed']
+            .forEach(id => setLayer(id, true));
+        setLayer('tog-axis', false); setLayer('tog-drgrid', false);
+        setLayer('tog-binary', false);
+    },
+    // Inner-disk feeding outburst: max density, NRP on, tight burst period.
+    burst: () => {
+        PRESETS.default();
+        setSlider('sl-disk-rho', 2.20);
+        setSlider('sl-burst-amp', 1.30);
+        setSlider('sl-burst-per', 5.0);
+        setSlider('sl-tpole', 18500);
+        setLayer('tog-nrp', true);
+        setLayer('tog-outflow', true);
+    },
+    // Disk shed (2013 shell-phase analogue).
+    shell: () => {
+        PRESETS.default();
+        setSlider('sl-disk-rho', 0.35);
+        setSlider('sl-disk-out', 2.8);
+        setSlider('sl-burst-amp', 0.10);
+        setLayer('tog-disk', false);    // disk currently shed
+    },
+    // Near-critical rotation, no disk — pure photospheric oblateness study.
+    crit: () => {
+        PRESETS.default();
+        setSlider('sl-ratio', 1.56);
+        setSlider('sl-spin',  2.10);
+        setSlider('sl-diffrot', 0.20);
+        setLayer('tog-disk', false);
+        setLayer('tog-outflow', false);
+        setLayer('tog-pwind', true);
+        setLayer('tog-drgrid', true);
+    },
+};
+document.getElementById('ps-default').addEventListener('click', PRESETS.default);
+document.getElementById('ps-burst').addEventListener('click',   PRESETS.burst);
+document.getElementById('ps-shell').addEventListener('click',   PRESETS.shell);
+document.getElementById('ps-crit').addEventListener('click',    PRESETS.crit);
 
 // ── Non-radial pulsation ─────────────────────────────────────────
 document.getElementById('tog-nrp').addEventListener('change', e => {
@@ -2449,6 +3171,60 @@ function maybeDrawHalpha(now) {
 }
 
 // ────────────────────────────────────────────────────────────────
+//  MASS-LOSS HUD
+// ────────────────────────────────────────────────────────────────
+//
+//  Numerical anchors are tied to canonical Achernar numbers
+//  (M ≈ 6.4 M☉, R_pole ≈ 7.3 R☉) and scale with the live sliders:
+//
+//   • Ṁ_polar (CAK)  ∝  L^(1/α') ∝ (T_pole·R_pole²)^(1/α'),   α' ≈ 0.65
+//                        — sub-linear growth in T_pole over the slider range.
+//   • v_∞,polar       ≈  2.5 · v_esc(R_pole) = 2.5·√(2GM/R_pole)
+//   • Ṁ_eq            scales with disk density × outburst envelope ×
+//                        spin (≈ 0 if rotation is sub-critical).
+//   • v_K(R_eq)       ≈  v_K(R_pole) / √(R_eq/R_pole)
+//
+const VESC_POLE_KMS = 579;            // √(2GM/R_pole) for Achernar A
+const MDOT_POL_REF  = 2.1;            // 10⁻¹⁰ M☉/yr at T_pole = 17 kK
+
+const hudMdotPol = document.getElementById('hud-mdot-pol');
+const hudVinf    = document.getElementById('hud-vinf');
+const hudMdotEq  = document.getElementById('hud-mdot-eq');
+const hudVk      = document.getElementById('hud-vk');
+
+function updateMdotHUD() {
+    const Tp = uniforms.u_t_pole.value;
+    const R  = Math.max(uniforms.u_axis_ratio.value, 1.0);
+    const beta = Math.min(2*(R-1)/(R*R*R), 0.293);
+    const burstAmp = uniforms.u_outburst_amp.value;
+
+    // Polar wind: Ṁ ∝ T_pole^(4/α') / M^((α'-1)/α')   for fixed M, ∝ T^(4/α')
+    const tNorm = Tp / 17000.0;
+    const mdotPol = MDOT_POL_REF * Math.pow(tNorm, 4 / 0.65);  // 10⁻¹⁰ M☉/yr
+    if (hudMdotPol) hudMdotPol.textContent = mdotPol.toFixed(2);
+
+    // v_∞ scales weakly with v_esc; v_esc(pole) is fixed by M, R_pole.
+    // Slight T-dependence from the CAK driving:  v_∞ / v_esc ≈ 2.0–2.6
+    const vInf = VESC_POLE_KMS * (2.20 + 0.45 * (tNorm - 1.0));
+    if (hudVinf) hudVinf.textContent = Math.round(vInf);
+
+    // Equatorial decretion mass loss: scales with ρ × spin × (1+amp·burst)
+    // and cuts off when sub-critical (the Roche-mass-loss mechanism shuts
+    // down well below v_K).  burstPeak set to 1 for HUD averaging.
+    const subcrit = Math.sqrt(beta / (8/27));  // ω/ω_crit
+    const fSubCrit = Math.max(0, Math.min(1, (subcrit - 0.55) / 0.40));
+    const mdotEq = (1.4 + 2.5 * burstAmp) * fSubCrit
+                 * uniforms.u_disk_rho.value
+                 * Math.max(0.2, state.spin)
+                 * (uniforms.u_disk_active.value > 0.5 ? 1 : 0.20);   // 10⁻⁹ M☉/yr
+    if (hudMdotEq) hudMdotEq.textContent = mdotEq.toFixed(2);
+
+    // Keplerian velocity at the equator
+    const vK = VESC_POLE_KMS / Math.sqrt(2 * R);
+    if (hudVk) hudVk.textContent = Math.round(vK);
+}
+
+// ────────────────────────────────────────────────────────────────
 //  ANIMATE
 // ────────────────────────────────────────────────────────────────
 let fpsF = 0, fpsT = performance.now();
@@ -2459,7 +3235,12 @@ const _invTmp = new THREE.Matrix4();
 
 function animate() {
     requestAnimationFrame(animate);
-    const dt = clock.getDelta();
+    // Wall-clock Δt × user-set time multiplier × pause gate.  Δt = 0 when
+    // paused freezes every integrator (rotation, outflows, NRP, twistors,
+    // outburst envelope, time uniform) without affecting camera/orbit
+    // controls or the renderer itself.
+    const wallDt = clock.getDelta();
+    const dt = state.paused ? 0 : wallDt * state.timeRate;
     uniforms.u_time.value += dt;
 
     // Body-frame rotation: rigid spin at Ω_eq.  Differential rotation
@@ -2491,7 +3272,9 @@ function animate() {
     //     Keplerian motion read as differential vs. the surface.
     updateTwistors(uniforms.u_time.value);
     updateOutflow(uniforms.u_time.value, dt);
+    updatePWind(uniforms.u_time.value, dt);
     updateDRRings();
+    updateMdotHUD();
 
     // Achernar B orbital motion.
     if (binaryGroup.visible) {
