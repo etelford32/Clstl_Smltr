@@ -211,6 +211,7 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
             <div>L: <span class="val" id="hud-lum">3 150</span> <span class="dim">L☉</span></div>
             <div>Decretion disk: <span class="vh" id="hud-disk">active</span></div>
             <div>Disk H(R<sub>eq</sub>): <span class="val" id="hud-h">0.04</span> <span class="dim">R<sub>eq</sub></span></div>
+            <div>Outburst: <span class="vh" id="hud-burst">build</span> <span class="dim" id="hud-burst-pct">0%</span></div>
             <div>FPS: <span id="fps-display">--</span></div>
             <div class="dim" style="margin-top:3px">Drag · Pinch · Scroll</div>
         </div>
@@ -981,16 +982,23 @@ starGroup.add(rimMesh);
 //  azimuthal turbulence rather than the previous narrow cylinder.
 //
 const windVS = /* glsl */`
-    varying vec3 vObj;
+    varying float vAlt;       // height above polar surface (≥0, world-space)
+    varying vec2  vRadXZ;     // (x,z) of vertex in world frame
+    varying float vObjY;      // sign of polar hemisphere (+1 north / −1 south)
     void main() {
-        vObj = position;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vAlt   = max(0.0, abs(wp.y) - 1.0);     // 0 at polar surface, growing outward
+        vRadXZ = wp.xz;                          // perpendicular distance from rotation axis
+        vObjY  = sign(wp.y);
+        gl_Position = projectionMatrix * viewMatrix * wp;
     }
 `;
 const windFS = /* glsl */`
     uniform float u_time;
     uniform float u_t_pole;
-    varying vec3 vObj;
+    varying float vAlt;
+    varying vec2  vRadXZ;
+    varying float vObjY;
 
     vec3 planckRGB(float T){
         float t = clamp(T,1000.0,40000.0)*0.01; float r,g,b;
@@ -1012,30 +1020,25 @@ const windFS = /* glsl */`
     }
 
     void main() {
-        float rxz  = length(vec2(vObj.x, vObj.z));
-        float yAbs = abs(vObj.y);
+        float rxz = length(vRadXZ);
 
-        // Geometric cone — radial profile widens with height.
-        // We don't want a hard "cylinder" silhouette: use a soft
-        // Gaussian whose width grows ∝ yAbs (free expansion).
-        float coneR = 0.45 + 0.55 * yAbs;     // wind expansion half-angle
+        // Cone half-width grows with altitude — free-streaming wind.
+        float coneR  = 0.55 + 0.42 * vAlt;
         float radial = exp(-pow(rxz / coneR, 2.0));
 
-        // Along-axis density falls super-exponentially; CAK winds
-        // accelerate to v∞ within a few R★, then density ∝ 1/r²·v.
-        float vRad   = 1.0 - exp(-yAbs / 1.4);   // velocity build-up
-        float density = (1.0 - 0.6 * vRad) * exp(-pow(yAbs / 3.4, 1.6));
+        // CAK density profile: peaks at the polar *surface* (vAlt=0), falls
+        // super-exponentially as the wind accelerates to v∞.
+        float vRad    = 1.0 - exp(-vAlt / 1.4);              // velocity build-up
+        float density = (1.0 - 0.55 * vRad) * exp(-pow(vAlt / 3.4, 1.6));
 
-        // Helical streak turbulence advected outward (gives the wind
-        // visible texture so it doesn't read as a static glow).
-        float advY = yAbs - u_time * 0.55;
-        float turb = 0.55 + 0.45 * vn(vec3(vObj.x*2.5, advY*1.6, vObj.z*2.5));
+        // Helical streaks advected outward in the wind direction.
+        float advY    = vAlt - u_time * 0.55;
+        float turb    = 0.55 + 0.45 * vn(vec3(vRadXZ.x*2.5, advY*1.6, vRadXZ.y*2.5));
 
-        float a = radial * density * turb * 0.42
-                * (0.92 + 0.08 * sin(u_time*1.7 + yAbs*2.2));
+        float a = radial * density * turb * 0.46
+                * (0.92 + 0.08 * sin(u_time*1.7 + vAlt*2.2));
 
-        // Wind plasma is hotter than the photospheric pole (CAK
-        // shock-heated), and bluer-shifted in continuum.
+        // Wind plasma is hotter than the photospheric pole (CAK shock-heated).
         vec3 c = planckRGB(u_t_pole * 1.18) * 1.25;
         gl_FragColor = vec4(c, a);
     }
@@ -1049,9 +1052,11 @@ const windMat = new THREE.ShaderMaterial({
 });
 const jetTop    = new THREE.Mesh(windGeo, windMat);
 const jetBottom = new THREE.Mesh(windGeo, windMat);
-// Position so the narrow base sits ~at the polar surface (y≈±1).
-jetTop.position.y    =  3.6;
-jetBottom.position.y = -3.6;
+// Position so the narrow base of each cone sits *just outside* the polar
+// surface (R_pole = 1).  Geometry y goes from −2.8 to +2.8; we want the
+// narrow end (y=−2.8 in local coords) at world-y ≈ +1.05 → offset = 3.85.
+jetTop.position.y    =  3.85;
+jetBottom.position.y = -3.85;
 jetBottom.rotation.x = Math.PI;
 starGroup.add(jetTop, jetBottom);
 
@@ -1258,7 +1263,7 @@ starGroup.add(disk);
 //  Colour encodes α₀ — the twistor phase — through a periodic
 //  wheel so you can read the congruence structure at a glance.
 //
-const TWIST_N = 2400;
+const TWIST_N = 1600;
 const twistPos   = new Float32Array(TWIST_N * 3);
 const twistCol   = new Float32Array(TWIST_N * 3);
 const twistParam = new Float32Array(TWIST_N * 5);   // R, r, α₀, q, ωφ
@@ -1285,7 +1290,9 @@ const twistParam = new Float32Array(TWIST_N * 5);   // R, r, α₀, q, ωφ
         twistParam[i*5+4] = w;
 
         // Colour by twistor phase α₀ — wrap a HSV wheel through
-        // the Penrose-style purple→cyan→magenta palette.
+        // the Penrose-style purple→cyan→magenta palette.  Particles on
+        // larger tori (the disk's outer fibres) are dimmed so the inner
+        // Hopf-fibration structure stays readable through the cloud.
         const t = a0 / (Math.PI * 2);
         const h = t * 6;
         const c = 0.9, x = c * (1 - Math.abs(((h) % 2) - 1));
@@ -1296,10 +1303,12 @@ const twistParam = new Float32Array(TWIST_N * 5);   // R, r, α₀, q, ωφ
         else if (h < 4) { R=0; G=x; B=c; }
         else if (h < 5) { R=x; G=0; B=c; }
         else            { R=c; G=0; B=x; }
+        // Outer-torus dimming: ∝ 1/Rt so the cloud doesn't wash out.
+        const dim = 0.55 + 0.40 * (2.0 / Math.max(Rt, 2.0));
         // Blend toward Penrose-paper purple
-        twistCol[i*3]   = 0.5 * R + 0.5 * 0.78;
-        twistCol[i*3+1] = 0.5 * G + 0.5 * 0.55;
-        twistCol[i*3+2] = 0.5 * B + 0.5 * 1.00;
+        twistCol[i*3]   = (0.5 * R + 0.5 * 0.78) * dim;
+        twistCol[i*3+1] = (0.5 * G + 0.5 * 0.55) * dim;
+        twistCol[i*3+2] = (0.5 * B + 0.5 * 1.00) * dim;
     }
 })();
 
@@ -1307,8 +1316,8 @@ const twistGeo = new THREE.BufferGeometry();
 twistGeo.setAttribute('position', new THREE.BufferAttribute(twistPos, 3));
 twistGeo.setAttribute('color',    new THREE.BufferAttribute(twistCol, 3));
 const twistMat = new THREE.PointsMaterial({
-    size: 0.045, sizeAttenuation: true, vertexColors: true,
-    transparent: true, opacity: 0.85, depthWrite: false,
+    size: 0.038, sizeAttenuation: true, vertexColors: true,
+    transparent: true, opacity: 0.65, depthWrite: false,
     blending: THREE.AdditiveBlending,
 });
 const twistPoints = new THREE.Points(twistGeo, twistMat);
@@ -1417,6 +1426,8 @@ function outflowColor(rNorm, dst) {
 
 let outTimeAccum = 0;
 const _outCol = new Float32Array(3);
+const hudBurst    = document.getElementById('hud-burst');
+const hudBurstPct = document.getElementById('hud-burst-pct');
 
 function updateOutflow(t, dt) {
     if (!outPoints.visible) {
@@ -1444,9 +1455,19 @@ function updateOutflow(t, dt) {
     // Outburst envelope — sin² so it's positive, no negative injection.
     const burstPer = Math.max(uniforms.u_outburst_per.value, 0.5);
     const burstAmp = uniforms.u_outburst_amp.value;
-    const burst = Math.pow(Math.max(0, Math.sin(Math.PI * t / burstPer)), 2);
+    const burstPhase = (t % burstPer) / burstPer;       // 0 → 1 within a cycle
+    const burst = Math.pow(Math.sin(Math.PI * burstPhase), 2);
     const injectionRate = (0.55 + 0.45 * burstAmp * burst) * uniforms.u_disk_rho.value
                         * (uniforms.u_disk_active.value > 0.5 ? 1.0 : 0.10);
+
+    // Update HUD: sin² peaks at φ = 0.5; before that = "build", after = "shed".
+    if (hudBurst) {
+        const stage = burstPhase < 0.4 ? 'build'
+                    : burstPhase < 0.6 ? 'peak'
+                    :                    'shed';
+        hudBurst.textContent = stage;
+        hudBurstPct.textContent = Math.round(burst * 100) + '%';
+    }
 
     // Differential rotation of the surface biases the equatorial
     // "feeding" zone: the equator launches mass at exactly v_K, so
@@ -1470,7 +1491,18 @@ function updateOutflow(t, dt) {
     }
 
     // ── Step 2: integrate every live particle
+    //
+    //  Particles live in starGroup — which itself rotates at Ω_body =
+    //  0.45·spin per second. To get the correct Keplerian motion in
+    //  the *inertial* frame we must advance their body-frame phase by
+    //      Δφ = (Ω_K(r) − Ω_body) dt
+    //  so the inertial-frame rotation reduces to Ω_K (independent of
+    //  the spin slider). At r = 1, Δφ = 0 with spin = 1 — particles
+    //  ride the equator. Beyond R_eq, Ω_K < Ω_body ⇒ Δφ < 0 ⇒
+    //  particles visibly *lag* the surface, the correct shear sign.
+    //
     const drift_visual = drift0 * 1.85;        // visualisation boost
+    const omegaBody    = 0.45 * state.spin;
     for (let i = 0; i < OUT_N; i++) {
         const r = outR[i];
         if (r >= Rout || outAge[i] >= outLife[i]) {
@@ -1480,10 +1512,8 @@ function updateOutflow(t, dt) {
             outPos[i*3+2] = 0;
             continue;
         }
-        // Keplerian Ω = r^(-3/2), with a small differential boost so
-        // outer rings clearly lag inner rings in this visualisation.
-        const omegaK = Math.pow(r, -1.5) * 0.45;
-        outPhi[i] += omegaK * dt;
+        const omegaK = Math.pow(r, -1.5) * 0.45;     // inertial Keplerian rate
+        outPhi[i] += (omegaK - omegaBody) * dt;       // body-frame advance
         // Viscous radial drift v_r = drift0 · v_K
         const vr = drift_visual * Math.pow(r, -0.5);
         outR[i] += vr * dt;
