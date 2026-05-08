@@ -408,6 +408,24 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
             </div>
 
             <div class="sec">
+                <div class="sec-hd"><span>Twistor Congruence</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="ctrl">
+                        <label>Helicity h<sub>T</sub></label>
+                        <input type="range" id="sl-twist-h" min="-1.5" max="1.5" step="0.05" value="0">
+                        <span class="vdisp" id="disp-twist-h">0.00</span>
+                    </div>
+                    <div style="font-size:10px;color:#666;line-height:1.5;margin-top:6px">
+                        h<sub>T</sub> = 0 → pure Hopf fibration (Z·Z̄ = 0, fibers
+                        close as Villarceau circles). h<sub>T</sub> ≠ 0 →
+                        Robinson congruence: φ<sub>base</sub> drifts with α, fibers
+                        spiral instead of close, encoding non-zero twistor norm.
+                        Sign of h<sub>T</sub> sets the chirality.
+                    </div>
+                </div>
+            </div>
+
+            <div class="sec">
                 <div class="sec-hd"><span>Non-Radial Pulsation</span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
                     <div class="toggle-row">
@@ -617,6 +635,12 @@ const uniforms = {
     // shows on year-decade timescales).
     u_outburst_amp: { value: 0.65 },
     u_outburst_per: { value: 8.0  },   // visualisation period (s)
+
+    // ── Robinson-congruence helicity ─────────────────────────────
+    // 0 → pure null (Hopf fibration, fibers close).
+    // ±N → twistor norm Z·Z̄ ≠ 0 → Robinson congruence, fibers
+    // spiral and don't close (non-null helicity / chirality).
+    u_twist_helicity: { value: 0.0 },
 };
 
 const state = { spin: 1.0, inclination: 65, viewMode: 0 };
@@ -1261,81 +1285,89 @@ starGroup.add(disk);
 // ────────────────────────────────────────────────────────────────
 //
 //  Penrose's twistor space ℙT ≅ ℂℙ³ encodes Minkowski-space null
-//  geodesics as points.  The unique non-trivial null geodesic
-//  congruence with non-zero twist is the Robinson congruence —
-//  when you slice it at a fixed time, the world-lines project
-//  onto a family of *Villarceau circles* that fibre nested tori
-//  around an axis.  Each torus is a single "twistor", and the
-//  Villarceau fibration realises the Hopf fibration S³ → S² of
-//  spinor space.
+//  geodesics as points.  A *Robinson congruence* is the family of
+//  null geodesics that meet a single non-null twistor Z ∈ ℙT.
+//  Sliced at constant time, the rays project onto ℝ³ as nested
+//  Villarceau circles — the **stereographic image of the Hopf
+//  fibration** S³ → S².  We render that fibration directly:
 //
-//  Why include it on a Be star?  Two reasons:
+//      • Sample a particle's *base point* (η, φ_b) on S² (the
+//        target of the Hopf map h: S³ → S²).
+//      • Sample the particle's *fiber phase* α₀.
+//      • Compute its position on S³ ⊂ ℂ²:
+//            z₁ = cos(η/2) · e^{i α}
+//            z₂ = sin(η/2) · e^{i (q·α − φ_b)}     α = α₀ + ω·t
+//        (q = 1 ⇒ pure Hopf circle, q > 1 ⇒ (1, q) torus knot.)
+//      • Project stereographically from (0, 0, 0, 1) ∈ S³:
+//            P(u, v, w, x) = (u, v, w) / (1 − x)
+//        and re-axis so Hopf-Z = scene-y (rotation axis) and the
+//        Hopf unit circle (η = 0) lies in the scene equatorial
+//        plane (xz).
 //
-//   1. It's the cleanest geometric way to draw a *quasi-Keplerian
-//      shear flow with non-zero vorticity*: each torus's particles
-//      share the same specific angular momentum but different
-//      orbital phase — exactly the structure of a thin disk.
-//      Project the y-axis to the rotation axis and the inner-disk
-//      shear *is* a Robinson congruence projection.
+//  Helicity slider h_T deforms the congruence away from pure
+//  null:  φ_b drifts with α at rate h_T·ω, breaking fiber closure
+//  and producing the *twisted* Robinson congruence with non-zero
+//  vorticity — the geometric encoding of twistor norm Z·Z̄ ≠ 0.
+//  At h_T = 0 you see the pure Hopf fibration; cranking h_T
+//  generates Robinson's logarithmic-spiral fibers.
 //
-//   2. The m=1 one-armed-oscillation mode that drives Be-disk
-//      V/R cycles is naturally encoded by the helical phasing of
-//      neighbouring twistors — it's the projection of a slowly
-//      rotating cell in twistor space.
-//
-//  Each particle carries (R_torus, r_torus, α₀, q) where q is
-//  the rational ratio between toroidal and poloidal phase
-//  velocities (q=1 gives an exact Villarceau circle; q≠1 gives
-//  a winding "torus knot" trajectory that fills the torus).
-//  Colour encodes α₀ — the twistor phase — through a periodic
-//  wheel so you can read the congruence structure at a glance.
+//  Twistors live in the *inertial* frame (parented to scene, not
+//  starGroup) because they are a property of spacetime, not of the
+//  rotating body — so the congruence stays geometrically still
+//  while the star spins inside it.
 //
 const TWIST_N = 1600;
-const twistPos   = new Float32Array(TWIST_N * 3);
-const twistCol   = new Float32Array(TWIST_N * 3);
-const twistParam = new Float32Array(TWIST_N * 5);   // R, r, α₀, q, ωφ
+const twistPos    = new Float32Array(TWIST_N * 3);
+const twistCol    = new Float32Array(TWIST_N * 3);
+const twistEta    = new Float32Array(TWIST_N);    // S² latitude of base point
+const twistPhiB0  = new Float32Array(TWIST_N);    // S² longitude of base point
+const twistAlpha0 = new Float32Array(TWIST_N);    // initial fiber phase
+const twistQ      = new Float32Array(TWIST_N);    // (1, q) torus-knot index
+const TWIST_SCALE = 2.5;                           // scene-units per Hopf radius
+const TWIST_OMEGA = 0.45;                          // twistor U(1) phase rate
 
 (function initTwistors() {
     for (let i = 0; i < TWIST_N; i++) {
-        // Distribute torus radii so the congruence covers ~2.0–6.0 R_eq,
-        // matching the disk extent.  Bias inward (more particles in the
-        // bright inner disk).
-        const u  = Math.pow(Math.random(), 0.6);
-        const Rt = 2.0 + 4.0 * u;
-        // Minor radius scales with H(r) of the disk: ~5% scale-height.
-        const rt = 0.04 + 0.08 * u + 0.05 * Math.random();
-        const a0 = Math.random() * Math.PI * 2;
-        // Mix of "Hopf" (q=1) and slightly winding (q=2,3) trajectories.
-        const choice = Math.random();
-        const q  = choice < 0.6 ? 1 : (choice < 0.9 ? 2 : 3);
-        // Toroidal angular speed — slower at large R (visualisation only).
-        const w  = 0.20 / Math.sqrt(Rt);
-        twistParam[i*5]   = Rt;
-        twistParam[i*5+1] = rt;
-        twistParam[i*5+2] = a0;
-        twistParam[i*5+3] = q;
-        twistParam[i*5+4] = w;
+        // η ∈ (0.18, π − 0.10): away from the singular Hopf fibers
+        //   (η = 0 ⇒ unit circle in equatorial plane;
+        //    η = π ⇒ entire rotation axis through ∞).
+        // We bias toward intermediate latitudes so the bulk of the
+        // cloud lies on the visible nested-tori shells rather than
+        // hugging the axis or the equatorial ring.
+        const u   = (i + 0.5) / TWIST_N;
+        const eta = 0.18 + (Math.PI - 0.28) * u;
+        twistEta[i]    = eta;
+        // Golden-spiral base longitude (≈ uniform on S²).
+        twistPhiB0[i]  = (i * Math.PI * (3 - Math.sqrt(5))) % (Math.PI * 2);
+        twistAlpha0[i] = Math.random() * Math.PI * 2;
+        // 65 % pure Hopf (q = 1), 25 % torus-knot (q = 2), 10 % (q = 3).
+        const c = Math.random();
+        twistQ[i] = c < 0.65 ? 1 : (c < 0.90 ? 2 : 3);
 
-        // Colour by twistor phase α₀ — wrap a HSV wheel through
-        // the Penrose-style purple→cyan→magenta palette.  Particles on
-        // larger tori (the disk's outer fibres) are dimmed so the inner
-        // Hopf-fibration structure stays readable through the cloud.
-        const t = a0 / (Math.PI * 2);
-        const h = t * 6;
-        const c = 0.9, x = c * (1 - Math.abs(((h) % 2) - 1));
+        // Colour: cyclic wheel by α₀ blended with η-tinted tone so the
+        // nested-tori layering is readable.  Inner shells (small η) →
+        // warm magenta; outer shells (η → π) → cool indigo.
+        const tA = twistAlpha0[i] / (Math.PI * 2);
+        const hA = tA * 6;
+        const cM = 0.9, xM = cM * (1 - Math.abs(((hA) % 2) - 1));
         let R = 0, G = 0, B = 0;
-        if (h < 1)      { R=c; G=x; B=0; }
-        else if (h < 2) { R=x; G=c; B=0; }
-        else if (h < 3) { R=0; G=c; B=x; }
-        else if (h < 4) { R=0; G=x; B=c; }
-        else if (h < 5) { R=x; G=0; B=c; }
-        else            { R=c; G=0; B=x; }
-        // Outer-torus dimming: ∝ 1/Rt so the cloud doesn't wash out.
-        const dim = 0.55 + 0.40 * (2.0 / Math.max(Rt, 2.0));
-        // Blend toward Penrose-paper purple
-        twistCol[i*3]   = (0.5 * R + 0.5 * 0.78) * dim;
-        twistCol[i*3+1] = (0.5 * G + 0.5 * 0.55) * dim;
-        twistCol[i*3+2] = (0.5 * B + 0.5 * 1.00) * dim;
+        if (hA < 1)      { R=cM; G=xM; B=0;  }
+        else if (hA < 2) { R=xM; G=cM; B=0;  }
+        else if (hA < 3) { R=0;  G=cM; B=xM; }
+        else if (hA < 4) { R=0;  G=xM; B=cM; }
+        else if (hA < 5) { R=xM; G=0;  B=cM; }
+        else             { R=cM; G=0;  B=xM; }
+        // Latitudinal tint (warm at equator → cool toward axis)
+        const lat = (eta - Math.PI/2) / (Math.PI/2);  // −1 (equator) … +1 (pole)
+        const tintR = 0.78 + 0.10 * lat;
+        const tintG = 0.55 - 0.05 * lat;
+        const tintB = 1.00 - 0.10 * lat;
+        // Dim particles on the most extreme tori so the structure stays
+        // readable when many shells overlap.
+        const dim = 0.65 + 0.30 * (1 - Math.abs(lat));
+        twistCol[i*3]   = (0.45 * R + 0.55 * tintR) * dim;
+        twistCol[i*3+1] = (0.45 * G + 0.55 * tintG) * dim;
+        twistCol[i*3+2] = (0.45 * B + 0.55 * tintB) * dim;
     }
 })();
 
@@ -1344,33 +1376,65 @@ twistGeo.setAttribute('position', new THREE.BufferAttribute(twistPos, 3));
 twistGeo.setAttribute('color',    new THREE.BufferAttribute(twistCol, 3));
 const twistMat = new THREE.PointsMaterial({
     size: 0.038, sizeAttenuation: true, vertexColors: true,
-    transparent: true, opacity: 0.65, depthWrite: false,
+    transparent: true, opacity: 0.70, depthWrite: false,
     blending: THREE.AdditiveBlending,
 });
 const twistPoints = new THREE.Points(twistGeo, twistMat);
 twistPoints.visible = false;
-starGroup.add(twistPoints);
+// Inertial frame: twistors are a spacetime structure, not a body overlay.
+scene.add(twistPoints);
 
 function updateTwistors(t) {
     if (!twistPoints.visible) return;
     const arr = twistPos;
+    const omega = TWIST_OMEGA;
+    const helicity = uniforms.u_twist_helicity.value;
+    const SCALE = TWIST_SCALE;
+    let nHidden = 0;
+
     for (let i = 0; i < TWIST_N; i++) {
-        const Rt = twistParam[i*5];
-        const rt = twistParam[i*5+1];
-        const a0 = twistParam[i*5+2];
-        const q  = twistParam[i*5+3];
-        const w  = twistParam[i*5+4];
+        const eta      = twistEta[i];
+        const phiBase0 = twistPhiB0[i];
+        const alpha0   = twistAlpha0[i];
+        const q        = twistQ[i];
 
-        // Toroidal phase φ (around the rotation axis) and poloidal
-        // phase ψ (around the cross-section); their rational ratio
-        // gives Villarceau / torus-knot trajectories.
-        const phi = w * t + a0;
-        const psi = q * w * t + 2 * a0;
+        // Twistor U(1) phase advance + base-point drift driven by helicity.
+        // h_T ≠ 0 untwists / twists the fibers, taking us off the pure-Hopf
+        // submanifold (Z·Z̄ = 0) into the generic non-null Robinson family.
+        const alpha   = alpha0   + omega * t;
+        const phiBase = phiBase0 + helicity * omega * t * 0.30;
 
-        const cR = Rt + rt * Math.cos(psi);
-        arr[i*3]   = cR * Math.cos(phi);
-        arr[i*3+1] = rt * Math.sin(psi);
-        arr[i*3+2] = cR * Math.sin(phi);
+        const cN = Math.cos(eta * 0.5);
+        const sN = Math.sin(eta * 0.5);
+        const cA = Math.cos(alpha);
+        const sA = Math.sin(alpha);
+        const aMb = q * alpha - phiBase;
+        const cAB = Math.cos(aMb);
+        const sAB = Math.sin(aMb);
+
+        // S³ embedding ⊂ ℂ²
+        const u = cN * cA;
+        const v = cN * sA;
+        const w = sN * cAB;
+        const x = sN * sAB;
+
+        // Stereographic projection from (0, 0, 0, 1)
+        const D = 1.0 - x;
+        if (D < 0.06) {
+            // Particle at projection-point singularity this frame —
+            // hide it just for this tick (it'll come back next frame).
+            arr[i*3]   = 1e3;
+            arr[i*3+1] = 1e3;
+            arr[i*3+2] = 1e3;
+            nHidden++;
+            continue;
+        }
+        // Hopf coords (X, Y, Z)_h = (u, v, w)/D.
+        // Re-axis so the Hopf Z-axis (degenerate fiber) ↔ scene y-axis,
+        // and the Hopf η = 0 unit circle (in xy_h plane) ↔ scene xz plane.
+        arr[i*3]   = SCALE * u / D;
+        arr[i*3+1] = SCALE * w / D;
+        arr[i*3+2] = SCALE * v / D;
     }
     twistGeo.attributes.position.needsUpdate = true;
 }
@@ -2040,6 +2104,10 @@ document.getElementById('sl-burst-amp').addEventListener('input', e => {
 document.getElementById('sl-burst-per').addEventListener('input', e => {
     uniforms.u_outburst_per.value = +e.target.value;
     document.getElementById('disp-burst-per').textContent = (+e.target.value).toFixed(1) + ' s';
+});
+document.getElementById('sl-twist-h').addEventListener('input', e => {
+    uniforms.u_twist_helicity.value = +e.target.value;
+    document.getElementById('disp-twist-h').textContent = (+e.target.value).toFixed(2);
 });
 
 // ── Gravity-darkening model selector ─────────────────────────────
