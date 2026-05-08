@@ -292,7 +292,21 @@ nav {
         </div>
         <div class="sp-section">
             <div class="sp-label" style="color:#ff4444">Debris &amp; Hazards</div>
-            <div class="sp-toggle"><input type="checkbox" id="grp-debris" checked><span class="grp-dot" style="background:#ff2200"></span><label for="grp-debris" style="color:#ff6644">Tracked Debris</label><span class="count" id="cnt-debris">—</span></div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-debris" checked><span class="grp-dot" style="background:#ff2200"></span><label for="grp-debris" style="color:#ff6644">Tracked Debris (all 4 events)</label><span class="count" id="cnt-debris">—</span></div>
+            <!-- Per-event debris sub-toggles. Each loads ONE fragmentation
+                 cloud as its own CelesTrak group so users can isolate
+                 FY-1C (the largest debris-generating event in history),
+                 Cosmos 1408, or the Iridium-33 / Cosmos-2251 collision
+                 against the rest of the catalog. The composite parent
+                 above is mutually exclusive with these — toggling on any
+                 child uncheck the parent (and vice-versa) so we never
+                 render the same NORAD ID twice. -->
+            <div style="margin-left:18px;border-left:1px solid rgba(255,80,40,.18);padding-left:8px;margin-top:4px">
+                <div class="sp-toggle"><input type="checkbox" id="grp-fengyun-1c-debris"><span class="grp-dot" style="background:#ff3060"></span><label for="grp-fengyun-1c-debris" title="2007 Chinese SC-19 ASAT test against FY-1C at 865 km — largest single debris-generating event in history">FY-1C ASAT (2007)</label><span class="count" id="cnt-fengyun-1c-debris">—</span></div>
+                <div class="sp-toggle"><input type="checkbox" id="grp-cosmos-1408-debris"><span class="grp-dot" style="background:#ff5070"></span><label for="grp-cosmos-1408-debris" title="2021 Russian PL-19 Nudol ASAT test — forced ISS shelter-in-place">Cosmos 1408 ASAT (2021)</label><span class="count" id="cnt-cosmos-1408-debris">—</span></div>
+                <div class="sp-toggle"><input type="checkbox" id="grp-iridium-33-debris"><span class="grp-dot" style="background:#ff7040"></span><label for="grp-iridium-33-debris" title="2009 first confirmed accidental hypervelocity collision between two intact satellites at 789 km">Iridium 33 (2009)</label><span class="count" id="cnt-iridium-33-debris">—</span></div>
+                <div class="sp-toggle"><input type="checkbox" id="grp-cosmos-2251-debris"><span class="grp-dot" style="background:#ff9050"></span><label for="grp-cosmos-2251-debris" title="2009 collision partner of Iridium 33 — second cloud at 790 km">Cosmos 2251 (2009)</label><span class="count" id="cnt-cosmos-2251-debris">—</span></div>
+            </div>
             <!-- Status strip for the background debris-threat screen.
                  Collapsed until the user enables debris; the Web Worker
                  then runs once against every loaded operational group and
@@ -608,6 +622,16 @@ loadGroup('debris');
 const _debrisCache  = new DebrisThreatCache();
 let   _debrisScreenRan = false;
 
+// All CelesTrak group ids that represent tracked debris (composite +
+// per-event subgroups). Used by the screener to recognise per-event
+// toggles as debris when picking targets and to fire the screen as
+// soon as ANY debris group is loaded.
+const ALL_DEBRIS_GROUPS = [
+    'debris',
+    'fengyun-1c-debris','cosmos-1408-debris',
+    'iridium-33-debris','cosmos-2251-debris',
+];
+
 _debrisCache.subscribe(_renderDebrisStatus);
 
 function _renderDebrisStatus(evt) {
@@ -660,13 +684,21 @@ function _renderDebrisStatus(evt) {
 
 async function _maybeRunDebrisScreen() {
     if (_debrisScreenRan) return;
-    if (!tracker.hasGroup('debris')) return;
+    // Fire as soon as ANY debris layer is loaded — composite OR a
+    // per-event subgroup (FY-1C, C-1408, IR-33, C-2251). The screener
+    // uses getTlesByGroup('debris'), which the tracker now expands to
+    // the union of all loaded debris groups.
+    const debrisLoaded = ALL_DEBRIS_GROUPS.some(g => tracker.hasGroup(g));
+    if (!debrisLoaded) return;
 
-    // Target = every loaded group *except* debris. GEO sats won't actually
-    // conjunct with LEO debris, but the altitude pre-filter in the worker
-    // prunes them cheaply and including them keeps the API simple.
+    // Target = every loaded group *except* debris layers. GEO sats won't
+    // actually conjunct with LEO debris, but the altitude pre-filter in
+    // the worker prunes them cheaply and including them keeps the API
+    // simple.
     const loaded  = tracker.getLoadedGroups();
-    const targets = tracker.getTlesByGroup(loaded.filter(g => g !== 'debris'));
+    const targets = tracker.getTlesByGroup(
+        loaded.filter(g => !ALL_DEBRIS_GROUPS.includes(g))
+    );
     const debris  = tracker.getTlesByGroup('debris');
     if (targets.length === 0 || debris.length === 0) return;
 
@@ -692,7 +724,7 @@ async function _maybeRunDebrisScreen() {
 // Fires after every tracker.loadGroup() resolves — use it as the hook for
 // "both catalogs ready, kick off the worker".
 window.addEventListener('satellites-loaded', (e) => {
-    if (e.detail?.group === 'debris') _maybeRunDebrisScreen();
+    if (ALL_DEBRIS_GROUPS.includes(e.detail?.group)) _maybeRunDebrisScreen();
 });
 
 // Manual rescan — drop the IDB row + reset the one-shot flag so the next
@@ -711,16 +743,49 @@ const ALL_GROUPS = [
     'gps-ops','galileo','beidou','glonass',
     'weather','science','resource','planet','geo','last-30-days',
     'debris',
+    // Per-event debris sub-layers. Loaded on individual demand and
+    // mutually exclusive with the composite 'debris' parent.
+    'fengyun-1c-debris','cosmos-1408-debris',
+    'iridium-33-debris','cosmos-2251-debris',
+];
+
+// Per-event debris IDs in DOM-toggle form (mirrors DEBRIS_GROUP_IDS in
+// satellite-tracker.js, minus the composite 'debris' parent). The
+// composite is mutually exclusive with these so we never render the
+// same NORAD ID under two groups.
+const DEBRIS_EVENT_GROUPS = [
+    'fengyun-1c-debris','cosmos-1408-debris',
+    'iridium-33-debris','cosmos-2251-debris',
 ];
 
 for (const name of ALL_GROUPS) {
     const el = document.getElementById(`grp-${name}`);
     if (!el) continue;
     el.addEventListener('change', async e => {
-        if (e.target.checked) {
+        const on = e.target.checked;
+
+        // Mutual exclusivity: composite parent vs per-event children.
+        if (on && name === 'debris') {
+            for (const child of DEBRIS_EVENT_GROUPS) {
+                const childEl = document.getElementById(`grp-${child}`);
+                if (childEl?.checked) {
+                    childEl.checked = false;
+                    if (tracker.hasGroup(child)) tracker.setGroupVisible(child, false);
+                }
+            }
+        }
+        if (on && DEBRIS_EVENT_GROUPS.includes(name)) {
+            const parent = document.getElementById('grp-debris');
+            if (parent?.checked) {
+                parent.checked = false;
+                if (tracker.hasGroup('debris')) tracker.setGroupVisible('debris', false);
+            }
+        }
+
+        if (on) {
             await loadGroup(name);
         }
-        tracker.setGroupVisible(name, e.target.checked);
+        tracker.setGroupVisible(name, on);
     });
 }
 

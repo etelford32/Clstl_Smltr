@@ -1081,6 +1081,125 @@ function _seededRand(seed) {
     };
 }
 
+// ── Per-event balanced debris fetch ─────────────────────────────────────────
+// The composite `debris` group merges all 4 fragmentation events into a
+// single response, but a random N-pick from that pool tends to under-
+// represent the FY-1C cohort (huge total → uniform sampling washes the
+// 2007 ASAT cloud out into the noise). For the upper-atmosphere globe
+// we want the simulation to *show* the structure of the catalog: the
+// FY-1C ring at 850 km, the Iridium-33/Cosmos-2251 twin clouds at 790
+// km, the Cosmos 1408 shrapnel near the ISS shell.
+//
+// `fetchDebrisByEvent()` fetches each per-event group individually and
+// returns them in a parallel structure so the caller can apply per-event
+// quotas. Default quotas are tuned so FY-1C dominates the visual mix
+// (matching its real share of the catalog) without flooding the screen.
+//
+// Per-event groups are each ~1–3 MB so the 4-way fan-out is well within
+// the edge proxy's 4 MB ceiling — and unlike the composite endpoint the
+// per-event ones never trigger the "response too large" path.
+
+const DEBRIS_EVENTS = [
+    { id: 'fengyun-1c',  group: 'fengyun-1c-debris',  defaultQuota: 350 },
+    { id: 'cosmos-1408', group: 'cosmos-1408-debris', defaultQuota: 200 },
+    { id: 'iridium-33',  group: 'iridium-33-debris',  defaultQuota: 150 },
+    { id: 'cosmos-2251', group: 'cosmos-2251-debris', defaultQuota: 150 },
+];
+
+/**
+ * Fetch each per-event debris group separately, classify in-band records,
+ * and return a flat list with per-event quotas applied. Designed for
+ * the upper-atmosphere globe so the visualisation shows real catalog
+ * structure (FY-1C dominates, both 2009 collision clouds visible).
+ *
+ * @param {object} opts
+ * @param {object} [opts.quotas]    per-event-id → max records (defaults below)
+ * @param {number} [opts.altMinKm]  altitude band lower bound (km)
+ * @param {number} [opts.altMaxKm]  altitude band upper bound (km)
+ * @param {number} [opts.timeoutMs] hard deadline for the whole 4-way fan-out
+ * @param {number|null} [opts.seed] RNG seed for deterministic shuffling
+ * @returns {Promise<{records:object[], byEvent:Object<string,number>, fetchedAt:number}>}
+ */
+export async function fetchDebrisByEvent({
+    quotas    = null,
+    altMinKm  = 200,
+    altMaxKm  = 1600,
+    timeoutMs = 12000,
+    seed      = null,
+} = {}) {
+    const ctl = new AbortController();
+    const t   = setTimeout(() => ctl.abort(), timeoutMs);
+
+    const _quota = (id) => {
+        if (quotas && Number.isFinite(quotas[id])) return quotas[id];
+        return DEBRIS_EVENTS.find(e => e.id === id)?.defaultQuota ?? 100;
+    };
+
+    try {
+        const settled = await Promise.allSettled(DEBRIS_EVENTS.map(async ev => {
+            const r = await fetch(`/api/celestrak/tle?group=${ev.group}`, {
+                signal:  ctl.signal,
+                headers: { Accept: 'application/json' },
+            });
+            if (!r.ok) throw new Error(`HTTP ${r.status} (${ev.group})`);
+            const data = await r.json();
+            return { event: ev, sats: data?.satellites || [] };
+        }));
+
+        const records  = [];
+        const byEvent  = {};
+        const rand     = seed != null ? _seededRand(seed) : Math.random;
+
+        for (let i = 0; i < settled.length; i++) {
+            const ev = DEBRIS_EVENTS[i];
+            byEvent[ev.id] = 0;
+            if (settled[i].status !== 'fulfilled') continue;
+
+            const inBand = settled[i].value.sats.filter(s =>
+                Number.isFinite(s.perigee_km) && Number.isFinite(s.apogee_km) &&
+                Number.isFinite(s.inclination) && Number.isFinite(s.mean_motion) &&
+                s.perigee_km >= altMinKm && s.apogee_km <= altMaxKm
+            );
+
+            // Shuffle then take quota. We're after a representative
+            // visualisation slice, not a top-N by anything in particular.
+            const pool = inBand.slice();
+            for (let j = pool.length - 1; j > 0; j--) {
+                const k = Math.floor(rand() * (j + 1));
+                [pool[j], pool[k]] = [pool[k], pool[j]];
+            }
+            const take = pool.slice(0, _quota(ev.id));
+
+            for (const s of take) {
+                records.push({
+                    id:        `debris-${s.norad_id}`,
+                    name:      s.name || `Debris ${s.norad_id}`,
+                    noradId:   s.norad_id,
+                    altitudeKm: Math.round((s.perigee_km + s.apogee_km) / 2),
+                    color:     '#ff6688',   // overridden by family color downstream
+                    _event:    ev.id,        // hint for the caller; classifier still wins
+                    orbital:   {
+                        noradId:        s.norad_id,
+                        inclinationDeg: s.inclination,
+                        raanDeg:        s.raan,
+                        argPerigeeDeg:  s.arg_perigee,
+                        meanAnomalyDeg0: s.mean_anomaly,
+                        eccentricity:   s.eccentricity,
+                        periodMin:      s.period_min,
+                        meanMotionRevPerDay: s.mean_motion,
+                        epoch:          s.epoch,
+                    },
+                });
+            }
+            byEvent[ev.id] = take.length;
+        }
+
+        return { records, byEvent, fetchedAt: Date.now() };
+    } finally {
+        clearTimeout(t);
+    }
+}
+
 // ── Storm presets ──────────────────────────────────────────────────────────
 // Archive values for the three events we gate SPARTA validation against.
 // "level" is a 0..1 visual cue for shell colouring; tune as the storm

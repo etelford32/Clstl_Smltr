@@ -41,7 +41,7 @@
 
 import * as THREE from 'three';
 import { EarthSkin } from './earth-skin.js';
-import { SATELLITE_REFERENCES, density, fetchDebrisSample }
+import { SATELLITE_REFERENCES, density, fetchDebrisSample, fetchDebrisByEvent }
     from './upper-atmosphere-engine.js';
 import { annotate as annotateDebris, summariseByFamily, DEBRIS_FAMILIES }
     from './debris-catalog.js';
@@ -978,6 +978,14 @@ export class AtmosphereGlobe {
     dispose() {
         cancelAnimationFrame(this._raf);
         this._resizeObs?.disconnect();
+        if (this._debrisRefreshTimer) {
+            clearInterval(this._debrisRefreshTimer);
+            this._debrisRefreshTimer = null;
+        }
+        if (this._debrisVisHandler && typeof document !== 'undefined') {
+            document.removeEventListener('visibilitychange', this._debrisVisHandler);
+            this._debrisVisHandler = null;
+        }
         // CameraController owns OrbitControls + the WASD bindings; its
         // dispose() unwinds both.
         this._controls?.dispose?.();
@@ -1686,19 +1694,42 @@ export class AtmosphereGlobe {
     // gives users visible LEO context without the Kessler-syndrome
     // cost of a quadratic 4-asset × 30k debris screen.
 
-    async _loadDebrisSample({ count = 200 } = {}) {
-        let records;
+    async _loadDebrisSample({ count = 850 } = {}) {
+        // Strategy: balanced per-event fetch with FY-1C heavily represented
+        // (it's the largest debris-generating event in history and the
+        // most distinctive visual signature in LEO). The previous random-
+        // pick from the composite group under-sampled FY-1C; the new path
+        // pulls each per-event group separately and applies quotas.
+        //
+        // Total ≈ 850 dots: 350 FY-1C + 200 C-1408 + 150 IR-33 + 150 C-2251.
+        // Each fragment is propagated client-side from real CelesTrak mean
+        // elements via the same lookup-table propagator the named probes
+        // use, so positions are real-time and tick at the simulated-time
+        // rate the user has selected.
+        let records = null;
+        let byEvent = null;
+        let fetchedAt = null;
         try {
-            // Widened to 250–1500 km so the sample spans the major
-            // debris-rich shells: ISS (400 km), Cosmos 1408 cloud
-            // (480 km), Starlink (550 km), Iridium-33/Cosmos-2251
-            // (790 km), Fengyun-1C (850 km), and OneWeb (1200 km).
-            // Sample size bumped from 50 → 200 so each family gets
-            // a visible footprint without flooding the screener.
-            records = await fetchDebrisSample({ count, altMinKm: 250, altMaxKm: 1500 });
+            const result = await fetchDebrisByEvent({
+                altMinKm: 200, altMaxKm: 1600,
+                quotas: this._debrisQuotas || undefined,
+            });
+            records   = result.records;
+            byEvent   = result.byEvent;
+            fetchedAt = result.fetchedAt;
         } catch (err) {
-            console.debug('[upper-atmosphere] debris fetch failed:', err?.message || err);
-            return;
+            console.debug('[upper-atmosphere] balanced debris fetch failed, falling back to composite:',
+                err?.message || err);
+            // Fallback path keeps the page useful when one of the four
+            // per-event groups is rate-limited or rolling. Random sample
+            // from the composite, same shape as before.
+            try {
+                records = await fetchDebrisSample({ count, altMinKm: 250, altMaxKm: 1500 });
+            } catch (err2) {
+                console.debug('[upper-atmosphere] composite debris fetch also failed:',
+                    err2?.message || err2);
+                return;
+            }
         }
         if (!records?.length) return;
 
@@ -1718,14 +1749,100 @@ export class AtmosphereGlobe {
         this._debris = debris;
         if (!debris.length) return;
 
+        this._debrisFetchedAt = fetchedAt ?? Date.now();
         this._buildDebrisCloud(debris);
+
         // Re-screen now that we have debris in scope.
         this._screenConjunctions();
         try {
             window.dispatchEvent(new CustomEvent('ua-debris-update', {
-                detail: { count: debris.length },
+                detail: {
+                    count:     debris.length,
+                    byEvent:   byEvent || null,
+                    fetchedAt: this._debrisFetchedAt,
+                },
             }));
         } catch (_) { /* SSR / no-window — ignore */ }
+
+        // Schedule a periodic refresh so the cloud tracks the live 18 SDS
+        // catalog as TLEs are republished (~every 8 h). A 1-hour cadence
+        // catches new fragments and updated mean elements without
+        // hammering the edge cache. Only schedule once.
+        this._scheduleDebrisRefresh();
+    }
+
+    /**
+     * Periodic refresh: re-pull the per-event debris catalog every
+     * `_debrisRefreshMs` (default 1 h) and rebuild the cloud in place.
+     * Cheap because the propagator's _phase0 is recomputed from the
+     * fresh epoch — so the cloud snaps to real-world positions with no
+     * drift on each refresh, and continues propagating in real time
+     * between refreshes.
+     */
+    _scheduleDebrisRefresh() {
+        if (this._debrisRefreshTimer) return;
+        const interval = this._debrisRefreshMs ?? 60 * 60 * 1000;
+        this._debrisRefreshTimer = setInterval(() => {
+            // Avoid refreshing while the tab is hidden; resumes on
+            // visibilitychange below.
+            if (typeof document !== 'undefined' && document.hidden) return;
+            this._refreshDebrisSample().catch(err =>
+                console.debug('[upper-atmosphere] debris refresh failed:',
+                    err?.message || err));
+        }, interval);
+
+        // Trigger a refresh on focus when stale (>30 min) so users
+        // returning to the tab see fresh debris without waiting for the
+        // next interval tick.
+        if (typeof document !== 'undefined' && !this._debrisVisHandler) {
+            this._debrisVisHandler = () => {
+                if (document.hidden) return;
+                const ageMs = Date.now() - (this._debrisFetchedAt || 0);
+                if (ageMs > 30 * 60 * 1000) {
+                    this._refreshDebrisSample().catch(() => {});
+                }
+            };
+            document.addEventListener('visibilitychange', this._debrisVisHandler);
+        }
+    }
+
+    /**
+     * Re-fetch the per-event debris catalog and rebuild the cloud. Called
+     * on the periodic refresh tick and on tab-refocus when the cache is
+     * stale. Idempotent — safe to call repeatedly.
+     */
+    async _refreshDebrisSample() {
+        let result;
+        try {
+            result = await fetchDebrisByEvent({
+                altMinKm: 200, altMaxKm: 1600,
+                quotas: this._debrisQuotas || undefined,
+            });
+        } catch {
+            return;
+        }
+        if (!result?.records?.length) return;
+
+        const debris = [];
+        for (const rec of result.records) {
+            const probe = this._buildDebrisProbe(rec);
+            if (probe) debris.push(probe);
+        }
+        if (!debris.length) return;
+        this._debris = debris;
+        this._debrisFetchedAt = result.fetchedAt;
+        this._buildDebrisCloud(debris);
+        this._screenConjunctions();
+        try {
+            window.dispatchEvent(new CustomEvent('ua-debris-update', {
+                detail: {
+                    count:     debris.length,
+                    byEvent:   result.byEvent || null,
+                    fetchedAt: this._debrisFetchedAt,
+                    refresh:   true,
+                },
+            }));
+        } catch (_) {}
     }
 
     /**
