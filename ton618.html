@@ -564,14 +564,31 @@ select {
                 <input type="range" id="s-lab-neufeld" min="0" max="1" step="0.02" value="0.7">
                 <div class="val" id="v-lab-neufeld">0.70</div>
             </div>
-            <div class="note">Per-cell Lyα peak Doppler-shifted by the local
-                radial outflow (homologous flow → halo redshifted relative to
-                the line center). Neufeld escape probability
-                P<sub>esc</sub> = 1 / (1 + 1.8(aτ₀)<sup>1/3</sup>) suppresses
-                emission in dense cores, where photons random-walk in
-                frequency before diffusing out. (1+z)⁻⁴ surface-brightness
-                dimming applied. Reference: Neufeld 1990, Bonilha 1979,
-                Cantalupo et al. 2014.</div>
+            <div class="sep" style="margin:6px 0"></div>
+            <div class="toggle-row">
+                <input type="checkbox" id="labDoublePeak" checked>
+                <label for="labDoublePeak">Double-peak Neufeld spectrum (twin Gaussians ±Δv<sub>peak</sub>)</label>
+            </div>
+            <div class="toggle-row">
+                <input type="checkbox" id="showPolVectors">
+                <label for="showPolVectors">Polarization vector overlay (Rayleigh phase, tangential)</label>
+            </div>
+            <div class="ctrl">
+                <label>Polarization cap f<sub>pol,max</sub></label>
+                <input type="range" id="s-lab-polmax" min="0" max="0.30" step="0.005" value="0.12">
+                <div class="val" id="v-lab-polmax">12.0 %  (typical LAB)</div>
+            </div>
+            <div class="btn-row" style="margin-top:6px">
+                <button class="btn-sm" id="btnCantalupo">⊞ Cantalupo Cosmic Web</button>
+                <button class="btn-sm" id="btnLabReset">↺ defaults</button>
+            </div>
+            <div class="note">Phase 2.2: anisotropic Rayleigh-like scattering
+                tracks Stokes Q/U through the raymarch; the overlay draws
+                tangential ticks at last-scatter PA on a 36-pixel grid,
+                length ∝ f<sub>pol</sub> normalized to the cap. Twin Gaussians
+                emerge displaced by ±0.92(aτ₀)<sup>1/3</sup> v<sub>th</sub>
+                (Neufeld 1990); outflow suppresses the blue peak by
+                exp(−2 v<sub>los</sub>/v<sub>th</sub>) (Verhamme 2006).</div>
         </div>
 
         <div>
@@ -872,6 +889,52 @@ select {
                v < 0.8  ? `${v.toFixed(2)}  (full)` :
                           `${v.toFixed(2)}  (extreme)`,
         (v) => app.setLabNeufeld(v));
+
+    // ── Phase 2.2 — polarization + double-peak toggles ─────────────
+    $('labDoublePeak').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.labDoublePeak) app.toggleDoublePeak();
+    });
+    $('showPolVectors').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showPolVectors) app.togglePolVectors();
+    });
+    bindRange('s-lab-polmax', 'v-lab-polmax',
+        (v) => `${(v*100).toFixed(1)} %  ${v < 0.05 ? '(weak)' : v < 0.10 ? '(LAB-low)' : v < 0.18 ? '(typical LAB)' : '(extreme)'}`,
+        (v) => app.setLabPolMax(v));
+
+    // Snap every LAB-related DOM slider to the live state. Called after a
+    // preset application so the panel readouts agree with what's on screen.
+    function syncLabPanelToState() {
+        const s = app.state;
+        const setRange = (id, val, valId, label) => {
+            const el = $(id); if (!el) return;
+            el.value = val;
+            if (valId && label != null) $(valId).innerHTML = label;
+        };
+        $('showLab').checked         = !!s.showLab;
+        $('labMechanism').value      = String(s.labMechanism | 0);
+        setRange('s-lab-r',       s.labRadiusKpc,       'v-lab-r',       `${(s.labRadiusKpc|0)} kpc`);
+        setRange('s-lab-rin',     s.labInnerKpc,        'v-lab-rin',     `${s.labInnerKpc.toFixed(1)} kpc`);
+        setRange('s-lab-alpha',   s.labAlpha,           'v-lab-alpha',   s.labAlpha.toFixed(2));
+        setRange('s-lab-clump',   s.labClump,           'v-lab-clump',   s.labClump.toFixed(2));
+        setRange('s-lab-fil',     s.labFilament,        'v-lab-fil',     s.labFilament.toFixed(2));
+        setRange('s-lab-i',       s.labIntensity,       'v-lab-i',       `${s.labIntensity.toFixed(2)}×`);
+        setRange('s-lab-z',       s.labZ,               'v-lab-z',       `z = ${s.labZ.toFixed(3)}`);
+        setRange('s-lab-vout',    s.labOutflowKms,      'v-lab-vout',    `${(s.labOutflowKms|0)} km/s`);
+        setRange('s-lab-beta',    s.labOutflowBeta,     'v-lab-beta',    s.labOutflowBeta.toFixed(2));
+        setRange('s-lab-nhi',     s.labLogNHI,          'v-lab-nhi',     s.labLogNHI.toFixed(1));
+        setRange('s-lab-neufeld', s.labNeufeld,         'v-lab-neufeld', s.labNeufeld.toFixed(2));
+        setRange('s-lab-polmax',  s.labPolMax,          'v-lab-polmax',  `${(s.labPolMax*100).toFixed(1)} %`);
+        $('labDoublePeak').checked = !!s.labDoublePeak;
+    }
+
+    $('btnCantalupo').addEventListener('click', () => {
+        app.applyLabPreset('cantalupo');
+        syncLabPanelToState();
+    });
+    $('btnLabReset').addEventListener('click', () => {
+        app.applyLabPreset('slug-default');
+        syncLabPanelToState();
+    });
 
     // ── Disk warp (B5) ───────────────────────────────────────────
     $('diskWarp').addEventListener('change', (e) => {

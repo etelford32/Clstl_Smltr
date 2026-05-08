@@ -123,6 +123,10 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         labLogNHI:        20.5,        // log10 central N_HI [cm⁻²] — DLA-like
         labTempK:         1.0e4,       // gas temperature
         labNeufeld:       0.7,         // 0..1 strength of resonance suppression
+        // Phase 2.2 — anisotropic scattering / polarization / double peak
+        showPolVectors:   false,
+        labPolMax:        0.12,        // f_pol cap (~ 12 % typical for Lyα LABs)
+        labDoublePeak:    true,        // render Neufeld twin Gaussians by default
         // Pre-converted constant: 1 M expressed in kpc for TON 618.
         mInKpc:           M_IN_KPC,
 
@@ -239,6 +243,9 @@ export async function boot({ canvas, hud, minimapCanvas }) {
             labTempK:         state.labTempK,
             labNeufeld:       state.labNeufeld,
             mInKpc:           state.mInKpc,
+            showPolVectors:   state.showPolVectors,
+            labPolMax:        state.labPolMax,
+            labDoublePeak:    state.labDoublePeak,
         });
         backend.draw();
         updateHUD(hud, state, backend, name);
@@ -465,6 +472,85 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         setLabLogNHI(v)       { state.labLogNHI = Math.max(17, Math.min(23, v)); state.dirty = true; },
         setLabTempK(v)        { state.labTempK = Math.max(1e3, Math.min(1e6, v)); state.dirty = true; },
         setLabNeufeld(v)      { state.labNeufeld = Math.max(0, Math.min(1, v)); state.dirty = true; },
+        togglePolVectors()    { state.showPolVectors = !state.showPolVectors; state.dirty = true; return state.showPolVectors; },
+        toggleDoublePeak()    { state.labDoublePeak  = !state.labDoublePeak;  state.dirty = true; return state.labDoublePeak; },
+        setLabPolMax(v)       { state.labPolMax = Math.max(0, Math.min(0.5, v)); state.dirty = true; },
+        // ── LAB scenario presets ──────────────────────────────────
+        // Snapshot+apply a coherent set of LAB parameters mapped to a named
+        // observed system. Forces the LAB on so the preset is immediately
+        // visible, and refreshes the panel sliders so the readouts agree.
+        applyLabPreset(name) {
+            const presets = {
+                // UM287's "Slug" (Cantalupo et al. 2014): 460 kpc cosmic-web
+                // filament illuminated by a hyperluminous quasar. Strongly
+                // anisotropic, photoionized, low intrinsic outflow — the
+                // morphology is set by the foreground filament, not winds.
+                'cantalupo': {
+                    showLab:       true,
+                    labMechanism:  1,                 // photoionization
+                    labRadiusKpc:  460,
+                    labInnerKpc:   8,
+                    labAlpha:      1.5,               // shallower than default — extends outward
+                    labClump:      0.85,              // strong substructure
+                    labFilament:   0.95,              // extreme cosmic-web alignment
+                    labFilamentAxis: [0.6, 0.0, 0.8], // the canonical Slug orientation
+                    labOutflowKms: 200,               // quiescent
+                    labOutflowBeta: 0.4,
+                    labLogNHI:     20.7,              // sub-DLA / DLA boundary
+                    labTempK:      1.5e4,
+                    labNeufeld:    0.55,
+                    labIntensity:  1.20,
+                    labZ:          2.279,             // UM287's redshift
+                    labDoublePeak: true,
+                    labPolMax:     0.10,
+                },
+                // Reset to Phase 2.1 Slug-class defaults.
+                'slug-default': {
+                    showLab:       true,
+                    labMechanism:  1,
+                    labRadiusKpc:  460,
+                    labInnerKpc:   8,
+                    labAlpha:      1.8,
+                    labClump:      0.55,
+                    labFilament:   0.45,
+                    labFilamentAxis: [0.6, 0.0, 0.8],
+                    labOutflowKms: 600,
+                    labOutflowBeta: 0.5,
+                    labLogNHI:     20.5,
+                    labTempK:      1.0e4,
+                    labNeufeld:    0.7,
+                    labIntensity:  0.85,
+                    labZ:          2.219,
+                    labDoublePeak: true,
+                    labPolMax:     0.12,
+                },
+                // Steidel-class smaller LAB at z ≈ 3.1 (LAB-1 / SSA22).
+                'steidel': {
+                    showLab:       true,
+                    labMechanism:  0,                 // cooling-dominated
+                    labRadiusKpc:  120,
+                    labInnerKpc:   4,
+                    labAlpha:      2.0,
+                    labClump:      0.65,
+                    labFilament:   0.30,
+                    labFilamentAxis: [0.0, 0.0, 1.0],
+                    labOutflowKms: 350,
+                    labOutflowBeta: 0.6,
+                    labLogNHI:     20.2,
+                    labTempK:      1.0e4,
+                    labNeufeld:    0.7,
+                    labIntensity:  0.95,
+                    labZ:          3.10,
+                    labDoublePeak: true,
+                    labPolMax:     0.08,
+                },
+            };
+            const p = presets[name];
+            if (!p) return false;
+            for (const key in p) state[key] = (Array.isArray(p[key])) ? p[key].slice() : p[key];
+            state.dirty = true;
+            return true;
+        },
         triggerQPOFlare(strength = 1.0, halfLifeSeconds = 2.5) {
             // Half-life in *real* seconds of the user's clock; converts to a
             // decay rate. Spawns a flare at the inner edge that the QPO loop
