@@ -320,28 +320,9 @@ canvas { display:block; width:100% !important; height:100% !important; }
 #hud .label { color:#777; font-size:10px; }
 #hud .val { color:#a0d8ff; font-weight:600; }
 #hud .sep { border-top:1px solid rgba(255,255,255,0.07); margin:6px 0; }
-/* Collapse toggle (mobile only) */
-#hud-collapse {
-    display:none; position:absolute; top:6px; right:8px;
-    background:rgba(160,100,255,0.15); border:1px solid rgba(160,120,255,0.35);
-    color:#c090ff; padding:2px 8px; border-radius:5px; cursor:pointer;
-    font-family:inherit; font-size:11px; pointer-events:auto;
-}
-body.hud-collapsed #hud .hud-extra { display:none; }
-body.hud-collapsed #hud { padding:6px 32px 6px 12px; min-width:0; }
-body.hud-collapsed #hud h3 { display:none; }
+/* (Legacy #hud-collapse removed — gp-min-btn provides minimize) */
 
-/* ─── Zoom Toolbar (bottom-centre) ──────────────────────────── */
-#zoom-bar {
-    position:absolute; bottom:18px; left:50%; transform:translateX(-50%);
-    display:flex; gap:6px; z-index:100;
-    max-width:calc(100vw - 24px); overflow-x:auto; overflow-y:hidden;
-    -webkit-overflow-scrolling:touch;
-    /* Hide scrollbar but keep scrolling functional on mobile */
-    scrollbar-width:none;
-    top: 14px; left: 14px;
-    width: 246px;
-}
+/* ─── Zoom Toolbar (bottom-centre) — see consolidated rules below ─ */
 #hud .gp-body { padding: var(--sp-4) var(--sp-6) var(--sp-5); }
 #hud .hud-row {
     display: flex; align-items: baseline; justify-content: space-between;
@@ -366,31 +347,27 @@ body.hud-collapsed #hud h3 { display:none; }
 
 /* ─── Zoom Toolbar (bottom-centre) ──────────────────────────── */
 #zoom-bar {
+    position: absolute;
     bottom: 18px; left: 50%;
     /* `transform` works alongside left:50% only until the user drags.
        After drag, JS sets explicit left/top and clears the transform. */
     transform: translateX(-50%);
     max-width: calc(100vw - 28px);
+    z-index: 100;
 }
 #zoom-bar.gp-positioned { transform: none; }   /* set by JS once dragged */
 #zoom-bar .gp-body {
     padding: var(--sp-3) var(--sp-4);
     display: flex; gap: var(--sp-3); flex-wrap: wrap;
     align-items: center;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    max-width: calc(100vw - 28px);
 }
-#zoom-bar::-webkit-scrollbar { display:none; }
+#zoom-bar .gp-body::-webkit-scrollbar { display: none; }
 #zoom-bar button {
-    background:rgba(0,0,0,0.75); border:1px solid rgba(255,255,255,0.18);
-    border-radius:6px; color:#ccc; padding:6px 14px; font-size:11px;
-    cursor:pointer; font-family:inherit; transition:all .18s;
-    backdrop-filter:blur(8px); flex-shrink:0; white-space:nowrap;
-    min-height:32px;
-}
-#zoom-bar button:hover { background:rgba(160,100,255,0.25); border-color:#a060ff; color:#fff; }
-#zoom-bar button.active { background:rgba(160,100,255,0.35); border-color:#c090ff; color:#fff; font-weight:600; }
-/* Show/hide spans within zoom buttons based on screen size */
-.zb-long { display:inline; }
-.zb-short { display:none; }
     background: var(--c-accent-soft);
     border: 1px solid var(--c-accent-border);
     border-radius: var(--r-sm);
@@ -401,6 +378,8 @@ body.hud-collapsed #hud h3 { display:none; }
     transition: background var(--t-snap), border-color var(--t-snap),
                 color var(--t-snap), transform var(--t-fast);
     flex-shrink: 0;
+    white-space: nowrap;
+    min-height: 32px;
 }
 #zoom-bar button:hover {
     background: rgba(var(--c-accent-rgb), .25);
@@ -414,6 +393,9 @@ body.hud-collapsed #hud h3 { display:none; }
     color: #fff; font-weight: 600;
     box-shadow: 0 0 0 1px var(--c-accent-glow) inset;
 }
+/* Show/hide spans within zoom buttons based on screen size */
+.zb-long { display:inline; }
+.zb-short { display:none; }
 .zb-sep {
     display: inline-block; width: 1px; height: 18px;
     background: var(--c-border-soft);
@@ -477,6 +459,62 @@ body.hud-collapsed #hud h3 { display:none; }
 #coord-display .cd-row .cd-v {
     color: var(--c-accent); font-weight: 600;
     font-variant-numeric: tabular-nums;
+}
+
+/* ─── Camera controls (right edge, vertical stack) ───────────── */
+#cam-controls {
+    position: absolute;
+    right: 14px; top: 50%; transform: translateY(-50%);
+    display: flex; flex-direction: column; gap: 6px;
+    z-index: 110;
+    pointer-events: auto;
+}
+.cam-btn {
+    width: 38px; height: 38px;
+    background: var(--c-surface-1);
+    border: 1px solid var(--c-accent-border);
+    border-radius: var(--r-md);
+    color: var(--c-accent);
+    font-size: 17px; font-weight: 700;
+    line-height: 1; cursor: pointer; font-family: inherit;
+    backdrop-filter: var(--blur-glass);
+    -webkit-backdrop-filter: var(--blur-glass);
+    box-shadow: var(--shadow-panel);
+    display: flex; align-items: center; justify-content: center;
+    transition: background var(--t-snap), border-color var(--t-snap),
+                color var(--t-snap), transform var(--t-fast);
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+}
+.cam-btn:hover {
+    background: rgba(var(--c-accent-rgb), .22);
+    border-color: var(--c-accent-border-hi);
+    color: #fff;
+}
+.cam-btn:active { transform: scale(.92); }
+
+/* ─── Sidebar toggle (mobile only) — fixed top-right ─────────── */
+#sidebar-toggle {
+    display: none;   /* shown on phone via media query */
+    position: absolute;
+    top: 14px; right: 14px;
+    width: 40px; height: 40px;
+    background: var(--c-surface-1);
+    border: 1px solid var(--c-accent-border);
+    border-radius: var(--r-md);
+    color: var(--c-accent);
+    font-size: 17px; cursor: pointer; font-family: inherit;
+    align-items: center; justify-content: center;
+    backdrop-filter: var(--blur-glass);
+    -webkit-backdrop-filter: var(--blur-glass);
+    box-shadow: var(--shadow-panel);
+    z-index: 510;
+    -webkit-tap-highlight-color: transparent;
+}
+#sidebar-toggle:hover, #sidebar-toggle.is-active {
+    background: rgba(var(--c-accent-rgb), .22);
+    border-color: var(--c-accent-border-hi);
+    color: #fff;
 }
 
 /* ─── Sun-orbit time-control panel ───────────────────────────── */
@@ -569,13 +607,19 @@ body.hud-collapsed #hud h3 { display:none; }
 
 /* ─── Tablet (≤768 px) ──────────────────────────────────────── */
 @media (max-width:768px) {
-    #hud { font-size:11px; padding:8px 12px; min-width:160px; }
-    #hud h3 { font-size:13px; }
-    #hud-collapse { display:block; }
+    #hud { font-size:11px; min-width:160px; max-width:calc(100vw - 80px); }
+    #hud .gp-title { font-size:12px; }
     #zoom-bar button { padding:8px 12px; font-size:11px; min-height:38px; }
     .zb-long { display:none; }
     .zb-short { display:inline; }
-    #coord-display { font-size:10px; padding:5px 9px; }
+    #coord-display { font-size:10px; }
+    #object-profile { max-width:calc(100vw - 28px); top:auto; bottom:138px;
+                      left:50%; transform:translateX(-50%); width:auto;
+                      max-height:38vh; overflow-y:auto; }
+    #object-profile.visible { transform:translateX(-50%); }
+    /* Camera controls: shift below the (potentially visible) sidebar toggle */
+    #cam-controls { top:auto; transform:none; bottom:78px; right:10px; }
+    .cam-btn { width:36px; height:36px; font-size:16px; }
 }
 
 /* ─── Phone portrait (≤600 px) ─────────────────────────────── */
@@ -584,24 +628,30 @@ body.hud-collapsed #hud h3 { display:none; }
     #coord-display { display:none; }
     /* Hide the full Sun-time panel; replace with the mini bar */
     #sun-time-panel { display:none; }
-    #sun-time-mini  { display:block; }
-    /* HUD starts collapsed on phones — Click ⤢ to expand */
-    body.is-mobile #hud { padding:5px 30px 5px 11px; min-width:0;
-                          font-size:11px; max-width:calc(100vw - 70px); }
-    body.is-mobile.hud-expanded #hud { padding:9px 32px 9px 13px; }
-    #hud-collapse { top:4px; right:6px; padding:2px 7px; font-size:10px; }
-    /* Sidebar: full-width drawer slides in from the right */
+    #sun-time-mini  { display:block; bottom:72px; width:calc(100vw - 110px);
+                      max-width:380px; left:auto; right:60px; transform:none; }
+    /* HUD scales down further on phones; users can minimize via gp-min-btn */
+    #hud { font-size:11px; max-width:calc(100vw - 70px); top:8px; left:8px; }
+    /* Hide secondary "Weather" link on small phones (still in nav menu) */
+    #btn-sw { display:none; }
+    /* Sidebar: full-width drawer slides in from the right via the toggle */
     #sidebar { position:absolute; right:0; top:0; bottom:0; width:88vw;
                max-width:340px; min-width:0; box-shadow:-6px 0 20px rgba(0,0,0,0.45);
                margin-right:0; transition:transform .3s ease, opacity .3s ease;
-               z-index:500; }
-    #sidebar.collapsed { transform:translateX(100%); opacity:0;
-                         pointer-events:none; margin-right:0; }
-    #sidebar-toggle { padding:8px 12px; font-size:13px; min-height:40px; }
+               z-index:500; transform:translateX(100%); opacity:0;
+               pointer-events:none; }
+    #sidebar.is-open { transform:translateX(0); opacity:1; pointer-events:auto; }
+    #sidebar-toggle { display:flex !important; }
+    /* Camera controls: row of 3 along left edge above zoom-bar */
+    #cam-controls { flex-direction:row; right:auto; left:8px;
+                    bottom:72px; top:auto; transform:none; gap:4px; }
+    .cam-btn { width:34px; height:34px; font-size:15px; }
     /* Bigger zoom-bar buttons; drop the Solar Sys label */
     #zoom-bar { gap:4px; bottom:14px; }
     #zoom-bar button { padding:8px 10px; font-size:11px; min-height:38px; }
     #zoom-solar-system span:not([class]) { display:none; }   /* keep just the ☀️ */
+    /* Object profile centred above the bottom toolbar stack */
+    #object-profile { bottom:160px; }
 }
 
 /* ─── Small phone (≤380 px) ────────────────────────────────── */
@@ -609,8 +659,11 @@ body.hud-collapsed #hud h3 { display:none; }
     #hud { font-size:10px; }
     #hud h3 { font-size:12px; }
     #zoom-bar button { padding:7px 8px; font-size:10px; min-height:34px; }
-    #sun-time-mini { font-size:10px; padding:5px 8px; bottom:54px; }
+    #sun-time-mini { font-size:10px; padding:5px 8px; bottom:64px;
+                     width:calc(100vw - 100px); }
     #sun-time-mini .stm-btn { padding:5px 9px; font-size:10px; min-height:28px; }
+    #cam-controls { bottom:64px; }
+    .cam-btn { width:30px; height:30px; font-size:14px; }
 }
 
 /* ─── Landscape phone (short height) ────────────────────────── */
@@ -620,6 +673,7 @@ body.hud-collapsed #hud h3 { display:none; }
     #zoom-bar { bottom:10px; gap:4px; }
     #zoom-bar button { padding:5px 9px; font-size:10px; min-height:28px; }
     #sun-time-mini { display:none; }   /* not enough vertical room */
+}
 @media (max-width: 1024px) {
     #sun-time-panel {
         width: 240px; top: auto; bottom: 64px;
@@ -997,26 +1051,6 @@ body.hud-collapsed #hud h3 { display:none; }
 <div id="app">
     <div id="canvas-wrap" data-preview-stage="1">
         <!-- HUD top-left -->
-        <div id="hud">
-            <button id="hud-collapse" type="button" title="Toggle full HUD">⤢</button>
-            <h3>⬡ Galactic Map</h3>
-            <div><span class="label">Selected: </span><span class="val" id="hud-name">—</span></div>
-            <div><span class="label">Dist from Sun: </span><span class="val" id="hud-dist">—</span></div>
-            <div class="hud-extra"><div class="sep"></div>
-            <div><span class="label">Galactic l: </span><span class="val" id="hud-l">—</span></div>
-            <div><span class="label">Galactic b: </span><span class="val" id="hud-b">—</span></div>
-            <div class="sep"></div>
-            <div><span class="label">Dist from GC: </span><span class="val" id="hud-gc">—</span></div>
-            <div title="Real cosmological distance from the Sun corresponding to the camera's position (inverse log-mapping beyond 60 kly)">
-                <span class="label">Cam → Sun: </span><span class="val" id="hud-view">—</span>
-            </div>
-            <div class="sep"></div>
-            <div title="Time elapsed in the Sun's current orbit around Sgr A*. One full Galactic year ≈ 225 Myr.">
-                <span class="label">Galactic year: </span><span class="val" id="hud-galactic-yr">—</span>
-            </div>
-            <div title="Sun's orbital phase around Sgr A* — 0% / 100% places the Sun at the +x side of the disk (current epoch).">
-                <span class="label">Orbital phase: </span><span class="val" id="hud-galactic-phase">—</span>
-            </div></div>
         <div id="hud" class="gp-panel" data-panel-key="hud">
             <div class="gp-header" data-drag-handle>
                 <span class="gp-grip" aria-hidden="true"></span>
@@ -1089,6 +1123,22 @@ body.hud-collapsed #hud h3 { display:none; }
                     <span title="One full orbit of the Sun around Sgr A* — a Galactic year."><span class="stp-rk">period </span><span class="stp-rv">225 Myr</span></span>
                     <span title="Vertical oscillation period of the Sun crossing the galactic disk."><span class="stp-rk">bobble </span><span class="stp-rv">67 Myr</span></span>
                 </div>
+            </div>
+        </div>
+
+        <!-- Mobile mini sun-time bar — replaces #sun-time-panel on phones -->
+        <div id="sun-time-mini" aria-label="Sun orbit time controls (compact)">
+            <div class="stm-row">
+                <button type="button" id="stm-live" class="stm-btn active"
+                        title="Snap back to today and resume live advance">▶ Live</button>
+                <input id="stm-scrub" type="range" min="-450" max="450"
+                       step="0.1" value="0" aria-label="Time scrub">
+                <span class="stm-val" id="stm-scrub-val">0 Myr</span>
+            </div>
+            <div class="stm-row" style="font-size:10px; color:var(--c-text-muted); justify-content:space-between;">
+                <span>v☉ <span class="stm-val" id="stm-vel">220.0 km/s</span></span>
+                <span>Z <span class="stm-val" id="stm-z">+65 ly</span></span>
+                <span>t <span class="stm-val" id="stm-speed">3.75 Myr/s</span></span>
             </div>
         </div>
 
@@ -1180,6 +1230,20 @@ body.hud-collapsed #hud h3 { display:none; }
                 </div>
             </div>
         </div>
+
+        <!-- Camera controls (right side) — zoom in/out + recenter -->
+        <div id="cam-controls" aria-label="Camera controls">
+            <button type="button" class="cam-btn" id="cam-zoom-in"
+                    title="Zoom camera in" aria-label="Zoom in">+</button>
+            <button type="button" class="cam-btn" id="cam-zoom-out"
+                    title="Zoom camera out" aria-label="Zoom out">−</button>
+            <button type="button" class="cam-btn" id="cam-recenter"
+                    title="Recenter on current view preset" aria-label="Recenter view">⌖</button>
+        </div>
+
+        <!-- Sidebar toggle — only shown on mobile to slide drawer in/out -->
+        <button type="button" id="sidebar-toggle" aria-label="Toggle catalog panel"
+                title="Open / close catalog">🛰</button>
     </div>
 
     <!-- Sidebar — catalog, info, display toggles, legend, reference -->
@@ -8622,21 +8686,18 @@ document.getElementById('tog-sun-orbit').addEventListener('change', e => {
     }
 })();
 
-// ── HUD collapse toggle (mobile) ───────────────────────────────────────
-(function wireHudCollapse() {
-    const btn = document.getElementById('hud-collapse');
-    if (!btn) return;
-    btn.addEventListener('click', () => {
-        document.body.classList.toggle('hud-collapsed');
-        const collapsed = document.body.classList.contains('hud-collapsed');
-        btn.textContent = collapsed ? '⤡' : '⤢';
-        document.body.classList.toggle('hud-expanded', !collapsed);
+// ── HUD auto-minimize on phone (uses gp-panel chrome) ───────────────────
+(function autoMinimizeOnPhone() {
+    if (window.innerWidth > 600) return;
+    const STORAGE_PREFIX = 'pp.gmap.panel.';
+    // Only auto-minimize panels the user hasn't explicitly interacted with
+    ['hud', 'sun-time', 'object-profile', 'zoom-bar', 'coord-display'].forEach(key => {
+        try {
+            if (localStorage.getItem(STORAGE_PREFIX + key)) return;
+        } catch { /* ignore */ }
+        const panel = document.querySelector('[data-panel-key="' + key + '"]');
+        if (panel && key !== 'zoom-bar') panel.classList.add('minimized');
     });
-    // Default-collapsed on phones to keep the canvas open
-    if (window.innerWidth <= 600) {
-        document.body.classList.add('hud-collapsed');
-        btn.textContent = '⤡';
-    }
 })();
 document.getElementById('tog-showpieces').addEventListener('change', e => {
     const v = e.target.checked;
@@ -8659,6 +8720,67 @@ document.getElementById('zoom-galaxy').addEventListener('click',   () => { setIg
 document.getElementById('zoom-edge_on').addEventListener('click',  () => { setIgmFocus(null); flyTo('edge_on'); });
 document.getElementById('zoom-universe').addEventListener('click', () => flyTo('universe', 2200));
 document.getElementById('igm-back-btn').addEventListener('click',  () => { setIgmFocus(null); flyTo('galaxy', 2400); });
+
+// ══════════════════════════════════════════════════════════════════════════
+//  CAMERA CONTROLS — visible +/− zoom buttons and recenter
+//  Dolly camera along the view ray (preserve orbit target). Recenter snaps
+//  back to the active zoom preset.
+// ══════════════════════════════════════════════════════════════════════════
+(function wireCamControls() {
+    const zin  = document.getElementById('cam-zoom-in');
+    const zout = document.getElementById('cam-zoom-out');
+    const recn = document.getElementById('cam-recenter');
+    if (!zin || !zout || !recn) return;
+
+    // Smoothly dolly camera toward / away from orbit target.
+    // factor < 1 zooms in, factor > 1 zooms out.
+    function dolly(factor) {
+        if (flyRaf) { cancelAnimationFrame(flyRaf); flyRaf = null; }
+        autoOrbit = null;
+        const tgt = controls.target.clone();
+        const offset = camera.position.clone().sub(tgt);
+        const newDist = Math.max(controls.minDistance,
+                                 Math.min(controls.maxDistance,
+                                          offset.length() * factor));
+        offset.setLength(newDist);
+        const dest = tgt.clone().add(offset);
+        flyToPos(dest, tgt, 320);
+    }
+
+    zin.addEventListener('click',  () => dolly(0.6));
+    zout.addEventListener('click', () => dolly(1.7));
+
+    // Recenter: re-fly to the currently-active preset, restoring framing
+    recn.addEventListener('click', () => {
+        const preset = currentZoom && ZOOM_PRESETS[currentZoom] ? currentZoom : 'galaxy';
+        setIgmFocus(null);
+        flyTo(preset, 1200);
+    });
+})();
+
+// ══════════════════════════════════════════════════════════════════════════
+//  SIDEBAR TOGGLE (mobile drawer)
+//  Slides the catalog drawer in/out from the right edge on phones.
+// ══════════════════════════════════════════════════════════════════════════
+(function wireSidebarToggle() {
+    const toggle = document.getElementById('sidebar-toggle');
+    const sidebar = document.getElementById('sidebar');
+    if (!toggle || !sidebar) return;
+    toggle.addEventListener('click', () => {
+        const open = sidebar.classList.toggle('is-open');
+        toggle.classList.toggle('is-active', open);
+        toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    // Close drawer when user taps a star list item, so they can see the result
+    sidebar.addEventListener('click', (e) => {
+        if (window.innerWidth > 600) return;
+        const item = e.target.closest('.star-item, .gp-section-hdr');
+        if (item && e.target.closest('.star-item')) {
+            sidebar.classList.remove('is-open');
+            toggle.classList.remove('is-active');
+        }
+    });
+})();
 
 // ══════════════════════════════════════════════════════════════════════════
 //  DRAGGABLE / MINIMIZABLE PANEL CHROME
@@ -9062,13 +9184,10 @@ function updateLabelScales() {
 function reapplyResponsiveClasses() {
     const w = window.innerWidth;
     document.body.classList.toggle('is-mobile', w <= 600);
-    // Auto-collapse the HUD when crossing into phone width (don't auto-expand
-    // — preserves user's manual toggle if they enlarge the window).
-    if (w <= 600 && !document.body.classList.contains('hud-collapsed')
-        && !document.body.classList.contains('hud-expanded')) {
-        document.body.classList.add('hud-collapsed');
-        const btn = document.getElementById('hud-collapse');
-        if (btn) btn.textContent = '⤡';
+    // Update camera aspect-aware FOV when resizing/rotating mobile devices
+    if (typeof camera !== 'undefined' && typeof adaptiveFovV === 'function') {
+        camera.fov = adaptiveFovV();
+        camera.updateProjectionMatrix();
     }
 }
 function handleResize() {
