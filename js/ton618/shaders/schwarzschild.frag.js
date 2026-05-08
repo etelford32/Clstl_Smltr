@@ -98,6 +98,12 @@ uniform float u_lab_filament;            // 0..1 cosmic-web-aligned anisotropy
 uniform vec3  u_lab_filament_axis;       // unit vector — major filament direction
 uniform float u_M_in_kpc;                // 1 unit M expressed in kpc (TON 618: ~3.16e-6)
 uniform int   u_lab_mechanism;           // 0=cooling, 1=photoionization, 2=shock
+uniform float u_lab_z;                   // cosmological redshift (TON 618 ≈ 2.219)
+uniform float u_lab_outflow_kms;         // bulk radial outflow at r = r_LAB
+uniform float u_lab_outflow_beta;        // v(r) = v_out (r/r_LAB)^β (β ≈ 0.5 accelerating)
+uniform float u_lab_log_NHI;             // log10 central column density [cm⁻²], 18..22
+uniform float u_lab_temp_K;              // gas temperature, default 1e4 K
+uniform float u_lab_neufeld;             // 0..1 blend: 0 = pure emission, 1 = full Neufeld suppression
 
 // ── B1 — Vertical disk structure (Shakura-Sunyaev slab) ─────────────
 uniform float u_disk_h_over_r;           // characteristic H/r at the inner edge (0..0.4)
@@ -1232,6 +1238,78 @@ float lab_emissivity(vec3 p_kpc, float rho) {
     return rho * rho;
 }
 
+// ---------------------------------------------------------------------------
+// Lyα resonance physics (Neufeld 1990; Adams 1972).
+// ---------------------------------------------------------------------------
+// In an optically-thick, static, uniform slab of neutral hydrogen the line-
+// center optical depth τ₀ controls how many resonant scatters a Lyα photon
+// undergoes before it diffuses out. Neufeld's analytical solution gives a
+// frequency-redistribution profile peaked at Δν = ±0.92 (a τ₀)^{1/3} Doppler
+// widths, with an effective escape probability
+//
+//     P_esc(τ₀) ≈ 1 / (1 + 1.8 (a τ₀)^{1/3})       (Bonilha 1979 fit)
+//
+// where a ≈ 4.7 × 10⁻⁴ (T / 10⁴ K)^{−1/2} is the Voigt parameter. Real LABs
+// see τ₀ ~ 10⁴–10⁷, P_esc ~ 0.05–0.5. We use the local density as a proxy
+// for the column density crossed by an emerging photon, scaled by the
+// user-set log_NHI so the central core is the densest sightline.
+float lab_neufeld_pesc(float rho_local) {
+    if (u_lab_neufeld <= 0.0) return 1.0;
+    // Voigt parameter at gas temperature T.
+    float a_voigt = 4.7e-4 * sqrt(1.0e4 / max(u_lab_temp_K, 1.0e3));
+    // Local "column" proxy: density × characteristic cell size, scaled to
+    // the central-column slider. rho_local is normalized so ρ ~ 1 at r_inner.
+    float NHI_local = pow(10.0, u_lab_log_NHI) * rho_local;
+    // Line-center cross-section σ₀ = 5.9e-14 cm² at T=10⁴K. Use a
+    // dimensionless τ proxy: column × σ₀ scale, log-flattened.
+    float tau0  = max(NHI_local * 5.9e-14, 1.0);
+    float aTau3 = pow(a_voigt * tau0, 1.0 / 3.0);
+    float P     = 1.0 / (1.0 + 1.8 * aTau3);
+    // Blend with pure emission per the user slider.
+    return mix(1.0, P, u_lab_neufeld);
+}
+
+// CIE-fit cheap wavelength-to-linear-RGB map for the visible window
+// 380–740 nm. Outside that window we fade to a deep violet UV proxy
+// (Lyα at z=2.219 sits at 391 nm — just inside visible).
+vec3 wavelength_to_rgb(float lam_nm) {
+    float r = 0.0, g = 0.0, b = 0.0;
+    if (lam_nm < 380.0) {
+        // UV: violet with rapid fade
+        float w = max(0.0, 1.0 - (380.0 - lam_nm) / 40.0);
+        r = 0.55 * w; g = 0.10 * w; b = 1.0 * w;
+    } else if (lam_nm < 440.0) {
+        r = -(lam_nm - 440.0) / 60.0;
+        g = 0.0;
+        b = 1.0;
+    } else if (lam_nm < 490.0) {
+        r = 0.0;
+        g = (lam_nm - 440.0) / 50.0;
+        b = 1.0;
+    } else if (lam_nm < 510.0) {
+        r = 0.0;
+        g = 1.0;
+        b = -(lam_nm - 510.0) / 20.0;
+    } else if (lam_nm < 580.0) {
+        r = (lam_nm - 510.0) / 70.0;
+        g = 1.0;
+        b = 0.0;
+    } else if (lam_nm < 645.0) {
+        r = 1.0;
+        g = -(lam_nm - 645.0) / 65.0;
+        b = 0.0;
+    } else if (lam_nm < 781.0) {
+        r = 1.0;
+        g = 0.0;
+        b = 0.0;
+    }
+    // Photopic edge attenuation (eye sensitivity rolls off below 420 / above 700).
+    float att = 1.0;
+    if      (lam_nm < 420.0) att = 0.30 + 0.70 * (lam_nm - 380.0) / 40.0;
+    else if (lam_nm > 700.0) att = 0.30 + 0.70 * (780.0 - lam_nm) / 80.0;
+    return vec3(r, g, b) * clamp(att, 0.0, 1.0);
+}
+
 // Volumetric raymarch through the LAB starting at the geodesic escape point.
 //   pos_M  — Cartesian position of the escape (in M units).
 //   dir    — unit photon direction at escape (asymptotic direction toward source).
@@ -1241,29 +1319,48 @@ vec3 lab_volume_emission(vec3 pos_M, vec3 dir) {
 
     // Convert to kpc once; march in kpc along the ray's path length s.
     vec3 pos_kpc = pos_M * u_M_in_kpc;
-    // Path length needed to traverse the LAB: ray could enter near r₀ and
-    // exit near +2 r_LAB on the far side (when the BH is between us and
-    // the rim). 2.5× the outer radius is a conservative upper bound.
     float s_max = 2.5 * u_lab_radius_kpc;
     const int N = 48;
     float ds = s_max / float(N);
     vec3 acc = vec3(0.0);
-    // Lyα observer-frame color baseline (Phase 2.1 part 3 will replace this
-    // with a velocity-shifted spectral mapping). At z = 2.219 the line
-    // shifts to λ_obs ≈ 391 nm — a deep violet, with a faint UV tail that
-    // we approximate by leaning the blue heavily.
-    vec3 color_base = vec3(0.30, 0.20, 1.10);
+
+    // Rest-frame Lyα at 121.6 nm, redshifted to the user's z. 1+z applied
+    // once at line-center; per-cell Doppler from outflow rides on top.
+    float lam0_obs_nm = 121.567 * (1.0 + u_lab_z);
+    const float C_KMS = 299792.458;
+
+    // (1+z)⁻⁴ surface-brightness dimming. For TON 618 (z≈2.22) this is
+    // 1/(3.219)⁴ ≈ 0.0093 — already an order of magnitude. We pre-multiply
+    // it into the integral so the user's intensity slider lives in O(1).
+    float dim_z4 = 1.0 / pow(1.0 + u_lab_z, 4.0);
+
     for (int i = 0; i < N; ++i) {
         float s = (float(i) + 0.5) * ds;
         vec3 q  = pos_kpc + dir * s;
         float rho = lab_density(q);
         if (rho <= 0.0) continue;
-        float j = lab_emissivity(q, rho);
-        acc += color_base * j * ds;
+
+        // Local outflow speed: v(r) = v_out · (r/r_LAB)^β.
+        float r_q = length(q);
+        float vmag_kms = u_lab_outflow_kms
+                       * pow(clamp(r_q / max(u_lab_radius_kpc, 1.0e-3), 0.0, 1.0),
+                             max(u_lab_outflow_beta, 0.0));
+        // LOS Doppler (cell receding from observer along dir → +ve shift).
+        // Photon arrived at observer along (-dir); cell velocity along q̂.
+        // For an observer interior to the halo, q̂ · (-dir) ≈ −1 for nearby
+        // cells, ≈ +1 for far-side cells (still receding by homologous flow).
+        float v_los_kms = -vmag_kms * dot(normalize(q), dir);
+        float lam_obs   = lam0_obs_nm * (1.0 + v_los_kms / C_KMS);
+        vec3  cell_col  = wavelength_to_rgb(lam_obs);
+
+        // Resonance escape multiplier (denser cells radiate less efficiently
+        // because their photons random-walk longer before diffusing out).
+        float P_esc = lab_neufeld_pesc(rho);
+        float j     = lab_emissivity(q, rho) * P_esc;
+
+        acc += cell_col * j * ds;
     }
-    // Cosmological surface-brightness dimming (1+z)⁻⁴ is folded into the
-    // intensity slider for now; an explicit z-aware mapping ships in part 3.
-    return acc * u_lab_intensity;
+    return acc * u_lab_intensity * dim_z4 * 100.0;   // 100× restores O(1) under the (1+z)⁻⁴ dimming
 }
 
 vec3 outgoing_direction(float y[8]) {

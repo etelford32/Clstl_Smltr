@@ -116,6 +116,13 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         labFilament:      0.45,        // 0..1 cosmic-web anisotropy
         labFilamentAxis:  [0.6, 0.0, 0.8],   // unit vector
         labMechanism:     1,           // 0=cooling, 1=photoionization, 2=shock
+        // Phase 2.1 part 2 — Neufeld resonance physics + spectral color
+        labZ:             2.219,       // TON 618 cosmological redshift
+        labOutflowKms:    600.0,       // bulk outflow at r_LAB (typical AGN-driven)
+        labOutflowBeta:   0.5,         // v(r) = v_out (r/r_LAB)^β
+        labLogNHI:        20.5,        // log10 central N_HI [cm⁻²] — DLA-like
+        labTempK:         1.0e4,       // gas temperature
+        labNeufeld:       0.7,         // 0..1 strength of resonance suppression
         // Pre-converted constant: 1 M expressed in kpc for TON 618.
         mInKpc:           M_IN_KPC,
 
@@ -225,6 +232,12 @@ export async function boot({ canvas, hud, minimapCanvas }) {
             labFilament:      state.labFilament,
             labFilamentAxis:  state.labFilamentAxis,
             labMechanism:     state.labMechanism,
+            labZ:             state.labZ,
+            labOutflowKms:    state.labOutflowKms,
+            labOutflowBeta:   state.labOutflowBeta,
+            labLogNHI:        state.labLogNHI,
+            labTempK:         state.labTempK,
+            labNeufeld:       state.labNeufeld,
             mInKpc:           state.mInKpc,
         });
         backend.draw();
@@ -391,6 +404,12 @@ export async function boot({ canvas, hud, minimapCanvas }) {
                 : Math.max(0, Math.min(2, m | 0));
             state.dirty = true;
         },
+        setLabZ(z)            { state.labZ = Math.max(0, Math.min(8, z)); state.dirty = true; },
+        setLabOutflow(kms)    { state.labOutflowKms = Math.max(0, Math.min(2000, kms)); state.dirty = true; },
+        setLabOutflowBeta(b)  { state.labOutflowBeta = Math.max(0, Math.min(2, b)); state.dirty = true; },
+        setLabLogNHI(v)       { state.labLogNHI = Math.max(17, Math.min(23, v)); state.dirty = true; },
+        setLabTempK(v)        { state.labTempK = Math.max(1e3, Math.min(1e6, v)); state.dirty = true; },
+        setLabNeufeld(v)      { state.labNeufeld = Math.max(0, Math.min(1, v)); state.dirty = true; },
         triggerQPOFlare(strength = 1.0, halfLifeSeconds = 2.5) {
             // Half-life in *real* seconds of the user's clock; converts to a
             // decay rate. Spawns a flare at the inner edge that the QPO loop

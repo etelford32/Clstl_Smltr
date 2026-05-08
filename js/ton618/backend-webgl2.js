@@ -76,6 +76,12 @@ export function createWebGL2Backend(canvas) {
         labFilamentAxis:  gl.getUniformLocation(program, 'u_lab_filament_axis'),
         mInKpc:           gl.getUniformLocation(program, 'u_M_in_kpc'),
         labMechanism:     gl.getUniformLocation(program, 'u_lab_mechanism'),
+        labZ:             gl.getUniformLocation(program, 'u_lab_z'),
+        labOutflowKms:    gl.getUniformLocation(program, 'u_lab_outflow_kms'),
+        labOutflowBeta:   gl.getUniformLocation(program, 'u_lab_outflow_beta'),
+        labLogNHI:        gl.getUniformLocation(program, 'u_lab_log_NHI'),
+        labTempK:         gl.getUniformLocation(program, 'u_lab_temp_K'),
+        labNeufeld:       gl.getUniformLocation(program, 'u_lab_neufeld'),
     };
 
     function resize(w, h) {
@@ -149,6 +155,12 @@ export function createWebGL2Backend(canvas) {
         gl.uniform3f(uLoc.labFilamentAxis,  fa[0], fa[1], fa[2]);
         gl.uniform1f(uLoc.mInKpc,           u.mInKpc           ?? 3.155e-6);
         gl.uniform1i(uLoc.labMechanism,     (u.labMechanism | 0));
+        gl.uniform1f(uLoc.labZ,             u.labZ             ?? 2.219);
+        gl.uniform1f(uLoc.labOutflowKms,    u.labOutflowKms    ?? 600.0);
+        gl.uniform1f(uLoc.labOutflowBeta,   u.labOutflowBeta   ?? 0.5);
+        gl.uniform1f(uLoc.labLogNHI,        u.labLogNHI        ?? 20.5);
+        gl.uniform1f(uLoc.labTempK,         u.labTempK         ?? 1.0e4);
+        gl.uniform1f(uLoc.labNeufeld,       u.labNeufeld       ?? 0.7);
     }
 
     function draw() {
