@@ -73,6 +73,7 @@ export class JetstreamOverlay {
     get peak() { return this._peak; }
 
     setVisible(v) { this._group.visible = !!v; }
+    get visible()  { return this._group.visible; }
 
     /**
      * Rebuild geometry from the current wind field. Not a per-frame call —
