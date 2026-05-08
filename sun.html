@@ -1242,6 +1242,46 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
                         </table>
                     </div>
 
+                    <!-- Fusion Engine — global integrated computations -->
+                    <div style="margin-top:8px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px">
+                        <div style="font-size:9px;color:#665;font-weight:600;letter-spacing:.06em;margin-bottom:4px">FUSION ENGINE (computed)</div>
+                        <table class="dtbl">
+                            <tr><td>Total fusion power</td><td id="fe-power">–</td></tr>
+                            <tr><td>pp-chain rate</td><td id="fe-pprate">–</td></tr>
+                            <tr><td>ν flux at Earth</td><td id="fe-nuflux">–</td></tr>
+                            <tr><td>Power from core</td><td id="fe-corepow">–</td></tr>
+                            <tr><td>SSM L vs L<sub>☉</sub></td><td id="fe-lcheck">–</td></tr>
+                        </table>
+                    </div>
+
+                    <!-- Photon Random Walk — Monte Carlo simulation -->
+                    <div style="margin-top:8px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px">
+                        <div style="font-size:9px;color:#665;font-weight:600;letter-spacing:.06em;margin-bottom:4px">PHOTON RANDOM WALK (Monte Carlo)</div>
+                        <div class="toggle-row">
+                            <input type="checkbox" id="tog-photon-walks">
+                            <label for="tog-photon-walks">Show 3D photon trails</label>
+                        </div>
+                        <table class="dtbl">
+                            <tr><td>Walkers</td><td id="fe-walkers">–</td></tr>
+                            <tr><td>Total escapes</td><td id="fe-escapes">–</td></tr>
+                            <tr><td>Mean steps to escape</td><td id="fe-mean-steps">–</td></tr>
+                            <tr><td>MC escape time est.</td><td id="fe-mc-escape">–</td></tr>
+                        </table>
+                    </div>
+
+                    <!-- Radial profile mini-chart -->
+                    <div style="margin-top:8px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px">
+                        <div style="font-size:9px;color:#665;font-weight:600;letter-spacing:.06em;margin-bottom:4px">RADIAL PROFILE</div>
+                        <canvas id="interior-profile" width="260" height="120"
+                            style="width:100%;height:auto;display:block;border-radius:6px;background:#0a0500"></canvas>
+                        <div style="font-size:9px;color:#777;margin-top:3px;text-align:center">
+                            <span style="color:#ff8866">T(r)</span> ·
+                            <span style="color:#ffcc44">ρ(r)</span> ·
+                            <span style="color:#88ddff">L(r)</span> ·
+                            <span style="color:#aa88ff">ε(r)</span>
+                        </div>
+                    </div>
+
                     <!-- Rotation -->
                     <div style="margin-top:8px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px">
                         <div style="font-size:9px;color:#665;font-weight:600;letter-spacing:.06em;margin-bottom:4px">ROTATION</div>
@@ -1612,6 +1652,10 @@ import {
     fusionRate, cumulativeLuminosity, photonEscapeTime, rotationRate,
     convectiveProperties, interiorLayerAt, interiorStateAt,
 } from './js/solar-atmosphere.js';
+import {
+    aggregateFusionStats, radialProfile, PhotonPool,
+    L_SUN_W, R_SUN_M, AU_M,
+} from './js/solar-interior-engine.js';
 import { EffectComposer }     from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass }         from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass }    from 'three/addons/postprocessing/UnrealBloomPass.js';
@@ -3113,6 +3157,144 @@ const coreMesh        = _makeInteriorMesh(0.25, coreFS,        48);
 const radiativeMesh   = _makeInteriorMesh(0.70, radiativeFS,   64);
 const convectiveMesh  = _makeInteriorMesh(0.97, convectiveFS,  72);
 scene.add(coreMesh, radiativeMesh, convectiveMesh);
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ── CORE → RADIATIVE-ZONE LIVE SIMULATION ────────────────────────────────
+//
+//  Couples the analytical SSM in solar-atmosphere.js to a real-time photon
+//  random-walk Monte Carlo (PhotonPool from solar-interior-engine.js).
+//  Each walker takes isotropic random steps with length = local displayMFP
+//  (Kramers-scaled so the visible step count grows toward the surface),
+//  then respawns inside the core when it escapes through r ≥ 1.
+//
+//  Rendering: a small THREE.Group hosting one THREE.Line per walker. The
+//  trail vertices are written each frame from the walker's circular
+//  position buffer; a per-vertex aOpacity attribute fades the tail away
+//  toward the head so the recent walk reads as a moving streak.
+//
+//  All trails render with depthTest:false + additive blending, parented
+//  to a group whose visibility tracks the new "Photon walks" toggle so
+//  users can switch the educational overlay on/off independently of the
+//  Core / Radiative-zone toggles.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const PHOTON_COUNT     = 24;
+const PHOTON_TRAIL_LEN = 96;
+
+const _photonPool = new PhotonPool(PHOTON_COUNT, PHOTON_TRAIL_LEN);
+
+const _photonGroup = new THREE.Group();
+_photonGroup.visible = false;       // off by default; Interior section enables it
+scene.add(_photonGroup);
+
+// Per-walker geometry: (trailLen-1) line segments rendered as a single
+// THREE.Line strip with vertex colours fading head→tail.
+const _photonLines = [];
+const PHOTON_VS = /* glsl */`
+    attribute float aOpacity;
+    attribute vec3  aColor;
+    varying float vOpacity;
+    varying vec3  vColor;
+    void main() {
+        vOpacity = aOpacity;
+        vColor   = aColor;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+`;
+const PHOTON_FS = /* glsl */`
+    varying float vOpacity;
+    varying vec3  vColor;
+    void main() { gl_FragColor = vec4(vColor, vOpacity); }
+`;
+const _photonMat = new THREE.ShaderMaterial({
+    vertexShader:   PHOTON_VS,
+    fragmentShader: PHOTON_FS,
+    transparent:    true,
+    depthWrite:     false,
+    depthTest:      false,                 // visible through the photosphere
+    blending:       THREE.AdditiveBlending,
+});
+
+for (let i = 0; i < PHOTON_COUNT; i++) {
+    const positions = new Float32Array(PHOTON_TRAIL_LEN * 3);
+    const colors    = new Float32Array(PHOTON_TRAIL_LEN * 3);
+    const opacities = new Float32Array(PHOTON_TRAIL_LEN);
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geom.setAttribute('aColor',   new THREE.BufferAttribute(colors, 3));
+    geom.setAttribute('aOpacity', new THREE.BufferAttribute(opacities, 1));
+    const line = new THREE.Line(geom, _photonMat);
+    line.frustumCulled = false;
+    line.userData = { positions, colors, opacities };
+    _photonGroup.add(line);
+    _photonLines.push(line);
+}
+
+// Update each line's vertex buffer from the walker's circular trail.
+// Vertices are unrolled head→tail with opacity ramping from 1.0 (head) to
+// 0.0 (tail). Colour gradient encodes radial fraction: deep red at the
+// core (high T, deep), warm gold mid-radiative, pale cyan at the surface.
+function _updatePhotonTrails() {
+    if (!_photonGroup.visible) return;
+    const walkers = _photonPool.walkers;
+    for (let wi = 0; wi < walkers.length; wi++) {
+        const w   = walkers[wi];
+        const ln  = _photonLines[wi];
+        const pos = ln.userData.positions;
+        const col = ln.userData.colors;
+        const opa = ln.userData.opacities;
+        const N   = w.filled;
+        // Read trail oldest→newest: tail is at head (oldest valid), going
+        // forward (modular) up to head-1. Unroll into linear vertex order.
+        for (let i = 0; i < PHOTON_TRAIL_LEN; i++) {
+            const valid = i < N;
+            // Index into the ring buffer. When filled < trailLen, valid
+            // samples sit in slots [0, filled); when full, they sit in
+            // [head, head+trailLen) wrapped.
+            let src;
+            if (w.filled < w.trailLen) src = i;
+            else                       src = (w.head + i) % w.trailLen;
+            const srcI = src * 3;
+            pos[i * 3]     = w.trail[srcI];
+            pos[i * 3 + 1] = w.trail[srcI + 1];
+            pos[i * 3 + 2] = w.trail[srcI + 2];
+
+            // Opacity fade tail→head
+            const f = N > 1 ? (i / (N - 1)) : 1.0;
+            opa[i] = valid ? f * 0.95 : 0.0;
+
+            // Colour by radial fraction at this trail vertex
+            const r = Math.sqrt(pos[i*3]*pos[i*3] + pos[i*3+1]*pos[i*3+1] + pos[i*3+2]*pos[i*3+2]);
+            // Core (r<0.25): deep red-orange. Radiative (0.25-0.71): gold.
+            // Convective (>0.71): pale cyan-white.
+            let cr, cg, cb;
+            if (r < 0.25) {
+                cr = 1.00; cg = 0.45; cb = 0.10;
+            } else if (r < 0.71) {
+                const k = (r - 0.25) / 0.46;
+                cr = 1.00; cg = 0.45 + k * 0.45; cb = 0.10 + k * 0.30;
+            } else {
+                const k = Math.min(1, (r - 0.71) / 0.29);
+                cr = 1.00 - k * 0.50; cg = 0.90 - k * 0.10; cb = 0.40 + k * 0.55;
+            }
+            col[i * 3]     = cr;
+            col[i * 3 + 1] = cg;
+            col[i * 3 + 2] = cb;
+        }
+        ln.geometry.setDrawRange(0, Math.max(0, N));
+        ln.geometry.attributes.position.needsUpdate = true;
+        ln.geometry.attributes.aColor.needsUpdate   = true;
+        ln.geometry.attributes.aOpacity.needsUpdate = true;
+    }
+}
+
+// Per-frame step: bound nSteps so the walk visibly progresses without
+// outrunning the trail buffer. Capped to ~3 steps per walker per frame.
+function _stepPhotonPool() {
+    if (!_photonGroup.visible) return;
+    _photonPool.step(2);
+    _updatePhotonTrails();
+}
 
 // ─── CHROMOSPHERE (r=1.15) — Ca H&K / Hα pink-red layer ──────────────────────
 const glowVS = /* glsl */`
@@ -6846,6 +7028,14 @@ function animate() {
     if (_nanoflareHost) _nanoflareHost.rotation.y = solarRotAngle;
     _updateNanoflares(t);
 
+    // Core → radiative-zone simulation: photon random-walk Monte Carlo.
+    // Trails co-rotate with the photosphere so they track the same frame
+    // as the rest of the interior visualisation.
+    if (_photonGroup) {
+        _photonGroup.rotation.y = solarRotAngle;
+        _stepPhotonPool();
+    }
+
     // Prominences — co-rotate, slow MHD wave oscillation + eruption fade
     if (promGroup) {
         promGroup.rotation.y = solarRotAngle;
@@ -8973,6 +9163,137 @@ function updateInteriorPanel() {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  ── FUSION ENGINE LIVE STATS + RADIAL PROFILE CHART ──────────────────────
+//
+//  Aggregates pp-chain power across the solar volume, neutrino flux at
+//  Earth, and Monte-Carlo random-walk diagnostics every 0.5 s. Cheap
+//  (200-bin trapezoidal integration of the SSM).
+// ═══════════════════════════════════════════════════════════════════════════
+
+function _fmtPower(W) {
+    if (W >= 1e26) return `${(W / 1e26).toFixed(2)}×10²⁶ W`;
+    if (W >= 1e23) return `${(W / 1e23).toFixed(2)}×10²³ W`;
+    return _fmtSciI(W) + ' W';
+}
+function _fmtRate(perSec) {
+    if (perSec >= 1e36) return `${(perSec / 1e36).toFixed(2)}×10³⁶/s`;
+    if (perSec >= 1e30) return `${(perSec / 1e30).toFixed(2)}×10³⁰/s`;
+    return _fmtSciI(perSec) + '/s';
+}
+function _fmtNuFlux(perM2sec) {
+    // Convert m⁻²s⁻¹ → cm⁻²s⁻¹ (the conventional unit)
+    const perCm2 = perM2sec * 1e-4;
+    if (perCm2 >= 1e10) return `${(perCm2 / 1e10).toFixed(2)}×10¹⁰ cm⁻²s⁻¹`;
+    return _fmtSciI(perCm2) + ' cm⁻²s⁻¹';
+}
+
+let _fusionStatsCache = null;
+let _fusionStatsAt    = 0;
+function updateFusionEngineStats() {
+    const now = performance.now();
+    if (!_fusionStatsCache || (now - _fusionStatsAt) > 500) {
+        _fusionStatsCache = aggregateFusionStats(200);
+        _fusionStatsAt    = now;
+    }
+    const s = _fusionStatsCache;
+    const _s = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+    _s('fe-power',   _fmtPower(s.powerW));
+    _s('fe-pprate',  _fmtRate(s.ratesPerSec));
+    _s('fe-nuflux',  _fmtNuFlux(s.neutrinoFluxAtEarth));
+    _s('fe-corepow', `${(s.corePowerFrac * 100).toFixed(1)}% (r<0.25)`);
+    const ratio = s.powerW / L_SUN_W;
+    _s('fe-lcheck',  `${ratio.toFixed(3)}× (${ratio > 0.95 && ratio < 1.05 ? '✓' : '⚠'})`);
+
+    // Photon-pool diagnostics
+    _s('fe-walkers', String(_photonPool.walkers.length));
+    _s('fe-escapes', String(_photonPool.escapes));
+    const meanSteps = _photonPool.escapes > 0
+        ? (_photonPool.totalSteps / _photonPool.escapes)
+        : NaN;
+    _s('fe-mean-steps', isFinite(meanSteps) ? Math.round(meanSteps).toLocaleString() : '—');
+    // MC escape-time estimate: meanSteps × <mfp>·R_sun / c. <mfp> ≈ 0.04 R_sun
+    // averaged over the displayed walk range — a rough display-time anchor.
+    const mfpAvg = 0.04 * R_SUN_M;
+    const tSec   = isFinite(meanSteps) ? meanSteps * mfpAvg / 2.998e8 : NaN;
+    if (!isFinite(tSec)) {
+        _s('fe-mc-escape', '—');
+    } else if (tSec > 86400 * 365.25) {
+        _s('fe-mc-escape', `~${(tSec / (86400 * 365.25)).toFixed(0)} yr`);
+    } else if (tSec > 86400) {
+        _s('fe-mc-escape', `~${(tSec / 86400).toFixed(1)} d`);
+    } else {
+        _s('fe-mc-escape', `~${tSec.toFixed(1)} s`);
+    }
+}
+
+// ── Radial-profile mini-chart ────────────────────────────────────────────
+const _profileCanvas = document.getElementById('interior-profile');
+const _profileCtx    = _profileCanvas?.getContext('2d');
+let _profileData     = null;
+
+function _drawProfileChart() {
+    if (!_profileCtx) return;
+    if (!_profileData) _profileData = radialProfile(96);
+    const cvs = _profileCanvas;
+    const ctx = _profileCtx;
+    ctx.clearRect(0, 0, cvs.width, cvs.height);
+    // Frame
+    ctx.fillStyle = '#0a0500';
+    ctx.fillRect(0, 0, cvs.width, cvs.height);
+    ctx.strokeStyle = 'rgba(255,140,0,.18)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0.5, 0.5, cvs.width - 1, cvs.height - 1);
+    // Vertical guides at the layer boundaries
+    const gx = (rf) => rf * cvs.width;
+    ctx.strokeStyle = 'rgba(255,140,0,.12)';
+    ctx.beginPath();
+    [0.25, 0.713].forEach(rf => { ctx.moveTo(gx(rf), 0); ctx.lineTo(gx(rf), cvs.height); });
+    ctx.stroke();
+
+    const { r, T, rho, eps, Lfrac } = _profileData;
+    const N = r.length;
+    const drawSeries = (vals, color, logMode = false, normTo) => {
+        let lo = Infinity, hi = -Infinity;
+        for (let i = 0; i < N; i++) {
+            let v = vals[i];
+            if (logMode) v = v > 0 ? Math.log10(v) : -30;
+            if (v < lo) lo = v;
+            if (v > hi) hi = v;
+        }
+        if (normTo) { lo = normTo[0]; hi = normTo[1]; }
+        const span = Math.max(1e-9, hi - lo);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        for (let i = 0; i < N; i++) {
+            let v = vals[i];
+            if (logMode) v = v > 0 ? Math.log10(v) : lo;
+            const x = (r[i]) * (cvs.width - 4) + 2;
+            const y = (cvs.height - 6) - ((v - lo) / span) * (cvs.height - 12) + 3;
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+    };
+    // Each series gets its own auto-range (log scale for T, ρ, ε)
+    drawSeries(T,    '#ff8866', true);
+    drawSeries(rho,  '#ffcc44', true);
+    drawSeries(eps,  '#aa88ff', true);
+    drawSeries(Lfrac,'#88ddff', false, [0, 1]);
+
+    // Layer labels
+    ctx.fillStyle = '#665';
+    ctx.font = '8px monospace';
+    ctx.fillText('Core', 4, 10);
+    ctx.fillText('Rad', gx(0.27) + 2, 10);
+    ctx.fillText('Conv', gx(0.72) + 2, 10);
+}
+
+// ── Photon-walks toggle wiring ───────────────────────────────────────────
+document.getElementById('tog-photon-walks')?.addEventListener('change', e => {
+    _photonGroup.visible = e.target.checked;
+});
+
 // ── Interior cross-section cutaway canvas ─────────────────────────────────────
 const _cutawayCanvas = document.getElementById('interior-cutaway');
 const _cutawayCtx    = _cutawayCanvas?.getContext('2d');
@@ -9116,20 +9437,30 @@ document.querySelectorAll('.int-jump').forEach(btn => {
     });
 });
 
-// Hook cutaway redraw into the panel update
+// Hook cutaway redraw + fusion-engine stats + radial profile into the panel update
 const _origUpdateInterior = updateInteriorPanel;
-// Patch: also draw cutaway when panel updates
 {
     const origFn = updateInteriorPanel;
     updateInteriorPanel = function() {
         origFn();
         const slider = document.getElementById('sl-int-radius');
         drawCutaway(slider ? parseFloat(slider.value) : 0.5);
+        updateFusionEngineStats();
+        _drawProfileChart();
     };
 }
 
 // Initial render
 updateInteriorPanel();
+
+// Periodic refresh of the live fusion-engine + photon-walk diagnostics so
+// the Interior panel stays in sync with the running Monte-Carlo simulation
+// (escapes, mean steps) even when the user is not interacting. Cheap —
+// a 200-bin trapezoidal SSM integration runs at most twice per second.
+setInterval(() => {
+    if (document.getElementById('sec-interior')?.classList.contains('closed')) return;
+    updateFusionEngineStats();
+}, 500);
 
 // ═══════════════════════════════════════════════════════════════
 //  SOLAR ATMOSPHERE PANEL — live physics calculations
