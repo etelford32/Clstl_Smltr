@@ -13,7 +13,7 @@ import {
     OBSERVER_TYPES, PRESETS,
 } from './camera.js';
 import { formatLength, PHOTON_RING_RS, R_HORIZON_GEOM, M_IN_KPC } from './units.js';
-import { measurePhotonRing } from './validation.js';
+import { measurePhotonRing, measureKerrShadow } from './validation.js';
 import { diagnostics, labDiagnostics, diskRegime, bzEfficiency } from './physics.js';
 import { createMinimap } from './minimap.js';
 import { traceRay } from './inspector.js';
@@ -713,6 +713,13 @@ export async function boot({ canvas, hud, minimapCanvas }) {
             state.showPhotonSphere = false;
             render();
             const result = measurePhotonRing(backend, state.cam, state.spin);
+            // Tier 2D — augment with the row-sweep Bardeen 1973 Kerr-shadow
+            // asymmetry test. At a = 0 it returns the same b_crit; at a > 0
+            // it splits the prograde / retrograde rims and reports Δb/2.
+            if (result) {
+                const kerr = measureKerrShadow(backend, state.cam, state.spin);
+                if (kerr) result.kerr_rim = kerr;
+            }
             // restore
             state.cam.r = saved.r; state.cam.theta = saved.theta; state.cam.phi = saved.phi;
             state.cam.yaw = saved.yaw; state.cam.pitch = saved.pitch; state.cam.roll = saved.roll;

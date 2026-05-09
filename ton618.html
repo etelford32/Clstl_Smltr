@@ -1328,20 +1328,35 @@ body.ton618-embed #hud-title { font-size:8px; }
                 return;
             }
             const aTag = result.kerr_regime
-                ? `Kerr rim (a = ${result.spin.toFixed(3)}) — column extent only`
-                : 'Schwarzschild';
-            const pass = Math.abs(result.error_pct) < 1.0;
-            v.textContent = [
-                `PHOTON RING / SHADOW MEASUREMENT  (${aTag})`,
-                `  measured b  = ${result.b_measured.toFixed(4)} M`,
-                `  schw b_crit = ${result.b_expected.toFixed(4)} M`,
-                `  measured    = ${result.ring_rs.toFixed(4)} r_s`,
-                `  schw expect = ${result.ring_rs_expected.toFixed(4)} r_s`,
-                `  delta       = ${result.error_pct.toFixed(3)} %`,
-                result.kerr_regime
-                    ? `  status      = INFO (Kerr — analytic rim is asymmetric; see Phase 1.5)`
-                    : `  status      = ${pass ? 'PASS (< 1%)' : 'ATTN (> 1%)'}`,
-            ].join('\n');
+                ? `Kerr a = ${result.spin.toFixed(3)}`
+                : 'Schwarzschild a = 0';
+            const pass_v = Math.abs(result.error_pct) < 1.0;
+            const lines = [
+                `─── A. VERTICAL EXTENT (col) — Schwarzschild reference ───`,
+                `  measured b      = ${result.b_measured.toFixed(4)} M`,
+                `  schw b_crit     = ${result.b_expected.toFixed(4)} M`,
+                `  measured        = ${result.ring_rs.toFixed(4)} r_s`,
+                `  Δ vs Schw       = ${result.error_pct.toFixed(3)} %`,
+                `  status          = ${result.kerr_regime
+                    ? 'INFO (vertical extent is Kerr-shape-modified; see B)'
+                    : (pass_v ? 'PASS (< 1%)' : 'ATTN (> 1%)')}`,
+            ];
+            if (result.kerr_rim) {
+                const k = result.kerr_rim;
+                const pass_pro    = Math.abs(k.b_pro_err_pct)   < 2.0;
+                const pass_retro  = Math.abs(k.b_retro_err_pct) < 2.0;
+                const pass_shift  = Math.abs(k.shift_err_pct)   < 5.0;
+                const all_pass    = pass_pro && pass_retro && pass_shift;
+                lines.push(
+                    `─── B. KERR RIM (row) — Bardeen 1973 contour ────────────`,
+                    `  prograde   b_+  = ${k.b_pro_meas.toFixed(4)} M  (ref ${k.b_pro_ref.toFixed(4)})  Δ ${k.b_pro_err_pct.toFixed(2)}%`,
+                    `  retrograde b_-  = ${k.b_retro_meas.toFixed(4)} M  (ref ${k.b_retro_ref.toFixed(4)})  Δ ${k.b_retro_err_pct.toFixed(2)}%`,
+                    `  Δb / 2  shift   = ${k.shift_meas.toFixed(4)} M  (ref ${k.shift_ref.toFixed(4)})  Δ ${k.shift_err_pct.toFixed(2)}%`,
+                    `  status          = ${all_pass ? 'PASS (Δ < 2 % rims, < 5 % shift)' : 'ATTN — see deltas above'}`,
+                );
+            }
+            lines.unshift(`PHOTON RING / SHADOW MEASUREMENT  (${aTag})`);
+            v.textContent = lines.join('\n');
         }, 50);
     });
 </script>
