@@ -149,6 +149,10 @@ export function createWebGL2Backend(canvas) {
         camRightCart:     gl.getUniformLocation(program, 'u_cam_right_cart'),
         camUpCart:        gl.getUniformLocation(program, 'u_cam_up_cart'),
         camForwardCart:   gl.getUniformLocation(program, 'u_cam_forward_cart'),
+        // Tier 1B — photon sub-rings + sky strength
+        showSubrings:     gl.getUniformLocation(program, 'u_show_subrings'),
+        subringStrength:  gl.getUniformLocation(program, 'u_subring_strength'),
+        skyStrength:      gl.getUniformLocation(program, 'u_sky_strength'),
     };
 
     // Tier 1A — render-time post-process knobs (state lives in main.js).
@@ -250,6 +254,9 @@ export function createWebGL2Backend(canvas) {
         gl.uniform3f(uLoc.camRightCart,   cr[0], cr[1], cr[2]);
         gl.uniform3f(uLoc.camUpCart,      cu[0], cu[1], cu[2]);
         gl.uniform3f(uLoc.camForwardCart, cf[0], cf[1], cf[2]);
+        gl.uniform1i(uLoc.showSubrings,    u.showSubrings ? 1 : 0);
+        gl.uniform1f(uLoc.subringStrength, u.subringStrength ?? 1.0);
+        gl.uniform1f(uLoc.skyStrength,     u.skyStrength     ?? 1.0);
         // Tier 1A — post-process state mirrored locally so draw() can use
         // it without re-marshalling the uniforms object.
         bloomThreshold = u.bloomThreshold ?? 1.0;

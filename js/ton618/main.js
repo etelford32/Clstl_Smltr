@@ -112,6 +112,11 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         bloomStrength:    1.0,        // multiplier on bloom contribution
         exposureStops:    0.0,        // ±3 EV typical
 
+        // ── Tier 1B — photon sub-rings + procedural deep sky ──────────
+        showSubrings:     true,        // n ≥ 1 Gralla-Holz-Wald photon sub-rings
+        subringStrength:  1.0,         // brightness multiplier (× exp(-nπ) decay)
+        skyStrength:      1.0,         // 0..2 — 0 fully suppresses the deep-sky field
+
         // ── Phase 2.1 — Lyman-α blob (Slug-class defaults) ────────────
         // Off by default; toggle to render the host-galaxy halo. Defaults
         // anchored to UM287's "Slug" nebula (Cantalupo et al. 2014):
@@ -261,6 +266,10 @@ export async function boot({ canvas, hud, minimapCanvas }) {
             bloomKnee:        state.bloomKnee,
             bloomStrength:    state.bloomStrength,
             exposureStops:    state.exposureStops,
+            // Tier 1B — sub-rings + sky strength
+            showSubrings:     state.showSubrings,
+            subringStrength:  state.subringStrength,
+            skyStrength:      state.skyStrength,
         });
         backend.draw();
         updateHUD(hud, state, backend, name);
@@ -496,6 +505,10 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         setBloomKnee(v)       { state.bloomKnee      = Math.max(0.05, Math.min(2, v)); state.dirty = true; },
         setBloomStrength(v)   { state.bloomStrength  = Math.max(0, Math.min(4, v)); state.dirty = true; },
         setExposureStops(v)   { state.exposureStops  = Math.max(-4, Math.min(4, v)); state.dirty = true; },
+        // ── Tier 1B — photon sub-rings + sky ───────────────────────
+        toggleSubrings()      { state.showSubrings = !state.showSubrings; state.dirty = true; return state.showSubrings; },
+        setSubringStrength(v) { state.subringStrength = Math.max(0, Math.min(4, v)); state.dirty = true; },
+        setSkyStrength(v)     { state.skyStrength = Math.max(0, Math.min(2, v)); state.dirty = true; },
         // ── LAB scenario presets ──────────────────────────────────
         // Snapshot+apply a coherent set of LAB parameters mapped to a named
         // observed system. Forces the LAB on so the preset is immediately

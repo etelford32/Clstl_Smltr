@@ -81,6 +81,12 @@ uniform float u_far_shortcut_r;          // r threshold for far-field straight-l
 // ── Phase 1 — Kerr spin parameter (M = 1) ───────────────────────────
 uniform float u_spin;                    // a/M ∈ [0, 0.999); a=0 ↔ Schwarzschild
 
+// ── Tier 1B — Gralla-Holz-Wald photon sub-rings (n = 1, 2, …) ───────
+uniform int   u_show_subrings;           // 1 = highlight n ≥ 1 sub-rings
+uniform float u_subring_strength;        // overall multiplier (default 1.0)
+// Improved deep-sky controls (procedural Milky Way + nebulae).
+uniform float u_sky_strength;            // 0..2; 0 fully suppresses the field
+
 // ── Phase 2.1 — Lyman-α blob (Slug-class defaults) ──────────────────
 // LAB lives at host-galaxy scale (~10²–10⁵ M_kpc beyond r_far). We
 // raymarch a procedural neutral-hydrogen density field in flat space
@@ -325,47 +331,97 @@ float hash21(vec2 p) {
     return fract(p.x * p.y);
 }
 
+// Forward declaration — definition lives further down (the disk's MRI fBm
+// also uses it, so it sits with the disk-emission helpers). Letting the
+// celestial sphere use the same noise gives the Milky Way and the LAB a
+// consistent procedural texture frequency.
+float vnoise2(vec2 p);
+
 vec3 celestial_sphere(vec3 dir) {
-    // Equirectangular hash-based starfield. Two brightness tiers + chromatic variation.
+    // Equirectangular procedural deep sky: dark sky ambient, mottled
+    // Milky-Way band with dust lanes, a couple of distant nebula clouds,
+    // and four star-density layers (red dwarfs → solar → blue → hot
+    // bright tier). Tuned so the *brightest* stars peak above the bloom
+    // threshold and form gentle halos in the composite.
     dir = normalize(dir);
     float theta = acos(clamp(dir.y, -1.0, 1.0));
     float phi   = atan(dir.z, dir.x);
     vec2 uv = vec2(phi / (2.0 * PI) + 0.5, theta / PI);
 
-    vec3 sky = vec3(0.004, 0.006, 0.015);  // very dark blue ambient
+    vec3 sky = vec3(0.0028, 0.0040, 0.0110);   // deep night
 
-    // Milky-Way-ish band: soft sinusoidal glow along an inclined great circle.
-    float band_angle = dot(normalize(dir), normalize(vec3(0.3, 0.2, 0.9)));
-    float band = smoothstep(0.35, 0.0, abs(band_angle));
-    sky += band * vec3(0.02, 0.018, 0.035);
+    // ── Milky Way band ───────────────────────────────────────────────
+    // Inclined great circle at ~25° from the metric pole. Inside the
+    // band, mottled brightness from 3-octave value noise + a "dust lane"
+    // variant that subtracts darkness along the densest ridge.
+    vec3 mw_axis = normalize(vec3(0.32, 0.18, 0.93));
+    float band_proj = dot(dir, mw_axis);
+    float band_w = smoothstep(0.40, 0.0, abs(band_proj));
+    if (band_w > 1.0e-3) {
+        float n = 0.55 * vnoise2(uv * vec2(40.0, 80.0))
+                + 0.30 * vnoise2(uv * vec2(80.0, 160.0) + 1.7)
+                + 0.15 * vnoise2(uv * vec2(160.0, 320.0) + 3.3);
+        float bulge = pow(band_w, 1.4);                            // brightest near the band axis
+        float bright_mw = clamp((n - 0.30) * 2.2, 0.0, 1.4) * bulge;
+        // Warm-creamy bulge core, slightly redder dust periphery.
+        vec3 mw_col = mix(vec3(0.014, 0.014, 0.022),
+                          vec3(0.090, 0.080, 0.060),
+                          bright_mw);
+        // Dust lanes: darken where noise spikes high (Karhunen-fakery).
+        float dust = smoothstep(0.62, 0.96, n);
+        sky += band_w * mw_col * (1.0 - 0.55 * dust);
+    }
 
-    // Three density layers of stars at different cell sizes.
-    for (int layer = 0; layer < 3; ++layer) {
-        float scale = 280.0 + 420.0 * float(layer);
+    // ── Distant nebula clouds (large soft patches) ──────────────────
+    // Two slow-frequency noise blobs tinted with hue variance — pink
+    // (Hα) and teal (OIII).
+    float n_low = vnoise2(uv * vec2(7.0, 14.0));
+    float n_lo2 = vnoise2(uv * vec2(7.0, 14.0) + 5.7);
+    float neb_mask = smoothstep(0.62, 0.92, n_low) * (0.5 + 0.5 * n_lo2);
+    sky += neb_mask * 0.018 * mix(vec3(0.32, 0.06, 0.45),
+                                  vec3(0.05, 0.38, 0.55),
+                                  n_lo2);
+
+    // ── Stars: four density tiers, last tier holds bright hot stars ──
+    for (int layer = 0; layer < 4; ++layer) {
+        float scale = 220.0 + 460.0 * float(layer);
         vec2  cell  = uv * scale;
         vec2  fl    = floor(cell);
         vec2  fr    = fract(cell);
         float h     = hash21(fl);
         float h2    = hash21(fl + 13.37);
 
-        // star present?
-        float threshold = 0.994 - 0.002 * float(layer);
+        // Layer 3 is the rarest, brightest tier (hot O/B-type or "named"
+        // foreground stars). Lower-index layers are progressively denser
+        // and fainter (red-dwarf-like backdrop).
+        float threshold = (layer == 3) ? 0.9985 : (0.992 - 0.002 * float(layer));
         if (h > threshold) {
             vec2  star_uv = vec2(h, h2);
             float d       = length(fr - star_uv);
-            float bright  = smoothstep(0.025, 0.0, d);
-            bright       *= 0.6 + 0.4 * h2;
+            float bright  = smoothstep(0.035, 0.0, d);
+            bright       *= 0.55 + 0.45 * h2;
 
-            // temperature -> color (cheap blackbody palette)
+            // Color: T sampled by h2, mapped to a 4-segment blackbody.
             float temp = h2;
-            vec3 color = mix(
-                mix(vec3(1.0, 0.75, 0.55), vec3(1.0, 1.0, 0.95), smoothstep(0.0, 0.5, temp)),
-                vec3(0.7, 0.85, 1.0), smoothstep(0.5, 1.0, temp)
-            );
-            sky += bright * color * (0.6 + 0.4 * float(3 - layer));
+            vec3 col;
+            if (temp < 0.25) {
+                col = mix(vec3(1.10, 0.55, 0.32), vec3(1.0, 0.78, 0.55), temp / 0.25);  // red dwarf → K
+            } else if (temp < 0.55) {
+                col = mix(vec3(1.0, 0.78, 0.55), vec3(1.0, 0.97, 0.86), (temp - 0.25) / 0.30); // K → G/F
+            } else if (temp < 0.82) {
+                col = mix(vec3(1.0, 0.97, 0.86), vec3(0.78, 0.88, 1.10), (temp - 0.55) / 0.27); // F → A/B
+            } else {
+                col = mix(vec3(0.78, 0.88, 1.10), vec3(0.55, 0.75, 1.40), (temp - 0.82) / 0.18); // B → O
+            }
+            // Layer-3 hot stars get extra brightness so they bloom in the
+            // composite pass — mimics the way Sirius/Vega/Rigel actually
+            // dominate a long-exposure photograph.
+            float layer_boost = (layer == 3) ? 3.6 : (0.6 + 0.4 * float(3 - layer));
+            sky += bright * col * layer_boost;
         }
     }
-    return sky;
+
+    return sky * u_sky_strength;
 }
 
 // ---------------------------------------------------------------------------
@@ -1033,7 +1089,8 @@ const int   DISK_MAX_CROSSINGS = 6;
 // 4 = opaque disk hit (background hidden), 5 = translucent disk path
 // (background still visible behind accumulated emission).
 void trace(inout float y[8], out int term, out int steps_taken, out float affine_used,
-           out vec3 disk_rgb, out vec3 grid_accum, out vec3 volume_rgb) {
+           out vec3 disk_rgb, out vec3 grid_accum, out vec3 volume_rgb,
+           out int eq_crossings) {
     float h = 0.5;
     float h_min = 1.0e-4;
     float h_max = 50.0;
@@ -1044,6 +1101,8 @@ void trace(inout float y[8], out int term, out int steps_taken, out float affine
     disk_rgb = vec3(0.0);
     grid_accum = vec3(0.0);
     volume_rgb = vec3(0.0);
+    eq_crossings = 0;
+    float prev_costh = cos(y[2]);   // for Gralla-Holz-Wald n-ring counter
 
     float y_try[8];
     float y_prev[8];
@@ -1090,6 +1149,13 @@ void trace(inout float y[8], out int term, out int steps_taken, out float affine
         for (int i = 0; i < 8; ++i) y[i] = y_try[i];
         affine_used += h;
         steps_taken = step + 1;
+
+        // Equator-crossing detector for Gralla-Holz-Wald photon-ring order.
+        // Each cos θ sign flip is a half-orbit (Δφ = π) about the BH axis;
+        // n = floor(eq_crossings / 2) gives the photon ring index.
+        float new_costh = cos(y[2]);
+        if (prev_costh * new_costh < 0.0) eq_crossings += 1;
+        prev_costh = new_costh;
 
         // Disk crossing test on accepted sub-arc. Two paths:
         //   • Razor-thin (H/r ≈ 0): equatorial-crossing intersection — fast,
@@ -1516,7 +1582,8 @@ void main() {
     vec3 disk_rgb;
     vec3 grid_rgb;
     vec3 volume_rgb;
-    trace(y, term, steps, aff, disk_rgb, grid_rgb, volume_rgb);
+    int eq_crossings;
+    trace(y, term, steps, aff, disk_rgb, grid_rgb, volume_rgb, eq_crossings);
 
     // Escape-point Cartesian position (M units) — needed for the LAB
     // raymarch which works in flat space beyond r_far.
@@ -1574,10 +1641,27 @@ void main() {
     // up to that point is what the camera saw on the way to the disk).
     color += volume_rgb;
 
-    // Photon-ring accent: rays that integrated many steps grazed the ring.
-    if (u_show_ring == 1) {
-        float ring_weight = smoothstep(280.0, 440.0, float(steps));
-        color += ring_weight * vec3(0.28, 0.16, 0.04);
+    // ── Photon ring + Gralla-Holz-Wald sub-rings ────────────────────
+    // The shadow boundary is the locus of photons that orbited the BH
+    // exactly once (n = 1), twice (n = 2), … before escape. Each
+    // successive sub-ring is fainter by a factor exp(−π) ≈ 0.0432
+    // (Gralla, Holz, Wald 2019). Equator-crossings track Δθ = π:
+    // n = floor(eq_crossings / 2) gives the sub-ring index.
+    if (u_show_ring == 1 || u_show_subrings == 1) {
+        int n_ring = eq_crossings / 2;
+        if (n_ring >= 1) {
+            // Brightness scales like exp(-n π) for the n-th sub-ring,
+            // multiplied by an overall user-tunable strength.
+            float bright = exp(-float(n_ring) * 3.14159265);
+            // Color: warm gilt for n=1, cooler / bluer as n rises (the
+            // strong-deflection regime is well-approximated by the
+            // critical curve, so higher rings are more isotropic in
+            // color — bias them toward blue-white).
+            vec3 ring_col = (n_ring == 1) ? vec3(1.30, 0.85, 0.50)
+                            : (n_ring == 2) ? vec3(1.05, 1.00, 0.85)
+                            : vec3(0.95, 1.00, 1.10);
+            color += bright * ring_col * u_subring_strength;
+        }
     }
 
     // Output linear HDR — ACES tonemap + bloom + gamma now live in the

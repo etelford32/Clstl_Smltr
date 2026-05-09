@@ -604,6 +604,32 @@ select {
         </div>
 
         <div>
+            <div class="sec-title">Photon sub-rings &amp; deep sky</div>
+            <div class="toggle-row">
+                <input type="checkbox" id="showSubrings" checked>
+                <label for="showSubrings">Highlight n=1, 2 photon sub-rings (Gralla-Holz-Wald)</label>
+            </div>
+            <div class="ctrl">
+                <label>Sub-ring strength</label>
+                <input type="range" id="s-subring" min="0" max="3" step="0.05" value="1">
+                <div class="val" id="v-subring">1.00×</div>
+            </div>
+            <div class="ctrl">
+                <label>Deep-sky brightness</label>
+                <input type="range" id="s-sky" min="0" max="2" step="0.05" value="1">
+                <div class="val" id="v-sky">1.00×</div>
+            </div>
+            <div class="note">Each successive photon sub-ring (rays that
+                orbit the BH 1, 2, … times before escape) is fainter by
+                exp(−π) ≈ 0.0432 — the strong-deflection asymptotic of
+                the Kerr critical curve. Their angular position is set by
+                b<sub>crit</sub> (and its Kerr-asymmetric counterpart at
+                a&gt;0); EHT-NG is being designed to resolve them.
+                Background: multi-octave Milky Way + Hα/OIII nebulae +
+                4-tier blackbody starfield.</div>
+        </div>
+
+        <div>
             <div class="sec-title">Cinematic (HDR · ACES · bloom)</div>
             <div class="toggle-row">
                 <input type="checkbox" id="bloomOn" checked>
@@ -1014,6 +1040,15 @@ select {
             else label = 'super-Eddington';
             return `${v.toFixed(3)}  (${label})`;
         }, (v) => app.setMdotRel(v));
+
+    // ── Sub-rings + sky (Tier 1B) ──────────────────────────────────
+    $('showSubrings').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showSubrings) app.toggleSubrings();
+    });
+    bindRange('s-subring', 'v-subring',
+        (v) => `${v.toFixed(2)}×`, (v) => app.setSubringStrength(v));
+    bindRange('s-sky', 'v-sky',
+        (v) => `${v.toFixed(2)}×`, (v) => app.setSkyStrength(v));
 
     // ── Cinematic (Tier 1A) ────────────────────────────────────────
     $('bloomOn').addEventListener('change', (e) => {
