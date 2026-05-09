@@ -14,7 +14,7 @@ import {
 } from './camera.js';
 import { formatLength, PHOTON_RING_RS, R_HORIZON_GEOM, M_IN_KPC } from './units.js';
 import { measurePhotonRing } from './validation.js';
-import { diagnostics, labDiagnostics } from './physics.js';
+import { diagnostics, labDiagnostics, diskRegime } from './physics.js';
 import { createMinimap } from './minimap.js';
 import { traceRay } from './inspector.js';
 
@@ -117,6 +117,16 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         subringStrength:  1.0,         // brightness multiplier (× exp(-nπ) decay)
         skyStrength:      1.0,         // 0..2 — 0 fully suppresses the deep-sky field
 
+        // ── Tier 2A — disk regime (auto from ṁ vs manual H/r override) ─
+        // When `regimeAuto` is on the disk's H(r)/r profile, T-scaling,
+        // brightness, and regime tag are all derived from u_mdot_rel
+        // (RIAF / thin / slim transitions). When off, the user keeps full
+        // manual control of H/r via the existing slider.
+        regimeAuto:       true,
+        // Cached regime info — refreshed every frame from diskRegime(mdotRel).
+        regimeIdx:        1,           // 0 RIAF, 1 thin, 2 slim
+        regimeName:       'thin disk (Shakura-Sunyaev / Novikov-Thorne)',
+
         // ── Phase 2.1 — Lyman-α blob (Slug-class defaults) ────────────
         // Off by default; toggle to render the host-galaxy halo. Defaults
         // anchored to UM287's "Slug" nebula (Cantalupo et al. 2014):
@@ -191,6 +201,15 @@ export async function boot({ canvas, hud, minimapCanvas }) {
 
     function render() {
         const u = cameraUniforms(state.cam, { width: canvas.width, height: canvas.height });
+        // Tier 2A — refresh the disk-regime classification from ṁ_rel each
+        // frame. When regimeAuto is on, override the user's H/r slider with
+        // the regime-derived value so the disk visibly transitions between
+        // razor-thin / puffy slim / thick RIAF as ṁ moves through critical
+        // boundaries (0.01 and 0.3).
+        const regime = diskRegime(state.mdotRel);
+        state.regimeIdx  = regime.regimeIdx;
+        state.regimeName = regime.regime;
+        const effectiveHOverR = state.regimeAuto ? regime.hOverR : state.diskHOverR;
         backend.setUniforms({
             ...u,
             rFar:             state.rFar,
@@ -230,7 +249,10 @@ export async function boot({ canvas, hud, minimapCanvas }) {
             feIntensity:      state.feIntensity,
             farShortcutR:     state.farShortcutR,
             // Track B
-            diskHOverR:       state.diskHOverR,
+            diskHOverR:           effectiveHOverR,
+            diskRegimeIdx:        state.regimeIdx,
+            diskTFactor:          regime.T_factor,
+            diskRegimeBrightness: regime.brightness_factor,
             mriStrength:      state.mriStrength,
             nHotspots:        state.nHotspots,
             qpoFlare:         state.qpoFlare,
@@ -505,6 +527,9 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         setBloomKnee(v)       { state.bloomKnee      = Math.max(0.05, Math.min(2, v)); state.dirty = true; },
         setBloomStrength(v)   { state.bloomStrength  = Math.max(0, Math.min(4, v)); state.dirty = true; },
         setExposureStops(v)   { state.exposureStops  = Math.max(-4, Math.min(4, v)); state.dirty = true; },
+        // ── Tier 2A — disk regime auto-mode ────────────────────────
+        toggleRegimeAuto()    { state.regimeAuto = !state.regimeAuto; state.dirty = true; return state.regimeAuto; },
+        getRegimeName()       { return state.regimeName; },
         // ── Tier 1B — photon sub-rings + sky ───────────────────────
         toggleSubrings()      { state.showSubrings = !state.showSubrings; state.dirty = true; return state.showSubrings; },
         setSubringStrength(v) { state.subringStrength = Math.max(0, Math.min(4, v)); state.dirty = true; },
@@ -736,6 +761,7 @@ function updateHUD(hud, state, backend, backendName) {
         `horizon area A = ${fmt(d.horizon_area_m2, 3)} m²`,
         `Bekenstein S/k = ${fmt(d.bekenstein_entropy_over_k, 3)}    T_H = ${fmt(d.T_hawking_K, 3)} K`,
         `─── disk luminosity ───────────────────────────`,
+        `regime: ${state.regimeName}   (auto: ${state.regimeAuto ? 'on' : 'off'})`,
         `efficiency η (NT, ISCO=${d.r_isco}M)  = ${(d.disk_efficiency*100).toFixed(2)} %`,
         `L_Edd          = ${fmt(d.eddington_solar_lum, 3)} L☉   (${fmt(d.eddington_W, 3)} W)`,
         `L_disk @ ṁ_rel = ${fmt(d.mdot_rel, 3)} → ${fmt(d.disk_lum_solar_lum, 3)} L☉`,

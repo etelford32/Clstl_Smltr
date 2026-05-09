@@ -41,8 +41,8 @@ const SCHEMA = [
     { k: 'ja', p: 'jetAlpha',            s: 'setJetAlpha',       d: 0.7,                t: 'f' },
     { k: 'jo', p: 'jetOpen',             s: null,                d: 0.18,               t: 'f' },
     { k: 'ji', p: 'jetIntensity',        s: 'setJetIntensity',   d: 0.06,               t: 'f' },
-    { k: 'cR', p: 'coronaRadius',        s: 'setCoronaRadius',   d: 10,                 t: 'f' },
-    { k: 'ci', p: 'coronaIntensity',     s: 'setCoronaIntensity',d: 0.04,               t: 'f' },
+    { k: 'oR', p: 'coronaRadius',        s: 'setCoronaRadius',   d: 10,                 t: 'f' },
+    { k: 'oI', p: 'coronaIntensity',     s: 'setCoronaIntensity',d: 0.04,               t: 'f' },
     { k: 'wi', p: 'windIntensity',       s: 'setWindIntensity',  d: 0.04,               t: 'f' },
     { k: 'fi', p: 'feIntensity',         s: 'setFeIntensity',    d: 0.6,                t: 'f' },
     { k: 'm',  p: 'mdotRel',             s: 'setMdotRel',        d: 0.10,               t: 'f' },
@@ -85,6 +85,7 @@ const SCHEMA = [
     { k: 'tl', p: 'showLindblad',        s: 'toggleLindblad',    d: false,              t: 'b' },
     { k: 'tg', p: 'showGrid',            s: 'toggleGrid',        d: false,              t: 'b' },
     { k: 'tp', p: 'showPhotonSphere',    s: 'togglePhotonSphere',d: false,              t: 'b' },
+    { k: 'Ra', p: 'regimeAuto',          s: 'toggleRegimeAuto',  d: true,               t: 'b' },
 ];
 
 function getPath(obj, path) {

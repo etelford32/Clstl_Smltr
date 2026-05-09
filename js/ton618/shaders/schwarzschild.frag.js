@@ -81,6 +81,11 @@ uniform float u_far_shortcut_r;          // r threshold for far-field straight-l
 // ── Phase 1 — Kerr spin parameter (M = 1) ───────────────────────────
 uniform float u_spin;                    // a/M ∈ [0, 0.999); a=0 ↔ Schwarzschild
 
+// ── Tier 2A — Disk regime (RIAF / thin / slim) driven by ṁ ──────────
+uniform int   u_disk_regime;             // 0 = RIAF, 1 = thin, 2 = slim
+uniform float u_disk_T_factor;           // regime-dependent multiplier on T_in
+uniform float u_disk_regime_brightness;  // regime-dependent brightness multiplier
+
 // ── Tier 1B — Gralla-Holz-Wald photon sub-rings (n = 1, 2, …) ───────
 uniform int   u_show_subrings;           // 1 = highlight n ≥ 1 sub-rings
 uniform float u_subring_strength;        // overall multiplier (default 1.0)
@@ -737,10 +742,31 @@ vec3 disk_emission(float r, float ph, float pt, float pph) {
     float radial = smoothstep(0.0, 0.06, uu) * exp(-uu * 1.4) *
                    (1.0 - smoothstep(0.85, 1.0, uu));
 
-    // ── Shakura-Sunyaev temperature → blackbody color ────────────────
-    // The g-factor Doppler-shifts the observed spectrum: T_obs = g · T_emit.
-    float T_obs = disk_temperature_K(r) * g;
-    vec3  col   = blackbody_rgb(T_obs);
+    // ── Regime-aware temperature → spectrum (Tier 2A) ────────────────
+    // Tier 2A: u_disk_T_factor encodes the photon-trapping cap in the
+    // slim-disk regime (Abramowicz: T_eff drops below the naive thin
+    // disk because energy is advected onto the BH). RIAF gets a
+    // separate, harder-spectrum branch that bypasses the blackbody
+    // path because the gas is optically thin.
+    float T_obs = disk_temperature_K(r) * g * u_disk_T_factor;
+    vec3 col;
+    if (u_disk_regime == 0) {
+        // RIAF / ADAF: optically-thin synchrotron + Compton spectrum,
+        // not a blackbody. Visualization uses a flat blue-white tint
+        // weighted by g (relativistic boost of the entire SED). Tier 2C
+        // will replace this with a proper power-law Compton path.
+        col = mix(vec3(0.40, 0.55, 1.05), vec3(0.85, 0.95, 1.30),
+                  smoothstep(0.5, 1.5, g));
+    } else if (u_disk_regime == 2) {
+        // Slim disk: blackbody at the trap-corrected T, with a bluish
+        // wash on the inner edge from photon-trapping shock heating.
+        col = blackbody_rgb(T_obs);
+        col += vec3(0.05, 0.08, 0.18) *
+               smoothstep(u_disk_outer, u_disk_inner * 1.5, r);
+    } else {
+        // Standard thin disk — pure Tanner-Helland blackbody.
+        col = blackbody_rgb(T_obs);
+    }
 
     // Tone the color a bit toward the spiral / turbulence; keep luminance
     // mostly from the bright factor. This avoids the disk going to neutral
@@ -822,7 +848,7 @@ vec3 disk_emission(float r, float ph, float pt, float pph) {
         }
     }
 
-    return emission * u_disk_brightness;
+    return emission * u_disk_brightness * u_disk_regime_brightness;
 }
 
 // "Vertical-relative-to-disk" coordinate: cos(θ_disk) where the disk normal
@@ -846,7 +872,15 @@ float disk_half_thickness(float r_cyl) {
     if (u_disk_h_over_r <= 0.005) return 0.0;
     float r_in = max(u_disk_inner, 1.0e-3);
     float ratio = pow(max(r_cyl / r_in, 1.0e-3), -0.25);
-    float H_over_r = u_disk_h_over_r * (0.7 + 0.6 * ratio);
+    // Regime-aware inner-edge profile (Tier 2A):
+    //   thin disk  → mild puff (0.7..1.3), Shakura-Sunyaev profile
+    //   slim disk  → aggressive inner puff (0.5..2.0), Abramowicz advective
+    //   RIAF       → near-uniform thick torus (0.85..1.10)
+    float profile;
+    if (u_disk_regime == 2)        profile = 0.50 + 1.50 * ratio;   // slim
+    else if (u_disk_regime == 0)   profile = 0.85 + 0.25 * ratio;   // RIAF
+    else                           profile = 0.70 + 0.60 * ratio;   // thin
+    float H_over_r = u_disk_h_over_r * profile;
     return H_over_r * r_cyl;
 }
 

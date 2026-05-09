@@ -153,6 +153,10 @@ export function createWebGL2Backend(canvas) {
         showSubrings:     gl.getUniformLocation(program, 'u_show_subrings'),
         subringStrength:  gl.getUniformLocation(program, 'u_subring_strength'),
         skyStrength:      gl.getUniformLocation(program, 'u_sky_strength'),
+        // Tier 2A — disk regime (RIAF / thin / slim) driven by ṁ
+        diskRegimeIdx:        gl.getUniformLocation(program, 'u_disk_regime'),
+        diskTFactor:          gl.getUniformLocation(program, 'u_disk_T_factor'),
+        diskRegimeBrightness: gl.getUniformLocation(program, 'u_disk_regime_brightness'),
     };
 
     // Tier 1A — render-time post-process knobs (state lives in main.js).
@@ -257,6 +261,9 @@ export function createWebGL2Backend(canvas) {
         gl.uniform1i(uLoc.showSubrings,    u.showSubrings ? 1 : 0);
         gl.uniform1f(uLoc.subringStrength, u.subringStrength ?? 1.0);
         gl.uniform1f(uLoc.skyStrength,     u.skyStrength     ?? 1.0);
+        gl.uniform1i(uLoc.diskRegimeIdx,        (u.diskRegimeIdx ?? 1) | 0);
+        gl.uniform1f(uLoc.diskTFactor,          u.diskTFactor          ?? 1.0);
+        gl.uniform1f(uLoc.diskRegimeBrightness, u.diskRegimeBrightness ?? 1.0);
         // Tier 1A — post-process state mirrored locally so draw() can use
         // it without re-marshalling the uniforms object.
         bloomThreshold = u.bloomThreshold ?? 1.0;
