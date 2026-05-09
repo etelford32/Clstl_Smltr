@@ -109,6 +109,7 @@ export function createWebGL2Backend(canvas) {
         coronaRadius:     gl.getUniformLocation(program, 'u_corona_radius'),
         coronaWidth:      gl.getUniformLocation(program, 'u_corona_width'),
         coronaIntensity:  gl.getUniformLocation(program, 'u_corona_intensity'),
+        coronaY:          gl.getUniformLocation(program, 'u_corona_y'),
         showWind:         gl.getUniformLocation(program, 'u_show_wind'),
         windIntensity:    gl.getUniformLocation(program, 'u_wind_intensity'),
         showFeLine:       gl.getUniformLocation(program, 'u_show_fe_line'),
@@ -217,6 +218,7 @@ export function createWebGL2Backend(canvas) {
         gl.uniform1f(uLoc.coronaRadius,     u.coronaRadius     ?? 10.0);
         gl.uniform1f(uLoc.coronaWidth,      u.coronaWidth      ?? 4.0);
         gl.uniform1f(uLoc.coronaIntensity,  u.coronaIntensity  ?? 0.04);
+        gl.uniform1f(uLoc.coronaY,          u.coronaY          ?? 0.7);
         gl.uniform1i(uLoc.showWind,         u.showWind ? 1 : 0);
         gl.uniform1f(uLoc.windIntensity,    u.windIntensity    ?? 0.04);
         gl.uniform1i(uLoc.showFeLine,       u.showFeLine ? 1 : 0);

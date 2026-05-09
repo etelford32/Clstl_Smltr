@@ -71,6 +71,7 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         coronaRadius:     10.0,
         coronaWidth:      4.0,
         coronaIntensity:  0.04,
+        coronaY:          0.7,        // Tier 2C — Compton y-parameter (typical AGN)
         showWind:         false,
         windIntensity:    0.04,
         showFeLine:       false,
@@ -268,6 +269,7 @@ export async function boot({ canvas, hud, minimapCanvas }) {
             coronaRadius:     state.coronaRadius,
             coronaWidth:      state.coronaWidth,
             coronaIntensity:  state.coronaIntensity,
+            coronaY:          state.coronaY,
             showWind:         state.showWind,
             windIntensity:    state.windIntensity,
             showFeLine:       state.showFeLine,
@@ -491,6 +493,11 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         setJetIntensity(v){ state.jetIntensity = Math.max(0, Math.min(1.0, v)); state.dirty = true; },
         setCoronaRadius(v){ state.coronaRadius = Math.max(2.5, Math.min(60, v)); state.dirty = true; },
         setCoronaIntensity(v){ state.coronaIntensity = Math.max(0, Math.min(0.5, v)); state.dirty = true; },
+        setCoronaY(v)        { state.coronaY = Math.max(0.05, Math.min(8, v)); state.dirty = true; },
+        getComptonGamma()    {
+            const y = Math.max(state.coronaY, 0.05);
+            return 0.5 + Math.sqrt(2.25 + 4 / (3 * y));
+        },
         setWindIntensity(v){ state.windIntensity = Math.max(0, Math.min(0.5, v)); state.dirty = true; },
         setFeIntensity(v) { state.feIntensity = Math.max(0, Math.min(5.0, v)); state.dirty = true; },
         setMdotRel(v)     { state.mdotRel = Math.max(0, Math.min(10.0, v)); state.dirty = true; },
@@ -801,7 +808,10 @@ function updateHUD(hud, state, backend, backendName) {
         `disk: ${diskTag}   r_in=${state.diskInner.toFixed(1)}M  r_out=${state.diskOuter.toFixed(1)}M`,
         `radiation: ${[
             state.showJets ? `jets(β=${state.jetVelocity.toFixed(2)},α=${state.jetAlpha.toFixed(2)})` : null,
-            state.showCorona ? `corona(r=${state.coronaRadius.toFixed(0)}M)` : null,
+            state.showCorona ? (() => {
+                const Gamma = 0.5 + Math.sqrt(2.25 + 4 / (3 * Math.max(state.coronaY, 0.05)));
+                return `corona(r=${state.coronaRadius.toFixed(0)}M · y=${state.coronaY.toFixed(2)} · Γ=${Gamma.toFixed(2)})`;
+            })() : null,
             state.showWind ? 'wind' : null,
             state.showFeLine ? 'Fe-Kα' : null,
             state.showHotspot ? `hotspot(r=${state.hotspotRadius.toFixed(1)}M)` : null,

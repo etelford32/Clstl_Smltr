@@ -43,6 +43,7 @@ const SCHEMA = [
     { k: 'ji', p: 'jetIntensity',        s: 'setJetIntensity',   d: 0.06,               t: 'f' },
     { k: 'oR', p: 'coronaRadius',        s: 'setCoronaRadius',   d: 10,                 t: 'f' },
     { k: 'oI', p: 'coronaIntensity',     s: 'setCoronaIntensity',d: 0.04,               t: 'f' },
+    { k: 'oY', p: 'coronaY',             s: 'setCoronaY',        d: 0.7,                t: 'f' },
     { k: 'wi', p: 'windIntensity',       s: 'setWindIntensity',  d: 0.04,               t: 'f' },
     { k: 'fi', p: 'feIntensity',         s: 'setFeIntensity',    d: 0.6,                t: 'f' },
     { k: 'm',  p: 'mdotRel',             s: 'setMdotRel',        d: 0.10,               t: 'f' },

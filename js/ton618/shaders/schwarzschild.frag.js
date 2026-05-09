@@ -69,6 +69,7 @@ uniform int   u_show_corona;             // 1 = hot Compton corona above inner d
 uniform float u_corona_radius;           // peak r in M
 uniform float u_corona_width;            // shell sigma in M
 uniform float u_corona_intensity;
+uniform float u_corona_y;                // Compton y-parameter: 4·k T_e / m_e c² · max(τ, τ²)
 
 uniform int   u_show_wind;               // 1 = thermally-driven disk wind cone
 uniform float u_wind_intensity;
@@ -1087,16 +1088,37 @@ vec3 volume_emission(float y_prev[8], float y_new[8], float h_step) {
         }
     }
 
-    // ── Hot Compton corona ──────────────────────────────────────────
+    // ── Hot Compton corona (Tier 2C — power-law radiative transfer) ─
+    // Inverse-Compton on the disk's seed photons. The corona shell is
+    // unchanged geometrically (Gaussian at u_corona_radius) but the
+    // spectrum is now derived from the user's Compton y-parameter:
+    //   y = 4 k T_e / m_e c² · max(τ_es, τ²_es)
+    // Sunyaev-Titarchuk 1980: photon index Γ = 0.5 + √(2.25 + 4/(3y)).
+    //   y small (~0.1) → Γ ≈ 4   (very soft, multiple scatterings barely
+    //                              boost photon energy — most emission
+    //                              still near the seed-photon temperature)
+    //   y ~ 1            → Γ ≈ 2.4 (typical AGN corona)
+    //   y large (~5)    → Γ ≈ 2.1 (hard; harder spectra mean more high-
+    //                              energy photons, "harder" in X-ray
+    //                              parlance = bluer in our visualization)
+    // We map Γ → color: hard spectrum bluish-white, soft spectrum
+    // orange-red (Compton-cooled toward the seed temperature).
     if (u_show_corona == 1) {
-        // Gaussian shell at u_corona_radius. Fully spherical; tapered slightly
-        // at the equator to avoid double-counting the disk's emission band.
         float dr_c   = (r - u_corona_radius) / max(u_corona_width, 0.5);
         float w_r    = exp(-dr_c * dr_c);
         float w_th   = 1.0 - 0.6 * exp(-pow((th - 0.5 * PI) / 0.18, 2.0));
-        // Comptonized X-ray spectrum is hard; use a hot blackbody-ish color.
-        vec3 col     = vec3(0.55, 0.75, 1.30);
-        out_rgb     += col * w_r * w_th * u_corona_intensity * h_step;
+
+        float y      = max(u_corona_y, 0.05);
+        float Gamma  = 0.5 + sqrt(2.25 + 4.0 / (3.0 * y));
+        // Color blends harder-bluer ↔ softer-redder along Γ ∈ [1.7, 3.5].
+        vec3 hard_col = vec3(0.85, 1.00, 1.55);     // X-ray-ish bluish-white
+        vec3 soft_col = vec3(1.45, 0.80, 0.40);     // orange (warm Compton)
+        vec3 col      = mix(hard_col, soft_col, smoothstep(1.7, 3.5, Gamma));
+        // Total Comptonized luminosity grows with y (more scatterings
+        // upscatter more seed photons). Empirical fit y → √y · (1+y/2)
+        // matches the qualitative AGN compactness scaling.
+        float y_boost = sqrt(y) * (1.0 + y * 0.5);
+        out_rgb += col * w_r * w_th * u_corona_intensity * y_boost * h_step;
     }
 
     // ── Radiation-driven disk wind (biconical) ─────────────────────
