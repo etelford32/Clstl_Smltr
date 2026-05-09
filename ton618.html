@@ -604,6 +604,39 @@ select {
         </div>
 
         <div>
+            <div class="sec-title">Cinematic (HDR · ACES · bloom)</div>
+            <div class="toggle-row">
+                <input type="checkbox" id="bloomOn" checked>
+                <label for="bloomOn">Bloom + HDR float framebuffer</label>
+            </div>
+            <div class="ctrl">
+                <label>Exposure (stops)</label>
+                <input type="range" id="s-exposure" min="-3" max="3" step="0.05" value="0">
+                <div class="val" id="v-exposure">0.00 EV</div>
+            </div>
+            <div class="ctrl">
+                <label>Bloom threshold</label>
+                <input type="range" id="s-bloom-th" min="0.2" max="4" step="0.05" value="1.2">
+                <div class="val" id="v-bloom-th">1.20</div>
+            </div>
+            <div class="ctrl">
+                <label>Bloom soft knee</label>
+                <input type="range" id="s-bloom-knee" min="0.05" max="1.5" step="0.025" value="0.6">
+                <div class="val" id="v-bloom-knee">0.60</div>
+            </div>
+            <div class="ctrl">
+                <label>Bloom strength</label>
+                <input type="range" id="s-bloom-st" min="0" max="3" step="0.025" value="1.0">
+                <div class="val" id="v-bloom-st">1.00×</div>
+            </div>
+            <div class="note">RGBA16F scene framebuffer feeds a 2-pass
+                separable Gaussian bloom (Karis 2013, smooth-knee bright
+                pass) and an ACES filmic tonemap (Narkowicz 2015) on
+                composite. Exposure shifts in <i>stops</i> (× 2<sup>EV</sup>);
+                threshold and knee define the bright-pass curve.</div>
+        </div>
+
+        <div>
             <div class="sec-title">Performance</div>
             <div class="toggle-row">
                 <input type="checkbox" id="autoLOD" checked>
@@ -981,6 +1014,20 @@ select {
             else label = 'super-Eddington';
             return `${v.toFixed(3)}  (${label})`;
         }, (v) => app.setMdotRel(v));
+
+    // ── Cinematic (Tier 1A) ────────────────────────────────────────
+    $('bloomOn').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.bloomEnabled) app.toggleBloom();
+    });
+    bindRange('s-exposure', 'v-exposure',
+        (v) => `${v >= 0 ? '+' : ''}${v.toFixed(2)} EV  (×${Math.pow(2, v).toFixed(2)})`,
+        (v) => app.setExposureStops(v));
+    bindRange('s-bloom-th', 'v-bloom-th',
+        (v) => v.toFixed(2), (v) => app.setBloomThreshold(v));
+    bindRange('s-bloom-knee', 'v-bloom-knee',
+        (v) => v.toFixed(2), (v) => app.setBloomKnee(v));
+    bindRange('s-bloom-st', 'v-bloom-st',
+        (v) => `${v.toFixed(2)}×`, (v) => app.setBloomStrength(v));
 
     // ── Performance ────────────────────────────────────────────────
     $('autoLOD').addEventListener('change', (e) => {

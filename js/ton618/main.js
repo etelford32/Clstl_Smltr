@@ -103,6 +103,15 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         // ── Time controls (B6) ─────────────────────────────────────────
         timeMax:          200.0,      // user-adjustable scrubber upper bound (s)
 
+        // ── Tier 1A — HDR + bloom + ACES tonemap pipeline ─────────────
+        // Defaults tuned so the disk's hot inner edge blooms without
+        // washing out the disk fine-structure or the LAB halo.
+        bloomEnabled:     true,
+        bloomThreshold:   1.2,        // luminance above which bloom kicks in
+        bloomKnee:        0.6,        // soft-knee half-width for smooth ramp
+        bloomStrength:    1.0,        // multiplier on bloom contribution
+        exposureStops:    0.0,        // ±3 EV typical
+
         // ── Phase 2.1 — Lyman-α blob (Slug-class defaults) ────────────
         // Off by default; toggle to render the host-galaxy halo. Defaults
         // anchored to UM287's "Slug" nebula (Cantalupo et al. 2014):
@@ -246,6 +255,12 @@ export async function boot({ canvas, hud, minimapCanvas }) {
             showPolVectors:   state.showPolVectors,
             labPolMax:        state.labPolMax,
             labDoublePeak:    state.labDoublePeak,
+            // Tier 1A — HDR/bloom/ACES post-process knobs
+            bloomEnabled:     state.bloomEnabled,
+            bloomThreshold:   state.bloomThreshold,
+            bloomKnee:        state.bloomKnee,
+            bloomStrength:    state.bloomStrength,
+            exposureStops:    state.exposureStops,
         });
         backend.draw();
         updateHUD(hud, state, backend, name);
@@ -475,6 +490,12 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         togglePolVectors()    { state.showPolVectors = !state.showPolVectors; state.dirty = true; return state.showPolVectors; },
         toggleDoublePeak()    { state.labDoublePeak  = !state.labDoublePeak;  state.dirty = true; return state.labDoublePeak; },
         setLabPolMax(v)       { state.labPolMax = Math.max(0, Math.min(0.5, v)); state.dirty = true; },
+        // ── Tier 1A — bloom / tonemap controls ─────────────────────
+        toggleBloom()         { state.bloomEnabled = !state.bloomEnabled; state.dirty = true; return state.bloomEnabled; },
+        setBloomThreshold(v)  { state.bloomThreshold = Math.max(0.1, Math.min(8, v)); state.dirty = true; },
+        setBloomKnee(v)       { state.bloomKnee      = Math.max(0.05, Math.min(2, v)); state.dirty = true; },
+        setBloomStrength(v)   { state.bloomStrength  = Math.max(0, Math.min(4, v)); state.dirty = true; },
+        setExposureStops(v)   { state.exposureStops  = Math.max(-4, Math.min(4, v)); state.dirty = true; },
         // ── LAB scenario presets ──────────────────────────────────
         // Snapshot+apply a coherent set of LAB parameters mapped to a named
         // observed system. Forces the LAB on so the preset is immediately

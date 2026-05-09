@@ -1580,10 +1580,10 @@ void main() {
         color += ring_weight * vec3(0.28, 0.16, 0.04);
     }
 
-    // Mild tone map + gamma.
-    color = color / (1.0 + color);
-    color = pow(color, vec3(1.0 / 2.2));
-
+    // Output linear HDR — ACES tonemap + bloom + gamma now live in the
+    // post-process composite pass (Tier 1A). The fragment values written
+    // here are unbounded (RGBA16F render target), so the disk's hot inner
+    // edge can radiate into the high-luminance regime where bloom kicks in.
     fragColor = vec4(color, 1.0);
 }
 `;
