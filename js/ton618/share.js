@@ -86,6 +86,8 @@ const SCHEMA = [
     { k: 'tg', p: 'showGrid',            s: 'toggleGrid',        d: false,              t: 'b' },
     { k: 'tp', p: 'showPhotonSphere',    s: 'togglePhotonSphere',d: false,              t: 'b' },
     { k: 'Ra', p: 'regimeAuto',          s: 'toggleRegimeAuto',  d: true,               t: 'b' },
+    { k: 'Bz', p: 'bzAuto',              s: 'toggleBzAuto',      d: true,               t: 'b' },
+    { k: 'mP', p: 'magnetization',       s: 'setMagnetization',  d: 0.7,                t: 'f' },
 ];
 
 function getPath(obj, path) {

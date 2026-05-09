@@ -157,6 +157,8 @@ export function createWebGL2Backend(canvas) {
         diskRegimeIdx:        gl.getUniformLocation(program, 'u_disk_regime'),
         diskTFactor:          gl.getUniformLocation(program, 'u_disk_T_factor'),
         diskRegimeBrightness: gl.getUniformLocation(program, 'u_disk_regime_brightness'),
+        // Tier 2B — Blandford-Znajek MAD-state disk dimming
+        diskMadDim:           gl.getUniformLocation(program, 'u_disk_mad_dim'),
     };
 
     // Tier 1A — render-time post-process knobs (state lives in main.js).
@@ -264,6 +266,7 @@ export function createWebGL2Backend(canvas) {
         gl.uniform1i(uLoc.diskRegimeIdx,        (u.diskRegimeIdx ?? 1) | 0);
         gl.uniform1f(uLoc.diskTFactor,          u.diskTFactor          ?? 1.0);
         gl.uniform1f(uLoc.diskRegimeBrightness, u.diskRegimeBrightness ?? 1.0);
+        gl.uniform1f(uLoc.diskMadDim,           u.diskMadDim           ?? 1.0);
         // Tier 1A — post-process state mirrored locally so draw() can use
         // it without re-marshalling the uniforms object.
         bloomThreshold = u.bloomThreshold ?? 1.0;

@@ -421,6 +421,59 @@ export function diskRegime(mdot_rel) {
 }
 
 // ---------------------------------------------------------------------------
+// Tier 2B — Blandford-Znajek jet power + MAD state.
+// ---------------------------------------------------------------------------
+// The 1977 Blandford-Znajek mechanism extracts rotational energy from a
+// spinning BH through magnetic field lines threading the horizon. Power
+// scales as
+//     P_BZ ∝ Φ_H² Ω_H² ∝ Φ_H² · a²/(2r₊)²
+// where Φ_H is the magnetic flux on the horizon and Ω_H = a/(2 M r₊) is
+// the horizon angular velocity. As accretion piles up flux on the
+// horizon, the disk eventually transitions into a "magnetically
+// arrested" (MAD) state in which Φ_H saturates at Φ_MAD ≈ 50 √(Ṁ M).
+//
+// Tchekhovskoy, Narayan, McKinney 2011 measured the dimensionless
+// efficiency η = L_jet / Ṁc² in MAD GRMHD simulations:
+//     η_MAD(a) ≈ 1.3 a² + 0.6 a⁴
+// which can exceed 1 — meaning more energy comes out as jet than was
+// fed in as accretion (the difference is mined from the BH's rotational
+// kinetic energy). Below MAD the disk is "SANE" (Standard And Normal
+// Evolution) and η scales as ~ (Φ/Φ_MAD)² η_MAD.
+//
+// `magnetization` is the user's slider: φ = Φ / Φ_MAD ∈ [0, 1.5].
+//   φ < 1     SANE regime, jet building up.
+//   φ = 1     MAD threshold.
+//   φ > 1     "super-MAD" with mild jet over-saturation.
+
+export function bzEfficiency(spin, magnetization) {
+    const a   = Math.max(0, Math.min(0.999, spin || 0));
+    const phi = Math.max(0, magnetization || 0);
+    const eta_MAD = 1.3 * a * a + 0.6 * Math.pow(a, 4);
+    const isMAD = phi >= 1.0;
+    let eta;
+    if (isMAD) {
+        // Plateau at η_MAD with mild over-saturation when φ > 1 ("super-MAD").
+        const overshoot = Math.min(0.4, (phi - 1.0) * 0.5);
+        eta = eta_MAD * (1.0 + overshoot);
+    } else {
+        // SANE: efficiency rises like φ² as flux accumulates toward MAD.
+        eta = phi * phi * eta_MAD;
+    }
+    return {
+        a,
+        phi,
+        eta,                                // total jet η = L_jet / Ṁc²
+        eta_MAD,                            // saturation value at given a
+        isMAD,
+        omega_H: a / (2.0 * (1.0 + Math.sqrt(Math.max(1 - a * a, 0)))),
+        // Disk dimming when MAD: the magnetosphere extracts energy that
+        // would otherwise heat the inner accretion flow, so the disk
+        // visibly fades. McKinney+ 2012, Tchekhovskoy+ 2014.
+        disk_mad_dim: isMAD ? (0.55 + 0.10 / Math.max(phi, 1.0)) : 1.0,
+    };
+}
+
+// ---------------------------------------------------------------------------
 // Phase 2.1 — Lyman-α blob diagnostics.
 // ---------------------------------------------------------------------------
 // Compute observable quantities from the user's LAB parameters so the HUD

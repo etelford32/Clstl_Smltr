@@ -86,6 +86,13 @@ uniform int   u_disk_regime;             // 0 = RIAF, 1 = thin, 2 = slim
 uniform float u_disk_T_factor;           // regime-dependent multiplier on T_in
 uniform float u_disk_regime_brightness;  // regime-dependent brightness multiplier
 
+// ── Tier 2B — Blandford-Znajek + MAD coupling ───────────────────────
+// MAD state extracts magnetic energy from accretion flow → inner disk
+// dims. u_disk_mad_dim multiplies the disk's final brightness; the jet
+// intensity uniform is overridden by main.js with the BZ-derived value
+// so no separate uniform needed for it.
+uniform float u_disk_mad_dim;            // 1 in non-MAD, ~0.55-0.70 in MAD
+
 // ── Tier 1B — Gralla-Holz-Wald photon sub-rings (n = 1, 2, …) ───────
 uniform int   u_show_subrings;           // 1 = highlight n ≥ 1 sub-rings
 uniform float u_subring_strength;        // overall multiplier (default 1.0)
@@ -848,7 +855,7 @@ vec3 disk_emission(float r, float ph, float pt, float pph) {
         }
     }
 
-    return emission * u_disk_brightness * u_disk_regime_brightness;
+    return emission * u_disk_brightness * u_disk_regime_brightness * u_disk_mad_dim;
 }
 
 // "Vertical-relative-to-disk" coordinate: cos(θ_disk) where the disk normal

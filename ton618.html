@@ -456,6 +456,16 @@ body.ton618-embed #hud-title { font-size:8px; }
                 <input type="checkbox" id="showJets" checked>
                 <label for="showJets">Bipolar synchrotron jets (Doppler δ<sup>2+α</sup>)</label>
             </div>
+            <div class="toggle-row">
+                <input type="checkbox" id="bzAuto" checked>
+                <label for="bzAuto">Auto jet η from spin a + magnetization (Blandford-Znajek)</label>
+            </div>
+            <div class="ctrl">
+                <label>Magnetic flux φ = Φ<sub>H</sub> / Φ<sub>MAD</sub></label>
+                <input type="range" id="s-magphi" min="0" max="1.5" step="0.01" value="0.7">
+                <div class="val" id="v-magphi">0.70  (SANE — pre-MAD)</div>
+            </div>
+            <div class="val" id="v-mad-state" style="text-align:left;color:#cca266">η<sub>BZ</sub>= — &nbsp; SANE</div>
             <div class="ctrl">
                 <label>Jet β = v/c</label>
                 <input type="range" id="s-jet-v" min="0" max="0.999" step="0.005" value="0.95">
@@ -1093,6 +1103,28 @@ body.ton618-embed #hud-title { font-size:8px; }
     bindRange('s-jet-o', 'v-jet-o', (v) => `${v.toFixed(0)}°`,
         (v) => app.setJetOpen((v * Math.PI) / 180));
     bindRange('s-jet-i', 'v-jet-i', (v) => v.toFixed(3), (v) => app.setJetIntensity(v));
+
+    // ── BZ + MAD (Tier 2B) ────────────────────────────────────────
+    $('bzAuto').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.bzAuto) app.toggleBzAuto();
+    });
+    bindRange('s-magphi', 'v-magphi',
+        (v) => v < 0.05 ? `${v.toFixed(2)}  (no flux)` :
+               v < 0.5  ? `${v.toFixed(2)}  (SANE — building)` :
+               v < 1.0  ? `${v.toFixed(2)}  (SANE — pre-MAD)` :
+               v < 1.15 ? `${v.toFixed(2)}  (MAD — saturated)` :
+                          `${v.toFixed(2)}  (super-MAD)`,
+        (v) => app.setMagnetization(v));
+    setInterval(() => {
+        const bz = app.getBzState?.();
+        if (!bz) return;
+        const tag = bz.isMAD ? 'MAD' : 'SANE';
+        const tagColor = bz.isMAD ? '#ff6644' : '#88dd66';
+        $('v-mad-state').innerHTML =
+            `η<sub>BZ</sub> = ${(bz.eta*100).toFixed(1)} %  ` +
+            `<span style="color:${tagColor}">${tag}</span>  ` +
+            `(η<sub>MAD</sub>(a) = ${(bz.etaMax*100).toFixed(1)} %)`;
+    }, 500);
     bindRange('s-cor-r', 'v-cor-r', (v) => `${v.toFixed(1)} M`, (v) => app.setCoronaRadius(v));
     bindRange('s-cor-i', 'v-cor-i', (v) => v.toFixed(3), (v) => app.setCoronaIntensity(v));
     bindRange('s-wind-i', 'v-wind-i', (v) => v.toFixed(3), (v) => app.setWindIntensity(v));

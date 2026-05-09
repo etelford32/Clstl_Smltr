@@ -14,7 +14,7 @@ import {
 } from './camera.js';
 import { formatLength, PHOTON_RING_RS, R_HORIZON_GEOM, M_IN_KPC } from './units.js';
 import { measurePhotonRing } from './validation.js';
-import { diagnostics, labDiagnostics, diskRegime } from './physics.js';
+import { diagnostics, labDiagnostics, diskRegime, bzEfficiency } from './physics.js';
 import { createMinimap } from './minimap.js';
 import { traceRay } from './inspector.js';
 
@@ -117,6 +117,19 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         subringStrength:  1.0,         // brightness multiplier (× exp(-nπ) decay)
         skyStrength:      1.0,         // 0..2 — 0 fully suppresses the deep-sky field
 
+        // ── Tier 2B — Blandford-Znajek + MAD ──────────────────────────
+        // φ = Φ_H / Φ_MAD: 0 = no flux, 1 = MAD threshold, > 1 super-MAD.
+        // When bzAuto is on, the jet's brightness is driven by η_BZ(a, φ)
+        // instead of the manual jetIntensity slider; the disk dims when
+        // MAD is reached because the magnetosphere extracts the inner-
+        // disk's binding energy (Tchekhovskoy+ 2011, McKinney+ 2012).
+        bzAuto:           true,
+        magnetization:    0.7,         // φ — 0..1.5 typical
+        // Cached per-frame BZ result for the HUD.
+        bzEta:            0.0,
+        bzIsMAD:          false,
+        bzEtaMax:         0.0,
+
         // ── Tier 2A — disk regime (auto from ṁ vs manual H/r override) ─
         // When `regimeAuto` is on the disk's H(r)/r profile, T-scaling,
         // brightness, and regime tag are all derived from u_mdot_rel
@@ -210,6 +223,18 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         state.regimeIdx  = regime.regimeIdx;
         state.regimeName = regime.regime;
         const effectiveHOverR = state.regimeAuto ? regime.hOverR : state.diskHOverR;
+        // Tier 2B — Blandford-Znajek jet power + MAD-state disk dimming.
+        const bz = bzEfficiency(state.spin, state.magnetization);
+        state.bzEta    = bz.eta;
+        state.bzEtaMax = bz.eta_MAD;
+        state.bzIsMAD  = bz.isMAD;
+        // η = 1.0 (a=1, MAD) maps to a visually-bright jet intensity of
+        // 0.20 — well-tuned with the existing Doppler-beaming term and
+        // the Tier 1A bloom. Below MAD or low-spin, jets fade smoothly.
+        const effectiveJetIntensity = state.bzAuto
+            ? Math.min(0.50, 0.20 * bz.eta)
+            : state.jetIntensity;
+        const effectiveDiskMadDim = state.bzAuto ? bz.disk_mad_dim : 1.0;
         backend.setUniforms({
             ...u,
             rFar:             state.rFar,
@@ -238,7 +263,7 @@ export async function boot({ canvas, hud, minimapCanvas }) {
             jetAlpha:         state.jetAlpha,
             jetOpen:          state.jetOpen,
             jetRMax:          state.jetRMax,
-            jetIntensity:     state.jetIntensity,
+            jetIntensity:     effectiveJetIntensity,
             showCorona:       state.showCorona,
             coronaRadius:     state.coronaRadius,
             coronaWidth:      state.coronaWidth,
@@ -253,6 +278,7 @@ export async function boot({ canvas, hud, minimapCanvas }) {
             diskRegimeIdx:        state.regimeIdx,
             diskTFactor:          regime.T_factor,
             diskRegimeBrightness: regime.brightness_factor,
+            diskMadDim:           effectiveDiskMadDim,
             mriStrength:      state.mriStrength,
             nHotspots:        state.nHotspots,
             qpoFlare:         state.qpoFlare,
@@ -530,6 +556,10 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         // ── Tier 2A — disk regime auto-mode ────────────────────────
         toggleRegimeAuto()    { state.regimeAuto = !state.regimeAuto; state.dirty = true; return state.regimeAuto; },
         getRegimeName()       { return state.regimeName; },
+        // ── Tier 2B — Blandford-Znajek + MAD ───────────────────────
+        toggleBzAuto()        { state.bzAuto = !state.bzAuto; state.dirty = true; return state.bzAuto; },
+        setMagnetization(v)   { state.magnetization = Math.max(0, Math.min(1.5, v)); state.dirty = true; },
+        getBzState()          { return { eta: state.bzEta, etaMax: state.bzEtaMax, isMAD: state.bzIsMAD, phi: state.magnetization }; },
         // ── Tier 1B — photon sub-rings + sky ───────────────────────
         toggleSubrings()      { state.showSubrings = !state.showSubrings; state.dirty = true; return state.showSubrings; },
         setSubringStrength(v) { state.subringStrength = Math.max(0, Math.min(4, v)); state.dirty = true; },
@@ -762,6 +792,7 @@ function updateHUD(hud, state, backend, backendName) {
         `Bekenstein S/k = ${fmt(d.bekenstein_entropy_over_k, 3)}    T_H = ${fmt(d.T_hawking_K, 3)} K`,
         `─── disk luminosity ───────────────────────────`,
         `regime: ${state.regimeName}   (auto: ${state.regimeAuto ? 'on' : 'off'})`,
+        `magnetic state: ${state.bzIsMAD ? 'MAD' : 'SANE'}  φ=${state.magnetization.toFixed(2)}   η_BZ=${(state.bzEta*100).toFixed(1)}%   η_MAD=${(state.bzEtaMax*100).toFixed(1)}%`,
         `efficiency η (NT, ISCO=${d.r_isco}M)  = ${(d.disk_efficiency*100).toFixed(2)} %`,
         `L_Edd          = ${fmt(d.eddington_solar_lum, 3)} L☉   (${fmt(d.eddington_W, 3)} W)`,
         `L_disk @ ṁ_rel = ${fmt(d.mdot_rel, 3)} → ${fmt(d.disk_lum_solar_lum, 3)} L☉`,
