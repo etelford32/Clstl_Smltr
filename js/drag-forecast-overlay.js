@@ -116,9 +116,21 @@ export class DragForecastOverlay {
         // Per-layer drag-delta state (red↑ / green↓) — fed via setDragHistory().
         // Default 0 = "no change known yet" → renders white.
         this._layerDelta = {};
-        for (const L of ATMOSPHERIC_LAYER_SCHEMA) this._layerDelta[L.id] = 0;
+        // Per-layer enable mask — mirrors AtmosphereGlobe.setLayerVisible so the
+        // drag-forecast lines for a hidden shell vanish too. Default ON for
+        // every layer so a fresh overlay matches the page's default state.
+        this._layerEnabled = {};
+        for (const L of ATMOSPHERIC_LAYER_SCHEMA) {
+            this._layerDelta[L.id] = 0;
+            this._layerEnabled[L.id] = true;
+        }
         this._f107 = 150;
         this._ap   = 15;
+
+        // Zoom-driven draw density. 1.0 → all tracers' trails written; 0.3 →
+        // only ~30% (the rest are zeroed out so the buffer stays packed but
+        // they cost no triangles). Updated each frame via setZoomLevel(dist).
+        this._drawDensity = 1.0;
 
         // ── Geometry ────────────────────────────────────────────────
         // One LineSegments mesh, two vertices per trail segment.
@@ -154,6 +166,44 @@ export class DragForecastOverlay {
     isVisible()   { return !!this.mesh.visible; }
 
     setSunDir(sunDir) { this._sunDir.copy(sunDir); }
+
+    /**
+     * Mirror the host page's per-layer visibility toggle. Tracers in a
+     * disabled layer still advect (so re-enabling looks instant rather
+     * than warm-up'ing) but their trails are zeroed out at write time.
+     */
+    setLayerEnabled(layerId, enabled) {
+        if (this._layerEnabled[layerId] === undefined) return;
+        this._layerEnabled[layerId] = !!enabled;
+    }
+
+    isLayerEnabled(layerId) {
+        return !!this._layerEnabled?.[layerId];
+    }
+
+    /**
+     * Adjust draw density from camera distance (in Earth radii from origin).
+     * Closer in → all trails. Far out → fewer trails so the field reads as
+     * a coarser pattern instead of a washed-out haze. Iteration cost stays
+     * fixed; we just write zeros for the skipped ones, which is cheap and
+     * keeps the GPU buffer layout stable across zooms.
+     *
+     * Curve:
+     *   ≤ 1.5 R⊕   → 1.00  (camera is inside / near the outer-exosphere)
+     *   3.2 R⊕    → 0.85   (default opening view)
+     *   5.0 R⊕    → 0.55
+     *   ≥ 8.0 R⊕   → 0.30
+     */
+    setZoomLevel(distR) {
+        const d = Math.max(1.0, distR);
+        let f;
+        if (d <= 1.5)      f = 1.00;
+        else if (d <= 3.2) f = 1.00 - 0.15 * ((d - 1.5) / (3.2 - 1.5));
+        else if (d <= 5.0) f = 0.85 - 0.30 * ((d - 3.2) / (5.0 - 3.2));
+        else if (d <= 8.0) f = 0.55 - 0.25 * ((d - 5.0) / (8.0 - 5.0));
+        else               f = 0.30;
+        this._drawDensity = f;
+    }
 
     /**
      * Push the latest drag-state snapshot. Cheap — just updates state used
@@ -269,11 +319,18 @@ export class DragForecastOverlay {
         let p = 0, c = 0;
         const tmpA = new THREE.Vector3();
         const tmpB = new THREE.Vector3();
-        const layerCol = new Array(ATMOSPHERIC_LAYER_SCHEMA.length);
+        const layerCol     = new Array(ATMOSPHERIC_LAYER_SCHEMA.length);
+        const layerEnabled = new Array(ATMOSPHERIC_LAYER_SCHEMA.length);
         for (let li = 0; li < ATMOSPHERIC_LAYER_SCHEMA.length; li++) {
             const id = ATMOSPHERIC_LAYER_SCHEMA[li].id;
-            layerCol[li] = _deltaColor(this._layerDelta[id] || 0);
+            layerCol[li]     = _deltaColor(this._layerDelta[id] || 0);
+            layerEnabled[li] = this._layerEnabled[id] !== false;
         }
+        // Zoom-density threshold. A tracer is drawn iff its hashed index
+        // falls under the threshold; rest are zeroed. Hashing keeps the
+        // thinning uniform across layers (otherwise contiguous index runs
+        // would over-represent whichever layer they belong to).
+        const drawThresh = Math.round(this._drawDensity * 256);
 
         for (let i = 0; i < this.N; i++) {
             const li = this._layerIdx[i];
@@ -281,6 +338,21 @@ export class DragForecastOverlay {
             const base  = i * TRAIL_LEN;
             const head  = this._head[i];
             const baseC = layerCol[li];
+
+            // Drop this tracer's segments if its layer is muted OR if zoom
+            // density excludes it. We still iterate its segments to keep
+            // the buffer offsets aligned — just write zero geometry.
+            const indexHash = ((i * 2654435761) >>> 0) & 0xff;
+            const drop = !layerEnabled[li] || indexHash >= drawThresh;
+            if (drop) {
+                for (let k = 0; k < segPerTrail; k++) {
+                    this._pos[p++] = 0; this._pos[p++] = 0; this._pos[p++] = 0;
+                    this._pos[p++] = 0; this._pos[p++] = 0; this._pos[p++] = 0;
+                    this._col[c++] = 0; this._col[c++] = 0; this._col[c++] = 0;
+                    this._col[c++] = 0; this._col[c++] = 0; this._col[c++] = 0;
+                }
+                continue;
+            }
 
             for (let k = 0; k < segPerTrail; k++) {
                 const k0 = (head + 1 + k)     % TRAIL_LEN;

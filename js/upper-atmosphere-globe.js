@@ -758,6 +758,16 @@ export class AtmosphereGlobe {
         // Particle system.
         const sys = this._particles?.[layerId];
         if (sys) sys.setVisible(v);
+        // Drag-forecast overlay: mirror the layer toggle so flow lines for
+        // hidden shells vanish too.
+        this._dragOverlay?.setLayerEnabled?.(layerId, v);
+        // Broadcast for any panel that paints per-layer state (drag legend
+        // dims muted rows).
+        try {
+            window.dispatchEvent(new CustomEvent('ua-layer-visibility', {
+                detail: { id: layerId, visible: v },
+            }));
+        } catch (_) { /* SSR / no-window — ignore */ }
     }
 
     /**
@@ -3508,8 +3518,13 @@ export class AtmosphereGlobe {
         }
 
         // Drag-forecast tracer advection. Self-gates on visibility so it
-        // costs nothing when the operator panel is closed.
-        if (this._dragOverlay) this._dragOverlay.update(dt);
+        // costs nothing when the operator panel is closed. Camera distance
+        // drives the LOD-style trail thinning so the field reads cleanly
+        // at any zoom — full population up close, ~30% out near the stars.
+        if (this._dragOverlay) {
+            this._dragOverlay.setZoomLevel(this._camera.position.length());
+            this._dragOverlay.update(dt);
+        }
 
         // Real-time Earth–Sun geometry. We don't rotate the Earth mesh or
         // the camera here — instead the sub-solar point is recomputed from

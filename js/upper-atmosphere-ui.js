@@ -784,7 +784,14 @@ export class UpperAtmosphereUI {
             });
         }
         window.addEventListener('ua-drag-forecast-tick', (e) => {
-            this._paintDragLegend(e?.detail);
+            this._lastDragSnapshot = e?.detail || this._lastDragSnapshot;
+            this._paintDragLegend(this._lastDragSnapshot);
+        });
+        // When a layer is muted via the per-layer toggle, the drag legend
+        // should reflect that immediately (dimmed row + " (off)" hint)
+        // even before the next setProfile() round-trip.
+        window.addEventListener('ua-layer-visibility', () => {
+            this._paintDragLegend(this._lastDragSnapshot);
         });
     }
 
@@ -792,10 +799,12 @@ export class UpperAtmosphereUI {
     _paintDragLegend(snapshot) {
         const host = this.el?.dragLegend;
         if (!host || !snapshot) return;
+        const layerVis = this.globe?.getLayerVisibility?.() || {};
         // Render in altitude order so the panel reads top-of-atmosphere → down.
         const rows = [];
         for (const L of ATMOSPHERIC_LAYER_SCHEMA) {
             const s = snapshot[L.id]; if (!s) continue;
+            const muted = layerVis[L.id] === false;
             // dRhoDt is normalised so ±1 ≈ saturated colour. For the
             // user-facing text we convert back to a %/min figure
             // (dRhoDt × 2%/min, the inverse of the normalisation in
@@ -817,10 +826,12 @@ export class UpperAtmosphereUI {
                 : q_uPa >= 1e-3
                   ? `${(q_uPa * 1e3).toFixed(1)} nPa`
                   : `${q_uPa.toExponential(1)} µPa`;
+            const muteCls = muted ? ' ua-drag-row-muted' : '';
+            const muteLabel = muted ? ' <span class="ua-drag-muted-tag">off</span>' : '';
             rows.push(
-                `<span class="ua-drag-row-name">${L.name}</span>` +
-                `<span class="ua-drag-row-q">q ≈ ${qLabel}</span>` +
-                `<span class="ua-drag-row-delta ${cls}">${label}</span>`
+                `<span class="ua-drag-row-name${muteCls}">${L.name}${muteLabel}</span>` +
+                `<span class="ua-drag-row-q${muteCls}">q ≈ ${qLabel}</span>` +
+                `<span class="ua-drag-row-delta ${muted ? 'ua-drag-flat ua-drag-row-muted' : cls}">${muted ? '—' : label}</span>`
             );
         }
         host.innerHTML = rows.join('');
