@@ -1,5 +1,7 @@
 import { FULLSCREEN_VERT } from './shaders/fullscreen.vert.js';
 import { SCHWARZSCHILD_FRAG } from './shaders/schwarzschild.frag.js';
+import { BLOOM_EXTRACT_FRAG, BLOOM_BLUR_FRAG } from './shaders/bloom.frag.js';
+import { COMPOSITE_FRAG } from './shaders/composite.frag.js';
 
 export function createWebGL2Backend(canvas) {
     const gl = canvas.getContext('webgl2', {
@@ -10,8 +12,66 @@ export function createWebGL2Backend(canvas) {
     });
     if (!gl) throw new Error('WebGL2 not available in this browser.');
 
-    const program = buildProgram(gl, FULLSCREEN_VERT, SCHWARZSCHILD_FRAG);
+    // EXT_color_buffer_float lets us render into RGBA16F textures, which
+    // is what makes the HDR pipeline work — the disk's hot inner edge can
+    // hit luminance values of ~50 and bloom pulls them back into sRGB.
+    // Without the extension we fall back to LDR (RGBA8) — bloom still
+    // runs but the brightest pixels are pre-clipped.
+    const hdrExt = gl.getExtension('EXT_color_buffer_float') ||
+                   gl.getExtension('EXT_color_buffer_half_float');
+    const HDR_INTERNAL = hdrExt ? gl.RGBA16F : gl.RGBA8;
+    const HDR_TYPE     = hdrExt ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE;
+
+    const program          = buildProgram(gl, FULLSCREEN_VERT, SCHWARZSCHILD_FRAG);
+    const programExtract   = buildProgram(gl, FULLSCREEN_VERT, BLOOM_EXTRACT_FRAG);
+    const programBlur      = buildProgram(gl, FULLSCREEN_VERT, BLOOM_BLUR_FRAG);
+    const programComposite = buildProgram(gl, FULLSCREEN_VERT, COMPOSITE_FRAG);
     const vao = gl.createVertexArray();
+
+    const uExtract = {
+        scene:     gl.getUniformLocation(programExtract, 'u_scene'),
+        texel:     gl.getUniformLocation(programExtract, 'u_texel'),
+        threshold: gl.getUniformLocation(programExtract, 'u_threshold'),
+        knee:      gl.getUniformLocation(programExtract, 'u_knee'),
+    };
+    const uBlur = {
+        input:  gl.getUniformLocation(programBlur, 'u_input'),
+        texel:  gl.getUniformLocation(programBlur, 'u_texel'),
+        axis:   gl.getUniformLocation(programBlur, 'u_axis'),
+    };
+    const uComposite = {
+        scene:          gl.getUniformLocation(programComposite, 'u_scene'),
+        bloom:          gl.getUniformLocation(programComposite, 'u_bloom'),
+        bloomStrength:  gl.getUniformLocation(programComposite, 'u_bloom_strength'),
+        exposureStops:  gl.getUniformLocation(programComposite, 'u_exposure_stops'),
+    };
+
+    // ── HDR + bloom framebuffer set ─────────────────────────────────
+    // sceneFBO   — RGBA16F at full resolution; the GR ray-trace renders here.
+    // bloomA/B   — RGBA16F at half resolution; bright-pass into A, blur
+    //              horizontally into B, blur vertically back into A.
+    function makeHdrFBO(w, h) {
+        const tex = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, HDR_INTERNAL, w, h, 0, gl.RGBA, HDR_TYPE, null);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S,     gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T,     gl.CLAMP_TO_EDGE);
+        const fbo = gl.createFramebuffer();
+        gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+        return { fbo, tex, w, h };
+    }
+    let sceneFBO = null;
+    let bloomA   = null;
+    let bloomB   = null;
+
+    function disposeFBO(f) {
+        if (!f) return;
+        gl.deleteFramebuffer(f.fbo);
+        gl.deleteTexture(f.tex);
+    }
 
     const uLoc = {
         resolution:       gl.getUniformLocation(program, 'u_resolution'),
@@ -49,6 +109,7 @@ export function createWebGL2Backend(canvas) {
         coronaRadius:     gl.getUniformLocation(program, 'u_corona_radius'),
         coronaWidth:      gl.getUniformLocation(program, 'u_corona_width'),
         coronaIntensity:  gl.getUniformLocation(program, 'u_corona_intensity'),
+        coronaY:          gl.getUniformLocation(program, 'u_corona_y'),
         showWind:         gl.getUniformLocation(program, 'u_show_wind'),
         windIntensity:    gl.getUniformLocation(program, 'u_wind_intensity'),
         showFeLine:       gl.getUniformLocation(program, 'u_show_fe_line'),
@@ -89,12 +150,35 @@ export function createWebGL2Backend(canvas) {
         camRightCart:     gl.getUniformLocation(program, 'u_cam_right_cart'),
         camUpCart:        gl.getUniformLocation(program, 'u_cam_up_cart'),
         camForwardCart:   gl.getUniformLocation(program, 'u_cam_forward_cart'),
+        // Tier 1B — photon sub-rings + sky strength
+        showSubrings:     gl.getUniformLocation(program, 'u_show_subrings'),
+        subringStrength:  gl.getUniformLocation(program, 'u_subring_strength'),
+        skyStrength:      gl.getUniformLocation(program, 'u_sky_strength'),
+        // Tier 2A — disk regime (RIAF / thin / slim) driven by ṁ
+        diskRegimeIdx:        gl.getUniformLocation(program, 'u_disk_regime'),
+        diskTFactor:          gl.getUniformLocation(program, 'u_disk_T_factor'),
+        diskRegimeBrightness: gl.getUniformLocation(program, 'u_disk_regime_brightness'),
+        // Tier 2B — Blandford-Znajek MAD-state disk dimming
+        diskMadDim:           gl.getUniformLocation(program, 'u_disk_mad_dim'),
     };
+
+    // Tier 1A — render-time post-process knobs (state lives in main.js).
+    let bloomThreshold  = 1.0;
+    let bloomKnee       = 0.5;
+    let bloomStrength   = 1.0;
+    let exposureStops   = 0.0;
+    let bloomEnabled    = true;
 
     function resize(w, h) {
         canvas.width  = w;
         canvas.height = h;
-        gl.viewport(0, 0, w, h);
+        // Reallocate the HDR scene FBO and the half-res bloom ping-pong pair.
+        // Half-res is fine for bloom — it's a low-frequency glow.
+        const hw = Math.max(1, w >> 1);
+        const hh = Math.max(1, h >> 1);
+        disposeFBO(sceneFBO); sceneFBO = makeHdrFBO(w, h);
+        disposeFBO(bloomA);   bloomA   = makeHdrFBO(hw, hh);
+        disposeFBO(bloomB);   bloomB   = makeHdrFBO(hw, hh);
     }
 
     function setUniforms(u) {
@@ -134,6 +218,7 @@ export function createWebGL2Backend(canvas) {
         gl.uniform1f(uLoc.coronaRadius,     u.coronaRadius     ?? 10.0);
         gl.uniform1f(uLoc.coronaWidth,      u.coronaWidth      ?? 4.0);
         gl.uniform1f(uLoc.coronaIntensity,  u.coronaIntensity  ?? 0.04);
+        gl.uniform1f(uLoc.coronaY,          u.coronaY          ?? 0.7);
         gl.uniform1i(uLoc.showWind,         u.showWind ? 1 : 0);
         gl.uniform1f(uLoc.windIntensity,    u.windIntensity    ?? 0.04);
         gl.uniform1i(uLoc.showFeLine,       u.showFeLine ? 1 : 0);
@@ -177,23 +262,107 @@ export function createWebGL2Backend(canvas) {
         gl.uniform3f(uLoc.camRightCart,   cr[0], cr[1], cr[2]);
         gl.uniform3f(uLoc.camUpCart,      cu[0], cu[1], cu[2]);
         gl.uniform3f(uLoc.camForwardCart, cf[0], cf[1], cf[2]);
+        gl.uniform1i(uLoc.showSubrings,    u.showSubrings ? 1 : 0);
+        gl.uniform1f(uLoc.subringStrength, u.subringStrength ?? 1.0);
+        gl.uniform1f(uLoc.skyStrength,     u.skyStrength     ?? 1.0);
+        gl.uniform1i(uLoc.diskRegimeIdx,        (u.diskRegimeIdx ?? 1) | 0);
+        gl.uniform1f(uLoc.diskTFactor,          u.diskTFactor          ?? 1.0);
+        gl.uniform1f(uLoc.diskRegimeBrightness, u.diskRegimeBrightness ?? 1.0);
+        gl.uniform1f(uLoc.diskMadDim,           u.diskMadDim           ?? 1.0);
+        // Tier 1A — post-process state mirrored locally so draw() can use
+        // it without re-marshalling the uniforms object.
+        bloomThreshold = u.bloomThreshold ?? 1.0;
+        bloomKnee      = u.bloomKnee      ?? 0.5;
+        bloomStrength  = u.bloomStrength  ?? 1.0;
+        exposureStops  = u.exposureStops  ?? 0.0;
+        bloomEnabled   = u.bloomEnabled   ?? true;
     }
 
     function draw() {
-        gl.useProgram(program);
         gl.bindVertexArray(vao);
+        const w = canvas.width, h = canvas.height;
+        const hw = bloomA.w,    hh = bloomA.h;
+
+        // ── Pass 1: scene → HDR float framebuffer ────────────────────
+        gl.bindFramebuffer(gl.FRAMEBUFFER, sceneFBO.fbo);
+        gl.viewport(0, 0, w, h);
+        gl.useProgram(program);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+        if (bloomEnabled && bloomStrength > 0.001) {
+            // ── Pass 2: bright extract (full-res scene → half-res A) ─
+            gl.bindFramebuffer(gl.FRAMEBUFFER, bloomA.fbo);
+            gl.viewport(0, 0, hw, hh);
+            gl.useProgram(programExtract);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, sceneFBO.tex);
+            gl.uniform1i(uExtract.scene, 0);
+            gl.uniform2f(uExtract.texel, 1.0 / w, 1.0 / h);
+            gl.uniform1f(uExtract.threshold, bloomThreshold);
+            gl.uniform1f(uExtract.knee, bloomKnee);
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+            // ── Pass 3: horizontal blur (A → B) ─────────────────────
+            gl.bindFramebuffer(gl.FRAMEBUFFER, bloomB.fbo);
+            gl.useProgram(programBlur);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, bloomA.tex);
+            gl.uniform1i(uBlur.input, 0);
+            gl.uniform2f(uBlur.texel, 1.0 / hw, 1.0 / hh);
+            gl.uniform2f(uBlur.axis, 1.0, 0.0);
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+            // ── Pass 4: vertical blur (B → A) ───────────────────────
+            gl.bindFramebuffer(gl.FRAMEBUFFER, bloomA.fbo);
+            gl.bindTexture(gl.TEXTURE_2D, bloomB.tex);
+            gl.uniform1i(uBlur.input, 0);
+            gl.uniform2f(uBlur.axis, 0.0, 1.0);
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
+        } else {
+            // Bloom off: clear the bloom buffer so the composite pass
+            // adds zero glow. Cheap because half-resolution.
+            gl.bindFramebuffer(gl.FRAMEBUFFER, bloomA.fbo);
+            gl.viewport(0, 0, hw, hh);
+            gl.clearColor(0.0, 0.0, 0.0, 1.0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+        }
+
+        // ── Pass 5: composite (scene + bloom → tonemap → canvas) ─────
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.viewport(0, 0, w, h);
+        gl.useProgram(programComposite);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, sceneFBO.tex);
+        gl.uniform1i(uComposite.scene, 0);
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, bloomA.tex);
+        gl.uniform1i(uComposite.bloom, 1);
+        gl.uniform1f(uComposite.bloomStrength, bloomEnabled ? bloomStrength : 0.0);
+        gl.uniform1f(uComposite.exposureStops, exposureStops);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        // Restore TEXTURE0 binding so nobody accidentally samples bloom.
+        gl.activeTexture(gl.TEXTURE0);
     }
 
     async function readPixelColumn(x, y, w, h) {
+        // Validation harness reads from the *final* canvas, which is the
+        // composited tonemapped output. That's correct: the photon-ring
+        // measurement looks for actual rendered shadow pixels.
         const buf = new Uint8Array(w * h * 4);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         gl.readPixels(x, y, w, h, gl.RGBA, gl.UNSIGNED_BYTE, buf);
         return buf;
     }
 
     function dispose() {
         gl.deleteProgram(program);
+        gl.deleteProgram(programExtract);
+        gl.deleteProgram(programBlur);
+        gl.deleteProgram(programComposite);
         gl.deleteVertexArray(vao);
+        disposeFBO(sceneFBO);
+        disposeFBO(bloomA);
+        disposeFBO(bloomB);
     }
 
     return { name: 'webgl2', gl, canvas, resize, setUniforms, draw, readPixelColumn, dispose };
