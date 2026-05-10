@@ -1137,7 +1137,12 @@ export function initVehicleCanvas(canvas, opts = {}) {
     // while still preventing flipping past zenith.
     controls.maxPolarAngle = Math.PI * 0.96;
     controls.minPolarAngle = 0.05;
-    controls.autoRotate = opts.autoRotate ?? true;
+    // Default OFF: the 3/4 orbit at the rocket-fit distance physically passes
+    // through the launch tower (FSS columns + truss live ~10 m off centerline,
+    // camera radius ~80 m → orbit clips the tower volume), which reads as the
+    // camera "cutting" from a clean 3/4 frame to a wall of orange beam every
+    // few seconds. Users can opt back in via the Auto toggle.
+    controls.autoRotate = opts.autoRotate ?? false;
     controls.autoRotateSpeed = 0.45;
     // Pan = right-click drag on desktop, two-finger drag on touch. Pan in
     // screen-space so it feels predictable regardless of camera tilt.
