@@ -27,6 +27,7 @@ import {
     fetchLiveIndices,
 } from './upper-atmosphere-engine.js';
 import { getRealtimeDriver } from './upper-atmosphere-realtime.js';
+import { projectDragState } from './drag-forecast-projector.js';
 import { ATMOSPHERIC_LAYER_SCHEMA } from './upper-atmosphere-layers.js';
 import { layerPhysics } from './upper-atmosphere-physics.js';
 import { DEBRIS_FAMILIES } from './debris-catalog.js';
@@ -80,6 +81,12 @@ export class UpperAtmosphereUI {
         this._realtimeEnabled = true;
         this._userPinnedKey   = null;   // 'f107'|'ap' if user moved a slider
         this._userPinnedAt    = 0;
+        // Drag-forecast horizon. 0 = nowcast (live driver values applied
+        // straight to the engine). >0 hours = AR(1) projection of F10.7/Ap
+        // over the realtime driver's history window. Updated by the
+        // horizon-pill UI (_bindForecastHorizon).
+        this._forecastHorizonHours = 0;
+        this._forecastSkill = 1.0;
         this._bindInputs();
         this._renderPresets();
         this._renderLayerLegend();
@@ -766,6 +773,60 @@ export class UpperAtmosphereUI {
     }
 
     /**
+     * Run the AR(1) projector against the realtime driver's history ring
+     * at the requested horizon. Lazy — only called when a forecast pill is
+     * active. Returns null if the driver hasn't accumulated enough samples
+     * yet (the projector falls back to last-known internally, but we still
+     * return null so callers leave live values in place rather than swap
+     * in a flat persistence forecast that would look identical to nowcast).
+     */
+    _projectStateForHorizon(horizonHours) {
+        try {
+            const drv = getRealtimeDriver();
+            const hist = drv?.getHistory?.();
+            if (!hist || hist.length < 6) return null;
+            return projectDragState(hist, horizonHours);
+        } catch (_) {
+            return null;
+        }
+    }
+
+    /**
+     * Public: set the active drag-forecast horizon (in hours; 0 = nowcast).
+     * The next realtime tick (or an immediate refresh, below) feeds the
+     * engine AR(1)-projected F10.7/Ap instead of live values. Pure UI-state
+     * call — does not affect the globe's nowcast machinery directly; the
+     * effect propagates via the standard setState/refresh path.
+     */
+    setForecastHorizon(hours) {
+        const h = Number.isFinite(hours) ? Math.max(0, Math.round(hours)) : 0;
+        if (h === this._forecastHorizonHours) return;
+        this._forecastHorizonHours = h;
+
+        if (h === 0) {
+            // Snap straight back to live values so the UI doesn't have to
+            // wait for the next realtime tick to clear the projection.
+            const drv = getRealtimeDriver();
+            const s = drv?.getState?.();
+            if (s) this.setState({ f107: s.f107, ap: s.ap });
+            this._forecastSkill = 1.0;
+        } else {
+            const proj = this._projectStateForHorizon(h);
+            if (proj && Number.isFinite(proj.f107) && Number.isFinite(proj.ap)) {
+                this._forecastSkill = proj.skill;
+                this.setState({ f107: proj.f107, ap: proj.ap });
+            } else {
+                this._forecastSkill = 0.5;   // unknown — show muted skill bar
+            }
+        }
+        this._paintForecastHorizonPills();
+        // Force-paint the legend even before the next setProfile broadcast.
+        this._paintDragLegend(this._lastDragSnapshot);
+    }
+
+    getForecastHorizon() { return this._forecastHorizonHours; }
+
+    /**
      * Drag-forecast checkbox + per-layer delta legend. The overlay itself
      * lives on the globe (drag-forecast-overlay.js); we just wire the
      * toggle + paint a tiny per-layer table from the 'ua-drag-forecast-tick'
@@ -783,6 +844,17 @@ export class UpperAtmosphereUI {
                 if (cb.checked) this._paintDragLegend(this.globe.getDragForecastSnapshot?.());
             });
         }
+        // Forecast horizon pills: Now / +1h / +3h / +6h / +12h / +24h.
+        const pills = this.el?.dragHorizonPills;
+        if (pills) {
+            pills.querySelectorAll('button[data-horizon]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const h = Number(btn.dataset.horizon) || 0;
+                    this.setForecastHorizon(h);
+                });
+            });
+            this._paintForecastHorizonPills();
+        }
         window.addEventListener('ua-drag-forecast-tick', (e) => {
             this._lastDragSnapshot = e?.detail || this._lastDragSnapshot;
             this._paintDragLegend(this._lastDragSnapshot);
@@ -793,6 +865,36 @@ export class UpperAtmosphereUI {
         window.addEventListener('ua-layer-visibility', () => {
             this._paintDragLegend(this._lastDragSnapshot);
         });
+    }
+
+    /**
+     * Reflect the active forecast horizon into the pill row. Called from
+     * setForecastHorizon() and on first paint of _bindDragForecast.
+     */
+    _paintForecastHorizonPills() {
+        const pills = this.el?.dragHorizonPills;
+        if (!pills) return;
+        const active = this._forecastHorizonHours || 0;
+        pills.querySelectorAll('button[data-horizon]').forEach(btn => {
+            const h = Number(btn.dataset.horizon) || 0;
+            btn.classList.toggle('ua-drag-pill--on', h === active);
+            btn.setAttribute('aria-pressed', h === active ? 'true' : 'false');
+        });
+        // Skill chip: dim from 100% (now) → ~40% (+24h). Surfaces the
+        // AR(1) confidence so operators don't read +24h numbers as
+        // gospel. Using a percentage is plain-spoken; the underlying
+        // skill is the projector's exp(-h/18) decay.
+        const chip = this.el?.dragHorizonChip;
+        if (chip) {
+            if (active === 0) {
+                chip.textContent = 'NOWCAST';
+                chip.classList.remove('ua-drag-chip--forecast');
+            } else {
+                const pct = Math.round((this._forecastSkill ?? 1) * 100);
+                chip.textContent = `+${active}h · skill ${pct}%`;
+                chip.classList.add('ua-drag-chip--forecast');
+            }
+        }
     }
 
     /** Paint per-layer drag-rate legend rows. snapshot = layerId → {rho,dRhoDt,dragQ}. */
@@ -884,10 +986,26 @@ export class UpperAtmosphereUI {
             // Apply state — but skip whichever key the user just moved.
             const pinExpired = (Date.now() - this._userPinnedAt) > 10_000;
             const partial = {};
+            // Forecast-horizon projection: when the user has selected a
+            // horizon (e.g. +6h) we feed the engine the AR(1)-projected
+            // F10.7/Ap instead of the live values. Drops back to live the
+            // moment the horizon is set to 0 ("Now").
+            let f107Apply = s.f107;
+            let apApply   = s.ap;
+            if (this._forecastHorizonHours > 0) {
+                const proj = this._projectStateForHorizon(this._forecastHorizonHours);
+                if (proj) {
+                    if (Number.isFinite(proj.f107)) f107Apply = proj.f107;
+                    if (Number.isFinite(proj.ap))   apApply   = proj.ap;
+                    this._forecastSkill = proj.skill;
+                }
+            } else {
+                this._forecastSkill = 1.0;
+            }
             if (this._userPinnedKey !== 'f107' || pinExpired)
-                partial.f107 = s.f107;
+                partial.f107 = f107Apply;
             if (this._userPinnedKey !== 'ap' || pinExpired)
-                partial.ap = s.ap;
+                partial.ap = apApply;
             // Skip the redraw round-trip if nothing actually changed.
             const changed =
                 ('f107' in partial && Math.abs((partial.f107 || 0) - this.state.f107) > 0.5) ||

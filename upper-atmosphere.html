@@ -736,6 +736,49 @@ input[type=range]::-moz-range-thumb {
 .ua-drag-up   { color:#ff5060; }
 .ua-drag-down { color:#40e090; }
 .ua-drag-flat { color:#aab; }
+.ua-drag-chip {
+    display:inline-block;
+    font-size:.6rem; letter-spacing:.08em;
+    padding:2px 7px; border-radius:10px;
+    color:#0cc;
+    background:rgba(0,200,200,.10);
+    border:1px solid rgba(0,200,200,.32);
+}
+.ua-drag-chip--forecast {
+    color:#ffaa20;
+    background:rgba(255,170,32,.10);
+    border-color:rgba(255,170,32,.40);
+}
+.ua-drag-pills {
+    display:flex; gap:4px;
+    margin:8px 0;
+    flex-wrap:wrap;
+}
+.ua-drag-pill {
+    flex:1 1 auto; min-width:42px;
+    font-size:.7rem; font-weight:600;
+    padding:5px 8px;
+    background:rgba(10,6,28,.55);
+    color:#bcd;
+    border:1px solid rgba(0,200,200,.18);
+    border-radius:8px;
+    cursor:pointer;
+    transition:background .15s, border-color .15s, color .15s;
+    font-variant-numeric:tabular-nums;
+}
+.ua-drag-pill:hover { border-color:rgba(0,200,200,.45); color:#fff; }
+.ua-drag-pill--on {
+    background:rgba(255,170,32,.16);
+    border-color:rgba(255,170,32,.55);
+    color:#ffd070;
+    box-shadow:0 0 8px rgba(255,170,32,.20);
+}
+.ua-drag-pill[data-horizon="0"].ua-drag-pill--on {
+    background:rgba(0,200,200,.16);
+    border-color:rgba(0,200,200,.55);
+    color:#0ff;
+    box-shadow:0 0 8px rgba(0,200,200,.20);
+}
 .ua-drag-row-muted { opacity:.45; text-decoration:line-through; }
 .ua-drag-row-delta.ua-drag-row-muted { text-decoration:none; }
 .ua-drag-muted-tag {
@@ -1198,18 +1241,37 @@ input[type=range]::-moz-range-thumb {
         </div>
 
         <div class="ua-panel" style="margin-bottom:14px;">
-            <h2>Drag forecast <span style="font-size:.6rem;color:#0cc;letter-spacing:.08em;margin-left:6px">NOWCAST</span></h2>
+            <h2 style="display:flex;align-items:center;gap:8px;">
+                Drag forecast
+                <span id="ua-drag-horizon-chip" class="ua-drag-chip">NOWCAST</span>
+            </h2>
             <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:8px">
                 Sun-driven flow lines across each thermospheric/exospheric
                 shell. Tracer colour shows <em>change</em> in atmospheric
                 density — operator-relevant signal. Storm onset inflates
                 drag (red); post-storm recovery cools and contracts (green).
-                Population scales with each layer's particle budget.
+                AR(1) projection of F10.7 + Ap from 72&nbsp;h history; skill
+                chip shows confidence at the selected horizon.
             </p>
             <label class="ua-drag-toggle-row" for="ua-drag-toggle">
                 <input type="checkbox" id="ua-drag-toggle">
                 <span>Show drag forecast flow</span>
             </label>
+            <div id="ua-drag-horizon-pills" class="ua-drag-pills" role="radiogroup"
+                 aria-label="Drag forecast horizon">
+                <button type="button" class="ua-drag-pill ua-drag-pill--on" data-horizon="0"
+                        aria-pressed="true">Now</button>
+                <button type="button" class="ua-drag-pill" data-horizon="1"
+                        aria-pressed="false">+1h</button>
+                <button type="button" class="ua-drag-pill" data-horizon="3"
+                        aria-pressed="false">+3h</button>
+                <button type="button" class="ua-drag-pill" data-horizon="6"
+                        aria-pressed="false">+6h</button>
+                <button type="button" class="ua-drag-pill" data-horizon="12"
+                        aria-pressed="false">+12h</button>
+                <button type="button" class="ua-drag-pill" data-horizon="24"
+                        aria-pressed="false">+24h</button>
+            </div>
             <div class="ua-drag-swatches">
                 <span class="ua-drag-sw ua-drag-sw-up">  <span class="ua-drag-dot"></span>drag rising</span>
                 <span class="ua-drag-sw ua-drag-sw-flat"><span class="ua-drag-dot"></span>steady</span>
@@ -1610,9 +1672,12 @@ input[type=range]::-moz-range-thumb {
             camKn:          document.getElementById('ua-cam-Kn'),
             camMode:        document.getElementById('ua-cam-mode'),
             camHint:        document.getElementById('ua-cam-hint'),
-            // Drag forecast (Phase 1: nowcast, sun-driven flow)
-            dragToggle:     document.getElementById('ua-drag-toggle'),
-            dragLegend:     document.getElementById('ua-drag-legend'),
+            // Drag forecast (Phase 1: nowcast, sun-driven flow;
+            //                Phase 3: AR(1) horizon scrubber)
+            dragToggle:        document.getElementById('ua-drag-toggle'),
+            dragLegend:        document.getElementById('ua-drag-legend'),
+            dragHorizonPills:  document.getElementById('ua-drag-horizon-pills'),
+            dragHorizonChip:   document.getElementById('ua-drag-horizon-chip'),
         },
         // Tries GET {PARKER_DSMC_API}/v1/atmosphere/profile when the
         // host window declares PARKER_DSMC_API; silently falls back to
