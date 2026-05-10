@@ -458,6 +458,137 @@ input[type=range]::-moz-range-thumb {
     margin-top:4px;
 }
 
+/* ─── Fleet panel (operator-grade per-asset drag forecast) ── */
+.ua-fleet-chip {
+    display:inline-block;
+    font-size:.55rem; letter-spacing:.08em; text-transform:uppercase;
+    padding:2px 6px; border-radius:6px;
+    color:#ffaa20; background:rgba(255,170,32,.10);
+    border:1px solid rgba(255,170,32,.35);
+}
+.ua-fleet-panel {
+    display:flex; flex-direction:column; gap:8px;
+    font-size:.75rem;
+}
+.ua-fleet-add { display:flex; flex-direction:column; gap:6px; }
+.ua-fleet-add-row {
+    display:flex; gap:6px; align-items:center;
+}
+.ua-fleet-input {
+    flex:1; min-width:0;
+    background:rgba(8,4,22,.7); color:#cde;
+    border:1px solid rgba(0,200,200,.25);
+    border-radius:6px;
+    padding:6px 8px;
+    font-size:.75rem;
+    font-family:inherit;
+}
+.ua-fleet-input--n { flex:0 0 60px; text-align:center; }
+.ua-fleet-input:focus { outline:none; border-color:rgba(0,200,200,.6); }
+.ua-fleet-btn {
+    background:rgba(10,6,28,.7); color:#bcd;
+    border:1px solid rgba(0,200,200,.25);
+    border-radius:6px;
+    padding:6px 12px;
+    font-size:.7rem; font-weight:600;
+    cursor:pointer;
+    transition:background .15s, border-color .15s, color .15s;
+}
+.ua-fleet-btn:hover { color:#fff; border-color:rgba(0,200,200,.5); }
+.ua-fleet-btn--primary {
+    background:rgba(0,200,200,.18); color:#0ff;
+    border-color:rgba(0,200,200,.55);
+}
+.ua-fleet-btn--primary:hover { background:rgba(0,200,200,.28); }
+.ua-fleet-btn--danger { color:#ff8090; border-color:rgba(255,80,96,.30); }
+.ua-fleet-btn--danger:hover { color:#ff5060; border-color:rgba(255,80,96,.55); }
+.ua-fleet-paste summary {
+    cursor:pointer; color:#9ab; font-size:.7rem;
+    padding:4px 0; user-select:none;
+}
+.ua-fleet-paste textarea {
+    width:100%; min-height:90px; resize:vertical;
+    background:rgba(8,4,22,.7); color:#cde;
+    border:1px solid rgba(0,200,200,.25);
+    border-radius:6px;
+    padding:6px 8px;
+    font-family:ui-monospace, monospace;
+    font-size:.7rem;
+    margin:6px 0;
+}
+.ua-fleet-status {
+    font-size:.7rem; color:#9ab;
+    min-height:1.2em;
+}
+.ua-fleet-status[data-kind="ok"]    { color:#40e090; }
+.ua-fleet-status[data-kind="error"] { color:#ff8090; }
+.ua-fleet-toolbar {
+    display:flex; justify-content:space-between; align-items:center;
+    padding:6px 0;
+    border-top:1px solid rgba(0,200,200,.10);
+    border-bottom:1px solid rgba(0,200,200,.10);
+}
+.ua-fleet-cards { display:flex; flex-direction:column; gap:8px; }
+.ua-fleet-empty {
+    padding:16px; text-align:center;
+    color:#9ab; font-size:.72rem; line-height:1.5;
+    border:1px dashed rgba(0,200,200,.20);
+    border-radius:8px;
+}
+.ua-fleet-card {
+    display:flex; flex-direction:column; gap:6px;
+    padding:8px 10px;
+    background:rgba(10,6,28,.55);
+    border:1px solid rgba(0,200,200,.18);
+    border-radius:8px;
+    border-left:3px solid rgba(64,224,144,.55);
+}
+.ua-fleet-card--sev-low  { border-left-color:rgba(64,224,144,.55); }
+.ua-fleet-card--sev-med  { border-left-color:rgba(255,170,32,.65); }
+.ua-fleet-card--sev-high { border-left-color:rgba(255,80,96,.85); box-shadow:0 0 12px rgba(255,80,96,.18); }
+.ua-fleet-card--unready  { border-left-color:rgba(150,170,200,.45); }
+.ua-fleet-card-head {
+    display:flex; align-items:center; gap:6px;
+    flex-wrap:wrap;
+}
+.ua-fleet-name { color:#fff; font-weight:600; font-size:.78rem; flex:1 1 auto; min-width:0; }
+.ua-fleet-norad {
+    font-size:.62rem; color:#9ab; font-variant-numeric:tabular-nums;
+}
+.ua-fleet-pill {
+    font-size:.55rem; letter-spacing:.06em; font-weight:700;
+    padding:1px 6px; border-radius:6px;
+}
+.ua-fleet-pill--ok       { color:#0ff;    background:rgba(0,200,200,.18);  border:1px solid rgba(0,200,200,.45); }
+.ua-fleet-pill--pending  { color:#ffaa20; background:rgba(255,170,32,.12); border:1px solid rgba(255,170,32,.35); }
+.ua-fleet-pill--err      { color:#ff5060; background:rgba(255,80,96,.12);  border:1px solid rgba(255,80,96,.35); }
+.ua-fleet-iconbtn {
+    background:transparent; color:#9ab;
+    border:1px solid rgba(150,170,200,.25);
+    border-radius:5px;
+    width:22px; height:22px; line-height:1;
+    font-size:.85rem; cursor:pointer; padding:0;
+}
+.ua-fleet-iconbtn:hover { color:#fff; border-color:rgba(0,200,200,.55); }
+.ua-fleet-card-err { color:#ff8090; font-size:.68rem; padding:4px 0; }
+.ua-fleet-stats { font-size:.7rem; color:#dde; line-height:1.45; font-variant-numeric:tabular-nums; }
+.ua-fleet-stat-row { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ua-fleet-badges { display:flex; flex-wrap:wrap; gap:4px; }
+.ua-fleet-badge {
+    font-size:.6rem; font-weight:700; letter-spacing:.04em;
+    padding:2px 6px; border-radius:5px;
+}
+.ua-fleet-badge--high { color:#ff5060; background:rgba(255,80,96,.14);  border:1px solid rgba(255,80,96,.45); }
+.ua-fleet-badge--med  { color:#ffaa20; background:rgba(255,170,32,.14); border:1px solid rgba(255,170,32,.45); }
+.ua-fleet-badge--low  { color:#40e090; background:rgba(64,224,144,.12); border:1px solid rgba(64,224,144,.40); }
+.ua-fleet-chart { height:56px; }
+.ua-fleet-svg { width:100%; height:100%; }
+.ua-fleet-chart-key {
+    display:flex; gap:10px; font-size:.55rem; color:#9ab;
+}
+.ua-fleet-key-now { color:#0ff; }
+.ua-fleet-key-fwd { color:#ffaa20; }
+
 /* ─── Satellite drag analysis ──────────────────────────── */
 .ua-tle-pill {
     display:inline-flex; align-items:center; gap:5px;
@@ -1296,6 +1427,21 @@ input[type=range]::-moz-range-thumb {
 
         <div class="ua-panel" style="margin-bottom:14px;">
             <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px">
+                <h2 style="margin:0">My fleet</h2>
+                <span class="ua-fleet-chip">OPERATOR · 25 max</span>
+            </div>
+            <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:8px">
+                Track up to 25 assets by NORAD&nbsp;ID, pasted&nbsp;TLE, or
+                bulk-imported CelesTrak group. Each card shows live drag,
+                72-h decay envelope under both the current state and the
+                AR(1)-projected forcing, and trips reentry / decay-spike /
+                drag-stress alerts to the bell when thresholds are crossed.
+            </p>
+            <div id="ua-fleet-panel"></div>
+        </div>
+
+        <div class="ua-panel" style="margin-bottom:14px;">
+            <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px">
                 <h2 style="margin:0">Satellite drag analysis</h2>
                 <span id="ua-tle-freshness" class="ua-tle-pill ua-tle-pill--pending"
                       title="TLE fetch status from /api/celestrak/tle">
@@ -1621,6 +1767,7 @@ input[type=range]::-moz-range-thumb {
     import * as engine from './js/upper-atmosphere-engine.js';
     import { AtmosphereGlobe } from './js/upper-atmosphere-globe.js';
     import { UpperAtmosphereUI } from './js/upper-atmosphere-ui.js';
+    import { FleetPanel } from './js/upper-atmosphere-fleet-panel.js';
     import { getRealtimeDriver } from './js/upper-atmosphere-realtime.js';
 
     const canvas = document.getElementById('ua-globe');
@@ -1685,8 +1832,42 @@ input[type=range]::-moz-range-thumb {
         useBackend: true,
     });
 
+    // ── Fleet panel (per-asset drag forecast + alerts) ────────────────
+    // Lives in the Analysis tab. Drives the existing alert-engine bell
+    // path by re-dispatching threshold breaches as `user-alert` events
+    // (same shape AlertEngine emits). Hands its severity-ranked
+    // top-3 to the globe so it can render in-scene orbit ribbons.
+    const fleetPanelEl = document.getElementById('ua-fleet-panel');
+    const fleetPanel = fleetPanelEl ? new FleetPanel({
+        host: fleetPanelEl,
+        getLiveState: () => ({ f107: ui.state.f107, ap: ui.state.ap }),
+        projHorizonHr: 12,
+        onAlert: (alert) => {
+            try {
+                window.dispatchEvent(new CustomEvent('user-alert', {
+                    detail: {
+                        alert: {
+                            id:        `drag:${alert.assetId}:${alert.kind}:${alert.ts}`,
+                            kind:      `drag-${alert.kind}`,
+                            severity:  alert.severity,
+                            title:     alert.title,
+                            body:      alert.body,
+                            ts:        alert.ts,
+                            asset:     { id: alert.assetId, noradId: alert.noradId, name: alert.name },
+                            source:    'upper-atmosphere-fleet',
+                        },
+                    },
+                }));
+            } catch (_) { /* SSR */ }
+        },
+        onSeverityChange: (top3) => {
+            globe.setFleetRibbons?.(top3);
+        },
+    }) : null;
+    fleetPanel?.start();
+
     // Expose for devtools poking.
-    window.__ua = { engine, globe, ui };
+    window.__ua = { engine, globe, ui, fleetPanel };
 
     /* ─── Aside tabs (Controls / Analysis) ──────────────────── */
     const tabBtns  = document.querySelectorAll('#ua-aside-tabs .ua-tab-btn');
