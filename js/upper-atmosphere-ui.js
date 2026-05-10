@@ -85,6 +85,7 @@ export class UpperAtmosphereUI {
         this._renderLayerLegend();
         this._renderLayerControls();
         this._bindFieldModeRadio();
+        this._bindDragForecast();
         this._bindLiveButton();
         this._bindSourcePill();
         this._bindSwpcEventBus();
@@ -762,6 +763,67 @@ export class UpperAtmosphereUI {
                 this.globe.setVectorFieldMode?.(inp.value);
             });
         }
+    }
+
+    /**
+     * Drag-forecast checkbox + per-layer delta legend. The overlay itself
+     * lives on the globe (drag-forecast-overlay.js); we just wire the
+     * toggle + paint a tiny per-layer table from the 'ua-drag-forecast-tick'
+     * event that the globe broadcasts each setProfile() call.
+     */
+    _bindDragForecast() {
+        const cb = this.el?.dragToggle;
+        if (cb) {
+            // Reflect the globe's initial state (off) into the DOM.
+            cb.checked = !!this.globe.getDragForecastVisible?.();
+            cb.addEventListener('change', () => {
+                this.globe.setDragForecastVisible?.(!!cb.checked);
+                // Force-paint the legend on first turn-on so the user sees
+                // numbers immediately, even before the next refresh tick.
+                if (cb.checked) this._paintDragLegend(this.globe.getDragForecastSnapshot?.());
+            });
+        }
+        window.addEventListener('ua-drag-forecast-tick', (e) => {
+            this._paintDragLegend(e?.detail);
+        });
+    }
+
+    /** Paint per-layer drag-rate legend rows. snapshot = layerId → {rho,dRhoDt,dragQ}. */
+    _paintDragLegend(snapshot) {
+        const host = this.el?.dragLegend;
+        if (!host || !snapshot) return;
+        // Render in altitude order so the panel reads top-of-atmosphere → down.
+        const rows = [];
+        for (const L of ATMOSPHERIC_LAYER_SCHEMA) {
+            const s = snapshot[L.id]; if (!s) continue;
+            // dRhoDt is normalised so ±1 ≈ saturated colour. For the
+            // user-facing text we convert back to a %/min figure
+            // (dRhoDt × 2%/min, the inverse of the normalisation in
+            // AtmosphereGlobe._refreshDragHistory).
+            const pctPerMin = s.dRhoDt * 2;
+            const cls = pctPerMin >  0.05 ? 'ua-drag-up'
+                      : pctPerMin < -0.05 ? 'ua-drag-down'
+                      : 'ua-drag-flat';
+            const arrow = pctPerMin >  0.05 ? '▲'
+                        : pctPerMin < -0.05 ? '▼'
+                        : '·';
+            const sign = pctPerMin >= 0 ? '+' : '−';
+            const label = `${arrow} ${sign}${Math.abs(pctPerMin).toFixed(2)}%/min`;
+            // q in micro-Pa is a more readable scale at LEO altitudes
+            // (typical 200–400 km q ≈ 1e-5 Pa = 10 µPa).
+            const q_uPa = s.dragQ * 1e6;
+            const qLabel = q_uPa >= 1
+                ? `${q_uPa.toFixed(1)} µPa`
+                : q_uPa >= 1e-3
+                  ? `${(q_uPa * 1e3).toFixed(1)} nPa`
+                  : `${q_uPa.toExponential(1)} µPa`;
+            rows.push(
+                `<span class="ua-drag-row-name">${L.name}</span>` +
+                `<span class="ua-drag-row-q">q ≈ ${qLabel}</span>` +
+                `<span class="ua-drag-row-delta ${cls}">${label}</span>`
+            );
+        }
+        host.innerHTML = rows.join('');
     }
 
     _bindSwpcEventBus() {

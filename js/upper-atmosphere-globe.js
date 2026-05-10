@@ -55,6 +55,7 @@ import { ATMOSPHERIC_LAYER_SCHEMA, layerForAltitude }
 import { LayerParticleSystem } from './upper-atmosphere-particles.js';
 import { layerPhysics, pointPhysics } from './upper-atmosphere-physics.js';
 import { LayerVectorField } from './upper-atmosphere-vector-fields.js';
+import { DragForecastOverlay } from './drag-forecast-overlay.js';
 import { MagneticCascade } from './upper-atmosphere-magnetic-cascade.js';
 import { SubstormController } from './upper-atmosphere-substorm.js';
 import { CameraController } from './upper-atmosphere-camera.js';
@@ -536,6 +537,7 @@ export class AtmosphereGlobe {
         this._buildLayerShells();
         this._buildLayerParticles();
         this._buildLayerVectorFields();
+        this._buildDragForecastOverlay();
         this._buildSatelliteRings();
         // Pairwise conjunction screener — depends on the probe lookup
         // tables built inside _buildSatelliteRings, so we set up after.
@@ -644,6 +646,103 @@ export class AtmosphereGlobe {
 
     getVectorFieldMode() { return this._fieldMode ?? 'off'; }
 
+    // ── Drag-forecast overlay ───────────────────────────────────────────────
+    // Particle flow-line view of LEO drag. Each layer carries its own
+    // population of tracers riding a sun-driven thermospheric wind proxy;
+    // colour encodes dρ/dt (red = drag rising, green = drag falling) so
+    // satellite operators can read the storm response at a glance. Built
+    // up-front (cheap) and toggled on by setDragForecastVisible().
+
+    _buildDragForecastOverlay() {
+        this._dragOverlay = new DragForecastOverlay(this._scene, {
+            sunDir: this._sunDir,
+            totalParticles: 1400,
+        });
+        // Per-layer ρ history → drag-delta. Maintained as a one-step
+        // rolling diff against the previous setProfile() / setState() push.
+        // _dragHistory[layerId] = { lastRho, lastT, dRhoDt }
+        this._dragHistory = {};
+        for (const layer of ATMOSPHERIC_LAYER_SCHEMA) {
+            this._dragHistory[layer.id] = { lastRho: NaN, lastT: NaN, dRhoDt: 0 };
+        }
+        this._dragHistorySmoothing = 0.30;   // EMA factor for dρ/dt
+    }
+
+    setDragForecastVisible(v) {
+        if (this._dragOverlay) this._dragOverlay.setVisible(v);
+    }
+    getDragForecastVisible() {
+        return !!this._dragOverlay?.isVisible?.();
+    }
+
+    /**
+     * Latest drag-delta snapshot (read-only) — used by the UI legend
+     * to paint per-layer up/down arrows and percent-change figures.
+     * @returns {object} layerId → { rho, dRhoDt, dragQ }
+     */
+    getDragForecastSnapshot() {
+        const out = {};
+        for (const layer of ATMOSPHERIC_LAYER_SCHEMA) {
+            const h = this._dragHistory?.[layer.id];
+            const phys = this._lastFieldPhys?.[layer.id];
+            if (!h || !phys) continue;
+            // q = ½ρv² for a circular orbit at the layer peak. v is
+            // approximated as √(μ/(R+h)) with μ in km³/s²; converted to
+            // m²/s² before multiplying ρ (kg/m³) so q comes out in Pa.
+            const MU_KM3_S2 = 398600.4418;
+            const r_km = 6371 + layer.peakKm;
+            const v_ms = Math.sqrt(MU_KM3_S2 / r_km) * 1000;
+            const dragQ = 0.5 * (phys.rho ?? 0) * v_ms * v_ms;
+            out[layer.id] = {
+                rho:    phys.rho ?? 0,
+                dRhoDt: h.dRhoDt,
+                dragQ,
+            };
+        }
+        return out;
+    }
+
+    /** Internal: recompute per-layer dρ/dt from the freshly cached physics. */
+    _refreshDragHistory() {
+        const phys = this._lastFieldPhys;
+        if (!phys) return;
+        const now = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
+        const perLayer = {};
+        for (const layer of ATMOSPHERIC_LAYER_SCHEMA) {
+            const p = phys[layer.id]; if (!p) continue;
+            const rho = p.rho ?? 0;
+            const h = this._dragHistory[layer.id];
+            if (Number.isFinite(h.lastRho) && rho > 0 && h.lastRho > 0 && now > h.lastT) {
+                // Fractional change per minute → maps storm onset (~+30%
+                // density inflation in 1–3 hr) to ≈+0.5 to +1.0 on the
+                // overlay's red/green ramp. Symmetric on recovery.
+                const dt_min = Math.max(1 / 60, (now - h.lastT) / 60);
+                const fracPerMin = (rho - h.lastRho) / h.lastRho / dt_min;
+                // Normalise: ±2%/min ≈ saturated colour.
+                const norm = fracPerMin / 0.02;
+                // EMA smoothing so single noisy ticks don't strobe colour.
+                h.dRhoDt = (1 - this._dragHistorySmoothing) * h.dRhoDt
+                         + this._dragHistorySmoothing * norm;
+            }
+            h.lastRho = rho;
+            h.lastT   = now;
+            perLayer[layer.id] = { dRhoDt: h.dRhoDt, rho };
+        }
+        if (this._dragOverlay) {
+            this._dragOverlay.setDragHistory({
+                perLayer,
+                f107: this._lastFieldState?.f107,
+                ap:   this._lastFieldState?.ap,
+            });
+        }
+        // Broadcast for the UI panel to repaint its legend.
+        try {
+            window.dispatchEvent(new CustomEvent('ua-drag-forecast-tick', {
+                detail: this.getDragForecastSnapshot(),
+            }));
+        } catch (_) { /* SSR / no-window — ignore */ }
+    }
+
     /**
      * Per-layer visibility toggle — drives the gradient shell AND the
      * matching particle system together. Layer id matches
@@ -733,6 +832,10 @@ export class AtmosphereGlobe {
                 fld.setPhysics(phys, { f107, ap });
             }
         }
+
+        // Drag-forecast overlay: physics has just refreshed, so per-layer
+        // dρ/dt can be recomputed against the previous push and broadcast.
+        this._refreshDragHistory();
 
         if (this._currentAltKm != null) this.setAltitude(this._currentAltKm);
     }
@@ -3066,6 +3169,8 @@ export class AtmosphereGlobe {
                 this._fields[id].setSunDir?.(this._sunDir);
             }
         }
+        // Drag-forecast overlay: tangent wind is sun-relative.
+        this._dragOverlay?.setSunDir?.(this._sunDir);
         // Magnetic-field cascade: sun direction biases the dayside-vs-
         // nightside packet weighting (cusp packets brighten on the
         // dayside where reconnection is active).
@@ -3401,6 +3506,10 @@ export class AtmosphereGlobe {
                 if (sys.points.visible) sys.update(dt);
             }
         }
+
+        // Drag-forecast tracer advection. Self-gates on visibility so it
+        // costs nothing when the operator panel is closed.
+        if (this._dragOverlay) this._dragOverlay.update(dt);
 
         // Real-time Earth–Sun geometry. We don't rotate the Earth mesh or
         // the camera here — instead the sub-solar point is recomputed from
