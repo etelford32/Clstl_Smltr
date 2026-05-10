@@ -1,0 +1,1092 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#03010e">
+<meta name="description" content="Parkers Physics for satellite operators. Per-spacecraft drag, radiation, and charging forecasts powered by first-principles MHD physics. Six hours of lead time. Validated against the events that took down 38 Starlinks in February 2022.">
+<meta name="keywords" content="space weather, satellite operators, drag forecast, MHD, magnetohydrodynamics, SWMF, BATS-R-US, conjunction analysis, NRLMSIS, JB2008, HASDM, LEO operations">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:title" content="Parkers Physics — We see the storm before it hits your satellite.">
+<meta property="og:description" content="Per-spacecraft space weather forecasts built on first-principles MHD physics. For the orbits and decision cycles commercial constellations actually fly.">
+<meta property="og:url" content="https://parkersphysics.com/satellite-operator/landing.html">
+<meta property="og:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+<meta property="og:image:alt" content="Parkers Physics — operator-grade space weather forecasting">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Parkers Physics — We see the storm before it hits your satellite.">
+<meta name="twitter:description" content="Per-spacecraft space weather forecasts built on first-principles MHD physics. Six hours of lead time, fifteen-minute cadence, twenty seconds during storms.">
+<meta name="twitter:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+
+<link rel="canonical" href="https://parkersphysics.com/satellite-operator/landing.html">
+
+<title>Parkers Physics — For satellite operators</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Playfair+Display:ital,wght@1,400;1,500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+  /* ===== Design tokens =====
+     Aligned with the wider Parkers Physics palette (--bg #03010e matches the
+     site theme-color, amber/steel accents echo the existing operator-facing
+     console pages). Editorial typography (Playfair Display / Inter / JetBrains
+     Mono) is reserved for this landing-style narrative page. */
+  :root {
+    --bg: #03010e;
+    --bg-elev: #0a0717;
+    --bg-card: #0f0c1f;
+    --bg-card-hover: #15112a;
+
+    --border: rgba(255, 255, 255, 0.08);
+    --border-strong: rgba(255, 255, 255, 0.16);
+
+    --text: #f4f1e8;
+    --text-soft: #b8b3a0;
+    --text-muted: #6e6a5a;
+
+    --amber: #f5b042;
+    --amber-soft: #f5b04266;
+    --steel: #5b9bd5;
+    --steel-soft: #5b9bd566;
+    --plasma: #d85a30;
+
+    --serif: 'Playfair Display', Georgia, serif;
+    --sans: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+
+    --max-w: 1100px;
+  }
+
+  /* ===== Reset + base ===== */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
+  }
+
+  /* ===== Particle field ===== */
+  .particle-field {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    overflow: hidden;
+  }
+  .particle-field canvas { width: 100%; height: 100%; display: block; }
+
+  .vignette {
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    background: radial-gradient(ellipse at top, transparent 0%, rgba(3, 1, 14, 0.4) 70%, rgba(3, 1, 14, 0.85) 100%);
+  }
+
+  main, footer { position: relative; z-index: 2; }
+
+  /* The shared site nav lives at z-index:600 with its own backdrop; nothing
+     to do here other than make sure our content stacks below it. */
+
+  /* ===== Layout ===== */
+  .container {
+    max-width: var(--max-w);
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+
+  /* ===== Sections ===== */
+  section { padding: 96px 0; }
+  section + section { border-top: 1px solid var(--border); }
+
+  @media (max-width: 720px) {
+    section { padding: 64px 0; }
+  }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--amber);
+    margin-bottom: 16px;
+  }
+
+  /* ===== Hero ===== */
+  .hero { padding-top: 80px; padding-bottom: 80px; }
+  .hero h1 {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: clamp(40px, 6vw, 68px);
+    font-weight: 400;
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    margin-bottom: 28px;
+    max-width: 18ch;
+  }
+  .hero h1 .accent { color: var(--amber); }
+  .hero-lede {
+    font-size: clamp(18px, 1.6vw, 22px);
+    line-height: 1.5;
+    color: var(--text);
+    max-width: 60ch;
+    margin-bottom: 20px;
+    font-weight: 400;
+  }
+  .hero-sub {
+    font-size: 15px;
+    color: var(--text-soft);
+    max-width: 60ch;
+    margin-bottom: 36px;
+  }
+  .hero-cta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 56px;
+  }
+
+  /* ===== Buttons ===== */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 13px 22px;
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    font-weight: 500;
+    text-decoration: none;
+    border: 1px solid var(--border-strong);
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 180ms ease;
+  }
+  .btn:hover {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: var(--text-soft);
+    transform: translateY(-1px);
+  }
+  .btn-primary {
+    background: var(--amber);
+    color: var(--bg);
+    border-color: var(--amber);
+    box-shadow: 0 0 24px var(--amber-soft);
+  }
+  .btn-primary:hover {
+    background: #ffc05a;
+    border-color: #ffc05a;
+    box-shadow: 0 0 32px var(--amber-soft);
+  }
+  .btn .arrow { transition: transform 180ms ease; }
+  .btn:hover .arrow { transform: translateX(2px); }
+
+  /* ===== Metrics ===== */
+  .metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 16px;
+    max-width: 720px;
+  }
+  .metric {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+    transition: border-color 200ms ease, transform 200ms ease;
+  }
+  .metric:hover {
+    border-color: var(--steel-soft);
+    transform: translateY(-2px);
+  }
+  .metric-num {
+    font-family: var(--mono);
+    font-size: 28px;
+    font-weight: 500;
+    color: var(--amber);
+    line-height: 1;
+    margin-bottom: 8px;
+  }
+  .metric-label {
+    font-size: 13px;
+    color: var(--text-soft);
+    letter-spacing: 0.02em;
+  }
+
+  /* ===== Section headers ===== */
+  .section-header { margin-bottom: 48px; max-width: 70ch; }
+  .section-h2 {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: clamp(28px, 3.4vw, 42px);
+    font-weight: 400;
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+    margin-bottom: 16px;
+  }
+  .section-body {
+    font-size: 16px;
+    color: var(--text-soft);
+    line-height: 1.75;
+  }
+  .section-body + .section-body { margin-top: 14px; }
+
+  /* ===== Wedge events ===== */
+  .events { display: grid; gap: 14px; margin: 32px 0; max-width: 70ch; }
+  .event {
+    background: var(--bg-elev);
+    border-left: 2px solid var(--steel);
+    padding: 16px 22px;
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    font-size: 15px;
+    line-height: 1.65;
+    color: var(--text-soft);
+  }
+  .event strong {
+    font-weight: 500;
+    font-family: var(--mono);
+    font-size: 13px;
+    letter-spacing: 0.04em;
+    display: block;
+    margin-bottom: 4px;
+    color: var(--amber);
+  }
+
+  /* ===== How it works ===== */
+  .how-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 24px;
+  }
+  .how-step {
+    border-left: 2px solid var(--border-strong);
+    padding-left: 22px;
+    transition: border-color 200ms ease;
+  }
+  .how-step:hover { border-color: var(--amber); }
+  .step-num {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-muted);
+    letter-spacing: 0.1em;
+    margin-bottom: 8px;
+  }
+  .step-title {
+    font-size: 18px;
+    font-weight: 500;
+    margin-bottom: 10px;
+    color: var(--text);
+  }
+  .step-body {
+    font-size: 14px;
+    color: var(--text-soft);
+    line-height: 1.7;
+  }
+  .how-closer {
+    margin-top: 48px;
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 22px;
+    color: var(--text);
+    max-width: 60ch;
+    line-height: 1.4;
+  }
+
+  /* ===== Features ===== */
+  .feature-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+  }
+  .feature {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 28px;
+    transition: all 240ms ease;
+  }
+  .feature:hover {
+    background: var(--bg-card-hover);
+    border-color: var(--steel-soft);
+    transform: translateY(-2px);
+  }
+  .feature-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-sm);
+    background: rgba(245, 176, 66, 0.1);
+    color: var(--amber);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 18px;
+  }
+  .feature h3 {
+    font-size: 16px;
+    font-weight: 500;
+    margin-bottom: 8px;
+    color: var(--text);
+  }
+  .feature p {
+    font-size: 14px;
+    color: var(--text-soft);
+    line-height: 1.65;
+  }
+
+  /* ===== Pricing ===== */
+  .tier-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 18px;
+  }
+  .tier {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 32px;
+    display: flex;
+    flex-direction: column;
+    transition: all 240ms ease;
+    position: relative;
+  }
+  .tier:hover { border-color: var(--steel-soft); }
+  .tier-pro {
+    border: 1px solid var(--amber);
+    box-shadow: 0 0 0 1px var(--amber-soft), 0 0 40px rgba(245, 176, 66, 0.08);
+  }
+  .tier-badge {
+    position: absolute;
+    top: -10px;
+    left: 32px;
+    background: var(--amber);
+    color: var(--bg);
+    font-size: 11px;
+    font-family: var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 4px 12px;
+    border-radius: var(--radius-sm);
+    font-weight: 500;
+  }
+  .tier-name {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-soft);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+  }
+  .tier-price {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 36px;
+    font-weight: 400;
+    line-height: 1;
+    color: var(--text);
+    margin-bottom: 6px;
+  }
+  .tier-price small {
+    font-family: var(--sans);
+    font-style: normal;
+    font-size: 14px;
+    color: var(--text-soft);
+    font-weight: 400;
+  }
+  .tier-tagline {
+    font-size: 13px;
+    color: var(--text-soft);
+    margin-bottom: 24px;
+    min-height: 38px;
+  }
+  .tier-list {
+    list-style: none;
+    margin-bottom: 28px;
+    flex: 1;
+  }
+  .tier-list li {
+    font-size: 14px;
+    color: var(--text-soft);
+    padding: 7px 0;
+    padding-left: 20px;
+    position: relative;
+    line-height: 1.5;
+  }
+  .tier-list li::before {
+    content: "→";
+    position: absolute;
+    left: 0;
+    color: var(--amber);
+    font-family: var(--mono);
+  }
+  .tier .btn { width: 100%; justify-content: center; }
+
+  /* ===== Vision ===== */
+  .vision {
+    background: linear-gradient(180deg, var(--bg-elev) 0%, var(--bg-card) 100%);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 64px 48px;
+    margin: 0 auto;
+    max-width: 900px;
+    position: relative;
+    overflow: hidden;
+  }
+  .vision::before {
+    content: "";
+    position: absolute;
+    top: -100px;
+    right: -100px;
+    width: 300px;
+    height: 300px;
+    background: radial-gradient(circle, var(--amber-soft) 0%, transparent 60%);
+    pointer-events: none;
+    opacity: 0.4;
+  }
+  .vision-body {
+    font-size: 17px;
+    line-height: 1.75;
+    color: var(--text);
+    margin-bottom: 18px;
+    max-width: 65ch;
+  }
+  .vision-body:last-of-type { margin-bottom: 0; }
+  .vision-quote {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 28px;
+    color: var(--amber);
+    margin: 32px 0;
+    line-height: 1.3;
+    letter-spacing: -0.01em;
+  }
+  .vision-closer {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 18px;
+    color: var(--text-soft);
+    margin-top: 24px;
+  }
+
+  @media (max-width: 720px) {
+    .vision { padding: 40px 28px; }
+  }
+
+  /* ===== Footer CTA ===== */
+  .foot-cta {
+    text-align: center;
+    padding: 96px 0;
+    border-top: 1px solid var(--border);
+  }
+  .foot-cta h2 {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: clamp(32px, 4vw, 48px);
+    font-weight: 400;
+    line-height: 1.1;
+    margin-bottom: 20px;
+    letter-spacing: -0.01em;
+  }
+  .foot-cta p {
+    font-size: 17px;
+    color: var(--text-soft);
+    max-width: 56ch;
+    margin: 0 auto 36px;
+    line-height: 1.65;
+  }
+  .foot-cta-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    justify-content: center;
+    margin-bottom: 20px;
+  }
+  .foot-note {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-muted);
+    letter-spacing: 0.04em;
+  }
+
+  /* ===== Site footer ===== */
+  .site-footer {
+    border-top: 1px solid var(--border);
+    padding: 56px 0 40px;
+    background: var(--bg);
+  }
+  .footer-grid {
+    display: grid;
+    grid-template-columns: 1.5fr 1fr 1fr 1fr;
+    gap: 40px;
+    margin-bottom: 48px;
+  }
+  @media (max-width: 720px) {
+    .footer-grid { grid-template-columns: 1fr 1fr; gap: 32px; }
+  }
+  .footer-brand-line {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--text);
+    text-decoration: none;
+  }
+  .brand-mark {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 30% 30%, var(--amber), var(--plasma) 60%, transparent 80%);
+    box-shadow: 0 0 24px var(--amber-soft);
+  }
+  .brand-name {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 20px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+  .footer-brand p {
+    font-size: 14px;
+    color: var(--text-soft);
+    margin-top: 12px;
+    max-width: 32ch;
+    line-height: 1.6;
+  }
+  .footer-col h4 {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 18px;
+    font-weight: 500;
+  }
+  .footer-col ul { list-style: none; }
+  .footer-col li { margin-bottom: 10px; }
+  .footer-col a {
+    font-size: 14px;
+    color: var(--text-soft);
+    text-decoration: none;
+    transition: color 150ms ease;
+  }
+  .footer-col a:hover { color: var(--amber); }
+  .footer-bottom {
+    border-top: 1px solid var(--border);
+    padding-top: 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    color: var(--text-muted);
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  /* ===== Reveal animation ===== */
+  .reveal {
+    opacity: 0;
+    transform: translateY(16px);
+    transition: opacity 700ms ease, transform 700ms ease;
+  }
+  .reveal.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .reveal { opacity: 1; transform: none; transition: none; }
+    html { scroll-behavior: auto; }
+  }
+</style>
+</head>
+
+<body>
+
+<div class="particle-field" aria-hidden="true">
+  <canvas id="particles"></canvas>
+</div>
+<div class="vignette" aria-hidden="true"></div>
+
+<link rel="stylesheet" href="/js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "/js/nav.js?v=20260510"; initNav("operations");</script>
+
+<main id="main-content">
+
+  <!-- ==================================================== -->
+  <!-- HERO  [A/B variant: data-headline]                    -->
+  <!-- ==================================================== -->
+  <section class="hero">
+    <div class="container">
+      <p class="eyebrow reveal">For satellite operators</p>
+
+      <!--
+        A/B HEADLINE OPTIONS — swap the <h1> below with one of these,
+        or append ?headline=<variant> to the URL to test live:
+
+        1 (default — oracle frame):
+          We see the storm <span class="accent">before it hits</span> your satellite.
+
+        2 (clock frame):
+          Six hours of warning. <span class="accent">While everyone else</span> has six minutes.
+
+        3 (Sun frame):
+          The Sun fires. <span class="accent">We've already told you</span> what happens next.
+
+        4 (physics-as-foresight frame):
+          Physics is the only forecast <span class="accent">that works</span> during storms.
+
+        5 (blindness frame — sales-deck appropriate, sharper):
+          Your forecast model is flying blind <span class="accent">during storms.</span> Ours isn't.
+      -->
+      <h1 class="reveal" data-variant="oracle">
+        We see the storm <span class="accent">before it hits</span> your satellite.
+      </h1>
+
+      <p class="hero-lede reveal">
+        Six hours of lead time. Per-spacecraft drag, radiation, and charging predictions on your orbit. Updated every fifteen minutes — every twenty seconds when the Sun fires.
+      </p>
+
+      <p class="hero-sub reveal">
+        Built on the same magnetohydrodynamics physics NASA uses for research. Productized for the operators flying through it.
+      </p>
+
+      <div class="hero-cta reveal">
+        <a href="/signup.html?plan=pro" class="btn btn-primary">
+          Request PRO access
+          <span class="arrow" aria-hidden="true">→</span>
+        </a>
+        <a href="/contact-enterprise.html" class="btn">Talk to engineering</a>
+      </div>
+
+      <div class="metrics reveal">
+        <div class="metric">
+          <div class="metric-num">6 hr</div>
+          <div class="metric-label">Forecast horizon</div>
+        </div>
+        <div class="metric">
+          <div class="metric-num">15 min</div>
+          <div class="metric-label">Refresh cadence</div>
+        </div>
+        <div class="metric">
+          <div class="metric-num">20 s</div>
+          <div class="metric-label">Storm-mode cadence</div>
+        </div>
+        <div class="metric">
+          <div class="metric-num">99.9%</div>
+          <div class="metric-label">Uptime SLA</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================================================== -->
+  <!-- The wedge                                            -->
+  <!-- ==================================================== -->
+  <section id="wedge">
+    <div class="container">
+      <div class="section-header reveal">
+        <p class="eyebrow">The wedge</p>
+        <h2 class="section-h2">The Sun doesn't care about your forecast model.</h2>
+        <p class="section-body">
+          Empirical models work — until they don't. JB2008. NRLMSIS. Regional Kp forecasts. The dominant tools across the industry are calibrated on quiet conditions and break down precisely when operators need them most.
+        </p>
+        <p class="section-body">
+          Storms are when the physics matters. Storms are when empirical models fail.
+        </p>
+      </div>
+
+      <div class="events reveal">
+        <div class="event">
+          <strong>February 2022</strong>
+          NRLMSIS reported nominal density. SpaceX lost 38 Starlinks in a single launch.
+        </div>
+        <div class="event">
+          <strong>May 2024 — the Gannon storm</strong>
+          Nearly 5,000 simultaneous maneuvers across the LEO constellation. Operators reacted. They didn't predict.
+        </div>
+      </div>
+
+      <p class="section-body reveal" style="max-width: 70ch;">
+        Parkers Physics runs the actual physics. Magnetohydrodynamics, on your orbit, refreshed continuously. So when the storm hits, you already know what your satellite will feel.
+      </p>
+    </div>
+  </section>
+
+  <!-- ==================================================== -->
+  <!-- How it works                                         -->
+  <!-- ==================================================== -->
+  <section id="how">
+    <div class="container">
+      <div class="section-header reveal">
+        <p class="eyebrow">How it works</p>
+        <h2 class="section-h2">Three layers. One prediction.</h2>
+      </div>
+
+      <div class="how-grid">
+        <div class="how-step reveal">
+          <p class="step-num">01 — INGEST</p>
+          <h3 class="step-title">Live, always on</h3>
+          <p class="step-body">
+            Solar wind from ACE and DSCOVR. X-ray flux from GOES-16/18. CMEs from NASA DONKI. Magnetometer data from the global INTERMAGNET network. Twelve feeds, refreshed continuously.
+          </p>
+        </div>
+        <div class="how-step reveal">
+          <p class="step-num">02 — PHYSICS</p>
+          <h3 class="step-title">SWMF, productized</h3>
+          <p class="step-body">
+            The same magnetohydrodynamics code NASA's Community Coordinated Modeling Center uses for research. We containerized it, gave it a real-time pipeline, and wrapped it in an API your flight dynamics team can actually call.
+          </p>
+        </div>
+        <div class="how-step reveal">
+          <p class="step-num">03 — DECIDE</p>
+          <h3 class="step-title">Per-satellite output</h3>
+          <p class="step-body">
+            You give us your ephemeris. We give you drag, radiation, and surface-charging predictions specific to your spacecraft — with quantified uncertainty bounds. Not point estimates pretending to be certainty.
+          </p>
+        </div>
+      </div>
+
+      <p class="how-closer reveal">
+        Generic models output grids. Parkers Physics outputs decisions.
+      </p>
+    </div>
+  </section>
+
+  <!-- ==================================================== -->
+  <!-- Features (PRO)                                       -->
+  <!-- ==================================================== -->
+  <section id="features">
+    <div class="container">
+      <div class="section-header reveal">
+        <p class="eyebrow">Parkers Physics PRO</p>
+        <h2 class="section-h2">Built for the orbits and decision cycles commercial constellations actually fly.</h2>
+      </div>
+
+      <div class="feature-grid">
+        <div class="feature reveal">
+          <div class="feature-icon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7"/></svg>
+          </div>
+          <h3>Per-satellite forecasts</h3>
+          <p>Submit your ephemeris. Receive drag, radiation, and charging predictions on your orbital path. Refreshed every fifteen minutes.</p>
+        </div>
+
+        <div class="feature reveal">
+          <div class="feature-icon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M3 21h18"/></svg>
+          </div>
+          <h3>Uncertainty quantification</h3>
+          <p>Every prediction comes with bounds. Know when to trust the model and when to widen your screening volume.</p>
+        </div>
+
+        <div class="feature reveal">
+          <div class="feature-icon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          </div>
+          <h3>Maneuver-window guidance</h3>
+          <p>Ephemeris-aware suggestions for when to maneuver, when to safe-mode, and when to hold. You make the call. We give you the inputs.</p>
+        </div>
+
+        <div class="feature reveal">
+          <div class="feature-icon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 18l6-6-6-6"/><path d="M8 6l-6 6 6 6"/></svg>
+          </div>
+          <h3>API-first integration</h3>
+          <p>REST and webhooks. Direct hooks into STK, GMAT, FreeFlyer, and your custom flight ops stack. No installers. No virtual machines. No 1990s.</p>
+        </div>
+
+        <div class="feature reveal">
+          <div class="feature-icon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a10 10 0 0 0 0 20"/><path d="M2 12h20"/></svg>
+          </div>
+          <h3>Storm-mode escalation</h3>
+          <p>Cadence drops to twenty seconds when Kp ≥ 6 or an X-class flare fires. The forecast keeps up with the Sun, not the calendar.</p>
+        </div>
+
+        <div class="feature reveal">
+          <div class="feature-icon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+          </div>
+          <h3>Operator-grade SLA</h3>
+          <p>99.9% uptime. Sub-second response. Dedicated compute. Engineering on call. Built for the people whose job is keeping spacecraft alive.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================================================== -->
+  <!-- Pricing                                              -->
+  <!-- ==================================================== -->
+  <section id="pricing">
+    <div class="container">
+      <div class="section-header reveal">
+        <p class="eyebrow">Pricing</p>
+        <h2 class="section-h2">Start free. Scale to a constellation.</h2>
+        <p class="section-body">A free tier for explorers and developers. A serious operator tier for production fleets. Custom contracts for the constellations and agencies running mission-critical infrastructure.</p>
+      </div>
+
+      <div class="tier-grid">
+
+        <div class="tier reveal">
+          <p class="tier-name">Free</p>
+          <p class="tier-price">$0 <small>/ forever</small></p>
+          <p class="tier-tagline">For explorers, students, and the curious.</p>
+          <ul class="tier-list">
+            <li>Live NOAA solar wind &amp; Kp data</li>
+            <li>Public space weather dashboard</li>
+            <li>Three core simulations</li>
+            <li>Community support</li>
+          </ul>
+          <a href="/signup.html?plan=free" class="btn">Get started</a>
+        </div>
+
+        <div class="tier tier-pro reveal">
+          <span class="tier-badge">For operators</span>
+          <p class="tier-name">PRO</p>
+          <p class="tier-price">$100 <small>/ month</small></p>
+          <p class="tier-tagline">For commercial constellations and space missions.</p>
+          <ul class="tier-list">
+            <li>Per-satellite drag &amp; radiation forecasts</li>
+            <li>Six-hour horizon, 15-min cadence</li>
+            <li>Storm-mode escalation to 20s</li>
+            <li>REST API + webhooks</li>
+            <li>Uncertainty bounds &amp; maneuver guidance</li>
+            <li>Priority support</li>
+          </ul>
+          <a href="/signup.html?plan=pro" class="btn btn-primary">Request PRO access</a>
+        </div>
+
+        <div class="tier reveal">
+          <p class="tier-name">Enterprise</p>
+          <p class="tier-price">Custom</p>
+          <p class="tier-tagline">For megaconstellations and government missions.</p>
+          <ul class="tier-list">
+            <li>Constellation-scale deployment</li>
+            <li>Dedicated compute &amp; SLA</li>
+            <li>Government contract vehicles</li>
+            <li>Integration support &amp; on-call engineering</li>
+            <li>SBIR / DoD / NOAA procurement ready</li>
+          </ul>
+          <a href="/contact-enterprise.html" class="btn">Talk to us</a>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================================================== -->
+  <!-- Vision                                               -->
+  <!-- ==================================================== -->
+  <section id="vision">
+    <div class="container">
+      <div class="vision reveal">
+        <p class="eyebrow">The bigger picture</p>
+        <h2 class="section-h2">Forecasting tomorrow's storm.<br>Building toward the stars.</h2>
+
+        <p class="vision-body">
+          Every spacecraft humanity has ever flown has been a bet against the Sun. The same physics that determines whether a Starlink survives a G4 storm tomorrow will determine whether a generation ship survives the heliopause in 2175. The same equations that protect a power grid in Quebec will protect a colony on Mars.
+        </p>
+
+        <p class="vision-body">
+          We started Parkers Physics because the gap between what the physics can do and what operators can use is the gap that keeps us tethered to Earth. Close it, and the inner solar system becomes navigable infrastructure. Close it again, and the outer planets do too. Close it enough times, and we go further.
+        </p>
+
+        <p class="vision-quote">Oracles of the sky and the stars.</p>
+
+        <p class="vision-closer">This is the work. One forecast at a time.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================================================== -->
+  <!-- Footer CTA                                           -->
+  <!-- ==================================================== -->
+  <section class="foot-cta">
+    <div class="container">
+      <h2 class="reveal">Start your journey through the cosmos.</h2>
+      <p class="reveal">
+        Whether you're protecting a billion-dollar constellation or seeing the heliosphere for the first time — Parkers Physics meets you where you are.
+      </p>
+      <div class="foot-cta-buttons reveal">
+        <a href="/signup.html" class="btn btn-primary">Create free account</a>
+        <a href="/signup.html?plan=pro" class="btn">Request PRO access</a>
+        <a href="/contact-enterprise.html" class="btn">Talk to us</a>
+      </div>
+      <p class="foot-note reveal">
+        No credit card required · Cancel anytime · Free tier always available
+      </p>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a href="/" class="footer-brand-line">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span class="brand-name">Parkers Physics</span>
+        </a>
+        <p>Oracles of the sky and the stars. Forecasting tomorrow's storm. Building toward the stars.</p>
+      </div>
+      <div class="footer-col">
+        <h4>Product</h4>
+        <ul>
+          <li><a href="/satellite-operator/landing.html">For operators</a></li>
+          <li><a href="/operations.html">Operations console</a></li>
+          <li><a href="/pricing.html">Pricing</a></li>
+          <li><a href="/dashboard.html">Dashboard</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Simulations</h4>
+        <ul>
+          <li><a href="/sun.html">Sun</a></li>
+          <li><a href="/earth.html">Earth</a></li>
+          <li><a href="/space-weather.html">Space weather</a></li>
+          <li><a href="/upper-atmosphere.html">Upper atmosphere</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Company</h4>
+        <ul>
+          <li><a href="/contact-enterprise.html">Enterprise</a></li>
+          <li><a href="/feedback.html">Feedback</a></li>
+          <li><a href="/privacy.html">Privacy</a></li>
+          <li><a href="/eula.html">Terms</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© 2026 Parkers Physics. All rights reserved.</span>
+      <span>Built on real physics. Run on real data.</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+  /* ===== Particle field — heliosphere drift ===== */
+  (function() {
+    const canvas = document.getElementById('particles');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    let w = 0, h = 0, particles = [];
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    function resize() {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      w = window.innerWidth;
+      h = window.innerHeight;
+      canvas.width = w * dpr;
+      canvas.height = h * dpr;
+      canvas.style.width = w + 'px';
+      canvas.style.height = h + 'px';
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    const count = reduceMotion ? 0 : Math.min(Math.floor(w * h / 9000), 140);
+    for (let i = 0; i < count; i++) {
+      particles.push({
+        x: Math.random() * w,
+        y: Math.random() * h,
+        vx: (Math.random() - 0.5) * 0.08,
+        vy: (Math.random() - 0.5) * 0.08,
+        r: Math.random() * 1.2 + 0.3,
+        a: Math.random() * 0.5 + 0.2,
+        twinkle: Math.random() * 0.02 + 0.005
+      });
+    }
+
+    function tick() {
+      ctx.clearRect(0, 0, w, h);
+      for (const p of particles) {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.a += (Math.random() - 0.5) * p.twinkle;
+        p.a = Math.max(0.1, Math.min(0.7, p.a));
+
+        if (p.x < -10) p.x = w + 10;
+        if (p.x > w + 10) p.x = -10;
+        if (p.y < -10) p.y = h + 10;
+        if (p.y > h + 10) p.y = -10;
+
+        ctx.beginPath();
+        ctx.fillStyle = 'rgba(245, 176, 66, ' + p.a + ')';
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      if (!reduceMotion) requestAnimationFrame(tick);
+    }
+    tick();
+  })();
+
+  /* ===== Reveal-on-scroll ===== */
+  (function() {
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduceMotion) {
+      document.querySelectorAll('.reveal').forEach(el => el.classList.add('visible'));
+      return;
+    }
+    if (!('IntersectionObserver' in window)) {
+      document.querySelectorAll('.reveal').forEach(el => el.classList.add('visible'));
+      return;
+    }
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach(e => {
+        if (e.isIntersecting) {
+          e.target.classList.add('visible');
+          io.unobserve(e.target);
+        }
+      });
+    }, { threshold: 0.08, rootMargin: '0px 0px -40px 0px' });
+
+    document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+  })();
+
+  /* ===== A/B headline switcher (query string driven) =====
+     Append ?headline=clock | sun | physics | blindness to test variants.
+     Default = oracle. */
+  (function() {
+    const params = new URLSearchParams(window.location.search);
+    const variant = params.get('headline');
+    if (!variant) return;
+    const h1 = document.querySelector('.hero h1');
+    if (!h1) return;
+
+    const variants = {
+      oracle: 'We see the storm <span class="accent">before it hits</span> your satellite.',
+      clock: 'Six hours of warning. <span class="accent">While everyone else</span> has six minutes.',
+      sun: 'The Sun fires. <span class="accent">We\'ve already told you</span> what happens next.',
+      physics: 'Physics is the only forecast <span class="accent">that works</span> during storms.',
+      blindness: 'Your forecast model is flying blind <span class="accent">during storms.</span> Ours isn\'t.'
+    };
+
+    if (variants[variant]) {
+      h1.innerHTML = variants[variant];
+      h1.dataset.variant = variant;
+    }
+  })();
+</script>
+
+</body>
+</html>

@@ -260,6 +260,18 @@
       "destination": "/for-educators.html"
     },
     {
+      "source": "/satellite-operator",
+      "destination": "/satellite-operator/landing.html"
+    },
+    {
+      "source": "/satellite-operators",
+      "destination": "/satellite-operator/landing.html"
+    },
+    {
+      "source": "/for-operators",
+      "destination": "/satellite-operator/landing.html"
+    },
+    {
       "source": "/educators",
       "destination": "/for-educators.html"
     },
