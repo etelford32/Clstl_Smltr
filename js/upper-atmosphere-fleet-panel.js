@@ -33,8 +33,10 @@
 import { UpperAtmosphereFleet, MAX_ASSETS, parseTleBlock } from './upper-atmosphere-fleet.js';
 import {
     FleetAnalyzer, rankBySeverity,
+    setDensityModel, getDensityModel,
     REENTRY_KM, DECAY_SPIKE_KM_DAY, DRAG_HIGH_PA, DRAG_HIGH_HOURS,
 } from './upper-atmosphere-fleet-analyzer.js';
+import { isMsisReady } from './nrlmsise00-bridge.js';
 
 // Debounce window for full-fleet re-analysis on incoming ticks. Compute
 // is cheap (~50 µs/asset) but we don't want to thrash mid-slider-drag.
@@ -243,6 +245,18 @@ export class FleetPanel {
             </div>
             <div class="ua-fleet-toolbar">
                 <span id="ua-fleet-count" class="ua-dim">0 / ${MAX_ASSETS}</span>
+                <span class="ua-fleet-model-toggle"
+                      title="Atmosphere model used for density and decay forecasts">
+                    <label class="ua-fleet-model-opt">
+                        <input type="radio" name="ua-fleet-model" value="nrlmsise00" checked>
+                        <span>NRLMSISE-00</span>
+                    </label>
+                    <label class="ua-fleet-model-opt">
+                        <input type="radio" name="ua-fleet-model" value="msis-lite">
+                        <span>MSIS-lite</span>
+                    </label>
+                    <span id="ua-fleet-model-state" class="ua-fleet-model-state"></span>
+                </span>
                 <button type="button" id="ua-fleet-clear-btn"
                         class="ua-fleet-btn ua-fleet-btn--danger">Clear all</button>
             </div>
@@ -269,6 +283,25 @@ export class FleetPanel {
         this._cardsHost = this.host.querySelector('#ua-fleet-cards');
         this._countEl   = this.host.querySelector('#ua-fleet-count');
         this._statusEl  = this.host.querySelector('#ua-fleet-add-status');
+        this._modelStateEl = this.host.querySelector('#ua-fleet-model-state');
+
+        // Model toggle: NRLMSISE-00 (vendored Brodowski C port via WASM)
+        // ↔ MSIS-lite (the original Jacchia-style JS surrogate). Resets
+        // the analyzer cache so the next paint re-runs against the new
+        // model without waiting for the next realtime tick.
+        for (const r of this.host.querySelectorAll('input[name="ua-fleet-model"]')) {
+            r.addEventListener('change', (e) => {
+                if (!e.target.checked) return;
+                setDensityModel(e.target.value);
+                this.analyzer.invalidate();
+                this._refreshModelState();
+                this._scheduleRecompute(0);
+            });
+        }
+        this._refreshModelState();
+        // The MSIS WASM may be loading — re-check shortly so the badge
+        // shows the right state without forcing a full poll loop.
+        setTimeout(() => this._refreshModelState(), 1500);
 
         // Card-host event delegation: remove buttons + asset clicks.
         this._cardsHost.addEventListener('click', (e) => {
@@ -327,6 +360,18 @@ export class FleetPanel {
         if (!this._statusEl) return;
         this._statusEl.textContent = text;
         this._statusEl.dataset.kind = kind;
+    }
+
+    _refreshModelState() {
+        if (!this._modelStateEl) return;
+        const sel = getDensityModel();
+        if (sel === 'nrlmsise00') {
+            this._modelStateEl.textContent = isMsisReady() ? '✓ live' : 'loading…';
+            this._modelStateEl.dataset.kind = isMsisReady() ? 'ok' : 'pending';
+        } else {
+            this._modelStateEl.textContent = 'surrogate';
+            this._modelStateEl.dataset.kind = 'info';
+        }
     }
 
     _renderList() {

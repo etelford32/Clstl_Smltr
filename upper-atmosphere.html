@@ -524,10 +524,31 @@ input[type=range]::-moz-range-thumb {
 .ua-fleet-status[data-kind="error"] { color:#ff8090; }
 .ua-fleet-toolbar {
     display:flex; justify-content:space-between; align-items:center;
+    gap:8px; flex-wrap:wrap;
     padding:6px 0;
     border-top:1px solid rgba(0,200,200,.10);
     border-bottom:1px solid rgba(0,200,200,.10);
 }
+.ua-fleet-model-toggle {
+    display:inline-flex; align-items:center; gap:6px;
+    font-size:.6rem; letter-spacing:.04em;
+    padding:2px 6px; border-radius:6px;
+    background:rgba(8,4,22,.55);
+    border:1px solid rgba(0,200,200,.18);
+}
+.ua-fleet-model-opt {
+    display:inline-flex; align-items:center; gap:3px;
+    color:#9ab; cursor:pointer; user-select:none;
+}
+.ua-fleet-model-opt input { margin:0; transform:scale(.85); accent-color:#0ff; }
+.ua-fleet-model-opt input:checked + span { color:#0ff; font-weight:700; }
+.ua-fleet-model-state {
+    font-size:.55rem; letter-spacing:.06em;
+    padding:1px 5px; border-radius:4px;
+}
+.ua-fleet-model-state[data-kind="ok"]      { color:#40e090; background:rgba(64,224,144,.10); }
+.ua-fleet-model-state[data-kind="pending"] { color:#ffaa20; background:rgba(255,170,32,.10); }
+.ua-fleet-model-state[data-kind="info"]    { color:#9ab;    background:rgba(150,170,200,.10); }
 .ua-fleet-cards { display:flex; flex-direction:column; gap:8px; }
 .ua-fleet-empty {
     padding:16px; text-align:center;

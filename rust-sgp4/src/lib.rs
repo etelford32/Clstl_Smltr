@@ -19,6 +19,11 @@
 use wasm_bindgen::prelude::*;
 use std::f64::consts::PI;
 
+// ── NRLMSISE-00 atmosphere model (vendored C port) ──────────────────────
+// Lives in src/nrlmsise00.rs; pulls in the C source via build.rs.
+// Exposes nrlmsise00_density_point + nrlmsise00_density_profile to JS.
+mod nrlmsise00;
+
 // ── WGS-72 constants (SGP4 standard, NOT WGS-84) ──────────────────────────
 
 const MU: f64 = 398600.8;            // km³/s² — gravitational parameter

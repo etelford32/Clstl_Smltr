@@ -70,8 +70,32 @@ import {
     SGP4_COL, DRAG_COL,
 } from './upper-atmosphere-trajectory-analysis.js';
 import { sampleProfile } from './upper-atmosphere-engine.js';
+import { sampleProfileMSIS, isMsisReady, ensureMsisReady }
+    from './nrlmsise00-bridge.js';
 import { projectDragState } from './drag-forecast-projector.js';
 import { getRealtimeDriver } from './upper-atmosphere-realtime.js';
+
+// Density-model selector. Defaults to NRLMSISE-00 — bit-identical to the
+// NRL reference (verified against Brodowski's published test outputs).
+// Falls back to the JS surrogate ("msis-lite") automatically when the
+// WASM hasn't loaded yet or a sample call throws.
+let _densityModel = 'nrlmsise00';
+export function setDensityModel(name) {
+    _densityModel = (name === 'msis-lite') ? 'msis-lite' : 'nrlmsise00';
+}
+export function getDensityModel() { return _densityModel; }
+// Kick the WASM init at module-load so first analyzer pass doesn't pay
+// the cold-start cost (caller already imports trajectory-analysis which
+// also kicks the same WASM).
+ensureMsisReady();
+
+function _samplePreferred(opts) {
+    if (_densityModel === 'nrlmsise00' && isMsisReady()) {
+        const p = sampleProfileMSIS(opts);
+        if (p) return p;
+    }
+    return sampleProfile(opts);
+}
 
 // ── Defaults / thresholds ────────────────────────────────────────────────────
 
@@ -207,9 +231,16 @@ export class FleetAnalyzer {
         const apProj   = (proj && Number.isFinite(proj.ap))   ? proj.ap   : ap;
         const skill    = (proj && Number.isFinite(proj.skill)) ? proj.skill : 1.0;
 
-        // Sample the atmosphere at both forcing levels.
-        const profileNow  = sampleProfile({ f107Sfu: f107,     ap });
-        const profileFwd  = sampleProfile({ f107Sfu: f107Proj, ap: apProj });
+        // Sample the atmosphere at both forcing levels. Prefer NRLMSISE-00
+        // (gold standard, agrees with NRL reference to within last ULP);
+        // fall back to the JS surrogate if WASM isn't ready yet.
+        const hist = getRealtimeDriver?.()?.getHistory?.() || [];
+        const profileNow  = _samplePreferred({
+            f107Sfu: f107,     ap, history: hist,
+        });
+        const profileFwd  = _samplePreferred({
+            f107Sfu: f107Proj, ap: apProj, history: hist,
+        });
 
         // Run the analyzer twice — once per scenario.
         const baseOpts = {
