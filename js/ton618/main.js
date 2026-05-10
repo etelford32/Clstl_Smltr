@@ -13,8 +13,8 @@ import {
     OBSERVER_TYPES, PRESETS,
 } from './camera.js';
 import { formatLength, PHOTON_RING_RS, R_HORIZON_GEOM, M_IN_KPC } from './units.js';
-import { measurePhotonRing } from './validation.js';
-import { diagnostics, labDiagnostics } from './physics.js';
+import { measurePhotonRing, measureKerrShadow } from './validation.js';
+import { diagnostics, labDiagnostics, diskRegime, bzEfficiency } from './physics.js';
 import { createMinimap } from './minimap.js';
 import { traceRay } from './inspector.js';
 
@@ -71,6 +71,7 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         coronaRadius:     10.0,
         coronaWidth:      4.0,
         coronaIntensity:  0.04,
+        coronaY:          0.7,        // Tier 2C — Compton y-parameter (typical AGN)
         showWind:         false,
         windIntensity:    0.04,
         showFeLine:       false,
@@ -102,6 +103,43 @@ export async function boot({ canvas, hud, minimapCanvas }) {
 
         // ── Time controls (B6) ─────────────────────────────────────────
         timeMax:          200.0,      // user-adjustable scrubber upper bound (s)
+
+        // ── Tier 1A — HDR + bloom + ACES tonemap pipeline ─────────────
+        // Defaults tuned so the disk's hot inner edge blooms without
+        // washing out the disk fine-structure or the LAB halo.
+        bloomEnabled:     true,
+        bloomThreshold:   1.2,        // luminance above which bloom kicks in
+        bloomKnee:        0.6,        // soft-knee half-width for smooth ramp
+        bloomStrength:    1.0,        // multiplier on bloom contribution
+        exposureStops:    0.0,        // ±3 EV typical
+
+        // ── Tier 1B — photon sub-rings + procedural deep sky ──────────
+        showSubrings:     true,        // n ≥ 1 Gralla-Holz-Wald photon sub-rings
+        subringStrength:  1.0,         // brightness multiplier (× exp(-nπ) decay)
+        skyStrength:      1.0,         // 0..2 — 0 fully suppresses the deep-sky field
+
+        // ── Tier 2B — Blandford-Znajek + MAD ──────────────────────────
+        // φ = Φ_H / Φ_MAD: 0 = no flux, 1 = MAD threshold, > 1 super-MAD.
+        // When bzAuto is on, the jet's brightness is driven by η_BZ(a, φ)
+        // instead of the manual jetIntensity slider; the disk dims when
+        // MAD is reached because the magnetosphere extracts the inner-
+        // disk's binding energy (Tchekhovskoy+ 2011, McKinney+ 2012).
+        bzAuto:           true,
+        magnetization:    0.7,         // φ — 0..1.5 typical
+        // Cached per-frame BZ result for the HUD.
+        bzEta:            0.0,
+        bzIsMAD:          false,
+        bzEtaMax:         0.0,
+
+        // ── Tier 2A — disk regime (auto from ṁ vs manual H/r override) ─
+        // When `regimeAuto` is on the disk's H(r)/r profile, T-scaling,
+        // brightness, and regime tag are all derived from u_mdot_rel
+        // (RIAF / thin / slim transitions). When off, the user keeps full
+        // manual control of H/r via the existing slider.
+        regimeAuto:       true,
+        // Cached regime info — refreshed every frame from diskRegime(mdotRel).
+        regimeIdx:        1,           // 0 RIAF, 1 thin, 2 slim
+        regimeName:       'thin disk (Shakura-Sunyaev / Novikov-Thorne)',
 
         // ── Phase 2.1 — Lyman-α blob (Slug-class defaults) ────────────
         // Off by default; toggle to render the host-galaxy halo. Defaults
@@ -177,6 +215,27 @@ export async function boot({ canvas, hud, minimapCanvas }) {
 
     function render() {
         const u = cameraUniforms(state.cam, { width: canvas.width, height: canvas.height });
+        // Tier 2A — refresh the disk-regime classification from ṁ_rel each
+        // frame. When regimeAuto is on, override the user's H/r slider with
+        // the regime-derived value so the disk visibly transitions between
+        // razor-thin / puffy slim / thick RIAF as ṁ moves through critical
+        // boundaries (0.01 and 0.3).
+        const regime = diskRegime(state.mdotRel);
+        state.regimeIdx  = regime.regimeIdx;
+        state.regimeName = regime.regime;
+        const effectiveHOverR = state.regimeAuto ? regime.hOverR : state.diskHOverR;
+        // Tier 2B — Blandford-Znajek jet power + MAD-state disk dimming.
+        const bz = bzEfficiency(state.spin, state.magnetization);
+        state.bzEta    = bz.eta;
+        state.bzEtaMax = bz.eta_MAD;
+        state.bzIsMAD  = bz.isMAD;
+        // η = 1.0 (a=1, MAD) maps to a visually-bright jet intensity of
+        // 0.20 — well-tuned with the existing Doppler-beaming term and
+        // the Tier 1A bloom. Below MAD or low-spin, jets fade smoothly.
+        const effectiveJetIntensity = state.bzAuto
+            ? Math.min(0.50, 0.20 * bz.eta)
+            : state.jetIntensity;
+        const effectiveDiskMadDim = state.bzAuto ? bz.disk_mad_dim : 1.0;
         backend.setUniforms({
             ...u,
             rFar:             state.rFar,
@@ -205,18 +264,23 @@ export async function boot({ canvas, hud, minimapCanvas }) {
             jetAlpha:         state.jetAlpha,
             jetOpen:          state.jetOpen,
             jetRMax:          state.jetRMax,
-            jetIntensity:     state.jetIntensity,
+            jetIntensity:     effectiveJetIntensity,
             showCorona:       state.showCorona,
             coronaRadius:     state.coronaRadius,
             coronaWidth:      state.coronaWidth,
             coronaIntensity:  state.coronaIntensity,
+            coronaY:          state.coronaY,
             showWind:         state.showWind,
             windIntensity:    state.windIntensity,
             showFeLine:       state.showFeLine,
             feIntensity:      state.feIntensity,
             farShortcutR:     state.farShortcutR,
             // Track B
-            diskHOverR:       state.diskHOverR,
+            diskHOverR:           effectiveHOverR,
+            diskRegimeIdx:        state.regimeIdx,
+            diskTFactor:          regime.T_factor,
+            diskRegimeBrightness: regime.brightness_factor,
+            diskMadDim:           effectiveDiskMadDim,
             mriStrength:      state.mriStrength,
             nHotspots:        state.nHotspots,
             qpoFlare:         state.qpoFlare,
@@ -246,6 +310,16 @@ export async function boot({ canvas, hud, minimapCanvas }) {
             showPolVectors:   state.showPolVectors,
             labPolMax:        state.labPolMax,
             labDoublePeak:    state.labDoublePeak,
+            // Tier 1A — HDR/bloom/ACES post-process knobs
+            bloomEnabled:     state.bloomEnabled,
+            bloomThreshold:   state.bloomThreshold,
+            bloomKnee:        state.bloomKnee,
+            bloomStrength:    state.bloomStrength,
+            exposureStops:    state.exposureStops,
+            // Tier 1B — sub-rings + sky strength
+            showSubrings:     state.showSubrings,
+            subringStrength:  state.subringStrength,
+            skyStrength:      state.skyStrength,
         });
         backend.draw();
         updateHUD(hud, state, backend, name);
@@ -419,6 +493,11 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         setJetIntensity(v){ state.jetIntensity = Math.max(0, Math.min(1.0, v)); state.dirty = true; },
         setCoronaRadius(v){ state.coronaRadius = Math.max(2.5, Math.min(60, v)); state.dirty = true; },
         setCoronaIntensity(v){ state.coronaIntensity = Math.max(0, Math.min(0.5, v)); state.dirty = true; },
+        setCoronaY(v)        { state.coronaY = Math.max(0.05, Math.min(8, v)); state.dirty = true; },
+        getComptonGamma()    {
+            const y = Math.max(state.coronaY, 0.05);
+            return 0.5 + Math.sqrt(2.25 + 4 / (3 * y));
+        },
         setWindIntensity(v){ state.windIntensity = Math.max(0, Math.min(0.5, v)); state.dirty = true; },
         setFeIntensity(v) { state.feIntensity = Math.max(0, Math.min(5.0, v)); state.dirty = true; },
         setMdotRel(v)     { state.mdotRel = Math.max(0, Math.min(10.0, v)); state.dirty = true; },
@@ -475,6 +554,23 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         togglePolVectors()    { state.showPolVectors = !state.showPolVectors; state.dirty = true; return state.showPolVectors; },
         toggleDoublePeak()    { state.labDoublePeak  = !state.labDoublePeak;  state.dirty = true; return state.labDoublePeak; },
         setLabPolMax(v)       { state.labPolMax = Math.max(0, Math.min(0.5, v)); state.dirty = true; },
+        // ── Tier 1A — bloom / tonemap controls ─────────────────────
+        toggleBloom()         { state.bloomEnabled = !state.bloomEnabled; state.dirty = true; return state.bloomEnabled; },
+        setBloomThreshold(v)  { state.bloomThreshold = Math.max(0.1, Math.min(8, v)); state.dirty = true; },
+        setBloomKnee(v)       { state.bloomKnee      = Math.max(0.05, Math.min(2, v)); state.dirty = true; },
+        setBloomStrength(v)   { state.bloomStrength  = Math.max(0, Math.min(4, v)); state.dirty = true; },
+        setExposureStops(v)   { state.exposureStops  = Math.max(-4, Math.min(4, v)); state.dirty = true; },
+        // ── Tier 2A — disk regime auto-mode ────────────────────────
+        toggleRegimeAuto()    { state.regimeAuto = !state.regimeAuto; state.dirty = true; return state.regimeAuto; },
+        getRegimeName()       { return state.regimeName; },
+        // ── Tier 2B — Blandford-Znajek + MAD ───────────────────────
+        toggleBzAuto()        { state.bzAuto = !state.bzAuto; state.dirty = true; return state.bzAuto; },
+        setMagnetization(v)   { state.magnetization = Math.max(0, Math.min(1.5, v)); state.dirty = true; },
+        getBzState()          { return { eta: state.bzEta, etaMax: state.bzEtaMax, isMAD: state.bzIsMAD, phi: state.magnetization }; },
+        // ── Tier 1B — photon sub-rings + sky ───────────────────────
+        toggleSubrings()      { state.showSubrings = !state.showSubrings; state.dirty = true; return state.showSubrings; },
+        setSubringStrength(v) { state.subringStrength = Math.max(0, Math.min(4, v)); state.dirty = true; },
+        setSkyStrength(v)     { state.skyStrength = Math.max(0, Math.min(2, v)); state.dirty = true; },
         // ── LAB scenario presets ──────────────────────────────────
         // Snapshot+apply a coherent set of LAB parameters mapped to a named
         // observed system. Forces the LAB on so the preset is immediately
@@ -617,6 +713,13 @@ export async function boot({ canvas, hud, minimapCanvas }) {
             state.showPhotonSphere = false;
             render();
             const result = measurePhotonRing(backend, state.cam, state.spin);
+            // Tier 2D — augment with the row-sweep Bardeen 1973 Kerr-shadow
+            // asymmetry test. At a = 0 it returns the same b_crit; at a > 0
+            // it splits the prograde / retrograde rims and reports Δb/2.
+            if (result) {
+                const kerr = measureKerrShadow(backend, state.cam, state.spin);
+                if (kerr) result.kerr_rim = kerr;
+            }
             // restore
             state.cam.r = saved.r; state.cam.theta = saved.theta; state.cam.phi = saved.phi;
             state.cam.yaw = saved.yaw; state.cam.pitch = saved.pitch; state.cam.roll = saved.roll;
@@ -702,6 +805,8 @@ function updateHUD(hud, state, backend, backendName) {
         `horizon area A = ${fmt(d.horizon_area_m2, 3)} m²`,
         `Bekenstein S/k = ${fmt(d.bekenstein_entropy_over_k, 3)}    T_H = ${fmt(d.T_hawking_K, 3)} K`,
         `─── disk luminosity ───────────────────────────`,
+        `regime: ${state.regimeName}   (auto: ${state.regimeAuto ? 'on' : 'off'})`,
+        `magnetic state: ${state.bzIsMAD ? 'MAD' : 'SANE'}  φ=${state.magnetization.toFixed(2)}   η_BZ=${(state.bzEta*100).toFixed(1)}%   η_MAD=${(state.bzEtaMax*100).toFixed(1)}%`,
         `efficiency η (NT, ISCO=${d.r_isco}M)  = ${(d.disk_efficiency*100).toFixed(2)} %`,
         `L_Edd          = ${fmt(d.eddington_solar_lum, 3)} L☉   (${fmt(d.eddington_W, 3)} W)`,
         `L_disk @ ṁ_rel = ${fmt(d.mdot_rel, 3)} → ${fmt(d.disk_lum_solar_lum, 3)} L☉`,
@@ -710,7 +815,10 @@ function updateHUD(hud, state, backend, backendName) {
         `disk: ${diskTag}   r_in=${state.diskInner.toFixed(1)}M  r_out=${state.diskOuter.toFixed(1)}M`,
         `radiation: ${[
             state.showJets ? `jets(β=${state.jetVelocity.toFixed(2)},α=${state.jetAlpha.toFixed(2)})` : null,
-            state.showCorona ? `corona(r=${state.coronaRadius.toFixed(0)}M)` : null,
+            state.showCorona ? (() => {
+                const Gamma = 0.5 + Math.sqrt(2.25 + 4 / (3 * Math.max(state.coronaY, 0.05)));
+                return `corona(r=${state.coronaRadius.toFixed(0)}M · y=${state.coronaY.toFixed(2)} · Γ=${Gamma.toFixed(2)})`;
+            })() : null,
             state.showWind ? 'wind' : null,
             state.showFeLine ? 'Fe-Kα' : null,
             state.showHotspot ? `hotspot(r=${state.hotspotRadius.toFixed(1)}M)` : null,

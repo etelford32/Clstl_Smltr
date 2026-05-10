@@ -150,6 +150,28 @@ select {
     display:inline-block; font-size:9px; letter-spacing:.15em; text-transform:uppercase;
     color:#000; background:#ff8800; padding:1px 6px; border-radius:10px; margin-right:4px;
 }
+/* Tier 1C — iframe embed mode (?embed=1): hide UI chrome for clean external embed */
+body.ton618-embed #panel,
+body.ton618-embed #controls-hint,
+body.ton618-embed #fly-pill,
+body.ton618-embed #minimap-wrap,
+body.ton618-embed nav { display:none !important; }
+body.ton618-embed #app { height:100vh; }
+body.ton618-embed #hud { font-size:9.5px; min-width:280px; opacity:.85; }
+body.ton618-embed #hud-title { font-size:8px; }
+.toast {
+    position:absolute; left:50%; top:18px; transform:translateX(-50%);
+    z-index:30; font-size:11px; color:#fff; background:rgba(20,20,40,.85);
+    border:1px solid rgba(255,180,80,.4); border-radius:6px; padding:6px 14px;
+    pointer-events:none; opacity:0; transition:opacity .25s;
+}
+.toast.show { opacity:1; }
+.rec-dot {
+    display:inline-block; width:8px; height:8px; border-radius:50%;
+    background:#ff4040; box-shadow:0 0 6px #ff4040; margin-right:6px; vertical-align:middle;
+    animation:rec-pulse 1.0s ease-in-out infinite;
+}
+@keyframes rec-pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
 </style>
 <script type="application/ld+json">
 {
@@ -189,6 +211,7 @@ select {
             <canvas id="minimap"></canvas>
         </div>
         <div id="fly-pill">⊙ free-fly</div>
+        <div id="toast" class="toast"></div>
         <div id="inspector">
             <div class="ic-title">▸ Geodesic inspector</div>
             <span class="ic-close" id="ic-close">✕</span>
@@ -323,8 +346,13 @@ select {
 
         <div>
             <div class="sec-title">Disk dynamics</div>
+            <div class="toggle-row">
+                <input type="checkbox" id="regimeAuto" checked>
+                <label for="regimeAuto">Auto regime (RIAF / thin / slim) from ṁ</label>
+            </div>
+            <div class="val" id="v-regime" style="text-align:left;color:#cca266">regime: thin disk</div>
             <div class="ctrl">
-                <label>Vertical thickness H/r (Shakura-Sunyaev slab)</label>
+                <label>Vertical thickness H/r <span style="color:#666">[manual override]</span></label>
                 <input type="range" id="s-disk-h" min="0" max="0.4" step="0.005" value="0">
                 <div class="val" id="v-disk-h">0.000  (razor-thin)</div>
             </div>
@@ -333,12 +361,13 @@ select {
                 <input type="range" id="s-mri" min="0" max="1.4" step="0.02" value="0.6">
                 <div class="val" id="v-mri">0.60</div>
             </div>
-            <div class="note">Slab thickness puffs at the inner edge like a slim
-                disk; emission integrates volumetrically through the slab so
-                multi-image lensing (top/bottom of the far disk) shows through
-                automatically. Razor-thin (0) keeps the original equator-only
-                intersection for speed. MRI strength drives anisotropic 4-octave
-                fBm that evolves at the local Keplerian rate Ω(r).</div>
+            <div class="note">When the auto regime is on, the ṁ slider drives
+                H/r, T(r) scaling, brightness, and the spectrum branch
+                (RIAF → blackbody → photon-trapped slim disk). The H/r
+                slider becomes a manual override when toggled off. RIAF
+                renders as an optically-thin Compton-blue torus; slim disk
+                puffs aggressively at the inner edge with photon-trapping
+                blue accent (Abramowicz 1988).</div>
         </div>
 
         <div>
@@ -427,6 +456,16 @@ select {
                 <input type="checkbox" id="showJets" checked>
                 <label for="showJets">Bipolar synchrotron jets (Doppler δ<sup>2+α</sup>)</label>
             </div>
+            <div class="toggle-row">
+                <input type="checkbox" id="bzAuto" checked>
+                <label for="bzAuto">Auto jet η from spin a + magnetization (Blandford-Znajek)</label>
+            </div>
+            <div class="ctrl">
+                <label>Magnetic flux φ = Φ<sub>H</sub> / Φ<sub>MAD</sub></label>
+                <input type="range" id="s-magphi" min="0" max="1.5" step="0.01" value="0.7">
+                <div class="val" id="v-magphi">0.70  (SANE — pre-MAD)</div>
+            </div>
+            <div class="val" id="v-mad-state" style="text-align:left;color:#cca266">η<sub>BZ</sub>= — &nbsp; SANE</div>
             <div class="ctrl">
                 <label>Jet β = v/c</label>
                 <input type="range" id="s-jet-v" min="0" max="0.999" step="0.005" value="0.95">
@@ -461,6 +500,11 @@ select {
                 <label>Corona intensity</label>
                 <input type="range" id="s-cor-i" min="0" max="0.2" step="0.002" value="0.04">
                 <div class="val" id="v-cor-i">0.040</div>
+            </div>
+            <div class="ctrl">
+                <label>Compton y-parameter (4 k T<sub>e</sub> / m<sub>e</sub>c² · max(τ, τ²))</label>
+                <input type="range" id="s-cor-y" min="0.05" max="5" step="0.025" value="0.7">
+                <div class="val" id="v-cor-y">y = 0.70 &nbsp; Γ = 2.40 (typical AGN)</div>
             </div>
 
             <div class="toggle-row" style="margin-top:8px;">
@@ -604,6 +648,65 @@ select {
         </div>
 
         <div>
+            <div class="sec-title">Photon sub-rings &amp; deep sky</div>
+            <div class="toggle-row">
+                <input type="checkbox" id="showSubrings" checked>
+                <label for="showSubrings">Highlight n=1, 2 photon sub-rings (Gralla-Holz-Wald)</label>
+            </div>
+            <div class="ctrl">
+                <label>Sub-ring strength</label>
+                <input type="range" id="s-subring" min="0" max="3" step="0.05" value="1">
+                <div class="val" id="v-subring">1.00×</div>
+            </div>
+            <div class="ctrl">
+                <label>Deep-sky brightness</label>
+                <input type="range" id="s-sky" min="0" max="2" step="0.05" value="1">
+                <div class="val" id="v-sky">1.00×</div>
+            </div>
+            <div class="note">Each successive photon sub-ring (rays that
+                orbit the BH 1, 2, … times before escape) is fainter by
+                exp(−π) ≈ 0.0432 — the strong-deflection asymptotic of
+                the Kerr critical curve. Their angular position is set by
+                b<sub>crit</sub> (and its Kerr-asymmetric counterpart at
+                a&gt;0); EHT-NG is being designed to resolve them.
+                Background: multi-octave Milky Way + Hα/OIII nebulae +
+                4-tier blackbody starfield.</div>
+        </div>
+
+        <div>
+            <div class="sec-title">Cinematic (HDR · ACES · bloom)</div>
+            <div class="toggle-row">
+                <input type="checkbox" id="bloomOn" checked>
+                <label for="bloomOn">Bloom + HDR float framebuffer</label>
+            </div>
+            <div class="ctrl">
+                <label>Exposure (stops)</label>
+                <input type="range" id="s-exposure" min="-3" max="3" step="0.05" value="0">
+                <div class="val" id="v-exposure">0.00 EV</div>
+            </div>
+            <div class="ctrl">
+                <label>Bloom threshold</label>
+                <input type="range" id="s-bloom-th" min="0.2" max="4" step="0.05" value="1.2">
+                <div class="val" id="v-bloom-th">1.20</div>
+            </div>
+            <div class="ctrl">
+                <label>Bloom soft knee</label>
+                <input type="range" id="s-bloom-knee" min="0.05" max="1.5" step="0.025" value="0.6">
+                <div class="val" id="v-bloom-knee">0.60</div>
+            </div>
+            <div class="ctrl">
+                <label>Bloom strength</label>
+                <input type="range" id="s-bloom-st" min="0" max="3" step="0.025" value="1.0">
+                <div class="val" id="v-bloom-st">1.00×</div>
+            </div>
+            <div class="note">RGBA16F scene framebuffer feeds a 2-pass
+                separable Gaussian bloom (Karis 2013, smooth-knee bright
+                pass) and an ACES filmic tonemap (Narkowicz 2015) on
+                composite. Exposure shifts in <i>stops</i> (× 2<sup>EV</sup>);
+                threshold and knee define the bright-pass curve.</div>
+        </div>
+
+        <div>
             <div class="sec-title">Performance</div>
             <div class="toggle-row">
                 <input type="checkbox" id="autoLOD" checked>
@@ -634,6 +737,25 @@ select {
                 <input type="checkbox" id="showRing" checked>
                 <label for="showRing">Highlight photon ring</label>
             </div>
+        </div>
+
+        <div>
+            <div class="sec-title">Share &amp; capture</div>
+            <div class="btn-row">
+                <button class="btn-sm" id="btnShare">⧉ Copy share link</button>
+                <button class="btn-sm" id="btnScreenshot">▣ Screenshot PNG</button>
+            </div>
+            <div class="btn-row" style="margin-top:6px">
+                <button class="btn-sm" id="btnRecord">● Start recording</button>
+                <button class="btn-sm" id="btnEmbed">⧉ Embed link</button>
+            </div>
+            <div class="note">Share links round-trip every slider through
+                <code>window.location.hash</code> — only values that differ
+                from defaults are encoded, so URLs stay short. Recording
+                tries MP4 H.264 first, falls back to WebM VP9. Add
+                <code>?embed=1</code> to the URL to hide all chrome for
+                iframe embeds; the dedicated button above creates that
+                URL with the current state pre-applied.</div>
         </div>
 
         <div>
@@ -677,12 +799,21 @@ select {
 
 <script type="module">
     import { boot } from './js/ton618/main.js';
+    import {
+        applyHash, encodeState, installAutoSync, copyShareLink,
+        downloadScreenshot, createRecorder, applyEmbedMode,
+    } from './js/ton618/share.js';
 
     const canvas        = document.getElementById('glCanvas');
     const hud           = document.getElementById('hud');
     const minimapCanvas = document.getElementById('minimap');
 
+    applyEmbedMode();
     const app = await boot({ canvas, hud, minimapCanvas });
+    // Apply the URL hash *after* boot — boot sets defaults; the hash overrides
+    // only the keys that were explicitly serialized (= differ from defaults).
+    applyHash(app, window.location.hash);
+    installAutoSync(app.state);
 
     const $ = (id) => document.getElementById(id);
 
@@ -764,6 +895,16 @@ select {
         (v) => `${v.toFixed(1)}×`, (v) => app.setAnimSpeed(v));
     bindRange('s-hot-r', 'v-hot-r',
         (v) => `${v.toFixed(1)} M`, (v) => app.setHotspotRadius(v));
+
+    // ── Disk regime (Tier 2A) ─────────────────────────────────────
+    $('regimeAuto').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.regimeAuto) app.toggleRegimeAuto();
+    });
+    // Live regime tag — refreshes every 500 ms (cheap; just a string read).
+    setInterval(() => {
+        const tag = app.getRegimeName?.();
+        if (tag) $('v-regime').textContent = `regime: ${tag}`;
+    }, 500);
 
     // ── Disk dynamics (B1, B2) ────────────────────────────────────
     bindRange('s-disk-h', 'v-disk-h',
@@ -967,8 +1108,41 @@ select {
     bindRange('s-jet-o', 'v-jet-o', (v) => `${v.toFixed(0)}°`,
         (v) => app.setJetOpen((v * Math.PI) / 180));
     bindRange('s-jet-i', 'v-jet-i', (v) => v.toFixed(3), (v) => app.setJetIntensity(v));
+
+    // ── BZ + MAD (Tier 2B) ────────────────────────────────────────
+    $('bzAuto').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.bzAuto) app.toggleBzAuto();
+    });
+    bindRange('s-magphi', 'v-magphi',
+        (v) => v < 0.05 ? `${v.toFixed(2)}  (no flux)` :
+               v < 0.5  ? `${v.toFixed(2)}  (SANE — building)` :
+               v < 1.0  ? `${v.toFixed(2)}  (SANE — pre-MAD)` :
+               v < 1.15 ? `${v.toFixed(2)}  (MAD — saturated)` :
+                          `${v.toFixed(2)}  (super-MAD)`,
+        (v) => app.setMagnetization(v));
+    setInterval(() => {
+        const bz = app.getBzState?.();
+        if (!bz) return;
+        const tag = bz.isMAD ? 'MAD' : 'SANE';
+        const tagColor = bz.isMAD ? '#ff6644' : '#88dd66';
+        $('v-mad-state').innerHTML =
+            `η<sub>BZ</sub> = ${(bz.eta*100).toFixed(1)} %  ` +
+            `<span style="color:${tagColor}">${tag}</span>  ` +
+            `(η<sub>MAD</sub>(a) = ${(bz.etaMax*100).toFixed(1)} %)`;
+    }, 500);
     bindRange('s-cor-r', 'v-cor-r', (v) => `${v.toFixed(1)} M`, (v) => app.setCoronaRadius(v));
     bindRange('s-cor-i', 'v-cor-i', (v) => v.toFixed(3), (v) => app.setCoronaIntensity(v));
+    bindRange('s-cor-y', 'v-cor-y',
+        (v) => {
+            const G = 0.5 + Math.sqrt(2.25 + 4 / (3 * Math.max(v, 0.05)));
+            const tag = G < 1.9 ? 'hard (jet-dominated)' :
+                        G < 2.2 ? 'hard (luminous AGN)' :
+                        G < 2.6 ? 'typical AGN' :
+                        G < 3.2 ? 'soft (low-y RIAF)' :
+                                  'very soft';
+            return `y = ${v.toFixed(2)} &nbsp; Γ = ${G.toFixed(2)} (${tag})`;
+        },
+        (v) => app.setCoronaY(v));
     bindRange('s-wind-i', 'v-wind-i', (v) => v.toFixed(3), (v) => app.setWindIntensity(v));
     bindRange('s-fe-i', 'v-fe-i', (v) => v.toFixed(2), (v) => app.setFeIntensity(v));
     bindRange('s-mdot', 'v-mdot',
@@ -981,6 +1155,29 @@ select {
             else label = 'super-Eddington';
             return `${v.toFixed(3)}  (${label})`;
         }, (v) => app.setMdotRel(v));
+
+    // ── Sub-rings + sky (Tier 1B) ──────────────────────────────────
+    $('showSubrings').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showSubrings) app.toggleSubrings();
+    });
+    bindRange('s-subring', 'v-subring',
+        (v) => `${v.toFixed(2)}×`, (v) => app.setSubringStrength(v));
+    bindRange('s-sky', 'v-sky',
+        (v) => `${v.toFixed(2)}×`, (v) => app.setSkyStrength(v));
+
+    // ── Cinematic (Tier 1A) ────────────────────────────────────────
+    $('bloomOn').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.bloomEnabled) app.toggleBloom();
+    });
+    bindRange('s-exposure', 'v-exposure',
+        (v) => `${v >= 0 ? '+' : ''}${v.toFixed(2)} EV  (×${Math.pow(2, v).toFixed(2)})`,
+        (v) => app.setExposureStops(v));
+    bindRange('s-bloom-th', 'v-bloom-th',
+        (v) => v.toFixed(2), (v) => app.setBloomThreshold(v));
+    bindRange('s-bloom-knee', 'v-bloom-knee',
+        (v) => v.toFixed(2), (v) => app.setBloomKnee(v));
+    bindRange('s-bloom-st', 'v-bloom-st',
+        (v) => `${v.toFixed(2)}×`, (v) => app.setBloomStrength(v));
 
     // ── Performance ────────────────────────────────────────────────
     $('autoLOD').addEventListener('change', (e) => {
@@ -1061,6 +1258,65 @@ select {
         });
     });
 
+    // ── Share & capture (Tier 1C) ──────────────────────────────────
+    const toast = $('toast');
+    function showToast(msg, ms = 2200) {
+        toast.textContent = msg;
+        toast.classList.add('show');
+        clearTimeout(showToast._t);
+        showToast._t = setTimeout(() => toast.classList.remove('show'), ms);
+    }
+    $('btnShare').addEventListener('click', async () => {
+        const r = await copyShareLink(app.state);
+        showToast(r.ok ? 'Share link copied to clipboard' : 'Could not copy — URL printed to console');
+        if (!r.ok) console.log('share URL:', r.url);
+    });
+    $('btnScreenshot').addEventListener('click', () => {
+        // Force a fresh render before capturing so the PNG includes any
+        // pending state changes that hadn't redrawn yet.
+        app.forceRender();
+        // Wait one frame so the GPU has actually composited.
+        requestAnimationFrame(() => {
+            downloadScreenshot(canvas, 'ton618');
+            showToast('Screenshot downloaded');
+        });
+    });
+    const recorder = createRecorder(canvas, { fps: 30 });
+    const recBtn = $('btnRecord');
+    let recTimer = null;
+    recBtn.addEventListener('click', () => {
+        if (recorder.isRecording()) {
+            recorder.stop();
+            clearInterval(recTimer); recTimer = null;
+            recBtn.innerHTML = '● Start recording';
+            showToast(`Stopped — saving ${recorder.format()}…`);
+        } else {
+            try {
+                recorder.start();
+                recBtn.innerHTML = '<span class="rec-dot"></span> 0.0 s · stop';
+                recTimer = setInterval(() => {
+                    recBtn.innerHTML = `<span class="rec-dot"></span> ${recorder.elapsedSec().toFixed(1)} s · stop`;
+                }, 200);
+                showToast(`Recording ${recorder.format()}`);
+            } catch (e) {
+                showToast(`Record unsupported: ${e.message ?? e}`);
+            }
+        }
+    });
+    $('btnEmbed').addEventListener('click', async () => {
+        const url = new URL(window.location.href);
+        url.hash = encodeState(app.state);
+        url.searchParams.set('embed', '1');
+        const s = url.toString();
+        try {
+            await navigator.clipboard.writeText(s);
+            showToast('Embed link copied (use as iframe src)');
+        } catch (e) {
+            console.log('embed URL:', s);
+            showToast('Embed URL printed to console');
+        }
+    });
+
     $('btnValidate').addEventListener('click', () => {
         const v = $('validation');
         v.style.display = 'block';
@@ -1072,20 +1328,35 @@ select {
                 return;
             }
             const aTag = result.kerr_regime
-                ? `Kerr rim (a = ${result.spin.toFixed(3)}) — column extent only`
-                : 'Schwarzschild';
-            const pass = Math.abs(result.error_pct) < 1.0;
-            v.textContent = [
-                `PHOTON RING / SHADOW MEASUREMENT  (${aTag})`,
-                `  measured b  = ${result.b_measured.toFixed(4)} M`,
-                `  schw b_crit = ${result.b_expected.toFixed(4)} M`,
-                `  measured    = ${result.ring_rs.toFixed(4)} r_s`,
-                `  schw expect = ${result.ring_rs_expected.toFixed(4)} r_s`,
-                `  delta       = ${result.error_pct.toFixed(3)} %`,
-                result.kerr_regime
-                    ? `  status      = INFO (Kerr — analytic rim is asymmetric; see Phase 1.5)`
-                    : `  status      = ${pass ? 'PASS (< 1%)' : 'ATTN (> 1%)'}`,
-            ].join('\n');
+                ? `Kerr a = ${result.spin.toFixed(3)}`
+                : 'Schwarzschild a = 0';
+            const pass_v = Math.abs(result.error_pct) < 1.0;
+            const lines = [
+                `─── A. VERTICAL EXTENT (col) — Schwarzschild reference ───`,
+                `  measured b      = ${result.b_measured.toFixed(4)} M`,
+                `  schw b_crit     = ${result.b_expected.toFixed(4)} M`,
+                `  measured        = ${result.ring_rs.toFixed(4)} r_s`,
+                `  Δ vs Schw       = ${result.error_pct.toFixed(3)} %`,
+                `  status          = ${result.kerr_regime
+                    ? 'INFO (vertical extent is Kerr-shape-modified; see B)'
+                    : (pass_v ? 'PASS (< 1%)' : 'ATTN (> 1%)')}`,
+            ];
+            if (result.kerr_rim) {
+                const k = result.kerr_rim;
+                const pass_pro    = Math.abs(k.b_pro_err_pct)   < 2.0;
+                const pass_retro  = Math.abs(k.b_retro_err_pct) < 2.0;
+                const pass_shift  = Math.abs(k.shift_err_pct)   < 5.0;
+                const all_pass    = pass_pro && pass_retro && pass_shift;
+                lines.push(
+                    `─── B. KERR RIM (row) — Bardeen 1973 contour ────────────`,
+                    `  prograde   b_+  = ${k.b_pro_meas.toFixed(4)} M  (ref ${k.b_pro_ref.toFixed(4)})  Δ ${k.b_pro_err_pct.toFixed(2)}%`,
+                    `  retrograde b_-  = ${k.b_retro_meas.toFixed(4)} M  (ref ${k.b_retro_ref.toFixed(4)})  Δ ${k.b_retro_err_pct.toFixed(2)}%`,
+                    `  Δb / 2  shift   = ${k.shift_meas.toFixed(4)} M  (ref ${k.shift_ref.toFixed(4)})  Δ ${k.shift_err_pct.toFixed(2)}%`,
+                    `  status          = ${all_pass ? 'PASS (Δ < 2 % rims, < 5 % shift)' : 'ATTN — see deltas above'}`,
+                );
+            }
+            lines.unshift(`PHOTON RING / SHADOW MEASUREMENT  (${aTag})`);
+            v.textContent = lines.join('\n');
         }, 50);
     });
 </script>

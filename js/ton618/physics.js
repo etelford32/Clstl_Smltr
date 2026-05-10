@@ -350,6 +350,130 @@ export function hawkingTemperatureK() {
 }
 
 // ---------------------------------------------------------------------------
+// Tier 2A — Accretion-flow regime classification (ṁ-driven).
+// ---------------------------------------------------------------------------
+// Three regimes share the disk renderer; ṁ_rel ≡ Ṁ / Ṁ_Edd selects between
+// them with smooth sigmoidal transitions:
+//
+//   ṁ < 0.01      RIAF / ADAF  (Narayan-Yi 1994). Geometrically thick
+//                 (H/r ≈ 0.5), optically thin, ion-electron-decoupled,
+//                 hot. Renders as a faint thick torus with bluish
+//                 Compton-broadened color rather than a pure blackbody.
+//
+//   0.01 ≤ ṁ ≤ 0.3  Thin disk (Shakura-Sunyaev 1973 / Novikov-Thorne 1973).
+//                 H/r ≈ 0.05, optically thick blackbody. T(r) = the
+//                 standard Shakura-Sunyaev profile. Default Phase 0/1
+//                 regime.
+//
+//   ṁ > 0.3       Slim disk (Abramowicz et al. 1988). Inner edge puffs
+//                 toward H/r → 1; advection of energy inward "traps"
+//                 photons and caps T_eff so the emergent luminosity
+//                 saturates at a few × L_Edd despite super-Eddington Ṁ.
+//
+// The function returns a single bundle that drives the shader's H(r)
+// profile, T-scaling, brightness multiplier, regime index (for color
+// branching in disk_emission), and a human-readable label for the HUD.
+const REGIME_RIAF = 0;
+const REGIME_THIN = 1;
+const REGIME_SLIM = 2;
+
+export function diskRegime(mdot_rel) {
+    const m = Math.max(1e-5, mdot_rel || 0);
+    let regimeIdx, hOverR, T_factor, brightness_factor, regime;
+    if (m < 0.01) {
+        // ── RIAF / ADAF ─────────────────────────────────────────────
+        regimeIdx = REGIME_RIAF;
+        // H/r grows toward 0.5 as cooling becomes inefficient. Soft
+        // saturation around ṁ ~ 1e-4 (deep ADAF) at H/r = 0.5.
+        hOverR = 0.50 - 0.10 * Math.tanh(Math.log10(m / 1e-4) * 0.6);
+        T_factor = 0.85;                            // dim and harder spectrum
+        brightness_factor = Math.max(0.05, m / 0.01);
+        regime = 'RIAF / ADAF (Narayan-Yi)';
+    } else if (m < 0.3) {
+        // ── Thin disk (standard Shakura-Sunyaev / Novikov-Thorne) ───
+        regimeIdx = REGIME_THIN;
+        // H/r mild growth with ṁ; ~0.05 at typical AGN, ~0.10 toward
+        // sub-Eddington upper edge. Smooth log-linear interp.
+        const t = Math.log10(m / 0.01) / Math.log10(30);
+        hOverR = 0.04 + 0.08 * t;
+        T_factor = 1.0;
+        brightness_factor = 1.0;
+        regime = 'thin disk (Shakura-Sunyaev / Novikov-Thorne)';
+    } else {
+        // ── Slim disk (Abramowicz, super-Eddington) ─────────────────
+        regimeIdx = REGIME_SLIM;
+        // Geometric puff at inner edge; H/r → 1 as ṁ → ∞.
+        hOverR = 0.18 + 0.55 * Math.tanh(Math.log10(m / 0.3));
+        // Photon-trapping factor: the deeper into super-Eddington we go,
+        // the more energy gets advected onto the BH instead of radiated.
+        // L_disk saturates at a few × L_Edd; T_eff drops correspondingly.
+        T_factor = 1.0 / Math.pow(1.0 + (m - 0.3) / 1.0, 0.25);
+        brightness_factor = Math.min(3.5, 1.0 + 0.6 * Math.log(m / 0.3));
+        regime = 'slim disk (Abramowicz, advection-dominated)';
+    }
+    return {
+        regimeIdx,
+        hOverR,
+        T_factor,
+        brightness_factor,
+        regime,
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Tier 2B — Blandford-Znajek jet power + MAD state.
+// ---------------------------------------------------------------------------
+// The 1977 Blandford-Znajek mechanism extracts rotational energy from a
+// spinning BH through magnetic field lines threading the horizon. Power
+// scales as
+//     P_BZ ∝ Φ_H² Ω_H² ∝ Φ_H² · a²/(2r₊)²
+// where Φ_H is the magnetic flux on the horizon and Ω_H = a/(2 M r₊) is
+// the horizon angular velocity. As accretion piles up flux on the
+// horizon, the disk eventually transitions into a "magnetically
+// arrested" (MAD) state in which Φ_H saturates at Φ_MAD ≈ 50 √(Ṁ M).
+//
+// Tchekhovskoy, Narayan, McKinney 2011 measured the dimensionless
+// efficiency η = L_jet / Ṁc² in MAD GRMHD simulations:
+//     η_MAD(a) ≈ 1.3 a² + 0.6 a⁴
+// which can exceed 1 — meaning more energy comes out as jet than was
+// fed in as accretion (the difference is mined from the BH's rotational
+// kinetic energy). Below MAD the disk is "SANE" (Standard And Normal
+// Evolution) and η scales as ~ (Φ/Φ_MAD)² η_MAD.
+//
+// `magnetization` is the user's slider: φ = Φ / Φ_MAD ∈ [0, 1.5].
+//   φ < 1     SANE regime, jet building up.
+//   φ = 1     MAD threshold.
+//   φ > 1     "super-MAD" with mild jet over-saturation.
+
+export function bzEfficiency(spin, magnetization) {
+    const a   = Math.max(0, Math.min(0.999, spin || 0));
+    const phi = Math.max(0, magnetization || 0);
+    const eta_MAD = 1.3 * a * a + 0.6 * Math.pow(a, 4);
+    const isMAD = phi >= 1.0;
+    let eta;
+    if (isMAD) {
+        // Plateau at η_MAD with mild over-saturation when φ > 1 ("super-MAD").
+        const overshoot = Math.min(0.4, (phi - 1.0) * 0.5);
+        eta = eta_MAD * (1.0 + overshoot);
+    } else {
+        // SANE: efficiency rises like φ² as flux accumulates toward MAD.
+        eta = phi * phi * eta_MAD;
+    }
+    return {
+        a,
+        phi,
+        eta,                                // total jet η = L_jet / Ṁc²
+        eta_MAD,                            // saturation value at given a
+        isMAD,
+        omega_H: a / (2.0 * (1.0 + Math.sqrt(Math.max(1 - a * a, 0)))),
+        // Disk dimming when MAD: the magnetosphere extracts energy that
+        // would otherwise heat the inner accretion flow, so the disk
+        // visibly fades. McKinney+ 2012, Tchekhovskoy+ 2014.
+        disk_mad_dim: isMAD ? (0.55 + 0.10 / Math.max(phi, 1.0)) : 1.0,
+    };
+}
+
+// ---------------------------------------------------------------------------
 // Phase 2.1 — Lyman-α blob diagnostics.
 // ---------------------------------------------------------------------------
 // Compute observable quantities from the user's LAB parameters so the HUD
