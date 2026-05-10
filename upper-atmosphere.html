@@ -702,6 +702,67 @@ input[type=range]::-moz-range-thumb {
 .ua-fm-temperature { color:#ffaa20; }
 .ua-fm-radiation   { color:#ff4dff; }
 
+/* ─── Drag-forecast panel ────────────────────────────────── */
+.ua-drag-toggle-row {
+    display:flex; align-items:center; gap:8px;
+    padding:6px 10px;
+    background:rgba(10,6,28,.55);
+    border:1px solid rgba(0,200,200,.18);
+    border-radius:8px;
+    cursor:pointer;
+    user-select:none;
+    color:#cde;
+    font-size:.78rem;
+    transition:background .15s, border-color .15s;
+    margin-bottom:8px;
+}
+.ua-drag-toggle-row:hover { border-color:rgba(0,200,200,.4); color:#fff; }
+.ua-drag-toggle-row input[type=checkbox] { accent-color:#0cc; }
+#ua-drag-legend {
+    display:grid;
+    grid-template-columns: 1fr auto auto;
+    gap:4px 10px;
+    align-items:center;
+    font-size:.7rem;
+    color:#bcd;
+    margin-top:6px;
+}
+#ua-drag-legend .ua-drag-row-name { color:#dde; }
+#ua-drag-legend .ua-drag-row-q    { color:#9ab; font-variant-numeric:tabular-nums; }
+#ua-drag-legend .ua-drag-row-delta {
+    font-weight:600; font-variant-numeric:tabular-nums;
+    min-width:62px; text-align:right;
+}
+.ua-drag-up   { color:#ff5060; }
+.ua-drag-down { color:#40e090; }
+.ua-drag-flat { color:#aab; }
+.ua-drag-row-muted { opacity:.45; text-decoration:line-through; }
+.ua-drag-row-delta.ua-drag-row-muted { text-decoration:none; }
+.ua-drag-muted-tag {
+    display:inline-block;
+    margin-left:5px; padding:0 5px;
+    font-size:.55rem; letter-spacing:.06em; text-transform:uppercase;
+    color:#9ab; background:rgba(150,170,200,.12);
+    border:1px solid rgba(150,170,200,.20);
+    border-radius:4px;
+    text-decoration:none;
+}
+.ua-drag-swatches {
+    display:flex; gap:6px; margin-top:8px;
+    font-size:.65rem; color:#9ab;
+    align-items:center; flex-wrap:wrap;
+}
+.ua-drag-sw {
+    display:inline-flex; align-items:center; gap:4px;
+}
+.ua-drag-sw .ua-drag-dot {
+    width:10px; height:10px; border-radius:50%;
+    box-shadow:0 0 6px currentColor;
+}
+.ua-drag-sw-up   .ua-drag-dot { background:#ff5060; color:#ff5060; }
+.ua-drag-sw-flat .ua-drag-dot { background:#dde;    color:#dde; }
+.ua-drag-sw-down .ua-drag-dot { background:#40e090; color:#40e090; }
+
 /* ─── Side-aside tabs (Controls / Analysis) ────────────── */
 #ua-aside-tabs {
     display:flex; gap:4px;
@@ -1135,6 +1196,27 @@ input[type=range]::-moz-range-thumb {
                 </label>
             </div>
         </div>
+
+        <div class="ua-panel" style="margin-bottom:14px;">
+            <h2>Drag forecast <span style="font-size:.6rem;color:#0cc;letter-spacing:.08em;margin-left:6px">NOWCAST</span></h2>
+            <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:8px">
+                Sun-driven flow lines across each thermospheric/exospheric
+                shell. Tracer colour shows <em>change</em> in atmospheric
+                density — operator-relevant signal. Storm onset inflates
+                drag (red); post-storm recovery cools and contracts (green).
+                Population scales with each layer's particle budget.
+            </p>
+            <label class="ua-drag-toggle-row" for="ua-drag-toggle">
+                <input type="checkbox" id="ua-drag-toggle">
+                <span>Show drag forecast flow</span>
+            </label>
+            <div class="ua-drag-swatches">
+                <span class="ua-drag-sw ua-drag-sw-up">  <span class="ua-drag-dot"></span>drag rising</span>
+                <span class="ua-drag-sw ua-drag-sw-flat"><span class="ua-drag-dot"></span>steady</span>
+                <span class="ua-drag-sw ua-drag-sw-down"><span class="ua-drag-dot"></span>drag falling</span>
+            </div>
+            <div id="ua-drag-legend"></div>
+        </div>
         </div><!-- /#ua-pane-controls -->
 
         <div id="ua-pane-analysis" class="ua-tab-pane" role="tabpanel"
@@ -1528,6 +1610,9 @@ input[type=range]::-moz-range-thumb {
             camKn:          document.getElementById('ua-cam-Kn'),
             camMode:        document.getElementById('ua-cam-mode'),
             camHint:        document.getElementById('ua-cam-hint'),
+            // Drag forecast (Phase 1: nowcast, sun-driven flow)
+            dragToggle:     document.getElementById('ua-drag-toggle'),
+            dragLegend:     document.getElementById('ua-drag-legend'),
         },
         // Tries GET {PARKER_DSMC_API}/v1/atmosphere/profile when the
         // host window declares PARKER_DSMC_API; silently falls back to
