@@ -36,7 +36,9 @@ import {
     setDensityModel, getDensityModel,
     REENTRY_KM, DECAY_SPIKE_KM_DAY, DRAG_HIGH_PA, DRAG_HIGH_HOURS,
 } from './upper-atmosphere-fleet-analyzer.js';
-import { isMsisReady } from './nrlmsise00-bridge.js';
+import { isMsisReady, f107AProvenance } from './nrlmsise00-bridge.js';
+import { isLoaded as isF107HistoryLoaded, ensureLoaded as ensureF107History, onUpdate as onF107Update }
+    from './f107-history.js';
 
 // Debounce window for full-fleet re-analysis on incoming ticks. Compute
 // is cheap (~50 µs/asset) but we don't want to thrash mid-slider-drag.
@@ -110,6 +112,7 @@ export class FleetPanel {
             this._dragTickHandler = null;
         }
         this._unsubscribeFleet?.();
+        this._unsubscribeF107?.();
         clearTimeout(this._recomputeTimer);
         this._recomputeTimer = null;
         this._destroyed = true;
@@ -299,9 +302,22 @@ export class FleetPanel {
             });
         }
         this._refreshModelState();
-        // The MSIS WASM may be loading — re-check shortly so the badge
-        // shows the right state without forcing a full poll loop.
+        // The MSIS WASM and the F10.7-history fetch are both async at
+        // boot — re-check shortly so the badge shows the right state
+        // without forcing a full poll loop.
         setTimeout(() => this._refreshModelState(), 1500);
+        // Keep the badge in sync with the F10.7 series: when /api/noaa/
+        // f107-history finally lands (or refreshes), refresh the chip
+        // AND invalidate the analyzer cache so the next paint computes
+        // against the real centred-81-day average instead of the
+        // ring-buffer fallback that was used while the fetch was
+        // in flight.
+        ensureF107History().catch(() => {});
+        this._unsubscribeF107 = onF107Update(() => {
+            this.analyzer.invalidate();
+            this._refreshModelState();
+            this._scheduleRecompute(0);
+        });
 
         // Card-host event delegation: remove buttons + asset clicks.
         this._cardsHost.addEventListener('click', (e) => {
@@ -366,11 +382,38 @@ export class FleetPanel {
         if (!this._modelStateEl) return;
         const sel = getDensityModel();
         if (sel === 'nrlmsise00') {
-            this._modelStateEl.textContent = isMsisReady() ? '✓ live' : 'loading…';
-            this._modelStateEl.dataset.kind = isMsisReady() ? 'ok' : 'pending';
+            const msisReady = isMsisReady();
+            // Append f107A provenance once history is loaded — it's the
+            // operator's clue that the centred-81-day input is real SWPC
+            // and not the ring-buffer fallback. Hover gives the exact
+            // sample counts that filled the window.
+            let label  = msisReady ? '✓ live' : 'loading…';
+            let kind   = msisReady ? 'ok' : 'pending';
+            let title  = '';
+            if (msisReady && isF107HistoryLoaded()) {
+                const p = f107AProvenance([]);
+                if (p?.kind === 'centred') {
+                    label = `✓ live · f107A centred (${p.observedSamples}o+${p.predictedSamples}p)`;
+                    title = 'Centred 81-day F10.7 from real SWPC observed + 45-day forecast';
+                } else if (p?.kind === 'trailing') {
+                    label = `✓ live · f107A trailing (${p.observedSamples}o)`;
+                    title = 'Trailing 81-day F10.7 — SWPC predicted feed unavailable, '
+                          + 'biased on fast solar climbs';
+                } else if (p?.kind === 'out-of-range') {
+                    label = '✓ live · f107A out-of-range';
+                    title = 'Requested date is outside the cached F10.7 window';
+                }
+            } else if (msisReady && !isF107HistoryLoaded()) {
+                label = '✓ live · f107A ring-buffer';
+                title = 'F10.7 history not loaded yet — using in-page proxy';
+            }
+            this._modelStateEl.textContent = label;
+            this._modelStateEl.dataset.kind = kind;
+            this._modelStateEl.title = title;
         } else {
             this._modelStateEl.textContent = 'surrogate';
             this._modelStateEl.dataset.kind = 'info';
+            this._modelStateEl.title = 'JS density surrogate (Jacchia-style)';
         }
     }
 

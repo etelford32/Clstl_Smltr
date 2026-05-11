@@ -27,6 +27,19 @@ import {
     default as initWasm,
 } from './sgp4-wasm/sgp4_wasm.js';
 import { SPECIES, SPECIES_MASS_KG } from './upper-atmosphere-engine.js';
+import {
+    ensureLoaded as ensureF107HistoryLoaded,
+    getF107A as getRealF107A,
+    getF107AWithProvenance,
+    isLoaded as isF107HistoryLoaded,
+} from './f107-history.js';
+
+// Kick the F10.7 history fetch at module-load. The endpoint is edge-
+// cached at 1 hour, so this is one cheap warm-up roundtrip per page;
+// every subsequent `computeF107A()` call is sync against the in-memory
+// rows. Failure is swallowed — callers fall back to the ring-buffer
+// proxy (existing pre-Phase-7 behaviour) automatically.
+ensureF107HistoryLoaded().catch(() => {});
 
 // ── WASM init (shared with TrajectoryAnalyzer) ──────────────────────────────
 
@@ -135,21 +148,65 @@ export function buildApHistory(history, currentAp, nowMs = Date.now()) {
 }
 
 /**
- * Compute the 81-day centred F10.7 average from a realtime history.
- * Falls back to the instantaneous flux when the history is shorter than
- * a sliding window (typically true; the realtime driver only buffers
- * a few hours of high-cadence samples). For correctness over weeks
- * you'd plumb in SWPC's daily F10.7 series — but for the operator
- * forecasts we run on a < 72 h horizon, the daily flux is a fine proxy.
+ * Compute the 81-day centred F10.7 average (NRLMSISE-00's `f107A`).
+ *
+ * Priority order:
+ *   1. Real SWPC daily series via `/api/noaa/f107-history` — centred
+ *      81-day window when the predicted feed is healthy, trailing
+ *      otherwise. Loaded lazily once per page (see ensureF107HistoryLoaded
+ *      kick-off at module-load above).
+ *   2. Mean of the realtime ring buffer's f107 samples — Phase 3/4
+ *      fallback; correct to ~0.5 SFU within ±24 h of "now" because
+ *      F10.7 is strongly autocorrelated (φ ≈ 0.94 typical).
+ *   3. Scalar fallback (instantaneous flux) — operator default 150.
+ *
+ * @param {Array} history          realtime ring buffer
+ * @param {number} currentF107     last-known instantaneous flux
+ * @param {Date}   [forDate]       date at which to evaluate (default: now)
+ * @returns {number}               F10.7 average for the requested date
  */
-export function computeF107A(history, currentF107) {
-    const fallback = Number.isFinite(currentF107) ? currentF107 : 150;
-    if (!Array.isArray(history) || history.length === 0) return fallback;
-    let sum = 0, n = 0;
-    for (const h of history) {
-        if (Number.isFinite(h?.f107)) { sum += h.f107; n++; }
+export function computeF107A(history, currentF107, forDate) {
+    const dateMs = forDate instanceof Date ? forDate.getTime() : Date.now();
+
+    // 1. Real SWPC daily series (preferred).
+    if (isF107HistoryLoaded()) {
+        const real = getRealF107A(dateMs);
+        if (Number.isFinite(real)) return real;
     }
-    return n > 0 ? sum / n : fallback;
+
+    // 2. Ring-buffer mean (the original Phase 4 implementation).
+    if (Array.isArray(history) && history.length > 0) {
+        let sum = 0, n = 0;
+        for (const h of history) {
+            if (Number.isFinite(h?.f107)) { sum += h.f107; n++; }
+        }
+        if (n > 0) return sum / n;
+    }
+
+    // 3. Last resort.
+    return Number.isFinite(currentF107) ? currentF107 : 150;
+}
+
+/**
+ * Provenance breakdown for the value `computeF107A()` would return at
+ * the given date. Lets UI surfaces (the model-state badge, the per-card
+ * skill chip) tell the operator which f107A source was used —
+ * 'centred' (real SWPC, with predicted samples in the window) is the
+ * gold standard, 'trailing' (real SWPC, observed-only) is biased on
+ * fast solar climbs, 'ring-buffer' is the in-page proxy.
+ */
+export function f107AProvenance(history, forDate) {
+    const dateMs = forDate instanceof Date ? forDate.getTime() : Date.now();
+    if (isF107HistoryLoaded()) {
+        const p = getF107AWithProvenance(dateMs);
+        if (p && Number.isFinite(p.value)) return p;
+    }
+    return {
+        value: null,
+        kind:  Array.isArray(history) && history.length > 0
+            ? 'ring-buffer' : 'fallback',
+        windowDays: 81,
+    };
 }
 
 // ── Public API: profile sampling ────────────────────────────────────────────
@@ -191,7 +248,10 @@ export function sampleProfileMSIS({
     if (!isMsisReady()) return null;
 
     const f107   = f107Sfu;
-    const f107A  = Number.isFinite(f107a) ? f107a : computeF107A(history, f107);
+    const f107A  = Number.isFinite(f107a) ? f107a : computeF107A(history, f107, nowDate);
+    const f107AProv = Number.isFinite(f107a)
+        ? { value: f107a, kind: 'caller-supplied', windowDays: 81 }
+        : f107AProvenance(history, nowDate);
     const apArr  = apHistory instanceof Float64Array && apHistory.length === 7
         ? apHistory
         : buildApHistory(history, ap, nowDate.getTime());
@@ -273,6 +333,11 @@ export function sampleProfileMSIS({
             model:   'NRLMSISE-00',
             source:  'rust-sgp4 + Brodowski 2002 C port',
             issuedAt: nowDate.toISOString(),
+            // f107a provenance — 'centred' (real SWPC w/ predicted samples
+            // in the window, ideal), 'trailing' (real SWPC, observed-only,
+            // biased on fast climbs), 'ring-buffer' (in-page proxy), or
+            // 'caller-supplied' / 'fallback'.
+            f107a: f107AProv,
         },
     };
 }
