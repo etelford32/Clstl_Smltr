@@ -620,6 +620,34 @@ input[type=range]::-moz-range-thumb {
 .ua-fleet-skill--high { color:#40e090; background:rgba(64,224,144,.12); border:1px solid rgba(64,224,144,.40); }
 .ua-fleet-skill--med  { color:#ffaa20; background:rgba(255,170,32,.12); border:1px solid rgba(255,170,32,.40); }
 .ua-fleet-skill--low  { color:#ff8090; background:rgba(255,80,96,.12);  border:1px solid rgba(255,80,96,.40); }
+.ua-fleet-bc-editor summary {
+    font-size:.6rem; color:#9ab;
+    cursor:pointer; user-select:none; padding:3px 0;
+    font-variant-numeric:tabular-nums;
+}
+.ua-fleet-bc-editor summary:hover { color:#cde; }
+.ua-fleet-bc-editor[open] summary { color:#0ff; }
+.ua-fleet-bc-row {
+    display:flex; gap:10px; align-items:center;
+    padding:4px 0;
+    font-size:.65rem; color:#9ab;
+}
+.ua-fleet-bc-row label {
+    display:flex; align-items:center; gap:5px;
+    flex:1; min-width:0;
+}
+.ua-fleet-bc-num {
+    width:80px; padding:2px 4px;
+    font-size:.65rem;
+}
+.ua-fleet-bc-sigma {
+    flex:1; min-width:0;
+    accent-color:#ffaa20;
+}
+.ua-fleet-bc-sigma-val {
+    font-size:.62rem; color:#ffaa20; font-weight:700;
+    min-width:30px; text-align:right; font-variant-numeric:tabular-nums;
+}
 
 /* ─── Satellite drag analysis ──────────────────────────── */
 .ua-tle-pill {

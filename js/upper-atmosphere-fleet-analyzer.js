@@ -132,6 +132,10 @@ function _stateKey(asset, f107, ap) {
         Math.round(f107 * 10) / 10,     // 0.1 SFU resolution
         Math.round(ap),
         Math.round(asset.bcM2PerKg * 1e6) / 1e6,
+        // bcSigmaRel changes the envelope band — must be in the cache
+        // key so the panel sees the new band the moment the operator
+        // moves the σ slider.
+        Math.round((asset.bcSigmaRel ?? 0.15) * 1000) / 1000,
     ].join('|');
 }
 
@@ -248,19 +252,36 @@ export class FleetAnalyzer {
         // SGP4 trajectory rides with the nowcast result; the other three
         // calls reuse its `sgp4` field downstream so we don't pay for it
         // four times.
+        //
+        // Envelope edges combine TWO uncertainty sources into one band:
+        //   1. Atmospheric forcing σ — the (f107, ap) AR(1) projection
+        //      σ from Phase 6.
+        //   2. Ballistic coefficient σ — Phase 8. Default 15% relative,
+        //      tunable per asset via fleet.setBcSigma().
+        // The two effects multiply in the drag rate (da/dt ∝ BC·ρ·v·a),
+        // so at the adverse edge we stack BOTH at +σ (forcing high AND
+        // BC high → max drag → fastest decay); at the benign edge both
+        // at −σ. This treats them as worst-case-correlated; the
+        // independent-quadrature combination would be ~30% tighter and
+        // is what the planned Monte Carlo follow-up will produce.
+        // For an operator "what could go wrong" band, the stacked
+        // envelope is the right pessimism.
+        const bcSig  = Number.isFinite(asset.bcSigmaRel) ? Math.max(0, Math.min(1, asset.bcSigmaRel)) : 0.15;
+        const bcLow  = asset.bcM2PerKg * Math.max(0, 1 - bcSig);
+        const bcHigh = asset.bcM2PerKg * (1 + bcSig);
         const baseOpts = {
             line1: asset.line1, line2: asset.line2,
             horizonHr: this._opts.horizonHr,
             sampleMin: this._opts.sampleMin,
             dragSubSec: this._opts.dragSubSec,
             dragOutMin: this._opts.dragOutMin,
-            bcM2PerKg:  asset.bcM2PerKg,
         };
 
         let nowRes, fwdRes, benignRes, adverseRes;
         try {
             nowRes = await this._traj.analyze({
                 ...baseOpts, profileSamples: profileNow.samples,
+                bcM2PerKg: asset.bcM2PerKg,
             });
         } catch (err) {
             const result = {
@@ -275,16 +296,19 @@ export class FleetAnalyzer {
         // Forecast + envelope edges. Any individual failure collapses to
         // the nowcast curve so the band degrades to "zero spread" rather
         // than breaking the card.
-        try { fwdRes     = await this._traj.analyze({ ...baseOpts, profileSamples: profileForecast.samples }); }
+        try { fwdRes     = await this._traj.analyze({ ...baseOpts, bcM2PerKg: asset.bcM2PerKg, profileSamples: profileForecast.samples }); }
         catch { fwdRes = nowRes; }
-        try { benignRes  = await this._traj.analyze({ ...baseOpts, profileSamples: profileBenign.samples  }); }
+        // Benign edge: low forcing × low BC → least drag → slowest decay → highest alt.
+        try { benignRes  = await this._traj.analyze({ ...baseOpts, bcM2PerKg: bcLow,  profileSamples: profileBenign.samples  }); }
         catch { benignRes = fwdRes; }
-        try { adverseRes = await this._traj.analyze({ ...baseOpts, profileSamples: profileAdverse.samples }); }
+        // Adverse edge: high forcing × high BC → most drag → fastest decay → lowest alt.
+        try { adverseRes = await this._traj.analyze({ ...baseOpts, bcM2PerKg: bcHigh, profileSamples: profileAdverse.samples }); }
         catch { adverseRes = fwdRes; }
 
         const result = this._buildResult({
             asset, nowRes, fwdRes, benignRes, adverseRes,
             env, skill, horizonHr,
+            bcSigmaRel: bcSig, bcLow, bcHigh,
         });
         this._cachePut(key, result);
         return result;
@@ -312,7 +336,8 @@ export class FleetAnalyzer {
         }
     }
 
-    _buildResult({ asset, nowRes, fwdRes, benignRes, adverseRes, env, skill, horizonHr }) {
+    _buildResult({ asset, nowRes, fwdRes, benignRes, adverseRes, env, skill, horizonHr,
+                   bcSigmaRel, bcLow, bcHigh }) {
         // ── Live snapshot: first row of nowcast SGP4 buffer is "now". ─────
         const sgp4 = nowRes.sgp4?.data;
         const stride = nowRes.sgp4?.stride || 13;
@@ -409,6 +434,20 @@ export class FleetAnalyzer {
                 phiF107:   env.phiF107,
                 phiAp:     env.phiAp,
                 skill:     env.skill,
+                // BC σ stacked into the envelope. Surfaced so the
+                // skill chip can show the full uncertainty story
+                // and the per-asset editor can hit it directly.
+                bcSigmaRel:   Number.isFinite(bcSigmaRel) ? bcSigmaRel : null,
+                bcLow:        Number.isFinite(bcLow)  ? bcLow  : null,
+                bcHigh:       Number.isFinite(bcHigh) ? bcHigh : null,
+                // Worst-case-correlated joint relative σ (= forcing-σ
+                // fraction + BC-σ; ~30% pessimistic vs independent
+                // quadrature, see analyzer comment for rationale).
+                jointSigmaRel: (() => {
+                    const fRel = Number.isFinite(env.sigmaF107) && Number.isFinite(env.f107) && env.f107 > 0
+                        ? env.sigmaF107 / env.f107 : 0;
+                    return Math.min(1, fRel + (bcSigmaRel ?? 0));
+                })(),
             } : null,
         };
     }

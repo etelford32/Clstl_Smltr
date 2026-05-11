@@ -326,6 +326,34 @@ export class FleetPanel {
             const refreshBtn = e.target.closest?.('button[data-refresh-id]');
             if (refreshBtn) { this.fleet.refresh(refreshBtn.dataset.refreshId); return; }
         });
+        // BC + BC σ editors are inputs (number / range), not buttons —
+        // wire 'change' on the cards host so we don't bind per card.
+        this._cardsHost.addEventListener('change', (e) => {
+            const bcInput = e.target.closest?.('input[data-bc-id]');
+            if (bcInput) {
+                const id = bcInput.dataset.bcId;
+                const v  = parseFloat(bcInput.value);
+                if (this.fleet.setBc(id, v)) this.analyzer.invalidate(id);
+                return;
+            }
+            const sigInput = e.target.closest?.('input[data-bc-sigma-id]');
+            if (sigInput) {
+                const id = sigInput.dataset.bcSigmaId;
+                // UI value is a percentage (0..50). Convert to relative.
+                const v  = parseFloat(sigInput.value) / 100;
+                if (this.fleet.setBcSigma(id, v)) this.analyzer.invalidate(id);
+                return;
+            }
+        });
+        // Live-preview slider drags by updating the readout label without
+        // committing; `change` (on release) does the actual store write.
+        this._cardsHost.addEventListener('input', (e) => {
+            const sigInput = e.target.closest?.('input[data-bc-sigma-id]');
+            if (sigInput) {
+                const lbl = sigInput.parentElement?.querySelector('.ua-fleet-bc-sigma-val');
+                if (lbl) lbl.textContent = `${parseFloat(sigInput.value).toFixed(0)}%`;
+            }
+        });
     }
 
     async _uiAddNorad() {
@@ -488,6 +516,31 @@ export class FleetPanel {
         const noradTag = r.noradId
             ? `<span class="ua-fleet-norad">#${r.noradId}</span>` : '';
 
+        // Per-asset BC + BC σ editor. Collapsed by default — operators
+        // configure once per asset and then forget. The σ slider is
+        // capped at 50% because anything beyond that is "we don't know
+        // the asset" rather than a meaningful uncertainty band.
+        const bcSigPct = ((r.forecast?.bcSigmaRel ?? 0.15) * 100).toFixed(0);
+        const bcEditor = `
+            <details class="ua-fleet-bc-editor">
+                <summary>BC = ${r.bcM2PerKg.toFixed(4)} m²/kg · σ ${bcSigPct}%</summary>
+                <div class="ua-fleet-bc-row">
+                    <label>BC (m²/kg)
+                        <input type="number" min="0.001" max="0.5" step="0.001"
+                               value="${r.bcM2PerKg.toFixed(4)}"
+                               data-bc-id="${r.id}"
+                               class="ua-fleet-input ua-fleet-bc-num">
+                    </label>
+                    <label>σ
+                        <input type="range" min="0" max="50" step="1"
+                               value="${bcSigPct}"
+                               data-bc-sigma-id="${r.id}"
+                               class="ua-fleet-bc-sigma">
+                        <span class="ua-fleet-bc-sigma-val">${bcSigPct}%</span>
+                    </label>
+                </div>
+            </details>`;
+
         return `
             <div class="ua-fleet-card ${sevClass}" data-asset-id="${r.id}">
                 <div class="ua-fleet-card-head">
@@ -505,6 +558,7 @@ export class FleetPanel {
                     <div class="ua-fleet-stat-row ua-dim">${orbit}</div>
                 </div>
                 ${badges.length ? `<div class="ua-fleet-badges">${badges.join('')}</div>` : ''}
+                ${bcEditor}
                 <div class="ua-fleet-chart">${chart}</div>
                 <div class="ua-fleet-chart-key">
                     <span class="ua-fleet-key-now">— nowcast</span>
@@ -532,9 +586,20 @@ function _renderForecastChip(fc) {
                    : 'ua-fleet-skill--low';
     const sf = Number.isFinite(fc.sigmaF107) ? fc.sigmaF107.toFixed(0) : '—';
     const sa = Number.isFinite(fc.sigmaAp)   ? fc.sigmaAp.toFixed(0)   : '—';
-    return `<span class="ua-fleet-skill ${sklClass}"
-                  title="AR(1) forecast confidence at +${fc.horizonHr}h. σ_F10.7 = ${sf} SFU, σ_Ap = ${sa}.">
-        ${skillPct}% · ±${sf} SFU / ±${sa} Ap
+    const bcPct = Number.isFinite(fc.bcSigmaRel) ? (fc.bcSigmaRel * 100).toFixed(0) : null;
+    const jointPct = Number.isFinite(fc.jointSigmaRel)
+        ? (fc.jointSigmaRel * 100).toFixed(0) : null;
+    // Tooltip carries the full breakdown: AR(1) forecast σ on F10.7/Ap,
+    // ballistic-coefficient σ, and the joint operator-grade envelope σ
+    // (worst-case correlated stack — see analyzer for rationale).
+    const title = `AR(1) forecast confidence at +${fc.horizonHr}h.`
+                + ` σ_F10.7 = ${sf} SFU, σ_Ap = ${sa}`
+                + (bcPct !== null   ? `, σ_BC = ${bcPct}%`     : '')
+                + (jointPct !== null ? `\nJoint drag σ = ${jointPct}%` : '')
+                + ' (envelope width).';
+    const jointSuffix = jointPct !== null ? ` · drag ±${jointPct}%` : '';
+    return `<span class="ua-fleet-skill ${sklClass}" title="${title}">
+        ${skillPct}% · ±${sf} SFU / ±${sa} Ap${jointSuffix}
     </span>`;
 }
 

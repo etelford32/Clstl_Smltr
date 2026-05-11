@@ -48,6 +48,24 @@ export const MAX_ASSETS = 25;
 // it places a ~500 km LEO sat in the right decay-rate ballpark.
 const DEFAULT_BC = 0.020;
 
+// Default RELATIVE σ on BC. 0.15 (15%) is the published spread for non-
+// drag-stabilised LEO platforms with uncertain attitude — covers cubesat
+// tumbling, Starlink-class broadside/edge variation, and the typical
+// disagreement between solar-pressure-derived and SGP4-fit BC. Drag-
+// stable platforms (ISS, Hubble) have ~5% σ in practice and can be set
+// per-asset by the operator via fleet.setBcSigma(id, σ).
+//
+// Operator interpretation: BC × ρ together drives da/dt, so a 15% BC σ
+// adds the same magnitude of envelope spread as a 15% ρ scatter.
+const DEFAULT_BC_SIGMA_REL = 0.15;
+// Per-NORAD overrides for asset families with better-characterised BC.
+// Anchored to published flight data + GRACE / CHAMP attitude analysis.
+const BC_SIGMA_BY_NORAD = Object.freeze({
+    25544: 0.05,    // ISS — drag-stable truss + continuous re-boost telemetry
+    20580: 0.04,    // Hubble — drag-stable design, well-characterised cross-section
+    48274: 0.07,    // Tiangong — moderately drag-stable
+});
+
 // ── Persistence ──────────────────────────────────────────────────────────────
 
 function _load() {
@@ -65,13 +83,14 @@ function _save(assets) {
         // Persist the bare minimum needed to resurrect — name, TLE, BC.
         // Status / err are runtime-only (always pending on reload anyway).
         const slim = assets.slice(0, MAX_ASSETS).map(a => ({
-            id:        a.id,
-            noradId:   a.noradId ?? null,
-            name:      a.name ?? null,
-            line1:     a.line1 ?? null,
-            line2:     a.line2 ?? null,
-            bcM2PerKg: a.bcM2PerKg ?? DEFAULT_BC,
-            addedAt:   a.addedAt ?? Date.now(),
+            id:          a.id,
+            noradId:     a.noradId ?? null,
+            name:        a.name ?? null,
+            line1:       a.line1 ?? null,
+            line2:       a.line2 ?? null,
+            bcM2PerKg:   a.bcM2PerKg ?? DEFAULT_BC,
+            bcSigmaRel:  Number.isFinite(a.bcSigmaRel) ? a.bcSigmaRel : DEFAULT_BC_SIGMA_REL,
+            addedAt:     a.addedAt ?? Date.now(),
         }));
         localStorage.setItem(STORAGE_KEY, JSON.stringify(slim));
     } catch { /* private mode / quota — silently degrade */ }
@@ -209,15 +228,16 @@ export class UpperAtmosphereFleet {
         // the user explicitly asks for one.
         for (const a of _load()) {
             this._assets.push({
-                id:        a.id || _idForAsset(a),
-                noradId:   a.noradId ?? null,
-                name:      a.name || (a.noradId ? `#${a.noradId}` : 'unknown'),
-                line1:     a.line1 ?? null,
-                line2:     a.line2 ?? null,
-                bcM2PerKg: Number.isFinite(a.bcM2PerKg) ? a.bcM2PerKg : _defaultBcFor(a.noradId),
-                status:    (a.line1 && a.line2) ? 'ready' : 'pending',
-                err:       null,
-                addedAt:   a.addedAt ?? Date.now(),
+                id:          a.id || _idForAsset(a),
+                noradId:     a.noradId ?? null,
+                name:        a.name || (a.noradId ? `#${a.noradId}` : 'unknown'),
+                line1:       a.line1 ?? null,
+                line2:       a.line2 ?? null,
+                bcM2PerKg:   Number.isFinite(a.bcM2PerKg) ? a.bcM2PerKg : _defaultBcFor(a.noradId),
+                bcSigmaRel:  Number.isFinite(a.bcSigmaRel) ? a.bcSigmaRel : _defaultBcSigmaFor(a.noradId),
+                status:      (a.line1 && a.line2) ? 'ready' : 'pending',
+                err:         null,
+                addedAt:     a.addedAt ?? Date.now(),
             });
         }
         // Resolve any restored entries that were missing TLEs (rare).
@@ -254,7 +274,7 @@ export class UpperAtmosphereFleet {
      * row, and the entry flips to 'ready' (or 'error') once the TLE
      * fetch resolves. Returns { ok: bool, reason?, id }.
      */
-    async addNorad(noradIdRaw, { bcM2PerKg } = {}) {
+    async addNorad(noradIdRaw, { bcM2PerKg, bcSigmaRel } = {}) {
         const noradId = parseInt(noradIdRaw, 10);
         if (!Number.isInteger(noradId) || noradId <= 0)
             return { ok: false, reason: 'invalid-id' };
@@ -264,15 +284,16 @@ export class UpperAtmosphereFleet {
             return { ok: false, reason: 'fleet-full' };
 
         const asset = {
-            id:        `norad:${noradId}`,
+            id:          `norad:${noradId}`,
             noradId,
-            name:      `#${noradId}`,
-            line1:     null,
-            line2:     null,
-            bcM2PerKg: Number.isFinite(bcM2PerKg) ? bcM2PerKg : _defaultBcFor(noradId),
-            status:    'pending',
-            err:       null,
-            addedAt:   Date.now(),
+            name:        `#${noradId}`,
+            line1:       null,
+            line2:       null,
+            bcM2PerKg:   Number.isFinite(bcM2PerKg) ? bcM2PerKg : _defaultBcFor(noradId),
+            bcSigmaRel:  Number.isFinite(bcSigmaRel) ? bcSigmaRel : _defaultBcSigmaFor(noradId),
+            status:      'pending',
+            err:         null,
+            addedAt:     Date.now(),
         };
         this._assets.push(asset);
         _save(this._assets);
@@ -320,7 +341,7 @@ export class UpperAtmosphereFleet {
      * Returns { ok, added: number, skipped: number, reasons: object }.
      * Skipped reasons: 'fleet-full', 'already-added', 'unparsed'.
      */
-    addTleBlock(text, { bcM2PerKg } = {}) {
+    addTleBlock(text, { bcM2PerKg, bcSigmaRel } = {}) {
         const parsed = parseTleBlock(text);
         if (parsed.length === 0) return { ok: false, added: 0, skipped: 0, reasons: { unparsed: 1 } };
 
@@ -332,14 +353,15 @@ export class UpperAtmosphereFleet {
             if (this.has(id))  { reasons['already-added']++; skipped++; continue; }
             this._assets.push({
                 id,
-                noradId:   p.noradId ?? null,
-                name:      p.name,
-                line1:     p.line1,
-                line2:     p.line2,
-                bcM2PerKg: Number.isFinite(bcM2PerKg) ? bcM2PerKg : _defaultBcFor(p.noradId),
-                status:    'ready',
-                err:       null,
-                addedAt:   Date.now(),
+                noradId:     p.noradId ?? null,
+                name:        p.name,
+                line1:       p.line1,
+                line2:       p.line2,
+                bcM2PerKg:   Number.isFinite(bcM2PerKg) ? bcM2PerKg : _defaultBcFor(p.noradId),
+                bcSigmaRel:  Number.isFinite(bcSigmaRel) ? bcSigmaRel : _defaultBcSigmaFor(p.noradId),
+                status:      'ready',
+                err:         null,
+                addedAt:     Date.now(),
             });
             added++;
         }
@@ -368,14 +390,15 @@ export class UpperAtmosphereFleet {
             if (this.has(id))  { reasons['already-added']++; skipped++; continue; }
             this._assets.push({
                 id,
-                noradId:   t.noradId ?? null,
-                name:      t.name,
-                line1:     t.line1,
-                line2:     t.line2,
-                bcM2PerKg: _defaultBcFor(t.noradId),
-                status:    'ready',
-                err:       null,
-                addedAt:   Date.now(),
+                noradId:     t.noradId ?? null,
+                name:        t.name,
+                line1:       t.line1,
+                line2:       t.line2,
+                bcM2PerKg:   _defaultBcFor(t.noradId),
+                bcSigmaRel:  _defaultBcSigmaFor(t.noradId),
+                status:      'ready',
+                err:         null,
+                addedAt:     Date.now(),
             });
             added++;
         }
@@ -388,6 +411,21 @@ export class UpperAtmosphereFleet {
         const asset = this.findById(id);
         if (!asset || !Number.isFinite(bcM2PerKg) || bcM2PerKg <= 0) return false;
         asset.bcM2PerKg = bcM2PerKg;
+        _save(this._assets);
+        this._notify();
+        return true;
+    }
+
+    /**
+     * Override the per-asset RELATIVE BC σ (0..1). Default is 0.15
+     * (15%); operators with attitude telemetry may want a tighter
+     * value (e.g. 0.05 for a known drag-stable platform) or a wider
+     * one for a known tumbler.
+     */
+    setBcSigma(id, bcSigmaRel) {
+        const asset = this.findById(id);
+        if (!asset || !Number.isFinite(bcSigmaRel) || bcSigmaRel < 0 || bcSigmaRel > 1) return false;
+        asset.bcSigmaRel = bcSigmaRel;
         _save(this._assets);
         this._notify();
         return true;
@@ -426,4 +464,9 @@ export class UpperAtmosphereFleet {
 function _defaultBcFor(noradId) {
     if (noradId && DEFAULT_BC_BY_NORAD[noradId]) return DEFAULT_BC_BY_NORAD[noradId];
     return DEFAULT_BC;
+}
+
+function _defaultBcSigmaFor(noradId) {
+    if (noradId && BC_SIGMA_BY_NORAD[noradId] != null) return BC_SIGMA_BY_NORAD[noradId];
+    return DEFAULT_BC_SIGMA_REL;
 }
