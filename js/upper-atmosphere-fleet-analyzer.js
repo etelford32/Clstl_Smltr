@@ -69,6 +69,12 @@ import {
     TrajectoryAnalyzer, profileToRhoGrid,
     SGP4_COL, DRAG_COL,
 } from './upper-atmosphere-trajectory-analysis.js';
+import {
+    drawMcSamples, runMcDecaySweep,
+    percentileBands, reentryProbability, decaySpikeProbability,
+    medianTrajectoryFromMc,
+} from './upper-atmosphere-mc.js';
+import * as _wasmGlue from './sgp4-wasm/sgp4_wasm.js';
 import { sampleProfile } from './upper-atmosphere-engine.js';
 import { sampleProfileMSIS, isMsisReady, ensureMsisReady }
     from './nrlmsise00-bridge.js';
@@ -84,6 +90,21 @@ export function setDensityModel(name) {
     _densityModel = (name === 'msis-lite') ? 'msis-lite' : 'nrlmsise00';
 }
 export function getDensityModel() { return _densityModel; }
+
+// ── Monte Carlo config ──────────────────────────────────────────────────────
+//
+// N=64 hits the sweet spot: percentile bands stabilize visually around
+// N=50, and the 64-sample sweep adds ~3 ms per asset (mostly the RK4 inner
+// loop, see upper-atmosphere-mc.js). 25-asset fleet = ~75 ms per pass.
+// Operators with high-stakes assets can bump it via setMonteCarloN.
+let _mcN = 64;
+let _mcEnabled = true;
+export function setMonteCarloN(n) {
+    _mcN = Math.max(8, Math.min(512, n | 0));
+}
+export function getMonteCarloN()    { return _mcN; }
+export function setMonteCarloEnabled(v) { _mcEnabled = !!v; }
+export function isMonteCarloEnabled()   { return _mcEnabled; }
 // Kick the WASM init at module-load so first analyzer pass doesn't pay
 // the cold-start cost (caller already imports trajectory-analysis which
 // also kicks the same WASM).
@@ -305,10 +326,61 @@ export class FleetAnalyzer {
         try { adverseRes = await this._traj.analyze({ ...baseOpts, bcM2PerKg: bcHigh, profileSamples: profileAdverse.samples }); }
         catch { adverseRes = fwdRes; }
 
+        // ── Monte Carlo over (F10.7, Ap, BC) ──────────────────────────────
+        // Replaces the 3-point envelope with proper N-sample sampling over
+        // the joint distribution of the three dominant uncertainty sources.
+        // Reuses the FORECAST atmosphere as the nominal ρ profile, then
+        // scales it per-draw via drag_decay_rk4's rhoScale parameter — see
+        // upper-atmosphere-mc.js header for the MSIS sensitivity rationale.
+        // The 4-trajectory pass above remains as the operator reference
+        // (nowcast = current forcing, forecast = AR(1) point forecast,
+        // envelope edges = worst-case stack for fallback when MC isn't
+        // available).
+        let mc = null;
+        if (_mcEnabled && env && fwdRes?.drag?.a0_km && profileForecast?.samples?.length) {
+            try {
+                const wasm = _wasmGlue;   // wasm-bindgen module (already initialised)
+                const { alt: altGrid, rho: rhoGrid } = profileToRhoGrid(profileForecast.samples);
+                const samples = drawMcSamples({
+                    env,
+                    bcM2PerKg: asset.bcM2PerKg,
+                    bcSigmaRel: bcSig,
+                    n: _mcN,
+                });
+                const flats = runMcDecaySweep({
+                    wasm,
+                    altGrid, rhoGrid,
+                    a0Km:       fwdRes.drag.a0_km,
+                    bcM2PerKg:  asset.bcM2PerKg,
+                    horizonMin: this._opts.horizonHr * 60,
+                    dragSubSec: this._opts.dragSubSec,
+                    dragOutMin: this._opts.dragOutMin,
+                    samples,
+                });
+                const bands = percentileBands(flats, [5, 50, 95]);
+                mc = {
+                    n:            _mcN,
+                    n_used:       bands.n_used,
+                    pLow:         bands.pLow,
+                    pMed:         bands.pMed,
+                    pHigh:        bands.pHigh,
+                    median:       medianTrajectoryFromMc(flats),
+                    pReentry:     reentryProbability(flats, REENTRY_KM),
+                    pDecaySpike:  decaySpikeProbability(flats, DECAY_SPIKE_KM_DAY),
+                    // Percentile bounds in name for the legend.
+                    percentiles:  [5, 50, 95],
+                };
+            } catch (err) {
+                console.warn('[FleetAnalyzer] MC sweep failed:', err?.message || err);
+                mc = null;
+            }
+        }
+
         const result = this._buildResult({
             asset, nowRes, fwdRes, benignRes, adverseRes,
             env, skill, horizonHr,
             bcSigmaRel: bcSig, bcLow, bcHigh,
+            mc,
         });
         this._cachePut(key, result);
         return result;
@@ -337,7 +409,7 @@ export class FleetAnalyzer {
     }
 
     _buildResult({ asset, nowRes, fwdRes, benignRes, adverseRes, env, skill, horizonHr,
-                   bcSigmaRel, bcLow, bcHigh }) {
+                   bcSigmaRel, bcLow, bcHigh, mc }) {
         // ── Live snapshot: first row of nowcast SGP4 buffer is "now". ─────
         const sgp4 = nowRes.sgp4?.data;
         const stride = nowRes.sgp4?.stride || 13;
@@ -398,11 +470,20 @@ export class FleetAnalyzer {
         const envAdverse = _flatToDecayArray(adverseRes?.drag) || fwdDecay;
 
         // ── Risk roll-up ───────────────────────────────────────────────────
-        // Adverse edge (= fastest decay) is the operator-grade "what could
-        // go wrong" signal — reentry timing, decay-spike, and drag-stress
-        // thresholds are evaluated against this curve. Nowcast remains the
-        // reference. The benign edge is plotted but doesn't trip alerts.
-        const risk = this._computeRisk(envAdverse);
+        // Preference order:
+        //   1. MC p95 curve when MC ran — the principled "95th-percentile
+        //      worst case" the operator should see flagged.
+        //   2. envelopeAdverse from Phase 6/8 stacked envelope as fallback
+        //      when MC didn't run (WASM still loading, etc.).
+        //   3. forecast when even the envelope edges aren't available.
+        // MC also surfaces P(reentry), P(decay-spike) which the panel
+        // renders next to the boolean badges.
+        const riskCurve = (mc?.pHigh && mc.pHigh.length > 0) ? mc.pHigh : envAdverse;
+        const risk = this._computeRisk(riskCurve);
+        if (mc) {
+            risk.pReentry    = mc.pReentry;
+            risk.pDecaySpike = mc.pDecaySpike;
+        }
 
         return {
             id:        asset.id,
@@ -417,6 +498,19 @@ export class FleetAnalyzer {
                 forecast:       fwdDecay,
                 envelopeBenign: envBenign,
                 envelopeAdverse: envAdverse,
+                // Monte Carlo bands (null when MC didn't run; panel
+                // falls back to envelopeBenign/Adverse for the band).
+                mc:             mc ? {
+                    n:           mc.n,
+                    n_used:      mc.n_used,
+                    percentiles: mc.percentiles,
+                    pLow:        mc.pLow,
+                    pMed:        mc.pMed,
+                    pHigh:       mc.pHigh,
+                    median:      mc.median,
+                    pReentry:    mc.pReentry,
+                    pDecaySpike: mc.pDecaySpike,
+                } : null,
                 horizonHr:      this._opts.horizonHr,
             },
             risk,

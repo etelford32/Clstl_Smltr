@@ -502,6 +502,23 @@ export class FleetPanel {
             title="Worst projected da/dt over horizon">↓ ${risk.maxDecayKmDay.toFixed(1)} km/day</span>`);
         if (risk?.fired?.dragStress)  badges.push(`<span class="ua-fleet-badge ua-fleet-badge--low"
             title="Sustained drag-stress hours over horizon">DRAG ${risk.sustainedDragHrs.toFixed(0)}h</span>`);
+        // Monte Carlo probabilities. Only show non-zero probabilities so
+        // the row doesn't shout at the operator for assets where the MC
+        // never crossed the threshold — those badges represent the band
+        // "tail risk" the binary threshold misses.
+        if (Number.isFinite(risk?.pReentry) && risk.pReentry > 0.01) {
+            const pct = (risk.pReentry * 100).toFixed(0);
+            const cls = risk.pReentry >= 0.5 ? 'ua-fleet-badge--high'
+                      : risk.pReentry >= 0.2 ? 'ua-fleet-badge--med'
+                      : 'ua-fleet-badge--low';
+            badges.push(`<span class="ua-fleet-badge ${cls}"
+                title="Monte Carlo: P(altitude < ${REENTRY_KM} km within horizon) across ${decay?.mc?.n_used ?? 0} samples">P(reentry) ${pct}%</span>`);
+        }
+        if (Number.isFinite(risk?.pDecaySpike) && risk.pDecaySpike > 0.05) {
+            const pct = (risk.pDecaySpike * 100).toFixed(0);
+            badges.push(`<span class="ua-fleet-badge ua-fleet-badge--low"
+                title="Monte Carlo: P(|da/dt| ≥ ${DECAY_SPIKE_KM_DAY} km/day at some point within horizon)">P(spike) ${pct}%</span>`);
+        }
 
         // SVG mini-chart: nowcast vs forecast altitude over the horizon.
         const chart = _miniDecayChart(decay);
@@ -562,8 +579,8 @@ export class FleetPanel {
                 <div class="ua-fleet-chart">${chart}</div>
                 <div class="ua-fleet-chart-key">
                     <span class="ua-fleet-key-now">— nowcast</span>
-                    <span class="ua-fleet-key-fwd">— forecast (+${this._projHorizonHr}h)</span>
-                    <span class="ua-fleet-key-band">▬ ±σ envelope</span>
+                    <span class="ua-fleet-key-fwd">— ${r.decay?.mc ? `MC p50 (n=${r.decay.mc.n_used})` : 'forecast'} (+${this._projHorizonHr}h)</span>
+                    <span class="ua-fleet-key-band">▬ ${r.decay?.mc ? 'p5–p95 band' : '±σ envelope'}</span>
                     ${_renderForecastChip(r.forecast)}
                 </div>
             </div>`;
@@ -620,9 +637,25 @@ function _renderForecastChip(fc) {
 
 function _miniDecayChart(decay) {
     const W = 240, H = 56, PAD = 4;
-    const a = decay.nowcast, b = decay.forecast;
-    const lo = decay.envelopeBenign  || b;   // higher-alt (benign)
-    const hi = decay.envelopeAdverse || b;   // lower-alt (adverse)
+    const a = decay.nowcast;
+    // MC bands take priority over the Phase 6/8 worst-case stack — they're
+    // the proper independent-quadrature combination of forcing + BC σ and
+    // are ~30% tighter than the stack. When MC didn't run (WASM still
+    // loading, or sweep failed) we drop back to envelopeBenign/Adverse
+    // so the band never disappears.
+    //
+    // Polygon-edge convention (kept from Phase 6 for renderer symmetry):
+    //   `lo` = UPPER edge of the polygon = HIGH altitude trajectory
+    //          (= benign forcing / p95 altitude under MC)
+    //   `hi` = LOWER edge of the polygon = LOW altitude trajectory
+    //          (= adverse forcing / p5 altitude under MC)
+    const mc = decay.mc;
+    const useMc = mc && mc.pLow?.length > 0 && mc.pHigh?.length > 0;
+    const lo = useMc ? mc.pHigh : (decay.envelopeBenign  || decay.forecast);
+    const hi = useMc ? mc.pLow  : (decay.envelopeAdverse || decay.forecast);
+    // Centre line: MC median when available, otherwise the AR(1) point
+    // forecast (which sits inside the band by construction in both modes).
+    const b = (useMc && mc.pMed?.length > 0) ? mc.pMed : decay.forecast;
     if (!a?.length || !b?.length) {
         return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"
                      class="ua-fleet-svg"></svg>`;
