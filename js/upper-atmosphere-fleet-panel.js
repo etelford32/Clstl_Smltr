@@ -36,9 +36,11 @@ import {
     setDensityModel, getDensityModel,
     REENTRY_KM, DECAY_SPIKE_KM_DAY, DRAG_HIGH_PA, DRAG_HIGH_HOURS,
 } from './upper-atmosphere-fleet-analyzer.js';
-import { isMsisReady, f107AProvenance } from './nrlmsise00-bridge.js';
+import { isMsisReady, f107AProvenance, apArrayProvenance } from './nrlmsise00-bridge.js';
 import { isLoaded as isF107HistoryLoaded, ensureLoaded as ensureF107History, onUpdate as onF107Update }
     from './f107-history.js';
+import { isLoaded as isApHistoryLoaded,   ensureLoaded as ensureApHistory,   onUpdate as onApUpdate }
+    from './ap-history.js';
 
 // Debounce window for full-fleet re-analysis on incoming ticks. Compute
 // is cheap (~50 µs/asset) but we don't want to thrash mid-slider-drag.
@@ -113,6 +115,7 @@ export class FleetPanel {
         }
         this._unsubscribeFleet?.();
         this._unsubscribeF107?.();
+        this._unsubscribeAp?.();
         clearTimeout(this._recomputeTimer);
         this._recomputeTimer = null;
         this._destroyed = true;
@@ -318,6 +321,15 @@ export class FleetPanel {
             this._refreshModelState();
             this._scheduleRecompute(0);
         });
+        // Same wiring for the Ap history — when /api/noaa/ap-history
+        // lands, drop the cache so the next paint runs against the real
+        // 7-slot ap_array instead of the ring-buffer fallback.
+        ensureApHistory().catch(() => {});
+        this._unsubscribeAp = onApUpdate(() => {
+            this.analyzer.invalidate();
+            this._refreshModelState();
+            this._scheduleRecompute(0);
+        });
 
         // Card-host event delegation: remove buttons + asset clicks.
         this._cardsHost.addEventListener('click', (e) => {
@@ -409,40 +421,62 @@ export class FleetPanel {
     _refreshModelState() {
         if (!this._modelStateEl) return;
         const sel = getDensityModel();
-        if (sel === 'nrlmsise00') {
-            const msisReady = isMsisReady();
-            // Append f107A provenance once history is loaded — it's the
-            // operator's clue that the centred-81-day input is real SWPC
-            // and not the ring-buffer fallback. Hover gives the exact
-            // sample counts that filled the window.
-            let label  = msisReady ? '✓ live' : 'loading…';
-            let kind   = msisReady ? 'ok' : 'pending';
-            let title  = '';
-            if (msisReady && isF107HistoryLoaded()) {
-                const p = f107AProvenance([]);
-                if (p?.kind === 'centred') {
-                    label = `✓ live · f107A centred (${p.observedSamples}o+${p.predictedSamples}p)`;
-                    title = 'Centred 81-day F10.7 from real SWPC observed + 45-day forecast';
-                } else if (p?.kind === 'trailing') {
-                    label = `✓ live · f107A trailing (${p.observedSamples}o)`;
-                    title = 'Trailing 81-day F10.7 — SWPC predicted feed unavailable, '
-                          + 'biased on fast solar climbs';
-                } else if (p?.kind === 'out-of-range') {
-                    label = '✓ live · f107A out-of-range';
-                    title = 'Requested date is outside the cached F10.7 window';
-                }
-            } else if (msisReady && !isF107HistoryLoaded()) {
-                label = '✓ live · f107A ring-buffer';
-                title = 'F10.7 history not loaded yet — using in-page proxy';
-            }
-            this._modelStateEl.textContent = label;
-            this._modelStateEl.dataset.kind = kind;
-            this._modelStateEl.title = title;
-        } else {
+        if (sel !== 'nrlmsise00') {
             this._modelStateEl.textContent = 'surrogate';
             this._modelStateEl.dataset.kind = 'info';
             this._modelStateEl.title = 'JS density surrogate (Jacchia-style)';
+            return;
         }
+        const msisReady = isMsisReady();
+        if (!msisReady) {
+            this._modelStateEl.textContent = 'loading…';
+            this._modelStateEl.dataset.kind = 'pending';
+            this._modelStateEl.title = '';
+            return;
+        }
+        // Compact "f107A · ap" status pair. Each side reports its own
+        // provenance source independently. Tooltip carries the long story.
+        const fpv = isF107HistoryLoaded() ? f107AProvenance([]) : null;
+        const apv = isApHistoryLoaded()   ? apArrayProvenance([]) : null;
+        const fLabel = !fpv ? 'rb' : (
+            fpv.kind === 'centred'      ? `cen(${fpv.observedSamples}o+${fpv.predictedSamples}p)` :
+            fpv.kind === 'trailing'     ? `tr(${fpv.observedSamples}o)` :
+            fpv.kind === 'out-of-range' ? 'oor' : 'rb'
+        );
+        const apLabel = !apv ? 'rb' : (
+            apv.kind === 'observed'                  ? `obs(${apv.slotsObserved})`
+          : apv.kind === 'mixed-observed-predicted'  ? `mix(${apv.slotsObserved}o+${apv.slotsPredicted}p)`
+          : apv.kind === 'partial'                   ? `partial(${apv.slotsFallback}fb)`
+          : 'rb'
+        );
+        this._modelStateEl.textContent = `✓ live · f107A ${fLabel} · ap ${apLabel}`;
+        this._modelStateEl.dataset.kind = 'ok';
+        this._modelStateEl.title =
+            `f107A: ${this._provLong(fpv)}\n`
+          + `ap_array: ${this._provLongAp(apv)}`;
+    }
+
+    _provLong(fpv) {
+        if (!fpv) return 'F10.7 history not loaded — in-page ring-buffer proxy';
+        if (fpv.kind === 'centred')
+            return `centred 81-day F10.7 from real SWPC observed (${fpv.observedSamples}) + 45-day forecast (${fpv.predictedSamples})`;
+        if (fpv.kind === 'trailing')
+            return `trailing 81-day F10.7 — predicted feed unavailable, biased on fast solar climbs`;
+        if (fpv.kind === 'out-of-range')
+            return 'requested date outside cached F10.7 window';
+        return 'F10.7 history loaded but no value';
+    }
+    _provLongAp(apv) {
+        if (!apv) return 'Ap history not loaded — in-page ring-buffer proxy';
+        if (apv.kind === 'observed')
+            return `all 7 NRLMSISE-00 slots filled from real SWPC Kp→Ap (${apv.slotsObserved} observed)`;
+        if (apv.kind === 'mixed-observed-predicted')
+            return `mixed observed/predicted ap_array (${apv.slotsObserved}o + ${apv.slotsPredicted}p)`;
+        if (apv.kind === 'partial')
+            return `partial ap_array: ${apv.slotsFallback} slots fell back to Ap=4 climatology`;
+        if (apv.kind === 'out-of-range')
+            return 'requested date outside cached Ap window';
+        return 'Ap history loaded but no value';
     }
 
     _renderList() {

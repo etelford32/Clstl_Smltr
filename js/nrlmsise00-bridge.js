@@ -33,6 +33,12 @@ import {
     getF107AWithProvenance,
     isLoaded as isF107HistoryLoaded,
 } from './f107-history.js';
+import {
+    ensureLoaded as ensureApHistoryLoaded,
+    getApArray as getRealApArray,
+    getApArrayWithProvenance,
+    isLoaded as isApHistoryLoaded,
+} from './ap-history.js';
 
 // Kick the F10.7 history fetch at module-load. The endpoint is edge-
 // cached at 1 hour, so this is one cheap warm-up roundtrip per page;
@@ -40,6 +46,9 @@ import {
 // rows. Failure is swallowed — callers fall back to the ring-buffer
 // proxy (existing pre-Phase-7 behaviour) automatically.
 ensureF107HistoryLoaded().catch(() => {});
+// Same pattern for the Ap history. Mirrors the F10.7 fetch architecture
+// for consistency; sync access after the first roundtrip lands.
+ensureApHistoryLoaded().catch(() => {});
 
 // ── WASM init (shared with TrajectoryAnalyzer) ──────────────────────────────
 
@@ -108,14 +117,31 @@ function _lstHr(d, lonDeg) {
 const _AP_LAGS_HR = [0, 0, 3, 6, 9, 22.5, 46.5];
 
 /**
- * Build the 7-element Ap history array from a (history, currentAp) pair.
+ * Build the 7-element Ap history array.
+ *
+ * Priority order:
+ *   1. Real SWPC 3-h Kp→Ap series via `/api/noaa/ap-history` — assembled
+ *      with proper lag windows from observed Ap (Phase 10).
+ *   2. Mean of the realtime ring buffer's ap samples — Phase 4 fallback.
+ *   3. Scalar fallback (instantaneous Ap) replicated across all slots.
  *
  * @param {Array<{simTimeMs, ap}>} history     past realtime ticks
  * @param {number} currentAp                  fallback when history empty
  * @param {number} [nowMs=Date.now()]         "now" for lag computation
- * @returns {Float64Array}                     7-element array, m³-side ready
+ * @returns {Float64Array}                     7-element array, NRLMSISE-00-ready
  */
 export function buildApHistory(history, currentAp, nowMs = Date.now()) {
+    // 1. Real SWPC series.
+    if (isApHistoryLoaded()) {
+        const real = getRealApArray(nowMs);
+        if (Array.isArray(real) && real.length === 7) {
+            const out = new Float64Array(7);
+            for (let i = 0; i < 7; i++) out[i] = real[i];
+            return out;
+        }
+    }
+
+    // 2/3. Ring-buffer assembly (Phase 4 / pre-Phase-10).
     const out = new Float64Array(7);
     const fallback = Number.isFinite(currentAp) ? currentAp : 4;
     if (!Array.isArray(history) || history.length === 0) {
@@ -206,6 +232,29 @@ export function f107AProvenance(history, forDate) {
         kind:  Array.isArray(history) && history.length > 0
             ? 'ring-buffer' : 'fallback',
         windowDays: 81,
+    };
+}
+
+/**
+ * Provenance breakdown for the 7-element ap_array `buildApHistory` would
+ * return. Mirrors f107AProvenance for symmetry.
+ *
+ *   kind = 'observed'                  — all slots from real Kp→Ap history
+ *   kind = 'mixed-observed-predicted'  — date inside the forecast window
+ *   kind = 'partial'                   — some slots fell back to climatology
+ *   kind = 'fallback'                  — ap-history endpoint down; ring-buffer
+ *   kind = 'unavailable'               — neither real nor ring-buffer data
+ */
+export function apArrayProvenance(history, forDate) {
+    const dateMs = forDate instanceof Date ? forDate.getTime() : Date.now();
+    if (isApHistoryLoaded()) {
+        const p = getApArrayWithProvenance(dateMs);
+        if (p?.value) return p;
+    }
+    return {
+        value: null,
+        kind:  Array.isArray(history) && history.length > 0
+            ? 'ring-buffer' : 'fallback',
     };
 }
 
@@ -338,6 +387,12 @@ export function sampleProfileMSIS({
             // biased on fast climbs), 'ring-buffer' (in-page proxy), or
             // 'caller-supplied' / 'fallback'.
             f107a: f107AProv,
+            // ap_array provenance — 'observed' (all 7 slots from real Kp→Ap
+            // history), 'mixed-observed-predicted' (slot windows straddle
+            // the forecast boundary), 'partial' (some slots fell back to
+            // climatology Ap=4), 'ring-buffer' (in-page proxy from
+            // realtime driver), 'fallback' (single scalar replicated).
+            apArray: apArrayProvenance(history, nowDate),
         },
     };
 }
