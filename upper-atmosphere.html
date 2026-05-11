@@ -607,8 +607,19 @@ input[type=range]::-moz-range-thumb {
 .ua-fleet-chart-key {
     display:flex; gap:10px; font-size:.55rem; color:#9ab;
 }
-.ua-fleet-key-now { color:#0ff; }
-.ua-fleet-key-fwd { color:#ffaa20; }
+.ua-fleet-key-now  { color:#0ff; }
+.ua-fleet-key-fwd  { color:#ffaa20; }
+.ua-fleet-key-band { color:rgba(255,170,32,.65); }
+.ua-fleet-skill {
+    margin-left:auto;
+    font-size:.55rem; font-weight:700; letter-spacing:.04em;
+    padding:1px 6px; border-radius:5px;
+    font-variant-numeric:tabular-nums;
+    cursor:help;
+}
+.ua-fleet-skill--high { color:#40e090; background:rgba(64,224,144,.12); border:1px solid rgba(64,224,144,.40); }
+.ua-fleet-skill--med  { color:#ffaa20; background:rgba(255,170,32,.12); border:1px solid rgba(255,170,32,.40); }
+.ua-fleet-skill--low  { color:#ff8090; background:rgba(255,80,96,.12);  border:1px solid rgba(255,80,96,.40); }
 
 /* ─── Satellite drag analysis ──────────────────────────── */
 .ua-tle-pill {

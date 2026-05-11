@@ -76,16 +76,36 @@ function _resampleHourly(hist, valueFn) {
 }
 
 /**
- * AR(1) projection of one scalar series.
- * Mirrors `rust-forecast/src/members/ar1.rs::predict_24h` line-for-line,
- * applied to the resampled hourly series.
+ * AR(1) projection of one scalar series. Returns BOTH the point forecast
+ * and its analytic forecast-error standard deviation at horizon h:
+ *
+ *   y_{t+h}  ≈  μ + φ^h · (y_t − μ)
+ *   Var(y_{t+h})  =  σ²_ε · (1 + φ² + φ⁴ + … + φ^(2(h−1)))
+ *                 =  σ²_ε · (1 − φ^(2h)) / (1 − φ²)
+ *                 =  Var(y) · (1 − φ^(2h))         (under stationarity)
+ *
+ * So the forecast σ grows from 0 at h=0 toward `sd(y)` (climatology) as
+ * h → ∞ — which is exactly the AR(1) uncertainty story: short-horizon
+ * forecasts are sharp; long-horizon forecasts fan out to the historical
+ * spread. We use this directly to feed ±σ envelopes around the
+ * drag-decay curves.
+ *
+ * Mirrors `rust-forecast/src/members/ar1.rs::predict_24h` line-for-line
+ * for the point forecast; the σ derivation is canonical AR(1) and lives
+ * here in JS for now (no Rust crate change required).
+ *
+ * @returns {{ point:number, sigma:number, sdY:number, phi:number }}
  */
 function _projectScalar(hist, valueFn, horizonHours) {
     const { ys } = _resampleHourly(hist, valueFn);
     const yClean = ys.filter(v => Number.isFinite(v));
     if (yClean.length < MIN_SAMPLES_FOR_AR1) {
         // Not enough samples → fall back to last-known value (persistence).
-        return yClean.length ? yClean[yClean.length - 1] : NaN;
+        // σ = 0 here is honest: we have no statistical basis to claim a
+        // spread. The skill score (separately) tells the UI not to trust
+        // this number too hard.
+        const last = yClean.length ? yClean[yClean.length - 1] : NaN;
+        return { point: last, sigma: 0, sdY: 0, phi: 0 };
     }
 
     const n  = yClean.length;
@@ -94,10 +114,11 @@ function _projectScalar(hist, valueFn, horizonHours) {
     let num = 0, den = 0;
     for (let i = 1; i < n; i++) num += (yClean[i] - mu) * (yClean[i - 1] - mu);
     for (let i = 0; i < n; i++) den += (yClean[i] - mu) ** 2;
-    if (den < 1e-9) return mu;   // flat series → propagate the mean
+    if (den < 1e-9) return { point: mu, sigma: 0, sdY: 0, phi: 0 };
 
     const phiRaw = num / den;
     const phi    = Math.max(-PHI_MAX, Math.min(PHI_MAX, phiRaw));
+    const sdY    = Math.sqrt(den / n);    // sample sd of the resampled series
 
     // Roll the AR(1) recursion forward `horizonHours` steps.
     let state = yClean[n - 1];
@@ -106,7 +127,15 @@ function _projectScalar(hist, valueFn, horizonHours) {
         state = mu + phi * (state - mu);
         steps--;
     }
-    return state;
+
+    // Forecast-error σ at horizon h. The (1 − φ^(2h)) factor grows
+    // monotonically from 0 (h=0) toward 1 (h→∞), so σ ramps from 0 to
+    // sd(y) — exactly the right "fans out toward climatology" behaviour.
+    const h = Math.max(0, horizonHours);
+    const phi2h = Math.pow(phi * phi, h);
+    const sigma = sdY * Math.sqrt(Math.max(0, 1 - phi2h));
+
+    return { point: state, sigma, sdY, phi };
 }
 
 /**
@@ -123,17 +152,26 @@ function _skillForHorizon(horizonHours) {
 
 /**
  * Project F10.7 and Ap forward by `horizonHours` using the realtime
- * driver's history ring. Returns both scalars plus a skill score.
+ * driver's history ring. Returns the point forecast for each scalar,
+ * its forecast-error σ (analytic AR(1) — see `_projectScalar`), and a
+ * horizon-decay skill cue.
+ *
+ * The σ fields are what downstream callers feed into ±σ uncertainty
+ * envelopes around the drag-decay curves. They asymptote to the
+ * historical sd as the horizon grows — exactly the "fans out toward
+ * climatology" behaviour an operator wants from a short-horizon AR(1).
  *
  * @param {Array<{t:number, f107?:number, ap?:number, apProxy?:number}>} history
  * @param {number} horizonHours
  * @param {object} [opts]
- * @param {boolean} [opts.useApProxy=true]  prefer apProxy (Burton-derived) over apSwpc
- *                                          for the Ap source — the proxy is what
- *                                          the page already reacts to between
- *                                          3-h SWPC ticks, so projecting it
- *                                          gives a smoother forecast curve
- * @returns {{ f107:number, ap:number, skill:number, horizonHours:number }}
+ * @param {boolean} [opts.useApProxy=true]
+ * @returns {{
+ *   f107:number, ap:number,
+ *   sigmaF107:number, sigmaAp:number,
+ *   sdF107:number, sdAp:number,           // historical sd (climatology spread)
+ *   phiF107:number, phiAp:number,         // AR(1) persistence per scalar
+ *   skill:number, horizonHours:number
+ * }}
  */
 export function projectDragState(history, horizonHours, opts = {}) {
     const useApProxy = opts.useApProxy !== false;
@@ -141,16 +179,54 @@ export function projectDragState(history, horizonHours, opts = {}) {
         ? (h) => Number.isFinite(h.ap) ? h.ap : h.apProxy
         : (h) => Number.isFinite(h.apSwpc) ? h.apSwpc : h.ap;
 
-    const f107 = _projectScalar(history, h => h.f107, horizonHours);
-    const ap   = _projectScalar(history, apFn,        horizonHours);
+    const f = _projectScalar(history, h => h.f107, horizonHours);
+    const a = _projectScalar(history, apFn,        horizonHours);
 
+    // Ap is bounded ≥ 0 physically; clamp both the point and the σ-down
+    // edge in projectDragEnvelope. F10.7 is also ≥0 in nature (~60 SFU
+    // solar minimum floor); we clamp at 50 to keep the envelope from
+    // implying a non-physical sub-solar-minimum atmosphere.
     return {
-        f107: Number.isFinite(f107) ? f107 : NaN,
-        // Ap is bounded ≥ 0 physically; clamp so an AR(1) over-shoot doesn't
-        // produce a meaningless negative storm index.
-        ap:   Number.isFinite(ap)   ? Math.max(0, ap) : NaN,
-        skill: _skillForHorizon(horizonHours),
+        f107:      Number.isFinite(f.point) ? f.point : NaN,
+        ap:        Number.isFinite(a.point) ? Math.max(0, a.point) : NaN,
+        sigmaF107: Number.isFinite(f.sigma) ? f.sigma : 0,
+        sigmaAp:   Number.isFinite(a.sigma) ? a.sigma : 0,
+        sdF107:    f.sdY,
+        sdAp:      a.sdY,
+        phiF107:   f.phi,
+        phiAp:     a.phi,
+        skill:     _skillForHorizon(horizonHours),
         horizonHours,
+    };
+}
+
+/**
+ * Three-scenario envelope for downstream uncertainty bands.
+ *
+ * Returns the same fields as `projectDragState` plus three explicit
+ * forcing tuples:
+ *
+ *   nominal:  (f107,        ap)
+ *   benign:   (f107 - σ,    ap - σ)   → less drag → higher altitude curve
+ *   adverse:  (f107 + σ,    ap + σ)   → more drag → lower altitude curve
+ *
+ * `benign` / `adverse` are physically clamped: F10.7 ≥ 50 SFU (solar-
+ * minimum floor) and Ap ≥ 0. Naming intentionally avoids "low/high"
+ * because the *altitude* envelope flips relative to forcing.
+ */
+export function projectDragEnvelope(history, horizonHours, opts = {}) {
+    const base = projectDragState(history, horizonHours, opts);
+    const f107 = base.f107, ap = base.ap;
+    const sf = base.sigmaF107, sa = base.sigmaAp;
+    const clampF = (x) => Math.max(50,  Number.isFinite(x) ? x : f107);
+    const clampA = (x) => Math.max(0,   Number.isFinite(x) ? x : ap);
+    return {
+        ...base,
+        forcing: {
+            nominal: { f107, ap },
+            benign:  { f107: clampF(f107 - sf), ap: clampA(ap - sa) },
+            adverse: { f107: clampF(f107 + sf), ap: clampA(ap + sa) },
+        },
     };
 }
 

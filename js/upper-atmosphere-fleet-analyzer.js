@@ -72,7 +72,7 @@ import {
 import { sampleProfile } from './upper-atmosphere-engine.js';
 import { sampleProfileMSIS, isMsisReady, ensureMsisReady }
     from './nrlmsise00-bridge.js';
-import { projectDragState } from './drag-forecast-projector.js';
+import { projectDragEnvelope } from './drag-forecast-projector.js';
 import { getRealtimeDriver } from './upper-atmosphere-realtime.js';
 
 // Density-model selector. Defaults to NRLMSISE-00 — bit-identical to the
@@ -221,28 +221,33 @@ export class FleetAnalyzer {
         const hit = this._cache.get(key);
         if (hit) return hit;
 
-        // Project F10.7/Ap forward at the requested horizon.
-        let proj;
+        // Project F10.7/Ap forward at the requested horizon and grab the
+        // ±σ envelope edges. `forcing.nominal/benign/adverse` carry the
+        // three forcing tuples we'll run drag-decay against.
+        let env;
+        const hist = getRealtimeDriver?.()?.getHistory?.() || [];
         try {
-            const hist = getRealtimeDriver?.()?.getHistory?.() || [];
-            proj = projectDragState(hist, horizonHr);
-        } catch { proj = null; }
-        const f107Proj = (proj && Number.isFinite(proj.f107)) ? proj.f107 : f107;
-        const apProj   = (proj && Number.isFinite(proj.ap))   ? proj.ap   : ap;
-        const skill    = (proj && Number.isFinite(proj.skill)) ? proj.skill : 1.0;
+            env = projectDragEnvelope(hist, horizonHr);
+        } catch { env = null; }
+        const nominal = env?.forcing?.nominal ?? { f107, ap };
+        const benign  = env?.forcing?.benign  ?? nominal;
+        const adverse = env?.forcing?.adverse ?? nominal;
+        const skill   = Number.isFinite(env?.skill) ? env.skill : 1.0;
 
-        // Sample the atmosphere at both forcing levels. Prefer NRLMSISE-00
+        // Sample the atmosphere at each forcing scenario. Prefer NRLMSISE-00
         // (gold standard, agrees with NRL reference to within last ULP);
         // fall back to the JS surrogate if WASM isn't ready yet.
-        const hist = getRealtimeDriver?.()?.getHistory?.() || [];
-        const profileNow  = _samplePreferred({
-            f107Sfu: f107,     ap, history: hist,
-        });
-        const profileFwd  = _samplePreferred({
-            f107Sfu: f107Proj, ap: apProj, history: hist,
-        });
+        const profileNow     = _samplePreferred({ f107Sfu: f107,           ap,           history: hist });
+        const profileForecast= _samplePreferred({ f107Sfu: nominal.f107,   ap: nominal.ap, history: hist });
+        const profileBenign  = _samplePreferred({ f107Sfu: benign.f107,    ap: benign.ap,  history: hist });
+        const profileAdverse = _samplePreferred({ f107Sfu: adverse.f107,   ap: adverse.ap, history: hist });
 
-        // Run the analyzer twice — once per scenario.
+        // Per-asset SGP4 + RK4. We run the SGP4 truth ONCE (asset's TLE
+        // doesn't change between forcing scenarios) and then re-run the
+        // RK4 drag-decay overlay against four ρ profiles. The reference
+        // SGP4 trajectory rides with the nowcast result; the other three
+        // calls reuse its `sgp4` field downstream so we don't pay for it
+        // four times.
         const baseOpts = {
             line1: asset.line1, line2: asset.line2,
             horizonHr: this._opts.horizonHr,
@@ -252,11 +257,10 @@ export class FleetAnalyzer {
             bcM2PerKg:  asset.bcM2PerKg,
         };
 
-        let nowRes, fwdRes;
+        let nowRes, fwdRes, benignRes, adverseRes;
         try {
             nowRes = await this._traj.analyze({
-                ...baseOpts,
-                profileSamples: profileNow.samples,
+                ...baseOpts, profileSamples: profileNow.samples,
             });
         } catch (err) {
             const result = {
@@ -268,15 +272,19 @@ export class FleetAnalyzer {
             this._cachePut(key, result);
             return result;
         }
-        try {
-            fwdRes = await this._traj.analyze({
-                ...baseOpts,
-                profileSamples: profileFwd.samples,
-            });
-        } catch { fwdRes = nowRes; /* fall back: forecast == nowcast */ }
+        // Forecast + envelope edges. Any individual failure collapses to
+        // the nowcast curve so the band degrades to "zero spread" rather
+        // than breaking the card.
+        try { fwdRes     = await this._traj.analyze({ ...baseOpts, profileSamples: profileForecast.samples }); }
+        catch { fwdRes = nowRes; }
+        try { benignRes  = await this._traj.analyze({ ...baseOpts, profileSamples: profileBenign.samples  }); }
+        catch { benignRes = fwdRes; }
+        try { adverseRes = await this._traj.analyze({ ...baseOpts, profileSamples: profileAdverse.samples }); }
+        catch { adverseRes = fwdRes; }
 
         const result = this._buildResult({
-            asset, nowRes, fwdRes, skill, horizonHr,
+            asset, nowRes, fwdRes, benignRes, adverseRes,
+            env, skill, horizonHr,
         });
         this._cachePut(key, result);
         return result;
@@ -304,7 +312,7 @@ export class FleetAnalyzer {
         }
     }
 
-    _buildResult({ asset, nowRes, fwdRes, skill, horizonHr }) {
+    _buildResult({ asset, nowRes, fwdRes, benignRes, adverseRes, env, skill, horizonHr }) {
         // ── Live snapshot: first row of nowcast SGP4 buffer is "now". ─────
         const sgp4 = nowRes.sgp4?.data;
         const stride = nowRes.sgp4?.stride || 13;
@@ -354,13 +362,22 @@ export class FleetAnalyzer {
             };
         }
 
-        const nowDecay = _flatToDecayArray(nowRes.drag);
-        const fwdDecay = _flatToDecayArray(fwdRes?.drag) || nowDecay;
+        const nowDecay     = _flatToDecayArray(nowRes.drag);
+        const fwdDecay     = _flatToDecayArray(fwdRes?.drag)     || nowDecay;
+        // ENVELOPE EDGES (altitude space, not forcing space):
+        //   adverse forcing  (F10.7 + σ, Ap + σ) → MORE drag → LOWER altitude curve
+        //   benign  forcing  (F10.7 − σ, Ap − σ) → LESS drag → HIGHER altitude curve
+        // We pin the band by altitude so the SVG renderer doesn't have to
+        // re-sort which line is on top.
+        const envBenign  = _flatToDecayArray(benignRes?.drag)  || fwdDecay;
+        const envAdverse = _flatToDecayArray(adverseRes?.drag) || fwdDecay;
 
         // ── Risk roll-up ───────────────────────────────────────────────────
-        // Use the forecast trajectory for risk — that's the operator-relevant
-        // "what could happen" signal. Nowcast is the reference for spread.
-        const risk = this._computeRisk(fwdDecay);
+        // Adverse edge (= fastest decay) is the operator-grade "what could
+        // go wrong" signal — reentry timing, decay-spike, and drag-stress
+        // thresholds are evaluated against this curve. Nowcast remains the
+        // reference. The benign edge is plotted but doesn't trip alerts.
+        const risk = this._computeRisk(envAdverse);
 
         return {
             id:        asset.id,
@@ -371,13 +388,28 @@ export class FleetAnalyzer {
             err:       null,
             live,
             decay: {
-                nowcast:  nowDecay,
-                forecast: fwdDecay,
-                horizonHr: this._opts.horizonHr,
+                nowcast:        nowDecay,
+                forecast:       fwdDecay,
+                envelopeBenign: envBenign,
+                envelopeAdverse: envAdverse,
+                horizonHr:      this._opts.horizonHr,
             },
             risk,
             forecastSkill: skill,
-            forecastF107:  fwdRes?.tle ? fwdDecay.length : null,
+            // Per-asset confidence/spread metadata so the card can render
+            // "confidence: 72%" and "± 14 SFU / ± 6 Ap" chips. Lives at
+            // top-level instead of nested under `decay` so the existing
+            // ribbon/severity consumers can ignore it cleanly.
+            forecast: env ? {
+                horizonHr,
+                f107:      env.f107,
+                ap:        env.ap,
+                sigmaF107: env.sigmaF107,
+                sigmaAp:   env.sigmaAp,
+                phiF107:   env.phiF107,
+                phiAp:     env.phiAp,
+                skill:     env.skill,
+            } : null,
         };
     }
 

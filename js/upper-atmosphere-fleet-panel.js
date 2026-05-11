@@ -465,35 +465,86 @@ export class FleetPanel {
                 <div class="ua-fleet-chart">${chart}</div>
                 <div class="ua-fleet-chart-key">
                     <span class="ua-fleet-key-now">— nowcast</span>
-                    <span class="ua-fleet-key-fwd">— forecast (+${this._projHorizonHr}h forcing)</span>
+                    <span class="ua-fleet-key-fwd">— forecast (+${this._projHorizonHr}h)</span>
+                    <span class="ua-fleet-key-band">▬ ±σ envelope</span>
+                    ${_renderForecastChip(r.forecast)}
                 </div>
             </div>`;
     }
 }
 
+// ── Forecast / skill chip ───────────────────────────────────────────────────
+//
+// Surfaces the AR(1) projector's confidence (the same `skill` score that
+// dimmed the horizon pill in Phase 3) plus the projector-derived spread
+// (±σ on F10.7, ±σ on Ap). Skill comes out of the projector already; the
+// σ values are new in Phase 6. We render them tightly so the per-card
+// chart key stays one line wide.
+
+function _renderForecastChip(fc) {
+    if (!fc) return '';
+    const skillPct = Math.round(((fc.skill ?? 0) * 100));
+    const sklClass = skillPct >= 75 ? 'ua-fleet-skill--high'
+                   : skillPct >= 50 ? 'ua-fleet-skill--med'
+                   : 'ua-fleet-skill--low';
+    const sf = Number.isFinite(fc.sigmaF107) ? fc.sigmaF107.toFixed(0) : '—';
+    const sa = Number.isFinite(fc.sigmaAp)   ? fc.sigmaAp.toFixed(0)   : '—';
+    return `<span class="ua-fleet-skill ${sklClass}"
+                  title="AR(1) forecast confidence at +${fc.horizonHr}h. σ_F10.7 = ${sf} SFU, σ_Ap = ${sa}.">
+        ${skillPct}% · ±${sf} SFU / ±${sa} Ap
+    </span>`;
+}
+
 // ── Inline SVG mini-chart ──────────────────────────────────────────────────
 //
-// Two-trace altitude-vs-time line chart. Nowcast in cyan; forecast in amber
-// (matches the horizon-pill colour from Phase 3). Width is responsive via
-// preserveAspectRatio; we draw inside a fixed 240×56 viewBox.
+// Three-layer altitude-vs-time chart:
+//
+//   • Filled band:  ±σ uncertainty envelope (forcing ± σ_F10.7, ± σ_Ap
+//                   driven through the same drag_decay_rk4 integrator,
+//                   so the band is a real spread of decay trajectories
+//                   — not a heuristic widened by horizon).
+//   • Cyan line:    nowcast (drag-decay under current forcing).
+//   • Amber dashed: forecast point (drag-decay under AR(1)-projected
+//                   forcing). Always sits inside the band by construction.
+//
+// Fixed 240×56 viewBox; preserveAspectRatio="none" lets the card stretch
+// the chart horizontally without distorting the data interpretation.
 
 function _miniDecayChart(decay) {
     const W = 240, H = 56, PAD = 4;
     const a = decay.nowcast, b = decay.forecast;
+    const lo = decay.envelopeBenign  || b;   // higher-alt (benign)
+    const hi = decay.envelopeAdverse || b;   // lower-alt (adverse)
     if (!a?.length || !b?.length) {
         return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"
                      class="ua-fleet-svg"></svg>`;
     }
     let xMin = a[0].t_min, xMax = a[a.length - 1].t_min;
     let yMin = Infinity, yMax = -Infinity;
-    for (const p of a) { if (p.alt_km < yMin) yMin = p.alt_km; if (p.alt_km > yMax) yMax = p.alt_km; }
-    for (const p of b) { if (p.alt_km < yMin) yMin = p.alt_km; if (p.alt_km > yMax) yMax = p.alt_km; }
+    const span = (arr) => {
+        for (const p of arr) {
+            if (p.alt_km < yMin) yMin = p.alt_km;
+            if (p.alt_km > yMax) yMax = p.alt_km;
+        }
+    };
+    span(a); span(b); span(lo); span(hi);
     if (yMax - yMin < 0.5) yMax = yMin + 0.5;
 
     const sx = (t) => PAD + ((t - xMin) / (xMax - xMin)) * (W - 2 * PAD);
     const sy = (y) => H - PAD - ((y - yMin) / (yMax - yMin)) * (H - 2 * PAD);
-    const path = (arr) => arr.map((p, i) =>
+    const linePath = (arr) => arr.map((p, i) =>
         `${i === 0 ? 'M' : 'L'}${sx(p.t_min).toFixed(1)},${sy(p.alt_km).toFixed(1)}`).join(' ');
+
+    // Band polygon: upper edge (benign, higher alt) drawn left→right,
+    // lower edge (adverse, lower alt) drawn right→left, then closed.
+    // Both arrays share the same time grid (analyzer's dragOutMin), so
+    // we can iterate by index instead of interpolating.
+    let bandPath = null;
+    if (lo.length === hi.length && lo.length >= 2) {
+        const fwd = lo.map(p => `${sx(p.t_min).toFixed(1)},${sy(p.alt_km).toFixed(1)}`);
+        const bak = hi.slice().reverse().map(p => `${sx(p.t_min).toFixed(1)},${sy(p.alt_km).toFixed(1)}`);
+        bandPath = `M${fwd.join(' L')} L${bak.join(' L')} Z`;
+    }
 
     // Reentry threshold gridline if it falls inside the y-range.
     const reentryLine = (REENTRY_KM > yMin && REENTRY_KM < yMax)
@@ -503,10 +554,11 @@ function _miniDecayChart(decay) {
         : '';
 
     return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"
-                 class="ua-fleet-svg" aria-label="Altitude decay forecast">
+                 class="ua-fleet-svg" aria-label="Altitude decay forecast with uncertainty envelope">
+        ${bandPath ? `<path d="${bandPath}" fill="rgba(255,170,32,.18)" stroke="none"/>` : ''}
         ${reentryLine}
-        <path d="${path(a)}" stroke="#0ff" stroke-width="1.4" fill="none"/>
-        <path d="${path(b)}" stroke="#ffaa20" stroke-width="1.4" fill="none"
+        <path d="${linePath(a)}" stroke="#0ff" stroke-width="1.4" fill="none"/>
+        <path d="${linePath(b)}" stroke="#ffaa20" stroke-width="1.4" fill="none"
               stroke-dasharray="3 2"/>
     </svg>`;
 }
