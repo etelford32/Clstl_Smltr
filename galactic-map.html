@@ -1315,6 +1315,8 @@ canvas { display:block; width:100% !important; height:100% !important; }
                     <div class="legend-item"><div class="legend-dot" style="background:#554477;border:1px solid #888"></div>Cosmic void (negative space)</div>
                     <div class="legend-item"><div class="legend-dot" style="background:#3366ff"></div>Galaxy cluster (ICM glow)</div>
                     <div class="legend-item"><div class="legend-dot" style="background:#ffe0a0"></div>Supergiant cD galaxy</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#ffaa44;border:2px solid #000"></div>Stellar BH (X-ray binary)</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#aa66ff"></div>GW merger event (concentric ripples)</div>
                 </div>
             </details>
 
@@ -2602,6 +2604,96 @@ const CATALOG = [
         constellation: 'eri',
     },
 
+    // ── Section header — Stellar-Mass Black Holes ─────────────────────────
+    { id: '__sep_stellar_bh', sectionHeader: 'Stellar Black Holes (X-ray binaries)', isHeader: true },
+
+    // Five canonical stellar-mass BHs in the Milky Way disk.  Each is in a
+    // bright X-ray binary system; the "star" we see optically is the donor
+    // companion whose Roche-lobe mass-transfer powers the X-ray emission
+    // from the BH's accretion disk.  All live in the linear region of the
+    // scale (< 60 kly) so positions are true.
+    // Note: Cygnus X-1 itself is defined later under the Galactic Showpieces
+    // section (it ships with a custom 3D visual).  It still participates in
+    // this group via isStellarBH:true added on its showpiece entry.
+    {
+        id: 'v404_cyg', name: 'V404 Cygni', abbr: 'V404 Cyg', type: 'Stellar BH (LMXB)',
+        l: 73.12, b: -2.09, dist: 7800,
+        temp: 0, spectral: 'SMBH',
+        color: 0x100600, glowColor: 0xff8844, size: 0.42,
+        desc: 'Recurrent black-hole microquasar — quiescent most of the time but produces spectacular outbursts when accretion-disk material avalanches onto the BH.  The June 2015 eruption was the brightest stellar-BH X-ray event in 26 years, briefly making it the brightest X-ray source in the sky and triggering a worldwide multi-wavelength campaign.',
+        props: [
+            ['Type', 'Low-mass X-ray binary (LMXB) — BH microquasar'],
+            ['BH mass', '9.0 ± 0.6 M☉'],
+            ['Companion', 'K3 III subgiant (~0.7 M☉)'],
+            ['Distance', '~7,800 ly (2.39 kpc, parallax)'],
+            ['Galactic l / b', '73.12° / −2.09°'],
+            ['Orbital period', '6.4714 days'],
+            ['Spin parameter', 'a* ≈ 0.86'],
+            ['Outbursts', '1938 · 1989 · 2015 · 2024 (mini)'],
+            ['Discovery', 'Optical nova 1938; X-ray ID 1989'],
+            ['Notable', '2015 outburst — brightest X-ray source briefly'],
+        ],
+        isStellarBH: true,
+    },
+    {
+        id: 'a0620_00', name: 'A0620-00 (V616 Mon)', abbr: 'A0620', type: 'Stellar BH (LMXB)',
+        l: 209.97, b: -6.54, dist: 3500,
+        temp: 0, spectral: 'SMBH',
+        color: 0x100600, glowColor: 0xff9955, size: 0.38,
+        desc: 'The best-measured stellar-mass black hole — its 6.6 M☉ has uncertainty of just ±0.25 M☉ thanks to the favourable 40° orbital inclination and short 7.75-hr period.  First detected as Nova Mon 1975 outburst, then quiescent for nearly 50 years.  The benchmark system for stellar-BH mass-function studies.',
+        props: [
+            ['Type', 'LMXB — BH (compact short-period binary)'],
+            ['BH mass', '6.61 ± 0.25 M☉ (best-measured)'],
+            ['Companion', 'K7 V dwarf (~0.4 M☉)'],
+            ['Distance', '~3,500 ly (1.06 kpc)'],
+            ['Galactic l / b', '209.97° / −6.54°'],
+            ['Orbital period', '7.75 hours (very short)'],
+            ['Outburst', '1975 — Nova Monocerotis'],
+            ['Notable', 'Mass benchmark for stellar BHs'],
+        ],
+        isStellarBH: true,
+    },
+    {
+        id: 'gro_j1655', name: 'GRO J1655-40', abbr: 'GRO J1655', type: 'BH Microquasar',
+        l: 344.98, b: 2.46, dist: 11000,
+        temp: 0, spectral: 'SMBH',
+        color: 0x100400, glowColor: 0xff7733, size: 0.50,
+        desc: 'A prototypical microquasar — a stellar-mass BH producing relativistic radio jets at v ≈ 0.92c, scaled-down analogues of those from supermassive AGN.  Detected by the Compton GRO observatory in 1994; subsequent outbursts (1996, 2005) revealed an iron-line wind from the inner accretion disk.  Used to test GR Lense-Thirring frame-dragging via its quasi-periodic oscillations.',
+        props: [
+            ['Type', 'LMXB — BH microquasar with jets'],
+            ['BH mass', '5.4 ± 0.3 M☉'],
+            ['Companion', 'F3-F6 IV subgiant (~2.3 M☉)'],
+            ['Distance', '~11,000 ly (3.2 kpc)'],
+            ['Galactic l / b', '344.98° / +2.46°'],
+            ['Orbital period', '2.6217 days'],
+            ['Spin parameter', 'a* ≈ 0.70'],
+            ['Jet velocity', '~0.92 c (relativistic)'],
+            ['Outbursts', '1994 · 1996 · 2005'],
+            ['Notable', 'Lense-Thirring precession candidate'],
+        ],
+        isStellarBH: true,
+    },
+    {
+        id: 'grs1915', name: 'GRS 1915+105', abbr: 'GRS 1915', type: 'BH Microquasar',
+        l: 45.37, b: -0.22, dist: 36000,
+        temp: 0, spectral: 'SMBH',
+        color: 0x080300, glowColor: 0xffbb55, size: 0.55,
+        desc: 'The fastest-spinning known black hole (a* > 0.98 — near the Kerr extremal bound) and the source of the longest X-ray outburst in history: continuously bright from 1992 until 2018, when it abruptly dimmed.  Hosted the first Galactic detection of apparent superluminal motion (1994); its radio jets reach v ≈ 0.98 c.',
+        props: [
+            ['Type', 'LMXB — BH microquasar (extreme spin)'],
+            ['BH mass', '14.0 ± 4.4 M☉'],
+            ['Companion', 'K-M III giant (~0.5 M☉)'],
+            ['Distance', '~36,000 ly (11 kpc)'],
+            ['Galactic l / b', '45.37° / −0.22°'],
+            ['Orbital period', '33.85 days (longest in BH LMXBs)'],
+            ['Spin parameter', 'a* > 0.98 (near-extremal Kerr)'],
+            ['Jet velocity', '~0.98 c'],
+            ['Active phase', '1992 – 2018 (26-yr outburst)'],
+            ['Notable', 'First Galactic superluminal motion (1994)'],
+        ],
+        isStellarBH: true,
+    },
+
     // ── Section header (sidebar only — no 3D object) ───────────────────────
     { id: '__sep_showpieces', sectionHeader: 'Galactic Showpieces (Nebulae & SNRs)', isHeader: true },
 
@@ -2762,6 +2854,7 @@ const CATALOG = [
             ['Inflated radio nebula', '~25 ly diameter (jet impacts ISM)'],
         ],
         isShowpiece: true,
+        isStellarBH: true,
     },
     {
         id: 'wr_104', name: 'WR 104 — "Pinwheel"', abbr: 'WR 104',
@@ -3070,6 +3163,96 @@ const CATALOG = [
             ['Luminosity', '~4 × 10¹³ L☉'],
             ['Apparent mag', '15.9 (V-band)'],
         ],
+    },
+
+    // ── Section header — Notable SMBHs + GW mergers ────────────────────────
+    { id: '__sep_bh_gw', sectionHeader: 'Notable SMBHs & Gravitational-Wave Mergers', isHeader: true },
+
+    // Two more supermassive BHs (the Coma BCG and the famous binary SMBH
+    // OJ 287) plus the two most-historic LIGO black-hole mergers.  Positions
+    // for the GW events are the centroids of their 90 %-credible localisation
+    // regions (uncertainty noted in their props).  Centaurus A — the nearest
+    // powerful AGN — is defined in the Local Universe Galaxies section as
+    // 'cen_a' and is not duplicated here.
+    {
+        id: 'ngc4889', name: 'NGC 4889 (Coma B)', abbr: 'NGC 4889', type: 'Giant Elliptical + Ultramassive BH',
+        l: 56.85, b: 87.96, dist: 308_000_000,
+        isIntergalactic: true,
+        temp: 4500, spectral: 'SMBH',
+        color: 0xffe0a8, glowColor: 0xffd07a, size: 4.6,
+        desc: 'A giant cD elliptical anchoring the Coma Cluster core (with NGC 4874).  Hosts one of the largest known black holes — ~21 billion M☉, comparable to Ton 618 but in the local universe.  The first SMBH whose mass was measured via stellar-velocity dispersion alone, requiring the M-σ relation to be extrapolated to extreme regimes.',
+        props: [
+            ['Type', 'cD Elliptical (E4 BCG)'],
+            ['Distance', '~308 Mly (94 Mpc)'],
+            ['Galactic l / b', '56.85° / +87.96° (galactic N pole)'],
+            ['Redshift', 'z ≈ 0.0216'],
+            ['Central BH', '2.1 × 10¹⁰ M☉ (21 billion M☉)'],
+            ['Schwarzschild radius', '~415 AU'],
+            ['Diameter', '~239,000 ly'],
+            ['Cluster', 'Coma — one of the two giant cDs'],
+            ['Notable', 'Among largest known SMBHs in the local universe'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: 'oj287', name: 'OJ 287 (Binary SMBH)', abbr: 'OJ 287', type: 'BL Lac Blazar / Binary SMBH',
+        l: 206.81, b: 35.82, dist: 3_500_000_000,
+        isIntergalactic: true,
+        temp: 0, spectral: 'SMBH',
+        color: 0x000000, glowColor: 0xffcc77, size: 3.4,
+        desc: 'A BL Lac blazar harbouring the best-confirmed binary supermassive black hole system.  The primary BH (~18.3 billion M☉) is orbited by a secondary (~150 million M☉) every ~12 years — and the secondary punches through the primary\'s accretion disk twice per orbit, producing predictable optical outbursts (1971, 1983, 1995, 2007, 2015, 2019 …).  The 2019 flare confirmed general-relativistic precession of the orbit.',
+        props: [
+            ['Type', 'BL Lac blazar / binary SMBH'],
+            ['Distance', '~3.5 Gly (z = 0.306)'],
+            ['Galactic l / b', '206.81° / +35.82°'],
+            ['Primary BH', '1.83 × 10¹⁰ M☉'],
+            ['Secondary BH', '1.5 × 10⁸ M☉ (orbits primary)'],
+            ['Orbital period', '~12 yr (precessing eccentric orbit)'],
+            ['Predicted outbursts', '1971·1983·1995·2007·2015·2019…'],
+            ['Notable', 'GR-precession-confirmed binary SMBH'],
+        ],
+    },
+    {
+        id: 'gw150914', name: 'GW150914 (First BH-BH merger)', abbr: 'GW150914', type: 'BH-BH Merger Event',
+        l: 250.0, b: -60.0, dist: 1_300_000_000,
+        isIntergalactic: true,
+        temp: 0, spectral: 'GW',
+        color: 0x442288, glowColor: 0xaa66ff, size: 2.8,
+        desc: 'The first direct detection of gravitational waves — 14 Sep 2015, 09:50:45 UTC, by LIGO Hanford + Livingston.  Two stellar-mass black holes (~36 + 29 M☉) spiralled together and merged, radiating ~3 M☉ of mass-energy as gravitational waves in ~0.2 s — momentarily outpowering the combined electromagnetic luminosity of every star in the observable universe.  Nobel Prize 2017.',
+        props: [
+            ['Event', 'BH-BH coalescence (LIGO)'],
+            ['Detected', '14 September 2015, 09:50:45 UTC'],
+            ['Primary BH', '35.6 +4.7/−3.1 M☉'],
+            ['Secondary BH', '30.6 +3.0/−4.4 M☉'],
+            ['Remnant BH', '63.1 +3.3/−3.0 M☉ (Kerr a* ≈ 0.69)'],
+            ['Energy radiated', '~3.0 M☉ c² in <0.2 s'],
+            ['Distance', '~1.3 Gly (z ≈ 0.09)'],
+            ['Localisation', '~600 deg² (90% credible)'],
+            ['Galactic l / b', '~250° / −60° (centroid; large uncertainty)'],
+            ['Notable', 'First direct GW detection · Nobel 2017'],
+        ],
+        isGWMerger: true,
+    },
+    {
+        id: 'gw190521', name: 'GW190521 (First IMBH)', abbr: 'GW190521', type: 'BH-BH Merger (IMBH formation)',
+        l: 244.0, b: 27.0, dist: 5_300_000_000,
+        isIntergalactic: true,
+        temp: 0, spectral: 'GW',
+        color: 0x882244, glowColor: 0xff66aa, size: 3.0,
+        desc: 'The most massive black-hole merger detected to date — 21 May 2019 by LIGO/Virgo.  The 85-M☉ primary sits squarely in the pair-instability supernova mass gap (~65–135 M☉), where stellar collapse should not be able to form a BH directly — strongly suggesting it formed from an earlier merger.  The 142-M☉ remnant is the first direct detection of an intermediate-mass black hole.',
+        props: [
+            ['Event', 'BH-BH merger (LIGO/Virgo O3a)'],
+            ['Detected', '21 May 2019, 03:02:29 UTC'],
+            ['Primary BH', '85 +21/−14 M☉ (pair-instability gap)'],
+            ['Secondary BH', '66 +17/−18 M☉'],
+            ['Remnant BH', '142 +28/−16 M☉ (first IMBH detection)'],
+            ['Energy radiated', '~8 M☉ c²'],
+            ['Distance', '~5.3 Gly (z ≈ 0.82)'],
+            ['Localisation', '~765 deg² (90% credible)'],
+            ['Galactic l / b', '~244° / +27° (centroid; large uncertainty)'],
+            ['Notable', 'First intermediate-mass BH detection'],
+        ],
+        isGWMerger: true,
     },
 
     // ── Section header (sidebar only — no 3D object) ───────────────────────
@@ -6630,6 +6813,63 @@ function makeGalaxySpriteCanvas(type, colorHex) {
             ctx.stroke();
         });
         ctx.restore();
+
+    } else if (type === 'gw_merger') {
+        // Gravitational-wave merger event: two small dark BH cores touching
+        // at the centre, surrounded by 4 expanding concentric ripples that
+        // suggest the radiated spacetime perturbation.  No bright EM core —
+        // these are detected by spacetime distortion alone.
+        ctx.save(); ctx.translate(cx, cx);
+
+        // Faint outer halo (the spacetime distortion "echo")
+        const halo = ctx.createRadialGradient(0,0, 30, 0,0, cx*0.92);
+        halo.addColorStop(0,    `rgba(${r},${g},${b},0.06)`);
+        halo.addColorStop(0.4,  `rgba(${r},${g},${b},0.10)`);
+        halo.addColorStop(1,    `rgba(${r},${g},${b},0.00)`);
+        ctx.fillStyle = halo;
+        ctx.beginPath(); ctx.arc(0,0, cx*0.92, 0, Math.PI*2); ctx.fill();
+
+        // Four expanding gravitational-wave ripples — bright thin annuli
+        const ripples = [
+            [38,  0.78],
+            [62,  0.55],
+            [88,  0.36],
+            [115, 0.20],
+        ];
+        ripples.forEach(([rad, op]) => {
+            ctx.beginPath();
+            ctx.arc(0, 0, rad, 0, Math.PI*2);
+            ctx.strokeStyle = `rgba(${r},${g},${b},${op})`;
+            ctx.lineWidth = 2.4;
+            ctx.stroke();
+            // Inner soft glow to give each ripple some thickness
+            const rg = ctx.createRadialGradient(0, 0, rad - 3, 0, 0, rad + 5);
+            rg.addColorStop(0,   `rgba(${r},${g},${b},0.0)`);
+            rg.addColorStop(0.5, `rgba(${r},${g},${b},${(op * 0.35).toFixed(3)})`);
+            rg.addColorStop(1,   `rgba(${r},${g},${b},0.0)`);
+            ctx.fillStyle = rg;
+            ctx.beginPath(); ctx.arc(0,0, rad + 5, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(0,0, rad - 3, 0, Math.PI*2);
+            ctx.globalCompositeOperation = 'destination-out';
+            ctx.fill();
+            ctx.globalCompositeOperation = 'source-over';
+        });
+
+        // Two merged BH cores — small dark discs with subtle accretion rim
+        [[-7, 0], [7, 0]].forEach(([dx, dy]) => {
+            // Bright accretion rim
+            const rim = ctx.createRadialGradient(dx, dy, 3, dx, dy, 9);
+            rim.addColorStop(0,    `rgba(${r},${g},${b},0.0)`);
+            rim.addColorStop(0.5,  `rgba(${r},${g},${b},0.75)`);
+            rim.addColorStop(0.85, `rgba(255,255,255,0.55)`);
+            rim.addColorStop(1,    `rgba(${r},${g},${b},0.0)`);
+            ctx.fillStyle = rim;
+            ctx.beginPath(); ctx.arc(dx, dy, 9, 0, Math.PI*2); ctx.fill();
+            // Dark core
+            ctx.fillStyle = 'rgba(2,1,8,1.0)';
+            ctx.beginPath(); ctx.arc(dx, dy, 4.5, 0, Math.PI*2); ctx.fill();
+        });
+        ctx.restore();
     }
     return cv;
 }
@@ -6661,7 +6901,7 @@ function buildGalaxySprite(s, pos) {
         coma_cluster:     'galaxy_cluster',
         ic1101:           'giant_galaxy',
         stephans_quintet: 'compact_group',
-        // Local Universe Galaxies (newly added)
+        // Local Universe Galaxies
         cen_a:            'elliptical',
         m82:              'irregular',
         m81:              'spiral',
@@ -6679,6 +6919,11 @@ function buildGalaxySprite(s, pos) {
         draco_dsph:       'elliptical',
         leo1_dsph:        'elliptical',
         antlia2_dsph:     'elliptical',
+        // Notable SMBHs & GW mergers
+        ngc4889:          'giant_galaxy',
+        oj287:            'quasar',
+        gw150914:         'gw_merger',
+        gw190521:         'gw_merger',
     };
     const spriteType = typeMap[s.id] || 'elliptical';
     const colorHex = s.glowColor ?? s.color;
