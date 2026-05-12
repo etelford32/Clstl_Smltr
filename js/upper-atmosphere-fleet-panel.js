@@ -912,6 +912,114 @@ export class FleetPanel {
     //
     // Result lives in this._backtests so successive analyzer paints
     // don't blow it away. The form rebuilds on every paint but the
+    // ── Phase 16: residual sparkline ─────────────────────────────────────
+    //
+    // Tiny inline chart of the asset's `residualHistory`, so the operator
+    // sees the TRAJECTORY into anomaly rather than just the verdict. Same
+    // BC-filter logic as detectAnomaly() — entries from before a BC edit
+    // get trimmed because they're not comparable to the current config.
+    //
+    // Layered SVG (back→front):
+    //   1. ±3σ band rectangle (faint amber) — only when σ > 0 (need ≥
+    //      5 prior samples for a meaningful sigma; gated by the detector)
+    //   2. median line (dashed cyan)
+    //   3. connecting polyline (subtle grey)
+    //   4. per-sample dots, latest one bigger + coloured by anomaly:
+    //        red if isAnomaly, green if in-band, amber otherwise.
+    //
+    // Visible from 3 samples onward — gives the operator the trajectory
+    // even before the detector has enough samples to fire (so they can
+    // already see a drift coming).
+    _renderResidualSparkline(asset, det) {
+        if (!asset?.residualHistory?.length) return '';
+        // Mirror the detector's filter: same BC params only. Edits to
+        // σ_BC create a discontinuity we shouldn't smooth over.
+        const bc  = asset.bcM2PerKg ?? null;
+        const bcS = asset.bcSigmaRel ?? null;
+        const tol = 1e-6;
+        const filtered = asset.residualHistory.filter(e =>
+            Math.abs((e.bcM2PerKg  ?? bc)  - bc)  < tol &&
+            Math.abs((e.bcSigmaRel ?? bcS) - bcS) < tol);
+        if (filtered.length < 3) return '';
+        const sorted = filtered.slice().sort((a, b) => a.ranAt - b.ranAt);
+        const values = sorted.map(e => e.residual_km);
+
+        const W = 160, H = 28, PAD_X = 3, PAD_Y = 4;
+
+        // Use the detector's median / σ when we have them — they're the
+        // canonical baseline + spread the badge fires against. When the
+        // detector hasn't enough samples to compute them, fall back to
+        // raw sample median (no band drawn).
+        const median = Number.isFinite(det?.median) ? det.median
+            : (() => {
+                const s = values.slice().sort((a, b) => a - b);
+                const n = s.length;
+                return n % 2 ? s[(n - 1) / 2] : 0.5 * (s[n / 2 - 1] + s[n / 2]);
+            })();
+        const sigma  = Number.isFinite(det?.sigma) ? det.sigma : 0;
+
+        // Y range: data + ±3σ band, padded by 5%.
+        let yLo = Math.min(...values, median - 3 * sigma);
+        let yHi = Math.max(...values, median + 3 * sigma);
+        const yRange = Math.max(yHi - yLo, 0.01);
+        yLo -= yRange * 0.05;
+        yHi += yRange * 0.05;
+
+        const sx = i => PAD_X + (W - 2 * PAD_X) * (i / Math.max(1, sorted.length - 1));
+        const sy = v => H - PAD_Y - (H - 2 * PAD_Y) * ((v - yLo) / (yHi - yLo));
+
+        const band = sigma > 0 ? (() => {
+            const y1 = sy(median + 3 * sigma);
+            const y2 = sy(median - 3 * sigma);
+            return `<rect x="${PAD_X}" y="${y1.toFixed(1)}"
+                          width="${(W - 2 * PAD_X).toFixed(1)}"
+                          height="${(y2 - y1).toFixed(1)}"
+                          fill="rgba(255,170,32,.10)"/>`;
+        })() : '';
+        const medY = sy(median);
+        const medLine = `<line x1="${PAD_X}" x2="${W - PAD_X}"
+                                y1="${medY.toFixed(1)}" y2="${medY.toFixed(1)}"
+                                stroke="rgba(0,200,200,.40)"
+                                stroke-dasharray="2 2" stroke-width="1"/>`;
+        const path = sorted.map((p, i) =>
+            `${i === 0 ? 'M' : 'L'}${sx(i).toFixed(1)},${sy(p.residual_km).toFixed(1)}`
+        ).join(' ');
+
+        const dots = sorted.map((p, i) => {
+            const isLast = i === sorted.length - 1;
+            const z = sigma > 0 ? Math.abs(p.residual_km - median) / sigma : 0;
+            const colour = isLast && det?.isAnomaly  ? '#ff5060'
+                         : isLast                    ? '#40e090'
+                         : z >= 3                    ? '#ffaa20'
+                                                     : '#9ab';
+            const r = isLast ? 2.4 : 1.6;
+            return `<circle cx="${sx(i).toFixed(1)}" cy="${sy(p.residual_km).toFixed(1)}"
+                            r="${r}" fill="${colour}"/>`;
+        }).join('');
+
+        const latest = sorted[sorted.length - 1];
+        const titleParts = [
+            `Residual history (${sorted.length} samples after BC filter)`,
+            `Latest: ${latest.residual_km.toFixed(2)} km`,
+        ];
+        if (Number.isFinite(median)) titleParts.push(`Median: ${median.toFixed(2)} km`);
+        if (sigma > 0) titleParts.push(`σ (MAD): ${sigma.toFixed(2)} km`);
+        if (Number.isFinite(det?.z)) titleParts.push(`z: ${det.z.toFixed(2)}`);
+        return `
+            <div class="ua-fleet-spark" title="${titleParts.join('\n')}">
+                <span class="ua-fleet-spark-label">skill</span>
+                <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"
+                     class="ua-fleet-spark-svg"
+                     aria-label="Residual history sparkline">
+                    ${band}${medLine}
+                    <path d="${path}" stroke="rgba(150,170,200,.65)"
+                          stroke-width="0.9" fill="none"/>
+                    ${dots}
+                </svg>
+                <span class="ua-fleet-spark-n">n=${sorted.length}</span>
+            </div>`;
+    }
+
     // textarea value is preserved by reading from the stored state.
 
     _renderBacktestBlock(r) {
@@ -1141,23 +1249,26 @@ export class FleetPanel {
         // magnitude floor (default 0.5 km) trip, so we don't spam the
         // operator about statistically-significant-but-trivial drift.
         const asset = this.fleet.findById(r.id);
-        if (asset) {
-            const det = detectAnomaly(asset);
-            if (det.isAnomaly) {
-                const dir = det.direction === 'high'
-                    ? 'higher residual than baseline'
-                    : 'lower residual than baseline';
-                const deltaKm = (det.latestResidual - det.median);
-                const sign = deltaKm >= 0 ? '+' : '−';
-                const aTitle = `Anomaly detected — latest residual ${sign}${Math.abs(deltaKm).toFixed(2)} km off median.\n`
-                    + `Sample: ${det.sampleCount} prior obs · median ${det.median.toFixed(2)} km · σ ${det.sigma.toFixed(2)} km\n`
-                    + `z = ${det.z.toFixed(1)} (${dir})\n`
-                    + `Possible causes: recent maneuver, attitude change, geometry change, debris event.\n`
-                    + `Refresh TLE history with ⟳ over a few days to confirm or clear.`;
-                badges.push(`<span class="ua-fleet-badge ua-fleet-badge--high ua-fleet-badge-anom"
-                                  title="${aTitle}">⚠ ANOMALY z=${det.z.toFixed(1)}σ</span>`);
-            }
+        const anomDet = asset ? detectAnomaly(asset) : null;
+        if (anomDet?.isAnomaly) {
+            const dir = anomDet.direction === 'high'
+                ? 'higher residual than baseline'
+                : 'lower residual than baseline';
+            const deltaKm = (anomDet.latestResidual - anomDet.median);
+            const sign = deltaKm >= 0 ? '+' : '−';
+            const aTitle = `Anomaly detected — latest residual ${sign}${Math.abs(deltaKm).toFixed(2)} km off median.\n`
+                + `Sample: ${anomDet.sampleCount} prior obs · median ${anomDet.median.toFixed(2)} km · σ ${anomDet.sigma.toFixed(2)} km\n`
+                + `z = ${anomDet.z.toFixed(1)} (${dir})\n`
+                + `Possible causes: recent maneuver, attitude change, geometry change, debris event.\n`
+                + `Refresh TLE history with ⟳ over a few days to confirm or clear.`;
+            badges.push(`<span class="ua-fleet-badge ua-fleet-badge--high ua-fleet-badge-anom"
+                              title="${aTitle}">⚠ ANOMALY z=${anomDet.z.toFixed(1)}σ</span>`);
         }
+        // Phase 16: residual sparkline — shown whenever ≥3 same-BC
+        // entries exist, regardless of whether the detector has enough
+        // for a full anomaly verdict. Lets operators see drift
+        // BEFORE it crosses the 3σ threshold.
+        const sparkline = asset ? this._renderResidualSparkline(asset, anomDet) : '';
 
         // SVG mini-chart: nowcast vs forecast altitude over the horizon.
         const chart = _miniDecayChart(decay);
@@ -1214,6 +1325,7 @@ export class FleetPanel {
                     <div class="ua-fleet-stat-row ua-dim">${orbit}</div>
                 </div>
                 ${badges.length ? `<div class="ua-fleet-badges">${badges.join('')}</div>` : ''}
+                ${sparkline}
                 ${bcEditor}
                 ${this._renderBacktestBlock(r)}
                 <div class="ua-fleet-chart">${chart}</div>

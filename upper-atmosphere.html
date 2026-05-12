@@ -802,6 +802,37 @@ input[type=range]::-moz-range-thumb {
     border-width:2px !important;
     cursor:help;
 }
+
+/* ─── Per-asset residual sparkline (Phase 16) ───────────── */
+/* Shows the trajectory of backtest residuals over time so operators
+ * see drift BEFORE it crosses the anomaly threshold. Amber band is
+ * the ±3σ MAD envelope from the anomaly detector; dashed line is the
+ * median; the rightmost dot is the most recent observation, sized up
+ * + colour-coded by the verdict. */
+.ua-fleet-spark {
+    display:flex; align-items:center; gap:6px;
+    padding:2px 0;
+    font-size:.58rem;
+    color:#789;
+    font-variant-numeric:tabular-nums;
+    cursor:help;
+    user-select:none;
+}
+.ua-fleet-spark-label {
+    flex:0 0 auto;
+    color:#9ab;
+    text-transform:uppercase;
+    letter-spacing:.06em;
+}
+.ua-fleet-spark-svg {
+    flex:1 1 auto;
+    height:28px;
+    max-width:200px;
+    /* Subtle background so the amber band reads even when σ is tiny. */
+    background:rgba(8,4,22,.30);
+    border-radius:3px;
+}
+.ua-fleet-spark-n { flex:0 0 auto; color:#789; }
 .ua-fleet-skill-stat {
     color:#9ab; font-size:.6rem;
     font-variant-numeric:tabular-nums;
