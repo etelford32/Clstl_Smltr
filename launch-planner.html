@@ -1464,7 +1464,14 @@ body[data-density="compact"] .lp-density-btn {
         try {
             const api = initVehicleCanvas(canvas, {
                 vehicle: 'shuttle',
-                autoRotate: true,
+                // OFF by default — the 3/4 orbit at the rocket-fit distance
+                // sweeps through the FSS launch-tower columns (~10 m off
+                // centerline at ~80 m radius), so a slow auto-rotate reads
+                // as the camera "snapping" to a wall of orange beam every
+                // few seconds. Must match the lh-toggle[data-toggle=autoRotate]
+                // button's default unlit state below — otherwise the UI lies
+                // about what the camera is actually doing.
+                autoRotate: false,
                 onVehicleChange: ({ id, info }) => {
                     renderMeta(info);
                     showVariantRow(id);
