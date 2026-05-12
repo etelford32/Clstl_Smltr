@@ -344,6 +344,21 @@ nav {
 #coord-tip .ct-readout .ct-rd-icon { display:inline-block; width:14px; }
 #coord-tip .ct-readout .ct-rd-val  { color:#ffd9a8; font-weight:600; }
 
+/* Provenance chip: a "you are looking at a forecast (or replay)" hint
+   prepended to the readout list whenever the slider isn't parked at
+   live. Confidence colouring matches the slider's tc-offset chip so
+   the two surfaces speak the same language. */
+#coord-tip .ct-rd-prov {
+    border-bottom: 1px solid rgba(255,255,255,.06);
+    padding-bottom: 3px; margin-bottom: 3px;
+    font-size: 9px; letter-spacing: .03em;
+}
+#coord-tip .ct-rd-prov .ct-rd-val { font-weight: 600; }
+#coord-tip .ct-rd-prov[data-prov="replay"]        .ct-rd-val { color: #6ee; }
+#coord-tip .ct-rd-prov[data-prov="forecast-near"] .ct-rd-val { color: #ffb366; }
+#coord-tip .ct-rd-prov[data-prov="forecast-mid"]  .ct-rd-val { color: #ff9933; }
+#coord-tip .ct-rd-prov[data-prov="forecast-far"]  .ct-rd-val { color: #ff6b3d; }
+
 /* ─── Layer panel ────────────────────────────────────────────── */
 #layer-panel {
     position:absolute; top:10px; right:10px; z-index:50;
@@ -1463,7 +1478,20 @@ nav {
     min-width: 172px; font-family: monospace;
 }
 .tc-time   { color: #0ee; font-size: 11px; line-height: 1;   letter-spacing: .02em; }
-.tc-offset { color: #667; font-size: 9px;  line-height: 1.2; margin-top: 2px; }
+.tc-offset {
+    color: #667; font-size: 9px;  line-height: 1.2; margin-top: 2px;
+    font-weight: 600; letter-spacing: .05em;
+    transition: color .15s ease;
+}
+/* Time-mode chip styling. Driven by data-tc-mode (set by the animate
+   loop). Live = neutral; replay = cyan; forecast splits by lead-time
+   into three confidence tiers (near/mid/far) borrowed from
+   well-documented NWP skill regimes. */
+.tc-offset[data-tc-mode="live"]          { color: #667; }
+.tc-offset[data-tc-mode="replay"]        { color: #0cc; }
+.tc-offset[data-tc-mode="forecast-near"] { color: #ffb366; }
+.tc-offset[data-tc-mode="forecast-mid"]  { color: #ff9933; }
+.tc-offset[data-tc-mode="forecast-far"]  { color: #ff6b3d; }
 
 /* 24-h replay slider. Range covers -1440..0 minutes (= -24 h..now); each
    step is one minute so keyboard arrows are usable. The native input
@@ -1477,31 +1505,39 @@ nav {
     min-width: 26px; user-select: none;
 }
 .tc-scrub-edge.right { text-align: right; color: #0ee; }
-/* Slider domain is [-10080, +4320] minutes (= -7d .. +3d). The "now"
-   mark sits at (10080 / 14400) = 70% across the track. CSS gradient
-   below paints the past side (left of 70%) cyan and the future side
-   (right of 70%) amber-dashed-ish so users can read at a glance which
-   half of the timeline they're scrubbing. */
+/* Slider domain is [-10080, +20160] minutes (= -7d .. +14d). "Now"
+   sits at 10080 / 30240 = 33.33 % across the track. We paint:
+     1. A flat cyan→amber half-and-half gradient (past vs future).
+     2. A 24-h-spaced tick stripe overlaid on top so the user can
+        count days at a glance.
+     3. A taller white "now" tick at 33.33 %.
+   All three are layered into the same `background` shorthand so the
+   slider's native input rendering still drives the thumb position.
+   --tc-now-pct is the single source of truth for the now-position;
+   if the slider range ever changes again, only this var moves. */
 #tc-scrub {
+    --tc-now-pct: 33.333%;
     flex: 1; min-width: 240px;
     -webkit-appearance: none; appearance: none;
     height: 4px;
-    background: linear-gradient(to right,
-        rgba(0,200,200,.10) 0%,
-        rgba(0,200,200,.26) 70%,
-        rgba(255,170,60,.10) 70.01%,
-        rgba(255,170,60,.30) 100%);
-    /* Vertical "now" tick painted on top of the track. */
-    background-image:
+    background:
+        /* 1. "now" tick (taller, white) */
+        linear-gradient(rgba(255,255,255,.7), rgba(255,255,255,.7))
+            no-repeat var(--tc-now-pct) center / 1.5px 12px,
+        /* 2. 24-h tick stripe across the whole track. The track is
+              30,240 min wide; each day is 1,440 min = 1/21 of the
+              track. We use 4.7619 % (=100/21) as the repeating gap
+              so 21 faint ticks line up to exact day boundaries. */
+        repeating-linear-gradient(to right,
+            transparent 0, transparent calc(4.7619% - 1px),
+            rgba(255,255,255,.10) calc(4.7619% - 1px),
+            rgba(255,255,255,.10) 4.7619%) no-repeat 0 center / 100% 6px,
+        /* 3. Past vs future tint */
         linear-gradient(to right,
             rgba(0,200,200,.10) 0%,
-            rgba(0,200,200,.26) 70%,
-            rgba(255,170,60,.10) 70.01%,
-            rgba(255,170,60,.30) 100%),
-        linear-gradient(rgba(255,255,255,.55), rgba(255,255,255,.55));
-    background-size: 100% 100%, 1px 10px;
-    background-position: 0 0, 70% center;
-    background-repeat: no-repeat, no-repeat;
+            rgba(0,200,200,.26) var(--tc-now-pct),
+            rgba(255,170,60,.10) calc(var(--tc-now-pct) + 0.01%),
+            rgba(255,170,60,.30) 100%);
     border-radius: 2px; outline: none; margin: 0;
     cursor: pointer;
 }
@@ -3654,6 +3690,31 @@ function _renderHoverReadouts(lat, lon) {
     const box = document.getElementById('ct-readouts');
     if (!box) return;
     const rows = [];
+
+    // Provenance + lead-time chip. Tells the user whether the values
+    // they're about to read came from an observation, a recorded
+    // replay frame, or a forecast — and for forecasts, gives an
+    // honest first-order confidence tier based on lead time. Values
+    // are sampled from the resolver's lerp output (same source as the
+    // globe paint) so the badge is consistent with what they see.
+    const _mode = _simTimeMode(simTimeMs);
+    if (_mode !== 'live') {
+        const dt    = simTimeMs - Date.now();
+        const absH  = Math.abs(dt) / 3600_000;
+        const sign  = dt >= 0 ? '+' : '−';
+        const span  = absH < 1
+            ? `${sign}${Math.round(Math.abs(dt) / 60_000)}m`
+            : absH < 24
+                ? `${sign}${absH.toFixed(1)}h`
+                : `${sign}${(absH / 24).toFixed(1)}d`;
+        const label = _mode === 'replay'        ? `observed ${span}`
+                    : _mode === 'forecast-near' ? `forecast ${span} · high confidence`
+                    : _mode === 'forecast-mid'  ? `forecast ${span} · moderate confidence`
+                    :                              `forecast ${span} · lower confidence`;
+        rows.push(`<div class="ct-readout ct-rd-prov" data-prov="${_mode}">` +
+            `<span class="ct-rd-icon">${_mode === 'replay' ? '⏪' : '🔮'}</span>` +
+            `<span class="ct-rd-val">${label}</span></div>`);
+    }
 
     // Wind — uses the existing windParticles.lookupWind() so the readout
     // exactly matches the streaks (decoded from the same windBuffer with
@@ -8553,6 +8614,36 @@ function _fmtSimOffset(d) {
     if (abs < 86400) return `${sign}${(abs / 3600).toFixed(1)}h`;
     return `${sign}${(abs / 86400).toFixed(1)}d`;
 }
+/**
+ * Classify a simulated time relative to wall-clock into one of:
+ *   'live'           — within 60 s of now
+ *   'replay'         — in the past
+ *   'forecast-near'  — 0..24 h ahead   (high confidence)
+ *   'forecast-mid'   — 24..72 h ahead  (moderate)
+ *   'forecast-far'   — >72 h ahead     (lower confidence)
+ *
+ * Confidence bands match the well-documented decay of NWP skill with
+ * lead time — they're not derived from ensemble spread (the gridded
+ * feed is single-valued per cell), but they're an honest first-order
+ * proxy. Used by the scrub-bar chip and the hover-readout provenance
+ * badge so the user always knows whether they're looking at an
+ * observation or a forecast.
+ */
+function _simTimeMode(simMs) {
+    const dt = simMs - Date.now();
+    if (Math.abs(dt) < 60_000)      return 'live';
+    if (dt < 0)                     return 'replay';
+    if (dt < 24 * 3600_000)         return 'forecast-near';
+    if (dt < 72 * 3600_000)         return 'forecast-mid';
+    return 'forecast-far';
+}
+const _SIM_MODE_LABEL = {
+    'live':          'LIVE',
+    'replay':        'REPLAY',
+    'forecast-near': 'FORECAST',
+    'forecast-mid':  'FORECAST',
+    'forecast-far':  'FORECAST',
+};
 // Bus-mode policy — keep in one place so all four entry points (play
 // button, speed buttons, Now button, slider drag) map consistently:
 //   speed=1  + playing → 'live'    (real-time advance)
@@ -8842,7 +8933,16 @@ function animate() {
         const tEl = document.getElementById('tc-time-utc');
         const oEl = document.getElementById('tc-time-offset');
         if (tEl) tEl.textContent = _fmtSimUTC(simDate);
-        if (oEl) oEl.textContent = _fmtSimOffset(simDate);
+        if (oEl) {
+            const mode = _simTimeMode(simDate.getTime());
+            const offset = _fmtSimOffset(simDate);
+            // Live state: keep the bare "now" so the chip doesn't
+            // shout when the slider's parked at real-time.
+            oEl.textContent = mode === 'live'
+                ? offset
+                : `${_SIM_MODE_LABEL[mode]} ${offset}`;
+            oEl.dataset.tcMode = mode;
+        }
     }
 
     controls.update();
