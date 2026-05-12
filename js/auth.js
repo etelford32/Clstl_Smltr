@@ -27,6 +27,18 @@
  */
 
 import { getSupabase, isConfigured } from './supabase-config.js';
+import {
+    canUseAlerts as _cfgCanUseAlerts,
+    canUseAdvancedAlerts as _cfgCanUseAdvancedAlerts,
+    canUseEmbed as _cfgCanUseEmbed,
+    hasCustomBranding as _cfgHasCustomBranding,
+    isPro as _cfgIsPro,
+} from './tier-config.js';
+// Telemetry is fire-and-forget. Importing it auto-installs error
+// autocapture and Web-Vitals observers; we additionally pipe the
+// JWT into it on session restore so server-side rows attach to the
+// correct user_id.
+import { telemetry } from './telemetry.js';
 
 const AUTH_KEY = 'pp_auth';
 
@@ -45,18 +57,74 @@ class AuthManager {
                 const { data: { session } } = await this._supabase.auth.getSession();
                 if (session?.user) {
                     this._user = this._mapSupabaseUser(session.user);
+                    // Persist immediately so dashboard.html's localStorage
+                    // fallback can read a valid session even if fetchProfile
+                    // below errors out (RLS misconfig, network blip). Without
+                    // this, a Supabase-restored session whose profile fetch
+                    // fails leaves pp_auth empty → dashboard auth gate stays
+                    // visible despite the user being signed in.
+                    this._persistToStorage();
                     // Fetch server-side profile (role, plan) on session restore
                     // so admin status is available immediately, not just from stale user_metadata
                     await this.fetchProfile();
-                    console.info('[Auth] Supabase session restored:', this._user.email, 'role:', this._user.role);
+                    // Session-restore is hot path on every page load — log at
+                    // debug level so the email + role don't sit in the prod
+                    // console (visible to anyone screen-sharing or extension-
+                    // scraping). Bump back to .info if you need to diagnose
+                    // restore issues; users in DevTools can flip Console
+                    // verbosity to "Verbose" to see it.
+                    console.debug('[Auth] Supabase session restored');
                 }
 
                 // Listen for auth state changes (login, logout, token refresh)
-                this._supabase.auth.onAuthStateChange((event, session) => {
-                    if (session?.user) {
-                        this._user = this._mapSupabaseUser(session.user);
-                    } else {
+                // CRITICAL: _mapSupabaseUser builds the user from user_metadata,
+                // which doesn't carry role/plan/seat info — that lives in
+                // user_profiles and is set by fetchProfile(). Wiping the
+                // existing user object on every auth event silently demotes
+                // admins on token refresh, breaking the admin gate. So:
+                //   - On SIGNED_OUT we clear _user.
+                //   - On any other event with a session, we MERGE the new
+                //     auth payload onto the existing _user (preserving role/
+                //     plan/etc.) and refresh from user_profiles after a
+                //     token refresh / sign-in so the server stays the source
+                //     of truth.
+                this._supabase.auth.onAuthStateChange(async (event, session) => {
+                    // Pipe (or clear) the JWT into telemetry so subsequent
+                    // batches attach to the correct user_id server-side.
+                    try { telemetry.setUserToken(session?.access_token || null); } catch {}
+                    // TOKEN_REFRESHED with a missing access_token = silent
+                    // refresh failure. Supabase doesn't surface a dedicated
+                    // failure event, so we infer it here.
+                    if (event === 'TOKEN_REFRESHED' && !session?.access_token) {
+                        try { telemetry.recordAuthFailure('token_refresh_failed', { source: 'onAuthStateChange' }); } catch {}
+                    }
+                    if (event === 'SIGNED_OUT' || !session?.user) {
                         this._user = null;
+                    } else {
+                        const supaUser = session.user;
+                        const mapped = this._mapSupabaseUser(supaUser);
+                        // Preserve fields that come from user_profiles (role,
+                        // server-side plan, seat info) across token refreshes.
+                        const preserved = this._user ? {
+                            role:                       this._user.role,
+                            plan:                       this._user.plan,
+                            display_name:               this._user.display_name,
+                            subscription_status:        this._user.subscription_status,
+                            subscription_period_end:    this._user.subscription_period_end,
+                            classroom_seats:            this._user.classroom_seats,
+                            seats_used:                 this._user.seats_used,
+                            attribution_required:       this._user.attribution_required,
+                            branding:                   this._user.branding,
+                            parent_account_id:          this._user.parent_account_id,
+                            effective_plan:             this._user.effective_plan,
+                            alerts:                     this._user.alerts,
+                        } : {};
+                        this._user = { ...mapped, ...preserved };
+                        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+                            // Re-pull server state so role/plan are current.
+                            // Fire-and-forget — don't block the auth event.
+                            this.fetchProfile().catch(() => {});
+                        }
                     }
                     window.dispatchEvent(new CustomEvent('auth-changed', {
                         detail: { event, user: this._user }
@@ -101,20 +169,79 @@ class AuthManager {
         return this._user?.role === 'admin' || this._user?.role === 'superadmin';
     }
 
-    /** Check if current user is a tester (full feature access for testing). */
+    /**
+     * Check if current user is a tester (full feature access for testing).
+     * Accepts EITHER role='tester' (legacy QA accounts) OR plan='tester'
+     * (the new comp tier issued via admin invite). Both grant the same
+     * access — every paid-tier gate that delegates to isTester() lights up.
+     */
     isTester() {
-        return this._user?.role === 'tester';
+        return this._user?.role === 'tester' || this._user?.plan === 'tester';
     }
 
-    /** Check if user's plan allows alerts (basic or advanced). */
+    // ── Tier feature gates ───────────────────────────────────────────────
+    // Plans, lowest → highest:
+    //   free → basic → educator → advanced → institution → enterprise
+    //
+    // PRO ≡ Advanced. The "PRO" badge in the UI and the TIER.PRO feed
+    // bucket both mean exactly: Advanced or above (Institution and
+    // Enterprise are Advanced-equivalent on data access; they layer on
+    // seats, branding, and support). Use isPro() below as the canonical
+    // gate.
+    //
+    // Educator is positioned BETWEEN basic and advanced because it gates
+    // on use case (classroom + embed) rather than data depth — Educator
+    // gets all Basic data feeds but adds embed permission and the
+    // Powered-by attribution flag.
+
+    /** Tiers that get any kind of alert (everything except free). */
     canUseAlerts() {
-        const plan = this.getPlan();
-        return plan === 'basic' || plan === 'advanced' || this.isAdmin() || this.isTester();
+        return _cfgCanUseAlerts(this.getPlan(), this.getRole());
     }
 
-    /** Check if user's plan allows advanced alerts (advanced only). */
+    /** Tiers that get the full advanced alert set (advanced data feeds). */
     canUseAdvancedAlerts() {
-        return this.getPlan() === 'advanced' || this.isAdmin() || this.isTester();
+        return _cfgCanUseAdvancedAlerts(this.getPlan(), this.getRole());
+    }
+
+    /** Tiers that may embed the simulator in third-party pages. */
+    canUseEmbed() {
+        return _cfgCanUseEmbed(this.getPlan(), this.getRole());
+    }
+
+    /** Tiers that may replace the Parkers Physics branding with their own. */
+    hasCustomBranding() {
+        return _cfgHasCustomBranding(this.getPlan());
+    }
+
+    /**
+     * Canonical PRO gate. PRO ≡ Advanced.
+     *
+     * Advanced, Institution, and Enterprise plans share the same data
+     * depth, the same advanced alerts, and the same simulators — they
+     * differ only on seat count, branding, and support. Admins and
+     * testers also pass.
+     *
+     * Use this for any feature gate that asks "does this user get the
+     * full advanced product?". This is the canonical equivalent of the
+     * `tier: 'advanced'` nav label and the `TIER.PRO` feed bucket from
+     * config.js (planToTier()).
+     */
+    isPro() {
+        return _cfgIsPro(this.getPlan(), this.getRole());
+    }
+
+    /**
+     * True when the user's tier requires the "Powered by Parkers Physics"
+     * attribution badge to render. Reads the server-side flag if available
+     * (set by the sync_tier_derived_columns trigger), else falls back to
+     * the plan name. Educator is the only paid tier where attribution is
+     * a licensing condition — Basic doesn't embed at all, and
+     * Institution+ get to white-label.
+     */
+    requiresAttribution() {
+        if (this._user?.attribution_required != null) return !!this._user.attribution_required;
+        return this.getPlan() === 'educator';
     }
 
     /** Get alert preferences (or defaults if not loaded). */
@@ -124,6 +251,14 @@ class AuthManager {
 
     /** Check if current user has superadmin role. */
     isSuperAdmin() {
+        return this._user?.role === 'superadmin';
+    }
+
+    /**
+     * Lowercase-canonical alias matching the DB role literal `superadmin`.
+     * Prefer this in new code; isSuperAdmin() kept for back-compat.
+     */
+    isSuperadmin() {
         return this._user?.role === 'superadmin';
     }
 
@@ -141,7 +276,7 @@ class AuthManager {
         try {
             const { data, error } = await this._supabase
                 .from('user_profiles')
-                .select('role, plan, display_name, location_lat, location_lon, location_city, notify_aurora, notify_storm, notify_flare, notify_cme, notify_temperature, notify_sat_pass, notify_conjunction, notify_radio_blackout, notify_gps, notify_power_grid, notify_collision, notify_recurrence, notify_iono_disturbance, aurora_kp_threshold, storm_g_threshold, flare_class_threshold, conjunction_threshold_km, temp_high_f, temp_low_f, radio_r_threshold, gnss_risk_threshold, power_grid_g_threshold, email_alerts, email_min_severity, alert_cooldown_min')
+                .select('role, plan, display_name, subscription_status, subscription_period_end, classroom_seats, seats_used, attribution_required, branding, parent_account_id, location_lat, location_lon, location_city, notify_aurora, notify_storm, notify_flare, notify_cme, notify_temperature, notify_sat_pass, notify_conjunction, notify_radio_blackout, notify_gps, notify_power_grid, notify_collision, notify_recurrence, notify_iono_disturbance, aurora_kp_threshold, storm_g_threshold, flare_class_threshold, conjunction_threshold_km, temp_high_f, temp_low_f, radio_r_threshold, gnss_risk_threshold, power_grid_g_threshold, email_alerts, email_min_severity, alert_cooldown_min')
                 .eq('id', this._user.id)
                 .single();
             if (error) {
@@ -168,6 +303,26 @@ class AuthManager {
                 if (data.role) this._user.role = data.role;
                 this._user.plan = data.plan || this._user.plan;
                 if (data.display_name) this._user.name = data.display_name;
+                // Tier metadata used by dashboard subscription card + attribution badge
+                this._user.subscription_status     = data.subscription_status     ?? null;
+                this._user.subscription_period_end = data.subscription_period_end ?? null;
+                this._user.classroom_seats         = data.classroom_seats         ?? null;
+                this._user.seats_used              = data.seats_used              ?? 0;
+                this._user.attribution_required    = data.attribution_required    ?? false;
+                this._user.branding                = data.branding                ?? {};
+                this._user.parent_account_id       = data.parent_account_id       ?? null;
+                // Resolve effective plan through parent_account_id for class
+                // students. effective_plan_for() is a SECURITY DEFINER RPC
+                // that returns the parent's plan (or the user's own when
+                // there's no parent). Failure here is non-fatal — getPlan()
+                // falls back to the stored value.
+                this._user.effective_plan = data.plan || 'free';
+                if (data.parent_account_id) {
+                    try {
+                        const { data: ep } = await this._supabase.rpc('effective_plan_for', { p_user_id: this._user.id });
+                        if (ep && typeof ep === 'string') this._user.effective_plan = ep;
+                    } catch (_) { /* keep fallback */ }
+                }
                 this._user.location = data.location_lat ? {
                     lat: data.location_lat, lon: data.location_lon, city: data.location_city
                 } : null;
@@ -246,8 +401,39 @@ class AuthManager {
         return this.getDisplayName().split(' ')[0];
     }
 
+    /**
+     * Effective plan after applying client-side guards. Reads `plan` straight
+     * from the user_profiles row, then downgrades to 'free' if the
+     * subscription is in the 'canceled' state AND the period_end has already
+     * elapsed.
+     *
+     * Why: when Stripe receives an immediate-cancel-via-API request the
+     * webhook keeps the paid plan until period_end so the user gets the
+     * value they paid for. We don't have a cron that flips them back to
+     * 'free' once that boundary passes — this guard makes the UI honest
+     * even if the row hasn't been touched in a while.
+     *
+     * Admins/testers ALWAYS see their stored plan (an expired admin row
+     * is still an admin row).
+     */
     getPlan() {
-        return (this._user?.plan || 'free').toLowerCase();
+        // Class students inherit their parent's plan via effective_plan
+        // (cached during fetchProfile). When set, it short-circuits the
+        // canceled-subscription guard below — a student's "subscription"
+        // is the parent's, which is whatever Stripe says it is.
+        const effective = (this._user?.effective_plan || '').toLowerCase();
+        const stored    = (this._user?.plan || 'free').toLowerCase();
+        if (effective && effective !== stored && this._user?.parent_account_id) {
+            return effective;
+        }
+        if (this.isAdmin?.() || this.isTester?.()) return stored;
+        if ((this._user?.subscription_status || '').toLowerCase() !== 'canceled') return stored;
+        const endIso = this._user?.subscription_period_end;
+        if (!endIso) return stored;
+        const ts = Date.parse(endIso);
+        if (!Number.isFinite(ts)) return stored;
+        // Subscription is canceled AND we're past the paid window — treat as free.
+        return ts < Date.now() ? 'free' : stored;
     }
 
     /**
@@ -307,13 +493,17 @@ class AuthManager {
     async signUp({ email, password, name, plan = 'free' }) {
         if (this._supabase) {
             try {
-                // Always sign up as 'free' — Stripe webhook upgrades the plan after payment.
-                // Store the intended plan in user_metadata for reference, but enforce free.
+                // Plan is decided server-side. The signup trigger
+                // (supabase-plan-lockdown-migration.sql) HARD-CODES plan='free'
+                // and IGNORES any client-supplied plan/role metadata — passing
+                // them here would be a silent no-op. We omit them entirely so
+                // the contract is obvious to readers and we don't tempt anyone
+                // into thinking client-side state controls billing tier.
                 const { data, error } = await this._supabase.auth.signUp({
                     email,
                     password,
                     options: {
-                        data: { name, plan: 'free', intended_plan: plan },
+                        data: { name },
                     },
                 });
                 if (error) return { success: false, error: error.message };
@@ -366,30 +556,54 @@ class AuthManager {
      */
     async verifyAdminServerSide() {
         if (!this._supabase) {
-            // No Supabase — fall back to local check
             return { verified: this.isAdmin(), role: this.getRole(), error: 'Supabase not configured' };
         }
         try {
-            const { data: { user }, error: authErr } = await this._supabase.auth.getUser();
-            if (authErr || !user) return { verified: false, error: authErr?.message || 'No session' };
+            // Try getUser() first — it cross-checks the JWT against the
+            // Supabase Auth server (so a tampered local token gets rejected).
+            // If that fails (auth-session-missing on cold load, network hiccup,
+            // refresh window) fall back to getSession().user since the JWT
+            // has already been validated once during _init/onAuthStateChange.
+            let userId = null;
+            let authErrMsg = null;
+            try {
+                const { data: { user }, error: authErr } = await this._supabase.auth.getUser();
+                if (authErr) authErrMsg = authErr.message;
+                userId = user?.id || null;
+            } catch (e) { authErrMsg = e.message; }
+
+            if (!userId) {
+                const { data: { session } } = await this._supabase.auth.getSession();
+                userId = session?.user?.id || null;
+                if (!userId) {
+                    return { verified: false, error: authErrMsg || 'No session' };
+                }
+            }
 
             const { data, error: dbErr } = await this._supabase
                 .from('user_profiles')
                 .select('role')
-                .eq('id', user.id)
+                .eq('id', userId)
                 .single();
             if (dbErr) {
-                // If role column doesn't exist, the error will mention "role".
-                // Provide a helpful message so the admin knows to run the migration.
                 const msg = dbErr.message || '';
-                const hint = msg.includes('role') || msg.includes('column')
-                    ? 'Role column missing — run supabase-admin.sql in Supabase SQL Editor'
-                    : msg;
-                return { verified: false, error: hint };
+                // Most common failure modes — surface the recovery action,
+                // not just the raw error.
+                let hint;
+                if (msg.includes('role') || msg.toLowerCase().includes('column')) {
+                    hint = 'Role column missing — run supabase-admin.sql in Supabase SQL Editor';
+                } else if (msg.toLowerCase().includes('no rows')
+                        || msg.toLowerCase().includes('multiple') ) {
+                    hint = 'No user_profiles row — sign out, sign back in, then run the supabase-make-owner-superadmin.sql migration';
+                } else if (dbErr.code === '42501' || msg.toLowerCase().includes('permission')) {
+                    hint = `RLS denied SELECT on user_profiles — verify the "Users see own profile" policy is in place`;
+                } else {
+                    hint = msg;
+                }
+                return { verified: false, error: hint, dbCode: dbErr.code };
             }
 
             const role = data?.role || 'user';
-            // Update local state to match server
             if (this._user) this._user.role = role;
             this._persistToStorage();
 
@@ -397,6 +611,183 @@ class AuthManager {
             return { verified: isAdmin, role };
         } catch (err) {
             return { verified: false, error: err.message };
+        }
+    }
+
+    /**
+     * Server-side superadmin verification. Same shape as
+     * verifyAdminServerSide() but only passes for role === 'superadmin'.
+     * Used by /superadmin.html to gate role-management + audit log.
+     * @returns {{ verified: boolean, role?: string, error?: string }}
+     */
+    async verifySuperadminServerSide() {
+        const res = await this.verifyAdminServerSide();
+        if (!res || res.error || !res.role) {
+            return { verified: false, role: res?.role, error: res?.error || 'No role' };
+        }
+        return { verified: res.role === 'superadmin', role: res.role };
+    }
+
+    /**
+     * Promote a user to a new role via the audited promote_user RPC.
+     * Caller permissions are enforced server-side:
+     *   - admin     → may set role IN ('user', 'tester'); cannot touch admins
+     *   - superadmin → may set role IN ('user', 'tester', 'admin')
+     * Superadmin minting is SQL-Editor-only (no UI path).
+     *
+     * @param {string} userId
+     * @param {'user'|'tester'|'admin'} newRole
+     * @param {string} [reason]  Free-form note attached to the audit row.
+     * @returns {{ success: boolean, role?: string, error?: string }}
+     */
+    async promoteUser(userId, newRole, reason = null) {
+        if (!this._supabase) return { success: false, error: 'Supabase not configured' };
+        try {
+            const { data, error } = await this._supabase.rpc('promote_user', {
+                p_user_id:  userId,
+                p_new_role: newRole,
+                p_reason:   reason,
+            });
+            if (error) return { success: false, error: error.message, code: error.code };
+            const row = Array.isArray(data) ? data[0] : data;
+            return { success: true, role: row?.role || newRole };
+        } catch (err) {
+            return { success: false, error: err.message };
+        }
+    }
+
+    /**
+     * Superadmin-only: manually override a user's plan, bypassing Stripe.
+     * Used for comp accounts that didn't go through the invite flow.
+     * Reason required (10–500 characters); recorded to user_profiles_audit.
+     *
+     * @param {string} userId
+     * @param {'free'|'basic'|'educator'|'advanced'|'institution'|'enterprise'} newPlan
+     * @param {string} reason
+     */
+    async setUserPlanOverride(userId, newPlan, reason) {
+        if (!this._supabase) return { success: false, error: 'Supabase not configured' };
+        try {
+            const { data, error } = await this._supabase.rpc('set_user_plan_override', {
+                p_user_id:  userId,
+                p_new_plan: newPlan,
+                p_reason:   reason,
+            });
+            if (error) return { success: false, error: error.message, code: error.code };
+            const row = Array.isArray(data) ? data[0] : data;
+            return { success: true, plan: row?.plan || newPlan };
+        } catch (err) {
+            return { success: false, error: err.message };
+        }
+    }
+
+    /**
+     * Superadmin-only: fetch recent role/plan/Stripe-link audit rows.
+     * @param {number} [limit=100]  Server clamps to 1–1000.
+     */
+    async getRecentRoleAudit(limit = 100) {
+        if (!this._supabase) return { success: false, error: 'Supabase not configured', rows: [] };
+        try {
+            const { data, error } = await this._supabase.rpc('recent_role_audit', { p_limit: limit });
+            if (error) return { success: false, error: error.message, rows: [] };
+            return { success: true, rows: data || [] };
+        } catch (err) {
+            return { success: false, error: err.message, rows: [] };
+        }
+    }
+
+    /**
+     * Superadmin-only: top-N JS error fingerprints in the window.
+     * Backed by telemetry_top_errors RPC.
+     */
+    async getTopErrors(days = 30, limit = 25) {
+        if (!this._supabase) return { success: false, error: 'Supabase not configured', rows: [] };
+        try {
+            const { data, error } = await this._supabase.rpc('telemetry_top_errors',
+                { p_days: days, p_limit: limit });
+            if (error) return { success: false, error: error.message, rows: [] };
+            return { success: true, rows: data || [] };
+        } catch (e) { return { success: false, error: e.message, rows: [] }; }
+    }
+
+    /** Superadmin: top-N auth failure reasons (UNIONs auth_failures + client_telemetry). */
+    async getTopAuthFailures(days = 30, limit = 15) {
+        if (!this._supabase) return { success: false, error: 'Supabase not configured', rows: [] };
+        try {
+            const { data, error } = await this._supabase.rpc('telemetry_top_auth_failures',
+                { p_days: days, p_limit: limit });
+            if (error) return { success: false, error: error.message, rows: [] };
+            return { success: true, rows: data || [] };
+        } catch (e) { return { success: false, error: e.message, rows: [] }; }
+    }
+
+    /** Superadmin: top-N 404 paths in the window. */
+    async getTop404s(days = 30, limit = 25) {
+        if (!this._supabase) return { success: false, error: 'Supabase not configured', rows: [] };
+        try {
+            const { data, error } = await this._supabase.rpc('telemetry_top_404s',
+                { p_days: days, p_limit: limit });
+            if (error) return { success: false, error: error.message, rows: [] };
+            return { success: true, rows: data || [] };
+        } catch (e) { return { success: false, error: e.message, rows: [] }; }
+    }
+
+    /** Superadmin: Web Vitals + app perf summary (p50/p95 per metric per route). */
+    async getPerfSummary(days = 7, limit = 50) {
+        if (!this._supabase) return { success: false, error: 'Supabase not configured', rows: [] };
+        try {
+            const { data, error } = await this._supabase.rpc('telemetry_perf_summary',
+                { p_days: days, p_limit: limit });
+            if (error) return { success: false, error: error.message, rows: [] };
+            return { success: true, rows: data || [] };
+        } catch (e) { return { success: false, error: e.message, rows: [] }; }
+    }
+
+    /**
+     * Superadmin: full per-user telemetry timeline. Merges
+     * client_telemetry + activation_events for one user, sorted
+     * newest-first. Used by the User Management modal "View timeline"
+     * action so a superadmin can see what a single user actually
+     * experienced without joining tables in the SQL editor.
+     */
+    async getUserTimeline(userId, days = 30, limit = 250) {
+        if (!this._supabase) return { success: false, error: 'Supabase not configured', rows: [] };
+        try {
+            const { data, error } = await this._supabase.rpc('telemetry_user_timeline',
+                { p_user_id: userId, p_days: days, p_limit: limit });
+            if (error) return { success: false, error: error.message, rows: [] };
+            return { success: true, rows: data || [] };
+        } catch (e) { return { success: false, error: e.message, rows: [] }; }
+    }
+
+    /** Superadmin: aggregate counts for the timeline header strip. */
+    async getUserTelemetrySummary(userId, days = 30) {
+        if (!this._supabase) return { success: false, error: 'Supabase not configured', summary: null };
+        try {
+            const { data, error } = await this._supabase.rpc('telemetry_user_summary',
+                { p_user_id: userId, p_days: days });
+            if (error) return { success: false, error: error.message, summary: null };
+            const row = Array.isArray(data) ? data[0] : data;
+            return { success: true, summary: row || null };
+        } catch (e) { return { success: false, error: e.message, summary: null }; }
+    }
+
+    /**
+     * Admin/superadmin: list users for the management table.
+     * @param {{ limit?: number, offset?: number, search?: string }} [opts]
+     */
+    async listUsersForAdmin(opts = {}) {
+        if (!this._supabase) return { success: false, error: 'Supabase not configured', rows: [] };
+        try {
+            const { data, error } = await this._supabase.rpc('list_users_for_admin', {
+                p_limit:  opts.limit  ?? 200,
+                p_offset: opts.offset ?? 0,
+                p_search: opts.search ?? null,
+            });
+            if (error) return { success: false, error: error.message, rows: [] };
+            return { success: true, rows: data || [] };
+        } catch (err) {
+            return { success: false, error: err.message, rows: [] };
         }
     }
 
@@ -411,6 +802,12 @@ class AuthManager {
     requireAuth(redirectUrl = 'signin.html') {
         if (!this.isSignedIn()) {
             try { sessionStorage.setItem('pp_auth_redirect', window.location.href); } catch (_) {}
+            // Telemetry: track which gated routes anonymous users tried
+            // to reach. Helps identify where to add public marketing
+            // pages vs where the gate is correct.
+            try {
+                telemetry.recordRedirect(window.location.href, redirectUrl, 'unauthenticated');
+            } catch {}
             window.location.href = redirectUrl;
             return false;
         }
@@ -424,6 +821,89 @@ class AuthManager {
             sessionStorage.removeItem('pp_auth_redirect');
             return url;
         } catch (_) { return null; }
+    }
+
+    /**
+     * Start an OAuth sign-in flow. Provider-agnostic — the only
+     * provider-specific work happens in the Supabase dashboard
+     * (see OAUTH_SETUP.md). Supabase performs the redirect itself
+     * via signInWithOAuth(); this method returns either an immediate
+     * `{ success:true }` (browser is leaving the page) or a
+     * `{ success:false, error }` if the call couldn't even start.
+     *
+     * The `redirectTo` URL must be on the Supabase project's allowed
+     * redirect list (Authentication → URL Configuration). We default
+     * to `<origin>/auth-callback.html`, which is where the provider-
+     * agnostic landing page lives; opting into a different
+     * redirectTo is allowed but generally only useful for tests.
+     *
+     * @param {'google'|'apple'|string} provider
+     * @param {{ redirectTo?: string, scopes?: string }} [options]
+     * @returns {Promise<{ success: boolean, error?: string }>}
+     */
+    async signInWithProvider(provider, options = {}) {
+        if (!this._supabase) {
+            return { success: false, error: 'Supabase client not configured' };
+        }
+        try {
+            const redirectTo = options.redirectTo
+                || `${window.location.origin}/auth-callback.html`;
+            const { error } = await this._supabase.auth.signInWithOAuth({
+                provider,
+                options: {
+                    redirectTo,
+                    scopes: options.scopes,   // undefined → provider defaults
+                    // queryParams default is fine; PKCE is auto for browsers.
+                },
+            });
+            if (error) return { success: false, error: error.message };
+            return { success: true };
+        } catch (err) {
+            return { success: false, error: err.message };
+        }
+    }
+
+    /**
+     * Sign in via emailed magic link. Sends a one-time link to the
+     * user's inbox; clicking it lands on /auth-callback.html where the
+     * Supabase client picks the session up via detectSessionInUrl
+     * (same code path as the OAuth callback, no extra wiring needed).
+     *
+     * Anti-enumeration: Supabase returns success regardless of
+     * whether the email maps to an existing user. The UI shows
+     * "Check your email" either way; only an actual user with that
+     * address gets a delivered email.
+     *
+     * shouldCreateUser is FALSE — magic links are intentionally a
+     * sign-IN flow, not a sign-UP flow. New accounts go through the
+     * password form so a recoverable credential exists. A request for
+     * an unknown email is silently ignored on Supabase's side.
+     *
+     * @param {string} email
+     * @param {{ redirectTo?: string }} [options]
+     * @returns {{ success: boolean, error?: string, code?: string }}
+     */
+    async signInWithMagicLink(email, options = {}) {
+        if (!this._supabase) {
+            return { success: false, error: 'Supabase client not configured' };
+        }
+        try {
+            const redirectTo = options.redirectTo
+                || `${window.location.origin}/auth-callback.html?from=magic_link`;
+            const { error } = await this._supabase.auth.signInWithOtp({
+                email,
+                options: {
+                    emailRedirectTo:  redirectTo,
+                    shouldCreateUser: false,
+                },
+            });
+            if (error) {
+                return { success: false, error: error.message, code: error.status };
+            }
+            return { success: true };
+        } catch (err) {
+            return { success: false, error: err.message };
+        }
     }
 
     /**

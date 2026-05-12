@@ -47,17 +47,26 @@ const SUPABASE_URL  = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABA
 const SUPABASE_KEY  = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SECRET_KEY || '';
 const RESEND_API    = 'https://api.resend.com/emails';
 const RESEND_KEY    = process.env.RESEND_API_KEY || '';
-const FROM_EMAIL    = process.env.ALERT_FROM_EMAIL || 'Parker Physics Alerts <alerts@parkerphysics.com>';
+const FROM_EMAIL    = process.env.ALERT_FROM_EMAIL || 'Parkers Physics Alerts <alerts@parkersphysics.com>';
 const MAX_PER_HOUR  = 10;
+
+// CORS: same-site only. Aligned with the vercel.json header rule on
+// `/api/alerts/*`. The function MUST emit the same value its parent rule
+// declares — Vercel's edge does NOT layer them; the function-set header
+// wins. Wildcard would accept credentialed cross-origin requests from
+// any third-party page that obtained a user JWT.
+const ALLOW_ORIGIN  = 'https://parkersphysics.com';
+const CORS_HEADERS = Object.freeze({
+    'Access-Control-Allow-Origin':  ALLOW_ORIGIN,
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    Vary:                           'Origin',
+});
 
 function jsonResp(body, status = 200) {
     return Response.json(body, {
         status,
-        headers: {
-            'Access-Control-Allow-Origin':  '*',
-            'Access-Control-Allow-Methods': 'POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-        },
+        headers: { ...CORS_HEADERS },
     });
 }
 
@@ -140,7 +149,7 @@ function buildEmailHtml(title, body, severity, alertType, locationLabel) {
 <body style="margin:0;padding:0;background:#0a0a14;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">
 <div style="max-width:520px;margin:0 auto;padding:24px 20px">
   <div style="text-align:center;margin-bottom:20px">
-    <span style="font-size:1.1rem;font-weight:800;background:linear-gradient(45deg,#ffd700,#ff8c00);-webkit-background-clip:text;-webkit-text-fill-color:transparent">Parker Physics</span>
+    <span style="font-size:1.1rem;font-weight:800;background:linear-gradient(45deg,#ffd700,#ff8c00);-webkit-background-clip:text;-webkit-text-fill-color:transparent">Parkers Physics</span>
   </div>
   <div style="background:#12111a;border:1px solid #222;border-radius:12px;padding:20px;margin-bottom:16px">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
@@ -155,7 +164,7 @@ function buildEmailHtml(title, body, severity, alertType, locationLabel) {
     <a href="https://parkerphysics.com/dashboard.html" style="display:inline-block;padding:10px 24px;background:linear-gradient(45deg,#ff8c00,#ffd700);color:#000;font-weight:700;border-radius:8px;text-decoration:none;font-size:.82rem">View Dashboard</a>
   </div>
   <p style="margin-top:20px;font-size:.65rem;color:#445;text-align:center;line-height:1.5">
-    You're receiving this because you enabled email alerts in your Parker Physics dashboard.<br>
+    You're receiving this because you enabled email alerts in your Parkers Physics dashboard.<br>
     <a href="https://parkerphysics.com/dashboard.html#saved-locations-card" style="color:#667">Manage alert preferences &amp; locations</a>
   </p>
 </div>
@@ -171,11 +180,7 @@ export default async function handler(req) {
     if (req.method === 'OPTIONS') {
         return new Response(null, {
             status: 204,
-            headers: {
-                'Access-Control-Allow-Origin':  '*',
-                'Access-Control-Allow-Methods': 'POST, OPTIONS',
-                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-            },
+            headers: { ...CORS_HEADERS },
         });
     }
 

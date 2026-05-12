@@ -1,0 +1,3308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Achernar — Oblate Be Star · Parkers Physics App</title>
+<link rel="canonical" href="https://parkersphysics.com/achernar.html">
+<meta name="description" content="Three-dimensional model of Achernar (Alpha Eridani), the most-oblate known star. Rapid rotation, gravity darkening, and a transient decretion disk.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/achernar.html">
+<meta property="og:title" content="Achernar — Oblate Be Star — Parkers Physics">
+<meta property="og:description" content="Three-dimensional model of Achernar (Alpha Eridani), the most-oblate known star. Rapid rotation, gravity darkening, and a transient decretion disk.">
+<meta property="og:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+<meta property="og:image:alt" content="Parkers Physics — real-time astrophysics simulations">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Achernar — Oblate Be Star — Parkers Physics">
+<meta name="twitter:description" content="Three-dimensional model of Achernar (Alpha Eridani), the most-oblate known star. Rapid rotation, gravity darkening, and a transient decretion disk.">
+<meta name="twitter:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#ddd;
+    font-family:'Segoe UI',system-ui,sans-serif; }
+
+/* Body is a flex column: nav at top (intrinsic height) and #app fills the
+   remaining viewport regardless of how tall the nav actually renders.  This
+   replaces the old calc(100vh − 48px) which was off-by-2 vs. nav's 50px and
+   had no fallback when the nav wrapped or browser zoom changed font size. */
+body { display: flex; flex-direction: column; }
+
+#app { position:relative; width:100%; flex:1 1 0; min-height:0; overflow:hidden; }
+#canvas-wrap {
+    position:absolute; inset:0;
+    background: radial-gradient(ellipse at 45% 50%, #060214 0%, #02010a 60%, #000 100%);
+}
+#canvas-wrap canvas { display:block; width:100% !important; height:100% !important; }
+
+#hud {
+    position:absolute; top:12px; left:12px; z-index:50;
+    background: rgba(4,2,16,.72); backdrop-filter: blur(8px);
+    border: 1px solid rgba(180,120,255,.22); border-radius: 8px;
+    padding: 10px 14px; font-size: 11px; line-height: 1.7;
+    pointer-events: none; min-width: 210px;
+}
+#hud h3 { font-size: 13px; color:#c8a8ff; margin-bottom:4px; letter-spacing:.5px; }
+#hud .val { color:#d8c0ff; font-weight:600; }
+#hud .vh  { color:#ffb0d0; font-weight:600; }
+#hud .dim { color:#555; font-size:10px; }
+#hud .sep { border-top:1px solid rgba(180,120,255,.18); margin:5px 0; }
+#fps-display { color:#40ff80; font-weight:600; }
+#hud .sub { font-size:10px; color:#888; font-weight:600; margin-top:2px; }
+
+.cv-btn {
+    position: absolute; z-index: 60;
+    background: rgba(4,2,16,.82); backdrop-filter: blur(8px);
+    border: 1px solid rgba(180,120,255,.34); border-radius: 8px;
+    color: #c8a8ff; cursor: pointer; font-family: inherit;
+    font-size: 12px; padding: 8px 12px; transition: all .15s;
+    touch-action: manipulation; text-decoration:none;
+    line-height: 1.2; font-weight: 500;
+    box-shadow: 0 2px 8px rgba(0,0,0,.35);
+}
+.cv-btn:hover {
+    background: rgba(120,80,200,.28); border-color:#b080ff; color:#fff;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(180,120,255,.30);
+}
+.cv-btn:active { transform: translateY(0); }
+.cv-btn .kbd {
+    display:inline-block; margin-left:6px; padding:1px 5px;
+    font-size:9.5px; font-weight:600; color:#888;
+    background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.14);
+    border-radius:3px; line-height:1.2;
+}
+.cv-btn:hover .kbd { color:#dab8ff; border-color:rgba(180,120,255,.4); }
+#btn-panel-open { top:12px; right:12px; }
+#btn-center     { bottom:16px; right:12px; }
+#btn-sw         { top:12px; right:115px; }
+@media (max-width: 720px) {
+    .cv-btn { font-size: 11px; padding: 7px 10px; }
+    .cv-btn .kbd { display:none; }
+}
+
+#backdrop { display:none; position:absolute; inset:0; z-index:400; background:rgba(0,0,0,.45); cursor:pointer; }
+#backdrop.show { display:block; }
+
+#panel {
+    position:absolute; top:0; right:0; bottom:0; width:min(340px,90vw);
+    background: rgba(3,2,14,.95); backdrop-filter: blur(16px);
+    border-left: 1px solid rgba(180,120,255,.18); z-index:450;
+    display:flex; flex-direction:column; overflow:hidden;
+    transform: translateX(100%); transition: transform .3s cubic-bezier(.4,0,.2,1);
+    box-shadow: -8px 0 24px rgba(0,0,0,.45);
+}
+@media (min-width: 880px) {
+    /* Non-modal on desktop — let the user see the simulation through the
+       panel and keep dragging the camera while controls are open. */
+    #panel { background: rgba(3,2,14,.86); }
+}
+#panel.open { transform: translateX(0); }
+#panel-header { flex-shrink:0; display:flex; align-items:flex-start; justify-content:space-between;
+    padding:12px 14px 8px; border-bottom:1px solid rgba(180,120,255,.15); }
+.panel-star { font-size:15px; font-weight:700; color:#c8a8ff; letter-spacing:.8px; }
+.panel-sub  { font-size:10px; color:#555; margin-top:2px; }
+.panel-badge { display:inline-block; margin-top:5px; padding:2px 8px; font-size:9px; letter-spacing:.4px;
+    background:rgba(180,120,255,.14); border:1px solid rgba(180,120,255,.32); border-radius:10px; color:#dab8ff; }
+#btn-panel-close { flex-shrink:0; margin-left:6px; margin-top:0;
+    background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.14);
+    border-radius:6px; color:#aaa; cursor:pointer; font-size:16px;
+    width:30px; height:30px; line-height:1; transition:all .15s;
+    display:inline-flex; align-items:center; justify-content:center; }
+#btn-panel-close:hover { background:rgba(255,80,80,.18); border-color:rgba(255,80,80,.5); color:#ff7070; }
+#panel-body { flex:1; overflow-y:auto; overflow-x:hidden; padding:8px; }
+#panel-body::-webkit-scrollbar { width:4px; }
+#panel-body::-webkit-scrollbar-thumb { background:rgba(180,120,255,.35); border-radius:2px; }
+
+.sec { margin-bottom:8px; border:1px solid rgba(180,120,255,.14); border-radius:7px; overflow:hidden; background:rgba(180,120,255,.02); }
+.sec-hd { display:flex; justify-content:space-between; align-items:center;
+    padding:8px 11px; background:rgba(180,120,255,.07); color:#c8a8ff; font-weight:600;
+    font-size:10px; cursor:pointer; user-select:none; text-transform:uppercase; letter-spacing:.7px; }
+.sec-hd:hover { background:rgba(180,120,255,.14); }
+.sec-hd .arrow { transition:transform .25s; }
+.sec.closed .sec-hd .arrow { transform:rotate(-90deg); }
+.sec-bd { padding:10px 11px; }
+.sec.closed .sec-bd { display:none; }
+.ctrl { display:flex; align-items:center; margin:6px 0; gap:8px; }
+.ctrl label { flex:0 0 76px; font-size:11px; color:#9a9; line-height:1.2; }
+.ctrl input[type=range] {
+    flex:1; cursor:pointer; height:32px; padding:13px 0;
+    -webkit-appearance:none; background:transparent;
+    touch-action: manipulation;
+}
+.ctrl input[type=range]::-webkit-slider-runnable-track {
+    height:4px; background:rgba(180,120,255,.32); border-radius:2px;
+    transition: background .15s;
+}
+.ctrl input[type=range]:hover::-webkit-slider-runnable-track { background:rgba(180,120,255,.55); }
+.ctrl input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance:none; width:22px; height:22px; margin-top:-9px;
+    border-radius:50%; background:#a070d0; cursor:pointer;
+    box-shadow:0 0 6px rgba(180,120,255,.55), 0 1px 4px rgba(0,0,0,.35);
+    border: 2px solid rgba(255,255,255,.10);
+    transition: transform .12s, background .12s;
+}
+.ctrl input[type=range]:hover::-webkit-slider-thumb { transform: scale(1.10); }
+.ctrl input[type=range]::-moz-range-track { height:4px; background:rgba(180,120,255,.32); border-radius:2px; }
+.ctrl input[type=range]::-moz-range-thumb {
+    width:20px; height:20px; border-radius:50%; background:#a070d0;
+    border:2px solid rgba(255,255,255,.10);
+    box-shadow:0 0 6px rgba(180,120,255,.55);
+}
+.vdisp {
+    flex:0 0 80px; text-align:right; color:#e8c8ff;
+    font-size:11px; font-weight:700; letter-spacing:.2px;
+    font-variant-numeric: tabular-nums;
+}
+.dtbl { width:100%; border-collapse:collapse; font-size:11px; }
+.dtbl td { padding:3px 4px; border-bottom:1px solid rgba(255,255,255,.04); vertical-align:top; }
+.dtbl td:first-child { color:#777; width:50%; }
+.dtbl td:last-child  { color:#dab8ff; text-align:right; font-weight:600; }
+.dtbl .hdr { background:rgba(180,120,255,.08); color:#c8a8ff !important; font-weight:700 !important; text-align:left !important; }
+.btn-row { display:flex; gap:5px; margin:8px 0; flex-wrap:wrap; }
+.btn-row button { flex:1; padding:8px 6px; min-width:56px;
+    background:rgba(180,120,255,.10); border:1px solid rgba(180,120,255,.26);
+    border-radius:5px; color:#c8a8ff; cursor:pointer; font-family:inherit; font-size:10px; transition:all .15s; }
+.btn-row button:hover { background:rgba(180,120,255,.22); }
+.btn-row button.active { background:rgba(180,120,255,.32); border-color:#b080ff; color:#f0e0ff; }
+.toggle-row {
+    display:flex; align-items:center; margin:2px 0; gap:9px;
+    font-size:11px; padding:5px 4px; border-radius:5px;
+    cursor:pointer; transition: background .12s;
+    user-select: none;
+}
+.toggle-row:hover { background: rgba(180,120,255,.06); }
+.toggle-row label { color:#aab; flex:1; cursor:pointer; line-height:1.3; }
+.toggle-row input[type=checkbox] {
+    width:16px; height:16px; cursor:pointer; accent-color:#a070d0;
+    flex-shrink:0;
+}
+.note-text { font-size:10px; color:#555; line-height:1.6; }
+.note-text strong { color:#a070d0; }
+.note-text p + p { margin-top:5px; }
+
+/* ── research-grade additions ─────────────────────────────── */
+#halpha-panel {
+    position:absolute; left:12px; bottom:16px; z-index:50;
+    background: rgba(4,2,16,.78); backdrop-filter: blur(8px);
+    border: 1px solid rgba(180,120,255,.22); border-radius: 8px;
+    padding: 8px 10px 6px; pointer-events: none;
+    width: 240px;
+}
+#halpha-panel .hp-title {
+    font-size:10px; color:#c8a8ff; letter-spacing:.6px;
+    text-transform:uppercase; margin-bottom:2px;
+    display:flex; justify-content:space-between; align-items:center;
+}
+#halpha-panel .hp-title .vr { color:#ffb0d0; font-weight:600; }
+#halpha-canvas { display:block; width:100%; height:84px; border-radius:4px;
+    background: linear-gradient(180deg, rgba(80,30,90,.18), rgba(30,5,40,.30)); }
+#halpha-panel .hp-axis {
+    display:flex; justify-content:space-between;
+    font-size:9px; color:#666; margin-top:1px;
+}
+@media (max-width: 640px) { #halpha-panel { display:none; } }
+
+#sed-panel {
+    position:absolute; right:12px; bottom:60px; z-index:50;
+    background: rgba(4,2,16,.78); backdrop-filter: blur(8px);
+    border: 1px solid rgba(180,120,255,.22); border-radius: 8px;
+    padding: 8px 10px 6px; pointer-events: none;
+    width: 280px;
+    display:none;
+}
+#sed-panel.show { display:block; }
+#sed-panel .sp-title {
+    font-size:10px; color:#c8a8ff; letter-spacing:.6px;
+    text-transform:uppercase; margin-bottom:2px;
+    display:flex; justify-content:space-between; align-items:center;
+}
+#sed-panel .sp-title .tag {
+    color:#ffd080; font-weight:600; font-size:9.5px; text-transform:none; letter-spacing:0;
+}
+#sed-canvas { display:block; width:100%; height:120px; border-radius:4px;
+    background: linear-gradient(180deg, rgba(20,15,40,.55), rgba(8,4,18,.65)); }
+#sed-panel .sp-axis {
+    display:flex; justify-content:space-between;
+    font-size:9px; color:#666; margin-top:1px;
+}
+#sed-panel .sp-legend {
+    display:flex; gap:10px; font-size:9px; color:#888; margin-top:3px;
+    justify-content:center;
+}
+#sed-panel .sp-legend span::before {
+    content: '\25A0  '; margin-right:1px;
+}
+#sed-panel .sp-legend .lp { color:#90c8ff; }
+#sed-panel .sp-legend .ld { color:#ff80a8; }
+#sed-panel .sp-legend .lt { color:#fff0c8; }
+@media (max-width: 720px) { #sed-panel { display:none !important; } }
+
+#mode-pill {
+    position:absolute; top:60px; left:12px; z-index:50;
+    background: rgba(4,2,16,.72); backdrop-filter: blur(8px);
+    border: 1px solid rgba(180,120,255,.22); border-radius: 8px;
+    padding: 4px 9px; font-size: 10px; color:#c8a8ff; letter-spacing:.5px;
+    pointer-events: none;
+}
+.btn-row.threecol button { flex:1; min-width:0; }
+
+.legend-bar {
+    height:8px; border-radius:2px; margin:6px 0 2px;
+    background: linear-gradient(90deg, #2050ff 0%, #6080ff 25%, #ddd 50%, #ff6080 75%, #ff2050 100%);
+}
+.legend-row { display:flex; justify-content:space-between; font-size:9px; color:#888; }
+
+/* ── UI flair: category accents, icons, smoother sections ─── */
+.sec { --acc: 180,120,255; }
+.sec[data-cat="geom"]    { --acc: 200,168,255; }
+.sec[data-cat="rot"]     { --acc: 255,200,128; }
+.sec[data-cat="disk"]    { --acc: 255,140,180; }
+.sec[data-cat="layers"]  { --acc: 140,200,255; }
+.sec[data-cat="outflow"] { --acc: 140,255,180; }
+.sec[data-cat="twist"]   { --acc: 255,140,224; }
+.sec[data-cat="nrp"]     { --acc: 255,224,128; }
+.sec[data-cat="time"]    { --acc: 200,200,200; }
+
+.sec { border-left: 2px solid rgba(var(--acc), .55); }
+.sec-hd {
+    background: linear-gradient(90deg,
+        rgba(var(--acc), .14) 0%,
+        rgba(180,120,255, .07) 70%);
+    color: rgba(var(--acc), 1);
+    transition: background .18s;
+}
+.sec-hd:hover {
+    background: linear-gradient(90deg,
+        rgba(var(--acc), .26) 0%,
+        rgba(180,120,255, .14) 70%);
+}
+.sec-hd .icon {
+    display:inline-block; width:14px; text-align:center;
+    margin-right:5px; opacity:.85; font-size:11px;
+}
+.sec-hd .group {
+    display:flex; align-items:center; gap:0;
+}
+
+/* Slider focus glow + accent-coloured thumb when active */
+.ctrl input[type=range]:focus { outline: none; }
+.ctrl input[type=range]:active::-webkit-slider-thumb {
+    box-shadow: 0 0 14px rgba(var(--acc), .9), 0 0 4px rgba(var(--acc), .6);
+    background: rgb(var(--acc));
+}
+.ctrl input[type=range]:active::-moz-range-thumb {
+    box-shadow: 0 0 14px rgba(var(--acc), .9);
+    background: rgb(var(--acc));
+}
+.ctrl input[type=range]::-webkit-slider-runnable-track {
+    background: linear-gradient(90deg, rgba(var(--acc), .28), rgba(var(--acc), .14));
+}
+.ctrl label[title] { cursor: help; border-bottom:1px dotted rgba(255,255,255,.15); }
+
+/* Preset bar above the section list */
+#preset-bar {
+    display:flex; gap:5px; padding:8px 0 10px; flex-wrap:wrap;
+    border-bottom:1px dashed rgba(180,120,255,.18); margin-bottom:8px;
+}
+#preset-bar button {
+    flex:1; min-width:64px; padding:6px 4px;
+    background: linear-gradient(180deg, rgba(180,120,255,.12), rgba(180,120,255,.04));
+    border:1px solid rgba(180,120,255,.30); border-radius:5px;
+    color:#dab8ff; cursor:pointer; font-family:inherit; font-size:10px;
+    letter-spacing:.4px; transition: all .15s;
+}
+#preset-bar button:hover {
+    background: linear-gradient(180deg, rgba(180,120,255,.32), rgba(180,120,255,.10));
+    transform: translateY(-1px); border-color:#b080ff;
+    box-shadow: 0 4px 12px rgba(180,120,255,.20);
+}
+#preset-bar button:active { transform: translateY(0); }
+#preset-bar .preset-label {
+    flex:0 0 100%; font-size:9px; color:#666; letter-spacing:.6px;
+    text-transform:uppercase; margin-bottom:2px;
+}
+
+/* Header collapse-all button */
+#panel-tools {
+    display:flex; gap:4px; align-items:center;
+}
+#btn-collapse-all {
+    background:transparent; border:1px solid rgba(255,255,255,.10);
+    color:#888; font-size:11px; cursor:pointer; padding:3px 7px;
+    border-radius:4px; transition: all .15s; font-family:inherit;
+}
+#btn-collapse-all:hover { color:#c8a8ff; border-color:rgba(180,120,255,.4); }
+
+/* HUD collapse */
+#hud { position: relative; transition: padding .2s, min-width .2s; }
+#hud-toggle {
+    position:absolute; top:6px; right:6px; cursor:pointer; pointer-events:auto;
+    color:#666; font-size:11px; padding:2px 6px; border-radius:3px;
+    background: transparent; border: 1px solid transparent;
+    transition: color .15s, background .15s, border .15s; user-select:none;
+    font-family:inherit;
+}
+#hud-toggle:hover { color:#c8a8ff; background: rgba(180,120,255,.10); border-color:rgba(180,120,255,.25); }
+#hud.collapsed > div:not(#hud-toggle):not(.always-show) { display:none; }
+#hud.collapsed h3 { margin-bottom:0; padding-right:30px; }
+#hud.collapsed { min-width:140px; padding:8px 14px; }
+
+/* Smoother body height transition (fall back to display:none when fully collapsed) */
+.sec-bd { transition: opacity .2s; }
+.sec.closed .sec-bd { opacity: 0; }
+.sec.closed .sec-hd { background-image: linear-gradient(90deg,
+        rgba(var(--acc), .06) 0%,
+        rgba(180,120,255, .03) 70%); }
+
+/* Tooltip / hint chip on slider value when hovered */
+.vdisp { position:relative; }
+
+/* Small "info" chip after some labels */
+.info-chip {
+    display:inline-block; width:11px; height:11px; line-height:10px;
+    text-align:center; font-size:9px; color:#aaa;
+    border:1px solid rgba(255,255,255,.20); border-radius:50%;
+    margin-left:3px; cursor:help; vertical-align:1px;
+}
+.info-chip:hover { color:#fff; border-color:#b080ff; }
+
+/* Sub-headers inside sections (for grouped layer toggles) */
+.subhd {
+    font-size:9px; color:#666; letter-spacing:.7px; text-transform:uppercase;
+    margin:8px 0 3px; padding-bottom:2px;
+    border-bottom: 1px dashed rgba(255,255,255,.06);
+}
+.subhd:first-child { margin-top:0; }
+
+/* Pause / time-rate row */
+#time-rate-row { display:flex; align-items:center; gap:6px; margin:4px 0; }
+#btn-pause {
+    flex:0 0 28px; height:24px; padding:0; font-size:11px;
+    background: rgba(180,120,255,.14); border:1px solid rgba(180,120,255,.30);
+    border-radius:5px; color:#c8a8ff; cursor:pointer; transition: all .15s;
+}
+#btn-pause.active {
+    background: rgba(255,180,80,.30); border-color:#ffb050; color:#ffe0a0;
+}
+
+/* Improved scrollbar */
+#panel-body::-webkit-scrollbar { width:6px; }
+#panel-body::-webkit-scrollbar-track { background: rgba(255,255,255,.02); }
+#panel-body::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, rgba(180,120,255,.35), rgba(180,120,255,.18));
+    border-radius:3px;
+}
+#panel-body::-webkit-scrollbar-thumb:hover { background: rgba(180,120,255,.55); }
+
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "@id": "https://parkersphysics.com/achernar.html#app",
+  "name": "Achernar — Oblate Be Star",
+  "description": "Three-dimensional model of Achernar (Alpha Eridani), the most-oblate known star. Rapid rotation, gravity darkening, and a transient decretion disk.",
+  "url": "https://parkersphysics.com/achernar.html",
+  "image": "https://parkersphysics.com/ParkersPhysics_logo2.jpg",
+  "applicationCategory": "EducationalApplication",
+  "applicationSubCategory": "Stellar astrophysics simulation",
+  "operatingSystem": "Web Browser",
+  "browserRequirements": "Requires JavaScript and WebGL",
+  "isAccessibleForFree": true,
+  "publisher": {
+    "@id": "https://parkersphysics.com/#org"
+  },
+  "inLanguage": "en-US"
+}
+</script>
+</head>
+<body>
+<h1 data-seo-h1 style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0">Achernar — Oblate Be Star Simulator</h1>
+
+
+<script type="importmap">
+{
+    "imports": {
+        "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+}
+</script>
+<!-- perf-hints:start -->
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" crossorigin>
+<!-- perf-hints:end --><link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("achernar");</script>
+
+<div id="app">
+    <div id="canvas-wrap">
+        <div id="hud">
+            <button id="hud-toggle" title="Collapse / expand HUD">−</button>
+            <h3 class="always-show">ACHERNAR — α Eridani</h3>
+            <div class="sub">B6 Vep · Be-type rapid rotator</div>
+            <div>T<sub>pole</sub>: <span class="val" id="hud-tpole">17 000</span> <span class="dim">K</span></div>
+            <div>T<sub>eq</sub>: <span class="val" id="hud-teq">10 000</span> <span class="dim">K</span></div>
+            <div>R<sub>eq</sub>/R<sub>pole</sub>: <span class="val" id="hud-ratio">1.56</span></div>
+            <div>v<sub>eq</sub>: <span class="val" id="hud-veq">285</span> <span class="dim">km/s</span></div>
+            <div>ω/ω<sub>crit</sub>: <span class="val" id="hud-omega">0.97</span></div>
+            <div class="sep"></div>
+            <div>v sin i: <span class="val" id="hud-vsini">258</span> <span class="dim">km/s</span></div>
+            <div>L: <span class="val" id="hud-lum">3 150</span> <span class="dim">L☉</span></div>
+            <div>Decretion disk: <span class="vh" id="hud-disk">active</span></div>
+            <div>Disk H(R<sub>eq</sub>): <span class="val" id="hud-h">0.04</span> <span class="dim">R<sub>eq</sub></span></div>
+            <div>Outburst: <span class="vh" id="hud-burst">build</span> <span class="dim" id="hud-burst-pct">0%</span></div>
+            <div class="sep"></div>
+            <div>Ṁ<sub>pol</sub>: <span class="val" id="hud-mdot-pol">2.1</span><span class="dim">×10⁻¹⁰ M☉/yr</span></div>
+            <div>v<sub>∞,pol</sub>: <span class="val" id="hud-vinf">1450</span> <span class="dim">km/s</span></div>
+            <div>Ṁ<sub>eq</sub>: <span class="val" id="hud-mdot-eq">3.5</span><span class="dim">×10⁻⁹ M☉/yr</span></div>
+            <div>v<sub>K</sub>(R<sub>eq</sub>): <span class="val" id="hud-vk">325</span> <span class="dim">km/s</span></div>
+            <div>FPS: <span id="fps-display">--</span></div>
+            <div class="dim" style="margin-top:3px">Drag · Pinch · Scroll</div>
+        </div>
+        <button class="cv-btn" id="btn-panel-open" title="Open controls (C)">☰ Controls<span class="kbd">C</span></button>
+        <a href="space-weather.html" class="cv-btn" id="btn-sw" title="Live Space Weather Data">⚡ Weather</a>
+        <button class="cv-btn" id="btn-center" title="Reset camera (R)">⊙ Center<span class="kbd">R</span></button>
+
+        <div id="mode-pill">Continuum · von Zeipel β=0.25</div>
+
+        <div id="halpha-panel">
+            <div class="hp-title"><span>Synthetic Hα 656.28 nm</span><span class="vr" id="hp-vr">V/R = 1.00</span></div>
+            <canvas id="halpha-canvas" width="480" height="170"></canvas>
+            <div class="hp-axis"><span>−800</span><span>0 km/s</span><span>+800</span></div>
+        </div>
+
+        <div id="sed-panel">
+            <div class="sp-title"><span>Spectral Energy Distribution</span><span class="tag" id="sp-tag">i = 65°</span></div>
+            <canvas id="sed-canvas" width="560" height="240"></canvas>
+            <div class="sp-axis"><span>0.1 µm</span><span>1 µm</span><span>10 µm</span></div>
+            <div class="sp-legend"><span class="lp">photosphere</span><span class="ld">disk</span><span class="lt">total</span></div>
+        </div>
+
+        <div id="backdrop"></div>
+    </div>
+
+    <aside id="panel">
+        <div id="panel-header">
+            <div>
+                <div class="panel-star">Achernar — α Eridani</div>
+                <div class="panel-sub">B6 Vep · 42.7 pc · 9th-brightest star</div>
+                <div class="panel-badge">Roche figure · von Zeipel · Be disk</div>
+            </div>
+            <div id="panel-tools">
+                <button id="btn-collapse-all" title="Collapse / expand all sections">⇅</button>
+                <button id="btn-panel-close">✕</button>
+            </div>
+        </div>
+        <div id="panel-body">
+
+            <div id="preset-bar">
+                <div class="preset-label">Quick presets</div>
+                <button id="ps-default" title="Restore Achernar canonical state">Achernar</button>
+                <button id="ps-burst"   title="Outburst peak: max disk density + NRP">Outburst</button>
+                <button id="ps-shell"   title="Shell phase: disk shed (2013-style)">Shell</button>
+                <button id="ps-crit"    title="Near-critical rotation, no disk">Critical</button>
+            </div>
+
+            <div class="sec" data-cat="geom">
+                <div class="sec-hd"><span class="group"><span class="icon">✦</span><span>Stellar Geometry</span></span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="ctrl">
+                        <label>R<sub>eq</sub>/R<sub>pol</sub></label>
+                        <input type="range" id="sl-ratio" min="1.00" max="1.56" step="0.01" value="1.56">
+                        <span class="vdisp" id="disp-ratio">1.56</span>
+                    </div>
+                    <div class="ctrl">
+                        <label>T<sub>pole</sub></label>
+                        <input type="range" id="sl-tpole" min="10000" max="22000" step="100" value="17000">
+                        <span class="vdisp" id="disp-tpole">17 000 K</span>
+                    </div>
+                    <div class="ctrl">
+                        <label>T<sub>eq</sub></label>
+                        <input type="range" id="sl-teq" min="6000" max="14000" step="100" value="10000">
+                        <span class="vdisp" id="disp-teq">10 000 K</span>
+                    </div>
+                    <div class="ctrl">
+                        <label>β<sub>GD</sub></label>
+                        <input type="range" id="sl-betagd" min="0.05" max="0.40" step="0.01" value="0.25">
+                        <span class="vdisp" id="disp-betagd">0.25</span>
+                    </div>
+                    <div style="font-size:10px;color:#666;line-height:1.45;margin-top:6px">
+                        <strong style="color:#a070d0">Gravity darkening law</strong>
+                    </div>
+                    <div class="btn-row threecol" id="gd-row">
+                        <button id="gd-vz" class="active">von Zeipel '24</button>
+                        <button id="gd-elr">ELR '11</button>
+                    </div>
+                    <div style="font-size:9.5px;color:#666;line-height:1.45">
+                        ELR (Espinosa Lara &amp; Rieutord 2011) self-consistently
+                        solves the radiative-flux divergence for a Roche figure
+                        and yields β<sub>eff</sub>≈0.21 at ω/ω<sub>c</sub>=0.85,
+                        weakening the equator-pole T contrast vs the classical
+                        β=0.25 von Zeipel theorem.
+                    </div>
+                </div>
+            </div>
+
+            <div class="sec" data-cat="rot">
+                <div class="sec-hd"><span class="group"><span class="icon">↻</span><span>Rotation</span></span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="ctrl">
+                        <label title="Visual rotation rate of the body in scene units. 0 = stop. Double-click to reset.">Spin rate</label>
+                        <input type="range" id="sl-spin" min="0" max="3.0" step="0.05" value="1.0">
+                        <span class="vdisp" id="disp-spin">1.00×</span>
+                    </div>
+                    <div class="ctrl">
+                        <label>View incl.</label>
+                        <input type="range" id="sl-incl" min="0" max="90" step="1" value="65">
+                        <span class="vdisp" id="disp-incl">65°</span>
+                    </div>
+                    <div class="ctrl">
+                        <label>Diff. rot α₂</label>
+                        <input type="range" id="sl-diffrot" min="0" max="0.30" step="0.005" value="0.10">
+                        <span class="vdisp" id="disp-diffrot">0.10</span>
+                    </div>
+                    <div style="font-size:10px;color:#666;line-height:1.5;margin-top:6px">
+                        Surface law Ω(θ)=Ω<sub>eq</sub>(1−α₂cos²θ); poles spin slower
+                        than the equator. Drives latitude-dependent noise drift and
+                        equatorial shear that feeds the disk.
+                    </div>
+                </div>
+            </div>
+
+            <div class="sec" data-cat="disk">
+                <div class="sec-hd"><span class="group"><span class="icon">◐</span><span>Decretion Disk</span></span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-disk" checked>
+                        <label for="tog-disk">Disk active (Hα emission)</label>
+                    </div>
+                    <div class="ctrl">
+                        <label>Density</label>
+                        <input type="range" id="sl-disk-rho" min="0" max="2.5" step="0.05" value="1.0">
+                        <span class="vdisp" id="disp-disk-rho">1.00</span>
+                    </div>
+                    <div class="ctrl">
+                        <label>Outer R</label>
+                        <input type="range" id="sl-disk-out" min="2.0" max="6.0" step="0.1" value="3.6">
+                        <span class="vdisp" id="disp-disk-out">3.6 R<sub>eq</sub></span>
+                    </div>
+                    <div style="font-size:10px;color:#666;line-height:1.5;margin-top:6px">
+                        Hot ionized H plasma in Keplerian rotation. Achernar ejected
+                        its disk in 2013 and reformed it ~2014.
+                    </div>
+                </div>
+            </div>
+
+            <div class="sec" data-cat="layers">
+                <div class="sec-hd"><span class="group"><span class="icon">☷</span><span>Visual Layers</span></span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="subhd">Star surface &amp; atmosphere</div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-corona" checked>
+                        <label for="tog-corona">Chromospheric rim</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-axis">
+                        <label for="tog-axis">Rotation axis line</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-drgrid">
+                        <label for="tog-drgrid">DR latitude grid (±30°, ±60°)</label>
+                    </div>
+
+                    <div class="subhd">Outflow &amp; math overlays</div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-jet" checked>
+                        <label for="tog-jet">Polar radiative wind glow (CAK)</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-pwind" checked>
+                        <label for="tog-pwind">Polar wind tracer particles</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-outflow" checked>
+                        <label for="tog-outflow">Decretion outflow streaks</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-twistor">
+                        <label for="tog-twistor">Twistor (Robinson) congruence</label>
+                    </div>
+
+                    <div class="subhd">External &amp; diagnostic</div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-binary">
+                        <label for="tog-binary">Achernar B (companion + orbit)</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-sed" checked>
+                        <label for="tog-sed">SED diagnostic panel</label>
+                    </div>
+
+                    <div class="btn-row" style="margin-top:8px">
+                        <button id="btn-layers-allon" title="Show every visual layer">All on</button>
+                        <button id="btn-layers-essentials" title="Default Achernar layers only">Essentials</button>
+                        <button id="btn-layers-alloff" title="Hide every overlay (clean view)">All off</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sec" data-cat="outflow">
+                <div class="sec-hd"><span class="group"><span class="icon">⤴</span><span>Outflow Activity</span></span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="ctrl">
+                        <label>Burst amp.</label>
+                        <input type="range" id="sl-burst-amp" min="0" max="1.5" step="0.05" value="0.65">
+                        <span class="vdisp" id="disp-burst-amp">0.65</span>
+                    </div>
+                    <div class="ctrl">
+                        <label>Burst per.</label>
+                        <input type="range" id="sl-burst-per" min="2.0" max="20.0" step="0.5" value="8.0">
+                        <span class="vdisp" id="disp-burst-per">8.0 s</span>
+                    </div>
+                    <div style="font-size:10px;color:#666;line-height:1.5;margin-top:6px">
+                        Episodic equatorial mass-loss bursts (Achernar feeds &amp;
+                        sheds its disk on multi-year cycles; we compress to
+                        seconds for visualisation). Particles inherit Keplerian
+                        v<sub>φ</sub> + viscous v<sub>r</sub> = α (c<sub>s</sub>/v<sub>K</sub>)² v<sub>K</sub>.
+                    </div>
+                </div>
+            </div>
+
+            <div class="sec" data-cat="twist">
+                <div class="sec-hd"><span class="group"><span class="icon">∞</span><span>Twistor Congruence</span></span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="ctrl">
+                        <label>Helicity h<sub>T</sub></label>
+                        <input type="range" id="sl-twist-h" min="-1.5" max="1.5" step="0.05" value="0">
+                        <span class="vdisp" id="disp-twist-h">0.00</span>
+                    </div>
+                    <div style="font-size:10px;color:#666;line-height:1.5;margin-top:6px">
+                        h<sub>T</sub> = 0 → pure Hopf fibration (Z·Z̄ = 0, fibers
+                        close as Villarceau circles). h<sub>T</sub> ≠ 0 →
+                        Robinson congruence: φ<sub>base</sub> drifts with α, fibers
+                        spiral instead of close, encoding non-zero twistor norm.
+                        Sign of h<sub>T</sub> sets the chirality.
+                    </div>
+                </div>
+            </div>
+
+            <div class="sec" data-cat="nrp">
+                <div class="sec-hd"><span class="group"><span class="icon">∿</span><span>Non-Radial Pulsation</span></span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-nrp">
+                        <label for="tog-nrp">Activate ℓ=2 m=2 prograde mode</label>
+                    </div>
+                    <div class="ctrl">
+                        <label>Amplitude</label>
+                        <input type="range" id="sl-nrp-amp" min="0" max="0.04" step="0.001" value="0.012">
+                        <span class="vdisp" id="disp-nrp-amp">0.012 R<sub>p</sub></span>
+                    </div>
+                    <div class="ctrl">
+                        <label>Period</label>
+                        <input type="range" id="sl-nrp-per" min="0.5" max="2.0" step="0.05" value="1.26">
+                        <span class="vdisp" id="disp-nrp-per">1.26 d</span>
+                    </div>
+                    <div style="font-size:9.5px;color:#666;line-height:1.5;margin-top:6px">
+                        Achernar exhibits multi-periodic g-mode pulsations
+                        (Vinicius+ 2006, Goss+ 2011) with detected periods
+                        of 0.7–1.7 d. The dominant mode appears prograde
+                        (ℓ=m=2), distorting the surface as a travelling
+                        equatorial bulge — likely the angular-momentum
+                        driver of disk ejection.
+                    </div>
+                </div>
+            </div>
+
+            <div class="sec" data-cat="time">
+                <div class="sec-hd"><span class="group"><span class="icon">⏱</span><span>Time Controls</span></span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div id="time-rate-row">
+                        <button id="btn-pause" title="Pause / resume the simulation clock">▶</button>
+                        <label style="flex:0 0 56px; font-size:11px; color:#888">Time ×</label>
+                        <input type="range" id="sl-timerate" min="0" max="4.0" step="0.05" value="1.0" style="flex:1">
+                        <span class="vdisp" id="disp-timerate">1.00×</span>
+                    </div>
+                    <div style="font-size:9.5px;color:#666;line-height:1.5;margin-top:6px">
+                        Global multiplier on simulation Δt. Affects body rotation,
+                        outflow integrators, NRP phase, twistor U(1) advance, and
+                        outburst envelope. Pause freezes everything but the camera.
+                    </div>
+                </div>
+            </div>
+
+            <div class="sec" data-cat="layers">
+                <div class="sec-hd"><span class="group"><span class="icon">◎</span><span>View Mode</span></span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="btn-row threecol" id="view-row">
+                        <button id="view-cont" class="active">Continuum</button>
+                        <button id="view-dopp">Doppler v<sub>los</sub></button>
+                        <button id="view-temp">T<sub>eff</sub> map</button>
+                    </div>
+                    <div id="legend-doppler" style="display:none">
+                        <div class="legend-bar"></div>
+                        <div class="legend-row"><span>−v<sub>eq</sub></span><span>0</span><span>+v<sub>eq</sub></span></div>
+                    </div>
+                    <div id="legend-temp" style="display:none">
+                        <div class="legend-bar" style="background:linear-gradient(90deg,#ff5030,#ffaa50,#ffe0a0,#fffdf0,#cce0ff)"></div>
+                        <div class="legend-row"><span>T<sub>eq</sub></span><span></span><span>T<sub>pole</sub></span></div>
+                    </div>
+                    <div style="font-size:9.5px;color:#666;line-height:1.5;margin-top:6px">
+                        Doppler maps the line-of-sight rotational velocity
+                        v⃗·n̂<sub>view</sub> = (Ω̂×r⃗)·n̂. This is the direct
+                        observable in long-baseline interferometric
+                        differential phase (e.g. AMBER, PIONIER).
+                    </div>
+                </div>
+            </div>
+
+            <div class="sec">
+                <div class="sec-hd"><span>Camera</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="btn-row">
+                        <button id="cam-edge">Edge-on</button>
+                        <button id="cam-incl" class="active">65° (Earth)</button>
+                        <button id="cam-pole">Pole-on</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sec closed">
+                <div class="sec-hd"><span>Reference Data</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <table class="dtbl">
+                        <tr><td colspan="2" class="hdr">Achernar A — α Eri</td></tr>
+                        <tr><td>Spectral type</td><td>B6 Vep</td></tr>
+                        <tr><td>HD / HIP</td><td>10144 / 7588</td></tr>
+                        <tr><td>Distance (Hipparcos)</td><td>42.75 pc (139 ly)</td></tr>
+                        <tr><td>V mag</td><td>0.46</td></tr>
+                        <tr><td>Mass</td><td>6.7 ± 0.4 M☉</td></tr>
+                        <tr><td>Luminosity</td><td>3 150 ± 230 L☉</td></tr>
+                        <tr><td colspan="2" class="hdr">VLTI/VINCI · Domiciano '03</td></tr>
+                        <tr><td>R<sub>eq</sub>/R<sub>pol</sub></td><td>1.56 ± 0.05</td></tr>
+                        <tr><td>2a / 2b (uniform-disk)</td><td>2.53 / 1.62 mas</td></tr>
+                        <tr><td colspan="2" class="hdr">VLTI/PIONIER · Domiciano '14</td></tr>
+                        <tr><td>R<sub>eq</sub></td><td>9.16 ± 0.23 R☉</td></tr>
+                        <tr><td>R<sub>pol</sub></td><td>6.78 ± 0.13 R☉</td></tr>
+                        <tr><td>R<sub>eq</sub>/R<sub>pol</sub></td><td>1.352 ± 0.044</td></tr>
+                        <tr><td>T<sub>eff</sub> (pole)</td><td>17 124 ± 350 K</td></tr>
+                        <tr><td>T<sub>eff</sub> (equator)</td><td>12 673 ± 260 K</td></tr>
+                        <tr><td>v<sub>eq</sub> sin i</td><td>257 ± 30 km/s</td></tr>
+                        <tr><td>v<sub>eq</sub></td><td>298 ± 27 km/s</td></tr>
+                        <tr><td>ω / ω<sub>crit</sub></td><td>0.838 ± 0.040</td></tr>
+                        <tr><td>Inclination i</td><td>60.6° ± 7°</td></tr>
+                        <tr><td>PA (rotation axis)</td><td>34.9° ± 1°</td></tr>
+                        <tr><td colspan="2" class="hdr">Achernar B (companion)</td></tr>
+                        <tr><td>Spectral type</td><td>A1V–A3V</td></tr>
+                        <tr><td>Mass</td><td>1.7 ± 0.3 M☉</td></tr>
+                        <tr><td>Period</td><td>~14.3 yr</td></tr>
+                        <tr><td>Semi-major axis</td><td>~12.3 AU (290 mas)</td></tr>
+                        <tr><td>Eccentricity</td><td>0.72</td></tr>
+                        <tr><td>Discovery</td><td>Kervella+ 2008</td></tr>
+                        <tr><td colspan="2" class="hdr">Disk (Hα emission)</td></tr>
+                        <tr><td>Surface density Σ(r)</td><td>∝ r<sup>−n</sup>, n≈2.0–3.5</td></tr>
+                        <tr><td>Scale height</td><td>H(r) ∝ r<sup>1.5</sup></td></tr>
+                        <tr><td>Temperature</td><td>~0.6 T<sub>eff,pol</sub></td></tr>
+                        <tr><td>Outer radius</td><td>~2–6 R<sub>eq</sub> (variable)</td></tr>
+                        <tr><td>Last shed event</td><td>2013 → reformed 2014</td></tr>
+                    </table>
+                </div>
+            </div>
+
+            <div class="sec closed">
+                <div class="sec-hd"><span>Physics Notes</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="note-text">
+                        <p><strong>Roche figure</strong>: surface = isopotential of Φ<sub>grav</sub>+Φ<sub>cent</sub>.
+                           Solved iteratively per-vertex: r = 1 + (β/2)·r³·sin²θ in polar units.
+                           Surface normal taken from −∇Φ; the Roche-critical limit β = 8/27 ≈ 0.296 corresponds
+                           to ω/ω<sub>c</sub> = 1 (R<sub>eq</sub>/R<sub>p</sub> = 1.5).</p>
+                        <p><strong>Gravity darkening</strong>: classical von Zeipel '24 gives T(θ) ∝ g<sub>eff</sub>(θ)<sup>β</sup>
+                           with β = 0.25 for radiative envelopes. Espinosa Lara &amp; Rieutord '11 self-consistently
+                           solve the radiative-flux-conservation equation on the Roche surface and find
+                           β<sub>eff</sub> falls toward ~0.18 as ω → ω<sub>c</sub>; we use a fitted
+                           closed-form to their Fig. 4.</p>
+                        <p><strong>Planck colour</strong>: per-fragment T mapped to RGB via Tanner-Helland blackbody fit
+                           with seam-smoothing across 6600 K so gravity-darkened B-star equators don't band.</p>
+                        <p><strong>Limb darkening</strong>: Claret quadratic
+                           I(μ)/I(1) = 1 − a(1 − μ) − b(1 − μ)², a=0.32, b=0.28 (B6V V-band-ish).</p>
+                        <p><strong>Be viscous decretion disk</strong> (Lee, Saio &amp; Osaki '91; Carciofi &amp;
+                           Bjorkman '08): isothermal H II plasma in Keplerian rotation,
+                           ρ(r,z) = ρ₀ (R<sub>eq</sub>/r)<sup>n</sup>·exp(−z²/2H²) with H(r) ∝ r<sup>1.5</sup>.
+                           We render the disk as a true 3D volume — front-to-back raymarched emission
+                           with τ-attenuation. Edge-on lines of sight pierce more plasma → strong Hα limb.</p>
+                        <p><strong>Doppler v<sub>los</sub> map</strong> reproduces what optical/IR
+                           interferometers (AMBER, PIONIER, GRAVITY) measure as differential phase
+                           — directly maps Ω̂ × r⃗ projected on the line of sight.</p>
+                        <p><strong>Non-radial pulsation</strong>: the surface displacement δr ∝ Y<sub>2</sub><sup>2</sup> ∝ sin²θ·cos(2φ − σt)
+                           is the prograde sectoral g-mode candidate driver of Achernar's episodic disk
+                           ejection (Vinicius+ '06, Goss+ '11).</p>
+                        <p><strong>Synthetic Hα profile</strong>: emission from the Keplerian disk is
+                           computed by integrating Σ(r)·δ(v − v<sub>K</sub>(r) sin i cos φ) over the disk;
+                           rotational broadening of the photospheric component uses the Gray uniform-disk profile.
+                           The V/R asymmetry is an m=1 disk-precession proxy.</p>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </aside>
+</div>
+
+<script type="module">
+import * as THREE        from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ────────────────────────────────────────────────────────────────
+//  PANEL state
+// ────────────────────────────────────────────────────────────────
+const panel    = document.getElementById('panel');
+const backdrop = document.getElementById('backdrop');
+const PANEL_KEY = 'achernar_panel_open_v1';
+const isWideViewport = () => window.matchMedia('(min-width: 880px)').matches;
+
+function openPanel(persist = true) {
+    panel.classList.add('open');
+    // On wide viewports the panel doesn't dim the scene (no backdrop) so the
+    // user can keep playing with the simulation while controls are open.
+    if (!isWideViewport()) backdrop.classList.add('show');
+    if (persist) try { localStorage.setItem(PANEL_KEY, '1'); } catch {}
+}
+function closePanel(persist = true) {
+    panel.classList.remove('open');
+    backdrop.classList.remove('show');
+    if (persist) try { localStorage.setItem(PANEL_KEY, '0'); } catch {}
+}
+document.getElementById('btn-panel-open').addEventListener('click',  () => openPanel());
+document.getElementById('btn-panel-close').addEventListener('click', () => closePanel());
+backdrop.addEventListener('click',                                   () => closePanel());
+
+// First-load default: open on desktop, closed on mobile.  Subsequent visits
+// honour the user's last explicit choice.
+{
+    let saved = null;
+    try { saved = localStorage.getItem(PANEL_KEY); } catch {}
+    if (saved === '1' || (saved === null && isWideViewport())) {
+        openPanel(false);
+    }
+}
+
+// ── Keyboard shortcuts ────────────────────────────────────────
+//
+//  Space   pause / resume the simulation
+//  C       toggle the controls panel
+//  H       toggle the HUD
+//  R       reset camera to default inclination view
+//  Esc     close the controls panel
+//  1/2/3   continuum / Doppler / T-map view modes
+//
+//  Ignored when the user is typing in an <input> or contenteditable.
+//
+window.addEventListener('keydown', e => {
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+    switch (e.key) {
+        case ' ':
+            e.preventDefault();
+            document.getElementById('btn-pause').click();
+            break;
+        case 'c': case 'C':
+            (panel.classList.contains('open') ? closePanel : openPanel)();
+            break;
+        case 'h': case 'H':
+            document.getElementById('hud-toggle').click();
+            break;
+        case 'r': case 'R':
+            setCam('incl');
+            break;
+        case 'Escape':
+            if (panel.classList.contains('open')) closePanel();
+            break;
+        case '1': setViewMode(0); break;
+        case '2': setViewMode(1); break;
+        case '3': setViewMode(2); break;
+    }
+});
+
+// ── Section open/closed state + localStorage persistence ──────
+const SEC_STATE_KEY = 'achernar_sec_state_v1';
+function persistSecState() {
+    const s = {};
+    document.querySelectorAll('.sec[data-cat]').forEach(sec => {
+        s[sec.dataset.cat] = sec.classList.contains('closed');
+    });
+    try { localStorage.setItem(SEC_STATE_KEY, JSON.stringify(s)); } catch {}
+}
+function loadSecState() {
+    let s = {};
+    try { s = JSON.parse(localStorage.getItem(SEC_STATE_KEY) || '{}'); } catch {}
+    document.querySelectorAll('.sec[data-cat]').forEach(sec => {
+        if (s[sec.dataset.cat]) sec.classList.add('closed');
+    });
+}
+loadSecState();
+
+document.querySelectorAll('.sec-hd').forEach(hd => {
+    hd.addEventListener('click', () => {
+        hd.closest('.sec').classList.toggle('closed');
+        persistSecState();
+    });
+});
+
+// ── Collapse-all / expand-all toggle ──────────────────────────
+document.getElementById('btn-collapse-all').addEventListener('click', () => {
+    const secs = document.querySelectorAll('#panel-body .sec');
+    const allClosed = [...secs].every(s => s.classList.contains('closed'));
+    secs.forEach(s => s.classList.toggle('closed', !allClosed));
+    persistSecState();
+});
+
+// ── HUD collapse ──────────────────────────────────────────────
+const hud       = document.getElementById('hud');
+const hudToggle = document.getElementById('hud-toggle');
+hudToggle.addEventListener('click', () => {
+    hud.classList.toggle('collapsed');
+    hudToggle.textContent = hud.classList.contains('collapsed') ? '+' : '−';
+    try { localStorage.setItem('achernar_hud_collapsed',
+        hud.classList.contains('collapsed') ? '1' : '0'); } catch {}
+});
+try {
+    if (localStorage.getItem('achernar_hud_collapsed') === '1') {
+        hud.classList.add('collapsed');
+        hudToggle.textContent = '+';
+    }
+} catch {}
+
+// ── Slider double-click → reset to default ────────────────────
+document.querySelectorAll('input[type=range]').forEach(s => {
+    s.dataset.defaultValue = s.value;
+    s.addEventListener('dblclick', () => {
+        s.value = s.dataset.defaultValue;
+        s.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+});
+
+// ────────────────────────────────────────────────────────────────
+//  STATE / UNIFORMS
+// ────────────────────────────────────────────────────────────────
+//
+//  Geometry: polar radius R_p ≡ 1 in scene units. Equatorial radius
+//  is implicit in u_axis_ratio. The Roche surface is the isopotential
+//      Φ(r,θ) = -GM/r - (1/2) ω² r² sin²θ
+//  Setting Φ(Rp,0)=Φ(Re,π/2) gives β = ω²·Rp³/(GM) = 2(R-1)/R³.
+//  Critical rotation is β=8/27 (Roche) reached at R=Rp·3/2 = 1.5.
+//  Achernar's observed R≈1.56 slightly exceeds critical — we soft-cap β
+//  so the surface stays well-defined.
+//
+const uniforms = {
+    u_time:        { value: 0.0 },
+    u_axis_ratio:  { value: 1.56 },   // R_eq / R_pole
+    u_t_pole:      { value: 17000.0 },
+    u_t_eq:        { value: 10000.0 },
+    u_beta_gd:     { value: 0.25 },   // von Zeipel exponent
+    u_gd_model:    { value: 0.0 },    // 0 = von Zeipel, 1 = Espinosa Lara & Rieutord '11
+    u_disk_active: { value: 1.0 },
+    u_disk_rho:    { value: 1.0 },
+    u_disk_outer:  { value: 3.6 },
+    u_view_mode:   { value: 0.0 },    // 0 continuum, 1 Doppler v_los, 2 T-map
+    u_v_eq:        { value: 1.0 },    // equatorial rotational velocity (Roche units, GM=Rp=1)
+    u_nrp_active:  { value: 0.0 },
+    u_nrp_amp:     { value: 0.012 },
+    u_nrp_omega:   { value: 2.0 * Math.PI / 1.26 }, // angular freq matching 1.26 d period (visualisation rate)
+    u_doppler_amp: { value: 1.0 },    // saturation factor for Doppler colormap
+    u_disk_inv_model: { value: new THREE.Matrix4() },
+
+    // ── Differential rotation ────────────────────────────────────
+    // Solar-style law:  Ω(θ)/Ω_eq = 1 − α₂ cos²θ
+    // Reiners & Royer 2004 measure |α| < 0.05 for early-type rapid
+    // rotators; we let the user push it harder to make the effect
+    // visible. α=0 ⇒ rigid body.
+    u_diffrot_alpha: { value: 0.10 },
+    u_diffrot_phase: { value: 0.0 },  // ∫Ω_eq dt — drives the noise drift integrator
+
+    // ── Episodic decretion outburst envelope ─────────────────────
+    // 1 + amp · max(0, sin(2π t / P)) — pulses the inner-disk
+    // particle injection rate (the "feeding" episodes Achernar
+    // shows on year-decade timescales).
+    u_outburst_amp: { value: 0.65 },
+    u_outburst_per: { value: 8.0  },   // visualisation period (s)
+
+    // ── Robinson-congruence helicity ─────────────────────────────
+    // 0 → pure null (Hopf fibration, fibers close).
+    // ±N → twistor norm Z·Z̄ ≠ 0 → Robinson congruence, fibers
+    // spiral and don't close (non-null helicity / chirality).
+    u_twist_helicity: { value: 0.0 },
+};
+
+const state = { spin: 1.0, inclination: 65, viewMode: 0 };
+
+// ────────────────────────────────────────────────────────────────
+//  SCENE
+// ────────────────────────────────────────────────────────────────
+const scene  = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(50, 1, 0.01, 2000);
+const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping         = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+
+const canvasWrap = document.getElementById('canvas-wrap');
+canvasWrap.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = 0.07;
+controls.minDistance = 2.5; controls.maxDistance = 80;
+controls.target.set(0, 0, 0);
+
+// Background star field (deeper southern sky for Eridanus)
+{
+    const n = 4500, pos = new Float32Array(n*3), col = new Float32Array(n*3);
+    for (let i = 0; i < n; i++) {
+        const r=320+Math.random()*520, th=Math.random()*Math.PI*2, ph=Math.acos(2*Math.random()-1);
+        pos[i*3]=r*Math.sin(ph)*Math.cos(th);
+        pos[i*3+1]=r*Math.sin(ph)*Math.sin(th);
+        pos[i*3+2]=r*Math.cos(ph);
+        const c = 0.65 + Math.random()*0.35;
+        col[i*3]=c*0.92; col[i*3+1]=c*0.93; col[i*3+2]=c;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('color',    new THREE.Float32BufferAttribute(col, 3));
+    scene.add(new THREE.Points(geo,
+        new THREE.PointsMaterial({ vertexColors:true, size:0.45, sizeAttenuation:false })));
+}
+
+// ────────────────────────────────────────────────────────────────
+//  STAR SHADERS — Roche figure + von Zeipel + Planck blackbody
+// ────────────────────────────────────────────────────────────────
+
+const ROCHE_GLSL = /* glsl */`
+    // Roche rotation parameter from desired equatorial:polar axis ratio.
+    // β = 2(R-1)/R³ in units of GM=1, R_p=1. Capped just below the
+    // Roche critical value (8/27 ≈ 0.296) to keep the surface real.
+    float rocheBeta(float R) {
+        float b = 2.0 * (R - 1.0) / max(R*R*R, 1e-6);
+        return clamp(b, 0.0, 0.293);
+    }
+
+    // Surface radius r(θ) of the Roche isopotential, polar units.
+    // r = 1 + (β/2) r³ sin²θ — solved by fixed-point iteration.
+    float rocheRadius(float beta, float sin2theta) {
+        float r = 1.0;
+        for (int i = 0; i < 6; ++i) {
+            r = 1.0 + 0.5 * beta * r * r * r * sin2theta;
+        }
+        return r;
+    }
+`;
+
+const starVS = /* glsl */`
+    uniform float u_axis_ratio;
+    uniform float u_time;
+    uniform float u_v_eq;
+    uniform float u_nrp_active;
+    uniform float u_nrp_amp;
+    uniform float u_nrp_omega;
+    uniform float u_diffrot_alpha;
+
+    varying vec3  vNormal;
+    varying vec3  vPosObj;     // surface position in object space
+    varying vec3  vViewDir;
+    varying float vGravFrac;   // 0 at equator, 1 at pole — drives gravity darkening
+    varying float vSinLat;     // |sin(latitude)| for noise/granulation
+    varying float vDoppler;    // line-of-sight velocity, normalised to ±v_eq
+    varying float vTheta;      // co-latitude, for ELR computation in FS
+    varying float vCosThSq;    // cos²θ — needed in FS for differential-rotation drift
+
+    ${ROCHE_GLSL}
+
+    void main() {
+        // The base mesh is a unit sphere; reuse direction → spherical coords.
+        vec3  dir       = normalize(position);
+        float cosTheta  = dir.y;                                  // y = rotation axis
+        float sin2theta = max(0.0, 1.0 - cosTheta * cosTheta);
+        float sinTheta  = sqrt(sin2theta);
+        float theta     = acos(clamp(cosTheta, -1.0, 1.0));
+        vTheta = theta;
+
+        float R    = max(u_axis_ratio, 1.0);
+        float beta = rocheBeta(R);
+        float r    = rocheRadius(beta, sin2theta);
+
+        // ── Non-radial pulsation: ℓ=2, m=2 prograde wave on the surface.
+        //   Y_2^2 ∝ sin²θ · cos(2φ - σt)  (σ in observer frame).
+        //   For Achernar this is a candidate driver for episodic disk ejection.
+        float phi = atan(dir.z, dir.x);
+        if (u_nrp_active > 0.5) {
+            float Y22  = sin2theta * cos(2.0 * phi - u_nrp_omega * u_time);
+            r += u_nrp_amp * Y22;
+        }
+
+        // World-space surface point. Polar radius = 1, so equator stretches to R naturally.
+        vec3 surfPos = dir * r;
+
+        // Effective gravity g_eff = -∇Φ = -(GM/r²) r̂ + ω² ϱ ϱ̂
+        // (GM=1, ω²=β, ϱ = r·sinθ in cylindrical radius.)
+        vec3  cylDir = vec3(dir.x, 0.0, dir.z);
+        float cyl    = length(cylDir);
+        vec3  cylHat = cyl > 1e-6 ? cylDir / cyl : vec3(0.0);
+        float rho    = r * sinTheta;
+
+        vec3  gVec = -dir / (r * r) + beta * rho * cylHat;
+        float gMag = length(gVec);
+
+        float gPole = 1.0;                                   // r=1, ϱ=0
+        float gEq   = max(1.0 / (R*R) - beta * R, 1e-3);     // r=R, ϱ=R, fully equatorial
+        vGravFrac   = clamp((gMag - gEq) / max(gPole - gEq, 1e-3), 0.0, 1.0);
+
+        // Outward surface normal = -ĝ_eff (the isopotential is perpendicular to g_eff).
+        vec3 nOut = -gVec / max(gMag, 1e-6);
+
+        vNormal  = normalize(normalMatrix * nOut);
+        vPosObj  = surfPos;
+        vSinLat  = abs(cosTheta);
+
+        vec4 mv  = modelViewMatrix * vec4(surfPos, 1.0);
+        vViewDir = normalize(-mv.xyz);
+
+        // ── Line-of-sight velocity for Doppler view mode.
+        //   Differential rotation:  Ω(θ)/Ω_eq = 1 − α₂ cos²θ
+        //   ⇒ v⃗ = Ω(θ)·(-r_z, 0, r_x).  Scaled to ±1 at the limb of the equator.
+        float omegaFrac = 1.0 - u_diffrot_alpha * cosTheta * cosTheta;
+        vec3  vRot   = vec3(-surfPos.z, 0.0, surfPos.x) * u_v_eq * omegaFrac;
+        vec3  vRotMV = (modelViewMatrix * vec4(vRot, 0.0)).xyz;
+        vec3  viewVec = normalize(mv.xyz);
+        // Positive = receding (red-shift)
+        float vlos = dot(vRotMV, viewVec);
+        vDoppler = clamp(vlos / max(u_v_eq * u_axis_ratio, 1e-3), -1.0, 1.0);
+        vCosThSq = cosTheta * cosTheta;
+
+        gl_Position = projectionMatrix * mv;
+    }
+`;
+
+const starFS = /* glsl */`
+    precision highp float;
+
+    uniform float u_time;
+    uniform float u_t_pole;
+    uniform float u_t_eq;
+    uniform float u_beta_gd;
+    uniform float u_axis_ratio;
+    uniform float u_gd_model;     // 0 = von Zeipel, 1 = ELR
+    uniform float u_view_mode;    // 0 continuum, 1 Doppler, 2 T-map
+    uniform float u_doppler_amp;
+    uniform float u_diffrot_alpha;
+    uniform float u_diffrot_phase;   // ∫Ω_eq dt — body-frame phase integral
+
+    varying vec3  vNormal;
+    varying vec3  vPosObj;
+    varying vec3  vViewDir;
+    varying float vGravFrac;
+    varying float vSinLat;
+    varying float vDoppler;
+    varying float vTheta;
+    varying float vCosThSq;
+
+    // 3D value-noise FBM (mild surface granulation).
+    float h3(vec3 p){ p = fract(p*vec3(127.1,311.7,74.7)); p += dot(p,p+19.19); return fract(p.x*p.y*p.z); }
+    float vn(vec3 p){
+        vec3 i=floor(p), f=fract(p), u=f*f*(3.0-2.0*f);
+        return mix(mix(mix(h3(i),h3(i+vec3(1,0,0)),u.x),
+                       mix(h3(i+vec3(0,1,0)),h3(i+vec3(1,1,0)),u.x), u.y),
+                   mix(mix(h3(i+vec3(0,0,1)),h3(i+vec3(1,0,1)),u.x),
+                       mix(h3(i+vec3(0,1,1)),h3(i+vec3(1,1,1)),u.x), u.y), u.z);
+    }
+    float fbm(vec3 p){ float v=0.0,a=0.5; for(int k=0;k<5;k++){ v+=a*vn(p); p=p*2.07+vec3(13.7,5.3,21.1); a*=0.5; } return v; }
+
+    // Tanner-Helland Planck-curve approximation, T in K, returns linear RGB.
+    // Smooth across the 6600 K seam so gravity-darkened B-stars don't band.
+    vec3 planckRGB(float T) {
+        float t = clamp(T, 1000.0, 40000.0) * 0.01;
+        float r, g, b;
+
+        if (t <= 66.0) {
+            r = 1.0;
+            g = 0.39008158 * log(max(t, 1.0)) - 0.63184144;
+        } else {
+            float tt = t - 60.0;
+            r = 1.29293619 * pow(tt, -0.1332048);
+            g = 1.12989086 * pow(tt, -0.0755149);
+        }
+        if (t >= 66.0) {
+            b = 1.0;
+        } else if (t <= 19.0) {
+            b = 0.0;
+        } else {
+            b = 0.54320679 * log(t - 10.0) - 1.19625409;
+        }
+        return clamp(vec3(r, g, b), 0.0, 1.4);
+    }
+
+    // ELR (Espinosa Lara & Rieutord 2011) effective β_GD as a function
+    // of the rotation parameter w = ω/ω_crit. Smooth fit over the published
+    // numerical solution table (their Fig. 4): β_eff falls from 0.25 at
+    // rest to ~0.18 at w=1. For Achernar (w≈0.84) → β_eff ≈ 0.213.
+    float elrBetaEff(float w) {
+        return 0.25 - 0.0746 * w * w - 0.0238 * w * w * w * w;
+    }
+
+    void main() {
+        vec3  N   = normalize(vNormal);
+        vec3  V   = normalize(vViewDir);
+        float mu  = max(dot(N, V), 0.0);
+
+        // ─── Gravity darkening ────────────────────────────────────────
+        // β_eff selected by model: classical von Zeipel uses the user slider;
+        // ELR derives it self-consistently from the Roche rotation.
+        float beta_user = u_beta_gd;
+        float R         = max(u_axis_ratio, 1.0);
+        float beta_rot  = clamp(2.0 * (R - 1.0) / (R*R*R), 0.0, 0.293);
+        float w         = sqrt(beta_rot / (8.0 / 27.0));   // ω/ω_crit
+        float beta_elr  = elrBetaEff(clamp(w, 0.0, 1.0));
+        float beta_eff  = mix(beta_user, beta_elr, u_gd_model);
+
+        float gd = pow(vGravFrac, beta_eff / 0.25);
+        float T  = mix(u_t_eq, u_t_pole, gd);
+
+        // ─── View-mode dispatch ───────────────────────────────────────
+        // Doppler v_los map: blue receding…red approaching with neutral mid.
+        if (u_view_mode > 0.5 && u_view_mode < 1.5) {
+            float omu_v  = 1.0 - mu;
+            float limb_v = clamp(1.0 - 0.32 * omu_v - 0.28 * omu_v * omu_v, 0.0, 1.0);
+            float d  = clamp(vDoppler * u_doppler_amp, -1.0, 1.0);
+            vec3 cBlue  = vec3(0.18, 0.32, 1.00);
+            vec3 cWhite = vec3(0.92, 0.92, 0.92);
+            vec3 cRed   = vec3(1.00, 0.18, 0.28);
+            vec3 col    = d < 0.0 ? mix(cWhite, cBlue, -d)
+                                  : mix(cWhite, cRed,   d);
+            // mild luminance tag from gravity darkening so we still see geometry
+            col *= (0.55 + 0.45 * gd) * limb_v * 1.1;
+            gl_FragColor = vec4(col, 1.0);
+            return;
+        }
+        // Pure T_eff thermal map (no Doppler/granulation/limb)
+        if (u_view_mode > 1.5) {
+            float omu_t  = 1.0 - mu;
+            float limb_t = clamp(1.0 - 0.20 * omu_t, 0.0, 1.0);
+            // Inferno-style temperature ramp gd∈[0,1] → equator(cool) → pole(hot)
+            vec3 c0 = vec3(0.50, 0.05, 0.10);   // equator (cool)
+            vec3 c1 = vec3(1.00, 0.40, 0.10);
+            vec3 c2 = vec3(1.00, 0.80, 0.40);
+            vec3 c3 = vec3(0.90, 0.95, 1.00);   // pole (hot)
+            vec3 col = mix(mix(c0, c1, smoothstep(0.0, 0.33, gd)),
+                           mix(c2, c3, smoothstep(0.66, 1.0, gd)),
+                           smoothstep(0.33, 0.66, gd));
+            col *= limb_t * 1.15;
+            gl_FragColor = vec4(col, 1.0);
+            return;
+        }
+
+        // ─── Continuum (default) ──────────────────────────────────────
+        vec3 base = planckRGB(T);
+
+        // ─── Granulation (B-star: very thin convection — minimal) ─────
+        // Differential-rotation latitude shear: rotate the noise sampling
+        // by Δφ(θ) = -α₂ · cos²θ · ∫Ω_eq dt.  In the body frame (which
+        // co-rotates at Ω_eq) the equator stays fixed; latitudes far from
+        // the equator drift backward, so high-latitude features visibly
+        // lag the equator.  This is the classical solar surface tracer.
+        float dphi   = -u_diffrot_alpha * vCosThSq * u_diffrot_phase;
+        float cdp    = cos(dphi), sdp = sin(dphi);
+        vec2  xzShr  = mat2(cdp, -sdp, sdp, cdp) * vec2(vPosObj.x, vPosObj.z);
+        vec3  granP  = vec3(xzShr.x, vPosObj.y, xzShr.y);
+        float gran   = fbm(granP * 4.5 + vec3(u_time * 0.005));
+        float surf   = 0.93 + 0.10 * gran;
+
+        // ─── Limb darkening (Claret quadratic, B6V V-band-ish) ────────
+        // I(μ) = 1 − a(1−μ) − b(1−μ)²,  a≈0.32, b≈0.28
+        float omu  = 1.0 - mu;
+        float limb = clamp(1.0 - 0.32 * omu - 0.28 * omu * omu, 0.0, 1.0);
+
+        vec3 col = base * surf * limb;
+
+        // Photospheric flicker — barely visible, just a touch of life
+        float flick = fbm(granP * 7.5 + vec3(u_time * 0.04)) * 2.0 - 1.0;
+        col *= 1.0 + 0.025 * flick;
+
+        // ─── Fresnel chromospheric rim (hotter than disk) ─────────────
+        float fresnel = pow(1.0 - mu, 4.0);
+        vec3  rimCol  = planckRGB(u_t_pole * 1.04) * 1.4;
+        col += rimCol * fresnel * 0.40;
+
+        col *= 1.45;   // exposure tweak — let the bloom-less render still glow
+        gl_FragColor = vec4(col, 1.0);
+    }
+`;
+
+// High-tessellation sphere — Roche surface needs vertex density at the equator
+// for the bulge to read smoothly.
+const starGeo  = new THREE.SphereGeometry(1.0, 192, 144);
+const starMat  = new THREE.ShaderMaterial({
+    vertexShader: starVS, fragmentShader: starFS, uniforms,
+});
+const starMesh = new THREE.Mesh(starGeo, starMat);
+const starGroup = new THREE.Group();
+starGroup.add(starMesh);
+scene.add(starGroup);
+
+// ────────────────────────────────────────────────────────────────
+//  CHROMOSPHERIC RIM SHELL
+// ────────────────────────────────────────────────────────────────
+const rimVS = /* glsl */`
+    uniform float u_axis_ratio;
+    varying vec3 vNormal; varying vec3 vViewDir; varying float vSinTheta;
+    void main() {
+        vec3  d  = normalize(position);
+        float ct = d.y;
+        float st = sqrt(max(0.0, 1.0 - ct*ct));
+        // Match the star's bulge so the rim follows the oblate horizon.
+        vec3  pos = vec3(d.x, d.y / max(u_axis_ratio, 1.0) , d.z) * mix(1.0, u_axis_ratio, st);
+        vSinTheta = st;
+        vNormal   = normalize(normalMatrix * d);
+        vec4 mv   = modelViewMatrix * vec4(pos * 1.13, 1.0);
+        vViewDir  = normalize(-mv.xyz);
+        gl_Position = projectionMatrix * mv;
+    }
+`;
+const rimFS = /* glsl */`
+    uniform float u_time; uniform float u_t_pole;
+    varying vec3 vNormal; varying vec3 vViewDir; varying float vSinTheta;
+    vec3 planckRGB(float T){
+        float t = clamp(T,1000.0,40000.0)*0.01; float r,g,b;
+        if (t<=66.0){ r=1.0; g=0.39008158*log(max(t,1.0))-0.63184144; }
+        else { float tt=t-60.0; r=1.29293619*pow(tt,-0.1332048); g=1.12989086*pow(tt,-0.0755149); }
+        if (t>=66.0) b=1.0; else if (t<=19.0) b=0.0;
+        else b=0.54320679*log(t-10.0)-1.19625409;
+        return clamp(vec3(r,g,b),0.0,1.4);
+    }
+    void main() {
+        float rim   = 1.0 - max(dot(normalize(vNormal), normalize(vViewDir)), 0.0);
+        float pulse = 0.92 + 0.08 * sin(u_time * 1.4);
+        // Rim brighter at the poles (where gravity darkening leaves T high)
+        float polarBoost = mix(0.55, 1.0, 1.0 - vSinTheta);
+        float a = pow(rim, 2.0) * 0.42 * pulse * polarBoost;
+        vec3  c = planckRGB(u_t_pole * 1.02) * 1.3;
+        gl_FragColor = vec4(c, a);
+    }
+`;
+const rimMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(1.0, 64, 48),
+    new THREE.ShaderMaterial({
+        vertexShader:rimVS, fragmentShader:rimFS, uniforms,
+        transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.BackSide,
+    })
+);
+starGroup.add(rimMesh);
+
+// ────────────────────────────────────────────────────────────────
+//  POLAR RADIATIVE-WIND ENHANCEMENT
+// ────────────────────────────────────────────────────────────────
+//  Achernar is *not* a jet source — main-sequence Be stars do not
+//  launch collimated outflows. What VLTI/AMBER + interferometric
+//  imaging (Kervella & Domiciano de Souza 2006) actually shows is a
+//  faster, hotter *radiative wind* over the gravity-bright pole:
+//  the higher T_eff at the pole boosts radiation pressure, so the
+//  CAK line-driven wind there has a higher mass loss per unit area
+//  and a larger terminal velocity.  That produces a diffuse,
+//  flared bipolar excess in continuum images — not a collimated
+//  jet.  We render that as a wide, soft, expanding cone with
+//  azimuthal turbulence rather than the previous narrow cylinder.
+//
+const windVS = /* glsl */`
+    varying float vAlt;       // height above polar surface (≥0, world-space)
+    varying vec2  vRadXZ;     // (x,z) of vertex in world frame
+    varying float vViewAlign; // |ŷ · v̂| — 1 if viewer is along the rotation axis
+    void main() {
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vAlt   = max(0.0, abs(wp.y) - 1.0);
+        vRadXZ = wp.xz;
+        // Camera-to-vertex unit vector — used to fade the cone away when
+        // the viewer looks straight down the rotation axis (pole-on).
+        vec3 vDir  = normalize(cameraPosition - wp.xyz);
+        vViewAlign = abs(vDir.y);
+        gl_Position = projectionMatrix * viewMatrix * wp;
+    }
+`;
+const windFS = /* glsl */`
+    uniform float u_time;
+    uniform float u_t_pole;
+    varying float vAlt;
+    varying vec2  vRadXZ;
+    varying float vViewAlign;
+
+    vec3 planckRGB(float T){
+        float t = clamp(T,1000.0,40000.0)*0.01; float r,g,b;
+        if (t<=66.0){ r=1.0; g=0.39008158*log(max(t,1.0))-0.63184144; }
+        else { float tt=t-60.0; r=1.29293619*pow(tt,-0.1332048); g=1.12989086*pow(tt,-0.0755149); }
+        if (t>=66.0) b=1.0; else if (t<=19.0) b=0.0;
+        else b=0.54320679*log(t-10.0)-1.19625409;
+        return clamp(vec3(r,g,b),0.0,1.4);
+    }
+
+    // Hash-based turbulence (no need for full FBM here)
+    float h(vec3 p){ p = fract(p*vec3(127.1,311.7,74.7)); p += dot(p,p+19.19); return fract(p.x*p.y*p.z); }
+    float vn(vec3 p){
+        vec3 i=floor(p), f=fract(p), u=f*f*(3.0-2.0*f);
+        return mix(mix(mix(h(i),h(i+vec3(1,0,0)),u.x),
+                       mix(h(i+vec3(0,1,0)),h(i+vec3(1,1,0)),u.x), u.y),
+                   mix(mix(h(i+vec3(0,0,1)),h(i+vec3(1,0,1)),u.x),
+                       mix(h(i+vec3(0,1,1)),h(i+vec3(1,1,1)),u.x), u.y), u.z);
+    }
+
+    void main() {
+        float rxz = length(vRadXZ);
+
+        // Cone half-width grows with altitude — free-streaming wind.
+        float coneR  = 0.55 + 0.42 * vAlt;
+        float radial = exp(-pow(rxz / coneR, 2.0));
+
+        // CAK density profile: peaks at the polar *surface* (vAlt=0), falls
+        // super-exponentially as the wind accelerates to v∞.
+        float vRad    = 1.0 - exp(-vAlt / 1.4);              // velocity build-up
+        float density = (1.0 - 0.55 * vRad) * exp(-pow(vAlt / 3.4, 1.6));
+
+        // Helical streaks advected outward in the wind direction.
+        float advY    = vAlt - u_time * 0.55;
+        float turb    = 0.55 + 0.45 * vn(vec3(vRadXZ.x*2.5, advY*1.6, vRadXZ.y*2.5));
+
+        float a = radial * density * turb * 0.46
+                * (0.92 + 0.08 * sin(u_time*1.7 + vAlt*2.2));
+
+        // Pole-on view rejection: when the viewer looks down the rotation
+        // axis we see the cone end-on, which fills the whole frame and
+        // overpowers the disk.  Smoothly fade alpha as the viewing
+        // direction approaches ŷ.  No effect outside ~25° of the pole.
+        float poleFade = 1.0 - 0.85 * smoothstep(0.72, 0.96, vViewAlign);
+        a *= poleFade;
+
+        // Wind plasma is hotter than the photospheric pole (CAK shock-heated).
+        vec3 c = planckRGB(u_t_pole * 1.18) * 1.25;
+        gl_FragColor = vec4(c, a);
+    }
+`;
+// Inverted truncated cone — narrow base at the pole, flaring outward.
+// Height 4.5 (capped to keep the cone *inside* the disk's outer extent
+// at typical settings: R_outer slider tops out at 6 R_eq, so the wind
+// at world-y ≈ ±5.3 stays comfortably inside the frame).
+const WIND_HEIGHT = 4.5;
+const windGeo = new THREE.CylinderGeometry(1.45, 0.35, WIND_HEIGHT, 36, 1, true);
+const windMat = new THREE.ShaderMaterial({
+    vertexShader:windVS, fragmentShader:windFS, uniforms,
+    transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.DoubleSide,
+});
+const jetTop    = new THREE.Mesh(windGeo, windMat);
+const jetBottom = new THREE.Mesh(windGeo, windMat);
+// Anchor the narrow base 0.05 R outside the polar surface (R_pole = 1).
+//   geometry y ∈ [−H/2, +H/2];  narrow end at y = −H/2.
+//   want narrow end at world-y = +1.05 ⇒ offset = 1.05 + H/2.
+const WIND_OFFSET = 1.05 + WIND_HEIGHT / 2;
+jetTop.position.y    =  WIND_OFFSET;
+jetBottom.position.y = -WIND_OFFSET;
+jetBottom.rotation.x = Math.PI;
+starGroup.add(jetTop, jetBottom);
+
+// ────────────────────────────────────────────────────────────────
+//  BE-STAR DECRETION DISK — 3D volumetric Hα-emitting plasma
+// ────────────────────────────────────────────────────────────────
+//
+//  We render the disk as a true volume (Carciofi & Bjorkman 2006/2008
+//  viscous-decretion model):
+//
+//     ρ(r,z) = ρ₀ (R_eq/r)^n · exp(-z²/2H(r)²)        Σ ∝ r^-(n-1.5)
+//     H(r)  = H₀ · (r/R_eq)^1.5                         (vertical hydrostatic
+//                                                        equilibrium, isothermal)
+//     v_φ(r) = √(GM/r)                                  (Keplerian)
+//
+//  A box mesh covering the disk volume is raymarched in the fragment
+//  shader. We accumulate emission with absorption (front-to-back integration).
+//  Edge-on lines of sight pierce more plasma → much brighter Hα limb;
+//  pole-on views show the canonical face-on H II disk.
+//
+const diskVS = /* glsl */`
+    uniform mat4 u_disk_inv_model;
+    varying vec3 vObj;
+    varying vec3 vCamObj;
+    void main() {
+        vObj = position;
+        // camera position in object space (CPU supplies inverse model matrix
+        // for WebGL1 compatibility — no inverse() in GLSL ES 1.00).
+        vec4 cObj = u_disk_inv_model * vec4(cameraPosition, 1.0);
+        vCamObj = cObj.xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+`;
+const diskFS = /* glsl */`
+    precision highp float;
+    uniform float u_time;
+    uniform float u_axis_ratio;
+    uniform float u_disk_active;
+    uniform float u_disk_rho;
+    uniform float u_disk_outer;
+    uniform float u_t_pole;
+    varying vec3 vObj;
+    varying vec3 vCamObj;
+
+    // Hash & 3D value-noise FBM for clumps and spiral-density structure.
+    float h3(vec3 p){ p=fract(p*vec3(127.1,311.7,74.7)); p+=dot(p,p+19.19); return fract(p.x*p.y*p.z); }
+    float vn3(vec3 p){
+        vec3 i=floor(p), f=fract(p), u=f*f*(3.0-2.0*f);
+        return mix(mix(mix(h3(i),h3(i+vec3(1,0,0)),u.x),
+                       mix(h3(i+vec3(0,1,0)),h3(i+vec3(1,1,0)),u.x), u.y),
+                   mix(mix(h3(i+vec3(0,0,1)),h3(i+vec3(1,0,1)),u.x),
+                       mix(h3(i+vec3(0,1,1)),h3(i+vec3(1,1,1)),u.x), u.y), u.z);
+    }
+    float fbm3(vec3 p){ float v=0.0,a=0.5; for(int k=0;k<4;k++){ v+=a*vn3(p); p=p*2.07+vec3(13.7,5.3,21.1); a*=0.5; } return v; }
+
+    // Slab–ray intersection in object space: y in [-Hbox,+Hbox], radial in [0,Router].
+    // Returns vec2(tNear, tFar); tFar<tNear ⇒ miss.
+    vec2 raySlab(vec3 ro, vec3 rd, float Hbox, float Router) {
+        // y-slab
+        float t1 = (-Hbox - ro.y) / (abs(rd.y) > 1e-6 ? rd.y : 1e-6);
+        float t2 = ( Hbox - ro.y) / (abs(rd.y) > 1e-6 ? rd.y : 1e-6);
+        float tNearY = min(t1, t2);
+        float tFarY  = max(t1, t2);
+        // radial cylinder y² + z² (no y), here cylinder around y axis: x²+z² < Router²
+        float a = rd.x*rd.x + rd.z*rd.z;
+        float b = 2.0 * (ro.x*rd.x + ro.z*rd.z);
+        float c = ro.x*ro.x + ro.z*ro.z - Router*Router;
+        float tNearR = -1e9, tFarR = 1e9;
+        if (a > 1e-8) {
+            float disc = b*b - 4.0*a*c;
+            if (disc > 0.0) {
+                float s = sqrt(disc);
+                tNearR = (-b - s) / (2.0*a);
+                tFarR  = (-b + s) / (2.0*a);
+            } else {
+                return vec2(1.0, -1.0); // miss
+            }
+        } else if (c > 0.0) { return vec2(1.0, -1.0); }
+
+        return vec2(max(tNearY, tNearR), min(tFarY, tFarR));
+    }
+
+    // Density at (r_cyl, y) in the Be disk.  r already = sqrt(x²+z²).
+    float diskDensity(float r, float y, float phiSheared, float Rinner, float Router) {
+        if (r < Rinner) return 0.0;
+        if (r > Router) return 0.0;
+        // Power-law radial: ρ₀(r) ∝ r^-n, n=3.5 (canonical Σ_disc ∝ r^-2 with H∝r^1.5)
+        float n = 3.5;
+        float rho0 = pow(Rinner / r, n);
+        // Vertical hydrostatic Gaussian, H ∝ r^1.5, with c_s/v_phi ~ 0.025 at r=Rinner.
+        float H = 0.025 * Rinner * pow(r / Rinner, 1.5);
+        float vert = exp(-0.5 * (y*y) / max(H*H, 1e-8));
+        // Soft inner & outer edges so the volume integral stays finite & smooth.
+        float t      = (r - Rinner) / max(Router - Rinner, 1e-3);
+        float edges  = smoothstep(0.0, 0.05, t) * smoothstep(1.0, 0.88, t);
+        // Spiral / clump structure (m≈1 one-armed oscillation reported in Be disks),
+        // sheared by Keplerian rate.
+        float clump = 0.55 + 0.45 * fbm3(vec3(r * 1.7, y * 4.0, phiSheared * 1.4))
+                                 * (0.6 + 0.4 * sin(phiSheared * 1.0));
+        return rho0 * vert * edges * clump;
+    }
+
+    void main() {
+        if (u_disk_active < 0.5) discard;
+
+        float Rinner = u_axis_ratio * 1.05;     // disk hugs the equatorial bulge
+        float Router = u_disk_outer;
+        float Hbox   = 0.025 * Rinner * pow(Router / Rinner, 1.5) * 4.0;  // ±4σ envelope
+
+        vec3 ro = vCamObj;
+        vec3 rd = normalize(vObj - vCamObj);
+
+        vec2 tt = raySlab(ro, rd, Hbox, Router);
+        if (tt.y < tt.x) discard;
+        float t0 = max(tt.x, 0.0);
+        float t1 = tt.y;
+        if (t1 - t0 < 1e-3) discard;
+
+        // Clamp the integration length so we don't blow out FPS on extreme angles
+        float L = min(t1 - t0, 24.0);
+
+        const int NSTEPS = 32;
+        float dl = L / float(NSTEPS);
+        vec3  p  = ro + rd * t0;
+        vec3 stepVec = rd * dl;
+
+        // Hα emission colour with mild inner-edge hot tinge (T~T_pole/2 → Hα + faint blue).
+        vec3 halpha   = vec3(1.00, 0.20, 0.32);
+        vec3 hotInner = vec3(1.00, 0.55, 0.75);
+
+        vec3  acc = vec3(0.0);
+        float trans = 1.0;
+
+        for (int i = 0; i < NSTEPS; ++i) {
+            float r   = length(vec2(p.x, p.z));
+            float phi = atan(p.z, p.x);
+            // Keplerian shear of the structure pattern
+            float kep = pow(max(r, 0.05), -1.5);
+            float phiSheared = phi - kep * u_time * 0.55;
+
+            float dens = diskDensity(r, p.y, phiSheared, Rinner, Router);
+            dens *= u_disk_rho;
+
+            // Inner rim is hotter (FUV-irradiated) → blend toward pinker
+            float innerHot = 1.0 - smoothstep(Rinner, Rinner * 1.5, r);
+            vec3 emiss = mix(halpha, hotInner, innerHot * 0.55);
+
+            // Volumetric front-to-back integration (emission + absorption)
+            float dT = clamp(dens * 0.30, 0.0, 0.40);
+            acc   += trans * emiss * dens * dl * 0.85;
+            trans *= 1.0 - dT;
+            if (trans < 0.01) break;
+
+            p += stepVec;
+        }
+
+        float alpha = clamp(1.0 - trans, 0.0, 0.96);
+        // Emission gain
+        gl_FragColor = vec4(acc * 1.20, alpha);
+    }
+`;
+// Disk volume: a flat slab enclosing the gas. Sized for the largest outer
+// radius (6 R_eq) and the tallest scale-height envelope (~±1.2 R_p).
+const diskGeo = new THREE.BoxGeometry(14.0, 3.0, 14.0);
+const diskMat = new THREE.ShaderMaterial({
+    vertexShader:diskVS, fragmentShader:diskFS, uniforms,
+    transparent:true, depthWrite:false,
+    blending:THREE.AdditiveBlending, side:THREE.BackSide,
+});
+const disk = new THREE.Mesh(diskGeo, diskMat);
+starGroup.add(disk);
+
+// ────────────────────────────────────────────────────────────────
+//  ROBINSON / TWISTOR NULL-CONGRUENCE OVERLAY
+// ────────────────────────────────────────────────────────────────
+//
+//  Penrose's twistor space ℙT ≅ ℂℙ³ encodes Minkowski-space null
+//  geodesics as points.  A *Robinson congruence* is the family of
+//  null geodesics that meet a single non-null twistor Z ∈ ℙT.
+//  Sliced at constant time, the rays project onto ℝ³ as nested
+//  Villarceau circles — the **stereographic image of the Hopf
+//  fibration** S³ → S².  We render that fibration directly:
+//
+//      • Sample a particle's *base point* (η, φ_b) on S² (the
+//        target of the Hopf map h: S³ → S²).
+//      • Sample the particle's *fiber phase* α₀.
+//      • Compute its position on S³ ⊂ ℂ²:
+//            z₁ = cos(η/2) · e^{i α}
+//            z₂ = sin(η/2) · e^{i (q·α − φ_b)}     α = α₀ + ω·t
+//        (q = 1 ⇒ pure Hopf circle, q > 1 ⇒ (1, q) torus knot.)
+//      • Project stereographically from (0, 0, 0, 1) ∈ S³:
+//            P(u, v, w, x) = (u, v, w) / (1 − x)
+//        and re-axis so Hopf-Z = scene-y (rotation axis) and the
+//        Hopf unit circle (η = 0) lies in the scene equatorial
+//        plane (xz).
+//
+//  Helicity slider h_T deforms the congruence away from pure
+//  null:  φ_b drifts with α at rate h_T·ω, breaking fiber closure
+//  and producing the *twisted* Robinson congruence with non-zero
+//  vorticity — the geometric encoding of twistor norm Z·Z̄ ≠ 0.
+//  At h_T = 0 you see the pure Hopf fibration; cranking h_T
+//  generates Robinson's logarithmic-spiral fibers.
+//
+//  Twistors live in the *inertial* frame (parented to scene, not
+//  starGroup) because they are a property of spacetime, not of the
+//  rotating body — so the congruence stays geometrically still
+//  while the star spins inside it.
+//
+const TWIST_N = 1600;
+const twistPos    = new Float32Array(TWIST_N * 3);
+const twistCol    = new Float32Array(TWIST_N * 3);
+const twistEta    = new Float32Array(TWIST_N);    // S² latitude of base point
+const twistPhiB0  = new Float32Array(TWIST_N);    // S² longitude of base point
+const twistAlpha0 = new Float32Array(TWIST_N);    // initial fiber phase
+const twistQ      = new Float32Array(TWIST_N);    // (1, q) torus-knot index
+const TWIST_SCALE = 2.5;                           // scene-units per Hopf radius
+const TWIST_OMEGA = 0.45;                          // twistor U(1) phase rate
+
+(function initTwistors() {
+    for (let i = 0; i < TWIST_N; i++) {
+        // η ∈ (0.18, π − 0.10): away from the singular Hopf fibers
+        //   (η = 0 ⇒ unit circle in equatorial plane;
+        //    η = π ⇒ entire rotation axis through ∞).
+        // We bias toward intermediate latitudes so the bulk of the
+        // cloud lies on the visible nested-tori shells rather than
+        // hugging the axis or the equatorial ring.
+        const u   = (i + 0.5) / TWIST_N;
+        const eta = 0.18 + (Math.PI - 0.28) * u;
+        twistEta[i]    = eta;
+        // Golden-spiral base longitude (≈ uniform on S²).
+        twistPhiB0[i]  = (i * Math.PI * (3 - Math.sqrt(5))) % (Math.PI * 2);
+        twistAlpha0[i] = Math.random() * Math.PI * 2;
+        // 65 % pure Hopf (q = 1), 25 % torus-knot (q = 2), 10 % (q = 3).
+        const c = Math.random();
+        twistQ[i] = c < 0.65 ? 1 : (c < 0.90 ? 2 : 3);
+
+        // Colour: cyclic wheel by α₀ blended with η-tinted tone so the
+        // nested-tori layering is readable.  Inner shells (small η) →
+        // warm magenta; outer shells (η → π) → cool indigo.
+        const tA = twistAlpha0[i] / (Math.PI * 2);
+        const hA = tA * 6;
+        const cM = 0.9, xM = cM * (1 - Math.abs(((hA) % 2) - 1));
+        let R = 0, G = 0, B = 0;
+        if (hA < 1)      { R=cM; G=xM; B=0;  }
+        else if (hA < 2) { R=xM; G=cM; B=0;  }
+        else if (hA < 3) { R=0;  G=cM; B=xM; }
+        else if (hA < 4) { R=0;  G=xM; B=cM; }
+        else if (hA < 5) { R=xM; G=0;  B=cM; }
+        else             { R=cM; G=0;  B=xM; }
+        // Latitudinal tint (warm at equator → cool toward axis)
+        const lat = (eta - Math.PI/2) / (Math.PI/2);  // −1 (equator) … +1 (pole)
+        const tintR = 0.78 + 0.10 * lat;
+        const tintG = 0.55 - 0.05 * lat;
+        const tintB = 1.00 - 0.10 * lat;
+        // Dim particles on the most extreme tori so the structure stays
+        // readable when many shells overlap.
+        const dim = 0.65 + 0.30 * (1 - Math.abs(lat));
+        twistCol[i*3]   = (0.45 * R + 0.55 * tintR) * dim;
+        twistCol[i*3+1] = (0.45 * G + 0.55 * tintG) * dim;
+        twistCol[i*3+2] = (0.45 * B + 0.55 * tintB) * dim;
+    }
+})();
+
+const twistGeo = new THREE.BufferGeometry();
+twistGeo.setAttribute('position', new THREE.BufferAttribute(twistPos, 3));
+twistGeo.setAttribute('color',    new THREE.BufferAttribute(twistCol, 3));
+const twistMat = new THREE.PointsMaterial({
+    size: 0.038, sizeAttenuation: true, vertexColors: true,
+    transparent: true, opacity: 0.70, depthWrite: false,
+    blending: THREE.AdditiveBlending,
+});
+const twistPoints = new THREE.Points(twistGeo, twistMat);
+twistPoints.visible = false;
+// Inertial frame: twistors are a spacetime structure, not a body overlay.
+scene.add(twistPoints);
+
+function updateTwistors(t) {
+    if (!twistPoints.visible) return;
+    const arr = twistPos;
+    const omega = TWIST_OMEGA;
+    const helicity = uniforms.u_twist_helicity.value;
+    const SCALE = TWIST_SCALE;
+    let nHidden = 0;
+
+    for (let i = 0; i < TWIST_N; i++) {
+        const eta      = twistEta[i];
+        const phiBase0 = twistPhiB0[i];
+        const alpha0   = twistAlpha0[i];
+        const q        = twistQ[i];
+
+        // Twistor U(1) phase advance + base-point drift driven by helicity.
+        // h_T ≠ 0 untwists / twists the fibers, taking us off the pure-Hopf
+        // submanifold (Z·Z̄ = 0) into the generic non-null Robinson family.
+        const alpha   = alpha0   + omega * t;
+        const phiBase = phiBase0 + helicity * omega * t * 0.30;
+
+        const cN = Math.cos(eta * 0.5);
+        const sN = Math.sin(eta * 0.5);
+        const cA = Math.cos(alpha);
+        const sA = Math.sin(alpha);
+        const aMb = q * alpha - phiBase;
+        const cAB = Math.cos(aMb);
+        const sAB = Math.sin(aMb);
+
+        // S³ embedding ⊂ ℂ²
+        const u = cN * cA;
+        const v = cN * sA;
+        const w = sN * cAB;
+        const x = sN * sAB;
+
+        // Stereographic projection from (0, 0, 0, 1)
+        const D = 1.0 - x;
+        if (D < 0.06) {
+            // Particle at projection-point singularity this frame —
+            // hide it just for this tick (it'll come back next frame).
+            arr[i*3]   = 1e3;
+            arr[i*3+1] = 1e3;
+            arr[i*3+2] = 1e3;
+            nHidden++;
+            continue;
+        }
+        // Hopf coords (X, Y, Z)_h = (u, v, w)/D.
+        // Re-axis so the Hopf Z-axis (degenerate fiber) ↔ scene y-axis,
+        // and the Hopf η = 0 unit circle (in xy_h plane) ↔ scene xz plane.
+        arr[i*3]   = SCALE * u / D;
+        arr[i*3+1] = SCALE * w / D;
+        arr[i*3+2] = SCALE * v / D;
+    }
+    twistGeo.attributes.position.needsUpdate = true;
+}
+
+// ────────────────────────────────────────────────────────────────
+//  DECRETION OUTFLOW PARTICLES (the actual mass-loss mechanism)
+// ────────────────────────────────────────────────────────────────
+//
+//  Be stars decrete — they don't accrete.  Material near the
+//  equator is spun up to local Keplerian velocity (helped by NRP
+//  pulsation pumping angular momentum into the surface layers)
+//  and is then transported *outward* by viscous angular-momentum
+//  redistribution.  The Lee-Saio-Osaki / Carciofi-Bjorkman model:
+//
+//      Σ̇_out = (1/r) ∂/∂r [ ν Σ r ∂(rv_φ)/∂r ]
+//      ν = α c_s² / Ω_K   (Shakura-Sunyaev, adapted for decretion)
+//
+//  In a thin Keplerian disk this gives a slow outward radial drift
+//
+//      v_r ≈  α (c_s / v_K)² v_K
+//
+//  superposed on the dominant azimuthal Keplerian motion.  We
+//  simulate ~1800 tracer particles each with state (r, φ, age):
+//
+//   • φ̇ = Ω_K(r) = r^(-3/2)         (Keplerian, scene units)
+//   • ṙ = drift_speed                  (outward, viscous)
+//   • injection rate at R_eq modulated by an outburst envelope
+//     1 + amp · max(0, sin(2π t/P))²  — Achernar's well-known
+//     episodic disk-feeding behaviour.
+//
+//  Particle is recycled when r > R_outer.
+//
+const OUT_N = 1800;
+// Each particle is rendered as a 2-vertex line segment: a *head* (current
+// position) and a *tail* offset by −v_world·τ so each particle wears a
+// velocity-aligned streak. This makes the Keplerian shear and viscous
+// outward drift visually obvious without storing per-particle history.
+const OUT_TAIL_TAU = 0.42;          // motion-blur time, scene seconds
+const outPos = new Float32Array(OUT_N * 2 * 3);     // head + tail
+const outCol = new Float32Array(OUT_N * 2 * 3);
+const outR   = new Float32Array(OUT_N);
+const outPhi = new Float32Array(OUT_N);
+const outAge = new Float32Array(OUT_N);     // seconds since launch
+const outLife = new Float32Array(OUT_N);    // expected lifetime (cosmetic)
+
+(function initOutflow() {
+    for (let i = 0; i < OUT_N; i++) {
+        outR[i]    = 1e9;       // start "dead" — they will be respawned
+        outPhi[i]  = 0;
+        outAge[i]  = 1e9;
+        outLife[i] = 0;
+    }
+})();
+const outGeo = new THREE.BufferGeometry();
+outGeo.setAttribute('position', new THREE.BufferAttribute(outPos, 3));
+outGeo.setAttribute('color',    new THREE.BufferAttribute(outCol, 3));
+const outMat = new THREE.LineBasicMaterial({
+    vertexColors: true,
+    transparent: true, depthWrite: false,
+    blending: THREE.AdditiveBlending,
+});
+const outPoints = new THREE.LineSegments(outGeo, outMat);
+outPoints.visible = true;
+starGroup.add(outPoints);
+
+// Random-launch helper (Box-Muller for Gaussian z thickness)
+function gauss() {
+    const u1 = Math.max(Math.random(), 1e-6), u2 = Math.random();
+    return Math.sqrt(-2*Math.log(u1)) * Math.cos(2*Math.PI*u2);
+}
+
+// Temperature-coloured palette for outflow:
+//   inner (T~10 kK)   → soft cyan
+//   bulk  (T~7-9 kK)  → magenta
+//   outer (T~5 kK)    → dim red
+function outflowColor(rNorm, dst) {
+    // rNorm in [0,1]: 0 inner, 1 outer
+    const t = Math.min(1, Math.max(0, rNorm));
+    // linear blend cyan → magenta → red
+    const cR = (1-t)*0.55 + t*1.00;
+    const cG = (1-t)*0.85 + t*0.20;
+    const cB = (1-t)*1.00 + t*0.30;
+    dst[0] = cR; dst[1] = cG; dst[2] = cB;
+}
+
+let outTimeAccum = 0;
+const _outCol = new Float32Array(3);
+const hudBurst    = document.getElementById('hud-burst');
+const hudBurstPct = document.getElementById('hud-burst-pct');
+
+function updateOutflow(t, dt) {
+    if (!outPoints.visible) {
+        // Hide all line segments off-screen
+        for (let i = 0; i < OUT_N * 2; i++) {
+            outPos[i*3] = 0; outPos[i*3+1] = 1e6; outPos[i*3+2] = 0;
+            outCol[i*3] = 0; outCol[i*3+1] = 0; outCol[i*3+2] = 0;
+        }
+        outGeo.attributes.position.needsUpdate = true;
+        outGeo.attributes.color.needsUpdate    = true;
+        return;
+    }
+
+    const Rin    = uniforms.u_axis_ratio.value * 1.05;   // inner edge
+    const Rout   = uniforms.u_disk_outer.value;          // outer edge
+    const alpha  = 0.0095;                                // viscosity proxy
+    const cs2_vk2 = 0.012;                                // (c_s / v_K)² for B-star disk
+    const drift0  = alpha * cs2_vk2;                      // base v_r/v_K
+
+    // Outburst envelope — sin² so it's positive, no negative injection.
+    const burstPer = Math.max(uniforms.u_outburst_per.value, 0.5);
+    const burstAmp = uniforms.u_outburst_amp.value;
+    const burstPhase = (t % burstPer) / burstPer;       // 0 → 1 within a cycle
+    const burst = Math.pow(Math.sin(Math.PI * burstPhase), 2);
+    const diskOn = uniforms.u_disk_active.value > 0.5;
+    const injectionRate = (0.55 + 0.45 * burstAmp * burst) * uniforms.u_disk_rho.value
+                        * (diskOn ? 1.0 : 0.10);
+
+    // Update HUD: sin² peaks at φ = 0.5; before that = "build", after = "shed".
+    if (hudBurst) {
+        const stage = burstPhase < 0.4 ? 'build'
+                    : burstPhase < 0.6 ? 'peak'
+                    :                    'shed';
+        hudBurst.textContent = stage;
+        hudBurstPct.textContent = Math.round(burst * 100) + '%';
+    }
+
+    // Differential rotation of the surface biases the equatorial
+    // "feeding" zone: the equator launches mass at exactly v_K, so
+    // boosted spin (state.spin) increases the launch rate.
+    const launchPerSec = 220 * injectionRate * Math.max(0.2, state.spin);
+    outTimeAccum += dt * launchPerSec;
+    let nLaunch = Math.floor(outTimeAccum);
+    outTimeAccum -= nLaunch;
+
+    // NRP m=2 prograde mode locks the launch azimuth to the two surface
+    // antinodes:   2φ_b − σt = 0  →  φ_antinode = (σt)/2 mod π.
+    // When NRP is active, ~75% of new particles are spawned in a tight
+    // Gaussian around one of the two antinodes — reproducing the
+    // "two-armed feeding" pattern observed in real Be stars during NRP-
+    // driven outbursts (Rivinius et al.).  When NRP is off we sample
+    // φ uniformly so the disk feeds isotropically.
+    const nrpOn      = uniforms.u_nrp_active.value > 0.5;
+    const sigmaT     = uniforms.u_nrp_omega.value * uniforms.u_time.value;
+    const antinode   = 0.5 * sigmaT;       // body-frame angle of arm 1
+    const armSpread  = 0.42;               // ~24° half-width
+
+    // ── Step 1: respawn dead particles, re-using slots
+    for (let i = 0; i < OUT_N && nLaunch > 0; i++) {
+        if (outR[i] >= Rout || outAge[i] >= outLife[i]) {
+            outR[i]    = Rin + 0.02 * Math.random();
+            if (nrpOn && Math.random() < 0.75) {
+                const arm = Math.random() < 0.5 ? antinode : antinode + Math.PI;
+                outPhi[i] = arm + armSpread * gauss();
+            } else {
+                outPhi[i] = Math.random() * Math.PI * 2;
+            }
+            outAge[i]  = 0;
+            // Lifetime sets the scale-height envelope: longer-lived
+            // particles drift further out before recycling.
+            outLife[i] = 8 + 14 * Math.random();
+            nLaunch--;
+        }
+    }
+
+    // ── Step 2: integrate every live particle
+    //
+    //  Particles live in starGroup — which itself rotates at Ω_body =
+    //  0.45·spin per second. To get the correct Keplerian motion in
+    //  the *inertial* frame we must advance their body-frame phase by
+    //      Δφ = (Ω_K(r) − Ω_body) dt
+    //  so the inertial-frame rotation reduces to Ω_K (independent of
+    //  the spin slider). At r = 1, Δφ = 0 with spin = 1 — particles
+    //  ride the equator. Beyond R_eq, Ω_K < Ω_body ⇒ Δφ < 0 ⇒
+    //  particles visibly *lag* the surface, the correct shear sign.
+    //
+    //  Tail vertex of each line segment is offset by −v_world·τ; here
+    //  v_world is the *inertial-frame* velocity expressed in body-frame
+    //  components (so it composes correctly with starGroup's rotation
+    //  applied at draw time):
+    //      v_x = -sin φ · (Ω_K · r)  +  cos φ · v_r
+    //      v_z =  cos φ · (Ω_K · r)  +  sin φ · v_r
+    //
+    const drift_visual = drift0 * 1.85;        // visualisation boost
+    const omegaBody    = 0.45 * state.spin;
+    const tau          = OUT_TAIL_TAU;
+    for (let i = 0; i < OUT_N; i++) {
+        const r = outR[i];
+        const head = i * 6;          // index of head x in outPos
+        const tail = i * 6 + 3;      // index of tail x
+
+        if (r >= Rout || outAge[i] >= outLife[i]) {
+            outPos[head]   = 0; outPos[head+1] = 1e6; outPos[head+2] = 0;
+            outPos[tail]   = 0; outPos[tail+1] = 1e6; outPos[tail+2] = 0;
+            continue;
+        }
+        const omegaK = Math.pow(r, -1.5) * 0.45;     // inertial Keplerian rate
+        outPhi[i] += (omegaK - omegaBody) * dt;       // body-frame advance
+        // Viscous radial drift v_r = drift0 · v_K
+        const vr = drift_visual * Math.pow(r, -0.5);
+        outR[i] += vr * dt;
+        outAge[i] += dt;
+
+        // Vertical thickness: thin Gaussian envelope ~ 0.05 R (puffs
+        // up slightly at larger r per H(r) ∝ r^1.5 / r ∝ r^0.5)
+        const z = 0.04 * Math.sqrt(r) * gauss() * 0.5;
+
+        const cf = Math.cos(outPhi[i]);
+        const sf = Math.sin(outPhi[i]);
+        const headX = r * cf;
+        const headY = z;
+        const headZ = r * sf;
+
+        // Inertial-frame velocity in body-frame coords (see comment above)
+        const vTan_world = omegaK * r;
+        const vWx = -sf * vTan_world + cf * vr;
+        const vWz =  cf * vTan_world + sf * vr;
+
+        outPos[head]   = headX;
+        outPos[head+1] = headY;
+        outPos[head+2] = headZ;
+        outPos[tail]   = headX - vWx * tau;
+        outPos[tail+1] = headY;          // negligible vertical motion
+        outPos[tail+2] = headZ - vWz * tau;
+
+        // Colour: age-fade × radial palette × burst-glow
+        const rNorm = (r - Rin) / Math.max(Rout - Rin, 0.1);
+        outflowColor(rNorm, _outCol);
+        const ageFrac = outAge[i] / outLife[i];
+        const bright  = (1 - ageFrac * 0.6) * (0.55 + 0.55 * burst);
+        // Head full bright, tail dimmed to ~25 % so the streak fades
+        // smoothly behind the particle.
+        outCol[head]   = _outCol[0] * bright;
+        outCol[head+1] = _outCol[1] * bright;
+        outCol[head+2] = _outCol[2] * bright;
+        outCol[tail]   = _outCol[0] * bright * 0.25;
+        outCol[tail+1] = _outCol[1] * bright * 0.25;
+        outCol[tail+2] = _outCol[2] * bright * 0.25;
+    }
+    outGeo.attributes.position.needsUpdate = true;
+    outGeo.attributes.color.needsUpdate    = true;
+}
+
+// ────────────────────────────────────────────────────────────────
+//  POLAR CAK WIND TRACER PARTICLES
+// ────────────────────────────────────────────────────────────────
+//
+//  Tracer particles for the gravity-darkening-enhanced polar wind.
+//  Each particle is launched from a polar cap (cos θ ≥ 0.65) with
+//  random azimuth, then accelerated radially outward following the
+//  classical CAK β-law:
+//
+//      v(r) = v_∞ · (1 − R★/r)^β      β ≈ 0.85
+//
+//  In our scene units (R_pole = 1), the velocity ramps from 0 at the
+//  surface to a terminal v_∞ ≈ 1 (visualisation rate) by r ≈ 4–5.
+//  Particles die at r > 9 or after 12 s and respawn at the polar cap.
+//
+//  Why "tracers" rather than the volumetric cone alone?  The cone is
+//  a static glow; tracers show actual material *in motion* — you can
+//  see the acceleration zone (sparse close to the star, dense far
+//  out as the wind decelerates the spawn-rate visually) and the
+//  approximate streamline geometry.  Together with the cone shader
+//  they produce a wind that reads as both density + flow.
+//
+const PWIND_N = 600;
+const pwPos   = new Float32Array(PWIND_N * 3);
+const pwCol   = new Float32Array(PWIND_N * 3);
+const pwR     = new Float32Array(PWIND_N);   // heliocentric distance
+const pwLatC  = new Float32Array(PWIND_N);   // signed cos θ (hemisphere ±)
+const pwPhi   = new Float32Array(PWIND_N);
+const pwAge   = new Float32Array(PWIND_N);
+const pwLife  = new Float32Array(PWIND_N);
+const PWIND_VINF = 1.05;                      // visualisation terminal v
+const PWIND_BETA = 0.85;
+const PWIND_RMAX = 9.0;
+
+(function initPWind() {
+    for (let i = 0; i < PWIND_N; i++) {
+        pwR[i] = 1e9; pwAge[i] = 1e9; pwLife[i] = 0;
+    }
+})();
+const pwGeo = new THREE.BufferGeometry();
+pwGeo.setAttribute('position', new THREE.BufferAttribute(pwPos, 3));
+pwGeo.setAttribute('color',    new THREE.BufferAttribute(pwCol, 3));
+const pwMat = new THREE.PointsMaterial({
+    size: 0.045, sizeAttenuation: true, vertexColors: true,
+    transparent: true, opacity: 0.85, depthWrite: false,
+    blending: THREE.AdditiveBlending,
+});
+const pwPoints = new THREE.Points(pwGeo, pwMat);
+pwPoints.visible = true;
+starGroup.add(pwPoints);
+
+let pwTimeAccum = 0;
+
+function updatePWind(t, dt) {
+    if (!pwPoints.visible) return;
+
+    // Mass-loss rate scales with luminosity ∝ T_pole^4 (CAK):
+    //   Ṁ_polar ∝ L^(1/α'),  α' ≈ 0.6–0.7 for B stars.
+    //   Use injection rate as a proxy.
+    const tNorm = uniforms.u_t_pole.value / 17000.0;
+    const launchPerSec = 70 * Math.pow(tNorm, 4 / 0.65);
+    pwTimeAccum += dt * launchPerSec;
+    let nLaunch = Math.floor(pwTimeAccum);
+    pwTimeAccum -= nLaunch;
+
+    // ── Step 1: respawn dead tracers from the polar caps
+    for (let i = 0; i < PWIND_N && nLaunch > 0; i++) {
+        if (pwR[i] >= PWIND_RMAX || pwAge[i] >= pwLife[i]) {
+            // Sample cos θ uniformly in [0.55, 1) → polar cap (~57° half-angle)
+            const cAbs = 0.55 + 0.45 * Math.random();
+            const hemi = Math.random() < 0.5 ? 1 : -1;
+            pwLatC[i] = hemi * cAbs;
+            pwPhi[i]  = Math.random() * Math.PI * 2;
+            pwR[i]    = 1.04;
+            pwAge[i]  = 0;
+            pwLife[i] = 8 + 8 * Math.random();
+            nLaunch--;
+        }
+    }
+
+    // ── Step 2: radial CAK β-law advance + colour
+    for (let i = 0; i < PWIND_N; i++) {
+        const r = pwR[i];
+        if (r >= PWIND_RMAX || pwAge[i] >= pwLife[i]) {
+            pwPos[i*3] = 0; pwPos[i*3+1] = 1e6; pwPos[i*3+2] = 0;
+            continue;
+        }
+        // β-law radial velocity, 0 at base → v_∞ asymptote.
+        const u = 1.0 - 1.0 / r;
+        const vRad = (u <= 0) ? 0.02 : PWIND_VINF * Math.pow(u, PWIND_BETA);
+        pwR[i] += vRad * dt * 0.85;
+        pwAge[i] += dt;
+
+        const cosT = pwLatC[i];
+        const sinT = Math.sqrt(Math.max(0, 1 - cosT*cosT));
+        const cf = Math.cos(pwPhi[i]);
+        const sf = Math.sin(pwPhi[i]);
+        const r2 = pwR[i];
+        pwPos[i*3]   = r2 * sinT * cf;
+        pwPos[i*3+1] = r2 * cosT;
+        pwPos[i*3+2] = r2 * sinT * sf;
+
+        // Colour: tracer is hot (T_pole · 1.18) shocked plasma at the
+        // base, cooling/fading as the wind expands and recombines.
+        const rNorm = Math.min(1, (r2 - 1) / (PWIND_RMAX - 1));
+        // Inner = bright pale-blue (recombining hot plasma)
+        // Outer = pale magenta-pink (cool thinning wind)
+        const tCool = Math.pow(rNorm, 0.6);
+        const speedFactor = vRad / PWIND_VINF;     // 0..1
+        const bright = (0.45 + 0.55 * speedFactor) * (1 - 0.4 * pwAge[i]/pwLife[i]);
+        pwCol[i*3]   = (0.65 + 0.35 * tCool) * bright;
+        pwCol[i*3+1] = (0.85 - 0.45 * tCool) * bright;
+        pwCol[i*3+2] = (1.00 - 0.30 * tCool) * bright;
+    }
+    pwGeo.attributes.position.needsUpdate = true;
+    pwGeo.attributes.color.needsUpdate    = true;
+}
+
+// ────────────────────────────────────────────────────────────────
+//  ROTATION-AXIS HELPER
+// ────────────────────────────────────────────────────────────────
+const axisGeo = new THREE.BufferGeometry();
+axisGeo.setAttribute('position', new THREE.Float32BufferAttribute(
+    new Float32Array([0,-3,0, 0,3,0]), 3));
+const axisLine = new THREE.Line(axisGeo,
+    new THREE.LineDashedMaterial({ color:0xc8a8ff, dashSize:0.15, gapSize:0.10, transparent:true, opacity:0.55 }));
+axisLine.computeLineDistances();
+axisLine.visible = false;
+starGroup.add(axisLine);
+
+// ────────────────────────────────────────────────────────────────
+//  DIFFERENTIAL-ROTATION LATITUDE GRID
+// ────────────────────────────────────────────────────────────────
+//
+//  Five dashed parallels traced on the *Roche surface* itself (not a
+//  sphere) at θ = 30°, 60°, 90° (equator), 120°, 150°.  Each ring is
+//  its own Object3D parented to starGroup, so the parent transform
+//  carries the body's solid-body Ω_eq rotation.  We then set each
+//  ring's local rotation.y to
+//      Δφ(θ) = -α₂ · cos²θ · ∫Ω_eq dt
+//  so the inertial-frame rotation rate of the ring is
+//      Ω_eq + Δφ̇ = Ω_eq · (1 − α₂ cos²θ) = Ω(θ)
+//  exactly the surface-shader DR law.  Result: at α₂ > 0 the polar
+//  rings visibly drift backward versus the equator — the same tracer
+//  helioseismologists use to map the Sun's DR.
+//
+//  Rings are rebuilt whenever the equatorial:polar ratio R changes,
+//  because r_Roche(θ) is a function of R.
+//
+const DR_RING_THETAS = [
+    { thetaDeg:  30, label: '+60° lat' },
+    { thetaDeg:  60, label: '+30° lat' },
+    { thetaDeg:  90, label: ' equator' },
+    { thetaDeg: 120, label: '−30° lat' },
+    { thetaDeg: 150, label: '−60° lat' },
+];
+
+const drRings = [];   // { mesh, cosTheta, geometry }
+
+function buildRingPositions(thetaRad, R, n = 192) {
+    // Roche radius at this latitude
+    const cosT = Math.cos(thetaRad);
+    const sin2 = 1 - cosT * cosT;
+    const sinT = Math.sqrt(sin2);
+    const beta = Math.min(2 * (R - 1) / (R*R*R), 0.293);
+    let r = 1;
+    for (let k = 0; k < 6; k++) r = 1 + 0.5 * beta * r*r*r * sin2;
+    const rSurf = r * 1.005;   // bias just above the surface to avoid z-fighting
+
+    // n+1 verts so the line closes cleanly under LineDashedMaterial.
+    const positions = new Float32Array((n + 1) * 3);
+    for (let i = 0; i <= n; i++) {
+        const phi = (i / n) * Math.PI * 2;
+        positions[i*3]   = rSurf * sinT * Math.cos(phi);
+        positions[i*3+1] = rSurf * cosT;
+        positions[i*3+2] = rSurf * sinT * Math.sin(phi);
+    }
+    return positions;
+}
+
+function rebuildDRRings() {
+    const R = Math.max(uniforms.u_axis_ratio.value, 1.0);
+    for (const ring of drRings) {
+        const newPos = buildRingPositions(ring.cosTheta.theta, R);
+        ring.geometry.setAttribute('position', new THREE.BufferAttribute(newPos, 3));
+        ring.geometry.attributes.position.needsUpdate = true;
+        ring.mesh.computeLineDistances();
+    }
+}
+
+(function initDRRings() {
+    for (const def of DR_RING_THETAS) {
+        const theta = def.thetaDeg * Math.PI / 180;
+        const cosT  = Math.cos(theta);
+        const isEq  = Math.abs(def.thetaDeg - 90) < 1;
+        const geo   = new THREE.BufferGeometry();
+        geo.setAttribute('position',
+            new THREE.BufferAttribute(buildRingPositions(theta, uniforms.u_axis_ratio.value), 3));
+        const mat = new THREE.LineDashedMaterial({
+            color: isEq ? 0xffd080 : 0xc8a8ff,
+            dashSize: 0.10, gapSize: 0.08,
+            transparent: true,
+            opacity: isEq ? 0.85 : 0.55,
+        });
+        const line = new THREE.Line(geo, mat);
+        line.computeLineDistances();
+        const wrapper = new THREE.Object3D();    // separate group for per-ring DR rotation
+        wrapper.add(line);
+        wrapper.visible = false;
+        starGroup.add(wrapper);
+        drRings.push({ mesh: line, wrapper, cosTheta: { theta, value: cosT, value2: cosT*cosT }, geometry: geo, isEquator: isEq });
+    }
+})();
+
+let drRingsVisible = false;
+function setDRRingsVisible(v) {
+    drRingsVisible = v;
+    for (const r of drRings) r.wrapper.visible = v;
+}
+function updateDRRings() {
+    if (!drRingsVisible) return;
+    const phase = uniforms.u_diffrot_phase.value;
+    const alpha = uniforms.u_diffrot_alpha.value;
+    for (const r of drRings) {
+        // Δφ(θ) = −α₂ · cos²θ · ∫Ω_eq dt — body-frame backward drift
+        r.wrapper.rotation.y = -alpha * r.cosTheta.value2 * phase;
+    }
+}
+
+// ────────────────────────────────────────────────────────────────
+//  ACHERNAR B — A1V–A3V companion (Kervella & Domiciano de Souza 2008)
+// ────────────────────────────────────────────────────────────────
+//   a ≈ 12.3 AU, e ≈ 0.72, P ≈ 14.3 yr, m_B ≈ 1.7 M☉.
+//   Achernar A's R_eq ≈ 9.16 R☉ ≈ 0.0426 AU, so the orbital
+//   semi-major in scene units (R_pol = 1) is huge (~290 R_eq).
+//   We compress the orbit visually so the companion is on-screen,
+//   and label it as "schematic".
+//
+const binaryGroup = new THREE.Group();
+binaryGroup.visible = false;
+
+// Companion star — small white-ish A-type
+const companion = new THREE.Mesh(
+    new THREE.SphereGeometry(0.12, 32, 24),
+    new THREE.ShaderMaterial({
+        uniforms: { u_time: uniforms.u_time },
+        vertexShader: `
+            varying vec3 vN; varying vec3 vV;
+            void main(){
+                vN = normalize(normalMatrix * normal);
+                vec4 mv = modelViewMatrix * vec4(position,1.0);
+                vV = normalize(-mv.xyz);
+                gl_Position = projectionMatrix * mv;
+            }
+        `,
+        fragmentShader: `
+            uniform float u_time;
+            varying vec3 vN; varying vec3 vV;
+            void main(){
+                float mu = max(dot(normalize(vN), normalize(vV)), 0.0);
+                float omu = 1.0 - mu;
+                float limb = clamp(1.0 - 0.34*omu - 0.20*omu*omu, 0.0, 1.0);
+                vec3 base = vec3(0.96, 0.98, 1.00);   // ~9000 K
+                float fres = pow(omu, 4.0);
+                gl_FragColor = vec4(base * limb * 1.8 + vec3(0.65,0.78,1.00) * fres * 0.5, 1.0);
+            }
+        `,
+    })
+);
+binaryGroup.add(companion);
+
+// Schematic orbital ellipse (a = 8 in scene units, e = 0.72)
+const orbitA = 8.0, orbitE = 0.72;
+const orbitPts = [];
+for (let k = 0; k <= 256; k++) {
+    const E = (k / 256) * Math.PI * 2;
+    const x = orbitA * (Math.cos(E) - orbitE);
+    const z = orbitA * Math.sqrt(1 - orbitE*orbitE) * Math.sin(E);
+    orbitPts.push(x, 0, z);
+}
+const orbitGeo = new THREE.BufferGeometry();
+orbitGeo.setAttribute('position', new THREE.Float32BufferAttribute(orbitPts, 3));
+const orbitLine = new THREE.Line(orbitGeo,
+    new THREE.LineDashedMaterial({ color:0x80a8ff, dashSize:0.20, gapSize:0.15, transparent:true, opacity:0.45 }));
+orbitLine.computeLineDistances();
+binaryGroup.add(orbitLine);
+
+// Tilt orbit roughly to its observed plane (~70° from line of sight)
+binaryGroup.rotation.x = -0.30;
+binaryGroup.rotation.z =  0.18;
+scene.add(binaryGroup);
+
+// State for solving Kepler's equation for the companion's animated position.
+const binaryState = {
+    M0: 0.0,
+    P:  18.0,    // visualisation period (s in scene time)
+    a:  orbitA,
+    e:  orbitE,
+};
+function solveKepler(M, e) {
+    let E = M + e * Math.sin(M);
+    for (let i = 0; i < 6; i++) E = E - (E - e*Math.sin(E) - M) / (1 - e*Math.cos(E));
+    return E;
+}
+
+// ────────────────────────────────────────────────────────────────
+//  LIGHTING (mostly cosmetic — shaders are emissive)
+// ────────────────────────────────────────────────────────────────
+const coreLight = new THREE.PointLight(0xc8b8ff, 3, 80);
+scene.add(coreLight);
+scene.add(new THREE.AmbientLight(0x06081a, 0.35));
+
+// ────────────────────────────────────────────────────────────────
+//  RESIZE
+// ────────────────────────────────────────────────────────────────
+function resize() {
+    const w = canvasWrap.clientWidth, h = canvasWrap.clientHeight;
+    if (!w || !h) return;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(canvasWrap);
+resize();
+
+// ────────────────────────────────────────────────────────────────
+//  CAMERA PRESETS
+// ────────────────────────────────────────────────────────────────
+function setCam(k) {
+    document.querySelectorAll('.btn-row button[id^=cam]').forEach(b => b.classList.remove('active'));
+    document.getElementById('cam-' + k)?.classList.add('active');
+    if (k === 'edge') { camera.position.set(0, 0.05, 7.0); }
+    else if (k === 'pole') { camera.position.set(0, 7.0, 0.001); }
+    else { // incl: 65° from pole = 25° elevation
+        const d = 7.0, el = (90 - 65) * Math.PI / 180;
+        camera.position.set(0, d*Math.sin(el), d*Math.cos(el));
+    }
+    controls.target.set(0, 0, 0);
+    controls.update();
+}
+document.getElementById('cam-edge').addEventListener('click', () => setCam('edge'));
+document.getElementById('cam-incl').addEventListener('click', () => setCam('incl'));
+document.getElementById('cam-pole').addEventListener('click', () => setCam('pole'));
+document.getElementById('btn-center').addEventListener('click', () => setCam('incl'));
+setCam('incl');
+
+// ────────────────────────────────────────────────────────────────
+//  SLIDER + TOGGLE BINDINGS
+// ────────────────────────────────────────────────────────────────
+const fmt = (v) => v.toLocaleString('en-US').replace(',', ' ');
+
+document.getElementById('sl-ratio').addEventListener('input', e => {
+    const v = +e.target.value;
+    uniforms.u_axis_ratio.value = v;
+    document.getElementById('disp-ratio').textContent = v.toFixed(2);
+    document.getElementById('hud-ratio').textContent  = v.toFixed(2);
+    // ω/ω_crit ≈ √(β / β_crit), β_crit = 8/27
+    const beta = Math.min(2*(v-1)/(v*v*v), 0.293);
+    const ratioCrit = Math.sqrt(beta / (8/27));
+    document.getElementById('hud-omega').textContent = ratioCrit.toFixed(2);
+    // Roche surface changed shape — rebuild DR latitude rings.
+    rebuildDRRings();
+});
+document.getElementById('sl-tpole').addEventListener('input', e => {
+    const v = +e.target.value;
+    uniforms.u_t_pole.value = v;
+    document.getElementById('disp-tpole').textContent = fmt(v) + ' K';
+    document.getElementById('hud-tpole').textContent  = fmt(v);
+});
+document.getElementById('sl-teq').addEventListener('input', e => {
+    const v = +e.target.value;
+    uniforms.u_t_eq.value = v;
+    document.getElementById('disp-teq').textContent = fmt(v) + ' K';
+    document.getElementById('hud-teq').textContent  = fmt(v);
+});
+document.getElementById('sl-betagd').addEventListener('input', e => {
+    const v = +e.target.value;
+    uniforms.u_beta_gd.value = v;
+    document.getElementById('disp-betagd').textContent = v.toFixed(2);
+});
+document.getElementById('sl-spin').addEventListener('input', e => {
+    state.spin = +e.target.value;
+    document.getElementById('disp-spin').textContent = state.spin.toFixed(2) + '×';
+    document.getElementById('hud-veq').textContent   = Math.round(285 * state.spin);
+});
+document.getElementById('sl-incl').addEventListener('input', e => {
+    state.inclination = +e.target.value;
+    document.getElementById('disp-incl').textContent = e.target.value + '°';
+    const d = camera.position.length() || 7.0;
+    const el = (90 - state.inclination) * Math.PI / 180;
+    camera.position.set(0, d*Math.sin(el), d*Math.cos(el));
+    controls.update();
+});
+document.getElementById('sl-diffrot').addEventListener('input', e => {
+    uniforms.u_diffrot_alpha.value = +e.target.value;
+    document.getElementById('disp-diffrot').textContent = (+e.target.value).toFixed(3);
+});
+
+document.getElementById('tog-disk').addEventListener('change', e => {
+    uniforms.u_disk_active.value = e.target.checked ? 1.0 : 0.0;
+    document.getElementById('hud-disk').textContent = e.target.checked ? 'active' : 'shed (shell phase)';
+});
+document.getElementById('sl-disk-rho').addEventListener('input', e => {
+    uniforms.u_disk_rho.value = +e.target.value;
+    document.getElementById('disp-disk-rho').textContent = (+e.target.value).toFixed(2);
+});
+document.getElementById('sl-disk-out').addEventListener('input', e => {
+    uniforms.u_disk_outer.value = +e.target.value;
+    document.getElementById('disp-disk-out').innerHTML = (+e.target.value).toFixed(1) + ' R<sub>eq</sub>';
+});
+
+document.getElementById('tog-corona').addEventListener('change', e => { rimMesh.visible = e.target.checked; });
+document.getElementById('tog-jet').addEventListener('change',    e => { jetTop.visible = jetBottom.visible = e.target.checked; });
+document.getElementById('tog-pwind').addEventListener('change',  e => { pwPoints.visible = e.target.checked; });
+document.getElementById('tog-axis').addEventListener('change',   e => { axisLine.visible = e.target.checked; });
+document.getElementById('tog-drgrid').addEventListener('change', e => setDRRingsVisible(e.target.checked));
+document.getElementById('tog-binary').addEventListener('change', e => { binaryGroup.visible = e.target.checked; });
+document.getElementById('tog-outflow').addEventListener('change',e => { outPoints.visible = e.target.checked; });
+document.getElementById('tog-twistor').addEventListener('change',e => { twistPoints.visible = e.target.checked; });
+
+document.getElementById('sl-burst-amp').addEventListener('input', e => {
+    uniforms.u_outburst_amp.value = +e.target.value;
+    document.getElementById('disp-burst-amp').textContent = (+e.target.value).toFixed(2);
+});
+document.getElementById('sl-burst-per').addEventListener('input', e => {
+    uniforms.u_outburst_per.value = +e.target.value;
+    document.getElementById('disp-burst-per').textContent = (+e.target.value).toFixed(1) + ' s';
+});
+document.getElementById('sl-twist-h').addEventListener('input', e => {
+    uniforms.u_twist_helicity.value = +e.target.value;
+    document.getElementById('disp-twist-h').textContent = (+e.target.value).toFixed(2);
+});
+
+// ── Gravity-darkening model selector ─────────────────────────────
+const modePill = document.getElementById('mode-pill');
+function refreshModePill() {
+    const law = uniforms.u_gd_model.value < 0.5
+        ? `von Zeipel β=${uniforms.u_beta_gd.value.toFixed(2)}`
+        : `ELR '11`;
+    const mode = ['Continuum', 'Doppler v_los', 'T_eff map'][state.viewMode];
+    modePill.textContent = `${mode} · ${law}`;
+}
+document.getElementById('gd-vz').addEventListener('click', () => {
+    uniforms.u_gd_model.value = 0.0;
+    document.getElementById('gd-vz').classList.add('active');
+    document.getElementById('gd-elr').classList.remove('active');
+    refreshModePill();
+});
+document.getElementById('gd-elr').addEventListener('click', () => {
+    uniforms.u_gd_model.value = 1.0;
+    document.getElementById('gd-elr').classList.add('active');
+    document.getElementById('gd-vz').classList.remove('active');
+    refreshModePill();
+});
+
+// ── View mode (continuum / Doppler / T-map) ──────────────────────
+function setViewMode(idx) {
+    state.viewMode = idx;
+    uniforms.u_view_mode.value = idx;
+    document.querySelectorAll('#view-row button').forEach(b => b.classList.remove('active'));
+    document.getElementById(['view-cont','view-dopp','view-temp'][idx]).classList.add('active');
+    document.getElementById('legend-doppler').style.display = idx === 1 ? 'block' : 'none';
+    document.getElementById('legend-temp').style.display    = idx === 2 ? 'block' : 'none';
+    refreshModePill();
+}
+document.getElementById('view-cont').addEventListener('click', () => setViewMode(0));
+document.getElementById('view-dopp').addEventListener('click', () => setViewMode(1));
+document.getElementById('view-temp').addEventListener('click', () => setViewMode(2));
+
+// ────────────────────────────────────────────────────────────────
+//  TIME CONTROLS — global Δt multiplier + pause
+// ────────────────────────────────────────────────────────────────
+state.timeRate = 1.0;
+state.paused   = false;
+const btnPause = document.getElementById('btn-pause');
+const slTimeR  = document.getElementById('sl-timerate');
+const dispTimeR = document.getElementById('disp-timerate');
+btnPause.addEventListener('click', () => {
+    state.paused = !state.paused;
+    btnPause.classList.toggle('active', state.paused);
+    btnPause.textContent = state.paused ? '⏸' : '▶';
+});
+slTimeR.addEventListener('input', e => {
+    state.timeRate = +e.target.value;
+    dispTimeR.textContent = state.timeRate.toFixed(2) + '×';
+});
+
+// ────────────────────────────────────────────────────────────────
+//  LAYER BATCH BUTTONS — All on / Essentials / All off
+// ────────────────────────────────────────────────────────────────
+const layerToggleIDs = [
+    'tog-corona', 'tog-axis', 'tog-drgrid',
+    'tog-jet', 'tog-pwind', 'tog-outflow', 'tog-twistor',
+    'tog-binary', 'tog-sed',
+];
+const layerEssentials = new Set([
+    'tog-corona', 'tog-jet', 'tog-pwind', 'tog-outflow', 'tog-sed',
+]);
+function setLayer(id, on) {
+    const el = document.getElementById(id);
+    if (!el || el.checked === on) return;
+    el.checked = on;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+}
+document.getElementById('btn-layers-allon').addEventListener('click', () => {
+    layerToggleIDs.forEach(id => setLayer(id, true));
+});
+document.getElementById('btn-layers-essentials').addEventListener('click', () => {
+    layerToggleIDs.forEach(id => setLayer(id, layerEssentials.has(id)));
+});
+document.getElementById('btn-layers-alloff').addEventListener('click', () => {
+    layerToggleIDs.forEach(id => setLayer(id, false));
+});
+
+// ────────────────────────────────────────────────────────────────
+//  QUICK PRESETS — apply slider/toggle batches that match named
+//  Achernar regimes.  Each preset dispatches the matching event so
+//  every existing handler runs (HUD numbers, Roche surface, disk
+//  shaders, Hα profile etc all stay in sync automatically).
+// ────────────────────────────────────────────────────────────────
+function setSlider(id, v) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.value = v;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+const PRESETS = {
+    // Canonical Achernar A as currently observed (post-2014 disk reform).
+    default: () => {
+        setSlider('sl-ratio',  1.56);
+        setSlider('sl-tpole',  17000);
+        setSlider('sl-teq',    10000);
+        setSlider('sl-betagd', 0.25);
+        setSlider('sl-spin',   1.00);
+        setSlider('sl-incl',   65);
+        setSlider('sl-diffrot',0.10);
+        setSlider('sl-disk-rho', 1.00);
+        setSlider('sl-disk-out', 3.6);
+        setSlider('sl-burst-amp', 0.65);
+        setSlider('sl-burst-per', 8.0);
+        setSlider('sl-twist-h', 0.0);
+        setSlider('sl-nrp-amp', 0.012);
+        setSlider('sl-nrp-per', 1.26);
+        setLayer('tog-disk', true);
+        setLayer('tog-nrp', false);
+        setLayer('tog-twistor', false);
+        ['tog-corona','tog-jet','tog-pwind','tog-outflow','tog-sed']
+            .forEach(id => setLayer(id, true));
+        setLayer('tog-axis', false); setLayer('tog-drgrid', false);
+        setLayer('tog-binary', false);
+    },
+    // Inner-disk feeding outburst: max density, NRP on, tight burst period.
+    burst: () => {
+        PRESETS.default();
+        setSlider('sl-disk-rho', 2.20);
+        setSlider('sl-burst-amp', 1.30);
+        setSlider('sl-burst-per', 5.0);
+        setSlider('sl-tpole', 18500);
+        setLayer('tog-nrp', true);
+        setLayer('tog-outflow', true);
+    },
+    // Disk shed (2013 shell-phase analogue).
+    shell: () => {
+        PRESETS.default();
+        setSlider('sl-disk-rho', 0.35);
+        setSlider('sl-disk-out', 2.8);
+        setSlider('sl-burst-amp', 0.10);
+        setLayer('tog-disk', false);    // disk currently shed
+    },
+    // Near-critical rotation, no disk — pure photospheric oblateness study.
+    crit: () => {
+        PRESETS.default();
+        setSlider('sl-ratio', 1.56);
+        setSlider('sl-spin',  2.10);
+        setSlider('sl-diffrot', 0.20);
+        setLayer('tog-disk', false);
+        setLayer('tog-outflow', false);
+        setLayer('tog-pwind', true);
+        setLayer('tog-drgrid', true);
+    },
+};
+document.getElementById('ps-default').addEventListener('click', PRESETS.default);
+document.getElementById('ps-burst').addEventListener('click',   PRESETS.burst);
+document.getElementById('ps-shell').addEventListener('click',   PRESETS.shell);
+document.getElementById('ps-crit').addEventListener('click',    PRESETS.crit);
+
+// ── Non-radial pulsation ─────────────────────────────────────────
+document.getElementById('tog-nrp').addEventListener('change', e => {
+    uniforms.u_nrp_active.value = e.target.checked ? 1.0 : 0.0;
+});
+document.getElementById('sl-nrp-amp').addEventListener('input', e => {
+    uniforms.u_nrp_amp.value = +e.target.value;
+    document.getElementById('disp-nrp-amp').innerHTML = (+e.target.value).toFixed(3) + ' R<sub>p</sub>';
+});
+document.getElementById('sl-nrp-per').addEventListener('input', e => {
+    const P = +e.target.value;
+    uniforms.u_nrp_omega.value = 2.0 * Math.PI / P;
+    document.getElementById('disp-nrp-per').textContent = P.toFixed(2) + ' d';
+});
+
+// ────────────────────────────────────────────────────────────────
+//  SPECTRAL ENERGY DISTRIBUTION
+// ────────────────────────────────────────────────────────────────
+//
+//  We render F_λ in two pieces and overplot:
+//
+//   1. Photosphere — integrate B_λ(T(θ)) μ dA over the *visible*
+//      hemisphere of the Roche figure with current gravity-darkening
+//      law and ω. The integral depends on inclination, so the SED
+//      hardens as the camera moves toward the pole (this is the
+//      classical Be aspect-angle effect).
+//
+//   2. Disk — optically-thin H II free-free / free-bound continuum,
+//          ε_ν ∝ n_e n_p T^(-1/2) g_ff(ν, T)        (in units of erg/s/Hz/cm³)
+//      converted to F_λ = F_ν · c/λ². We add the Balmer (364.6 nm)
+//      and Paschen (820.4 nm) discontinuities — diagnostic of disk
+//      density and temperature — and bolt on Gaussian-broadened
+//      Hα/Hβ/Brγ emission lines for visual context.
+//
+//  Both curves and their sum are drawn on log–log axes from 0.1 µm
+//  to 10 µm; the IR excess is the canonical Be-star observable.
+//
+const sedCanvas = document.getElementById('sed-canvas');
+const sedCtx    = sedCanvas.getContext('2d');
+const sedTag    = document.getElementById('sp-tag');
+const SED_W = sedCanvas.width, SED_H = sedCanvas.height;
+
+const SED_NL = 96;
+const sedLam = new Float32Array(SED_NL);         // wavelength grid, nm
+{
+    const lo = 100.0, hi = 10000.0;              // 0.1–10 µm
+    for (let i = 0; i < SED_NL; i++) {
+        sedLam[i] = lo * Math.pow(hi / lo, i / (SED_NL - 1));
+    }
+}
+
+// Fibonacci-spiral surface samples on the unit sphere (we map to Roche r(θ)
+// on the fly). 240 points is plenty for a smooth SED at 80 wavelengths.
+const SED_NS = 240;
+const sedDir = new Float32Array(SED_NS * 3);
+for (let i = 0; i < SED_NS; i++) {
+    const phi = i * Math.PI * (3 - Math.sqrt(5));
+    const ct  = 1 - 2 * (i + 0.5) / SED_NS;
+    const st  = Math.sqrt(Math.max(0, 1 - ct * ct));
+    sedDir[i*3]   = st * Math.cos(phi);
+    sedDir[i*3+1] = ct;
+    sedDir[i*3+2] = st * Math.sin(phi);
+}
+
+// Planck B_λ(T), arbitrary scaling.  We work in shape-only units:
+//   B_λ(T) ∝ (1/λ⁵) / (exp(hc/λkT) − 1)
+const HC_KB = 1.4387769e7;   // hc/k in nm·K
+function planckBlam(lamNm, T) {
+    const x = HC_KB / (lamNm * T);
+    if (x > 80) return 0;
+    const exp = Math.exp(x);
+    if (exp - 1 < 1e-20) return 0;
+    const lam5 = Math.pow(lamNm, 5);
+    return 1.0 / (lam5 * (exp - 1));
+}
+
+// Gaunt-factor proxy g_ff(λ, T) — slow logarithmic dependence; we use a
+// dimensionally-correct approximation good enough for the visual.
+function gauntFF(lamNm, T) {
+    const lam_um = lamNm * 1e-3;
+    return 0.55 * (Math.log(4.955e-2 / lam_um) + 1.5 * Math.log(T)) / 8.0 + 1.0;
+}
+
+const sedPhot  = new Float32Array(SED_NL);
+const sedDisk  = new Float32Array(SED_NL);
+const sedTotal = new Float32Array(SED_NL);
+
+const _sedView = new THREE.Vector3();
+const _sedTmp  = new THREE.Vector3();
+
+function computeSED() {
+    // ── 1. Resolve current physics state from uniforms ───────────────
+    const R     = Math.max(uniforms.u_axis_ratio.value, 1.0);
+    const beta  = Math.min(2 * (R - 1) / (R*R*R), 0.293);
+    const gPole = 1.0;
+    const gEq   = Math.max(1.0 / (R*R) - beta * R, 1e-3);
+    const Tpole = uniforms.u_t_pole.value;
+    const Teq   = uniforms.u_t_eq.value;
+    const w     = Math.sqrt(beta / (8/27));
+    const beta_eff = (uniforms.u_gd_model.value < 0.5)
+        ? uniforms.u_beta_gd.value
+        : (0.25 - 0.0746*w*w - 0.0238*w*w*w*w);
+
+    // View direction in the star's local frame (so it lines up with our
+    // surface samples). starGroup only rotates around y, so this is just
+    // a single rotation by −starGroup.rotation.y.
+    _sedView.copy(camera.position);
+    starGroup.worldToLocal(_sedView).normalize();
+    const vx = _sedView.x, vy = _sedView.y, vz = _sedView.z;
+
+    // ── 2. Photosphere integrand ────────────────────────────────────
+    sedPhot.fill(0);
+    let totalArea = 0;
+    for (let i = 0; i < SED_NS; i++) {
+        const dx = sedDir[i*3], dy = sedDir[i*3+1], dz = sedDir[i*3+2];
+        const sin2 = Math.max(0, 1 - dy*dy);
+        const sinT = Math.sqrt(sin2);
+
+        // Roche radius (5 fixed-point iterations is plenty)
+        let r = 1;
+        for (let k = 0; k < 5; k++) r = 1 + 0.5 * beta * r*r*r * sin2;
+
+        // g_eff = -∇Φ = −r̂/r² + β·ϱ·ϱ̂
+        const cyl = Math.hypot(dx, dz);
+        const cx  = cyl > 1e-6 ? dx / cyl : 0;
+        const cz  = cyl > 1e-6 ? dz / cyl : 0;
+        const rho = r * sinT;
+        const gx = -dx / (r*r) + beta * rho * cx;
+        const gy = -dy / (r*r);
+        const gz = -dz / (r*r) + beta * rho * cz;
+        const gMag = Math.hypot(gx, gy, gz);
+        const gFrac = Math.max(0, Math.min(1, (gMag - gEq) / Math.max(gPole - gEq, 1e-3)));
+        const gd = Math.pow(gFrac, beta_eff / 0.25);
+        const T  = Teq + gd * (Tpole - Teq);
+
+        // Outward normal = -ĝ
+        const nx = -gx / gMag, ny = -gy / gMag, nz = -gz / gMag;
+        const mu = Math.max(0, nx*vx + ny*vy + nz*vz);
+
+        // Differential area: r² for the Roche figure mapped from a unit
+        // sphere is a reasonable shape proxy (good to <5% for our R≤1.56).
+        const wA = r * r * mu;
+        if (wA <= 0) continue;
+        totalArea += wA;
+
+        for (let k = 0; k < SED_NL; k++) {
+            sedPhot[k] += wA * planckBlam(sedLam[k], T);
+        }
+    }
+    // Normalise photosphere so peak ~1 (we'll renormalise globally at draw time).
+    if (totalArea > 0) {
+        const inv = 1 / totalArea;
+        for (let k = 0; k < SED_NL; k++) sedPhot[k] *= inv;
+    }
+
+    // ── 3. Disk free-free + free-bound continuum + emission lines ────
+    sedDisk.fill(0);
+    if (uniforms.u_disk_active.value > 0.5) {
+        const Tdisk  = 0.6 * Tpole;     // typical Be disk T_eff (FUV-irradiated)
+        const Rin    = R * 1.05;
+        const Rout   = uniforms.u_disk_outer.value;
+        // Emission-measure proxy: ∫ n²·H(r) dr ∝ (1 - (Rin/Rout)^…) — combine
+        // outer extent and the user density slider into one normaliser.
+        const massProxy = (Rout - Rin) * Math.pow(Rout / Rin, 1.5);
+        const norm = uniforms.u_disk_rho.value * massProxy;
+
+        for (let k = 0; k < SED_NL; k++) {
+            const lam = sedLam[k];
+            // F_ν,ff ∝ T^(-1/2) g_ff. Convert to F_λ = F_ν c/λ² ⇒ F_λ ∝ g_ff/λ².
+            let ff = gauntFF(lam, Tdisk) / (lam * lam) * Math.pow(Tdisk / 10000, -0.5);
+
+            // Balmer continuum (n=2) — emission edge at 364.6 nm. Smooth jump.
+            // Below the limit we are in the Lyman continuum (much weaker), above
+            // it the recombination cascade pumps up the visible continuum.
+            const balmer = 1.0 + 1.6 * Math.exp(-Math.pow((lam - 364.6) / 14, 2)) * (lam > 364.6 ? 1 : 0.25);
+            // Paschen continuum edge at 820.4 nm
+            const paschen = 1.0 + 0.45 * Math.exp(-Math.pow((lam - 820.4) / 22, 2)) * (lam > 820.4 ? 1 : 0.4);
+            // Brackett edge at 1458 nm (smaller)
+            const brackett = 1.0 + 0.20 * Math.exp(-Math.pow((lam - 1458) / 35, 2)) * (lam > 1458 ? 1 : 0.55);
+
+            ff *= balmer * paschen * brackett;
+            sedDisk[k] = ff * norm * 4.0e7;
+
+            // Emission lines on top of the disk continuum
+            const lineAt = (l0, sigma, amp) => {
+                const dl = lam - l0;
+                return amp * Math.exp(-(dl*dl) / (2 * sigma * sigma));
+            };
+            sedDisk[k] += norm * (
+                lineAt(656.28, 3.0, 1.6e7)   // Hα
+              + lineAt(486.13, 2.5, 0.55e7)  // Hβ
+              + lineAt(434.05, 2.0, 0.22e7)  // Hγ
+              + lineAt(2166.0, 12.0, 0.30e7) // Brγ
+              + lineAt(5169.0, 8.0,  0.04e7) // Fe II 5169 (placeholder for Fe-II forest)
+            );
+        }
+    }
+
+    // ── 4. Total ────────────────────────────────────────────────────
+    for (let k = 0; k < SED_NL; k++) sedTotal[k] = sedPhot[k] + sedDisk[k];
+}
+
+// Wavelength → x pixel (log scale, 100 → 10000 nm)
+function sedX(lamNm) {
+    const t = (Math.log10(lamNm) - 2) / 2;   // 100 → 0, 10000 → 1
+    return t * SED_W;
+}
+// Flux → y pixel (log scale; we set vmin/vmax dynamically per draw)
+function sedY(F, logFmin, logFmax) {
+    if (F <= 0) return SED_H;
+    const t = (Math.log10(F) - logFmin) / (logFmax - logFmin);
+    return SED_H * (1 - Math.max(0, Math.min(1, t)));
+}
+
+function drawSED() {
+    if (!sedPanel.classList.contains('show')) return;
+    computeSED();
+
+    // Auto-scale vertical range from current data (with floor)
+    let fmax = 0;
+    for (let k = 0; k < SED_NL; k++) fmax = Math.max(fmax, sedTotal[k]);
+    if (fmax < 1e-30) fmax = 1;
+    const logFmax = Math.log10(fmax) + 0.20;
+    const logFmin = logFmax - 4.5;       // 4.5 dex of dynamic range
+
+    // Update inclination tag
+    sedTag.textContent = `i = ${Math.round(state.inclination)}°`;
+
+    // ── grid + frame ────────────────────────────────────────────────
+    sedCtx.clearRect(0, 0, SED_W, SED_H);
+    sedCtx.lineWidth = 1;
+    sedCtx.strokeStyle = 'rgba(180,120,255,0.10)';
+    // vertical decade lines
+    for (let lam = 100; lam <= 10000; lam *= 10) {
+        const x = sedX(lam);
+        sedCtx.beginPath(); sedCtx.moveTo(x, 0); sedCtx.lineTo(x, SED_H); sedCtx.stroke();
+        // minor lines
+        for (let m = 2; m <= 9; m++) {
+            const xm = sedX(lam * m);
+            if (xm < SED_W) {
+                sedCtx.strokeStyle = 'rgba(180,120,255,0.04)';
+                sedCtx.beginPath(); sedCtx.moveTo(xm, 0); sedCtx.lineTo(xm, SED_H); sedCtx.stroke();
+                sedCtx.strokeStyle = 'rgba(180,120,255,0.10)';
+            }
+        }
+    }
+    // horizontal decade lines
+    sedCtx.strokeStyle = 'rgba(180,120,255,0.08)';
+    for (let f = Math.ceil(logFmin); f <= Math.floor(logFmax); f++) {
+        const y = sedY(Math.pow(10, f), logFmin, logFmax);
+        sedCtx.beginPath(); sedCtx.moveTo(0, y); sedCtx.lineTo(SED_W, y); sedCtx.stroke();
+    }
+
+    // photometric bands shaded
+    const bands = [
+        { lo: 380,  hi: 440,  c: 'rgba(80,120,255,0.06)', n: 'B' },
+        { lo: 500,  hi: 590,  c: 'rgba(110,255,140,0.05)', n: 'V' },
+        { lo: 1100, hi: 1330, c: 'rgba(255,180,80,0.05)',  n: 'J' },
+        { lo: 1500, hi: 1800, c: 'rgba(255,140,80,0.05)',  n: 'H' },
+        { lo: 2000, hi: 2400, c: 'rgba(255,100,100,0.05)', n: 'K' },
+    ];
+    sedCtx.font = '8px system-ui';
+    for (const b of bands) {
+        const x0 = sedX(b.lo), x1 = sedX(b.hi);
+        sedCtx.fillStyle = b.c;
+        sedCtx.fillRect(x0, 0, x1 - x0, SED_H);
+        sedCtx.fillStyle = 'rgba(220,220,255,0.35)';
+        sedCtx.fillText(b.n, (x0 + x1) / 2 - 3, 9);
+    }
+
+    // ── photosphere curve ──────────────────────────────────────────
+    sedCtx.strokeStyle = '#90c8ff';
+    sedCtx.lineWidth = 1.4;
+    sedCtx.beginPath();
+    for (let k = 0; k < SED_NL; k++) {
+        const x = sedX(sedLam[k]);
+        const y = sedY(sedPhot[k], logFmin, logFmax);
+        if (k === 0) sedCtx.moveTo(x, y); else sedCtx.lineTo(x, y);
+    }
+    sedCtx.stroke();
+
+    // ── disk curve ─────────────────────────────────────────────────
+    if (uniforms.u_disk_active.value > 0.5) {
+        sedCtx.strokeStyle = '#ff80a8';
+        sedCtx.lineWidth = 1.2;
+        sedCtx.beginPath();
+        let started = false;
+        for (let k = 0; k < SED_NL; k++) {
+            if (sedDisk[k] <= 0) continue;
+            const x = sedX(sedLam[k]);
+            const y = sedY(sedDisk[k], logFmin, logFmax);
+            if (!started) { sedCtx.moveTo(x, y); started = true; }
+            else sedCtx.lineTo(x, y);
+        }
+        sedCtx.stroke();
+    }
+
+    // ── total curve (filled) ───────────────────────────────────────
+    sedCtx.strokeStyle = '#fff0c8';
+    sedCtx.lineWidth = 1.6;
+    sedCtx.fillStyle = 'rgba(255,240,200,0.10)';
+    sedCtx.beginPath();
+    sedCtx.moveTo(0, SED_H);
+    for (let k = 0; k < SED_NL; k++) {
+        const x = sedX(sedLam[k]);
+        const y = sedY(sedTotal[k], logFmin, logFmax);
+        sedCtx.lineTo(x, y);
+    }
+    sedCtx.lineTo(SED_W, SED_H); sedCtx.closePath(); sedCtx.fill();
+    sedCtx.beginPath();
+    for (let k = 0; k < SED_NL; k++) {
+        const x = sedX(sedLam[k]);
+        const y = sedY(sedTotal[k], logFmin, logFmax);
+        if (k === 0) sedCtx.moveTo(x, y); else sedCtx.lineTo(x, y);
+    }
+    sedCtx.stroke();
+
+    // ── line markers (Hα, Brγ) ─────────────────────────────────────
+    const marks = [
+        { lam: 364.6,  label: 'Bal' },
+        { lam: 656.28, label: 'Hα'  },
+        { lam: 820.4,  label: 'Pa'  },
+        { lam: 2166,   label: 'Brγ' },
+    ];
+    sedCtx.fillStyle = 'rgba(200,160,255,0.55)';
+    sedCtx.font = '9px system-ui';
+    for (const m of marks) {
+        const x = sedX(m.lam);
+        sedCtx.fillRect(x, SED_H - 9, 1, 9);
+        sedCtx.fillText(m.label, x + 2, SED_H - 1);
+    }
+}
+
+const sedPanel = document.getElementById('sed-panel');
+sedPanel.classList.add('show');
+document.getElementById('tog-sed').addEventListener('change', e => {
+    sedPanel.classList.toggle('show', e.target.checked);
+});
+
+// Throttle SED redraws — the hemispheric integration is the most expensive
+// per-frame op on the page; ~5 fps is plenty for diagnostics.
+let sedLast = 0;
+function maybeDrawSED(now) {
+    if (now - sedLast > 200) { drawSED(); sedLast = now; }
+}
+
+// ────────────────────────────────────────────────────────────────
+//  SYNTHETIC Hα LINE PROFILE
+// ────────────────────────────────────────────────────────────────
+//   For a Keplerian disk in optically thin emission, the emergent
+//   Hα profile is a convolution of:
+//      φ(v) = ∫ Σ(r) · δ(v − v_φ(r) sin i sin φ) r dr dφ
+//   For inclination i:
+//     i = 90° (edge-on)  → strongly double-peaked, V/R≈1
+//     i = 0°  (pole-on)  → narrow single peak (no projection)
+//   Photospheric absorption is added underneath as a broad Gaussian
+//   from rotational broadening (v_eq sin i).
+//
+const hpCanvas = document.getElementById('halpha-canvas');
+const hpCtx    = hpCanvas.getContext('2d');
+const hpVR     = document.getElementById('hp-vr');
+const HP_W = hpCanvas.width, HP_H = hpCanvas.height;
+const HP_NV = 96;
+const hpProfile = new Float32Array(HP_NV);
+
+function drawHalphaProfile() {
+    // ── Compute v_eq sin i from current state.
+    const v_eq = 298 * state.spin;                              // km/s
+    const sinI = Math.sin(state.inclination * Math.PI / 180);
+    const cosI = Math.cos(state.inclination * Math.PI / 180);
+    const vSinI = v_eq * sinI;
+    document.getElementById('hud-vsini').textContent = Math.round(vSinI);
+
+    const Rin  = uniforms.u_axis_ratio.value * 1.05;
+    const Rout = uniforms.u_disk_outer.value;
+    // Disk inner Keplerian velocity ≈ v_eq · sqrt(R_eq / r_inner) → ≈ v_eq.
+    // Outer  ≈ v_eq · sqrt(R_eq / r_outer).
+    const vMaxDisk = v_eq * Math.sqrt(uniforms.u_axis_ratio.value / Rin) * sinI;  // km/s
+    const vMinDisk = v_eq * Math.sqrt(uniforms.u_axis_ratio.value / Rout) * sinI;
+
+    // Velocity grid: −800 … +800 km/s
+    const VMAX = 800;
+
+    hpProfile.fill(0);
+    const diskOn = uniforms.u_disk_active.value > 0.5;
+    const diskRho = uniforms.u_disk_rho.value;
+
+    if (diskOn) {
+        // Build the disk emission profile by integrating Σ(r) ∝ r^-2 (column),
+        // weighted by the Doppler-shifted contribution at each radius.
+        const NR = 80;
+        for (let ir = 0; ir < NR; ir++) {
+            const r = Rin + (Rout - Rin) * (ir + 0.5) / NR;
+            const vK = v_eq * Math.sqrt(uniforms.u_axis_ratio.value / r) * sinI;
+            const sigma = Math.pow(Rin / r, 2.0);  // surface density
+            const ringWeight = sigma * r * (Rout - Rin) / NR;
+            // For each azimuth, contribute to v(φ)=vK·cos(φ)
+            const NPHI = 36;
+            for (let ip = 0; ip < NPHI; ip++) {
+                const phi = (ip / NPHI) * Math.PI * 2;
+                const v = vK * Math.cos(phi);
+                // Accumulate with a small thermal width (~12 km/s)
+                const idx = (v / VMAX + 1) * 0.5 * HP_NV;
+                const i0  = Math.max(0, Math.floor(idx) - 2);
+                const i1  = Math.min(HP_NV - 1, Math.floor(idx) + 2);
+                for (let k = i0; k <= i1; k++) {
+                    const vv = (k / HP_NV * 2 - 1) * VMAX;
+                    const w = Math.exp(-(vv - v) * (vv - v) / (2 * 18 * 18));
+                    hpProfile[k] += ringWeight * w * diskRho;
+                }
+            }
+        }
+    }
+
+    // Photospheric absorption — broad rotational profile, v_eq sin i FWHM
+    // (Be stars: Hα core fills with disk emission; we use an absorption depth
+    // proportional to (1 − sigma_disk) to roughly emulate that shell→emission
+    // continuum.)
+    const photDepth = diskOn ? 0.65 : 1.0;
+    const photProfile = new Float32Array(HP_NV);
+    for (let k = 0; k < HP_NV; k++) {
+        const v = (k / HP_NV * 2 - 1) * VMAX;
+        // Rotation profile: I(v) = 1 − A·sqrt(1 − (v/vSinI)²) (uniform-disk)
+        const x = v / Math.max(vSinI, 5);
+        photProfile[k] = (Math.abs(x) < 1) ? Math.sqrt(1 - x * x) * photDepth : 0;
+    }
+
+    // Compose: continuum=1, minus absorption, plus emission.
+    // Normalise emission to a sensible peak.
+    let emax = 0; for (let k = 0; k < HP_NV; k++) emax = Math.max(emax, hpProfile[k]);
+    const eScale = (emax > 0) ? 0.85 / emax : 0;
+    const flux = new Float32Array(HP_NV);
+    for (let k = 0; k < HP_NV; k++) {
+        flux[k] = 1.0 - 0.55 * photProfile[k] + hpProfile[k] * eScale;
+    }
+
+    // V/R asymmetry: caused by m=1 disk eccentricity. We use a phase-modulated
+    // perturbation derived from the disk's bulk noise pattern.
+    const t = uniforms.u_time.value;
+    const eps = 0.06 * Math.sin(t * 0.13);    // slow V/R cycle
+    for (let k = 0; k < HP_NV; k++) {
+        const v = (k / HP_NV * 2 - 1) * VMAX;
+        if (v < 0) flux[k] *= (1 + eps);
+        else       flux[k] *= (1 - eps);
+    }
+
+    // Draw
+    hpCtx.clearRect(0, 0, HP_W, HP_H);
+    // grid
+    hpCtx.strokeStyle = 'rgba(180,120,255,0.10)';
+    hpCtx.lineWidth = 1;
+    for (let y = 0; y < HP_H; y += HP_H / 4) {
+        hpCtx.beginPath(); hpCtx.moveTo(0, y); hpCtx.lineTo(HP_W, y); hpCtx.stroke();
+    }
+    // continuum
+    hpCtx.strokeStyle = 'rgba(180,180,180,0.30)';
+    hpCtx.beginPath();
+    const yCont = HP_H * (1 - 1.0 / 1.6);
+    hpCtx.moveTo(0, yCont); hpCtx.lineTo(HP_W, yCont); hpCtx.stroke();
+    // line-centre
+    hpCtx.strokeStyle = 'rgba(180,120,255,0.30)';
+    hpCtx.beginPath(); hpCtx.moveTo(HP_W/2, 0); hpCtx.lineTo(HP_W/2, HP_H); hpCtx.stroke();
+    // profile
+    hpCtx.strokeStyle = '#ff6080';
+    hpCtx.lineWidth = 1.5;
+    hpCtx.fillStyle = 'rgba(255,80,140,0.18)';
+    hpCtx.beginPath();
+    hpCtx.moveTo(0, HP_H);
+    for (let k = 0; k < HP_NV; k++) {
+        const x = (k / (HP_NV - 1)) * HP_W;
+        const y = HP_H * (1 - flux[k] / 1.6);
+        hpCtx.lineTo(x, y);
+    }
+    hpCtx.lineTo(HP_W, HP_H); hpCtx.closePath(); hpCtx.fill();
+    hpCtx.beginPath();
+    for (let k = 0; k < HP_NV; k++) {
+        const x = (k / (HP_NV - 1)) * HP_W;
+        const y = HP_H * (1 - flux[k] / 1.6);
+        if (k === 0) hpCtx.moveTo(x, y); else hpCtx.lineTo(x, y);
+    }
+    hpCtx.stroke();
+
+    // V/R numerical readout (peak ratio)
+    let vPeak = 0, rPeak = 0;
+    const half = (HP_NV / 2) | 0;
+    for (let k = 0; k < half; k++) vPeak = Math.max(vPeak, flux[k]);
+    for (let k = half; k < HP_NV; k++) rPeak = Math.max(rPeak, flux[k]);
+    const vr = (rPeak > 0) ? vPeak / rPeak : 1;
+    hpVR.textContent = `V/R = ${vr.toFixed(2)}`;
+
+    // Disk H readout
+    document.getElementById('hud-h').textContent =
+        (0.025 * Math.pow(uniforms.u_axis_ratio.value, 1.5)).toFixed(3);
+    // Luminosity scales ∝ (R_eq/R_eq0)² × <T⁴> — show modest variation
+    const LR = (uniforms.u_axis_ratio.value / 1.56);
+    const LT = Math.pow((0.6 * uniforms.u_t_eq.value + 0.4 * uniforms.u_t_pole.value) / 14000, 4);
+    const Lum = Math.round(3150 * LR * LR * LT);
+    document.getElementById('hud-lum').textContent = Lum.toLocaleString('en-US').replace(',', ' ');
+}
+
+// Throttle Hα redraws to ~12 fps to spare the main thread.
+let hpLast = 0;
+function maybeDrawHalpha(now) {
+    if (now - hpLast > 80) { drawHalphaProfile(); hpLast = now; }
+}
+
+// ────────────────────────────────────────────────────────────────
+//  MASS-LOSS HUD
+// ────────────────────────────────────────────────────────────────
+//
+//  Numerical anchors are tied to canonical Achernar numbers
+//  (M ≈ 6.4 M☉, R_pole ≈ 7.3 R☉) and scale with the live sliders:
+//
+//   • Ṁ_polar (CAK)  ∝  L^(1/α') ∝ (T_pole·R_pole²)^(1/α'),   α' ≈ 0.65
+//                        — sub-linear growth in T_pole over the slider range.
+//   • v_∞,polar       ≈  2.5 · v_esc(R_pole) = 2.5·√(2GM/R_pole)
+//   • Ṁ_eq            scales with disk density × outburst envelope ×
+//                        spin (≈ 0 if rotation is sub-critical).
+//   • v_K(R_eq)       ≈  v_K(R_pole) / √(R_eq/R_pole)
+//
+const VESC_POLE_KMS = 579;            // √(2GM/R_pole) for Achernar A
+const MDOT_POL_REF  = 2.1;            // 10⁻¹⁰ M☉/yr at T_pole = 17 kK
+
+const hudMdotPol = document.getElementById('hud-mdot-pol');
+const hudVinf    = document.getElementById('hud-vinf');
+const hudMdotEq  = document.getElementById('hud-mdot-eq');
+const hudVk      = document.getElementById('hud-vk');
+
+function updateMdotHUD() {
+    const Tp = uniforms.u_t_pole.value;
+    const R  = Math.max(uniforms.u_axis_ratio.value, 1.0);
+    const beta = Math.min(2*(R-1)/(R*R*R), 0.293);
+    const burstAmp = uniforms.u_outburst_amp.value;
+
+    // Polar wind: Ṁ ∝ T_pole^(4/α') / M^((α'-1)/α')   for fixed M, ∝ T^(4/α')
+    const tNorm = Tp / 17000.0;
+    const mdotPol = MDOT_POL_REF * Math.pow(tNorm, 4 / 0.65);  // 10⁻¹⁰ M☉/yr
+    if (hudMdotPol) hudMdotPol.textContent = mdotPol.toFixed(2);
+
+    // v_∞ scales weakly with v_esc; v_esc(pole) is fixed by M, R_pole.
+    // Slight T-dependence from the CAK driving:  v_∞ / v_esc ≈ 2.0–2.6
+    const vInf = VESC_POLE_KMS * (2.20 + 0.45 * (tNorm - 1.0));
+    if (hudVinf) hudVinf.textContent = Math.round(vInf);
+
+    // Equatorial decretion mass loss: scales with ρ × spin × (1+amp·burst)
+    // and cuts off when sub-critical (the Roche-mass-loss mechanism shuts
+    // down well below v_K).  burstPeak set to 1 for HUD averaging.
+    const subcrit = Math.sqrt(beta / (8/27));  // ω/ω_crit
+    const fSubCrit = Math.max(0, Math.min(1, (subcrit - 0.55) / 0.40));
+    const mdotEq = (1.4 + 2.5 * burstAmp) * fSubCrit
+                 * uniforms.u_disk_rho.value
+                 * Math.max(0.2, state.spin)
+                 * (uniforms.u_disk_active.value > 0.5 ? 1 : 0.20);   // 10⁻⁹ M☉/yr
+    if (hudMdotEq) hudMdotEq.textContent = mdotEq.toFixed(2);
+
+    // Keplerian velocity at the equator
+    const vK = VESC_POLE_KMS / Math.sqrt(2 * R);
+    if (hudVk) hudVk.textContent = Math.round(vK);
+}
+
+// ────────────────────────────────────────────────────────────────
+//  ANIMATE
+// ────────────────────────────────────────────────────────────────
+let fpsF = 0, fpsT = performance.now();
+const fpsEl = document.getElementById('fps-display');
+const clock = new THREE.Clock();
+
+const _invTmp = new THREE.Matrix4();
+
+function animate() {
+    requestAnimationFrame(animate);
+    // Wall-clock Δt × user-set time multiplier × pause gate.  Δt = 0 when
+    // paused freezes every integrator (rotation, outflows, NRP, twistors,
+    // outburst envelope, time uniform) without affecting camera/orbit
+    // controls or the renderer itself.
+    const wallDt = clock.getDelta();
+    const dt = state.paused ? 0 : wallDt * state.timeRate;
+    uniforms.u_time.value += dt;
+
+    // Body-frame rotation: rigid spin at Ω_eq.  Differential rotation
+    // is applied *inside* shaders/particle systems via u_diffrot_phase,
+    // not by adding latitude-dependent rotation to starGroup.
+    const omegaEqVis = 0.45 * state.spin;
+    starGroup.rotation.y    += dt * omegaEqVis;
+    uniforms.u_diffrot_phase.value += dt * omegaEqVis;
+
+    // Update equatorial rotational velocity (Roche units) for shader Doppler:
+    //   v_eq² = ω² R_eq² = β R_eq²,  β = rocheBeta(R)
+    {
+        const R    = Math.max(uniforms.u_axis_ratio.value, 1.0);
+        const beta = Math.min(2*(R-1)/(R*R*R), 0.293);
+        uniforms.u_v_eq.value = Math.sqrt(beta) * R * state.spin;
+    }
+
+    // Disk world→object inverse for the volumetric raymarcher.
+    disk.updateMatrixWorld(true);
+    _invTmp.copy(disk.matrixWorld).invert();
+    uniforms.u_disk_inv_model.value.copy(_invTmp);
+
+    // Particle systems live in the star's body frame.  Note:
+    //   • twistors use absolute u_time (their toroidal phase
+    //     is intrinsic to the congruence, not tied to the body).
+    //   • outflow particles must subtract the body rotation if we
+    //     want them to "lag" the surface — for now we let them
+    //     co-rotate with starGroup, which makes the prograde
+    //     Keplerian motion read as differential vs. the surface.
+    updateTwistors(uniforms.u_time.value);
+    updateOutflow(uniforms.u_time.value, dt);
+    updatePWind(uniforms.u_time.value, dt);
+    updateDRRings();
+    updateMdotHUD();
+
+    // Achernar B orbital motion.
+    if (binaryGroup.visible) {
+        const M = (uniforms.u_time.value / binaryState.P) * 2 * Math.PI + binaryState.M0;
+        const E = solveKepler(M, binaryState.e);
+        const x = binaryState.a * (Math.cos(E) - binaryState.e);
+        const z = binaryState.a * Math.sqrt(1 - binaryState.e*binaryState.e) * Math.sin(E);
+        companion.position.set(x, 0, z);
+    }
+
+    controls.update();
+    renderer.render(scene, camera);
+
+    const now = performance.now();
+    maybeDrawHalpha(now);
+    maybeDrawSED(now);
+
+    fpsF++;
+    if (now - fpsT >= 500) {
+        fpsEl.textContent = Math.round(fpsF * 1000 / (now - fpsT));
+        fpsF = 0; fpsT = now;
+    }
+}
+animate();
+refreshModePill();
+
+console.log('%c[Achernar Simulator — α Eridani (B6 Vep)]', 'color:#c8a8ff;font-weight:bold;font-size:13px');
+console.log('  Roche-figure surface · von Zeipel gravity-darkening · Planck blackbody · Be decretion disk');
+</script>
+</body>
+</html>

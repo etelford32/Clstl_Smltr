@@ -205,7 +205,7 @@ export default async function handler(req) {
     };
 
     return jsonOk({
-        source:           'Parker Physics atmosphere/profile · seed-grid lookup',
+        source:           'Parkers Physics atmosphere/profile · seed-grid lookup',
         seed_built_at:    SEED_BUILT_AT,
         seed_note:        SEED_SOURCE_NOTE,
         f107_sfu:         f107,

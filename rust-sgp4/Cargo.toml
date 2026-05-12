@@ -2,15 +2,27 @@
 name = "sgp4_wasm"
 version = "0.1.0"
 edition = "2021"
-description = "SGP4/SDP4 orbital propagator compiled to WebAssembly"
+description = "SGP4/SDP4 orbital propagator + NRLMSISE-00 atmosphere, compiled to WebAssembly"
 
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
 wasm-bindgen = "0.2"
+js-sys       = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde-wasm-bindgen = "0.6"
+# libm — pure-Rust libm. Used to satisfy the libc math symbols (exp,
+# log, sin, cos, sqrt, pow, fabs, log10) that NRLMSISE-00's C source
+# references when we link it for wasm32-unknown-unknown (which has no
+# libc). See src/nrlmsise00.rs for the C-symbol shims.
+libm = "0.2"
+
+[build-dependencies]
+# cc — compiles the vendored NRLMSISE-00 C source into our cdylib.
+# Picks up `cc` or clang from the environment; on wasm32 targets cc-rs
+# automatically uses clang with --target=wasm32-unknown-unknown.
+cc = "1"
 
 [profile.release]
 opt-level = 'z'

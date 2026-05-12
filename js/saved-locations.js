@@ -5,10 +5,14 @@
  * ("Home", "Cabin", "Office", …) with per-location alert config
  * (which alert types fire + per-type thresholds).
  *
- * Plan caps (enforced both client-side and by a DB trigger):
- *   free      → 0 saved locations
- *   basic     → 5 saved locations
- *   advanced  → 25 saved locations
+ * Plan caps (enforced both client-side and by a DB trigger).
+ * Mirrors public.plan_location_limit() in Supabase migrations:
+ *   free         → 0 saved locations
+ *   basic        → 5 saved locations
+ *   educator     → 5 saved locations
+ *   advanced     → 25 saved locations
+ *   institution  → 25 saved locations
+ *   enterprise   → 100 saved locations
  *
  * Alert config stored on each row as JSONB. Any field left null
  * falls back to the account-level default on user_profiles.
@@ -20,17 +24,19 @@
 
 import { auth } from './auth.js';
 import { getSupabase, isConfigured } from './supabase-config.js';
+import { TIERS, locationLimit as _cfgLocationLimit } from './tier-config.js';
 
 const EVT = 'saved-locations-changed';
 
-export const PLAN_LIMITS = Object.freeze({
-    free:     0,
-    basic:    5,
-    advanced: 25,
-});
+// Built from js/tier-config.js so the cap table is defined in exactly one
+// place. Kept as a frozen { plan: limit } map for backward compatibility
+// with the dashboard's existing PLAN_LIMITS import.
+export const PLAN_LIMITS = Object.freeze(
+    Object.fromEntries(TIERS.map(t => [t.id, t.locationLimit]))
+);
 
 /** Columns fetched from user_locations. */
-const COLS = 'id, label, lat, lon, city, is_primary, notify_enabled, email_alerts_enabled, alert_config, timezone, created_at, updated_at';
+const COLS = 'id, label, lat, lon, city, is_primary, notify_enabled, email_alerts_enabled, daily_digest_enabled, alert_config, timezone, created_at, updated_at';
 
 /** Cache keyed by user id so repeat calls in the same tick are cheap. */
 let _cache = null;
@@ -48,8 +54,7 @@ function _invalidate() {
 /** Return the numeric cap for the signed-in user's plan (admins/testers: Infinity). */
 export function locationLimit() {
     if (auth.isAdmin?.() || auth.isTester?.()) return Infinity;
-    const plan = (auth.getPlan?.() || 'free').toLowerCase();
-    return PLAN_LIMITS[plan] ?? 0;
+    return _cfgLocationLimit(auth.getPlan?.() || 'free');
 }
 
 /** True if the user has room for another saved location. */
@@ -115,6 +120,7 @@ export async function addLocation(loc) {
         is_primary:           !!loc.is_primary,
         notify_enabled:       loc.notify_enabled ?? true,
         email_alerts_enabled: loc.email_alerts_enabled ?? true,
+        daily_digest_enabled: loc.daily_digest_enabled ?? false,
         alert_config:         loc.alert_config ?? {},
         timezone:             loc.timezone ?? null,
     };
@@ -153,6 +159,7 @@ export async function updateLocation(id, patch) {
     const allowed = [
         'label', 'lat', 'lon', 'city',
         'is_primary', 'notify_enabled', 'email_alerts_enabled',
+        'daily_digest_enabled',
         'alert_config', 'timezone',
     ];
     const row = {};

@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS public.user_profiles (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     email TEXT,
     display_name TEXT,
-    plan TEXT DEFAULT 'free' CHECK (plan IN ('free', 'basic', 'advanced')),
+    plan TEXT DEFAULT 'free' CHECK (plan IN ('free', 'basic', 'educator', 'advanced', 'institution', 'enterprise')),
     role TEXT DEFAULT 'user' CHECK (role IN ('user', 'tester', 'admin', 'superadmin')),
     -- Stripe billing
     stripe_customer_id TEXT,
@@ -35,6 +35,10 @@ CREATE TABLE IF NOT EXISTS public.user_profiles (
     location_lat DOUBLE PRECISION,
     location_lon DOUBLE PRECISION,
     location_city TEXT,
+    -- Account-level display timezone (IANA name); falls back to the
+    -- browser zone when null. Per-location overrides live on
+    -- user_locations.timezone.
+    timezone TEXT,
     -- Notification preferences (basic tier)
     notify_aurora BOOLEAN DEFAULT false,
     notify_conjunction BOOLEAN DEFAULT false,
@@ -213,7 +217,7 @@ CREATE POLICY "Users can manage own locations"
 CREATE TABLE IF NOT EXISTS public.invite_codes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     code TEXT UNIQUE NOT NULL,
-    plan TEXT DEFAULT 'free' CHECK (plan IN ('free', 'basic', 'advanced')),
+    plan TEXT DEFAULT 'free' CHECK (plan IN ('free', 'basic', 'educator', 'advanced', 'institution', 'enterprise')),
     max_uses INTEGER DEFAULT 1,
     used_count INTEGER DEFAULT 0,
     expires_at TIMESTAMPTZ,

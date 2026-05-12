@@ -1,0 +1,211 @@
+/* ═══ Earth UI design tokens ═══════════════════════════════════════════
+   Single source of truth for the Earth simulation page's design system.
+   Linked from earth.html, design-tokens.html, and any future page that
+   wants to consume the same palette + spacing + effects. Companion
+   reference doc: DESIGN_TOKENS.md.
+
+   Three blocks live here:
+
+     1. :root { ... }                              — default (dark / desktop)
+     2. @media (max-width: 640px) { :root {...}}   — phone overrides
+     3. :root.theme-light, body.theme-light {...}  — light-theme overrides
+
+   Plus the small `body.theme-light` background flip so the page itself
+   recolours when light mode is active.
+
+   Why a standalone file: keeping the tokens in earth.html created a
+   duplication risk for any other page that wants to consume them
+   (the future swatch viewer, marketing pages, embed snippets). One
+   stylesheet, every consumer linking it, no drift between sources.
+
+   IMPORTANT: rule-level light-theme overrides (gradients, layered
+   shadows, decorative effects that aren't expressible as a single
+   token) STAY in earth.html. This file is for the *tokens* — the
+   atomic values — not for selectors that only earth.html uses.
+   ────────────────────────────────────────────────────────────────── */
+
+:root {
+    /* ── Primary chrome accent — cyan family.
+         Used by every weather/atmosphere/info panel border and
+         scrollbar; the visual signature of the Earth page chrome. */
+    --c-accent:               #00c6ff;
+    --c-accent-rgb:           0, 200, 255;
+    --c-accent-soft:          rgba(0, 200, 255, .15);
+    --c-accent-border:        rgba(0, 200, 255, .22);
+    --c-accent-border-hi:     rgba(0, 200, 255, .30);
+    --c-accent-glow:          rgba(0, 210, 255, .55);
+    --c-accent-bg-overlay:    rgba(0, 210, 255, .10);
+
+    /* ── Storm-watch / cyclone accent — amber family. */
+    --c-storm:                #ffb066;
+    --c-storm-rgb:            255, 160, 80;
+    --c-storm-soft:           rgba(255, 160, 80, .12);
+    --c-storm-border:         rgba(255, 160, 80, .28);
+    --c-storm-border-hi:      rgba(255, 160, 80, .55);
+    --c-storm-glow:           rgba(255, 160, 80, .55);
+    --c-storm-bg-overlay:     rgba(255, 160, 80, .10);
+
+    /* ── Location/sun accent — teal-mint family. */
+    --c-loc:                  #5fffd0;
+    --c-loc-rgb:              95, 255, 208;
+    --c-loc-soft:             rgba(95, 255, 208, .18);
+    --c-loc-border:           rgba(95, 255, 208, .45);
+
+    /* ── Status palette (live / fetching / error / idle dots).
+         Single source of truth for the .lyr-status pips, the
+         NASA-obs row dots, and the Storm Watch pulse. */
+    --c-status-live:          #4fc97f;
+    --c-status-live-glow:     rgba(79, 201, 127, .55);
+    --c-status-fetching:      #ffaa22;
+    --c-status-fetch-glow:    rgba(255, 170, 34, .60);
+    --c-status-error:         #ff4422;
+    --c-status-error-glow:    rgba(255, 68, 34, .65);
+    --c-status-idle:          #556;
+
+    /* ── Surface fills — used for every panel's frosted-glass
+         background. Layered radial-gradient overlays on top of these
+         give each panel its own subtle hue without diverging the
+         underlying value scale. */
+    --c-surface-1:            rgba(6, 10, 22, .86);
+    --c-surface-2:            rgba(2, 4, 12, .92);
+
+    /* ── Text scale — five tiers from headline to faint metadata.
+         The skill-grid and storm-watch use slightly different mid-
+         greys; the tokens preserve those differences so a refactor
+         doesn't accidentally flatten the hierarchy. */
+    --c-text-primary:         #d6dee6;     /* card titles, primary readouts */
+    --c-text-secondary:       #b0c8d8;     /* layer labels, body copy */
+    --c-text-muted:           #7a98a8;     /* descriptors, captions */
+    --c-text-faint:           #557;        /* metadata, ago timestamps */
+    --c-text-skill:           #88b;        /* skill-grid — distinct from chrome */
+
+    /* ── Border/separator levels. */
+    --c-border-faint:         rgba(255, 255, 255, .06);
+    --c-border-soft:          rgba(255, 255, 255, .10);
+    --c-border-medium:        rgba(255, 255, 255, .14);
+
+    /* ── Spacing rhythm — 2 px base, doubled at each step. Every
+         panel padding, gap, and row spacing pulls from this scale. */
+    --sp-1:                   2px;
+    --sp-2:                   4px;
+    --sp-3:                   6px;
+    --sp-4:                   8px;
+    --sp-5:                   10px;
+    --sp-6:                   12px;
+    --sp-7:                   14px;
+    --sp-8:                   16px;
+
+    /* ── Border radii. */
+    --r-sm:                   4px;         /* badges, buttons */
+    --r-md:                   6px;         /* sub-cards inside a panel */
+    --r-lg:                   9px;         /* legacy panel default */
+    --r-xl:                   10px;        /* current panel default */
+    --r-2xl:                  14px;        /* loc-panel hero */
+
+    /* ── Surface effects. */
+    --blur-glass:             blur(12px) saturate(1.15);
+    --shadow-panel:           0 4px 22px rgba(0, 16, 40, .55);
+
+    /* ── Transition speeds. */
+    --t-fast:                 .12s ease;
+    --t-snap:                 .15s ease;
+    --t-medium:               .25s ease;
+}
+
+/* ═══ Mobile token overrides ════════════════════════════════════════════
+   Phones get a tighter spacing scale and lighter surface effects so the
+   panel chrome doesn't crowd a 6-inch display.  Smaller tokens compress
+   by 1 px (already tight); larger ones compress by 2 px so panels with
+   var(--sp-7) padding go from 14 px to 12 px, etc. The shadow + blur
+   also relax — they're expensive on mobile GPUs and the small viewport
+   doesn't need as much depth to read as a layered card.
+   ────────────────────────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+    :root {
+        --sp-2:               3px;
+        --sp-3:               5px;
+        --sp-4:               7px;
+        --sp-5:               8px;
+        --sp-6:               10px;
+        --sp-7:               12px;
+        --sp-8:               14px;
+
+        --shadow-panel:       0 2px 14px rgba(0, 16, 40, .50);
+        --blur-glass:         blur(8px) saturate(1.10);
+        --r-xl:               8px;
+        --r-2xl:              12px;
+    }
+}
+
+/* ═══ Light theme token overrides ═══════════════════════════════════════
+   Activated by adding `theme-light` to <html> or <body>. See the
+   activation hook in earth.html (resolved via URL ?theme=, localStorage
+   pp.theme, or prefers-color-scheme) and the 🌞/🌙 toggle button.
+
+   Calibration philosophy:
+     - Surface / text / borders FLIP — light backgrounds need dark text
+       and visibly darker borders to maintain hierarchy.
+     - Accent colours DEEPEN — `#00c6ff` cyan has poor contrast on
+       white-ish backgrounds; the light theme uses a slightly more
+       saturated/darker `--c-accent` so labels and links read at a
+       comfortable 4.5:1 contrast minimum.
+     - Status colours stay PUT (live=green, error=red) — they read
+       well on either background; flipping them would just confuse
+       the green=ok convention.
+
+   Tokens NOT redefined here keep their dark-theme value. That's
+   intentional — anything missing means "this token works fine on both
+   backgrounds" rather than "we forgot."
+   ────────────────────────────────────────────────────────────────────── */
+:root.theme-light,
+body.theme-light {
+    --c-surface-1:            rgba(248, 250, 254, .94);
+    --c-surface-2:            rgba(232, 238, 248, .96);
+
+    --c-accent:               #0085b0;
+    --c-accent-rgb:           0, 133, 176;
+    --c-accent-soft:          rgba(0, 133, 176, .12);
+    --c-accent-border:        rgba(0, 133, 176, .25);
+    --c-accent-border-hi:     rgba(0, 133, 176, .40);
+    --c-accent-glow:          rgba(0, 133, 176, .55);
+    --c-accent-bg-overlay:    rgba(0, 133, 176, .06);
+
+    --c-storm:                #d96a1a;
+    --c-storm-rgb:            217, 106, 26;
+    --c-storm-soft:           rgba(217, 106, 26, .12);
+    --c-storm-border:         rgba(217, 106, 26, .35);
+    --c-storm-border-hi:      rgba(217, 106, 26, .55);
+    --c-storm-glow:           rgba(217, 106, 26, .40);
+    --c-storm-bg-overlay:     rgba(217, 106, 26, .06);
+
+    --c-loc:                  #00926a;
+    --c-loc-rgb:              0, 146, 106;
+    --c-loc-soft:             rgba(0, 146, 106, .14);
+    --c-loc-border:           rgba(0, 146, 106, .45);
+
+    --c-text-primary:         #1a2735;
+    --c-text-secondary:       #2c3a4a;
+    --c-text-muted:           #5a6a7a;
+    --c-text-faint:           #8898a8;
+    --c-text-skill:           #4a5a7a;
+
+    --c-border-faint:         rgba(10, 30, 50, .08);
+    --c-border-soft:          rgba(10, 30, 50, .14);
+    --c-border-medium:        rgba(10, 30, 50, .20);
+
+    --shadow-panel:           0 4px 22px rgba(20, 40, 80, .14);
+}
+
+/* The page <body> background also has to flip when light theme is
+   active — the panels sit on top of a black <body> by default. The
+   layered radial gradient gives the light backdrop a subtle depth
+   so panels still pop against it instead of vanishing. We target
+   `body.theme-light` AND descend through `html.theme-light body` so
+   the rule fires regardless of which ancestor carries the class. */
+body.theme-light,
+html.theme-light body {
+    background:
+        radial-gradient(80% 60% at 50% 0%, #d8e8f5 0%, transparent 70%),
+        linear-gradient(180deg, #eaf2f8 0%, #cfdce8 100%);
+    color: var(--c-text-primary);
+}

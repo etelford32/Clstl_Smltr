@@ -1,18 +1,26 @@
-// Schwarzschild ray-tracing fragment shader.
+// Kerr ray-tracing fragment shader  (Phase 1).
 //
-// Integrates null geodesics of the Schwarzschild metric in (t, r, theta, phi)
-// coordinates on an 8D phase space y = (t, r, th, ph, k^t, k^r, k^th, k^ph)
-// using an embedded RK4(5) Cash-Karp scheme with adaptive step control.
+// Integrates null geodesics of the Kerr metric in Boyer-Lindquist (BL)
+// coordinates (t, r, θ, φ) using the Hamiltonian form on the covariant
+// 4-momentum p_μ. Cash-Karp RK4(5) adaptive step on the 8-D phase space
+//     y = (t, r, θ, φ, p_t, p_r, p_θ, p_φ).
 //
-// Units: geometrized, M = 1. Horizon at r = 2.
+// Why covariant momenta: in BL the metric is t- and φ-independent, so
+// p_t and p_φ are *exactly* conserved by Hamilton's equations
+//     dp_μ/dλ = −(1/2) ∂_μ g^{αβ} p_α p_β,
+// which kills two of the four ODEs by construction. The photon energy
+// E = −p_t and axial angular momentum L_z = p_φ stay fixed; combined
+// with the on-shell constraint p^μ p_μ = 0, that's three of the four
+// integrals of motion (Carter Q is the fourth, computed in the inspector).
 //
-// Pixel -> ray construction: static observer tetrad in Schwarzschild coords.
-// A stationary observer at (r, theta) has orthonormal frame
-//     e_{(t)}^mu = (1/sqrt(f), 0, 0, 0)
-//     e_{(r)}^mu = (0, sqrt(f), 0, 0)
-//     e_{(th)}^mu = (0, 0, 1/r, 0)
-//     e_{(ph)}^mu = (0, 0, 0, 1/(r sin theta))
-// where f = 1 - 2M/r. Camera orientation is constructed in this frame.
+// Units: geometrized, M = 1. Outer horizon r₊ = 1 + √(1 − a²); the
+// renderer pre-terminates rays just outside r₊ so the BL coordinate
+// singularity at Δ = 0 never fires inside an RK stage.
+//
+// Observer tetrad: ZAMO (zero-angular-momentum observer, Bardeen-Press-
+// Teukolsky 1972) — locally non-rotating, valid everywhere outside r₊
+// including inside the ergosphere where a static observer is impossible.
+// Reduces to the Schwarzschild static tetrad continuously at a = 0.
 
 export const SCHWARZSCHILD_FRAG = /* glsl */ `#version 300 es
 precision highp float;
@@ -29,57 +37,226 @@ uniform int   u_max_steps;
 uniform float u_tol;                    // RK45 abs/rel tolerance
 uniform int   u_show_ring;              // 1 = tint photon ring on capture
 uniform float u_time;
-uniform int   u_observer_type;          // 0 = static (outside horizon), 1 = free-fall (inside or near)
+uniform int   u_observer_type;          // 0 = static, 1 = free-fall (Painlevé-Gullstrand), 2 = ZAMO (= static for Schwarzschild), 3 = circular Keplerian (equator)
+uniform int   u_show_disk;               // 1 = render thin equatorial accretion disk
+uniform float u_disk_inner;              // r_in (in M); ~6 for Schwarzschild ISCO
+uniform float u_disk_outer;              // r_out (in M); ~24
+uniform float u_disk_thickness;          // half-thickness in M; 0 = razor thin
+uniform float u_disk_brightness;         // overall intensity multiplier
+uniform float u_disk_T_inner;            // Shakura-Sunyaev T(r_in) in Kelvin (visualization-tuned)
+uniform float u_disk_shear_speed;        // multiplier on Keplerian Ω(r) for visible motion
+uniform int   u_disk_mode;               // 0 = opaque, 1 = translucent (RIAF/optically-thin)
+uniform int   u_show_hotspot;            // 1 = render orbiting hot-spot field
+uniform float u_hotspot_radius;          // r_hot in M (anchor for spot-0)
+uniform float u_hotspot_phi0;            // initial phase of spot-0
+uniform float u_hotspot_strength;        // brightness scale (× all spots)
+uniform int   u_n_hotspots;              // 1..8 quasi-random Keplerian flare cells
+uniform float u_qpo_flare;               // 0..1 transient brightness boost (B7 preset)
+uniform int   u_show_lindblad;           // 1 = highlight m=2 Lindblad resonances
+uniform float u_lindblad_rp;             // pattern-speed anchor radius (M)
+uniform int   u_show_grid;               // 1 = draw faint 3D coordinate grid shells
+uniform int   u_show_photon_sphere;      // 1 = highlight photon sphere with translucent shell
+
+// ── Multi-component radiation / particle emission ────────────────────
+uniform int   u_show_jets;               // 1 = render bipolar relativistic jets
+uniform float u_jet_velocity;            // β = v/c of the bulk jet flow
+uniform float u_jet_alpha;               // synchrotron spectral index α (I_ν ∝ ν^−α)
+uniform float u_jet_open;                // half-opening angle (radians) from pole
+uniform float u_jet_r_max;               // outer cutoff in M
+uniform float u_jet_intensity;
+
+uniform int   u_show_corona;             // 1 = hot Compton corona above inner disk
+uniform float u_corona_radius;           // peak r in M
+uniform float u_corona_width;            // shell sigma in M
+uniform float u_corona_intensity;
+uniform float u_corona_y;                // Compton y-parameter: 4·k T_e / m_e c² · max(τ, τ²)
+
+uniform int   u_show_wind;               // 1 = thermally-driven disk wind cone
+uniform float u_wind_intensity;
+
+uniform int   u_show_fe_line;            // 1 = Fe K-α line emission on inner disk
+uniform float u_fe_intensity;
+
+uniform float u_far_shortcut_r;          // r threshold for far-field straight-line termination (M)
+
+// ── Phase 1 — Kerr spin parameter (M = 1) ───────────────────────────
+uniform float u_spin;                    // a/M ∈ [0, 0.999); a=0 ↔ Schwarzschild
+
+// ── Tier 2A — Disk regime (RIAF / thin / slim) driven by ṁ ──────────
+uniform int   u_disk_regime;             // 0 = RIAF, 1 = thin, 2 = slim
+uniform float u_disk_T_factor;           // regime-dependent multiplier on T_in
+uniform float u_disk_regime_brightness;  // regime-dependent brightness multiplier
+
+// ── Tier 2B — Blandford-Znajek + MAD coupling ───────────────────────
+// MAD state extracts magnetic energy from accretion flow → inner disk
+// dims. u_disk_mad_dim multiplies the disk's final brightness; the jet
+// intensity uniform is overridden by main.js with the BZ-derived value
+// so no separate uniform needed for it.
+uniform float u_disk_mad_dim;            // 1 in non-MAD, ~0.55-0.70 in MAD
+
+// ── Tier 1B — Gralla-Holz-Wald photon sub-rings (n = 1, 2, …) ───────
+uniform int   u_show_subrings;           // 1 = highlight n ≥ 1 sub-rings
+uniform float u_subring_strength;        // overall multiplier (default 1.0)
+// Improved deep-sky controls (procedural Milky Way + nebulae).
+uniform float u_sky_strength;            // 0..2; 0 fully suppresses the field
+
+// ── Phase 2.1 — Lyman-α blob (Slug-class defaults) ──────────────────
+// LAB lives at host-galaxy scale (~10²–10⁵ M_kpc beyond r_far). We
+// raymarch a procedural neutral-hydrogen density field in flat space
+// from the geodesic's escape point outward along its asymptotic
+// direction, accumulating Lyα emissivity modulated by the Neufeld
+// resonance-escape probability. Reference target: UM287's "Slug"
+// nebula (Cantalupo et al. 2014) — 460 kpc, ~10⁴⁴ erg s⁻¹.
+uniform int   u_show_lab;
+uniform float u_lab_intensity;           // overall brightness multiplier
+uniform float u_lab_radius_kpc;          // outer blob radius
+uniform float u_lab_inner_kpc;           // central ionized cavity radius
+uniform float u_lab_alpha;               // density power-law slope ρ ∝ r^{−α}
+uniform float u_lab_clump;               // 0..1 clumping amplitude (drives variance C)
+uniform float u_lab_filament;            // 0..1 cosmic-web-aligned anisotropy
+uniform vec3  u_lab_filament_axis;       // unit vector — major filament direction
+uniform float u_M_in_kpc;                // 1 unit M expressed in kpc (TON 618: ~3.16e-6)
+uniform int   u_lab_mechanism;           // 0=cooling, 1=photoionization, 2=shock
+uniform float u_lab_z;                   // cosmological redshift (TON 618 ≈ 2.219)
+uniform float u_lab_outflow_kms;         // bulk radial outflow at r = r_LAB
+uniform float u_lab_outflow_beta;        // v(r) = v_out (r/r_LAB)^β (β ≈ 0.5 accelerating)
+uniform float u_lab_log_NHI;             // log10 central column density [cm⁻²], 18..22
+uniform float u_lab_temp_K;              // gas temperature, default 1e4 K
+uniform float u_lab_neufeld;             // 0..1 blend: 0 = pure emission, 1 = full Neufeld suppression
+
+// ── Phase 2.2 — anisotropic resonance scattering + double-peak ──────
+// Rayleigh-like scattering polarizes Lyα photons to ≤ 100 % at right
+// angles; observed LABs reach ~5–15 %. We track Stokes Q/U alongside
+// intensity through the raymarch and surface the result as a sparse
+// vector overlay on the rendered image.
+uniform int   u_show_pol_vectors;        // 1 = render polarization tick overlay
+uniform float u_lab_pol_max;             // f_pol cap (typical 0.10–0.15)
+uniform int   u_lab_double_peak;         // 1 = render Neufeld twin-Gaussian peaks
+// Camera right and up vectors expressed in the same Cartesian frame the
+// LAB raymarch uses (BH-centered, y-up polar). Lets us project the
+// per-cell radial direction onto the screen plane for the polarization PA.
+uniform vec3  u_cam_right_cart;
+uniform vec3  u_cam_up_cart;
+uniform vec3  u_cam_forward_cart;
+
+// ── B1 — Vertical disk structure (Shakura-Sunyaev slab) ─────────────
+uniform float u_disk_h_over_r;           // characteristic H/r at the inner edge (0..0.4)
+
+// ── B2 — MRI turbulence amplitude (0..1) ────────────────────────────
+uniform float u_mri_strength;
+
+// ── B5 — Bardeen-Petterson disk warp ────────────────────────────────
+uniform int   u_disk_warp_on;            // 1 = tilt the disk plane
+uniform float u_disk_warp_angle;         // tilt angle (rad)
+uniform float u_disk_warp_psi;           // tilt axis azimuth (rad)
 
 #define M 1.0
 #define HORIZON_EPS 1.0e-3
 #define PI 3.14159265358979323846
 
 // ---------------------------------------------------------------------------
-// Geodesic RHS for null rays in Schwarzschild
+// Kerr metric in Boyer-Lindquist coordinates (M = 1).
 // ---------------------------------------------------------------------------
-// d x^mu / d lambda = k^mu
-// d k^mu / d lambda = - Gamma^mu_{alpha beta} k^alpha k^beta
+//   Σ  ≡ r² + a²cos²θ
+//   Δ  ≡ r² − 2r + a²
+//   A  ≡ (r² + a²)² − a² Δ sin²θ        (sometimes written Σ_φ or A)
+// Outer/inner horizons r_± = 1 ± √(1 − a²).
+//
+// Inverse-metric components (only nonzero):
+//   g^tt   = −A / (Σ Δ)
+//   g^tφ   = −2 a r / (Σ Δ)
+//   g^rr   =  Δ / Σ
+//   g^θθ   =  1 / Σ
+//   g^φφ   =  (Δ − a² sin²θ) / (Σ Δ sin²θ)
+// ---------------------------------------------------------------------------
+
+// Outer horizon r₊(a) — used by the trace loop and the rhs clamp so
+// intermediate RK stages never see Δ ≤ 0.
+float kerr_r_plus() {
+    float a = clamp(u_spin, 0.0, 0.999);
+    return 1.0 + sqrt(max(1.0 - a * a, 0.0));
+}
+
+// Pack the 5 nonzero inverse-metric components into vec4 + float so we can
+// pass them around without struct gymnastics in WebGL2 shaders.
+//   xx = g^tt, xy = g^tφ, xz = g^rr, xw = g^θθ, fifth = g^φφ.
+void kerr_inv_metric(float r, float th, out vec4 g4, out float gPP) {
+    float a   = clamp(u_spin, 0.0, 0.999);
+    float a2  = a * a;
+    float r2  = r * r;
+    float sth = sin(th);
+    float cth = cos(th);
+    float s2  = max(sth * sth, 1.0e-8);
+    float Sigma = r2 + a2 * cth * cth;
+    float Delta = r2 - 2.0 * r + a2;
+    // Clamp Δ away from zero — only relevant if a stage briefly pushes inside r₊.
+    float DeltaSafe = (Delta > 1.0e-5) ? Delta : 1.0e-5;
+    float A     = (r2 + a2) * (r2 + a2) - a2 * DeltaSafe * s2;
+    float invSD = 1.0 / (Sigma * DeltaSafe);
+    g4.x = -A           * invSD;                 // g^tt
+    g4.y = -2.0 * a * r * invSD;                 // g^tφ
+    g4.z =  DeltaSafe / Sigma;                   // g^rr
+    g4.w =  1.0 / Sigma;                         // g^θθ
+    gPP  = (DeltaSafe - a2 * s2) / (Sigma * DeltaSafe * s2);
+}
+
+// Hamiltonian: H = (1/2) g^{αβ} p_α p_β. Used to evaluate the on-shell
+// constraint H = 0 and (numerically) ∂_r H, ∂_θ H for the momentum RHS.
+float kerr_hamiltonian(float r, float th, float pt, float pr, float pth, float pph) {
+    vec4  g4; float gPP;
+    kerr_inv_metric(r, th, g4, gPP);
+    return 0.5 * (g4.x * pt * pt
+                  + 2.0 * g4.y * pt * pph
+                  + g4.z * pr * pr
+                  + g4.w * pth * pth
+                  + gPP  * pph * pph);
+}
+
+// ---------------------------------------------------------------------------
+// Geodesic RHS — Hamilton's equations on the 8-D phase space (x^μ, p_μ).
+// ---------------------------------------------------------------------------
+//   dx^μ/dλ = +∂H/∂p_μ = g^{μν} p_ν
+//   dp_μ/dλ = −∂H/∂x^μ = −(1/2) ∂_μ g^{αβ} p_α p_β
+//
+// Killing vectors of Kerr ∂_t and ∂_φ ⇒ dp_t/dλ = dp_φ/dλ = 0 exactly,
+// no matter what the integrator does. We compute ∂_r H and ∂_θ H by
+// central differences in the metric coefficients — at single-precision
+// the truncation error of the central difference (~h²) and the round-off
+// (~ε/h) cross at h ≈ 1e-3 for typical r, θ values. Two extra metric
+// evaluations per axis, four per RHS — cheap.
 void rhs(in float y[8], out float d[8]) {
-    // r is clamped just outside the horizon so intermediate RK stages that
-    // briefly overshoot still produce finite values (f > 0). The outer loop
-    // pre-terminates any accepted state with r <= 2M + eps.
-    float r    = max(y[1], 2.0 * M + 1.0e-3);
-    float th   = y[2];
-    float kt   = y[4];
-    float kr   = y[5];
-    float kth  = y[6];
-    float kph  = y[7];
+    float a = clamp(u_spin, 0.0, 0.999);
+    float r_plus = 1.0 + sqrt(max(1.0 - a * a, 0.0));
+    float r   = max(y[1], r_plus + 1.0e-3);
+    float th  = y[2];
+    // sin θ is kept away from 0 inside kerr_inv_metric (s2 = max(sin²θ, 1e-8)),
+    // so we don't need an extra clamp on θ here.
+    float pt  = y[4], pr = y[5], pth = y[6], pph = y[7];
 
-    float f      = 1.0 - 2.0 * M / r;
-    float sinth  = sin(th);
-    float costh  = cos(th);
+    vec4  g4; float gPP;
+    kerr_inv_metric(r, th, g4, gPP);
 
-    // keep sin(theta) away from 0 so cot(theta) is finite
-    float sinth_s = (abs(sinth) < 1.0e-4) ? ((sinth >= 0.0) ? 1.0e-4 : -1.0e-4) : sinth;
+    // dx^μ/dλ = g^{μν} p_ν
+    d[0] = g4.x * pt + g4.y * pph;          // dt/dλ
+    d[1] = g4.z * pr;                       // dr/dλ
+    d[2] = g4.w * pth;                      // dθ/dλ
+    d[3] = g4.y * pt + gPP * pph;           // dφ/dλ
 
-    d[0] = kt;
-    d[1] = kr;
-    d[2] = kth;
-    d[3] = kph;
+    // p_t and p_φ are conserved (Killing). Set their derivatives to zero;
+    // the integrator will hold them rock-stable to round-off.
+    d[4] = 0.0;
+    d[7] = 0.0;
 
-    // Gamma^t_{tr} = M / (r^2 f)
-    d[4] = -2.0 * (M / (r * r * f)) * kt * kr;
-
-    // Gamma^r_{tt} = M f / r^2
-    // Gamma^r_{rr} = -M / (r^2 f)
-    // Gamma^r_{th th} = -(r - 2M) = -r f
-    // Gamma^r_{ph ph} = -(r - 2M) sin^2 th
-    d[5] =
-        - (M * f / (r * r)) * kt * kt
-        + (M / (r * r * f)) * kr * kr
-        + r * f * (kth * kth + sinth * sinth * kph * kph);
-
-    // Gamma^th_{r th} = 1/r, Gamma^th_{ph ph} = -sin th cos th
-    d[6] = -(2.0 / r) * kr * kth + sinth * costh * kph * kph;
-
-    // Gamma^ph_{r ph} = 1/r, Gamma^ph_{th ph} = cot th
-    d[7] = -(2.0 / r) * kr * kph - 2.0 * (costh / sinth_s) * kth * kph;
+    // dp_r/dλ = −(1/2) ∂_r g^{αβ} p_α p_β  via central difference on H.
+    // dp_θ/dλ = −(1/2) ∂_θ g^{αβ} p_α p_β  similarly.
+    float h_r  = max(1.0e-3 * r, 1.0e-4);
+    float h_th = 1.0e-3;
+    float H_rp = kerr_hamiltonian(r + h_r, th,        pt, pr, pth, pph);
+    float H_rm = kerr_hamiltonian(max(r - h_r, r_plus + 1.0e-4), th, pt, pr, pth, pph);
+    float H_tp = kerr_hamiltonian(r, th + h_th, pt, pr, pth, pph);
+    float H_tm = kerr_hamiltonian(r, th - h_th, pt, pr, pth, pph);
+    d[5] = -(H_rp - H_rm) / (2.0 * h_r);
+    d[6] = -(H_tp - H_tm) / (2.0 * h_th);
 }
 
 // ---------------------------------------------------------------------------
@@ -167,47 +344,97 @@ float hash21(vec2 p) {
     return fract(p.x * p.y);
 }
 
+// Forward declaration — definition lives further down (the disk's MRI fBm
+// also uses it, so it sits with the disk-emission helpers). Letting the
+// celestial sphere use the same noise gives the Milky Way and the LAB a
+// consistent procedural texture frequency.
+float vnoise2(vec2 p);
+
 vec3 celestial_sphere(vec3 dir) {
-    // Equirectangular hash-based starfield. Two brightness tiers + chromatic variation.
+    // Equirectangular procedural deep sky: dark sky ambient, mottled
+    // Milky-Way band with dust lanes, a couple of distant nebula clouds,
+    // and four star-density layers (red dwarfs → solar → blue → hot
+    // bright tier). Tuned so the *brightest* stars peak above the bloom
+    // threshold and form gentle halos in the composite.
     dir = normalize(dir);
     float theta = acos(clamp(dir.y, -1.0, 1.0));
     float phi   = atan(dir.z, dir.x);
     vec2 uv = vec2(phi / (2.0 * PI) + 0.5, theta / PI);
 
-    vec3 sky = vec3(0.004, 0.006, 0.015);  // very dark blue ambient
+    vec3 sky = vec3(0.0028, 0.0040, 0.0110);   // deep night
 
-    // Milky-Way-ish band: soft sinusoidal glow along an inclined great circle.
-    float band_angle = dot(normalize(dir), normalize(vec3(0.3, 0.2, 0.9)));
-    float band = smoothstep(0.35, 0.0, abs(band_angle));
-    sky += band * vec3(0.02, 0.018, 0.035);
+    // ── Milky Way band ───────────────────────────────────────────────
+    // Inclined great circle at ~25° from the metric pole. Inside the
+    // band, mottled brightness from 3-octave value noise + a "dust lane"
+    // variant that subtracts darkness along the densest ridge.
+    vec3 mw_axis = normalize(vec3(0.32, 0.18, 0.93));
+    float band_proj = dot(dir, mw_axis);
+    float band_w = smoothstep(0.40, 0.0, abs(band_proj));
+    if (band_w > 1.0e-3) {
+        float n = 0.55 * vnoise2(uv * vec2(40.0, 80.0))
+                + 0.30 * vnoise2(uv * vec2(80.0, 160.0) + 1.7)
+                + 0.15 * vnoise2(uv * vec2(160.0, 320.0) + 3.3);
+        float bulge = pow(band_w, 1.4);                            // brightest near the band axis
+        float bright_mw = clamp((n - 0.30) * 2.2, 0.0, 1.4) * bulge;
+        // Warm-creamy bulge core, slightly redder dust periphery.
+        vec3 mw_col = mix(vec3(0.014, 0.014, 0.022),
+                          vec3(0.090, 0.080, 0.060),
+                          bright_mw);
+        // Dust lanes: darken where noise spikes high (Karhunen-fakery).
+        float dust = smoothstep(0.62, 0.96, n);
+        sky += band_w * mw_col * (1.0 - 0.55 * dust);
+    }
 
-    // Three density layers of stars at different cell sizes.
-    for (int layer = 0; layer < 3; ++layer) {
-        float scale = 280.0 + 420.0 * float(layer);
+    // ── Distant nebula clouds (large soft patches) ──────────────────
+    // Two slow-frequency noise blobs tinted with hue variance — pink
+    // (Hα) and teal (OIII).
+    float n_low = vnoise2(uv * vec2(7.0, 14.0));
+    float n_lo2 = vnoise2(uv * vec2(7.0, 14.0) + 5.7);
+    float neb_mask = smoothstep(0.62, 0.92, n_low) * (0.5 + 0.5 * n_lo2);
+    sky += neb_mask * 0.018 * mix(vec3(0.32, 0.06, 0.45),
+                                  vec3(0.05, 0.38, 0.55),
+                                  n_lo2);
+
+    // ── Stars: four density tiers, last tier holds bright hot stars ──
+    for (int layer = 0; layer < 4; ++layer) {
+        float scale = 220.0 + 460.0 * float(layer);
         vec2  cell  = uv * scale;
         vec2  fl    = floor(cell);
         vec2  fr    = fract(cell);
         float h     = hash21(fl);
         float h2    = hash21(fl + 13.37);
 
-        // star present?
-        float threshold = 0.994 - 0.002 * float(layer);
+        // Layer 3 is the rarest, brightest tier (hot O/B-type or "named"
+        // foreground stars). Lower-index layers are progressively denser
+        // and fainter (red-dwarf-like backdrop).
+        float threshold = (layer == 3) ? 0.9985 : (0.992 - 0.002 * float(layer));
         if (h > threshold) {
             vec2  star_uv = vec2(h, h2);
             float d       = length(fr - star_uv);
-            float bright  = smoothstep(0.025, 0.0, d);
-            bright       *= 0.6 + 0.4 * h2;
+            float bright  = smoothstep(0.035, 0.0, d);
+            bright       *= 0.55 + 0.45 * h2;
 
-            // temperature -> color (cheap blackbody palette)
+            // Color: T sampled by h2, mapped to a 4-segment blackbody.
             float temp = h2;
-            vec3 color = mix(
-                mix(vec3(1.0, 0.75, 0.55), vec3(1.0, 1.0, 0.95), smoothstep(0.0, 0.5, temp)),
-                vec3(0.7, 0.85, 1.0), smoothstep(0.5, 1.0, temp)
-            );
-            sky += bright * color * (0.6 + 0.4 * float(3 - layer));
+            vec3 col;
+            if (temp < 0.25) {
+                col = mix(vec3(1.10, 0.55, 0.32), vec3(1.0, 0.78, 0.55), temp / 0.25);  // red dwarf → K
+            } else if (temp < 0.55) {
+                col = mix(vec3(1.0, 0.78, 0.55), vec3(1.0, 0.97, 0.86), (temp - 0.25) / 0.30); // K → G/F
+            } else if (temp < 0.82) {
+                col = mix(vec3(1.0, 0.97, 0.86), vec3(0.78, 0.88, 1.10), (temp - 0.55) / 0.27); // F → A/B
+            } else {
+                col = mix(vec3(0.78, 0.88, 1.10), vec3(0.55, 0.75, 1.40), (temp - 0.82) / 0.18); // B → O
+            }
+            // Layer-3 hot stars get extra brightness so they bloom in the
+            // composite pass — mimics the way Sirius/Vega/Rigel actually
+            // dominate a long-exposure photograph.
+            float layer_boost = (layer == 3) ? 3.6 : (0.6 + 0.4 * float(3 - layer));
+            sky += bright * col * layer_boost;
         }
     }
-    return sky;
+
+    return sky * u_sky_strength;
 }
 
 // ---------------------------------------------------------------------------
@@ -219,6 +446,28 @@ vec3 celestial_sphere(vec3 dir) {
 //   col 2 = right
 // Photon 3-direction in the tetrad frame is: forward + u*tan_x*right + v*tan_y*up
 // then normalized, and the full tetrad 4-momentum is k^{a} = (1, n_r, n_th, n_ph).
+// Build the initial ray on the 8-D phase space (x^μ, p_μ) from the ZAMO
+// tetrad of Bardeen-Press-Teukolsky 1972. ZAMO ("locally non-rotating")
+// is the natural Kerr observer: timelike everywhere outside r₊, smoothly
+// degenerates to the Schwarzschild static frame at a = 0, and stays
+// physically valid inside the ergosphere (where a true static observer
+// is forbidden because g_tt > 0).
+//
+//   ZAMO tetrad in BL coordinates:
+//     e_t̂ = (1/α)(1, 0, 0, ω)         timelike
+//     e_r̂ = (0, √(Δ/Σ), 0, 0)
+//     e_θ̂ = (0, 0, 1/√Σ, 0)
+//     e_φ̂ = (0, 0, 0, 1/(sin θ √(A/Σ)))
+//   where α = √(ΣΔ/A) is the lapse and ω = 2ar/A is the frame-dragging
+//   angular velocity.
+//
+// For u_observer_type == 3 ("Keplerian") in the equatorial plane and
+// r > r_isco_pro(a), we boost the ZAMO tetrad in +φ̂ by the Kerr
+// prograde Kepler velocity v_K = (Ω − ω)·√(g_φφ_proper)/α.
+//
+// Free-fall (PG-analog, observer_type == 1) lands in Phase 1.1; for now
+// we fall back to ZAMO so the slider doesn't produce silently-wrong
+// physics.
 void build_initial_ray(vec2 ndc, out float y0[8]) {
     float aspect = u_resolution.x / u_resolution.y;
     float tan_y  = tan(0.5 * u_fov_y);
@@ -232,113 +481,1138 @@ void build_initial_ray(vec2 ndc, out float y0[8]) {
                               + up_t    * (ndc.y * tan_y)
                               + right_t * (ndc.x * tan_x));
 
-    // Map tetrad components back to coordinate k^mu.
-    float r     = u_cam_pos.y;
-    float th    = u_cam_pos.z;
-    float f     = 1.0 - 2.0 * M / r;
-    float sqf   = sqrt(max(f, 1.0e-6));
-    float sinth = max(abs(sin(th)), 1.0e-4) * sign(sin(th) + (sin(th) == 0.0 ? 1.0 : 0.0));
+    // Unpack camera coordinates and Kerr functions at (r, θ).
+    float r   = u_cam_pos.y;
+    float th  = u_cam_pos.z;
+    float a   = clamp(u_spin, 0.0, 0.999);
+    float a2  = a * a;
+    float r2  = r * r;
+    float sth = sin(th);
+    float cth = cos(th);
+    float s2  = max(sth * sth, 1.0e-8);
+    float Sigma = r2 + a2 * cth * cth;
+    float Delta = max(r2 - 2.0 * r + a2, 1.0e-5);
+    float A     = (r2 + a2) * (r2 + a2) - a2 * Delta * s2;
+    float alpha = sqrt(max(Sigma * Delta / A, 1.0e-9));     // ZAMO lapse
+    float omega = 2.0 * a * r / A;                          // frame dragging
 
-    float kt_coord, kr_coord, kth_coord, kph_coord;
+    // Photon contravariant 4-momentum from ZAMO tetrad legs:
+    //   k^μ = e_(â)^μ  k^(â)            where  k^(â) = (1, n_r, n_θ, n_φ).
+    float n_r  = n_tetrad.x;
+    float n_th = n_tetrad.y;
+    float n_ph = n_tetrad.z;
 
-    if (u_observer_type == 0) {
-        // Static observer tetrad (valid only for r > 2M).
-        kt_coord  = 1.0 / sqf;
-        kr_coord  = n_tetrad.x * sqf;
-        kth_coord = n_tetrad.y / r;
-        kph_coord = n_tetrad.z / (r * sinth);
+    float kt_co, kr_co, kth_co, kph_co;
+
+    // Optional Keplerian boost (equator + valid prograde circular). The
+    // boost is applied in the (t̂, φ̂) plane of the ZAMO frame, leaving
+    // radial and polar legs unchanged. We accept any equatorial radius —
+    // the v-clamp below catches the photon-sphere singularity (v → 1) and
+    // the bracket > 0 guard catches retrograde-bound orbits.
+    bool use_kepler = (u_observer_type == 3) &&
+                      (abs(th - 0.5 * PI) < 0.05);
+    if (use_kepler) {
+        // Kerr prograde equatorial Kepler angular velocity (M = 1):
+        //   Ω_K = 1 / (r^{3/2} + a)
+        float OmegaK = 1.0 / (pow(r, 1.5) + a);
+        // ZAMO-frame 3-velocity of the Keplerian orbiter, +φ̂ direction.
+        // v = (Ω − ω) · √(g_φφ_proper) / α   with g_φφ_proper = (A/Σ) sin²θ.
+        float gPhiPhi_proper = (A / Sigma) * s2;
+        float v = (OmegaK - omega) * sqrt(max(gPhiPhi_proper, 0.0)) / max(alpha, 1.0e-6);
+        v = clamp(v, -0.9999, 0.9999);
+        float gamma = 1.0 / sqrt(1.0 - v * v);
+        // Boosted timelike & azimuthal tetrad legs:
+        float k_that =  gamma * (1.0           +  v * n_ph);
+        float k_phat =  gamma * (n_ph          +  v * 1.0);
+        float k_rhat =  n_r;
+        float k_thhat = n_th;
+        // Push back to BL contravariant components.
+        kt_co  = (1.0 / alpha) * k_that;
+        kr_co  = sqrt(Delta / Sigma) * k_rhat;
+        kth_co = (1.0 / sqrt(Sigma)) * k_thhat;
+        kph_co = (omega / alpha) * k_that
+                 + (1.0 / (sqrt(max(A / Sigma, 1.0e-9)) * abs(sth))) * k_phat;
     } else {
-        // Radially in-falling observer from rest at infinity (Painleve-Gullstrand-like).
-        // u^mu = (1/f, -sqrt(2M/r), 0, 0) satisfies g_{mu nu} u^mu u^nu = -1 for r > 2M,
-        // and remains regular as r -> 2M except for the kt = 1/f term which still blows up
-        // in Schwarzschild t. For Phase 0 we just use static outside and never cross.
-        kt_coord  = 1.0 / sqf;
-        kr_coord  = n_tetrad.x * sqf;
-        kth_coord = n_tetrad.y / r;
-        kph_coord = n_tetrad.z / (r * sinth);
+        // ZAMO (covers static & free-fall slots in this Phase 1 build).
+        float k_that  = 1.0;
+        float k_rhat  = n_r;
+        float k_thhat = n_th;
+        float k_phat  = n_ph;
+        kt_co  = (1.0 / alpha) * k_that;
+        kr_co  = sqrt(Delta / Sigma) * k_rhat;
+        kth_co = (1.0 / sqrt(Sigma)) * k_thhat;
+        kph_co = (omega / alpha) * k_that
+                 + (1.0 / (sqrt(max(A / Sigma, 1.0e-9)) * abs(sth))) * k_phat;
     }
+
+    // Lower indices: p_μ = g_{μν} k^ν.
+    //   g_tt   = −(1 − 2r/Σ)
+    //   g_tφ   = −2 a r sin²θ / Σ
+    //   g_rr   = Σ / Δ
+    //   g_θθ   = Σ
+    //   g_φφ   = (A/Σ) sin²θ
+    float g_tt = -(1.0 - 2.0 * r / Sigma);
+    float g_tphi = -2.0 * a * r * s2 / Sigma;
+    float g_rr = Sigma / Delta;
+    float g_thth = Sigma;
+    float g_phph = (A / Sigma) * s2;
+
+    float p_t  = g_tt   * kt_co + g_tphi * kph_co;
+    float p_r  = g_rr   * kr_co;
+    float p_th = g_thth * kth_co;
+    float p_ph = g_tphi * kt_co + g_phph * kph_co;
 
     y0[0] = u_cam_pos.x;     // t
     y0[1] = r;
     y0[2] = th;
-    y0[3] = u_cam_pos.w;     // phi
-    y0[4] = kt_coord;
-    y0[5] = kr_coord;
-    y0[6] = kth_coord;
-    y0[7] = kph_coord;
+    y0[3] = u_cam_pos.w;     // φ
+    y0[4] = p_t;
+    y0[5] = p_r;
+    y0[6] = p_th;
+    y0[7] = p_ph;
 }
+
+// ---------------------------------------------------------------------------
+// Blackbody → linear sRGB (Tanner-Helland piecewise approximation, fitted to
+// the Planck locus from 1000 K to 40000 K). Returns a *linear* RGB value
+// suitable for HDR addition before tone mapping. Brightness is shaped by the
+// Wien shift, so hotter T pulls the color toward blue and brightens the
+// blue channel without manual tuning.
+// ---------------------------------------------------------------------------
+vec3 blackbody_rgb(float T) {
+    T = clamp(T, 1000.0, 40000.0) * 0.01;     // T in 100 K units
+    float r, g, b;
+
+    // Red channel
+    if (T <= 66.0) {
+        r = 1.0;
+    } else {
+        r = 1.292936 * pow(T - 60.0, -0.1332047);
+    }
+
+    // Green channel
+    if (T <= 66.0) {
+        g = 0.3900816 * log(max(T, 1.0)) - 0.6318414;
+    } else {
+        g = 1.129891 * pow(T - 60.0, -0.0755148);
+    }
+
+    // Blue channel
+    if (T >= 66.0) {
+        b = 1.0;
+    } else if (T <= 19.0) {
+        b = 0.0;
+    } else {
+        b = 0.5432068 * log(T - 10.0) - 1.196254;
+    }
+
+    return clamp(vec3(r, g, b), 0.0, 1.0);
+}
+
+// Shakura-Sunyaev radiation temperature for a thin disk with no-torque
+// inner boundary. T(r) ∝ (M ṁ / r^3)^{1/4} · (1 − √(r_in / r))^{1/4}.
+// We absorb the Ṁ-dependent prefactor into the user-visible T_inner control
+// (the *peak* temperature, which sits a little outside r_in). Returns Kelvin.
+float disk_temperature_K(float r) {
+    if (r <= u_disk_inner + 1.0e-3) return 0.0;
+    float u = u_disk_inner / r;
+    float fade = max(1.0 - sqrt(u), 0.0);
+    // Normalise so the visible peak ≈ u_disk_T_inner. The Shakura-Sunyaev
+    // peak occurs at r = (49/36) r_in with peak ≈ 0.488 of the prefactor;
+    // we divide by 0.488 so the user-set value lands on that peak.
+    float T = u_disk_T_inner * pow(u, 0.75) * pow(fade, 0.25) / 0.488;
+    return T;
+}
+
+// 2-D value noise for shear / turbulence overlays.
+float vnoise2(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    float a = hash21(i);
+    float b = hash21(i + vec2(1.0, 0.0));
+    float c = hash21(i + vec2(0.0, 1.0));
+    float d = hash21(i + vec2(1.0, 1.0));
+    vec2 w = f * f * (3.0 - 2.0 * f);
+    return mix(mix(a, b, w.x), mix(c, d, w.x), w.y);
+}
+
+// ---------------------------------------------------------------------------
+// MRI turbulence model.
+// ---------------------------------------------------------------------------
+// The magneto-rotational instability (Balbus-Hawley 1991) is the angular-
+// momentum-transport mechanism in Keplerian disks. It produces eddies whose
+// turnover time tracks 1/Ω(r), elongated in φ by the local shear (Δv ∝ r dΩ/dr).
+// We model that with anisotropic 4-octave fBm in (log r, ph_local), where
+// ph_local already absorbs Ω(r)·t — so inner cells *evolve* faster than
+// outer cells purely from the kinematics, exactly as physical MRI does.
+float mri_fbm(float lnr, float ph_local, float t) {
+    float a = 0.0;
+    float amp = 0.5;
+    float fr = 1.0;
+    // shear ratio: φ-direction packed denser than r → eddy elongation in φ
+    for (int i = 0; i < 4; ++i) {
+        float jitter = float(i) * 1.7 + 0.2 * t;
+        a += amp * (vnoise2(vec2(2.5 * fr * lnr + jitter,
+                                 9.0 * fr * ph_local - 0.7 * jitter)) - 0.5);
+        amp *= 0.55;
+        fr  *= 2.05;
+    }
+    return a;          // ≈ −0.5..+0.5
+}
+
+// ---------------------------------------------------------------------------
+// Accretion-disk emission model (thin disk in equatorial plane).
+// ---------------------------------------------------------------------------
+// Uses:
+//   • prograde-Keplerian emitter for the g-factor
+//     (E_emit = -g_{mu nu} k^mu u^nu, u from the orbiter)
+//   • Shakura-Sunyaev T(r) → Tanner-Helland blackbody color
+//   • Keplerian shear: spiral phase advances at the *local* Ω(r), so inner
+//     orbits visibly out-pace outer orbits — physically correct shear flow
+//   • intensity invariant I_obs = g^4 · I_emit (Liouville/Boltzmann)
+//   • optional orbiting hot-spot at u_hotspot_radius
+// ---------------------------------------------------------------------------
+// 'pt', 'pph' here are the photon's covariant 4-momentum components
+// p_t and p_φ at the disk-cell crossing (the Phase 1 state vector
+// stores p_μ, not k^μ). The g-factor is the metric-independent form
+//   g = E_obs / E_emit = (−p_μ u^μ_obs) / (−p_μ u^μ_emit).
+// We absorb the observer's normalization (E_obs ≡ −p_t at infinity = 1)
+// into the photon's energy so the formula reduces to
+//   g = 1 / (−p_μ u^μ_emit) = 1 / (−p_t·u^t − p_φ·u^φ).
+vec3 disk_emission(float r, float ph, float pt, float pph) {
+    if (r < u_disk_inner || r > u_disk_outer) return vec3(0.0);
+
+    // ── Kerr equatorial prograde Keplerian 4-velocity (M = 1) ─────────
+    //   Ω_K = 1 / (r^{3/2} + a)
+    //   u^t = (r^{3/2} + a) / √(r² · (r − 3 + 2 a r^{−1/2}))    Bardeen-Press-Teukolsky
+    // Equivalent form via direct normalization u_μ u^μ = −1:
+    //   bracket = (1 − 2/r) + 4 a Ω/r − (r² + a² + 2 a²/r) Ω²
+    //   u^t = 1/√bracket,   u^φ = Ω u^t
+    // Reduces to Schwarzschild's u^t = 1/√(1 − 3/r) at a = 0.
+    float a      = clamp(u_spin, 0.0, 0.999);
+    float OmegaK = 1.0 / (pow(r, 1.5) + a);
+    float bracket = (1.0 - 2.0 / r)
+                  + 4.0 * a * OmegaK / r
+                  - (r * r + a * a + 2.0 * a * a / r) * OmegaK * OmegaK;
+    if (bracket <= 0.0) return vec3(0.0);          // unbound / past r_ms
+    float ut    = 1.0 / sqrt(bracket);
+    float Omega = OmegaK;                          // local alias
+    float uph   = Omega * ut;
+
+    // ── g-factor ──────────────────────────────────────────────────────
+    // E_emit = −p_μ u^μ = −(p_t·u^t + p_φ·u^φ).
+    float E_emit = -(pt * ut + pph * uph);
+    E_emit = max(E_emit, 1.0e-3);
+    float g = 1.0 / E_emit;
+    float bright = pow(g, 4.0);
+
+    // ── Keplerian-sheared coordinates ─────────────────────────────────
+    // Co-rotating azimuthal coordinate: ph_local = ph - Ω(r) · t · speed.
+    // The shear speed multiplier compresses real-time "decade-scale"
+    // disk dynamics into watchable seconds without altering the *relative*
+    // rate at which inner orbits outpace outer ones.
+    float t_eff   = u_time * u_disk_shear_speed;
+    float ph_local = ph - Omega * t_eff;
+    float lnr      = log(r);
+
+    // ── MRI turbulence (Balbus-Hawley, anisotropic fBm) ──────────────
+    // The MRI is the actual angular-momentum-transport mechanism in real
+    // disks. We model it as anisotropic noise elongated in φ by the local
+    // shear and evolving at 1/Ω(r). Strength controlled by u_mri_strength.
+    float mri = mri_fbm(lnr, ph_local, t_eff * 0.07);
+    float turb = clamp(0.65 + u_mri_strength * (1.6 * mri), 0.15, 1.45);
+
+    // ── Optional density-wave spiral (m=2, weak) ──────────────────────
+    // We retain a faint global m=2 spiral as a reminder that real disks
+    // exhibit MRI + standing density waves; amplitude is small so the
+    // pattern doesn't dominate the more physically-grounded MRI noise.
+    float spiral_phase = 2.0 * ph_local - 2.6 * lnr;
+    float spiral       = 0.92 + 0.08 * sin(spiral_phase);
+
+    // ── Lindblad resonance highlight (m=2 OLR / ILR) ──────────────────
+    // Pattern speed Ω_p ≡ Ω_K(r_p). Resonances at r where
+    //   Ω(r) = Ω_p ± κ/m, κ ≈ Ω_K (Schwarzschild Keplerian),
+    // m = 2: ratios Ω/Ω_p = 0.5 (OLR) and 1.5 (ILR), giving
+    //   r_OLR = r_p · 1.5^(2/3) ≈ 1.31 r_p,
+    //   r_ILR = r_p · 0.5^(2/3) ≈ 0.63 r_p.
+    float lindblad_w = 0.0;
+    if (u_show_lindblad == 1 && u_lindblad_rp > 0.0) {
+        float r_olr = u_lindblad_rp * 1.31037;
+        float r_ilr = u_lindblad_rp * 0.62996;
+        float w_olr = exp(-pow((r - r_olr) / 0.5, 2.0));
+        float w_ilr = exp(-pow((r - r_ilr) / 0.5, 2.0));
+        float w_p   = exp(-pow((r - u_lindblad_rp) / 0.45, 2.0));
+        lindblad_w = w_olr + w_ilr + 0.6 * w_p;
+    }
+
+    // ── Radial brightness profile: smooth inner roll-off, exponential fall ─
+    float uu     = (r - u_disk_inner) / max(u_disk_outer - u_disk_inner, 0.1);
+    float radial = smoothstep(0.0, 0.06, uu) * exp(-uu * 1.4) *
+                   (1.0 - smoothstep(0.85, 1.0, uu));
+
+    // ── Regime-aware temperature → spectrum (Tier 2A) ────────────────
+    // Tier 2A: u_disk_T_factor encodes the photon-trapping cap in the
+    // slim-disk regime (Abramowicz: T_eff drops below the naive thin
+    // disk because energy is advected onto the BH). RIAF gets a
+    // separate, harder-spectrum branch that bypasses the blackbody
+    // path because the gas is optically thin.
+    float T_obs = disk_temperature_K(r) * g * u_disk_T_factor;
+    vec3 col;
+    if (u_disk_regime == 0) {
+        // RIAF / ADAF: optically-thin synchrotron + Compton spectrum,
+        // not a blackbody. Visualization uses a flat blue-white tint
+        // weighted by g (relativistic boost of the entire SED). Tier 2C
+        // will replace this with a proper power-law Compton path.
+        col = mix(vec3(0.40, 0.55, 1.05), vec3(0.85, 0.95, 1.30),
+                  smoothstep(0.5, 1.5, g));
+    } else if (u_disk_regime == 2) {
+        // Slim disk: blackbody at the trap-corrected T, with a bluish
+        // wash on the inner edge from photon-trapping shock heating.
+        col = blackbody_rgb(T_obs);
+        col += vec3(0.05, 0.08, 0.18) *
+               smoothstep(u_disk_outer, u_disk_inner * 1.5, r);
+    } else {
+        // Standard thin disk — pure Tanner-Helland blackbody.
+        col = blackbody_rgb(T_obs);
+    }
+
+    // Tone the color a bit toward the spiral / turbulence; keep luminance
+    // mostly from the bright factor. This avoids the disk going to neutral
+    // white when bright is huge.
+    vec3 emission = col * bright * radial * spiral * turb;
+
+    // Lindblad rings: mild blue-shifted accent, additive on top of disk.
+    if (lindblad_w > 0.0) {
+        emission += vec3(0.45, 0.65, 1.10) * lindblad_w * bright * radial * 0.45;
+    }
+
+    // ── Fe K-α 6.4 keV line on the inner disk ────────────────────────
+    // The line is monoenergetic in the rest frame; in the observer's frame it
+    // is gravitationally + Doppler smeared by g, producing the asymmetric
+    // skewed profile real X-ray observatories use to constrain spin & ISCO.
+    // We render it as an extra blue-shifted brightness ribbon weighted by
+    // I ∝ g^3 (spectral-line intensity invariant for a δ-function in ν).
+    if (u_show_fe_line == 1) {
+        float fe_w   = exp(-pow((r - u_disk_inner) / 1.6, 2.0));
+        float g_line = pow(g, 3.0);
+        // Color: nominally K-α is 6.4 keV (X-ray); we tint blue with a slight
+        // red tail that emerges in the receding side from g < 1.
+        vec3 fe_col = mix(vec3(1.4, 0.45, 0.25),  // red at g < 1
+                          vec3(0.55, 0.85, 1.50), // strong blue at g > 1
+                          smoothstep(0.55, 1.4, g));
+        emission += fe_col * fe_w * g_line * u_fe_intensity * radial * 1.6;
+    }
+
+    // ── Orbiting hot-spot field (multi-spot Doppler-correct) ─────────
+    // Each spot is a Keplerian flare cell at r_h, sheared into a ribbon
+    // along φ by the differential rotation. Brightness rides the *same*
+    // g-factor as the ambient disk (Liouville: I_obs = g⁴ I_emit), so the
+    // approaching side of every spot brightens and the receding side dims
+    // — matching how real disk hot-spots show up in time-resolved EHT data.
+    if (u_show_hotspot == 1 && u_n_hotspots > 0) {
+        const int N_MAX = 8;
+        for (int i = 0; i < N_MAX; ++i) {
+            if (i >= u_n_hotspots) break;
+            float idf = float(i) + 1.0;
+            // Deterministic spot parameters (no per-frame state).
+            // Spot 0 honors the legacy single-spot slider; spots 1..N-1
+            // procedurally fill the disk.
+            float r_h, phi0, lifetime, sz_phi, sz_r;
+            if (i == 0) {
+                r_h      = u_hotspot_radius;
+                phi0     = u_hotspot_phi0;
+                lifetime = 14.0;
+                sz_phi   = 0.05;
+                sz_r     = 0.6;
+            } else {
+                float h1 = fract(idf * 0.71370 + 0.123);
+                float h2 = fract(idf * 0.31415 + 0.541);
+                float h3 = fract(idf * 0.17290 + 0.879);
+                r_h      = mix(u_disk_inner * 1.05, u_disk_outer * 0.55, h1);
+                phi0     = 6.2831853 * h2;
+                lifetime = 6.0 + 16.0 * h3;
+                sz_phi   = 0.04 + 0.05 * fract(idf * 0.43);
+                sz_r     = 0.45 + 0.55 * fract(idf * 0.91);
+            }
+            float Omega_h = pow(r_h, -1.5);
+            float ph_h    = phi0 + Omega_h * t_eff;
+            float dphi    = mod(ph - ph_h + PI, 2.0 * PI) - PI;
+            float dr      = (r - r_h);
+            float gauss   = exp(-(dphi * dphi) / max(sz_phi, 0.005)
+                                - (dr * dr) / max(sz_r, 0.05));
+            // Birth-death envelope: half-sine over each lifetime cycle.
+            // Spot 0 is steady-state (legacy behavior).
+            float life_w = 1.0;
+            if (i > 0) {
+                float age = mod(t_eff * 0.20 + idf * 13.7, lifetime);
+                float s = sin(PI * age / lifetime);
+                life_w = s * s;
+            }
+            // Hot-spot is hotter than the ambient disk -> bluer. Use
+            // ambient g-factor so Doppler asymmetry is preserved.
+            vec3 hot_col = blackbody_rgb(min(40000.0, T_obs * 1.6 + 4000.0));
+            float qpo_boost = 1.0 + 4.0 * u_qpo_flare * exp(-pow((r - u_disk_inner * 1.1) / 1.2, 2.0));
+            emission += hot_col * gauss * bright * life_w * u_hotspot_strength * qpo_boost;
+        }
+    }
+
+    return emission * u_disk_brightness * u_disk_regime_brightness * u_disk_mad_dim;
+}
+
+// "Vertical-relative-to-disk" coordinate: cos(θ_disk) where the disk normal
+// is tilted from the metric pole by u_disk_warp_angle around azimuth
+// u_disk_warp_psi. At α = 0 reduces to cos(θ). Used for both the slab
+// occupancy test and the equator-crossing detector below.
+float cos_theta_disk(float th, float ph) {
+    if (u_disk_warp_on == 0) return cos(th);
+    float a = u_disk_warp_angle;
+    float ca = cos(a);
+    float sa = sin(a);
+    return sa * sin(th) * cos(ph - u_disk_warp_psi) + ca * cos(th);
+}
+
+// Disk half-thickness profile. Shakura-Sunyaev says H(r) ∝ c_s/Ω_K, which
+// for an isothermal slab gives H/r ≈ const at large r and a slim-disk
+// puff (H/r → 1) as r → r_in. We model that with the user-set H/r at the
+// inner edge, fading like (r/r_in)^{-1/4} so the inner edge is thicker
+// than the outer disk — visually correct slim-disk geometry.
+float disk_half_thickness(float r_cyl) {
+    if (u_disk_h_over_r <= 0.005) return 0.0;
+    float r_in = max(u_disk_inner, 1.0e-3);
+    float ratio = pow(max(r_cyl / r_in, 1.0e-3), -0.25);
+    // Regime-aware inner-edge profile (Tier 2A):
+    //   thin disk  → mild puff (0.7..1.3), Shakura-Sunyaev profile
+    //   slim disk  → aggressive inner puff (0.5..2.0), Abramowicz advective
+    //   RIAF       → near-uniform thick torus (0.85..1.10)
+    float profile;
+    if (u_disk_regime == 2)        profile = 0.50 + 1.50 * ratio;   // slim
+    else if (u_disk_regime == 0)   profile = 0.85 + 0.25 * ratio;   // RIAF
+    else                           profile = 0.70 + 0.60 * ratio;   // thin
+    float H_over_r = u_disk_h_over_r * profile;
+    return H_over_r * r_cyl;
+}
+
+// Detect equatorial-plane (or warped-disk-plane) crossing inside [r_in, r_out].
+// Returns 1 if hit, refining (r, phi, k^t, k^phi) by linear interp in cos θ_disk.
+int disk_intersect(float y_prev[8], float y_new[8],
+                   out float r_hit, out float phi_hit,
+                   out float kt_hit, out float kph_hit) {
+    float costh_o = cos_theta_disk(y_prev[2], y_prev[3]);
+    float costh_n = cos_theta_disk(y_new[2],  y_new[3]);
+    if (costh_o * costh_n >= 0.0) return 0;                   // no sign change
+
+    float r_n = y_new[1];
+    if (r_n < u_disk_inner - 1.0 || r_n > u_disk_outer + 1.0) return 0;
+
+    float t = costh_o / (costh_o - costh_n);                  // ∈ (0,1)
+    r_hit   = mix(y_prev[1], y_new[1], t);
+    phi_hit = mix(y_prev[3], y_new[3], t);
+    kt_hit  = mix(y_prev[4], y_new[4], t);
+    kph_hit = mix(y_prev[7], y_new[7], t);
+    if (r_hit < u_disk_inner || r_hit > u_disk_outer) return 0;
+    return 1;
+}
+
+// Per-RK-step volumetric contribution from the slab disk (B1). When H/r > 0
+// this is the dominant disk path; the equator-crossing test above becomes a
+// degenerate special case (slab thickness → 0). Returns added emission and
+// optical depth in the supplied accumulators.
+void disk_slab_step(float y_prev[8], float y_new[8], float h_step,
+                    inout vec3 disk_rgb, inout float tau_total,
+                    out int term_out) {
+    term_out = 0;
+    if (u_show_disk == 0 || u_disk_h_over_r <= 0.005) return;
+
+    float r_mid  = 0.5 * (y_prev[1] + y_new[1]);
+    float th_mid = 0.5 * (y_prev[2] + y_new[2]);
+    float ph_mid = 0.5 * (y_prev[3] + y_new[3]);
+    float c_disk = cos_theta_disk(th_mid, ph_mid);
+    float r_cyl  = r_mid * sqrt(max(1.0 - c_disk * c_disk, 0.0));
+    float z_disk = r_mid * c_disk;
+
+    if (r_cyl < u_disk_inner || r_cyl > u_disk_outer) return;
+
+    float H = disk_half_thickness(r_cyl);
+    if (H <= 0.0) return;
+    float zh = z_disk / H;
+    if (abs(zh) > 3.0) return;                 // outside ~3σ slab
+
+    float vert = exp(-zh * zh);                 // Gaussian vertical profile
+
+    // k^μ midpoint for the g-factor inside disk_emission (which expects
+    // (kt, kph) of the photon at the slab cell — we pass midpoint values).
+    float kt_mid  = 0.5 * (y_prev[4] + y_new[4]);
+    float kph_mid = 0.5 * (y_prev[7] + y_new[7]);
+
+    vec3 emit = disk_emission(r_cyl, ph_mid, kt_mid, kph_mid) * vert;
+
+    // Per-step optical-depth contribution. The 0.25 prefactor calibrates the
+    // slab so a face-on traversal of the entire H column yields τ ≈ 1 in
+    // opaque mode; tweakable without affecting physics.
+    float dtau_per_M = 0.25 * vert;
+    float dtau = dtau_per_M * h_step;
+
+    bool translucent = (u_disk_mode == 1);
+    if (translucent) {
+        // Translucent (RIAF) mode: lower opacity per unit length so multiple
+        // lensed images stack. Maintain the existing translucent feel.
+        dtau *= 0.45;
+        float w = max(1.0 - tau_total, 0.0);
+        disk_rgb  += emit * dtau * w;
+        tau_total += dtau;
+        if (tau_total >= 0.985) { term_out = 5; return; }
+    } else {
+        // Opaque slab: standard front-to-back compositing.
+        float w = max(1.0 - tau_total, 0.0);
+        disk_rgb  += emit * dtau * w;
+        tau_total += dtau;
+        if (tau_total >= 0.98) { term_out = 4; return; }
+    }
+}
+
+// 3-D coordinate grid: faint glow when the ray crosses a small angular
+// neighborhood of an integer-degree latitude/longitude line at a milestone
+// radius. Cheap and gives strong depth cues.
+vec3 grid_overlay(float y_prev[8], float y_new[8]) {
+    if (u_show_grid == 0) return vec3(0.0);
+    float r  = 0.5 * (y_prev[1] + y_new[1]);
+    float th = 0.5 * (y_prev[2] + y_new[2]);
+    float ph = 0.5 * (y_prev[3] + y_new[3]);
+
+    float shell_w = 0.6;
+    float near10 = exp(-pow((r - 10.0) / shell_w, 2.0));
+    float near30 = exp(-pow((r - 30.0) / shell_w, 2.0));
+    float shell  = max(near10 * 0.10, near30 * 0.05);
+    if (shell < 1.0e-3) return vec3(0.0);
+
+    float lat = fract(th * 12.0 / PI);
+    float lon = fract(ph * 12.0 / PI);
+    float lat_line = max(0.0, 1.0 - 14.0 * min(lat, 1.0 - lat));
+    float lon_line = max(0.0, 1.0 - 14.0 * min(lon, 1.0 - lon));
+
+    return shell * (lat_line + lon_line) * vec3(0.20, 0.45, 0.65);
+}
+
+// Translucent photon-sphere "shell" — adds a faint cyan glow whenever a ray
+// crosses near r = 3M (the unstable circular-photon-orbit shell). Lights up
+// the lensed photon sub-rings even when the disk is off.
+vec3 photon_sphere_glow(float y_prev[8], float y_new[8]) {
+    if (u_show_photon_sphere == 0) return vec3(0.0);
+    float r = 0.5 * (y_prev[1] + y_new[1]);
+    float w = exp(-pow((r - 3.0 * M) / 0.18, 2.0));
+    return w * vec3(0.04, 0.20, 0.30);
+}
+
+// ---------------------------------------------------------------------------
+// Volumetric emissions accumulated along the geodesic.
+//
+// Three components, each weighted by the affine step size h so the line
+// integral is integrator-step-invariant:
+//
+//   • Bipolar relativistic jets       (synchrotron, power-law, full Doppler δ^{2+α})
+//   • Compton corona above inner disk (hot, near-spherical shell)
+//   • Disk wind                       (UV biconical outflow at high ṁ)
+//
+// Each is purely emissive (additive), optically thin in this Phase 0.5 model.
+// The jet uses a co-moving radial 4-velocity at speed β, its g-factor against
+// the photon's k^μ giving the iconic "approaching jet ten times brighter than
+// the receding one" Doppler beaming (M87-style).
+// ---------------------------------------------------------------------------
+vec3 volume_emission(float y_prev[8], float y_new[8], float h_step) {
+    vec3 out_rgb = vec3(0.0);
+    float r   = 0.5 * (y_prev[1] + y_new[1]);
+    float th  = 0.5 * (y_prev[2] + y_new[2]);
+    // Photon covariant 4-momentum at the cell midpoint.
+    float pt  = 0.5 * (y_prev[4] + y_new[4]);
+    float pr  = 0.5 * (y_prev[5] + y_new[5]);
+    float pph = 0.5 * (y_prev[7] + y_new[7]);
+
+    float r_plus = kerr_r_plus();
+    if (r <= r_plus + 0.01) return out_rgb;
+
+    // Kerr ZAMO-frame structure (used for both the jet 4-velocity build
+    // and the corona/wind tinting).
+    float a   = clamp(u_spin, 0.0, 0.999);
+    float a2  = a * a;
+    float r2  = r * r;
+    float sth = sin(th);
+    float s2  = max(sth * sth, 1.0e-6);
+    float Sigma = r2 + a2 * cos(th) * cos(th);
+    float Delta = max(r2 - 2.0 * r + a2, 1.0e-5);
+    float A     = (r2 + a2) * (r2 + a2) - a2 * Delta * s2;
+    float alpha = sqrt(max(Sigma * Delta / A, 1.0e-9));   // ZAMO lapse
+    float omega = 2.0 * a * r / A;                        // frame dragging
+    // Aliases for legacy Schwarzschild call sites that referenced sqf:
+    float f_h = max(1.0 - 2.0 / r, 1.0e-3);
+
+    // ── Bipolar relativistic jets ───────────────────────────────────
+    if (u_show_jets == 1) {
+        // angular distance from nearest pole
+        float th_axis = min(th, PI - th);
+        if (th_axis < u_jet_open && r < u_jet_r_max) {
+            // Jet 4-velocity: bulk flow outward along ±r̂_ZAMO. Sign chosen
+            // by hemisphere. We parametrize in the ZAMO orthonormal frame
+            // (u_(t̂), u_(r̂)) = (γ, ±γβ), then push to BL contravariant:
+            //   u^t = γ/α            ,  u^r = ±γβ √(Δ/Σ)
+            //   u^φ = γω/α           ,  u^θ = 0
+            // (the φ-component picks up the frame-dragging shift even
+            // though the bulk flow has no φ-velocity in the local frame).
+            float beta_sign = (th < 0.5 * PI) ? 1.0 : -1.0;
+            float beta = u_jet_velocity;
+            float gamma_j = 1.0 / sqrt(max(1.0 - beta * beta, 1.0e-6));
+            float ut  = gamma_j / alpha;
+            float ur  = beta_sign * gamma_j * beta * sqrt(Delta / Sigma);
+            float uph = gamma_j * omega / alpha;
+
+            // E_emit = −p_μ u^μ. (Note: p_θ * u^θ = 0 since u^θ = 0.)
+            float E_emit = -(pt * ut + pph * uph) - pr * ur;
+            E_emit = max(E_emit, 1.0e-3);
+            float delta = 1.0 / E_emit;                            // Doppler factor
+
+            // Synchrotron power-law: I_obs(ν) = δ^{2+α} I_emit(ν).
+            float bright = pow(delta, 2.0 + u_jet_alpha);
+
+            // Angular profile: paraboloid-collimated (brightest along axis).
+            float ang = pow(1.0 - th_axis / u_jet_open, 2.0);
+
+            // Radial profile: ~1/(1 + r/scale) — bright base, fading sheath.
+            float rad = 1.0 / (1.0 + r * 0.06);
+
+            // Synchrotron color: bluish-white at high δ (approaching jet),
+            // reddened at low δ (receding). Treat δ as a temperature analog.
+            vec3 col = mix(vec3(0.9, 0.45, 0.30),    // dim red at low δ
+                           vec3(0.65, 0.85, 1.30),    // bluish-white at high δ
+                           smoothstep(0.4, 1.6, delta));
+
+            out_rgb += col * bright * ang * rad * u_jet_intensity * h_step;
+        }
+    }
+
+    // ── Hot Compton corona (Tier 2C — power-law radiative transfer) ─
+    // Inverse-Compton on the disk's seed photons. The corona shell is
+    // unchanged geometrically (Gaussian at u_corona_radius) but the
+    // spectrum is now derived from the user's Compton y-parameter:
+    //   y = 4 k T_e / m_e c² · max(τ_es, τ²_es)
+    // Sunyaev-Titarchuk 1980: photon index Γ = 0.5 + √(2.25 + 4/(3y)).
+    //   y small (~0.1) → Γ ≈ 4   (very soft, multiple scatterings barely
+    //                              boost photon energy — most emission
+    //                              still near the seed-photon temperature)
+    //   y ~ 1            → Γ ≈ 2.4 (typical AGN corona)
+    //   y large (~5)    → Γ ≈ 2.1 (hard; harder spectra mean more high-
+    //                              energy photons, "harder" in X-ray
+    //                              parlance = bluer in our visualization)
+    // We map Γ → color: hard spectrum bluish-white, soft spectrum
+    // orange-red (Compton-cooled toward the seed temperature).
+    if (u_show_corona == 1) {
+        float dr_c   = (r - u_corona_radius) / max(u_corona_width, 0.5);
+        float w_r    = exp(-dr_c * dr_c);
+        float w_th   = 1.0 - 0.6 * exp(-pow((th - 0.5 * PI) / 0.18, 2.0));
+
+        float y      = max(u_corona_y, 0.05);
+        float Gamma  = 0.5 + sqrt(2.25 + 4.0 / (3.0 * y));
+        // Color blends harder-bluer ↔ softer-redder along Γ ∈ [1.7, 3.5].
+        vec3 hard_col = vec3(0.85, 1.00, 1.55);     // X-ray-ish bluish-white
+        vec3 soft_col = vec3(1.45, 0.80, 0.40);     // orange (warm Compton)
+        vec3 col      = mix(hard_col, soft_col, smoothstep(1.7, 3.5, Gamma));
+        // Total Comptonized luminosity grows with y (more scatterings
+        // upscatter more seed photons). Empirical fit y → √y · (1+y/2)
+        // matches the qualitative AGN compactness scaling.
+        float y_boost = sqrt(y) * (1.0 + y * 0.5);
+        out_rgb += col * w_r * w_th * u_corona_intensity * y_boost * h_step;
+    }
+
+    // ── Radiation-driven disk wind (biconical) ─────────────────────
+    if (u_show_wind == 1) {
+        // Two cones at ±45° from the equator (above & below the disk).
+        float th_cone = 0.78539816;            // π/4
+        float th_dist = min(abs(th - th_cone), abs(th - (PI - th_cone)));
+        if (th_dist < 0.40 && r > u_disk_inner * 0.9 && r < u_disk_outer * 2.5) {
+            float w_th = exp(-pow(th_dist / 0.22, 2.0));
+            float w_r  = exp(-(r - u_disk_inner) / max(u_disk_outer * 0.6, 5.0));
+            // Mildly relativistic outflow tints it blue.
+            vec3 col   = vec3(0.30, 0.50, 1.05);
+            out_rgb   += col * w_th * w_r * u_wind_intensity * h_step;
+        }
+    }
+
+    return out_rgb;
+}
+
+// Per-crossing optical depth for translucent disks (RIAF-like). 1.0 = opaque
+// after a single crossing (matches u_disk_mode == 0); ~0.35 lets a few
+// crossings stack so the secondary lensed image of the disk shows through.
+const float DISK_TAU_PER_PASS = 0.35;
+const int   DISK_MAX_CROSSINGS = 6;
 
 // ---------------------------------------------------------------------------
 // Main integration loop.
 // ---------------------------------------------------------------------------
 // Termination flags: 0 = still integrating, 1 = captured by horizon,
-// 2 = escaped to celestial sphere, 3 = step budget exhausted.
-void trace(inout float y[8], out int term, out int steps_taken, out float affine_used) {
-    float h = 0.5;     // initial step (affine parameter)
+// 2 = escaped to celestial sphere, 3 = step budget exhausted,
+// 4 = opaque disk hit (background hidden), 5 = translucent disk path
+// (background still visible behind accumulated emission).
+void trace(inout float y[8], out int term, out int steps_taken, out float affine_used,
+           out vec3 disk_rgb, out vec3 grid_accum, out vec3 volume_rgb,
+           out int eq_crossings) {
+    float h = 0.5;
     float h_min = 1.0e-4;
     float h_max = 50.0;
 
     term = 0;
     steps_taken = 0;
     affine_used = 0.0;
+    disk_rgb = vec3(0.0);
+    grid_accum = vec3(0.0);
+    volume_rgb = vec3(0.0);
+    eq_crossings = 0;
+    float prev_costh = cos(y[2]);   // for Gralla-Holz-Wald n-ring counter
 
     float y_try[8];
+    float y_prev[8];
     float err;
+
+    float tau_total = 0.0;       // accumulated optical depth (translucent mode)
+    int   crossings = 0;
+    bool  translucent = (u_disk_mode == 1);
+
+    float r_plus_local = kerr_r_plus();
 
     for (int step = 0; step < 4096; ++step) {
         if (step >= u_max_steps) break;
 
-        // Pre-step termination tests. Catches captured/escaped rays before we
-        // feed a marginal state into the integrator.
-        if (y[1] <= 2.0 * M + HORIZON_EPS) { term = 1; return; }
-        if (y[1] >= u_r_far)                { term = 2; return; }
+        if (y[1] <= r_plus_local + HORIZON_EPS) { term = 1; return; }
+        if (y[1] >= u_r_far)                    { term = 2; return; }
+
+        // Far-field straight-line shortcut: once we're well outside the
+        // photon sphere and moving outward, the geodesic is essentially a
+        // straight line on the celestial sphere. Skip the rest of the
+        // integration — saves up to 30-50 % of step budget at wide views.
+        // With covariant momenta the sign of dr/dλ = g^rr p_r = (Δ/Σ) p_r
+        // matches sign(p_r), so y[5] > 0 still flags an outward-bound ray.
+        if (u_far_shortcut_r > 0.0 && y[1] > u_far_shortcut_r && y[5] > 0.0) {
+            term = (tau_total > 0.0) ? 5 : 2;
+            return;
+        }
+
+        for (int i = 0; i < 8; ++i) y_prev[i] = y[i];
 
         ck_step(y, h, y_try, err);
-
-        // Guard against NaN/inf error: treat as "reject, shrink" to recover.
         if (!(err < 1.0e20)) { h = max(h * 0.25, h_min); continue; }
 
+        bool accepted;
         if (err < u_tol) {
-            // accept
-            for (int i = 0; i < 8; ++i) y[i] = y_try[i];
-            affine_used += h;
-            steps_taken = step + 1;
-
-            // termination tests on accepted state
-            float r = y[1];
-            if (r <= 2.0 * M + HORIZON_EPS) { term = 1; return; }
-            if (r >= u_r_far)                { term = 2; return; }
-
-            // grow step size
-            float factor = 0.9 * pow(u_tol / max(err, 1.0e-12), 0.2);
-            h = clamp(h * min(factor, 4.0), h_min, h_max);
+            accepted = true;
         } else {
-            // shrink step size
             float factor = 0.9 * pow(u_tol / max(err, 1.0e-12), 0.25);
             h = clamp(h * max(factor, 0.1), h_min, h_max);
-            if (h <= h_min + 1.0e-12) {
-                // proceed with min-step if clamped to floor
-                for (int i = 0; i < 8; ++i) y[i] = y_try[i];
-                affine_used += h;
-                steps_taken = step + 1;
-                float r = y[1];
-                if (r <= 2.0 * M + HORIZON_EPS) { term = 1; return; }
-                if (r >= u_r_far)                { term = 2; return; }
+            accepted = (h <= h_min + 1.0e-12);
+        }
+        if (!accepted) continue;
+
+        for (int i = 0; i < 8; ++i) y[i] = y_try[i];
+        affine_used += h;
+        steps_taken = step + 1;
+
+        // Equator-crossing detector for Gralla-Holz-Wald photon-ring order.
+        // Each cos θ sign flip is a half-orbit (Δφ = π) about the BH axis;
+        // n = floor(eq_crossings / 2) gives the photon ring index.
+        float new_costh = cos(y[2]);
+        if (prev_costh * new_costh < 0.0) eq_crossings += 1;
+        prev_costh = new_costh;
+
+        // Disk crossing test on accepted sub-arc. Two paths:
+        //   • Razor-thin (H/r ≈ 0): equatorial-crossing intersection — fast,
+        //     analytically correct for the limit, and used by the photon-ring
+        //     validation harness which disables the disk anyway.
+        //   • Volumetric slab (H/r > 0): per-step accumulation through the
+        //     Shakura-Sunyaev slab; multi-image stacking is automatic.
+        if (u_show_disk == 1 && u_disk_h_over_r <= 0.005) {
+            float r_h, ph_h, kt_h, kph_h;
+            if (disk_intersect(y_prev, y, r_h, ph_h, kt_h, kph_h) == 1) {
+                vec3 emit = disk_emission(r_h, ph_h, kt_h, kph_h);
+                if (translucent) {
+                    float w = (1.0 - tau_total) * DISK_TAU_PER_PASS;
+                    disk_rgb += emit * w;
+                    tau_total += DISK_TAU_PER_PASS;
+                    crossings += 1;
+                    if (tau_total >= 0.98 || crossings >= DISK_MAX_CROSSINGS) {
+                        term = 5;
+                        return;
+                    }
+                } else {
+                    disk_rgb = emit;
+                    term = 4;
+                    return;
+                }
             }
+        } else if (u_show_disk == 1) {
+            int slab_term;
+            disk_slab_step(y_prev, y, h, disk_rgb, tau_total, slab_term);
+            if (slab_term != 0) { term = slab_term; return; }
+        }
+
+        // Per-step overlays.
+        grid_accum += grid_overlay(y_prev, y);
+        grid_accum += photon_sphere_glow(y_prev, y);
+
+        // Volumetric emissions (jets / corona / wind), weighted by step size.
+        volume_rgb += volume_emission(y_prev, y, h);
+
+        float r = y[1];
+        if (r <= r_plus_local + HORIZON_EPS) { term = 1; return; }
+        if (r >= u_r_far) {
+            // Escaped — but the user may have accumulated translucent disk
+            // emission on the way out; surface it via term = 5.
+            term = (tau_total > 0.0) ? 5 : 2;
+            return;
+        }
+
+        if (err < u_tol) {
+            float factor = 0.9 * pow(u_tol / max(err, 1.0e-12), 0.2);
+            h = clamp(h * min(factor, 4.0), h_min, h_max);
         }
     }
-    term = 3;
+    term = (tau_total > 0.0) ? 5 : 3;
 }
 
-// Convert outgoing (r, theta, phi, k^r, k^theta, k^phi) at large r to
-// an asymptotic Cartesian direction for celestial-sphere lookup.
+// Convert the outgoing 8-state at large r to an asymptotic Cartesian
+// direction for celestial-sphere lookup. State stores covariant momenta
+// p_μ; raise indices via k^μ = g^{μν} p_ν before mapping into Cartesian.
+// At large r the Kerr metric goes to flat Minkowski, so the direction
+// extracted from k^μ is the photon's asymptotic direction.
+// ---------------------------------------------------------------------------
+// Phase 2.1 — Lyman-α blob (host-galaxy halo around the BH).
+// ---------------------------------------------------------------------------
+// Coordinate convention here is *flat space*, kpc units. The volumetric
+// raymarch starts where the geodesic escapes the strong-field zone
+// (r ≈ r_far ≪ r_LAB) and continues outward along the photon's asymptotic
+// direction, accumulating Lyα emissivity along the way. The radial scale
+// gap between the inner GR sim (r_far ≈ 1200 M ≈ 4 × 10⁻³ kpc for TON 618)
+// and the LAB outer radius (~ 460 kpc Slug-class) is enormous, so the LAB
+// path is essentially "the celestial sphere with thickness."
+//
+// Density model (NFW-like with central ionized cavity):
+//   ρ(r) = ρ₀ · (r_inner / r)^α       for r > r_inner
+//        = 0                            for r < r_inner   (Strömgren cavity)
+// Clumping and filament anisotropy ride on top as multiplicative noise.
+
+// Hash + 3-D value noise.
+float hash13(vec3 p) {
+    p = fract(p * vec3(0.1031, 0.11369, 0.13787));
+    p += dot(p, p.yxz + 19.19);
+    return fract((p.x + p.y) * p.z);
+}
+float vnoise3(vec3 p) {
+    vec3 i = floor(p);
+    vec3 f = fract(p);
+    vec3 w = f * f * (3.0 - 2.0 * f);
+    float n000 = hash13(i + vec3(0,0,0));
+    float n100 = hash13(i + vec3(1,0,0));
+    float n010 = hash13(i + vec3(0,1,0));
+    float n110 = hash13(i + vec3(1,1,0));
+    float n001 = hash13(i + vec3(0,0,1));
+    float n101 = hash13(i + vec3(1,0,1));
+    float n011 = hash13(i + vec3(0,1,1));
+    float n111 = hash13(i + vec3(1,1,1));
+    float nx00 = mix(n000, n100, w.x);
+    float nx10 = mix(n010, n110, w.x);
+    float nx01 = mix(n001, n101, w.x);
+    float nx11 = mix(n011, n111, w.x);
+    float nxy0 = mix(nx00, nx10, w.y);
+    float nxy1 = mix(nx01, nx11, w.y);
+    return mix(nxy0, nxy1, w.z);
+}
+
+// Anisotropic 4-octave fBm. The filament axis stretches the noise along
+// itself, suggesting a cosmic-web filament passing through the LAB.
+float lab_fbm(vec3 p_kpc) {
+    float a = 0.5, fr = 0.04;        // fundamental scale ~25 kpc
+    float s = 0.0;
+    // Build an aspect-stretched coordinate when filament > 0.
+    vec3 axis = normalize(u_lab_filament_axis + vec3(1e-4, 0, 0));
+    float stretch = 1.0 + 2.0 * u_lab_filament;     // up to 3:1 along axis
+    for (int o = 0; o < 4; ++o) {
+        vec3 q = p_kpc * fr;
+        // Stretch by reducing frequency along the filament axis.
+        q -= axis * (dot(q, axis) * (1.0 - 1.0 / stretch));
+        s += a * (vnoise3(q + float(o) * 17.13) - 0.5);
+        a  *= 0.55;
+        fr *= 2.07;
+    }
+    return s;            // ≈ −0.5..+0.5
+}
+
+// Neutral-hydrogen density at position p_kpc relative to BH.
+//   ρ(r) ∝ (r_inner / r)^α  for r > r_inner, 0 inside (ionized cavity).
+//   Multiplied by (1 + clump · fbm) for clumping; (1 + filament*0.5) along axis.
+float lab_density(vec3 p_kpc) {
+    float r = length(p_kpc);
+    if (r < u_lab_inner_kpc || r > u_lab_radius_kpc * 1.2) return 0.0;
+    float radial = pow(u_lab_inner_kpc / max(r, 1e-3), u_lab_alpha);
+    // Soft outer cutoff so emission tapers smoothly past r_LAB.
+    float taper = 1.0 - smoothstep(u_lab_radius_kpc * 0.7, u_lab_radius_kpc, r);
+    radial *= taper;
+    float fbm = lab_fbm(p_kpc);
+    float clump = 1.0 + u_lab_clump * 2.5 * fbm;
+    return max(radial * clump, 0.0);
+}
+
+// Per-mechanism emissivity j_Lyα (arbitrary units).
+//   0 — gravitational cooling: j ∝ ρ² · Λ(T) (recombination + collisional).
+//       Spatially smoother, dense filaments dominate.
+//   1 — photoionization (AGN-driven): j ∝ ρ · Φ_ion / r².
+//       Centrally peaked, drops as inverse-square from the source.
+//   2 — shock heating: j ∝ ρ² · |∇·v| proxy via fbm gradient → fragmented.
+float lab_emissivity(vec3 p_kpc, float rho) {
+    if (rho <= 0.0) return 0.0;
+    if (u_lab_mechanism == 1) {
+        float r2 = max(dot(p_kpc, p_kpc), 1.0);     // kpc²
+        return rho / r2 * (u_lab_inner_kpc * u_lab_inner_kpc + 1.0);
+    }
+    if (u_lab_mechanism == 2) {
+        // Shock proxy: noise gradient magnitude — bright at edges of clumps.
+        float h = 1.0;
+        float dx = lab_fbm(p_kpc + vec3(h,0,0)) - lab_fbm(p_kpc - vec3(h,0,0));
+        float dy = lab_fbm(p_kpc + vec3(0,h,0)) - lab_fbm(p_kpc - vec3(0,h,0));
+        float dz = lab_fbm(p_kpc + vec3(0,0,h)) - lab_fbm(p_kpc - vec3(0,0,h));
+        float grad = sqrt(dx*dx + dy*dy + dz*dz);
+        return rho * rho * grad * 4.0;
+    }
+    // default: gravitational cooling — recombination ∝ ρ² (T≈10⁴ K assumed).
+    return rho * rho;
+}
+
+// ---------------------------------------------------------------------------
+// Lyα resonance physics (Neufeld 1990; Adams 1972).
+// ---------------------------------------------------------------------------
+// In an optically-thick, static, uniform slab of neutral hydrogen the line-
+// center optical depth τ₀ controls how many resonant scatters a Lyα photon
+// undergoes before it diffuses out. Neufeld's analytical solution gives a
+// frequency-redistribution profile peaked at Δν = ±0.92 (a τ₀)^{1/3} Doppler
+// widths, with an effective escape probability
+//
+//     P_esc(τ₀) ≈ 1 / (1 + 1.8 (a τ₀)^{1/3})       (Bonilha 1979 fit)
+//
+// where a ≈ 4.7 × 10⁻⁴ (T / 10⁴ K)^{−1/2} is the Voigt parameter. Real LABs
+// see τ₀ ~ 10⁴–10⁷, P_esc ~ 0.05–0.5. We use the local density as a proxy
+// for the column density crossed by an emerging photon, scaled by the
+// user-set log_NHI so the central core is the densest sightline.
+float lab_neufeld_pesc(float rho_local) {
+    if (u_lab_neufeld <= 0.0) return 1.0;
+    // Voigt parameter at gas temperature T.
+    float a_voigt = 4.7e-4 * sqrt(1.0e4 / max(u_lab_temp_K, 1.0e3));
+    // Local "column" proxy: density × characteristic cell size, scaled to
+    // the central-column slider. rho_local is normalized so ρ ~ 1 at r_inner.
+    float NHI_local = pow(10.0, u_lab_log_NHI) * rho_local;
+    // Line-center cross-section σ₀ = 5.9e-14 cm² at T=10⁴K. Use a
+    // dimensionless τ proxy: column × σ₀ scale, log-flattened.
+    float tau0  = max(NHI_local * 5.9e-14, 1.0);
+    float aTau3 = pow(a_voigt * tau0, 1.0 / 3.0);
+    float P     = 1.0 / (1.0 + 1.8 * aTau3);
+    // Blend with pure emission per the user slider.
+    return mix(1.0, P, u_lab_neufeld);
+}
+
+// CIE-fit cheap wavelength-to-linear-RGB map for the visible window
+// 380–740 nm. Outside that window we fade to a deep violet UV proxy
+// (Lyα at z=2.219 sits at 391 nm — just inside visible).
+vec3 wavelength_to_rgb(float lam_nm) {
+    float r = 0.0, g = 0.0, b = 0.0;
+    if (lam_nm < 380.0) {
+        // UV: violet with rapid fade
+        float w = max(0.0, 1.0 - (380.0 - lam_nm) / 40.0);
+        r = 0.55 * w; g = 0.10 * w; b = 1.0 * w;
+    } else if (lam_nm < 440.0) {
+        r = -(lam_nm - 440.0) / 60.0;
+        g = 0.0;
+        b = 1.0;
+    } else if (lam_nm < 490.0) {
+        r = 0.0;
+        g = (lam_nm - 440.0) / 50.0;
+        b = 1.0;
+    } else if (lam_nm < 510.0) {
+        r = 0.0;
+        g = 1.0;
+        b = -(lam_nm - 510.0) / 20.0;
+    } else if (lam_nm < 580.0) {
+        r = (lam_nm - 510.0) / 70.0;
+        g = 1.0;
+        b = 0.0;
+    } else if (lam_nm < 645.0) {
+        r = 1.0;
+        g = -(lam_nm - 645.0) / 65.0;
+        b = 0.0;
+    } else if (lam_nm < 781.0) {
+        r = 1.0;
+        g = 0.0;
+        b = 0.0;
+    }
+    // Photopic edge attenuation (eye sensitivity rolls off below 420 / above 700).
+    float att = 1.0;
+    if      (lam_nm < 420.0) att = 0.30 + 0.70 * (lam_nm - 380.0) / 40.0;
+    else if (lam_nm > 700.0) att = 0.30 + 0.70 * (780.0 - lam_nm) / 80.0;
+    return vec3(r, g, b) * clamp(att, 0.0, 1.0);
+}
+
+// Volumetric raymarch through the LAB starting at the geodesic escape point.
+//   pos_M  — Cartesian position of the escape (in M units).
+//   dir    — unit photon direction at escape (asymptotic direction toward source).
+// Returns observer-frame additive Lyα emission (linear RGB, before tone map).
+// Per-cell line color. Phase 2.1 used a single observer-frame Lyα peak.
+// Phase 2.2 splits into Neufeld's twin Gaussians at ν₀ ± 0.92(aτ₀)^{1/3}·ν_th
+// when u_lab_double_peak == 1. Outflow + Neufeld give the canonical asymmetric
+// red-dominated profile: in the cell's rest frame Lyα photons are *destroyed*
+// at line center (resonance trapping) and emerge displaced by ±Δν_peak
+// Doppler widths; an outflow shifts each peak by v_los/c, then suppresses
+// the blue side because blueshifted photons re-encounter the line core in
+// the foreground gas and resonantly scatter again.
+vec3 lab_cell_color(float rho, float v_los_kms, float lam0_obs_nm) {
+    const float C_KMS = 299792.458;
+    float lam_center = lam0_obs_nm * (1.0 + v_los_kms / C_KMS);
+
+    if (u_lab_double_peak == 0) return wavelength_to_rgb(lam_center);
+
+    // Voigt parameter at gas temperature.
+    float a_voigt = 4.7e-4 * sqrt(1.0e4 / max(u_lab_temp_K, 1.0e3));
+    // Local optical-depth proxy from the local density × central column.
+    float tau0   = max(pow(10.0, u_lab_log_NHI) * rho * 5.9e-14, 1.0);
+    // Peak displacement in km/s. v_th ≈ 12.85 √(T/10⁴ K).
+    float v_th   = 12.85 * sqrt(max(u_lab_temp_K, 1.0e3) / 1.0e4);
+    float dv_peak_kms = 0.92 * pow(a_voigt * tau0, 1.0 / 3.0) * v_th;
+
+    float lam_red  = lam0_obs_nm * (1.0 + (v_los_kms + dv_peak_kms) / C_KMS);
+    float lam_blue = lam0_obs_nm * (1.0 + (v_los_kms - dv_peak_kms) / C_KMS);
+
+    // Outflow asymmetry: blue peak suppressed when net flow is outward
+    // (photons in the blue wing are more likely to scatter again on
+    // foreground gas). Empirical fit: w_blue = exp(−2 v_los/v_th) for
+    // v_los > 0, capped at 0.05; w_red = 1 always. Matches the observed
+    // double-peak ratios in real LABs (Verhamme 2006).
+    float w_blue = clamp(exp(-2.0 * max(v_los_kms, 0.0) / max(v_th, 10.0)), 0.05, 1.0);
+    return wavelength_to_rgb(lam_red) + w_blue * wavelength_to_rgb(lam_blue);
+}
+
+// Phase function for resonance scattering. We use the Rayleigh-like form
+// f_pol(μ) = (1 − μ²) / (1 + μ²) where μ = cos(θ_scat) is the cosine of the
+// scattering angle (incident from BH along q̂, scattered along −dir to
+// observer). Maxes at μ = 0 (right-angle scatter), zero forward/back.
+float lab_pol_fraction(vec3 q_hat, vec3 ray_dir) {
+    float mu = clamp(dot(q_hat, -ray_dir), -1.0, 1.0);
+    float mu2 = mu * mu;
+    return (1.0 - mu2) / max(1.0 + mu2, 1.0e-3);
+}
+
+// Project the cell's radial direction onto the screen plane and return
+// the Stokes-frame angle of polarization (perpendicular to the projected
+// radial → tangential pattern around the BH).
+float lab_pol_PA(vec3 q_hat) {
+    // Right and up are pre-supplied in the same Cartesian frame as q_hat.
+    float sR = dot(q_hat, u_cam_right_cart);
+    float sU = dot(q_hat, u_cam_up_cart);
+    // PA of projected radial direction; polarization is perpendicular.
+    float pa_radial = atan(sU, sR);
+    return pa_radial + 1.5707963;            // +π/2 = 90°
+}
+
+vec3 lab_volume_emission(vec3 pos_M, vec3 dir, out vec2 stokes_QU) {
+    stokes_QU = vec2(0.0);
+    if (u_show_lab == 0 || u_lab_intensity <= 0.0) return vec3(0.0);
+
+    // Convert to kpc once; march in kpc along the ray's path length s.
+    vec3 pos_kpc = pos_M * u_M_in_kpc;
+    float s_max = 2.5 * u_lab_radius_kpc;
+    const int N = 48;
+    float ds = s_max / float(N);
+    vec3 acc = vec3(0.0);
+
+    // Rest-frame Lyα at 121.6 nm, redshifted to the user's z.
+    float lam0_obs_nm = 121.567 * (1.0 + u_lab_z);
+    // (1+z)⁻⁴ surface-brightness dimming.
+    float dim_z4 = 1.0 / pow(1.0 + u_lab_z, 4.0);
+
+    for (int i = 0; i < N; ++i) {
+        float s = (float(i) + 0.5) * ds;
+        vec3 q  = pos_kpc + dir * s;
+        float rho = lab_density(q);
+        if (rho <= 0.0) continue;
+
+        // Local outflow speed: v(r) = v_out · (r/r_LAB)^β.
+        float r_q = length(q);
+        float vmag_kms = u_lab_outflow_kms
+                       * pow(clamp(r_q / max(u_lab_radius_kpc, 1.0e-3), 0.0, 1.0),
+                             max(u_lab_outflow_beta, 0.0));
+        vec3 q_hat = (r_q > 1.0e-6) ? (q / r_q) : vec3(0.0, 1.0, 0.0);
+        float v_los_kms = -vmag_kms * dot(q_hat, dir);
+
+        // Per-cell color (twin-peak Neufeld profile when enabled).
+        vec3 cell_col = lab_cell_color(rho, v_los_kms, lam0_obs_nm);
+
+        // Resonance escape multiplier.
+        float P_esc = lab_neufeld_pesc(rho);
+        float j     = lab_emissivity(q, rho) * P_esc;
+
+        // Direct emission (intensity contribution).
+        vec3  contrib_I = cell_col * j * ds;
+        acc += contrib_I;
+
+        // ── Polarization (Stokes Q, U) — Rayleigh-like phase function ─
+        // Only the *scattered* fraction is polarized; direct-emitted
+        // photons are unpolarized. Scattering fraction proxy: optical-depth
+        // weighted, capped at unity. f_scat ≈ 1 − P_esc gives a clean
+        // "more scattered when more trapped" relation.
+        float f_scat = clamp(1.0 - P_esc, 0.0, 1.0);
+        float f_pol  = u_lab_pol_max * f_scat * lab_pol_fraction(q_hat, dir);
+        float pa     = lab_pol_PA(q_hat);
+        float I_lum  = dot(contrib_I, vec3(0.299, 0.587, 0.114));
+        // Polarization is a directionless line, so Stokes uses 2*PA.
+        // Sign: Q = +I·f·cos(2*PA), U = +I·f·sin(2*PA), with PA already
+        // perpendicular to the radial.
+        stokes_QU.x += I_lum * f_pol * cos(2.0 * pa);
+        stokes_QU.y += I_lum * f_pol * sin(2.0 * pa);
+    }
+
+    float scale = u_lab_intensity * dim_z4 * 100.0;
+    stokes_QU *= scale;
+    return acc * scale;
+}
+
+// Sparse polarization-vector tick overlay.
+//   GRID — pixel pitch; ticks render at every cell center.
+//   length — proportional to f_pol relative to the cap u_lab_pol_max.
+// Computed in screen-pixel space directly; each pixel asks "am I inside
+// the tick that belongs to my grid cell?" and contributes a faint white
+// luminance modulation.
+vec3 lab_pol_tick_overlay(vec2 fragCoord, float f_pol_norm, float pa_pol) {
+    if (u_show_pol_vectors == 0 || f_pol_norm < 0.02) return vec3(0.0);
+    const float GRID = 36.0;
+    vec2 cell   = floor(fragCoord / GRID);
+    vec2 center = (cell + 0.5) * GRID;
+    vec2 d      = fragCoord - center;
+    // Half-length = up to 0.42 cell at full f_pol, scaling linearly.
+    float half_len = GRID * 0.42 * clamp(f_pol_norm, 0.0, 1.0);
+    float c = cos(pa_pol), s = sin(pa_pol);
+    float along =  d.x * c + d.y * s;
+    float perp  = -d.x * s + d.y * c;
+    float w_along = step(abs(along), half_len);
+    float w_perp  = smoothstep(1.6, 0.0, abs(perp));
+    return vec3(0.55, 0.65, 0.70) * w_along * w_perp * 0.85;
+}
+
 vec3 outgoing_direction(float y[8]) {
     float r     = y[1];
     float th    = y[2];
     float ph    = y[3];
-    float kr    = y[5];
-    float kth   = y[6];
-    float kph   = y[7];
+    float pt    = y[4];
+    float pr    = y[5];
+    float pth   = y[6];
+    float pph   = y[7];
+
+    vec4 g4; float gPP;
+    kerr_inv_metric(r, th, g4, gPP);
+    // k^r = g^rr p_r;  k^θ = g^θθ p_θ;  k^φ = g^tφ p_t + g^φφ p_φ
+    float kr  = g4.z * pr;
+    float kth = g4.w * pth;
+    float kph = g4.y * pt + gPP * pph;
 
     float sinth = sin(th);
     float costh = cos(th);
@@ -346,9 +1620,9 @@ vec3 outgoing_direction(float y[8]) {
     float cosph = cos(ph);
 
     // velocity in an orthonormal radial/tangential frame
-    float vx_sph = kr;          // radial
-    float vy_sph = r * kth;     // theta
-    float vz_sph = r * sinth * kph;  // phi
+    float vx_sph = kr;
+    float vy_sph = r * kth;
+    float vz_sph = r * sinth * kph;
 
     // unit vectors in Cartesian
     vec3 er = vec3(sinth * cosph, costh, sinth * sinph);
@@ -368,30 +1642,95 @@ void main() {
     int term;
     int steps;
     float aff;
-    trace(y, term, steps, aff);
+    vec3 disk_rgb;
+    vec3 grid_rgb;
+    vec3 volume_rgb;
+    int eq_crossings;
+    trace(y, term, steps, aff, disk_rgb, grid_rgb, volume_rgb, eq_crossings);
+
+    // Escape-point Cartesian position (M units) — needed for the LAB
+    // raymarch which works in flat space beyond r_far.
+    float r_e  = y[1];
+    float th_e = y[2];
+    float ph_e = y[3];
+    vec3 escape_pos_M = r_e * vec3(sin(th_e) * cos(ph_e),
+                                   cos(th_e),
+                                   sin(th_e) * sin(ph_e));
 
     vec3 color;
+    vec2 lab_stokes = vec2(0.0);
     if (term == 1) {
-        // Horizon capture: pitch black. Photon ring is the thin rim right outside.
+        // Horizon capture: pitch black.
         color = vec3(0.0);
     } else if (term == 2) {
+        // Escape to celestial sphere.
         vec3 dir = outgoing_direction(y);
         color = celestial_sphere(dir);
+        // LAB volumetric halo (Phase 2.1+2.2) — accumulate Lyα emission
+        // along the asymptotic continuation of the geodesic in flat space,
+        // tracking Stokes Q/U for the polarization overlay.
+        color += lab_volume_emission(escape_pos_M, dir, lab_stokes);
+    } else if (term == 4) {
+        // Opaque disk hit.
+        color = disk_rgb;
+    } else if (term == 5) {
+        // Translucent path: ray ultimately escaped (or got captured) AFTER
+        // accumulating disk emission.
+        vec3 dir5 = outgoing_direction(y);
+        vec3 background = (y[1] >= u_r_far) ? celestial_sphere(dir5) : vec3(0.0);
+        if (y[1] >= u_r_far) background += lab_volume_emission(escape_pos_M, dir5, lab_stokes);
+        color = background + disk_rgb;
     } else {
-        // Step budget exhausted (shouldn't normally happen). Mark faintly for debug.
+        // Step budget exhausted.
         color = vec3(0.02, 0.0, 0.02);
     }
 
-    // Photon-ring accent: rays that integrated many steps grazed the ring.
-    if (u_show_ring == 1) {
-        float ring_weight = smoothstep(280.0, 440.0, float(steps));
-        color += ring_weight * vec3(0.28, 0.16, 0.04);
+    // Polarization vector overlay — sparse ticks at a coarse pixel grid.
+    if (u_show_pol_vectors == 1 && u_show_lab == 1) {
+        float I_lum = max(dot(color, vec3(0.299, 0.587, 0.114)), 1.0e-3);
+        float f_pol = length(lab_stokes) / I_lum;
+        float pa_pol = 0.5 * atan(lab_stokes.y, lab_stokes.x);
+        // Cap normalization at the user's f_pol_max so the longest tick
+        // corresponds to the maximum-polarization cell (≈ 1.0 length).
+        float f_pol_norm = clamp(f_pol / max(u_lab_pol_max, 1.0e-3), 0.0, 1.0);
+        color += lab_pol_tick_overlay(gl_FragCoord.xy, f_pol_norm, pa_pol);
     }
 
-    // Mild tone map + gamma.
-    color = color / (1.0 + color);
-    color = pow(color, vec3(1.0 / 2.2));
+    // Per-step overlays (grid + photon-sphere glow) always composite on top.
+    color += grid_rgb;
 
+    // Volumetric jet/corona/wind emission rides on top of everything except
+    // an opaque disk (the disk itself ate the ray on hit so the volume sum
+    // up to that point is what the camera saw on the way to the disk).
+    color += volume_rgb;
+
+    // ── Photon ring + Gralla-Holz-Wald sub-rings ────────────────────
+    // The shadow boundary is the locus of photons that orbited the BH
+    // exactly once (n = 1), twice (n = 2), … before escape. Each
+    // successive sub-ring is fainter by a factor exp(−π) ≈ 0.0432
+    // (Gralla, Holz, Wald 2019). Equator-crossings track Δθ = π:
+    // n = floor(eq_crossings / 2) gives the sub-ring index.
+    if (u_show_ring == 1 || u_show_subrings == 1) {
+        int n_ring = eq_crossings / 2;
+        if (n_ring >= 1) {
+            // Brightness scales like exp(-n π) for the n-th sub-ring,
+            // multiplied by an overall user-tunable strength.
+            float bright = exp(-float(n_ring) * 3.14159265);
+            // Color: warm gilt for n=1, cooler / bluer as n rises (the
+            // strong-deflection regime is well-approximated by the
+            // critical curve, so higher rings are more isotropic in
+            // color — bias them toward blue-white).
+            vec3 ring_col = (n_ring == 1) ? vec3(1.30, 0.85, 0.50)
+                            : (n_ring == 2) ? vec3(1.05, 1.00, 0.85)
+                            : vec3(0.95, 1.00, 1.10);
+            color += bright * ring_col * u_subring_strength;
+        }
+    }
+
+    // Output linear HDR — ACES tonemap + bloom + gamma now live in the
+    // post-process composite pass (Tier 1A). The fragment values written
+    // here are unbounded (RGBA16F render target), so the disk's hot inner
+    // edge can radiate into the high-luminance regime where bloom kicks in.
     fragColor = vec4(color, 1.0);
 }
 `;

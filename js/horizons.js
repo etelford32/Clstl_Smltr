@@ -288,6 +288,15 @@ const MERCURY_EL = {
     omega: 77.456119,  i: 7.004986, node: 48.330893,
     adot: 0, edot: 0.00002123, omegadot: 0.16047, idot: -0.00594, nodedot: -0.12534,
 };
+// Earth/Moon barycenter — Standish (1992) Table 1, valid ±3000 yr.
+// Position is computed from VSOP87D in earthHeliocentric(); these elements
+// are used only by planetElementsAt() for the orbital-element panel and the
+// long-horizon apsidal-precession plot.
+const EARTH_EL = {
+    L0: 100.46457166, Ldot: 35999.37244981, a: 1.00000261, e: 0.01671123,
+    omega: 102.93768193, i: -0.00001531, node: 0.0,
+    adot: 0.00000562, edot: -0.00004392, omegadot: 0.32327364, idot: -0.01294668, nodedot: 0.0,
+};
 const VENUS_EL = {
     L0: 181.979801, Ldot: 58517.8156760, a: 0.72332982, e: 0.00677323,
     omega: 131.563703, i: 3.394662, node: 76.679920,
@@ -318,6 +327,64 @@ const NEPTUNE_EL = {
     omega: 48.120275, i: 1.769953, node: 131.784057,
     adot: 0.00006447, edot: 0.00000818, omegadot: 0.01009, idot: -0.00255, nodedot: -0.00598,
 };
+
+/**
+ * Public planet element table — keyed by lowercase body name.
+ *
+ * Each entry holds the J2000 Keplerian elements plus secular rates per
+ * Julian century. Sources:
+ *   Mercury–Mars      Meeus Table 31.a + Standish (1992) rates
+ *   Earth             Standish (1992) Table 1
+ *   Jupiter–Neptune   Meeus Table 31.a + Standish (1992) rates
+ *
+ * Earth's *position* still comes from the VSOP87D series in
+ * earthHeliocentric(); these mean elements drive the orbital-element panel
+ * and the long-horizon apsidal-precession diagnostic.
+ */
+export const PLANET_ELEMENTS = {
+    mercury: MERCURY_EL,
+    venus:   VENUS_EL,
+    earth:   EARTH_EL,
+    mars:    MARS_EL,
+    jupiter: JUPITER_EL,
+    saturn:  SATURN_EL,
+    uranus:  URANUS_EL,
+    neptune: NEPTUNE_EL,
+};
+
+/**
+ * Osculating-style mean Keplerian elements at an arbitrary epoch.
+ *
+ * Applies the linear secular rates to the J2000 base elements:
+ *   a(T)  = a0  + adot · T
+ *   e(T)  = e0  + edot · T   etc., where T = (jd − 2451545) / 36525.
+ *
+ * Returns degrees (not radians) for the angular elements so they can be
+ * shown directly in a UI table. M is the mean anomaly = L − ω̄ wrapped
+ * into [0,360).
+ *
+ * Validity: ±3 kyr full accuracy; degrades smoothly out to ±10 kyr where
+ * higher-order secular and resonant terms (Milankovitch cycles, Jupiter–
+ * Saturn great inequality) become non-negligible.
+ *
+ * @param {string} key  Lowercase body name ('mercury' .. 'neptune')
+ * @param {number} jd   Julian Day Number
+ * @returns {{ a:number, e:number, i:number, node:number, omegaBar:number,
+ *             M:number, L:number, T:number }}
+ */
+export function planetElementsAt(key, jd = jdNow()) {
+    const el = PLANET_ELEMENTS[key];
+    if (!el) throw new Error(`planetElementsAt: unknown body "${key}"`);
+    const T = (jd - 2451545.0) / 36525.0;
+    const a    = el.a    + (el.adot     ?? 0) * T;
+    const e    = el.e    + (el.edot     ?? 0) * T;
+    const inc  = el.i    + (el.idot     ?? 0) * T;
+    const node = el.node + (el.nodedot  ?? 0) * T;
+    const wbar = el.omega+ (el.omegadot ?? 0) * T;
+    const L    = ((el.L0 + el.Ldot * T) % 360 + 360) % 360;
+    const M    = ((L - wbar) % 360 + 360) % 360;
+    return { a, e, i: inc, node, omegaBar: wbar, M, L, T };
+}
 
 /**
  * Mercury's heliocentric ecliptic position (full 3D).

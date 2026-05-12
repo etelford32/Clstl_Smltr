@@ -1,5 +1,5 @@
 /**
- * upper-atmosphere-engine.js — Parker Physics thermosphere/exosphere surrogate
+ * upper-atmosphere-engine.js — Parkers Physics thermosphere/exosphere surrogate
  * ═══════════════════════════════════════════════════════════════════════════
  * Pure-JS, zero-dependency physics surrogate for the upper atmosphere
  * (80–2000 km). Mirrors the Jacchia-style exponential fallback in
@@ -82,12 +82,214 @@ export const ATMOSPHERIC_LAYERS = [
 
 // ── Canonical satellite altitudes for the globe overlay ─────────────────────
 // Mirrors dsmc/pipeline/profile.py:SATELLITE_REFERENCES.
+//
+// Each entry that represents an actual orbiting object also carries an
+// `orbital` block — Keplerian mean elements at a representative epoch,
+// good enough for visual-grade ground-track propagation in the absence
+// of a live TLE refresh. The CelesTrak proxy at /api/celestrak/tle can
+// upgrade these to real-time mean elements when the page is online; the
+// hardcoded values here are the fallback so the visual works offline.
+//
+// noradId is the NORAD catalog number (also called SATCAT or SCC). It's
+// the canonical key for fetching a single satellite's TLE from CelesTrak.
+//
+// `orbital: null` means "this is a reference altitude, not an object" —
+// e.g. the Kármán line. Such entries get a static ring overlay only.
 export const SATELLITE_REFERENCES = [
-    { id: "karman",   name: "Kármán line",    altitudeKm:   100, color: "#ff7070" },
-    { id: "iss",      name: "ISS",            altitudeKm:   420, color: "#00ffd0" },
-    { id: "hubble",   name: "Hubble (HST)",   altitudeKm:   540, color: "#ffd060" },
-    { id: "starlink", name: "Starlink shell", altitudeKm:   550, color: "#60a0ff" },
-    { id: "iridium",  name: "Iridium",        altitudeKm:   780, color: "#a080ff" },
+    {
+        id: "karman", name: "Kármán line", altitudeKm: 100,
+        color: "#ff7070",
+        orbital: null,
+        description: "Internationally recognised threshold of space (FAI). Below this, aerodynamic flight is possible.",
+    },
+    {
+        id: "iss", name: "ISS", altitudeKm: 420,
+        color: "#00ffd0",
+        orbital: {
+            noradId: 25544,
+            inclinationDeg:    51.6,
+            raanDeg:            0,
+            argPerigeeDeg:      0,
+            meanAnomalyDeg0:    0,
+            eccentricity:       0.0006,
+            periodMin:         92.7,
+        },
+        description: "International Space Station. Crewed since 2000. Heaviest LEO drag testbed.",
+    },
+    {
+        id: "hubble", name: "Hubble (HST)", altitudeKm: 540,
+        color: "#ffd060",
+        orbital: {
+            noradId: 20580,
+            inclinationDeg:    28.5,
+            raanDeg:           120,
+            argPerigeeDeg:      0,
+            meanAnomalyDeg0:   80,
+            eccentricity:       0.0003,
+            periodMin:         95.4,
+        },
+        description: "Hubble Space Telescope. Reboost-dependent; entered atmospheric drag regime in 1990.",
+    },
+    {
+        id: "starlink", name: "Starlink shell", altitudeKm: 550,
+        color: "#60a0ff",
+        orbital: {
+            // STARLINK-1007 — first operational v1.0 birds, representative.
+            noradId: 44713,
+            inclinationDeg:    53.0,
+            raanDeg:           240,
+            argPerigeeDeg:      0,
+            meanAnomalyDeg0:   160,
+            eccentricity:       0.0001,
+            periodMin:         95.6,
+        },
+        description: "SpaceX Starlink representative shell at 550 km, 53° inclined. ~5000 active birds.",
+    },
+    {
+        id: "iridium", name: "Iridium NEXT", altitudeKm: 780,
+        color: "#a080ff",
+        orbital: {
+            // IRIDIUM 102 — representative NEXT-generation bird.
+            noradId: 41917,
+            inclinationDeg:    86.4,
+            raanDeg:            60,
+            argPerigeeDeg:      0,
+            meanAnomalyDeg0:   240,
+            eccentricity:       0.0002,
+            periodMin:        100.4,
+        },
+        description: "Iridium NEXT polar constellation. 86.4° inclined; covers high-latitude comms.",
+    },
+
+    // ── Crewed + science assets in the LEO drag belt ──────────────────
+    {
+        id: "tiangong", name: "Tiangong (CSS)", altitudeKm: 385,
+        color: "#ff70a0",
+        orbital: {
+            noradId: 48274,                   // CSS / TIANHE core module
+            inclinationDeg:    41.5,
+            raanDeg:           300,
+            argPerigeeDeg:      0,
+            meanAnomalyDeg0:   115,
+            eccentricity:       0.0008,
+            periodMin:         92.2,
+        },
+        description: "Chinese Space Station. Crewed since 2021; permanent T-shaped configuration "
+                   + "since the Wentian + Mengtian modules docked in 2022.",
+    },
+    {
+        id: "swarm-a", name: "Swarm-A", altitudeKm: 462,
+        color: "#80f0d0",
+        orbital: {
+            noradId: 39452,
+            inclinationDeg:    87.4,
+            raanDeg:            45,
+            argPerigeeDeg:      0,
+            meanAnomalyDeg0:   200,
+            eccentricity:       0.0011,
+            periodMin:         93.8,
+        },
+        description: "ESA Swarm magnetic-field probe (one of three). Maps the lithospheric, "
+                   + "ionospheric and core fields — gold-standard data for the magnetic-cascade "
+                   + "module driving this simulator.",
+    },
+    {
+        id: "icesat2", name: "ICESat-2", altitudeKm: 496,
+        color: "#9cffe0",
+        orbital: {
+            noradId: 43613,
+            inclinationDeg:    92.0,
+            raanDeg:           120,
+            argPerigeeDeg:      0,
+            meanAnomalyDeg0:    35,
+            eccentricity:       0.0003,
+            periodMin:         94.5,
+        },
+        description: "NASA polar laser-altimeter measuring sea ice + ice-sheet elevation "
+                   + "to 4 mm precision via the ATLAS photon-counting LIDAR.",
+    },
+    {
+        id: "grace-fo", name: "GRACE-FO", altitudeKm: 490,
+        color: "#f8c060",
+        orbital: {
+            noradId: 43476,
+            inclinationDeg:    89.0,
+            raanDeg:           220,
+            argPerigeeDeg:      0,
+            meanAnomalyDeg0:   310,
+            eccentricity:       0.0021,
+            periodMin:         94.4,
+        },
+        description: "GRACE Follow-On twin gravity-mapping pair. Inter-satellite laser "
+                   + "ranging tracks Earth-mass redistribution — groundwater, ice, ocean.",
+    },
+    {
+        id: "cryosat2", name: "CryoSat-2", altitudeKm: 717,
+        color: "#a0e0ff",
+        orbital: {
+            noradId: 36508,
+            inclinationDeg:    92.0,
+            raanDeg:            70,
+            argPerigeeDeg:      0,
+            meanAnomalyDeg0:    50,
+            eccentricity:       0.0010,
+            periodMin:         99.2,
+        },
+        description: "ESA Ku-band SAR radar altimeter. Drift orbit — no fixed ground-track "
+                   + "repeat — gives dense polar ice-thickness sampling.",
+    },
+    {
+        id: "sentinel1a", name: "Sentinel-1A", altitudeKm: 693,
+        color: "#c0a0ff",
+        orbital: {
+            noradId: 39634,
+            inclinationDeg:    98.2,                // sun-synchronous
+            raanDeg:           340,
+            argPerigeeDeg:      0,
+            meanAnomalyDeg0:   180,
+            eccentricity:       0.0001,
+            periodMin:         98.6,
+        },
+        description: "ESA Copernicus C-band SAR. Sun-synchronous dawn-dusk; "
+                   + "InSAR deformation + maritime monitoring.",
+    },
+    {
+        id: "noaa20", name: "NOAA-20 (JPSS-1)", altitudeKm: 824,
+        color: "#ffe080",
+        orbital: {
+            noradId: 43013,
+            inclinationDeg:    98.7,
+            raanDeg:            10,
+            argPerigeeDeg:      0,
+            meanAnomalyDeg0:    90,
+            eccentricity:       0.0001,
+            periodMin:        101.4,
+        },
+        description: "Polar-orbiting NOAA weather sat. VIIRS imager + CrIS sounder feed "
+                   + "operational forecasts and the JPSS data-assimilation chain.",
+    },
+    {
+        id: "sentinel6", name: "Sentinel-6 MF", altitudeKm: 1336,
+        color: "#ff9070",
+        orbital: {
+            noradId: 46984,
+            inclinationDeg:    66.0,
+            raanDeg:           150,
+            argPerigeeDeg:      0,
+            meanAnomalyDeg0:   270,
+            eccentricity:       0.0008,
+            periodMin:        112.4,
+        },
+        description: "Sentinel-6 Michael Freilich. Sea-level reference altimeter; "
+                   + "successor to TOPEX/Jason — the operational sea-level record.",
+    },
+    {
+        id: "geo-line", name: "Geostationary belt", altitudeKm: 2000,
+        color: "#80a0c0",
+        orbital: null,
+        description: "Marker only — true GEO (35 786 km) is far outside the simulator's "
+                   + "drag-belt. Shown so users know what's *above* the rendered band.",
+    },
 ];
 
 /**
@@ -101,9 +303,11 @@ export function layerAt(altitudeKm) {
 }
 
 // ── Composition anchors (number-density fractions) ──────────────────────────
-// Shapes tracked against NRL-MSIS / CIRA 1972. Log-space linear blend
-// between adjacent anchors; values below/above the anchor range use
-// the nearest anchor (no extrapolation).
+// LEGACY altitude-only fractions — kept for fallback use only. The
+// physical model below derives fractions from per-species diffusive
+// equilibrium (Bates 1959 + barometric integration of each species'
+// own scale height). These anchors are used only when the per-species
+// path early-outs (e.g., during selfTest invariants).
 const _ANCHORS = [
     { alt: 120,  frac: { N2: 0.78,   O2: 0.18,  NO: 5e-3, O: 0.03,  N: 0.01,  He: 1e-4,  H: 1e-6 } },
     { alt: 250,  frac: { N2: 0.55,   O2: 0.08,  NO: 1e-3, O: 0.36,  N: 4e-3,  He: 1e-3,  H: 1e-5 } },
@@ -113,6 +317,115 @@ const _ANCHORS = [
     { alt: 1500, frac: { N2: 1e-4,   O2: 1e-5,  NO: 1e-7, O: 0.12,  N: 1e-6,  He: 0.48,  H:  0.40 } },
     { alt: 2000, frac: { N2: 1e-5,   O2: 1e-6,  NO: 1e-8, O: 0.03,  N: 1e-7,  He: 0.27,  H:  0.70 } },
 ];
+
+// ── Bates (1959) thermospheric temperature profile ──────────────────────────
+//
+// The thermosphere's vertical temperature structure is *not* an exponential
+// fall-off — it's a monotonic rise from a near-mesopause base T₁₂₀ ≈ 380 K
+// to the asymptotic exospheric temperature T∞ that's set by F10.7 and the
+// geomagnetic state. The classic empirical fit (Bates 1959, MSIS, Jacchia):
+//
+//     T(z) = T∞ − (T∞ − T₁₂₀) · exp[ −σ · (z − 120) ]
+//
+// where σ ≈ 0.02 km⁻¹ controls how fast T relaxes toward T∞. At 200 km
+// you're still inside the inversion (T ~ 800 K when T∞ = 1100 K); at
+// 400+ km you're effectively at T∞.
+//
+// The closed-form integral that diffusion equilibrium needs:
+//
+//     ∫_120^z dz' / T(z')  =  (z − 120) / T∞   +  (1 / (σ T∞)) · ln[ T(z) / T₁₂₀ ]
+//
+// derived by partial fractions on 1/[T∞ − (T∞−T₁₂₀)·exp(−σ·u)].
+// Used by `_speciesNumberDensity` to compute per-species barometric
+// decay along the local Bates T(z) without numerical quadrature.
+const BATES_T120_K = 380;          // base temperature at z₀ = 120 km (K)
+const BATES_SIGMA  = 0.02;         // T-relaxation rate (km⁻¹)
+
+/** Local kinetic temperature (K) at altitude under the Bates profile. */
+export function batesTemperature(altKm, Tinf) {
+    if (altKm <= 120) return BATES_T120_K;
+    const dT = Tinf - BATES_T120_K;
+    return Tinf - dT * Math.exp(-BATES_SIGMA * (altKm - 120));
+}
+
+/**
+ * ∫_120^z dz' / T(z') under the Bates profile, in km/K. Used as the
+ * temperature-weighted altitude integrand inside the per-species
+ * barometric exponential below.
+ */
+function _batesInvTempIntegral(altKm, Tinf) {
+    if (altKm <= 120) return 0;
+    const T_z   = batesTemperature(altKm, Tinf);
+    const linear = (altKm - 120) / Tinf;
+    const corr   = (1 / (BATES_SIGMA * Tinf)) * Math.log(T_z / BATES_T120_K);
+    return linear + corr;
+}
+
+// ── Per-species anchor concentrations at z₀ = 120 km ───────────────────────
+// Climatological MSIS values (m⁻³) — units consistent with the rest of
+// the engine. The total at 120 km is ~4×10¹⁷ m⁻³ which puts ρ_120 in
+// the ~5×10⁻⁸ kg/m³ range, a hair above the engine's RHO_150 anchor
+// (~2×10⁻⁹) by 30 km — exactly the homopause-to-thermosphere falloff.
+//
+// These don't change with solar activity at z₀ — the thermosphere
+// expands above 120 km when T∞ rises, but the lower thermosphere is
+// largely insensitive (turbopause mixing keeps fractions clamped there).
+const N0_120 = Object.freeze({
+    N2: 1.13e17,
+    O2: 5.30e16,
+    O:  7.60e16,
+    N:  1.60e15,
+    NO: 1.00e14,
+    He: 4.00e13,
+    H:  4.00e11,
+});
+
+// Thermal-diffusion coefficient α_i. Negligible (≈0) for heavy species;
+// He has α ≈ −0.4, H has α ≈ −0.25 (Banks & Kockarts 1973). We absorb
+// the (1+α) factor as a small correction on the (T₁₂₀/T)^(1+α) term.
+const ALPHA_T = Object.freeze({
+    N2: 0, O2: 0, O: 0, N: 0, NO: 0,
+    He: -0.40,
+    H:  -0.25,
+});
+
+/**
+ * Number density of one species at altitude under diffusive equilibrium
+ * along the Bates T(z) profile. Above the homopause (~105 km) each
+ * species independently follows its own scale height H_i = kT/(m_i g):
+ *
+ *     n_i(z) = n_i(120) · [T(120)/T(z)]^(1+α_i)
+ *                       · exp[ −(m_i · g_eff / k) · ∫_120^z dz'/T(z') ]
+ *
+ * where g_eff is the gravity at the midpoint of (120, z). The integral
+ * has the closed form derived above.
+ *
+ * Returns 0 for altitudes below 120 km (the diffusive-equilibrium
+ * regime starts at the homopause; below that, mixing keeps fractions
+ * clamped — handled separately if ever needed).
+ */
+function _speciesNumberDensity(species, altKm, Tinf) {
+    if (altKm < 120) return 0;
+    const m_i  = SPECIES_MASS_KG[species];
+    if (!Number.isFinite(m_i) || m_i <= 0) return 0;
+
+    const T_z  = batesTemperature(altKm, Tinf);
+    const Tratio = BATES_T120_K / T_z;
+    const alpha  = ALPHA_T[species] ?? 0;
+    const tFactor = Math.pow(Tratio, 1 + alpha);
+
+    // Use a midpoint gravity — slow variation across (120, z), and this
+    // saves us a numerical quadrature without a measurable accuracy hit
+    // even at z = 2000 km (g changes only ~50 % across that span).
+    const zMidKm = 0.5 * (120 + altKm);
+    const g_eff  = gravity(zMidKm);
+
+    const I_T = _batesInvTempIntegral(altKm, Tinf);   // km/K
+    const argKm = (m_i * g_eff / KB) * I_T;           // dimensionless if I_T in m/K
+    // I_T is km/K; convert to m/K by ×1000 inside the exponent:
+    const arg = argKm * 1000;
+    return N0_120[species] * tFactor * Math.exp(-arg);
+}
 
 // ── Public: derived quantities ──────────────────────────────────────────────
 
@@ -135,17 +448,64 @@ export function gravity(altKm) {
 }
 
 /**
- * Mass density (kg/m³) at altitude under Jacchia-exponential assumptions.
- * Anchored at 150 km with ρ ≈ 2×10⁻⁹ kg/m³; uses a short scale height
- * below 150 km (barometric) and a T-dependent scale height above.
+ * Mass density (kg/m³) at altitude. Below 120 km we fall back to a short
+ * barometric extrapolation anchored on the lumped 120-km column. Above
+ * 120 km we sum the per-species contributions n_i × m_i directly — no
+ * mean-scale-height fudging — so the density profile inherits the
+ * correct heavy/light differential expansion when T∞ rises.
  */
-function _massDensity(altKm, T) {
-    const RHO_150 = 2.0e-9;
-    if (altKm <= 150) {
-        return RHO_150 * Math.exp((150 - altKm) / 8.0);
+function _massDensity(altKm, Tinf) {
+    if (altKm <= 120) {
+        // Stitch onto the per-species column at 120 km via a short
+        // barometric exponential. Below the homopause turbulent mixing
+        // dominates → use the column ρ at 120 km × the local Bates T(z)
+        // ratio. This matches MSIS to ~factor of 2 across 80–120 km
+        // which is plenty for the visualisation's purpose.
+        let rho120 = 0;
+        for (const s of SPECIES) rho120 += N0_120[s] * SPECIES_MASS_KG[s];
+        return rho120 * Math.exp((120 - altKm) / 7.0);
     }
-    const H_km = 0.053 * T;
-    return RHO_150 * Math.exp(-(altKm - 150) / H_km);
+    let rho = 0;
+    for (const s of SPECIES) {
+        rho += _speciesNumberDensity(s, altKm, Tinf) * SPECIES_MASS_KG[s];
+    }
+    // Floor — keeps log10(ρ) finite for plotting code.
+    return Math.max(rho, 1e-30);
+}
+
+/**
+ * Total number density (m⁻³) under diffusive equilibrium.
+ */
+function _totalNumberDensity(altKm, Tinf) {
+    if (altKm <= 120) {
+        let n120 = 0;
+        for (const s of SPECIES) n120 += N0_120[s];
+        return n120 * Math.exp((120 - altKm) / 7.0);
+    }
+    let n = 0;
+    for (const s of SPECIES) n += _speciesNumberDensity(s, altKm, Tinf);
+    return Math.max(n, 1e0);
+}
+
+/**
+ * Composition fractions at altitude — derived from the same per-species
+ * diffusive-equilibrium calc as the density, so the storm response
+ * (atomic O expanding more than N₂ when T∞ rises) is *physical*, not
+ * decoration. Falls back to the legacy altitude-only anchors below
+ * 120 km where the diffusive regime doesn't apply.
+ */
+function _fractionsAtT(altKm, Tinf) {
+    if (altKm <= 120) return _fractionsAt(altKm);   // legacy mixing-region
+    const out = {};
+    let sum = 0;
+    for (const s of SPECIES) {
+        const n_i = _speciesNumberDensity(s, altKm, Tinf);
+        out[s] = n_i;
+        sum += n_i;
+    }
+    if (sum <= 0) return _fractionsAt(altKm);
+    for (const s of SPECIES) out[s] /= sum;
+    return out;
 }
 
 /**
@@ -189,26 +549,39 @@ export function density({ altitudeKm, f107Sfu, ap }) {
     if (altitudeKm < 80) {
         throw new Error("altitudeKm must be ≥ 80 (thermosphere lower bound)");
     }
-    const T = exosphereTempK(f107Sfu, ap);
-    const rho = _massDensity(altitudeKm, T);
-    const fractions = _fractionsAt(altitudeKm);
+    const Tinf = exosphereTempK(f107Sfu, ap);
+    // Local kinetic temperature from the Bates (1959) inversion profile —
+    // *not* T∞ everywhere. Below ~250 km T(z) is markedly cooler than T∞.
+    const T_local = batesTemperature(altitudeKm, Tinf);
+
+    const rho = _massDensity(altitudeKm, Tinf);
+    const fractions = _fractionsAtT(altitudeKm, Tinf);
 
     // Mean molecular mass in kg (by number fraction).
     let mBar = 0;
     for (const s of SPECIES) mBar += fractions[s] * SPECIES_MASS_KG[s];
 
-    // Total number density = ρ / m̄.
-    const nTotal = mBar > 0 ? rho / mBar : 0;
+    // Total number density — direct sum (not ρ/m̄) so heavy/light
+    // contributions remain self-consistent even with rounding.
+    const nTotal = _totalNumberDensity(altitudeKm, Tinf);
 
-    // Per-species number density.
+    // Per-species number density (m⁻³).
     const n = {};
     for (const s of SPECIES) n[s] = fractions[s] * nTotal;
 
-    // Scale height of the mean neutral (km).
+    // Scale height of the mean neutral (km), using local T.
     const g = gravity(altitudeKm);
-    const H_km = mBar > 0 && T > 0 ? (KB * T / (mBar * g)) / 1000 : NaN;
+    const H_km = mBar > 0 && T_local > 0 ? (KB * T_local / (mBar * g)) / 1000 : NaN;
 
-    return { altitudeKm, T, rho, nTotal, H_km, mBar, fractions, n };
+    return {
+        altitudeKm,
+        // T is the *local kinetic* temperature — not T∞. Plots and
+        // particle thermal speeds want this so vth varies through the
+        // thermosphere instead of clamping to a single asymptotic value.
+        T:    T_local,
+        Tinf,                  // exosphere asymptote — useful for callers
+        rho, nTotal, H_km, mBar, fractions, n,
+    };
 }
 
 /**
@@ -499,7 +872,7 @@ function _quietGW() {
 /**
  * Fetch current NOAA indices (F10.7, Kp, Ap) for "Live NOAA" buttons.
  * Preference order:
- *   1. Parker Physics DSMC backend — GET /v1/atmosphere/indices
+ *   1. Parkers Physics DSMC backend — GET /v1/atmosphere/indices
  *      (already pre-ingested by the Belay supervisor; fastest, cached).
  *   2. NOAA SWPC direct JSON endpoints (CORS-enabled).
  *      f107_cm_flux.json  → { flux: SFU, ... }[]      — daily F10.7
@@ -592,6 +965,239 @@ export function getSnapshot({
         T: exosphereTempK(f107Sfu, ap),
         altitudes: hits,
     };
+}
+
+// ── Debris sampler ──────────────────────────────────────────────────────────
+//
+// Pulls a small random sample from CelesTrak's `debris` SPECIAL list,
+// filtered to the LEO band that matches our asset altitudes (so the
+// conjunction screener sees plausible threats rather than GEO debris
+// 36 000 km out of plane).
+//
+// Sample size is intentionally tiny — operational risk modelling needs
+// the full 30k-object catalog (see js/satellite-tracker.js); this
+// function is for *visualization-grade* debris context only. ~50
+// objects gives users a sense of the LEO density without burying the
+// scene in dots or driving the screener into a 4-asset × 30k
+// quadratic blow-up.
+//
+// CelesTrak is free, CORS-enabled, no auth. The /api/celestrak/tle
+// Edge proxy parses TLEs server-side and returns mean-element JSON.
+//
+// Deterministic-by-default: the `seed` option (when provided) drives
+// a tiny LCG so the same sample is reproducible across reloads —
+// useful for screenshots / regression tests.
+export async function fetchDebrisSample({
+    count       = 50,
+    altMinKm    = 350,
+    altMaxKm    = 900,
+    timeoutMs   = 8000,
+    seed        = null,
+} = {}) {
+    // Try the composite group first; fall through to per-event groups if
+    // the composite is empty or returns an upstream error. Per-event
+    // groups are individually <2 MB and far more resilient than the
+    // 4-way fan-out, so the user always sees *some* debris even when
+    // CelesTrak rolls a group name or hits a rate limit.
+    const SOURCES = [
+        '/api/celestrak/tle?group=debris',
+        '/api/celestrak/tle?group=cosmos-1408-debris',
+        '/api/celestrak/tle?group=fengyun-1c-debris',
+        '/api/celestrak/tle?group=iridium-33-debris',
+        '/api/celestrak/tle?group=cosmos-2251-debris',
+    ];
+
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), timeoutMs);
+    try {
+        let all = [];
+        let lastErr = null;
+        for (const url of SOURCES) {
+            try {
+                const r = await fetch(url, {
+                    signal: ctl.signal,
+                    headers: { Accept: 'application/json' },
+                });
+                if (!r.ok) { lastErr = new Error(`HTTP ${r.status} (${url})`); continue; }
+                const data = await r.json();
+                const sats = data?.satellites || [];
+                if (sats.length > 0) {
+                    all = sats;
+                    break;
+                }
+            } catch (e) {
+                lastErr = e;
+                // AbortError aborts the whole fallback chain — bail out.
+                if (e?.name === 'AbortError') throw e;
+            }
+        }
+        if (all.length === 0 && lastErr) throw lastErr;
+        // Filter to LEO debris in our altitude band. Skip anything with
+        // a NaN inclination / mean motion / element so downstream
+        // propagation never hits NaNs.
+        const inBand = all.filter(s =>
+            Number.isFinite(s.perigee_km) && Number.isFinite(s.apogee_km) &&
+            Number.isFinite(s.inclination) && Number.isFinite(s.mean_motion) &&
+            s.perigee_km >= altMinKm && s.apogee_km <= altMaxKm
+        );
+        // Shuffle + take. Use a seeded RNG when `seed` is provided so
+        // the same set of debris shows on each reload.
+        const rand = seed != null ? _seededRand(seed) : Math.random;
+        const pool = inBand.slice();
+        for (let i = pool.length - 1; i > 0; i--) {
+            const j = Math.floor(rand() * (i + 1));
+            [pool[i], pool[j]] = [pool[j], pool[i]];
+        }
+        return pool.slice(0, count).map(s => ({
+            id:        `debris-${s.norad_id}`,
+            name:      s.name || `Debris ${s.norad_id}`,
+            noradId:   s.norad_id,
+            altitudeKm: Math.round((s.perigee_km + s.apogee_km) / 2),
+            color:     '#ff6688',
+            orbital:   {
+                noradId:        s.norad_id,
+                inclinationDeg: s.inclination,
+                raanDeg:        s.raan,
+                argPerigeeDeg:  s.arg_perigee,
+                meanAnomalyDeg0: s.mean_anomaly,        // M at TLE epoch — globe converts to M_now
+                eccentricity:   s.eccentricity,
+                periodMin:      s.period_min,
+                meanMotionRevPerDay: s.mean_motion,     // needed by globe for M_now propagation
+                epoch:          s.epoch,
+            },
+        }));
+    } finally {
+        clearTimeout(t);
+    }
+}
+
+/** Tiny 32-bit LCG for the seeded debris sample. Good enough for
+ *  reproducibility — not cryptographically anything. */
+function _seededRand(seed) {
+    let s = (seed | 0) || 1;
+    return () => {
+        s = (Math.imul(s, 1664525) + 1013904223) | 0;
+        return ((s >>> 0) % 1_000_003) / 1_000_003;
+    };
+}
+
+// ── Per-event balanced debris fetch ─────────────────────────────────────────
+// The composite `debris` group merges all 4 fragmentation events into a
+// single response, but a random N-pick from that pool tends to under-
+// represent the FY-1C cohort (huge total → uniform sampling washes the
+// 2007 ASAT cloud out into the noise). For the upper-atmosphere globe
+// we want the simulation to *show* the structure of the catalog: the
+// FY-1C ring at 850 km, the Iridium-33/Cosmos-2251 twin clouds at 790
+// km, the Cosmos 1408 shrapnel near the ISS shell.
+//
+// `fetchDebrisByEvent()` fetches each per-event group individually and
+// returns them in a parallel structure so the caller can apply per-event
+// quotas. Default quotas are tuned so FY-1C dominates the visual mix
+// (matching its real share of the catalog) without flooding the screen.
+//
+// Per-event groups are each ~1–3 MB so the 4-way fan-out is well within
+// the edge proxy's 4 MB ceiling — and unlike the composite endpoint the
+// per-event ones never trigger the "response too large" path.
+
+const DEBRIS_EVENTS = [
+    { id: 'fengyun-1c',  group: 'fengyun-1c-debris',  defaultQuota: 350 },
+    { id: 'cosmos-1408', group: 'cosmos-1408-debris', defaultQuota: 200 },
+    { id: 'iridium-33',  group: 'iridium-33-debris',  defaultQuota: 150 },
+    { id: 'cosmos-2251', group: 'cosmos-2251-debris', defaultQuota: 150 },
+];
+
+/**
+ * Fetch each per-event debris group separately, classify in-band records,
+ * and return a flat list with per-event quotas applied. Designed for
+ * the upper-atmosphere globe so the visualisation shows real catalog
+ * structure (FY-1C dominates, both 2009 collision clouds visible).
+ *
+ * @param {object} opts
+ * @param {object} [opts.quotas]    per-event-id → max records (defaults below)
+ * @param {number} [opts.altMinKm]  altitude band lower bound (km)
+ * @param {number} [opts.altMaxKm]  altitude band upper bound (km)
+ * @param {number} [opts.timeoutMs] hard deadline for the whole 4-way fan-out
+ * @param {number|null} [opts.seed] RNG seed for deterministic shuffling
+ * @returns {Promise<{records:object[], byEvent:Object<string,number>, fetchedAt:number}>}
+ */
+export async function fetchDebrisByEvent({
+    quotas    = null,
+    altMinKm  = 200,
+    altMaxKm  = 1600,
+    timeoutMs = 12000,
+    seed      = null,
+} = {}) {
+    const ctl = new AbortController();
+    const t   = setTimeout(() => ctl.abort(), timeoutMs);
+
+    const _quota = (id) => {
+        if (quotas && Number.isFinite(quotas[id])) return quotas[id];
+        return DEBRIS_EVENTS.find(e => e.id === id)?.defaultQuota ?? 100;
+    };
+
+    try {
+        const settled = await Promise.allSettled(DEBRIS_EVENTS.map(async ev => {
+            const r = await fetch(`/api/celestrak/tle?group=${ev.group}`, {
+                signal:  ctl.signal,
+                headers: { Accept: 'application/json' },
+            });
+            if (!r.ok) throw new Error(`HTTP ${r.status} (${ev.group})`);
+            const data = await r.json();
+            return { event: ev, sats: data?.satellites || [] };
+        }));
+
+        const records  = [];
+        const byEvent  = {};
+        const rand     = seed != null ? _seededRand(seed) : Math.random;
+
+        for (let i = 0; i < settled.length; i++) {
+            const ev = DEBRIS_EVENTS[i];
+            byEvent[ev.id] = 0;
+            if (settled[i].status !== 'fulfilled') continue;
+
+            const inBand = settled[i].value.sats.filter(s =>
+                Number.isFinite(s.perigee_km) && Number.isFinite(s.apogee_km) &&
+                Number.isFinite(s.inclination) && Number.isFinite(s.mean_motion) &&
+                s.perigee_km >= altMinKm && s.apogee_km <= altMaxKm
+            );
+
+            // Shuffle then take quota. We're after a representative
+            // visualisation slice, not a top-N by anything in particular.
+            const pool = inBand.slice();
+            for (let j = pool.length - 1; j > 0; j--) {
+                const k = Math.floor(rand() * (j + 1));
+                [pool[j], pool[k]] = [pool[k], pool[j]];
+            }
+            const take = pool.slice(0, _quota(ev.id));
+
+            for (const s of take) {
+                records.push({
+                    id:        `debris-${s.norad_id}`,
+                    name:      s.name || `Debris ${s.norad_id}`,
+                    noradId:   s.norad_id,
+                    altitudeKm: Math.round((s.perigee_km + s.apogee_km) / 2),
+                    color:     '#ff6688',   // overridden by family color downstream
+                    _event:    ev.id,        // hint for the caller; classifier still wins
+                    orbital:   {
+                        noradId:        s.norad_id,
+                        inclinationDeg: s.inclination,
+                        raanDeg:        s.raan,
+                        argPerigeeDeg:  s.arg_perigee,
+                        meanAnomalyDeg0: s.mean_anomaly,
+                        eccentricity:   s.eccentricity,
+                        periodMin:      s.period_min,
+                        meanMotionRevPerDay: s.mean_motion,
+                        epoch:          s.epoch,
+                    },
+                });
+            }
+            byEvent[ev.id] = take.length;
+        }
+
+        return { records, byEvent, fetchedAt: Date.now() };
+    } finally {
+        clearTimeout(t);
+    }
 }
 
 // ── Storm presets ──────────────────────────────────────────────────────────

@@ -30,7 +30,7 @@ const TEST_LAST     = 'User';
 test.describe('Landing Page', () => {
     test('loads and shows hero CTA', async ({ page }) => {
         await page.goto('/');
-        await expect(page).toHaveTitle(/Parker Physics/);
+        await expect(page).toHaveTitle(/Parkers Physics/);
         // Hero CTA should be visible
         const cta = page.locator('a:has-text("Get Started")').first();
         await expect(cta).toBeVisible();
@@ -399,5 +399,124 @@ test.describe('API Edge Functions', () => {
             data: { title: 'test', body: 'test' },
         });
         expect([401, 501]).toContain(res.status());
+    });
+});
+
+// ── 10. Tier expansion (Educator / Institution / Enterprise) ───────────────
+
+test.describe('Tier expansion', () => {
+    test('pricing page renders all six tier cards', async ({ page }) => {
+        await page.goto('/pricing.html');
+        await expect(page.locator('.tier-name', { hasText: /^Free Trial$/ })).toBeVisible();
+        await expect(page.locator('.tier-name', { hasText: /^Basic$/ })).toBeVisible();
+        await expect(page.locator('.tier-name', { hasText: /^Educator$/ })).toBeVisible();
+        await expect(page.locator('.tier-name', { hasText: /^Advanced$/ })).toBeVisible();
+        await expect(page.locator('.tier-name', { hasText: /^Institution$/ })).toBeVisible();
+        await expect(page.locator('.tier-name', { hasText: /^Enterprise$/ })).toBeVisible();
+    });
+
+    test('signup page exposes all five self-serve plan pills', async ({ page }) => {
+        await page.goto('/signup.html');
+        for (const id of ['pill-free', 'pill-basic', 'pill-educator', 'pill-advanced', 'pill-institution']) {
+            await expect(page.locator('#' + id)).toBeVisible();
+        }
+        // Enterprise has no pill — it's a link to contact-enterprise.html
+        await expect(page.locator('a[href="contact-enterprise.html"]')).toBeVisible();
+    });
+
+    test('?plan=educator pre-selects Educator pill', async ({ page }) => {
+        await page.goto('/signup.html?plan=educator');
+        await expect(page.locator('#pill-educator')).toHaveClass(/selected/);
+    });
+
+    test('stripe checkout rejects enterprise plan', async ({ request }) => {
+        const res = await request.post('/api/stripe/checkout', {
+            data:    { plan: 'enterprise' },
+            headers: { Authorization: 'Bearer fake-token' },
+        });
+        // 401 (unauthorized — JWT rejected first) OR 400 (contact_required) OR 501 (not configured)
+        // The test runs with no Stripe / Supabase config in CI.
+        expect([400, 401, 501]).toContain(res.status());
+    });
+
+    test('stripe checkout accepts trial promo code in body schema', async ({ request }) => {
+        // The endpoint should at least parse the body; without a real JWT
+        // it'll 401 (unauthorized) before applying the trial. We're just
+        // verifying the schema didn't reject because of the new field.
+        const res = await request.post('/api/stripe/checkout', {
+            data:    { plan: 'basic', trial: 'tour-30day' },
+            headers: { Authorization: 'Bearer fake-token' },
+        });
+        expect([400, 401, 501]).toContain(res.status());
+    });
+
+    test('?plan=basic&trial=tour-30day URL preserves trial param on signup', async ({ page }) => {
+        await page.goto('/signup.html?plan=basic&trial=tour-30day');
+        // Plan pre-selection still works; trial param stays in the URL so
+        // the post-signup checkout call can forward it server-side.
+        await expect(page.locator('#pill-basic')).toHaveClass(/selected/);
+        const url = page.url();
+        expect(url).toMatch(/trial=tour-30day/);
+    });
+
+    test('contact-enterprise endpoint rejects missing email', async ({ request }) => {
+        const res = await request.post('/api/contact/enterprise', {
+            data: { name: 'Test User' },
+        });
+        // 400 (invalid_email) OR 403 (origin_blocked from test runner) OR 501 (not configured)
+        expect([400, 403, 501]).toContain(res.status());
+    });
+
+    test('contact-enterprise page renders form', async ({ page }) => {
+        await page.goto('/contact-enterprise.html');
+        await expect(page.locator('#contact-form')).toBeVisible();
+        await expect(page.locator('input[name="email"]')).toBeVisible();
+        await expect(page.locator('input[name="use_case"][value="anomaly_correlation"]')).toBeAttached();
+    });
+});
+
+// ── 7. Educator wedge: landing page + class-invite endpoint ─────────────────
+
+test.describe('Educator Wedge', () => {
+    test('for-educators page renders hero + CTA', async ({ page }) => {
+        await page.goto('/for-educators.html');
+        await expect(page.locator('h1')).toContainText(/NASA|class|simulations/i);
+        const cta = page.locator('a.btn-primary[href*="signup"]').first();
+        await expect(cta).toBeVisible();
+        await expect(cta).toHaveAttribute('href', /plan=educator/);
+    });
+
+    test('/educators pretty URL works', async ({ page }) => {
+        const res = await page.goto('/educators');
+        // Vercel rewrite serves /for-educators.html under both URLs.
+        // In dev (no Vercel rewrites), this may 404 — accept either the rewrite or the source.
+        if (res && res.ok()) {
+            await expect(page.locator('h1')).toBeVisible();
+        }
+    });
+
+    test('class invite endpoint rejects unauthorized POST', async ({ request }) => {
+        const res = await request.post('/api/class/invite', {
+            data: { email: 'student@example.com' },
+        });
+        // 401 (no auth) or 501 (not configured in CI) — never 200.
+        expect([401, 403, 501]).toContain(res.status());
+    });
+
+    test('class roster endpoint rejects unauthorized GET', async ({ request }) => {
+        const res = await request.get('/api/class/roster');
+        expect([401, 403, 501]).toContain(res.status());
+    });
+
+    test('class invite endpoint rejects invalid origin', async ({ request }) => {
+        const res = await request.post('/api/class/invite', {
+            data:    { email: 'student@example.com' },
+            headers: {
+                Authorization: 'Bearer fake-token',
+                Origin:        'https://evil.example.com',
+            },
+        });
+        // 403 (forbidden_origin) or 401 (auth) or 501 (not configured).
+        expect([401, 403, 501]).toContain(res.status());
     });
 });

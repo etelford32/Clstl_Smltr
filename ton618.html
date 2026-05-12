@@ -2,9 +2,27 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TON 618 Research Observatory — Parker Physics App</title>
-<meta name="description" content="Research-grade Kerr geodesic observatory for TON 618, the most massive known black hole. Phase 0: Schwarzschild baseline with RK45 null-geodesic ray tracing.">
+<title>TON 618 Research Observatory — Parkers Physics App</title>
+<link rel="canonical" href="https://parkersphysics.com/ton618.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/ton618.html">
+<meta property="og:title" content="TON 618 — Ultramassive Black Hole — Parkers Physics">
+<meta property="og:description" content="Research-grade visualization of TON 618, a ~66 billion solar mass quasar. Compare its event horizon to the solar system and Milky Way at scale.">
+<meta property="og:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+<meta property="og:image:alt" content="Parkers Physics — real-time astrophysics simulations">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="TON 618 — Ultramassive Black Hole — Parkers Physics">
+<meta name="twitter:description" content="Research-grade visualization of TON 618, a ~66 billion solar mass quasar. Compare its event horizon to the solar system and Milky Way at scale.">
+<meta name="twitter:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+
+<meta name="description" content="Research-grade Kerr geodesic observatory for TON 618, the most massive known black hole. Phase 1: rotating Kerr metric integrated on the GPU via Hamilton's equations, with ZAMO tetrads, spin-correct ISCO and shadow.">
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family:'Courier New',monospace; background:#000; color:#ccc; display:flex; flex-direction:column; min-height:100vh; overflow:hidden; }
@@ -18,14 +36,25 @@ body { font-family:'Courier New',monospace; background:#000; color:#ccc; display
     position:absolute; top:10px; left:10px; z-index:10; pointer-events:none;
     font-family:'Courier New',monospace; font-size:10.5px; line-height:1.55;
     background:rgba(0,0,0,.55); backdrop-filter:blur(4px);
-    border:1px solid rgba(255,140,0,.15); border-radius:6px;
-    padding:10px 14px; min-width:320px; color:#cca266; white-space:pre;
+    border:1px solid rgba(255,140,0,.18); border-radius:6px;
+    padding:10px 14px; min-width:380px; color:#cca266; white-space:pre;
 }
 #hud-title {
     position:absolute; top:10px; left:10px; transform:translateY(-18px);
     font-size:9px; letter-spacing:.2em; color:#ff8800; text-transform:uppercase;
     pointer-events:none;
 }
+#minimap-wrap {
+    position:absolute; top:10px; right:10px; z-index:10;
+    width:300px; height:140px;
+    background:rgba(0,0,0,.45); border:1px solid rgba(255,140,0,.18);
+    border-radius:6px; padding:4px;
+}
+#minimap-wrap > .mm-label {
+    position:absolute; top:-14px; left:6px; font-size:9px; letter-spacing:.2em;
+    color:#ff8800; text-transform:uppercase;
+}
+#minimap { width:100%; height:100%; display:block; }
 #validation {
     position:absolute; bottom:14px; left:14px; z-index:10;
     font-size:10px; line-height:1.6; color:#8fd7ff;
@@ -34,13 +63,40 @@ body { font-family:'Courier New',monospace; background:#000; color:#ccc; display
 }
 #controls-hint {
     position:absolute; bottom:14px; right:14px; z-index:10;
-    font-size:9.5px; color:#777; background:rgba(0,0,0,.5);
-    border:1px solid rgba(255,255,255,.07); border-radius:5px; padding:7px 10px;
+    font-size:9.5px; color:#888; background:rgba(0,0,0,.5);
+    border:1px solid rgba(255,255,255,.07); border-radius:5px; padding:8px 10px;
+    line-height:1.55; max-width:330px;
 }
+#controls-hint b { color:#ffaa44; letter-spacing:.05em; }
+#fly-pill {
+    position:absolute; top:160px; right:10px; z-index:10;
+    font-size:10px; letter-spacing:.18em; text-transform:uppercase;
+    color:#000; background:#ff8800; padding:3px 9px; border-radius:11px;
+    display:none;
+}
+#fly-pill.on { display:inline-block; }
+
+#inspector {
+    position:absolute; bottom:50px; left:14px; z-index:10;
+    font-family:'Courier New',monospace; font-size:10.5px; line-height:1.6;
+    color:#9eecff; background:rgba(0,12,28,.78);
+    border:1px solid rgba(120,200,255,.30); border-radius:6px;
+    padding:9px 12px; white-space:pre; min-width:300px; display:none;
+    backdrop-filter:blur(4px);
+}
+#inspector .ic-title {
+    font-size:9px; letter-spacing:.18em; color:#7adcff; text-transform:uppercase;
+    margin-bottom:4px;
+}
+#inspector .ic-close {
+    position:absolute; top:4px; right:7px; cursor:pointer; color:#5e9bbf;
+    font-size:11px; pointer-events:auto;
+}
+#inspector .ic-close:hover { color:#fff; }
 
 /* Right panel */
 #panel {
-    width:270px; min-width:270px; background:rgba(8,4,20,.95);
+    width:290px; min-width:290px; background:rgba(8,4,20,.95);
     border-left:1px solid rgba(255,120,0,.2);
     display:flex; flex-direction:column; overflow-y:auto;
     padding:12px; gap:10px;
@@ -68,6 +124,15 @@ select {
     font-family:inherit; font-size:11px; width:100%; transition:background .2s;
 }
 .btn:hover { background:rgba(255,100,0,.3); }
+.btn-row {
+    display:grid; grid-template-columns:1fr 1fr; gap:6px;
+}
+.btn-sm {
+    background:rgba(120,60,180,.15); border:1px solid rgba(160,100,220,.35);
+    color:#cda8ff; padding:5px 8px; border-radius:4px; cursor:pointer;
+    font-family:inherit; font-size:10.5px; transition:background .2s;
+}
+.btn-sm:hover { background:rgba(160,100,220,.3); }
 .shader-badge {
     display:inline-block; background:linear-gradient(45deg,#6040ff,#ff4080);
     color:#fff; font-size:9px; padding:2px 6px; border-radius:3px;
@@ -85,9 +150,53 @@ select {
     display:inline-block; font-size:9px; letter-spacing:.15em; text-transform:uppercase;
     color:#000; background:#ff8800; padding:1px 6px; border-radius:10px; margin-right:4px;
 }
+/* Tier 1C — iframe embed mode (?embed=1): hide UI chrome for clean external embed */
+body.ton618-embed #panel,
+body.ton618-embed #controls-hint,
+body.ton618-embed #fly-pill,
+body.ton618-embed #minimap-wrap,
+body.ton618-embed nav { display:none !important; }
+body.ton618-embed #app { height:100vh; }
+body.ton618-embed #hud { font-size:9.5px; min-width:280px; opacity:.85; }
+body.ton618-embed #hud-title { font-size:8px; }
+.toast {
+    position:absolute; left:50%; top:18px; transform:translateX(-50%);
+    z-index:30; font-size:11px; color:#fff; background:rgba(20,20,40,.85);
+    border:1px solid rgba(255,180,80,.4); border-radius:6px; padding:6px 14px;
+    pointer-events:none; opacity:0; transition:opacity .25s;
+}
+.toast.show { opacity:1; }
+.rec-dot {
+    display:inline-block; width:8px; height:8px; border-radius:50%;
+    background:#ff4040; box-shadow:0 0 6px #ff4040; margin-right:6px; vertical-align:middle;
+    animation:rec-pulse 1.0s ease-in-out infinite;
+}
+@keyframes rec-pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
 </style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "@id": "https://parkersphysics.com/ton618.html#app",
+  "name": "TON 618 — Ultramassive Black Hole",
+  "description": "Research-grade visualization of TON 618, a ~66 billion solar mass quasar. Compare its event horizon to the solar system and Milky Way at scale.",
+  "url": "https://parkersphysics.com/ton618.html",
+  "image": "https://parkersphysics.com/ParkersPhysics_logo2.jpg",
+  "applicationCategory": "EducationalApplication",
+  "applicationSubCategory": "High-energy astrophysics simulation",
+  "operatingSystem": "Web Browser",
+  "browserRequirements": "Requires JavaScript and WebGL",
+  "isAccessibleForFree": true,
+  "publisher": {
+    "@id": "https://parkersphysics.com/#org"
+  },
+  "inLanguage": "en-US"
+}
+</script>
 </head>
 <body>
+<h1 data-seo-h1 style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0">TON 618 — Ultramassive Black Hole</h1>
+
 <link rel="stylesheet" href="js/nav-styles.css">
 <nav></nav>
 <script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("ton618");</script>
@@ -95,23 +204,49 @@ select {
 <div id="app">
     <div id="canvas-area">
         <canvas id="glCanvas"></canvas>
-        <div id="hud-title">Phase 0 · Schwarzschild Baseline · RK45 null-geodesic</div>
+        <div id="hud-title">Phase 1 · Kerr (Hamilton, BL) · ZAMO tetrad · RK45 · 3D God-mode Camera</div>
         <div id="hud">booting…</div>
+        <div id="minimap-wrap">
+            <div class="mm-label">god-view · top / side</div>
+            <canvas id="minimap"></canvas>
+        </div>
+        <div id="fly-pill">⊙ free-fly</div>
+        <div id="toast" class="toast"></div>
+        <div id="inspector">
+            <div class="ic-title">▸ Geodesic inspector</div>
+            <span class="ic-close" id="ic-close">✕</span>
+            <div id="inspector-body">click anywhere on the render</div>
+        </div>
         <div id="validation"></div>
-        <div id="controls-hint">Drag: orbit &nbsp;·&nbsp; Shift+Drag: look &nbsp;·&nbsp; Wheel: dolly &nbsp;·&nbsp; WASD/QE: strafe &nbsp;·&nbsp; R: reset</div>
+        <div id="controls-hint">
+            <b>orbit:</b> drag · shift+drag pan · mid-drag roll · wheel dolly<br>
+            <b>fly (F):</b> WASD strafe · Q/E forward/back · space/ctrl up/down<br>
+            <b>both:</b> arrows yaw/pitch · Z/X roll · shift = boost · R reset<br>
+            <b>click:</b> inspect that pixel's geodesic (b, r_min, term…)
+        </div>
     </div>
 
     <aside id="panel">
         <div>
-            <div class="shader-badge">▸ WebGL2 · RK45</div>
-            <div class="sec-title"><span class="phase-pill">Phase 0</span> Observatory</div>
+            <div class="shader-badge">▸ WebGL2 · Kerr-BL · Hamilton · ZAMO</div>
+            <div class="sec-title"><span class="phase-pill">Phase 1</span> Observatory</div>
             <div class="note">Research-grade Kerr geodesic observatory for TON 618
-                (M ≈ 6.6×10¹⁰ M☉). Currently a Schwarzschild baseline; spin is fixed at
-                <i>a = 0</i> until Phase 1 lands.</div>
+                (M ≈ 6.6×10¹⁰ M☉). Hamilton's equations on the 8-D phase space
+                (x<sup>μ</sup>, p<sub>μ</sub>) in Boyer-Lindquist coords; p<sub>t</sub> = −E
+                and p<sub>φ</sub> = L<sub>z</sub> conserved by construction. ZAMO tetrad
+                replaces the static frame so the camera survives the ergosphere.</div>
         </div>
 
         <div>
             <div class="sec-title">Observer (geometrized, M = 1)</div>
+            <div class="ctrl">
+                <label>Frame</label>
+                <select id="observer">
+                    <option value="static" selected>Static stationary (r &gt; 2M)</option>
+                    <option value="freefall">Painlevé-Gullstrand (free-fall)</option>
+                    <option value="keplerian">Circular Keplerian (eq., r &gt; 3M)</option>
+                </select>
+            </div>
             <div class="ctrl">
                 <label>Radial distance r [M]</label>
                 <input type="range" id="s-r" min="2.5" max="200" step="0.5" value="30">
@@ -119,8 +254,8 @@ select {
             </div>
             <div class="ctrl">
                 <label>Polar angle θ</label>
-                <input type="range" id="s-theta" min="2" max="178" step="1" value="90">
-                <div class="val" id="v-theta">90°</div>
+                <input type="range" id="s-theta" min="2" max="178" step="1" value="80">
+                <div class="val" id="v-theta">80°</div>
             </div>
             <div class="ctrl">
                 <label>Azimuth φ</label>
@@ -129,9 +264,462 @@ select {
             </div>
             <div class="ctrl">
                 <label>Field of view</label>
-                <input type="range" id="s-fov" min="15" max="120" step="1" value="45">
-                <div class="val" id="v-fov">45°</div>
+                <input type="range" id="s-fov" min="15" max="120" step="1" value="60">
+                <div class="val" id="v-fov">60°</div>
             </div>
+            <div class="toggle-row">
+                <input type="checkbox" id="flyMode">
+                <label for="flyMode">Free-fly (FPS) mode — press F</label>
+            </div>
+        </div>
+
+        <div>
+            <div class="sec-title">Black-hole geometry</div>
+            <div class="ctrl">
+                <label>Spin a / M  <span style="color:#76d18a">[live · drives the geodesic kernel]</span></label>
+                <input type="range" id="s-spin" min="0" max="0.998" step="0.002" value="0">
+                <div class="val" id="v-spin">0.000  (Schwarzschild)</div>
+            </div>
+            <div class="toggle-row">
+                <input type="checkbox" id="snapIsco" checked>
+                <label for="snapIsco">Snap r_inner → ISCO_prograde(a)</label>
+            </div>
+            <div class="note">Phase 1: spin drives the metric in the shader, the
+                ZAMO tetrad reconstruction, the disk's Keplerian g-factor, the
+                photon-ring shape, the ergosphere geometry, and the camera's
+                horizon-aware floor r<sub>+</sub>(a). At a → 0 the integrator
+                continuously degenerates back to Schwarzschild.</div>
+        </div>
+
+        <div>
+            <div class="sec-title">Camera presets</div>
+            <div class="btn-row">
+                <button class="btn-sm" data-preset="far-equator">far · equator</button>
+                <button class="btn-sm" data-preset="iconic">iconic Interstellar</button>
+                <button class="btn-sm" data-preset="pole-down">pole-down</button>
+                <button class="btn-sm" data-preset="photon-graze">photon graze</button>
+                <button class="btn-sm" data-preset="horizon-skim">horizon skim</button>
+                <button class="btn-sm" data-preset="isco-orbit">ISCO orbit</button>
+                <button class="btn-sm" data-preset="wide-survey">wide survey</button>
+            </div>
+            <div class="note">Smooth cinematic transitions (~1.4 s, log-r interp).</div>
+        </div>
+
+        <div>
+            <div class="sec-title">Accretion disk (3D scene)</div>
+            <div class="toggle-row">
+                <input type="checkbox" id="showDisk" checked>
+                <label for="showDisk">Render disk (ISCO → outer)</label>
+            </div>
+            <div class="ctrl">
+                <label>Optical regime</label>
+                <select id="diskMode">
+                    <option value="opaque" selected>Opaque thin disk</option>
+                    <option value="translucent">Translucent (RIAF / multi-image)</option>
+                </select>
+            </div>
+            <div class="ctrl">
+                <label>r_inner [M]</label>
+                <input type="range" id="s-disk-in" min="2.5" max="20" step="0.1" value="6">
+                <div class="val" id="v-disk-in">6.0 M (ISCO)</div>
+            </div>
+            <div class="ctrl">
+                <label>r_outer [M]</label>
+                <input type="range" id="s-disk-out" min="8" max="80" step="0.5" value="24">
+                <div class="val" id="v-disk-out">24 M</div>
+            </div>
+            <div class="ctrl">
+                <label>Inner-edge T (Shakura-Sunyaev peak)</label>
+                <input type="range" id="s-disk-T" min="1500" max="40000" step="100" value="12000">
+                <div class="val" id="v-disk-T">12000 K (white-hot)</div>
+            </div>
+            <div class="ctrl">
+                <label>Brightness</label>
+                <input type="range" id="s-disk-bright" min="0" max="4" step="0.05" value="1">
+                <div class="val" id="v-disk-bright">1.00×</div>
+            </div>
+            <div class="note">Color is a Tanner-Helland blackbody fit to T(r) =
+                T<sub>in</sub>(r<sub>in</sub>/r)<sup>3/4</sup>(1−√(r<sub>in</sub>/r))<sup>1/4</sup>,
+                Doppler-shifted by the photon's g-factor against the local
+                prograde-Keplerian emitter. I<sub>obs</sub> = g⁴ I<sub>emit</sub>.</div>
+        </div>
+
+        <div>
+            <div class="sec-title">Disk dynamics</div>
+            <div class="toggle-row">
+                <input type="checkbox" id="regimeAuto" checked>
+                <label for="regimeAuto">Auto regime (RIAF / thin / slim) from ṁ</label>
+            </div>
+            <div class="val" id="v-regime" style="text-align:left;color:#cca266">regime: thin disk</div>
+            <div class="ctrl">
+                <label>Vertical thickness H/r <span style="color:#666">[manual override]</span></label>
+                <input type="range" id="s-disk-h" min="0" max="0.4" step="0.005" value="0">
+                <div class="val" id="v-disk-h">0.000  (razor-thin)</div>
+            </div>
+            <div class="ctrl">
+                <label>MRI turbulence amplitude</label>
+                <input type="range" id="s-mri" min="0" max="1.4" step="0.02" value="0.6">
+                <div class="val" id="v-mri">0.60</div>
+            </div>
+            <div class="note">When the auto regime is on, the ṁ slider drives
+                H/r, T(r) scaling, brightness, and the spectrum branch
+                (RIAF → blackbody → photon-trapped slim disk). The H/r
+                slider becomes a manual override when toggled off. RIAF
+                renders as an optically-thin Compton-blue torus; slim disk
+                puffs aggressively at the inner edge with photon-trapping
+                blue accent (Abramowicz 1988).</div>
+        </div>
+
+        <div>
+            <div class="sec-title">Animation</div>
+            <div class="toggle-row">
+                <input type="checkbox" id="anim" checked>
+                <label for="anim">Animate (Keplerian shear + hot-spots)</label>
+            </div>
+            <div class="ctrl">
+                <label>Speed (× Ω<sub>K</sub>(r))</label>
+                <input type="range" id="s-anim" min="0" max="20" step="0.5" value="1">
+                <div class="val" id="v-anim">1.0×</div>
+            </div>
+            <div class="ctrl">
+                <label>Time scrubber t [s]</label>
+                <input type="range" id="s-time" min="0" max="200" step="0.05" value="0">
+                <div class="val" id="v-time">0.00 s  (t<sub>real</sub> ≈ —)</div>
+            </div>
+            <div class="btn-row" style="margin-top:6px;">
+                <button class="btn-sm" id="btnPause">⏸ pause</button>
+                <button class="btn-sm" id="btnQPO">⚡ QPO flare</button>
+            </div>
+            <div class="toggle-row" style="margin-top:8px;">
+                <input type="checkbox" id="showHotspot" checked>
+                <label for="showHotspot">Orbiting hot-spot field</label>
+            </div>
+            <div class="ctrl">
+                <label>Number of hot-spots</label>
+                <input type="range" id="s-nspots" min="1" max="8" step="1" value="1">
+                <div class="val" id="v-nspots">1</div>
+            </div>
+            <div class="ctrl">
+                <label>Anchor hot-spot r [M]</label>
+                <input type="range" id="s-hot-r" min="3.5" max="40" step="0.1" value="6.5">
+                <div class="val" id="v-hot-r">6.5 M</div>
+            </div>
+            <div class="note">Each spot rides the same g-factor pipeline as
+                the disk — approaching side brightens, receding side dims —
+                physically correct Doppler asymmetry. Spot 0 is steady-state;
+                spots 1+ pulse with sin² lifetimes (random duty cycles).
+                The QPO flare button injects a transient brightness boost
+                near the inner edge with a 2.5 s half-life.</div>
+        </div>
+
+        <div>
+            <div class="sec-title">Density-wave structure</div>
+            <div class="toggle-row">
+                <input type="checkbox" id="showLindblad">
+                <label for="showLindblad">Highlight m=2 Lindblad resonances</label>
+            </div>
+            <div class="ctrl">
+                <label>Pattern-speed anchor r<sub>p</sub> [M]</label>
+                <input type="range" id="s-lindblad-rp" min="6" max="60" step="0.5" value="12">
+                <div class="val" id="v-lindblad-rp">12.0 M</div>
+            </div>
+            <div class="note">For pattern speed Ω<sub>p</sub>=Ω<sub>K</sub>(r<sub>p</sub>),
+                the m=2 inner / outer Lindblad resonances sit at r<sub>p</sub>·0.630
+                and r<sub>p</sub>·1.310 (κ ≈ Ω<sub>K</sub> for Schwarzschild Keplerian).</div>
+        </div>
+
+        <div>
+            <div class="sec-title">Disk warp (Bardeen-Petterson)</div>
+            <div class="toggle-row">
+                <input type="checkbox" id="diskWarp">
+                <label for="diskWarp">Tilt disk plane</label>
+            </div>
+            <div class="ctrl">
+                <label>Tilt angle α</label>
+                <input type="range" id="s-warp-a" min="0" max="60" step="0.5" value="0">
+                <div class="val" id="v-warp-a">0°</div>
+            </div>
+            <div class="ctrl">
+                <label>Tilt azimuth ψ</label>
+                <input type="range" id="s-warp-p" min="0" max="360" step="1" value="0">
+                <div class="val" id="v-warp-p">0°</div>
+            </div>
+            <div class="note">Stub: rotates the disk normal away from the metric
+                pole. In Phase 1 Lense-Thirring torque (∝ a) drives a real
+                radial warp profile β(r) with the Bardeen-Petterson transition
+                radius r<sub>BP</sub>.</div>
+        </div>
+
+        <div>
+            <div class="sec-title">Radiation &amp; particle emissions</div>
+            <div class="toggle-row">
+                <input type="checkbox" id="showJets" checked>
+                <label for="showJets">Bipolar synchrotron jets (Doppler δ<sup>2+α</sup>)</label>
+            </div>
+            <div class="toggle-row">
+                <input type="checkbox" id="bzAuto" checked>
+                <label for="bzAuto">Auto jet η from spin a + magnetization (Blandford-Znajek)</label>
+            </div>
+            <div class="ctrl">
+                <label>Magnetic flux φ = Φ<sub>H</sub> / Φ<sub>MAD</sub></label>
+                <input type="range" id="s-magphi" min="0" max="1.5" step="0.01" value="0.7">
+                <div class="val" id="v-magphi">0.70  (SANE — pre-MAD)</div>
+            </div>
+            <div class="val" id="v-mad-state" style="text-align:left;color:#cca266">η<sub>BZ</sub>= — &nbsp; SANE</div>
+            <div class="ctrl">
+                <label>Jet β = v/c</label>
+                <input type="range" id="s-jet-v" min="0" max="0.999" step="0.005" value="0.95">
+                <div class="val" id="v-jet-v">0.950 c   (γ ≈ 3.20)</div>
+            </div>
+            <div class="ctrl">
+                <label>Spectral index α (I<sub>ν</sub> ∝ ν<sup>−α</sup>)</label>
+                <input type="range" id="s-jet-a" min="0" max="2" step="0.05" value="0.7">
+                <div class="val" id="v-jet-a">0.70</div>
+            </div>
+            <div class="ctrl">
+                <label>Half-opening angle</label>
+                <input type="range" id="s-jet-o" min="2" max="35" step="1" value="10">
+                <div class="val" id="v-jet-o">10°</div>
+            </div>
+            <div class="ctrl">
+                <label>Jet intensity</label>
+                <input type="range" id="s-jet-i" min="0" max="0.4" step="0.005" value="0.06">
+                <div class="val" id="v-jet-i">0.060</div>
+            </div>
+
+            <div class="toggle-row" style="margin-top:8px;">
+                <input type="checkbox" id="showCorona">
+                <label for="showCorona">Hot Compton corona (X-ray scatter)</label>
+            </div>
+            <div class="ctrl">
+                <label>Corona peak r [M]</label>
+                <input type="range" id="s-cor-r" min="3" max="40" step="0.5" value="10">
+                <div class="val" id="v-cor-r">10 M</div>
+            </div>
+            <div class="ctrl">
+                <label>Corona intensity</label>
+                <input type="range" id="s-cor-i" min="0" max="0.2" step="0.002" value="0.04">
+                <div class="val" id="v-cor-i">0.040</div>
+            </div>
+            <div class="ctrl">
+                <label>Compton y-parameter (4 k T<sub>e</sub> / m<sub>e</sub>c² · max(τ, τ²))</label>
+                <input type="range" id="s-cor-y" min="0.05" max="5" step="0.025" value="0.7">
+                <div class="val" id="v-cor-y">y = 0.70 &nbsp; Γ = 2.40 (typical AGN)</div>
+            </div>
+
+            <div class="toggle-row" style="margin-top:8px;">
+                <input type="checkbox" id="showWind">
+                <label for="showWind">Radiation-driven disk wind (UV cone)</label>
+            </div>
+            <div class="ctrl">
+                <label>Wind intensity</label>
+                <input type="range" id="s-wind-i" min="0" max="0.2" step="0.002" value="0.04">
+                <div class="val" id="v-wind-i">0.040</div>
+            </div>
+
+            <div class="toggle-row" style="margin-top:8px;">
+                <input type="checkbox" id="showFeLine">
+                <label for="showFeLine">Fe K-α line emission (6.4 keV)</label>
+            </div>
+            <div class="ctrl">
+                <label>Fe-line intensity</label>
+                <input type="range" id="s-fe-i" min="0" max="3" step="0.05" value="0.6">
+                <div class="val" id="v-fe-i">0.60</div>
+            </div>
+
+            <div class="ctrl" style="margin-top:8px;">
+                <label>ṁ / ṁ_Edd  (drives HUD luminosity)</label>
+                <input type="range" id="s-mdot" min="0.001" max="2" step="0.005" value="0.10">
+                <div class="val" id="v-mdot">0.100  (typical AGN)</div>
+            </div>
+            <div class="note">Jets use a co-moving radial 4-velocity at β; their
+                g-factor against the photon's k<sup>μ</sup> gives I<sub>obs</sub>
+                = δ<sup>2+α</sup> I<sub>emit</sub> — the iconic M87-style
+                approaching/receding asymmetry.</div>
+        </div>
+
+        <div>
+            <div class="sec-title">Lyman-α blob (host halo)</div>
+            <div class="toggle-row">
+                <input type="checkbox" id="showLab">
+                <label for="showLab">Render Lyα halo around BH (<i>Phase 2.1</i>)</label>
+            </div>
+            <div class="ctrl">
+                <label>Powering mechanism</label>
+                <select id="labMechanism">
+                    <option value="0">Gravitational cooling (j ∝ ρ²)</option>
+                    <option value="1" selected>AGN photoionization (j ∝ ρ Φ/r²)</option>
+                    <option value="2">Shock heating (filament edges)</option>
+                </select>
+            </div>
+            <div class="ctrl">
+                <label>Outer radius r<sub>LAB</sub> [kpc]</label>
+                <input type="range" id="s-lab-r" min="30" max="800" step="5" value="460">
+                <div class="val" id="v-lab-r">460 kpc  (Slug-class)</div>
+            </div>
+            <div class="ctrl">
+                <label>Inner cavity r<sub>inner</sub> [kpc]</label>
+                <input type="range" id="s-lab-rin" min="0.5" max="50" step="0.5" value="8">
+                <div class="val" id="v-lab-rin">8.0 kpc</div>
+            </div>
+            <div class="ctrl">
+                <label>Density slope α  (ρ ∝ r<sup>−α</sup>)</label>
+                <input type="range" id="s-lab-alpha" min="0.5" max="3" step="0.05" value="1.8">
+                <div class="val" id="v-lab-alpha">1.80</div>
+            </div>
+            <div class="ctrl">
+                <label>Clumping amplitude</label>
+                <input type="range" id="s-lab-clump" min="0" max="1" step="0.02" value="0.55">
+                <div class="val" id="v-lab-clump">0.55</div>
+            </div>
+            <div class="ctrl">
+                <label>Filament anisotropy</label>
+                <input type="range" id="s-lab-fil" min="0" max="1" step="0.02" value="0.45">
+                <div class="val" id="v-lab-fil">0.45</div>
+            </div>
+            <div class="ctrl">
+                <label>Brightness</label>
+                <input type="range" id="s-lab-i" min="0" max="4" step="0.05" value="0.85">
+                <div class="val" id="v-lab-i">0.85×</div>
+            </div>
+            <div class="sep" style="margin:6px 0"></div>
+            <div class="ctrl">
+                <label>Redshift z  (line center λ<sub>obs</sub> = 121.567(1+z) nm)</label>
+                <input type="range" id="s-lab-z" min="0" max="6" step="0.01" value="2.219">
+                <div class="val" id="v-lab-z">z = 2.219  (TON 618;  λ<sub>obs</sub> ≈ 391 nm)</div>
+            </div>
+            <div class="ctrl">
+                <label>Bulk outflow v<sub>out</sub> at r<sub>LAB</sub> [km/s]</label>
+                <input type="range" id="s-lab-vout" min="0" max="1500" step="10" value="600">
+                <div class="val" id="v-lab-vout">600 km/s  (typical AGN-driven)</div>
+            </div>
+            <div class="ctrl">
+                <label>Outflow profile β  (v(r) = v<sub>out</sub>(r/r<sub>LAB</sub>)<sup>β</sup>)</label>
+                <input type="range" id="s-lab-beta" min="0" max="1.5" step="0.05" value="0.5">
+                <div class="val" id="v-lab-beta">0.50  (mild acceleration)</div>
+            </div>
+            <div class="ctrl">
+                <label>log N<sub>HI</sub>  (central column [cm⁻²])</label>
+                <input type="range" id="s-lab-nhi" min="18" max="22.5" step="0.1" value="20.5">
+                <div class="val" id="v-lab-nhi">20.5  (DLA-class)</div>
+            </div>
+            <div class="ctrl">
+                <label>Neufeld resonance suppression</label>
+                <input type="range" id="s-lab-neufeld" min="0" max="1" step="0.02" value="0.7">
+                <div class="val" id="v-lab-neufeld">0.70</div>
+            </div>
+            <div class="sep" style="margin:6px 0"></div>
+            <div class="toggle-row">
+                <input type="checkbox" id="labDoublePeak" checked>
+                <label for="labDoublePeak">Double-peak Neufeld spectrum (twin Gaussians ±Δv<sub>peak</sub>)</label>
+            </div>
+            <div class="toggle-row">
+                <input type="checkbox" id="showPolVectors">
+                <label for="showPolVectors">Polarization vector overlay (Rayleigh phase, tangential)</label>
+            </div>
+            <div class="ctrl">
+                <label>Polarization cap f<sub>pol,max</sub></label>
+                <input type="range" id="s-lab-polmax" min="0" max="0.30" step="0.005" value="0.12">
+                <div class="val" id="v-lab-polmax">12.0 %  (typical LAB)</div>
+            </div>
+            <div class="btn-row" style="margin-top:6px">
+                <button class="btn-sm" id="btnCantalupo">⊞ Cantalupo Cosmic Web</button>
+                <button class="btn-sm" id="btnLabReset">↺ defaults</button>
+            </div>
+            <div class="note">Phase 2.2: anisotropic Rayleigh-like scattering
+                tracks Stokes Q/U through the raymarch; the overlay draws
+                tangential ticks at last-scatter PA on a 36-pixel grid,
+                length ∝ f<sub>pol</sub> normalized to the cap. Twin Gaussians
+                emerge displaced by ±0.92(aτ₀)<sup>1/3</sup> v<sub>th</sub>
+                (Neufeld 1990); outflow suppresses the blue peak by
+                exp(−2 v<sub>los</sub>/v<sub>th</sub>) (Verhamme 2006).</div>
+        </div>
+
+        <div>
+            <div class="sec-title">Overlays</div>
+            <div class="toggle-row">
+                <input type="checkbox" id="showGrid">
+                <label for="showGrid">3-D coordinate grid shells (10M, 30M)</label>
+            </div>
+            <div class="toggle-row">
+                <input type="checkbox" id="showPhotonSphere">
+                <label for="showPhotonSphere">Photon-sphere shell glow (r = 3M)</label>
+            </div>
+        </div>
+
+        <div>
+            <div class="sec-title">Photon sub-rings &amp; deep sky</div>
+            <div class="toggle-row">
+                <input type="checkbox" id="showSubrings" checked>
+                <label for="showSubrings">Highlight n=1, 2 photon sub-rings (Gralla-Holz-Wald)</label>
+            </div>
+            <div class="ctrl">
+                <label>Sub-ring strength</label>
+                <input type="range" id="s-subring" min="0" max="3" step="0.05" value="1">
+                <div class="val" id="v-subring">1.00×</div>
+            </div>
+            <div class="ctrl">
+                <label>Deep-sky brightness</label>
+                <input type="range" id="s-sky" min="0" max="2" step="0.05" value="1">
+                <div class="val" id="v-sky">1.00×</div>
+            </div>
+            <div class="note">Each successive photon sub-ring (rays that
+                orbit the BH 1, 2, … times before escape) is fainter by
+                exp(−π) ≈ 0.0432 — the strong-deflection asymptotic of
+                the Kerr critical curve. Their angular position is set by
+                b<sub>crit</sub> (and its Kerr-asymmetric counterpart at
+                a&gt;0); EHT-NG is being designed to resolve them.
+                Background: multi-octave Milky Way + Hα/OIII nebulae +
+                4-tier blackbody starfield.</div>
+        </div>
+
+        <div>
+            <div class="sec-title">Cinematic (HDR · ACES · bloom)</div>
+            <div class="toggle-row">
+                <input type="checkbox" id="bloomOn" checked>
+                <label for="bloomOn">Bloom + HDR float framebuffer</label>
+            </div>
+            <div class="ctrl">
+                <label>Exposure (stops)</label>
+                <input type="range" id="s-exposure" min="-3" max="3" step="0.05" value="0">
+                <div class="val" id="v-exposure">0.00 EV</div>
+            </div>
+            <div class="ctrl">
+                <label>Bloom threshold</label>
+                <input type="range" id="s-bloom-th" min="0.2" max="4" step="0.05" value="1.2">
+                <div class="val" id="v-bloom-th">1.20</div>
+            </div>
+            <div class="ctrl">
+                <label>Bloom soft knee</label>
+                <input type="range" id="s-bloom-knee" min="0.05" max="1.5" step="0.025" value="0.6">
+                <div class="val" id="v-bloom-knee">0.60</div>
+            </div>
+            <div class="ctrl">
+                <label>Bloom strength</label>
+                <input type="range" id="s-bloom-st" min="0" max="3" step="0.025" value="1.0">
+                <div class="val" id="v-bloom-st">1.00×</div>
+            </div>
+            <div class="note">RGBA16F scene framebuffer feeds a 2-pass
+                separable Gaussian bloom (Karis 2013, smooth-knee bright
+                pass) and an ACES filmic tonemap (Narkowicz 2015) on
+                composite. Exposure shifts in <i>stops</i> (× 2<sup>EV</sup>);
+                threshold and knee define the bright-pass curve.</div>
+        </div>
+
+        <div>
+            <div class="sec-title">Performance</div>
+            <div class="toggle-row">
+                <input type="checkbox" id="autoLOD" checked>
+                <label for="autoLOD">Auto-LOD (drop res while moving)</label>
+            </div>
+            <div class="ctrl">
+                <label>Far-field shortcut r [M] (0 = off)</label>
+                <input type="range" id="s-far" min="0" max="500" step="10" value="120">
+                <div class="val" id="v-far">120 M</div>
+            </div>
+            <div class="note">Geodesics that pass r and are heading outward
+                quit integration early — saves 30–50 % of step budget on wide
+                views without altering the celestial-sphere result.</div>
         </div>
 
         <div>
@@ -152,45 +740,81 @@ select {
         </div>
 
         <div>
+            <div class="sec-title">Share &amp; capture</div>
+            <div class="btn-row">
+                <button class="btn-sm" id="btnShare">⧉ Copy share link</button>
+                <button class="btn-sm" id="btnScreenshot">▣ Screenshot PNG</button>
+            </div>
+            <div class="btn-row" style="margin-top:6px">
+                <button class="btn-sm" id="btnRecord">● Start recording</button>
+                <button class="btn-sm" id="btnEmbed">⧉ Embed link</button>
+            </div>
+            <div class="note">Share links round-trip every slider through
+                <code>window.location.hash</code> — only values that differ
+                from defaults are encoded, so URLs stay short. Recording
+                tries MP4 H.264 first, falls back to WebM VP9. Add
+                <code>?embed=1</code> to the URL to hide all chrome for
+                iframe embeds; the dedicated button above creates that
+                URL with the current state pre-applied.</div>
+        </div>
+
+        <div>
             <div class="sec-title">Validation</div>
             <button class="btn" id="btnValidate">⊙ Measure photon ring</button>
-            <div class="note">Expected apparent ring radius at infinity:
-                <b>b_crit = 3√3 M ≈ 5.196 M</b> = <b>2.598 r_s</b>
-                (Bardeen-Press-Teukolsky, Schwarzschild).</div>
+            <div class="note">At a = 0: <b>b_crit = 3√3 M ≈ 5.196 M</b> = <b>2.598 r_s</b>
+                (Bardeen-Press-Teukolsky 1972). At a &gt; 0 the shadow rim becomes
+                asymmetric — the column-extent measurement here is a single-axis
+                proxy; full Bardeen 1973 contour validation lands in Phase 1.5.</div>
         </div>
 
         <div class="sep"></div>
         <div class="info-box">
-            <b>Phase 0 physics</b><br>
-            <span style="color:#ffaa44">① Tetrad:</span> static-observer orthonormal frame
-            {e_(t), e_(r), e_(θ), e_(φ)} in Schwarzschild coords; valid only for r &gt; 2M.<br>
-            <span style="color:#ffaa44">② Ray construction:</span> pixel → local 3-direction
-            → null 4-momentum k^μ via tetrad.<br>
-            <span style="color:#ffaa44">③ Integration:</span> Cash-Karp RK4(5) adaptive on 8-D
-            phase space (t, r, θ, φ, k^t, k^r, k^θ, k^φ).<br>
-            <span style="color:#ffaa44">④ Termination:</span> horizon capture at r ≲ 2M, or
-            escape past r_far = 1200 M onto the celestial sphere.<br>
-            <span style="color:#ffaa44">⑤ Starfield:</span> procedural, hash-based — lensed
-            by construction (the shadow + photon-ring pattern emerges from the geodesics, not
-            a post-process).
+            <b>Phase 1 physics</b><br>
+            <span style="color:#ffaa44">① Metric:</span> Kerr in Boyer-Lindquist
+            (Σ = r²+a²cos²θ, Δ = r²−2r+a², A = (r²+a²)²−a²Δsin²θ). Reduces
+            continuously to Schwarzschild at a = 0.<br>
+            <span style="color:#ffaa44">② Geodesics:</span> Hamilton's equations
+            on (x<sup>μ</sup>, p<sub>μ</sub>) — p<sub>t</sub> and p<sub>φ</sub> exactly
+            conserved (Killing vectors). ∂<sub>r</sub>H, ∂<sub>θ</sub>H by central
+            difference.<br>
+            <span style="color:#ffaa44">③ Tetrad:</span> ZAMO frame (Bardeen-
+            Press-Teukolsky 1972) — locally non-rotating, valid through the
+            ergosphere; Keplerian boost in the equatorial plane.<br>
+            <span style="color:#ffaa44">④ Termination:</span> horizon capture
+            at r ≲ r<sub>+</sub>(a) = 1+√(1−a²), or escape past r<sub>far</sub> = 1200 M.<br>
+            <span style="color:#ffaa44">⑤ Disk:</span> spin-correct Kerr
+            Keplerian Ω<sub>K</sub> = 1/(r<sup>3/2</sup>+a) drives the Doppler
+            asymmetry; ISCO snaps to BPT-1972 prograde value.<br>
+            <span style="color:#ffaa44">⑥ Inspector:</span> click any pixel to
+            re-run the geodesic in JS and read off E, L<sub>z</sub>, Carter Q,
+            their drift, b, r<sub>min</sub>, total Δφ.
         </div>
         <div class="note">
             UI note: TON 618 mass is <i>measured</i> (virial/SED);
-            spin <i>a = 0.95</i> (Phase 1 default) is <i>inferred</i>;
-            super-Eddington phases are <i>hypothetical</i>.
+            high spin <i>a ≈ 0.95</i> is <i>inferred</i>; super-Eddington
+            phases are <i>hypothetical</i>.
         </div>
     </aside>
 </div>
 
 <script type="module">
     import { boot } from './js/ton618/main.js';
+    import {
+        applyHash, encodeState, installAutoSync, copyShareLink,
+        downloadScreenshot, createRecorder, applyEmbedMode,
+    } from './js/ton618/share.js';
 
-    const canvas = document.getElementById('glCanvas');
-    const hud    = document.getElementById('hud');
+    const canvas        = document.getElementById('glCanvas');
+    const hud           = document.getElementById('hud');
+    const minimapCanvas = document.getElementById('minimap');
 
-    const app = await boot({ canvas, hud });
+    applyEmbedMode();
+    const app = await boot({ canvas, hud, minimapCanvas });
+    // Apply the URL hash *after* boot — boot sets defaults; the hash overrides
+    // only the keys that were explicitly serialized (= differ from defaults).
+    applyHash(app, window.location.hash);
+    installAutoSync(app.state);
 
-    // ── panel wiring ───────────────────────────────────────────────
     const $ = (id) => document.getElementById(id);
 
     function bindRange(id, valId, fmt, onChange) {
@@ -202,13 +826,496 @@ select {
         });
     }
 
-    bindRange('s-r',     'v-r',     (v) => `${v.toFixed(1)} M`,   (v) => { app.state.cam.r = v; app.forceRender(); });
-    bindRange('s-theta', 'v-theta', (v) => `${v.toFixed(0)}°`,    (v) => { app.state.cam.theta = (v * Math.PI) / 180; app.forceRender(); });
-    bindRange('s-phi',   'v-phi',   (v) => `${v.toFixed(0)}°`,    (v) => { app.state.cam.phi   = (v * Math.PI) / 180; app.forceRender(); });
-    bindRange('s-fov',   'v-fov',   (v) => `${v.toFixed(0)}°`,    (v) => { app.setFov(v); });
+    bindRange('s-r',     'v-r',     (v) => `${v.toFixed(1)} M`,
+        (v) => { app.state.cam.r = v;             app.state.cam.transition = null; app.forceRender(); });
+    bindRange('s-theta', 'v-theta', (v) => `${v.toFixed(0)}°`,
+        (v) => { app.state.cam.theta = (v * Math.PI) / 180; app.state.cam.transition = null; app.forceRender(); });
+    bindRange('s-phi',   'v-phi',   (v) => `${v.toFixed(0)}°`,
+        (v) => { app.state.cam.phi   = (v * Math.PI) / 180; app.state.cam.transition = null; app.forceRender(); });
+    bindRange('s-fov',   'v-fov',   (v) => `${v.toFixed(0)}°`,
+        (v) => { app.setFov(v); });
 
+    bindRange('s-spin', 'v-spin',
+        (v) => {
+            let label;
+            if (v < 0.01)      label = 'Schwarzschild';
+            else if (v < 0.3)  label = 'slow rotator';
+            else if (v < 0.7)  label = 'moderate spin';
+            else if (v < 0.95) label = 'fast spin';
+            else if (v < 0.998)label = 'near-extremal';
+            else               label = 'extremal limit';
+            return `${v.toFixed(3)}  (${label})`;
+        },
+        (v) => app.setSpin(v));
+    $('snapIsco').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.autoSnapIscoToSpin) app.toggleAutoSnapIsco();
+    });
+
+    $('observer').addEventListener('change', (e) => app.setObserverType(e.target.value));
     $('quality').addEventListener('change', (e) => app.setQuality(e.target.value));
     $('showRing').addEventListener('change', () => app.toggleRing());
+
+    // Disk + grid controls
+    $('showDisk').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showDisk) app.toggleDisk();
+    });
+    $('showGrid').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showGrid) app.toggleGrid();
+    });
+    $('showPhotonSphere').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showPhotonSphere) app.togglePhotonSphere();
+    });
+    $('showHotspot').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showHotspot) app.toggleHotspot();
+    });
+    $('anim').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.animate) app.toggleAnim();
+    });
+    $('diskMode').addEventListener('change', (e) => app.setDiskMode(e.target.value));
+
+    bindRange('s-disk-in', 'v-disk-in',
+        (v) => `${v.toFixed(1)} M${Math.abs(v - 6) < 0.05 ? ' (ISCO)' : ''}`,
+        (v) => app.setDiskInner(v));
+    bindRange('s-disk-out', 'v-disk-out',
+        (v) => `${v.toFixed(1)} M`, (v) => app.setDiskOuter(v));
+    bindRange('s-disk-bright', 'v-disk-bright',
+        (v) => `${v.toFixed(2)}×`, (v) => app.setDiskBrightness(v));
+    bindRange('s-disk-T', 'v-disk-T',
+        (v) => {
+            let label;
+            if (v < 3500) label = 'red-hot';
+            else if (v < 6500) label = 'sun-like';
+            else if (v < 10000) label = 'white-hot';
+            else if (v < 20000) label = 'blue-hot';
+            else label = 'UV';
+            return `${(v|0)} K (${label})`;
+        },
+        (v) => app.setDiskTInner(v));
+    bindRange('s-anim', 'v-anim',
+        (v) => `${v.toFixed(1)}×`, (v) => app.setAnimSpeed(v));
+    bindRange('s-hot-r', 'v-hot-r',
+        (v) => `${v.toFixed(1)} M`, (v) => app.setHotspotRadius(v));
+
+    // ── Disk regime (Tier 2A) ─────────────────────────────────────
+    $('regimeAuto').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.regimeAuto) app.toggleRegimeAuto();
+    });
+    // Live regime tag — refreshes every 500 ms (cheap; just a string read).
+    setInterval(() => {
+        const tag = app.getRegimeName?.();
+        if (tag) $('v-regime').textContent = `regime: ${tag}`;
+    }, 500);
+
+    // ── Disk dynamics (B1, B2) ────────────────────────────────────
+    bindRange('s-disk-h', 'v-disk-h',
+        (v) => v < 0.005 ? '0.000  (razor-thin)' :
+               v < 0.05  ? `${v.toFixed(3)}  (thin)` :
+               v < 0.15  ? `${v.toFixed(3)}  (standard)` :
+               v < 0.3   ? `${v.toFixed(3)}  (slim)` :
+                           `${v.toFixed(3)}  (super-slim)`,
+        (v) => app.setDiskHOverR(v));
+    bindRange('s-mri', 'v-mri',
+        (v) => v.toFixed(2), (v) => app.setMriStrength(v));
+
+    // ── Multi-hot-spot field (B4) ─────────────────────────────────
+    bindRange('s-nspots', 'v-nspots',
+        (v) => `${v|0}`, (v) => app.setNHotspots(v));
+
+    // ── Time scrubber + pause + QPO (B6, B7) ──────────────────────
+    const sTime = $('s-time');
+    const vTime = $('v-time');
+    function fmtTimeLabel(t) {
+        // Convert sim-seconds into TON 618 real-time. The shader sees
+        // t_eff = u_time · shear_speed in geometric M-units, and one M-unit of
+        // time is M_meters/c real seconds at TON 618 mass.
+        const d = app.diagnostics();
+        const realSec = t * app.state.diskShearSpeed * d.sim_seconds_per_M;
+        const yr = realSec / (3600 * 24 * 365.25);
+        const orbits = (d.isco_period_seconds > 0) ? (realSec / d.isco_period_seconds) : null;
+        const s = `${t.toFixed(2)} s`;
+        let real;
+        if (yr < 1/365)         real = `${(realSec).toFixed(1)} s_real`;
+        else if (yr < 1)        real = `${(yr*365).toFixed(1)} d`;
+        else if (yr < 1000)     real = `${yr.toFixed(1)} yr`;
+        else                    real = `${yr.toExponential(2)} yr`;
+        const orbStr = (orbits != null) ? `, ${orbits.toFixed(2)} ISCO orb` : '';
+        return `${s}  (≈ ${real}${orbStr})`;
+    }
+    sTime.addEventListener('input', () => {
+        const t = +sTime.value;
+        app.setTime(t);
+        vTime.innerHTML = fmtTimeLabel(t);
+    });
+    // Mirror simulation time back into the scrubber while playing.
+    setInterval(() => {
+        if (!document.activeElement || document.activeElement.id !== 's-time') {
+            const t = app.getTime();
+            if (t > +sTime.max) sTime.max = (Math.ceil(t / 100) * 100).toString();
+            sTime.value = t.toFixed(2);
+            vTime.innerHTML = fmtTimeLabel(t);
+        }
+    }, 250);
+
+    $('btnPause').addEventListener('click', () => {
+        if (app.state.animate) app.toggleAnim();
+        else                   app.toggleAnim();
+        $('btnPause').textContent = app.state.animate ? '⏸ pause' : '▶ play';
+        $('anim').checked = app.state.animate;
+    });
+    $('btnQPO').addEventListener('click', () => {
+        app.triggerQPOFlare(1.0, 2.5);
+    });
+
+    // ── Lindblad resonance overlay (B3) ──────────────────────────
+    $('showLindblad').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showLindblad) app.toggleLindblad();
+    });
+    bindRange('s-lindblad-rp', 'v-lindblad-rp',
+        (v) => `${v.toFixed(1)} M`, (v) => app.setLindbladRp(v));
+
+    // ── Lyman-α blob (Phase 2.1) ─────────────────────────────────
+    $('showLab').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showLab) app.toggleLab();
+    });
+    $('labMechanism').addEventListener('change', (e) => app.setLabMechanism(+e.target.value));
+    bindRange('s-lab-r', 'v-lab-r',
+        (v) => v >= 350 && v <= 500 ? `${(v|0)} kpc  (Slug-class)`
+            : v < 150 ? `${(v|0)} kpc  (compact LAB)`
+            : v > 600 ? `${(v|0)} kpc  (super-Slug)`
+            : `${(v|0)} kpc`,
+        (v) => app.setLabRadiusKpc(v));
+    bindRange('s-lab-rin', 'v-lab-rin',
+        (v) => `${v.toFixed(1)} kpc`, (v) => app.setLabInnerKpc(v));
+    bindRange('s-lab-alpha', 'v-lab-alpha',
+        (v) => v.toFixed(2), (v) => app.setLabAlpha(v));
+    bindRange('s-lab-clump', 'v-lab-clump',
+        (v) => v.toFixed(2), (v) => app.setLabClump(v));
+    bindRange('s-lab-fil', 'v-lab-fil',
+        (v) => v.toFixed(2), (v) => app.setLabFilament(v));
+    bindRange('s-lab-i', 'v-lab-i',
+        (v) => `${v.toFixed(2)}×`, (v) => app.setLabIntensity(v));
+    bindRange('s-lab-z', 'v-lab-z',
+        (v) => {
+            const lam = (121.567 * (1 + v)).toFixed(0);
+            const tag = Math.abs(v - 2.219) < 0.05 ? 'TON 618' :
+                        v < 0.5  ? 'low-z'   :
+                        v < 1.5  ? 'cosmic noon precursor' :
+                        v < 3.5  ? 'cosmic noon' :
+                        v < 5.5  ? 'reionization tail' :
+                                   'reionization';
+            return `z = ${v.toFixed(3)}  (${tag};  λ<sub>obs</sub> ≈ ${lam} nm)`;
+        },
+        (v) => app.setLabZ(v));
+    bindRange('s-lab-vout', 'v-lab-vout',
+        (v) => v < 100 ? `${(v|0)} km/s  (quiescent)` :
+               v < 400 ? `${(v|0)} km/s  (warm outflow)` :
+               v < 900 ? `${(v|0)} km/s  (typical AGN-driven)` :
+                         `${(v|0)} km/s  (super-wind)`,
+        (v) => app.setLabOutflow(v));
+    bindRange('s-lab-beta', 'v-lab-beta',
+        (v) => v < 0.2 ? `${v.toFixed(2)}  (uniform)` :
+               v < 0.7 ? `${v.toFixed(2)}  (mild acceleration)` :
+                         `${v.toFixed(2)}  (steep accel.)`,
+        (v) => app.setLabOutflowBeta(v));
+    bindRange('s-lab-nhi', 'v-lab-nhi',
+        (v) => v < 19  ? `${v.toFixed(1)}  (sub-LLS)` :
+               v < 20  ? `${v.toFixed(1)}  (LLS-class)` :
+               v < 20.3 ? `${v.toFixed(1)}  (sub-DLA)` :
+               v < 21.5 ? `${v.toFixed(1)}  (DLA-class)` :
+                          `${v.toFixed(1)}  (proximate-DLA / molecular)`,
+        (v) => app.setLabLogNHI(v));
+    bindRange('s-lab-neufeld', 'v-lab-neufeld',
+        (v) => v < 0.05 ? `${v.toFixed(2)}  (off — pure emission)` :
+               v < 0.4  ? `${v.toFixed(2)}  (mild)` :
+               v < 0.8  ? `${v.toFixed(2)}  (full)` :
+                          `${v.toFixed(2)}  (extreme)`,
+        (v) => app.setLabNeufeld(v));
+
+    // ── Phase 2.2 — polarization + double-peak toggles ─────────────
+    $('labDoublePeak').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.labDoublePeak) app.toggleDoublePeak();
+    });
+    $('showPolVectors').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showPolVectors) app.togglePolVectors();
+    });
+    bindRange('s-lab-polmax', 'v-lab-polmax',
+        (v) => `${(v*100).toFixed(1)} %  ${v < 0.05 ? '(weak)' : v < 0.10 ? '(LAB-low)' : v < 0.18 ? '(typical LAB)' : '(extreme)'}`,
+        (v) => app.setLabPolMax(v));
+
+    // Snap every LAB-related DOM slider to the live state. Called after a
+    // preset application so the panel readouts agree with what's on screen.
+    function syncLabPanelToState() {
+        const s = app.state;
+        const setRange = (id, val, valId, label) => {
+            const el = $(id); if (!el) return;
+            el.value = val;
+            if (valId && label != null) $(valId).innerHTML = label;
+        };
+        $('showLab').checked         = !!s.showLab;
+        $('labMechanism').value      = String(s.labMechanism | 0);
+        setRange('s-lab-r',       s.labRadiusKpc,       'v-lab-r',       `${(s.labRadiusKpc|0)} kpc`);
+        setRange('s-lab-rin',     s.labInnerKpc,        'v-lab-rin',     `${s.labInnerKpc.toFixed(1)} kpc`);
+        setRange('s-lab-alpha',   s.labAlpha,           'v-lab-alpha',   s.labAlpha.toFixed(2));
+        setRange('s-lab-clump',   s.labClump,           'v-lab-clump',   s.labClump.toFixed(2));
+        setRange('s-lab-fil',     s.labFilament,        'v-lab-fil',     s.labFilament.toFixed(2));
+        setRange('s-lab-i',       s.labIntensity,       'v-lab-i',       `${s.labIntensity.toFixed(2)}×`);
+        setRange('s-lab-z',       s.labZ,               'v-lab-z',       `z = ${s.labZ.toFixed(3)}`);
+        setRange('s-lab-vout',    s.labOutflowKms,      'v-lab-vout',    `${(s.labOutflowKms|0)} km/s`);
+        setRange('s-lab-beta',    s.labOutflowBeta,     'v-lab-beta',    s.labOutflowBeta.toFixed(2));
+        setRange('s-lab-nhi',     s.labLogNHI,          'v-lab-nhi',     s.labLogNHI.toFixed(1));
+        setRange('s-lab-neufeld', s.labNeufeld,         'v-lab-neufeld', s.labNeufeld.toFixed(2));
+        setRange('s-lab-polmax',  s.labPolMax,          'v-lab-polmax',  `${(s.labPolMax*100).toFixed(1)} %`);
+        $('labDoublePeak').checked = !!s.labDoublePeak;
+    }
+
+    $('btnCantalupo').addEventListener('click', () => {
+        app.applyLabPreset('cantalupo');
+        syncLabPanelToState();
+    });
+    $('btnLabReset').addEventListener('click', () => {
+        app.applyLabPreset('slug-default');
+        syncLabPanelToState();
+    });
+
+    // ── Disk warp (B5) ───────────────────────────────────────────
+    $('diskWarp').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.diskWarpOn) app.toggleWarp();
+    });
+    bindRange('s-warp-a', 'v-warp-a',
+        (v) => `${v.toFixed(0)}°`, (v) => app.setWarpAngle(v));
+    bindRange('s-warp-p', 'v-warp-p',
+        (v) => `${v.toFixed(0)}°`, (v) => app.setWarpPsi(v));
+
+    // ── Multi-component radiation controls ─────────────────────────
+    $('showJets').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showJets) app.toggleJets();
+    });
+    $('showCorona').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showCorona) app.toggleCorona();
+    });
+    $('showWind').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showWind) app.toggleWind();
+    });
+    $('showFeLine').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showFeLine) app.toggleFeLine();
+    });
+    bindRange('s-jet-v', 'v-jet-v',
+        (v) => {
+            const gamma = 1 / Math.sqrt(Math.max(1 - v * v, 1e-9));
+            return `${v.toFixed(3)} c   (γ ≈ ${gamma.toFixed(2)})`;
+        }, (v) => app.setJetVelocity(v));
+    bindRange('s-jet-a', 'v-jet-a', (v) => v.toFixed(2), (v) => app.setJetAlpha(v));
+    bindRange('s-jet-o', 'v-jet-o', (v) => `${v.toFixed(0)}°`,
+        (v) => app.setJetOpen((v * Math.PI) / 180));
+    bindRange('s-jet-i', 'v-jet-i', (v) => v.toFixed(3), (v) => app.setJetIntensity(v));
+
+    // ── BZ + MAD (Tier 2B) ────────────────────────────────────────
+    $('bzAuto').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.bzAuto) app.toggleBzAuto();
+    });
+    bindRange('s-magphi', 'v-magphi',
+        (v) => v < 0.05 ? `${v.toFixed(2)}  (no flux)` :
+               v < 0.5  ? `${v.toFixed(2)}  (SANE — building)` :
+               v < 1.0  ? `${v.toFixed(2)}  (SANE — pre-MAD)` :
+               v < 1.15 ? `${v.toFixed(2)}  (MAD — saturated)` :
+                          `${v.toFixed(2)}  (super-MAD)`,
+        (v) => app.setMagnetization(v));
+    setInterval(() => {
+        const bz = app.getBzState?.();
+        if (!bz) return;
+        const tag = bz.isMAD ? 'MAD' : 'SANE';
+        const tagColor = bz.isMAD ? '#ff6644' : '#88dd66';
+        $('v-mad-state').innerHTML =
+            `η<sub>BZ</sub> = ${(bz.eta*100).toFixed(1)} %  ` +
+            `<span style="color:${tagColor}">${tag}</span>  ` +
+            `(η<sub>MAD</sub>(a) = ${(bz.etaMax*100).toFixed(1)} %)`;
+    }, 500);
+    bindRange('s-cor-r', 'v-cor-r', (v) => `${v.toFixed(1)} M`, (v) => app.setCoronaRadius(v));
+    bindRange('s-cor-i', 'v-cor-i', (v) => v.toFixed(3), (v) => app.setCoronaIntensity(v));
+    bindRange('s-cor-y', 'v-cor-y',
+        (v) => {
+            const G = 0.5 + Math.sqrt(2.25 + 4 / (3 * Math.max(v, 0.05)));
+            const tag = G < 1.9 ? 'hard (jet-dominated)' :
+                        G < 2.2 ? 'hard (luminous AGN)' :
+                        G < 2.6 ? 'typical AGN' :
+                        G < 3.2 ? 'soft (low-y RIAF)' :
+                                  'very soft';
+            return `y = ${v.toFixed(2)} &nbsp; Γ = ${G.toFixed(2)} (${tag})`;
+        },
+        (v) => app.setCoronaY(v));
+    bindRange('s-wind-i', 'v-wind-i', (v) => v.toFixed(3), (v) => app.setWindIntensity(v));
+    bindRange('s-fe-i', 'v-fe-i', (v) => v.toFixed(2), (v) => app.setFeIntensity(v));
+    bindRange('s-mdot', 'v-mdot',
+        (v) => {
+            let label;
+            if (v < 0.005) label = 'RIAF (LLAGN)';
+            else if (v < 0.05) label = 'sub-Eddington';
+            else if (v < 0.3) label = 'typical AGN';
+            else if (v < 1.0) label = 'near-Eddington';
+            else label = 'super-Eddington';
+            return `${v.toFixed(3)}  (${label})`;
+        }, (v) => app.setMdotRel(v));
+
+    // ── Sub-rings + sky (Tier 1B) ──────────────────────────────────
+    $('showSubrings').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showSubrings) app.toggleSubrings();
+    });
+    bindRange('s-subring', 'v-subring',
+        (v) => `${v.toFixed(2)}×`, (v) => app.setSubringStrength(v));
+    bindRange('s-sky', 'v-sky',
+        (v) => `${v.toFixed(2)}×`, (v) => app.setSkyStrength(v));
+
+    // ── Cinematic (Tier 1A) ────────────────────────────────────────
+    $('bloomOn').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.bloomEnabled) app.toggleBloom();
+    });
+    bindRange('s-exposure', 'v-exposure',
+        (v) => `${v >= 0 ? '+' : ''}${v.toFixed(2)} EV  (×${Math.pow(2, v).toFixed(2)})`,
+        (v) => app.setExposureStops(v));
+    bindRange('s-bloom-th', 'v-bloom-th',
+        (v) => v.toFixed(2), (v) => app.setBloomThreshold(v));
+    bindRange('s-bloom-knee', 'v-bloom-knee',
+        (v) => v.toFixed(2), (v) => app.setBloomKnee(v));
+    bindRange('s-bloom-st', 'v-bloom-st',
+        (v) => `${v.toFixed(2)}×`, (v) => app.setBloomStrength(v));
+
+    // ── Performance ────────────────────────────────────────────────
+    $('autoLOD').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.autoLOD) app.toggleAutoLOD();
+    });
+    bindRange('s-far', 'v-far',
+        (v) => v == 0 ? 'off' : `${(v|0)} M`, (v) => app.setFarShortcutR(v));
+
+    // ── Pixel inspector ────────────────────────────────────────────
+    const inspector = $('inspector');
+    const inspBody  = $('inspector-body');
+    $('ic-close').addEventListener('click', () => { inspector.style.display = 'none'; });
+    app.onInspect((r) => {
+        inspector.style.display = 'block';
+        const bRel = r.b_impact / r.b_crit;
+        const fmtPct = (x) => Math.abs(x) < 1e-6 ? '0.000 %' : x.toExponential(3) + ' %';
+        const lines = [
+            `pixel (${r._click_x}, ${r._click_y})   spin a = ${(r.spin ?? 0).toFixed(3)}`,
+            `term       : ${r.term.toUpperCase()}`,
+            `verdict    : ${r.verdict}`,
+            `impact b   : ${r.b_impact.toFixed(4)} M  (b/b_crit_Schw = ${bRel.toFixed(4)})`,
+            `b_crit     : ${r.b_crit.toFixed(4)} M  (Schwarzschild ref)`,
+            `r_min      : ${r.r_min.toFixed(3)} M   (horizon r₊ = ${r.r_horizon.toFixed(3)}M, ISCO_pro = ${(r.r_isco_pro ?? 6).toFixed(3)}M)`,
+            `r_max      : ${r.r_max.toFixed(3)} M`,
+            `Δφ total   : ${(r.deflection_total).toFixed(3)} rad   (${(r.deflection_total*180/Math.PI).toFixed(1)}°)`,
+            `eq. crossings: ${r.equator_crossings}`,
+            `steps      : ${r.steps}`,
+            `─── conservation drift (RK4 fixed-step, Hamilton form) ───`,
+            `E   drift  : ${fmtPct(r.E_drift_pct)}    (Killing ∂_t)`,
+            `L_z drift  : ${fmtPct(r.L_drift_pct)}    (Killing ∂_φ)`,
+            `Q   drift  : ${fmtPct(r.Q_drift_pct ?? 0)}    (Carter)`,
+        ];
+        if (r.lab_polarization_fraction != null) {
+            lines.push(
+                `─── LAB sightline (Lyα halo) ────────────────`,
+                `λ_obs       : ${r.lab_lambda_obs_nm.toFixed(2)} nm`,
+                `R_half      : ${r.lab_R_half_kpc.toFixed(2)} kpc`,
+                `τ₀(central) : ${r.lab_tau0_central.toExponential(2)}`,
+                `P_esc(cen)  : ${r.lab_P_esc_central.toFixed(3)}`,
+                `f_pol       : ${(r.lab_polarization_fraction * 100).toFixed(2)} %  (max 15 %, tangential)`,
+                `PA_pol      : ${r.lab_polarization_PA_deg.toFixed(1)}°  (perpendicular to projected radial)`,
+            );
+        }
+        inspBody.textContent = lines.join('\n');
+    });
+
+    const flyToggle = $('flyMode');
+    const flyPill   = $('fly-pill');
+    flyToggle.addEventListener('change', () => {
+        if (flyToggle.checked !== app.state.cam.flyMode) {
+            app.toggleFlyMode();
+        }
+        flyPill.classList.toggle('on', app.state.cam.flyMode);
+    });
+    // Sync the pill if the user presses F instead of clicking the checkbox.
+    setInterval(() => {
+        const on = app.state.cam.flyMode;
+        flyToggle.checked = on;
+        flyPill.classList.toggle('on', on);
+    }, 250);
+
+    document.querySelectorAll('[data-preset]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const name = btn.getAttribute('data-preset');
+            app.applyPreset(name);
+            // Sync the sliders to the preset target after the transition begins;
+            // since the cam state lerps, watch a frame later.
+            setTimeout(() => {
+                $('s-r').value     = app.state.cam.r.toFixed(1);
+                $('v-r').textContent = `${app.state.cam.r.toFixed(1)} M`;
+                $('s-theta').value = (app.state.cam.theta * 180 / Math.PI).toFixed(0);
+                $('v-theta').textContent = `${(app.state.cam.theta * 180 / Math.PI).toFixed(0)}°`;
+                $('s-phi').value   = ((app.state.cam.phi * 180 / Math.PI) + 360) % 360;
+                $('v-phi').textContent = `${(((app.state.cam.phi * 180 / Math.PI) + 360) % 360).toFixed(0)}°`;
+                $('s-fov').value   = (app.state.cam.fovY * 180 / Math.PI).toFixed(0);
+                $('v-fov').textContent = `${(app.state.cam.fovY * 180 / Math.PI).toFixed(0)}°`;
+            }, 1500);
+        });
+    });
+
+    // ── Share & capture (Tier 1C) ──────────────────────────────────
+    const toast = $('toast');
+    function showToast(msg, ms = 2200) {
+        toast.textContent = msg;
+        toast.classList.add('show');
+        clearTimeout(showToast._t);
+        showToast._t = setTimeout(() => toast.classList.remove('show'), ms);
+    }
+    $('btnShare').addEventListener('click', async () => {
+        const r = await copyShareLink(app.state);
+        showToast(r.ok ? 'Share link copied to clipboard' : 'Could not copy — URL printed to console');
+        if (!r.ok) console.log('share URL:', r.url);
+    });
+    $('btnScreenshot').addEventListener('click', () => {
+        // Force a fresh render before capturing so the PNG includes any
+        // pending state changes that hadn't redrawn yet.
+        app.forceRender();
+        // Wait one frame so the GPU has actually composited.
+        requestAnimationFrame(() => {
+            downloadScreenshot(canvas, 'ton618');
+            showToast('Screenshot downloaded');
+        });
+    });
+    const recorder = createRecorder(canvas, { fps: 30 });
+    const recBtn = $('btnRecord');
+    let recTimer = null;
+    recBtn.addEventListener('click', () => {
+        if (recorder.isRecording()) {
+            recorder.stop();
+            clearInterval(recTimer); recTimer = null;
+            recBtn.innerHTML = '● Start recording';
+            showToast(`Stopped — saving ${recorder.format()}…`);
+        } else {
+            try {
+                recorder.start();
+                recBtn.innerHTML = '<span class="rec-dot"></span> 0.0 s · stop';
+                recTimer = setInterval(() => {
+                    recBtn.innerHTML = `<span class="rec-dot"></span> ${recorder.elapsedSec().toFixed(1)} s · stop`;
+                }, 200);
+                showToast(`Recording ${recorder.format()}`);
+            } catch (e) {
+                showToast(`Record unsupported: ${e.message ?? e}`);
+            }
+        }
+    });
+    $('btnEmbed').addEventListener('click', async () => {
+        const url = new URL(window.location.href);
+        url.hash = encodeState(app.state);
+        url.searchParams.set('embed', '1');
+        const s = url.toString();
+        try {
+            await navigator.clipboard.writeText(s);
+            showToast('Embed link copied (use as iframe src)');
+        } catch (e) {
+            console.log('embed URL:', s);
+            showToast('Embed URL printed to console');
+        }
+    });
 
     $('btnValidate').addEventListener('click', () => {
         const v = $('validation');
@@ -220,16 +1327,36 @@ select {
                 v.textContent = 'validation failed: no shadow detected';
                 return;
             }
-            const pass = Math.abs(result.error_pct) < 1.0;
-            v.textContent = [
-                `PHOTON RING VALIDATION`,
-                `  measured b  = ${result.b_measured.toFixed(4)} M`,
-                `  expected b  = ${result.b_expected.toFixed(4)} M`,
-                `  measured    = ${result.ring_rs.toFixed(4)} r_s`,
-                `  expected    = ${result.ring_rs_expected.toFixed(4)} r_s`,
-                `  error       = ${result.error_pct.toFixed(3)} %`,
-                `  status      = ${pass ? 'PASS (< 1%)' : 'ATTN (> 1%)'}`,
-            ].join('\n');
+            const aTag = result.kerr_regime
+                ? `Kerr a = ${result.spin.toFixed(3)}`
+                : 'Schwarzschild a = 0';
+            const pass_v = Math.abs(result.error_pct) < 1.0;
+            const lines = [
+                `─── A. VERTICAL EXTENT (col) — Schwarzschild reference ───`,
+                `  measured b      = ${result.b_measured.toFixed(4)} M`,
+                `  schw b_crit     = ${result.b_expected.toFixed(4)} M`,
+                `  measured        = ${result.ring_rs.toFixed(4)} r_s`,
+                `  Δ vs Schw       = ${result.error_pct.toFixed(3)} %`,
+                `  status          = ${result.kerr_regime
+                    ? 'INFO (vertical extent is Kerr-shape-modified; see B)'
+                    : (pass_v ? 'PASS (< 1%)' : 'ATTN (> 1%)')}`,
+            ];
+            if (result.kerr_rim) {
+                const k = result.kerr_rim;
+                const pass_pro    = Math.abs(k.b_pro_err_pct)   < 2.0;
+                const pass_retro  = Math.abs(k.b_retro_err_pct) < 2.0;
+                const pass_shift  = Math.abs(k.shift_err_pct)   < 5.0;
+                const all_pass    = pass_pro && pass_retro && pass_shift;
+                lines.push(
+                    `─── B. KERR RIM (row) — Bardeen 1973 contour ────────────`,
+                    `  prograde   b_+  = ${k.b_pro_meas.toFixed(4)} M  (ref ${k.b_pro_ref.toFixed(4)})  Δ ${k.b_pro_err_pct.toFixed(2)}%`,
+                    `  retrograde b_-  = ${k.b_retro_meas.toFixed(4)} M  (ref ${k.b_retro_ref.toFixed(4)})  Δ ${k.b_retro_err_pct.toFixed(2)}%`,
+                    `  Δb / 2  shift   = ${k.shift_meas.toFixed(4)} M  (ref ${k.shift_ref.toFixed(4)})  Δ ${k.shift_err_pct.toFixed(2)}%`,
+                    `  status          = ${all_pass ? 'PASS (Δ < 2 % rims, < 5 % shift)' : 'ATTN — see deltas above'}`,
+                );
+            }
+            lines.unshift(`PHOTON RING / SHADOW MEASUREMENT  (${aTag})`);
+            v.textContent = lines.join('\n');
         }, 50);
     });
 </script>

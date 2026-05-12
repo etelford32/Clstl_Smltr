@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -41,8 +41,11 @@ jobs:
           for f in *.html; do
             cp "$f" build/web/ && echo "Copied $f"
           done
-          # Copy any top-level CSS/JS if present
-          for f in *.css *.js 2>/dev/null; do
+          # Copy any top-level CSS/JS if present. The [ -f ] guard handles
+          # the case where the glob doesn't match (bash leaves the literal
+          # pattern); 2>/dev/null after `in <glob>` is a syntax error in
+          # bash because that position only accepts word lists, not redirects.
+          for f in *.css *.js; do
             [ -f "$f" ] && cp "$f" build/web/ && echo "Copied $f"
           done
           # Copy JS modules directory
@@ -59,11 +62,11 @@ jobs:
             cp -r rust/www/* build/web/rust/www/ && echo "Copied rust/www/"
           fi
           # Copy static assets (images, logos, etc.)
-          for f in *.png *.jpg *.svg *.ico *.webp 2>/dev/null; do
+          for f in *.png *.jpg *.svg *.ico *.webp; do
             [ -f "$f" ] && cp "$f" build/web/ && echo "Copied $f"
           done
           # Copy sitemap/robots
-          for f in sitemap.xml robots.txt 2>/dev/null; do
+          for f in sitemap.xml robots.txt; do
             [ -f "$f" ] && cp "$f" build/web/ && echo "Copied $f"
           done
           # List what we're deploying
@@ -120,7 +123,7 @@ jobs:
 
       - name: Checkout
         if: steps.secrets-check.outputs.available == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Docker Buildx
         if: steps.secrets-check.outputs.available == 'true'

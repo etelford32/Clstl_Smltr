@@ -1,4 +1,154 @@
 /**
+ * @param {number} a0_km
+ * @param {number} bc_m2_per_kg
+ * @param {number} horizon_min
+ * @param {number} dt_sub_sec
+ * @param {number} out_stride_min
+ * @param {Float64Array} alt_grid_km
+ * @param {Float64Array} rho_grid_kg_m3
+ * @param {number} rho_scale
+ * @returns {Float64Array}
+ */
+export function drag_decay_rk4(a0_km, bc_m2_per_kg, horizon_min, dt_sub_sec, out_stride_min, alt_grid_km, rho_grid_kg_m3, rho_scale) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passArrayF64ToWasm0(alt_grid_km, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF64ToWasm0(rho_grid_kg_m3, wasm.__wbindgen_export);
+        const len1 = WASM_VECTOR_LEN;
+        wasm.drag_decay_rk4(retptr, a0_km, bc_m2_per_kg, horizon_min, dt_sub_sec, out_stride_min, ptr0, len0, ptr1, len1, rho_scale);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+        if (r3) {
+            throw takeObject(r2);
+        }
+        var v3 = getArrayF64FromWasm0(r0, r1).slice();
+        wasm.__wbindgen_export2(r0, r1 * 8, 8);
+        return v3;
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
+ * @returns {number}
+ */
+export function drag_stride() {
+    const ret = wasm.drag_stride();
+    return ret >>> 0;
+}
+
+/**
+ * JS-callable: one altitude point. Returns the 11-element array above.
+ * @param {number} year
+ * @param {number} doy
+ * @param {number} sec
+ * @param {number} alt_km
+ * @param {number} lat_deg
+ * @param {number} lon_deg
+ * @param {number} lst_hr
+ * @param {number} f107a
+ * @param {number} f107
+ * @param {Float64Array} ap_history
+ * @returns {Float64Array}
+ */
+export function nrlmsise00_density_point(year, doy, sec, alt_km, lat_deg, lon_deg, lst_hr, f107a, f107, ap_history) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passArrayF64ToWasm0(ap_history, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.nrlmsise00_density_point(retptr, year, doy, sec, alt_km, lat_deg, lon_deg, lst_hr, f107a, f107, ptr0, len0);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var v2 = getArrayF64FromWasm0(r0, r1).slice();
+        wasm.__wbindgen_export2(r0, r1 * 8, 8);
+        return v2;
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
+ * JS-callable: an altitude profile at fixed (lat, lon, time, forcing).
+ *
+ * Returns a flat Float64 array stride-12, where each row is:
+ *
+ *   [alt_km, He, O, N2, O2, Ar, mass_kg_m3, H, N, anom_O, T_exo, T_alt]
+ *
+ * This is the operator-grade replacement for the JS `sampleProfile()`
+ * fallback. One WASM call covers the whole drag-decay altitude grid
+ * (~50 points), avoiding 50 individual JS↔WASM round-trips.
+ * @param {number} year
+ * @param {number} doy
+ * @param {number} sec
+ * @param {number} lat_deg
+ * @param {number} lon_deg
+ * @param {number} lst_hr
+ * @param {number} f107a
+ * @param {number} f107
+ * @param {Float64Array} ap_history
+ * @param {Float64Array} alt_grid_km
+ * @returns {Float64Array}
+ */
+export function nrlmsise00_density_profile(year, doy, sec, lat_deg, lon_deg, lst_hr, f107a, f107, ap_history, alt_grid_km) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passArrayF64ToWasm0(ap_history, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF64ToWasm0(alt_grid_km, wasm.__wbindgen_export);
+        const len1 = WASM_VECTOR_LEN;
+        wasm.nrlmsise00_density_profile(retptr, year, doy, sec, lat_deg, lon_deg, lst_hr, f107a, f107, ptr0, len0, ptr1, len1);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var v3 = getArrayF64FromWasm0(r0, r1).slice();
+        wasm.__wbindgen_export2(r0, r1 * 8, 8);
+        return v3;
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
+ * Stride of the flat profile array — JS reads this once at boot to
+ * avoid hard-coding 12 in two places.
+ * @returns {number}
+ */
+export function nrlmsise00_profile_stride() {
+    const ret = wasm.nrlmsise00_profile_stride();
+    return ret >>> 0;
+}
+
+/**
+ * Compute osculating Keplerian elements from a TLE at one specific time.
+ * Returns a JSON-friendly object usable directly by JS.
+ * @param {string} line1
+ * @param {string} line2
+ * @param {number} tsince_min
+ * @returns {any}
+ */
+export function osculating_elements_at(line1, line2, tsince_min) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passStringToWasm0(line1, wasm.__wbindgen_export, wasm.__wbindgen_export3);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(line2, wasm.__wbindgen_export, wasm.__wbindgen_export3);
+        const len1 = WASM_VECTOR_LEN;
+        wasm.osculating_elements_at(retptr, ptr0, len0, ptr1, len1, tsince_min);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        if (r2) {
+            throw takeObject(r1);
+        }
+        return takeObject(r0);
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
  * Parse a TLE and return orbital elements as JSON-friendly object.
  * @param {string} line1
  * @param {string} line2
@@ -7,9 +157,9 @@
 export function parse_tle_info(line1, line2) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        const ptr0 = passStringToWasm0(line1, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const ptr0 = passStringToWasm0(line1, wasm.__wbindgen_export, wasm.__wbindgen_export3);
         const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(line2, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const ptr1 = passStringToWasm0(line2, wasm.__wbindgen_export, wasm.__wbindgen_export3);
         const len1 = WASM_VECTOR_LEN;
         wasm.parse_tle_info(retptr, ptr0, len0, ptr1, len1);
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
@@ -36,9 +186,9 @@ export function parse_tle_info(line1, line2) {
 export function propagate_batch(line1, line2, times_min) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        const ptr0 = passStringToWasm0(line1, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const ptr0 = passStringToWasm0(line1, wasm.__wbindgen_export, wasm.__wbindgen_export3);
         const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(line2, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const ptr1 = passStringToWasm0(line2, wasm.__wbindgen_export, wasm.__wbindgen_export3);
         const len1 = WASM_VECTOR_LEN;
         const ptr2 = passArrayF64ToWasm0(times_min, wasm.__wbindgen_export);
         const len2 = WASM_VECTOR_LEN;
@@ -51,7 +201,7 @@ export function propagate_batch(line1, line2, times_min) {
             throw takeObject(r2);
         }
         var v4 = getArrayF64FromWasm0(r0, r1).slice();
-        wasm.__wbindgen_export3(r0, r1 * 8, 8);
+        wasm.__wbindgen_export2(r0, r1 * 8, 8);
         return v4;
     } finally {
         wasm.__wbindgen_add_to_stack_pointer(16);
@@ -69,9 +219,9 @@ export function propagate_batch(line1, line2, times_min) {
 export function propagate_tle(line1, line2, tsince_min) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        const ptr0 = passStringToWasm0(line1, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const ptr0 = passStringToWasm0(line1, wasm.__wbindgen_export, wasm.__wbindgen_export3);
         const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(line2, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const ptr1 = passStringToWasm0(line2, wasm.__wbindgen_export, wasm.__wbindgen_export3);
         const len1 = WASM_VECTOR_LEN;
         wasm.propagate_tle(retptr, ptr0, len0, ptr1, len1, tsince_min);
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
@@ -82,25 +232,202 @@ export function propagate_tle(line1, line2, tsince_min) {
             throw takeObject(r2);
         }
         var v3 = getArrayF64FromWasm0(r0, r1).slice();
-        wasm.__wbindgen_export3(r0, r1 * 8, 8);
+        wasm.__wbindgen_export2(r0, r1 * 8, 8);
         return v3;
     } finally {
         wasm.__wbindgen_add_to_stack_pointer(16);
     }
 }
 
+/**
+ * @param {string} line1
+ * @param {string} line2
+ * @param {Float64Array} times_min
+ * @returns {Float64Array}
+ */
+export function propagate_trajectory_full(line1, line2, times_min) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passStringToWasm0(line1, wasm.__wbindgen_export, wasm.__wbindgen_export3);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(line2, wasm.__wbindgen_export, wasm.__wbindgen_export3);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passArrayF64ToWasm0(times_min, wasm.__wbindgen_export);
+        const len2 = WASM_VECTOR_LEN;
+        wasm.propagate_trajectory_full(retptr, ptr0, len0, ptr1, len1, ptr2, len2);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+        if (r3) {
+            throw takeObject(r2);
+        }
+        var v4 = getArrayF64FromWasm0(r0, r1).slice();
+        wasm.__wbindgen_export2(r0, r1 * 8, 8);
+        return v4;
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
+ * Append a sat to the registry. Returns the slot index (0-based).
+ * Parse / init failures bubble up as JsValue strings — JS marks the
+ * slot as un-batched and falls back to its own propagator for that
+ * entry.
+ * @param {string} line1
+ * @param {string} line2
+ * @returns {number}
+ */
+export function registry_add(line1, line2) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passStringToWasm0(line1, wasm.__wbindgen_export, wasm.__wbindgen_export3);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(line2, wasm.__wbindgen_export, wasm.__wbindgen_export3);
+        const len1 = WASM_VECTOR_LEN;
+        wasm.registry_add(retptr, ptr0, len0, ptr1, len1);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        if (r2) {
+            throw takeObject(r1);
+        }
+        return r0 >>> 0;
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+export function registry_clear() {
+    wasm.registry_clear();
+}
+
+/**
+ * @returns {number}
+ */
+export function registry_len() {
+    const ret = wasm.registry_len();
+    return ret >>> 0;
+}
+
+/**
+ * Propagate every registered sat to JD = `now_jd`, rotate TEME →
+ * scene-frame using `gmst_rad` (matching js/geo/coords.js
+ * eciToEcef + the Y=north flip), scale by `scale` (= km_to_scene),
+ * and return a flat Float32Array of [x, y, z] triplets — one per
+ * registered slot, in slot order.
+ *
+ * Returning the buffer (rather than taking a JS-owned `&mut` slice)
+ * is the wasm-bindgen pattern that actually writes back to JS:
+ * `&mut [f32]` is treated as a pure input by wasm-bindgen
+ * (passArrayF32ToWasm0 copies INTO WASM and never copies out), so
+ * using that signature would silently drop every position update.
+ *
+ * On per-sat propagate failure (decay / numerical blowup) and on
+ * blank slots the triplet is NaN so JS can detect it and fall back
+ * without confusing it with a valid origin sample.
+ * @param {number} now_jd
+ * @param {number} gmst_rad
+ * @param {number} scale
+ * @returns {Float32Array}
+ */
+export function registry_propagate(now_jd, gmst_rad, scale) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        wasm.registry_propagate(retptr, now_jd, gmst_rad, scale);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var v1 = getArrayF32FromWasm0(r0, r1).slice();
+        wasm.__wbindgen_export2(r0, r1 * 4, 4);
+        return v1;
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
+ * Zero-allocation companion to `registry_propagate`. Writes the
+ * same [x, y, z] triplets directly into the supplied JS
+ * `Float32Array`, which is typically backed by a SharedArrayBuffer
+ * the main thread is already using as the THREE position
+ * attribute. One memcpy from a thread-local Rust scratch buffer
+ * (`OUT_BUFFER`) to the JS-side typed array; no per-frame
+ * `Vec<f32>` allocation, no per-frame wasm-bindgen → Float32Array
+ * conversion.
+ *
+ * Returns the slot count actually written (= registered sats).
+ * `out` MUST be at least 3 × registry_len() floats long; if it's
+ * shorter we write what fits and return that count, leaving the
+ * remainder of the registry untouched. Caller can detect this by
+ * comparing the return to its expected slot count.
+ * @param {number} now_jd
+ * @param {number} gmst_rad
+ * @param {number} scale
+ * @param {Float32Array} out
+ * @returns {number}
+ */
+export function registry_propagate_into(now_jd, gmst_rad, scale, out) {
+    try {
+        const ret = wasm.registry_propagate_into(now_jd, gmst_rad, scale, addBorrowedObject(out));
+        return ret >>> 0;
+    } finally {
+        heap[stack_pointer++] = undefined;
+    }
+}
+
+/**
+ * Mark a slot as removed. The slot is kept (so subsequent indices
+ * don't shift) but propagation skips it.
+ * @param {number} idx
+ */
+export function registry_remove(idx) {
+    wasm.registry_remove(idx);
+}
+
+/**
+ * Reserve a slot without an associated state (e.g. JS-fallback sat).
+ * The slot propagates as (0, 0, 0); JS overwrites that triplet with
+ * its own values after the batch returns. Keeps the WASM registry
+ * in lockstep with JS `_satellites[]` so indices line up.
+ * @returns {number}
+ */
+export function registry_reserve_blank() {
+    const ret = wasm.registry_reserve_blank();
+    return ret >>> 0;
+}
+
+/**
+ * Stride for the trajectory array — exposed so JS callers don't hardcode 13.
+ * @returns {number}
+ */
+export function trajectory_stride() {
+    const ret = wasm.trajectory_stride();
+    return ret >>> 0;
+}
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
-        __wbg___wbindgen_throw_81fc77679af83bc6: function(arg0, arg1) {
+        __wbg___wbindgen_throw_9c75d47bf9e7731e: function(arg0, arg1) {
             throw new Error(getStringFromWasm0(arg0, arg1));
         },
-        __wbg_new_4f9fafbb3909af72: function() {
+        __wbg_length_5693120f2a64a00d: function(arg0) {
+            const ret = getObject(arg0).length;
+            return ret;
+        },
+        __wbg_new_2fad8ca02fd00684: function() {
             const ret = new Object();
             return addHeapObject(ret);
         },
+        __wbg_set_15b3678c712ded6b: function(arg0, arg1, arg2) {
+            getObject(arg0).set(getArrayF32FromWasm0(arg1, arg2));
+        },
         __wbg_set_6be42768c690e380: function(arg0, arg1, arg2) {
             getObject(arg0)[takeObject(arg1)] = takeObject(arg2);
+        },
+        __wbg_subarray_2a79e7a5db50bc18: function(arg0, arg1, arg2) {
+            const ret = getObject(arg0).subarray(arg1 >>> 0, arg2 >>> 0);
+            return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000001: function(arg0) {
             // Cast intrinsic for `F64 -> Externref`.
@@ -115,6 +442,9 @@ function __wbg_get_imports() {
         __wbindgen_object_clone_ref: function(arg0) {
             const ret = getObject(arg0);
             return addHeapObject(ret);
+        },
+        __wbindgen_object_drop_ref: function(arg0) {
+            takeObject(arg0);
         },
     };
     return {
@@ -132,10 +462,21 @@ function addHeapObject(obj) {
     return idx;
 }
 
+function addBorrowedObject(obj) {
+    if (stack_pointer == 1) throw new Error('out of js stack');
+    heap[--stack_pointer] = obj;
+    return stack_pointer;
+}
+
 function dropObject(idx) {
     if (idx < 1028) return;
     heap[idx] = heap_next;
     heap_next = idx;
+}
+
+function getArrayF32FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getFloat32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
 }
 
 function getArrayF64FromWasm0(ptr, len) {
@@ -151,6 +492,14 @@ function getDataViewMemory0() {
     return cachedDataViewMemory0;
 }
 
+let cachedFloat32ArrayMemory0 = null;
+function getFloat32ArrayMemory0() {
+    if (cachedFloat32ArrayMemory0 === null || cachedFloat32ArrayMemory0.byteLength === 0) {
+        cachedFloat32ArrayMemory0 = new Float32Array(wasm.memory.buffer);
+    }
+    return cachedFloat32ArrayMemory0;
+}
+
 let cachedFloat64ArrayMemory0 = null;
 function getFloat64ArrayMemory0() {
     if (cachedFloat64ArrayMemory0 === null || cachedFloat64ArrayMemory0.byteLength === 0) {
@@ -160,8 +509,7 @@ function getFloat64ArrayMemory0() {
 }
 
 function getStringFromWasm0(ptr, len) {
-    ptr = ptr >>> 0;
-    return decodeText(ptr, len);
+    return decodeText(ptr >>> 0, len);
 }
 
 let cachedUint8ArrayMemory0 = null;
@@ -223,6 +571,8 @@ function passStringToWasm0(arg, malloc, realloc) {
     return ptr;
 }
 
+let stack_pointer = 1024;
+
 function takeObject(idx) {
     const ret = getObject(idx);
     dropObject(idx);
@@ -258,11 +608,13 @@ if (!('encodeInto' in cachedTextEncoder)) {
 
 let WASM_VECTOR_LEN = 0;
 
-let wasmModule, wasm;
+let wasmModule, wasmInstance, wasm;
 function __wbg_finalize_init(instance, module) {
+    wasmInstance = instance;
     wasm = instance.exports;
     wasmModule = module;
     cachedDataViewMemory0 = null;
+    cachedFloat32ArrayMemory0 = null;
     cachedFloat64ArrayMemory0 = null;
     cachedUint8ArrayMemory0 = null;
     return wasm;

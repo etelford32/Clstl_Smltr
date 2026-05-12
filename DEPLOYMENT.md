@@ -1,45 +1,32 @@
-# Star Simulation Deployment Guide
+# Parkers Physics — Deployment Guide
 
-This guide covers all the ways to deploy and run the star simulation live.
+End-to-end deployment for **parkersphysics.com**: the static front-end +
+Vercel Edge Functions in `/api/**`, the Supabase database + auth, the
+Stripe billing integration, and the email + cron pipeline.
 
-## 🌐 Option 1: Web Deployment (Browser-Based)
+For local development, see `QUICK_START.md`.
 
-The easiest way to share your simulation online using Pygbag (Pygame compiled to WebAssembly).
+## 🌐 Web Deployment via Vercel
 
-### Method A: GitHub Pages (Free & Easy)
+The site deploys as a static asset bundle plus serverless Edge Functions
+under `/api/*`. There is no build step for the front-end (HTML/JS shipped
+verbatim); the only build action is `bash build-wasm.sh` for the Rust →
+WASM bundles in `/rust/www`.
 
-1. **Enable GitHub Pages** in your repository:
-   - Go to Settings → Pages
-   - Select source: GitHub Actions
-   - The `.github/workflows/deploy.yml` will automatically build and deploy
+1. **Connect the GitHub repo** to a Vercel project (Vercel dashboard →
+   Add new → Project → import this repo). Default settings work; Vercel
+   reads `vercel.json` for build/output/cron configuration.
 
-2. **Manual build** (if you want to test locally first):
-   ```bash
-   # Install Pygbag
-   pip install pygbag
+2. **Set Production environment variables** (see the Supabase Setup
+   section below for the full list). Mark every secret value as
+   **Sensitive** so the value isn't visible to project collaborators or
+   captured in build logs.
 
-   # Build the web version
-   pygbag --build main.py
+3. **Set the production domain alias** to `parkersphysics.com`
+   (Vercel dashboard → Project → Settings → Domains).
 
-   # Test locally (opens browser at http://localhost:8000)
-   pygbag main.py
-   ```
-
-3. **Access your live simulation**:
-   - URL: `https://yourusername.github.io/Clstl_Smltr/`
-   - Works on any device with a modern browser!
-
-### Method B: Deploy to Netlify/Vercel
-
-1. Build the web version:
-   ```bash
-   pygbag --build main.py
-   ```
-
-2. Deploy the `build/web` folder to:
-   - [Netlify](https://www.netlify.com/) (drag & drop)
-   - [Vercel](https://vercel.com/)
-   - [GitHub Pages](https://pages.github.com/)
+4. **Push to `main`** — Vercel auto-deploys. Cron jobs declared in
+   `vercel.json` register on the next production deploy.
 
 ## 🔐 Supabase Setup & Admin Bootstrap
 
@@ -49,17 +36,151 @@ migrations are idempotent — safe to re-run if you ever rebuild.
 **1. Apply the schema migrations in order** (Supabase Dashboard → SQL
 Editor → paste each file → Run):
 
+> 🚀 **Fresh project? One-paste shortcut:** apply
+> [`supabase-bootstrap-fresh.sql`](supabase-bootstrap-fresh.sql) once. It
+> bundles every foundational migration below in dependency order, so a
+> brand-new Supabase project comes up correctly with a single SQL Editor
+> paste. Skip the rest of step 1 and jump to step 2 if you used it.
+
 ```
+# Foundational schema
 supabase-schema.sql                       # core tables, RLS, helpers
+supabase-migration.sql                    # role + tester support extension
+supabase-admin.sql                        # admin RPCs, is_admin() helper
+
+# Saved-locations + per-plan limits
 supabase-multi-location-migration.sql     # per-plan saved-location caps
-supabase-weather-cache-migration.sql      # weather_grid_cache table
-supabase-weather-pgcron-migration.sql     # hourly Open-Meteo refresh
+
+# Weather pipeline
+supabase-weather-cache-migration.sql              # weather_grid_cache table
+supabase-weather-pgcron-migration.sql             # original pg_cron Open-Meteo refresh
+supabase-weather-pgcron-fix-migration.sql         # SSL/timeout fix for above
+supabase-weather-unschedule-migration.sql         # un-schedule pg_cron once Vercel cron took over
+supabase-weather-pgcron-secondary-migration.sql   # pg_cron 72×36 secondary writer at *:30
+
+# Pipeline observability + supplementary feeds
+supabase-pipeline-heartbeat-migration.sql # admin "Pipeline Health" backing tables
+supabase-pipeline-alerts-migration.sql    # last_alert_at column + alert RPC
+supabase-solar-wind-migration.sql         # solar-wind ring buffer
+supabase-solar-wind-freshness-fix.sql     # freshness gate fix for above
+supabase-polar-vortex-migration.sql       # polar_vortex_snapshots schema
+
+# Security + auditing
 supabase-security-tighten-migration.sql   # analytics + session RLS hardening
 supabase-invites-email-migration.sql      # email-targeted invites + RPCs
 supabase-email-rate-limit-migration.sql   # DB-backed email rate limit + audit
+supabase-auth-failures-migration.sql      # auth_failures table + log_auth_failure RPC;
+                                          # source for the admin "signin_failed" metric
 supabase-schema-hardening-migration.sql   # role/endpoint CHECKs + delete_user_data RPC
 supabase-retention-cron-migration.sql     # analytics/alert retention + cron-status RPC
+
+# Onboarding-blocker fixes (added April 2026 — REQUIRED before opening signups)
+supabase-daily-digest-migration.sql       # per-location digest opt-in column
+supabase-plan-lockdown-migration.sql      # blocks self-grant of paid plans (CRITICAL)
+
+# Educator wedge (April 2026)
+supabase-class-seats-migration.sql        # class-seat invite RPCs + activation_events table
+
+# Linter follow-up (April 2026)
+supabase-analytics-views-rls-fix.sql      # security_invoker on analytics_daily / user_analytics
+
+# Superadmin role/plan audit (May 2026)
+supabase-role-plan-audit-migration.sql    # is_superadmin(), user_profiles_audit table,
+                                          # promote_user / set_user_plan_override RPCs,
+                                          # AFTER trigger capturing role/plan/Stripe-link
+                                          # changes for forensic review
+
+# Email-confirmation telemetry (May 2026)
+supabase-signup-confirmed-migration.sql   # AFTER trigger on auth.users.confirmed_at
+                                          # logs signup + signup_confirmed events;
+                                          # closes the email-gate funnel hole and
+                                          # extends auth_flow_metrics
+
+# Schema-hardening follow-up (May 2026)
+supabase-schema-hardening-followup-migration.sql
+                                          # CRITICAL — closes a regression where
+                                          # supabase-oauth-trigger-migration.sql
+                                          # accidentally re-introduced
+                                          # COALESCE(v_meta->>'plan', 'free') in
+                                          # handle_new_user(), silently re-opening
+                                          # the metadata-injection path closed by
+                                          # supabase-plan-lockdown-migration.sql.
+                                          # MUST run after both. Includes a
+                                          # verification query to detect any
+                                          # accounts minted while the regression
+                                          # was live.
+
+# Client telemetry (May 2026)
+supabase-client-telemetry-migration.sql   # client_telemetry table (errors,
+                                          # auth_failures, 404s, redirects,
+                                          # web_vitals, app_perf) + log RPC +
+                                          # 4 superadmin-only top-N read RPCs
+                                          # + pg_cron pruner (14d perf, 30d rest).
+                                          # Surfaces on /superadmin → Telemetry tab.
+                                          # Requires the /api/telemetry/log edge
+                                          # endpoint deployed to Vercel.
+
+# Perf alerts (May 2026)
+supabase-perf-alerts-migration.sql        # perf_alert_state + 5 RPCs that wire
+                                          # /api/cron/pipeline-watchdog into the
+                                          # client_telemetry pipeline. LCP p95
+                                          # > 4 s (configurable) on any route
+                                          # fires a Slack/email alert, with
+                                          # 6 h cooldown + auto-resolve after 3
+                                          # consecutive healthy ticks.
+                                          # MUST be applied AFTER
+                                          # supabase-client-telemetry-migration.sql.
+
+# Per-user timeline (May 2026)
+supabase-user-timeline-migration.sql      # telemetry_user_timeline + _summary
+                                          # RPCs that merge client_telemetry +
+                                          # activation_events for a single user
+                                          # into one chronological view. Powers
+                                          # the "Timeline" action on each row of
+                                          # /superadmin → User Management. Read-
+                                          # only; superadmin-gated.
+                                          # MUST be applied AFTER
+                                          # supabase-client-telemetry-migration.sql.
+
+# Magic-link signin (May 2026)
+supabase-magic-link-migration.sql         # signin_magic_link_requested event
+                                          # added to activation_events CHECK +
+                                          # auth_flow_metrics refreshed to
+                                          # expose it on the admin Auth flow
+                                          # card. Operator runbook (with
+                                          # branded email template) lives in
+                                          # MAGIC_LINK_SETUP.md.
+
+# Profile timezone (May 2026)
+supabase-profile-timezone-migration.sql   # adds user_profiles.timezone so
+                                          # the account page can save the
+                                          # user's display timezone. Without
+                                          # it, /account → Save Profile
+                                          # fails with "Could not find the
+                                          # 'timezone' column of
+                                          # 'user_profiles' in the schema
+                                          # cache".
 ```
+
+> **Apply order — `supabase-role-plan-audit-migration.sql`** must run AFTER
+> `supabase-plan-lockdown-migration.sql` (it patches the lockdown trigger to
+> honour an opt-in flag set by the new audited RPCs). The migration is
+> idempotent and starts the audit table empty by design — no historical
+> backfill of pre-migration role/plan changes. Once applied, admins can
+> promote between `user`↔`tester` from `/admin` (Users tab → Change role),
+> superadmins get the full management surface at `/superadmin` (role
+> changes up to admin, plan overrides with required reason, audit log).
+> Superadmin minting stays SQL-Editor-only — there is no UI path to mint
+> a new superadmin, by design.
+
+> **Prerequisites for `supabase-class-seats-migration.sql`** — the migration
+> performs a preflight check and aborts with the missing items if any are
+> absent. It needs (in any order, all idempotent):
+> `supabase-schema.sql` (for `invite_codes` + `user_profiles`), and
+> `supabase-tier-expansion-migration.sql` (for the `parent_account_id`,
+> `classroom_seats`, `seats_used` columns). The
+> `supabase-invites-apply-plan-migration.sql` is recommended (provides the
+> guard trigger) but not strictly required.
 
 If any `CREATE EXTENSION` line errors out (`pg_cron`, `http`), enable
 the extension via Database → Extensions in the Supabase dashboard,
@@ -68,15 +189,42 @@ then re-run the migration.
 **2. Set Vercel environment variables** (Project → Settings →
 Environment Variables, scope = Production):
 
-| Var | Required for |
-|---|---|
-| `SUPABASE_URL` | every `/api/*` endpoint |
-| `SUPABASE_SERVICE_KEY` | every `/api/*` endpoint (service_role, server-only) |
-| `RESEND_API_KEY` | `/api/alerts/email`, `/api/invites/send` |
-| `INVITE_FROM_EMAIL` | optional; defaults to `Parker Physics <invites@parkerphysics.com>` |
-| `ALERT_FROM_EMAIL` | optional; defaults to `Parker Physics Alerts <alerts@parkerphysics.com>` |
-| `APP_URL` | optional; defaults to `https://parkerphysics.com` (used in invite magic links) |
-| `STRIPE_SECRET_KEY` + `STRIPE_*_PRICE_ID` + `STRIPE_WEBHOOK_SECRET` | paid tiers |
+| Var | Required for | Sensitive? |
+|---|---|---|
+| `SUPABASE_URL` | every `/api/*` endpoint | no |
+| `SUPABASE_SERVICE_KEY` | every `/api/*` endpoint (service_role, server-only) | **yes** |
+| `RESEND_API_KEY` | `/api/alerts/email`, `/api/cron/daily-forecast-digest`, `/api/invites/send` | **yes** |
+| `INVITE_FROM_EMAIL` | optional; defaults to `Parkers Physics <invites@parkersphysics.com>` | no |
+| `ALERT_FROM_EMAIL` | optional; defaults to `Parkers Physics Alerts <alerts@parkersphysics.com>` | no |
+| `APP_URL` | optional; defaults to `https://parkersphysics.com` (used in invite magic links) | no |
+| `STRIPE_SECRET_KEY` | paid tiers (Stripe API calls from `/api/stripe/*`) | **yes** |
+| `STRIPE_BASIC_PRICE_ID` / `STRIPE_BASIC_YEARLY_PRICE_ID` | Basic monthly + optional yearly | no |
+| `STRIPE_EDUCATOR_PRICE_ID` / `STRIPE_EDUCATOR_YEARLY_PRICE_ID` | Educator monthly + optional yearly | no |
+| `STRIPE_ADVANCED_PRICE_ID` / `STRIPE_ADVANCED_YEARLY_PRICE_ID` | Advanced monthly + optional yearly | no |
+| `STRIPE_INSTITUTION_PRICE_ID` / `STRIPE_INSTITUTION_YEARLY_PRICE_ID` | Institution monthly + optional yearly | no |
+| `STRIPE_WEBHOOK_SECRET` | `/api/stripe/webhook` signature verification | **yes** |
+| `TRIAL_EDU_14DAY_ENABLED=1` | optional; turns on the `edu-14day` trial promo (Educator outreach) | no |
+
+> **Trial promos (server-enforced).** The checkout endpoint accepts an
+> optional `trial: '<code>'` field; the code → days mapping lives in
+> `api/stripe/checkout.js` (`TRIAL_PROMOS`). Codes shipped today:
+>
+> | Code | Days | Plans | Source |
+> |---|---|---|---|
+> | `tour-30day` | 30 | basic, educator | Home-page Explore tour final stop |
+> | `edu-14day`  | 14 | educator        | Educator outreach (gated by `TRIAL_EDU_14DAY_ENABLED=1`) |
+>
+> Stripe's built-in **trial reminder email** (Dashboard →
+> Subscriptions → Settings → Trials) fires 7 days before trial end —
+> turn it on so users get the standard "trial ending" notice. The
+> webhook also logs an `subscription_trial_ending` activation event on
+> `customer.subscription.trial_will_end` so the admin funnel charts trial
+> reminders alongside trial → paid conversions.
+| `CRON_SECRET` | `/api/cron/*` Bearer token (recommended over `x-vercel-cron` fallback) | **yes** |
+| `METNO_USER_AGENT` | optional; identifies us to MET Norway | no |
+| `ALERT_OPS_EMAIL` | required for `/api/cron/pipeline-watchdog` to actually send (without it the watchdog logs candidates but skips email) | **yes** |
+| `SLACK_WEBHOOK_URL` | optional; Slack incoming-webhook URL. Watchdog uses Slack as the preferred channel for perf-regression + recovery alerts and falls back to email if unset | **yes** |
+| `PERF_ALERT_METRIC` / `PERF_ALERT_THRESHOLD_MS` / `PERF_ALERT_WINDOW_HOURS` / `PERF_ALERT_MIN_SAMPLES` / `PERF_ALERT_COOLDOWN_HOURS` / `PERF_ALERT_RESOLVE_STREAK` | optional; per-knob overrides for the perf-regression alert (defaults: `LCP` / `4000` / `6` / `30` / `6` / `3`) | no |
 
 **3. Promote the first admin** — after you've signed up your own
 account through `/signup`, run this in the Supabase SQL Editor (one
@@ -128,252 +276,125 @@ deliberately can't reach `auth.users` from plpgsql.
 subscription via the Stripe Dashboard. Future work is wrapping all
 four steps behind a single `/api/admin/delete-user` endpoint.
 
-## 🐳 Option 2: Docker with VNC (Full 3D Version)
-
-Run the full OpenGL version in a container with remote access via VNC.
-
-### Quick Start
-
-```bash
-# Build and run with Docker Compose
-docker-compose up -d
-
-# Access via web browser
-open http://localhost:8080
-
-# Or use a VNC client
-# Connect to: localhost:5900
-```
-
-### Manual Docker Commands
-
-```bash
-# Build the image
-docker build -t star-simulation .
-
-# Run the container
-docker run -d -p 5900:5900 --name star-sim star-simulation
-
-# View logs
-docker logs -f star-sim
-
-# Stop
-docker stop star-sim
-```
-
-### Accessing the Simulation
-
-**Option A: Web Browser (easiest)**
-- Open `http://localhost:8080` in your browser
-- You'll see the simulation running in real-time!
-
-**Option B: VNC Client**
-- Install a VNC viewer ([RealVNC](https://www.realvnc.com/), TightVNC, etc.)
-- Connect to `localhost:5900`
-- No password required (or set one in Dockerfile)
-
-### Deploy Docker to Cloud
-
-#### Deploy to DigitalOcean
-
-```bash
-# Create a droplet (Ubuntu 22.04)
-# SSH into it and run:
-
-sudo apt-get update
-sudo apt-get install -y docker.io docker-compose
-git clone https://github.com/yourusername/Clstl_Smltr.git
-cd Clstl_Smltr
-sudo docker-compose up -d
-
-# Access via: http://YOUR_DROPLET_IP:8080
-```
-
-#### Deploy to AWS ECS/Fargate
-
-```bash
-# Push to Docker Hub first
-docker login
-docker tag star-simulation yourusername/star-simulation:latest
-docker push yourusername/star-simulation:latest
-
-# Then create an ECS task definition using the image
-# Configure port 5900 and 8080 in security groups
-```
-
-## 💻 Option 3: Local Installation
-
-### Desktop Version (Full 3D with Shaders)
-
-```bash
-# Clone repository
-git clone https://github.com/yourusername/Clstl_Smltr.git
-cd Clstl_Smltr
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Run the 3D version
-python star_simulation.py
-```
-
-**Requirements:**
-- Python 3.7+
-- OpenGL 2.1+ compatible GPU
-- Display/monitor
-
-### Web Version (2D Simplified)
-
-```bash
-# Run the 2D web-compatible version locally
-python main.py
-```
-
-## 📱 Option 4: Mobile/Tablet Access
-
-### Via Web Browser
-- Deploy using Option 1 (Pygbag)
-- Access from any mobile browser
-- Touch-enabled controls work automatically
-
-### Via Docker VNC
-- Use a VNC app on iOS/Android
-- Connect to your Docker instance
-- Full 3D version runs remotely
-
-## 🚀 Option 5: Cloud Platforms
-
-### Heroku
-```bash
-# Create a Heroku app
-heroku create star-simulation
-
-# Add buildpacks
-heroku buildpacks:add heroku/python
-
-# Deploy
-git push heroku main
-```
-
-### Render.com
-1. Create new Web Service
-2. Connect your GitHub repo
-3. Build command: `pip install -r requirements.txt`
-4. Start command: `python star_simulation.py`
-5. Add VNC configuration
-
-### Railway.app
-1. Click "New Project"
-2. Select your GitHub repo
-3. Railway auto-detects Dockerfile
-4. Set environment variables if needed
-5. Deploy!
-
-## 🎬 Option 6: Video/Screenshot Export
-
-Create a video or screenshots to share (no live deployment needed):
-
-```bash
-# Install additional dependencies
-pip install opencv-python pillow
-
-# Generate screenshots (coming soon - see roadmap)
-python export_screenshots.py
-
-# Generate video (coming soon - see roadmap)
-python export_video.py
-```
-
-## 📊 Comparison Table
-
-| Method | Difficulty | Cost | 3D Graphics | Best For |
-|--------|-----------|------|-------------|----------|
-| Pygbag Web | ⭐ Easy | Free | 2D Only | Sharing online, mobile |
-| Docker VNC | ⭐⭐ Medium | Free-$$$ | Full 3D | Remote access, cloud |
-| Local Install | ⭐ Easy | Free | Full 3D | Development, demos |
-| Video Export | ⭐⭐ Medium | Free | Full 3D | Social media, YouTube |
-
-## 🔧 Troubleshooting
-
-### Pygbag Build Issues
-
-**Problem:** `pygbag` fails to build
-**Solution:**
-```bash
-# Use specific version
-pip install pygbag==0.8.7
-
-# Or install from source
-pip install git+https://github.com/pygame-web/pygbag
-```
-
-### Docker VNC Black Screen
-
-**Problem:** VNC shows black screen
-**Solution:**
-```bash
-# Check logs
-docker logs star-sim
-
-# Restart X server
-docker exec star-sim supervisorctl restart xvfb
-```
-
-### OpenGL Not Available
-
-**Problem:** "OpenGL not supported" error
-**Solution:**
-- Update graphics drivers
-- Use the 2D version (`main.py`) instead
-- Enable OpenGL in virtual machine settings
-
-## 🌟 Recommended Deployment for Different Use Cases
-
-### For Portfolio/Resume
-→ **Use Pygbag + GitHub Pages**
-- Free, fast, works everywhere
-- Direct link to share: `https://yourusername.github.io/Clstl_Smltr/`
-
-### For Demos/Presentations
-→ **Use Docker VNC on Cloud Server**
-- Full quality 3D graphics
-- Accessible from anywhere
-- Control via web browser
-
-### For Development
-→ **Use Local Installation**
-- Fastest iteration
-- Full debugging capabilities
-- No deployment overhead
-
-### For Social Media
-→ **Use Video Export**
-- Create high-quality recordings
-- Share on YouTube, Twitter, etc.
-- No need for users to install anything
-
-## 📚 Additional Resources
-
-- [Pygbag Documentation](https://github.com/pygame-web/pygbag)
-- [Docker Documentation](https://docs.docker.com/)
-- [noVNC Project](https://novnc.com/)
-- [GitHub Pages Guide](https://pages.github.com/)
-
-## 🆘 Need Help?
-
-Open an issue on GitHub: [https://github.com/yourusername/Clstl_Smltr/issues](https://github.com/yourusername/Clstl_Smltr/issues)
-
----
-
-**Quick Start Summary:**
-
-```bash
-# Fastest way to get it live:
-pip install pygbag
-pygbag main.py
-# Opens in browser at http://localhost:8000
-
-# Or with Docker:
-docker-compose up
-# Opens in browser at http://localhost:8080
-```
+## 🛡️ Vercel Firewall — required rate-limit rules
+
+These rules live in the Vercel dashboard, not in `vercel.json`, so this
+section is the system-of-record for what should be configured. After
+provisioning a new Vercel project for this codebase, recreate them here:
+
+**Vercel dashboard → Project → Firewall → Rate Limiting → Add rule**
+
+| Rule | Path pattern | Limit | Action |
+|---|---|---|---|
+| `forecast-per-ip`         | `/api/weather/forecast`         | 60 req / min / IP | 429, 60s deny window |
+| `weather-grid-per-ip`     | `/api/weather/grid`             | 30 req / min / IP | 429, 60s deny window |
+| `alerts-email-per-ip`     | `/api/alerts/email`             | 20 req / min / IP | 429, 60s deny window |
+
+**Why:** The hourly forecast strip (added in `claude/add-location-forecasting`)
+fans out one `/api/weather/forecast?type=hourly` call per saved location on
+every dashboard render. A 25-saved-location Pro user is already a 25× amplifier
+at the application layer, so abuse from a logged-in attacker scales fast.
+60 req/min is well above any legitimate dashboard load (one render = ~25
+calls; bouncing a refresh every 5 s for diagnostics is ~5 req/s = 300/min,
+still flagged but not user-blocking).
+
+WAF rate limits block **before** the function invokes, which means a blocked
+request costs nothing (no Vercel function $, no Open-Meteo quota). This is
+strictly cheaper than any in-code limiter.
+
+**Cron auth (recommended):** also set `CRON_SECRET` in
+**Vercel → Project → Settings → Environment Variables** so the cron
+endpoints can drop their `x-vercel-cron`-header fallback if needed.
+
+## 🚀 Onboarding Readiness Checklist
+
+Single source of truth before opening signups to paying users.
+Each item is independently verifiable; if you can't tick it, don't open
+the front door yet.
+
+### Vercel — environment variables
+
+- [ ] All secrets marked **Sensitive** (Vercel will nag with a
+      "Needs Attention" badge until you do):
+  - `RESEND_API_KEY`
+  - `SUPABASE_SERVICE_KEY` (and `SUPABASE_SECRET_KEY` if dual-named)
+  - `STRIPE_SECRET_KEY`
+  - `STRIPE_WEBHOOK_SECRET`
+  - `STEAM_WEB_API_KEY` (if used)
+- [ ] `CRON_SECRET` set and **Sensitive**
+- [ ] Production domain alias = `parkersphysics.com`
+
+### Supabase — migrations applied (in order)
+
+Run all 19 in the order listed in the Supabase Setup section above.
+The two onboarding-blocker migrations at the end (`supabase-daily-digest-migration.sql`,
+`supabase-plan-lockdown-migration.sql`) are required for paid-tier integrity:
+
+- [ ] `supabase-daily-digest-migration.sql` — adds the `daily_digest_enabled` column
+- [ ] `supabase-plan-lockdown-migration.sql` — closes the two plan-self-grant paths.
+      Verify with the queries inline at the bottom of that file:
+  - Self `UPDATE plan='advanced'` returns `42501 / insufficient_privilege`
+  - `signUp({ options: { data: { plan: 'advanced' } } })` results in `plan='free'`
+
+### Vercel Firewall — rate-limit rules
+
+- [ ] `forecast-per-ip` @ 60 req/min/IP
+- [ ] `weather-grid-per-ip` @ 30 req/min/IP
+- [ ] `alerts-email-per-ip` @ 20 req/min/IP
+
+### Stripe — billing wiring
+
+- [ ] Webhook endpoint = `https://parkersphysics.com/api/stripe/webhook`
+- [ ] Selected events: `checkout.session.completed`, `customer.subscription.created`,
+      `customer.subscription.updated`, `customer.subscription.deleted`
+- [ ] `STRIPE_WEBHOOK_SECRET` copied to Vercel as **Sensitive**
+- [ ] Webhook test event delivered + appears in `email_send_log` /
+      `user_profiles.subscription_status` updates correctly
+- [ ] Webhook fails-CLOSED if the secret is missing
+      (verified by `api/stripe/webhook.js` change in commit `4e333cc`)
+
+### Resend — email pipeline
+
+- [ ] Sending domain (`parkersphysics.com`) verified with DKIM/SPF in Resend
+- [ ] `ALERT_FROM_EMAIL` and `INVITE_FROM_EMAIL` use addresses on the verified domain
+- [ ] Test send via dry-run cron:
+      `curl -H "Authorization: Bearer $CRON_SECRET" "https://parkersphysics.com/api/cron/daily-forecast-digest?dry=1"`
+      → returns `{ ok: true, dryRun: true, scanned, previewSample: [...] }` with
+      no Resend invocation
+
+### Cron health — admin dashboard
+
+- [ ] `/admin` → Pipeline Health: zero red rows in the last 24h
+- [ ] All 7 crons registered in `vercel.json` are firing on schedule:
+      ```
+      0 * * * *      /api/cron/refresh-weather-grid
+      */5 * * * *    /api/cron/prewarm-hot
+      */30 * * * *   /api/cron/prewarm-medium
+      0 */6 * * *    /api/cron/prewarm-cold
+      0 11 * * *     /api/cron/daily-forecast-digest
+      */30 * * * *   /api/cron/refresh-saved-locations
+      15,45 * * * *  /api/cron/pipeline-watchdog
+      ```
+- [ ] `pipeline-watchdog` reports `candidates: 0` while pipelines are healthy.
+      Force-trigger by leaving `consecutive_fail` artificially high in
+      `pipeline_heartbeat` and verifying an email lands at `ALERT_OPS_EMAIL`,
+      then confirm `last_alert_at` was stamped (so subsequent ticks skip).
+- [ ] `/api/cron/daily-forecast-digest` real run (not dry-run) reports
+      `sent > 0` once at least one user has `daily_digest_enabled = true`
+
+### Smoke tests — paid-tier integrity (RUN BEFORE OPENING DOORS)
+
+- [ ] Sign up new account → confirm `plan = 'free'` in `user_profiles`
+- [ ] Attempt direct `UPDATE` of own plan via Supabase JS SDK → expect `42501`
+- [ ] Attempt signup with `options.data.plan = 'advanced'` → confirm row lands as `'free'`
+- [ ] Stripe test-mode checkout → webhook grants the correct plan tier
+- [ ] Cancel subscription → webhook downgrades to `'free'`
+- [ ] User can save locations up to their per-plan cap (5 / 25), not beyond
+- [ ] User can enable digest only up to their per-plan cap (5 / 10), not beyond
+- [ ] Hourly strip renders with valid forecast data for a saved location
+- [ ] Daily digest email arrives at the user's address (set timezone tolerance ±1h around 11:00 UTC)
+
+## 🆘 Need help?
+
+Open an issue on the GitHub repo or check the admin dashboard's
+"Pipeline Health" + "Email Activity" panels for live diagnostics.

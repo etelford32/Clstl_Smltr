@@ -277,7 +277,7 @@ fn fetch_features(base_url: &str) -> Result<RawFeatures, String> {
         xray_deriv: 0.0,
         wind_speed_km_s: wind_speed,
         wind_trend_slope: trend_slope,
-        bz_nT: bz,
+        bz_nt: bz,
         density_cc: density,
         radio_flux_sfu: 120.0,       // moderate default
         ar_count: 4,                 // default

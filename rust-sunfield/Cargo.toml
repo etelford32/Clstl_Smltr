@@ -1,0 +1,19 @@
+[package]
+name = "sunfield_wasm"
+version = "0.1.0"
+edition = "2021"
+description = "Solar magnetic field-line tracer (PFSS-lite) — buried-dipole superposition + RK4 streamline integration, compiled to WebAssembly for sun.html"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde-wasm-bindgen = "0.6"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

@@ -1,5 +1,3 @@
-/* @ts-self-types="./sstar_wasm.d.ts" */
-
 /**
  * Full orbital elements and derived quantities for the given star.
  *
@@ -94,7 +92,7 @@ export function next_periapsis_jd(star_id, after_jd) {
  * Propagate ALL S-stars to a Julian Date in one call.
  *
  * Returns flat array `[x₀,y₀,z₀,vx₀,vy₀,vz₀,r₀,vr₀, x₁,y₁,...]`
- * with 8 values per star × 4 stars = 32 f64s total.
+ * with 8 values per star × NUM_STARS stars = 8·NUM_STARS f64s total.
  * Efficient for animation loops (single WASM call per frame).
  * @param {number} jd
  * @returns {Float64Array}

@@ -37,7 +37,7 @@ export default async function handler(req) {
     }
 
     return jsonOk({
-        source:        'Parker Physics atmosphere/snapshot · seed-grid lookup',
+        source:        'Parkers Physics atmosphere/snapshot · seed-grid lookup',
         f107_sfu:      f107,
         ap:            ap,
         f107_used:     f107,

@@ -2,8 +2,13 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>System Status — Parker Physics</title>
+<title>System Status — Parkers Physics</title>
 <link rel="stylesheet" href="js/nav-styles.css">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -78,7 +83,11 @@ h1{font-size:1.4rem;font-weight:800;background:linear-gradient(45deg,#ff6060,#ff
     "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
 }}
 </script>
-<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("status");</script>
+<!-- perf-hints:start -->
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" crossorigin>
+<!-- perf-hints:end --><script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("status");</script>
 
 <div class="auth-gate" id="auth-gate">
   <div>
@@ -193,7 +202,7 @@ const PAGES = [
     { file: 'sun.html',              label: 'The Sun',                  tag: 'sim',  deps: ['js/nav.js','js/swpc-feed.js','js/wind-pipeline-feed.js','js/soho-feed.js','js/solar-atmosphere.js','js/solar-weather-forecast.js'] },
     { file: 'earth.html',            label: 'Earth',                    tag: 'sim',  deps: ['js/nav.js','js/swpc-feed.js','js/user-location.js','js/weather-feed.js','js/nws-alerts.js','js/isobar-engine.js','js/magnetosphere-engine.js','js/exosphere-engine.js','js/solar-wind-magnetosphere.js','js/solar-weather-history.js','js/solar-weather-forecast.js','js/satellite-feed.js','js/earth-obs-feed.js','js/scale-nav.js','js/earth-feeds.js','js/satellite-tracker.js','js/earth-skin.js','js/storm-feed.js'] },
     { file: 'moon.html',             label: 'Moon',                     tag: 'sim',  deps: ['js/nav.js','js/moon-skin.js','js/swpc-feed.js','js/scale-nav.js','js/analytics.js','js/user-state.js','js/greeting.js'] },
-    { file: 'threejs.html',          label: 'Solar System',             tag: 'sim',  deps: ['js/nav.js','js/scale-nav.js','js/horizons.js','js/jupiter-shader.js','js/planet-moons.js','js/swpc-feed.js'] },
+    { file: 'threejs.html',          label: 'Solar System',             tag: 'sim',  deps: ['js/nav.js','js/scale-nav.js','js/horizons.js','js/jupiter-shader.js','js/planet-moons.js','js/jovian-system.js','js/gravity-lab/physics.js','js/swpc-feed.js'] },
     { file: 'galactic-map.html',     label: 'Galaxy Map',               tag: 'sim',  deps: ['js/nav.js','js/scale-nav.js','js/live-status-bar.js','js/sstar-wasm/sstar_wasm.js'] },
     { file: 'sagittarius.html',      label: 'Sagittarius A*',           tag: 'sim',  deps: ['js/nav.js','js/sgr-a-star.js','js/analytics.js','js/user-state.js','js/greeting.js'] },
     { file: 'sirius.html',           label: 'Sirius Binary',            tag: 'sim',  deps: ['js/nav.js'] },
@@ -236,7 +245,7 @@ const JS_MODULES = [
     'js/moon-skin.js','js/scale-nav.js','js/live-status-bar.js',
     'js/horizons.js','js/horizons-extended.js','js/outer-planets.js',
     'js/orbit-trails.js','js/orbital-analytics.js',
-    'js/jupiter-shader.js','js/jupiter-skin.js','js/planet-moons.js',
+    'js/jupiter-shader.js','js/jupiter-skin.js','js/planet-moons.js','js/jovian-system.js',
     'js/satellite-feed.js','js/satellite-tracker.js',
     'js/sun-shader.js','js/sun-skin.js','js/sun-features.js','js/sim-sun.js','js/sim-earth.js',
     'js/flare-ring.js','js/neo-feed.js','js/nws-alerts.js','js/weather-feed.js',
@@ -396,6 +405,12 @@ async function _probeProxy(spec) {
     let ageSec = null;
     if (Number.isFinite(body?.age_seconds)) ageSec = body.age_seconds;
     else if (body?.fetched_at)       { const t = Date.parse(body.fetched_at);       if (Number.isFinite(t)) ageSec = Math.max(0, Math.floor((Date.now() - t) / 1000)); }
+    // CelesTrak proxies (TLE + Aristotle/SOCRATES) and many SWPC feeds
+    // emit a top-level `fetched` ISO-8601 instead of `fetched_at`. NHC
+    // storm feed uses `updated`. Accept all three so the status card
+    // doesn't show "no freshness info" for endpoints that are healthy.
+    else if (body?.fetched)          { const t = Date.parse(body.fetched);          if (Number.isFinite(t)) ageSec = Math.max(0, Math.floor((Date.now() - t) / 1000)); }
+    else if (body?.updated)          { const t = Date.parse(body.updated);          if (Number.isFinite(t)) ageSec = Math.max(0, Math.floor((Date.now() - t) / 1000)); }
     else if (body?.data?.updated)    { const t = Date.parse(body.data.updated);     if (Number.isFinite(t)) ageSec = Math.max(0, Math.floor((Date.now() - t) / 1000)); }
     else if (Array.isArray(body)) {
         // NOAA JSON feeds are arrays of samples; recency = most recent timestamp.

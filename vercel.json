@@ -20,9 +20,38 @@
     {
       "path": "/api/cron/prewarm-cold",
       "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/cron/daily-forecast-digest",
+      "schedule": "0 11 * * *"
+    },
+    {
+      "path": "/api/cron/refresh-saved-locations",
+      "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/cron/pipeline-watchdog",
+      "schedule": "15,45 * * * *"
+    },
+    {
+      "path": "/api/cron/onboarding-nudge",
+      "schedule": "30 16 * * *"
     }
   ],
   "headers": [
+    {
+      "source": "/operations.html",
+      "headers": [
+        {
+          "key": "Cross-Origin-Opener-Policy",
+          "value": "same-origin"
+        },
+        {
+          "key": "Cross-Origin-Embedder-Policy",
+          "value": "credentialless"
+        }
+      ]
+    },
     {
       "source": "/api/stripe/(.*)",
       "headers": [
@@ -45,7 +74,11 @@
       "headers": [
         {
           "key": "Access-Control-Allow-Origin",
-          "value": "*"
+          "value": "https://parkersphysics.com"
+        },
+        {
+          "key": "Vary",
+          "value": "Origin"
         },
         {
           "key": "Access-Control-Allow-Methods",
@@ -159,6 +192,10 @@
       "destination": "/vega.html"
     },
     {
+      "source": "/achernar",
+      "destination": "/achernar.html"
+    },
+    {
       "source": "/pricing",
       "destination": "/pricing.html"
     },
@@ -191,6 +228,14 @@
       "destination": "/upper-atmosphere.html"
     },
     {
+      "source": "/operations",
+      "destination": "/operations.html"
+    },
+    {
+      "source": "/ops",
+      "destination": "/operations.html"
+    },
+    {
       "source": "/privacy",
       "destination": "/privacy.html"
     },
@@ -201,6 +246,38 @@
     {
       "source": "/api-policy",
       "destination": "/api-policy.html"
+    },
+    {
+      "source": "/contact-enterprise",
+      "destination": "/contact-enterprise.html"
+    },
+    {
+      "source": "/feedback",
+      "destination": "/feedback.html"
+    },
+    {
+      "source": "/for-educators",
+      "destination": "/for-educators.html"
+    },
+    {
+      "source": "/satellite-operator",
+      "destination": "/satellite-operator/landing.html"
+    },
+    {
+      "source": "/satellite-operators",
+      "destination": "/satellite-operator/landing.html"
+    },
+    {
+      "source": "/for-operators",
+      "destination": "/satellite-operator/landing.html"
+    },
+    {
+      "source": "/educators",
+      "destination": "/for-educators.html"
+    },
+    {
+      "source": "/teachers",
+      "destination": "/for-educators.html"
     },
     {
       "source": "/admin",

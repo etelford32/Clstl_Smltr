@@ -9,7 +9,7 @@
  *   CREATE TABLE public.invite_codes (
  *       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
  *       code TEXT UNIQUE NOT NULL,
- *       plan TEXT DEFAULT 'free' CHECK (plan IN ('free','basic','advanced')),
+ *       plan TEXT DEFAULT 'free' CHECK (plan IN ('free','tester','basic','educator','advanced','institution','enterprise')),
  *       max_uses INTEGER DEFAULT 1,
  *       used_count INTEGER DEFAULT 0,
  *       expires_at TIMESTAMPTZ,
@@ -155,6 +155,10 @@ export async function validateInviteCode(code, email = null) {
  * Call after successful signup. The RPC enforces that email-targeted
  * invites only redeem when the email matches.
  *
+ * Note: this only marks the invite as used. It does NOT apply the
+ * invite's plan to the user. For paid-tier comp invites use
+ * applyInvitePlan() instead — it's atomic redeem + plan upgrade.
+ *
  * @param {string} inviteId  - UUID of the invite code
  * @param {string} [email]   - Email the user signed up with (for targeted invites)
  * @returns {{ ok: boolean }}
@@ -173,6 +177,101 @@ export async function redeemInviteCode(inviteId, email = null) {
         return { ok: data === true || data === null };
     } catch (_) {
         return { ok: false };
+    }
+}
+
+/**
+ * Whether the validated invite is a class-seat invite. Class seats
+ * route through apply_class_invite() instead of apply_invite_plan() —
+ * the student inherits the parent's plan via parent_account_id rather
+ * than being comped a plan of their own.
+ *
+ * @param {string} inviteId
+ * @returns {Promise<boolean>}
+ */
+export async function isClassInvite(inviteId) {
+    if (!isConfigured() || !inviteId) return false;
+    try {
+        const sb = await getSupabase();
+        const { data, error } = await sb.rpc('is_class_invite', { p_invite_id: inviteId });
+        if (error) return false;
+        return data === true;
+    } catch { return false; }
+}
+
+/**
+ * Atomic class-seat redeem. Sets parent_account_id on the calling
+ * user's profile and bumps the parent's seats_used. Returns the
+ * parent's plan so the dashboard knows what tier the student is
+ * effectively on.
+ *
+ * @param {string} inviteId
+ * @param {string} [email]
+ * @returns {Promise<{ok:boolean, applied:boolean, parentPlan?:string, error?:string}>}
+ */
+export async function applyClassInvite(inviteId, email = null) {
+    if (!isConfigured()) return { ok: false, applied: false, error: 'Supabase not configured' };
+    if (!inviteId)       return { ok: false, applied: false, error: 'Missing invite id' };
+    try {
+        const sb = await getSupabase();
+        const { data, error } = await sb.rpc('apply_class_invite', {
+            p_invite_id: inviteId,
+            p_email:     email,
+        });
+        if (error) {
+            const hint = /function .* does not exist/i.test(error.message || '')
+                ? 'apply_class_invite RPC missing — run supabase-class-seats-migration.sql'
+                : error.message;
+            return { ok: false, applied: false, error: hint };
+        }
+        const row = Array.isArray(data) ? data[0] : data;
+        if (!row) return { ok: true, applied: false };
+        return {
+            ok:         true,
+            applied:    !!row.applied,
+            parentPlan: row.parent_plan,
+        };
+    } catch (err) {
+        return { ok: false, applied: false, error: err.message };
+    }
+}
+
+/**
+ * Atomic redeem + plan upgrade. Use this from signup.html so an
+ * Educator/Advanced/Institution invite actually lands the user on
+ * that plan, not 'free'. The user_profiles row is updated server-
+ * side via the apply_invite_plan() SECURITY DEFINER RPC, which
+ * bypasses the column-level guard trigger that prevents users from
+ * self-elevating from the browser.
+ *
+ * @param {string} inviteId  - UUID of the invite code
+ * @param {string} [email]   - Email the user signed up with (for targeted invites)
+ * @returns {{ ok: boolean, applied: boolean, plan?: string, error?: string }}
+ */
+export async function applyInvitePlan(inviteId, email = null) {
+    if (!isConfigured()) return { ok: false, applied: false, error: 'Supabase not configured' };
+    if (!inviteId)       return { ok: false, applied: false, error: 'Missing invite id' };
+    try {
+        const sb = await getSupabase();
+        const { data, error } = await sb.rpc('apply_invite_plan', {
+            p_invite_id: inviteId,
+            p_email:     email,
+        });
+        if (error) {
+            // Most common: the RPC isn't installed yet. Surface a helpful
+            // hint instead of a generic Postgres error.
+            const hint = /function .* does not exist/i.test(error.message || '')
+                ? 'apply_invite_plan RPC missing — run supabase-invites-apply-plan-migration.sql'
+                : error.message;
+            return { ok: false, applied: false, error: hint };
+        }
+        // RPC returns SETOF (applied bool, plan text); supabase-js gives us
+        // an array. Empty array means the invite was rejected silently.
+        const row = Array.isArray(data) ? data[0] : data;
+        if (!row) return { ok: true, applied: false };
+        return { ok: true, applied: !!row.applied, plan: row.plan };
+    } catch (err) {
+        return { ok: false, applied: false, error: err.message };
     }
 }
 

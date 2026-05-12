@@ -170,21 +170,33 @@ export class FlareRing {
 
 export class FlareRing3D {
     /**
-     * @param {THREE.Scene} scene   Scene to add meshes to
-     * @param {object}      THREE   Three.js namespace
-     * @param {number}      sunR    Sun radius in scene units
+     * @param {THREE.Scene}    scene    Scene or group to add meshes to
+     * @param {object}         THREE    Three.js namespace
+     * @param {number}         sunR     Sun radius in scene units
+     * @param {THREE.Vector3} [center]  Sun centre in **world** coordinates; the
+     *                                  EUV ring's normal is oriented to face
+     *                                  this point so the wave radiates radially
+     *                                  outward from the photosphere.  Defaults
+     *                                  to (0, 0, 0) (sun-at-origin scenes).
      */
-    constructor(scene, THREE, sunR) {
+    constructor(scene, THREE, sunR, center = null) {
         this._scene  = scene;
         this._T      = THREE;
         this._sunR   = sunR;
+        this._center = center ?? new THREE.Vector3(0, 0, 0);
         this._states = [];   // supports concurrent M + X bursts
     }
+
+    /** Update the sun-centre (e.g. if the sun moves between frames). */
+    setCenter(v) { this._center.copy(v); }
 
     /**
      * Spawn a new flare burst.  Previous bursts may still be running.
      * @param {boolean}        extreme   true = X-class; false = M-class
-     * @param {THREE.Vector3} [position] World-space source; defaults to limb AR offset
+     * @param {THREE.Vector3} [position] Source position in the same frame as
+     *                                   `scene` (i.e. local to this instance's
+     *                                   parent group).  Defaults to a random
+     *                                   limb point relative to the sun.
      */
     trigger(extreme = false, position = null) {
         const T   = this._T;
@@ -222,11 +234,16 @@ export class FlareRing3D {
                 blending: T.AdditiveBlending, depthWrite: false, side: T.DoubleSide,
             })
         );
-        // Orient ring normal toward the camera (face the ecliptic-XZ plane)
+        // Orient ring normal radially outward from the sun centre — the
+        // ring's local +Z (default ring normal) faces sun centre (world
+        // coords), so the ring sits tangent to the photosphere at AR and
+        // expands as a Moreton/EIT wave across the disk.  Add to parent
+        // first so lookAt sees the correct world matrix.
         euvRing.position.copy(pos);
-        euvRing.lookAt(new T.Vector3(0, 0, 0));
         euvRing.renderOrder = 5;
         this._scene.add(euvRing);
+        this._scene.updateWorldMatrix(true, false);
+        euvRing.lookAt(this._center);
 
         // ── Post-flare arcade glow (hot loop emission at footpoints) ──────────
         const arcade = new T.Mesh(

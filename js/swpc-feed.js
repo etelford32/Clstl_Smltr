@@ -32,7 +32,22 @@
  *  feed.start();
  */
 
-import { API, NOAA, INTERVALS, STORM, STORM_TRIGGERS, TIER } from './config.js';
+import { API, NOAA, INTERVALS, STORM, STORM_TRIGGERS, TIER, planToTier } from './config.js';
+
+// ── Lazy auth-derived tier ──────────────────────────────────────────────────
+// Read the live auth state from the same localStorage key auth.js writes to.
+// Avoids importing the auth module (and its Supabase + Three.js deps) into
+// pages that only want the feed. Falls back to TIER.FREE if not signed in.
+const _AUTH_KEY = 'pp_auth';
+function _detectTierFromStorage() {
+    try {
+        const raw = localStorage.getItem(_AUTH_KEY) || sessionStorage.getItem(_AUTH_KEY);
+        if (!raw) return TIER.FREE;
+        const a = JSON.parse(raw);
+        if (!a?.signedIn) return TIER.FREE;
+        return planToTier(a.plan, a.role);
+    } catch { return TIER.FREE; }
+}
 
 // ── Quiet-Sun fallback state ──────────────────────────────────────────────────
 export const FALLBACK = {
@@ -474,24 +489,91 @@ async function fetchElectrons(state) {
     if (latest2mev) state.electron_flux_2mev = latest2mev.flux;
 }
 
+// Calibration constant: weighted-probability sum → GW. Empirically tuned
+// against published OVATION nowcast hemispheric-power values: a quiet
+// day's grid sums to ~150-300 weighted units → ~4-8 GW; a Kp 7 storm
+// hits ~3500 → ~85 GW; an extreme event ~6000 → ~150 GW. The value is
+// not a published NOAA constant — it's reverse-engineered from the
+// relationship between the grid integral and the separately-published
+// hemi-power text file. Re-tune if NOAA changes the OVATION model
+// output range.
+const _OVATION_PROB_TO_GW = 0.025;
+
+/**
+ * Integrate a 1°×1° OVATION probability grid into a per-hemisphere
+ * power estimate (GW). Each cell's contribution is its probability
+ * (0-100) multiplied by cos(lat) to area-weight, then summed and
+ * scaled by the empirical calibration constant.
+ *
+ * Returns null if the grid is malformed — caller falls back to the
+ * previous tick's value.
+ */
+function _integrateOvationGrid(coordinates) {
+    if (!Array.isArray(coordinates) || coordinates.length === 0) return null;
+    let north = 0, south = 0;
+    let nN = 0, nS = 0;
+    for (const row of coordinates) {
+        if (!Array.isArray(row) || row.length < 3) continue;
+        const lat = parseFloat(row[1]);
+        const prob = parseFloat(row[2]);
+        if (!Number.isFinite(lat) || !Number.isFinite(prob)) continue;
+        // Area weight on a unit sphere: dA ∝ cos(lat) for equal-Δlat,Δlon.
+        const cosLat = Math.cos(lat * Math.PI / 180);
+        const weighted = prob * cosLat;
+        if (lat >= 0) { north += weighted; nN++; }
+        else          { south += weighted; nS++; }
+    }
+    if (nN === 0 && nS === 0) return null;
+    return {
+        north_gw: north * _OVATION_PROB_TO_GW,
+        south_gw: south * _OVATION_PROB_TO_GW,
+    };
+}
+
 async function fetchAurora(state) {
     const raw = await fetchNoaa(NOAA.aurora);
-    // Format: JSON object with hemispheric power fields
     if (!raw || typeof raw !== 'object') return;
-    const north = noaaFill(
+
+    // OVATION's published JSON delivers a coordinates grid (1° × 1°,
+    // 64,800 points: [lon, lat, probability_0_100]). Pre-2024 docs and
+    // some mirrors mention top-level "Hemispheric Power" fields; the
+    // *live* services.swpc.noaa.gov payload doesn't carry them, so the
+    // earlier code silently returned null and the shader sat at the
+    // default-2-GW fallback even during major storms. Fix: derive
+    // hemi-power by integrating the grid we already have in hand,
+    // and fall back to whatever top-level keys are present (some
+    // mirrors and the .txt nowcast feed do publish them).
+    let north = noaaFill(
         raw['Hemispheric Power North'] ??
         raw['hemispheric_power_north'] ??
         raw.north_power
     );
-    const south = noaaFill(
+    let south = noaaFill(
         raw['Hemispheric Power South'] ??
         raw['hemispheric_power_south'] ??
         raw.south_power
     );
+    if ((north == null || south == null) && Array.isArray(raw.coordinates)) {
+        const integrated = _integrateOvationGrid(raw.coordinates);
+        if (integrated) {
+            if (north == null) north = integrated.north_gw;
+            if (south == null) south = integrated.south_gw;
+        }
+    }
     if (north != null) state.aurora_power_north = north;
     if (south != null) state.aurora_power_south = south;
 
-    // Derive activity label from total hemispheric power
+    // Stash the upstream forecast timestamp so the resolver / HUD can
+    // distinguish a stale grid from a fresh one. NOAA publishes the
+    // OVATION nowcast at 5-minute cadence; anything older than ~30 min
+    // is suspect and we tag the resolver source accordingly.
+    const ftime = raw['Forecast Time'] ?? raw.forecast_time;
+    if (ftime) {
+        const t = Date.parse(ftime);
+        if (Number.isFinite(t)) state.aurora_forecast_ms = t;
+    }
+
+    // Derive activity label from total hemispheric power.
     const total = (north ?? 0) + (south ?? 0);
     state.aurora_activity = total > 200 ? 'severe'
         : total > 100 ? 'active'
@@ -499,6 +581,11 @@ async function fetchAurora(state) {
         : total > 10  ? 'low'
         : 'quiet';
 }
+
+// Surfaced for the AuroraHistory module and any direct tests — keeps
+// the integration logic in one place rather than a duplicate in the
+// edge function.
+export { _integrateOvationGrid as integrateOvationGrid };
 
 async function fetchAlerts(state) {
     const raw = await fetchNoaa(NOAA.alerts);
@@ -767,11 +854,20 @@ async function fetchRadioFlux(state) {
 
 export class SpaceWeatherFeed {
     /**
-     * @param {object} opts
-     * @param {string} opts.tier  TIER.FREE (default) or TIER.PRO
+     * @param {object}  opts
+     * @param {string} [opts.tier]  Override the auto-detected tier. Pass
+     *                              TIER.PRO to force T4 + faster storm
+     *                              multipliers (e.g. for an admin preview);
+     *                              omit to derive from the signed-in user's
+     *                              plan via planToTier().
      */
-    constructor({ tier = TIER.FREE } = {}) {
-        this.tier        = tier;
+    constructor({ tier } = {}) {
+        // Auto-derive from auth when not explicitly specified. Historical
+        // call sites (`new SpaceWeatherFeed()` without a tier arg) used to
+        // get TIER.FREE unconditionally — meaning Advanced/Institution/
+        // Enterprise users were silently downgraded to free-tier polling
+        // intervals + no T4. Now those tiers correctly land in TIER.PRO.
+        this.tier        = tier ?? _detectTierFromStorage();
         this._raw        = { ...FALLBACK };
         this._timers     = {};
         this._stormMode  = false;
@@ -781,6 +877,24 @@ export class SpaceWeatherFeed {
         this.failStreak  = 0;
         this._lastFlareKey = null;
         this._lastCmeKey   = null;
+
+        // Re-evaluate tier on auth changes (sign-in, plan upgrade via
+        // checkout). Reschedule active timers if the bucket flipped, so a
+        // user who upgrades mid-session immediately gets the faster
+        // intervals + T4 without a page reload.
+        if (typeof window !== 'undefined' && tier == null) {
+            this._authListener = () => {
+                const next = _detectTierFromStorage();
+                if (next === this.tier) return;
+                const wasRunning = !!this._timers.t1;
+                this.tier = next;
+                if (!wasRunning) return;
+                // Tear down + re-start so T4 schedule respects the new tier.
+                this.stop();
+                this.start();
+            };
+            window.addEventListener('auth-changed', this._authListener);
+        }
     }
 
     // ── Public API ────────────────────────────────────────────────────────────

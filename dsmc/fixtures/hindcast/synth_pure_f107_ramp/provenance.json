@@ -1,0 +1,29 @@
+{
+  "synth_id": "synth_pure_f107_ramp",
+  "template_event": "solar_min_dec_2019",
+  "template_path": "dsmc/fixtures/hindcast/solar_min_dec_2019/historical_ap.csv",
+  "scaling": {
+    "ap_factor": 1.0,
+    "f107_factor": 10.0,
+    "extend_storm_3h_bins": 0,
+    "storm_threshold_ap": 80.0,
+    "cap_ap": 400.0,
+    "cap_f107": 1000.0
+  },
+  "description": "Pure-F10.7 stress sweep: solar-min 2019 (Ap \u2264 12) with F10.7 multiplied by 10\u00d7 to reach 700 SFU. Decouples the F10.7 axis from the Ap axis so the stress report can isolate the predictor's F10.7-sensitivity from its storm-coupling response.",
+  "citations": [
+    "(synthetic \u2014 for monotonicity / smoothness probing only)"
+  ],
+  "post_scale_summary": {
+    "n_rows": 48,
+    "ap_min": 0.0,
+    "ap_max": 12.0,
+    "f107_min": 689.0,
+    "f107_max": 716.0
+  },
+  "warnings": [
+    "F10.7 = 716 SFU exceeds the predictor's training maximum of 315 SFU; predictions here are extrapolations and must be checked for monotonicity / smoothness only, not accuracy."
+  ],
+  "generated_at_utc": "2026-05-08T01:53:18.529257Z",
+  "do_not_train_on_this_fixture": true
+}

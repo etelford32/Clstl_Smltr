@@ -1,4 +1,4 @@
-# SPARTA DSMC kernel for Parker Physics
+# SPARTA DSMC kernel for Parkers Physics
 
 We use [SPARTA](https://sparta.github.io/) (Sandia National Labs,
 Stochastic PArallel Rarefied-gas Time-accurate Analyzer — GPL v2) as

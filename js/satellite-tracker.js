@@ -41,6 +41,27 @@ const DEG2RAD  = DEG;         // kept as alias for SGP4 orbital-element conversi
 const RE_KM    = 6378.135;    // WGS-72 (SGP4 standard — distinct from geo.radiusKm)
 const MIN_PER_DAY = 1440;
 
+// Atomics slot indices in the sync Int32Array shared with the
+// propagation worker. Mirrored at the top of
+// js/operations/propagation-worker.js — keep in lockstep.
+//
+// The "true SAB protocol" uses these to coordinate the entire hot
+// tick path without touching postMessage — main bumps REQUEST and
+// Atomics.notify; worker waitAsync's, propagates, bumps PUBLISH and
+// Atomics.notify; main polls PUBLISH each frame and gates the GPU
+// upload on WRITING. add-sats / clear / init still flow over
+// postMessage (rare control plane), and waitAsync yields the worker
+// to the event loop between ticks so those handlers actually run.
+const SYNC_PUBLISH_SLOT = 0;   // worker writes after each completed frame
+const SYNC_WRITING_SLOT = 1;   // 1 while worker is mid-write, 0 when done
+const SYNC_REQUEST_SLOT = 2;   // main writes the next frameId, notifies
+const SYNC_RUNNING_SLOT = 3;   // main writes 0 to terminate the worker tick loop
+
+// Control Float64 slot indices in the parallel ctrl SharedArrayBuffer.
+const CTRL_JD_SLOT      = 0;
+const CTRL_GMST_SLOT    = 1;
+const CTRL_SCALE_SLOT   = 2;
+
 // ── Rust WASM SGP4 (high-performance, loaded async) ────────────────────────
 // Falls back to the JS propagator if WASM isn't available.
 let _wasmSgp4 = null;
@@ -49,13 +70,30 @@ let _wasmLoading = false;
 async function _loadWasmSgp4() {
     if (_wasmSgp4 || _wasmLoading) return _wasmSgp4;
     _wasmLoading = true;
+    const t0 = performance.now();
     try {
         const mod = await import('./sgp4-wasm/sgp4_wasm.js');
         await mod.default();  // init WASM
         _wasmSgp4 = mod;
         console.info('[SatTracker] Rust SGP4 WASM loaded — high-performance propagation active');
+        // Telemetry: how long did the WASM cold-start take? Big swings
+        // in p95 here are usually network / CDN edge problems, not
+        // wasm-bindgen instantiation. Lazy import so satellite-tracker
+        // doesn't pull telemetry into pages that don't need it.
+        try {
+            const { telemetry } = await import('./telemetry.js');
+            telemetry.recordPerf('wasm_sgp4_init', performance.now() - t0);
+        } catch {}
     } catch (err) {
         console.debug('[SatTracker] WASM SGP4 not available, using JS fallback:', err.message);
+        // Telemetry: don't burn an `error` row on this — WASM-unavailable
+        // is an expected fallback for older browsers. Log as a tagged
+        // app_perf with a -1 value so we can count occurrence rates
+        // without polluting the error top-N.
+        try {
+            const { telemetry } = await import('./telemetry.js');
+            telemetry.recordPerf('wasm_sgp4_init_failed', -1);
+        } catch {}
     }
     _wasmLoading = false;
     return _wasmSgp4;
@@ -172,13 +210,37 @@ const GROUP_COLORS = {
     'amateur':       new THREE.Color(0x66ffcc),  // teal — Ham radio
     'visual':        new THREE.Color(0xffffaa),  // pale yellow — Bright objects
     'active':        new THREE.Color(0x88aacc),  // muted blue — All active
-    'debris':        new THREE.Color(0xff2200),  // danger red — Debris
+    'debris':        new THREE.Color(0xff2200),  // danger red — Debris (composite)
+    // Per-event debris groups, colored to match debris-catalog.js families so
+    // the satellites globe and the upper-atmosphere globe agree on what each
+    // breakup cloud looks like. Hot reds → ASAT clouds, amber/peach → CZ-6A
+    // upper-stage breakups, etc.
+    'fengyun-1c-debris':  new THREE.Color(0xff3060),  // FY-1C ASAT (2007) — largest single event
+    'cosmos-1408-debris': new THREE.Color(0xff5070),  // C1408 ASAT (2021) — ISS shell hazard
+    'iridium-33-debris':  new THREE.Color(0xff7040),  // Iridium 33 collision (2009)
+    'cosmos-2251-debris': new THREE.Color(0xff9050),  // Cosmos 2251 collision (2009)
     'last-30-days':  new THREE.Color(0x00ffaa),  // mint — Recent launches
     'geo':           new THREE.Color(0xffaa00),  // amber — Geostationary
     'planet':        new THREE.Color(0x88ff88),  // light green — Planet Labs
     'search':        new THREE.Color(0x00ffcc),  // original cyan — Manual search
     '_default':      new THREE.Color(0x00ffcc),  // fallback
 };
+
+// Set of CelesTrak group IDs that represent tracked debris. Used by
+// altitude-cohort + conjunction-screening helpers so a per-event toggle
+// (just FY-1C, just Cosmos 1408, etc.) is still treated as "debris" when
+// counting hazards in a sat's shell. Keep this in lockstep with
+// GROUP_COLORS / GROUP_MAP / debris-catalog.js families.
+export const DEBRIS_GROUP_IDS = new Set([
+    'debris',
+    'fengyun-1c-debris',
+    'cosmos-1408-debris',
+    'iridium-33-debris',
+    'cosmos-2251-debris',
+]);
+
+/** True when a group id represents a tracked-debris layer. */
+export function isDebrisGroup(group) { return DEBRIS_GROUP_IDS.has(group); }
 
 /** Get the color for a constellation group. */
 export function getGroupColor(group) {
@@ -225,6 +287,102 @@ export class SatelliteTracker {
         this._positions = null;
         this._colors = null;
         this._pointsMesh = null;
+
+        // Batch propagation hot-path. WASM keeps a parallel registry
+        // of parsed Sgp4State so the per-frame tick can call one
+        // function instead of N (parse + init + propagate)s. The
+        // registry is append-only and indices line up with
+        // `_satellites[i]`. `_batchSyncedTo` tracks how many slots
+        // have been registered; new sats get registered lazily at
+        // the next tick or via _syncRegistry() so add-at-load and
+        // WASM-ready-after-load both converge on a consistent state.
+        this._batchOut       = null;       // Float32Array of length 3·maxSats
+        this._batchSyncedTo  = 0;          // index up to which the registry is in sync
+        this._batchAvailable = false;      // true once WASM exposes registry_*
+
+        // Off-thread propagation. When a Worker spawns and reports
+        // ready, the live tick stops calling WASM in-line and instead
+        // hands the work to the worker. Two transports:
+        //
+        //   - SAB ("shared")     : crossOriginIsolated === true. We
+        //     allocate a SharedArrayBuffer once, pass it to the worker,
+        //     and use the same memory as the THREE position attribute.
+        //     Tick messages carry only jd/gmst/scale; the worker writes
+        //     directly into the SAB; the main thread sets needsUpdate
+        //     and reads lat/lon from the same buffer. Zero CPU copies.
+        //
+        //   - Transferable       : not isolated (older browser, no
+        //     COOP/COEP, mobile Safari). Single ArrayBuffer ping-pongs
+        //     between main and worker via postMessage transfer.
+        //
+        // Both share the same _workerInFlight / _workerSyncedTo
+        // bookkeeping; the difference is only in how positions
+        // surface.
+        this._worker          = null;
+        this._workerReady     = false;
+        this._workerSyncedTo  = 0;          // sats already shipped to the worker
+        this._workerBuf       = null;       // transferable: Float32Array, our half of the ping-pong
+        this._workerInFlight  = false;
+        this._workerFrameId   = 0;
+        this._workerLastFrame = 0;          // most recent frameId that landed
+        this._workerEnabled   = (typeof Worker !== 'undefined');
+
+        // SAB fast path. crossOriginIsolated requires COOP/COEP to be
+        // set on the document; vercel.json + dev-server.mjs add them
+        // on /operations.html. Pages without those headers (or
+        // browsers that don't honour `credentialless` — Safari today)
+        // see crossOriginIsolated === false and stay on the
+        // transferable path.
+        //
+        // _syncSab is a tiny (16-byte) SAB carrying an Int32Array we
+        // use as an Atomics fence between the worker's SAB writes
+        // and the main thread's gl.bufferData read. Slot 0 is the
+        // publish counter (worker writes after each completed
+        // frame), slot 1 is the writing flag (1 while writes are in
+        // progress, 0 when done). Without the fence, a slow render
+        // could in principle overlap a worker write — bounded but
+        // visually torn. With it, we just defer the upload one frame
+        // when the writing flag is set.
+        const isolated = typeof self !== 'undefined'
+            && self.crossOriginIsolated
+            && typeof SharedArrayBuffer !== 'undefined';
+        this._posSab        = null;
+        this._syncSab       = null;
+        this._syncView      = null;
+        this._ctrlSab       = null;
+        this._ctrlView      = null;
+        this._sabReady      = false;             // worker has accepted the SAB
+        this._lastUploadedFrame = 0;             // frameId we last uploaded for
+        // Atomics.waitAsync is what lets the worker stay coordinated
+        // via SAB without burning a postMessage per frame. Falls
+        // back to the message-driven path on engines that don't
+        // support it (Chrome <87, FF <89, Safari <15.4).
+        this._atomicsTickEnabled = isolated && typeof Atomics?.waitAsync === 'function';
+        if (isolated) {
+            try {
+                this._posSab   = new SharedArrayBuffer(this._maxSats * 3 * 4);
+                this._syncSab  = new SharedArrayBuffer(16);
+                this._syncView = new Int32Array(this._syncSab);
+                if (this._atomicsTickEnabled) {
+                    this._ctrlSab  = new SharedArrayBuffer(24);
+                    this._ctrlView = new Float64Array(this._ctrlSab);
+                    // Worker starts the tick loop; main marks RUNNING=1
+                    // so the worker's loop doesn't shut down before the
+                    // first tick lands.
+                    Atomics.store(this._syncView, SYNC_RUNNING_SLOT, 1);
+                }
+            } catch (err) {
+                console.debug('[SatTracker] SAB alloc failed, transferable path only:', err.message);
+                this._posSab = null;
+                this._syncSab = null;
+                this._syncView = null;
+                this._ctrlSab = null;
+                this._ctrlView = null;
+                this._atomicsTickEnabled = false;
+            }
+        }
+
+        if (this._workerEnabled) this._spawnWorker();
 
         // Shell visualization group
         this._shellGroup = new THREE.Group();
@@ -320,7 +478,13 @@ export class SatelliteTracker {
             horizonH  = 24,
             stepMin   = 10,
         } = opts;
-        return this.screenConjunctions(noradId, horizonH, stepMin, withinKm, 'debris');
+        // Screen against every loaded debris layer — the composite 'debris'
+        // group OR any of the per-event subgroups (FY-1C, C-1408, IR-33,
+        // C-2251) the user may have toggled on individually.
+        return this.screenConjunctions(
+            noradId, horizonH, stepMin, withinKm,
+            [...DEBRIS_GROUP_IDS],
+        );
     }
 
     /**
@@ -344,8 +508,8 @@ export class SatelliteTracker {
             if (s.tle.norad_id === excludeId) continue;
             if (!Number.isFinite(s.alt))      continue;
             if (s.alt < lo || s.alt > hi)     continue;
-            if (s.group === 'debris') debris++;
-            else                      active++;
+            if (DEBRIS_GROUP_IDS.has(s.group)) debris++;
+            else                               active++;
         }
         return { debris, active, total: debris + active, bandKm };
     }
@@ -385,6 +549,13 @@ export class SatelliteTracker {
         const matches = (g) => {
             if (group == null) return true;
             if (Array.isArray(group)) return group.includes(g);
+            // 'debris' is treated as the union of every loaded debris
+            // layer (the composite + the four per-event groups). Without
+            // this, callers asking for the "debris catalog" would miss
+            // anything the user loaded via a per-event toggle (FY-1C,
+            // Cosmos 1408, etc.) and the density map / conjunction
+            // screener would silently undercount hazards.
+            if (group === 'debris') return DEBRIS_GROUP_IDS.has(g);
             return g === group;
         };
         return this._satellites
@@ -455,11 +626,25 @@ export class SatelliteTracker {
      */
     async loadGroup(group = 'stations') {
         if (this._groups.has(group)) return this._groups.get(group).count;
+        const _t0 = performance.now();
         try {
             const res = await fetch(`/api/celestrak/tle?group=${group}`);
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const data = await res.json();
-            if (data.error) throw new Error(data.error);
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || data.error) {
+                const reason = data.error
+                    ? `${data.error}${data.detail ? `: ${data.detail}` : ''}`
+                    : `HTTP ${res.status}`;
+                throw new Error(reason);
+            }
+            // Telemetry: record the TLE-load latency for the superadmin
+            // perf summary. Surfaces as `tle_load_ms` per route. Slow
+            // p95 here is a CelesTrak / edge proxy issue, not a client
+            // one. Lazy import keeps satellite-tracker free of a
+            // hard dep on telemetry.
+            try {
+                const { telemetry } = await import('./telemetry.js');
+                telemetry.recordPerf(`tle_load_${group}`, performance.now() - _t0);
+            } catch {}
 
             const tles = data.satellites ?? [];
             const added = this._addSatellites(tles, group);
@@ -467,8 +652,18 @@ export class SatelliteTracker {
                 visible: true,
                 count: added,
                 color: GROUP_COLORS[group] ?? GROUP_COLORS._default,
+                error: null,
+                composite: data.composite ?? false,
+                subgroups: data.subgroups ?? null,
+                fetched: data.fetched ?? new Date().toISOString(),
             });
 
+            // Composite groups can succeed-with-partial. Keep that visible.
+            const partial = (data.subgroups ?? []).filter(s => s.status === 'error');
+            if (partial.length > 0) {
+                console.warn(`[SatTracker] ${group}: ${partial.length}/${data.subgroups.length} subgroups failed:`,
+                    partial.map(p => `${p.group} (${p.error})`).join(', '));
+            }
             console.info(`[SatTracker] +${added} satellites (${group}) — total: ${this._satellites.length}`);
 
             window.dispatchEvent(new CustomEvent('satellites-loaded', {
@@ -478,8 +673,36 @@ export class SatelliteTracker {
             return added;
         } catch (err) {
             console.warn(`[SatTracker] Failed to load ${group}:`, err.message);
+            // Record the failure so the UI can render a "failed (retry)"
+            // state instead of an indeterminate "—". A subsequent
+            // loadGroup() call will short-circuit on hasGroup(); callers
+            // wanting a retry should remove the group first.
+            this._groups.set(group, {
+                visible: false,
+                count: 0,
+                color: GROUP_COLORS[group] ?? GROUP_COLORS._default,
+                error: err.message || 'unknown',
+                fetched: new Date().toISOString(),
+            });
+            window.dispatchEvent(new CustomEvent('satellites-load-failed', {
+                detail: { group, error: err.message },
+            }));
             return 0;
         }
+    }
+
+    /**
+     * Forget a group entry so a subsequent loadGroup() will refetch.
+     * Used by the layer panel's retry-on-failed-load button. Does not
+     * remove already-rendered satellites for the group (call
+     * unloadGroup() for that).
+     */
+    forgetGroup(group) {
+        if (!this._groups.has(group)) return;
+        const entry = this._groups.get(group);
+        // Only forget failed entries — a successful load keeps its
+        // satellites in _satellites so a forget+reload would dupe them.
+        if (entry.error) this._groups.delete(group);
     }
 
     /**
@@ -487,6 +710,7 @@ export class SatelliteTracker {
      * @param {number} noradId  NORAD catalog number
      */
     async loadNorad(noradId) {
+        const _t0 = performance.now();
         try {
             const res = await fetch(`/api/celestrak/tle?norad=${noradId}`);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -495,6 +719,10 @@ export class SatelliteTracker {
 
             const sats = data.satellites ?? [];
             this._addSatellites(sats, 'search');
+            try {
+                const { telemetry } = await import('./telemetry.js');
+                telemetry.recordPerf('tle_load_norad', performance.now() - _t0);
+            } catch {}
             return sats[0] ?? null;
         } catch (err) {
             console.warn(`[SatTracker] Failed to load NORAD ${noradId}:`, err.message);
@@ -610,7 +838,16 @@ export class SatelliteTracker {
             this._pointsMesh.geometry.dispose();
         }
         const n = this._satellites.length;
-        const posArr = new Float32Array(n * 3);
+        // SAB fast path: the position attribute is a Float32Array
+        // view over the shared SAB the worker is also writing to. As
+        // n grows we re-wrap the view; the SAB itself was sized to
+        // maxSats at construction so we never reallocate. WebGL's
+        // bufferData reads through the typed array view, which works
+        // regardless of whether the underlying buffer is an
+        // ArrayBuffer or a SharedArrayBuffer.
+        const posArr = this._posSab
+            ? new Float32Array(this._posSab, 0, n * 3)
+            : new Float32Array(n * 3);
         const colArr = new Float32Array(n * 3);
 
         const overrides = this._colorOverrides;
@@ -665,6 +902,286 @@ export class SatelliteTracker {
         this._colors.needsUpdate = true;
     }
 
+    /* ─── Off-thread propagation ────────────────────────────── */
+
+    _spawnWorker() {
+        try {
+            const url = new URL('./operations/propagation-worker.js', import.meta.url);
+            this._worker = new Worker(url, { type: 'module' });
+            this._worker.onerror = (ev) => {
+                console.warn('[SatTracker] propagation worker errored, falling back:', ev.message);
+                this._teardownWorker();
+            };
+            this._worker.onmessage = (ev) => this._onWorkerMessage(ev.data);
+            this._worker.postMessage({ type: 'init' });
+            // Initial buffer for the ping-pong. Sized to maxSats so we
+            // never need to reallocate even after the catalog grows.
+            this._workerBuf = new Float32Array(this._maxSats * 3);
+        } catch (err) {
+            console.debug('[SatTracker] worker unavailable, staying on main thread:', err.message);
+            this._worker        = null;
+            this._workerEnabled = false;
+        }
+    }
+
+    _teardownWorker() {
+        if (!this._worker) return;
+        // Signal the Atomics tick loop to drop out of waitAsync, then
+        // terminate. The notify is needed because the worker is
+        // parked in waitAsync — without it, terminate still works
+        // but waitAsync may keep its promise pending until GC.
+        if (this._syncView) {
+            try {
+                Atomics.store(this._syncView, SYNC_RUNNING_SLOT, 0);
+                Atomics.notify(this._syncView, SYNC_REQUEST_SLOT, 1);
+            } catch (_) { /* sync view may already be detached */ }
+        }
+        try { this._worker.terminate(); } catch (_) {}
+        this._worker             = null;
+        this._workerEnabled      = false;
+        this._workerReady        = false;
+        this._workerInFlight     = false;
+        this._atomicsTickEnabled = false;
+        // _workerBuf is whatever's lying around; main-batch path will
+        // allocate its own.
+    }
+
+    _onWorkerMessage(msg) {
+        if (msg.type === 'ready') {
+            if (msg.ok && msg.hasRegistry) {
+                this._workerReady = true;
+                // If the page is crossOriginIsolated and we got a SAB
+                // allocated, hand it over now. The worker will switch
+                // to shared-memory mode for ticks.
+                if (this._posSab) {
+                    this._worker.postMessage({
+                        type:           'init-shared',
+                        sab:            this._posSab,
+                        syncSab:        this._syncSab ?? null,
+                        ctrlSab:        this._ctrlSab ?? null,
+                        atomicsTickRequested: !!this._atomicsTickEnabled,
+                    });
+                }
+                // Ship every sat we already know about.
+                this._workerSync();
+            } else {
+                console.debug('[SatTracker] worker WASM init failed:', msg.error || 'no registry');
+                this._teardownWorker();
+            }
+            return;
+        }
+        if (msg.type === 'shared-ready') {
+            if (msg.ok) {
+                this._sabReady = true;
+            } else {
+                console.debug('[SatTracker] worker rejected SAB, falling back to transferable:', msg.error);
+                this._posSab   = null;
+                this._sabReady = false;
+            }
+            return;
+        }
+        if (msg.type === 'add-ack' || msg.type === 'clear-ack') return;
+        if (msg.type === 'positions') {
+            this._workerInFlight = false;
+            this._workerLastFrame = msg.frameId;
+
+            if (msg.mismatch) {
+                // Slot count drifted — re-ship everything and skip
+                // this frame's upload (positions would be NaN).
+                this._workerSyncedTo = 0;
+                this._worker.postMessage({ type: 'clear' });
+                this._workerSync();
+                return;
+            }
+
+            if (this._sabReady && msg.buffer == null) {
+                // SAB path: positions are already in shared memory
+                // (which the THREE position attribute is a view over).
+                // Just refresh lat/lon and tell the GPU to re-upload.
+                this._refreshFromSab(msg.slots, msg.frameId);
+            } else {
+                // Transferable path: wrap a view, copy in.
+                const buf = new Float32Array(msg.buffer);
+                this._workerBuf = buf;
+                this._uploadPositionsFromBuffer(buf, msg.slots);
+            }
+            return;
+        }
+        if (msg.type === 'error') {
+            console.warn('[SatTracker] worker error:', msg.error);
+            return;
+        }
+    }
+
+    /**
+     * SAB-mode counterpart to _uploadPositionsFromBuffer. The position
+     * attribute already shares memory with the worker, so there's
+     * nothing to copy — we just walk the buffer for lat/lon recovery
+     * and the highlight sprite, and flag the attribute as dirty so
+     * the next render uploads it to the GPU.
+     *
+     * Atomics fence: read the worker's writing flag with
+     * Atomics.load. Pairs with the worker's Atomics.store before its
+     * SAB writes, so this load is the synchronization edge that
+     * makes those writes visible. If the flag is set we skip the
+     * needsUpdate (uploading mid-write would tear positions); the
+     * next 'positions' message will retry. We still do lat/lon
+     * recovery — the read is still a valid snapshot for tooltip /
+     * cohort consumers, just not for GPU upload.
+     */
+    _refreshFromSab(slotCount, frameId) {
+        if (!this._positions || !this._posSab) return;
+        const writing = this._syncView
+            ? Atomics.load(this._syncView, SYNC_WRITING_SLOT)
+            : 0;
+        const view = this._positions.array;
+        const n = Math.min(slotCount, this._satellites.length);
+        const kmToScene = this._earthR / RE_KM;
+        let dirty = false;
+        for (let i = 0; i < n; i++) {
+            const off = i * 3;
+            const x = view[off];
+            const y = view[off + 1];
+            const z = view[off + 2];
+            if (x !== x) continue;   // NaN — keep last known position
+            dirty = true;
+
+            const sat = this._satellites[i];
+            const sx = x / kmToScene;
+            const sy = y / kmToScene;
+            const sz = z / kmToScene;
+            const r  = Math.sqrt(sx * sx + sy * sy + sz * sz);
+            if (r > 1e-9) {
+                const cy = sy / r;
+                sat.lat = Math.asin(cy < -1 ? -1 : cy > 1 ? 1 : cy) * RAD;
+                sat.lon = Math.atan2(-sz, sx) * RAD;
+                sat.alt = r - RE_KM;
+            }
+            if (this._highlightNoradId != null
+                && sat.tle.norad_id === this._highlightNoradId
+                && this._highlightSprite) {
+                this._highlightSprite.position.set(x, y, z);
+            }
+        }
+        if (dirty && !writing && Number.isFinite(frameId)) {
+            // Safe to upload — worker has finished writes for this
+            // frame. Without the fence we'd unconditionally set
+            // needsUpdate and risk a torn gl.bufferData on slow GPUs.
+            this._positions.needsUpdate = true;
+            this._lastUploadedFrame = frameId;
+        } else if (dirty && !this._syncView) {
+            // No sync SAB available (browser doesn't support it for
+            // some reason) — fall back to the previous behaviour:
+            // assume the postMessage barrier is enough.
+            this._positions.needsUpdate = true;
+        }
+    }
+
+    /**
+     * Send any new sats since the last sync to the worker registry.
+     * Chunked so a 30 k-row catalog landing in one shot doesn't park
+     * the worker on TLE parsing for ~1 s while tick messages queue
+     * behind it. The next tick fires `_workerSync` again, so the
+     * remainder lands on subsequent frames — first frames render the
+     * already-shipped slots and the new ones come online a frame or
+     * two later.
+     */
+    _workerSync(maxThisCall = 5000) {
+        if (!this._worker || !this._workerReady) return;
+        const n = this._satellites.length;
+        if (n <= this._workerSyncedTo) return;
+        const upTo = Math.min(n, this._workerSyncedTo + maxThisCall);
+        const tles = [];
+        for (let i = this._workerSyncedTo; i < upTo; i++) {
+            const t = this._satellites[i].tle;
+            tles.push({
+                line1: t.line1 || null,
+                line2: t.line2 || null,
+            });
+        }
+        this._workerSyncedTo = upTo;
+        this._worker.postMessage({ type: 'add-sats', tles });
+    }
+
+    /**
+     * Copy worker-returned positions into the THREE position attribute
+     * and refresh lat/lon/alt for tooltip / cohort consumers. NaN
+     * triplets indicate parse-failed or decayed slots; we leave them
+     * at their last known position so the dot doesn't snap to origin.
+     */
+    _uploadPositionsFromBuffer(buf, slotCount) {
+        if (!this._positions) return;
+        const posArr = this._positions.array;
+        const n = Math.min(slotCount, this._satellites.length);
+        const kmToScene = this._earthR / RE_KM;
+
+        let dirty = false;
+        for (let i = 0; i < n; i++) {
+            const off = i * 3;
+            const x = buf[off];
+            const y = buf[off + 1];
+            const z = buf[off + 2];
+            if (x !== x) continue;   // NaN — keep last known position
+
+            posArr[off]     = x;
+            posArr[off + 1] = y;
+            posArr[off + 2] = z;
+            dirty = true;
+
+            const sat = this._satellites[i];
+            const sx = x / kmToScene;
+            const sy = y / kmToScene;
+            const sz = z / kmToScene;
+            const r  = Math.sqrt(sx * sx + sy * sy + sz * sz);
+            if (r > 1e-9) {
+                const cy = sy / r;
+                sat.lat = Math.asin(cy < -1 ? -1 : cy > 1 ? 1 : cy) * RAD;
+                sat.lon = Math.atan2(-sz, sx) * RAD;
+                sat.alt = r - RE_KM;
+            }
+
+            if (this._highlightNoradId != null
+                && sat.tle.norad_id === this._highlightNoradId
+                && this._highlightSprite) {
+                this._highlightSprite.position.set(x, y, z);
+            }
+        }
+        if (dirty) this._positions.needsUpdate = true;
+    }
+
+    /**
+     * Lazy-register any not-yet-batched sats with the WASM registry.
+     * Idempotent — safe to call every frame; usually a no-op once
+     * the load has settled. Slot indices line up with `_satellites[i]`,
+     * so a JS→WASM mismatch (parse failure, decay) reserves a blank
+     * slot to keep the alignment stable.
+     */
+    _syncRegistry() {
+        if (!_wasmSgp4 || !_wasmSgp4.registry_propagate) return false;
+        this._batchAvailable = true;
+
+        const n = this._satellites.length;
+        for (let i = this._batchSyncedTo; i < n; i++) {
+            const sat = this._satellites[i];
+            let registered = false;
+            if (sat.tle.line1 && sat.tle.line2) {
+                try {
+                    _wasmSgp4.registry_add(sat.tle.line1, sat.tle.line2);
+                    sat._batchOk = true;
+                    registered = true;
+                } catch (_) {
+                    // Parse / init failed — fall through to blank slot.
+                }
+            }
+            if (!registered) {
+                _wasmSgp4.registry_reserve_blank();
+                sat._batchOk = false;
+            }
+        }
+        this._batchSyncedTo = n;
+        return true;
+    }
+
     /** Update satellite positions to current time. Call every frame. */
     tick(nowMs = Date.now()) {
         if (!this._positions || this._satellites.length === 0) return;
@@ -674,38 +1191,186 @@ export class SatelliteTracker {
         const kmToScene = this._earthR / RE_KM;
         const posArr  = this._positions.array;
 
-        for (let i = 0; i < this._satellites.length; i++) {
-            const sat    = this._satellites[i];
-            const tsince = (jd - sat.epochJd) * MIN_PER_DAY;
+        // Worker path (preferred). The worker has its own WASM
+        // registry; the main thread keeps it in sync via add-sats
+        // messages. Two transports converge here:
+        //
+        //   - SAB    : tick is a tiny header message; the worker
+        //              writes positions straight into the shared
+        //              memory the THREE position attribute is a view
+        //              over.
+        //   - Xfer   : a Float32Array's buffer ping-pongs across
+        //              postMessage transfer.
+        //
+        // Either way we hold at most one outstanding tick — if the
+        // worker hasn't acked yet, this frame skips and positions
+        // stay one frame stale (invisible at 60 fps).
+        if (this._workerReady && this._workerEnabled) {
+            this._workerSync();
 
-            const teme = propagate(sat.tle, tsince);
-            _temeScratch.set(teme.x, teme.y, teme.z);
+            // Atomics-only protocol: zero postMessage on the hot tick
+            // path. Main writes (jd, gmst, scale) into a shared
+            // Float64 control SAB, bumps REQUEST in the sync SAB,
+            // and Atomics.notify wakes the worker (which is parked
+            // in waitAsync). Each frame we also poll PUBLISH for the
+            // most recent worker-completed frame; if newer than the
+            // last one we uploaded for, refresh lat/lon and flag the
+            // GPU upload (gated on the WRITING flag).
+            if (this._atomicsTickEnabled && this._sabReady) {
+                const published = Atomics.load(this._syncView, SYNC_PUBLISH_SLOT);
+                if (published !== this._lastUploadedFrame) {
+                    this._refreshFromSab(this._workerSyncedTo, published);
+                }
 
-            // TEME → ECEF (GMST rotation) → scene frame, in one call.
-            geo.eciToEcef(_temeScratch, gmstRad, _sceneScratch);
+                // Write control + bump request. The 32-bit wrap on the
+                // request id is fine: PUBLISH and REQUEST are
+                // compared with !== so a wrap-around still triggers
+                // an upload and wakes the worker.
+                this._ctrlView[CTRL_JD_SLOT]    = jd;
+                this._ctrlView[CTRL_GMST_SLOT]  = gmstRad;
+                this._ctrlView[CTRL_SCALE_SLOT] = kmToScene;
+                const id = (this._workerFrameId + 1) | 0;
+                this._workerFrameId = id;
+                Atomics.store(this._syncView, SYNC_REQUEST_SLOT, id);
+                Atomics.notify(this._syncView, SYNC_REQUEST_SLOT, 1);
+                return;
+            }
 
-            const x = _sceneScratch.x * kmToScene;
-            const y = _sceneScratch.y * kmToScene;
-            const z = _sceneScratch.z * kmToScene;
-            posArr[i * 3]     = x;
-            posArr[i * 3 + 1] = y;
-            posArr[i * 3 + 2] = z;
+            if (this._workerInFlight) return;
 
-            // Recover geographic coords for tooltip / API use. `positionToLatLon`
-            // returns radians and the scene-frame magnitude (here in km since
-            // we haven't scaled yet); convert to degrees + altitude.
-            const ll = geo.positionToLatLon(_sceneScratch);
-            sat.lat = ll.lat * RAD;
-            sat.lon = ll.lon * RAD;
-            sat.alt = ll.radiusUnits - RE_KM;
+            // postMessage protocol — the previous fast path. Defers
+            // the post to a microtask so the worker's next SAB write
+            // begins only after this frame's renderer.render() call
+            // has completed gl.bufferData. The Atomics fence in
+            // _refreshFromSab is the safety net.
+            if (this._sabReady) {
+                this._workerInFlight = true;
+                const frameId        = ++this._workerFrameId;
+                queueMicrotask(() => {
+                    this._worker?.postMessage({
+                        type:           'tick',
+                        jd, gmst:        gmstRad,
+                        scale:           kmToScene,
+                        frameId,
+                        expectedSlots:   this._workerSyncedTo,
+                    });
+                });
+                return;
+            }
+            if (this._workerBuf) {
+                const buf = this._workerBuf;
+                this._workerBuf       = null;
+                this._workerInFlight  = true;
+                const frameId         = ++this._workerFrameId;
+                queueMicrotask(() => {
+                    this._worker?.postMessage(
+                        {
+                            type:           'tick',
+                            jd, gmst:        gmstRad,
+                            scale:           kmToScene,
+                            buffer:          buf.buffer,
+                            frameId,
+                            expectedSlots:   this._workerSyncedTo,
+                        },
+                        [buf.buffer],
+                    );
+                });
+            }
+            return;
+        }
 
-            // Park the highlight sprite on the matching sat. O(1) hit test
-            // folded into the main loop so we don't have to re-find the
-            // satellite after the fact.
-            if (this._highlightNoradId != null
-                && sat.tle.norad_id === this._highlightNoradId
-                && this._highlightSprite) {
-                this._highlightSprite.position.set(x, y, z);
+        const useBatch = this._syncRegistry();
+
+        if (useBatch) {
+            // One WASM call propagates every sat AND folds in the
+            // TEME → scene-frame transform (matches geo.eciToEcef +
+            // the Y=north scene flip). Returns NaN per slot for
+            // un-batched / decayed sats — those drop to the JS
+            // fallback below. Note we re-receive the buffer each
+            // frame because wasm-bindgen passes &mut [f32] as
+            // input-only; a returned Vec<f32> is the path that
+            // actually carries data back to JS.
+            const out = _wasmSgp4.registry_propagate(jd, gmstRad, kmToScene);
+            this._batchOut = out;
+
+            const n = this._satellites.length;
+            for (let i = 0; i < n; i++) {
+                const off = i * 3;
+                const sat = this._satellites[i];
+
+                let x = out[off];
+                let y = out[off + 1];
+                let z = out[off + 2];
+
+                if (sat._batchOk === false || x !== x /* NaN */) {
+                    // Per-sat fallback: parse-failed slots and decayed
+                    // sats land here. propagate() will pick its own
+                    // best path (WASM single-call → JS Kepler).
+                    const tsince = (jd - sat.epochJd) * MIN_PER_DAY;
+                    const teme = propagate(sat.tle, tsince);
+                    _temeScratch.set(teme.x, teme.y, teme.z);
+                    geo.eciToEcef(_temeScratch, gmstRad, _sceneScratch);
+                    x = _sceneScratch.x * kmToScene;
+                    y = _sceneScratch.y * kmToScene;
+                    z = _sceneScratch.z * kmToScene;
+                }
+
+                posArr[off]     = x;
+                posArr[off + 1] = y;
+                posArr[off + 2] = z;
+
+                // Lat/lon/alt — keep the legacy fields in sync. Use
+                // the (already-computed) scene-frame coords directly
+                // instead of round-tripping through positionToLatLon
+                // so we save a Vector3 + a few extra trig calls per
+                // sat. positionToLatLon's mapping is:
+                //   lat = asin(y/r); lon = atan2(-z, x); r in km.
+                const sx = x / kmToScene;
+                const sy = y / kmToScene;
+                const sz = z / kmToScene;
+                const r  = Math.sqrt(sx * sx + sy * sy + sz * sz);
+                if (r > 1e-9) {
+                    const cy = sy / r;
+                    sat.lat = Math.asin(cy < -1 ? -1 : cy > 1 ? 1 : cy) * RAD;
+                    sat.lon = Math.atan2(-sz, sx) * RAD;
+                    sat.alt = r - RE_KM;
+                }
+
+                if (this._highlightNoradId != null
+                    && sat.tle.norad_id === this._highlightNoradId
+                    && this._highlightSprite) {
+                    this._highlightSprite.position.set(x, y, z);
+                }
+            }
+        } else {
+            // No registry API (older WASM build, or WASM not loaded
+            // yet). Original per-sat path; same numerics.
+            for (let i = 0; i < this._satellites.length; i++) {
+                const sat    = this._satellites[i];
+                const tsince = (jd - sat.epochJd) * MIN_PER_DAY;
+
+                const teme = propagate(sat.tle, tsince);
+                _temeScratch.set(teme.x, teme.y, teme.z);
+
+                geo.eciToEcef(_temeScratch, gmstRad, _sceneScratch);
+
+                const x = _sceneScratch.x * kmToScene;
+                const y = _sceneScratch.y * kmToScene;
+                const z = _sceneScratch.z * kmToScene;
+                posArr[i * 3]     = x;
+                posArr[i * 3 + 1] = y;
+                posArr[i * 3 + 2] = z;
+
+                const ll = geo.positionToLatLon(_sceneScratch);
+                sat.lat = ll.lat * RAD;
+                sat.lon = ll.lon * RAD;
+                sat.alt = ll.radiusUnits - RE_KM;
+
+                if (this._highlightNoradId != null
+                    && sat.tle.norad_id === this._highlightNoradId
+                    && this._highlightSprite) {
+                    this._highlightSprite.position.set(x, y, z);
+                }
             }
         }
 
@@ -885,24 +1550,48 @@ export class SatelliteTracker {
      * Conjunction screening: find close approaches between a target satellite
      * and all loaded catalog objects over the next N hours.
      *
-     * Uses WASM batch propagation when available for ~100× speed.
+     * Anchors at `opts.epochMs` (defaults to wall-clock now) so callers
+     * can screen relative to a scrubbed sim time. After the coarse
+     * SGP4 sweep, each candidate's closest sample is refined with a
+     * parabolic fit through dist²(i-1, i, i+1) — sub-step TCA + miss.
+     * When `opts.withDv` is set, finite-differences relative velocity
+     * at the refined TCA and reports |Δv| (km/s) plus the unit miss
+     * vector (useful for a real B-plane).
      *
      * @param {number} targetNoradId    NORAD ID of the target satellite
      * @param {number} [hoursAhead=72]  Look-ahead window
      * @param {number} [stepMin=10]     Time step in minutes
      * @param {number} [thresholdKm=25] Distance threshold
-     * @param {string|null} [groupFilter=null]
-     *        If set (e.g. 'debris'), skip catalog objects whose group
-     *        isn't a match. Saves thousands of propagate() calls per run
-     *        when the caller only cares about one constellation kind.
-     * @returns {Array<{name, norad_id, dist_km, hours_ahead, tca_jd}>}
+     * @param {string|string[]|null} [groupFilter=null]
+     *        Restrict secondaries to one group, an array of groups, or
+     *        null (every loaded sat except the primary). Saves
+     *        thousands of propagate() calls per run when the caller
+     *        only cares about one constellation kind.
+     * @param {object}  [opts]
+     * @param {number}  [opts.epochMs]   Anchor in ms since epoch.
+     * @param {boolean} [opts.refine=true]   Parabolic refine.
+     * @param {boolean} [opts.withDv=true]   Include |Δv| + miss unit.
+     * @returns {Array<{ name, norad_id, group, dist_km, tca_jd,
+     *                   tca_ms, hours_ahead, dv_kms, miss_unit }>}
      */
-    async screenConjunctions(targetNoradId, hoursAhead = 72, stepMin = 10, thresholdKm = 25, groupFilter = null) {
+    async screenConjunctions(targetNoradId, hoursAhead = 72, stepMin = 10, thresholdKm = 25, groupFilter = null, opts = {}) {
         const target = this._satellites.find(s => s.tle.norad_id === targetNoradId);
         if (!target) return [];
 
+        const epochMs   = Number.isFinite(opts.epochMs) ? opts.epochMs : Date.now();
+        const refine    = opts.refine    !== false;
+        const withDv    = opts.withDv    !== false;
+        const withSpark = opts.withSpark !== false;
+        const SPARK_HALF_WINDOW = 5;   // ±5 samples around TCA coarse
+
+        const matchesGroup = (g) => {
+            if (groupFilter == null) return true;
+            if (Array.isArray(groupFilter)) return groupFilter.includes(g);
+            return g === groupFilter;
+        };
+
         const nSteps = Math.ceil(hoursAhead * 60 / stepMin);
-        const jd = Date.now() / 86400000 + 2440587.5;
+        const jd = epochMs / 86400000 + 2440587.5;
         const tsinceBase = (jd - target.epochJd) * MIN_PER_DAY;
 
         // Generate time array
@@ -934,45 +1623,161 @@ export class SatelliteTracker {
             console.debug(`[Conjunction] Target propagated via JS fallback: ${nSteps} steps`);
         }
 
+        // Pre-filter widens with the horizon: a debris piece in an
+        // eccentric orbit can drift through the asset's altitude shell
+        // over a 14-day window, so the bound has to grow with time.
+        // ~50 km/d worst-case altitude drift in high-drag LEO; cap so
+        // the filter still does work at long horizons.
+        const targetAltAvg = (target.tle.perigee_km + target.tle.apogee_km) / 2;
+        const altMargin    = Math.min(50 * (hoursAhead / 24) + 200, 1500);
+
         // Screen all catalog objects
         const conjunctions = [];
-        const targetAltAvg = (target.tle.perigee_km + target.tle.apogee_km) / 2;
 
         for (const cat of this._satellites) {
             if (cat.tle.norad_id === targetNoradId) continue;
-            if (groupFilter && cat.group !== groupFilter) continue;
+            if (!matchesGroup(cat.group)) continue;
 
-            // Pre-filter: skip if altitude difference > 200 km
-            const catAltAvg = (cat.tle.perigee_km + cat.tle.apogee_km) / 2;
-            if (Math.abs(catAltAvg - targetAltAvg) > 200) continue;
+            // Pre-filter on apogee/perigee overlap with the target's
+            // shell ± altMargin. Tighter than a "mean-altitude within
+            // 200 km" check while still horizon-aware.
+            const catPerigee = cat.tle.perigee_km;
+            const catApogee  = cat.tle.apogee_km;
+            if (catApogee  + altMargin < targetAltAvg - 200) continue;
+            if (catPerigee - altMargin > targetAltAvg + 200) continue;
 
-            // Propagate catalog object at each step
+            // Propagate catalog object at each step.
             const catTsinceBase = (jd - cat.epochJd) * MIN_PER_DAY;
+
+            // Track the closest sample over the *full* window. The
+            // previous version broke on the first sample under the
+            // threshold, which is the wrong number — closest-approach
+            // is deeper than the first dip into the threshold.
+            let bestI  = -1;
+            let bestD2 = Infinity;
+            const catPos = new Array(nSteps);
+            // Sample-distance buffer (km) — kept so we can crop a
+            // window around bestI for the sparkline without
+            // re-propagating.
+            const dists = new Float32Array(nSteps);
 
             for (let i = 0; i < nSteps; i++) {
                 const tgt = targetPositions[i];
-                if (!isFinite(tgt.x)) continue;
+                if (!isFinite(tgt.x)) { dists[i] = NaN; continue; }
 
-                const catTsince = catTsinceBase + i * stepMin;
-                const catPos = propagate(cat.tle, catTsince);
-                if (!isFinite(catPos.x)) continue;
+                const cp = propagate(cat.tle, catTsinceBase + i * stepMin);
+                catPos[i] = cp;
+                if (!isFinite(cp.x)) { dists[i] = NaN; continue; }
 
-                const dx = tgt.x - catPos.x;
-                const dy = tgt.y - catPos.y;
-                const dz = tgt.z - catPos.z;
-                const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                const dx = tgt.x - cp.x;
+                const dy = tgt.y - cp.y;
+                const dz = tgt.z - cp.z;
+                const d2 = dx * dx + dy * dy + dz * dz;
+                dists[i] = Math.sqrt(d2);
 
-                if (dist < thresholdKm) {
-                    conjunctions.push({
-                        name: cat.tle.name,
-                        norad_id: cat.tle.norad_id,
-                        dist_km: Math.round(dist * 10) / 10,
-                        hours_ahead: Math.round(i * stepMin / 60 * 10) / 10,
-                        tca_jd: jd + i * stepMin / MIN_PER_DAY,
-                    });
-                    break;  // one conjunction per object (closest approach)
+                if (d2 < bestD2) { bestD2 = d2; bestI = i; }
+            }
+
+            if (bestI < 0) continue;
+
+            let missKm    = Math.sqrt(bestD2);
+            let tcaOffMin = bestI * stepMin;
+
+            // Parabolic refine through dist²(i-1, i, i+1). Sub-step
+            // TCA + miss without extra propagate calls — we already
+            // have the neighbours from the sweep. Skip at the window
+            // boundary; there's no reliable "outside" sample.
+            if (refine && bestI > 0 && bestI < nSteps - 1) {
+                const tgtL = targetPositions[bestI - 1];
+                const tgtR = targetPositions[bestI + 1];
+                const cpL  = catPos[bestI - 1];
+                const cpR  = catPos[bestI + 1];
+                if (isFinite(tgtL?.x) && isFinite(tgtR?.x) && isFinite(cpL?.x) && isFinite(cpR?.x)) {
+                    const dL = (tgtL.x - cpL.x) ** 2 + (tgtL.y - cpL.y) ** 2 + (tgtL.z - cpL.z) ** 2;
+                    const dC = bestD2;
+                    const dR = (tgtR.x - cpR.x) ** 2 + (tgtR.y - cpR.y) ** 2 + (tgtR.z - cpR.z) ** 2;
+                    const denom = dL - 2 * dC + dR;
+                    if (Math.abs(denom) > 1e-9) {
+                        const delta = 0.5 * (dL - dR) / denom;
+                        if (delta > -1 && delta < 1) {
+                            tcaOffMin = (bestI + delta) * stepMin;
+                            const d2Min = dC - 0.25 * (dL - dR) * delta;
+                            if (d2Min > 0 && isFinite(d2Min)) missKm = Math.sqrt(d2Min);
+                        }
+                    }
                 }
             }
+
+            if (missKm > thresholdKm) continue;
+
+            // |Δv| at TCA via central-difference (10 s either side) on
+            // both objects, then the magnitude of the relative-velocity
+            // vector. Cheap (4 propagates) and gives the encounter
+            // energy proxy callers want.
+            let dvKms    = null;
+            let missUnit = null;
+            let vRel     = null;
+            let missVec  = null;
+            if (withDv) {
+                const tcaT  = tsinceBase + tcaOffMin;
+                const halfH = 10 / 60;
+                const pA = propagate(target.tle, tcaT - halfH);
+                const pB = propagate(target.tle, tcaT + halfH);
+                const sA = propagate(cat.tle,    catTsinceBase + tcaOffMin - halfH);
+                const sB = propagate(cat.tle,    catTsinceBase + tcaOffMin + halfH);
+                if (isFinite(pA.x) && isFinite(pB.x) && isFinite(sA.x) && isFinite(sB.x)) {
+                    const dt = 20; // seconds of central-diff span
+                    const vRelX = ((pB.x - pA.x) - (sB.x - sA.x)) / dt;
+                    const vRelY = ((pB.y - pA.y) - (sB.y - sA.y)) / dt;
+                    const vRelZ = ((pB.z - pA.z) - (sB.z - sA.z)) / dt;
+                    dvKms = Math.sqrt(vRelX * vRelX + vRelY * vRelY + vRelZ * vRelZ);
+                    vRel  = { x: vRelX, y: vRelY, z: vRelZ };
+
+                    const tcaP = propagate(target.tle, tcaT);
+                    const tcaS = propagate(cat.tle,    catTsinceBase + tcaOffMin);
+                    if (isFinite(tcaP.x) && isFinite(tcaS.x)) {
+                        const mx = tcaP.x - tcaS.x;
+                        const my = tcaP.y - tcaS.y;
+                        const mz = tcaP.z - tcaS.z;
+                        const m  = Math.sqrt(mx * mx + my * my + mz * mz) || 1;
+                        missVec  = { x: mx, y: my, z: mz };
+                        missUnit = { x: mx / m, y: my / m, z: mz / m };
+                    }
+                }
+            }
+
+            // Sparkline window: ±SPARK_HALF_WINDOW samples around
+            // bestI, clipped to [0, nSteps-1]. NaNs survive so the
+            // renderer's time axis stays consistent.
+            let spark = null;
+            if (withSpark) {
+                const lo  = Math.max(0, bestI - SPARK_HALF_WINDOW);
+                const hi  = Math.min(nSteps - 1, bestI + SPARK_HALF_WINDOW);
+                const km  = new Array(hi - lo + 1);
+                for (let i = lo; i <= hi; i++) km[i - lo] = dists[i];
+                spark = {
+                    km,
+                    step_min:     stepMin,
+                    center_index: bestI - lo,
+                };
+            }
+
+            const tcaMs = epochMs + tcaOffMin * 60 * 1000;
+
+            conjunctions.push({
+                name:        cat.tle.name,
+                norad_id:    cat.tle.norad_id,
+                group:       cat.group,
+                dist_km:     Math.round(missKm * 100) / 100,
+                hours_ahead: Math.round(tcaOffMin / 60 * 100) / 100,
+                tca_jd:      jd + tcaOffMin / MIN_PER_DAY,
+                tca_ms:      tcaMs,
+                dv_kms:      dvKms != null ? Math.round(dvKms * 1000) / 1000 : null,
+                v_rel:       vRel,
+                miss_unit:   missUnit,
+                miss_vec:    missVec,
+                spark,
+            });
         }
 
         conjunctions.sort((a, b) => a.dist_km - b.dist_km);

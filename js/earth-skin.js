@@ -259,6 +259,17 @@ uniform float u_cloud_data_strength; // Open-Meteo imprint intensity.
                                      //   0.2  = ±10% soft modulation
                                      //   0.5  = ±25% (default, original behaviour)
                                      //   1.0  = ±50% (data-dominated)
+uniform float u_research_mode;       // 0 = composite (procedural fill + data nudge);
+                                     // 1 = research / measured-only:
+                                     //     • disables BASE_LOW/MID/HIGH constants
+                                     //       so coverage comes from data alone
+                                     //     • renders satellite no-data regions
+                                     //       as a faint hatch instead of plausible
+                                     //       procedural cloud
+                                     //     • renders alpha = data directly,
+                                     //       bypassing u_cloud_data_strength so
+                                     //       researchers see what the model says,
+                                     //       not what the noise field invents
 
 // Storm systems: .xy = UV position, .z = intensity [0-1], .w = spin (+1 CCW/-1 CW)
 uniform vec4 u_storms[8];
@@ -504,11 +515,15 @@ void main() {
     float shapeMid  = smoothstep(0.38, 0.62, nMid);
     float shapeHigh = smoothstep(0.40, 0.72, nHigh);
 
-    // Global base cover — constant across latitudes so the shader can never
-    // produce a completely clear band just because the weather grid says so.
-    const float BASE_LOW  = 0.72;
-    const float BASE_MID  = 0.48;
-    const float BASE_HIGH = 0.32;
+    // Global base cover — constant across latitudes so the composite shader
+    // can never produce a completely clear band just because the weather grid
+    // says so. Research mode zeros these out: coverage = data, full stop.
+    const float BASE_LOW_DEFAULT  = 0.72;
+    const float BASE_MID_DEFAULT  = 0.48;
+    const float BASE_HIGH_DEFAULT = 0.32;
+    float baseLow  = mix(BASE_LOW_DEFAULT,  0.0, u_research_mode);
+    float baseMid  = mix(BASE_MID_DEFAULT,  0.0, u_research_mode);
+    float baseHigh = mix(BASE_HIGH_DEFAULT, 0.0, u_research_mode);
 
     if (u_weather_on > 0.5) {
         vec4  cl      = texture2D(u_cloud_layers, vUv);
@@ -517,26 +532,45 @@ void main() {
         float clHigh  = cl.b;
         precip        = cl.a;
 
-        // Parameterised data-imprint strength. Equivalent to the original
-        // ±25% formula when u_cloud_data_strength == 0.5. At 0.0 the data
-        // is completely ignored (pure noise-driven clouds) — that's the
-        // diagnostic mode for isolating whether banding comes from the
-        // data texture or the shader's own noise field. Precipitation
-        // channel (cl.a) is still read regardless of strength because it
-        // gates the streak overlay, which is meaningful independent of
-        // the modulation weight.
-        float modLow  = 1.0 + (clLow  - 0.5) * u_cloud_data_strength;
-        float modMid  = 1.0 + (clMid  - 0.5) * u_cloud_data_strength;
-        float modHigh = 1.0 + (clHigh - 0.5) * u_cloud_data_strength;
+        if (u_research_mode > 0.5) {
+            // Research / measured-only: alpha = data, period. The texture has
+            // already been bilinearly upsampled and box-blurred from the
+            // coarse grid (see weather-feed.js _decodeCoarse), so
+            // showing it raw is honest, not noisy. The procedural shape
+            // factors (shapeLow / shapeMid / shapeHigh) act only as a fine-
+            // scale dither at low amplitude so the eye can resolve the 5°
+            // grid pitch — they never invent coverage where the data is 0.
+            float ditherLow  = mix(0.85, 1.05, shapeLow);
+            float ditherMid  = mix(0.90, 1.05, shapeMid);
+            float ditherHigh = mix(0.92, 1.05, shapeHigh);
+            alphaLow  = clLow  * ditherLow;
+            alphaMid  = clMid  * ditherMid;
+            alphaHigh = clHigh * ditherHigh;
+        } else {
+            // Composite mode (default visual). Parameterised data-imprint
+            // strength: equivalent to the original ±25% formula when
+            // u_cloud_data_strength == 0.5. At 0.0 the data is completely
+            // ignored (pure noise-driven clouds) — useful for isolating
+            // whether banding comes from the data texture or the shader's
+            // own noise field. Precipitation channel is read regardless of
+            // strength because it gates the streak overlay, which is
+            // meaningful independent of the modulation weight.
+            float modLow  = 1.0 + (clLow  - 0.5) * u_cloud_data_strength;
+            float modMid  = 1.0 + (clMid  - 0.5) * u_cloud_data_strength;
+            float modHigh = 1.0 + (clHigh - 0.5) * u_cloud_data_strength;
 
-        alphaLow  = shapeLow  * BASE_LOW  * modLow;
-        alphaMid  = shapeMid  * BASE_MID  * modMid;
-        alphaHigh = shapeHigh * BASE_HIGH * modHigh;
+            alphaLow  = shapeLow  * baseLow  * modLow;
+            alphaMid  = shapeMid  * baseMid  * modMid;
+            alphaHigh = shapeHigh * baseHigh * modHigh;
+        }
     } else {
         // No weather data: pure noise-driven clouds at the base density.
-        alphaLow  = shapeLow  * BASE_LOW;
-        alphaMid  = shapeMid  * BASE_MID;
-        alphaHigh = shapeHigh * BASE_HIGH;
+        // In research mode baseLow/Mid/High are all zero, so the globe
+        // stays cloud-free until real data arrives — which is the honest
+        // answer for a researcher when the data feed is down.
+        alphaLow  = shapeLow  * baseLow;
+        alphaMid  = shapeMid  * baseMid;
+        alphaHigh = shapeHigh * baseHigh;
     }
 
     // Satellite observation: when a real cloud-imagery texture is supplied
@@ -547,19 +581,27 @@ void main() {
     // the satellite didn't see (polar winter darkness, MODIS orbit gaps,
     // coastline masks) arrive with alpha = 0 and we route them back to
     // procedural clouds, so the globe never shows a permanent fake cap.
+    float satNoDataMask = 0.0;   // research-mode hatch flag (set below)
     if (u_satellite_on > 0.5) {
         vec4  sat      = texture2D(u_satellite, vUv);
         float satCloud = sat.r;
-        float satData  = sat.a;                             // 1 where MODIS has coverage
+        float satData  = sat.a;                             // 1 where the satellite saw this pixel
         float satShape = smoothstep(0.18, 0.85, satCloud);
         float satLow   = satShape * mix(0.85, 1.0, shapeLow);
         float satMid   = satShape * mix(0.55, 0.85, shapeMid);
         // Coverage-weighted blend: full satellite influence only where the
-        // alpha mask confirms the pixel is real data.
+        // alpha mask confirms the pixel is real observation.
         float influence = satData * 0.82;
         alphaLow  = mix(alphaLow,  satLow,           influence);
         alphaMid  = mix(alphaMid,  satMid,           0.60 * satData);
         alphaHigh = mix(alphaHigh, satShape * 0.35,  0.35 * satData);
+
+        // Research mode: outside the satellite's footprint (satData < 1) we
+        // want the user to SEE that nothing was observed there, not a
+        // plausible procedural cloud. Capture an inverted mask for the
+        // hatch overlay below; in composite mode this stays at 0 so nothing
+        // changes for casual viewers.
+        satNoDataMask = (1.0 - satData) * u_research_mode;
     }
 
     // Composite layers: opaque low clouds dominate, cirrus adds on top
@@ -655,6 +697,21 @@ void main() {
         // rain shows even over already-opaque overcast.
         col    = mix(col, rainShade, streak * 0.70);
         alpha  = clamp(alpha + streak * 0.30, 0.0, 0.98);
+    }
+
+    // ── Research-mode no-data hatch ──────────────────────────────────────────
+    // In composite mode this branch is dormant (satNoDataMask = 0). In
+    // research mode it paints a faint diagonal stripe over regions the
+    // satellite mosaic didn't cover (polar caps, between-disc gaps), so
+    // researchers can immediately tell where coverage ends. The hatch is
+    // additive on alpha so it shows even where no procedural cloud was drawn.
+    if (satNoDataMask > 0.01) {
+        // Diagonal lines at ~3° spacing — independent of latitude so the
+        // pattern reads consistently from pole to equator.
+        float hatch  = step(0.5, fract((vUv.x + vUv.y) * 60.0));
+        float hatchA = hatch * satNoDataMask * 0.18;
+        col          = mix(col, vec3(0.55, 0.62, 0.78), hatchA);
+        alpha        = clamp(alpha + hatchA, 0.0, 0.95);
     }
 
     gl_FragColor = vec4(col, alpha);
@@ -817,7 +874,16 @@ float vnoise(vec2 p) {
 }
 
 void main() {
-    if (u_enabled < 0.5 || u_kp < 1.5) discard;
+    // Hard kill on toggle off — that is the users intent. We do NOT
+    // also discard on low Kp the way the previous version did: that
+    // made the toggle silently no-op during quiet periods (Kp below
+    // 1.5 is most of the time at solar minimum), so users would flip
+    // the checkbox and see no visual response, concluding "the toggle
+    // is broken." Instead, the shader always runs while u_enabled is
+    // on; a quiet-period multiplier (quietGate below) softly fades
+    // the band toward zero alpha so the visual story is "I see the
+    // oval is there, it is just dim because nothing is happening."
+    if (u_enabled < 0.5) discard;
 
     // UV reconstructed from interpolated object-space normal (see EARTH_VERT
     // for the rationale). Feed it straight into the same helpers used by the
@@ -833,11 +899,19 @@ void main() {
     float absLat      = 90.0 - min(magCoLatDeg, 180.0 - magCoLatDeg);
     float lonDeg      = uvToLatLonDeg(vUv).y;
 
+    // For visualisation only — when actual Kp is below the climatological
+    // floor we *render* as if Kp were 1.5 so the oval has a visible band
+    // even at solar minimum. This is purely cosmetic; the actual
+    // physical inputs (band width, ray gating, colour ramp) still respond
+    // to the live Kp via kpEff.  quietGate later fades the alpha back
+    // down so quiet periods don't lie about activity.
+    float kpDisplay = max(u_kp, 1.5);
+
     // Effective storm strength — Kp plus a Bz-south kicker so a fresh
     // southward turning shoves the oval equatorward immediately, without
     // having to wait for the Kp index to catch up.
     float bz      = clamp(u_bz_south, 0.0, 1.0);
-    float kpEff   = u_kp + bz * 1.8;
+    float kpEff   = kpDisplay + bz * 1.8;
 
     // Equatorward boundary (deg). Matches js/user-location.js#auroraVisibility
     // with a -Bz shift added so reconnection-driven expansion shows visibly.
@@ -915,10 +989,18 @@ void main() {
     // Fade in over Kp_eff 1.5 → 3.
     float kpGate = smoothstep(1.5, 3.0, kpEff);
 
+    // Quiet-period gate — at the actual Kp 0 the oval renders at ~30%
+    // of its full alpha; at Kp ≥ 2 it's at full strength. Combined
+    // with the kpDisplay floor above, this gives the user a visible
+    // "the toggle is on, here's where the oval lives" indicator
+    // during solar minimum without overstating the activity.
+    float quietGate = mix(0.30, 1.0, smoothstep(0.0, 2.0, u_kp));
+
     float intensity = band * pulse * nightM * kpGate * rayGlow * powerBoost + substorm * band * nightM;
     float curtain   = 0.55 + 0.45 * eq;
 
-    gl_FragColor = vec4(col * intensity * curtain * 1.8, clamp(intensity * 0.85, 0.0, 1.0));
+    gl_FragColor = vec4(col * intensity * curtain * 1.8 * quietGate,
+                        clamp(intensity * 0.85 * quietGate, 0.0, 1.0));
 }`;
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -981,6 +1063,9 @@ export function createCloudUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
         u_weather_on:    { value: 0 },
         u_satellite_on:  { value: 0 },            // off until satellite texture arrives
         u_cloud_data_strength: { value: 0.5 },    // 0.5 matches original ±25% imprint
+        // Research / measured-only mode (see CLOUD_FRAG): 0 = composite (default),
+        // 1 = data-only with hatched no-data overlay. UI toggle in earth.html.
+        u_research_mode: { value: 0 },
         u_storms:        { value: Array.from({ length: 8 }, () => new THREE.Vector4(0, 0, 0, 1)) },
         u_storm_count:   { value: 0 },
     };

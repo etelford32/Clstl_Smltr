@@ -2,14 +2,127 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Launch Planner — Orbital Launch Weather Go/No-Go · Parker Physics</title>
-<meta name="description" content="Track upcoming SpaceX, Blue Origin, ULA, and Rocket Lab launches with automated weather Go/No-Go analysis — wind, gusts, precipitation, cloud cover, and 3-day forecasts for every pad worldwide.">
+<title>Launch Planner — Range Weather · Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/launch-planner">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/launch-planner">
+<meta property="og:title" content="Launch Planner — Parkers Physics">
+<meta property="og:description" content="Orbital launch go/no-go weather planning with live NOAA wind, lightning, and cloud-ceiling forecasts for major US ranges. Built for mission-planning workflows.">
+<meta property="og:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+<meta property="og:image:alt" content="Parkers Physics — real-time astrophysics simulations">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Launch Planner — Parkers Physics">
+<meta name="twitter:description" content="Orbital launch go/no-go weather planning with live NOAA wind, lightning, and cloud-ceiling forecasts for major US ranges. Built for mission-planning workflows.">
+<meta name="twitter:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+
+<meta name="description" content="Orbital launch go/no-go weather planning with live NOAA wind, lightning, and cloud-ceiling forecasts for major US ranges.">
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 html { height:auto; overflow-y:auto; }
 body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; color:#d0cce8;
     font-family:'Segoe UI', system-ui, sans-serif; }
+
+/* ─── Collapsible panels ─────────────────────────────── */
+/* Any [data-collapse-id] panel pairs an .lp-collapse-hd header with an
+   .lp-collapse-body that hides when the panel has --collapsed. The header
+   gets a rotating chevron via the JS (.lp-collapse-chev). */
+.lp-collapse-hd {
+    display:flex; align-items:baseline; gap:8px;
+    user-select:none;
+    -webkit-user-select:none;
+    transition:opacity .15s;
+}
+.lp-collapse-hd:hover { opacity:.85; }
+.lp-collapse-chev {
+    margin-left:auto;
+    font-size:.7rem;
+    color:#9ab;
+    transition:transform .2s ease;
+    flex-shrink:0;
+}
+.lp-panel--collapsed .lp-collapse-chev { transform:rotate(-90deg); }
+.lp-panel--collapsed .lp-collapse-body { display:none; }
+.lp-panel--collapsed { padding-bottom:8px !important; }
+.lp-panel--collapsed .lh-section-hd p,
+.lp-panel--collapsed .lh-section-sub,
+.lp-panel--collapsed .lp-strip-sub { display:none; }
+
+/* Filters panel header (no built-in header, we added one) */
+.lp-filters-hd { margin-bottom:10px; padding-bottom:6px;
+    border-bottom:1px solid rgba(255,255,255,.06); }
+.lp-filters-hd h3 {
+    font-size:.74rem; font-weight:800; color:#cde;
+    letter-spacing:.06em; text-transform:uppercase;
+}
+
+/* ─── Draggable overlay state ───────────────────────── */
+.lp-drag-handle { cursor:grab; }
+.lp-drag-handle:active { cursor:grabbing; }
+.lp-dragging {
+    box-shadow:0 12px 32px rgba(0,0,0,.6), 0 0 0 1px rgba(0,200,200,.4) !important;
+    z-index:5 !important;
+    opacity:.96;
+    user-select:none; -webkit-user-select:none;
+}
+
+/* ─── Density / compact mode ─────────────────────────── */
+/* Default styling continues as-is; [data-density="compact"] tightens the
+   most space-hungry blocks. Toggled via the ⇲ button in the canvas header. */
+body[data-density="compact"] .lp-panel { padding:9px 12px; }
+body[data-density="compact"] #lp-vehicle { padding:9px 12px 12px; }
+body[data-density="compact"] .lh-section-hd h2 { font-size:.92rem; }
+body[data-density="compact"] .lh-section-hd p,
+body[data-density="compact"] .lh-section-sub { display:none; }
+body[data-density="compact"] .lh-vehicle-picker { padding:4px 6px; gap:8px; margin:2px 0 8px; }
+body[data-density="compact"] .lh-vp-btn { font-size:.66rem; padding:3px 9px; }
+body[data-density="compact"] .lh-vp-label { font-size:.56rem; }
+body[data-density="compact"] .lh-vehicle-canvas-host { min-height:300px; aspect-ratio:16/9; }
+body[data-density="compact"] .lh-vehicle-wrap { grid-template-columns:1fr 240px; gap:10px; }
+body[data-density="compact"] .lh-vehicle-stats { gap:4px; }
+body[data-density="compact"] .lh-vehicle-stat { padding:4px 6px; }
+body[data-density="compact"] .lh-vehicle-stat-k { font-size:.54rem; margin-bottom:1px; }
+body[data-density="compact"] .lh-vehicle-stat-v { font-size:.72rem; }
+body[data-density="compact"] .lh-vehicle-name { font-size:.88rem; }
+body[data-density="compact"] .lh-thrust-card { padding:8px 10px; gap:7px; }
+body[data-density="compact"] .lh-thrust-v { font-size:.95rem; }
+body[data-density="compact"] .lh-thrust-row { font-size:.56rem; padding:1px 0; }
+body[data-density="compact"] .lh-thrust-row { grid-template-columns:74px 1fr 32px; gap:5px; }
+body[data-density="compact"] .lp-strip-card { flex-basis:178px; padding:7px 9px; gap:3px; }
+body[data-density="compact"] .lp-strip-name { font-size:.78rem; }
+body[data-density="compact"] .lp-strip-veh  { font-size:.6rem; padding:1px 5px; }
+body[data-density="compact"] .lp-strip-pad  { font-size:.58rem; }
+body[data-density="compact"] .lp-strip-cd   { font-size:.66rem; }
+body[data-density="compact"] #lp-app { gap:10px; padding:10px; }
+body[data-density="compact"] .lp-card { padding:9px 11px; }
+body[data-density="compact"] .lp-card-name { font-size:.9rem; }
+body[data-density="compact"] .lp-chip { font-size:.66rem; padding:3px 9px; }
+
+/* Compact-mode button in canvas header */
+.lp-density-btn {
+    margin-left:auto;
+    background:rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.12);
+    color:#9ab;
+    font-size:.62rem; font-weight:700; letter-spacing:.06em;
+    padding:3px 10px;
+    border-radius:5px;
+    cursor:pointer;
+    font-family:inherit;
+    transition:all .15s;
+}
+.lp-density-btn:hover { border-color:rgba(0,200,200,.5); color:#0ff; }
+body[data-density="compact"] .lp-density-btn {
+    background:rgba(0,200,200,.16);
+    border-color:#0cc;
+    color:#0ff;
+}
 
 /* ─── App layout ─────────────────────────────────────── */
 #lp-app {
@@ -325,6 +438,630 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
     color:#667; font-size:.82rem; line-height:1.5;
 }
 
+/* ─── Achievements + Timeline + Vehicle Canvas ───────── */
+#lp-history {
+    max-width:1400px; margin:0 auto; padding:0 14px 48px;
+    display:grid; gap:14px;
+}
+.lh-section-hd {
+    display:flex; justify-content:space-between; align-items:baseline;
+    gap:10px; margin:6px 2px 2px;
+}
+.lh-section-hd h2 {
+    font-size:1.05rem; font-weight:800; color:#eef;
+    letter-spacing:.02em;
+}
+.lh-section-hd p { font-size:.74rem; color:#889; line-height:1.5; max-width:680px; }
+
+/* Achievements panel */
+#lp-achievements { padding:14px 16px 18px; }
+.lh-tabs { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px; }
+.lh-tab {
+    background:rgba(255,255,255,.05);
+    border:1px solid rgba(255,255,255,.12);
+    color:#bcd;
+    border-radius:999px;
+    padding:5px 14px;
+    font-size:.74rem; font-weight:700;
+    cursor:pointer; transition:all .15s;
+    font-family:inherit; letter-spacing:.04em;
+}
+.lh-tab:hover { border-color:rgba(0,200,200,.4); color:#fff; }
+.lh-tab--on { background:rgba(0,200,200,.18); border-color:#0cc; color:#0ff; }
+
+.lh-programs {
+    display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr));
+    gap:12px;
+}
+.lh-program {
+    background:rgba(15,10,35,.78);
+    border:1px solid rgba(255,255,255,.08);
+    border-left:3px solid #888;
+    border-radius:10px;
+    padding:12px 14px;
+    transition:box-shadow .25s, transform .15s;
+}
+.lh-program--flash {
+    box-shadow:0 0 0 2px rgba(0,200,200,.5), 0 0 24px rgba(0,200,200,.25);
+    transform:translateY(-2px);
+}
+.lh-program-hd {
+    display:flex; justify-content:space-between; align-items:flex-start;
+    gap:10px; margin-bottom:4px;
+}
+.lh-program-op {
+    font-size:.62rem; color:#8ab; text-transform:uppercase;
+    letter-spacing:.08em; font-weight:700; margin-bottom:2px;
+    font-family:monospace;
+}
+.lh-program-name { font-size:1rem; font-weight:800; line-height:1.2; }
+.lh-program-count {
+    font-size:.62rem; color:#778; font-family:monospace;
+    background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08);
+    border-radius:4px; padding:2px 6px; white-space:nowrap;
+}
+.lh-program-tag { font-size:.74rem; color:#aab; line-height:1.5; margin:4px 0 10px; font-style:italic; }
+.lh-flights { list-style:none; display:flex; flex-direction:column; gap:6px; }
+.lh-flight {
+    display:grid; grid-template-columns:90px 1fr; gap:10px;
+    padding:6px 0; border-top:1px dashed rgba(255,255,255,.06);
+    font-size:.76rem;
+}
+.lh-flight:first-child { border-top:none; }
+.lh-flight-date {
+    font-size:.66rem; color:#9ab; font-family:monospace;
+    padding-top:2px; letter-spacing:.04em;
+}
+.lh-flight-name { font-weight:700; color:#eef; margin-bottom:2px; }
+.lh-flight-note { font-size:.7rem; color:#99a; line-height:1.5; }
+
+/* Timeline */
+#lp-timeline { padding:14px 16px; }
+.lh-tl-scroll {
+    overflow-x:auto; overflow-y:hidden;
+    padding:24px 0 110px;     /* room for dot + staggered labels */
+    scrollbar-width:thin;
+}
+.lh-tl-scroll::-webkit-scrollbar { height:6px; }
+.lh-tl-scroll::-webkit-scrollbar-thumb { background:rgba(0,200,200,.3); border-radius:3px; }
+.lh-tl-rail {
+    position:relative;
+    width:1800px;     /* horizontal canvas; scrolls on smaller screens */
+    height:60px;
+}
+.lh-tl-axis {
+    position:absolute; left:0; right:0; top:50%;
+    height:2px; background:linear-gradient(90deg, rgba(0,200,200,.05), rgba(0,200,200,.4) 30%, rgba(0,200,200,.4) 70%, rgba(0,200,200,.05));
+}
+.lh-tl-decade {
+    position:absolute; top:50%;
+    width:1px; height:18px; background:rgba(255,255,255,.12);
+    transform:translate(-50%, -50%);
+}
+.lh-tl-decade-lbl {
+    position:absolute; top:14px; left:50%;
+    transform:translateX(-50%);
+    font-size:.62rem; color:#556; font-family:monospace; letter-spacing:.06em;
+    white-space:nowrap;
+}
+.lh-tl-marker {
+    position:absolute;
+    top:50%; transform:translate(-50%, -50%);
+    background:transparent; border:none; padding:0; cursor:pointer;
+    font-family:inherit; color:inherit;
+    display:flex; flex-direction:column; align-items:center;
+    transition:transform .15s;
+}
+.lh-tl-marker:hover { transform:translate(-50%, -55%); }
+.lh-tl-marker:hover .lh-tl-lbl { color:#fff; }
+.lh-tl-dot {
+    width:10px; height:10px; border-radius:50%;
+    background:var(--c, #0cc);
+    box-shadow:0 0 8px var(--c, #0cc), 0 0 0 2px rgba(4,2,16,.9);
+    flex-shrink:0;
+}
+.lh-tl-lbl {
+    position:absolute;
+    font-size:.62rem; line-height:1.25; color:#aab;
+    white-space:nowrap; text-align:center;
+    font-family:monospace; letter-spacing:.02em;
+    pointer-events:none;
+}
+.lh-tl-lbl-name { display:block; font-weight:700; color:#ccd; }
+.lh-tl-lbl-date { display:block; font-size:.56rem; color:#778; margin-top:1px; }
+/* Stagger labels into 4 lanes (2 above, 2 below) so they don't pile up. */
+.lh-tl-lane-0 .lh-tl-lbl { top:-46px; }
+.lh-tl-lane-1 .lh-tl-lbl { top:18px;  }
+.lh-tl-lane-2 .lh-tl-lbl { top:-72px; }
+.lh-tl-lane-3 .lh-tl-lbl { top:44px;  }
+
+/* ─── Top section: canvas + Next Launches strip ──────── */
+#lp-canvas-top {
+    max-width:1400px; margin:0 auto;
+    padding:0 14px;
+    display:grid; gap:14px;
+    margin-bottom:18px;
+}
+
+/* Next Launches strip — horizontal scroll of cards */
+#lp-strip { padding:12px 16px 14px; }
+.lp-strip-hd {
+    display:flex; align-items:baseline; justify-content:space-between;
+    margin-bottom:10px;
+}
+.lp-strip-hd h2 {
+    font-size:.95rem; font-weight:800; color:#eef; letter-spacing:.02em;
+}
+.lp-strip-sub {
+    font-size:.66rem; color:#778; font-family:monospace; letter-spacing:.04em;
+}
+.lp-strip-track {
+    display:flex; gap:10px;
+    overflow-x:auto; overflow-y:hidden;
+    padding-bottom:6px;
+    scrollbar-width:thin;
+    scroll-snap-type:x proximity;
+}
+.lp-strip-track::-webkit-scrollbar { height:5px; }
+.lp-strip-track::-webkit-scrollbar-thumb { background:rgba(0,200,200,.3); border-radius:3px; }
+.lp-strip-empty {
+    font-size:.78rem; color:#778; padding:14px 8px; font-style:italic;
+}
+.lp-strip-card {
+    flex:0 0 220px;
+    background:rgba(15,10,35,.78);
+    border:1px solid rgba(255,255,255,.08);
+    border-left:3px solid rgba(255,255,255,.12);
+    border-radius:8px;
+    padding:9px 11px;
+    cursor:pointer;
+    text-align:left;
+    font-family:inherit;
+    color:inherit;
+    transition:transform .12s, border-color .15s, background .15s;
+    scroll-snap-align:start;
+    display:flex; flex-direction:column; gap:4px;
+}
+.lp-strip-card:hover {
+    border-color:rgba(0,200,200,.35);
+    background:rgba(15,10,35,.92);
+    transform:translateY(-2px);
+}
+.lp-strip-card--active {
+    border-color:#0cc;
+    border-left-color:#0cc;
+    background:rgba(0,200,200,.06);
+    box-shadow:0 0 0 1px rgba(0,200,200,.25);
+}
+.lp-strip-card--green  { border-left-color:#4c8; }
+.lp-strip-card--yellow { border-left-color:#fa0; }
+.lp-strip-card--red    { border-left-color:#f44; }
+.lp-strip-row {
+    display:flex; justify-content:space-between; align-items:center; gap:6px;
+}
+.lp-strip-provider {
+    font-size:.58rem; color:#9ab; text-transform:uppercase;
+    letter-spacing:.1em; font-weight:700;
+}
+.lp-strip-verdict {
+    font-size:.56rem; font-weight:800; padding:1px 6px;
+    border-radius:3px; border:1px solid; font-family:monospace; letter-spacing:.06em;
+}
+.lp-strip-name {
+    font-size:.84rem; font-weight:700; color:#eef; line-height:1.25;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.lp-strip-veh {
+    display:inline-flex; align-items:center; gap:5px;
+    font-size:.66rem;
+    background:rgba(255,140,40,.12);
+    border:1px solid rgba(255,140,40,.28);
+    color:#fc7;
+    border-radius:4px;
+    padding:2px 7px;
+    font-family:monospace; font-weight:700;
+    letter-spacing:.04em;
+    align-self:flex-start;
+    max-width:100%;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.lp-strip-veh--unknown {
+    background:rgba(255,255,255,.04);
+    border-color:rgba(255,255,255,.12);
+    color:#99a;
+}
+.lp-strip-veh-icon { display:inline-block; }
+.lp-strip-pad {
+    font-size:.62rem; color:#778; font-family:monospace;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.lp-strip-cd {
+    font-size:.72rem; font-weight:800; color:#0cc;
+    font-family:monospace; letter-spacing:.04em;
+}
+
+/* Vehicle canvas */
+#lp-vehicle { padding:14px 16px 18px; }
+
+/* Vehicle + variant picker row */
+.lh-vehicle-picker {
+    display:flex; flex-wrap:wrap; gap:14px;
+    margin:6px 0 12px;
+    padding:8px 10px;
+    background:rgba(0,0,0,.25);
+    border:1px solid rgba(255,255,255,.06);
+    border-radius:8px;
+}
+.lh-vp-group { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.lh-vp-label {
+    font-size:.62rem; color:#778; text-transform:uppercase;
+    letter-spacing:.1em; font-weight:700;
+    margin-right:4px;
+}
+.lh-vp-btn {
+    background:rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.1);
+    color:#bcd;
+    border-radius:6px;
+    padding:5px 12px;
+    font-size:.72rem; font-weight:700;
+    cursor:pointer;
+    transition:all .15s;
+    font-family:inherit;
+    letter-spacing:.04em;
+}
+.lh-vp-btn:hover { border-color:rgba(0,200,200,.4); color:#fff; }
+.lh-vp-btn--on {
+    background:rgba(0,200,200,.18);
+    border-color:#0cc;
+    color:#0ff;
+}
+.lh-vp-variants .lh-vp-btn--on {
+    background:rgba(255,140,40,.18);
+    border-color:#fa7;
+    color:#fc7;
+}
+
+.lh-vehicle-wrap {
+    display:grid; grid-template-columns:1fr 280px; gap:14px;
+}
+@media (max-width:820px) { .lh-vehicle-wrap { grid-template-columns:1fr; } }
+.lh-vehicle-canvas-host {
+    position:relative;
+    background:#02010a;
+    border:1px solid rgba(0,200,200,.22);
+    border-radius:10px;
+    overflow:hidden;
+    aspect-ratio:16/10;
+    min-height:380px;
+    box-shadow:inset 0 0 80px rgba(120,80,200,.08), 0 8px 32px rgba(0,0,0,.5);
+}
+.lh-vehicle-canvas-host canvas { display:block; width:100%; height:100%; }
+.lh-vehicle-watermark {
+    position:absolute; bottom:10px; left:12px;
+    font-size:.58rem; color:#667; font-family:monospace;
+    letter-spacing:.08em; text-transform:uppercase;
+    pointer-events:none;
+    text-shadow:0 1px 2px rgba(0,0,0,.6);
+}
+
+/* Overlay button groups (presets + toggles) */
+.lh-vehicle-views, .lh-vehicle-toggles {
+    position:absolute; top:10px;
+    display:flex; gap:4px;
+    background:rgba(8,4,20,.55);
+    backdrop-filter:blur(8px);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:8px;
+    padding:4px;
+    z-index:2;
+}
+.lh-vehicle-views { left:10px; }
+.lh-vehicle-toggles { right:10px; }
+.lh-view, .lh-toggle {
+    background:transparent;
+    border:1px solid transparent;
+    color:#9ab;
+    font-size:.66rem; font-weight:700;
+    font-family:inherit;
+    letter-spacing:.04em;
+    padding:5px 9px;
+    border-radius:5px;
+    cursor:pointer;
+    transition:all .15s;
+    white-space:nowrap;
+}
+.lh-view:hover, .lh-toggle:hover {
+    background:rgba(255,255,255,.06);
+    color:#cde;
+}
+.lh-view--on {
+    background:rgba(0,200,200,.18);
+    border-color:rgba(0,200,200,.5);
+    color:#0ff;
+}
+/* Camera-control buttons (zoom/recenter/fov) — visually distinct from
+   view presets so they don't get a persistent --on state when clicked. */
+.lh-view-sep {
+    width:1px; align-self:stretch;
+    margin:2px 3px;
+    background:rgba(255,255,255,.12);
+}
+.lh-view--cam {
+    color:#9bd; font-weight:600;
+    min-width:1.6rem; text-align:center;
+    padding:5px 7px;
+}
+.lh-view--cam:active {
+    background:rgba(120,180,255,.18);
+    border-color:rgba(120,180,255,.4);
+    color:#cdf;
+}
+.lh-toggle--on {
+    background:rgba(255,140,40,.18);
+    border-color:rgba(255,140,40,.45);
+    color:#fc7;
+}
+
+/* Liftoff button — sits in the toggle bar but visually distinct (red) */
+.lh-liftoff {
+    background:rgba(255,40,40,.16);
+    border:1px solid rgba(255,80,80,.55);
+    color:#ff7766;
+    font-size:.7rem; font-weight:800;
+    font-family:inherit;
+    letter-spacing:.06em; text-transform:uppercase;
+    padding:5px 11px;
+    border-radius:5px;
+    cursor:pointer;
+    transition:all .15s;
+    margin-right:6px;
+    white-space:nowrap;
+}
+.lh-liftoff:hover {
+    background:rgba(255,40,40,.28);
+    border-color:#f55;
+    color:#fff;
+    box-shadow:0 0 12px rgba(255,80,40,.35);
+}
+.lh-liftoff--ascending {
+    background:rgba(255,80,40,.32);
+    border-color:#f73;
+    color:#fff;
+    animation:lh-liftoff-pulse 1.1s ease-in-out infinite;
+}
+@keyframes lh-liftoff-pulse {
+    0%, 100% { box-shadow:0 0 0 0 rgba(255,120,40,.5); }
+    50%      { box-shadow:0 0 16px 4px rgba(255,120,40,.35); }
+}
+
+/* Mission Elapsed Time HUD — bottom-left during liftoff */
+.lh-met {
+    position:absolute; bottom:36px; left:12px;
+    z-index:2;
+    display:flex; flex-direction:column; gap:5px;
+    padding:8px 12px;
+    background:rgba(8,4,20,.7);
+    backdrop-filter:blur(8px);
+    border:1px solid rgba(255,80,40,.35);
+    border-radius:6px;
+    font-family:'Consolas', 'Monaco', monospace;
+    /* draggable — pointer-events stay enabled */
+}
+.lh-met-row {
+    display:flex; align-items:center; gap:8px;
+}
+.lh-met-row--data {
+    border-top:1px solid rgba(255,255,255,.08);
+    padding-top:5px;
+    gap:10px;
+}
+.lh-met-k {
+    font-size:.58rem; color:#778; letter-spacing:.12em; font-weight:700;
+}
+.lh-met-v {
+    font-size:.95rem; color:#ff7766; font-weight:800; letter-spacing:.04em;
+    min-width:62px;
+}
+.lh-met-phase {
+    font-size:.65rem; color:#cde;
+    text-transform:uppercase; letter-spacing:.08em;
+    border-left:1px solid rgba(255,255,255,.12);
+    padding-left:8px;
+}
+.lh-met-tile {
+    display:flex; align-items:baseline; gap:4px;
+}
+.lh-met-tile-k {
+    font-size:.54rem; color:#778; letter-spacing:.08em; font-weight:700;
+}
+.lh-met-tile-v {
+    font-size:.78rem; color:#fb7; font-weight:800; letter-spacing:.02em;
+    min-width:56px;
+}
+
+/* Force-balance HUD — bottom-right of canvas, shown when Vectors is on */
+.lh-force {
+    position:absolute; bottom:12px; right:12px;
+    z-index:2;
+    width:160px;
+    background:rgba(8,4,20,.72);
+    backdrop-filter:blur(8px);
+    border:1px solid rgba(255,140,40,.32);
+    border-radius:8px;
+    padding:8px 8px 6px;
+    /* draggable — pointer-events stay enabled */
+    font-family:'Consolas','Monaco',monospace;
+}
+.lh-force-hd {
+    font-size:.55rem; color:#9ab; letter-spacing:.14em; font-weight:700;
+    text-align:center; margin-bottom:4px;
+}
+.lh-force-svg {
+    width:100%; height:auto;
+    display:block;
+}
+.lh-force-foot {
+    display:flex; justify-content:space-between;
+    margin-top:4px;
+    font-size:.5rem; letter-spacing:.06em;
+}
+.lh-force-leg { display:flex; align-items:center; gap:3px; }
+.lh-force-leg::before {
+    content:''; display:inline-block;
+    width:8px; height:2px; border-radius:1px;
+}
+.lh-force-leg--t      { color:#5fc97f; }
+.lh-force-leg--t::before { background:#5fc97f; }
+.lh-force-leg--w      { color:#f55; }
+.lh-force-leg--w::before { background:#f55; }
+.lh-force-leg--n      { color:#fc7; }
+.lh-force-leg--n::before { background:#fc7; }
+
+@media (max-width:520px) {
+    .lh-view, .lh-toggle, .lh-liftoff { font-size:.6rem; padding:4px 6px; }
+    .lh-met { font-size:.7em; bottom:30px; }
+}
+.lh-vehicle-meta {
+    background:rgba(15,10,35,.6);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:10px;
+    padding:14px;
+    display:flex; flex-direction:column; gap:10px;
+}
+.lh-vehicle-name {
+    font-size:1rem; font-weight:800; color:#fc7; line-height:1.2;
+}
+.lh-vehicle-sub {
+    font-size:.7rem; color:#9ab; font-family:monospace;
+    letter-spacing:.04em; text-transform:uppercase;
+}
+.lh-vehicle-stats {
+    display:grid; grid-template-columns:1fr 1fr; gap:6px;
+    margin-top:4px;
+}
+.lh-vehicle-stat {
+    background:rgba(255,255,255,.03);
+    border:1px solid rgba(255,255,255,.06);
+    border-radius:6px;
+    padding:6px 8px;
+}
+.lh-vehicle-stat-k {
+    font-size:.58rem; color:#778; text-transform:uppercase;
+    letter-spacing:.08em; font-weight:700; margin-bottom:2px;
+}
+.lh-vehicle-stat-v {
+    font-size:.78rem; font-weight:700; color:#eef; font-family:monospace;
+}
+.lh-vehicle-note {
+    font-size:.66rem; color:#889; line-height:1.55; font-style:italic;
+    border-top:1px solid rgba(255,255,255,.06); padding-top:8px;
+}
+.lh-vehicle-pad {
+    font-size:.7rem; color:#cde; font-family:monospace;
+    background:rgba(0,200,200,.08);
+    border:1px solid rgba(0,200,200,.18);
+    border-radius:6px;
+    padding:6px 10px;
+    letter-spacing:.04em;
+}
+.lh-vehicle-pad-k {
+    color:#778; font-size:.58rem; text-transform:uppercase;
+    letter-spacing:.1em; margin-right:6px;
+}
+
+/* Thrust card — sits below stats grid in the meta sidebar */
+.lh-thrust-card {
+    background:linear-gradient(180deg, rgba(255,80,40,.06), rgba(255,80,40,.0));
+    border:1px solid rgba(255,140,40,.22);
+    border-radius:8px;
+    padding:10px 12px;
+    display:flex; flex-direction:column; gap:10px;
+}
+.lh-thrust-headline {
+    display:grid; grid-template-columns:1fr 1fr; gap:10px;
+    padding-bottom:6px;
+    border-bottom:1px solid rgba(255,140,40,.18);
+}
+.lh-thrust-k {
+    font-size:.58rem; color:#9ab; text-transform:uppercase;
+    letter-spacing:.1em; font-weight:700; margin-bottom:2px;
+}
+.lh-thrust-v {
+    font-size:1.15rem; font-weight:800; color:#fc7;
+    font-family:'Consolas','Monaco',monospace;
+    letter-spacing:.02em;
+}
+.lh-thrust-unit { font-size:.65rem; color:#a98; font-weight:700; }
+.lh-thrust-engine {
+    display:flex; align-items:center; gap:8px;
+    font-size:.7rem;
+}
+.lh-thrust-prop {
+    color:#cde; font-family:monospace;
+}
+.lh-thrust-compare-hd {
+    font-size:.58rem; color:#9ab; text-transform:uppercase;
+    letter-spacing:.1em; font-weight:700; margin-bottom:6px;
+}
+.lh-thrust-row {
+    display:grid; grid-template-columns:88px 1fr 38px;
+    align-items:center; gap:6px;
+    padding:2px 0;
+    font-size:.62rem;
+    transition:background .15s;
+    border-radius:3px;
+}
+.lh-thrust-row--active {
+    background:rgba(255,140,40,.12);
+    box-shadow:inset 2px 0 0 #fa7;
+    padding-left:4px;
+}
+.lh-thrust-row--active .lh-thrust-name { color:#fff; font-weight:800; }
+.lh-thrust-row--active .lh-thrust-mn   { color:#fc7; font-weight:800; }
+.lh-thrust-name {
+    color:#aab;
+    font-family:monospace;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.lh-thrust-bar-wrap {
+    height:8px;
+    background:rgba(255,255,255,.04);
+    border-radius:2px;
+    overflow:hidden;
+    position:relative;
+}
+.lh-thrust-bar {
+    display:block; height:100%;
+    border-radius:2px;
+    transition:width .25s ease-out;
+}
+.lh-thrust-era-active   { background:linear-gradient(90deg, #fa7, #f73); }
+.lh-thrust-era-historic { background:linear-gradient(90deg, #9bc, #678); }
+.lh-thrust-era-planned  { background:linear-gradient(90deg, #fb6, #d83); border:1px dashed #d83; box-sizing:border-box; }
+.lh-thrust-era-concept  { background:repeating-linear-gradient(45deg, rgba(255,150,80,.5) 0 4px, rgba(80,30,10,.4) 4px 8px); }
+.lh-thrust-mn {
+    color:#cde;
+    font-family:'Consolas','Monaco',monospace;
+    text-align:right;
+    font-size:.6rem;
+}
+.lh-thrust-foot {
+    margin-top:6px;
+    font-size:.55rem; color:#778;
+    display:flex; flex-wrap:wrap; align-items:center; gap:2px;
+}
+.lh-thrust-foot span {
+    display:inline-block;
+    width:14px; height:7px;
+    border-radius:2px;
+    margin-right:2px; vertical-align:middle;
+}
+/* Live-thrust pulse on the active bar during liftoff */
+.lh-thrust-row--live .lh-thrust-bar {
+    box-shadow:0 0 8px rgba(255,140,40,.6);
+}
+
 /* ─── Mobile tweaks ──────────────────────────────────── */
 @media (max-width:720px) {
     #lp-roster { max-height:none; }
@@ -340,6 +1077,30 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
     "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
 }}
 </script>
+<!-- perf-hints:start -->
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" crossorigin>
+<!-- perf-hints:end --><script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "@id": "https://parkersphysics.com/launch-planner#app",
+  "name": "Launch Planner",
+  "description": "Orbital launch go/no-go weather planning with live NOAA wind, lightning, and cloud-ceiling forecasts for major US ranges. Built for mission-planning workflows.",
+  "url": "https://parkersphysics.com/launch-planner",
+  "image": "https://parkersphysics.com/ParkersPhysics_logo2.jpg",
+  "applicationCategory": "EducationalApplication",
+  "applicationSubCategory": "Aerospace mission planning",
+  "operatingSystem": "Web Browser",
+  "browserRequirements": "Requires JavaScript and WebGL",
+  "isAccessibleForFree": true,
+  "publisher": {
+    "@id": "https://parkersphysics.com/#org"
+  },
+  "inLanguage": "en-US"
+}
+</script>
 </head>
 <body>
 
@@ -352,28 +1113,171 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
     <span id="lp-status">Initializing…</span>
 </div>
 
+<!-- ─── Top: 3D vehicle canvas + Next Launches strip ─────────────────── -->
+<section id="lp-canvas-top">
+
+    <!-- 3D Vehicle Canvas (relocated from below) -->
+    <div class="lp-panel" id="lp-vehicle" data-collapse-id="vehicle">
+        <div class="lh-section-hd lp-collapse-hd">
+            <h2>Vehicle Visualization · Generic</h2>
+            <p class="lh-section-sub">Procedural 3D placeholders — click a launch or pick a vehicle to preview the matching stack.</p>
+            <button type="button" class="lp-density-btn" id="lp-density-btn" title="Toggle compact display"
+                    aria-label="Toggle compact display">⇲ Compact</button>
+        </div>
+        <div class="lp-collapse-body">
+
+        <!-- Vehicle + variant selector row -->
+        <div class="lh-vehicle-picker">
+            <div class="lh-vp-group">
+                <span class="lh-vp-label">Vehicle</span>
+                <button type="button" class="lh-vp-btn lh-vp-btn--on" data-vehicle="shuttle"  data-variant="">Space Shuttle</button>
+                <button type="button" class="lh-vp-btn"               data-vehicle="falcon9"  data-variant="block5">Falcon 9</button>
+                <button type="button" class="lh-vp-btn"               data-vehicle="starship" data-variant="v2">Starship</button>
+            </div>
+            <div class="lh-vp-group lh-vp-variants" id="lh-vp-variants-starship" hidden>
+                <span class="lh-vp-label">Starship</span>
+                <button type="button" class="lh-vp-btn" data-vehicle="starship" data-variant="v1">V1</button>
+                <button type="button" class="lh-vp-btn lh-vp-btn--on" data-vehicle="starship" data-variant="v2">V2</button>
+                <button type="button" class="lh-vp-btn" data-vehicle="starship" data-variant="v3">V3</button>
+                <button type="button" class="lh-vp-btn" data-vehicle="starship" data-variant="future">Future ✱</button>
+            </div>
+            <div class="lh-vp-group lh-vp-variants" id="lh-vp-variants-falcon9" hidden>
+                <span class="lh-vp-label">Falcon</span>
+                <button type="button" class="lh-vp-btn lh-vp-btn--on" data-vehicle="falcon9" data-variant="block5">Block 5</button>
+                <button type="button" class="lh-vp-btn"               data-vehicle="falcon9" data-variant="block5-crew">Crew Dragon</button>
+                <button type="button" class="lh-vp-btn"               data-vehicle="falcon9" data-variant="heavy">Heavy</button>
+            </div>
+        </div>
+
+        <div class="lh-vehicle-wrap">
+            <div class="lh-vehicle-canvas-host">
+                <canvas id="lh-vehicle-canvas"></canvas>
+
+                <!-- View presets — overlay top-left -->
+                <div class="lh-vehicle-views" role="group" aria-label="Camera view">
+                    <button type="button" class="lh-view lh-view--on" data-view="threequarter">3⁄4</button>
+                    <button type="button" class="lh-view"            data-view="front">Front</button>
+                    <button type="button" class="lh-view"            data-view="side">Side</button>
+                    <button type="button" class="lh-view"            data-view="top">Top</button>
+                    <button type="button" class="lh-view"            data-view="closeup">Engines</button>
+                    <span class="lh-view-sep" aria-hidden="true"></span>
+                    <button type="button" class="lh-view lh-view--cam" data-cam="zoom-in"  title="Zoom in">＋</button>
+                    <button type="button" class="lh-view lh-view--cam" data-cam="zoom-out" title="Zoom out">−</button>
+                    <button type="button" class="lh-view lh-view--cam" data-cam="recenter" title="Recenter on stack">⊙</button>
+                    <button type="button" class="lh-view lh-view--cam" data-cam="fov" id="lh-cam-fov" title="Cycle field of view (28°/38°/52°)">38°</button>
+                </div>
+
+                <!-- Toggles — overlay top-right -->
+                <div class="lh-vehicle-toggles" role="group" aria-label="Display toggles">
+                    <button type="button" class="lh-liftoff" id="lh-liftoff" title="Liftoff animation">▶ Liftoff</button>
+                    <button type="button" class="lh-toggle"               data-toggle="autoRotate" title="Auto-rotate camera">⟳ Auto</button>
+                    <button type="button" class="lh-toggle"               data-toggle="plume"      title="Engine plume">▲ Plume</button>
+                    <button type="button" class="lh-toggle"               data-toggle="vectors"    title="Per-engine thrust vectors + CoM">⇣ Vectors</button>
+                    <button type="button" class="lh-toggle lh-toggle--on" data-toggle="pad"        title="Launch pad + tower">⌂ Pad</button>
+                </div>
+
+                <!-- Force-balance HUD — bottom-right, only shown when Vectors is on -->
+                <div class="lh-force" id="lh-force" hidden>
+                    <div class="lh-force-hd">FORCE BALANCE</div>
+                    <svg class="lh-force-svg" viewBox="-60 -110 120 220">
+                        <rect x="-4" y="-8" width="8" height="20" fill="#666" rx="1"/>
+                        <polygon points="-4,-8 4,-8 0,-14" fill="#888"/>
+                        <line id="lh-fd-thrust" x1="0" y1="0" x2="0" y2="-50"
+                              stroke="#5fc97f" stroke-width="3" stroke-linecap="round"/>
+                        <polygon id="lh-fd-thrust-head" points="-5,-50 5,-50 0,-60" fill="#5fc97f"/>
+                        <text x="14" y="-30" fill="#5fc97f" font-size="9" font-family="monospace">T 0.0</text>
+                        <line id="lh-fd-grav" x1="0" y1="14" x2="0" y2="50"
+                              stroke="#f55" stroke-width="2" stroke-linecap="round"/>
+                        <polygon id="lh-fd-grav-head" points="-4,50 4,50 0,58" fill="#f55"/>
+                        <text x="14" y="35" fill="#f55" font-size="9" font-family="monospace">W 0.0</text>
+                        <line id="lh-fd-net" x1="-30" y1="0" x2="-30" y2="-30"
+                              stroke="#fc7" stroke-width="2" stroke-linecap="round"/>
+                        <polygon id="lh-fd-net-head" points="-34,-30 -26,-30 -30,-38" fill="#fc7"/>
+                        <text x="-58" y="-18" fill="#fc7" font-size="9" font-family="monospace">Δ 0.0</text>
+                    </svg>
+                    <div class="lh-force-foot">
+                        <span class="lh-force-leg lh-force-leg--t">Thrust</span>
+                        <span class="lh-force-leg lh-force-leg--w">Weight</span>
+                        <span class="lh-force-leg lh-force-leg--n">Net</span>
+                    </div>
+                </div>
+
+                <!-- Mission Elapsed Time HUD — bottom-left, only shown during liftoff -->
+                <div class="lh-met" id="lh-met" hidden>
+                    <div class="lh-met-row">
+                        <span class="lh-met-k">MET</span>
+                        <span class="lh-met-v" id="lh-met-v">T-03.0</span>
+                        <span class="lh-met-phase" id="lh-met-phase">Standby</span>
+                    </div>
+                    <div class="lh-met-row lh-met-row--data">
+                        <span class="lh-met-tile">
+                            <span class="lh-met-tile-k">THR</span>
+                            <span class="lh-met-tile-v" id="lh-met-thrust">0.0 / 0.0 MN</span>
+                        </span>
+                        <span class="lh-met-tile">
+                            <span class="lh-met-tile-k">%</span>
+                            <span class="lh-met-tile-v" id="lh-met-throttle">0%</span>
+                        </span>
+                        <span class="lh-met-tile">
+                            <span class="lh-met-tile-k">G</span>
+                            <span class="lh-met-tile-v" id="lh-met-g">0.00</span>
+                        </span>
+                    </div>
+                </div>
+
+                <div class="lh-vehicle-watermark">Procedural · For illustration only</div>
+            </div>
+            <aside class="lh-vehicle-meta" id="lh-vehicle-meta">
+                <!-- Filled dynamically by initVehicleCanvas onVehicleChange -->
+            </aside>
+        </div>
+        </div><!-- /.lp-collapse-body -->
+    </div>
+
+    <!-- Next Launches strip — horizontally scrollable cards, each declares
+         the matching 3D model. Clicking a card auto-binds the canvas via
+         the existing roster→model bridge. -->
+    <div class="lp-panel" id="lp-strip" data-collapse-id="strip">
+        <div class="lp-strip-hd lp-collapse-hd">
+            <h2>Next Launches</h2>
+            <span class="lp-strip-sub" id="lp-strip-sub">Loading upcoming launches…</span>
+        </div>
+        <div class="lp-collapse-body">
+            <div class="lp-strip-track" id="lp-strip-track">
+                <div class="lp-strip-empty">Awaiting roster…</div>
+            </div>
+        </div>
+    </div>
+
+</section>
+
 <div id="lp-app">
 
     <!-- Left: Filters -->
-    <aside class="lp-panel" id="lp-filters">
-        <div class="lp-label">Window</div>
-        <div class="lp-chip-row">
-            <button type="button" class="lp-chip" data-window-days="7">7 days</button>
-            <button type="button" class="lp-chip" data-window-days="30">30 days</button>
-            <button type="button" class="lp-chip lp-chip--on" data-window-days="90">90 days</button>
+    <aside class="lp-panel" id="lp-filters" data-collapse-id="filters">
+        <div class="lp-filters-hd lp-collapse-hd">
+            <h3>Filters</h3>
         </div>
+        <div class="lp-collapse-body">
+            <div class="lp-label">Window</div>
+            <div class="lp-chip-row">
+                <button type="button" class="lp-chip" data-window-days="7">7 days</button>
+                <button type="button" class="lp-chip" data-window-days="30">30 days</button>
+                <button type="button" class="lp-chip lp-chip--on" data-window-days="90">90 days</button>
+            </div>
 
-        <div class="lp-label">Weather Verdict</div>
-        <div class="lp-chip-row">
-            <button type="button" class="lp-chip lp-chip--on" data-verdict-filter="all">All</button>
-            <button type="button" class="lp-chip lp-chip--green" data-verdict-filter="green">GO</button>
-            <button type="button" class="lp-chip lp-chip--yellow" data-verdict-filter="yellow">HOLD</button>
-            <button type="button" class="lp-chip lp-chip--red" data-verdict-filter="red">NO-GO</button>
-        </div>
+            <div class="lp-label">Weather Verdict</div>
+            <div class="lp-chip-row">
+                <button type="button" class="lp-chip lp-chip--on" data-verdict-filter="all">All</button>
+                <button type="button" class="lp-chip lp-chip--green" data-verdict-filter="green">GO</button>
+                <button type="button" class="lp-chip lp-chip--yellow" data-verdict-filter="yellow">HOLD</button>
+                <button type="button" class="lp-chip lp-chip--red" data-verdict-filter="red">NO-GO</button>
+            </div>
 
-        <div class="lp-label">Launch Provider</div>
-        <div class="lp-chip-row" id="lp-providers">
-            <span style="font-size:.72rem;color:#556;font-style:italic">Loading…</span>
+            <div class="lp-label">Launch Provider</div>
+            <div class="lp-chip-row" id="lp-providers">
+                <span style="font-size:.72rem;color:#556;font-style:italic">Loading…</span>
+            </div>
         </div>
     </aside>
 
@@ -393,7 +1297,580 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
 
 </div>
 
+<!-- ─── Achievement Runs · Timeline · Vehicle Canvas ──────────────────── -->
+<section id="lp-history">
+
+    <!-- Achievement Runs -->
+    <div class="lp-panel" id="lp-achievements" data-collapse-id="achievements">
+        <div class="lh-section-hd lp-collapse-hd">
+            <h2>Achievement Runs</h2>
+            <p>Program-scale milestone flights from NASA and SpaceX — the launches that opened doors no one had walked through before.</p>
+        </div>
+        <div class="lp-collapse-body">
+            <div id="lh-achievements-root"></div>
+        </div>
+    </div>
+
+    <!-- Historic Timeline -->
+    <div class="lp-panel" id="lp-timeline" data-collapse-id="timeline">
+        <div class="lh-section-hd lp-collapse-hd">
+            <h2>Historic Timeline</h2>
+            <p>Every milestone flight, plotted chronologically. Click a marker to jump to the program above. Scroll horizontally to span 1961 → today.</p>
+        </div>
+        <div class="lp-collapse-body">
+            <div id="lh-timeline-root"></div>
+        </div>
+    </div>
+
+</section>
+
 <script type="module" src="./js/launch-planner.js"></script>
+<script type="module">
+    import { renderAchievements, renderTimeline } from './js/launch-history.js';
+    import { initVehicleCanvas } from './js/launch-vehicle-3d.js';
+    import { REFERENCE_THRUSTS, REFERENCE_MAX_MN } from './js/launch-engines.js';
+    import {
+        wireAllCollapsibles, makeDraggable,
+        initDensity, toggleDensity,
+    } from './js/launch-ui-panels.js';
+
+    // Apply persisted density setting before any rendering so cards lay out
+    // at the correct size on first paint.
+    initDensity();
+    // Wire up every [data-collapse-id] panel for click-to-collapse. Strip
+    // and Filters default to expanded; the user toggles from there.
+    wireAllCollapsibles();
+    // Density button in the vehicle-panel header — toggles the body's
+    // data-density attribute, which CSS uses to retighten everything.
+    document.getElementById('lp-density-btn')?.addEventListener('click', e => {
+        e.stopPropagation();
+        toggleDensity();
+    });
+
+    renderAchievements(document.getElementById('lh-achievements-root'));
+    renderTimeline(document.getElementById('lh-timeline-root'));
+
+    const canvas = document.getElementById('lh-vehicle-canvas');
+    if (canvas) {
+        const meta     = document.getElementById('lh-vehicle-meta');
+        const variants = document.getElementById('lh-vp-variants');
+
+        function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({
+            '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+        }[c])); }
+
+        function renderThrustCard(info) {
+            const t = info?.thrust;
+            if (!t) return '';
+            const activeRefId = t.ref_id;
+            // Comparison bars — one row per reference vehicle, width
+            // proportional to its sea-level thrust.
+            const rows = REFERENCE_THRUSTS.map(r => {
+                const pct = (r.sl_mn / REFERENCE_MAX_MN * 100).toFixed(1);
+                const isActive = (r.id === activeRefId);
+                return `
+                    <div class="lh-thrust-row${isActive ? ' lh-thrust-row--active' : ''}" data-ref="${esc(r.id)}">
+                        <span class="lh-thrust-name">${esc(r.label)}</span>
+                        <span class="lh-thrust-bar-wrap">
+                            <span class="lh-thrust-bar lh-thrust-era-${esc(r.era)}" style="width:${pct}%"></span>
+                        </span>
+                        <span class="lh-thrust-mn">${r.sl_mn.toFixed(1)}</span>
+                    </div>`;
+            }).join('');
+            return `
+                <div class="lh-thrust-card">
+                    <div class="lh-thrust-headline">
+                        <div>
+                            <div class="lh-thrust-k">Liftoff Thrust</div>
+                            <div class="lh-thrust-v">${t.liftoff_mn.toFixed(1)} <span class="lh-thrust-unit">MN</span></div>
+                        </div>
+                        <div>
+                            <div class="lh-thrust-k">Initial T/W</div>
+                            <div class="lh-thrust-v">${t.twr_initial.toFixed(2)}</div>
+                        </div>
+                    </div>
+                    <div class="lh-thrust-engine">
+                        <span class="lh-thrust-k">Propellant</span>
+                        <span class="lh-thrust-prop">${esc(t.propellant)}</span>
+                    </div>
+                    <div class="lh-thrust-compare">
+                        <div class="lh-thrust-compare-hd">Sea-level thrust comparison (MN)</div>
+                        ${rows}
+                        <div class="lh-thrust-foot">
+                            <span class="lh-thrust-era-active"></span> active &nbsp;·&nbsp;
+                            <span class="lh-thrust-era-historic"></span> historic &nbsp;·&nbsp;
+                            <span class="lh-thrust-era-planned"></span> planned &nbsp;·&nbsp;
+                            <span class="lh-thrust-era-concept"></span> concept
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderMeta(info) {
+            if (!info || !meta) return;
+            meta.innerHTML = `
+                <div>
+                    <div class="lh-vehicle-sub">${esc(info.years || '')}</div>
+                    <div class="lh-vehicle-name">${esc(info.name)}</div>
+                </div>
+                <div class="lh-vehicle-stats">
+                    <div class="lh-vehicle-stat"><div class="lh-vehicle-stat-k">Stack height</div><div class="lh-vehicle-stat-v">${esc(info.height_m)} m</div></div>
+                    <div class="lh-vehicle-stat"><div class="lh-vehicle-stat-k">Diameter</div><div class="lh-vehicle-stat-v">${esc(info.diameter_m)} m</div></div>
+                    <div class="lh-vehicle-stat"><div class="lh-vehicle-stat-k">Booster eng.</div><div class="lh-vehicle-stat-v">${esc(info.booster_engines)}</div></div>
+                    <div class="lh-vehicle-stat"><div class="lh-vehicle-stat-k">Upper eng.</div><div class="lh-vehicle-stat-v">${esc(info.ship_engines)}</div></div>
+                    <div class="lh-vehicle-stat"><div class="lh-vehicle-stat-k">Liftoff mass</div><div class="lh-vehicle-stat-v">${esc(info.liftoff_mass_t)} t</div></div>
+                    <div class="lh-vehicle-stat"><div class="lh-vehicle-stat-k">Payload (LEO)</div><div class="lh-vehicle-stat-v">${esc(info.leo_payload_t)} t</div></div>
+                </div>
+                ${renderThrustCard(info)}
+                ${info.pad ? `<div class="lh-vehicle-pad"><span class="lh-vehicle-pad-k">Pad</span> ${esc(info.pad)}</div>` : ''}
+                <div class="lh-vehicle-note">${esc(info.notes || '')}</div>
+                <div class="lh-vehicle-note" style="opacity:.7;font-size:.6rem">
+                    Drag to orbit · right-drag (or two-finger) to pan · scroll to zoom ·
+                    overlay buttons set preset views, dolly in/out, recenter the stack,
+                    and cycle FOV (28°/38°/52°).
+                </div>
+            `;
+        }
+
+        const liftoffBtn = document.getElementById('lh-liftoff');
+        const metEl      = document.getElementById('lh-met');
+        const metV       = document.getElementById('lh-met-v');
+        const metPhase   = document.getElementById('lh-met-phase');
+        const variantsStarship = document.getElementById('lh-vp-variants-starship');
+        const variantsFalcon9  = document.getElementById('lh-vp-variants-falcon9');
+
+        function showVariantRow(vehicleId) {
+            variantsStarship.hidden = (vehicleId !== 'starship');
+            variantsFalcon9.hidden  = (vehicleId !== 'falcon9');
+        }
+
+        function fmtMET(T) {
+            const sign = T < 0 ? 'T-' : 'T+';
+            const v = Math.abs(T);
+            return sign + (v < 10 ? '0' : '') + v.toFixed(1);
+        }
+        function phaseFor(T) {
+            if (T < -0.2) return 'Engine Startup';
+            if (T < 0)    return 'Hold-Down Release';
+            if (T < 10)   return 'Liftoff';
+            if (T < 18)   return 'Roll Program';
+            if (T < 25)   return 'Vertical Ascent';
+            if (T < 45)   return 'Pitch Program';
+            if (T < 55)   return 'Max-Q · Throttle Down';
+            return 'Throttle Up';
+        }
+
+        try {
+            const api = initVehicleCanvas(canvas, {
+                vehicle: 'shuttle',
+                autoRotate: true,
+                onVehicleChange: ({ id, info }) => {
+                    renderMeta(info);
+                    showVariantRow(id);
+                    // Refresh the force diagram if it's visible — different
+                    // vehicle, very different thrust/weight ratio. Deferred
+                    // because the very first onVehicleChange fires
+                    // synchronously inside initVehicleCanvas, before forceEl
+                    // and api have left their TDZ.
+                    queueMicrotask(() => {
+                        if (typeof updateForceDiagram === 'function') updateForceDiagram();
+                    });
+                },
+                onLiftoffEnd: () => {
+                    liftoffBtn.classList.remove('lh-liftoff--ascending');
+                    liftoffBtn.textContent = '▶ Liftoff';
+                    metEl.hidden = true;
+                },
+            });
+
+            // ── Draggable canvas overlays ─────────────────────────────────
+            // Pointer-drag any of the four overlays to a custom position;
+            // double-click the panel header to snap back to default.
+            const dragTargets = [
+                ['.lh-vehicle-views',   'views'],
+                ['.lh-vehicle-toggles', 'toggles'],
+                ['#lh-met',             'met'],
+                ['#lh-force',           'force'],
+            ];
+            for (const [sel, key] of dragTargets) {
+                const el = document.querySelector(sel);
+                if (el) makeDraggable(el, { key });
+            }
+
+            // ── Roster → 3D auto-bind ─────────────────────────────────────
+            // launch-planner.js dispatches `lp:launch-selected` whenever a
+            // user clicks a launch card or the page deep-links into one.
+            // We translate the launch's vehicle metadata into a (vehicle,
+            // variant) tuple the 3D canvas understands and update the
+            // picker buttons + canvas in lockstep.
+            function vehicleForLaunch(l) {
+                const rid = (l._vehicle?.ruleset?.id || '').toLowerCase();
+                const v   = (l.vehicle || '').toLowerCase();
+                const n   = (l.name    || '').toLowerCase();
+                const year = l.net_iso ? new Date(l.net_iso).getUTCFullYear() : 0;
+
+                if (rid === 'starship' || /starship|super heavy/.test(v)) {
+                    // Pick variant by NET year (Block 1 retired late 2024;
+                    // Block 2 currently flying; V3 expected ~2026).
+                    if (year && year <= 2024) return ['starship', 'v1'];
+                    if (year && year <= 2026) return ['starship', 'v2'];
+                    return ['starship', 'v3'];
+                }
+                if (rid === 'falcon-heavy' || /falcon\s*heavy/.test(v)) {
+                    return ['falcon9', 'heavy'];
+                }
+                if (rid.startsWith('falcon-9') || /falcon\s*9/.test(v)) {
+                    if (rid === 'falcon-9-crew' || /crew\s*dragon|crew-?\d/.test(n) || /dragon/.test(v)) {
+                        return ['falcon9', 'block5-crew'];
+                    }
+                    return ['falcon9', 'block5'];
+                }
+                if (/space\s*shuttle|sts/i.test(v)) return ['shuttle', null];
+                return null;     // unknown — leave the canvas alone
+            }
+
+            document.addEventListener('lp:launch-selected', (e) => {
+                const l = e.detail?.launch;
+                if (!l) return;
+                const tuple = vehicleForLaunch(l);
+                if (!tuple) return;
+                const [vehicleId, variantId] = tuple;
+                // Bail if we're already showing this exact configuration —
+                // avoids a needless dispose+rebuild cycle on roster re-clicks.
+                if (api.currentInfo) {
+                    const matchingPickerBtn = document.querySelector(
+                        `.lh-vp-btn--on[data-vehicle="${vehicleId}"]` +
+                        (variantId ? `[data-variant="${variantId}"]` : '')
+                    );
+                    if (matchingPickerBtn) return;
+                }
+                // Update vehicle-row highlight (top row picks vehicle)
+                document.querySelectorAll('.lh-vehicle-picker .lh-vp-group').forEach(group => {
+                    group.querySelectorAll('.lh-vp-btn').forEach(b => {
+                        const isVehicleRow = group === group.parentNode.firstElementChild ||
+                                             !group.classList.contains('lh-vp-variants');
+                        if (isVehicleRow) {
+                            b.classList.toggle('lh-vp-btn--on', b.dataset.vehicle === vehicleId);
+                        } else if (group.id === `lh-vp-variants-${vehicleId}`) {
+                            b.classList.toggle('lh-vp-btn--on',
+                                b.dataset.vehicle === vehicleId && b.dataset.variant === variantId);
+                        }
+                    });
+                });
+                api.setVehicle(vehicleId, variantId || undefined);
+
+                // Sync the Next-Launches strip — highlight whichever card
+                // matches the just-selected launch. Stash the id globally
+                // so re-renders of the strip preserve the highlight.
+                window.__lpSelectedId = l.id;
+                const stripCards = document.querySelectorAll('.lp-strip-card');
+                stripCards.forEach(c => c.classList.toggle('lp-strip-card--active',
+                    String(c.dataset.id) === String(l.id)));
+            });
+
+            // ── Next Launches strip ───────────────────────────────────────
+            // Renders a horizontally-scrollable card per upcoming launch,
+            // each declaring the matching 3D model. Clicking a card
+            // simulates a click on the corresponding roster card, which
+            // re-uses launch-planner.js's existing selectLaunch() flow
+            // (loads weather, fires lp:launch-selected, auto-binds canvas).
+            const stripTrack = document.getElementById('lp-strip-track');
+            const stripSub   = document.getElementById('lp-strip-sub');
+
+            function fmtCountdown(iso) {
+                if (!iso) return '—';
+                const ms = new Date(iso).getTime() - Date.now();
+                if (!Number.isFinite(ms)) return '—';
+                if (ms < 0) return 'PAST';
+                const s = Math.floor(ms / 1000);
+                const d = Math.floor(s / 86400);
+                const h = Math.floor((s % 86400) / 3600);
+                const m = Math.floor((s % 3600) / 60);
+                if (d > 0) return `T-${d}d ${h}h`;
+                if (h > 0) return `T-${h}h ${m}m`;
+                return `T-${m}m`;
+            }
+
+            function vehBadgeHtml(l) {
+                const v = vehicleForLaunch(l);
+                if (!v) {
+                    const fallback = (l.vehicle || 'Unknown').slice(0, 24);
+                    return `<span class="lp-strip-veh lp-strip-veh--unknown">${esc(fallback)}</span>`;
+                }
+                const labels = {
+                    'shuttle':                 'Space Shuttle',
+                    'starship-v1':             'Starship V1',
+                    'starship-v2':             'Starship V2',
+                    'starship-v3':             'Starship V3',
+                    'starship-future':         'Starship Future',
+                    'falcon9-block5':          'Falcon 9 Block 5',
+                    'falcon9-block5-crew':     'Falcon 9 + Crew Dragon',
+                    'falcon9-heavy':           'Falcon Heavy',
+                };
+                const key = `${v[0]}${v[1] ? '-' + v[1] : ''}`;
+                const label = labels[key] || `${v[0]}${v[1] ? ' ' + v[1] : ''}`;
+                return `<span class="lp-strip-veh">▶ ${esc(label)}</span>`;
+            }
+
+            function verdictTag(l) {
+                const v = l._score?.verdict;
+                if (!v) return '';
+                const colors = { green: '#4c8', yellow: '#fa0', red: '#f44' };
+                const labels = { green: 'GO', yellow: 'HOLD', red: 'NO-GO' };
+                const c = colors[v]; const t = labels[v];
+                return `<span class="lp-strip-verdict" style="color:${c};border-color:${c}55;background:${c}22">${t}</span>`;
+            }
+
+            function renderStrip(launches) {
+                if (!launches || !launches.length) {
+                    stripTrack.innerHTML = '<div class="lp-strip-empty">No upcoming launches in window.</div>';
+                    stripSub.textContent = '';
+                    return;
+                }
+                const top = launches.slice(0, 12);
+                stripSub.textContent = `Top ${top.length} of ${launches.length} · click to load model`;
+                stripTrack.innerHTML = top.map(l => {
+                    const v = l._score?.verdict;
+                    const cls = v ? `lp-strip-card--${v}` : '';
+                    const isActive = String(l.id) === String(window.__lpSelectedId || '');
+                    return `
+                        <button type="button" class="lp-strip-card ${cls}${isActive ? ' lp-strip-card--active' : ''}"
+                                data-id="${esc(l.id)}">
+                            <div class="lp-strip-row">
+                                <span class="lp-strip-provider">${esc(l.provider || '')}</span>
+                                ${verdictTag(l)}
+                            </div>
+                            <div class="lp-strip-name">${esc(l.name || 'Untitled')}</div>
+                            ${vehBadgeHtml(l)}
+                            <div class="lp-strip-pad">${esc(l.pad?.location || l.pad?.name || '')}</div>
+                            <div class="lp-strip-cd" data-net="${esc(l.net_iso || '')}">${esc(fmtCountdown(l.net_iso))}</div>
+                        </button>
+                    `;
+                }).join('');
+
+                // Wire each card to forward clicks to the matching roster card.
+                stripTrack.querySelectorAll('.lp-strip-card').forEach(card => {
+                    card.addEventListener('click', () => {
+                        const id = card.dataset.id;
+                        const rosterCard = document.querySelector(
+                            `#lp-roster [data-launch-id="${CSS.escape(id)}"]`);
+                        if (rosterCard) {
+                            rosterCard.click();
+                            rosterCard.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                        }
+                    });
+                });
+            }
+
+            document.addEventListener('lp:launches-loaded', (e) => {
+                renderStrip(e.detail?.launches || []);
+            });
+
+            // Tick the strip's countdowns once a second.
+            setInterval(() => {
+                document.querySelectorAll('.lp-strip-cd').forEach(el => {
+                    const iso = el.dataset.net;
+                    if (iso) el.textContent = fmtCountdown(iso);
+                });
+            }, 1000);
+
+            const metThrust   = document.getElementById('lh-met-thrust');
+            const metThrottle = document.getElementById('lh-met-throttle');
+            const metG        = document.getElementById('lh-met-g');
+
+            // Liftoff button
+            liftoffBtn.addEventListener('click', () => {
+                if (api.isAscending) {
+                    api.cancelLiftoff();
+                    // onLiftoffEnd resets button + HUD
+                } else {
+                    api.liftoff();
+                    liftoffBtn.classList.add('lh-liftoff--ascending');
+                    liftoffBtn.textContent = '■ Abort';
+                    metEl.hidden = false;
+                    // Drive HUD on a separate ~10 Hz interval — cheaper than
+                    // updating the DOM every frame.
+                    const activeRow = document.querySelector('.lh-thrust-row--active');
+                    const activeBar = activeRow?.querySelector('.lh-thrust-bar');
+                    const activeMnEl = activeRow?.querySelector('.lh-thrust-mn');
+                    if (activeRow) activeRow.classList.add('lh-thrust-row--live');
+                    const baseBarPct = activeBar?.style.width;
+
+                    const hudTick = setInterval(() => {
+                        if (!api.isAscending) {
+                            clearInterval(hudTick);
+                            // Restore bar to nominal width when flight ends.
+                            if (activeRow) activeRow.classList.remove('lh-thrust-row--live');
+                            if (activeBar && baseBarPct) activeBar.style.width = baseBarPct;
+                            return;
+                        }
+                        metV.textContent = fmtMET(api.missionT);
+                        metPhase.textContent = phaseFor(api.missionT);
+
+                        const live = api.getLiveThrust();
+                        if (live) {
+                            metThrust.textContent =
+                                `${live.thrust_mn.toFixed(1)} / ${live.thrust_max_mn.toFixed(1)} MN`;
+                            metThrottle.textContent = Math.round(live.throttle * 100) + '%';
+                            metG.textContent = live.g.toFixed(2);
+
+                            // Pulse the active comparison bar with current
+                            // live-thrust ratio — visible during the max-Q
+                            // throttle bucket (bar shrinks ~30%).
+                            if (activeBar) {
+                                const baseMn = live.thrust_max_mn;
+                                const liveFrac = (live.thrust_mn / REFERENCE_MAX_MN * 100);
+                                activeBar.style.width = liveFrac.toFixed(2) + '%';
+                            }
+                            if (activeMnEl) {
+                                activeMnEl.textContent = live.thrust_mn.toFixed(1);
+                            }
+                        }
+
+                        // Force-balance diagram tracks live thrust + mass.
+                        updateForceDiagram();
+                    }, 100);
+                }
+            });
+
+            // Vehicle/variant selector buttons
+            document.querySelectorAll('.lh-vp-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const v   = btn.dataset.vehicle;
+                    const var_ = btn.dataset.variant || undefined;
+                    // Highlight: vehicle row vs variant row, separate selection.
+                    const row = btn.closest('.lh-vp-group');
+                    row.querySelectorAll('.lh-vp-btn').forEach(b => b.classList.remove('lh-vp-btn--on'));
+                    btn.classList.add('lh-vp-btn--on');
+                    api.setVehicle(v, var_);
+                    // Reset view to threequarter on vehicle change.
+                    document.querySelectorAll('.lh-view[data-view]').forEach(b => b.classList.toggle('lh-view--on', b.dataset.view === 'threequarter'));
+                });
+            });
+
+            // View-preset + camera-control buttons
+            const fovBtn = document.getElementById('lh-cam-fov');
+            document.querySelectorAll('.lh-view').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    // Camera action buttons (zoom / recenter / fov) — no
+                    // sticky --on state; they're transient commands.
+                    const cam = btn.dataset.cam;
+                    if (cam) {
+                        if (cam === 'zoom-in')  api.setZoom?.(0.78);
+                        if (cam === 'zoom-out') api.setZoom?.(1.28);
+                        if (cam === 'recenter') api.recenter?.();
+                        if (cam === 'fov' && api.cycleFOV) {
+                            const fov = api.cycleFOV();
+                            if (fovBtn) fovBtn.textContent = `${Math.round(fov)}°`;
+                        }
+                        return;
+                    }
+                    // View presets — sticky highlight.
+                    const view = btn.dataset.view;
+                    if (!view) return;
+                    document.querySelectorAll('.lh-view[data-view]').forEach(b => b.classList.remove('lh-view--on'));
+                    btn.classList.add('lh-view--on');
+                    api.setView(view);
+                });
+            });
+
+            // Toggle buttons (autoRotate / plume / vectors / pad)
+            const forceEl = document.getElementById('lh-force');
+            document.querySelectorAll('.lh-toggle').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    btn.classList.toggle('lh-toggle--on');
+                    const on = btn.classList.contains('lh-toggle--on');
+                    if (btn.dataset.toggle === 'autoRotate') api.setAutoRotate(on);
+                    if (btn.dataset.toggle === 'plume')      api.setPlume(on);
+                    if (btn.dataset.toggle === 'pad')        api.setPad(on);
+                    if (btn.dataset.toggle === 'vectors') {
+                        api.setVectors(on);
+                        forceEl.hidden = !on;
+                        if (on) updateForceDiagram();
+                    }
+                });
+            });
+
+            // ── 2D force-balance HUD ──────────────────────────────────────
+            // Updates whenever the Vectors overlay is visible. During pre-
+            // launch idle the diagram shows the static balance (T_max vs W).
+            // During liftoff it tracks live throttle so the thrust arrow
+            // shrinks ~30% during the max-Q bucket.
+            const fdThrust    = document.getElementById('lh-fd-thrust');
+            const fdThrustHd  = document.getElementById('lh-fd-thrust-head');
+            const fdGrav      = document.getElementById('lh-fd-grav');
+            const fdGravHd    = document.getElementById('lh-fd-grav-head');
+            const fdNet       = document.getElementById('lh-fd-net');
+            const fdNetHd     = document.getElementById('lh-fd-net-head');
+            const fdSvg       = forceEl.querySelector('svg');
+
+            function updateForceDiagram() {
+                if (forceEl.hidden) return;
+                const info = api.currentInfo;
+                if (!info?.thrust) return;
+
+                // Live thrust + mass (live during ascent, max otherwise).
+                const live = api.getLiveThrust() || {
+                    thrust_mn: info.thrust.liftoff_mn,
+                    thrust_max_mn: info.thrust.liftoff_mn,
+                    g: info.thrust.twr_initial,
+                    mass_t: info.thrust.mass_t,
+                };
+                // Pre-launch: show max thrust statically. In-flight: show live.
+                const thrustMn = api.isAscending ? live.thrust_mn : info.thrust.liftoff_mn;
+                const massT    = live.mass_t || info.thrust.mass_t;
+                const weightMn = (massT * 9.80665) / 1000;
+                const netMn    = thrustMn - weightMn;
+
+                // SVG y-axis: -y = up. Map MN to pixels — Starship V3 (~96 MN)
+                // maxes out at about 95 px. Cap arrow lengths in case future
+                // variants exceed this.
+                const PX_PER_MN = 0.95;
+                const tPx = Math.min(95, thrustMn * PX_PER_MN);
+                const wPx = Math.min(95, weightMn * PX_PER_MN);
+                const nPx = Math.min(95, Math.abs(netMn) * PX_PER_MN);
+
+                // Thrust arrow: shaft -10..-(10+tPx), head triangle at top.
+                fdThrust.setAttribute('y2', String(-(8 + tPx)));
+                const tHeadY = -(8 + tPx);
+                fdThrustHd.setAttribute('points',
+                    `-5,${tHeadY} 5,${tHeadY} 0,${tHeadY - 8}`);
+
+                // Gravity arrow: shaft 14..(14+wPx)
+                fdGrav.setAttribute('y2', String(14 + wPx));
+                const wHeadY = 14 + wPx;
+                fdGravHd.setAttribute('points',
+                    `-4,${wHeadY} 4,${wHeadY} 0,${wHeadY + 8}`);
+
+                // Net arrow: lateral, points up if positive, down if negative.
+                const netUp = netMn >= 0;
+                const netY  = netUp ? -nPx : nPx;
+                fdNet.setAttribute('y1', '0');
+                fdNet.setAttribute('y2', String(netY));
+                fdNetHd.setAttribute('points',
+                    netUp
+                    ? `-34,${netY} -26,${netY} -30,${netY - 8}`
+                    : `-34,${netY} -26,${netY} -30,${netY + 8}`);
+
+                // Update labels
+                fdSvg.querySelectorAll('text').forEach(t => {
+                    const f = t.getAttribute('fill');
+                    if (f === '#5fc97f') t.textContent = `T ${thrustMn.toFixed(1)}`;
+                    if (f === '#f55')    t.textContent = `W ${weightMn.toFixed(1)}`;
+                    if (f === '#fc7')    t.textContent =
+                        `${netUp ? '↑' : '↓'} ${Math.abs(netMn).toFixed(1)}`;
+                });
+            }
+        } catch (err) {
+            console.error('[launch-vehicle-3d]', err);
+            const host = canvas.parentElement;
+            if (host) {
+                host.innerHTML = '<div style="padding:40px;text-align:center;color:#778;font-size:.78rem">3D canvas unavailable in this browser.</div>';
+            }
+        }
+    }
+</script>
 
 </body>
 </html>

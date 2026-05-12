@@ -40,14 +40,40 @@
  */
 
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { EarthSkin } from './earth-skin.js';
-import { SATELLITE_REFERENCES } from './upper-atmosphere-engine.js';
+import { SATELLITE_REFERENCES, density, fetchDebrisSample, fetchDebrisByEvent }
+    from './upper-atmosphere-engine.js';
+import { annotate as annotateDebris, summariseByFamily, DEBRIS_FAMILIES }
+    from './debris-catalog.js';
+import { CONSTELLATIONS, spawnConstellationPositions }
+    from './constellation-catalog.js';
+import { buildSatelliteModel, buildSatelliteModelLow }
+    from './satellite-models.js';
 import { computeShue, computeBowShock } from './magnetosphere-engine.js';
-import { ATMOSPHERIC_LAYER_SCHEMA } from './upper-atmosphere-layers.js';
+import { ATMOSPHERIC_LAYER_SCHEMA, layerForAltitude }
+    from './upper-atmosphere-layers.js';
 import { LayerParticleSystem } from './upper-atmosphere-particles.js';
-import { layerPhysics } from './upper-atmosphere-physics.js';
+import { layerPhysics, pointPhysics } from './upper-atmosphere-physics.js';
 import { LayerVectorField } from './upper-atmosphere-vector-fields.js';
+import { DragForecastOverlay } from './drag-forecast-overlay.js';
+import { FleetRibbons } from './upper-atmosphere-fleet-ribbons.js';
+import { MagneticCascade } from './upper-atmosphere-magnetic-cascade.js';
+import { SubstormController } from './upper-atmosphere-substorm.js';
+import { CameraController } from './upper-atmosphere-camera.js';
+import { subSolarPoint } from './sun-altitude.js';
+
+// Map (sub-solar lat, sub-solar lon) → unit Vector3 in the scene's world
+// frame. Convention: scene +Y is the geographic north pole; lon=0 (Greenwich)
+// faces +X at scene-origin orientation. This keeps the day-side terminator
+// on the existing Earth texture aligned with the real sub-solar geographic
+// point, so the simulation reads as "real-time Earth–Sun geometry."
+function _subSolarToVec3(latDeg, lonDeg) {
+    const DEG = Math.PI / 180;
+    const phi = latDeg * DEG;
+    const lam = lonDeg * DEG;
+    const c = Math.cos(phi);
+    return new THREE.Vector3(c * Math.cos(lam), Math.sin(phi), c * Math.sin(lam));
+}
 
 // NOAA SWPC Kp→Ap table, used to invert Ap back to Kp for the aurora
 // shader. The shader's own oval-geometry code wants Kp, not Ap.
@@ -156,6 +182,10 @@ const LAYER_FRAG = /* glsl */`
     uniform float uStorm;        // 0..1 geomagnetic forcing
     uniform vec3  uSunDir;       // unit vector, world frame
     uniform float uSwForcing;    // 0..1 dynamic-pressure proxy from solar wind
+    uniform float uFade;         // 0..1 — drops to ~0.18 when camera is
+                                 //        inside this shell's altitude band
+                                 //        so free-fly users can see through
+                                 //        the layer they're standing in.
     varying vec3  vWorldPos;
 
     // Ray-sphere intersection. Returns vec2(tNear, tFar). Negative
@@ -221,6 +251,7 @@ const LAYER_FRAG = /* glsl */`
         pn = pow(pn, 0.85);
 
         float alpha = uOpacity * uIntensity * pn * (1.0 + 0.45 * dayside);
+        alpha *= uFade;
         gl_FragColor = vec4(col, clamp(alpha, 0.0, 1.0));
     }
 `;
@@ -316,6 +347,179 @@ const SW_STREAM_FRAG = /* glsl */`
     }
 `;
 
+// ── Sun photosphere shader — procedural granulation + limb darkening ──
+// fbm-based cell pattern that drifts slowly so the disc reads as a
+// roiling, convecting surface rather than a flat sprite. Colour ramps
+// from a hot white-yellow core toward orange limb (limb darkening), with
+// brighter "active region" highlights that breathe with uTime.
+const SUN_VERT = /* glsl */`
+    varying vec3 vNormalW;
+    varying vec3 vPosW;
+    varying vec3 vViewDirW;
+    void main() {
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vPosW    = wp.xyz;
+        vNormalW = normalize(mat3(modelMatrix) * normal);
+        vViewDirW = normalize(cameraPosition - wp.xyz);
+        gl_Position = projectionMatrix * viewMatrix * wp;
+    }
+`;
+const SUN_FRAG = /* glsl */`
+    precision highp float;
+    uniform float uTime;
+    uniform float uIntensity;
+    uniform vec3  uHot;
+    uniform vec3  uCool;
+    varying vec3  vNormalW;
+    varying vec3  vViewDirW;
+    varying vec3  vPosW;
+
+    // Hash + value-noise — cheap, no texture dependency.
+    float hash3(vec3 p) {
+        p = fract(p * 0.3183099 + vec3(0.71, 0.113, 0.419));
+        p *= 17.0;
+        return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+    }
+    float vnoise(vec3 p) {
+        vec3 i = floor(p), f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        float n000 = hash3(i + vec3(0.0, 0.0, 0.0));
+        float n100 = hash3(i + vec3(1.0, 0.0, 0.0));
+        float n010 = hash3(i + vec3(0.0, 1.0, 0.0));
+        float n110 = hash3(i + vec3(1.0, 1.0, 0.0));
+        float n001 = hash3(i + vec3(0.0, 0.0, 1.0));
+        float n101 = hash3(i + vec3(1.0, 0.0, 1.0));
+        float n011 = hash3(i + vec3(0.0, 1.0, 1.0));
+        float n111 = hash3(i + vec3(1.0, 1.0, 1.0));
+        return mix(
+            mix(mix(n000, n100, f.x), mix(n010, n110, f.x), f.y),
+            mix(mix(n001, n101, f.x), mix(n011, n111, f.x), f.y),
+            f.z);
+    }
+    float fbm(vec3 p) {
+        float a = 0.0, w = 0.5;
+        for (int i = 0; i < 5; i++) {
+            a += w * vnoise(p);
+            p *= 2.05;
+            w *= 0.5;
+        }
+        return a;
+    }
+
+    void main() {
+        // Granulation: scale up the surface position so cells are small
+        // relative to the disc, then drift with uTime to roil. A second
+        // FBM at half scale picks out broad active-region brightening.
+        vec3 p = normalize(vPosW) * 4.5;
+        float gran   = fbm(p + vec3(0.0, uTime * 0.04, 0.0));
+        float active = fbm(p * 0.6 + vec3(uTime * 0.02, 0.0, uTime * 0.015));
+        float surf   = mix(gran, active, 0.45);
+
+        // Limb darkening: the disc edge cools toward orange/red; the
+        // centre reads white-hot. Boost the darkening exponent slightly
+        // so users get the "convex 3D star" cue rather than a flat disc.
+        float NdV  = clamp(dot(normalize(vNormalW), normalize(vViewDirW)), 0.0, 1.0);
+        float limb = pow(NdV, 0.55);
+
+        // Active-region hotspots — breathing white-hot peaks. Squared
+        // contrast so they punch through the granulation noise.
+        float hotspot = smoothstep(0.62, 0.95, surf);
+        hotspot = pow(hotspot, 1.6);
+
+        // Colour blend: limb-darkened cool baseline, brightened by the
+        // FBM and lifted toward white at the hotspots.
+        vec3 base = mix(uCool, uHot, limb);
+        base += hotspot * vec3(0.55, 0.42, 0.18);
+        base *= 0.78 + 0.42 * surf;
+
+        // Subtle uIntensity scale (tied to F10.7) — quiet sun is a
+        // touch dimmer, cycle max is brighter and whiter.
+        base *= 0.85 + 0.45 * uIntensity;
+
+        gl_FragColor = vec4(base, 1.0);
+    }
+`;
+
+// ── Sun corona shader — multi-layer additive halo ─────────────────────
+// A fresnel-bright shell with FBM "streamer" filaments rotating slowly
+// around the disc. Used at three radii (chromosphere → mid corona →
+// outer corona) with different colours so the layered glow reads as
+// real depth rather than a single flat halo.
+const CORONA_VERT = /* glsl */`
+    varying vec3 vNormalW;
+    varying vec3 vViewDirW;
+    varying vec2 vUv;
+    void main() {
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vNormalW  = normalize(mat3(modelMatrix) * normal);
+        vViewDirW = normalize(cameraPosition - wp.xyz);
+        vUv       = uv;
+        gl_Position = projectionMatrix * viewMatrix * wp;
+    }
+`;
+const CORONA_FRAG = /* glsl */`
+    precision highp float;
+    uniform vec3  uColor;
+    uniform vec3  uRimColor;
+    uniform float uTime;
+    uniform float uIntensity;
+    uniform float uRimPower;
+    uniform float uBaseAlpha;
+    varying vec3  vNormalW;
+    varying vec3  vViewDirW;
+    varying vec2  vUv;
+
+    float hash3(vec3 p) {
+        p = fract(p * 0.3183099 + vec3(0.71, 0.113, 0.419));
+        p *= 17.0;
+        return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+    }
+    float vnoise(vec3 p) {
+        vec3 i = floor(p), f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        return mix(
+            mix(mix(hash3(i+vec3(0,0,0)), hash3(i+vec3(1,0,0)), f.x),
+                mix(hash3(i+vec3(0,1,0)), hash3(i+vec3(1,1,0)), f.x), f.y),
+            mix(mix(hash3(i+vec3(0,0,1)), hash3(i+vec3(1,0,1)), f.x),
+                mix(hash3(i+vec3(0,1,1)), hash3(i+vec3(1,1,1)), f.x), f.y),
+            f.z);
+    }
+    float fbm(vec3 p) {
+        float a = 0.0, w = 0.5;
+        for (int i = 0; i < 4; i++) {
+            a += w * vnoise(p);
+            p *= 2.1;
+            w *= 0.5;
+        }
+        return a;
+    }
+
+    void main() {
+        // Limb-bright fresnel — corona reads brightest at the silhouette.
+        float NdV  = abs(dot(normalize(vNormalW), normalize(vViewDirW)));
+        float fres = pow(1.0 - NdV, uRimPower);
+
+        // Rotating filament noise: creates the suggestion of corona
+        // streamers without modelling each one geometrically. The radial
+        // sample uses the surface normal so the filaments stay attached
+        // to the disc as it rotates.
+        vec3 p = normalize(vNormalW) * 3.2 + vec3(uTime * 0.03, 0.0, uTime * 0.05);
+        float fil = fbm(p);
+        // Sharpen the FBM into "ribbons" — power curve picks out brighter
+        // ridges and lets the rest fall away.
+        fil = pow(smoothstep(0.40, 0.95, fil), 1.4);
+
+        vec3 col = mix(uColor, uRimColor, fres);
+        col += fil * uRimColor * 0.55;
+
+        // Slow breathing pulse — overall corona modulation.
+        float pulse = 0.92 + 0.16 * sin(uTime * 0.5);
+
+        float alpha = (uBaseAlpha + fres * 0.55 + fil * 0.18) * pulse * uIntensity;
+        gl_FragColor = vec4(col, clamp(alpha, 0.0, 0.95));
+    }
+`;
+
 export class AtmosphereGlobe {
     /**
      * @param {HTMLCanvasElement} canvas
@@ -334,9 +538,34 @@ export class AtmosphereGlobe {
         this._buildLayerShells();
         this._buildLayerParticles();
         this._buildLayerVectorFields();
+        this._buildDragForecastOverlay();
+        this._buildFleetRibbons();
         this._buildSatelliteRings();
+        // Pairwise conjunction screener — depends on the probe lookup
+        // tables built inside _buildSatelliteRings, so we set up after.
+        this._setupConjunctionScreener();
+        // Hover-highlight reticle for the debris cloud. Built up-front
+        // (cheap; one mesh) so _updateDebrisHighlight has a target to
+        // poke at the moment a hover lands on a dot.
+        this._buildDebrisHighlight();
+        // Fire-and-forget live-TLE upgrade. Each probe starts on its
+        // hardcoded mean elements; the fetch resolves a few hundred ms
+        // later and patches the probe in place. Failures fall back
+        // silently to the hardcoded values.
+        this._fetchLiveTLEs().catch(err => {
+            console.debug('[upper-atmosphere] live TLE upgrade skipped:', err?.message || err);
+        });
+        // Background debris sample — 50 LEO debris pieces in the same
+        // altitude band as our assets, fetched from CelesTrak's debris
+        // SPECIAL list. Failures are silent; the page stays usable
+        // without debris context.
+        this._loadDebrisSample().catch(err => {
+            console.debug('[upper-atmosphere] debris load skipped:', err?.message || err);
+        });
         this._buildAltitudeRing();
+        this._buildAtmosphericPhenomena();
         this._buildSolarWind();
+        this._buildMagneticCascade();
         if (this.opts.stars) this._initStars();
         this._initControls();
         this._initResize();
@@ -361,6 +590,10 @@ export class AtmosphereGlobe {
             const sys = new LayerParticleSystem({
                 parent: this._particleGroup,
                 layer,
+                // Sun direction drives the per-particle thermospheric
+                // wind (subsolar→antisolar tangent flow). Stored on
+                // each system; setSunDir() can update it later.
+                sunDir: this._sunDir,
             });
             this._particles[layer.id] = sys;
         }
@@ -415,6 +648,121 @@ export class AtmosphereGlobe {
 
     getVectorFieldMode() { return this._fieldMode ?? 'off'; }
 
+    // ── Drag-forecast overlay ───────────────────────────────────────────────
+    // Particle flow-line view of LEO drag. Each layer carries its own
+    // population of tracers riding a sun-driven thermospheric wind proxy;
+    // colour encodes dρ/dt (red = drag rising, green = drag falling) so
+    // satellite operators can read the storm response at a glance. Built
+    // up-front (cheap) and toggled on by setDragForecastVisible().
+
+    _buildDragForecastOverlay() {
+        this._dragOverlay = new DragForecastOverlay(this._scene, {
+            sunDir: this._sunDir,
+            totalParticles: 1400,
+        });
+        // Per-layer ρ history → drag-delta. Maintained as a one-step
+        // rolling diff against the previous setProfile() / setState() push.
+        // _dragHistory[layerId] = { lastRho, lastT, dRhoDt }
+        this._dragHistory = {};
+        for (const layer of ATMOSPHERIC_LAYER_SCHEMA) {
+            this._dragHistory[layer.id] = { lastRho: NaN, lastT: NaN, dRhoDt: 0 };
+        }
+        this._dragHistorySmoothing = 0.30;   // EMA factor for dρ/dt
+    }
+
+    // ── Fleet ribbons ───────────────────────────────────────────────────
+    // Renders the top-N highest-severity tracked assets (managed by the
+    // FleetPanel) as colour-coded great-circle orbit lines in the scene.
+    // Built up-front; populated when FleetPanel calls setFleetRibbons().
+
+    _buildFleetRibbons() {
+        this._fleetRibbons = new FleetRibbons(this._scene);
+    }
+
+    /**
+     * Push the current top-N fleet results into the in-scene ribbon
+     * renderer. Pass an empty array to clear. Called by FleetPanel's
+     * onSeverityChange callback every analyzer pass.
+     */
+    setFleetRibbons(top) {
+        this._fleetRibbons?.setRibbons?.(Array.isArray(top) ? top : []);
+    }
+
+    setDragForecastVisible(v) {
+        if (this._dragOverlay) this._dragOverlay.setVisible(v);
+    }
+    getDragForecastVisible() {
+        return !!this._dragOverlay?.isVisible?.();
+    }
+
+    /**
+     * Latest drag-delta snapshot (read-only) — used by the UI legend
+     * to paint per-layer up/down arrows and percent-change figures.
+     * @returns {object} layerId → { rho, dRhoDt, dragQ }
+     */
+    getDragForecastSnapshot() {
+        const out = {};
+        for (const layer of ATMOSPHERIC_LAYER_SCHEMA) {
+            const h = this._dragHistory?.[layer.id];
+            const phys = this._lastFieldPhys?.[layer.id];
+            if (!h || !phys) continue;
+            // q = ½ρv² for a circular orbit at the layer peak. v is
+            // approximated as √(μ/(R+h)) with μ in km³/s²; converted to
+            // m²/s² before multiplying ρ (kg/m³) so q comes out in Pa.
+            const MU_KM3_S2 = 398600.4418;
+            const r_km = 6371 + layer.peakKm;
+            const v_ms = Math.sqrt(MU_KM3_S2 / r_km) * 1000;
+            const dragQ = 0.5 * (phys.rho ?? 0) * v_ms * v_ms;
+            out[layer.id] = {
+                rho:    phys.rho ?? 0,
+                dRhoDt: h.dRhoDt,
+                dragQ,
+            };
+        }
+        return out;
+    }
+
+    /** Internal: recompute per-layer dρ/dt from the freshly cached physics. */
+    _refreshDragHistory() {
+        const phys = this._lastFieldPhys;
+        if (!phys) return;
+        const now = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
+        const perLayer = {};
+        for (const layer of ATMOSPHERIC_LAYER_SCHEMA) {
+            const p = phys[layer.id]; if (!p) continue;
+            const rho = p.rho ?? 0;
+            const h = this._dragHistory[layer.id];
+            if (Number.isFinite(h.lastRho) && rho > 0 && h.lastRho > 0 && now > h.lastT) {
+                // Fractional change per minute → maps storm onset (~+30%
+                // density inflation in 1–3 hr) to ≈+0.5 to +1.0 on the
+                // overlay's red/green ramp. Symmetric on recovery.
+                const dt_min = Math.max(1 / 60, (now - h.lastT) / 60);
+                const fracPerMin = (rho - h.lastRho) / h.lastRho / dt_min;
+                // Normalise: ±2%/min ≈ saturated colour.
+                const norm = fracPerMin / 0.02;
+                // EMA smoothing so single noisy ticks don't strobe colour.
+                h.dRhoDt = (1 - this._dragHistorySmoothing) * h.dRhoDt
+                         + this._dragHistorySmoothing * norm;
+            }
+            h.lastRho = rho;
+            h.lastT   = now;
+            perLayer[layer.id] = { dRhoDt: h.dRhoDt, rho };
+        }
+        if (this._dragOverlay) {
+            this._dragOverlay.setDragHistory({
+                perLayer,
+                f107: this._lastFieldState?.f107,
+                ap:   this._lastFieldState?.ap,
+            });
+        }
+        // Broadcast for the UI panel to repaint its legend.
+        try {
+            window.dispatchEvent(new CustomEvent('ua-drag-forecast-tick', {
+                detail: this.getDragForecastSnapshot(),
+            }));
+        } catch (_) { /* SSR / no-window — ignore */ }
+    }
+
     /**
      * Per-layer visibility toggle — drives the gradient shell AND the
      * matching particle system together. Layer id matches
@@ -430,6 +778,16 @@ export class AtmosphereGlobe {
         // Particle system.
         const sys = this._particles?.[layerId];
         if (sys) sys.setVisible(v);
+        // Drag-forecast overlay: mirror the layer toggle so flow lines for
+        // hidden shells vanish too.
+        this._dragOverlay?.setLayerEnabled?.(layerId, v);
+        // Broadcast for any panel that paints per-layer state (drag legend
+        // dims muted rows).
+        try {
+            window.dispatchEvent(new CustomEvent('ua-layer-visibility', {
+                detail: { id: layerId, visible: v },
+            }));
+        } catch (_) { /* SSR / no-window — ignore */ }
     }
 
     /**
@@ -504,6 +862,10 @@ export class AtmosphereGlobe {
                 fld.setPhysics(phys, { f107, ap });
             }
         }
+
+        // Drag-forecast overlay: physics has just refreshed, so per-layer
+        // dρ/dt can be recomputed against the previous push and broadcast.
+        this._refreshDragHistory();
 
         if (this._currentAltKm != null) this.setAltitude(this._currentAltKm);
     }
@@ -597,17 +959,65 @@ export class AtmosphereGlobe {
                 sh.material.uniforms.uStorm.value = auroraAW;
             }
         }
+
+        // Drive the sun's emission visuals from F10.7 — corona glow,
+        // streamer brightness/length, core temperature.
+        this.setF107(f107);
+
+        // Refresh phenomena layer intensities (NLC, EEJ, AE rings, Sq).
+        this._updateAtmosphericPhenomena({ f107, ap });
+
+        // Drive the magnetic-field cascade — solar EUV + precipitation
+        // packets flowing down dipole L-shells into the auroral oval.
+        // Pass the live solar-wind state too so the cascade can:
+        //   • compress dayside / stretch nightside lines from Pdyn
+        //   • compute Φ_PC, FAC magnitude, HPI
+        //   • dispatch a 'ua-magnetic-state' event with operator-grade
+        //     headlines (HPI, Φ_PC, Lpp, FAC, oval edges, implications)
+        // Uses live IMF Bz when available; falls back to an Ap-derived
+        // proxy so storm presets still light up the reconnection cue.
+        if (this._cascade) {
+            this._cascade.setState({
+                f107, ap, bz,
+                speed:   this._swState?.speed,
+                density: this._swState?.density,
+                by:      this._swState?.by,
+            });
+        }
+
+        // Feed a substorm-index proxy into the controller's auto-
+        // trigger. We synthesise the index from the same drivers
+        // solar-wind-magnetosphere.js uses: an Ap-driven storm-norm
+        // plus a southward-Bz integrand. Climbing across 0.6 fires
+        // an auto-substorm if the controller is idle + past the
+        // refractory period.
+        if (this._substorm) {
+            const stormNorm = Math.max(0, Math.min(1, (ap - 12) / 200));
+            // Bz drive integrand — accumulates while Bz is southward,
+            // decays exponentially otherwise. Half-life ~30 sec wall-
+            // clock so a state push of southward Bz primes the next
+            // few sets of pushes (mirrors the real magnetosphere's
+            // memory of recent driving).
+            const bzS = Number.isFinite(bz)
+                ? Math.max(0, -bz / 20)        // 0 at +Bz, 1 at -20 nT
+                : stormNorm * 0.7;
+            this._bzDriveAccum = Math.max(0, Math.min(1,
+                0.85 * (this._bzDriveAccum || 0) + 0.45 * bzS));
+            const idx = Math.min(1, 0.55 * stormNorm + 0.65 * this._bzDriveAccum);
+            this._substorm.setSubstormIndex(idx);
+        }
     }
 
     /**
      * Toggle overlay groups.
      */
     setVisibility({ satellites = true, shells = true, solarWind = true,
-                    particles = true, vectorFields } = {}) {
+                    particles = true, vectorFields, cascade = true } = {}) {
         if (this._satGroup)      this._satGroup.visible      = satellites;
         if (this._shellGroup)    this._shellGroup.visible    = shells;
         if (this._swGroup)       this._swGroup.visible       = solarWind;
         if (this._particleGroup) this._particleGroup.visible = particles;
+        if (this._cascade)       this._cascade.setVisible(cascade);
         // vectorFields visibility is driven by the field MODE — passing
         // false explicitly here forces the whole group off without
         // changing the mode (a user-friendly "hide" without losing
@@ -633,7 +1043,15 @@ export class AtmosphereGlobe {
         const speed   = Number.isFinite(sw.speed)   ? sw.speed   : SW_DEFAULTS.speed;
         const density = Number.isFinite(sw.density) ? sw.density : SW_DEFAULTS.density;
         const bz      = Number.isFinite(sw.bz)      ? sw.bz      : SW_DEFAULTS.bz;
-        this._swState = { speed, density, bz };
+        const by      = Number.isFinite(sw.by)      ? sw.by      : 0;
+        this._swState = { speed, density, bz, by };
+
+        // Cascade geometry compresses dayside / stretches nightside
+        // lines under Pdyn — push the live state so the visual tracks
+        // the boundary motion the magnetopause is showing in parallel.
+        if (this._cascade) {
+            this._cascade.setSolarWindState({ speed, density, bz, by });
+        }
 
         const mp = computeShue(density, speed, bz);
         const bs = computeBowShock(mp.r0, mp.alpha);
@@ -693,7 +1111,17 @@ export class AtmosphereGlobe {
     dispose() {
         cancelAnimationFrame(this._raf);
         this._resizeObs?.disconnect();
-        this._controls?.dispose();
+        if (this._debrisRefreshTimer) {
+            clearInterval(this._debrisRefreshTimer);
+            this._debrisRefreshTimer = null;
+        }
+        if (this._debrisVisHandler && typeof document !== 'undefined') {
+            document.removeEventListener('visibilitychange', this._debrisVisHandler);
+            this._debrisVisHandler = null;
+        }
+        // CameraController owns OrbitControls + the WASD bindings; its
+        // dispose() unwinds both.
+        this._controls?.dispose?.();
         this._disposeHover?.();
         this._scene.traverse(o => {
             if (o.geometry) o.geometry.dispose?.();
@@ -730,9 +1158,17 @@ export class AtmosphereGlobe {
         this._camera = new THREE.PerspectiveCamera(40, aspect, 0.01, 1000);
         this._camera.position.set(0, 0.6, this.opts.cameraDistance);
 
-        // Sun direction — mostly from +X with a slight northern tilt.
-        // Used by EarthSkin and by subsequent setState() recomputations.
-        this._sunDir = new THREE.Vector3(1, 0.35, 0.2).normalize();
+        // Sun direction — derived from the actual sub-solar point at
+        // the current wall-clock time. The day-side terminator on the
+        // EarthSkin texture and the position of the Sun graphic in the
+        // solar-wind group both fall out of this vector, so the scene
+        // reflects the real Earth–Sun geometry at page-load. _animate()
+        // refreshes it every frame; that motion is genuinely glacial
+        // (≈15°/hour, the Earth's actual rotation rate relative to the
+        // Sun) so the camera reads as static while the geometry remains
+        // physically correct.
+        const ssp = subSolarPoint(new Date());
+        this._sunDir = _subSolarToVec3(ssp.lat, ssp.lon);
     }
 
     _buildEarth() {
@@ -792,6 +1228,7 @@ export class AtmosphereGlobe {
                     uStorm:     { value: 0 },
                     uSunDir:    { value: this._sunDir.clone() },
                     uSwForcing: { value: 0 },
+                    uFade:      { value: 1.0 },
                 },
                 transparent: true,
                 // BackSide: draws the far hemisphere when the camera is
@@ -827,13 +1264,27 @@ export class AtmosphereGlobe {
     }
 
     _buildSatelliteRings() {
-        this._satGroup = new THREE.Group();
-        this._satRings = [];
+        // Two-tier overlay:
+        //  • _satGroup     — flat reference rings at each altitude. The
+        //                    Kármán line (non-orbital) gets only this.
+        //  • _satProbeGrp  — moving sprites + inclined orbital paths for
+        //                    every entry that has an `orbital` block.
+        //
+        // The rings are kept around as zoomed-out "altitude shell"
+        // indicators; the sprites + paths render the actual inclined
+        // orbit at one period worth of points so users see the real
+        // geometry instead of a fictitious flat circle.
+        this._satGroup     = new THREE.Group();
+        this._satProbeGrp  = new THREE.Group();
+        this._satProbeGrp.name = 'satellite-probes';
+        this._satRings     = [];
+        this._satProbes    = {};      // id → { mesh, path, spec, _phase0 }
+
         for (const sat of SATELLITE_REFERENCES) {
             const r = 1 + sat.altitudeKm / R_EARTH_KM;
             // Slight tilt per ring so they don't all overlap on one plane.
             const tilt = (sat.altitudeKm % 31) * Math.PI / 180;
-            const ring = _ringMesh(r, 0.004, _hex(sat.color), 0.75);
+            const ring = _ringMesh(r, 0.004, _hex(sat.color), sat.orbital ? 0.45 : 0.75);
             ring.rotation.x = Math.PI / 2 + tilt * 0.05;
             ring.rotation.y = tilt * 0.8;
             ring.userData = {
@@ -845,8 +1296,1124 @@ export class AtmosphereGlobe {
             };
             this._satRings.push(ring);
             this._satGroup.add(ring);
+
+            // For orbital objects, also build a moving probe + an
+            // inclined orbital-path polyline.
+            if (sat.orbital) this._buildSatelliteProbe(sat);
         }
         this._scene.add(this._satGroup);
+        this._scene.add(this._satProbeGrp);
+    }
+
+    /**
+     * Build a moving satellite probe + an inclined orbital-path
+     * polyline for one SATELLITE_REFERENCES entry. The probe is
+     * tagged kind='sat-probe' (identical handling for every satellite)
+     * with `id` carrying the satellite key so click/tooltip can resolve
+     * the right spec.
+     *
+     * Orbital propagation uses the entry's mean elements directly —
+     * good enough for a "visualisation-grade" ground track. A live TLE
+     * fetch from /api/celestrak/tle can upgrade the elements after boot.
+     */
+    _buildSatelliteProbe(spec) {
+        const colorHex = _hex(spec.color);
+        const altKm    = spec.altitudeKm;
+        const r        = 1 + altKm / R_EARTH_KM;
+
+        // ── Probe LOD ────────────────────────────────────────────────
+        // Three tiers, swapped automatically by THREE.LOD based on
+        // camera distance to the probe (in scene units, where 1 = R⊕):
+        //
+        //   far   (≥ 0.9)  sphere + halo only — the original "dot" look
+        //                   from any zoomed-out camera position.
+        //   mid   (≥ 0.06) low-poly recognisable shape — solar panels,
+        //                   bus, antennas — readable from a few hundred
+        //                   km out (artistic scale).
+        //   near  (≥ 0)    the same shape (kept as a separate level so
+        //                   we can plug a higher-poly variant later).
+        //
+        // The LOD is the picker target — userData is set on it so a
+        // raycast against any of its children resolves up via the
+        // .parent chain in _initTooltip.
+        const lod = new THREE.LOD();
+        lod.userData = {
+            kind:    'sat-probe',
+            id:      spec.id,
+            name:    spec.name,
+            altKm,
+            color:   spec.color,
+            spec,
+            tooltip: spec.description ||
+                     'Click to fly the camera here. Drag pressure '
+                   + '≈ ½ρv² uses live ρ at the probe\'s current altitude.',
+        };
+
+        // Far tier: sphere + halo (original look). Wrapped in a Group
+        // so the halo stays a child and follows orientation cleanly.
+        const farGrp = new THREE.Group();
+        const sphere = new THREE.Mesh(
+            new THREE.SphereGeometry(0.012, 14, 10),
+            new THREE.MeshBasicMaterial({
+                color: colorHex, transparent: true, opacity: 1.0,
+            }),
+        );
+        const halo = new THREE.Mesh(
+            new THREE.SphereGeometry(0.026, 14, 10),
+            new THREE.MeshBasicMaterial({
+                color: colorHex, transparent: true, opacity: 0.25,
+                depthWrite: false, blending: THREE.AdditiveBlending,
+            }),
+        );
+        farGrp.add(sphere);
+        farGrp.add(halo);
+
+        // Mid + near tiers: recognisable model from satellite-models.js.
+        // The high-detail tier is currently identical to mid — kept
+        // separate so future poly-count work plugs in cleanly.
+        const midGrp = buildSatelliteModel(spec);
+        const nearGrp = buildSatelliteModelLow(spec);
+
+        // LOD distance thresholds. Three.js picks the highest-index
+        // level whose distance ≤ camera-to-LOD distance; smaller
+        // numbers = closer. With camera at ~3.2 R⊕ and probes at
+        // ~1.07 R⊕, the default view sees distance ≈ 2.1 → far tier.
+        // When the user flies to within ~0.3 R⊕ (≈ 2000 km artistic)
+        // we promote to mid; closer than 0.06 R⊕ (≈ 380 km) we render
+        // near. Tuned empirically — bump if the swap reads as a pop.
+        lod.addLevel(nearGrp, 0);
+        lod.addLevel(midGrp,  0.06);
+        lod.addLevel(farGrp,  0.30);
+
+        // Seed the probe's position on first paint at one orbital point
+        // so it's not stuck at origin until the first animate() tick.
+        lod.position.set(r, 0, 0);
+        this._satProbeGrp.add(lod);
+
+        // Keep `mesh` as the LOD object — _stepSatellites and the
+        // public APIs that read probe.mesh.position keep working.
+        const mesh = lod;
+
+        // ── Orbital-path polyline ─────────────────────────────────────
+        // 96 points around a full period — closed loop. Drawn in the
+        // same satellite-probe group so visibility stays in sync.
+        const N = 96;
+        const pathPts = new Float32Array(N * 3);
+        for (let k = 0; k < N; k++) {
+            const tFrac = k / N;
+            const p = _propagateKeplerian(spec.orbital, tFrac, r);
+            pathPts[k * 3 + 0] = p.x;
+            pathPts[k * 3 + 1] = p.y;
+            pathPts[k * 3 + 2] = p.z;
+        }
+        const pathGeo = new THREE.BufferGeometry();
+        pathGeo.setAttribute('position', new THREE.BufferAttribute(pathPts, 3));
+        const pathMat = new THREE.LineBasicMaterial({
+            color: colorHex,
+            transparent: true,
+            opacity: 0.55,
+            depthWrite: false,
+        });
+        const pathLine = new THREE.LineLoop(pathGeo, pathMat);
+        pathLine.userData = {
+            kind: 'sat-orbit-path', id: spec.id, name: `${spec.name} orbit`,
+            color: spec.color, altKm,
+            tooltip: `Real-period inclined orbit · i = ${spec.orbital.inclinationDeg}° · `
+                   + `period ≈ ${spec.orbital.periodMin.toFixed(1)} min · NORAD ${spec.orbital.noradId}`,
+        };
+        this._satProbeGrp.add(pathLine);
+
+        // Cache for per-frame propagation. _phase0 randomises the
+        // satellite's starting mean-anomaly so all four don't all start
+        // at M=0 simultaneously.
+        const probe = {
+            mesh, pathLine, spec,
+            _phase0: spec.orbital.meanAnomalyDeg0 * Math.PI / 180,
+            _propTable: null,        // populated immediately below
+        };
+        this._satProbes[spec.id] = probe;
+        // Pre-bake a phase-indexed position lookup so the conjunction
+        // screener can do O(1) lookups instead of trig calls per step.
+        // 256 samples = 1.4° angular resolution = ~22 s for an ~92-min
+        // orbit; fine enough for 30-s-step TCA finding.
+        this._buildProbeLookup(probe);
+    }
+
+    /**
+     * Pre-bake a 256-entry (x, y, z) Float32Array of probe positions
+     * sampled evenly around the orbital phase. Used by the conjunction
+     * screener — _lookupProbePosition turns simulated-time into a
+     * position via a single integer division + array read.
+     *
+     * Re-run after TLE upgrades (orbital elements change) so the
+     * lookup table stays consistent with the live mean elements.
+     */
+    _buildProbeLookup(probe) {
+        const N = 256;
+        if (!probe._propTable) probe._propTable = new Float32Array(N * 3);
+        const r = 1 + probe.spec.altitudeKm / R_EARTH_KM;
+        for (let k = 0; k < N; k++) {
+            const tFrac = k / N;
+            const p = _propagateKeplerian(probe.spec.orbital, tFrac, r);
+            probe._propTable[k * 3 + 0] = p.x;
+            probe._propTable[k * 3 + 1] = p.y;
+            probe._propTable[k * 3 + 2] = p.z;
+        }
+        probe._propTableN = N;
+    }
+
+    /**
+     * Fly the camera to one satellite probe by id. Falls through to
+     * the ISS probe if id is omitted (preserves the original
+     * .flyToISS() entry point). Auto-switches to fly mode so
+     * OrbitControls doesn't yank the camera back to planet centre
+     * mid-animation (the Phase 25 bug fix).
+     *
+     * Pass {follow:true} to engage real per-frame tracking — without
+     * it the camera just flies to where the satellite WAS at the
+     * moment of click, and the satellite then propagates away.
+     */
+    flyToSatellite(id = 'iss', durationSec = 1.6, { follow = false } = {}) {
+        const probe = this._satProbes?.[id];
+        if (!probe) return;
+        const pos = probe.mesh.position.clone();
+        // Offset behind the velocity-side of the probe so the camera
+        // sees it move forward through the layer.
+        const radial = pos.clone().normalize();
+        const offset = radial.multiplyScalar(0.18);
+        const target = pos.clone().add(offset);
+        if (this._controls.getMode?.() === 'orbit') {
+            this._controls.setMode('fly');
+        }
+        this.flyTo(target, pos, durationSec);
+        if (follow) {
+            // Engage follow after the flyTo's smoothstep completes —
+            // delay by the animation duration so the spring doesn't
+            // fight the fly-in.
+            setTimeout(() => {
+                if (this._satProbes?.[id]) this.followSatellite(id);
+            }, durationSec * 1000);
+        }
+    }
+
+    /**
+     * Engage per-frame follow on a satellite. The camera tracks the
+     * probe's mesh.position (which is updated every frame by the SGP4
+     * propagator) — so the operator sees the target stay fixed in
+     * view while the world rotates past underneath.
+     */
+    followSatellite(id) {
+        const probe = this._satProbes?.[id];
+        if (!probe?.mesh) return;
+        this._controls.followObject?.(() => probe.mesh.position);
+        this._followId = { kind: 'sat', id };
+    }
+
+    /** Stop any active follow (mode + flyTo unchanged). */
+    stopFollowing() {
+        this._controls.stopFollowing?.();
+        this._followId = null;
+    }
+    isFollowing() { return !!this._controls.isFollowing?.(); }
+    getFollowTarget() { return this._followId ?? null; }
+
+    /** Reset camera to a default home view. Drops any active follow. */
+    resetCameraView() { this._controls.resetView?.(); this._followId = null; }
+    /** Snap to top-down (polar) view. */
+    cameraTopView()   { this._controls.flyToTopView?.(); this._followId = null; }
+
+    /** Backwards-compatible wrapper retained for the existing UI button. */
+    flyToISS(durationSec = 1.6) {
+        return this.flyToSatellite('iss', durationSec);
+    }
+    /** New: follow ISS (default click target for the HUD's "Visit ISS"). */
+    followISS() {
+        if (this._controls.getMode?.() === 'orbit') this._controls.setMode('fly');
+        return this.flyToSatellite('iss', 1.6, { follow: true });
+    }
+
+    /**
+     * Fly the camera to a specific debris piece by index. Position
+     * comes from the cloud's flat position buffer (not a per-piece
+     * mesh) since debris are rendered as a single THREE.Points draw
+     * call. Also auto-switches into fly mode so the camera anim
+     * doesn't get clamped back to the planet centre by OrbitControls.
+     */
+    flyToDebris(idx, durationSec = 1.6, { follow = false } = {}) {
+        if (!this._debrisPositions || !this._debris?.[idx]) return;
+        const p = this._debrisPositions;
+        const o = idx * 3;
+        const debrisPos = new THREE.Vector3(p[o], p[o + 1], p[o + 2]);
+        const radial = debrisPos.clone().normalize();
+        const offset = radial.multiplyScalar(0.18);
+        const target = debrisPos.clone().add(offset);
+        if (this._controls.getMode?.() === 'orbit') {
+            this._controls.setMode('fly');
+        }
+        this.flyTo(target, debrisPos, durationSec);
+        if (follow) {
+            // Debris positions live in a packed Float32Array updated
+            // every frame by the catalog propagator. The follow callback
+            // reads the live offset each frame — so the camera tracks
+            // even rapidly-tumbling LEO fragments.
+            setTimeout(() => this.followDebris(idx), durationSec * 1000);
+        }
+    }
+
+    /** Engage per-frame follow on a debris piece by index. */
+    followDebris(idx) {
+        if (!this._debrisPositions || !this._debris?.[idx]) return;
+        const p = this._debrisPositions;
+        const o = idx * 3;
+        const tmp = new THREE.Vector3();
+        this._controls.followObject?.(() => {
+            tmp.set(p[o], p[o + 1], p[o + 2]);
+            return tmp;
+        });
+        this._followId = { kind: 'debris', idx };
+    }
+
+    /**
+     * Upgrade every orbital probe from hardcoded mean elements to the
+     * live TLE for that NORAD ID. Hits the same /api/celestrak/tle
+     * Edge proxy that the rest of the repo uses; the proxy parses the
+     * raw TLE into { inclination, raan, arg_perigee, mean_anomaly,
+     * mean_motion, eccentricity, epoch, period_min, ... } so we don't
+     * need to parse anything ourselves.
+     *
+     * Per satellite:
+     *   1. Fetch /api/celestrak/tle?norad=<id>
+     *   2. Compute the *current* mean anomaly:
+     *        M_now = M_epoch + n · (now − epoch)
+     *      where n is the mean motion in rad/s. This pins the probe
+     *      to its real orbital position at page-boot time; subsequent
+     *      per-frame propagation continues from there.
+     *   3. Replace the spec.orbital block in place + rebuild the
+     *      orbital-path polyline geometry from the new elements so
+     *      visual track + sprite stay coherent.
+     *
+     * Doesn't apply J2 secular drift to RAAN/argP between epoch and
+     * now — for typical TLEs <1 day old this is sub-degree on RAAN
+     * for ISS, fine for visual-grade fidelity. A future round can
+     * add the Brouwer-Lyddane secular terms if the precision matters.
+     *
+     * Concurrent fetches via Promise.allSettled — one slow satellite
+     * doesn't block the others. Returns the count of upgraded probes
+     * for the UI's freshness indicator.
+     */
+    async _fetchLiveTLEs() {
+        if (!this._satProbes) return 0;
+        const probes = Object.values(this._satProbes)
+            .filter(p => p.spec?.orbital?.noradId);
+
+        const fetchOne = async (probe) => {
+            const id = probe.spec.orbital.noradId;
+            const ctl = new AbortController();
+            const t = setTimeout(() => ctl.abort(), 4000);
+            try {
+                const r = await fetch(`/api/celestrak/tle?norad=${id}`, {
+                    signal: ctl.signal,
+                    headers: { Accept: 'application/json' },
+                });
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                const data = await r.json();
+                const sat = data?.satellites?.[0];
+                if (!sat) throw new Error('no satellites in response');
+                this._upgradeProbeFromTLE(probe, sat);
+                return { id: probe.spec.id, ok: true };
+            } catch (err) {
+                return { id: probe.spec.id, ok: false, err };
+            } finally {
+                clearTimeout(t);
+            }
+        };
+
+        const results = await Promise.allSettled(probes.map(fetchOne));
+        const ok = results.filter(r => r.value?.ok).length;
+        // Stash a manifest so the UI's freshness pill knows what's live
+        // vs fallback. window event so the UI module doesn't need an
+        // explicit hook into globe internals.
+        this._tleSummary = {
+            total:    probes.length,
+            live:     ok,
+            fetchedAt: Date.now(),
+        };
+        try {
+            window.dispatchEvent(new CustomEvent('ua-tle-update',
+                { detail: this._tleSummary }));
+        } catch (_) { /* SSR / no-window — ignore */ }
+        return ok;
+    }
+
+    /**
+     * Apply one parsed TLE to one probe in place. Splits out from the
+     * fetch loop so unit tests / future scheduled-refresh paths can
+     * call it directly with a mock element set.
+     *
+     * @param {object} probe   from this._satProbes[id]
+     * @param {object} sat     parsed CelesTrak entry — see
+     *                         api/celestrak/tle.js parseSingleTle()
+     */
+    _upgradeProbeFromTLE(probe, sat) {
+        const orb = probe.spec.orbital;
+        const epochMs = Date.parse(sat.epoch);
+        if (!Number.isFinite(epochMs)) return;
+
+        // Mean motion: rev/day → rad/s.
+        const n_rad_s = (sat.mean_motion * 2 * Math.PI) / 86400;
+        const dtSec = (Date.now() - epochMs) / 1000;
+        // Wrap to [0, 2π) so the propagator's tFrac stays clean.
+        let M_now_rad = (sat.mean_anomaly * Math.PI / 180) + n_rad_s * dtSec;
+        const TAU = 2 * Math.PI;
+        M_now_rad = ((M_now_rad % TAU) + TAU) % TAU;
+
+        // Patch the orbital element block. Keep noradId; replace the
+        // mean elements + period from the live TLE.
+        orb.inclinationDeg   = sat.inclination;
+        orb.raanDeg          = sat.raan;
+        orb.argPerigeeDeg    = sat.arg_perigee;
+        orb.eccentricity     = sat.eccentricity;
+        orb.meanAnomalyDeg0  = M_now_rad * 180 / Math.PI;
+        orb.periodMin        = sat.period_min;
+
+        // Update the average altitude from apogee/perigee — used by
+        // the orbital-path polyline radius and the static ring. For
+        // near-circular orbits this is essentially unchanged; for
+        // eccentric orbits this is a sensible "shell" altitude.
+        const meanAltKm = (sat.apogee_km + sat.perigee_km) / 2;
+        if (Number.isFinite(meanAltKm) && meanAltKm > 0) {
+            probe.spec.altitudeKm = Math.round(meanAltKm);
+        }
+
+        // Reset the per-frame phase to "now" — propagation in
+        // _stepSatellites uses _phase0 as the M at elapsedSec=0.
+        probe._phase0 = M_now_rad;
+
+        // Carry the source + epoch into the probe's userData so the
+        // tooltip + drag panel can show TLE freshness.
+        if (probe.mesh?.userData) {
+            probe.mesh.userData.tleSource = 'live';
+            probe.mesh.userData.tleEpoch  = sat.epoch;
+        }
+
+        // Stash the raw TLE lines on the probe so the trajectory
+        // analyzer can run SGP4 directly without a second fetch.
+        if (sat.line1 && sat.line2) {
+            probe.tleLines = { line1: sat.line1, line2: sat.line2, epoch: sat.epoch };
+        }
+
+        // Rebuild the orbital-path polyline from the new elements.
+        this._refreshOrbitalPath(probe);
+        // And the conjunction-screener lookup table — its sampling is
+        // tied to the orbital elements, so a TLE update means stale
+        // entries until we regenerate.
+        this._buildProbeLookup(probe);
+    }
+
+    /**
+     * Re-sample the orbital-path polyline for one probe using its
+     * current spec.orbital. Cheap (96 points, no allocations) so
+     * we can call it any time elements change.
+     */
+    _refreshOrbitalPath(probe) {
+        const path = probe.pathLine;
+        if (!path) return;
+        const positions = path.geometry.attributes.position.array;
+        const N = positions.length / 3;
+        const r = 1 + probe.spec.altitudeKm / R_EARTH_KM;
+        for (let k = 0; k < N; k++) {
+            const tFrac = k / N;
+            const p = _propagateKeplerian(probe.spec.orbital, tFrac, r);
+            positions[k * 3 + 0] = p.x;
+            positions[k * 3 + 1] = p.y;
+            positions[k * 3 + 2] = p.z;
+        }
+        path.geometry.attributes.position.needsUpdate = true;
+        path.geometry.computeBoundingSphere();
+    }
+
+    /**
+     * Read the live-TLE summary set by _fetchLiveTLEs. Returns
+     * { total, live, fetchedAt } or null if no fetch has resolved yet.
+     * UI uses this to paint the "Live TLE · 2h ago" freshness pill.
+     */
+    /**
+     * Lookup raw TLE lines for one tracked probe by id, if they were
+     * fetched live. Returns null when the probe is still on fallback
+     * mean elements or the spec has no NORAD ID.
+     */
+    getProbeTle(id) {
+        const probe = this._satProbes?.[id];
+        return probe?.tleLines || null;
+    }
+
+    /**
+     * Lightweight metadata bundle for the trajectory analyzer.
+     */
+    getProbeMeta(id) {
+        const probe = this._satProbes?.[id];
+        if (!probe) return null;
+        return {
+            id,
+            name:    probe.spec.name,
+            color:   probe.spec.color,
+            altKm:   probe.spec.altitudeKm,
+            noradId: probe.spec.orbital?.noradId,
+            inclinationDeg: probe.spec.orbital?.inclinationDeg,
+            tleLines: probe.tleLines || null,
+        };
+    }
+
+    // ── Live-catalog overlay (full active + debris cloud) ────────────────
+    // Lazy-instantiated on the first enableCatalogGroup() call. Reuses the
+    // shared SatelliteTracker class — its Rust-WASM SGP4 batch path handles
+    // tens of thousands of objects per frame. We attach it under the same
+    // scene as the rest of the globe so day/night and atmosphere cohorts
+    // stay aligned.
+    async enableCatalogGroup(group) {
+        const tracker = await this._ensureCatalogTracker();
+        if (!tracker) return { ok: false, reason: 'tracker init failed' };
+        try {
+            const added = await tracker.loadGroup(group);
+            return { ok: true, count: added ?? 0, total: tracker._satellites.length };
+        } catch (err) {
+            return { ok: false, reason: String(err?.message || err) };
+        }
+    }
+
+    /** Hide / forget one catalog group. */
+    disableCatalogGroup(group) {
+        const t = this._catalogTracker;
+        if (!t) return false;
+        // SatelliteTracker doesn't expose a per-group remove that
+        // truly drops slots; the cheap operation is to toggle visibility.
+        // Slots stay registered (cheap on the WASM side) but are not drawn.
+        if (t._groups?.has?.(group)) {
+            t.setGroupVisible?.(group, false);
+        }
+        return true;
+    }
+
+    /** Re-show a previously disabled group without re-fetching. */
+    showCatalogGroup(group) {
+        const t = this._catalogTracker;
+        if (!t) return false;
+        t.setGroupVisible?.(group, true);
+        return true;
+    }
+
+    /** Snapshot of catalog state — used by the toggle-bar status line. */
+    getCatalogStatus() {
+        const t = this._catalogTracker;
+        if (!t) return { total: 0, groups: [] };
+        return {
+            total: t._satellites?.length || 0,
+            groups: Array.from(t._groups || []).map(([name, info]) => ({
+                name, count: info.count, visible: info.visible !== false,
+            })),
+        };
+    }
+
+    async _ensureCatalogTracker() {
+        if (this._catalogTracker) return this._catalogTracker;
+        if (this._catalogTrackerLoading) return this._catalogTrackerLoading;
+        this._catalogTrackerLoading = (async () => {
+            try {
+                const mod = await import('./satellite-tracker.js');
+                // Earth radius = 1 in scene units; tracker handles km→scene.
+                // showOrbits=false avoids per-sat orbit-trail meshes (we
+                // do that on the named refs instead).
+                const tracker = new mod.SatelliteTracker(this._scene, 1.0, {
+                    maxSatellites: 35000,
+                    showOrbits: false,
+                });
+                // Make tracker points clickable for analysis. The
+                // tracker rebuilds its Points mesh on each add-sats batch,
+                // so we keep `_extraHittable` in sync with the live mesh
+                // instead of appending stale references.
+                this._catalogTracker = tracker;
+                this._extraHittable = this._extraHittable || [];
+                const syncHittable = () => {
+                    // Drop any prior catalog mesh and patch in the current
+                    // one. Other hittables (debris cloud, satellite
+                    // probes) live under different mesh refs so we only
+                    // touch the one tagged as the tracker's points mesh.
+                    this._extraHittable = this._extraHittable.filter(
+                        o => o.userData?.kind !== 'catalog-cloud'
+                    );
+                    if (tracker._pointsMesh) {
+                        tracker._pointsMesh.userData = tracker._pointsMesh.userData || {};
+                        tracker._pointsMesh.userData.kind = 'catalog-cloud';
+                        this._extraHittable.push(tracker._pointsMesh);
+                    }
+                };
+                syncHittable();
+                window.addEventListener('satellites-loaded', syncHittable);
+                return tracker;
+            } catch (err) {
+                console.warn('[upper-atmosphere] catalog tracker init failed:', err);
+                this._catalogTrackerLoading = null;
+                return null;
+            }
+        })();
+        return this._catalogTrackerLoading;
+    }
+
+    /** Resolve a catalog raycast hit to a sat record (TLE + name + alt). */
+    _resolveCatalogHit(hit) {
+        const t = this._catalogTracker;
+        if (!t || !hit || hit.object !== t._pointsMesh) return null;
+        const sat = t._satellites?.[hit.index];
+        if (!sat) return null;
+        return {
+            kind:   'catalog-point',
+            id:     `catalog-${sat.tle?.norad_id ?? hit.index}`,
+            name:   sat.tle?.name || `NORAD ${sat.tle?.norad_id ?? '—'}`,
+            altKm:  sat.alt,
+            color:  '#0cc',
+            noradId: sat.tle?.norad_id,
+            line1:  sat.tle?.line1,
+            line2:  sat.tle?.line2,
+            tooltip: `Click to analyze trajectory · alt ${(sat.alt ?? 0).toFixed(0)} km`,
+        };
+    }
+
+    getTleSummary() {
+        return this._tleSummary || null;
+    }
+
+    // ── LEO debris cloud ──────────────────────────────────────────────────
+    //
+    // Background hazards drawn as a single THREE.Points cloud (one
+    // draw call regardless of count). Each piece is propagated with
+    // the same phase-indexed lookup-table machinery the named probes
+    // use. They feed the conjunction screener so the asset-vs-debris
+    // risk surfaces in the panel.
+    //
+    // Visualization-grade only — operational risk modelling needs the
+    // full ~30k-object catalog (see js/satellite-tracker.js). 50 dots
+    // gives users visible LEO context without the Kessler-syndrome
+    // cost of a quadratic 4-asset × 30k debris screen.
+
+    async _loadDebrisSample({ count = 850 } = {}) {
+        // Strategy: balanced per-event fetch with FY-1C heavily represented
+        // (it's the largest debris-generating event in history and the
+        // most distinctive visual signature in LEO). The previous random-
+        // pick from the composite group under-sampled FY-1C; the new path
+        // pulls each per-event group separately and applies quotas.
+        //
+        // Total ≈ 850 dots: 350 FY-1C + 200 C-1408 + 150 IR-33 + 150 C-2251.
+        // Each fragment is propagated client-side from real CelesTrak mean
+        // elements via the same lookup-table propagator the named probes
+        // use, so positions are real-time and tick at the simulated-time
+        // rate the user has selected.
+        let records = null;
+        let byEvent = null;
+        let fetchedAt = null;
+        try {
+            const result = await fetchDebrisByEvent({
+                altMinKm: 200, altMaxKm: 1600,
+                quotas: this._debrisQuotas || undefined,
+            });
+            records   = result.records;
+            byEvent   = result.byEvent;
+            fetchedAt = result.fetchedAt;
+        } catch (err) {
+            console.debug('[upper-atmosphere] balanced debris fetch failed, falling back to composite:',
+                err?.message || err);
+            // Fallback path keeps the page useful when one of the four
+            // per-event groups is rate-limited or rolling. Random sample
+            // from the composite, same shape as before.
+            try {
+                records = await fetchDebrisSample({ count, altMinKm: 250, altMaxKm: 1500 });
+            } catch (err2) {
+                console.debug('[upper-atmosphere] composite debris fetch also failed:',
+                    err2?.message || err2);
+                return;
+            }
+        }
+        if (!records?.length) return;
+
+        // Build one probe entry per debris record. Each gets:
+        //   • Spec block with orbital + epoch
+        //   • _phase0 set to *current* M (M_epoch + n·dt) so the dot
+        //     starts where it should be in real-world right now.
+        //   • _propTable for O(1) screener lookup.
+        // They live in this._debris (parallel to _satProbes) so they
+        // don't pollute satellite drag analysis or the named-probe
+        // tooltip pipeline.
+        const debris = [];
+        for (const rec of records) {
+            const probe = this._buildDebrisProbe(rec);
+            if (probe) debris.push(probe);
+        }
+        this._debris = debris;
+        if (!debris.length) return;
+
+        this._debrisFetchedAt = fetchedAt ?? Date.now();
+        this._buildDebrisCloud(debris);
+
+        // Re-screen now that we have debris in scope.
+        this._screenConjunctions();
+        try {
+            window.dispatchEvent(new CustomEvent('ua-debris-update', {
+                detail: {
+                    count:     debris.length,
+                    byEvent:   byEvent || null,
+                    fetchedAt: this._debrisFetchedAt,
+                },
+            }));
+        } catch (_) { /* SSR / no-window — ignore */ }
+
+        // Schedule a periodic refresh so the cloud tracks the live 18 SDS
+        // catalog as TLEs are republished (~every 8 h). A 1-hour cadence
+        // catches new fragments and updated mean elements without
+        // hammering the edge cache. Only schedule once.
+        this._scheduleDebrisRefresh();
+    }
+
+    /**
+     * Periodic refresh: re-pull the per-event debris catalog every
+     * `_debrisRefreshMs` (default 1 h) and rebuild the cloud in place.
+     * Cheap because the propagator's _phase0 is recomputed from the
+     * fresh epoch — so the cloud snaps to real-world positions with no
+     * drift on each refresh, and continues propagating in real time
+     * between refreshes.
+     */
+    _scheduleDebrisRefresh() {
+        if (this._debrisRefreshTimer) return;
+        const interval = this._debrisRefreshMs ?? 60 * 60 * 1000;
+        this._debrisRefreshTimer = setInterval(() => {
+            // Avoid refreshing while the tab is hidden; resumes on
+            // visibilitychange below.
+            if (typeof document !== 'undefined' && document.hidden) return;
+            this._refreshDebrisSample().catch(err =>
+                console.debug('[upper-atmosphere] debris refresh failed:',
+                    err?.message || err));
+        }, interval);
+
+        // Trigger a refresh on focus when stale (>30 min) so users
+        // returning to the tab see fresh debris without waiting for the
+        // next interval tick.
+        if (typeof document !== 'undefined' && !this._debrisVisHandler) {
+            this._debrisVisHandler = () => {
+                if (document.hidden) return;
+                const ageMs = Date.now() - (this._debrisFetchedAt || 0);
+                if (ageMs > 30 * 60 * 1000) {
+                    this._refreshDebrisSample().catch(() => {});
+                }
+            };
+            document.addEventListener('visibilitychange', this._debrisVisHandler);
+        }
+    }
+
+    /**
+     * Re-fetch the per-event debris catalog and rebuild the cloud. Called
+     * on the periodic refresh tick and on tab-refocus when the cache is
+     * stale. Idempotent — safe to call repeatedly.
+     */
+    async _refreshDebrisSample() {
+        let result;
+        try {
+            result = await fetchDebrisByEvent({
+                altMinKm: 200, altMaxKm: 1600,
+                quotas: this._debrisQuotas || undefined,
+            });
+        } catch {
+            return;
+        }
+        if (!result?.records?.length) return;
+
+        const debris = [];
+        for (const rec of result.records) {
+            const probe = this._buildDebrisProbe(rec);
+            if (probe) debris.push(probe);
+        }
+        if (!debris.length) return;
+        this._debris = debris;
+        this._debrisFetchedAt = result.fetchedAt;
+        this._buildDebrisCloud(debris);
+        this._screenConjunctions();
+        try {
+            window.dispatchEvent(new CustomEvent('ua-debris-update', {
+                detail: {
+                    count:     debris.length,
+                    byEvent:   result.byEvent || null,
+                    fetchedAt: this._debrisFetchedAt,
+                    refresh:   true,
+                },
+            }));
+        } catch (_) {}
+    }
+
+    /**
+     * Build one debris probe from a parsed CelesTrak record. Computes
+     * M_now from epoch + mean motion (same convention as
+     * _upgradeProbeFromTLE), bakes the lookup table, and returns the
+     * probe entry. Returns null when the record has bogus elements.
+     */
+    _buildDebrisProbe(rec) {
+        const orb = rec.orbital;
+        const epochMs = orb.epoch ? Date.parse(orb.epoch) : NaN;
+        if (!Number.isFinite(epochMs) || !Number.isFinite(orb.meanMotionRevPerDay)) {
+            return null;
+        }
+        const n_rad_s = (orb.meanMotionRevPerDay * 2 * Math.PI) / 86400;
+        const dtSec   = (Date.now() - epochMs) / 1000;
+        const TAU = 2 * Math.PI;
+        let M_now = (orb.meanAnomalyDeg0 * Math.PI / 180) + n_rad_s * dtSec;
+        M_now = ((M_now % TAU) + TAU) % TAU;
+
+        // Family + size attribution. The catalog assigns:
+        //   _family   — known fragmentation event or generic-debris
+        //   _size     — small / medium / large (mass + RCS estimate)
+        //   _hazardMJ — kinetic energy at typical LEO closing speed
+        // Used downstream by the debris cloud (per-vertex color),
+        // tooltips, and the family roll-up panel.
+        const annot = annotateDebris(rec);
+
+        const probe = {
+            spec: {
+                id: rec.id,
+                name: rec.name,
+                // Override the engine's generic pink with the family
+                // color so the cloud reads as "debris by source event".
+                color: annot.family.color,
+                altitudeKm: rec.altitudeKm,
+                orbital: { ...orb, meanAnomalyDeg0: M_now * 180 / Math.PI },
+            },
+            _phase0: M_now,
+            _propTable: null,
+            _propTableN: 0,
+            _kind: 'debris',
+            _family: annot.family,
+            _size:   annot.size,
+            _hazardMJ: annot.hazardMJ,
+            mesh: null,           // debris are points in a shared cloud, not individual meshes
+        };
+        this._buildProbeLookup(probe);
+        return probe;
+    }
+
+    /**
+     * Build a single THREE.Points cloud for the debris. One draw call
+     * regardless of count; per-frame _stepDebris updates positions
+     * from the cached lookup tables.
+     */
+    _buildDebrisCloud(debris) {
+        const N = debris.length;
+        const positions = new Float32Array(N * 3);
+        // Per-vertex color: each debris point inherits its family's
+        // signature color from debris-catalog.js. The PointsMaterial
+        // is set to vertexColors so the cloud reads as a heatmap of
+        // source events instead of a uniform pink swarm.
+        const colors    = new Float32Array(N * 3);
+        // Per-vertex point size — large rocket bodies render bigger
+        // than small ASAT shrapnel, giving a visual hazard hierarchy.
+        const sizes     = new Float32Array(N);
+
+        // Seed with current positions so first paint isn't at origin.
+        const ts = this.opts.satTimeScale ?? this.opts.issTimeScale ?? 60;
+        const tNowSim = (this._clock?.getElapsedTime?.() ?? 0) * ts;
+        const _tmpColor = new THREE.Color();
+        for (let i = 0; i < N; i++) {
+            const p = _lookupProbePosition(debris[i], tNowSim);
+            positions[i * 3]     = p.x;
+            positions[i * 3 + 1] = p.y;
+            positions[i * 3 + 2] = p.z;
+
+            const fam = debris[i]._family;
+            _tmpColor.set(fam?.color || '#ff7099');
+            colors[i * 3]     = _tmpColor.r;
+            colors[i * 3 + 1] = _tmpColor.g;
+            colors[i * 3 + 2] = _tmpColor.b;
+
+            sizes[i] = debris[i]._size?.pointPx ?? 0.014;
+        }
+        const geom = new THREE.BufferGeometry();
+        geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geom.setAttribute('color',    new THREE.BufferAttribute(colors, 3));
+        const mat = new THREE.PointsMaterial({
+            vertexColors: true,
+            // 2.4× the previous size so the cloud reads as "hazard" at the
+            // default 3.2 Earth-radii camera distance instead of needing
+            // the user to zoom in.
+            size:         0.034,
+            sizeAttenuation: true,
+            transparent: true,
+            // Bumped opacity so the additive blend doesn't wash the dots
+            // out against the day-side Earth.
+            opacity:     1.0,
+            depthWrite:  false,
+            blending:    THREE.AdditiveBlending,
+        });
+        if (this._debrisCloud) {
+            // Re-load: dispose the old.
+            this._satProbeGrp?.remove(this._debrisCloud);
+            this._debrisCloud.geometry.dispose();
+            this._debrisCloud.material.dispose();
+        }
+        this._debrisCloud = new THREE.Points(geom, mat);
+        this._debrisCloud.frustumCulled = false;
+        this._debrisCloud.userData = {
+            kind: 'debris-cloud',
+            id:   'debris',
+            name: `LEO debris sample (n=${N})`,
+            tooltip: 'Random sample of CelesTrak debris in the 350–900 km '
+                   + 'altitude band. Visualization context only — full '
+                   + 'risk modelling needs the complete catalog.',
+        };
+        this._debrisPositions = positions;
+        this._satProbeGrp.add(this._debrisCloud);
+    }
+
+    /**
+     * Per-frame debris position update. Uses the same simulated-time
+     * axis as _stepSatellites so debris and assets stay coherent.
+     */
+    _stepDebris(t) {
+        if (!this._debris?.length || !this._debrisPositions) return;
+        const ts = this.opts.satTimeScale ?? this.opts.issTimeScale ?? 60;
+        const tNowSim = t * ts;
+        const pos = this._debrisPositions;
+        for (let i = 0; i < this._debris.length; i++) {
+            const p = _lookupProbePosition(this._debris[i], tNowSim);
+            const o = i * 3;
+            pos[o]     = p.x;
+            pos[o + 1] = p.y;
+            pos[o + 2] = p.z;
+        }
+        this._debrisCloud.geometry.attributes.position.needsUpdate = true;
+    }
+
+    /** Count of currently-tracked debris pieces. UI uses this for the
+     *  panel header. Returns 0 if the fetch hasn't resolved yet. */
+    getDebrisCount() { return this._debris?.length ?? 0; }
+
+    /**
+     * Roll-up of the loaded debris sample by source-event family.
+     * Each entry is { family, count, mediumEnergyMJ }, sorted by count
+     * desc. Used by the Debris Families UI panel.
+     */
+    getDebrisFamilyBreakdown() {
+        return summariseByFamily(this._debris || []);
+    }
+
+    /**
+     * Returns metadata for the i-th debris piece — used by the tooltip
+     * pipeline (which has the index from the picked vertex). The
+     * shape mirrors what the conjunction-watch row needs:
+     *   { name, noradId, altKm, family:{id,name,color,year},
+     *     size:{class,rangeM,massKg}, hazardMJ }
+     */
+    getDebrisMetaByIndex(idx) {
+        const d = this._debris?.[idx];
+        if (!d) return null;
+        return {
+            name:      d.spec.name,
+            noradId:   d.spec.orbital?.noradId,
+            altKm:     d.spec.altitudeKm,
+            family:    d._family
+                ? { id: d._family.id, name: d._family.name,
+                    color: d._family.color, year: d._family.year }
+                : null,
+            size:      d._size
+                ? { class: d._size.class, rangeM: d._size.rangeM,
+                    massKg: d._size.massKg }
+                : null,
+            hazardMJ:  d._hazardMJ ?? 0,
+        };
+    }
+
+    // ── Constellation overlays ───────────────────────────────────────────
+    //
+    // Render one or more major constellations as faint distinct point
+    // clouds. Each constellation gets its own THREE.Points so toggling
+    // is a single mesh.visible flip. Positions come from
+    // constellation-catalog.js's spawnConstellationPositions(), which
+    // synthesises Walker-Delta element sets — no live TLE fetch.
+    //
+    // Operational modelling needs the live catalog (see
+    // js/satellite-tracker.js); these overlays exist purely to give
+    // the user spatial intuition for "where do the big constellations
+    // live, relative to my orbit + the debris clouds."
+
+    /**
+     * Toggle a constellation overlay on/off. Lazily builds the cloud
+     * on first enable and caches it; subsequent toggles are O(1). When
+     * the constellation has a `.meo: true` flag (GPS / Galileo /
+     * GLONASS / BeiDou), the cloud is built but the camera distance
+     * may need expanding to see it — we don't move the camera here.
+     *
+     * @param {string} id          constellation id (see CONSTELLATIONS)
+     * @param {boolean} visible
+     * @returns {boolean}          whether the call succeeded
+     */
+    setConstellationVisible(id, visible) {
+        const c = CONSTELLATIONS.find(c => c.id === id);
+        if (!c) return false;
+        this._constellationClouds = this._constellationClouds || {};
+        let cloud = this._constellationClouds[id];
+        if (!cloud && visible) {
+            cloud = this._buildConstellationCloud(c);
+            this._constellationClouds[id] = cloud;
+        }
+        if (cloud) cloud.cloud.visible = visible;
+        return true;
+    }
+
+    /** Returns a list of constellation ids currently visible. */
+    getConstellationsVisible() {
+        const out = [];
+        const all = this._constellationClouds || {};
+        for (const id in all) if (all[id].cloud.visible) out.push(id);
+        return out;
+    }
+
+    /**
+     * Build a {cloud, probes} entry for one constellation. Each probe
+     * has the same shape as a debris probe (with _kind = 'sat'), so
+     * the per-frame _stepConstellations loop can drive it through the
+     * standard _lookupProbePosition pathway.
+     */
+    _buildConstellationCloud(c) {
+        const recs = spawnConstellationPositions(c);
+        const probes = recs.map(rec => {
+            const orb = rec.orbital;
+            const TAU = 2 * Math.PI;
+            const M_now = ((orb.meanAnomalyDeg0 * Math.PI / 180) % TAU + TAU) % TAU;
+            const probe = {
+                spec: {
+                    id: rec.id,
+                    name: c.name,
+                    color: rec.color,
+                    altitudeKm: rec.altitudeKm,
+                    orbital: { ...orb, meanAnomalyDeg0: M_now * 180 / Math.PI },
+                },
+                _phase0: M_now,
+                _propTable: null,
+                _propTableN: 0,
+                _kind: 'constellation',
+                _constellationId: c.id,
+                mesh: null,
+            };
+            this._buildProbeLookup(probe);
+            return probe;
+        });
+
+        const N = probes.length;
+        const positions = new Float32Array(N * 3);
+        const ts = this.opts.satTimeScale ?? this.opts.issTimeScale ?? 60;
+        const tNowSim = (this._clock?.getElapsedTime?.() ?? 0) * ts;
+        for (let i = 0; i < N; i++) {
+            const p = _lookupProbePosition(probes[i], tNowSim);
+            positions[i * 3]     = p.x;
+            positions[i * 3 + 1] = p.y;
+            positions[i * 3 + 2] = p.z;
+        }
+        const geom = new THREE.BufferGeometry();
+        geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        const mat = new THREE.PointsMaterial({
+            color:       new THREE.Color(c.color),
+            size:        0.012,
+            sizeAttenuation: true,
+            transparent: true,
+            opacity:     0.55,
+            depthWrite:  false,
+            blending:    THREE.AdditiveBlending,
+        });
+        const cloud = new THREE.Points(geom, mat);
+        cloud.frustumCulled = false;
+        cloud.userData = {
+            kind: 'constellation',
+            id:   c.id,
+            name: `${c.name} (${c.operator}) — ${c.countActive} active`,
+            tooltip: `${c.name}: ${c.summary}`,
+        };
+        // Mount on the same group as debris so it inherits any
+        // global toggling we add later.
+        this._satProbeGrp.add(cloud);
+
+        return { cloud, probes, positions };
+    }
+
+    /** Per-frame: advance every visible constellation cloud's points. */
+    _stepConstellations(t) {
+        const all = this._constellationClouds;
+        if (!all) return;
+        const ts = this.opts.satTimeScale ?? this.opts.issTimeScale ?? 60;
+        const tNowSim = t * ts;
+        for (const id in all) {
+            const entry = all[id];
+            if (!entry.cloud.visible) continue;
+            const probes = entry.probes;
+            const pos = entry.positions;
+            for (let i = 0; i < probes.length; i++) {
+                const p = _lookupProbePosition(probes[i], tNowSim);
+                const o = i * 3;
+                pos[o]     = p.x;
+                pos[o + 1] = p.y;
+                pos[o + 2] = p.z;
+            }
+            entry.cloud.geometry.attributes.position.needsUpdate = true;
+        }
+    }
+
+    /**
+     * Build the hover-highlight ring used to disambiguate which dot
+     * the tooltip is describing. 50 pink dots all look the same; the
+     * cyan reticle gives the user a clear visual anchor. Ring orients
+     * perpendicular to the view direction each frame (always face-on)
+     * + pulses subtly so the eye lands on it immediately.
+     */
+    _buildDebrisHighlight() {
+        const geom = new THREE.TorusGeometry(0.025, 0.0028, 8, 32);
+        const mat  = new THREE.MeshBasicMaterial({
+            color:       0x00ffe6,
+            transparent: true,
+            opacity:     0.0,
+            depthWrite:  false,
+            blending:    THREE.AdditiveBlending,
+        });
+        this._debrisHighlight = new THREE.Mesh(geom, mat);
+        this._debrisHighlight.visible = false;
+        this._debrisHighlight.frustumCulled = false;
+        this._debrisHighlight.userData = {
+            kind:    'debris-highlight',
+            tooltip: 'Currently-hovered debris piece.',
+        };
+        this._scene.add(this._debrisHighlight);
+    }
+
+    /**
+     * Per-frame: keep the highlight ring stuck to the hovered debris
+     * piece's live position + face-on to the camera. Reads
+     * _hoveredDebrisIdx (set by the tooltip pipeline) and pulses the
+     * ring scale slightly to draw the eye.
+     */
+    _updateDebrisHighlight(elapsedSec) {
+        if (!this._debrisHighlight) return;
+        const idx = this._hoveredDebrisIdx;
+        if (!Number.isFinite(idx) || !this._debrisPositions
+            || !this._debris?.[idx]) {
+            // Smoothly fade out instead of hard-hide so the ring
+            // doesn't pop when the cursor leaves the dot.
+            const m = this._debrisHighlight.material;
+            m.opacity = Math.max(0, m.opacity - 0.12);
+            this._debrisHighlight.visible = m.opacity > 0.01;
+            return;
+        }
+        const o = idx * 3;
+        const p = this._debrisPositions;
+        this._debrisHighlight.position.set(p[o], p[o + 1], p[o + 2]);
+        // Face-on to the camera: ring plane perpendicular to view ray.
+        this._debrisHighlight.lookAt(this._camera.position);
+        // Subtle pulse — sin(2π · 1.4 Hz · t) at ±10 % scale.
+        const s = 1 + 0.10 * Math.sin(elapsedSec * 8.8);
+        this._debrisHighlight.scale.setScalar(s);
+        const m = this._debrisHighlight.material;
+        m.opacity = Math.min(0.9, m.opacity + 0.18);
+        this._debrisHighlight.visible = true;
     }
 
     _buildAltitudeRing() {
@@ -854,6 +2421,300 @@ export class AtmosphereGlobe {
         this._ring.rotation.x = Math.PI / 2;
         this._ring.rotation.y = 0.4;
         this._scene.add(this._ring);
+    }
+
+    /**
+     * Mesosphere phenomena + thermospheric currents — the missing
+     * "middle atmosphere" visualisation layer between the rim glow and
+     * the auroral oval.
+     *
+     * Built once; intensity + visibility tracked from setState() so the
+     * NLC band only lights up during the local hemisphere's summer
+     * window, the equatorial electrojet brightens with EUV (F10.7), and
+     * the auroral electrojet ring scales with Ap.
+     *
+     *   • NLC band   — two thin polar discs at 83 km, lat |φ| > 55°,
+     *                  cyan, summer-hemisphere-only intensity.
+     *   • EEJ ring   — equatorial electrojet at 110 km on the equator,
+     *                  yellow-green, dayside-tilted (the real EEJ is
+     *                  daylit-only but a full ring reads cleaner).
+     *   • Sq vortex pair — paired markers near ±30° lat at 110 km on
+     *                  the dayside, showing the classic two-cell Sq
+     *                  current system.
+     *   • Auroral EJ — magenta torus at 110 km along the auroral oval
+     *                  centerline — the visible analogue of the AE/AL
+     *                  current intensity.
+     *   • Meteor flux — 200 short streaks in the 80-100 km mesosphere
+     *                  hinting at the diurnal sporadic-meteor input.
+     */
+    _buildAtmosphericPhenomena() {
+        this._phenomenaGroup = new THREE.Group();
+        this._phenomenaGroup.name = 'atmospheric-phenomena';
+
+        // ── Noctilucent cloud caps (mesopause, ~83 km) ────────────────
+        // One thin torus per polar cap. The torus is centred on the y
+        // axis at sin(latRefDeg) and given a major radius cos(latRefDeg)
+        // so the ring lives at lat = latRefDeg on a sphere of radius
+        // (1 + 83/R_E). Keeping these as simple rings avoids the cost
+        // of a custom polar-cap shell.
+        const rNlc = 1 + 83 / R_EARTH_KM;
+        const latRef = 65 * Math.PI / 180;
+        const nlcMajor = rNlc * Math.cos(latRef);
+        const nlcY     = rNlc * Math.sin(latRef);
+        this._nlcGroup = new THREE.Group();
+        this._nlcGroup.name = 'nlc-band';
+        for (const sign of [+1, -1]) {
+            const ring = _ringMesh(nlcMajor, 0.0024, 0x9eecff, 0.0);
+            ring.position.y = nlcY * sign;
+            // Already lying in xz plane via _ringMesh; that matches a
+            // latitude line, so no extra rotation is needed.
+            ring.userData = {
+                kind: 'nlc-band',
+                hemisphere: sign > 0 ? 'N' : 'S',
+                tooltip: 'Noctilucent clouds — water-ice particles at ~83 km. '
+                       + 'Visible only in the summer-hemisphere mesopause window '
+                       + '(~50-65° lat, dawn/dusk twilight).',
+            };
+            this._nlcGroup.add(ring);
+        }
+        this._phenomenaGroup.add(this._nlcGroup);
+
+        // ── Equatorial electrojet (EEJ, ~110 km, ±3° lat) ─────────────
+        // Single bright ring on the geographic equator at 110 km. The
+        // real EEJ is a narrow eastward jet centred on the magnetic
+        // equator with a ±3° half-width — visualisation-grade is fine.
+        const rEej = 1 + 110 / R_EARTH_KM;
+        this._eejRing = _ringMesh(rEej, 0.0030, 0xc0ff60, 0.18);
+        this._eejRing.userData = {
+            kind: 'eej',
+            tooltip: 'Equatorial Electrojet — eastward dayside ionospheric current '
+                   + 'at ~110 km, driven by the daily E×B tidal dynamo. '
+                   + 'Brightens with F10.7 (EUV ionisation).',
+        };
+        this._phenomenaGroup.add(this._eejRing);
+
+        // ── Auroral electrojet ring (AE/AL surrogate, ~110 km) ────────
+        // Pair of rings at lat ±67° on the same 110 km shell. Brightens
+        // with Ap and modulates with substorm phase from the substorm
+        // controller.
+        const aeLat = 67 * Math.PI / 180;
+        const aeMajor = rEej * Math.cos(aeLat);
+        const aeY     = rEej * Math.sin(aeLat);
+        this._aeGroup = new THREE.Group();
+        this._aeGroup.name = 'ae-rings';
+        for (const sign of [+1, -1]) {
+            const ring = _ringMesh(aeMajor, 0.0028, 0xff6dd2, 0.12);
+            ring.position.y = aeY * sign;
+            ring.userData = {
+                kind: 'ae-ring',
+                hemisphere: sign > 0 ? 'N' : 'S',
+                tooltip: 'Auroral Electrojet — westward (AL) and eastward (AU) '
+                       + 'currents at ~110 km along the auroral oval. '
+                       + 'Brightens with Ap; intensifies during substorm expansion.',
+            };
+            this._aeGroup.add(ring);
+        }
+        this._phenomenaGroup.add(this._aeGroup);
+
+        // ── Sq quiet-time vortex markers (~110 km, dayside ±30° lat) ──
+        // Two soft glowing spheres marking the centres of the daytime
+        // Sq current loops. Visualisation-only — the real Sq vortex is
+        // a 2-D current-system that shifts with local time.
+        this._sqGroup = new THREE.Group();
+        this._sqGroup.name = 'sq-vortices';
+        const sqLat = 30 * Math.PI / 180;
+        const sqMajor = rEej * Math.cos(sqLat);
+        const sqY     = rEej * Math.sin(sqLat);
+        for (const sign of [+1, -1]) {
+            const sphere = new THREE.Mesh(
+                new THREE.SphereGeometry(0.020, 18, 14),
+                new THREE.MeshBasicMaterial({
+                    color: 0xfff0a8,
+                    transparent: true,
+                    opacity: 0.0,
+                    blending: THREE.AdditiveBlending,
+                    depthWrite: false,
+                }),
+            );
+            sphere.userData = {
+                _sign:   sign,
+                _major:  sqMajor,
+                _y:      sqY * sign,
+                kind:    'sq-vortex',
+                hemisphere: sign > 0 ? 'N' : 'S',
+                tooltip: 'Sq current cell — daytime ionospheric dynamo vortex centre. '
+                       + 'Two cells (one per hemisphere) drive a ~30 nT '
+                       + 'magnetic-field perturbation at the surface.',
+            };
+            this._sqGroup.add(sphere);
+        }
+        this._phenomenaGroup.add(this._sqGroup);
+
+        // ── Mesospheric meteor flux (80-100 km, point streaks) ────────
+        // Static Points cloud — positions are chosen on a thin spherical
+        // shell at altitudes 80-100 km. Visual only; per-frame phase is
+        // baked into the shader via a sin(time + offset) opacity term so
+        // points blink as if they were ionising trails.
+        const meteorN = 240;
+        const positions = new Float32Array(meteorN * 3);
+        const phases    = new Float32Array(meteorN);
+        for (let i = 0; i < meteorN; i++) {
+            const u = Math.random();
+            const v = Math.random();
+            const theta = 2 * Math.PI * u;
+            const phi   = Math.acos(2 * v - 1);
+            const altKm = 80 + 20 * Math.random();
+            const r = 1 + altKm / R_EARTH_KM;
+            positions[i * 3 + 0] = r * Math.sin(phi) * Math.cos(theta);
+            positions[i * 3 + 1] = r * Math.cos(phi);
+            positions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
+            phases[i] = Math.random() * Math.PI * 2;
+        }
+        const meteorGeo = new THREE.BufferGeometry();
+        meteorGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        meteorGeo.setAttribute('aPhase',   new THREE.BufferAttribute(phases, 1));
+        const meteorMat = new THREE.ShaderMaterial({
+            uniforms: {
+                uTime:      { value: 0 },
+                uIntensity: { value: 0.0 },
+            },
+            vertexShader: /* glsl */`
+                attribute float aPhase;
+                uniform float uTime;
+                varying float vBlink;
+                void main() {
+                    float blink = 0.5 + 0.5 * sin(uTime * 2.0 + aPhase * 6.28);
+                    vBlink = pow(blink, 4.0);
+                    vec4 mv = modelViewMatrix * vec4(position, 1.0);
+                    gl_Position = projectionMatrix * mv;
+                    gl_PointSize = 1.5 + 2.5 * vBlink;
+                }
+            `,
+            fragmentShader: /* glsl */`
+                uniform float uIntensity;
+                varying float vBlink;
+                void main() {
+                    vec2 uv = gl_PointCoord - vec2(0.5);
+                    float r = length(uv);
+                    if (r > 0.5) discard;
+                    float a = (1.0 - r * 2.0) * vBlink * uIntensity;
+                    gl_FragColor = vec4(1.0, 0.85, 0.5, a);
+                }
+            `,
+            transparent: true,
+            depthWrite:  false,
+            blending:    THREE.AdditiveBlending,
+        });
+        this._meteorPoints = new THREE.Points(meteorGeo, meteorMat);
+        this._meteorPoints.userData = {
+            kind:    'meteor-flux',
+            tooltip: 'Sporadic-meteor mass-deposition zone (80-100 km). '
+                   + '~10 t/day worldwide; lifts metallic-ion layers. '
+                   + 'Brightens during the major showers (Perseids, Geminids).',
+        };
+        this._phenomenaGroup.add(this._meteorPoints);
+
+        this._scene.add(this._phenomenaGroup);
+
+        // Seed initial intensities — refined by setState().
+        this._updateAtmosphericPhenomena({
+            f107: 150, ap: 15,
+            monthIdx: new Date().getUTCMonth(),
+        });
+    }
+
+    /**
+     * Drive the phenomena layer's per-element intensities from the
+     * current (F10.7, Ap) state plus the calendar month (for NLC
+     * seasonality). Called from setState() and once at boot.
+     */
+    _updateAtmosphericPhenomena({ f107 = 150, ap = 15, monthIdx = null } = {}) {
+        if (!this._phenomenaGroup) return;
+        const m = (monthIdx == null) ? new Date().getUTCMonth() : monthIdx;
+
+        // NLC seasonality — peaks ~20 d after summer solstice.
+        // North hemisphere peak: late June (m≈5.7); south: late December.
+        const nlcWindow = (peakM) => {
+            const d = Math.abs(((m - peakM + 12) % 12));
+            const dist = Math.min(d, 12 - d);
+            return Math.max(0, Math.cos(dist / 1.5 * Math.PI / 2));
+        };
+        const nlcN = nlcWindow(5.7);
+        const nlcS = nlcWindow(11.7);
+        if (this._nlcGroup) {
+            this._nlcGroup.children.forEach(ring => {
+                const isN = ring.userData.hemisphere === 'N';
+                ring.material.opacity = (isN ? nlcN : nlcS) * 0.55;
+            });
+        }
+
+        // Equatorial electrojet brightens with F10.7 (EUV → conductivity)
+        // and dampens slightly during the strongest storms (counter-EEJ
+        // events around noon).
+        if (this._eejRing) {
+            const eejBase = Math.min(1, Math.max(0, (f107 - 70) / 200));
+            const counter = ap > 100 ? 0.4 : 1.0;          // proxy for CEJ
+            this._eejRing.material.opacity = 0.18 + 0.55 * eejBase * counter;
+        }
+
+        // Auroral electrojet rings track Ap (storm intensity).
+        if (this._aeGroup) {
+            const ae = Math.min(1, ap / 100);
+            this._aeGroup.children.forEach(r => {
+                r.material.opacity = 0.10 + 0.65 * ae;
+            });
+        }
+
+        // Sq vortex strength scales with EUV ionisation (F10.7) and
+        // *declines* during storms (storm-time ionospheric dynamo
+        // disruption).
+        if (this._sqGroup) {
+            const sq = Math.min(1, Math.max(0, (f107 - 70) / 180));
+            const stormDamp = 1 / (1 + ap / 80);
+            this._sqGroup.children.forEach(s => {
+                s.material.opacity = 0.30 * sq * stormDamp;
+            });
+        }
+
+        // Meteor-flux blink intensity — slight diurnal modulation handled
+        // in the shader, but the master brightness rides at a fixed
+        // baseline so users always see something.
+        if (this._meteorPoints) {
+            this._meteorPoints.material.uniforms.uIntensity.value = 0.85;
+        }
+
+        // Cache so the per-frame _stepPhenomena keeps Sq vortices on the
+        // dayside as the Earth rotates the sun-direction.
+        this._phenomenaState = { f107, ap, monthIdx: m };
+    }
+
+    /**
+     * Per-frame update for phenomena — slides Sq vortices to track
+     * local-noon (subsolar longitude) and ticks the meteor shader's
+     * uTime so the points blink. Cheap; runs every frame.
+     */
+    _stepPhenomena(elapsedSec) {
+        if (!this._phenomenaGroup) return;
+        if (this._meteorPoints) {
+            this._meteorPoints.material.uniforms.uTime.value = elapsedSec;
+        }
+        if (this._sqGroup && this._sunDir) {
+            // Place each vortex on the dayside (along +sun direction)
+            // at lat ±30° on the 110 km shell. Use the sun direction
+            // already cached on the globe (subsolar geometry).
+            const sun = this._sunDir.clone().normalize();
+            // Build a frame: y-up = world Y, x = projection of sun on
+            // the equatorial plane.
+            const eqSun = new THREE.Vector3(sun.x, 0, sun.z);
+            if (eqSun.lengthSq() < 1e-6) eqSun.set(1, 0, 0);
+            eqSun.normalize();
+            for (const s of this._sqGroup.children) {
+                const sign = s.userData._sign;
+                const major = s.userData._major;
+                const y     = s.userData._y;
+                s.position.set(eqSun.x * major, y, eqSun.z * major);
+            }
+        }
     }
 
     _buildSolarWind() {
@@ -974,18 +2835,52 @@ export class AtmosphereGlobe {
         });
         this._streamGroup = new THREE.Group();
         this._streamGroup.name = 'fluxStreamers';
-        const streamerStarts = _streamerStartPoints(8, bs0.r0 + 4);
-        for (const s of streamerStarts) {
-            const positions = new Float32Array(2 * 3);
-            const progress  = new Float32Array(2);
-            // Streamer goes from far-sunward (y = s.y) toward Earth
-            // (y ~ bs.r0). Both points are in the solar group's local
-            // frame; we'll +Y == sunward by group orientation.
+        // Bumped from 8 → 64 streamers for a denser, more textured
+        // sunward flow. Each streamer is a multi-segment polyline with
+        // a subtle Parker-spiral curl + per-strand jitter so the
+        // cluster doesn't read as a wheel of straight spokes.
+        const N_FLUX = 64;
+        const SEG    = 16;          // segments per streamer
+        const streamerStarts = _streamerStartPoints(N_FLUX, bs0.r0 + 4);
+        const tooltipText = 'Bulk plasma flow from the Sun. Brightness ∝ dynamic pressure ρv²; flow rate ∝ speed.';
+        for (let si = 0; si < streamerStarts.length; si++) {
+            const s = streamerStarts[si];
+            // Bow-shock approach point — converge slightly toward the
+            // sun-Earth axis but never to zero so streamers don't
+            // bunch into a single line at the nose.
             const yEnd = bs0.r0 * 0.95;
-            positions[0] = s.x; positions[1] = s.y; positions[2] = s.z;
-            positions[3] = s.x * 0.20; positions[4] = yEnd; positions[5] = s.z * 0.20;
-            progress[0] = 0;
-            progress[1] = 1;
+            const xEnd = s.x * 0.20;
+            const zEnd = s.z * 0.20;
+
+            // Parker-spiral hint — small azimuthal twist proportional
+            // to streamer arrival distance. Sign jittered so adjacent
+            // strands curl opposite ways and visually braid.
+            const sign = (si % 2 === 0) ? 1 : -1;
+            const twistAmp = 0.22 * sign * (0.7 + 0.6 * Math.random());
+
+            const positions = new Float32Array(SEG * 3);
+            const progress  = new Float32Array(SEG);
+            for (let i = 0; i < SEG; i++) {
+                const t = i / (SEG - 1);
+                // Linear interpolate sunward → Earth, then add the
+                // twist as an azimuthal offset around the sun-Earth
+                // axis (+Y in solar-group frame).
+                const x0 = s.x + (xEnd - s.x) * t;
+                const y0 = s.y + (yEnd - s.y) * t;
+                const z0 = s.z + (zEnd - s.z) * t;
+                // Twist grows from 0 at the source to a peak around
+                // mid-flight then relaxes near the bow shock — the
+                // shape Parker-spiral streamers actually take in the
+                // inner heliosphere.
+                const tw = twistAmp * Math.sin(Math.PI * t);
+                const c = Math.cos(tw), sn = Math.sin(tw);
+                const x1 = x0 * c - z0 * sn;
+                const z1 = x0 * sn + z0 * c;
+                positions[i * 3 + 0] = x1;
+                positions[i * 3 + 1] = y0;
+                positions[i * 3 + 2] = z1;
+                progress[i] = t;
+            }
             const geom = new THREE.BufferGeometry();
             geom.setAttribute('position',  new THREE.BufferAttribute(positions, 3));
             geom.setAttribute('aProgress', new THREE.BufferAttribute(progress, 1));
@@ -994,31 +2889,75 @@ export class AtmosphereGlobe {
                 kind:    'flux-stream',
                 id:      'flux-stream',
                 name:    'Solar-wind flux',
-                tooltip: 'Bulk plasma flow from the Sun. Brightness ∝ dynamic pressure ρv²; flow rate ∝ speed.',
+                tooltip: tooltipText,
             };
             this._streamGroup.add(line);
         }
         this._swGroup.add(this._streamGroup);
 
-        // ── Sun marker — small disc far up the sun line so users have ──
-        // ── a visual reference for "this way is sunward". ──────────────
-        const sunGeo = new THREE.SphereGeometry(0.6, 18, 14);
-        const sunMat = new THREE.MeshBasicMaterial({
-            color:       0xffe080,
+        // ── Heliospheric current sheet (faint disc) ─────────────────────
+        // Thin equatorial sheet along the solar-wind flow plane. Reads
+        // as a soft pink-orange wash that traces the wavy ballerina-
+        // skirt geometry. Cheap — one ring mesh; fragment shader does
+        // the radial fade.
+        const sheetGeo = new THREE.RingGeometry(2.5, bs0.r0 + 2, 96, 1);
+        const sheetMat = new THREE.ShaderMaterial({
+            uniforms: {
+                uColor: { value: new THREE.Color(0xff9c66) },
+                uTime:  { value: 0 },
+            },
+            vertexShader: /* glsl */`
+                varying vec2 vUv;
+                varying vec3 vPosL;
+                void main() {
+                    vUv = uv;
+                    vPosL = position;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: /* glsl */`
+                precision highp float;
+                uniform vec3  uColor;
+                uniform float uTime;
+                varying vec2  vUv;
+                varying vec3  vPosL;
+                void main() {
+                    // Distance from the sun-Earth axis (+Y) → ring radius.
+                    float r = length(vPosL.xz);
+                    // Ballerina-skirt waviness — gentle azimuthal warp.
+                    float az = atan(vPosL.z, vPosL.x);
+                    float warp = sin(az * 4.0 + uTime * 0.4) * 0.5 + 0.5;
+                    // Radial taper: brighter near the disc, falling to
+                    // zero at both inner & outer edges.
+                    float radial = smoothstep(2.5, 4.0, r) * (1.0 - smoothstep(8.0, 14.0, r));
+                    float a = 0.10 * radial * (0.5 + 0.5 * warp);
+                    gl_FragColor = vec4(uColor, a);
+                }
+            `,
             transparent: true,
-            opacity:     0.85,
-            blending:    THREE.AdditiveBlending,
+            side:        THREE.DoubleSide,
             depthWrite:  false,
+            blending:    THREE.AdditiveBlending,
         });
-        this._sunMarker = new THREE.Mesh(sunGeo, sunMat);
-        this._sunMarker.position.set(0, bs0.r0 + 8, 0);
-        this._sunMarker.userData = {
-            kind:    'sun-marker',
-            id:      'sun',
-            name:    'Sun (direction)',
-            tooltip: 'Direction toward the Sun. Solar wind streams from here.',
+        const sheet = new THREE.Mesh(sheetGeo, sheetMat);
+        // RingGeometry is in the XY plane — rotate so it lies in the
+        // XZ plane (the sun-aligned group's equatorial plane).
+        sheet.rotation.x = Math.PI / 2;
+        sheet.userData = {
+            kind:    'current-sheet',
+            id:      'helio-current-sheet',
+            name:    'Heliospheric current sheet',
+            tooltip: 'Wavy equatorial boundary in the interplanetary magnetic field; the "ballerina skirt".',
         };
-        this._swGroup.add(this._sunMarker);
+        this._currentSheetMat = sheetMat;
+        this._swGroup.add(sheet);
+
+        // ── Sun glow + EUV streamers ───────────────────────────────────
+        // Replaces the flat sphere marker with a proper "the Sun is
+        // emitting" cue: a hot core, a soft corona halo, and a cluster
+        // of outgoing radial photon streamers whose count + brightness
+        // scale with F10.7. setF107() updates them live.
+        this._buildSun(bs0);
 
         this._scene.add(this._swGroup);
 
@@ -1026,6 +2965,322 @@ export class AtmosphereGlobe {
         // the engine already has a feel for this. setSolarWind() is also
         // called externally once SwpcFeed pushes real data.
         this.setSolarWind(SW_DEFAULTS);
+    }
+
+    /**
+     * Build the dipole magnetic-field cascade — a set of L-shell field
+     * lines carrying an animated EUV/precipitation packet train from
+     * the magnetopause down to the auroral oval and the polar cusps.
+     * Drives intensity from the live (F10.7, Ap, Bz) state via
+     * setState(), which is called from setState() on the globe.
+     */
+    _buildMagneticCascade() {
+        this._cascade = new MagneticCascade({
+            parent:    this._scene,
+            intensity: 0.45,
+            sunDir:    this._sunDir,
+        });
+        // Apply the climatology so first paint shows a baseline cascade
+        // even before setState() arrives.
+        this._cascade.setState({ f107: 150, ap: 15 });
+
+        // Substorm state machine — drives the growth → expansion →
+        // recovery animation. 'demo' mode walks through a substorm
+        // in ~30 s wall-clock; auto-triggered when the cumulative
+        // southward-Bz drive (substorm-index proxy) crosses 0.6.
+        this._substorm = new SubstormController({ mode: 'demo' });
+
+        // Local accumulator of southward-Bz drive — fed into the
+        // controller as a substorm-index proxy. Re-evaluated whenever
+        // setState() pushes a fresh (Ap, Bz) tuple.
+        this._bzDriveAccum = 0;
+    }
+
+    /**
+     * Manually trigger a substorm. Returns true on success (controller
+     * was IDLE), false if a substorm is already in progress.
+     */
+    triggerSubstorm(opts) {
+        return this._substorm?.trigger(opts) ?? false;
+    }
+    /** Force-end any in-progress substorm. */
+    resetSubstorm() { this._substorm?.reset(); }
+    /** 'demo' (compressed ~30 s) or 'realtime' (literal-minutes timing). */
+    setSubstormMode(mode) { this._substorm?.setMode(mode); }
+    /** Toggle the auto-trigger from substorm-index threshold. */
+    setSubstormAuto(v) { this._substorm?.setAutoEnabled(v); }
+
+    /**
+     * Build the sun: a hot inner core + a soft halo + 24 outgoing
+     * radial streamers that read as photon emission. F10.7 modulates
+     * the corona brightness + streamer length so users see "active
+     * sun" vs "quiet sun" at a glance. Mounted in the solar group so
+     * "+Y == sunward" alignment is automatic.
+     */
+    _buildSun(bs0) {
+        const sunDistance = bs0.r0 + 8;
+        // Multi-layer Sun: photosphere → chromosphere → corona →
+        // outer corona. Each layer is a separate sphere mesh with its
+        // own material so the layered fresnel additive blend reads as
+        // real depth rather than a single flat halo. Sized in scene
+        // units (Earth radii); not to true scale — the real Sun is
+        // ~109 R⊕ wide but we keep it visually marker-sized so it
+        // fits in frame next to Earth's magnetosphere.
+        const photoR    = 0.55;   // visible "surface"
+        const chromoR   = 0.72;   // tight reddish ring
+        const coronaR   = 1.50;   // mid-corona glow
+        const outerR    = 2.80;   // wide blue-white halo
+
+        const sunUserData = {
+            kind:    'sun-marker',
+            id:      'sun',
+            name:    'Sun',
+            tooltip: 'Solar emission source. Photosphere granulation, '
+                   + 'chromosphere ring, and multi-layer corona. '
+                   + 'Brightness + streamer length scale with F10.7 '
+                   + '(10.7-cm radio flux, an EUV proxy used by NRL-MSIS).',
+        };
+
+        // ── Photosphere — granulated, limb-darkened disc ────────────
+        const photoMat = new THREE.ShaderMaterial({
+            uniforms: {
+                uTime:      { value: 0 },
+                uIntensity: { value: 1.0 },
+                uHot:       { value: new THREE.Color(0xfff5d8) },
+                uCool:      { value: new THREE.Color(0xff8a30) },
+            },
+            vertexShader:   SUN_VERT,
+            fragmentShader: SUN_FRAG,
+            depthWrite:     true,
+        });
+        const photo = new THREE.Mesh(
+            new THREE.SphereGeometry(photoR, 64, 48),
+            photoMat,
+        );
+        photo.userData = sunUserData;
+
+        // ── Chromosphere — thin reddish-pink shell hugging the disc ─
+        const chromoMat = new THREE.ShaderMaterial({
+            uniforms: {
+                uColor:     { value: new THREE.Color(0xff5530) },
+                uRimColor:  { value: new THREE.Color(0xff9870) },
+                uBaseAlpha: { value: 0.22 },
+                uRimPower:  { value: 2.4 },
+                uIntensity: { value: 1.0 },
+                uTime:      { value: 0 },
+            },
+            vertexShader:   CORONA_VERT,
+            fragmentShader: CORONA_FRAG,
+            transparent:    true,
+            side:           THREE.DoubleSide,
+            depthWrite:     false,
+            blending:       THREE.AdditiveBlending,
+        });
+        const chromo = new THREE.Mesh(
+            new THREE.SphereGeometry(chromoR, 48, 32),
+            chromoMat,
+        );
+        chromo.userData = sunUserData;
+
+        // ── Mid corona — yellow-white, fbm filaments ────────────────
+        const coronaMat = new THREE.ShaderMaterial({
+            uniforms: {
+                uColor:     { value: new THREE.Color(0xffd070) },
+                uRimColor:  { value: new THREE.Color(0xffeec0) },
+                uBaseAlpha: { value: 0.16 },
+                uRimPower:  { value: 1.7 },
+                uIntensity: { value: 1.0 },
+                uTime:      { value: 0 },
+            },
+            vertexShader:   CORONA_VERT,
+            fragmentShader: CORONA_FRAG,
+            transparent:    true,
+            side:           THREE.DoubleSide,
+            depthWrite:     false,
+            blending:       THREE.AdditiveBlending,
+        });
+        const corona = new THREE.Mesh(
+            new THREE.SphereGeometry(coronaR, 48, 32),
+            coronaMat,
+        );
+        corona.userData = sunUserData;
+
+        // ── Outer corona — wide cool halo, near-transparent ─────────
+        const outerMat = new THREE.ShaderMaterial({
+            uniforms: {
+                uColor:     { value: new THREE.Color(0xffe8c8) },
+                uRimColor:  { value: new THREE.Color(0xb0d8ff) },
+                uBaseAlpha: { value: 0.05 },
+                uRimPower:  { value: 2.6 },
+                uIntensity: { value: 1.0 },
+                uTime:      { value: 0 },
+            },
+            vertexShader:   CORONA_VERT,
+            fragmentShader: CORONA_FRAG,
+            transparent:    true,
+            side:           THREE.DoubleSide,
+            depthWrite:     false,
+            blending:       THREE.AdditiveBlending,
+        });
+        const outer = new THREE.Mesh(
+            new THREE.SphereGeometry(outerR, 36, 24),
+            outerMat,
+        );
+        outer.userData = sunUserData;
+
+        // ── Outgoing radial streamers — Fibonacci sphere ────────────
+        // Bumped from 24 → 56 strands and each carries a slight curl
+        // off-axis so the cluster reads as a textured photon flow
+        // rather than a regular wheel of spokes.
+        const N_STREAMS = 56;
+        const streamMat = new THREE.ShaderMaterial({
+            uniforms: {
+                uColor:     { value: new THREE.Color(0xffe4a0) },
+                uTime:      { value: 0 },
+                uIntensity: { value: 0.7 },
+                uSpeed:     { value: -0.28 },     // negative → flow outward
+            },
+            vertexShader:   SW_STREAM_VERT,
+            fragmentShader: SW_STREAM_FRAG,
+            transparent:    true,
+            depthWrite:     false,
+            blending:       THREE.AdditiveBlending,
+        });
+
+        const streamGroup = new THREE.Group();
+        const phi = Math.PI * (3 - Math.sqrt(5));
+        for (let i = 0; i < N_STREAMS; i++) {
+            const y    = 1 - (i / (N_STREAMS - 1)) * 2;
+            const r    = Math.sqrt(Math.max(0, 1 - y * y));
+            const lon  = i * phi;
+            const dx = r * Math.cos(lon);
+            const dy = y;
+            const dz = r * Math.sin(lon);
+            // Curl factor — small per-strand offset so the tip drifts
+            // off the radial line. Amount alternates ± so neighbours
+            // visually braid rather than radiate uniformly.
+            const sign = (i % 2 === 0) ? 1 : -1;
+            const curl = 0.18 * sign;
+            const tx = -dz * curl;
+            const tz =  dx * curl;
+            const tipLen = 2.0 + 1.4 * Math.random();   // jittered length
+            const positions = new Float32Array([
+                dx * photoR, dy * photoR, dz * photoR,
+                (dx + tx) * (photoR + tipLen), dy * (photoR + tipLen), (dz + tz) * (photoR + tipLen),
+            ]);
+            const progress = new Float32Array([0, 1]);
+            const g = new THREE.BufferGeometry();
+            g.setAttribute('position',  new THREE.BufferAttribute(positions, 3));
+            g.setAttribute('aProgress', new THREE.BufferAttribute(progress, 1));
+            const line = new THREE.Line(g, streamMat);
+            line.userData = {
+                kind:    'sun-stream',
+                id:      'sun-stream',
+                name:    'Sun · radial emission',
+                tooltip: 'Radial photon flow. Length + brightness scale with F10.7.',
+            };
+            streamGroup.add(line);
+        }
+
+        // ── Sun group — bundle photosphere + halos + streamers ──────
+        const sunGroup = new THREE.Group();
+        sunGroup.add(photo);
+        sunGroup.add(chromo);
+        sunGroup.add(corona);
+        sunGroup.add(outer);
+        sunGroup.add(streamGroup);
+        sunGroup.position.set(0, sunDistance, 0);
+
+        // Cache references for setF107 + animate.
+        this._sunMarker      = sunGroup;
+        this._sunPhotoMat    = photoMat;
+        this._sunChromoMat   = chromoMat;
+        this._sunCoreMat     = photoMat;       // legacy alias for setF107
+        this._sunHaloMat     = coronaMat;
+        this._sunOuterMat    = outerMat;
+        this._sunStreamMat   = streamMat;
+        this._sunStreamGroup = streamGroup;
+        this._swGroup.add(sunGroup);
+    }
+
+    /**
+     * Drive the sun's emission visuals from the solar-flux index
+     * (F10.7 in SFU). Quiet-sun ≈ 70 SFU; cycle-max ≈ 250–300. Maps
+     * to streamer brightness, halo glow, and core size.
+     */
+    setF107(f107Sfu) {
+        const f = Number.isFinite(f107Sfu) ? f107Sfu : 150;
+        const q = Math.max(0, Math.min(1, (f - 65) / (300 - 65)));   // 0..1
+        if (this._sunChromoMat) this._sunChromoMat.uniforms.uIntensity.value = 0.65 + 0.70 * q;
+        if (this._sunHaloMat)   this._sunHaloMat.uniforms.uIntensity.value   = 0.55 + 0.95 * q;
+        if (this._sunOuterMat)  this._sunOuterMat.uniforms.uIntensity.value  = 0.40 + 0.90 * q;
+        if (this._sunStreamMat) this._sunStreamMat.uniforms.uIntensity.value = 0.35 + 1.10 * q;
+        // Photosphere intensity ramp — the granulation stays the same
+        // but the overall brightness rises with activity.
+        if (this._sunPhotoMat) {
+            this._sunPhotoMat.uniforms.uIntensity.value = 0.85 + 0.45 * q;
+        }
+        // Stream group scales radially so high F10.7 = longer EUV reach.
+        if (this._sunStreamGroup) {
+            const s = 0.85 + 0.65 * q;
+            this._sunStreamGroup.scale.setScalar(s);
+        }
+    }
+
+    /**
+     * Refresh the world-frame sun direction from the current sub-solar
+     * point so the day/night terminator on Earth and the Sun graphic in
+     * the solar-wind group track real time. Cheap (one trig call + a
+     * quaternion + a few uniform copies) so we run it every frame.
+     */
+    _updateSunRealTime() {
+        const ssp = subSolarPoint(new Date());
+        // Skin: only push uniform updates when the angle has actually
+        // moved meaningfully (>0.01° ≈ 1.7e-4 rad). Sub-solar drift is
+        // ≈15°/hour so this still fires several times a minute.
+        const next = _subSolarToVec3(ssp.lat, ssp.lon);
+        if (!this._sunDir) this._sunDir = next;
+        else {
+            // copy in place so consumers that captured the reference
+            // (EarthSkin uniform, layer shells, particle systems, etc.)
+            // see the new value without us having to re-push.
+            this._sunDir.copy(next);
+        }
+        // EarthSkin holds its own clone — push the update so the
+        // shader's u_sun_dir matches.
+        this._skin?.setSunDir?.(this._sunDir);
+        // Layer shells: each material owns its own uSunDir clone.
+        if (this._shells) {
+            for (const sh of this._shells) {
+                sh.material.uniforms.uSunDir?.value.copy(this._sunDir);
+            }
+        }
+        // Particle systems & vector fields use the sun direction for
+        // the subsolar→antisolar wind tangent.
+        if (this._particles) {
+            for (const id in this._particles) {
+                this._particles[id].setSunDir?.(this._sunDir);
+            }
+        }
+        if (this._fields) {
+            for (const id in this._fields) {
+                this._fields[id].setSunDir?.(this._sunDir);
+            }
+        }
+        // Drag-forecast overlay: tangent wind is sun-relative.
+        this._dragOverlay?.setSunDir?.(this._sunDir);
+        // Magnetic-field cascade: sun direction biases the dayside-vs-
+        // nightside packet weighting (cusp packets brighten on the
+        // dayside where reconnection is active).
+        this._cascade?.setSunDir?.(this._sunDir);
+        // Solar-wind group is oriented so its local +Y points at the
+        // Sun; update the quaternion so the Shue magnetopause + bow
+        // shock + Sun marker all rotate to the new sub-solar direction.
+        if (this._swGroup) {
+            const yAxis = new THREE.Vector3(0, 1, 0);
+            const q = new THREE.Quaternion().setFromUnitVectors(yAxis, this._sunDir);
+            this._swGroup.quaternion.copy(q);
+        }
     }
 
     _initStars() {
@@ -1059,16 +3314,56 @@ export class AtmosphereGlobe {
     }
 
     _initControls() {
-        this._controls = new OrbitControls(this._camera, this.canvas);
-        this._controls.enableDamping = true;
-        this._controls.dampingFactor = 0.08;
-        this._controls.minDistance = 1.25;
-        // Bumped from 14 → 28 so users can pull back far enough to see
-        // the bow shock + magnetopause in full. Atmosphere-shell visuals
-        // remain sized to Earth radii so they don't grow with zoom.
-        this._controls.maxDistance = 28;
-        this._controls.enablePan = false;
-        this._controls.rotateSpeed = 0.55;
+        // CameraController wraps OrbitControls + a hand-rolled fly mode
+        // behind a single setMode() switch. Default = orbit so existing
+        // behaviour is unchanged on first paint; the UI exposes a toggle
+        // to switch into fly mode where users can move *into* the layers.
+        this._controls = new CameraController(this._camera, this.canvas);
+    }
+
+    /**
+     * Toggle the camera between 'orbit' (planet-locked, OrbitControls)
+     * and 'fly' (free 6-DOF, WASD + mouse-drag look). Returns the new
+     * mode so callers can sync a UI toggle.
+     */
+    setCameraMode(mode) {
+        this._controls.setMode(mode);
+        return this._controls.getMode();
+    }
+    getCameraMode() { return this._controls.getMode(); }
+
+    /**
+     * Smoothly fly the camera to a world-space target, optionally aiming
+     * at lookAt. Used by satellite click-to-fly and ISS focus.
+     */
+    flyTo(targetVec3, lookAtVec3 = null, duration = 1.4) {
+        this._controls.flyTo(targetVec3, lookAtVec3, duration);
+    }
+
+    /**
+     * Camera altitude above 1 R⊕ in km. The HUD reads this every frame to
+     * paint the local-altitude readout + sample the engine for ρ/T/Kn.
+     */
+    getCameraAltitudeKm() {
+        return this._controls.getAltitudeKm();
+    }
+
+    /**
+     * Sample local atmospheric physics at the current camera altitude.
+     * Returns null if the camera is below the simulator's domain (< 80 km).
+     * Cheap; uses the same engine call the side panel uses.
+     */
+    getCameraSampleAtState({ f107, ap }) {
+        const altKm = this.getCameraAltitudeKm();
+        if (!Number.isFinite(altKm) || altKm < 80) return { altitudeKm: altKm, outOfDomain: true };
+        const layer = layerForAltitude(altKm);
+        const phys  = pointPhysics({
+            altitudeKm: altKm,
+            f107Sfu:    f107,
+            ap,
+            layerThicknessKm: layer ? Math.max(1, layer.maxKm - layer.minKm) : null,
+        });
+        return { ...phys, layer };
     }
 
     _initResize() {
@@ -1115,7 +3410,12 @@ export class AtmosphereGlobe {
         this._raycaster = new THREE.Raycaster();
         // Thicker hit area than the visual torus — makes these thin rings
         // actually catchable with the mouse.
-        this._raycaster.params.Line = { threshold: 0.02 };
+        this._raycaster.params.Line   = { threshold: 0.02 };
+        // Per-point picking on the debris cloud. Threshold is in world
+        // units (R⊕); 0.02 ≈ 127 km, generous enough to catch a 0.014-
+        // size sprite without overlap between dots in the typical
+        // viewing range.
+        this._raycaster.params.Points = { threshold: 0.02 };
         this._mouse = new THREE.Vector2(-9, -9);
 
         const hittable = () => [
@@ -1125,7 +3425,73 @@ export class AtmosphereGlobe {
             ...(this._bsMesh     ? [this._bsMesh]     : []),
             ...(this._sheathMesh ? [this._sheathMesh] : []),
             ...(this._sunMarker  ? [this._sunMarker]  : []),
+            // Each satellite probe (moving sprite) is independently
+            // hittable so the tooltip + click-to-fly resolves to the
+            // right satellite.
+            ...Object.values(this._satProbes || {}).map(p => p.mesh),
+            // Debris cloud — single Points object, but Three's Points
+            // raycaster returns a per-point .index we use to resolve
+            // which dot was hovered. See _findTaggedUserData below.
+            ...(this._debrisCloud ? [this._debrisCloud] : []),
+            // Magnetic-cascade artefacts — every line, oval band,
+            // cusp dot, MLT marker, and FAC ring carries a tagged
+            // userData; the recursive=true raycast finds them via
+            // their parent groups.
+            ...(this._cascade ? [this._cascade.group] : []),
+            // Live-catalog Points cloud — populated lazily by
+            // enableCatalogGroup(). Each point picks per-index back to
+            // a TLE record via _resolveCatalogHit.
+            ...(this._extraHittable || []),
         ];
+
+        // Recursive: the ISS sprite carries a child halo mesh; if we
+        // raycast non-recursively the halo eats hits and the parent's
+        // userData isn't found. recursive=true makes the raycaster
+        // descend; we look at hits[0].object.userData OR walk up to a
+        // tagged ancestor.
+        const _findTaggedUserData = (obj) => {
+            let o = obj;
+            while (o) {
+                if (o.userData?.kind) return o.userData;
+                o = o.parent;
+            }
+            return obj.userData || {};
+        };
+
+        /**
+         * Per-debris userData resolver. The cloud-level userData has
+         * kind='debris-cloud' (good for the legend) but we want the
+         * tooltip + click-to-fly to talk about the *specific* piece
+         * the user is pointing at. Three's points raycaster returns
+         * an .index field on the intersection; we map it back into
+         * the parallel this._debris array.
+         */
+        const _userDataForHit = (hit) => {
+            if (!hit) return {};
+            // Live-catalog cloud hit → resolve to a specific TLE.
+            const catUd = this._resolveCatalogHit?.(hit);
+            if (catUd) return catUd;
+            // Debris cloud hit → resolve to a specific piece.
+            if (hit.object === this._debrisCloud
+                && Number.isFinite(hit.index)
+                && this._debris?.[hit.index]) {
+                const d = this._debris[hit.index];
+                return {
+                    kind:     'debris-piece',
+                    id:       d.spec.id,
+                    name:     d.spec.name,
+                    altKm:    d.spec.altitudeKm,
+                    color:    d.spec.color,
+                    noradId:  d.spec.orbital?.noradId,
+                    inclinationDeg: d.spec.orbital?.inclinationDeg,
+                    periodMin:      d.spec.orbital?.periodMin,
+                    debrisIdx:      hit.index,
+                    tooltip:  'Click to fly the camera to this debris piece. '
+                            + 'Drag pressure uses the live ρ at its current altitude.',
+                };
+            }
+            return _findTaggedUserData(hit.object);
+        };
 
         const onMove = (e) => {
             const rect = this.canvas.getBoundingClientRect();
@@ -1134,28 +3500,92 @@ export class AtmosphereGlobe {
             this._mouse.x = (x / rect.width)  *  2 - 1;
             this._mouse.y = (y / rect.height) * -2 + 1;
             this._raycaster.setFromCamera(this._mouse, this._camera);
-            const hits = this._raycaster.intersectObjects(hittable(), false);
+            const hits = this._raycaster.intersectObjects(hittable(), true);
             if (hits.length > 0) {
-                const ud = hits[0].object.userData || {};
+                const ud = _userDataForHit(hits[0]);
                 tip.innerHTML = _tipHTML(ud, this._profile, this._swState);
                 tip.style.left = `${x}px`;
                 tip.style.top  = `${y}px`;
                 tip.style.opacity = '1';
+                this._hoveredUserData = ud;
+                // Drive the debris-cloud highlight reticle. Stays in
+                // sync with whichever dot the tooltip is describing —
+                // if the hover moves off a debris hit, the index is
+                // cleared and the reticle fades out.
+                this._hoveredDebrisIdx = ud?.kind === 'debris-piece'
+                    ? ud.debrisIdx
+                    : null;
                 this.canvas.style.cursor = 'pointer';
             } else {
                 tip.style.opacity = '0';
-                this.canvas.style.cursor = 'grab';
+                this._hoveredUserData = null;
+                this._hoveredDebrisIdx = null;
+                if (this._controls.getMode() === 'fly') {
+                    this.canvas.style.cursor = 'crosshair';
+                } else {
+                    this.canvas.style.cursor = 'grab';
+                }
             }
         };
         const onLeave = () => {
             tip.style.opacity = '0';
+            this._hoveredDebrisIdx = null;
             this.canvas.style.cursor = 'grab';
+        };
+        // Click handler: clicking on the ISS probe flies the camera to it.
+        // Designed to ignore drag-clicks (keep OrbitControls / fly-mode
+        // mouse-look working) by tracking the down-position and only
+        // firing if the mouse hasn't moved more than a few pixels.
+        let downX = 0, downY = 0, downT = 0;
+        const onDown = (e) => {
+            downX = e.clientX; downY = e.clientY; downT = performance.now();
+        };
+        const onUp = (e) => {
+            const dx = Math.abs(e.clientX - downX);
+            const dy = Math.abs(e.clientY - downY);
+            const dt = performance.now() - downT;
+            if (dx > 4 || dy > 4 || dt > 350) return;     // user dragged
+            const ud = this._hoveredUserData;
+            // Phase 25: click on an orbital target both flies the
+            // camera in AND engages follow — so the target stays in
+            // frame as it propagates instead of immediately drifting
+            // out of view after the flyTo animation completes. The
+            // operator stops following by switching mode (Orbit/Fly
+            // button) or by clicking "Stop follow" in the HUD.
+            if (ud?.kind === 'sat-probe' && ud.id) {
+                this.flyToSatellite(ud.id, 1.6, { follow: true });
+            } else if (ud?.kind === 'iss-probe') {
+                this.followISS();
+            } else if (ud?.kind === 'debris-piece' && Number.isFinite(ud.debrisIdx)) {
+                this.flyToDebris(ud.debrisIdx, 1.6, { follow: true });
+            } else if (ud?.kind === 'catalog-point' && (ud.line1 || ud.noradId)) {
+                // Click on any live-catalog point → push into the
+                // trajectory analyzer panel. Pass TLE inline if we have
+                // it; analyzer falls back to /api/celestrak/tle?norad=
+                // otherwise.
+                try {
+                    window.dispatchEvent(new CustomEvent('ua-analyze-sat', {
+                        detail: {
+                            id:    ud.id,
+                            name:  ud.name,
+                            color: ud.color,
+                            line1: ud.line1,
+                            line2: ud.line2,
+                            noradId: ud.noradId,
+                        }
+                    }));
+                } catch (_) { /* ignore */ }
+            }
         };
         this.canvas.addEventListener('mousemove', onMove);
         this.canvas.addEventListener('mouseleave', onLeave);
+        this.canvas.addEventListener('mousedown',  onDown);
+        this.canvas.addEventListener('mouseup',    onUp);
         this._disposeHover = () => {
             this.canvas.removeEventListener('mousemove', onMove);
             this.canvas.removeEventListener('mouseleave', onLeave);
+            this.canvas.removeEventListener('mousedown',  onDown);
+            this.canvas.removeEventListener('mouseup',    onUp);
             tip.remove();
         };
     }
@@ -1178,12 +3608,22 @@ export class AtmosphereGlobe {
             }
         }
 
-        // Slow auto-rotation when user isn't actively dragging.
-        if (this.opts.autoRotate && this._skin && !this._controls.dragging) {
-            this._skin.earthMesh.rotation.y += 0.0010;
-            if (this._shellGroup) this._shellGroup.rotation.y += 0.00045;
-            if (this._satGroup)   this._satGroup.rotation.y   += 0.00060;
+        // Drag-forecast tracer advection. Self-gates on visibility so it
+        // costs nothing when the operator panel is closed. Camera distance
+        // drives the LOD-style trail thinning so the field reads cleanly
+        // at any zoom — full population up close, ~30% out near the stars.
+        if (this._dragOverlay) {
+            this._dragOverlay.setZoomLevel(this._camera.position.length());
+            this._dragOverlay.update(dt);
         }
+
+        // Real-time Earth–Sun geometry. We don't rotate the Earth mesh or
+        // the camera here — instead the sub-solar point is recomputed from
+        // the wall clock every frame so the day-side terminator tracks
+        // reality at the actual sidereal rate (≈15°/hour). The user reads
+        // this as a stationary, physically-correct scene rather than the
+        // old fast spin-and-circle.
+        this._updateSunRealTime();
 
         // Push the live camera position into the shell shaders so their
         // limb fresnel tracks the current viewpoint.
@@ -1195,13 +3635,532 @@ export class AtmosphereGlobe {
 
         // Solar-wind shaders: advance time for fresnel pulse + streamer
         // dash animation.
-        if (this._mpMat)     this._mpMat.uniforms.uTime.value     = t;
-        if (this._bsMat)     this._bsMat.uniforms.uTime.value     = t;
-        if (this._streamMat) this._streamMat.uniforms.uTime.value = t;
+        if (this._mpMat)       this._mpMat.uniforms.uTime.value       = t;
+        if (this._bsMat)       this._bsMat.uniforms.uTime.value       = t;
+        if (this._streamMat)   this._streamMat.uniforms.uTime.value   = t;
+        if (this._currentSheetMat) this._currentSheetMat.uniforms.uTime.value = t;
+        // Sun shaders: photosphere granulation drift, multi-layer
+        // corona breathing pulse, outgoing-streamer dash.
+        if (this._sunPhotoMat)  this._sunPhotoMat.uniforms.uTime.value  = t;
+        if (this._sunChromoMat) this._sunChromoMat.uniforms.uTime.value = t;
+        if (this._sunHaloMat)   this._sunHaloMat.uniforms.uTime.value   = t;
+        if (this._sunOuterMat)  this._sunOuterMat.uniforms.uTime.value  = t;
+        if (this._sunStreamMat) this._sunStreamMat.uniforms.uTime.value = t;
 
-        this._controls.update();
+        // Magnetic-field cascade: advance the packet-dash phase. One
+        // uniform write feeds every L-shell field line.
+        if (this._cascade) this._cascade.update(t);
+
+        // Substorm state machine: tick → push to cascade → broadcast
+        // for the UI panel. Skip the heavy refresh path while idle so
+        // we don't spend cycles re-rebuilding the oval every frame
+        // when nothing is happening.
+        if (this._substorm && this._cascade) {
+            const prevPhase = this._substorm.getTick().phase;
+            const tick = this._substorm.update(dt);
+            const isActive   = tick.phase !== 'idle';
+            const wasActive  = prevPhase   !== 'idle';
+            // Only push to cascade when the substorm is doing
+            // something — every frame during active phases (so the
+            // bulge / WTS / AE proxy update smoothly), plus a one-
+            // shot zero-state push on the active→idle transition so
+            // the oval snaps back to its quiet position.
+            if (isActive || wasActive) {
+                this._cascade.setSubstormState(
+                    tick,
+                    this._cascade._lastKpCached,
+                );
+                // Broadcast for the UI panel.
+                try {
+                    window.dispatchEvent(new CustomEvent('ua-substorm-tick', {
+                        detail: tick,
+                    }));
+                } catch (_) { /* SSR / no-window — ignore */ }
+            }
+        }
+
+        this._controls.update(dt);
+
+        // Per-frame satellite orbit propagation. Visual time is sped
+        // up via opts.satTimeScale (default 60×) so a user sees a full
+        // pass in seconds. Each probe has its own period, inclination,
+        // and starting mean anomaly so paths don't all overlap.
+        if (this._satProbes) this._stepSatellites(t);
+        if (this._debris)    this._stepDebris(t);
+        if (this._constellationClouds) this._stepConstellations(t);
+        if (this._phenomenaGroup) this._stepPhenomena(t);
+        // Track the hovered debris with a face-on cyan reticle so
+        // users can tell which of 50 identical-looking pink dots the
+        // tooltip is describing. Cheap; just position + scale + lookAt.
+        this._updateDebrisHighlight(t);
+
+        // Conjunction screener: re-scan every 2 simulated seconds so
+        // TCA times stay current as orbits evolve. Per-frame chord
+        // line updates use whatever the cache holds — cheap.
+        if (this._satProbes && (t - (this._lastConjScanTime ?? -Infinity)) > 2.0) {
+            this._screenConjunctions();
+            this._lastConjScanTime = t;
+        }
+        if (this._conjunctionLines) this._updateConjunctionLines();
+
+        // Shell-fade-when-inside: when the camera enters a layer band,
+        // drop the shell's opacity so the user can see through the layer
+        // they're standing in. Cheap — five comparisons per frame.
+        if (this._shells) this._fadeShellsForCameraAltitude();
+
+        // Live-catalog tracker — propagate every loaded sat via Rust
+        // SGP4 WASM. The tracker handles SAB / worker / batch fast-paths
+        // internally; we just feed it wall-clock time.
+        if (this._catalogTracker?.tick) {
+            this._catalogTracker.tick(Date.now());
+        }
+
         this._renderer.render(this._scene, this._camera);
     }
+
+    /**
+     * Drop the gradient shell's opacity when the camera is inside its
+     * altitude band; restore otherwise. Without this, free-fly users see
+     * the additive blend stack up against the inside of every shell they
+     * pass through, which reads as a wall of orange.
+     */
+    _fadeShellsForCameraAltitude() {
+        const altKm = this.getCameraAltitudeKm();
+        for (const sh of this._shells) {
+            const ud = sh.userData;
+            const inside = altKm >= ud.minKm && altKm <= ud.maxKm;
+            // Use an explicit fade factor on each shell's intensity
+            // uniform — multiplied with the base log-ρ intensity that
+            // setProfile() set up.
+            const baseFade = inside ? 0.18 : 1.0;
+            // Smoothly blend so the transition isn't abrupt.
+            const cur = sh.material.uniforms.uFade?.value ?? 1.0;
+            const next = cur + (baseFade - cur) * 0.12;
+            if (sh.material.uniforms.uFade) {
+                sh.material.uniforms.uFade.value = next;
+            }
+        }
+    }
+
+    /**
+     * Advance every cached satellite probe along its mean-element
+     * orbit. Each probe carries its own (i, RAAN, M₀, period); the
+     * helper _propagateKeplerian computes a position on the inclined
+     * orbital plane in world frame.
+     *
+     * The probe's userData.altKm is updated each frame from the
+     * computed |position| so the tooltip drag-pressure readout uses
+     * the *current* altitude (not the spec's nominal value) — this
+     * matters when we eventually upgrade to elliptical orbits with
+     * non-zero eccentricity.
+     */
+    _stepSatellites(elapsedSec) {
+        const ts = this.opts.satTimeScale ?? this.opts.issTimeScale ?? 60;
+        for (const id in this._satProbes) {
+            const probe = this._satProbes[id];
+            const periodSec = probe.spec.orbital.periodMin * 60;
+            // Total mean anomaly traveled at compressed time.
+            const M = probe._phase0 + (elapsedSec * ts / periodSec) * 2 * Math.PI;
+            // Convert M back into an orbit fraction for the helper.
+            const tFrac = (M / (2 * Math.PI)) % 1;
+            const altShellR = 1 + probe.spec.altitudeKm / R_EARTH_KM;
+            const p = _propagateKeplerian(probe.spec.orbital, tFrac, altShellR);
+
+            probe.mesh.position.set(p.x, p.y, p.z);
+            // Update altitude from current radial distance — keeps the
+            // tooltip honest if eccentricity is non-zero (apogee/perigee
+            // sweep). For circular orbits the value is constant.
+            const rNow = Math.hypot(p.x, p.y, p.z);
+            probe.mesh.userData.altKm = (rNow - 1) * R_EARTH_KM;
+
+            // Orient the sprite along the velocity tangent so users
+            // can see direction-of-travel when zoomed in.
+            const v = _propagateKeplerianVelocity(probe.spec.orbital, tFrac, altShellR);
+            const radial = probe.mesh.position.clone().normalize();
+            const m = new THREE.Matrix4().lookAt(
+                probe.mesh.position,
+                probe.mesh.position.clone().add(v),
+                radial,
+            );
+            probe.mesh.quaternion.setFromRotationMatrix(m);
+        }
+    }
+
+    /**
+     * Snapshot of every satellite probe's *current* state, used by the
+     * UI's drag-analysis side panel. Cheap — just reads cached probe
+     * positions; no engine sampling here. Returns one entry per
+     * orbital satellite; non-orbital references (Kármán) are skipped.
+     */
+    getSatelliteStates() {
+        const out = [];
+        if (!this._satProbes) return out;
+        for (const id in this._satProbes) {
+            const probe = this._satProbes[id];
+            const rNow  = probe.mesh.position.length();
+            const altKm = (rNow - 1) * R_EARTH_KM;
+            out.push({
+                id,
+                name:    probe.spec.name,
+                color:   probe.spec.color,
+                altKm,
+                noradId: probe.spec.orbital.noradId,
+                periodMin: probe.spec.orbital.periodMin,
+                inclinationDeg: probe.spec.orbital.inclinationDeg,
+            });
+        }
+        return out;
+    }
+
+    /**
+     * Full drag-analysis snapshot for every orbital satellite at the
+     * current state. Returns altitude, ρ (sampled from the active
+     * profile), circular orbital speed, drag pressure q = ½ρv², and a
+     * Knudsen-derived regime label. Sorted descending by drag — the UI
+     * panel shows "ISS feels the most drag" most-prominently.
+     *
+     * This couples globe state (probe altitude) with engine state
+     * (profile from setProfile) so the panel reads off the same source
+     * of truth as the rest of the page.
+     */
+    getSatelliteDragAnalysis() {
+        const states = this.getSatelliteStates();
+        if (!this._profile?.samples?.length) return states.map(s => ({ ...s, rho: null, q: null }));
+        const out = states.map(s => {
+            const rho = _nearestRho(this._profile.samples, s.altKm);
+            const vKmS = _circularOrbitalSpeedKmS(s.altKm);
+            const v = vKmS * 1000;                          // m/s
+            const q = 0.5 * rho * v * v;                    // Pa
+            // Carry the live/fallback flag + epoch into the panel so
+            // users can see which probes are running on real CelesTrak
+            // elements vs the hardcoded backstop.
+            const probe = this._satProbes?.[s.id];
+            const tleSource = probe?.mesh?.userData?.tleSource ?? 'fallback';
+            const tleEpoch  = probe?.mesh?.userData?.tleEpoch  ?? null;
+            return {
+                ...s,
+                rho,
+                vKmS,
+                qPa: q,
+                qmPa: q * 1000,
+                tleSource, tleEpoch,
+            };
+        });
+        // Highest drag first — useful ranking for the panel.
+        out.sort((a, b) => (b.qPa ?? 0) - (a.qPa ?? 0));
+        return out;
+    }
+
+    // ── Conjunction screening ──────────────────────────────────────────────
+    //
+    // For each pair of orbital probes we sweep simulated-time from
+    // "now" out to `horizonMin` minutes in `stepSec`-second
+    // increments, find the time of closest approach (TCA) and the
+    // miss distance there, plus the current separation. Results are
+    // cached on this._conjunctions; the UI repaints from the cache.
+    //
+    // Cost: 6 pairs × 180 steps × 2 lookups + cheap math = ~10 k ops
+    // per scan. We rerun every 2 s. Imperceptible.
+    //
+    // Time axis is *simulated* seconds (real orbital time), not page-
+    // clock seconds. With opts.satTimeScale = 60×, "TCA in 47 min"
+    // means 47 minutes of physical orbital evolution; the user will
+    // see it occur after ~47 page-seconds.
+
+    _setupConjunctionScreener() {
+        this._conjunctions = [];
+        // Lines connecting predicted-close pairs, drawn with additive
+        // blending so they read against the dark backdrop.
+        this._conjunctionGroup = new THREE.Group();
+        this._conjunctionGroup.name = 'conjunction-chords';
+        this._scene.add(this._conjunctionGroup);
+        this._conjunctionLines = {};        // pairKey → THREE.Line — asset-asset, fixed
+        this._debrisChordPool  = [];        // reusable pool for top-N asset-debris threats
+
+        // Build one line per asset-asset pair right away so endpoint
+        // updates don't pay for geometry creation in the hot path.
+        const probes = Object.values(this._satProbes || {});
+        for (let i = 0; i < probes.length; i++) {
+            for (let j = i + 1; j < probes.length; j++) {
+                const a = probes[i], b = probes[j];
+                const key = _pairKey(a.spec.id, b.spec.id);
+                const line = _buildChordLine({
+                    aId:   a.spec.id, bId: b.spec.id,
+                    aName: a.spec.name, bName: b.spec.name,
+                });
+                this._conjunctionLines[key] = line;
+                this._conjunctionGroup.add(line);
+            }
+        }
+
+        // Pre-allocate a small pool of chord lines for asset↔debris
+        // threats so the per-frame logic doesn't allocate. Three is
+        // enough — beyond that the scene gets cluttered and the panel
+        // already lists more in detail.
+        const POOL_SIZE = 3;
+        for (let i = 0; i < POOL_SIZE; i++) {
+            const line = _buildChordLine({});       // anonymous; reassigned per scan
+            this._debrisChordPool.push(line);
+            this._conjunctionGroup.add(line);
+        }
+
+        this._lastConjScanTime = -Infinity;
+    }
+
+    /**
+     * Sweep every probe pair over the next `horizonMin` simulated
+     * minutes and update this._conjunctions in place. Cheap; fed by
+     * the per-probe phase-indexed lookup tables built at probe spawn.
+     */
+    _screenConjunctions({ horizonMin = 90, stepSec = 30, altPreFilterKm = 250 } = {}) {
+        const assets = Object.values(this._satProbes || {});
+        const debris = this._debris || [];
+        if (assets.length < 1) {
+            this._conjunctions = [];
+            return;
+        }
+
+        const ts = this.opts.satTimeScale ?? this.opts.issTimeScale ?? 60;
+        // Simulated-orbital seconds since page boot.
+        const tNowSim = this._clock.getElapsedTime() * ts;
+
+        const horizonSec = horizonMin * 60;
+        const nSteps = Math.max(2, Math.floor(horizonSec / stepSec) + 1);
+
+        const out = [];
+
+        // Inner helper to scan one pair across the horizon.
+        const scan = (a, b) => {
+            let minDist = Infinity, minStep = 0;
+            let firstDist = 0;
+            for (let k = 0; k < nSteps; k++) {
+                const tSim = tNowSim + k * stepSec;
+                const pa = _lookupProbePosition(a, tSim);
+                const pb = _lookupProbePosition(b, tSim);
+                const dx = pa.x - pb.x;
+                const dy = pa.y - pb.y;
+                const dz = pa.z - pb.z;
+                const d2 = dx * dx + dy * dy + dz * dz;
+                if (k === 0) firstDist = Math.sqrt(d2);
+                if (d2 < minDist) { minDist = d2; minStep = k; }
+            }
+            return {
+                currDistKm: firstDist * R_EARTH_KM,
+                tcaDistKm:  Math.sqrt(minDist) * R_EARTH_KM,
+                tcaTimeSec: minStep * stepSec,
+            };
+        };
+
+        // ── Asset ↔ asset (always screened; the small N=4 case) ───────
+        for (let i = 0; i < assets.length; i++) {
+            for (let j = i + 1; j < assets.length; j++) {
+                const a = assets[i], b = assets[j];
+                // Altitude pre-filter — paired LEO assets pass easily,
+                // but it costs nothing here and keeps GEO/MEO additions
+                // robust against quadratic blow-ups in future rounds.
+                if (Math.abs(a.spec.altitudeKm - b.spec.altitudeKm) > altPreFilterKm) continue;
+                const r = scan(a, b);
+                out.push({
+                    kind: 'asset-asset',
+                    aId: a.spec.id, bId: b.spec.id,
+                    aName: a.spec.name, bName: b.spec.name,
+                    aColor: a.spec.color, bColor: b.spec.color,
+                    aNorad: a.spec.orbital?.noradId,
+                    bNorad: b.spec.orbital?.noradId,
+                    ...r,
+                });
+            }
+        }
+
+        // ── Asset ↔ debris ────────────────────────────────────────────
+        // Pre-filter cuts the propagation cost for orbits that can
+        // never come within altPreFilterKm anyway. For 4 assets × 50
+        // debris, typical post-filter pair count is 30–80 — a small
+        // fraction of the worst-case 200. Each surviving pair still
+        // runs nSteps=180 lookups so the screener stays bounded.
+        for (const a of assets) {
+            for (const b of debris) {
+                if (Math.abs(a.spec.altitudeKm - b.spec.altitudeKm) > altPreFilterKm) continue;
+                const r = scan(a, b);
+                out.push({
+                    kind: 'asset-debris',
+                    aId: a.spec.id, bId: b.spec.id,
+                    aName: a.spec.name, bName: b.spec.name,
+                    aColor: a.spec.color, bColor: b.spec.color,
+                    aNorad: a.spec.orbital?.noradId,
+                    bNorad: b.spec.orbital?.noradId,
+                    ...r,
+                });
+            }
+        }
+
+        out.sort((p, q) => p.tcaDistKm - q.tcaDistKm);
+        this._conjunctions = out;
+    }
+
+    /**
+     * Update each per-pair chord line's endpoints to the live probe
+     * positions and set color/opacity from the cached TCA prediction.
+     * Drawn faint by default; intensifies for pairs with a tight TCA.
+     */
+    _updateConjunctionLines() {
+        if (!this._conjunctionLines || !this._conjunctions) return;
+        const watchKm = 200;
+
+        // Build a quick id-pair → cached entry map for O(1) lookup
+        // when refreshing the fixed asset-asset chord lines.
+        const byKey = {};
+        for (const c of this._conjunctions) byKey[_pairKey(c.aId, c.bId)] = c;
+
+        // ── Asset ↔ asset: fixed lines, keyed by pair ─────────────────
+        for (const key in this._conjunctionLines) {
+            const line = this._conjunctionLines[key];
+            const c = byKey[key];
+            const pa = this._satProbes?.[line.userData.aId]?.mesh.position;
+            const pb = this._satProbes?.[line.userData.bId]?.mesh.position;
+            if (!c || !pa || !pb || c.tcaDistKm > watchKm) {
+                line.material.opacity = 0;
+                continue;
+            }
+            _paintChordLine(line, pa, pb, c, watchKm);
+        }
+
+        // ── Asset ↔ debris: top-N threats, painted into a small pool ──
+        // The pool is a fixed-size set of THREE.Lines that we
+        // repurpose each scan. Lines beyond the live threat count are
+        // hidden by setting opacity to 0.
+        const pool = this._debrisChordPool || [];
+        const debrisThreats = this._conjunctions
+            .filter(c => c.kind === 'asset-debris' && c.tcaDistKm <= watchKm)
+            .slice(0, pool.length);
+
+        for (let i = 0; i < pool.length; i++) {
+            const line = pool[i];
+            const c = debrisThreats[i];
+            if (!c) {
+                line.material.opacity = 0;
+                continue;
+            }
+            const pa = this._satProbes?.[c.aId]?.mesh.position;
+            // Debris position from the cloud's flat position buffer —
+            // O(1) lookup via the debris index.
+            const debrisIdx = (this._debris || []).findIndex(d => d.spec.id === c.bId);
+            if (!pa || debrisIdx < 0) {
+                line.material.opacity = 0;
+                continue;
+            }
+            const pos = this._debrisPositions;
+            const pb = {
+                x: pos[debrisIdx * 3],
+                y: pos[debrisIdx * 3 + 1],
+                z: pos[debrisIdx * 3 + 2],
+            };
+            // Update the line's userData with the live pair so the
+            // tooltip pipeline (raycaster) can describe the threat
+            // even though the pool slot was repurposed.
+            line.userData.aId  = c.aId;
+            line.userData.bId  = c.bId;
+            line.userData.aName = c.aName;
+            line.userData.bName = c.bName;
+            line.userData.tooltip = `Predicted close approach: ${c.aName} ↔ ${c.bName} (debris).`;
+            _paintChordLine(line, pa, pb, c, watchKm);
+        }
+    }
+
+    /**
+     * Public snapshot for the UI conjunction-watch panel. Triggers
+     * a screen if cache is stale (> 2 s old). Returns the cached
+     * pair list sorted by TCA-distance ascending.
+     */
+    getConjunctionAnalysis() {
+        const now = performance.now() / 1000;
+        if (!this._conjunctions || (now - (this._lastConjScanTime ?? -Infinity)) > 2.0) {
+            this._screenConjunctions();
+            this._lastConjScanTime = now;
+        }
+        return this._conjunctions || [];
+    }
+}
+
+// ── Keplerian orbit helper ─────────────────────────────────────────────────
+// Visualisation-grade propagator. Inputs are mean elements; output is a
+// position on the inclined orbital plane in world frame, scaled to a
+// `radius` representative altitude so the math stays in R⊕ units the rest
+// of the page works in.
+//
+// Convention: orbital plane is rotated from the equatorial plane by the
+// inclination around X, then around Y by RAAN. Argument of perigee is
+// folded into the in-plane angle so we can keep argP non-zero for users
+// who want to play with apsides later.
+//
+// For circular orbits (eccentricity ≈ 0) we skip Kepler's-equation
+// solving entirely — eccentric anomaly equals mean anomaly, and the
+// in-plane radius is constant. tFrac is in [0, 1) along one orbit; the
+// caller advances it deterministically each frame.
+function _propagateKeplerian(orb, tFrac, radius) {
+    const i = orb.inclinationDeg * Math.PI / 180;
+    const Ω = orb.raanDeg         * Math.PI / 180;
+    const ω = orb.argPerigeeDeg   * Math.PI / 180;
+    const M = tFrac * 2 * Math.PI;
+    const e = orb.eccentricity ?? 0;
+
+    // True anomaly = mean anomaly for circular orbit; otherwise solve
+    // Kepler's equation by Newton-Raphson and convert.
+    let nu;
+    if (e < 1e-4) {
+        nu = M;
+    } else {
+        let E = M;
+        for (let k = 0; k < 6; k++) {
+            E = E - (E - e * Math.sin(E) - M) / (1 - e * Math.cos(E));
+        }
+        nu = 2 * Math.atan2(
+            Math.sqrt(1 + e) * Math.sin(E / 2),
+            Math.sqrt(1 - e) * Math.cos(E / 2),
+        );
+    }
+    const θ = ω + nu;
+    const r = radius * (e < 1e-4 ? 1 : (1 - e * e) / (1 + e * Math.cos(nu)));
+
+    // In-plane (perifocal) coordinates with x along ascending node.
+    const xp = r * Math.cos(θ);
+    const yp = r * Math.sin(θ);
+
+    // Rotate to ECI using the standard 3-1-3 sequence (RAAN, incl,
+    // argP); since argP was folded into θ above, we only need the
+    // incl + RAAN rotations here. ECI is the canonical Z-up,
+    // equatorial-XY frame used by SGP4 and pretty much every
+    // satellite catalog.
+    const cosI = Math.cos(i), sinI = Math.sin(i);
+    const cosΩ = Math.cos(Ω), sinΩ = Math.sin(Ω);
+    // Rotation around X by inclination: (xp, yp, 0) → (xp, yp·cosI, yp·sinI).
+    const xa = xp;
+    const ya = yp * cosI;
+    const za = yp * sinI;
+    // Rotation around Z by RAAN.
+    const xEci = xa * cosΩ - ya * sinΩ;
+    const yEci = xa * sinΩ + ya * cosΩ;
+    const zEci = za;
+
+    // Map ECI Z-up → Three.js world Y-up by swapping y and z.
+    // (Three.js convention used throughout the page: +Y is north pole.)
+    return { x: xEci, y: zEci, z: yEci };
+}
+
+/**
+ * Velocity tangent at the same orbital position. Used for sprite
+ * orientation; returned as a unit vector in world frame.
+ */
+function _propagateKeplerianVelocity(orb, tFrac, radius) {
+    // Forward-difference: sample a hair ahead and subtract. Cheap and
+    // mode-agnostic (works for circular and elliptical alike) without
+    // re-deriving the analytic dr/dν.
+    const dt = 1e-4;
+    const a = _propagateKeplerian(orb, tFrac,             radius);
+    const b = _propagateKeplerian(orb, (tFrac + dt) % 1,  radius);
+    const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+    const len = Math.hypot(dx, dy, dz) || 1;
+    return new THREE.Vector3(dx / len, dy / len, dz / len);
 }
 
 // ── Utilities ──────────────────────────────────────────────────────────────
@@ -1237,6 +4196,112 @@ function _hex(colorStr) {
     if (typeof colorStr === "number") return colorStr;
     if (!colorStr) return 0xffffff;
     return parseInt(colorStr.replace("#", ""), 16);
+}
+
+/**
+ * Circular orbital speed at altitude `altKm`. Uses Earth's standard
+ * gravitational parameter μ = 398 600.4418 km³/s² and the WGS-72 mean
+ * radius (matches the SGP4 propagator's RE_KM upstream so we stay on
+ * one consistent reference). Returns km/s.
+ *
+ *   v = √(μ / (Rₑ + h))
+ *
+ * For ISS @ 420 km this gives 7.66 km/s, the canonical value.
+ */
+function _circularOrbitalSpeedKmS(altKm) {
+    const MU = 398600.4418;     // km³/s²
+    const RE = 6378.135;        // km, WGS-72
+    const r = RE + altKm;
+    return Math.sqrt(MU / r);
+}
+
+/**
+ * Stable key for an unordered probe pair. Sorted-string concat so
+ * (iss, hubble) and (hubble, iss) hash to the same chord line.
+ */
+function _pairKey(idA, idB) {
+    return idA < idB ? `${idA}__${idB}` : `${idB}__${idA}`;
+}
+
+/**
+ * Build one chord-line scaffold (2-vertex BufferGeometry +
+ * additive-blended LineBasicMaterial). Used both for the fixed
+ * asset-asset pairs and for the recyclable debris-threat pool;
+ * userData is filled in by the caller / per-frame update.
+ */
+/**
+ * Paint one chord line from `pa` to `pb` and color/opacity-modulate
+ * by the TCA prediction `c`. Shared by the asset-asset branch and
+ * the debris-pool branch of _updateConjunctionLines.
+ */
+function _paintChordLine(line, pa, pb, c, watchKm) {
+    const pos = line.geometry.attributes.position.array;
+    pos[0] = pa.x; pos[1] = pa.y; pos[2] = pa.z;
+    pos[3] = pb.x; pos[4] = pb.y; pos[5] = pb.z;
+    line.geometry.attributes.position.needsUpdate = true;
+    // Color by predicted TCA distance — red <10 km, orange <50 km,
+    // yellow <200 km. Opacity ramps up as the *current* separation
+    // approaches the predicted TCA distance, so the line literally
+    // lights up at the moment of closest approach.
+    const col = c.tcaDistKm < 10  ? 0xff3060
+              : c.tcaDistKm < 50  ? 0xff8a3a
+              : 0xffd060;
+    line.material.color.setHex(col);
+    const ratio = Math.max(0, 1 - (c.currDistKm / Math.max(watchKm, c.tcaDistKm * 4)));
+    line.material.opacity = 0.20 + 0.55 * ratio;
+}
+
+function _buildChordLine(userData) {
+    const positions = new Float32Array(6);
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const mat = new THREE.LineBasicMaterial({
+        color:       0x888888,
+        transparent: true,
+        opacity:     0.0,
+        depthWrite:  false,
+        blending:    THREE.AdditiveBlending,
+    });
+    const line = new THREE.Line(geom, mat);
+    line.frustumCulled = false;
+    line.userData = { kind: 'conjunction-chord', ...userData };
+    return line;
+}
+
+/**
+ * O(1) probe-position lookup via the precomputed phase-indexed
+ * table. simSec is the current simulated-orbital-time in seconds;
+ * we resolve it to a fractional phase index, then linearly
+ * interpolate between adjacent table entries for sub-sample
+ * smoothness (matters at TCA where the curve is flattest).
+ *
+ * Falls back to a fresh trig-based propagate if the lookup table
+ * isn't built yet — happens only on the very first frame post-spawn.
+ */
+function _lookupProbePosition(probe, simSec) {
+    const periodSec = probe.spec.orbital.periodMin * 60;
+    if (!probe._propTable || !periodSec) {
+        const M = probe._phase0 + 2 * Math.PI * simSec / Math.max(periodSec, 1);
+        const TAU = 2 * Math.PI;
+        const tFrac = ((M / TAU) % 1 + 1) % 1;
+        const r = 1 + probe.spec.altitudeKm / R_EARTH_KM;
+        return _propagateKeplerian(probe.spec.orbital, tFrac, r);
+    }
+    const N = probe._propTableN;
+    const M = probe._phase0 + 2 * Math.PI * simSec / periodSec;
+    const TAU = 2 * Math.PI;
+    const phaseFrac = ((M / TAU) % 1 + 1) % 1;
+    const fIdx = phaseFrac * N;
+    const k0 = Math.floor(fIdx) % N;
+    const k1 = (k0 + 1) % N;
+    const t  = fIdx - Math.floor(fIdx);
+    const tbl = probe._propTable;
+    const a0 = k0 * 3, a1 = k1 * 3;
+    return {
+        x: tbl[a0]     * (1 - t) + tbl[a1]     * t,
+        y: tbl[a0 + 1] * (1 - t) + tbl[a1 + 1] * t,
+        z: tbl[a0 + 2] * (1 - t) + tbl[a1 + 2] * t,
+    };
 }
 
 // Distribute streamer launch points across the sunward hemisphere — a
@@ -1322,9 +4387,95 @@ function _tipHTML(userData, profile, swState) {
             }
             break;
         case 'sun-marker':
-            detail = `sunward direction`;
+        case 'sun-stream':
+            detail = `solar emission source`;
             dataLines = `<div style="color:#666;font-size:10px;margin-top:2px">${userData.tooltip}</div>`;
             break;
+        case 'iss-probe':
+        case 'sat-probe': {
+            // Live satellite probe. Drag pressure q = ½ρv² uses the
+            // *current* probe altitude (so eccentric-orbit apogee/
+            // perigee swings show up) and the circular orbital speed
+            // at that altitude: v = √(μ/(R+h)).
+            const incl = userData.spec?.orbital?.inclinationDeg;
+            const period = userData.spec?.orbital?.periodMin;
+            detail = `${userData.altKm.toFixed(0)} km`
+                + (incl ? ` · ${incl}°` : '')
+                + (period ? ` · ${period.toFixed(1)} min` : '')
+                + ` · click to fly here`;
+            if (profile?.samples?.length) {
+                const rho = _nearestRho(profile.samples, userData.altKm);
+                const v = _circularOrbitalSpeedKmS(userData.altKm) * 1000;   // m/s
+                const q = 0.5 * rho * v * v;                                  // Pa
+                dataLines = `
+                    <div style="color:#9cf">ρ = ${rho.toExponential(2)} kg/m³ · v ≈ ${(v / 1000).toFixed(2)} km/s</div>
+                    <div style="color:#0fc">drag q ≈ ${(q * 1000).toFixed(2)} mPa</div>
+                    <div style="color:#666;font-size:10px;margin-top:2px">${userData.tooltip}</div>`;
+            } else {
+                dataLines = `<div style="color:#666;font-size:10px;margin-top:2px">${userData.tooltip}</div>`;
+            }
+            break;
+        }
+        case 'sat-orbit-path':
+            detail = `${userData.altKm} km · orbital track`;
+            dataLines = `<div style="color:#666;font-size:10px;margin-top:2px">${userData.tooltip}</div>`;
+            break;
+        case 'debris-piece': {
+            // Per-piece debris readout. Live ρ at the piece's altitude
+            // + drag pressure q = ½ρv² at the circular orbital speed.
+            const incl = userData.inclinationDeg;
+            const period = userData.periodMin;
+            const norad = userData.noradId;
+            detail = `${userData.altKm} km · debris`
+                + (incl  ? ` · ${incl.toFixed(1)}°` : '')
+                + (period ? ` · ${period.toFixed(1)} min` : '')
+                + ` · click to fly here`;
+            const lines = [];
+            if (norad) lines.push(`<div style="color:#9ab">NORAD ${norad}</div>`);
+            if (profile?.samples?.length) {
+                const rho = _nearestRho(profile.samples, userData.altKm);
+                const v = _circularOrbitalSpeedKmS(userData.altKm) * 1000;
+                const q = 0.5 * rho * v * v;
+                lines.push(
+                    `<div style="color:#9cf">ρ = ${rho.toExponential(2)} kg/m³ · v ≈ ${(v / 1000).toFixed(2)} km/s</div>`,
+                    `<div style="color:#0fc">drag q ≈ ${(q * 1000).toFixed(2)} mPa</div>`,
+                );
+            }
+            lines.push(`<div style="color:#666;font-size:10px;margin-top:2px">${userData.tooltip}</div>`);
+            dataLines = lines.join('');
+            break;
+        }
+        case 'magnetic-cascade-line': {
+            const L = userData.L?.toFixed(1) ?? '—';
+            const labelColor = userData.color || '#9cf';
+            detail = `L = ${L} · <span style="color:${labelColor}">${userData.label || ''}</span>`;
+            dataLines = `
+                <div style="color:#9ab;font-size:10px;margin-top:2px">${userData.population || ''}</div>
+                <div style="color:#666;font-size:10px;margin-top:1px">family: ${userData.family || ''}</div>`;
+            break;
+        }
+        case 'auroral-oval': {
+            detail = `${userData.band === 'equatorward' ? 'Equatorward' : 'Poleward'} edge · ${userData.hemisphere} · ~${userData.altKm} km`;
+            dataLines = `<div style="color:#666;font-size:10px;margin-top:2px">${userData.tooltip || ''}</div>`;
+            break;
+        }
+        case 'polar-cusp': {
+            detail = `Polar cusp · ${userData.hemisphere} · ~${userData.altKm} km`;
+            dataLines = `<div style="color:#666;font-size:10px;margin-top:2px">${userData.tooltip || ''}</div>`;
+            break;
+        }
+        case 'mlt-marker': {
+            detail = `MLT ${userData.mlt.toString().padStart(2, '0')} · ${userData.label}`;
+            dataLines = `<div style="color:#666;font-size:10px;margin-top:2px">${userData.tooltip || ''}</div>`;
+            break;
+        }
+        case 'fac-region-1':
+        case 'fac-region-2': {
+            const region = userData.region;
+            detail = `Region ${region} Birkeland · ${userData.hemisphere} · ~${userData.altKm} km`;
+            dataLines = `<div style="color:#666;font-size:10px;margin-top:2px">${userData.tooltip || ''}</div>`;
+            break;
+        }
         default:
             detail = userData.altKm != null ? `${userData.altKm} km` : '';
     }

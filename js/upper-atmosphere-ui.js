@@ -26,8 +26,18 @@ import {
     fetchProfile,
     fetchLiveIndices,
 } from './upper-atmosphere-engine.js';
+import { getRealtimeDriver } from './upper-atmosphere-realtime.js';
+import { projectDragState } from './drag-forecast-projector.js';
 import { ATMOSPHERIC_LAYER_SCHEMA } from './upper-atmosphere-layers.js';
 import { layerPhysics } from './upper-atmosphere-physics.js';
+import { DEBRIS_FAMILIES } from './debris-catalog.js';
+import { CONSTELLATIONS } from './constellation-catalog.js';
+import {
+    probabilityOfCollision, pcRisk, recommendDeltaV,
+    formatDeltaV, deltaVToFuelKg,
+} from './collision-avoidance.js';
+import { buildAnalyticsBundle }
+    from './upper-atmosphere-space-weather-analytics.js';
 
 // ── Palette (matches the globe's density ramp in spirit) ────────────────────
 const SPECIES_COLORS = {
@@ -68,22 +78,683 @@ export class UpperAtmosphereUI {
         this._refreshInflight = null;
         this._refreshTimer = null;
 
+        this._realtimeEnabled = true;
+        this._userPinnedKey   = null;   // 'f107'|'ap' if user moved a slider
+        this._userPinnedAt    = 0;
+        // Drag-forecast horizon. 0 = nowcast (live driver values applied
+        // straight to the engine). >0 hours = AR(1) projection of F10.7/Ap
+        // over the realtime driver's history window. Updated by the
+        // horizon-pill UI (_bindForecastHorizon).
+        this._forecastHorizonHours = 0;
+        this._forecastSkill = 1.0;
         this._bindInputs();
         this._renderPresets();
         this._renderLayerLegend();
         this._renderLayerControls();
         this._bindFieldModeRadio();
+        this._bindDragForecast();
         this._bindLiveButton();
         this._bindSourcePill();
         this._bindSwpcEventBus();
+        this._bindRealtimeBus();
+        this._bindCameraControls();
+        this._bindTleFreshnessBus();
         this._bindResize();
         this._paintSourcePill();
+        // Initial paint of the TLE-freshness pill — mostly so the
+        // pulsing "fetching" state shows on first paint instead of
+        // appearing on the first refresh().
+        this._paintTleFreshness();
         // Push climatology defaults so the magnetopause / bow shock /
         // streamers all light up at first paint instead of sitting on a
         // hard-coded uniform value.
         this._applySolarWindToGlobe();
         this._paintSolarWindStats();
         this.refresh();
+        this._startCameraHUDLoop();
+    }
+
+    // ── Camera HUD ──────────────────────────────────────────────────────────
+    // Wires the orbit/fly toggle + Visit ISS button + the live readout
+    // panel that samples the engine at the camera's current altitude. The
+    // readout updates on a 4-Hz tick instead of every frame so a 60 fps
+    // user doesn't pay 60× the engine cost for a panel they aren't even
+    // necessarily looking at.
+
+    _bindCameraControls() {
+        const { camOrbitBtn, camFlyBtn, camIssBtn } = this.el;
+        const setMode = (mode) => {
+            const m = this.globe.setCameraMode?.(mode) || mode;
+            camOrbitBtn?.classList.toggle('ua-cam-on', m === 'orbit');
+            camFlyBtn  ?.classList.toggle('ua-cam-on', m === 'fly');
+            if (this.el.camMode) this.el.camMode.textContent = m;
+            if (this.el.camHint) {
+                this.el.camHint.textContent = m === 'fly'
+                    ? 'WASD move · Q/E down/up · Shift fast · drag to look'
+                    : 'drag to rotate · scroll to zoom';
+            }
+        };
+        camOrbitBtn?.addEventListener('click', () => setMode('orbit'));
+        camFlyBtn  ?.addEventListener('click', () => setMode('fly'));
+        camIssBtn  ?.addEventListener('click', () => {
+            // Phase 25: Visit ISS now LOCKS follow — the camera tracks
+            // the probe as it propagates, instead of arriving at one
+            // point in space and watching the ISS sail away.
+            setMode('fly');
+            this.globe.followISS?.();
+        });
+
+        // Phase 25: preset / utility controls. Reset returns home view
+        // and drops any follow lock; Top snaps to polar; Zoom in/out
+        // adjust distance for users without a scroll wheel (or who
+        // prefer discrete steps); Stop-follow appears whenever a
+        // follow is engaged.
+        const { camResetBtn, camTopBtn, camZoomInBtn, camZoomOutBtn, camStopFollowBtn } = this.el;
+        camResetBtn?.addEventListener('click', () => {
+            this.globe.resetCameraView?.();
+            // setMode after resetView so the orbit pose is the default.
+            setTimeout(() => setMode('orbit'), 1000);
+        });
+        camTopBtn?.addEventListener('click', () => {
+            // Top-view sits high above the north pole; orbit mode lets
+            // the operator drag-rotate from there cleanly.
+            this.globe.cameraTopView?.();
+            setTimeout(() => setMode('orbit'), 1000);
+        });
+        // Zoom buttons nudge the camera radially. We multiply position
+        // by a factor — slower close to Earth, faster far away — so a
+        // single click visibly moves the camera at both ends of the
+        // distance range.
+        const stepZoom = (factor) => {
+            const cam = this.globe?._camera;
+            if (!cam) return;
+            const dist = cam.position.length();
+            const next = Math.max(1.05, Math.min(28, dist * factor));
+            cam.position.multiplyScalar(next / dist);
+        };
+        camZoomInBtn ?.addEventListener('click', () => stepZoom(0.82));
+        camZoomOutBtn?.addEventListener('click', () => stepZoom(1 / 0.82));
+
+        camStopFollowBtn?.addEventListener('click', () => {
+            this.globe.stopFollowing?.();
+            this._refreshFollowUi();
+        });
+
+        // Poll the follow state at the same 4 Hz the readout uses, so
+        // the Stop-follow button surfaces immediately when a click on
+        // the canvas engages tracking.
+        this._followUiTimer = setInterval(() => this._refreshFollowUi(), 250);
+    }
+
+    /** Show/hide the Stop-follow button based on globe.isFollowing(). */
+    _refreshFollowUi() {
+        const btn = this.el.camStopFollowBtn;
+        if (!btn) return;
+        const on = !!this.globe.isFollowing?.();
+        btn.classList.toggle('is-hidden', !on);
+        // Also light up the readout's mode chip when following.
+        if (this.el.camMode) {
+            this.el.camMode.classList.toggle('ua-cam-mode--follow', on);
+            if (on) {
+                const tgt = this.globe.getFollowTarget?.();
+                this.el.camMode.textContent = tgt?.kind === 'sat'
+                    ? `following ${tgt.id}`
+                    : tgt?.kind === 'debris'
+                        ? `following debris #${tgt.idx}`
+                        : 'following';
+            }
+        }
+        if (this.el.camHint && on) {
+            this.el.camHint.textContent = 'tracking target · Orbit/Fly/Reset to release';
+        }
+    }
+
+    /**
+     * Tick the HUD readout at 4 Hz, reading camera altitude from the
+     * globe and re-sampling local physics from the engine. Decoupled
+     * from refresh() so the HUD stays correct as the user flies around
+     * without having to spam the full slider-driven refresh.
+     *
+     * Also re-paints the satellite drag-analysis panel — its altitudes
+     * change every frame as probes orbit, so a static refresh-only
+     * paint would show stale values for every satellite with non-zero
+     * eccentricity. 4 Hz is plenty smooth for a side panel.
+     */
+    _startCameraHUDLoop() {
+        const tick = () => {
+            this._paintCameraHUD();
+            this._paintSatelliteDrag();
+            this._paintConjunctionWatch();
+            this._paintAvoidancePanel();
+        };
+        clearInterval(this._camHUDTimer);
+        this._camHUDTimer = setInterval(tick, 250);
+        // Family panel + constellation toggles repaint less often —
+        // they only change when the debris sample loads or the user
+        // flips a toggle.
+        this._renderDebrisFamilies();
+        this._renderConstellationToggles();
+        window.addEventListener('ua-debris-update', () => this._renderDebrisFamilies());
+        tick();
+    }
+
+    /**
+     * Paint the conjunction-watch panel from the globe's pairwise
+     * screener cache. Each row carries the pair's current centre-to-
+     * centre separation, predicted TCA distance + eta, and a
+     * watch/alert/critical class that drives the row's tinting.
+     *
+     * Row tinting thresholds match the globe's chord coloring:
+     *   crit   < 10 km
+     *   alert  < 50 km
+     *   watch  < 200 km
+     *   muted  >= 200 km
+     */
+    _paintConjunctionWatch() {
+        const box = this.el.conjunctionBox;
+        if (!box) return;
+        const pairs = this.globe?.getConjunctionAnalysis?.() ?? [];
+        if (!pairs.length) {
+            box.innerHTML = '<div class="ua-dim" style="font-size:.7rem">no probe pairs to screen</div>';
+            return;
+        }
+        // Cap visible row count so a debris-heavy snapshot doesn't
+        // unroll a massive list. Asset-asset pairs always show; we
+        // append the closest debris threats up to a budget.
+        const MAX_ROWS = 12;
+        const assetPairs = pairs.filter(p => p.kind === 'asset-asset');
+        const debrisPairs = pairs.filter(p => p.kind === 'asset-debris');
+        const displayed = assetPairs.concat(debrisPairs).slice(0, MAX_ROWS);
+
+        const html = displayed.map(p => {
+            const cls = p.tcaDistKm < 10  ? 'ua-conj-row--crit'
+                      : p.tcaDistKm < 50  ? 'ua-conj-row--alert'
+                      : p.tcaDistKm < 200 ? 'ua-conj-row--watch'
+                      : '';
+            const tcaCol = p.tcaDistKm < 10  ? '#ff3060'
+                         : p.tcaDistKm < 50  ? '#ff8a3a'
+                         : p.tcaDistKm < 200 ? '#ffcc60'
+                         : '#9ab';
+            const tcaText = p.tcaDistKm > 9999
+                ? p.tcaDistKm.toExponential(2)
+                : p.tcaDistKm.toFixed(p.tcaDistKm < 100 ? 1 : 0);
+            const currText = p.currDistKm.toFixed(p.currDistKm < 100 ? 1 : 0);
+            const etaMin = p.tcaTimeSec / 60;
+            const etaText = etaMin < 1 ? 'now'
+                           : etaMin < 60 ? `${etaMin.toFixed(0)}m`
+                           : `${(etaMin / 60).toFixed(1)}h`;
+            // Truncate long debris names so the layout stays tidy.
+            const bShort = p.bName.length > 22 ? p.bName.slice(0, 21) + '…' : p.bName;
+            const aShort = p.aName.length > 22 ? p.aName.slice(0, 21) + '…' : p.aName;
+            // For asset-debris pairs, look up the family + size meta
+            // so the row badge reads "FY-1C SMALL" instead of bare DEB.
+            // The globe stores debris by id; we recover the index by id.
+            let famBadge = '';
+            let pcText   = '';
+            if (p.kind === 'asset-debris') {
+                const debrisIdx = (this.globe?._debris || []).findIndex(d => d.spec.id === p.bId);
+                const meta = this.globe?.getDebrisMetaByIndex?.(debrisIdx);
+                if (meta?.family) {
+                    const sizeTag = meta.size?.class
+                        ? `<span style="opacity:.7">${meta.size.class.toUpperCase()}</span>`
+                        : '';
+                    famBadge = `
+                        <span style="color:${meta.family.color};font-size:.58rem;font-weight:700;letter-spacing:.04em"
+                              title="${meta.family.name}">
+                            ${this._shortFamilyTag(meta.family.id)}
+                            ${sizeTag}
+                        </span>`;
+                }
+                // Quick Pc preview right in the row so the user sees
+                // the magnitude without opening the avoidance panel.
+                const { pc } = probabilityOfCollision({
+                    missKm: p.tcaDistKm,
+                    tcaSec: p.tcaTimeSec,
+                    kind:   'asset-debris',
+                });
+                const pcRisk_ = pcRisk(pc);
+                pcText = `<span class="ua-conj-pc" style="color:${pcRisk_.color}"
+                                title="Probability of Collision (Foster 1D, σ scales with TCA)">
+                            Pc ≈ ${pc.toExponential(1)}
+                          </span>`;
+            }
+            return `
+              <div class="ua-conj-row ${cls}" title="${p.aName} ↔ ${p.bName}${p.bNorad ? ' · NORAD ' + p.bNorad : ''}">
+                <span class="ua-conj-pair">
+                    <span class="ua-conj-dot" style="background:${p.aColor};color:${p.aColor}"></span>
+                    <span>${aShort}</span>
+                    <span class="ua-conj-link">↔</span>
+                    <span class="ua-conj-dot" style="background:${p.bColor};color:${p.bColor}"></span>
+                    <span>${bShort}</span>
+                    ${famBadge}
+                </span>
+                <span class="ua-conj-meta">
+                    <span>now ${currText} km</span>
+                    ${pcText}
+                </span>
+                <span class="ua-conj-tca" style="color:${tcaCol}">
+                    ${tcaText} km
+                    <span class="ua-conj-eta">in ${etaText}</span>
+                </span>
+              </div>
+            `;
+        }).join('');
+        // Footer when we truncated.
+        const trailing = pairs.length > displayed.length
+            ? `<div class="ua-dim" style="font-size:.62rem;margin-top:4px;text-align:right">+${pairs.length - displayed.length} more pairs screened</div>`
+            : '';
+        box.innerHTML = html + trailing;
+    }
+
+    // ── Debris family roll-up ────────────────────────────────────────────
+    //
+    // Aggregates the loaded debris sample by source-event family and
+    // renders a compact bar / count list. Each row shows the family
+    // name + year, a colored swatch, the in-sample count, and the
+    // catalog-wide tracked-fragment estimate so users can extrapolate
+    // from the visualization-grade sample to operational scale.
+
+    /**
+     * Map debris-family id → 4-character row badge for the conjunction
+     * panel. Mirror the family name's mnemonic so users can scan rows.
+     */
+    _shortFamilyTag(id) {
+        const m = {
+            'fengyun-1c':            'FY-1C',
+            'cosmos-iridium-2009':   'IR-33',
+            'cosmos-1408':           'C1408',
+            'mission-shakti':        'SHKTI',
+            'long-march-6a':         'CZ-6A',
+            'noaa-breakups':         'NOAA',
+            'rocket-bodies':         'R/B',
+            'generic-debris':        'DEB',
+            'unknown':               'UNK',
+        };
+        return m[id] || 'DEB';
+    }
+
+    _renderDebrisFamilies() {
+        const box = this.el.debrisFamilies;
+        if (!box) return;
+        const families = this.globe?.getDebrisFamilyBreakdown?.() ?? [];
+        if (!families.length) {
+            box.innerHTML = '<div class="ua-dim" style="font-size:.7rem">'
+                          + 'waiting for debris catalog…</div>';
+            return;
+        }
+        const totalSample = families.reduce((s, f) => s + f.count, 0);
+        // Total catalog-wide tracked debris across the registry — for
+        // the "showing X of Y tracked" framing.
+        const totalCatalog = DEBRIS_FAMILIES.reduce((s, f) => s + (f.tracked || 0), 0);
+        const html = families.map(({ family, count, mediumEnergyMJ }) => {
+            const pct = (100 * count / totalSample).toFixed(0);
+            const yr  = family.year ? ` · ${family.year}` : '';
+            const energyTxt = mediumEnergyMJ > 0
+                ? `<span style="color:#cc9">${(mediumEnergyMJ / 1000).toFixed(1)} GJ Σ</span>`
+                : '';
+            return `
+              <div class="ua-fam-row" title="${family.summary}">
+                <span class="ua-fam-swatch" style="background:${family.color}"></span>
+                <span class="ua-fam-name">${family.name}${yr}</span>
+                <span class="ua-fam-count">${count}</span>
+                <span class="ua-fam-bar">
+                  <span class="ua-fam-bar-fill"
+                        style="width:${pct}%; background:${family.color}"></span>
+                </span>
+                <span class="ua-fam-energy">${energyTxt}</span>
+              </div>`;
+        }).join('');
+        const footer = `
+          <div class="ua-dim" style="font-size:.6rem;margin-top:6px;line-height:1.4">
+            Showing ${totalSample} of ~${totalCatalog.toLocaleString()} tracked
+            objects in the LEO debris registry. Σ energy is sample-only,
+            kinetic at 14 km/s closing speed.
+          </div>`;
+        box.innerHTML = html + footer;
+    }
+
+    // ── Collision avoidance recommendations ──────────────────────────────
+    //
+    // For the closest active threat (asset-debris pair under 50 km TCA),
+    // compute the recommended evasion Δv via Clohessy-Wiltshire and
+    // report the operational decision. The thresholds are conservative
+    // versions of CCSDS-recommended COLA tiers:
+    //
+    //   < 1 km miss → maneuver (red)
+    //   < 5 km miss → consider maneuver (amber)
+    //   < 50 km miss → monitor (yellow)
+    //   ≥ 50 km miss → nominal (green)
+    //
+    // Δv recommendations assume a circular reference orbit; the model
+    // returns the cheapest in-track impulse needed to clear a 5-km
+    // safety margin given the current TCA lookahead. Real ops would
+    // also screen the post-burn trajectory for secondary conjunctions —
+    // we don't here.
+
+    _paintAvoidancePanel() {
+        const box = this.el.avoidanceBox;
+        if (!box) return;
+        const pairs = this.globe?.getConjunctionAnalysis?.() ?? [];
+        if (!pairs.length) {
+            box.innerHTML = '<div class="ua-dim" style="font-size:.7rem">'
+                          + 'no conjunctions to evaluate.</div>';
+            return;
+        }
+
+        // Pull the top 3 threats: prefer asset-debris (the operational
+        // case) but fall back to asset-asset if no debris pair has
+        // crossed the screening threshold yet.
+        const threats = pairs
+            .filter(p => p.tcaDistKm < 200)
+            .slice(0, 3);
+
+        if (!threats.length) {
+            box.innerHTML = `
+              <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;
+                          background:rgba(96,200,144,.10);border-radius:6px;
+                          border:1px solid rgba(96,200,144,.3)">
+                <span style="color:#80c890;font-weight:700">●</span>
+                <span style="font-size:.74rem;color:#a4d8b0">Nominal — no
+                pairs within 200 km TCA.</span>
+              </div>`;
+            return;
+        }
+
+        const cards = threats.map(p => {
+            const altKm = (this.globe?._satProbes?.[p.aId]?.spec?.altitudeKm) ?? 500;
+            const { pc } = probabilityOfCollision({
+                missKm: p.tcaDistKm,
+                tcaSec: p.tcaTimeSec,
+                kind:   p.kind,
+            });
+            const risk = pcRisk(pc);
+            const rec = recommendDeltaV({
+                altKm,
+                tcaSec:        p.tcaTimeSec,
+                currentMissKm: p.tcaDistKm,
+                targetMissKm:  5,
+            });
+            const fuelG = deltaVToFuelKg(rec.dvInTrackMS) * 1000;
+            // For asset-debris, surface the family + size so the user
+            // sees what they're avoiding.
+            let famLine = '';
+            if (p.kind === 'asset-debris') {
+                const idx = (this.globe?._debris || []).findIndex(d => d.spec.id === p.bId);
+                const meta = this.globe?.getDebrisMetaByIndex?.(idx);
+                if (meta?.family) {
+                    famLine = `
+                      <div class="ua-av-fam" style="color:${meta.family.color}">
+                        ${meta.family.name}
+                        ${meta.size?.class ? `· ${meta.size.class} (${meta.size.rangeM})` : ''}
+                        ${meta.size?.massKg ? `· ~${meta.size.massKg} kg` : ''}
+                      </div>`;
+                }
+            }
+            const action = !rec.feasible ? 'TCA too close — shelter / orient'
+                          : rec.dvInTrackMS === 0
+                            ? 'Current miss exceeds 5 km — no action'
+                            : `Burn ${formatDeltaV(rec.dvInTrackMS)} prograde`;
+            // Direction explanation: positive Δv in-track shifts the
+            // asset along-track (raising orbit slightly + delaying TCA);
+            // negative Δv (retrograde) lowers + advances. Either works
+            // — we report the magnitude.
+            return `
+              <div class="ua-av-card" style="border-left:3px solid ${risk.color}">
+                <div class="ua-av-head">
+                  <span class="ua-av-pair">
+                    ${p.aName} <span style="opacity:.6">↔</span> ${p.bName}
+                  </span>
+                  <span class="ua-av-tier" style="background:${risk.color}20;color:${risk.color}">
+                    ${risk.label.toUpperCase()}
+                  </span>
+                </div>
+                ${famLine}
+                <div class="ua-av-stats">
+                  <span title="Predicted miss distance at TCA">
+                    miss <b>${p.tcaDistKm.toFixed(2)} km</b>
+                  </span>
+                  <span title="Probability of collision (Foster 1D)">
+                    Pc <b>${pc.toExponential(2)}</b>
+                  </span>
+                  <span title="Time-to-closest-approach in simulated orbital seconds">
+                    TCA <b>${(p.tcaTimeSec / 60).toFixed(0)} min</b>
+                  </span>
+                </div>
+                <div class="ua-av-action">
+                  <span class="ua-av-action-icon" style="color:${risk.color}">▸</span>
+                  ${action}
+                </div>
+                <div class="ua-av-meta">
+                  in-track Δv <b>${formatDeltaV(rec.dvInTrackMS)}</b>
+                  · radial Δv ${formatDeltaV(rec.dvRadialMS)}
+                  · lead ${(rec.leadSec / 60).toFixed(0)} min
+                  ${fuelG > 0 ? `· fuel ~${fuelG.toFixed(1)} g (Hall, Isp 1500 s)` : ''}
+                </div>
+              </div>`;
+        }).join('');
+        box.innerHTML = cards + `
+          <div class="ua-dim" style="font-size:.6rem;margin-top:6px;line-height:1.4">
+            Δv from Clohessy-Wiltshire on a circular reference orbit;
+            Pc via Foster 1D with σ ∝ TCA lookahead. Visualization-grade
+            — operational COLA needs CDM-derived covariance.
+          </div>`;
+    }
+
+    // ── Constellation toggles ────────────────────────────────────────────
+    //
+    // Render the constellation registry as a row of toggle chips.
+    // Each chip flips visibility on the globe's overlay cloud for that
+    // constellation; clouds are lazily built on first enable. MEO
+    // constellations are flagged so the user knows they live well
+    // outside the camera's default zoom.
+
+    _renderConstellationToggles() {
+        const box = this.el.constellationToggles;
+        if (!box) return;
+        const html = CONSTELLATIONS.map(c => {
+            const meoTag = c.meo ? ' · MEO' : '';
+            return `
+              <button type="button"
+                      class="ua-cn-chip"
+                      data-cn-id="${c.id}"
+                      style="--cn-c:${c.color}"
+                      title="${c.summary}">
+                <span class="ua-cn-swatch" style="background:${c.color}"></span>
+                <span class="ua-cn-name">${c.name}</span>
+                <span class="ua-cn-meta">${c.countActive}${meoTag}</span>
+              </button>`;
+        }).join('');
+        box.innerHTML = html + `
+          <div class="ua-dim" style="font-size:.6rem;margin-top:6px;line-height:1.4;flex-basis:100%">
+            Visualization-grade Walker overlays. Click to render a
+            representative sample of ${CONSTELLATIONS.reduce((s,c)=>s+c.sampleCount,0)}
+            dots across all constellations.
+          </div>`;
+        box.querySelectorAll('.ua-cn-chip').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const id = btn.dataset.cnId;
+                const on = !btn.classList.contains('ua-cn-on');
+                btn.classList.toggle('ua-cn-on', on);
+                this.globe?.setConstellationVisible?.(id, on);
+            });
+        });
+    }
+
+    // ── TLE freshness pill ─────────────────────────────────────────────────
+
+    /**
+     * Listen for ua-tle-update events fired by the globe's
+     * _fetchLiveTLEs(). The event detail is { total, live, fetchedAt }
+     * — we use that to repaint the freshness pill from "fetching…"
+     * to "live · X ago" (or "fallback" if every fetch failed).
+     *
+     * Also schedule a 60-s repaint so the "X ago" text stays current
+     * as time advances (without forcing a network refetch).
+     */
+    _bindTleFreshnessBus() {
+        window.addEventListener('ua-tle-update', () => this._paintTleFreshness());
+        window.addEventListener('ua-debris-update', () => this._paintDebrisPill());
+        clearInterval(this._tleAgeTimer);
+        this._tleAgeTimer = setInterval(() => {
+            this._paintTleFreshness();
+            this._paintDebrisPill();
+        }, 60_000);
+        this._paintDebrisPill();
+    }
+
+    _paintDebrisPill() {
+        const pill  = this.el.debrisPill;
+        const label = this.el.debrisLabel;
+        if (!pill || !label) return;
+        const n = this.globe?.getDebrisCount?.() ?? 0;
+        if (n === 0) {
+            pill.className = 'ua-tle-pill ua-tle-pill--pending';
+            label.textContent = 'fetching debris…';
+        } else {
+            pill.className = 'ua-tle-pill ua-tle-pill--live';
+            // Surface freshness so users can see the cloud is being kept
+            // current against the live 18 SDS catalog (refresh fires
+            // hourly + on tab refocus when stale).
+            const fetchedAt = this.globe?._debrisFetchedAt;
+            let suffix = '';
+            if (Number.isFinite(fetchedAt)) {
+                const ageS = Math.max(0, (Date.now() - fetchedAt) / 1000);
+                suffix = ` · ${_ageString(ageS)}`;
+            }
+            label.textContent = `${n} debris tracked · LEO${suffix}`;
+        }
+    }
+
+    _paintTleFreshness() {
+        const pill  = this.el.tleFreshness;
+        const label = this.el.tleLabel;
+        if (!pill || !label) return;
+
+        const summary = this.globe?.getTleSummary?.();
+        // Keep CSS class names in sync with upper-atmosphere.html.
+        const setKind = (kind) => {
+            pill.className = `ua-tle-pill ua-tle-pill--${kind}`;
+        };
+
+        if (!summary) {
+            setKind('pending');
+            label.textContent = 'fetching TLEs…';
+            return;
+        }
+        const { total, live, fetchedAt } = summary;
+        const ageS = Math.max(0, (Date.now() - fetchedAt) / 1000);
+        const agoStr = _ageString(ageS);
+
+        if (live === 0) {
+            setKind('fallback');
+            label.textContent = `fallback elements · 0 / ${total} live`;
+        } else if (live < total) {
+            setKind('partial');
+            label.textContent = `live ${live} / ${total} · ${agoStr}`;
+        } else {
+            setKind('live');
+            label.textContent = `live TLEs · ${total} sats · ${agoStr}`;
+        }
+    }
+
+    /**
+     * Render the per-satellite drag-analysis rows. Pulls a snapshot
+     * from globe.getSatelliteDragAnalysis() (sorted by q descending)
+     * and lays out one row per satellite with a horizontal q-bar so
+     * users see "ISS feels 10× more drag than Iridium" at a glance.
+     *
+     * Click on a row flies the camera to that satellite — same path
+     * the canvas-click on a probe sprite uses.
+     */
+    _paintSatelliteDrag() {
+        const box = this.el.satDrag;
+        if (!box) return;
+        const states = this.globe.getSatelliteDragAnalysis?.() || [];
+        if (states.length === 0) {
+            box.innerHTML = '<div class="ua-dim" style="font-size:.7rem">no orbital satellites tracked</div>';
+            return;
+        }
+        // Use the highest q in the snapshot to scale the bars so the
+        // ranking is visible even when all values are tiny.
+        const maxQ = states.reduce((m, s) => Math.max(m, s.qPa ?? 0), 1e-12);
+        const html = states.map(s => {
+            const colour   = s.color || '#0cc';
+            const qmPaText = Number.isFinite(s.qmPa) ? s.qmPa.toFixed(2) : '—';
+            const altText  = Number.isFinite(s.altKm) ? `${s.altKm.toFixed(0)} km` : '—';
+            const noradTxt = s.noradId ? `NORAD ${s.noradId}` : '';
+            const inclTxt  = Number.isFinite(s.inclinationDeg) ? `${s.inclinationDeg.toFixed(1)}°` : '';
+            const liveTxt  = s.tleSource === 'live' ? '● live' : '○ fallback';
+            const liveCol  = s.tleSource === 'live' ? '#0cc'   : '#c87';
+            const meta     = [noradTxt, inclTxt].filter(Boolean).join(' · ')
+                          + ` · <span style="color:${liveCol}">${liveTxt}</span>`;
+            const fillPct  = Math.max(2, Math.min(100, ((s.qPa ?? 0) / maxQ) * 100));
+            return `
+                <div class="ua-sat-row" data-sat-id="${s.id}" title="Click to fly the camera to ${s.name}">
+                    <span class="ua-sat-dot" style="background:${colour};color:${colour}"></span>
+                    <span class="ua-sat-name">
+                        <span class="ua-sat-title">${s.name}</span>
+                        <span class="ua-sat-meta">${meta}</span>
+                    </span>
+                    <span class="ua-sat-alt">${altText}</span>
+                    <span class="ua-sat-q" style="color:${colour}">${qmPaText}<span style="color:#556;font-weight:400"> mPa</span></span>
+                    <span class="ua-sat-q-bar"><span class="ua-sat-q-fill" style="width:${fillPct}%;background:${colour}"></span></span>
+                </div>
+            `;
+        }).join('');
+        // innerHTML is fine here — values come from engine + spec
+        // (no user-supplied strings). Re-attach click handlers each
+        // re-paint since we rewrite the DOM.
+        box.innerHTML = html;
+        box.querySelectorAll('.ua-sat-row').forEach(row => {
+            row.addEventListener('click', () => {
+                const id = row.dataset.satId;
+                if (!id) return;
+                // Switch to fly mode if we're still in orbit so the
+                // camera-anim lands somewhere useful instead of being
+                // clamped back to the planet centre.
+                if (this.globe.getCameraMode?.() === 'orbit') {
+                    this.globe.setCameraMode?.('fly');
+                    if (this.el.camOrbitBtn) this.el.camOrbitBtn.classList.remove('ua-cam-on');
+                    if (this.el.camFlyBtn)   this.el.camFlyBtn  .classList.add('ua-cam-on');
+                    if (this.el.camMode)     this.el.camMode.textContent = 'fly';
+                }
+                this.globe.flyToSatellite?.(id);
+            });
+        });
+    }
+
+    _paintCameraHUD() {
+        const { camAlt, camLayer, camRho, camT, camKn } = this.el;
+        if (!camAlt) return;
+        const sample = this.globe.getCameraSampleAtState?.({
+            f107: this.state.f107, ap: this.state.ap,
+        });
+        if (!sample) return;
+
+        const altKm = sample.altitudeKm;
+        camAlt.textContent = Number.isFinite(altKm)
+            ? `${altKm.toFixed(0)} km`
+            : '—';
+
+        if (sample.outOfDomain) {
+            camLayer.textContent = altKm < 80 ? '< sim domain' : '—';
+            camRho.textContent = '—';
+            camT.textContent   = '—';
+            camKn.textContent  = '—';
+            return;
+        }
+
+        const layerName = sample.layer?.name || '—';
+        const layerHi   = sample.layer
+            ? `#${sample.layer.colorHigh.toString(16).padStart(6, '0')}`
+            : '#0cc';
+        camLayer.innerHTML = `<span class="ua-cam-layer-tag" style="color:${layerHi};border-color:${layerHi}66">${layerName}</span>`;
+        camRho.textContent = sample.ρ.toExponential(2) + ' kg/m³';
+        camT.textContent   = `${sample.T.toFixed(0)} K`;
+        camKn.textContent  = Number.isFinite(sample.knudsen)
+            ? (sample.knudsen >= 100 ? sample.knudsen.toExponential(1)
+              : sample.knudsen.toFixed(2))
+            : '∞';
     }
 
     // ── Data-source pill ────────────────────────────────────────────────────
@@ -165,6 +836,173 @@ export class UpperAtmosphereUI {
         }
     }
 
+    /**
+     * Run the AR(1) projector against the realtime driver's history ring
+     * at the requested horizon. Lazy — only called when a forecast pill is
+     * active. Returns null if the driver hasn't accumulated enough samples
+     * yet (the projector falls back to last-known internally, but we still
+     * return null so callers leave live values in place rather than swap
+     * in a flat persistence forecast that would look identical to nowcast).
+     */
+    _projectStateForHorizon(horizonHours) {
+        try {
+            const drv = getRealtimeDriver();
+            const hist = drv?.getHistory?.();
+            if (!hist || hist.length < 6) return null;
+            return projectDragState(hist, horizonHours);
+        } catch (_) {
+            return null;
+        }
+    }
+
+    /**
+     * Public: set the active drag-forecast horizon (in hours; 0 = nowcast).
+     * The next realtime tick (or an immediate refresh, below) feeds the
+     * engine AR(1)-projected F10.7/Ap instead of live values. Pure UI-state
+     * call — does not affect the globe's nowcast machinery directly; the
+     * effect propagates via the standard setState/refresh path.
+     */
+    setForecastHorizon(hours) {
+        const h = Number.isFinite(hours) ? Math.max(0, Math.round(hours)) : 0;
+        if (h === this._forecastHorizonHours) return;
+        this._forecastHorizonHours = h;
+
+        if (h === 0) {
+            // Snap straight back to live values so the UI doesn't have to
+            // wait for the next realtime tick to clear the projection.
+            const drv = getRealtimeDriver();
+            const s = drv?.getState?.();
+            if (s) this.setState({ f107: s.f107, ap: s.ap });
+            this._forecastSkill = 1.0;
+        } else {
+            const proj = this._projectStateForHorizon(h);
+            if (proj && Number.isFinite(proj.f107) && Number.isFinite(proj.ap)) {
+                this._forecastSkill = proj.skill;
+                this.setState({ f107: proj.f107, ap: proj.ap });
+            } else {
+                this._forecastSkill = 0.5;   // unknown — show muted skill bar
+            }
+        }
+        this._paintForecastHorizonPills();
+        // Force-paint the legend even before the next setProfile broadcast.
+        this._paintDragLegend(this._lastDragSnapshot);
+    }
+
+    getForecastHorizon() { return this._forecastHorizonHours; }
+
+    /**
+     * Drag-forecast checkbox + per-layer delta legend. The overlay itself
+     * lives on the globe (drag-forecast-overlay.js); we just wire the
+     * toggle + paint a tiny per-layer table from the 'ua-drag-forecast-tick'
+     * event that the globe broadcasts each setProfile() call.
+     */
+    _bindDragForecast() {
+        const cb = this.el?.dragToggle;
+        if (cb) {
+            // Reflect the globe's initial state (off) into the DOM.
+            cb.checked = !!this.globe.getDragForecastVisible?.();
+            cb.addEventListener('change', () => {
+                this.globe.setDragForecastVisible?.(!!cb.checked);
+                // Force-paint the legend on first turn-on so the user sees
+                // numbers immediately, even before the next refresh tick.
+                if (cb.checked) this._paintDragLegend(this.globe.getDragForecastSnapshot?.());
+            });
+        }
+        // Forecast horizon pills: Now / +1h / +3h / +6h / +12h / +24h.
+        const pills = this.el?.dragHorizonPills;
+        if (pills) {
+            pills.querySelectorAll('button[data-horizon]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const h = Number(btn.dataset.horizon) || 0;
+                    this.setForecastHorizon(h);
+                });
+            });
+            this._paintForecastHorizonPills();
+        }
+        window.addEventListener('ua-drag-forecast-tick', (e) => {
+            this._lastDragSnapshot = e?.detail || this._lastDragSnapshot;
+            this._paintDragLegend(this._lastDragSnapshot);
+        });
+        // When a layer is muted via the per-layer toggle, the drag legend
+        // should reflect that immediately (dimmed row + " (off)" hint)
+        // even before the next setProfile() round-trip.
+        window.addEventListener('ua-layer-visibility', () => {
+            this._paintDragLegend(this._lastDragSnapshot);
+        });
+    }
+
+    /**
+     * Reflect the active forecast horizon into the pill row. Called from
+     * setForecastHorizon() and on first paint of _bindDragForecast.
+     */
+    _paintForecastHorizonPills() {
+        const pills = this.el?.dragHorizonPills;
+        if (!pills) return;
+        const active = this._forecastHorizonHours || 0;
+        pills.querySelectorAll('button[data-horizon]').forEach(btn => {
+            const h = Number(btn.dataset.horizon) || 0;
+            btn.classList.toggle('ua-drag-pill--on', h === active);
+            btn.setAttribute('aria-pressed', h === active ? 'true' : 'false');
+        });
+        // Skill chip: dim from 100% (now) → ~40% (+24h). Surfaces the
+        // AR(1) confidence so operators don't read +24h numbers as
+        // gospel. Using a percentage is plain-spoken; the underlying
+        // skill is the projector's exp(-h/18) decay.
+        const chip = this.el?.dragHorizonChip;
+        if (chip) {
+            if (active === 0) {
+                chip.textContent = 'NOWCAST';
+                chip.classList.remove('ua-drag-chip--forecast');
+            } else {
+                const pct = Math.round((this._forecastSkill ?? 1) * 100);
+                chip.textContent = `+${active}h · skill ${pct}%`;
+                chip.classList.add('ua-drag-chip--forecast');
+            }
+        }
+    }
+
+    /** Paint per-layer drag-rate legend rows. snapshot = layerId → {rho,dRhoDt,dragQ}. */
+    _paintDragLegend(snapshot) {
+        const host = this.el?.dragLegend;
+        if (!host || !snapshot) return;
+        const layerVis = this.globe?.getLayerVisibility?.() || {};
+        // Render in altitude order so the panel reads top-of-atmosphere → down.
+        const rows = [];
+        for (const L of ATMOSPHERIC_LAYER_SCHEMA) {
+            const s = snapshot[L.id]; if (!s) continue;
+            const muted = layerVis[L.id] === false;
+            // dRhoDt is normalised so ±1 ≈ saturated colour. For the
+            // user-facing text we convert back to a %/min figure
+            // (dRhoDt × 2%/min, the inverse of the normalisation in
+            // AtmosphereGlobe._refreshDragHistory).
+            const pctPerMin = s.dRhoDt * 2;
+            const cls = pctPerMin >  0.05 ? 'ua-drag-up'
+                      : pctPerMin < -0.05 ? 'ua-drag-down'
+                      : 'ua-drag-flat';
+            const arrow = pctPerMin >  0.05 ? '▲'
+                        : pctPerMin < -0.05 ? '▼'
+                        : '·';
+            const sign = pctPerMin >= 0 ? '+' : '−';
+            const label = `${arrow} ${sign}${Math.abs(pctPerMin).toFixed(2)}%/min`;
+            // q in micro-Pa is a more readable scale at LEO altitudes
+            // (typical 200–400 km q ≈ 1e-5 Pa = 10 µPa).
+            const q_uPa = s.dragQ * 1e6;
+            const qLabel = q_uPa >= 1
+                ? `${q_uPa.toFixed(1)} µPa`
+                : q_uPa >= 1e-3
+                  ? `${(q_uPa * 1e3).toFixed(1)} nPa`
+                  : `${q_uPa.toExponential(1)} µPa`;
+            const muteCls = muted ? ' ua-drag-row-muted' : '';
+            const muteLabel = muted ? ' <span class="ua-drag-muted-tag">off</span>' : '';
+            rows.push(
+                `<span class="ua-drag-row-name${muteCls}">${L.name}${muteLabel}</span>` +
+                `<span class="ua-drag-row-q${muteCls}">q ≈ ${qLabel}</span>` +
+                `<span class="ua-drag-row-delta ${muted ? 'ua-drag-flat ua-drag-row-muted' : cls}">${muted ? '—' : label}</span>`
+            );
+        }
+        host.innerHTML = rows.join('');
+    }
+
     _bindSwpcEventBus() {
         // If the host page boots SpaceWeatherFeed (e.g. the user also has
         // space-weather.html open in a parent frame), soak up values
@@ -182,7 +1020,78 @@ export class UpperAtmosphereUI {
             };
             this._applySolarWindToGlobe();
             this._paintSolarWindStats();
+            this._paintSpaceWeatherAnalytics();
         });
+    }
+
+    /**
+     * Subscribe to the realtime driver's per-tick state. Between SWPC
+     * fetches the driver runs a Burton-style ring-current integrator
+     * off the upstream solar wind and produces a continuously-updated
+     * Ap surrogate; we feed that straight into the engine state. Slider
+     * moves "pin" the corresponding key for ~10 s so the realtime push
+     * doesn't fight the user mid-drag.
+     */
+    _bindRealtimeBus() {
+        // Mirror solar-wind values into _liveBusValues so the existing
+        // panels keep working when swpc-update isn't available but the
+        // driver is producing a current state vector.
+        window.addEventListener('ua-realtime-tick', (e) => {
+            if (!this._realtimeEnabled) return;
+            const s = e?.detail; if (!s) return;
+            this._liveBusValues = {
+                f107:    s.f107,
+                kp:      s.kp,
+                bz:      s.bz,
+                speed:   s.v,
+                density: s.n,
+                dst:     s.dst,
+            };
+            // Apply state — but skip whichever key the user just moved.
+            const pinExpired = (Date.now() - this._userPinnedAt) > 10_000;
+            const partial = {};
+            // Forecast-horizon projection: when the user has selected a
+            // horizon (e.g. +6h) we feed the engine the AR(1)-projected
+            // F10.7/Ap instead of the live values. Drops back to live the
+            // moment the horizon is set to 0 ("Now").
+            let f107Apply = s.f107;
+            let apApply   = s.ap;
+            if (this._forecastHorizonHours > 0) {
+                const proj = this._projectStateForHorizon(this._forecastHorizonHours);
+                if (proj) {
+                    if (Number.isFinite(proj.f107)) f107Apply = proj.f107;
+                    if (Number.isFinite(proj.ap))   apApply   = proj.ap;
+                    this._forecastSkill = proj.skill;
+                }
+            } else {
+                this._forecastSkill = 1.0;
+            }
+            if (this._userPinnedKey !== 'f107' || pinExpired)
+                partial.f107 = f107Apply;
+            if (this._userPinnedKey !== 'ap' || pinExpired)
+                partial.ap = apApply;
+            // Skip the redraw round-trip if nothing actually changed.
+            const changed =
+                ('f107' in partial && Math.abs((partial.f107 || 0) - this.state.f107) > 0.5) ||
+                ('ap'   in partial && Math.abs((partial.ap   || 0) - this.state.ap)   > 0.5);
+            if (changed) {
+                this.setState(partial);
+            } else {
+                this._applySolarWindToGlobe();
+                this._paintSolarWindStats();
+                this._paintSpaceWeatherAnalytics();
+            }
+        });
+    }
+
+    /**
+     * Toggle the realtime driver on/off. When off, sliders stay where
+     * the user left them and the page behaves like the legacy "static"
+     * mode. The driver itself keeps running in the background so the
+     * history strip continues to fill.
+     */
+    setRealtimeEnabled(on) {
+        this._realtimeEnabled = !!on;
     }
 
     // Push the latest solar-wind plasma state to the globe + the side
@@ -298,8 +1207,219 @@ export class UpperAtmosphereUI {
         this._paintStats();
         this._paintLayerControls();
         this._paintSourcePill();
+        this._paintSpaceWeatherAnalytics();
+        this._paintMesosphereStatus();
+
+        // Notify trajectory analyzer that ρ profile has changed so any
+        // open analysis re-runs against the new state.
+        try {
+            window.dispatchEvent(new CustomEvent('ua-profile-update', {
+                detail: { f107: this.state.f107, ap: this.state.ap }
+            }));
+        } catch (_) { /* SSR / no-window — ignore */ }
 
         if (this.useBackend) this._scheduleBackendRefresh();
+    }
+
+    /**
+     * Paint the operator-grade space-weather analytics panel — turns
+     * the (F10.7, Ap, Bz) state into actionable headlines: SWPC G-tier,
+     * Dst, drag forecast, HF blackout score, GIC threat, polar-cap
+     * absorption, NLC visibility, aurora-edge latitude.
+     */
+    _paintSpaceWeatherAnalytics() {
+        const box = this.el.swAnalytics;
+        if (!box) return;
+        const { f107, ap } = this.state;
+        const sw = this._liveBusValues || {};
+        const a = buildAnalyticsBundle({
+            f107, ap,
+            bz:        Number.isFinite(sw.bz) ? sw.bz : 0,
+            monthIdx:  new Date().getUTCMonth(),
+            hemisphere:'N',
+        });
+
+        const dragRow = `
+            <div class="ua-sw-row" style="border-left-color:${a.gStorm.color}">
+                <span class="ua-sw-k">drag</span>
+                <span class="ua-sw-v" style="color:${a.gStorm.color}">
+                    +${a.drag.excessPct.toFixed(0)} %
+                </span>
+                <span class="ua-sw-tail">
+                    T∞ ${a.drag.Tinf_K.toFixed(0)} K<br>
+                    ISS ${a.drag.issFuelKgDay.toFixed(1)} kg/d
+                </span>
+                <span class="ua-sw-bar"><span class="ua-sw-bar-fill"
+                    style="width:${Math.min(100, Math.max(2, a.drag.excessPct * 0.4 + 2)).toFixed(0)}%;
+                           background:${a.gStorm.color}"></span></span>
+            </div>`;
+
+        const stormRow = `
+            <div class="ua-sw-row" style="border-left-color:${a.gStorm.color}">
+                <span class="ua-sw-k">storm</span>
+                <span class="ua-sw-v" style="color:${a.gStorm.color}">
+                    ${a.gStorm.tier}
+                    <span class="ua-sw-tag" style="background:${a.gStorm.color}22;color:${a.gStorm.color}">
+                        ${a.gStorm.label}
+                    </span>
+                </span>
+                <span class="ua-sw-tail">Ap ${ap}</span>
+            </div>`;
+
+        const dstColor = a.dst < -250 ? '#ff3060' :
+                         a.dst < -100 ? '#ff8050' :
+                         a.dst < -50  ? '#ffcc60' :
+                                        '#80c890';
+        const dstRow = `
+            <div class="ua-sw-row" style="border-left-color:${dstColor}">
+                <span class="ua-sw-k">Dst proxy</span>
+                <span class="ua-sw-v" style="color:${dstColor}">
+                    ${a.dst.toFixed(0)} nT
+                </span>
+                <span class="ua-sw-tail">ring current</span>
+            </div>`;
+
+        const hfPct  = (a.hf.score * 100).toFixed(0);
+        const hfColor= a.hf.score > 0.7 ? '#ff5070' :
+                       a.hf.score > 0.4 ? '#ffaa50' :
+                       a.hf.score > 0.2 ? '#ffcc60' : '#80c890';
+        const rTag = a.hf.rTier
+            ? `<span class="ua-sw-tag" style="background:${hfColor}22;color:${hfColor}">${a.hf.rTier.tier}</span>`
+            : '';
+        const hfRow = `
+            <div class="ua-sw-row" style="border-left-color:${hfColor}">
+                <span class="ua-sw-k">HF abs</span>
+                <span class="ua-sw-v" style="color:${hfColor}">${hfPct} %${rTag}</span>
+                <span class="ua-sw-tail">D-region<br>F10.7 + auroral</span>
+                <span class="ua-sw-bar"><span class="ua-sw-bar-fill"
+                    style="width:${hfPct}%;background:${hfColor}"></span></span>
+            </div>`;
+
+        const gicRow = `
+            <div class="ua-sw-row" style="border-left-color:${a.gic.color}">
+                <span class="ua-sw-k">GIC risk</span>
+                <span class="ua-sw-v" style="color:${a.gic.color}">
+                    ${a.gic.tier.toUpperCase()}
+                </span>
+                <span class="ua-sw-tail">dB/dt ≈ ${a.gic.dBdt.toFixed(0)} nT/min</span>
+            </div>`;
+
+        const pcaRow = `
+            <div class="ua-sw-row" style="border-left-color:${a.pca.color}">
+                <span class="ua-sw-k">PCA</span>
+                <span class="ua-sw-v" style="color:${a.pca.color}">
+                    ${a.pca.tier.toUpperCase()}
+                </span>
+                <span class="ua-sw-tail">${
+                    a.pca.active ? `&gt; ${a.pca.latDeg}° lat` : 'no SEP cap'
+                }</span>
+            </div>`;
+
+        const nlcColor = a.nlc > 0.6 ? '#9eecff' :
+                         a.nlc > 0.2 ? '#80b8c8' : '#556';
+        const nlcRow = `
+            <div class="ua-sw-row" style="border-left-color:${nlcColor}">
+                <span class="ua-sw-k">NLC viz</span>
+                <span class="ua-sw-v" style="color:${nlcColor}">
+                    ${(a.nlc * 100).toFixed(0)} %
+                </span>
+                <span class="ua-sw-tail">summer<br>mesopause</span>
+            </div>`;
+
+        const aurRow = `
+            <div class="ua-sw-row" style="border-left-color:#ff60c0">
+                <span class="ua-sw-k">aurora</span>
+                <span class="ua-sw-v" style="color:#ff80d0">
+                    ≥ ${a.auroraEdgeDeg.toFixed(0)}°
+                </span>
+                <span class="ua-sw-tail">equatorward<br>edge (geomag)</span>
+            </div>`;
+
+        box.innerHTML = stormRow + dstRow + dragRow + hfRow + gicRow + pcaRow + nlcRow + aurRow;
+    }
+
+    /**
+     * Render a status row for each phenomena overlay (NLC, EEJ, AE, Sq).
+     * Mostly informational — this panel doesn't toggle the overlays
+     * (the globe drives them from setState), but it tells the user what
+     * they're looking at on the 3D scene.
+     */
+    _paintMesosphereStatus() {
+        const box = this.el.mesosphereBox;
+        if (!box) return;
+        const { f107, ap } = this.state;
+        const monthIdx = new Date().getUTCMonth();
+
+        // NLC seasonality — match the globe's calculation.
+        const nlcWindow = (peakM) => {
+            const d = Math.abs(((monthIdx - peakM + 12) % 12));
+            const dist = Math.min(d, 12 - d);
+            return Math.max(0, Math.cos(dist / 1.5 * Math.PI / 2));
+        };
+        const nlcN = nlcWindow(5.7);
+        const nlcS = nlcWindow(11.7);
+        const nlcOn = Math.max(nlcN, nlcS) > 0.15;
+
+        const eejBase = Math.min(1, Math.max(0, (f107 - 70) / 200));
+        const aeNorm  = Math.min(1, ap / 100);
+        const sqBase  = Math.min(1, Math.max(0, (f107 - 70) / 180))
+                      / (1 + ap / 80);
+
+        const fmtPct = v => `${(v * 100).toFixed(0)}%`;
+        const tag = (v) => v > 0.5
+            ? `<span class="ua-meso-state" style="color:#0fc">ACTIVE</span>`
+            : v > 0.15
+            ? `<span class="ua-meso-state" style="color:#fc6">faint</span>`
+            : `<span class="ua-meso-state" style="color:#556">off</span>`;
+
+        const rows = [
+            {
+                color: '#9eecff',
+                name:  'Noctilucent clouds',
+                meta:  `83 km · summer mesopause · NH ${fmtPct(nlcN)} / SH ${fmtPct(nlcS)}`,
+                active: nlcOn,
+                v: Math.max(nlcN, nlcS),
+            },
+            {
+                color: '#c0ff60',
+                name:  'Equatorial electrojet',
+                meta:  `110 km · dayside EUV current · F10.7 driver ${fmtPct(eejBase)}`,
+                active: eejBase > 0.05,
+                v: eejBase,
+            },
+            {
+                color: '#ff6dd2',
+                name:  'Auroral electrojets',
+                meta:  `110 km · ±67° lat · Ap-driven · ${fmtPct(aeNorm)}`,
+                active: aeNorm > 0.10,
+                v: aeNorm,
+            },
+            {
+                color: '#fff0a8',
+                name:  'Sq vortex pair',
+                meta:  `110 km · noon ±30° lat · quiet-time dynamo · ${fmtPct(sqBase)}`,
+                active: sqBase > 0.10,
+                v: sqBase,
+            },
+            {
+                color: '#ffd890',
+                name:  'Sporadic meteor flux',
+                meta:  '80-100 km · ~10 t/day worldwide · always on',
+                active: true,
+                v: 1,
+            },
+        ];
+
+        box.innerHTML = rows.map(r => `
+            <div class="ua-meso-row${r.active ? '' : ' ua-meso--off'}">
+                <span class="ua-meso-dot" style="background:${r.color};color:${r.color}"></span>
+                <span>
+                    <span class="ua-meso-name" style="color:${r.color}">${r.name}</span>
+                    <span class="ua-meso-meta">${r.meta}</span>
+                </span>
+                ${tag(r.v)}
+            </div>
+        `).join('');
     }
 
     _scheduleBackendRefresh() {
@@ -346,6 +1466,12 @@ export class UpperAtmosphereUI {
             el.value = String(this.state[key]);
             el.addEventListener('input', () => {
                 this.state[key] = cast(el.value);
+                // F10.7 / Ap moves pin against realtime push for ~10 s
+                // so the realtime driver doesn't fight the user.
+                if (key === 'f107' || key === 'ap') {
+                    this._userPinnedKey = key;
+                    this._userPinnedAt  = Date.now();
+                }
                 this.refresh();
             });
         };
@@ -948,4 +2074,15 @@ function _pillFor(model, useBackend) {
                     : 'In-browser surrogate — backend calls disabled. Click to re-enable Auto mode.',
             };
     }
+}
+
+/**
+ * Compact "N s/m/h ago" formatter for the TLE freshness pill.
+ * Caps at hours since CelesTrak refreshes every ~8h — anything
+ * older than that and the user should see the unit clearly.
+ */
+function _ageString(seconds) {
+    if (seconds < 60)   return `${Math.round(seconds)}s ago`;
+    if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
+    return `${(seconds / 3600).toFixed(1)}h ago`;
 }
