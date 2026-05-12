@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FARGO Hydro — WASM Proving Ground · Parkers Physics</title>
+
+<meta name="description" content="A Rust-to-WebAssembly 2-D log-polar FARGO hydrodynamics kernel running live in the browser. Proving-ground for an eventual 3-D protoplanetary disc solver.">
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html, body { height:100%; }
+body {
+    background:#040210; color:#d8d4ee;
+    font-family:'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    overflow:hidden;
+}
+
+#wrap {
+    display:grid; grid-template-columns: 340px 1fr;
+    height:100vh;
+}
+#sidebar {
+    background:rgba(8,4,22,.92); backdrop-filter:blur(20px);
+    border-right:1px solid rgba(255,255,255,.06);
+    padding:18px 18px 24px; overflow-y:auto;
+}
+#sidebar h1 { font-size:1.1rem; font-weight:700; color:#fff; letter-spacing:.02em; }
+#sidebar h1 .accent { color:#ffaa5a; }
+#sidebar p.lead { font-size:.78rem; color:#998878; margin-top:6px; line-height:1.55; }
+
+.kv {
+    display:flex; align-items:baseline; justify-content:space-between;
+    font-family:monospace; font-size:.74rem;
+    margin:4px 0;
+}
+.kv-k { color:#998878; }
+.kv-v { color:#fff; font-weight:700; }
+
+.section {
+    margin-top:16px; padding-top:12px;
+    border-top:1px solid rgba(255,255,255,.06);
+}
+.section h2 {
+    font-size:.7rem; text-transform:uppercase; letter-spacing:.08em;
+    color:#ffd8a8; margin-bottom:8px; font-weight:800;
+}
+.btn-row { display:flex; gap:8px; flex-wrap:wrap; margin-top:6px; }
+.btn {
+    appearance:none; border:1px solid rgba(255,170,90,.4);
+    background:rgba(255,170,90,.08); color:#ffd8a8;
+    padding:6px 10px; font-size:.72rem; border-radius:6px;
+    cursor:pointer; font-family:monospace;
+    transition: background .15s, transform .1s;
+}
+.btn:hover { background:rgba(255,170,90,.18); }
+.btn:active { transform:scale(.97); }
+.btn[data-on="true"] {
+    background:rgba(255,170,90,.32); color:#fff;
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.18);
+}
+
+.slider-row {
+    margin:8px 0 12px;
+}
+.slider-row .label {
+    display:flex; justify-content:space-between;
+    font-family:monospace; font-size:.7rem;
+    color:#cbb; margin-bottom:3px;
+}
+.slider-row .val { color:#fff; font-weight:700; }
+.slider-row input[type=range] {
+    width:100%; height:3px; -webkit-appearance:none; appearance:none;
+    background:rgba(255,255,255,.10); border-radius:2px; outline:none; cursor:pointer;
+}
+.slider-row input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance:none; width:12px; height:12px; border-radius:50%;
+    background:#ffaa5a; cursor:pointer;
+    box-shadow:0 0 4px rgba(255,170,90,.5);
+}
+
+#stage {
+    position:relative;
+    background:radial-gradient(ellipse at center, #0b0820 0%, #040210 60%, #000 100%);
+}
+#stage canvas {
+    position:absolute; inset:0;
+    width:100%; height:100%;
+    display:block;
+}
+#hud {
+    position:absolute; right:14px; top:14px;
+    background:rgba(10,6,28,.75); backdrop-filter:blur(10px);
+    border:1px solid rgba(255,255,255,.10);
+    border-radius:10px; padding:10px 14px;
+    font-family:monospace; font-size:.7rem; color:#cbb; line-height:1.6;
+    min-width:180px;
+}
+#hud strong { color:#fff; }
+#stage .badge {
+    position:absolute; left:14px; top:14px;
+    font-family:monospace; font-size:.65rem; color:#ffd8a8;
+    padding:4px 10px; border-radius:999px;
+    background:rgba(255,170,90,.15);
+    border:1px solid rgba(255,170,90,.35);
+    letter-spacing:.08em; text-transform:uppercase;
+}
+#stage .badge.err {
+    background:rgba(255, 90, 90, .18); border-color:rgba(255, 90, 90, .5);
+    color:#ffd0d0;
+}
+
+.note {
+    margin-top:14px; padding:10px;
+    background:rgba(255,255,255,.03); border-radius:8px;
+    font-size:.66rem; line-height:1.6; color:#998878;
+}
+.note code {
+    background:rgba(255,170,90,.1); color:#ffd8a8;
+    padding:1px 5px; border-radius:3px; font-size:.96em;
+}
+</style>
+</head>
+<body>
+
+<div id="wrap">
+    <aside id="sidebar">
+        <h1>FARGO Hydro <span class="accent">·</span> WASM proving ground</h1>
+        <p class="lead">
+            A 2-D log-polar FARGO kernel written in Rust, compiled to WebAssembly,
+            advancing live in your browser. This is step one toward a real 3-D
+            protoplanetary-disc solver — first prove the toolchain, then layer on
+            the vertical structure and the magnetic field.
+        </p>
+
+        <div class="section">
+            <h2>Kernel</h2>
+            <div class="kv"><span class="kv-k">module</span><span class="kv-v" id="hud-wasm-size">—</span></div>
+            <div class="kv"><span class="kv-k">grid</span><span class="kv-v" id="hud-grid">—</span></div>
+            <div class="kv"><span class="kv-k">cells</span><span class="kv-v" id="hud-cells">—</span></div>
+            <div class="kv"><span class="kv-k">step ms</span><span class="kv-v" id="hud-stepms">—</span></div>
+            <div class="kv"><span class="kv-k">substeps</span><span class="kv-v" id="hud-substeps">—</span></div>
+        </div>
+
+        <div class="section">
+            <h2>Controls</h2>
+            <div class="btn-row">
+                <button class="btn" id="btn-play" data-on="true">▶ Run</button>
+                <button class="btn" id="btn-reset">↻ Reset</button>
+                <button class="btn" id="btn-planet">+ Planet @ r=1.5</button>
+            </div>
+
+            <div class="slider-row">
+                <div class="label"><span>dt per frame</span><span class="val" id="lab-dt">0.05</span></div>
+                <input type="range" id="sl-dt" min="0.005" max="0.5" step="0.005" value="0.05">
+            </div>
+            <div class="slider-row">
+                <div class="label"><span>Planet mass q = M_p / M_*</span><span class="val" id="lab-q">0.001</span></div>
+                <input type="range" id="sl-q" min="0" max="0.005" step="0.0001" value="0.001">
+            </div>
+            <div class="slider-row">
+                <div class="label"><span>Resolution (n_r × n_φ)</span><span class="val" id="lab-res">192 × 384</span></div>
+                <input type="range" id="sl-res" min="0" max="3" step="1" value="2">
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Method</h2>
+            <p class="lead" style="margin-top:0;">
+                Locally isothermal log-polar grid · donor-cell upwind transport · FARGO
+                azimuthal shift (integer + fractional) · explicit pressure /
+                centrifugal / planetary-gravity sources · de Val-Borro (2006)
+                wave-killing boundaries. First-order in space &amp; time — MUSCL
+                + HLLC are next.
+            </p>
+        </div>
+
+        <div class="note">
+            Rebuild the kernel with <code>./scripts/build-wasm.sh</code>. The page
+            fetches <code>/static/hydro/disc_hydro.wasm</code> on load. Code units:
+            GM<sub>★</sub> = 1, inner edge at r = 1; one time unit ≈
+            1 / Ω<sub>K</sub>(r<sub>in</sub>) ≈ 1/(2π) inner orbit.
+        </div>
+    </aside>
+
+    <div id="stage">
+        <div class="badge" id="badge">loading WASM…</div>
+        <canvas id="cv"></canvas>
+        <div id="hud">
+            <div><strong>t</strong> = <span id="hud-t">0.000</span></div>
+            <div><strong>steps</strong> = <span id="hud-tsteps">0</span></div>
+            <div><strong>fps</strong> = <span id="hud-fps">—</span></div>
+        </div>
+    </div>
+</div>
+
+<script type="module">
+import { loadHydro }            from './js/hydro/loader.js';
+import { makeHeatmapRenderer }  from './js/hydro/renderer.js';
+
+const canvas = document.getElementById('cv');
+const badge  = document.getElementById('badge');
+
+// Resolutions selectable by slider (index → [nr, nphi]).
+const RES = [[96,192], [128,256], [192,384], [256,512]];
+
+function sizeCanvas() {
+    const dpr = Math.min(2, devicePixelRatio || 1);
+    const rect = canvas.parentElement.getBoundingClientRect();
+    canvas.width  = Math.floor(rect.width  * dpr);
+    canvas.height = Math.floor(rect.height * dpr);
+}
+sizeCanvas();
+window.addEventListener('resize', () => { sizeCanvas(); renderer.resize(canvas.width, canvas.height); });
+
+const renderer = makeHeatmapRenderer(canvas);
+
+let hydro = null;
+try {
+    hydro = await loadHydro('/static/hydro/disc_hydro.wasm');
+    badge.textContent = 'WASM loaded';
+    setTimeout(() => badge.style.opacity = 0, 800);
+} catch (err) {
+    badge.className = 'badge err';
+    badge.textContent = 'WASM load failed — run ./scripts/build-wasm.sh';
+    console.error(err);
+    throw err;
+}
+
+// Cell-count-aware fetch so we know the artifact size.
+fetch('/static/hydro/disc_hydro.wasm', { method: 'HEAD' })
+    .then(r => {
+        const len = +r.headers.get('content-length') || 0;
+        document.getElementById('hud-wasm-size').textContent =
+            len ? `${(len/1024).toFixed(1)} KiB` : 'loaded';
+    })
+    .catch(() => { /* non-fatal */ });
+
+function initSim() {
+    const [nr, nphi] = RES[+document.getElementById('sl-res').value];
+    hydro.init({
+        nr, nphi,
+        rMin: 1.0, rMax: 4.0,
+        gmStar: 1.0,
+        sigma0: 1.0, sigmaSlope: -1.0,
+        cs0: 0.05, csSlope: -0.25,
+    });
+    document.getElementById('hud-grid').textContent  = `${nr} × ${nphi}`;
+    document.getElementById('hud-cells').textContent = `${nr*nphi}`;
+}
+initSim();
+
+// ── UI wiring ────────────────────────────────────────────────────────────────
+const slDt  = document.getElementById('sl-dt');
+const labDt = document.getElementById('lab-dt');
+slDt.addEventListener('input', () => labDt.textContent = (+slDt.value).toFixed(3));
+
+const slQ  = document.getElementById('sl-q');
+const labQ = document.getElementById('lab-q');
+let planetOn = false;
+let planetPhi = 0; // accumulates each frame
+slQ.addEventListener('input', () => labQ.textContent = (+slQ.value).toFixed(4));
+
+const slRes = document.getElementById('sl-res');
+const labRes = document.getElementById('lab-res');
+slRes.addEventListener('input', () => {
+    const [nr, nphi] = RES[+slRes.value];
+    labRes.textContent = `${nr} × ${nphi}`;
+});
+slRes.addEventListener('change', () => { initSim(); });
+
+const btnPlay = document.getElementById('btn-play');
+let running = true;
+btnPlay.addEventListener('click', () => {
+    running = !running;
+    btnPlay.dataset.on = running ? 'true' : 'false';
+    btnPlay.textContent = running ? '▶ Run' : '⏸ Pause';
+});
+
+document.getElementById('btn-reset').addEventListener('click', () => {
+    initSim();
+    planetOn = false;
+    document.getElementById('btn-planet').dataset.on = 'false';
+    hydro.setPlanet(0, 0, 0, 0);
+});
+
+document.getElementById('btn-planet').addEventListener('click', (e) => {
+    planetOn = !planetOn;
+    e.currentTarget.dataset.on = planetOn ? 'true' : 'false';
+    if (!planetOn) hydro.setPlanet(0, 0, 0, 0);
+});
+
+// ── Animation loop ───────────────────────────────────────────────────────────
+let lastT = performance.now();
+let lastFpsT = lastT;
+let frames = 0;
+let stepMsEma = 0;
+let lastSubsteps = 0;
+
+function frame() {
+    const now = performance.now();
+    const dtReal = (now - lastT) / 1000;
+    lastT = now;
+
+    if (running && hydro) {
+        const dt = +slDt.value;
+        // Planet on a circular orbit at r=1.5.
+        if (planetOn) {
+            const rP = 1.5;
+            const omegaP = Math.sqrt(1.0 / (rP * rP * rP));
+            planetPhi += omegaP * dt;
+            const x = rP * Math.cos(planetPhi);
+            const y = rP * Math.sin(planetPhi);
+            const q = +slQ.value;
+            // Smoothing length: ~0.6 H, with H/r ≈ cs/v_K ≈ 0.05 at r=1.5.
+            const eps = 0.6 * 0.05 * rP;
+            hydro.setPlanet(x, y, q, eps);
+        }
+        const t0 = performance.now();
+        lastSubsteps = hydro.step(dt);
+        const t1 = performance.now();
+        stepMsEma = 0.85 * stepMsEma + 0.15 * (t1 - t0);
+    }
+
+    renderer.render(hydro);
+
+    frames++;
+    if (now - lastFpsT > 500) {
+        const fps = (frames * 1000 / (now - lastFpsT)).toFixed(0);
+        document.getElementById('hud-fps').textContent = fps;
+        document.getElementById('hud-stepms').textContent = stepMsEma.toFixed(2);
+        document.getElementById('hud-substeps').textContent = lastSubsteps;
+        document.getElementById('hud-t').textContent = hydro.time().toFixed(3);
+        document.getElementById('hud-tsteps').textContent = hydro.steps();
+        lastFpsT = now;
+        frames = 0;
+    }
+
+    requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

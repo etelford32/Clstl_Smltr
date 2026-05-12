@@ -1,0 +1,11 @@
+[workspace]
+members  = ["crates/disc-hydro"]
+resolver = "2"
+
+[profile.release]
+opt-level        = 3
+lto              = "fat"
+codegen-units    = 1
+panic            = "abort"
+strip            = "symbols"
+overflow-checks  = false

@@ -1,3 +1,10 @@
+# Rust (disc-hydro WASM kernel + future native crates).
+# The compiled artifact gets copied into /static/hydro/, which IS tracked
+# so the page works on Vercel without an in-CI Rust build.
+/target/
+**/*.rs.bk
+Cargo.lock
+
 # Python — anchored to repo root so we don't accidentally ignore
 # scripts/**/lib/ or similar legitimate JS helper directories.
 __pycache__/

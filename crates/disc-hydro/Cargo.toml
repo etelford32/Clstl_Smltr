@@ -1,0 +1,17 @@
+[package]
+name    = "disc-hydro"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "2-D log-polar FARGO hydro kernel compiled to WebAssembly. The seed for an eventual full 3-D protoplanetary-disc solver."
+
+[lib]
+# `cdylib` is required to produce a standalone .wasm module that exposes its
+# linear memory and a flat C ABI to the host (JavaScript). `rlib` lets native
+# unit tests share the same code.
+crate-type = ["cdylib", "rlib"]
+
+# No external crates. We rely only on `core` + `alloc` + `std` features that
+# the Rust target `wasm32-unknown-unknown` provides out of the box, which
+# means the build works in fully sandboxed CI with no network access.
+[dependencies]
