@@ -27,23 +27,189 @@
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family:'Courier New',monospace; background:#000; color:#ccc; display:flex; flex-direction:column; min-height:100vh; overflow:hidden; }
 
+/* ── Parkers Physics design tokens (TON 618 amber family) ────────── */
+:root {
+    --pp-accent:            #ff8800;
+    --pp-accent-rgb:        255, 136, 0;
+    --pp-accent-soft:       rgba(255, 136, 0, .12);
+    --pp-accent-softer:     rgba(255, 136, 0, .06);
+    --pp-accent-border:     rgba(255, 136, 0, .28);
+    --pp-accent-border-hi:  rgba(255, 136, 0, .50);
+    --pp-accent-glow:       rgba(255, 136, 0, .55);
+
+    --pp-surface-1:         rgba(10, 6, 2, .86);
+    --pp-surface-2:         rgba(4, 2, 0, .94);
+    --pp-surface-overlay:   radial-gradient(120% 80% at 0% 0%, rgba(255,136,0,.10), transparent 60%);
+
+    --pp-text-primary:      #ffd9a8;
+    --pp-text-secondary:    #cca266;
+    --pp-text-muted:        #998866;
+    --pp-text-faint:        #6a5a44;
+
+    --pp-blur-glass:        blur(12px) saturate(1.18);
+    --pp-shadow-panel:      0 6px 26px rgba(0, 0, 0, .55), 0 0 0 1px rgba(255,136,0,.04) inset;
+
+    --pp-r-sm:              4px;
+    --pp-r-md:              7px;
+    --pp-r-lg:              10px;
+
+    --pp-t-fast:            .12s ease;
+    --pp-t-snap:            .15s ease;
+    --pp-t-medium:          .25s ease;
+}
+@media (max-width: 640px) {
+    :root {
+        --pp-blur-glass:    blur(8px) saturate(1.10);
+        --pp-shadow-panel:  0 4px 16px rgba(0, 0, 0, .55);
+    }
+}
+
 #app { display:flex; height:calc(100vh - 48px); }
 #canvas-area { flex:1; position:relative; background:#000; overflow:hidden; }
 #glCanvas { position:absolute; top:0; left:0; width:100%; height:100%; display:block; image-rendering:auto; }
 
-/* HUD */
-#hud {
-    position:absolute; top:10px; left:10px; z-index:10; pointer-events:none;
-    font-family:'Courier New',monospace; font-size:10.5px; line-height:1.55;
-    background:rgba(0,0,0,.55); backdrop-filter:blur(4px);
-    border:1px solid rgba(255,140,0,.18); border-radius:6px;
-    padding:10px 14px; min-width:380px; color:#cca266; white-space:pre;
+/* ── pp-panel: draggable, minimizable chrome card ────────────────── */
+.pp-panel {
+    position:absolute; z-index:10;
+    display:flex; flex-direction:column;
+    font-family:'Courier New',monospace;
+    color:var(--pp-text-secondary);
+    background:linear-gradient(to bottom, var(--pp-surface-1), var(--pp-surface-2)), var(--pp-surface-overlay);
+    background-blend-mode:normal, screen;
+    border:1px solid var(--pp-accent-border);
+    border-radius:var(--pp-r-md);
+    backdrop-filter:var(--pp-blur-glass);
+    -webkit-backdrop-filter:var(--pp-blur-glass);
+    box-shadow:var(--pp-shadow-panel);
+    pointer-events:auto;
+    transition:border-color var(--pp-t-snap), box-shadow var(--pp-t-snap);
 }
-#hud-title {
-    position:absolute; top:10px; left:10px; transform:translateY(-18px);
-    font-size:9px; letter-spacing:.2em; color:#ff8800; text-transform:uppercase;
+.pp-panel-header {
+    user-select:none;
+    -webkit-user-select:none;
+}
+.pp-panel:hover { border-color:var(--pp-accent-border-hi); }
+.pp-panel.is-dragging {
+    border-color:var(--pp-accent-border-hi);
+    box-shadow:0 8px 32px rgba(0,0,0,.65), 0 0 0 1px var(--pp-accent-glow);
+    transition:none;
+}
+.pp-panel-header {
+    display:flex; align-items:center; gap:8px;
+    padding:6px 8px 6px 10px;
+    background:linear-gradient(to right, var(--pp-accent-soft), var(--pp-accent-softer) 70%);
+    border-bottom:1px solid var(--pp-accent-border);
+    border-radius:var(--pp-r-md) var(--pp-r-md) 0 0;
+    cursor:grab;
+    touch-action:none;
+    min-height:26px;
+}
+.pp-panel-header:active { cursor:grabbing; }
+.pp-panel.collapsed .pp-panel-header {
+    border-bottom-color:transparent;
+    border-radius:var(--pp-r-md);
+}
+.pp-drag-grip {
+    width:10px; height:14px; flex-shrink:0;
+    background-image:
+        radial-gradient(circle at 1.5px 1.5px, var(--pp-text-muted) 1px, transparent 1.5px);
+    background-size:4px 4px;
+    background-position:0 1px;
+    opacity:.55;
     pointer-events:none;
 }
+.pp-panel-title {
+    flex:1; min-width:0;
+    font-size:9.5px; letter-spacing:.18em; text-transform:uppercase;
+    color:var(--pp-accent);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    pointer-events:none;
+    text-shadow:0 0 6px rgba(var(--pp-accent-rgb), .35);
+}
+.pp-panel-actions { display:flex; align-items:center; gap:4px; }
+.pp-btn-icon {
+    width:22px; height:22px;
+    background:transparent;
+    border:1px solid var(--pp-accent-border);
+    border-radius:var(--pp-r-sm);
+    color:var(--pp-text-secondary);
+    cursor:pointer;
+    font-family:inherit;
+    font-size:13px; line-height:1;
+    display:inline-flex; align-items:center; justify-content:center;
+    padding:0;
+    transition:background var(--pp-t-fast), border-color var(--pp-t-fast), color var(--pp-t-fast);
+}
+.pp-btn-icon:hover {
+    background:var(--pp-accent-soft);
+    border-color:var(--pp-accent-border-hi);
+    color:var(--pp-accent);
+}
+.pp-btn-icon:active { transform:scale(.92); }
+.pp-panel-body {
+    padding:9px 12px 10px;
+    overflow:auto;
+    color:var(--pp-text-secondary);
+    font-size:10.5px; line-height:1.55;
+    transition:max-height var(--pp-t-medium), padding var(--pp-t-medium), opacity var(--pp-t-fast);
+    max-height:calc(100vh - 160px);
+}
+.pp-panel.collapsed .pp-panel-body {
+    max-height:0 !important;
+    padding-top:0; padding-bottom:0;
+    opacity:0;
+    overflow:hidden;
+    pointer-events:none;
+}
+.pp-panel-body::-webkit-scrollbar { width:4px; height:4px; }
+.pp-panel-body::-webkit-scrollbar-thumb { background:var(--pp-accent-border); border-radius:2px; }
+
+/* ── Top-left: live physics readout ──────────────────────────────── */
+#hud-panel {
+    top:12px; left:12px;
+    min-width:400px; max-width:480px;
+}
+#hud {
+    white-space:pre;
+    color:var(--pp-text-secondary);
+}
+/* ── Bottom-left: controls reference ─────────────────────────────── */
+#controls-hint-panel {
+    bottom:14px; left:12px;
+    max-width:360px;
+}
+#controls-hint {
+    font-size:10px; line-height:1.65;
+    color:var(--pp-text-muted);
+}
+#controls-hint b {
+    color:var(--pp-accent);
+    letter-spacing:.05em;
+    font-weight:normal;
+    text-shadow:0 0 6px rgba(var(--pp-accent-rgb), .25);
+}
+#controls-hint kbd {
+    display:inline-block;
+    font-family:inherit;
+    font-size:9.5px;
+    padding:1px 5px;
+    margin:0 1px;
+    color:var(--pp-text-primary);
+    background:var(--pp-accent-softer);
+    border:1px solid var(--pp-accent-border);
+    border-radius:3px;
+    line-height:1.3;
+}
+
+@media (max-width: 640px) {
+    .pp-panel-header { padding:8px 8px 8px 10px; min-height:32px; }
+    .pp-btn-icon { width:28px; height:28px; font-size:14px; }
+    .pp-panel-title { font-size:10px; }
+    #hud-panel { min-width:0; left:8px; right:8px; max-width:none; top:8px; }
+    #controls-hint-panel { left:8px; right:8px; max-width:none; bottom:8px; }
+    .pp-panel-body { font-size:10px; padding:8px 10px; }
+}
+
 #minimap-wrap {
     position:absolute; top:10px; right:10px; z-index:10;
     width:300px; height:140px;
@@ -61,13 +227,6 @@ body { font-family:'Courier New',monospace; background:#000; color:#ccc; display
     background:rgba(0,0,0,.6); border:1px solid rgba(143,215,255,.25);
     border-radius:6px; padding:10px 14px; white-space:pre; display:none;
 }
-#controls-hint {
-    position:absolute; bottom:14px; right:14px; z-index:10;
-    font-size:9.5px; color:#888; background:rgba(0,0,0,.5);
-    border:1px solid rgba(255,255,255,.07); border-radius:5px; padding:8px 10px;
-    line-height:1.55; max-width:330px;
-}
-#controls-hint b { color:#ffaa44; letter-spacing:.05em; }
 #fly-pill {
     position:absolute; top:160px; right:10px; z-index:10;
     font-size:10px; letter-spacing:.18em; text-transform:uppercase;
@@ -152,13 +311,14 @@ select {
 }
 /* Tier 1C — iframe embed mode (?embed=1): hide UI chrome for clean external embed */
 body.ton618-embed #panel,
-body.ton618-embed #controls-hint,
+body.ton618-embed #controls-hint-panel,
 body.ton618-embed #fly-pill,
 body.ton618-embed #minimap-wrap,
 body.ton618-embed nav { display:none !important; }
 body.ton618-embed #app { height:100vh; }
-body.ton618-embed #hud { font-size:9.5px; min-width:280px; opacity:.85; }
-body.ton618-embed #hud-title { font-size:8px; }
+body.ton618-embed #hud-panel { min-width:0; max-width:340px; opacity:.9; }
+body.ton618-embed #hud { font-size:9.5px; }
+body.ton618-embed .pp-panel-title { font-size:8.5px; }
 .toast {
     position:absolute; left:50%; top:18px; transform:translateX(-50%);
     z-index:30; font-size:11px; color:#fff; background:rgba(20,20,40,.85);
@@ -204,8 +364,16 @@ body.ton618-embed #hud-title { font-size:8px; }
 <div id="app">
     <div id="canvas-area">
         <canvas id="glCanvas"></canvas>
-        <div id="hud-title">Phase 1 · Kerr (Hamilton, BL) · ZAMO tetrad · RK45 · 3D God-mode Camera</div>
-        <div id="hud">booting…</div>
+        <div id="hud-panel" class="pp-panel" data-pp-panel>
+            <header class="pp-panel-header">
+                <span class="pp-drag-grip" aria-hidden="true"></span>
+                <span class="pp-panel-title">▸ WebGL2 · Phase 1 · Kerr-BL · Hamilton · ZAMO · RK45</span>
+                <span class="pp-panel-actions">
+                    <button type="button" class="pp-btn-icon" data-pp-minimize aria-label="Minimize" title="Minimize"><span aria-hidden="true">–</span></button>
+                </span>
+            </header>
+            <div id="hud" class="pp-panel-body">booting…</div>
+        </div>
         <div id="minimap-wrap">
             <div class="mm-label">god-view · top / side</div>
             <canvas id="minimap"></canvas>
@@ -218,11 +386,20 @@ body.ton618-embed #hud-title { font-size:8px; }
             <div id="inspector-body">click anywhere on the render</div>
         </div>
         <div id="validation"></div>
-        <div id="controls-hint">
-            <b>orbit:</b> drag · shift+drag pan · mid-drag roll · wheel dolly<br>
-            <b>fly (F):</b> WASD strafe · Q/E forward/back · space/ctrl up/down<br>
-            <b>both:</b> arrows yaw/pitch · Z/X roll · shift = boost · R reset<br>
-            <b>click:</b> inspect that pixel's geodesic (b, r_min, term…)
+        <div id="controls-hint-panel" class="pp-panel" data-pp-panel>
+            <header class="pp-panel-header">
+                <span class="pp-drag-grip" aria-hidden="true"></span>
+                <span class="pp-panel-title">▸ Observatory Controls · Camera &amp; Inspector</span>
+                <span class="pp-panel-actions">
+                    <button type="button" class="pp-btn-icon" data-pp-minimize aria-label="Minimize" title="Minimize"><span aria-hidden="true">–</span></button>
+                </span>
+            </header>
+            <div id="controls-hint" class="pp-panel-body">
+                <b>orbit:</b> drag · <kbd>shift</kbd>+drag pan · mid-drag roll · wheel dolly<br>
+                <b>fly</b> <kbd>F</kbd>: <kbd>WASD</kbd> strafe · <kbd>Q</kbd>/<kbd>E</kbd> fwd/back · <kbd>space</kbd>/<kbd>ctrl</kbd> up/down<br>
+                <b>both:</b> arrows yaw/pitch · <kbd>Z</kbd>/<kbd>X</kbd> roll · <kbd>shift</kbd>=boost · <kbd>R</kbd> reset<br>
+                <b>click:</b> inspect that pixel's geodesic (b, r_min, term…)
+            </div>
         </div>
     </div>
 
@@ -1359,6 +1536,148 @@ body.ton618-embed #hud-title { font-size:8px; }
             v.textContent = lines.join('\n');
         }, 50);
     });
+</script>
+
+<script>
+// ── pp-panel: drag + minimize + persistence ──────────────────────────
+// Touch-optimized via Pointer Events. Position and collapse state are
+// keyed off the panel id and survive reloads via localStorage.
+(function () {
+    const STORAGE_PREFIX = 'pp.ton618.panel.';
+
+    function clampToParent(panel, left, top) {
+        const parent = panel.offsetParent || document.body;
+        const parentRect = parent.getBoundingClientRect();
+        const rect = panel.getBoundingClientRect();
+        // Keep at least 60px of panel inside the viewport on every edge so
+        // the header (and minimize button) stay reachable after a drag.
+        const minVisible = 60;
+        const maxLeft = parentRect.width - minVisible;
+        const maxTop  = parentRect.height - minVisible;
+        const minLeft = minVisible - rect.width;
+        const minTop  = 0;
+        return [
+            Math.max(minLeft, Math.min(maxLeft, left)),
+            Math.max(minTop,  Math.min(maxTop,  top)),
+        ];
+    }
+
+    function applyPosition(panel, left, top) {
+        const [cl, ct] = clampToParent(panel, left, top);
+        panel.style.left   = cl + 'px';
+        panel.style.top    = ct + 'px';
+        panel.style.right  = 'auto';
+        panel.style.bottom = 'auto';
+    }
+
+    function restorePosition(panel) {
+        try {
+            const raw = localStorage.getItem(STORAGE_PREFIX + panel.id + '.pos');
+            if (!raw) return;
+            const { left, top } = JSON.parse(raw);
+            if (typeof left === 'number' && typeof top === 'number') {
+                applyPosition(panel, left, top);
+            }
+        } catch (e) { /* ignore corrupt storage */ }
+    }
+
+    function persistPosition(panel) {
+        const parent = panel.offsetParent || document.body;
+        const parentRect = parent.getBoundingClientRect();
+        const rect = panel.getBoundingClientRect();
+        const left = rect.left - parentRect.left;
+        const top  = rect.top  - parentRect.top;
+        try {
+            localStorage.setItem(
+                STORAGE_PREFIX + panel.id + '.pos',
+                JSON.stringify({ left, top })
+            );
+        } catch (e) { /* quota / private mode */ }
+    }
+
+    function makeDraggable(panel) {
+        const header = panel.querySelector('.pp-panel-header');
+        if (!header) return;
+        let dragging = false;
+        let pointerId = null;
+        let startX = 0, startY = 0, baseLeft = 0, baseTop = 0;
+
+        header.addEventListener('pointerdown', (e) => {
+            // Don't start a drag from the minimize button.
+            if (e.target.closest('button')) return;
+            // Primary button / touch / pen only.
+            if (e.button !== undefined && e.button !== 0) return;
+            dragging = true;
+            pointerId = e.pointerId;
+            try { header.setPointerCapture(pointerId); } catch (err) {}
+            const parent = panel.offsetParent || document.body;
+            const parentRect = parent.getBoundingClientRect();
+            const rect = panel.getBoundingClientRect();
+            baseLeft = rect.left - parentRect.left;
+            baseTop  = rect.top  - parentRect.top;
+            startX = e.clientX;
+            startY = e.clientY;
+            panel.classList.add('is-dragging');
+            e.preventDefault();
+        });
+
+        header.addEventListener('pointermove', (e) => {
+            if (!dragging || e.pointerId !== pointerId) return;
+            applyPosition(panel, baseLeft + (e.clientX - startX), baseTop + (e.clientY - startY));
+        });
+
+        function endDrag(e) {
+            if (!dragging) return;
+            if (e && e.pointerId !== undefined && e.pointerId !== pointerId) return;
+            dragging = false;
+            try { header.releasePointerCapture(pointerId); } catch (err) {}
+            pointerId = null;
+            panel.classList.remove('is-dragging');
+            persistPosition(panel);
+        }
+        header.addEventListener('pointerup', endDrag);
+        header.addEventListener('pointercancel', endDrag);
+
+        // Double-click the header to reset to the CSS-defined position.
+        header.addEventListener('dblclick', (e) => {
+            if (e.target.closest('button')) return;
+            panel.style.left = '';
+            panel.style.top = '';
+            panel.style.right = '';
+            panel.style.bottom = '';
+            try { localStorage.removeItem(STORAGE_PREFIX + panel.id + '.pos'); } catch (err) {}
+        });
+    }
+
+    function makeMinimizable(panel) {
+        const btn = panel.querySelector('[data-pp-minimize]');
+        if (!btn) return;
+        const key = STORAGE_PREFIX + panel.id + '.collapsed';
+        const initial = (() => {
+            try { return localStorage.getItem(key) === '1'; } catch { return false; }
+        })();
+        panel.classList.toggle('collapsed', initial);
+        updateButton();
+        btn.addEventListener('click', () => {
+            const collapsed = panel.classList.toggle('collapsed');
+            try { localStorage.setItem(key, collapsed ? '1' : '0'); } catch (err) {}
+            updateButton();
+        });
+        function updateButton() {
+            const collapsed = panel.classList.contains('collapsed');
+            btn.firstElementChild.textContent = collapsed ? '+' : '–';
+            const label = collapsed ? 'Restore' : 'Minimize';
+            btn.setAttribute('aria-label', label);
+            btn.setAttribute('title', label);
+        }
+    }
+
+    document.querySelectorAll('[data-pp-panel]').forEach((panel) => {
+        restorePosition(panel);
+        makeDraggable(panel);
+        makeMinimizable(panel);
+    });
+})();
 </script>
 </body>
 </html>
