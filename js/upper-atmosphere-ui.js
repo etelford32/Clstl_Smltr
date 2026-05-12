@@ -180,6 +180,56 @@ export class UpperAtmosphereUI {
             this._refreshFollowUi();
         });
 
+        // Phase 26: time-warp panel. Event delegation on the panel
+        // container so the per-rate buttons + pause + snap-now don't
+        // need 8 individual listeners. Active-rate highlight uses the
+        // same .ua-cam-on class as the mode toggles.
+        const warpHost = document.querySelector('.ua-cam-controls--warp');
+        if (warpHost) {
+            const setActiveRate = (rate) => {
+                for (const b of warpHost.querySelectorAll('.ua-cam-warp-rate')) {
+                    b.classList.toggle('ua-cam-on',
+                        parseFloat(b.dataset.rate) === rate);
+                }
+            };
+            warpHost.addEventListener('click', (e) => {
+                const rateBtn = e.target.closest?.('.ua-cam-warp-rate');
+                if (rateBtn) {
+                    const rate = parseFloat(rateBtn.dataset.rate);
+                    if (Number.isFinite(rate)) {
+                        this.globe.setSatTimeScale?.(rate);
+                        // Resume if paused — explicit-rate click implies "play".
+                        this.globe.resumeSat?.();
+                        setActiveRate(rate);
+                        const pauseBtn = warpHost.querySelector('#ua-cam-warp-pause');
+                        pauseBtn?.classList.remove('ua-cam-on');
+                    }
+                    return;
+                }
+                const pauseBtn = e.target.closest?.('#ua-cam-warp-pause');
+                if (pauseBtn) {
+                    if (this.globe.isSatPaused?.()) {
+                        this.globe.resumeSat?.();
+                        pauseBtn.classList.remove('ua-cam-on');
+                        pauseBtn.title = 'Pause satellite propagation';
+                    } else {
+                        this.globe.pauseSat?.();
+                        pauseBtn.classList.add('ua-cam-on');
+                        pauseBtn.title = 'Resume satellite propagation';
+                    }
+                    return;
+                }
+                const snapBtn = e.target.closest?.('#ua-cam-warp-snap');
+                if (snapBtn) {
+                    this.globe.snapSatToWallClock?.();
+                    // After a snap, also drop back to 1× so the operator's
+                    // mental model matches what they just did.
+                    this.globe.setSatTimeScale?.(1);
+                    setActiveRate(1);
+                }
+            });
+        }
+
         // Poll the follow state at the same 4 Hz the readout uses, so
         // the Stop-follow button surfaces immediately when a click on
         // the canvas engages tracking.

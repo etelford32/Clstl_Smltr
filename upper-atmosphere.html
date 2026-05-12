@@ -280,6 +280,23 @@ input[type=range]::-moz-range-thumb {
      * used than mode-toggle, so they don't compete for attention. */
     gap:var(--ua-sp-2);
 }
+#ua-camera-hud .ua-cam-controls--warp {
+    /* Time-warp panel — third row. Uses tabular numerals so the rate
+     * presets share a column width; pause + snap-now sit at the
+     * trailing edge with explicit separation. */
+    gap:var(--ua-sp-2);
+    font-variant-numeric:tabular-nums;
+}
+#ua-camera-hud .ua-cam-warp-label {
+    /* Inline "×" label sits left of the rate buttons. Matches the
+     * preset-button height + colour so it reads as a row marker
+     * rather than competing for attention. */
+    display:inline-flex; align-items:center;
+    color:var(--ua-text-faint);
+    font-size:var(--ua-fs-xs);
+    letter-spacing:.04em;
+    padding-right:2px;
+}
 #ua-camera-hud button {
     background:var(--ua-surf-3);
     border:1px solid var(--ua-cyan-bdr);
@@ -2502,6 +2519,31 @@ input[type=range]::-moz-range-thumb {
                         title="Zoom out (increase distance to target)">−</button>
                 <button type="button" id="ua-cam-stop-follow" class="ua-cam-stop is-hidden"
                         title="Stop following the current target (camera stays put, you can orbit/fly freely)">⏹ Stop follow</button>
+            </div>
+            <!-- Phase 26: time-warp panel. Default 1× real-time so probes
+                 match their actual current positions; presets let the
+                 operator scale up to watch orbits play out in seconds.
+                 ⏯ pause freezes every satellite in place; ⟳ snap re-
+                 anchors them to wall-clock now after a long warp. -->
+            <div class="ua-cam-controls ua-cam-controls--warp"
+                 title="Simulation time-warp — propagation speed of every satellite + debris piece">
+                <span class="ua-cam-warp-label">×</span>
+                <button type="button" class="ua-cam-warp-rate" data-rate="0.5"
+                        title="Half speed — useful for watching reentry geometry">½</button>
+                <button type="button" class="ua-cam-warp-rate ua-cam-on" data-rate="1"
+                        title="Real time (default)">1×</button>
+                <button type="button" class="ua-cam-warp-rate" data-rate="10"
+                        title="10× — 9 min per LEO orbit">10×</button>
+                <button type="button" class="ua-cam-warp-rate" data-rate="60"
+                        title="60× — 90 s per LEO orbit (classic demo speed)">60×</button>
+                <button type="button" class="ua-cam-warp-rate" data-rate="600"
+                        title="600× — 9 s per LEO orbit">600×</button>
+                <button type="button" class="ua-cam-warp-rate" data-rate="3600"
+                        title="3600× — 1.5 s per LEO orbit, full Earth rotation in 24 s">3600×</button>
+                <button type="button" id="ua-cam-warp-pause"
+                        title="Pause/resume satellite propagation (camera + UI keep running)">⏯</button>
+                <button type="button" id="ua-cam-warp-snap"
+                        title="Snap satellites back to their wall-clock positions (cancels accumulated time-warp drift)">⟳ Now</button>
             </div>
             <div id="ua-cam-readout">
                 <div class="ua-cam-row">
