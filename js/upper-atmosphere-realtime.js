@@ -55,6 +55,12 @@
  */
 
 import { fetchLiveIndices, kpToAp } from './upper-atmosphere-engine.js';
+// Phase C — the driver no longer owns simTimeMs/mode/rate; it reads
+// them from the shared TimeBus and adjusts via bus.setRate / setSimTime.
+// Same external API (setMode, setRate, jumpToNow, scrubTo, getState),
+// same emitted 'ua-realtime-tick' shape — every downstream consumer
+// is unchanged. Only the source of truth moves.
+import { getTimeBus } from './upper-atmosphere-time-bus.js';
 
 // ── Tunables ──────────────────────────────────────────────────────────────
 const SWPC_F107_INTERVAL_MS = 60 * 60 * 1000;     // 1 h
@@ -99,11 +105,17 @@ class UpperAtmosphereRealtime {
         this.dst     = 0;          // Dst, presented to UI
         this.apProxy = 15;         // surrogate Ap (max of SWPC + Burton-derived)
 
-        // Sim-clock.
-        this.mode    = 'live';     // 'live' | 'paused' | 'warp'
-        this.rate    = 1;          // time-warp multiplier (signed)
-        this.simTimeMs = Date.now();
-        this._lastTickWallMs = Date.now();
+        // Phase C: sim-clock state now lives on the shared TimeBus.
+        // No more this.simTimeMs / this.mode / this.rate /
+        // this._lastTickWallMs — everything is read from the bus and
+        // mutated via its setters. The driver's emit cadence stays
+        // 10 Hz (this._timers.clock) so DOM event consumers don't get
+        // 60 Hz spam from the bus's animate-rate tick.
+        this._bus = getTimeBus();
+        // Subscribe to discrete repositioning so scrubTo() reflects
+        // instantly in the emitted 'ua-realtime-tick' event without
+        // waiting for the next 10 Hz poll.
+        this._unsubJump = this._bus.onJump(() => this._emitTick());
 
         // Rolling 72-h ring buffer of fused snapshots.
         this.history = [];
@@ -131,12 +143,21 @@ class UpperAtmosphereRealtime {
         this._timers.f107  = setInterval(() => this._fetchF107Ap('f107'), SWPC_F107_INTERVAL_MS);
         this._timers.ap    = setInterval(() => this._fetchF107Ap('ap'),   SWPC_AP_INTERVAL_MS);
         this._timers.integ = setInterval(() => this._stepIntegrator(),    INTEGRATOR_MS);
-        this._timers.clock = setInterval(() => this._stepClock(),         100); // 10 Hz UI clock
-
-        this._lastTickWallMs = Date.now();
+        // Phase C: 10 Hz emit timer reads bus state + dispatches the
+        // 'ua-realtime-tick' event. The bus's own advance happens in
+        // the globe's RAF loop (60+ Hz); throttling here keeps DOM
+        // event consumers at a sensible cadence.
+        this._timers.clock = setInterval(() => this._emitTick(),          100);
     }
 
     stop() {
+        // Phase C: bus subscription is created in the constructor (not
+        // start), so the unsub must run regardless of _running state.
+        // Otherwise a stopped-but-never-started driver keeps emitting
+        // realtime-tick on every bus scrub.
+        this._unsubJump?.();
+        this._unsubJump = null;
+
         if (!this._running) return;
         this._running = false;
         for (const k of Object.keys(this._timers)) {
@@ -151,43 +172,40 @@ class UpperAtmosphereRealtime {
 
     // ── Sim-clock controls ────────────────────────────────────────────────
 
+    // Phase C: all clock mutations route through the bus. External API
+    // shape is identical — these stay on the driver so existing UI
+    // doesn't need rewiring. The bus's onJump subscription (constructor)
+    // re-emits 'ua-realtime-tick' on every discrete mutation so the
+    // immediate-feedback behaviour of the old setters is preserved.
+
     setMode(mode, rate) {
         if (!['live', 'paused', 'warp'].includes(mode)) return;
-        this.mode = mode;
-        if (Number.isFinite(rate)) this.rate = rate;
         if (mode === 'live') {
-            this.simTimeMs = Date.now();
-            this.rate = 1;
+            this._bus.snapToNow();              // sim=now + rate=1
+        } else if (mode === 'paused') {
+            this._bus.pause();
+        } else if (mode === 'warp') {
+            this._bus.setRate(Number.isFinite(rate) ? rate : this._bus.getRate() || 1);
         }
-        this._lastTickWallMs = Date.now();
-        this._emitTick();
     }
 
     setRate(rate) {
         if (!Number.isFinite(rate)) return;
-        this.rate = rate;
-        if (this.mode === 'live' && rate !== 1) this.mode = 'warp';
-        this._lastTickWallMs = Date.now();
-        this._emitTick();
+        this._bus.setRate(rate);
     }
 
-    jumpToNow() {
-        this.simTimeMs = Date.now();
-        this.mode = 'live';
-        this.rate = 1;
-        this._lastTickWallMs = Date.now();
-        this._emitTick();
-    }
+    jumpToNow() { this._bus.snapToNow(); }
 
     scrubTo(ms) {
         if (!Number.isFinite(ms)) return;
-        const now = Date.now();
-        const lo = now - HISTORY_SPAN_MS;
-        this.simTimeMs = Math.max(lo, Math.min(now, ms));
-        this.mode = (this.simTimeMs >= now - 60_000) ? 'live' : 'paused';
-        this.rate = 1;
-        this._lastTickWallMs = Date.now();
-        this._emitTick();
+        // Bus enforces its own bounds (30 d past / 1 h future, broader
+        // than the driver's 72 h history). For replay back through the
+        // history-ring window the bus pause behaviour is what we want;
+        // for further-past scrubs the bus still works (sat propagation
+        // is valid), even though the indices fall back to the nearest
+        // history sample (see _currentState).
+        this._bus.setSimTime(ms, { reason: 'scrub' });
+        this._bus.setRate(1);                   // scrub freezes the rate at 1
     }
 
     refreshNow() {
@@ -205,8 +223,9 @@ class UpperAtmosphereRealtime {
     }
 
     isLive() {
-        return this.mode === 'live'
-            && Math.abs(Date.now() - this.simTimeMs) < 30_000;
+        // Phase C: delegate to the bus, which carries the same
+        // semantic (rate≈1 AND within 30 s of wall-clock).
+        return this._bus.isLive();
     }
 
     // ── Internals ──────────────────────────────────────────────────────────
@@ -292,28 +311,11 @@ class UpperAtmosphereRealtime {
         this._emitTick();
     }
 
-    _stepClock() {
-        const wall = Date.now();
-        const dWall = wall - this._lastTickWallMs;
-        this._lastTickWallMs = wall;
-
-        if (this.mode === 'live') {
-            this.simTimeMs = wall;
-        } else if (this.mode === 'warp') {
-            this.simTimeMs += dWall * this.rate;
-            const lo = wall - HISTORY_SPAN_MS;
-            const hi = wall;
-            if (this.simTimeMs > hi) {
-                this.simTimeMs = hi;
-                this.mode = 'live';
-                this.rate = 1;
-            } else if (this.simTimeMs < lo) {
-                this.simTimeMs = lo;
-                this.mode = 'paused';
-            }
-        }
-        // 'paused' → no change.
-    }
+    // _stepClock() was the driver's own clock advancement. Phase C
+    // removed it — the shared TimeBus advances itself in the globe's
+    // RAF loop (one canonical advance per page). The 10 Hz emit timer
+    // in start() just reads + dispatches; bus.onJump (constructor)
+    // covers the immediate-feedback case for explicit setRate / scrub.
 
     _pushHistory(t) {
         this.history.push({
@@ -340,12 +342,20 @@ class UpperAtmosphereRealtime {
     }
 
     _currentState() {
+        // Phase C: all clock state from the bus. The payload shape
+        // is unchanged — downstream consumers (status pill, fleet
+        // analyzer, drag forecast, etc.) keep reading the same
+        // fields. Driver-owned fields (history, f107Sfu, apProxy,
+        // SW indices, …) are still local.
+        const wall      = Date.now();
+        const simTimeMs = this._bus.getSimTime();
+        const mode      = this._bus.getMode();        // 'live'|'paused'|'warp'|'replay'
+        const rate      = this._bus.getRate();
         // If we're scrubbing (sim-time != now), return the nearest
         // history sample so density/temperature reflect the past state.
-        const wall = Date.now();
         let snap = null;
-        if (this.mode !== 'live' && Math.abs(this.simTimeMs - wall) > 60_000 && this.history.length) {
-            snap = _findNearest(this.history, this.simTimeMs);
+        if (mode !== 'live' && Math.abs(simTimeMs - wall) > 60_000 && this.history.length) {
+            snap = _findNearest(this.history, simTimeMs);
         }
         const f107 = snap ? snap.f107 : this.f107Sfu;
         const ap   = snap ? snap.ap   : this.apProxy;
@@ -355,15 +365,20 @@ class UpperAtmosphereRealtime {
         const v    = snap ? snap.v    : this.vSw;
         const n    = snap ? snap.n    : this.nSw;
         return {
-            simTimeMs: this.simTimeMs,
+            simTimeMs,
             wallMs:    wall,
             f107, ap, kp, dst, bz, v, n,
             apSwpc:    this.apSwpc,
             apProxy:   this.apProxy,
             source:    this.source,
-            mode:      this.mode,
-            rate:      this.rate,
-            isLive:    this.isLive(),
+            // The bus distinguishes 'replay' (rate<0) from 'warp'
+            // (rate>1 forward), but downstream realtime-tick consumers
+            // only know 'live'|'paused'|'warp'. Project replay→warp
+            // for backward compat; signed `rate` still tells the full
+            // story for callers that care.
+            mode:      mode === 'replay' ? 'warp' : mode,
+            rate,
+            isLive:    this._bus.isLive(),
             scrubbing: snap !== null,
             historyStartMs: wall - HISTORY_SPAN_MS,
             historyEndMs:   wall,

@@ -55,6 +55,12 @@ import { sampleProfileMSIS, isMsisReady } from './nrlmsise00-bridge.js';
 import { getF107At, isLoaded as isF107Loaded } from './f107-history.js';
 import { getApDailyMeanAt, isLoaded as isApLoaded } from './ap-history.js';
 import { profileToRhoGrid } from './upper-atmosphere-trajectory-analysis.js';
+// Phase D: every "now" in this module reads through the shared
+// TimeBus so the analyzer's residual-history timestamps reflect
+// sim-time, not wall-clock. During replay or scrub, runFleetSkill's
+// "ranAt" matches the simulated moment of the sweep — consistent
+// with everything else on the page.
+import { getTimeBus } from './upper-atmosphere-time-bus.js';
 
 const R_EARTH_KM = 6378.135;          // WGS-72, same as SGP4
 
@@ -485,7 +491,12 @@ export async function runFleetSkill(assets, {
             medianAbsResidualKm: pickResid(50),
             p95AbsResidualKm:    pickResid(95),
             targetDays,
-            ranAt: Date.now(),
+            // Phase D: sim-clock-aware timestamp. During live operation
+            // this matches Date.now() exactly; during replay/scrub it
+            // reflects the moment the operator was inspecting. Consumers
+            // (anomaly detector, sparkline) sort by this field and need
+            // it to track the simulation's "now", not wall-clock.
+            ranAt: getTimeBus().getSimTime(),
         },
         results,
     };

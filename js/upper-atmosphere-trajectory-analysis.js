@@ -37,6 +37,12 @@
  *   // result.osc     : { sma_km, ecc, inc_deg, ... }
  */
 
+// Phase D: default "now" for the analyzer's SGP4 + drag-decay sweep
+// reads from the shared TimeBus. Callers can still pass an explicit
+// `nowDate` (used by the backtest engine for historical replay) —
+// only the default changes. Live behaviour is identical.
+import { getTimeBus } from './upper-atmosphere-time-bus.js';
+
 const SGP4_STRIDE = 13;     // mirrors Rust trajectory_stride()
 const DRAG_STRIDE = 5;      // mirrors Rust drag_stride()
 
@@ -164,7 +170,10 @@ export class TrajectoryAnalyzer {
         dragOutMin,
         rhoScale = 1.0,
         profileSamples,
-        nowDate = new Date(),
+        // Phase D: bus-aware default — falls through to sim-time so
+        // scrub/replay automatically retimes the SGP4 truth + drag-
+        // decay overlay. Explicit nowDate still honoured.
+        nowDate = new Date(getTimeBus().getSimTime()),
     }) {
         const wasm = await this.ready;
         if (!wasm) throw new Error('WASM SGP4 unavailable');

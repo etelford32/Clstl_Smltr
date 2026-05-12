@@ -323,6 +323,22 @@ input[type=range]::-moz-range-thumb {
     border-color:var(--ua-cyan);
     color:var(--ua-cyan);
 }
+#ua-camera-hud .ua-cam-warp-rate--rev {
+    /* Replay (negative-rate) chips read in red so they don't blend
+     * with the forward-rate column. Matches the scrubber's
+     * mode="replay" pill. */
+    color:var(--ua-red-soft);
+    border-color:rgba(255,80,96,.30);
+}
+#ua-camera-hud .ua-cam-warp-rate--rev:hover {
+    color:var(--ua-red);
+    border-color:rgba(255,80,96,.55);
+}
+#ua-camera-hud .ua-cam-warp-rate--rev.ua-cam-on {
+    background:var(--ua-red-low);
+    border-color:var(--ua-red);
+    color:var(--ua-red);
+}
 #ua-camera-hud .ua-cam-stop {
     /* Follow-active state: amber accent so it reads as "stop the
      * thing the operator just started" rather than a peer of the
@@ -376,6 +392,142 @@ input[type=range]::-moz-range-thumb {
     font-size:10px; font-weight:700; letter-spacing:.04em;
     background:rgba(0,200,200,.14);
     color:#9ff; border:1px solid var(--ua-cyan-bdr);
+}
+
+/* ─── Time scrubber (Phase E) ───────────────────────────────────────
+ * Anchored to the bottom of #ua-globe-wrap. Two stacked rows:
+ *   head:   UTC readout + mode chip + rate (when non-1×) + snap-now
+ *   track:  horizontal drag surface with tick marks + handle
+ * Mode chip is colour-coded so the operator sees the bus state at a
+ * glance without parsing the time string. */
+#ua-time-scrubber-host {
+    position:absolute; left:var(--ua-sp-5); right:var(--ua-sp-5);
+    bottom:var(--ua-sp-5);
+    pointer-events:none;          /* container is just a host */
+    z-index:5;
+}
+.ua-scrub {
+    pointer-events:auto;
+    background:var(--ua-surf-3);
+    border:1px solid var(--ua-cyan-bdr);
+    border-radius:var(--ua-r-md);
+    padding:var(--ua-sp-3) var(--ua-sp-4);
+    display:flex; flex-direction:column; gap:var(--ua-sp-3);
+    box-shadow:0 2px 12px rgba(0,0,0,.45);
+    font-family:ui-monospace, monospace;
+    color:var(--ua-text-default);
+    user-select:none;
+}
+.ua-scrub-head {
+    display:flex; align-items:center; gap:var(--ua-sp-3);
+    font-size:var(--ua-fs-sm);
+    line-height:1;
+    min-height:var(--ua-row-h);
+}
+.ua-scrub-utc {
+    flex:1 1 auto;
+    color:var(--ua-text-primary); font-weight:700;
+    letter-spacing:.04em;
+    font-variant-numeric:tabular-nums;
+}
+.ua-scrub-mode {
+    font-size:var(--ua-fs-xs); font-weight:700;
+    letter-spacing:var(--ua-ls-cap);
+    padding:0 var(--ua-sp-3);
+    border-radius:var(--ua-r-sm);
+    display:inline-flex; align-items:center;
+    min-height:var(--ua-row-h);
+    border:1px solid var(--ua-cyan-bdr);
+    color:var(--ua-cyan);
+    background:var(--ua-cyan-mid);
+}
+.ua-scrub-mode[data-mode="paused"]  { color:var(--ua-amber); background:var(--ua-amber-low); border-color:var(--ua-amber-bdr); }
+.ua-scrub-mode[data-mode="warp"]    { color:var(--ua-amber); background:var(--ua-amber-low); border-color:var(--ua-amber-bdr); }
+.ua-scrub-mode[data-mode="replay"]  { color:var(--ua-red);   background:var(--ua-red-low);   border-color:var(--ua-red-bdr); }
+.ua-scrub-rate {
+    font-size:var(--ua-fs-xs); font-weight:700;
+    color:var(--ua-amber);
+    font-variant-numeric:tabular-nums;
+    padding:0 var(--ua-sp-2);
+}
+.ua-scrub-snap {
+    background:transparent; color:var(--ua-text-muted);
+    border:1px solid var(--ua-cyan-bdr);
+    border-radius:var(--ua-r-sm);
+    padding:0 var(--ua-sp-3);
+    height:var(--ua-row-h);
+    font:600 var(--ua-fs-xs)/1 system-ui, sans-serif;
+    letter-spacing:.04em;
+    cursor:pointer;
+}
+.ua-scrub-snap:hover { color:var(--ua-cyan); border-color:var(--ua-cyan); }
+.ua-scrub-track {
+    position:relative;
+    height:22px;
+    cursor:pointer;
+    /* The track itself is a thin bar; the handle sits on top + the
+     * fill rectangle gives a soft "amount of time elapsed" indicator
+     * from past-edge to handle. */
+}
+.ua-scrub-track::before {
+    /* Track background line */
+    content:'';
+    position:absolute; left:0; right:0; top:50%;
+    height:2px; transform:translateY(-50%);
+    background:rgba(0,200,200,.18);
+    border-radius:1px;
+}
+.ua-scrub-track-fill {
+    position:absolute; left:0; top:50%;
+    height:2px; transform:translateY(-50%);
+    background:linear-gradient(90deg, transparent 0%, var(--ua-cyan-mid) 100%);
+    border-radius:1px;
+    pointer-events:none;
+}
+.ua-scrub-track-ticks {
+    position:absolute; inset:0;
+    pointer-events:none;
+}
+.ua-scrub-tick {
+    position:absolute; top:0; bottom:0;
+    transform:translateX(-50%);
+    display:flex; flex-direction:column; justify-content:flex-end;
+    align-items:center; gap:1px;
+}
+.ua-scrub-tick-mark {
+    width:1px; height:6px;
+    background:var(--ua-text-faint);
+    opacity:.6;
+}
+.ua-scrub-tick-label {
+    font-size:9px;
+    color:var(--ua-text-faint);
+    font-variant-numeric:tabular-nums;
+    margin-bottom:-12px;             /* pin below the track */
+}
+.ua-scrub-handle {
+    position:absolute; top:50%;
+    transform:translate(-50%, -50%);
+    width:14px; height:14px;
+    border-radius:50%;
+    background:var(--ua-cyan);
+    border:2px solid var(--ua-text-primary);
+    box-shadow:0 0 6px rgba(0,255,255,.55);
+    cursor:grab;
+    padding:0;
+    transition:transform .12s, box-shadow .12s;
+}
+.ua-scrub-handle:hover {
+    box-shadow:0 0 10px rgba(0,255,255,.85);
+    transform:translate(-50%, -50%) scale(1.18);
+}
+.ua-scrub.is-dragging .ua-scrub-handle {
+    cursor:grabbing;
+    transform:translate(-50%, -50%) scale(1.28);
+    box-shadow:0 0 14px rgba(0,255,255,.95);
+}
+.ua-scrub.is-dragging .ua-scrub-utc {
+    color:var(--ua-amber);
 }
 
 /* ─── Plots ────────────────────────────────────────────── */
@@ -2526,7 +2678,19 @@ input[type=range]::-moz-range-thumb {
                  ⏯ pause freezes every satellite in place; ⟳ snap re-
                  anchors them to wall-clock now after a long warp. -->
             <div class="ua-cam-controls ua-cam-controls--warp"
-                 title="Simulation time-warp — propagation speed of every satellite + debris piece">
+                 title="Simulation time-warp — propagation speed of every satellite + debris piece. Negative rates rewind for post-event forensics.">
+                <!-- Phase F: replay (negative-rate) chips. The bus accepts
+                     signed rates, so a click here rewinds every consumer
+                     (sat propagation, density model, analyzer family) in
+                     lock-step. Order is descending-magnitude → 1× so the
+                     row reads like a number line: faster-reverse on the
+                     left, faster-forward on the right. -->
+                <button type="button" class="ua-cam-warp-rate ua-cam-warp-rate--rev" data-rate="-600"
+                        title="−600× replay — rewind 9 s per LEO orbit (post-conjunction forensics)">◂600×</button>
+                <button type="button" class="ua-cam-warp-rate ua-cam-warp-rate--rev" data-rate="-60"
+                        title="−60× replay — rewind 90 s per LEO orbit">◂60×</button>
+                <button type="button" class="ua-cam-warp-rate ua-cam-warp-rate--rev" data-rate="-10"
+                        title="−10× replay — rewind 9 min per LEO orbit">◂10×</button>
                 <span class="ua-cam-warp-label">×</span>
                 <button type="button" class="ua-cam-warp-rate" data-rate="0.5"
                         title="Half speed — useful for watching reentry geometry">½</button>
@@ -2570,6 +2734,15 @@ input[type=range]::-moz-range-thumb {
                 <div class="ua-cam-hint" id="ua-cam-hint">drag to rotate · scroll to zoom</div>
             </div>
         </div>
+
+        <!-- Phase E: time scrubber. Anchored to the bottom of the globe
+             so it doesn't compete with the top-right camera HUD.
+             Wired in upper-atmosphere.html's bootstrap; widget code in
+             js/upper-atmosphere-time-scrubber.js. The host element gets
+             the .ua-pane-analysis design-token scope so the scrubber's
+             CSS reads from the same fleet UI tokens as the rest of the
+             page chrome. -->
+        <div id="ua-time-scrubber-host" class="ua-pane-analysis"></div>
 
         <div id="ua-globe-legend">
             <b>gradient shells</b> · mesosphere → outer exosphere<br>
@@ -2616,6 +2789,12 @@ input[type=range]::-moz-range-thumb {
     import { AtmosphereGlobe } from './js/upper-atmosphere-globe.js';
     import { UpperAtmosphereUI } from './js/upper-atmosphere-ui.js';
     import { FleetPanel } from './js/upper-atmosphere-fleet-panel.js';
+    // Phase E: operator-facing time scrubber. Mounts to the bottom of
+    // the globe canvas, drives the shared TimeBus directly. Every
+    // downstream consumer (Phase B sat propagation, Phase C realtime
+    // driver, Phase D analyzer family) reads simTimeMs from the bus
+    // so dragging here retimes the whole page atomically.
+    import { TimeScrubber } from './js/upper-atmosphere-time-scrubber.js';
     import { getRealtimeDriver } from './js/upper-atmosphere-realtime.js';
 
     const canvas = document.getElementById('ua-globe');
@@ -2720,8 +2899,14 @@ input[type=range]::-moz-range-thumb {
     }) : null;
     fleetPanel?.start();
 
+    // Phase E: mount the time scrubber at the bottom of the globe.
+    // Constructor wires bus subscriptions + DOM events; no further
+    // wiring needed. Destroy() can be called later for cleanup.
+    const scrubberHost = document.getElementById('ua-time-scrubber-host');
+    const timeScrubber = scrubberHost ? new TimeScrubber(scrubberHost) : null;
+
     // Expose for devtools poking.
-    window.__ua = { engine, globe, ui, fleetPanel };
+    window.__ua = { engine, globe, ui, fleetPanel, timeScrubber };
 
     /* ─── Aside tabs (Controls / Analysis) ──────────────────── */
     const tabBtns  = document.querySelectorAll('#ua-aside-tabs .ua-tab-btn');
