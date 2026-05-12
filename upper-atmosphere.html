@@ -524,6 +524,13 @@ input[type=range]::-moz-range-thumb {
     --ua-r-sm: 4px;
     --ua-r-md: 6px;
     --ua-r-lg: 8px;
+    /* ── Shared header-row metric line (Phase 24) ─────────────────
+     * Every element in a compact header row (asset card head, story-
+     * card head subline) settles to this height with line-height:1,
+     * so the text inside each element sits on the SAME vertical
+     * metric regardless of font-size. Pills lose vertical padding;
+     * icon buttons match natively. */
+    --ua-row-h: 22px;
     /* ── Letterspacing for the "UPPERCASE LABELS" pattern ───────── */
     --ua-ls-cap: .06em;
 }
@@ -639,16 +646,35 @@ input[type=range]::-moz-range-thumb {
 .ua-fleet-card--sev-high { border-left-color:rgba(255,80,96,.85); box-shadow:0 0 12px rgba(255,80,96,.18); }
 .ua-fleet-card--unready  { border-left-color:rgba(150,170,200,.45); }
 .ua-fleet-card-head {
+    /* Header row sits on a SHARED metric line — every child below uses
+     * min-height:var(--ua-row-h) + line-height:1 so text sits on the
+     * same vertical axis regardless of font-size. The pill loses its
+     * vertical padding because row-height handles vertical sizing now. */
     display:flex; align-items:center; gap:var(--ua-sp-3);
     flex-wrap:wrap;
+    line-height:1;
 }
-.ua-fleet-name { color:var(--ua-text-primary); font-weight:600; font-size:var(--ua-fs-md); flex:1 1 auto; min-width:0; }
+.ua-fleet-name {
+    color:var(--ua-text-primary); font-weight:600; font-size:var(--ua-fs-md);
+    flex:1 1 auto; min-width:0;
+    /* Shared row metric — inline-flex centres the text vertically without
+     * changing flex-item behaviour from the parent's perspective. */
+    display:inline-flex; align-items:center;
+    min-height:var(--ua-row-h); line-height:1;
+}
 .ua-fleet-norad {
     font-size:var(--ua-fs-xs); color:var(--ua-text-muted); font-variant-numeric:tabular-nums;
+    display:inline-flex; align-items:center;
+    min-height:var(--ua-row-h); line-height:1;
 }
 .ua-fleet-pill {
-    font-size:var(--ua-fs-xs); letter-spacing:.06em; font-weight:700;
-    padding:1px 6px; border-radius:var(--ua-r-md);
+    font-size:var(--ua-fs-xs); letter-spacing:var(--ua-ls-cap); font-weight:700;
+    /* Vertical padding is 0 — the row-height token handles vertical
+     * sizing so pill text shares the metric line with the name + norad
+     * + icon button. Horizontal padding stays at sp-3. */
+    padding:0 var(--ua-sp-3); border-radius:var(--ua-r-md);
+    display:inline-flex; align-items:center;
+    min-height:var(--ua-row-h); line-height:1;
 }
 .ua-fleet-pill--ok       { color:var(--ua-cyan);    background:var(--ua-cyan-mid);  border:1px solid rgba(0,200,200,.45); }
 .ua-fleet-pill--pending  { color:var(--ua-amber); background:var(--ua-amber-low); border:1px solid rgba(255,170,32,.35); }
@@ -862,6 +888,11 @@ input[type=range]::-moz-range-thumb {
     flex:1 1 auto;
     min-width:0;
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    /* Shares the per-card header row metric (Phase 24). inline-flex
+     * here keeps the button as a flex-item from the parent's POV
+     * while centring its own text on the row's metric line. */
+    display:inline-flex; align-items:center;
+    min-height:var(--ua-row-h); line-height:1;
 }
 .ua-fleet-name-btn:hover {
     color:var(--ua-cyan);
