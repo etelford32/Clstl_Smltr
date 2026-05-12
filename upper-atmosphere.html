@@ -946,6 +946,53 @@ input[type=range]::-moz-range-thumb {
     min-width:48px;
 }
 
+/* ─── Conjunction archive section (Phase 17) ────────────── */
+/* Sits below the live top-5 and shows historical pairs from the past
+ * 14 days — operators see "this pair has been close N times" rather
+ * than just the next predicted approach. Visually quieter than the
+ * live section so it doesn't compete for attention. */
+.ua-fleet-conj-arch {
+    margin-top:8px;
+    padding-top:6px;
+    border-top:1px dashed rgba(0,200,200,.15);
+    display:flex; flex-direction:column; gap:3px;
+}
+.ua-fleet-conj-arch-head {
+    font-size:.6rem;
+    color:#9ab;
+    text-transform:uppercase;
+    letter-spacing:.06em;
+    display:flex; gap:6px; align-items:baseline;
+}
+.ua-fleet-conj-arch-sub {
+    color:#789;
+    text-transform:none;
+    letter-spacing:0;
+    font-variant-numeric:tabular-nums;
+}
+.ua-fleet-conj-arch-rows { display:flex; flex-direction:column; gap:1px; }
+.ua-fleet-conj-arch-row {
+    display:grid;
+    grid-template-columns: 38px 1fr auto auto;
+    gap:8px; align-items:center;
+    padding:3px 8px;
+    border-radius:4px;
+    font-size:.62rem;
+    color:#cde;
+    font-variant-numeric:tabular-nums;
+    cursor:help;
+    background:rgba(8,4,22,.30);
+}
+.ua-fleet-conj-arch-row:hover { background:rgba(0,200,200,.06); }
+.ua-fleet-conj-arch-cnt {
+    color:#ffaa20;
+    font-weight:700;
+    text-align:right;
+}
+.ua-fleet-conj-arch-d, .ua-fleet-conj-arch-age {
+    color:#9ab; text-align:right; min-width:60px;
+}
+
 /* Flash animation triggered when a conjunction row is clicked. Tints
  * the card briefly + adds a glow so the operator's eye lands on the
  * right place after the smooth-scroll completes. */

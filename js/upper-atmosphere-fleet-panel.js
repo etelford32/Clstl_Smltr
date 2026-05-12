@@ -185,6 +185,14 @@ export class FleetPanel {
             // Fire alerts for any newly-tripped thresholds.
             for (const r of readyResults) this._maybeFireAlerts(r);
 
+            // Phase 17: archive the live conjunction events the analyzer
+            // just produced. Same-pair + TCA-window dedup happens inside
+            // recordConjunctions, so re-running the same sweep doesn't
+            // double-count — sightings just increments. Run BEFORE
+            // _renderList so the panel's archive section reflects the
+            // freshly-merged data on this paint.
+            this.fleet.recordConjunctions(this.analyzer.lastConjunctions || []);
+
             this._renderList();
             // Hand the severity-ranked list to whoever cares about ribbons.
             this.onSeverityChange(rankBySeverity(readyResults).slice(0, 3));
@@ -705,7 +713,100 @@ export class FleetPanel {
                 </div>`;
         }).join('');
 
-        this._conjHost.innerHTML = `${header}<div class="ua-fleet-conj-rows">${rows}</div>`;
+        this._conjHost.innerHTML = `${header}<div class="ua-fleet-conj-rows">${rows}</div>`
+            + this._renderConjunctionArchiveSection();
+    }
+
+    /**
+     * Recent close-approaches section (Phase 17). Shows the top
+     * historical pairs from the archive — entries whose tcaAbsMs is
+     * already in the past — so operators see "Starlink-2944 has been
+     * a frequent partner over the last 14 days, 4 separate encounters,
+     * worst miss was 5 km".
+     *
+     * Live (pending) events are NOT shown here — they're already in
+     * the top-5 above and we don't want to duplicate. The archive
+     * surface answers a different question: "what has been happening
+     * historically?" not "what's about to happen?".
+     */
+    _renderConjunctionArchiveSection() {
+        const archive = this.fleet.getConjunctionArchive?.() || [];
+        const now = Date.now();
+        const HISTORICAL_WINDOW_DAYS = 14;
+        const cutoff = now - HISTORICAL_WINDOW_DAYS * 86400000;
+        // Only show events whose TCA has already passed (truly historical)
+        // AND whose tcaAbsMs is within the operator-relevant window.
+        const past = archive.filter(e =>
+            Number.isFinite(e.tcaAbsMs)
+            && e.tcaAbsMs < now
+            && e.tcaAbsMs >= cutoff
+        );
+        if (past.length === 0) return '';
+
+        // Group by pair, aggregate stats — same idea as the per-asset
+        // tally but fleet-wide.
+        const byPair = new Map();
+        for (const e of past) {
+            const stat = byPair.get(e.pairKey) || {
+                pairKey: e.pairKey,
+                idA: e.idA, idB: e.idB,
+                nameA: e.nameA, nameB: e.nameB,
+                encounters: 0,
+                worstDMinKm: Infinity,
+                lastTcaMs: 0,
+                sightings: 0,
+            };
+            stat.encounters++;
+            stat.sightings += e.sightings ?? 1;
+            if (Number.isFinite(e.dMinKm) && e.dMinKm < stat.worstDMinKm) stat.worstDMinKm = e.dMinKm;
+            if (e.tcaAbsMs > stat.lastTcaMs) stat.lastTcaMs = e.tcaAbsMs;
+            byPair.set(e.pairKey, stat);
+        }
+        const pairs = [...byPair.values()]
+            .sort((a, b) => b.encounters - a.encounters || a.worstDMinKm - b.worstDMinKm)
+            .slice(0, 5);
+
+        const rows = pairs.map(p => {
+            const ageMs = now - p.lastTcaMs;
+            const ageStr = ageMs < 3600000      ? `${Math.round(ageMs / 60000)} min ago`
+                         : ageMs < 86400000     ? `${Math.round(ageMs / 3600000)} h ago`
+                         :                         `${Math.round(ageMs / 86400000)} d ago`;
+            const worstTxt = Number.isFinite(p.worstDMinKm) ? `${p.worstDMinKm.toFixed(1)} km` : '—';
+            const tooltip = `${p.encounters} encounter${p.encounters === 1 ? '' : 's'}`
+                + ` over the last ${HISTORICAL_WINDOW_DAYS} days`
+                + `\nworst miss: ${worstTxt}, most recent ${ageStr}`
+                + `\n${p.sightings} sweep observation${p.sightings === 1 ? '' : 's'}`
+                + (p.encounters > p.sightings ? '' : ` (each event seen across ${(p.sightings / p.encounters).toFixed(1)} sweeps)`);
+            return `
+                <div class="ua-fleet-conj-arch-row" title="${tooltip}">
+                    <span class="ua-fleet-conj-arch-cnt">×${p.encounters}</span>
+                    <span class="ua-fleet-conj-pair">
+                        <button type="button" class="ua-fleet-conj-name"
+                                data-conj-jump-to="${p.idA}" data-conj-jump-pair="${p.idB}">
+                            ${_esc(p.nameA)}
+                        </button>
+                        <span class="ua-fleet-conj-sep">↔</span>
+                        <button type="button" class="ua-fleet-conj-name"
+                                data-conj-jump-to="${p.idB}" data-conj-jump-pair="${p.idA}">
+                            ${_esc(p.nameB)}
+                        </button>
+                    </span>
+                    <span class="ua-fleet-conj-arch-d">worst ${worstTxt}</span>
+                    <span class="ua-fleet-conj-arch-age">${ageStr}</span>
+                </div>`;
+        }).join('');
+
+        return `
+            <div class="ua-fleet-conj-arch">
+                <div class="ua-fleet-conj-arch-head">
+                    Recent close approaches
+                    <span class="ua-fleet-conj-arch-sub">
+                        last ${HISTORICAL_WINDOW_DAYS} d · ${past.length} event${past.length === 1 ? '' : 's'}
+                        across ${byPair.size} pair${byPair.size === 1 ? '' : 's'}
+                    </span>
+                </div>
+                <div class="ua-fleet-conj-arch-rows">${rows}</div>
+            </div>`;
     }
 
     /**
@@ -1263,6 +1364,39 @@ export class FleetPanel {
                 + `Refresh TLE history with ⟳ over a few days to confirm or clear.`;
             badges.push(`<span class="ua-fleet-badge ua-fleet-badge--high ua-fleet-badge-anom"
                               title="${aTitle}">⚠ ANOMALY z=${anomDet.z.toFixed(1)}σ</span>`);
+        }
+        // Phase 17: frequent-partner chip — surfaces "this asset has
+        // been a frequent conjunction partner over the last 14 days,
+        // pattern of concern". Computed from the persistent archive,
+        // so the chip survives across page reloads. Only fires when
+        // the asset has at least one historical encounter (i.e. a TCA
+        // that has already passed). Live encounters (still pending)
+        // are already in the conjunction panel above.
+        if (asset) {
+            const stats = this.fleet.getConjunctionStats?.(asset.id, 14);
+            if (stats && stats.encounters >= 1) {
+                const top = stats.partnerTallies[0];
+                const worst = Number.isFinite(stats.worstDMinKm)
+                    ? `${stats.worstDMinKm.toFixed(1)} km` : '—';
+                const cls = stats.encounters >= 4 ? 'ua-fleet-badge--high'
+                          : stats.encounters >= 2 ? 'ua-fleet-badge--med'
+                                                  : 'ua-fleet-badge--low';
+                const partnerListTxt = stats.partnerTallies.slice(0, 4).map(p =>
+                    `  • ${p.partnerName} ×${p.encounters}`
+                    + (Number.isFinite(p.worstDMinKm) ? ` (worst ${p.worstDMinKm.toFixed(1)} km)` : '')
+                ).join('\n');
+                const tooltip = `${stats.encounters} historical close approach`
+                    + (stats.encounters === 1 ? '' : 'es')
+                    + ` over the last ${stats.windowDays} days`
+                    + ` across ${stats.uniquePartners} unique partner`
+                    + (stats.uniquePartners === 1 ? '' : 's')
+                    + `\nWorst miss: ${worst}`
+                    + (top ? `\n\nPartners:\n${partnerListTxt}` : '')
+                    + `\n\nClick a name in the Recent close approaches`
+                    + ` panel to jump to that asset.`;
+                badges.push(`<span class="ua-fleet-badge ${cls}" title="${tooltip}">
+                    PARTNERS ×${stats.encounters} · worst ${worst}</span>`);
+            }
         }
         // Phase 16: residual sparkline — shown whenever ≥3 same-BC
         // entries exist, regardless of whether the detector has enough

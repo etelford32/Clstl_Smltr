@@ -75,6 +75,16 @@ const TLE_HISTORY_MAX = 8;
 // of daily samples to build a robust MAD baseline; 30 covers a full
 // solar-rotation cycle so a single storm doesn't bias the median.
 const RESIDUAL_HISTORY_MAX = 30;
+// Phase 17: fleet-wide conjunction-event archive. Each entry is a
+// (pair, TCA-window) tuple; new sweeps with the same pair + TCA-within-
+// 30-min merge into the existing entry (incrementing `sightings` and
+// refreshing the prediction). Cap is generous because operators may
+// run dense fleets; retention is time-based so we don't accumulate
+// 6-month-old events.
+const CONJ_STORAGE_KEY     = 'pp-ua-fleet-conj-v1';
+const CONJ_ARCHIVE_MAX     = 200;
+const CONJ_RETENTION_DAYS  = 30;
+const CONJ_DEDUP_TCA_MIN   = 30;     // merge window for same-pair encounters
 
 // ── Persistence ──────────────────────────────────────────────────────────────
 
@@ -111,6 +121,24 @@ function _save(assets) {
         }));
         localStorage.setItem(STORAGE_KEY, JSON.stringify(slim));
     } catch { /* private mode / quota — silently degrade */ }
+}
+
+// ── Conjunction archive persistence (Phase 17) ───────────────────────────────
+function _loadConjArchive() {
+    try {
+        const raw = JSON.parse(localStorage.getItem(CONJ_STORAGE_KEY) || '[]');
+        if (!Array.isArray(raw)) return [];
+        return raw.filter(e => e && e.pairKey && e.idA && e.idB);
+    } catch { return []; }
+}
+function _saveConjArchive(archive) {
+    try {
+        localStorage.setItem(CONJ_STORAGE_KEY,
+            JSON.stringify(archive.slice(0, CONJ_ARCHIVE_MAX)));
+    } catch { /* quota */ }
+}
+function _conjPairKey(idA, idB) {
+    return idA < idB ? `${idA}|${idB}` : `${idB}|${idA}`;
 }
 
 // ── TLE parsing helpers ──────────────────────────────────────────────────────
@@ -239,6 +267,11 @@ export class UpperAtmosphereFleet {
         this._assets  = [];
         this._subs    = new Set();
         this._inflight = new Map();   // id → AbortController for pending fetches
+        // Phase 17: fleet-wide conjunction-event archive. Lives outside
+        // the per-asset persistence because it's pair-keyed; loaded
+        // separately + retention-pruned at first read.
+        this._conjArchive = _loadConjArchive();
+        this._pruneConjArchive();
 
         // Restore from localStorage. Each restored entry already carries
         // its TLE, so it's `ready` immediately — no refetch needed unless
@@ -521,6 +554,156 @@ export class UpperAtmosphereFleet {
         _save(this._assets);
         this._notify();
         return true;
+    }
+
+    // ── Phase 17: conjunction-event archive ────────────────────────────────
+    //
+    // Each unique (pair, TCA-window) is one entry. New sweeps with the
+    // same pair + TCA within 30 min refresh the existing entry and
+    // increment its `sightings` counter. New TCAs (e.g. an old encounter
+    // expired and the next geometric crossing is a fresh entry) get a
+    // new row. Retention is time-based (drop entries whose tcaAbsMs is
+    // > 30 days old) so the archive doesn't grow unboundedly.
+
+    /**
+     * Merge a sweep's conjunction events into the archive.
+     * Called by the panel after `analyzer.analyzeMany()` settles.
+     *
+     * Each event is the shape produced by upper-atmosphere-conjunction.js#
+     * screenFleet — { idA, idB, nameA, nameB, tcaMin, dMinKm, sigmaKm,
+     * sigmaA, sigmaB, pConj, thresholdKm, correlation }.
+     *
+     * @param {Array}  events
+     * @param {number} [sweepAtMs=Date.now()]   anchor for tcaMin → tcaAbsMs
+     */
+    recordConjunctions(events, sweepAtMs = Date.now()) {
+        if (!Array.isArray(events) || events.length === 0) {
+            this._pruneConjArchive();
+            return;
+        }
+        for (const e of events) {
+            if (!e?.idA || !e?.idB || !Number.isFinite(e.tcaMin)) continue;
+            const tcaAbsMs = sweepAtMs + e.tcaMin * 60000;
+            const pairKey  = _conjPairKey(e.idA, e.idB);
+            const existing = this._conjArchive.find(x =>
+                x.pairKey === pairKey
+                && Math.abs(x.tcaAbsMs - tcaAbsMs) < CONJ_DEDUP_TCA_MIN * 60000);
+            if (existing) {
+                existing.sightings   = (existing.sightings ?? 1) + 1;
+                existing.lastSeenAt  = sweepAtMs;
+                // Refresh the prediction: the most recent sweep has the
+                // best (most-current) numbers, including any drift in
+                // TCA timing or pConj as the orbit evolves.
+                existing.tcaAbsMs    = tcaAbsMs;
+                existing.dMinKm      = e.dMinKm;
+                existing.pConj       = e.pConj;
+                existing.sigmaKm     = e.sigmaKm;
+                existing.thresholdKm = e.thresholdKm;
+                // Names can change if the operator renames an asset;
+                // keep the latest.
+                existing.nameA = e.idA === existing.idA ? e.nameA : e.nameB;
+                existing.nameB = e.idA === existing.idA ? e.nameB : e.nameA;
+            } else {
+                this._conjArchive.push({
+                    pairKey,
+                    idA: e.idA, idB: e.idB,
+                    nameA: e.nameA, nameB: e.nameB,
+                    tcaAbsMs,
+                    dMinKm:      e.dMinKm,
+                    pConj:       e.pConj,
+                    sigmaKm:     e.sigmaKm ?? null,
+                    thresholdKm: e.thresholdKm,
+                    firstSeenAt: sweepAtMs,
+                    lastSeenAt:  sweepAtMs,
+                    sightings:   1,
+                });
+            }
+        }
+        this._pruneConjArchive();
+        _saveConjArchive(this._conjArchive);
+        this._notify();
+    }
+
+    /** Drop archive entries older than CONJ_RETENTION_DAYS, then cap. */
+    _pruneConjArchive() {
+        const cutoff = Date.now() - CONJ_RETENTION_DAYS * 86400000;
+        // Keep entries whose TCA was recent OR are still in the future
+        // (pending). Past entries older than the retention window expire.
+        this._conjArchive = this._conjArchive.filter(e =>
+            Number.isFinite(e?.tcaAbsMs) && e.tcaAbsMs > cutoff);
+        if (this._conjArchive.length > CONJ_ARCHIVE_MAX) {
+            this._conjArchive.sort((a, b) =>
+                (b.lastSeenAt ?? 0) - (a.lastSeenAt ?? 0));
+            this._conjArchive.length = CONJ_ARCHIVE_MAX;
+        }
+    }
+
+    /** Read-only snapshot of the archive, sorted by lastSeenAt DESC. */
+    getConjunctionArchive() {
+        this._pruneConjArchive();
+        return this._conjArchive.slice().sort((a, b) =>
+            (b.lastSeenAt ?? 0) - (a.lastSeenAt ?? 0));
+    }
+
+    /**
+     * Per-asset rollup: how many encounters this asset participated in
+     * over the last `windowDays`, keyed by partner.
+     *
+     * @returns {{
+     *   encounters: number,           // distinct events
+     *   sightings:  number,           // sum of sightings across events
+     *   uniquePartners: number,
+     *   worstDMinKm: number|null,
+     *   worstP: number,
+     *   partnerTallies: [{ partnerId, partnerName, encounters, sightings,
+     *                       worstDMinKm, worstP, lastSeenAt }],
+     *   windowDays: number,
+     * }}
+     */
+    getConjunctionStats(assetId, windowDays = 14) {
+        const cutoff = Date.now() - windowDays * 86400000;
+        const involved = (this._conjArchive ?? []).filter(e =>
+            (e.idA === assetId || e.idB === assetId) && e.tcaAbsMs >= cutoff);
+
+        const partnerTally = new Map();
+        let worstDMinKm = Infinity, worstP = 0, totalSightings = 0;
+        for (const e of involved) {
+            const partnerId   = e.idA === assetId ? e.idB   : e.idA;
+            const partnerName = e.idA === assetId ? e.nameB : e.nameA;
+            const stat = partnerTally.get(partnerId) || {
+                partnerId, partnerName, encounters: 0, sightings: 0,
+                worstDMinKm: Infinity, worstP: 0, lastSeenAt: 0,
+            };
+            stat.encounters++;
+            stat.sightings += e.sightings ?? 1;
+            if (Number.isFinite(e.dMinKm) && e.dMinKm < stat.worstDMinKm) stat.worstDMinKm = e.dMinKm;
+            if (Number.isFinite(e.pConj)  && e.pConj  > stat.worstP)     stat.worstP      = e.pConj;
+            if ((e.lastSeenAt ?? 0) > stat.lastSeenAt) stat.lastSeenAt = e.lastSeenAt;
+            partnerTally.set(partnerId, stat);
+            totalSightings += e.sightings ?? 1;
+            if (Number.isFinite(e.dMinKm) && e.dMinKm < worstDMinKm) worstDMinKm = e.dMinKm;
+            if (Number.isFinite(e.pConj)  && e.pConj  > worstP)      worstP      = e.pConj;
+        }
+        const partners = [...partnerTally.values()].map(p => ({
+            ...p,
+            worstDMinKm: Number.isFinite(p.worstDMinKm) ? p.worstDMinKm : null,
+        })).sort((a, b) => b.encounters - a.encounters);
+        return {
+            encounters:     involved.length,
+            sightings:      totalSightings,
+            uniquePartners: partnerTally.size,
+            worstDMinKm:    Number.isFinite(worstDMinKm) ? worstDMinKm : null,
+            worstP,
+            partnerTallies: partners,
+            windowDays,
+        };
+    }
+
+    /** Operator-triggered "wipe the conjunction memory". */
+    clearConjunctionArchive() {
+        this._conjArchive = [];
+        _saveConjArchive(this._conjArchive);
+        this._notify();
     }
 
     /** Force a fresh CelesTrak pull for a NORAD-anchored asset. */
