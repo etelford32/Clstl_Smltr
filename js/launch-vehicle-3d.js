@@ -884,19 +884,37 @@ function frameForView(name, vehicle, fovDeg, aspect) {
     const center = bbox.getCenter(new THREE.Vector3());
     const size   = bbox.getSize(new THREE.Vector3());
 
-    // Bias the look-at along Y for presets that want to favor a section of
-    // the stack (e.g. closeup pulls the eye toward the engines).
-    center.y += preset.biasY * size.y;
+    // Look-at locked to the rocket's vertical axis (x=0, z=0) — every vehicle
+    // builder anchors its stack at that line. Using bbox.center.x/z instead
+    // would aim the camera at the bbox geometric centroid, which for an
+    // asymmetric stack (Shuttle: orbiter mounted ~8.5 m to +Z of the ET;
+    // anything with a side payload / boattail) sits several meters off the
+    // stack axis. The result is a permanently lopsided 3/4 frame where the
+    // rocket appears shoved to one side. autoRotate previously hid this by
+    // sweeping the camera continuously around the off-axis target.
+    const target = new THREE.Vector3(
+        0,
+        center.y + preset.biasY * size.y,
+        0,
+    );
+
+    // Fit-distance must use the *radial* extents of the bbox measured from
+    // the on-axis target, not bbox.size/2. For an asymmetric stack
+    // size.z/2 underestimates how far the bbox actually reaches in +Z away
+    // from x=z=0 — the orbiter would clip out of frame. Take the max of the
+    // four signed extents per horizontal axis.
+    const halfX = Math.max(Math.abs(bbox.max.x), Math.abs(bbox.min.x));
+    const halfZ = Math.max(Math.abs(bbox.max.z), Math.abs(bbox.min.z));
+    const halfYV = Math.max(size.y, 1) * 0.5 * 1.05;
+    const halfH  = Math.max(halfX, halfZ, 1) * 1.05;
 
     // Fit the larger of vertical extent and horizontal extent (modulated by
     // canvas aspect) to the viewport. 1.05 = 5 % padding so the silhouette
     // doesn't kiss the frame edge.
     const halfFovV = (fovDeg * Math.PI / 180) / 2;
     const halfFovH = Math.atan(Math.tan(halfFovV) * aspect);
-    const halfV = Math.max(size.y, 1) * 0.5 * 1.05;
-    const halfH = Math.max(size.x, size.z, 1) * 0.5 * 1.05;
-    const distFitV = halfV / Math.tan(halfFovV);
-    const distFitH = halfH / Math.tan(halfFovH);
+    const distFitV = halfYV / Math.tan(halfFovV);
+    const distFitH = halfH  / Math.tan(halfFovH);
     let dist = Math.max(distFitV, distFitH) * preset.distMul;
 
     // Clamp so we don't punch through the near plane on tiny vehicles or
@@ -907,8 +925,8 @@ function frameForView(name, vehicle, fovDeg, aspect) {
     dist = Math.max(dist, preset.distMinM ?? 8);
 
     const dir = new THREE.Vector3(...preset.dir).normalize();
-    const pos = center.clone().addScaledVector(dir, dist);
-    return { pos: pos.toArray(), target: center.toArray(), dist };
+    const pos = target.clone().addScaledVector(dir, dist);
+    return { pos: pos.toArray(), target: target.toArray(), dist };
 }
 
 // Cancellable tween. Returns a handle whose `cancelled = true` short-circuits
