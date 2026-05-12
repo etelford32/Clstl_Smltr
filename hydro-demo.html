@@ -167,11 +167,12 @@ body {
         <div class="section">
             <h2>Method</h2>
             <p class="lead" style="margin-top:0;">
-                Locally isothermal log-polar grid · donor-cell upwind transport · FARGO
-                azimuthal shift (integer + fractional) · explicit pressure /
-                centrifugal / planetary-gravity sources · de Val-Borro (2006)
-                wave-killing boundaries. First-order in space &amp; time — MUSCL
-                + HLLC are next.
+                Locally isothermal log-polar grid · <strong>PLM reconstruction with
+                minmod limiter</strong> · <strong>LLF/Rusanov Riemann flux</strong>
+                · FARGO azimuthal shift (integer + fractional) · explicit
+                pressure / centrifugal / planetary-gravity sources · de Val-Borro
+                (2006) wave-killing boundaries. Second-order in space, forward
+                Euler in time — RK2 + HLLC are next.
             </p>
         </div>
 

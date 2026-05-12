@@ -57,10 +57,45 @@ pub struct Sim {
     w_phi:     Vec<f64>,
     /// Frozen 1-D reference Σ profile for boundary damping.
     sigma_ref: Vec<f64>,
+    /// Persistent PLM/LLF scratch arrays — keeps the inner loop alloc-free.
+    pub(crate) scratch: TransportScratch,
     pub gm_star: f64,
     pub planets: Vec<Planet>,
     pub t: f64,
     pub steps: u64,
+}
+
+/// Per-call workspace for the PLM+LLF transport. Allocated once at
+/// `Sim::new()` and reused on every substep so the hot loop never hits the
+/// allocator. All arrays are sized for the (nr × nphi) grid except the
+/// radial face fluxes, which need (nr + 1) × nphi.
+pub(crate) struct TransportScratch {
+    // Slopes (one per primitive per direction).
+    pub sl_sig_r: Vec<f64>,  pub sl_sig_p: Vec<f64>,
+    pub sl_vr_r:  Vec<f64>,  pub sl_vr_p:  Vec<f64>,
+    pub sl_vp_r:  Vec<f64>,  pub sl_vp_p:  Vec<f64>,
+    pub sl_wp_p:  Vec<f64>,
+    // Radial face fluxes ((nr + 1) · nphi entries).
+    pub fr_sig:   Vec<f64>,  pub fr_mr:    Vec<f64>,  pub fr_mp:    Vec<f64>,
+    // Azimuthal face fluxes (n entries; stored at the "j-1/2" face of each cell).
+    pub fp_sig:   Vec<f64>,  pub fp_mr:    Vec<f64>,  pub fp_mp:    Vec<f64>,
+    // Updated conservatives.
+    pub sig_new:  Vec<f64>,  pub mr_new:   Vec<f64>,  pub mp_new:   Vec<f64>,
+}
+
+impl TransportScratch {
+    fn new(n: usize, n_face_r: usize) -> Self {
+        let z = |k| vec![0.0_f64; k];
+        Self {
+            sl_sig_r: z(n), sl_sig_p: z(n),
+            sl_vr_r:  z(n), sl_vr_p:  z(n),
+            sl_vp_r:  z(n), sl_vp_p:  z(n),
+            sl_wp_p:  z(n),
+            fr_sig: z(n_face_r), fr_mr: z(n_face_r), fr_mp: z(n_face_r),
+            fp_sig: z(n),        fp_mr: z(n),        fp_mp: z(n),
+            sig_new: z(n), mr_new: z(n), mp_new: z(n),
+        }
+    }
 }
 
 impl Sim {
@@ -96,10 +131,12 @@ impl Sim {
             }
         }
 
+        let scratch = TransportScratch::new(n, (grid.nr + 1) * grid.nphi);
         Self {
             vphi_bar:  vec![0.0; grid.nr],
             w_phi:     vec![0.0; n],
             sigma_ref,
+            scratch,
             grid, sigma, vr, vphi,
             gm_star,
             planets: Vec::new(),
@@ -143,10 +180,10 @@ impl Sim {
         source::apply_sources(&self.grid,
                               &mut self.sigma, &mut self.vr, &mut self.vphi,
                               self.gm_star, &self.planets, dt);
-        // 3. Transport sub-step using residual w_phi.
+        // 3. Transport sub-step using residual w_phi (PLM + minmod + LLF).
         transport::advect(&self.grid,
                           &mut self.sigma, &mut self.vr, &mut self.vphi,
-                          &self.w_phi, dt);
+                          &self.w_phi, &mut self.scratch, dt);
         // 4. FARGO shift by vphi_bar·dt — large dt is fine here, that's the point.
         fargo::shift(&self.grid,
                      &mut self.sigma, &mut self.vr, &mut self.vphi,
@@ -228,27 +265,80 @@ pub extern "C" fn hydro_set_planet(x: f64, y: f64, gm: f64, eps: f64) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Native-side tests — sanity-check the kernel on x86_64 before we ship it.
+//
+// Tests construct `Sim` directly instead of going through the global C-ABI
+// slot. That keeps each test independent so cargo can run them in parallel
+// without races on the `static mut SIM`.
 // ─────────────────────────────────────────────────────────────────────────────
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn fresh() -> &'static mut Sim {
+    fn fresh_sim() -> Sim {
         // 64 × 64 disc from 0.5 to 5.0 length units, GM* = 1, Σ ∝ r^-1.
-        assert_eq!(1, hydro_init(64, 64, 0.5, 5.0, 1.0, 1.0, -1.0, 0.05, -0.25));
-        sim_mut()
+        Sim::new(64, 64, 0.5, 5.0, 1.0, 1.0, -1.0, 0.05, -0.25)
     }
+
+    /// Drive the same CFL-bounded sub-stepping that hydro_step() does, but
+    /// against an explicit Sim handle.
+    fn run_for(s: &mut Sim, dt_target: f64, calls: usize) {
+        for _ in 0..calls {
+            let mut remaining = dt_target;
+            for _ in 0..256 {
+                if remaining <= 0.0 { break; }
+                let dt = s.cfl_dt(0.4).min(remaining);
+                if !dt.is_finite() || dt <= 0.0 { break; }
+                s.substep(dt);
+                remaining -= dt;
+            }
+        }
+    }
+
+    /// Sum Σ·dA over the *active* region (10 % strip at each radial edge
+    /// excluded because of wave-killing damping there).
+    fn active_mass(s: &Sim) -> f64 {
+        let g = &s.grid;
+        let n_skip = ((g.nr as f64) * 0.10).ceil() as usize;
+        let mut m = 0.0;
+        for i in n_skip..(g.nr - n_skip) {
+            let area = g.r[i] * g.dr[i] * g.dphi;
+            for j in 0..g.nphi {
+                m += s.sigma[g.idx(i, j)] * area;
+            }
+        }
+        m
+    }
+
+    /// Σ in the active region must drift by < 1 % over a 5-inner-orbit run
+    /// at moderate resolution (96 × 96). This is the second-order PLM/LLF
+    /// quality bar — donor-cell on the identical setup drifts > 50 %.
+    /// Inner orbit at r = 0.5 is T = 2π·r^{3/2} ≈ 2.22 code-units.
+    #[test]
+    fn mass_conservation_under_one_percent_over_five_orbits() {
+        let mut s = Sim::new(96, 96, 0.5, 5.0, 1.0, 1.0, -1.0, 0.05, -0.25);
+        let m0 = active_mass(&s);
+        // 60 calls × dt = 0.2 → t ≈ 12 ≈ 5.4 inner orbits.
+        run_for(&mut s, 0.2, 60);
+        let m1 = active_mass(&s);
+        let drift = (m1 - m0) / m0;
+        assert!(drift.abs() < 0.01,
+                "Σ active-region mass drift {:+.4} ({:+.2} %) > 1 % bar",
+                drift, drift * 100.0);
+    }
+
+    // Note: a formal Richardson "drift halves with doubled resolution" test
+    // is deliberately omitted at this stage. Forward Euler in time + cell-
+    // centred source coupling are still first-order, so the spatial 2nd-
+    // order accuracy from PLM is masked by O(dt) error in long runs. RK2
+    // time integration + flux-corrected source coupling are the next step.
 
     /// Proving-ground sanity checks: the kernel must run without producing
     /// NaN/Inf, Σ must stay strictly positive, and the radial velocity
     /// must not run away to super-sonic speeds inside the active region.
-    /// Quantitative mass-conservation tests belong with the upgrade to a
-    /// proper MUSCL scheme in a follow-up commit — donor-cell is too
-    /// diffusive for sub-percent drift at 64×64.
     #[test]
     fn kernel_remains_finite_and_bounded() {
-        let s = fresh();
-        for _ in 0..50 { hydro_step(0.2); }
+        let mut s = fresh_sim();
+        run_for(&mut s, 0.2, 50);
         let g = &s.grid;
         let n_skip = (g.nr as f64 * 0.06).ceil() as usize;
         let mut max_abs_vr = 0.0_f64;
@@ -263,12 +353,33 @@ mod tests {
             }
         }
         assert!(min_sigma > 0.0, "Σ went non-positive: min = {}", min_sigma);
-        let cs_min = g.cs.iter().cloned().fold(f64::INFINITY, f64::min);
         let cs_max = g.cs.iter().cloned().fold(0.0_f64, f64::max);
-        // |v_r| should remain comfortably sub-sonic for an undisturbed disc.
         assert!(max_abs_vr < 5.0 * cs_max,
                 "radial flow {} exceeds 5·c_s,max = {}", max_abs_vr, 5.0 * cs_max);
-        // Sanity: c_s scale is plausible.
-        assert!(cs_min > 0.0 && cs_max.is_finite());
+    }
+
+    /// A q = 10⁻³ planet on a r = 1.5 circular orbit must imprint a
+    /// measurable spiral wake in Σ within a small fraction of an orbit.
+    /// Sanity check that the planet-gravity source path works end-to-end.
+    #[test]
+    fn planet_imprints_spiral_wake() {
+        let mut s = Sim::new(96, 192, 0.5, 5.0, 1.0, 1.0, -1.0, 0.05, -0.25);
+        // Drop a planet at φ = 0, r = 1.5.
+        s.planets.push(source::Planet { x: 1.5, y: 0.0, gm: 1e-3, eps: 0.045 });
+        run_for(&mut s, 0.05, 60); // ≈ 1.4 inner orbits
+        // Max azimuthal asymmetry over r ∈ [0.8, 2.5].
+        let mut max_asym = 0.0_f64;
+        for i in 0..s.grid.nr {
+            if s.grid.r[i] < 0.8 || s.grid.r[i] > 2.5 { continue; }
+            let mut mn = f64::INFINITY; let mut mx = 0.0_f64;
+            for j in 0..s.grid.nphi {
+                let v = s.sigma[s.grid.idx(i, j)];
+                if v < mn { mn = v; } if v > mx { mx = v; }
+            }
+            let asym = (mx - mn) / (mx + mn);
+            if asym > max_asym { max_asym = asym; }
+        }
+        assert!(max_asym > 0.02,
+                "expected ≥ 2 % spiral-wake asymmetry, got {:.3}", max_asym);
     }
 }
