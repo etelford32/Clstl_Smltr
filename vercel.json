@@ -36,6 +36,10 @@
     {
       "path": "/api/cron/onboarding-nudge",
       "schedule": "30 16 * * *"
+    },
+    {
+      "path": "/api/cron/archive-forecasts",
+      "schedule": "0 2 * * *"
     }
   ],
   "headers": [
