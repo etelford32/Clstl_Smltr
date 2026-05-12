@@ -806,6 +806,61 @@ nav {
                      letter-spacing: .04em; font-weight: 700; font-size: 8.5px; }
 .pp-member-detail  { color: #779;    font-size: 9px; }
 
+/* ─── Renewables panel (renewables-panel.js) ─────────────────────
+   Paired solar + wind cards for the pinned location. Mirrors the
+   probability picker's typography so both panels feel like part of
+   the same operator surface. */
+.rp-root { display:flex; flex-direction:column; gap: var(--sp-2); }
+.rp-head {
+    display:flex; align-items:center; gap: var(--sp-2);
+    padding-bottom: var(--sp-1);
+    border-bottom: 1px solid var(--c-border-faint);
+}
+.rp-head-title { font-size:10.5px; color:#cfe9f5; font-weight:600;
+                 letter-spacing:.04em; }
+.rp-head-hint  { font-size:9px;   color:#7a91a4; font-style:italic; flex:1; }
+.rp-refresh {
+    background: rgba(var(--c-accent-rgb), .18); color:#cfe9f5;
+    border: 1px solid rgba(var(--c-accent-rgb), .35);
+    border-radius: var(--r-sm); padding: 2px 8px;
+    font-size: 9.5px; cursor: pointer;
+}
+.rp-refresh:disabled { opacity:.6; cursor:not-allowed; }
+.rp-empty  { font-size: 9.5px; color: #557; font-style: italic; padding: 4px 0; }
+.rp-error  { font-size: 10px;  color: #ff8c5a; padding: 4px 0; }
+.rp-gauges { display:flex; flex-direction:column; gap: var(--sp-2); }
+.rp-card {
+    border: 1px solid var(--c-border-faint); border-radius: var(--r-sm);
+    background: rgba(255,255,255,.02);
+    padding: var(--sp-2);
+}
+.rp-card-solar { border-color: rgba(255, 210, 76, 0.25); }
+.rp-card-wind  { border-color: rgba(127, 210, 255, 0.25); }
+.rp-card-head {
+    display:flex; align-items:baseline; gap: 6px;
+    margin-bottom: 4px;
+}
+.rp-card-icon { font-size: 13px; opacity:.9; }
+.rp-card-name { font-size: 10.5px; color: #cfe9f5; font-weight: 600; flex:1; }
+.rp-card-cf   {
+    font-size: 14px; font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: #cfe9f5; letter-spacing: -.02em;
+}
+.rp-card-solar .rp-card-cf { color: #ffd24c; }
+.rp-card-wind  .rp-card-cf { color: #7fd2ff; }
+.rp-spark { width: 100%; height: 40px; display: block;
+            background: rgba(0,0,0,.20); border-radius: 3px; }
+.rp-card-foot {
+    display:flex; justify-content:space-between;
+    font-size: 9px; color: #779; margin-top: 4px;
+}
+.rp-basis {
+    font-size: 8.5px; color: #557; font-style: italic;
+    padding-top: var(--sp-1);
+    border-top: 1px dashed rgba(255,255,255,.05);
+}
+
 /* ─── Info panel ─────────────────────────────────────────────── */
 #info-panel {
     position:absolute; bottom:52px; right:10px; z-index:50;
@@ -2438,6 +2493,17 @@ nav {
             </div>
         </div>
 
+        <!-- ── Renewables ──
+             Solar + wind potential at the pinned location. Derived
+             entirely from Open-Meteo radiation + wind via
+             /api/weather/renewables; no new external data source. -->
+        <div class="lyr-section collapsed" data-lyr-section="renewables">
+            <div class="lyr-section-hdr"><span>RENEWABLES</span><span class="lyr-chevron">▾</span></div>
+            <div class="lyr-section-body">
+                <div id="renewables-panel-host"></div>
+            </div>
+        </div>
+
         <!-- ── Magnetosphere ── -->
         <div class="lyr-section collapsed" data-lyr-section="magneto">
             <div class="lyr-section-hdr"><span>MAGNETOSPHERE</span><span class="lyr-chevron">▾</span></div>
@@ -3145,6 +3211,7 @@ import { ForecastRegistry, PersistenceForecaster, CHANNEL_NAMES, FORECAST_HORIZO
 import { WeatherForecastValidator } from './js/weather-forecast-validation.js';
 import { mountModelsPanel } from './js/models-panel.js';
 import { ProbabilityPicker } from './js/probability-picker.js';
+import { mountRenewablesPanel } from './js/renewables-panel.js';
 import { PrecipClimatology }        from './js/precip-climatology.js';
 import { PrecipBiasTracker }        from './js/precip-bias-tracker.js';
 import { NasaPrecipExtractor }      from './js/nasa-precip-extractor.js';
@@ -9980,6 +10047,35 @@ document.querySelectorAll('.lyr-section[data-lyr-section]').forEach(sec => {
     // it), mount immediately. Otherwise wait for the first click.
     if (!section.classList.contains('collapsed')) mountOnce();
 
+    const hdr = section.querySelector('.lyr-section-hdr');
+    if (hdr) {
+        hdr.addEventListener('click', () => {
+            if (!section.classList.contains('collapsed')) mountOnce();
+        });
+    }
+})();
+
+// ── Renewables panel: lazy-mount on first expand ──
+// Same lazy-mount idiom as the other panels. The card auto-fetches
+// on first open; subsequent fetches are user-triggered via Refresh.
+(function mountRenewables() {
+    const host    = document.getElementById('renewables-panel-host');
+    const section = document.querySelector('[data-lyr-section="renewables"]');
+    if (!host || !section) return;
+
+    let panel = null;
+    function mountOnce() {
+        if (panel) return;
+        panel = mountRenewablesPanel(host, () =>
+            (_userLat != null && _userLon != null)
+                ? { lat: _userLat, lon: _userLon }
+                : null,
+        );
+        // Kick off the initial fetch automatically if a pin already
+        // exists; otherwise wait for the user to hit Refresh.
+        if (_userLat != null && _userLon != null) panel.refresh();
+    }
+    if (!section.classList.contains('collapsed')) mountOnce();
     const hdr = section.querySelector('.lyr-section-hdr');
     if (hdr) {
         hdr.addEventListener('click', () => {
