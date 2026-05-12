@@ -41,7 +41,8 @@ import { isLoaded as isF107HistoryLoaded, ensureLoaded as ensureF107History, onU
     from './f107-history.js';
 import { isLoaded as isApHistoryLoaded,   ensureLoaded as ensureApHistory,   onUpdate as onApUpdate }
     from './ap-history.js';
-import { runBacktest } from './upper-atmosphere-backtest.js';
+import { runBacktest, runFleetSkill, pickHistoricalForBacktest }
+    from './upper-atmosphere-backtest.js';
 
 // Debounce window for full-fleet re-analysis on incoming ticks. Compute
 // is cheap (~50 µs/asset) but we don't want to thrash mid-slider-drag.
@@ -88,6 +89,14 @@ export class FleetPanel {
         // computed validation doesn't blink away on the next realtime
         // tick. Keyed by asset.id; value is { running, result, pastedTle }.
         this._backtests = new Map();
+        // Fleet-wide skill dashboard cache. Hashing on (asset.id, line1
+        // epoch, historical-pick epoch, bcM2PerKg, bcSigmaRel) tuples
+        // means realtime ticks don't re-run the (expensive) fleet-wide
+        // backtest sweep; only TLE refreshes / membership changes /
+        // BC edits do. `_fleetSkill` holds the last completed summary.
+        this._fleetSkill = null;
+        this._fleetSkillKey = '';
+        this._fleetSkillRunning = false;
         this._alertCooldowns = new Map();    // assetId|kind → fireWallMs
         this._recomputeTimer = null;
         this._tickHandler = null;
@@ -271,6 +280,12 @@ export class FleetPanel {
                 <button type="button" id="ua-fleet-clear-btn"
                         class="ua-fleet-btn ua-fleet-btn--danger">Clear all</button>
             </div>
+            <!-- Fleet-wide skill dashboard (Phase 14). Runs an auto-
+                 backtest on every asset with archived TLE history and
+                 surfaces the calibration aggregate. Sits ABOVE the
+                 conjunction panel because "is the model honest about
+                 my whole fleet?" is the top-level trust question. -->
+            <div id="ua-fleet-skill" class="ua-fleet-skill"></div>
             <!-- Fleet-wide conjunction screen. Sits between the toolbar and
                  the per-asset card list so the operator sees pair-level
                  risk first, then drills into individual assets. -->
@@ -296,11 +311,33 @@ export class FleetPanel {
 
         // Cache references for the render loop.
         this._cardsHost = this.host.querySelector('#ua-fleet-cards');
+        this._skillHost = this.host.querySelector('#ua-fleet-skill');
         this._conjHost  = this.host.querySelector('#ua-fleet-conj');
         this._countEl   = this.host.querySelector('#ua-fleet-count');
         this._statusEl  = this.host.querySelector('#ua-fleet-add-status');
         this._modelStateEl = this.host.querySelector('#ua-fleet-model-state');
 
+        // Skill-dashboard event delegation:
+        //   • [data-skill-refresh] — force a fresh sweep (operator can
+        //     hit this after editing BCs / refreshing TLEs to get a
+        //     fast skill update without waiting for the cache invalidation
+        //     heuristic to notice).
+        //   • [data-conj-jump-to] — the "worst" chip reuses the same
+        //     selector pattern as the conjunction panel so we get
+        //     scroll-and-flash for free.
+        this._skillHost.addEventListener('click', (e) => {
+            const refresh = e.target.closest?.('[data-skill-refresh]');
+            if (refresh) {
+                this._fleetSkillKey = ''; this._fleetSkill = null;
+                this._maybeRunFleetSkill();
+                return;
+            }
+            const jump = e.target.closest?.('[data-conj-jump-to]');
+            if (jump) {
+                this._jumpAndFlash(jump.dataset.conjJumpTo);
+                return;
+            }
+        });
         // Conjunction-panel event delegation:
         //   • [data-conj-jump-to] on a row → scroll-and-flash that asset's card
         //   • [data-conj-threshold] on a chip → switch screening threshold
@@ -552,9 +589,11 @@ export class FleetPanel {
                     No tracked assets. Add a NORAD ID, paste a TLE, or
                     bulk-import a constellation above.
                 </div>`;
-            // Conjunction panel only makes sense with ≥ 2 assets; hide
-            // when the fleet is empty/singleton.
+            // Conjunction + skill panels only make sense with assets
+            // in play; hide when the fleet is empty.
             this._renderConjunctionPanel([]);
+            this._fleetSkill = null; this._fleetSkillKey = '';
+            this._renderSkillDashboard();
             return;
         }
         // Sort by severity DESC for ops-grade triage.
@@ -566,6 +605,12 @@ export class FleetPanel {
         // GLOBAL top-K so a high-P pair between two off-screen assets
         // doesn't get buried.
         this._renderConjunctionPanel(this.analyzer.lastConjunctions || []);
+        // Render whatever skill data we have (or the empty hint) on
+        // every paint — _maybeRunFleetSkill is the one that decides
+        // whether to actually re-run the (expensive) sweep, gated on
+        // its own cache key. Render is cheap; sweep is not.
+        this._renderSkillDashboard();
+        this._maybeRunFleetSkill();
     }
 
     // ── Fleet-wide conjunction panel ───────────────────────────────────────
@@ -685,6 +730,145 @@ export class FleetPanel {
             el.classList.add('ua-fleet-card--flash');
             setTimeout(() => el.classList.remove('ua-fleet-card--flash'), 1500);
         }
+    }
+
+    // ── Fleet-wide skill dashboard ──────────────────────────────────────────
+    //
+    // Runs a 7-day backtest on every asset with eligible TLE history,
+    // aggregates the calibration verdicts, surfaces a one-line summary
+    // at the top of the panel. Compute is gated on a cache key derived
+    // from the assets' current+historical TLE epochs + BC params, so
+    // realtime ticks don't trigger redundant sweeps — only TLE refreshes
+    // or fleet-membership changes do.
+
+    _fleetSkillCacheKey() {
+        const fleet = this.fleet.list();
+        return fleet.map(a => {
+            const pick = pickHistoricalForBacktest(a) || {};
+            return `${a.id}|${a.line1?.slice(18, 32) ?? ''}|${pick.line1?.slice(18, 32) ?? ''}`
+                 + `|${Math.round((a.bcM2PerKg ?? 0) * 1e6)}|${Math.round((a.bcSigmaRel ?? 0) * 1000)}`;
+        }).join(';');
+    }
+
+    /**
+     * Kick the fleet-skill backtest if (a) we don't have a result yet,
+     * or (b) the cache key has changed (TLE refresh / fleet edit). Runs
+     * the actual sweep async so the realtime tick stays responsive.
+     */
+    async _maybeRunFleetSkill() {
+        if (this._fleetSkillRunning) return;
+        if (!isMsisReady()) return;            // analyzer can't backtest without MSIS
+        const fleet = this.fleet.list();
+        if (fleet.length < 1) {
+            this._fleetSkill = null; this._fleetSkillKey = '';
+            this._renderSkillDashboard();
+            return;
+        }
+        const key = this._fleetSkillCacheKey();
+        if (key === this._fleetSkillKey && this._fleetSkill) return;
+        this._fleetSkillRunning = true;
+        // Repaint with a "running" placeholder so the operator knows
+        // a sweep is in flight (skill backtests take a few seconds at
+        // 25 assets × 24-MC × 7-day sequential).
+        this._renderSkillDashboard({ running: true });
+        try {
+            const out = await runFleetSkill(fleet, { targetDays: 7, monteCarloN: 24 });
+            this._fleetSkill = out;
+            this._fleetSkillKey = key;
+        } catch (err) {
+            console.warn('[FleetPanel] fleet-skill sweep failed:', err?.message || err);
+            this._fleetSkill = null;
+        } finally {
+            this._fleetSkillRunning = false;
+            this._renderSkillDashboard();
+        }
+    }
+
+    _renderSkillDashboard(opts = {}) {
+        if (!this._skillHost) return;
+        const fleet = this.fleet.list();
+        if (fleet.length === 0) { this._skillHost.innerHTML = ''; return; }
+
+        if (opts.running) {
+            this._skillHost.innerHTML = `
+                <div class="ua-fleet-skill-head">
+                    <span class="ua-fleet-skill-title">Fleet-wide skill</span>
+                    <span class="ua-fleet-skill-sub">running 7-day backtest sweep…</span>
+                </div>`;
+            return;
+        }
+
+        if (!this._fleetSkill?.summary) {
+            // First mount, no data yet — show the empty hint so the
+            // operator knows the dashboard exists and what's needed
+            // for it to populate.
+            this._skillHost.innerHTML = `
+                <div class="ua-fleet-skill-head">
+                    <span class="ua-fleet-skill-title">Fleet-wide skill</span>
+                    <span class="ua-fleet-skill-sub">
+                        no historical TLEs yet — use the ⟳ button on each card
+                        over a few days to accumulate skill data
+                    </span>
+                </div>`;
+            return;
+        }
+
+        const s = this._fleetSkill.summary;
+        const has = s.eligible > 0;
+        const calPct = has ? Math.round(s.calibratedFrac * 100) : null;
+        const calClass = !has ? 'is-empty'
+                       : calPct >= 75 ? 'is-high'
+                       : calPct >= 50 ? 'is-med'
+                       : 'is-low';
+        const counts = `
+            <span class="ua-fleet-skill-cnt ua-fleet-skill-cnt--cal">✓ ${s.calibrated} calibrated</span>
+            ${s.over  ? `<span class="ua-fleet-skill-cnt ua-fleet-skill-cnt--over">↑ ${s.over} over</span>`   : ''}
+            ${s.under ? `<span class="ua-fleet-skill-cnt ua-fleet-skill-cnt--under">↓ ${s.under} under</span>` : ''}
+            ${s.noHistory ? `<span class="ua-fleet-skill-cnt ua-fleet-skill-cnt--gap">∅ ${s.noHistory} no-hist</span>` : ''}
+            ${s.driverGap ? `<span class="ua-fleet-skill-cnt ua-fleet-skill-cnt--gap">⚠ ${s.driverGap} driver-gap</span>` : ''}
+            ${s.tooRecent ? `<span class="ua-fleet-skill-cnt ua-fleet-skill-cnt--gap">⏳ ${s.tooRecent} too-recent</span>` : ''}
+            ${s.failed    ? `<span class="ua-fleet-skill-cnt ua-fleet-skill-cnt--gap">✗ ${s.failed} failed</span>`         : ''}`;
+        const ageSec = Math.round((Date.now() - s.ranAt) / 1000);
+        const ageStr = ageSec < 60 ? `${ageSec}s ago`
+                     : ageSec < 3600 ? `${Math.round(ageSec / 60)}m ago`
+                     : `${Math.round(ageSec / 3600)}h ago`;
+        const headLine = has
+            ? `<span class="ua-fleet-skill-frac">${calPct}%</span> calibrated · n=${s.eligible}/${s.total}`
+            : `<span class="ua-fleet-skill-frac is-empty">—</span> calibrated (none eligible)`;
+        const medianTxt = (Number.isFinite(s.medianAbsResidualKm))
+            ? `median |Δ| ${s.medianAbsResidualKm.toFixed(2)} km · p95 ${s.p95AbsResidualKm?.toFixed(2)} km`
+            : '';
+        // Worst-offender shout-out — clicking it jumps to that card.
+        let worstChip = '';
+        const results = this._fleetSkill.results || {};
+        let worst = null;
+        for (const id of Object.keys(results)) {
+            const r = results[id];
+            if (r.status !== 'ok' || r.inBand) continue;
+            if (!worst || Math.abs(r.residual_km) > Math.abs(worst.residual_km)) worst = r;
+        }
+        if (worst) {
+            const sign = worst.residual_km >= 0 ? '+' : '−';
+            worstChip = `
+                <button type="button" class="ua-fleet-skill-worst"
+                        data-conj-jump-to="${worst.assetId}"
+                        title="${_esc(worst.name)}: model ${sign}${Math.abs(worst.residual_km).toFixed(2)} km off reality at +${worst.deltaDays?.toFixed(1) ?? '—'} d backtest">
+                    worst: ${_esc(worst.name)} ${sign}${Math.abs(worst.residual_km).toFixed(1)} km
+                </button>`;
+        }
+        this._skillHost.innerHTML = `
+            <div class="ua-fleet-skill-head ${calClass}">
+                <span class="ua-fleet-skill-title">Fleet-wide skill</span>
+                <span class="ua-fleet-skill-line">${headLine}</span>
+                <span class="ua-fleet-skill-meta">
+                    ${s.targetDays}-day backtest · ${ageStr}
+                </span>
+                <button type="button" class="ua-fleet-conj-chip" data-skill-refresh="1"
+                        title="Re-run the fleet-skill backtest sweep">↻</button>
+            </div>
+            <div class="ua-fleet-skill-row">${counts}</div>
+            ${medianTxt ? `<div class="ua-fleet-skill-stat">${medianTxt}</div>` : ''}
+            ${worstChip}`;
     }
 
     // ── Per-asset backtest UI ───────────────────────────────────────────────

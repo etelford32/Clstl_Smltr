@@ -65,6 +65,12 @@ const BC_SIGMA_BY_NORAD = Object.freeze({
     20580: 0.04,    // Hubble — drag-stable design, well-characterised cross-section
     48274: 0.07,    // Tiangong — moderately drag-stable
 });
+// TLE history per asset. Each refresh() that brings down a newer TLE
+// pushes the previous one onto `asset.tleHistory`, capped at this count.
+// 8 entries × typical SWPC refresh cadence (1/day) ≈ a week of history,
+// which is the operator-grade window for Phase 14's fleet-skill backtest
+// (7-day default, falling back to whatever's available within 1–30 days).
+const TLE_HISTORY_MAX = 8;
 
 // ── Persistence ──────────────────────────────────────────────────────────────
 
@@ -80,7 +86,8 @@ function _load() {
 
 function _save(assets) {
     try {
-        // Persist the bare minimum needed to resurrect — name, TLE, BC.
+        // Persist the bare minimum needed to resurrect — name, TLE, BC,
+        // plus the rolling TLE history used by the fleet-skill backtest.
         // Status / err are runtime-only (always pending on reload anyway).
         const slim = assets.slice(0, MAX_ASSETS).map(a => ({
             id:          a.id,
@@ -90,6 +97,9 @@ function _save(assets) {
             line2:       a.line2 ?? null,
             bcM2PerKg:   a.bcM2PerKg ?? DEFAULT_BC,
             bcSigmaRel:  Number.isFinite(a.bcSigmaRel) ? a.bcSigmaRel : DEFAULT_BC_SIGMA_REL,
+            tleHistory:  Array.isArray(a.tleHistory)
+                ? a.tleHistory.slice(0, TLE_HISTORY_MAX)
+                : [],
             addedAt:     a.addedAt ?? Date.now(),
         }));
         localStorage.setItem(STORAGE_KEY, JSON.stringify(slim));
@@ -235,6 +245,7 @@ export class UpperAtmosphereFleet {
                 line2:       a.line2 ?? null,
                 bcM2PerKg:   Number.isFinite(a.bcM2PerKg) ? a.bcM2PerKg : _defaultBcFor(a.noradId),
                 bcSigmaRel:  Number.isFinite(a.bcSigmaRel) ? a.bcSigmaRel : _defaultBcSigmaFor(a.noradId),
+                tleHistory:  Array.isArray(a.tleHistory) ? a.tleHistory.slice(0, TLE_HISTORY_MAX) : [],
                 status:      (a.line1 && a.line2) ? 'ready' : 'pending',
                 err:         null,
                 addedAt:     a.addedAt ?? Date.now(),
@@ -291,6 +302,7 @@ export class UpperAtmosphereFleet {
             line2:       null,
             bcM2PerKg:   Number.isFinite(bcM2PerKg) ? bcM2PerKg : _defaultBcFor(noradId),
             bcSigmaRel:  Number.isFinite(bcSigmaRel) ? bcSigmaRel : _defaultBcSigmaFor(noradId),
+            tleHistory:  [],
             status:      'pending',
             err:         null,
             addedAt:     Date.now(),
@@ -317,6 +329,16 @@ export class UpperAtmosphereFleet {
                 asset.status = 'error';
                 asset.err = 'celestrak fetch failed';
             } else {
+                // If the asset already had a TLE AND the newly-fetched
+                // one is a different epoch, archive the OLD one onto the
+                // asset's tleHistory. This builds up the historical
+                // record Phase 14's fleet-skill dashboard backtests
+                // against. Capped at TLE_HISTORY_MAX entries; same-epoch
+                // refreshes (which can happen mid-day before CelesTrak
+                // publishes a new element set) are no-ops.
+                if (asset.line1 && asset.line2 && tle.line1 !== asset.line1) {
+                    _archiveTle(asset, asset.line1, asset.line2);
+                }
                 asset.line1  = tle.line1;
                 asset.line2  = tle.line2;
                 asset.name   = tle.name || asset.name;
@@ -359,6 +381,7 @@ export class UpperAtmosphereFleet {
                 line2:       p.line2,
                 bcM2PerKg:   Number.isFinite(bcM2PerKg) ? bcM2PerKg : _defaultBcFor(p.noradId),
                 bcSigmaRel:  Number.isFinite(bcSigmaRel) ? bcSigmaRel : _defaultBcSigmaFor(p.noradId),
+                tleHistory:  [],
                 status:      'ready',
                 err:         null,
                 addedAt:     Date.now(),
@@ -396,6 +419,7 @@ export class UpperAtmosphereFleet {
                 line2:       t.line2,
                 bcM2PerKg:   _defaultBcFor(t.noradId),
                 bcSigmaRel:  _defaultBcSigmaFor(t.noradId),
+                tleHistory:  [],
                 status:      'ready',
                 err:         null,
                 addedAt:     Date.now(),
@@ -465,6 +489,50 @@ function _defaultBcFor(noradId) {
     if (noradId && DEFAULT_BC_BY_NORAD[noradId]) return DEFAULT_BC_BY_NORAD[noradId];
     return DEFAULT_BC;
 }
+
+/**
+ * TLE epoch (Unix ms) parsed from the YYDDD.dddddddd field on line 1.
+ * Avoids a round-trip through WASM; used here only for archival
+ * dedup + ordering, never for SGP4 propagation.
+ *
+ * TLE epoch year convention (NORAD spec, 1980 onward):
+ *   00–56 → 2000–2056
+ *   57–99 → 1957–1999
+ */
+function _tleEpochMs(line1) {
+    if (!line1 || line1.length < 32) return NaN;
+    const yy   = parseInt(line1.slice(18, 20), 10);
+    const doyf = parseFloat(line1.slice(20, 32));
+    if (!Number.isInteger(yy) || !Number.isFinite(doyf)) return NaN;
+    const year = yy < 57 ? 2000 + yy : 1900 + yy;
+    const dayMs = (doyf - 1) * 86400000;
+    return Date.UTC(year, 0, 1) + dayMs;
+}
+
+/**
+ * Push (line1, line2) onto an asset's tleHistory, sorted by epoch DESC,
+ * deduped, and capped at TLE_HISTORY_MAX. Quiet no-op if either line
+ * is missing or already in the history (by epoch + line1 match).
+ *
+ * Caller already ensured the new TLE supersedes the existing one
+ * (different line1 with later epoch). This is the bookkeeping side.
+ */
+function _archiveTle(asset, line1, line2) {
+    if (!line1 || !line2) return;
+    if (!Array.isArray(asset.tleHistory)) asset.tleHistory = [];
+    const epochMs = _tleEpochMs(line1);
+    if (!Number.isFinite(epochMs)) return;
+    // Dedup: skip if we already have this exact line1 in history.
+    if (asset.tleHistory.some(h => h.line1 === line1)) return;
+    asset.tleHistory.unshift({ line1, line2, epochMs, archivedAt: Date.now() });
+    // Keep sorted by epoch DESC, drop the oldest beyond the cap.
+    asset.tleHistory.sort((a, b) => (b.epochMs ?? 0) - (a.epochMs ?? 0));
+    if (asset.tleHistory.length > TLE_HISTORY_MAX) {
+        asset.tleHistory.length = TLE_HISTORY_MAX;
+    }
+}
+
+export { _tleEpochMs, _archiveTle, TLE_HISTORY_MAX };
 
 function _defaultBcSigmaFor(noradId) {
     if (noradId && BC_SIGMA_BY_NORAD[noradId] != null) return BC_SIGMA_BY_NORAD[noradId];

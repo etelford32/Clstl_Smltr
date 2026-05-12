@@ -726,6 +726,78 @@ input[type=range]::-moz-range-thumb {
     font-variant-numeric:tabular-nums;
 }
 
+/* ─── Fleet-wide skill dashboard (Phase 14) ─────────────── */
+.ua-fleet-skill {
+    display:flex; flex-direction:column; gap:4px;
+    padding:8px 0;
+    border-bottom:1px solid rgba(0,200,200,.10);
+    margin-bottom:4px;
+}
+.ua-fleet-skill:empty { display:none; }
+.ua-fleet-skill-head {
+    display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+}
+.ua-fleet-skill-title {
+    color:#fff; font-weight:700; font-size:.7rem;
+    letter-spacing:.04em; text-transform:uppercase;
+}
+.ua-fleet-skill-sub {
+    color:#9ab; font-size:.62rem;
+    font-variant-numeric:tabular-nums;
+}
+.ua-fleet-skill-line {
+    color:#dde; font-size:.72rem;
+    font-variant-numeric:tabular-nums;
+}
+.ua-fleet-skill-frac {
+    color:#0ff; font-weight:700; font-size:.85rem;
+    margin-right:3px;
+}
+.ua-fleet-skill-head.is-high  .ua-fleet-skill-frac { color:#40e090; }
+.ua-fleet-skill-head.is-med   .ua-fleet-skill-frac { color:#ffaa20; }
+.ua-fleet-skill-head.is-low   .ua-fleet-skill-frac { color:#ff5060; }
+.ua-fleet-skill-head.is-empty .ua-fleet-skill-frac,
+.ua-fleet-skill-frac.is-empty { color:#789; }
+.ua-fleet-skill-meta {
+    margin-left:auto;
+    color:#789; font-size:.6rem;
+    font-variant-numeric:tabular-nums;
+}
+.ua-fleet-skill-row {
+    display:flex; gap:6px; flex-wrap:wrap;
+    padding:2px 0;
+}
+.ua-fleet-skill-cnt {
+    font-size:.6rem; font-weight:600;
+    padding:1px 6px; border-radius:5px;
+    border:1px solid rgba(0,200,200,.18);
+    background:rgba(8,4,22,.55);
+    color:#9ab;
+    font-variant-numeric:tabular-nums;
+}
+.ua-fleet-skill-cnt--cal   { color:#40e090; border-color:rgba(64,224,144,.45);  background:rgba(64,224,144,.08); }
+.ua-fleet-skill-cnt--over  { color:#ffaa20; border-color:rgba(255,170,32,.45); background:rgba(255,170,32,.08); }
+.ua-fleet-skill-cnt--under { color:#ff5060; border-color:rgba(255,80,96,.45);  background:rgba(255,80,96,.08); }
+.ua-fleet-skill-cnt--gap   { color:#789;    border-color:rgba(150,170,200,.30); background:rgba(8,4,22,.55); }
+.ua-fleet-skill-stat {
+    color:#9ab; font-size:.6rem;
+    font-variant-numeric:tabular-nums;
+}
+.ua-fleet-skill-worst {
+    align-self:flex-start;
+    font-size:.6rem; font-weight:600;
+    padding:2px 7px; border-radius:5px;
+    background:rgba(255,80,96,.10);
+    border:1px solid rgba(255,80,96,.35);
+    color:#ff8090;
+    cursor:pointer;
+    font-variant-numeric:tabular-nums;
+}
+.ua-fleet-skill-worst:hover {
+    background:rgba(255,80,96,.18);
+    color:#ff5060;
+}
+
 /* ─── Fleet-wide conjunction screen (Phase 12) ──────────── */
 .ua-fleet-conj {
     display:flex; flex-direction:column; gap:6px;

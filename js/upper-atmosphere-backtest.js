@@ -332,5 +332,164 @@ export async function runBacktest({
     };
 }
 
+// ── Fleet-wide skill aggregation ────────────────────────────────────────────
+//
+// Phase 14: run a backtest on every asset that has an archived TLE in the
+// target age window, then summarise the calibration verdicts across the
+// fleet. The aggregate answers "is the WHOLE fleet being modelled well,
+// not just a single asset?"
+
+/**
+ * Pick the archived TLE closest to `targetDays` ago, among entries within
+ * [minDays, maxDays]. Returns null when the asset has no eligible history.
+ *
+ *   minDays  — too-recent TLEs don't carry useful skill signal
+ *              (the asset hasn't drifted enough vs the model)
+ *   maxDays  — older than what observed drivers cover (~30 days for Ap,
+ *              ~50 for F10.7); backtest would fail with drivers-unavailable
+ */
+export function pickHistoricalForBacktest(asset, {
+    targetDays = 7, minDays = 2, maxDays = 28,
+} = {}) {
+    if (!asset?.line1 || !Array.isArray(asset.tleHistory) || asset.tleHistory.length === 0) {
+        return null;
+    }
+    const nowEpochMs = (() => {
+        const yy = parseInt(asset.line1.slice(18, 20), 10);
+        const doyf = parseFloat(asset.line1.slice(20, 32));
+        if (!Number.isInteger(yy) || !Number.isFinite(doyf)) return Date.now();
+        const year = yy < 57 ? 2000 + yy : 1900 + yy;
+        return Date.UTC(year, 0, 1) + (doyf - 1) * 86400000;
+    })();
+    let best = null, bestScore = Infinity;
+    for (const h of asset.tleHistory) {
+        if (!h?.line1 || !h?.line2 || !Number.isFinite(h.epochMs)) continue;
+        const ageDays = (nowEpochMs - h.epochMs) / 86400000;
+        if (ageDays < minDays || ageDays > maxDays) continue;
+        // Score by distance from the target age — closer to target wins.
+        const score = Math.abs(ageDays - targetDays);
+        if (score < bestScore) { bestScore = score; best = h; }
+    }
+    return best;
+}
+
+/**
+ * Run a backtest for every asset in the fleet that has an eligible
+ * historical TLE, then aggregate the calibration verdicts.
+ *
+ * @param {Array} assets     fleet store entries (line1/line2 + tleHistory)
+ * @param {object} [opts]
+ * @param {number} [opts.targetDays=7]
+ * @param {number} [opts.monteCarloN=24]   smaller default than per-card
+ *                                          backtest — fleet runs 25 in series
+ * @param {number} [opts.seed=12345]       deterministic seed for repeatable
+ *                                          fleet-skill outputs across reloads
+ * @returns {Promise<{ summary, results }>}
+ *
+ *   results: per-asset record of the backtest outcome, keyed by asset.id:
+ *     {
+ *       assetId, name, noradId,
+ *       status: 'ok' | 'no-history' | 'driver-gap' | 'too-recent' | 'failed',
+ *       reason, deltaDays, residual_km, relativeError, verdict, inBand,
+ *     }
+ *   summary: aggregate over results
+ *     {
+ *       total, eligible,
+ *       calibrated, over, under,
+ *       noHistory, driverGap, failed,
+ *       calibratedFrac: calibrated / eligible (NaN when eligible=0),
+ *       medianAbsResidualKm, p95AbsResidualKm,
+ *     }
+ */
+export async function runFleetSkill(assets, {
+    targetDays = 7, monteCarloN = 24, seed = 12345,
+} = {}) {
+    const results = {};
+    const residuals = [];
+    let calibrated = 0, over = 0, under = 0;
+    let noHistory = 0, driverGap = 0, failed = 0, tooRecent = 0;
+
+    for (let i = 0; i < assets.length; i++) {
+        const a = assets[i];
+        if (a.status !== 'ready' || !a.line1 || !a.line2) {
+            results[a.id] = { assetId: a.id, name: a.name, noradId: a.noradId,
+                              status: 'failed', reason: 'asset-not-ready' };
+            failed++;
+            continue;
+        }
+        const hist = pickHistoricalForBacktest(a, { targetDays });
+        if (!hist) {
+            const why = (Array.isArray(a.tleHistory) && a.tleHistory.length > 0)
+                ? 'too-recent' : 'no-history';
+            results[a.id] = {
+                assetId: a.id, name: a.name, noradId: a.noradId,
+                status: why,
+                reason: why === 'no-history'
+                    ? 'refresh asset over a few days to build history'
+                    : 'all archived TLEs are within the min-age window',
+            };
+            if (why === 'no-history') noHistory++; else tooRecent++;
+            continue;
+        }
+        // Stagger draws by asset index so seeded MC across the fleet doesn't
+        // reuse the same Box-Muller pairs everywhere.
+        const r = await runBacktest({
+            historicalLine1: hist.line1, historicalLine2: hist.line2,
+            currentLine1:    a.line1,    currentLine2:    a.line2,
+            bcM2PerKg:       a.bcM2PerKg,
+            bcSigmaRel:      a.bcSigmaRel,
+            monteCarloN,
+            seed:            seed + i * 7919,    // any large prime offset
+        });
+        if (!r?.ok) {
+            const status = r?.reason === 'drivers-unavailable' ? 'driver-gap' : 'failed';
+            results[a.id] = {
+                assetId: a.id, name: a.name, noradId: a.noradId,
+                status, reason: r?.reason || 'backtest failed',
+            };
+            if (status === 'driver-gap') driverGap++; else failed++;
+            continue;
+        }
+        const verdict = r.mc?.verdict || (Math.abs(r.relativeError) < 5e-4 ? 'calibrated'
+            : r.residual_km > 0 ? 'under-predicting alt' : 'over-predicting alt');
+        if (verdict === 'calibrated')              calibrated++;
+        else if (verdict === 'over-predicting alt') over++;
+        else if (verdict === 'under-predicting alt') under++;
+        results[a.id] = {
+            assetId: a.id, name: a.name, noradId: a.noradId,
+            status: 'ok',
+            deltaDays:     r.deltaDays,
+            residual_km:   r.residual_km,
+            relativeError: r.relativeError,
+            verdict,
+            inBand:        r.mc?.inBand ?? null,
+            mcBand:        r.mc ? { p5: r.mc.p5_km, p50: r.mc.p50_km, p95: r.mc.p95_km, n: r.mc.n } : null,
+            historicalEpochMs: hist.epochMs,
+            currentEpochMs:    r.t1Ms,
+            drivers:           r.drivers,
+        };
+        residuals.push(Math.abs(r.residual_km));
+    }
+
+    residuals.sort((a, b) => a - b);
+    const pickResid = (p) => residuals.length === 0 ? null :
+        residuals[Math.min(residuals.length - 1, Math.max(0, Math.floor((p / 100) * (residuals.length - 1))))];
+    const eligible = calibrated + over + under;
+    return {
+        summary: {
+            total:       assets.length,
+            eligible,
+            calibrated, over, under,
+            noHistory, driverGap, failed, tooRecent,
+            calibratedFrac: eligible > 0 ? calibrated / eligible : NaN,
+            medianAbsResidualKm: pickResid(50),
+            p95AbsResidualKm:    pickResid(95),
+            targetDays,
+            ranAt: Date.now(),
+        },
+        results,
+    };
+}
+
 // Re-exports for testing.
 export { _buildDriverSequence, _integrateForward, _smaAtEpoch };
