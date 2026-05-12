@@ -530,7 +530,19 @@ export class AtmosphereGlobe {
      */
     constructor(canvas, opts = {}) {
         this.canvas = canvas;
-        this.opts = { cameraDistance: 3.2, stars: true, autoRotate: true, ...opts };
+        // Phase 26: default sat propagation to REAL-TIME (1×) so probes
+        // sit at their actual current positions. Callers that explicitly
+        // want demo-speed compression can pass satTimeScale in opts;
+        // the in-page time-warp HUD uses setSatTimeScale() to change it
+        // live. Legacy `issTimeScale` is honoured for back-compat but
+        // also defaults to 1×.
+        this.opts = { cameraDistance: 3.2, stars: true, autoRotate: true,
+                      satTimeScale: 1, ...opts };
+        // Pause flag — separate from time-scale so resuming returns to
+        // the previous rate, not the default. Set via pauseSat() /
+        // resumeSat() from the HUD.
+        this._satPaused = false;
+        this._satRatePrePause = this.opts.satTimeScale;
 
         this._initRenderer();
         this._initScene();
@@ -1522,6 +1534,89 @@ export class AtmosphereGlobe {
     /** Snap to top-down (polar) view. */
     cameraTopView()   { this._controls.flyToTopView?.(); this._followId = null; }
 
+    // ── Phase 26: time-warp + sat-clock control ──────────────────────────
+    //
+    // Every per-frame satellite propagation multiplies `_clock.getDelta()`
+    // by this rate. Default is 1× (real-time — probes sit at their
+    // wall-clock positions). The HUD exposes preset multipliers (½, 1,
+    // 10, 60, 600, 3600) plus pause + "snap to now"; this method is the
+    // single mutation point.
+
+    /** Effective rate used by every _stepSatellites + debris path. */
+    _getSatRate() {
+        if (this._satPaused) return 0;
+        return this.opts.satTimeScale ?? this.opts.issTimeScale ?? 1;
+    }
+
+    /** Live-set the propagation rate (signed; 0 pauses). Operator UI. */
+    setSatTimeScale(rate) {
+        if (!Number.isFinite(rate)) return;
+        // Negative rates would rewind orbits — not blocked, but rarely
+        // useful operationally; the HUD doesn't expose negative presets.
+        if (rate === 0) {
+            this.pauseSat();
+            return;
+        }
+        this._satPaused = false;
+        this._satRatePrePause = rate;
+        this.opts.satTimeScale = rate;
+    }
+
+    /** Convenience getter — UI uses this to highlight the active preset. */
+    getSatTimeScale() {
+        return this._satPaused ? 0 : this._getSatRate();
+    }
+
+    /** Freeze every probe in place (no propagation until resumed). */
+    pauseSat() {
+        if (this._satPaused) return;
+        // Remember the prior rate so resumeSat() returns to the last
+        // preset rather than the default.
+        this._satRatePrePause = this.opts.satTimeScale ?? 1;
+        this._satPaused = true;
+    }
+
+    /** Resume at the rate active before pauseSat(). */
+    resumeSat() {
+        if (!this._satPaused) return;
+        this._satPaused = false;
+        this.opts.satTimeScale = this._satRatePrePause ?? 1;
+    }
+
+    isSatPaused() { return !!this._satPaused; }
+
+    /**
+     * Snap every satellite (and live-catalog tracker) back to its real-
+     * time wall-clock position. Useful after a long time-warp session
+     * or when the operator suspects drift. Re-runs the per-probe
+     * mean-anomaly anchor from each probe's stored TLE epoch.
+     */
+    snapSatToWallClock() {
+        // Each probe with a real TLE has its mean-elements anchored via
+        // updateFromCelesTrak()'s logic. The simplest way to re-anchor
+        // all of them is to re-trigger the same logic for any probe
+        // that has a `userData.lastTleSnapshot`. If the live-catalog
+        // tracker holds that snapshot, run it again; otherwise fall
+        // through and let the next CelesTrak refresh do it.
+        if (!this._satProbes) return;
+        const now = Date.now();
+        for (const id in this._satProbes) {
+            const p = this._satProbes[id];
+            const snap = p.mesh?.userData?.lastTleSnapshot;
+            if (!snap || !Number.isFinite(snap.epochMs)) continue;
+            const n_rad_s = (snap.mean_motion * 2 * Math.PI) / 86400;
+            const dtSec = (now - snap.epochMs) / 1000;
+            const TAU = 2 * Math.PI;
+            let M = (snap.mean_anomaly * Math.PI / 180) + n_rad_s * dtSec;
+            M = ((M % TAU) + TAU) % TAU;
+            p._phase0 = M;
+        }
+        // Reset the THREE clock's accumulated delta-time so the next
+        // _stepSatellites doesn't multiply M by a stale elapsedSec.
+        // getDelta() returns time since last call; sample-and-discard.
+        this._clock?.getDelta?.();
+    }
+
     /** Backwards-compatible wrapper retained for the existing UI button. */
     flyToISS(durationSec = 1.6) {
         return this.flyToSatellite('iss', durationSec);
@@ -1694,6 +1789,16 @@ export class AtmosphereGlobe {
         if (probe.mesh?.userData) {
             probe.mesh.userData.tleSource = 'live';
             probe.mesh.userData.tleEpoch  = sat.epoch;
+            // Phase 26: cache the raw mean-element snapshot so
+            // snapSatToWallClock() can re-anchor without another
+            // CelesTrak round-trip. We only need the four fields the
+            // re-anchor math reads: epochMs, mean_motion (rev/day),
+            // mean_anomaly (deg at epoch).
+            probe.mesh.userData.lastTleSnapshot = {
+                epochMs,
+                mean_motion:  sat.mean_motion,
+                mean_anomaly: sat.mean_anomaly,
+            };
         }
 
         // Stash the raw TLE lines on the probe so the trajectory
@@ -2113,7 +2218,7 @@ export class AtmosphereGlobe {
         const sizes     = new Float32Array(N);
 
         // Seed with current positions so first paint isn't at origin.
-        const ts = this.opts.satTimeScale ?? this.opts.issTimeScale ?? 60;
+        const ts = this._getSatRate();
         const tNowSim = (this._clock?.getElapsedTime?.() ?? 0) * ts;
         const _tmpColor = new THREE.Color();
         for (let i = 0; i < N; i++) {
@@ -2173,7 +2278,7 @@ export class AtmosphereGlobe {
      */
     _stepDebris(t) {
         if (!this._debris?.length || !this._debrisPositions) return;
-        const ts = this.opts.satTimeScale ?? this.opts.issTimeScale ?? 60;
+        const ts = this._getSatRate();
         const tNowSim = t * ts;
         const pos = this._debrisPositions;
         for (let i = 0; i < this._debris.length; i++) {
@@ -2303,7 +2408,7 @@ export class AtmosphereGlobe {
 
         const N = probes.length;
         const positions = new Float32Array(N * 3);
-        const ts = this.opts.satTimeScale ?? this.opts.issTimeScale ?? 60;
+        const ts = this._getSatRate();
         const tNowSim = (this._clock?.getElapsedTime?.() ?? 0) * ts;
         for (let i = 0; i < N; i++) {
             const p = _lookupProbePosition(probes[i], tNowSim);
@@ -2341,7 +2446,7 @@ export class AtmosphereGlobe {
     _stepConstellations(t) {
         const all = this._constellationClouds;
         if (!all) return;
-        const ts = this.opts.satTimeScale ?? this.opts.issTimeScale ?? 60;
+        const ts = this._getSatRate();
         const tNowSim = t * ts;
         for (const id in all) {
             const entry = all[id];
@@ -3755,7 +3860,7 @@ export class AtmosphereGlobe {
      * non-zero eccentricity.
      */
     _stepSatellites(elapsedSec) {
-        const ts = this.opts.satTimeScale ?? this.opts.issTimeScale ?? 60;
+        const ts = this._getSatRate();
         for (const id in this._satProbes) {
             const probe = this._satProbes[id];
             const periodSec = probe.spec.orbital.periodMin * 60;
@@ -3920,7 +4025,7 @@ export class AtmosphereGlobe {
             return;
         }
 
-        const ts = this.opts.satTimeScale ?? this.opts.issTimeScale ?? 60;
+        const ts = this._getSatRate();
         // Simulated-orbital seconds since page boot.
         const tNowSim = this._clock.getElapsedTime() * ts;
 
