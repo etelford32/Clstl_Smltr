@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Accretion Disc — Planet Formation & Habitable Zones · Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/accretion-disc.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/accretion-disc.html">
+<meta property="og:title" content="Accretion Disc — Planet Formation Simulator — Parkers Physics">
+<meta property="og:description" content="Live α-disc + pebble accretion + Kopparapu habitable-zone simulator. Re-form the Solar System, watch Theia carve the Moon, and probe atmospheric escape.">
+<meta property="og:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+<meta property="og:image:alt" content="Parkers Physics — real-time astrophysics simulations">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Accretion Disc — Planet Formation Simulator">
+<meta name="twitter:description" content="Live Shakura–Sunyaev α-disc, Lambrechts–Johansen pebble accretion, and Kopparapu habitable zone — watch the Solar System form in your browser.">
+<meta name="twitter:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+
+<meta name="description" content="Browser-based protoplanetary accretion-disc & planet-formation simulator. Shakura–Sunyaev α-viscosity, Lynden-Bell–Pringle spreading, pebble accretion, Type I/II migration, Kopparapu habitable zone.">
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html, body { height:100%; }
+body {
+    background:#040210; color:#d8d4ee;
+    font-family:'Segoe UI', system-ui, sans-serif;
+    overflow:hidden;
+}
+
+/* ─── Hero strip ─────────────────────────────────────────────── */
+#ad-hero {
+    position:relative; z-index:5;
+    padding:14px 22px 12px;
+    background:linear-gradient(180deg, rgba(255,170,90,.10), rgba(4,2,16,0));
+    border-bottom:1px solid rgba(255,200,140,.14);
+    display:flex; align-items:baseline; justify-content:space-between; gap:18px;
+    flex-wrap:wrap;
+}
+#ad-hero h1 {
+    font-size:1.35rem; font-weight:800;
+    background:linear-gradient(100deg,#fff 30%,#ffc88c);
+    -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+}
+#ad-hero p {
+    font-size:.78rem; color:#998878; font-family:monospace;
+    letter-spacing:.04em;
+}
+#ad-hero p strong { color:#ffd8a8; }
+#ad-hero p a { color:#ffc88c; }
+
+/* ─── Layout ─────────────────────────────────────────────────── */
+#ad-app {
+    position:relative;
+    display:grid;
+    grid-template-columns:300px 1fr 320px;
+    height:calc(100vh - 110px);
+    min-height:520px;
+    gap:0;
+}
+@media (max-width:1100px) {
+    #ad-app { grid-template-columns:1fr; height:auto; }
+    #ad-stage { height:60vh; min-height:380px; }
+}
+
+.ad-side {
+    background:rgba(10,6,28,.78);
+    backdrop-filter:blur(14px);
+    border-right:1px solid rgba(255,255,255,.06);
+    overflow-y:auto;
+    padding:18px 16px 24px;
+}
+#ad-side-right {
+    border-right:none;
+    border-left:1px solid rgba(255,255,255,.06);
+}
+
+#ad-stage {
+    position:relative;
+    background:#03020a;
+    overflow:hidden;
+}
+#ad-canvas {
+    width:100%; height:100%; display:block;
+    cursor:grab;
+}
+#ad-canvas:active { cursor:grabbing; }
+
+/* ─── Sidebar labels ─────────────────────────────────────────── */
+.ad-label {
+    font-size:.68rem; color:#a89878;
+    text-transform:uppercase; letter-spacing:.12em;
+    font-weight:800;
+    margin-top:18px; margin-bottom:8px;
+}
+.ad-label:first-child { margin-top:0; }
+
+.ad-tabs { display:grid; gap:6px; }
+.ad-tab {
+    background:rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.10);
+    border-radius:8px;
+    padding:10px 12px;
+    font-family:inherit; color:#bcb;
+    text-align:left; cursor:pointer;
+    transition:all .15s;
+}
+.ad-tab:hover { border-color:rgba(255,200,140,.45); color:#fff; }
+.ad-tab.on {
+    background:linear-gradient(120deg, rgba(255,170,90,.18), rgba(255,255,255,.03));
+    border-color:#ffaa5a;
+    color:#fff;
+}
+.ad-tab-name { font-size:.92rem; font-weight:700; }
+.ad-tab-sub  { font-size:.7rem; color:#998878; margin-top:2px; line-height:1.4; }
+.ad-tab.on .ad-tab-sub { color:#ffd8a8; }
+
+.ad-showcase {
+    background:linear-gradient(150deg, rgba(255,170,90,.10), rgba(10,6,28,.5) 70%);
+    border:1px solid rgba(255,170,90,.20);
+    border-radius:10px;
+    padding:14px 14px 12px;
+    margin-bottom:6px;
+}
+.ad-showcase-headline {
+    font-size:.92rem; font-weight:800; color:#fff;
+    margin-bottom:6px; line-height:1.25;
+}
+.ad-showcase-callout {
+    font-size:.78rem; color:#ffd8a8; line-height:1.55;
+    margin-bottom:8px;
+}
+.ad-showcase-physics {
+    font-size:.7rem; color:#998878; line-height:1.55; font-style:italic;
+    border-top:1px solid rgba(255,255,255,.06);
+    padding-top:8px;
+}
+
+.ad-controls { display:grid; gap:8px; }
+.ad-btn-row { display:flex; gap:6px; }
+.ad-btn {
+    flex:1;
+    background:rgba(255,255,255,.05);
+    border:1px solid rgba(255,255,255,.10);
+    border-radius:6px;
+    color:#cbd; padding:8px 10px;
+    font-family:inherit; font-size:.78rem; font-weight:700;
+    cursor:pointer;
+    transition:all .15s;
+}
+.ad-btn:hover { border-color:rgba(255,200,140,.45); color:#fff; }
+.ad-btn-primary {
+    background:linear-gradient(120deg,#ffc88c 0%,#ff8a4a 100%);
+    border-color:transparent; color:#221608;
+}
+.ad-btn-primary:hover { filter:brightness(1.08); }
+
+.ad-warp-wrap {
+    background:rgba(255,255,255,.03);
+    border:1px solid rgba(255,255,255,.07);
+    border-radius:8px;
+    padding:10px 12px;
+}
+.ad-warp-wrap input {
+    width:100%; -webkit-appearance:none; appearance:none;
+    height:4px; background:rgba(255,255,255,.10); border-radius:2px;
+    outline:none; cursor:pointer; margin-top:6px;
+}
+.ad-warp-wrap input::-webkit-slider-thumb {
+    -webkit-appearance:none; appearance:none;
+    width:16px; height:16px; border-radius:50%;
+    background:#ffaa5a; cursor:pointer;
+    box-shadow:0 0 8px rgba(255,170,90,.6);
+}
+.ad-warp-wrap input::-moz-range-thumb {
+    width:16px; height:16px; border-radius:50%; border:none;
+    background:#ffaa5a; cursor:pointer;
+}
+.ad-warp-readout {
+    font-family:monospace; font-size:.82rem; color:#fff; font-weight:700;
+}
+.ad-warp-mini { font-size:.62rem; color:#778; margin-top:4px; font-family:monospace; }
+
+/* ─── HUD (right sidebar) ───────────────────────────────────── */
+.ad-hud-section { margin-bottom:18px; }
+.ad-hud-title {
+    font-size:.68rem; color:#a89878;
+    text-transform:uppercase; letter-spacing:.12em;
+    font-weight:800;
+    margin-bottom:8px;
+}
+.ad-hud-grid {
+    display:grid; grid-template-columns:auto 1fr; gap:4px 12px;
+    font-family:monospace; font-size:.78rem;
+}
+.ad-hud-grid dt { color:#998878; }
+.ad-hud-grid dd { color:#fff; text-align:right; }
+
+table.ad-bodies {
+    width:100%; border-collapse:collapse; font-size:.72rem;
+}
+table.ad-bodies th, table.ad-bodies td {
+    padding:5px 4px;
+    border-bottom:1px solid rgba(255,255,255,.05);
+    text-align:left;
+    font-family:monospace;
+}
+table.ad-bodies th {
+    color:#a89878; font-weight:700;
+    font-size:.62rem; letter-spacing:.06em;
+    text-transform:uppercase;
+}
+
+/* ─── Time-control bar (overlay on stage) ───────────────────── */
+#ad-stage-bar {
+    position:absolute; left:50%; bottom:18px;
+    transform:translateX(-50%);
+    z-index:3;
+    display:flex; align-items:center; gap:10px;
+    background:rgba(10,6,28,.78); backdrop-filter:blur(12px);
+    border:1px solid rgba(255,255,255,.10);
+    border-radius:999px;
+    padding:6px 14px;
+}
+.ad-stage-time {
+    font-family:monospace; font-size:.82rem; color:#ffd8a8;
+    padding:0 6px; font-weight:700;
+}
+#ad-stage-watermark {
+    position:absolute; right:12px; bottom:12px;
+    z-index:2;
+    font-family:monospace; font-size:.6rem;
+    color:#665a4a; letter-spacing:.06em;
+    text-transform:uppercase;
+    pointer-events:none;
+}
+
+/* ─── Legend overlay ────────────────────────────────────────── */
+#ad-legend {
+    position:absolute; left:14px; top:14px;
+    z-index:2;
+    background:rgba(10,6,28,.75); backdrop-filter:blur(10px);
+    border:1px solid rgba(255,255,255,.10);
+    border-radius:10px; padding:10px 12px;
+    font-size:.7rem; line-height:1.55; font-family:monospace;
+    color:#cbb;
+}
+#ad-legend .ad-leg-dot {
+    display:inline-block; width:10px; height:2px; vertical-align:middle;
+    margin-right:6px;
+}
+#ad-legend strong { color:#fff; }
+</style>
+<link rel="stylesheet" href="js/nav-styles.css">
+<script type="importmap">
+{
+    "imports": {
+        "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+}
+</script>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" crossorigin>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "@id": "https://parkersphysics.com/accretion-disc.html#app",
+  "name": "Accretion Disc — Planet Formation Simulator",
+  "description": "Live Shakura–Sunyaev α-disc, Lambrechts–Johansen pebble accretion, Paardekooper Type I/II migration, Canup giant-impact Moon formation, and Kopparapu habitable-zone evolution.",
+  "url": "https://parkersphysics.com/accretion-disc.html",
+  "image": "https://parkersphysics.com/ParkersPhysics_logo2.jpg",
+  "applicationCategory": "EducationalApplication",
+  "applicationSubCategory": "Protoplanetary disc & planet-formation simulation",
+  "operatingSystem": "Web Browser",
+  "browserRequirements": "Requires JavaScript and WebGL",
+  "isAccessibleForFree": true,
+  "publisher": { "@id": "https://parkersphysics.com/#org" },
+  "inLanguage": "en-US"
+}
+</script>
+</head>
+<body>
+
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260502b"; initNav("accretion-disc");</script>
+
+<div id="ad-hero">
+    <div>
+        <h1>Accretion Disc — Planet Formation Lab</h1>
+        <p>
+            <strong>Live LBP viscous disc</strong> · pebble accretion · Paardekooper torques · Kopparapu habitable zone
+        </p>
+    </div>
+    <p style="text-align:right;">
+        <strong>FREE</strong> · solar-system formation preset ·
+        <a href="gravity-lab.html">N-body Gravity Lab →</a>
+    </p>
+</div>
+
+<div id="ad-app">
+
+    <!-- LEFT SIDEBAR ─────────────────────────────────────────────── -->
+    <aside class="ad-side" id="ad-side-left">
+        <div class="ad-label">Scenario</div>
+        <div class="ad-tabs" id="ad-tabs">
+            <button type="button" class="ad-tab on" data-scenario="solar-system">
+                <div class="ad-tab-name">Solar System</div>
+                <div class="ad-tab-sub">Hayashi MMSN · Mercury → Saturn · Theia → Moon</div>
+            </button>
+        </div>
+
+        <div class="ad-label">Showcase</div>
+        <div class="ad-showcase">
+            <div class="ad-showcase-headline">Re-form the Sun's planets</div>
+            <div class="ad-showcase-callout">
+                A 0.02 M☉ Hayashi protoplanetary disc evolves under Shakura–Sunyaev α-viscosity (α = 10⁻³). Eight embryos accrete pebbles, migrate, and collide.
+                Around 50–100 Myr, <strong>Theia</strong> strikes proto-Earth; a circumterrestrial debris disc condenses into the <strong>Moon</strong> outside the Roche limit.
+            </div>
+            <div class="ad-showcase-physics">
+                Physics: Lynden-Bell &amp; Pringle (1974), Weidenschilling (1977), Lambrechts &amp; Johansen (2012), Paardekooper, Baruteau &amp; Kley (2010, 2011),
+                Canup (2012), Ćuk &amp; Stewart (2012), Kopparapu et al. (2013, 2014), Caldiroli et al. (2025).
+            </div>
+        </div>
+
+        <div class="ad-label">Time warp</div>
+        <div class="ad-warp-wrap">
+            <div class="ad-warp-readout" id="ad-warp-val">—</div>
+            <input type="range" id="ad-warp" min="0" max="1000" step="1" value="650">
+            <div class="ad-warp-mini">log scale · 10² ↔ 10⁶ yr / sec</div>
+        </div>
+
+        <div class="ad-label">Controls</div>
+        <div class="ad-controls">
+            <div class="ad-btn-row">
+                <button type="button" class="ad-btn ad-btn-primary" id="ad-play">❚❚ Pause</button>
+                <button type="button" class="ad-btn" id="ad-reset">↻ Reset</button>
+            </div>
+        </div>
+
+        <div class="ad-label">References</div>
+        <p style="font-size:.66rem; color:#998878; line-height:1.6;">
+            Active groups: Henning (MINDS/JWST), Zhang &amp; Pinilla (AGE-PRO/ALMA), Johansen (Lund), Youdin (Arizona),
+            Lambrechts (Lund), Canup (SwRI), Stewart &amp; Lock (synestia), Kopparapu (NASA Goddard),
+            Wordsworth (Harvard), Schaefer (Stanford), Hu (JPL), Zahnle (NASA Ames).
+        </p>
+    </aside>
+
+    <!-- 3D STAGE ─────────────────────────────────────────────────── -->
+    <main id="ad-stage">
+        <canvas id="ad-canvas"></canvas>
+        <div id="ad-legend">
+            <div><span class="ad-leg-dot" style="background:#70c0ff;"></span><strong>Snow line</strong> · T = 170 K</div>
+            <div><span class="ad-leg-dot" style="background:#6fe48b;"></span><strong>HZ</strong> · runaway → max greenhouse</div>
+            <div><span class="ad-leg-dot" style="background:#ffaa5a;"></span><strong>Dust</strong> · drifting pebbles</div>
+        </div>
+        <div id="ad-stage-bar">
+            <span class="ad-stage-time" id="ad-elapsed">—</span>
+        </div>
+        <div id="ad-stage-watermark">LBP α-disc · live</div>
+    </main>
+
+    <!-- RIGHT SIDEBAR ─────────────────────────────────────────────── -->
+    <aside class="ad-side" id="ad-side-right">
+
+        <div class="ad-hud-section">
+            <div class="ad-hud-title">Star</div>
+            <dl class="ad-hud-grid">
+                <dt>L*</dt><dd id="ad-lum">—</dd>
+                <dt>T_eff</dt><dd id="ad-teff">—</dd>
+                <dt>Snow line</dt><dd id="ad-snow">—</dd>
+            </dl>
+        </div>
+
+        <div class="ad-hud-section">
+            <div class="ad-hud-title">Habitable zone (Kopparapu)</div>
+            <dl class="ad-hud-grid">
+                <dt>Conservative inner</dt><dd id="ad-hz-in">—</dd>
+                <dt>Conservative outer</dt><dd id="ad-hz-out">—</dd>
+                <dt>Optimistic</dt><dd id="ad-hz-opt">—</dd>
+            </dl>
+            <p style="font-size:.66rem; color:#998878; margin-top:6px; line-height:1.5;">
+                Bands evolve as L*(t). The green ring on the stage marks the conservative HZ — between the Runaway Greenhouse (inner) and the Maximum Greenhouse (outer) limits.
+            </p>
+        </div>
+
+        <div class="ad-hud-section">
+            <div class="ad-hud-title">Disc</div>
+            <dl class="ad-hud-grid">
+                <dt>M_disc</dt><dd id="ad-disc-mass">—</dd>
+            </dl>
+        </div>
+
+        <div class="ad-hud-section">
+            <div class="ad-hud-title">Bodies</div>
+            <table class="ad-bodies"><tbody id="ad-body-table">
+                <tr><td colspan="4" style="color:#998878;">loading…</td></tr>
+            </tbody></table>
+        </div>
+
+    </aside>
+
+</div>
+
+<script type="module">
+import { boot } from './js/accretion-disc/disc.js?v=20260512a';
+
+const canvas = document.getElementById('ad-canvas');
+const ui = {
+    age:        document.getElementById('ad-elapsed'),
+    lum:        document.getElementById('ad-lum'),
+    teff:       document.getElementById('ad-teff'),
+    snowLine:   document.getElementById('ad-snow'),
+    hzInner:    document.getElementById('ad-hz-in'),
+    hzOuter:    document.getElementById('ad-hz-out'),
+    hzOpt:      document.getElementById('ad-hz-opt'),
+    discMass:   document.getElementById('ad-disc-mass'),
+    bodyTable:  document.getElementById('ad-body-table'),
+
+    playBtn:    document.getElementById('ad-play'),
+    resetBtn:   document.getElementById('ad-reset'),
+    warpSlider: document.getElementById('ad-warp'),
+    warpVal:    document.getElementById('ad-warp-val'),
+};
+boot({ canvas, ui, scenarioId: 'solar-system' });
+</script>
+
+</body>
+</html>
