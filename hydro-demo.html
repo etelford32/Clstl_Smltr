@@ -159,8 +159,8 @@ body {
                 <input type="range" id="sl-q" min="0" max="0.005" step="0.0001" value="0.001">
             </div>
             <div class="slider-row">
-                <div class="label"><span>Resolution (n_r × n_φ)</span><span class="val" id="lab-res">192 × 384</span></div>
-                <input type="range" id="sl-res" min="0" max="3" step="1" value="2">
+                <div class="label"><span>Resolution (n_r × n_φ)</span><span class="val" id="lab-res">128 × 256</span></div>
+                <input type="range" id="sl-res" min="0" max="3" step="1" value="1">
             </div>
         </div>
 
@@ -169,10 +169,12 @@ body {
             <p class="lead" style="margin-top:0;">
                 Locally isothermal log-polar grid · <strong>PLM reconstruction with
                 minmod limiter</strong> · <strong>LLF/Rusanov Riemann flux</strong>
-                · FARGO azimuthal shift (integer + fractional) · explicit
+                · <strong>SSP-RK2 (Shu-Osher) in time</strong> · FARGO azimuthal
+                shift (integer + fractional, single-shot per substep) · explicit
                 pressure / centrifugal / planetary-gravity sources · de Val-Borro
-                (2006) wave-killing boundaries. Second-order in space, forward
-                Euler in time — RK2 + HLLC are next.
+                (2006) wave-killing boundaries. <strong>Formally O(h², dt²)</strong>;
+                drift converges as h² in the transient regime, plateaus at the
+                damping-zone floor in steady-state. HLLC + SIMD next.
             </p>
         </div>
 

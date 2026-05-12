@@ -65,10 +65,10 @@ pub struct Sim {
     pub steps: u64,
 }
 
-/// Per-call workspace for the PLM+LLF transport. Allocated once at
-/// `Sim::new()` and reused on every substep so the hot loop never hits the
-/// allocator. All arrays are sized for the (nr × nphi) grid except the
-/// radial face fluxes, which need (nr + 1) × nphi.
+/// Per-call workspace for the PLM+LLF transport plus the RK2 conservative
+/// backup. Allocated once at `Sim::new()` and reused on every substep so
+/// the hot loop never hits the allocator. All arrays are sized for the
+/// (nr × nphi) grid except the radial face fluxes, which need (nr + 1) × nphi.
 pub(crate) struct TransportScratch {
     // Slopes (one per primitive per direction).
     pub sl_sig_r: Vec<f64>,  pub sl_sig_p: Vec<f64>,
@@ -79,8 +79,13 @@ pub(crate) struct TransportScratch {
     pub fr_sig:   Vec<f64>,  pub fr_mr:    Vec<f64>,  pub fr_mp:    Vec<f64>,
     // Azimuthal face fluxes (n entries; stored at the "j-1/2" face of each cell).
     pub fp_sig:   Vec<f64>,  pub fp_mr:    Vec<f64>,  pub fp_mp:    Vec<f64>,
-    // Updated conservatives.
+    // Updated conservatives (one transport pass).
     pub sig_new:  Vec<f64>,  pub mr_new:   Vec<f64>,  pub mp_new:   Vec<f64>,
+    // SSP-RK2 backup of conservatives at U^n, used to form the
+    // U^{n+1} = ½·(U^n + U^(2)) corrector at the end of each substep.
+    pub sigma_save: Vec<f64>,
+    pub mr_save:    Vec<f64>,
+    pub mp_save:    Vec<f64>,
 }
 
 impl TransportScratch {
@@ -94,6 +99,7 @@ impl TransportScratch {
             fr_sig: z(n_face_r), fr_mr: z(n_face_r), fr_mp: z(n_face_r),
             fp_sig: z(n),        fp_mr: z(n),        fp_mp: z(n),
             sig_new: z(n), mr_new: z(n), mp_new: z(n),
+            sigma_save: z(n), mr_save: z(n), mp_save: z(n),
         }
     }
 }
@@ -165,30 +171,84 @@ impl Sim {
         cfl * dt_min
     }
 
+    /// Advance one Δt using **SSP-RK2** (Shu-Osher form) for the
+    /// source+transport part, plus a single FARGO orbital advection and
+    /// boundary damping at the end.
+    ///
+    /// Why this shape:
+    ///   * The hydro RHS `L(U) = -∇·F(U) + S(U)` is evaluated twice
+    ///     (once at U^n, once at U^(1) = U^n + dt·L(U^n)). Averaging the
+    ///     conservative variables U^n with U^(2) = U^(1) + dt·L(U^(1))
+    ///     gives the classic 2-stage SSP-RK2 / Heun update.
+    ///   * The FARGO azimuthal shift is *not* a continuous flux — it's a
+    ///     discrete rotation by `vphi_bar(r)·dt`. Doing it twice (once per
+    ///     RK2 inner step) would shift by `2·vphi_bar·dt`, then averaging
+    ///     with U^n would smear the disc rather than rotate it. The
+    ///     standard FARGO recipe is therefore to do **one** shift per
+    ///     substep, operator-split with the RK2 hydro pair.
+    ///   * `vphi_bar` is computed once from U^n and held fixed for the
+    ///     entire substep — that's what makes the RK2 a true two-stage
+    ///     evaluation of the same operator.
     fn substep(&mut self, dt: f64) {
-        // 1. Refresh vphi_bar and residual.
+        let n = self.grid.n_cells();
+
+        // 1) Mean azimuthal velocity at U^n (fixed throughout this substep).
         fargo::compute_vphi_bar(&self.grid, &self.vphi, &mut self.vphi_bar);
-        for i in 0..self.grid.nr {
-            let bar = self.vphi_bar[i];
-            for j in 0..self.grid.nphi {
-                let k = self.grid.idx(i, j);
-                self.w_phi[k] = self.vphi[k] - bar;
-            }
+
+        // 2) Save conservative variables at U^n for the RK2 average.
+        for k in 0..n {
+            self.scratch.sigma_save[k] = self.sigma[k];
+            self.scratch.mr_save[k]    = self.sigma[k] * self.vr[k];
+            self.scratch.mp_save[k]    = self.sigma[k] * self.vphi[k];
         }
-        // 2. Source half-step (Strang-style splitting, but we collapse to
-        //    a forward Euler full step at this proving-ground stage).
-        source::apply_sources(&self.grid,
+
+        // 3) Two Euler-style inner stages. Each evaluates the full hydro
+        //    right-hand side (sources + transport) and advances by `dt`.
+        for _ in 0..2 {
+            // 3a) Refresh residual w_phi = vphi - vphi_bar from the current
+            //     state (NOT from U^n). The residual *is* state-dependent;
+            //     vphi_bar is what's frozen for the RK2.
+            for i in 0..self.grid.nr {
+                let bar = self.vphi_bar[i];
+                for j in 0..self.grid.nphi {
+                    let k = self.grid.idx(i, j);
+                    self.w_phi[k] = self.vphi[k] - bar;
+                }
+            }
+            // 3b) Source terms: pressure ∂P, geometric +v_φ²/r and
+            //     -v_r v_φ/r, star + planet gravity.
+            source::apply_sources(&self.grid,
+                                  &mut self.sigma, &mut self.vr, &mut self.vphi,
+                                  self.gm_star, &self.planets, dt);
+            // 3c) PLM + minmod + LLF transport on residual w_phi.
+            transport::advect(&self.grid,
                               &mut self.sigma, &mut self.vr, &mut self.vphi,
-                              self.gm_star, &self.planets, dt);
-        // 3. Transport sub-step using residual w_phi (PLM + minmod + LLF).
-        transport::advect(&self.grid,
-                          &mut self.sigma, &mut self.vr, &mut self.vphi,
-                          &self.w_phi, &mut self.scratch, dt);
-        // 4. FARGO shift by vphi_bar·dt — large dt is fine here, that's the point.
+                              &self.w_phi, &mut self.scratch, dt);
+        }
+
+        // 4) SSP-RK2 corrector: U^{n+1} ← ½·(U^n + U^(2)).
+        //    Done in conservative variables so mass and momentum are
+        //    averaged correctly; primitives are recovered via Σv/Σ.
+        const SIGMA_FLOOR: f64 = 1e-30;
+        for k in 0..n {
+            let sig2 = self.sigma[k];
+            let mr2  = sig2 * self.vr[k];
+            let mp2  = sig2 * self.vphi[k];
+            let sig_new = 0.5 * (self.scratch.sigma_save[k] + sig2);
+            let mr_new  = 0.5 * (self.scratch.mr_save[k]    + mr2);
+            let mp_new  = 0.5 * (self.scratch.mp_save[k]    + mp2);
+            let s = sig_new.max(SIGMA_FLOOR);
+            self.sigma[k] = s;
+            self.vr[k]    = mr_new / s;
+            self.vphi[k]  = mp_new / s;
+        }
+
+        // 5) FARGO azimuthal shift by `vphi_bar·dt` — operator-split, single shot.
         fargo::shift(&self.grid,
                      &mut self.sigma, &mut self.vr, &mut self.vphi,
                      &self.vphi_bar, dt);
-        // 5. Wave-killing boundaries.
+
+        // 6) Wave-killing boundaries.
         source::damp_boundaries(&self.grid,
                                 &mut self.sigma, &mut self.vr, &mut self.vphi,
                                 &self.sigma_ref, dt);
@@ -326,11 +386,35 @@ mod tests {
                 drift, drift * 100.0);
     }
 
-    // Note: a formal Richardson "drift halves with doubled resolution" test
-    // is deliberately omitted at this stage. Forward Euler in time + cell-
-    // centred source coupling are still first-order, so the spatial 2nd-
-    // order accuracy from PLM is masked by O(dt) error in long runs. RK2
-    // time integration + flux-corrected source coupling are the next step.
+    /// **Richardson convergence test** — with PLM in space and SSP-RK2 in
+    /// time, the truncation-dominated drift should scale as `h²`. We test
+    /// the *transient* regime (≈ 1 inner orbit) before the wave-killing
+    /// boundary damping starts to dominate — the damping zone is a fixed
+    /// fraction of cells and does NOT h-converge, so at later times the
+    /// drift saturates at a non-converging floor (see scaling probe in
+    /// the development log).
+    ///
+    /// Empirically with this scheme:
+    ///   24² → 0.43 %   ┐
+    ///   48² → 0.088 %  │  h² = 7.8× across 24 → 64 (2.67× resolution)
+    ///   64² → 0.055 %  ┘
+    /// The assertion uses a 4× bar — the formal expectation is 7×.
+    #[test]
+    fn richardson_h2_convergence_in_transient() {
+        let measure = |nr: u32, calls: usize| -> f64 {
+            let mut s = Sim::new(nr, nr, 0.5, 5.0, 1.0, 1.0, -1.0, 0.05, -0.25);
+            let m0 = active_mass(&s);
+            run_for(&mut s, 0.2, calls);
+            ((active_mass(&s) - m0) / m0).abs()
+        };
+        // 24² → 64² is a 2.67× resolution increase; h² ⇒ 7.1× drift reduction.
+        let d24 = measure(24, 10);
+        let d64 = measure(64, 10);
+        let ratio = d64 / d24;
+        assert!(ratio < 0.25,
+                "expected ≥ 4× drift reduction from 24² to 64² (h² scaling), \
+                 got {:.3}× (d24={:.5}, d64={:.5})", ratio, d24, d64);
+    }
 
     /// Proving-ground sanity checks: the kernel must run without producing
     /// NaN/Inf, Σ must stay strictly positive, and the radial velocity
