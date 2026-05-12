@@ -45,6 +45,7 @@ import {
     runBacktest, runFleetSkill, pickHistoricalForBacktest,
     detectAnomaly, detectFleetAnomalies,
     correlateAnomalyWithConjunctions, tallyAnomalyConjunctionCorrelations,
+    walkResidualAnomalies,
 } from './upper-atmosphere-backtest.js';
 
 // Debounce window for full-fleet re-analysis on incoming ticks. Compute
@@ -1109,16 +1110,48 @@ export class FleetPanel {
             `${i === 0 ? 'M' : 'L'}${sx(i).toFixed(1)},${sy(p.residual_km).toFixed(1)}`
         ).join(' ');
 
+        // Phase 20: retroactive anomaly flags. Each entry is scored
+        // against the entries that PRECEDED it (same composite gate as
+        // the live detector), so past dots that would have fired the
+        // anomaly badge get promoted from amber→red and a vertical
+        // tick mark anchors them on a baseline below the chart. This
+        // turns the sparkline into a fleet-skill timeline: a chronic
+        // maneuverer shows 4+ red ticks across the window, a quiet
+        // asset shows none.
+        const walk = walkResidualAnomalies(asset);
+        // The walker's filter+sort matches ours; the flags array is
+        // index-aligned to `sorted`.
+        const anomFlags = walk.flags.length === sorted.length
+            ? walk.flags : new Array(sorted.length).fill(false);
+        let priorAnomalies = 0;
+        for (let i = 0; i < anomFlags.length - 1; i++) {
+            if (anomFlags[i]) priorAnomalies++;
+        }
+        const totalAnomalies = priorAnomalies + (anomFlags[anomFlags.length - 1] ? 1 : 0);
+
         const dots = sorted.map((p, i) => {
             const isLast = i === sorted.length - 1;
+            const wasAnom = anomFlags[i] === true;
             const z = sigma > 0 ? Math.abs(p.residual_km - median) / sigma : 0;
             const colour = isLast && det?.isAnomaly  ? '#ff5060'
                          : isLast                    ? '#40e090'
-                         : z >= 3                    ? '#ffaa20'
+                         : wasAnom                   ? '#ff5060'    // past anomaly
+                         : z >= 3                    ? '#ffaa20'    // sub-magnitude
                                                      : '#9ab';
-            const r = isLast ? 2.4 : 1.6;
+            const r = isLast ? 2.4 : (wasAnom ? 1.9 : 1.6);
             return `<circle cx="${sx(i).toFixed(1)}" cy="${sy(p.residual_km).toFixed(1)}"
                             r="${r}" fill="${colour}"/>`;
+        }).join('');
+
+        // Tick marks at the bottom margin for each anomalous past entry —
+        // separate from the dot so the timeline is readable even when the
+        // dot gets clipped near a band edge.
+        const ticks = sorted.map((p, i) => {
+            if (!anomFlags[i] || i === sorted.length - 1) return '';
+            return `<line x1="${sx(i).toFixed(1)}" x2="${sx(i).toFixed(1)}"
+                          y1="${(H - 1).toFixed(1)}" y2="${(H - PAD_Y).toFixed(1)}"
+                          stroke="#ff5060" stroke-width="1.2"
+                          opacity="0.75"/>`;
         }).join('');
 
         const latest = sorted[sorted.length - 1];
@@ -1129,6 +1162,17 @@ export class FleetPanel {
         if (Number.isFinite(median)) titleParts.push(`Median: ${median.toFixed(2)} km`);
         if (sigma > 0) titleParts.push(`σ (MAD): ${sigma.toFixed(2)} km`);
         if (Number.isFinite(det?.z)) titleParts.push(`z: ${det.z.toFixed(2)}`);
+        // Phase 20: tally + qualitative descriptor. ≥3 anomalies inside
+        // the persisted window is chronic-maneuverer territory; the
+        // operator's narrative wants this called out distinctly from a
+        // one-off blip.
+        if (totalAnomalies > 0) {
+            const descriptor = totalAnomalies >= 3 ? ' (chronic — frequent maneuvers?)'
+                            : totalAnomalies === 2 ? ' (recurring)'
+                            : '';
+            titleParts.push(
+                `Anomalies in window: ${totalAnomalies}` + descriptor);
+        }
         return `
             <div class="ua-fleet-spark" title="${titleParts.join('\n')}">
                 <span class="ua-fleet-spark-label">skill</span>
@@ -1139,8 +1183,11 @@ export class FleetPanel {
                     <path d="${path}" stroke="rgba(150,170,200,.65)"
                           stroke-width="0.9" fill="none"/>
                     ${dots}
+                    ${ticks}
                 </svg>
-                <span class="ua-fleet-spark-n">n=${sorted.length}</span>
+                <span class="ua-fleet-spark-n">n=${sorted.length}${
+                    totalAnomalies > 0 ? ` · ⚠×${totalAnomalies}` : ''
+                }</span>
             </div>`;
     }
 

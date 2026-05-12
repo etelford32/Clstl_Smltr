@@ -632,6 +632,58 @@ function _median(sortedArr) {
 }
 
 /**
+ * Same composite gate as detectAnomaly, applied to one candidate
+ * index `i` in a values series, scored against the i preceding
+ * entries. Returns the boolean verdict only. Used by
+ * walkResidualAnomalies to retroactively mark past anomalies.
+ */
+function _anomalyAtIdx(values, i, {
+    zThreshold     = Z_THRESHOLD,
+    minSamples     = MIN_SAMPLES,
+    minDeviationKm = MIN_DEVIATION_KM,
+} = {}) {
+    if (i < minSamples) return false;
+    const prior = values.slice(0, i).sort((a, b) => a - b);
+    const med = _median(prior);
+    const devs = prior.map(v => Math.abs(v - med)).sort((a, b) => a - b);
+    const sigma = Math.max(_median(devs) * MAD_TO_SIGMA, 1e-6);
+    const delta = values[i] - med;
+    const z = Math.abs(delta) / sigma;
+    return z >= zThreshold && Math.abs(delta) >= minDeviationKm;
+}
+
+/**
+ * Walk an asset's residual history and mark each entry with whether
+ * it WOULD have fired the anomaly detector at the time it was added —
+ * scoring each entry against only the entries that preceded it. Used
+ * by Phase 20's sparkline to overlay tick marks at past anomalies, so
+ * operators see "this asset has had 3 anomalies in 30 days" instead
+ * of just the latest verdict.
+ *
+ * Same composite gate as detectAnomaly (z ≥ 3 AND |Δ| ≥ 0.5 km),
+ * same BC filter (entries from before a BC edit get trimmed because
+ * they're not comparable to the current config).
+ *
+ * @returns {{ entries: object[], flags: boolean[] }}
+ *          Both arrays are aligned to the SAME post-filter sort order.
+ */
+export function walkResidualAnomalies(asset, opts) {
+    if (!asset?.residualHistory?.length) return { entries: [], flags: [] };
+    const bc  = asset.bcM2PerKg ?? null;
+    const bcS = asset.bcSigmaRel ?? null;
+    const tol = 1e-6;
+    const filtered = asset.residualHistory
+        .filter(e =>
+            Math.abs((e.bcM2PerKg  ?? bc)  - bc)  < tol &&
+            Math.abs((e.bcSigmaRel ?? bcS) - bcS) < tol)
+        .slice()
+        .sort((a, b) => (a.ranAt ?? 0) - (b.ranAt ?? 0));
+    const values = filtered.map(e => e.residual_km);
+    const flags  = values.map((_, i) => _anomalyAtIdx(values, i, opts));
+    return { entries: filtered, flags };
+}
+
+/**
  * Sweep `detectAnomaly` across the fleet. Returns the per-asset detector
  * outputs keyed by id, plus a summary count.
  */
