@@ -59,6 +59,12 @@ import { DragForecastOverlay } from './drag-forecast-overlay.js';
 import { FleetRibbons } from './upper-atmosphere-fleet-ribbons.js';
 import { MagneticCascade } from './upper-atmosphere-magnetic-cascade.js';
 import { SubstormController } from './upper-atmosphere-substorm.js';
+// Phase B (time-bus integration): the globe pulls simTimeMs from this
+// shared singleton instead of its own THREE.Clock + rate multiplier.
+// Sat + debris propagation read absolute time from the bus, so future
+// scrubbing / replay work just sets bus.simTimeMs and everything
+// follows.
+import { getTimeBus } from './upper-atmosphere-time-bus.js';
 import { CameraController } from './upper-atmosphere-camera.js';
 import { subSolarPoint } from './sun-altitude.js';
 
@@ -538,11 +544,14 @@ export class AtmosphereGlobe {
         // also defaults to 1×.
         this.opts = { cameraDistance: 3.2, stars: true, autoRotate: true,
                       satTimeScale: 1, ...opts };
-        // Pause flag — separate from time-scale so resuming returns to
-        // the previous rate, not the default. Set via pauseSat() /
-        // resumeSat() from the HUD.
-        this._satPaused = false;
-        this._satRatePrePause = this.opts.satTimeScale;
+        // Phase B: the globe owns a reference to the shared TimeBus.
+        // The bus's rate IS the satellite-propagation rate; the legacy
+        // pauseSat / setSatTimeScale APIs proxy through. opts honoured:
+        // if caller passed satTimeScale, seed the bus with that rate.
+        this._timeBus = getTimeBus();
+        if (Number.isFinite(this.opts.satTimeScale)) {
+            this._timeBus.setRate(this.opts.satTimeScale);
+        }
 
         this._initRenderer();
         this._initScene();
@@ -1437,10 +1446,17 @@ export class AtmosphereGlobe {
 
         // Cache for per-frame propagation. _phase0 randomises the
         // satellite's starting mean-anomaly so all four don't all start
-        // at M=0 simultaneously.
+        // at M=0 simultaneously. Phase B: also seed absolute-time
+        // anchor fields so _lookupProbePositionAt works from frame 1.
+        // The construction-time wall-clock is the epoch; downstream
+        // updateFromCelesTrak() may overwrite both fields with the
+        // real TLE epoch + sat.mean_anomaly when live data arrives.
+        const M0 = spec.orbital.meanAnomalyDeg0 * Math.PI / 180;
         const probe = {
             mesh, pathLine, spec,
-            _phase0: spec.orbital.meanAnomalyDeg0 * Math.PI / 180,
+            _phase0:        M0,
+            _M_epoch_rad:   M0,
+            _epochMs:       Date.now(),
             _propTable: null,        // populated immediately below
         };
         this._satProbes[spec.id] = probe;
@@ -1542,80 +1558,40 @@ export class AtmosphereGlobe {
     // 10, 60, 600, 3600) plus pause + "snap to now"; this method is the
     // single mutation point.
 
-    /** Effective rate used by every _stepSatellites + debris path. */
-    _getSatRate() {
-        if (this._satPaused) return 0;
-        return this.opts.satTimeScale ?? this.opts.issTimeScale ?? 1;
-    }
+    /**
+     * Phase B: all rate / pause / snap state lives on the shared TimeBus.
+     * The legacy globe methods below are thin pass-throughs so existing
+     * HUD code + tests keep working unchanged. _getSatRate() is the only
+     * field still owned by the globe — and it's just a getter on the
+     * bus that legacy per-frame paths (none left after Phase B) might
+     * still read.
+     */
+    _getSatRate() { return this._timeBus.getRate(); }
 
-    /** Live-set the propagation rate (signed; 0 pauses). Operator UI. */
+    /** Live-set propagation rate via the bus. Signed; 0 pauses. */
     setSatTimeScale(rate) {
         if (!Number.isFinite(rate)) return;
-        // Negative rates would rewind orbits — not blocked, but rarely
-        // useful operationally; the HUD doesn't expose negative presets.
-        if (rate === 0) {
-            this.pauseSat();
-            return;
-        }
-        this._satPaused = false;
-        this._satRatePrePause = rate;
-        this.opts.satTimeScale = rate;
+        this._timeBus.setRate(rate);
     }
 
-    /** Convenience getter — UI uses this to highlight the active preset. */
-    getSatTimeScale() {
-        return this._satPaused ? 0 : this._getSatRate();
-    }
+    /** UI highlights its active preset chip off this. */
+    getSatTimeScale() { return this._timeBus.getRate(); }
 
-    /** Freeze every probe in place (no propagation until resumed). */
-    pauseSat() {
-        if (this._satPaused) return;
-        // Remember the prior rate so resumeSat() returns to the last
-        // preset rather than the default.
-        this._satRatePrePause = this.opts.satTimeScale ?? 1;
-        this._satPaused = true;
-    }
-
-    /** Resume at the rate active before pauseSat(). */
-    resumeSat() {
-        if (!this._satPaused) return;
-        this._satPaused = false;
-        this.opts.satTimeScale = this._satRatePrePause ?? 1;
-    }
-
-    isSatPaused() { return !!this._satPaused; }
+    /** Pause / resume / status all delegate to the bus, which owns the
+     *  remember-the-prior-rate semantic for resume. */
+    pauseSat()    { this._timeBus.pause();  }
+    resumeSat()   { this._timeBus.resume(); }
+    isSatPaused() { return this._timeBus.getRate() === 0; }
 
     /**
-     * Snap every satellite (and live-catalog tracker) back to its real-
-     * time wall-clock position. Useful after a long time-warp session
-     * or when the operator suspects drift. Re-runs the per-probe
-     * mean-anomaly anchor from each probe's stored TLE epoch.
+     * Snap every probe back to its real-time wall-clock position.
+     * Phase B: this is now just bus.snapToNow() — simTimeMs jumps to
+     * Date.now() and the bus emits a 'jump' event. Every per-frame
+     * propagation already reads bus.getSimTime() so the next frame
+     * paints probes at their correct real-time positions, no per-
+     * probe re-anchoring needed.
      */
-    snapSatToWallClock() {
-        // Each probe with a real TLE has its mean-elements anchored via
-        // updateFromCelesTrak()'s logic. The simplest way to re-anchor
-        // all of them is to re-trigger the same logic for any probe
-        // that has a `userData.lastTleSnapshot`. If the live-catalog
-        // tracker holds that snapshot, run it again; otherwise fall
-        // through and let the next CelesTrak refresh do it.
-        if (!this._satProbes) return;
-        const now = Date.now();
-        for (const id in this._satProbes) {
-            const p = this._satProbes[id];
-            const snap = p.mesh?.userData?.lastTleSnapshot;
-            if (!snap || !Number.isFinite(snap.epochMs)) continue;
-            const n_rad_s = (snap.mean_motion * 2 * Math.PI) / 86400;
-            const dtSec = (now - snap.epochMs) / 1000;
-            const TAU = 2 * Math.PI;
-            let M = (snap.mean_anomaly * Math.PI / 180) + n_rad_s * dtSec;
-            M = ((M % TAU) + TAU) % TAU;
-            p._phase0 = M;
-        }
-        // Reset the THREE clock's accumulated delta-time so the next
-        // _stepSatellites doesn't multiply M by a stale elapsedSec.
-        // getDelta() returns time since last call; sample-and-discard.
-        this._clock?.getDelta?.();
-    }
+    snapSatToWallClock() { this._timeBus.snapToNow(); }
 
     /** Backwards-compatible wrapper retained for the existing UI button. */
     flyToISS(durationSec = 1.6) {
@@ -1780,9 +1756,17 @@ export class AtmosphereGlobe {
             probe.spec.altitudeKm = Math.round(meanAltKm);
         }
 
-        // Reset the per-frame phase to "now" — propagation in
-        // _stepSatellites uses _phase0 as the M at elapsedSec=0.
-        probe._phase0 = M_now_rad;
+        // Reset the per-frame phase. Legacy field (_phase0) remains
+        // populated for any caller that still inspects it, but the
+        // per-frame propagation now reads (_M_epoch_rad, _epochMs)
+        // directly — anchored at the TLE epoch instead of "now". This
+        // makes the same formula work for live wall-clock AND for
+        // replay through past simTimeMs values (the operator scrubs
+        // backward and sees the actual past orbital phase, not a
+        // forward extrapolation pretending to be backward).
+        probe._phase0      = M_now_rad;
+        probe._M_epoch_rad = sat.mean_anomaly * Math.PI / 180;
+        probe._epochMs     = epochMs;
 
         // Carry the source + epoch into the probe's userData so the
         // tooltip + drag panel can show TLE freshness.
@@ -2188,6 +2172,12 @@ export class AtmosphereGlobe {
                 orbital: { ...orb, meanAnomalyDeg0: M_now * 180 / Math.PI },
             },
             _phase0: M_now,
+            // Phase B: absolute-time anchor. Anchored at construction
+            // wall-clock since M_now is "M at now"; downstream replay
+            // / scrub uses (simTimeMs − this epoch) × n to recompute M
+            // for any past or future moment.
+            _M_epoch_rad: M_now,
+            _epochMs:     Date.now(),
             _propTable: null,
             _propTableN: 0,
             _kind: 'debris',
@@ -2218,11 +2208,12 @@ export class AtmosphereGlobe {
         const sizes     = new Float32Array(N);
 
         // Seed with current positions so first paint isn't at origin.
-        const ts = this._getSatRate();
-        const tNowSim = (this._clock?.getElapsedTime?.() ?? 0) * ts;
+        // Phase B: absolute-time lookup; downstream _stepDebris reuses
+        // the same helper each frame.
+        const simTimeMs = this._timeBus.getSimTime();
         const _tmpColor = new THREE.Color();
         for (let i = 0; i < N; i++) {
-            const p = _lookupProbePosition(debris[i], tNowSim);
+            const p = _lookupProbePositionAt(debris[i], simTimeMs);
             positions[i * 3]     = p.x;
             positions[i * 3 + 1] = p.y;
             positions[i * 3 + 2] = p.z;
@@ -2273,16 +2264,16 @@ export class AtmosphereGlobe {
     }
 
     /**
-     * Per-frame debris position update. Uses the same simulated-time
-     * axis as _stepSatellites so debris and assets stay coherent.
+     * Per-frame debris position update. Reads the same absolute
+     * simTimeMs as _stepSatellites — debris + named probes stay
+     * coherent across all rate / scrub / replay states.
      */
-    _stepDebris(t) {
+    _stepDebris() {
         if (!this._debris?.length || !this._debrisPositions) return;
-        const ts = this._getSatRate();
-        const tNowSim = t * ts;
+        const simTimeMs = this._timeBus.getSimTime();
         const pos = this._debrisPositions;
         for (let i = 0; i < this._debris.length; i++) {
-            const p = _lookupProbePosition(this._debris[i], tNowSim);
+            const p = _lookupProbePositionAt(this._debris[i], simTimeMs);
             const o = i * 3;
             pos[o]     = p.x;
             pos[o + 1] = p.y;
@@ -2396,6 +2387,10 @@ export class AtmosphereGlobe {
                     orbital: { ...orb, meanAnomalyDeg0: M_now * 180 / Math.PI },
                 },
                 _phase0: M_now,
+                // Phase B absolute-time anchor (same rationale as
+                // _satProbes / debris paths above).
+                _M_epoch_rad: M_now,
+                _epochMs:     Date.now(),
                 _propTable: null,
                 _propTableN: 0,
                 _kind: 'constellation',
@@ -2408,10 +2403,10 @@ export class AtmosphereGlobe {
 
         const N = probes.length;
         const positions = new Float32Array(N * 3);
-        const ts = this._getSatRate();
-        const tNowSim = (this._clock?.getElapsedTime?.() ?? 0) * ts;
+        // Phase B: seed initial positions from bus-driven absolute time.
+        const simTimeMs = this._timeBus.getSimTime();
         for (let i = 0; i < N; i++) {
-            const p = _lookupProbePosition(probes[i], tNowSim);
+            const p = _lookupProbePositionAt(probes[i], simTimeMs);
             positions[i * 3]     = p.x;
             positions[i * 3 + 1] = p.y;
             positions[i * 3 + 2] = p.z;
@@ -2443,18 +2438,20 @@ export class AtmosphereGlobe {
     }
 
     /** Per-frame: advance every visible constellation cloud's points. */
-    _stepConstellations(t) {
+    _stepConstellations() {
         const all = this._constellationClouds;
         if (!all) return;
-        const ts = this._getSatRate();
-        const tNowSim = t * ts;
+        // Phase B: absolute-time read from the shared bus, same as
+        // _stepSatellites + _stepDebris — every orbital object on the
+        // page is rendered against ONE canonical simTimeMs.
+        const simTimeMs = this._timeBus.getSimTime();
         for (const id in all) {
             const entry = all[id];
             if (!entry.cloud.visible) continue;
             const probes = entry.probes;
             const pos = entry.positions;
             for (let i = 0; i < probes.length; i++) {
-                const p = _lookupProbePosition(probes[i], tNowSim);
+                const p = _lookupProbePositionAt(probes[i], simTimeMs);
                 const o = i * 3;
                 pos[o]     = p.x;
                 pos[o + 1] = p.y;
@@ -3786,13 +3783,22 @@ export class AtmosphereGlobe {
 
         this._controls.update(dt);
 
-        // Per-frame satellite orbit propagation. Visual time is sped
-        // up via opts.satTimeScale (default 60×) so a user sees a full
-        // pass in seconds. Each probe has its own period, inclination,
-        // and starting mean anomaly so paths don't all overlap.
-        if (this._satProbes) this._stepSatellites(t);
-        if (this._debris)    this._stepDebris(t);
-        if (this._constellationClouds) this._stepConstellations(t);
+        // Phase B: advance the shared time bus once per animate frame.
+        // step() reads Date.now() internally + applies the current rate,
+        // so the bus pauses naturally when the page is hidden (no Date
+        // drift between frames). Every downstream consumer (sat probes,
+        // debris, eventually realtime driver + analyzer) reads
+        // bus.getSimTime() — one canonical "now" across the page.
+        this._timeBus?.step();
+
+        // Per-frame satellite orbit propagation. Uses absolute sim-time
+        // via the bus (Phase B) — each probe carries (_epochMs,
+        // _M_epoch_rad) and computes M = M_epoch + n × (simTimeMs −
+        // epochMs)/1000, so rate changes / scrubs / replay all yield
+        // the correct position with no drift accumulation.
+        if (this._satProbes) this._stepSatellites();
+        if (this._debris)    this._stepDebris();
+        if (this._constellationClouds) this._stepConstellations();
         if (this._phenomenaGroup) this._stepPhenomena(t);
         // Track the hovered debris with a face-on cyan reticle so
         // users can tell which of 50 identical-looking pink dots the
@@ -3859,15 +3865,22 @@ export class AtmosphereGlobe {
      * matters when we eventually upgrade to elliptical orbits with
      * non-zero eccentricity.
      */
-    _stepSatellites(elapsedSec) {
-        const ts = this._getSatRate();
+    _stepSatellites() {
+        // Phase B: absolute-time propagation from the shared TimeBus.
+        //   M = M_epoch + (2π/periodSec) × (simTimeMs − epochMs) / 1000
+        // The bus's rate / pause / scrub state is already baked into
+        // simTimeMs by the time we read it, so this loop is unaware
+        // of "live vs replay vs warp" — it just renders the orbit at
+        // whatever moment the bus says is "now".
+        const simTimeMs = this._timeBus.getSimTime();
+        const TAU = 2 * Math.PI;
         for (const id in this._satProbes) {
             const probe = this._satProbes[id];
             const periodSec = probe.spec.orbital.periodMin * 60;
-            // Total mean anomaly traveled at compressed time.
-            const M = probe._phase0 + (elapsedSec * ts / periodSec) * 2 * Math.PI;
+            const dtSec = (simTimeMs - probe._epochMs) / 1000;
+            const M = probe._M_epoch_rad + (TAU * dtSec) / Math.max(periodSec, 1);
             // Convert M back into an orbit fraction for the helper.
-            const tFrac = (M / (2 * Math.PI)) % 1;
+            const tFrac = ((M / TAU) % 1 + 1) % 1;
             const altShellR = 1 + probe.spec.altitudeKm / R_EARTH_KM;
             const p = _propagateKeplerian(probe.spec.orbital, tFrac, altShellR);
 
@@ -4025,10 +4038,13 @@ export class AtmosphereGlobe {
             return;
         }
 
-        const ts = this._getSatRate();
-        // Simulated-orbital seconds since page boot.
-        const tNowSim = this._clock.getElapsedTime() * ts;
-
+        // Phase B: scan walks forward from simTimeMs (absolute, in ms)
+        // by stepSec increments per iteration. Each lookup takes the
+        // proposed sim-time directly, so changing the bus's rate or
+        // pausing doesn't change WHICH future moments we scan — the
+        // physics window is anchored at simTimeMs regardless of how
+        // fast it's advancing.
+        const nowMs = this._timeBus.getSimTime();
         const horizonSec = horizonMin * 60;
         const nSteps = Math.max(2, Math.floor(horizonSec / stepSec) + 1);
 
@@ -4039,9 +4055,9 @@ export class AtmosphereGlobe {
             let minDist = Infinity, minStep = 0;
             let firstDist = 0;
             for (let k = 0; k < nSteps; k++) {
-                const tSim = tNowSim + k * stepSec;
-                const pa = _lookupProbePosition(a, tSim);
-                const pb = _lookupProbePosition(b, tSim);
+                const tMs = nowMs + k * stepSec * 1000;
+                const pa = _lookupProbePositionAt(a, tMs);
+                const pb = _lookupProbePositionAt(b, tMs);
                 const dx = pa.x - pb.x;
                 const dy = pa.y - pb.y;
                 const dz = pa.z - pb.z;
@@ -4375,26 +4391,44 @@ function _buildChordLine(userData) {
 
 /**
  * O(1) probe-position lookup via the precomputed phase-indexed
- * table. simSec is the current simulated-orbital-time in seconds;
- * we resolve it to a fractional phase index, then linearly
- * interpolate between adjacent table entries for sub-sample
- * smoothness (matters at TCA where the curve is flattest).
+ * table. Phase B switched this to ABSOLUTE-time signature: pass a
+ * Unix-ms timestamp (typically from the shared TimeBus) and the
+ * helper resolves the corresponding mean anomaly directly from the
+ * probe's epoch anchor:
  *
- * Falls back to a fresh trig-based propagate if the lookup table
- * isn't built yet — happens only on the very first frame post-spawn.
+ *     M = _M_epoch_rad + n × (simTimeMs − _epochMs) / 1000
+ *
+ * where n = 2π / periodSec. This formula is stable under rate
+ * changes, scrubbing, and replay: the same simTimeMs always yields
+ * the same position, regardless of how long the renderer has been
+ * running or how many rate edits the operator has made.
+ *
+ * Probes lacking explicit (_epochMs, _M_epoch_rad) — older code
+ * paths or tests — fall back to the legacy _phase0 read using
+ * the probe's own creation-time as the implicit epoch.
+ *
+ * Falls back to a fresh trig-based propagate when the precomputed
+ * phase-table isn't built yet (only on the first frame post-spawn).
  */
-function _lookupProbePosition(probe, simSec) {
+function _lookupProbePositionAt(probe, simTimeMs) {
     const periodSec = probe.spec.orbital.periodMin * 60;
+    const TAU = 2 * Math.PI;
+    // Mean anomaly via absolute time. The two-branch fallback keeps
+    // synthetic probes (no TLE epoch wired) working — they have
+    // _phase0 but no _epochMs / _M_epoch_rad until the constructor
+    // helper backfills them.
+    const epochMs    = Number.isFinite(probe._epochMs) ? probe._epochMs : 0;
+    const M_at_epoch = Number.isFinite(probe._M_epoch_rad) ? probe._M_epoch_rad
+                        : (probe._phase0 ?? 0);
+    const dtSec = (simTimeMs - epochMs) / 1000;
+    const M = M_at_epoch + (TAU * dtSec) / Math.max(periodSec, 1);
+
     if (!probe._propTable || !periodSec) {
-        const M = probe._phase0 + 2 * Math.PI * simSec / Math.max(periodSec, 1);
-        const TAU = 2 * Math.PI;
         const tFrac = ((M / TAU) % 1 + 1) % 1;
         const r = 1 + probe.spec.altitudeKm / R_EARTH_KM;
         return _propagateKeplerian(probe.spec.orbital, tFrac, r);
     }
     const N = probe._propTableN;
-    const M = probe._phase0 + 2 * Math.PI * simSec / periodSec;
-    const TAU = 2 * Math.PI;
     const phaseFrac = ((M / TAU) % 1 + 1) % 1;
     const fIdx = phaseFrac * N;
     const k0 = Math.floor(fIdx) % N;
