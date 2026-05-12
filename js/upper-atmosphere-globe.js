@@ -1465,9 +1465,15 @@ export class AtmosphereGlobe {
     /**
      * Fly the camera to one satellite probe by id. Falls through to
      * the ISS probe if id is omitted (preserves the original
-     * .flyToISS() entry point).
+     * .flyToISS() entry point). Auto-switches to fly mode so
+     * OrbitControls doesn't yank the camera back to planet centre
+     * mid-animation (the Phase 25 bug fix).
+     *
+     * Pass {follow:true} to engage real per-frame tracking — without
+     * it the camera just flies to where the satellite WAS at the
+     * moment of click, and the satellite then propagates away.
      */
-    flyToSatellite(id = 'iss', durationSec = 1.6) {
+    flyToSatellite(id = 'iss', durationSec = 1.6, { follow = false } = {}) {
         const probe = this._satProbes?.[id];
         if (!probe) return;
         const pos = probe.mesh.position.clone();
@@ -1476,12 +1482,54 @@ export class AtmosphereGlobe {
         const radial = pos.clone().normalize();
         const offset = radial.multiplyScalar(0.18);
         const target = pos.clone().add(offset);
+        if (this._controls.getMode?.() === 'orbit') {
+            this._controls.setMode('fly');
+        }
         this.flyTo(target, pos, durationSec);
+        if (follow) {
+            // Engage follow after the flyTo's smoothstep completes —
+            // delay by the animation duration so the spring doesn't
+            // fight the fly-in.
+            setTimeout(() => {
+                if (this._satProbes?.[id]) this.followSatellite(id);
+            }, durationSec * 1000);
+        }
     }
+
+    /**
+     * Engage per-frame follow on a satellite. The camera tracks the
+     * probe's mesh.position (which is updated every frame by the SGP4
+     * propagator) — so the operator sees the target stay fixed in
+     * view while the world rotates past underneath.
+     */
+    followSatellite(id) {
+        const probe = this._satProbes?.[id];
+        if (!probe?.mesh) return;
+        this._controls.followObject?.(() => probe.mesh.position);
+        this._followId = { kind: 'sat', id };
+    }
+
+    /** Stop any active follow (mode + flyTo unchanged). */
+    stopFollowing() {
+        this._controls.stopFollowing?.();
+        this._followId = null;
+    }
+    isFollowing() { return !!this._controls.isFollowing?.(); }
+    getFollowTarget() { return this._followId ?? null; }
+
+    /** Reset camera to a default home view. Drops any active follow. */
+    resetCameraView() { this._controls.resetView?.(); this._followId = null; }
+    /** Snap to top-down (polar) view. */
+    cameraTopView()   { this._controls.flyToTopView?.(); this._followId = null; }
 
     /** Backwards-compatible wrapper retained for the existing UI button. */
     flyToISS(durationSec = 1.6) {
         return this.flyToSatellite('iss', durationSec);
+    }
+    /** New: follow ISS (default click target for the HUD's "Visit ISS"). */
+    followISS() {
+        if (this._controls.getMode?.() === 'orbit') this._controls.setMode('fly');
+        return this.flyToSatellite('iss', 1.6, { follow: true });
     }
 
     /**
@@ -1491,7 +1539,7 @@ export class AtmosphereGlobe {
      * call. Also auto-switches into fly mode so the camera anim
      * doesn't get clamped back to the planet centre by OrbitControls.
      */
-    flyToDebris(idx, durationSec = 1.6) {
+    flyToDebris(idx, durationSec = 1.6, { follow = false } = {}) {
         if (!this._debrisPositions || !this._debris?.[idx]) return;
         const p = this._debrisPositions;
         const o = idx * 3;
@@ -1503,6 +1551,26 @@ export class AtmosphereGlobe {
             this._controls.setMode('fly');
         }
         this.flyTo(target, debrisPos, durationSec);
+        if (follow) {
+            // Debris positions live in a packed Float32Array updated
+            // every frame by the catalog propagator. The follow callback
+            // reads the live offset each frame — so the camera tracks
+            // even rapidly-tumbling LEO fragments.
+            setTimeout(() => this.followDebris(idx), durationSec * 1000);
+        }
+    }
+
+    /** Engage per-frame follow on a debris piece by index. */
+    followDebris(idx) {
+        if (!this._debrisPositions || !this._debris?.[idx]) return;
+        const p = this._debrisPositions;
+        const o = idx * 3;
+        const tmp = new THREE.Vector3();
+        this._controls.followObject?.(() => {
+            tmp.set(p[o], p[o + 1], p[o + 2]);
+            return tmp;
+        });
+        this._followId = { kind: 'debris', idx };
     }
 
     /**
@@ -3478,15 +3546,18 @@ export class AtmosphereGlobe {
             const dt = performance.now() - downT;
             if (dx > 4 || dy > 4 || dt > 350) return;     // user dragged
             const ud = this._hoveredUserData;
-            // Click on any satellite probe → fly there.
+            // Phase 25: click on an orbital target both flies the
+            // camera in AND engages follow — so the target stays in
+            // frame as it propagates instead of immediately drifting
+            // out of view after the flyTo animation completes. The
+            // operator stops following by switching mode (Orbit/Fly
+            // button) or by clicking "Stop follow" in the HUD.
             if (ud?.kind === 'sat-probe' && ud.id) {
-                this.flyToSatellite(ud.id);
+                this.flyToSatellite(ud.id, 1.6, { follow: true });
             } else if (ud?.kind === 'iss-probe') {
-                // Legacy: keep the kind='iss-probe' path working in
-                // case anything still emits that tag.
-                this.flyToISS();
+                this.followISS();
             } else if (ud?.kind === 'debris-piece' && Number.isFinite(ud.debrisIdx)) {
-                this.flyToDebris(ud.debrisIdx);
+                this.flyToDebris(ud.debrisIdx, 1.6, { follow: true });
             } else if (ud?.kind === 'catalog-point' && (ud.line1 || ud.noradId)) {
                 // Click on any live-catalog point → push into the
                 // trajectory analyzer panel. Pass TLE inline if we have

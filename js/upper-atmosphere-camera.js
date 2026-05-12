@@ -79,6 +79,15 @@ export class CameraController {
         // Smooth flyTo() animation.
         this._anim = null;
 
+        // Object-follow state (Phase 25). The camera locks onto a
+        // moving target — getPositionFn() is called every frame; the
+        // camera repositions to an offset behind/above the target and
+        // re-aims its lookAt. Used to "follow ISS" / "follow
+        // STARLINK-XXXX" as they propagate via SGP4 each frame.
+        // Cleared by stopFollowing() or by any user-initiated mode
+        // change (orbit/fly button click).
+        this._follow = null;
+
         // Cached camera basis — recomputed whenever yaw/pitch change.
         this._fwd   = new THREE.Vector3();
         this._right = new THREE.Vector3();
@@ -87,8 +96,12 @@ export class CameraController {
         this._bindFly();
     }
 
-    setMode(mode) {
+    setMode(mode, { fromFollow = false } = {}) {
         if (mode !== 'orbit' && mode !== 'fly') return;
+        // Phase 25: user-initiated mode changes break follow lock —
+        // otherwise the operator would fight an invisible track. The
+        // internal followObject() path passes fromFollow=true to bypass.
+        if (!fromFollow) this._follow = null;
         if (mode === this._mode) return;
 
         if (mode === 'fly') {
@@ -155,6 +168,59 @@ export class CameraController {
         };
     }
 
+    /**
+     * Engage follow-mode on a moving target. The supplied callback is
+     * called every frame and must return a THREE.Vector3 in the
+     * scene's world units (1 R⊕ = 1) for the target's current
+     * position. The camera repositions to `offset` behind the target
+     * each frame and re-aims its lookAt at the target. Follow is
+     * gentle — the camera-to-offset position uses a critically-damped
+     * spring (smoothing) so the operator doesn't experience jerks on
+     * fast-moving low-orbit targets.
+     *
+     * Auto-switches to fly mode (so OrbitControls doesn't fight the
+     * lock by pulling toward planet centre). Calling stopFollowing
+     * leaves the camera at its last followed position; the operator
+     * can then orbit / fly freely.
+     *
+     * @param {() => THREE.Vector3} getPositionFn
+     * @param {object} [opts]
+     * @param {THREE.Vector3} [opts.offset]  camera offset relative to
+     *   the target's RADIAL direction (away from Earth centre).
+     *   Default 0.18 R⊕ outward — clear view past Earth's limb.
+     * @param {number} [opts.smoothing]      time-constant in seconds
+     *   for the position spring. 0 = snap; 0.3 = noticeably smooth.
+     */
+    followObject(getPositionFn, { offset = null, smoothing = 0.15 } = {}) {
+        if (typeof getPositionFn !== 'function') return;
+        // Switch to fly mode (without breaking the follow lock).
+        if (this._mode !== 'fly') this.setMode('fly', { fromFollow: true });
+        this._follow = {
+            getPos: getPositionFn,
+            offset: offset ? offset.clone() : null,   // null → use radial-out default
+            smoothing,
+        };
+    }
+
+    stopFollowing() { this._follow = null; }
+    isFollowing()   { return !!this._follow; }
+
+    /** Reset to a default viewpoint — useful for a "Home" button. */
+    resetView({ distance = 3.4, durationSec = 1.0 } = {}) {
+        this._follow = null;
+        const target = new THREE.Vector3(0, 0.65 * distance, distance);
+        const lookAt = new THREE.Vector3(0, 0, 0);
+        this.flyTo(target, lookAt, durationSec);
+    }
+
+    /** Snap to a polar (top-down) view of the planet. */
+    flyToTopView({ distance = 4.5, durationSec = 1.0 } = {}) {
+        this._follow = null;
+        const target = new THREE.Vector3(0, distance, 0.001);   // ε for valid lookAt
+        const lookAt = new THREE.Vector3(0, 0, 0);
+        this.flyTo(target, lookAt, durationSec);
+    }
+
     /** Per-frame update — call from the host's animate() loop. */
     update(dt) {
         // While a flyTo() animation is in progress we don't run mode-
@@ -163,6 +229,17 @@ export class CameraController {
         // pulling the camera back toward target every frame.
         if (this._anim) {
             this._stepAnim();
+            return;
+        }
+
+        // Phase 25: follow-mode runs after any flyTo completes. The
+        // target's position comes from getPositionFn — typically a
+        // probe's mesh.position which is updated each frame by the
+        // SGP4 propagator. We move the camera toward (target + offset)
+        // with a critically-damped spring so a fast-moving LEO target
+        // doesn't yank the view jerkily.
+        if (this._follow) {
+            this._stepFollow(dt);
             return;
         }
 
@@ -289,6 +366,42 @@ export class CameraController {
         if (dist > 30) {
             this.camera.position.multiplyScalar(30 / dist);
         }
+    }
+
+    _stepFollow(dt) {
+        const f = this._follow;
+        let tgt;
+        try { tgt = f.getPos(); } catch (_) { tgt = null; }
+        if (!tgt || !Number.isFinite(tgt.x)) { this._follow = null; return; }
+
+        // Default offset: 0.18 R⊕ radially outward from the target so
+        // the camera looks at the target with Earth's limb behind it.
+        // Caller can supply a custom THREE.Vector3 offset which is
+        // applied in WORLD frame (e.g. north-up offset for a polar
+        // tracking view).
+        const camPos = tgt.clone();
+        if (f.offset) {
+            camPos.add(f.offset);
+        } else {
+            const radial = tgt.clone().normalize().multiplyScalar(0.18);
+            camPos.add(radial);
+        }
+
+        // Critically-damped position spring. dt-aware so behaviour is
+        // frame-rate independent.
+        const k = 1 - Math.exp(-dt / Math.max(0.001, f.smoothing));
+        this.camera.position.lerp(camPos, k);
+
+        // Re-aim. Use lookAt with world-Y up so the horizon stays level.
+        this.camera.up.set(0, 1, 0);
+        this.camera.lookAt(tgt);
+
+        // Seed yaw/pitch from the lookAt direction so if the operator
+        // stops following + drives the fly camera manually, controls
+        // pick up cleanly.
+        const fwd = tgt.clone().sub(this.camera.position).normalize();
+        this._pitch = Math.asin(Math.max(-1, Math.min(1, fwd.y)));
+        this._yaw   = Math.atan2(fwd.x, -fwd.z);
     }
 
     _stepAnim() {
