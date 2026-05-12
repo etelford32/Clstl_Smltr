@@ -232,44 +232,100 @@ input[type=range]::-moz-range-thumb {
 }
 #ua-globe-legend b { color:#0ff; font-weight:600; }
 
-/* ─── Camera HUD (top-right of globe) ──────────────────── */
+/* ─── Camera HUD (top-right of globe) — Phase 25 refresh ── */
+/* The HUD now hosts two control rows (mode + preset/follow) plus the
+ * live readout. Uses fleet-UI design tokens via .ua-fw scope (HUD is
+ * mounted inside #ua-globe-wrap which inherits via the token block on
+ * .ua-pane-analysis + .ua-fw — we extend the rule via the local
+ * selectors below so HUD elements receive the same tokens). */
+#ua-camera-hud,
+#ua-cam-readout {
+    /* Adopt the same fleet-UI tokens so HUD reads through the design
+     * system. The token block on .ua-fw / .ua-pane-analysis already
+     * carries the declarations; mirroring them here lets the HUD
+     * elements use var() without nesting inside one of those
+     * containers in the DOM. */
+    --ua-surf-2: rgba(10,6,28,.55);
+    --ua-surf-3: rgba(8,4,22,.78);
+    --ua-text-primary: #fff;
+    --ua-text-default: #cde;
+    --ua-text-muted:   #aab8c6;
+    --ua-text-faint:   #8a98a8;
+    --ua-cyan: #0ff;
+    --ua-cyan-mid: rgba(0,200,200,.18);
+    --ua-cyan-bdr: rgba(0,200,200,.30);
+    --ua-fs-xs: .65rem;
+    --ua-fs-sm: .72rem;
+    --ua-r-sm: 4px;
+    --ua-r-md: 6px;
+    --ua-r-lg: 8px;
+    --ua-sp-2: 4px;
+    --ua-sp-3: 6px;
+    --ua-sp-4: 8px;
+    --ua-sp-5: 12px;
+}
 #ua-camera-hud {
-    position:absolute; right:14px; top:14px;
-    display:flex; flex-direction:column; gap:8px;
+    position:absolute; right:var(--ua-sp-5); top:var(--ua-sp-5);
+    display:flex; flex-direction:column; gap:var(--ua-sp-4);
     align-items:flex-end;
     pointer-events:none;          /* children re-enable */
     z-index:5;
 }
 #ua-camera-hud .ua-cam-controls {
-    display:flex; gap:6px;
+    display:flex; gap:var(--ua-sp-3);
     pointer-events:auto;
 }
+#ua-camera-hud .ua-cam-controls--preset {
+    /* Smaller chips on the second row; reset/top/zoom are less frequently
+     * used than mode-toggle, so they don't compete for attention. */
+    gap:var(--ua-sp-2);
+}
 #ua-camera-hud button {
-    background:rgba(8,4,22,.78);
-    border:1px solid rgba(0,200,200,.28);
-    color:#bcd;
-    border-radius:6px; padding:5px 10px;
-    font:11px/1 system-ui, sans-serif; font-weight:600;
+    background:var(--ua-surf-3);
+    border:1px solid var(--ua-cyan-bdr);
+    color:var(--ua-text-default);
+    border-radius:var(--ua-r-md);
+    padding:5px 10px;
+    font:var(--ua-fs-sm)/1 system-ui, sans-serif; font-weight:600;
     cursor:pointer; letter-spacing:.04em;
-    transition:all .12s;
+    transition:color .12s, border-color .12s, background .12s;
+}
+#ua-camera-hud .ua-cam-controls--preset button {
+    /* Slightly tighter than primary controls. */
+    padding:3px var(--ua-sp-4);
+    font-size:var(--ua-fs-xs);
+    border-color:rgba(0,200,200,.20);
+    color:var(--ua-text-muted);
 }
 #ua-camera-hud button:hover {
     border-color:rgba(0,255,230,.55);
-    color:#0ff;
+    color:var(--ua-cyan);
 }
 #ua-camera-hud button.ua-cam-on {
-    background:rgba(0,200,200,.18);
-    border-color:#0cc;
-    color:#0ff;
+    background:var(--ua-cyan-mid);
+    border-color:var(--ua-cyan);
+    color:var(--ua-cyan);
 }
+#ua-camera-hud .ua-cam-stop {
+    /* Follow-active state: amber accent so it reads as "stop the
+     * thing the operator just started" rather than a peer of the
+     * preset buttons. */
+    background:rgba(255,170,32,.14);
+    border-color:rgba(255,170,32,.55);
+    color:#ffaa20;
+}
+#ua-camera-hud .ua-cam-stop:hover {
+    background:rgba(255,170,32,.22);
+    color:#ffc060;
+}
+#ua-camera-hud .is-hidden { display:none; }
 #ua-cam-readout {
-    background:rgba(8,4,22,.82);
+    background:var(--ua-surf-3);
     border:1px solid rgba(0,200,200,.18);
-    border-radius:8px;
-    padding:8px 11px;
-    font:11px monospace;
-    line-height:1.45;
-    color:#cde;
+    border-radius:var(--ua-r-lg);
+    padding:var(--ua-sp-4) 11px;
+    font:var(--ua-fs-xs)/1.45 ui-monospace, monospace;
+    color:var(--ua-text-default);
     min-width:170px;
     pointer-events:auto;
     box-shadow:0 2px 10px rgba(0,0,0,.4);
@@ -277,23 +333,32 @@ input[type=range]::-moz-range-thumb {
 #ua-cam-readout .ua-cam-row {
     display:flex; justify-content:space-between; gap:10px;
 }
-#ua-cam-readout .ua-cam-k    { color:#789; }
-#ua-cam-readout .ua-cam-v    { color:#fff; }
+#ua-cam-readout .ua-cam-k    { color:var(--ua-text-faint); }
+#ua-cam-readout .ua-cam-v    { color:var(--ua-text-primary); }
 #ua-cam-readout .ua-cam-mode {
     margin-top:5px; padding-top:5px;
     border-top:1px dotted rgba(255,255,255,.08);
-    color:#0cc; font-weight:600;
+    color:var(--ua-cyan); font-weight:600;
     text-align:center;
+}
+#ua-cam-readout .ua-cam-mode--follow {
+    /* Distinct from orbit/fly idle states — operator immediately sees
+     * "I'm tracking something" without needing to read the buttons. */
+    color:#ffaa20;
+    background:rgba(255,170,32,.10);
+    border-radius:var(--ua-r-sm);
+    border:1px solid rgba(255,170,32,.35);
+    padding:2px 4px;
 }
 #ua-cam-readout .ua-cam-hint {
     color:#556; font-size:10px;
     text-align:center; margin-top:2px;
 }
 #ua-cam-readout .ua-cam-layer-tag {
-    display:inline-block; padding:1px 5px; border-radius:3px;
+    display:inline-block; padding:1px 5px; border-radius:var(--ua-r-sm);
     font-size:10px; font-weight:700; letter-spacing:.04em;
     background:rgba(0,200,200,.14);
-    color:#9ff; border:1px solid rgba(0,200,200,.3);
+    color:#9ff; border:1px solid var(--ua-cyan-bdr);
 }
 
 /* ─── Plots ────────────────────────────────────────────── */
@@ -2412,15 +2477,31 @@ input[type=range]::-moz-range-thumb {
     <section id="ua-globe-wrap">
         <canvas id="ua-globe"></canvas>
 
-        <!-- Camera HUD: mode toggle + Visit ISS + live altitude readout -->
+        <!-- Camera HUD: mode toggle + presets + Visit ISS + live readout.
+             Phase 25 expansion: real per-frame follow when chasing
+             orbital targets; reset/top-view presets; explicit follow
+             toggle so operators can stop tracking without changing
+             camera mode. -->
         <div id="ua-camera-hud">
             <div class="ua-cam-controls">
                 <button type="button" id="ua-cam-orbit" class="ua-cam-on"
                         title="Orbit the planet (drag to rotate, scroll to zoom)">Orbit</button>
                 <button type="button" id="ua-cam-fly"
-                        title="Free-fly · WASD to move, Q/E down/up, Shift faster, drag to look">Fly</button>
+                        title="Free-fly · WASD move · Q/E down/up · Shift faster · drag to look">Fly</button>
                 <button type="button" id="ua-cam-iss"
-                        title="Fly to the live ISS probe at 420 km · 51.6° inclination">↥ Visit ISS</button>
+                        title="Fly to the live ISS probe (420 km · 51.6°) and lock follow">↥ Visit ISS</button>
+            </div>
+            <div class="ua-cam-controls ua-cam-controls--preset">
+                <button type="button" id="ua-cam-reset"
+                        title="Return camera to home view (drops any follow lock)">⟲ Reset</button>
+                <button type="button" id="ua-cam-top"
+                        title="Snap to top-down (polar) view">▲ Top</button>
+                <button type="button" id="ua-cam-zoom-in"
+                        title="Zoom in (decrease distance to target)">＋</button>
+                <button type="button" id="ua-cam-zoom-out"
+                        title="Zoom out (increase distance to target)">−</button>
+                <button type="button" id="ua-cam-stop-follow" class="ua-cam-stop is-hidden"
+                        title="Stop following the current target (camera stays put, you can orbit/fly freely)">⏹ Stop follow</button>
             </div>
             <div id="ua-cam-readout">
                 <div class="ua-cam-row">
@@ -2534,16 +2615,22 @@ input[type=range]::-moz-range-thumb {
             swAnalytics:    document.getElementById('ua-sw-analytics'),
             mesosphereBox:  document.getElementById('ua-mesosphere'),
             // Camera HUD
-            camOrbitBtn:    document.getElementById('ua-cam-orbit'),
-            camFlyBtn:      document.getElementById('ua-cam-fly'),
-            camIssBtn:      document.getElementById('ua-cam-iss'),
-            camAlt:         document.getElementById('ua-cam-alt'),
-            camLayer:       document.getElementById('ua-cam-layer'),
-            camRho:         document.getElementById('ua-cam-rho'),
-            camT:           document.getElementById('ua-cam-T'),
-            camKn:          document.getElementById('ua-cam-Kn'),
-            camMode:        document.getElementById('ua-cam-mode'),
-            camHint:        document.getElementById('ua-cam-hint'),
+            camOrbitBtn:      document.getElementById('ua-cam-orbit'),
+            camFlyBtn:        document.getElementById('ua-cam-fly'),
+            camIssBtn:        document.getElementById('ua-cam-iss'),
+            // Phase 25 — preset / utility / follow controls
+            camResetBtn:      document.getElementById('ua-cam-reset'),
+            camTopBtn:        document.getElementById('ua-cam-top'),
+            camZoomInBtn:     document.getElementById('ua-cam-zoom-in'),
+            camZoomOutBtn:    document.getElementById('ua-cam-zoom-out'),
+            camStopFollowBtn: document.getElementById('ua-cam-stop-follow'),
+            camAlt:           document.getElementById('ua-cam-alt'),
+            camLayer:         document.getElementById('ua-cam-layer'),
+            camRho:           document.getElementById('ua-cam-rho'),
+            camT:             document.getElementById('ua-cam-T'),
+            camKn:            document.getElementById('ua-cam-Kn'),
+            camMode:          document.getElementById('ua-cam-mode'),
+            camHint:          document.getElementById('ua-cam-hint'),
             // Drag forecast (Phase 1: nowcast, sun-driven flow;
             //                Phase 3: AR(1) horizon scrubber)
             dragToggle:        document.getElementById('ua-drag-toggle'),
