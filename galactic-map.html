@@ -135,9 +135,17 @@
     position: relative;
 }
 .gp-panel.minimized .gp-header { border-bottom-color: transparent; }
+/* Several panels (#sidebar, #hud, #zoom-bar, #coord-display, #sun-time-panel)
+   apply ID-scoped padding/max-height overrides to their .gp-body — those
+   rules have higher CSS specificity than the .gp-panel.minimized .gp-body
+   chain (IDs outrank classes), which used to leave the body at full size
+   on minimize ("stays big but empty").  Marking the collapse state
+   !important is the cleanest fix: minimize is an essential UI state and
+   should always trump panel-specific styling. */
 .gp-panel.minimized .gp-body {
-    max-height: 0;
-    padding-top: 0; padding-bottom: 0;
+    max-height: 0 !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
     opacity: 0;
     pointer-events: none;
 }
@@ -270,6 +278,12 @@ canvas { display:block; width:100% !important; height:100% !important; }
     pointer-events:none; font-size:12px; line-height:1.6; min-width:220px;
     max-width:calc(100vw - 28px);
 }
+/* The panel root sets pointer-events:none so drag-rotate works *through*
+   the HUD body (you can still spin the galaxy by dragging on the readout).
+   But the header — grip, title, and the −/+ minimize button — must stay
+   clickable, or the panel becomes inert and looks "broken / empty". */
+#hud .gp-header,
+#hud .gp-min-btn { pointer-events: auto; }
 #hud h3 { margin:0 0 6px; font-size:14px; color:#c090ff; }
 #hud .label { color:#777; font-size:10px; }
 #hud .val { color:#a0d8ff; font-weight:600; }
