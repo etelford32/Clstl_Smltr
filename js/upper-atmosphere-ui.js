@@ -137,12 +137,76 @@ export class UpperAtmosphereUI {
         camOrbitBtn?.addEventListener('click', () => setMode('orbit'));
         camFlyBtn  ?.addEventListener('click', () => setMode('fly'));
         camIssBtn  ?.addEventListener('click', () => {
-            // Switching to fly mode + flying the camera at the ISS gives
-            // a good "explorable" first impression — the user can take
-            // over with WASD afterward.
+            // Phase 25: Visit ISS now LOCKS follow — the camera tracks
+            // the probe as it propagates, instead of arriving at one
+            // point in space and watching the ISS sail away.
             setMode('fly');
-            this.globe.flyToISS?.();
+            this.globe.followISS?.();
         });
+
+        // Phase 25: preset / utility controls. Reset returns home view
+        // and drops any follow lock; Top snaps to polar; Zoom in/out
+        // adjust distance for users without a scroll wheel (or who
+        // prefer discrete steps); Stop-follow appears whenever a
+        // follow is engaged.
+        const { camResetBtn, camTopBtn, camZoomInBtn, camZoomOutBtn, camStopFollowBtn } = this.el;
+        camResetBtn?.addEventListener('click', () => {
+            this.globe.resetCameraView?.();
+            // setMode after resetView so the orbit pose is the default.
+            setTimeout(() => setMode('orbit'), 1000);
+        });
+        camTopBtn?.addEventListener('click', () => {
+            // Top-view sits high above the north pole; orbit mode lets
+            // the operator drag-rotate from there cleanly.
+            this.globe.cameraTopView?.();
+            setTimeout(() => setMode('orbit'), 1000);
+        });
+        // Zoom buttons nudge the camera radially. We multiply position
+        // by a factor — slower close to Earth, faster far away — so a
+        // single click visibly moves the camera at both ends of the
+        // distance range.
+        const stepZoom = (factor) => {
+            const cam = this.globe?._camera;
+            if (!cam) return;
+            const dist = cam.position.length();
+            const next = Math.max(1.05, Math.min(28, dist * factor));
+            cam.position.multiplyScalar(next / dist);
+        };
+        camZoomInBtn ?.addEventListener('click', () => stepZoom(0.82));
+        camZoomOutBtn?.addEventListener('click', () => stepZoom(1 / 0.82));
+
+        camStopFollowBtn?.addEventListener('click', () => {
+            this.globe.stopFollowing?.();
+            this._refreshFollowUi();
+        });
+
+        // Poll the follow state at the same 4 Hz the readout uses, so
+        // the Stop-follow button surfaces immediately when a click on
+        // the canvas engages tracking.
+        this._followUiTimer = setInterval(() => this._refreshFollowUi(), 250);
+    }
+
+    /** Show/hide the Stop-follow button based on globe.isFollowing(). */
+    _refreshFollowUi() {
+        const btn = this.el.camStopFollowBtn;
+        if (!btn) return;
+        const on = !!this.globe.isFollowing?.();
+        btn.classList.toggle('is-hidden', !on);
+        // Also light up the readout's mode chip when following.
+        if (this.el.camMode) {
+            this.el.camMode.classList.toggle('ua-cam-mode--follow', on);
+            if (on) {
+                const tgt = this.globe.getFollowTarget?.();
+                this.el.camMode.textContent = tgt?.kind === 'sat'
+                    ? `following ${tgt.id}`
+                    : tgt?.kind === 'debris'
+                        ? `following debris #${tgt.idx}`
+                        : 'following';
+            }
+        }
+        if (this.el.camHint && on) {
+            this.el.camHint.textContent = 'tracking target · Orbit/Fly/Reset to release';
+        }
     }
 
     /**
