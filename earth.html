@@ -676,6 +676,136 @@ nav {
 .models-footer a { color:#7ad; text-decoration:none; }
 .models-footer a:hover { text-decoration:underline; }
 
+/* ─── Probability Picker (probability-picker.js) ──────────────────
+   Free-to-use exceedance-probability panel. Anonymous users get a
+   5-minute soft trial; signed-in users have unlimited queries. The
+   timer chip + soft-freeze banner are the entire conversion surface
+   — keep the rest of the picker calm so the chip stands out. */
+.pp-root { display:flex; flex-direction:column; gap: var(--sp-2); }
+.pp-title {
+    display:flex; align-items:center; justify-content:space-between;
+    gap: var(--sp-2); padding: var(--sp-1) 0;
+    border-bottom: 1px solid var(--c-border-faint);
+}
+.pp-title-h { font-size:10.5px; color:#cfe9f5; font-weight:600;
+              letter-spacing:.04em; }
+.pp-timer-chip {
+    font-size:8.5px; padding: 2px 6px; border-radius: 10px;
+    background: rgba(var(--c-accent-rgb), .08);
+    color: #9ab3c3; letter-spacing:.02em;
+    border: 1px solid rgba(var(--c-accent-rgb), .15);
+}
+.pp-timer-chip.pp-signed   {
+    background: rgba(60,200,120,.10); color: #6ec487;
+    border-color: rgba(60,200,120,.25);
+}
+.pp-timer-chip.pp-expired  {
+    background: rgba(255,120,80,.10); color: #ff8c5a;
+    border-color: rgba(255,120,80,.30);
+}
+.pp-row { display:flex; flex-wrap:wrap; align-items:center;
+          gap: 6px; font-size:10px; color:#9ab3c3; }
+.pp-row-line { color:#7a91a4; font-style:italic; }
+.pp-glue     { color:#557; font-size: 9.5px; }
+.pp-input {
+    background: rgba(0,0,0,.25); color: #cfe9f5;
+    border: 1px solid var(--c-border-faint);
+    border-radius: var(--r-sm);
+    padding: 2px 5px; font-size: 10.5px;
+    font-family: inherit; outline: none;
+}
+.pp-input:focus { border-color: rgba(var(--c-accent-rgb), .55); }
+.pp-input-field     { min-width: 110px; }
+.pp-input-op        { min-width: 40px;  font-weight: 700; }
+.pp-input-threshold { width: 64px;  text-align: right; }
+.pp-unit {
+    font-size: 9px; color: #7a91a4; padding: 1px 5px;
+    background: rgba(255,255,255,.04); border-radius: 3px;
+    text-transform: uppercase; letter-spacing: .05em;
+}
+.pp-chip {
+    background: rgba(0,0,0,.18); color: #9ab3c3;
+    border: 1px solid var(--c-border-faint);
+    border-radius: 10px; padding: 2px 7px;
+    font-size: 9.5px; cursor: pointer;
+    transition: background .15s ease, color .15s ease;
+}
+.pp-chip:hover  { background: rgba(var(--c-accent-rgb), .10); color: #cfe9f5; }
+.pp-chip.active {
+    background: rgba(var(--c-accent-rgb), .20); color: #cfe9f5;
+    border-color: rgba(var(--c-accent-rgb), .45);
+}
+.pp-row-run { justify-content: space-between; margin-top: var(--sp-1); }
+.pp-run-btn {
+    background: var(--c-accent); color: #002;
+    border: none; border-radius: var(--r-sm);
+    padding: 5px 14px; font-size: 11px; font-weight: 700;
+    cursor: pointer; letter-spacing: .03em;
+}
+.pp-run-btn:disabled {
+    background: rgba(255,255,255,.08); color: #557;
+    cursor: not-allowed;
+}
+.pp-loc { font-size: 9px; color: #7a91a4; font-style: italic; }
+.pp-banner {
+    font-size: 10px; padding: 6px 8px; border-radius: var(--r-sm);
+    background: rgba(255,120,80,.10);
+    border: 1px solid rgba(255,120,80,.30);
+    color: #ffb499;
+}
+.pp-banner-link { color: #ffd9a8; text-decoration: underline; cursor: pointer; }
+.pp-result { display:flex; flex-direction:column; gap: var(--sp-2);
+             padding: var(--sp-2) 0; }
+.pp-result-empty   { color: #557; font-size: 9.5px; font-style: italic; padding-top: 4px; }
+.pp-result-error   { color: #ff8c5a; font-size: 10px; }
+.pp-err-head       { font-weight: 600; }
+.pp-err-detail     { color: #b87a6a; font-size: 9px; margin-top: 2px; }
+.pp-result-head    {
+    display:flex; align-items:baseline; gap: 8px; flex-wrap: wrap;
+}
+.pp-pct {
+    font-size: 26px; font-weight: 700; color: #cfe9f5;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+}
+.pp-pct-na { font-size: 22px; color: #557; }
+.pp-result-summary { font-size: 10px; color: #9ab3c3; flex:1; min-width:0; }
+.pp-conf {
+    font-size: 8.5px; padding: 2px 6px; border-radius: 10px;
+    letter-spacing: .04em; text-transform: uppercase; font-weight: 600;
+}
+.pp-conf-high     { background: rgba(60,200,120,.12); color: #6ec487; }
+.pp-conf-moderate { background: rgba(255,170,60,.12); color: #ffb366; }
+.pp-conf-low      { background: rgba(255,120,80,.12); color: #ff8c5a; }
+.pp-conf-unknown  { background: rgba(255,255,255,.05); color: #777;   }
+.pp-spark {
+    width: 100%; height: 36px; display: block;
+    background: rgba(0,0,0,.20); border-radius: 3px;
+}
+.pp-spark-line {
+    fill: none; stroke: rgba(var(--c-accent-rgb), .85);
+    stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round;
+}
+.pp-spark-area { fill: rgba(var(--c-accent-rgb), .18); }
+.pp-why summary {
+    font-size: 9.5px; color: #779;
+    cursor: pointer; list-style: none; padding: 4px 0;
+    border-top: 1px dashed rgba(255,255,255,.06);
+}
+.pp-why summary::-webkit-details-marker { display: none; }
+.pp-why[open] summary { color: #9ab3c3; }
+.pp-members { display: flex; flex-direction: column; gap: 4px;
+              padding: 4px 0; }
+.pp-member {
+    display: grid; grid-template-columns: 50px 32px 1fr;
+    gap: 6px; align-items: baseline;
+    font-size: 9.5px;
+}
+.pp-member-id      { color: #cfe9f5; font-weight: 600; font-family: ui-monospace, monospace; }
+.pp-member-verdict { color: #779;    text-align: center; text-transform: uppercase;
+                     letter-spacing: .04em; font-weight: 700; font-size: 8.5px; }
+.pp-member-detail  { color: #779;    font-size: 9px; }
+
 /* ─── Info panel ─────────────────────────────────────────────── */
 #info-panel {
     position:absolute; bottom:52px; right:10px; z-index:50;
@@ -2296,6 +2426,18 @@ nav {
             </div>
         </div>
 
+        <!-- ── Probability Picker ──
+             Structured-input exceedance-probability tool. Free to use;
+             anonymous users get a 5-minute soft trial via
+             AnonymousSessionTimer. Lazy-mounted on first expand so the
+             timer doesn't start ticking against visitors who never open it. -->
+        <div class="lyr-section collapsed" data-lyr-section="probability-picker">
+            <div class="lyr-section-hdr"><span>PROBABILITY PICKER</span><span class="lyr-chevron">▾</span></div>
+            <div class="lyr-section-body">
+                <div id="probability-picker-host"></div>
+            </div>
+        </div>
+
         <!-- ── Magnetosphere ── -->
         <div class="lyr-section collapsed" data-lyr-section="magneto">
             <div class="lyr-section-hdr"><span>MAGNETOSPHERE</span><span class="lyr-chevron">▾</span></div>
@@ -3002,6 +3144,7 @@ import { WeatherForecastFeed }   from './js/weather-forecast-feed.js';
 import { ForecastRegistry, PersistenceForecaster, CHANNEL_NAMES, FORECAST_HORIZONS_H } from './js/weather-forecast.js';
 import { WeatherForecastValidator } from './js/weather-forecast-validation.js';
 import { mountModelsPanel } from './js/models-panel.js';
+import { ProbabilityPicker } from './js/probability-picker.js';
 import { PrecipClimatology }        from './js/precip-climatology.js';
 import { PrecipBiasTracker }        from './js/precip-bias-tracker.js';
 import { NasaPrecipExtractor }      from './js/nasa-precip-extractor.js';
@@ -9837,6 +9980,49 @@ document.querySelectorAll('.lyr-section[data-lyr-section]').forEach(sec => {
     // it), mount immediately. Otherwise wait for the first click.
     if (!section.classList.contains('collapsed')) mountOnce();
 
+    const hdr = section.querySelector('.lyr-section-hdr');
+    if (hdr) {
+        hdr.addEventListener('click', () => {
+            if (!section.classList.contains('collapsed')) mountOnce();
+        });
+    }
+})();
+
+// ── Probability Picker: lazy-mount on first expand ──
+// Same pattern as the models panel above. The picker also starts an
+// AnonymousSessionTimer on mount, so deferring until first expand
+// means the 5-minute free trial doesn't tick against users who never
+// see the panel. Surfaces _userLat / _userLon (the pinned-location
+// globals) so "Where" is auto-resolved without a second control.
+(function mountProbabilityPicker() {
+    const host    = document.getElementById('probability-picker-host');
+    const section = document.querySelector('[data-lyr-section="probability-picker"]');
+    if (!host || !section) return;
+
+    let picker = null;
+    function mountOnce() {
+        if (picker) return;
+        picker = new ProbabilityPicker({
+            host,
+            getLatLon: () => (_userLat != null && _userLon != null)
+                ? { lat: _userLat, lon: _userLon }
+                : null,
+            isSignedIn: () => {
+                try { return !!auth?.isSignedIn?.(); } catch { return false; }
+            },
+            onSignInPrompt: () => {
+                window.location.href = '/signin?next=' +
+                    encodeURIComponent(window.location.pathname);
+            },
+        });
+        picker.mount();
+        // If the user signs in mid-session (auth event), unfreeze the
+        // picker without a page reload. auth.js dispatches 'pp-auth-change'
+        // via window; if that event isn't wired we still survive because
+        // refreshSignIn() is a safe no-op.
+        window.addEventListener('pp-auth-change', () => picker.refreshSignIn());
+    }
+    if (!section.classList.contains('collapsed')) mountOnce();
     const hdr = section.querySelector('.lyr-section-hdr');
     if (hdr) {
         hdr.addEventListener('click', () => {
