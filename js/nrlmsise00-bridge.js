@@ -39,6 +39,11 @@ import {
     getApArrayWithProvenance,
     isLoaded as isApHistoryLoaded,
 } from './ap-history.js';
+// Phase D: every "now" default reads from the shared TimeBus, so
+// the density model + ap-array assembler + provenance helpers all
+// retime automatically when the operator scrubs. Explicit Date /
+// nowMs args still win, used by backtests for historical replay.
+import { getTimeBus } from './upper-atmosphere-time-bus.js';
 
 // Kick the F10.7 history fetch at module-load. The endpoint is edge-
 // cached at 1 hour, so this is one cheap warm-up roundtrip per page;
@@ -127,10 +132,10 @@ const _AP_LAGS_HR = [0, 0, 3, 6, 9, 22.5, 46.5];
  *
  * @param {Array<{simTimeMs, ap}>} history     past realtime ticks
  * @param {number} currentAp                  fallback when history empty
- * @param {number} [nowMs=Date.now()]         "now" for lag computation
+ * @param {number} [nowMs=bus.getSimTime()]   "now" for lag computation
  * @returns {Float64Array}                     7-element array, NRLMSISE-00-ready
  */
-export function buildApHistory(history, currentAp, nowMs = Date.now()) {
+export function buildApHistory(history, currentAp, nowMs = getTimeBus().getSimTime()) {
     // 1. Real SWPC series.
     if (isApHistoryLoaded()) {
         const real = getRealApArray(nowMs);
@@ -192,7 +197,7 @@ export function buildApHistory(history, currentAp, nowMs = Date.now()) {
  * @returns {number}               F10.7 average for the requested date
  */
 export function computeF107A(history, currentF107, forDate) {
-    const dateMs = forDate instanceof Date ? forDate.getTime() : Date.now();
+    const dateMs = forDate instanceof Date ? forDate.getTime() : getTimeBus().getSimTime();
 
     // 1. Real SWPC daily series (preferred).
     if (isF107HistoryLoaded()) {
@@ -222,7 +227,7 @@ export function computeF107A(history, currentF107, forDate) {
  * fast solar climbs, 'ring-buffer' is the in-page proxy.
  */
 export function f107AProvenance(history, forDate) {
-    const dateMs = forDate instanceof Date ? forDate.getTime() : Date.now();
+    const dateMs = forDate instanceof Date ? forDate.getTime() : getTimeBus().getSimTime();
     if (isF107HistoryLoaded()) {
         const p = getF107AWithProvenance(dateMs);
         if (p && Number.isFinite(p.value)) return p;
@@ -246,7 +251,7 @@ export function f107AProvenance(history, forDate) {
  *   kind = 'unavailable'               — neither real nor ring-buffer data
  */
 export function apArrayProvenance(history, forDate) {
-    const dateMs = forDate instanceof Date ? forDate.getTime() : Date.now();
+    const dateMs = forDate instanceof Date ? forDate.getTime() : getTimeBus().getSimTime();
     if (isApHistoryLoaded()) {
         const p = getApArrayWithProvenance(dateMs);
         if (p?.value) return p;
@@ -279,7 +284,7 @@ export function apArrayProvenance(history, forDate) {
  * @param {number} [opts.nPoints=200]
  * @param {number} [opts.latDeg=0]      sub-satellite latitude (sun-relative diurnal effects)
  * @param {number} [opts.lonDeg=0]
- * @param {Date}   [opts.nowDate=new Date()]
+ * @param {Date}   [opts.nowDate=new Date(bus.getSimTime())]
  */
 export function sampleProfileMSIS({
     f107Sfu = 150,
@@ -292,7 +297,7 @@ export function sampleProfileMSIS({
     nPoints = 200,
     latDeg = 0,
     lonDeg = 0,
-    nowDate = new Date(),
+    nowDate = new Date(getTimeBus().getSimTime()),
 } = {}) {
     if (!isMsisReady()) return null;
 
@@ -405,7 +410,7 @@ export function sampleProfileMSIS({
 export function densityPointMSIS({
     altitudeKm,
     f107Sfu = 150, f107a, ap = 15, apHistory, history,
-    latDeg = 0, lonDeg = 0, nowDate = new Date(),
+    latDeg = 0, lonDeg = 0, nowDate = new Date(getTimeBus().getSimTime()),
 }) {
     if (!isMsisReady()) return null;
     const f107A  = Number.isFinite(f107a) ? f107a : computeF107A(history, f107Sfu);

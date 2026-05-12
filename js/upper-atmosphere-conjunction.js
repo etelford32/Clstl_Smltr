@@ -58,6 +58,11 @@
  */
 
 import { buildTimeGrid, SGP4_COL } from './upper-atmosphere-trajectory-analysis.js';
+// Phase D: default "now" reads from the shared TimeBus so the
+// pairwise screener uses sim-time. Scrub backward → the screener
+// scans the horizon FROM that past moment, surfacing the
+// conjunction set that was relevant at the simulated time.
+import { getTimeBus } from './upper-atmosphere-time-bus.js';
 
 const SGP4_STRIDE = 13;
 const MU_KM3_S2   = 398600.4418;
@@ -233,7 +238,9 @@ export async function screenFleet(results, wasmModule, opts = {}) {
     const cfg = { ...DEFAULTS, ...opts };
     if (!Array.isArray(results) || results.length < 2 || !wasmModule) return [];
 
-    const nowDate = opts.nowDate || new Date();
+    // Phase D: bus-aware default. Explicit opts.nowDate still wins so
+    // callers can request a specific moment (e.g. unit tests).
+    const nowDate = opts.nowDate || new Date(getTimeBus().getSimTime());
     const assets = results.filter(r =>
         r?.status === 'ready' &&
         r?.live?.altKm > 0 &&
