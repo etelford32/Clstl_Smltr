@@ -266,6 +266,10 @@ export class FleetPanel {
                 <button type="button" id="ua-fleet-clear-btn"
                         class="ua-fleet-btn ua-fleet-btn--danger">Clear all</button>
             </div>
+            <!-- Fleet-wide conjunction screen. Sits between the toolbar and
+                 the per-asset card list so the operator sees pair-level
+                 risk first, then drills into individual assets. -->
+            <div id="ua-fleet-conj" class="ua-fleet-conj"></div>
             <div id="ua-fleet-cards" class="ua-fleet-cards"></div>
         `;
 
@@ -287,9 +291,36 @@ export class FleetPanel {
 
         // Cache references for the render loop.
         this._cardsHost = this.host.querySelector('#ua-fleet-cards');
+        this._conjHost  = this.host.querySelector('#ua-fleet-conj');
         this._countEl   = this.host.querySelector('#ua-fleet-count');
         this._statusEl  = this.host.querySelector('#ua-fleet-add-status');
         this._modelStateEl = this.host.querySelector('#ua-fleet-model-state');
+
+        // Conjunction-panel event delegation:
+        //   • [data-conj-jump-to] on a row → scroll-and-flash that asset's card
+        //   • [data-conj-threshold] on a chip → switch screening threshold
+        // Both invalidate the analyzer cache so the next paint reflects
+        // the new config; the threshold change also triggers a recompute
+        // immediately rather than waiting for the next realtime tick.
+        this._conjHost.addEventListener('click', (e) => {
+            const jump = e.target.closest?.('[data-conj-jump-to]');
+            if (jump) {
+                this._jumpAndFlash(jump.dataset.conjJumpTo, jump.dataset.conjJumpPair);
+                return;
+            }
+            const thresh = e.target.closest?.('[data-conj-threshold]');
+            if (thresh) {
+                const km = parseFloat(thresh.dataset.conjThreshold);
+                if (Number.isFinite(km) && km > 0) {
+                    this.analyzer.setConjunctionThreshold(km);
+                    // Screening sphere always ≥ threshold; lift it
+                    // proportionally so the candidate set stays sane.
+                    this.analyzer.setConjunctionScreening(Math.max(km * 2, 50));
+                    this.analyzer.invalidate();
+                    this._scheduleRecompute(0);
+                }
+            }
+        });
 
         // Model toggle: NRLMSISE-00 (vendored Brodowski C port via WASM)
         // ↔ MSIS-lite (the original Jacchia-style JS surrogate). Resets
@@ -489,11 +520,139 @@ export class FleetPanel {
                     No tracked assets. Add a NORAD ID, paste a TLE, or
                     bulk-import a constellation above.
                 </div>`;
+            // Conjunction panel only makes sense with ≥ 2 assets; hide
+            // when the fleet is empty/singleton.
+            this._renderConjunctionPanel([]);
             return;
         }
         // Sort by severity DESC for ops-grade triage.
         const sorted = rankBySeverity(results);
         this._cardsHost.innerHTML = sorted.map(r => this._renderCard(r)).join('');
+        // Render the fleet-wide conjunction summary from the analyzer's
+        // last screening pass. Per-asset CONJ badges in each card still
+        // show that asset's worst partner; this panel surfaces the
+        // GLOBAL top-K so a high-P pair between two off-screen assets
+        // doesn't get buried.
+        this._renderConjunctionPanel(this.analyzer.lastConjunctions || []);
+    }
+
+    // ── Fleet-wide conjunction panel ───────────────────────────────────────
+    //
+    // Renders top-K (default 5) conjunction events globally sorted by
+    // P(conj) DESC, then by TCA ASC. Each row shows both partners, the
+    // probability badge, time to closest approach, nominal min distance,
+    // and (when MC bands were available) the relative along-track σ at
+    // TCA that drove the probability.
+    //
+    // The header surfaces the current screening configuration so the
+    // operator knows what they're reading; the threshold chips
+    // (5/25/50 km) let them retune without leaving the panel.
+
+    _renderConjunctionPanel(events) {
+        if (!this._conjHost) return;
+        const nAssets = this._results.length;
+        if (nAssets < 2) {
+            this._conjHost.innerHTML = '';
+            return;
+        }
+        const threshold = this.analyzer.getConjunctionThreshold?.() ?? 25;
+        const rho       = this.analyzer.getConjunctionCorrelation?.() ?? 0.8;
+        const topK = events.slice(0, 5);
+        const presets = [5, 25, 50];
+
+        const header = `
+            <div class="ua-fleet-conj-head">
+                <span class="ua-fleet-conj-title">Pairwise conjunction screen</span>
+                <span class="ua-fleet-conj-sub">
+                    ${events.length} event${events.length === 1 ? '' : 's'}
+                    within ${threshold} km · ρ=${rho.toFixed(1)}
+                </span>
+                <span class="ua-fleet-conj-thresh">
+                    ${presets.map(km => `
+                        <button type="button" data-conj-threshold="${km}"
+                                class="ua-fleet-conj-chip${km === threshold ? ' is-active' : ''}"
+                                title="Set screening threshold to ${km} km${km === 5 ? ' (CARA hard-alert volume)' : km === 25 ? ' (CARA screening volume)' : ' (loose screening)'}">
+                            ${km} km
+                        </button>`).join('')}
+                </span>
+            </div>`;
+
+        if (topK.length === 0) {
+            this._conjHost.innerHTML = `
+                ${header}
+                <div class="ua-fleet-conj-empty">
+                    No close approaches within ${threshold} km over the next
+                    ${this.analyzer._opts?.horizonHr ?? 72} h.
+                </div>`;
+            return;
+        }
+
+        const rows = topK.map(e => {
+            const pct = Math.round((e.pConj ?? 0) * 100);
+            const sevClass = pct >= 50 ? 'is-high' : pct >= 10 ? 'is-med' : 'is-low';
+            const sigmaTxt = Number.isFinite(e.sigmaKm)
+                ? `σ ${e.sigmaKm.toFixed(1)} km`
+                : 'σ —';
+            const hrs = e.tcaMin / 60;
+            const hrsTxt = hrs < 1 ? `${(hrs * 60).toFixed(0)} min`
+                         : hrs < 24 ? `${hrs.toFixed(1)} h`
+                         : `${(hrs / 24).toFixed(1)} d`;
+            // Each row is clickable on both ends — clicking either name
+            // jumps to that asset's card. The pair is also passed so the
+            // flash animation can highlight both at once.
+            const tooltip = `Nominal min ${e.dMinKm.toFixed(1)} km at +${hrsTxt}.\n`
+                + (Number.isFinite(e.sigmaKm)
+                    ? `MC σ_rel = ${e.sigmaKm.toFixed(1)} km along-track at TCA\n`
+                      + `(σ_A=${e.sigmaA?.toFixed(1) ?? '—'} km, σ_B=${e.sigmaB?.toFixed(1) ?? '—'} km, ρ=${e.correlation.toFixed(1)}).\n`
+                      + `P(d ≤ ${e.thresholdKm} km) = ${pct}%`
+                    : 'MC bands unavailable — probability from nominal distance only.');
+            return `
+                <div class="ua-fleet-conj-row ${sevClass}" title="${tooltip}">
+                    <span class="ua-fleet-conj-prob">${pct}%</span>
+                    <span class="ua-fleet-conj-pair">
+                        <button type="button" class="ua-fleet-conj-name"
+                                data-conj-jump-to="${e.idA}" data-conj-jump-pair="${e.idB}">
+                            ${_esc(e.nameA)}
+                        </button>
+                        <span class="ua-fleet-conj-sep">↔</span>
+                        <button type="button" class="ua-fleet-conj-name"
+                                data-conj-jump-to="${e.idB}" data-conj-jump-pair="${e.idA}">
+                            ${_esc(e.nameB)}
+                        </button>
+                    </span>
+                    <span class="ua-fleet-conj-tca">+${hrsTxt}</span>
+                    <span class="ua-fleet-conj-d">${e.dMinKm.toFixed(1)} km</span>
+                    <span class="ua-fleet-conj-sig">${sigmaTxt}</span>
+                </div>`;
+        }).join('');
+
+        this._conjHost.innerHTML = `${header}<div class="ua-fleet-conj-rows">${rows}</div>`;
+    }
+
+    /**
+     * Scroll the target asset's card into view and briefly flash it (and
+     * its partner if given) so the operator can spot the conjunction
+     * geometry on the per-card chart. The flash class is removed after
+     * the CSS animation completes — no JS animation loop needed.
+     */
+    _jumpAndFlash(idA, idB) {
+        if (!this._cardsHost) return;
+        const cardA = this._cardsHost.querySelector(`[data-asset-id="${CSS.escape(idA)}"]`);
+        const cardB = idB ? this._cardsHost.querySelector(`[data-asset-id="${CSS.escape(idB)}"]`) : null;
+        if (cardA) {
+            cardA.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        for (const el of [cardA, cardB]) {
+            if (!el) continue;
+            el.classList.remove('ua-fleet-card--flash');
+            // Force a reflow so the same flash can re-trigger on rapid
+            // back-and-forth clicks. Reading offsetHeight commits the
+            // class removal before we re-add it.
+            // eslint-disable-next-line no-unused-expressions
+            void el.offsetHeight;
+            el.classList.add('ua-fleet-card--flash');
+            setTimeout(() => el.classList.remove('ua-fleet-card--flash'), 1500);
+        }
     }
 
     _renderCard(r) {

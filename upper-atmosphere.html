@@ -649,6 +649,112 @@ input[type=range]::-moz-range-thumb {
     min-width:30px; text-align:right; font-variant-numeric:tabular-nums;
 }
 
+/* ─── Fleet-wide conjunction screen (Phase 12) ──────────── */
+.ua-fleet-conj {
+    display:flex; flex-direction:column; gap:6px;
+    padding:8px 0;
+    border-bottom:1px solid rgba(0,200,200,.10);
+    margin-bottom:4px;
+}
+.ua-fleet-conj:empty { display:none; }
+.ua-fleet-conj-head {
+    display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+}
+.ua-fleet-conj-title {
+    color:#fff; font-weight:700; font-size:.7rem;
+    letter-spacing:.04em; text-transform:uppercase;
+}
+.ua-fleet-conj-sub {
+    color:#9ab; font-size:.62rem;
+    font-variant-numeric:tabular-nums;
+}
+.ua-fleet-conj-thresh {
+    display:inline-flex; gap:3px; margin-left:auto;
+}
+.ua-fleet-conj-chip {
+    background:rgba(8,4,22,.55); color:#9ab;
+    border:1px solid rgba(0,200,200,.18);
+    border-radius:5px;
+    padding:2px 7px;
+    font-size:.6rem; font-weight:600;
+    cursor:pointer;
+    font-variant-numeric:tabular-nums;
+    transition:color .12s, border-color .12s, background .12s;
+}
+.ua-fleet-conj-chip:hover { color:#cde; border-color:rgba(0,200,200,.45); }
+.ua-fleet-conj-chip.is-active {
+    color:#0ff; border-color:rgba(0,200,200,.6);
+    background:rgba(0,200,200,.10);
+}
+.ua-fleet-conj-empty {
+    color:#9ab; font-size:.65rem; line-height:1.5;
+    padding:8px 10px;
+    border:1px dashed rgba(0,200,200,.15);
+    border-radius:6px;
+    text-align:center;
+}
+.ua-fleet-conj-rows {
+    display:flex; flex-direction:column; gap:2px;
+}
+.ua-fleet-conj-row {
+    display:grid;
+    grid-template-columns: 38px 1fr auto auto auto;
+    gap:8px; align-items:center;
+    padding:4px 8px;
+    border-radius:6px;
+    border:1px solid rgba(0,200,200,.15);
+    background:rgba(10,6,28,.45);
+    font-size:.66rem;
+    font-variant-numeric:tabular-nums;
+    cursor:help;
+}
+.ua-fleet-conj-row.is-high {
+    border-left:3px solid rgba(255,80,96,.85);
+    box-shadow:0 0 8px rgba(255,80,96,.12);
+}
+.ua-fleet-conj-row.is-med  { border-left:3px solid rgba(255,170,32,.7); }
+.ua-fleet-conj-row.is-low  { border-left:3px solid rgba(64,224,144,.55); }
+.ua-fleet-conj-prob {
+    color:#fff; font-weight:700; text-align:right;
+    font-size:.72rem;
+}
+.ua-fleet-conj-row.is-high .ua-fleet-conj-prob { color:#ff5060; }
+.ua-fleet-conj-row.is-med  .ua-fleet-conj-prob { color:#ffaa20; }
+.ua-fleet-conj-row.is-low  .ua-fleet-conj-prob { color:#40e090; }
+.ua-fleet-conj-pair {
+    display:flex; align-items:center; gap:4px;
+    min-width:0;
+    color:#dde;
+}
+.ua-fleet-conj-name {
+    background:none; border:none; padding:0;
+    color:#cde; font: inherit; cursor:pointer;
+    text-decoration:none;
+    font-variant-numeric:tabular-nums;
+    max-width:120px; overflow:hidden; text-overflow:ellipsis;
+    white-space:nowrap;
+}
+.ua-fleet-conj-name:hover {
+    color:#0ff; text-decoration:underline;
+}
+.ua-fleet-conj-sep { color:#789; }
+.ua-fleet-conj-tca, .ua-fleet-conj-d, .ua-fleet-conj-sig {
+    color:#9ab; text-align:right;
+    min-width:48px;
+}
+
+/* Flash animation triggered when a conjunction row is clicked. Tints
+ * the card briefly + adds a glow so the operator's eye lands on the
+ * right place after the smooth-scroll completes. */
+@keyframes ua-fleet-card-flash {
+    0%   { box-shadow: 0 0 0  rgba(0,200,200,0);   background:rgba(10,6,28,.55); }
+    20%  { box-shadow: 0 0 18px rgba(0,200,200,.55); background:rgba(0,200,200,.10); }
+    100% { box-shadow: 0 0 0  rgba(0,200,200,0);   background:rgba(10,6,28,.55); }
+}
+.ua-fleet-card--flash {
+    animation: ua-fleet-card-flash 1.4s ease-out;
+}
+
 /* ─── Satellite drag analysis ──────────────────────────── */
 .ua-tle-pill {
     display:inline-flex; align-items:center; gap:5px;
