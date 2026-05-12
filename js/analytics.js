@@ -56,6 +56,25 @@ function _makeSessionId() {
     return 'sess_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
 }
 
+// Lazy import of telemetry to forward analytics failures upstream.
+// Cached so we never re-import on retry storms. Loading telemetry has
+// no side effects beyond its own auto-init, which is idempotent.
+let _telemetryPromise = null;
+function _getTelemetry() {
+    if (!_telemetryPromise) {
+        _telemetryPromise = import('./telemetry.js')
+            .then(m => m.telemetry)
+            .catch(() => null);
+    }
+    return _telemetryPromise;
+}
+async function _reportAnalyticsFailure(source, err) {
+    try {
+        const t = await _getTelemetry();
+        if (t) t.recordError(err, { source: `analytics.${source}` });
+    } catch { /* never throw from a reporter */ }
+}
+
 // ── GA4 Loader ───────────────────────────────────────────────────────────────
 
 function _initGA() {
@@ -99,6 +118,7 @@ async function _flush() {
     } catch (err) {
         _buffer.unshift(...batch);
         console.warn('[Analytics] Flush failed:', err.message);
+        _reportAnalyticsFailure('flush', err);
     }
 }
 
@@ -116,6 +136,7 @@ async function _heartbeat() {
         });
     } catch (err) {
         console.warn('[Analytics] Heartbeat failed:', err.message);
+        _reportAnalyticsFailure('heartbeat', err);
     }
 }
 

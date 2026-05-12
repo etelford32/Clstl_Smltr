@@ -40,6 +40,7 @@
  *  413: { error: "payload_too_large" }
  *  429: { error: "rate_limited" }
  *  501: { error: "not_configured" }
+ *  502: { error: "rpc_failed" | "rpc_unreachable", detail, status? }
  */
 
 export const config = { runtime: 'edge' };
@@ -175,13 +176,22 @@ export default async function handler(req) {
             signal: AbortSignal.timeout(5000),
         });
         if (!res.ok) {
-            console.warn('[telemetry] RPC failed:', res.status);
-            return jsonResp({ ok: true, accepted: 0 }, 202, origin);
+            // Surface the RPC failure instead of pretending success. The
+            // browser uses sendBeacon and ignores the body, but Vercel
+            // logs + manual `curl` checks need the real status so a
+            // missing table / dropped grant / RLS regression is visible.
+            const detail = (await res.text().catch(() => '')).slice(0, 512);
+            console.error('[telemetry] RPC failed:', res.status, detail);
+            return jsonResp(
+                { error: 'rpc_failed', status: res.status, detail },
+                502,
+                origin
+            );
         }
         const inserted = await res.json();
         return jsonResp({ ok: true, accepted: Number(inserted) || 0 }, 202, origin);
     } catch (e) {
-        console.warn('[telemetry] RPC error:', e.message);
-        return jsonResp({ ok: true, accepted: 0 }, 202, origin);
+        console.error('[telemetry] RPC error:', e.message);
+        return jsonResp({ error: 'rpc_unreachable', detail: e.message }, 502, origin);
     }
 }
