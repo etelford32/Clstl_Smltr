@@ -254,6 +254,89 @@ table.ad-bodies th {
     margin-right:6px;
 }
 #ad-legend strong { color:#fff; }
+
+/* ─── Initial-conditions panel ─────────────────────────────── */
+.ad-group {
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:10px;
+    margin-bottom:10px;
+    background:rgba(255,255,255,.02);
+}
+.ad-group-header {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:8px 12px;
+    cursor:pointer;
+    font-size:.74rem; font-weight:800; color:#ffd8a8;
+    text-transform:uppercase; letter-spacing:.08em;
+    user-select:none;
+}
+.ad-group-header::after {
+    content:"▾"; color:#998878; transition:transform .15s;
+}
+.ad-group.collapsed .ad-group-header::after { transform:rotate(-90deg); }
+.ad-group-body { padding:6px 12px 12px; }
+.ad-group.collapsed .ad-group-body { display:none; }
+
+.ad-slider {
+    margin-bottom:10px;
+}
+.ad-slider-row {
+    display:flex; align-items:baseline; justify-content:space-between;
+    font-family:monospace; font-size:.72rem;
+    margin-bottom:3px;
+}
+.ad-slider-name { color:#cbb; }
+.ad-slider-val  { color:#fff; font-weight:700; }
+.ad-slider-unit { color:#998878; font-size:.62rem; margin-left:4px; }
+.ad-slider input[type=range] {
+    width:100%; -webkit-appearance:none; appearance:none;
+    height:3px; background:rgba(255,255,255,.10); border-radius:2px;
+    outline:none; cursor:pointer; margin-top:2px;
+}
+.ad-slider input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance:none; appearance:none;
+    width:13px; height:13px; border-radius:50%;
+    background:#ffaa5a; cursor:pointer;
+    box-shadow:0 0 6px rgba(255,170,90,.55);
+}
+.ad-slider input[type=range]::-moz-range-thumb {
+    width:13px; height:13px; border-radius:50%; border:none;
+    background:#ffaa5a; cursor:pointer;
+}
+.ad-slider-hint {
+    font-size:.6rem; color:#998878; line-height:1.5; margin-top:3px; font-style:italic;
+}
+
+.ad-toggle-row {
+    display:flex; align-items:center; gap:10px;
+    padding:6px 0;
+    cursor:pointer;
+    font-size:.74rem;
+}
+.ad-toggle-row input[type=checkbox] {
+    appearance:none; -webkit-appearance:none;
+    width:28px; height:16px; border-radius:999px;
+    background:rgba(255,255,255,.10);
+    border:1px solid rgba(255,255,255,.18);
+    cursor:pointer; position:relative;
+    transition:background .15s, border-color .15s;
+    flex-shrink:0;
+}
+.ad-toggle-row input[type=checkbox]::after {
+    content:""; position:absolute;
+    width:10px; height:10px; border-radius:50%;
+    background:#fff; top:2px; left:2px;
+    transition:transform .15s;
+}
+.ad-toggle-row input[type=checkbox]:checked {
+    background:rgba(255,170,90,.45);
+    border-color:#ffaa5a;
+}
+.ad-toggle-row input[type=checkbox]:checked::after {
+    transform:translateX(12px);
+}
+.ad-toggle-name { color:#cbb; font-weight:600; }
+.ad-toggle-hint { font-size:.6rem; color:#998878; line-height:1.4; margin-left:38px; margin-top:-3px; padding-bottom:4px; }
 </style>
 <link rel="stylesheet" href="js/nav-styles.css">
 <script type="importmap">
@@ -314,6 +397,124 @@ table.ad-bodies th {
                 <div class="ad-tab-name">Solar System</div>
                 <div class="ad-tab-sub">Hayashi MMSN · Mercury → Saturn · Theia → Moon</div>
             </button>
+        </div>
+
+        <div class="ad-label">Initial conditions</div>
+        <p style="font-size:.66rem; color:#998878; line-height:1.5; margin-bottom:8px;">
+            Tinker live. Changing a slider rebuilds the disc &amp; embryos from scratch.
+        </p>
+
+        <!-- Star group -->
+        <div class="ad-group" id="ad-grp-star">
+            <div class="ad-group-header">Star</div>
+            <div class="ad-group-body">
+                <div class="ad-slider" data-key="star.Mstar_solar" data-min="0.3" data-max="1.5" data-step="0.05" data-unit="M☉" data-decimals="2">
+                    <div class="ad-slider-row"><span class="ad-slider-name">Stellar mass M★</span><span class="ad-slider-val"></span></div>
+                    <input type="range">
+                    <div class="ad-slider-hint">Drives L★(t), T_eff, snow line, HZ. F-star at 1.4 ↔ M-dwarf at 0.3.</div>
+                </div>
+                <div class="ad-slider" data-key="star.ageStartYr" data-min="0" data-max="1000000" data-step="10000" data-unit="yr" data-decimals="0">
+                    <div class="ad-slider-row"><span class="ad-slider-name">Start age</span><span class="ad-slider-val"></span></div>
+                    <input type="range">
+                    <div class="ad-slider-hint">Pre-MS star is brighter &amp; cooler — start at 0 for the hottest L★.</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Disc group -->
+        <div class="ad-group" id="ad-grp-disc">
+            <div class="ad-group-header">Protoplanetary disc</div>
+            <div class="ad-group-body">
+                <div class="ad-slider" data-key="disc.Mdisc_Msun" data-log="1" data-min="-3" data-max="-1" data-step="0.05" data-unit="M☉" data-decimals="4">
+                    <div class="ad-slider-row"><span class="ad-slider-name">Disc mass M_disc</span><span class="ad-slider-val"></span></div>
+                    <input type="range">
+                    <div class="ad-slider-hint">Class II median ≈ 0.02 M☉ (Andrews 2020 ALMA). Log scale.</div>
+                </div>
+                <div class="ad-slider" data-key="disc.alpha" data-log="1" data-min="-5" data-max="-1" data-step="0.05" data-unit="" data-decimals="6">
+                    <div class="ad-slider-row"><span class="ad-slider-name">α viscosity</span><span class="ad-slider-val"></span></div>
+                    <input type="range">
+                    <div class="ad-slider-hint">Shakura-Sunyaev α. AGE-PRO 2025: 10⁻⁴–10⁻³. Higher = shorter-lived disc.</div>
+                </div>
+                <div class="ad-slider" data-key="disc.rOutAU" data-min="20" data-max="200" data-step="1" data-unit="AU" data-decimals="0">
+                    <div class="ad-slider-row"><span class="ad-slider-name">Outer radius r_out</span><span class="ad-slider-val"></span></div>
+                    <input type="range">
+                    <div class="ad-slider-hint">Mass reservoir extent. Real Class II discs span 30–300 AU.</div>
+                </div>
+                <div class="ad-slider" data-key="disc.dustGasRatio" data-min="0.001" data-max="0.05" data-step="0.001" data-unit="" data-decimals="3">
+                    <div class="ad-slider-row"><span class="ad-slider-name">Dust : gas ratio</span><span class="ad-slider-val"></span></div>
+                    <input type="range">
+                    <div class="ad-slider-hint">Metallicity proxy. 0.01 = solar. Higher = faster pebble accretion.</div>
+                </div>
+                <div class="ad-slider" data-key="disc.n" data-min="40" data-max="150" data-step="2" data-unit="cells" data-decimals="0">
+                    <div class="ad-slider-row"><span class="ad-slider-name">Radial cells</span><span class="ad-slider-val"></span></div>
+                    <input type="range">
+                    <div class="ad-slider-hint">LBP grid resolution. More cells = sharper snow line but slower step.</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Embryos group -->
+        <div class="ad-group collapsed" id="ad-grp-embryos">
+            <div class="ad-group-header">Embryos</div>
+            <div class="ad-group-body">
+                <label class="ad-toggle-row" data-key="embryos.includeTheia">
+                    <input type="checkbox" checked />
+                    <span class="ad-toggle-name">Include Theia (Mars-class impactor at 1 AU)</span>
+                </label>
+                <div class="ad-toggle-hint">Off → no giant impact → no Moon spawn.</div>
+                <div class="ad-slider" data-key="embryos.seedMultiplier" data-min="0.1" data-max="5" data-step="0.1" data-unit="×" data-decimals="2">
+                    <div class="ad-slider-row"><span class="ad-slider-name">Seed mass scale</span><span class="ad-slider-val"></span></div>
+                    <input type="range">
+                    <div class="ad-slider-hint">Scales every embryo's seed mass. Larger ⇒ less pebble growth needed.</div>
+                </div>
+                <div class="ad-slider" data-key="embryos.jitterAU" data-min="0" data-max="0.3" data-step="0.01" data-unit="AU" data-decimals="2">
+                    <div class="ad-slider-row"><span class="ad-slider-name">Position jitter ±</span><span class="ad-slider-val"></span></div>
+                    <input type="range">
+                    <div class="ad-slider-hint">Random offset in starting a. Tests resonance / chaos sensitivity.</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Physics toggles -->
+        <div class="ad-group collapsed" id="ad-grp-physics">
+            <div class="ad-group-header">Physics prescriptions</div>
+            <div class="ad-group-body">
+                <label class="ad-toggle-row" data-key="physics.pebbleAccretion">
+                    <input type="checkbox" checked />
+                    <span class="ad-toggle-name">Pebble accretion</span>
+                </label>
+                <div class="ad-toggle-hint">Lambrechts &amp; Johansen (2012) Hill-radius capture.</div>
+
+                <label class="ad-toggle-row" data-key="physics.typeI">
+                    <input type="checkbox" checked />
+                    <span class="ad-toggle-name">Type I migration</span>
+                </label>
+                <div class="ad-toggle-hint">Paardekooper, Baruteau &amp; Kley (2010) torque (prescription, not resolved wakes).</div>
+
+                <label class="ad-toggle-row" data-key="physics.typeII">
+                    <input type="checkbox" checked />
+                    <span class="ad-toggle-name">Type II migration</span>
+                </label>
+                <div class="ad-toggle-hint">Crida+ (2006) gap-opening criterion → viscous drift.</div>
+
+                <label class="ad-toggle-row" data-key="physics.photoEvap">
+                    <input type="checkbox" checked />
+                    <span class="ad-toggle-name">Photo-evaporation</span>
+                </label>
+                <div class="ad-toggle-hint">Owen+ (2012) XUV wind sink at r &gt; 1 AU. Disperses the disc.</div>
+
+                <label class="ad-toggle-row" data-key="physics.collisions">
+                    <input type="checkbox" checked />
+                    <span class="ad-toggle-name">Embryo collisions</span>
+                </label>
+                <div class="ad-toggle-hint">Off → embryos pass through each other; no Moon forms.</div>
+            </div>
+        </div>
+
+        <div class="ad-controls" style="margin-bottom:10px;">
+            <div class="ad-btn-row">
+                <button type="button" class="ad-btn" id="ad-cfg-restore">Reset to Solar System defaults</button>
+            </div>
         </div>
 
         <div class="ad-label">Showcase</div>
@@ -409,7 +610,7 @@ table.ad-bodies th {
 </div>
 
 <script type="module">
-import { boot } from './js/accretion-disc/disc.js?v=20260512a';
+import { boot } from './js/accretion-disc/disc.js?v=20260512b';
 
 const canvas = document.getElementById('ad-canvas');
 const ui = {
@@ -428,7 +629,86 @@ const ui = {
     warpSlider: document.getElementById('ad-warp'),
     warpVal:    document.getElementById('ad-warp-val'),
 };
-boot({ canvas, ui, scenarioId: 'solar-system' });
+const api = boot({ canvas, ui, scenarioId: 'solar-system' });
+
+// ── Initial-conditions panel binder ─────────────────────────────────────────
+// Each slider's <div class="ad-slider"> carries a data-key path like
+// "disc.alpha" plus min/max/step (linear) or a data-log flag making the slider
+// values exponents of 10. Toggles use data-key on the wrapping <label>.
+function getByPath(obj, path) {
+    return path.split('.').reduce((o, k) => o && o[k], obj);
+}
+function setByPath(obj, path, val) {
+    const parts = path.split('.');
+    const last = parts.pop();
+    const ref = parts.reduce((o, k) => (o[k] = o[k] || {}, o[k]), obj);
+    ref[last] = val;
+}
+
+function formatValue(v, el) {
+    const dec = +(el.dataset.decimals ?? 2);
+    const log = el.dataset.log === '1';
+    if (log && Math.abs(v) < 1e-3) return v.toExponential(2);
+    if (Math.abs(v) >= 1e6 || (Math.abs(v) < 1e-3 && v !== 0)) return v.toExponential(2);
+    return v.toFixed(dec);
+}
+
+function refreshSliderUI(div) {
+    const cfg = api.getConfig();
+    const path = div.dataset.key;
+    const cur = getByPath(cfg, path);
+    const log = div.dataset.log === '1';
+    const min = +div.dataset.min, max = +div.dataset.max, step = +div.dataset.step;
+    const input = div.querySelector('input[type=range]');
+    input.min = min; input.max = max; input.step = step;
+    input.value = log ? Math.log10(cur) : cur;
+    div.querySelector('.ad-slider-val').innerHTML =
+        formatValue(cur, div) + '<span class="ad-slider-unit">' + (div.dataset.unit || '') + '</span>';
+}
+
+function bindSlider(div) {
+    const path = div.dataset.key;
+    const log = div.dataset.log === '1';
+    const input = div.querySelector('input[type=range]');
+    refreshSliderUI(div);
+    input.addEventListener('input', () => {
+        const raw = +input.value;
+        const val = log ? Math.pow(10, raw) : raw;
+        const patch = {}; setByPath(patch, path, val);
+        api.applyConfig(patch);
+        div.querySelector('.ad-slider-val').innerHTML =
+            formatValue(val, div) + '<span class="ad-slider-unit">' + (div.dataset.unit || '') + '</span>';
+    });
+}
+
+function bindToggle(label) {
+    const path = label.dataset.key;
+    const input = label.querySelector('input[type=checkbox]');
+    const cfg = api.getConfig();
+    input.checked = !!getByPath(cfg, path);
+    input.addEventListener('change', () => {
+        const patch = {}; setByPath(patch, path, input.checked);
+        api.applyConfig(patch);
+    });
+}
+
+document.querySelectorAll('.ad-slider').forEach(bindSlider);
+document.querySelectorAll('.ad-toggle-row').forEach(bindToggle);
+
+// Collapsible group headers
+document.querySelectorAll('.ad-group-header').forEach(h => {
+    h.addEventListener('click', () => h.parentElement.classList.toggle('collapsed'));
+});
+
+// "Restore defaults" button
+document.getElementById('ad-cfg-restore').addEventListener('click', () => {
+    api.applyConfig(api.getDefaults());
+    document.querySelectorAll('.ad-slider').forEach(refreshSliderUI);
+    document.querySelectorAll('.ad-toggle-row').forEach(label => {
+        const path = label.dataset.key;
+        label.querySelector('input[type=checkbox]').checked = !!getByPath(api.getConfig(), path);
+    });
+});
 </script>
 
 </body>

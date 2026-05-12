@@ -34,8 +34,13 @@ const TWO_PI = Math.PI * 2;
 // ─────────────────────────────────────────────────────────────────────────────
 // Module-scope state (single sim per page).
 // ─────────────────────────────────────────────────────────────────────────────
+//
+// `cfg` holds the live, user-tunable configuration. It seeds from the chosen
+// scenario but every value can be overridden at runtime via applyConfig().
+// Slider UIs should always treat `sim.cfg` as the single source of truth.
 const sim = {
     scenario: null,
+    cfg: null,                // live overrides — see defaultCfg()
     disc:     null,
     bodies:   [],
     moonletDisc: null,        // post-Theia circumterrestrial debris disc
@@ -59,6 +64,36 @@ const sim = {
     lastTickMs: performance.now(),
 };
 
+// Live-tunable configuration — sliders write to this object via applyConfig().
+function defaultCfg(scenario) {
+    return {
+        star: {
+            Mstar_solar: scenario.star.Mstar_solar,
+            ageStartYr:  scenario.star.ageStartYr,
+        },
+        disc: {
+            Mdisc_Msun: scenario.disc.Mdisc_Msun,
+            alpha:      scenario.disc.alpha,
+            rInAU:      scenario.disc.rInAU,
+            rOutAU:     scenario.disc.rOutAU,
+            n:          scenario.disc.n,
+            dustGasRatio: 0.01,    // global multiplier on dust:gas (Hayashi baseline = 0.01)
+        },
+        embryos: {
+            includeTheia: true,
+            seedMultiplier: 1.0,   // scales all embryo seed masses
+            jitterAU:       0.0,   // randomize initial a by ±jitter
+        },
+        physics: {
+            pebbleAccretion: true,
+            typeI:           true,
+            typeII:          true,
+            photoEvap:       true,
+            collisions:      true,
+        },
+    };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Public API
 // ─────────────────────────────────────────────────────────────────────────────
@@ -69,7 +104,32 @@ export function boot({ canvas, ui, scenarioId = 'solar-system' }) {
     initThree();
     bindUI();
     loop();
-    return sim;
+    return {
+        sim,
+        applyConfig,
+        getConfig: () => sim.cfg,
+        getDefaults: () => defaultCfg(sim.scenario),
+    };
+}
+
+// Called from the slider panel. Accepts a partial (deep) override.
+// Triggers a live rebuild of the disc + embryos so the scene reflects the
+// new initial conditions without dropping the Three.js renderer.
+export function applyConfig(partial) {
+    if (!sim.scenario) return;
+    deepMerge(sim.cfg, partial || {});
+    rebuildWorld();
+}
+
+function deepMerge(target, source) {
+    for (const k of Object.keys(source)) {
+        if (source[k] !== null && typeof source[k] === 'object' && !Array.isArray(source[k])) {
+            if (!target[k]) target[k] = {};
+            deepMerge(target[k], source[k]);
+        } else {
+            target[k] = source[k];
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -80,21 +140,86 @@ function initScenario(id) {
     if (!sc) throw new Error('unknown scenario ' + id);
 
     sim.scenario = sc;
-    sim.ageYr = sc.star.ageStartYr;
+    sim.cfg = defaultCfg(sc);
+    sim.ageYr = sim.cfg.star.ageStartYr;
     sim.impactDone = false;
     sim.moonSpawned = false;
 
-    const trk = stellarTrack(sc.star.Mstar_solar, sim.ageYr);
+    rebuildDiscAndBodies();
+}
+
+// Rebuild the LBP disc grid + embryo list using sim.cfg as truth.
+// Does NOT touch the Three.js scene.
+function rebuildDiscAndBodies() {
+    const cfg = sim.cfg;
+    const Mstar = cfg.star.Mstar_solar * M_SUN;
+    const trk = stellarTrack(cfg.star.Mstar_solar, sim.ageYr);
     sim.disc = makeDiscGrid({
-        Mstar: sc.star.Mstar,
-        Mdisc: sc.disc.Mdisc_Msun * M_SUN,
-        rInAU: sc.disc.rInAU,
-        rOutAU: sc.disc.rOutAU,
-        n: sc.disc.n,
-        alpha: sc.disc.alpha,
+        Mstar,
+        Mdisc: cfg.disc.Mdisc_Msun * M_SUN,
+        rInAU: cfg.disc.rInAU,
+        rOutAU: cfg.disc.rOutAU,
+        n: cfg.disc.n,
+        alpha: cfg.disc.alpha,
         Lstar: trk.L_W,
     });
-    sim.bodies = buildInitialBodies(sc);
+    // Apply the dust:gas ratio override (Hayashi makeDiscGrid uses fixed 0.01 / 0.0033).
+    const ratio = cfg.disc.dustGasRatio;
+    for (let i = 0; i < sim.disc.n; i++) {
+        const inside = sim.disc.T[i] > 170;
+        sim.disc.sigmaDust[i] = sim.disc.sigma[i] * ratio * (inside ? 0.33 : 1.4);
+    }
+
+    // Build embryos honoring cfg overrides.
+    sim.bodies = buildInitialBodies(sim.scenario);
+    const out = [];
+    for (const b of sim.bodies) {
+        if (b.flagTheia && !cfg.embryos.includeTheia) continue;
+        b.m *= cfg.embryos.seedMultiplier;
+        const jitter = cfg.embryos.jitterAU * (Math.random() * 2 - 1) * AU;
+        if (jitter !== 0) {
+            const a = Math.hypot(b.x, b.y);
+            const aNew = Math.max(0.05 * AU, a + jitter);
+            const scale = aNew / a;
+            b.x *= scale; b.y *= scale;
+            // Re-circularise at the new a (cfg.star.Mstar_solar).
+            const v = Math.sqrt(G * Mstar / aNew);
+            const ang = Math.atan2(b.y, b.x);
+            b.vx = -v * Math.sin(ang); b.vy = v * Math.cos(ang);
+        }
+        out.push(b);
+    }
+    sim.bodies = out;
+}
+
+// Full live reset: rebuild physics + swap out the visual meshes.
+function rebuildWorld() {
+    // Tear down old meshes/trails.
+    for (const m of sim.bodyMeshes) sim.scene.remove(m);
+    for (const t of sim.bodyTrails) sim.scene.remove(t.line);
+    sim.bodyMeshes.length = 0;
+    sim.bodyTrails.length = 0;
+    sim.ageYr = sim.cfg.star.ageStartYr;
+    sim.impactDone = false;
+    sim.moonSpawned = false;
+    rebuildDiscAndBodies();
+
+    // Disc mesh geometry depends on n — regenerate if the cell count changed.
+    if (sim.discMesh) {
+        const segCount = sim.discMesh.userData.segments;
+        const expectedVerts = sim.disc.n * (segCount + 1);
+        if (sim.discMesh.geometry.attributes.position.count !== expectedVerts) {
+            sim.scene.remove(sim.discMesh);
+            sim.discMesh.geometry.dispose();
+            sim.discMesh.material.dispose();
+            sim.discMesh = makeDiscMesh();
+            sim.scene.add(sim.discMesh);
+        }
+    }
+    for (const b of sim.bodies) {
+        const m = makeBodyMesh(b); sim.bodyMeshes.push(m); sim.scene.add(m);
+        const t = makeTrail(b.color); sim.bodyTrails.push(t); sim.scene.add(t.line);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -284,7 +409,7 @@ function updateRing(ring, rScene) {
 }
 
 function refreshHzRings() {
-    const trk = stellarTrack(sim.scenario.star.Mstar_solar, sim.ageYr);
+    const trk = stellarTrack(sim.cfg.star.Mstar_solar, sim.ageYr);
     const hz  = hzBoundaries(trk.L_W, trk.Teff);
     const inner = hz.runawayGreen * SCENE_PER_AU;
     const outer = hz.maxGreen     * SCENE_PER_AU;
@@ -359,58 +484,61 @@ function pushTrail(t, x, z) {
 function tick(dtRealS) {
     if (sim.paused) return;
 
+    const Mstar = sim.cfg.star.Mstar_solar * M_SUN;
     const sec = sim.timeWarpYrPerS * dtRealS * YEAR;   // simulated seconds advanced this frame
     let remaining = sec;
     // Subcycle: bounded by disc CFL plus an integrator safety on orbits (~ 0.1 of inner orbital period).
-    const Pinner = TWO_PI * Math.sqrt(Math.pow(0.3 * AU, 3) / (G * sim.scenario.star.Mstar));
+    const Pinner = TWO_PI * Math.sqrt(Math.pow(0.3 * AU, 3) / (G * Mstar));
+    const phys = sim.cfg.physics;
     while (remaining > 0) {
-        const dtDisc = discDt(sim.disc);
+        const dtDisc = phys.photoEvap ? discDt(sim.disc) : discDt(sim.disc);
         const dtOrb  = 0.05 * Pinner;
         const dt     = Math.min(remaining, dtDisc, dtOrb, 1e5 * YEAR);
 
-        stepDisc(sim.disc, dt);
+        stepDisc(sim.disc, dt, { photoEvap: phys.photoEvap });
         dustDriftStep(sim.disc, dt);
 
         // Pebble accretion onto each embryo
-        for (const b of sim.bodies) {
-            if (!b.alive) continue;
-            const a = semiMajorAxis(b, sim.scenario.star.Mstar);
-            if (!isFinite(a) || a < 0.05 * AU) continue;
-            b.a = a;
-            const Miso = pebbleIsolationMass(a, sim.disc);
-            if (b.m < Miso) {
-                const dm = pebbleAccretionRate(b, sim.disc) * dt;
-                b.m += dm;
-                // Remove dust mass from the disc local cell
-                const iIdx = nearestIndex(sim.disc.r, a);
-                const drCell = (iIdx > 0)
-                    ? sim.disc.r[iIdx] - sim.disc.r[iIdx-1]
-                    : sim.disc.r[1] - sim.disc.r[0];
-                const annulusA = 2 * Math.PI * sim.disc.r[iIdx] * drCell;
-                sim.disc.sigmaDust[iIdx] = Math.max(0,
-                    sim.disc.sigmaDust[iIdx] - dm / annulusA);
-                updateRadius(b);
+        if (phys.pebbleAccretion) {
+            for (const b of sim.bodies) {
+                if (!b.alive) continue;
+                const a = semiMajorAxis(b, Mstar);
+                if (!isFinite(a) || a < 0.05 * AU) continue;
+                b.a = a;
+                const Miso = pebbleIsolationMass(a, sim.disc);
+                if (b.m < Miso) {
+                    const dm = pebbleAccretionRate(b, sim.disc) * dt;
+                    b.m += dm;
+                    const iIdx = nearestIndex(sim.disc.r, a);
+                    const drCell = (iIdx > 0)
+                        ? sim.disc.r[iIdx] - sim.disc.r[iIdx-1]
+                        : sim.disc.r[1] - sim.disc.r[0];
+                    const annulusA = 2 * Math.PI * sim.disc.r[iIdx] * drCell;
+                    sim.disc.sigmaDust[iIdx] = Math.max(0,
+                        sim.disc.sigmaDust[iIdx] - dm / annulusA);
+                    updateRadius(b);
+                }
             }
         }
 
         // N-body step (with gas-disc still present)
-        leapfrog2D(sim.bodies.filter(b => b.alive), sim.scenario.star.Mstar, dt);
+        leapfrog2D(sim.bodies.filter(b => b.alive), Mstar, dt);
 
-        // Migration: Type I or Type II
-        for (const b of sim.bodies) {
-            if (!b.alive) continue;
-            if (sim.disc.sigma.every(s => s < 0.1)) continue;       // disc dissipated
-            let daDt;
-            if (opensGap(b, sim.disc)) {
-                daDt = typeIIMigrationRate(b, sim.disc);
-            } else {
-                daDt = typeIMigrationRate(b, sim.disc);
+        // Migration: Type I or Type II — each gated independently.
+        const discAlive = sim.disc.sigma.some(s => s > 1);
+        if (discAlive) {
+            for (const b of sim.bodies) {
+                if (!b.alive) continue;
+                const inGap = opensGap(b, sim.disc);
+                let daDt = 0;
+                if (inGap && phys.typeII) daDt = typeIIMigrationRate(b, sim.disc);
+                else if (!inGap && phys.typeI) daDt = typeIMigrationRate(b, sim.disc);
+                if (daDt !== 0) applyMigration(b, Mstar, daDt, dt);
             }
-            applyMigration(b, sim.scenario.star.Mstar, daDt, dt);
         }
 
-        // Collision detection (Hill-radius proxy).
-        handleCollisions();
+        // Collision detection.
+        if (phys.collisions) handleCollisions();
 
         // Theia giant impact - check whether to spawn the Moon.
         if (!sim.impactDone) checkTheiaImpact();
@@ -421,7 +549,7 @@ function tick(dtRealS) {
     }
 
     // Refresh stellar luminosity + T_eff -> disc T -> HZ rings.
-    const trk = stellarTrack(sim.scenario.star.Mstar_solar, sim.ageYr);
+    const trk = stellarTrack(sim.cfg.star.Mstar_solar, sim.ageYr);
     sim.disc.Lstar = trk.L_W;
     refreshHzRings();
 
@@ -566,14 +694,14 @@ function updateHud(trk) {
         const rows = ['<tr><th>Body</th><th>a</th><th>M</th><th>state</th></tr>'];
         for (const b of sim.bodies) {
             if (!b.alive && !b.absorbed_by) continue;
-            const a = b.alive ? semiMajorAxis(b, sim.scenario.star.Mstar) / AU : '—';
+            const a = b.alive ? semiMajorAxis(b, (sim.cfg.star.Mstar_solar * M_SUN)) / AU : '—';
             const aStr = (typeof a === 'number' && isFinite(a)) ? a.toFixed(2) + ' AU' : '—';
             const mStr = (b.m / M_EARTH).toFixed(3) + ' M⊕';
             let state;
             if (!b.alive) state = '<span style="color:#998">→ ' + (b.absorbed_by || 'lost') + '</span>';
             else if (b.role === 'moon') state = '<span style="color:#cba9ff">spawned</span>';
             else {
-                const hab = planetHabitability({ a: b.alive ? semiMajorAxis(b, sim.scenario.star.Mstar) : b.a_init, m: b.m, R_m: b.R_m, albedo: 0.3, p_surf_bar: 1, mix: { N2: 0.78, CO2: 0.0004, H2O: 0.01 } },
+                const hab = planetHabitability({ a: b.alive ? semiMajorAxis(b, (sim.cfg.star.Mstar_solar * M_SUN)) : b.a_init, m: b.m, R_m: b.R_m, albedo: 0.3, p_surf_bar: 1, mix: { N2: 0.78, CO2: 0.0004, H2O: 0.01 } },
                     sim.scenario.star, sim.ageYr);
                 state = hab.classification;
             }
