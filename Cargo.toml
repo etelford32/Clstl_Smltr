@@ -1,0 +1,18 @@
+[workspace]
+members  = ["crates/disc-hydro"]
+resolver = "2"
+
+# `rust/` holds the standalone Bevy `star_renderer` crate, which has its own
+# Cargo.lock, its own .cargo/config.toml, and its own CI workflow
+# (.github/workflows/build-wasm.yml). It is deliberately NOT part of this
+# workspace — excluding it here stops Cargo from auto-merging it when it
+# walks up looking for a workspace root.
+exclude  = ["rust"]
+
+[profile.release]
+opt-level        = 3
+lto              = "fat"
+codegen-units    = 1
+panic            = "abort"
+strip            = "symbols"
+overflow-checks  = false
