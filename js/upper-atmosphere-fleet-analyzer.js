@@ -74,6 +74,7 @@ import {
     percentileBands, reentryProbability, decaySpikeProbability,
     medianTrajectoryFromMc,
 } from './upper-atmosphere-mc.js';
+import { screenFleet } from './upper-atmosphere-conjunction.js';
 import * as _wasmGlue from './sgp4-wasm/sgp4_wasm.js';
 import { sampleProfile } from './upper-atmosphere-engine.js';
 import { sampleProfileMSIS, isMsisReady, ensureMsisReady }
@@ -386,10 +387,52 @@ export class FleetAnalyzer {
         return result;
     }
 
-    /** Run analyze() for many assets. Returns Promise<Array<result>>. */
+    /**
+     * Run analyze() for many assets, then run the pairwise conjunction
+     * screener as a post-pass. Returns Promise<Array<result>> for
+     * backwards compatibility — conjunction events are attached to each
+     * result under `result.conjunctions` (only the events the asset
+     * appears in) and to the analyzer instance as `lastConjunctions` for
+     * the panel to consume globally.
+     */
     async analyzeMany(assets, liveState, projHorizonHr) {
-        return Promise.all(assets.map(a => this.analyze(a, liveState, projHorizonHr)));
+        const results = await Promise.all(assets.map(a =>
+            this.analyze(a, liveState, projHorizonHr)));
+        try {
+            const events = await screenFleet(results, _wasmGlue, {
+                horizonHr:   this._opts.horizonHr,
+                sampleMin:   this._opts.sampleMin,
+                thresholdKm: this._conjThreshold,
+                screeningKm: this._conjScreening,
+                correlation: this._conjCorrelation,
+            });
+            // Index events by asset id so cards can render their nearest-
+            // partner badge in O(1) at render time.
+            const byId = new Map();
+            for (const e of events) {
+                if (!byId.has(e.idA)) byId.set(e.idA, []);
+                if (!byId.has(e.idB)) byId.set(e.idB, []);
+                byId.get(e.idA).push(e);
+                byId.get(e.idB).push(e);
+            }
+            for (const r of results) {
+                r.conjunctions = byId.get(r.id) || [];
+            }
+            this.lastConjunctions = events;
+        } catch (err) {
+            console.warn('[FleetAnalyzer] conjunction screen failed:', err?.message || err);
+            this.lastConjunctions = [];
+        }
+        return results;
     }
+
+    /** Conjunction-screening thresholds — wired through to screenFleet. */
+    setConjunctionThreshold(km)   { this._conjThreshold = Math.max(0.1, km); }
+    setConjunctionScreening(km)   { this._conjScreening = Math.max(this._conjThreshold ?? 25, km); }
+    setConjunctionCorrelation(ρ)  { this._conjCorrelation = Math.max(-1, Math.min(1, ρ)); }
+    getConjunctionThreshold()     { return this._conjThreshold ?? 25; }
+    getConjunctionScreening()     { return this._conjScreening ?? 50; }
+    getConjunctionCorrelation()   { return this._conjCorrelation ?? 0.8; }
 
     _cachePut(key, value) {
         // Trivial LRU: drop the oldest insert when capped.
@@ -485,7 +528,7 @@ export class FleetAnalyzer {
             risk.pDecaySpike = mc.pDecaySpike;
         }
 
-        return {
+        const out = {
             id:        asset.id,
             name:      asset.name,
             noradId:   asset.noradId,
@@ -544,6 +587,15 @@ export class FleetAnalyzer {
                 })(),
             } : null,
         };
+        // Non-enumerable handle to the asset's TLE — the conjunction
+        // screener re-propagates from this in the post-pass. Putting it
+        // on the result (rather than fetching from the fleet store)
+        // keeps the screener pure and avoids a circular dep.
+        Object.defineProperty(out, '_tle', {
+            value: [asset.line1, asset.line2],
+            enumerable: false, writable: false,
+        });
+        return out;
     }
 
     _computeRisk(decay) {

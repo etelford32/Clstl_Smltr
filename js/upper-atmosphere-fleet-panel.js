@@ -554,6 +554,31 @@ export class FleetPanel {
                 title="Monte Carlo: P(|da/dt| ≥ ${DECAY_SPIKE_KM_DAY} km/day at some point within horizon)">P(spike) ${pct}%</span>`);
         }
 
+        // Conjunction badge — pick the asset's highest-P(conj) partner.
+        // Only shown when P > 1% OR nominal min distance < threshold,
+        // matching the operator's "worth a look" threshold from the
+        // catalog screening conventions (CARA uses 1 km hard alert and
+        // 25 km screening volume; we use 25 km as the badge trigger).
+        const conj = Array.isArray(r.conjunctions) && r.conjunctions.length
+            ? r.conjunctions[0] : null;
+        if (conj && ((conj.pConj ?? 0) > 0.01 || conj.dMinKm <= conj.thresholdKm * 1.5)) {
+            const partner = conj.idA === r.id ? conj.nameB : conj.nameA;
+            const partnerId = conj.idA === r.id ? conj.idB : conj.idA;
+            const pct = (conj.pConj * 100).toFixed(0);
+            const hrs = (conj.tcaMin / 60).toFixed(1);
+            const cls = conj.pConj >= 0.5 ? 'ua-fleet-badge--high'
+                      : conj.pConj >= 0.1 ? 'ua-fleet-badge--med'
+                      : 'ua-fleet-badge--low';
+            const sigmaTxt = Number.isFinite(conj.sigmaKm)
+                ? `\nMC σ_rel = ${conj.sigmaKm.toFixed(1)} km along-track at TCA (ρ=${conj.correlation.toFixed(1)} atmospheric correlation)`
+                : '\nMC bands unavailable — probability from nominal min distance only';
+            const title = `Closest approach with ${_esc(partner)}:`
+                + `\nNominal min ${conj.dMinKm.toFixed(1)} km at +${hrs}h`
+                + `\nP(d ≤ ${conj.thresholdKm} km) ≈ ${pct}%${sigmaTxt}`;
+            badges.push(`<span class="ua-fleet-badge ${cls}" data-conj-partner="${partnerId}"
+                              title="${title}">CONJ ${_esc(partner)} ${pct}%</span>`);
+        }
+
         // SVG mini-chart: nowcast vs forecast altitude over the horizon.
         const chart = _miniDecayChart(decay);
 
