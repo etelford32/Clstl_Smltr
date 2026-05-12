@@ -56,6 +56,7 @@ import { LayerParticleSystem } from './upper-atmosphere-particles.js';
 import { layerPhysics, pointPhysics } from './upper-atmosphere-physics.js';
 import { LayerVectorField } from './upper-atmosphere-vector-fields.js';
 import { DragForecastOverlay } from './drag-forecast-overlay.js';
+import { FleetRibbons } from './upper-atmosphere-fleet-ribbons.js';
 import { MagneticCascade } from './upper-atmosphere-magnetic-cascade.js';
 import { SubstormController } from './upper-atmosphere-substorm.js';
 import { CameraController } from './upper-atmosphere-camera.js';
@@ -538,6 +539,7 @@ export class AtmosphereGlobe {
         this._buildLayerParticles();
         this._buildLayerVectorFields();
         this._buildDragForecastOverlay();
+        this._buildFleetRibbons();
         this._buildSatelliteRings();
         // Pairwise conjunction screener — depends on the probe lookup
         // tables built inside _buildSatelliteRings, so we set up after.
@@ -666,6 +668,24 @@ export class AtmosphereGlobe {
             this._dragHistory[layer.id] = { lastRho: NaN, lastT: NaN, dRhoDt: 0 };
         }
         this._dragHistorySmoothing = 0.30;   // EMA factor for dρ/dt
+    }
+
+    // ── Fleet ribbons ───────────────────────────────────────────────────
+    // Renders the top-N highest-severity tracked assets (managed by the
+    // FleetPanel) as colour-coded great-circle orbit lines in the scene.
+    // Built up-front; populated when FleetPanel calls setFleetRibbons().
+
+    _buildFleetRibbons() {
+        this._fleetRibbons = new FleetRibbons(this._scene);
+    }
+
+    /**
+     * Push the current top-N fleet results into the in-scene ribbon
+     * renderer. Pass an empty array to clear. Called by FleetPanel's
+     * onSeverityChange callback every analyzer pass.
+     */
+    setFleetRibbons(top) {
+        this._fleetRibbons?.setRibbons?.(Array.isArray(top) ? top : []);
     }
 
     setDragForecastVisible(v) {

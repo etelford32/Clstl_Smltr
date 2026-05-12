@@ -458,6 +458,755 @@ input[type=range]::-moz-range-thumb {
     margin-top:4px;
 }
 
+/* ─── Fleet panel (operator-grade per-asset drag forecast) ── */
+.ua-fleet-chip {
+    display:inline-block;
+    font-size:.55rem; letter-spacing:.08em; text-transform:uppercase;
+    padding:2px 6px; border-radius:6px;
+    color:#ffaa20; background:rgba(255,170,32,.10);
+    border:1px solid rgba(255,170,32,.35);
+}
+.ua-fleet-panel {
+    display:flex; flex-direction:column; gap:8px;
+    font-size:.75rem;
+}
+.ua-fleet-add { display:flex; flex-direction:column; gap:6px; }
+.ua-fleet-add-row {
+    display:flex; gap:6px; align-items:center;
+}
+.ua-fleet-input {
+    flex:1; min-width:0;
+    background:rgba(8,4,22,.7); color:#cde;
+    border:1px solid rgba(0,200,200,.25);
+    border-radius:6px;
+    padding:6px 8px;
+    font-size:.75rem;
+    font-family:inherit;
+}
+.ua-fleet-input--n { flex:0 0 60px; text-align:center; }
+.ua-fleet-input:focus { outline:none; border-color:rgba(0,200,200,.6); }
+.ua-fleet-btn {
+    background:rgba(10,6,28,.7); color:#bcd;
+    border:1px solid rgba(0,200,200,.25);
+    border-radius:6px;
+    padding:6px 12px;
+    font-size:.7rem; font-weight:600;
+    cursor:pointer;
+    transition:background .15s, border-color .15s, color .15s;
+}
+.ua-fleet-btn:hover { color:#fff; border-color:rgba(0,200,200,.5); }
+.ua-fleet-btn--primary {
+    background:rgba(0,200,200,.18); color:#0ff;
+    border-color:rgba(0,200,200,.55);
+}
+.ua-fleet-btn--primary:hover { background:rgba(0,200,200,.28); }
+.ua-fleet-btn--danger { color:#ff8090; border-color:rgba(255,80,96,.30); }
+.ua-fleet-btn--danger:hover { color:#ff5060; border-color:rgba(255,80,96,.55); }
+.ua-fleet-paste summary {
+    cursor:pointer; color:#9ab; font-size:.7rem;
+    padding:4px 0; user-select:none;
+}
+.ua-fleet-paste textarea {
+    width:100%; min-height:90px; resize:vertical;
+    background:rgba(8,4,22,.7); color:#cde;
+    border:1px solid rgba(0,200,200,.25);
+    border-radius:6px;
+    padding:6px 8px;
+    font-family:ui-monospace, monospace;
+    font-size:.7rem;
+    margin:6px 0;
+}
+.ua-fleet-status {
+    font-size:.7rem; color:#9ab;
+    min-height:1.2em;
+}
+.ua-fleet-status[data-kind="ok"]    { color:#40e090; }
+.ua-fleet-status[data-kind="error"] { color:#ff8090; }
+.ua-fleet-toolbar {
+    display:flex; justify-content:space-between; align-items:center;
+    gap:8px; flex-wrap:wrap;
+    padding:6px 0;
+    border-top:1px solid rgba(0,200,200,.10);
+    border-bottom:1px solid rgba(0,200,200,.10);
+}
+.ua-fleet-model-toggle {
+    display:inline-flex; align-items:center; gap:6px;
+    font-size:.6rem; letter-spacing:.04em;
+    padding:2px 6px; border-radius:6px;
+    background:rgba(8,4,22,.55);
+    border:1px solid rgba(0,200,200,.18);
+}
+.ua-fleet-model-opt {
+    display:inline-flex; align-items:center; gap:3px;
+    color:#9ab; cursor:pointer; user-select:none;
+}
+.ua-fleet-model-opt input { margin:0; transform:scale(.85); accent-color:#0ff; }
+.ua-fleet-model-opt input:checked + span { color:#0ff; font-weight:700; }
+.ua-fleet-model-state {
+    font-size:.55rem; letter-spacing:.06em;
+    padding:1px 5px; border-radius:4px;
+}
+.ua-fleet-model-state[data-kind="ok"]      { color:#40e090; background:rgba(64,224,144,.10); }
+.ua-fleet-model-state[data-kind="pending"] { color:#ffaa20; background:rgba(255,170,32,.10); }
+.ua-fleet-model-state[data-kind="info"]    { color:#9ab;    background:rgba(150,170,200,.10); }
+.ua-fleet-cards { display:flex; flex-direction:column; gap:8px; }
+.ua-fleet-empty {
+    padding:16px; text-align:center;
+    color:#9ab; font-size:.72rem; line-height:1.5;
+    border:1px dashed rgba(0,200,200,.20);
+    border-radius:8px;
+}
+.ua-fleet-card {
+    display:flex; flex-direction:column; gap:6px;
+    padding:8px 10px;
+    background:rgba(10,6,28,.55);
+    border:1px solid rgba(0,200,200,.18);
+    border-radius:8px;
+    border-left:3px solid rgba(64,224,144,.55);
+}
+.ua-fleet-card--sev-low  { border-left-color:rgba(64,224,144,.55); }
+.ua-fleet-card--sev-med  { border-left-color:rgba(255,170,32,.65); }
+.ua-fleet-card--sev-high { border-left-color:rgba(255,80,96,.85); box-shadow:0 0 12px rgba(255,80,96,.18); }
+.ua-fleet-card--unready  { border-left-color:rgba(150,170,200,.45); }
+.ua-fleet-card-head {
+    display:flex; align-items:center; gap:6px;
+    flex-wrap:wrap;
+}
+.ua-fleet-name { color:#fff; font-weight:600; font-size:.78rem; flex:1 1 auto; min-width:0; }
+.ua-fleet-norad {
+    font-size:.62rem; color:#9ab; font-variant-numeric:tabular-nums;
+}
+.ua-fleet-pill {
+    font-size:.55rem; letter-spacing:.06em; font-weight:700;
+    padding:1px 6px; border-radius:6px;
+}
+.ua-fleet-pill--ok       { color:#0ff;    background:rgba(0,200,200,.18);  border:1px solid rgba(0,200,200,.45); }
+.ua-fleet-pill--pending  { color:#ffaa20; background:rgba(255,170,32,.12); border:1px solid rgba(255,170,32,.35); }
+.ua-fleet-pill--err      { color:#ff5060; background:rgba(255,80,96,.12);  border:1px solid rgba(255,80,96,.35); }
+.ua-fleet-iconbtn {
+    background:transparent; color:#9ab;
+    border:1px solid rgba(150,170,200,.25);
+    border-radius:5px;
+    width:22px; height:22px; line-height:1;
+    font-size:.85rem; cursor:pointer; padding:0;
+}
+.ua-fleet-iconbtn:hover { color:#fff; border-color:rgba(0,200,200,.55); }
+.ua-fleet-card-err { color:#ff8090; font-size:.68rem; padding:4px 0; }
+.ua-fleet-stats { font-size:.7rem; color:#dde; line-height:1.45; font-variant-numeric:tabular-nums; }
+.ua-fleet-stat-row { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ua-fleet-badges { display:flex; flex-wrap:wrap; gap:4px; }
+.ua-fleet-badge {
+    font-size:.6rem; font-weight:700; letter-spacing:.04em;
+    padding:2px 6px; border-radius:5px;
+}
+.ua-fleet-badge--high { color:#ff5060; background:rgba(255,80,96,.14);  border:1px solid rgba(255,80,96,.45); }
+.ua-fleet-badge--med  { color:#ffaa20; background:rgba(255,170,32,.14); border:1px solid rgba(255,170,32,.45); }
+.ua-fleet-badge--low  { color:#40e090; background:rgba(64,224,144,.12); border:1px solid rgba(64,224,144,.40); }
+.ua-fleet-chart { height:56px; }
+.ua-fleet-svg { width:100%; height:100%; }
+.ua-fleet-chart-key {
+    display:flex; gap:10px; font-size:.55rem; color:#9ab;
+}
+.ua-fleet-key-now  { color:#0ff; }
+.ua-fleet-key-fwd  { color:#ffaa20; }
+.ua-fleet-key-band { color:rgba(255,170,32,.65); }
+.ua-fleet-skill {
+    margin-left:auto;
+    font-size:.55rem; font-weight:700; letter-spacing:.04em;
+    padding:1px 6px; border-radius:5px;
+    font-variant-numeric:tabular-nums;
+    cursor:help;
+}
+.ua-fleet-skill--high { color:#40e090; background:rgba(64,224,144,.12); border:1px solid rgba(64,224,144,.40); }
+.ua-fleet-skill--med  { color:#ffaa20; background:rgba(255,170,32,.12); border:1px solid rgba(255,170,32,.40); }
+.ua-fleet-skill--low  { color:#ff8090; background:rgba(255,80,96,.12);  border:1px solid rgba(255,80,96,.40); }
+.ua-fleet-bc-editor summary {
+    font-size:.6rem; color:#9ab;
+    cursor:pointer; user-select:none; padding:3px 0;
+    font-variant-numeric:tabular-nums;
+}
+.ua-fleet-bc-editor summary:hover { color:#cde; }
+.ua-fleet-bc-editor[open] summary { color:#0ff; }
+.ua-fleet-bc-row {
+    display:flex; gap:10px; align-items:center;
+    padding:4px 0;
+    font-size:.65rem; color:#9ab;
+}
+.ua-fleet-bc-row label {
+    display:flex; align-items:center; gap:5px;
+    flex:1; min-width:0;
+}
+.ua-fleet-bc-num {
+    width:80px; padding:2px 4px;
+    font-size:.65rem;
+}
+.ua-fleet-bc-sigma {
+    flex:1; min-width:0;
+    accent-color:#ffaa20;
+}
+.ua-fleet-bc-sigma-val {
+    font-size:.62rem; color:#ffaa20; font-weight:700;
+    min-width:30px; text-align:right; font-variant-numeric:tabular-nums;
+}
+
+/* ─── Per-asset backtest (Phase 13) ─────────────────────── */
+.ua-fleet-backtest summary {
+    font-size:.62rem; color:#9ab;
+    cursor:pointer; user-select:none; padding:3px 0;
+    list-style:none;
+    font-variant-numeric:tabular-nums;
+}
+.ua-fleet-backtest summary::-webkit-details-marker { display:none; }
+.ua-fleet-backtest summary:hover { color:#cde; }
+.ua-fleet-backtest[open] summary { color:#0ff; }
+.ua-fleet-backtest.is-ok > summary   { color:#40e090; }
+.ua-fleet-backtest.is-warn > summary { color:#ffaa20; }
+.ua-fleet-backtest-body {
+    padding:6px 0 2px;
+    display:flex; flex-direction:column; gap:6px;
+}
+.ua-fleet-backtest-tle {
+    width:100%; min-height:60px; resize:vertical;
+    background:rgba(8,4,22,.7); color:#cde;
+    border:1px solid rgba(0,200,200,.20);
+    border-radius:5px;
+    padding:5px 7px;
+    font-family:ui-monospace, monospace;
+    font-size:.62rem; line-height:1.3;
+}
+.ua-fleet-backtest-actions {
+    display:flex; align-items:center; gap:8px;
+}
+.ua-fleet-backtest-hint {
+    color:#789; font-size:.58rem; line-height:1.3;
+}
+.ua-fleet-backtest-result {
+    background:rgba(8,4,22,.45);
+    border:1px solid rgba(0,200,200,.15);
+    border-radius:5px;
+    padding:6px 8px;
+    display:flex; flex-direction:column; gap:4px;
+    font-size:.65rem;
+}
+.ua-fleet-backtest-warn {
+    color:#ffaa20; font-size:.6rem; font-weight:600;
+    padding-bottom:2px;
+}
+.ua-fleet-backtest-numbers {
+    display:flex; gap:10px; flex-wrap:wrap;
+    color:#dde;
+    font-variant-numeric:tabular-nums;
+}
+.ua-fleet-backtest-numbers b { color:#fff; }
+.ua-fleet-backtest-resid {
+    margin-left:auto;
+    color:#ffaa20; font-weight:700;
+}
+.ua-fleet-backtest-mcrow {
+    display:flex; gap:10px; align-items:center;
+    color:#9ab;
+    font-variant-numeric:tabular-nums;
+}
+.ua-fleet-backtest-verdict {
+    margin-left:auto;
+    padding:1px 6px; border-radius:4px;
+    font-size:.58rem; font-weight:700; letter-spacing:.04em;
+    text-transform:uppercase;
+}
+.ua-fleet-backtest-verdict--ok {
+    color:#40e090; background:rgba(64,224,144,.12);
+    border:1px solid rgba(64,224,144,.40);
+}
+.ua-fleet-backtest-verdict--warn {
+    color:#ffaa20; background:rgba(255,170,32,.12);
+    border:1px solid rgba(255,170,32,.40);
+}
+.ua-fleet-backtest-meta {
+    color:#789; font-size:.58rem;
+    font-variant-numeric:tabular-nums;
+}
+
+/* ─── Floating window + story-card (Phase 21) ──────────── */
+/* Reusable floating-window primitive: drag from title bar, minimize,
+ * close, position persisted per-id in localStorage. Pattern is
+ * available to any future floating UI (export, conjunction-pair
+ * detail, alerts-log) without subclassing. */
+.ua-fw {
+    background:rgba(10,6,28,.94);
+    backdrop-filter: blur(6px);
+    border:1px solid rgba(0,200,200,.30);
+    border-radius:8px;
+    box-shadow:0 8px 32px rgba(0,0,0,.55), 0 0 0 1px rgba(0,200,200,.05);
+    display:flex; flex-direction:column;
+    overflow:hidden;
+    color:#cde;
+    font-family:inherit;
+    /* When minimized we collapse the body away; the bar alone is ~30 px. */
+}
+.ua-fw--min { box-shadow:0 4px 14px rgba(0,0,0,.45); }
+.ua-fw-bar {
+    display:flex; align-items:center; gap:4px;
+    padding:5px 6px 5px 10px;
+    cursor:grab;
+    user-select:none;
+    background:linear-gradient(180deg, rgba(0,200,200,.10), rgba(0,200,200,.03));
+    border-bottom:1px solid rgba(0,200,200,.18);
+}
+.ua-fw-bar--dragging { cursor:grabbing; background:rgba(0,200,200,.18); }
+.ua-fw--min .ua-fw-bar { border-bottom:none; }
+.ua-fw-title {
+    flex:1 1 auto;
+    color:#fff; font-weight:700; font-size:.72rem;
+    letter-spacing:.04em;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.ua-fw-btn {
+    flex:0 0 auto;
+    width:22px; height:22px; padding:0;
+    background:transparent; color:#9ab;
+    border:1px solid rgba(150,170,200,.20);
+    border-radius:4px;
+    font-size:.85rem; line-height:1;
+    cursor:pointer;
+}
+.ua-fw-btn:hover { color:#0ff; border-color:rgba(0,200,200,.55); }
+.ua-fw-body {
+    flex:1 1 auto;
+    overflow:auto;
+    padding:0;
+}
+
+/* Clickable asset-name pseudo-link inside per-card chrome — looks
+ * like the original name span but gets a hover underline so the
+ * operator knows it's interactive. */
+.ua-fleet-name-btn {
+    background:none;
+    border:none;
+    padding:0;
+    color:#fff;
+    font: inherit;
+    font-weight:600;
+    font-size:.78rem;
+    cursor:pointer;
+    text-align:left;
+    flex:1 1 auto;
+    min-width:0;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.ua-fleet-name-btn:hover {
+    color:#0ff;
+    text-decoration:underline;
+    text-underline-offset:2px;
+}
+
+/* Story-card content layout. Each section is a tight block; the
+ * grid stacks them with consistent spacing. Body scrolls if total
+ * height exceeds the window. */
+.ua-storycard {
+    display:flex; flex-direction:column;
+    padding:10px 12px 14px;
+    font-size:.7rem;
+    line-height:1.45;
+}
+.ua-storycard-head {
+    display:flex; align-items:center; gap:6px; flex-wrap:wrap;
+    padding-bottom:8px;
+    border-bottom:1px solid rgba(0,200,200,.12);
+    margin-bottom:8px;
+}
+.ua-storycard-name {
+    color:#fff; font-weight:700; font-size:.95rem;
+}
+.ua-storycard-norad {
+    color:#9ab; font-size:.65rem; font-variant-numeric:tabular-nums;
+}
+.ua-storycard-grid {
+    display:flex; flex-direction:column; gap:10px;
+}
+.ua-storycard-sec h4 {
+    margin:0 0 4px;
+    font-size:.62rem;
+    text-transform:uppercase;
+    letter-spacing:.08em;
+    color:#9ab;
+    font-weight:700;
+}
+.ua-storycard-empty {
+    color:#789; font-size:.65rem; line-height:1.45;
+    padding:6px 8px; margin:0;
+    border:1px dashed rgba(0,200,200,.18);
+    border-radius:5px;
+}
+.ua-storycard-livegrid {
+    display:grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap:4px;
+    font-variant-numeric:tabular-nums;
+}
+.ua-storycard-livegrid > div {
+    background:rgba(8,4,22,.55);
+    border:1px solid rgba(0,200,200,.15);
+    border-radius:5px;
+    padding:4px 6px;
+    display:flex; flex-direction:column; gap:1px;
+}
+.ua-storycard-livegrid span { color:#789; font-size:.55rem; text-transform:uppercase; letter-spacing:.06em; }
+.ua-storycard-livegrid b    { color:#fff; font-size:.7rem; font-weight:700; }
+.ua-storycard-livefoot {
+    color:#9ab; font-size:.6rem;
+    padding:4px 2px 0;
+    font-variant-numeric:tabular-nums;
+}
+.ua-storycard-svg {
+    width:100%; max-width:100%;
+    background:rgba(8,4,22,.40);
+    border-radius:4px;
+    display:block;
+}
+.ua-storycard-svg--spark { background:rgba(8,4,22,.30); }
+.ua-storycard-axislabel {
+    fill:#789; font-size:8px; font-family:ui-monospace, monospace;
+}
+.ua-storycard-key {
+    display:flex; gap:10px; flex-wrap:wrap;
+    font-size:.55rem;
+    padding-top:3px;
+}
+.ua-storycard-key-sub {
+    margin-left:auto;
+    color:#789;
+    font-variant-numeric:tabular-nums;
+}
+.ua-storycard-skillfoot {
+    color:#9ab; font-size:.6rem;
+    padding-top:3px;
+    font-variant-numeric:tabular-nums;
+}
+.ua-storycard-conj-summary {
+    color:#9ab; font-size:.6rem;
+    padding-bottom:3px;
+    font-variant-numeric:tabular-nums;
+}
+.ua-storycard-conj-rows,
+.ua-storycard-anom-rows {
+    display:flex; flex-direction:column; gap:1px;
+}
+.ua-storycard-conj-row {
+    display:grid;
+    grid-template-columns: 38px 1fr auto;
+    gap:6px; align-items:center;
+    padding:3px 6px;
+    background:rgba(8,4,22,.35);
+    border-radius:4px;
+    font-size:.62rem;
+    font-variant-numeric:tabular-nums;
+}
+.ua-storycard-conj-row.is-past { opacity:.7; }
+.ua-storycard-conj-row.is-pending {
+    border-left:2px solid rgba(255,170,32,.55);
+}
+.ua-storycard-conj-prob { font-weight:700; text-align:right; }
+.ua-storycard-conj-prob.is-high { color:#ff5060; }
+.ua-storycard-conj-prob.is-med  { color:#ffaa20; }
+.ua-storycard-conj-prob.is-low  { color:#40e090; }
+.ua-storycard-conj-partner { color:#cde; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ua-storycard-conj-meta    { color:#9ab; text-align:right; }
+
+.ua-storycard-anom-row {
+    display:grid;
+    grid-template-columns: auto auto auto 1fr;
+    gap:6px; align-items:baseline;
+    padding:3px 6px;
+    background:rgba(8,4,22,.35);
+    border-left:2px solid rgba(255,80,96,.55);
+    border-radius:4px;
+    font-size:.62rem;
+    font-variant-numeric:tabular-nums;
+}
+.ua-storycard-anom-when  { color:#9ab; }
+.ua-storycard-anom-delta { color:#ff8090; font-weight:700; }
+.ua-storycard-anom-z     { color:#ffaa20; }
+.ua-storycard-anom-cause { color:#cde; text-align:right; }
+
+/* ─── Fleet-wide skill dashboard (Phase 14) ─────────────── */
+.ua-fleet-skill {
+    display:flex; flex-direction:column; gap:4px;
+    padding:8px 0;
+    border-bottom:1px solid rgba(0,200,200,.10);
+    margin-bottom:4px;
+}
+.ua-fleet-skill:empty { display:none; }
+.ua-fleet-skill-head {
+    display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+}
+.ua-fleet-skill-title {
+    color:#fff; font-weight:700; font-size:.7rem;
+    letter-spacing:.04em; text-transform:uppercase;
+}
+.ua-fleet-skill-sub {
+    color:#9ab; font-size:.62rem;
+    font-variant-numeric:tabular-nums;
+}
+.ua-fleet-skill-line {
+    color:#dde; font-size:.72rem;
+    font-variant-numeric:tabular-nums;
+}
+.ua-fleet-skill-frac {
+    color:#0ff; font-weight:700; font-size:.85rem;
+    margin-right:3px;
+}
+.ua-fleet-skill-head.is-high  .ua-fleet-skill-frac { color:#40e090; }
+.ua-fleet-skill-head.is-med   .ua-fleet-skill-frac { color:#ffaa20; }
+.ua-fleet-skill-head.is-low   .ua-fleet-skill-frac { color:#ff5060; }
+.ua-fleet-skill-head.is-empty .ua-fleet-skill-frac,
+.ua-fleet-skill-frac.is-empty { color:#789; }
+.ua-fleet-skill-meta {
+    margin-left:auto;
+    color:#789; font-size:.6rem;
+    font-variant-numeric:tabular-nums;
+}
+.ua-fleet-skill-row {
+    display:flex; gap:6px; flex-wrap:wrap;
+    padding:2px 0;
+}
+.ua-fleet-skill-cnt {
+    font-size:.6rem; font-weight:600;
+    padding:1px 6px; border-radius:5px;
+    border:1px solid rgba(0,200,200,.18);
+    background:rgba(8,4,22,.55);
+    color:#9ab;
+    font-variant-numeric:tabular-nums;
+}
+.ua-fleet-skill-cnt--cal   { color:#40e090; border-color:rgba(64,224,144,.45);  background:rgba(64,224,144,.08); }
+.ua-fleet-skill-cnt--over  { color:#ffaa20; border-color:rgba(255,170,32,.45); background:rgba(255,170,32,.08); }
+.ua-fleet-skill-cnt--under { color:#ff5060; border-color:rgba(255,80,96,.45);  background:rgba(255,80,96,.08); }
+.ua-fleet-skill-cnt--gap   { color:#789;    border-color:rgba(150,170,200,.30); background:rgba(8,4,22,.55); }
+.ua-fleet-skill-cnt--anom  {
+    color:#ff5060;
+    border-color:rgba(255,80,96,.55);
+    background:rgba(255,80,96,.12);
+    cursor:help;
+    /* Pulse animation to draw the eye to a new anomaly. Subtle — we
+       only show this chip when count > 0, so the operator's already
+       had it surface naturally; the pulse just makes "new" assets
+       easier to find at-a-glance. */
+    animation: ua-fleet-anom-pulse 2.4s ease-in-out infinite;
+}
+@keyframes ua-fleet-anom-pulse {
+    0%, 100% { box-shadow: 0 0 0 rgba(255,80,96,0); }
+    50%      { box-shadow: 0 0 8px rgba(255,80,96,.45); }
+}
+
+/* Per-asset ANOMALY badge — same severity colour as REENTRY but with
+ * a heavier border so it reads as "something CHANGED about this
+ * asset" rather than "a known threshold was crossed". */
+.ua-fleet-badge-anom {
+    border-width:2px !important;
+    cursor:help;
+}
+
+/* ─── Per-asset residual sparkline (Phase 16) ───────────── */
+/* Shows the trajectory of backtest residuals over time so operators
+ * see drift BEFORE it crosses the anomaly threshold. Amber band is
+ * the ±3σ MAD envelope from the anomaly detector; dashed line is the
+ * median; the rightmost dot is the most recent observation, sized up
+ * + colour-coded by the verdict. */
+.ua-fleet-spark {
+    display:flex; align-items:center; gap:6px;
+    padding:2px 0;
+    font-size:.58rem;
+    color:#789;
+    font-variant-numeric:tabular-nums;
+    cursor:help;
+    user-select:none;
+}
+.ua-fleet-spark-label {
+    flex:0 0 auto;
+    color:#9ab;
+    text-transform:uppercase;
+    letter-spacing:.06em;
+}
+.ua-fleet-spark-svg {
+    flex:1 1 auto;
+    height:28px;
+    max-width:200px;
+    /* Subtle background so the amber band reads even when σ is tiny. */
+    background:rgba(8,4,22,.30);
+    border-radius:3px;
+}
+.ua-fleet-spark-n { flex:0 0 auto; color:#789; }
+.ua-fleet-skill-stat {
+    color:#9ab; font-size:.6rem;
+    font-variant-numeric:tabular-nums;
+}
+.ua-fleet-skill-worst {
+    align-self:flex-start;
+    font-size:.6rem; font-weight:600;
+    padding:2px 7px; border-radius:5px;
+    background:rgba(255,80,96,.10);
+    border:1px solid rgba(255,80,96,.35);
+    color:#ff8090;
+    cursor:pointer;
+    font-variant-numeric:tabular-nums;
+}
+.ua-fleet-skill-worst:hover {
+    background:rgba(255,80,96,.18);
+    color:#ff5060;
+}
+
+/* ─── Fleet-wide conjunction screen (Phase 12) ──────────── */
+.ua-fleet-conj {
+    display:flex; flex-direction:column; gap:6px;
+    padding:8px 0;
+    border-bottom:1px solid rgba(0,200,200,.10);
+    margin-bottom:4px;
+}
+.ua-fleet-conj:empty { display:none; }
+.ua-fleet-conj-head {
+    display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+}
+.ua-fleet-conj-title {
+    color:#fff; font-weight:700; font-size:.7rem;
+    letter-spacing:.04em; text-transform:uppercase;
+}
+.ua-fleet-conj-sub {
+    color:#9ab; font-size:.62rem;
+    font-variant-numeric:tabular-nums;
+}
+.ua-fleet-conj-thresh {
+    display:inline-flex; gap:3px; margin-left:auto;
+}
+.ua-fleet-conj-chip {
+    background:rgba(8,4,22,.55); color:#9ab;
+    border:1px solid rgba(0,200,200,.18);
+    border-radius:5px;
+    padding:2px 7px;
+    font-size:.6rem; font-weight:600;
+    cursor:pointer;
+    font-variant-numeric:tabular-nums;
+    transition:color .12s, border-color .12s, background .12s;
+}
+.ua-fleet-conj-chip:hover { color:#cde; border-color:rgba(0,200,200,.45); }
+.ua-fleet-conj-chip.is-active {
+    color:#0ff; border-color:rgba(0,200,200,.6);
+    background:rgba(0,200,200,.10);
+}
+.ua-fleet-conj-empty {
+    color:#9ab; font-size:.65rem; line-height:1.5;
+    padding:8px 10px;
+    border:1px dashed rgba(0,200,200,.15);
+    border-radius:6px;
+    text-align:center;
+}
+.ua-fleet-conj-rows {
+    display:flex; flex-direction:column; gap:2px;
+}
+.ua-fleet-conj-row {
+    display:grid;
+    grid-template-columns: 38px 1fr auto auto auto;
+    gap:8px; align-items:center;
+    padding:4px 8px;
+    border-radius:6px;
+    border:1px solid rgba(0,200,200,.15);
+    background:rgba(10,6,28,.45);
+    font-size:.66rem;
+    font-variant-numeric:tabular-nums;
+    cursor:help;
+}
+.ua-fleet-conj-row.is-high {
+    border-left:3px solid rgba(255,80,96,.85);
+    box-shadow:0 0 8px rgba(255,80,96,.12);
+}
+.ua-fleet-conj-row.is-med  { border-left:3px solid rgba(255,170,32,.7); }
+.ua-fleet-conj-row.is-low  { border-left:3px solid rgba(64,224,144,.55); }
+.ua-fleet-conj-prob {
+    color:#fff; font-weight:700; text-align:right;
+    font-size:.72rem;
+}
+.ua-fleet-conj-row.is-high .ua-fleet-conj-prob { color:#ff5060; }
+.ua-fleet-conj-row.is-med  .ua-fleet-conj-prob { color:#ffaa20; }
+.ua-fleet-conj-row.is-low  .ua-fleet-conj-prob { color:#40e090; }
+.ua-fleet-conj-pair {
+    display:flex; align-items:center; gap:4px;
+    min-width:0;
+    color:#dde;
+}
+.ua-fleet-conj-name {
+    background:none; border:none; padding:0;
+    color:#cde; font: inherit; cursor:pointer;
+    text-decoration:none;
+    font-variant-numeric:tabular-nums;
+    max-width:120px; overflow:hidden; text-overflow:ellipsis;
+    white-space:nowrap;
+}
+.ua-fleet-conj-name:hover {
+    color:#0ff; text-decoration:underline;
+}
+.ua-fleet-conj-sep { color:#789; }
+.ua-fleet-conj-tca, .ua-fleet-conj-d, .ua-fleet-conj-sig {
+    color:#9ab; text-align:right;
+    min-width:48px;
+}
+
+/* ─── Conjunction archive section (Phase 17) ────────────── */
+/* Sits below the live top-5 and shows historical pairs from the past
+ * 14 days — operators see "this pair has been close N times" rather
+ * than just the next predicted approach. Visually quieter than the
+ * live section so it doesn't compete for attention. */
+.ua-fleet-conj-arch {
+    margin-top:8px;
+    padding-top:6px;
+    border-top:1px dashed rgba(0,200,200,.15);
+    display:flex; flex-direction:column; gap:3px;
+}
+.ua-fleet-conj-arch-head {
+    font-size:.6rem;
+    color:#9ab;
+    text-transform:uppercase;
+    letter-spacing:.06em;
+    display:flex; gap:6px; align-items:baseline;
+}
+.ua-fleet-conj-arch-sub {
+    color:#789;
+    text-transform:none;
+    letter-spacing:0;
+    font-variant-numeric:tabular-nums;
+}
+.ua-fleet-conj-arch-rows { display:flex; flex-direction:column; gap:1px; }
+.ua-fleet-conj-arch-row {
+    display:grid;
+    grid-template-columns: 38px 1fr auto auto;
+    gap:8px; align-items:center;
+    padding:3px 8px;
+    border-radius:4px;
+    font-size:.62rem;
+    color:#cde;
+    font-variant-numeric:tabular-nums;
+    cursor:help;
+    background:rgba(8,4,22,.30);
+}
+.ua-fleet-conj-arch-row:hover { background:rgba(0,200,200,.06); }
+.ua-fleet-conj-arch-cnt {
+    color:#ffaa20;
+    font-weight:700;
+    text-align:right;
+}
+.ua-fleet-conj-arch-d, .ua-fleet-conj-arch-age {
+    color:#9ab; text-align:right; min-width:60px;
+}
+
+/* Flash animation triggered when a conjunction row is clicked. Tints
+ * the card briefly + adds a glow so the operator's eye lands on the
+ * right place after the smooth-scroll completes. */
+@keyframes ua-fleet-card-flash {
+    0%   { box-shadow: 0 0 0  rgba(0,200,200,0);   background:rgba(10,6,28,.55); }
+    20%  { box-shadow: 0 0 18px rgba(0,200,200,.55); background:rgba(0,200,200,.10); }
+    100% { box-shadow: 0 0 0  rgba(0,200,200,0);   background:rgba(10,6,28,.55); }
+}
+.ua-fleet-card--flash {
+    animation: ua-fleet-card-flash 1.4s ease-out;
+}
+
 /* ─── Satellite drag analysis ──────────────────────────── */
 .ua-tle-pill {
     display:inline-flex; align-items:center; gap:5px;
@@ -736,6 +1485,49 @@ input[type=range]::-moz-range-thumb {
 .ua-drag-up   { color:#ff5060; }
 .ua-drag-down { color:#40e090; }
 .ua-drag-flat { color:#aab; }
+.ua-drag-chip {
+    display:inline-block;
+    font-size:.6rem; letter-spacing:.08em;
+    padding:2px 7px; border-radius:10px;
+    color:#0cc;
+    background:rgba(0,200,200,.10);
+    border:1px solid rgba(0,200,200,.32);
+}
+.ua-drag-chip--forecast {
+    color:#ffaa20;
+    background:rgba(255,170,32,.10);
+    border-color:rgba(255,170,32,.40);
+}
+.ua-drag-pills {
+    display:flex; gap:4px;
+    margin:8px 0;
+    flex-wrap:wrap;
+}
+.ua-drag-pill {
+    flex:1 1 auto; min-width:42px;
+    font-size:.7rem; font-weight:600;
+    padding:5px 8px;
+    background:rgba(10,6,28,.55);
+    color:#bcd;
+    border:1px solid rgba(0,200,200,.18);
+    border-radius:8px;
+    cursor:pointer;
+    transition:background .15s, border-color .15s, color .15s;
+    font-variant-numeric:tabular-nums;
+}
+.ua-drag-pill:hover { border-color:rgba(0,200,200,.45); color:#fff; }
+.ua-drag-pill--on {
+    background:rgba(255,170,32,.16);
+    border-color:rgba(255,170,32,.55);
+    color:#ffd070;
+    box-shadow:0 0 8px rgba(255,170,32,.20);
+}
+.ua-drag-pill[data-horizon="0"].ua-drag-pill--on {
+    background:rgba(0,200,200,.16);
+    border-color:rgba(0,200,200,.55);
+    color:#0ff;
+    box-shadow:0 0 8px rgba(0,200,200,.20);
+}
 .ua-drag-row-muted { opacity:.45; text-decoration:line-through; }
 .ua-drag-row-delta.ua-drag-row-muted { text-decoration:none; }
 .ua-drag-muted-tag {
@@ -1198,18 +1990,37 @@ input[type=range]::-moz-range-thumb {
         </div>
 
         <div class="ua-panel" style="margin-bottom:14px;">
-            <h2>Drag forecast <span style="font-size:.6rem;color:#0cc;letter-spacing:.08em;margin-left:6px">NOWCAST</span></h2>
+            <h2 style="display:flex;align-items:center;gap:8px;">
+                Drag forecast
+                <span id="ua-drag-horizon-chip" class="ua-drag-chip">NOWCAST</span>
+            </h2>
             <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:8px">
                 Sun-driven flow lines across each thermospheric/exospheric
                 shell. Tracer colour shows <em>change</em> in atmospheric
                 density — operator-relevant signal. Storm onset inflates
                 drag (red); post-storm recovery cools and contracts (green).
-                Population scales with each layer's particle budget.
+                AR(1) projection of F10.7 + Ap from 72&nbsp;h history; skill
+                chip shows confidence at the selected horizon.
             </p>
             <label class="ua-drag-toggle-row" for="ua-drag-toggle">
                 <input type="checkbox" id="ua-drag-toggle">
                 <span>Show drag forecast flow</span>
             </label>
+            <div id="ua-drag-horizon-pills" class="ua-drag-pills" role="radiogroup"
+                 aria-label="Drag forecast horizon">
+                <button type="button" class="ua-drag-pill ua-drag-pill--on" data-horizon="0"
+                        aria-pressed="true">Now</button>
+                <button type="button" class="ua-drag-pill" data-horizon="1"
+                        aria-pressed="false">+1h</button>
+                <button type="button" class="ua-drag-pill" data-horizon="3"
+                        aria-pressed="false">+3h</button>
+                <button type="button" class="ua-drag-pill" data-horizon="6"
+                        aria-pressed="false">+6h</button>
+                <button type="button" class="ua-drag-pill" data-horizon="12"
+                        aria-pressed="false">+12h</button>
+                <button type="button" class="ua-drag-pill" data-horizon="24"
+                        aria-pressed="false">+24h</button>
+            </div>
             <div class="ua-drag-swatches">
                 <span class="ua-drag-sw ua-drag-sw-up">  <span class="ua-drag-dot"></span>drag rising</span>
                 <span class="ua-drag-sw ua-drag-sw-flat"><span class="ua-drag-dot"></span>steady</span>
@@ -1230,6 +2041,21 @@ input[type=range]::-moz-range-thumb {
         <div class="ua-panel" style="margin-bottom:14px;">
             <h2>Atmospheric layers</h2>
             <div id="ua-layer-legend"></div>
+        </div>
+
+        <div class="ua-panel" style="margin-bottom:14px;">
+            <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px">
+                <h2 style="margin:0">My fleet</h2>
+                <span class="ua-fleet-chip">OPERATOR · 25 max</span>
+            </div>
+            <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:8px">
+                Track up to 25 assets by NORAD&nbsp;ID, pasted&nbsp;TLE, or
+                bulk-imported CelesTrak group. Each card shows live drag,
+                72-h decay envelope under both the current state and the
+                AR(1)-projected forcing, and trips reentry / decay-spike /
+                drag-stress alerts to the bell when thresholds are crossed.
+            </p>
+            <div id="ua-fleet-panel"></div>
         </div>
 
         <div class="ua-panel" style="margin-bottom:14px;">
@@ -1559,6 +2385,7 @@ input[type=range]::-moz-range-thumb {
     import * as engine from './js/upper-atmosphere-engine.js';
     import { AtmosphereGlobe } from './js/upper-atmosphere-globe.js';
     import { UpperAtmosphereUI } from './js/upper-atmosphere-ui.js';
+    import { FleetPanel } from './js/upper-atmosphere-fleet-panel.js';
     import { getRealtimeDriver } from './js/upper-atmosphere-realtime.js';
 
     const canvas = document.getElementById('ua-globe');
@@ -1610,9 +2437,12 @@ input[type=range]::-moz-range-thumb {
             camKn:          document.getElementById('ua-cam-Kn'),
             camMode:        document.getElementById('ua-cam-mode'),
             camHint:        document.getElementById('ua-cam-hint'),
-            // Drag forecast (Phase 1: nowcast, sun-driven flow)
-            dragToggle:     document.getElementById('ua-drag-toggle'),
-            dragLegend:     document.getElementById('ua-drag-legend'),
+            // Drag forecast (Phase 1: nowcast, sun-driven flow;
+            //                Phase 3: AR(1) horizon scrubber)
+            dragToggle:        document.getElementById('ua-drag-toggle'),
+            dragLegend:        document.getElementById('ua-drag-legend'),
+            dragHorizonPills:  document.getElementById('ua-drag-horizon-pills'),
+            dragHorizonChip:   document.getElementById('ua-drag-horizon-chip'),
         },
         // Tries GET {PARKER_DSMC_API}/v1/atmosphere/profile when the
         // host window declares PARKER_DSMC_API; silently falls back to
@@ -1620,8 +2450,42 @@ input[type=range]::-moz-range-thumb {
         useBackend: true,
     });
 
+    // ── Fleet panel (per-asset drag forecast + alerts) ────────────────
+    // Lives in the Analysis tab. Drives the existing alert-engine bell
+    // path by re-dispatching threshold breaches as `user-alert` events
+    // (same shape AlertEngine emits). Hands its severity-ranked
+    // top-3 to the globe so it can render in-scene orbit ribbons.
+    const fleetPanelEl = document.getElementById('ua-fleet-panel');
+    const fleetPanel = fleetPanelEl ? new FleetPanel({
+        host: fleetPanelEl,
+        getLiveState: () => ({ f107: ui.state.f107, ap: ui.state.ap }),
+        projHorizonHr: 12,
+        onAlert: (alert) => {
+            try {
+                window.dispatchEvent(new CustomEvent('user-alert', {
+                    detail: {
+                        alert: {
+                            id:        `drag:${alert.assetId}:${alert.kind}:${alert.ts}`,
+                            kind:      `drag-${alert.kind}`,
+                            severity:  alert.severity,
+                            title:     alert.title,
+                            body:      alert.body,
+                            ts:        alert.ts,
+                            asset:     { id: alert.assetId, noradId: alert.noradId, name: alert.name },
+                            source:    'upper-atmosphere-fleet',
+                        },
+                    },
+                }));
+            } catch (_) { /* SSR */ }
+        },
+        onSeverityChange: (top3) => {
+            globe.setFleetRibbons?.(top3);
+        },
+    }) : null;
+    fleetPanel?.start();
+
     // Expose for devtools poking.
-    window.__ua = { engine, globe, ui };
+    window.__ua = { engine, globe, ui, fleetPanel };
 
     /* ─── Aside tabs (Controls / Analysis) ──────────────────── */
     const tabBtns  = document.querySelectorAll('#ua-aside-tabs .ua-tab-btn');

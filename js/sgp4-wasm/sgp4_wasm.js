@@ -41,6 +41,86 @@ export function drag_stride() {
 }
 
 /**
+ * JS-callable: one altitude point. Returns the 11-element array above.
+ * @param {number} year
+ * @param {number} doy
+ * @param {number} sec
+ * @param {number} alt_km
+ * @param {number} lat_deg
+ * @param {number} lon_deg
+ * @param {number} lst_hr
+ * @param {number} f107a
+ * @param {number} f107
+ * @param {Float64Array} ap_history
+ * @returns {Float64Array}
+ */
+export function nrlmsise00_density_point(year, doy, sec, alt_km, lat_deg, lon_deg, lst_hr, f107a, f107, ap_history) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passArrayF64ToWasm0(ap_history, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.nrlmsise00_density_point(retptr, year, doy, sec, alt_km, lat_deg, lon_deg, lst_hr, f107a, f107, ptr0, len0);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var v2 = getArrayF64FromWasm0(r0, r1).slice();
+        wasm.__wbindgen_export2(r0, r1 * 8, 8);
+        return v2;
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
+ * JS-callable: an altitude profile at fixed (lat, lon, time, forcing).
+ *
+ * Returns a flat Float64 array stride-12, where each row is:
+ *
+ *   [alt_km, He, O, N2, O2, Ar, mass_kg_m3, H, N, anom_O, T_exo, T_alt]
+ *
+ * This is the operator-grade replacement for the JS `sampleProfile()`
+ * fallback. One WASM call covers the whole drag-decay altitude grid
+ * (~50 points), avoiding 50 individual JS↔WASM round-trips.
+ * @param {number} year
+ * @param {number} doy
+ * @param {number} sec
+ * @param {number} lat_deg
+ * @param {number} lon_deg
+ * @param {number} lst_hr
+ * @param {number} f107a
+ * @param {number} f107
+ * @param {Float64Array} ap_history
+ * @param {Float64Array} alt_grid_km
+ * @returns {Float64Array}
+ */
+export function nrlmsise00_density_profile(year, doy, sec, lat_deg, lon_deg, lst_hr, f107a, f107, ap_history, alt_grid_km) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passArrayF64ToWasm0(ap_history, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF64ToWasm0(alt_grid_km, wasm.__wbindgen_export);
+        const len1 = WASM_VECTOR_LEN;
+        wasm.nrlmsise00_density_profile(retptr, year, doy, sec, lat_deg, lon_deg, lst_hr, f107a, f107, ptr0, len0, ptr1, len1);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var v3 = getArrayF64FromWasm0(r0, r1).slice();
+        wasm.__wbindgen_export2(r0, r1 * 8, 8);
+        return v3;
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
+ * Stride of the flat profile array — JS reads this once at boot to
+ * avoid hard-coding 12 in two places.
+ * @returns {number}
+ */
+export function nrlmsise00_profile_stride() {
+    const ret = wasm.nrlmsise00_profile_stride();
+    return ret >>> 0;
+}
+
+/**
  * Compute osculating Keplerian elements from a TLE at one specific time.
  * Returns a JSON-friendly object usable directly by JS.
  * @param {string} line1
