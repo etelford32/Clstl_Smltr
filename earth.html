@@ -359,6 +359,34 @@ nav {
 #coord-tip .ct-rd-prov[data-prov="forecast-mid"]  .ct-rd-val { color: #ff9933; }
 #coord-tip .ct-rd-prov[data-prov="forecast-far"]  .ct-rd-val { color: #ff6b3d; }
 
+/* Composite-index advisory rows: emit by js/composite-indices.js's
+   advisoriesToHtmlRows. Severity-coded so the worst entries stand out
+   at a glance — the array is pre-sorted danger → info on the JS side. */
+#coord-tip .ct-rd-adv {
+    margin-top: 2px; padding: 2px 4px;
+    border-radius: 3px;
+    border-left: 2px solid transparent;
+    font-size: 10px;
+}
+#coord-tip .ct-rd-adv .ct-rd-adv-label {
+    color: #779; font-size: 9px; margin-left: 4px;
+}
+#coord-tip .ct-rd-adv[data-sev="info"] {
+    border-left-color: rgba(120,160,200,.5);
+}
+#coord-tip .ct-rd-adv[data-sev="caution"] {
+    border-left-color: #ffd24c; background: rgba(255,210,76,.05);
+}
+#coord-tip .ct-rd-adv[data-sev="caution"]  .ct-rd-val { color: #ffd24c; }
+#coord-tip .ct-rd-adv[data-sev="warning"] {
+    border-left-color: #ff9933; background: rgba(255,153,51,.06);
+}
+#coord-tip .ct-rd-adv[data-sev="warning"]  .ct-rd-val { color: #ff9933; }
+#coord-tip .ct-rd-adv[data-sev="danger"] {
+    border-left-color: #ff5050; background: rgba(255,80,80,.08);
+}
+#coord-tip .ct-rd-adv[data-sev="danger"]   .ct-rd-val { color: #ff5050; font-weight: 700; }
+
 /* ─── Layer panel ────────────────────────────────────────────── */
 #layer-panel {
     position:absolute; top:10px; right:10px; z-index:50;
@@ -3212,6 +3240,7 @@ import { WeatherForecastValidator } from './js/weather-forecast-validation.js';
 import { mountModelsPanel } from './js/models-panel.js';
 import { ProbabilityPicker } from './js/probability-picker.js';
 import { mountRenewablesPanel } from './js/renewables-panel.js';
+import { computeAdvisories, advisoriesToHtmlRows } from './js/composite-indices.js';
 import { PrecipClimatology }        from './js/precip-climatology.js';
 import { PrecipBiasTracker }        from './js/precip-bias-tracker.js';
 import { NasaPrecipExtractor }      from './js/nasa-precip-extractor.js';
@@ -3994,6 +4023,24 @@ function _renderHoverReadouts(lat, lon) {
         rows.push(`<div class="ct-readout"><span class="ct-rd-icon">🌫</span>` +
             `<span class="ct-rd-val">${fog}</span> ` +
             `(RH ${wx.rhPct.toFixed(0)}% · low-cloud ${cl.clLow.toFixed(0)}%)</div>`);
+    }
+
+    // ── Composite-index advisories ──
+    // Always run regardless of which readouts are toggled — these are
+    // safety/operational alerts, not optional display fields. Reuses
+    // already-sampled wx / wind buffers when available so the cost on
+    // mousemove is just the index arithmetic (microseconds).
+    {
+        const _wx = wx || _sampleWeatherAt(lat, lon);
+        const _w  = windParticles?.lookupWind?.(lat, lon) || null;
+        if (_wx) {
+            const advs = computeAdvisories({
+                tempC:  _wx.tempC,
+                rhPct:  _wx.rhPct,
+                windMs: _w?.speedMs,
+            });
+            if (advs.length) rows.push(...advisoriesToHtmlRows(advs));
+        }
     }
 
     if (rows.length) {
