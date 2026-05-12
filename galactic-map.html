@@ -378,6 +378,10 @@ canvas { display:block; width:100% !important; height:100% !important; }
             <input type="checkbox" id="tog-plane" checked>
             <label for="tog-plane">Galactic plane</label>
         </div>
+        <div class="tog-row">
+            <input type="checkbox" id="tog-constellations" checked>
+            <label for="tog-constellations" title="Stick-figure asterism lines connecting bright stars in each constellation">Constellation lines</label>
+        </div>
 
         <div class="sb-hd" style="margin-top:16px">Spectral Type Legend</div>
         <div class="legend-item"><div class="legend-dot" style="background:#88aaff"></div>O/B — hot blue/white</div>
@@ -821,7 +825,9 @@ const CATALOG = [
             ['Temperature', '5,084 K'],
             ['Mass', '0.83 M☉'],
             ['Planets', 'Candidate system + debris disk'],
+            ['Asterism role', 'River near δ Eri (Eridanus)'],
         ],
+        constellation: 'eri',
     },
     {
         id: 'procyon', name: 'Procyon', abbr: 'Procyon', type: 'F5IV-V',
@@ -1052,7 +1058,9 @@ const CATALOG = [
             ['Temperature', '3,660 K'],
             ['Radius', '~700 R☉'],
             ['Luminosity', '~75,000 L☉'],
+            ['Asterism role', 'Heart of the Scorpion (α Sco)'],
         ],
+        constellation: 'sco',
     },
     {
         id: 'canopus', name: 'Canopus', abbr: 'Canopus', type: 'F0II',
@@ -1198,6 +1206,356 @@ const CATALOG = [
             ['Arecibo Message', 'Target — 1974'],
         ],
         isCluster: true,
+    },
+
+    // ── Section header — Scorpius asterism stars ──────────────────────────
+    { id: '__sep_sco', sectionHeader: 'Scorpius Constellation', isHeader: true },
+
+    // Antares (α Sco) is already defined above with its full biography; it is
+    // also a Scorpius member.  Below are the other 13 bright stars that draw
+    // the scorpion shape — pincers (β δ π), head/body (σ τ ε), tail (μ ζ η
+    // θ ι κ) and stinger (λ υ).  Coordinates are heliocentric galactic.
+    {
+        id: 'acrab', name: 'Acrab (β Sco)', abbr: 'β Sco', type: 'B1 V + B2 V',
+        l: 353.19, b: 23.60, dist: 530,
+        temp: 25000, spectral: 'B',
+        color: 0x9bb0ff, size: 0.42,
+        desc: 'A multiple system anchoring the northern pincer of Scorpius. The "Graffias" pair (β¹ + β²) is a stunning telescopic double. β¹ itself is at least a six-component system. Famously occulted by Jupiter in 1971 — a rare event that constrained Jupiter\'s atmospheric structure.',
+        props: [
+            ['Spectral type', 'B1 V (+B2 V, +B0.5 V — sextuple)'],
+            ['V magnitude', '2.50 (combined)'],
+            ['Distance', '~530 ly (162 pc)'],
+            ['Galactic l / b', '353.19° / +23.60°'],
+            ['Component sep', 'β¹–β² ≈ 13.7″ (telescopic double)'],
+            ['Notable', '1971 Jovian occultation'],
+            ['Asterism role', 'North pincer claw'],
+        ],
+        constellation: 'sco',
+    },
+    {
+        id: 'dschubba', name: 'Dschubba (δ Sco)', abbr: 'δ Sco', type: 'B0.3 IV',
+        l: 350.10, b: 22.49, dist: 491,
+        temp: 28000, spectral: 'B',
+        color: 0x9bb0ff, size: 0.45,
+        desc: 'Arabic "the forehead" — once thought a typical B-type subgiant. In June 2000 it unexpectedly brightened by ~50% and developed a circumstellar gas disc, revealing itself as a fast-rotating Be-star binary. Has remained brighter and more variable than its historical baseline ever since.',
+        props: [
+            ['Spectral type', 'B0.3 IV (now Be variable)'],
+            ['V magnitude', '2.29 (now ~1.6 since 2000)'],
+            ['Distance', '~491 ly (151 pc)'],
+            ['Galactic l / b', '350.10° / +22.49°'],
+            ['Mass', '~13 + 8 M☉ (binary)'],
+            ['Discovery 2000', 'Be-shell brightening event'],
+            ['Asterism role', 'Head'],
+        ],
+        constellation: 'sco',
+    },
+    {
+        id: 'pi_sco', name: 'Pi Scorpii (π Sco)', abbr: 'π Sco', type: 'B1 V',
+        l: 347.22, b: 20.23, dist: 590,
+        temp: 28000, spectral: 'B',
+        color: 0x9bb0ff, size: 0.38,
+        desc: 'A close spectroscopic eclipsing binary forming the southern pincer of Scorpius. The two B-type components orbit every 1.57 days; periodic dips of ~0.04 mag from partial eclipses make it a textbook example of a "near-contact" binary.',
+        props: [
+            ['Spectral type', 'B1 V (+B2 V eclipsing pair)'],
+            ['V magnitude', '2.89'],
+            ['Distance', '~590 ly (180 pc)'],
+            ['Galactic l / b', '347.22° / +20.23°'],
+            ['Orbital period', '1.5701 days'],
+            ['Asterism role', 'South pincer claw'],
+        ],
+        constellation: 'sco',
+    },
+    {
+        id: 'sigma_sco', name: 'Sigma Scorpii (σ Sco)', abbr: 'σ Sco', type: 'B1 III',
+        l: 351.31, b: 17.00, dist: 696,
+        temp: 23000, spectral: 'B',
+        color: 0x9bb0ff, size: 0.40,
+        desc: 'A quadruple system at the head-to-heart link of Scorpius. Member of the Upper Scorpius OB association — the nearest region of recent massive-star formation, 5–10 Myr old. β-Cephei pulsator with a 0.247-day period; helps calibrate pulsation distance scales.',
+        props: [
+            ['Spectral type', 'B1 III (β Cep pulsator)'],
+            ['V magnitude', '2.89'],
+            ['Distance', '~696 ly (214 pc)'],
+            ['Galactic l / b', '351.31° / +17.00°'],
+            ['Pulsation period', '0.247 day'],
+            ['Group', 'Upper Scorpius OB association'],
+            ['Asterism role', 'Body — upper'],
+        ],
+        constellation: 'sco',
+    },
+    {
+        id: 'tau_sco', name: 'Tau Scorpii (τ Sco)', abbr: 'τ Sco', type: 'B0 V',
+        l: 351.54, b: 12.81, dist: 470,
+        temp: 32000, spectral: 'B',
+        color: 0x9bb0ff, size: 0.42,
+        desc: 'Surprisingly strong, complex magnetic field for a hot star — one of the very few O/B stars with a confirmed fossil dynamo. A young (~5 Myr) massive star in the Upper Sco association; its X-ray emission is anomalously bright, a probable consequence of magnetic confinement of the stellar wind.',
+        props: [
+            ['Spectral type', 'B0 V'],
+            ['V magnitude', '2.82'],
+            ['Distance', '~470 ly (144 pc)'],
+            ['Galactic l / b', '351.54° / +12.81°'],
+            ['Magnetic field', '~500 G (fossil dynamo)'],
+            ['Mass', '~15 M☉'],
+            ['Asterism role', 'Body — middle'],
+        ],
+        constellation: 'sco',
+    },
+    {
+        id: 'eps_sco', name: 'Epsilon Scorpii (ε Sco)', abbr: 'ε Sco', type: 'K2 III',
+        l: 348.82, b: 6.66, dist: 63.7,
+        temp: 4560, spectral: 'K',
+        color: 0xffd2a1, size: 0.38,
+        desc: 'A nearby orange giant — closest bright star in the Scorpius asterism to the Sun. Has measurably depleted lithium, suggesting deep convective mixing as it crossed the giant branch. Possible solar-system planet host (one candidate confirmed 2008 — HD 151249 b, mass 7 M_J).',
+        props: [
+            ['Spectral type', 'K2 III'],
+            ['V magnitude', '2.31'],
+            ['Distance', '63.7 ly (19.5 pc)'],
+            ['Galactic l / b', '348.82° / +6.66°'],
+            ['Mass', '~1.2 M☉'],
+            ['Notable', 'Substellar companion (HD 151249 b)'],
+            ['Asterism role', 'Body — heart side'],
+        ],
+        constellation: 'sco',
+    },
+    {
+        id: 'mu_sco', name: 'Mu Scorpii (μ Sco)', abbr: 'μ Sco', type: 'B1.5 IV',
+        l: 346.12, b: 3.91, dist: 519,
+        temp: 23000, spectral: 'B',
+        color: 0x9bb0ff, size: 0.36,
+        desc: 'A close double known as the "Cat\'s Eyes" of Scorpius (with ζ Sco). μ¹ is itself a 1.45-day eclipsing binary in which two B-type stars nearly touch; total mass 21 M☉.',
+        props: [
+            ['Spectral type', 'B1.5 IV (eclipsing binary)'],
+            ['V magnitude', '3.00 (combined)'],
+            ['Distance', '~519 ly (159 pc)'],
+            ['Galactic l / b', '346.12° / +3.91°'],
+            ['Orbital period', '1.4463 d'],
+            ['Asterism role', 'Tail bend'],
+        ],
+        constellation: 'sco',
+    },
+    {
+        id: 'zeta_sco', name: 'Zeta Scorpii (ζ²)', abbr: 'ζ² Sco', type: 'K4 III',
+        l: 343.18, b: 1.13, dist: 130,
+        temp: 4100, spectral: 'K',
+        color: 0xffc080, size: 0.36,
+        desc: 'A foreground K-giant projected onto the much more distant ζ¹ — an extreme blue hypergiant ~6,000 ly away. The "Cat\'s Eyes" optical pair of Scorpius (with μ Sco) is actually two unrelated stars at very different distances.',
+        props: [
+            ['Spectral type', 'ζ² = K4 III (ζ¹ behind = B1 Ia⁺)'],
+            ['V magnitude', '3.62'],
+            ['Distance', '~130 ly (40 pc; ζ¹ ≈ 6,000 ly)'],
+            ['Galactic l / b', '343.18° / +1.13°'],
+            ['Asterism role', 'Tail'],
+        ],
+        constellation: 'sco',
+    },
+    {
+        id: 'eta_sco', name: 'Eta Scorpii (η Sco)', abbr: 'η Sco', type: 'F3 IIIp',
+        l: 343.96, b: -2.39, dist: 73.5,
+        temp: 6800, spectral: 'F',
+        color: 0xfff4e8, size: 0.32,
+        desc: 'A peculiar F-type subgiant — chemically anomalous, with enhanced silicon and strontium and depleted calcium ("Ap-like" abundances despite the cooler temperature). Member of the Sirius supercluster moving group.',
+        props: [
+            ['Spectral type', 'F3 IIIp (chemically peculiar)'],
+            ['V magnitude', '3.32'],
+            ['Distance', '73.5 ly (22.5 pc)'],
+            ['Galactic l / b', '343.96° / −2.39°'],
+            ['Moving group', 'Sirius supercluster'],
+            ['Asterism role', 'Tail'],
+        ],
+        constellation: 'sco',
+    },
+    {
+        id: 'sargas', name: 'Sargas (θ Sco)', abbr: 'θ Sco', type: 'F1 II',
+        l: 347.20, b: -5.55, dist: 270,
+        temp: 7200, spectral: 'F',
+        color: 0xfff4e8, size: 0.50,
+        desc: 'Sumerian "the Smiter" — second-brightest star in Scorpius and the bright knot at the tail\'s bend before the sting. A massive F-type bright giant just leaving the main sequence. Slowly variable in radial velocity, suggesting an undetected companion.',
+        props: [
+            ['Spectral type', 'F1 II'],
+            ['V magnitude', '1.87'],
+            ['Distance', '~270 ly (83 pc)'],
+            ['Galactic l / b', '347.20° / −5.55°'],
+            ['Mass', '~5.7 M☉'],
+            ['Luminosity', '~1,800 L☉'],
+            ['Asterism role', 'Tail — last bend'],
+        ],
+        constellation: 'sco',
+    },
+    {
+        id: 'iota_sco', name: 'Iota₁ Scorpii (ι¹ Sco)', abbr: 'ι¹ Sco', type: 'F2 Ia',
+        l: 350.94, b: -6.04, dist: 1820,
+        temp: 6900, spectral: 'F',
+        color: 0xfff4e8, size: 0.55,
+        desc: 'A rare F-type yellow supergiant — among the most luminous F-type stars known (~30,000 L☉). Distant despite its naked-eye visibility. Likely transiting the Hertzsprung gap from blue-supergiant ancestor to red supergiant; will end as a Type II supernova within a few hundred thousand years.',
+        props: [
+            ['Spectral type', 'F2 Ia'],
+            ['V magnitude', '2.99'],
+            ['Distance', '~1,820 ly (560 pc)'],
+            ['Galactic l / b', '350.94° / −6.04°'],
+            ['Luminosity', '~30,000 L☉'],
+            ['Mass', '~12 M☉'],
+            ['Fate', 'Type II supernova'],
+            ['Asterism role', 'Tail'],
+        ],
+        constellation: 'sco',
+    },
+    {
+        id: 'kappa_sco', name: 'Girtab (κ Sco)', abbr: 'κ Sco', type: 'B1.5 III',
+        l: 351.04, b: -4.74, dist: 464,
+        temp: 23400, spectral: 'B',
+        color: 0x9bb0ff, size: 0.42,
+        desc: 'Sumerian "the Scorpion." A β Cephei-type pulsating variable in a 196-day eccentric binary orbit. Forms the bend at the end of the tail just before the stinger.',
+        props: [
+            ['Spectral type', 'B1.5 III (β Cep pulsator)'],
+            ['V magnitude', '2.39'],
+            ['Distance', '~464 ly (142 pc)'],
+            ['Galactic l / b', '351.04° / −4.74°'],
+            ['Orbital period', '196.5 days'],
+            ['Pulsation', 'P ≈ 0.20 d, β Cep'],
+            ['Asterism role', 'Tail bend before stinger'],
+        ],
+        constellation: 'sco',
+    },
+    {
+        id: 'shaula', name: 'Shaula (λ Sco)', abbr: 'λ Sco', type: 'B1.5 IV + B2 IV',
+        l: 351.74, b: -2.27, dist: 570,
+        temp: 25000, spectral: 'B',
+        color: 0x9bb0ff, size: 0.52,
+        desc: 'Arabic "the raised tail" — the scorpion\'s sting. Visually the second-brightest star in Scorpius, just behind Antares. A triple system: a 5.95-day spectroscopic pair plus a wide pre-main-sequence companion. β Cephei pulsator with a 0.2137-day period.',
+        props: [
+            ['Spectral type', 'B1.5 IV (β Cep pulsator)'],
+            ['V magnitude', '1.62'],
+            ['Distance', '~570 ly (175 pc)'],
+            ['Galactic l / b', '351.74° / −2.27°'],
+            ['System', 'Triple — spectroscopic pair + companion'],
+            ['Pulsation period', '0.2137 d'],
+            ['Asterism role', 'Stinger — upper'],
+        ],
+        constellation: 'sco',
+    },
+    {
+        id: 'lesath', name: 'Lesath (υ Sco)', abbr: 'υ Sco', type: 'B2 IV',
+        l: 351.31, b: -1.85, dist: 580,
+        temp: 22300, spectral: 'B',
+        color: 0x9bb0ff, size: 0.40,
+        desc: 'Forms the "false double" with Shaula at the scorpion\'s stinger — the two are unrelated in physical space (Lesath is in the foreground of the same line of sight) but together they look like the venomous tip of the sting. Member of the Upper Scorpius OB association.',
+        props: [
+            ['Spectral type', 'B2 IV'],
+            ['V magnitude', '2.70'],
+            ['Distance', '~580 ly (178 pc)'],
+            ['Galactic l / b', '351.31° / −1.85°'],
+            ['Group', 'Upper Scorpius OB association'],
+            ['Asterism role', 'Stinger — lower'],
+        ],
+        constellation: 'sco',
+    },
+
+    // ── Section header — Eridanus asterism stars ──────────────────────────
+    { id: '__sep_eri', sectionHeader: 'Eridanus Constellation', isHeader: true },
+
+    // ε Eridani is already defined above (it is a Sun-neighbour at 10.475 ly).
+    // Below are six more bright stars in the great river — from Cursa at the
+    // northern end near Orion all the way south to Achernar at the river\'s
+    // mouth.  Eridanus is the sixth-largest constellation and stretches 60°.
+    {
+        id: 'cursa', name: 'Cursa (β Eri)', abbr: 'β Eri', type: 'A3 III',
+        l: 205.30, b: -25.30, dist: 89,
+        temp: 8360, spectral: 'A',
+        color: 0xccddff, size: 0.38,
+        desc: 'Arabic "the chair" — the northern end of the river Eridanus, just NW of Rigel in Orion. Rare cause of an unexplained 1985 brightening (~0.4 mag) lasting hours, the cause of which has never been firmly identified (planetary occultation or flare are the leading hypotheses).',
+        props: [
+            ['Spectral type', 'A3 III'],
+            ['V magnitude', '2.78'],
+            ['Distance', '~89 ly (27 pc)'],
+            ['Galactic l / b', '205.30° / −25.30°'],
+            ['Mass', '~2 M☉'],
+            ['1985 event', 'Unexplained brief brightening'],
+            ['Asterism role', 'Headwater — near Rigel'],
+        ],
+        constellation: 'eri',
+    },
+    {
+        id: 'zaurak', name: 'Zaurak (γ Eri)', abbr: 'γ Eri', type: 'M0.5 IIIb',
+        l: 204.99, b: -44.46, dist: 203,
+        temp: 3820, spectral: 'M',
+        color: 0xffaa66, size: 0.50,
+        desc: 'Arabic "the boat." A semi-regular variable red giant — slow brightness oscillations of ~0.2 mag over ~57 days. Notable for its strong technetium absorption, suggesting it may be on or near the AGB.',
+        props: [
+            ['Spectral type', 'M0.5 IIIb (semi-regular variable)'],
+            ['V magnitude', '2.97 (var. ~3.0–3.2)'],
+            ['Distance', '~203 ly (62 pc)'],
+            ['Galactic l / b', '204.99° / −44.46°'],
+            ['Pulsation period', '~57 days'],
+            ['Asterism role', 'Upper river'],
+        ],
+        constellation: 'eri',
+    },
+    {
+        id: 'delta_eri', name: 'Rana (δ Eri)', abbr: 'δ Eri', type: 'K0 IV',
+        l: 198.10, b: -46.10, dist: 29.5,
+        temp: 5080, spectral: 'K',
+        color: 0xffd2a1, size: 0.30,
+        desc: 'A bright nearby subgiant — one of the closest "post-main-sequence" stars. A common asteroseismology target (CoRoT and TESS) because its solar-like oscillations and well-determined parallax let astronomers test stellar models with high precision.',
+        props: [
+            ['Spectral type', 'K0 IV'],
+            ['V magnitude', '3.54'],
+            ['Distance', '29.5 ly (9.04 pc)'],
+            ['Galactic l / b', '198.10° / −46.10°'],
+            ['Mass', '~1.3 M☉'],
+            ['Notable', 'Asteroseismology benchmark'],
+            ['Asterism role', 'River, near ε Eri'],
+        ],
+        constellation: 'eri',
+    },
+    {
+        id: 'eta_eri', name: 'Azha (η Eri)', abbr: 'η Eri', type: 'K1 III-IV',
+        l: 187.59, b: -38.29, dist: 137,
+        temp: 4730, spectral: 'K',
+        color: 0xffd2a1, size: 0.35,
+        desc: 'Persian "the ostrich nest." An evolved K-giant slightly past first dredge-up; mildly enhanced in CN and Na. Often used to mark the eastern bend of the river before it heads south.',
+        props: [
+            ['Spectral type', 'K1 III-IV'],
+            ['V magnitude', '3.89'],
+            ['Distance', '~137 ly (42 pc)'],
+            ['Galactic l / b', '187.59° / −38.29°'],
+            ['Asterism role', 'Eastern bend'],
+        ],
+        constellation: 'eri',
+    },
+    {
+        id: 'acamar', name: 'Acamar (θ Eri)', abbr: 'θ Eri', type: 'A4 III + A1 V',
+        l: 247.96, b: -60.43, dist: 161,
+        temp: 8200, spectral: 'A',
+        color: 0xccddff, size: 0.42,
+        desc: 'Arabic "the end of the river." Before precession lowered Achernar into view, Acamar was the southernmost point of Eridanus visible from the ancient Mediterranean — the actual "river\'s end." A stunning visual binary, two A-type stars separated by ~8.3″.',
+        props: [
+            ['Spectral type', 'A4 III + A1 V (visual binary)'],
+            ['V magnitude', '2.88 (combined)'],
+            ['Distance', '~161 ly (50 pc)'],
+            ['Galactic l / b', '247.96° / −60.43°'],
+            ['Separation', '8.3″ (telescopic double)'],
+            ['Historical', 'Ancient "river\'s end" (pre-precession)'],
+            ['Asterism role', 'Southern river bend'],
+        ],
+        constellation: 'eri',
+    },
+    {
+        id: 'achernar', name: 'Achernar (α Eri)', abbr: 'α Eri', type: 'B6 Vep',
+        l: 290.84, b: -58.79, dist: 139,
+        temp: 14500, spectral: 'B',
+        color: 0xa5c0ff, size: 0.70,
+        desc: 'Arabic "the river\'s end" — the modern southernmost point of Eridanus and the ninth-brightest star in the sky. The most oblate star ever observed: its equatorial radius is ~50% larger than its polar radius, the result of an extreme ~250 km/s equatorial rotation (~88% of break-up).',
+        props: [
+            ['Spectral type', 'B6 Vep (rapidly rotating Be star)'],
+            ['V magnitude', '0.46'],
+            ['Distance', '139 ly (42.7 pc)'],
+            ['Galactic l / b', '290.84° / −58.79°'],
+            ['Mass', '~6.7 M☉'],
+            ['Equatorial v', '~250 km/s (~88% break-up)'],
+            ['Oblateness', 'a/b ≈ 1.50 (most oblate known)'],
+            ['Companion', 'α Eri B (~A1V at 12 AU)'],
+            ['Asterism role', "River's end — southernmost"],
+        ],
+        constellation: 'eri',
     },
 
     // ── Section header (sidebar only — no 3D object) ───────────────────────
@@ -4030,6 +4388,125 @@ const decadeGuides = [];   // [{ring, lbl, sceneR}, ...]
 })();
 
 // ══════════════════════════════════════════════════════════════════════════
+//  CONSTELLATIONS
+//  Stick-figure asterism lines drawn between catalog stars.  Each entry
+//  references catalog star ids; lines connect specific pairs in the order
+//  the standard IAU/Stellarium pattern follows.
+//
+//  Visibility rules:
+//   • lines hide at GC-zoom (camDist < 6) and at universe-zoom (camDist >
+//     45 kly) — the patterns are local-sky features and lose meaning beyond
+//     the solar neighbourhood
+//   • line opacity fades smoothly across the visible zoom range
+//   • centroid labels show only inside the constellation's distance shell
+// ══════════════════════════════════════════════════════════════════════════
+const CONSTELLATIONS = [
+    {
+        id: 'sco', name: 'Scorpius', abbr: 'Sco', genitive: 'Scorpii',
+        mythology: 'The scorpion of Greek mythology that killed Orion — placed at opposite ends of the sky so the two never appear together.',
+        color: 0xff8866,    // warm reddish (matches Antares heart)
+        // Asterism lines — pairs of star ids, drawn end-to-end
+        lines: [
+            // Pincers / head
+            ['acrab',    'dschubba'],
+            ['dschubba', 'pi_sco'],
+            ['acrab',    'sigma_sco'],
+            ['dschubba', 'sigma_sco'],
+            ['pi_sco',   'sigma_sco'],
+            // Body
+            ['sigma_sco', 'antares'],
+            ['antares',   'tau_sco'],
+            ['tau_sco',   'eps_sco'],
+            ['eps_sco',   'mu_sco'],
+            // Tail
+            ['mu_sco',    'zeta_sco'],
+            ['zeta_sco',  'eta_sco'],
+            ['eta_sco',   'sargas'],
+            ['sargas',    'iota_sco'],
+            ['iota_sco',  'kappa_sco'],
+            // Stinger
+            ['kappa_sco', 'shaula'],
+            ['shaula',    'lesath'],
+        ],
+    },
+    {
+        id: 'eri', name: 'Eridanus', abbr: 'Eri', genitive: 'Eridani',
+        mythology: 'The great celestial river — variously identified with the Po, the Nile or the legendary river Phaethon plunged into. The sixth-largest constellation.',
+        color: 0x66aaff,    // cool river blue
+        lines: [
+            ['cursa',     'zaurak'],
+            ['zaurak',    'eta_eri'],
+            ['eta_eri',   'delta_eri'],
+            ['delta_eri', 'eps_eri'],
+            ['eps_eri',   'acamar'],
+            ['acamar',    'achernar'],
+        ],
+    },
+];
+
+// Build line geometry + centroid label sprite for each constellation
+const constellationObjects = [];   // [{ id, lineGroup, label, color }, ...]
+(function buildConstellations() {
+    CONSTELLATIONS.forEach(c => {
+        const lineGroup = new THREE.Group();
+        const positions = [];   // for centroid calc
+
+        c.lines.forEach(([aId, bId]) => {
+            const a = CATALOG.find(s => s.id === aId);
+            const b = CATALOG.find(s => s.id === bId);
+            if (!a || !b) {
+                console.warn(`Constellation ${c.id}: missing star ${aId} or ${bId}`);
+                return;
+            }
+            const geo = new THREE.BufferGeometry().setFromPoints([a.pos3, b.pos3]);
+            const mat = new THREE.LineBasicMaterial({
+                color: c.color, transparent: true, opacity: 0.55,
+                depthWrite: false, blending: THREE.AdditiveBlending,
+            });
+            const line = new THREE.Line(geo, mat);
+            line.userData.constellation = c.id;
+            lineGroup.add(line);
+            positions.push(a.pos3, b.pos3);
+        });
+
+        // Centroid (mean position) — for label placement
+        const centroid = new THREE.Vector3();
+        positions.forEach(p => centroid.add(p));
+        centroid.divideScalar(Math.max(1, positions.length));
+        const meanDist = positions.reduce((s, p) => s + p.distanceTo(SUN3), 0)
+                       / Math.max(1, positions.length);
+
+        // Label sprite at centroid
+        const cv = document.createElement('canvas');
+        cv.width = 512; cv.height = 96;
+        const cx = cv.getContext('2d');
+        cx.font = 'bold 36px Segoe UI, sans-serif';
+        const hex = '#' + c.color.toString(16).padStart(6, '0');
+        cx.fillStyle = hex + 'cc';   // ~80% opacity
+        cx.textAlign = 'center';
+        cx.fillText(c.name, 256, 48);
+        cx.font = '18px Segoe UI, sans-serif';
+        cx.fillStyle = hex + '88';
+        cx.fillText('constellation · ' + c.lines.length + ' segments', 256, 76);
+
+        const lblSp = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: new THREE.CanvasTexture(cv), transparent: true, depthWrite: false,
+        }));
+        lblSp.position.copy(centroid);
+        // Place label slightly above the asterism plane
+        lblSp.position.y += Math.max(50, meanDist * 0.06);
+        const lblBase = Math.max(60, meanDist * 0.10);
+        lblSp.scale.set(lblBase * 4, lblBase, 1);
+        scene.add(lblSp);
+        scene.add(lineGroup);
+
+        constellationObjects.push({
+            id: c.id, lineGroup, label: lblSp, color: c.color, meanDist,
+        });
+    });
+})();
+
+// ══════════════════════════════════════════════════════════════════════════
 //  SIDEBAR STAR LIST
 // ══════════════════════════════════════════════════════════════════════════
 const starListEl = document.getElementById('star-list');
@@ -4182,6 +4659,10 @@ document.getElementById('tog-labels').addEventListener('change', e => {
 });
 document.getElementById('tog-plane').addEventListener('change', e => {
     galPlane.visible = e.target.checked;
+});
+let constellationsEnabled = true;
+document.getElementById('tog-constellations').addEventListener('change', e => {
+    constellationsEnabled = e.target.checked;
 });
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -4458,6 +4939,41 @@ function animate() {
         ring.visible = v;
         lbl.visible  = v;
     });
+
+    // ── Constellation lines + labels — local-sky feature, fade in/out by
+    //    distance from the Sun.  Visible from ~5 ly out (after leaving the
+    //    GC zoom) and fade out as the camera leaves the solar neighbourhood.
+    {
+        const togOn = constellationsEnabled;
+        const camFromSun = camera.position.distanceTo(SUN3);
+        constellationObjects.forEach(({ lineGroup, label, meanDist }) => {
+            // Fade window centred on the constellation's mean stellar distance
+            // — lines reach full brightness when the camera is just outside the
+            // constellation (so the asterism reads from a useful vantage point)
+            // and fade to zero well before galactic zoom.
+            const inner = Math.max(5, meanDist * 0.4);     // close enough for lines to matter
+            const outer = Math.max(2500, meanDist * 12);   // far enough that pattern is gone
+            let alpha = 0;
+            if (camFromSun > inner && camFromSun < outer) {
+                // Triangular fade peaking at meanDist × 1.5
+                const peak = meanDist * 1.5;
+                alpha = camFromSun < peak
+                    ? (camFromSun - inner) / Math.max(1, peak - inner)
+                    : 1 - (camFromSun - peak) / Math.max(1, outer - peak);
+                alpha = Math.max(0, Math.min(1, alpha));
+            }
+            // Apply toggle + zoom alpha
+            const visible = togOn && alpha > 0.02;
+            lineGroup.visible = visible;
+            label.visible     = visible && alpha > 0.4;
+            if (visible) {
+                lineGroup.children.forEach(line => {
+                    line.material.opacity = 0.62 * alpha;
+                });
+                label.material.opacity = alpha;
+            }
+        });
+    }
 
     // ── M31 trajectory: show only in universe view ────────────────
     const showTraj = camDistFromOrigin > 200000;
