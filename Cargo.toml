@@ -2,12 +2,20 @@
 members  = ["crates/disc-hydro"]
 resolver = "2"
 
-# `rust/` holds the standalone Bevy `star_renderer` crate, which has its own
-# Cargo.lock, its own .cargo/config.toml, and its own CI workflow
-# (.github/workflows/build-wasm.yml). It is deliberately NOT part of this
-# workspace — excluding it here stops Cargo from auto-merging it when it
-# walks up looking for a workspace root.
-exclude  = ["rust"]
+# Every other Rust crate in this repo predates the disc-hydro workspace and
+# is a standalone package with its own Cargo.lock and its own bespoke build
+# pipeline (Vercel `build-wasm.sh`, GitHub Actions workflows, etc.).
+# Excluding them here stops Cargo from auto-merging them when it walks up
+# the directory tree looking for a workspace root — which would otherwise
+# break every existing CI / deployment path.
+#
+# Inventory:
+#   rust/          standalone Bevy `star_renderer`     (.github/workflows/build-wasm.yml)
+#   rust-sstar/    Sgr A* S-star orbital propagator   (build-wasm.sh)
+#   rust-forecast/ space-weather forecasting kernel   (build-wasm.sh)
+#   rust-sgp4/     SGP4 satellite propagator          (build-wasm.sh)
+#   rust-sunfield/ solar surface field renderer       (build-wasm.sh)
+exclude  = ["rust", "rust-sstar", "rust-forecast", "rust-sgp4", "rust-sunfield"]
 
 [profile.release]
 opt-level        = 3
