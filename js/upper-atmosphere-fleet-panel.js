@@ -1387,13 +1387,22 @@ export class FleetPanel {
             const conjCorr = correlateAnomalyWithConjunctions(
                 asset, anomDet, this.fleet.getConjunctionArchive?.() || []);
 
+            // Phase 19: maneuver-type hint from the residual direction.
+            // Always question-marked because we cannot distinguish a true
+            // operator burn from an unmodelled drag surprise without
+            // telemetry — but for the common conj-avoidance case the
+            // direction inference is right far more often than not.
+            const maneuverWord = conjCorr?.maneuverHint === 'boost' ? 'boost burn?'
+                                : conjCorr?.maneuverHint === 'brake' ? 'brake burn?'
+                                                                     : null;
             const causeLines = conjCorr
                 ? [
                     `\nPossible cause: avoidance maneuver after `
                     + `${conjCorr.partnerName} conjunction`
                     + (conjCorr.daysGap > 0
                         ? ` (TCA ${conjCorr.daysGap.toFixed(1)} d ago, P(conj) ${(conjCorr.pConj*100).toFixed(0)}%)`
-                        : ` (TCA ${(-conjCorr.daysGap).toFixed(1)} d ahead — pre-emptive burn?, P(conj) ${(conjCorr.pConj*100).toFixed(0)}%)`),
+                        : ` (TCA ${(-conjCorr.daysGap).toFixed(1)} d ahead — pre-emptive burn?, P(conj) ${(conjCorr.pConj*100).toFixed(0)}%)`)
+                    + (maneuverWord ? ` — ${maneuverWord}` : ''),
                     `Other plausible causes: attitude change, geometry change, debris event.`,
                   ]
                 : [
@@ -1405,9 +1414,13 @@ export class FleetPanel {
                 + causeLines.join('\n') + '\n'
                 + `Refresh TLE history with ⟳ over a few days to confirm or clear.`;
             // Augment the badge label with a one-word hint when we have
-            // a likely conjunction-related cause. Operators see the
-            // suspect inline; the tooltip carries the full attribution.
-            const conjHint = conjCorr ? ' · likely conj' : '';
+            // a likely conjunction-related cause. Maneuver type, when
+            // we have it, replaces the generic "likely conj" — operator
+            // gets a more specific signal in the same space.
+            const conjHint = !conjCorr ? ''
+                : conjCorr.maneuverHint === 'boost' ? ' · likely boost'
+                : conjCorr.maneuverHint === 'brake' ? ' · likely brake'
+                                                    : ' · likely conj';
             badges.push(`<span class="ua-fleet-badge ua-fleet-badge--high ua-fleet-badge-anom"
                               title="${aTitle}">⚠ ANOMALY z=${anomDet.z.toFixed(1)}σ${conjHint}</span>`);
         }

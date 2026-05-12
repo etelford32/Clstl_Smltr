@@ -685,6 +685,27 @@ const CORR_SCORE_THRESHOLD     = 0.05; // composite score required to surface
  * Find the most likely conjunction event responsible for an anomaly,
  * if any. Scoring: pConj × Gaussian(daysGap centered at causal peak).
  *
+ * Phase 19: also infers a maneuver-type hint from the residual direction.
+ * Sign convention: residual_km = a_pred − a_real, anomDet.direction is
+ * the sign of (latest − median):
+ *
+ *   direction='high'  latest residual UP   →  model over-predicts alt
+ *                                              MORE than usual → sat is
+ *                                              LOWER than expected → likely
+ *                                              a brake burn (rare for
+ *                                              conjunction avoidance, more
+ *                                              common for end-of-life or
+ *                                              an unmodelled drag spike)
+ *   direction='low'   latest residual DOWN →  sat HIGHER than expected →
+ *                                              likely a boost burn (the
+ *                                              canonical avoidance burn:
+ *                                              raise orbit, phase shift,
+ *                                              drift away from approach)
+ *
+ * The hint is operator-grade ambiguous — we can't tell a boost burn from
+ * a benign drag-coefficient surprise without telemetry, so the tooltip
+ * always carries a question mark.
+ *
  * @param {object} asset                fleet entry (must have `id`)
  * @param {object} anomDet              output of detectAnomaly()
  * @param {Array}  archive              output of getConjunctionArchive()
@@ -694,6 +715,7 @@ const CORR_SCORE_THRESHOLD     = 0.05; // composite score required to surface
  *   pConj: number,
  *   daysGap: number,                   // anomaly observation − TCA, days
  *   score: number,                     // composite score [0..1]
+ *   maneuverHint: 'boost' | 'brake' | null,   // direction inference
  * }|null}
  */
 export function correlateAnomalyWithConjunctions(asset, anomDet, archive) {
@@ -730,6 +752,13 @@ export function correlateAnomalyWithConjunctions(asset, anomDet, archive) {
         }
     }
     if (!best || best.score < CORR_SCORE_THRESHOLD) return null;
+    // Phase 19: maneuver-type hint from anomaly direction.
+    //   direction='low'   sat HIGHER than expected → boost (raise orbit)
+    //   direction='high'  sat LOWER than expected  → brake (rare for
+    //                                                  conj avoidance)
+    best.maneuverHint = anomDet.direction === 'low'  ? 'boost'
+                      : anomDet.direction === 'high' ? 'brake'
+                                                     : null;
     return best;
 }
 
