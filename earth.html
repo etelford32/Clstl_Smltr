@@ -613,6 +613,54 @@ nav {
     margin-left:auto; align-self:center;
 }
 
+/* ─── Forecast Models panel (models-panel.js) ────────────────────
+   Lightweight collapsible list of the active statistical forecasters
+   in forecaster_registry. Lives inside its own .lyr-section in the
+   Layers panel; the section header inherits the existing collapse
+   chevron behaviour. */
+.models-list { display:flex; flex-direction:column; gap: var(--sp-2); }
+.models-row {
+    border:1px solid var(--c-border-faint); border-radius: var(--r-sm);
+    background: rgba(255,255,255,.015);
+    overflow: hidden;
+}
+.models-row[open] { background: rgba(var(--c-accent-rgb),.05); }
+.models-row-head {
+    display:flex; align-items:center; gap: var(--sp-2);
+    padding: 5px var(--sp-3); cursor:pointer;
+    list-style:none;       /* hide default disclosure triangle */
+    font-size:10.5px;
+}
+.models-row-head::-webkit-details-marker { display:none; }
+.models-row-icon { font-size:13px; opacity:.8; width:14px; text-align:center; }
+.models-row-name { color:#cfe9f5; font-weight:600; flex:1; }
+.models-row-id   {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size:9px; color:#667; letter-spacing:.05em;
+}
+.models-row-body {
+    padding: 0 var(--sp-3) var(--sp-3) calc(var(--sp-3) + 18px);
+    font-size:9.5px; line-height:1.5;
+}
+.models-row-blurb { color:#9ab3c3; margin: var(--sp-1) 0 var(--sp-2); }
+.models-row-tech  { color:#557; font-size:9px; }
+.models-row-family {
+    color:#779;
+    text-transform:uppercase; letter-spacing:.08em; font-weight:600;
+}
+.models-row-notes { color:#557; }
+.models-empty {
+    font-size:10px; color:#779; text-align:center; padding: var(--sp-3) 0;
+    font-style:italic;
+}
+.models-empty-detail { font-size:9px; color:#557; margin-top: var(--sp-1); }
+.models-footer {
+    font-size:9px; color:#557; padding: var(--sp-2) 0 0;
+    text-align:center;
+}
+.models-footer a { color:#7ad; text-decoration:none; }
+.models-footer a:hover { text-decoration:underline; }
+
 /* ─── Info panel ─────────────────────────────────────────────── */
 #info-panel {
     position:absolute; bottom:52px; right:10px; z-index:50;
@@ -2201,6 +2249,17 @@ nav {
             </div>
         </div>
 
+        <!-- ── Forecast Models ──
+             Collapsed by default; opens to a list of the active statistical
+             forecasters that power the time-slider's forecast frames. Pulled
+             from forecaster_registry via /api/forecast/models. -->
+        <div class="lyr-section collapsed" data-lyr-section="forecast-models">
+            <div class="lyr-section-hdr"><span>FORECAST MODELS</span><span class="lyr-chevron">▾</span></div>
+            <div class="lyr-section-body">
+                <div id="models-panel-host"></div>
+            </div>
+        </div>
+
         <!-- ── Magnetosphere ── -->
         <div class="lyr-section collapsed" data-lyr-section="magneto">
             <div class="lyr-section-hdr"><span>MAGNETOSPHERE</span><span class="lyr-chevron">▾</span></div>
@@ -2906,6 +2965,7 @@ import { WeatherFrameResolver }  from './js/weather-frame-resolver.js';
 import { WeatherForecastFeed }   from './js/weather-forecast-feed.js';
 import { ForecastRegistry, PersistenceForecaster, CHANNEL_NAMES, FORECAST_HORIZONS_H } from './js/weather-forecast.js';
 import { WeatherForecastValidator } from './js/weather-forecast-validation.js';
+import { mountModelsPanel } from './js/models-panel.js';
 import { PrecipClimatology }        from './js/precip-climatology.js';
 import { PrecipBiasTracker }        from './js/precip-bias-tracker.js';
 import { NasaPrecipExtractor }      from './js/nasa-precip-extractor.js';
@@ -9657,6 +9717,33 @@ document.querySelectorAll('.lyr-section[data-lyr-section]').forEach(sec => {
         else if (stored === '0') sec.classList.remove('collapsed');
     } catch {}
 });
+
+// ── Forecast Models panel: lazy-mount on first expand ──
+// The panel makes a network call to /api/forecast/models; deferring
+// the mount until the user actually opens the section keeps the page-
+// load critical path clean for visitors who don't care.
+(function mountForecastModelsPanel() {
+    const host    = document.getElementById('models-panel-host');
+    const section = document.querySelector('[data-lyr-section="forecast-models"]');
+    if (!host || !section) return;
+
+    let mounted = false;
+    function mountOnce() {
+        if (mounted) return;
+        mounted = true;
+        mountModelsPanel(host).catch(() => { mounted = false; });
+    }
+    // If the section was restored as expanded (user previously opened
+    // it), mount immediately. Otherwise wait for the first click.
+    if (!section.classList.contains('collapsed')) mountOnce();
+
+    const hdr = section.querySelector('.lyr-section-hdr');
+    if (hdr) {
+        hdr.addEventListener('click', () => {
+            if (!section.classList.contains('collapsed')) mountOnce();
+        });
+    }
+})();
 
 // ═══════════════════════════════════════════════════════════════
 //  MOBILE SWIPE-DOWN TO CLOSE PANELS
