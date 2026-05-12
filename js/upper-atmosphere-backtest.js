@@ -491,5 +491,166 @@ export async function runFleetSkill(assets, {
     };
 }
 
+// ── Anomaly detection (Phase 15) ────────────────────────────────────────────
+//
+// The operator's question: "Has something CHANGED about this asset?" —
+// new attitude regime, recent maneuver, debris event, geometry change.
+// Operationally we answer it by looking at the residual time series
+// the fleet-skill sweeps produce: when the LATEST residual sits >3σ
+// away from the asset's OWN historical median, the model's assumptions
+// no longer fit the asset.
+//
+// We use robust statistics (median + median-absolute-deviation) rather
+// than mean + standard deviation:
+//   - one storm-driven outlier shouldn't trash the baseline
+//   - MAD is the established robust σ for unimodal distributions
+//   - 1.4826 makes MAD numerically equivalent to σ under a normal
+//     distribution, so "3σ" thresholds still mean what operators expect
+//
+// Pre-filtering: we drop history entries whose (bcM2PerKg, bcSigmaRel)
+// don't match the current asset state. Changing σ_BC shifts the
+// residual systematically, so older entries aren't comparable.
+
+const MAD_TO_SIGMA  = 1.4826;
+const Z_THRESHOLD   = 3.0;
+const MIN_SAMPLES   = 5;        // need at least 5 prior points for a stable MAD
+// Practical-significance floor: an asset whose model fits the last week
+// to within 0.5 km isn't telling the operator anything actionable even
+// if a 0.05 km blip is technically 3σ off a 0.015 km baseline. Z-threshold
+// gates "is this statistically a change?"; this gates "is the magnitude
+// operationally interesting?". BOTH must trip to flag an anomaly.
+const MIN_DEVIATION_KM = 0.5;
+
+/**
+ * Detect whether the latest residual on an asset's history is an
+ * anomaly relative to its own past.
+ *
+ * @param {object} asset                fleet-store entry with residualHistory
+ * @param {object} [opts]
+ * @param {number} [opts.zThreshold=3]
+ * @param {number} [opts.minSamples=5]
+ * @returns {{
+ *   isAnomaly: boolean,
+ *   reason?: string,           // when isAnomaly=false and we know why
+ *   latestResidual: number|null,
+ *   latestRanAt:    number|null,
+ *   median: number|null,
+ *   sigma:  number|null,       // = MAD × 1.4826 (normal-equivalent σ)
+ *   z:      number|null,       // |latest − median| / sigma
+ *   sampleCount: number,       // entries used in stats (after BC filter)
+ *   totalCount:  number,
+ *   trimmedForBcChange: number,
+ *   direction: 'high' | 'low' | null,  // sign of (latest − median)
+ * }}
+ */
+export function detectAnomaly(asset, {
+    zThreshold      = Z_THRESHOLD,
+    minSamples      = MIN_SAMPLES,
+    minDeviationKm  = MIN_DEVIATION_KM,
+} = {}) {
+    const totalCount = Array.isArray(asset?.residualHistory)
+        ? asset.residualHistory.length : 0;
+    const baseRet = {
+        isAnomaly: false, reason: 'no-history',
+        latestResidual: null, latestRanAt: null,
+        median: null, sigma: null, z: null,
+        sampleCount: 0, totalCount,
+        trimmedForBcChange: 0,
+        direction: null,
+    };
+    if (totalCount === 0) return baseRet;
+
+    // Filter entries that match the asset's CURRENT BC params — residual
+    // is sensitive to BC, so old-config entries aren't comparable.
+    const bc  = asset.bcM2PerKg ?? null;
+    const bcS = asset.bcSigmaRel ?? null;
+    const tol = 1e-6;
+    const filtered = asset.residualHistory.filter(e =>
+        Math.abs((e.bcM2PerKg  ?? bc)  - bc)  < tol &&
+        Math.abs((e.bcSigmaRel ?? bcS) - bcS) < tol);
+    const trimmed  = totalCount - filtered.length;
+
+    // The latest entry IS the candidate; we need ≥ minSamples PRIOR
+    // entries to score it against. So total filtered count needs
+    // minSamples + 1.
+    if (filtered.length < minSamples + 1) {
+        return {
+            ...baseRet,
+            reason: 'too-few-samples',
+            sampleCount: filtered.length,
+            trimmedForBcChange: trimmed,
+            latestResidual: filtered[filtered.length - 1]?.residual_km ?? null,
+            latestRanAt:    filtered[filtered.length - 1]?.ranAt        ?? null,
+        };
+    }
+
+    // Sort by ranAt, take the LAST entry as the candidate, evaluate
+    // it against the median + MAD of all earlier filtered entries.
+    const sorted = filtered.slice().sort((a, b) => a.ranAt - b.ranAt);
+    const latest = sorted[sorted.length - 1];
+    const prior  = sorted.slice(0, -1).map(e => e.residual_km);
+
+    // Robust stats: median, then median absolute deviation.
+    const sortedPrior = prior.slice().sort((a, b) => a - b);
+    const median = _median(sortedPrior);
+    const deviations = sortedPrior.map(v => Math.abs(v - median)).sort((a, b) => a - b);
+    const mad = _median(deviations);
+    // Sigma equivalent (normal-distribution interpretation). A flat
+    // series with MAD=0 implies the prior was perfectly consistent;
+    // any deviation now is "infinitely many σ" — we floor sigma to
+    // a small epsilon to keep z finite for the operator.
+    const sigma = Math.max(mad * MAD_TO_SIGMA, 1e-6);
+    const delta = latest.residual_km - median;
+    const z = Math.abs(delta) / sigma;
+    // Composite gate: both statistical AND practical significance.
+    const tripsZ      = z >= zThreshold;
+    const tripsMag    = Math.abs(delta) >= minDeviationKm;
+    const isAnomaly   = tripsZ && tripsMag;
+
+    return {
+        isAnomaly,
+        reason: isAnomaly ? null
+                          : tripsZ      ? 'sub-magnitude'  // z fired but Δ too small
+                          : tripsMag    ? 'sub-sigma'      // Δ big but not statistically significant
+                                        : 'within-band',
+        latestResidual: latest.residual_km,
+        latestRanAt:    latest.ranAt,
+        median, sigma, z,
+        sampleCount: prior.length,
+        totalCount,
+        trimmedForBcChange: trimmed,
+        direction: delta > 0 ? 'high' : delta < 0 ? 'low' : null,
+    };
+}
+
+function _median(sortedArr) {
+    if (!sortedArr.length) return 0;
+    const n = sortedArr.length;
+    return n % 2 === 1
+        ? sortedArr[(n - 1) / 2]
+        : 0.5 * (sortedArr[n / 2 - 1] + sortedArr[n / 2]);
+}
+
+/**
+ * Sweep `detectAnomaly` across the fleet. Returns the per-asset detector
+ * outputs keyed by id, plus a summary count.
+ */
+export function detectFleetAnomalies(assets, opts) {
+    const byId = {};
+    let anomalous = 0, eligible = 0;
+    for (const a of assets) {
+        const det = detectAnomaly(a, opts);
+        byId[a.id] = det;
+        if (det.reason !== 'no-history' && det.reason !== 'too-few-samples') {
+            eligible++;
+            if (det.isAnomaly) anomalous++;
+        }
+    }
+    return {
+        summary: { total: assets.length, eligible, anomalous },
+        byId,
+    };
+}
+
 // Re-exports for testing.
-export { _buildDriverSequence, _integrateForward, _smaAtEpoch };
+export { _buildDriverSequence, _integrateForward, _smaAtEpoch, _median };

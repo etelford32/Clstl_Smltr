@@ -779,6 +779,29 @@ input[type=range]::-moz-range-thumb {
 .ua-fleet-skill-cnt--over  { color:#ffaa20; border-color:rgba(255,170,32,.45); background:rgba(255,170,32,.08); }
 .ua-fleet-skill-cnt--under { color:#ff5060; border-color:rgba(255,80,96,.45);  background:rgba(255,80,96,.08); }
 .ua-fleet-skill-cnt--gap   { color:#789;    border-color:rgba(150,170,200,.30); background:rgba(8,4,22,.55); }
+.ua-fleet-skill-cnt--anom  {
+    color:#ff5060;
+    border-color:rgba(255,80,96,.55);
+    background:rgba(255,80,96,.12);
+    cursor:help;
+    /* Pulse animation to draw the eye to a new anomaly. Subtle — we
+       only show this chip when count > 0, so the operator's already
+       had it surface naturally; the pulse just makes "new" assets
+       easier to find at-a-glance. */
+    animation: ua-fleet-anom-pulse 2.4s ease-in-out infinite;
+}
+@keyframes ua-fleet-anom-pulse {
+    0%, 100% { box-shadow: 0 0 0 rgba(255,80,96,0); }
+    50%      { box-shadow: 0 0 8px rgba(255,80,96,.45); }
+}
+
+/* Per-asset ANOMALY badge — same severity colour as REENTRY but with
+ * a heavier border so it reads as "something CHANGED about this
+ * asset" rather than "a known threshold was crossed". */
+.ua-fleet-badge-anom {
+    border-width:2px !important;
+    cursor:help;
+}
 .ua-fleet-skill-stat {
     color:#9ab; font-size:.6rem;
     font-variant-numeric:tabular-nums;

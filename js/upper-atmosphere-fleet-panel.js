@@ -41,8 +41,10 @@ import { isLoaded as isF107HistoryLoaded, ensureLoaded as ensureF107History, onU
     from './f107-history.js';
 import { isLoaded as isApHistoryLoaded,   ensureLoaded as ensureApHistory,   onUpdate as onApUpdate }
     from './ap-history.js';
-import { runBacktest, runFleetSkill, pickHistoricalForBacktest }
-    from './upper-atmosphere-backtest.js';
+import {
+    runBacktest, runFleetSkill, pickHistoricalForBacktest,
+    detectAnomaly, detectFleetAnomalies,
+} from './upper-atmosphere-backtest.js';
 
 // Debounce window for full-fleet re-analysis on incoming ticks. Compute
 // is cheap (~50 µs/asset) but we don't want to thrash mid-slider-drag.
@@ -775,6 +777,26 @@ export class FleetPanel {
             const out = await runFleetSkill(fleet, { targetDays: 7, monteCarloN: 24 });
             this._fleetSkill = out;
             this._fleetSkillKey = key;
+            // Phase 15: persist each asset's residual into its rolling
+            // history so the anomaly detector has a time series. Same-pair
+            // dedup is handled inside recordResidual — re-running on the
+            // same TLE pair won't pollute the series.
+            for (const id of Object.keys(out.results || {})) {
+                const r = out.results[id];
+                if (r.status !== 'ok' || !Number.isFinite(r.residual_km)) continue;
+                const a = this.fleet.findById(id);
+                if (!a) continue;
+                this.fleet.recordResidual(id, {
+                    ranAt:             out.summary.ranAt,
+                    residual_km:       r.residual_km,
+                    relativeError:     r.relativeError,
+                    deltaDays:         r.deltaDays,
+                    historicalEpochMs: r.historicalEpochMs ?? null,
+                    currentEpochMs:    r.currentEpochMs ?? null,
+                    bcM2PerKg:         a.bcM2PerKg,
+                    bcSigmaRel:        a.bcSigmaRel,
+                });
+            }
         } catch (err) {
             console.warn('[FleetPanel] fleet-skill sweep failed:', err?.message || err);
             this._fleetSkill = null;
@@ -820,10 +842,19 @@ export class FleetPanel {
                        : calPct >= 75 ? 'is-high'
                        : calPct >= 50 ? 'is-med'
                        : 'is-low';
+        // Phase 15 anomaly tally — runs locally over the asset histories,
+        // independent of the runFleetSkill output. Always cheap (no
+        // backtest re-run; just per-asset median+MAD on the stored series).
+        const anomSweep = detectFleetAnomalies(fleet);
+        const anomCnt = anomSweep.summary.anomalous;
+
         const counts = `
             <span class="ua-fleet-skill-cnt ua-fleet-skill-cnt--cal">✓ ${s.calibrated} calibrated</span>
             ${s.over  ? `<span class="ua-fleet-skill-cnt ua-fleet-skill-cnt--over">↑ ${s.over} over</span>`   : ''}
             ${s.under ? `<span class="ua-fleet-skill-cnt ua-fleet-skill-cnt--under">↓ ${s.under} under</span>` : ''}
+            ${anomCnt ? `<span class="ua-fleet-skill-cnt ua-fleet-skill-cnt--anom"
+                              title="Assets whose latest residual is >3σ off their own historical median AND >0.5 km in magnitude. Click each card's ANOMALY badge for the breakdown.">
+                              ⚠ ${anomCnt} anomaly${anomCnt === 1 ? '' : 'ies'}</span>` : ''}
             ${s.noHistory ? `<span class="ua-fleet-skill-cnt ua-fleet-skill-cnt--gap">∅ ${s.noHistory} no-hist</span>` : ''}
             ${s.driverGap ? `<span class="ua-fleet-skill-cnt ua-fleet-skill-cnt--gap">⚠ ${s.driverGap} driver-gap</span>` : ''}
             ${s.tooRecent ? `<span class="ua-fleet-skill-cnt ua-fleet-skill-cnt--gap">⏳ ${s.tooRecent} too-recent</span>` : ''}
@@ -1103,6 +1134,29 @@ export class FleetPanel {
                 + `\nP(d ≤ ${conj.thresholdKm} km) ≈ ${pct}%${sigmaTxt}`;
             badges.push(`<span class="ua-fleet-badge ${cls}" data-conj-partner="${partnerId}"
                               title="${title}">CONJ ${_esc(partner)} ${pct}%</span>`);
+        }
+
+        // Phase 15: anomaly badge. Reads from the asset's persisted
+        // residual history; only fires when both the z-score AND the
+        // magnitude floor (default 0.5 km) trip, so we don't spam the
+        // operator about statistically-significant-but-trivial drift.
+        const asset = this.fleet.findById(r.id);
+        if (asset) {
+            const det = detectAnomaly(asset);
+            if (det.isAnomaly) {
+                const dir = det.direction === 'high'
+                    ? 'higher residual than baseline'
+                    : 'lower residual than baseline';
+                const deltaKm = (det.latestResidual - det.median);
+                const sign = deltaKm >= 0 ? '+' : '−';
+                const aTitle = `Anomaly detected — latest residual ${sign}${Math.abs(deltaKm).toFixed(2)} km off median.\n`
+                    + `Sample: ${det.sampleCount} prior obs · median ${det.median.toFixed(2)} km · σ ${det.sigma.toFixed(2)} km\n`
+                    + `z = ${det.z.toFixed(1)} (${dir})\n`
+                    + `Possible causes: recent maneuver, attitude change, geometry change, debris event.\n`
+                    + `Refresh TLE history with ⟳ over a few days to confirm or clear.`;
+                badges.push(`<span class="ua-fleet-badge ua-fleet-badge--high ua-fleet-badge-anom"
+                                  title="${aTitle}">⚠ ANOMALY z=${det.z.toFixed(1)}σ</span>`);
+            }
         }
 
         // SVG mini-chart: nowcast vs forecast altitude over the horizon.

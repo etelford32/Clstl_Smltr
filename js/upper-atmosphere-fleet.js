@@ -71,6 +71,10 @@ const BC_SIGMA_BY_NORAD = Object.freeze({
 // which is the operator-grade window for Phase 14's fleet-skill backtest
 // (7-day default, falling back to whatever's available within 1–30 days).
 const TLE_HISTORY_MAX = 8;
+// Residual time-series cap. Phase 15's anomaly detector wants ~30 days
+// of daily samples to build a robust MAD baseline; 30 covers a full
+// solar-rotation cycle so a single storm doesn't bias the median.
+const RESIDUAL_HISTORY_MAX = 30;
 
 // ── Persistence ──────────────────────────────────────────────────────────────
 
@@ -99,6 +103,9 @@ function _save(assets) {
             bcSigmaRel:  Number.isFinite(a.bcSigmaRel) ? a.bcSigmaRel : DEFAULT_BC_SIGMA_REL,
             tleHistory:  Array.isArray(a.tleHistory)
                 ? a.tleHistory.slice(0, TLE_HISTORY_MAX)
+                : [],
+            residualHistory: Array.isArray(a.residualHistory)
+                ? a.residualHistory.slice(-RESIDUAL_HISTORY_MAX)
                 : [],
             addedAt:     a.addedAt ?? Date.now(),
         }));
@@ -246,6 +253,8 @@ export class UpperAtmosphereFleet {
                 bcM2PerKg:   Number.isFinite(a.bcM2PerKg) ? a.bcM2PerKg : _defaultBcFor(a.noradId),
                 bcSigmaRel:  Number.isFinite(a.bcSigmaRel) ? a.bcSigmaRel : _defaultBcSigmaFor(a.noradId),
                 tleHistory:  Array.isArray(a.tleHistory) ? a.tleHistory.slice(0, TLE_HISTORY_MAX) : [],
+                residualHistory: Array.isArray(a.residualHistory)
+                    ? a.residualHistory.slice(-RESIDUAL_HISTORY_MAX) : [],
                 status:      (a.line1 && a.line2) ? 'ready' : 'pending',
                 err:         null,
                 addedAt:     a.addedAt ?? Date.now(),
@@ -303,6 +312,7 @@ export class UpperAtmosphereFleet {
             bcM2PerKg:   Number.isFinite(bcM2PerKg) ? bcM2PerKg : _defaultBcFor(noradId),
             bcSigmaRel:  Number.isFinite(bcSigmaRel) ? bcSigmaRel : _defaultBcSigmaFor(noradId),
             tleHistory:  [],
+            residualHistory: [],
             status:      'pending',
             err:         null,
             addedAt:     Date.now(),
@@ -382,6 +392,7 @@ export class UpperAtmosphereFleet {
                 bcM2PerKg:   Number.isFinite(bcM2PerKg) ? bcM2PerKg : _defaultBcFor(p.noradId),
                 bcSigmaRel:  Number.isFinite(bcSigmaRel) ? bcSigmaRel : _defaultBcSigmaFor(p.noradId),
                 tleHistory:  [],
+                residualHistory: [],
                 status:      'ready',
                 err:         null,
                 addedAt:     Date.now(),
@@ -420,6 +431,7 @@ export class UpperAtmosphereFleet {
                 bcM2PerKg:   _defaultBcFor(t.noradId),
                 bcSigmaRel:  _defaultBcSigmaFor(t.noradId),
                 tleHistory:  [],
+                residualHistory: [],
                 status:      'ready',
                 err:         null,
                 addedAt:     Date.now(),
@@ -450,6 +462,62 @@ export class UpperAtmosphereFleet {
         const asset = this.findById(id);
         if (!asset || !Number.isFinite(bcSigmaRel) || bcSigmaRel < 0 || bcSigmaRel > 1) return false;
         asset.bcSigmaRel = bcSigmaRel;
+        _save(this._assets);
+        this._notify();
+        return true;
+    }
+
+    /**
+     * Append a residual observation to an asset's rolling history (Phase 15).
+     * Caller is the panel after each runFleetSkill sweep. The history is
+     * the time series Phase 15's anomaly detector consumes.
+     *
+     * Same-tle-epoch dedup: re-running a sweep against the same TLE pair
+     * shouldn't double-count. We key on the current TLE's epoch field
+     * (cols 18..31 of line 1) plus the historical TLE's epoch.
+     *
+     * @param {string} id      asset id
+     * @param {object} entry   { ranAt, residual_km, relativeError, deltaDays,
+     *                           historicalEpochMs, currentEpochMs,
+     *                           bcM2PerKg, bcSigmaRel }
+     * @returns {boolean}      true if appended; false if dedup'd or
+     *                          asset missing
+     */
+    recordResidual(id, entry) {
+        const asset = this.findById(id);
+        if (!asset || !entry || !Number.isFinite(entry.residual_km)) return false;
+        if (!Array.isArray(asset.residualHistory)) asset.residualHistory = [];
+        // Dedup against the same (historical, current) TLE pair — sweeps
+        // re-run on BC edits but the underlying observation is unchanged
+        // unless the TLEs moved. We DO want a re-entry when BC changed
+        // (the residual itself shifts), so include bc/bcSigma in the key.
+        const key = (e) => `${e.historicalEpochMs ?? 0}|${e.currentEpochMs ?? 0}`
+                         + `|${Math.round((e.bcM2PerKg ?? 0) * 1e6)}`
+                         + `|${Math.round((e.bcSigmaRel ?? 0) * 1000)}`;
+        const k = key(entry);
+        const dupIdx = asset.residualHistory.findIndex(e => key(e) === k);
+        if (dupIdx >= 0) {
+            // Refresh the timestamp on the dup so the operator sees the
+            // latest sweep's freshness without losing the original value.
+            asset.residualHistory[dupIdx].ranAt = entry.ranAt;
+            _save(this._assets);
+            this._notify();
+            return false;
+        }
+        asset.residualHistory.push(entry);
+        if (asset.residualHistory.length > RESIDUAL_HISTORY_MAX) {
+            asset.residualHistory.splice(0, asset.residualHistory.length - RESIDUAL_HISTORY_MAX);
+        }
+        _save(this._assets);
+        this._notify();
+        return true;
+    }
+
+    /** Drop an asset's residual history (operator-triggered "reset baseline"). */
+    clearResiduals(id) {
+        const asset = this.findById(id);
+        if (!asset) return false;
+        asset.residualHistory = [];
         _save(this._assets);
         this._notify();
         return true;
