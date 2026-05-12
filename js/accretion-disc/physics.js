@@ -108,7 +108,9 @@ export function makeDiscGrid({ Mstar, Mdisc, rInAU = 0.1, rOutAU = 60, n = 90, a
 }
 
 // One explicit LBP step. dt should satisfy CFL: dt < 0.4 * min(dr^2 / nu).
-export function stepDisc(disc, dt) {
+// Optional second arg `{ photoEvap: bool }` toggles the Owen+ (2012) sink.
+export function stepDisc(disc, dt, opts = {}) {
+    const usePhotoEvap = opts.photoEvap !== false;
     const { r, sigma, T, n, Mstar, alpha, Lstar } = disc;
     const newSigma = new Float64Array(n);
 
@@ -159,13 +161,15 @@ export function stepDisc(disc, dt) {
     // Apply photo-evaporation: Owen et al. (2012) -- simple wind sink at r > 1 AU.
     // F_w(r) ~ 1e-9 Msun/yr * (r/AU)^(-2) once disc age > 1 Myr; we fold it
     // into the explicit Sigma update each step proportional to local Sigma.
-    const photoRate = 1e-9 * M_SUN / YEAR; // kg/s
-    for (let i = 0; i < n; i++) {
-        const rAU = r[i] / AU;
-        if (rAU < 1) continue;
-        const local = photoRate / (2 * Math.PI * r[i] * (r[i] - (i > 0 ? r[i-1] : r[0]))) * Math.pow(rAU, -2);
-        const dSig  = Math.min(newSigma[i], local * dt);
-        newSigma[i] -= dSig;
+    if (usePhotoEvap) {
+        const photoRate = 1e-9 * M_SUN / YEAR; // kg/s
+        for (let i = 0; i < n; i++) {
+            const rAU = r[i] / AU;
+            if (rAU < 1) continue;
+            const local = photoRate / (2 * Math.PI * r[i] * (r[i] - (i > 0 ? r[i-1] : r[0]))) * Math.pow(rAU, -2);
+            const dSig  = Math.min(newSigma[i], local * dt);
+            newSigma[i] -= dSig;
+        }
     }
 
     for (let i = 0; i < n; i++) sigma[i] = newSigma[i];
