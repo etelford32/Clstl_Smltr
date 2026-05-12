@@ -652,5 +652,107 @@ export function detectFleetAnomalies(assets, opts) {
     };
 }
 
+// ── Phase 18: anomaly ↔ conjunction correlation ─────────────────────────────
+//
+// When an asset gets flagged as anomalous AND it recently appeared in a
+// high-P conjunction event, the operator most-likely cause is an
+// avoidance maneuver (operator burned a small Δv to dodge, the model
+// doesn't know about the burn, so the new TLE diverges from the
+// pre-burn predicted trajectory → anomaly).
+//
+// Causal-window operational reasoning:
+//   - Conjunction predicted at TCA = T₀
+//   - Operator schedules avoidance ~12-48h before T₀ (faster for late
+//     warnings; slower for fragile assets like Hubble)
+//   - New post-burn TLE published a few hours to a day later
+//   - Our backtest comparing pre-burn TLE (in tleHistory) to post-burn
+//     TLE (current) shows altitude drift → anomaly fires
+//   - So the anomaly's `latestRanAt` lands AFTER the maneuver, which is
+//     AT/BEFORE TCA. The "best" causal match has TCA roughly 1–3 days
+//     before the anomaly observation.
+//
+// We don't claim certainty — we just surface "possible cause" with a
+// score. Operator decides.
+
+const CORR_TCA_MIN_DAYS_BACK   = -1;   // TCA still pending → maneuver in flight
+const CORR_TCA_MAX_DAYS_BACK   = 14;   // older than 2 weeks unlikely to be the cause
+const CORR_PCONJ_FLOOR         = 0.05; // <5% prob isn't worth blaming
+const CORR_RECENCY_PEAK_DAYS   = 2;    // most-likely-causal lag
+const CORR_RECENCY_DECAY_DAYS  = 5;    // Gaussian σ around the peak
+const CORR_SCORE_THRESHOLD     = 0.05; // composite score required to surface
+
+/**
+ * Find the most likely conjunction event responsible for an anomaly,
+ * if any. Scoring: pConj × Gaussian(daysGap centered at causal peak).
+ *
+ * @param {object} asset                fleet entry (must have `id`)
+ * @param {object} anomDet              output of detectAnomaly()
+ * @param {Array}  archive              output of getConjunctionArchive()
+ * @returns {{
+ *   topMatch: object,                  // the conjunction-archive entry
+ *   partnerName: string,
+ *   pConj: number,
+ *   daysGap: number,                   // anomaly observation − TCA, days
+ *   score: number,                     // composite score [0..1]
+ * }|null}
+ */
+export function correlateAnomalyWithConjunctions(asset, anomDet, archive) {
+    if (!anomDet?.isAnomaly || !Number.isFinite(anomDet.latestRanAt)) return null;
+    if (!Array.isArray(archive) || archive.length === 0) return null;
+    const tAnom = anomDet.latestRanAt;
+    const involved = archive.filter(e =>
+        (e.idA === asset.id || e.idB === asset.id)
+        && Number.isFinite(e.tcaAbsMs)
+        && Number.isFinite(e.pConj)
+        && e.pConj >= CORR_PCONJ_FLOOR);
+    if (involved.length === 0) return null;
+
+    let best = null;
+    for (const e of involved) {
+        const daysGap = (tAnom - e.tcaAbsMs) / 86400000;
+        if (daysGap < CORR_TCA_MIN_DAYS_BACK || daysGap > CORR_TCA_MAX_DAYS_BACK) continue;
+        // Gaussian recency weight, peaking at CORR_RECENCY_PEAK_DAYS.
+        // For TCA STILL PENDING (negative daysGap), use 0 distance from
+        // peak — operator may already be maneuvering pre-burn.
+        const distFromPeak = daysGap < 0
+            ? Math.abs(CORR_RECENCY_PEAK_DAYS)            // crude, fine for the operator hint
+            : Math.abs(daysGap - CORR_RECENCY_PEAK_DAYS);
+        const recency = Math.exp(-((distFromPeak / CORR_RECENCY_DECAY_DAYS) ** 2));
+        const score = e.pConj * recency;
+        if (!best || score > best.score) {
+            best = {
+                topMatch: e,
+                partnerName: e.idA === asset.id ? e.nameB : e.nameA,
+                pConj:   e.pConj,
+                daysGap,
+                score,
+            };
+        }
+    }
+    if (!best || best.score < CORR_SCORE_THRESHOLD) return null;
+    return best;
+}
+
+/**
+ * Fleet-wide tally of anomaly↔conjunction correlations. Counts how
+ * many anomalous assets have a likely conjunction-related cause —
+ * useful for the dashboard chip "⚠ 3 anomalies (2 likely conj-related)".
+ *
+ * Cheap: re-uses already-computed detector + archive. No re-sweeping.
+ */
+export function tallyAnomalyConjunctionCorrelations(assets, anomalyByIdOrFn, archive) {
+    const getDet = typeof anomalyByIdOrFn === 'function'
+        ? anomalyByIdOrFn
+        : (a) => anomalyByIdOrFn?.[a.id] || null;
+    let related = 0, anomalous = 0;
+    for (const a of assets) {
+        const det = getDet(a);
+        if (!det?.isAnomaly) continue;
+        anomalous++;
+        if (correlateAnomalyWithConjunctions(a, det, archive)) related++;
+    }
+    return { anomalous, related };
+}
+
 // Re-exports for testing.
 export { _buildDriverSequence, _integrateForward, _smaAtEpoch, _median };
