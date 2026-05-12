@@ -41,6 +41,7 @@ import { isLoaded as isF107HistoryLoaded, ensureLoaded as ensureF107History, onU
     from './f107-history.js';
 import { isLoaded as isApHistoryLoaded,   ensureLoaded as ensureApHistory,   onUpdate as onApUpdate }
     from './ap-history.js';
+import { runBacktest } from './upper-atmosphere-backtest.js';
 
 // Debounce window for full-fleet re-analysis on incoming ticks. Compute
 // is cheap (~50 µs/asset) but we don't want to thrash mid-slider-drag.
@@ -83,6 +84,10 @@ export class FleetPanel {
         this.analyzer.setHorizonHrForProjection(this._projHorizonHr);
 
         this._results = [];                  // last analyzer pass
+        // Backtest state — survives re-renders so the operator's just-
+        // computed validation doesn't blink away on the next realtime
+        // tick. Keyed by asset.id; value is { running, result, pastedTle }.
+        this._backtests = new Map();
         this._alertCooldowns = new Map();    // assetId|kind → fireWallMs
         this._recomputeTimer = null;
         this._tickHandler = null;
@@ -368,6 +373,22 @@ export class FleetPanel {
             if (removeBtn) { this.fleet.remove(removeBtn.dataset.removeId); return; }
             const refreshBtn = e.target.closest?.('button[data-refresh-id]');
             if (refreshBtn) { this.fleet.refresh(refreshBtn.dataset.refreshId); return; }
+            const btRun = e.target.closest?.('button[data-bt-run]');
+            if (btRun) { this._runBacktest(btRun.dataset.btRun); return; }
+            // Track <details> open/close so re-renders preserve operator
+            // state. The summary click fires before the open attribute
+            // toggles, so we read the OPPOSITE of what's currently there.
+            const sum = e.target.closest?.('.ua-fleet-backtest > summary');
+            if (sum) {
+                const det = sum.parentElement;
+                const id  = det?.dataset.btAsset;
+                if (id) {
+                    const st = this._backtests.get(id) || {};
+                    st.expanded = !det.open;
+                    this._backtests.set(id, st);
+                }
+                return;
+            }
         });
         // BC + BC σ editors are inputs (number / range), not buttons —
         // wire 'change' on the cards host so we don't bind per card.
@@ -395,6 +416,17 @@ export class FleetPanel {
             if (sigInput) {
                 const lbl = sigInput.parentElement?.querySelector('.ua-fleet-bc-sigma-val');
                 if (lbl) lbl.textContent = `${parseFloat(sigInput.value).toFixed(0)}%`;
+                return;
+            }
+            // Persist backtest textarea content per-keystroke so a
+            // realtime-tick repaint doesn't clobber the operator's
+            // paste-in-progress. We only TOUCH state here; no re-render.
+            const btTle = e.target.closest?.('textarea[data-bt-tle-id]');
+            if (btTle) {
+                const id = btTle.dataset.btTleId;
+                const st = this._backtests.get(id) || {};
+                st.pastedTle = btTle.value;
+                this._backtests.set(id, st);
             }
         });
     }
@@ -655,6 +687,157 @@ export class FleetPanel {
         }
     }
 
+    // ── Per-asset backtest UI ───────────────────────────────────────────────
+    //
+    // Operator pastes a historical TLE for the same asset; we forward-
+    // propagate the model from that TLE's epoch through the observed
+    // (F10.7, Ap) drivers to the current TLE's epoch and compare to
+    // reality. The point error is the headline number; the MC verdict
+    // tells the operator whether their assumed σ_BC was honest.
+    //
+    // Result lives in this._backtests so successive analyzer paints
+    // don't blow it away. The form rebuilds on every paint but the
+    // textarea value is preserved by reading from the stored state.
+
+    _renderBacktestBlock(r) {
+        const state = this._backtests.get(r.id) || {};
+        const res   = state.result;
+        const status = state.running ? 'running' : state.error ? 'error' : res?.ok ? 'ok' : 'idle';
+        const summary = (() => {
+            if (state.running) return 'Backtest running…';
+            if (state.error)   return `Backtest failed: ${state.error}`;
+            if (!res?.ok)      return 'Validate against historical TLE';
+            const dT = res.deltaDays.toFixed(1);
+            const sign = res.residual_km >= 0 ? '+' : '−';
+            const rel = (Math.abs(res.relativeError) * 100).toFixed(2);
+            const verdict = res.mc?.verdict ? ` · ${res.mc.verdict}` : '';
+            return `${dT}-day backtest: ${sign}${Math.abs(res.residual_km).toFixed(2)} km (${rel}%)${verdict}`;
+        })();
+        const summaryClass = res?.ok
+            ? (res.mc?.inBand ? 'is-ok' : 'is-warn')
+            : (state.error ? 'is-warn' : '');
+
+        const pasted = state.pastedTle ?? '';
+        // Result panel — only rendered when we have one to show.
+        let resultPanel = '';
+        if (res?.ok) {
+            const sign = res.residual_km >= 0 ? '+' : '−';
+            const dT = res.deltaDays.toFixed(2);
+            const f107M = res.drivers.meanF107.toFixed(0);
+            const apM = res.drivers.meanAp.toFixed(0);
+            const noradWarn = !res.noradMatch
+                ? `<div class="ua-fleet-backtest-warn">⚠ NORAD ID mismatch — historical TLE may be a different asset</div>`
+                : '';
+            const mcRow = res.mc ? `
+                <div class="ua-fleet-backtest-mcrow">
+                    <span>MC band (n=${res.mc.n}): ${res.mc.p5_km.toFixed(1)} – ${res.mc.p95_km.toFixed(1)} km</span>
+                    <span class="ua-fleet-backtest-verdict ua-fleet-backtest-verdict--${res.mc.inBand ? 'ok' : 'warn'}">
+                        ${res.mc.verdict}
+                    </span>
+                </div>` : '';
+            resultPanel = `
+                <div class="ua-fleet-backtest-result">
+                    ${noradWarn}
+                    <div class="ua-fleet-backtest-numbers">
+                        <span>predicted SMA <b>${res.a_pred_km.toFixed(2)} km</b></span>
+                        <span>actual SMA <b>${res.a_real_km.toFixed(2)} km</b></span>
+                        <span class="ua-fleet-backtest-resid">Δ ${sign}${Math.abs(res.residual_km).toFixed(2)} km</span>
+                    </div>
+                    ${mcRow}
+                    <div class="ua-fleet-backtest-meta">
+                        ${dT} days · mean F10.7=${f107M} SFU · mean Ap=${apM}
+                        · ${res.drivers.days} day-step${res.drivers.days === 1 ? '' : 's'}
+                    </div>
+                </div>`;
+        }
+        return `
+            <details class="ua-fleet-backtest ${summaryClass}" data-bt-asset="${r.id}"
+                     ${state.expanded ? 'open' : ''}>
+                <summary>↺ ${summary}</summary>
+                <div class="ua-fleet-backtest-body">
+                    <textarea class="ua-fleet-backtest-tle"
+                              data-bt-tle-id="${r.id}"
+                              placeholder="Paste a historical TLE for this asset (the 2-line or 3-line block you had ≤ 30 days ago)"
+                    >${_esc(pasted)}</textarea>
+                    <div class="ua-fleet-backtest-actions">
+                        <button type="button" class="ua-fleet-btn ua-fleet-btn--primary"
+                                data-bt-run="${r.id}" ${state.running ? 'disabled' : ''}>
+                            ${state.running ? 'Running…' : 'Run backtest'}
+                        </button>
+                        <span class="ua-fleet-backtest-hint">
+                            Needs observed F10.7 (~50 d) + Ap (~30 d) — older
+                            TLEs will fail with drivers-unavailable.
+                        </span>
+                    </div>
+                    ${resultPanel}
+                </div>
+            </details>`;
+    }
+
+    /** Triggered by the [data-bt-run] button click. Parses the pasted
+     *  TLE, runs the backtest, stores the result, re-renders. */
+    async _runBacktest(assetId) {
+        const r = this._results.find(x => x.id === assetId);
+        if (!r) return;
+        const taEl = this._cardsHost.querySelector(`textarea[data-bt-tle-id="${CSS.escape(assetId)}"]`);
+        const pasted = taEl?.value?.trim() ?? '';
+        const state = this._backtests.get(assetId) || {};
+        state.pastedTle = pasted;
+        state.expanded  = true;
+        if (!pasted) {
+            state.error  = 'paste a historical TLE first';
+            state.result = null;
+            this._backtests.set(assetId, state);
+            this._renderList();
+            return;
+        }
+        const parsed = parseTleBlock(pasted);
+        if (parsed.length === 0) {
+            state.error  = 'TLE parse failed — check the block format';
+            state.result = null;
+            this._backtests.set(assetId, state);
+            this._renderList();
+            return;
+        }
+        // Find the current TLE on the asset from the fleet store.
+        const asset = this.fleet.findById(assetId);
+        if (!asset?.line1 || !asset?.line2) {
+            state.error = 'current TLE missing — refresh the asset first';
+            state.result = null;
+            this._backtests.set(assetId, state);
+            this._renderList();
+            return;
+        }
+        state.running = true; state.error = null; state.result = null;
+        this._backtests.set(assetId, state);
+        this._renderList();
+        try {
+            const result = await runBacktest({
+                historicalLine1: parsed[0].line1,
+                historicalLine2: parsed[0].line2,
+                currentLine1:    asset.line1,
+                currentLine2:    asset.line2,
+                bcM2PerKg:       asset.bcM2PerKg,
+                bcSigmaRel:      asset.bcSigmaRel,
+                monteCarloN:     32,
+            });
+            state.running = false;
+            if (!result?.ok) {
+                state.error  = result?.reason || 'backtest failed';
+                state.result = null;
+            } else {
+                state.result = result;
+                state.error  = null;
+            }
+        } catch (err) {
+            state.running = false;
+            state.error   = err?.message || 'backtest threw';
+            state.result  = null;
+        }
+        this._backtests.set(assetId, state);
+        this._renderList();
+    }
+
     _renderCard(r) {
         const isReady = r.status === 'ready' && r.live && r.decay;
         const statusPill = r.status === 'ready' ? 'ua-fleet-pill--ok'
@@ -794,6 +977,7 @@ export class FleetPanel {
                 </div>
                 ${badges.length ? `<div class="ua-fleet-badges">${badges.join('')}</div>` : ''}
                 ${bcEditor}
+                ${this._renderBacktestBlock(r)}
                 <div class="ua-fleet-chart">${chart}</div>
                 <div class="ua-fleet-chart-key">
                     <span class="ua-fleet-key-now">— nowcast</span>

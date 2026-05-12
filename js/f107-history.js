@@ -200,3 +200,31 @@ export function snapshot() {
 export function isLoaded() {
     return _state.fetchedOk && _state.rows.length > 0;
 }
+
+/**
+ * Daily observed F10.7 at the given date — operator-grade lookup for
+ * backtests / historical replays. Returns the row nearest to `dateMs`
+ * by ≤ 1 day, or null when:
+ *   - the series isn't loaded yet
+ *   - the date predates the cached window (we don't extrapolate)
+ *   - the date is in the predicted future (caller should branch on
+ *     this themselves if they want forecast-driven simulation)
+ *
+ * Forecast/observed split is preserved: when `observedOnly` (default
+ * true), we ignore `kind: 'predicted'` rows. Backtests want only the
+ * observed F10.7 that the model HAD when it was being run historically.
+ */
+export function getF107At(dateMs, { observedOnly = true } = {}) {
+    if (!_state.fetchedOk || _state.rows.length === 0) return null;
+    let best = null, bestD = Infinity;
+    for (const r of _state.rows) {
+        if (observedOnly && r.kind !== 'observed') continue;
+        const t = _ymdToMs(r.date);
+        if (!Number.isFinite(t)) continue;
+        const d = Math.abs(t - dateMs);
+        if (d < bestD) { bestD = d; best = r; }
+    }
+    // Reject "nearest" matches further than 1.5 days away — that means
+    // we're outside the cached window and shouldn't pretend otherwise.
+    return (best && bestD < 1.5 * 86400000) ? best.flux_sfu : null;
+}

@@ -226,3 +226,27 @@ export function snapshot() {
 export function isLoaded() {
     return _state.fetchedOk && _state.rows.length > 0;
 }
+
+/**
+ * Daily-mean Ap at a given date — operator-grade lookup for backtests.
+ * Averages the eight 3-h Ap ticks centred on the requested day's UTC
+ * midnight (i.e. within ±12 h). Returns null when:
+ *   - the series isn't loaded
+ *   - the date predates the cached window (we don't extrapolate)
+ *   - fewer than 4 of the 8 ticks fall inside the window (the day is
+ *     too data-poor to call a "daily mean")
+ *
+ * `observedOnly` defaults to true: backtests only see what the model
+ * HAD when it was being run historically.
+ */
+export function getApDailyMeanAt(dateMs, { observedOnly = true } = {}) {
+    if (!_state.fetchedOk || _state.rows.length === 0) return null;
+    const loMs = dateMs - 12 * 3600000;
+    const hiMs = dateMs + 12 * 3600000;
+    let sum = 0, n = 0;
+    for (const r of _state.rows) {
+        if (observedOnly && r.kind !== 'observed') continue;
+        if (r.tMs >= loMs && r.tMs <= hiMs) { sum += r.ap; n++; }
+    }
+    return n >= 4 ? sum / n : null;
+}
