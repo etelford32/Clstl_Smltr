@@ -323,6 +323,22 @@ input[type=range]::-moz-range-thumb {
     border-color:var(--ua-cyan);
     color:var(--ua-cyan);
 }
+#ua-camera-hud .ua-cam-warp-rate--rev {
+    /* Replay (negative-rate) chips read in red so they don't blend
+     * with the forward-rate column. Matches the scrubber's
+     * mode="replay" pill. */
+    color:var(--ua-red-soft);
+    border-color:rgba(255,80,96,.30);
+}
+#ua-camera-hud .ua-cam-warp-rate--rev:hover {
+    color:var(--ua-red);
+    border-color:rgba(255,80,96,.55);
+}
+#ua-camera-hud .ua-cam-warp-rate--rev.ua-cam-on {
+    background:var(--ua-red-low);
+    border-color:var(--ua-red);
+    color:var(--ua-red);
+}
 #ua-camera-hud .ua-cam-stop {
     /* Follow-active state: amber accent so it reads as "stop the
      * thing the operator just started" rather than a peer of the
@@ -2662,7 +2678,19 @@ input[type=range]::-moz-range-thumb {
                  ⏯ pause freezes every satellite in place; ⟳ snap re-
                  anchors them to wall-clock now after a long warp. -->
             <div class="ua-cam-controls ua-cam-controls--warp"
-                 title="Simulation time-warp — propagation speed of every satellite + debris piece">
+                 title="Simulation time-warp — propagation speed of every satellite + debris piece. Negative rates rewind for post-event forensics.">
+                <!-- Phase F: replay (negative-rate) chips. The bus accepts
+                     signed rates, so a click here rewinds every consumer
+                     (sat propagation, density model, analyzer family) in
+                     lock-step. Order is descending-magnitude → 1× so the
+                     row reads like a number line: faster-reverse on the
+                     left, faster-forward on the right. -->
+                <button type="button" class="ua-cam-warp-rate ua-cam-warp-rate--rev" data-rate="-600"
+                        title="−600× replay — rewind 9 s per LEO orbit (post-conjunction forensics)">◂600×</button>
+                <button type="button" class="ua-cam-warp-rate ua-cam-warp-rate--rev" data-rate="-60"
+                        title="−60× replay — rewind 90 s per LEO orbit">◂60×</button>
+                <button type="button" class="ua-cam-warp-rate ua-cam-warp-rate--rev" data-rate="-10"
+                        title="−10× replay — rewind 9 min per LEO orbit">◂10×</button>
                 <span class="ua-cam-warp-label">×</span>
                 <button type="button" class="ua-cam-warp-rate" data-rate="0.5"
                         title="Half speed — useful for watching reentry geometry">½</button>
