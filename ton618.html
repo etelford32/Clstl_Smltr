@@ -211,22 +211,62 @@ body { font-family:'Courier New',monospace; background:#000; color:#ccc; display
 }
 
 #minimap-wrap {
-    position:absolute; top:10px; right:10px; z-index:10;
-    width:300px; height:140px;
-    background:rgba(0,0,0,.45); border:1px solid rgba(255,140,0,.18);
-    border-radius:6px; padding:4px;
+    top:12px; right:12px;
+    width:300px;
 }
-#minimap-wrap > .mm-label {
-    position:absolute; top:-14px; left:6px; font-size:9px; letter-spacing:.2em;
-    color:#ff8800; text-transform:uppercase;
+#minimap-wrap .pp-panel-body {
+    padding:4px;
+    height:130px;
+    max-height:130px;
 }
+#minimap-wrap.collapsed { width:300px; }
 #minimap { width:100%; height:100%; display:block; }
-#validation {
-    position:absolute; bottom:14px; left:14px; z-index:10;
-    font-size:10px; line-height:1.6; color:#8fd7ff;
-    background:rgba(0,0,0,.6); border:1px solid rgba(143,215,255,.25);
-    border-radius:6px; padding:10px 14px; white-space:pre; display:none;
+
+#inspector {
+    bottom:60px; left:12px;
+    min-width:320px; max-width:420px;
+    display:none;
 }
+#inspector .pp-panel-body {
+    font-size:10.5px; line-height:1.6;
+    color:#9eecff; white-space:pre;
+    max-height:calc(100vh - 220px);
+}
+#validation {
+    bottom:14px; left:12px;
+    min-width:320px; max-width:520px;
+    display:none;
+    z-index:11;
+}
+#validation .pp-panel-body {
+    font-size:10px; line-height:1.6;
+    color:#bbf2bd; white-space:pre;
+    max-height:calc(100vh - 200px);
+}
+
+/* Cyan accent variant — geodesic inspector */
+.pp-panel[data-pp-accent="cyan"] {
+    --pp-accent:           #8fd7ff;
+    --pp-accent-rgb:       143, 215, 255;
+    --pp-accent-soft:      rgba(143, 215, 255, .12);
+    --pp-accent-softer:    rgba(143, 215, 255, .06);
+    --pp-accent-border:    rgba(143, 215, 255, .30);
+    --pp-accent-border-hi: rgba(143, 215, 255, .55);
+    --pp-accent-glow:      rgba(143, 215, 255, .55);
+    --pp-surface-overlay:  radial-gradient(120% 80% at 0% 0%, rgba(143,215,255,.08), transparent 60%);
+}
+/* Green accent variant — validation pass/attn */
+.pp-panel[data-pp-accent="green"] {
+    --pp-accent:           #6ee5a6;
+    --pp-accent-rgb:       110, 229, 166;
+    --pp-accent-soft:      rgba(110, 229, 166, .10);
+    --pp-accent-softer:    rgba(110, 229, 166, .04);
+    --pp-accent-border:    rgba(110, 229, 166, .28);
+    --pp-accent-border-hi: rgba(110, 229, 166, .55);
+    --pp-accent-glow:      rgba(110, 229, 166, .55);
+    --pp-surface-overlay:  radial-gradient(120% 80% at 0% 0%, rgba(110,229,166,.08), transparent 60%);
+}
+
 #fly-pill {
     position:absolute; top:160px; right:10px; z-index:10;
     font-size:10px; letter-spacing:.18em; text-transform:uppercase;
@@ -235,76 +275,197 @@ body { font-family:'Courier New',monospace; background:#000; color:#ccc; display
 }
 #fly-pill.on { display:inline-block; }
 
-#inspector {
-    position:absolute; bottom:50px; left:14px; z-index:10;
-    font-family:'Courier New',monospace; font-size:10.5px; line-height:1.6;
-    color:#9eecff; background:rgba(0,12,28,.78);
-    border:1px solid rgba(120,200,255,.30); border-radius:6px;
-    padding:9px 12px; white-space:pre; min-width:300px; display:none;
-    backdrop-filter:blur(4px);
-}
-#inspector .ic-title {
-    font-size:9px; letter-spacing:.18em; color:#7adcff; text-transform:uppercase;
-    margin-bottom:4px;
-}
-#inspector .ic-close {
-    position:absolute; top:4px; right:7px; cursor:pointer; color:#5e9bbf;
-    font-size:11px; pointer-events:auto;
-}
-#inspector .ic-close:hover { color:#fff; }
-
-/* Right panel */
+/* Right panel — sticky toolbar + collapsible sections + search */
 #panel {
-    width:290px; min-width:290px; background:rgba(8,4,20,.95);
-    border-left:1px solid rgba(255,120,0,.2);
+    width:300px; min-width:300px;
+    background:linear-gradient(to bottom, rgba(8,4,2,.96), rgba(2,1,0,.98));
+    border-left:1px solid var(--pp-accent-border);
     display:flex; flex-direction:column; overflow-y:auto;
-    padding:12px; gap:10px;
+    padding:0;
+    gap:0;
+    color:var(--pp-text-secondary);
 }
-#panel::-webkit-scrollbar { width:4px; }
-#panel::-webkit-scrollbar-thumb { background:rgba(255,140,0,.3); border-radius:2px; }
+#panel::-webkit-scrollbar { width:5px; }
+#panel::-webkit-scrollbar-thumb { background:var(--pp-accent-border); border-radius:2px; }
+#panel::-webkit-scrollbar-track { background:rgba(0,0,0,.3); }
+.pp-panel-toolbar {
+    position:sticky; top:0; z-index:5;
+    display:flex; flex-direction:column; gap:6px;
+    padding:10px 12px;
+    background:linear-gradient(to bottom, rgba(12,7,2,.98) 80%, rgba(12,7,2,.85));
+    border-bottom:1px solid var(--pp-accent-border);
+    backdrop-filter:var(--pp-blur-glass);
+    -webkit-backdrop-filter:var(--pp-blur-glass);
+}
+.pp-panel-toolbar-row {
+    display:flex; align-items:center; gap:6px;
+}
+.pp-panel-toolbar-title {
+    flex:1;
+    font-size:10.5px; letter-spacing:.18em; text-transform:uppercase;
+    color:var(--pp-accent);
+    text-shadow:0 0 8px rgba(var(--pp-accent-rgb), .35);
+}
+.pp-panel-toolbar-actions { display:flex; gap:4px; }
+.pp-search {
+    position:relative;
+    display:flex; align-items:center;
+}
+.pp-search::before {
+    content:"⌕";
+    position:absolute; left:8px;
+    font-size:13px;
+    color:var(--pp-text-muted);
+    pointer-events:none;
+}
+.pp-search input {
+    flex:1; width:100%;
+    font-family:inherit; font-size:11px;
+    color:var(--pp-text-primary);
+    background:rgba(0,0,0,.45);
+    border:1px solid var(--pp-accent-border);
+    border-radius:var(--pp-r-sm);
+    padding:5px 22px 5px 26px;
+    transition:border-color var(--pp-t-snap), background var(--pp-t-snap);
+}
+.pp-search input::placeholder { color:var(--pp-text-faint); }
+.pp-search input:focus {
+    outline:none;
+    border-color:var(--pp-accent-border-hi);
+    background:rgba(0,0,0,.65);
+}
+.pp-search-clear {
+    position:absolute; right:4px;
+    width:18px; height:18px;
+    border:none; background:transparent;
+    color:var(--pp-text-muted);
+    font-size:13px; line-height:1;
+    cursor:pointer;
+    display:none;
+    border-radius:3px;
+    padding:0;
+}
+.pp-search.has-value .pp-search-clear { display:inline-flex; align-items:center; justify-content:center; }
+.pp-search-clear:hover { color:var(--pp-accent); background:var(--pp-accent-soft); }
+.pp-results-count {
+    font-size:9.5px; color:var(--pp-text-faint);
+    letter-spacing:.05em;
+    height:11px;
+}
+
+#panel-sections {
+    display:flex; flex-direction:column;
+    padding:10px 12px;
+    gap:6px;
+}
+#panel-sections > .pp-intro {
+    padding:8px 10px 6px;
+    border-bottom:1px solid var(--pp-accent-border);
+    margin-bottom:2px;
+}
+.pp-intro .sec-title {
+    /* The intro keeps its original label appearance; the .sec-title
+       button styling defined below is scoped to .pp-section. */
+    display:block;
+    background:none;
+    border:none;
+    padding:0 0 4px;
+    font-size:11px;
+    letter-spacing:.15em;
+    text-transform:uppercase;
+    color:var(--pp-accent);
+    cursor:default;
+}
+.pp-intro .sec-title::after { content:none; }
+.pp-section {
+    border:1px solid var(--pp-accent-border);
+    border-radius:var(--pp-r-md);
+    background:linear-gradient(to bottom, rgba(255,136,0,.02), rgba(255,136,0,.005));
+    overflow:hidden;
+    transition:border-color var(--pp-t-snap), background var(--pp-t-snap);
+}
+.pp-section:hover { border-color:var(--pp-accent-border-hi); }
+.pp-section.hit { border-color:var(--pp-accent-border-hi); box-shadow:0 0 0 1px var(--pp-accent-soft); }
+.pp-section-hidden { display:none !important; }
 .sec-title {
-    font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:#ff8800;
-    border-bottom:1px solid rgba(255,136,0,.25); padding-bottom:4px; margin-bottom:6px;
+    /* Now a header button toggling the section body */
+    display:flex; align-items:center; gap:6px;
+    width:100%;
+    margin:0; padding:7px 10px;
+    background:linear-gradient(to right, var(--pp-accent-soft), var(--pp-accent-softer) 75%);
+    border:none;
+    border-bottom:1px solid var(--pp-accent-border);
+    font-family:inherit;
+    font-size:10px; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--pp-accent);
+    cursor:pointer;
+    text-align:left;
+    transition:background var(--pp-t-snap);
 }
+.sec-title:hover { background:linear-gradient(to right, var(--pp-accent-soft), var(--pp-accent-soft)); }
+.sec-title::after {
+    content:"▾";
+    margin-left:auto;
+    font-size:10px;
+    color:var(--pp-text-muted);
+    transition:transform var(--pp-t-medium);
+}
+.pp-section.collapsed .sec-title { border-bottom-color:transparent; }
+.pp-section.collapsed .sec-title::after { transform:rotate(-90deg); }
+.pp-section-body {
+    padding:10px 10px 4px;
+    max-height:9999px;
+    transition:max-height var(--pp-t-medium), padding var(--pp-t-medium), opacity var(--pp-t-fast);
+    overflow:hidden;
+}
+.pp-section.collapsed .pp-section-body {
+    max-height:0 !important;
+    padding-top:0; padding-bottom:0;
+    opacity:0;
+}
+
 .ctrl { display:flex; flex-direction:column; gap:3px; margin-bottom:7px; }
-.ctrl label { font-size:10px; color:#aaa; }
-.ctrl input[type=range] { width:100%; accent-color:#ff8800; }
-.ctrl .val { font-size:10.5px; color:#ff9933; text-align:right; }
+.ctrl label { font-size:10px; color:var(--pp-text-muted); }
+.ctrl input[type=range] { width:100%; accent-color:var(--pp-accent); }
+.ctrl .val { font-size:10.5px; color:var(--pp-text-primary); text-align:right; }
 select {
-    background:#0d0806; border:1px solid rgba(255,136,0,.3); color:#ccc;
-    padding:4px 6px; border-radius:4px; font-family:inherit; font-size:11px; width:100%;
+    background:#0d0806; border:1px solid var(--pp-accent-border); color:var(--pp-text-secondary);
+    padding:4px 6px; border-radius:var(--pp-r-sm); font-family:inherit; font-size:11px; width:100%;
 }
 .toggle-row { display:flex; align-items:center; gap:6px; margin-bottom:4px; }
-.toggle-row input { accent-color:#ff8800; }
-.toggle-row label { font-size:10px; color:#aaa; cursor:pointer; }
+.toggle-row input { accent-color:var(--pp-accent); }
+.toggle-row label { font-size:10px; color:var(--pp-text-muted); cursor:pointer; }
 .btn {
-    background:rgba(255,100,0,.15); border:1px solid rgba(255,120,0,.4);
-    color:#ff9933; padding:6px 10px; border-radius:5px; cursor:pointer;
-    font-family:inherit; font-size:11px; width:100%; transition:background .2s;
+    background:var(--pp-accent-soft); border:1px solid var(--pp-accent-border-hi);
+    color:var(--pp-accent); padding:6px 10px; border-radius:var(--pp-r-sm); cursor:pointer;
+    font-family:inherit; font-size:11px; width:100%;
+    transition:background var(--pp-t-snap), border-color var(--pp-t-snap);
 }
-.btn:hover { background:rgba(255,100,0,.3); }
+.btn:hover { background:rgba(var(--pp-accent-rgb), .22); }
 .btn-row {
     display:grid; grid-template-columns:1fr 1fr; gap:6px;
 }
 .btn-sm {
     background:rgba(120,60,180,.15); border:1px solid rgba(160,100,220,.35);
-    color:#cda8ff; padding:5px 8px; border-radius:4px; cursor:pointer;
-    font-family:inherit; font-size:10.5px; transition:background .2s;
+    color:#cda8ff; padding:5px 8px; border-radius:var(--pp-r-sm); cursor:pointer;
+    font-family:inherit; font-size:10.5px;
+    transition:background var(--pp-t-snap), border-color var(--pp-t-snap);
 }
-.btn-sm:hover { background:rgba(160,100,220,.3); }
+.btn-sm:hover { background:rgba(160,100,220,.3); border-color:rgba(160,100,220,.55); }
 .shader-badge {
     display:inline-block; background:linear-gradient(45deg,#6040ff,#ff4080);
     color:#fff; font-size:9px; padding:2px 6px; border-radius:3px;
     letter-spacing:.08em; margin-bottom:6px;
 }
 .info-box {
-    font-size:10px; color:#888; line-height:1.6;
-    border:1px solid rgba(255,255,255,.06); border-radius:4px;
-    padding:8px; background:rgba(255,255,255,.02);
+    font-size:10px; color:var(--pp-text-muted); line-height:1.6;
+    border:1px solid var(--pp-accent-border);
+    border-radius:var(--pp-r-md);
+    padding:8px 10px; background:var(--pp-accent-softer);
 }
-.info-box b { color:#ffaa44; }
-.sep { border-top:1px solid rgba(255,255,255,.07); margin:4px 0; }
-.note { font-size:9.5px; color:#777; line-height:1.5; margin-top:4px; }
+.info-box b { color:var(--pp-accent); }
+.sep { border-top:1px solid var(--pp-accent-border); margin:4px 0; }
+.note { font-size:9.5px; color:var(--pp-text-faint); line-height:1.5; margin-top:4px; }
 .phase-pill {
     display:inline-block; font-size:9px; letter-spacing:.15em; text-transform:uppercase;
     color:#000; background:#ff8800; padding:1px 6px; border-radius:10px; margin-right:4px;
@@ -374,18 +535,42 @@ body.ton618-embed .pp-panel-title { font-size:8.5px; }
             </header>
             <div id="hud" class="pp-panel-body">booting…</div>
         </div>
-        <div id="minimap-wrap">
-            <div class="mm-label">god-view · top / side</div>
-            <canvas id="minimap"></canvas>
+        <div id="minimap-wrap" class="pp-panel" data-pp-panel>
+            <header class="pp-panel-header">
+                <span class="pp-drag-grip" aria-hidden="true"></span>
+                <span class="pp-panel-title">▸ God-View · top / side</span>
+                <span class="pp-panel-actions">
+                    <button type="button" class="pp-btn-icon" data-pp-minimize aria-label="Minimize" title="Minimize"><span aria-hidden="true">–</span></button>
+                </span>
+            </header>
+            <div class="pp-panel-body">
+                <canvas id="minimap"></canvas>
+            </div>
         </div>
         <div id="fly-pill">⊙ free-fly</div>
         <div id="toast" class="toast"></div>
-        <div id="inspector">
-            <div class="ic-title">▸ Geodesic inspector</div>
-            <span class="ic-close" id="ic-close">✕</span>
-            <div id="inspector-body">click anywhere on the render</div>
+        <div id="inspector" class="pp-panel" data-pp-panel data-pp-accent="cyan">
+            <header class="pp-panel-header">
+                <span class="pp-drag-grip" aria-hidden="true"></span>
+                <span class="pp-panel-title">▸ Geodesic Inspector</span>
+                <span class="pp-panel-actions">
+                    <button type="button" class="pp-btn-icon" data-pp-minimize aria-label="Minimize" title="Minimize"><span aria-hidden="true">–</span></button>
+                    <button type="button" class="pp-btn-icon" data-pp-close id="ic-close" aria-label="Close" title="Close"><span aria-hidden="true">✕</span></button>
+                </span>
+            </header>
+            <div id="inspector-body" class="pp-panel-body">click anywhere on the render</div>
         </div>
-        <div id="validation"></div>
+        <div id="validation" class="pp-panel" data-pp-panel data-pp-accent="green">
+            <header class="pp-panel-header">
+                <span class="pp-drag-grip" aria-hidden="true"></span>
+                <span class="pp-panel-title">▸ Photon-Ring Validation</span>
+                <span class="pp-panel-actions">
+                    <button type="button" class="pp-btn-icon" data-pp-minimize aria-label="Minimize" title="Minimize"><span aria-hidden="true">–</span></button>
+                    <button type="button" class="pp-btn-icon" data-pp-close aria-label="Close" title="Close"><span aria-hidden="true">✕</span></button>
+                </span>
+            </header>
+            <div id="validation-body" class="pp-panel-body">measuring…</div>
+        </div>
         <div id="controls-hint-panel" class="pp-panel" data-pp-panel>
             <header class="pp-panel-header">
                 <span class="pp-drag-grip" aria-hidden="true"></span>
@@ -1366,9 +1551,10 @@ body.ton618-embed .pp-panel-title { font-size:8.5px; }
     // ── Pixel inspector ────────────────────────────────────────────
     const inspector = $('inspector');
     const inspBody  = $('inspector-body');
-    $('ic-close').addEventListener('click', () => { inspector.style.display = 'none'; });
+    // Close handler wired by the data-pp-close infra below.
     app.onInspect((r) => {
-        inspector.style.display = 'block';
+        inspector.style.display = 'flex';
+        inspector.classList.remove('collapsed');
         const bRel = r.b_impact / r.b_crit;
         const fmtPct = (x) => Math.abs(x) < 1e-6 ? '0.000 %' : x.toExponential(3) + ' %';
         const lines = [
@@ -1495,13 +1681,15 @@ body.ton618-embed .pp-panel-title { font-size:8.5px; }
     });
 
     $('btnValidate').addEventListener('click', () => {
-        const v = $('validation');
-        v.style.display = 'block';
-        v.textContent = 'measuring…';
+        const v    = $('validation');
+        const body = $('validation-body');
+        v.style.display = 'flex';
+        v.classList.remove('collapsed');
+        body.textContent = 'measuring…';
         setTimeout(() => {
             const result = app.runPhotonRingValidation();
             if (!result) {
-                v.textContent = 'validation failed: no shadow detected';
+                body.textContent = 'validation failed: no shadow detected';
                 return;
             }
             const aTag = result.kerr_regime
@@ -1533,7 +1721,7 @@ body.ton618-embed .pp-panel-title { font-size:8.5px; }
                 );
             }
             lines.unshift(`PHOTON RING / SHADOW MEASUREMENT  (${aTag})`);
-            v.textContent = lines.join('\n');
+            body.textContent = lines.join('\n');
         }, 50);
     });
 </script>
@@ -1576,9 +1764,22 @@ body.ton618-embed .pp-panel-title { font-size:8.5px; }
             if (!raw) return;
             const { left, top } = JSON.parse(raw);
             if (typeof left === 'number' && typeof top === 'number') {
-                applyPosition(panel, left, top);
+                // Apply raw — hidden panels would clamp against width=0
+                // otherwise. Clamping happens on first user drag.
+                panel.style.left   = left + 'px';
+                panel.style.top    = top + 'px';
+                panel.style.right  = 'auto';
+                panel.style.bottom = 'auto';
             }
         } catch (e) { /* ignore corrupt storage */ }
+    }
+
+    function makeCloseable(panel) {
+        const btn = panel.querySelector('[data-pp-close]');
+        if (!btn) return;
+        btn.addEventListener('click', () => {
+            panel.style.display = 'none';
+        });
     }
 
     function persistPosition(panel) {
@@ -1676,7 +1877,196 @@ body.ton618-embed .pp-panel-title { font-size:8.5px; }
         restorePosition(panel);
         makeDraggable(panel);
         makeMinimizable(panel);
+        makeCloseable(panel);
     });
+
+    // ── Right-panel: sticky toolbar + collapsible sections + search ──
+    const rightPanel = document.getElementById('panel');
+    if (rightPanel) {
+        // Open-by-default substring whitelist for section titles.
+        const OPEN_BY_DEFAULT = [
+            'observer',
+            'black-hole geometry',
+            'camera presets',
+            'accretion disk',
+        ];
+        const SECTION_STORE = 'pp.ton618.sections.collapsed';
+        const collapsedSet = (() => {
+            try {
+                const raw = localStorage.getItem(SECTION_STORE);
+                return new Set(raw ? JSON.parse(raw) : []);
+            } catch { return new Set(); }
+        })();
+        function persistCollapsed() {
+            try {
+                localStorage.setItem(SECTION_STORE, JSON.stringify([...collapsedSet]));
+            } catch (e) {}
+        }
+
+        // 1. Wrap existing direct children in #panel-sections so the
+        //    toolbar can sit above them sticky.
+        const sectionsWrap = document.createElement('div');
+        sectionsWrap.id = 'panel-sections';
+        while (rightPanel.firstChild) {
+            sectionsWrap.appendChild(rightPanel.firstChild);
+        }
+        rightPanel.appendChild(sectionsWrap);
+
+        // 2. Convert each section to collapsible — first div is the intro
+        //    (has a .shader-badge); leave it open and non-collapsible.
+        const sections = [];
+        Array.from(sectionsWrap.children).forEach((node) => {
+            if (!(node instanceof HTMLElement)) return;
+            // The standalone .sep and .info-box / .note tail aren't sections.
+            if (node.classList.contains('sep') ||
+                node.classList.contains('info-box') ||
+                node.classList.contains('note')) {
+                return;
+            }
+            const titleEl = node.querySelector(':scope > .sec-title');
+            if (!titleEl) return;
+
+            const isIntro = !!node.querySelector(':scope > .shader-badge');
+            if (isIntro) {
+                node.classList.add('pp-intro');
+                return; // intro card stays open + label-only
+            }
+            node.classList.add('pp-section');
+
+            // Convert sec-title <div> into a real <button>.
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'sec-title';
+            btn.innerHTML = titleEl.innerHTML;
+            titleEl.replaceWith(btn);
+
+            // Wrap remaining siblings of the title in .pp-section-body.
+            const body = document.createElement('div');
+            body.className = 'pp-section-body';
+            while (btn.nextSibling) {
+                body.appendChild(btn.nextSibling);
+            }
+            node.appendChild(body);
+
+            const key = (btn.textContent || '').trim().toLowerCase();
+            node.dataset.sectionKey = key;
+            // Cache lowercase searchable text (title + body labels) for fast filtering.
+            node.dataset.searchText = (node.textContent || '').toLowerCase();
+
+            const openByDefault = OPEN_BY_DEFAULT.some((s) => key.includes(s));
+            // If user has a stored preference, honor it; otherwise use default.
+            let collapsed;
+            if (collapsedSet.has(key)) collapsed = true;
+            else if (localStorage.getItem(SECTION_STORE + '.' + key + '.open') === '1') collapsed = false;
+            else collapsed = !openByDefault;
+            node.classList.toggle('collapsed', collapsed);
+
+            btn.addEventListener('click', () => {
+                const nowCollapsed = node.classList.toggle('collapsed');
+                if (nowCollapsed) collapsedSet.add(key);
+                else collapsedSet.delete(key);
+                persistCollapsed();
+                // Track explicit-open preference so it survives default flips.
+                try {
+                    localStorage.setItem(
+                        SECTION_STORE + '.' + key + '.open',
+                        nowCollapsed ? '0' : '1'
+                    );
+                } catch (e) {}
+            });
+            sections.push(node);
+        });
+
+        // 3. Build the sticky toolbar with title + search.
+        const toolbar = document.createElement('div');
+        toolbar.className = 'pp-panel-toolbar';
+        toolbar.innerHTML = `
+            <div class="pp-panel-toolbar-row">
+                <span class="pp-panel-toolbar-title">▸ Controls</span>
+                <span class="pp-panel-toolbar-actions">
+                    <button type="button" class="pp-btn-icon" data-action="expand-all" aria-label="Expand all" title="Expand all"><span aria-hidden="true">⤓</span></button>
+                    <button type="button" class="pp-btn-icon" data-action="collapse-all" aria-label="Collapse all" title="Collapse all"><span aria-hidden="true">⤒</span></button>
+                </span>
+            </div>
+            <div class="pp-search">
+                <input type="search" placeholder="Filter sliders, presets…" aria-label="Filter controls" autocomplete="off" spellcheck="false">
+                <button type="button" class="pp-search-clear" aria-label="Clear" title="Clear">✕</button>
+            </div>
+            <div class="pp-results-count" aria-live="polite"></div>
+        `;
+        rightPanel.insertBefore(toolbar, sectionsWrap);
+
+        const searchInput = toolbar.querySelector('.pp-search input');
+        const searchWrap  = toolbar.querySelector('.pp-search');
+        const searchClear = toolbar.querySelector('.pp-search-clear');
+        const resultsCount = toolbar.querySelector('.pp-results-count');
+
+        // Remember each section's pre-search collapsed state so we can
+        // restore it when the query is cleared. Reset by reassignment.
+        let preSearchCollapsedRef = new WeakMap();
+        const applyFilterRebound = (q) => {
+            const query = q.trim().toLowerCase();
+            searchWrap.classList.toggle('has-value', !!query);
+            if (!query) {
+                sections.forEach((sec) => {
+                    sec.classList.remove('pp-section-hidden', 'hit');
+                    if (preSearchCollapsedRef.has(sec)) {
+                        sec.classList.toggle('collapsed', preSearchCollapsedRef.get(sec));
+                    }
+                });
+                preSearchCollapsedRef = new WeakMap();
+                resultsCount.textContent = '';
+                return;
+            }
+            let visible = 0;
+            sections.forEach((sec) => {
+                const text = sec.dataset.searchText || '';
+                const hit = text.includes(query);
+                if (!preSearchCollapsedRef.has(sec)) {
+                    preSearchCollapsedRef.set(sec, sec.classList.contains('collapsed'));
+                }
+                sec.classList.toggle('pp-section-hidden', !hit);
+                sec.classList.toggle('hit', hit);
+                if (hit) {
+                    sec.classList.remove('collapsed');
+                    visible++;
+                }
+            });
+            resultsCount.textContent = visible === 0
+                ? 'no matches'
+                : `${visible} section${visible === 1 ? '' : 's'} match`;
+        };
+        searchInput.addEventListener('input', () => applyFilterRebound(searchInput.value));
+        searchClear.addEventListener('click', () => {
+            searchInput.value = '';
+            applyFilterRebound('');
+            searchInput.focus();
+        });
+        searchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && searchInput.value) {
+                e.stopPropagation();
+                searchInput.value = '';
+                applyFilterRebound('');
+            }
+        });
+
+        toolbar.querySelector('[data-action="expand-all"]').addEventListener('click', () => {
+            sections.forEach((sec) => {
+                sec.classList.remove('collapsed');
+                const key = sec.dataset.sectionKey;
+                if (key) collapsedSet.delete(key);
+            });
+            persistCollapsed();
+        });
+        toolbar.querySelector('[data-action="collapse-all"]').addEventListener('click', () => {
+            sections.forEach((sec) => {
+                sec.classList.add('collapsed');
+                const key = sec.dataset.sectionKey;
+                if (key) collapsedSet.add(key);
+            });
+            persistCollapsed();
+        });
+    }
 })();
 </script>
 </body>
