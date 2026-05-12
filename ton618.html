@@ -27,47 +27,246 @@
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family:'Courier New',monospace; background:#000; color:#ccc; display:flex; flex-direction:column; min-height:100vh; overflow:hidden; }
 
+/* ── Parkers Physics design tokens (TON 618 amber family) ────────── */
+:root {
+    --pp-accent:            #ff8800;
+    --pp-accent-rgb:        255, 136, 0;
+    --pp-accent-soft:       rgba(255, 136, 0, .12);
+    --pp-accent-softer:     rgba(255, 136, 0, .06);
+    --pp-accent-border:     rgba(255, 136, 0, .28);
+    --pp-accent-border-hi:  rgba(255, 136, 0, .50);
+    --pp-accent-glow:       rgba(255, 136, 0, .55);
+
+    --pp-surface-1:         rgba(10, 6, 2, .86);
+    --pp-surface-2:         rgba(4, 2, 0, .94);
+    --pp-surface-overlay:   radial-gradient(120% 80% at 0% 0%, rgba(255,136,0,.10), transparent 60%);
+
+    --pp-text-primary:      #ffd9a8;
+    --pp-text-secondary:    #cca266;
+    --pp-text-muted:        #998866;
+    --pp-text-faint:        #6a5a44;
+
+    --pp-blur-glass:        blur(12px) saturate(1.18);
+    --pp-shadow-panel:      0 6px 26px rgba(0, 0, 0, .55), 0 0 0 1px rgba(255,136,0,.04) inset;
+
+    --pp-r-sm:              4px;
+    --pp-r-md:              7px;
+    --pp-r-lg:              10px;
+
+    --pp-t-fast:            .12s ease;
+    --pp-t-snap:            .15s ease;
+    --pp-t-medium:          .25s ease;
+}
+@media (max-width: 640px) {
+    :root {
+        --pp-blur-glass:    blur(8px) saturate(1.10);
+        --pp-shadow-panel:  0 4px 16px rgba(0, 0, 0, .55);
+    }
+}
+
 #app { display:flex; height:calc(100vh - 48px); }
 #canvas-area { flex:1; position:relative; background:#000; overflow:hidden; }
 #glCanvas { position:absolute; top:0; left:0; width:100%; height:100%; display:block; image-rendering:auto; }
 
-/* HUD */
-#hud {
-    position:absolute; top:10px; left:10px; z-index:10; pointer-events:none;
-    font-family:'Courier New',monospace; font-size:10.5px; line-height:1.55;
-    background:rgba(0,0,0,.55); backdrop-filter:blur(4px);
-    border:1px solid rgba(255,140,0,.18); border-radius:6px;
-    padding:10px 14px; min-width:380px; color:#cca266; white-space:pre;
+/* ── pp-panel: draggable, minimizable chrome card ────────────────── */
+.pp-panel {
+    position:absolute; z-index:10;
+    display:flex; flex-direction:column;
+    font-family:'Courier New',monospace;
+    color:var(--pp-text-secondary);
+    background:linear-gradient(to bottom, var(--pp-surface-1), var(--pp-surface-2)), var(--pp-surface-overlay);
+    background-blend-mode:normal, screen;
+    border:1px solid var(--pp-accent-border);
+    border-radius:var(--pp-r-md);
+    backdrop-filter:var(--pp-blur-glass);
+    -webkit-backdrop-filter:var(--pp-blur-glass);
+    box-shadow:var(--pp-shadow-panel);
+    pointer-events:auto;
+    transition:border-color var(--pp-t-snap), box-shadow var(--pp-t-snap);
 }
-#hud-title {
-    position:absolute; top:10px; left:10px; transform:translateY(-18px);
-    font-size:9px; letter-spacing:.2em; color:#ff8800; text-transform:uppercase;
+.pp-panel-header {
+    user-select:none;
+    -webkit-user-select:none;
+}
+.pp-panel:hover { border-color:var(--pp-accent-border-hi); }
+.pp-panel.is-dragging {
+    border-color:var(--pp-accent-border-hi);
+    box-shadow:0 8px 32px rgba(0,0,0,.65), 0 0 0 1px var(--pp-accent-glow);
+    transition:none;
+}
+.pp-panel-header {
+    display:flex; align-items:center; gap:8px;
+    padding:6px 8px 6px 10px;
+    background:linear-gradient(to right, var(--pp-accent-soft), var(--pp-accent-softer) 70%);
+    border-bottom:1px solid var(--pp-accent-border);
+    border-radius:var(--pp-r-md) var(--pp-r-md) 0 0;
+    cursor:grab;
+    touch-action:none;
+    min-height:26px;
+}
+.pp-panel-header:active { cursor:grabbing; }
+.pp-panel.collapsed .pp-panel-header {
+    border-bottom-color:transparent;
+    border-radius:var(--pp-r-md);
+}
+.pp-drag-grip {
+    width:10px; height:14px; flex-shrink:0;
+    background-image:
+        radial-gradient(circle at 1.5px 1.5px, var(--pp-text-muted) 1px, transparent 1.5px);
+    background-size:4px 4px;
+    background-position:0 1px;
+    opacity:.55;
     pointer-events:none;
 }
-#minimap-wrap {
-    position:absolute; top:10px; right:10px; z-index:10;
-    width:300px; height:140px;
-    background:rgba(0,0,0,.45); border:1px solid rgba(255,140,0,.18);
-    border-radius:6px; padding:4px;
+.pp-panel-title {
+    flex:1; min-width:0;
+    font-size:9.5px; letter-spacing:.18em; text-transform:uppercase;
+    color:var(--pp-accent);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    pointer-events:none;
+    text-shadow:0 0 6px rgba(var(--pp-accent-rgb), .35);
 }
-#minimap-wrap > .mm-label {
-    position:absolute; top:-14px; left:6px; font-size:9px; letter-spacing:.2em;
-    color:#ff8800; text-transform:uppercase;
+.pp-panel-actions { display:flex; align-items:center; gap:4px; }
+.pp-btn-icon {
+    width:22px; height:22px;
+    background:transparent;
+    border:1px solid var(--pp-accent-border);
+    border-radius:var(--pp-r-sm);
+    color:var(--pp-text-secondary);
+    cursor:pointer;
+    font-family:inherit;
+    font-size:13px; line-height:1;
+    display:inline-flex; align-items:center; justify-content:center;
+    padding:0;
+    transition:background var(--pp-t-fast), border-color var(--pp-t-fast), color var(--pp-t-fast);
 }
-#minimap { width:100%; height:100%; display:block; }
-#validation {
-    position:absolute; bottom:14px; left:14px; z-index:10;
-    font-size:10px; line-height:1.6; color:#8fd7ff;
-    background:rgba(0,0,0,.6); border:1px solid rgba(143,215,255,.25);
-    border-radius:6px; padding:10px 14px; white-space:pre; display:none;
+.pp-btn-icon:hover {
+    background:var(--pp-accent-soft);
+    border-color:var(--pp-accent-border-hi);
+    color:var(--pp-accent);
+}
+.pp-btn-icon:active { transform:scale(.92); }
+.pp-panel-body {
+    padding:9px 12px 10px;
+    overflow:auto;
+    color:var(--pp-text-secondary);
+    font-size:10.5px; line-height:1.55;
+    transition:max-height var(--pp-t-medium), padding var(--pp-t-medium), opacity var(--pp-t-fast);
+    max-height:calc(100vh - 160px);
+}
+.pp-panel.collapsed .pp-panel-body {
+    max-height:0 !important;
+    padding-top:0; padding-bottom:0;
+    opacity:0;
+    overflow:hidden;
+    pointer-events:none;
+}
+.pp-panel-body::-webkit-scrollbar { width:4px; height:4px; }
+.pp-panel-body::-webkit-scrollbar-thumb { background:var(--pp-accent-border); border-radius:2px; }
+
+/* ── Top-left: live physics readout ──────────────────────────────── */
+#hud-panel {
+    top:12px; left:12px;
+    min-width:400px; max-width:480px;
+}
+#hud {
+    white-space:pre;
+    color:var(--pp-text-secondary);
+}
+/* ── Bottom-left: controls reference ─────────────────────────────── */
+#controls-hint-panel {
+    bottom:14px; left:12px;
+    max-width:360px;
 }
 #controls-hint {
-    position:absolute; bottom:14px; right:14px; z-index:10;
-    font-size:9.5px; color:#888; background:rgba(0,0,0,.5);
-    border:1px solid rgba(255,255,255,.07); border-radius:5px; padding:8px 10px;
-    line-height:1.55; max-width:330px;
+    font-size:10px; line-height:1.65;
+    color:var(--pp-text-muted);
 }
-#controls-hint b { color:#ffaa44; letter-spacing:.05em; }
+#controls-hint b {
+    color:var(--pp-accent);
+    letter-spacing:.05em;
+    font-weight:normal;
+    text-shadow:0 0 6px rgba(var(--pp-accent-rgb), .25);
+}
+#controls-hint kbd {
+    display:inline-block;
+    font-family:inherit;
+    font-size:9.5px;
+    padding:1px 5px;
+    margin:0 1px;
+    color:var(--pp-text-primary);
+    background:var(--pp-accent-softer);
+    border:1px solid var(--pp-accent-border);
+    border-radius:3px;
+    line-height:1.3;
+}
+
+@media (max-width: 640px) {
+    .pp-panel-header { padding:8px 8px 8px 10px; min-height:32px; }
+    .pp-btn-icon { width:28px; height:28px; font-size:14px; }
+    .pp-panel-title { font-size:10px; }
+    #hud-panel { min-width:0; left:8px; right:8px; max-width:none; top:8px; }
+    #controls-hint-panel { left:8px; right:8px; max-width:none; bottom:8px; }
+    .pp-panel-body { font-size:10px; padding:8px 10px; }
+}
+
+#minimap-wrap {
+    top:12px; right:12px;
+    width:300px;
+}
+#minimap-wrap .pp-panel-body {
+    padding:4px;
+    height:130px;
+    max-height:130px;
+}
+#minimap-wrap.collapsed { width:300px; }
+#minimap { width:100%; height:100%; display:block; }
+
+#inspector {
+    bottom:60px; left:12px;
+    min-width:320px; max-width:420px;
+    display:none;
+}
+#inspector .pp-panel-body {
+    font-size:10.5px; line-height:1.6;
+    color:#9eecff; white-space:pre;
+    max-height:calc(100vh - 220px);
+}
+#validation {
+    bottom:14px; left:12px;
+    min-width:320px; max-width:520px;
+    display:none;
+    z-index:11;
+}
+#validation .pp-panel-body {
+    font-size:10px; line-height:1.6;
+    color:#bbf2bd; white-space:pre;
+    max-height:calc(100vh - 200px);
+}
+
+/* Cyan accent variant — geodesic inspector */
+.pp-panel[data-pp-accent="cyan"] {
+    --pp-accent:           #8fd7ff;
+    --pp-accent-rgb:       143, 215, 255;
+    --pp-accent-soft:      rgba(143, 215, 255, .12);
+    --pp-accent-softer:    rgba(143, 215, 255, .06);
+    --pp-accent-border:    rgba(143, 215, 255, .30);
+    --pp-accent-border-hi: rgba(143, 215, 255, .55);
+    --pp-accent-glow:      rgba(143, 215, 255, .55);
+    --pp-surface-overlay:  radial-gradient(120% 80% at 0% 0%, rgba(143,215,255,.08), transparent 60%);
+}
+/* Green accent variant — validation pass/attn */
+.pp-panel[data-pp-accent="green"] {
+    --pp-accent:           #6ee5a6;
+    --pp-accent-rgb:       110, 229, 166;
+    --pp-accent-soft:      rgba(110, 229, 166, .10);
+    --pp-accent-softer:    rgba(110, 229, 166, .04);
+    --pp-accent-border:    rgba(110, 229, 166, .28);
+    --pp-accent-border-hi: rgba(110, 229, 166, .55);
+    --pp-accent-glow:      rgba(110, 229, 166, .55);
+    --pp-surface-overlay:  radial-gradient(120% 80% at 0% 0%, rgba(110,229,166,.08), transparent 60%);
+}
+
 #fly-pill {
     position:absolute; top:160px; right:10px; z-index:10;
     font-size:10px; letter-spacing:.18em; text-transform:uppercase;
@@ -76,89 +275,211 @@ body { font-family:'Courier New',monospace; background:#000; color:#ccc; display
 }
 #fly-pill.on { display:inline-block; }
 
-#inspector {
-    position:absolute; bottom:50px; left:14px; z-index:10;
-    font-family:'Courier New',monospace; font-size:10.5px; line-height:1.6;
-    color:#9eecff; background:rgba(0,12,28,.78);
-    border:1px solid rgba(120,200,255,.30); border-radius:6px;
-    padding:9px 12px; white-space:pre; min-width:300px; display:none;
-    backdrop-filter:blur(4px);
-}
-#inspector .ic-title {
-    font-size:9px; letter-spacing:.18em; color:#7adcff; text-transform:uppercase;
-    margin-bottom:4px;
-}
-#inspector .ic-close {
-    position:absolute; top:4px; right:7px; cursor:pointer; color:#5e9bbf;
-    font-size:11px; pointer-events:auto;
-}
-#inspector .ic-close:hover { color:#fff; }
-
-/* Right panel */
+/* Right panel — sticky toolbar + collapsible sections + search */
 #panel {
-    width:290px; min-width:290px; background:rgba(8,4,20,.95);
-    border-left:1px solid rgba(255,120,0,.2);
+    width:300px; min-width:300px;
+    background:linear-gradient(to bottom, rgba(8,4,2,.96), rgba(2,1,0,.98));
+    border-left:1px solid var(--pp-accent-border);
     display:flex; flex-direction:column; overflow-y:auto;
-    padding:12px; gap:10px;
+    padding:0;
+    gap:0;
+    color:var(--pp-text-secondary);
 }
-#panel::-webkit-scrollbar { width:4px; }
-#panel::-webkit-scrollbar-thumb { background:rgba(255,140,0,.3); border-radius:2px; }
+#panel::-webkit-scrollbar { width:5px; }
+#panel::-webkit-scrollbar-thumb { background:var(--pp-accent-border); border-radius:2px; }
+#panel::-webkit-scrollbar-track { background:rgba(0,0,0,.3); }
+.pp-panel-toolbar {
+    position:sticky; top:0; z-index:5;
+    display:flex; flex-direction:column; gap:6px;
+    padding:10px 12px;
+    background:linear-gradient(to bottom, rgba(12,7,2,.98) 80%, rgba(12,7,2,.85));
+    border-bottom:1px solid var(--pp-accent-border);
+    backdrop-filter:var(--pp-blur-glass);
+    -webkit-backdrop-filter:var(--pp-blur-glass);
+}
+.pp-panel-toolbar-row {
+    display:flex; align-items:center; gap:6px;
+}
+.pp-panel-toolbar-title {
+    flex:1;
+    font-size:10.5px; letter-spacing:.18em; text-transform:uppercase;
+    color:var(--pp-accent);
+    text-shadow:0 0 8px rgba(var(--pp-accent-rgb), .35);
+}
+.pp-panel-toolbar-actions { display:flex; gap:4px; }
+.pp-search {
+    position:relative;
+    display:flex; align-items:center;
+}
+.pp-search::before {
+    content:"⌕";
+    position:absolute; left:8px;
+    font-size:13px;
+    color:var(--pp-text-muted);
+    pointer-events:none;
+}
+.pp-search input {
+    flex:1; width:100%;
+    font-family:inherit; font-size:11px;
+    color:var(--pp-text-primary);
+    background:rgba(0,0,0,.45);
+    border:1px solid var(--pp-accent-border);
+    border-radius:var(--pp-r-sm);
+    padding:5px 22px 5px 26px;
+    transition:border-color var(--pp-t-snap), background var(--pp-t-snap);
+}
+.pp-search input::placeholder { color:var(--pp-text-faint); }
+.pp-search input:focus {
+    outline:none;
+    border-color:var(--pp-accent-border-hi);
+    background:rgba(0,0,0,.65);
+}
+.pp-search-clear {
+    position:absolute; right:4px;
+    width:18px; height:18px;
+    border:none; background:transparent;
+    color:var(--pp-text-muted);
+    font-size:13px; line-height:1;
+    cursor:pointer;
+    display:none;
+    border-radius:3px;
+    padding:0;
+}
+.pp-search.has-value .pp-search-clear { display:inline-flex; align-items:center; justify-content:center; }
+.pp-search-clear:hover { color:var(--pp-accent); background:var(--pp-accent-soft); }
+.pp-results-count {
+    font-size:9.5px; color:var(--pp-text-faint);
+    letter-spacing:.05em;
+    height:11px;
+}
+
+#panel-sections {
+    display:flex; flex-direction:column;
+    padding:10px 12px;
+    gap:6px;
+}
+#panel-sections > .pp-intro {
+    padding:8px 10px 6px;
+    border-bottom:1px solid var(--pp-accent-border);
+    margin-bottom:2px;
+}
+.pp-intro .sec-title {
+    /* The intro keeps its original label appearance; the .sec-title
+       button styling defined below is scoped to .pp-section. */
+    display:block;
+    background:none;
+    border:none;
+    padding:0 0 4px;
+    font-size:11px;
+    letter-spacing:.15em;
+    text-transform:uppercase;
+    color:var(--pp-accent);
+    cursor:default;
+}
+.pp-intro .sec-title::after { content:none; }
+.pp-section {
+    border:1px solid var(--pp-accent-border);
+    border-radius:var(--pp-r-md);
+    background:linear-gradient(to bottom, rgba(255,136,0,.02), rgba(255,136,0,.005));
+    overflow:hidden;
+    transition:border-color var(--pp-t-snap), background var(--pp-t-snap);
+}
+.pp-section:hover { border-color:var(--pp-accent-border-hi); }
+.pp-section.hit { border-color:var(--pp-accent-border-hi); box-shadow:0 0 0 1px var(--pp-accent-soft); }
+.pp-section-hidden { display:none !important; }
 .sec-title {
-    font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:#ff8800;
-    border-bottom:1px solid rgba(255,136,0,.25); padding-bottom:4px; margin-bottom:6px;
+    /* Now a header button toggling the section body */
+    display:flex; align-items:center; gap:6px;
+    width:100%;
+    margin:0; padding:7px 10px;
+    background:linear-gradient(to right, var(--pp-accent-soft), var(--pp-accent-softer) 75%);
+    border:none;
+    border-bottom:1px solid var(--pp-accent-border);
+    font-family:inherit;
+    font-size:10px; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--pp-accent);
+    cursor:pointer;
+    text-align:left;
+    transition:background var(--pp-t-snap);
 }
+.sec-title:hover { background:linear-gradient(to right, var(--pp-accent-soft), var(--pp-accent-soft)); }
+.sec-title::after {
+    content:"▾";
+    margin-left:auto;
+    font-size:10px;
+    color:var(--pp-text-muted);
+    transition:transform var(--pp-t-medium);
+}
+.pp-section.collapsed .sec-title { border-bottom-color:transparent; }
+.pp-section.collapsed .sec-title::after { transform:rotate(-90deg); }
+.pp-section-body {
+    padding:10px 10px 4px;
+    max-height:9999px;
+    transition:max-height var(--pp-t-medium), padding var(--pp-t-medium), opacity var(--pp-t-fast);
+    overflow:hidden;
+}
+.pp-section.collapsed .pp-section-body {
+    max-height:0 !important;
+    padding-top:0; padding-bottom:0;
+    opacity:0;
+}
+
 .ctrl { display:flex; flex-direction:column; gap:3px; margin-bottom:7px; }
-.ctrl label { font-size:10px; color:#aaa; }
-.ctrl input[type=range] { width:100%; accent-color:#ff8800; }
-.ctrl .val { font-size:10.5px; color:#ff9933; text-align:right; }
+.ctrl label { font-size:10px; color:var(--pp-text-muted); }
+.ctrl input[type=range] { width:100%; accent-color:var(--pp-accent); }
+.ctrl .val { font-size:10.5px; color:var(--pp-text-primary); text-align:right; }
 select {
-    background:#0d0806; border:1px solid rgba(255,136,0,.3); color:#ccc;
-    padding:4px 6px; border-radius:4px; font-family:inherit; font-size:11px; width:100%;
+    background:#0d0806; border:1px solid var(--pp-accent-border); color:var(--pp-text-secondary);
+    padding:4px 6px; border-radius:var(--pp-r-sm); font-family:inherit; font-size:11px; width:100%;
 }
 .toggle-row { display:flex; align-items:center; gap:6px; margin-bottom:4px; }
-.toggle-row input { accent-color:#ff8800; }
-.toggle-row label { font-size:10px; color:#aaa; cursor:pointer; }
+.toggle-row input { accent-color:var(--pp-accent); }
+.toggle-row label { font-size:10px; color:var(--pp-text-muted); cursor:pointer; }
 .btn {
-    background:rgba(255,100,0,.15); border:1px solid rgba(255,120,0,.4);
-    color:#ff9933; padding:6px 10px; border-radius:5px; cursor:pointer;
-    font-family:inherit; font-size:11px; width:100%; transition:background .2s;
+    background:var(--pp-accent-soft); border:1px solid var(--pp-accent-border-hi);
+    color:var(--pp-accent); padding:6px 10px; border-radius:var(--pp-r-sm); cursor:pointer;
+    font-family:inherit; font-size:11px; width:100%;
+    transition:background var(--pp-t-snap), border-color var(--pp-t-snap);
 }
-.btn:hover { background:rgba(255,100,0,.3); }
+.btn:hover { background:rgba(var(--pp-accent-rgb), .22); }
 .btn-row {
     display:grid; grid-template-columns:1fr 1fr; gap:6px;
 }
 .btn-sm {
     background:rgba(120,60,180,.15); border:1px solid rgba(160,100,220,.35);
-    color:#cda8ff; padding:5px 8px; border-radius:4px; cursor:pointer;
-    font-family:inherit; font-size:10.5px; transition:background .2s;
+    color:#cda8ff; padding:5px 8px; border-radius:var(--pp-r-sm); cursor:pointer;
+    font-family:inherit; font-size:10.5px;
+    transition:background var(--pp-t-snap), border-color var(--pp-t-snap);
 }
-.btn-sm:hover { background:rgba(160,100,220,.3); }
+.btn-sm:hover { background:rgba(160,100,220,.3); border-color:rgba(160,100,220,.55); }
 .shader-badge {
     display:inline-block; background:linear-gradient(45deg,#6040ff,#ff4080);
     color:#fff; font-size:9px; padding:2px 6px; border-radius:3px;
     letter-spacing:.08em; margin-bottom:6px;
 }
 .info-box {
-    font-size:10px; color:#888; line-height:1.6;
-    border:1px solid rgba(255,255,255,.06); border-radius:4px;
-    padding:8px; background:rgba(255,255,255,.02);
+    font-size:10px; color:var(--pp-text-muted); line-height:1.6;
+    border:1px solid var(--pp-accent-border);
+    border-radius:var(--pp-r-md);
+    padding:8px 10px; background:var(--pp-accent-softer);
 }
-.info-box b { color:#ffaa44; }
-.sep { border-top:1px solid rgba(255,255,255,.07); margin:4px 0; }
-.note { font-size:9.5px; color:#777; line-height:1.5; margin-top:4px; }
+.info-box b { color:var(--pp-accent); }
+.sep { border-top:1px solid var(--pp-accent-border); margin:4px 0; }
+.note { font-size:9.5px; color:var(--pp-text-faint); line-height:1.5; margin-top:4px; }
 .phase-pill {
     display:inline-block; font-size:9px; letter-spacing:.15em; text-transform:uppercase;
     color:#000; background:#ff8800; padding:1px 6px; border-radius:10px; margin-right:4px;
 }
 /* Tier 1C — iframe embed mode (?embed=1): hide UI chrome for clean external embed */
 body.ton618-embed #panel,
-body.ton618-embed #controls-hint,
+body.ton618-embed #controls-hint-panel,
 body.ton618-embed #fly-pill,
 body.ton618-embed #minimap-wrap,
 body.ton618-embed nav { display:none !important; }
 body.ton618-embed #app { height:100vh; }
-body.ton618-embed #hud { font-size:9.5px; min-width:280px; opacity:.85; }
-body.ton618-embed #hud-title { font-size:8px; }
+body.ton618-embed #hud-panel { min-width:0; max-width:340px; opacity:.9; }
+body.ton618-embed #hud { font-size:9.5px; }
+body.ton618-embed .pp-panel-title { font-size:8.5px; }
 .toast {
     position:absolute; left:50%; top:18px; transform:translateX(-50%);
     z-index:30; font-size:11px; color:#fff; background:rgba(20,20,40,.85);
@@ -204,25 +525,66 @@ body.ton618-embed #hud-title { font-size:8px; }
 <div id="app">
     <div id="canvas-area">
         <canvas id="glCanvas"></canvas>
-        <div id="hud-title">Phase 1 · Kerr (Hamilton, BL) · ZAMO tetrad · RK45 · 3D God-mode Camera</div>
-        <div id="hud">booting…</div>
-        <div id="minimap-wrap">
-            <div class="mm-label">god-view · top / side</div>
-            <canvas id="minimap"></canvas>
+        <div id="hud-panel" class="pp-panel" data-pp-panel>
+            <header class="pp-panel-header">
+                <span class="pp-drag-grip" aria-hidden="true"></span>
+                <span class="pp-panel-title">▸ WebGL2 · Phase 1 · Kerr-BL · Hamilton · ZAMO · RK45</span>
+                <span class="pp-panel-actions">
+                    <button type="button" class="pp-btn-icon" data-pp-minimize aria-label="Minimize" title="Minimize"><span aria-hidden="true">–</span></button>
+                </span>
+            </header>
+            <div id="hud" class="pp-panel-body">booting…</div>
+        </div>
+        <div id="minimap-wrap" class="pp-panel" data-pp-panel>
+            <header class="pp-panel-header">
+                <span class="pp-drag-grip" aria-hidden="true"></span>
+                <span class="pp-panel-title">▸ God-View · top / side</span>
+                <span class="pp-panel-actions">
+                    <button type="button" class="pp-btn-icon" data-pp-minimize aria-label="Minimize" title="Minimize"><span aria-hidden="true">–</span></button>
+                </span>
+            </header>
+            <div class="pp-panel-body">
+                <canvas id="minimap"></canvas>
+            </div>
         </div>
         <div id="fly-pill">⊙ free-fly</div>
         <div id="toast" class="toast"></div>
-        <div id="inspector">
-            <div class="ic-title">▸ Geodesic inspector</div>
-            <span class="ic-close" id="ic-close">✕</span>
-            <div id="inspector-body">click anywhere on the render</div>
+        <div id="inspector" class="pp-panel" data-pp-panel data-pp-accent="cyan">
+            <header class="pp-panel-header">
+                <span class="pp-drag-grip" aria-hidden="true"></span>
+                <span class="pp-panel-title">▸ Geodesic Inspector</span>
+                <span class="pp-panel-actions">
+                    <button type="button" class="pp-btn-icon" data-pp-minimize aria-label="Minimize" title="Minimize"><span aria-hidden="true">–</span></button>
+                    <button type="button" class="pp-btn-icon" data-pp-close id="ic-close" aria-label="Close" title="Close"><span aria-hidden="true">✕</span></button>
+                </span>
+            </header>
+            <div id="inspector-body" class="pp-panel-body">click anywhere on the render</div>
         </div>
-        <div id="validation"></div>
-        <div id="controls-hint">
-            <b>orbit:</b> drag · shift+drag pan · mid-drag roll · wheel dolly<br>
-            <b>fly (F):</b> WASD strafe · Q/E forward/back · space/ctrl up/down<br>
-            <b>both:</b> arrows yaw/pitch · Z/X roll · shift = boost · R reset<br>
-            <b>click:</b> inspect that pixel's geodesic (b, r_min, term…)
+        <div id="validation" class="pp-panel" data-pp-panel data-pp-accent="green">
+            <header class="pp-panel-header">
+                <span class="pp-drag-grip" aria-hidden="true"></span>
+                <span class="pp-panel-title">▸ Photon-Ring Validation</span>
+                <span class="pp-panel-actions">
+                    <button type="button" class="pp-btn-icon" data-pp-minimize aria-label="Minimize" title="Minimize"><span aria-hidden="true">–</span></button>
+                    <button type="button" class="pp-btn-icon" data-pp-close aria-label="Close" title="Close"><span aria-hidden="true">✕</span></button>
+                </span>
+            </header>
+            <div id="validation-body" class="pp-panel-body">measuring…</div>
+        </div>
+        <div id="controls-hint-panel" class="pp-panel" data-pp-panel>
+            <header class="pp-panel-header">
+                <span class="pp-drag-grip" aria-hidden="true"></span>
+                <span class="pp-panel-title">▸ Observatory Controls · Camera &amp; Inspector</span>
+                <span class="pp-panel-actions">
+                    <button type="button" class="pp-btn-icon" data-pp-minimize aria-label="Minimize" title="Minimize"><span aria-hidden="true">–</span></button>
+                </span>
+            </header>
+            <div id="controls-hint" class="pp-panel-body">
+                <b>orbit:</b> drag · <kbd>shift</kbd>+drag pan · mid-drag roll · wheel dolly<br>
+                <b>fly</b> <kbd>F</kbd>: <kbd>WASD</kbd> strafe · <kbd>Q</kbd>/<kbd>E</kbd> fwd/back · <kbd>space</kbd>/<kbd>ctrl</kbd> up/down<br>
+                <b>both:</b> arrows yaw/pitch · <kbd>Z</kbd>/<kbd>X</kbd> roll · <kbd>shift</kbd>=boost · <kbd>R</kbd> reset<br>
+                <b>click:</b> inspect that pixel's geodesic (b, r_min, term…)
+            </div>
         </div>
     </div>
 
@@ -1189,9 +1551,10 @@ body.ton618-embed #hud-title { font-size:8px; }
     // ── Pixel inspector ────────────────────────────────────────────
     const inspector = $('inspector');
     const inspBody  = $('inspector-body');
-    $('ic-close').addEventListener('click', () => { inspector.style.display = 'none'; });
+    // Close handler wired by the data-pp-close infra below.
     app.onInspect((r) => {
-        inspector.style.display = 'block';
+        inspector.style.display = 'flex';
+        inspector.classList.remove('collapsed');
         const bRel = r.b_impact / r.b_crit;
         const fmtPct = (x) => Math.abs(x) < 1e-6 ? '0.000 %' : x.toExponential(3) + ' %';
         const lines = [
@@ -1318,13 +1681,15 @@ body.ton618-embed #hud-title { font-size:8px; }
     });
 
     $('btnValidate').addEventListener('click', () => {
-        const v = $('validation');
-        v.style.display = 'block';
-        v.textContent = 'measuring…';
+        const v    = $('validation');
+        const body = $('validation-body');
+        v.style.display = 'flex';
+        v.classList.remove('collapsed');
+        body.textContent = 'measuring…';
         setTimeout(() => {
             const result = app.runPhotonRingValidation();
             if (!result) {
-                v.textContent = 'validation failed: no shadow detected';
+                body.textContent = 'validation failed: no shadow detected';
                 return;
             }
             const aTag = result.kerr_regime
@@ -1356,9 +1721,353 @@ body.ton618-embed #hud-title { font-size:8px; }
                 );
             }
             lines.unshift(`PHOTON RING / SHADOW MEASUREMENT  (${aTag})`);
-            v.textContent = lines.join('\n');
+            body.textContent = lines.join('\n');
         }, 50);
     });
+</script>
+
+<script>
+// ── pp-panel: drag + minimize + persistence ──────────────────────────
+// Touch-optimized via Pointer Events. Position and collapse state are
+// keyed off the panel id and survive reloads via localStorage.
+(function () {
+    const STORAGE_PREFIX = 'pp.ton618.panel.';
+
+    function clampToParent(panel, left, top) {
+        const parent = panel.offsetParent || document.body;
+        const parentRect = parent.getBoundingClientRect();
+        const rect = panel.getBoundingClientRect();
+        // Keep at least 60px of panel inside the viewport on every edge so
+        // the header (and minimize button) stay reachable after a drag.
+        const minVisible = 60;
+        const maxLeft = parentRect.width - minVisible;
+        const maxTop  = parentRect.height - minVisible;
+        const minLeft = minVisible - rect.width;
+        const minTop  = 0;
+        return [
+            Math.max(minLeft, Math.min(maxLeft, left)),
+            Math.max(minTop,  Math.min(maxTop,  top)),
+        ];
+    }
+
+    function applyPosition(panel, left, top) {
+        const [cl, ct] = clampToParent(panel, left, top);
+        panel.style.left   = cl + 'px';
+        panel.style.top    = ct + 'px';
+        panel.style.right  = 'auto';
+        panel.style.bottom = 'auto';
+    }
+
+    function restorePosition(panel) {
+        try {
+            const raw = localStorage.getItem(STORAGE_PREFIX + panel.id + '.pos');
+            if (!raw) return;
+            const { left, top } = JSON.parse(raw);
+            if (typeof left === 'number' && typeof top === 'number') {
+                // Apply raw — hidden panels would clamp against width=0
+                // otherwise. Clamping happens on first user drag.
+                panel.style.left   = left + 'px';
+                panel.style.top    = top + 'px';
+                panel.style.right  = 'auto';
+                panel.style.bottom = 'auto';
+            }
+        } catch (e) { /* ignore corrupt storage */ }
+    }
+
+    function makeCloseable(panel) {
+        const btn = panel.querySelector('[data-pp-close]');
+        if (!btn) return;
+        btn.addEventListener('click', () => {
+            panel.style.display = 'none';
+        });
+    }
+
+    function persistPosition(panel) {
+        const parent = panel.offsetParent || document.body;
+        const parentRect = parent.getBoundingClientRect();
+        const rect = panel.getBoundingClientRect();
+        const left = rect.left - parentRect.left;
+        const top  = rect.top  - parentRect.top;
+        try {
+            localStorage.setItem(
+                STORAGE_PREFIX + panel.id + '.pos',
+                JSON.stringify({ left, top })
+            );
+        } catch (e) { /* quota / private mode */ }
+    }
+
+    function makeDraggable(panel) {
+        const header = panel.querySelector('.pp-panel-header');
+        if (!header) return;
+        let dragging = false;
+        let pointerId = null;
+        let startX = 0, startY = 0, baseLeft = 0, baseTop = 0;
+
+        header.addEventListener('pointerdown', (e) => {
+            // Don't start a drag from the minimize button.
+            if (e.target.closest('button')) return;
+            // Primary button / touch / pen only.
+            if (e.button !== undefined && e.button !== 0) return;
+            dragging = true;
+            pointerId = e.pointerId;
+            try { header.setPointerCapture(pointerId); } catch (err) {}
+            const parent = panel.offsetParent || document.body;
+            const parentRect = parent.getBoundingClientRect();
+            const rect = panel.getBoundingClientRect();
+            baseLeft = rect.left - parentRect.left;
+            baseTop  = rect.top  - parentRect.top;
+            startX = e.clientX;
+            startY = e.clientY;
+            panel.classList.add('is-dragging');
+            e.preventDefault();
+        });
+
+        header.addEventListener('pointermove', (e) => {
+            if (!dragging || e.pointerId !== pointerId) return;
+            applyPosition(panel, baseLeft + (e.clientX - startX), baseTop + (e.clientY - startY));
+        });
+
+        function endDrag(e) {
+            if (!dragging) return;
+            if (e && e.pointerId !== undefined && e.pointerId !== pointerId) return;
+            dragging = false;
+            try { header.releasePointerCapture(pointerId); } catch (err) {}
+            pointerId = null;
+            panel.classList.remove('is-dragging');
+            persistPosition(panel);
+        }
+        header.addEventListener('pointerup', endDrag);
+        header.addEventListener('pointercancel', endDrag);
+
+        // Double-click the header to reset to the CSS-defined position.
+        header.addEventListener('dblclick', (e) => {
+            if (e.target.closest('button')) return;
+            panel.style.left = '';
+            panel.style.top = '';
+            panel.style.right = '';
+            panel.style.bottom = '';
+            try { localStorage.removeItem(STORAGE_PREFIX + panel.id + '.pos'); } catch (err) {}
+        });
+    }
+
+    function makeMinimizable(panel) {
+        const btn = panel.querySelector('[data-pp-minimize]');
+        if (!btn) return;
+        const key = STORAGE_PREFIX + panel.id + '.collapsed';
+        const initial = (() => {
+            try { return localStorage.getItem(key) === '1'; } catch { return false; }
+        })();
+        panel.classList.toggle('collapsed', initial);
+        updateButton();
+        btn.addEventListener('click', () => {
+            const collapsed = panel.classList.toggle('collapsed');
+            try { localStorage.setItem(key, collapsed ? '1' : '0'); } catch (err) {}
+            updateButton();
+        });
+        function updateButton() {
+            const collapsed = panel.classList.contains('collapsed');
+            btn.firstElementChild.textContent = collapsed ? '+' : '–';
+            const label = collapsed ? 'Restore' : 'Minimize';
+            btn.setAttribute('aria-label', label);
+            btn.setAttribute('title', label);
+        }
+    }
+
+    document.querySelectorAll('[data-pp-panel]').forEach((panel) => {
+        restorePosition(panel);
+        makeDraggable(panel);
+        makeMinimizable(panel);
+        makeCloseable(panel);
+    });
+
+    // ── Right-panel: sticky toolbar + collapsible sections + search ──
+    const rightPanel = document.getElementById('panel');
+    if (rightPanel) {
+        // Open-by-default substring whitelist for section titles.
+        const OPEN_BY_DEFAULT = [
+            'observer',
+            'black-hole geometry',
+            'camera presets',
+            'accretion disk',
+        ];
+        const SECTION_STORE = 'pp.ton618.sections.collapsed';
+        const collapsedSet = (() => {
+            try {
+                const raw = localStorage.getItem(SECTION_STORE);
+                return new Set(raw ? JSON.parse(raw) : []);
+            } catch { return new Set(); }
+        })();
+        function persistCollapsed() {
+            try {
+                localStorage.setItem(SECTION_STORE, JSON.stringify([...collapsedSet]));
+            } catch (e) {}
+        }
+
+        // 1. Wrap existing direct children in #panel-sections so the
+        //    toolbar can sit above them sticky.
+        const sectionsWrap = document.createElement('div');
+        sectionsWrap.id = 'panel-sections';
+        while (rightPanel.firstChild) {
+            sectionsWrap.appendChild(rightPanel.firstChild);
+        }
+        rightPanel.appendChild(sectionsWrap);
+
+        // 2. Convert each section to collapsible — first div is the intro
+        //    (has a .shader-badge); leave it open and non-collapsible.
+        const sections = [];
+        Array.from(sectionsWrap.children).forEach((node) => {
+            if (!(node instanceof HTMLElement)) return;
+            // The standalone .sep and .info-box / .note tail aren't sections.
+            if (node.classList.contains('sep') ||
+                node.classList.contains('info-box') ||
+                node.classList.contains('note')) {
+                return;
+            }
+            const titleEl = node.querySelector(':scope > .sec-title');
+            if (!titleEl) return;
+
+            const isIntro = !!node.querySelector(':scope > .shader-badge');
+            if (isIntro) {
+                node.classList.add('pp-intro');
+                return; // intro card stays open + label-only
+            }
+            node.classList.add('pp-section');
+
+            // Convert sec-title <div> into a real <button>.
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'sec-title';
+            btn.innerHTML = titleEl.innerHTML;
+            titleEl.replaceWith(btn);
+
+            // Wrap remaining siblings of the title in .pp-section-body.
+            const body = document.createElement('div');
+            body.className = 'pp-section-body';
+            while (btn.nextSibling) {
+                body.appendChild(btn.nextSibling);
+            }
+            node.appendChild(body);
+
+            const key = (btn.textContent || '').trim().toLowerCase();
+            node.dataset.sectionKey = key;
+            // Cache lowercase searchable text (title + body labels) for fast filtering.
+            node.dataset.searchText = (node.textContent || '').toLowerCase();
+
+            const openByDefault = OPEN_BY_DEFAULT.some((s) => key.includes(s));
+            // If user has a stored preference, honor it; otherwise use default.
+            let collapsed;
+            if (collapsedSet.has(key)) collapsed = true;
+            else if (localStorage.getItem(SECTION_STORE + '.' + key + '.open') === '1') collapsed = false;
+            else collapsed = !openByDefault;
+            node.classList.toggle('collapsed', collapsed);
+
+            btn.addEventListener('click', () => {
+                const nowCollapsed = node.classList.toggle('collapsed');
+                if (nowCollapsed) collapsedSet.add(key);
+                else collapsedSet.delete(key);
+                persistCollapsed();
+                // Track explicit-open preference so it survives default flips.
+                try {
+                    localStorage.setItem(
+                        SECTION_STORE + '.' + key + '.open',
+                        nowCollapsed ? '0' : '1'
+                    );
+                } catch (e) {}
+            });
+            sections.push(node);
+        });
+
+        // 3. Build the sticky toolbar with title + search.
+        const toolbar = document.createElement('div');
+        toolbar.className = 'pp-panel-toolbar';
+        toolbar.innerHTML = `
+            <div class="pp-panel-toolbar-row">
+                <span class="pp-panel-toolbar-title">▸ Controls</span>
+                <span class="pp-panel-toolbar-actions">
+                    <button type="button" class="pp-btn-icon" data-action="expand-all" aria-label="Expand all" title="Expand all"><span aria-hidden="true">⤓</span></button>
+                    <button type="button" class="pp-btn-icon" data-action="collapse-all" aria-label="Collapse all" title="Collapse all"><span aria-hidden="true">⤒</span></button>
+                </span>
+            </div>
+            <div class="pp-search">
+                <input type="search" placeholder="Filter sliders, presets…" aria-label="Filter controls" autocomplete="off" spellcheck="false">
+                <button type="button" class="pp-search-clear" aria-label="Clear" title="Clear">✕</button>
+            </div>
+            <div class="pp-results-count" aria-live="polite"></div>
+        `;
+        rightPanel.insertBefore(toolbar, sectionsWrap);
+
+        const searchInput = toolbar.querySelector('.pp-search input');
+        const searchWrap  = toolbar.querySelector('.pp-search');
+        const searchClear = toolbar.querySelector('.pp-search-clear');
+        const resultsCount = toolbar.querySelector('.pp-results-count');
+
+        // Remember each section's pre-search collapsed state so we can
+        // restore it when the query is cleared. Reset by reassignment.
+        let preSearchCollapsedRef = new WeakMap();
+        const applyFilterRebound = (q) => {
+            const query = q.trim().toLowerCase();
+            searchWrap.classList.toggle('has-value', !!query);
+            if (!query) {
+                sections.forEach((sec) => {
+                    sec.classList.remove('pp-section-hidden', 'hit');
+                    if (preSearchCollapsedRef.has(sec)) {
+                        sec.classList.toggle('collapsed', preSearchCollapsedRef.get(sec));
+                    }
+                });
+                preSearchCollapsedRef = new WeakMap();
+                resultsCount.textContent = '';
+                return;
+            }
+            let visible = 0;
+            sections.forEach((sec) => {
+                const text = sec.dataset.searchText || '';
+                const hit = text.includes(query);
+                if (!preSearchCollapsedRef.has(sec)) {
+                    preSearchCollapsedRef.set(sec, sec.classList.contains('collapsed'));
+                }
+                sec.classList.toggle('pp-section-hidden', !hit);
+                sec.classList.toggle('hit', hit);
+                if (hit) {
+                    sec.classList.remove('collapsed');
+                    visible++;
+                }
+            });
+            resultsCount.textContent = visible === 0
+                ? 'no matches'
+                : `${visible} section${visible === 1 ? '' : 's'} match`;
+        };
+        searchInput.addEventListener('input', () => applyFilterRebound(searchInput.value));
+        searchClear.addEventListener('click', () => {
+            searchInput.value = '';
+            applyFilterRebound('');
+            searchInput.focus();
+        });
+        searchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && searchInput.value) {
+                e.stopPropagation();
+                searchInput.value = '';
+                applyFilterRebound('');
+            }
+        });
+
+        toolbar.querySelector('[data-action="expand-all"]').addEventListener('click', () => {
+            sections.forEach((sec) => {
+                sec.classList.remove('collapsed');
+                const key = sec.dataset.sectionKey;
+                if (key) collapsedSet.delete(key);
+            });
+            persistCollapsed();
+        });
+        toolbar.querySelector('[data-action="collapse-all"]').addEventListener('click', () => {
+            sections.forEach((sec) => {
+                sec.classList.add('collapsed');
+                const key = sec.dataset.sectionKey;
+                if (key) collapsedSet.add(key);
+            });
+            persistCollapsed();
+        });
+    }
+})();
 </script>
 </body>
 </html>
