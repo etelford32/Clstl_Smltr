@@ -83,6 +83,7 @@ const NAV_DROPDOWNS = [
             { href: 'star2d.html',            label: '2D Stellar Modeler',   sub: 'HR diagram + classification',     tier: 'public', icon: '📊' },
             { href: 'star2d-advanced.html',   label: 'Advanced 2D Solar',    sub: 'CME, Parker spirals, fluid',      tier: 'free',   icon: '🔬' },
             { href: 'gravity-lab.html',       label: 'Gravity Lab',          sub: 'Live N-body · moons & resonances', tier: 'public', icon: '🪐', badge: 'NEW', id: 'gravity-lab' },
+            { href: 'accretion-disc.html',    label: 'Accretion Disc',       sub: 'α-disc + pebble accretion + Theia → Moon', tier: 'public', icon: '🌀', badge: 'NEW', id: 'accretion-disc' },
             // Jovian System merged into the live Solar System orrery (threejs.html).
             // Galilean moons now run inside the main scene via Yoshida-4 N-body.
             { href: 'time-machine.html',      label: 'Orbital Time Machine', sub: 'N-body propagation · ±10 kyr to ±1 Myr', tier: 'public', icon: '⏳', badge: 'IN DEV', id: 'time-machine' },
