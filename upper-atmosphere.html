@@ -726,6 +726,208 @@ input[type=range]::-moz-range-thumb {
     font-variant-numeric:tabular-nums;
 }
 
+/* ─── Floating window + story-card (Phase 21) ──────────── */
+/* Reusable floating-window primitive: drag from title bar, minimize,
+ * close, position persisted per-id in localStorage. Pattern is
+ * available to any future floating UI (export, conjunction-pair
+ * detail, alerts-log) without subclassing. */
+.ua-fw {
+    background:rgba(10,6,28,.94);
+    backdrop-filter: blur(6px);
+    border:1px solid rgba(0,200,200,.30);
+    border-radius:8px;
+    box-shadow:0 8px 32px rgba(0,0,0,.55), 0 0 0 1px rgba(0,200,200,.05);
+    display:flex; flex-direction:column;
+    overflow:hidden;
+    color:#cde;
+    font-family:inherit;
+    /* When minimized we collapse the body away; the bar alone is ~30 px. */
+}
+.ua-fw--min { box-shadow:0 4px 14px rgba(0,0,0,.45); }
+.ua-fw-bar {
+    display:flex; align-items:center; gap:4px;
+    padding:5px 6px 5px 10px;
+    cursor:grab;
+    user-select:none;
+    background:linear-gradient(180deg, rgba(0,200,200,.10), rgba(0,200,200,.03));
+    border-bottom:1px solid rgba(0,200,200,.18);
+}
+.ua-fw-bar--dragging { cursor:grabbing; background:rgba(0,200,200,.18); }
+.ua-fw--min .ua-fw-bar { border-bottom:none; }
+.ua-fw-title {
+    flex:1 1 auto;
+    color:#fff; font-weight:700; font-size:.72rem;
+    letter-spacing:.04em;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.ua-fw-btn {
+    flex:0 0 auto;
+    width:22px; height:22px; padding:0;
+    background:transparent; color:#9ab;
+    border:1px solid rgba(150,170,200,.20);
+    border-radius:4px;
+    font-size:.85rem; line-height:1;
+    cursor:pointer;
+}
+.ua-fw-btn:hover { color:#0ff; border-color:rgba(0,200,200,.55); }
+.ua-fw-body {
+    flex:1 1 auto;
+    overflow:auto;
+    padding:0;
+}
+
+/* Clickable asset-name pseudo-link inside per-card chrome — looks
+ * like the original name span but gets a hover underline so the
+ * operator knows it's interactive. */
+.ua-fleet-name-btn {
+    background:none;
+    border:none;
+    padding:0;
+    color:#fff;
+    font: inherit;
+    font-weight:600;
+    font-size:.78rem;
+    cursor:pointer;
+    text-align:left;
+    flex:1 1 auto;
+    min-width:0;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.ua-fleet-name-btn:hover {
+    color:#0ff;
+    text-decoration:underline;
+    text-underline-offset:2px;
+}
+
+/* Story-card content layout. Each section is a tight block; the
+ * grid stacks them with consistent spacing. Body scrolls if total
+ * height exceeds the window. */
+.ua-storycard {
+    display:flex; flex-direction:column;
+    padding:10px 12px 14px;
+    font-size:.7rem;
+    line-height:1.45;
+}
+.ua-storycard-head {
+    display:flex; align-items:center; gap:6px; flex-wrap:wrap;
+    padding-bottom:8px;
+    border-bottom:1px solid rgba(0,200,200,.12);
+    margin-bottom:8px;
+}
+.ua-storycard-name {
+    color:#fff; font-weight:700; font-size:.95rem;
+}
+.ua-storycard-norad {
+    color:#9ab; font-size:.65rem; font-variant-numeric:tabular-nums;
+}
+.ua-storycard-grid {
+    display:flex; flex-direction:column; gap:10px;
+}
+.ua-storycard-sec h4 {
+    margin:0 0 4px;
+    font-size:.62rem;
+    text-transform:uppercase;
+    letter-spacing:.08em;
+    color:#9ab;
+    font-weight:700;
+}
+.ua-storycard-empty {
+    color:#789; font-size:.65rem; line-height:1.45;
+    padding:6px 8px; margin:0;
+    border:1px dashed rgba(0,200,200,.18);
+    border-radius:5px;
+}
+.ua-storycard-livegrid {
+    display:grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap:4px;
+    font-variant-numeric:tabular-nums;
+}
+.ua-storycard-livegrid > div {
+    background:rgba(8,4,22,.55);
+    border:1px solid rgba(0,200,200,.15);
+    border-radius:5px;
+    padding:4px 6px;
+    display:flex; flex-direction:column; gap:1px;
+}
+.ua-storycard-livegrid span { color:#789; font-size:.55rem; text-transform:uppercase; letter-spacing:.06em; }
+.ua-storycard-livegrid b    { color:#fff; font-size:.7rem; font-weight:700; }
+.ua-storycard-livefoot {
+    color:#9ab; font-size:.6rem;
+    padding:4px 2px 0;
+    font-variant-numeric:tabular-nums;
+}
+.ua-storycard-svg {
+    width:100%; max-width:100%;
+    background:rgba(8,4,22,.40);
+    border-radius:4px;
+    display:block;
+}
+.ua-storycard-svg--spark { background:rgba(8,4,22,.30); }
+.ua-storycard-axislabel {
+    fill:#789; font-size:8px; font-family:ui-monospace, monospace;
+}
+.ua-storycard-key {
+    display:flex; gap:10px; flex-wrap:wrap;
+    font-size:.55rem;
+    padding-top:3px;
+}
+.ua-storycard-key-sub {
+    margin-left:auto;
+    color:#789;
+    font-variant-numeric:tabular-nums;
+}
+.ua-storycard-skillfoot {
+    color:#9ab; font-size:.6rem;
+    padding-top:3px;
+    font-variant-numeric:tabular-nums;
+}
+.ua-storycard-conj-summary {
+    color:#9ab; font-size:.6rem;
+    padding-bottom:3px;
+    font-variant-numeric:tabular-nums;
+}
+.ua-storycard-conj-rows,
+.ua-storycard-anom-rows {
+    display:flex; flex-direction:column; gap:1px;
+}
+.ua-storycard-conj-row {
+    display:grid;
+    grid-template-columns: 38px 1fr auto;
+    gap:6px; align-items:center;
+    padding:3px 6px;
+    background:rgba(8,4,22,.35);
+    border-radius:4px;
+    font-size:.62rem;
+    font-variant-numeric:tabular-nums;
+}
+.ua-storycard-conj-row.is-past { opacity:.7; }
+.ua-storycard-conj-row.is-pending {
+    border-left:2px solid rgba(255,170,32,.55);
+}
+.ua-storycard-conj-prob { font-weight:700; text-align:right; }
+.ua-storycard-conj-prob.is-high { color:#ff5060; }
+.ua-storycard-conj-prob.is-med  { color:#ffaa20; }
+.ua-storycard-conj-prob.is-low  { color:#40e090; }
+.ua-storycard-conj-partner { color:#cde; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ua-storycard-conj-meta    { color:#9ab; text-align:right; }
+
+.ua-storycard-anom-row {
+    display:grid;
+    grid-template-columns: auto auto auto 1fr;
+    gap:6px; align-items:baseline;
+    padding:3px 6px;
+    background:rgba(8,4,22,.35);
+    border-left:2px solid rgba(255,80,96,.55);
+    border-radius:4px;
+    font-size:.62rem;
+    font-variant-numeric:tabular-nums;
+}
+.ua-storycard-anom-when  { color:#9ab; }
+.ua-storycard-anom-delta { color:#ff8090; font-weight:700; }
+.ua-storycard-anom-z     { color:#ffaa20; }
+.ua-storycard-anom-cause { color:#cde; text-align:right; }
+
 /* ─── Fleet-wide skill dashboard (Phase 14) ─────────────── */
 .ua-fleet-skill {
     display:flex; flex-direction:column; gap:4px;

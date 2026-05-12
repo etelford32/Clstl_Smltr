@@ -47,6 +47,7 @@ import {
     correlateAnomalyWithConjunctions, tallyAnomalyConjunctionCorrelations,
     walkResidualAnomalies,
 } from './upper-atmosphere-backtest.js';
+import { AssetStoryCard } from './upper-atmosphere-asset-storycard.js';
 
 // Debounce window for full-fleet re-analysis on incoming ticks. Compute
 // is cheap (~50 µs/asset) but we don't want to thrash mid-slider-drag.
@@ -101,6 +102,11 @@ export class FleetPanel {
         this._fleetSkill = null;
         this._fleetSkillKey = '';
         this._fleetSkillRunning = false;
+        // Phase 21: open story-card windows keyed by asset id. Each entry
+        // is an AssetStoryCard instance; updates push live data on every
+        // analyzer recompute so an open card stays fresh without forcing
+        // the operator to re-click.
+        this._storyCards = new Map();
         this._alertCooldowns = new Map();    // assetId|kind → fireWallMs
         this._recomputeTimer = null;
         this._tickHandler = null;
@@ -424,6 +430,12 @@ export class FleetPanel {
             if (refreshBtn) { this.fleet.refresh(refreshBtn.dataset.refreshId); return; }
             const btRun = e.target.closest?.('button[data-bt-run]');
             if (btRun) { this._runBacktest(btRun.dataset.btRun); return; }
+            // Phase 21: clicking the asset name opens the per-asset story
+            // card (or focuses it + un-minimises if already open). The
+            // FloatingWindow primitive handles dedup internally, so this
+            // path is safe to call repeatedly.
+            const storyBtn = e.target.closest?.('button[data-story-id]');
+            if (storyBtn) { this._openStoryCard(storyBtn.dataset.storyId); return; }
             // Track <details> open/close so re-renders preserve operator
             // state. The summary click fires before the open attribute
             // toggles, so we read the OPPOSITE of what's currently there.
@@ -623,6 +635,9 @@ export class FleetPanel {
         // its own cache key. Render is cheap; sweep is not.
         this._renderSkillDashboard();
         this._maybeRunFleetSkill();
+        // Phase 21: push fresh data into every currently-open story-card
+        // window. Cheap when zero are open (early-return inside).
+        this._updateOpenStoryCards();
     }
 
     // ── Fleet-wide conjunction panel ───────────────────────────────────────
@@ -1268,6 +1283,48 @@ export class FleetPanel {
             </details>`;
     }
 
+    /** Phase 21: open (or focus, if already open) a story-card for one
+     *  asset. The card lives in a FloatingWindow primitive and gets
+     *  pushed fresh data on every analyzer recompute via
+     *  _updateOpenStoryCards. Closing the window prunes the entry. */
+    _openStoryCard(assetId) {
+        const asset = this.fleet.findById(assetId);
+        if (!asset) return;
+        const result = this._results.find(r => r.id === assetId) || null;
+        // If we already have a card for this asset, FloatingWindow's
+        // built-in dedup will return the existing instance — but our
+        // map still owns it, so just refresh and bring forward.
+        if (this._storyCards.has(assetId)) {
+            const sc = this._storyCards.get(assetId);
+            sc.update({ asset, result });
+            sc.win.setMinimized(false);
+            sc.win.bringToFront();
+            return;
+        }
+        // First-open path. Hook close-cleanup so the map doesn't leak
+        // entries for closed windows.
+        const sc = AssetStoryCard.open({
+            asset, result,
+            fleet: this.fleet,
+            analyzer: this.analyzer,
+        });
+        sc.win.onClose = () => this._storyCards.delete(assetId);
+        this._storyCards.set(assetId, sc);
+    }
+
+    /** Push fresh asset + analyzer results into every currently-open
+     *  story card. Called from _renderList on every recompute so open
+     *  windows track the same data the per-card view does. */
+    _updateOpenStoryCards() {
+        if (this._storyCards.size === 0) return;
+        for (const [id, sc] of this._storyCards) {
+            const asset = this.fleet.findById(id);
+            if (!asset) { sc.close(); this._storyCards.delete(id); continue; }
+            const result = this._results.find(r => r.id === id) || null;
+            try { sc.update({ asset, result }); } catch (_) { /* render error — leave the window as-is */ }
+        }
+    }
+
     /** Triggered by the [data-bt-run] button click. Parses the pasted
      *  TLE, runs the backtest, stores the result, re-renders. */
     async _runBacktest(assetId) {
@@ -1346,7 +1403,9 @@ export class FleetPanel {
             return `
                 <div class="ua-fleet-card ua-fleet-card--unready" data-asset-id="${r.id}">
                     <div class="ua-fleet-card-head">
-                        <span class="ua-fleet-name">${_esc(r.name)}</span>
+                        <button type="button" class="ua-fleet-name ua-fleet-name-btn"
+                                data-story-id="${r.id}"
+                                title="Open expanded view (drag + minimize)">${_esc(r.name)}</button>
                         <span class="ua-fleet-pill ${statusPill}">${statusText}</span>
                         <button class="ua-fleet-iconbtn" title="Remove"
                                 data-remove-id="${r.id}">×</button>
