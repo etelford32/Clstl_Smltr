@@ -2596,6 +2596,18 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             let clamped = jd;
             if (Number.isFinite(state.simStartJD)) clamped = Math.max(state.simStartJD, clamped);
             if (Number.isFinite(state.simEndJD))   clamped = Math.min(state.simEndJD,   clamped);
+            // Move state.elapsed by the equivalent wall-seconds so mission
+            // interp (u = (elapsed - startedAt) / durSec) tracks the scrub —
+            // otherwise scrubbing the timeline jumps planets but leaves
+            // spacecraft frozen on their original arcs. The mapping
+            //   Δelapsed_s = Δjd_days / simDaysPerSec
+            // is exact as long as simDaysPerSec is constant; if the user
+            // changed speed presets mid-mission, in-flight arc progress
+            // drifts slightly from where it "should" be at the new JD.
+            const deltaJD = clamped - state.scenarioJD;
+            if (state.simDaysPerSec > 0) {
+                state.elapsed += deltaJD / state.simDaysPerSec;
+            }
             state.scenarioJD = clamped;
             // Scrubbing back inside the window clears the bound-flag so a
             // subsequent edge-hit re-fires the toast.
