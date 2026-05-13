@@ -738,6 +738,25 @@ export class SatelliteTracker {
         this._updateColors();
     }
 
+    /**
+     * Suppress only the point-sprite render for a group while keeping
+     * propagation, picking, and group visibility otherwise unchanged.
+     *
+     * Used by alternate renderers (e.g. the Starlink InstancedMesh in
+     * `operations/starlink-model.js`) that replace dots with real 3D
+     * geometry — without this, every Starlink would draw both a dot
+     * and a mesh at the same point, the dot bleeding visibly through
+     * the mesh on near-zoom and showing as a tiny artefact on far-zoom.
+     */
+    setGroupDotsVisible(group, dotsVisible) {
+        const g = this._groups.get(group);
+        if (!g) return;
+        const hidden = !dotsVisible;
+        if (g.dotsHidden === hidden) return;
+        g.dotsHidden = hidden;
+        this._updateColors();
+    }
+
     /** Check if a group is loaded. */
     hasGroup(group) { return this._groups.has(group); }
 
@@ -855,13 +874,17 @@ export class SatelliteTracker {
             const sat   = this._satellites[i];
             const gInfo = this._groups.get(sat.group);
             const visible = gInfo ? gInfo.visible : true;
+            const dotsOff = gInfo ? !!gInfo.dotsHidden : false;
             // Explicit override (e.g. weather-alert tint) wins over group
             // colour, but still respects group visibility — a hidden group
-            // stays hidden even if its sat is flagged.
+            // stays hidden even if its sat is flagged. `dotsHidden`
+            // forces the hidden colour regardless of override; that's
+            // the path the Starlink mesh renderer takes to silence the
+            // underlying point.
             const override = overrides?.get(sat.tle.norad_id);
-            const c = !visible          ? _hiddenColor
-                    : override          ? override
-                    :                     sat.color;
+            const c = !visible || dotsOff ? _hiddenColor
+                    : override            ? override
+                    :                       sat.color;
             colArr[i * 3]     = c.r;
             colArr[i * 3 + 1] = c.g;
             colArr[i * 3 + 2] = c.b;
@@ -886,12 +909,13 @@ export class SatelliteTracker {
             const sat = this._satellites[i];
             const gInfo = this._groups.get(sat.group);
             const visible = gInfo ? gInfo.visible : true;
+            const dotsOff = gInfo ? !!gInfo.dotsHidden : false;
             const override = overrides?.get(sat.tle.norad_id);
-            if (visible && override) {
+            if (visible && !dotsOff && override) {
                 colArr[i * 3]     = override.r;
                 colArr[i * 3 + 1] = override.g;
                 colArr[i * 3 + 2] = override.b;
-            } else if (visible) {
+            } else if (visible && !dotsOff) {
                 colArr[i * 3]     = sat.color.r;
                 colArr[i * 3 + 1] = sat.color.g;
                 colArr[i * 3 + 2] = sat.color.b;
