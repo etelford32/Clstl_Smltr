@@ -209,6 +209,66 @@ body {
     line-height: 1.35;
     backdrop-filter: blur(4px);
 }
+
+/* ─── Status pills (shared across tooltip / menu / inspector) ─ */
+/* `.op-pills` is the wrapping flexbox; `.op-pill` is the badge.
+   Tones map to semantic colour roles so all three surfaces speak the
+   same visual language — see js/operations/satellite-pills.js for
+   the taxonomy. Kept dense (font 0.6rem, height ~14px) so a fleet
+   row or hover tip can carry 3–4 pills without bloating. */
+.op-pills {
+    display: flex; flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 3px;
+}
+.op-pill {
+    display: inline-flex; align-items: center;
+    height: 14px; padding: 0 6px;
+    border-radius: 9px;
+    font-size: .58rem; font-weight: 600; letter-spacing: .02em;
+    font-family: inherit;
+    border: 1px solid transparent;
+    line-height: 1; white-space: nowrap;
+}
+.op-pill--neutral {
+    color: #9cf;
+    background: rgba(80, 140, 200, 0.14);
+    border-color: rgba(80, 140, 200, 0.25);
+}
+.op-pill--info {
+    color: #9be;
+    background: rgba(50, 130, 220, 0.20);
+    border-color: rgba(80, 160, 230, 0.45);
+}
+.op-pill--accent {
+    color: #fd9;
+    background: rgba(255, 200, 100, 0.16);
+    border-color: rgba(255, 200, 100, 0.42);
+}
+.op-pill--warn {
+    color: #fc8;
+    background: rgba(255, 160, 60, 0.18);
+    border-color: rgba(255, 160, 60, 0.45);
+}
+.op-pill--danger {
+    color: #f99;
+    background: rgba(255, 60, 80, 0.22);
+    border-color: rgba(255, 80, 90, 0.55);
+}
+.op-pill--muted {
+    color: #aab;
+    background: rgba(120, 130, 150, 0.12);
+    border-color: rgba(120, 130, 150, 0.25);
+}
+/* Some specific pills want a glyph-style emphasis. */
+.op-pill--reentry-now {
+    animation: opPillPulse 1.8s ease-in-out infinite;
+}
+@keyframes opPillPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 80, 90, 0.45); }
+    50%      { box-shadow: 0 0 0 3px rgba(255, 80, 90, 0); }
+}
+
 .op-pick-tooltip .op-pick-name {
     color: #0ff; font-weight: 700;
     margin-bottom: 2px;
@@ -248,10 +308,16 @@ body {
     backdrop-filter: blur(6px);
 }
 .op-pick-menu-head {
-    display: flex; align-items: baseline; gap: 6px;
+    display: flex; flex-direction: column; gap: 4px;
     padding: 6px 9px;
     border-bottom: 1px solid rgba(255,255,255,.07);
     background: rgba(0, 200, 200, 0.05);
+}
+.op-pick-menu-head-row {
+    display: flex; align-items: baseline; gap: 6px;
+}
+.op-pick-menu-head .op-pills {
+    margin-top: 0;
 }
 .op-pick-menu-name {
     color: #0ff; font-weight: 700;
@@ -1258,8 +1324,14 @@ body {
     padding: 6px 0;
 }
 .op-orbit-head {
-    display: flex; align-items: baseline; gap: 6px;
+    display: flex; flex-direction: column; gap: 4px;
     margin-bottom: 6px;
+}
+.op-orbit-head-row {
+    display: flex; align-items: baseline; gap: 6px;
+}
+.op-orbit-head .op-pills {
+    margin-top: 0;
 }
 .op-orbit-name {
     color: #cef; font-weight: 700;
@@ -2354,14 +2426,35 @@ mountManeuverPanel({
     onSelectChange: (fn) => visuals.onSelectionChange(fn),
 });
 
+// "Currently-flagged" NORAD-ID set, refreshed each time the screener
+// completes a run. Drives the `Conjunction` status pill on every
+// satellite profile card — tooltip, context menu, and inspector
+// header all share the same source of truth.
+const conjunctionIds = new Set();
+conjDeck.subscribeRows(({ rows }) => {
+    conjunctionIds.clear();
+    for (const r of rows || []) {
+        if (r?.conjs?.length > 0 && Number.isFinite(r.asset?.noradId)) {
+            conjunctionIds.add(r.asset.noradId);
+        }
+        for (const c of r?.conjs || []) {
+            if (Number.isFinite(c?.norad_id)) conjunctionIds.add(c.norad_id);
+        }
+    }
+});
+const isInConjunction = (id) => conjunctionIds.has(id);
+
 // Per-asset orbit & perturbation inspector — TLE elements, J2
 // secular drifts, altitude profile over one orbit. Reads from
 // the same selection bus as the maneuver panel.
 mountOrbitInspector({
-    host:           document.getElementById('op-orbit-body'),
-    tracker:        fleet.tracker,
-    getSelectedId:  () => visuals.getSelectedAsset(),
-    onSelectChange: (fn) => visuals.onSelectionChange(fn),
+    host:            document.getElementById('op-orbit-body'),
+    tracker:         fleet.tracker,
+    globe,
+    isInFleet:       (id) => myFleet.has(id),
+    isInConjunction,
+    getSelectedId:   () => visuals.getSelectedAsset(),
+    onSelectChange:  (fn) => visuals.onSelectionChange(fn),
 });
 
 bPlane.mountBPlane();
@@ -2377,6 +2470,8 @@ mountGlobePicker({
     camera:        globe.camera,
     controls:      globe.controls,
     tracker:       fleet.tracker,
+    globe,                                 // for the eclipse status pill
+    isInConjunction,                       // for the conjunction status pill
     onSelect:      (id) => visuals.setSelectedAsset(id),
     onAddFleet:    (id) => myFleet.add(id),
     onRemoveFleet: (id) => myFleet.remove(id),

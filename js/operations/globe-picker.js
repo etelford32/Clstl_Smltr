@@ -40,6 +40,8 @@
  * Returns a small handle `{ dispose() }`.
  */
 
+import { computePills, renderPills } from './satellite-pills.js';
+
 const HOVER_FPS_HZ      = 30;
 const HOVER_THROTTLE_MS = 1000 / HOVER_FPS_HZ;
 const PICK_THRESHOLD    = 0.025;   // scene units (Earth radius = 1)
@@ -62,6 +64,15 @@ function escapeHtml(s) {
 export function mountGlobePicker(opts = {}) {
     const {
         canvas, camera, tracker, controls,
+        // `globe` is optional; when provided, pill computation can
+        // do eclipse detection (needs the live sun direction). Without
+        // it the eclipse pill simply never fires, which is fine for
+        // any caller still on the pre-pills API.
+        globe         = null,
+        // `isInConjunction(id)` lets the screener tag a sat that's
+        // currently in a flagged pair. Optional — when missing, the
+        // conjunction pill won't fire.
+        isInConjunction = () => false,
         onSelect      = () => {},
         onAddFleet    = () => {},
         onRemoveFleet = () => {},
@@ -172,15 +183,26 @@ export function mountGlobePicker(opts = {}) {
     function showTooltip(noradId, clientX, clientY) {
         const sat = tracker.getSatellite?.(noradId);
         if (!sat) { hideTooltip(); return; }
-        const inFleet = isInFleet(noradId);
+        const pills = computePills(sat, {
+            tracker,
+            globe,
+            inFleet:       isInFleet(noradId),
+            inConjunction: isInConjunction(noradId),
+        });
+        // Drop the fleet pill when it's already implicit elsewhere on
+        // the card — but here in the tooltip the pill row IS the
+        // status surface, so render the full list. Compact mode skips
+        // per-pill title attributes since the tooltip is itself a
+        // hover surface.
+        const pillHtml = renderPills(pills, { max: 4, compact: true });
         tooltip.innerHTML = `
             <div class="op-pick-name">${escapeHtml(sat.name || `#${noradId}`)}</div>
             <div class="op-pick-meta">
                 <span>#${noradId}</span>
                 ${sat.group ? `<span class="op-pick-group">${escapeHtml(sat.group)}</span>` : ''}
                 <span>${fmtAlt(sat.alt)}</span>
-                ${inFleet ? '<span class="op-pick-fleet">★ fleet</span>' : ''}
             </div>
+            ${pillHtml}
             <div class="op-pick-hint">Click to select · Right-click for actions</div>
         `;
         tooltip.style.display = 'block';
@@ -299,10 +321,26 @@ export function mountGlobePicker(opts = {}) {
         hideTooltip();
 
         const sat = tracker.getSatellite?.(noradId);
+        // Same pill set as the tooltip for visual continuity. Pill
+        // titles ARE rendered here (the menu doesn't double as its
+        // own hover surface, so explanations are useful on a
+        // mouse-over).
+        const menuPills = sat ? renderPills(
+            computePills(sat, {
+                tracker,
+                globe,
+                inFleet:       isInFleet(noradId),
+                inConjunction: isInConjunction(noradId),
+            }),
+            { max: 4 },
+        ) : '';
         menu.innerHTML = `
             <div class="op-pick-menu-head">
-                <span class="op-pick-menu-name">${escapeHtml(sat?.name || `#${noradId}`)}</span>
-                <span class="op-pick-menu-id">#${noradId}</span>
+                <div class="op-pick-menu-head-row">
+                    <span class="op-pick-menu-name">${escapeHtml(sat?.name || `#${noradId}`)}</span>
+                    <span class="op-pick-menu-id">#${noradId}</span>
+                </div>
+                ${menuPills}
             </div>
             <ul class="op-pick-menu-list">
                 ${items.map((it, i) => `
