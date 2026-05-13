@@ -9,6 +9,11 @@
 <link rel="manifest" href="/manifest.json">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Dashboard — Parkers Physics</title>
+<!-- Canonical origin. Read at runtime by the auth-gate diagnostic so it
+     can spot www/apex mismatches that prevent localStorage sessions from
+     being visible across origins (the #1 cause of "I signed in but the
+     dashboard says I'm not signed in"). -->
+<link rel="canonical" href="https://parkersphysics.com/dashboard">
 <meta name="robots" content="noindex,nofollow">
 <link rel="stylesheet" href="js/nav-styles.css">
 <style>
@@ -272,6 +277,23 @@ footer a:hover{color:var(--text)}
 .gate-signin{background:transparent;border:1px solid var(--accent);color:var(--accent)}
 .gate-signup{background:var(--accent);color:#0a0510}
 
+/* Diagnostic panel — collapsed by default so the gate stays clean for
+   the common case, but available with one click when a user is stuck.
+   Renders the actual state the page sees (origin, storage keys, what
+   auth.js thinks) so a screenshot is a complete bug report. */
+.gate-diag-toggle{margin-top:14px;background:none;border:none;color:rgba(160,128,255,.85);cursor:pointer;font:inherit;font-size:.78rem;text-decoration:underline;text-underline-offset:3px}
+.gate-diag{display:none;margin-top:14px;max-width:520px;width:100%;text-align:left;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:14px 16px;font-size:.78rem;color:#cdd;line-height:1.55}
+.gate-diag.open{display:block}
+.gate-diag h4{font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:#88a;font-weight:700;margin:0 0 8px}
+.gate-diag dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:0 0 10px;font-size:.76rem}
+.gate-diag dt{color:#88a}
+.gate-diag dd{color:#cef;margin:0;word-break:break-all;font-family:'SFMono-Regular',Consolas,monospace}
+.gate-diag dd.bad{color:#ff8b8b}
+.gate-diag dd.ok{color:#9ad36f}
+.gate-diag .gate-reset{margin-top:6px;background:rgba(255,140,80,.12);border:1px solid rgba(255,140,80,.45);color:#ffc090;font:inherit;font-size:.78rem;font-weight:700;padding:8px 14px;border-radius:6px;cursor:pointer}
+.gate-diag .gate-reset:hover{background:rgba(255,140,80,.22)}
+.gate-diag .gate-hint{margin-top:8px;font-size:.72rem;color:#88a;line-height:1.5}
+
 /* ── MOBILE / TOUCH RESPONSIVENESS ────────────────────────────────────────
    Tuned against iPhone (375 / 390 / 430px wide) and the Safari address-bar
    resize behavior. The shared nav (nav-styles.css) handles its own breakpoint
@@ -361,6 +383,22 @@ footer a:hover{color:var(--text)}
   <button id="gate-demo" type="button" style="margin-top:18px;background:none;border:none;color:rgba(160,128,255,.85);cursor:pointer;font:inherit;font-size:.82rem;text-decoration:underline;text-underline-offset:3px">
     or preview the dashboard as a guest
   </button>
+  <button id="gate-diag-toggle" type="button" class="gate-diag-toggle">
+    I just signed in — why am I here?
+  </button>
+  <div id="gate-diag" class="gate-diag" aria-live="polite">
+    <h4>Session check</h4>
+    <dl id="gate-diag-dl"></dl>
+    <div id="gate-diag-tip" class="gate-hint"></div>
+    <button id="gate-reset" type="button" class="gate-reset">
+      Clear stale session and retry sign-in
+    </button>
+    <div class="gate-hint">
+      Clears Supabase + local auth state on this device and bounces you
+      back to <code>/signin.html</code>. Safe — it only removes browser
+      storage, never your account.
+    </div>
+  </div>
 </div>
 
 <!-- Demo-mode banner (rendered when sessionStorage.pp_demo_mode === '1').
@@ -1256,6 +1294,180 @@ function _enterDemoMode() {
     if (badge) { badge.textContent = 'Demo'; badge.className = 'plan-badge plan-free'; }
 }
 
+// Diagnostic for the auth-gate path. Surfaces the actual state the page
+// sees (origin, storage keys, auth module signedIn, last [Auth] event) +
+// a curated tip per detected root cause. Renders into #gate-diag on click
+// of the toggle. Also pushes a telemetry event on gate-shown so we can
+// count this server-side and the funnel drop-offs card surfaces the
+// session_id that hit it.
+function _gateDiagSnapshot() {
+    const origin = (typeof location !== 'undefined' && location.origin) || '';
+    // Look for the Supabase session token in localStorage. Key shape is
+    // sb-<project-ref>-auth-token. We don't expose the token itself —
+    // just whether it exists + the user_id it claims, for diagnostic.
+    let sbKey = null, sbUserId = null, sbHasRefresh = false;
+    try {
+        for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && k.startsWith('sb-') && k.endsWith('-auth-token')) { sbKey = k; break; }
+        }
+        if (sbKey) {
+            const raw = localStorage.getItem(sbKey);
+            if (raw) {
+                const obj = JSON.parse(raw);
+                sbUserId    = obj?.user?.id || obj?.currentSession?.user?.id || null;
+                sbHasRefresh = !!(obj?.refresh_token || obj?.currentSession?.refresh_token);
+            }
+        }
+    } catch {}
+    // pp_auth is the legacy mirror auth.js writes for the dashboard's
+    // localStorage-fallback gate (see _persistToStorage). The `provider`
+    // field tells us whether we hit the silent mock-auth fallback.
+    let ppAuth = null, ppProvider = null;
+    try {
+        const raw = localStorage.getItem('pp_auth') || sessionStorage.getItem('pp_auth');
+        if (raw) { ppAuth = JSON.parse(raw); ppProvider = ppAuth?.provider || null; }
+    } catch {}
+    const supabaseSignedIn = !!(_authMod?.isSignedIn?.());
+    // Best-guess canonical: the og:url / canonical link tag on this page
+    // points at the marketing-correct host. If the current origin doesn't
+    // match it, that's the most common root cause (www vs apex, alternate
+    // spellings of the domain).
+    let canonical = null;
+    try {
+        const link = document.querySelector('link[rel="canonical"]');
+        if (link?.href) canonical = new URL(link.href).origin;
+    } catch {}
+    return {
+        origin,
+        canonical,
+        sbKey,
+        sbHasSession: !!sbKey,
+        sbUserId,
+        sbHasRefresh,
+        supabaseSignedIn,
+        ppAuth: !!ppAuth,
+        ppProvider,
+        signedIn: !!ppAuth?.signedIn,
+        cookiesEnabled: !!navigator.cookieEnabled,
+        // Approximate private-mode detection — localStorage write-then-read
+        // round-trip. Real private mode usually allows it but is volatile.
+        storageOk: (() => {
+            try { localStorage.setItem('__pp_probe', '1'); localStorage.removeItem('__pp_probe'); return true; }
+            catch { return false; }
+        })(),
+    };
+}
+
+function _gateDiagTip(snap) {
+    // Ordered by specificity — first match wins.
+    if (!snap.storageOk) {
+        return 'This browser is blocking localStorage — most often a private/incognito window or aggressive cookie protection. Try a normal window or relax the privacy setting for this site.';
+    }
+    if (snap.ppProvider === 'mock') {
+        return 'Auth fell back to MOCK mode — the real Supabase backend was unreachable when this page loaded. Reload the page; if it persists, an extension or network filter is blocking cdn.jsdelivr.net or aijsboodkivnhzfstvdq.supabase.co.';
+    }
+    if (snap.canonical && snap.origin && snap.canonical !== snap.origin) {
+        return `You are on ${snap.origin} but the canonical site is ${snap.canonical}. Sessions saved on one origin are not visible to the other (browser storage is per-origin). Sign in on ${snap.canonical} instead.`;
+    }
+    if (snap.sbHasSession && !snap.supabaseSignedIn) {
+        return 'Supabase session token exists but the auth module did not load it — the Supabase client probably failed to initialize. Try the reset button below.';
+    }
+    if (!snap.sbHasSession && !snap.ppAuth) {
+        return 'No session token on this device. You may have signed in on a different browser, profile, or domain. Sign in again here.';
+    }
+    if (!snap.sbHasSession && snap.ppAuth) {
+        return 'Only the legacy mirror exists, no live Supabase token — your session has likely expired. Sign in again.';
+    }
+    return 'Try the reset button below; if it keeps happening, screenshot this panel and send it to support.';
+}
+
+function _renderAuthGateDiagnostic() {
+    const dl = document.getElementById('gate-diag-dl');
+    const tip = document.getElementById('gate-diag-tip');
+    const toggle = document.getElementById('gate-diag-toggle');
+    const panel  = document.getElementById('gate-diag');
+    const reset  = document.getElementById('gate-reset');
+    if (!dl || !panel) return;
+
+    const snap = _gateDiagSnapshot();
+
+    // Render diagnostic key/value rows. Uses .ok / .bad classes for traffic-
+    // light coloring so a screenshot reads in one glance.
+    const row = (k, v, cls = '') =>
+        `<dt>${k}</dt><dd class="${cls}">${(v == null || v === '') ? '—' : String(v).slice(0, 80)}</dd>`;
+    dl.innerHTML = [
+        row('Page origin',         snap.origin),
+        row('Canonical origin',    snap.canonical || 'n/a', (snap.canonical && snap.origin !== snap.canonical) ? 'bad' : ''),
+        row('Supabase token',      snap.sbHasSession ? 'present' : 'missing', snap.sbHasSession ? 'ok' : 'bad'),
+        row('Refresh token',       snap.sbHasRefresh ? 'present' : 'missing'),
+        row('Auth module signed-in', snap.supabaseSignedIn ? 'yes' : 'no', snap.supabaseSignedIn ? 'ok' : 'bad'),
+        row('Legacy pp_auth',      snap.ppAuth ? `present (provider: ${snap.ppProvider || '?'})` : 'missing',
+             snap.ppProvider === 'mock' ? 'bad' : ''),
+        row('localStorage write',  snap.storageOk ? 'ok' : 'blocked', snap.storageOk ? 'ok' : 'bad'),
+        row('Cookies enabled',     snap.cookiesEnabled ? 'yes' : 'no'),
+    ].join('');
+
+    tip.textContent = _gateDiagTip(snap);
+
+    toggle?.addEventListener('click', () => panel.classList.toggle('open'));
+
+    reset?.addEventListener('click', async () => {
+        // Clear EVERY auth-related key on this origin. The Supabase client
+        // also exposes signOut(); we call it best-effort but don't depend
+        // on it (the page already failed to init Supabase in the worst
+        // cases). Storage clear is the authoritative reset.
+        try { await _authMod?.signOut?.(null); } catch {}
+        try {
+            const dropPrefixes = ['sb-', 'pp_'];
+            const allKeys = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const k = localStorage.key(i);
+                if (k && dropPrefixes.some(p => k.startsWith(p))) allKeys.push(k);
+            }
+            allKeys.forEach(k => localStorage.removeItem(k));
+            sessionStorage.removeItem('pp_auth');
+            sessionStorage.removeItem('pp_demo_mode');
+        } catch {}
+        // Bounce to signin on the canonical origin if we know it differs;
+        // otherwise stay on the current host.
+        const dest = (snap.canonical && snap.canonical !== snap.origin)
+            ? `${snap.canonical}/signin.html`
+            : '/signin.html';
+        location.href = dest;
+    });
+
+    // Server-side breadcrumb. Funnel stage so it stitches into the same
+    // funnel_id as the user's earlier signin journey — the drop-off card
+    // will surface this session_id with reason='gate_shown'. Fire-and-
+    // forget; never block the gate render.
+    try {
+        import('./js/auth-funnel.js').then(({ funnel }) => {
+            funnel.step('dashboard_auth_gate_shown', {
+                origin:          snap.origin,
+                canonical:       snap.canonical,
+                origin_mismatch: snap.canonical ? snap.origin !== snap.canonical : null,
+                sb_token:        snap.sbHasSession,
+                pp_provider:     snap.ppProvider,
+                storage_ok:      snap.storageOk,
+                supabase_signed_in: snap.supabaseSignedIn,
+            });
+        }).catch(() => {});
+    } catch {}
+    try {
+        import('./js/telemetry.js').then(({ telemetry }) => {
+            telemetry.recordAuthFailure('dashboard_auth_gate_shown', {
+                source: 'dashboard_gate',
+                code:   snap.ppProvider === 'mock'
+                        ? 'mock_fallback'
+                        : (snap.canonical && snap.origin !== snap.canonical)
+                            ? 'origin_mismatch'
+                            : (!snap.storageOk ? 'storage_blocked' : 'no_session'),
+            });
+        }).catch(() => {});
+    } catch {}
+}
+
 if (!_auth || !_auth.signedIn) {
   if (_demoMode) {
       _enterDemoMode();
@@ -1265,6 +1477,10 @@ if (!_auth || !_auth.signedIn) {
       // dashboard chrome gets hidden behind the auth gate.
       document.querySelector('main').style.visibility = 'hidden';
       document.querySelector('footer').style.visibility = 'hidden';
+      // Render the diagnostic panel inline so a stuck user can see WHY
+      // the gate fired — and a screenshot is now a complete bug report.
+      // Also fires telemetry so we count gate hits server-side.
+      _renderAuthGateDiagnostic();
   }
 } else {
   // Hide the full-screen sign-in overlay FIRST, before any downstream init can
