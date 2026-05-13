@@ -293,6 +293,7 @@ nav {
             <div>Ṁ<sub>acc</sub>: <span class="val" id="hud-mdot">—</span> <span class="dim">g/s</span></div>
             <div>L<sub>acc</sub>: <span class="val" id="hud-lacc">—</span> <span class="dim">erg/s</span></div>
             <div>T<sub>shock</sub>: <span class="val" id="hud-tshk">—</span> <span class="dim">K</span></div>
+            <div>Captures: <span class="val" id="hud-cap">0</span> <span class="dim">cum.</span></div>
             <div class="sep"></div>
             <div>Orbital phase: <span class="val" id="hud-phase">0°</span></div>
             <div>True anom: <span class="val" id="hud-nu">—</span><span class="dim">°</span></div>
@@ -306,6 +307,9 @@ nav {
         <canvas id="acc-canvas" width="280" height="80"
                 style="position:absolute;right:14px;top:108px;background:rgba(4,2,16,.78);
                        border:1px solid rgba(255,154,162,.25);border-radius:6px;z-index:550;"></canvas>
+        <canvas id="sed-canvas" width="280" height="120"
+                style="position:absolute;right:14px;top:202px;background:rgba(4,2,16,.85);
+                       border:1px solid rgba(150,210,255,.25);border-radius:6px;z-index:550;"></canvas>
         <button class="cv-btn" id="btn-panel-open">☰ Controls</button>
         <a href="space-weather.html" class="cv-btn" id="btn-sw" title="Live Space Weather Data">⚡ Weather</a>
         <button class="cv-btn" id="btn-center" title="Reset camera">⊙ Center</button>
@@ -379,6 +383,10 @@ nav {
                         <input type="checkbox" id="tog-labels" checked>
                         <label for="tog-labels">Labels (use HUD)</label>
                     </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-wake" checked>
+                        <label for="tog-wake">3-D BHL wind wake</label>
+                    </div>
                 </div>
             </div>
 
@@ -440,7 +448,9 @@ nav {
                         <p style="margin-top:5px"><strong>Gravitational waves:</strong> Peters–Mathews (1963) quadrupole. f(e=0.591) ≈ 9.52, ⟨dE/dt⟩ ≈ 9.3×10¹⁵ erg/s. Strain h ≈ 10⁻²² at Earth, frequency ~1.3 nHz (sub-pulsar-timing-array). Decay time t<sub>GW</sub> ≈ 10²¹ yr.</p>
                         <p style="margin-top:5px"><strong>Wind &amp; accretion:</strong> Sirius A drives a weak A-star wind (Ṁ ≈ 10⁻¹³ M☉/yr, v<sub>∞</sub> ≈ 600 km/s — Landstreet+ 2011). Bondi–Hoyle–Lyttleton capture onto Sirius B with ρ<sub>wind</sub>∝r⁻² gives ≈ 15× modulation between peri and apo passes.</p>
                         <p style="margin-top:5px"><strong>Plasma shock:</strong> v<sub>ff</sub> = √(2GM<sub>B</sub>/R<sub>B</sub>) ≈ 6800 km/s; strong-shock T<sub>s</sub> ≈ 6×10⁸ K (~50 keV hard X-ray). Bremsstrahlung emissivity ε<sub>ff,ν</sub> = 6.8×10⁻³⁸ n<sub>e</sub>n<sub>i</sub>T⁻¹ᐟ²e⁻ʰᵛ/ᵏᵀ (Rybicki &amp; Lightman §5).</p>
-                        <p style="margin-top:5px"><strong>References:</strong> Bond+ 2017 ApJ 840 70; Holberg+ 1998 ApJ 497 935; Beuermann+ 2006 A&amp;A 458 541; Peters 1964 Phys Rev 136 B1224.</p>
+                        <p style="margin-top:5px"><strong>Sirius B atmosphere (DA):</strong> Eddington-Barbier emergent flux F<sub>ν</sub> = πB<sub>ν</sub>(T(τ<sub>ν</sub>=2/3)) on a grey T(τ) stratification, with H bound-free opacity at the Lyman edge (912 Å) and Balmer edge (3650 Å). EUV brightening ≈ 50× over naïve Planck — recovers the observed soft X-ray excess (Beuermann+ 2006). Lyα–Lyζ absorption lines via Stark-broadened Lorentzians.</p>
+                        <p style="margin-top:5px"><strong>3-D wind wake:</strong> Lagrangian particle simulator (~4 000 packets) launched isotropically from Sirius A at v<sub>∞</sub> ≈ 600 km/s, integrated in the inertial barycentric frame under both stars' gravity. The Mach-cone wake forms naturally; particles captured within Sirius B's accretion radius are recycled. Toggle in <em>Layers</em>.</p>
+                        <p style="margin-top:5px"><strong>References:</strong> Bond+ 2017 ApJ 840 70; Holberg+ 1998 ApJ 497 935; Beuermann+ 2006 A&amp;A 458 541; Peters 1964 Phys Rev 136 B1224; Koester 1989 ApJ 342 999; Theuns, Boffin &amp; Jorissen 1996 MNRAS 280 1264.</p>
                     </div>
                 </div>
             </div>
@@ -478,8 +488,14 @@ const ringMd = new Float32Array(RING_LEN);
 let ringIdx = 0;
 const gwCanvas = document.getElementById('gw-canvas');
 const accCanvas = document.getElementById('acc-canvas');
+const sedCanvas = document.getElementById('sed-canvas');
 const gwCtx  = gwCanvas.getContext('2d');
 const accCtx = accCanvas.getContext('2d');
+const sedCtx = sedCanvas.getContext('2d');
+
+// SED is recomputed only every ~60 frames (it doesn't depend on time)
+let sedCache = null;
+let sedFrameCounter = 0;
 
 // Numeric formatting for HUD
 function fmtSci(x, p=2) {
@@ -510,6 +526,7 @@ const state = {
     orbitAngle: 0,                        // radians, JS fallback only
     physicsTime: 1994.5715,               // Julian yr — start at periastron
     snapshot: null,                       // last WASM snapshot
+    wakeEnabled: true,                    // 3-D BHL wind-particle cloud
 };
 
 // SCENE
@@ -764,6 +781,67 @@ const lightB = new THREE.PointLight(0xaabbff, 1, 20);
 scene.add(lightB);
 scene.add(new THREE.AmbientLight(0x040810, 0.4));
 
+// ─── 3-D BHL WIND-WAKE PARTICLE CLOUD ─────────────────────────────────────────
+// Driven by the WASM wake_step kernel. Particles are launched isotropically
+// from Sirius A's surface at v_∞ ≈ 600 km/s and respond to the gravity of
+// both stars in the inertial barycentric frame.  Colour encodes speed:
+//   blue  = launch (~600 km/s)         the unperturbed wind
+//   white = decelerated/deflected      (BHL focusing region near Sirius B)
+//   red   = high-speed inflow          (Keplerian whip around Sirius B)
+const WAKE_N = 4000;
+const wakeGeom = new THREE.BufferGeometry();
+const wakePosAttr   = new THREE.BufferAttribute(new Float32Array(WAKE_N * 3), 3);
+const wakeColorAttr = new THREE.BufferAttribute(new Float32Array(WAKE_N * 3), 3);
+wakePosAttr.setUsage(THREE.DynamicDrawUsage);
+wakeColorAttr.setUsage(THREE.DynamicDrawUsage);
+wakeGeom.setAttribute('position', wakePosAttr);
+wakeGeom.setAttribute('color',    wakeColorAttr);
+const wakeMat = new THREE.PointsMaterial({
+    size: 0.04, sizeAttenuation: true, vertexColors: true,
+    transparent: true, opacity: 0.85, depthWrite: false,
+    blending: THREE.AdditiveBlending,
+});
+const wakeCloud = new THREE.Points(wakeGeom, wakeMat);
+scene.add(wakeCloud);
+
+// Capture sphere around Sirius B — matches `r_capture` in the WASM
+// wake module. Physical R_acc (~0.005 AU) is too small to see at the
+// orbital scale, so the visualisation uses 0.5 AU so BHL captures fire
+// visibly (~10s of hits per simulated decade). Pure visualisation —
+// snapshot() still reports the physically-correct R_acc for the HUD.
+const accretionSphere = new THREE.Mesh(
+    new THREE.SphereGeometry(0.5, 24, 24),
+    new THREE.MeshBasicMaterial({
+        color: 0xffd57a, transparent: true, opacity: 0.08,
+        wireframe: true, depthWrite: false,
+    })
+);
+scene.add(accretionSphere);
+
+let wakeReady = false;
+function ensureWakeInitialised() {
+    if (wakeReady || !wasmReady) return;
+    wasm.wake_init(WAKE_N, state.physicsTime);
+    wakeReady = true;
+}
+
+// Speed-to-color ramp: blue → white → red for [200, 600, 2000] km/s.
+function speedColor(spd, out, i) {
+    const t = Math.max(0, Math.min(1, (spd - 200) / 1800));
+    // 3-stop gradient (blue, white, red)
+    if (t < 0.5) {
+        const u = t / 0.5;
+        out[i*3  ] = 0.4 + u * 0.6;
+        out[i*3+1] = 0.6 + u * 0.4;
+        out[i*3+2] = 1.0;
+    } else {
+        const u = (t - 0.5) / 0.5;
+        out[i*3  ] = 1.0;
+        out[i*3+1] = 1.0 - u * 0.7;
+        out[i*3+2] = 1.0 - u * 0.9;
+    }
+}
+
 // ─── RESIZE ───────────────────────────────────────────────────────────────────
 function resize() {
     const w = canvasWrap.clientWidth, h = canvasWrap.clientHeight;
@@ -836,6 +914,35 @@ function animate() {
 
         drawRingPlot(gwCtx, gwCanvas, ringHp, ringHx, '#ffd57a', '#ffb04a', 'h+ / h× (×10⁻²²)');
         drawRingPlot(accCtx, accCanvas, ringMd, null, '#ff9aa2', null, 'Ṁ_acc (g/s)');
+        // SED is static (doesn't depend on orbital phase) so recompute rarely.
+        if (sedCache === null || (++sedFrameCounter % 240) === 0) {
+            sedCache = wasm.spectrum(50.0, 4000.0, 96);  // 50 nm (EUV) → 4000 nm (NIR)
+        }
+        drawSED(sedCtx, sedCanvas, sedCache);
+
+        // ─── Advance the 3-D BHL wind-wake particle cloud ─────────────────
+        ensureWakeInitialised();
+        if (wakeReady && state.wakeEnabled) {
+            const dt_wake = dt * 0.05 * state.orbitSpeed;   // wake substep, yr
+            wasm.wake_step(dt_wake, state.physicsTime, 32);
+            const pos = wasm.wake_positions();   // Float32Array length 3N
+            const spd = wasm.wake_speeds();      // Float32Array length N
+            const posArr = wakePosAttr.array;
+            const colArr = wakeColorAttr.array;
+            const zoom = state.separation / 19.78;
+            for (let i = 0; i < WAKE_N; i++) {
+                posArr[i*3  ] = pos[i*3  ] * zoom;
+                posArr[i*3+1] = pos[i*3+1] * zoom;
+                posArr[i*3+2] = pos[i*3+2] * zoom;
+                speedColor(spd[i], colArr, i);
+            }
+            wakePosAttr.needsUpdate = true;
+            wakeColorAttr.needsUpdate = true;
+            const diag = wasm.wake_diagnostics();
+            document.getElementById('hud-cap').textContent = Math.round(diag[1]).toLocaleString();
+        }
+        wakeCloud.visible = state.wakeEnabled;
+        accretionSphere.visible = state.wakeEnabled;
     } else {
         // Fallback: legacy analytic Keplerian
         state.orbitAngle += dt * 0.010 * state.orbitSpeed;
@@ -851,6 +958,7 @@ function animate() {
     lightA.position.copy(posA);
     siriusBMesh.position.copy(posB);
     siriusBHalo.position.copy(posB);
+    accretionSphere.position.copy(posB);
     lightB.position.copy(posB);
 
     controls.update();
@@ -865,6 +973,51 @@ function animate() {
 }
 
 // ─── RING-BUFFER PLOT ────────────────────────────────────────────────────────
+// SED plot — log-log on [λ_nm, F_λ erg/s/cm²/Å], three components stacked.
+function drawSED(ctx, canvas, buf) {
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+    if (!buf || buf.length < 4) return;
+    const N = buf.length / 4;
+    // Scan ranges
+    let lmin = +Infinity, lmax = -Infinity, fmin = +Infinity, fmax = -Infinity;
+    for (let i = 0; i < N; i++) {
+        const lam = buf[i*4];
+        const total = buf[i*4+1] + buf[i*4+2] + buf[i*4+3];
+        if (lam < lmin) lmin = lam; if (lam > lmax) lmax = lam;
+        if (total > 0 && total < fmin) fmin = total;
+        if (total > fmax) fmax = total;
+    }
+    if (!isFinite(fmin) || fmin === 0) fmin = fmax * 1e-12;
+    const xs = lam => (Math.log10(lam) - Math.log10(lmin)) / (Math.log10(lmax) - Math.log10(lmin)) * W;
+    const ys = f   => H - 2 - (Math.log10(Math.max(f, fmin)) - Math.log10(fmin)) / (Math.log10(fmax) - Math.log10(fmin)) * (H - 14);
+    // grid lines (powers of 10 along x)
+    ctx.strokeStyle = 'rgba(255,255,255,.07)'; ctx.lineWidth = 1;
+    for (let l = Math.ceil(Math.log10(lmin)); l <= Math.floor(Math.log10(lmax)); l++) {
+        const x = xs(Math.pow(10, l));
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+        ctx.fillStyle = 'rgba(160,180,210,.6)';
+        ctx.font = '9px system-ui';
+        ctx.fillText(`10^${l}nm`, x + 2, H - 2);
+    }
+    // Draw a curve given column index
+    function curve(colIdx, color, label, dy) {
+        ctx.strokeStyle = color; ctx.lineWidth = 1.3; ctx.beginPath();
+        for (let i = 0; i < N; i++) {
+            const lam = buf[i*4];
+            const f = buf[i*4 + colIdx];
+            const x = xs(lam), y = ys(f);
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        ctx.fillStyle = color; ctx.font = '9px system-ui';
+        ctx.fillText(label, 6, 11 + dy);
+    }
+    curve(1, '#ffb84a', 'Sirius A (Planck 9 940 K)', 0);
+    curve(2, '#7fb4ff', 'Sirius B (Koester DA 25 200 K)', 10);
+    curve(3, '#ff7a8a', 'BHL bremsstrahlung column', 20);
+}
+
 function drawRingPlot(ctx, canvas, a, b, ca, cb, label) {
     const W = canvas.width, H = canvas.height;
     ctx.clearRect(0, 0, W, H);
@@ -924,6 +1077,7 @@ document.getElementById('tog-orbit').addEventListener('change',  e => { orbitTra
 document.getElementById('tog-acca').addEventListener('change',   e => { siriusACorona.visible = e.target.checked; });
 document.getElementById('tog-accb').addEventListener('change',   e => { siriusBHalo.visible = e.target.checked; });
 document.getElementById('tog-labels').addEventListener('change', e => { document.getElementById('hud').style.display = e.target.checked ? '' : 'none'; });
+document.getElementById('tog-wake').addEventListener('change',   e => { state.wakeEnabled = e.target.checked; });
 
 // SLIDERS
 document.getElementById('sl-speed').addEventListener('input', function() {

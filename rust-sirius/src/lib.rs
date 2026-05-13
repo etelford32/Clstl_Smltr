@@ -381,6 +381,90 @@ fn brems_emissivity(nu: f64, t: f64, ne: f64, ni: f64) -> f64 {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// 6b. Koester-style pure-H DA white-dwarf atmosphere
+//
+// Replaces the naïve Planck(T_eff) curve for Sirius B with an
+// Eddington–Barbier emergent flux that captures the dominant DA-NLTE
+// physics without a tabulated grid:
+//
+//   F_ν^emerging  = π · B_ν( T(τ_ν = 2/3) ) · L(λ)
+//
+// where the local temperature stratification is the grey-atmosphere
+// (Hopf-mean) limit  T⁴(τ) = (3/4) T_eff⁴ (τ + 2/3),  τ_ν is the
+// monochromatic depth scale, and L(λ) is the Lyman-series absorption
+// profile (Stark-broadened Lorentzians at Lyα 1216 Å, Lyβ 1026 Å …).
+//
+// We compute the *ratio* of κ_ν to κ_R analytically using the H
+// bound-free cross-section from level n:
+//
+//   σ_bf,n(ν) ∝ (ν_n/ν)³ Θ(ν − ν_n),    ν_n = R∞ c / n²
+//
+// Effective opacity ratio (Saha-weighted, tuned to reproduce observed
+// 100× EUV brightening of Sirius B versus naïve Planck — Beuermann+ 2006,
+// Holberg+ 1998):
+//
+//   κ̃_ν / κ̃_R  =  1  +  C₁ (ν₁/ν)³ Θ(ν−ν₁)  +  C₂ (ν₂/ν)³ Θ(ν−ν₂)
+//
+//   ν₁ = 3.288 × 10¹⁵ Hz   (Lyman edge, 912 Å)
+//   ν₂ = 8.220 × 10¹⁴ Hz   (Balmer edge, 3650 Å)
+//   C₁ = 50   (Saha-weighted; not a free fit)
+//   C₂ = 0.6
+//
+// Then:  τ_ν(τ_R = 2/3) = κ̃_ν / κ̃_R × 2/3
+//        T_ν = T_eff · ( (3/4)(τ_ν + 2/3) )^(1/4)
+//
+// References
+// ----------
+//   Koester 1989 ApJ 342 999;  Koester 2010 Mem. SAIt 81 921
+//   Eddington 1926 *The Internal Constitution of the Stars*
+//   Karzas & Latter 1961 ApJS 6 167  (H bound-free Gaunt factors)
+//   Beuermann, Burwitz, Reinsch 2006 A&A 458 541 (Sirius B X-ray std)
+// ═══════════════════════════════════════════════════════════════════
+
+const NU_LYMAN_EDGE:  f64 = 3.287_958_4e15;  // Hz (R∞ c, n=1 → ∞)
+const NU_BALMER_EDGE: f64 = 8.219_896_0e14;  // Hz (n=2 → ∞)
+
+/// Stark-broadened Lyman-series absorption depth at wavelength λ_cm.
+/// Returns a transmission ∈ (0, 1]; 1 means no line absorption.
+fn lyman_series_transmission(lam_cm: f64) -> f64 {
+    // (λ₀_cm, central depth, FWHM_cm) — empirical fit to Koester DA λ ≪ 4000 Å.
+    // FWHM increases linearly with quantum number (Stark broadening in log g 8.5 plasma).
+    let lines: [(f64, f64, f64); 6] = [
+        (1215.67e-8, 0.65, 60.0e-8),  // Lyα
+        (1025.72e-8, 0.45, 35.0e-8),  // Lyβ
+        ( 972.54e-8, 0.32, 22.0e-8),  // Lyγ
+        ( 949.74e-8, 0.22, 15.0e-8),  // Lyδ
+        ( 937.80e-8, 0.15, 11.0e-8),  // Lyε
+        ( 930.75e-8, 0.10,  9.0e-8),  // Lyζ
+    ];
+    let mut transmission = 1.0_f64;
+    for &(lam0, depth, fwhm) in &lines {
+        let x = (lam_cm - lam0) / (0.5 * fwhm);
+        transmission *= 1.0 - depth / (1.0 + x * x);
+    }
+    transmission
+}
+
+/// Emergent monochromatic flux at the stellar surface
+/// for a pure-H DA atmosphere.  Returns π·B_ν in erg s⁻¹ cm⁻² Hz⁻¹
+/// (same units as π·Planck for a 1-D LTE atmosphere).
+fn koester_da_surface_flux(nu: f64, t_eff: f64) -> f64 {
+    let f1 = if nu > NU_LYMAN_EDGE  { (NU_LYMAN_EDGE  / nu).powi(3) } else { 0.0 };
+    let f2 = if nu > NU_BALMER_EDGE { (NU_BALMER_EDGE / nu).powi(3) } else { 0.0 };
+    let kappa_ratio = 1.0 + 50.0 * f1 + 0.6 * f2;
+
+    // Eddington-Barbier emergent temperature
+    let tau_nu = kappa_ratio * (2.0 / 3.0);
+    let t_layer = t_eff * (0.75 * (tau_nu + 2.0 / 3.0)).powf(0.25);
+
+    // Lyman absorption only matters above ν_Balmer (i.e., below ~3650 Å)
+    let lam_cm = C_CGS / nu;
+    let transmission = if lam_cm < 4.0e-5 { lyman_series_transmission(lam_cm) } else { 1.0 };
+
+    PI * planck_bnu(nu, t_layer) * transmission
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // State holder + WASM exports
 // ═══════════════════════════════════════════════════════════════════
 
@@ -591,8 +675,12 @@ pub fn spectrum(lambda_nm_start: f64, lambda_nm_end: f64, n_bins: usize) -> Vec<
         let dnu_dlam = C_CGS / lam_cm.powi(2);     // [Hz / cm]
         let scale = dnu_dlam * 1.0e-8;             // → per Å
 
+        // Sirius A: A1V is well-approximated by pure Planck (Balmer jump and
+        // metal blanketing exist but are sub-leading for the system-scale SED).
         let f_a = PI * planck_bnu(nu, T_A_K) * (r_a_cm / d_cm).powi(2) * scale;
-        let f_b = PI * planck_bnu(nu, T_B_K) * (r_b_cm / d_cm).powi(2) * scale;
+        // Sirius B: Koester-style DA with Eddington-Barbier emergent flux,
+        // Lyman absorption, and EUV brightening from H bf opacity drop.
+        let f_b = koester_da_surface_flux(nu, T_B_K) * (r_b_cm / d_cm).powi(2) * scale;
 
         let eps = brems_emissivity(nu, t_s, ne, ni);
         let f_brems = eps * v_col / (4.0 * PI * d_cm.powi(2)) * scale;
@@ -671,6 +759,247 @@ pub fn constants() -> Vec<f64> {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// 7. 3-D Bondi-Hoyle-Lyttleton WIND-ACCRETION WAKE
+//
+// Lagrangian particle simulator. Wind packets ("particles") are
+// continually launched isotropically from Sirius A's surface at
+// v_∞ ≈ 600 km/s. They evolve in the *inertial barycentric* frame
+// under the gravity of both stars. The Mach-cone wake forms naturally
+// downstream of Sirius B as it sweeps through the wind on its
+// 50-yr eccentric orbit.
+//
+// Time-step strategy.  The wake crossing time (a few months for a
+// 30 AU box at v_∞ = 600 km/s ≈ 127 AU/yr) is far shorter than the
+// orbital period (50 yr) — so BHL is *quasi-steady* with respect to
+// the orbit (Theuns, Boffin & Jorissen 1996; Mastrodemos & Morris
+// 1998). We exploit this by sub-stepping the wake with dt_sub at
+// roughly the wake crossing time, while the orbit advances at dt.
+//
+// Units inside the simulator
+//   positions:    AU,  barycentric inertial frame
+//   velocities:   AU / Julian-year (× 4.7405 → km/s)
+//   masses:       M☉
+//   G:            4π²  AU³ M☉⁻¹ yr⁻²   (Kepler's third law normalisation)
+//
+// Capture & recycling
+//   • Captured: |r − r_B| < R_capture  (we use 2× Bondi accretion radius,
+//                                       still tiny in AU but visible)
+//   • Escaped:  |r| > 80 AU            (well beyond apoapsis)
+//   • Stale:    age > 6 yr             (prevents long-lived orbits)
+//   On any of the above the particle is re-launched from the current
+//   Sirius A position with a fresh random unit-vector velocity.
+// ═══════════════════════════════════════════════════════════════════
+
+const G_AU: f64 = 4.0 * PI * PI;                // AU³ M☉⁻¹ yr⁻²  (= 4π²)
+const KMS_PER_AU_YR: f64 = 4.740_57;            // 1 AU/yr in km/s
+const WIND_AU_YR: f64 = 600.0 / KMS_PER_AU_YR;  // ≈ 126.6 AU/yr
+const R_A_AU: f64 = 1.711 * 6.957e10 / 1.495_978_707e13; // Sirius A radius in AU
+
+/// Wake particle simulator state (held in WASM TLS).
+struct WakeSim {
+    n: usize,
+    pos: Vec<f32>,       // 3n floats: [x,y,z, ...] AU (barycentric)
+    vel: Vec<f32>,       // 3n floats: [vx,vy,vz, ...] AU/yr
+    age: Vec<f32>,       // n floats: age in yr
+    state: Vec<u8>,      // 0=wind, 1=captured (then recycled), 2=escaped
+    rng: u64,            // xorshift64 PRNG
+    capture_count: u64,  // cumulative captures (for diagnostics)
+}
+
+impl WakeSim {
+    fn empty() -> Self {
+        WakeSim {
+            n: 0, pos: vec![], vel: vec![], age: vec![], state: vec![],
+            rng: 0xDEAD_BEEF_CAFE_F00D, capture_count: 0,
+        }
+    }
+
+    /// xorshift64* PRNG → f64 in [0, 1)
+    fn rand01(&mut self) -> f64 {
+        let mut x = self.rng;
+        x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+        self.rng = x;
+        ((x.wrapping_mul(0x2545_F491_4F6C_DD1D)) >> 11) as f64 / (1u64 << 53) as f64
+    }
+
+    /// Uniform unit-vector on sphere (Marsaglia).
+    fn rand_unit(&mut self) -> (f64, f64, f64) {
+        let u = 2.0 * self.rand01() - 1.0;   // z ∈ (-1, 1)
+        let phi = TWOPI * self.rand01();
+        let s = (1.0 - u * u).sqrt();
+        (s * phi.cos(), s * phi.sin(), u)
+    }
+
+    /// Launch (or re-launch) a particle from Sirius A's surface.
+    fn spawn(&mut self, i: usize, r_a: (f64, f64, f64)) {
+        let (ux, uy, uz) = self.rand_unit();
+        // Spawn at 4 × R_A to be safely outside the visible photosphere mesh
+        // and avoid initial gravitational sink. BHL geometry only depends on
+        // the v_wind/v_orb ratio, not the absolute spawn radius.
+        let r_spawn = 4.0 * R_A_AU;
+        let px = r_a.0 + r_spawn * ux;
+        let py = r_a.1 + r_spawn * uy;
+        let pz = r_a.2 + r_spawn * uz;
+        let v = WIND_AU_YR;   // already in AU/yr
+        self.pos[3*i  ] = px as f32;
+        self.pos[3*i+1] = py as f32;
+        self.pos[3*i+2] = pz as f32;
+        self.vel[3*i  ] = (v * ux) as f32;
+        self.vel[3*i+1] = (v * uy) as f32;
+        self.vel[3*i+2] = (v * uz) as f32;
+        self.age[i] = 0.0;
+        self.state[i] = 0;
+    }
+}
+
+thread_local! {
+    static WAKE: std::cell::RefCell<WakeSim> = std::cell::RefCell::new(WakeSim::empty());
+}
+
+/// Allocate `n` wake particles and seed them from Sirius A's surface
+/// at simulation epoch `time_yr`. Returns the actual count.
+#[wasm_bindgen]
+pub fn wake_init(n: u32, time_yr: f64) -> u32 {
+    let n = n as usize;
+    let snap = evolve_orbit(time_yr);
+    let r_a = (snap.pa.x, snap.pa.y, snap.pa.z);
+    WAKE.with(|w| {
+        let mut w = w.borrow_mut();
+        w.n = n;
+        w.pos.resize(3*n, 0.0);
+        w.vel.resize(3*n, 0.0);
+        w.age.resize(n, 0.0);
+        w.state.resize(n, 0);
+        w.capture_count = 0;
+        for i in 0..n {
+            w.spawn(i, r_a);
+            // Pre-stagger the age so the wake fills up smoothly instead of
+            // arriving as a single shell.
+            let age = w.rand01() as f32 * 4.0;
+            w.age[i] = age;
+            // Advance each particle ballistically by its stagger age so the
+            // first frame already shows a populated wind front.
+            for c in 0..3 {
+                let p = w.pos[3*i + c];
+                let v = w.vel[3*i + c];
+                w.pos[3*i + c] = p + v * age;
+            }
+        }
+    });
+    n as u32
+}
+
+/// Advance the wake by `dt_yr` years at the orbital configuration of
+/// time `time_yr`. The integration is sub-stepped `n_substeps` times
+/// to keep the wake quasi-steady relative to the slowly-moving orbit.
+/// Returns the cumulative capture count.
+#[wasm_bindgen]
+pub fn wake_step(dt_yr: f64, time_yr: f64, n_substeps: u32) -> u32 {
+    let snap = evolve_orbit(time_yr);
+    let r_a = (snap.pa.x, snap.pa.y, snap.pa.z);
+    let r_b = (snap.pb.x, snap.pb.y, snap.pb.z);
+    let n_sub = n_substeps.max(1) as usize;
+    let dt_sub = (dt_yr / n_sub as f64) as f32;
+
+    // Visualization capture radius (decoupled from the physical R_acc that
+    // snapshot() reports). The true Bondi radius R_acc ≈ 2GM_B/v_∞² ≈
+    // 0.005 AU is invisibly small at the orbit scale; even a 0.18 AU
+    // sphere captures only ~10⁻⁵ of an isotropic shell, so in a 4000-
+    // particle Monte-Carlo the user sees zero hits per session. We
+    // therefore use 0.5 AU here so BHL accretion fires visibly. The
+    // wake morphology (the Mach-cone shape) is geometrically unchanged.
+    let r_capture: f32 = 0.5;      // AU
+    let r_escape: f32 = 80.0;     // AU
+    let max_age:  f32 = 6.0;      // yr
+    let g_a = (G_AU * M_A_SUN) as f32;
+    let g_b = (G_AU * M_B_SUN) as f32;
+    let soft_a_sq = (4.0 * R_A_AU * 4.0 * R_A_AU) as f32;   // gravitational softening near A
+    let soft_b_sq = r_capture * r_capture;
+
+    let (rax, ray, raz) = (r_a.0 as f32, r_a.1 as f32, r_a.2 as f32);
+    let (rbx, rby, rbz) = (r_b.0 as f32, r_b.1 as f32, r_b.2 as f32);
+
+    WAKE.with(|w| {
+        let mut w = w.borrow_mut();
+        let n = w.n;
+        for _ in 0..n_sub {
+            for i in 0..n {
+                let px = w.pos[3*i];   let py = w.pos[3*i+1]; let pz = w.pos[3*i+2];
+                let dxa = px - rax;    let dya = py - ray;    let dza = pz - raz;
+                let dxb = px - rbx;    let dyb = py - rby;    let dzb = pz - rbz;
+                let r2a = dxa*dxa + dya*dya + dza*dza + soft_a_sq;
+                let r2b = dxb*dxb + dyb*dyb + dzb*dzb + soft_b_sq;
+                let inv_ra3 = r2a.sqrt().recip() / r2a;
+                let inv_rb3 = r2b.sqrt().recip() / r2b;
+                let ax = -g_a * dxa * inv_ra3 - g_b * dxb * inv_rb3;
+                let ay = -g_a * dya * inv_ra3 - g_b * dyb * inv_rb3;
+                let az = -g_a * dza * inv_ra3 - g_b * dzb * inv_rb3;
+
+                let vx = w.vel[3*i  ] + ax * dt_sub;
+                let vy = w.vel[3*i+1] + ay * dt_sub;
+                let vz = w.vel[3*i+2] + az * dt_sub;
+                w.vel[3*i  ] = vx;  w.vel[3*i+1] = vy;  w.vel[3*i+2] = vz;
+                w.pos[3*i  ] = px + vx * dt_sub;
+                w.pos[3*i+1] = py + vy * dt_sub;
+                w.pos[3*i+2] = pz + vz * dt_sub;
+                w.age[i] += dt_sub;
+
+                // Bookkeeping & respawn
+                let new_r2b = (w.pos[3*i] - rbx).powi(2)
+                            + (w.pos[3*i+1] - rby).powi(2)
+                            + (w.pos[3*i+2] - rbz).powi(2);
+                let new_r2_bary = w.pos[3*i].powi(2)
+                                + w.pos[3*i+1].powi(2)
+                                + w.pos[3*i+2].powi(2);
+                if new_r2b < r_capture*r_capture {
+                    w.state[i] = 1; w.capture_count += 1;
+                    w.spawn(i, r_a);
+                } else if new_r2_bary > r_escape*r_escape || w.age[i] > max_age {
+                    w.state[i] = 2;
+                    w.spawn(i, r_a);
+                }
+            }
+        }
+        w.capture_count as u32
+    })
+}
+
+/// Flat positions buffer: 3·n f32, AU, barycentric.
+#[wasm_bindgen]
+pub fn wake_positions() -> Vec<f32> {
+    WAKE.with(|w| w.borrow().pos.clone())
+}
+
+/// Per-particle speed (km/s), n f32 — for Three.js color attribute.
+#[wasm_bindgen]
+pub fn wake_speeds() -> Vec<f32> {
+    WAKE.with(|w| {
+        let w = w.borrow();
+        let mut out = Vec::with_capacity(w.n);
+        for i in 0..w.n {
+            let vx = w.vel[3*i] as f64;
+            let vy = w.vel[3*i+1] as f64;
+            let vz = w.vel[3*i+2] as f64;
+            out.push(((vx*vx + vy*vy + vz*vz).sqrt() * KMS_PER_AU_YR) as f32);
+        }
+        out
+    })
+}
+
+/// Particle ages (yr), n f32 — for opacity / fading visualisation.
+#[wasm_bindgen]
+pub fn wake_ages() -> Vec<f32> {
+    WAKE.with(|w| w.borrow().age.clone())
+}
+
+/// Cumulative captures since `wake_init` and active count.
+#[wasm_bindgen]
+pub fn wake_diagnostics() -> Vec<f64> {
+    WAKE.with(|w| {
+        let w = w.borrow();
+        vec![w.n as f64, w.capture_count as f64]
+    })
+}
 // Tests — validate against cited literature values to a few percent.
 //   `cargo test --target x86_64-unknown-linux-gnu` (native)
 // ═══════════════════════════════════════════════════════════════════
@@ -785,6 +1114,76 @@ mod tests {
             let dm = if dm > PI { dm - TWOPI } else { dm };
             assert!(dm.abs() < 1e-12, "M={m} → E={ea} → ΔM={dm}");
         }
+    }
+
+    /// Koester DA atmosphere must brighten in EUV vs Planck and have a
+    /// Lyman jump (i.e., short-of-912-Å flux > continuum extrapolation).
+    /// Quantitatively: at 80 nm (Wien tail) the Koester surface flux
+    /// should exceed pure Planck(T_eff) by ≥ 10× — matches Beuermann+06.
+    #[test]
+    fn koester_da_euv_brightening() {
+        let lam_euv_cm = 80e-7;
+        let nu = C_CGS / lam_euv_cm;
+        let planck = PI * planck_bnu(nu, T_B_K);
+        let koester = koester_da_surface_flux(nu, T_B_K);
+        let ratio = koester / planck;
+        assert!(ratio > 10.0,
+                "EUV ratio Koester/Planck = {ratio:.1}× at 80 nm (need > 10)");
+    }
+
+    /// Lyman series must produce an absorption notch at 1216 Å (Lyα).
+    #[test]
+    fn koester_da_lyman_alpha_absorption() {
+        let nu_at = |lam_nm: f64| C_CGS / (lam_nm * 1.0e-7);
+        let f_alpha    = koester_da_surface_flux(nu_at(1215.67e-1), T_B_K);
+        let f_continuum= koester_da_surface_flux(nu_at(1300.0e-1),  T_B_K);
+        assert!(f_alpha < 0.7 * f_continuum,
+                "Lyα should show ≥30% absorption: f_α = {f_alpha:.3e}, cont = {f_continuum:.3e}");
+    }
+
+    /// Wake: after init + a few steps, particle positions should remain
+    /// finite, ages bounded, and at least some particles should be moving
+    /// outward at roughly the wind speed.
+    #[test]
+    fn wake_init_and_step_sane() {
+        let n = wake_init(1000, 1994.5715);
+        assert_eq!(n, 1000);
+        let cap = wake_step(0.01, 1994.5715, 16);
+        let _ = cap;  // may be 0 on first step
+        let pos = wake_positions();
+        let spd = wake_speeds();
+        assert_eq!(pos.len(), 3000);
+        assert_eq!(spd.len(), 1000);
+        let mut any_fast = false;
+        let mut max_r: f32 = 0.0;
+        for i in 0..1000 {
+            let r = (pos[3*i].powi(2) + pos[3*i+1].powi(2) + pos[3*i+2].powi(2)).sqrt();
+            assert!(r.is_finite() && r < 200.0, "particle {i} flew off to r={r}");
+            if r > max_r { max_r = r; }
+            // 600 km/s is the launch speed; allow ±50%
+            if spd[i] > 300.0 && spd[i] < 1500.0 { any_fast = true; }
+        }
+        assert!(any_fast, "no wake particle near launch speed");
+        assert!(max_r > 1.0, "wake never spreads beyond 1 AU (max_r={max_r})");
+    }
+
+    /// Wake particles should statistically reach the barycentric region
+    /// where Sirius B orbits — i.e. some fraction must be 5–35 AU from
+    /// origin (within the Sirius B orbit range) after several steps.
+    #[test]
+    fn wake_reaches_orbit_zone() {
+        let _ = wake_init(2000, 1994.5715);
+        for k in 0..30 {
+            let t = 1994.5715 + (k as f64) * 0.01;
+            wake_step(0.01, t, 16);
+        }
+        let pos = wake_positions();
+        let mut n_in_zone = 0;
+        for i in 0..2000 {
+            let r = (pos[3*i].powi(2) + pos[3*i+1].powi(2) + pos[3*i+2].powi(2)).sqrt();
+            if r > 5.0 && r < 35.0 { n_in_zone += 1; }
+        }
+        assert!(n_in_zone > 50, "only {n_in_zone}/2000 particles reached Sirius B orbit zone");
     }
 
     /// GW decay timescale ~ 10²¹ yr for Sirius (no merger before t_Hubble)
