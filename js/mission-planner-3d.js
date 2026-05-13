@@ -826,6 +826,9 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         if (dt <= 0) return null;
         state.elapsed   += dt;
         state.scenarioJD += dt * state.simDaysPerSec;
+        // Drop the stale anchor — otherwise the next tick rebuilds elapsed /
+        // scenarioJD from the pre-warp anchor and snaps the whole sim back.
+        _resetSimAnchor();
         // One synchronous tick so positions, trails, and phase
         // transitions catch up before the next render frame.
         updateEarthSystem(0);
