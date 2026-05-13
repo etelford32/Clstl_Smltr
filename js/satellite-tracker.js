@@ -219,6 +219,8 @@ const GROUP_COLORS = {
     'cosmos-1408-debris': new THREE.Color(0xff5070),  // C1408 ASAT (2021) — ISS shell hazard
     'iridium-33-debris':  new THREE.Color(0xff7040),  // Iridium 33 collision (2009)
     'cosmos-2251-debris': new THREE.Color(0xff9050),  // Cosmos 2251 collision (2009)
+    'sl-16-rb':      new THREE.Color(0xd6b070),  // tan — SL-16 / Zenit-2 R/B (large intact debris)
+    'envisat':       new THREE.Color(0xe6c060),  // warm gold — Envisat (defunct ESA EO platform)
     'last-30-days':  new THREE.Color(0x00ffaa),  // mint — Recent launches
     'geo':           new THREE.Color(0xffaa00),  // amber — Geostationary
     'planet':        new THREE.Color(0x88ff88),  // light green — Planet Labs
