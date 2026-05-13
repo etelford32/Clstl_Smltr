@@ -361,6 +361,42 @@ nav {
     touch-action: manipulation; text-decoration: none; display: inline-block;
 }
 .cv-btn:hover { background: rgba(255,140,0,.15); border-color:#ff8c00; color:#ffb830; }
+
+/* ── Flare-mode overlay & panel (2D MHD kernel) ───────────────────── */
+.flare-overlay {
+    position: absolute;
+    top: 30px;
+    right: 30px;
+    width: 256px;
+    height: 128px;
+    border: 1px solid rgba(255, 140, 0, 0.5);
+    border-radius: 6px;
+    background: #000;
+    image-rendering: pixelated;
+    box-shadow: 0 0 20px rgba(255, 80, 0, 0.4);
+    display: none;
+    /* Override the generic `canvas { width: 100% }` rule. */
+    max-width: 256px;
+}
+.flare-overlay.active { display: block; }
+.flare-overlay-label {
+    position: absolute;
+    top: 32px;
+    right: 36px;
+    color: #ffb830;
+    font-size: 11px;
+    font-family: monospace;
+    text-shadow: 0 0 4px #000;
+    pointer-events: none;
+    display: none;
+}
+.flare-overlay-label.active { display: block; }
+.flare-panel { background: rgba(255, 140, 0, 0.04); border-left: 2px solid #ff8c00; padding-left: 10px; }
+.flare-panel h3 { color: #ffb830; }
+.flare-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; }
+.flare-row button { margin-top: 0; padding: 8px; font-size: 0.9rem; }
+.flare-stat { display: flex; justify-content: space-between; font-family: monospace; font-size: 0.85rem; color: #ddd; margin: 4px 0; }
+.flare-stat .v { color: #ffb830; }
 </style>
 <script type="application/ld+json">
 {
@@ -399,6 +435,8 @@ nav {
             <a href="space-weather.html" class="cv-btn" id="btn-sw" title="Live Space Weather Data" style="top:12px; right:12px;">⚡ Weather</a>
 
         <canvas id="starCanvas" width="800" height="600"></canvas>
+        <canvas id="flareCanvas" class="flare-overlay" width="128" height="64"></canvas>
+        <div id="flareLabel" class="flare-overlay-label">|J<sub>z</sub>| current sheet (2D MHD)</div>
         </div>
 
         <div class="controls">
@@ -487,6 +525,21 @@ nav {
                         <div class="stat-value" id="luminosity">1.0 L☉</div>
                     </div>
                 </div>
+            </div>
+
+            <div class="control-group flare-panel">
+                <h3>🔥 Flare Mode (2D MHD)</h3>
+                <p style="font-size:0.85rem;color:#bbb;margin-bottom:8px;">
+                    Live 2.5-D resistive MHD on a Harris current sheet. Watch
+                    the X-point pinch and reconnection-driven jets form.
+                </p>
+                <div class="flare-row">
+                    <button id="flareInitBtn">Trigger Flare</button>
+                    <button id="flareRunBtn">▶ Run</button>
+                </div>
+                <div class="flare-stat"><span>t</span><span class="v" id="flareT">0.000</span></div>
+                <div class="flare-stat"><span>|v<sub>y</sub>|<sub>peak</sub></span><span class="v" id="flareVy">0.000</span></div>
+                <div class="flare-stat"><span>|J<sub>z</sub>|<sub>peak</sub></span><span class="v" id="flareJz">0.000</span></div>
             </div>
 
             <button id="resetBtn">Reset to Defaults</button>
@@ -728,6 +781,68 @@ nav {
                 particles.push(new Particle());
             }
         }
+
+        // ── Phase 6: flare-driven ejecta particles ────────────────────
+        // A separate array from the steady-wind `particles`, so flare
+        // bursts stay visually distinct and don't compete for slots with
+        // the equilibrium wind. Filled by `window.__pulseFlare(intensity)`,
+        // which the MHD module calls each frame with a value derived from
+        // the kernel's peak |vy|.
+        let flareParticles = [];
+        const MAX_FLARE_PARTICLES = 400;
+
+        class FlareParticle {
+            constructor(angle, speed) {
+                const cx = canvas.width / 2;
+                const cy = canvas.height / 2;
+                const r0 = starSize * 0.55;
+                this.x = cx + Math.cos(angle) * r0;
+                this.y = cy + Math.sin(angle) * r0;
+                // Small angular jitter so the jet has visible width.
+                const jitter = (Math.random() - 0.5) * 0.25;
+                this.vx = Math.cos(angle + jitter) * speed;
+                this.vy = Math.sin(angle + jitter) * speed;
+                this.life = 1.0;
+                this.maxLife = 1.0 + Math.random() * 1.5;
+                this.size = 2.0 + Math.random() * 2.5;
+                // Flare colormap: hot core (white-yellow) → cool tail (red).
+                const heat = Math.random();
+                this.color = {
+                    r: 255,
+                    g: Math.round(150 + 80 * heat),
+                    b: Math.round(40 * heat),
+                };
+            }
+            update(dt) {
+                this.x += this.vx * dt * 60;
+                this.y += this.vy * dt * 60;
+                this.life -= dt / this.maxLife;
+            }
+            draw() {
+                const alpha = this.life * (brightness / 100);
+                ctx.fillStyle = `rgba(${this.color.r}, ${this.color.g}, ${this.color.b}, ${alpha})`;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size * this.life, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        // Public hook: called by js/mhd/loader.js consumers (the Flare-Mode
+        // module at the bottom of this file). `intensity ∈ [0, 1]` maps to
+        // 0..12 new ejecta per frame, in a tight cone aimed up-and-right
+        // from the star centre. The angle is fixed so users associate the
+        // jet with the visible Jz heatmap in the upper-right of the canvas.
+        window.__pulseFlare = function(intensity) {
+            if (!isFinite(intensity) || intensity <= 0) return;
+            const clamped = Math.min(1.0, intensity);
+            const n = Math.round(clamped * 12);
+            const flareAngle = -Math.PI / 4; // upper-right
+            for (let i = 0; i < n; i++) {
+                if (flareParticles.length >= MAX_FLARE_PARTICLES) break;
+                const speed = particleSpeed * (2.0 + Math.random() * 2.0);
+                flareParticles.push(new FlareParticle(flareAngle, speed));
+            }
+        };
 
         // Draw star
         function drawStar() {
@@ -979,9 +1094,17 @@ nav {
                 p.draw();
             });
 
+            // Phase 6: flare-particle update/draw, after the wind particles
+            // so the bright orange ejecta render on top of the cooler wind.
+            if (flareParticles.length) {
+                flareParticles = flareParticles.filter(p => p.life > 0);
+                flareParticles.forEach(p => { p.update(dt); p.draw(); });
+            }
+
             // Update stats
             document.getElementById('fps').textContent = fps;
-            document.getElementById('activeParticles').textContent = particles.length;
+            document.getElementById('activeParticles').textContent =
+                particles.length + (flareParticles.length ? ` (+${flareParticles.length} flare)` : '');
 
             requestAnimationFrame(animate);
         }
@@ -1116,6 +1239,141 @@ nav {
         
         console.log('🌟 2D Star Modeler loaded!');
         console.log('Select different star types to see their characteristics');
+    </script>
+
+    <script type="module">
+    // ── Flare Mode (2D MHD kernel) ────────────────────────────────────
+    // Lazy-loads /static/mhd/stellar_mhd_2d.wasm on first click, runs the
+    // Harris-sheet + η-bump reconnection model, renders Jz onto the inset
+    // canvas. Independent of the existing particle simulation — the two
+    // share screen real estate but no JS state.
+    import { loadMhd } from './js/mhd/loader.js';
+
+    const overlay  = document.getElementById('flareCanvas');
+    const label    = document.getElementById('flareLabel');
+    const initBtn  = document.getElementById('flareInitBtn');
+    const runBtn   = document.getElementById('flareRunBtn');
+    const tEl      = document.getElementById('flareT');
+    const vyEl     = document.getElementById('flareVy');
+    const jzEl     = document.getElementById('flareJz');
+    const overlayCtx = overlay.getContext('2d');
+
+    let mhd = null;
+    let running = false;
+    let imageData = null;
+    const STEPS_PER_FRAME = 4;
+
+    async function ensureLoaded() {
+        if (mhd) return mhd;
+        initBtn.disabled = true;
+        initBtn.textContent = 'Loading…';
+        try {
+            mhd = await loadMhd('/static/mhd/stellar_mhd_2d.wasm');
+        } catch (err) {
+            initBtn.disabled = false;
+            initBtn.textContent = 'Trigger Flare';
+            console.error('[flare] wasm load failed:', err);
+            alert('Could not load the MHD kernel. See console for details.');
+            throw err;
+        }
+        initBtn.disabled = false;
+        initBtn.textContent = 'Re-trigger';
+        return mhd;
+    }
+
+    function renderJz() {
+        const nx = mhd.nx(), ny = mhd.ny();
+        if (!imageData || imageData.width !== nx || imageData.height !== ny) {
+            overlay.width = nx;
+            overlay.height = ny;
+            imageData = overlayCtx.createImageData(nx, ny);
+        }
+        const jz = mhd.jzField();
+        // Symmetric autoscale to the peak |Jz| each frame so the colormap
+        // adapts as the current sheet pinches.
+        let peak = 0;
+        for (let k = 0; k < jz.length; k++) {
+            const a = Math.abs(jz[k]);
+            if (a > peak) peak = a;
+        }
+        const inv = peak > 0 ? 1 / peak : 0;
+        const data = imageData.data;
+        // Flip y so j=0 (bottom of physical domain) maps to bottom of canvas.
+        for (let j = 0; j < ny; j++) {
+            for (let i = 0; i < nx; i++) {
+                const v = jz[j * nx + i] * inv; // [-1, 1]
+                const row = ny - 1 - j;
+                const dst = (row * nx + i) * 4;
+                // Divergent red-white-blue colormap.
+                let r, g, b;
+                if (v >= 0) {
+                    r = 255;
+                    g = Math.round(255 * (1 - v));
+                    b = Math.round(255 * (1 - v));
+                } else {
+                    r = Math.round(255 * (1 + v));
+                    g = Math.round(255 * (1 + v));
+                    b = 255;
+                }
+                data[dst]     = r;
+                data[dst + 1] = g;
+                data[dst + 2] = b;
+                data[dst + 3] = 255;
+            }
+        }
+        overlayCtx.putImageData(imageData, 0, 0);
+    }
+
+    function updateStats() {
+        tEl.textContent  = mhd.time().toFixed(3);
+        vyEl.textContent = mhd.peakVy().toFixed(3);
+        jzEl.textContent = mhd.peakJz().toFixed(2);
+    }
+
+    function loop() {
+        if (!running) return;
+        for (let s = 0; s < STEPS_PER_FRAME; s++) mhd.step();
+        renderJz();
+        updateStats();
+        // Phase 6 coupling: the kernel's peak |vy| measures how strongly the
+        // X-point is ejecting plasma. We map it to a [0, 1] intensity that
+        // saturates at vy = 0.3 v_A (a healthy mature reconnection outflow)
+        // and hand it to the inline particle system, which spawns visible
+        // ejecta on the star canvas. This is the "extrapolate outward" piece
+        // of the original plan — the box-scale MHD flare drives star-scale
+        // wind enhancement.
+        if (typeof window.__pulseFlare === 'function') {
+            const intensity = Math.min(1.0, mhd.peakVy() / 0.3);
+            window.__pulseFlare(intensity);
+        }
+        requestAnimationFrame(loop);
+    }
+
+    initBtn.addEventListener('click', async () => {
+        await ensureLoaded();
+        // 128 x 64 cells, box 4 x 2 in code units — matches the regression
+        // test's grid and gives a clear current-sheet visualisation.
+        mhd.initFlare({ nx: 128, ny: 64, lx: 4, ly: 2 });
+        overlay.classList.add('active');
+        label.classList.add('active');
+        renderJz();
+        updateStats();
+        running = false;
+        runBtn.textContent = '▶ Run';
+    });
+
+    runBtn.addEventListener('click', async () => {
+        if (!mhd) await ensureLoaded();
+        // If user clicks Run without Init, auto-init so something happens.
+        if (mhd.nx() === 0) {
+            mhd.initFlare({ nx: 128, ny: 64, lx: 4, ly: 2 });
+            overlay.classList.add('active');
+            label.classList.add('active');
+        }
+        running = !running;
+        runBtn.textContent = running ? '⏸ Pause' : '▶ Run';
+        if (running) loop();
+    });
     </script>
     </div>
 </body>

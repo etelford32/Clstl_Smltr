@@ -25,6 +25,7 @@ pub mod hlld;
 pub mod resistive;
 pub mod solver;
 pub mod state;
+pub mod wasm;
 
 pub use bc::{BcKind, BoundaryConfig};
 pub use grid::{Grid, NG};
