@@ -1691,7 +1691,10 @@ export function initVehicleCanvas(canvas, opts = {}) {
             }
         }
 
-        for (const p of current.plumes) tickPlume(p, t, throttle);
+        // Live altitude (km) feeds the plume shader so it widens / lengthens
+        // as ambient pressure falls. liveOffsetY() is meters above pad.
+        const altKm = liveOffsetY() / 1000;
+        for (const p of current.plumes) tickPlume(p, t, throttle, altKm);
         tickBeacons(padState.beacons, t);
         // Camera shake — applied just before render and undone right after,
         // so the offset shows in this frame but isn't fed back into
