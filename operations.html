@@ -2231,6 +2231,7 @@ import { showToast }          from './js/operations/toast.js';
 import * as bPlane            from './js/operations/b-plane.js';
 import * as densityMap        from './js/operations/density-map.js';
 import { mountAristotle }     from './js/operations/aristotle.js';
+import { HeroTrails }         from './js/operations/hero-trails.js';
 import { getGroupColorHex }   from './js/satellite-tracker.js';
 import { loadSatcat }         from './js/satcat-catalog.js';
 // Side-effect import: hero-objects self-registers with debris-catalog
@@ -2352,6 +2353,14 @@ globe.start();
 // upgrade transparently once the catalog lands (subscribers fire on
 // successful load). Fire-and-forget — no await.
 loadSatcat();
+
+// Velocity ribbons for the hero NORADs (Envisat, ISS, Hubble,
+// Tiangong). Each gets a short fading trail behind its current
+// position — makes the orbital motion of the big modelled objects
+// feel anchored. Self-gating: if a hero NORAD isn't currently in the
+// tracker (layer not loaded), its trail stays hidden.
+const heroTrails = new HeroTrails(globe, fleet.tracker);
+globe.onTick(() => heroTrails.tick());
 
 mountLayerPanel(fleet);
 
