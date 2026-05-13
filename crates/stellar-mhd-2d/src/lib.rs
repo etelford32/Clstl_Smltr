@@ -21,11 +21,13 @@
 pub mod bc;
 pub mod grid;
 pub mod hlld;
+pub mod resistive;
 pub mod solver;
 pub mod state;
 
 pub use bc::{BcKind, BoundaryConfig};
 pub use grid::{Grid, NG};
+pub use resistive::{apply_resistive, ohmic_power, resistive_dt};
 pub use solver::{advance, compute_dt, divb_norms};
 pub use state::{cons_to_prim, prim_to_cons, Prim, State, GAMMA, N_VARS};
 
@@ -44,6 +46,8 @@ pub struct Sim {
     pub cfl: f64,
     /// GLM cleaning speed, refreshed each step from the max wave speed.
     pub c_h: f64,
+    /// Uniform magnetic diffusivity. Set to 0.0 for ideal MHD.
+    pub eta: f64,
 }
 
 impl Sim {
@@ -59,6 +63,7 @@ impl Sim {
             t: 0.0,
             cfl: 0.4,
             c_h: 0.0,
+            eta: 0.0,
         }
     }
 }
