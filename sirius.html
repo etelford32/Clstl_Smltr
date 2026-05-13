@@ -276,16 +276,36 @@ nav {
             <h3>Sirius System — α CMa</h3>
             <div class="sub">Sirius A (A1V)</div>
             <div>T<sub>eff</sub>: <span class="val" id="hud-ta">9 940</span> <span class="dim">K</span></div>
-            <div>Sep.: <span class="val" id="hud-sep">8.6</span> <span class="dim">AU</span></div>
+            <div>Sep.: <span class="val" id="hud-sep">19.78</span> <span class="dim">AU</span></div>
+            <div>v<sub>rel</sub>: <span class="val" id="hud-vrel">—</span> <span class="dim">km/s</span></div>
             <div class="sep"></div>
             <div class="sub">Sirius B (DA2 WD)</div>
             <div>T<sub>eff</sub>: <span class="valb" id="hud-tb">25 200</span> <span class="dim">K</span></div>
             <div>R: <span class="valb">0.0084</span> <span class="dim">R☉</span></div>
             <div class="sep"></div>
+            <div class="sub" style="color:#ffd57a">GW emission (Peters–Mathews)</div>
+            <div>dE/dt: <span class="val" id="hud-lgw">—</span> <span class="dim">erg/s</span></div>
+            <div>h<sub>+</sub>: <span class="val" id="hud-hp">—</span></div>
+            <div>h<sub>×</sub>: <span class="val" id="hud-hx">—</span></div>
+            <div>f<sub>GW</sub>: <span class="val" id="hud-fgw">—</span> <span class="dim">Hz</span></div>
+            <div class="sep"></div>
+            <div class="sub" style="color:#ff9aa2">Wind accretion (BHL)</div>
+            <div>Ṁ<sub>acc</sub>: <span class="val" id="hud-mdot">—</span> <span class="dim">g/s</span></div>
+            <div>L<sub>acc</sub>: <span class="val" id="hud-lacc">—</span> <span class="dim">erg/s</span></div>
+            <div>T<sub>shock</sub>: <span class="val" id="hud-tshk">—</span> <span class="dim">K</span></div>
+            <div class="sep"></div>
             <div>Orbital phase: <span class="val" id="hud-phase">0°</span></div>
+            <div>True anom: <span class="val" id="hud-nu">—</span><span class="dim">°</span></div>
+            <div>1PN Δω: <span class="val" id="hud-domega">—</span> <span class="dim">″</span></div>
             <div>FPS: <span id="fps-display">--</span></div>
             <div class="dim" style="margin-top:3px">Drag · Pinch · Scroll</div>
         </div>
+        <canvas id="gw-canvas" width="280" height="80"
+                style="position:absolute;right:14px;top:14px;background:rgba(4,2,16,.78);
+                       border:1px solid rgba(255,213,122,.25);border-radius:6px;z-index:550;"></canvas>
+        <canvas id="acc-canvas" width="280" height="80"
+                style="position:absolute;right:14px;top:108px;background:rgba(4,2,16,.78);
+                       border:1px solid rgba(255,154,162,.25);border-radius:6px;z-index:550;"></canvas>
         <button class="cv-btn" id="btn-panel-open">☰ Controls</button>
         <a href="space-weather.html" class="cv-btn" id="btn-sw" title="Live Space Weather Data">⚡ Weather</a>
         <button class="cv-btn" id="btn-center" title="Reset camera">⊙ Center</button>
@@ -317,9 +337,9 @@ nav {
                         <span class="vdisp" id="disp-incl">43°</span>
                     </div>
                     <div class="ctrl">
-                        <label>Separation</label>
-                        <input type="range" id="sl-sep" min="2" max="15" step="0.5" value="8.6">
-                        <span class="vdisp" id="disp-sep">8.6 AU</span>
+                        <label>Separation (zoom)</label>
+                        <input type="range" id="sl-sep" min="6" max="40" step="0.5" value="19.78">
+                        <span class="vdisp" id="disp-sep">19.78 AU</span>
                     </div>
                 </div>
             </div>
@@ -390,10 +410,12 @@ nav {
                         <tr><td>Mass</td><td>1.018 M☉</td></tr>
                         <tr><td>Radius</td><td>0.0084 R☉</td></tr>
                         <tr><td colspan="2" class="hdr">System</td></tr>
-                        <tr><td>Distance</td><td>2.64 pc</td></tr>
-                        <tr><td>Orbital period</td><td>50.13 yr</td></tr>
-                        <tr><td>Semi-major axis</td><td>7.5 AU</td></tr>
-                        <tr><td>Eccentricity</td><td>0.591</td></tr>
+                        <tr><td>Distance</td><td>2.6371 pc</td></tr>
+                        <tr><td>Orbital period</td><td>50.1284 yr</td></tr>
+                        <tr><td>Semi-major axis</td><td>19.78 AU (α = 7.4957″)</td></tr>
+                        <tr><td>Eccentricity</td><td>0.5914</td></tr>
+                        <tr><td>Inclination</td><td>136.336°</td></tr>
+                        <tr><td>r<sub>peri</sub> / r<sub>apo</sub></td><td>8.08 / 31.49 AU</td></tr>
                     </table>
                 </div>
             </div>
@@ -405,7 +427,20 @@ nav {
                         <p><strong>Sirius A</strong> is an A1V main-sequence star, 25× more luminous than the Sun. Its blue-white light makes it appear the brightest star in the sky (apparent magnitude −1.46) despite being only 2.64 pc away.</p>
                         <p style="margin-top:5px"><strong>Sirius B</strong> is a DA2 white dwarf — the collapsed remnant of a star that was once ~5 M☉. At 25,200 K it glows hot blue-white, but with only 0.0084 R☉ radius it appears tiny. It was discovered in 1862 by Alvan Clark.</p>
                         <p style="margin-top:5px"><strong>Gravity:</strong> Surface gravity of Sirius B is ~330,000× Earth's. A teaspoon of white dwarf material would weigh ~15 tonnes.</p>
-                        <p style="margin-top:5px"><strong>Eccentric orbit:</strong> The two stars orbit a common barycentre with eccentricity 0.591 — separation varies from ~8.2 AU (periapsis) to ~31.5 AU (apoapsis).</p>
+                        <p style="margin-top:5px"><strong>Eccentric orbit:</strong> The two stars orbit a common barycentre with eccentricity 0.591 — separation varies from 8.08 AU (periapsis) to 31.49 AU (apoapsis).</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sec closed">
+                <div class="sec-hd"><span>Physics Engine (WASM)</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="note-text">
+                        <p><strong>Orbit:</strong> Kepler equation solved with Danby starter + cubic Halley-Newton refinement (&lt;1e-14 residual). 1PN Schwarzschild periastron precession Δω ≈ 9.2 mas/orbit (Damour–Deruelle 1985).</p>
+                        <p style="margin-top:5px"><strong>Gravitational waves:</strong> Peters–Mathews (1963) quadrupole. f(e=0.591) ≈ 9.52, ⟨dE/dt⟩ ≈ 9.3×10¹⁵ erg/s. Strain h ≈ 10⁻²² at Earth, frequency ~1.3 nHz (sub-pulsar-timing-array). Decay time t<sub>GW</sub> ≈ 10²¹ yr.</p>
+                        <p style="margin-top:5px"><strong>Wind &amp; accretion:</strong> Sirius A drives a weak A-star wind (Ṁ ≈ 10⁻¹³ M☉/yr, v<sub>∞</sub> ≈ 600 km/s — Landstreet+ 2011). Bondi–Hoyle–Lyttleton capture onto Sirius B with ρ<sub>wind</sub>∝r⁻² gives ≈ 15× modulation between peri and apo passes.</p>
+                        <p style="margin-top:5px"><strong>Plasma shock:</strong> v<sub>ff</sub> = √(2GM<sub>B</sub>/R<sub>B</sub>) ≈ 6800 km/s; strong-shock T<sub>s</sub> ≈ 6×10⁸ K (~50 keV hard X-ray). Bremsstrahlung emissivity ε<sub>ff,ν</sub> = 6.8×10⁻³⁸ n<sub>e</sub>n<sub>i</sub>T⁻¹ᐟ²e⁻ʰᵛ/ᵏᵀ (Rybicki &amp; Lightman §5).</p>
+                        <p style="margin-top:5px"><strong>References:</strong> Bond+ 2017 ApJ 840 70; Holberg+ 1998 ApJ 497 935; Beuermann+ 2006 A&amp;A 458 541; Peters 1964 Phys Rev 136 B1224.</p>
                     </div>
                 </div>
             </div>
@@ -417,6 +452,42 @@ nav {
 <script type="module">
 import * as THREE        from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import initSirius, * as Sirius from './js/sirius-wasm/sirius_wasm.js';
+
+// ─── WASM PHYSICS ENGINE ─────────────────────────────────────────────────────
+// Lazy-loaded; until ready we fall back to the analytic getOrbitalPos.
+let wasmReady = false;
+const wasm = await initSirius('./js/sirius-wasm/sirius_wasm_bg.wasm')
+    .then(() => { wasmReady = true; return Sirius; })
+    .catch(err => { console.warn('[sirius] WASM init failed, using JS fallback:', err); return null; });
+
+// Field offsets in snapshot() return array — keep in sync with rust-sirius/src/lib.rs
+const SNAP = {
+    PA_X:0, PA_Y:1, PA_Z:2, PB_X:3, PB_Y:4, PB_Z:5,
+    R_AU:6, V_REL_KMS:7, NU_DEG:8, OMEGA_ADV_ARCSEC:9,
+    L_GW:10, H_PLUS:11, H_CROSS:12, F_GW:13, T_GW_YR:14,
+    RHO_WIND:15, V_WIND_KMS:16, R_ACC:17, MDOT_ACC:18, L_ACC:19,
+    T_SHOCK:20, V_FF_KMS:21, RL_A_RSUN:22, FILL:23,
+};
+
+// Plot ring-buffers for the GW and Ṁ_acc canvases
+const RING_LEN = 240;
+const ringHp = new Float32Array(RING_LEN);
+const ringHx = new Float32Array(RING_LEN);
+const ringMd = new Float32Array(RING_LEN);
+let ringIdx = 0;
+const gwCanvas = document.getElementById('gw-canvas');
+const accCanvas = document.getElementById('acc-canvas');
+const gwCtx  = gwCanvas.getContext('2d');
+const accCtx = accCanvas.getContext('2d');
+
+// Numeric formatting for HUD
+function fmtSci(x, p=2) {
+    if (!isFinite(x) || x === 0) return x.toFixed(p);
+    const e = Math.floor(Math.log10(Math.abs(x)));
+    const m = x / Math.pow(10, e);
+    return m.toFixed(p) + '×10' + String(e).split('').map(c => '⁻⁰¹²³⁴⁵⁶⁷⁸⁹'['-0123456789'.indexOf(c)]).join('');
+}
 
 // Nav handled by shared nav.js module
 
@@ -428,13 +499,17 @@ document.getElementById('btn-panel-close').addEventListener('click', () => { pan
 backdrop.addEventListener('click', () => { panel.classList.remove('open'); backdrop.classList.remove('show'); });
 
 // STATE
+// "physicsTime" is the simulation date in Julian years (continuous from epoch 1994.5715
+// of periastron passage). WASM consumes this directly.
 const state = {
     orbitSpeed: 1.0,
-    inclination: 43.0,
-    separation: 8.6,   // AU (in scene units: 1 unit = 1.5 "scale-AU")
+    inclination: 43.0,                    // viewer's choice (visual only — WASM uses true 136°)
+    separation: 19.78,                    // physical AU (Bond+17 Kepler-III)
     teffA: 9940,
     oblateA: 0.03,
-    orbitAngle: 0,     // radians
+    orbitAngle: 0,                        // radians, JS fallback only
+    physicsTime: 1994.5715,               // Julian yr — start at periastron
+    snapshot: null,                       // last WASM snapshot
 };
 
 // SCENE
@@ -713,25 +788,67 @@ function getOrbitalPos(angle, semiMajor, ecc, inclDeg) {
 }
 
 // ─── ANIMATE ──────────────────────────────────────────────────────────────────
+// Scene-unit scale: the WASM returns positions in physical AU. We rescale so
+// the orbit is comfortably framed: SCENE_SCALE units per AU. Periastron
+// r_p = 8.08 AU, so we want ~8 scene units there → SCENE_SCALE ≈ 1.0/scale.
+// state.separation is the user-tunable physical AU; we use it as a "zoom".
 function animate() {
     requestAnimationFrame(animate);
     const dt = 0.010;
     unifA.u_time.value += dt;
     unifB.u_time.value += dt;
 
-    // Advance orbit
-    state.orbitAngle += dt * 0.010 * state.orbitSpeed;
+    // Advance simulation time: 1 frame ≈ orbitSpeed × 0.05 yr → ~1000× wall-clock
+    // (one full 50.13-yr orbit in ~10 s of real time at speed=1.0).
+    state.physicsTime += dt * 0.5 * state.orbitSpeed;
 
-    // Get positions (B orbits around A in simplified model)
-    // Center of mass: ~1.5 AU from A (since mA=2.06, mB=1.02, ratio ~2:1)
-    const massRatio = 1.018 / (2.063 + 1.018);  // ~0.33
-    const posB = getOrbitalPos(state.orbitAngle, state.separation, 0.591, state.inclination);
-    const posA = posB.clone().multiplyScalar(-massRatio / (1 - massRatio));
+    let posA, posB;
+    if (wasmReady) {
+        const snap = wasm.snapshot(state.physicsTime);
+        state.snapshot = snap;
+
+        // Visual rescale: user "separation slider" is interpreted as a zoom factor
+        // around the true 19.78 AU geometry. 1 scene unit ≈ (state.separation / 19.78) AU.
+        const zoom = state.separation / 19.78;
+        posA = new THREE.Vector3(snap[SNAP.PA_X], snap[SNAP.PA_Y], snap[SNAP.PA_Z]).multiplyScalar(zoom);
+        posB = new THREE.Vector3(snap[SNAP.PB_X], snap[SNAP.PB_Y], snap[SNAP.PB_Z]).multiplyScalar(zoom);
+
+        // Update ring buffers for time-series plots
+        ringHp[ringIdx] = snap[SNAP.H_PLUS];
+        ringHx[ringIdx] = snap[SNAP.H_CROSS];
+        ringMd[ringIdx] = snap[SNAP.MDOT_ACC];
+        ringIdx = (ringIdx + 1) % RING_LEN;
+
+        // Update HUD
+        document.getElementById('hud-sep').textContent   = snap[SNAP.R_AU].toFixed(2);
+        document.getElementById('hud-vrel').textContent  = snap[SNAP.V_REL_KMS].toFixed(2);
+        document.getElementById('hud-nu').textContent    = snap[SNAP.NU_DEG].toFixed(1);
+        document.getElementById('hud-domega').textContent= snap[SNAP.OMEGA_ADV_ARCSEC].toExponential(2);
+        document.getElementById('hud-lgw').textContent   = fmtSci(snap[SNAP.L_GW]);
+        document.getElementById('hud-hp').textContent    = fmtSci(snap[SNAP.H_PLUS]);
+        document.getElementById('hud-hx').textContent    = fmtSci(snap[SNAP.H_CROSS]);
+        document.getElementById('hud-fgw').textContent   = fmtSci(snap[SNAP.F_GW]);
+        document.getElementById('hud-mdot').textContent  = fmtSci(snap[SNAP.MDOT_ACC]);
+        document.getElementById('hud-lacc').textContent  = fmtSci(snap[SNAP.L_ACC]);
+        document.getElementById('hud-tshk').textContent  = fmtSci(snap[SNAP.T_SHOCK]);
+        document.getElementById('hud-phase').textContent =
+            (((state.physicsTime - 1994.5715) / 50.1284) % 1 * 360).toFixed(1) + '°';
+
+        drawRingPlot(gwCtx, gwCanvas, ringHp, ringHx, '#ffd57a', '#ffb04a', 'h+ / h× (×10⁻²²)');
+        drawRingPlot(accCtx, accCanvas, ringMd, null, '#ff9aa2', null, 'Ṁ_acc (g/s)');
+    } else {
+        // Fallback: legacy analytic Keplerian
+        state.orbitAngle += dt * 0.010 * state.orbitSpeed;
+        const massRatio = 1.018 / (2.063 + 1.018);
+        posB = getOrbitalPos(state.orbitAngle, state.separation, 0.5914, state.inclination);
+        posA = posB.clone().multiplyScalar(-massRatio / (1 - massRatio));
+        document.getElementById('hud-sep').textContent   = state.separation.toFixed(2);
+        document.getElementById('hud-phase').textContent = Math.round((state.orbitAngle % (Math.PI*2)) * 180/Math.PI) + '°';
+    }
 
     siriusAMesh.position.copy(posA);
     siriusACorona.position.copy(posA);
     lightA.position.copy(posA);
-
     siriusBMesh.position.copy(posB);
     siriusBHalo.position.copy(posB);
     lightB.position.copy(posB);
@@ -745,12 +862,42 @@ function animate() {
         fpsEl.textContent = Math.round(fpsF * 1000 / (now - fpsT));
         fpsF = 0; fpsT = now;
     }
-
-    // Update HUD
-    const sep = posB.distanceTo(posA);
-    document.getElementById('hud-sep').textContent = state.separation.toFixed(1);
-    document.getElementById('hud-phase').textContent = Math.round((state.orbitAngle % (Math.PI*2)) * 180 / Math.PI) + '°';
 }
+
+// ─── RING-BUFFER PLOT ────────────────────────────────────────────────────────
+function drawRingPlot(ctx, canvas, a, b, ca, cb, label) {
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+    // auto-range — sym around 0 for GW, log-positive for Ṁ
+    let lo = +Infinity, hi = -Infinity;
+    for (let i = 0; i < RING_LEN; i++) {
+        if (isFinite(a[i])) { if (a[i] < lo) lo = a[i]; if (a[i] > hi) hi = a[i]; }
+        if (b && isFinite(b[i])) { if (b[i] < lo) lo = b[i]; if (b[i] > hi) hi = b[i]; }
+    }
+    if (!isFinite(lo) || !isFinite(hi) || lo === hi) { lo = -1; hi = 1; }
+    const pad = 0.1 * (hi - lo); lo -= pad; hi += pad;
+    // baseline at y=0 if 0 is in range
+    ctx.strokeStyle = 'rgba(255,255,255,.1)';
+    ctx.beginPath();
+    const y0 = H - (0 - lo) / (hi - lo) * H;
+    if (y0 >= 0 && y0 <= H) { ctx.moveTo(0, y0); ctx.lineTo(W, y0); ctx.stroke(); }
+    function plot(arr, color) {
+        ctx.strokeStyle = color; ctx.lineWidth = 1.4; ctx.beginPath();
+        for (let i = 0; i < RING_LEN; i++) {
+            const k = (ringIdx + i) % RING_LEN;
+            const x = (i / (RING_LEN - 1)) * W;
+            const y = H - (arr[k] - lo) / (hi - lo) * H;
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+    }
+    plot(a, ca);
+    if (b) plot(b, cb);
+    ctx.fillStyle = 'rgba(220,220,220,.65)';
+    ctx.font = '10px system-ui';
+    ctx.fillText(label, 6, 12);
+}
+
 animate();
 
 // ACCORDION
