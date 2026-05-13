@@ -20,6 +20,7 @@
  */
 
 import { SatelliteTracker } from '../satellite-tracker.js';
+import { StarlinkFleet }    from './starlink-model.js';
 
 // Per-event debris layer ids — mutually exclusive with the composite
 // 'debris' layer so the same NORAD ID isn't double-counted across the
@@ -67,6 +68,15 @@ export class OperationsFleet {
         // simTimeMs each frame keeps positions deterministic with the
         // bus regardless of mode (live / scrub / replay).
         globe.onTick((simTimeMs) => this.tracker.tick(simTimeMs));
+
+        // 3D Starlink mesh fleet — first member of the "real models"
+        // pipeline. Registered after the tracker tick so it reads
+        // freshly propagated positions for the same simTimeMs. The
+        // mesh stays hidden until the Starlink layer is toggled on;
+        // when it is, we also suppress the per-sat point so the dot
+        // doesn't bleed through.
+        this.starlinkFleet = new StarlinkFleet(globe, this.tracker);
+        globe.onTick(() => this.starlinkFleet.tick());
 
         // Track desired-on state separately from the catalog defaults so
         // `bootstrap()` actually fires loads. The previous version
@@ -184,6 +194,17 @@ export class OperationsFleet {
         if (this.tracker.hasGroup(layer.group)) {
             this.tracker.setGroupVisible(layer.group, want);
         }
+
+        // Starlink: drive the InstancedMesh renderer in lockstep with
+        // the layer toggle, and suppress the underlying point so each
+        // satellite has exactly one on-screen representation.
+        if (id === 'starlink') {
+            this.starlinkFleet.setVisible(want);
+            if (this.tracker.hasGroup(layer.group)) {
+                this.tracker.setGroupDotsVisible(layer.group, !want);
+            }
+        }
+
         this._notify();
     }
 
