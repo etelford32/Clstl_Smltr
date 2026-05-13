@@ -1055,7 +1055,22 @@ export function initVehicleCanvas(canvas, opts = {}) {
     if (!canvas) throw new Error('initVehicleCanvas: canvas element required');
 
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    // Pixel ratio LOCKED to 1.
+    //
+    // On Retina displays setPixelRatio(devicePixelRatio) doubles the canvas
+    // drawing buffer (`canvas.width = clientWidth × 2`). That doubled value
+    // is what CSS treats as the canvas's intrinsic content size — and any
+    // ancestor grid track using plain '1fr' inherits it as a min-content
+    // floor and blows past the viewport. minmax(0, 1fr) + contain: layout
+    // size in CSS *should* isolate that, but Mac Firefox/Safari leak it
+    // through certain ancestor chains in practice (the repeated "canvas
+    // takes over" / "canvas overflows right" regression has been this on
+    // every prior occurrence). Locking pixelRatio = 1 makes the drawing
+    // buffer always equal the CSS display size, so the intrinsic content
+    // size matches what the layout expects and the feedback loop is
+    // categorically impossible. Slight loss of sharpness on HiDPI is
+    // imperceptible for this content; stability is the higher priority.
+    renderer.setPixelRatio(1);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.05;
