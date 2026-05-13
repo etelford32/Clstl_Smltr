@@ -36,7 +36,7 @@ import { createMissionClock } from './launch-mission-clock.js';
 import { ENGINES } from './launch-engines.js';
 import { buildThrustOverlay, tickThrustOverlay } from './launch-thrust-overlay.js';
 import { buildPlume as buildPlumeShared, tickPlume } from './launch-plume.js';
-import { buildEngineBell } from './launch-engine-bell.js';
+import { buildEngineBell, buildTankDomeFittings } from './launch-engine-bell.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -164,6 +164,32 @@ function buildExternalTank() {
     feed.position.set(0.6, L * 0.78, R * 1.04);
     feed.castShadow = true;
     g.add(feed);
+
+    // LH2 aft-dome fittings — small central sump, anti-vortex baffle, and
+    // the big 17" LH2 feedline outlet that exits on the orbiter side (+Z).
+    // The ET's main lathe profile already builds the dome shell; we add
+    // just the hardware that hangs off its underside. A smaller pressur-
+    // ization-vent stub sits opposite the feedline outlet (−Z side).
+    //
+    // surfaceY = 0.02 so fittings sit just below the dome lip rather than
+    // z-fighting with the lathe at exactly y=0.
+    const aftDome = buildTankDomeFittings({
+        domeRadius: R * 0.9,
+        sumpR:      0.08,                       // small central LH2 outlet
+        sumpH:      0.10,
+        baffle:     true,
+        asymmetricFeed: {
+            angle:   Math.PI / 2,               // +Z: orbiter side
+            radial:  0.55,                      // 55% of dome radius from axis
+            sizeMul: 1.8,                       // 17" feedline is conspicuously fat
+        },
+        pressurizationPort: {
+            angle:   -Math.PI / 2,              // -Z: opposite the feedline
+            radial:  0.6,
+        },
+        surfaceY: () => 0.02,
+    });
+    g.add(aftDome);
 
     return g;
 }
