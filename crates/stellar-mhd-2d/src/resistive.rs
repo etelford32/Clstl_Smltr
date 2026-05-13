@@ -21,8 +21,18 @@ use crate::bc::{apply_bcs, BoundaryConfig};
 use crate::state::var;
 use crate::Sim;
 
+/// Peak η across the grid: the per-cell field if present, otherwise the
+/// uniform `sim.eta`. Drives the parabolic CFL.
+fn eta_peak(sim: &Sim) -> f64 {
+    match &sim.eta_grid {
+        Some(v) => v.iter().copied().fold(0.0_f64, f64::max),
+        None => sim.eta,
+    }
+}
+
 /// Maximum forward-Euler dt for the parabolic operator on this grid.
-pub fn resistive_dt(sim: &Sim, eta: f64) -> f64 {
+pub fn resistive_dt(sim: &Sim) -> f64 {
+    let eta = eta_peak(sim);
     if eta <= 0.0 {
         return f64::INFINITY;
     }
@@ -32,26 +42,43 @@ pub fn resistive_dt(sim: &Sim, eta: f64) -> f64 {
 }
 
 /// Apply the resistive source for total time `dt`, sub-cycling internally
-/// if needed to satisfy the parabolic CFL. No-op when `eta == 0`.
+/// if needed to satisfy the parabolic CFL. No-op when η is everywhere zero.
 ///
 /// `bcs` is needed because the central-difference stencil reads ghost cells;
 /// we refresh the ghost layer before each sub-step.
-pub fn apply_resistive(sim: &mut Sim, dt: f64, eta: f64, bcs: BoundaryConfig) {
-    if eta <= 0.0 || dt <= 0.0 {
+pub fn apply_resistive(sim: &mut Sim, dt: f64, bcs: BoundaryConfig) {
+    if eta_peak(sim) <= 0.0 || dt <= 0.0 {
         return;
     }
-    let dt_max = resistive_dt(sim, eta);
+    let dt_max = resistive_dt(sim);
     let nsub = (dt / dt_max).ceil().max(1.0) as usize;
     let dt_sub = dt / nsub as f64;
     for _ in 0..nsub {
         apply_bcs(&sim.grid, bcs, &mut sim.state);
-        substep(sim, dt_sub, eta);
+        substep(sim, dt_sub);
+    }
+}
+
+/// Read η at padded cell index `c`. Falls back to the uniform scalar when
+/// no per-cell field is installed.
+#[inline]
+fn eta_at(sim: &Sim, c: usize) -> f64 {
+    match &sim.eta_grid {
+        Some(v) => v[c],
+        None => sim.eta,
     }
 }
 
 /// One forward-Euler resistive sub-step. Uses central differences on the
 /// cell-centred B-field; reads ghost zones (apply BCs first).
-fn substep(sim: &mut Sim, dt: f64, eta: f64) {
+///
+/// With non-uniform η this discretisation evaluates `η ∇²B` per cell — a
+/// first-order approximation to the correct `-∇×(η J)` form (the dropped
+/// term is `J × ∇η`, which only matters where η varies on the cell scale).
+/// Good enough to localise reconnection at the trigger spot; we can upgrade
+/// to a flux-conservative staggered form if Sweet-Parker scaling tests
+/// later demand it.
+fn substep(sim: &mut Sim, dt: f64) {
     let g = sim.grid;
     let inv_dx2 = 1.0 / (g.dx * g.dx);
     let inv_dy2 = 1.0 / (g.dy * g.dy);
@@ -104,15 +131,17 @@ fn substep(sim: &mut Sim, dt: f64, eta: f64) {
             let j_sq = jx * jx + jy * jy + jz * jz;
             let b_dot_lap = bx_c * lap_bx + by_c * lap_by + bz_c * lap_bz;
 
+            let eta_c = eta_at(sim, c);
+
             // ∂B/∂t = η ∇²B.
-            sim.state.u[var::BX][c] = bx_c + dt * eta * lap_bx;
-            sim.state.u[var::BY][c] = by_c + dt * eta * lap_by;
-            sim.state.u[var::BZ][c] = bz_c + dt * eta * lap_bz;
+            sim.state.u[var::BX][c] = bx_c + dt * eta_c * lap_bx;
+            sim.state.u[var::BY][c] = by_c + dt * eta_c * lap_by;
+            sim.state.u[var::BZ][c] = bz_c + dt * eta_c * lap_bz;
 
             // ∂E/∂t = η (|J|² + B·∇²B). The B·∇²B piece cancels the change
             // in magnetic energy 0.5 d(B²)/dt = B·dB/dt, leaving the thermal
             // part heated by exactly η|J|² (Ohmic).
-            sim.state.u[var::E][c] += dt * eta * (j_sq + b_dot_lap);
+            sim.state.u[var::E][c] += dt * eta_c * (j_sq + b_dot_lap);
         }
     }
 }
@@ -178,7 +207,7 @@ mod tests {
             // Don't let advance() overshoot; clamp dt by hand.
             let dt_remaining = t_end - sim.t;
             let (dt_ideal, c_h) = crate::solver::compute_dt(&sim);
-            let dt_eta = resistive_dt(&sim, sim.eta);
+            let dt_eta = resistive_dt(&sim);
             let dt = dt_ideal.min(dt_eta).min(dt_remaining);
             sim.c_h = c_h;
             // Inline the advance pipeline so we can pass our clamped dt.

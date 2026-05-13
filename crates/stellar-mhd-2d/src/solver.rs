@@ -299,9 +299,7 @@ pub fn advance(sim: &mut Sim, bcs: BoundaryConfig) -> f64 {
     sim.c_h = c_h;
     rk2_step(sim, dt, bcs, c_h);
     damp_psi(sim, dt, c_h);
-    if sim.eta > 0.0 {
-        crate::resistive::apply_resistive(sim, dt, sim.eta, bcs);
-    }
+    crate::resistive::apply_resistive(sim, dt, bcs);
     sim.t += dt;
     dt
 }
