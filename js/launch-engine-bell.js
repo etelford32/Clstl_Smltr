@@ -425,12 +425,118 @@ function buildEnginePlumbing(throatR, headY) {
 //   style       — 'cryo' (LH2/LOX/CH4) or 'kerolox' (RP-1/LO2); just
 //                  changes the manifold color tint.
 
+// Tank dome cap — bulges DOWN over the engine bay (it's the bottom of the
+// propellant tank above). Built as a LatheGeometry with the profile going
+// from (0,0) at the tip (lowest point) up to (radius, height) at the outer
+// edge where the dome meets the cylindrical tank wall. Sump fitting +
+// anti-vortex baffle + radial feed-line penetrations make it read as a
+// real tank bottom rather than a smooth shell.
+function buildTankDomeCap({ radius, height, color, feedPenetrations = 6 }) {
+    const g = new THREE.Group();
+    g.name = 'TankDome';
+
+    // Dome profile — quarter-ellipse from tip (axis, low) to edge (rim, high).
+    const profile = [];
+    const N = 18;
+    for (let i = 0; i <= N; i++) {
+        const t = i / N;
+        const a = t * Math.PI / 2;
+        profile.push(new THREE.Vector2(
+            radius * Math.sin(a),
+            height * (1 - Math.cos(a)),
+        ));
+    }
+    // Close the bottom rim of the dome so the underside reads as a solid
+    // shell, not an open cone — add the axis point.
+    profile.unshift(new THREE.Vector2(0, 0));
+
+    const domeMat = new THREE.MeshStandardMaterial({
+        color,
+        metalness: 0.55,
+        roughness: 0.55,
+        side: THREE.DoubleSide,
+    });
+    const dome = new THREE.Mesh(
+        new THREE.LatheGeometry(profile, 40),
+        domeMat,
+    );
+    dome.castShadow = true;
+    dome.receiveShadow = true;
+    g.add(dome);
+
+    // Central sump — small cylindrical fitting at the dome tip. This is
+    // the main propellant outlet on a real tank, where the fluid pools
+    // and exits down through a feed line.
+    const sumpR = radius * 0.12;
+    const sumpH = radius * 0.16;
+    const fittingMat = new THREE.MeshStandardMaterial({
+        color: 0x554f3e, metalness: 0.85, roughness: 0.32,
+    });
+    const sump = new THREE.Mesh(
+        new THREE.CylinderGeometry(sumpR, sumpR * 0.85, sumpH, 18),
+        fittingMat,
+    );
+    sump.position.y = -sumpH / 2;
+    sump.castShadow = true;
+    g.add(sump);
+
+    // Anti-vortex baffle — a small ring around the sump that prevents
+    // bathtub-drain vortices from forming as propellant drains during burn.
+    const baffleR = sumpR * 1.95;
+    const baffle = new THREE.Mesh(
+        new THREE.TorusGeometry(baffleR, sumpR * 0.14, 6, 22),
+        new THREE.MeshStandardMaterial({
+            color: 0x33312a, metalness: 0.8, roughness: 0.4,
+        }),
+    );
+    baffle.rotation.x = Math.PI / 2;
+    baffle.position.y = -sumpR * 0.2;
+    g.add(baffle);
+
+    // Radial feed-line penetrations — small cylindrical flanges on the
+    // dome where individual engine-feed lines exit. Positioned at 0.62×
+    // dome radius so they read as "between" the central sump and the
+    // outer wall.
+    if (feedPenetrations > 0) {
+        const ringR = radius * 0.62;
+        // Y on the dome surface at radial ringR — invert the profile.
+        // height * (1 - cos(a)) where sin(a) = ringR/radius → cos(a) = √(1-(ringR/radius)²)
+        const sinA = ringR / radius;
+        const cosA = Math.sqrt(Math.max(0, 1 - sinA * sinA));
+        const ringY = height * (1 - cosA);
+        const penR = sumpR * 0.45;
+        const penH = sumpR * 1.2;
+        for (let i = 0; i < feedPenetrations; i++) {
+            const a = (i / feedPenetrations) * Math.PI * 2;
+            // Flange disc flush against dome surface
+            const flange = new THREE.Mesh(
+                new THREE.CylinderGeometry(penR * 1.6, penR * 1.6, penR * 0.4, 14),
+                fittingMat,
+            );
+            flange.position.set(Math.cos(a) * ringR, ringY, Math.sin(a) * ringR);
+            g.add(flange);
+            // Short stub protruding through (the pipe outlet below the dome)
+            const stub = new THREE.Mesh(
+                new THREE.CylinderGeometry(penR, penR, penH, 10),
+                fittingMat,
+            );
+            stub.position.set(Math.cos(a) * ringR, ringY - penH / 2 - penR * 0.2, Math.sin(a) * ringR);
+            g.add(stub);
+        }
+    }
+
+    return g;
+}
+
 export function buildClusterManifold({
     plateRadius,
     centerY    = 0.5,
     engineCount = 9,
     copvs      = false,
     style      = 'cryo',
+    tankDome   = true,                   // render the tank dome cap above the manifold
+    domeColor,                           // override default per-style
+    domeHeight,                          // override default
 } = {}) {
     const g = new THREE.Group();
     g.name = 'ClusterManifold';
@@ -487,6 +593,26 @@ export function buildClusterManifold({
         );
         spoke.rotation.y = -a;
         g.add(spoke);
+    }
+
+    // Tank dome cap — bottom of the propellant tank, bulging down over
+    // the engine bay. Positioned with its tip just above the manifold
+    // ring so the dome's underside is what the user sees when looking up
+    // through the engines.
+    if (tankDome) {
+        const dRadius = plateRadius * 0.95;
+        const dHeight = domeHeight ?? plateRadius * 0.42;
+        const dColor  = domeColor ?? (style === 'kerolox'
+            ? 0x9c9a96             // RP-1 tank — matte alloy
+            : 0xc8cdd3);           // cryo tank — stainless / aluminum
+        const dome = buildTankDomeCap({
+            radius:           dRadius,
+            height:           dHeight,
+            color:            dColor,
+            feedPenetrations: engineCount > 9 ? 8 : 6,
+        });
+        dome.position.y = centerY + plateRadius * 0.08;
+        g.add(dome);
     }
 
     // COPVs — composite pressure vessels around the central plenum. Real
