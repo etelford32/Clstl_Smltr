@@ -34,6 +34,7 @@
 
 import { decayWithSigma } from './decision-deck.js';
 import { provStore }      from './provenance.js';
+import { annotate as annotateDebris } from '../debris-catalog.js';
 
 // Regime cut-offs (km above mean Earth radius).
 const ALT_LEO_MAX = 2000;
@@ -278,6 +279,42 @@ export function computePills(sat, ctx = {}) {
                     : null;
     const rp = regimePill(altKm);
     if (rp) pills.push(rp);
+
+    // ── Size class — sourced from debris-catalog.annotate(), which
+    // already runs for every probe on the upper-atmosphere globe.
+    // Gated on family.id !== 'unknown' so we don't bluff a size for
+    // active payloads (Starlink, GPS, …): for those the classifier
+    // falls through to the generic "medium" heuristic which would
+    // misrepresent objects we have no real size opinion on.
+    //
+    // For attributed objects (rocket bodies, ASAT fragments, NOAA
+    // breakups, named cloud events) we surface:
+    //   - large  → `warn`    catastrophic on impact, ~800 kg median
+    //   - medium → `neutral` 10 cm–1 m, mission-killing
+    //   - small  → `muted`   1–10 cm, lethal but small RCS
+    try {
+        const annot = annotateDebris({
+            name:    sat.name ?? tle?.name,
+            noradId: norad,
+        });
+        const family = annot?.family;
+        const size   = annot?.size;
+        if (family && family.id !== 'unknown' && size) {
+            const cls = size.class;
+            const label = cls === 'large'  ? 'Large'
+                        : cls === 'medium' ? 'Medium'
+                        :                    'Small';
+            const tone  = cls === 'large'  ? 'warn'
+                        : cls === 'medium' ? 'neutral'
+                        :                    'muted';
+            pills.push({
+                id:    `size-${cls}`,
+                label,
+                tone,
+                title: `${size.rangeM} · ~${size.massKg} kg · RCS ≈ ${size.rcsM2} m² · ${family.name}.`,
+            });
+        }
+    } catch (_) { /* annotate is best-effort — skip pill on any failure */ }
 
     // ── Defunct / tumbling — taxonomic, last in the list.
     if (isDefunct(sat)) {
