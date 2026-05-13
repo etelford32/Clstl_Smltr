@@ -744,9 +744,20 @@ body[data-density="compact"] .lp-density-btn {
     min-height:380px;
     min-width:0;
     max-width:100%;
+    /* contain: prevent the canvas's intrinsic drawing-buffer size from
+       propagating up into grid track sizing. Without this, even with
+       minmax(0,1fr), some browsers still consult the inner canvas's
+       intrinsic dimensions when resolving grid item flex. */
+    contain:layout size;
     box-shadow:inset 0 0 80px rgba(120,80,200,.08), 0 8px 32px rgba(0,0,0,.5);
 }
-.lh-vehicle-canvas-host canvas { display:block; width:100%; height:100%; }
+.lh-vehicle-canvas-host canvas {
+    display:block;
+    width:100%; height:100%;
+    /* Constrain the canvas display box to its container regardless of
+       the drawing buffer's intrinsic size. */
+    max-width:100%; max-height:100%;
+}
 .lh-vehicle-watermark {
     position:absolute; bottom:10px; left:12px;
     font-size:.58rem; color:#667; font-family:monospace;
