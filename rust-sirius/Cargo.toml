@@ -1,0 +1,19 @@
+[package]
+name = "sirius_wasm"
+version = "0.1.0"
+edition = "2021"
+description = "Sirius binary physics engine — Kepler+1PN orbit, Peters-Mathews GW emission, Bondi-Hoyle-Lyttleton wind accretion, and thermal bremsstrahlung spectrum, compiled to WebAssembly."
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde-wasm-bindgen = "0.6"
+
+[profile.release]
+opt-level = 'z'
+lto = true
+codegen-units = 1
+strip = true
