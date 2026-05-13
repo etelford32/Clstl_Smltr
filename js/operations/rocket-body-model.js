@@ -28,11 +28,75 @@
  */
 
 import * as THREE from 'three';
+import { annotate as annotateDebris } from '../debris-catalog.js';
+import { onSatcatLoaded } from '../satcat-catalog.js';
 
 // CelesTrak group ids the proxy uses for the NAME lookups. Must match
 // the keys registered in `api/celestrak/tle.js`.
 const SL16_GROUP = 'sl-16-rb';
 const SL8_GROUP  = 'sl-8-rb';
+
+// Per-instance scale clamps. The rocket-body fleets used to render
+// every instance at the same model size; this range lets each rocket
+// vary by ±35% so a side-by-side view reads as "different builds,
+// different RCS measurements" instead of a copy-pasted cylinder.
+const INSTANCE_SCALE_MIN = 0.75;
+const INSTANCE_SCALE_MAX = 1.35;
+
+function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+
+/**
+ * Per-instance scale multiplier in [INSTANCE_SCALE_MIN, INSTANCE_SCALE_MAX].
+ *
+ * Three sources, in priority order:
+ *   1. SATCAT measured RCS (`source === 'satcat'`, `rcsRawM2` present)
+ *        → continuous: scale = sqrt(rcs / typicalRcsM2), clamped.
+ *          The sqrt is because RCS scales with area (length²);
+ *          linear dimension scales with sqrt(RCS).
+ *   2. SATCAT or hero bucket class (small / medium / large) → discrete
+ *        base values (0.82 / 1.00 / 1.18) plus a NORAD-seeded ±5%
+ *        jitter so neighbours don't look pixel-identical.
+ *   3. Nothing known → 1.0 (no variation).
+ *
+ * `typicalRcsM2` is the class-median RCS used as the denominator on the
+ * SATCAT path. For SL-16 / SL-8 / Centaur-class bodies, real SATCAT
+ * measurements cluster around 10 m²; passing a different value here
+ * lets a future class (CubeSat fleets, etc.) tune for its own regime
+ * without changing the formula.
+ */
+export function computeInstanceScale(sat, opts = {}) {
+    const { typicalRcsM2 = 10 } = opts;
+    const id = sat?.tle?.norad_id ?? sat?.norad_id;
+    const name = sat?.tle?.name ?? sat?.name;
+    if (!Number.isFinite(id) && !name) return 1.0;
+
+    try {
+        const annot = annotateDebris({ name, noradId: id });
+        const size  = annot?.size;
+        if (!size) return 1.0;
+
+        // SATCAT measurement — continuous scaling.
+        if (size.source === 'satcat' && Number.isFinite(size.rcsRawM2) && size.rcsRawM2 > 0) {
+            return clamp(Math.sqrt(size.rcsRawM2 / typicalRcsM2),
+                         INSTANCE_SCALE_MIN, INSTANCE_SCALE_MAX);
+        }
+
+        // Bucket-only (SATCAT class without raw RCS, hero match, or
+        // heuristic) — discrete base + NORAD-seeded jitter.
+        if (size.class) {
+            const base = size.class === 'small'  ? 0.82
+                       : size.class === 'medium' ? 1.00
+                       :                            1.18;
+            // Same golden-ratio fraction we use for tumble phase, so
+            // each rocket has a single stable identity across rate
+            // / pose / scale.
+            const nudge = (((id || 0) * 0.6180339887) % 1 - 0.5) * 0.10;
+            return clamp(base + nudge, INSTANCE_SCALE_MIN, INSTANCE_SCALE_MAX);
+        }
+    } catch (_) { /* annotate is best-effort */ }
+
+    return 1.0;
+}
 
 // Common exaggeration factor — same as the Starlink renderer so all
 // "real model" layers compose at consistent visual sizes. The geometry
@@ -267,8 +331,20 @@ export class RocketBodyFleet {
         this._prevPos = new Float32Array(maxInstances * 3);
         this._prevPos.fill(NaN);
 
+        // Per-instance scale-matrix cache. Keyed by NORAD ID, lazy
+        // populated on the first frame each instance appears. Lets
+        // SL-16s and SL-8s vary in apparent size by SATCAT RCS or
+        // bucket class without per-frame annotate() work.
+        this._scaleMCache = new Map();
+        // Invalidate when SATCAT lands mid-session — the loaded
+        // catalog can promote a generic-large rocket body to a
+        // specific RCS measurement, changing the scale.
+        this._unsubSatcat = onSatcatLoaded(() => this._scaleMCache.clear());
+
         // Scratch — all per-tick allocations live here, none in the
-        // hot loop.
+        // hot loop. `_scaleM` is the *fallback* scale matrix used
+        // when no per-instance cached entry exists yet; the cache
+        // overrides it once `_getScaleMatrix()` has run.
         this._m       = new THREE.Matrix4();
         this._scaleM  = new THREE.Matrix4().makeScale(modelScale, modelScale, modelScale);
         this._tumbleM = new THREE.Matrix4();
@@ -278,6 +354,23 @@ export class RocketBodyFleet {
         this._cross   = new THREE.Vector3();
         this._rotM    = new THREE.Matrix4();
         this._zeroM   = new THREE.Matrix4().makeScale(0, 0, 0);
+    }
+
+    /**
+     * Returns the per-instance scale Matrix4 for a satellite,
+     * populating the cache on first request. The matrix bakes in the
+     * fleet's base `modelScale × instance multiplier`, so the
+     * downstream multiply chain doesn't change shape.
+     */
+    _getScaleMatrix(sat) {
+        const id = sat?.tle?.norad_id;
+        if (!Number.isFinite(id)) return this._scaleM;
+        let m = this._scaleMCache.get(id);
+        if (m) return m;
+        const s = computeInstanceScale(sat) * this._modelScale;
+        m = new THREE.Matrix4().makeScale(s, s, s);
+        this._scaleMCache.set(id, m);
+        return m;
     }
 
     setVisible(on) {
@@ -314,7 +407,7 @@ export class RocketBodyFleet {
             if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) continue;
             if (px === 0 && py === 0 && pz === 0) continue;
 
-            this._writeInstance(slot, px, py, pz, simTimeMs, sat.tle.norad_id | 0);
+            this._writeInstance(slot, sat, px, py, pz, simTimeMs);
             slot++;
         }
         for (let k = slot; k < this._mesh.count; k++) {
@@ -332,9 +425,13 @@ export class RocketBodyFleet {
      *
      * If tumble is enabled, an extra rotation around model +Y is
      * applied (the cylinder spins around its long axis), phased by
-     * NORAD ID so each rocket has a distinct phase.
+     * NORAD ID so each rocket has a distinct phase. The per-instance
+     * scale matrix (sized by SATCAT RCS or bucket class) is fetched
+     * from the cache via `_getScaleMatrix(sat)` so neighbouring
+     * rockets show visible size variation.
      */
-    _writeInstance(slot, px, py, pz, simTimeMs, noradId) {
+    _writeInstance(slot, sat, px, py, pz, simTimeMs) {
+        const noradId = (sat?.tle?.norad_id | 0) || 0;
         this._zenith.set(px, py, pz);
         const r = this._zenith.length();
         if (r < 1e-9) {
@@ -382,6 +479,12 @@ export class RocketBodyFleet {
 
         this._rotM.makeBasis(this._cross, this._zenith, this._along);
 
+        // Per-instance scale comes from the cache (sized by SATCAT
+        // RCS or class bucket, with a stable NORAD-seeded jitter).
+        // Falls back to the fleet's uniform `_scaleM` when no
+        // annotation is available.
+        const scaleM = this._getScaleMatrix(sat);
+
         if (this._tumbleRate !== 0) {
             // Per-instance phase. The NORAD ID, fractional-multiplied
             // by an irrational, gives a uniform distribution of phases
@@ -391,9 +494,9 @@ export class RocketBodyFleet {
             const angle = (simTimeMs / 1000) * this._tumbleRate + phase;
             this._tumbleM.makeRotationY(angle);
             this._m.multiplyMatrices(this._rotM, this._tumbleM);
-            this._m.multiply(this._scaleM);
+            this._m.multiply(scaleM);
         } else {
-            this._m.multiplyMatrices(this._rotM, this._scaleM);
+            this._m.multiplyMatrices(this._rotM, scaleM);
         }
         this._m.elements[12] = px;
         this._m.elements[13] = py;
@@ -409,6 +512,8 @@ export class RocketBodyFleet {
         if (this._mesh.parent) this._mesh.parent.remove(this._mesh);
         this._geometry.dispose();
         this._material.dispose();
+        this._unsubSatcat?.();
+        this._scaleMCache.clear();
     }
 }
 

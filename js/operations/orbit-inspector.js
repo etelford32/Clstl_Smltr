@@ -33,6 +33,7 @@ import { decayWithSigma, deltaAPerDay, fmtLifetime } from './decision-deck.js';
 import { provStore } from './provenance.js';
 import { computePills, renderPills } from './satellite-pills.js';
 import { annotate as annotateDebris, hazardEnergyMJ } from '../debris-catalog.js';
+import { onSatcatLoaded } from '../satcat-catalog.js';
 
 const MIN_PER_DAY = 1440;
 const RE_KM       = 6378.135;     // WGS-72, matches the SGP4 propagator
@@ -344,39 +345,106 @@ export function mountOrbitInspector(opts = {}) {
             { max: 5 },
         );
 
-        // Physical-scale roll-up. Uses the same `annotate()` the
-        // upper-atmosphere globe runs over every debris probe (family
-        // attribution + size class). Renders an inline block only
-        // when the classifier confidently attributed the object;
-        // otherwise (active payload, unclassified) we leave it off
-        // rather than print a default-medium guess.
+        // Physical-scale roll-up. Three sources, prioritised by
+        // debris-catalog.estimateSize:
+        //   hero      true (h × w × d) from hero-objects.js
+        //   satcat    upstream RCS bucket + raw RCS m²
+        //   heuristic name pattern + family attribution
+        //
+        // The block renders whenever we have *anything* better than
+        // a default-medium guess — hero or satcat unconditionally,
+        // heuristic only when the family is attributed.
         let physicalHtml = '';
         try {
             const annot = annotateDebris({ name: sat.name, noradId: tle.norad_id });
             const family = annot?.family;
             const size   = annot?.size;
-            if (family && family.id !== 'unknown' && size) {
+            const src    = size?.source;
+            const shouldRender = size && (
+                src === 'hero' ||
+                src === 'satcat' ||
+                (family && family.id !== 'unknown')
+            );
+            if (shouldRender) {
                 const energyMJ = Number.isFinite(annot.hazardMJ)
                     ? annot.hazardMJ
                     : hazardEnergyMJ(size.massKg);
-                physicalHtml = `
-                    <div class="op-orbit-rates op-orbit-physical">
-                        <div class="op-orbit-rate-title" title="Family attribution + size class from name + NORAD range. Mass and RCS are bucket medians, not measurements.">
-                            Physical (est.)
-                            <span class="op-orbit-rate-conds">${escapeHtml(family.name)}</span>
+                const sourceLabel =
+                      src === 'hero'   ? 'DISCOSweb / agency'
+                    : src === 'satcat' ? 'SATCAT'
+                    :                    'heuristic';
+                const sourceTitle =
+                      src === 'hero'   ? 'True dimensions from operator / agency datasheets — DISCOSweb-equivalent.'
+                    : src === 'satcat' ? 'Radar cross-section measurement from CelesTrak SATCAT.'
+                    :                    'Size class inferred from object name + family attribution.';
+                const condBadge = src === 'hero' && size.match
+                    ? `hero match (${escapeHtml(size.match)})`
+                    : family?.id && family.id !== 'unknown'
+                        ? escapeHtml(family.name)
+                        : 'attributed object';
+
+                // Hero rows: true bounding-box + span + real mass +
+                // measured (or face-area-derived) RCS. We retire the
+                // bucket-median rows when we have the real ones.
+                let coreRows;
+                if (src === 'hero' && size.dimensions_m) {
+                    const d = size.dimensions_m;
+                    const dimStr = `${d.h.toFixed(1)} × ${d.w.toFixed(1)} × ${d.d.toFixed(1)}`;
+                    const spanRow = Number.isFinite(size.span_m)
+                        ? `<div title="Tip-to-tip span including deployed solar arrays / antennas.">
+                               <span class="op-orbit-tag">span</span>${size.span_m.toFixed(1)}<span class="op-orbit-unit"> m</span>
+                           </div>`
+                        : '';
+                    const rcsRow = Number.isFinite(size.rcsM2) && size.rcsM2 > 0
+                        ? `<div title="Public RCS (operator datasheet) or face-area estimate when measurement isn't published.">
+                               <span class="op-orbit-tag">RCS</span>${size.rcsM2}<span class="op-orbit-unit"> m²</span>
+                           </div>`
+                        : '';
+                    coreRows = `
+                        <div title="True bounding-box dimensions (h × w × d) in metres — fully-deployed.">
+                            <span class="op-orbit-tag">size</span>${dimStr}<span class="op-orbit-unit"> m</span>
                         </div>
+                        <div title="Published mass — design or operating value.">
+                            <span class="op-orbit-tag">mass</span>${size.massKg.toLocaleString()}<span class="op-orbit-unit"> kg</span>
+                        </div>
+                        ${spanRow}
+                        ${rcsRow}
+                    `;
+                } else {
+                    // SATCAT / heuristic — bucket-median rows.
+                    const rcsRow = Number.isFinite(size.rcsRawM2)
+                        ? `<div title="Measured RCS from SATCAT (m²).">
+                               <span class="op-orbit-tag">RCS</span>${size.rcsRawM2}<span class="op-orbit-unit"> m²</span>
+                           </div>`
+                        : `<div title="Median radar cross-section for the size class (bucket).">
+                               <span class="op-orbit-tag">RCS</span>~${size.rcsM2}<span class="op-orbit-unit"> m²</span>
+                           </div>`;
+                    coreRows = `
                         <div title="Conventional debris size bin (Liou &amp; Johnson 2006).">
                             <span class="op-orbit-tag">class</span>${escapeHtml(size.class)}<span class="op-orbit-unit"> · ${escapeHtml(size.rangeM)}</span>
                         </div>
                         <div title="Median mass for the size class. Off by ±1× for individual objects.">
                             <span class="op-orbit-tag">mass</span>~${size.massKg}<span class="op-orbit-unit"> kg</span>
                         </div>
-                        <div title="Median radar cross-section for the size class.">
-                            <span class="op-orbit-tag">RCS</span>${size.rcsM2}<span class="op-orbit-unit"> m²</span>
+                        ${rcsRow}
+                    `;
+                }
+
+                const notesRow = src === 'hero' && size.notes
+                    ? `<div class="op-orbit-hero-note">${escapeHtml(size.notes)}</div>`
+                    : '';
+
+                physicalHtml = `
+                    <div class="op-orbit-rates op-orbit-physical">
+                        <div class="op-orbit-rate-title" title="${escapeHtml(sourceTitle)}">
+                            Physical (${escapeHtml(sourceLabel)})
+                            <span class="op-orbit-rate-conds">${condBadge}</span>
                         </div>
+                        ${coreRows}
                         <div title="Kinetic energy at typical 14 km/s LEO closing speed — proxy for catastrophic-impact tier.">
-                            <span class="op-orbit-tag">KE</span>${energyMJ >= 100 ? energyMJ.toFixed(0) : energyMJ.toFixed(1)}<span class="op-orbit-unit"> MJ</span>
+                            <span class="op-orbit-tag">KE</span>${energyMJ >= 100 ? Math.round(energyMJ).toLocaleString() : energyMJ.toFixed(1)}<span class="op-orbit-unit"> MJ</span>
                         </div>
+                        ${notesRow}
                     </div>
                 `;
             }
@@ -435,9 +503,9 @@ export function mountOrbitInspector(opts = {}) {
                 Mean elements (TLE / Brouwer-Lyddane). Drag rate +
                 lifetime use the same King-Hele-style surrogate as
                 Decay Watch, modulated by live SWPC F10.7 / Ap.
-                Physical roll-up is bucket-median (small / medium /
-                large), not measurement — replace with SATCAT
-                <code>RCS_SIZE</code> when wired.
+                Physical roll-up reads from CelesTrak SATCAT when
+                available; otherwise it falls back to a name-pattern
+                heuristic (labelled in the section header).
             </div>
         `;
     }
@@ -471,6 +539,14 @@ export function mountOrbitInspector(opts = {}) {
     }
     pollTimer = setTimeout(poll, 1000);
 
+    // Repaint when SATCAT finishes loading mid-session. Without this,
+    // the first selection rendered before the catalog arrived would
+    // show "(heuristic)" until the user clicked something else; the
+    // SATCAT path then upgrades transparently.
+    const offSatcat = onSatcatLoaded(() => {
+        if (selectedId != null) render();
+    });
+
     // Initial paint.
     selectedId = getSelectedId();
     render();
@@ -479,6 +555,7 @@ export function mountOrbitInspector(opts = {}) {
         dispose() {
             offSel?.();
             offProv?.();
+            offSatcat?.();
             if (pollTimer) clearTimeout(pollTimer);
         },
     };

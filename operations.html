@@ -1427,6 +1427,18 @@ body {
     padding: 0 5px;
     border-radius: 2px;
 }
+.op-orbit-hero-note {
+    grid-column: 1 / -1;
+    margin-top: 4px;
+    padding: 4px 6px;
+    font-size: .6rem;
+    line-height: 1.35;
+    color: #cef;
+    background: rgba(0,200,200,.04);
+    border-left: 2px solid rgba(0,200,200,.4);
+    border-radius: 0 2px 2px 0;
+    font-style: italic;
+}
 .op-orbit-reentry {
     font-family: monospace;
     font-size: .58rem;
@@ -2219,7 +2231,13 @@ import { showToast }          from './js/operations/toast.js';
 import * as bPlane            from './js/operations/b-plane.js';
 import * as densityMap        from './js/operations/density-map.js';
 import { mountAristotle }     from './js/operations/aristotle.js';
+import { HeroTrails }         from './js/operations/hero-trails.js';
 import { getGroupColorHex }   from './js/satellite-tracker.js';
+import { loadSatcat }         from './js/satcat-catalog.js';
+// Side-effect import: hero-objects self-registers with debris-catalog
+// so estimateSize() picks up true dimensions for Envisat, ISS, Hubble,
+// SL-16/SL-8 R/B families, etc. Must run before any size-class lookup.
+import './js/hero-objects.js';
 
 // Mount tooltip delegations up front so anything that binds later
 // (layer counts, future decision-deck values) is hover-ready without
@@ -2328,6 +2346,21 @@ timeBus.start();
 const globe = new OperationsGlobe(document.getElementById('op-globe'));
 const fleet = new OperationsFleet(globe);
 globe.start();
+
+// Kick off the CelesTrak SATCAT fetch in parallel with the TLE loads.
+// Best-effort: a failure silently falls back to the debris-catalog
+// name-pattern heuristic. The pill / inspector "size" surfaces will
+// upgrade transparently once the catalog lands (subscribers fire on
+// successful load). Fire-and-forget — no await.
+loadSatcat();
+
+// Velocity ribbons for the hero NORADs (Envisat, ISS, Hubble,
+// Tiangong). Each gets a short fading trail behind its current
+// position — makes the orbital motion of the big modelled objects
+// feel anchored. Self-gating: if a hero NORAD isn't currently in the
+// tracker (layer not loaded), its trail stays hidden.
+const heroTrails = new HeroTrails(globe, fleet.tracker);
+globe.onTick(() => heroTrails.tick());
 
 mountLayerPanel(fleet);
 
