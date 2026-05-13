@@ -23,6 +23,9 @@ import { SatelliteTracker }                from '../satellite-tracker.js';
 import { StarlinkFleet }                   from './starlink-model.js';
 import { createSL16Fleet, createSL8Fleet } from './rocket-body-model.js';
 import { EnvisatModel }                    from './envisat-model.js';
+import { createIssModel }                     from './iss-model.js';
+import { createHubbleModel, HUBBLE_NORAD_ID } from './hubble-model.js';
+import { createTiangongModel }                from './tiangong-model.js';
 
 // Per-event debris layer ids — mutually exclusive with the composite
 // 'debris' layer so the same NORAD ID isn't double-counted across the
@@ -118,6 +121,36 @@ export class OperationsFleet {
         // 2012 uncontrolled attitude.
         this.envisatModel = new EnvisatModel(globe, this.tracker);
         globe.onTick((simTimeMs) => this.envisatModel.tick(simTimeMs));
+
+        // ISS / Hubble / Tiangong — actively attitude-controlled hero
+        // meshes. Each renders only when its NORAD is in the
+        // tracker (self-gating on getPositionXYZ presence), so no
+        // dedicated layer toggle is needed: ISS + Tiangong come for
+        // free with the default-on `stations` layer, and Hubble is
+        // loaded on demand below.
+        this.issModel      = createIssModel(globe, this.tracker);
+        this.hubbleModel   = createHubbleModel(globe, this.tracker);
+        this.tiangongModel = createTiangongModel(globe, this.tracker);
+        // All three start visible — the mesh self-hides until the
+        // tracker has a position. No flash at origin because the
+        // matrix update only fires after a valid getPositionXYZ.
+        this.issModel.setVisible(true);
+        this.hubbleModel.setVisible(true);
+        this.tiangongModel.setVisible(true);
+        globe.onTick((simTimeMs) => {
+            this.issModel.tick(simTimeMs);
+            this.hubbleModel.tick(simTimeMs);
+            this.tiangongModel.tick(simTimeMs);
+        });
+
+        // Hubble isn't in any default-on group (`stations` covers ISS
+        // + Tiangong but not Hubble; CelesTrak's `science` group
+        // isn't a layer in this console). Pull it in once so the
+        // mesh has a position to track without forcing the user to
+        // know which layer holds Hubble's TLE.
+        const hubbleLoad = this.tracker.loadNorad?.(HUBBLE_NORAD_ID);
+        hubbleLoad?.catch?.(err =>
+            console.debug('[fleet] Hubble TLE load failed:', err?.message));
 
         // Track desired-on state separately from the catalog defaults so
         // `bootstrap()` actually fires loads. The previous version
