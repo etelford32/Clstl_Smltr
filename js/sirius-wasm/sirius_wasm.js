@@ -129,6 +129,105 @@ export function spectrum(lambda_nm_start, lambda_nm_end, n_bins) {
         wasm.__wbindgen_add_to_stack_pointer(16);
     }
 }
+
+/**
+ * Particle ages (yr), n f32 — for opacity / fading visualisation.
+ * @returns {Float32Array}
+ */
+export function wake_ages() {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        wasm.wake_ages(retptr);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var v1 = getArrayF32FromWasm0(r0, r1).slice();
+        wasm.__wbindgen_export(r0, r1 * 4, 4);
+        return v1;
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
+ * Cumulative captures since `wake_init` and active count.
+ * @returns {Float64Array}
+ */
+export function wake_diagnostics() {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        wasm.wake_diagnostics(retptr);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var v1 = getArrayF64FromWasm0(r0, r1).slice();
+        wasm.__wbindgen_export(r0, r1 * 8, 8);
+        return v1;
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
+ * Allocate `n` wake particles and seed them from Sirius A's surface
+ * at simulation epoch `time_yr`. Returns the actual count.
+ * @param {number} n
+ * @param {number} time_yr
+ * @returns {number}
+ */
+export function wake_init(n, time_yr) {
+    const ret = wasm.wake_init(n, time_yr);
+    return ret >>> 0;
+}
+
+/**
+ * Flat positions buffer: 3·n f32, AU, barycentric.
+ * @returns {Float32Array}
+ */
+export function wake_positions() {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        wasm.wake_positions(retptr);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var v1 = getArrayF32FromWasm0(r0, r1).slice();
+        wasm.__wbindgen_export(r0, r1 * 4, 4);
+        return v1;
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
+ * Per-particle speed (km/s), n f32 — for Three.js color attribute.
+ * @returns {Float32Array}
+ */
+export function wake_speeds() {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        wasm.wake_speeds(retptr);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var v1 = getArrayF32FromWasm0(r0, r1).slice();
+        wasm.__wbindgen_export(r0, r1 * 4, 4);
+        return v1;
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
+ * Advance the wake by `dt_yr` years at the orbital configuration of
+ * time `time_yr`. The integration is sub-stepped `n_substeps` times
+ * to keep the wake quasi-steady relative to the slowly-moving orbit.
+ * Returns the cumulative capture count.
+ * @param {number} dt_yr
+ * @param {number} time_yr
+ * @param {number} n_substeps
+ * @returns {number}
+ */
+export function wake_step(dt_yr, time_yr, n_substeps) {
+    const ret = wasm.wake_step(dt_yr, time_yr, n_substeps);
+    return ret >>> 0;
+}
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
@@ -137,6 +236,11 @@ function __wbg_get_imports() {
         __proto__: null,
         "./sirius_wasm_bg.js": import0,
     };
+}
+
+function getArrayF32FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getFloat32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
 }
 
 function getArrayF64FromWasm0(ptr, len) {
@@ -150,6 +254,14 @@ function getDataViewMemory0() {
         cachedDataViewMemory0 = new DataView(wasm.memory.buffer);
     }
     return cachedDataViewMemory0;
+}
+
+let cachedFloat32ArrayMemory0 = null;
+function getFloat32ArrayMemory0() {
+    if (cachedFloat32ArrayMemory0 === null || cachedFloat32ArrayMemory0.byteLength === 0) {
+        cachedFloat32ArrayMemory0 = new Float32Array(wasm.memory.buffer);
+    }
+    return cachedFloat32ArrayMemory0;
 }
 
 let cachedFloat64ArrayMemory0 = null;
@@ -166,6 +278,7 @@ function __wbg_finalize_init(instance, module) {
     wasm = instance.exports;
     wasmModule = module;
     cachedDataViewMemory0 = null;
+    cachedFloat32ArrayMemory0 = null;
     cachedFloat64ArrayMemory0 = null;
     return wasm;
 }
