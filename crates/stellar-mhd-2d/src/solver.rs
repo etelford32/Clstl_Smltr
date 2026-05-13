@@ -288,12 +288,18 @@ pub fn divb_norms(sim: &Sim) -> (f64, f64) {
 }
 
 /// Public top-level "advance one step" entry point.
-/// Manages the c_h estimate, the SSP-RK2 stages, and GLM damping. Returns dt.
+/// Manages the c_h estimate, the SSP-RK2 stages, GLM damping, and the
+/// resistive sub-cycle. Returns dt.
+///
+/// Operator splitting is Lie (first-order): ideal MHD step, then resistive
+/// step. The resistive timescale on flare-relevant grids is usually much
+/// longer than the Alfvén timescale, so the splitting error is small.
 pub fn advance(sim: &mut Sim, bcs: BoundaryConfig) -> f64 {
     let (dt, c_h) = compute_dt(sim);
     sim.c_h = c_h;
     rk2_step(sim, dt, bcs, c_h);
     damp_psi(sim, dt, c_h);
+    crate::resistive::apply_resistive(sim, dt, bcs);
     sim.t += dt;
     dt
 }
