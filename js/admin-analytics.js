@@ -1553,6 +1553,38 @@ export async function fetchAuthFlowMetrics(days = 30) {
     }
 }
 
+/**
+ * Recent auth-funnel drop-offs — sessions whose last funnel stage in the
+ * window is NOT a success terminal. Returns up to `limit` rows ordered
+ * newest-first, each carrying the funnel_id (copyable into the replay RPC),
+ * the last stage seen, the recorded reason / code / provider / method, and
+ * the route the session was on when it stalled.
+ *
+ * Powers the admin "Last 50 auth funnel drop-offs" card — the
+ * one-screen diagnosis surface for "the sign-in is broken" tickets.
+ */
+export async function fetchAuthFunnelDropoffs(days = 7, limit = 50) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client.rpc('telemetry_auth_funnel_dropoffs', {
+            p_days:  days,
+            p_limit: limit,
+        });
+        if (error) throw error;
+        return { ok: true, data: data || [] };
+    } catch (err) {
+        const msg = err.message || '';
+        const hint = /function .* does not exist/i.test(msg)
+            ? 'telemetry_auth_funnel_dropoffs RPC missing — apply supabase-auth-funnel-dropoffs-migration.sql'
+            : /forbidden|permission|42501/i.test(msg)
+            ? 'Superadmin only — sign in as a superadmin to view drop-offs'
+            : msg;
+        return { ok: false, error: hint };
+    }
+}
+
 /** New vs returning users in the window. */
 export async function fetchNewVsReturning(days = 30) {
     const client = await sb();

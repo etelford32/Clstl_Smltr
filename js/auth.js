@@ -135,6 +135,17 @@ class AuthManager {
                 console.info('[Auth] Supabase auth active');
             } catch (err) {
                 console.warn('[Auth] Supabase init failed, using mock auth:', err.message);
+                // Surface the silent fallback so prod CDN blocks / Supabase
+                // outages stop being invisible. Without this, the user signs
+                // in successfully to a fake local-only session and the
+                // dashboard's Supabase reads all fail — looks like "I signed
+                // in but the app is broken". Fire-and-forget; telemetry must
+                // never block auth init.
+                try {
+                    telemetry.recordAuthFailure(err?.message || 'supabase_init_failed', {
+                        source: 'auth_init_fallback_to_mock',
+                    });
+                } catch {}
                 this._loadMock();
                 this._initialized = true;
             }
