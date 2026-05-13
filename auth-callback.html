@@ -58,6 +58,29 @@ body {
     margin: 10px 0 16px;
     text-align: left;
 }
+.cb-err-code {
+    display: inline-block;
+    margin: 10px 0 4px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    background: rgba(255,107,107,.18);
+    border: 1px solid rgba(255,107,107,.45);
+    color: #ffb0b0;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+    font-size: .78rem;
+    font-weight: 700;
+    letter-spacing: .02em;
+    word-break: break-all;
+    text-align: left;
+    max-width: 100%;
+}
+.cb-err-hint {
+    margin: 6px 0 2px;
+    font-size: .72rem;
+    color: #889;
+    text-align: left;
+    line-height: 1.45;
+}
 .cb-actions {
     display: flex; gap: 10px;
     justify-content: center; flex-wrap: wrap;
@@ -112,7 +135,12 @@ body {
     </div>
     <div id="cb-error-row" style="display:none">
         <h1>Sign-in didn't complete</h1>
+        <div id="cb-error-code-row" style="display:none">
+            <div class="cb-err-hint">Error code (share this when reporting):</div>
+            <code class="cb-err-code" id="cb-error-code">—</code>
+        </div>
         <div class="cb-err" id="cb-error-msg">—</div>
+        <div class="cb-err-hint" id="cb-error-hint" style="display:none"></div>
         <p>Try again, or sign in with your email and password instead.</p>
         <div class="cb-actions">
             <a class="cb-btn" href="/signin.html">← Back to sign in</a>
@@ -142,22 +170,62 @@ const subEl    = document.getElementById('cb-sub');
 const spinRow  = document.getElementById('cb-spinner-row');
 const errRow   = document.getElementById('cb-error-row');
 const errMsg   = document.getElementById('cb-error-msg');
+const errCodeRow = document.getElementById('cb-error-code-row');
+const errCodeEl  = document.getElementById('cb-error-code');
+const errHintEl  = document.getElementById('cb-error-hint');
 
-function showError(msg, source = 'oauth_callback') {
+// Curated hints for the error codes a misconfigured OAuth setup most
+// often produces. Keeps the page self-diagnosing — operators reading a
+// user's screenshot can identify the root cause without checking logs.
+const ERROR_CODE_HINTS = {
+    provider_not_enabled:   'The provider is not enabled in Supabase → Authentication → Providers. Toggle it on and re-save the credentials.',
+    invalid_redirect:       'The redirect URL is not on the Supabase allow-list. Add both /auth-callback.html and /auth-callback.html?** under Authentication → URL Configuration.',
+    invalid_request:        'Supabase rejected the OAuth request shape. Usually a stale tab — close the tab and start fresh from /signin.html.',
+    server_error:           'The provider (or Supabase) returned an internal error. Try once more; if it persists, check the provider console for outages.',
+    access_denied:          'You declined the consent screen on the provider side. Re-click the button and accept to continue.',
+    otp_expired:            'This magic link has expired. Request a fresh link from /signin.html.',
+    otp_disabled:           'Magic-link sign-in is disabled in Supabase → Authentication → Providers → Email. Enable it or use the password form.',
+    bad_oauth_callback:     'Supabase did not receive a valid callback from the provider. The provider Return URL probably does not match Supabase’s callback URL.',
+    unexpected_failure:     'Generic provider failure. The error_description below usually carries the real reason.',
+};
+
+function showError(msg, source = 'oauth_callback', code = null) {
     if (spinRow) spinRow.style.display = 'none';
     if (errRow)  errRow.style.display = '';
     if (errMsg)  errMsg.textContent = msg || 'An unknown error occurred.';
+    // Surface the raw error code as a copyable chip. The code is the
+    // single most useful diagnostic — provider_not_enabled vs
+    // invalid_redirect vs access_denied each point at a different
+    // configuration step. Users can screenshot the chip and operators
+    // can resolve the issue without trawling logs.
+    if (code) {
+        if (errCodeEl)  errCodeEl.textContent = String(code).slice(0, 80);
+        if (errCodeRow) errCodeRow.style.display = '';
+        const hint = ERROR_CODE_HINTS[code];
+        if (hint && errHintEl) {
+            errHintEl.textContent = hint;
+            errHintEl.style.display = '';
+        } else if (errHintEl) {
+            errHintEl.style.display = 'none';
+        }
+    } else if (errCodeRow) {
+        errCodeRow.style.display = 'none';
+    }
     // Telemetry: log every OAuth-callback error so the superadmin
     // Telemetry tab surfaces a top-N of provider failure reasons.
     // Lazy import — telemetry.js is optional from this page's POV.
     import('./js/telemetry.js')
-        .then(({ telemetry }) => telemetry.recordAuthFailure(msg || 'unknown', { source }))
+        .then(({ telemetry }) => telemetry.recordAuthFailure(msg || 'unknown', {
+            source,
+            code: code || null,
+        }))
         .catch(() => { /* fire-and-forget */ });
     // Funnel: stitches into the same funnel_id as oauth_button_clicked
     // so the admin can compute click→callback success rate per provider.
     try {
         funnel.step('auth_callback_failed', {
             source,
+            code:       code || null,
             reason:     String(msg || 'unknown').slice(0, 200),
             elapsed_ms: Date.now() - _cbT0,
         });
@@ -191,7 +259,9 @@ if (errCode) {
               || errCode;
     // Pass the callback source through so telemetry can distinguish
     // expired magic links (otp_expired) from OAuth-provider failures.
-    showError(desc.replace(/\+/g, ' '), `${callbackSource}_callback`);
+    // Pass the raw code separately so the error chip + hint render
+    // independently of the human-readable description.
+    showError(desc.replace(/\+/g, ' '), `${callbackSource}_callback`, errCode);
 } else {
     boot();
 }
