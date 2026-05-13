@@ -55,6 +55,10 @@ const sim = {
     snowRing: null,
     bodyMeshes: [],
     bodyTrails: [],
+    bodyOrbits: [],          // live osculating-ellipse line per body
+    bodyLabels: [],          // text-sprite name tag per body
+    sunGlow: null,
+    flash: null,             // active giant-impact flash sprite, if any
     hzRing: { inner: null, outer: null, optimistic: null },
     star: null,
     starLight: null,
@@ -200,11 +204,16 @@ function rebuildDiscAndBodies() {
 
 // Full live reset: rebuild physics + swap out the visual meshes.
 function rebuildWorld() {
-    // Tear down old meshes/trails.
+    // Tear down old visual companions.
     for (const m of sim.bodyMeshes) sim.scene.remove(m);
     for (const t of sim.bodyTrails) sim.scene.remove(t.line);
+    for (const o of sim.bodyOrbits) sim.scene.remove(o.line);
+    for (const l of sim.bodyLabels) sim.scene.remove(l);
     sim.bodyMeshes.length = 0;
     sim.bodyTrails.length = 0;
+    sim.bodyOrbits.length = 0;
+    sim.bodyLabels.length = 0;
+    if (sim.flash) { sim.scene.remove(sim.flash.mesh); sim.flash = null; }
     sim.ageYr = sim.cfg.star.ageStartYr;
     sim.impactDone = false;
     sim.moonSpawned = false;
@@ -228,6 +237,8 @@ function rebuildWorld() {
     for (const b of sim.bodies) {
         const m = makeBodyMesh(b); sim.bodyMeshes.push(m); sim.scene.add(m);
         const t = makeTrail(b.color); sim.bodyTrails.push(t); sim.scene.add(t.line);
+        const o = makeOrbit(b.color); sim.bodyOrbits.push(o); sim.scene.add(o.line);
+        const l = makeLabelSprite(b.name); sim.bodyLabels.push(l); sim.scene.add(l);
     }
 }
 
@@ -258,12 +269,15 @@ function initThree() {
     // Starfield backdrop
     scene.add(makeStarfield());
 
-    // Star
+    // Star + additive corona halo
     const starGeo = new THREE.SphereGeometry(1.5, 32, 32);
     const starMat = new THREE.MeshBasicMaterial({ color: 0xffe080 });
     const star = new THREE.Mesh(starGeo, starMat);
     scene.add(star);
     sim.star = star;
+
+    sim.sunGlow = makeSunGlow();
+    scene.add(sim.sunGlow);
 
     const sunLight = new THREE.PointLight(0xfff0c0, 4, 0, 1.5);
     scene.add(sunLight);
@@ -281,13 +295,13 @@ function initThree() {
     // Habitable-zone rings
     refreshHzRings();
 
-    // Embryo meshes
-    for (const b of sim.bodies) sim.bodyMeshes.push(makeBodyMesh(b));
-    for (const m of sim.bodyMeshes) scene.add(m);
-
-    // Trails
-    for (const b of sim.bodies) sim.bodyTrails.push(makeTrail(b.color));
-    for (const t of sim.bodyTrails) scene.add(t.line);
+    // Per-body visuals: mesh + trail + osculating orbit + label.
+    for (const b of sim.bodies) {
+        const m = makeBodyMesh(b);  sim.bodyMeshes.push(m); scene.add(m);
+        const t = makeTrail(b.color);  sim.bodyTrails.push(t); scene.add(t.line);
+        const o = makeOrbit(b.color);  sim.bodyOrbits.push(o); scene.add(o.line);
+        const l = makeLabelSprite(b.name); sim.bodyLabels.push(l); scene.add(l);
+    }
 
     window.addEventListener('resize', sizeRenderer);
 }
@@ -440,7 +454,7 @@ function refreshHzRings() {
 function makeBodyMesh(b) {
     // Body radius (scene units): exaggerate so embryos are visible.
     const radius = Math.max(0.18, 0.35 * Math.cbrt(b.m / M_EARTH));
-    const geom = new THREE.SphereGeometry(radius, 18, 18);
+    const geom = new THREE.SphereGeometry(radius, 24, 24);
     const mat = new THREE.MeshStandardMaterial({
         color: b.color,
         emissive: new THREE.Color(b.color).multiplyScalar(0.25),
@@ -448,8 +462,182 @@ function makeBodyMesh(b) {
         metalness: 0.05,
     });
     const mesh = new THREE.Mesh(geom, mat);
-    mesh.userData = { body: b };
+    mesh.userData = { body: b, baseRadius: radius };
+
+    // Iconic Saturn rings — flat annulus tilted to Saturn's real axial obliquity.
+    if (b.name === 'proto-Saturn') {
+        const ringGeom = new THREE.RingGeometry(radius * 1.45, radius * 2.35, 80, 1);
+        const ringMat = new THREE.MeshBasicMaterial({
+            color: 0xead8a0,
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.65,
+            depthWrite: false,
+        });
+        const ring = new THREE.Mesh(ringGeom, ringMat);
+        ring.rotation.x = -Math.PI / 2 + 0.47;   // ~27° real obliquity
+        ring.rotation.z = 0.12;
+        mesh.add(ring);
+    }
     return mesh;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sun corona halo (additive sprite stack behind the photosphere).
+// ─────────────────────────────────────────────────────────────────────────────
+function makeSunGlow() {
+    const c = document.createElement('canvas');
+    c.width = c.height = 256;
+    const ctx = c.getContext('2d');
+    const g = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+    g.addColorStop(0.00, 'rgba(255,250,210,0.95)');
+    g.addColorStop(0.18, 'rgba(255,210,130,0.55)');
+    g.addColorStop(0.45, 'rgba(255,140,60,0.20)');
+    g.addColorStop(0.85, 'rgba(255,90,30,0.04)');
+    g.addColorStop(1.00, 'rgba(255,60,20,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 256, 256);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace || tex.colorSpace;
+    const mat = new THREE.SpriteMaterial({
+        map: tex,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+    });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(14, 14, 1);
+    return sprite;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Live osculating orbit. Recovers (a, e, ω) from the heliocentric state vector
+// each frame and renders the resulting Kepler ellipse as a LineLoop. Hides on
+// non-bound (e ≥ 1) or invalid solutions.
+// ─────────────────────────────────────────────────────────────────────────────
+const ORBIT_SEGMENTS = 128;
+function makeOrbit(color) {
+    const N = ORBIT_SEGMENTS;
+    const pos = new Float32Array((N + 1) * 3);
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const mat = new THREE.LineBasicMaterial({
+        color, transparent: true, opacity: 0.35, depthWrite: false,
+    });
+    const line = new THREE.LineLoop(geom, mat);
+    line.visible = false;
+    return { line, geom, pos, N };
+}
+
+function updateOrbit(orb, body, Mstar) {
+    const mu = G * Mstar;
+    const r = Math.hypot(body.x, body.y);
+    if (!isFinite(r) || r <= 0) { orb.line.visible = false; return; }
+    const v2 = body.vx * body.vx + body.vy * body.vy;
+    const h  = body.x * body.vy - body.y * body.vx;     // specific angular momentum, z
+    const energy = 0.5 * v2 - mu / r;
+    const a = -mu / (2 * energy);
+    if (!isFinite(a) || a <= 0) { orb.line.visible = false; return; }
+    // Eccentricity vector (2D, in-plane components).
+    const ex = (body.vy * h) / mu - body.x / r;
+    const ey = (-body.vx * h) / mu - body.y / r;
+    const e  = Math.hypot(ex, ey);
+    if (!isFinite(e) || e >= 0.95) { orb.line.visible = false; return; }
+    const omega = Math.atan2(ey, ex);                   // argument of periapsis
+    const p   = a * (1 - e * e);
+    const cw  = Math.cos(omega), sw = Math.sin(omega);
+    const N   = orb.N;
+    const s   = SCENE_PER_AU / AU;
+    for (let i = 0; i <= N; i++) {
+        const nu  = (i / N) * TWO_PI;
+        const rNu = p / (1 + e * Math.cos(nu));
+        const xp  = rNu * Math.cos(nu);
+        const yp  = rNu * Math.sin(nu);
+        const x   = xp * cw - yp * sw;
+        const y   = xp * sw + yp * cw;
+        orb.pos[3*i]   = x * s;
+        orb.pos[3*i+1] = 0.01;
+        orb.pos[3*i+2] = y * s;
+    }
+    orb.geom.attributes.position.needsUpdate = true;
+    orb.line.visible = true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// In-scene body labels. Each label is a CanvasTexture sprite pinned above the
+// body, scaled so it stays legible across zoom levels.
+// ─────────────────────────────────────────────────────────────────────────────
+function makeLabelSprite(text) {
+    const c = document.createElement('canvas');
+    c.width = 256; c.height = 64;
+    const ctx = c.getContext('2d');
+    ctx.clearRect(0, 0, 256, 64);
+    ctx.font = '700 22px "Segoe UI", system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    // Soft outline for legibility against the bright disc.
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+    ctx.strokeText(text, 128, 34);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(text, 128, 32);
+    const tex = new THREE.CanvasTexture(c);
+    tex.minFilter = THREE.LinearFilter;
+    const mat = new THREE.SpriteMaterial({
+        map: tex,
+        transparent: true,
+        depthTest: false,
+        depthWrite: false,
+    });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(6, 1.5, 1);
+    sprite.renderOrder = 10;
+    return sprite;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Giant-impact flash: brief additive burst at the merger site, drives itself
+// from real time (animated in the render loop, not the physics tick).
+// ─────────────────────────────────────────────────────────────────────────────
+function triggerImpactFlash(x_m, y_m) {
+    if (sim.flash) { sim.scene.remove(sim.flash.mesh); sim.flash = null; }
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const ctx = c.getContext('2d');
+    const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+    g.addColorStop(0.00, 'rgba(255,255,255,1)');
+    g.addColorStop(0.22, 'rgba(255,220,160,0.85)');
+    g.addColorStop(0.55, 'rgba(255,120,60,0.25)');
+    g.addColorStop(1.00, 'rgba(255,80,30,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 128, 128);
+    const tex = new THREE.CanvasTexture(c);
+    const mat = new THREE.SpriteMaterial({
+        map: tex,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+    });
+    const sprite = new THREE.Sprite(mat);
+    sprite.position.set(x_m / AU * SCENE_PER_AU, 0.4, y_m / AU * SCENE_PER_AU);
+    sprite.scale.set(2, 2, 1);
+    sim.scene.add(sprite);
+    sim.flash = { mesh: sprite, t0: performance.now(), durMs: 2200 };
+}
+
+function tickFlash() {
+    if (!sim.flash) return;
+    const u = (performance.now() - sim.flash.t0) / sim.flash.durMs;
+    if (u >= 1) {
+        sim.scene.remove(sim.flash.mesh);
+        sim.flash.mesh.material.map?.dispose();
+        sim.flash.mesh.material.dispose();
+        sim.flash = null;
+        return;
+    }
+    const s = 2 + 24 * u;
+    sim.flash.mesh.scale.set(s, s, 1);
+    sim.flash.mesh.material.opacity = Math.max(0, 1 - u);
 }
 
 function makeTrail(color) {
@@ -570,14 +758,33 @@ function tick(dtRealS) {
     sim.disc.Lstar = trk.L_W;
     refreshHzRings();
 
-    // Push trails + body positions.
+    // Push trails + body positions + osculating orbit + label tag.
     for (let i = 0; i < sim.bodies.length; i++) {
         const b = sim.bodies[i];
-        if (!b.alive) { sim.bodyMeshes[i].visible = false; continue; }
-        sim.bodyMeshes[i].position.set(b.x / AU * SCENE_PER_AU, 0, b.y / AU * SCENE_PER_AU);
+        const mesh  = sim.bodyMeshes[i];
+        const orbit = sim.bodyOrbits[i];
+        const label = sim.bodyLabels[i];
+        if (!b.alive) {
+            mesh.visible = false;
+            if (orbit) orbit.line.visible = false;
+            if (label) label.visible = false;
+            continue;
+        }
+        const xs = b.x / AU * SCENE_PER_AU;
+        const zs = b.y / AU * SCENE_PER_AU;
+        mesh.position.set(xs, 0, zs);
+        const baseR = mesh.userData.baseRadius || 0.35;
         const radius = Math.max(0.18, 0.35 * Math.cbrt(b.m / M_EARTH));
-        sim.bodyMeshes[i].scale.setScalar(radius / 0.35);
-        pushTrail(sim.bodyTrails[i], b.x / AU * SCENE_PER_AU, b.y / AU * SCENE_PER_AU);
+        mesh.scale.setScalar(radius / baseR);
+        // Slow visual self-rotation so the planets feel alive (purely cosmetic).
+        mesh.rotation.y += 0.01;
+        pushTrail(sim.bodyTrails[i], xs, zs);
+        if (orbit) updateOrbit(orbit, b, Mstar);
+        if (label) {
+            label.visible = true;
+            // Pin label above the body; lift scales with body radius.
+            label.position.set(xs, 0.8 + radius * 0.8, zs);
+        }
     }
 
     // Snow line update.
@@ -632,6 +839,7 @@ function mergeBodies(A, B) {
         sim.impactBody = big;
         // Boost angular momentum a bit (simulates fast-spin synestia outcome of Cuk & Stewart 2012).
         big.spin_h = 5;  // h/h_rot_break unit, fast spin
+        triggerImpactFlash(big.x, big.y);
     }
 }
 
@@ -672,10 +880,14 @@ function spawnMoon() {
         parent: earth,
     };
     sim.bodies.push(moon);
-    sim.bodyMeshes.push(makeBodyMesh(moon));
-    sim.scene.add(sim.bodyMeshes[sim.bodyMeshes.length - 1]);
-    sim.bodyTrails.push(makeTrail(moon.color));
-    sim.scene.add(sim.bodyTrails[sim.bodyTrails.length - 1].line);
+    const moonMesh = makeBodyMesh(moon);
+    sim.bodyMeshes.push(moonMesh); sim.scene.add(moonMesh);
+    const moonTrail = makeTrail(moon.color);
+    sim.bodyTrails.push(moonTrail); sim.scene.add(moonTrail.line);
+    const moonOrbit = makeOrbit(moon.color);
+    sim.bodyOrbits.push(moonOrbit); sim.scene.add(moonOrbit.line);
+    const moonLabel = makeLabelSprite(moon.name);
+    sim.bodyLabels.push(moonLabel); sim.scene.add(moonLabel);
     sim.moonSpawned = true;
 }
 
@@ -973,19 +1185,22 @@ function bindUI() {
     ui.resetBtn?.addEventListener('click', () => {
         for (const m of sim.bodyMeshes) sim.scene.remove(m);
         for (const t of sim.bodyTrails) sim.scene.remove(t.line);
+        for (const o of sim.bodyOrbits) sim.scene.remove(o.line);
+        for (const l of sim.bodyLabels) sim.scene.remove(l);
         sim.bodyMeshes.length = 0;
         sim.bodyTrails.length = 0;
+        sim.bodyOrbits.length = 0;
+        sim.bodyLabels.length = 0;
+        if (sim.flash) { sim.scene.remove(sim.flash.mesh); sim.flash = null; }
         initScenario(sim.scenario.id);
         sim.lastMdotacc = 0;
         sim.lastMdotAgeYr = sim.ageYr;
         sim.mdotEMA = NaN;
         for (const b of sim.bodies) {
-            const m = makeBodyMesh(b);
-            sim.bodyMeshes.push(m);
-            sim.scene.add(m);
-            const t = makeTrail(b.color);
-            sim.bodyTrails.push(t);
-            sim.scene.add(t.line);
+            const m = makeBodyMesh(b); sim.bodyMeshes.push(m); sim.scene.add(m);
+            const t = makeTrail(b.color); sim.bodyTrails.push(t); sim.scene.add(t.line);
+            const o = makeOrbit(b.color); sim.bodyOrbits.push(o); sim.scene.add(o.line);
+            const l = makeLabelSprite(b.name); sim.bodyLabels.push(l); sim.scene.add(l);
         }
     });
     ui.warpSlider?.addEventListener('input', () => {
@@ -1008,6 +1223,7 @@ function loop() {
     sim.lastTickMs = now;
     sim.controls?.update();
     tick(dt);
+    tickFlash();
     sim.renderer.render(sim.scene, sim.camera);
     sim.raf = requestAnimationFrame(loop);
 }
