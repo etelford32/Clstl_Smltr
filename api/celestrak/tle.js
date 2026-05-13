@@ -71,6 +71,10 @@ const GROUP_MAP = {
     // on the TLE object name. `SL-16 R/B` is tight enough to exclude
     // SL-16 fragments (which appear as `SL-16 DEB` when catalogued).
     'sl-16-rb':     'NAME=SL-16+R/B',
+    // SL-8 / Cosmos-3M second stages. ~290 in catalog. Same NAME-
+    // filter trick as SL-16: "R/B" suffix excludes the SL-8 DEB
+    // fragmentation debris (a non-trivial population on its own).
+    'sl-8-rb':      'NAME=SL-8+R/B',
     // Single-object hero asset: NORAD 27386, ESA's defunct Envisat.
     // NAME=ENVISAT returns the one TLE; the operations console renders
     // it with a dedicated 3D mesh in `js/operations/envisat-model.js`.
