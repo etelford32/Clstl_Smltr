@@ -402,7 +402,7 @@
         <!-- New surface added in the Phase-3 onboarding work. Reads the
              onboarding_funnel / tour_metrics / auth_flow_metrics /
              new_vs_returning RPCs (supabase-onboarding-events-migration
-             .sql) plus a direct event_log query for demo telemetry. -->
+             .sql) plus a direct analytics_events query for demo telemetry. -->
         <div class="card" style="margin-bottom:18px">
             <h3>
                 Onboarding
@@ -1681,7 +1681,7 @@ async function loadDemoMetrics() {
     el.innerHTML =
         _onboardingMetricRow('Demo entered',          d.entered) +
         _onboardingMetricRow('Signup-link clicks',    d.clicked, _pct(d.clickRate) + ' click-through') +
-        `<div style="font-size:.7rem;color:#667;margin-top:8px;line-height:1.4">Anonymous events live in <code>event_log</code> — RLS forbids unauth writes to <code>activation_events</code>. Click-through ≠ completed signup; cross-reference with the Signups KPI above.</div>`;
+        `<div style="font-size:.7rem;color:#667;margin-top:8px;line-height:1.4">Anonymous events live in <code>analytics_events</code> (via <code>analytics.event()</code>) — RLS forbids unauth writes to <code>activation_events</code>. Click-through ≠ completed signup; cross-reference with the Signups KPI above.</div>`;
 }
 async function loadAuthFlowMetrics() {
     const el = document.getElementById('auth-flow-container');
