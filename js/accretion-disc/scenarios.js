@@ -75,14 +75,17 @@ export const SCENARIO_ORDER = ['solar-system'];
 // Build the initial body list (heliocentric x, y, vx, vy in SI) from a
 // scenario descriptor. Bodies start on circular Keplerian orbits at their
 // seed a_AU values with random phases.
-// Inclination range (rad) for randomly tilted initial orbits. Solar System
-// real values: Mercury 7°, others 0.8° – 3.4°. We pick from a small range so
-// the visual disc has 3D depth without breaking the thin-disc approximation.
-const INCL_MAX_RAD = 0.06;   // ~3.4°
+// Inclination range (rad) for randomly tilted initial orbits. Modest spread
+// (~1.4°) so close-orbital pairs (Theia / proto-Earth) don't miss each other
+// in z and scatter the inner system. Co-orbital pairs are forced onto the
+// same plane below — Theia inherits proto-Earth's inclination + node so they
+// merge promptly via the Hill-radius criterion in handleCollisions().
+const INCL_MAX_RAD = 0.025;
 
 export function buildInitialBodies(scenario) {
     const bodies = [];
     const Mstar = scenario.star.Mstar;
+    let earthIncl = 0, earthNode = 0;
     for (const emb of scenario.embryos) {
         const a = emb.a_AU * AU;
         const phase = Math.random() * 2 * Math.PI;
@@ -95,8 +98,11 @@ export function buildInitialBodies(scenario) {
         const vyo =  v * Math.cos(phase);
 
         // Per-body inclination + longitude of ascending node, uniform random.
-        const incl = Math.random() * INCL_MAX_RAD;
-        const node = Math.random() * 2 * Math.PI;
+        let incl = Math.random() * INCL_MAX_RAD;
+        let node = Math.random() * 2 * Math.PI;
+        if (emb.flagEarth) { earthIncl = incl; earthNode = node; }
+        // Theia shares Earth's plane so the giant impact actually happens.
+        if (emb.flagTheia) { incl = earthIncl; node = earthNode; }
         const ci = Math.cos(incl), si = Math.sin(incl);
         const cn = Math.cos(node), sn = Math.sin(node);
 
