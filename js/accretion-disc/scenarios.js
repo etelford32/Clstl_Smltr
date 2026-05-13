@@ -29,7 +29,7 @@ export const SOLAR_SYSTEM = {
         Mdisc_Msun: 0.02,           // 2% solar mass — typical Class II disc
         rInAU: 0.1,
         rOutAU: 60,
-        n: 90,
+        n: 60,
         alpha: 1e-3,
     },
     embryos: [
