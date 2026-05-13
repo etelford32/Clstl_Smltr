@@ -1276,7 +1276,10 @@ export function initVehicleCanvas(canvas, opts = {}) {
         cam.lastX = e.clientX;
         cam.lastY = e.clientY;
         try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
-        canvas.focus();
+        // preventScroll: focusing the canvas otherwise triggers the
+        // browser's scroll-into-view, which on a wide page shifts the
+        // whole document sideways when you click the canvas.
+        canvas.focus({ preventScroll: true });
     }
     function onPointerMove(e) {
         if (!cam.dragging) return;
