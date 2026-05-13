@@ -320,6 +320,27 @@
             </div>
             <div id="heatmap-targets" style="margin-top:12px;font-size:.78rem;color:#aaa"></div>
         </div>
+
+        <!-- ── Forecast Accumulator (forecast_log + forecast_archive_pointer) ── -->
+        <div class="card" id="accumulator-card">
+            <h3>Forecast Accumulator
+                <span style="font-size:.72rem;color:#666;font-weight:400;margin-left:6px">
+                    predictions logged via /api/forecast/log → daily archive to R2
+                </span>
+                <span style="float:right;font-size:.72rem;color:#888;font-weight:400">
+                    <button class="btn btn-sm" id="btn-refresh-accumulator">Refresh</button>
+                </span>
+            </h3>
+            <div class="kpi-grid" id="accumulator-grid">
+                <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-acc-hot-total">--</div><div class="kpi-label">Hot rows (total)</div></div>
+                <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-acc-hot-24h">--</div><div class="kpi-label">Logged (24h)</div></div>
+                <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-acc-hot-today">--</div><div class="kpi-label">Logged today</div></div>
+                <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-acc-archived-days">--</div><div class="kpi-label">Archived days</div></div>
+                <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-acc-archived-total">--</div><div class="kpi-label">Archived rows</div></div>
+                <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-acc-archived-bytes">--</div><div class="kpi-label">R2 storage</div></div>
+            </div>
+            <div id="accumulator-detail" style="font-size:.78rem;color:#888;margin-top:10px">--</div>
+        </div>
     </div>
 
     <!-- ═══════════════════ USERS TAB ═══════════════════ -->
@@ -768,7 +789,7 @@
 import { auth } from './js/auth.js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY, isConfigured, getSupabase, testConnection } from './js/supabase-config.js';
 import { GA_MEASUREMENT_ID } from './js/analytics.js';
-import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchActivationFunnel, fetchActivationDaily, fetchActivationOverview, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap, fetchWizardFunnel, fetchTourMetrics, fetchDemoMetrics, fetchAuthFlowMetrics, fetchNewVsReturning, fetchVisitorFlow, fetchEntryDestinations } from './js/admin-analytics.js';
+import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchActivationFunnel, fetchActivationDaily, fetchActivationOverview, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap, fetchWizardFunnel, fetchTourMetrics, fetchDemoMetrics, fetchAuthFlowMetrics, fetchNewVsReturning, fetchVisitorFlow, fetchEntryDestinations, fetchAccumulatorStats } from './js/admin-analytics.js';
 import { createInviteCode, fetchInviteCodes, deactivateInvite, sendInviteEmail } from './js/admin-invites.js';
 
 // ── Tabs (wired first so they always work) ──────────────────────────────────
@@ -1221,6 +1242,73 @@ loadHeatmap();
 document.getElementById('btn-refresh-heatmap').addEventListener('click', loadHeatmap);
 document.getElementById('heatmap-page').addEventListener('change', loadHeatmap);
 document.getElementById('heatmap-window').addEventListener('change', loadHeatmap);
+
+// ── Forecast Accumulator tile ────────────────────────────────────────────
+// Reads the get_accumulator_stats RPC (supabase-accumulator-stats-migration.sql).
+// Degrades gracefully if the migration hasn't been applied yet — shows an
+// install hint instead of a generic error.
+function _fmtBytes(n) {
+    if (!n || !Number.isFinite(n)) return '--';
+    if (n < 1024)       return n + ' B';
+    if (n < 1024 ** 2)  return (n / 1024).toFixed(1) + ' KB';
+    if (n < 1024 ** 3)  return (n / 1024 ** 2).toFixed(1) + ' MB';
+    return (n / 1024 ** 3).toFixed(2) + ' GB';
+}
+function _setKpi(id, value) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = value == null ? '--' : value;
+    el.classList.remove('kpi-loading');
+}
+async function loadAccumulator() {
+    const detailEl = document.getElementById('accumulator-detail');
+    const res = await fetchAccumulatorStats();
+    if (!res.ok) {
+        // Migration not applied vs. real failure
+        const ids = ['kpi-acc-hot-total','kpi-acc-hot-24h','kpi-acc-hot-today',
+                     'kpi-acc-archived-days','kpi-acc-archived-total','kpi-acc-archived-bytes'];
+        ids.forEach(id => _setKpi(id, '0'));
+        if (detailEl) {
+            detailEl.innerHTML = res.missing
+                ? 'Migration not applied. Run <code style="color:#9ac">supabase-accumulator-stats-migration.sql</code> in the Supabase SQL editor.'
+                : `Could not load accumulator stats: ${_esc(res.error || 'unknown error')}`;
+            detailEl.style.color = res.missing ? '#999' : '#f88';
+        }
+        return;
+    }
+    const d = res.data || {};
+    if (d.authorized === false) {
+        // Caller isn't an admin — the page-level admin gate should have
+        // caught this, but be defensive.
+        if (detailEl) detailEl.textContent = 'Admin verification required.';
+        return;
+    }
+    _setKpi('kpi-acc-hot-total',     (d.hot_total ?? 0).toLocaleString());
+    _setKpi('kpi-acc-hot-24h',       (d.hot_24h ?? 0).toLocaleString());
+    _setKpi('kpi-acc-hot-today',     (d.hot_today ?? 0).toLocaleString());
+    _setKpi('kpi-acc-archived-days', (d.archived_days ?? 0).toLocaleString());
+    _setKpi('kpi-acc-archived-total',(d.archived_total ?? 0).toLocaleString());
+    _setKpi('kpi-acc-archived-bytes', _fmtBytes(d.archived_total_bytes));
+
+    if (detailEl) {
+        const lines = [];
+        if (d.hot_oldest) {
+            lines.push(`Oldest hot row: ${_timeAgo(d.hot_oldest)} (${new Date(d.hot_oldest).toISOString().slice(0,19).replace('T',' ')}Z)`);
+        } else {
+            lines.push('Hot table is empty — no predictions logged yet.');
+        }
+        if (d.archived_last_day) {
+            lines.push(`Last R2 archive: <code style="color:#9ac">${_esc(d.archived_last_day)}</code> · ${_fmtBytes(d.archived_last_bytes)}`);
+        } else {
+            lines.push('No R2 archives written yet (cron <code style="color:#9ac">archive-forecasts</code> runs at 02:00 UTC daily).');
+        }
+        detailEl.style.color = '#888';
+        detailEl.innerHTML = lines.join(' · ');
+    }
+}
+loadAccumulator();
+const _accBtn = document.getElementById('btn-refresh-accumulator');
+if (_accBtn) _accBtn.addEventListener('click', loadAccumulator);
 
 /** Escape HTML entities to prevent stored XSS from user-controlled data */
 function _esc(s) { return s == null ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }

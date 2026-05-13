@@ -344,6 +344,49 @@ nav {
 #coord-tip .ct-readout .ct-rd-icon { display:inline-block; width:14px; }
 #coord-tip .ct-readout .ct-rd-val  { color:#ffd9a8; font-weight:600; }
 
+/* Provenance chip: a "you are looking at a forecast (or replay)" hint
+   prepended to the readout list whenever the slider isn't parked at
+   live. Confidence colouring matches the slider's tc-offset chip so
+   the two surfaces speak the same language. */
+#coord-tip .ct-rd-prov {
+    border-bottom: 1px solid rgba(255,255,255,.06);
+    padding-bottom: 3px; margin-bottom: 3px;
+    font-size: 9px; letter-spacing: .03em;
+}
+#coord-tip .ct-rd-prov .ct-rd-val { font-weight: 600; }
+#coord-tip .ct-rd-prov[data-prov="replay"]        .ct-rd-val { color: #6ee; }
+#coord-tip .ct-rd-prov[data-prov="forecast-near"] .ct-rd-val { color: #ffb366; }
+#coord-tip .ct-rd-prov[data-prov="forecast-mid"]  .ct-rd-val { color: #ff9933; }
+#coord-tip .ct-rd-prov[data-prov="forecast-far"]  .ct-rd-val { color: #ff6b3d; }
+
+/* Composite-index advisory rows: emit by js/composite-indices.js's
+   advisoriesToHtmlRows. Severity-coded so the worst entries stand out
+   at a glance — the array is pre-sorted danger → info on the JS side. */
+#coord-tip .ct-rd-adv {
+    margin-top: 2px; padding: 2px 4px;
+    border-radius: 3px;
+    border-left: 2px solid transparent;
+    font-size: 10px;
+}
+#coord-tip .ct-rd-adv .ct-rd-adv-label {
+    color: #779; font-size: 9px; margin-left: 4px;
+}
+#coord-tip .ct-rd-adv[data-sev="info"] {
+    border-left-color: rgba(120,160,200,.5);
+}
+#coord-tip .ct-rd-adv[data-sev="caution"] {
+    border-left-color: #ffd24c; background: rgba(255,210,76,.05);
+}
+#coord-tip .ct-rd-adv[data-sev="caution"]  .ct-rd-val { color: #ffd24c; }
+#coord-tip .ct-rd-adv[data-sev="warning"] {
+    border-left-color: #ff9933; background: rgba(255,153,51,.06);
+}
+#coord-tip .ct-rd-adv[data-sev="warning"]  .ct-rd-val { color: #ff9933; }
+#coord-tip .ct-rd-adv[data-sev="danger"] {
+    border-left-color: #ff5050; background: rgba(255,80,80,.08);
+}
+#coord-tip .ct-rd-adv[data-sev="danger"]   .ct-rd-val { color: #ff5050; font-weight: 700; }
+
 /* ─── Layer panel ────────────────────────────────────────────── */
 #layer-panel {
     position:absolute; top:10px; right:10px; z-index:50;
@@ -611,6 +654,239 @@ nav {
 }
 .lyr-featured-row .lyr-status {
     margin-left:auto; align-self:center;
+}
+
+/* ─── Forecast Models panel (models-panel.js) ────────────────────
+   Lightweight collapsible list of the active statistical forecasters
+   in forecaster_registry. Lives inside its own .lyr-section in the
+   Layers panel; the section header inherits the existing collapse
+   chevron behaviour. */
+.models-list { display:flex; flex-direction:column; gap: var(--sp-2); }
+.models-row {
+    border:1px solid var(--c-border-faint); border-radius: var(--r-sm);
+    background: rgba(255,255,255,.015);
+    overflow: hidden;
+}
+.models-row[open] { background: rgba(var(--c-accent-rgb),.05); }
+.models-row-head {
+    display:flex; align-items:center; gap: var(--sp-2);
+    padding: 5px var(--sp-3); cursor:pointer;
+    list-style:none;       /* hide default disclosure triangle */
+    font-size:10.5px;
+}
+.models-row-head::-webkit-details-marker { display:none; }
+.models-row-icon { font-size:13px; opacity:.8; width:14px; text-align:center; }
+.models-row-name { color:#cfe9f5; font-weight:600; flex:1; }
+.models-row-id   {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size:9px; color:#667; letter-spacing:.05em;
+}
+.models-row-body {
+    padding: 0 var(--sp-3) var(--sp-3) calc(var(--sp-3) + 18px);
+    font-size:9.5px; line-height:1.5;
+}
+.models-row-blurb { color:#9ab3c3; margin: var(--sp-1) 0 var(--sp-2); }
+.models-row-tech  { color:#557; font-size:9px; }
+.models-row-family {
+    color:#779;
+    text-transform:uppercase; letter-spacing:.08em; font-weight:600;
+}
+.models-row-notes { color:#557; }
+.models-empty {
+    font-size:10px; color:#779; text-align:center; padding: var(--sp-3) 0;
+    font-style:italic;
+}
+.models-empty-detail { font-size:9px; color:#557; margin-top: var(--sp-1); }
+.models-footer {
+    font-size:9px; color:#557; padding: var(--sp-2) 0 0;
+    text-align:center;
+}
+.models-footer a { color:#7ad; text-decoration:none; }
+.models-footer a:hover { text-decoration:underline; }
+
+/* ─── Probability Picker (probability-picker.js) ──────────────────
+   Free-to-use exceedance-probability panel. Anonymous users get a
+   5-minute soft trial; signed-in users have unlimited queries. The
+   timer chip + soft-freeze banner are the entire conversion surface
+   — keep the rest of the picker calm so the chip stands out. */
+.pp-root { display:flex; flex-direction:column; gap: var(--sp-2); }
+.pp-title {
+    display:flex; align-items:center; justify-content:space-between;
+    gap: var(--sp-2); padding: var(--sp-1) 0;
+    border-bottom: 1px solid var(--c-border-faint);
+}
+.pp-title-h { font-size:10.5px; color:#cfe9f5; font-weight:600;
+              letter-spacing:.04em; }
+.pp-timer-chip {
+    font-size:8.5px; padding: 2px 6px; border-radius: 10px;
+    background: rgba(var(--c-accent-rgb), .08);
+    color: #9ab3c3; letter-spacing:.02em;
+    border: 1px solid rgba(var(--c-accent-rgb), .15);
+}
+.pp-timer-chip.pp-signed   {
+    background: rgba(60,200,120,.10); color: #6ec487;
+    border-color: rgba(60,200,120,.25);
+}
+.pp-timer-chip.pp-expired  {
+    background: rgba(255,120,80,.10); color: #ff8c5a;
+    border-color: rgba(255,120,80,.30);
+}
+.pp-row { display:flex; flex-wrap:wrap; align-items:center;
+          gap: 6px; font-size:10px; color:#9ab3c3; }
+.pp-row-line { color:#7a91a4; font-style:italic; }
+.pp-glue     { color:#557; font-size: 9.5px; }
+.pp-input {
+    background: rgba(0,0,0,.25); color: #cfe9f5;
+    border: 1px solid var(--c-border-faint);
+    border-radius: var(--r-sm);
+    padding: 2px 5px; font-size: 10.5px;
+    font-family: inherit; outline: none;
+}
+.pp-input:focus { border-color: rgba(var(--c-accent-rgb), .55); }
+.pp-input-field     { min-width: 110px; }
+.pp-input-op        { min-width: 40px;  font-weight: 700; }
+.pp-input-threshold { width: 64px;  text-align: right; }
+.pp-unit {
+    font-size: 9px; color: #7a91a4; padding: 1px 5px;
+    background: rgba(255,255,255,.04); border-radius: 3px;
+    text-transform: uppercase; letter-spacing: .05em;
+}
+.pp-chip {
+    background: rgba(0,0,0,.18); color: #9ab3c3;
+    border: 1px solid var(--c-border-faint);
+    border-radius: 10px; padding: 2px 7px;
+    font-size: 9.5px; cursor: pointer;
+    transition: background .15s ease, color .15s ease;
+}
+.pp-chip:hover  { background: rgba(var(--c-accent-rgb), .10); color: #cfe9f5; }
+.pp-chip.active {
+    background: rgba(var(--c-accent-rgb), .20); color: #cfe9f5;
+    border-color: rgba(var(--c-accent-rgb), .45);
+}
+.pp-row-run { justify-content: space-between; margin-top: var(--sp-1); }
+.pp-run-btn {
+    background: var(--c-accent); color: #002;
+    border: none; border-radius: var(--r-sm);
+    padding: 5px 14px; font-size: 11px; font-weight: 700;
+    cursor: pointer; letter-spacing: .03em;
+}
+.pp-run-btn:disabled {
+    background: rgba(255,255,255,.08); color: #557;
+    cursor: not-allowed;
+}
+.pp-loc { font-size: 9px; color: #7a91a4; font-style: italic; }
+.pp-banner {
+    font-size: 10px; padding: 6px 8px; border-radius: var(--r-sm);
+    background: rgba(255,120,80,.10);
+    border: 1px solid rgba(255,120,80,.30);
+    color: #ffb499;
+}
+.pp-banner-link { color: #ffd9a8; text-decoration: underline; cursor: pointer; }
+.pp-result { display:flex; flex-direction:column; gap: var(--sp-2);
+             padding: var(--sp-2) 0; }
+.pp-result-empty   { color: #557; font-size: 9.5px; font-style: italic; padding-top: 4px; }
+.pp-result-error   { color: #ff8c5a; font-size: 10px; }
+.pp-err-head       { font-weight: 600; }
+.pp-err-detail     { color: #b87a6a; font-size: 9px; margin-top: 2px; }
+.pp-result-head    {
+    display:flex; align-items:baseline; gap: 8px; flex-wrap: wrap;
+}
+.pp-pct {
+    font-size: 26px; font-weight: 700; color: #cfe9f5;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+}
+.pp-pct-na { font-size: 22px; color: #557; }
+.pp-result-summary { font-size: 10px; color: #9ab3c3; flex:1; min-width:0; }
+.pp-conf {
+    font-size: 8.5px; padding: 2px 6px; border-radius: 10px;
+    letter-spacing: .04em; text-transform: uppercase; font-weight: 600;
+}
+.pp-conf-high     { background: rgba(60,200,120,.12); color: #6ec487; }
+.pp-conf-moderate { background: rgba(255,170,60,.12); color: #ffb366; }
+.pp-conf-low      { background: rgba(255,120,80,.12); color: #ff8c5a; }
+.pp-conf-unknown  { background: rgba(255,255,255,.05); color: #777;   }
+.pp-spark {
+    width: 100%; height: 36px; display: block;
+    background: rgba(0,0,0,.20); border-radius: 3px;
+}
+.pp-spark-line {
+    fill: none; stroke: rgba(var(--c-accent-rgb), .85);
+    stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round;
+}
+.pp-spark-area { fill: rgba(var(--c-accent-rgb), .18); }
+.pp-why summary {
+    font-size: 9.5px; color: #779;
+    cursor: pointer; list-style: none; padding: 4px 0;
+    border-top: 1px dashed rgba(255,255,255,.06);
+}
+.pp-why summary::-webkit-details-marker { display: none; }
+.pp-why[open] summary { color: #9ab3c3; }
+.pp-members { display: flex; flex-direction: column; gap: 4px;
+              padding: 4px 0; }
+.pp-member {
+    display: grid; grid-template-columns: 50px 32px 1fr;
+    gap: 6px; align-items: baseline;
+    font-size: 9.5px;
+}
+.pp-member-id      { color: #cfe9f5; font-weight: 600; font-family: ui-monospace, monospace; }
+.pp-member-verdict { color: #779;    text-align: center; text-transform: uppercase;
+                     letter-spacing: .04em; font-weight: 700; font-size: 8.5px; }
+.pp-member-detail  { color: #779;    font-size: 9px; }
+
+/* ─── Renewables panel (renewables-panel.js) ─────────────────────
+   Paired solar + wind cards for the pinned location. Mirrors the
+   probability picker's typography so both panels feel like part of
+   the same operator surface. */
+.rp-root { display:flex; flex-direction:column; gap: var(--sp-2); }
+.rp-head {
+    display:flex; align-items:center; gap: var(--sp-2);
+    padding-bottom: var(--sp-1);
+    border-bottom: 1px solid var(--c-border-faint);
+}
+.rp-head-title { font-size:10.5px; color:#cfe9f5; font-weight:600;
+                 letter-spacing:.04em; }
+.rp-head-hint  { font-size:9px;   color:#7a91a4; font-style:italic; flex:1; }
+.rp-refresh {
+    background: rgba(var(--c-accent-rgb), .18); color:#cfe9f5;
+    border: 1px solid rgba(var(--c-accent-rgb), .35);
+    border-radius: var(--r-sm); padding: 2px 8px;
+    font-size: 9.5px; cursor: pointer;
+}
+.rp-refresh:disabled { opacity:.6; cursor:not-allowed; }
+.rp-empty  { font-size: 9.5px; color: #557; font-style: italic; padding: 4px 0; }
+.rp-error  { font-size: 10px;  color: #ff8c5a; padding: 4px 0; }
+.rp-gauges { display:flex; flex-direction:column; gap: var(--sp-2); }
+.rp-card {
+    border: 1px solid var(--c-border-faint); border-radius: var(--r-sm);
+    background: rgba(255,255,255,.02);
+    padding: var(--sp-2);
+}
+.rp-card-solar { border-color: rgba(255, 210, 76, 0.25); }
+.rp-card-wind  { border-color: rgba(127, 210, 255, 0.25); }
+.rp-card-head {
+    display:flex; align-items:baseline; gap: 6px;
+    margin-bottom: 4px;
+}
+.rp-card-icon { font-size: 13px; opacity:.9; }
+.rp-card-name { font-size: 10.5px; color: #cfe9f5; font-weight: 600; flex:1; }
+.rp-card-cf   {
+    font-size: 14px; font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: #cfe9f5; letter-spacing: -.02em;
+}
+.rp-card-solar .rp-card-cf { color: #ffd24c; }
+.rp-card-wind  .rp-card-cf { color: #7fd2ff; }
+.rp-spark { width: 100%; height: 40px; display: block;
+            background: rgba(0,0,0,.20); border-radius: 3px; }
+.rp-card-foot {
+    display:flex; justify-content:space-between;
+    font-size: 9px; color: #779; margin-top: 4px;
+}
+.rp-basis {
+    font-size: 8.5px; color: #557; font-style: italic;
+    padding-top: var(--sp-1);
+    border-top: 1px dashed rgba(255,255,255,.05);
 }
 
 /* ─── Info panel ─────────────────────────────────────────────── */
@@ -1415,7 +1691,20 @@ nav {
     min-width: 172px; font-family: monospace;
 }
 .tc-time   { color: #0ee; font-size: 11px; line-height: 1;   letter-spacing: .02em; }
-.tc-offset { color: #667; font-size: 9px;  line-height: 1.2; margin-top: 2px; }
+.tc-offset {
+    color: #667; font-size: 9px;  line-height: 1.2; margin-top: 2px;
+    font-weight: 600; letter-spacing: .05em;
+    transition: color .15s ease;
+}
+/* Time-mode chip styling. Driven by data-tc-mode (set by the animate
+   loop). Live = neutral; replay = cyan; forecast splits by lead-time
+   into three confidence tiers (near/mid/far) borrowed from
+   well-documented NWP skill regimes. */
+.tc-offset[data-tc-mode="live"]          { color: #667; }
+.tc-offset[data-tc-mode="replay"]        { color: #0cc; }
+.tc-offset[data-tc-mode="forecast-near"] { color: #ffb366; }
+.tc-offset[data-tc-mode="forecast-mid"]  { color: #ff9933; }
+.tc-offset[data-tc-mode="forecast-far"]  { color: #ff6b3d; }
 
 /* 24-h replay slider. Range covers -1440..0 minutes (= -24 h..now); each
    step is one minute so keyboard arrows are usable. The native input
@@ -1429,31 +1718,39 @@ nav {
     min-width: 26px; user-select: none;
 }
 .tc-scrub-edge.right { text-align: right; color: #0ee; }
-/* Slider domain is [-10080, +4320] minutes (= -7d .. +3d). The "now"
-   mark sits at (10080 / 14400) = 70% across the track. CSS gradient
-   below paints the past side (left of 70%) cyan and the future side
-   (right of 70%) amber-dashed-ish so users can read at a glance which
-   half of the timeline they're scrubbing. */
+/* Slider domain is [-10080, +20160] minutes (= -7d .. +14d). "Now"
+   sits at 10080 / 30240 = 33.33 % across the track. We paint:
+     1. A flat cyan→amber half-and-half gradient (past vs future).
+     2. A 24-h-spaced tick stripe overlaid on top so the user can
+        count days at a glance.
+     3. A taller white "now" tick at 33.33 %.
+   All three are layered into the same `background` shorthand so the
+   slider's native input rendering still drives the thumb position.
+   --tc-now-pct is the single source of truth for the now-position;
+   if the slider range ever changes again, only this var moves. */
 #tc-scrub {
+    --tc-now-pct: 33.333%;
     flex: 1; min-width: 240px;
     -webkit-appearance: none; appearance: none;
     height: 4px;
-    background: linear-gradient(to right,
-        rgba(0,200,200,.10) 0%,
-        rgba(0,200,200,.26) 70%,
-        rgba(255,170,60,.10) 70.01%,
-        rgba(255,170,60,.30) 100%);
-    /* Vertical "now" tick painted on top of the track. */
-    background-image:
+    background:
+        /* 1. "now" tick (taller, white) */
+        linear-gradient(rgba(255,255,255,.7), rgba(255,255,255,.7))
+            no-repeat var(--tc-now-pct) center / 1.5px 12px,
+        /* 2. 24-h tick stripe across the whole track. The track is
+              30,240 min wide; each day is 1,440 min = 1/21 of the
+              track. We use 4.7619 % (=100/21) as the repeating gap
+              so 21 faint ticks line up to exact day boundaries. */
+        repeating-linear-gradient(to right,
+            transparent 0, transparent calc(4.7619% - 1px),
+            rgba(255,255,255,.10) calc(4.7619% - 1px),
+            rgba(255,255,255,.10) 4.7619%) no-repeat 0 center / 100% 6px,
+        /* 3. Past vs future tint */
         linear-gradient(to right,
             rgba(0,200,200,.10) 0%,
-            rgba(0,200,200,.26) 70%,
-            rgba(255,170,60,.10) 70.01%,
-            rgba(255,170,60,.30) 100%),
-        linear-gradient(rgba(255,255,255,.55), rgba(255,255,255,.55));
-    background-size: 100% 100%, 1px 10px;
-    background-position: 0 0, 70% center;
-    background-repeat: no-repeat, no-repeat;
+            rgba(0,200,200,.26) var(--tc-now-pct),
+            rgba(255,170,60,.10) calc(var(--tc-now-pct) + 0.01%),
+            rgba(255,170,60,.30) 100%);
     border-radius: 2px; outline: none; margin: 0;
     cursor: pointer;
 }
@@ -2201,6 +2498,40 @@ nav {
             </div>
         </div>
 
+        <!-- ── Forecast Models ──
+             Collapsed by default; opens to a list of the active statistical
+             forecasters that power the time-slider's forecast frames. Pulled
+             from forecaster_registry via /api/forecast/models. -->
+        <div class="lyr-section collapsed" data-lyr-section="forecast-models">
+            <div class="lyr-section-hdr"><span>FORECAST MODELS</span><span class="lyr-chevron">▾</span></div>
+            <div class="lyr-section-body">
+                <div id="models-panel-host"></div>
+            </div>
+        </div>
+
+        <!-- ── Probability Picker ──
+             Structured-input exceedance-probability tool. Free to use;
+             anonymous users get a 5-minute soft trial via
+             AnonymousSessionTimer. Lazy-mounted on first expand so the
+             timer doesn't start ticking against visitors who never open it. -->
+        <div class="lyr-section collapsed" data-lyr-section="probability-picker">
+            <div class="lyr-section-hdr"><span>PROBABILITY PICKER</span><span class="lyr-chevron">▾</span></div>
+            <div class="lyr-section-body">
+                <div id="probability-picker-host"></div>
+            </div>
+        </div>
+
+        <!-- ── Renewables ──
+             Solar + wind potential at the pinned location. Derived
+             entirely from Open-Meteo radiation + wind via
+             /api/weather/renewables; no new external data source. -->
+        <div class="lyr-section collapsed" data-lyr-section="renewables">
+            <div class="lyr-section-hdr"><span>RENEWABLES</span><span class="lyr-chevron">▾</span></div>
+            <div class="lyr-section-body">
+                <div id="renewables-panel-host"></div>
+            </div>
+        </div>
+
         <!-- ── Magnetosphere ── -->
         <div class="lyr-section collapsed" data-lyr-section="magneto">
             <div class="lyr-section-hdr"><span>MAGNETOSPHERE</span><span class="lyr-chevron">▾</span></div>
@@ -2906,6 +3237,10 @@ import { WeatherFrameResolver }  from './js/weather-frame-resolver.js';
 import { WeatherForecastFeed }   from './js/weather-forecast-feed.js';
 import { ForecastRegistry, PersistenceForecaster, CHANNEL_NAMES, FORECAST_HORIZONS_H } from './js/weather-forecast.js';
 import { WeatherForecastValidator } from './js/weather-forecast-validation.js';
+import { mountModelsPanel } from './js/models-panel.js';
+import { ProbabilityPicker } from './js/probability-picker.js';
+import { mountRenewablesPanel } from './js/renewables-panel.js';
+import { computeAdvisories, advisoriesToHtmlRows } from './js/composite-indices.js';
 import { PrecipClimatology }        from './js/precip-climatology.js';
 import { PrecipBiasTracker }        from './js/precip-bias-tracker.js';
 import { NasaPrecipExtractor }      from './js/nasa-precip-extractor.js';
@@ -3595,6 +3930,31 @@ function _renderHoverReadouts(lat, lon) {
     if (!box) return;
     const rows = [];
 
+    // Provenance + lead-time chip. Tells the user whether the values
+    // they're about to read came from an observation, a recorded
+    // replay frame, or a forecast — and for forecasts, gives an
+    // honest first-order confidence tier based on lead time. Values
+    // are sampled from the resolver's lerp output (same source as the
+    // globe paint) so the badge is consistent with what they see.
+    const _mode = _simTimeMode(simTimeMs);
+    if (_mode !== 'live') {
+        const dt    = simTimeMs - Date.now();
+        const absH  = Math.abs(dt) / 3600_000;
+        const sign  = dt >= 0 ? '+' : '−';
+        const span  = absH < 1
+            ? `${sign}${Math.round(Math.abs(dt) / 60_000)}m`
+            : absH < 24
+                ? `${sign}${absH.toFixed(1)}h`
+                : `${sign}${(absH / 24).toFixed(1)}d`;
+        const label = _mode === 'replay'        ? `observed ${span}`
+                    : _mode === 'forecast-near' ? `forecast ${span} · high confidence`
+                    : _mode === 'forecast-mid'  ? `forecast ${span} · moderate confidence`
+                    :                              `forecast ${span} · lower confidence`;
+        rows.push(`<div class="ct-readout ct-rd-prov" data-prov="${_mode}">` +
+            `<span class="ct-rd-icon">${_mode === 'replay' ? '⏪' : '🔮'}</span>` +
+            `<span class="ct-rd-val">${label}</span></div>`);
+    }
+
     // Wind — uses the existing windParticles.lookupWind() so the readout
     // exactly matches the streaks (decoded from the same windBuffer with
     // the same bilinear weights).
@@ -3663,6 +4023,24 @@ function _renderHoverReadouts(lat, lon) {
         rows.push(`<div class="ct-readout"><span class="ct-rd-icon">🌫</span>` +
             `<span class="ct-rd-val">${fog}</span> ` +
             `(RH ${wx.rhPct.toFixed(0)}% · low-cloud ${cl.clLow.toFixed(0)}%)</div>`);
+    }
+
+    // ── Composite-index advisories ──
+    // Always run regardless of which readouts are toggled — these are
+    // safety/operational alerts, not optional display fields. Reuses
+    // already-sampled wx / wind buffers when available so the cost on
+    // mousemove is just the index arithmetic (microseconds).
+    {
+        const _wx = wx || _sampleWeatherAt(lat, lon);
+        const _w  = windParticles?.lookupWind?.(lat, lon) || null;
+        if (_wx) {
+            const advs = computeAdvisories({
+                tempC:  _wx.tempC,
+                rhPct:  _wx.rhPct,
+                windMs: _w?.speedMs,
+            });
+            if (advs.length) rows.push(...advisoriesToHtmlRows(advs));
+        }
     }
 
     if (rows.length) {
@@ -8493,6 +8871,36 @@ function _fmtSimOffset(d) {
     if (abs < 86400) return `${sign}${(abs / 3600).toFixed(1)}h`;
     return `${sign}${(abs / 86400).toFixed(1)}d`;
 }
+/**
+ * Classify a simulated time relative to wall-clock into one of:
+ *   'live'           — within 60 s of now
+ *   'replay'         — in the past
+ *   'forecast-near'  — 0..24 h ahead   (high confidence)
+ *   'forecast-mid'   — 24..72 h ahead  (moderate)
+ *   'forecast-far'   — >72 h ahead     (lower confidence)
+ *
+ * Confidence bands match the well-documented decay of NWP skill with
+ * lead time — they're not derived from ensemble spread (the gridded
+ * feed is single-valued per cell), but they're an honest first-order
+ * proxy. Used by the scrub-bar chip and the hover-readout provenance
+ * badge so the user always knows whether they're looking at an
+ * observation or a forecast.
+ */
+function _simTimeMode(simMs) {
+    const dt = simMs - Date.now();
+    if (Math.abs(dt) < 60_000)      return 'live';
+    if (dt < 0)                     return 'replay';
+    if (dt < 24 * 3600_000)         return 'forecast-near';
+    if (dt < 72 * 3600_000)         return 'forecast-mid';
+    return 'forecast-far';
+}
+const _SIM_MODE_LABEL = {
+    'live':          'LIVE',
+    'replay':        'REPLAY',
+    'forecast-near': 'FORECAST',
+    'forecast-mid':  'FORECAST',
+    'forecast-far':  'FORECAST',
+};
 // Bus-mode policy — keep in one place so all four entry points (play
 // button, speed buttons, Now button, slider drag) map consistently:
 //   speed=1  + playing → 'live'    (real-time advance)
@@ -8782,7 +9190,16 @@ function animate() {
         const tEl = document.getElementById('tc-time-utc');
         const oEl = document.getElementById('tc-time-offset');
         if (tEl) tEl.textContent = _fmtSimUTC(simDate);
-        if (oEl) oEl.textContent = _fmtSimOffset(simDate);
+        if (oEl) {
+            const mode = _simTimeMode(simDate.getTime());
+            const offset = _fmtSimOffset(simDate);
+            // Live state: keep the bare "now" so the chip doesn't
+            // shout when the slider's parked at real-time.
+            oEl.textContent = mode === 'live'
+                ? offset
+                : `${_SIM_MODE_LABEL[mode]} ${offset}`;
+            oEl.dataset.tcMode = mode;
+        }
     }
 
     controls.update();
@@ -9657,6 +10074,105 @@ document.querySelectorAll('.lyr-section[data-lyr-section]').forEach(sec => {
         else if (stored === '0') sec.classList.remove('collapsed');
     } catch {}
 });
+
+// ── Forecast Models panel: lazy-mount on first expand ──
+// The panel makes a network call to /api/forecast/models; deferring
+// the mount until the user actually opens the section keeps the page-
+// load critical path clean for visitors who don't care.
+(function mountForecastModelsPanel() {
+    const host    = document.getElementById('models-panel-host');
+    const section = document.querySelector('[data-lyr-section="forecast-models"]');
+    if (!host || !section) return;
+
+    let mounted = false;
+    function mountOnce() {
+        if (mounted) return;
+        mounted = true;
+        mountModelsPanel(host).catch(() => { mounted = false; });
+    }
+    // If the section was restored as expanded (user previously opened
+    // it), mount immediately. Otherwise wait for the first click.
+    if (!section.classList.contains('collapsed')) mountOnce();
+
+    const hdr = section.querySelector('.lyr-section-hdr');
+    if (hdr) {
+        hdr.addEventListener('click', () => {
+            if (!section.classList.contains('collapsed')) mountOnce();
+        });
+    }
+})();
+
+// ── Renewables panel: lazy-mount on first expand ──
+// Same lazy-mount idiom as the other panels. The card auto-fetches
+// on first open; subsequent fetches are user-triggered via Refresh.
+(function mountRenewables() {
+    const host    = document.getElementById('renewables-panel-host');
+    const section = document.querySelector('[data-lyr-section="renewables"]');
+    if (!host || !section) return;
+
+    let panel = null;
+    function mountOnce() {
+        if (panel) return;
+        panel = mountRenewablesPanel(host, () =>
+            (_userLat != null && _userLon != null)
+                ? { lat: _userLat, lon: _userLon }
+                : null,
+        );
+        // Kick off the initial fetch automatically if a pin already
+        // exists; otherwise wait for the user to hit Refresh.
+        if (_userLat != null && _userLon != null) panel.refresh();
+    }
+    if (!section.classList.contains('collapsed')) mountOnce();
+    const hdr = section.querySelector('.lyr-section-hdr');
+    if (hdr) {
+        hdr.addEventListener('click', () => {
+            if (!section.classList.contains('collapsed')) mountOnce();
+        });
+    }
+})();
+
+// ── Probability Picker: lazy-mount on first expand ──
+// Same pattern as the models panel above. The picker also starts an
+// AnonymousSessionTimer on mount, so deferring until first expand
+// means the 5-minute free trial doesn't tick against users who never
+// see the panel. Surfaces _userLat / _userLon (the pinned-location
+// globals) so "Where" is auto-resolved without a second control.
+(function mountProbabilityPicker() {
+    const host    = document.getElementById('probability-picker-host');
+    const section = document.querySelector('[data-lyr-section="probability-picker"]');
+    if (!host || !section) return;
+
+    let picker = null;
+    function mountOnce() {
+        if (picker) return;
+        picker = new ProbabilityPicker({
+            host,
+            getLatLon: () => (_userLat != null && _userLon != null)
+                ? { lat: _userLat, lon: _userLon }
+                : null,
+            isSignedIn: () => {
+                try { return !!auth?.isSignedIn?.(); } catch { return false; }
+            },
+            onSignInPrompt: () => {
+                window.location.href = '/signin?next=' +
+                    encodeURIComponent(window.location.pathname);
+            },
+        });
+        picker.mount();
+        // If the user signs in mid-session (auth event), unfreeze the
+        // picker without a page reload. auth.js dispatches 'pp-auth-change'
+        // via window; if that event isn't wired we still survive because
+        // refreshSignIn() is a safe no-op.
+        window.addEventListener('pp-auth-change', () => picker.refreshSignIn());
+    }
+    if (!section.classList.contains('collapsed')) mountOnce();
+    const hdr = section.querySelector('.lyr-section-hdr');
+    if (hdr) {
+        hdr.addEventListener('click', () => {
+            if (!section.classList.contains('collapsed')) mountOnce();
+        });
+    }
+})();
 
 // ═══════════════════════════════════════════════════════════════
 //  MOBILE SWIPE-DOWN TO CLOSE PANELS
