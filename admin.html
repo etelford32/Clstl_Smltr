@@ -433,6 +433,18 @@
                 <h3 style="font-size:.82rem;margin-bottom:10px">New vs returning users</h3>
                 <div id="new-returning-container"><div class="empty">Loading…</div></div>
             </div>
+            <!-- ── Auth funnel drop-offs ─────────────────────────────────
+                 One row per stalled session: the last funnel stage it hit,
+                 the recorded reason/code, and a copyable funnel_id you can
+                 hand to telemetry_auth_funnel_replay() in SQL for the full
+                 stage-by-stage replay. Superadmin-only RPC. -->
+            <div class="card" style="margin:14px 0 0">
+                <h3 style="font-size:.82rem;margin-bottom:10px">
+                    Auth funnel drop-offs
+                    <span style="font-size:.7rem;color:#778;font-weight:400;margin-left:6px">last 7 days · sessions that did not reach a success terminal</span>
+                </h3>
+                <div id="auth-dropoffs-container"><div class="empty">Loading…</div></div>
+            </div>
         </div>
 
         <!-- ── Activation funnel ──────────────────────────────────── -->
@@ -789,7 +801,7 @@
 import { auth } from './js/auth.js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY, isConfigured, getSupabase, testConnection } from './js/supabase-config.js';
 import { GA_MEASUREMENT_ID } from './js/analytics.js';
-import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchActivationFunnel, fetchActivationDaily, fetchActivationOverview, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap, fetchWizardFunnel, fetchTourMetrics, fetchDemoMetrics, fetchAuthFlowMetrics, fetchNewVsReturning, fetchVisitorFlow, fetchEntryDestinations, fetchAccumulatorStats } from './js/admin-analytics.js';
+import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchActivationFunnel, fetchActivationDaily, fetchActivationOverview, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap, fetchWizardFunnel, fetchTourMetrics, fetchDemoMetrics, fetchAuthFlowMetrics, fetchAuthFunnelDropoffs, fetchNewVsReturning, fetchVisitorFlow, fetchEntryDestinations, fetchAccumulatorStats } from './js/admin-analytics.js';
 import { createInviteCode, fetchInviteCodes, deactivateInvite, sendInviteEmail } from './js/admin-invites.js';
 
 // ── Tabs (wired first so they always work) ──────────────────────────────────
@@ -1705,6 +1717,101 @@ async function loadNewVsReturning() {
             <div style="background:#4fc3f7;width:${retPct}%"></div>
         </div>`;
 }
+// Last 50 auth-funnel drop-offs. Each row is a stalled session — the
+// funnel_id is copyable so an operator can feed it to the replay RPC
+// (telemetry_auth_funnel_replay) for a stage-by-stage view. The card
+// renders empty cleanly when there are no drop-offs in the window —
+// that's the "happy" state, not an error.
+function _fmtTimeAgo(iso) {
+    try {
+        const ms = Date.now() - new Date(iso).getTime();
+        if (!Number.isFinite(ms) || ms < 0) return '—';
+        const s = Math.floor(ms / 1000);
+        if (s < 60)        return `${s}s ago`;
+        const m = Math.floor(s / 60);
+        if (m < 60)        return `${m}m ago`;
+        const h = Math.floor(m / 60);
+        if (h < 48)        return `${h}h ago`;
+        return `${Math.floor(h / 24)}d ago`;
+    } catch { return '—'; }
+}
+async function loadAuthFunnelDropoffs() {
+    const el = document.getElementById('auth-dropoffs-container');
+    if (!el) return;
+    const r = await fetchAuthFunnelDropoffs(7, 50);
+    if (!r.ok) {
+        el.innerHTML = `<div class="empty" style="color:#ff8080">${_esc(r.error)}</div>`;
+        return;
+    }
+    const rows = r.data || [];
+    if (!rows.length) {
+        el.innerHTML = '<div class="empty">No drop-offs in the last 7 days — every funnel reached a success terminal.</div>';
+        return;
+    }
+    const head = `
+        <div style="display:grid;grid-template-columns:80px 1.6fr 1.4fr 80px 70px;gap:10px;padding:6px 8px;font-size:.66rem;color:#778;letter-spacing:.06em;text-transform:uppercase;border-bottom:1px solid rgba(255,255,255,.06)">
+            <div>When</div>
+            <div>Last stage</div>
+            <div>Reason / code</div>
+            <div>Steps</div>
+            <div>Funnel</div>
+        </div>`;
+    const body = rows.map(row => {
+        const when     = _fmtTimeAgo(row.last_seen);
+        const stage    = _esc(row.last_stage || '—');
+        const route    = row.last_route ? `<span style="color:#667;font-size:.7rem"> · ${_esc(row.last_route)}</span>` : '';
+        const code     = row.last_code     ? `<code style="background:rgba(255,140,80,.18);border:1px solid rgba(255,140,80,.4);color:#ffc090;padding:1px 6px;border-radius:4px;font-size:.72rem;font-family:'SFMono-Regular',Consolas,monospace">${_esc(row.last_code)}</code>` : '';
+        const provider = row.last_provider ? `<span style="font-size:.7rem;color:#88a"> · ${_esc(row.last_provider)}</span>` : '';
+        const method   = row.last_method   ? `<span style="font-size:.7rem;color:#88a"> · ${_esc(row.last_method)}</span>` : '';
+        const reason   = row.last_reason   ? `<div style="font-size:.74rem;color:#9aa;margin-top:2px;line-height:1.35;word-break:break-word">${_esc(row.last_reason).slice(0, 200)}</div>` : '';
+        // funnel_id is short enough to render in full but we trim visually
+        // to keep the column readable; the title attribute carries the full
+        // value so an operator can hover-copy it into SQL.
+        const fid      = row.funnel_id || '';
+        const fidShort = fid.length > 10 ? `${fid.slice(0,8)}…` : fid;
+        return `
+        <div style="display:grid;grid-template-columns:80px 1.6fr 1.4fr 80px 70px;gap:10px;padding:8px;font-size:.78rem;border-bottom:1px solid rgba(255,255,255,.04);align-items:start">
+            <div style="color:#88a;font-size:.74rem">${_esc(when)}</div>
+            <div>
+                <div style="color:#cde;font-weight:600">${stage}${provider}${method}</div>
+                ${route ? `<div style="color:#667;font-size:.7rem;margin-top:2px">${_esc(row.last_route || '')}</div>` : ''}
+            </div>
+            <div>
+                ${code}
+                ${reason}
+            </div>
+            <div style="color:#88a">${row.stage_count ?? 0}</div>
+            <div>
+                <code class="pp-fid-copy" data-fid="${_esc(fid)}" title="${_esc(fid)} — click to copy" style="font-family:'SFMono-Regular',Consolas,monospace;font-size:.7rem;color:#a080ff;cursor:pointer;user-select:all">${_esc(fidShort)}</code>
+            </div>
+        </div>`;
+    }).join('');
+    el.innerHTML = `
+        ${head}
+        ${body}
+        <div style="font-size:.7rem;color:#667;margin-top:10px;line-height:1.5">
+            Click a funnel id to copy it, then in SQL Editor:
+            <code style="color:#9ad36f">SELECT * FROM public.telemetry_auth_funnel_replay('&lt;id&gt;');</code>
+            to see the full stage-by-stage replay. In-flight sessions (last event &lt; 2 min ago) are hidden so a user mid-form does not appear as a drop-off.
+        </div>`;
+    // Delegated click handler — copies the funnel_id from the data
+    // attribute so we avoid quoting headaches when interpolating into
+    // an inline onclick. Re-bound on each refresh; .onclick assignment
+    // overwrites any previous handler so we don't accumulate listeners.
+    el.onclick = (ev) => {
+        const t = ev.target.closest?.('.pp-fid-copy');
+        if (!t) return;
+        const fid = t.dataset.fid || '';
+        if (!fid) return;
+        try {
+            navigator.clipboard?.writeText(fid);
+            const prev = t.textContent;
+            t.textContent = 'copied!';
+            setTimeout(() => { t.textContent = prev; }, 900);
+        } catch {}
+    };
+}
+
 async function loadOnboardingAll() {
     await Promise.all([
         loadWizardFunnel(),
@@ -1712,6 +1819,7 @@ async function loadOnboardingAll() {
         loadDemoMetrics(),
         loadAuthFlowMetrics(),
         loadNewVsReturning(),
+        loadAuthFunnelDropoffs(),
     ]);
 }
 document.getElementById('btn-refresh-onboarding')?.addEventListener('click', loadOnboardingAll);
