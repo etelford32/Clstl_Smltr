@@ -175,9 +175,41 @@ class AuthManager {
         };
     }
 
+    /**
+     * Effective role for UI gating. If the real role is `superadmin` AND
+     * a "View as user" override is set in sessionStorage (see js/view-as.js),
+     * return the override role; otherwise return the real role.
+     * Non-superadmins cannot escalate via the override (anti-escalation).
+     */
+    _effectiveRole() {
+        const real = this._user?.role;
+        if (real !== 'superadmin') return real;
+        try {
+            const raw = sessionStorage.getItem('pp-view-as');
+            if (!raw) return real;
+            const o = JSON.parse(raw);
+            return (o && o.role) ? o.role : real;
+        } catch (_) { return real; }
+    }
+
+    /** Effective plan (honours the same view-as override as _effectiveRole). */
+    _effectivePlan() {
+        if (this._user?.role !== 'superadmin') return this._user?.plan;
+        try {
+            const raw = sessionStorage.getItem('pp-view-as');
+            if (!raw) return this._user?.plan;
+            const o = JSON.parse(raw);
+            return (o && o.plan) ? o.plan : this._user?.plan;
+        } catch (_) { return this._user?.plan; }
+    }
+
+    /** Real DB role, always — bypasses any view-as override. Diagnostic use. */
+    getRealRole() { return this._user?.role; }
+
     /** Check if current user has admin role. */
     isAdmin() {
-        return this._user?.role === 'admin' || this._user?.role === 'superadmin';
+        const r = this._effectiveRole();
+        return r === 'admin' || r === 'superadmin';
     }
 
     /**
@@ -187,7 +219,7 @@ class AuthManager {
      * access — every paid-tier gate that delegates to isTester() lights up.
      */
     isTester() {
-        return this._user?.role === 'tester' || this._user?.plan === 'tester';
+        return this._effectiveRole() === 'tester' || this._effectivePlan() === 'tester';
     }
 
     // ── Tier feature gates ───────────────────────────────────────────────
@@ -260,9 +292,14 @@ class AuthManager {
         return this._user?.alerts ?? {};
     }
 
-    /** Check if current user has superadmin role. */
+    /**
+     * Check if current user has superadmin role (effective — view-as aware).
+     * A superadmin who's "viewing as user" will return false here so the
+     * UI hides superadmin-only widgets during preview. Use getRealRole()
+     * if you need to detect the actual on-disk role.
+     */
     isSuperAdmin() {
-        return this._user?.role === 'superadmin';
+        return this._effectiveRole() === 'superadmin';
     }
 
     /**
@@ -270,12 +307,12 @@ class AuthManager {
      * Prefer this in new code; isSuperAdmin() kept for back-compat.
      */
     isSuperadmin() {
-        return this._user?.role === 'superadmin';
+        return this._effectiveRole() === 'superadmin';
     }
 
-    /** Get user's role. */
+    /** Get user's role (effective — honours view-as override). */
     getRole() {
-        return this._user?.role || 'user';
+        return this._effectiveRole() || 'user';
     }
 
     /**
@@ -428,6 +465,13 @@ class AuthManager {
      * is still an admin row).
      */
     getPlan() {
+        // "View as user" override (superadmin-only client-side preview)
+        // short-circuits all of the downstream logic — we want to render
+        // the UI as if we were exactly the target plan.
+        const overridden = this._effectivePlan();
+        if (this._user?.role === 'superadmin' && overridden && overridden !== this._user?.plan) {
+            return overridden.toLowerCase();
+        }
         // Class students inherit their parent's plan via effective_plan
         // (cached during fetchProfile). When set, it short-circuits the
         // canceled-subscription guard below — a student's "subscription"
