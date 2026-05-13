@@ -140,6 +140,17 @@ nav {
     background: radial-gradient(ellipse at 40% 50%, #010210 0%, #000408 60%, #000 100%);
 }
 #canvas-wrap canvas { display: block; width: 100% !important; height: 100% !important; }
+/* Overlay analysis canvases must opt out of the renderer's 100%×100% rule
+   above — without this they stretch to fill the whole canvas-wrap and the
+   10-px text inside is scaled up ~7×. */
+#canvas-wrap canvas#gw-canvas,
+#canvas-wrap canvas#acc-canvas { width: 280px !important; height: 80px !important; }
+#canvas-wrap canvas#sed-canvas { width: 280px !important; height: 120px !important; }
+@media (max-width: 720px) {
+    #canvas-wrap canvas#gw-canvas,
+    #canvas-wrap canvas#acc-canvas { width: 200px !important; height: 60px !important; }
+    #canvas-wrap canvas#sed-canvas { width: 200px !important; height: 90px !important; }
+}
 
 #hud {
     position: absolute; top: 12px; left: 12px; z-index: 50;
