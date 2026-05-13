@@ -471,18 +471,111 @@ function refreshHzRings() {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Cached procedural textures: a soft circular alpha sprite for dust particles
+// and a banded latitudinal stripe map for gas giants. Both are generated once
+// off a small canvas so we don't ship binary assets.
+// ─────────────────────────────────────────────────────────────────────────────
+let _dustSpriteTexture = null;
+function getDustSpriteTexture() {
+    if (_dustSpriteTexture) return _dustSpriteTexture;
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const ctx = c.getContext('2d');
+    const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 30);
+    g.addColorStop(0,    'rgba(255,255,255,1)');
+    g.addColorStop(0.35, 'rgba(255,255,255,0.55)');
+    g.addColorStop(0.75, 'rgba(255,255,255,0.10)');
+    g.addColorStop(1,    'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 64, 64);
+    _dustSpriteTexture = new THREE.CanvasTexture(c);
+    return _dustSpriteTexture;
+}
+
+const _gasGiantTexCache = new Map();
+function getGasGiantTexture(baseColorHex, seed = 0) {
+    const cacheKey = baseColorHex + ':' + seed;
+    if (_gasGiantTexCache.has(cacheKey)) return _gasGiantTexCache.get(cacheKey);
+    const c = document.createElement('canvas');
+    c.width = 256; c.height = 128;
+    const ctx = c.getContext('2d');
+    const base = new THREE.Color(baseColorHex);
+    for (let y = 0; y < 128; y++) {
+        const t = y / 128;
+        const band = (
+            Math.sin(t * Math.PI *  8 + seed)       * 0.45 +
+            Math.sin(t * Math.PI * 14 + seed * 1.3) * 0.25 +
+            Math.sin(t * Math.PI *  3 + seed * 0.7) * 0.30
+        );
+        const r = Math.max(0, Math.min(1, base.r * (1 + band * 0.20)));
+        const g = Math.max(0, Math.min(1, base.g * (1 + band * 0.14)));
+        const b = Math.max(0, Math.min(1, base.b * (1 + band * 0.06)));
+        ctx.fillStyle = `rgb(${(r*255)|0}, ${(g*255)|0}, ${(b*255)|0})`;
+        ctx.fillRect(0, y, 256, 1);
+    }
+    const tex = new THREE.CanvasTexture(c);
+    _gasGiantTexCache.set(cacheKey, tex);
+    return tex;
+}
+
+const _bodyHaloTexCache = new Map();
+function getBodyHaloTexture(baseColorHex) {
+    if (_bodyHaloTexCache.has(baseColorHex)) return _bodyHaloTexCache.get(baseColorHex);
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const ctx = c.getContext('2d');
+    const base = new THREE.Color(baseColorHex);
+    const rgb = `${(base.r*255)|0}, ${(base.g*255)|0}, ${(base.b*255)|0}`;
+    const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+    g.addColorStop(0.00, `rgba(${rgb}, 0.55)`);
+    g.addColorStop(0.30, `rgba(${rgb}, 0.20)`);
+    g.addColorStop(0.70, `rgba(${rgb}, 0.04)`);
+    g.addColorStop(1.00, `rgba(${rgb}, 0)`);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 128, 128);
+    const tex = new THREE.CanvasTexture(c);
+    _bodyHaloTexCache.set(baseColorHex, tex);
+    return tex;
+}
+
 function makeBodyMesh(b) {
     // Body radius (scene units): exaggerate so embryos are visible.
     const radius = Math.max(0.18, 0.35 * Math.cbrt(b.m / M_EARTH));
-    const geom = new THREE.SphereGeometry(radius, 24, 24);
-    const mat = new THREE.MeshStandardMaterial({
-        color: b.color,
-        emissive: new THREE.Color(b.color).multiplyScalar(0.25),
-        roughness: 0.65,
-        metalness: 0.05,
-    });
+    const geom = new THREE.SphereGeometry(radius, 32, 24);
+    let mat;
+    if (b.role === 'gas') {
+        // Banded gas giants — procedurally generated stripe map.
+        const tex = getGasGiantTexture(b.color, b.name.length);
+        mat = new THREE.MeshStandardMaterial({
+            map: tex,
+            emissive: new THREE.Color(b.color).multiplyScalar(0.10),
+            roughness: 0.75,
+            metalness: 0.02,
+        });
+    } else {
+        mat = new THREE.MeshStandardMaterial({
+            color: b.color,
+            emissive: new THREE.Color(b.color).multiplyScalar(0.22),
+            roughness: 0.65,
+            metalness: 0.05,
+        });
+    }
     const mesh = new THREE.Mesh(geom, mat);
     mesh.userData = { body: b, baseRadius: radius };
+
+    // Soft atmospheric halo around gas giants — additive sprite.
+    if (b.role === 'gas') {
+        const haloMat = new THREE.SpriteMaterial({
+            map: getBodyHaloTexture(b.color),
+            transparent: true,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+        });
+        const halo = new THREE.Sprite(haloMat);
+        halo.scale.set(radius * 3.2, radius * 3.2, 1);
+        mesh.add(halo);
+    }
 
     // Iconic Saturn rings — flat annulus tilted to Saturn's real axial obliquity.
     if (b.name === 'proto-Saturn') {
@@ -764,9 +857,11 @@ function makeDustCloud() {
     geom.setAttribute('color',    new THREE.BufferAttribute(col, 3));
     const mat = new THREE.PointsMaterial({
         vertexColors: true,
-        size: 0.18,
+        map: getDustSpriteTexture(),
+        alphaTest: 0.02,
+        size: 0.45,           // tapered sprite — effective size is ~½
         transparent: true,
-        opacity: 0.55,
+        opacity: 0.75,
         depthWrite: false,
         sizeAttenuation: true,
         blending: THREE.AdditiveBlending,
@@ -805,12 +900,15 @@ function removeDustCloud() {
 }
 
 function makeTrail(color) {
-    const N = 120;
+    // Trails complement the orbit ellipse: ellipse shows the current orbit,
+    // trail shows recent motion (especially useful for migrating embryos).
+    // Keep them short + dim so they don't dominate the scene.
+    const N = 60;
     const pos = new Float32Array(N * 3);
     const geom = new THREE.BufferGeometry();
     geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     geom.setDrawRange(0, 0);
-    const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.6 });
+    const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.45 });
     const line = new THREE.Line(geom, mat);
     return { line, geom, pos, head: 0, count: 0, N };
 }
@@ -975,14 +1073,22 @@ function nearestIndex(arr, v) {
 }
 
 function handleCollisions() {
+    const Mstar = sim.cfg.star.Mstar_solar * M_SUN;
     const alive = sim.bodies.filter(b => b.alive);
     for (let i = 0; i < alive.length; i++) {
         for (let j = i + 1; j < alive.length; j++) {
             const A = alive[i], B = alive[j];
-            const dx = A.x - B.x, dy = A.y - B.y;
-            const dist = Math.hypot(dx, dy);
-            // Combined Hill / proximity radius: use ~ 2 * (R_A + R_B) for inelastic merging.
-            const merge = 3 * (A.R_m + B.R_m);
+            const dx = A.x - B.x, dy = A.y - B.y, dz = (A.z || 0) - (B.z || 0);
+            const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+            // Hill-radius "feeding zone" merger: at our integrator resolution,
+            // a close approach within ~½ R_Hill is indistinguishable from a
+            // physical collision. This keeps co-orbital pairs (Theia + Earth)
+            // from missing each other forever once they pick up inclinations.
+            const ra = Math.sqrt(A.x*A.x + A.y*A.y + (A.z||0)*(A.z||0));
+            const rb = Math.sqrt(B.x*B.x + B.y*B.y + (B.z||0)*(B.z||0));
+            const aMutual = 0.5 * (ra + rb);
+            const rH = aMutual * Math.cbrt((A.m + B.m) / (3 * Mstar));
+            const merge = Math.max(3 * (A.R_m + B.R_m), 0.5 * rH);
             if (dist < merge) {
                 mergeBodies(A, B);
             }
