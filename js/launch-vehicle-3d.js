@@ -1148,83 +1148,54 @@ export function initVehicleCanvas(canvas, opts = {}) {
     }
 
     // ── OrbitControls ──────────────────────────────────────────────────────
+    // Wheel-zoom is OFF so the canvas doesn't hijack page scroll. Camera
+    // dolly is buttons-only (+/− via api.setZoom). Drag-orbit and right-drag
+    // pan still work as expected.
     const controls = new OrbitControls(camera, canvas);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.08;
-    // Allow looking slightly above horizon (so 'Top' preset can swing wide)
-    // while still preventing flipping past zenith.
-    controls.maxPolarAngle = Math.PI * 0.96;
-    controls.minPolarAngle = 0.05;
-    // Default OFF: the 3/4 orbit at the rocket-fit distance physically passes
-    // through the launch tower (FSS columns + truss live ~10 m off centerline,
-    // camera radius ~80 m → orbit clips the tower volume), which reads as the
-    // camera "cutting" from a clean 3/4 frame to a wall of orange beam every
-    // few seconds. Users can opt back in via the Auto toggle.
-    controls.autoRotate = opts.autoRotate ?? false;
-    controls.autoRotateSpeed = 0.45;
-    // Pan = right-click drag on desktop, two-finger drag on touch. Pan in
-    // screen-space so it feels predictable regardless of camera tilt.
-    controls.enablePan = true;
-    controls.screenSpacePanning = true;
-    controls.panSpeed = 0.9;
-    controls.rotateSpeed = 0.8;
-    controls.zoomSpeed = 0.9;
+    controls.enableDamping       = true;
+    controls.dampingFactor       = 0.08;
+    controls.enableZoom          = false;
+    controls.enablePan           = true;
+    controls.screenSpacePanning  = true;
+    controls.maxPolarAngle       = Math.PI * 0.96;
+    controls.minPolarAngle       = 0.05;
+    controls.panSpeed            = 0.9;
+    controls.rotateSpeed         = 0.8;
+    controls.autoRotate          = !!opts.autoRotate;
+    controls.autoRotateSpeed     = 0.45;
 
     // ── Vehicle state (mutable — replaced by setVehicle) ───────────────────
     let current = {
-        id: null,
-        variant: null,
-        root: null,
-        plumes: [],
-        height: 1,
-        info: null,
+        id: null, variant: null, root: null, plumes: [],
+        height: 1, info: null,
         bbox: new THREE.Box3(),
-        // Mutated each frame during liftoff:
-        basePadY: 0,         // pad-top Y captured on vehicle build
-        baseTargetY: 0,      // controls.target.y captured on vehicle build
-        baseCamY: 0,         // camera.position.y captured on vehicle build
+        basePadY: 0,
+        baseTargetY: 0,
+        baseCamY: 0,
         lastAltitude: 0,
-        trailWidthM: 9,      // pad-specific trail width
+        trailWidthM: 9,
     };
-    // Track which preset is active so recenter() can re-frame using the
-    // user's current choice rather than always slamming back to threequarter.
     let currentViewName = 'threequarter';
 
-    // ── Active camera tweens ───────────────────────────────────────────────
-    // setView/recenter spawn one tween per channel (position + target). We
-    // track them here so a fresh view-pick or a vehicle/liftoff change can
-    // cancel any in-flight tween cleanly — otherwise stale step callbacks
-    // keep writing camera.position for hundreds of ms and the framing snaps
-    // visibly.
-    const activeTweens = new Set();
-    function cancelActiveTweens() {
-        for (const h of activeTweens) h.cancelled = true;
-        activeTweens.clear();
-        // Restore deferred state so cancellations leave behavior consistent
-        // with a normal completion.
+    // ── View tween state ───────────────────────────────────────────────────
+    // setView fires ONE tween (carrying both pos and target as a 6-vec) so
+    // cancellation is a single handle, not a counted pair. autoRotate is
+    // parked across a tween because it'd fight the direct camera writes,
+    // and restored on completion. setAutoRotate keeps the saved value in
+    // sync so a user toggle mid-tween isn't clobbered on restore.
+    let activeTween = null;
+    let savedAutoRotate = null;
+    let cameraFollowSuppressed = false;
+
+    function cancelViewTween() {
+        if (activeTween) { activeTween.cancelled = true; activeTween = null; }
         if (savedAutoRotate !== null) {
             controls.autoRotate = savedAutoRotate;
             savedAutoRotate = null;
         }
         cameraFollowSuppressed = false;
     }
-    // applyMissionState's per-frame Δ-altitude follow gets suppressed for
-    // the duration of a view tween: the tween itself bakes the live altitude
-    // offset into camera.y/target.y each step (via liveOffsetY()), so adding
-    // dy on top would race the tween and double-count the rise. Re-baselines
-    // current.lastAltitude on completion so the follow can resume cleanly.
-    let cameraFollowSuppressed = false;
-    // Auto-rotate gets disabled across a view-tween. We capture the user's
-    // intended state once (on the first tween in a chain) and restore it
-    // when the chain settles. Capturing per-tween was a bug — the second
-    // click in a fast pair sees autoRotate=false from the first tween and
-    // restores false at the end, clobbering the user's setting.
-    let savedAutoRotate = null;
 
-    // Rocket's current rise above its pad-base. During liftoff this is the
-    // mission-clock altitude (+ twang); on the pad it's 0. View framing
-    // adds this to the static-bbox-derived position+target so the camera
-    // tracks the rocket all the way up instead of lingering at pad level.
     function liveOffsetY() {
         return current.root ? (current.root.position.y - current.basePadY) : 0;
     }
@@ -1270,7 +1241,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
         // Cancel any in-flight animation + view-tween before swapping. A
         // stale tween from the prior vehicle would keep writing camera.pos
         // for ~800 ms, fighting the new vehicle's framing.
-        cancelActiveTweens();
+        cancelViewTween();
         cameraFollowSuppressed = false;
         if (missionActive) cancelLiftoff();
 
@@ -1449,7 +1420,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
         // Cancel any active view-tween — otherwise its absolute camera-pos
         // writes for the next several hundred ms would race the per-frame
         // ascent follow, producing a visible camera judder right at T-0.
-        cancelActiveTweens();
+        cancelViewTween();
         cameraFollowSuppressed = false;
 
         // Re-baseline vertical follow before the delta-tracking loop runs.
@@ -1480,7 +1451,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
         // Same reasoning as liftoff() — kill any in-flight view tween before
         // we restore the base framing, so the tween can't drag the camera
         // back into mid-air after we settle it back on the pad.
-        cancelActiveTweens();
+        cancelViewTween();
         cameraFollowSuppressed = false;
 
         // Reset vehicle pose — including the per-frame vibration offset
@@ -1588,104 +1559,75 @@ export function initVehicleCanvas(canvas, opts = {}) {
     }
     tick();
 
-    // ── Public API ─────────────────────────────────────────────────────────
-    // setView / recenter both go through here. The destination is a function
-    // of the live rocket position so a view-pick mid-flight chases the
-    // rocket up instead of landing on the empty pad. lastAltitude gets
-    // re-synced on tween completion because cameraFollowSuppressed silences
-    // applyMissionState's own dy-add for the duration of the tween.
+    // ── Public camera API ──────────────────────────────────────────────────
+
+    // Single-tween view swap. Pos + target ride a 6-vec so cancellation is
+    // one handle. The destination is a function of the live rocket Y so a
+    // view-pick mid-flight lands on the moving rocket, not the empty pad.
     function setView(name) {
         if (!VIEW_PRESETS[name]) return;
         currentViewName = name;
-
-        // Cancel any prior tween so its onDone can't fire after this one and
-        // restore a stale autoRotate value. Without this, fast successive
-        // view-picks left autoRotate flickering on/off.
-        cancelActiveTweens();
+        cancelViewTween();
 
         const aspect = camera.aspect || 16/10;
-        // frameForView uses the static (build-time) bbox — i.e. the rocket
-        // at its base. We add the live rise to y on every tween step so the
-        // tween chases the moving rocket instead of landing on a stale frame.
-        const baseView = frameForView(name, current, cameraFov, aspect);
-        const liveTargetEnd = () => [
-            baseView.target[0],
-            baseView.target[1] + liveOffsetY(),
-            baseView.target[2],
-        ];
-        const livePosEnd = () => [
-            baseView.pos[0],
-            baseView.pos[1] + liveOffsetY(),
-            baseView.pos[2],
-        ];
+        const base   = frameForView(name, current, cameraFov, aspect);
 
-        const fromPos = camera.position.toArray();
-        const fromTgt = controls.target.toArray();
-        // Capture once across a chain — the second click in a fast double-
-        // tap would otherwise see autoRotate=false (the first tween disabled
-        // it) and restore false instead of the user's true.
-        if (savedAutoRotate === null) savedAutoRotate = controls.autoRotate;
+        savedAutoRotate = controls.autoRotate;
         controls.autoRotate = false;
-        // Suppress applyMissionState's per-frame dy-add — the tween bakes
-        // the live offset into camera.y/target.y itself, so adding dy on
-        // top would double the rise and pull the camera up too fast.
         cameraFollowSuppressed = missionActive;
 
-        const handles = [];
-        const onAllDone = () => {
-            if (handles.some(h => h.cancelled)) return;
-            // Re-baseline the ascent follow so dy starts from zero against
-            // the post-tween camera state — otherwise the first dy would
-            // snap camera.y by the rise that accumulated during the tween.
-            if (missionActive) {
-                current.lastAltitude = missionClock.snapshot().altitude;
-            }
-            cameraFollowSuppressed = false;
-            if (savedAutoRotate !== null) {
-                controls.autoRotate = savedAutoRotate;
-                savedAutoRotate = null;
-            }
-            handles.forEach(h => activeTweens.delete(h));
+        const from = [
+            camera.position.x, camera.position.y, camera.position.z,
+            controls.target.x, controls.target.y, controls.target.z,
+        ];
+        const toFn = () => {
+            const dy = liveOffsetY();
+            return [
+                base.pos[0],    base.pos[1]    + dy, base.pos[2],
+                base.target[0], base.target[1] + dy, base.target[2],
+            ];
         };
 
-        let pending = 2;
-        const oneDone = () => { if (--pending === 0) onAllDone(); };
-
-        const hPos = tween(fromPos, livePosEnd, 800,
-            p => camera.position.set(p[0], p[1], p[2]),
-            oneDone);
-        const hTgt = tween(fromTgt, liveTargetEnd, 800,
-            p => controls.target.set(p[0], p[1], p[2]),
-            oneDone);
-        handles.push(hPos, hTgt);
-        activeTweens.add(hPos);
-        activeTweens.add(hTgt);
+        activeTween = tween(from, toFn, 800,
+            v => {
+                camera.position.set(v[0], v[1], v[2]);
+                controls.target.set(v[3], v[4], v[5]);
+            },
+            () => {
+                if (missionActive) {
+                    current.lastAltitude = missionClock.snapshot().altitude;
+                }
+                cameraFollowSuppressed = false;
+                if (savedAutoRotate !== null) {
+                    controls.autoRotate = savedAutoRotate;
+                    savedAutoRotate = null;
+                }
+                activeTween = null;
+                controls.update();
+            }
+        );
     }
 
-    // Dolly along the current view direction without changing target.
-    // factor < 1 zooms in (closer to subject); > 1 zooms out. controls.target
-    // moves with the rocket during ascent, so this works at any altitude.
+    // Dolly along the current view direction. factor < 1 zooms in, > 1 out.
+    // Clamped to controls.min/maxDistance. Calls controls.update() so the
+    // OrbitControls damped spherical re-syncs and the next user drag doesn't
+    // race against a stale internal radius.
     function setZoom(factor) {
-        const dir = camera.position.clone().sub(controls.target);
+        const dir  = camera.position.clone().sub(controls.target);
         const dist = dir.length();
         const next = THREE.MathUtils.clamp(dist * factor,
             controls.minDistance, controls.maxDistance);
         dir.setLength(next);
         camera.position.copy(controls.target).add(dir);
+        controls.update();
     }
 
-    // Snap back to the vehicle-bbox center using the current preset; useful
-    // after the user pans / orbits into deep space. Routes through setView
-    // so it inherits live rocket-tracking during liftoff.
     function recenter() {
         setView(currentViewName || 'threequarter');
     }
 
-    // FOV cycler: 28 (tele) → 38 (default) → 52 (wide). Acts like a lens
-    // swap — we dolly the camera along its current axis so the subject
-    // subtends the same vertical angle after the FOV change. That preserves
-    // any panning the user has done instead of yanking them back to the
-    // preset.
+    // FOV swap with dolly compensation so the subject subtends the same
+    // vertical angle. Preserves any user pan/orbit.
     function setFOV(deg) {
         const next = THREE.MathUtils.clamp(deg, 18, 80);
         if (Math.abs(next - cameraFov) < 0.5) return;
@@ -1694,25 +1636,33 @@ export function initVehicleCanvas(canvas, opts = {}) {
         cameraFov = next;
         camera.fov = cameraFov;
         camera.updateProjectionMatrix();
-        const dir = camera.position.clone().sub(controls.target);
+        const dir  = camera.position.clone().sub(controls.target);
         const dist = dir.length();
-        const newDist = dist * (prevHalf / nextHalf);
-        dir.setLength(THREE.MathUtils.clamp(newDist,
+        dir.setLength(THREE.MathUtils.clamp(dist * (prevHalf / nextHalf),
             controls.minDistance, controls.maxDistance));
         camera.position.copy(controls.target).add(dir);
+        controls.update();
     }
     function cycleFOV() {
         const cycle = [28, 38, 52];
-        const i = cycle.findIndex(v => Math.abs(v - cameraFov) < 1);
-        setFOV(cycle[(i + 1 + cycle.length) % cycle.length] || 38);
+        let i = cycle.findIndex(v => Math.abs(v - cameraFov) < 1);
+        if (i < 0) i = cycle.indexOf(38);
+        setFOV(cycle[(i + 1) % cycle.length]);
         return cameraFov;
     }
 
     function setPlume(on) {
         for (const p of current.plumes) p.visible = !!on;
     }
-    function setPad(on)        { if (padState.root) padState.root.visible = !!on; }
-    function setAutoRotate(on) { controls.autoRotate = !!on; }
+    function setPad(on) { if (padState.root) padState.root.visible = !!on; }
+
+    // Mid-tween toggle updates the saved value so the restore lands on the
+    // user's intent, not the pre-tween state.
+    function setAutoRotate(on) {
+        const v = !!on;
+        if (savedAutoRotate !== null) savedAutoRotate = v;
+        else                          controls.autoRotate = v;
+    }
     function setVectors(on) {
         vectorsOn = !!on;
         if (current.thrustOverlay) current.thrustOverlay.visible = vectorsOn;
