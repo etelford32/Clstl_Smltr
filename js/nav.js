@@ -100,7 +100,21 @@ function _getAuth() {
     let auth = null;
     try { auth = JSON.parse(localStorage.getItem(AUTH_KEY) || 'null'); } catch (_) {}
     if (!auth) { try { auth = JSON.parse(sessionStorage.getItem(AUTH_KEY) || 'null'); } catch (_) {} }
-    return auth?.signedIn ? auth : null;
+    if (!auth?.signedIn) return null;
+    // Superadmin "view as user" override (js/view-as.js). Anti-escalation:
+    // applyTo() returns the input unchanged unless the real role is
+    // 'superadmin' — anyone else who plants the sessionStorage key is
+    // ignored. Server-side calls keep using the real session JWT.
+    try {
+        const raw = sessionStorage.getItem('pp-view-as');
+        if (raw && auth.role === 'superadmin') {
+            const o = JSON.parse(raw);
+            if (o && o.role) {
+                return { ...auth, role: o.role, plan: o.plan ?? auth.plan, _viewAs: true, _realRole: 'superadmin' };
+            }
+        }
+    } catch (_) {}
+    return auth;
 }
 
 // Tier level determines which menu items + features a user can see.
@@ -160,6 +174,13 @@ export function initNav(activeId = '') {
     if (!window._ppConsentLoaded) {
         window._ppConsentLoaded = true;
         import('./cookie-consent.js').catch(() => { window._ppConsentLoaded = false; });
+    }
+
+    // Lazy-load the "View as user" widget (superadmin-only; self-gates).
+    // Real-role check happens inside view-as.js — non-superadmins get nothing.
+    if (!window._ppViewAsLoaded) {
+        window._ppViewAsLoaded = true;
+        import('./view-as.js').then(m => m.mount?.()).catch(() => { window._ppViewAsLoaded = false; });
     }
 
     const auth = _getAuth();
