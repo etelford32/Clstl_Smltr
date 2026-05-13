@@ -27,7 +27,7 @@
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 html, body { height:100%; }
 body {
-    background:#040210; color:#d8d4ee;
+    background:#000; color:#ddd;
     font-family:'Segoe UI', system-ui, sans-serif;
     overflow:hidden;
 }
@@ -36,22 +36,22 @@ body {
 #ad-hero {
     position:relative; z-index:5;
     padding:14px 22px 12px;
-    background:linear-gradient(180deg, rgba(255,170,90,.10), rgba(4,2,16,0));
-    border-bottom:1px solid rgba(255,200,140,.14);
+    background:linear-gradient(180deg, rgba(255,200,0,.10), rgba(0,0,0,0));
+    border-bottom:1px solid rgba(255,200,0,.20);
     display:flex; align-items:baseline; justify-content:space-between; gap:18px;
     flex-wrap:wrap;
 }
 #ad-hero h1 {
     font-size:1.35rem; font-weight:800;
-    background:linear-gradient(100deg,#fff 30%,#ffc88c);
+    background:linear-gradient(45deg,#ffd700,#ff8c00);
     -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
 }
 #ad-hero p {
-    font-size:.78rem; color:#998878; font-family:monospace;
+    font-size:.78rem; color:#998; font-family:monospace;
     letter-spacing:.04em;
 }
-#ad-hero p strong { color:#ffd8a8; }
-#ad-hero p a { color:#ffc88c; }
+#ad-hero p strong { color:#ffd700; }
+#ad-hero p a { color:#ffb84a; }
 
 /* ─── Layout ─────────────────────────────────────────────────── */
 #ad-app {
@@ -68,9 +68,9 @@ body {
 }
 
 .ad-side {
-    background:rgba(10,6,28,.78);
+    background:rgba(4,2,16,.93);
     backdrop-filter:blur(14px);
-    border-right:1px solid rgba(255,255,255,.06);
+    border-right:1px solid rgba(255,255,255,.07);
     overflow-y:auto;
     padding:18px 16px 24px;
 }
@@ -81,7 +81,7 @@ body {
 
 #ad-stage {
     position:relative;
-    background:#03020a;
+    background:#000;
     overflow:hidden;
 }
 #ad-canvas {
@@ -92,7 +92,7 @@ body {
 
 /* ─── Sidebar labels ─────────────────────────────────────────── */
 .ad-label {
-    font-size:.68rem; color:#a89878;
+    font-size:.68rem; color:#998;
     text-transform:uppercase; letter-spacing:.12em;
     font-weight:800;
     margin-top:18px; margin-bottom:8px;
@@ -109,19 +109,19 @@ body {
     text-align:left; cursor:pointer;
     transition:all .15s;
 }
-.ad-tab:hover { border-color:rgba(255,200,140,.45); color:#fff; }
+.ad-tab:hover { border-color:rgba(255,200,0,.45); color:#fff; }
 .ad-tab.on {
-    background:linear-gradient(120deg, rgba(255,170,90,.18), rgba(255,255,255,.03));
-    border-color:#ffaa5a;
+    background:linear-gradient(120deg, rgba(255,200,0,.18), rgba(255,255,255,.03));
+    border-color:#ffd700;
     color:#fff;
 }
 .ad-tab-name { font-size:.92rem; font-weight:700; }
-.ad-tab-sub  { font-size:.7rem; color:#998878; margin-top:2px; line-height:1.4; }
-.ad-tab.on .ad-tab-sub { color:#ffd8a8; }
+.ad-tab-sub  { font-size:.7rem; color:#998; margin-top:2px; line-height:1.4; }
+.ad-tab.on .ad-tab-sub { color:#ffd700; }
 
 .ad-showcase {
-    background:linear-gradient(150deg, rgba(255,170,90,.10), rgba(10,6,28,.5) 70%);
-    border:1px solid rgba(255,170,90,.20);
+    background:linear-gradient(150deg, rgba(255,200,0,.10), rgba(4,2,16,.5) 70%);
+    border:1px solid rgba(255,200,0,.22);
     border-radius:10px;
     padding:14px 14px 12px;
     margin-bottom:6px;
@@ -131,11 +131,11 @@ body {
     margin-bottom:6px; line-height:1.25;
 }
 .ad-showcase-callout {
-    font-size:.78rem; color:#ffd8a8; line-height:1.55;
+    font-size:.78rem; color:#e8d8a0; line-height:1.55;
     margin-bottom:8px;
 }
 .ad-showcase-physics {
-    font-size:.7rem; color:#998878; line-height:1.55; font-style:italic;
+    font-size:.7rem; color:#998; line-height:1.55; font-style:italic;
     border-top:1px solid rgba(255,255,255,.06);
     padding-top:8px;
 }
@@ -152,10 +152,10 @@ body {
     cursor:pointer;
     transition:all .15s;
 }
-.ad-btn:hover { border-color:rgba(255,200,140,.45); color:#fff; }
+.ad-btn:hover { border-color:rgba(255,200,0,.45); color:#fff; }
 .ad-btn-primary {
-    background:linear-gradient(120deg,#ffc88c 0%,#ff8a4a 100%);
-    border-color:transparent; color:#221608;
+    background:linear-gradient(45deg,#ff8c00,#ffd700);
+    border-color:transparent; color:#000; font-weight:700;
 }
 .ad-btn-primary:hover { filter:brightness(1.08); }
 
@@ -173,12 +173,12 @@ body {
 .ad-warp-wrap input::-webkit-slider-thumb {
     -webkit-appearance:none; appearance:none;
     width:16px; height:16px; border-radius:50%;
-    background:#ffaa5a; cursor:pointer;
-    box-shadow:0 0 8px rgba(255,170,90,.6);
+    background:#ffd700; cursor:pointer;
+    box-shadow:0 0 8px rgba(255,200,0,.6);
 }
 .ad-warp-wrap input::-moz-range-thumb {
     width:16px; height:16px; border-radius:50%; border:none;
-    background:#ffaa5a; cursor:pointer;
+    background:#ffd700; cursor:pointer;
 }
 .ad-warp-readout {
     font-family:monospace; font-size:.82rem; color:#fff; font-weight:700;
@@ -188,7 +188,7 @@ body {
 /* ─── HUD (right sidebar) ───────────────────────────────────── */
 .ad-hud-section { margin-bottom:18px; }
 .ad-hud-title {
-    font-size:.68rem; color:#a89878;
+    font-size:.68rem; color:#998;
     text-transform:uppercase; letter-spacing:.12em;
     font-weight:800;
     margin-bottom:8px;
@@ -197,7 +197,7 @@ body {
     display:grid; grid-template-columns:auto 1fr; gap:4px 12px;
     font-family:monospace; font-size:.78rem;
 }
-.ad-hud-grid dt { color:#998878; }
+.ad-hud-grid dt { color:#998; }
 .ad-hud-grid dd { color:#fff; text-align:right; }
 
 table.ad-bodies {
@@ -210,7 +210,7 @@ table.ad-bodies th, table.ad-bodies td {
     font-family:monospace;
 }
 table.ad-bodies th {
-    color:#a89878; font-weight:700;
+    color:#998; font-weight:700;
     font-size:.62rem; letter-spacing:.06em;
     text-transform:uppercase;
 }
@@ -221,20 +221,20 @@ table.ad-bodies th {
     transform:translateX(-50%);
     z-index:3;
     display:flex; align-items:center; gap:10px;
-    background:rgba(10,6,28,.78); backdrop-filter:blur(12px);
+    background:rgba(4,2,16,.85); backdrop-filter:blur(12px);
     border:1px solid rgba(255,255,255,.10);
     border-radius:999px;
     padding:6px 14px;
 }
 .ad-stage-time {
-    font-family:monospace; font-size:.82rem; color:#ffd8a8;
+    font-family:monospace; font-size:.82rem; color:#ffd700;
     padding:0 6px; font-weight:700;
 }
 #ad-stage-watermark {
     position:absolute; right:12px; bottom:12px;
     z-index:2;
     font-family:monospace; font-size:.6rem;
-    color:#665a4a; letter-spacing:.06em;
+    color:#665; letter-spacing:.06em;
     text-transform:uppercase;
     pointer-events:none;
 }
@@ -243,7 +243,7 @@ table.ad-bodies th {
 #ad-legend {
     position:absolute; left:14px; top:14px;
     z-index:2;
-    background:rgba(10,6,28,.75); backdrop-filter:blur(10px);
+    background:rgba(4,2,16,.85); backdrop-filter:blur(10px);
     border:1px solid rgba(255,255,255,.10);
     border-radius:10px; padding:10px 12px;
     font-size:.7rem; line-height:1.55; font-family:monospace;
@@ -266,12 +266,12 @@ table.ad-bodies th {
     display:flex; align-items:center; justify-content:space-between;
     padding:8px 12px;
     cursor:pointer;
-    font-size:.74rem; font-weight:800; color:#ffd8a8;
+    font-size:.74rem; font-weight:800; color:#ffd700;
     text-transform:uppercase; letter-spacing:.08em;
     user-select:none;
 }
 .ad-group-header::after {
-    content:"▾"; color:#998878; transition:transform .15s;
+    content:"▾"; color:#998; transition:transform .15s;
 }
 .ad-group.collapsed .ad-group-header::after { transform:rotate(-90deg); }
 .ad-group-body { padding:6px 12px 12px; }
@@ -287,7 +287,7 @@ table.ad-bodies th {
 }
 .ad-slider-name { color:#cbb; }
 .ad-slider-val  { color:#fff; font-weight:700; }
-.ad-slider-unit { color:#998878; font-size:.62rem; margin-left:4px; }
+.ad-slider-unit { color:#998; font-size:.62rem; margin-left:4px; }
 .ad-slider input[type=range] {
     width:100%; -webkit-appearance:none; appearance:none;
     height:3px; background:rgba(255,255,255,.10); border-radius:2px;
@@ -296,15 +296,15 @@ table.ad-bodies th {
 .ad-slider input[type=range]::-webkit-slider-thumb {
     -webkit-appearance:none; appearance:none;
     width:13px; height:13px; border-radius:50%;
-    background:#ffaa5a; cursor:pointer;
-    box-shadow:0 0 6px rgba(255,170,90,.55);
+    background:#ffd700; cursor:pointer;
+    box-shadow:0 0 6px rgba(255,200,0,.55);
 }
 .ad-slider input[type=range]::-moz-range-thumb {
     width:13px; height:13px; border-radius:50%; border:none;
-    background:#ffaa5a; cursor:pointer;
+    background:#ffd700; cursor:pointer;
 }
 .ad-slider-hint {
-    font-size:.6rem; color:#998878; line-height:1.5; margin-top:3px; font-style:italic;
+    font-size:.6rem; color:#998; line-height:1.5; margin-top:3px; font-style:italic;
 }
 
 .ad-toggle-row {
@@ -329,14 +329,14 @@ table.ad-bodies th {
     transition:transform .15s;
 }
 .ad-toggle-row input[type=checkbox]:checked {
-    background:rgba(255,170,90,.45);
-    border-color:#ffaa5a;
+    background:rgba(255,200,0,.45);
+    border-color:#ffd700;
 }
 .ad-toggle-row input[type=checkbox]:checked::after {
     transform:translateX(12px);
 }
 .ad-toggle-name { color:#cbb; font-weight:600; }
-.ad-toggle-hint { font-size:.6rem; color:#998878; line-height:1.4; margin-left:38px; margin-top:-3px; padding-bottom:4px; }
+.ad-toggle-hint { font-size:.6rem; color:#998; line-height:1.4; margin-left:38px; margin-top:-3px; padding-bottom:4px; }
 </style>
 <link rel="stylesheet" href="js/nav-styles.css">
 <script type="importmap">
@@ -400,7 +400,7 @@ table.ad-bodies th {
         </div>
 
         <div class="ad-label">Initial conditions</div>
-        <p style="font-size:.66rem; color:#998878; line-height:1.5; margin-bottom:8px;">
+        <p style="font-size:.66rem; color:#998; line-height:1.5; margin-bottom:8px;">
             Tinker live. Changing a slider rebuilds the disc &amp; embryos from scratch.
         </p>
 
@@ -533,7 +533,7 @@ table.ad-bodies th {
         <div class="ad-label">Time warp</div>
         <div class="ad-warp-wrap">
             <div class="ad-warp-readout" id="ad-warp-val">—</div>
-            <input type="range" id="ad-warp" min="0" max="1000" step="1" value="650">
+            <input type="range" id="ad-warp" min="0" max="1000" step="1" value="350">
             <div class="ad-warp-mini">log scale · 10² ↔ 10⁶ yr / sec</div>
         </div>
 
@@ -546,7 +546,7 @@ table.ad-bodies th {
         </div>
 
         <div class="ad-label">References</div>
-        <p style="font-size:.66rem; color:#998878; line-height:1.6;">
+        <p style="font-size:.66rem; color:#998; line-height:1.6;">
             Active groups: Henning (MINDS/JWST), Zhang &amp; Pinilla (AGE-PRO/ALMA), Johansen (Lund), Youdin (Arizona),
             Lambrechts (Lund), Canup (SwRI), Stewart &amp; Lock (synestia), Kopparapu (NASA Goddard),
             Wordsworth (Harvard), Schaefer (Stanford), Hu (JPL), Zahnle (NASA Ames).
@@ -586,7 +586,7 @@ table.ad-bodies th {
                 <dt>Conservative outer</dt><dd id="ad-hz-out">—</dd>
                 <dt>Optimistic</dt><dd id="ad-hz-opt">—</dd>
             </dl>
-            <p style="font-size:.66rem; color:#998878; margin-top:6px; line-height:1.5;">
+            <p style="font-size:.66rem; color:#998; margin-top:6px; line-height:1.5;">
                 Bands evolve as L*(t). The green ring on the stage marks the conservative HZ — between the Runaway Greenhouse (inner) and the Maximum Greenhouse (outer) limits.
             </p>
         </div>
@@ -601,7 +601,7 @@ table.ad-bodies th {
         <div class="ad-hud-section">
             <div class="ad-hud-title">Bodies</div>
             <table class="ad-bodies"><tbody id="ad-body-table">
-                <tr><td colspan="4" style="color:#998878;">loading…</td></tr>
+                <tr><td colspan="4" style="color:#998;">loading…</td></tr>
             </tbody></table>
         </div>
 
@@ -610,7 +610,7 @@ table.ad-bodies th {
 </div>
 
 <script type="module">
-import { boot } from './js/accretion-disc/disc.js?v=20260512b';
+import { boot } from './js/accretion-disc/disc.js?v=20260513a';
 
 const canvas = document.getElementById('ad-canvas');
 const ui = {

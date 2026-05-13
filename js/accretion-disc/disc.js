@@ -45,7 +45,7 @@ const sim = {
     bodies:   [],
     moonletDisc: null,        // post-Theia circumterrestrial debris disc
     ageYr:    0,
-    timeWarpYrPerS: 1e4,
+    timeWarpYrPerS: 2.5e3,
     paused: false,
     impactDone: false,
     moonSpawned: false,
@@ -297,7 +297,7 @@ function sizeRenderer() {
 
 function makeStarfield() {
     const geom = new THREE.BufferGeometry();
-    const N = 2000;
+    const N = 800;
     const pos = new Float32Array(N * 3);
     for (let i = 0; i < N; i++) {
         const r = 800 + Math.random() * 600;
@@ -315,7 +315,7 @@ function makeStarfield() {
 function makeDiscMesh() {
     const { n } = sim.disc;
     // Build a ring-like disc as a triangle strip. We use a high-segment ring per radial bin.
-    const segments = 96;
+    const segments = 64;
     const verts = [];
     const colors = [];
     const indices = [];
@@ -444,7 +444,7 @@ function makeBodyMesh(b) {
 }
 
 function makeTrail(color) {
-    const N = 240;
+    const N = 120;
     const pos = new Float32Array(N * 3);
     const geom = new THREE.BufferGeometry();
     geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
@@ -481,6 +481,12 @@ function pushTrail(t, x, z) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Simulation tick
 // ─────────────────────────────────────────────────────────────────────────────
+// Hard cap on substeps per frame. Prevents the page from locking up when the
+// user dials the time-warp slider to large values — instead of running 80k
+// subcycles, we advance as far as we can within the budget and let real time
+// move on. The sim quietly slows when warp is too high for the host.
+const MAX_SUBSTEPS_PER_FRAME = 120;
+
 function tick(dtRealS) {
     if (sim.paused) return;
 
@@ -490,8 +496,10 @@ function tick(dtRealS) {
     // Subcycle: bounded by disc CFL plus an integrator safety on orbits (~ 0.1 of inner orbital period).
     const Pinner = TWO_PI * Math.sqrt(Math.pow(0.3 * AU, 3) / (G * Mstar));
     const phys = sim.cfg.physics;
-    while (remaining > 0) {
-        const dtDisc = phys.photoEvap ? discDt(sim.disc) : discDt(sim.disc);
+    let steps = 0;
+    while (remaining > 0 && steps < MAX_SUBSTEPS_PER_FRAME) {
+        steps++;
+        const dtDisc = discDt(sim.disc);
         const dtOrb  = 0.05 * Pinner;
         const dt     = Math.min(remaining, dtDisc, dtOrb, 1e5 * YEAR);
 
