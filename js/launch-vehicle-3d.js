@@ -29,7 +29,6 @@
  */
 
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { buildStarship } from './launch-vehicle-starship.js';
 import { buildFalcon9 } from './launch-vehicle-falcon9.js';
 import { buildPad as buildPadInfra, tickBeacons } from './launch-pad-3d.js';
@@ -1156,22 +1155,191 @@ export function initVehicleCanvas(canvas, opts = {}) {
         padState = built;
     }
 
-    // ── OrbitControls ──────────────────────────────────────────────────────
-    // Wheel-zoom is OFF so the canvas doesn't hijack page scroll.
-    // Pan is OFF so the user can't drag controls.target into the launch
-    // tower. Azimuth bounds are set per-vehicle in setVehicle() because
-    // tower position varies (LC-39A FSS at -X, Falcon TEL strongback at
-    // -Z) — see PAD_AZIMUTH_BOUNDS.
-    const controls = new OrbitControls(camera, canvas);
-    controls.enableDamping       = true;
-    controls.dampingFactor       = 0.08;
-    controls.enableZoom          = false;
-    controls.enablePan           = false;
-    controls.maxPolarAngle       = Math.PI * 0.96;
-    controls.minPolarAngle       = 0.05;
-    controls.rotateSpeed         = 0.8;
-    controls.autoRotate          = !!opts.autoRotate;
-    controls.autoRotateSpeed     = 0.45;
+    // ── God-mode flight camera ─────────────────────────────────────────────
+    // OrbitControls is gone. This is a free-fly camera with FPS-style
+    // mouse-look + WASD/QE keyboard, plus snap-to-preset on view buttons.
+    //
+    // Inputs:
+    //   Left-click drag on canvas → mouse-look (yaw + pitch).
+    //   W / S                     → forward / back along view direction.
+    //   A / D                     → strafe left / right.
+    //   Q / E                     → down / up in world Y.
+    //   Shift                     → sprint (3× speed).
+    //   Mouse wheel on canvas     → smooth dolly along view direction.
+    //   Preset buttons / +/− / FOV / recenter → snap or tween to a frame.
+    //
+    // State held in `cam`:
+    //   pos   (Vector3) — camera world position. camera.position is written
+    //                     from this each frame.
+    //   yaw   (rad)     — rotation around world Y. 0 = looking toward -Z.
+    //   pitch (rad)     — rotation around camera X. +ve = looking up.
+    //                     Clamped to ±(π/2 − 0.02) so we never gimbal-flip.
+    //   keys  (object)  — current pressed state for movement keys.
+    //
+    // `controls` is kept as a compat shim with .target (Vector3) so the
+    // existing liftoff / view-tween code can continue to write to it. The
+    // target is purely informational — camera orientation comes from
+    // (yaw, pitch), not from look-at.
+    const cam = {
+        pos:       new THREE.Vector3(0, 30, 80),
+        yaw:       0,
+        pitch:     0,
+        keys:      Object.create(null),
+        dragging:  false,
+        lastX:     0,
+        lastY:     0,
+        moveSpeed: 80,       // m/s base
+        sprintMul: 3,
+        lookSpeed: 0.003,    // rad/px of mouse drag
+        dollyStep: 6,        // m per wheel notch
+        pitchMin: -Math.PI / 2 + 0.02,
+        pitchMax:  Math.PI / 2 - 0.02,
+    };
+
+    const _fwd   = new THREE.Vector3();
+    const _right = new THREE.Vector3();
+    const _move  = new THREE.Vector3();
+
+    function camForward(out) {
+        return out.set(
+            -Math.sin(cam.yaw) * Math.cos(cam.pitch),
+             Math.sin(cam.pitch),
+            -Math.cos(cam.yaw) * Math.cos(cam.pitch),
+        );
+    }
+    function camRight(out) {
+        return out.set(Math.cos(cam.yaw), 0, -Math.sin(cam.yaw)).normalize();
+    }
+    function setLookAt(targetVec) {
+        const dir = new THREE.Vector3().subVectors(targetVec, cam.pos);
+        if (dir.lengthSq() < 1e-6) return;
+        dir.normalize();
+        cam.yaw   = Math.atan2(-dir.x, -dir.z);
+        cam.pitch = THREE.MathUtils.clamp(Math.asin(dir.y), cam.pitchMin, cam.pitchMax);
+    }
+    function applyCamToThree() {
+        camera.position.copy(cam.pos);
+        camera.rotation.set(cam.pitch, cam.yaw, 0, 'YXZ');
+    }
+
+    // Compat shim — old code reads/writes `controls.target` and calls
+    // `controls.update()`. We give it a real Vector3 target (for liftoff
+    // bookkeeping) and an update() that runs the god-camera tick.
+    const controls = {
+        target:        new THREE.Vector3(0, 0, 0),
+        autoRotate:    false,
+        autoRotateSpeed: 0,
+        minDistance:   6,
+        maxDistance:   2000,
+        // Unused fields kept so legacy code doesn't crash if it sets them.
+        minAzimuthAngle: -Infinity, maxAzimuthAngle: Infinity,
+        minPolarAngle:   0,         maxPolarAngle:   Math.PI,
+        enableDamping: false, dampingFactor: 0,
+        enableZoom: false, enablePan: false, rotateSpeed: 0,
+        _dt: 0,
+        update() {
+            const dt = this._dt;
+            // Movement keys → cam.pos.
+            camForward(_fwd);
+            camRight(_right);
+            _move.set(0, 0, 0);
+            if (cam.keys.w) _move.add(_fwd);
+            if (cam.keys.s) _move.sub(_fwd);
+            if (cam.keys.a) _move.sub(_right);
+            if (cam.keys.d) _move.add(_right);
+            if (cam.keys.q) _move.y -= 1;
+            if (cam.keys.e) _move.y += 1;
+            if (_move.lengthSq() > 0 && dt > 0) {
+                const sprint = cam.keys.shift ? cam.sprintMul : 1;
+                _move.normalize().multiplyScalar(cam.moveSpeed * sprint * dt);
+                cam.pos.add(_move);
+            }
+            applyCamToThree();
+        },
+        dispose() {
+            canvas.removeEventListener('pointerdown', onPointerDown);
+            canvas.removeEventListener('pointermove', onPointerMove);
+            canvas.removeEventListener('pointerup',   onPointerUp);
+            canvas.removeEventListener('pointercancel', onPointerUp);
+            canvas.removeEventListener('wheel',       onWheel);
+            canvas.removeEventListener('contextmenu', onContextMenu);
+            window.removeEventListener('keydown',     onKeyDown);
+            window.removeEventListener('keyup',       onKeyUp);
+            window.removeEventListener('blur',        onBlur);
+        },
+    };
+
+    // ── Input handlers ─────────────────────────────────────────────────────
+    function onPointerDown(e) {
+        if (e.button !== 0) return;              // left-click only
+        cam.dragging = true;
+        cam.lastX = e.clientX;
+        cam.lastY = e.clientY;
+        try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+        canvas.focus();
+    }
+    function onPointerMove(e) {
+        if (!cam.dragging) return;
+        const dx = e.clientX - cam.lastX;
+        const dy = e.clientY - cam.lastY;
+        cam.lastX = e.clientX;
+        cam.lastY = e.clientY;
+        cam.yaw   -= dx * cam.lookSpeed;
+        cam.pitch -= dy * cam.lookSpeed;
+        cam.pitch  = THREE.MathUtils.clamp(cam.pitch, cam.pitchMin, cam.pitchMax);
+    }
+    function onPointerUp(e) {
+        if (!cam.dragging) return;
+        cam.dragging = false;
+        try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
+    }
+    function onContextMenu(e) {
+        // Suppress right-click menu inside canvas so a stray right-click
+        // doesn't break flow. Doesn't affect anywhere else on the page.
+        e.preventDefault();
+    }
+    function onWheel(e) {
+        // Smooth dolly along view direction. Negative deltaY (scroll up)
+        // moves forward. We do preventDefault here because we want the
+        // wheel to drive the camera when the cursor is on the canvas.
+        e.preventDefault();
+        camForward(_fwd);
+        const dir = e.deltaY > 0 ? -1 : 1;
+        cam.pos.addScaledVector(_fwd, dir * cam.dollyStep);
+    }
+    function setKey(key, down) {
+        const k = key.length === 1 ? key.toLowerCase() : key;
+        if (k === 'Shift' || k === 'shift') { cam.keys.shift = down; return; }
+        if ('wasdqe'.includes(k)) cam.keys[k] = down;
+    }
+    function onKeyDown(e) {
+        // Only intercept movement keys when the canvas has focus, so
+        // typing in forms anywhere else on the page is unaffected.
+        if (document.activeElement !== canvas) return;
+        setKey(e.key, true);
+        if ('wasdqeWASDQE'.includes(e.key) || e.key === 'Shift') e.preventDefault();
+    }
+    function onKeyUp(e) {
+        setKey(e.key, false);
+    }
+    function onBlur() {
+        // Window lost focus — release all held keys so the camera doesn't
+        // glide off forever when the user alt-tabs mid-press.
+        for (const k of Object.keys(cam.keys)) cam.keys[k] = false;
+        cam.dragging = false;
+    }
+
+    canvas.tabIndex = 0;                          // make focusable
+    canvas.style.outline = 'none';                // no focus ring
+    canvas.addEventListener('pointerdown',   onPointerDown);
+    canvas.addEventListener('pointermove',   onPointerMove);
+    canvas.addEventListener('pointerup',     onPointerUp);
+    canvas.addEventListener('pointercancel', onPointerUp);
+    canvas.addEventListener('wheel',         onWheel, { passive: false });
+    canvas.addEventListener('contextmenu',   onContextMenu);
+    window.addEventListener('keydown',       onKeyDown);
+    window.addEventListener('keyup',         onKeyUp);
+    window.addEventListener('blur',          onBlur);
 
     // ── Vehicle state (mutable — replaced by setVehicle) ───────────────────
     let current = {
@@ -1187,21 +1355,15 @@ export function initVehicleCanvas(canvas, opts = {}) {
     let currentViewName = 'threequarter';
 
     // ── View tween state ───────────────────────────────────────────────────
-    // setView fires ONE tween (carrying both pos and target as a 6-vec) so
-    // cancellation is a single handle, not a counted pair. autoRotate is
-    // parked across a tween because it'd fight the direct camera writes,
-    // and restored on completion. setAutoRotate keeps the saved value in
-    // sync so a user toggle mid-tween isn't clobbered on restore.
+    // setView fires ONE tween (carrying both cam.pos and controls.target as
+    // a 6-vec) so cancellation is a single handle. cameraFollowSuppressed
+    // gates applyMissionState's per-frame Δy add during the tween, since
+    // the tween itself bakes the live altitude offset into each step.
     let activeTween = null;
-    let savedAutoRotate = null;
     let cameraFollowSuppressed = false;
 
     function cancelViewTween() {
         if (activeTween) { activeTween.cancelled = true; activeTween = null; }
-        if (savedAutoRotate !== null) {
-            controls.autoRotate = savedAutoRotate;
-            savedAutoRotate = null;
-        }
         cameraFollowSuppressed = false;
     }
 
@@ -1289,42 +1451,19 @@ export function initVehicleCanvas(canvas, opts = {}) {
         const padOpts = { boosterDiameter: parseFloat(v.info?.diameter_m) || undefined };
         swapPad(v.padId, padOpts);
 
-        // A new vehicle starts framed from the canonical 3/4 angle so the
-        // UI highlight (which the host page resets to 3/4 on every vehicle
-        // pick) always matches what the camera is doing.
+        // A new vehicle starts framed from the canonical 3/4 angle.
         currentViewName = 'threequarter';
-        // Re-fit camera + shadow camera using the vehicle's actual bbox.
         const aspect = camera.aspect || 16/10;
         const view = frameForView(currentViewName, current, cameraFov, aspect);
-        camera.position.set(...view.pos);
+        cam.pos.set(...view.pos);
         controls.target.set(...view.target);
-        // Distance bounds: tight enough to crop in on engines, loose enough
-        // to take in the full pad complex with room to breathe.
-        controls.minDistance = Math.max(view.dist * 0.18, 6);
-        controls.maxDistance = view.dist * 5.0;
-        // Azimuth clamp keeps the camera on the rocket's "viewing side" so
-        // orbit-drag can't swing the camera behind the launch tower. Azimuth
-        // convention: 0 = +Z (front), +π/2 = +X (right side), π = -Z (back),
-        // -π/2 = -X (left side). Towers live on:
-        //   lc39a / mechazilla / generic → -X  → safe arc [0, π]
-        //   falcon_tel                   → -Z  → safe arc [-π/2, π/2]
-        const towerAtNegX = (v.padId === 'lc39a'
-                          || v.padId === 'mechazilla'
-                          || v.padId === 'generic'
-                          || !v.padId);
-        if (towerAtNegX) {
-            controls.minAzimuthAngle = 0;
-            controls.maxAzimuthAngle = Math.PI;
-        } else {
-            // falcon_tel + any future -Z-tower pad
-            controls.minAzimuthAngle = -Math.PI / 2;
-            controls.maxAzimuthAngle =  Math.PI / 2;
-        }
+        setLookAt(controls.target);
+        applyCamToThree();
         fitShadowCameraToVehicle(current);
 
-        // Capture camera/target Y for liftoff offset math.
+        // Capture baseline Y so the liftoff Δ-follow can re-baseline cleanly.
         current.baseTargetY = controls.target.y;
-        current.baseCamY    = camera.position.y;
+        current.baseCamY    = cam.pos.y;
 
         if (typeof opts.onVehicleChange === 'function') {
             opts.onVehicleChange({ id, variant, info: v.info });
@@ -1364,16 +1503,15 @@ export function initVehicleCanvas(canvas, opts = {}) {
             current.root.position.z = 0;
         }
 
-        // Camera follow: target rises with the vehicle, camera position
-        // rises by the same Δ so the user-chosen orbital framing is
-        // preserved. lastAltitude tracks last-applied altitude so we only
-        // shift by the *delta* each frame. Suppressed during a view-tween
-        // so the tween's absolute writes don't race this delta-add.
+        // Camera follow: target rises with the vehicle, cam.pos rises by
+        // the same Δ so the user's framing is preserved. Suppressed during
+        // a view-tween so the tween's absolute writes don't race this
+        // delta-add.
         if (!cameraFollowSuppressed) {
             const dy = s.altitude - current.lastAltitude;
             if (dy !== 0) {
-                controls.target.y    += dy;
-                camera.position.y    += dy;
+                controls.target.y += dy;
+                cam.pos.y         += dy;
             }
         }
         current.lastAltitude = s.altitude;
@@ -1459,15 +1597,12 @@ export function initVehicleCanvas(canvas, opts = {}) {
         // residual so it can't race the manual y-writes next frame.
         current.lastAltitude = 0;
         controls.target.y    = current.baseTargetY;
-        camera.position.y    = current.baseCamY;
-        controls.update();
+        cam.pos.y            = current.baseCamY;
 
         missionClock.start();
         missionActive = true;
         // Force plume on so you can actually see the engines fire.
         for (const p of current.plumes) p.visible = true;
-        // Disable auto-rotate so we don't fight the camera follow.
-        controls.autoRotate = false;
     }
 
     function cancelLiftoff() {
@@ -1486,16 +1621,10 @@ export function initVehicleCanvas(canvas, opts = {}) {
         current.root.position.set(0, current.basePadY, 0);
         current.root.rotation.set(0, 0, 0);
 
-        // Restore camera/target to the baseline captured in setVehicle().
-        // Symmetric with liftoff() — subtracting lastAltitude only undoes
-        // the follow's own translation and ignores any vertical drift the
-        // user (or damping) introduced mid-ascent, which compounds across
-        // launch/cancel cycles. Snapping y back to base zeroes that drift.
-        // X/Z are left so the user's azimuth/orbit survives the cancel.
+        // Restore baseline Y so subsequent launches start clean.
         controls.target.y    = current.baseTargetY;
-        camera.position.y    = current.baseCamY;
+        cam.pos.y            = current.baseCamY;
         current.lastAltitude = 0;
-        controls.update();
 
         // Restore scene state
         trail.visible = false;
@@ -1540,15 +1669,10 @@ export function initVehicleCanvas(canvas, opts = {}) {
 
     function tick() {
         if (!running) { rafId = 0; return; }
-        clock.getDelta();
+        const dt = clock.getDelta();
         const t = clock.elapsedTime;
+        controls._dt = dt;
         controls.update();
-        // Belt-and-suspenders: snap target back onto the rocket's vertical
-        // axis every frame. If anything (autoRotate damping, a stray pan
-        // event, an inertia tick) nudges x/z off, the next frame puts it
-        // back. Y is left free — applyMissionState writes it during liftoff.
-        controls.target.x = 0;
-        controls.target.z = 0;
         stars.material.uniforms.uTime.value = t;
 
         // Liftoff state — advance clock, apply pose/sky/pad/trail, drive plume throttle.
@@ -1605,12 +1729,10 @@ export function initVehicleCanvas(canvas, opts = {}) {
         const aspect = camera.aspect || 16/10;
         const base   = frameForView(name, current, cameraFov, aspect);
 
-        savedAutoRotate = controls.autoRotate;
-        controls.autoRotate = false;
         cameraFollowSuppressed = missionActive;
 
         const from = [
-            camera.position.x, camera.position.y, camera.position.z,
+            cam.pos.x, cam.pos.y, cam.pos.z,
             controls.target.x, controls.target.y, controls.target.z,
         ];
         const toFn = () => {
@@ -1623,58 +1745,40 @@ export function initVehicleCanvas(canvas, opts = {}) {
 
         activeTween = tween(from, toFn, 800,
             v => {
-                camera.position.set(v[0], v[1], v[2]);
+                cam.pos.set(v[0], v[1], v[2]);
                 controls.target.set(v[3], v[4], v[5]);
+                setLookAt(controls.target);
             },
             () => {
                 if (missionActive) {
                     current.lastAltitude = missionClock.snapshot().altitude;
                 }
                 cameraFollowSuppressed = false;
-                if (savedAutoRotate !== null) {
-                    controls.autoRotate = savedAutoRotate;
-                    savedAutoRotate = null;
-                }
                 activeTween = null;
-                controls.update();
             }
         );
     }
 
-    // Dolly along the current view direction. factor < 1 zooms in, > 1 out.
-    // Clamped to controls.min/maxDistance. Calls controls.update() so the
-    // OrbitControls damped spherical re-syncs and the next user drag doesn't
-    // race against a stale internal radius.
+    // God-mode dolly along the current view direction. factor < 1 zooms
+    // in (forward), > 1 zooms out (back). 20 m per click is comfortable.
     function setZoom(factor) {
-        const dir  = camera.position.clone().sub(controls.target);
-        const dist = dir.length();
-        const next = THREE.MathUtils.clamp(dist * factor,
-            controls.minDistance, controls.maxDistance);
-        dir.setLength(next);
-        camera.position.copy(controls.target).add(dir);
-        controls.update();
+        camForward(_fwd);
+        const stepM = (factor < 1) ? 20 : -20;
+        cam.pos.addScaledVector(_fwd, stepM);
     }
 
     function recenter() {
         setView(currentViewName || 'threequarter');
     }
 
-    // FOV swap with dolly compensation so the subject subtends the same
-    // vertical angle. Preserves any user pan/orbit.
+    // FOV swap. No dolly compensation — in god-mode the user owns position
+    // explicitly; FOV is purely a lens-swap.
     function setFOV(deg) {
         const next = THREE.MathUtils.clamp(deg, 18, 80);
         if (Math.abs(next - cameraFov) < 0.5) return;
-        const prevHalf = Math.tan((cameraFov * Math.PI / 180) / 2);
-        const nextHalf = Math.tan((next      * Math.PI / 180) / 2);
         cameraFov = next;
         camera.fov = cameraFov;
         camera.updateProjectionMatrix();
-        const dir  = camera.position.clone().sub(controls.target);
-        const dist = dir.length();
-        dir.setLength(THREE.MathUtils.clamp(dist * (prevHalf / nextHalf),
-            controls.minDistance, controls.maxDistance));
-        camera.position.copy(controls.target).add(dir);
-        controls.update();
     }
     function cycleFOV() {
         const cycle = [28, 38, 52];
@@ -1689,13 +1793,9 @@ export function initVehicleCanvas(canvas, opts = {}) {
     }
     function setPad(on) { if (padState.root) padState.root.visible = !!on; }
 
-    // Mid-tween toggle updates the saved value so the restore lands on the
-    // user's intent, not the pre-tween state.
-    function setAutoRotate(on) {
-        const v = !!on;
-        if (savedAutoRotate !== null) savedAutoRotate = v;
-        else                          controls.autoRotate = v;
-    }
+    // No-op in god-mode — the Auto button toggles its CSS state but doesn't
+    // do anything to the camera. Left as a stub so the host UI doesn't break.
+    function setAutoRotate(_on) {}
     function setVectors(on) {
         vectorsOn = !!on;
         if (current.thrustOverlay) current.thrustOverlay.visible = vectorsOn;
