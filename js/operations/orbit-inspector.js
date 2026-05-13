@@ -32,6 +32,7 @@ import { propagate, tleEpochToJd, getWasmSgp4 } from '../satellite-tracker.js';
 import { decayWithSigma, deltaAPerDay, fmtLifetime } from './decision-deck.js';
 import { provStore } from './provenance.js';
 import { computePills, renderPills } from './satellite-pills.js';
+import { annotate as annotateDebris, hazardEnergyMJ } from '../debris-catalog.js';
 
 const MIN_PER_DAY = 1440;
 const RE_KM       = 6378.135;     // WGS-72, matches the SGP4 propagator
@@ -343,6 +344,44 @@ export function mountOrbitInspector(opts = {}) {
             { max: 5 },
         );
 
+        // Physical-scale roll-up. Uses the same `annotate()` the
+        // upper-atmosphere globe runs over every debris probe (family
+        // attribution + size class). Renders an inline block only
+        // when the classifier confidently attributed the object;
+        // otherwise (active payload, unclassified) we leave it off
+        // rather than print a default-medium guess.
+        let physicalHtml = '';
+        try {
+            const annot = annotateDebris({ name: sat.name, noradId: tle.norad_id });
+            const family = annot?.family;
+            const size   = annot?.size;
+            if (family && family.id !== 'unknown' && size) {
+                const energyMJ = Number.isFinite(annot.hazardMJ)
+                    ? annot.hazardMJ
+                    : hazardEnergyMJ(size.massKg);
+                physicalHtml = `
+                    <div class="op-orbit-rates op-orbit-physical">
+                        <div class="op-orbit-rate-title" title="Family attribution + size class from name + NORAD range. Mass and RCS are bucket medians, not measurements.">
+                            Physical (est.)
+                            <span class="op-orbit-rate-conds">${escapeHtml(family.name)}</span>
+                        </div>
+                        <div title="Conventional debris size bin (Liou &amp; Johnson 2006).">
+                            <span class="op-orbit-tag">class</span>${escapeHtml(size.class)}<span class="op-orbit-unit"> · ${escapeHtml(size.rangeM)}</span>
+                        </div>
+                        <div title="Median mass for the size class. Off by ±1× for individual objects.">
+                            <span class="op-orbit-tag">mass</span>~${size.massKg}<span class="op-orbit-unit"> kg</span>
+                        </div>
+                        <div title="Median radar cross-section for the size class.">
+                            <span class="op-orbit-tag">RCS</span>${size.rcsM2}<span class="op-orbit-unit"> m²</span>
+                        </div>
+                        <div title="Kinetic energy at typical 14 km/s LEO closing speed — proxy for catastrophic-impact tier.">
+                            <span class="op-orbit-tag">KE</span>${energyMJ >= 100 ? energyMJ.toFixed(0) : energyMJ.toFixed(1)}<span class="op-orbit-unit"> MJ</span>
+                        </div>
+                    </div>
+                `;
+            }
+        } catch (_) { /* annotate is best-effort; skip the block on any failure */ }
+
         const cell = (label, value, unit = '', tip = '') => `
             <tr title="${escapeHtml(tip)}">
                 <td class="op-orbit-cell-k">${label}</td>
@@ -390,10 +429,15 @@ export function mountOrbitInspector(opts = {}) {
 
             ${renderDragSection(tle)}
 
+            ${physicalHtml}
+
             <div class="op-orbit-caveat">
                 Mean elements (TLE / Brouwer-Lyddane). Drag rate +
                 lifetime use the same King-Hele-style surrogate as
                 Decay Watch, modulated by live SWPC F10.7 / Ap.
+                Physical roll-up is bucket-median (small / medium /
+                large), not measurement — replace with SATCAT
+                <code>RCS_SIZE</code> when wired.
             </div>
         `;
     }
