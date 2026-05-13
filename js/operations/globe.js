@@ -51,7 +51,14 @@ export class OperationsGlobe {
         this.sunLight = new THREE.DirectionalLight(0xffffff, 1.05);
         this.sunLight.position.set(10, 2, 3);
         this.scene.add(this.sunLight);
-        this._sunSceneV = new THREE.Vector3();
+        this._sunSceneV   = new THREE.Vector3();
+        // Unit-vector direction from Earth centre to Sun in scene
+        // coordinates, refreshed each frame in `_frame()`. Exposed via
+        // `getSunDirection()` so renderers that need lighting-aware
+        // geometry (e.g. the Starlink solar-array tracker in
+        // `operations/starlink-model.js`) can read the same value the
+        // directional light uses, without recomputing GMST + ephemeris.
+        this._sunSceneDir = new THREE.Vector3(1, 0, 0);
 
         const earthGeo = new THREE.SphereGeometry(EARTH_RADIUS_SCENE, 64, 64);
         const earthTex = new THREE.TextureLoader().load(
@@ -88,6 +95,15 @@ export class OperationsGlobe {
     getEarthRadius() { return EARTH_RADIUS_SCENE; }
 
     /**
+     * Current scene-space unit vector pointing from Earth centre to
+     * the Sun. Live reference — callers should NOT mutate. Refreshed
+     * each frame inside `_frame()` before tick listeners run, so any
+     * onTick handler sees the same direction the directional light is
+     * using this frame.
+     */
+    getSunDirection() { return this._sunSceneDir; }
+
+    /**
      * Register a listener that runs once per frame inside the render loop
      * with the current simTimeMs. Returns an unsubscribe.
      */
@@ -120,7 +136,14 @@ export class OperationsGlobe {
         this.earthMesh.rotation.y = geo.greenwichSiderealTime(simDate);
 
         const sun = sunDirectionEci(simDate);
-        this._sunSceneV.set(sun.x, sun.z, -sun.y).multiplyScalar(10);
+        // (sun.x, sun.z, -sun.y) is the unit Sun direction in scene
+        // coords (ECI → scene-frame flip matches what the rest of the
+        // scene uses). The directional light wants a position, so we
+        // multiply by 10 to keep its world-space transform away from
+        // the origin; the unit direction is cached separately for
+        // renderers that need geometric sun-tracking math.
+        this._sunSceneDir.set(sun.x, sun.z, -sun.y);
+        this._sunSceneV.copy(this._sunSceneDir).multiplyScalar(10);
         this.sunLight.position.copy(this._sunSceneV);
 
         for (const fn of this._tickListeners) {
