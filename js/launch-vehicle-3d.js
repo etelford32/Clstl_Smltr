@@ -866,11 +866,20 @@ function computeVehicleBBox(vehicleRoot) {
     const bbox = new THREE.Box3();
     vehicleRoot.traverse(o => {
         if (!o.isMesh) return;
-        // Skip plume groups (children named 'Plume') so an invisible cone
-        // doesn't bloat the bbox.
+        // Skip non-rocket helpers so they don't bloat the framing bbox:
+        //   Plume         — invisible engine cone, off by default but huge
+        //                   when on.
+        //   ThrustOverlay — debug arrows that extend ~18 m DOWN from each
+        //                   engine. Always added to v.root before bbox is
+        //                   computed, and although invisible by default
+        //                   their geometry is in the world-bounds traversal.
+        //                   Without the skip the Shuttle SRB arrows pushed
+        //                   bbox.min.y to ~-16 m, shifting target.y down
+        //                   ~13 m and biasing the whole frame toward the
+        //                   booster + launch tower.
         let p = o;
         while (p) {
-            if (p.name === 'Plume') return;
+            if (p.name === 'Plume' || p.name === 'ThrustOverlay') return;
             p = p.parent;
         }
         bbox.expandByObject(o);
@@ -1150,11 +1159,9 @@ export function initVehicleCanvas(canvas, opts = {}) {
     // ── OrbitControls ──────────────────────────────────────────────────────
     // Wheel-zoom is OFF so the canvas doesn't hijack page scroll.
     // Pan is OFF so the user can't drag controls.target into the launch
-    // tower (FSS at LC-39A is at (-22,4,0); Mechazilla tower at (-16,0,0)).
-    // Once target moved into a tower, the entire orbit sphere lived inside
-    // the tower volume and every frame looked like an orange beam.
-    // Azimuth is clamped to a ~180° arc on the rocket's viewing side so
-    // orbit-drag also can't swing the camera behind the tower.
+    // tower. Azimuth bounds are set per-vehicle in setVehicle() because
+    // tower position varies (LC-39A FSS at -X, Falcon TEL strongback at
+    // -Z) — see PAD_AZIMUTH_BOUNDS.
     const controls = new OrbitControls(camera, canvas);
     controls.enableDamping       = true;
     controls.dampingFactor       = 0.08;
@@ -1165,11 +1172,6 @@ export function initVehicleCanvas(canvas, opts = {}) {
     controls.rotateSpeed         = 0.8;
     controls.autoRotate          = !!opts.autoRotate;
     controls.autoRotateSpeed     = 0.45;
-    // Azimuth 0 = +Z (canonical viewing side); +π/2 = +X; −π/2 = −X (tower
-    // side on every supported pad). Allow ~120° each way from +Z, blocking
-    // a 120° wedge centered on the tower.
-    controls.minAzimuthAngle     = -Math.PI * 2 / 3;
-    controls.maxAzimuthAngle     =  Math.PI * 2 / 3;
 
     // ── Vehicle state (mutable — replaced by setVehicle) ───────────────────
     let current = {
@@ -1300,6 +1302,24 @@ export function initVehicleCanvas(canvas, opts = {}) {
         // to take in the full pad complex with room to breathe.
         controls.minDistance = Math.max(view.dist * 0.18, 6);
         controls.maxDistance = view.dist * 5.0;
+        // Azimuth clamp keeps the camera on the rocket's "viewing side" so
+        // orbit-drag can't swing the camera behind the launch tower. Azimuth
+        // convention: 0 = +Z (front), +π/2 = +X (right side), π = -Z (back),
+        // -π/2 = -X (left side). Towers live on:
+        //   lc39a / mechazilla / generic → -X  → safe arc [0, π]
+        //   falcon_tel                   → -Z  → safe arc [-π/2, π/2]
+        const towerAtNegX = (v.padId === 'lc39a'
+                          || v.padId === 'mechazilla'
+                          || v.padId === 'generic'
+                          || !v.padId);
+        if (towerAtNegX) {
+            controls.minAzimuthAngle = 0;
+            controls.maxAzimuthAngle = Math.PI;
+        } else {
+            // falcon_tel + any future -Z-tower pad
+            controls.minAzimuthAngle = -Math.PI / 2;
+            controls.maxAzimuthAngle =  Math.PI / 2;
+        }
         fitShadowCameraToVehicle(current);
 
         // Capture camera/target Y for liftoff offset math.
