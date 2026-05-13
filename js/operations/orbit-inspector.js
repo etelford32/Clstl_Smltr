@@ -345,50 +345,81 @@ export function mountOrbitInspector(opts = {}) {
             { max: 5 },
         );
 
-        // Physical-scale roll-up. Uses the same `annotate()` the
-        // upper-atmosphere globe runs over every debris probe (family
-        // attribution + size class). When CelesTrak SATCAT has
-        // loaded, `size.source === 'satcat'` and `size.rcsRawM2`
-        // carries the actual measured RCS — we surface both the
-        // measurement and the bucket median so the operator sees
-        // which is which.
+        // Physical-scale roll-up. Three sources, prioritised by
+        // debris-catalog.estimateSize:
+        //   hero      true (h × w × d) from hero-objects.js
+        //   satcat    upstream RCS bucket + raw RCS m²
+        //   heuristic name pattern + family attribution
         //
-        // Renders only when SATCAT gave us a real measurement OR the
-        // heuristic classified into a non-unknown family; otherwise
-        // we'd be inventing data for objects we don't know anything
-        // about.
+        // The block renders whenever we have *anything* better than
+        // a default-medium guess — hero or satcat unconditionally,
+        // heuristic only when the family is attributed.
         let physicalHtml = '';
         try {
             const annot = annotateDebris({ name: sat.name, noradId: tle.norad_id });
             const family = annot?.family;
             const size   = annot?.size;
-            const fromSatcat = size?.source === 'satcat';
-            if (size && (fromSatcat || (family && family.id !== 'unknown'))) {
+            const src    = size?.source;
+            const shouldRender = size && (
+                src === 'hero' ||
+                src === 'satcat' ||
+                (family && family.id !== 'unknown')
+            );
+            if (shouldRender) {
                 const energyMJ = Number.isFinite(annot.hazardMJ)
                     ? annot.hazardMJ
                     : hazardEnergyMJ(size.massKg);
-                const sourceLabel = fromSatcat ? 'SATCAT' : 'heuristic';
-                const sourceTitle = fromSatcat
-                    ? 'Radar cross-section measurement from CelesTrak SATCAT (upstream-authoritative).'
-                    : 'Size class inferred from object name + family attribution. Replace with SATCAT when wired.';
-                const condBadge = family?.id && family.id !== 'unknown'
-                    ? escapeHtml(family.name)
-                    : 'attributed object';
-                // RCS row: when we have the raw m², show it; otherwise
-                // the bucket median. Either way label which is which.
-                const rcsRow = Number.isFinite(size.rcsRawM2)
-                    ? `<div title="Measured RCS from SATCAT (m²).">
-                           <span class="op-orbit-tag">RCS</span>${size.rcsRawM2}<span class="op-orbit-unit"> m²</span>
-                       </div>`
-                    : `<div title="Median radar cross-section for the size class (bucket).">
-                           <span class="op-orbit-tag">RCS</span>~${size.rcsM2}<span class="op-orbit-unit"> m²</span>
-                       </div>`;
-                physicalHtml = `
-                    <div class="op-orbit-rates op-orbit-physical">
-                        <div class="op-orbit-rate-title" title="${escapeHtml(sourceTitle)}">
-                            Physical (${escapeHtml(sourceLabel)})
-                            <span class="op-orbit-rate-conds">${condBadge}</span>
+                const sourceLabel =
+                      src === 'hero'   ? 'DISCOSweb / agency'
+                    : src === 'satcat' ? 'SATCAT'
+                    :                    'heuristic';
+                const sourceTitle =
+                      src === 'hero'   ? 'True dimensions from operator / agency datasheets — DISCOSweb-equivalent.'
+                    : src === 'satcat' ? 'Radar cross-section measurement from CelesTrak SATCAT.'
+                    :                    'Size class inferred from object name + family attribution.';
+                const condBadge = src === 'hero' && size.match
+                    ? `hero match (${escapeHtml(size.match)})`
+                    : family?.id && family.id !== 'unknown'
+                        ? escapeHtml(family.name)
+                        : 'attributed object';
+
+                // Hero rows: true bounding-box + span + real mass +
+                // measured (or face-area-derived) RCS. We retire the
+                // bucket-median rows when we have the real ones.
+                let coreRows;
+                if (src === 'hero' && size.dimensions_m) {
+                    const d = size.dimensions_m;
+                    const dimStr = `${d.h.toFixed(1)} × ${d.w.toFixed(1)} × ${d.d.toFixed(1)}`;
+                    const spanRow = Number.isFinite(size.span_m)
+                        ? `<div title="Tip-to-tip span including deployed solar arrays / antennas.">
+                               <span class="op-orbit-tag">span</span>${size.span_m.toFixed(1)}<span class="op-orbit-unit"> m</span>
+                           </div>`
+                        : '';
+                    const rcsRow = Number.isFinite(size.rcsM2) && size.rcsM2 > 0
+                        ? `<div title="Public RCS (operator datasheet) or face-area estimate when measurement isn't published.">
+                               <span class="op-orbit-tag">RCS</span>${size.rcsM2}<span class="op-orbit-unit"> m²</span>
+                           </div>`
+                        : '';
+                    coreRows = `
+                        <div title="True bounding-box dimensions (h × w × d) in metres — fully-deployed.">
+                            <span class="op-orbit-tag">size</span>${dimStr}<span class="op-orbit-unit"> m</span>
                         </div>
+                        <div title="Published mass — design or operating value.">
+                            <span class="op-orbit-tag">mass</span>${size.massKg.toLocaleString()}<span class="op-orbit-unit"> kg</span>
+                        </div>
+                        ${spanRow}
+                        ${rcsRow}
+                    `;
+                } else {
+                    // SATCAT / heuristic — bucket-median rows.
+                    const rcsRow = Number.isFinite(size.rcsRawM2)
+                        ? `<div title="Measured RCS from SATCAT (m²).">
+                               <span class="op-orbit-tag">RCS</span>${size.rcsRawM2}<span class="op-orbit-unit"> m²</span>
+                           </div>`
+                        : `<div title="Median radar cross-section for the size class (bucket).">
+                               <span class="op-orbit-tag">RCS</span>~${size.rcsM2}<span class="op-orbit-unit"> m²</span>
+                           </div>`;
+                    coreRows = `
                         <div title="Conventional debris size bin (Liou &amp; Johnson 2006).">
                             <span class="op-orbit-tag">class</span>${escapeHtml(size.class)}<span class="op-orbit-unit"> · ${escapeHtml(size.rangeM)}</span>
                         </div>
@@ -396,9 +427,24 @@ export function mountOrbitInspector(opts = {}) {
                             <span class="op-orbit-tag">mass</span>~${size.massKg}<span class="op-orbit-unit"> kg</span>
                         </div>
                         ${rcsRow}
-                        <div title="Kinetic energy at typical 14 km/s LEO closing speed — proxy for catastrophic-impact tier.">
-                            <span class="op-orbit-tag">KE</span>${energyMJ >= 100 ? energyMJ.toFixed(0) : energyMJ.toFixed(1)}<span class="op-orbit-unit"> MJ</span>
+                    `;
+                }
+
+                const notesRow = src === 'hero' && size.notes
+                    ? `<div class="op-orbit-hero-note">${escapeHtml(size.notes)}</div>`
+                    : '';
+
+                physicalHtml = `
+                    <div class="op-orbit-rates op-orbit-physical">
+                        <div class="op-orbit-rate-title" title="${escapeHtml(sourceTitle)}">
+                            Physical (${escapeHtml(sourceLabel)})
+                            <span class="op-orbit-rate-conds">${condBadge}</span>
                         </div>
+                        ${coreRows}
+                        <div title="Kinetic energy at typical 14 km/s LEO closing speed — proxy for catastrophic-impact tier.">
+                            <span class="op-orbit-tag">KE</span>${energyMJ >= 100 ? Math.round(energyMJ).toLocaleString() : energyMJ.toFixed(1)}<span class="op-orbit-unit"> MJ</span>
+                        </div>
+                        ${notesRow}
                     </div>
                 `;
             }

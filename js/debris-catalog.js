@@ -195,6 +195,18 @@ export function setSatcatLookup(lookup) {
 /** True iff SATCAT enrichment is active. */
 export function hasSatcat() { return _satcatLookup !== null; }
 
+// ── Optional hero-object override ──────────────────────────────────────────
+// `hero-objects.js` pushes a `lookup(rec) → heroInfo|null` here on import.
+// Used by estimateSize() as the top-priority override — when present,
+// true dimensions / mass / RCS replace any SATCAT or heuristic bucket
+// for the matched object.
+let _heroLookup = null;
+
+/** Install (or clear) the hero-objects lookup. */
+export function setHeroLookup(lookup) {
+    _heroLookup = (typeof lookup === 'function') ? lookup : null;
+}
+
 // ── Classification ─────────────────────────────────────────────────────────
 
 /**
@@ -267,23 +279,66 @@ const SIZE_CLASSES = {
 export { SIZE_CLASSES };
 
 /**
- * Estimate size class for a record. SATCAT first when available (the
- * upstream catalog carries an RCS measurement bucketed against the
- * Liou & Johnson 2006 thresholds); name + family heuristic otherwise.
+ * Estimate size class for a record. Three-tier override:
+ *   1. hero-objects.js   — public-source true dimensions (Envisat,
+ *                          ISS, Hubble, SL-16/SL-8/Centaur family,
+ *                          …). Wins absolutely.
+ *   2. SATCAT            — upstream RCS measurement bucket.
+ *   3. heuristic         — name + family fallback.
  *
  * Returned shape always carries a `source` tag so the UI can be
  * honest about where the bucket came from:
- *   'satcat'    — RCS bucket from CelesTrak SATCAT (preferred)
+ *   'hero'      — true dimensions from the hero-objects table
+ *   'satcat'    — RCS bucket from CelesTrak SATCAT
  *   'heuristic' — derived from name pattern + family attribution
+ *
+ * `source === 'hero'` also brings:
+ *   dimensions_m { h, w, d }   true bounding-box dimensions (m)
+ *   span_m                     tip-to-tip span if published
+ *   massKg                     OVERRIDDEN with the real value
+ *   rcsM2                      OVERRIDDEN with measurement when known
+ *   notes                      operator-facing comment
+ *   match                      'norad' | 'name'
  *
  * @returns {{
  *   class:string, rangeM:string, rcsM2:number, massKg:number,
- *   pointPx:number, source:string, rcsRawM2?:number
+ *   pointPx:number, source:string, rcsRawM2?:number,
+ *   dimensions_m?:{h:number,w:number,d:number}, span_m?:number,
+ *   notes?:string, match?:string
  * }}
  */
 export function estimateSize(rec, family) {
     const id   = Number(rec.noradId ?? rec.norad_id);
     const name = String(rec.name ?? '').toUpperCase();
+
+    // ── Hero path ────────────────────────────────────────────────
+    // Lazy-loaded so a consumer that doesn't ship hero-objects.js
+    // (or fails to import it) doesn't break debris-catalog. The
+    // import is synchronous via the registered _heroLookup setter
+    // below — same shape trick as the SATCAT lookup.
+    if (_heroLookup && (Number.isFinite(id) || name)) {
+        const hero = _heroLookup(rec);
+        if (hero) {
+            // Compute the bucket class from the real numbers. Prefer
+            // hero's own opinion (_heroClass) if it was attached;
+            // otherwise SIZE_CLASSES.large for ANY hero match since
+            // every entry in the current table is physically large
+            // (smallest is the SL-8 R/B at 6 × 2.4 m, RCS ≈ 14 m²).
+            const cls  = hero.heroClass || 'large';
+            const base = SIZE_CLASSES[cls] || SIZE_CLASSES.large;
+            return {
+                class:        cls,
+                ...base,
+                massKg:       hero.mass_kg ?? base.massKg,
+                rcsM2:        hero.rcs_m2  ?? base.rcsM2,
+                source:       'hero',
+                dimensions_m: hero.dims_m,
+                span_m:       hero.span_m,
+                notes:        hero.notes,
+                match:        hero.match,
+            };
+        }
+    }
 
     // ── SATCAT path ───────────────────────────────────────────────
     // When the loader has primed `_satcatLookup`, the upstream bucket

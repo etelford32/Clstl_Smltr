@@ -300,8 +300,13 @@ export function computePills(sat, ctx = {}) {
         });
         const family = annot?.family;
         const size   = annot?.size;
-        const fromSatcat = size?.source === 'satcat';
-        if (size && (fromSatcat || (family && family.id !== 'unknown'))) {
+        const src    = size?.source;
+        const shouldFire = size && (
+            src === 'hero' ||
+            src === 'satcat' ||
+            (family && family.id !== 'unknown')
+        );
+        if (shouldFire) {
             const cls = size.class;
             const label = cls === 'large'  ? 'Large'
                         : cls === 'medium' ? 'Medium'
@@ -309,20 +314,26 @@ export function computePills(sat, ctx = {}) {
             const tone  = cls === 'large'  ? 'warn'
                         : cls === 'medium' ? 'neutral'
                         :                    'muted';
-            // Title carries the source so a mouseover answers "where
-            // did this size come from?" — measurement vs. inferred.
-            const rcsBit = Number.isFinite(size.rcsRawM2)
-                ? `RCS ${size.rcsRawM2} m² (SATCAT)`
-                : `RCS ≈ ${size.rcsM2} m² (${size.source})`;
-            const famBit = family?.name && family.id !== 'unknown'
-                ? ` · ${family.name}`
-                : '';
-            pills.push({
-                id:    `size-${cls}`,
-                label,
-                tone,
-                title: `${size.rangeM} · ~${size.massKg} kg · ${rcsBit}${famBit}.`,
-            });
+            // Title flavour follows source. Hero entries carry true
+            // dimensions; SATCAT carries a measured RCS; heuristic
+            // carries the bucket median.
+            let title;
+            if (src === 'hero' && size.dimensions_m) {
+                const d = size.dimensions_m;
+                const dimStr = `${d.h.toFixed(1)}×${d.w.toFixed(1)}×${d.d.toFixed(1)} m`;
+                const spanBit = Number.isFinite(size.span_m)
+                    ? ` · span ${size.span_m.toFixed(1)} m`
+                    : '';
+                title = `${dimStr}${spanBit} · ${size.massKg.toLocaleString()} kg (operator datasheet).`;
+            } else if (Number.isFinite(size.rcsRawM2)) {
+                title = `${size.rangeM} · ~${size.massKg} kg · RCS ${size.rcsRawM2} m² (SATCAT).`;
+            } else {
+                const famBit = family?.name && family.id !== 'unknown'
+                    ? ` · ${family.name}`
+                    : '';
+                title = `${size.rangeM} · ~${size.massKg} kg · RCS ≈ ${size.rcsM2} m² (heuristic)${famBit}.`;
+            }
+            pills.push({ id: `size-${cls}`, label, tone, title });
         }
     } catch (_) { /* annotate is best-effort — skip pill on any failure */ }
 

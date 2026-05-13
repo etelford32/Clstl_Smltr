@@ -1427,6 +1427,18 @@ body {
     padding: 0 5px;
     border-radius: 2px;
 }
+.op-orbit-hero-note {
+    grid-column: 1 / -1;
+    margin-top: 4px;
+    padding: 4px 6px;
+    font-size: .6rem;
+    line-height: 1.35;
+    color: #cef;
+    background: rgba(0,200,200,.04);
+    border-left: 2px solid rgba(0,200,200,.4);
+    border-radius: 0 2px 2px 0;
+    font-style: italic;
+}
 .op-orbit-reentry {
     font-family: monospace;
     font-size: .58rem;
@@ -2221,6 +2233,10 @@ import * as densityMap        from './js/operations/density-map.js';
 import { mountAristotle }     from './js/operations/aristotle.js';
 import { getGroupColorHex }   from './js/satellite-tracker.js';
 import { loadSatcat }         from './js/satcat-catalog.js';
+// Side-effect import: hero-objects self-registers with debris-catalog
+// so estimateSize() picks up true dimensions for Envisat, ISS, Hubble,
+// SL-16/SL-8 R/B families, etc. Must run before any size-class lookup.
+import './js/hero-objects.js';
 
 // Mount tooltip delegations up front so anything that binds later
 // (layer counts, future decision-deck values) is hover-ready without
