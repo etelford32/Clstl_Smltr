@@ -169,6 +169,44 @@ const _BY_ID = Object.fromEntries(DEBRIS_FAMILIES.map(f => [f.id, f]));
 /** Look up a family by id (e.g. 'fengyun-1c'). */
 export function getFamily(id) { return _BY_ID[id] || null; }
 
+// ── Optional SATCAT enrichment ─────────────────────────────────────────────
+// `satcat-catalog.js` pushes a lookup here once the bulk CelesTrak
+// SATCAT response has been parsed. When present:
+//   - classifyDebris consults SATCAT OBJECT_TYPE as a last-resort
+//     family hint (after NORAD-range + name-pattern), so anything the
+//     heuristic falls through to 'unknown' on can still pick up
+//     'rocket-bodies' or 'generic-debris' when SATCAT knows better.
+//   - estimateSize consults SATCAT RCS bucket FIRST. Upstream data
+//     trumps the heuristic where it disagrees, which is non-trivial
+//     for active payloads (lots of comsats are "large" by RCS but the
+//     name regex doesn't fire) and for old DEB fragments without a
+//     known parent event.
+//
+// The shape is whatever `satcat-catalog.buildLookup()` returns; we
+// only call `.get(noradId)` here, so any object with that method
+// works for testing.
+let _satcatLookup = null;
+
+/** Install (or clear) the SATCAT lookup. Pass `null` to detach. */
+export function setSatcatLookup(lookup) {
+    _satcatLookup = lookup || null;
+}
+
+/** True iff SATCAT enrichment is active. */
+export function hasSatcat() { return _satcatLookup !== null; }
+
+// ── Optional hero-object override ──────────────────────────────────────────
+// `hero-objects.js` pushes a `lookup(rec) → heroInfo|null` here on import.
+// Used by estimateSize() as the top-priority override — when present,
+// true dimensions / mass / RCS replace any SATCAT or heuristic bucket
+// for the matched object.
+let _heroLookup = null;
+
+/** Install (or clear) the hero-objects lookup. */
+export function setHeroLookup(lookup) {
+    _heroLookup = (typeof lookup === 'function') ? lookup : null;
+}
+
 // ── Classification ─────────────────────────────────────────────────────────
 
 /**
@@ -202,6 +240,18 @@ export function classifyDebris(rec) {
         if (f.namePattern && f.namePattern.test(name)) return f;
     }
 
+    // Third pass: SATCAT OBJECT_TYPE. Only consulted when the
+    // previous passes fall through — name pattern + NORAD range are
+    // more specific (they can pick a particular fragmentation event),
+    // SATCAT just says "rocket body" or "debris" at the taxonomic
+    // level. Promotes records the heuristic would otherwise drop
+    // into 'unknown'.
+    if (_satcatLookup && Number.isFinite(id)) {
+        const sc = _satcatLookup.get(id);
+        if (sc?.objectCategory === 'rocket-body')  return _BY_ID['rocket-bodies'];
+        if (sc?.objectCategory === 'debris')       return _BY_ID['generic-debris'];
+    }
+
     return _BY_ID['unknown'];
 }
 
@@ -229,36 +279,106 @@ const SIZE_CLASSES = {
 export { SIZE_CLASSES };
 
 /**
- * Estimate size class from family + object name.
- * Heuristic: rocket bodies and intact satellites = large; "DEB" of any
- * kind defaults to medium (tracked = ≥10 cm); explicit small-fragment
- * markers downgrade to small. Family override wins for known clouds —
- * Cosmos 1408 and FY-1C both produced primarily small/medium fragments.
+ * Estimate size class for a record. Three-tier override:
+ *   1. hero-objects.js   — public-source true dimensions (Envisat,
+ *                          ISS, Hubble, SL-16/SL-8/Centaur family,
+ *                          …). Wins absolutely.
+ *   2. SATCAT            — upstream RCS measurement bucket.
+ *   3. heuristic         — name + family fallback.
  *
- * @returns {{class:string, rangeM:string, rcsM2:number, massKg:number, pointPx:number}}
+ * Returned shape always carries a `source` tag so the UI can be
+ * honest about where the bucket came from:
+ *   'hero'      — true dimensions from the hero-objects table
+ *   'satcat'    — RCS bucket from CelesTrak SATCAT
+ *   'heuristic' — derived from name pattern + family attribution
+ *
+ * `source === 'hero'` also brings:
+ *   dimensions_m { h, w, d }   true bounding-box dimensions (m)
+ *   span_m                     tip-to-tip span if published
+ *   massKg                     OVERRIDDEN with the real value
+ *   rcsM2                      OVERRIDDEN with measurement when known
+ *   notes                      operator-facing comment
+ *   match                      'norad' | 'name'
+ *
+ * @returns {{
+ *   class:string, rangeM:string, rcsM2:number, massKg:number,
+ *   pointPx:number, source:string, rcsRawM2?:number,
+ *   dimensions_m?:{h:number,w:number,d:number}, span_m?:number,
+ *   notes?:string, match?:string
+ * }}
  */
 export function estimateSize(rec, family) {
+    const id   = Number(rec.noradId ?? rec.norad_id);
     const name = String(rec.name ?? '').toUpperCase();
 
+    // ── Hero path ────────────────────────────────────────────────
+    // Lazy-loaded so a consumer that doesn't ship hero-objects.js
+    // (or fails to import it) doesn't break debris-catalog. The
+    // import is synchronous via the registered _heroLookup setter
+    // below — same shape trick as the SATCAT lookup.
+    if (_heroLookup && (Number.isFinite(id) || name)) {
+        const hero = _heroLookup(rec);
+        if (hero) {
+            // Compute the bucket class from the real numbers. Prefer
+            // hero's own opinion (_heroClass) if it was attached;
+            // otherwise SIZE_CLASSES.large for ANY hero match since
+            // every entry in the current table is physically large
+            // (smallest is the SL-8 R/B at 6 × 2.4 m, RCS ≈ 14 m²).
+            const cls  = hero.heroClass || 'large';
+            const base = SIZE_CLASSES[cls] || SIZE_CLASSES.large;
+            return {
+                class:        cls,
+                ...base,
+                massKg:       hero.mass_kg ?? base.massKg,
+                rcsM2:        hero.rcs_m2  ?? base.rcsM2,
+                source:       'hero',
+                dimensions_m: hero.dims_m,
+                span_m:       hero.span_m,
+                notes:        hero.notes,
+                match:        hero.match,
+            };
+        }
+    }
+
+    // ── SATCAT path ───────────────────────────────────────────────
+    // When the loader has primed `_satcatLookup`, the upstream bucket
+    // wins. We still attach the bucket-median massKg/rcsM2 from
+    // SIZE_CLASSES so downstream KE / Δv calculations keep their
+    // accustomed shape, but layer `rcsRawM2` (the actual RCS in m²)
+    // alongside for code that wants the precise number.
+    if (_satcatLookup && Number.isFinite(id)) {
+        const sc = _satcatLookup.get(id);
+        if (sc?.rcsClass && SIZE_CLASSES[sc.rcsClass]) {
+            const base = SIZE_CLASSES[sc.rcsClass];
+            return {
+                class:    sc.rcsClass,
+                ...base,
+                source:   'satcat',
+                rcsRawM2: sc.rcsRawM2,
+            };
+        }
+    }
+
+    // ── Heuristic path ────────────────────────────────────────────
     if (/\bR\/?B\b|ROCKET BODY|UPPER STAGE|CENTAUR|DELTA|ARIANE/.test(name)) {
-        return { class: 'large', ...SIZE_CLASSES.large };
+        return { class: 'large', ...SIZE_CLASSES.large, source: 'heuristic' };
     }
     if (family && family.id === 'rocket-bodies') {
-        return { class: 'large', ...SIZE_CLASSES.large };
+        return { class: 'large', ...SIZE_CLASSES.large, source: 'heuristic' };
     }
     // ASAT clouds: heavy fragmentation skews small.
     if (family && (family.id === 'cosmos-1408' || family.id === 'fengyun-1c'
                 || family.id === 'mission-shakti')) {
         // 30% of ASAT fragments end up in the small-tracked tail.
-        const r = (Number(rec.noradId ?? rec.norad_id) || 0) % 100;
+        const r = (Number.isFinite(id) ? id : 0) % 100;
         return r < 30
-            ? { class: 'small',  ...SIZE_CLASSES.small  }
-            : { class: 'medium', ...SIZE_CLASSES.medium };
+            ? { class: 'small',  ...SIZE_CLASSES.small,  source: 'heuristic' }
+            : { class: 'medium', ...SIZE_CLASSES.medium, source: 'heuristic' };
     }
     if (/\bDEB\b/.test(name)) {
-        return { class: 'medium', ...SIZE_CLASSES.medium };
+        return { class: 'medium', ...SIZE_CLASSES.medium, source: 'heuristic' };
     }
-    return { class: 'medium', ...SIZE_CLASSES.medium };
+    return { class: 'medium', ...SIZE_CLASSES.medium, source: 'heuristic' };
 }
 
 /**

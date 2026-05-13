@@ -280,15 +280,16 @@ export function computePills(sat, ctx = {}) {
     const rp = regimePill(altKm);
     if (rp) pills.push(rp);
 
-    // ── Size class — sourced from debris-catalog.annotate(), which
-    // already runs for every probe on the upper-atmosphere globe.
-    // Gated on family.id !== 'unknown' so we don't bluff a size for
-    // active payloads (Starlink, GPS, …): for those the classifier
-    // falls through to the generic "medium" heuristic which would
-    // misrepresent objects we have no real size opinion on.
+    // ── Size class — sourced from debris-catalog.annotate(). Two
+    // possible providers feed it:
+    //   - SATCAT (CelesTrak's measured RCS, bucketed) when the catalog
+    //     has loaded — fires for anything with a real measurement,
+    //     including active payloads;
+    //   - heuristic (name pattern + family attribution) otherwise,
+    //     gated on the family being non-unknown so we don't bluff a
+    //     default-medium answer for unclassified payloads.
     //
-    // For attributed objects (rocket bodies, ASAT fragments, NOAA
-    // breakups, named cloud events) we surface:
+    // Tones graded by hazard tier:
     //   - large  → `warn`    catastrophic on impact, ~800 kg median
     //   - medium → `neutral` 10 cm–1 m, mission-killing
     //   - small  → `muted`   1–10 cm, lethal but small RCS
@@ -299,7 +300,13 @@ export function computePills(sat, ctx = {}) {
         });
         const family = annot?.family;
         const size   = annot?.size;
-        if (family && family.id !== 'unknown' && size) {
+        const src    = size?.source;
+        const shouldFire = size && (
+            src === 'hero' ||
+            src === 'satcat' ||
+            (family && family.id !== 'unknown')
+        );
+        if (shouldFire) {
             const cls = size.class;
             const label = cls === 'large'  ? 'Large'
                         : cls === 'medium' ? 'Medium'
@@ -307,12 +314,26 @@ export function computePills(sat, ctx = {}) {
             const tone  = cls === 'large'  ? 'warn'
                         : cls === 'medium' ? 'neutral'
                         :                    'muted';
-            pills.push({
-                id:    `size-${cls}`,
-                label,
-                tone,
-                title: `${size.rangeM} · ~${size.massKg} kg · RCS ≈ ${size.rcsM2} m² · ${family.name}.`,
-            });
+            // Title flavour follows source. Hero entries carry true
+            // dimensions; SATCAT carries a measured RCS; heuristic
+            // carries the bucket median.
+            let title;
+            if (src === 'hero' && size.dimensions_m) {
+                const d = size.dimensions_m;
+                const dimStr = `${d.h.toFixed(1)}×${d.w.toFixed(1)}×${d.d.toFixed(1)} m`;
+                const spanBit = Number.isFinite(size.span_m)
+                    ? ` · span ${size.span_m.toFixed(1)} m`
+                    : '';
+                title = `${dimStr}${spanBit} · ${size.massKg.toLocaleString()} kg (operator datasheet).`;
+            } else if (Number.isFinite(size.rcsRawM2)) {
+                title = `${size.rangeM} · ~${size.massKg} kg · RCS ${size.rcsRawM2} m² (SATCAT).`;
+            } else {
+                const famBit = family?.name && family.id !== 'unknown'
+                    ? ` · ${family.name}`
+                    : '';
+                title = `${size.rangeM} · ~${size.massKg} kg · RCS ≈ ${size.rcsM2} m² (heuristic)${famBit}.`;
+            }
+            pills.push({ id: `size-${cls}`, label, tone, title });
         }
     } catch (_) { /* annotate is best-effort — skip pill on any failure */ }
 
