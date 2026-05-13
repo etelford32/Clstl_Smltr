@@ -316,85 +316,114 @@ export function typeIIMigrationRate(planet, disc) {
 }
 
 // ─── Mini N-body for embryos ────────────────────────────────────────────────
-// We track 2D positions, velocities of N embryos around the star. For the
-// formation phase we use a simple leapfrog in heliocentric coordinates and
-// add gas-driven migration as a forced eccentricity-damped a-update.
+// Heliocentric 3D leapfrog (kick-drift-kick). Bodies carry (x, y, z) and
+// (vx, vy, vz); z components are optional and default to 0, so 2D callers
+// from older code paths still work unchanged. Inclinations are small in
+// our scenarios but real, which gives the scene visible vertical structure
+// once rendered.
 export function leapfrog2D(bodies, Mstar, dt) {
     const N = bodies.length;
     // Half-kick
     for (let i = 0; i < N; i++) {
         const ax = gravX(bodies, i, Mstar);
         const ay = gravY(bodies, i, Mstar);
+        const az = gravZ(bodies, i, Mstar);
         bodies[i].vx += 0.5 * ax * dt;
         bodies[i].vy += 0.5 * ay * dt;
+        bodies[i].vz = (bodies[i].vz || 0) + 0.5 * az * dt;
     }
     // Drift
     for (let i = 0; i < N; i++) {
         bodies[i].x += bodies[i].vx * dt;
         bodies[i].y += bodies[i].vy * dt;
+        bodies[i].z = (bodies[i].z || 0) + bodies[i].vz * dt;
     }
     // Half-kick
     for (let i = 0; i < N; i++) {
         const ax = gravX(bodies, i, Mstar);
         const ay = gravY(bodies, i, Mstar);
+        const az = gravZ(bodies, i, Mstar);
         bodies[i].vx += 0.5 * ax * dt;
         bodies[i].vy += 0.5 * ay * dt;
+        bodies[i].vz += 0.5 * az * dt;
     }
 }
 
 function gravX(bodies, i, Mstar) {
-    const xi = bodies[i].x, yi = bodies[i].y;
-    const ri = Math.hypot(xi, yi);
+    const xi = bodies[i].x, yi = bodies[i].y, zi = bodies[i].z || 0;
+    const ri = Math.sqrt(xi*xi + yi*yi + zi*zi);
     let ax = -G * Mstar * xi / (ri * ri * ri);
     for (let j = 0; j < bodies.length; j++) {
         if (j === i) continue;
-        const dx = bodies[j].x - xi, dy = bodies[j].y - yi;
-        const r2 = dx*dx + dy*dy + 1e6;       // softening (1 km)
+        const dx = bodies[j].x - xi, dy = bodies[j].y - yi, dz = (bodies[j].z || 0) - zi;
+        const r2 = dx*dx + dy*dy + dz*dz + 1e6;       // softening (1 km)
         const r3 = r2 * Math.sqrt(r2);
         ax += G * bodies[j].m * dx / r3;
     }
     return ax;
 }
 function gravY(bodies, i, Mstar) {
-    const xi = bodies[i].x, yi = bodies[i].y;
-    const ri = Math.hypot(xi, yi);
+    const xi = bodies[i].x, yi = bodies[i].y, zi = bodies[i].z || 0;
+    const ri = Math.sqrt(xi*xi + yi*yi + zi*zi);
     let ay = -G * Mstar * yi / (ri * ri * ri);
     for (let j = 0; j < bodies.length; j++) {
         if (j === i) continue;
-        const dx = bodies[j].x - xi, dy = bodies[j].y - yi;
-        const r2 = dx*dx + dy*dy + 1e6;
+        const dx = bodies[j].x - xi, dy = bodies[j].y - yi, dz = (bodies[j].z || 0) - zi;
+        const r2 = dx*dx + dy*dy + dz*dz + 1e6;
         const r3 = r2 * Math.sqrt(r2);
         ay += G * bodies[j].m * dy / r3;
     }
     return ay;
 }
+function gravZ(bodies, i, Mstar) {
+    const xi = bodies[i].x, yi = bodies[i].y, zi = bodies[i].z || 0;
+    const ri = Math.sqrt(xi*xi + yi*yi + zi*zi);
+    let az = -G * Mstar * zi / (ri * ri * ri);
+    for (let j = 0; j < bodies.length; j++) {
+        if (j === i) continue;
+        const dx = bodies[j].x - xi, dy = bodies[j].y - yi, dz = (bodies[j].z || 0) - zi;
+        const r2 = dx*dx + dy*dy + dz*dz + 1e6;
+        const r3 = r2 * Math.sqrt(r2);
+        az += G * bodies[j].m * dz / r3;
+    }
+    return az;
+}
 
-// Convert a body's state to orbital semi-major axis.
+// Convert a body's state to orbital semi-major axis (3D).
 export function semiMajorAxis(b, Mstar) {
-    const r = Math.hypot(b.x, b.y);
-    const v2 = b.vx*b.vx + b.vy*b.vy;
+    const z  = b.z  || 0;
+    const vz = b.vz || 0;
+    const r = Math.sqrt(b.x*b.x + b.y*b.y + z*z);
+    const v2 = b.vx*b.vx + b.vy*b.vy + vz*vz;
     const eps = v2 / 2 - G * Mstar / r;     // specific energy
     return -G * Mstar / (2 * eps);
 }
 
-// Reset a body onto a circular Keplerian orbit at radius a.
+// Reset a body onto a circular Keplerian orbit at radius a (in-plane).
 export function setCircular(b, Mstar, a, phase = 0) {
     const v = Math.sqrt(G * Mstar / a);
-    b.x = a * Math.cos(phase); b.y = a * Math.sin(phase);
-    b.vx = -v * Math.sin(phase); b.vy = v * Math.cos(phase);
+    b.x = a * Math.cos(phase); b.y = a * Math.sin(phase); b.z = 0;
+    b.vx = -v * Math.sin(phase); b.vy = v * Math.cos(phase); b.vz = 0;
 }
 
 // Apply migration to a body (smoothly shrink a while keeping e ~ 0).
+// Scales the position vector uniformly so the orbital plane (inclination)
+// is preserved.
 export function applyMigration(b, Mstar, daDt, dt) {
     const a = semiMajorAxis(b, Mstar);
     if (!isFinite(a) || a <= 0) return;
     const aNew = Math.max(0.01 * AU, a + daDt * dt);
     const ratio = aNew / a;
-    // Scale radius and rescale velocity to remain on a circular orbit at the new a.
     b.x *= ratio; b.y *= ratio;
+    if (b.z !== undefined) b.z *= ratio;
     const vCirc = Math.sqrt(G * Mstar / aNew);
-    const vmag  = Math.hypot(b.vx, b.vy);
-    if (vmag > 0) { b.vx *= vCirc / vmag; b.vy *= vCirc / vmag; }
+    const vz    = b.vz || 0;
+    const vmag  = Math.sqrt(b.vx*b.vx + b.vy*b.vy + vz*vz);
+    if (vmag > 0) {
+        const s = vCirc / vmag;
+        b.vx *= s; b.vy *= s;
+        if (b.vz !== undefined) b.vz *= s;
+    }
 }
 
 // Roche limit (fluid satellite) for inspiral checks (Phobos).

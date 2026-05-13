@@ -22,6 +22,7 @@ import {
     leapfrog2D, semiMajorAxis, setCircular,
     snowLineAU, hayashiTemp, toomreQ,
     rocheLimitFluid,
+    soundSpeed, omegaK,
 } from './physics.js';
 
 import { hzBoundaries, stellarTrack, xuvFlux1AU, planetHabitability } from './habitable.js';
@@ -30,6 +31,10 @@ import { SCENARIOS, buildInitialBodies, updateRadius } from './scenarios.js';
 // Visual scale: 1 AU -> 5 scene units.
 const SCENE_PER_AU = 5;
 const TWO_PI = Math.PI * 2;
+// Vertical exaggeration applied to the physical z-axis when rendering. Real
+// disc H/r flares from ~0.02 (inner) to ~0.1 (outer); 2.5× keeps the visible
+// flaring obvious without making the disc look like a vertical wall.
+const Z_EXAG = 2.5;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Module-scope state (single sim per page).
@@ -58,6 +63,7 @@ const sim = {
     bodyOrbits: [],          // live osculating-ellipse line per body
     bodyLabels: [],          // text-sprite name tag per body
     sunGlow: null,
+    dust: null,              // volumetric dust-particle cloud
     flash: null,             // active giant-impact flash sprite, if any
     hzRing: { inner: null, outer: null, optimistic: null },
     star: null,
@@ -188,14 +194,20 @@ function rebuildDiscAndBodies() {
         b.m *= cfg.embryos.seedMultiplier;
         const jitter = cfg.embryos.jitterAU * (Math.random() * 2 - 1) * AU;
         if (jitter !== 0) {
-            const a = Math.hypot(b.x, b.y);
+            const z0 = b.z || 0;
+            const a = Math.sqrt(b.x*b.x + b.y*b.y + z0*z0);
             const aNew = Math.max(0.05 * AU, a + jitter);
             const scale = aNew / a;
-            b.x *= scale; b.y *= scale;
-            // Re-circularise at the new a (cfg.star.Mstar_solar).
-            const v = Math.sqrt(G * Mstar / aNew);
-            const ang = Math.atan2(b.y, b.x);
-            b.vx = -v * Math.sin(ang); b.vy = v * Math.cos(ang);
+            b.x *= scale; b.y *= scale; b.z = z0 * scale;
+            // Rescale velocity to circular at the new a, preserving direction
+            // so the inclined orbital plane is kept.
+            const vCirc = Math.sqrt(G * Mstar / aNew);
+            const vz0 = b.vz || 0;
+            const vmag = Math.sqrt(b.vx*b.vx + b.vy*b.vy + vz0*vz0);
+            if (vmag > 0) {
+                const s = vCirc / vmag;
+                b.vx *= s; b.vy *= s; b.vz = vz0 * s;
+            }
         }
         out.push(b);
     }
@@ -214,6 +226,7 @@ function rebuildWorld() {
     sim.bodyOrbits.length = 0;
     sim.bodyLabels.length = 0;
     if (sim.flash) { sim.scene.remove(sim.flash.mesh); sim.flash = null; }
+    removeDustCloud();
     sim.ageYr = sim.cfg.star.ageStartYr;
     sim.impactDone = false;
     sim.moonSpawned = false;
@@ -240,6 +253,8 @@ function rebuildWorld() {
         const o = makeOrbit(b.color); sim.bodyOrbits.push(o); sim.scene.add(o.line);
         const l = makeLabelSprite(b.name); sim.bodyLabels.push(l); sim.scene.add(l);
     }
+    sim.dust = makeDustCloud();
+    sim.scene.add(sim.dust.points);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -302,6 +317,10 @@ function initThree() {
         const o = makeOrbit(b.color);  sim.bodyOrbits.push(o); scene.add(o.line);
         const l = makeLabelSprite(b.name); sim.bodyLabels.push(l); scene.add(l);
     }
+
+    // Volumetric dust-particle cloud (3D Σ_dust · Gaussian-in-z).
+    sim.dust = makeDustCloud();
+    scene.add(sim.dust.points);
 
     window.addEventListener('resize', sizeRenderer);
 }
@@ -367,7 +386,8 @@ function makeDiscMesh() {
         vertexColors: true,
         side: THREE.DoubleSide,
         transparent: true,
-        opacity: 0.85,
+        // Lower opacity so the volumetric dust cloud reads clearly above it.
+        opacity: 0.6,
         depthWrite: false,
     });
     const mesh = new THREE.Mesh(geom, mat);
@@ -531,33 +551,55 @@ function makeOrbit(color) {
 
 function updateOrbit(orb, body, Mstar) {
     const mu = G * Mstar;
-    const r = Math.hypot(body.x, body.y);
+    const x  = body.x,  y  = body.y,  z  = body.z  || 0;
+    const vx = body.vx, vy = body.vy, vz = body.vz || 0;
+    const r  = Math.sqrt(x*x + y*y + z*z);
     if (!isFinite(r) || r <= 0) { orb.line.visible = false; return; }
-    const v2 = body.vx * body.vx + body.vy * body.vy;
-    const h  = body.x * body.vy - body.y * body.vx;     // specific angular momentum, z
+    const v2 = vx*vx + vy*vy + vz*vz;
     const energy = 0.5 * v2 - mu / r;
     const a = -mu / (2 * energy);
     if (!isFinite(a) || a <= 0) { orb.line.visible = false; return; }
-    // Eccentricity vector (2D, in-plane components).
-    const ex = (body.vy * h) / mu - body.x / r;
-    const ey = (-body.vx * h) / mu - body.y / r;
-    const e  = Math.hypot(ex, ey);
+
+    // Specific angular momentum vector h = r × v.
+    const hx = y * vz - z * vy;
+    const hy = z * vx - x * vz;
+    const hz = x * vy - y * vx;
+    const hmag = Math.sqrt(hx*hx + hy*hy + hz*hz);
+    if (!isFinite(hmag) || hmag === 0) { orb.line.visible = false; return; }
+
+    // Eccentricity vector e_vec = (v × h)/μ − r̂.
+    const ex_v = (vy * hz - vz * hy) / mu - x / r;
+    const ey_v = (vz * hx - vx * hz) / mu - y / r;
+    const ez_v = (vx * hy - vy * hx) / mu - z / r;
+    const e = Math.sqrt(ex_v*ex_v + ey_v*ey_v + ez_v*ez_v);
     if (!isFinite(e) || e >= 0.95) { orb.line.visible = false; return; }
-    const omega = Math.atan2(ey, ex);                   // argument of periapsis
-    const p   = a * (1 - e * e);
-    const cw  = Math.cos(omega), sw = Math.sin(omega);
-    const N   = orb.N;
-    const s   = SCENE_PER_AU / AU;
+
+    // Orthonormal basis in the orbital plane: p̂ along periapsis,
+    // q̂ = ĥ × p̂ in the direction of motion at periapsis.
+    let px, py, pz;
+    if (e > 1e-6) {
+        px = ex_v / e; py = ey_v / e; pz = ez_v / e;
+    } else {
+        // Circular orbit: e_vec is degenerate, take current position as ref.
+        px = x / r; py = y / r; pz = z / r;
+    }
+    const qx = (hy * pz - hz * py) / hmag;
+    const qy = (hz * px - hx * pz) / hmag;
+    const qz = (hx * py - hy * px) / hmag;
+
+    const p_param = a * (1 - e * e);
+    const N = orb.N;
+    const s = SCENE_PER_AU / AU;
     for (let i = 0; i <= N; i++) {
         const nu  = (i / N) * TWO_PI;
-        const rNu = p / (1 + e * Math.cos(nu));
-        const xp  = rNu * Math.cos(nu);
-        const yp  = rNu * Math.sin(nu);
-        const x   = xp * cw - yp * sw;
-        const y   = xp * sw + yp * cw;
-        orb.pos[3*i]   = x * s;
-        orb.pos[3*i+1] = 0.01;
-        orb.pos[3*i+2] = y * s;
+        const cn  = Math.cos(nu), sn = Math.sin(nu);
+        const rNu = p_param / (1 + e * cn);
+        const xx = rNu * (cn * px + sn * qx);
+        const yy = rNu * (cn * py + sn * qy);
+        const zz = rNu * (cn * pz + sn * qz);
+        orb.pos[3*i]   = xx * s;
+        orb.pos[3*i+1] = zz * s * Z_EXAG;
+        orb.pos[3*i+2] = yy * s;
     }
     orb.geom.attributes.position.needsUpdate = true;
     orb.line.visible = true;
@@ -599,7 +641,7 @@ function makeLabelSprite(text) {
 // Giant-impact flash: brief additive burst at the merger site, drives itself
 // from real time (animated in the render loop, not the physics tick).
 // ─────────────────────────────────────────────────────────────────────────────
-function triggerImpactFlash(x_m, y_m) {
+function triggerImpactFlash(x_m, y_m, z_m = 0) {
     if (sim.flash) { sim.scene.remove(sim.flash.mesh); sim.flash = null; }
     const c = document.createElement('canvas');
     c.width = c.height = 128;
@@ -619,7 +661,11 @@ function triggerImpactFlash(x_m, y_m) {
         depthWrite: false,
     });
     const sprite = new THREE.Sprite(mat);
-    sprite.position.set(x_m / AU * SCENE_PER_AU, 0.4, y_m / AU * SCENE_PER_AU);
+    sprite.position.set(
+        x_m / AU * SCENE_PER_AU,
+        z_m / AU * SCENE_PER_AU * Z_EXAG + 0.4,
+        y_m / AU * SCENE_PER_AU,
+    );
     sprite.scale.set(2, 2, 1);
     sim.scene.add(sprite);
     sim.flash = { mesh: sprite, t0: performance.now(), durMs: 2200 };
@@ -640,6 +686,124 @@ function tickFlash() {
     sim.flash.mesh.material.opacity = Math.max(0, 1 - u);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Volumetric dust-particle cloud. Samples N particles from the disc dust
+// surface-density profile, distributes them vertically as a Gaussian about
+// the midplane with σ = local scale height H(r), and orbits them at the
+// Keplerian rate. Gives the disc real 3D thickness — flared as H/r grows
+// with r — without changing the underlying thin-disc physics.
+// ─────────────────────────────────────────────────────────────────────────────
+const DUST_PARTICLE_COUNT = 2500;
+
+function buildDustCdf(disc) {
+    const cdf = new Float64Array(disc.n);
+    let tot = 0;
+    for (let i = 0; i < disc.n; i++) {
+        const dr = (i < disc.n - 1) ? disc.r[i+1] - disc.r[i] : disc.r[i] - disc.r[i-1];
+        // Weight by mass-per-radial-bin so denser bins draw more particles.
+        tot += Math.max(0, disc.sigmaDust[i]) * 2 * Math.PI * disc.r[i] * dr;
+        cdf[i] = tot;
+    }
+    return { cdf, tot };
+}
+
+function cdfBisect(cdf, u) {
+    let lo = 0, hi = cdf.length - 1;
+    if (u <= cdf[0]) return 0;
+    while (hi - lo > 1) {
+        const mid = (lo + hi) >> 1;
+        if (cdf[mid] < u) lo = mid; else hi = mid;
+    }
+    return hi;
+}
+
+function makeDustCloud() {
+    const N = DUST_PARTICLE_COUNT;
+    const disc = sim.disc;
+    const { cdf, tot } = buildDustCdf(disc);
+
+    const pos = new Float32Array(N * 3);
+    const col = new Float32Array(N * 3);
+    const data = new Array(N);
+
+    if (tot === 0) {
+        // Degenerate disc — return an empty Points so callers don't crash.
+        const g = new THREE.BufferGeometry();
+        g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+        const m = new THREE.PointsMaterial({ vertexColors: true, size: 0.18, transparent: true, opacity: 0 });
+        return { points: new THREE.Points(g, m), data, pos };
+    }
+
+    const T_SNOW_K = 170;
+    for (let p = 0; p < N; p++) {
+        const u = Math.random() * tot;
+        const i = cdfBisect(cdf, u);
+        const r = disc.r[i];
+        const phi0 = Math.random() * TWO_PI;
+        const H = soundSpeed(disc.T[i]) / omegaK(r, disc.Mstar);
+        // Box-Muller for vertical Gaussian about the midplane.
+        const u1 = Math.max(1e-6, Math.random());
+        const u2 = Math.random();
+        const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(TWO_PI * u2) * H;
+        data[p] = { r, phi0, z };
+        const x_m = r * Math.cos(phi0);
+        const y_m = r * Math.sin(phi0);
+        pos[3*p]   = x_m / AU * SCENE_PER_AU;
+        pos[3*p+1] = z  / AU * SCENE_PER_AU * Z_EXAG;
+        pos[3*p+2] = y_m / AU * SCENE_PER_AU;
+        // Inside the snow line → warm/orange (rocky dust); outside → cool/blue
+        // (icy grains). Slight randomisation so the cloud doesn't band sharply.
+        const warm = disc.T[i] > T_SNOW_K;
+        const j = 0.85 + Math.random() * 0.25;
+        if (warm) { col[3*p] = 1.0 * j; col[3*p+1] = 0.65 * j; col[3*p+2] = 0.30 * j; }
+        else      { col[3*p] = 0.55 * j; col[3*p+1] = 0.78 * j; col[3*p+2] = 1.0  * j; }
+    }
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geom.setAttribute('color',    new THREE.BufferAttribute(col, 3));
+    const mat = new THREE.PointsMaterial({
+        vertexColors: true,
+        size: 0.18,
+        transparent: true,
+        opacity: 0.55,
+        depthWrite: false,
+        sizeAttenuation: true,
+        blending: THREE.AdditiveBlending,
+    });
+    return { points: new THREE.Points(geom, mat), data, pos };
+}
+
+// Advance the dust cloud by `dtSimSec` of simulated time. Each particle
+// orbits at its own Keplerian rate; z is fixed (vertically static).
+function updateDustCloud(dtSimSec) {
+    const dust = sim.dust;
+    if (!dust || !dust.data || dust.data.length === 0) return;
+    const Mstar = sim.cfg.star.Mstar_solar * M_SUN;
+    const s = SCENE_PER_AU / AU;
+    const sz = s * Z_EXAG;
+    const data = dust.data;
+    const pos = dust.pos;
+    for (let p = 0; p < data.length; p++) {
+        const d = data[p];
+        const om = Math.sqrt(G * Mstar / (d.r * d.r * d.r));
+        d.phi0 += om * dtSimSec;
+        const c = Math.cos(d.phi0), si = Math.sin(d.phi0);
+        pos[3*p]   = d.r * c * s;
+        pos[3*p+1] = d.z * sz;
+        pos[3*p+2] = d.r * si * s;
+    }
+    dust.points.geometry.attributes.position.needsUpdate = true;
+}
+
+function removeDustCloud() {
+    if (!sim.dust) return;
+    sim.scene.remove(sim.dust.points);
+    sim.dust.points.geometry.dispose();
+    sim.dust.points.material.dispose();
+    sim.dust = null;
+}
+
 function makeTrail(color) {
     const N = 120;
     const pos = new Float32Array(N * 3);
@@ -651,9 +815,9 @@ function makeTrail(color) {
     return { line, geom, pos, head: 0, count: 0, N };
 }
 
-function pushTrail(t, x, z) {
+function pushTrail(t, x, y, z) {
     t.pos[3*t.head]   = x;
-    t.pos[3*t.head+1] = 0.02;
+    t.pos[3*t.head+1] = y;
     t.pos[3*t.head+2] = z;
     t.head = (t.head + 1) % t.N;
     t.count = Math.min(t.N, t.count + 1);
@@ -759,6 +923,7 @@ function tick(dtRealS) {
     refreshHzRings();
 
     // Push trails + body positions + osculating orbit + label tag.
+    // Mapping: physics-x → scene-x, physics-y → scene-z, physics-z → scene-y.
     for (let i = 0; i < sim.bodies.length; i++) {
         const b = sim.bodies[i];
         const mesh  = sim.bodyMeshes[i];
@@ -772,18 +937,19 @@ function tick(dtRealS) {
         }
         const xs = b.x / AU * SCENE_PER_AU;
         const zs = b.y / AU * SCENE_PER_AU;
-        mesh.position.set(xs, 0, zs);
+        const ys = (b.z || 0) / AU * SCENE_PER_AU * Z_EXAG;
+        mesh.position.set(xs, ys, zs);
         const baseR = mesh.userData.baseRadius || 0.35;
         const radius = Math.max(0.18, 0.35 * Math.cbrt(b.m / M_EARTH));
         mesh.scale.setScalar(radius / baseR);
         // Slow visual self-rotation so the planets feel alive (purely cosmetic).
         mesh.rotation.y += 0.01;
-        pushTrail(sim.bodyTrails[i], xs, zs);
+        pushTrail(sim.bodyTrails[i], xs, ys, zs);
         if (orbit) updateOrbit(orbit, b, Mstar);
         if (label) {
             label.visible = true;
             // Pin label above the body; lift scales with body radius.
-            label.position.set(xs, 0.8 + radius * 0.8, zs);
+            label.position.set(xs, ys + 0.8 + radius * 0.8, zs);
         }
     }
 
@@ -792,6 +958,9 @@ function tick(dtRealS) {
 
     // Disc colour map.
     updateDiscColors();
+
+    // Volumetric dust particles ride along at the Keplerian rate.
+    updateDustCloud(sec);
 
     updateHud(trk);
 }
@@ -822,12 +991,14 @@ function handleCollisions() {
 }
 
 function mergeBodies(A, B) {
-    // Inelastic merger: conserve momentum, sum masses; remember Theia event.
+    // Inelastic merger: conserve momentum (3D), sum masses; remember Theia event.
     const big = (A.m >= B.m) ? A : B;
     const small = (A.m >= B.m) ? B : A;
     const m1 = big.m, m2 = small.m;
+    const bvz = big.vz || 0, svz = small.vz || 0;
     big.vx = (m1 * big.vx + m2 * small.vx) / (m1 + m2);
     big.vy = (m1 * big.vy + m2 * small.vy) / (m1 + m2);
+    big.vz = (m1 * bvz    + m2 * svz)       / (m1 + m2);
     big.m += m2;
     updateRadius(big);
     small.alive = false;
@@ -839,7 +1010,7 @@ function mergeBodies(A, B) {
         sim.impactBody = big;
         // Boost angular momentum a bit (simulates fast-spin synestia outcome of Cuk & Stewart 2012).
         big.spin_h = 5;  // h/h_rot_break unit, fast spin
-        triggerImpactFlash(big.x, big.y);
+        triggerImpactFlash(big.x, big.y, big.z || 0);
     }
 }
 
@@ -865,8 +1036,10 @@ function spawnMoon() {
         density: 3344,
         x: earth.x + a_moon * Math.cos(phase) * 50,   // visualization offset
         y: earth.y + a_moon * Math.sin(phase) * 50,
+        z: earth.z || 0,
         vx: earth.vx,
         vy: earth.vy,
+        vz: earth.vz || 0,
         a_init: a_moon,
         color: 0xc8c8c8,
         role: 'moon',
@@ -1192,6 +1365,7 @@ function bindUI() {
         sim.bodyOrbits.length = 0;
         sim.bodyLabels.length = 0;
         if (sim.flash) { sim.scene.remove(sim.flash.mesh); sim.flash = null; }
+        removeDustCloud();
         initScenario(sim.scenario.id);
         sim.lastMdotacc = 0;
         sim.lastMdotAgeYr = sim.ageYr;
@@ -1202,6 +1376,8 @@ function bindUI() {
             const o = makeOrbit(b.color); sim.bodyOrbits.push(o); sim.scene.add(o.line);
             const l = makeLabelSprite(b.name); sim.bodyLabels.push(l); sim.scene.add(l);
         }
+        sim.dust = makeDustCloud();
+        sim.scene.add(sim.dust.points);
     });
     ui.warpSlider?.addEventListener('input', () => {
         const v = +ui.warpSlider.value / 1000;        // 0..1

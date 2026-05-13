@@ -75,6 +75,11 @@ export const SCENARIO_ORDER = ['solar-system'];
 // Build the initial body list (heliocentric x, y, vx, vy in SI) from a
 // scenario descriptor. Bodies start on circular Keplerian orbits at their
 // seed a_AU values with random phases.
+// Inclination range (rad) for randomly tilted initial orbits. Solar System
+// real values: Mercury 7°, others 0.8° – 3.4°. We pick from a small range so
+// the visual disc has 3D depth without breaking the thin-disc approximation.
+const INCL_MAX_RAD = 0.06;   // ~3.4°
+
 export function buildInitialBodies(scenario) {
     const bodies = [];
     const Mstar = scenario.star.Mstar;
@@ -82,14 +87,37 @@ export function buildInitialBodies(scenario) {
         const a = emb.a_AU * AU;
         const phase = Math.random() * 2 * Math.PI;
         const v = Math.sqrt(G * Mstar / a);
+
+        // Orbital-frame circular state at true anomaly = phase.
+        const xo  = a * Math.cos(phase);
+        const yo  = a * Math.sin(phase);
+        const vxo = -v * Math.sin(phase);
+        const vyo =  v * Math.cos(phase);
+
+        // Per-body inclination + longitude of ascending node, uniform random.
+        const incl = Math.random() * INCL_MAX_RAD;
+        const node = Math.random() * 2 * Math.PI;
+        const ci = Math.cos(incl), si = Math.sin(incl);
+        const cn = Math.cos(node), sn = Math.sin(node);
+
+        // Rotate orbital-frame state into the inertial frame: tilt about the
+        // orbital-frame x-axis by incl, then rotate about the z-axis by node.
+        const yt  = yo  * ci;
+        const zt  = yo  * si;
+        const vyt = vyo * ci;
+        const vzt = vyo * si;
+
+        const x  = xo  * cn - yt  * sn;
+        const y  = xo  * sn + yt  * cn;
+        const vx = vxo * cn - vyt * sn;
+        const vy = vxo * sn + vyt * cn;
+
         bodies.push({
             name: emb.name,
             m: emb.seed_Mearth * M_EARTH,
             density: emb.density,
-            x: a * Math.cos(phase),
-            y: a * Math.sin(phase),
-            vx: -v * Math.sin(phase),
-            vy:  v * Math.cos(phase),
+            x, y, z: zt,
+            vx, vy, vz: vzt,
             a_init: a,
             color: emb.color,
             role: emb.role,
