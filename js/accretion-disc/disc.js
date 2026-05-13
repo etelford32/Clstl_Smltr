@@ -62,6 +62,12 @@ const sim = {
     ui: null,
     raf: 0,
     lastTickMs: performance.now(),
+    // Diagnostics (mass-flow rate onto the star, low-pass filtered).
+    lastMdotacc: 0,
+    lastMdotAgeYr: 0,
+    mdotEMA: NaN,
+    // Throttle expensive HUD redraws to ~6 Hz; the 60 Hz tick still runs.
+    lastHudMs: 0,
 };
 
 // Live-tunable configuration — sliders write to this object via applyConfig().
@@ -202,6 +208,9 @@ function rebuildWorld() {
     sim.ageYr = sim.cfg.star.ageStartYr;
     sim.impactDone = false;
     sim.moonSpawned = false;
+    sim.lastMdotacc = 0;
+    sim.lastMdotAgeYr = sim.ageYr;
+    sim.mdotEMA = NaN;
     rebuildDiscAndBodies();
 
     // Disc mesh geometry depends on n — regenerate if the cell count changed.
@@ -678,6 +687,14 @@ function updateHud(trk) {
     if (!ui) return;
 
     ui.age && (ui.age.textContent = formatAge(sim.ageYr));
+
+    // Throttle the heavier per-frame UI work (profile plots, body table,
+    // resonance scan) to ~6 Hz so the canvas keeps drawing at full rate.
+    const now = performance.now();
+    const hudHot = (now - sim.lastHudMs) > 160;
+    if (!hudHot) return;
+    sim.lastHudMs = now;
+
     ui.lum && (ui.lum.textContent = trk.L_Lsun.toFixed(3) + ' L☉');
     ui.teff && (ui.teff.textContent = Math.round(trk.Teff) + ' K');
     if (ui.snowLine) ui.snowLine.textContent = snowLineAU(sim.disc.Lstar).toFixed(2) + ' AU';
@@ -687,15 +704,57 @@ function updateHud(trk) {
     ui.hzOuter && (ui.hzOuter.textContent = hz.maxGreen.toFixed(3) + ' AU');
     ui.hzOpt   && (ui.hzOpt.textContent   = hz.recentVenus.toFixed(3) + ' – ' + hz.earlyMars.toFixed(3) + ' AU');
 
-    // Total disc mass.
-    let Mdisc = 0;
+    // Mass budget — integrate gas + dust over the grid, sum live planet masses.
+    let Mgas = 0, Mdust = 0;
     for (let i = 0; i < sim.disc.n; i++) {
         const dr = (i < sim.disc.n - 1)
             ? sim.disc.r[i+1] - sim.disc.r[i]
             : sim.disc.r[i] - sim.disc.r[i-1];
-        Mdisc += 2 * Math.PI * sim.disc.r[i] * sim.disc.sigma[i] * dr;
+        const annA = 2 * Math.PI * sim.disc.r[i] * dr;
+        Mgas  += annA * sim.disc.sigma[i];
+        Mdust += annA * sim.disc.sigmaDust[i];
     }
-    ui.discMass && (ui.discMass.textContent = (Mdisc / M_SUN * 1000).toFixed(2) + ' × 10⁻³ M☉');
+    let Mplanets = 0;
+    for (const b of sim.bodies) if (b.alive) Mplanets += b.m;
+    const Macc = sim.disc.Mdotacc;
+
+    ui.discMass   && (ui.discMass.textContent   = (Mgas    / M_SUN * 1000).toFixed(2) + ' × 10⁻³ M☉');
+    ui.dustMass   && (ui.dustMass.textContent   = (Mdust   / M_EARTH).toFixed(2) + ' M⊕');
+    ui.planetMass && (ui.planetMass.textContent = (Mplanets / M_EARTH).toFixed(2) + ' M⊕');
+    ui.accMass    && (ui.accMass.textContent    = (Macc    / M_SUN * 1000).toFixed(3) + ' × 10⁻³ M☉');
+
+    // Ṁ★ (mass-flow rate onto the star) from running total + EMA smoothing.
+    if (sim.ageYr > sim.lastMdotAgeYr) {
+        const dM_kg  = Macc - sim.lastMdotacc;
+        const dt_yr  = sim.ageYr - sim.lastMdotAgeYr;
+        const rate   = (dM_kg / M_SUN) / dt_yr;     // M☉ / yr
+        sim.mdotEMA  = isFinite(sim.mdotEMA) ? (0.85 * sim.mdotEMA + 0.15 * rate) : rate;
+        sim.lastMdotacc   = Macc;
+        sim.lastMdotAgeYr = sim.ageYr;
+    }
+    if (ui.mdot) {
+        if (isFinite(sim.mdotEMA) && sim.mdotEMA > 0) {
+            ui.mdot.textContent = sim.mdotEMA.toExponential(2) + ' M☉/yr';
+        } else {
+            ui.mdot.textContent = '—';
+        }
+    }
+
+    // Disc profile sparklines (log-r horizontal axis).
+    drawProfile(ui.profSigma,  sim.disc.sigma,     { log: true,  color: '#ffd700' });
+    drawProfile(ui.profDust,   sim.disc.sigmaDust, { log: true,  color: '#ffb84a' });
+    drawProfile(ui.profTemp,   sim.disc.T,         { log: false, color: '#70c0ff',
+                                                    refValues: [170, 1400], refLabels: ['snow', 'silicate'] });
+    const Q = new Float64Array(sim.disc.n);
+    for (let i = 0; i < sim.disc.n; i++) {
+        const q = toomreQ(sim.disc, i);
+        Q[i] = isFinite(q) ? Math.min(q, 50) : 50;     // clamp Σ→0 spike
+    }
+    drawProfile(ui.profToomre, Q, { log: true, color: '#6fe48b',
+                                    refValues: [1], refLabels: ['unstable'] });
+
+    // Resonance scanner.
+    if (ui.resList) renderResonances(ui.resList);
 
     // Body table.
     if (ui.bodyTable) {
@@ -717,6 +776,182 @@ function updateHud(trk) {
         }
         ui.bodyTable.innerHTML = rows.join('');
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Diagnostic profile plots: tiny canvas-2D line charts for Σ, T, Q, dust.
+// Horizontal axis is log r over the grid range; reference lines (snow line,
+// Q=1, etc.) are passed in via opts.refValues with matching opts.refLabels.
+// ─────────────────────────────────────────────────────────────────────────────
+function drawProfile(canvas, values, opts) {
+    if (!canvas || !values || !values.length) return;
+    const ctx = canvas.getContext('2d');
+    const dpr = Math.min(2, devicePixelRatio || 1);
+    const cssW = canvas.clientWidth || canvas.width;
+    const cssH = canvas.clientHeight || canvas.height;
+    if (canvas.width !== cssW * dpr || canvas.height !== cssH * dpr) {
+        canvas.width  = cssW * dpr;
+        canvas.height = cssH * dpr;
+    }
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+
+    // Range over finite values.
+    let vMin = Infinity, vMax = -Infinity;
+    for (let i = 0; i < values.length; i++) {
+        const v = values[i];
+        if (!isFinite(v)) continue;
+        if (opts.log && v <= 0) continue;
+        if (v < vMin) vMin = v;
+        if (v > vMax) vMax = v;
+    }
+    if (!isFinite(vMin) || vMax === vMin) { vMin = 0; vMax = 1; }
+
+    let vLo = vMin, vHi = vMax;
+    if (opts.log) { vLo = Math.log10(vMin); vHi = Math.log10(vMax); }
+    const padY = 0.05 * (vHi - vLo);
+    vLo -= padY; vHi += padY;
+
+    const xOf = (i) => (i / (values.length - 1)) * (W - 4) + 2;
+    const yOf = (v) => {
+        const u = opts.log ? Math.log10(Math.max(v, 1e-300)) : v;
+        return H - ((u - vLo) / (vHi - vLo)) * (H - 4) - 2;
+    };
+
+    // Reference lines (snow, silicate, Q=1).
+    if (opts.refValues) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+        ctx.setLineDash([3 * dpr, 3 * dpr]);
+        ctx.lineWidth = 1 * dpr;
+        for (const rv of opts.refValues) {
+            if (opts.log && rv <= 0) continue;
+            const y = yOf(rv);
+            if (y < 0 || y > H) continue;
+            ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+        }
+        ctx.setLineDash([]);
+    }
+
+    // Main curve.
+    ctx.strokeStyle = opts.color || '#ffd700';
+    ctx.lineWidth = 1.5 * dpr;
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i < values.length; i++) {
+        const v = values[i];
+        if (!isFinite(v) || (opts.log && v <= 0)) { started = false; continue; }
+        const x = xOf(i);
+        const y = yOf(v);
+        if (!started) { ctx.moveTo(x, y); started = true; }
+        else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    // Range labels (top-right and bottom-right).
+    ctx.fillStyle = '#998';
+    ctx.font = (9 * dpr) + 'px monospace';
+    ctx.textAlign = 'right';
+    const fmt = (v) => {
+        if (!isFinite(v)) return '—';
+        if (opts.log) return '10^' + v.toFixed(1);
+        if (Math.abs(v) >= 1000 || (Math.abs(v) < 0.01 && v !== 0)) return v.toExponential(1);
+        return v.toFixed(v >= 10 ? 0 : 1);
+    };
+    ctx.fillText(fmt(vHi), W - 3, 10 * dpr);
+    ctx.fillText(fmt(vLo), W - 3, H - 3);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Mean-motion resonance scanner: walk adjacent embryo pairs sorted by a, find
+// the nearest p:q commensurability up to p,q ≤ 6, and tag pairs within 1% of
+// exact (locked) or within 3% (near).
+// ─────────────────────────────────────────────────────────────────────────────
+function scanResonances() {
+    const Mstar = sim.cfg.star.Mstar_solar * M_SUN;
+    const arr = [];
+    for (const b of sim.bodies) {
+        if (!b.alive || b.isMoon) continue;
+        const a = semiMajorAxis(b, Mstar);
+        if (!isFinite(a) || a <= 0) continue;
+        arr.push({ b, a });
+    }
+    arr.sort((x, y) => x.a - y.a);
+    const out = [];
+    for (let i = 0; i < arr.length - 1; i++) {
+        const inner = arr[i], outer = arr[i + 1];
+        const Pratio = Math.pow(outer.a / inner.a, 1.5);    // P_out / P_in > 1
+        if (!isFinite(Pratio) || Pratio < 1.001) continue;
+        let best = null;
+        for (let q = 1; q <= 5; q++) {
+            for (let p = q + 1; p <= q + 6; p++) {
+                if (gcdInt(p, q) !== 1) continue;            // reduced form only
+                const r = p / q;
+                const err = Math.abs(Pratio - r) / r;
+                if (!best || err < best.err) best = { p, q, r, err };
+            }
+        }
+        if (!best) continue;
+        out.push({
+            inner: inner.b.name, outer: outer.b.name,
+            Pratio, p: best.p, q: best.q, err: best.err,
+        });
+    }
+    return out;
+}
+
+function gcdInt(a, b) { return b ? gcdInt(b, a % b) : a; }
+
+function renderResonances(listEl) {
+    const res = scanResonances();
+    if (!res.length) {
+        listEl.innerHTML = '<li class="ad-res-hint">No alive pairs.</li>';
+        return;
+    }
+    const items = res.map(r => {
+        const tag = (r.err < 0.01) ? 'locked' : (r.err < 0.03) ? 'near' : '';
+        return `<li class="ad-res-item ${tag}">
+            <span class="ad-res-pair">${esc(r.inner)} : ${esc(r.outer)}</span>
+            <span><span class="ad-res-ratio">${r.p}:${r.q}</span><span class="ad-res-err">Δ ${(r.err*100).toFixed(1)}%</span></span>
+        </li>`;
+    });
+    listEl.innerHTML = items.join('');
+}
+
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CSV export of current body state for offline analysis.
+// ─────────────────────────────────────────────────────────────────────────────
+function exportBodiesCsv() {
+    const Mstar = sim.cfg.star.Mstar_solar * M_SUN;
+    const header = ['name','role','alive','a_AU','a_init_AU','mass_Mearth','R_km','absorbed_by'];
+    const rows = [header];
+    for (const b of sim.bodies) {
+        const a = b.alive ? (semiMajorAxis(b, Mstar) / AU) : '';
+        rows.push([
+            b.name,
+            b.role || '',
+            b.alive,
+            (typeof a === 'number' && isFinite(a)) ? a.toFixed(4) : '',
+            ((b.a_init || 0) / AU).toFixed(4),
+            (b.m / M_EARTH).toFixed(5),
+            ((b.R_m || 0) / 1000).toFixed(2),
+            b.absorbed_by || '',
+        ]);
+    }
+    const csv = rows.map(r => r.map(cell => {
+        const s = String(cell);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    }).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `accretion-disc_${Math.round(sim.ageYr).toString()}yr.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function formatAge(yr) {
@@ -741,6 +976,9 @@ function bindUI() {
         sim.bodyMeshes.length = 0;
         sim.bodyTrails.length = 0;
         initScenario(sim.scenario.id);
+        sim.lastMdotacc = 0;
+        sim.lastMdotAgeYr = sim.ageYr;
+        sim.mdotEMA = NaN;
         for (const b of sim.bodies) {
             const m = makeBodyMesh(b);
             sim.bodyMeshes.push(m);
@@ -758,6 +996,7 @@ function bindUI() {
         ui.warpVal && (ui.warpVal.textContent = yrPerS.toExponential(2) + ' yr/s');
     });
     ui.warpSlider && ui.warpSlider.dispatchEvent(new Event('input'));
+    ui.exportCsvBtn?.addEventListener('click', exportBodiesCsv);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
