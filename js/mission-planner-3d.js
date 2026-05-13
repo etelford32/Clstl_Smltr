@@ -1472,30 +1472,36 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             state.clock.getDelta();
         }
         const dWall    = (_wallNow - state.simAnchor.wallMs) / 1000;
-        const newElapsed = state.simAnchor.elapsed + dWall * state.simAnchor.timeScale;
+        // Sim-window clamp. When scenarioJD would walk past either bound at a
+        // non-zero rate we shorten this frame's slice to the fraction that
+        // lands on the edge, pin scenarioJD, kill timeScale, and emit a
+        // single 'mp:sim-bound'. Shortening dWall (rather than only pinning
+        // scenarioJD) keeps state.elapsed and scenarioJD consistent — mission
+        // interp `u = (elapsed - startedAt) / durSec` can't advance past the
+        // boundary either. simBoundHit clears on bound change / scrub-back /
+        // unpause-with-rate>0.
+        const _rate     = state.simAnchor.timeScale * state.simAnchor.simDaysPerSec;
+        const _jdRaw    = state.simAnchor.scenarioJD + dWall * _rate;
+        let   dWallEff  = dWall;
+        let   boundHit  = null;
+        if (_rate > 0 && Number.isFinite(state.simEndJD) && _jdRaw > state.simEndJD) {
+            dWallEff = (state.simEndJD - state.simAnchor.scenarioJD) / _rate;
+            boundHit = 'end';
+        } else if (_rate < 0 && Number.isFinite(state.simStartJD) && _jdRaw < state.simStartJD) {
+            dWallEff = (state.simStartJD - state.simAnchor.scenarioJD) / _rate;
+            boundHit = 'start';
+        }
+        dWallEff = Math.max(0, dWallEff);
+        const newElapsed = state.simAnchor.elapsed + dWallEff * state.simAnchor.timeScale;
         const dt         = Math.max(0, newElapsed - state.elapsed);  // monotonic frame slice
         state.elapsed    = newElapsed;
-        state.scenarioJD = state.simAnchor.scenarioJD + dWall * state.simAnchor.timeScale * state.simAnchor.simDaysPerSec;
-
-        // Sim-window clamp. When scenarioJD walks past either bound at a
-        // non-zero rate we pin it to the edge, kill timeScale, and emit a
-        // single 'mp:sim-bound' so the host UI can flash a "reached end"
-        // chip. simBoundHit is cleared the next time the user changes the
-        // bounds, scrubs back inside, or unpauses with rate>0.
-        const _rate = state.timeScale * state.simDaysPerSec;
-        if (_rate !== 0 && Number.isFinite(state.simStartJD) && state.scenarioJD < state.simStartJD) {
-            state.scenarioJD = state.simStartJD;
-            if (state.simBoundHit !== 'start') {
-                state.simBoundHit = 'start';
-                _emitSimBound('start');
-            }
-            state.timeScale = 0;
-            _resetSimAnchor();
-        } else if (_rate !== 0 && Number.isFinite(state.simEndJD) && state.scenarioJD > state.simEndJD) {
-            state.scenarioJD = state.simEndJD;
-            if (state.simBoundHit !== 'end') {
-                state.simBoundHit = 'end';
-                _emitSimBound('end');
+        state.scenarioJD = state.simAnchor.scenarioJD + dWallEff * _rate;
+        if (boundHit) {
+            // Snap to the edge to absorb any float drift, then auto-pause.
+            state.scenarioJD = boundHit === 'end' ? state.simEndJD : state.simStartJD;
+            if (state.simBoundHit !== boundHit) {
+                state.simBoundHit = boundHit;
+                _emitSimBound(boundHit);
             }
             state.timeScale = 0;
             _resetSimAnchor();
@@ -1508,7 +1514,9 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         // Phobos / Deimos / Earth heliocentric in deterministic Keplerian form
         // and emits an FNV-1a hash per reply. The simSpeed argument is "sim
         // seconds per real second" — here, timeScale × simDaysPerSec × 86400.
-        const simSpdSecPerSec = state.simAnchor.timeScale * state.simAnchor.simDaysPerSec * 86400;
+        // (Read from state, not simAnchor — the bound-clamp branch may have
+        // just nulled the anchor.)
+        const simSpdSecPerSec = state.timeScale * state.simDaysPerSec * 86400;
         prof.measure('bridge', () => {
             earthBridge.maintain(state.scenarioJD, simSpdSecPerSec);
             _updateEarthBridgeResidual();
