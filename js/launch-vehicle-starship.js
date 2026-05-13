@@ -29,7 +29,7 @@
 import * as THREE from 'three';
 import { ENGINES } from './launch-engines.js';
 import { buildPlume as buildPlumeShared } from './launch-plume.js';
-import { buildEngineBell } from './launch-engine-bell.js';
+import { buildEngineBell, buildClusterManifold } from './launch-engine-bell.js';
 
 // ── Colors ───────────────────────────────────────────────────────────────────
 // Stainless steel is the whole point — high metalness, slight blue tint, and
@@ -193,6 +193,22 @@ function buildRaptorCluster({ counts, plateRadius, bellRadius, bellLength, vacuu
         }
         ringIdx++;
     }
+
+    // Thrust-frame manifold + COPV ring. Real Super Heavy has visible
+    // composite pressure vessels (helium / autogenous pressurization)
+    // arrayed around the central methane / LOX distribution plenum.
+    // centerY matches the per-engine plumbing flange: engine at local y=-0.6,
+    // Raptor effective throatR ≈ bellRadius*0.4, flange at engine-local
+    // y = throatR*7.1, so manifold at -0.6 + bellRadius*0.4*7.1.
+    const totalEngines = counts.reduce((s, n) => s + n, 0);
+    const manifold = buildClusterManifold({
+        plateRadius: plateRadius,
+        centerY:     -0.6 + bellRadius * 2.84,
+        engineCount: totalEngines,
+        copvs:       totalEngines >= 20,   // Super Heavy only; Ship is too crowded
+        style:       'cryo',
+    });
+    g.add(manifold);
 
     return g;
 }

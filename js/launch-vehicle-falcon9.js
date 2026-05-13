@@ -22,7 +22,7 @@
 import * as THREE from 'three';
 import { ENGINES } from './launch-engines.js';
 import { buildPlume as buildPlumeShared } from './launch-plume.js';
-import { buildEngineBell } from './launch-engine-bell.js';
+import { buildEngineBell, buildClusterManifold } from './launch-engine-bell.js';
 
 // ── Colors ───────────────────────────────────────────────────────────────────
 
@@ -160,6 +160,21 @@ function buildOctaweb(boosterR) {
         const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
         placeBell(Math.cos(a) * ringR, Math.sin(a) * ringR);
     }
+
+    // Thrust-frame manifold ring above the engine plate — the spider-web
+    // structural plenum that ties the 9 Merlins together on a real octaweb.
+    // centerY chosen to line up with the per-engine plumbing flanges: each
+    // engine sits at local y=-0.55, and buildEnginePlumbing puts its flange
+    // at engine-local y = throatR*7.1 (Merlin throatR=0.18 → +1.28). So
+    // manifold sits at -0.55 + 1.28 ≈ 0.73 → flanges visually mate to ring.
+    const manifold = buildClusterManifold({
+        plateRadius: boosterR,
+        centerY:     0.73,
+        engineCount: 9,
+        style:       'kerolox',
+    });
+    g.add(manifold);
+
     return g;
 }
 

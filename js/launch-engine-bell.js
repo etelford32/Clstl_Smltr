@@ -335,6 +335,198 @@ function buildPowerhead(throatR, detail = 'high') {
     return g;
 }
 
+// ── Per-engine plumbing ─────────────────────────────────────────────────────
+// Two feed lines (fuel + oxidizer) extending UP from the powerhead crown,
+// each routed via a TubeGeometry curve with a 90° bend so it doesn't look
+// like a straight stick, terminating in a flange/connector at the top.
+//
+// In real hardware these are the LH2 + LO2 (SSME), CH4 + LO2 (Raptor),
+// or RP-1 + LO2 (Merlin) lines that route from the propellant tanks down
+// through the thrust structure to each engine's preburner. We don't
+// render the full route — just the visible last meter or two above the
+// powerhead — but it's enough to break up the silhouette.
+
+function buildEnginePlumbing(throatR, headY) {
+    const g = new THREE.Group();
+    g.name = 'Plumbing';
+
+    const fuelMat = new THREE.MeshStandardMaterial({
+        color: 0x6a7a8a,           // chrome / brushed steel cryo line
+        metalness: 0.65, roughness: 0.4,
+    });
+    const oxMat = new THREE.MeshStandardMaterial({
+        color: 0x9aa8b8,           // lighter LOX line
+        metalness: 0.7, roughness: 0.35,
+    });
+    const flangeMat = new THREE.MeshStandardMaterial({
+        color: 0x4a4438, metalness: 0.9, roughness: 0.3,
+    });
+
+    const pipeR  = throatR * 0.20;
+    const liftH  = throatR * 4.5;     // total height above the powerhead crown
+    const bendY  = throatR * 1.0;     // elbow height above the powerhead
+    const inX    = throatR * 0.85;    // attachment X on the powerhead
+    const outX   = throatR * 1.55;    // final feed-flange X (offset outward)
+
+    for (let i = 0; i < 2; i++) {
+        const side = i === 0 ? -1 : 1;
+        const mat  = i === 0 ? fuelMat : oxMat;
+
+        // CatmullRom curve through 4 points: attach → vertical → elbow → top
+        const pts = [
+            new THREE.Vector3(side * inX,  headY,                  0),
+            new THREE.Vector3(side * inX,  headY + bendY,          0),
+            new THREE.Vector3(side * outX, headY + bendY + throatR * 0.5, 0),
+            new THREE.Vector3(side * outX, headY + liftH,          0),
+        ];
+        const curve = new THREE.CatmullRomCurve3(pts);
+        const tube = new THREE.Mesh(
+            new THREE.TubeGeometry(curve, 24, pipeR, 10, false),
+            mat,
+        );
+        tube.castShadow = true;
+        g.add(tube);
+
+        // Flange at the top — short fat cylinder, suggests a bolt-up connector.
+        const flange = new THREE.Mesh(
+            new THREE.CylinderGeometry(pipeR * 1.5, pipeR * 1.5, pipeR * 0.8, 16),
+            flangeMat,
+        );
+        flange.position.set(side * outX, headY + liftH, 0);
+        g.add(flange);
+
+        // Attach collar at the powerhead crown — small torus suggesting the
+        // socket weld where the pipe joins the engine.
+        const collar = new THREE.Mesh(
+            new THREE.TorusGeometry(pipeR * 1.4, pipeR * 0.3, 6, 14),
+            flangeMat,
+        );
+        collar.rotation.x = Math.PI / 2;
+        collar.position.set(side * inX, headY + pipeR * 0.3, 0);
+        g.add(collar);
+    }
+
+    return g;
+}
+
+// ── Cluster thrust-frame manifold ───────────────────────────────────────────
+// A single central plenum + horizontal ring sitting above the engine plate.
+// Visually this is the "thrust frame" that ties all the engines into one
+// structure on a cluster like the Falcon 9 octaweb or Super Heavy. Call
+// once per cluster, AFTER you've placed the engines.
+//
+// Options:
+//   plateRadius — outer radius of the engine plate
+//   centerY     — vertical offset above the plate (where the ring sits)
+//   engineCount — drives the ring's tessellation
+//   copvs       — render COPV (composite overwrap pressure vessel) helium
+//                  bottles around the central plenum (true for Raptor
+//                  clusters, false for kerolox)
+//   style       — 'cryo' (LH2/LOX/CH4) or 'kerolox' (RP-1/LO2); just
+//                  changes the manifold color tint.
+
+export function buildClusterManifold({
+    plateRadius,
+    centerY    = 0.5,
+    engineCount = 9,
+    copvs      = false,
+    style      = 'cryo',
+} = {}) {
+    const g = new THREE.Group();
+    g.name = 'ClusterManifold';
+
+    const ringMat = new THREE.MeshStandardMaterial({
+        color: style === 'kerolox' ? 0x6a5a48 : 0x6a7a8a,
+        metalness: 0.7, roughness: 0.4,
+    });
+    const plenumMat = new THREE.MeshStandardMaterial({
+        color: 0x2a2a32, metalness: 0.75, roughness: 0.4,
+    });
+
+    // Horizontal manifold ring — sits above the engine-plate radius slightly
+    // inside it. Connects to each engine's plumbing flange.
+    const ringR = plateRadius * 0.78;
+    const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(ringR, plateRadius * 0.04, 8, Math.max(24, engineCount * 3)),
+        ringMat,
+    );
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = centerY;
+    ring.castShadow = true;
+    g.add(ring);
+
+    // Central plenum — small dome at axis. Hints at the "main propellant
+    // distribution" plenum that the per-engine feed lines branch off of.
+    const plenumR = plateRadius * 0.16;
+    const plenum = new THREE.Mesh(
+        new THREE.SphereGeometry(plenumR, 18, 14, 0, Math.PI * 2, 0, Math.PI / 2),
+        plenumMat,
+    );
+    plenum.position.y = centerY + plateRadius * 0.02;
+    plenum.castShadow = true;
+    g.add(plenum);
+
+    // Radial spokes from plenum to ring (the visible structural ribs that
+    // tie the central plenum to the outer manifold; on a Falcon octaweb
+    // this is the iconic spider-web look).
+    const spokeMat = new THREE.MeshStandardMaterial({
+        color: 0x1a1a1f, metalness: 0.85, roughness: 0.3,
+    });
+    const spokeCount = Math.min(8, engineCount);
+    for (let i = 0; i < spokeCount; i++) {
+        const a = (i / spokeCount) * Math.PI * 2;
+        const len = ringR - plenumR;
+        const spoke = new THREE.Mesh(
+            new THREE.BoxGeometry(len, plateRadius * 0.05, plateRadius * 0.04),
+            spokeMat,
+        );
+        spoke.position.set(
+            Math.cos(a) * (plenumR + len / 2),
+            centerY,
+            Math.sin(a) * (plenumR + len / 2),
+        );
+        spoke.rotation.y = -a;
+        g.add(spoke);
+    }
+
+    // COPVs — composite pressure vessels around the central plenum. Real
+    // Super Heavy has these visibly arranged at the base. Off-white tone.
+    if (copvs) {
+        const copvMat = new THREE.MeshStandardMaterial({
+            color: 0xe0d8c0, metalness: 0.25, roughness: 0.55,
+        });
+        const copvCapMat = new THREE.MeshStandardMaterial({
+            color: 0x5a564a, metalness: 0.7, roughness: 0.4,
+        });
+        const copvR = plateRadius * 0.04;
+        const copvLen = plateRadius * 0.22;
+        const ringForCopvs = plateRadius * 0.34;
+        const count = 12;
+        for (let i = 0; i < count; i++) {
+            const a = (i / count) * Math.PI * 2;
+            const cyl = new THREE.Mesh(
+                new THREE.CylinderGeometry(copvR, copvR, copvLen, 14),
+                copvMat,
+            );
+            cyl.position.set(
+                Math.cos(a) * ringForCopvs,
+                centerY + copvLen * 0.2,
+                Math.sin(a) * ringForCopvs,
+            );
+            g.add(cyl);
+            // Hemispheric caps
+            const capTop = new THREE.Mesh(
+                new THREE.SphereGeometry(copvR, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+                copvCapMat,
+            );
+            capTop.position.set(cyl.position.x, cyl.position.y + copvLen / 2, cyl.position.z);
+            g.add(capTop);
+        }
+    }
+
+    return g;
+}
+
 // ── Public ──────────────────────────────────────────────────────────────────
 
 export function buildEngineBell(opts = {}) {
@@ -376,6 +568,18 @@ export function buildEngineBell(opts = {}) {
     }
     if (hasGimbal)    g.add(buildGimbalMount(throatR, detail));
     if (hasPowerhead) g.add(buildPowerhead(throatR, detail));
+
+    // Per-engine plumbing — two feed lines extending from the powerhead
+    // crown up to a flange. Adds the "thrust frame manifold" look the user
+    // sees on real engine bays. Skipped on solid motors (no plumbing) and
+    // on 'low' detail (cluster filler engines).
+    const hasPlumbing = opts.plumbing ?? (detail !== 'low' && type !== 'rsrm');
+    if (hasPlumbing) {
+        // Powerhead top y ≈ throatR * 0.4 (gimbal offset) + headH (powerhead
+        // height) = throatR * (0.4 + 2.2) = throatR * 2.6. Match buildPowerhead.
+        const headY = throatR * 2.6;
+        g.add(buildEnginePlumbing(throatR, headY));
+    }
 
     return g;
 }
