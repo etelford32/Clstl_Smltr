@@ -169,6 +169,32 @@ const _BY_ID = Object.fromEntries(DEBRIS_FAMILIES.map(f => [f.id, f]));
 /** Look up a family by id (e.g. 'fengyun-1c'). */
 export function getFamily(id) { return _BY_ID[id] || null; }
 
+// ── Optional SATCAT enrichment ─────────────────────────────────────────────
+// `satcat-catalog.js` pushes a lookup here once the bulk CelesTrak
+// SATCAT response has been parsed. When present:
+//   - classifyDebris consults SATCAT OBJECT_TYPE as a last-resort
+//     family hint (after NORAD-range + name-pattern), so anything the
+//     heuristic falls through to 'unknown' on can still pick up
+//     'rocket-bodies' or 'generic-debris' when SATCAT knows better.
+//   - estimateSize consults SATCAT RCS bucket FIRST. Upstream data
+//     trumps the heuristic where it disagrees, which is non-trivial
+//     for active payloads (lots of comsats are "large" by RCS but the
+//     name regex doesn't fire) and for old DEB fragments without a
+//     known parent event.
+//
+// The shape is whatever `satcat-catalog.buildLookup()` returns; we
+// only call `.get(noradId)` here, so any object with that method
+// works for testing.
+let _satcatLookup = null;
+
+/** Install (or clear) the SATCAT lookup. Pass `null` to detach. */
+export function setSatcatLookup(lookup) {
+    _satcatLookup = lookup || null;
+}
+
+/** True iff SATCAT enrichment is active. */
+export function hasSatcat() { return _satcatLookup !== null; }
+
 // ── Classification ─────────────────────────────────────────────────────────
 
 /**
@@ -202,6 +228,18 @@ export function classifyDebris(rec) {
         if (f.namePattern && f.namePattern.test(name)) return f;
     }
 
+    // Third pass: SATCAT OBJECT_TYPE. Only consulted when the
+    // previous passes fall through — name pattern + NORAD range are
+    // more specific (they can pick a particular fragmentation event),
+    // SATCAT just says "rocket body" or "debris" at the taxonomic
+    // level. Promotes records the heuristic would otherwise drop
+    // into 'unknown'.
+    if (_satcatLookup && Number.isFinite(id)) {
+        const sc = _satcatLookup.get(id);
+        if (sc?.objectCategory === 'rocket-body')  return _BY_ID['rocket-bodies'];
+        if (sc?.objectCategory === 'debris')       return _BY_ID['generic-debris'];
+    }
+
     return _BY_ID['unknown'];
 }
 
@@ -229,36 +267,63 @@ const SIZE_CLASSES = {
 export { SIZE_CLASSES };
 
 /**
- * Estimate size class from family + object name.
- * Heuristic: rocket bodies and intact satellites = large; "DEB" of any
- * kind defaults to medium (tracked = ≥10 cm); explicit small-fragment
- * markers downgrade to small. Family override wins for known clouds —
- * Cosmos 1408 and FY-1C both produced primarily small/medium fragments.
+ * Estimate size class for a record. SATCAT first when available (the
+ * upstream catalog carries an RCS measurement bucketed against the
+ * Liou & Johnson 2006 thresholds); name + family heuristic otherwise.
  *
- * @returns {{class:string, rangeM:string, rcsM2:number, massKg:number, pointPx:number}}
+ * Returned shape always carries a `source` tag so the UI can be
+ * honest about where the bucket came from:
+ *   'satcat'    — RCS bucket from CelesTrak SATCAT (preferred)
+ *   'heuristic' — derived from name pattern + family attribution
+ *
+ * @returns {{
+ *   class:string, rangeM:string, rcsM2:number, massKg:number,
+ *   pointPx:number, source:string, rcsRawM2?:number
+ * }}
  */
 export function estimateSize(rec, family) {
+    const id   = Number(rec.noradId ?? rec.norad_id);
     const name = String(rec.name ?? '').toUpperCase();
 
+    // ── SATCAT path ───────────────────────────────────────────────
+    // When the loader has primed `_satcatLookup`, the upstream bucket
+    // wins. We still attach the bucket-median massKg/rcsM2 from
+    // SIZE_CLASSES so downstream KE / Δv calculations keep their
+    // accustomed shape, but layer `rcsRawM2` (the actual RCS in m²)
+    // alongside for code that wants the precise number.
+    if (_satcatLookup && Number.isFinite(id)) {
+        const sc = _satcatLookup.get(id);
+        if (sc?.rcsClass && SIZE_CLASSES[sc.rcsClass]) {
+            const base = SIZE_CLASSES[sc.rcsClass];
+            return {
+                class:    sc.rcsClass,
+                ...base,
+                source:   'satcat',
+                rcsRawM2: sc.rcsRawM2,
+            };
+        }
+    }
+
+    // ── Heuristic path ────────────────────────────────────────────
     if (/\bR\/?B\b|ROCKET BODY|UPPER STAGE|CENTAUR|DELTA|ARIANE/.test(name)) {
-        return { class: 'large', ...SIZE_CLASSES.large };
+        return { class: 'large', ...SIZE_CLASSES.large, source: 'heuristic' };
     }
     if (family && family.id === 'rocket-bodies') {
-        return { class: 'large', ...SIZE_CLASSES.large };
+        return { class: 'large', ...SIZE_CLASSES.large, source: 'heuristic' };
     }
     // ASAT clouds: heavy fragmentation skews small.
     if (family && (family.id === 'cosmos-1408' || family.id === 'fengyun-1c'
                 || family.id === 'mission-shakti')) {
         // 30% of ASAT fragments end up in the small-tracked tail.
-        const r = (Number(rec.noradId ?? rec.norad_id) || 0) % 100;
+        const r = (Number.isFinite(id) ? id : 0) % 100;
         return r < 30
-            ? { class: 'small',  ...SIZE_CLASSES.small  }
-            : { class: 'medium', ...SIZE_CLASSES.medium };
+            ? { class: 'small',  ...SIZE_CLASSES.small,  source: 'heuristic' }
+            : { class: 'medium', ...SIZE_CLASSES.medium, source: 'heuristic' };
     }
     if (/\bDEB\b/.test(name)) {
-        return { class: 'medium', ...SIZE_CLASSES.medium };
+        return { class: 'medium', ...SIZE_CLASSES.medium, source: 'heuristic' };
     }
-    return { class: 'medium', ...SIZE_CLASSES.medium };
+    return { class: 'medium', ...SIZE_CLASSES.medium, source: 'heuristic' };
 }
 
 /**

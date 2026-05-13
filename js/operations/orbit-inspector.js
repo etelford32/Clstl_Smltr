@@ -33,6 +33,7 @@ import { decayWithSigma, deltaAPerDay, fmtLifetime } from './decision-deck.js';
 import { provStore } from './provenance.js';
 import { computePills, renderPills } from './satellite-pills.js';
 import { annotate as annotateDebris, hazardEnergyMJ } from '../debris-catalog.js';
+import { onSatcatLoaded } from '../satcat-catalog.js';
 
 const MIN_PER_DAY = 1440;
 const RE_KM       = 6378.135;     // WGS-72, matches the SGP4 propagator
@@ -346,24 +347,47 @@ export function mountOrbitInspector(opts = {}) {
 
         // Physical-scale roll-up. Uses the same `annotate()` the
         // upper-atmosphere globe runs over every debris probe (family
-        // attribution + size class). Renders an inline block only
-        // when the classifier confidently attributed the object;
-        // otherwise (active payload, unclassified) we leave it off
-        // rather than print a default-medium guess.
+        // attribution + size class). When CelesTrak SATCAT has
+        // loaded, `size.source === 'satcat'` and `size.rcsRawM2`
+        // carries the actual measured RCS — we surface both the
+        // measurement and the bucket median so the operator sees
+        // which is which.
+        //
+        // Renders only when SATCAT gave us a real measurement OR the
+        // heuristic classified into a non-unknown family; otherwise
+        // we'd be inventing data for objects we don't know anything
+        // about.
         let physicalHtml = '';
         try {
             const annot = annotateDebris({ name: sat.name, noradId: tle.norad_id });
             const family = annot?.family;
             const size   = annot?.size;
-            if (family && family.id !== 'unknown' && size) {
+            const fromSatcat = size?.source === 'satcat';
+            if (size && (fromSatcat || (family && family.id !== 'unknown'))) {
                 const energyMJ = Number.isFinite(annot.hazardMJ)
                     ? annot.hazardMJ
                     : hazardEnergyMJ(size.massKg);
+                const sourceLabel = fromSatcat ? 'SATCAT' : 'heuristic';
+                const sourceTitle = fromSatcat
+                    ? 'Radar cross-section measurement from CelesTrak SATCAT (upstream-authoritative).'
+                    : 'Size class inferred from object name + family attribution. Replace with SATCAT when wired.';
+                const condBadge = family?.id && family.id !== 'unknown'
+                    ? escapeHtml(family.name)
+                    : 'attributed object';
+                // RCS row: when we have the raw m², show it; otherwise
+                // the bucket median. Either way label which is which.
+                const rcsRow = Number.isFinite(size.rcsRawM2)
+                    ? `<div title="Measured RCS from SATCAT (m²).">
+                           <span class="op-orbit-tag">RCS</span>${size.rcsRawM2}<span class="op-orbit-unit"> m²</span>
+                       </div>`
+                    : `<div title="Median radar cross-section for the size class (bucket).">
+                           <span class="op-orbit-tag">RCS</span>~${size.rcsM2}<span class="op-orbit-unit"> m²</span>
+                       </div>`;
                 physicalHtml = `
                     <div class="op-orbit-rates op-orbit-physical">
-                        <div class="op-orbit-rate-title" title="Family attribution + size class from name + NORAD range. Mass and RCS are bucket medians, not measurements.">
-                            Physical (est.)
-                            <span class="op-orbit-rate-conds">${escapeHtml(family.name)}</span>
+                        <div class="op-orbit-rate-title" title="${escapeHtml(sourceTitle)}">
+                            Physical (${escapeHtml(sourceLabel)})
+                            <span class="op-orbit-rate-conds">${condBadge}</span>
                         </div>
                         <div title="Conventional debris size bin (Liou &amp; Johnson 2006).">
                             <span class="op-orbit-tag">class</span>${escapeHtml(size.class)}<span class="op-orbit-unit"> · ${escapeHtml(size.rangeM)}</span>
@@ -371,9 +395,7 @@ export function mountOrbitInspector(opts = {}) {
                         <div title="Median mass for the size class. Off by ±1× for individual objects.">
                             <span class="op-orbit-tag">mass</span>~${size.massKg}<span class="op-orbit-unit"> kg</span>
                         </div>
-                        <div title="Median radar cross-section for the size class.">
-                            <span class="op-orbit-tag">RCS</span>${size.rcsM2}<span class="op-orbit-unit"> m²</span>
-                        </div>
+                        ${rcsRow}
                         <div title="Kinetic energy at typical 14 km/s LEO closing speed — proxy for catastrophic-impact tier.">
                             <span class="op-orbit-tag">KE</span>${energyMJ >= 100 ? energyMJ.toFixed(0) : energyMJ.toFixed(1)}<span class="op-orbit-unit"> MJ</span>
                         </div>
@@ -435,9 +457,9 @@ export function mountOrbitInspector(opts = {}) {
                 Mean elements (TLE / Brouwer-Lyddane). Drag rate +
                 lifetime use the same King-Hele-style surrogate as
                 Decay Watch, modulated by live SWPC F10.7 / Ap.
-                Physical roll-up is bucket-median (small / medium /
-                large), not measurement — replace with SATCAT
-                <code>RCS_SIZE</code> when wired.
+                Physical roll-up reads from CelesTrak SATCAT when
+                available; otherwise it falls back to a name-pattern
+                heuristic (labelled in the section header).
             </div>
         `;
     }
@@ -471,6 +493,14 @@ export function mountOrbitInspector(opts = {}) {
     }
     pollTimer = setTimeout(poll, 1000);
 
+    // Repaint when SATCAT finishes loading mid-session. Without this,
+    // the first selection rendered before the catalog arrived would
+    // show "(heuristic)" until the user clicked something else; the
+    // SATCAT path then upgrades transparently.
+    const offSatcat = onSatcatLoaded(() => {
+        if (selectedId != null) render();
+    });
+
     // Initial paint.
     selectedId = getSelectedId();
     render();
@@ -479,6 +509,7 @@ export function mountOrbitInspector(opts = {}) {
         dispose() {
             offSel?.();
             offProv?.();
+            offSatcat?.();
             if (pollTimer) clearTimeout(pollTimer);
         },
     };

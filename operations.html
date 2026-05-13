@@ -2220,6 +2220,7 @@ import * as bPlane            from './js/operations/b-plane.js';
 import * as densityMap        from './js/operations/density-map.js';
 import { mountAristotle }     from './js/operations/aristotle.js';
 import { getGroupColorHex }   from './js/satellite-tracker.js';
+import { loadSatcat }         from './js/satcat-catalog.js';
 
 // Mount tooltip delegations up front so anything that binds later
 // (layer counts, future decision-deck values) is hover-ready without
@@ -2328,6 +2329,13 @@ timeBus.start();
 const globe = new OperationsGlobe(document.getElementById('op-globe'));
 const fleet = new OperationsFleet(globe);
 globe.start();
+
+// Kick off the CelesTrak SATCAT fetch in parallel with the TLE loads.
+// Best-effort: a failure silently falls back to the debris-catalog
+// name-pattern heuristic. The pill / inspector "size" surfaces will
+// upgrade transparently once the catalog lands (subscribers fire on
+// successful load). Fire-and-forget — no await.
+loadSatcat();
 
 mountLayerPanel(fleet);
 
