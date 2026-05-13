@@ -29,6 +29,7 @@
 import * as THREE from 'three';
 import { ENGINES } from './launch-engines.js';
 import { buildPlume as buildPlumeShared } from './launch-plume.js';
+import { buildEngineBell } from './launch-engine-bell.js';
 
 // ── Colors ───────────────────────────────────────────────────────────────────
 // Stainless steel is the whole point — high metalness, slight blue tint, and
@@ -141,36 +142,17 @@ function flatMat(color, roughness = 0.6, metalness = 0.05) {
 
 // ── Sub-builders ─────────────────────────────────────────────────────────────
 
-// Raptor engine bell. Raptor's full-flow staged-combustion bell is shorter
-// and stockier than an SSME — and we have a LOT of them (33+) so we keep
-// geometry cheap (12 segments). One shared bell geometry per call site.
-function makeRaptorBellGeo(throatR, exitR, length, segs = 14) {
-    const pts = [];
-    const N = 10;
-    for (let i = 0; i <= N; i++) {
-        const t = i / N;
-        const r = throatR + (exitR - throatR) * Math.pow(t, 0.6);
-        pts.push(new THREE.Vector2(r, -t * length));
-    }
-    return new THREE.LatheGeometry(pts, segs);
-}
-
 // Raptor cluster — concentric rings of engines around the base of a booster
 // or ship. counts is e.g. [3, 10, 20] = 3 inner + 10 middle + 20 outer.
-// Returns a Group containing all bells.
+//
+// Each engine is the shared launch-engine-bell.js builder. Detail level
+// scales with ring index so a 33-engine Super Heavy cluster doesn't blow
+// the draw budget: innermost ring (the gimbaling thirteen on real Super
+// Heavy) gets 'medium' (14 regen tubes + gimbal cross-pins), middle and
+// outer rings get 'low' (bell + hot glow only, no tubes / gimbal).
 function buildRaptorCluster({ counts, plateRadius, bellRadius, bellLength, vacuumRing = false }) {
     const g = new THREE.Group();
     g.name = 'RaptorCluster';
-
-    const bellGeo = makeRaptorBellGeo(bellRadius * 0.4, bellRadius, bellLength, 14);
-    const vacGeo  = makeRaptorBellGeo(bellRadius * 0.4, bellRadius * 1.55, bellLength * 1.45, 14);
-    const bellMat = new THREE.MeshPhysicalMaterial({
-        color: COLORS.raptorBell,
-        roughness: 0.35,
-        metalness: 0.6,
-        clearcoat: 0.5,
-    });
-    const hotMat = new THREE.MeshBasicMaterial({ color: COLORS.raptorHot, side: THREE.BackSide });
 
     // Engine plate — dark disc the bells hang off of.
     const plate = new THREE.Mesh(
@@ -184,9 +166,6 @@ function buildRaptorCluster({ counts, plateRadius, bellRadius, bellLength, vacuu
 
     let ringIdx = 0;
     for (const n of counts) {
-        // Inner ring sits at small radius; subsequent rings spaced across the
-        // engine plate. Outermost ring is parked just inside plateRadius.
-        const isOuterMost = ringIdx === counts.length - 1;
         const innerEdge   = bellRadius * 1.2;
         const ringR = ringIdx === 0
             ? bellRadius * 1.3
@@ -194,24 +173,23 @@ function buildRaptorCluster({ counts, plateRadius, bellRadius, bellLength, vacuu
               (ringIdx / Math.max(1, counts.length - 1));
 
         // Vacuum-optimized engines (larger bells) are typically the inner
-        // ring of the Ship cluster only. Toggle via vacuumRing flag and
-        // only apply on innermost ring of a 2-ring ship cluster.
+        // ring of the Ship cluster only.
         const useVac = vacuumRing && ringIdx === 0 && counts.length === 2;
-        const useGeo = useVac ? vacGeo : bellGeo;
-        const useLen = useVac ? bellLength * 1.45 : bellLength;
+        // Inner ring gimbals (gets the visible mount); outer rings are
+        // fixed and 'low' detail.
+        const detail = (ringIdx === 0) ? 'medium' : 'low';
 
         for (let i = 0; i < n; i++) {
             const a = (i / n) * Math.PI * 2 + (ringIdx % 2 ? Math.PI / n : 0);
-            const bell = new THREE.Mesh(useGeo, bellMat);
+            const bell = buildEngineBell({
+                type:    useVac ? 'raptor_vac' : 'raptor',
+                throatR: bellRadius * 0.4,
+                exitR:   useVac ? bellRadius * 1.55 : bellRadius,
+                length:  useVac ? bellLength * 1.45 : bellLength,
+                detail,
+            });
             bell.position.set(Math.cos(a) * ringR, -0.6, Math.sin(a) * ringR);
-            bell.castShadow = true;
             g.add(bell);
-
-            // Hot interior glow — back-side cone slightly inside the bell.
-            const glow = new THREE.Mesh(useGeo, hotMat);
-            glow.scale.set(0.85, 0.95, 0.85);
-            glow.position.copy(bell.position);
-            g.add(glow);
         }
         ringIdx++;
     }

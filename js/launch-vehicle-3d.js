@@ -36,6 +36,7 @@ import { createMissionClock } from './launch-mission-clock.js';
 import { ENGINES } from './launch-engines.js';
 import { buildThrustOverlay, tickThrustOverlay } from './launch-thrust-overlay.js';
 import { buildPlume as buildPlumeShared, tickPlume } from './launch-plume.js';
+import { buildEngineBell } from './launch-engine-bell.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -236,19 +237,16 @@ function buildSRB() {
     frustum.position.y = L * 0.86;
     g.add(frustum);
 
-    // SRB nozzle — exposed bell at the very base. Built via lathe so the bell
-    // contour is curved, not just a cone.
-    const nozPts = [];
-    for (let i = 0; i <= 16; i++) {
-        const t = i / 16;
-        const r = R * 0.55 + (R * 0.95 - R * 0.55) * Math.pow(t, 0.55);
-        nozPts.push(new THREE.Vector2(r, -t * 1.6));
-    }
-    const nozzle = new THREE.Mesh(
-        new THREE.LatheGeometry(nozPts, 24),
-        mkMat(COLORS.nozzle, { roughness: 0.35, metalness: 0.55 })
-    );
-    nozzle.castShadow = true;
+    // SRB nozzle — exposed bell at the very base. RSRM uses an ablative-
+    // cooled conical nozzle (no regen-cooling tubes) but does have a flex-
+    // bearing gimbal for thrust vectoring. Shared builder handles both.
+    const nozzle = buildEngineBell({
+        type:     'rsrm',
+        throatR:  R * 0.55,
+        exitR:    R * 0.95,
+        length:   1.6,
+        detail:   'high',     // SRBs are big and prominent on the silhouette
+    });
     g.add(nozzle);
 
     return g;
@@ -495,47 +493,12 @@ function buildOrbiter() {
 }
 
 // ── SSME (Space Shuttle Main Engine) ─────────────────────────────────────────
-// Powerhead block + bell nozzle, both lathed for smooth contour.
+// Full detail RS-25: Rao-profile bell, 24 regen-cooling tubes wrapping the
+// outside, gimbal mount with hydraulic actuators, and the powerhead /
+// turbopump block above the throat. Shared builder in launch-engine-bell.js.
 
 function buildSSME() {
-    const g = new THREE.Group();
-    g.name = 'SSME';
-
-    // Powerhead — chunky block at top with plumbing detail.
-    const head = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.55, 0.6, 0.7, 16),
-        mkMat(COLORS.metalDark, { roughness: 0.4, metalness: 0.7 })
-    );
-    head.position.y = 0.4;
-    head.castShadow = true;
-    g.add(head);
-
-    // Bell nozzle — lathe profile that flares like a real rocket bell.
-    const bellPts = [];
-    const N = 18;
-    for (let i = 0; i <= N; i++) {
-        const t = i / N;
-        // Throat at t=0 (small), exit at t=1 (large). Shape is a slight
-        // parabola so the curve is visible.
-        const r = 0.32 + (0.95 - 0.32) * Math.pow(t, 0.55);
-        bellPts.push(new THREE.Vector2(r, -t * 1.9));
-    }
-    const bell = new THREE.Mesh(
-        new THREE.LatheGeometry(bellPts, 28),
-        mkPhys(COLORS.nozzle, { roughness: 0.3, metalness: 0.55, clearcoat: 0.4 })
-    );
-    bell.castShadow = true;
-    g.add(bell);
-
-    // Inner bell glow (hot-when-firing). Faintly emissive so it reads even
-    // when the plume is off.
-    const glow = new THREE.Mesh(
-        new THREE.LatheGeometry(bellPts.map(p => new THREE.Vector2(p.x * 0.92, p.y + 0.05)), 24),
-        new THREE.MeshBasicMaterial({ color: COLORS.nozzleHot, side: THREE.BackSide })
-    );
-    g.add(glow);
-
-    return g;
+    return buildEngineBell({ type: 'rs25', detail: 'high' });
 }
 
 // ── Engine plume ────────────────────────────────────────────────────────────

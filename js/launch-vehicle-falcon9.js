@@ -22,6 +22,7 @@
 import * as THREE from 'three';
 import { ENGINES } from './launch-engines.js';
 import { buildPlume as buildPlumeShared } from './launch-plume.js';
+import { buildEngineBell } from './launch-engine-bell.js';
 
 // ── Colors ───────────────────────────────────────────────────────────────────
 
@@ -129,18 +130,10 @@ function physMat(color, opts = {}) {
 
 // ── Octaweb (9-Merlin engine plate) ──────────────────────────────────────────
 // Real Falcon 9 octaweb: 1 center engine + 8 in a ring at ~0.7·radius.
-// Merlin 1D bell: throat ~0.32 m, exit ~0.92 m, length ~2.0 m.
-
-function makeMerlinBellGeo(throatR, exitR, length) {
-    const pts = [];
-    const N = 12;
-    for (let i = 0; i <= N; i++) {
-        const t = i / N;
-        const r = throatR + (exitR - throatR) * Math.pow(t, 0.55);
-        pts.push(new THREE.Vector2(r, -t * length));
-    }
-    return new THREE.LatheGeometry(pts, 20);
-}
+// Each Merlin 1D is the shared launch-engine-bell.js builder at 'medium'
+// detail — 14 regen tubes, gimbal cross-pins, simplified powerhead. 9 of
+// them in a tight cluster, so medium keeps the silhouette readable without
+// blowing the draw budget.
 
 function buildOctaweb(boosterR) {
     const g = new THREE.Group();
@@ -156,22 +149,10 @@ function buildOctaweb(boosterR) {
     plate.receiveShadow = true;
     g.add(plate);
 
-    // 9 Merlin bells — 1 center + 8 ring
-    const bellGeo = makeMerlinBellGeo(0.18, 0.46, 1.95);
-    const bellMat = physMat(COLORS.merlinBell, {
-        roughness: 0.32, metalness: 0.55, clearcoat: 0.5,
-    });
-    const hotMat = new THREE.MeshBasicMaterial({ color: COLORS.merlinHot, side: THREE.BackSide });
-
     function placeBell(x, z) {
-        const bell = new THREE.Mesh(bellGeo, bellMat);
+        const bell = buildEngineBell({ type: 'merlin', detail: 'medium' });
         bell.position.set(x, -0.55, z);
-        bell.castShadow = true;
         g.add(bell);
-        const glow = new THREE.Mesh(bellGeo, hotMat);
-        glow.scale.set(0.85, 0.95, 0.85);
-        glow.position.copy(bell.position);
-        g.add(glow);
     }
     placeBell(0, 0);
     const ringR = boosterR * 0.62;
@@ -442,15 +423,11 @@ function buildSecondStage(P) {
     body.receiveShadow = true;
     g.add(body);
 
-    // MVac engine — a single, much larger bell than a sea-level Merlin
-    // (vacuum-optimized, ~1.8 m exit diameter on Falcon 9).
-    const mvacGeo = makeMerlinBellGeo(0.22, 0.92, 3.0);
-    const mvac = new THREE.Mesh(
-        mvacGeo,
-        physMat(COLORS.merlinBell, { roughness: 0.3, metalness: 0.55, clearcoat: 0.5 })
-    );
+    // MVac engine — a single, much larger bell than a sea-level Merlin.
+    // Vacuum-optimized, ~1.8 m exit diameter, niobium-alloy nozzle extension.
+    // Full detail since it's the only engine on the upper stage.
+    const mvac = buildEngineBell({ type: 'merlin_vac', detail: 'high' });
     mvac.position.y = -0.1;
-    mvac.castShadow = true;
     g.add(mvac);
 
     return g;
