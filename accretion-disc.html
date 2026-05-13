@@ -337,6 +337,51 @@ table.ad-bodies th {
 }
 .ad-toggle-name { color:#cbb; font-weight:600; }
 .ad-toggle-hint { font-size:.6rem; color:#998; line-height:1.4; margin-left:38px; margin-top:-3px; padding-bottom:4px; }
+
+/* ─── Diagnostic profile plots ──────────────────────────────── */
+.ad-profile { margin-bottom:8px; }
+.ad-profile-label {
+    font-family:monospace; font-size:.66rem; color:#bcb;
+    letter-spacing:.02em; margin-bottom:2px;
+}
+.ad-profile-canvas {
+    width:100%; height:48px;
+    display:block;
+    background:rgba(255,255,255,.025);
+    border:1px solid rgba(255,255,255,.06);
+    border-radius:4px;
+}
+.ad-profile-hint {
+    font-size:.6rem; color:#998; line-height:1.5;
+    margin-top:6px; font-style:italic;
+}
+
+/* ─── Resonance list ────────────────────────────────────────── */
+.ad-res-list { list-style:none; padding:0; margin:0; }
+.ad-res-item {
+    display:flex; align-items:baseline; justify-content:space-between;
+    padding:4px 8px;
+    font-family:monospace; font-size:.7rem;
+    border-bottom:1px solid rgba(255,255,255,.05);
+    color:#cbb;
+}
+.ad-res-item:last-child { border-bottom:none; }
+.ad-res-item.locked {
+    background:rgba(255,200,0,.08);
+    border-left:2px solid #ffd700;
+    color:#ffd700;
+}
+.ad-res-item.near {
+    background:rgba(180,140,255,.06);
+    border-left:2px solid #b78cff;
+    color:#cba9ff;
+}
+.ad-res-pair { font-weight:700; }
+.ad-res-ratio { color:#fff; }
+.ad-res-item.locked .ad-res-ratio,
+.ad-res-item.near   .ad-res-ratio { color:inherit; }
+.ad-res-err { font-size:.6rem; color:#998; margin-left:6px; }
+.ad-res-hint { font-size:.62rem; color:#998; font-style:italic; }
 </style>
 <link rel="stylesheet" href="js/nav-styles.css">
 <script type="importmap">
@@ -594,8 +639,43 @@ table.ad-bodies th {
         <div class="ad-hud-section">
             <div class="ad-hud-title">Disc</div>
             <dl class="ad-hud-grid">
-                <dt>M_disc</dt><dd id="ad-disc-mass">—</dd>
+                <dt>M_disc (gas)</dt><dd id="ad-disc-mass">—</dd>
+                <dt>M_dust</dt><dd id="ad-dust-mass">—</dd>
+                <dt>M_planets</dt><dd id="ad-planet-mass">—</dd>
+                <dt>Accreted ★</dt><dd id="ad-acc-mass">—</dd>
+                <dt>Ṁ★</dt><dd id="ad-mdot">—</dd>
             </dl>
+        </div>
+
+        <div class="ad-hud-section">
+            <div class="ad-hud-title">Disc profiles · log-r</div>
+            <div class="ad-profile">
+                <div class="ad-profile-label">Σ_gas (kg/m²)</div>
+                <canvas class="ad-profile-canvas" id="ad-prof-sigma" width="280" height="48"></canvas>
+            </div>
+            <div class="ad-profile">
+                <div class="ad-profile-label">Σ_dust (kg/m²)</div>
+                <canvas class="ad-profile-canvas" id="ad-prof-dust" width="280" height="48"></canvas>
+            </div>
+            <div class="ad-profile">
+                <div class="ad-profile-label">T (K)</div>
+                <canvas class="ad-profile-canvas" id="ad-prof-temp" width="280" height="48"></canvas>
+            </div>
+            <div class="ad-profile">
+                <div class="ad-profile-label">Toomre Q</div>
+                <canvas class="ad-profile-canvas" id="ad-prof-toomre" width="280" height="48"></canvas>
+            </div>
+            <p class="ad-profile-hint">
+                Dashed: snow line (170 K) · silicate sublimation (1400 K).
+                Q&lt;1 ⇒ gravitationally unstable.
+            </p>
+        </div>
+
+        <div class="ad-hud-section">
+            <div class="ad-hud-title">Mean-motion resonances</div>
+            <ul class="ad-res-list" id="ad-res-list">
+                <li class="ad-res-hint">computing…</li>
+            </ul>
         </div>
 
         <div class="ad-hud-section">
@@ -603,6 +683,7 @@ table.ad-bodies th {
             <table class="ad-bodies"><tbody id="ad-body-table">
                 <tr><td colspan="4" style="color:#998;">loading…</td></tr>
             </tbody></table>
+            <button type="button" class="ad-btn" id="ad-export-csv" style="margin-top:10px; width:100%;">Download bodies CSV</button>
         </div>
 
     </aside>
@@ -610,7 +691,7 @@ table.ad-bodies th {
 </div>
 
 <script type="module">
-import { boot } from './js/accretion-disc/disc.js?v=20260513a';
+import { boot } from './js/accretion-disc/disc.js?v=20260513b';
 
 const canvas = document.getElementById('ad-canvas');
 const ui = {
@@ -622,12 +703,23 @@ const ui = {
     hzOuter:    document.getElementById('ad-hz-out'),
     hzOpt:      document.getElementById('ad-hz-opt'),
     discMass:   document.getElementById('ad-disc-mass'),
+    dustMass:   document.getElementById('ad-dust-mass'),
+    planetMass: document.getElementById('ad-planet-mass'),
+    accMass:    document.getElementById('ad-acc-mass'),
+    mdot:       document.getElementById('ad-mdot'),
     bodyTable:  document.getElementById('ad-body-table'),
+    resList:    document.getElementById('ad-res-list'),
+
+    profSigma:  document.getElementById('ad-prof-sigma'),
+    profDust:   document.getElementById('ad-prof-dust'),
+    profTemp:   document.getElementById('ad-prof-temp'),
+    profToomre: document.getElementById('ad-prof-toomre'),
 
     playBtn:    document.getElementById('ad-play'),
     resetBtn:   document.getElementById('ad-reset'),
     warpSlider: document.getElementById('ad-warp'),
     warpVal:    document.getElementById('ad-warp-val'),
+    exportCsvBtn: document.getElementById('ad-export-csv'),
 };
 const api = boot({ canvas, ui, scenarioId: 'solar-system' });
 
