@@ -26,8 +26,12 @@ function draw(ctx, canvas, cam) {
     // Two panels side-by-side: left = top-down equatorial slice, right = polar slice.
     const pad = 6 * window.devicePixelRatio;
     const halfW = (W - 3 * pad) * 0.5;
-    drawTopDown(ctx, pad, pad, halfW, H - 2 * pad, cam);
-    drawSide(ctx, pad * 2 + halfW, pad, halfW, H - 2 * pad, cam);
+    const panelH = H - 2 * pad;
+    // Skip drawing when the canvas is hidden / not yet laid out — otherwise
+    // negative panel dimensions yield a negative radius in ctx.arc.
+    if (halfW <= 0 || panelH <= 0) return;
+    drawTopDown(ctx, pad, pad, halfW, panelH, cam);
+    drawSide(ctx, pad * 2 + halfW, pad, halfW, panelH, cam);
 }
 
 // Top-down equatorial view (looking down +y, x-right is +x_world, x-down is +z_world).
@@ -158,6 +162,7 @@ function drawSide(ctx, x0, y0, w, h, cam) {
 }
 
 function drawCircle(ctx, r, color, dash) {
+    if (!(r > 0)) return;
     ctx.save();
     ctx.strokeStyle = color;
     ctx.lineWidth = 1;
