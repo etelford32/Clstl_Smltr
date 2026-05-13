@@ -618,6 +618,39 @@ export async function fetchCronStatus() {
     }
 }
 
+// ── Forecast accumulator stats ──────────────────────────────────────────────
+// Aggregates over forecast_log + forecast_archive_pointer for the admin
+// "Forecast Accumulator" tile. The underlying RPC (get_accumulator_stats)
+// is SECURITY DEFINER and rejects non-admins itself; this wrapper still
+// gates on requireAdmin() for consistency + early-out.
+
+/**
+ * Returns { authorized, hot_total, hot_today, hot_24h, hot_oldest,
+ *           archived_total, archived_days, archived_last_day,
+ *           archived_last_bytes, archived_total_bytes, as_of }.
+ * `authorized: false` is normal in the pre-migration state — the
+ * dashboard tile renders an empty-state in that case.
+ */
+export async function fetchAccumulatorStats() {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+
+    try {
+        const { data, error } = await client.rpc('get_accumulator_stats');
+        if (error) throw error;
+        return { ok: true, data: data || {} };
+    } catch (err) {
+        // RPC missing (migration not applied yet) → return a not-installed
+        // marker so the tile shows a one-line install hint instead of
+        // a generic error.
+        const msg = err?.message || String(err);
+        const missing = /function .* does not exist/i.test(msg)
+            || /not found/i.test(msg);
+        return { ok: false, error: msg, missing };
+    }
+}
+
 // ── Pipeline heartbeat (per-pipeline health summary) ────────────────────────
 // Reads the pipeline_heartbeat table populated by record_pipeline_success /
 // record_pipeline_failure inside each pg_cron refresh function. This is the
