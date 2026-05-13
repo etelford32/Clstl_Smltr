@@ -1,5 +1,5 @@
 [workspace]
-members  = ["crates/disc-hydro"]
+members  = ["crates/disc-hydro", "crates/stellar-mhd-2d"]
 resolver = "2"
 
 # Every other Rust crate in this repo predates the disc-hydro workspace and
