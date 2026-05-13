@@ -2344,6 +2344,18 @@ nav {
                     More layers below — explore freely.
                 </div>
 
+                <label class="lyr-featured-row" for="feat-lyr-clouds"
+                       title="Live satellite cloud cover. Procedural fill is shaded by Open-Meteo cloud fraction (~hourly) so storm systems, ITCZ bands, and clear deserts read at a glance.">
+                    <input type="checkbox" id="feat-lyr-clouds" data-mirror="lyr-clouds" checked>
+                    <span class="lyr-featured-text">
+                        <span class="lyr-featured-name">
+                            <span class="lyr-featured-icon">☁️</span>Cloud Cover
+                        </span>
+                        <span class="lyr-featured-desc">Live global cloud cover, satellite-anchored</span>
+                    </span>
+                    <span class="lyr-status" data-layer="clouds"></span>
+                </label>
+
                 <label class="lyr-featured-row" for="feat-lyr-wind"
                        title="Animated streaming particles showing live global wind direction and speed (Open-Meteo, ~hourly).">
                     <input type="checkbox" id="feat-lyr-wind" data-mirror="lyr-wind" checked>
@@ -3424,7 +3436,10 @@ controls.dampingFactor = 0.06;
 controls.minDistance   = 1.06;   // just above cloud layer
 controls.maxDistance   = 10.0;
 controls.autoRotate      = true;
-controls.autoRotateSpeed = 0.25; // slow sidereal drift
+// 1.5 → ~9°/s, ≈40 s per revolution at 60 fps. The previous 0.25 setting
+// produced ~1.5°/s, which on this heavy scene (often rendering at 30–45 fps)
+// dropped to <1°/s and read as "not rotating" — that's the bug users hit.
+controls.autoRotateSpeed = 1.5;
 
 function onResize() {
     const w = canvas.clientWidth, h = canvas.clientHeight;
@@ -9176,7 +9191,16 @@ function animate() {
         const ease = 1 - Math.pow(1 - _flyProgress, 3);
         camera.position.lerpVectors(_flyFrom, _flyTarget, ease);
         controls.target.lerp(_flyAimAt, ease);
-        if (_flyProgress >= 1) { _flyTarget = null; controls.autoRotate = false; }
+        if (_flyProgress >= 1) {
+            _flyTarget = null;
+            controls.autoRotate = false;
+            // Keep the Auto-rotate checkbox visually in sync with the
+            // underlying state so re-checking it actually re-enables
+            // rotation (otherwise the box stays checked but rotation is
+            // off, and a single toggle just turns it back off again).
+            const rotEl = document.getElementById('lyr-rotate');
+            if (rotEl && rotEl.checked) rotEl.checked = false;
+        }
     }
 
     // ── Astro HUD DOM writes — throttled to 1 Hz of real time. Rotation
