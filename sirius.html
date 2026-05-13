@@ -467,7 +467,7 @@ import initSirius, * as Sirius from './js/sirius-wasm/sirius_wasm.js';
 // ─── WASM PHYSICS ENGINE ─────────────────────────────────────────────────────
 // Lazy-loaded; until ready we fall back to the analytic getOrbitalPos.
 let wasmReady = false;
-const wasm = await initSirius('./js/sirius-wasm/sirius_wasm_bg.wasm')
+const wasm = await initSirius({ module_or_path: './js/sirius-wasm/sirius_wasm_bg.wasm' })
     .then(() => { wasmReady = true; return Sirius; })
     .catch(err => { console.warn('[sirius] WASM init failed, using JS fallback:', err); return null; });
 
