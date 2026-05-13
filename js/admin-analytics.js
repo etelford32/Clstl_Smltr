@@ -1336,9 +1336,10 @@ export async function fetchAtRiskSubscriptions() {
 //   auth_flow_metrics(p_days)   → signup / signin success counts
 //   new_vs_returning(p_days)    → bucketed user counts
 //
-// Plus one event_log query for anonymous demo telemetry (demo_entered
-// and demo_signup_clicked land in event_log because the visitor isn't
-// signed in and RLS on activation_events forbids unauth writes).
+// Plus one analytics_events query for anonymous demo telemetry
+// (demo_entered and demo_signup_clicked land in analytics_events via
+// analytics.event() because the visitor isn't signed in and RLS on
+// activation_events forbids unauth writes).
 //
 // All fetchers degrade gracefully if the migration hasn't been applied —
 // the admin UI surfaces the migration filename in the empty state so an
@@ -1413,9 +1414,9 @@ export async function fetchTourMetrics(days = 30) {
 }
 
 /**
- * Demo-mode metrics. Anonymous events live in event_log (analytics.event)
- * because the visitor isn't signed in, so this fetcher hits that table
- * directly instead of the activation RPCs.
+ * Demo-mode metrics. Anonymous events live in analytics_events (written
+ * by analytics.event()) because the visitor isn't signed in, so this
+ * fetcher hits that table directly instead of the activation RPCs.
  *
  * Conversion = demo_signup_clicked / demo_entered. Not perfect (a click
  * doesn't guarantee signup completion) but close enough to spot a
@@ -1428,7 +1429,7 @@ export async function fetchDemoMetrics(days = 30) {
     try {
         const since = new Date(Date.now() - days * 86400_000).toISOString();
         const { data, error } = await client
-            .from('event_log')
+            .from('analytics_events')
             .select('event_name')
             .in('event_name', ['demo_entered', 'demo_signup_clicked'])
             .gte('created_at', since);
