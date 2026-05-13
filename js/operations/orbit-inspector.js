@@ -31,6 +31,7 @@
 import { propagate, tleEpochToJd, getWasmSgp4 } from '../satellite-tracker.js';
 import { decayWithSigma, deltaAPerDay, fmtLifetime } from './decision-deck.js';
 import { provStore } from './provenance.js';
+import { computePills, renderPills } from './satellite-pills.js';
 
 const MIN_PER_DAY = 1440;
 const RE_KM       = 6378.135;     // WGS-72, matches the SGP4 propagator
@@ -265,6 +266,13 @@ export function mountOrbitInspector(opts = {}) {
     const {
         host,
         tracker,
+        // Optional context that lets the inspector header render
+        // status pills consistent with the picker tooltip / menu.
+        // When omitted, only the always-computable pills (regime,
+        // defunct, tumbling, reentry) fire.
+        globe           = null,
+        isInFleet       = () => false,
+        isInConjunction = () => false,
         getSelectedId  = () => null,
         onSelectChange = () => () => {},
     } = opts;
@@ -321,6 +329,20 @@ export function mountOrbitInspector(opts = {}) {
             ? `<span class="op-orbit-group">${escapeHtml(sat.group)}</span>`
             : '';
 
+        // Status pills — same compute used by the picker tooltip /
+        // menu, so the inspector reads as "the long-form version of
+        // that thing you just hovered". Limit to 5 here since the
+        // panel is wider than the tooltip.
+        const pillHtml = renderPills(
+            computePills(sat, {
+                tracker,
+                globe,
+                inFleet:       isInFleet(tle.norad_id),
+                inConjunction: isInConjunction(tle.norad_id),
+            }),
+            { max: 5 },
+        );
+
         const cell = (label, value, unit = '', tip = '') => `
             <tr title="${escapeHtml(tip)}">
                 <td class="op-orbit-cell-k">${label}</td>
@@ -330,9 +352,12 @@ export function mountOrbitInspector(opts = {}) {
 
         host.innerHTML = `
             <div class="op-orbit-head">
-                <span class="op-orbit-name" title="${escapeHtml(sat.name)}">${escapeHtml(sat.name)}</span>
-                <span class="op-orbit-id">#${tle.norad_id}</span>
-                ${groupBadge}
+                <div class="op-orbit-head-row">
+                    <span class="op-orbit-name" title="${escapeHtml(sat.name)}">${escapeHtml(sat.name)}</span>
+                    <span class="op-orbit-id">#${tle.norad_id}</span>
+                    ${groupBadge}
+                </div>
+                ${pillHtml}
             </div>
 
             <table class="op-orbit-elements">
