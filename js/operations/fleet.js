@@ -21,6 +21,8 @@
 
 import { SatelliteTracker } from '../satellite-tracker.js';
 import { StarlinkFleet }    from './starlink-model.js';
+import { SL16Fleet }        from './rocket-body-model.js';
+import { EnvisatModel }     from './envisat-model.js';
 
 // Per-event debris layer ids — mutually exclusive with the composite
 // 'debris' layer so the same NORAD ID isn't double-counted across the
@@ -54,6 +56,17 @@ export const LAYER_CATALOG = Object.freeze([
     { id: 'beidou',       label: 'BeiDou',             section: 'GNSS',             on: false, group: 'beidou'       },
     { id: 'glonass',      label: 'GLONASS',            section: 'GNSS',             on: false, group: 'glonass'      },
     { id: 'last-30-days', label: 'Recently launched',  section: 'Hazards',          on: false, group: 'last-30-days' },
+    // Large intact rocket-body debris. Statistically-most-concerning
+    // class in LEO (McKnight et al.) — kept separate from the
+    // composite/per-event debris layers because these are individual
+    // ~9 t objects, not fragmentation clouds, and they get a 3D model
+    // instead of a dot.
+    { id: 'sl-16-rb',     label: 'SL-16 / Zenit-2 R/B', section: 'Large debris (3D)', on: false, group: 'sl-16-rb'    },
+    // Envisat — single-instance hero asset. Largest defunct Earth-
+    // observation satellite, tumbling silently since 2012. Rendered
+    // with a dedicated Mesh (single object, no instancing) so the
+    // bus + ASAR + gold solar wing silhouette reads on close zoom.
+    { id: 'envisat',      label: 'Envisat (defunct)',   section: 'Large debris (3D)', on: false, group: 'envisat'     },
 ]);
 
 export class OperationsFleet {
@@ -77,6 +90,19 @@ export class OperationsFleet {
         // doesn't bleed through.
         this.starlinkFleet = new StarlinkFleet(globe, this.tracker);
         globe.onTick(() => this.starlinkFleet.tick());
+
+        // SL-16 / Zenit-2 rocket-body fleet — phase 2 of the model
+        // pipeline. ~9-tonne upper stages clustered around 800–900 km
+        // get a cylinder + nozzle silhouette instead of a generic dot.
+        this.sl16Fleet = new SL16Fleet(globe, this.tracker);
+        globe.onTick(() => this.sl16Fleet.tick());
+
+        // Envisat — single-mesh hero asset (NORAD 27386). Position
+        // tracked via the same SGP4 pipeline; orientation is LVLH +
+        // a slow tumble around the local zenith to convey the post-
+        // 2012 uncontrolled attitude.
+        this.envisatModel = new EnvisatModel(globe, this.tracker);
+        globe.onTick((simTimeMs) => this.envisatModel.tick(simTimeMs));
 
         // Track desired-on state separately from the catalog defaults so
         // `bootstrap()` actually fires loads. The previous version
@@ -200,6 +226,25 @@ export class OperationsFleet {
         // satellite has exactly one on-screen representation.
         if (id === 'starlink') {
             this.starlinkFleet.setVisible(want);
+            if (this.tracker.hasGroup(layer.group)) {
+                this.tracker.setGroupDotsVisible(layer.group, !want);
+            }
+        }
+
+        // SL-16 R/B: same dual-toggle pattern as Starlink.
+        if (id === 'sl-16-rb') {
+            this.sl16Fleet.setVisible(want);
+            if (this.tracker.hasGroup(layer.group)) {
+                this.tracker.setGroupDotsVisible(layer.group, !want);
+            }
+        }
+
+        // Envisat: same dual-toggle pattern. The mesh handles its own
+        // "wait for TLE to land" gating inside tick(), so flipping
+        // setVisible(true) before the load resolves is safe — the
+        // mesh stays hidden until a propagated position arrives.
+        if (id === 'envisat') {
+            this.envisatModel.setVisible(want);
             if (this.tracker.hasGroup(layer.group)) {
                 this.tracker.setGroupDotsVisible(layer.group, !want);
             }

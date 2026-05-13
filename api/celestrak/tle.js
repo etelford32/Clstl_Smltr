@@ -64,6 +64,17 @@ const GROUP_MAP = {
     'beidou':       'GROUP=beidou',
     'glonass':      'GROUP=glonass',
     'planet':       'GROUP=planet',
+    // Rocket-body families pulled by NAME substring. Used by the
+    // operations console's 3D-model layers (`js/operations/rocket-body-model.js`)
+    // to render intact upper stages as cylinder meshes rather than
+    // dots. NAME match is server-side at CelesTrak — substring match
+    // on the TLE object name. `SL-16 R/B` is tight enough to exclude
+    // SL-16 fragments (which appear as `SL-16 DEB` when catalogued).
+    'sl-16-rb':     'NAME=SL-16+R/B',
+    // Single-object hero asset: NORAD 27386, ESA's defunct Envisat.
+    // NAME=ENVISAT returns the one TLE; the operations console renders
+    // it with a dedicated 3D mesh in `js/operations/envisat-model.js`.
+    'envisat':      'NAME=ENVISAT',
     // Per-event debris groups (each is <2 MB; CelesTrak's monolithic
     // SPECIAL=debris is ~9 MB and exceeds the edge response cap).
     'cosmos-1408-debris': 'GROUP=cosmos-1408-debris',
