@@ -1148,21 +1148,28 @@ export function initVehicleCanvas(canvas, opts = {}) {
     }
 
     // ── OrbitControls ──────────────────────────────────────────────────────
-    // Wheel-zoom is OFF so the canvas doesn't hijack page scroll. Camera
-    // dolly is buttons-only (+/− via api.setZoom). Drag-orbit and right-drag
-    // pan still work as expected.
+    // Wheel-zoom is OFF so the canvas doesn't hijack page scroll.
+    // Pan is OFF so the user can't drag controls.target into the launch
+    // tower (FSS at LC-39A is at (-22,4,0); Mechazilla tower at (-16,0,0)).
+    // Once target moved into a tower, the entire orbit sphere lived inside
+    // the tower volume and every frame looked like an orange beam.
+    // Azimuth is clamped to a ~180° arc on the rocket's viewing side so
+    // orbit-drag also can't swing the camera behind the tower.
     const controls = new OrbitControls(camera, canvas);
     controls.enableDamping       = true;
     controls.dampingFactor       = 0.08;
     controls.enableZoom          = false;
-    controls.enablePan           = true;
-    controls.screenSpacePanning  = true;
+    controls.enablePan           = false;
     controls.maxPolarAngle       = Math.PI * 0.96;
     controls.minPolarAngle       = 0.05;
-    controls.panSpeed            = 0.9;
     controls.rotateSpeed         = 0.8;
     controls.autoRotate          = !!opts.autoRotate;
     controls.autoRotateSpeed     = 0.45;
+    // Azimuth 0 = +Z (canonical viewing side); +π/2 = +X; −π/2 = −X (tower
+    // side on every supported pad). Allow ~120° each way from +Z, blocking
+    // a 120° wedge centered on the tower.
+    controls.minAzimuthAngle     = -Math.PI * 2 / 3;
+    controls.maxAzimuthAngle     =  Math.PI * 2 / 3;
 
     // ── Vehicle state (mutable — replaced by setVehicle) ───────────────────
     let current = {
@@ -1516,6 +1523,12 @@ export function initVehicleCanvas(canvas, opts = {}) {
         clock.getDelta();
         const t = clock.elapsedTime;
         controls.update();
+        // Belt-and-suspenders: snap target back onto the rocket's vertical
+        // axis every frame. If anything (autoRotate damping, a stray pan
+        // event, an inertia tick) nudges x/z off, the next frame puts it
+        // back. Y is left free — applyMissionState writes it during liftoff.
+        controls.target.x = 0;
+        controls.target.z = 0;
         stars.material.uniforms.uTime.value = t;
 
         // Liftoff state — advance clock, apply pose/sky/pad/trail, drive plume throttle.
