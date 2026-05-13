@@ -1,0 +1,15 @@
+[package]
+name        = "stellar-mhd-2d"
+version     = "0.1.0"
+edition     = "2021"
+publish     = false
+description = "2.5-D resistive MHD kernel for stellar flare modelling, compiled to WebAssembly. 2D Cartesian grid, 3-vector v and B, HLLD Riemann solver with GLM divergence cleaning."
+
+[lib]
+# `cdylib` produces a standalone .wasm with linear memory + flat C ABI for JS.
+# `rlib` lets native unit tests share the same code.
+crate-type = ["cdylib", "rlib"]
+
+# Zero external deps — same constraint as disc-hydro. Keeps wasm32 builds
+# reproducible in sandboxed CI with no network access.
+[dependencies]
