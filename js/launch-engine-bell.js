@@ -425,6 +425,145 @@ function buildEnginePlumbing(throatR, headY) {
 //   style       — 'cryo' (LH2/LOX/CH4) or 'kerolox' (RP-1/LO2); just
 //                  changes the manifold color tint.
 
+// Tank-dome fittings — sump + anti-vortex baffle + feed penetrations. No
+// dome shell, just the hardware that sits on the dome surface. Exported
+// so vehicles that already build their tank dome as part of their main
+// lathe (Shuttle ET) can drop just the fittings in place.
+//
+// Three feed-out modes (combinable):
+//   penetrations.count   — N symmetric ring penetrations (typical for
+//                           multi-engine clusters where each engine has
+//                           its own feed exit)
+//   asymmetricFeed       — single offset outlet at a specific angle, sized
+//                           bigger than a ring penetration (Shuttle ET's
+//                           17 " LH2 feedline exits the LH2 dome on the
+//                           orbiter side only)
+//   pressurizationPort   — small inverted outlet at a specific angle for
+//                           helium / ullage pressurization plumbing
+//
+// All radii / offsets are in dome-radius units (0..1) so the same call
+// works on a tiny upper-stage dome and a fat first-stage dome.
+
+export function buildTankDomeFittings({
+    domeRadius,
+    sumpR              = 0.12,
+    sumpH              = 0.16,
+    baffle             = true,
+    penetrations       = null,        // { count, ringR, sizeMul }
+    asymmetricFeed     = null,        // { angle, radial, sizeMul }
+    pressurizationPort = null,        // { angle, radial }
+    surfaceY           = (r) => 0,    // Y of dome surface at radial r (default flat)
+}) {
+    const g = new THREE.Group();
+    g.name = 'TankDomeFittings';
+
+    const fittingMat = new THREE.MeshStandardMaterial({
+        color: 0x554f3e, metalness: 0.85, roughness: 0.32,
+    });
+
+    // Central sump
+    const sR = domeRadius * sumpR;
+    const sH = domeRadius * sumpH;
+    const sump = new THREE.Mesh(
+        new THREE.CylinderGeometry(sR, sR * 0.85, sH, 18),
+        fittingMat,
+    );
+    sump.position.y = surfaceY(0) - sH / 2;
+    sump.castShadow = true;
+    g.add(sump);
+
+    if (baffle) {
+        const baffleR = sR * 1.95;
+        const ring = new THREE.Mesh(
+            new THREE.TorusGeometry(baffleR, sR * 0.14, 6, 22),
+            new THREE.MeshStandardMaterial({
+                color: 0x33312a, metalness: 0.8, roughness: 0.4,
+            }),
+        );
+        ring.rotation.x = Math.PI / 2;
+        ring.position.y = surfaceY(baffleR) - sR * 0.2;
+        g.add(ring);
+    }
+
+    // Symmetric ring of feed penetrations
+    if (penetrations && penetrations.count > 0) {
+        const count = penetrations.count;
+        const ringR = domeRadius * (penetrations.ringR ?? 0.62);
+        const mul   = penetrations.sizeMul ?? 1.0;
+        const penR  = sR * 0.45 * mul;
+        const penH  = sR * 1.2 * mul;
+        const ringY = surfaceY(ringR);
+        for (let i = 0; i < count; i++) {
+            const a = (i / count) * Math.PI * 2;
+            const flange = new THREE.Mesh(
+                new THREE.CylinderGeometry(penR * 1.6, penR * 1.6, penR * 0.4, 14),
+                fittingMat,
+            );
+            flange.position.set(Math.cos(a) * ringR, ringY, Math.sin(a) * ringR);
+            g.add(flange);
+            const stub = new THREE.Mesh(
+                new THREE.CylinderGeometry(penR, penR, penH, 10),
+                fittingMat,
+            );
+            stub.position.set(
+                Math.cos(a) * ringR,
+                ringY - penH / 2 - penR * 0.2,
+                Math.sin(a) * ringR,
+            );
+            g.add(stub);
+        }
+    }
+
+    // Single asymmetric feed outlet (e.g. Shuttle ET's 17" LH2 feedline)
+    if (asymmetricFeed) {
+        const a    = asymmetricFeed.angle;
+        const rad  = domeRadius * (asymmetricFeed.radial ?? 0.55);
+        const mul  = asymmetricFeed.sizeMul ?? 1.5;
+        const penR = sR * 0.45 * mul;
+        const penH = sR * 1.6 * mul;
+        const y0   = surfaceY(rad);
+        const flange = new THREE.Mesh(
+            new THREE.CylinderGeometry(penR * 1.7, penR * 1.7, penR * 0.5, 18),
+            fittingMat,
+        );
+        flange.position.set(Math.cos(a) * rad, y0, Math.sin(a) * rad);
+        g.add(flange);
+        const stub = new THREE.Mesh(
+            new THREE.CylinderGeometry(penR, penR, penH, 14),
+            fittingMat,
+        );
+        stub.position.set(
+            Math.cos(a) * rad,
+            y0 - penH / 2 - penR * 0.25,
+            Math.sin(a) * rad,
+        );
+        g.add(stub);
+    }
+
+    // Small pressurization vent (offset from feed outlet)
+    if (pressurizationPort) {
+        const a    = pressurizationPort.angle;
+        const rad  = domeRadius * (pressurizationPort.radial ?? 0.7);
+        const penR = sR * 0.22;
+        const penH = sR * 0.6;
+        const y0   = surfaceY(rad);
+        const stub = new THREE.Mesh(
+            new THREE.CylinderGeometry(penR, penR, penH, 10),
+            new THREE.MeshStandardMaterial({
+                color: 0x4a4438, metalness: 0.85, roughness: 0.35,
+            }),
+        );
+        stub.position.set(
+            Math.cos(a) * rad,
+            y0 - penH / 2 - penR * 0.2,        // protrude DOWN (engine-bay side)
+            Math.sin(a) * rad,
+        );
+        g.add(stub);
+    }
+
+    return g;
+}
+
 // Tank dome cap — bulges DOWN over the engine bay (it's the bottom of the
 // propellant tank above). Built as a LatheGeometry with the profile going
 // from (0,0) at the tip (lowest point) up to (radius, height) at the outer
