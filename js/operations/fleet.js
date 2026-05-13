@@ -19,10 +19,10 @@
  * constellations (Starlink ~6k, GNSS ~120) load on user demand.
  */
 
-import { SatelliteTracker } from '../satellite-tracker.js';
-import { StarlinkFleet }    from './starlink-model.js';
-import { SL16Fleet }        from './rocket-body-model.js';
-import { EnvisatModel }     from './envisat-model.js';
+import { SatelliteTracker }                from '../satellite-tracker.js';
+import { StarlinkFleet }                   from './starlink-model.js';
+import { createSL16Fleet, createSL8Fleet } from './rocket-body-model.js';
+import { EnvisatModel }                    from './envisat-model.js';
 
 // Per-event debris layer ids — mutually exclusive with the composite
 // 'debris' layer so the same NORAD ID isn't double-counted across the
@@ -62,6 +62,12 @@ export const LAYER_CATALOG = Object.freeze([
     // ~9 t objects, not fragmentation clouds, and they get a 3D model
     // instead of a dot.
     { id: 'sl-16-rb',     label: 'SL-16 / Zenit-2 R/B', section: 'Large debris (3D)', on: false, group: 'sl-16-rb'    },
+    // SL-8 / Cosmos-3M second stage. ~290 of these in the catalog
+    // — far more numerous than SL-16, dominates the "objects per
+    // shell" count between 700–1000 km. Rendered with a slow per-
+    // instance tumble to communicate that most are in uncontrolled
+    // attitude states.
+    { id: 'sl-8-rb',      label: 'SL-8 / Cosmos-3M R/B', section: 'Large debris (3D)', on: false, group: 'sl-8-rb'     },
     // Envisat — single-instance hero asset. Largest defunct Earth-
     // observation satellite, tumbling silently since 2012. Rendered
     // with a dedicated Mesh (single object, no instancing) so the
@@ -94,8 +100,17 @@ export class OperationsFleet {
         // SL-16 / Zenit-2 rocket-body fleet — phase 2 of the model
         // pipeline. ~9-tonne upper stages clustered around 800–900 km
         // get a cylinder + nozzle silhouette instead of a generic dot.
-        this.sl16Fleet = new SL16Fleet(globe, this.tracker);
-        globe.onTick(() => this.sl16Fleet.tick());
+        // Stable (no tumble): canonical gravity-gradient pose.
+        this.sl16Fleet = createSL16Fleet(globe, this.tracker);
+        globe.onTick((simTimeMs) => this.sl16Fleet.tick(simTimeMs));
+
+        // SL-8 / Cosmos-3M rocket-body fleet — phase 4. Same instanced
+        // pipeline as SL-16 but with a stubbier cylinder, smaller
+        // nozzle, dark paint band, and a slow per-instance tumble
+        // around the cylinder long axis (phase seeded by NORAD ID so
+        // neighbours don't move in lockstep).
+        this.sl8Fleet = createSL8Fleet(globe, this.tracker);
+        globe.onTick((simTimeMs) => this.sl8Fleet.tick(simTimeMs));
 
         // Envisat — single-mesh hero asset (NORAD 27386). Position
         // tracked via the same SGP4 pipeline; orientation is LVLH +
@@ -234,6 +249,14 @@ export class OperationsFleet {
         // SL-16 R/B: same dual-toggle pattern as Starlink.
         if (id === 'sl-16-rb') {
             this.sl16Fleet.setVisible(want);
+            if (this.tracker.hasGroup(layer.group)) {
+                this.tracker.setGroupDotsVisible(layer.group, !want);
+            }
+        }
+
+        // SL-8 R/B: same dual-toggle pattern.
+        if (id === 'sl-8-rb') {
+            this.sl8Fleet.setVisible(want);
             if (this.tracker.hasGroup(layer.group)) {
                 this.tracker.setGroupDotsVisible(layer.group, !want);
             }
