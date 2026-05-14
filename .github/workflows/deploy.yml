@@ -69,6 +69,16 @@ jobs:
           for f in sitemap.xml robots.txt; do
             [ -f "$f" ] && cp "$f" build/web/ && echo "Copied $f"
           done
+          # Copy Vercel project config so the deployed branch carries the
+          # crons[] / headers / build settings. Without vercel.json in the
+          # tree Vercel pulls from gh-pages, the scheduler has no cron
+          # registrations and /api/cron/* never fires — even though the
+          # handlers are deployed as lambdas. package.json carries
+          # "type": "module" so Node serverless functions load as ESM
+          # natively instead of going through the ESM→CJS compile step.
+          for f in vercel.json package.json; do
+            [ -f "$f" ] && cp "$f" build/web/ && echo "Copied $f"
+          done
           # List what we're deploying
           echo "--- build/web contents ---"
           ls -lhR build/web/ | head -60
