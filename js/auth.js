@@ -853,23 +853,66 @@ class AuthManager {
         try { localStorage.setItem(AUTH_KEY, json); } catch (_) {}
     }
 
-    /** Redirect to signin if not logged in. */
+    /**
+     * Redirect to signin if not logged in. Returns true when the user is
+     * already authenticated, false (after triggering navigation) when not.
+     *
+     * Deep-link preservation: the caller's full URL (including pathname,
+     * search, and hash) is stashed two ways so the post-login redirect
+     * survives both a sessionStorage block and a fresh tab opened from
+     * a shared link:
+     *   1. `sessionStorage.pp_auth_redirect` — read back by
+     *      `getPostLoginRedirect()` after a successful sign-in.
+     *   2. `?next=<encoded-path>` appended to the signin URL — read by
+     *      `signin.html` even when sessionStorage is unavailable
+     *      (private windows, strict cookie protection).
+     *
+     * The next-param is intentionally only the same-origin path; the
+     * signin page validates it against an allow-list before honouring
+     * it so an attacker can't smuggle an absolute off-origin URL through
+     * a `/signin?next=https://evil.example` link.
+     */
     requireAuth(redirectUrl = 'signin.html') {
-        if (!this.isSignedIn()) {
-            try { sessionStorage.setItem('pp_auth_redirect', window.location.href); } catch (_) {}
-            // Telemetry: track which gated routes anonymous users tried
-            // to reach. Helps identify where to add public marketing
-            // pages vs where the gate is correct.
-            try {
-                telemetry.recordRedirect(window.location.href, redirectUrl, 'unauthenticated');
-            } catch {}
-            window.location.href = redirectUrl;
-            return false;
-        }
-        return true;
+        if (this.isSignedIn()) return true;
+
+        // Capture the path the user was trying to reach. We don't
+        // persist absolute URLs in `?next=` — only same-origin paths —
+        // so the signin allowlist can validate without ambiguity.
+        let intentPath = '';
+        try {
+            const u = new URL(window.location.href);
+            intentPath = u.pathname + u.search + u.hash;
+        } catch { intentPath = ''; }
+
+        try { sessionStorage.setItem('pp_auth_redirect', window.location.href); } catch (_) {}
+
+        // Build the signin destination. If the caller already specified
+        // an explicit ?next= we honour it; otherwise we append our own
+        // computed intent.
+        let dest = redirectUrl;
+        try {
+            if (intentPath && !/[?&]next=/.test(dest)) {
+                const sep = dest.includes('?') ? '&' : '?';
+                dest = `${dest}${sep}next=${encodeURIComponent(intentPath)}`;
+            }
+        } catch {}
+
+        // Telemetry: track which gated routes anonymous users tried
+        // to reach. Helps identify where to add public marketing
+        // pages vs where the gate is correct.
+        try {
+            telemetry.recordRedirect(window.location.href, dest, 'unauthenticated');
+        } catch {}
+
+        window.location.href = dest;
+        return false;
     }
 
-    /** Get stored post-login redirect URL. */
+    /**
+     * Get stored post-login redirect URL. Consumed by signin.html and
+     * auth-callback.html on a successful sign-in. Single-shot — calling
+     * a second time returns null because the value is cleared on read.
+     */
     getPostLoginRedirect() {
         try {
             const url = sessionStorage.getItem('pp_auth_redirect');

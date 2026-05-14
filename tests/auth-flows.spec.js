@@ -250,50 +250,78 @@ test.describe('Pricing Page', () => {
 });
 
 // ── 7. Dashboard ────────────────────────────────────────────────────────────
+//
+// Notes after the canonical auth/dashboard refactor:
+//   • Unauthenticated visit to /dashboard.html now REDIRECTS to
+//     /signin?next=/dashboard.html (no more in-page modal as the
+//     primary gate). The in-page #auth-gate stays in the markup as a
+//     fallback for the case where the module script fails to load,
+//     so the test below asserts the redirect.
+//   • Subscription, Alert Preferences, and Saved Locations cards have
+//     moved to /settings.html. The dashboard now carries a single
+//     "Open Settings" link strip in their place.
 
 test.describe('Dashboard', () => {
-    test('shows auth gate for unauthenticated users', async ({ page }) => {
-        // Clear any stored auth
-        await page.goto('/dashboard.html');
+    test('unauthenticated visit redirects to /signin?next=/dashboard.html', async ({ page }) => {
+        await page.goto('/');
         await page.evaluate(() => {
             localStorage.removeItem('pp_auth');
             sessionStorage.removeItem('pp_auth');
         });
+        await page.goto('/dashboard.html');
+        await page.waitForURL(/\/signin\.html\?next=/, { timeout: 10_000 });
+        const url = new URL(page.url());
+        expect(url.searchParams.get('next')).toContain('dashboard.html');
+    });
+
+    test('settings-link strip points to /settings.html', async ({ page }) => {
+        await page.goto('/dashboard.html');
+        await page.evaluate(() => {
+            localStorage.setItem('pp_auth', JSON.stringify({
+                signedIn: true, email: 'test@test.com', name: 'Test',
+                plan: 'free', role: 'user', provider: 'mock',
+            }));
+        });
         await page.reload();
-        // Should show auth gate or hide main content
-        const gate = page.locator('#auth-gate');
-        await expect(gate).toBeVisible({ timeout: 5_000 });
+        const card = page.locator('#settings-link-card');
+        await expect(card).toBeVisible({ timeout: 10_000 });
+        await expect(card.locator('a[href="settings.html"]')).toBeVisible();
     });
 
-    test('subscription card exists', async ({ page }) => {
+    test('impact score card exists for paid user', async ({ page }) => {
         await page.goto('/dashboard.html');
-        const subCard = page.locator('#subscription-card');
-        // Card should exist in DOM (may be hidden if not authed)
-        await expect(subCard).toBeAttached();
+        await page.evaluate(() => {
+            localStorage.setItem('pp_auth', JSON.stringify({
+                signedIn: true, email: 'test@test.com', name: 'Test',
+                plan: 'basic', role: 'user', provider: 'mock',
+            }));
+        });
+        await page.reload();
+        await expect(page.locator('#impact-card')).toBeAttached({ timeout: 10_000 });
     });
 
-    test('alert preferences card exists', async ({ page }) => {
+    test('alert history card exists for paid user', async ({ page }) => {
         await page.goto('/dashboard.html');
-        const prefsCard = page.locator('#alert-prefs-card');
-        await expect(prefsCard).toBeAttached();
-    });
-
-    test('impact score card exists', async ({ page }) => {
-        await page.goto('/dashboard.html');
-        const impactCard = page.locator('#impact-card');
-        await expect(impactCard).toBeAttached();
-    });
-
-    test('alert history card exists', async ({ page }) => {
-        await page.goto('/dashboard.html');
-        const historyCard = page.locator('#alert-history-card');
-        await expect(historyCard).toBeAttached();
+        await page.evaluate(() => {
+            localStorage.setItem('pp_auth', JSON.stringify({
+                signedIn: true, email: 'test@test.com', name: 'Test',
+                plan: 'basic', role: 'user', provider: 'mock',
+            }));
+        });
+        await page.reload();
+        await expect(page.locator('#alert-history-card')).toBeAttached({ timeout: 10_000 });
     });
 
     test('tour retake button exists', async ({ page }) => {
         await page.goto('/dashboard.html');
-        const tourBtn = page.locator('#retake-tour');
-        await expect(tourBtn).toBeAttached();
+        await page.evaluate(() => {
+            localStorage.setItem('pp_auth', JSON.stringify({
+                signedIn: true, email: 'test@test.com', name: 'Test',
+                plan: 'free', role: 'user', provider: 'mock',
+            }));
+        });
+        await page.reload();
+        await expect(page.locator('#retake-tour')).toBeAttached({ timeout: 10_000 });
     });
 });
 
