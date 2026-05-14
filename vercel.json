@@ -1,0 +1,344 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "bash build-wasm.sh",
+  "outputDirectory": ".",
+  "framework": null,
+  "installCommand": "export PATH=/rust/bin:$HOME/.cargo/bin:$PATH && rustup target add wasm32-unknown-unknown",
+  "crons": [
+    {
+      "path": "/api/cron/refresh-weather-grid",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/prewarm-hot",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/prewarm-medium",
+      "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/cron/prewarm-cold",
+      "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/cron/daily-forecast-digest",
+      "schedule": "0 11 * * *"
+    },
+    {
+      "path": "/api/cron/refresh-saved-locations",
+      "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/cron/pipeline-watchdog",
+      "schedule": "15,45 * * * *"
+    },
+    {
+      "path": "/api/cron/onboarding-nudge",
+      "schedule": "30 16 * * *"
+    },
+    {
+      "path": "/api/cron/archive-forecasts",
+      "schedule": "0 2 * * *"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/operations.html",
+      "headers": [
+        {
+          "key": "Cross-Origin-Opener-Policy",
+          "value": "same-origin"
+        },
+        {
+          "key": "Cross-Origin-Embedder-Policy",
+          "value": "credentialless"
+        }
+      ]
+    },
+    {
+      "source": "/api/stripe/(.*)",
+      "headers": [
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET, POST, OPTIONS"
+        },
+        {
+          "key": "Access-Control-Allow-Headers",
+          "value": "Content-Type, Authorization, Stripe-Signature"
+        }
+      ]
+    },
+    {
+      "source": "/api/alerts/(.*)",
+      "headers": [
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "https://parkersphysics.com"
+        },
+        {
+          "key": "Vary",
+          "value": "Origin"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET, POST, OPTIONS"
+        },
+        {
+          "key": "Access-Control-Allow-Headers",
+          "value": "Content-Type, Authorization"
+        }
+      ]
+    },
+    {
+      "source": "/api/weather/(.*)",
+      "headers": [
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET, OPTIONS"
+        },
+        {
+          "key": "Access-Control-Allow-Headers",
+          "value": "Content-Type, Authorization"
+        }
+      ]
+    },
+    {
+      "source": "/api/forecast/(.*)",
+      "headers": [
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET, POST, OPTIONS"
+        },
+        {
+          "key": "Access-Control-Allow-Headers",
+          "value": "Content-Type, Authorization"
+        }
+      ]
+    },
+    {
+      "source": "/api/nws/(.*)",
+      "headers": [
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET, OPTIONS"
+        },
+        {
+          "key": "Access-Control-Allow-Headers",
+          "value": "Content-Type, Authorization"
+        }
+      ]
+    },
+    {
+      "source": "/rust/www/(.*)",
+      "headers": [
+        {
+          "key": "Cross-Origin-Embedder-Policy",
+          "value": "require-corp"
+        },
+        {
+          "key": "Cross-Origin-Opener-Policy",
+          "value": "same-origin"
+        }
+      ]
+    },
+    {
+      "source": "/rust/www/(.*)\\.(wasm)",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/wasm"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    },
+    {
+      "source": "/rust/www/(.*)\\.(js|mjs)",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/javascript; charset=utf-8"
+        }
+      ]
+    },
+    {
+      "source": "/rust/www/(.*)\\.(html)",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "text/html; charset=utf-8"
+        }
+      ]
+    },
+    {
+      "source": "/js/(.*)\\.js",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/:path*",
+      "has": [{ "type": "host", "value": "www.parkersphysics.com" }],
+      "destination": "https://parkersphysics.com/:path*",
+      "permanent": true
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/rust/www/:path*",
+      "destination": "/rust/www/:path*"
+    },
+    {
+      "source": "/wr102",
+      "destination": "/wr102.html"
+    },
+    {
+      "source": "/vega",
+      "destination": "/vega.html"
+    },
+    {
+      "source": "/achernar",
+      "destination": "/achernar.html"
+    },
+    {
+      "source": "/pricing",
+      "destination": "/pricing.html"
+    },
+    {
+      "source": "/signup",
+      "destination": "/signup.html"
+    },
+    {
+      "source": "/signin",
+      "destination": "/signin.html"
+    },
+    {
+      "source": "/login",
+      "destination": "/signin.html"
+    },
+    {
+      "source": "/dashboard",
+      "destination": "/dashboard.html"
+    },
+    {
+      "source": "/launch-planner",
+      "destination": "/launch-planner.html"
+    },
+    {
+      "source": "/missions",
+      "destination": "/missions.html"
+    },
+    {
+      "source": "/upper-atmosphere",
+      "destination": "/upper-atmosphere.html"
+    },
+    {
+      "source": "/operations",
+      "destination": "/operations.html"
+    },
+    {
+      "source": "/ops",
+      "destination": "/operations.html"
+    },
+    {
+      "source": "/privacy",
+      "destination": "/privacy.html"
+    },
+    {
+      "source": "/eula",
+      "destination": "/eula.html"
+    },
+    {
+      "source": "/api-policy",
+      "destination": "/api-policy.html"
+    },
+    {
+      "source": "/contact-enterprise",
+      "destination": "/contact-enterprise.html"
+    },
+    {
+      "source": "/feedback",
+      "destination": "/feedback.html"
+    },
+    {
+      "source": "/for-educators",
+      "destination": "/for-educators.html"
+    },
+    {
+      "source": "/satellite-operator",
+      "destination": "/satellite-operator/landing.html"
+    },
+    {
+      "source": "/satellite-operators",
+      "destination": "/satellite-operator/landing.html"
+    },
+    {
+      "source": "/for-operators",
+      "destination": "/satellite-operator/landing.html"
+    },
+    {
+      "source": "/educators",
+      "destination": "/for-educators.html"
+    },
+    {
+      "source": "/teachers",
+      "destination": "/for-educators.html"
+    },
+    {
+      "source": "/admin",
+      "destination": "/admin.html"
+    },
+    {
+      "source": "/reset-password",
+      "destination": "/reset-password.html"
+    },
+    {
+      "source": "/v1/solar-wind/:path*",
+      "destination": "/api/solar-wind/:path*"
+    },
+    {
+      "source": "/v1/noaa/:path*",
+      "destination": "/api/noaa/:path*"
+    },
+    {
+      "source": "/v1/donki/:path*",
+      "destination": "/api/donki/:path*"
+    },
+    {
+      "source": "/v1/horizons",
+      "destination": "/api/horizons"
+    },
+    {
+      "source": "/v1/atmosphere/:path*",
+      "destination": "/api/atmosphere/:path*"
+    },
+    {
+      "source": "/v1/weather/:path*",
+      "destination": "/api/weather/:path*"
+    }
+  ]
+}
