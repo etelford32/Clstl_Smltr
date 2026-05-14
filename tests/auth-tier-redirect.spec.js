@@ -69,7 +69,19 @@ function mockAuthFor(plan, role, extra = {}) {
     };
 }
 
+/**
+ * Seed a mock session into localStorage.
+ *
+ * Why we visit `/` first: every protected page now calls
+ * `auth.requireAuth()` as its first module-script line, which navigates
+ * the page away when no session is present. If the test called
+ * `page.evaluate(...)` directly without a same-origin landing pad, the
+ * write could race the redirect. Visiting the unprotected home page
+ * once gives us a stable localStorage context that all subsequent
+ * `page.goto(<protected-page>)` calls inherit.
+ */
 async function setAuth(page, plan, role, extra = {}) {
+    await page.goto('/');
     await page.evaluate((auth) => {
         localStorage.setItem('pp_auth', JSON.stringify(auth));
         sessionStorage.removeItem('pp_demo_mode');
@@ -83,9 +95,8 @@ async function setAuth(page, plan, role, extra = {}) {
 test.describe('Dashboard auth gate — all tiers', () => {
     for (const fx of TIER_FIXTURES) {
         test(`clears gate for ${fx.label}`, async ({ page }) => {
-            await page.goto('/dashboard.html');
             await setAuth(page, fx.plan, fx.role);
-            await page.reload();
+            await page.goto('/dashboard.html');
 
             // Gate should be hidden; main should be visible.
             const gate = page.locator('#auth-gate');
@@ -155,15 +166,13 @@ test.describe('requireAuth deep-link preservation', () => {
 test.describe('Signin page — already signed in', () => {
     for (const fx of TIER_FIXTURES) {
         test(`shows panel (does not redirect) for ${fx.label}`, async ({ page }) => {
-            await page.goto('/signin.html');
             await setAuth(page, fx.plan, fx.role);
             await page.goto('/signin.html');
 
             // No auto-redirect — we should stay on /signin.html.
-            await page.waitForSelector('#already-signed-in:not([style*="display:none"]):not([style*="display: none"])', { timeout: 10_000 });
+            await expect(page.locator('#already-signed-in')).toBeVisible({ timeout: 10_000 });
             expect(page.url()).toMatch(/signin\.html/);
             await expect(page.locator('#signin-form')).toBeHidden();
-            await expect(page.locator('#already-signed-in')).toBeVisible();
 
             // Continue button defaults to dashboard.html when no ?next=
             // and no pp_auth_redirect is stashed.
@@ -173,7 +182,6 @@ test.describe('Signin page — already signed in', () => {
     }
 
     test('continue button honours ?next= (same-origin path)', async ({ page }) => {
-        await page.goto('/signin.html');
         await setAuth(page, 'free', 'user');
         await page.goto('/signin.html?next=%2Fsettings.html%23alert-prefs');
         await expect(page.locator('#already-signed-in')).toBeVisible({ timeout: 10_000 });
@@ -182,7 +190,6 @@ test.describe('Signin page — already signed in', () => {
     });
 
     test('continue button REJECTS off-origin ?next= and falls back to dashboard', async ({ page }) => {
-        await page.goto('/signin.html');
         await setAuth(page, 'free', 'user');
         await page.goto('/signin.html?next=https%3A%2F%2Fevil.example%2F');
         await expect(page.locator('#already-signed-in')).toBeVisible({ timeout: 10_000 });
@@ -192,7 +199,6 @@ test.describe('Signin page — already signed in', () => {
     });
 
     test('continue button REJECTS protocol-relative ?next=', async ({ page }) => {
-        await page.goto('/signin.html');
         await setAuth(page, 'free', 'user');
         await page.goto('/signin.html?next=%2F%2Fevil.example%2Fxx');
         await expect(page.locator('#already-signed-in')).toBeVisible({ timeout: 10_000 });
@@ -202,13 +208,12 @@ test.describe('Signin page — already signed in', () => {
     });
 
     test('sign-out button clears session and reloads', async ({ page }) => {
-        await page.goto('/signin.html');
         await setAuth(page, 'free', 'user');
         await page.goto('/signin.html');
         await expect(page.locator('#already-signed-in')).toBeVisible({ timeout: 10_000 });
         await page.click('#asi-signout');
         // After signOut + reload, the form should be back and pp_auth gone.
-        await page.waitForSelector('#signin-form:not([style*="display:none"])', { timeout: 10_000 });
+        await expect(page.locator('#signin-form')).toBeVisible({ timeout: 10_000 });
         const auth = await page.evaluate(() => localStorage.getItem('pp_auth'));
         expect(auth).toBeNull();
     });
@@ -216,7 +221,6 @@ test.describe('Signin page — already signed in', () => {
 
 test.describe('Signup page — already signed in', () => {
     test('renders panel and does NOT auto-redirect', async ({ page }) => {
-        await page.goto('/signup.html');
         await setAuth(page, 'free', 'user');
         await page.goto('/signup.html');
         await expect(page.locator('#already-signed-in')).toBeVisible({ timeout: 10_000 });
@@ -231,9 +235,8 @@ test.describe('Signup page — already signed in', () => {
 
 test.describe('Welcome page', () => {
     test('renders for signed-in user with plan-aware greeting', async ({ page }) => {
-        await page.goto('/welcome.html');
         await setAuth(page, 'free', 'user');
-        await page.reload();
+        await page.goto('/welcome.html');
         await expect(page.locator('#auth-gate')).toBeHidden({ timeout: 10_000 });
         await expect(page.locator('#welcome-h1')).toBeVisible();
         await expect(page.locator('#choice-sim')).toBeVisible();
@@ -244,17 +247,15 @@ test.describe('Welcome page', () => {
     });
 
     test('hides upgrade pill for paid tiers', async ({ page }) => {
-        await page.goto('/welcome.html');
         await setAuth(page, 'advanced', 'user');
-        await page.reload();
+        await page.goto('/welcome.html');
         await expect(page.locator('#choice-sim')).toBeVisible({ timeout: 10_000 });
         await expect(page.locator('#upgrade-pill')).toBeHidden();
     });
 
     test('clicking "set location" reveals the inline form', async ({ page }) => {
-        await page.goto('/welcome.html');
         await setAuth(page, 'free', 'user');
-        await page.reload();
+        await page.goto('/welcome.html');
         await expect(page.locator('#choice-loc')).toBeVisible({ timeout: 10_000 });
         await page.click('#choice-loc');
         await expect(page.locator('#location-form')).toHaveClass(/open/);
@@ -268,9 +269,8 @@ test.describe('Welcome page', () => {
 
 test.describe('Settings page', () => {
     test('renders all three sections for signed-in user', async ({ page }) => {
-        await page.goto('/settings.html');
         await setAuth(page, 'basic', 'user');
-        await page.reload();
+        await page.goto('/settings.html');
         await expect(page.locator('#auth-gate')).toBeHidden({ timeout: 10_000 });
         await expect(page.locator('#subscription')).toBeVisible();
         await expect(page.locator('#alert-prefs')).toBeVisible();
@@ -278,44 +278,39 @@ test.describe('Settings page', () => {
     });
 
     test('free users see alert-prefs gate', async ({ page }) => {
-        await page.goto('/settings.html');
         await setAuth(page, 'free', 'user');
-        await page.reload();
+        await page.goto('/settings.html');
         await expect(page.locator('#alert-prefs')).toBeVisible({ timeout: 10_000 });
         await expect(page.locator('#alert-prefs-gate')).toBeVisible();
         await expect(page.locator('#alert-prefs-content')).toBeHidden();
     });
 
     test('free users see saved-locations gate', async ({ page }) => {
-        await page.goto('/settings.html');
         await setAuth(page, 'free', 'user');
-        await page.reload();
+        await page.goto('/settings.html');
         await expect(page.locator('#saved-locations')).toBeVisible({ timeout: 10_000 });
         await expect(page.locator('#sl-gate')).toBeVisible();
         await expect(page.locator('#sl-content')).toBeHidden();
     });
 
     test('basic users see alert-prefs CONTENT (gate hidden)', async ({ page }) => {
-        await page.goto('/settings.html');
         await setAuth(page, 'basic', 'user');
-        await page.reload();
+        await page.goto('/settings.html');
         await expect(page.locator('#alert-prefs-content')).toBeVisible({ timeout: 10_000 });
         await expect(page.locator('#alert-prefs-gate')).toBeHidden();
     });
 
     test('advanced users get advanced-alert rows enabled (not disabled)', async ({ page }) => {
-        await page.goto('/settings.html');
         await setAuth(page, 'advanced', 'user');
-        await page.reload();
+        await page.goto('/settings.html');
         await expect(page.locator('#alert-prefs-content')).toBeVisible({ timeout: 10_000 });
         const disabled = await page.locator('#pref-notify_radio_blackout').isDisabled();
         expect(disabled).toBeFalsy();
     });
 
     test('basic users have advanced-alert rows disabled', async ({ page }) => {
-        await page.goto('/settings.html');
         await setAuth(page, 'basic', 'user');
-        await page.reload();
+        await page.goto('/settings.html');
         await expect(page.locator('#alert-prefs-content')).toBeVisible({ timeout: 10_000 });
         const disabled = await page.locator('#pref-notify_radio_blackout').isDisabled();
         expect(disabled).toBeTruthy();
@@ -328,9 +323,8 @@ test.describe('Settings page', () => {
 
 test.describe('Dashboard tier-aware skeleton', () => {
     test('free user: paid-only cards hidden', async ({ page }) => {
-        await page.goto('/dashboard.html');
         await setAuth(page, 'free', 'user');
-        await page.reload();
+        await page.goto('/dashboard.html');
         await expect(page.locator('#auth-gate')).toBeHidden({ timeout: 10_000 });
         // Wait for applyTierLayout() to stamp data-tier-visible on each card.
         await page.waitForFunction(() => {
@@ -344,9 +338,8 @@ test.describe('Dashboard tier-aware skeleton', () => {
     });
 
     test('basic user: alert-card / impact-card / alert-history-card visible; trip / roster hidden', async ({ page }) => {
-        await page.goto('/dashboard.html');
         await setAuth(page, 'basic', 'user');
-        await page.reload();
+        await page.goto('/dashboard.html');
         await page.waitForFunction(() => document.getElementById('alert-card')?.dataset.tierVisible !== undefined, null, { timeout: 10_000 });
         expect(await page.locator('#alert-card').getAttribute('data-tier-visible')).toBe('1');
         expect(await page.locator('#impact-card').getAttribute('data-tier-visible')).toBe('1');
@@ -356,27 +349,24 @@ test.describe('Dashboard tier-aware skeleton', () => {
     });
 
     test('educator user: trip-planning + class-roster visible', async ({ page }) => {
-        await page.goto('/dashboard.html');
         await setAuth(page, 'educator', 'user');
-        await page.reload();
+        await page.goto('/dashboard.html');
         await page.waitForFunction(() => document.getElementById('trip-planning-card')?.dataset.tierVisible !== undefined, null, { timeout: 10_000 });
         expect(await page.locator('#trip-planning-card').getAttribute('data-tier-visible')).toBe('1');
         expect(await page.locator('#class-roster-card').getAttribute('data-tier-visible')).toBe('1');
     });
 
     test('advanced user: trip-planning visible, class-roster hidden', async ({ page }) => {
-        await page.goto('/dashboard.html');
         await setAuth(page, 'advanced', 'user');
-        await page.reload();
+        await page.goto('/dashboard.html');
         await page.waitForFunction(() => document.getElementById('trip-planning-card')?.dataset.tierVisible !== undefined, null, { timeout: 10_000 });
         expect(await page.locator('#trip-planning-card').getAttribute('data-tier-visible')).toBe('1');
         expect(await page.locator('#class-roster-card').getAttribute('data-tier-visible')).toBe('0');
     });
 
     test('admin role unlocks every card regardless of plan', async ({ page }) => {
-        await page.goto('/dashboard.html');
         await setAuth(page, 'free', 'admin');
-        await page.reload();
+        await page.goto('/dashboard.html');
         await page.waitForFunction(() => document.getElementById('alert-card')?.dataset.tierVisible !== undefined, null, { timeout: 10_000 });
         for (const id of ['alert-card', 'impact-card', 'trip-planning-card', 'alert-history-card', 'class-roster-card']) {
             expect(await page.locator(`#${id}`).getAttribute('data-tier-visible')).toBe('1');
@@ -402,10 +392,9 @@ test.describe('Plan badge after sign-in', () => {
 
     for (const fx of BADGE_FIXTURES) {
         test(`shows correct badge for plan=${fx.plan} role=${fx.role}`, async ({ page }) => {
-            await page.goto('/dashboard.html');
             await setAuth(page, fx.plan, fx.role);
             await page.evaluate(() => localStorage.setItem('ppx_tour_completed', '1'));
-            await page.reload();
+            await page.goto('/dashboard.html');
             const badge = page.locator('#plan-badge');
             await expect(badge).toBeVisible({ timeout: 10_000 });
             await expect(badge).toHaveText(fx.text);
@@ -420,7 +409,10 @@ test.describe('Plan badge after sign-in', () => {
 
 test.describe('Sign-out flow', () => {
     test('clears pp_auth from both storages', async ({ page }) => {
-        await page.goto('/dashboard.html');
+        // Use an unprotected page as the storage host — dashboard now
+        // bounces anonymous visitors to /signin, which would race the
+        // evaluate that writes pp_auth.
+        await page.goto('/');
         await page.evaluate(() => {
             localStorage.setItem('pp_auth', JSON.stringify({
                 signedIn: true, email: 'admin@test.com', name: 'Admin',
