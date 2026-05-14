@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Welcome — Parkers Physics</title>
+<meta name="robots" content="noindex,nofollow">
+<meta name="description" content="Pick your first step in Parkers Physics — try a simulation, set your location, or open your dashboard.">
+<link rel="stylesheet" href="js/nav-styles.css">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#06030f;--surface:#0d0820;--border:rgba(255,255,255,.07);
+  --text:#d0cce8;--muted:#6a6488;--accent:#ffb830;--accent2:#4fc3f7;
+  --green:#4fc97f;--card-bg:#0f0c21;--purple:#c77dff;
+}
+html{height:auto;overflow-y:auto}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh;display:flex;flex-direction:column;overflow-x:hidden}
+
+main{flex:1;max-width:1040px;width:100%;margin:0 auto;padding:32px 24px 60px}
+
+/* Auth gate (matches dashboard / account) */
+#auth-gate{position:fixed;inset:0;background:var(--bg);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px}
+#auth-gate.hidden{display:none}
+#auth-gate h2{font-size:1.55rem;font-weight:800;margin-bottom:10px}
+#auth-gate p{color:var(--muted);margin-bottom:26px;max-width:360px;font-size:.9rem}
+.gate-actions{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
+.gate-actions a{display:inline-flex;align-items:center;justify-content:center;padding:12px 24px;min-height:44px;border-radius:24px;font-weight:700;font-size:.88rem;text-decoration:none}
+.gate-signin{background:transparent;border:1px solid var(--accent);color:var(--accent)}
+.gate-signup{background:var(--accent);color:#0a0510}
+
+.page-header{margin-bottom:28px;text-align:center}
+.page-header h1{font-size:2rem;font-weight:800;background:linear-gradient(100deg,#fff 30%,#c77dff);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:8px}
+.page-header p{color:var(--muted);font-size:.98rem;max-width:560px;margin:0 auto}
+.welcome-eyebrow{display:inline-block;font-size:.62rem;letter-spacing:.16em;text-transform:uppercase;font-weight:800;color:#c77dff;background:rgba(192,128,255,.10);border:1px solid rgba(192,128,255,.32);border-radius:999px;padding:3px 10px;margin-bottom:14px}
+
+/* Three big choices */
+.choice-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin-bottom:36px}
+.choice-card{background:var(--card-bg);border:1px solid var(--border);border-radius:14px;padding:22px 20px;text-decoration:none;color:inherit;display:flex;flex-direction:column;gap:8px;transition:border-color .15s,transform .15s,background .15s;cursor:pointer}
+.choice-card:hover{border-color:rgba(192,128,255,.5);background:rgba(255,255,255,.02);transform:translateY(-2px)}
+.choice-card:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.choice-icon{font-size:2rem;line-height:1}
+.choice-title{font-size:1.05rem;font-weight:700;color:#fff;margin-top:6px}
+.choice-desc{font-size:.82rem;color:var(--muted);line-height:1.5;flex:1}
+.choice-cta{margin-top:10px;font-size:.78rem;font-weight:700;color:var(--accent2)}
+
+/* Tutorial section */
+.tutorial-section{margin-top:18px}
+.tutorial-section h2{font-size:1.05rem;font-weight:700;color:#fff;margin-bottom:6px;letter-spacing:.01em}
+.tutorial-section .sub{font-size:.82rem;color:var(--muted);margin-bottom:18px;line-height:1.5}
+.tutorial-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.tutorial-card{background:rgba(255,255,255,.02);border:1px solid var(--border);border-radius:10px;padding:14px 16px;text-decoration:none;color:inherit;display:flex;flex-direction:column;gap:4px;transition:border-color .15s,background .15s}
+.tutorial-card:hover{border-color:rgba(79,195,247,.35);background:rgba(79,195,247,.04)}
+.tutorial-title{font-size:.88rem;font-weight:700;color:#e8f4ff}
+.tutorial-desc{font-size:.72rem;color:var(--muted);line-height:1.5}
+.tutorial-tag{display:inline-block;font-size:.58rem;font-weight:800;letter-spacing:.08em;color:var(--accent);background:rgba(255,184,48,.08);border:1px solid rgba(255,184,48,.3);border-radius:999px;padding:2px 8px;text-transform:uppercase;margin-bottom:4px;align-self:flex-start}
+
+/* Set-location inline form */
+#location-form{display:none;background:rgba(255,255,255,.02);border:1px solid rgba(192,128,255,.3);border-radius:12px;padding:18px 20px;margin-bottom:24px}
+#location-form.open{display:block}
+#location-form h3{font-size:1rem;font-weight:700;color:#fff;margin-bottom:10px}
+#location-form p{font-size:.78rem;color:var(--muted);margin-bottom:12px;line-height:1.5}
+.loc-row{display:flex;gap:8px;flex-wrap:wrap}
+.loc-row input{flex:1;min-width:180px;background:rgba(0,0,0,.32);border:1px solid rgba(160,128,255,.22);border-radius:8px;color:#e8f4ff;font:inherit;font-size:.9rem;padding:10px 12px;outline:none;transition:border-color .12s}
+.loc-row input:focus{border-color:#c77dff}
+.loc-row button{font:inherit;font-size:.82rem;font-weight:700;padding:9px 16px;border-radius:8px;cursor:pointer;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.04);color:#cef;transition:background .15s}
+.loc-row button:hover{background:rgba(255,255,255,.09);color:#fff}
+.loc-row button.primary{background:linear-gradient(45deg,#ff8c00,#ffd700);color:#0a0510;border-color:transparent}
+.loc-row button:disabled{opacity:.5;cursor:not-allowed}
+.loc-status{margin-top:8px;font-size:.78rem;padding:6px 10px;border-radius:6px;display:none}
+.loc-status.ok{display:block;background:rgba(78,201,127,.08);border:1px solid rgba(78,201,127,.3);color:var(--green)}
+.loc-status.err{display:block;background:rgba(255,107,107,.08);border:1px solid rgba(255,107,107,.3);color:#ff8b8b}
+
+/* Footer pill / upgrade */
+.upgrade-pill{margin-top:32px;padding:14px 18px;background:linear-gradient(90deg,rgba(192,128,255,.10),rgba(79,195,247,.10));border:1px solid rgba(192,128,255,.28);border-radius:12px;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
+.upgrade-pill strong{color:#fff}
+.upgrade-pill a{color:#ffd700;font-weight:700;text-decoration:none;white-space:nowrap}
+.upgrade-pill a:hover{text-decoration:underline}
+
+footer{padding:22px;text-align:center;font-size:.74rem;color:var(--muted);border-top:1px solid var(--border)}
+footer a{color:var(--muted);text-decoration:none;margin:0 6px}
+footer a:hover{color:var(--text)}
+
+@media(max-width:600px){
+  main{padding:18px 12px 56px}
+  .page-header h1{font-size:1.5rem}
+  .choice-card{padding:18px 16px}
+}
+</style>
+</head>
+<body>
+
+<!-- ── AUTH GATE ──
+     Welcome is reachable as a tutorial hub for signed-in users. An
+     anonymous visitor sees the same gate the dashboard does — sign in
+     to land here, or browse the marketing site at /. The auth.requireAuth()
+     call below handles the redirect to /signin?next=/welcome.html. -->
+<div id="auth-gate" aria-live="polite">
+  <img src="ParkersPhysics_logo2.jpg" alt="Parkers Physics" style="height:52px;width:52px;border-radius:50%;object-fit:cover;margin-bottom:18px">
+  <h2>Sign in to see your welcome page</h2>
+  <p>The welcome hub picks a first step based on your plan and shows the right tutorial materials.</p>
+  <div class="gate-actions">
+    <a href="signin.html?next=%2Fwelcome.html" class="gate-signin">Sign In</a>
+    <a href="signup.html" class="gate-signup">Create Free Account</a>
+  </div>
+</div>
+
+<!-- ── NAV ── -->
+<nav aria-label="Primary navigation"></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260514"; initNav("");</script>
+
+<main>
+
+  <header class="page-header">
+    <span class="welcome-eyebrow" id="welcome-eyebrow">Welcome</span>
+    <h1 id="welcome-h1">Welcome to Parkers Physics</h1>
+    <p id="welcome-sub">Pick a first step. You can always come back here for tutorials and shortcuts.</p>
+  </header>
+
+  <!-- ── 3 big choices ── -->
+  <div class="choice-grid" id="choice-grid">
+
+    <a class="choice-card" id="choice-sim" href="sun.html" data-pick="try_sim">
+      <div class="choice-icon">☀️</div>
+      <div class="choice-title">Try a simulation</div>
+      <div class="choice-desc">Jump into the live Sun simulator. Real-time NOAA solar imagery, granulation, sunspots, the corona — all driven by today's space weather.</div>
+      <div class="choice-cta">Open the Sun sim →</div>
+    </a>
+
+    <button class="choice-card" id="choice-loc" type="button" data-pick="set_location">
+      <div class="choice-icon">📍</div>
+      <div class="choice-title">Set your location</div>
+      <div class="choice-desc">Anchor aurora visibility, ISS pass times, and storm warnings to you. Takes about 20 seconds. We never share your location.</div>
+      <div class="choice-cta">Set location →</div>
+    </button>
+
+    <a class="choice-card" id="choice-dash" href="dashboard.html" data-pick="go_dashboard">
+      <div class="choice-icon">📋</div>
+      <div class="choice-title">Open your dashboard</div>
+      <div class="choice-desc">Live space weather, your personal report, aurora visibility, and quick links to every simulator you have access to.</div>
+      <div class="choice-cta">Go to dashboard →</div>
+    </a>
+
+  </div>
+
+  <!-- ── Inline location form (revealed by "Set your location" choice) ── -->
+  <section id="location-form" aria-labelledby="location-form-title">
+    <h3 id="location-form-title">Where should we anchor your forecasts?</h3>
+    <p>Type a city, zip, or address — we'll geocode and save it as your primary location. You can change or clear it any time from your account.</p>
+    <div class="loc-row">
+      <input id="welcome-loc-input" type="text" placeholder="City, zip, or address…" maxlength="80" autocomplete="off" aria-label="Location">
+      <button id="welcome-loc-gps" type="button" title="Use device location">📍 Auto</button>
+      <button id="welcome-loc-save" type="button" class="primary">Save location</button>
+    </div>
+    <div class="loc-status" id="welcome-loc-status" role="status"></div>
+  </section>
+
+  <!-- ── Tutorials ── -->
+  <section class="tutorial-section">
+    <h2>Quick tutorials</h2>
+    <p class="sub">Three-minute reads that explain the simulator, your alerts, and how to make the most of a free account.</p>
+    <div class="tutorial-grid">
+
+      <a class="tutorial-card" href="space-weather.html" data-tutorial="space-weather">
+        <span class="tutorial-tag">Tutorial</span>
+        <div class="tutorial-title">Reading space weather</div>
+        <div class="tutorial-desc">What Kp, Bz, and solar wind speed mean, and how they affect aurora, GPS, and radio.</div>
+      </a>
+
+      <a class="tutorial-card" href="sun.html" data-tutorial="sun-sim">
+        <span class="tutorial-tag">Tutorial</span>
+        <div class="tutorial-title">The Sun simulator</div>
+        <div class="tutorial-desc">A guided tour of the live granulation, sunspot, and corona overlays in the Sun simulator.</div>
+      </a>
+
+      <a class="tutorial-card" href="earth.html" data-tutorial="earth-sim">
+        <span class="tutorial-tag">Tutorial</span>
+        <div class="tutorial-title">Earth + aurora oval</div>
+        <div class="tutorial-desc">See the live aurora oval, your saved locations, and how the Kp index drives oval shape.</div>
+      </a>
+
+      <a class="tutorial-card" href="missions.html" data-tutorial="missions">
+        <span class="tutorial-tag">Catalog</span>
+        <div class="tutorial-title">All simulators</div>
+        <div class="tutorial-desc">Browse every simulator we ship — black holes, Wolf-Rayet stars, accretion discs, and more.</div>
+      </a>
+
+      <a class="tutorial-card" href="settings.html#alert-prefs" data-tutorial="alerts">
+        <span class="tutorial-tag">How-to</span>
+        <div class="tutorial-title">Alert preferences</div>
+        <div class="tutorial-desc">Pick which space-weather events email you, and at what severity. Paid plan needed for email.</div>
+      </a>
+
+      <a class="tutorial-card" href="pricing.html" data-tutorial="pricing">
+        <span class="tutorial-tag">Plans</span>
+        <div class="tutorial-title">What each plan unlocks</div>
+        <div class="tutorial-desc">Side-by-side comparison of Free, Basic, Educator, Advanced, Institution, and Enterprise.</div>
+      </a>
+
+    </div>
+  </section>
+
+  <!-- ── Upgrade pill (rendered only for free users) ── -->
+  <div class="upgrade-pill" id="upgrade-pill" style="display:none">
+    <div><strong>You're on Free.</strong> <span style="color:var(--muted)">Saved locations, email alerts, and advanced simulators need a paid plan.</span></div>
+    <a href="pricing.html">See plans →</a>
+  </div>
+
+</main>
+
+<footer>
+  <a href="dashboard.html">Dashboard</a> ·
+  <a href="settings.html">Settings</a> ·
+  <a href="account.html">Account</a> ·
+  <a href="pricing.html">Pricing</a> ·
+  <a href="privacy.html">Privacy</a>
+</footer>
+
+<script type="module">
+import { auth } from './js/auth.js';
+import { tierLabel, getTier } from './js/tier-config.js';
+import { logActivation } from './js/activation.js';
+import { funnel } from './js/auth-funnel.js';
+import './js/telemetry.js';
+import { analytics } from './js/analytics.js';
+
+// ── Auth: this page is for signed-in users; bounce anon visitors to
+// /signin?next=/welcome.html via requireAuth(). The auth-gate above is
+// only the fallback if the module script fails to load.
+await auth.ready();
+if (!auth.requireAuth('signin.html?next=%2Fwelcome.html')) {
+    // Stop here — requireAuth has already navigated away.
+} else {
+    document.getElementById('auth-gate').classList.add('hidden');
+
+    // Funnel: stitches into the post-signup funnel_id so the admin
+    // can compute "% of new signups that hit welcome".
+    try { funnel.step('welcome_view'); } catch {}
+
+    const user  = auth.getUser();
+    const plan  = (auth.getPlan() || 'free').toLowerCase();
+    const tier  = getTier(plan);
+    const label = tierLabel(plan);
+    const first = (auth.getFirstName?.() || user?.name || 'Explorer').split(' ')[0];
+
+    // Greeting personalisation.
+    const h1     = document.getElementById('welcome-h1');
+    const sub    = document.getElementById('welcome-sub');
+    const eyebrow= document.getElementById('welcome-eyebrow');
+    h1.textContent = `Welcome${first ? ', ' + first : ''}`;
+    eyebrow.textContent = `${label} plan`;
+    sub.textContent = plan === 'free'
+        ? 'Pick a first step. You can come back here any time for tutorials and shortcuts.'
+        : `You're on the ${label} plan — every simulator and alert is yours. Pick a first step below.`;
+
+    // Free-tier upgrade pill.
+    if (!tier.paid && plan !== 'tester') {
+        document.getElementById('upgrade-pill').style.display = '';
+    }
+
+    // Identify so subsequent page_view events attach to the user.
+    try { if (user?.id) analytics.identify(user.id, { plan, role: user.role }); } catch {}
+
+    // ── Choice handlers ──────────────────────────────────────────────
+    // Each choice emits a single activation event so the funnel + admin
+    // dashboards can compute "% of welcome users that pick X". Picking
+    // "go to dashboard" also satisfies the wizard_completed activation
+    // event so the existing onboarding-nudge cron stops emailing them.
+    function recordPick(pick, extra = {}) {
+        try { funnel.step('welcome_pick', { pick, plan, ...extra }); } catch {}
+        try { logActivation('wizard_completed', { source: 'welcome', pick, plan }); } catch {}
+    }
+
+    document.getElementById('choice-sim').addEventListener('click', () => {
+        recordPick('try_sim');
+    });
+
+    document.getElementById('choice-dash').addEventListener('click', () => {
+        recordPick('go_dashboard');
+    });
+
+    const locForm   = document.getElementById('location-form');
+    const locInput  = document.getElementById('welcome-loc-input');
+    const locSave   = document.getElementById('welcome-loc-save');
+    const locGps    = document.getElementById('welcome-loc-gps');
+    const locStatus = document.getElementById('welcome-loc-status');
+
+    document.getElementById('choice-loc').addEventListener('click', () => {
+        locForm.classList.add('open');
+        try { funnel.step('welcome_location_opened'); } catch {}
+        setTimeout(() => locInput.focus(), 100);
+    });
+
+    function setStatus(kind, msg) {
+        locStatus.className = 'loc-status ' + kind;
+        locStatus.textContent = msg;
+    }
+
+    locSave.addEventListener('click', async () => {
+        const q = (locInput.value || '').trim();
+        if (!q) { setStatus('err', 'Type a city, zip, or address first.'); return; }
+        locSave.disabled = true; locSave.textContent = 'Saving…';
+        setStatus('', '');
+        try {
+            const { geocodeQuery, saveUserLocation } = await import('./js/user-location.js');
+            const r = await geocodeQuery(q);
+            if (!r) {
+                setStatus('err', "Couldn't find that location. Try a city, postcode, or full address.");
+                locSave.disabled = false; locSave.textContent = 'Save location';
+                return;
+            }
+            saveUserLocation({ lat: r.lat, lon: r.lon, city: r.city });
+            // Persist to user_profiles too — fire-and-forget.
+            try {
+                await auth.updateProfile({
+                    location_lat:  r.lat,
+                    location_lon:  r.lon,
+                    location_city: r.city,
+                });
+            } catch {}
+            setStatus('ok', `Saved — alerts will fire for ${r.city}.`);
+            recordPick('set_location', { city: r.city });
+            // Brief pause then move the user to the dashboard, where their
+            // new location is already wired into every card.
+            setTimeout(() => { window.location.href = 'dashboard.html'; }, 1200);
+        } catch (e) {
+            setStatus('err', e?.message || 'Something went wrong saving that location.');
+            locSave.disabled = false; locSave.textContent = 'Save location';
+        }
+    });
+
+    locGps.addEventListener('click', () => {
+        if (!navigator.geolocation) {
+            setStatus('err', 'Geolocation is not supported in this browser.');
+            return;
+        }
+        setStatus('', '');
+        locGps.disabled = true; locGps.textContent = 'Locating…';
+        navigator.geolocation.getCurrentPosition(async (pos) => {
+            try {
+                const { saveUserLocation } = await import('./js/user-location.js');
+                // user-location.js doesn't expose a reverse geocoder; surface
+                // raw coordinates as the label so the card has something to
+                // show. The user can edit the label later from /settings.
+                const label = `${pos.coords.latitude.toFixed(3)}, ${pos.coords.longitude.toFixed(3)}`;
+                saveUserLocation({ lat: pos.coords.latitude, lon: pos.coords.longitude, city: label });
+                try {
+                    await auth.updateProfile({
+                        location_lat:  pos.coords.latitude,
+                        location_lon:  pos.coords.longitude,
+                        location_city: label,
+                    });
+                } catch {}
+                setStatus('ok', `Saved — alerts will fire for ${label}.`);
+                recordPick('set_location', { city: label, source: 'gps' });
+                setTimeout(() => { window.location.href = 'dashboard.html'; }, 1200);
+            } catch (e) {
+                setStatus('err', e?.message || 'Failed to save GPS location.');
+                locGps.disabled = false; locGps.textContent = '📍 Auto';
+            }
+        }, () => {
+            setStatus('err', 'Could not get GPS location (denied or unavailable).');
+            locGps.disabled = false; locGps.textContent = '📍 Auto';
+        }, { timeout: 10000, enableHighAccuracy: false });
+    });
+
+    // Tutorial clicks — funnel only, no activation event (these aren't
+    // "completion" signals, just exploration).
+    document.querySelectorAll('.tutorial-card[data-tutorial]').forEach(el => {
+        el.addEventListener('click', () => {
+            try { funnel.step('welcome_tutorial_clicked', { topic: el.dataset.tutorial }); } catch {}
+        });
+    });
+}
+</script>
+
+</body>
+</html>

@@ -302,7 +302,11 @@ async function boot() {
         const isNew = createdMs && (Date.now() - createdMs) < 60_000;
 
         if (isNew) {
-            // Wizard auto-fires on first dashboard load.
+            // Brand-new OAuth/magic-link account. We send the user to
+            // /welcome.html (set below) where they pick a first step
+            // explicitly. The legacy pp_welcome_pending flag is still
+            // stamped for one release cycle as a fallback for any
+            // mid-flow user — the dashboard no longer reads it.
             try { localStorage.setItem('pp_welcome_pending', '1'); } catch {}
 
             // Activation event. The DB unique partial index on
@@ -369,11 +373,32 @@ async function boot() {
             if (u?.id) analytics.identify(u.id, { plan: u.plan, role: u.role });
         } catch {}
 
-        // Honour any post-login redirect a sign-in-required page may
-        // have stashed in sessionStorage; default to dashboard.
-        let dest;
-        try { dest = auth.getPostLoginRedirect?.(); } catch {}
-        if (!dest) dest = 'dashboard.html';
+        // Pick the post-callback destination:
+        //   • Brand-new accounts (signed up via OAuth / magic-link)
+        //     land on /welcome.html — same contract as password signup.
+        //   • Returning users honour any pp_auth_redirect stashed by
+        //     requireAuth() on the page they tried to reach, falling
+        //     back to /dashboard.html.
+        let dest = null;
+        if (isNew) {
+            dest = 'welcome.html';
+        } else {
+            try { dest = auth.getPostLoginRedirect?.(); } catch {}
+            if (dest) {
+                // Collapse absolute pp_auth_redirect URLs to same-origin
+                // paths — keeps the redirect surface narrow and matches
+                // the contract signin.html uses.
+                try {
+                    const u = new URL(dest);
+                    if (u.origin === window.location.origin) {
+                        dest = u.pathname + u.search + u.hash;
+                    } else {
+                        dest = null;
+                    }
+                } catch { dest = null; }
+            }
+            if (!dest) dest = 'dashboard.html';
+        }
 
         // Clean the hash so a refresh on the dashboard doesn't try to
         // re-process the OAuth tokens. window.location.replace also

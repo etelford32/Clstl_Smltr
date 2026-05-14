@@ -408,7 +408,25 @@
             <div class="success-overlay" id="success-view">
                 <div class="success-icon">🎉</div>
                 <h3>You're in!</h3>
-                <p>Your account has been created.<br>Redirecting you to your dashboard in a moment…<br><a href="dashboard.html" style="color:#a080ff;">Or click here to continue →</a></p>
+                <p>Your account has been created.<br>Taking you to your welcome page in a moment…<br><a href="welcome.html" style="color:#a080ff;">Or click here to continue →</a></p>
+            </div>
+
+            <!-- "Already signed in" panel — replaces the auto-bounce. Same
+                 idea as signin.html's panel: surface the signed-in identity
+                 and let the user continue or sign out without yanking them
+                 to the dashboard against their will. -->
+            <div id="already-signed-in" style="display:none;padding:18px 0;text-align:center">
+                <div style="font-size:2.4rem;margin-bottom:10px">👋</div>
+                <h3 style="color:#4eff91;margin-bottom:6px">You already have an account</h3>
+                <p style="color:#aab;font-size:.88rem;line-height:1.5;margin-bottom:16px">
+                    Signed in as <span id="asu-email" style="color:#fff;font-weight:600">—</span>.
+                    Pick something below — or sign out if you wanted to make a different account.
+                </p>
+                <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+                    <a href="welcome.html" class="form-submit-btn" style="display:inline-flex;align-items:center;justify-content:center;padding:10px 16px;border-radius:8px;background:linear-gradient(45deg,#ff8c00,#ffd700);color:#0a0510;font-weight:700;text-decoration:none">Open welcome page</a>
+                    <a href="dashboard.html" class="form-submit-btn" style="display:inline-flex;align-items:center;justify-content:center;padding:10px 16px;border-radius:8px;background:rgba(255,255,255,.06);color:#cef;border:1px solid rgba(255,255,255,.12);text-decoration:none">Go to dashboard</a>
+                    <button type="button" id="asu-signout" style="font:inherit;padding:10px 16px;border-radius:8px;background:rgba(255,255,255,.04);color:#888;border:1px solid rgba(255,255,255,.1);cursor:pointer">Sign out</button>
+                </div>
             </div>
         </div>
 
@@ -437,13 +455,24 @@
 
     await auth.ready();
     if (auth.isSignedIn()) {
-        // Already-signed-in landing on /signup — same idempotency story as
-        // signin.html: identify before redirect so the dashboard page_view
-        // attaches to the user.
+        // Already-signed-in landing on /signup. Render the "you have an
+        // account" panel INSTEAD of auto-bouncing — auto-bounce traps
+        // anyone who wanted to make a second account, and shows the
+        // welcome page (the canonical post-signup destination) as an
+        // option alongside the dashboard.
         const u = auth.getUser();
         if (u?.id) analytics.identify(u.id, { plan: u.plan, role: u.role });
         funnel.step('signup_already_signed_in');
-        window.location.href = 'dashboard.html';
+
+        // Hide the form, show the panel.
+        document.getElementById('form-view').style.display = 'none';
+        document.getElementById('asu-email').textContent = u?.email || '—';
+        document.getElementById('asu-signout').addEventListener('click', async () => {
+            try { funnel.step('signup_already_signout'); } catch {}
+            await auth.signOut(null);
+            location.reload();
+        });
+        document.getElementById('already-signed-in').style.display = '';
     }
     // applyInvitePlan handles plan-comp invites; applyClassInvite handles
     // educator/institution seat invites that attach the student to a
@@ -822,10 +851,14 @@
                 }
             } catch {}
 
-            // Stamp a localStorage flag so the dashboard's welcome wizard
-            // fires on the next page load. Stripe checkout redirect (paid
-            // tiers) lands BACK on the dashboard with success=true via
-            // the Stripe portal — the flag survives that round-trip.
+            // The pp_welcome_pending flag is retired — /welcome.html is
+            // now the canonical first-step page and the user lands on it
+            // directly after this success view (or after the Stripe
+            // checkout round-trip for paid tiers). We still write it for
+            // one release cycle so users mid-flow when the deploy lands
+            // (i.e. between this code and the dashboard load) don't lose
+            // the welcome experience entirely — the dashboard ignores the
+            // flag now, but the safety hatch stays here for a beat.
             try { localStorage.setItem('pp_welcome_pending', '1'); } catch {}
 
             // Activation event: the brand-new account is signed in by
@@ -868,9 +901,12 @@
             //   - this was a class-seat invite (student rides parent's plan).
             const goToCheckout = plan !== 'free' && !invitedComp && !classSeatApplied;
             if (goToCheckout) {
-                // User selected a paid plan — redirect to checkout after brief delay
+                // User selected a paid plan — redirect to checkout after brief delay.
+                // Post-Stripe we land back on dashboard.html as a 'success' return,
+                // which is the historical contract Stripe webhook + the portal page
+                // expect; the welcome hub is one click away from there.
                 const msgEl = document.querySelector('#success-view p');
-                if (msgEl) msgEl.innerHTML = 'Account created! Redirecting to checkout&hellip;<br><a href="dashboard.html" style="color:#a080ff;font-size:.82rem">Or go to dashboard &rarr;</a>';
+                if (msgEl) msgEl.innerHTML = 'Account created! Redirecting to checkout&hellip;<br><a href="welcome.html" style="color:#a080ff;font-size:.82rem">Or skip to your welcome page &rarr;</a>';
                 setTimeout(async () => {
                     try {
                         const sb = await (await import('./js/supabase-config.js')).getSupabase();
@@ -888,17 +924,22 @@
                         const data = await res.json();
                         if (data.url) { window.location.href = data.url; return; }
                     } catch (e) { console.warn('Checkout redirect failed:', e); }
-                    window.location.href = 'dashboard.html';
+                    // Checkout failure fallback: land on welcome rather than
+                    // dashboard so the user has a chance to pick a path.
+                    window.location.href = 'welcome.html';
                 }, 1500);
             } else {
+                // Free / class-seat / invite-comped paths all land on the
+                // welcome hub. It's the canonical first-step picker and
+                // doubles as the tutorial library.
                 const msgEl = document.querySelector('#success-view p');
                 if (classSeatApplied) {
                     const plabel = parentPlan ? parentPlan.charAt(0).toUpperCase() + parentPlan.slice(1) : 'class';
-                    if (msgEl) msgEl.innerHTML = `Welcome! You've joined a Parkers Physics ${plabel} class.<br><a href="dashboard.html" style="color:#a080ff;">Open your dashboard →</a>`;
+                    if (msgEl) msgEl.innerHTML = `Welcome! You've joined a Parkers Physics ${plabel} class.<br><a href="welcome.html" style="color:#a080ff;">Open your welcome page →</a>`;
                 } else if (invitedComp) {
-                    if (msgEl) msgEl.innerHTML = `Welcome! Your invite unlocked the <strong>${invite.plan.charAt(0).toUpperCase() + invite.plan.slice(1)}</strong> plan.<br><a href="dashboard.html" style="color:#a080ff;">Open your dashboard →</a>`;
+                    if (msgEl) msgEl.innerHTML = `Welcome! Your invite unlocked the <strong>${invite.plan.charAt(0).toUpperCase() + invite.plan.slice(1)}</strong> plan.<br><a href="welcome.html" style="color:#a080ff;">Open your welcome page →</a>`;
                 }
-                setTimeout(() => { window.location.href = 'dashboard.html'; }, 2500);
+                setTimeout(() => { window.location.href = 'welcome.html'; }, 2500);
             }
         })();
     });

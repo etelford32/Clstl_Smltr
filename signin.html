@@ -315,6 +315,33 @@
                     <p style="color:#888; font-size:.9rem;">Redirecting you to the app…</p>
                 </div>
 
+                <!-- "Already signed in" panel — replaces the old auto-bounce.
+                     Rendered when a visitor lands on /signin with a live
+                     session. Lets the user continue (honouring ?next= /
+                     pp_auth_redirect first, falling back to dashboard) OR
+                     sign out without leaving the page. Prevents the
+                     "I can't log into a different account" trap. -->
+                <div id="already-signed-in" style="display:none;padding:18px 0;text-align:center">
+                    <div style="font-size:2.4rem;margin-bottom:10px">👋</div>
+                    <h3 style="color:#4eff91;margin-bottom:6px">You're already signed in</h3>
+                    <p style="color:#aab;font-size:.88rem;line-height:1.5;margin-bottom:16px">
+                        Signed in as <span id="asi-email" style="color:#fff;font-weight:600">—</span>
+                        <span id="asi-plan-wrap" style="margin-left:6px"></span>
+                    </p>
+                    <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+                        <a id="asi-continue" href="dashboard.html" class="btn-submit" style="max-width:200px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none">
+                            Continue →
+                        </a>
+                        <button type="button" id="asi-signout" class="btn-submit"
+                                style="max-width:200px;background:rgba(255,255,255,.06);color:#ccc;border:1px solid rgba(255,255,255,.1)">
+                            Sign out and switch account
+                        </button>
+                    </div>
+                    <p style="color:#666;font-size:.72rem;margin-top:14px">
+                        Want to sign into a different account? Sign out first, then enter the other credentials.
+                    </p>
+                </div>
+
                 <form id="signin-form" novalidate>
                     <div class="form-group">
                         <label for="email">Email Address</label>
@@ -436,18 +463,106 @@
     import { auth } from './js/auth.js';
     import { analytics } from './js/analytics.js';
     import { funnel } from './js/auth-funnel.js';
-    // Wait for Supabase to initialize, then check if already signed in
+    import { tierLabel, tierBadgeClass } from './js/tier-config.js';
+
+    // ── ?next= allowlist ─────────────────────────────────────────────
+    // The ?next= query param carries the deep link a user was trying to
+    // reach before requireAuth() bounced them here. To defend against
+    // open-redirect smuggling (e.g. /signin?next=https://evil.example)
+    // we only honour same-origin path-style values, validated against
+    // the current origin via the URL constructor. Returns either a
+    // safe "/path?q#frag" string or null.
+    function readSafeNext() {
+        try {
+            const raw = new URLSearchParams(location.search).get('next');
+            if (!raw) return null;
+            // Reject anything that's not a same-origin path. Two-step
+            // check: protocol-relative ("//evil") gets rejected before
+            // URL parses it as same-origin against location.origin.
+            if (raw.startsWith('//')) return null;
+            if (!raw.startsWith('/'))  return null;
+            const u = new URL(raw, window.location.origin);
+            if (u.origin !== window.location.origin) return null;
+            // Length cap — keep the next-param from carrying surprises
+            // (very long URLs are almost always either junk or attack).
+            const safe = u.pathname + u.search + u.hash;
+            if (safe.length > 512) return null;
+            return safe;
+        } catch { return null; }
+    }
+    window._readSafeNext = readSafeNext;
+
+    /** Pick the best post-signin destination. Returns a same-origin
+     *  path. Order:  ?next= (validated) > sessionStorage pp_auth_redirect
+     *  (set by requireAuth) > 'dashboard.html'. */
+    function pickPostSigninDest() {
+        const nxt = readSafeNext();
+        if (nxt) return nxt;
+        const stashed = auth.getPostLoginRedirect();
+        if (stashed) {
+            // pp_auth_redirect carries an absolute URL — collapse to
+            // same-origin path to keep the redirect surface narrow.
+            try {
+                const u = new URL(stashed);
+                if (u.origin === window.location.origin) {
+                    return u.pathname + u.search + u.hash;
+                }
+            } catch {}
+        }
+        return 'dashboard.html';
+    }
+    window._pickPostSigninDest = pickPostSigninDest;
+
+    // Wait for Supabase to initialize, then decide what to render.
     await auth.ready();
+
     if (auth.isSignedIn()) {
         // Already-signed-in landings on /signin are a meaningful funnel
         // event in their own right — they tell us how often a user
         // bookmarked /signin and a returning session restore beat them
-        // to the punch. Identify before redirecting so the page_view
-        // on dashboard attaches to a known user_id.
+        // to the punch. Identify so the next page_view attaches to a
+        // known user_id, then render the "already signed in" panel
+        // INSTEAD of auto-redirecting. Auto-bounce traps users who
+        // want to sign in as a different account.
         const u = auth.getUser();
         if (u?.id) analytics.identify(u.id, { plan: u.plan, role: u.role });
         funnel.step('signin_already_signed_in');
-        window.location.href = 'dashboard.html';
+
+        // Render the panel.
+        document.getElementById('signin-form').style.display = 'none';
+        document.getElementById('login-alert').classList.remove('show');
+        const oauthDivider = document.getElementById('oauth-divider');
+        if (oauthDivider) oauthDivider.style.display = 'none';
+        const oauthMount = document.getElementById('oauth-mount');
+        if (oauthMount) oauthMount.style.display = 'none';
+
+        document.getElementById('asi-email').textContent = u?.email || '—';
+        const planWrap = document.getElementById('asi-plan-wrap');
+        if (planWrap && u?.plan) {
+            const plan = (auth.getPlan?.() || u.plan || 'free').toLowerCase();
+            planWrap.innerHTML =
+                `<span class="plan-badge ${tierBadgeClass(plan)}" `
+              + `style="display:inline-block;padding:1px 8px;border-radius:10px;`
+              + `font-size:.62rem;font-weight:700;text-transform:uppercase;`
+              + `letter-spacing:.06em;background:rgba(192,128,255,.12);color:#c77dff">`
+              + `${tierLabel(plan)}</span>`;
+        }
+
+        // Wire continue + sign-out.
+        const dest = pickPostSigninDest();
+        document.getElementById('asi-continue').href = dest;
+        document.getElementById('asi-continue').addEventListener('click', () => {
+            try { funnel.step('signin_already_continue', { dest }); } catch {}
+        });
+        document.getElementById('asi-signout').addEventListener('click', async () => {
+            try { funnel.step('signin_already_signout'); } catch {}
+            // Stay on /signin so the user can immediately type the other
+            // credentials. Pass null to signOut() so it doesn't redirect.
+            await auth.signOut(null);
+            location.reload();
+        });
+
+        document.getElementById('already-signed-in').style.display = '';
     }
     // Expose auth to the non-module script below
     window._ppAuth = { auth, analytics };
@@ -803,8 +918,13 @@
                 }
             } catch {}
 
-            // Redirect: check for post-login redirect, else go to dashboard
-            const redirect = auth.getPostLoginRedirect() || 'dashboard.html';
+            // Redirect: pickPostSigninDest honours (in order) ?next=
+            // (validated, same-origin only), then pp_auth_redirect from
+            // requireAuth(), then dashboard.html. Returning users land
+            // where they came from; brand-new sessions land on dashboard.
+            const redirect = (typeof window._pickPostSigninDest === 'function')
+                ? window._pickPostSigninDest()
+                : (auth.getPostLoginRedirect() || 'dashboard.html');
             setTimeout(() => { window.location.href = redirect; }, 1200);
         })();
     });

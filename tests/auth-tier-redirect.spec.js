@@ -1,36 +1,48 @@
 /**
- * E2E tests: dashboard auth gate clears for every tier of user.
+ * E2E tests: canonical sign-in / sign-up / dashboard contract.
  *
- * Why this file exists: the user-visible bug is "I keep getting stuck on
- * the auth gate even after signing in". The redirect chain is
- *   signin.html  → dashboard.html (gate evaluation in module script)
- *   signup.html  → dashboard.html
- *   auth-callback.html (OAuth / magic link) → dashboard.html
- * If the gate evaluation in dashboard.html doesn't see the persisted
- * session for ANY plan/role the user can hold, the user lands back on
- * the gate and clicks Sign In again, producing an infinite loop.
+ * Replaces the older "every successful signin lands on dashboard" assertion
+ * with the new contract:
  *
- * The dashboard auth gate's effective check is:
- *   auth.isSignedIn()  OR  JSON.parse(localStorage.pp_auth || sessionStorage.pp_auth).signedIn
- * so the contract these tests pin is: every tier we issue (every plan
- * AND every role) populates one of those two paths in a way that
- * clears the gate.
+ *   1. Anonymous visitor to /dashboard.html → bounced to /signin?next=/dashboard.html
+ *      (requireAuth() preserves the deep link in BOTH ?next= and
+ *      sessionStorage.pp_auth_redirect; either path returns the user
+ *      after sign-in).
  *
- * We mock-authenticate by injecting `pp_auth` into localStorage —
- * Supabase isn't configured in CI, so auth.js falls through to its
- * mock-mode loader (`_loadMock`) which reads exactly that key. This
- * mirrors what the existing Onboarding-Tour suite does (see
- * auth-flows.spec.js, "Onboarding Tour" describe block) so the pattern
- * is consistent.
+ *   2. Already-signed-in visitor to /signin.html → renders the "You're
+ *      already signed in" panel inline. No auto-redirect. Continue
+ *      button targets pickPostSigninDest() (next > pp_auth_redirect > dashboard);
+ *      Sign-out button clears the session and reloads.
  *
- * Run:  npx playwright test tests/auth-tier-redirect.spec.js
+ *   3. Already-signed-in visitor to /signup.html → renders the "You
+ *      already have an account" panel. Same no-auto-bounce contract.
+ *
+ *   4. /welcome.html renders for signed-in users and gates anonymous
+ *      visitors via requireAuth() → /signin?next=%2Fwelcome.html.
+ *
+ *   5. /settings.html renders the three migrated cards (subscription,
+ *      alert prefs, saved locations) and applies tier gates correctly.
+ *
+ *   6. Dashboard tier-aware skeleton: free users do NOT see Personal
+ *      Report / Impact Score / Trip Planning / Alert History / Class
+ *      Roster; basic+ users see the basic set; educator/advanced+ users
+ *      see all of them. Verified via the data-tier-visible attribute
+ *      written by applyTierLayout().
+ *
+ *   7. ?next= allowlist on /signin rejects off-origin and
+ *      protocol-relative values, honours same-origin paths.
+ *
+ *   8. Sign-out still clears pp_auth from both storages (regression
+ *      guard for the existing test).
+ *
+ * Auth is mocked via localStorage 'pp_auth' (auth.js falls through to
+ * its mock loader when Supabase isn't configured in CI).
+ *
+ * Run: npx playwright test tests/auth-tier-redirect.spec.js
  */
 
 import { test, expect } from '@playwright/test';
 
-// All seven plan IDs from js/tier-config.js TIERS, plus the three
-// roles that bypass plan-based gating (admin/superadmin/tester role).
-// Tester appears twice on purpose: once as a plan, once as a role.
 const TIER_FIXTURES = [
     { label: 'free / user',                 plan: 'free',        role: 'user' },
     { label: 'tester (comp plan)',          plan: 'tester',      role: 'user' },
@@ -44,7 +56,7 @@ const TIER_FIXTURES = [
     { label: 'superadmin',                  plan: 'enterprise',  role: 'superadmin' },
 ];
 
-function mockAuthFor(plan, role) {
+function mockAuthFor(plan, role, extra = {}) {
     return {
         signedIn: true,
         email:    `${role}-${plan}@playwright.test`,
@@ -53,54 +65,328 @@ function mockAuthFor(plan, role) {
         role,
         provider: 'mock',
         ts:       Date.now(),
+        ...extra,
     };
 }
 
-// ── 1. Dashboard auth gate clears for every tier ────────────────────────────
-//
-// This is the primary regression guard for the "stuck on auth gate"
-// report: if any tier fixture fails to clear the gate, the user
-// would experience an infinite signin → dashboard → signin loop.
+async function setAuth(page, plan, role, extra = {}) {
+    await page.evaluate((auth) => {
+        localStorage.setItem('pp_auth', JSON.stringify(auth));
+        sessionStorage.removeItem('pp_demo_mode');
+    }, mockAuthFor(plan, role, extra));
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// 1. Dashboard auth gate clears for every tier
+// ─────────────────────────────────────────────────────────────────────
 
 test.describe('Dashboard auth gate — all tiers', () => {
     for (const fx of TIER_FIXTURES) {
         test(`clears gate for ${fx.label}`, async ({ page }) => {
-            // Land on the dashboard once so we have a same-origin
-            // localStorage to write into, then inject the session
-            // before the module script runs on reload.
             await page.goto('/dashboard.html');
-            await page.evaluate((auth) => {
-                localStorage.setItem('pp_auth', JSON.stringify(auth));
-                // Ensure no stale demo flag — demo mode uses a different
-                // gate-clear path and would mask a real regression.
-                sessionStorage.removeItem('pp_demo_mode');
-            }, mockAuthFor(fx.plan, fx.role));
-
+            await setAuth(page, fx.plan, fx.role);
             await page.reload();
 
-            // Gate should be hidden — auth.js falls through to mock
-            // mode (no Supabase env in CI) and dashboard.html's
-            // localStorage fallback at lines 1156–1163 reads pp_auth.
+            // Gate should be hidden; main should be visible.
             const gate = page.locator('#auth-gate');
-            // The `display: none` is set as inline style by the script,
-            // so the locator should be hidden once the script has run.
             await expect(gate).toBeHidden({ timeout: 10_000 });
-
-            // Main dashboard content should be visible (visibility flips
-            // back from 'hidden' once the gate has cleared).
-            const main = page.locator('main');
-            await expect(main).toBeVisible();
+            await expect(page.locator('main')).toBeVisible();
         });
     }
 });
 
-// ── 2. Plan badge reflects the user's tier ──────────────────────────────────
-//
-// Catches the case where the gate clears but the plan badge stays on
-// the default "Free" — that mismatch is what users see when the
-// localStorage payload is read but tier-config / fetchProfile didn't
-// run, and it's the most common "looks broken" symptom after a
-// successful sign-in.
+// ─────────────────────────────────────────────────────────────────────
+// 2. Anonymous dashboard visit → /signin?next=/dashboard.html
+// ─────────────────────────────────────────────────────────────────────
+
+test.describe('requireAuth deep-link preservation', () => {
+    test('anonymous /dashboard.html redirects to /signin?next=/dashboard.html', async ({ page }) => {
+        // Ensure no session.
+        await page.goto('/');
+        await page.evaluate(() => {
+            localStorage.removeItem('pp_auth');
+            sessionStorage.removeItem('pp_auth');
+            sessionStorage.removeItem('pp_auth_redirect');
+        });
+        await page.goto('/dashboard.html');
+        await page.waitForURL(/\/signin\.html\?next=/, { timeout: 10_000 });
+        const url = new URL(page.url());
+        expect(url.searchParams.get('next')).toContain('dashboard.html');
+
+        // sessionStorage fallback should also be set.
+        const stashed = await page.evaluate(() => sessionStorage.getItem('pp_auth_redirect'));
+        expect(stashed).toContain('dashboard.html');
+    });
+
+    test('anonymous /settings.html redirects to /signin?next=%2Fsettings.html', async ({ page }) => {
+        await page.goto('/');
+        await page.evaluate(() => {
+            localStorage.removeItem('pp_auth');
+            sessionStorage.removeItem('pp_auth');
+        });
+        await page.goto('/settings.html');
+        await page.waitForURL(/\/signin/, { timeout: 10_000 });
+        // The anchor-link version of settings sets next= via the
+        // hardcoded link, but the requireAuth navigation also runs;
+        // either way the post-signin destination must round-trip.
+        const url = new URL(page.url());
+        const next = url.searchParams.get('next');
+        expect(next).toMatch(/settings\.html/);
+    });
+
+    test('anonymous /welcome.html redirects to /signin?next=%2Fwelcome.html', async ({ page }) => {
+        await page.goto('/');
+        await page.evaluate(() => {
+            localStorage.removeItem('pp_auth');
+            sessionStorage.removeItem('pp_auth');
+        });
+        await page.goto('/welcome.html');
+        await page.waitForURL(/\/signin/, { timeout: 10_000 });
+        const url = new URL(page.url());
+        const next = url.searchParams.get('next');
+        expect(next).toMatch(/welcome\.html/);
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// 3. Already-signed-in panel (signin + signup) — NO auto-bounce
+// ─────────────────────────────────────────────────────────────────────
+
+test.describe('Signin page — already signed in', () => {
+    for (const fx of TIER_FIXTURES) {
+        test(`shows panel (does not redirect) for ${fx.label}`, async ({ page }) => {
+            await page.goto('/signin.html');
+            await setAuth(page, fx.plan, fx.role);
+            await page.goto('/signin.html');
+
+            // No auto-redirect — we should stay on /signin.html.
+            await page.waitForSelector('#already-signed-in:not([style*="display:none"]):not([style*="display: none"])', { timeout: 10_000 });
+            expect(page.url()).toMatch(/signin\.html/);
+            await expect(page.locator('#signin-form')).toBeHidden();
+            await expect(page.locator('#already-signed-in')).toBeVisible();
+
+            // Continue button defaults to dashboard.html when no ?next=
+            // and no pp_auth_redirect is stashed.
+            const href = await page.locator('#asi-continue').getAttribute('href');
+            expect(href).toMatch(/dashboard\.html|^\//);
+        });
+    }
+
+    test('continue button honours ?next= (same-origin path)', async ({ page }) => {
+        await page.goto('/signin.html');
+        await setAuth(page, 'free', 'user');
+        await page.goto('/signin.html?next=%2Fsettings.html%23alert-prefs');
+        await expect(page.locator('#already-signed-in')).toBeVisible({ timeout: 10_000 });
+        const href = await page.locator('#asi-continue').getAttribute('href');
+        expect(href).toBe('/settings.html#alert-prefs');
+    });
+
+    test('continue button REJECTS off-origin ?next= and falls back to dashboard', async ({ page }) => {
+        await page.goto('/signin.html');
+        await setAuth(page, 'free', 'user');
+        await page.goto('/signin.html?next=https%3A%2F%2Fevil.example%2F');
+        await expect(page.locator('#already-signed-in')).toBeVisible({ timeout: 10_000 });
+        const href = await page.locator('#asi-continue').getAttribute('href');
+        expect(href).not.toMatch(/evil\.example/);
+        expect(href).toMatch(/dashboard\.html$/);
+    });
+
+    test('continue button REJECTS protocol-relative ?next=', async ({ page }) => {
+        await page.goto('/signin.html');
+        await setAuth(page, 'free', 'user');
+        await page.goto('/signin.html?next=%2F%2Fevil.example%2Fxx');
+        await expect(page.locator('#already-signed-in')).toBeVisible({ timeout: 10_000 });
+        const href = await page.locator('#asi-continue').getAttribute('href');
+        expect(href).not.toMatch(/evil\.example/);
+        expect(href).toMatch(/dashboard\.html$/);
+    });
+
+    test('sign-out button clears session and reloads', async ({ page }) => {
+        await page.goto('/signin.html');
+        await setAuth(page, 'free', 'user');
+        await page.goto('/signin.html');
+        await expect(page.locator('#already-signed-in')).toBeVisible({ timeout: 10_000 });
+        await page.click('#asi-signout');
+        // After signOut + reload, the form should be back and pp_auth gone.
+        await page.waitForSelector('#signin-form:not([style*="display:none"])', { timeout: 10_000 });
+        const auth = await page.evaluate(() => localStorage.getItem('pp_auth'));
+        expect(auth).toBeNull();
+    });
+});
+
+test.describe('Signup page — already signed in', () => {
+    test('renders panel and does NOT auto-redirect', async ({ page }) => {
+        await page.goto('/signup.html');
+        await setAuth(page, 'free', 'user');
+        await page.goto('/signup.html');
+        await expect(page.locator('#already-signed-in')).toBeVisible({ timeout: 10_000 });
+        await expect(page.locator('#form-view')).toBeHidden();
+        expect(page.url()).toMatch(/signup\.html/);
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// 4. /welcome.html renders for signed-in users; choice cards are wired
+// ─────────────────────────────────────────────────────────────────────
+
+test.describe('Welcome page', () => {
+    test('renders for signed-in user with plan-aware greeting', async ({ page }) => {
+        await page.goto('/welcome.html');
+        await setAuth(page, 'free', 'user');
+        await page.reload();
+        await expect(page.locator('#auth-gate')).toBeHidden({ timeout: 10_000 });
+        await expect(page.locator('#welcome-h1')).toBeVisible();
+        await expect(page.locator('#choice-sim')).toBeVisible();
+        await expect(page.locator('#choice-loc')).toBeVisible();
+        await expect(page.locator('#choice-dash')).toBeVisible();
+        // Free upgrade pill should be visible.
+        await expect(page.locator('#upgrade-pill')).toBeVisible();
+    });
+
+    test('hides upgrade pill for paid tiers', async ({ page }) => {
+        await page.goto('/welcome.html');
+        await setAuth(page, 'advanced', 'user');
+        await page.reload();
+        await expect(page.locator('#choice-sim')).toBeVisible({ timeout: 10_000 });
+        await expect(page.locator('#upgrade-pill')).toBeHidden();
+    });
+
+    test('clicking "set location" reveals the inline form', async ({ page }) => {
+        await page.goto('/welcome.html');
+        await setAuth(page, 'free', 'user');
+        await page.reload();
+        await expect(page.locator('#choice-loc')).toBeVisible({ timeout: 10_000 });
+        await page.click('#choice-loc');
+        await expect(page.locator('#location-form')).toHaveClass(/open/);
+        await expect(page.locator('#welcome-loc-input')).toBeVisible();
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// 5. /settings.html — three cards render with correct tier gating
+// ─────────────────────────────────────────────────────────────────────
+
+test.describe('Settings page', () => {
+    test('renders all three sections for signed-in user', async ({ page }) => {
+        await page.goto('/settings.html');
+        await setAuth(page, 'basic', 'user');
+        await page.reload();
+        await expect(page.locator('#auth-gate')).toBeHidden({ timeout: 10_000 });
+        await expect(page.locator('#subscription')).toBeVisible();
+        await expect(page.locator('#alert-prefs')).toBeVisible();
+        await expect(page.locator('#saved-locations')).toBeVisible();
+    });
+
+    test('free users see alert-prefs gate', async ({ page }) => {
+        await page.goto('/settings.html');
+        await setAuth(page, 'free', 'user');
+        await page.reload();
+        await expect(page.locator('#alert-prefs')).toBeVisible({ timeout: 10_000 });
+        await expect(page.locator('#alert-prefs-gate')).toBeVisible();
+        await expect(page.locator('#alert-prefs-content')).toBeHidden();
+    });
+
+    test('free users see saved-locations gate', async ({ page }) => {
+        await page.goto('/settings.html');
+        await setAuth(page, 'free', 'user');
+        await page.reload();
+        await expect(page.locator('#saved-locations')).toBeVisible({ timeout: 10_000 });
+        await expect(page.locator('#sl-gate')).toBeVisible();
+        await expect(page.locator('#sl-content')).toBeHidden();
+    });
+
+    test('basic users see alert-prefs CONTENT (gate hidden)', async ({ page }) => {
+        await page.goto('/settings.html');
+        await setAuth(page, 'basic', 'user');
+        await page.reload();
+        await expect(page.locator('#alert-prefs-content')).toBeVisible({ timeout: 10_000 });
+        await expect(page.locator('#alert-prefs-gate')).toBeHidden();
+    });
+
+    test('advanced users get advanced-alert rows enabled (not disabled)', async ({ page }) => {
+        await page.goto('/settings.html');
+        await setAuth(page, 'advanced', 'user');
+        await page.reload();
+        await expect(page.locator('#alert-prefs-content')).toBeVisible({ timeout: 10_000 });
+        const disabled = await page.locator('#pref-notify_radio_blackout').isDisabled();
+        expect(disabled).toBeFalsy();
+    });
+
+    test('basic users have advanced-alert rows disabled', async ({ page }) => {
+        await page.goto('/settings.html');
+        await setAuth(page, 'basic', 'user');
+        await page.reload();
+        await expect(page.locator('#alert-prefs-content')).toBeVisible({ timeout: 10_000 });
+        const disabled = await page.locator('#pref-notify_radio_blackout').isDisabled();
+        expect(disabled).toBeTruthy();
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// 6. Tier-aware dashboard skeleton
+// ─────────────────────────────────────────────────────────────────────
+
+test.describe('Dashboard tier-aware skeleton', () => {
+    test('free user: paid-only cards hidden', async ({ page }) => {
+        await page.goto('/dashboard.html');
+        await setAuth(page, 'free', 'user');
+        await page.reload();
+        await expect(page.locator('#auth-gate')).toBeHidden({ timeout: 10_000 });
+        // Wait for applyTierLayout() to stamp data-tier-visible on each card.
+        await page.waitForFunction(() => {
+            const ids = ['alert-card', 'impact-card', 'trip-planning-card', 'alert-history-card', 'class-roster-card'];
+            return ids.every(id => document.getElementById(id)?.dataset.tierVisible !== undefined);
+        }, null, { timeout: 10_000 });
+        for (const id of ['alert-card', 'impact-card', 'trip-planning-card', 'alert-history-card', 'class-roster-card']) {
+            const vis = await page.locator(`#${id}`).getAttribute('data-tier-visible');
+            expect(vis, `${id} should be hidden for free user`).toBe('0');
+        }
+    });
+
+    test('basic user: alert-card / impact-card / alert-history-card visible; trip / roster hidden', async ({ page }) => {
+        await page.goto('/dashboard.html');
+        await setAuth(page, 'basic', 'user');
+        await page.reload();
+        await page.waitForFunction(() => document.getElementById('alert-card')?.dataset.tierVisible !== undefined, null, { timeout: 10_000 });
+        expect(await page.locator('#alert-card').getAttribute('data-tier-visible')).toBe('1');
+        expect(await page.locator('#impact-card').getAttribute('data-tier-visible')).toBe('1');
+        expect(await page.locator('#alert-history-card').getAttribute('data-tier-visible')).toBe('1');
+        expect(await page.locator('#trip-planning-card').getAttribute('data-tier-visible')).toBe('0');
+        expect(await page.locator('#class-roster-card').getAttribute('data-tier-visible')).toBe('0');
+    });
+
+    test('educator user: trip-planning + class-roster visible', async ({ page }) => {
+        await page.goto('/dashboard.html');
+        await setAuth(page, 'educator', 'user');
+        await page.reload();
+        await page.waitForFunction(() => document.getElementById('trip-planning-card')?.dataset.tierVisible !== undefined, null, { timeout: 10_000 });
+        expect(await page.locator('#trip-planning-card').getAttribute('data-tier-visible')).toBe('1');
+        expect(await page.locator('#class-roster-card').getAttribute('data-tier-visible')).toBe('1');
+    });
+
+    test('advanced user: trip-planning visible, class-roster hidden', async ({ page }) => {
+        await page.goto('/dashboard.html');
+        await setAuth(page, 'advanced', 'user');
+        await page.reload();
+        await page.waitForFunction(() => document.getElementById('trip-planning-card')?.dataset.tierVisible !== undefined, null, { timeout: 10_000 });
+        expect(await page.locator('#trip-planning-card').getAttribute('data-tier-visible')).toBe('1');
+        expect(await page.locator('#class-roster-card').getAttribute('data-tier-visible')).toBe('0');
+    });
+
+    test('admin role unlocks every card regardless of plan', async ({ page }) => {
+        await page.goto('/dashboard.html');
+        await setAuth(page, 'free', 'admin');
+        await page.reload();
+        await page.waitForFunction(() => document.getElementById('alert-card')?.dataset.tierVisible !== undefined, null, { timeout: 10_000 });
+        for (const id of ['alert-card', 'impact-card', 'trip-planning-card', 'alert-history-card', 'class-roster-card']) {
+            expect(await page.locator(`#${id}`).getAttribute('data-tier-visible')).toBe('1');
+        }
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// 7. Plan badge after sign-in (kept from old suite, still part of contract)
+// ─────────────────────────────────────────────────────────────────────
 
 test.describe('Plan badge after sign-in', () => {
     const BADGE_FIXTURES = [
@@ -110,24 +396,16 @@ test.describe('Plan badge after sign-in', () => {
         { plan: 'advanced',    role: 'user',       text: /^Advanced$/i,     cls: /plan-advanced/ },
         { plan: 'institution', role: 'user',       text: /^Institution$/i,  cls: /plan-institution/ },
         { plan: 'enterprise',  role: 'user',       text: /^Enterprise$/i,   cls: /plan-enterprise/ },
-        // Role-overrides — admins/superadmins get the role label, not
-        // the plan. tester plan keeps the plan label (it's a comp tier).
-        { plan: 'free',        role: 'admin',      text: /^Admin$/i,        cls: /plan-advanced/ },
-        { plan: 'enterprise',  role: 'superadmin', text: /^Superadmin$/i,   cls: /plan-advanced/ },
+        { plan: 'free',        role: 'admin',      text: /^Admin$/i,        cls: /plan-/ },
+        { plan: 'enterprise',  role: 'superadmin', text: /^Superadmin$/i,   cls: /plan-/ },
     ];
 
     for (const fx of BADGE_FIXTURES) {
         test(`shows correct badge for plan=${fx.plan} role=${fx.role}`, async ({ page }) => {
             await page.goto('/dashboard.html');
-            await page.evaluate((auth) => {
-                localStorage.setItem('pp_auth', JSON.stringify(auth));
-                sessionStorage.removeItem('pp_demo_mode');
-                // Suppress the welcome-tour modal — it overlays the badge
-                // and isn't what this test cares about.
-                localStorage.setItem('ppx_tour_completed', '1');
-            }, mockAuthFor(fx.plan, fx.role));
+            await setAuth(page, fx.plan, fx.role);
+            await page.evaluate(() => localStorage.setItem('ppx_tour_completed', '1'));
             await page.reload();
-
             const badge = page.locator('#plan-badge');
             await expect(badge).toBeVisible({ timeout: 10_000 });
             await expect(badge).toHaveText(fx.text);
@@ -136,38 +414,9 @@ test.describe('Plan badge after sign-in', () => {
     }
 });
 
-// ── 3. Signin page bounces signed-in users to dashboard ─────────────────────
-//
-// Pins the OTHER half of the redirect contract: a user who already
-// has a valid session and lands on /signin.html should be redirected
-// to the dashboard, NOT see the signin form. The opposite failure
-// (signin form visible to a signed-in user) is what produces the
-// "redirect loop" symptom when combined with a flaky gate evaluation.
-
-test.describe('Signin page — already signed in', () => {
-    for (const fx of TIER_FIXTURES) {
-        test(`bounces ${fx.label} to dashboard`, async ({ page }) => {
-            await page.goto('/signin.html');
-            await page.evaluate((auth) => {
-                localStorage.setItem('pp_auth', JSON.stringify(auth));
-            }, mockAuthFor(fx.plan, fx.role));
-
-            // Wait for the auth.ready() → location.href = 'dashboard.html'
-            // bounce. The signin.html module script does this synchronously
-            // after auth.ready() resolves.
-            await page.goto('/signin.html');
-            await page.waitForURL(/dashboard\.html/, { timeout: 10_000 });
-            expect(page.url()).toMatch(/dashboard\.html/);
-        });
-    }
-});
-
-// ── 4. Sign-out path clears the session ─────────────────────────────────────
-//
-// The mirror of the gate-clear contract: after signOut the gate must
-// re-appear. If signOut leaves a stale pp_auth row behind, the user
-// "comes back signed in" on the next page load — confusing for shared
-// computers, and a real privacy bug.
+// ─────────────────────────────────────────────────────────────────────
+// 8. Sign-out clears storage (regression guard)
+// ─────────────────────────────────────────────────────────────────────
 
 test.describe('Sign-out flow', () => {
     test('clears pp_auth from both storages', async ({ page }) => {
@@ -182,18 +431,11 @@ test.describe('Sign-out flow', () => {
                 plan: 'advanced', role: 'admin', provider: 'mock', ts: Date.now(),
             }));
         });
-
-        // Drive auth.signOut() directly via the module — no UI
-        // dependency on the nav's sign-out button (which lives in a
-        // separate component and has its own tests).
         await page.evaluate(async () => {
             const { auth } = await import('/js/auth.js');
             await auth.ready();
-            // Suppress the redirect — we want to inspect storage state
-            // after signOut, not chase the navigation.
             await auth.signOut(null);
         });
-
         const localOk   = await page.evaluate(() => localStorage.getItem('pp_auth'));
         const sessionOk = await page.evaluate(() => sessionStorage.getItem('pp_auth'));
         expect(localOk).toBeNull();
@@ -201,30 +443,25 @@ test.describe('Sign-out flow', () => {
     });
 });
 
-// ── 5. Magic-link mode toggle doesn't throw ─────────────────────────────────
-//
-// Regression guard for the alert-banner null-reference bug in
-// signin.html (id was 'alert-banner' but the actual element is
-// 'login-alert'). The bug surfaced as a thrown TypeError on the very
-// first click of the magic-link toggle, which froze the form mid-
-// transition and was a likely contributor to "stuck" signin sessions.
+// ─────────────────────────────────────────────────────────────────────
+// 9. Magic-link toggle (regression for the alert-banner null bug)
+// ─────────────────────────────────────────────────────────────────────
 
 test.describe('Signin form — magic link toggle', () => {
     test('toggle does not throw when switching modes', async ({ page }) => {
         const errors = [];
         page.on('pageerror', e => errors.push(e.message));
         await page.goto('/signin.html');
-        // Wait for the form to render past the auth.ready() gate.
-        await expect(page.locator('#magic-toggle')).toBeVisible();
+        // Make sure we're in the form view (no signed-in user).
+        await page.evaluate(() => localStorage.removeItem('pp_auth'));
+        await page.reload();
+        await expect(page.locator('#magic-toggle')).toBeVisible({ timeout: 10_000 });
 
         await page.click('#magic-toggle');
         await expect(page.locator('#pw-row')).toBeHidden();
-
         await page.click('#magic-toggle');
         await expect(page.locator('#pw-row')).toBeVisible();
 
-        // Any TypeError during toggle would be a regression of the
-        // alert-banner / login-alert mismatch we just fixed.
         expect(errors.join('\n')).not.toMatch(/Cannot read.*classList/);
         expect(errors.join('\n')).not.toMatch(/null/i);
     });

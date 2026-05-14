@@ -433,16 +433,19 @@ footer a:hover{color:var(--text)}
     </p>
   </div>
 
-  <!-- ── SUBSCRIPTION MANAGEMENT ── -->
-  <div class="card" id="subscription-card" style="margin-bottom:16px;display:none">
+  <!-- ── SETTINGS LINK STRIP ──
+       Subscription / Alert Preferences / Saved Locations have moved
+       to /settings.html. This thin strip is the dashboard's pointer
+       to that page so muscle-memory doesn't take the user on a
+       wild-goose chase. -->
+  <div class="card" id="settings-link-card" style="margin-bottom:16px">
     <div class="card-body" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:14px 18px">
       <div>
-        <div style="font-size:.82rem;font-weight:700;color:#e8f4ff" id="sub-status-text">Free Plan</div>
-        <div style="font-size:.68rem;color:var(--muted)" id="sub-detail-text">Upgrade to unlock all simulations and alerts</div>
+        <div style="font-size:.82rem;font-weight:700;color:#e8f4ff">Subscription, alerts &amp; saved locations</div>
+        <div style="font-size:.68rem;color:var(--muted)">Manage your plan, alert preferences, and saved locations on the settings page.</div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <a href="pricing.html" class="btn-sm" id="sub-upgrade-btn" style="background:linear-gradient(45deg,#ff8c00,#ffd700);color:#000;font-weight:700;border-radius:6px;padding:6px 16px;text-decoration:none;font-size:.75rem">Upgrade Plan</a>
-        <button id="sub-manage-btn" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;color:#aab;cursor:pointer;padding:6px 16px;font-family:inherit;font-size:.75rem;display:none">Manage Billing</button>
+        <a href="settings.html" class="btn-sm" style="background:linear-gradient(45deg,#ff8c00,#ffd700);color:#000;font-weight:700;border-radius:6px;padding:6px 16px;text-decoration:none;font-size:.75rem">Open Settings →</a>
       </div>
     </div>
   </div>
@@ -724,43 +727,10 @@ footer a:hover{color:var(--text)}
     </div>
   </div>
 
-  <!-- ── SAVED LOCATIONS ── -->
-  <div class="card" id="saved-locations-card" style="margin-bottom:20px">
-    <div class="card-head">
-      <span class="card-title">Saved Locations</span>
-      <span class="card-link" id="sl-plan-badge" style="font-size:.68rem;color:var(--muted)"></span>
-    </div>
-    <div class="card-body">
+  <!-- Saved Locations moved to /settings.html#saved-locations.
+       The init IIFE further down still runs but no-ops because the
+       DOM ids it queries no longer exist on this page. -->
 
-      <!-- Gate for free users. Copy is rendered dynamically from
-           js/tier-config.js so adding a tier doesn't require a string
-           edit here too. See _renderSavedLocsGate() below. -->
-      <div id="sl-gate" class="sl-gate" style="display:none">
-        <div style="font-size:1.3rem;margin-bottom:6px">&#128205;</div>
-        <div id="sl-gate-copy">Save locations and get dedicated alerts for each one.</div>
-        <a href="pricing.html" class="btn">Upgrade</a>
-      </div>
-
-      <div id="sl-content" style="display:none">
-        <div class="sl-header">
-          <div class="sl-counter"><strong id="sl-count">0</strong> of <strong id="sl-limit">5</strong> locations used</div>
-          <button class="sl-btn" id="sl-copy-defaults-btn" title="Create a location from your current primary location setting">Add current location</button>
-        </div>
-
-        <div class="sl-add-row">
-          <input id="sl-label-input" type="text" placeholder="Label (e.g. Home, Cabin)" maxlength="40" autocomplete="off">
-          <input id="sl-city-input" type="text" placeholder="City, zip, or address…" maxlength="80" autocomplete="off">
-          <button class="loc-btn" id="sl-add-btn" title="Add this location">&#43;</button>
-          <button class="loc-btn" id="sl-add-gps-btn" title="Use my GPS location">&#8853;</button>
-        </div>
-        <div class="sl-err" id="sl-err" role="alert"></div>
-
-        <div class="sl-list" id="sl-list">
-          <div class="sl-empty">No saved locations yet. Add one above to start getting per-location alerts.</div>
-        </div>
-      </div>
-    </div>
-  </div>
 
   <!-- ── TRIP PLANNING ── -->
   <div class="card" id="trip-planning-card" style="margin-bottom:20px">
@@ -810,215 +780,9 @@ footer a:hover{color:var(--text)}
     </div>
   </div>
 
-  <!-- ── ALERT PREFERENCES ── -->
-  <div class="card" id="alert-prefs-card" style="margin-bottom:20px">
-    <div class="card-head">
-      <span class="card-title">Alert Preferences</span>
-      <span class="card-link" id="alert-prefs-plan" style="font-size:.68rem;color:var(--muted)"></span>
-    </div>
-    <div class="card-body" id="alert-prefs-body">
-
-      <!-- Gate: free users see upgrade prompt -->
-      <div id="alert-prefs-gate" style="text-align:center;padding:16px 0;display:none">
-        <div style="font-size:1.2rem;margin-bottom:6px">&#128276;</div>
-        <div style="font-size:.82rem;color:var(--muted);margin-bottom:10px">
-          Alerts are available on <strong style="color:var(--accent2)">Basic</strong>, <strong style="color:#9ad36f">Educator</strong>, <strong style="color:var(--accent)">Advanced</strong>, <strong style="color:#ff8cc8">Institution</strong>, and <strong style="color:#ffd700">Enterprise</strong> plans.
-        </div>
-        <a href="pricing.html" style="display:inline-block;padding:6px 18px;background:linear-gradient(45deg,#ff8c00,#ffd700);color:#000;font-weight:700;border-radius:6px;text-decoration:none;font-size:.78rem">Upgrade</a>
-      </div>
-
-      <!-- Alert toggles (basic tier) -->
-      <div id="alert-prefs-content" style="display:none">
-        <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px">Standard Alerts</div>
-        <div class="alert-pref-grid" id="alert-pref-grid-basic">
-          <!-- Temperature -->
-          <div class="alert-pref-row">
-            <label class="alert-pref-toggle">
-              <input type="checkbox" id="pref-notify_temperature" data-key="notify_temperature">
-              <span class="alert-pref-name">Temperature</span>
-            </label>
-            <div class="alert-pref-threshold" id="pref-temp-thresholds">
-              <label style="font-size:.68rem;color:var(--muted)">High <input type="number" id="pref-temp_high_f" data-key="temp_high_f" style="width:48px" placeholder="95"> &deg;F</label>
-              <label style="font-size:.68rem;color:var(--muted)">Low <input type="number" id="pref-temp_low_f" data-key="temp_low_f" style="width:48px" placeholder="32"> &deg;F</label>
-            </div>
-          </div>
-          <!-- Aurora -->
-          <div class="alert-pref-row">
-            <label class="alert-pref-toggle">
-              <input type="checkbox" id="pref-notify_aurora" data-key="notify_aurora">
-              <span class="alert-pref-name">Aurora Visibility</span>
-            </label>
-            <div class="alert-pref-threshold">
-              <label style="font-size:.68rem;color:var(--muted)">Kp &ge;
-                <select id="pref-aurora_kp_threshold" data-key="aurora_kp_threshold" style="width:48px">
-                  <option value="3">3</option><option value="4">4</option><option value="5" selected>5</option>
-                  <option value="6">6</option><option value="7">7</option><option value="8">8</option>
-                </select>
-              </label>
-            </div>
-          </div>
-          <!-- Storm -->
-          <div class="alert-pref-row">
-            <label class="alert-pref-toggle">
-              <input type="checkbox" id="pref-notify_storm" data-key="notify_storm">
-              <span class="alert-pref-name">Geomagnetic Storm</span>
-            </label>
-            <div class="alert-pref-threshold">
-              <label style="font-size:.68rem;color:var(--muted)">G-scale &ge;
-                <select id="pref-storm_g_threshold" data-key="storm_g_threshold" style="width:48px">
-                  <option value="1" selected>G1</option><option value="2">G2</option><option value="3">G3</option>
-                  <option value="4">G4</option><option value="5">G5</option>
-                </select>
-              </label>
-            </div>
-          </div>
-          <!-- Flare -->
-          <div class="alert-pref-row">
-            <label class="alert-pref-toggle">
-              <input type="checkbox" id="pref-notify_flare" data-key="notify_flare">
-              <span class="alert-pref-name">Solar Flare</span>
-            </label>
-            <div class="alert-pref-threshold">
-              <label style="font-size:.68rem;color:var(--muted)">Class &ge;
-                <select id="pref-flare_class_threshold" data-key="flare_class_threshold" style="width:48px">
-                  <option value="C">C</option><option value="M" selected>M</option><option value="X">X</option>
-                </select>
-              </label>
-            </div>
-          </div>
-          <!-- CME -->
-          <div class="alert-pref-row">
-            <label class="alert-pref-toggle">
-              <input type="checkbox" id="pref-notify_cme" data-key="notify_cme">
-              <span class="alert-pref-name">CME Earth-Directed</span>
-            </label>
-          </div>
-          <!-- Satellite Pass -->
-          <div class="alert-pref-row">
-            <label class="alert-pref-toggle">
-              <input type="checkbox" id="pref-notify_sat_pass" data-key="notify_sat_pass">
-              <span class="alert-pref-name">Satellite Pass</span>
-            </label>
-          </div>
-        </div>
-
-        <!-- Advanced tier alerts -->
-        <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:14px 0 8px;display:flex;align-items:center;gap:6px">
-          Advanced Alerts
-          <span style="background:rgba(0,200,200,.12);color:#0cc;font-size:.6rem;padding:1px 6px;border-radius:3px;font-weight:700">PRO</span>
-        </div>
-        <div class="alert-pref-grid" id="alert-pref-grid-advanced">
-          <div class="alert-pref-row"><label class="alert-pref-toggle"><input type="checkbox" id="pref-notify_collision" data-key="notify_collision"><span class="alert-pref-name">Satellite Collision</span></label></div>
-          <!-- Radio Blackout with R-scale threshold -->
-          <div class="alert-pref-row">
-            <label class="alert-pref-toggle">
-              <input type="checkbox" id="pref-notify_radio_blackout" data-key="notify_radio_blackout">
-              <span class="alert-pref-name">Radio Blackout</span>
-            </label>
-            <div class="alert-pref-threshold">
-              <label style="font-size:.68rem;color:var(--muted)">R-scale &ge;
-                <select id="pref-radio_r_threshold" data-key="radio_r_threshold" style="width:48px">
-                  <option value="1">R1</option><option value="2" selected>R2</option><option value="3">R3</option>
-                  <option value="4">R4</option><option value="5">R5</option>
-                </select>
-              </label>
-            </div>
-          </div>
-          <!-- GPS Degradation with risk level threshold -->
-          <div class="alert-pref-row">
-            <label class="alert-pref-toggle">
-              <input type="checkbox" id="pref-notify_gps" data-key="notify_gps">
-              <span class="alert-pref-name">GNSS / GPS Degradation</span>
-            </label>
-            <div class="alert-pref-threshold">
-              <label style="font-size:.68rem;color:var(--muted)">Risk &ge;
-                <select id="pref-gnss_risk_threshold" data-key="gnss_risk_threshold" style="width:72px">
-                  <option value="1">Moderate</option><option value="2" selected>High</option><option value="3">Severe</option>
-                </select>
-              </label>
-            </div>
-          </div>
-          <!-- Power Grid Risk with G-scale threshold -->
-          <div class="alert-pref-row">
-            <label class="alert-pref-toggle">
-              <input type="checkbox" id="pref-notify_power_grid" data-key="notify_power_grid">
-              <span class="alert-pref-name">Power Grid Risk</span>
-            </label>
-            <div class="alert-pref-threshold">
-              <label style="font-size:.68rem;color:var(--muted)">G-scale &ge;
-                <select id="pref-power_grid_g_threshold" data-key="power_grid_g_threshold" style="width:48px">
-                  <option value="2">G2</option><option value="3">G3</option><option value="4" selected>G4</option>
-                  <option value="5">G5</option>
-                </select>
-              </label>
-            </div>
-          </div>
-          <!-- Ionospheric Disturbance -->
-          <div class="alert-pref-row">
-            <label class="alert-pref-toggle">
-              <input type="checkbox" id="pref-notify_iono_disturbance" data-key="notify_iono_disturbance">
-              <span class="alert-pref-name">Ionospheric Disturbance</span>
-            </label>
-            <span style="font-size:.58rem;color:var(--muted)">D/E/F2-layer &amp; TEC anomalies</span>
-          </div>
-          <div class="alert-pref-row"><label class="alert-pref-toggle"><input type="checkbox" id="pref-notify_recurrence" data-key="notify_recurrence"><span class="alert-pref-name">27-Day Recurrence</span></label></div>
-        </div>
-
-        <!-- Delivery options -->
-        <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
-          <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;gap:8px">
-            Email Delivery
-            <span style="background:rgba(79,195,247,.1);color:var(--accent2);font-size:.55rem;padding:1px 6px;border-radius:3px;font-weight:700">SENT TO <span id="email-delivery-addr">your inbox</span></span>
-          </div>
-
-          <!-- Master email toggle -->
-          <div class="alert-pref-row">
-            <label class="alert-pref-toggle">
-              <input type="checkbox" id="pref-email_alerts" data-key="email_alerts">
-              <span class="alert-pref-name">Email me when alerts fire</span>
-            </label>
-            <span style="font-size:.62rem;color:var(--muted)">Max 10 emails / hour</span>
-          </div>
-
-          <!-- Dependent email settings — hidden when email alerts off -->
-          <div id="email-delivery-dependents" style="display:none">
-
-            <div class="alert-pref-row" style="padding-left:28px">
-              <label style="font-size:.72rem;color:var(--muted);flex:1">Minimum severity</label>
-              <select id="pref-email_min_severity" data-key="email_min_severity" style="width:110px">
-                <option value="info">Info &amp; up</option>
-                <option value="warning" selected>Warning &amp; up</option>
-                <option value="critical">Critical only</option>
-              </select>
-            </div>
-
-            <div class="alert-pref-row" style="padding-left:28px">
-              <label style="font-size:.72rem;color:var(--muted);flex:1">Cooldown per alert type</label>
-              <select id="pref-alert_cooldown_min" data-key="alert_cooldown_min" style="width:96px">
-                <option value="15">15 min</option><option value="30">30 min</option>
-                <option value="60" selected>1 hour</option><option value="120">2 hours</option>
-                <option value="360">6 hours</option><option value="720">12 hours</option>
-              </select>
-            </div>
-
-            <div style="padding:8px 10px;margin-top:4px;background:rgba(79,195,247,.05);border:1px solid rgba(79,195,247,.15);border-radius:6px;font-size:.66rem;color:#99b;line-height:1.5">
-              <strong style="color:var(--accent2)">Tip:</strong>
-              Each <a href="#saved-locations-card" style="color:var(--accent2)">saved location</a>
-              can turn email delivery on/off independently, and override any of the thresholds above.
-            </div>
-
-          </div>
-        </div>
-
-        <!-- Save -->
-        <div style="margin-top:14px;display:flex;align-items:center;gap:10px">
-          <button id="alert-prefs-save" style="background:linear-gradient(45deg,#ff8c00,#ffd700);color:#000;font-weight:700;border:none;border-radius:6px;padding:7px 20px;cursor:pointer;font-family:inherit;font-size:.78rem">Save Preferences</button>
-          <span id="alert-prefs-msg" style="font-size:.68rem;color:var(--green);display:none">Saved!</span>
-        </div>
-      </div>
-
-    </div>
-  </div>
+  <!-- Alert Preferences moved to /settings.html#alert-prefs.
+       The init logic further down no-ops when its DOM ids are
+       missing (each id lookup is guarded). -->
 
   <!-- ── ALERT HISTORY ── -->
   <div class="card" id="alert-history-card" style="margin-bottom:20px">
@@ -1168,11 +932,7 @@ import {
 } from './js/trip-planner.js';
 import { mountClassRoster } from './js/class-roster.js';
 import { logActivation, EVENTS } from './js/activation.js';
-import { tierLabel, tierBadgeClass } from './js/tier-config.js';
-// Auto-mounts a welcome wizard on first signed-in load (post-signup or
-// when ?welcome=1 is in the URL). No-ops on subsequent loads. See
-// js/welcome-wizard.js for trigger logic + dismissal flag.
-import './js/welcome-wizard.js';
+import { tierLabel, tierBadgeClass, getTier } from './js/tier-config.js';
 
 // Expose auth for the inline script sections
 window._ppAuth = { auth };
@@ -1188,6 +948,79 @@ await Promise.race([
     auth.ready(),
     new Promise(resolve => setTimeout(resolve, 8000)),
 ]);
+
+// Primary auth contract: bounce anonymous visitors to
+// /signin?next=<this-url> so the deep link they typed (or were shared)
+// survives the round-trip. Demo-mode short-circuits this check below
+// so the public preview still works. The full-screen in-page gate
+// further down is a fallback for the case where this navigation didn't
+// happen (e.g. the auth module timed out during _init).
+let _demoModePrecheck = false;
+try { _demoModePrecheck = sessionStorage.getItem('pp_demo_mode') === '1'; } catch {}
+if (!_demoModePrecheck && !auth.isSignedIn()) {
+    // requireAuth() appends ?next= itself and stashes pp_auth_redirect.
+    // It returns false after triggering the navigation so the rest of
+    // the dashboard init never starts.
+    auth.requireAuth('signin.html');
+}
+
+/* ── Tier-aware skeleton ─────────────────────────────────────────────────
+ * Free / intro accounts see a slim three-card layout (Location, Space
+ * Weather, Daily Briefing). Paid tiers progressively unlock the rest:
+ *   basic   → + Personal Report + Impact Score + Alert History
+ *   educator+/advanced+ → + Trip Planning + Class Roster
+ * Class students inherit their parent's effective_plan; admins / testers
+ * bypass the gates entirely. Gating is layout-level only — every card's
+ * data-fetch logic is still scoped by its own canUse* check, so this is
+ * UX, not a security boundary.
+ */
+function applyTierLayout() {
+    let plan = 'free';
+    let role = 'user';
+    try {
+        plan = (auth.getPlan?.() || 'free').toLowerCase();
+        role = (auth.getRole?.() || 'user').toLowerCase();
+    } catch {}
+    const isElevated = role === 'admin' || role === 'superadmin' || role === 'tester' || plan === 'tester';
+    const tier  = getTier(plan);
+    const paid  = !!tier?.paid;
+    const isPro = ['advanced','institution','enterprise'].includes(plan);
+    const isEducatorish = ['educator','institution','enterprise'].includes(plan);
+
+    // For each card: visible when isElevated OR a tier-specific predicate
+    // returns true. The HTML default `style` keeps these visible during
+    // initial paint; we toggle them off as the very first thing after
+    // auth.ready() so the user never sees a flash of "paid" content.
+    const rules = [
+        { id: 'alert-card',           keep: isElevated || paid },
+        { id: 'impact-card',          keep: isElevated || paid },
+        { id: 'alert-history-card',   keep: isElevated || paid },
+        { id: 'trip-planning-card',   keep: isElevated || isPro || isEducatorish },
+        // class-roster only mounts content for seated plans anyway; hide
+        // the empty card frame entirely for everyone else.
+        { id: 'class-roster-card',    keep: isElevated || isEducatorish },
+    ];
+    for (const { id, keep } of rules) {
+        const el = document.getElementById(id);
+        if (!el) continue;
+        el.style.display = keep ? '' : 'none';
+        // Mark for tests + diagnostics — `data-tier-visible` is the
+        // assertion surface that auth-tier-redirect.spec.js reads.
+        el.dataset.tierVisible = keep ? '1' : '0';
+    }
+    // The plan badge itself is rendered by _renderPlanBadge() further
+    // down — same auth-changed listener, single source of truth. We
+    // intentionally don't duplicate the badge write here to avoid drift.
+    return { plan, role, paid, isPro, isEducatorish, isElevated };
+}
+
+// Run once now (auth.ready() has resolved so plan is current), and again
+// whenever the auth module fires a state change (login, profile fetch,
+// post-Stripe webhook refresh, view-as toggle, etc.).
+applyTierLayout();
+window.addEventListener('auth-changed', () => {
+    try { applyTierLayout(); } catch {}
+});
 
 let _authMod = auth;
 let _auth = null;
@@ -2287,11 +2120,22 @@ initAll();
     window.addEventListener('alert-mark-all-read', () => engine.markAllRead());
 
     // ── Preferences panel logic ──────────────────────────────────────────────
+    // The Alert Preferences card has moved to /settings.html. The block
+    // below is kept (rather than deleted) because the alert engine .start()
+    // call lives inside it for tiers that have alerts. We early-return
+    // before touching DOM if the card itself isn't present on this page.
+    const _alertPrefsCardPresent = !!document.getElementById('alert-prefs-card');
     const canAlert    = auth.canUseAlerts();
     const isAdvanced  = auth.canUseAdvancedAlerts();
     const gateEl      = document.getElementById('alert-prefs-gate');
     const contentEl   = document.getElementById('alert-prefs-content');
     const planLabel   = document.getElementById('alert-prefs-plan');
+
+    if (!_alertPrefsCardPresent) {
+        // Card moved — still start the engine so the bell tray renders,
+        // but skip every UI mutation that would NPE on a missing DOM.
+        if (canAlert) engine.start();
+    } else {
 
     if (planLabel) planLabel.textContent = auth.getPlan().toUpperCase() + ' plan';
 
@@ -2378,13 +2222,19 @@ initAll();
         _syncEmailDeps();
         if (_emailAddr) _emailAddr.textContent = (auth.getUser()?.email || 'your inbox');
     }
+    } // end of _alertPrefsCardPresent else
 }
 
 // ── Saved Locations (multi-location alerts) ─────────────────────────────────
+// MOVED to /settings.html#saved-locations. The IIFE below early-returns
+// when its root DOM ids aren't present on this page.
 (() => {
     const $ = id => document.getElementById(id);
     const gate        = $('sl-gate');
     const content     = $('sl-content');
+    // The card is now on /settings.html. Anything below this point
+    // assumes the DOM is mounted, so bail out cleanly when it isn't.
+    if (!gate && !content) return;
     const cardTitle   = $('sl-plan-badge');
     const countEl     = $('sl-count');
     const limitEl     = $('sl-limit');
