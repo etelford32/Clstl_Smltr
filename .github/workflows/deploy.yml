@@ -73,6 +73,33 @@ jobs:
           echo "--- build/web contents ---"
           ls -lhR build/web/ | head -60
 
+      - name: Write static vercel.json (gh-pages is prebuilt — no WASM build)
+        run: |
+          # The gh-pages branch is pure static output published by this
+          # workflow.  It contains no build-wasm.sh and no rust-*/ source
+          # crates, so the source vercel.json's
+          #   buildCommand:   "bash build-wasm.sh"
+          #   installCommand: "... rustup target add wasm32-unknown-unknown"
+          # make Vercel fail with exit 127 ("build-wasm.sh: No such file").
+          #
+          # peaceiris/actions-gh-pages (force_orphan:false) never deletes a
+          # stale vercel.json already on gh-pages, so we must publish a
+          # corrected one every deploy.  Derive it from the repo's
+          # vercel.json so headers/rewrites/crons stay in sync, but
+          # neutralise the build/install commands — the content is already
+          # built, Vercel just needs to serve it.
+          python - <<'PY'
+          import json
+          cfg = json.load(open('vercel.json'))
+          cfg['buildCommand']   = ''   # nothing to build; static output
+          cfg['installCommand'] = ''   # no rustup / npm needed to serve
+          cfg['outputDirectory'] = '.'
+          cfg['framework'] = None
+          json.dump(cfg, open('build/web/vercel.json', 'w'), indent=2)
+          print('Wrote build/web/vercel.json (buildCommand/installCommand cleared)')
+          print('Preserved keys:', ', '.join(sorted(cfg)))
+          PY
+
       - name: Create project README in build
         run: |
           cat > build/web/README.md << 'EOF'
