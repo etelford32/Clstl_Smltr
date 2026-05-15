@@ -376,11 +376,87 @@ nav {
             </div>
 
             <div class="sec">
+                <div class="sec-hd"><span>⚗ Experiment Lab</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="note-text" style="margin-bottom:8px">
+                        <p>Push the system into hypothetical regimes. Defaults
+                           reproduce real Sirius exactly; presets jump to
+                           dramatic "what-if" configurations.</p>
+                    </div>
+                    <div class="btn-row">
+                        <button id="px-real" class="active">Real Sirius</button>
+                        <button id="px-overflow">Roche overflow</button>
+                    </div>
+                    <div class="btn-row">
+                        <button id="px-ns">NS companion</button>
+                        <button id="px-bh">BH companion</button>
+                        <button id="px-ecc">e = 0.9</button>
+                    </div>
+                    <div class="ctrl">
+                        <label>M<sub>A</sub></label>
+                        <input type="range" id="sl-ma" min="0.5" max="20" step="0.05" value="2.063">
+                        <span class="vdisp" id="disp-ma">2.06 M☉</span>
+                    </div>
+                    <div class="ctrl">
+                        <label>M<sub>B</sub></label>
+                        <input type="range" id="sl-mb" min="0.1" max="20" step="0.05" value="1.018">
+                        <span class="vdisp" id="disp-mb">1.02 M☉</span>
+                    </div>
+                    <div class="ctrl">
+                        <label>Eccentricity</label>
+                        <input type="range" id="sl-ecc" min="0" max="0.95" step="0.01" value="0.591">
+                        <span class="vdisp" id="disp-ecc">0.591</span>
+                    </div>
+                    <div class="ctrl">
+                        <label>log Ṁ<sub>wind</sub></label>
+                        <input type="range" id="sl-mdot" min="-16" max="-5" step="0.1" value="-13">
+                        <span class="vdisp" id="disp-mdot">1e-13 M☉/yr</span>
+                    </div>
+                    <div class="ctrl">
+                        <label>v<sub>∞</sub></label>
+                        <input type="range" id="sl-vinf" min="50" max="3000" step="10" value="600">
+                        <span class="vdisp" id="disp-vinf">600 km/s</span>
+                    </div>
+                    <div class="ctrl">
+                        <label>Companion R</label>
+                        <input type="range" id="sl-rb" min="-6" max="0.3" step="0.05" value="-2.076">
+                        <span class="vdisp" id="disp-rb">0.0084 R☉</span>
+                    </div>
+                    <div class="ctrl">
+                        <label>Roche fill</label>
+                        <input type="range" id="sl-fill" min="0" max="1.4" step="0.02" value="0.002">
+                        <span class="vdisp" id="disp-fill">0.00 (detached)</span>
+                    </div>
+                    <div class="ctrl">
+                        <label>GW ×10^</label>
+                        <input type="range" id="sl-gwx" min="0" max="22" step="1" value="0">
+                        <span class="vdisp" id="disp-gwx">×1</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sec">
                 <div class="sec-hd"><span>Layers</span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
                     <div class="toggle-row">
                         <input type="checkbox" id="tog-orbit" checked>
                         <label for="tog-orbit">Orbit trail</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-lens" checked>
+                        <label for="tog-lens">Gravitational lensing (B)</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-roche">
+                        <label for="tog-roche">Roche-lobe surface</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-tidal" checked>
+                        <label for="tog-tidal">Tidal distortion of A</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-hotspot" checked>
+                        <label for="tog-hotspot">Accretion hotspot</label>
                     </div>
                     <div class="toggle-row">
                         <input type="checkbox" id="tog-acca" checked>
@@ -489,6 +565,7 @@ const SNAP = {
     L_GW:10, H_PLUS:11, H_CROSS:12, F_GW:13, T_GW_YR:14,
     RHO_WIND:15, V_WIND_KMS:16, R_ACC:17, MDOT_ACC:18, L_ACC:19,
     T_SHOCK:20, V_FF_KMS:21, RL_A_RSUN:22, FILL:23,
+    PERIOD_YR:24, M_B:25, L1_AU:26, OVERFLOW:27, LENS_AU:28, GW_EXAGG:29,
 };
 
 // Plot ring-buffers for the GW and Ṁ_acc canvases
@@ -538,7 +615,30 @@ const state = {
     physicsTime: 1994.5715,               // Julian yr — start at periastron
     snapshot: null,                       // last WASM snapshot
     wakeEnabled: true,                    // 3-D BHL wind-particle cloud
+    lensEnabled: true,                    // gravitational lensing of bg stars
+    rocheEnabled: false,                  // Roche-lobe wireframe
+    tidalEnabled: true,                   // tidal elongation of Sirius A
+    hotspotEnabled: true,                 // accretion hotspot on Sirius B
+    // Experiment-Lab config (mirrors wasm SimConfig; pushed via configure())
+    cfg: { mA:2.063, mB:1.018, ecc:0.5914, mdot:1e-13, vinf:600, rb:0.0084, fill:0.0022, gwx:1 },
+    lastCapture: 0,                       // for hotspot flare
+    hotspotGlow: 0,
 };
+
+// Push the current Experiment-Lab config into the WASM engine. The
+// running wake adapts smoothly as particles recycle (each respawn reads
+// the new config), so we DON'T hard-reseed on every slider tick — only
+// on preset jumps via reseedWake().
+function pushConfig() {
+    if (!wasmReady) return;
+    const c = state.cfg;
+    wasm.configure(c.mA, c.mB, c.ecc, c.mdot, c.vinf, c.rb, c.fill, c.gwx);
+    sedCache = null;                      // SED depends on masses/compactness
+}
+function reseedWake() {
+    if (!wasmReady) return;
+    wasm.wake_init(WAKE_N, state.physicsTime);
+}
 
 // SCENE
 const scene  = new THREE.Scene();
@@ -559,20 +659,74 @@ controls.enableDamping = true; controls.dampingFactor = 0.07;
 controls.minDistance = 2; controls.maxDistance = 80;
 controls.target.set(0, 0, 0);
 
-// BACKGROUND STARS — lots of them (Canis Major region is rich)
+// BACKGROUND STARS + GRAVITATIONAL LENSING BY SIRIUS B
+//
+// The background field is deflected in a vertex shader using the
+// point-mass thin-lens equation. A light ray with unlensed angular
+// separation β from the lens appears at the primary-image angle
+//   θ = ½(β + √(β² + 4 θ_E²))
+// where θ_E is the Einstein angle. The physical θ_E for a 1 M☉ white
+// dwarf at this geometry is microscopic, so we expose an exaggeration
+// factor (driven by the configured companion mass) — the *shape* of
+// the distortion is the real lens mapping; only the scale is amplified
+// for pedagardy. Black-hole / neutron-star presets make it dramatic.
+const lensUniforms = {
+    uLensPos:  { value: new THREE.Vector3(0,0,0) },
+    uCamPos:   { value: new THREE.Vector3(0,0,0) },
+    uThetaE:   { value: 0.0 },     // effective (exaggerated) Einstein angle [rad]
+    uEnabled:  { value: 1.0 },
+};
 {
     const n = 5000, pos = new Float32Array(n*3), col = new Float32Array(n*3);
     for (let i = 0; i < n; i++) {
         const r=300+Math.random()*500, th=Math.random()*Math.PI*2, ph=Math.acos(2*Math.random()-1);
         pos[i*3]=r*Math.sin(ph)*Math.cos(th); pos[i*3+1]=r*Math.sin(ph)*Math.sin(th); pos[i*3+2]=r*Math.cos(ph);
-        // Slightly blue-tinted star field
         const c = 0.7 + Math.random() * 0.3;
         col[i*3]=c*0.90; col[i*3+1]=c*0.95; col[i*3+2]=c;
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-    scene.add(new THREE.Points(geo, new THREE.PointsMaterial({ vertexColors:true, size:0.45, sizeAttenuation:false })));
+    const lensVS = /* glsl */`
+        uniform vec3 uLensPos; uniform vec3 uCamPos;
+        uniform float uThetaE; uniform float uEnabled;
+        varying vec3 vColor; varying float vMag;
+        void main() {
+            vColor = color;
+            vec3 p = position;
+            if (uEnabled > 0.5 && uThetaE > 0.0) {
+                vec3 toStar = normalize(p - uCamPos);
+                vec3 toLens = normalize(uLensPos - uCamPos);
+                vec3 off    = toStar - toLens;
+                float beta  = length(off);                 // small-angle β
+                if (beta > 1e-5) {
+                    vec3  tdir  = off / beta;
+                    float thE   = uThetaE;
+                    float theta = 0.5 * (beta + sqrt(beta*beta + 4.0*thE*thE));
+                    vec3  newDir= normalize(toLens + tdir * theta);
+                    float dist  = length(p - uCamPos);
+                    p = uCamPos + newDir * dist;
+                    // brighten stars piling up near the Einstein ring
+                    vMag = 1.0 + clamp(thE / max(beta, thE*0.25), 0.0, 3.0);
+                } else { vMag = 4.0; }                      // on-axis caustic
+            } else { vMag = 1.0; }
+            vec4 mv = modelViewMatrix * vec4(p, 1.0);
+            gl_Position = projectionMatrix * mv;
+            gl_PointSize = 1.6 * vMag;
+        }`;
+    const lensFS = /* glsl */`
+        precision mediump float;
+        varying vec3 vColor; varying float vMag;
+        void main() {
+            vec2 d = gl_PointCoord - vec2(0.5);
+            if (dot(d,d) > 0.25) discard;
+            gl_FragColor = vec4(vColor * min(vMag,3.0), 1.0);
+        }`;
+    const mat = new THREE.ShaderMaterial({
+        uniforms: lensUniforms, vertexShader: lensVS, fragmentShader: lensFS,
+        vertexColors: true, transparent: false,
+    });
+    scene.add(new THREE.Points(geo, mat));
 }
 
 // ─── SHARED GLSL HELPERS ──────────────────────────────────────────────────────
@@ -829,6 +983,50 @@ const accretionSphere = new THREE.Mesh(
 );
 scene.add(accretionSphere);
 
+// ─── ACCRETION HOTSPOT on Sirius B ────────────────────────────────────────────
+// An additive glow that brightens on the hemisphere of B facing the
+// incoming stream/wind, flaring with the capture rate (matter slamming
+// into the white dwarf releases ½Ṁv_ff² as a hot X-ray spot).
+const hotspot = new THREE.Mesh(
+    new THREE.SphereGeometry(0.30, 20, 20),
+    new THREE.MeshBasicMaterial({
+        color: 0xffe8b0, transparent: true, opacity: 0.0,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+    })
+);
+scene.add(hotspot);
+
+// ─── ROCHE-LOBE wireframe ─────────────────────────────────────────────────────
+// Two teardrop equipotential lobes meeting at L1. Built as LatheGeometry
+// of an egg profile; each lobe is scaled to its Eggleton radius and the
+// pointed end is aimed along the instantaneous A→B axis. Toggle-gated.
+function makeLobe(color) {
+    const pts = [];
+    for (let k = 0; k <= 24; k++) {
+        const t = k / 24;                      // 0 = far cap, 1 = L1 tip
+        // egg-ish radius profile: round at the back, cusped toward L1
+        const rad = Math.sin(Math.PI * t) * (1.0 - 0.45 * t);
+        pts.push(new THREE.Vector2(Math.max(rad, 0.0001) * 1.0, (t - 0.5) * 2.0));
+    }
+    const geo = new THREE.LatheGeometry(pts, 28);
+    return new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+        color, wireframe: true, transparent: true, opacity: 0.22, depthWrite: false,
+    }));
+}
+const lobeA = makeLobe(0x88bbff);
+const lobeB = makeLobe(0xffbb88);
+lobeA.visible = lobeB.visible = false;
+scene.add(lobeA); scene.add(lobeB);
+
+const _zAxis = new THREE.Vector3(0, 1, 0);   // LatheGeometry axis
+function orientLobe(lobe, fromPos, toPos, lobeRadiusScene) {
+    // point the lathe's +Y (the L1 cusp) toward the companion
+    const dir = new THREE.Vector3().subVectors(toPos, fromPos).normalize();
+    lobe.position.copy(fromPos);
+    lobe.quaternion.setFromUnitVectors(_zAxis, dir);
+    lobe.scale.set(lobeRadiusScene, lobeRadiusScene, lobeRadiusScene);
+}
+
 let wakeReady = false;
 function ensureWakeInitialised() {
     if (wakeReady || !wasmReady) return;
@@ -972,6 +1170,71 @@ function animate() {
     accretionSphere.position.copy(posB);
     lightB.position.copy(posB);
 
+    // ─── GRAVITATIONAL LENSING by Sirius B ────────────────────────────
+    // θ_E ≈ √(2 · lensScale / D)  with lensScale = 4GM_B/c² (from snapshot,
+    // AU) and D the lens distance. Physically tiny for a WD, so amplify
+    // for visibility, scaled super-linearly with companion mass so the
+    // NS/BH presets produce a bold Einstein ring.
+    lensUniforms.uEnabled.value = state.lensEnabled ? 1.0 : 0.0;
+    if (state.lensEnabled && state.snapshot) {
+        const mB = state.snapshot[SNAP.M_B] || 1.0;
+        const lensAU = state.snapshot[SNAP.LENS_AU] || 1e-3;
+        // base Einstein-ish angle from the real deflection scale, then a
+        // pedagogical gain ∝ M_B² so a 10 M☉ BH lenses ~100× harder.
+        const D = Math.max(posB.length(), 1.0);
+        const thetaPhys = Math.sqrt(2.0 * (lensAU / 1.496e8) / D); // ~rad, microscopic
+        const gain = 4.0e6 * mB * mB;
+        lensUniforms.uThetaE.value = Math.min(thetaPhys * gain, 0.6);
+        lensUniforms.uLensPos.value.copy(posB);
+        lensUniforms.uCamPos.value.copy(camera.position);
+    }
+
+    // ─── ACCRETION HOTSPOT on Sirius B ────────────────────────────────
+    if (state.snapshot) {
+        const diag = wasmReady ? wasm.wake_diagnostics() : [0,0];
+        const dCap = Math.max(0, diag[1] - state.lastCapture);
+        state.lastCapture = diag[1];
+        // exponential decay + flare on each capture batch
+        state.hotspotGlow = state.hotspotGlow * 0.90 + Math.min(dCap * 0.05, 0.8);
+        const overflow = state.snapshot[SNAP.OVERFLOW] > 0.5;
+        const baseGlow = overflow ? 0.45 : 0.0;   // steady glow when accreting hard
+        hotspot.material.opacity = state.hotspotEnabled
+            ? Math.min(baseGlow + state.hotspotGlow, 0.95) : 0.0;
+        // sit the spot on the hemisphere of B facing Sirius A (incoming matter)
+        const toA = new THREE.Vector3().subVectors(posA, posB).normalize();
+        hotspot.position.copy(posB).add(toA.multiplyScalar(0.12));
+        const sc = 0.6 + 0.5 * Math.sin(performance.now() * 0.006);
+        hotspot.scale.setScalar(state.hotspotEnabled ? sc : 0.0001);
+    }
+
+    // ─── ROCHE-LOBE wireframe ─────────────────────────────────────────
+    lobeA.visible = lobeB.visible = state.rocheEnabled;
+    if (state.rocheEnabled && state.snapshot) {
+        const zoom = state.separation / 19.78;        // AU → scene units
+        const rlA_au = state.snapshot[SNAP.RL_A_RSUN] / 215.032;  // R☉ → AU
+        const l1_au  = state.snapshot[SNAP.L1_AU];                 // L1 from A, AU
+        const sep_au = state.snapshot[SNAP.R_AU];
+        const rlB_au = Math.max(sep_au - l1_au, sep_au * 0.2);    // B lobe ≈ B→L1
+        orientLobe(lobeA, posA, posB, Math.max(rlA_au * zoom, 0.05));
+        orientLobe(lobeB, posB, posA, Math.max(rlB_au * zoom, 0.05));
+    }
+
+    // ─── TIDAL DISTORTION of Sirius A ─────────────────────────────────
+    // Prolate elongation toward the companion, amplitude ∝ (R_A/r)³ and
+    // the configured Roche-fill (a lobe-filling star is strongly distorted).
+    if (state.tidalEnabled && state.snapshot) {
+        const sep = Math.max(state.snapshot[SNAP.R_AU], 0.1);
+        const fill = state.snapshot[SNAP.FILL];
+        const amp = Math.min(0.04 + 0.9 * Math.pow(fill, 1.5) + 12.0 / (sep*sep*sep), 0.6);
+        const toB = new THREE.Vector3().subVectors(posB, posA).normalize();
+        // build a basis with X' along A→B, scale X' by (1+amp)
+        siriusAMesh.scale.set(1 + amp, 1 - amp*0.4, 1 - amp*0.4);
+        siriusAMesh.quaternion.setFromUnitVectors(new THREE.Vector3(1,0,0), toB);
+    } else {
+        siriusAMesh.scale.set(1,1,1);
+        siriusAMesh.quaternion.identity();
+    }
+
     controls.update();
     renderer.render(scene, camera);
 
@@ -1089,6 +1352,69 @@ document.getElementById('tog-acca').addEventListener('change',   e => { siriusAC
 document.getElementById('tog-accb').addEventListener('change',   e => { siriusBHalo.visible = e.target.checked; });
 document.getElementById('tog-labels').addEventListener('change', e => { document.getElementById('hud').style.display = e.target.checked ? '' : 'none'; });
 document.getElementById('tog-wake').addEventListener('change',   e => { state.wakeEnabled = e.target.checked; });
+document.getElementById('tog-lens').addEventListener('change',   e => { state.lensEnabled = e.target.checked; });
+document.getElementById('tog-roche').addEventListener('change',  e => { state.rocheEnabled = e.target.checked; });
+document.getElementById('tog-tidal').addEventListener('change',  e => { state.tidalEnabled = e.target.checked; });
+document.getElementById('tog-hotspot').addEventListener('change',e => { state.hotspotEnabled = e.target.checked; });
+
+// ─── EXPERIMENT LAB ───────────────────────────────────────────────────────────
+function fmtMdot(v) {
+    const e = Math.floor(Math.log10(v));
+    return (v / Math.pow(10,e)).toFixed(0) + 'e' + e + ' M☉/yr';
+}
+function syncLabExpr() {
+    const c = state.cfg;
+    document.getElementById('disp-ma').textContent   = c.mA.toFixed(2) + ' M☉';
+    document.getElementById('disp-mb').textContent   = c.mB.toFixed(2) + ' M☉';
+    document.getElementById('disp-ecc').textContent  = c.ecc.toFixed(3);
+    document.getElementById('disp-mdot').textContent = fmtMdot(c.mdot);
+    document.getElementById('disp-vinf').textContent = c.vinf.toFixed(0) + ' km/s';
+    document.getElementById('disp-rb').textContent   = c.rb < 1e-3
+        ? c.rb.toExponential(1) + ' R☉' : c.rb.toFixed(4) + ' R☉';
+    document.getElementById('disp-fill').textContent = c.fill.toFixed(2)
+        + (c.fill >= 1.0 ? ' ⚠ OVERFLOW' : (c.fill > 0.5 ? ' (near-contact)' : ' (detached)'));
+    document.getElementById('disp-gwx').textContent  = '×1e' + Math.round(Math.log10(c.gwx));
+}
+function syncLabSliders() {
+    const c = state.cfg;
+    document.getElementById('sl-ma').value   = c.mA;
+    document.getElementById('sl-mb').value   = c.mB;
+    document.getElementById('sl-ecc').value  = c.ecc;
+    document.getElementById('sl-mdot').value = Math.log10(c.mdot);
+    document.getElementById('sl-vinf').value = c.vinf;
+    document.getElementById('sl-rb').value   = Math.log10(c.rb);
+    document.getElementById('sl-fill').value = c.fill;
+    document.getElementById('sl-gwx').value  = Math.round(Math.log10(c.gwx));
+    syncLabExpr();
+}
+function applyLab() { syncLabExpr(); pushConfig(); }
+
+document.getElementById('sl-ma').addEventListener('input',  function(){ state.cfg.mA  = +this.value; applyLab(); });
+document.getElementById('sl-mb').addEventListener('input',  function(){ state.cfg.mB  = +this.value; applyLab(); });
+document.getElementById('sl-ecc').addEventListener('input', function(){ state.cfg.ecc = +this.value; applyLab(); });
+document.getElementById('sl-mdot').addEventListener('input',function(){ state.cfg.mdot= Math.pow(10,+this.value); applyLab(); });
+document.getElementById('sl-vinf').addEventListener('input',function(){ state.cfg.vinf= +this.value; applyLab(); });
+document.getElementById('sl-rb').addEventListener('input',  function(){ state.cfg.rb  = Math.pow(10,+this.value); applyLab(); });
+document.getElementById('sl-fill').addEventListener('input',function(){ state.cfg.fill= +this.value; applyLab(); });
+document.getElementById('sl-gwx').addEventListener('input', function(){ state.cfg.gwx = Math.pow(10,+this.value); applyLab(); });
+
+const PRESETS = {
+    'px-real':     { mA:2.063, mB:1.018, ecc:0.5914, mdot:1e-13, vinf:600,  rb:0.0084,  fill:0.0022, gwx:1 },
+    'px-overflow': { mA:2.063, mB:1.018, ecc:0.30,   mdot:1e-7,  vinf:300,  rb:0.0084,  fill:1.10,   gwx:1 },
+    'px-ns':       { mA:2.063, mB:1.40,  ecc:0.5914, mdot:1e-9,  vinf:600,  rb:2e-5,    fill:0.0022, gwx:1e3 },
+    'px-bh':       { mA:2.063, mB:10.0,  ecc:0.5914, mdot:1e-9,  vinf:600,  rb:1.9e-7,  fill:0.0022, gwx:1e6 },
+    'px-ecc':      { mA:2.063, mB:1.018, ecc:0.90,   mdot:1e-13, vinf:600,  rb:0.0084,  fill:0.0022, gwx:1e2 },
+};
+function activatePreset(id) {
+    Object.keys(PRESETS).forEach(k =>
+        document.getElementById(k)?.classList.toggle('active', k === id));
+    state.cfg = { ...PRESETS[id] };
+    syncLabSliders();
+    pushConfig();
+    reseedWake();   // preset = big jump → reset wake to show the new regime now
+}
+Object.keys(PRESETS).forEach(id =>
+    document.getElementById(id).addEventListener('click', () => activatePreset(id)));
 
 // SLIDERS
 document.getElementById('sl-speed').addEventListener('input', function() {
@@ -1122,6 +1448,9 @@ document.getElementById('sl-oblate').addEventListener('input', function() {
     unifA.u_oblate.value = +this.value;
     document.getElementById('disp-oblate').textContent = (+this.value).toFixed(2);
 });
+
+// Initialise Experiment-Lab labels from the default (real-Sirius) config.
+syncLabExpr();
 
 console.log('%c[Sirius System · A1V + DA2 Binary]', 'color:#88aaff;font-weight:bold;font-size:13px');
 </script>
