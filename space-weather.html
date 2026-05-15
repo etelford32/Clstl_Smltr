@@ -1000,6 +1000,74 @@ nav {
 .helio-corner-link { display: none; }
 /* Controls hint — hidden; drag-to-orbit is standard learned UX */
 .helio-hint { display: none; }
+
+/* ══ Sprint 5 — Hypothetical Mode ════════════════════════════════════════ */
+/* Guardrail 3: viewport border tint when hypothetical (never mistaken). */
+.helio-hero-wrap.hyp-on { box-shadow: 0 4px 40px rgba(0,0,0,.8),
+    inset 0 0 0 2px rgba(168,110,255,.85), inset 0 0 90px rgba(120,40,220,.10); }
+/* Guardrail 1: mode badge (top-right, near Reset View). */
+#mode-badge {
+    position: absolute; top: 12px; left: 12px; z-index: 11;
+    display: flex; align-items: center; gap: 6px; cursor: pointer;
+    padding: 4px 11px; border-radius: 20px; font: 600 .66rem 'Courier New',monospace;
+    letter-spacing: .08em; background: rgba(8,10,18,.85);
+    border: 1px solid rgba(120,160,210,.4); color: #cfe;
+    user-select: none;
+}
+#mode-badge .mb-dot { width: 8px; height: 8px; border-radius: 50%; background: #4f8;
+    box-shadow: 0 0 7px currentColor; }
+#mode-badge.m-live { color:#7df0a8; } #mode-badge.m-live .mb-dot{ background:#4f8; }
+#mode-badge.m-scrub{ color:#ffd27a; } #mode-badge.m-scrub .mb-dot{ background:#ffb020; }
+#mode-badge.m-hyp  { color:#c79bff; border-color:rgba(168,110,255,.6); }
+#mode-badge.m-hyp .mb-dot{ background:#a86eff; }
+/* Guardrail 4: watermark. */
+#hyp-watermark {
+    position: absolute; right: 12px; bottom: 10px; z-index: 7; display: none;
+    font: 400 .6rem 'Courier New',monospace; color: rgba(199,155,255,.7);
+    pointer-events: none; text-align: right;
+}
+.helio-hero-wrap.hyp-on #hyp-watermark { display: block; }
+/* Dial panel — right-edge slide-out (bottom sheet on mobile). */
+#hyp-dial {
+    position: absolute; top: 0; right: 0; height: 100%; width: 290px; z-index: 8;
+    background: rgba(6,7,16,.94); border-left: 1px solid rgba(168,110,255,.35);
+    transform: translateX(102%); transition: transform .35s ease;
+    overflow-y: auto; padding: 12px 14px; box-sizing: border-box;
+    font: 400 .7rem 'Courier New',monospace; color: #b9c6d8;
+}
+#hyp-dial.open { transform: translateX(0); }
+#hyp-dial h4 { margin: 2px 0 8px; color:#c79bff; font-size:.74rem; letter-spacing:.06em; }
+#hyp-dial .dial-row { margin: 9px 0; }
+#hyp-dial label { display:flex; justify-content:space-between; font-size:.64rem; color:#8fb4d8; }
+#hyp-dial input[type=range]{ width:100%; accent-color:#a86eff; margin-top:3px; }
+#hyp-dial input[type=number]{ width:62px; background:rgba(255,255,255,.06);
+    border:1px solid rgba(168,110,255,.3); color:#dfe; border-radius:4px;
+    font:inherit; padding:1px 4px; text-align:right; }
+#hyp-dial .dial-ticks{ display:flex; justify-content:space-between; font-size:.54rem;
+    color:#5a6f86; margin-top:1px; }
+#hyp-dial .dial-derived{ margin:10px 0; padding:8px; border-radius:6px;
+    background:rgba(168,110,255,.07); border:1px solid rgba(168,110,255,.18);
+    font-size:.64rem; line-height:1.55; }
+#hyp-dial .dial-derived b{ color:#c79bff; }
+#hyp-dial .dial-btns{ display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+#hyp-dial button{ flex:1; min-width:88px; padding:5px 8px; border-radius:6px;
+    background:rgba(168,110,255,.14); border:1px solid rgba(168,110,255,.4);
+    color:#d9c7ff; font:inherit; cursor:pointer; }
+#hyp-dial button:hover{ background:rgba(168,110,255,.28); }
+#hyp-dial button.dial-live{ background:rgba(60,255,120,.12); border-color:rgba(60,255,120,.4); color:#9fe; }
+#hyp-dial .dial-note{ font-size:.56rem; color:#5a6f86; margin-top:8px; line-height:1.5; }
+#hyp-dial select{ width:100%; background:rgba(255,255,255,.06); color:#dfe;
+    border:1px solid rgba(168,110,255,.3); border-radius:4px; font:inherit; padding:3px; }
+#hyp-toast{ position:absolute; left:50%; bottom:18px; transform:translateX(-50%);
+    z-index:9; background:rgba(8,10,18,.95); border:1px solid rgba(168,110,255,.5);
+    color:#d9c7ff; padding:7px 14px; border-radius:7px; font:.7rem 'Courier New',monospace;
+    display:none; }
+@media (max-width:640px){
+    #hyp-dial{ width:100%; height:auto; max-height:62%; top:auto; bottom:0;
+        transform:translateY(102%); border-left:none; border-top:1px solid rgba(168,110,255,.35); }
+    #hyp-dial.open{ transform:translateY(0); }
+    #mode-badge{ left:12px; top:48px; }
+}
 /* ── Corona bloom slider ─────────────────────────────────────────────────── */
 .helio-bloom-ctrl {
     position: absolute; top: 12px; right: 14px; z-index: 10;
@@ -1656,6 +1724,49 @@ nav {
     <div class="helio-hero-wrap" data-preview-stage="1">
         
         <button class="cv-btn" id="btn-sw-here" title="Current Space Weather" style="top:12px;right:12px;" onclick="document.getElementById('helio-canvas').dispatchEvent(new Event('reset'))">⊙ Reset View</button>
+        <!-- Sprint 5 — Hypothetical Mode (badge / dial / watermark / toast) -->
+        <div id="mode-badge" class="m-live" role="button" tabindex="0"
+             title="LIVE → HYPOTHETICAL · click to model a scenario">
+            <span class="mb-dot"></span><span id="mb-text">LIVE</span>
+        </div>
+        <div id="hyp-watermark">HYPOTHETICAL — empirical model preview,<br>not an operational forecast</div>
+        <div id="hyp-toast"></div>
+        <aside id="hyp-dial" aria-label="Hypothetical scenario dial">
+            <h4>⚛ HYPOTHETICAL SCENARIO</h4>
+            <div class="dial-row">
+                <label>Bz (IMF north–south, nT)<input type="number" id="d-bz" min="-50" max="50" step="0.5" value="0"></label>
+                <input type="range" id="d-bz-r" min="-50" max="50" step="0.5" value="0">
+                <div class="dial-ticks"><span>−50</span><span>−30 sev</span><span>−15</span><span>0</span><span>+50</span></div>
+            </div>
+            <div class="dial-row">
+                <label>Solar wind speed (km/s)<input type="number" id="d-v" min="250" max="2500" step="10" value="400"></label>
+                <input type="range" id="d-v-r" min="250" max="2500" step="10" value="400">
+                <div class="dial-ticks"><span>250</span><span>800</span><span>1500</span><span>2200</span></div>
+            </div>
+            <div class="dial-row">
+                <label>Density n (n/cc)<input type="number" id="d-n" min="1" max="100" step="0.5" value="5"></label>
+                <input type="range" id="d-n-r" min="1" max="100" step="0.5" value="5">
+                <div class="dial-ticks"><span>1</span><span>5</span><span>20</span><span>50</span><span>100</span></div>
+            </div>
+            <div class="dial-row">
+                <label>IMF By (nT)<input type="number" id="d-by" min="-50" max="50" step="0.5" value="0"></label>
+                <input type="range" id="d-by-r" min="-50" max="50" step="0.5" value="0">
+            </div>
+            <div class="dial-derived" id="dial-derived">—</div>
+            <div class="dial-row">
+                <label for="dial-preset">Load scenario…</label>
+                <select id="dial-preset"><option value="">— preset —</option></select>
+            </div>
+            <div class="dial-btns">
+                <button class="dial-live" id="dial-reset-live">⊙ Reset to live</button>
+                <button id="dial-save">🔗 Save / share</button>
+            </div>
+            <div class="dial-note">Inputs are upstream solar-wind drivers; Pdyn, Dst,
+                Kp &amp; HP are <b>modeled</b> from them (O'Brien-McPherron 2002,
+                Newell 2007/2009). F10.7 held at last live value (not modulated on
+                minute timescales). Empirical model preview · full MHD via SWMF API
+                in development.</div>
+        </aside>
         <canvas id="helio-canvas"
                 aria-label="3D inner solar system — Parker spiral solar wind, Earth magnetosphere, planetary positions"
                 role="img"></canvas>
@@ -5587,6 +5698,236 @@ window.openImg = function(thumb) {
 
     const cvSurf = document.getElementById('surf-mini-plot');
     if (cvSurf) new ResizeObserver(() => surf.refresh()).observe(cvSurf);
+</script>
+
+<!-- ══ Sprint 5 — Hypothetical Mode controller (self-contained) ════════════ -->
+<script>
+(function () {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const wrap = document.querySelector('.helio-hero-wrap');
+  if (!wrap) return;
+
+  // Readout suffix guardrail (purple "?" after every live-HUD value).
+  const st = document.createElement('style');
+  st.textContent =
+    '.helio-live-hud.hyp .hv::after{content:" ?";color:#c79bff;font-weight:700}';
+  document.head.appendChild(st);
+
+  const DEF = { bz: 0, v: 400, n: 5, by: 0 };
+  let mode = 'LIVE';                 // LIVE | SCRUB | HYPOTHETICAL
+  let dial = { ...DEF };
+  let lastLive = null;              // last real swpc-update detail (for restore/seed)
+  let lastF107 = 150;
+  let scenarios = [];
+  let scenName = '';
+
+  // ── Coupling functions (named, documented) ───────────────────────────────
+  const pdyn = (n, v) => 1.6726e-6 * n * v * v;                 // nPa
+  const clockDeg = (by, bz) => Math.atan2(by, bz) * 180 / Math.PI; // 180°=due S
+  function newellDPhi(v, by, bz) {                              // Newell 2007/09
+    const bt = Math.hypot(by, bz);
+    const tc = Math.atan2(Math.abs(by), bz);                    // clock angle
+    return Math.pow(v, 4/3) * Math.pow(Math.max(1e-3, bt), 2/3)
+         * Math.pow(Math.sin(tc / 2), 8/3);                     // arb units
+  }
+  // dΦ/dt → Kp, calibrated so {400,0,0}→~1.5 and {850,-30,-10}→~8.5.
+  const couplingKp = dphi => Math.max(0, Math.min(9, dphi / 4800));
+  // O'Brien-McPherron 2002 steady-state Dst (uses the *dial* v, unlike the
+  // engine's fixed-400 shortcut — the prompt wants v-driven Dst).
+  function omDst(v, n, bz) {
+    const VBs = v * Math.max(0, -bz) * 1e-3;                     // mV/m
+    const Q   = VBs > 0.49 ? -4.4 * (VBs - 0.49) : 0;            // nT/h
+    const Dst_inj  = Q * 7;                                      // τ ≈ 7 h
+    const Dst_pdyn = -7.26 * Math.sqrt(Math.max(0.1, pdyn(n, v)));
+    return Math.max(-900, Math.min(30, Dst_inj + Dst_pdyn));
+  }
+  // Newell 2009 hemispheric power (GW), ~5 quiet → ~200 extreme.
+  const hpGW = dphi => Math.max(2, Math.min(280, 4 + dphi / 95));
+
+  // ── Build a synthetic swpc-update from the dial ──────────────────────────
+  function buildHypState() {
+    const { bz, v, n, by } = dial;
+    const dphi = newellDPhi(v, by, bz);
+    const kp   = couplingKp(dphi);
+    const dst  = omDst(v, n, bz);
+    const hp   = hpGW(dphi);
+    return {
+      __hyp: true, status: 'live', historical_event: null,
+      solar_wind: { speed: v, density: n, bz, by, bt: Math.hypot(by, bz) },
+      kp, dst_index: dst,
+      f107_flux: lastF107,
+      xray_flux: 1e-8, xray_class: 'A1.0',
+      aurora_power_north: hp, aurora_power_south: hp * 0.92,
+      active_regions: lastLive?.active_regions ?? [],
+      derived: { xray_intensity: 1e-8, f107_norm: Math.max(0, Math.min(1, (lastF107 - 65) / 235)) },
+    };
+  }
+
+  let _deb = null;
+  function pushDial(immediate) {
+    const fire = () => window.dispatchEvent(new CustomEvent('swpc-update', { detail: buildHypState() }));
+    if (immediate) { fire(); return; }
+    clearTimeout(_deb); _deb = setTimeout(fire, 100);   // ≤50 ms recompute → 100 ms debounce
+  }
+
+  // ── Capture-phase gate: in HYPOTHETICAL, block live/scrub ticks so the
+  // dial fully owns every layer; capture the last live snapshot for restore.
+  window.addEventListener('swpc-update', function (e) {
+    const d = e.detail || {};
+    if (!d.__hyp) {
+      if (Number.isFinite(d.f107_flux) && d.f107_flux > 0) lastF107 = d.f107_flux;
+      lastLive = d;
+      // Passive SCRUB/LIVE badge tracking (only when not hypothetical).
+      if (mode !== 'HYPOTHETICAL') {
+        if (d.historical_event) setMode('SCRUB', d.historical_event);
+        else if (mode !== 'LIVE') setMode('LIVE');
+      }
+      if (mode === 'HYPOTHETICAL') { e.stopImmediatePropagation(); return; }
+    }
+  }, true);   // capture — runs before every layer's listener
+
+  // ── Derived-readout panel ────────────────────────────────────────────────
+  function refreshDerived() {
+    const { bz, v, n, by } = dial;
+    const dphi = newellDPhi(v, by, bz);
+    const el = $('dial-derived'); if (!el) return;
+    el.innerHTML =
+      `Pdyn <b>${pdyn(n, v).toFixed(2)}</b> nPa`
+      + ` · clock θc <b>${clockDeg(by, bz).toFixed(0)}°</b>`
+      + `<br>Predicted Dst <b>${omDst(v, n, bz).toFixed(0)}</b> nT`
+      + ` <span style="color:#5a6f86">(O'Brien-McPherron 2002)</span>`
+      + `<br>Predicted Kp <b>${couplingKp(dphi).toFixed(1)}</b>`
+      + ` · HP <b>${hpGW(dphi).toFixed(0)}</b> GW`
+      + ` <span style="color:#5a6f86">(Newell 2007/09)</span>`
+      + `<br>F10.7 <b>${lastF107.toFixed(0)}</b> SFU <span style="color:#5a6f86">(held at last live)</span>`;
+  }
+
+  // ── Mode machine + guardrails ────────────────────────────────────────────
+  const badge = $('mode-badge'), mbText = $('mb-text'), hud = document.querySelector('.helio-live-hud');
+  function setMode(m, label) {
+    mode = m;
+    badge.className = m === 'HYPOTHETICAL' ? 'm-hyp' : m === 'SCRUB' ? 'm-scrub' : 'm-live';
+    mbText.textContent = m === 'HYPOTHETICAL'
+        ? 'HYPOTHETICAL' + (scenName ? ' · ' + scenName : ' · scenario')
+        : m === 'SCRUB' ? 'SCRUB' + (label ? ' · ' + label : '') : 'LIVE';
+    wrap.classList.toggle('hyp-on', m === 'HYPOTHETICAL');
+    hud && hud.classList.toggle('hyp', m === 'HYPOTHETICAL');
+    $('hyp-dial').classList.toggle('open', m === 'HYPOTHETICAL');
+    // Hide the timeline scrubber in hypothetical (its presence implies history).
+    const tl = $('tw-timeline-row'); if (tl) tl.style.visibility = m === 'HYPOTHETICAL' ? 'hidden' : '';
+    if (m !== 'HYPOTHETICAL') { scenName = ''; updateHash(true); }
+  }
+
+  function enterHyp(seed) {
+    // Seed from current live/scrub conditions so mode entry has no visual jump.
+    const s = seed || (lastLive ? {
+      bz: lastLive.solar_wind?.bz ?? 0, v: lastLive.solar_wind?.speed ?? 400,
+      n: lastLive.solar_wind?.density ?? 5, by: lastLive.solar_wind?.by ?? 0,
+    } : { ...DEF });
+    dial = { bz: +s.bz, v: +s.v, n: +s.n, by: +s.by };
+    syncDialUI(); setMode('HYPOTHETICAL'); refreshDerived(); pushDial(true); updateHash();
+  }
+  function resetToLive() {
+    scenName = '';
+    setMode('LIVE');
+    history.replaceState(null, '', location.pathname + location.search);
+    // Instant restore: re-emit the last real snapshot (gate is now open).
+    if (lastLive) window.dispatchEvent(new CustomEvent('swpc-update', { detail: lastLive }));
+  }
+
+  // ── Dial UI wiring ───────────────────────────────────────────────────────
+  const ids = { bz: 'd-bz', v: 'd-v', n: 'd-n', by: 'd-by' };
+  function syncDialUI() {
+    for (const k in ids) {
+      const num = $(ids[k]), rng = $(ids[k] + '-r');
+      if (num) num.value = dial[k]; if (rng) rng.value = dial[k];
+    }
+  }
+  for (const k in ids) {
+    const num = $(ids[k]), rng = $(ids[k] + '-r');
+    const on = src => () => {
+      let val = parseFloat(src.value); if (!Number.isFinite(val)) return;
+      dial[k] = val;
+      if (num) num.value = val; if (rng) rng.value = val;
+      refreshDerived(); updateHash();
+      if (mode === 'HYPOTHETICAL') pushDial(false);
+    };
+    rng && rng.addEventListener('input', on(rng));
+    num && num.addEventListener('input', on(num));
+  }
+
+  badge.addEventListener('click', () => { if (mode === 'HYPOTHETICAL') resetToLive(); else enterHyp(); });
+  badge.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); badge.click(); } });
+  $('dial-reset-live').addEventListener('click', resetToLive);
+
+  // ── URL-hash scenario sharing ────────────────────────────────────────────
+  function updateHash(clear) {
+    if (clear || mode !== 'HYPOTHETICAL') return;
+    const p = new URLSearchParams();
+    p.set('bz', dial.bz); p.set('v', dial.v); p.set('n', dial.n); p.set('by', dial.by);
+    if (scenName) p.set('name', scenName);
+    history.replaceState(null, '', '#hyp?' + p.toString());
+  }
+  function parseHash() {
+    const h = location.hash || '';
+    if (!h.startsWith('#hyp')) return null;
+    const q = new URLSearchParams(h.slice(h.indexOf('?') + 1));
+    const g = (k, d) => { const x = parseFloat(q.get(k)); return Number.isFinite(x) ? x : d; };
+    return { bz: g('bz', 0), v: g('v', 400), n: g('n', 5), by: g('by', 0), name: q.get('name') || '' };
+  }
+  function toast(msg) {
+    const t = $('hyp-toast'); if (!t) return;
+    t.textContent = msg; t.style.display = 'block';
+    clearTimeout(t._k); t._k = setTimeout(() => t.style.display = 'none', 4000);
+  }
+  $('dial-save').addEventListener('click', () => {
+    updateHash();
+    const url = location.origin + location.pathname + location.hash;
+    navigator.clipboard?.writeText(url).then(
+      () => toast('Scenario URL copied to clipboard'),
+      () => toast('Share URL: ' + location.hash));
+  });
+
+  // ── Preset scenarios ─────────────────────────────────────────────────────
+  fetch('data/hypothetical-scenarios.json', { cache: 'no-cache' })
+    .then(r => r.json()).then(j => {
+      scenarios = j.scenarios || [];
+      const sel = $('dial-preset'); if (!sel) return;
+      const cats = ['reference', 'operational', 'severe', 'extreme'];
+      const order = scenarios.slice().sort((a, b) =>
+        (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+      for (const cat of cats) {
+        const inCat = order.filter(s => s.category === cat);
+        if (!inCat.length) continue;
+        const og = document.createElement('optgroup'); og.label = cat.toUpperCase();
+        for (const s of inCat) {
+          const o = document.createElement('option');
+          o.value = s.id;
+          o.textContent = (s.pinned ? '★ ' : '') + s.label;
+          o.title = s.description;
+          og.appendChild(o);
+        }
+        sel.appendChild(og);
+      }
+      sel.addEventListener('change', () => {
+        const s = scenarios.find(x => x.id === sel.value); if (!s) return;
+        scenName = s.label;
+        if (s.warning) toast('⚠ ' + s.warning);
+        enterHyp(s.inputs);
+        toast('Loaded scenario: ' + s.label);
+        sel.value = '';
+      });
+      // Cold-load from a shared scenario URL.
+      const hp = parseHash();
+      if (hp) {
+        scenName = hp.name || 'shared scenario';
+        setTimeout(() => { enterHyp(hp); toast('Loaded scenario: ' + scenName); }, 700);
+      }
+    }).catch(() => {});
+
+  refreshDerived();
+})();
 </script>
 
 </body>

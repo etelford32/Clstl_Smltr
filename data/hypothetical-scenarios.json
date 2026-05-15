@@ -1,0 +1,68 @@
+{
+  "_comment": "Curated Hypothetical-Mode scenarios for space-weather.html. Read-only; add new scenarios to the array (no code change). Inputs are upstream solar-wind drivers (Bz, v, n, By); all downstream indices (Pdyn, Dst, Kp, HP) are MODELED from these via the named coupling functions (O'Brien-McPherron 2002, Newell 2007/2009) — never dialed directly. Provenance per scenario notes where the input values came from.",
+  "schema_version": 1,
+  "scenarios": [
+    {
+      "id": "quiet",
+      "label": "Quiet baseline",
+      "description": "Solar-minimum conditions, typical quiet day. Reference state.",
+      "inputs": { "bz": 0, "v": 400, "n": 5, "by": 0 },
+      "category": "reference",
+      "provenance": "Nominal slow solar wind (OMNI climatological median)."
+    },
+    {
+      "id": "moderate-storm",
+      "label": "G3 storm (moderate)",
+      "description": "Typical moderate geomagnetic storm. A few per year near solar max.",
+      "inputs": { "bz": -15, "v": 600, "n": 12, "by": 5 },
+      "category": "operational",
+      "provenance": "Representative CIR/CME-sheath values for a G3 (Kp 7) event."
+    },
+    {
+      "id": "gannon-analog",
+      "label": "Gannon-class (G5)",
+      "description": "May 2024 Gannon Storm analog. CME-driven, prolonged southward Bz.",
+      "inputs": { "bz": -30, "v": 850, "n": 25, "by": -10 },
+      "category": "severe",
+      "historical_analog": "gannon-2024",
+      "provenance": "DSCOVR/ACE L1 values during the 2024-05-10/11 main phase (peak Dst −412 nT)."
+    },
+    {
+      "id": "halloween-analog",
+      "label": "Halloween 2003 analog",
+      "description": "Multiple-CME sequence; coronagraphs saturated; X17/X28 flares.",
+      "inputs": { "bz": -40, "v": 1500, "n": 30, "by": 15 },
+      "category": "severe",
+      "historical_analog": "halloween-2003",
+      "provenance": "ACE sheath values 2003-10-29/30 (peak Dst −383 nT; some sensors saturated)."
+    },
+    {
+      "id": "carrington-analog",
+      "label": "Carrington-class (1859 analog)",
+      "description": "Historic extreme. ~1-in-150-year event. No modern instrument equivalent.",
+      "inputs": { "bz": -50, "v": 2200, "n": 60, "by": 20 },
+      "category": "extreme",
+      "historical_analog": "carrington-1859",
+      "warning": "Conditions outside the modern observational range. Empirical models are EXTRAPOLATED — treat as illustrative, not quantitative.",
+      "provenance": "Reconstructed estimates (Tsurutani 2003; Hayakawa 2019) — wide uncertainty."
+    },
+    {
+      "id": "starlink-feb-2022",
+      "label": "Starlink Loss (Feb 2022)",
+      "description": "A modest G1 storm that destroyed 38 of 49 Starlink satellites via thermospheric drag. The case for physics-first drag prediction.",
+      "inputs": { "bz": -8, "v": 510, "n": 14, "by": -3 },
+      "category": "operational",
+      "historical_analog": "starlink-feb-2022",
+      "pinned": true,
+      "provenance": "L1 values 2022-02-03 (Dst ≈ −66 nT; NRLMSIS underpredicted ρ@210-km by ~30%)."
+    },
+    {
+      "id": "fast-cir",
+      "label": "Fast coronal-hole stream",
+      "description": "High-speed stream from a recurrent coronal hole — fast wind, low density, weak/variable Bz. Common at the declining phase of a cycle.",
+      "inputs": { "bz": -6, "v": 750, "n": 3, "by": 4 },
+      "category": "operational",
+      "provenance": "Typical CIR/HSS trailing-edge values (low n, high v)."
+    }
+  ]
+}
