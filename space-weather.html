@@ -1532,15 +1532,15 @@ nav {
 <script type="importmap">
 {
     "imports": {
-        "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        "three":         "/js/vendor/three-0.160.0/three.module.js",
+        "three/addons/": "/js/vendor/three-0.160.0/jsm/"
     }
 }
 </script>
 <!-- perf-hints:start -->
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
-<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" crossorigin>
+<link rel="modulepreload" href="/js/vendor/three-0.160.0/three.module.js">
 <!-- perf-hints:end --><!-- ── NAV ─────────────────────────────────────────────────────────────────── -->
 <!-- ─── Nav (shared via nav.js) ──────────────────────────────── -->
 <link rel="stylesheet" href="js/nav-styles.css">
@@ -2802,13 +2802,16 @@ nav {
 import './js/live-status-bar.js';
 import { SpaceWeatherFeed }  from './js/swpc-feed.js';
 import { SohoFeed }          from './js/soho-feed.js';
-import { Heliosphere3D }     from './js/heliosphere3d.js';
+// Heliosphere3D / SpaceWeatherGlobe / SpaceWeatherHud / SdoComparePanel pull
+// in Three.js (off-origin CDN). They are NOT statically imported here: a
+// static import binds the whole module graph, so a single Three.js load
+// failure would abort this entire <script type="module"> — taking the NOAA
+// feed, the offline banner, and even the on-device VSOP87D orbit panel down
+// with it. They are lazy-loaded further below, AFTER the data plane is fully
+// wired, behind a try/catch so the 3D hero degrades on its own.
 import { EphemerisService }    from './js/horizons.js';
 import { SolarWindState }      from './js/solar-wind-state.js';
 import WindPipelineFeed         from './js/wind-pipeline-feed.js';
-import { SpaceWeatherGlobe }   from './js/space-weather-globe.js';
-import { SpaceWeatherHud }     from './js/space-weather-hud.js';
-import { SdoComparePanel }     from './js/sdo-compare-panel.js';
 import { HekFeed }             from './js/hek-feed.js';
 import { earthOrbitFull }       from './js/earth-orbit.js';
 import { akasofuEpsilon, substormIndex } from './js/solar-wind-magnetosphere.js';
@@ -2822,6 +2825,15 @@ import { ModelValidator } from './js/model-validation.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 const el = id => document.getElementById(id);
+
+// 3D-hero bindings, filled by the fault-tolerant lazy Three.js import below
+// (after the data plane is wired). Hoisted to module top so the data-plane
+// listeners that touch _globe / _helio read a defined `null` instead of a
+// ReferenceError while Three.js is still in flight (or never arrives).
+let Heliosphere3D, SpaceWeatherGlobe, SpaceWeatherHud, SdoComparePanel;
+let _helio = null;
+let _globe = null;
+let _threeOk = false;
 
 // Seed orbit panel immediately without waiting for ephemeris-ready
 try {
@@ -3207,12 +3219,19 @@ window.addEventListener('swpc-update', e => {
     const dsbAge  = el('dsb-age');
     if (banner) {
         banner.className = 'data-status-banner ' + (st === 'live' ? '' : st);
-        if (st === 'offline') {
-            dsbText.textContent = '⚠ NOAA live feed unavailable — showing last cached values. Retrying in 90 s.';
-            dsbAge.textContent  = d.lastUpdated ? 'Last data: ' + fmtTime(d.lastUpdated) + ' UTC' : '';
-        } else if (st === 'stale') {
-            dsbText.textContent = '⚠ Space weather data is stale (>5 min old) — network may be slow.';
-            dsbAge.textContent  = d.lastUpdated ? 'Last data: ' + fmtTime(d.lastUpdated) + ' UTC' : '';
+        if (st === 'offline' || st === 'stale') {
+            const fh      = d.feed_health || {};
+            const failed  = Array.isArray(fh.failed) && fh.failed.length
+                ? fh.failed.join(', ')
+                : 'NOAA SWPC';
+            const lastGood = fh.last_good_at ? new Date(fh.last_good_at) : null;
+            const ageMin   = lastGood ? Math.round((Date.now() - lastGood.getTime()) / 60000) : null;
+            const ageStr   = ageMin == null ? 'no successful update yet'
+                : ageMin < 1 ? 'last successful update <1 min ago'
+                : `last successful update ${ageMin} min ago`;
+            const verb = st === 'offline' ? 'unavailable' : 'delayed';
+            dsbText.textContent = `⚠ Live feed ${verb} (${failed}, ${ageStr}) — showing cached values.`;
+            dsbAge.textContent  = lastGood ? 'Last data: ' + fmtTime(lastGood) + ' UTC' : '';
         }
     }
 });
@@ -3601,13 +3620,39 @@ new EphemerisService().startLive(120);
 // Heliosphere3D._tickWind() for physically-correct distance-scaled wind rendering.
 new SolarWindState().start();
 
+// ── Lazy Three.js 3D modules (fault-isolated from the data plane) ────────────
+// Everything above this line — the NOAA/DONKI feed, every swpc-update /
+// earth-orbit-update / soho-update listener, the offline banner, and the
+// on-device VSOP87D orbit seed — is already wired and polling, with ZERO
+// dependency on Three.js. Only the optional 3D hero + magnetosphere globe
+// need Three. We import them dynamically here so a Three.js CDN failure
+// (outage, network policy, importmap edge case) degrades JUST the 3D views
+// instead of blanking every readout on the page. Top-level await is safe:
+// this is an entry module, nothing imports it, and the data plane has
+// already started above.
+try {
+    const [helioMod, globeMod, hudMod, sdoMod] = await Promise.all([
+        import('./js/heliosphere3d.js'),
+        import('./js/space-weather-globe.js'),
+        import('./js/space-weather-hud.js'),
+        import('./js/sdo-compare-panel.js'),
+    ]);
+    Heliosphere3D   = helioMod.Heliosphere3D;
+    SpaceWeatherGlobe = globeMod.SpaceWeatherGlobe;
+    SpaceWeatherHud = hudMod.SpaceWeatherHud;
+    SdoComparePanel = sdoMod.SdoComparePanel;
+    _threeOk = true;
+} catch (err) {
+    console.warn('[space-weather] 3D hero unavailable — Three.js failed to load. '
+        + 'Data plane is unaffected and continues live.', err?.message ?? err);
+}
+
 // ── 3D Heliosphere hero (inner solar system, Three.js) ───────────────────────
 // Heliosphere3D: 3D Parker spiral solar wind, real ephemeris planetary orbits,
 // Earth magnetosphere via MagnetosphereEngine, CME shells, flare bursts.
 // Listens to swpc-update + ephemeris-ready events automatically.
 const helioCanvas = document.getElementById('helio-canvas');
-let _helio = null;
-if (helioCanvas) {
+if (helioCanvas && _threeOk) {
     _helio = new Heliosphere3D(helioCanvas).start();
     // Expose globally so the bloom slider can call setBloom()
     window._helio3d = _helio;
@@ -3995,10 +4040,9 @@ window.addEventListener('helio-time-update', _updatePlanetTable);
 // ── 3D Magnetosphere Globe ────────────────────────────────────────────────────
 // SpaceWeatherGlobe (space-weather-globe.js) — Three.js Earth + magnetosphere.
 // Receives live updates via swpc-update; layer toggles wired to buttons below.
-let _globe = null;
 {
     const globeCanvas = el('sw-globe-canvas');
-    if (globeCanvas) {
+    if (globeCanvas && _threeOk) {
         _globe = new SpaceWeatherGlobe(globeCanvas).start();
 
         // Diagnostic HUD overlay — updates at 4 Hz from globe internal state
