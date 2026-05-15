@@ -4044,6 +4044,7 @@ window.addEventListener('helio-time-update', _updatePlanetTable);
     const globeCanvas = el('sw-globe-canvas');
     if (globeCanvas && _threeOk) {
         _globe = new SpaceWeatherGlobe(globeCanvas).start();
+        window.__swglobe = _globe;   // devtools / QA introspection (cf. window._helio3d)
 
         // Diagnostic HUD overlay — updates at 4 Hz from globe internal state
         const hudEl = document.getElementById('sw-hud');

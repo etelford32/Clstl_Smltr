@@ -315,6 +315,23 @@ export class SpaceWeatherGlobe {
         return (this._sceneSunEarth * v_kms * this._timeCompression) / this._kmPerAU;
     }
 
+    /**
+     * Story 1.1 — map measured L1 proton density (n/cc) to the number of
+     * packets actually in flight. Quiet wind ≈ 3 n/cc → ~40 % of the pool;
+     * a dense CIR / sheath ≈ 20+ n/cc → the full pool. Packets above the
+     * active cut are parked inside the Sun (occluded by the bright disk) so
+     * the change reads as *more particles in the stream*, not just a
+     * brighter stream — exactly the acceptance criterion. Cheap: it only
+     * moves an integer cut, the per-frame loop honours it.
+     */
+    _applyWindDensity() {
+        const N = this._windVel ? this._windVel.length : 0;
+        if (!N) return;
+        const n = this._windDensity ?? 5;
+        const f = 0.40 + 0.60 * Math.max(0, Math.min(1, (n - 2) / 14));
+        this._windActive = Math.max(1, Math.round(N * f));
+    }
+
     // ── Construction ──────────────────────────────────────────────────────────
 
     _buildRenderer(canvas) {
@@ -546,12 +563,19 @@ export class SpaceWeatherGlobe {
     }
 
     _buildWindParticles() {
-        const N   = 2000;
-        const pos = new Float32Array(N * 3);
-        const col = new Float32Array(N * 3);
+        // 4000 packets — within the sprint's 3000–5000 budget. The visible
+        // population in flight is gated by `_windActive` (density-driven),
+        // not by N, so a quiet sun shows a thin stream and a dense one a
+        // thick one *with the same buffer*.
+        const N   = 4000;
+        const pos  = new Float32Array(N * 3);
+        const col  = new Float32Array(N * 3);
+        const base = new Float32Array(N * 3);     // pre-Bz base RGB (for recolour)
         const vel = new Float32Array(N);          // km/s assigned to this packet
         const src = new Int16Array(N);            // -1 = ambient stream, ≥0 = AR index
         const age = new Float32Array(N);          // viewing-seconds since spawn
+        this._windBase   = base;
+        this._windActive = N;                     // set by _applyWindDensity()
         for (let i = 0; i < N; i++) {
             vel[i] = 350 + Math.random() * 250;   // ambient slow stream
             src[i] = -1;
@@ -590,10 +614,45 @@ export class SpaceWeatherGlobe {
         pos[i*3]   = this._sunSceneX + nx * sunR;
         pos[i*3+1] = ny * sunR;
         pos[i*3+2] = nz * sunR;
-        // Pale blue ambient slow-stream colour
-        col[i*3]   = 0.38;
-        col[i*3+1] = 0.74;
-        col[i*3+2] = 1.00;
+        // Pale blue ambient slow-stream base colour (pre-Bz tint).
+        this._setWindColor(col, i, 0.38, 0.74, 1.00);
+    }
+
+    /**
+     * Write a packet's base RGB into `_windBase` and the displayed colour
+     * into `col`, lerping the base toward storm-red by the live southward-Bz
+     * fraction:  s = clamp(−Bz / 20, 0, 1).  Bz ≥ 0 → untinted (neutral);
+     * Bz = −20 nT → fully saturated red.  This is the data→appearance hook
+     * the sprint asks for; it's centralised here so every spawn path and the
+     * live `_recolorWind()` pass share one mapping.
+     */
+    _setWindColor(col, i, r, g, b) {
+        const base = this._windBase;
+        if (base) { base[i*3] = r; base[i*3+1] = g; base[i*3+2] = b; }
+        const s  = Math.max(0, Math.min(1, -(this._windBz ?? 0) / 20));
+        const RR = 1.00, RG = 0.16, RB = 0.12;          // storm-red target
+        col[i*3]   = r + (RR - r) * s;
+        col[i*3+1] = g + (RG - g) * s;
+        col[i*3+2] = b + (RB - b) * s;
+    }
+
+    /** Re-lerp every live packet's colour from its stored base after a Bz
+     *  change, so the stream tints toward red within one update tick rather
+     *  than waiting for the whole population to recycle. */
+    _recolorWind() {
+        if (!this._windPts || !this._windBase) return;
+        const col  = this._windPts.geometry.attributes.color.array;
+        const base = this._windBase;
+        const s  = Math.max(0, Math.min(1, -(this._windBz ?? 0) / 20));
+        const RR = 1.00, RG = 0.16, RB = 0.12;
+        const n = this._windVel.length;
+        for (let i = 0; i < n; i++) {
+            const br = base[i*3], bg = base[i*3+1], bb = base[i*3+2];
+            col[i*3]   = br + (RR - br) * s;
+            col[i*3+1] = bg + (RG - bg) * s;
+            col[i*3+2] = bb + (RB - bb) * s;
+        }
+        this._windPts.geometry.attributes.color.needsUpdate = true;
     }
 
     /** AR-anchored wind packet: launches from active-region surface point. */
@@ -607,16 +666,10 @@ export class SpaceWeatherGlobe {
         pos[i*3]   = ox;
         pos[i*3+1] = oy;
         pos[i*3+2] = oz;
-        // Complex ARs eject hotter / faster plasma → orange-red
-        if (stream.complex) {
-            col[i*3]   = 1.00;
-            col[i*3+1] = 0.55;
-            col[i*3+2] = 0.18;
-        } else {
-            col[i*3]   = 1.00;
-            col[i*3+1] = 0.85;
-            col[i*3+2] = 0.45;
-        }
+        // Complex ARs eject hotter / faster plasma → orange-red base;
+        // simple ARs a warmer yellow. Bz tint applied in _setWindColor.
+        if (stream.complex) this._setWindColor(col, i, 1.00, 0.55, 0.18);
+        else                this._setWindColor(col, i, 1.00, 0.85, 0.45);
     }
 
     // ── Solar magnetosphere (heliospheric current sheet + dipole field) ──────
@@ -1914,12 +1967,32 @@ export class SpaceWeatherGlobe {
         const kp  = state.kp ?? 2;
         const bz  = sw.bz    ?? 0;
         const spd = sw.speed ?? 400;
+        const dens = sw.density;
         // Cache for HUD timeline strip (poll-only readers)
         this._lastKp = kp;
         this._lastBz = bz;
 
+        // ── Story 1.1: live L1 coupling for the particle stream ────────────
+        // Degraded mode: Sprint-0 surfaces real feed health on the state.
+        // When the feed is stale/offline we keep the LAST known wind values
+        // (don't freeze or vanish) but flag degraded so the stream drifts a
+        // touch slower and breathes a slow pulse — a visible "is this live?"
+        // tell without a UI control.
+        const fstatus   = state.status ?? state.meta?.status ?? 'live';
+        this._windDegraded = fstatus !== 'live';
+        // Density only updates when the plasma feed actually delivered a
+        // value, so a dropped tick can't collapse the stream to nothing.
+        if (Number.isFinite(dens) && dens > 0) this._windDensity = dens;
+        const prevBz = this._windBz ?? 0;
+        this._windBz = bz;
+
         this._windSpeedNorm = Math.max(0, Math.min(1, (spd - 250) / 650));
         this._windSpeedKms  = Math.max(200, Math.min(1200, spd));
+
+        // More measured protons → more packets in flight (not just brighter).
+        this._applyWindDensity();
+        // Bz moved enough to matter (≥1 nT) → re-tint live packets now.
+        if (Math.abs(prevBz - bz) > 1.0) this._recolorWind();
 
         // Rebuild aurora tori when Kp shifts meaningfully
         if (Math.abs(kp - this._auroraKp) > 0.4) this._buildAurora(kp);
@@ -1937,9 +2010,12 @@ export class SpaceWeatherGlobe {
         this._earthU.u_aurora_power.value = Math.min(1, kp / 9);
 
         // Wind particle base opacity scales with speed (per-particle colour set
-        // by spawn function — ambient blue, AR yellow/orange).
+        // by spawn function — ambient blue, AR yellow/orange). Stored as the
+        // base so the degraded-mode pulse can breathe around it in _animate
+        // without losing the speed coupling.
+        this._windOpacityBase = 0.45 + this._windSpeedNorm * 0.35;
         const wMat = this._windPts.material;
-        wMat.opacity = 0.45 + this._windSpeedNorm * 0.35;
+        if (!this._windDegraded) wMat.opacity = this._windOpacityBase;
 
         // Magnetosphere geometry update
         this._magEngine.update(state);
@@ -2782,12 +2858,31 @@ export class SpaceWeatherGlobe {
         // already (sceneSpd × SCENE_TO_KM ÷ _timeCompression = vel[i] km/s),
         // so for the spiral we just need ψ(r_real, v_real_kms).
 
+        // Density gate (Story 1.1): packets at/after the active cut are
+        // parked inside the Sun so a low-density wind reads as a *thinner*
+        // stream. age[i] = -1 marks "parked"; a reactivated packet (cut grew)
+        // is respawned fresh at the source.
+        const active = this._windActive ?? N;
+        // Degraded feed → drift ~12 % slower (visible "stale" tell).
+        const degradeMul = this._windDegraded ? 0.88 : 1.0;
+
         for (let i = 0; i < N; i++) {
+            if (i >= active) {
+                if (age[i] !== -1) {
+                    age[i] = -1;
+                    pos[i*3] = sunX; pos[i*3+1] = 0; pos[i*3+2] = 0;
+                }
+                continue;
+            }
+            if (age[i] === -1) {            // reactivated — bring it back live
+                this._respawnWind(pos, col, i, vel, src, age, 1);
+            }
+
             // Ageing
             age[i] += dt;
 
             // Per-particle scene velocity (units/s) from km/s
-            const sceneSpd = this._windSceneSpeed(vel[i]);
+            const sceneSpd = this._windSceneSpeed(vel[i]) * degradeMul;
 
             const x = pos[i*3], y = pos[i*3+1], z = pos[i*3+2];
 
@@ -2905,8 +3000,11 @@ export class SpaceWeatherGlobe {
             this._spawnArWind(pos, col, i, stream);
         } else {
             src[i] = -1;
-            // Slow ambient stream: 300–500 km/s
-            vel[i] = 300 + Math.random() * 200;
+            // Ambient stream tracks the LIVE measured bulk speed (±12 %
+            // spread for texture) instead of a fixed 300–500 band — this is
+            // what makes the whole stream visibly speed up/slow down and the
+            // Sun→L1 transit shorten/lengthen with the top-bar Wind value.
+            vel[i] = (this._windSpeedKms || 400) * (0.88 + Math.random() * 0.24);
             this._spawnAmbientWind(pos, col, i);
         }
     }
@@ -2997,6 +3095,15 @@ export class SpaceWeatherGlobe {
         // packets), bow-shock impact pulses, and HCS rotation.
         prof.measure('windStep',     () => this._stepWind(dt));
         prof.measure('impactPulses', () => this._stepImpactPulses(dt));
+        // Degraded-feed tell: breathe the stream opacity slowly (~0.15 Hz)
+        // around its speed-derived base so a stale/offline feed is visibly
+        // "not quite live" without freezing or hiding the stream.
+        if (this._windPts) {
+            const base = this._windOpacityBase ?? 0.62;
+            this._windPts.material.opacity = this._windDegraded
+                ? base * (0.62 + 0.38 * (0.5 + 0.5 * Math.sin(t * 0.95)))
+                : base;
+        }
         if (this._hcsMesh) this._hcsMesh.rotation.y += dt * 0.02;
 
         // AR twist accumulator → kink eruption → CME injection
