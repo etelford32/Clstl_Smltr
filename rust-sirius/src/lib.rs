@@ -120,6 +120,99 @@ const V_INF_A: f64 = 6.0e7;
 const BETA_WIND: f64 = 0.8;
 
 // ═══════════════════════════════════════════════════════════════════
+// Runtime simulation config — "Experiment Lab"
+//
+// Everything the front-end can tweak lives here. Defaults reproduce the
+// real Sirius system exactly (the literature constants above); the user
+// can then push the knobs into hypothetical regimes (heavier companion,
+// faster wind, Roche-lobe overflow, neutron-star / black-hole remnant)
+// to *explore the physics*, which is the whole point of the lab.
+//
+// Held in a thread_local (WASM is single-threaded) so the physics
+// functions can read it without threading a param through every call.
+// `a` (semi-major axis) is held FIXED at the observed value — changing
+// the masses then changes the period via Kepler-III rather than warping
+// the orbit you're looking at.
+// ═══════════════════════════════════════════════════════════════════
+
+#[derive(Clone)]
+struct SimConfig {
+    m_a: f64,        // Sirius A mass        [M☉]
+    m_b: f64,        // companion mass       [M☉]
+    ecc: f64,        // orbital eccentricity
+    mdot_a: f64,     // Sirius A mass-loss   [M☉ yr⁻¹]
+    v_inf: f64,      // wind terminal speed  [cm s⁻¹]
+    r_b_rsun: f64,   // companion radius     [R☉]  (compactness: WD≈0.0084, NS≈2e-5, BH→r_s)
+    roche_fill: f64, // donor radius / Roche-lobe radius (≥1 ⇒ overflow)
+    gw_exagg: f64,   // visual-only strain multiplier (does not affect dynamics)
+}
+
+impl Default for SimConfig {
+    fn default() -> Self {
+        SimConfig {
+            m_a:        M_A_SUN,
+            m_b:        M_B_SUN,
+            ecc:        E_ORB,
+            mdot_a:     MDOT_A_MSUN_YR,
+            v_inf:      V_INF_A,
+            r_b_rsun:   R_B_SUN,
+            roche_fill: R_A_SUN / (roche_radius_over_a(M_A_SUN / M_B_SUN) * A_REL_AU * AU_CM / RSUN),
+            gw_exagg:   1.0,
+        }
+    }
+}
+
+thread_local! {
+    static SIM: std::cell::RefCell<SimConfig> = std::cell::RefCell::new(SimConfig::default());
+}
+
+#[inline]
+fn cfg() -> SimConfig { SIM.with(|c| c.borrow().clone()) }
+
+/// Push a new experiment configuration. Any non-finite or out-of-range
+/// argument falls back to the field's safe value, so the front-end can
+/// be sloppy. Returns 1 on success.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn configure(
+    m_a: f64, m_b: f64, ecc: f64,
+    mdot_a: f64, v_inf_kms: f64, r_b_rsun: f64,
+    roche_fill: f64, gw_exagg: f64,
+) -> u32 {
+    let clamp = |v: f64, lo: f64, hi: f64, dflt: f64| {
+        if v.is_finite() && v >= lo && v <= hi { v } else { dflt }
+    };
+    SIM.with(|c| {
+        let mut c = c.borrow_mut();
+        c.m_a        = clamp(m_a,        0.05, 150.0,  M_A_SUN);
+        c.m_b        = clamp(m_b,        0.05, 150.0,  M_B_SUN);
+        c.ecc        = clamp(ecc,        0.0,  0.95,   E_ORB);
+        c.mdot_a     = clamp(mdot_a,     1e-16, 1e-4,  MDOT_A_MSUN_YR);
+        c.v_inf      = clamp(v_inf_kms,  10.0, 5000.0, V_INF_A / 1e5) * 1e5;
+        c.r_b_rsun   = clamp(r_b_rsun,   1e-7, 5.0,    R_B_SUN);
+        c.roche_fill = clamp(roche_fill, 0.0,  1.4,    0.0022);
+        c.gw_exagg   = clamp(gw_exagg,   1.0,  1e30,   1.0);
+    });
+    1
+}
+
+/// Reset every knob to the real-Sirius literature values.
+#[wasm_bindgen]
+pub fn reset_config() -> u32 {
+    SIM.with(|c| *c.borrow_mut() = SimConfig::default());
+    1
+}
+
+/// Read the live config back: [m_a, m_b, ecc, mdot_a, v_inf_kms,
+/// r_b_rsun, roche_fill, gw_exagg]. Lets the UI restore slider state
+/// and the lensing layer read the companion mass.
+#[wasm_bindgen]
+pub fn get_config() -> Vec<f64> {
+    let c = cfg();
+    vec![c.m_a, c.m_b, c.ecc, c.mdot_a, c.v_inf / 1e5, c.r_b_rsun, c.roche_fill, c.gw_exagg]
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // Small types
 // ═══════════════════════════════════════════════════════════════════
 
@@ -302,14 +395,14 @@ fn gw_strain(
 fn wind_velocity(r_cm: f64) -> f64 {
     let r_a = R_A_SUN * RSUN;
     if r_cm <= r_a { 0.0 } else {
-        V_INF_A * (1.0 - r_a / r_cm).powf(BETA_WIND)
+        cfg().v_inf * (1.0 - r_a / r_cm).powf(BETA_WIND)
     }
 }
 
 fn wind_density(r_cm: f64) -> f64 {
     let v = wind_velocity(r_cm);
     if v <= 0.0 { return 0.0; }
-    let mdot = MDOT_A_MSUN_YR * MSUN / YR_S;     // [g s⁻¹]
+    let mdot = cfg().mdot_a * MSUN / YR_S;        // [g s⁻¹]
     mdot / (4.0 * PI * r_cm * r_cm * v)
 }
 
@@ -317,17 +410,22 @@ fn bhl_rate(r_cm: f64, v_orb_cm_s: f64) -> (f64, f64, f64) {
     let v_w = wind_velocity(r_cm);
     let v_rel = (v_w * v_w + v_orb_cm_s * v_orb_cm_s).sqrt();
     let cs = 1.5e6;                                          // 15 km/s in wind plasma
-    let m_b = M_B_SUN * MSUN;
+    let m_b = cfg().m_b * MSUN;
     let r_acc = 2.0 * G_CGS * m_b / (v_rel * v_rel + cs * cs);
     let rho = wind_density(r_cm);
     let mdot_acc = PI * r_acc * r_acc * rho * v_rel;
     (mdot_acc, r_acc, v_rel)
 }
 
+/// Free-fall speed onto the companion surface. For a black-hole preset
+/// (r_b_rsun driven below the Schwarzschild radius) we cap at 0.9c so
+/// the Newtonian formula doesn't run away — a crude but bounded proxy.
 fn free_fall_velocity_b() -> f64 {
-    let m_b = M_B_SUN * MSUN;
-    let r_b = R_B_SUN * RSUN;
-    (2.0 * G_CGS * m_b / r_b).sqrt()
+    let c = cfg();
+    let m_b = c.m_b * MSUN;
+    let r_b = (c.r_b_rsun * RSUN).max(1.0);
+    let v = (2.0 * G_CGS * m_b / r_b).sqrt();
+    v.min(0.9 * C_CGS)
 }
 
 fn shock_temperature() -> f64 {
@@ -339,6 +437,16 @@ fn shock_temperature() -> f64 {
 fn accretion_luminosity(mdot_acc_g_s: f64) -> f64 {
     let v_ff = free_fall_velocity_b();
     0.5 * mdot_acc_g_s * v_ff * v_ff
+}
+
+/// Distance of the inner Lagrange point L1 from the donor (Sirius A)
+/// centre, as a fraction of the instantaneous separation. Frank, King &
+/// Raine "Accretion Power in Astrophysics" fit, valid 0.1 < q < 10:
+///   x_L1 / a = 0.500 − 0.227 log10(M_accretor / M_donor)
+fn l1_fraction_from_a() -> f64 {
+    let c = cfg();
+    let ratio = (c.m_b / c.m_a).clamp(0.01, 100.0);
+    (0.500 - 0.227 * ratio.log10()).clamp(0.05, 0.95)
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -481,26 +589,29 @@ struct OrbitState {
 }
 
 fn evolve_orbit(time_yr: f64) -> OrbitState {
-    let m_a = M_A_SUN * MSUN;
-    let m_b = M_B_SUN * MSUN;
+    let c = cfg();
+    let m_a = c.m_a * MSUN;
+    let m_b = c.m_b * MSUN;
+    let ecc = c.ecc;
     let m_tot = m_a + m_b;
     let a_cm = A_REL_AU * AU_CM;
 
-    // mean motion + mean anomaly from epoch of periastron
+    // mean motion + mean anomaly from epoch of periastron. Period floats
+    // with M_tot via Kepler-III (a is held at the observed value).
     let n_rad_s = (G_CGS * m_tot / a_cm.powi(3)).sqrt();
     let dt_s    = (time_yr - T_PERI_YR) * YR_S;
     let mean_anom = (n_rad_s * dt_s).rem_euclid(TWOPI);
 
-    let e_anom = kepler_solve(mean_anom, E_ORB);
-    let nu     = true_anomaly(e_anom, E_ORB);
+    let e_anom = kepler_solve(mean_anom, ecc);
+    let nu     = true_anomaly(e_anom, ecc);
 
     // 1PN precession: argument of periastron advances secularly
-    let domega_dt = schwarzschild_precession_rate(m_tot, a_cm, E_ORB);
+    let domega_dt = schwarzschild_precession_rate(m_tot, a_cm, ecc);
     let omega_advance = domega_dt * dt_s;
     let omega_peri = OMEGA_PERI_DEG * DEG2RAD + omega_advance;
 
     // separation [AU] and vis-viva relative speed [cm/s]
-    let r_au = A_REL_AU * (1.0 - E_ORB * e_anom.cos());
+    let r_au = A_REL_AU * (1.0 - ecc * e_anom.cos());
     let v_rel = (G_CGS * m_tot * (2.0 / (r_au * AU_CM) - 1.0 / a_cm)).sqrt();
 
     // Position in orbital plane (perifocal frame): x→periastron, y→90°
@@ -567,28 +678,40 @@ fn evolve_orbit(time_yr: f64) -> OrbitState {
 ///   [20   ]  shock temperature T_s [K]
 ///   [21   ]  v_ff at Sirius B surface [km/s]
 ///   [22   ]  Roche-lobe radius around Sirius A at this r [R☉]
-///   [23   ]  Sirius-A Roche-lobe fill fraction (R_A / R_L)
+///   [23   ]  Sirius-A Roche-lobe fill fraction (configured)
+///   [24   ]  orbital period now [yr]   (Kepler-III w/ configured masses)
+///   [25   ]  companion mass [M☉]
+///   [26   ]  L1 distance from Sirius A [AU]
+///   [27   ]  overflow active (1.0 = Roche-lobe overflow, else 0.0)
+///   [28   ]  4·G·M_B/c²  [AU]  — gravitational-lens deflection scale
+///   [29   ]  GW exaggeration factor in effect (visual only)
 #[wasm_bindgen]
 pub fn snapshot(time_yr: f64) -> Vec<f64> {
     let s = evolve_orbit(time_yr);
+    let c = cfg();
 
-    let m_a = M_A_SUN * MSUN;
-    let m_b = M_B_SUN * MSUN;
+    let m_a = c.m_a * MSUN;
+    let m_b = c.m_b * MSUN;
+    let ecc = c.ecc;
     let m_tot = m_a + m_b;
     let mu = m_a * m_b / m_tot;
     let a_cm = A_REL_AU * AU_CM;
     let d_cm = D_PC * PC_CM;
 
-    let l_gw = gw_luminosity(m_a, m_b, a_cm, E_ORB);
-    let (h_p, h_x) = gw_strain(
-        mu, m_tot, a_cm, E_ORB,
+    let period_yr = TWOPI * (a_cm.powi(3) / (G_CGS * m_tot)).sqrt() / YR_S;
+
+    let l_gw = gw_luminosity(m_a, m_b, a_cm, ecc) * c.gw_exagg;
+    let (mut h_p, mut h_x) = gw_strain(
+        mu, m_tot, a_cm, ecc,
         s.true_anom,
         OMEGA_PERI_DEG * DEG2RAD + s.omega_advance,
         INCL_DEG * DEG2RAD,
         d_cm,
     );
-    let f_gw_peak = 2.0 / (P_ORB_YR * YR_S);   // n=2 quadrupole harmonic
-    let t_gw_yr = gw_decay_time(m_a, m_b, a_cm, E_ORB) / YR_S;
+    h_p *= c.gw_exagg;
+    h_x *= c.gw_exagg;
+    let f_gw_peak = 2.0 / (period_yr * YR_S);   // n=2 quadrupole harmonic
+    let t_gw_yr = gw_decay_time(m_a, m_b, a_cm, ecc) / YR_S;
 
     // BHL
     let (mdot_acc, r_acc, _v_rel_w) = bhl_rate(s.r_cm, s.v_rel_cm_s);
@@ -597,10 +720,13 @@ pub fn snapshot(time_yr: f64) -> Vec<f64> {
     let v_ff = free_fall_velocity_b();
 
     // Roche lobe: q = M_A/M_B, this gives R_L of Sirius A
-    let q_a = M_A_SUN / M_B_SUN;
+    let q_a = c.m_a / c.m_b;
     let rl_a_cm = roche_radius_over_a(q_a) * s.r_cm;
     let rl_a_rsun = rl_a_cm / RSUN;
-    let fill = R_A_SUN / rl_a_rsun;
+    let fill = c.roche_fill;
+    let overflow = if fill >= 1.0 { 1.0 } else { 0.0 };
+    let l1_au = l1_fraction_from_a() * (s.r_cm / AU_CM);
+    let lens_scale_au = 4.0 * G_CGS * m_b / (C_CGS * C_CGS) / AU_CM;
 
     let omega_arcsec = s.omega_advance.to_degrees() * 3600.0;
 
@@ -625,6 +751,12 @@ pub fn snapshot(time_yr: f64) -> Vec<f64> {
         v_ff / 1.0e5,
         rl_a_rsun,
         fill,
+        period_yr,
+        c.m_b,
+        l1_au,
+        overflow,
+        lens_scale_au,
+        c.gw_exagg,
     ]
 }
 
@@ -792,7 +924,6 @@ pub fn constants() -> Vec<f64> {
 
 const G_AU: f64 = 4.0 * PI * PI;                // AU³ M☉⁻¹ yr⁻²  (= 4π²)
 const KMS_PER_AU_YR: f64 = 4.740_57;            // 1 AU/yr in km/s
-const WIND_AU_YR: f64 = 600.0 / KMS_PER_AU_YR;  // ≈ 126.6 AU/yr
 const R_A_AU: f64 = 1.711 * 6.957e10 / 1.495_978_707e13; // Sirius A radius in AU
 
 /// Wake particle simulator state (held in WASM TLS).
@@ -830,23 +961,79 @@ impl WakeSim {
         (s * phi.cos(), s * phi.sin(), u)
     }
 
-    /// Launch (or re-launch) a particle from Sirius A's surface.
-    fn spawn(&mut self, i: usize, r_a: (f64, f64, f64)) {
-        let (ux, uy, uz) = self.rand_unit();
-        // Spawn at 4 × R_A to be safely outside the visible photosphere mesh
-        // and avoid initial gravitational sink. BHL geometry only depends on
-        // the v_wind/v_orb ratio, not the absolute spawn radius.
-        let r_spawn = 4.0 * R_A_AU;
-        let px = r_a.0 + r_spawn * ux;
-        let py = r_a.1 + r_spawn * uy;
-        let pz = r_a.2 + r_spawn * uz;
-        let v = WIND_AU_YR;   // already in AU/yr
+    /// Launch (or re-launch) a particle.
+    ///
+    /// Two regimes, selected by the configured Roche-fill factor:
+    ///
+    ///  • DETACHED (fill < 1):  isotropic stellar wind from Sirius A's
+    ///    surface at v = v_∞ (the real-Sirius case).
+    ///
+    ///  • OVERFLOW (fill ≥ 1):  a focused ballistic stream launched from
+    ///    the inner Lagrange point L1, co-moving with the companion plus
+    ///    a gentle push through L1 and a tangential kick in the orbital
+    ///    plane. Gravity then whips it into an accretion disk around the
+    ///    companion — the classic Roche-lobe-overflow → stream → disk
+    ///    morphology (Lubow & Shu 1975; Frank, King & Raine).
+    ///
+    /// `v_b` is the companion's barycentric velocity (AU/yr) — used so
+    /// the overflow stream carries the right orbital angular momentum.
+    fn spawn(&mut self, i: usize,
+             r_a: (f64, f64, f64), r_b: (f64, f64, f64), v_b: (f64, f64, f64)) {
+        let overflow = cfg().roche_fill >= 1.0;
+        let (px, py, pz, vx, vy, vz);
+
+        if overflow {
+            // separation axis A → B
+            let sx = r_b.0 - r_a.0; let sy = r_b.1 - r_a.1; let sz = r_b.2 - r_a.2;
+            let sn = (sx*sx + sy*sy + sz*sz).sqrt().max(1e-9);
+            let (shx, shy, shz) = (sx/sn, sy/sn, sz/sn);
+            let l1f = l1_fraction_from_a();
+            // L1 point + small jitter so the stream has a finite width
+            let j = 0.012;
+            let j1 = (self.rand01() - 0.5) * j;
+            let j2 = (self.rand01() - 0.5) * j;
+            let j3 = (self.rand01() - 0.5) * j;
+            px = r_a.0 + l1f * sx + j1;
+            py = r_a.1 + l1f * sy + j2;
+            pz = r_a.2 + l1f * sz + j3;
+            // tangential (disk) direction = (L̂ × ŝ), L̂ from r_b × v_b
+            let lx = r_b.1*v_b.2 - r_b.2*v_b.1;
+            let ly = r_b.2*v_b.0 - r_b.0*v_b.2;
+            let lz = r_b.0*v_b.1 - r_b.1*v_b.0;
+            let ln = (lx*lx + ly*ly + lz*lz).sqrt();
+            let (lhx, lhy, lhz) = if ln > 1e-9 { (lx/ln, ly/ln, lz/ln) } else { (0.0, 0.0, 1.0) };
+            let tx = lhy*shz - lhz*shy;
+            let ty = lhz*shx - lhx*shz;
+            let tz = lhx*shy - lhy*shx;
+            // Stream leaves L1 near the local sound speed with the modest
+            // angular momentum set by binary corotation. Keeping v_circ
+            // small gives a realistic circularisation radius (a fraction
+            // of the L1–B distance) → a tight accretion disk rather than a
+            // huge unbound ring (Lubow & Shu 1975; Frank, King & Raine §4).
+            let v_push = 5.0 / KMS_PER_AU_YR;     // ~5 km/s through L1 toward B
+            let v_circ = 3.0 / KMS_PER_AU_YR;     // small tangential → tight disk
+            vx = v_b.0 + v_push*shx + v_circ*tx;
+            vy = v_b.1 + v_push*shy + v_circ*ty;
+            vz = v_b.2 + v_push*shz + v_circ*tz;
+        } else {
+            let (ux, uy, uz) = self.rand_unit();
+            // Spawn at 4 × R_A to clear the photosphere mesh and avoid the
+            // initial gravitational sink. BHL geometry depends only on the
+            // v_wind/v_orb ratio, not the absolute spawn radius.
+            let r_spawn = 4.0 * R_A_AU;
+            px = r_a.0 + r_spawn * ux;
+            py = r_a.1 + r_spawn * uy;
+            pz = r_a.2 + r_spawn * uz;
+            let v = cfg().v_inf / (KMS_PER_AU_YR * 1.0e5); // cm/s → km/s → AU/yr
+            vx = v * ux; vy = v * uy; vz = v * uz;
+        }
+
         self.pos[3*i  ] = px as f32;
         self.pos[3*i+1] = py as f32;
         self.pos[3*i+2] = pz as f32;
-        self.vel[3*i  ] = (v * ux) as f32;
-        self.vel[3*i+1] = (v * uy) as f32;
-        self.vel[3*i+2] = (v * uz) as f32;
+        self.vel[3*i  ] = vx as f32;
+        self.vel[3*i+1] = vy as f32;
+        self.vel[3*i+2] = vz as f32;
         self.age[i] = 0.0;
         self.state[i] = 0;
     }
@@ -856,13 +1043,31 @@ thread_local! {
     static WAKE: std::cell::RefCell<WakeSim> = std::cell::RefCell::new(WakeSim::empty());
 }
 
-/// Allocate `n` wake particles and seed them from Sirius A's surface
-/// at simulation epoch `time_yr`. Returns the actual count.
+/// Companion (B) barycentric position & velocity at `time_yr`,
+/// velocity by central finite difference. Returns
+/// ((bx,by,bz) AU, (vx,vy,vz) AU/yr) and the donor (A) position.
+fn ab_state(time_yr: f64) -> ((f64,f64,f64),(f64,f64,f64),(f64,f64,f64)) {
+    let h = 1.0e-3;                       // yr
+    let s0 = evolve_orbit(time_yr);
+    let sp = evolve_orbit(time_yr + h);
+    let sm = evolve_orbit(time_yr - h);
+    let r_a = (s0.pa.x, s0.pa.y, s0.pa.z);
+    let r_b = (s0.pb.x, s0.pb.y, s0.pb.z);
+    let v_b = (
+        (sp.pb.x - sm.pb.x) / (2.0 * h),
+        (sp.pb.y - sm.pb.y) / (2.0 * h),
+        (sp.pb.z - sm.pb.z) / (2.0 * h),
+    );
+    (r_a, r_b, v_b)
+}
+
+/// Allocate `n` wake particles and seed them at simulation epoch
+/// `time_yr` (wind from Sirius A, or an L1 stream if Roche overflow is
+/// configured). Returns the actual count.
 #[wasm_bindgen]
 pub fn wake_init(n: u32, time_yr: f64) -> u32 {
     let n = n as usize;
-    let snap = evolve_orbit(time_yr);
-    let r_a = (snap.pa.x, snap.pa.y, snap.pa.z);
+    let (r_a, r_b, v_b) = ab_state(time_yr);
     WAKE.with(|w| {
         let mut w = w.borrow_mut();
         w.n = n;
@@ -872,7 +1077,7 @@ pub fn wake_init(n: u32, time_yr: f64) -> u32 {
         w.state.resize(n, 0);
         w.capture_count = 0;
         for i in 0..n {
-            w.spawn(i, r_a);
+            w.spawn(i, r_a, r_b, v_b);
             // Pre-stagger the age so the wake fills up smoothly instead of
             // arriving as a single shell.
             let age = w.rand01() as f32 * 4.0;
@@ -895,24 +1100,23 @@ pub fn wake_init(n: u32, time_yr: f64) -> u32 {
 /// Returns the cumulative capture count.
 #[wasm_bindgen]
 pub fn wake_step(dt_yr: f64, time_yr: f64, n_substeps: u32) -> u32 {
-    let snap = evolve_orbit(time_yr);
-    let r_a = (snap.pa.x, snap.pa.y, snap.pa.z);
-    let r_b = (snap.pb.x, snap.pb.y, snap.pb.z);
+    let (r_a, r_b, v_b) = ab_state(time_yr);
+    let c = cfg();
+    let overflow = c.roche_fill >= 1.0;
     let n_sub = n_substeps.max(1) as usize;
     let dt_sub = (dt_yr / n_sub as f64) as f32;
 
-    // Visualization capture radius (decoupled from the physical R_acc that
-    // snapshot() reports). The true Bondi radius R_acc ≈ 2GM_B/v_∞² ≈
-    // 0.005 AU is invisibly small at the orbit scale; even a 0.18 AU
-    // sphere captures only ~10⁻⁵ of an isotropic shell, so in a 4000-
-    // particle Monte-Carlo the user sees zero hits per session. We
-    // therefore use 0.5 AU here so BHL accretion fires visibly. The
-    // wake morphology (the Mach-cone shape) is geometrically unchanged.
-    let r_capture: f32 = 0.5;      // AU
+    // Visualization capture radius (decoupled from the physical R_acc).
+    // The true Bondi radius is invisibly small, so wind mode uses 0.5 AU
+    // so BHL captures fire visibly. In Roche-overflow mode we shrink it
+    // to 0.10 AU so the dense L1 stream can wrap into a visible accretion
+    // disk before being swallowed. Wake morphology is geometrically
+    // unchanged either way.
+    let r_capture: f32 = if overflow { 0.10 } else { 0.5 };  // AU
     let r_escape: f32 = 80.0;     // AU
-    let max_age:  f32 = 6.0;      // yr
-    let g_a = (G_AU * M_A_SUN) as f32;
-    let g_b = (G_AU * M_B_SUN) as f32;
+    let max_age:  f32 = if overflow { 14.0 } else { 6.0 };   // yr (disk orbits are long-lived)
+    let g_a = (G_AU * c.m_a) as f32;
+    let g_b = (G_AU * c.m_b) as f32;
     let soft_a_sq = (4.0 * R_A_AU * 4.0 * R_A_AU) as f32;   // gravitational softening near A
     let soft_b_sq = r_capture * r_capture;
 
@@ -953,10 +1157,10 @@ pub fn wake_step(dt_yr: f64, time_yr: f64, n_substeps: u32) -> u32 {
                                 + w.pos[3*i+2].powi(2);
                 if new_r2b < r_capture*r_capture {
                     w.state[i] = 1; w.capture_count += 1;
-                    w.spawn(i, r_a);
+                    w.spawn(i, r_a, r_b, v_b);
                 } else if new_r2_bary > r_escape*r_escape || w.age[i] > max_age {
                     w.state[i] = 2;
-                    w.spawn(i, r_a);
+                    w.spawn(i, r_a, r_b, v_b);
                 }
             }
         }
@@ -1184,6 +1388,73 @@ mod tests {
             if r > 5.0 && r < 35.0 { n_in_zone += 1; }
         }
         assert!(n_in_zone > 50, "only {n_in_zone}/2000 particles reached Sirius B orbit zone");
+        reset_config();
+    }
+
+    /// configure() must change the physics: a 10 M☉ black-hole companion
+    /// should raise GW power, shorten the period, and boost L_acc.
+    #[test]
+    fn configure_changes_physics() {
+        reset_config();
+        let base = snapshot(1994.5715);
+        let l_gw_0 = base[10];
+        let period_0 = base[24];
+
+        // 10 M☉ companion, Schwarzschild-radius "surface"
+        configure(2.063, 10.0, 0.5914, 1.0e-13, 600.0, 1.0e-4, 0.0022, 1.0);
+        let bh = snapshot(1994.5715);
+        assert!(bh[10] > l_gw_0 * 5.0, "GW power should jump with a 10 M☉ companion");
+        assert!(bh[24] < period_0,     "period should shorten with more mass");
+        assert!(bh[25] == 10.0,        "companion mass readback wrong: {}", bh[25]);
+        assert!(bh[28] > base[28],     "lens deflection scale should grow with M_B");
+        reset_config();
+    }
+
+    /// configure() clamps garbage to safe values rather than NaN-poisoning.
+    #[test]
+    fn configure_clamps_garbage() {
+        configure(f64::NAN, -3.0, 5.0, 0.0, -100.0, 0.0, 99.0, f64::INFINITY);
+        let c = get_config();
+        assert!(c[0].is_finite() && c[0] > 0.0, "m_a fell back finite");
+        assert!(c[2] >= 0.0 && c[2] <= 0.95,    "ecc clamped to [0,0.95]");
+        reset_config();
+    }
+
+    /// Roche-overflow mode: with fill ≥ 1 the wake must launch from the
+    /// L1 point (≈ between the stars), NOT isotropically around Sirius A.
+    /// Quantitatively, the mean particle distance from Sirius A should be
+    /// much larger than the wind-mode spawn shell (≈ a sizeable fraction
+    /// of the separation), because particles stream toward B.
+    #[test]
+    fn roche_overflow_launches_l1_stream() {
+        reset_config();
+        // crank Sirius A to fill its Roche lobe
+        configure(2.063, 1.018, 0.3, 1.0e-13, 600.0, 0.0084, 1.10, 1.0);
+        let snap = snapshot(1994.5715);
+        assert!(snap[27] == 1.0, "overflow flag should be set (fill=1.10)");
+        assert!(snap[26] > 0.0,  "L1 distance should be positive");
+        let _ = wake_init(1500, 1994.5715);
+        // Stream infall time from L1 is a few yr; run long enough to reach
+        // a quasi-steady stream + disk around the companion.
+        for k in 0..300 {
+            let s = snapshot(1994.5715 + k as f64 * 0.05);
+            wake_step(0.05, 1994.5715 + k as f64 * 0.05, 24);
+            let _ = s;
+        }
+        let pos = wake_positions();
+        // At steady state a good fraction of the stream pools within a few
+        // AU of the companion (the accretion disk + infalling stream).
+        let bsnap = snapshot(1994.5715 + 299.0 * 0.05);
+        let b = (bsnap[3], bsnap[4], bsnap[5]);
+        let mut near_b = 0;
+        for i in 0..1500 {
+            let dx = pos[3*i] as f64 - b.0;
+            let dy = pos[3*i+1] as f64 - b.1;
+            let dz = pos[3*i+2] as f64 - b.2;
+            if (dx*dx + dy*dy + dz*dz).sqrt() < 5.0 { near_b += 1; }
+        }
+        assert!(near_b > 60, "overflow stream should pool near B; only {near_b}/1500");
+        reset_config();
     }
 
     /// GW decay timescale ~ 10²¹ yr for Sirius (no merger before t_Hubble)

@@ -19,6 +19,25 @@ export function accretion_curve(n_samples) {
 }
 
 /**
+ * Push a new experiment configuration. Any non-finite or out-of-range
+ * argument falls back to the field's safe value, so the front-end can
+ * be sloppy. Returns 1 on success.
+ * @param {number} m_a
+ * @param {number} m_b
+ * @param {number} ecc
+ * @param {number} mdot_a
+ * @param {number} v_inf_kms
+ * @param {number} r_b_rsun
+ * @param {number} roche_fill
+ * @param {number} gw_exagg
+ * @returns {number}
+ */
+export function configure(m_a, m_b, ecc, mdot_a, v_inf_kms, r_b_rsun, roche_fill, gw_exagg) {
+    const ret = wasm.configure(m_a, m_b, ecc, mdot_a, v_inf_kms, r_b_rsun, roche_fill, gw_exagg);
+    return ret >>> 0;
+}
+
+/**
  * Return a JS-readable struct of static system constants. Useful for
  * the HUD/diagnostics overlay so the front-end isn't hardcoding them.
  * @returns {Float64Array}
@@ -27,6 +46,26 @@ export function constants() {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
         wasm.constants(retptr);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var v1 = getArrayF64FromWasm0(r0, r1).slice();
+        wasm.__wbindgen_export(r0, r1 * 8, 8);
+        return v1;
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
+ * Read the live config back: [m_a, m_b, ecc, mdot_a, v_inf_kms,
+ * r_b_rsun, roche_fill, gw_exagg]. Lets the UI restore slider state
+ * and the lensing layer read the companion mass.
+ * @returns {Float64Array}
+ */
+export function get_config() {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        wasm.get_config(retptr);
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         var v1 = getArrayF64FromWasm0(r0, r1).slice();
@@ -58,6 +97,15 @@ export function gw_waveform(n_samples) {
 }
 
 /**
+ * Reset every knob to the real-Sirius literature values.
+ * @returns {number}
+ */
+export function reset_config() {
+    const ret = wasm.reset_config();
+    return ret >>> 0;
+}
+
+/**
  * One-shot "system snapshot" — flat array of 24 doubles:
  *
  *   [ 0..3 ]  Sirius A position (AU, sky frame)
@@ -79,7 +127,13 @@ export function gw_waveform(n_samples) {
  *   [20   ]  shock temperature T_s [K]
  *   [21   ]  v_ff at Sirius B surface [km/s]
  *   [22   ]  Roche-lobe radius around Sirius A at this r [R☉]
- *   [23   ]  Sirius-A Roche-lobe fill fraction (R_A / R_L)
+ *   [23   ]  Sirius-A Roche-lobe fill fraction (configured)
+ *   [24   ]  orbital period now [yr]   (Kepler-III w/ configured masses)
+ *   [25   ]  companion mass [M☉]
+ *   [26   ]  L1 distance from Sirius A [AU]
+ *   [27   ]  overflow active (1.0 = Roche-lobe overflow, else 0.0)
+ *   [28   ]  4·G·M_B/c²  [AU]  — gravitational-lens deflection scale
+ *   [29   ]  GW exaggeration factor in effect (visual only)
  * @param {number} time_yr
  * @returns {Float64Array}
  */
@@ -167,8 +221,9 @@ export function wake_diagnostics() {
 }
 
 /**
- * Allocate `n` wake particles and seed them from Sirius A's surface
- * at simulation epoch `time_yr`. Returns the actual count.
+ * Allocate `n` wake particles and seed them at simulation epoch
+ * `time_yr` (wind from Sirius A, or an L1 stream if Roche overflow is
+ * configured). Returns the actual count.
  * @param {number} n
  * @param {number} time_yr
  * @returns {number}
