@@ -2252,6 +2252,11 @@ export class SpaceWeatherGlobe {
             );
         }
 
+        // Story 1.3: live GOES M/X onset → localized brightening + toast.
+        // (Independent of the legacy state.flare path below, which the
+        // swpc-feed schema doesn't populate.)
+        this._detectFlareOnset(state, regions);
+
         // Flare trigger from state — anchor on the matching active region
         // (so the flare appears at the AR's actual lat/lon rather than the
         // event-time location string).
@@ -2318,6 +2323,159 @@ export class SpaceWeatherGlobe {
                 earthFacing: opts.earthDirected ?? false,
             });
         }
+    }
+
+    // ── Story 1.3: M/X flare onset → localized brightening + toast ──────────
+
+    /** Peak local-brightness multiplier for a GOES class, log-scaled:
+     *  M1≈1.5×, M5≈3×, X1≈6×, X5+≈10× (flare class is itself logarithmic). */
+    _classMag(cls) {
+        const s = String(cls ?? '');
+        const L = s[0]?.toUpperCase();
+        const n = parseFloat(s.slice(1)) || 1;
+        if (L === 'X') return Math.min(10, 6 + 4 * Math.min(1, Math.log10(Math.max(1, n)) / Math.log10(5)));
+        if (L === 'M') return 1.5 + 1.5 * Math.min(1, Math.log10(Math.max(1, n)) / Math.log10(5));
+        return 1.0;   // B/C never reach here (filtered by the detector)
+    }
+
+    /** Lazily-built soft radial sprite reused by every flare bloom. */
+    _flareBloomTexture() {
+        if (this._flareBloomTex) return this._flareBloomTex;
+        const s = 128, c = document.createElement('canvas');
+        c.width = c.height = s;
+        const x = c.getContext('2d');
+        const g = x.createRadialGradient(s/2, s/2, 0, s/2, s/2, s/2);
+        g.addColorStop(0,   'rgba(255,255,250,1)');
+        g.addColorStop(0.25,'rgba(255,238,180,0.85)');
+        g.addColorStop(0.55,'rgba(255,170,70,0.35)');
+        g.addColorStop(1,   'rgba(255,120,30,0)');
+        x.fillStyle = g; x.fillRect(0, 0, s, s);
+        this._flareBloomTex = new THREE.CanvasTexture(c);
+        return this._flareBloomTex;
+    }
+
+    /**
+     * Localized brightening at an AR's heliographic position. 90 s total,
+     * ease-out decay; peak scales with `mag` (log of flare class). Pure
+     * additive sprite parented at the Sun — added/removed cleanly, and when
+     * no flare is active `_flareBlooms` is empty so per-frame cost is zero.
+     */
+    _fireFlareBloom(lat_rad, lon_rad, mag) {
+        const SUN_R = 8.2;   // just above the photosphere so it reads as surface brightening
+        const ax = new THREE.Vector3(
+            Math.cos(lat_rad) * Math.cos(lon_rad),
+            Math.sin(lat_rad),
+            Math.cos(lat_rad) * Math.sin(lon_rad),
+        );
+        const mat = new THREE.SpriteMaterial({
+            map: this._flareBloomTexture(),
+            color: 0xffffff,
+            transparent: true,
+            opacity: 0,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+        });
+        const spr = new THREE.Sprite(mat);
+        spr.position.set(
+            this._sunGroup.position.x + ax.x * SUN_R,
+            this._sunGroup.position.y + ax.y * SUN_R,
+            this._sunGroup.position.z + ax.z * SUN_R,
+        );
+        spr.renderOrder = 7;
+        this._scene.add(spr);
+        (this._flareBlooms ??= []).push({
+            spr, age: 0, dur: 90,
+            sizeMax: 2.4 + 1.6 * Math.min(10, mag),     // scene units
+            peak:    Math.min(1, 0.18 * mag),
+        });
+    }
+
+    /** Advance + retire flare blooms. ease-out: bright fast, long tail. */
+    _stepFlareBlooms(dt) {
+        const list = this._flareBlooms;
+        if (!list || !list.length) return;
+        for (let i = list.length - 1; i >= 0; i--) {
+            const fb = list[i];
+            fb.age += dt;
+            const u = fb.age / fb.dur;            // 0 → 1
+            if (u >= 1) {
+                this._scene.remove(fb.spr);
+                fb.spr.material.dispose();
+                list.splice(i, 1);
+                continue;
+            }
+            // Rise in ~4 % of the window, then ease-out decay.
+            const env = u < 0.04 ? (u / 0.04) : Math.pow(1 - (u - 0.04) / 0.96, 1.8);
+            fb.spr.material.opacity = fb.peak * env;
+            const sc = fb.sizeMax * (0.55 + 0.45 * env);
+            fb.spr.scale.set(sc, sc, 1);
+        }
+    }
+
+    /**
+     * Detect a GOES M/X onset from the live feed and fire the scene event
+     * exactly once per flare. Crossing-only (prev < M ≤ now) OR a newer
+     * M/X in the merged flare list we haven't fired. Deduped across reloads
+     * via localStorage so a refresh mid-flare doesn't re-pulse.
+     */
+    _detectFlareOnset(state, regions) {
+        const flux = Number(state.xray_flux);
+        const prev = this._xrayPrev ?? 0;
+        if (Number.isFinite(flux)) this._xrayPrev = flux;
+
+        // Best available flare descriptor (merged NOAA+DONKI, newest first).
+        const merged = (state.flares ?? state.recent_flares ?? []);
+        const top    = merged[0] ?? null;
+        const cls    = top?.cls ?? state.flare_class ?? state.xray_class ?? null;
+        const letter = String(cls ?? '')[0]?.toUpperCase();
+        const isMX   = letter === 'M' || letter === 'X';
+        if (!isMX) return;
+
+        // Identity = class + peak-minute, so a reload mid-flare is one event.
+        const tRaw = top?.time ?? state.flare_time ?? Date.now();
+        const tMs  = tRaw instanceof Date ? tRaw.getTime() : new Date(tRaw).getTime();
+        if (!Number.isFinite(tMs)) return;
+        const id = `${cls}@${Math.round(tMs / 60000)}`;
+
+        const crossedM = prev < 1e-5 && flux >= 1e-5;
+        const newInList = id !== this._lastFlareKey3;
+        if (!crossedM && !newInList) return;
+        if (id === this._lastFlareKey3) return;
+
+        // Cross-reload dedup: never fire a flare at/older than the last fired.
+        let lastFired = 0;
+        try { lastFired = +localStorage.getItem('pp_lastFlareFired') || 0; } catch {}
+        if (tMs <= lastFired) { this._lastFlareKey3 = id; return; }
+
+        this._lastFlareKey3 = id;
+        try { localStorage.setItem('pp_lastFlareFired', String(tMs)); } catch {}
+
+        // Resolve AR heliographic position: region match → location string
+        // → disk centre. Uses the same lat/lon the AR layer renders with.
+        let lat = 0, lon = 0, arId = top?.region ?? state.flare_location ?? null;
+        const ar = (regions || []).find(r => top?.region && r.region === top.region);
+        if (ar) { lat = ar.lat_rad; lon = ar.lon_rad; arId = ar.region; }
+        else if (top?.location || state.flare_location) {
+            const m = String(top?.location ?? state.flare_location).match(/([NS])(\d+)\s*([EW])(\d+)/i);
+            if (m) {
+                lat = (+m[2]) * (m[1].toUpperCase() === 'N' ? 1 : -1) * Math.PI / 180;
+                lon = (+m[4]) * (m[3].toUpperCase() === 'W' ? -1 : 1) * Math.PI / 180;
+            }
+        }
+
+        const mag = this._classMag(cls);
+        this._fireFlareBloom(lat, lon, mag);
+        try { this._fireFlareVisual(cls, lat, lon, { arId }); } catch {}
+
+        // Notify the page (toast for X-class; the Recent-flare tile already
+        // updates from swpc-update within 60 s).
+        try {
+            window.dispatchEvent(new CustomEvent('flare-onset', { detail: {
+                cls, letter, arId,
+                timeUTC: new Date(tMs).toISOString().slice(11, 16) + ' UTC',
+                xclass: letter === 'X',
+            }}));
+        } catch {}
     }
 
     /** Toggle MagnetosphereEngine layers (and globe-owned overlays). */
@@ -3183,6 +3341,7 @@ export class SpaceWeatherGlobe {
         // packets), bow-shock impact pulses, and HCS rotation.
         prof.measure('windStep',     () => this._stepWind(dt));
         prof.measure('impactPulses', () => this._stepImpactPulses(dt));
+        this._stepFlareBlooms(dt);   // zero cost when no flare is active
         // Degraded-feed tell: breathe the stream opacity slowly (~0.15 Hz)
         // around its speed-derived base so a stale/offline feed is visibly
         // "not quite live" without freezing or hiding the stream.
