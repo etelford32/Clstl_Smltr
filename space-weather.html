@@ -1728,7 +1728,8 @@ nav {
                    title="Adjust corona and solar wind brightness">
             <span class="bloom-val" id="bloom-val">1.0×</span>
         </div>
-        <a class="helio-corner-link" href="earth.html" title="Open Earth detail view">Earth View →</a>
+        <a class="helio-corner-link" href="#earth-view" title="Snap-zoom to Earth's magnetosphere"
+           onclick="document.getElementById('helio-canvas').dispatchEvent(new Event('earth-view')); return false;">Earth View →</a>
     </div>
 
     <!-- ── SOLAR SYSTEM DATA DESCRIPTION ─────────────────────────────────── -->
@@ -3156,10 +3157,14 @@ window.addEventListener('swpc-update', e => {
     const bzNorm = Math.min(Math.max((-bz + 30) / 60, 0), 1);
     el('bz-marker').style.left = `${bzNorm * 100}%`;
 
-    // Magnetopause estimate (Shue-simplified: R_mp ≈ 11.4 * (sw_pressure)^(-1/6.6) for Bz>0)
-    // Simplified: R_mp ≈ 10 * (1 - 0.013*|Bz|) for southward Bz
-    const bzS = Math.max(-bz, 0);
-    const rmp = (10.9 * Math.pow(1 + 0.013 * bzS, -1 / 2.1)).toFixed(1);
+    // Magnetopause estimate — full Shue et al. (1998), identical math to
+    // MagnetosphereEngine.computeShue() so this readout matches the rendered
+    // geometry by construction (Story 2.3).
+    const _mpN  = Math.max(0.5, sw.density ?? 5);
+    const _mpV  = Math.max(200, sw.speed   ?? 400);
+    const _mpPd = Math.max(0.05, 1.67e-6 * _mpN * _mpV * _mpV);   // nPa
+    const rmp   = ((10.22 + 1.29 * Math.tanh(0.184 * (bz + 8.14)))
+                   * Math.pow(_mpPd, -1 / 6.6)).toFixed(1);
     el('mp-dist').textContent = rmp + ' R⊕';
 
     // Kp
@@ -3882,6 +3887,11 @@ if (helioCanvas && _threeOk) {
     _helio = new Heliosphere3D(helioCanvas).start();
     // Expose globally so the bloom slider can call setBloom()
     window._helio3d = _helio;
+    // Sprint 2: inbound links / earth.html redirect land on #earth-view —
+    // snap-zoom to the in-scene Earth magnetosphere once the scene is live.
+    if (location.hash === '#earth-view') {
+        setTimeout(() => helioCanvas.dispatchEvent(new Event('earth-view')), 600);
+    }
 }
 
 // ── Corona bloom slider ───────────────────────────────────────────────────────

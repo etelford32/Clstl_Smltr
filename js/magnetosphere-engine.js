@@ -769,12 +769,13 @@ export class MagnetosphereEngine {
         const { r0, alpha, pdyn } = computeShue(n, v, bz);
         const bs = computeBowShock(r0, alpha);
 
-        // Rebuild solar shells only on significant change (avoids GC pressure)
-        if (Math.abs(r0 - this._lastR0) > 0.25 || Math.abs(alpha - this._lastAlpha) > 0.03) {
-            this._rebuildSolarShells(r0, alpha);
-            this._lastR0    = r0;
-            this._lastAlpha = alpha;
-        }
+        // Story 2.3: don't snap the geometry. Set the Shue target; tick()
+        // eases the *rendered* shells toward it over ~500 ms so a fast
+        // timeline scrub compresses smoothly instead of strobing.
+        this._tgtR0    = r0;
+        this._tgtAlpha = alpha;
+        if (this._smR0 == null)    this._smR0    = r0;
+        if (this._smAlpha == null) this._smAlpha = alpha;
 
         // Rebuild Earth shells on Kp change
         if (Math.abs(kp - this._lastKp) > 0.4) {
@@ -785,10 +786,12 @@ export class MagnetosphereEngine {
 
         // Compute analysis metrics
         this.analysis = {
-            r0,
+            r0,                       // Shue target R_mp (R⊕) — the numeric truth
+            r0_render:   this._smR0 ?? r0,   // eased value the geometry shows
             alpha,
             pdyn,
             bowShockR0:  bs.r0,
+            magnetopauseR0: this._smR0 ?? r0,   // alias (consumers used this name)
             plasmapause: computePlasmapause(kp),
             dst:         computeRingCurrentDst(kp, pdyn, bz),
             joule:       computeJouleHeating(kp),
@@ -805,6 +808,26 @@ export class MagnetosphereEngine {
      * @param {number}          dt      frame delta-time (s, default 1/60)
      */
     tick(t, sunDir, sw = {}, dt = 1 / 60) {
+        // ── Story 2.3: ease rendered magnetopause/bow-shock toward the Shue
+        // target (~500 ms, τ≈0.18 s) and rebuild the Lathe shells only when
+        // the smoothed value has moved enough to matter. Bow shock follows
+        // in lockstep via computeBowShock(_smR0,_smAlpha). ──────────────────
+        if (this._tgtR0 != null) {
+            const k = 1 - Math.exp(-Math.min(0.1, dt) / 0.18);
+            this._smR0    += (this._tgtR0    - this._smR0)    * k;
+            this._smAlpha += (this._tgtAlpha - this._smAlpha) * k;
+            if (Math.abs(this._smR0 - this._lastR0) > 0.12 ||
+                Math.abs(this._smAlpha - this._lastAlpha) > 0.02) {
+                this._rebuildSolarShells(this._smR0, this._smAlpha);
+                this._lastR0    = this._smR0;
+                this._lastAlpha = this._smAlpha;
+            }
+            if (this.analysis) {
+                this.analysis.r0_render      = this._smR0;
+                this.analysis.magnetopauseR0 = this._smR0;
+            }
+        }
+
         // Orient solar group: +Y → sun direction
         const q = new THREE.Quaternion().setFromUnitVectors(
             new THREE.Vector3(0, 1, 0),
