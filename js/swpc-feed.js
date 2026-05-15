@@ -259,8 +259,18 @@ function parseLocation(loc) {
  */
 const SWPC_RETRY_DELAYS_MS = [500, 1500];   // 3 total attempts
 
+// One line per fetch completion (success or failure) when the page is loaded
+// with ?debug=1 — off by default so the console stays quiet in normal use.
+// Gives the next outage a per-feed latency + status trail without a rebuild.
+const _DEBUG = typeof location !== 'undefined' && /[?&]debug=1(?:&|$)/.test(location.search);
+function _logFetch(source, status, ms, extra) {
+    if (!_DEBUG) return;
+    console.info('[data]', source, status, Math.round(ms) + 'ms', extra ?? '');
+}
+
 async function _fetchWithRetry(url, label) {
     const attempts = SWPC_RETRY_DELAYS_MS.length + 1;
+    const t0 = (typeof performance !== 'undefined' ? performance : Date).now();
     let lastErr;
     for (let attempt = 0; attempt < attempts; attempt++) {
         try {
@@ -273,19 +283,22 @@ async function _fetchWithRetry(url, label) {
                 throw new Error(`${label} HTTP ${res.status} — ${url}`);
             }
             try {
-                return await res.json();
+                const json = await res.json();
+                _logFetch(label, 'ok', ((typeof performance !== 'undefined' ? performance : Date).now()) - t0, url);
+                return json;
             } catch (e) {
                 throw new Error(`${label} bad JSON from ${url}: ${e.message}`);
             }
         } catch (err) {
             lastErr = err;
             // Don't retry definitive client errors (4xx).
-            if (/HTTP 4\d\d/.test(err.message)) throw err;
+            if (/HTTP 4\d\d/.test(err.message)) break;
             if (attempt < SWPC_RETRY_DELAYS_MS.length) {
                 await new Promise(r => setTimeout(r, SWPC_RETRY_DELAYS_MS[attempt]));
             }
         }
     }
+    _logFetch(label, 'FAIL', ((typeof performance !== 'undefined' ? performance : Date).now()) - t0, lastErr?.message);
     throw lastErr;
 }
 
@@ -874,6 +887,8 @@ export class SpaceWeatherFeed {
         this._calmStreak = 0;
         this.status      = 'connecting';
         this.lastUpdated = null;
+        this._lastGoodAt = null;     // last T1 where a core feed succeeded
+        this._failedFeeds = [];      // human labels of feeds down this cycle
         this.failStreak  = 0;
         this._lastFlareKey = null;
         this._lastCmeKey   = null;
@@ -963,16 +978,30 @@ export class SpaceWeatherFeed {
     }
 
     async _runT1() {
-        const results = await Promise.allSettled([
-            fetchWind(this._raw),
-            fetchMag(this._raw),      // IMF Bt/Bz — separate from plasma data
-            fetchKp1m(this._raw),
-            fetchXray(this._raw),
-        ]);
-        const ok = results.some(r => r.status === 'fulfilled');
+        // Order matters: the success check below indexes into this list.
+        const T1 = [
+            ['SWPC plasma (wind)', fetchWind(this._raw)],
+            ['SWPC mag (IMF Bz)',  fetchMag(this._raw)],   // best-effort: see note
+            ['SWPC Kp-1m',         fetchKp1m(this._raw)],
+            ['SWPC X-ray',         fetchXray(this._raw)],
+        ];
+        const results = await Promise.allSettled(T1.map(([, p]) => p));
+
+        // Honest status: derive `ok` from the CORE feeds only (wind/Kp/X-ray,
+        // indices 0/2/3). fetchMag swallows its own error and resolves so it
+        // can keep the previous Bz — counting it as a generic "fulfilled"
+        // pinned status to 'live' even with every real feed down, so the
+        // unavailable banner could never fire truthfully. (Sprint-0 fix.)
+        const core   = [results[0], results[2], results[3]];
+        const ok     = core.some(r => r.status === 'fulfilled');
+        this._failedFeeds = T1
+            .filter((_, i) => results[i].status === 'rejected')
+            .map(([label]) => label);
+
         if (ok) {
             this.status      = 'live';
             this.lastUpdated = new Date();
+            this._lastGoodAt = this.lastUpdated;
             this.failStreak  = 0;
         } else {
             this.failStreak++;
@@ -980,7 +1009,7 @@ export class SpaceWeatherFeed {
         }
         results.forEach((r, i) => {
             if (r.status === 'rejected')
-                console.warn(`[SWPC T1] feed ${i}: ${r.reason?.message ?? r.reason}`);
+                console.warn(`[SWPC T1] ${T1[i][0]}: ${r.reason?.message ?? r.reason}`);
         });
         this._checkStormMode();
         this._dispatch();
@@ -1181,6 +1210,13 @@ export class SpaceWeatherFeed {
                 trend:             raw.f107_trend_direction    ?? null,
                 recent:            raw.f107_recent             ?? [],
                 f107_norm:         d.f107_norm,
+            },
+            // Per-feed health so the offline banner can name the dead feed
+            // and how long it's been since real data, instead of a generic
+            // "temporarily unavailable".
+            feed_health: {
+                failed:       this._failedFeeds ?? [],
+                last_good_at: this._lastGoodAt,
             },
             meta: {
                 status:      this.status,
