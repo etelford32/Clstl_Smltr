@@ -1243,6 +1243,40 @@ nav {
 .layer-btn:hover  { border-color: rgba(0,198,255,.5); color: #aee; }
 .layer-btn.active { background: rgba(0,198,255,.18); color: #00e5ff;
     border-color: rgba(0,198,255,.45); }
+/* Story 3.4 — collapsible physics-region groups */
+.globe-layer-btns { flex-direction: column; align-items: stretch; gap: 4px; }
+.lyr-grp { border: 1px solid rgba(0,198,255,.12); border-radius: 7px; overflow: hidden; }
+.lyr-grp > summary {
+    list-style: none; cursor: pointer; user-select: none;
+    padding: 4px 9px; font-size: .64rem; letter-spacing: .09em;
+    color: #7fbcd8; text-transform: uppercase; background: rgba(0,198,255,.06);
+}
+.lyr-grp > summary::-webkit-details-marker { display: none; }
+.lyr-grp > summary::before { content: '▾ '; opacity: .6; }
+.lyr-grp:not([open]) > summary::before { content: '▸ '; }
+.lyr-grp-body { display: flex; flex-wrap: wrap; gap: 6px; padding: 7px 9px; }
+.lyr-attr { font-size: .58rem; color: #4d6378; width: 100%; margin: -2px 0 2px;
+    font-family: 'Courier New', monospace; }
+.thermo-alt { display: inline-flex; gap: 4px; align-items: center; }
+.thermo-alt .layer-btn { padding: 2px 7px; }
+/* Thermosphere ρ colour-bar legend (Story 3.1) */
+#thermo-legend {
+    position: absolute; left: 12px; bottom: 12px; z-index: 6;
+    background: rgba(8,10,18,.86); border: 1px solid rgba(120,160,210,.4);
+    border-radius: 6px; padding: 6px 9px; font: 400 .62rem/1.3 'Courier New',monospace;
+    color: #aebfce; display: none; pointer-events: none; max-width: 280px;
+}
+#thermo-legend.on { display: block; }
+#thermo-legend .tl-bar { height: 9px; border-radius: 2px; margin: 3px 0;
+    background: linear-gradient(90deg,
+      #443983,#3b528b,#2c728e,#21908d,#27ad81,#5dc863,#aadc32,#fde725); }
+#thermo-legend .tl-ticks { display: flex; justify-content: space-between; color: #8fb4d8; }
+#thermo-tip {
+    position: fixed; z-index: 9500; pointer-events: none; display: none;
+    background: rgba(8,10,18,.96); border: 1px solid rgba(120,160,210,.5);
+    border-left: 3px solid #5dc863; border-radius: 6px; padding: 7px 10px;
+    font: 400 .68rem/1.4 'Courier New',monospace; color: #b9d2e6; max-width: 280px;
+}
 
 /* SDO live A/B panel — top-left of canvas, mirror of HUD glass-pane style */
 .sdo-cmp-panel {
@@ -2186,20 +2220,54 @@ nav {
                 <span class="earth-section-sub">Live photosphere + corona · Shue-1998 magnetopause · Van Allen belts · Kp/Bz</span>
             </div>
             <!-- Layer toggle buttons -->
+            <!-- Story 3.4 — layers grouped by physical region (collapsible,
+                 state persisted). The grouping is operator-pedagogical. -->
             <div class="globe-layer-btns" id="globe-layers">
-                <button class="layer-btn active" data-layer="magnetopause">Magnetopause</button>
-                <button class="layer-btn active" data-layer="bowShock">Bow Shock</button>
-                <button class="layer-btn active" data-layer="belts">Van Allen Belts</button>
-                <button class="layer-btn active" data-layer="beltParticles">μ-Conserving Tracers</button>
-                <button class="layer-btn active" data-layer="plasmasphere">Plasmasphere</button>
-                <button class="layer-btn active" data-layer="cme">CME Shells</button>
-                <button class="layer-btn active" data-layer="solarField">Solar Field / HCS</button>
-                <button class="layer-btn active" data-layer="parker">Parker Streamline</button>
-                <button class="layer-btn active" data-layer="fluxRopes">AR Flux Ropes</button>
-                <button class="layer-btn active" data-layer="fieldLines" title="RK4-traced field lines from a multipole B field — real bipolar AR loop topology, not parametric tori">AR Field Lines</button>
-                <button class="layer-btn active" data-layer="arMarkers" title="Click an AR pin (or table row below) to focus the camera and read its current twist Φ / Hale class / area">AR Pins</button>
-                <button class="layer-btn active" data-layer="filaments" title="Cool filament/prominence arcs lifting off during M/X flares and internal kink eruptions — Hα / 304 Å signature, distinct from the gold/orange hot loops underneath">Filaments</button>
-                <button class="layer-btn active" data-layer="wind">Wind Streams</button>
+                <details class="lyr-grp" data-grp="solar" open>
+                    <summary>Solar</summary>
+                    <div class="lyr-grp-body">
+                        <button class="layer-btn active" data-layer="solarField">Solar Field / HCS</button>
+                        <button class="layer-btn active" data-layer="parker">Parker Streamline</button>
+                        <button class="layer-btn active" data-layer="fluxRopes">AR Flux Ropes</button>
+                        <button class="layer-btn active" data-layer="fieldLines" title="RK4-traced field lines from a multipole B field — real bipolar AR loop topology, not parametric tori">AR Field Lines</button>
+                        <button class="layer-btn active" data-layer="arMarkers" title="Click an AR pin (or table row below) to focus the camera and read its current twist Φ / Hale class / area">AR Pins</button>
+                        <button class="layer-btn active" data-layer="filaments" title="Cool filament/prominence arcs lifting off during M/X flares and internal kink eruptions — Hα / 304 Å signature">Filaments</button>
+                        <button class="layer-btn active" data-layer="wind">Wind Streams</button>
+                    </div>
+                </details>
+                <details class="lyr-grp" data-grp="heliosphere" open>
+                    <summary>Heliosphere</summary>
+                    <div class="lyr-grp-body">
+                        <button class="layer-btn active" data-layer="cme">CME Shells</button>
+                    </div>
+                </details>
+                <details class="lyr-grp" data-grp="magnetosphere" open>
+                    <summary>Magnetosphere</summary>
+                    <div class="lyr-grp-body">
+                        <button class="layer-btn active" data-layer="magnetopause">Magnetopause</button>
+                        <button class="layer-btn active" data-layer="bowShock">Bow Shock</button>
+                        <button class="layer-btn active" data-layer="belts">Van Allen Belts</button>
+                        <button class="layer-btn active" data-layer="beltParticles">μ-Conserving Tracers</button>
+                        <button class="layer-btn active" data-layer="plasmasphere">Plasmasphere</button>
+                        <span class="lyr-attr">Plasmasphere · Carpenter-Anderson 1992</span>
+                        <button class="layer-btn active" data-layer="ringCurrent">Ring Current</button>
+                        <span class="lyr-attr">Ring current · Dst-scaled (Dessler-Parker-Sckopke)</span>
+                    </div>
+                </details>
+                <details class="lyr-grp" data-grp="atmosphere" open>
+                    <summary>Atmosphere</summary>
+                    <div class="lyr-grp-body">
+                        <button class="layer-btn" data-layer="thermosphere">Thermosphere ρ</button>
+                        <span class="thermo-alt" id="thermo-alt-sel" role="radiogroup" aria-label="Thermosphere altitude">
+                            <button class="layer-btn" data-thermo-alt="300">300 km</button>
+                            <button class="layer-btn active" data-thermo-alt="400">400 km</button>
+                            <button class="layer-btn" data-thermo-alt="500">500 km</button>
+                        </span>
+                        <span class="lyr-attr">Thermosphere ρ @ <span id="thermo-alt-lbl">400</span> km · Parker DSMC</span>
+                        <button class="layer-btn active" data-layer="aurora">Aurora Oval</button>
+                        <span class="lyr-attr" id="aurora-attr">Aurora oval · OVATION-Prime / NOAA SWPC</span>
+                    </div>
+                </details>
             </div>
             <!-- AIA-style EUV channel selector — switches the sun rendering
                  between white-light and one of six SDO/AIA passbands. Each
@@ -2221,8 +2289,15 @@ nav {
         <canvas id="sw-globe-canvas"
             aria-label="Interactive 3D Earth showing live magnetosphere, Van Allen belts, auroral ovals and solar wind particles"
             role="img"></canvas>
+        <!-- Story 3.1 — thermosphere ρ colour-bar legend (shown when layer on) -->
+        <div id="thermo-legend" aria-label="Thermospheric density legend">
+            <div>Thermosphere ρ @ <span id="tl-alt">400</span> km · <b>Parker DSMC</b></div>
+            <div class="tl-bar"></div>
+            <div class="tl-ticks"><span id="tl-lo">–</span><span id="tl-base">baseline</span><span id="tl-hi">–</span></div>
+        </div>
         <!-- Hover tooltip for AR pins in 3D — populated by raycast handler -->
         <div class="ar-tooltip" id="ar-tooltip" style="display:none" role="tooltip"></div>
+        <div id="thermo-tip" role="tooltip"></div>
         <!-- Diagnostic HUD overlay — populated by space-weather-hud.js at 4 Hz -->
         <div class="space-weather-hud" id="sw-hud"
              aria-label="Live physics diagnostics: storm index, AR twist, internal eruptions, Van Allen tracer counts"></div>
@@ -4468,12 +4543,141 @@ window.addEventListener('helio-time-update', _updatePlanetTable);
             _globe?.setRealHoles(ev.detail?.holes ?? []);
         });
 
-        // Layer toggle buttons
+        // Layer toggle buttons (skip the thermosphere altitude radios)
         document.getElementById('globe-layers')?.addEventListener('click', ev => {
             const btn = ev.target.closest('.layer-btn');
-            if (!btn) return;
+            if (!btn || btn.hasAttribute('data-thermo-alt')) return;
             btn.classList.toggle('active');
             _globe.setLayerVisible(btn.dataset.layer, btn.classList.contains('active'));
+        });
+
+        // ── Story 3.1 — thermosphere altitude selector (radio-style) ──────
+        const _thAltSel = document.getElementById('thermo-alt-sel');
+        const _thBtn    = document.querySelector('#globe-layers [data-layer="thermosphere"]');
+        function _setThermoAltUI(alt) {
+            _thAltSel?.querySelectorAll('[data-thermo-alt]').forEach(b =>
+                b.classList.toggle('active', +b.dataset.thermoAlt === alt));
+            const lbl = el('thermo-alt-lbl'); if (lbl) lbl.textContent = alt;
+            const tla = el('tl-alt');         if (tla) tla.textContent = alt;
+        }
+        _thAltSel?.addEventListener('click', ev => {
+            const b = ev.target.closest('[data-thermo-alt]');
+            if (!b) return;
+            const alt = +b.dataset.thermoAlt;
+            _setThermoAltUI(alt);
+            _globe.setThermosphere(alt);                 // also marks layer on
+            if (_thBtn) _thBtn.classList.add('active');
+        });
+        // Restore persisted thermosphere state into the UI.
+        try {
+            const a = +localStorage.getItem('pp_thermoAlt');
+            if ([300,400,500].includes(a)) _setThermoAltUI(a);
+            if (localStorage.getItem('pp_thermoOn') === '1' && _thBtn)
+                _thBtn.classList.add('active');
+        } catch {}
+
+        // ── Story 3.1 — legend wiring ─────────────────────────────────────
+        const _thLegend = el('thermo-legend');
+        _globe._onThermoLegend = () => {
+            if (!_thLegend) return;
+            const on = !!_globe._thermoOn;
+            _thLegend.classList.toggle('on', on);
+            if (!on || !_globe._thermoRange) return;
+            const fmt = e => {
+                const v = Math.pow(10, e);
+                return v.toExponential(1).replace('e', '×10').replace('+','');
+            };
+            el('tl-lo').textContent = fmt(_globe._thermoRange.lo);
+            el('tl-hi').textContent = fmt(_globe._thermoRange.hi);
+            el('tl-alt').textContent = _globe._thermoAlt;
+        };
+        _globe._onThermoLegend();
+
+        // ── Story 3.1 — hover tooltip (raycast against the shell) ─────────
+        const _thTip = el('thermo-tip');
+        globeCanvas.addEventListener('pointermove', (e) => {
+            if (!_globe._thermoOn || !_globe._thermoMesh ||
+                !_globe._thermoGroup?.visible || !_globe._raycaster) {
+                if (_thTip) _thTip.style.display = 'none'; return;
+            }
+            const r = globeCanvas.getBoundingClientRect();
+            const ndc = { x: ((e.clientX-r.left)/r.width)*2-1,
+                          y: -((e.clientY-r.top)/r.height)*2+1 };
+            try {
+                _globe._raycaster.setFromCamera(ndc, _globe._camera);
+                const hit = _globe._raycaster.intersectObject(_globe._thermoMesh, false)[0];
+                if (!hit) { _thTip.style.display = 'none'; return; }
+                const p = hit.point.clone().normalize();
+                const lat = (Math.asin(p.y) * 180/Math.PI);
+                const lon = (Math.atan2(p.z, p.x) * 180/Math.PI);
+                const rho0 = _globe._thermoRho0 ?? 4e-12;
+                // local ρ ≈ base × diurnal (matches _recomputeThermo model)
+                const bx=Math.cos(-0.52), bz=Math.sin(-0.52);
+                const sd=Math.max(0, p.x*bx + p.z*bz);
+                const rho = rho0 * (0.72 + 0.55*sd);
+                const mult = rho / (_globe._thermoRhoQuiet ?? 4e-12);
+                const drag = ((mult - 1) * 100).toFixed(0);
+                const H = (_globe._thermoH ?? 60).toFixed(0);
+                _thTip.innerHTML =
+                  `ρ = ${rho.toExponential(2).replace('e','×10').replace('+','')} kg/m³`
+                  + ` at ${lat.toFixed(1)}°${lat>=0?'N':'S'}, ${Math.abs(lon).toFixed(1)}°${lon>=0?'E':'W'}`
+                  + `<br>${mult.toFixed(2)}× quiet-time baseline`
+                  + `<br>Drag impact: ${drag>=0?'+':''}${drag}% at C_d=2.2`
+                  + `<br>Scale height H ≈ ${H} km`
+                  + `<br><span style="color:#5f7790">dρ/ρ ≈ dF/F (const v,A,C_d) · Parker DSMC</span>`;
+                _thTip.style.display = 'block';
+                const tw=_thTip.offsetWidth, th=_thTip.offsetHeight;
+                _thTip.style.left = Math.min(e.clientX+14, innerWidth-tw-8)+'px';
+                _thTip.style.top  = Math.min(e.clientY+14, innerHeight-th-8)+'px';
+            } catch { _thTip.style.display = 'none'; }
+        });
+        globeCanvas.addEventListener('pointerleave', () => {
+            if (_thTip) _thTip.style.display = 'none';
+        });
+
+        // ── Story 3.4 — persist collapsible section state ─────────────────
+        document.querySelectorAll('#globe-layers .lyr-grp').forEach(d => {
+            const key = 'pp_lyrgrp_' + d.dataset.grp;
+            try {
+                const s = localStorage.getItem(key);
+                if (s === '0') d.open = false;
+                if (s === '1') d.open = true;
+            } catch {}
+            d.addEventListener('toggle', () => {
+                try { localStorage.setItem(key, d.open ? '1' : '0'); } catch {}
+            });
+        });
+        // Mobile default: collapse all on first visit (no stored prefs yet).
+        if (window.matchMedia('(max-width: 640px)').matches) {
+            document.querySelectorAll('#globe-layers .lyr-grp').forEach(d => {
+                if (localStorage.getItem('pp_lyrgrp_' + d.dataset.grp) == null) d.open = false;
+            });
+        }
+
+        // ── Story 3.3 — aurora source badge + HPI on the Aurora tile ──────
+        window.addEventListener('aurora-source', (e) => {
+            const mode = e.detail?.mode;
+            const attr = el('aurora-attr');
+            if (attr) attr.textContent = mode === 'ovation'
+                ? 'Aurora oval · OVATION-Prime / NOAA SWPC'
+                : 'Aurora oval · Kp-derived (OVATION unavailable for this time)';
+            const lvl = el('aurora-level');
+            if (lvl && mode === 'ovation' && !document.getElementById('aurora-ov-badge')) {
+                const b = document.createElement('span');
+                b.id = 'aurora-ov-badge'; b.textContent = ' OVATION';
+                b.style.cssText = 'font-size:.5rem;color:#5dc863;letter-spacing:.1em;vertical-align:super';
+                lvl.appendChild(b);
+            }
+        });
+        window.addEventListener('swpc-update', (e) => {
+            const d = e.detail || {};
+            const hpi = (d.aurora_power_north ?? 0) + (d.aurora_power_south ?? 0);
+            const sub = el('aurora-lat');
+            if (sub && hpi > 0) {
+                const base = sub.getAttribute('data-base') ?? sub.textContent;
+                if (!sub.getAttribute('data-base')) sub.setAttribute('data-base', base);
+                sub.textContent = `${sub.getAttribute('data-base')} · HPI ${hpi.toFixed(0)} GW`;
+            }
         });
 
         // SDO/AIA EUV channel selector — radio-style (only one active at a time).

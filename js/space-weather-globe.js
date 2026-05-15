@@ -25,7 +25,8 @@ import { OrbitControls }      from 'three/addons/controls/OrbitControls.js';
 import { EffectComposer }     from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass }         from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass }    from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { MagnetosphereEngine } from './magnetosphere-engine.js';
+import { MagnetosphereEngine, computePlasmapause } from './magnetosphere-engine.js';
+import { density as thermoDensity } from './upper-atmosphere-engine.js';
 import { SunSkin }            from './sun-skin.js';
 import { CmePropagator }     from './cme-propagation.js';
 import { VanAllenParticles } from './van-allen-particles.js';
@@ -301,9 +302,14 @@ export class SpaceWeatherGlobe {
         this._buildAurora(2);
         this._buildWindParticles();
         this._buildMagnetosphere();
+        this._buildThermosphere();      // Story 3.1
+        this._buildRingCurrent();       // Story 3.2
         this._buildCamera();
         this._buildControls(canvas);
         this._buildComposer();
+        // Story 3.3 — pull the live OVATION grid (falls back to the Kp oval).
+        this._fetchOvation();
+        this._ovationTimer = setInterval(() => this._fetchOvation(), 30 * 60 * 1000);
     }
 
     /** Compute per-frame scene-unit displacement for a wind speed (km/s). */
@@ -637,6 +643,238 @@ export class SpaceWeatherGlobe {
         this._auroraGroup.add(northOval, southOval);
         this._auroraKp    = kp;
         this._auroraAlpha = alpha;
+    }
+
+    // ══ Sprint 3 — operator overlays ═════════════════════════════════════════
+    // Earth = SphereGeometry(1) at origin, 1 scene unit = 1 R⊕ = 6371 km.
+
+    /** Perceptually-uniform viridis-ish ramp (operator-grade, not jet). */
+    static _VIRIDIS = [
+        [0.267,0.005,0.329],[0.283,0.141,0.458],[0.254,0.265,0.530],
+        [0.207,0.372,0.553],[0.164,0.471,0.558],[0.128,0.567,0.551],
+        [0.135,0.659,0.518],[0.267,0.749,0.441],[0.478,0.821,0.318],
+        [0.741,0.873,0.150],[0.993,0.906,0.144],
+    ];
+    _viridis(t) {
+        const V = SpaceWeatherGlobe._VIRIDIS;
+        t = Math.max(0, Math.min(1, t)) * (V.length - 1);
+        const i = Math.floor(t), f = t - i;
+        const a = V[i], b = V[Math.min(V.length - 1, i + 1)];
+        return [a[0]+(b[0]-a[0])*f, a[1]+(b[1]-a[1])*f, a[2]+(b[2]-a[2])*f];
+    }
+
+    /** NOAA Kp→Ap conversion (same table the dashboard uses). */
+    _kpToAp(kp) {
+        const T = [0,3,7,15,27,48,80,140,240,400];
+        const lo = Math.floor(Math.max(0, Math.min(9, kp)));
+        const hi = Math.min(9, lo + 1);
+        return T[lo] + (T[hi] - T[lo]) * (Math.max(0, Math.min(9, kp)) - lo);
+    }
+
+    /**
+     * Story 3.1 — translucent thermospheric-density shell at a selectable
+     * altitude. Base ρ(alt, F10.7, Ap) is the on-device Parker DSMC engine
+     * (upper-atmosphere-engine.js); a documented diurnal-bulge × auroral-
+     * Joule spatial modulation paints the lat/lon variation operators expect
+     * (day-side bulge + storm-time auroral enhancement — the Starlink/Gannon
+     * signature). Attribution shown to the user: "Parker DSMC".
+     */
+    _buildThermosphere() {
+        const grp = new THREE.Group();
+        grp.name = 'thermosphere';
+        grp.visible = false;
+        const geo = new THREE.SphereGeometry(1, 64, 40);   // r set per-alt in setThermosphere
+        const n   = geo.attributes.position.count;
+        geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+        const mat = new THREE.MeshBasicMaterial({
+            vertexColors: true, transparent: true, opacity: 0.0,
+            depthWrite: false, side: THREE.FrontSide,
+            blending: THREE.NormalBlending,
+        });
+        this._thermoMesh = new THREE.Mesh(geo, mat);
+        grp.add(this._thermoMesh);
+        this._thermoGroup = grp;
+        this._scene.add(grp);
+        this._thermoAlt   = 400;          // km — default (ISS / Starlink shell)
+        this._thermoOn    = false;
+        this._thermoRhoQuiet = 4.0e-12;   // kg/m³ @400 km quiet baseline
+        // Restore persisted state.
+        try {
+            const a = +localStorage.getItem('pp_thermoAlt');
+            if ([300,400,500].includes(a)) this._thermoAlt = a;
+            this._thermoOn = localStorage.getItem('pp_thermoOn') === '1';
+        } catch {}
+        this._recomputeThermo();
+        if (this._thermoOn) this.setThermosphere(this._thermoAlt);
+    }
+
+    /** Recolour the shell from the live/scrubbed Kp + F10.7. Cheap (~2.6k
+     *  verts); called on every swpc-update and on altitude switch. */
+    _recomputeThermo() {
+        if (!this._thermoMesh) return;
+        const alt  = this._thermoAlt;
+        const kp   = Number.isFinite(this._lastKp) ? this._lastKp : 2;
+        const f107 = Number.isFinite(this._lastF107) ? this._lastF107 : 150;
+        const ap   = this._kpToAp(kp);
+        let base;
+        try { base = thermoDensity({ altitudeKm: alt, f107Sfu: f107, ap }); }
+        catch { this._thermoBad = true; return; }
+        this._thermoBad = false;
+        this._thermoRho0 = base.rho;          // global mean ρ (kg/m³)
+        this._thermoH    = base.H_km;         // scale height (km)
+        // Shell radius for this altitude.
+        const R = 1 + alt / 6371;
+        this._thermoMesh.scale.setScalar(R);
+        const pos = this._thermoMesh.geometry.attributes.position;
+        const col = this._thermoMesh.geometry.attributes.color.array;
+        // Diurnal bulge points at the Sun (+X in this scene), lagged ~ to
+        // 14 h local solar time (≈ +30° toward dusk = -Z here).
+        const bx = Math.cos(-0.52), bz = Math.sin(-0.52);
+        // Auroral-zone Joule enhancement: grows + widens with Kp.
+        const aurLat = (67 - 2.0 * kp) * Math.PI / 180;     // oval colatitude edge
+        const aurAmp = 0.15 + 0.55 * Math.min(1, kp / 9);
+        const aurWid = (6 + kp) * Math.PI / 180;
+        let lrMin = 1e30, lrMax = -1e30;
+        const tmp = new Float32Array(pos.count);
+        for (let i = 0; i < pos.count; i++) {
+            const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+            const lat = Math.asin(Math.max(-1, Math.min(1, y)));
+            // Day/night bulge: cos of angle to (lagged) subsolar point.
+            const sd = Math.max(0, x * bx + z * bz);
+            const diurnal = 0.72 + 0.55 * sd;               // ~0.72 night → 1.27 day
+            // Auroral Joule heating: Gaussian rings at ±aurLat (both poles).
+            const dN = (Math.abs(lat) - (Math.PI/2 - (Math.PI/2 - aurLat)));
+            const dl = Math.abs(Math.abs(lat) - aurLat);
+            const aur = aurAmp * Math.exp(-(dl*dl) / (2*aurWid*aurWid));
+            const rho = this._thermoRho0 * diurnal * (1 + aur);
+            const lr  = Math.log10(Math.max(1e-20, rho));
+            tmp[i] = lr;
+            if (lr < lrMin) lrMin = lr; if (lr > lrMax) lrMax = lr;
+            void dN;
+        }
+        // Fixed display range so colours are comparable across times: anchor
+        // to the quiet baseline so storm inflation reads as a colour shift.
+        const lo = Math.log10(this._thermoRhoQuiet) - 0.55;
+        const hi = Math.log10(this._thermoRhoQuiet) + 1.15;
+        for (let i = 0; i < pos.count; i++) {
+            const c = this._viridis((tmp[i] - lo) / (hi - lo));
+            col[i*3] = c[0]; col[i*3+1] = c[1]; col[i*3+2] = c[2];
+        }
+        this._thermoMesh.geometry.attributes.color.needsUpdate = true;
+        this._thermoRange = { lo, hi };
+        if (this._onThermoLegend) this._onThermoLegend();
+    }
+
+    /** Public: set altitude (300/400/500) or null to turn the layer off.
+     *  500 ms opacity crossfade; persists state. */
+    setThermosphere(alt) {
+        if (!this._thermoGroup) return;
+        if (alt == null) {
+            this._thermoOn = false;
+            this._thermoFade = { from: this._thermoMesh.material.opacity, to: 0, t: 0 };
+        } else {
+            this._thermoAlt = alt;
+            this._thermoOn  = true;
+            this._recomputeThermo();
+            this._thermoGroup.visible = true;
+            this._thermoFade = { from: this._thermoMesh.material.opacity, to: 0.34, t: 0 };
+        }
+        try {
+            localStorage.setItem('pp_thermoAlt', String(this._thermoAlt));
+            localStorage.setItem('pp_thermoOn', this._thermoOn ? '1' : '0');
+        } catch {}
+    }
+
+    /**
+     * Story 3.2 — ring-current torus (Dessler-Parker-Sckopke visual proxy:
+     * a bulk indicator of the integrated Dst signal, NOT a particle sim).
+     * L ≈ 3–5, intensity ∝ |Dst|, dusk-side asymmetry during main phase.
+     */
+    _buildRingCurrent() {
+        const grp = new THREE.Group();
+        grp.name = 'ringCurrent';
+        grp.visible = false;
+        const geo = new THREE.TorusGeometry(4.0, 1.5, 20, 80);
+        const mat = new THREE.MeshBasicMaterial({
+            color: 0x3a6ea8, transparent: true, opacity: 0.0,
+            blending: THREE.AdditiveBlending, depthWrite: false,
+        });
+        const torus = new THREE.Mesh(geo, mat);
+        torus.rotation.x = Math.PI / 2;          // lie in the equatorial plane
+        grp.add(torus);
+        this._ringTorus = torus;
+        this._ringGroup = grp;
+        this._scene.add(grp);
+    }
+
+    _updateRingCurrent(dst, dstFalling) {
+        if (!this._ringTorus) return;
+        const a = Math.max(0, Math.min(1, (Math.abs(dst) - 10) / 240));   // 10→250 nT
+        const m = this._ringTorus.material;
+        // blue (quiet) → amber → orange (storm)
+        const c = a < 0.5
+            ? [0.23 + a*1.0, 0.43 + a*0.6, 0.66 - a*0.7]
+            : [0.93, 0.73 - (a-0.5)*0.9, 0.30 - (a-0.5)*0.5];
+        m.color.setRGB(c[0], c[1], c[2]);
+        m.opacity = 0.04 + a * 0.34;
+        // Dusk-side asymmetry during main phase (Dst decreasing): squash the
+        // dawn side, bulge dusk (-Z here is duskward with Sun at +X).
+        const asym = dstFalling ? 0.18 * a : 0.0;
+        this._ringTorus.scale.set(1 + asym, 1, 1 - asym);
+    }
+
+    /**
+     * Story 3.3 — OVATION-Prime auroral power grid draped on Earth. Falls
+     * back to the existing Kp parametric oval when the grid is unavailable
+     * (offline / historical), with an honest attribution change.
+     */
+    async _fetchOvation() {
+        try {
+            const r = await fetch('https://services.swpc.noaa.gov/json/ovation_aurora_latest.json',
+                                  { signal: AbortSignal.timeout(8000) });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const j = await r.json();
+            if (!Array.isArray(j?.coordinates)) throw new Error('no grid');
+            this._ovationGrid = j.coordinates;        // [[lon,lat,intensity],…]
+            this._ovationAt   = Date.now();
+            this._buildOvationAurora();
+            this._auroraMode  = 'ovation';
+            window.dispatchEvent(new CustomEvent('aurora-source', { detail: { mode: 'ovation' } }));
+        } catch {
+            this._auroraMode = 'kp';
+            window.dispatchEvent(new CustomEvent('aurora-source', { detail: { mode: 'kp' } }));
+        }
+    }
+
+    _buildOvationAurora() {
+        const grid = this._ovationGrid;
+        if (!Array.isArray(grid) || !grid.length) return;
+        if (this._ovGroup) this._scene.remove(this._ovGroup);
+        const g = new THREE.Group(); g.name = 'ovation';
+        const pts = [], cols = [];
+        for (const row of grid) {
+            const lon = +row[0], lat = +row[1], p = +row[2];
+            if (!Number.isFinite(p) || p < 0.5) continue;       // skip empty cells
+            const la = lat * Math.PI / 180, lo = lon * Math.PI / 180;
+            const r  = 1.015;
+            pts.push(r*Math.cos(la)*Math.cos(lo), r*Math.sin(la), r*Math.cos(la)*Math.sin(lo));
+            // green (low) → pink (high) — real auroral O 557.7 → N₂/O 630.0
+            const t = Math.min(1, p / 8);
+            cols.push(0.10 + t*0.85, 0.95 - t*0.55, 0.30 + t*0.45);
+        }
+        if (!pts.length) return;
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+        geo.setAttribute('color',    new THREE.Float32BufferAttribute(cols, 3));
+        const mat = new THREE.PointsMaterial({
+            size: 0.045, vertexColors: true, transparent: true, opacity: 0.85,
+            blending: THREE.AdditiveBlending, depthWrite: false,
+        });
+        g.add(new THREE.Points(geo, mat));
+        g.visible = this._auroraGroup ? this._auroraGroup.visible : true;
+        this._ovGroup = g;
+        this._scene.add(g);
+        if (this._auroraGroup) this._auroraGroup.visible = false;   // OVATION supersedes the Kp oval
     }
 
     _buildWindParticles() {
@@ -2049,6 +2287,19 @@ export class SpaceWeatherGlobe {
         this._lastKp = kp;
         this._lastBz = bz;
 
+        // ── Sprint 3: operator-overlay live/scrub coupling ────────────────
+        const f107 = state.f107_flux ?? state.solar_activity?.f107_sfu;
+        if (Number.isFinite(f107) && f107 > 0) this._lastF107 = f107;
+        const dst  = state.dst_index ?? state.geomagnetic?.dst_nT ?? -5;
+        const dstFalling = (this._lastDst != null) && dst < this._lastDst - 2;
+        this._lastDst = dst;
+        if (this._thermoOn) this._recomputeThermo();        // Story 3.1
+        this._updateRingCurrent(dst, dstFalling);           // Story 3.2
+        // Plasmasphere erosion (Carpenter-Anderson) is engine-driven via
+        // computePlasmapause(kp) in MagnetosphereEngine.update() below —
+        // L_pp = clamp(1.8, 6.5, 5.6 − 0.46·Kp). Track it for QA/HUD.
+        this._lastLpp = computePlasmapause(kp);
+
         // ── Story 1.1: live L1 coupling for the particle stream ────────────
         // Degraded mode: Sprint-0 surfaces real feed health on the state.
         // When the feed is stale/offline we keep the LAST known wind values
@@ -2514,6 +2765,23 @@ export class SpaceWeatherGlobe {
         }
         if (name === 'beltParticles') {
             this._beltParticles?.setVisible(visible);
+            return;
+        }
+        // ── Sprint 3 operator overlays ───────────────────────────────────
+        if (name === 'ringCurrent') {            // Story 3.2
+            this._ringOn = visible;
+            if (this._ringGroup) this._ringGroup.visible = visible;
+            return;
+        }
+        if (name === 'thermosphere') {           // Story 3.1 (radios drive alt)
+            this.setThermosphere(visible ? this._thermoAlt : null);
+            return;
+        }
+        if (name === 'aurora' || name === 'auroraOval') {   // Story 3.3 (Kp+OVATION)
+            this._auroraOn = visible;
+            if (this._auroraGroup && this._auroraMode !== 'ovation')
+                this._auroraGroup.visible = visible;
+            if (this._ovGroup) this._ovGroup.visible = visible;
             return;
         }
         this._magEngine.setLayerVisible(name, visible);
@@ -3336,6 +3604,35 @@ export class SpaceWeatherGlobe {
                 m.material.opacity = a0 * (0.60 + 0.40 * Math.sin(t * 2.6 + i * 1.4));
             });
         });
+
+        // ── Sprint 3: thermosphere fade + LOD gate (Earth-centric scene) ──
+        // Operator overlays are GEOSPACE-only — show within ~16 R⊕ of Earth
+        // (origin), fade out beyond so they don't clutter the wide view.
+        {
+            const camD = this._camera ? this._camera.position.length() : 999;
+            const near = camD < 16;
+            if (this._thermoMesh && this._thermoFade) {
+                const F = this._thermoFade;
+                F.t += dt;
+                const u = Math.min(1, F.t / 0.5);
+                const e = u * u * (3 - 2 * u);
+                this._thermoMesh.material.opacity = F.from + (F.to - F.from) * e;
+                if (u >= 1) {
+                    this._thermoFade = null;
+                    if (this._thermoMesh.material.opacity <= 0.001)
+                        this._thermoGroup.visible = false;
+                }
+            }
+            if (this._thermoGroup && this._thermoOn)
+                this._thermoGroup.visible = near;
+            if (this._ringGroup)
+                this._ringGroup.visible = this._ringOn === true && near;
+            if (this._ovGroup) {
+                const onA = this._auroraOn !== false;
+                this._ovGroup.visible = onA;
+                this._ovGroup.children[0].material.opacity = near ? 0.85 : 0.30;
+            }
+        }
 
         // Solar wind particle integrator (Parker-spiral advection of N=2000
         // packets), bow-shock impact pulses, and HCS rotation.
