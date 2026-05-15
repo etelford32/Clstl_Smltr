@@ -221,6 +221,24 @@ export class SunSkin {
     get euvMode() { return this._euvMode; }
 
     /**
+     * Story 1.2: when a live SDO/AIA disk is billboarded over the Sun the
+     * synthetic corona shells would double-expose the disk. Fade them down
+     * so the synthetic render becomes a quiet limb/far-side blend rather
+     * than competing with the real imagery; restore on fallback. Idempotent
+     * and safe to call every frame.
+     */
+    setLiveTextureActive(active) {
+        if (this._liveTexActive === active) return;
+        this._liveTexActive = active;
+        for (const m of this._coronaMeshes) {
+            if (m.material) m.material.opacity = active ? 0.18 : 0.6;
+        }
+        if (this._volCoronaMesh?.material) {
+            this._volCoronaMesh.material.opacity = active ? 0.35 : 1.0;
+        }
+    }
+
+    /**
      * Set the locations and depths of synthetic coronal holes.  Each hole is
      * { lat_rad, lon_rad, depth } where depth ∈ [0, 1] controls how strongly
      * the hole subtracts EUV emission (1 = fully dark, 0 = no effect).
