@@ -419,6 +419,83 @@ export class SpaceWeatherGlobe {
         this._sunGlow.scale.set(60, 60, 1);
         this._sunGlow.position.copy(this._sunGroup.position);
         this._scene.add(this._sunGlow);
+
+        // ── Story 1.2: live SDO/AIA disk, billboarded over the photosphere ──
+        // A camera-facing textured quad showing the real Sun at the active
+        // EUV channel via the same /api/solar/aia proxy the inset uses (so
+        // inset ↔ wrapped texture are always the same frame). Hidden until a
+        // texture actually loads; on any failure it stays hidden and the
+        // synthetic DEM photosphere/corona underneath is the fallback.
+        const aiaMat = new THREE.SpriteMaterial({
+            transparent: true,
+            opacity: 0.0,                 // fades in on first successful load
+            depthWrite: false,
+            depthTest: true,
+        });
+        this._aiaSprite = new THREE.Sprite(aiaMat);
+        // Image disk fills ~0.8 of the frame; size so it overlays the
+        // 8-unit photosphere (≈ 2·8 / 0.8 ≈ 20). Tuned visually.
+        this._aiaSprite.scale.set(21, 21, 1);
+        this._aiaSprite.position.copy(this._sunGroup.position);
+        this._aiaSprite.renderOrder = 5;
+        this._aiaSprite.visible = false;
+        this._scene.add(this._aiaSprite);
+
+        this._aiaLoader   = new THREE.TextureLoader();
+        this._aiaChannel  = 'white';
+        this._aiaLastFetch = 0;
+        this._aiaTexture  = null;          // last good texture (fallback)
+        this._aiaHistIso  = null;
+        this._refreshAiaTexture('white', true);
+    }
+
+    /**
+     * Fetch (or refresh) the live SDO/AIA disk for `channel` via the
+     * same-origin proxy and billboard it over the Sun. Fallback chain:
+     *   live proxy texture → last good texture (kept) → synthetic DEM.
+     * Never blanks the Sun and never shows a placeholder.
+     */
+    _refreshAiaTexture(channel, force = false) {
+        if (!this._aiaSprite) return;
+        const ch = channel ?? this._aiaChannel ?? 'white';
+        this._aiaChannel  = ch;
+        this._aiaLastFetch = performance.now();
+        const REFRESH_MS = 5 * 60 * 1000;            // matches the inset bucket
+        const bucket = Math.floor(Date.now() / REFRESH_MS);
+        const url = `/api/solar/aia?channel=${encodeURIComponent(ch)}&res=1024&b=${bucket}`
+                  + (this._aiaHistIso ? `&t=${encodeURIComponent(this._aiaHistIso)}` : '');
+        this._aiaLoader.load(
+            url,
+            (tex) => {
+                if (this._aiaChannel !== ch) { tex.dispose(); return; } // channel changed mid-flight
+                tex.colorSpace = THREE.SRGBColorSpace;
+                const old = this._aiaTexture;
+                this._aiaTexture = tex;
+                this._aiaSprite.material.map = tex;
+                this._aiaSprite.material.opacity = 0.96;
+                this._aiaSprite.material.needsUpdate = true;
+                this._aiaSprite.visible = true;
+                if (old) old.dispose();
+                // Live texture is authoritative — drop synthetic photosphere
+                // brightness so it acts purely as the limb/far-side blend.
+                this._sunSkin?.setLiveTextureActive?.(true);
+            },
+            undefined,
+            () => {
+                // Keep last good texture if we have one; else reveal synthetic.
+                if (!this._aiaTexture) {
+                    this._aiaSprite.visible = false;
+                    this._sunSkin?.setLiveTextureActive?.(false);
+                }
+            },
+        );
+    }
+
+    /** Timeline-scrubber hook (Story 1.2 / cross-story): request a past
+     *  frame (proxy still returns latest → labelled "[live]"), or null=live. */
+    setSolarTime(iso) {
+        this._aiaHistIso = iso || null;
+        this._refreshAiaTexture(this._aiaChannel, true);
     }
 
     /** Generate a radial glow texture for the sun sprite. */
@@ -1994,6 +2071,14 @@ export class SpaceWeatherGlobe {
         // Bz moved enough to matter (≥1 nT) → re-tint live packets now.
         if (Math.abs(prevBz - bz) > 1.0) this._recolorWind();
 
+        // Story 1.2: refresh the live AIA disk every ~12 min, piggy-backed
+        // on the data tick (no separate timer) — AR rotation across the
+        // disk becomes visible over a session without a page reload.
+        if (this._aiaSprite &&
+            performance.now() - (this._aiaLastFetch ?? 0) > 12 * 60 * 1000) {
+            this._refreshAiaTexture(this._aiaChannel, true);
+        }
+
         // Rebuild aurora tori when Kp shifts meaningfully
         if (Math.abs(kp - this._auroraKp) > 0.4) this._buildAurora(kp);
 
@@ -2296,7 +2381,10 @@ export class SpaceWeatherGlobe {
      * shells, and dims the photosphere appropriately.
      */
     setEuvMode(channel) {
+        // Synthetic DEM render honours the channel (fallback path) …
         this._sunSkin?.setEuvMode(channel);
+        // … and the live SDO/AIA billboard swaps to the same channel.
+        this._refreshAiaTexture(channel, true);
     }
 
     /**
