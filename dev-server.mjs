@@ -105,6 +105,7 @@ const API_ROUTES = {
     '/api/mars/weather':           'api/mars/weather.js',
     '/api/storms':                 'api/storms.js',
     '/api/health':                 'api/health.js',
+    '/api/solar/aia':              'api/solar/aia.js',
 
     // ── Auth / billing / invites / class / contact ────────────────────────
     // These are the user-facing edge functions (not data-pipeline). Vercel's

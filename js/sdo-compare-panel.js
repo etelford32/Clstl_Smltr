@@ -34,15 +34,14 @@
  * proxied fetch; a future enhancement.
  */
 
-const SDO_URL = {
-    white: 'https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_HMIIC.jpg',
-    94:    'https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0094.jpg',
-    131:   'https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0131.jpg',
-    171:   'https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0171.jpg',
-    193:   'https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0193.jpg',
-    211:   'https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0211.jpg',
-    304:   'https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0304.jpg',
-};
+// Story 1.2: all SDO imagery now flows through the same-origin
+// /api/solar/aia proxy (cached 12 min) — never a direct nasa.gov fetch.
+// The 3D Sun texture uses the identical proxy URL so the inset and the
+// wrapped disk are guaranteed to be the same channel + same frame.
+const CHANNELS = ['white', '94', '131', '171', '193', '211', '304'];
+const aiaUrl = (channel, bucket, isoT) =>
+    `/api/solar/aia?channel=${encodeURIComponent(channel)}&res=1024&b=${bucket}`
+    + (isoT ? `&t=${encodeURIComponent(isoT)}` : '');
 
 const CHANNEL_DESC = {
     white: 'HMI continuum',
@@ -91,24 +90,35 @@ export class SdoComparePanel {
      * @param {string} channel  one of 'white' | '94' | '131' | '171' | '193' | '211' | '304'
      */
     setChannel(channel) {
-        this._channel = channel in SDO_URL ? channel : 'white';
-        const url = SDO_URL[this._channel];
-        // Cache-buster bucketed to REFRESH_MS so reloads don't hammer NASA's
-        // CDN at the page's render tick rate.
-        const bucket = Math.floor(Date.now() / REFRESH_MS);
-        const fullUrl = `${url}?t=${bucket}`;
+        this._channel = CHANNELS.includes(channel) ? channel : 'white';
+        // Cache-buster bucketed to REFRESH_MS so reloads don't hammer the
+        // edge cache at the page's render tick rate.
+        const bucket  = Math.floor(Date.now() / REFRESH_MS);
+        const fullUrl = aiaUrl(this._channel, bucket, this._histIso ?? null);
         this._chEl.textContent = CHANNEL_DESC[this._channel] ?? this._channel;
-        this._footEl.textContent = 'loading from NASA SDO…';
+        this._footEl.textContent = 'loading SDO/AIA…';
         this._footEl.classList.remove('sdo-cmp-err');
         this._img.onload  = () => {
             const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            this._footEl.textContent = `latest · fetched ${ts}`;
+            this._footEl.textContent = this._histIso
+                ? `[live] — historical view · fetched ${ts}`
+                : `latest · fetched ${ts}`;
         };
         this._img.onerror = () => {
-            this._footEl.textContent = 'NASA CDN unreachable — try again later';
+            this._footEl.textContent = 'SDO feed unreachable — synthetic view active';
             this._footEl.classList.add('sdo-cmp-err');
         };
         this._img.src = fullUrl;
+    }
+
+    /**
+     * Timeline-scrubber hook: pass an ISO string to request a past frame
+     * (the proxy currently still returns latest, so we label it honestly),
+     * or null to return to live.
+     */
+    setTime(iso) {
+        this._histIso = iso || null;
+        this.setChannel(this._channel);
     }
 
     /** Begin auto-refresh on REFRESH_MS interval. */
