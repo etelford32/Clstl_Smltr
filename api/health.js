@@ -28,6 +28,12 @@ const UPSTREAMS = [
     { source: 'swpc-kp',      url: 'https://services.swpc.noaa.gov/json/planetary_k_index_1m.json',       edge_authoritative: false },
     { source: 'swpc-xray',    url: 'https://services.swpc.noaa.gov/json/goes/primary/xrays-1-day.json',   edge_authoritative: false },
     { source: 'swpc-alerts',  url: 'https://services.swpc.noaa.gov/products/alerts.json',                 edge_authoritative: false },
+    // Story 4.2 operator-readout feeds (browser-direct on the page; an edge
+    // 403 here is expected, like the other swpc-* rows — ρ@400 is on-device
+    // so it has no upstream to ping and is intentionally not listed).
+    { source: 'swpc-dst-kyoto', url: 'https://services.swpc.noaa.gov/products/kyoto-dst.json',                  edge_authoritative: false },
+    { source: 'swpc-f107',      url: 'https://services.swpc.noaa.gov/json/f107_cm_flux.json',                   edge_authoritative: false },
+    { source: 'swpc-ap-daily',  url: 'https://services.swpc.noaa.gov/text/daily-geomagnetic-indices.txt',       edge_authoritative: false },
     { source: 'donki-cme',    url: `https://kauai.ccmc.gsfc.nasa.gov/DONKI/WS/get/CME?api_key=${NASA_KEY}`, edge_authoritative: true },
     { source: 'jpl-horizons', url: 'https://ssd.jpl.nasa.gov/api/horizons.api?format=json&COMMAND=%27399%27&EPHEM_TYPE=VECTORS&CENTER=%27500@10%27&START_TIME=%272026-01-01%27&STOP_TIME=%272026-01-02%27&STEP_SIZE=%271%20d%27', edge_authoritative: true },
 ];
