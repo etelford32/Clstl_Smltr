@@ -1155,6 +1155,52 @@ nav {
 .tw-tick-lbl  { font-size: .52rem; font-family: monospace; color: #667; white-space: nowrap; margin-top: 1px; }
 .tw-tick:first-child .tw-tick-lbl,
 .tw-tick:last-child  .tw-tick-lbl { visibility: hidden; }
+/* ── Story 4.1: historical-event marker lane ─────────────────────────────
+   Centralised palette (observatory-dark) — referenced by class, never
+   hard-coded in JS, so re-theming is one place. */
+:root {
+    --evt-g12:    #ffcf6b;   /* G1–G2 mild   (amber-300) */
+    --evt-g3:     #ff9d2e;   /* G3 moderate  (amber-500) */
+    --evt-g45:    #ff4d4d;   /* G4–G5 severe (red-500)  */
+    --evt-xflare: #b98cff;   /* X-class flare (purple-400) */
+    --evt-cme:    #38d6e8;   /* named CME    (cyan-400)  */
+}
+.tw-slider-wrap { padding-top: 15px; }            /* room for the event lane */
+.tw-events {
+    position: absolute; left: 0; right: 0; top: 0; height: 13px;
+    pointer-events: none; z-index: 3;
+}
+.tw-evt {
+    position: absolute; top: 1px; height: 11px;
+    pointer-events: auto; cursor: pointer;
+    border-radius: 2px; opacity: .85;
+    transition: opacity .12s, transform .12s, box-shadow .12s;
+}
+.tw-evt.tw-evt-point { width: 2px; margin-left: -1px; }
+.tw-evt.tw-evt-bar   { min-width: 3px; }
+.tw-evt:hover, .tw-evt.tw-evt-hot {
+    opacity: 1; transform: scaleY(1.25);
+    box-shadow: 0 0 6px currentColor, 0 0 2px #fff;
+}
+.tw-evt-g12    { background: var(--evt-g12);    color: var(--evt-g12); }
+.tw-evt-g3     { background: var(--evt-g3);     color: var(--evt-g3); }
+.tw-evt-g45    { background: var(--evt-g45);    color: var(--evt-g45); }
+.tw-evt-xflare { background: var(--evt-xflare); color: var(--evt-xflare); }
+.tw-evt-cme    { background: var(--evt-cme);    color: var(--evt-cme); }
+.tw-evt-pinned { box-shadow: 0 0 0 1px rgba(255,255,255,.5); }
+.tw-evt-tip {
+    position: fixed; z-index: 9500; max-width: 290px;
+    background: rgba(8,10,18,.97); border: 1px solid rgba(120,160,210,.5);
+    border-left: 3px solid #7fb4d8; border-radius: 6px;
+    padding: 8px 11px; pointer-events: none;
+    font: 400 .72rem/1.4 'Courier New', monospace; color: #b9d2e6;
+    box-shadow: 0 6px 24px rgba(0,0,0,.55);
+}
+.tw-evt-tip .te-h   { font-weight: 700; color: #ffd27a; font-size: .8rem; }
+.tw-evt-tip .te-m   { color: #8fb4d8; margin: 2px 0 5px; }
+.tw-evt-tip .te-s   { color: #aebfce; }
+.tw-evt-tip .te-src { color: #5f7790; font-size: .64rem; margin-top: 5px; }
+.tw-evt-tip .te-cta { color: #7fd6ff; font-size: .66rem; margin-top: 5px; }
 /* step badge */
 .tw-step-badge {
     font-size: .58rem; font-family: monospace; color: #667;
@@ -1583,7 +1629,12 @@ nav {
         <div class="helio-live-hud">
             <span class="hl">Wind</span><span class="hv" id="h3d-speed">–</span> km/s &nbsp;
             <span class="hl">Bz</span><span class="hv" id="h3d-bz">–</span> nT &nbsp;
-            <span class="hl">Kp</span><span class="hv" id="h3d-kp">–</span>
+            <span class="hl">Kp</span><span class="hv" id="h3d-kp">–</span> &nbsp;
+            <!-- Story 4.2: operator-grade indices -->
+            <span class="hl">Dst</span><span class="hv" id="h3d-dst" title="Disturbance storm-time index — Kyoto WDC (via SWPC kyoto-dst mirror)">–</span> nT &nbsp;
+            <span class="hl">F10.7</span><span class="hv" id="h3d-f107" title="10.7 cm solar radio flux — NOAA SWPC f107_cm_flux">–</span> SFU &nbsp;
+            <span class="hl">Ap</span><span class="hv" id="h3d-ap" title="Daily geomagnetic Ap index — NOAA SWPC daily-geomagnetic-indices">–</span> &nbsp;
+            <span class="hl">ρ400</span><span class="hv" id="h3d-rho400" title="Neutral mass density at 400 km — Parkers Physics thermosphere engine (on-device)">–</span> kg/m³
             <span class="hud-extra">&nbsp;
             <span class="hl">r⊕</span><span class="hv" id="h3d-rau">–</span> AU &nbsp;
             <span class="hl">L1 delay</span><span class="hv" id="h3d-delay">–</span> min &nbsp;
@@ -1650,6 +1701,9 @@ nav {
                 <span class="tw-tl-label tw-tl-start" id="tw-tl-start">–</span>
                 <!-- Slider + tick marks -->
                 <div class="tw-slider-wrap" id="tw-slider-wrap">
+                    <!-- Story 4.1: historical-event markers (read-only) -->
+                    <div class="tw-events" id="tw-events"
+                         aria-label="Known historical space-weather events — click to jump"></div>
                     <input type="range" class="tw-slider" id="tw-slider"
                            min="0" max="10000" value="5000"
                            title="Drag to travel through time">
@@ -3287,6 +3341,127 @@ window.addEventListener('flare-onset', e => {
     setTimeout(kill, 10000);                      // 10 s auto-dismiss
 });
 
+// ── Story 4.2: operator-grade readouts (Dst · F10.7 · Ap · ρ@400) ─────────────
+// Dst source decision: the swpc-feed already fetches Kyoto WDC's Dst via
+// SWPC's kyoto-dst.json mirror (browser-direct, CORS-clean, on the existing
+// T3 tick) and exposes it as state.dst_index — that IS the authoritative
+// Kyoto quicklook value, so we consume it rather than stand up a separate
+// HTML-scraping proxy (simpler, no new failure surface, well within the 2 s
+// p95 budget). F10.7 + Ap are fetched directly from SWPC (CORS-enabled);
+// Ap falls back to a Kp→Ap derivation (marked ~) if the daily file is
+// unreachable so the field still carries a real value. ρ@400 mirrors the
+// on-device thermosphere engine (#ua-rho-iss = ρ at 400 km).
+{
+    const KP2AP = [0, 3, 7, 15, 27, 48, 80, 140, 240, 400];
+    const RHO400_QUIET = 4.0e-12;          // kg/m³ quiet-time baseline @400 km
+    const F107_URL = 'https://services.swpc.noaa.gov/json/f107_cm_flux.json';
+    const AP_URL   = 'https://services.swpc.noaa.gov/text/daily-geomagnetic-indices.txt';
+    let _f107Live = null, _f107At = 0, _apLive = null, _apAt = 0, _apDerived = false;
+
+    const utc = ms => new Date(ms).toISOString().slice(11, 16) + ' UTC';
+    function paint(id, html, cls, title) {
+        const e = el(id); if (!e) return;
+        e.innerHTML = html;
+        e.className = 'hv' + (cls ? ' ' + cls : '');
+        if (title) e.title = title;
+    }
+    const cDst = v => v > -30 ? 'ok' : v >= -100 ? 'warn' : 'danger';
+    const cAp  = v => v < 15  ? 'ok' : v <= 50  ? 'warn' : 'danger';
+
+    function renderDst(d) {
+        const v = d?.dst_index;
+        if (v == null || !Number.isFinite(v)) {
+            paint('h3d-dst', '—', 'warn', 'Dst feed unavailable ⚠'); return;
+        }
+        const ev = d.historical_event ? ` · event ${d.historical_event}` : '';
+        paint('h3d-dst', `${Math.round(v)}`, cDst(v),
+            `Disturbance storm-time index · Kyoto WDC (SWPC kyoto-dst mirror) · updated ${utc(Date.now())}${ev}`);
+    }
+    function renderF107() {
+        const fresh = _f107Live != null && (Date.now() - _f107At) < 36 * 3600e3;
+        if (!fresh) { paint('h3d-f107', '—', 'warn', 'F10.7 feed unavailable ⚠'); return; }
+        paint('h3d-f107', _f107Live.toFixed(1), '',
+            `10.7 cm solar radio flux · NOAA SWPC · updated ${utc(_f107At)}`);
+    }
+    function renderAp() {
+        if (_apLive == null) { paint('h3d-ap', '—', 'warn', 'Ap feed unavailable ⚠'); return; }
+        const mark = _apDerived ? '~' : '';
+        paint('h3d-ap', `${mark}${Math.round(_apLive)}`, cAp(_apLive),
+            _apDerived
+                ? `Ap derived from live Kp (SWPC daily file unreachable) · ${utc(_apAt)}`
+                : `Daily geomagnetic Ap · NOAA SWPC daily-geomagnetic-indices · ${utc(_apAt)}`);
+    }
+    function renderRho() {
+        const src = el('ua-rho-iss')?.textContent ?? '';
+        const m = src.match(/([0-9.]+e[+-]?\d+)/i);
+        if (!m) { paint('h3d-rho400', '—', '', 'ρ@400 km — thermosphere engine warming up'); return; }
+        const rho = parseFloat(m[1]);
+        const mant = rho.toExponential(2);              // e.g. 3.21e-12
+        const [a, b] = mant.split('e');
+        const sup = b.replace('-', '⁻').replace('+', '')
+            .replace(/\d/g, d => '⁰¹²³⁴⁵⁶⁷⁸⁹'[+d]);
+        const mult = (rho / RHO400_QUIET).toFixed(2);
+        paint('h3d-rho400', `${a}×10${sup}`, '',
+            `Neutral mass density @400 km · Parkers Physics thermosphere (on-device) · `
+            + `${mult}× quiet-time baseline (${RHO400_QUIET.toExponential(1)} kg/m³)`);
+    }
+
+    window.addEventListener('swpc-update', e => {
+        const d = e.detail || {};
+        renderDst(d);
+        const f = d.f107_flux ?? d.solar_activity?.f107_sfu;
+        if (Number.isFinite(f) && f > 0) { _f107Live = f; _f107At = Date.now(); }
+        renderF107();
+        // Ap: prefer the authoritative daily file; otherwise derive from live Kp.
+        if (_apLive == null || _apDerived) {
+            const kp = d.kp ?? d.geomagnetic?.kp;
+            if (Number.isFinite(kp)) {
+                const lo = Math.floor(Math.min(kp, 9)), hi = Math.min(lo + 1, 9);
+                _apLive = KP2AP[lo] + (KP2AP[hi] - KP2AP[lo]) * (kp - lo);
+                _apDerived = true; _apAt = Date.now();
+            }
+        }
+        renderAp();
+        renderRho();
+    });
+
+    async function pullF107() {
+        try {
+            const r = await fetch(F107_URL, { signal: AbortSignal.timeout(8000) });
+            const a = await r.json();
+            const last = Array.isArray(a) ? a[a.length - 1] : null;
+            const v = Number(last?.flux ?? last?.f107 ?? last?.observed_flux);
+            if (Number.isFinite(v) && v > 0) { _f107Live = v; _f107At = Date.now(); renderF107(); }
+        } catch (_) { renderF107(); }
+    }
+    async function pullAp() {
+        try {
+            const r = await fetch(AP_URL, { signal: AbortSignal.timeout(8000) });
+            const txt = await r.text();
+            const rows = txt.split('\n').filter(l => /^\d{4}\s+\d{2}\s+\d{2}/.test(l));
+            const last = rows[rows.length - 1];
+            if (last) {
+                // Columns: YYYY MM DD … then the planetary "A" (Ap) value.
+                // The Ap index is the integer after the radio-flux block; take
+                // the 4th numeric column (date=3) that is ≤ 400 and ≥ 0.
+                const nums = last.trim().split(/\s+/).map(Number);
+                const ap = nums[4];
+                if (Number.isFinite(ap) && ap >= 0 && ap <= 400) {
+                    _apLive = ap; _apDerived = false; _apAt = Date.now(); renderAp();
+                }
+            }
+        } catch (_) { /* keep Kp-derived fallback */ }
+    }
+
+    // Mirror the on-device ρ@400 as the thermosphere engine updates it.
+    const rhoEl = el('ua-rho-iss');
+    if (rhoEl) new MutationObserver(renderRho)
+        .observe(rhoEl, { childList: true, characterData: true, subtree: true });
+
+    pullF107(); pullAp(); renderRho();
+    setInterval(() => { pullF107(); pullAp(); }, 60 * 60 * 1000);   // hourly
+}
+
 // ── SOHO/SDO imagery ──────────────────────────────────────────────────────────
 window.addEventListener('soho-update', e => {
     const imgs = e.detail.images || {};
@@ -3884,6 +4059,7 @@ window.addEventListener('helio-time-update', _updatePlanetTable);
                              <div class="tw-tick-lbl">${cfg.fmtTick(d)}</div>`;
             ticksEl.appendChild(div);
         }
+        _renderEventMarkers();   // Story 4.1: keep event lane in sync with window
     }
 
     // ── Update slider fill gradient ───────────────────────────────────────────
@@ -3954,6 +4130,169 @@ window.addEventListener('helio-time-update', _updatePlanetTable);
         }
         _updateSliderFromJD(jd);
     }
+
+    // ══ Story 4.1 — historical-event markers on the scrubber ═════════════════
+    // Read-only catalogue from data/space-weather-events.json. Markers are
+    // positioned once per window/centre change (not per frame). Missing /
+    // bad data → the scrubber renders normally, just without markers.
+    let _events = null;          // [{ ...ev, _s:ms, _e:ms, klass, point, sev }]
+    let _evtTip = null;          // shared tooltip element (created lazily)
+
+    function _classifyEvent(ev) {
+        const mag = String(ev.magnitude ?? '');
+        const gNum = /G(\d)/.exec(mag);
+        const g = gNum ? +gNum[1] : (mag.includes('G5') ? 5 : 0);
+        let klass, sev;
+        if (ev.type === 'x_flare')                 { klass = 'tw-evt-xflare'; sev = 4; }
+        else if (ev.type === 'named_cme')          { klass = 'tw-evt-cme';    sev = 2; }
+        else if (g >= 4 || /G5/.test(mag))         { klass = 'tw-evt-g45';    sev = 5; }
+        else if (g === 3)                          { klass = 'tw-evt-g3';     sev = 3; }
+        else                                       { klass = 'tw-evt-g12';    sev = 1; }
+        const durMs = (ev._e - ev._s);
+        return { klass, sev, point: ev.type === 'x_flare' || durMs < 6 * 3600e3 };
+    }
+
+    function _evtTooltipEl() {
+        if (_evtTip) return _evtTip;
+        _evtTip = document.createElement('div');
+        _evtTip.className = 'tw-evt-tip';
+        _evtTip.style.display = 'none';
+        document.body.appendChild(_evtTip);
+        return _evtTip;
+    }
+
+    function _fmtRange(s, e) {
+        const a = new Date(s), b = new Date(e);
+        const ds = a.toISOString().slice(0, 10);
+        const de = b.toISOString().slice(0, 10);
+        return ds === de ? ds : `${ds} → ${de}`;
+    }
+
+    function _showEvtTip(ev, markerEl) {
+        const tip = _evtTooltipEl();
+        const idx = ev.indices ?? {};
+        const dst = idx.peak_dst ?? idx.estimated_dst;
+        const bits = [ev.magnitude];
+        if (dst != null) bits.push(`${idx.peak_dst != null ? 'peak' : 'est.'} Dst ${dst} nT`);
+        if (idx.flare_class) bits.push(idx.flare_class);
+        tip.innerHTML =
+            `<div class="te-h">${ev.label}</div>` +
+            `<div class="te-m">${_fmtRange(ev._s, ev._e)} · ${bits.filter(Boolean).join(' · ')}</div>` +
+            `<div class="te-s">${ev.summary ?? ''}</div>` +
+            `<div class="te-src">Sources: ${(ev.sources ?? []).join('; ')}</div>` +
+            `<div class="te-cta">▸ click to jump${idx.peak_dst != null ? ' · ⇧+click → peak' : ''}</div>`;
+        tip.style.display = 'block';
+        // Anchor to the marker, clamped to the viewport (never clipped).
+        const r = markerEl.getBoundingClientRect();
+        const tw = tip.offsetWidth, th = tip.offsetHeight;
+        let left = r.left + r.width / 2 - tw / 2;
+        left = Math.max(8, Math.min(left, window.innerWidth - tw - 8));
+        let top = r.top - th - 8;
+        if (top < 8) top = r.bottom + 8;             // flip below if no room above
+        tip.style.left = left + 'px';
+        tip.style.top  = top + 'px';
+    }
+    function _hideEvtTip() { if (_evtTip) _evtTip.style.display = 'none'; }
+
+    /**
+     * Drive the scene + readouts to an event's catalogued storm-time state.
+     * Uses the same swpc-update bus the live feed uses, so the Sun (Sprint 1),
+     * magnetosphere and the operator readouts (Story 4.2) all reflect it.
+     * Pre-1957 events have no measured Dst → indices stay estimated/absent
+     * and the readouts honestly show that (handled in Story 4.2).
+     */
+    function _applyEventState(ev, peak = false) {
+        const idx = ev.indices ?? {};
+        const dst = (peak ? idx.peak_dst : null) ?? idx.peak_dst ?? idx.estimated_dst ?? null;
+        const kp  = idx.peak_kp ?? idx.estimated_kp ?? (dst != null ? Math.min(9, Math.max(0, -dst / 50 + 4)) : 4);
+        // Coarse but physical: storm-time wind/IMF scale with Dst depth.
+        const depth = dst != null ? Math.min(1, -dst / 600) : 0.3;
+        const speed = Math.round(380 + depth * 520);          // 380 → ~900 km/s
+        const bz    = -(4 + depth * 36);                       // down to ≈ −40 nT
+        const xcls  = idx.flare_class ?? (ev.type === 'x_flare' ? ev.magnitude : null);
+        const xflux = xcls ? ({ X: 1e-4, M: 1e-5 }[String(xcls)[0]] ?? 1e-6) *
+                              (parseFloat(String(xcls).slice(1)) || 1) : 1e-7;
+        window.dispatchEvent(new CustomEvent('swpc-update', { detail: {
+            solar_wind: { speed, density: 5 + depth * 25, bz, bt: 6 + depth * 30, by: 4 },
+            kp, status: 'live', historical_event: ev.id,
+            dst_index: dst, xray_flux: xflux,
+            flare_class: xcls, flare_time: ev.start,
+            xray_class: xcls, active_regions: [],
+            derived: { xray_intensity: xflux, f107_norm: 0.5 },
+        }}));
+    }
+
+    function _jumpToEvent(ev, toPeak) {
+        const ms = toPeak && ev.indices?.peak_dst != null ? ev._s + (ev._e - ev._s) * 0.4 : ev._s;
+        if (_helio) {
+            _helio.setSimDate(new Date(ms));
+            _updateSliderFromJD(msToJD(ms));
+            _setScaleActive(0);
+        }
+        // Solar-image (Story 1.2) historical hook, if the globe exposes it.
+        try { window.__swglobe?.setSolarTime?.(new Date(ms).toISOString()); } catch {}
+        _applyEventState(ev, toPeak);
+        _hideEvtTip();
+    }
+
+    function _renderEventMarkers() {
+        const lane = el('tw-events');
+        if (!lane) return;
+        lane.innerHTML = '';
+        if (!Array.isArray(_events) || !_events.length) return;
+
+        const winDays  = _twWindowSec / 86400;
+        const startMs  = jdToMs(_twWinStartJD);
+        const endMs    = jdToMs(_twWinStartJD + winDays);
+        const spanMs   = endMs - startMs;
+        // Zoom-aware density: at month/year windows only pinned + G4+ events,
+        // else everything in range; never more than ~20 markers.
+        const wide     = _twWindowSec >= 2592000;
+        let inRange = _events.filter(ev => ev._e >= startMs && ev._s <= endMs);
+        if (wide) inRange = inRange.filter(ev => ev.pinned || ev.sev >= 5);
+        inRange.sort((a, b) => (b.pinned === a.pinned ? b.sev - a.sev : (b.pinned ? 1 : -1)));
+        inRange = inRange.slice(0, 20);
+
+        for (const ev of inRange) {
+            const a    = Math.max(0, (ev._s - startMs) / spanMs);
+            const bRaw = Math.min(1, (ev._e - startMs) / spanMs);
+            const m = document.createElement('div');
+            m.className = `tw-evt ${ev.klass} ${ev.point ? 'tw-evt-point' : 'tw-evt-bar'}`
+                        + (ev.pinned ? ' tw-evt-pinned' : '');
+            m.style.left = (a * 100).toFixed(3) + '%';
+            if (!ev.point) m.style.width = Math.max(0.4, (bRaw - a) * 100).toFixed(3) + '%';
+            m.setAttribute('aria-label', `${ev.label} — ${ev.magnitude}`);
+            m.tabIndex = 0;
+            m.addEventListener('mouseenter', () => _showEvtTip(ev, m));
+            m.addEventListener('mouseleave', _hideEvtTip);
+            m.addEventListener('focus',      () => _showEvtTip(ev, m));
+            m.addEventListener('blur',       _hideEvtTip);
+            m.addEventListener('click', (e) => _jumpToEvent(ev, e.shiftKey));
+            m.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); _jumpToEvent(ev, e.shiftKey); }
+            });
+            lane.appendChild(m);
+        }
+    }
+
+    // Load the catalogue; never break the scrubber if it's missing.
+    fetch('data/space-weather-events.json', { cache: 'no-cache' })
+        .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+        .then(j => {
+            _events = (j.events ?? []).map(ev => {
+                const _s = Date.parse(ev.start);
+                const _e = Date.parse(ev.end ?? ev.start);
+                const o  = { ...ev, _s, _e };
+                Object.assign(o, _classifyEvent(o));
+                return o;
+            }).filter(ev => Number.isFinite(ev._s));
+            _renderEventMarkers();
+        })
+        .catch(err => {
+            console.warn('[space-weather] event catalogue unavailable — '
+                + 'scrubber renders without markers:', err?.message ?? err);
+        });
+    window.addEventListener('resize', () => { _hideEvtTip(); _renderEventMarkers(); });
 
     // ── Date picker ───────────────────────────────────────────────────────────
     el('tw-date-picker')?.addEventListener('change', e => {

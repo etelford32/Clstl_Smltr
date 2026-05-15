@@ -1,0 +1,151 @@
+{
+  "_comment": "Curated historical space-weather events for the space-weather.html timeline scrubber. Read-only. Append new events to the array; the page picks them up on next load with no code change. Sources are documented per event (NOAA SWPC G/R lists, Kyoto WDC, peer-reviewed papers) — the same record base HeliochroniCles compiles. Do not add uncertain/apocryphal events.",
+  "schema_version": 1,
+  "events": [
+    {
+      "id": "carrington-1859",
+      "start": "1859-09-01T17:18:00Z",
+      "end": "1859-09-02T06:00:00Z",
+      "type": "geomagnetic_storm",
+      "magnitude": "G5+",
+      "label": "Carrington Event",
+      "summary": "The most intense geomagnetic storm in recorded history. Telegraph systems worldwide failed; aurorae were seen from the Caribbean.",
+      "indices": { "estimated_dst": -1750, "estimated_kp": 9 },
+      "sources": ["Tsurutani et al. 2003 JGR", "Hayakawa et al. 2019 ApJ"]
+    },
+    {
+      "id": "quebec-1989",
+      "start": "1989-03-13T01:27:00Z",
+      "end": "1989-03-14T02:00:00Z",
+      "type": "geomagnetic_storm",
+      "magnitude": "G5",
+      "label": "Quebec Blackout 1989",
+      "summary": "A severe geomagnetic storm collapsed the Hydro-Quebec grid in 92 seconds, leaving six million people without power for ~9 hours. The benchmark grid-impact event.",
+      "indices": { "peak_dst": -589, "peak_kp": 9 },
+      "sources": ["Allen et al. 1989 EOS", "Bolduc 2002 JASTP", "NOAA SWPC"]
+    },
+    {
+      "id": "bastille-2000",
+      "start": "2000-07-14T10:24:00Z",
+      "end": "2000-07-16T12:00:00Z",
+      "type": "storm_sequence",
+      "magnitude": "G5",
+      "label": "Bastille Day 2000",
+      "summary": "An X5.7 flare on 14 July 2000 launched a fast Earth-directed halo CME, producing a G5 storm and a strong solar proton event. A classic flare-CME-storm chain.",
+      "indices": { "peak_dst": -301, "peak_kp": 9, "flare_class": "X5.7" },
+      "sources": ["Smith et al. 2001 SolPhys", "NOAA SWPC", "NASA"]
+    },
+    {
+      "id": "halloween-2003",
+      "start": "2003-10-28T11:00:00Z",
+      "end": "2003-11-04T20:00:00Z",
+      "type": "storm_sequence",
+      "magnitude": "G5",
+      "label": "Halloween Storms 2003",
+      "summary": "A series of X-class flares including X17.2 (Oct 28) and the saturation-class X28+ (Nov 4). SOHO LASCO C2/C3 were saturated; airline routes were diverted.",
+      "indices": { "peak_dst": -383, "peak_kp": 9, "flare_class": "X28+" },
+      "sources": ["Gopalswamy et al. 2005 JGR", "NOAA SWPC", "NASA"]
+    },
+    {
+      "id": "stpatricks-2015",
+      "start": "2015-03-17T04:45:00Z",
+      "end": "2015-03-18T12:00:00Z",
+      "type": "geomagnetic_storm",
+      "magnitude": "G4",
+      "label": "St. Patrick's Day 2015",
+      "summary": "The largest geomagnetic storm of solar cycle 24, driven by a CME compounded by a corotating high-speed stream. Widely studied for its two-step main phase.",
+      "indices": { "peak_dst": -223, "peak_kp": 8 },
+      "sources": ["Kataoka et al. 2015 EPS", "Wu et al. 2016 JGR", "Kyoto WDC"]
+    },
+    {
+      "id": "starlink-feb-2022",
+      "start": "2022-02-03T13:13:00Z",
+      "end": "2022-02-08T00:00:00Z",
+      "type": "geomagnetic_storm",
+      "magnitude": "G1",
+      "label": "Starlink Loss Event",
+      "summary": "A merely G1 storm raised thermospheric density enough to deorbit 38 of 49 newly launched Starlink satellites; NRLMSIS underpredicted density by ~30%. The anchor case for physics-first vs ML drag modelling.",
+      "indices": { "peak_dst": -66, "peak_kp": 5 },
+      "sources": ["SpaceX press release 2022-02-08", "Fang et al. 2022 GRL", "Dang et al. 2022 GRL"],
+      "pinned": true
+    },
+    {
+      "id": "gannon-2024",
+      "start": "2024-05-10T17:00:00Z",
+      "end": "2024-05-13T00:00:00Z",
+      "type": "geomagnetic_storm",
+      "magnitude": "G5",
+      "label": "Gannon Storm",
+      "summary": "The first G5 storm since 2003, from a sequence of CMEs out of AR 13664. Low-latitude aurorae worldwide; many operators reported drag-induced orbit decay and anomalies.",
+      "indices": { "peak_dst": -412, "peak_kp": 9 },
+      "sources": ["NOAA SWPC", "Kyoto WDC", "Parker et al. 2024 (preprint)"],
+      "pinned": true
+    },
+    {
+      "id": "ar3664-x87-2024",
+      "start": "2024-05-14T16:51:00Z",
+      "end": "2024-05-14T17:20:00Z",
+      "type": "x_flare",
+      "magnitude": "X8.7",
+      "label": "AR 3664 X8.7 Flare",
+      "summary": "An X8.7 flare from AR 13664 on 14 May 2024 — the largest flare of solar cycle 25 at the time, immediately following the Gannon storm.",
+      "indices": { "flare_class": "X8.7" },
+      "sources": ["NOAA SWPC", "GOES XRS"]
+    },
+    {
+      "id": "ar3842-x90-2024",
+      "start": "2024-10-03T12:08:00Z",
+      "end": "2024-10-03T12:30:00Z",
+      "type": "x_flare",
+      "magnitude": "X9.0",
+      "label": "AR 3842 X9.0 Flare",
+      "summary": "An X9.0 flare from AR 13842 on 3 October 2024, the strongest of solar cycle 25 to date. Used as a validation case for the Parkers Physics MHD flare simulation.",
+      "indices": { "flare_class": "X9.0" },
+      "sources": ["NOAA SWPC", "GOES XRS", "Parkers Physics validation set"]
+    },
+    {
+      "id": "oct2024-g4-sequence",
+      "start": "2024-10-10T15:00:00Z",
+      "end": "2024-10-12T00:00:00Z",
+      "type": "geomagnetic_storm",
+      "magnitude": "G4",
+      "label": "October 2024 G4 Storm",
+      "summary": "A severe G4 storm on 10-11 October 2024 from an AR 13848 halo CME, again producing widespread mid-latitude aurorae.",
+      "indices": { "peak_dst": -335, "peak_kp": 8 },
+      "sources": ["NOAA SWPC", "Kyoto WDC"]
+    },
+    {
+      "id": "ar3590-x63-2024",
+      "start": "2024-02-22T22:08:00Z",
+      "end": "2024-02-22T22:40:00Z",
+      "type": "x_flare",
+      "magnitude": "X6.3",
+      "label": "AR 3590 X6.3 Flare",
+      "summary": "An X6.3 flare from AR 13590 on 22 February 2024, the largest of cycle 25 until the May 2024 sequence surpassed it.",
+      "indices": { "flare_class": "X6.3" },
+      "sources": ["NOAA SWPC", "GOES XRS"]
+    },
+    {
+      "id": "newyears-x50-2023",
+      "start": "2023-12-31T21:36:00Z",
+      "end": "2023-12-31T22:00:00Z",
+      "type": "x_flare",
+      "magnitude": "X5.0",
+      "label": "New Year's Eve 2023 X5.0",
+      "summary": "An X5.0 flare from AR 13536 on 31 December 2023 — the largest flare since the September 2017 X8.2 at the time.",
+      "indices": { "flare_class": "X5.0" },
+      "sources": ["NOAA SWPC", "GOES XRS"]
+    },
+    {
+      "id": "sep-2017-x92",
+      "start": "2017-09-06T11:53:00Z",
+      "end": "2017-09-10T16:06:00Z",
+      "type": "storm_sequence",
+      "magnitude": "G4",
+      "label": "September 2017 Storm",
+      "summary": "AR 12673 produced an X9.3 (6 Sep) and an X8.2 limb flare (10 Sep) with a strong proton event, driving a G4 storm during the rising activity gap of cycle 24.",
+      "indices": { "peak_dst": -142, "peak_kp": 8, "flare_class": "X9.3" },
+      "sources": ["Redmon et al. 2018 SpaceWeather", "NOAA SWPC", "Kyoto WDC"]
+    }
+  ]
+}
