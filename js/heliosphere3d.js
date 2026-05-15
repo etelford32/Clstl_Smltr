@@ -67,6 +67,33 @@ import { SunFeatures } from './sun-features.js';
 /** Three.js units per AU */
 const AU = 100;
 
+// ── Sprint 2 — continuous-zoom scale thresholds ─────────────────────────────
+// Camera distance (scene units) to the current target. The scene exaggerates
+// the magnetosphere (R⊕≈1 u) relative to orbits (AU=100 u), so these are
+// tuned for the *visual* regimes the spec describes rather than a literal
+// AU/R⊕ conversion. Ordered widest → tightest.
+const LOD = Object.freeze({
+    HELIOSPHERIC:   430,   // cd >  430  — default landing view (cam ≈465 u)
+    INNER_SOLAR:    120,   // 120 < cd ≤ 430 — Sun & Earth both framed
+    NEAR_EARTH:      40,   //  40 < cd ≤ 120 — approaching Earth
+    MAGNETOSPHERIC:  16,   //  16 < cd ≤  40 — bow shock visible (screenshot)
+    GEOSPACE:         2.0, // 2.0 < cd ≤  16 — belts / atmosphere shells
+    SURFACE:          0,   // cd ≤ 2.0       — surface detail
+});
+/** Classify a camera distance into a scale band name. */
+function lodBand(cd) {
+    if (cd >  LOD.HELIOSPHERIC)   return 'HELIOSPHERIC';
+    if (cd >  LOD.INNER_SOLAR)    return 'INNER_SOLAR';
+    if (cd >  LOD.NEAR_EARTH)     return 'NEAR_EARTH';
+    if (cd >  LOD.MAGNETOSPHERIC) return 'MAGNETOSPHERIC';
+    if (cd >  LOD.GEOSPACE)       return 'GEOSPACE';
+    return 'SURFACE';
+}
+const _smoothstep = (a, b, x) => {
+    const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+    return t * t * (3 - 2 * t);
+};
+
 /** Visual body radii (Three.js units, exaggerated for readability) */
 const R = {
     sun:     4.5,
@@ -418,6 +445,19 @@ export class Heliosphere3D {
 
         // Dynamic sun features (spicules, microflares, streamers, field lines)
         this._sunFeatures  = null;   // [{ line, pts, lat, lon, maxH, age, maxAge, phase }]
+
+        // ── Sprint 2: continuous-zoom LOD state ──────────────────────────────
+        // Scene is dual-scale by design (orbits at AU=100 u, magnetosphere
+        // exaggerated to R⊕=1 u so it reads at system scale). Thresholds are
+        // therefore expressed in *camera-distance scene units to the current
+        // target*, chosen so the visual behaviour matches the spec
+        // (full system → bow shock → surface), not a naive AU/R⊕ map.
+        this._lodScale    = 'HELIOSPHERIC';
+        this._lodPrev     = null;
+        this._lodFades    = [];          // active 500ms opacity crossfades
+        this._lodBlend    = 0;           // 0 = target Sun, 1 = target Earth
+        this._hintSeen    = false;
+        try { this._hintSeen = localStorage.getItem('pp_helioHintSeen') === '1'; } catch {}
 
         // Three.js objects (set by _build*)
         this._renderer    = null;
@@ -818,6 +858,17 @@ export class Heliosphere3D {
         this._controls.maxDistance    = 3500;
         this._controls.autoRotate     = false;
         this._controls.zoomSpeed      = 1.2;
+        // Exponential zoom-to-cursor: OrbitControls' dolly is already
+        // multiplicative (pow(0.95, zoomSpeed) per tick) so zoom "feel" is
+        // scale-consistent; zoomToCursor keeps the point under the pointer
+        // fixed for an intuitive dive toward Earth.
+        this._controls.zoomToCursor   = true;
+
+        // Sprint 2: Reset-View button dispatches a 'reset' Event on the
+        // canvas; an 'earth-view' Event snap-zooms to geospace. (Earth-View
+        // link is repurposed to fire this instead of navigating away.)
+        this._canvas.addEventListener('reset',      () => this.resetView());
+        this._canvas.addEventListener('earth-view', () => this.earthView());
     }
 
     _buildScene() {
@@ -938,6 +989,126 @@ export class Heliosphere3D {
                 c.mesh.material.opacity = c.baseOpacity * this._bloomLevel;
             });
         }
+    }
+
+    // ══ Sprint 2 / Story 2.1 — continuous-zoom LOD controller ════════════════
+
+    /**
+     * Per-frame: blend the orbit target Sun→Earth by camera distance, classify
+     * the scale band, and trigger 500 ms opacity crossfades on the layer
+     * groups when a threshold is crossed. Explicit layer toggles still win —
+     * if the user turned a layer ON, LOD won't fade it out.
+     */
+    _updateLOD(dt) {
+        if (!this._camera || !this._controls) return;
+        const cam = this._camera, ctr = this._controls;
+
+        // Target handoff: Sun (origin) when wide, Earth when close. Blend by
+        // distance-to-current-target across INNER_SOLAR → NEAR_EARTH.
+        const ep   = this._earthGroup ? this._earthGroup.position : new THREE.Vector3(AU, 0, 0);
+        const cd0  = cam.position.distanceTo(ctr.target);
+        const want = 1 - _smoothstep(LOD.NEAR_EARTH, LOD.INNER_SOLAR, cd0); // 0=Sun,1=Earth
+        // Ease the blend so a fast scroll doesn't snap the focus.
+        this._lodBlend += (want - this._lodBlend) * Math.min(1, dt * 6);
+        const b = this._lodBlend;
+        ctr.target.set(ep.x * b, ep.y * b, ep.z * b);
+
+        // Distance to the (now blended) target drives the band.
+        const cd   = cam.position.distanceTo(ctr.target);
+        const band = lodBand(cd);
+        if (band !== this._lodScale) {
+            this._lodPrev  = this._lodScale;
+            this._lodScale = band;
+            this._onLodChange(band);
+        }
+        // Onboarding hint: dismiss permanently once the user gets close.
+        if (!this._hintSeen &&
+            (band === 'MAGNETOSPHERIC' || band === 'GEOSPACE' || band === 'SURFACE')) {
+            this._hintSeen = true;
+            try { localStorage.setItem('pp_helioHintSeen', '1'); } catch {}
+            const h = document.querySelector('.helio-hint');
+            if (h) h.style.display = 'none';
+        }
+        this._stepLodFades(dt);
+    }
+
+    /** Resolve the visible-opacity target for a layer group at a band. */
+    _lodTargetFor(group, band) {
+        // Explicit user toggle overrides LOD (don't fade out a layer the user
+        // deliberately enabled / disabled).
+        const t = this._layerToggle || {};
+        if (group in t) return t[group] ? 1 : 0;
+        const wide = band === 'HELIOSPHERIC' || band === 'INNER_SOLAR';
+        switch (group) {
+            case 'wind':                                   // Sprint-1 stream
+                return (band === 'GEOSPACE' || band === 'SURFACE') ? 0 : 1;
+            case 'magnetosphere':                          // mp + bow shock
+                return wide ? (band === 'INNER_SOLAR' ? 0.35 : 0.12)
+                            : (band === 'SURFACE' ? 0 : 1);
+            case 'belts':
+                return (band === 'NEAR_EARTH' || band === 'MAGNETOSPHERIC' ||
+                        band === 'GEOSPACE') ? 1 : (band === 'SURFACE' ? 0 : 0);
+            case 'plasmasphere':
+                return (band === 'MAGNETOSPHERIC' || band === 'GEOSPACE') ? 1 : 0;
+            default: return 1;
+        }
+    }
+
+    _onLodChange(band) {
+        // Queue a 500 ms ease crossfade for each managed layer group.
+        for (const g of ['wind', 'magnetosphere', 'belts', 'plasmasphere']) {
+            const to = this._lodTargetFor(g, band);
+            const ex = this._lodFades.find(f => f.group === g);
+            const from = ex ? ex.cur : (g === 'wind' ? 1 : 0);
+            this._lodFades = this._lodFades.filter(f => f.group !== g);
+            this._lodFades.push({ group: g, from, to, cur: from, t: 0, dur: 0.5 });
+        }
+    }
+
+    _applyGroupOpacity(group, k) {
+        if (group === 'wind') {
+            if (this._windPoints) this._windPoints.material.opacity = 0.9 * k;
+            if (this._spiralLines) for (const l of this._spiralLines) l.material.opacity = 0.9 * k;
+        } else if (this._magnetosphere) {
+            // Engine owns many materials — use its toggle as a coarse fade
+            // (visible above ~3 %); good enough for the LOD cue.
+            this._magnetosphere.setLayerVisible?.('magnetopause', k > 0.03);
+            this._magnetosphere.setLayerVisible?.('bowShock',     k > 0.03);
+            if (group === 'belts')        this._magnetosphere.setLayerVisible?.('belts',        k > 0.03);
+            if (group === 'plasmasphere') this._magnetosphere.setLayerVisible?.('plasmasphere', k > 0.03);
+        }
+    }
+
+    _stepLodFades(dt) {
+        for (let i = this._lodFades.length - 1; i >= 0; i--) {
+            const f = this._lodFades[i];
+            f.t += dt;
+            const u  = Math.min(1, f.t / f.dur);
+            const e  = u * u * (3 - 2 * u);                 // ease-in-out
+            f.cur = f.from + (f.to - f.from) * e;
+            this._applyGroupOpacity(f.group, f.cur);
+            if (u >= 1) this._lodFades.splice(i, 1);
+        }
+    }
+
+    /** Reset View (UI button) → heliospheric, target = Sun. */
+    resetView() {
+        if (!this._camera || !this._controls) return;
+        this._controls.target.set(0, 0, 0);
+        this._lodBlend = 0;
+        this._camera.position.set(0, 200, 420);
+        this._controls.update?.();
+    }
+
+    /** Earth View (UI) → snap to geospace, target = Earth (no navigation). */
+    earthView() {
+        if (!this._camera || !this._controls || !this._earthGroup) return;
+        const ep = this._earthGroup.position;
+        this._lodBlend = 1;
+        this._controls.target.copy(ep);
+        // ~8 R⊕ out, slightly above the ecliptic, on the dayside.
+        this._camera.position.set(ep.x - 9, ep.y + 4, ep.z + 7);
+        this._controls.update?.();
     }
 
     _buildOrbitTrails() {
@@ -1836,12 +2007,42 @@ export class Heliosphere3D {
         if (this._earthGroup && this._windSpeedAttr) {
             const ep   = this._earthGroup.position;
             const A    = this._magnetosphere?.analysis;
-            const bsR  = (A?.bowShockR0     ?? 13) * 1.1;   // bow shock + small pad
+            // Story 2.2: deflection is LOD-gated. Zoomed out (heliospheric /
+            // inner-solar) particles are pure Parker spiral exactly as in
+            // Sprint 1; the Shue boundary only engages once Earth is the
+            // focus and the magnetosphere is on-screen.
+            const _deflect = this._lodScale !== 'HELIOSPHERIC'
+                          && this._lodScale !== 'INNER_SOLAR';
+
+            // Live Shue geometry (rendered/eased value so particles deflect
+            // off the *visible* surface). Sunward unit from Earth → origin.
+            const r0      = A?.r0_render ?? A?.magnetopauseR0 ?? A?.r0 ?? 10;
+            const alpha   = Math.max(0.3, A?.alpha ?? 0.58);
+            const bsR0    = (A?.bowShockR0 ?? r0 * 1.3);
+            const bsAlpha = Math.max(0.3, alpha - 0.08);
+            const sx = -ep.x, sy = -ep.y, sz = -ep.z;          // Earth→Sun
+            const sLen = Math.hypot(sx, sy, sz) || 1;
+            const sux = sx / sLen, suy = sy / sLen, suz = sz / sLen;
+            // Tilted dipole (≈11° from ecliptic-north toward the Sun) — cusps
+            // sit at the *magnetic* poles, not geographic.
+            const TILT = 11 * Math.PI / 180;
+            const mnx = sux * Math.sin(TILT);
+            const mny = Math.cos(TILT);
+            const mnz = suz * Math.sin(TILT);
+            const CUSP_COS = Math.cos(18 * Math.PI / 180);      // 18° half-angle
+            // Anti-sunward (downtail) unit and Bz-stretched tail length.
+            const tax = ep.x / (Math.hypot(ep.x, ep.y, ep.z) || 1);
+            const tay = ep.y / (Math.hypot(ep.x, ep.y, ep.z) || 1);
+            const taz = ep.z / (Math.hypot(ep.x, ep.y, ep.z) || 1);
+            const tailLen = r0 * (3.0 + 1.6 * Math.sqrt(Math.max(0, -bz)));
+            const tailRad = r0 * 0.95;
+            // Broad-phase sphere must comfortably *enclose* the flared Shue
+            // bow shock (which balloons to many R⊕ off the subsolar line and
+            // far down the tail) — otherwise flank/tail particles never reach
+            // the precise per-θ classification below. The exact surface test
+            // (rBs/rMp at the particle's θ) does the real work.
+            const bsR  = Math.max(bsR0 * 3.0, tailLen);         // generous cap
             const bsR2 = bsR * bsR;
-            const mpR  = (A?.magnetopauseR0 ?? 10);          // magnetopause R0
-            const mpR2 = mpR * mpR;
-            const cuspR  = mpR * 0.85;                        // inner cusp shell
-            const cuspR2 = cuspR * cuspR;
             // Cusp-precipitation probability per frame (rises with southward Bz)
             const cuspProb = 0.012 * (1 + bzSouth * 4);
 
@@ -1855,37 +2056,84 @@ export class Heliosphere3D {
                 mr2 = mr * mr;
             }
 
+            let _dbgIn = 0, _dbgSheath = 0;     // QA counters (cheap, per-frame)
             for (let i = 0; i < N_WIND; i++) {
                 const px = this._windPos[i * 3]     - ep.x;
                 const py = this._windPos[i * 3 + 1] - ep.y;
                 const pz = this._windPos[i * 3 + 2] - ep.z;
                 const d2 = px * px + py * py + pz * pz;
 
-                if (d2 < bsR2) {
-                    // Inside bow shock — mark as magnetosheath plasma
-                    this._windSpeedAttr[i] = 0.3;
+                if (_deflect && d2 < bsR2) {
+                    _dbgIn++;
+                    const d   = Math.sqrt(d2) || 1e-3;
+                    // Angle from the subsolar (Sun-Earth) line.
+                    const cosT = (px * sux + py * suy + pz * suz) / d;
+                    const opc  = Math.max(0.12, 1 + cosT);          // 1+cosθ, guarded
+                    // Shue surfaces at this θ.
+                    const rMp = r0   * Math.pow(2 / opc, alpha);
+                    const rBs = bsR0 * Math.pow(2 / opc, bsAlpha);
 
-                    if (d2 < mpR2) {
-                        // Inside magnetopause — deflect tangentially to the
-                        // closed-magnetosphere surface (sphere approximation).
-                        const d = Math.sqrt(d2);
-                        const k = mpR / Math.max(0.001, d);
-                        this._windPos[i * 3]     = ep.x + px * k;
-                        this._windPos[i * 3 + 1] = ep.y + py * k;
-                        this._windPos[i * 3 + 2] = ep.z + pz * k;
-
-                        // Cusp leakage: rare absorption deep inside the shell
-                        if (d2 < cuspR2 && Math.random() < cuspProb) {
+                    if (d <= rBs && d > rMp) {
+                        // Magnetosheath: shocked, hot, more random. Rankine-
+                        // Hugoniot-ish: bleed the radial component, add thermal
+                        // jitter; flag for the shader's hot-sheath colour.
+                        this._windSpeedAttr[i] = 0.3;
+                        const jx = (Math.random() - 0.5) * 0.4;
+                        const jy = (Math.random() - 0.5) * 0.4;
+                        const jz = (Math.random() - 0.5) * 0.4;
+                        this._windPos[i*3]   += jx;
+                        this._windPos[i*3+1] += jy;
+                        this._windPos[i*3+2] += jz;
+                    } else if (d <= rMp) {
+                        this._windSpeedAttr[i] = 0.3;
+                        // Cusp test — within 18° of a magnetic pole on the
+                        // dayside → precipitate (respawn at the corona).
+                        const ph = 1 / d;
+                        const cuspDot = Math.abs((px*mnx + py*mny + pz*mnz) * ph);
+                        if (cosT > 0 && cuspDot > CUSP_COS &&
+                            Math.random() < cuspProb * 6) {
                             this._spawnWind(i, false);
-                            continue;   // skip moon check — particle is gone
+                            continue;
+                        }
+                        if (cosT > -0.05) {
+                            // Dayside / flank: drape tangentially out to the
+                            // Shue magnetopause (impermeable boundary).
+                            const k = rMp / d;
+                            this._windPos[i*3]   = ep.x + px * k;
+                            this._windPos[i*3+1] = ep.y + py * k;
+                            this._windPos[i*3+2] = ep.z + pz * k;
+                        } else {
+                            // Nightside: stream down the magnetotail. Clamp the
+                            // transverse radius to the lobe, advance anti-
+                            // sunward (length ∝ |Bz|^0.5), recycle past the
+                            // visible tail.
+                            const axial = px*tax + py*tay + pz*taz;          // ≥0 downtail
+                            const ex = px - axial*tax, ey = py - axial*tay, ez = pz - axial*taz;
+                            const rho = Math.hypot(ex, ey, ez) || 1e-3;
+                            const kk  = tailRad / rho;
+                            const na  = Math.min(tailLen, axial + 0.06 * tailLen);
+                            this._windPos[i*3]   = ep.x + ex*kk + tax*na;
+                            this._windPos[i*3+1] = ep.y + ey*kk + tay*na;
+                            this._windPos[i*3+2] = ep.z + ez*kk + taz*na;
+                            if (na >= tailLen - 1e-3) { this._spawnWind(i, false); continue; }
+                        }
+                    } else {
+                        // Inside the bow-shock test sphere but outside both
+                        // Shue surfaces at this θ — still free-streaming.
+                        if (this._windSpeedAttr[i] > 0.15 && this._windSpeedAttr[i] < 0.45) {
+                            const armIdx = this._windArmIdx ? this._windArmIdx[i] : 0;
+                            this._windSpeedAttr[i] =
+                                (this._armTypes && this._armTypes[armIdx] === 1) ? 1.0 : 0.0;
                         }
                     }
                 } else if (this._windSpeedAttr[i] > 0.15 && this._windSpeedAttr[i] < 0.45) {
-                    // Exited bow shock — restore normal fast/slow stream type
+                    // Far from Earth (or LOD-gated off) — restore stream type.
                     const armIdx = this._windArmIdx ? this._windArmIdx[i] : 0;
                     this._windSpeedAttr[i] =
                         (this._armTypes && this._armTypes[armIdx] === 1) ? 1.0 : 0.0;
                 }
+
+                if (this._windSpeedAttr[i] === 0.3) _dbgSheath++;
 
                 // Lunar absorption — independent of magnetosphere check
                 if (!isNaN(mwx)) {
@@ -1897,6 +2145,8 @@ export class Heliosphere3D {
                     }
                 }
             }
+            this._dbgWind = { deflect: _deflect, inBowShock: _dbgIn,
+                              sheath: _dbgSheath, r0, bsR0 };
         }
 
         // ── Update shader uniforms ────────────────────────────────────────────
@@ -2776,6 +3026,7 @@ export class Heliosphere3D {
             }
         }
 
+        this._updateLOD(dt);          // Sprint 2: continuous-zoom LOD
         this._controls.update();
         this._renderer.render(this._scene, this._camera);
     }
