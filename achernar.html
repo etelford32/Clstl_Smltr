@@ -25,7 +25,16 @@ body { display: flex; flex-direction: column; }
     position:absolute; inset:0;
     background: radial-gradient(ellipse at 45% 50%, #060214 0%, #02010a 60%, #000 100%);
 }
-#canvas-wrap canvas { display:block; width:100% !important; height:100% !important; }
+/* Only the WebGL renderer canvas (a *direct* child of #canvas-wrap)
+   should fill the viewport.  The child combinator keeps this !important
+   rule from clobbering the nested 2D diagnostic canvases (#halpha-canvas,
+   #sed-canvas) which live inside their own panels and need their own
+   fixed heights — otherwise their plots stretch to the wrong aspect and
+   misalign with their axes. */
+#canvas-wrap > canvas {
+    display:block; position:absolute; inset:0;
+    width:100% !important; height:100% !important;
+}
 
 #hud {
     position:absolute; top:12px; left:12px; z-index:50;
