@@ -1,0 +1,363 @@
+/* ════════════════════════════════════════════════════════════════════════
+   Parker Physics — Colors & Type Tokens
+   Ultraviolet space aesthetic: Orbitron display, deep-black voids,
+   indigo / neon pink / electric purple / UV accents, and lightning whites.
+   ════════════════════════════════════════════════════════════════════════ */
+
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+:root {
+
+  /* ════════════════════════════════════════════════════════════════════
+     COLOR — DEEP SPACE BLACKS
+     Background scale running near-black → off-black with subtle violet
+     undertone. Always dark; no light mode exists.
+     ════════════════════════════════════════════════════════════════════ */
+  --black-void:         #02000a;   /* primary canvas — deepest black, faint violet shift */
+  --black-deeper:       #050010;   /* footer / well */
+  --black-panel:        #07021a;   /* alternating section, raised surface 0 */
+  --black-elevated-1:   #0d0626;   /* cards on void */
+  --black-elevated-2:   #150a35;   /* hover surfaces */
+  --black-overlay:      rgba(2,0,10,.85);
+
+  /* low-alpha white "ghost" surfaces for elevation w/o new color */
+  --ghost-1:  rgba(255,255,255,.04);
+  --ghost-2:  rgba(255,255,255,.07);
+  --ghost-3:  rgba(255,255,255,.12);
+  --ghost-4:  rgba(255,255,255,.20);
+
+  /* ════════════════════════════════════════════════════════════════════
+     COLOR — INDIGO (deep cool foundation)
+     ════════════════════════════════════════════════════════════════════ */
+  --indigo-900:    #0a0530;   /* near-black indigo */
+  --indigo-800:    #110755;
+  --indigo-700:    #1a0c80;
+  --indigo-600:    #2614b8;   /* primary indigo */
+  --indigo-500:    #3b1eff;   /* electric indigo, headline accent */
+  --indigo-400:    #6a48ff;
+  --indigo-300:    #9a85ff;
+  --indigo-200:    #c5b8ff;
+  --indigo-100:    #ebe5ff;
+
+  /* ════════════════════════════════════════════════════════════════════
+     COLOR — PURPLE / ULTRAVIOLET (cosmic core)
+     ════════════════════════════════════════════════════════════════════ */
+  --uv-900:        #1d0044;
+  --uv-800:        #320070;
+  --uv-700:        #5500b3;
+  --uv-600:        #7b00ee;   /* primary UV */
+  --uv-500:        #9d3aff;   /* signature ultraviolet */
+  --uv-400:        #b765ff;
+  --uv-300:        #d29aff;
+  --uv-200:        #e6c8ff;
+  --uv-100:        #f4e6ff;
+
+  /* ════════════════════════════════════════════════════════════════════
+     COLOR — NEON PINK / MAGENTA (spark / heat)
+     ════════════════════════════════════════════════════════════════════ */
+  --pink-900:      #4d0030;
+  --pink-700:      #aa0066;
+  --pink-600:      #e60088;
+  --pink-500:      #ff1f9c;   /* signature neon pink */
+  --pink-400:      #ff5cb8;
+  --pink-300:      #ff8fcd;
+  --pink-200:      #ffc5e2;
+
+  /* ════════════════════════════════════════════════════════════════════
+     COLOR — LIGHTNING (high-energy whites & cyans)
+     Cool, near-white with blue undertone. Used for sparks, focus rings,
+     active electrical accents.
+     ════════════════════════════════════════════════════════════════════ */
+  --lightning-pure:    #ffffff;
+  --lightning-bolt:    #f5f8ff;   /* lightning whites */
+  --lightning-glow:    #d8e6ff;
+  --lightning-arc:     #8ff0ff;   /* electric arc cyan */
+  --lightning-spark:   #4ddbff;
+  --lightning-deep:    #1f8fff;   /* deep electric blue */
+
+  /* ════════════════════════════════════════════════════════════════════
+     COLOR — SEMANTIC STATUS
+     ════════════════════════════════════════════════════════════════════ */
+  --status-ok:      #2eff9e;   /* live, healthy, success */
+  --status-info:    var(--lightning-spark);
+  --status-pro:     var(--uv-500);
+  --status-warn:    #ffd23f;   /* caution */
+  --status-alert:   var(--pink-500);
+  --status-danger:  #ff3050;
+
+  /* ════════════════════════════════════════════════════════════════════
+     COLOR — FOREGROUND (text on deep-black surfaces)
+     ════════════════════════════════════════════════════════════════════ */
+  --fg-1:    #f5f0ff;          /* near-white, tinted UV — h1/h2 */
+  --fg-2:    #d6cfee;          /* body default */
+  --fg-3:    #a89dcc;          /* secondary body */
+  --fg-4:    #7a6f9c;          /* caption / sub */
+  --fg-5:    #524a73;          /* footer body */
+  --fg-6:    #38335a;          /* footer copyright, dividers-as-text */
+  --fg-on-bright: #0a0420;     /* dark text on bright UV/pink buttons */
+
+  /* ════════════════════════════════════════════════════════════════════
+     COLOR — BORDERS
+     ════════════════════════════════════════════════════════════════════ */
+  --border-1:       rgba(157,138,255,.08);   /* faintest UV-tinted divider */
+  --border-2:       rgba(157,138,255,.15);
+  --border-3:       rgba(157,138,255,.25);
+  --border-uv:      rgba(157,58,255,.45);    /* glowing UV border */
+  --border-pink:    rgba(255,31,156,.45);
+  --border-arc:     rgba(143,240,255,.40);
+
+  /* ════════════════════════════════════════════════════════════════════
+     COLOR — SIGNATURE GRADIENTS
+     ════════════════════════════════════════════════════════════════════ */
+  --grad-uv:           linear-gradient(135deg, #3b1eff 0%, #9d3aff 100%);
+  --grad-uv-pink:      linear-gradient(135deg, #9d3aff 0%, #ff1f9c 100%);
+  --grad-spectrum:     linear-gradient(135deg, #3b1eff 0%, #9d3aff 50%, #ff1f9c 100%);
+  --grad-headline:     linear-gradient(135deg, #f5f8ff 0%, #c5b8ff 50%, #ff1f9c 100%);
+  --grad-headline-uv:  linear-gradient(135deg, #ffffff 0%, #d29aff 50%, #9d3aff 100%);
+  --grad-arc:          linear-gradient(135deg, #8ff0ff 0%, #6a48ff 100%);
+  --grad-cosmic-bg:    radial-gradient(ellipse at 30% 50%, #1d0044 0%, #02000a 70%);
+  --grad-uv-bg:        radial-gradient(ellipse at 50% 0%, rgba(157,58,255,.18) 0%, #02000a 70%);
+  --grad-pink-bg:      radial-gradient(ellipse at 50% 100%, rgba(255,31,156,.15) 0%, #02000a 70%);
+
+  /* ════════════════════════════════════════════════════════════════════
+     SHADOWS & GLOWS
+     Neon-style outer glows are the system's signature elevation cue.
+     ════════════════════════════════════════════════════════════════════ */
+  --shadow-card:        0 12px 40px rgba(2,0,10,.6);
+  --shadow-card-hover:  0 20px 60px rgba(2,0,10,.8);
+  --shadow-dropdown:    0 14px 44px rgba(2,0,10,.9);
+
+  --glow-uv-sm:    0 0 18px rgba(157,58,255,.45);
+  --glow-uv-md:    0 0 36px rgba(157,58,255,.65);
+  --glow-uv-lg:    0 0 80px rgba(123,0,238,.55);
+
+  --glow-pink-sm:  0 0 18px rgba(255,31,156,.45);
+  --glow-pink-md:  0 0 36px rgba(255,31,156,.65);
+  --glow-pink-lg:  0 0 80px rgba(230,0,136,.55);
+
+  --glow-arc-sm:   0 0 16px rgba(143,240,255,.55);
+  --glow-arc-md:   0 0 32px rgba(77,219,255,.7);
+
+  --glow-indigo-sm: 0 0 18px rgba(106,72,255,.5);
+  --glow-indigo-md: 0 0 38px rgba(59,30,255,.6);
+
+  --inner-glow-uv:    inset 0 0 22px rgba(157,58,255,.30);
+  --inner-glow-pink:  inset 0 0 22px rgba(255,31,156,.25);
+
+  /* ════════════════════════════════════════════════════════════════════
+     RADII
+     ════════════════════════════════════════════════════════════════════ */
+  --radius-xs:    3px;
+  --radius-sm:    5px;
+  --radius-md:    8px;
+  --radius-lg:   14px;
+  --radius-xl:   16px;
+  --radius-2xl:  22px;
+  --radius-pill: 999px;
+  --radius-circle: 50%;
+
+  /* ════════════════════════════════════════════════════════════════════
+     SPACING (8-point base, 4-point steps for tight UI)
+     ════════════════════════════════════════════════════════════════════ */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-10: 40px;
+  --space-13: 52px;
+  --space-16: 64px;
+  --space-22: 88px;
+  --space-25: 100px;
+
+  /* ════════════════════════════════════════════════════════════════════
+     TYPOGRAPHY — FAMILIES
+     Orbitron drives display + brand voice (it is THE space-tech typeface).
+     Space Grotesk is the workhorse body face — humanist, futurist-adjacent.
+     JetBrains Mono carries data, code, telemetry.
+     ════════════════════════════════════════════════════════════════════ */
+  --font-display: 'Orbitron', 'Eurostile', 'Bank Gothic', system-ui, sans-serif;
+  --font-sans:    'Space Grotesk', 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono:    'JetBrains Mono', 'Courier New', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* ── Sizes ─────────────────────────────────────────────────────── */
+  --fs-hero:    clamp(2.4rem, 6vw, 4.5rem);
+  --fs-h1:      clamp(2rem,   5vw, 3.4rem);
+  --fs-h2:      clamp(1.6rem, 4vw, 2.6rem);
+  --fs-h3:      1.25rem;
+  --fs-stat:    2.6rem;
+  --fs-body:    1rem;
+  --fs-body-sm: .9rem;
+  --fs-meta:    .85rem;
+  --fs-caption: .78rem;
+  --fs-micro:   .72rem;
+  --fs-mono:    .82rem;
+
+  /* ── Weights ───────────────────────────────────────────────────── */
+  --fw-regular: 400;
+  --fw-medium:  500;
+  --fw-semi:    600;
+  --fw-bold:    700;
+  --fw-black:   800;
+  --fw-ultra:   900;
+
+  /* ── Letter spacing ────────────────────────────────────────────── */
+  --tracking-cyber:   .18em;   /* ORBITRON HEADLINE / EYEBROW BIG */
+  --tracking-eyebrow: .14em;
+  --tracking-wider:   .08em;
+  --tracking-wide:    .04em;
+  --tracking-normal:  0;
+  --tracking-tight:  -.01em;
+  --tracking-tight2: -.02em;
+
+  /* ── Line heights ──────────────────────────────────────────────── */
+  --lh-tight: 1.05;
+  --lh-snug:  1.2;
+  --lh-base:  1.5;
+  --lh-loose: 1.7;
+
+  /* ════════════════════════════════════════════════════════════════════
+     MOTION
+     ════════════════════════════════════════════════════════════════════ */
+  --ease-standard: cubic-bezier(.4, 0, .2, 1);
+  --ease-electric: cubic-bezier(.65, 0, .35, 1);
+  --ease-warp:     cubic-bezier(.55, 0, .85, .4);
+  --dur-fast:   .15s;
+  --dur-base:   .25s;
+  --dur-slow:   .4s;
+  --dur-fade:   .7s;
+}
+
+
+/* ════════════════════════════════════════════════════════════════════════
+   SEMANTIC ELEMENTS
+   ════════════════════════════════════════════════════════════════════════ */
+
+body {
+  background: var(--black-void);
+  color: var(--fg-2);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  line-height: var(--lh-base);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* ── Display headlines — Orbitron, uppercase, generous tracking ───── */
+h1, .h1 {
+  font-family: var(--font-display);
+  font-weight: var(--fw-black);
+  font-size: var(--fs-hero);
+  letter-spacing: var(--tracking-cyber);
+  line-height: var(--lh-tight);
+  text-transform: uppercase;
+  background: var(--grad-headline);
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 0 40px rgba(157,58,255,.25);
+}
+
+h2, .h2 {
+  font-family: var(--font-display);
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-h2);
+  letter-spacing: var(--tracking-wider);
+  line-height: var(--lh-snug);
+  text-transform: uppercase;
+  color: var(--fg-1);
+}
+
+h3, .h3 {
+  font-family: var(--font-display);
+  font-weight: var(--fw-semi);
+  font-size: var(--fs-h3);
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-1);
+}
+
+/* ── Eyebrow — small caps Orbitron over a section ──────────────────── */
+.eyebrow {
+  font-family: var(--font-display);
+  font-size: var(--fs-micro);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-cyber);
+  color: var(--uv-400);
+  font-weight: var(--fw-bold);
+  text-shadow: 0 0 12px rgba(157,58,255,.35);
+}
+
+/* ── Brand wordmark — gradient, ultra-wide, Orbitron ───────────────── */
+.brand-wordmark {
+  font-family: var(--font-display);
+  font-weight: var(--fw-ultra);
+  letter-spacing: var(--tracking-cyber);
+  text-transform: uppercase;
+  background: var(--grad-uv-pink);
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* ── Body — Space Grotesk, comfortable line-height ─────────────────── */
+p, .body {
+  font-family: var(--font-sans);
+  font-size: var(--fs-body-sm);
+  color: var(--fg-3);
+  line-height: var(--lh-loose);
+}
+
+.body-lg   { font-size: var(--fs-body); color: var(--fg-2); }
+.body-muted { color: var(--fg-4); }
+
+/* ── Mono — telemetry, code, data feeds, terminal ──────────────────── */
+code, .mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-mono);
+  letter-spacing: var(--tracking-tight);
+}
+
+/* ── Stat number — large, gradient, Orbitron ───────────────────────── */
+.stat-num {
+  font-family: var(--font-display);
+  font-size: var(--fs-stat);
+  font-weight: var(--fw-black);
+  letter-spacing: var(--tracking-wide);
+  background: var(--grad-uv-pink);
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+  line-height: 1;
+}
+
+.caption {
+  font-family: var(--font-sans);
+  font-size: var(--fs-caption);
+  color: var(--fg-4);
+  letter-spacing: var(--tracking-wide);
+}
+
+/* ── Lightning text — for high-emphasis status, sparks white-glow ──── */
+.lightning {
+  color: var(--lightning-bolt);
+  text-shadow: 0 0 10px rgba(143,240,255,.85),
+               0 0 24px rgba(31,143,255,.55);
+}
+
+/* ── UV glow text — for headlines that need extra punch ────────────── */
+.uv-glow {
+  color: var(--uv-300);
+  text-shadow: 0 0 12px rgba(157,58,255,.7),
+               0 0 32px rgba(123,0,238,.45);
+}
+
+/* ── Pink glow text — accent runs, hot states ──────────────────────── */
+.pink-glow {
+  color: var(--pink-400);
+  text-shadow: 0 0 10px rgba(255,31,156,.7),
+               0 0 28px rgba(230,0,136,.4);
+}
