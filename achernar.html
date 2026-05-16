@@ -60,10 +60,10 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
     position:absolute; top:12px; left:12px; z-index:50;
     background: rgba(4,2,16,.72); backdrop-filter: blur(8px);
     border: 1px solid rgba(180,120,255,.22); border-radius: 8px;
-    padding: 10px 14px; font-size: 11px; line-height: 1.7;
-    pointer-events: none; min-width: 210px;
+    font-size: 11px; line-height: 1.7; min-width: 210px;
 }
-#hud h3 { font-size: 13px; color:#c8a8ff; margin-bottom:4px; letter-spacing:.5px; }
+#hud .panel-body { padding: 4px 14px 11px; }
+#hud h3 { font-size: 13px; color:#c8a8ff; margin:0; letter-spacing:.5px; }
 #hud .val { color:#d8c0ff; font-weight:600; }
 #hud .vh  { color:#ffb0d0; font-weight:600; }
 #hud .dim { color:#555; font-size:10px; }
@@ -100,6 +100,10 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
 @media (max-width: 720px) {
     .cv-btn { font-size: 11px; padding: 7px 10px; }
     .cv-btn .kbd { display:none; }
+    /* Never let a floating overlay span the phone — clamp to the
+       viewport and let the body scroll if a panel is left expanded. */
+    #hud { min-width:0; max-width:calc(100vw - 24px); line-height:1.6; }
+    #hud .panel-body { max-height:46vh; overflow-y:auto; }
 }
 
 #backdrop { display:none; position:absolute; inset:0; z-index:400; background:rgba(0,0,0,.45); cursor:pointer; }
@@ -207,13 +211,12 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
     position:absolute; left:12px; bottom:16px; z-index:50;
     background: rgba(4,2,16,.78); backdrop-filter: blur(8px);
     border: 1px solid rgba(180,120,255,.22); border-radius: 8px;
-    padding: 8px 10px 6px; pointer-events: none;
     width: 240px;
 }
+#halpha-panel .panel-body { padding: 6px 10px; }
 #halpha-panel .hp-title {
     font-size:10px; color:#c8a8ff; letter-spacing:.6px;
-    text-transform:uppercase; margin-bottom:2px;
-    display:flex; justify-content:space-between; align-items:center;
+    text-transform:uppercase; margin-bottom:0;
 }
 #halpha-panel .hp-title .vr { color:#ffb0d0; font-weight:600; }
 #halpha-canvas { display:block; width:100%; height:84px; border-radius:4px;
@@ -228,15 +231,14 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
     position:absolute; right:12px; bottom:60px; z-index:50;
     background: rgba(4,2,16,.78); backdrop-filter: blur(8px);
     border: 1px solid rgba(180,120,255,.22); border-radius: 8px;
-    padding: 8px 10px 6px; pointer-events: none;
     width: 280px;
     display:none;
 }
 #sed-panel.show { display:block; }
+#sed-panel .panel-body { padding: 6px 10px; }
 #sed-panel .sp-title {
     font-size:10px; color:#c8a8ff; letter-spacing:.6px;
-    text-transform:uppercase; margin-bottom:2px;
-    display:flex; justify-content:space-between; align-items:center;
+    text-transform:uppercase; margin-bottom:0;
 }
 #sed-panel .sp-title .tag {
     color:#ffd080; font-weight:600; font-size:9.5px; text-transform:none; letter-spacing:0;
@@ -259,12 +261,14 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
 #sed-panel .sp-legend .lt { color:#fff0c8; }
 @media (max-width: 720px) { #sed-panel { display:none !important; } }
 
+/* Folded into the HUD body (it used to be a separate absolute pill
+   that overlapped the HUD on tall viewports). Now it rides with the
+   HUD so it collapses and drags as one element. */
 #mode-pill {
-    position:absolute; top:60px; left:12px; z-index:50;
-    background: rgba(4,2,16,.72); backdrop-filter: blur(8px);
-    border: 1px solid rgba(180,120,255,.22); border-radius: 8px;
-    padding: 4px 9px; font-size: 10px; color:#c8a8ff; letter-spacing:.5px;
-    pointer-events: none;
+    display:block; margin-top:7px; padding:4px 8px;
+    font-size:10px; color:#c8a8ff; letter-spacing:.4px;
+    background: rgba(180,120,255,.10);
+    border:1px solid rgba(180,120,255,.22); border-radius:6px;
 }
 .btn-row.threecol button { flex:1; min-width:0; }
 
@@ -355,19 +359,37 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
 }
 #btn-collapse-all:hover { color:#c8a8ff; border-color:rgba(180,120,255,.4); }
 
-/* HUD collapse */
-#hud { position: relative; transition: padding .2s, min-width .2s; }
-#hud-toggle {
-    position:absolute; top:6px; right:6px; cursor:pointer; pointer-events:auto;
-    color:#666; font-size:11px; padding:2px 6px; border-radius:3px;
-    background: transparent; border: 1px solid transparent;
-    transition: color .15s, background .15s, border .15s; user-select:none;
-    font-family:inherit;
+/* ── Shared collapsible + draggable chrome (HUD / Hα / SED) ────
+   Mirrors the earth.html .panel-header / .panel-minimized
+   methodology so every floating overlay collapses and repositions
+   with one consistent gesture: tap the header to collapse, drag the
+   header to move, double-click to snap back. The shared
+   js/draggable-panel.js module disambiguates tap-vs-drag and
+   persists each panel's position + collapsed state. */
+#hud, #halpha-panel, #sed-panel { overflow: hidden; }
+.panel-header {
+    display:flex; align-items:center; justify-content:space-between;
+    gap:8px; padding:7px 10px 7px 12px; cursor:grab; user-select:none;
+    touch-action:none; border-bottom:1px solid rgba(180,120,255,.16);
 }
-#hud-toggle:hover { color:#c8a8ff; background: rgba(180,120,255,.10); border-color:rgba(180,120,255,.25); }
-#hud.collapsed > div:not(#hud-toggle):not(.always-show) { display:none; }
-#hud.collapsed h3 { margin-bottom:0; padding-right:30px; }
-#hud.collapsed { min-width:140px; padding:8px 14px; }
+.panel-header:active { cursor:grabbing; }
+.panel-header > :first-child { flex:1; min-width:0; }
+.panel-btn {
+    flex-shrink:0; width:24px; height:24px; padding:0; line-height:1;
+    display:flex; align-items:center; justify-content:center;
+    background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.14);
+    border-radius:5px; color:#888; cursor:pointer; font-size:11px;
+    font-family:inherit; touch-action:manipulation;
+    transition: background .15s, color .15s, border-color .15s, transform .08s;
+}
+.panel-btn:hover { background:rgba(180,120,255,.16); color:#c8a8ff; border-color:rgba(180,120,255,.4); }
+.panel-btn:active { transform:scale(.92); }
+.panel-body { overflow:hidden; transition: max-height .25s ease, opacity .2s ease; }
+.panel-minimized .panel-body {
+    max-height:0 !important; opacity:0;
+    padding-top:0 !important; padding-bottom:0 !important;
+}
+.panel-minimized .panel-header { border-bottom-color:transparent; }
 
 /* Smoother body height transition (fall back to display:none when fully collapsed) */
 .sec-bd { transition: opacity .2s; }
@@ -461,45 +483,60 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
 <div id="app">
     <div id="canvas-wrap">
         <div id="hud">
-            <button id="hud-toggle" title="Collapse / expand HUD">−</button>
-            <h3 class="always-show">ACHERNAR — α Eridani</h3>
-            <div class="sub">B6 Vep · Be-type rapid rotator</div>
-            <div>T<sub>pole</sub>: <span class="val" id="hud-tpole">17 000</span> <span class="dim">K</span></div>
-            <div>T<sub>eq</sub>: <span class="val" id="hud-teq">10 000</span> <span class="dim">K</span></div>
-            <div>R<sub>eq</sub>/R<sub>pole</sub>: <span class="val" id="hud-ratio">1.56</span></div>
-            <div>v<sub>eq</sub>: <span class="val" id="hud-veq">285</span> <span class="dim">km/s</span></div>
-            <div>ω/ω<sub>crit</sub>: <span class="val" id="hud-omega">0.97</span></div>
-            <div class="sep"></div>
-            <div>v sin i: <span class="val" id="hud-vsini">258</span> <span class="dim">km/s</span></div>
-            <div>L: <span class="val" id="hud-lum">3 150</span> <span class="dim">L☉</span></div>
-            <div>Decretion disk: <span class="vh" id="hud-disk">active</span></div>
-            <div>Disk H(R<sub>eq</sub>): <span class="val" id="hud-h">0.04</span> <span class="dim">R<sub>eq</sub></span></div>
-            <div>Outburst: <span class="vh" id="hud-burst">build</span> <span class="dim" id="hud-burst-pct">0%</span></div>
-            <div class="sep"></div>
-            <div>Ṁ<sub>pol</sub>: <span class="val" id="hud-mdot-pol">2.1</span><span class="dim">×10⁻¹⁰ M☉/yr</span></div>
-            <div>v<sub>∞,pol</sub>: <span class="val" id="hud-vinf">1450</span> <span class="dim">km/s</span></div>
-            <div>Ṁ<sub>eq</sub>: <span class="val" id="hud-mdot-eq">3.5</span><span class="dim">×10⁻⁹ M☉/yr</span></div>
-            <div>v<sub>K</sub>(R<sub>eq</sub>): <span class="val" id="hud-vk">325</span> <span class="dim">km/s</span></div>
-            <div>FPS: <span id="fps-display">--</span></div>
-            <div class="dim" style="margin-top:3px">Drag · Pinch · Scroll</div>
+            <div class="panel-header" data-minimize="hud">
+                <h3>ACHERNAR — α Eridani</h3>
+                <button class="panel-btn" data-minimize-btn="hud" title="Collapse / expand HUD (H)">▾</button>
+            </div>
+            <div class="panel-body">
+                <div class="sub">B6 Vep · Be-type rapid rotator</div>
+                <div>T<sub>pole</sub>: <span class="val" id="hud-tpole">17 000</span> <span class="dim">K</span></div>
+                <div>T<sub>eq</sub>: <span class="val" id="hud-teq">10 000</span> <span class="dim">K</span></div>
+                <div>R<sub>eq</sub>/R<sub>pole</sub>: <span class="val" id="hud-ratio">1.56</span></div>
+                <div>v<sub>eq</sub>: <span class="val" id="hud-veq">285</span> <span class="dim">km/s</span></div>
+                <div>ω/ω<sub>crit</sub>: <span class="val" id="hud-omega">0.97</span></div>
+                <div class="sep"></div>
+                <div>v sin i: <span class="val" id="hud-vsini">258</span> <span class="dim">km/s</span></div>
+                <div>L: <span class="val" id="hud-lum">3 150</span> <span class="dim">L☉</span></div>
+                <div>Decretion disk: <span class="vh" id="hud-disk">active</span></div>
+                <div>Disk H(R<sub>eq</sub>): <span class="val" id="hud-h">0.04</span> <span class="dim">R<sub>eq</sub></span></div>
+                <div>Outburst: <span class="vh" id="hud-burst">build</span> <span class="dim" id="hud-burst-pct">0%</span></div>
+                <div class="sep"></div>
+                <div>Ṁ<sub>pol</sub>: <span class="val" id="hud-mdot-pol">2.1</span><span class="dim">×10⁻¹⁰ M☉/yr</span></div>
+                <div>v<sub>∞,pol</sub>: <span class="val" id="hud-vinf">1450</span> <span class="dim">km/s</span></div>
+                <div>Ṁ<sub>eq</sub>: <span class="val" id="hud-mdot-eq">3.5</span><span class="dim">×10⁻⁹ M☉/yr</span></div>
+                <div>v<sub>K</sub>(R<sub>eq</sub>): <span class="val" id="hud-vk">325</span> <span class="dim">km/s</span></div>
+                <div>FPS: <span id="fps-display">--</span></div>
+                <div id="mode-pill">Continuum · von Zeipel β=0.25</div>
+                <div class="dim" style="margin-top:3px">Drag · Pinch · Scroll</div>
+            </div>
         </div>
         <button class="cv-btn" id="btn-panel-open" title="Open controls (C)">☰ Controls<span class="kbd">C</span></button>
         <a href="space-weather.html" class="cv-btn" id="btn-sw" title="Live Space Weather Data">⚡ Weather</a>
         <button class="cv-btn" id="btn-center" title="Reset camera (R)">⊙ Center<span class="kbd">R</span></button>
 
-        <div id="mode-pill">Continuum · von Zeipel β=0.25</div>
-
         <div id="halpha-panel">
-            <div class="hp-title"><span>Synthetic Hα 656.28 nm</span><span class="vr" id="hp-vr">V/R = 1.00</span></div>
-            <canvas id="halpha-canvas" width="480" height="170"></canvas>
-            <div class="hp-axis"><span>−800</span><span>0 km/s</span><span>+800</span></div>
+            <div class="panel-header hp-title" data-minimize="halpha-panel">
+                <span>Synthetic Hα 656.28 nm</span>
+                <span class="vr" id="hp-vr">V/R = 1.00</span>
+                <button class="panel-btn" data-minimize-btn="halpha-panel" title="Collapse / expand">▾</button>
+            </div>
+            <div class="panel-body">
+                <canvas id="halpha-canvas" width="480" height="170"></canvas>
+                <div class="hp-axis"><span>−800</span><span>0 km/s</span><span>+800</span></div>
+            </div>
         </div>
 
         <div id="sed-panel">
-            <div class="sp-title"><span>Spectral Energy Distribution</span><span class="tag" id="sp-tag">i = 65°</span></div>
+            <div class="panel-header sp-title" data-minimize="sed-panel">
+                <span>Spectral Energy Distribution</span>
+                <span class="tag" id="sp-tag">i = 65°</span>
+                <button class="panel-btn" data-minimize-btn="sed-panel" title="Collapse / expand">▾</button>
+            </div>
+            <div class="panel-body">
             <canvas id="sed-canvas" width="560" height="240"></canvas>
             <div class="sp-axis"><span>0.1 µm</span><span>1 µm</span><span>10 µm</span></div>
             <div class="sp-legend"><span class="lp">photosphere</span><span class="ld">disk</span><span class="lt">total</span></div>
+            </div>
         </div>
 
         <div id="backdrop"></div>
@@ -876,6 +913,7 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
 <script type="module">
 import * as THREE        from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { makePanelDraggable, resetPanelPosition } from './js/draggable-panel.js';
 
 // ────────────────────────────────────────────────────────────────
 //  PANEL state
@@ -936,7 +974,7 @@ window.addEventListener('keydown', e => {
             (panel.classList.contains('open') ? closePanel : openPanel)();
             break;
         case 'h': case 'H':
-            document.getElementById('hud-toggle').click();
+            document.querySelector('[data-minimize-btn="hud"]')?.click();
             break;
         case 'r': case 'R':
             setCam('incl');
@@ -983,21 +1021,59 @@ document.getElementById('btn-collapse-all').addEventListener('click', () => {
     persistSecState();
 });
 
-// ── HUD collapse ──────────────────────────────────────────────
-const hud       = document.getElementById('hud');
-const hudToggle = document.getElementById('hud-toggle');
-hudToggle.addEventListener('click', () => {
-    hud.classList.toggle('collapsed');
-    hudToggle.textContent = hud.classList.contains('collapsed') ? '+' : '−';
-    try { localStorage.setItem('achernar_hud_collapsed',
-        hud.classList.contains('collapsed') ? '1' : '0'); } catch {}
-});
-try {
-    if (localStorage.getItem('achernar_hud_collapsed') === '1') {
-        hud.classList.add('collapsed');
-        hudToggle.textContent = '+';
+// ── Floating panels: collapse + drag (shared methodology) ─────
+//   Every overlay (HUD, Hα, SED) gets a .panel-header drag handle
+//   and a .panel-btn[data-minimize-btn] collapse toggle, mirroring
+//   the earth.html panel chrome. js/draggable-panel.js handles the
+//   pointer drag + position persistence and disambiguates a tap
+//   (collapse) from a drag (reposition) via a 4 px threshold.
+const FLOAT_PANELS  = ['hud', 'halpha-panel', 'sed-panel'];
+const PANEL_MIN_KEY = id => 'achernar-panel-min-' + id;
+
+function setPanelMinimized(panel, btn, min, persist = true) {
+    panel.classList.toggle('panel-minimized', min);
+    if (btn) btn.textContent = min ? '▸' : '▾';
+    if (persist) {
+        try { localStorage.setItem(PANEL_MIN_KEY(panel.id), min ? '1' : '0'); } catch {}
     }
-} catch {}
+}
+
+// Delegated so the tap-to-collapse works no matter which panel.
+document.addEventListener('click', e => {
+    const btn = e.target.closest('[data-minimize-btn]');
+    if (!btn) return;
+    e.stopPropagation();
+    const panel = document.getElementById(btn.dataset.minimizeBtn);
+    if (panel) setPanelMinimized(panel, btn, !panel.classList.contains('panel-minimized'));
+});
+
+// Restore collapsed state + wire dragging. The HUD defaults to
+// collapsed on phones so it never buries the star on first load;
+// desktop opens it expanded. Explicit user choices always win.
+const smallViewport = window.matchMedia('(max-width: 720px)').matches;
+FLOAT_PANELS.forEach(id => {
+    const panel = document.getElementById(id);
+    if (!panel) return;
+    const btn = panel.querySelector('[data-minimize-btn]');
+    let stored = null;
+    try { stored = localStorage.getItem(PANEL_MIN_KEY(id)); } catch {}
+    let min;
+    if (stored === '1')      min = true;
+    else if (stored === '0') min = false;
+    else                     min = (id === 'hud') ? smallViewport : false;
+    setPanelMinimized(panel, btn, min, false);
+    makePanelDraggable(panel);
+});
+
+// Double-click a header → snap that panel back to its CSS-default spot.
+document.querySelectorAll(
+    '#hud .panel-header, #halpha-panel .panel-header, #sed-panel .panel-header'
+).forEach(hdr => {
+    hdr.addEventListener('dblclick', ev => {
+        if (ev.target.closest('.panel-btn')) return;
+        resetPanelPosition(hdr.parentElement);
+    });
+});
 
 // ── Slider double-click → reset to default ────────────────────
 document.querySelectorAll('input[type=range]').forEach(s => {
