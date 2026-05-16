@@ -103,7 +103,8 @@ export const PIPELINES = [
       endpoint: '/api/solar-wind/latest',
       category: 'space-weather', upstream: 'NOAA SWPC RTSW',
       cadence_s: 60,    prewarm: 'hot',
-      warnAgeS:  10 * 60, critAgeS: 30 * 60 },
+      warnAgeS:  10 * 60, critAgeS: 30 * 60,
+      notes: 'Supabase ring buffer fed by /api/cron/refresh-solar-wind every 2 min (canonical) + browser write-throughs via /api/solar-wind/ingest (deduped on UNIQUE observed_at,source).' },
 
     { id: 'solar-wind-speed',   label: 'Solar wind speed',
       endpoint: '/api/solar-wind/wind-speed',
