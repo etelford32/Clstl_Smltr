@@ -27,6 +27,7 @@ import { RenderPass }         from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass }    from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { MagnetosphereEngine, computePlasmapause } from './magnetosphere-engine.js';
 import { density as thermoDensity } from './upper-atmosphere-engine.js';
+import { createSolarDisk }    from './solar-disk.js';
 import { SunSkin }            from './sun-skin.js';
 import { CmePropagator }     from './cme-propagation.js';
 import { VanAllenParticles } from './van-allen-particles.js';
@@ -426,26 +427,17 @@ export class SpaceWeatherGlobe {
         this._sunGlow.position.copy(this._sunGroup.position);
         this._scene.add(this._sunGlow);
 
-        // ── Story 1.2: live SDO/AIA disk, billboarded over the photosphere ──
-        // A camera-facing textured quad showing the real Sun at the active
-        // EUV channel via the same /api/solar/aia proxy the inset uses (so
-        // inset ↔ wrapped texture are always the same frame). Hidden until a
-        // texture actually loads; on any failure it stays hidden and the
-        // synthetic DEM photosphere/corona underneath is the fallback.
-        const aiaMat = new THREE.SpriteMaterial({
-            transparent: true,
-            opacity: 0.0,                 // fades in on first successful load
-            depthWrite: false,
-            depthTest: true,
-        });
-        this._aiaSprite = new THREE.Sprite(aiaMat);
-        // Image disk fills ~0.8 of the frame; size so it overlays the
-        // 8-unit photosphere (≈ 2·8 / 0.8 ≈ 20). Tuned visually.
-        this._aiaSprite.scale.set(21, 21, 1);
-        this._aiaSprite.position.copy(this._sunGroup.position);
-        this._aiaSprite.renderOrder = 5;
-        this._aiaSprite.visible = false;
-        this._scene.add(this._aiaSprite);
+        // ── Live SDO/AIA disk (shared shader — no more black square) ───────
+        // Camera-facing disk: circular-masked, limb-feathered, luminance-
+        // keyed so the SDO frame's black background becomes transparent and
+        // the real solar surface blends into the procedural corona. Same
+        // module the heliosphere hero uses → two windows, one live Sun.
+        // size ≈ 2.2 × photosphere radius (8.0) so the imaged disk overlays
+        // the sphere with the limb feathering into the corona.
+        this._aiaDisk = createSolarDisk(THREE, { size: 8.0 * 2.2, diskR: 0.455 });
+        this._aiaDisk.mesh.position.copy(this._sunGroup.position);
+        this._aiaDisk.mesh.renderOrder = 6;
+        this._scene.add(this._aiaDisk.mesh);
 
         this._aiaLoader   = new THREE.TextureLoader();
         this._aiaChannel  = 'white';
@@ -462,7 +454,7 @@ export class SpaceWeatherGlobe {
      * Never blanks the Sun and never shows a placeholder.
      */
     _refreshAiaTexture(channel, force = false) {
-        if (!this._aiaSprite) return;
+        if (!this._aiaDisk) return;
         const ch = channel ?? this._aiaChannel ?? 'white';
         this._aiaChannel  = ch;
         this._aiaLastFetch = performance.now();
@@ -475,22 +467,19 @@ export class SpaceWeatherGlobe {
             (tex) => {
                 if (this._aiaChannel !== ch) { tex.dispose(); return; } // channel changed mid-flight
                 tex.colorSpace = THREE.SRGBColorSpace;
-                const old = this._aiaTexture;
                 this._aiaTexture = tex;
-                this._aiaSprite.material.map = tex;
-                this._aiaSprite.material.opacity = 0.96;
-                this._aiaSprite.material.needsUpdate = true;
-                this._aiaSprite.visible = true;
-                if (old) old.dispose();
+                this._aiaDisk.setTexture(tex);   // disposes the prior texture
+                this._aiaDisk.setOpacity(0.96);
                 // Live texture is authoritative — drop synthetic photosphere
                 // brightness so it acts purely as the limb/far-side blend.
                 this._sunSkin?.setLiveTextureActive?.(true);
             },
             undefined,
             () => {
-                // Keep last good texture if we have one; else reveal synthetic.
+                // Keep last good texture if we have one; else fade out so the
+                // procedural photosphere + corona become the Sun.
                 if (!this._aiaTexture) {
-                    this._aiaSprite.visible = false;
+                    this._aiaDisk.setOpacity(0);
                     this._sunSkin?.setLiveTextureActive?.(false);
                 }
             },
@@ -2325,7 +2314,7 @@ export class SpaceWeatherGlobe {
         // Story 1.2: refresh the live AIA disk every ~12 min, piggy-backed
         // on the data tick (no separate timer) — AR rotation across the
         // disk becomes visible over a session without a page reload.
-        if (this._aiaSprite &&
+        if (this._aiaDisk &&
             performance.now() - (this._aiaLastFetch ?? 0) > 12 * 60 * 1000) {
             this._refreshAiaTexture(this._aiaChannel, true);
         }
@@ -3678,6 +3667,8 @@ export class SpaceWeatherGlobe {
         // Sun update — shader time + flare decay
         this._sunSkin.update(t);
         if (dt > 0 && dt < 1) this._sunSkin.decayFlare(dt);
+        // Live SDO disk: keep it facing the camera (billboard).
+        this._aiaDisk?.face(this._camera);
 
         // 3-D flare burst stack (impulsive flash → EUV ring → arcade glow)
         if (dt > 0 && dt < 1) this._flareRing3D?.tick(dt);

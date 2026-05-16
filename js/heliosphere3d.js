@@ -60,6 +60,7 @@ import {
     cglAnisotropy,
 } from './helio-physics.js';
 import { SUN_VERT, SUN_FRAG, createSunUniforms } from './sun-shader.js';
+import { createSolarDisk } from './solar-disk.js';
 import { SunFeatures } from './sun-features.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -927,6 +928,16 @@ export class Heliosphere3D {
         this._scene.add(core);
         this._sunCore = core;
 
+        // Live SDO disk over the hero Sun — same shared shader the globe
+        // uses, so both views are windows onto the same real-time Sun.
+        // Hero shows HMI white-light (the true visible Sun); fed by the
+        // /api/solar/aia proxy, refreshed every 12 min.
+        this._aiaDisk = createSolarDisk(THREE, { size: R.sun * 2.3, diskR: 0.455 });
+        this._aiaDisk.mesh.position.set(0, 0, 0);   // hero Sun is at the origin
+        this._scene.add(this._aiaDisk.mesh);
+        this._aiaLoader = new THREE.TextureLoader();
+        this._refreshAiaDisk();
+
         // ── Corona glow layers — 4 nested additive halos ─────────────────────────
         // Layout:
         //   [0] Chromosphere / transition region (1.25×) — always present
@@ -959,6 +970,21 @@ export class Heliosphere3D {
             this._scene.add(glow);
             this._coronaMeshes.push({ mesh: glow, baseOpacity: def.baseOpacity, baseScale: def.baseScale });
         }
+    }
+
+    /** Pull the live HMI white-light disk through the same /api/solar/aia
+     *  proxy the globe uses, so the hero Sun is the real current Sun.
+     *  Fade out on failure → the procedural photosphere is the fallback. */
+    _refreshAiaDisk() {
+        if (!this._aiaDisk || !this._aiaLoader) return;
+        this._aiaLastFetch = performance.now();
+        const bucket = Math.floor(Date.now() / (5 * 60 * 1000));
+        this._aiaLoader.load(
+            `/api/solar/aia?channel=white&res=1024&b=${bucket}`,
+            (tex) => { this._aiaDisk.setTexture(tex); this._aiaDisk.setOpacity(0.95); },
+            undefined,
+            () => { if (!this._aiaDisk.hasTexture) this._aiaDisk.setOpacity(0); },
+        );
     }
 
     /**
@@ -3027,6 +3053,12 @@ export class Heliosphere3D {
         }
 
         this._updateLOD(dt);          // Sprint 2: continuous-zoom LOD
+        // Live SDO disk: billboard to camera + 12-min refresh.
+        if (this._aiaDisk) {
+            this._aiaDisk.face(this._camera);
+            if (performance.now() - (this._aiaLastFetch ?? 0) > 12 * 60 * 1000)
+                this._refreshAiaDisk();
+        }
         this._controls.update();
         this._renderer.render(this._scene, this._camera);
     }
