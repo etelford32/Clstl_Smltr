@@ -1102,7 +1102,12 @@ export function initVehicleCanvas(canvas, opts = {}) {
     // ≈ 50 mm equivalent) so the rocket has a sense of presence without
     // looking like a telephoto-flat travel postcard. Cycle via setFOV().
     let cameraFov = 38;
-    const camera = new THREE.PerspectiveCamera(cameraFov, 1, 0.5, 8000);
+    // Default aspect 16/10 (not 1) matches the host's CSS aspect-ratio, so if
+    // the panel mounts collapsed and the very first frame ever paints before
+    // the ResizeObserver delivers a real box, it's a sane wide frame rather
+    // than a square one. The real aspect is applied the moment a non-zero
+    // box exists (see resize()).
+    const camera = new THREE.PerspectiveCamera(cameraFov, 16 / 10, 0.5, 8000);
 
     // ── Lighting ────────────────────────────────────────────────────────────
     scene.add(new THREE.HemisphereLight(0x6688aa, 0x2a1830, 0.55));
@@ -1645,21 +1650,75 @@ export function initVehicleCanvas(canvas, opts = {}) {
         if (typeof opts.onLiftoffEnd === 'function') opts.onLiftoffEnd();
     }
 
+    // Snap the camera to the canonical frame for the current preset and the
+    // *live* canvas aspect. Mirrors setVehicle's framing but without the
+    // 800 ms view tween, so a canvas that was just revealed (panel expanded)
+    // pops straight to the correct frame instead of animating from a stale
+    // pose. Sets controls.target + flushes the god-camera so the pose is
+    // applied even if the render loop is currently paused (collapsed panel).
+    function reframeCurrentView() {
+        if (!current || !current.root) return;
+        cancelViewTween();
+        const aspect = camera.aspect || 16 / 10;
+        const view   = frameForView(currentViewName || 'threequarter',
+                                    current, cameraFov, aspect);
+        const dy = liveOffsetY();
+        cam.pos.set(view.pos[0],    view.pos[1]    + dy, view.pos[2]);
+        controls.target.set(view.target[0], view.target[1] + dy, view.target[2]);
+        setLookAt(controls.target);
+        controls.update();
+        applyCamToThree();
+        // Re-baseline the on-pad reference Y (excludes any in-flight offset)
+        // so a later liftoff Δ-follow stays consistent.
+        current.baseTargetY = controls.target.y - dy;
+        current.baseCamY    = cam.pos.y - dy;
+    }
+
     // ── Resize handling ────────────────────────────────────────────────────
     // Sized BEFORE the initial setVehicle so frameForView sees the correct
-    // canvas aspect from the very first frame — otherwise the default 1:1
-    // PerspectiveCamera aspect leads to a tall, low-margin fit on a 16:10
-    // canvas and the rocket spills out the sides.
+    // canvas aspect from the very first frame — otherwise the default
+    // PerspectiveCamera aspect leads to a tall, low-margin fit and the rocket
+    // spills out the sides.
+    //
+    // The canvas host (.lh-vehicle-canvas-host, inside .lp-collapse-body) can
+    // mount display:none when its panel restores a persisted "collapsed"
+    // state. While collapsed, clientWidth/clientHeight are 0. We must NOT
+    // derive aspect from that (0/0 = NaN) nor setSize(0), and we must NOT
+    // substitute an arbitrary fallback size — doing so bakes a wrong aspect
+    // into setVehicle's framing that nothing ever corrects. Instead we bail
+    // until a real box exists, then re-fit the framing exactly once, so a
+    // cold load with the panel collapsed self-corrects the instant it's
+    // revealed. The same path cleanly re-measures after the compact-density
+    // toggle (host aspect-ratio 16/10 → 16/9, min-height 380 → 300).
+    let framedForValidSize = false;
     function resize() {
-        const w = canvas.clientWidth || 600;
-        const h = canvas.clientHeight || 400;
+        const w = canvas.clientWidth;
+        const h = canvas.clientHeight;
+        if (!w || !h) return;                 // collapsed / not yet laid out
+        // pixelRatio is locked to 1 (see WebGLRenderer init), so the drawing
+        // buffer always equals the CSS box and can't overflow the grid track.
         renderer.setSize(w, h, false);
         camera.aspect = w / h;
         camera.updateProjectionMatrix();
+        // First real box we ever see: (re)frame the current vehicle for the
+        // now-known aspect. Covers the panel-mounted-collapsed cold load,
+        // where the init-time frame ran against the placeholder aspect and
+        // would otherwise stay mis-framed forever. Subsequent resizes
+        // (window resize, density toggle) only re-measure — the user owns
+        // the free-fly camera and we don't yank it back to a preset.
+        if (!framedForValidSize) {
+            framedForValidSize = true;
+            reframeCurrentView();
+        }
     }
+    // Observe the host element, not just the canvas: the host is what
+    // gains/loses its layout box when the collapse panel toggles
+    // display:none ⇄ block, so observing it guarantees the expand
+    // notification (and the density aspect-ratio change) in every browser.
+    const resizeHost = canvas.parentElement || canvas;
     resize();
     const ro = new ResizeObserver(resize);
-    ro.observe(canvas);
+    ro.observe(resizeHost);
 
     // Initial vehicle.
     setVehicle(opts.vehicle || 'shuttle', opts.variant);
@@ -1837,6 +1896,26 @@ export function initVehicleCanvas(canvas, opts = {}) {
         setFOV,
         cycleFOV,
         recenter,
+        // Force a re-measure + reframe. The host page can call this after it
+        // programmatically expands the vehicle panel (the collapse UI fires
+        // no event) or after any layout change the ResizeObserver can't see.
+        // Optional explicit w/h is an escape hatch for callers that already
+        // know the target box.
+        refresh() {
+            framedForValidSize = false;     // let the next resize() reframe
+            resize();
+        },
+        resize(w, h) {
+            if (w > 0 && h > 0) {
+                renderer.setSize(w, h, false);
+                camera.aspect = w / h;
+                camera.updateProjectionMatrix();
+                reframeCurrentView();
+            } else {
+                framedForValidSize = false;
+                resize();
+            }
+        },
         liftoff,
         cancelLiftoff,
         get fov() { return cameraFov; },
