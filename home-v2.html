@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Parkers Physics — Physics-first space weather forecasting</title>
+<meta name="description" content="Storm-resilient LEO drag and thermospheric density forecasts built on first-principles MHD. For satellite operators, government programs, educators, and space researchers.">
+<link rel="stylesheet" href="colors_and_type.css">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    background:var(--black-void);
+    color:var(--fg-2);
+    font-family:var(--font-sans);
+    font-size:var(--fs-body);
+    line-height:var(--lh-base);
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+  body::before{
+    content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
+    background:var(--grad-uv-bg);
+  }
+  #bg-field{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.7}
+  @media(prefers-reduced-motion:reduce){#bg-field{display:none}}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 var(--space-8);position:relative;z-index:1}
+  a{color:inherit;text-decoration:none}
+
+  .eyebrow{
+    font-family:var(--font-display);font-size:11px;font-weight:var(--fw-bold);
+    text-transform:uppercase;letter-spacing:var(--tracking-cyber);
+    color:var(--uv-400);text-shadow:0 0 12px rgba(157,58,255,.35);
+  }
+  h1,h2,h3{font-family:var(--font-display);font-weight:var(--fw-black);text-transform:uppercase;letter-spacing:var(--tracking-cyber);line-height:var(--lh-tight)}
+
+  .btn{
+    display:inline-flex;align-items:center;gap:8px;cursor:pointer;border:none;
+    font-family:var(--font-display);font-weight:var(--fw-bold);font-size:12px;
+    letter-spacing:var(--tracking-wider);text-transform:uppercase;
+    transition:all .2s var(--ease-standard);
+  }
+  .btn-primary{
+    background:var(--grad-uv-pink);color:var(--fg-on-bright);
+    padding:13px 26px;border-radius:var(--radius-md);
+    box-shadow:0 0 36px rgba(157,58,255,.55),inset 0 0 22px rgba(255,255,255,.15);
+  }
+  .btn-primary:hover{transform:translateY(-2px);filter:brightness(1.12);box-shadow:0 0 48px rgba(255,31,156,.7)}
+  .btn-secondary{
+    background:rgba(157,58,255,.12);color:var(--fg-1);
+    padding:12px 24px;border-radius:var(--radius-md);border:1px solid var(--border-uv);
+  }
+  .btn-secondary:hover{background:rgba(157,58,255,.2)}
+  .btn-ghost{
+    background:transparent;color:var(--lightning-arc);
+    padding:12px 24px;border-radius:var(--radius-md);border:1px solid var(--border-arc);
+  }
+  .btn-ghost:hover{background:rgba(143,240,255,.07)}
+  .btn .arr{transition:transform .2s}
+  .btn:hover .arr{transform:translateX(3px)}
+
+  nav{position:sticky;top:0;z-index:50;background:var(--black-overlay);backdrop-filter:blur(14px);border-bottom:1px solid var(--border-1)}
+  .nav-in{display:flex;align-items:center;justify-content:space-between;padding:14px var(--space-8);max-width:1180px;margin:0 auto}
+  .brand{display:flex;align-items:center;gap:11px}
+  .brand .mark{
+    width:26px;height:26px;border-radius:var(--radius-circle);flex-shrink:0;
+    background:var(--grad-uv-pink);position:relative;box-shadow:var(--glow-uv-sm);
+  }
+  .brand .mark::after{content:"";position:absolute;inset:7px;border-radius:50%;background:var(--black-void)}
+  .brand .mark::before{content:"";position:absolute;top:50%;left:50%;width:5px;height:5px;border-radius:50%;background:var(--lightning-arc);transform:translate(-50%,-50%);box-shadow:var(--glow-arc-sm);z-index:1}
+  .brand b{font-family:var(--font-display);font-weight:var(--fw-bold);font-size:14px;letter-spacing:var(--tracking-wider);text-transform:uppercase;color:var(--fg-1)}
+  .nav-links{display:flex;align-items:center;gap:26px}
+  .nav-links a{font-family:var(--font-display);font-size:11px;font-weight:var(--fw-medium);letter-spacing:var(--tracking-wide);text-transform:uppercase;color:var(--fg-3);transition:color .2s}
+  .nav-links a:hover{color:var(--fg-1)}
+  .nav-signin{color:var(--lightning-arc)!important}
+  @media(max-width:760px){.nav-links a:not(.nav-signin){display:none}}
+
+  header{padding:var(--space-25) 0 var(--space-22);position:relative}
+  .hero-eye{margin-bottom:var(--space-6);display:flex;align-items:center;gap:10px;animation:rise .7s .05s both}
+  .live-dot{width:7px;height:7px;border-radius:50%;background:var(--status-ok);box-shadow:0 0 10px var(--status-ok);animation:blink 2.4s ease-in-out infinite}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.35}}
+  h1{
+    font-size:var(--fs-hero);max-width:17ch;
+    background:var(--grad-headline);-webkit-background-clip:text;background-clip:text;
+    -webkit-text-fill-color:transparent;text-shadow:0 0 40px rgba(157,58,255,.25);
+    animation:rise .7s .12s both;
+  }
+  .hero-sub{
+    margin-top:var(--space-6);max-width:58ch;font-size:1.06rem;color:var(--fg-3);
+    line-height:var(--lh-loose);animation:rise .7s .2s both;
+  }
+  .hero-cta{display:flex;gap:var(--space-3);margin-top:var(--space-8);flex-wrap:wrap;animation:rise .7s .28s both}
+  .hero-readout{
+    margin-top:var(--space-13);display:grid;grid-template-columns:repeat(4,1fr);
+    border:1px solid var(--border-2);border-radius:var(--radius-lg);overflow:hidden;
+    background:var(--black-panel);animation:rise .7s .36s both;
+  }
+  .hero-readout div{padding:var(--space-5);border-right:1px solid var(--border-1)}
+  .hero-readout div:last-child{border-right:none}
+  .hero-readout .k{font-family:var(--font-mono);font-size:var(--fs-micro);letter-spacing:var(--tracking-wider);text-transform:uppercase;color:var(--fg-4)}
+  .hero-readout .v{font-family:var(--font-display);font-weight:var(--fw-bold);font-size:1.25rem;color:var(--fg-1);margin-top:8px;text-transform:uppercase;letter-spacing:var(--tracking-wide)}
+  .hero-readout .v.live{color:var(--status-ok)}
+  @media(max-width:680px){.hero-readout{grid-template-columns:repeat(2,1fr)}.hero-readout div:nth-child(2){border-right:none}}
+  @keyframes rise{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+  @media(prefers-reduced-motion:reduce){
+    .hero-eye,h1,.hero-sub,.hero-cta,.hero-readout{animation:none}
+  }
+
+  /* ── Persona self-select — lets a visitor re-aim the page, and powers
+       the persona dimension on every funnel/analytics event ───────────── */
+  .persona-switch{
+    display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-8);
+    animation:rise .7s .04s both;
+  }
+  .persona-switch .pl{
+    font-family:var(--font-display);font-size:10px;font-weight:var(--fw-bold);
+    letter-spacing:var(--tracking-wider);text-transform:uppercase;
+    color:var(--fg-4);background:var(--ghost-1);border:1px solid var(--border-2);
+    padding:7px 14px;border-radius:var(--radius-pill);cursor:pointer;
+    transition:all .2s var(--ease-standard);
+  }
+  .persona-switch .pl:hover{color:var(--fg-1);border-color:var(--border-3)}
+  .persona-switch .pl[aria-pressed="true"]{
+    color:var(--fg-on-bright);background:var(--grad-uv-pink);border-color:transparent;
+    box-shadow:var(--glow-uv-sm);
+  }
+  .persona-switch .pl-label{color:var(--fg-5);align-self:center;font-family:var(--font-mono);
+    font-size:var(--fs-micro);letter-spacing:var(--tracking-wide);text-transform:uppercase;margin-right:var(--space-1)}
+  @media(prefers-reduced-motion:reduce){.persona-switch{animation:none}}
+
+  section{padding:var(--space-22) 0;position:relative}
+  .divider{border-top:1px solid var(--border-1)}
+  .sec-head{margin-bottom:var(--space-13);max-width:64ch}
+  .sec-head h2{font-size:var(--fs-h2);margin-top:var(--space-4);color:var(--fg-1);text-shadow:0 0 30px rgba(157,58,255,.2)}
+  .sec-head p{margin-top:var(--space-3);color:var(--fg-3);font-size:1rem;text-transform:none;font-family:var(--font-sans);letter-spacing:0;line-height:var(--lh-loose)}
+
+  .proof{display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--border-2);border-radius:var(--radius-lg);overflow:hidden}
+  .proof>div{padding:var(--space-10)}
+  .proof .hook{background:linear-gradient(155deg,#150a35,#0d0626);border-right:1px solid var(--border-2)}
+  .proof .receipt{background:linear-gradient(155deg,#0d0626,#07021a)}
+  .case-id{font-family:var(--font-mono);font-size:var(--fs-micro);letter-spacing:var(--tracking-wider);color:var(--fg-4);text-transform:uppercase}
+  .proof h3{font-size:1.35rem;margin:var(--space-3) 0 var(--space-4);letter-spacing:var(--tracking-wide)}
+  .proof .hook h3{color:var(--pink-400);text-shadow:0 0 24px rgba(255,31,156,.35)}
+  .proof .receipt h3{color:var(--lightning-arc);text-shadow:0 0 24px rgba(143,240,255,.3)}
+  .proof p{font-size:.94rem;color:var(--fg-3);line-height:var(--lh-loose)}
+  .punch{margin-top:var(--space-5);padding-top:var(--space-5);border-top:1px solid var(--border-1);font-size:.94rem;color:var(--fg-2)}
+  .punch b{color:var(--fg-1)}
+  .stat-row{display:flex;gap:var(--space-8);margin-top:var(--space-5);flex-wrap:wrap}
+  .stat-row .n{font-family:var(--font-display);font-weight:var(--fw-black);font-size:1.9rem;color:var(--status-warn);letter-spacing:var(--tracking-wide)}
+  .stat-row .l{font-family:var(--font-mono);font-size:var(--fs-micro);letter-spacing:var(--tracking-wide);text-transform:uppercase;color:var(--fg-4);margin-top:4px}
+  .flag{
+    margin-top:var(--space-5);font-family:var(--font-mono);font-size:var(--fs-caption);
+    color:var(--status-warn);background:rgba(255,210,63,.07);
+    border:1px solid rgba(255,210,63,.25);border-radius:var(--radius-sm);
+    padding:11px 14px;line-height:1.55;
+  }
+  @media(max-width:760px){.proof{grid-template-columns:1fr}.proof .hook{border-right:none;border-bottom:1px solid var(--border-2)}}
+
+  .doors{display:grid;grid-template-columns:1.5fr 1fr 1fr;gap:var(--space-5)}
+  .door{
+    background:linear-gradient(155deg,#150a35,#0d0626);
+    border:1px solid var(--border-2);border-radius:var(--radius-lg);
+    padding:var(--space-8);position:relative;display:flex;flex-direction:column;
+    transition:all .25s var(--ease-standard);overflow:hidden;
+  }
+  .door::before{content:"";position:absolute;left:0;top:0;right:0;height:2px;background:var(--border-3)}
+  .door:hover{transform:translateY(-4px);border-color:var(--border-3)}
+  .door.primary{border-color:var(--border-uv);box-shadow:var(--glow-uv-md)}
+  .door.primary::before{background:var(--grad-uv-pink)}
+  .door.primary:hover{box-shadow:0 0 52px rgba(255,31,156,.5)}
+  .dnum{font-family:var(--font-mono);font-size:var(--fs-micro);color:var(--fg-4);letter-spacing:var(--tracking-wide)}
+  .door h3{font-size:1.2rem;margin:var(--space-4) 0 var(--space-3);letter-spacing:var(--tracking-wide);color:var(--fg-1)}
+  .door.primary h3{background:var(--grad-headline-uv);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+  .door p{font-size:.9rem;color:var(--fg-3);flex-grow:1;line-height:var(--lh-loose)}
+  .dlink{margin-top:var(--space-5);font-family:var(--font-display);font-size:11px;font-weight:var(--fw-bold);letter-spacing:var(--tracking-wide);text-transform:uppercase;color:var(--lightning-arc);display:flex;align-items:center;gap:7px}
+  .door.primary .dlink{color:var(--pink-400)}
+  .door:hover .arr{transform:translateX(3px)}
+  .arr{transition:transform .2s}
+  @media(max-width:860px){.doors{grid-template-columns:1fr}}
+
+  .why{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--border-2);border-radius:var(--radius-lg);overflow:hidden}
+  .why .col{padding:var(--space-8);border-right:1px solid var(--border-1);background:var(--black-panel)}
+  .why .col:last-child{border-right:none}
+  .why .idx{font-family:var(--font-display);font-weight:var(--fw-black);font-size:1.4rem;background:var(--grad-uv-pink);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+  .why h3{font-size:1.1rem;margin:var(--space-4) 0 var(--space-3);letter-spacing:var(--tracking-wide);color:var(--fg-1)}
+  .why p{font-size:.9rem;color:var(--fg-3);line-height:var(--lh-loose)}
+  @media(max-width:760px){.why{grid-template-columns:1fr}.why .col{border-right:none;border-bottom:1px solid var(--border-1)}.why .col:last-child{border-bottom:none}}
+
+  .cap-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-4)}
+  .cap{display:flex;gap:var(--space-4);align-items:flex-start;background:var(--black-panel);border:1px solid var(--border-2);border-radius:var(--radius-md);padding:var(--space-6)}
+  .cap .dot{width:9px;height:9px;border-radius:50%;background:var(--status-ok);box-shadow:0 0 10px var(--status-ok);margin-top:7px;flex-shrink:0}
+  .cap.road .dot{background:var(--status-warn);box-shadow:0 0 10px var(--status-warn)}
+  .cap h4{font-family:var(--font-display);font-size:.82rem;font-weight:var(--fw-bold);letter-spacing:var(--tracking-wide);text-transform:uppercase;color:var(--fg-1)}
+  .cap p{font-size:.86rem;color:var(--fg-3);margin-top:5px;line-height:1.55}
+  .road-tag{display:inline-block;margin-top:9px;font-family:var(--font-mono);font-size:var(--fs-micro);letter-spacing:var(--tracking-wide);text-transform:uppercase;color:var(--status-warn);border:1px solid rgba(255,210,63,.3);padding:3px 8px;border-radius:var(--radius-xs)}
+  @media(max-width:680px){.cap-grid{grid-template-columns:1fr}}
+
+  .gov{border:1px solid var(--border-uv);border-radius:var(--radius-lg);overflow:hidden;background:var(--grad-cosmic-bg);box-shadow:var(--inner-glow-uv)}
+  .gov-in{padding:var(--space-10);display:grid;grid-template-columns:1.3fr 1fr;gap:var(--space-10);align-items:center}
+  .gov h2{font-size:1.45rem;margin:var(--space-4) 0;color:var(--fg-1);letter-spacing:var(--tracking-wide)}
+  .gov p{color:var(--fg-3);font-size:.94rem;line-height:var(--lh-loose)}
+  .naics{margin-top:var(--space-6);display:flex;flex-wrap:wrap;gap:var(--space-2)}
+  .naics span{font-family:var(--font-mono);font-size:var(--fs-caption);color:var(--fg-3);border:1px solid var(--border-2);padding:5px 10px;border-radius:var(--radius-xs);background:var(--black-void)}
+  .gov-panel{border-left:1px solid var(--border-2);padding-left:var(--space-10)}
+  .gov-panel .row{display:flex;justify-content:space-between;align-items:center;padding:11px 0;border-bottom:1px solid var(--border-1)}
+  .gov-panel .row:last-of-type{border-bottom:none}
+  .gov-panel .lbl{font-family:var(--font-mono);font-size:var(--fs-micro);letter-spacing:var(--tracking-wide);text-transform:uppercase;color:var(--fg-4)}
+  .gov-panel .val{font-family:var(--font-mono);font-size:var(--fs-caption);color:var(--fg-2)}
+  .gov-panel .val.pending{color:var(--status-warn)}
+  .gov-panel .dl{margin-top:var(--space-5);display:flex;flex-direction:column;gap:var(--space-2)}
+  .gov-panel .dl a{display:flex;align-items:center;gap:9px;font-family:var(--font-mono);font-size:var(--fs-caption);color:var(--fg-3);padding:11px 13px;border:1px solid var(--border-2);border-radius:var(--radius-sm);transition:all .2s}
+  .gov-panel .dl a:hover{border-color:var(--border-arc);color:var(--fg-1)}
+  .gov-panel .dl a::before{content:"▸";color:var(--lightning-arc)}
+  @media(max-width:820px){.gov-in{grid-template-columns:1fr;gap:var(--space-8)}.gov-panel{border-left:none;border-top:1px solid var(--border-2);padding-left:0;padding-top:var(--space-8)}}
+
+  .res{border:1px solid var(--border-2);border-radius:var(--radius-lg);background:var(--black-panel);padding:var(--space-10);position:relative;overflow:hidden}
+  .res::before{content:"";position:absolute;right:-80px;top:-80px;width:280px;height:280px;background:radial-gradient(circle,rgba(157,58,255,.16),transparent 70%)}
+  .res-top{display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:var(--space-5);margin-bottom:var(--space-8);position:relative}
+  .res-top h3{font-size:1.4rem;color:var(--fg-1);letter-spacing:var(--tracking-wide)}
+  .res-top p{color:var(--fg-3);font-size:.94rem;max-width:48ch;margin-top:8px;text-transform:none;font-family:var(--font-sans);letter-spacing:0;line-height:var(--lh-loose)}
+  .sim-strip{display:flex;gap:var(--space-2);flex-wrap:wrap;margin-bottom:var(--space-6)}
+  .sim-strip span{font-family:var(--font-mono);font-size:var(--fs-caption);color:var(--fg-3);border:1px solid var(--border-2);padding:6px 11px;border-radius:var(--radius-xs);background:var(--black-void)}
+  .tier-row{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-4)}
+  .tier{border:1px solid var(--border-2);border-radius:var(--radius-md);padding:var(--space-6);background:var(--black-void)}
+  .tier .tn{font-family:var(--font-display);font-size:10px;font-weight:var(--fw-bold);letter-spacing:var(--tracking-wider);text-transform:uppercase;color:var(--fg-4)}
+  .tier .tp{font-family:var(--font-display);font-weight:var(--fw-black);font-size:1.7rem;margin:7px 0 5px;color:var(--fg-1)}
+  .tier .tp span{font-size:.85rem;color:var(--fg-4);font-weight:var(--fw-medium)}
+  .tier .td{font-size:.84rem;color:var(--fg-3);line-height:1.55}
+  .res-note{margin-top:var(--space-5);font-family:var(--font-mono);font-size:var(--fs-micro);color:var(--fg-4);position:relative}
+  @media(max-width:680px){.tier-row{grid-template-columns:1fr}}
+
+  .final{text-align:center;padding:var(--space-25) 0;background:var(--grad-pink-bg)}
+  .final h2{font-size:var(--fs-h2);max-width:20ch;margin:var(--space-4) auto 0;color:var(--fg-1);text-shadow:0 0 40px rgba(255,31,156,.3)}
+  .final p{color:var(--fg-3);margin:var(--space-4) auto 0;max-width:50ch;line-height:var(--lh-loose)}
+  .final .hero-cta{justify-content:center;margin-top:var(--space-8)}
+
+  footer{border-top:1px solid var(--border-1);padding:var(--space-13) 0 var(--space-16);background:var(--black-deeper)}
+  .foot-grid{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:var(--space-8)}
+  .foot-grid h5{font-family:var(--font-display);font-size:10px;font-weight:var(--fw-bold);letter-spacing:var(--tracking-wider);text-transform:uppercase;color:var(--fg-4);margin-bottom:var(--space-4)}
+  .foot-grid a{display:block;color:var(--fg-4);font-size:.86rem;margin-bottom:9px;transition:color .2s}
+  .foot-grid a:hover{color:var(--fg-1)}
+  .foot-brand p{color:var(--fg-5);font-size:.86rem;margin-top:var(--space-3);max-width:34ch;line-height:var(--lh-loose)}
+  .foot-bottom{margin-top:var(--space-10);padding-top:var(--space-6);border-top:1px solid var(--border-1);display:flex;justify-content:space-between;flex-wrap:wrap;gap:var(--space-3);font-family:var(--font-mono);font-size:var(--fs-micro);color:var(--fg-6);letter-spacing:var(--tracking-wide)}
+  @media(max-width:760px){.foot-grid{grid-template-columns:1fr 1fr}}
+  .anchor{scroll-margin-top:90px}
+</style>
+</head>
+<body>
+<canvas id="bg-field" aria-hidden="true"></canvas>
+
+<nav>
+  <div class="nav-in">
+    <a href="#" class="brand"><span class="mark"></span> <b>Parkers Physics</b></a>
+    <div class="nav-links">
+      <a href="#operators">Operators</a>
+      <a href="#government">Government &amp; SBIR</a>
+      <a href="#researchers">Researchers</a>
+      <a href="/signin.html" class="nav-signin" data-funnel-cta data-cta="nav_signin">Sign in ↗</a>
+    </div>
+  </div>
+</nav>
+
+<header>
+  <div class="wrap">
+    <div class="hero-eye">
+      <span class="live-dot"></span>
+      <span class="eyebrow" data-pp="hero.eyebrow">Physics-first space weather forecasting</span>
+    </div>
+    <h1 data-pp="hero.h1">LEO drag forecasts that hold up during the storm</h1>
+    <p class="hero-sub" data-pp="hero.sub">
+      When a geomagnetic storm hits, the empirical atmosphere models inside your conjunction
+      and reentry tools under-predict drag — and spacecraft come down early. Parkers Physics
+      forecasts thermospheric density from first-principles MHD, so your orbit determination
+      stays accurate when it matters most.
+    </p>
+
+    <div class="persona-switch" id="personaSwitch" role="group" aria-label="Choose your track">
+      <span class="pl-label">I am a</span>
+      <button class="pl" type="button" data-persona="operator"   aria-pressed="true">Satellite operator</button>
+      <button class="pl" type="button" data-persona="educator"   aria-pressed="false">Educator</button>
+      <button class="pl" type="button" data-persona="enthusiast" aria-pressed="false">Enthusiast</button>
+      <button class="pl" type="button" data-persona="scientist"  aria-pressed="false">Scientist</button>
+    </div>
+
+    <div class="hero-cta">
+      <a href="#operators" class="btn btn-primary" data-pp-href="hero.ctaPrimary"
+         data-funnel-cta data-cta="hero_primary"><span data-pp="hero.ctaPrimary">Request access</span> <span class="arr">→</span></a>
+      <a href="#government" class="btn btn-ghost" data-pp-href="hero.ctaSecondary"
+         data-funnel-cta data-cta="hero_secondary"><span data-pp="hero.ctaSecondary">Get the technical brief</span></a>
+    </div>
+
+    <div class="hero-readout" id="heroReadout">
+      <div><div class="k">Forecast target</div><div class="v">LEO drag</div></div>
+      <div><div class="k">Model basis</div><div class="v">MHD</div></div>
+      <div><div class="k">Validation</div><div class="v">Storm-class</div></div>
+      <div><div class="k">Live feeds</div><div class="v live">12 ●</div></div>
+    </div>
+  </div>
+</header>
+
+<section class="anchor divider" id="proof" data-pp-section="proof">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">The problem, and the receipt</span>
+      <h2>The atmosphere model is wrong in the direction that loses spacecraft</h2>
+    </div>
+    <div class="proof">
+      <div class="hook">
+        <div class="case-id">Case 01 — Starlink Group 4-7 · Feb 2022</div>
+        <h3>38 satellites lost to drag the model didn't see</h3>
+        <p>
+          A modest geomagnetic storm raised thermospheric density shortly after launch.
+          Atmospheric drag came in well above what the operational empirical model predicted.
+          Of 49 newly launched Starlink satellites, 38 failed to climb to operational orbit
+          and reentered.
+        </p>
+        <div class="punch">
+          <b>The model wasn't off by a rounding error.</b> It was off in the one direction
+          that de-orbits hardware — and empirical models degrade exactly when storms arrive.
+        </div>
+      </div>
+      <div class="receipt">
+        <div class="case-id">Case 02 — Gannon storm · May 2024</div>
+        <h3>Reconstructed, then validated against the real event</h3>
+        <p>
+          We reconstructed the May 2024 Gannon superstorm from ground-magnetometer data
+          and tested our density response against it — a storm that pushed empirical
+          atmosphere models well outside their calibration range.
+        </p>
+        <div class="stat-row">
+          <div><div class="n">RMSE TBD</div><div class="l">vs. NRLMSIS</div></div>
+          <div><div class="n">— %</div><div class="l">drag-error reduction</div></div>
+        </div>
+        <div class="flag">
+          ⚠ ROADMAP — Gannon validation runs on GSA pipeline step 1 (gsa_step1.py).
+          In validation, not a shipping product. Numbers above are placeholders pending
+          gsa_step1 output.
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="anchor divider" id="operators" data-pp-section="operators">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Pick your mission</span>
+      <h2>Three ways into Parkers Physics</h2>
+      <p>One forecasting engine, four audiences. Use the track switch above to re-aim this page.</p>
+    </div>
+    <div class="doors" id="doors">
+      <div class="door" data-door="operators">
+        <div class="dnum">DOOR 01</div>
+        <h3>Satellite operators</h3>
+        <p>
+          Storm-resilient drag and thermospheric density forecasts for conjunction screening,
+          reentry prediction, and orbit maintenance. Delivered as density grids and Δ-ephemeris
+          your existing OD pipeline can ingest — API, CSV, JSON.
+        </p>
+        <a href="#capability" class="dlink" data-funnel-cta data-cta="door_operators">Request access <span class="arr">→</span></a>
+      </div>
+      <div class="door" data-door="government">
+        <div class="dnum">DOOR 02</div>
+        <h3>Government &amp; SBIR</h3>
+        <p>
+          A physics-first forecasting capability for AFRL, NOAA, and NASA programs.
+          Capabilities statement and technical brief available for program officers.
+        </p>
+        <a href="#government" class="dlink" data-funnel-cta data-cta="door_government">View capability <span class="arr">→</span></a>
+      </div>
+      <div class="door" data-door="researchers">
+        <div class="dnum">DOOR 03</div>
+        <h3>Researchers &amp; educators</h3>
+        <p>
+          28+ interactive simulations built on published equations and live NASA / NOAA
+          feeds. Free to start.
+        </p>
+        <a href="#researchers" class="dlink" data-funnel-cta data-cta="door_researchers">Explore simulations <span class="arr">→</span></a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="divider" data-pp-section="why">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">The differentiator</span>
+      <h2>Why physics-first beats the black box</h2>
+      <p>The space situational awareness market is crowded with machine-learning models. Here's what a first-principles approach gives you that curve-fitting can't.</p>
+    </div>
+    <div class="why">
+      <div class="col">
+        <div class="idx">01</div>
+        <h3>MHD, not curve-fit</h3>
+        <p>Global magnetosphere modeling in the SWMF / BATS-R-US lineage — not empirical models like NRLMSIS, calibrated to quiet conditions and degrading exactly when a storm arrives.</p>
+      </div>
+      <div class="col">
+        <div class="idx">02</div>
+        <h3>Transparent &amp; reproducible</h3>
+        <p>Every model traces to a published equation. A program officer can evaluate the method itself; a result can be defended in technical review. No black box to take on faith.</p>
+      </div>
+      <div class="col">
+        <div class="idx">03</div>
+        <h3>Validated on real storms</h3>
+        <p>Tested against the events that break empirical models — Starlink 2022, Gannon 2024 — not just quiet-time baselines that any model can fit.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="anchor divider" id="capability" data-pp-section="capability">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">What you get</span>
+      <h2>Operational outputs, not a 3D toy</h2>
+      <p>Deliverables built to drop into a flight-dynamics workflow. Roadmap items are labeled — never presented as shipping today.</p>
+    </div>
+    <div class="cap-grid">
+      <div class="cap"><div class="dot"></div><div><h4>Thermospheric density grids</h4><p>Density fields under specified F10.7 / Ap states across the LEO altitude band.</p></div></div>
+      <div class="cap"><div class="dot"></div><div><h4>Drag &amp; ballistic-impact estimates</h4><p>Drag-coefficient and orbital-decay estimates for reentry timing and phasing.</p></div></div>
+      <div class="cap"><div class="dot"></div><div><h4>Storm-mode forecast updates</h4><p>Escalated refresh during active geomagnetic conditions, when forecasts matter most.</p></div></div>
+      <div class="cap"><div class="dot"></div><div><h4>API + CSV / JSON export</h4><p>Pipeline-ready outputs your existing orbit-determination tools can ingest directly.</p></div></div>
+      <div class="cap road"><div class="dot"></div><div><h4>INTERMAGNET ground station aggregator</h4><p>Dst reconstruction from the full INTERMAGNET network rather than the standard four stations.</p><span class="road-tag">Roadmap · in validation</span></div></div>
+      <div class="cap road"><div class="dot"></div><div><h4>Sun-to-Earth forecast chain</h4><p>Coupled magnetosphere–ionosphere–thermosphere forecasting with a learned overlay.</p><span class="road-tag">Roadmap</span></div></div>
+    </div>
+  </div>
+</section>
+
+<section class="anchor divider" id="government" data-pp-section="government">
+  <div class="wrap">
+    <div class="gov">
+      <div class="gov-in">
+        <div>
+          <span class="eyebrow">Government &amp; SBIR</span>
+          <h2>A vendor built for the contract, not the app store</h2>
+          <p>
+            Parkers Physics is positioned as a physics-first space weather forecasting
+            capability for federal programs. The thesis is simple: global MHD modeling
+            resolves storm-time thermospheric response that empirical models miss — the
+            gap that drove the 2022 Starlink loss. We're structured for SBIR / STTR as the
+            near-term path to a deployable capability.
+          </p>
+          <div class="naics">
+            <span>NAICS 541715</span><span>NAICS 541330</span><span>NAICS 541511</span><span>NAICS 541512</span>
+          </div>
+        </div>
+        <div class="gov-panel">
+          <div class="row"><span class="lbl">SAM.gov</span><span class="val pending">Registration in progress</span></div>
+          <div class="row"><span class="lbl">CAGE code</span><span class="val pending">Pending</span></div>
+          <div class="row"><span class="lbl">Set-aside</span><span class="val">Small business</span></div>
+          <div class="row"><span class="lbl">Vehicle</span><span class="val">SBIR / STTR</span></div>
+          <div class="dl">
+            <a href="#" data-funnel-cta data-cta="gov_capabilities_pdf">Capabilities statement (PDF)</a>
+            <a href="#" data-funnel-cta data-cta="gov_brief_pdf">Technical brief — for program officers (PDF)</a>
+          </div>
+          <a href="/contact-enterprise.html" class="btn btn-primary" style="margin-top:16px;width:100%;justify-content:center"
+             data-funnel-cta data-cta="gov_brief_us">Brief us on the mission <span class="arr">→</span></a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="anchor divider" id="researchers" data-pp-section="researchers">
+  <div class="wrap">
+    <div class="res">
+      <div class="res-top">
+        <div>
+          <span class="eyebrow">Researchers &amp; educators</span>
+          <h3 style="margin-top:14px">Explore the universe in your browser</h3>
+          <p>The original Parkers Physics experience — 28+ scientifically accurate WebGL simulations driven by live NASA and NOAA data. Built on published equations, free to start.</p>
+        </div>
+        <a href="https://www.parkersphysics.com/galactic-map.html" class="btn btn-secondary"
+           data-funnel-cta data-cta="res_open_sims">Open the simulations <span class="arr">→</span></a>
+      </div>
+      <div class="sim-strip">
+        <span>Earth magnetosphere</span><span>Upper atmosphere</span><span>Solar physics engine</span>
+        <span>Space weather dashboard</span><span>Stellar physics</span><span>Galactic map</span><span>+ 22 more</span>
+      </div>
+      <div class="tier-row">
+        <div class="tier">
+          <div class="tn">Free — forever</div>
+          <div class="tp">$0</div>
+          <div class="td">3 core simulations · live NOAA solar wind &amp; Kp · space weather dashboard.</div>
+        </div>
+        <div class="tier">
+          <div class="tn">Basic</div>
+          <div class="tp">$10<span> / mo</span></div>
+          <div class="td">All 28+ simulations · full WebGL rendering · live DONKI feeds · storm alerts.</div>
+        </div>
+      </div>
+      <p class="res-note">Operator &amp; agency access is scoped per mission — not a public tier. Use Door 01.</p>
+    </div>
+  </div>
+</section>
+
+<section class="final divider" data-pp-section="final">
+  <div class="wrap">
+    <span class="eyebrow">Start here</span>
+    <h2 data-pp="final.h2">Is your atmosphere model losing you spacecraft?</h2>
+    <p data-pp="final.p">Request access for a scoped briefing on storm-resilient drag forecasting for your constellation.</p>
+    <div class="hero-cta">
+      <a href="#operators" class="btn btn-primary" data-pp-href="final.ctaPrimary"
+         data-funnel-cta data-cta="final_primary"><span data-pp="final.ctaPrimary">Request access</span> <span class="arr">→</span></a>
+      <a href="#government" class="btn btn-ghost" data-pp-href="hero.ctaSecondary"
+         data-funnel-cta data-cta="final_secondary"><span data-pp="hero.ctaSecondary">Get the technical brief</span></a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div class="foot-brand">
+        <a href="#" class="brand"><span class="mark"></span> <b>Parkers Physics</b></a>
+        <p>Physics-first space weather forecasting for satellites, programs, and science.</p>
+      </div>
+      <div>
+        <h5>Platform</h5>
+        <a href="#operators">For operators</a>
+        <a href="#government">Government &amp; SBIR</a>
+        <a href="#capability">Capabilities</a>
+        <a href="#researchers">Simulations</a>
+      </div>
+      <div>
+        <h5>Data sources</h5>
+        <a href="https://www.swpc.noaa.gov/">NOAA SWPC</a>
+        <a href="https://api.nasa.gov/">NASA DONKI</a>
+        <a href="#">GOES-16/18</a>
+        <a href="#">INTERMAGNET</a>
+      </div>
+      <div>
+        <h5>Company</h5>
+        <a href="/contact-enterprise.html">Contact</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/eula.html">Terms</a>
+      </div>
+    </div>
+    <div class="foot-bottom">
+      <span>© 2026 PARKERS PHYSICS</span>
+      <span>OPERATOR-FIRST HOMEPAGE v2 · UV SYSTEM · A/B</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+/* Lightweight drifting particle field — no black hole, no heavy 3D.
+   Respects prefers-reduced-motion and pauses when the tab is hidden. */
+(function(){
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+  var cv = document.getElementById('bg-field');
+  if(reduce || !cv){ if(cv) cv.style.display='none'; return; }
+  var ctx = cv.getContext('2d'), W, H, dpr, parts = [], raf, running = true;
+  var hues = ['157,58,255','255,31,156','143,240,255'];
+  function size(){
+    dpr = Math.min(window.devicePixelRatio||1, 2);
+    W = cv.width = innerWidth*dpr;
+    H = cv.height = innerHeight*dpr;
+    cv.style.width = innerWidth+'px'; cv.style.height = innerHeight+'px';
+    var target = Math.round(innerWidth*innerHeight/24000);
+    parts = [];
+    for(var i=0;i<target;i++) parts.push(spawn());
+  }
+  function spawn(){
+    return {
+      x:Math.random()*W, y:Math.random()*H,
+      r:(Math.random()*1.5+0.4)*dpr,
+      vx:(Math.random()*0.16+0.04)*dpr*(Math.random()<.5?-1:1),
+      vy:(Math.random()*0.10-0.05)*dpr,
+      a:Math.random()*0.4+0.1,
+      tw:Math.random()*Math.PI*2,
+      hue:hues[Math.floor(Math.random()*hues.length)]
+    };
+  }
+  function frame(){
+    if(!running) return;
+    ctx.clearRect(0,0,W,H);
+    for(var i=0;i<parts.length;i++){
+      var p = parts[i];
+      p.x+=p.vx; p.y+=p.vy; p.tw+=0.013;
+      if(p.x<-20)p.x=W+20; if(p.x>W+20)p.x=-20;
+      if(p.y<-20)p.y=H+20; if(p.y>H+20)p.y=-20;
+      var depth = Math.max(0, 1 - p.y/(H*0.95));
+      var alpha = p.a*depth*(0.65+0.35*Math.sin(p.tw));
+      if(alpha<=0.01) continue;
+      ctx.beginPath();
+      ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+      ctx.fillStyle='rgba('+p.hue+','+alpha.toFixed(3)+')';
+      ctx.shadowBlur=6*dpr; ctx.shadowColor='rgba('+p.hue+',0.6)';
+      ctx.fill();
+    }
+    ctx.shadowBlur=0;
+    raf=requestAnimationFrame(frame);
+  }
+  document.addEventListener('visibilitychange',function(){
+    running=!document.hidden;
+    if(running) raf=requestAnimationFrame(frame); else cancelAnimationFrame(raf);
+  });
+  addEventListener('resize',size);
+  size(); frame();
+})();
+</script>
+
+<script type="module">
+/* A/B + persona wiring. Importing experiments.js transitively boots the
+   anon-safe telemetry/funnel pipeline (telemetry.js self-inits on import). */
+import { experiments } from './js/experiments.js';
+import { resolveContent } from './js/persona-content.js';
+
+const $  = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
+
+function render(){
+  const persona = experiments.persona();
+  const assignments = {
+    home_hero: experiments.assign('home_hero'),
+    home_cta:  experiments.assign('home_cta'),
+  };
+  const c = resolveContent(persona, assignments);
+
+  // Text slots
+  $$('[data-pp]').forEach(el => {
+    const v = c.slots[el.getAttribute('data-pp')];
+    if (typeof v === 'string') el.textContent = v;
+  });
+  // Anchor targets
+  $$('[data-pp-href]').forEach(el => {
+    const a = el.closest('a') || el;
+    const href = c.hrefs[el.getAttribute('data-pp-href')];
+    if (href) a.setAttribute('href', href);
+  });
+  // Persona-tuned readout
+  const ro = $('#heroReadout');
+  if (ro && Array.isArray(c.readout)) {
+    ro.innerHTML = c.readout.map(r =>
+      `<div><div class="k">${r.k}</div><div class="v${r.live?' live':''}">${r.v}</div></div>`
+    ).join('');
+  }
+  // Promote the persona's door
+  $$('#doors .door').forEach(d => {
+    d.classList.toggle('primary', d.getAttribute('data-door') === c.activeDoor);
+  });
+  // Reflect active persona on the switch
+  $$('#personaSwitch .pl').forEach(b => {
+    b.setAttribute('aria-pressed', String(b.getAttribute('data-persona') === persona));
+  });
+  document.documentElement.setAttribute('data-persona', persona);
+}
+
+// Persona self-select
+$$('#personaSwitch .pl').forEach(btn => {
+  btn.addEventListener('click', () => {
+    experiments.setPersona(btn.getAttribute('data-persona'));
+    render();
+  });
+});
+window.addEventListener('pp-persona-changed', render);
+
+// Assign variants + paint the persona view first, so the landing_view
+// event (and every event after) carries the resolved exp map + persona.
+render();
+
+// Landing view — canonical funnel stage, segmented by persona + exp map
+experiments.track('landing_view', { page: 'home-v2' });
+
+// Every CTA → canonical landing_cta_click with which control + target
+$$('[data-funnel-cta]').forEach(el => {
+  el.addEventListener('click', () => {
+    experiments.track('landing_cta_click', {
+      cta: el.getAttribute('data-cta') || 'unknown',
+      target: (el.getAttribute('href') || '').slice(0, 80),
+    });
+  }, { passive: true });
+});
+
+// Section reach — one event per section per session (extra stage; stores
+// but is intentionally absent from the ordered funnel-summary RPC)
+if ('IntersectionObserver' in window) {
+  const seen = new Set();
+  const io = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (!e.isIntersecting) continue;
+      const name = e.target.getAttribute('data-pp-section');
+      if (seen.has(name)) continue;
+      seen.add(name);
+      experiments.track('landing_section_view', { section: name });
+    }
+  }, { threshold: 0.4 });
+  $$('[data-pp-section]').forEach(s => io.observe(s));
+}
+</script>
+
+</body>
+</html>
