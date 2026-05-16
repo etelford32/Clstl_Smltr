@@ -544,9 +544,10 @@
 </footer>
 
 <script>
-/* Lightweight drifting particle field — no black hole, no heavy 3D.
-   Respects prefers-reduced-motion and pauses when the tab is hidden. */
-(function(){
+/* Lightweight drifting particle field — the hero_bg "particles" control
+   variant. Started by the module below only when assigned. Respects
+   prefers-reduced-motion and pauses when the tab is hidden. */
+window.__ppStartParticles = function(){
   var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches;
   var cv = document.getElementById('bg-field');
   if(reduce || !cv){ if(cv) cv.style.display='none'; return; }
@@ -598,7 +599,7 @@
   });
   addEventListener('resize',size);
   size(); frame();
-})();
+};
 </script>
 
 <script type="module">
@@ -688,6 +689,50 @@ if ('IntersectionObserver' in window) {
   }, { threshold: 0.4 });
   $$('[data-pp-section]').forEach(s => io.observe(s));
 }
+
+// Hero background — A/B variant of `hero_bg`. accretion = the 3D
+// analytical scene (disc + Parker spirals + twistors); particles = the
+// light drifting field. Engagement (control tweaks, dwell) is tracked
+// so the test measures interest, not only click-through.
+(function initHeroBg(){
+  const reduced = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches);
+  const variant = experiments.assign('hero_bg');
+
+  const seenInteract = new Set();
+  const onInteract = (name) => {
+    if (seenInteract.has(name)) return;          // bound volume: once/control/session
+    seenInteract.add(name);
+    experiments.track('hero_interact', { control: name });
+  };
+
+  const startParticles = () => {
+    const bg = document.getElementById('bg-field');
+    if (bg) bg.style.display = '';
+    if (typeof window.__ppStartParticles === 'function') window.__ppStartParticles();
+  };
+
+  if (variant === 'accretion') {
+    const bg = document.getElementById('bg-field');
+    if (bg) bg.style.display = 'none';           // 3D scene owns the backdrop
+    import('./js/hero-accretion.js')
+      .then(m => m.mountHeroAccretion({ reduced, onInteract }))
+      .catch(() => startParticles());            // WebGL / import failure → fallback
+  } else {
+    startParticles();
+  }
+
+  // Hero dwell — fired once after 8s of an active (visible) tab.
+  let dwelled = false;
+  (function dwell(){
+    if (dwelled) return;
+    if (document.hidden) { setTimeout(dwell, 2000); return; }
+    setTimeout(() => {
+      if (dwelled || document.hidden) { dwell(); return; }
+      dwelled = true;
+      experiments.track('hero_dwell', { ms: 8000 });
+    }, 8000);
+  })();
+})();
 </script>
 
 </body>
