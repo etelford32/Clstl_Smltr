@@ -87,6 +87,7 @@ export const SUN_FRAG = /* glsl */`
     uniform vec4  u_regions[8];
     uniform int   u_nRegions;
     uniform float u_rot_phase;
+    uniform float u_unrest;             // 0..1 live restlessness (X-ray driven)
     uniform float u_channel_phot_dim;   // 1.0 white-light, ~0.05 in EUV channels
 
     varying vec3 vNormalView;
@@ -135,20 +136,35 @@ export const SUN_FRAG = /* glsl */`
     }
 
     // ── Granulation (~1 Mm cells) ─────────────────────────────────────────────
+    // Real granules have an ~8–10 min lifetime and visibly boil; the prior
+    // drift coefficients were so small the surface read as frozen at a
+    // glance.  Roughly 2× faster so the convection pattern evolves on a
+    // session timescale (still well short of "flowing"), and the larger
+    // cells churn with a faint per-cell pulse so the boil never looks like a
+    // rigidly translating texture.
     float granulation(vec2 uv, float t) {
-        float n = vnoise(uv *  7.0  + vec2( t * 0.016,  t * 0.011)) * 0.50
-                + vnoise(uv * 15.0  + vec2(-t * 0.025,  t * 0.018)) * 0.30
-                + vnoise(uv * 31.0  + vec2( t * 0.041, -t * 0.035)) * 0.20;
+        float n = vnoise(uv *  7.0  + vec2( t * 0.034,  t * 0.024)) * 0.50
+                + vnoise(uv * 15.0  + vec2(-t * 0.052,  t * 0.038)) * 0.30
+                + vnoise(uv * 31.0  + vec2( t * 0.082, -t * 0.070)) * 0.20;
+        n += 0.05 * sin(t * 0.22 + (uv.x + uv.y) * 18.0);
         return smoothstep(0.30, 0.70, n);
     }
 
     // ── Chromospheric spicules ─────────────────────────────────────────────────
+    // The Hα limb fringe seethes faster and reaches higher when the Sun is
+    // active (more flux emergence → denser, more energetic jets).  u_unrest
+    // accelerates the jet shimmer and lifts the fringe so the limb visibly
+    // bristles during flare-rich periods even with the AIA disk on top.
     float spicules(vec2 uv, float mu, float t) {
-        float n = vnoise(vec2(uv.x * 110.0 + t * 0.008, uv.y * 5.0 + t * 0.003)) * 0.6
-                + vnoise(vec2(uv.x * 220.0 - t * 0.015, uv.y * 2.5))              * 0.4;
-        float w = max(0.0, 1.0 - mu / 0.18);
+        float ag = 1.0 + u_unrest * 2.2;          // jitter acceleration
+        float n = vnoise(vec2(uv.x * 110.0 + t * 0.008 * ag, uv.y * 5.0 + t * 0.003 * ag)) * 0.6
+                + vnoise(vec2(uv.x * 220.0 - t * 0.015 * ag, uv.y * 2.5))                   * 0.4;
+        // Fast flicker on top so individual jets visibly twitch.
+        n *= 0.82 + 0.18 * sin(t * (3.0 + u_unrest * 9.0) + uv.x * 90.0);
+        float reach = 0.18 * (1.0 + u_unrest * 0.55);
+        float w = max(0.0, 1.0 - mu / reach);
         w = w * w;
-        return n * w;
+        return n * w * (1.0 + u_unrest * 0.45);
     }
 
     // ── Limb darkening ────────────────────────────────────────────────────────
@@ -173,19 +189,26 @@ export const SUN_FRAG = /* glsl */`
 
         // ── Convection texture ──
         vec2 uv = vUv;
-        // Apply differential rotation phase offset for quality >= 2
+        // Differential rotation: drift the convection/spicule pattern around
+        // the disk so the surface visibly turns, with the equator outrunning
+        // the poles (Snodgrass).  u_rot_phase is the equatorial rotation
+        // angle in radians driven by the host's solar clock; uv.x spans the
+        // full circumference once, so radians → turns is ×1/(2π).  Applied at
+        // quality ≥ 2 (the dedicated Sun / space-weather globe); the far
+        // heliosphere view leaves it static.  The old ×0.0001 scale made
+        // this imperceptible — the surface looked frozen.
         if (u_quality > 1.5) {
-            // Snodgrass differential rotation: equator faster than poles
-            float lat = (uv.y - 0.5) * 3.14159;
-            float sinLat = sin(lat);
-            float s2 = sinLat * sinLat;
-            // Relative to equatorial rate: slow poles by up to ~25%
+            float latT   = (uv.y - 0.5) * 3.14159;
+            float sinLat = sin(latT);
+            float s2     = sinLat * sinLat;
             float diffRot = 1.0 - 0.163 * s2 - 0.121 * s2 * s2;
-            uv.x += u_rot_phase * diffRot * 0.0001;
+            uv.x += u_rot_phase * diffRot * 0.15915494;   // ×1/(2π)
         }
 
-        float sgran = supergranulation(uv, u_time);
-        float gran  = (u_quality > 0.5) ? granulation(uv, u_time) : sgran;
+        // Convective turnover speeds up modestly when the Sun is restless.
+        float convT = u_time * (1.0 + u_unrest * 0.45);
+        float sgran = supergranulation(uv, convT);
+        float gran  = (u_quality > 0.5) ? granulation(uv, convT) : sgran;
         float texture = sgran * 0.38 + gran * 0.62;
 
         // ── Base photosphere colour from Teff ──
@@ -240,8 +263,17 @@ export const SUN_FRAG = /* glsl */`
             float plage     = exp(-ang * ang / (0.040 + 0.020 * arInt)) * arInt * facing;
             //   compact bright knot (171 Å loops above the AR)
             float knot      = exp(-ang * ang / (0.012 + 0.004 * arInt)) * arInt * facing;
-            // Time-varying flicker for active loops (~10 s lifetime)
-            float flicker   = 0.85 + 0.15 * sin(u_time * 1.6 + float(k) * 2.3);
+            // Time-varying flicker for active loops.  A quiet AR barely
+            // shimmers; a flaring one crackles — amplitude AND rate scale
+            // with the live unrest so the plage's restlessness mirrors the
+            // real GOES X-ray state instead of a fixed cosmetic wobble.
+            float fAmp  = 0.10 + 0.42 * u_unrest;
+            float fRate = 1.2  + 5.5  * u_unrest;
+            float flicker   = max(0.05, (1.0 - fAmp)
+                            + fAmp * sin(u_time * fRate + float(k) * 2.3)
+                            // second, faster beat only emerges when active →
+                            // the "boiling" micro-flare crackle of a hot AR.
+                            + 0.10 * u_unrest * sin(u_time * (9.0 + float(k)) + float(k)));
 
             totalUmbra    += umbra;
             totalPenumbra += penumb;
@@ -264,6 +296,13 @@ export const SUN_FRAG = /* glsl */`
 
         // EUV plage emission — additive, brighter near disc centre, attenuated at limb
         actCol += totalEuv * (0.65 + 0.35 * mu) * max(0.6, u_bloom);
+
+        // Disk-wide "simmer": an active Sun has a raised, gently pulsing
+        // diffuse EUV background (network + nano-flare heating) — barely
+        // there when quiet, a soft breathing wash when the X-ray is hot.
+        float simmer = u_unrest * (0.020 + 0.014 * sin(u_time * 0.9))
+                     * (0.55 + 0.45 * mu);
+        actCol += vec3(0.85, 0.62, 0.42) * simmer * max(0.6, u_bloom);
 
         // ── Post-flare UV arc glow ──
         if (u_flare_arc > 0.005) {
@@ -316,6 +355,7 @@ export const CORONA_FRAG = /* glsl */`
     uniform float u_euv_dimming;
     uniform float u_layer;   // 0-1 which corona layer (inner->outer)
     uniform float u_time;
+    uniform float u_unrest;  // 0..1 live restlessness (X-ray driven)
     varying vec3 vWorldNormal;
     varying vec3 vViewDir;
 
@@ -324,6 +364,10 @@ export const CORONA_FRAG = /* glsl */`
         vec3 V = normalize(vViewDir);
         float NdotV = dot(V, N);
 
+        // Heliographic latitude / azimuth proxies from the world normal.
+        float lat = abs(N.y);
+        float az  = atan(N.z, N.x);            // [-π, π] around the spin axis
+
         // ── Fresnel rim (strong at silhouette) ──
         float rim = pow(1.0 - abs(NdotV), 1.6);
 
@@ -331,10 +375,20 @@ export const CORONA_FRAG = /* glsl */`
         // Inner layers glow across the whole sphere; outer layers are rim-only
         float faceGlow = max(0.0, NdotV) * (1.0 - u_layer) * 0.12;
 
-        // ── Streamer structure — helmet streamers at equatorial belt ──
-        // Use world normal Y component as proxy for heliographic latitude
-        float lat = abs(N.y);
-        float streamer = (1.0 - smoothstep(0.0, 0.45, lat)) * 0.15 * (1.0 - u_layer * 0.6);
+        // ── Streamer structure — helmet streamers at the equatorial belt ──
+        // The belt is no longer a smooth band: discrete streamers modulate it
+        // azimuthally, the whole pattern slowly rotates with the Sun, and the
+        // ray tips waver (slow MHD swaying) so the corona is never static.
+        // Streamer count/contrast swells with unrest (an active Sun grows a
+        // brighter, more structured streamer belt).
+        float roll   = u_time * 0.012;                       // slow corona spin
+        float sway   = 0.18 * sin(u_time * 0.23 + az * 2.0); // ray-tip waver
+        float belt   = 1.0 - smoothstep(0.0, 0.45 + 0.06 * sin(az * 5.0 + roll), lat);
+        float rays   = 0.5 + 0.5 * sin(az * (7.0 + 4.0 * u_unrest) - roll * 3.0 + sway);
+        rays         = pow(rays, 2.0);
+        float streamer = belt * (0.10 + 0.18 * u_unrest)
+                       * (0.45 + 0.55 * rays)
+                       * (1.0 - u_layer * 0.6);
         // Polar coronal holes — dimmer at poles
         float polarHole = smoothstep(0.7, 0.95, lat) * 0.08 * (1.0 - u_layer);
 
@@ -343,11 +397,16 @@ export const CORONA_FRAG = /* glsl */`
         vec3 outerCol = vec3(0.80, 0.30, 0.05);
         vec3 col = mix(innerCol, outerCol, u_layer);
 
-        // Streamer colour — slightly brighter white in streamer belt
+        // Streamer colour — slightly brighter white in the streamer belt
         col += vec3(0.15, 0.12, 0.05) * streamer;
 
-        // X-ray brightening during flares — hot blue-white component
-        col += vec3(0.25, 0.35, 0.55) * u_xray_norm * (1.0 - u_layer * 0.5);
+        // X-ray brightening — hot blue-white component.  Uses the live
+        // unrest (a smoothed X-ray proxy that keeps evolving between the
+        // 1-min data ticks) so a hot corona genuinely shimmers hotter,
+        // pulsing on a faster beat the more active the Sun is.
+        float hot   = max(u_xray_norm, u_unrest * 0.8);
+        float hotPulse = 0.75 + 0.25 * sin(u_time * (1.1 + 4.0 * u_unrest));
+        col += vec3(0.25, 0.35, 0.55) * hot * hotPulse * (1.0 - u_layer * 0.5);
 
         // ── Alpha: combine rim + face glow + streamers ──
         float baseAlpha = rim * (0.30 - u_layer * 0.20)
@@ -357,11 +416,19 @@ export const CORONA_FRAG = /* glsl */`
         // Subtract polar holes
         baseAlpha -= polarHole;
 
-        // Bloom and time-varying pulsation (subtle coronal breathing)
-        float pulse = 1.0 + 0.04 * sin(u_time * 0.7 + u_layer * 2.0);
+        // ── Coronal breathing ───────────────────────────────────────────
+        // Real corona brightness tracks active-region heating: nearly steady
+        // when quiet, a deep multi-frequency throb when the X-ray is hot.
+        // (Previously this used u_time but the shell material was never given
+        //  u_time, so the corona was frozen — this is the headline fix.)
+        float bAmp  = 0.03 + 0.20 * u_unrest;
+        float pulse = 1.0
+                    + bAmp * sin(u_time * (0.6 + 0.9 * u_unrest) + u_layer * 2.0)
+                    + 0.4 * bAmp * sin(u_time * (1.7 + 3.0 * u_unrest) - u_layer);
         float alpha = max(0.0, baseAlpha) * max(0.3, u_bloom) * pulse;
 
-        // EUV dimming from CME — coronal mass loss reduces brightness
+        // EUV dimming from an Earth-directed CME — coronal mass leaves and
+        // the halo visibly deflates, then recovers (driven by live DONKI).
         alpha *= 1.0 - u_euv_dimming * (0.4 + u_layer * 0.3);
 
         gl_FragColor = vec4(col * alpha, alpha);
@@ -399,6 +466,12 @@ export function createSunUniforms(THREE) {
         u_flare_t:   { value: 0.0 },
         u_kp_norm:   { value: 0.0 },
         u_bloom:     { value: 1.0 },
+        // Story 1.4 — live "unrest" scalar [0..1] derived from the GOES
+        // X-ray level + its short-term volatility + recent-flare decay.
+        // Drives corona breathing, plage/loop crackle and spicule agitation
+        // so the Sun's visible restlessness tracks how active it actually is
+        // right now rather than running a fixed cosmetic animation.
+        u_unrest:    { value: 0.0 },
         u_flare_arc:    { value: 0.0 },
         u_flare_phase:  { value: 0.0 },   // 0-1 flare evolution stage
         u_euv_dimming:  { value: 0.0 },   // 0-1 coronal mass loss dimming

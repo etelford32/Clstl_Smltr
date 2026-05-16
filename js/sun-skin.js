@@ -111,10 +111,17 @@ export class SunSkin {
         if (corona) {
             for (let i = 0; i < CORONA_SHELLS.length; i++) {
                 const r = radius * CORONA_SHELLS[i];
+                // Share the live uniforms with the shell material.  u_time,
+                // u_unrest and u_euv_dimming were previously NOT passed, so
+                // the shell's time-varying breathing was frozen at sin(0) and
+                // CME dimming never reached it — the corona looked dead.
                 const coronaU = {
-                    u_bloom:     this.sunU.u_bloom,
-                    u_xray_norm: this.sunU.u_xray_norm,
-                    u_layer:     { value: i / (CORONA_SHELLS.length - 1) },
+                    u_bloom:       this.sunU.u_bloom,
+                    u_xray_norm:   this.sunU.u_xray_norm,
+                    u_time:        this.sunU.u_time,
+                    u_unrest:      this.sunU.u_unrest,
+                    u_euv_dimming: this.sunU.u_euv_dimming,
+                    u_layer:       { value: i / (CORONA_SHELLS.length - 1) },
                 };
                 const mat = new THREE.ShaderMaterial({
                     vertexShader:   CORONA_VERT,
@@ -165,12 +172,29 @@ export class SunSkin {
         this.setEuvMode('white');
     }
 
+    /**
+     * Story 1.4 — drive the photosphere rotation phase from an external
+     * solar clock (radians of equatorial rotation).  Once called, the
+     * internal sidereal auto-accumulation in update() is suppressed so the
+     * host (e.g. the space-weather globe's time-lapsed solar clock) is the
+     * single source of truth.  Pages that don't call this keep the old
+     * self-driven behaviour.
+     */
+    setRotationPhase(rad) {
+        this._extRotDriven = true;
+        this._rotPhase = rad || 0;
+        this.sunU.u_rot_phase.value = this._rotPhase;
+    }
+
     /** Call every frame with elapsed seconds. */
     update(t) {
         this.sunU.u_time.value = t;
-        // Accumulate differential rotation phase
-        this._rotPhase += OMEGA_EQ * (1 / 60);  // assume ~60fps
-        this.sunU.u_rot_phase.value = this._rotPhase;
+        // Accumulate differential rotation phase — only when no external
+        // solar clock is driving it (heliosphere hero keeps this path).
+        if (!this._extRotDriven) {
+            this._rotPhase += OMEGA_EQ * (1 / 60);  // assume ~60fps
+            this.sunU.u_rot_phase.value = this._rotPhase;
+        }
         // Refresh sun-world position uniform so the volumetric corona ray
         // shader has accurate world-space anchor (parent may have moved).
         if (this._parent && this._parent.getWorldPosition) {
@@ -281,6 +305,26 @@ export class SunSkin {
         this.sunU.u_f107_norm.value = f107Norm;
         this.sunU.u_activity.value  = activity;
         this.sunU.u_teff.value      = teff;
+    }
+
+    /**
+     * Story 1.4 — push the live "unrest" scalar [0..1].  Derived by the
+     * caller from the GOES X-ray level + its short-term volatility + recent-
+     * flare decay, this drives the corona's breathing depth/rate, the
+     * plage/loop crackle, and the spicule fringe agitation so the Sun's
+     * visible restlessness tracks how active it actually is right now.
+     */
+    setUnrest(v) {
+        this.sunU.u_unrest.value = Math.max(0, Math.min(1, v || 0));
+    }
+
+    /**
+     * EUV/white-light dimming [0..1] from an Earth-directed CME — coronal
+     * mass leaves the corona and the halo visibly deflates, then recovers.
+     * Driven from the live DONKI CME feed by the host page.
+     */
+    setEuvDimming(v) {
+        this.sunU.u_euv_dimming.value = Math.max(0, Math.min(1, v || 0));
     }
 
     /**
