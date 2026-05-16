@@ -2352,17 +2352,25 @@ export class SpaceWeatherGlobe {
         this._beltParticles?.setKp(kp);
         this._beltParticles?.setStorm({ bz, kp });
 
-        // Sun — push live SWPC data
-        const xInt = state.derived?.xray_intensity ?? 0;
-        const xrayNorm = Math.max(0, Math.min(1, xInt > 0
-            ? (-Math.log10(xInt) - 4) / 4
-            : 0));
+        // Sun — push live SWPC data.
+        // derived.xray_intensity is ALREADY a 0..1 log-normalised GOES flux
+        // (clamp01((log10(flux)+9)/6) → ~0.17 A-class quiet … ~0.83 X-class).
+        // The previous code applied a *raw-flux* formula to that already-
+        // normalised value, so xrayNorm clamped to ~0 forever and the Sun's
+        // entire X-ray response was dead.  Re-stretch the live intensity so
+        // quiet→0 and a strong flare→1.
+        const xInt = state.derived?.xray_intensity ?? 0.17;
+        const xrayNorm = Math.max(0, Math.min(1, (xInt - 0.17) / 0.63));
         this._sunSkin.setSpaceWeather({
             xrayNorm,
             kpNorm:   Math.min(1, kp / 9),
             f107Norm: state.derived?.f107_norm ?? 0.5,
             activity: state.derived?.activity  ?? 0.5,
         });
+
+        // ── Story 1.4: live "unrest" → the Sun visibly tracks its real state ──
+        this._sunSkin.setUnrest(this._computeUnrest(state, xrayNorm));
+        this._sunSkin.setEuvDimming(this._computeCmeDimming(state));
 
         // ── Synthesise coronal holes from solar-wind speed ──────────────────
         // Two near-permanent polar holes (always present, scaled by activity
@@ -2850,6 +2858,77 @@ export class SpaceWeatherGlobe {
 
     /** Currently-active sun-rendering mode. */
     get euvMode() { return this._sunSkin?.euvMode ?? 'white'; }
+
+    /**
+     * Story 1.4 — derive the live "unrest" scalar [0..1] the Sun shaders use
+     * to breathe / crackle in proportion to how active the Sun actually is.
+     *
+     * Three real-data ingredients, combined and smoothed:
+     *   • level      — the live GOES X-ray flux (xrayNorm: quiet 0 → X 1).
+     *   • volatility — an EMA of |Δlevel| between the 1-min data ticks; a
+     *                  Sun that is rapidly varying its X-ray output is
+     *                  "crackling" (micro-/sub-flare activity) even if the
+     *                  instantaneous level is moderate.
+     *   • flareEcho  — exponential decay of the most recent M/X flare (post-
+     *                  flare loops keep the corona hot for hours).
+     *
+     * Smoothed with a fast attack / slow release so a flare ramps the Sun
+     * up within a tick and it settles over many minutes — matching real
+     * post-flare coronal cooling rather than snapping back.
+     */
+    _computeUnrest(state, xrayNorm) {
+        const level = Math.max(0, Math.min(1, xrayNorm || 0));
+
+        // Short-term volatility (per-tick |Δ|, EMA-smoothed, then stretched
+        // — even small but persistent jitter should register as "restless").
+        const prev = this._unrestPrevLevel ?? level;
+        const dAbs = Math.abs(level - prev);
+        this._unrestPrevLevel = level;
+        this._xrayVolEma = (this._xrayVolEma ?? 0) * 0.7 + dAbs * 0.3;
+        const volatility = Math.min(1, this._xrayVolEma * 12);
+
+        // Most-recent M/X flare echo (NOAA+DONKI merged list is time-sorted).
+        let flareEcho = 0;
+        const top = (state.flares ?? [])[0];
+        if (top && top.time) {
+            const t = top.time instanceof Date ? top.time.getTime()
+                                                : new Date(top.time).getTime();
+            const L = String(top.cls ?? top.parsed?.letter ?? '').toUpperCase()[0];
+            const scale = L === 'X' ? 1.0 : L === 'M' ? 0.55 : L === 'C' ? 0.18 : 0.0;
+            if (isFinite(t) && scale > 0) {
+                const dtHr = (Date.now() - t) / 3.6e6;
+                if (dtHr >= 0 && dtHr < 8) flareEcho = scale * Math.exp(-dtHr / 2.0);
+            }
+        }
+
+        // Storm mode is a coarse "the Sun is angry" backstop.
+        const stormFloor = state.storm_mode ? 0.30 : 0.0;
+
+        const target = Math.max(
+            stormFloor,
+            Math.min(1, 0.60 * level + 0.30 * volatility + 0.55 * flareEcho),
+        );
+
+        // Asymmetric smoothing: fast up (flare onset is abrupt), slow down.
+        const cur = this._unrest ?? target;
+        const a   = target > cur ? 0.55 : 0.06;
+        this._unrest = cur + (target - cur) * a;
+        return this._unrest;
+    }
+
+    /**
+     * Story 1.4 — EUV/white-light dimming [0..1] from a live Earth-directed
+     * CME.  A new DONKI detection injects a deflation impulse (coronal mass
+     * has left); it then recovers over a few hours as the corona refills.
+     */
+    _computeCmeDimming(state) {
+        if (state.new_cme_detected && state.earth_directed_cme) {
+            this._cmeDim = Math.max(this._cmeDim ?? 0, 0.55);
+        }
+        // ~6 h e-folding recovery at the ~1-min tick cadence.
+        this._cmeDim = (this._cmeDim ?? 0) * 0.992;
+        return this._cmeDim < 0.01 ? 0 : this._cmeDim;
+    }
 
     /**
      * Build the active coronal-hole anchor list for the live frame.

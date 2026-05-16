@@ -111,10 +111,17 @@ export class SunSkin {
         if (corona) {
             for (let i = 0; i < CORONA_SHELLS.length; i++) {
                 const r = radius * CORONA_SHELLS[i];
+                // Share the live uniforms with the shell material.  u_time,
+                // u_unrest and u_euv_dimming were previously NOT passed, so
+                // the shell's time-varying breathing was frozen at sin(0) and
+                // CME dimming never reached it — the corona looked dead.
                 const coronaU = {
-                    u_bloom:     this.sunU.u_bloom,
-                    u_xray_norm: this.sunU.u_xray_norm,
-                    u_layer:     { value: i / (CORONA_SHELLS.length - 1) },
+                    u_bloom:       this.sunU.u_bloom,
+                    u_xray_norm:   this.sunU.u_xray_norm,
+                    u_time:        this.sunU.u_time,
+                    u_unrest:      this.sunU.u_unrest,
+                    u_euv_dimming: this.sunU.u_euv_dimming,
+                    u_layer:       { value: i / (CORONA_SHELLS.length - 1) },
                 };
                 const mat = new THREE.ShaderMaterial({
                     vertexShader:   CORONA_VERT,
@@ -281,6 +288,26 @@ export class SunSkin {
         this.sunU.u_f107_norm.value = f107Norm;
         this.sunU.u_activity.value  = activity;
         this.sunU.u_teff.value      = teff;
+    }
+
+    /**
+     * Story 1.4 — push the live "unrest" scalar [0..1].  Derived by the
+     * caller from the GOES X-ray level + its short-term volatility + recent-
+     * flare decay, this drives the corona's breathing depth/rate, the
+     * plage/loop crackle, and the spicule fringe agitation so the Sun's
+     * visible restlessness tracks how active it actually is right now.
+     */
+    setUnrest(v) {
+        this.sunU.u_unrest.value = Math.max(0, Math.min(1, v || 0));
+    }
+
+    /**
+     * EUV/white-light dimming [0..1] from an Earth-directed CME — coronal
+     * mass leaves the corona and the halo visibly deflates, then recovers.
+     * Driven from the live DONKI CME feed by the host page.
+     */
+    setEuvDimming(v) {
+        this.sunU.u_euv_dimming.value = Math.max(0, Math.min(1, v || 0));
     }
 
     /**
