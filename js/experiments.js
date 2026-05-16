@@ -53,6 +53,15 @@ export const EXPERIMENTS = Object.freeze({
             { id: 'urgency', w: 50 },   // persona-specific stronger verb
         ],
     },
+    // Hero background renderer. control = the light drifting particle
+    // field; accretion = the analytical, adjustable accretion-disc canvas.
+    hero_bg: {
+        status: 'running',
+        variants: [
+            { id: 'particles', w: 50 },
+            { id: 'accretion', w: 50 },
+        ],
+    },
 });
 
 /* ── Storage keys ───────────────────────────────────────────────────── */
