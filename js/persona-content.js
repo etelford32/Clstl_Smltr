@@ -55,7 +55,7 @@ const BASE = {
         ctaPrimary:      { control: 'Explore simulations', urgency: 'Start a free classroom' },
         ctaPrimaryHref:  '#researchers',
         ctaSecondary:    'See educator pricing',
-        ctaSecondaryHref:'/for-educators',
+        ctaSecondaryHref:'/for-educators.html',
         readout: [
             { k: 'Simulations', v: '28+' },
             { k: 'Data',        v: 'Live NASA·NOAA' },
