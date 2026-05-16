@@ -53,6 +53,58 @@ const J_CR1                  = 2398167.4;       // JD at the start of CR 1
 const UNIX_TO_JD             = 2440587.5;       // JD at Unix epoch 0
 const DEG2RAD                = Math.PI / 180;
 
+// ── Differential rotation (Snodgrass 1990, Doppler) ──────────────────────────
+//   ω(φ) = A + B·sin²φ + C·sin⁴φ   [°/day, sidereal]
+// The Sun is not a rigid body: the equator laps the poles by ~4 °/day, so a
+// feature's heliographic longitude drifts relative to the rigidly-rotating
+// Carrington grid by an amount that depends only on its latitude.  The
+// Carrington coordinate system itself is defined by a *fixed* sidereal rate
+// (period 25.38 d ⇒ 14.184 °/day), so the differential drift of a feature
+// at latitude φ over Δt solar-days is
+//
+//     Δφ_carr(φ) = ( ω(φ) − ω_carr ) · Δt        [° of Carrington longitude]
+//
+// Equator → +0.53 °/day (drifts east, ahead of the grid); mid-latitudes lag.
+const SNODGRASS_A      = 14.713;   // °/day equatorial sidereal
+const SNODGRASS_B      = -2.396;   // °/day  sin²φ term
+const SNODGRASS_C      = -1.787;   // °/day  sin⁴φ term
+const CARRINGTON_SIDEREAL_RATE = 360 / 25.38;   // ≈14.184 °/day
+
+/**
+ * Sidereal surface rotation rate at heliographic latitude `lat_rad`
+ * (Snodgrass 1990), in degrees per day.
+ */
+export function siderealRateDegPerDay(lat_rad = 0) {
+    const s2 = Math.sin(lat_rad) ** 2;
+    return SNODGRASS_A + SNODGRASS_B * s2 + SNODGRASS_C * s2 * s2;
+}
+
+/**
+ * Differential drift of a feature's Carrington longitude (degrees) after
+ * `elapsedSolarDays` of (possibly time-lapsed) solar time, given its
+ * heliographic latitude.  Zero at the latitude where the surface co-rotates
+ * with the Carrington grid (~26°); positive nearer the equator.
+ */
+export function differentialCarringtonDriftDeg(lat_rad, elapsedSolarDays) {
+    return (siderealRateDegPerDay(lat_rad) - CARRINGTON_SIDEREAL_RATE)
+         * elapsedSolarDays;
+}
+
+/**
+ * Scene-coordinate longitude (radians) for a feature published at Carrington
+ * longitude `lon_carrington_deg` / latitude `lat_rad`, observed `virtualDate`,
+ * having undergone differential rotation for `elapsedSolarDays` since it was
+ * catalogued.  This is `carringtonToSceneLon` with the latitude-dependent
+ * differential drift folded into the Carrington longitude first, so equatorial
+ * regions visibly outrun high-latitude ones over a session.
+ */
+export function differentialSceneLon(
+    lon_carrington_deg, lat_rad, virtualDate = new Date(), elapsedSolarDays = 0,
+) {
+    const drift = differentialCarringtonDriftDeg(lat_rad, elapsedSolarDays);
+    return carringtonToSceneLon(lon_carrington_deg + drift, virtualDate);
+}
+
 /** Convert a JS Date (or default = now) to Julian Day. */
 export function julianDay(date = new Date()) {
     return date.getTime() / 86400000 + UNIX_TO_JD;

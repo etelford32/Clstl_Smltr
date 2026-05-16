@@ -189,15 +189,20 @@ export const SUN_FRAG = /* glsl */`
 
         // ── Convection texture ──
         vec2 uv = vUv;
-        // Apply differential rotation phase offset for quality >= 2
+        // Differential rotation: drift the convection/spicule pattern around
+        // the disk so the surface visibly turns, with the equator outrunning
+        // the poles (Snodgrass).  u_rot_phase is the equatorial rotation
+        // angle in radians driven by the host's solar clock; uv.x spans the
+        // full circumference once, so radians → turns is ×1/(2π).  Applied at
+        // quality ≥ 2 (the dedicated Sun / space-weather globe); the far
+        // heliosphere view leaves it static.  The old ×0.0001 scale made
+        // this imperceptible — the surface looked frozen.
         if (u_quality > 1.5) {
-            // Snodgrass differential rotation: equator faster than poles
-            float lat = (uv.y - 0.5) * 3.14159;
-            float sinLat = sin(lat);
-            float s2 = sinLat * sinLat;
-            // Relative to equatorial rate: slow poles by up to ~25%
+            float latT   = (uv.y - 0.5) * 3.14159;
+            float sinLat = sin(latT);
+            float s2     = sinLat * sinLat;
             float diffRot = 1.0 - 0.163 * s2 - 0.121 * s2 * s2;
-            uv.x += u_rot_phase * diffRot * 0.0001;
+            uv.x += u_rot_phase * diffRot * 0.15915494;   // ×1/(2π)
         }
 
         // Convective turnover speeds up modestly when the Sun is restless.

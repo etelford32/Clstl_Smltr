@@ -35,6 +35,7 @@ import {
     carringtonToSceneLon,
     subEarthCarringtonLongitude,
     carringtonRotationNumber,
+    differentialSceneLon,
 } from './sun-rotation.js';
 import { PerfProfiler } from './perf-profiler.js';
 import { buildArFieldLoops } from './sun-field.js';
@@ -242,6 +243,20 @@ export class SpaceWeatherGlobe {
         // Per-AR emission streams (built once per setRegions update)
         this._arStreams      = [];   // [{ origin:Vector3, dirBase, intensity, complex }]
         this._lastRegionsKey = '';
+
+        // ── Solar rotation clock (Story 1.4) ────────────────────────────────
+        // NOAA publishes AR positions in Carrington longitude at a real
+        // instant; between the (≈daily) updates the Sun used to sit frozen.
+        // A time-lapsed solar clock advances continuously so the disk turns
+        // visibly within a session, with the equator outrunning the poles
+        // (differential rotation, sun-rotation.js).  The lapse is honest and
+        // labelled — same spirit as the compressed Moon orbit elsewhere.
+        this._solarLapse     = 300;        // virtual solar-sec per real-sec
+        this._arBase         = null;       // Carrington-frame base AR list
+        this._arBuildRealMs  = 0;          // wall-clock at last AR-set build
+        this._arShaderBase   = [];         // per-AR {intensity,complex,lat_rad}
+        this._holeCtx        = { v: 400, activity: 0.5 };
+        this._rotLastRebuild = 0;          // last 3-D feature rebuild (perf.now)
 
         // ── AR twist accumulator ────────────────────────────────────────────
         // Each NOAA active region carries an integrating twist Φ(t) that grows
@@ -2372,15 +2387,13 @@ export class SpaceWeatherGlobe {
         this._sunSkin.setUnrest(this._computeUnrest(state, xrayNorm));
         this._sunSkin.setEuvDimming(this._computeCmeDimming(state));
 
-        // ── Synthesise coronal holes from solar-wind speed ──────────────────
-        // Two near-permanent polar holes (always present, scaled by activity
-        // — deeper / wider during solar minimum) plus one Earth-facing
-        // equatorial hole when the 1-AU wind is fast enough to suggest an
-        // open-field stream is currently rooted in the Earth-facing
-        // hemisphere.  Real coronal-hole maps come from EUV imagery (193 Å
-        // dark patches), which we don't ingest yet — this is a kinematic
-        // proxy that captures the right gross structure.
-        this._sunSkin.setHoles(this._synthesizeHoles(spd, state));
+        // Coronal-hole context for the per-frame solar-rotation pass
+        // (synthetic polar + wind-driven equatorial proxies, plus the
+        // Carrington-anchored HEK detections, all re-projected as the Sun
+        // turns).  Pushed every frame from `_applySolarRotation`.
+        this._holeCtx = { v: spd, activity: state.derived?.activity ?? 0.5 };
+        this._sunSkin.setHoles(
+            this._synthesizeHoles(spd, state, this._solarVirtualDate()));
 
         // ── Active regions — paint patches on photosphere & build wind streams ──
         const regions = Array.isArray(state.active_regions) ? state.active_regions : [];
@@ -2392,39 +2405,16 @@ export class SpaceWeatherGlobe {
             // entries keep their accumulated Φ; fresh ARs initialise from the
             // baseline tied to their Hale class; missing ARs are dropped.
             this._syncArTwist(regions);
-            // Convert area + spot count → 0..1 emission intensity.
-            //   Area is already normalised to ~0..1 via swpc-feed (μH / 400).
-            //   Sunspot multiplicity adds a small bump (saturating).
-            // Apply the live Carrington-rotation transform so AR longitudes
-            // track the actual sub-Earth angle at the moment of rendering —
-            // ARs now drift west across the disk at ≈13°/day, matching SDO.
-            // We build a derived `regionsApparent` array used by every
-            // visual consumer (sun shader, flux-rope arches, wind streams)
-            // so the rotation is applied once and consistently.
-            const nowDate = new Date();
-            const regionsApparent = regions.map(r => {
-                const lon_carr_deg = r.lon_deg != null
-                    ? r.lon_deg
-                    : (r.lon_rad ?? 0) * 180 / Math.PI;
-                return {
-                    ...r,
-                    lon_rad: carringtonToSceneLon(lon_carr_deg, nowDate),
-                    lon_deg_carrington: lon_carr_deg,   // preserve original
-                };
-            });
 
             // ── Per-AR flare-recency boost ──────────────────────────────
             // Real EUV emissions track recent flare activity: an AR that
             // popped an X-class flare 30 min ago glows much brighter in
             // 94/131/193/211 Å than its sunspot area alone would predict
-            // (post-flare loops sustain hot plasma for hours).  We mix
-            // recent NOAA flare reports into the shader's per-AR intensity
-            // so the synthetic emission tracks reality, not just
-            // morphology.  Decay timescale 1.5 h matches typical post-
-            // flare loop cooling; class scaling X→1.0, M→0.5, C→0.2,
-            // B→0.05 follows the GOES log-amplitude convention.
+            // (post-flare loops sustain hot plasma for hours).  Decay 1.5 h
+            // matches typical post-flare loop cooling; class scaling
+            // X→1.0 M→0.5 C→0.2 B→0.05 follows the GOES log convention.
+            const nowMs        = Date.now();
             const recentFlares = state.recent_flares ?? [];
-            const nowMs        = nowDate.getTime();
             const arFlareBoost = new Map();
             const flareBoostList = [];
             for (const f of recentFlares) {
@@ -2445,59 +2435,26 @@ export class SpaceWeatherGlobe {
                 .sort((a, b) => b.boost - a.boost)
                 .slice(0, 12);
 
-            const arForShader = regionsApparent.slice(0, 8).map(r => {
+            // Carrington-frame base list.  Longitude is kept in its native
+            // Carrington degrees; the scene longitude is (re)derived every
+            // frame from the time-lapsed solar clock with latitude-dependent
+            // differential rotation, so the whole Sun visibly turns between
+            // the (≈daily) NOAA updates instead of sitting frozen.
+            this._arBase = regions.map(r => {
+                const lon_carr_deg = r.lon_deg != null
+                    ? r.lon_deg
+                    : (r.lon_rad ?? 0) * 180 / Math.PI;
                 const base = (r.area_norm ?? 0.2) * 0.85
                            + Math.min(r.num_spots ?? 1, 30) / 60;
                 const fboost = arFlareBoost.get(r.region) ?? 0;
-                // Multiplicative boost: 100 % brighter for fresh X-class,
-                // 25 % brighter for fresh M-class, etc.  Capped at 1.0
-                // intensity (saturation, since u_regions.w is normalised).
-                const intensity = Math.max(0.20, Math.min(1.0, base * (1 + fboost * 1.0)));
-                return {
-                    lat_rad: r.lat_rad,
-                    lon_rad: r.lon_rad,
-                    intensity,
-                    complex: !!r.is_complex,
-                };
+                const intensity = Math.max(0.20, Math.min(1.0, base * (1 + fboost)));
+                return { ...r, lon_carr_deg, _intensity: intensity };
             });
-            const placed = this._sunSkin.setRegions(arForShader);
-            // Build wind-stream descriptors anchored at each placed AR.
-            const sunPos = this._sunGroup.position;
-            const sunR   = 8.0;
-            this._arStreams = placed.map((p, i) => {
-                // World-space launch point on photosphere
-                const origin = new THREE.Vector3(
-                    sunPos.x + p.x * sunR,
-                    sunPos.y + p.y * sunR,
-                    sunPos.z + p.z * sunR,
-                );
-                // Earth-facing flag: sunPos.x = +55, Earth at 0 → Earth-facing
-                // hemisphere has world-x of origin < sunPos.x, i.e. p.x < 0.
-                // We let *all* ARs emit but bias the launch direction toward
-                // Earth so back-side regions still feed the spiral.
-                return {
-                    origin,
-                    intensity: p.intensity,
-                    complex:   p.complex,
-                    earthFacing: p.x < 0.15,
-                    arIndex:   i,
-                };
-            });
+            this._arBuildRealMs = Date.now();
 
-            // Rebuild flux-rope arches for the complex ARs in this set
-            this._rebuildFluxRopes(regionsApparent);
-            // Trace real bipolar field lines (RK4 over multipole B field).
-            // CPU-side, runs once per AR-set change — sub-millisecond cost.
-            this._rebuildArFieldLines(regionsApparent.slice(0, 8).map((r, i) => ({
-                ...r,
-                intensity: arForShader[i]?.intensity ?? 0.5,
-            })));
-            // Rebuild billboard region pins (clickable from the AR table /
-            // raycast pickable for hover tooltips).
-            this._rebuildArMarkers(
-                regionsApparent.slice(0, 8),
-                arForShader.map(r => r.intensity),
-            );
+            // Project + build everything once now (single code path; the
+            // per-frame pass re-uses it as the clock advances).
+            this._applySolarRotation(0, /* force */ true);
         }
 
         // Story 1.3: live GOES M/X onset → localized brightening + toast.
@@ -2930,6 +2887,132 @@ export class SpaceWeatherGlobe {
         return this._cmeDim < 0.01 ? 0 : this._cmeDim;
     }
 
+    // ── Solar rotation clock (Story 1.4) ─────────────────────────────────────
+
+    /**
+     * Set the solar time-lapse: virtual solar-seconds per real-second.
+     * 1 = real time (≈0.5°/h, imperceptible in a session); the default 300
+     * turns the disk a visible ~2.7°/min so a viewer plainly sees the Sun
+     * rotate, with the equator outrunning the poles.  Clamped [1, 5000].
+     */
+    setRotationLapse(x) {
+        const v = Number(x);
+        if (Number.isFinite(v)) this._solarLapse = Math.max(1, Math.min(5000, v));
+        return this._solarLapse;
+    }
+    get rotationLapse() { return this._solarLapse; }
+
+    /** Wall-clock → time-lapsed "solar now" Date (anchored at AR-set build). */
+    _solarVirtualDate() {
+        if (!this._arBuildRealMs) return new Date();
+        const lapse = Math.max(1, this._solarLapse || 1);
+        return new Date(this._arBuildRealMs + (Date.now() - this._arBuildRealMs) * lapse);
+    }
+
+    /**
+     * Re-project the AR-anchored Sun (shader regions, coronal holes, wind-
+     * stream roots, photosphere convection phase, AR markers, flux ropes and
+     * traced field lines) from the Carrington-frame base through the time-
+     * lapsed solar clock, applying latitude-dependent differential rotation
+     * so the whole Sun visibly turns within a session and equatorial regions
+     * outrun high-latitude ones.  Cheap per-frame work (uniform writes +
+     * marker repositioning); the heavier flux-rope / field-line geometry is
+     * rebuilt on a ≤1.2 s cadence (sub-degree step at the default lapse, so
+     * the arches stay glued to the rotating spots).
+     */
+    _applySolarRotation(dt = 0, force = false) {
+        const base = this._arBase;
+        if (!base || !this._sunSkin) return;
+
+        const lapse      = Math.max(1, this._solarLapse || 1);
+        const vElapsedMs = (Date.now() - this._arBuildRealMs) * lapse;
+        const eDays      = vElapsedMs / 86400000;
+        const vDate      = new Date(this._arBuildRealMs + vElapsedMs);
+
+        const regionsApparent = base.map(b => ({
+            ...b,
+            lon_rad: differentialSceneLon(b.lon_carr_deg, b.lat_rad, vDate, eDays),
+            lon_deg_carrington: b.lon_carr_deg,
+        }));
+        const top8 = regionsApparent.slice(0, 8);
+
+        // Shader-painted ARs (sunspots / plage) — the dominant "is it
+        // turning?" cue; cheap uniform writes, smooth every frame.
+        const arForShader = top8.map(r => ({
+            lat_rad:   r.lat_rad,
+            lon_rad:   r.lon_rad,
+            intensity: r._intensity ?? 0.5,
+            complex:   !!r.is_complex,
+        }));
+        const placed = this._sunSkin.setRegions(arForShader);
+
+        // Wind-stream launch points ride the rotating ARs.
+        const sunPos = this._sunGroup.position;
+        const sunR   = 8.0;
+        this._arStreams = placed.map((p, i) => ({
+            origin: new THREE.Vector3(
+                sunPos.x + p.x * sunR,
+                sunPos.y + p.y * sunR,
+                sunPos.z + p.z * sunR,
+            ),
+            intensity:   p.intensity,
+            complex:     p.complex,
+            earthFacing: p.x < 0.15,
+            arIndex:     i,
+        }));
+
+        // Coronal holes swept through the same clock.
+        this._sunSkin.setHoles(this._synthesizeHoles(
+            this._holeCtx.v,
+            { derived: { activity: this._holeCtx.activity } },
+            vDate,
+        ));
+
+        // Photosphere convection / spicule texture — differential drift
+        // (equatorial synodic turns since the AR-set build epoch).
+        this._sunSkin.setRotationPhase((eDays / 27.2753) * Math.PI * 2);
+
+        // Markers: rebuild sprites only on a fresh AR set; otherwise just
+        // reposition (no canvas/texture churn) so they glide with the disk.
+        if (force || !this._arMarkers || this._arMarkers.length === 0) {
+            this._rebuildArMarkers(top8, top8.map(r => r._intensity ?? 0.5));
+        } else {
+            this._repositionArMarkers(top8);
+        }
+
+        const nowPN = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+        if (force || nowPN - (this._rotLastRebuild || 0) > 1200) {
+            this._rotLastRebuild = nowPN;
+            this._rebuildFluxRopes(regionsApparent, /* force */ true);
+            this._rebuildArFieldLines(
+                top8.map(r => ({ ...r, intensity: r._intensity ?? 0.5 })));
+        }
+    }
+
+    /** Reposition existing AR marker sprites in place (rotation update —
+     *  keeps the raycast `.world` vectors and the `arMarkers` getter in
+     *  sync without recreating canvases). */
+    _repositionArMarkers(regions) {
+        if (!this._arMarkers || !this._arMarkers.length) return;
+        const SUN_R  = 8.0;
+        const sunPos = this._sunGroup.position;
+        const byId   = new Map(regions.map(r => [r.region, r]));
+        for (const m of this._arMarkers) {
+            const r = byId.get(m.region);
+            if (!r) continue;
+            const x = Math.cos(r.lat_rad) * Math.cos(r.lon_rad);
+            const y = Math.sin(r.lat_rad);
+            const z = Math.cos(r.lat_rad) * Math.sin(r.lon_rad);
+            m.world.set(
+                sunPos.x + x * SUN_R * 1.04,
+                sunPos.y + y * SUN_R * 1.04,
+                sunPos.z + z * SUN_R * 1.04,
+            );
+            m.sprite.position.copy(m.world);
+            m.lon_rad = r.lon_rad;
+        }
+    }
+
     /**
      * Build the active coronal-hole anchor list for the live frame.
      *
@@ -2945,7 +3028,7 @@ export class SpaceWeatherGlobe {
      * longitude via the live sub-Earth angle (sun-rotation.js).  Capped at
      * 4 entries total (the shader's u_holes uniform array length).
      */
-    _synthesizeHoles(v_sw_kms, state) {
+    _synthesizeHoles(v_sw_kms, state, atDate = new Date()) {
         const activity = state?.derived?.activity ?? 0.5;
         const polarDepth = 0.45 + 0.30 * (1 - activity);
         const holes = [
@@ -2953,15 +3036,16 @@ export class SpaceWeatherGlobe {
             { lat_rad: -Math.PI / 2, lon_rad: 0, depth: polarDepth },
         ];
 
-        // Real HEK-derived mid-latitude holes (Carrington-anchored)
+        // Real HEK-derived mid-latitude holes (Carrington-anchored) — projected
+        // through the live/time-lapsed solar clock so they sweep across the
+        // disk with the rotating Sun rather than staying pinned.
         if (this._realHoles && this._realHoles.length) {
-            const nowDate = new Date();
             for (const h of this._realHoles) {
                 if (holes.length >= 4) break;
                 const lat = (h.lat_deg ?? 0) * Math.PI / 180;
                 // Skip near-polar entries (already covered by synthetic polar)
                 if (Math.abs(lat) > 70 * Math.PI / 180) continue;
-                const sceneLon = carringtonToSceneLon(h.lon_carrington_deg ?? 0, nowDate);
+                const sceneLon = carringtonToSceneLon(h.lon_carrington_deg ?? 0, atDate);
                 holes.push({ lat_rad: lat, lon_rad: sceneLon, depth: h.depth ?? 0.65 });
             }
         }
@@ -3746,6 +3830,10 @@ export class SpaceWeatherGlobe {
         // Sun update — shader time + flare decay
         this._sunSkin.update(t);
         if (dt > 0 && dt < 1) this._sunSkin.decayFlare(dt);
+        // Story 1.4 — advance the time-lapsed solar clock so the Sun turns
+        // (differential rotation: equator outruns the poles) within a
+        // session instead of sitting frozen between NOAA updates.
+        this._applySolarRotation(dt);
         // Live SDO disk: keep it facing the camera (billboard).
         this._aiaDisk?.face(this._camera);
 

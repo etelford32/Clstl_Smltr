@@ -172,12 +172,29 @@ export class SunSkin {
         this.setEuvMode('white');
     }
 
+    /**
+     * Story 1.4 — drive the photosphere rotation phase from an external
+     * solar clock (radians of equatorial rotation).  Once called, the
+     * internal sidereal auto-accumulation in update() is suppressed so the
+     * host (e.g. the space-weather globe's time-lapsed solar clock) is the
+     * single source of truth.  Pages that don't call this keep the old
+     * self-driven behaviour.
+     */
+    setRotationPhase(rad) {
+        this._extRotDriven = true;
+        this._rotPhase = rad || 0;
+        this.sunU.u_rot_phase.value = this._rotPhase;
+    }
+
     /** Call every frame with elapsed seconds. */
     update(t) {
         this.sunU.u_time.value = t;
-        // Accumulate differential rotation phase
-        this._rotPhase += OMEGA_EQ * (1 / 60);  // assume ~60fps
-        this.sunU.u_rot_phase.value = this._rotPhase;
+        // Accumulate differential rotation phase — only when no external
+        // solar clock is driving it (heliosphere hero keeps this path).
+        if (!this._extRotDriven) {
+            this._rotPhase += OMEGA_EQ * (1 / 60);  // assume ~60fps
+            this.sunU.u_rot_phase.value = this._rotPhase;
+        }
         // Refresh sun-world position uniform so the volumetric corona ray
         // shader has accurate world-space anchor (parent may have moved).
         if (this._parent && this._parent.getWorldPosition) {
