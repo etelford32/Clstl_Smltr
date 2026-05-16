@@ -121,6 +121,7 @@ export const CORONA_VOL_FRAG = /* glsl */`
     uniform float u_filament_opacity;   // per-channel cool-plasma extinction coeff
 
     uniform float u_time;
+    uniform float u_unrest;             // 0..1 live restlessness (X-ray driven)
 
     varying vec3 vWorldPos;
 
@@ -340,6 +341,11 @@ export const CORONA_VOL_FRAG = /* glsl */`
             holeMask = max(holeMask, hDepth * exp(-angH * angH / 0.18));
         }
         emission *= (1.0 - holeMask);
+        // Live "unrest" breathing — the EUV corona's diffuse emission gently
+        // throbs, faster and deeper the more active the Sun actually is, so
+        // the channel views read as a living plasma rather than a still.
+        emission *= 1.0 + (0.04 + 0.18 * u_unrest)
+                          * sin(u_time * (0.5 + 1.6 * u_unrest));
         fil_density = clamp(fil_density, 0.0, 4.0);
     }
 

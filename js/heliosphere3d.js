@@ -59,7 +59,9 @@ import {
     plasmaBeta,
     cglAnisotropy,
 } from './helio-physics.js';
-import { SUN_VERT, SUN_FRAG, createSunUniforms } from './sun-shader.js';
+import {
+    SUN_VERT, SUN_FRAG, CORONA_VERT, CORONA_FRAG, createSunUniforms,
+} from './sun-shader.js';
 import { createSolarDisk } from './solar-disk.js';
 import { SunFeatures } from './sun-features.js';
 
@@ -392,6 +394,9 @@ export class Heliosphere3D {
             kp:        2,
             xrayClass: 'C1.0',
             xrayFlux:  1e-8,
+            xrayNorm:  0,        // 0..1 quiet→X (Story 1.4-consistent)
+            unrest:    0,        // 0..1 live restlessness
+            cmeDim:    0,        // 0..1 CME coronal-deflation impulse
             cmeActive: false,
             cmeSpeed:  800,
             regions:   [],
@@ -652,10 +657,22 @@ export class Heliosphere3D {
         if (d.xray_flux)        this._sw.xrayFlux  = d.xray_flux;
         if (d.active_regions)   this._sw.regions   = d.active_regions;
 
+        // Story 1.4 parity: derived.xray_intensity is already a 0..1
+        // log-normalised GOES flux (~0.17 quiet … ~0.83 X-class); re-stretch
+        // so quiet→0, strong flare→1 — same signal the globe uses.
+        const xi = d.derived?.xray_intensity;
+        this._sw.xrayNorm = Number.isFinite(xi)
+            ? Math.max(0, Math.min(1, (xi - 0.17) / 0.63))
+            : Math.min(1, Math.log10(Math.max(1e-9, this._sw.xrayFlux) / 1e-9) / 4);
+        this._computeHeroUnrest(d);
+
         const prevCme = this._sw.cmeActive;
         this._sw.cmeActive = !!(d.earth_directed_cme || d.cme_active);
         this._sw.cmeSpeed  = d.earth_directed_cme?.speed ?? this._sw.cmeSpeed;
-        if (!prevCme && this._sw.cmeActive) this._triggerCME();
+        if (!prevCme && this._sw.cmeActive) {
+            this._sw.cmeDim = Math.max(this._sw.cmeDim ?? 0, 0.55);
+            this._triggerCME();
+        }
 
         // Update magnetosphere — pass SZA from helio-state if available
         if (this._magnetosphere) {
@@ -670,6 +687,45 @@ export class Heliosphere3D {
             this._triggerFlare(cls === 'X');
         }
         this._lastXray = this._sw.xrayClass;
+    }
+
+    /**
+     * Story 1.4/H2 — live "unrest" scalar [0..1] for the hero Sun, mirroring
+     * the globe: GOES X-ray level + its short-term volatility + recent M/X
+     * flare echo, smoothed fast-attack / slow-release (post-flare coronal
+     * cooling).  Drives the corona breathing + plage/spicule crackle so the
+     * solar-system centrepiece tracks how active the Sun actually is.
+     */
+    _computeHeroUnrest(d) {
+        const level = Math.max(0, Math.min(1, this._sw.xrayNorm || 0));
+
+        const prev = this._unrestPrevLevel ?? level;
+        const dAbs = Math.abs(level - prev);
+        this._unrestPrevLevel = level;
+        this._xrayVolEma = (this._xrayVolEma ?? 0) * 0.7 + dAbs * 0.3;
+        const volatility = Math.min(1, this._xrayVolEma * 12);
+
+        let flareEcho = 0;
+        const top = (d.flares ?? [])[0];
+        if (top && top.time) {
+            const t = top.time instanceof Date ? top.time.getTime()
+                                                : new Date(top.time).getTime();
+            const L = String(top.cls ?? top.parsed?.letter ?? '').toUpperCase()[0];
+            const scale = L === 'X' ? 1.0 : L === 'M' ? 0.55 : L === 'C' ? 0.18 : 0.0;
+            if (isFinite(t) && scale > 0) {
+                const dtHr = (Date.now() - t) / 3.6e6;
+                if (dtHr >= 0 && dtHr < 8) flareEcho = scale * Math.exp(-dtHr / 2.0);
+            }
+        }
+
+        const stormFloor = d.storm_mode ? 0.30 : 0.0;
+        const target = Math.max(
+            stormFloor,
+            Math.min(1, 0.60 * level + 0.30 * volatility + 0.55 * flareEcho),
+        );
+        const cur = this._sw.unrest ?? target;
+        const a   = target > cur ? 0.55 : 0.06;
+        this._sw.unrest = cur + (target - cur) * a;
     }
 
     _onEph(ev) {
@@ -938,37 +994,41 @@ export class Heliosphere3D {
         this._aiaLoader = new THREE.TextureLoader();
         this._refreshAiaDisk();
 
-        // ── Corona glow layers — 4 nested additive halos ─────────────────────────
-        // Layout:
-        //   [0] Chromosphere / transition region (1.25×) — always present
-        //   [1] Inner K-corona                  (1.65×) — bloom-scaled
-        //   [2] K-corona                        (2.30×) — bloom-scaled
-        //   [3] Outer F-corona                  (3.40×) — bloom-scaled, dimmer
-        //
-        // The baseScale and baseOpacity are stored so setBloom() can rescale
-        // them without rebuilding geometry.
-        this._coronaDef = [
-            { baseScale: 1.25, baseOpacity: 0.28, color: 0xff8800 },
-            { baseScale: 1.65, baseOpacity: 0.11, color: 0xff6600 },
-            { baseScale: 2.30, baseOpacity: 0.055, color: 0xff4400 },
-            { baseScale: 3.40, baseOpacity: 0.022, color: 0xff2200 },
-        ];
+        // ── Corona — shared CORONA shell stack (Story H1) ────────────────────────
+        // Replaces the four flat MeshBasicMaterial blobs with the same
+        // physically-shaded shells the Sun·Earth globe uses: Fresnel limb
+        // rim, helmet streamers, polar-hole darkening, pearly K-corona →
+        // faint F-corona colour, and the Story 1.4 X-ray "unrest" breathing.
+        // Uniforms are shared with the photosphere so u_bloom / u_xray_norm /
+        // u_time / u_unrest / u_euv_dimming propagate automatically; each
+        // shell only adds its own u_layer (inner→outer).  Radii mirror
+        // sun-skin.js so the hero and globe Suns read identically.
+        const CORONA_SHELLS = [1.15, 1.45, 2.00, 3.00];
         this._coronaMeshes = [];
-        for (const def of this._coronaDef) {
+        for (let i = 0; i < CORONA_SHELLS.length; i++) {
+            const coronaU = {
+                u_bloom:       this._sunUniforms.u_bloom,
+                u_xray_norm:   this._sunUniforms.u_xray_norm,
+                u_time:        this._sunUniforms.u_time,
+                u_unrest:      this._sunUniforms.u_unrest,
+                u_euv_dimming: this._sunUniforms.u_euv_dimming,
+                u_layer:       { value: i / (CORONA_SHELLS.length - 1) },
+            };
             const glow = new THREE.Mesh(
-                new THREE.SphereGeometry(R.sun * def.baseScale, 24, 24),
-                new THREE.MeshBasicMaterial({
-                    color:       def.color,
-                    transparent: true,
-                    opacity:     def.baseOpacity,
-                    blending:    THREE.AdditiveBlending,
-                    depthWrite:  false,
-                    side:        THREE.BackSide,
-                })
+                new THREE.SphereGeometry(R.sun * CORONA_SHELLS[i], 40, 40),
+                new THREE.ShaderMaterial({
+                    vertexShader:   CORONA_VERT,
+                    fragmentShader: CORONA_FRAG,
+                    uniforms:       coronaU,
+                    transparent:    true,
+                    depthWrite:     false,
+                    side:           THREE.BackSide,
+                    blending:       THREE.AdditiveBlending,
+                }),
             );
             glow.renderOrder = 2;
             this._scene.add(glow);
-            this._coronaMeshes.push({ mesh: glow, baseOpacity: def.baseOpacity, baseScale: def.baseScale });
+            this._coronaMeshes.push({ mesh: glow });
         }
     }
 
@@ -1007,13 +1067,10 @@ export class Heliosphere3D {
     setBloom(v) {
         this._bloomLevel = Math.max(0.3, Math.min(3.0, v));
         if (this._sunUniforms?.u_bloom) {
+            // Shared with the photosphere AND the corona shells — the
+            // CORONA_FRAG shader reads u_bloom directly, so the halo
+            // brightness tracks without per-mesh opacity bookkeeping.
             this._sunUniforms.u_bloom.value = this._bloomLevel;
-        }
-        // Outer F-corona (index 3) only becomes visible above bloom ~0.7
-        if (this._coronaMeshes) {
-            this._coronaMeshes.forEach((c, i) => {
-                c.mesh.material.opacity = c.baseOpacity * this._bloomLevel;
-            });
         }
     }
 
@@ -2684,9 +2741,13 @@ export class Heliosphere3D {
             this._sunFlareT = Math.max(0, this._sunFlareT - dt * 0.8);
         }
 
-        // ── X-ray flux normalisation (log scale: C1→0.25, M1→0.50, X1→0.75) ─
-        const flux   = Math.max(1e-9, this._sw.xrayFlux ?? 1e-9);
-        const xNorm  = Math.min(1, Math.log10(flux / 1e-9) / 4);
+        // X-ray normalisation now comes from the Story 1.4-consistent
+        // signal computed in _onSwpc (derived.xray_intensity re-stretched),
+        // not a second ad-hoc flux formula — hero and globe agree.
+        const xNorm = this._sw.xrayNorm || 0;
+
+        // CME coronal-deflation impulse recovers over ~6 h.
+        this._sw.cmeDim = (this._sw.cmeDim ?? 0) * Math.exp(-dt / 21600);
 
         // ── Update shader uniforms ────────────────────────────────────────────
         const u = this._sunUniforms;
@@ -2695,10 +2756,12 @@ export class Heliosphere3D {
         u.u_flare_t.value   = this._sunFlareT;
         u.u_kp_norm.value   = Math.min(1, (this._sw.kp ?? 2) / 9);
         u.u_bloom.value     = this._bloomLevel;
-        // New uniforms from upgraded sun-shader.js:
         u.u_f107_norm.value = Math.min(1, ((this._sw.f107 ?? 150) - 65) / 235);
         u.u_activity.value  = Math.min(1, xNorm * 0.6 + u.u_kp_norm.value * 0.4);
         u.u_rot_phase.value = this._rot;
+        // Story 1.4/H2 — drive the living-Sun behaviours on the hero.
+        u.u_unrest.value      = this._sw.unrest ?? 0;
+        u.u_euv_dimming.value = this._sw.cmeDim < 0.01 ? 0 : this._sw.cmeDim;
 
         // Post-flare UV arcade glow on sun surface — decays after trigger
         if (this._flareArcT > 0) {
@@ -2731,13 +2794,10 @@ export class Heliosphere3D {
         }
         u.u_nRegions.value = nReg;
 
-        // ── Corona glow opacity — bloom × activity pulse ─────────────────────
-        if (this._coronaMeshes) {
-            const coronaBoost = 1.0 + xNorm * 0.55 + this._sunFlareT * 0.8;
-            for (const c of this._coronaMeshes) {
-                c.mesh.material.opacity = Math.min(1, c.baseOpacity * this._bloomLevel * coronaBoost);
-            }
-        }
+        // Corona brightness/structure/breathing is now fully shader-driven
+        // (CORONA_FRAG reads the shared u_bloom / u_xray_norm / u_unrest /
+        // u_euv_dimming), so the old per-mesh opacity pulse is gone — the
+        // halo brightens, breathes and deflates on its own.
 
         // ── Flare SEP ray tick ────────────────────────────────────────────────
         this._tickFlareSEP(dt);
