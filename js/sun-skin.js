@@ -230,11 +230,14 @@ export class SunSkin {
     setLiveTextureActive(active) {
         if (this._liveTexActive === active) return;
         this._liveTexActive = active;
+        // The live disk is now luminance-keyed and feathers into the corona
+        // (no opaque square), so keep the corona rich — only a slight pull-
+        // back so the very limb doesn't double-expose.
         for (const m of this._coronaMeshes) {
-            if (m.material) m.material.opacity = active ? 0.18 : 0.6;
+            if (m.material) m.material.opacity = active ? 0.48 : 0.6;
         }
         if (this._volCoronaMesh?.material) {
-            this._volCoronaMesh.material.opacity = active ? 0.35 : 1.0;
+            this._volCoronaMesh.material.opacity = active ? 0.85 : 1.0;
         }
     }
 
