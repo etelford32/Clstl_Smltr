@@ -62,6 +62,20 @@ export const EXPERIMENTS = Object.freeze({
             { id: 'accretion', w: 50 },
         ],
     },
+    // Page-level: which homepage HTML is served at `/`. The 50/50 split is
+    // owned by Vercel Edge Middleware (middleware.js), which pins the choice
+    // in the `pp_home_v` cookie. `cookie`/`cookieMap` make this experiment
+    // read that server decision instead of hashing independently, so the
+    // recorded assignment can never disagree with the page actually served.
+    home_redesign: {
+        status: 'running',
+        cookie: 'pp_home_v',
+        cookieMap: { index: 'control', v2: 'redesign' },
+        variants: [
+            { id: 'control',  w: 50 },   // legacy index.html
+            { id: 'redesign', w: 50 },   // home-v2.html
+        ],
+    },
 });
 
 /* ── Storage keys ───────────────────────────────────────────────────── */
@@ -74,6 +88,14 @@ const SEEN_KEY     = 'pp_exp_seen';       // sessionStorage — exposure dedup
 
 function lsGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
 function lsSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
+
+function cookieGet(name) {
+    try {
+        const esc = name.replace(/([.$?*|{}()[\]\\/+^])/g, '\\$1');
+        const m = document.cookie.match(new RegExp('(?:^|; )' + esc + '=([^;]*)'));
+        return m ? decodeURIComponent(m[1]) : null;
+    } catch { return null; }
+}
 
 function makeId() {
     try { if (crypto?.randomUUID) return crypto.randomUUID(); } catch {}
@@ -133,6 +155,14 @@ function pickVariant(key) {
     const variants = exp.variants;
     const forced = readForces()[key];
     if (forced && variants.some(v => v.id === forced)) return forced;
+    // Server-pinned assignment (e.g. middleware-decided page split). The
+    // cookie is authoritative so the served page and the recorded variant
+    // stay in lockstep; we only fall through to hashing if it's absent.
+    if (exp.cookie) {
+        const raw = cookieGet(exp.cookie);
+        const mapped = raw && exp.cookieMap ? exp.cookieMap[raw] : raw;
+        if (mapped && variants.some(v => v.id === mapped)) return mapped;
+    }
     if (exp.status !== 'running') return variants[0].id;
     const point = bucket(visitorId(), key);
     const total = variants.reduce((s, v) => s + (v.w || 0), 0) || 1;
