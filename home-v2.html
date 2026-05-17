@@ -65,11 +65,9 @@
   .nav-in{display:flex;align-items:center;justify-content:space-between;padding:14px var(--space-8);max-width:1180px;margin:0 auto}
   .brand{display:flex;align-items:center;gap:11px}
   .brand .mark{
-    width:26px;height:26px;border-radius:var(--radius-circle);flex-shrink:0;
-    background:var(--grad-uv-pink);position:relative;box-shadow:var(--glow-uv-sm);
+    width:28px;height:28px;border-radius:var(--radius-circle);flex-shrink:0;
+    object-fit:cover;display:block;box-shadow:var(--glow-uv-sm);
   }
-  .brand .mark::after{content:"";position:absolute;inset:7px;border-radius:50%;background:var(--black-void)}
-  .brand .mark::before{content:"";position:absolute;top:50%;left:50%;width:5px;height:5px;border-radius:50%;background:var(--lightning-arc);transform:translate(-50%,-50%);box-shadow:var(--glow-arc-sm);z-index:1}
   .brand b{font-family:var(--font-display);font-weight:var(--fw-bold);font-size:14px;letter-spacing:var(--tracking-wider);text-transform:uppercase;color:var(--fg-1)}
   .nav-links{display:flex;align-items:center;gap:26px}
   .nav-links a{font-family:var(--font-display);font-size:11px;font-weight:var(--fw-medium);letter-spacing:var(--tracking-wide);text-transform:uppercase;color:var(--fg-3);transition:color .2s}
@@ -235,7 +233,7 @@
 
 <nav>
   <div class="nav-in">
-    <a href="#" class="brand"><span class="mark"></span> <b>Parkers Physics</b></a>
+    <a href="earth.html" class="brand" aria-label="Parkers Physics — Earth weather simulation"><img src="ParkersPhysics_logo2.jpg" alt="Parkers Physics" class="mark"> <b>Parkers Physics</b></a>
     <div class="nav-links">
       <a href="#operators">Operators</a>
       <a href="#capability">Capabilities</a>
@@ -453,7 +451,7 @@
   <div class="wrap">
     <div class="foot-grid">
       <div class="foot-brand">
-        <a href="#" class="brand"><span class="mark"></span> <b>Parkers Physics</b></a>
+        <a href="earth.html" class="brand" aria-label="Parkers Physics — Earth weather simulation"><img src="ParkersPhysics_logo2.jpg" alt="Parkers Physics" class="mark"> <b>Parkers Physics</b></a>
         <p>Physics-first space weather forecasting for satellites, programs, and science.</p>
       </div>
       <div>
