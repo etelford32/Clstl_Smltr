@@ -2,20 +2,6 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<!-- Sprint 2: the Earth-detail view now lives inside the continuous-zoom
-     space-weather scene. Inbound links to earth.html redirect there so the
-     "Earth View" is one navigable scene, not a scene cut. The standalone
-     page is preserved behind ?standalone=1 for tooling / deep debugging. -->
-<script>
-(function () {
-  try {
-    var p = new URLSearchParams(location.search);
-    if (!p.has('standalone')) {
-      location.replace('space-weather.html#earth-view');
-    }
-  } catch (e) { location.replace('space-weather.html#earth-view'); }
-})();
-</script>
 <script src="js/preview-mode.js"></script>
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
 <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
