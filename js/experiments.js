@@ -263,10 +263,21 @@ class Experiments {
     }
 
     // Consent-gated mirror — analytics.event() itself buffers/drops based
-    // on window.ppConsent, so we never gate here.
+    // on window.ppConsent, so we never gate here. GA4 can't segment on a
+    // nested object, so the assignments map is also flattened to scalar
+    // `exp_<key>` params (registerable as GA4 custom dimensions). The rich
+    // `exp` object is kept for Supabase analytics_events (arbitrary JSON).
     _mirror(name, props) {
         try {
-            analytics.event(name, { persona: this._persona, exp: this.assignments(), ...props });
+            const exp = this.assignments();
+            const flat = {};
+            for (const k in exp) flat['exp_' + k] = exp[k];
+            analytics.event(name, {
+                persona: this._persona,
+                exp,
+                ...flat,
+                ...props,
+            });
         } catch {}
     }
 }
