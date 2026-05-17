@@ -19,7 +19,7 @@ const PERSONA_DOOR = {
     operator:   'operators',
     educator:   'researchers',
     enthusiast: 'researchers',
-    scientist:  'government',
+    scientist:  'operators',
 };
 
 const BASE = {
@@ -32,8 +32,8 @@ const BASE = {
         sub: 'When a geomagnetic storm hits, the empirical atmosphere models inside your conjunction and reentry tools under-predict drag — and spacecraft come down early. Parkers Physics forecasts thermospheric density from first-principles MHD, so your orbit determination stays accurate when it matters most.',
         ctaPrimary:      { control: 'Request access',  urgency: 'Get storm-resilient forecasts' },
         ctaPrimaryHref:  '#operators',
-        ctaSecondary:    'Get the technical brief',
-        ctaSecondaryHref:'#government',
+        ctaSecondary:    'See what you get',
+        ctaSecondaryHref:'#capability',
         readout: [
             { k: 'Forecast target', v: 'LEO drag' },
             { k: 'Model basis',     v: 'MHD' },
@@ -98,8 +98,8 @@ const BASE = {
         sub: 'Global magnetosphere modeling in the SWMF / BATS-R-US lineage. Every result traces to a published equation and is validated against the storms that push empirical models outside their calibration range — Starlink 2022, Gannon 2024.',
         ctaPrimary:      { control: 'Read the method', urgency: 'See the storm validation' },
         ctaPrimaryHref:  '#proof',
-        ctaSecondary:    'Technical brief (PDF)',
-        ctaSecondaryHref:'#government',
+        ctaSecondary:    'See what you get',
+        ctaSecondaryHref:'#capability',
         readout: [
             { k: 'Basis',        v: 'MHD' },
             { k: 'Lineage',      v: 'SWMF·BATS-R-US' },

@@ -158,7 +158,7 @@
   }
   @media(max-width:760px){.proof{grid-template-columns:1fr}.proof .hook{border-right:none;border-bottom:1px solid var(--border-2)}}
 
-  .doors{display:grid;grid-template-columns:1.5fr 1fr 1fr;gap:var(--space-5)}
+  .doors{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-5)}
   .door{
     background:linear-gradient(155deg,#150a35,#0d0626);
     border:1px solid var(--border-2);border-radius:var(--radius-lg);
@@ -197,23 +197,6 @@
   .road-tag{display:inline-block;margin-top:9px;font-family:var(--font-mono);font-size:var(--fs-micro);letter-spacing:var(--tracking-wide);text-transform:uppercase;color:var(--status-warn);border:1px solid rgba(255,210,63,.3);padding:3px 8px;border-radius:var(--radius-xs)}
   @media(max-width:680px){.cap-grid{grid-template-columns:1fr}}
 
-  .gov{border:1px solid var(--border-uv);border-radius:var(--radius-lg);overflow:hidden;background:var(--grad-cosmic-bg);box-shadow:var(--inner-glow-uv)}
-  .gov-in{padding:var(--space-10);display:grid;grid-template-columns:1.3fr 1fr;gap:var(--space-10);align-items:center}
-  .gov h2{font-size:1.45rem;margin:var(--space-4) 0;color:var(--fg-1);letter-spacing:var(--tracking-wide)}
-  .gov p{color:var(--fg-3);font-size:.94rem;line-height:var(--lh-loose)}
-  .naics{margin-top:var(--space-6);display:flex;flex-wrap:wrap;gap:var(--space-2)}
-  .naics span{font-family:var(--font-mono);font-size:var(--fs-caption);color:var(--fg-3);border:1px solid var(--border-2);padding:5px 10px;border-radius:var(--radius-xs);background:var(--black-void)}
-  .gov-panel{border-left:1px solid var(--border-2);padding-left:var(--space-10)}
-  .gov-panel .row{display:flex;justify-content:space-between;align-items:center;padding:11px 0;border-bottom:1px solid var(--border-1)}
-  .gov-panel .row:last-of-type{border-bottom:none}
-  .gov-panel .lbl{font-family:var(--font-mono);font-size:var(--fs-micro);letter-spacing:var(--tracking-wide);text-transform:uppercase;color:var(--fg-4)}
-  .gov-panel .val{font-family:var(--font-mono);font-size:var(--fs-caption);color:var(--fg-2)}
-  .gov-panel .val.pending{color:var(--status-warn)}
-  .gov-panel .dl{margin-top:var(--space-5);display:flex;flex-direction:column;gap:var(--space-2)}
-  .gov-panel .dl a{display:flex;align-items:center;gap:9px;font-family:var(--font-mono);font-size:var(--fs-caption);color:var(--fg-3);padding:11px 13px;border:1px solid var(--border-2);border-radius:var(--radius-sm);transition:all .2s}
-  .gov-panel .dl a:hover{border-color:var(--border-arc);color:var(--fg-1)}
-  .gov-panel .dl a::before{content:"▸";color:var(--lightning-arc)}
-  @media(max-width:820px){.gov-in{grid-template-columns:1fr;gap:var(--space-8)}.gov-panel{border-left:none;border-top:1px solid var(--border-2);padding-left:0;padding-top:var(--space-8)}}
 
   .res{border:1px solid var(--border-2);border-radius:var(--radius-lg);background:var(--black-panel);padding:var(--space-10);position:relative;overflow:hidden}
   .res::before{content:"";position:absolute;right:-80px;top:-80px;width:280px;height:280px;background:radial-gradient(circle,rgba(157,58,255,.16),transparent 70%)}
@@ -255,7 +238,7 @@
     <a href="#" class="brand"><span class="mark"></span> <b>Parkers Physics</b></a>
     <div class="nav-links">
       <a href="#operators">Operators</a>
-      <a href="#government">Government &amp; SBIR</a>
+      <a href="#capability">Capabilities</a>
       <a href="#researchers">Researchers</a>
       <a href="/signin.html" class="nav-signin" data-funnel-cta data-cta="nav_signin">Sign in ↗</a>
     </div>
@@ -287,8 +270,8 @@
     <div class="hero-cta">
       <a href="#operators" class="btn btn-primary" data-pp-href="hero.ctaPrimary"
          data-funnel-cta data-cta="hero_primary"><span data-pp="hero.ctaPrimary">Request access</span> <span class="arr">→</span></a>
-      <a href="#government" class="btn btn-ghost" data-pp-href="hero.ctaSecondary"
-         data-funnel-cta data-cta="hero_secondary"><span data-pp="hero.ctaSecondary">Get the technical brief</span></a>
+      <a href="#capability" class="btn btn-ghost" data-pp-href="hero.ctaSecondary"
+         data-funnel-cta data-cta="hero_secondary"><span data-pp="hero.ctaSecondary">See what you get</span></a>
     </div>
 
     <div class="hero-readout" id="heroReadout">
@@ -347,7 +330,7 @@
   <div class="wrap">
     <div class="sec-head">
       <span class="eyebrow">Pick your mission</span>
-      <h2>Three ways into Parkers Physics</h2>
+      <h2>Two ways into Parkers Physics</h2>
       <p>One forecasting engine, four audiences. Use the track switch above to re-aim this page.</p>
     </div>
     <div class="doors" id="doors">
@@ -361,17 +344,8 @@
         </p>
         <a href="#capability" class="dlink" data-funnel-cta data-cta="door_operators">Request access <span class="arr">→</span></a>
       </div>
-      <div class="door" data-door="government">
-        <div class="dnum">DOOR 02</div>
-        <h3>Government &amp; SBIR</h3>
-        <p>
-          A physics-first forecasting capability for AFRL, NOAA, and NASA programs.
-          Capabilities statement and technical brief available for program officers.
-        </p>
-        <a href="#government" class="dlink" data-funnel-cta data-cta="door_government">View capability <span class="arr">→</span></a>
-      </div>
       <div class="door" data-door="researchers">
-        <div class="dnum">DOOR 03</div>
+        <div class="dnum">DOOR 02</div>
         <h3>Researchers &amp; educators</h3>
         <p>
           28+ interactive simulations built on published equations and live NASA / NOAA
@@ -428,41 +402,6 @@
   </div>
 </section>
 
-<section class="anchor divider" id="government" data-pp-section="government">
-  <div class="wrap">
-    <div class="gov">
-      <div class="gov-in">
-        <div>
-          <span class="eyebrow">Government &amp; SBIR</span>
-          <h2>A vendor built for the contract, not the app store</h2>
-          <p>
-            Parkers Physics is positioned as a physics-first space weather forecasting
-            capability for federal programs. The thesis is simple: global MHD modeling
-            resolves storm-time thermospheric response that empirical models miss — the
-            gap that drove the 2022 Starlink loss. We're structured for SBIR / STTR as the
-            near-term path to a deployable capability.
-          </p>
-          <div class="naics">
-            <span>NAICS 541715</span><span>NAICS 541330</span><span>NAICS 541511</span><span>NAICS 541512</span>
-          </div>
-        </div>
-        <div class="gov-panel">
-          <div class="row"><span class="lbl">SAM.gov</span><span class="val pending">Registration in progress</span></div>
-          <div class="row"><span class="lbl">CAGE code</span><span class="val pending">Pending</span></div>
-          <div class="row"><span class="lbl">Set-aside</span><span class="val">Small business</span></div>
-          <div class="row"><span class="lbl">Vehicle</span><span class="val">SBIR / STTR</span></div>
-          <div class="dl">
-            <a href="#" data-funnel-cta data-cta="gov_capabilities_pdf">Capabilities statement (PDF)</a>
-            <a href="#" data-funnel-cta data-cta="gov_brief_pdf">Technical brief — for program officers (PDF)</a>
-          </div>
-          <a href="/contact-enterprise.html" class="btn btn-primary" style="margin-top:16px;width:100%;justify-content:center"
-             data-funnel-cta data-cta="gov_brief_us">Brief us on the mission <span class="arr">→</span></a>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
 <section class="anchor divider" id="researchers" data-pp-section="researchers">
   <div class="wrap">
     <div class="res">
@@ -504,8 +443,8 @@
     <div class="hero-cta">
       <a href="#operators" class="btn btn-primary" data-pp-href="final.ctaPrimary"
          data-funnel-cta data-cta="final_primary"><span data-pp="final.ctaPrimary">Request access</span> <span class="arr">→</span></a>
-      <a href="#government" class="btn btn-ghost" data-pp-href="hero.ctaSecondary"
-         data-funnel-cta data-cta="final_secondary"><span data-pp="hero.ctaSecondary">Get the technical brief</span></a>
+      <a href="#capability" class="btn btn-ghost" data-pp-href="hero.ctaSecondary"
+         data-funnel-cta data-cta="final_secondary"><span data-pp="hero.ctaSecondary">See what you get</span></a>
     </div>
   </div>
 </section>
@@ -520,7 +459,6 @@
       <div>
         <h5>Platform</h5>
         <a href="#operators">For operators</a>
-        <a href="#government">Government &amp; SBIR</a>
         <a href="#capability">Capabilities</a>
         <a href="#researchers">Simulations</a>
       </div>
@@ -698,14 +636,15 @@ if ('IntersectionObserver' in window) {
   $$('[data-pp-section]').forEach(s => io.observe(s));
 }
 
-// Hero background — A/B variant of `hero_bg`. constellation = the 3D
-// operational-fleet scene (Earth + the real Walker shells, with a
-// storm-drag control); particles = the light drifting field.
-// Engagement (control tweaks, dwell) is tracked so the test measures
-// interest, not only click-through.
+// Hero background — the cinematic satellite-drag scene is the homepage's
+// first-page visual: a Starlink-class bird heated and dragged down by a
+// storm-thickened thermosphere, the exact failure mode the product
+// forecasts. The light drifting particle field is only the fallback when
+// WebGL or the module import fails. `hero_bg` is still assigned so the
+// exposure/engagement events keep flowing for the A/B layer.
 (function initHeroBg(){
   const reduced = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches);
-  const variant = experiments.assign('hero_bg');
+  experiments.assign('hero_bg');
 
   const seenInteract = new Set();
   const onInteract = (name) => {
@@ -720,15 +659,11 @@ if ('IntersectionObserver' in window) {
     if (typeof window.__ppStartParticles === 'function') window.__ppStartParticles();
   };
 
-  if (variant === 'constellation') {
-    const bg = document.getElementById('bg-field');
-    if (bg) bg.style.display = 'none';           // 3D scene owns the backdrop
-    import('./js/hero-constellation.js')
-      .then(m => m.mountHeroConstellation({ reduced, onInteract }))
-      .catch(() => startParticles());            // WebGL / import failure → fallback
-  } else {
-    startParticles();
-  }
+  const bg = document.getElementById('bg-field');
+  if (bg) bg.style.display = 'none';             // 3D scene owns the backdrop
+  import('./js/hero-satellite-drag.js')
+    .then(m => m.mountHeroSatelliteDrag({ reduced, onInteract }))
+    .catch(() => startParticles());              // WebGL / import failure → fallback
 
   // Hero dwell — fired once after 8s of an active (visible) tab.
   let dwelled = false;
