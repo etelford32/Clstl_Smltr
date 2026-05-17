@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Parkers Physics — Physics-first space weather forecasting</title>
 <meta name="description" content="Storm-resilient LEO drag and thermospheric density forecasts built on first-principles MHD. For satellite operators, government programs, educators, and space researchers.">
+<link rel="canonical" href="https://parkersphysics.com/">
+<meta property="og:url" content="https://parkersphysics.com/">
 <link rel="stylesheet" href="colors_and_type.css">
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
@@ -660,6 +662,12 @@ window.addEventListener('pp-persona-changed', render);
 // Assign variants + paint the persona view first, so the landing_view
 // event (and every event after) carries the resolved exp map + persona.
 render();
+
+// This is the `home_redesign` redesign arm. Record the page-level
+// assignment (reads middleware's pp_home_v cookie, so it always matches
+// the served page) before landing_view so control and variant are
+// measured identically against the same visitor id.
+experiments.assign('home_redesign');
 
 // Landing view — canonical funnel stage, segmented by persona + exp map
 experiments.track('landing_view', { page: 'home-v2' });

@@ -447,6 +447,30 @@
             </div>
         </div>
 
+        <!-- ── Homepage A/B test (home_redesign) ──────────────────────
+             50/50 split between index.html (control) and home-v2.html
+             (redesign), decided by middleware.js. Exposures + CTA-click
+             conversions per arm, from telemetry_experiment_ab_summary
+             (supabase-experiment-ab-migration.sql). -->
+        <div class="card" style="margin-bottom:18px">
+            <h3>
+                Homepage A/B — <code style="color:#9ad36f">home_redesign</code>
+                <span style="font-size:.7rem;color:#778;font-weight:400;margin-left:6px">last
+                    <select id="ab-window" class="btn btn-sm" style="padding:2px 8px;font-size:.7rem">
+                        <option value="7">7 days</option>
+                        <option value="30" selected>30 days</option>
+                        <option value="90">90 days</option>
+                    </select>
+                </span>
+                <button class="btn btn-sm" id="btn-refresh-ab" style="float:right">Refresh</button>
+            </h3>
+            <p style="font-size:.78rem;color:#666;margin-bottom:14px">
+                Conversion = a funnel that hit <code style="color:#9ac">landing_cta_click</code> after
+                <code style="color:#9ac">experiment_exposure</code>. Lift is the redesign arm vs control.
+            </p>
+            <div id="ab-home-container"><div class="empty">Loading…</div></div>
+        </div>
+
         <!-- ── Activation funnel ──────────────────────────────────── -->
         <div class="card" style="margin-bottom:18px">
             <h3>
@@ -801,7 +825,7 @@
 import { auth } from './js/auth.js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY, isConfigured, getSupabase, testConnection } from './js/supabase-config.js';
 import { GA_MEASUREMENT_ID } from './js/analytics.js';
-import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchActivationFunnel, fetchActivationDaily, fetchActivationOverview, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap, fetchWizardFunnel, fetchTourMetrics, fetchDemoMetrics, fetchAuthFlowMetrics, fetchAuthFunnelDropoffs, fetchNewVsReturning, fetchVisitorFlow, fetchEntryDestinations, fetchAccumulatorStats } from './js/admin-analytics.js';
+import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchActivationFunnel, fetchActivationDaily, fetchActivationOverview, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap, fetchWizardFunnel, fetchTourMetrics, fetchDemoMetrics, fetchAuthFlowMetrics, fetchAuthFunnelDropoffs, fetchNewVsReturning, fetchVisitorFlow, fetchEntryDestinations, fetchAccumulatorStats, fetchExperimentAB } from './js/admin-analytics.js';
 import { createInviteCode, fetchInviteCodes, deactivateInvite, sendInviteEmail } from './js/admin-invites.js';
 
 // ── Tabs (wired first so they always work) ──────────────────────────────────
@@ -1612,6 +1636,58 @@ async function loadAtRisk() {
     el.innerHTML = html;
 }
 
+// Homepage A/B (home_redesign): exposures + CTA-click conversions per arm,
+// lift, and a two-proportion z-test so an operator can tell at a glance
+// whether the redesign is winning yet. Backed by fetchExperimentAB.
+async function loadExperimentAB() {
+    const days = parseInt(document.getElementById('ab-window').value, 10) || 30;
+    const el = document.getElementById('ab-home-container');
+    el.innerHTML = '<div class="empty">Loading…</div>';
+    const res = await fetchExperimentAB('home_redesign', days);
+    if (!res.ok) { el.innerHTML = `<div class="empty" style="color:#ff8080">${_esc(res.error)}</div>`; return; }
+    const rows = res.data || [];
+    if (!rows.length) {
+        el.innerHTML = '<div class="empty">No exposures yet — once visitors hit / the split starts recording here.</div>';
+        return;
+    }
+    const byVariant = {};
+    for (const r of rows) byVariant[r.variant] = r;
+    const ctrl = byVariant.control, redes = byVariant.redesign;
+    const fmtRate = v => v == null ? '—' : `${Number(v).toFixed(2)}%`;
+
+    let html = '<table><thead><tr><th>Arm</th><th>Exposures</th><th>Conversions</th><th>Conv. rate</th><th>Lift vs control</th></tr></thead><tbody>';
+    for (const key of ['control', 'redesign']) {
+        const r = byVariant[key];
+        const label = key === 'control' ? 'control · index.html' : 'redesign · home-v2.html';
+        if (!r) { html += `<tr><td>${_esc(label)}</td><td colspan="4" style="color:#444">no data</td></tr>`; continue; }
+        let lift = '—';
+        if (key === 'redesign' && ctrl && Number(ctrl.conversion_rate) > 0) {
+            const l = (Number(r.conversion_rate) - Number(ctrl.conversion_rate)) / Number(ctrl.conversion_rate) * 100;
+            const col = l >= 0 ? '#4eff91' : '#ff8080';
+            lift = `<span style="color:${col};font-weight:600">${l >= 0 ? '+' : ''}${l.toFixed(1)}%</span>`;
+        }
+        html += `<tr><td>${_esc(label)}</td><td>${Number(r.exposures).toLocaleString()}</td><td>${Number(r.conversions).toLocaleString()}</td><td style="color:#fff;font-weight:600">${fmtRate(r.conversion_rate)}</td><td>${lift}</td></tr>`;
+    }
+    html += '</tbody></table>';
+
+    if (ctrl && redes) {
+        const n1 = +ctrl.exposures, c1 = +ctrl.conversions, n2 = +redes.exposures, c2 = +redes.conversions;
+        let note = 'Not enough data for a significance read.';
+        if (n1 > 0 && n2 > 0) {
+            const p1 = c1 / n1, p2 = c2 / n2, pp = (c1 + c2) / (n1 + n2);
+            const se = Math.sqrt(pp * (1 - pp) * (1 / n1 + 1 / n2));
+            if (se > 0) {
+                const z = Math.abs((p2 - p1) / se);
+                note = z > 1.96
+                    ? `Statistically significant (|z|=${z.toFixed(2)}, p&lt;0.05).`
+                    : `Not yet significant (|z|=${z.toFixed(2)}, need |z|&gt;1.96).`;
+            }
+        }
+        html += `<p style="font-size:.74rem;color:#778;margin-top:10px">${note}</p>`;
+    }
+    el.innerHTML = html;
+}
+
 // Lazy-load activation tab on first switch (the queries are heavier than
 // the overview cards — no point hammering Supabase if the user never
 // opens the tab).
@@ -1626,6 +1702,7 @@ async function loadActivationAll() {
         loadEducatorRoster(),
         loadTopSimsByPlan(),
         loadAtRisk(),
+        loadExperimentAB(),
     ]);
     _activationLoaded = true;
 }
@@ -1638,6 +1715,8 @@ document.getElementById('activation-window')?.addEventListener('change', () => {
     loadActivationFunnel();
     loadActivationChart();
 });
+document.getElementById('btn-refresh-ab')?.addEventListener('click', loadExperimentAB);
+document.getElementById('ab-window')?.addEventListener('change', loadExperimentAB);
 
 // ── Onboarding section (wizard / tour / demo / auth flow) ──────────────────
 // Renders five mini-cards inside the Activation tab. Each fetcher
