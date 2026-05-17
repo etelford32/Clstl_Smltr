@@ -1,0 +1,114 @@
+{
+  "_comment": "Known nav non-compliance (Phase 1–4 worklist). CI ratchet: pages here may keep ONLY these violation types until standardized. Remove an entry once fixed, or run --write-baseline. Never add by hand.",
+  "api-policy.html": [
+    "ghostCss",
+    "noNavJs",
+    "noNavStyles"
+  ],
+  "auth-callback.html": [
+    "noNavJs",
+    "noNavStyles"
+  ],
+  "betelgeuse.html": [
+    "ghostCss"
+  ],
+  "black-hole-fluid.html": [
+    "ghostCss"
+  ],
+  "contact-enterprise.html": [
+    "ghostCss"
+  ],
+  "design-tokens.html": [
+    "noNavJs",
+    "noNavStyles"
+  ],
+  "earth.html": [
+    "ghostCss"
+  ],
+  "eula.html": [
+    "ghostCss",
+    "noNavJs",
+    "noNavStyles"
+  ],
+  "feedback.html": [
+    "ghostCss"
+  ],
+  "for-educators.html": [
+    "ghostCss"
+  ],
+  "galactic-map.html": [
+    "ghostCss"
+  ],
+  "home-v2.html": [
+    "ghostCss",
+    "noNavJs",
+    "noNavStyles"
+  ],
+  "hydro-demo.html": [
+    "noNavJs",
+    "noNavStyles"
+  ],
+  "index.html": [
+    "ghostCss"
+  ],
+  "pricing.html": [
+    "ghostCss"
+  ],
+  "privacy.html": [
+    "ghostCss",
+    "noNavJs",
+    "noNavStyles"
+  ],
+  "reset-password.html": [
+    "noNavJs",
+    "noNavStyles"
+  ],
+  "rust.html": [
+    "ghostCss"
+  ],
+  "satellites.html": [
+    "ghostCss"
+  ],
+  "signin.html": [
+    "ghostCss"
+  ],
+  "signup.html": [
+    "ghostCss"
+  ],
+  "sirius.html": [
+    "ghostCss"
+  ],
+  "solar-fluid.html": [
+    "ghostCss"
+  ],
+  "space-weather.html": [
+    "ghostCss"
+  ],
+  "star2d-advanced.html": [
+    "ghostCss"
+  ],
+  "star2d.html": [
+    "ghostCss"
+  ],
+  "star3d.html": [
+    "ghostCss"
+  ],
+  "stellar-wind.html": [
+    "ghostCss"
+  ],
+  "sun.html": [
+    "ghostCss"
+  ],
+  "threejs.html": [
+    "ghostCss"
+  ],
+  "ton618.html": [
+    "ghostCss"
+  ],
+  "vega.html": [
+    "ghostCss"
+  ],
+  "wr102.html": [
+    "ghostCss"
+  ]
+}
