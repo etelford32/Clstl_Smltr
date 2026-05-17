@@ -1,13 +1,23 @@
 /**
- * middleware.js — Vercel Edge Middleware: homepage A/B split.
+ * middleware.js — Vercel Edge Middleware.
  *
- * Owns the `home_redesign` experiment's traffic split. For requests to `/`
- * it picks an arm 50/50, pins the choice in the `pp_home_v` cookie so a
- * visitor stays sticky, and internally rewrites to the variant's HTML
- * (the address bar stays `/`):
+ * Two responsibilities, in order:
  *
- *     control  → pp_home_v=index  → index.html      (legacy homepage)
- *     redesign → pp_home_v=v2     → home-v2.html    (new homepage)
+ *  1. Canonical host. This middleware is the SINGLE owner of the
+ *     www → apex redirect for the entire site. The equivalent rule was
+ *     removed from vercel.json so there is exactly one source of truth —
+ *     two overlapping redirects previously fought and broke the homepage.
+ *     It runs on every path (see `config.matcher`), so the document AND
+ *     all of its relative-URL assets resolve to the same origin; ES module
+ *     loads are never split cross-origin.
+ *
+ *  2. Homepage A/B split (only for `/`). Picks the `home_redesign` arm
+ *     50/50, pins it in the `pp_home_v` cookie so a visitor stays sticky,
+ *     and internally rewrites to the variant's HTML (address bar stays
+ *     `/`):
+ *
+ *         control  → pp_home_v=index  → index.html     (legacy homepage)
+ *         redesign → pp_home_v=v2     → home-v2.html   (new homepage)
  *
  * The cookie is intentionally NOT HttpOnly: js/experiments.js reads it for
  * the `home_redesign` experiment so the variant it records always matches
@@ -17,20 +27,19 @@
  *
  * When the test concludes, flip the default arm here (or pin everyone to
  * `v2`) to make home-v2 the canonical homepage.
- *
- * Because this middleware claims `/` and runs ahead of the vercel.json
- * www→apex redirect, it must also perform that canonical-host redirect
- * itself (see WWW_HOST guard below) — otherwise the homepage serves on www
- * while its relative module scripts redirect to apex, a cross-origin split
- * that blocks ES module loads and breaks the page.
  */
 
 import { next, rewrite } from '@vercel/edge';
 
-export const config = { matcher: '/' };
+// Run on every path. The host canonicalization must cover assets too, not
+// just the document — otherwise a www visitor gets the page on one origin
+// while its modules 307 to the other (cross-origin, blocks ES modules).
+export const config = { matcher: '/(.*)' };
 
 const COOKIE = 'pp_home_v';
 const ONE_YEAR = 60 * 60 * 24 * 365;
+const WWW_HOST = 'www.parkersphysics.com';
+const APEX_HOST = 'parkersphysics.com';
 
 function readCookie(req, name) {
   const header = req.headers.get('cookie');
@@ -55,27 +64,24 @@ function cookieHeader(value) {
   return `${COOKIE}=${value}; Path=/; Max-Age=${ONE_YEAR}; SameSite=Lax; Secure`;
 }
 
-// vercel.json canonicalises www → apex for every path, but this middleware
-// owns `/` and runs before that rule, so without this guard the homepage
-// document stays on www while its relative-URL module scripts get 307'd to
-// apex — a cross-origin redirect that blocks `<script type="module">` loads
-// (missing Access-Control-Allow-Origin) and breaks the page. Mirror the
-// vercel.json redirect here so the document and its assets share one origin.
-const WWW_HOST = 'www.parkersphysics.com';
-const APEX_HOST = 'parkersphysics.com';
-
 export default function middleware(req) {
   const url = new URL(req.url);
 
-  const host = req.headers.get('host') || url.hostname;
+  // 1. Sole www → apex canonicalization, for every path. Detect via the
+  //    Host header (reliable); build Location from path+query only —
+  //    req.url's host/proto are not dependable in the edge runtime, so we
+  //    never echo them back into Location (that was the loop/break risk).
+  const host = (req.headers.get('host') || url.hostname || '').toLowerCase();
   if (host === WWW_HOST) {
-    url.hostname = APEX_HOST;
-    url.host = APEX_HOST;
     return new Response(null, {
       status: 308,
-      headers: { Location: url.toString() },
+      headers: { Location: `https://${APEX_HOST}${url.pathname}${url.search}` },
     });
   }
+
+  // 2. A/B split is homepage-only. Every other path passes straight
+  //    through (middleware still ran — just to enforce the host rule).
+  if (url.pathname !== '/') return next();
 
   const forced = normalizeArm(url.searchParams.get('exp_home_redesign'));
   const existing = normalizeArm(readCookie(req, COOKIE));

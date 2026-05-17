@@ -199,19 +199,6 @@
       ]
     }
   ],
-  "redirects": [
-    {
-      "source": "/:path*",
-      "has": [
-        {
-          "type": "host",
-          "value": "www.parkersphysics.com"
-        }
-      ],
-      "destination": "https://parkersphysics.com/:path*",
-      "permanent": true
-    }
-  ],
   "rewrites": [
     {
       "source": "/rust/www/:path*",
