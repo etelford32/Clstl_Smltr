@@ -690,10 +690,11 @@ if ('IntersectionObserver' in window) {
   $$('[data-pp-section]').forEach(s => io.observe(s));
 }
 
-// Hero background — A/B variant of `hero_bg`. accretion = the 3D
-// analytical scene (disc + Parker spirals + twistors); particles = the
-// light drifting field. Engagement (control tweaks, dwell) is tracked
-// so the test measures interest, not only click-through.
+// Hero background — A/B variant of `hero_bg`. constellation = the 3D
+// operational-fleet scene (Earth + the real Walker shells, with a
+// storm-drag control); particles = the light drifting field.
+// Engagement (control tweaks, dwell) is tracked so the test measures
+// interest, not only click-through.
 (function initHeroBg(){
   const reduced = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches);
   const variant = experiments.assign('hero_bg');
@@ -711,11 +712,11 @@ if ('IntersectionObserver' in window) {
     if (typeof window.__ppStartParticles === 'function') window.__ppStartParticles();
   };
 
-  if (variant === 'accretion') {
+  if (variant === 'constellation') {
     const bg = document.getElementById('bg-field');
     if (bg) bg.style.display = 'none';           // 3D scene owns the backdrop
-    import('./js/hero-accretion.js')
-      .then(m => m.mountHeroAccretion({ reduced, onInteract }))
+    import('./js/hero-constellation.js')
+      .then(m => m.mountHeroConstellation({ reduced, onInteract }))
       .catch(() => startParticles());            // WebGL / import failure → fallback
   } else {
     startParticles();
