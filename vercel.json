@@ -213,6 +213,10 @@
       "destination": "/rust/www/:path*"
     },
     {
+      "source": "/home-v2",
+      "destination": "/home-v2.html"
+    },
+    {
       "source": "/wr102",
       "destination": "/wr102.html"
     },

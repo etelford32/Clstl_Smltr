@@ -715,6 +715,30 @@ export async function fetchActivationFunnel(days = 30) {
 }
 
 /**
+ * A/B results for one experiment over the last N days. One row per
+ * variant: exposures, CTA-click conversions, conversion_rate (%).
+ * Backed by telemetry_experiment_ab_summary (admin-only RPC).
+ */
+export async function fetchExperimentAB(experiment, days = 30) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client.rpc('telemetry_experiment_ab_summary', {
+            p_experiment: experiment,
+            p_days: days,
+        });
+        if (error) throw error;
+        return { ok: true, data: data || [] };
+    } catch (err) {
+        const hint = /function .* does not exist/i.test(err.message || '')
+            ? 'telemetry_experiment_ab_summary RPC missing — run supabase-experiment-ab-migration.sql'
+            : err.message;
+        return { ok: false, error: hint };
+    }
+}
+
+/**
  * Activation overview KPIs for the last N days. Single round trip to
  * activation_events; aggregated client-side. Returns:
  *   {
