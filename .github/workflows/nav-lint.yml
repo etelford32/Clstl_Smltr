@@ -1,0 +1,26 @@
+name: nav-lint
+
+# Canonical-navigation structural gate. Ratchet: green while non-compliance
+# stays within scripts/nav-lint-baseline.json (the Phase 1–4 worklist),
+# RED on any new page or regression. Mark the `nav-structural-lint` job as a
+# required status check in branch protection so parallel sessions cannot
+# merge new nav drift.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  nav-structural-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: nav structural lint
+        run: node scripts/lint-nav.mjs
