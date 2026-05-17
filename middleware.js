@@ -17,6 +17,12 @@
  *
  * When the test concludes, flip the default arm here (or pin everyone to
  * `v2`) to make home-v2 the canonical homepage.
+ *
+ * Because this middleware claims `/` and runs ahead of the vercel.json
+ * www→apex redirect, it must also perform that canonical-host redirect
+ * itself (see WWW_HOST guard below) — otherwise the homepage serves on www
+ * while its relative module scripts redirect to apex, a cross-origin split
+ * that blocks ES module loads and breaks the page.
  */
 
 import { next, rewrite } from '@vercel/edge';
@@ -49,8 +55,27 @@ function cookieHeader(value) {
   return `${COOKIE}=${value}; Path=/; Max-Age=${ONE_YEAR}; SameSite=Lax; Secure`;
 }
 
+// vercel.json canonicalises www → apex for every path, but this middleware
+// owns `/` and runs before that rule, so without this guard the homepage
+// document stays on www while its relative-URL module scripts get 307'd to
+// apex — a cross-origin redirect that blocks `<script type="module">` loads
+// (missing Access-Control-Allow-Origin) and breaks the page. Mirror the
+// vercel.json redirect here so the document and its assets share one origin.
+const WWW_HOST = 'www.parkersphysics.com';
+const APEX_HOST = 'parkersphysics.com';
+
 export default function middleware(req) {
   const url = new URL(req.url);
+
+  const host = req.headers.get('host') || url.hostname;
+  if (host === WWW_HOST) {
+    url.hostname = APEX_HOST;
+    url.host = APEX_HOST;
+    return new Response(null, {
+      status: 308,
+      headers: { Location: url.toString() },
+    });
+  }
 
   const forced = normalizeArm(url.searchParams.get('exp_home_redesign'));
   const existing = normalizeArm(readCookie(req, COOKIE));
