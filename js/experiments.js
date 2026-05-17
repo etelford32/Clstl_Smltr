@@ -53,13 +53,14 @@ export const EXPERIMENTS = Object.freeze({
             { id: 'urgency', w: 50 },   // persona-specific stronger verb
         ],
     },
-    // Hero background renderer. control = the light drifting particle
-    // field; accretion = the analytical, adjustable accretion-disc canvas.
+    // Hero background renderer. particles = the light drifting field;
+    // constellation = the 3D operational-fleet globe (real Walker shells
+    // from constellation-catalog.js + a storm-drag control).
     hero_bg: {
         status: 'running',
         variants: [
-            { id: 'particles', w: 50 },
-            { id: 'accretion', w: 50 },
+            { id: 'particles',     w: 50 },
+            { id: 'constellation', w: 50 },
         ],
     },
     // Page-level: which homepage HTML is served at `/`. The 50/50 split is
