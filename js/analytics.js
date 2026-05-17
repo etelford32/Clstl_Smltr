@@ -49,7 +49,8 @@ let _userId = null;
 let _userProps = {};
 let _supabase = null;
 let _supabaseReady = false;
-let _gtagReady = false;
+let _gtagReady = false;   // gtag.js <script> finished loading (status only)
+let _gaActive  = false;   // GA initialized + gtag queue installed — safe to send
 let _heartbeatTimer = null;
 
 function _makeSessionId() {
@@ -78,7 +79,7 @@ async function _reportAnalyticsFailure(source, err) {
 // ── GA4 Loader ───────────────────────────────────────────────────────────────
 
 function _initGA() {
-    if (!GA_MEASUREMENT_ID || _gtagReady) return;
+    if (!GA_MEASUREMENT_ID || _gaActive) return;
 
     window.dataLayer = window.dataLayer || [];
     window.gtag = function() { window.dataLayer.push(arguments); };
@@ -86,6 +87,12 @@ function _initGA() {
     window.gtag('config', GA_MEASUREMENT_ID, {
         send_page_view: false,
     });
+    // The gtag() shim queues into dataLayer; gtag.js replays the queue on
+    // load. So sends are safe the moment the queue + config exist — gating
+    // on script.onload instead would silently drop every event fired
+    // before the async script arrives (page_view, experiment_exposure,
+    // landing_view all fire on load, well before that).
+    _gaActive = true;
 
     const script = document.createElement('script');
     script.async = true;
@@ -386,7 +393,7 @@ class Analytics {
         _sessionEvents.push(event);
         _buffer.push(event);
 
-        if (_gtagReady) {
+        if (_gaActive) {
             window.gtag('event', 'page_view', {
                 page_title: document.title,
                 page_location: window.location.href,
@@ -431,7 +438,7 @@ class Analytics {
         _sessionEvents.push(event);
         _buffer.push(event);
 
-        if (_gtagReady) {
+        if (_gaActive) {
             window.gtag('event', name, props);
         }
     }
@@ -445,7 +452,7 @@ class Analytics {
         _userId = userId;
         _userProps = { ...traits };
 
-        if (_gtagReady) {
+        if (_gaActive) {
             window.gtag('set', 'user_properties', {
                 pp_plan: traits.plan,
                 pp_role: traits.role,
@@ -486,6 +493,7 @@ class Analytics {
         return {
             configured: !!GA_MEASUREMENT_ID,
             measurementId: GA_MEASUREMENT_ID || null,
+            active: _gaActive,
             loaded: _gtagReady,
         };
     }
