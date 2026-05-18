@@ -1702,3 +1702,76 @@ export async function fetchNewVsReturning(days = 30) {
         return { ok: false, error: hint };
     }
 }
+
+// ── Client telemetry: perf / errors / 404s / auth failures ──────────────────
+// All four RPCs live in supabase-client-telemetry-migration.sql and are
+// superadmin-gated server-side (is_superadmin()), so a plain admin gets a
+// 42501 and the shared hint below. Data is written by js/telemetry.js
+// (web_vital / error / not_found / auth_failure kinds in client_telemetry).
+
+function _telemetryHint(err, rpc, migration) {
+    const msg = err?.message || '';
+    if (/function .* does not exist|PGRST202/i.test(msg)) {
+        return `${rpc} RPC missing — apply ${migration}`;
+    }
+    if (/forbidden|permission|42501|superadmin/i.test(msg)) {
+        return 'Superadmin only — sign in as a superadmin to view this';
+    }
+    return msg || 'Unknown error';
+}
+
+/** Web Vitals + app-perf p50/p95 per (metric, route). */
+export async function fetchPerfSummary(days = 7, limit = 50) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client.rpc('telemetry_perf_summary', { p_days: days, p_limit: limit });
+        if (error) throw error;
+        return { ok: true, data: data || [] };
+    } catch (err) {
+        return { ok: false, error: _telemetryHint(err, 'telemetry_perf_summary', 'supabase-client-telemetry-migration.sql') };
+    }
+}
+
+/** Top JS error fingerprints in the window. */
+export async function fetchTopErrors(days = 30, limit = 25) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client.rpc('telemetry_top_errors', { p_days: days, p_limit: limit });
+        if (error) throw error;
+        return { ok: true, data: data || [] };
+    } catch (err) {
+        return { ok: false, error: _telemetryHint(err, 'telemetry_top_errors', 'supabase-client-telemetry-migration.sql') };
+    }
+}
+
+/** Top 404 routes in the window. */
+export async function fetchTop404s(days = 30, limit = 25) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client.rpc('telemetry_top_404s', { p_days: days, p_limit: limit });
+        if (error) throw error;
+        return { ok: true, data: data || [] };
+    } catch (err) {
+        return { ok: false, error: _telemetryHint(err, 'telemetry_top_404s', 'supabase-client-telemetry-migration.sql') };
+    }
+}
+
+/** Top auth-failure reasons (client_telemetry ∪ auth_failures). */
+export async function fetchTopAuthFailures(days = 30, limit = 15) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client.rpc('telemetry_top_auth_failures', { p_days: days, p_limit: limit });
+        if (error) throw error;
+        return { ok: true, data: data || [] };
+    } catch (err) {
+        return { ok: false, error: _telemetryHint(err, 'telemetry_top_auth_failures', 'supabase-client-telemetry-migration.sql') };
+    }
+}
