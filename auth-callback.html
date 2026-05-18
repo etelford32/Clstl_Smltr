@@ -316,6 +316,10 @@ async function boot() {
             try {
                 await logActivation('signup', { plan: 'free', source: callbackSource });
             } catch {}
+            // GA4 recommended `sign_up` for new OAuth/magic-link accounts.
+            // Mirrors to gtag via analytics.event(); method carries the
+            // provider so GA4 can segment organic vs Google/Apple signups.
+            try { analytics.event('sign_up', { method: callbackSource || 'oauth', plan: 'free' }); } catch {}
 
             // Funnel: dedicated stage for OAuth/magic-link signups so the
             // funnel summary RPC can split signup_succeeded volume by

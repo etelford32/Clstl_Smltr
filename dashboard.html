@@ -1686,6 +1686,31 @@ if (!_auth || !_auth.signedIn) {
   const urlParams = new URLSearchParams(location.search);
   if (urlParams.get('checkout') === 'success') {
     const successPlan = urlParams.get('plan') || 'basic';
+    const sessionId = urlParams.get('session_id') || '';
+    // GA4 ecommerce `purchase` — the subscription-conversion signal.
+    // transaction_id is the Stripe Checkout session id so GA4 dedupes
+    // if the success URL is reloaded; a sessionStorage guard also stops
+    // a same-tab double-fire before the URL is cleaned below. Value is
+    // the monthly list price (cadence isn't in the return URL — yearly
+    // shows as the monthly figure; good enough for a conversion proxy,
+    // not billing). Consent-gated like every GA4 send (analytics.event
+    // only reaches gtag once analytics cookies are accepted).
+    try {
+      const PLAN_PRICE = { basic: 10, educator: 25, advanced: 100, institution: 500, enterprise: 0 };
+      const guardKey = 'pp_purchase_sent_' + (sessionId || successPlan);
+      if (!sessionStorage.getItem(guardKey)) {
+        sessionStorage.setItem(guardKey, '1');
+        const value = PLAN_PRICE[successPlan] ?? 0;
+        import('./js/analytics.js').then(({ analytics }) => {
+          analytics?.event?.('purchase', {
+            transaction_id: sessionId || `sub_${successPlan}_${Date.now()}`,
+            currency: 'USD',
+            value,
+            items: [{ item_id: successPlan, item_name: `${successPlan} plan`, price: value, quantity: 1 }],
+          });
+        }).catch(() => {});
+      }
+    } catch {}
     const banner = document.createElement('div');
     banner.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);background:rgba(0,40,20,.95);border:1px solid rgba(0,200,100,.3);border-radius:10px;padding:14px 28px;color:#44cc88;font-size:.88rem;font-weight:600;z-index:999;box-shadow:0 4px 20px rgba(0,0,0,.5);text-align:center';
     banner.innerHTML = `Welcome to ${successPlan.charAt(0).toUpperCase() + successPlan.slice(1)}! Your subscription is now active.`;
@@ -2273,6 +2298,14 @@ runSafe('Activation events', () => {
         if (!a) return;
         const dest = (a.getAttribute('href') || '').replace(/\.html$/, '').replace(/^\//, '');
         logActivation(EVENTS.FIRST_SIM_OPENED, { sim: dest });
+        // GA4 engagement: fires on EVERY sim-card click (not deduped like
+        // the activation event above), so GA4 sees per-sim popularity and
+        // repeat usage. analytics.simulation → event 'sim_open' → gtag.
+        try {
+            import('./js/analytics.js').then(({ analytics }) => {
+                analytics?.simulation?.(dest, 'open', { source: 'dashboard' });
+            }).catch(() => {});
+        } catch {}
     };
     document.querySelector('.sim-grid')?.addEventListener('click', onceSim, { capture: true });
 
