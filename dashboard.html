@@ -51,6 +51,14 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
    shared nav uses its own .nav-item class from nav-styles.css. */
 .btn-sm{padding:6px 14px;border-radius:20px;font-size:.8rem;font-weight:600;cursor:pointer;text-decoration:none;border:none;line-height:1}
 
+/* Per-card failure state. Rendered by runCard() when a card's initializer
+   throws (or its lazily-imported dependency failed to load) so one broken
+   feed degrades to an inline "couldn't load · Retry" instead of taking the
+   whole dashboard down with it. */
+.card-load-error{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:12px 0 0;padding:12px 14px;border:1px solid rgba(255,120,120,.35);background:rgba(255,80,80,.08);border-radius:8px;font-size:.8rem;color:#ffb3b3}
+.card-retry-btn{padding:5px 14px;border-radius:6px;border:1px solid rgba(255,255,255,.25);background:rgba(255,255,255,.06);color:#ffd9d9;font:inherit;font-size:.75rem;font-weight:600;cursor:pointer}
+.card-retry-btn:hover{background:rgba(255,255,255,.12)}
+
 /* ── LAYOUT ── */
 main{flex:1;max-width:1180px;width:100%;margin:0 auto;padding:36px 24px 60px}
 
@@ -1029,24 +1037,13 @@ footer a:hover{color:var(--text)}
 </script>
 
 <script type="module">
+// Only the two all-relative, proven-loading deps are static: auth.js is
+// needed for the gate that runs before anything else, and tier-config.js
+// feeds the (unwrapped) plan badge / subscription render. Every other
+// feature module is loaded resiliently below so a single failed import
+// (e.g. a transitive CDN dep) can't abort the whole dashboard before a
+// single card renders — see the resilient-dependency block.
 import { auth } from './js/auth.js';
-import { geocodeQuery, saveUserLocation, loadUserLocation,
-         clearUserLocation, auroraVisibility } from './js/user-location.js';
-import { SpaceWeatherFeed } from './js/swpc-feed.js';
-import { AlertEngine } from './js/alert-engine.js';
-import { ImpactScoreEngine } from './js/impact-score.js';
-import { OnboardingTour } from './js/onboarding-tour.js';
-import { DailySummaryEngine } from './js/daily-summary.js';
-import {
-    listLocations, addLocation, updateLocation, removeLocation,
-    setPrimaryLocation, locationLimit, onLocationsChanged, PLAN_LIMITS,
-} from './js/saved-locations.js';
-import {
-    fetchTripWeather, encodeTripParam, weatherCodeLabel, compassLabel,
-    greatCircleDistanceKm,
-} from './js/trip-planner.js';
-import { mountClassRoster } from './js/class-roster.js';
-import { logActivation, EVENTS } from './js/activation.js';
 import { tierLabel, tierBadgeClass, getTier } from './js/tier-config.js';
 
 // Expose auth for the inline script sections
@@ -1063,6 +1060,121 @@ await Promise.race([
     auth.ready(),
     new Promise(resolve => setTimeout(resolve, 8000)),
 ]);
+
+/* ════════════════════════════════════════════════════════════
+   RESILIENT DEPENDENCY LOADING + PER-CARD FAULT ISOLATION
+   Each feature module is imported independently. A single failed
+   module (bad transitive CDN dep, network blip, syntax error in a
+   peer) no longer aborts the whole dashboard before any card
+   renders — that is the exact failure that left this page a blank
+   shell. Failed modules resolve to throwing stubs so only the
+   card(s) that use them degrade (caught by runCard → visible
+   Retry); analytics-only deps degrade to silent no-ops.
+═════════════════════════════════════════════════════════════ */
+const _imp = (m) => import(m).then(x => x, e => {
+    console.error(`[dashboard] dependency failed to load: ${m}`, e);
+    return null;
+});
+const [
+    _mUL, _mSWF, _mAE, _mISE, _mOT, _mDSE, _mSL, _mTP, _mCR, _mACT,
+] = await Promise.all([
+    _imp('./js/user-location.js'),
+    _imp('./js/swpc-feed.js'),
+    _imp('./js/alert-engine.js'),
+    _imp('./js/impact-score.js'),
+    _imp('./js/onboarding-tour.js'),
+    _imp('./js/daily-summary.js'),
+    _imp('./js/saved-locations.js'),
+    _imp('./js/trip-planner.js'),
+    _imp('./js/class-roster.js'),
+    _imp('./js/activation.js'),
+]);
+// Missing export → a stub that throws when actually used, so the
+// failure surfaces inside a runCard()/runSafe() boundary rather than
+// at module-evaluation time.
+const _dead = (m) => () => {
+    throw new Error(`[dashboard] "${m}" failed to load — feature unavailable`);
+};
+const _pick = (mod, mname, name, fallback) =>
+    (mod && mod[name] !== undefined)
+        ? mod[name]
+        : (fallback !== undefined ? fallback : _dead(mname));
+
+// user-location.js
+const geocodeQuery      = _pick(_mUL, 'user-location', 'geocodeQuery');
+const saveUserLocation  = _pick(_mUL, 'user-location', 'saveUserLocation');
+const loadUserLocation  = _pick(_mUL, 'user-location', 'loadUserLocation', () => null);
+const clearUserLocation = _pick(_mUL, 'user-location', 'clearUserLocation', () => {});
+const auroraVisibility  = _pick(_mUL, 'user-location', 'auroraVisibility');
+// swpc-feed.js / alert-engine.js / impact-score.js / onboarding / daily-summary
+const SpaceWeatherFeed   = _pick(_mSWF, 'swpc-feed', 'SpaceWeatherFeed');
+const AlertEngine        = _pick(_mAE,  'alert-engine', 'AlertEngine');
+const ImpactScoreEngine  = _pick(_mISE, 'impact-score', 'ImpactScoreEngine');
+const OnboardingTour     = _pick(_mOT,  'onboarding-tour', 'OnboardingTour');
+const DailySummaryEngine = _pick(_mDSE, 'daily-summary', 'DailySummaryEngine');
+// saved-locations.js (its card lives on /settings now; IIFE early-returns)
+const listLocations      = _pick(_mSL, 'saved-locations', 'listLocations');
+const addLocation        = _pick(_mSL, 'saved-locations', 'addLocation');
+const updateLocation     = _pick(_mSL, 'saved-locations', 'updateLocation');
+const removeLocation     = _pick(_mSL, 'saved-locations', 'removeLocation');
+const setPrimaryLocation = _pick(_mSL, 'saved-locations', 'setPrimaryLocation');
+const locationLimit      = _pick(_mSL, 'saved-locations', 'locationLimit');
+const onLocationsChanged = _pick(_mSL, 'saved-locations', 'onLocationsChanged', () => {});
+const PLAN_LIMITS        = _pick(_mSL, 'saved-locations', 'PLAN_LIMITS', {});
+// trip-planner.js (pulls THREE transitively — the original SPOF)
+const fetchTripWeather      = _pick(_mTP, 'trip-planner', 'fetchTripWeather');
+const encodeTripParam       = _pick(_mTP, 'trip-planner', 'encodeTripParam');
+const weatherCodeLabel      = _pick(_mTP, 'trip-planner', 'weatherCodeLabel');
+const compassLabel          = _pick(_mTP, 'trip-planner', 'compassLabel');
+const greatCircleDistanceKm = _pick(_mTP, 'trip-planner', 'greatCircleDistanceKm');
+// class-roster.js (imported but not invoked on this page) — no-op fallback
+const mountClassRoster = _pick(_mCR, 'class-roster', 'mountClassRoster', () => {});
+// activation.js — fire-and-forget analytics; degrade to no-ops, never error
+const logActivation = _pick(_mACT, 'activation', 'logActivation', () => {});
+const EVENTS        = _pick(_mACT, 'activation', 'EVENTS', {});
+
+// ── Per-card fault-isolation helpers ─────────────────────────────────────────
+function _cardErrorBox(host, label, retry) {
+    if (!host) return;
+    let box = host.querySelector(':scope > .card-load-error');
+    if (!box) { box = document.createElement('div'); box.className = 'card-load-error'; host.appendChild(box); }
+    box.replaceChildren();
+    const msg = document.createElement('span');
+    msg.textContent = `${label || 'This section'} couldn't load.`;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'card-retry-btn';
+    btn.textContent = 'Retry';
+    btn.addEventListener('click', () => { box.remove(); retry(); });
+    box.append(msg, btn);
+}
+// Background wiring (no user-facing card): swallow + log, never let one
+// block's throw halt the blocks after it.
+function runSafe(label, fn) {
+    try {
+        const r = fn();
+        if (r && typeof r.then === 'function') r.catch(e => console.error(`[dashboard] ${label} failed:`, e));
+    } catch (e) {
+        console.error(`[dashboard] ${label} failed:`, e);
+    }
+}
+// User-facing card: on throw (sync or async) show an inline error + Retry
+// scoped to that card only.
+function runCard(label, cardId, fn) {
+    const host = document.getElementById(cardId);
+    const go = () => {
+        try {
+            const r = fn();
+            if (r && typeof r.then === 'function') {
+                r.catch(e => { console.error(`[dashboard] ${label} failed:`, e); _cardErrorBox(host, label, go); });
+            }
+        } catch (e) {
+            console.error(`[dashboard] ${label} failed:`, e);
+            _cardErrorBox(host, label, go);
+        }
+    };
+    go();
+}
 
 // Primary auth contract: bounce anonymous visitors to
 // /signin?next=<this-url> so the deep link they typed (or were shared)
@@ -1574,6 +1686,31 @@ if (!_auth || !_auth.signedIn) {
   const urlParams = new URLSearchParams(location.search);
   if (urlParams.get('checkout') === 'success') {
     const successPlan = urlParams.get('plan') || 'basic';
+    const sessionId = urlParams.get('session_id') || '';
+    // GA4 ecommerce `purchase` — the subscription-conversion signal.
+    // transaction_id is the Stripe Checkout session id so GA4 dedupes
+    // if the success URL is reloaded; a sessionStorage guard also stops
+    // a same-tab double-fire before the URL is cleaned below. Value is
+    // the monthly list price (cadence isn't in the return URL — yearly
+    // shows as the monthly figure; good enough for a conversion proxy,
+    // not billing). Consent-gated like every GA4 send (analytics.event
+    // only reaches gtag once analytics cookies are accepted).
+    try {
+      const PLAN_PRICE = { basic: 10, educator: 25, advanced: 100, institution: 500, enterprise: 0 };
+      const guardKey = 'pp_purchase_sent_' + (sessionId || successPlan);
+      if (!sessionStorage.getItem(guardKey)) {
+        sessionStorage.setItem(guardKey, '1');
+        const value = PLAN_PRICE[successPlan] ?? 0;
+        import('./js/analytics.js').then(({ analytics }) => {
+          analytics?.event?.('purchase', {
+            transaction_id: sessionId || `sub_${successPlan}_${Date.now()}`,
+            currency: 'USD',
+            value,
+            items: [{ item_id: successPlan, item_name: `${successPlan} plan`, price: value, quantity: 1 }],
+          });
+        }).catch(() => {});
+      }
+    } catch {}
     const banner = document.createElement('div');
     banner.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);background:rgba(0,40,20,.95);border:1px solid rgba(0,200,100,.3);border-radius:10px;padding:14px 28px;color:#44cc88;font-size:.88rem;font-weight:600;z-index:999;box-shadow:0 4px 20px rgba(0,0,0,.5);text-align:center';
     banner.innerHTML = `Welcome to ${successPlan.charAt(0).toUpperCase() + successPlan.slice(1)}! Your subscription is now active.`;
@@ -2118,8 +2255,8 @@ function initAll() {
     _showLocation(null);
   }
 
-  // Space weather
-  _initSpaceWeather();
+  // Space weather (isolated: a dead SWPC feed degrades this card only)
+  runCard('Space Weather', 'sw-card', _initSpaceWeather);
 
   // Local time refresh every minute
   setInterval(() => {
@@ -2135,22 +2272,22 @@ function initAll() {
 }
 
 // All declarations complete — safe to call initAll now
-initAll();
+runSafe('Location card', initAll);
 
 // ── Onboarding Tour ─────────────────────────────────────────────────────────
-{
+runSafe('Onboarding tour', () => {
     const tour = new OnboardingTour();
     // Auto-start for new users (first visit)
     setTimeout(() => tour.start(), 1500);
     // Re-trigger link
     document.getElementById('retake-tour')?.addEventListener('click', () => tour.forceStart());
-}
+});
 
 // ── Activation events ───────────────────────────────────────────────────────
 // First-X events the team can use to measure how many signups got value.
 // All idempotent at the DB layer (unique partial index on (user_id, event)),
 // so spamming is harmless.
-{
+runSafe('Activation events', () => {
     // Signup landmark — first dashboard load IS effectively the activated
     // signup. The DB unique index dedupes so this firing on every load is fine.
     logActivation(EVENTS.SIGNUP);
@@ -2161,6 +2298,14 @@ initAll();
         if (!a) return;
         const dest = (a.getAttribute('href') || '').replace(/\.html$/, '').replace(/^\//, '');
         logActivation(EVENTS.FIRST_SIM_OPENED, { sim: dest });
+        // GA4 engagement: fires on EVERY sim-card click (not deduped like
+        // the activation event above), so GA4 sees per-sim popularity and
+        // repeat usage. analytics.simulation → event 'sim_open' → gtag.
+        try {
+            import('./js/analytics.js').then(({ analytics }) => {
+                analytics?.simulation?.(dest, 'open', { source: 'dashboard' });
+            }).catch(() => {});
+        } catch {}
     };
     document.querySelector('.sim-grid')?.addEventListener('click', onceSim, { capture: true });
 
@@ -2168,10 +2313,10 @@ initAll();
     window.addEventListener('user-location-changed', (e) => {
         if (e.detail) logActivation(EVENTS.LOCATION_SAVED, { source: 'dashboard' });
     });
-}
+});
 
 // ── Alert Engine + Preferences Wiring ────────────────────────────────────────
-{
+runCard('Alerts', 'alert-card', () => {
     const engine = new AlertEngine();
 
     // Wire the "mark all read" event from nav bell
@@ -2281,12 +2426,12 @@ initAll();
         if (_emailAddr) _emailAddr.textContent = (auth.getUser()?.email || 'your inbox');
     }
     } // end of _alertPrefsCardPresent else
-}
+});
 
 // ── Saved Locations (multi-location alerts) ─────────────────────────────────
 // MOVED to /settings.html#saved-locations. The IIFE below early-returns
 // when its root DOM ids aren't present on this page.
-(() => {
+runSafe('Saved locations', () => {
     const $ = id => document.getElementById(id);
     const gate        = $('sl-gate');
     const content     = $('sl-content');
@@ -2843,10 +2988,10 @@ initAll();
 
     // Initial render
     render();
-})();
+});
 
 // ── Trip Planning (two-location weather comparison) ─────────────────────────
-(() => {
+runCard('Trip planning', 'trip-planning-card', () => {
     const $ = id => document.getElementById(id);
     const empty     = $('tp-empty');
     const wrap      = $('tp-wrap');
@@ -3050,10 +3195,10 @@ initAll();
 
     onLocationsChanged(() => refreshLocations());
     refreshLocations();
-})();
+});
 
 // ── Impact Score Engine ──────────────────────────────────────────────────────
-{
+runCard('Impact score', 'impact-card', () => {
     const impactEngine = new ImpactScoreEngine().start();
 
     const _el = id => document.getElementById(id);
@@ -3155,10 +3300,10 @@ initAll();
             }
         }
     });
-}
+});
 
 // ── Daily Briefing Engine ─────────────────────────────────────────────────────
-{
+runCard('Daily briefing', 'daily-briefing-card', () => {
     const summaryEngine = new DailySummaryEngine().start();
     const _el = id => document.getElementById(id);
 
@@ -3247,10 +3392,10 @@ initAll();
             refreshBriefing();
         }
     });
-}
+});
 
 // ── Alert History Panel ──────────────────────────────────────────────────────
-{
+runCard('Alert history', 'alert-history-card', () => {
     const PAGE_SIZE = 15;
     let _histPage = 0;
     let _histType = 'all';
@@ -3357,7 +3502,7 @@ initAll();
 
     // Initial load
     loadHistory();
-}
+});
 </script>
 <script type="module">import './js/analytics.js';</script>
 </body>

@@ -827,6 +827,20 @@
                     class_seat:     !!classSeatApplied,
                     invite_comped:  !!invitedComp,
                 });
+                // GA4 `sign_up` — the account exists (pending email
+                // confirmation); this is still the signup conversion.
+                // Mutually exclusive with the auto-confirm branch below,
+                // so no double-count. Dynamic import: analytics isn't in
+                // scope on this early-return path.
+                try {
+                    import('./js/analytics.js').then(({ analytics }) => {
+                        analytics?.event?.('sign_up', {
+                            method:  _hasInvite ? 'invite' : 'email',
+                            plan:    _selectedPlan,
+                            pending: true,
+                        });
+                    }).catch(() => {});
+                } catch {}
                 return;
             }
 
@@ -848,6 +862,11 @@
                 if (u?.id) {
                     const { analytics } = await import('./js/analytics.js');
                     analytics.identify(u.id, { plan: u.plan, role: u.role });
+                    // GA4 recommended `sign_up` event (mirrors to gtag).
+                    analytics.event('sign_up', {
+                        method: _hasInvite ? 'invite' : 'email',
+                        plan:   _selectedPlan,
+                    });
                 }
             } catch {}
 
