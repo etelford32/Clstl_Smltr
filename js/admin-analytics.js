@@ -1762,6 +1762,38 @@ export async function fetchTop404s(days = 30, limit = 25) {
     }
 }
 
+/**
+ * Analytics consent opt-in rate — the correction factor for every
+ * consent-gated KPI. Returns prompts / decisions / analytics_opt_in /
+ * functional_opt_in / optin_rate / engagement_rate (rates 0..1 or null
+ * before any traffic). Admin-gated server-side.
+ */
+export async function fetchConsentOptinRate(days = 30) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client.rpc('consent_optin_rate', { p_days: days });
+        if (error) throw error;
+        const row = Array.isArray(data) ? data[0] : data;
+        return {
+            ok: true,
+            data: {
+                prompts:          Number(row?.prompts) || 0,
+                decisions:        Number(row?.decisions) || 0,
+                analyticsOptIn:   Number(row?.analytics_opt_in) || 0,
+                functionalOptIn:  Number(row?.functional_opt_in) || 0,
+                // null (not 0) when undefined so the UI shows "—" rather
+                // than a misleading 0% before any decisions are recorded.
+                optinRate:        row?.optin_rate == null ? null : Number(row.optin_rate),
+                engagementRate:   row?.engagement_rate == null ? null : Number(row.engagement_rate),
+            },
+        };
+    } catch (err) {
+        return { ok: false, error: _telemetryHint(err, 'consent_optin_rate', 'supabase-consent-telemetry-migration.sql') };
+    }
+}
+
 /** Top auth-failure reasons (client_telemetry ∪ auth_failures). */
 export async function fetchTopAuthFailures(days = 30, limit = 15) {
     const client = await sb();

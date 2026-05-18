@@ -228,6 +228,19 @@
             <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-enterprise">--</div><div class="kpi-label">Enterprise Accounts</div></div>
             <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-admins">--</div><div class="kpi-label">Admin Users</div></div>
             <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-online">--</div><div class="kpi-label">Online Now</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-optin">--</div><div class="kpi-label">Analytics Opt-in</div><div class="kpi-sub" id="kpi-optin-sub"></div></div>
+        </div>
+
+        <div style="font-size:.72rem;line-height:1.5;color:#667;margin:-6px 0 22px">
+            Visitors, Sign-ins, Minutes &amp; Online Now are derived from
+            first-party analytics that only fire <strong>after a visitor
+            accepts the analytics cookie</strong> &mdash; treat them as a
+            lower bound on real traffic, not totals. <em>Visitors</em> is
+            distinct sessions (anonymous included); the <em>signed&nbsp;in</em>
+            sub-figure is distinct logged-in users. <strong>Analytics
+            Opt-in</strong> is the correction factor &mdash; divide a gated
+            metric by it for a true-volume estimate. Sign-ups, Subscribers,
+            Revenue &amp; Admin Users come from account records and are exact.
         </div>
 
         <div style="font-size:.72rem;line-height:1.5;color:#667;margin:-6px 0 22px">
@@ -1088,6 +1101,39 @@ async function loadRevenueKPIs() {
     }
 }
 loadRevenueKPIs();
+
+// ── Analytics Opt-in KPI ────────────────────────────────────────────────────
+// The correction factor for every consent-gated card. Lives in the Overview
+// grid; fed by consent_optin_rate (supabase-consent-telemetry-migration.sql).
+async function loadConsentKPI() {
+    const val = document.getElementById('kpi-optin');
+    const sub = document.getElementById('kpi-optin-sub');
+    if (!val) return;
+    const res = await fetchConsentOptinRate(30);
+    if (!res.ok) {
+        val.textContent = '—';
+        val.className = 'kpi-val white';
+        val.title = res.error || '';
+        if (sub) sub.textContent = /migration/i.test(res.error || '') ? 'migration not applied' : '';
+        return;
+    }
+    const d = res.data;
+    if (d.optinRate == null) {
+        val.textContent = '—';
+        val.className = 'kpi-val white';
+        if (sub) sub.textContent = d.prompts ? `${d.prompts} prompts · 0 decided` : 'no prompts yet';
+        return;
+    }
+    const pct = Math.round(d.optinRate * 100);
+    val.textContent = pct + '%';
+    val.className = 'kpi-val ' + (pct >= 50 ? 'green' : pct >= 25 ? 'gold' : 'red');
+    if (sub) {
+        const eng = d.engagementRate == null ? null : Math.round(d.engagementRate * 100);
+        sub.textContent = `${d.analyticsOptIn.toLocaleString()} of ${d.decisions.toLocaleString()} decided`
+            + (eng == null ? '' : ` · ${eng}% engaged`);
+    }
+}
+loadConsentKPI();
 
 // ── Daily Trend sparkline (page views + unique users + avg time-on-page) ────
 async function loadTrend() {
@@ -2994,6 +3040,7 @@ async function refreshAnalyticsNow() {
         await Promise.allSettled([
             loadKPIs(),
             loadRevenueKPIs(),
+            loadConsentKPI(),
             tabLoad(),
         ]);
         if (stamp) stamp.textContent = `Last refresh: ${new Date().toLocaleTimeString()}`;
