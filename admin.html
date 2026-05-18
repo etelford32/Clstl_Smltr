@@ -59,6 +59,8 @@
         }
         .kpi-val { font-size: 1.8rem; font-weight: 800; line-height: 1; margin-bottom: 6px; }
         .kpi-label { font-size: .72rem; color: #666; text-transform: uppercase; letter-spacing: .06em; }
+        .kpi-sub { font-size: .62rem; color: #6c8; margin-top: 5px; letter-spacing: .02em; }
+        .kpi-sub:empty { display: none; }
         .kpi-val.green { color: #4eff91; }
         .kpi-val.blue { color: #4fc3f7; }
         .kpi-val.purple { color: #c080ff; }
@@ -213,9 +215,9 @@
     <!-- ═══════════════════ OVERVIEW TAB ═══════════════════ -->
     <div class="tab-panel active" id="panel-overview">
         <div class="kpi-grid" id="kpi-grid">
-            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-dau">--</div><div class="kpi-label">Daily Uniques</div></div>
-            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-wau">--</div><div class="kpi-label">Weekly Uniques</div></div>
-            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-mau">--</div><div class="kpi-label">Monthly Uniques</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-dau">--</div><div class="kpi-label">Daily Visitors</div><div class="kpi-sub" id="kpi-dau-sub"></div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-wau">--</div><div class="kpi-label">Weekly Visitors</div><div class="kpi-sub" id="kpi-wau-sub"></div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-mau">--</div><div class="kpi-label">Monthly Visitors</div><div class="kpi-sub" id="kpi-mau-sub"></div></div>
             <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-signins">--</div><div class="kpi-label">Sign-ins (30d)</div></div>
             <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-minutes">--</div><div class="kpi-label">Minutes Used (30d)</div></div>
             <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-signups">--</div><div class="kpi-label">Users Signed Up</div></div>
@@ -226,6 +228,29 @@
             <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-enterprise">--</div><div class="kpi-label">Enterprise Accounts</div></div>
             <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-admins">--</div><div class="kpi-label">Admin Users</div></div>
             <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-online">--</div><div class="kpi-label">Online Now</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-optin">--</div><div class="kpi-label">Analytics Opt-in</div><div class="kpi-sub" id="kpi-optin-sub"></div></div>
+        </div>
+
+        <div style="font-size:.72rem;line-height:1.5;color:#667;margin:-6px 0 22px">
+            Visitors, Sign-ins, Minutes &amp; Online Now are derived from
+            first-party analytics that only fire <strong>after a visitor
+            accepts the analytics cookie</strong> &mdash; treat them as a
+            lower bound on real traffic, not totals. <em>Visitors</em> is
+            distinct sessions (anonymous included); the <em>signed&nbsp;in</em>
+            sub-figure is distinct logged-in users. <strong>Analytics
+            Opt-in</strong> is the correction factor &mdash; divide a gated
+            metric by it for a true-volume estimate. Sign-ups, Subscribers,
+            Revenue &amp; Admin Users come from account records and are exact.
+        </div>
+
+        <div style="font-size:.72rem;line-height:1.5;color:#667;margin:-6px 0 22px">
+            Visitors, Sign-ins, Minutes &amp; Online Now are derived from
+            first-party analytics that only fire <strong>after a visitor
+            accepts the analytics cookie</strong> &mdash; treat them as a
+            lower bound on real traffic, not totals. <em>Visitors</em> is
+            distinct sessions (anonymous included); the <em>signed&nbsp;in</em>
+            sub-figure is distinct logged-in users. Sign-ups, Subscribers,
+            Revenue &amp; Admin Users come from account records and are exact.
         </div>
 
         <!-- Revenue & Subscription Metrics -->
@@ -745,6 +770,27 @@
                 <div id="config-info"></div>
             </div>
         </div>
+        <!-- ── Performance & Errors (client_telemetry) ──────────────── -->
+        <!-- Web Vitals (LCP/FCP/CLS/INP) + JS errors + 404s + auth
+             failures, all from client_telemetry written by
+             js/telemetry.js. The four RPCs are superadmin-gated
+             server-side (supabase-client-telemetry-migration.sql), so
+             this card self-gates to superadmins and shows a clear hint
+             if the migration hasn't been applied. -->
+        <div class="card" id="perf-errors-card" style="margin-bottom:18px">
+            <h3>
+                Performance &amp; Errors
+                <span style="float:right;display:flex;gap:8px;align-items:center">
+                    <select id="perf-window" class="btn btn-sm" style="padding:2px 8px;font-size:.7rem">
+                        <option value="7">7 days</option>
+                        <option value="30" selected>30 days</option>
+                        <option value="90">90 days</option>
+                    </select>
+                    <button class="btn btn-sm" id="btn-refresh-perf">Refresh</button>
+                </span>
+            </h3>
+            <div id="perf-errors-container"><div class="empty">Loading…</div></div>
+        </div>
         <!-- ── Pipeline Health (data-freshness summary) ─────────────── -->
         <!-- One row per pipeline (solar_wind, weather_grid, …) showing
              last successful upstream fetch, consecutive-fail streak, and
@@ -825,7 +871,7 @@
 import { auth } from './js/auth.js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY, isConfigured, getSupabase, testConnection } from './js/supabase-config.js';
 import { GA_MEASUREMENT_ID } from './js/analytics.js';
-import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchActivationFunnel, fetchActivationDaily, fetchActivationOverview, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap, fetchWizardFunnel, fetchTourMetrics, fetchDemoMetrics, fetchAuthFlowMetrics, fetchAuthFunnelDropoffs, fetchNewVsReturning, fetchVisitorFlow, fetchEntryDestinations, fetchAccumulatorStats, fetchExperimentAB } from './js/admin-analytics.js';
+import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchActivationFunnel, fetchActivationDaily, fetchActivationOverview, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap, fetchWizardFunnel, fetchTourMetrics, fetchDemoMetrics, fetchAuthFlowMetrics, fetchAuthFunnelDropoffs, fetchNewVsReturning, fetchVisitorFlow, fetchEntryDestinations, fetchAccumulatorStats, fetchExperimentAB, fetchPerfSummary, fetchTopErrors, fetchTop404s, fetchTopAuthFailures } from './js/admin-analytics.js';
 import { createInviteCode, fetchInviteCodes, deactivateInvite, sendInviteEmail } from './js/admin-invites.js';
 
 // ── Tabs (wired first so they always work) ──────────────────────────────────
@@ -964,9 +1010,17 @@ async function loadKPIs() {
         el.textContent = typeof val === 'number' ? val.toLocaleString() : val;
         el.className = 'kpi-val ' + cls;
     };
-    set('kpi-dau', d.dailyUnique, 'white');
-    set('kpi-wau', d.weeklyUnique, 'white');
-    set('kpi-mau', d.monthlyUnique, 'white');
+    // Headline = unique visitors (distinct session_id, anonymous-inclusive).
+    // Sub-line = signed-in users (distinct user_id). The empty-state CSS
+    // hides the sub-line until data resolves.
+    const setVisitors = (valId, subId, visitors, users) => {
+        set(valId, visitors ?? 0, 'white');
+        const sub = document.getElementById(subId);
+        if (sub) sub.textContent = `${(users ?? 0).toLocaleString()} signed in`;
+    };
+    setVisitors('kpi-dau', 'kpi-dau-sub', d.dailyVisitors, d.dailyUnique);
+    setVisitors('kpi-wau', 'kpi-wau-sub', d.weeklyVisitors, d.weeklyUnique);
+    setVisitors('kpi-mau', 'kpi-mau-sub', d.monthlyVisitors, d.monthlyUnique);
     set('kpi-signins', d.signIns, 'blue');
     set('kpi-minutes', d.minutesUsed, 'blue');
     set('kpi-signups', d.signUps, 'green');
@@ -1047,6 +1101,39 @@ async function loadRevenueKPIs() {
     }
 }
 loadRevenueKPIs();
+
+// ── Analytics Opt-in KPI ────────────────────────────────────────────────────
+// The correction factor for every consent-gated card. Lives in the Overview
+// grid; fed by consent_optin_rate (supabase-consent-telemetry-migration.sql).
+async function loadConsentKPI() {
+    const val = document.getElementById('kpi-optin');
+    const sub = document.getElementById('kpi-optin-sub');
+    if (!val) return;
+    const res = await fetchConsentOptinRate(30);
+    if (!res.ok) {
+        val.textContent = '—';
+        val.className = 'kpi-val white';
+        val.title = res.error || '';
+        if (sub) sub.textContent = /migration/i.test(res.error || '') ? 'migration not applied' : '';
+        return;
+    }
+    const d = res.data;
+    if (d.optinRate == null) {
+        val.textContent = '—';
+        val.className = 'kpi-val white';
+        if (sub) sub.textContent = d.prompts ? `${d.prompts} prompts · 0 decided` : 'no prompts yet';
+        return;
+    }
+    const pct = Math.round(d.optinRate * 100);
+    val.textContent = pct + '%';
+    val.className = 'kpi-val ' + (pct >= 50 ? 'green' : pct >= 25 ? 'gold' : 'red');
+    if (sub) {
+        const eng = d.engagementRate == null ? null : Math.round(d.engagementRate * 100);
+        sub.textContent = `${d.analyticsOptIn.toLocaleString()} of ${d.decisions.toLocaleString()} decided`
+            + (eng == null ? '' : ` · ${eng}% engaged`);
+    }
+}
+loadConsentKPI();
 
 // ── Daily Trend sparkline (page views + unique users + avg time-on-page) ────
 async function loadTrend() {
@@ -2478,6 +2565,133 @@ async function loadCronStatus() {
 document.getElementById('btn-refresh-cron').addEventListener('click', loadCronStatus);
 loadCronStatus();
 
+// ── Performance & Errors (client_telemetry, superadmin-only) ────────────────
+function _perfSection(title, bodyHtml) {
+    return `<div style="margin-bottom:18px">`
+         + `<div style="font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:#7a8;font-weight:700;margin-bottom:6px">${title}</div>`
+         + bodyHtml + `</div>`;
+}
+function _perfErr(res, what) {
+    return `<div class="empty" style="color:#ff9090">${what}: ${_esc(res.error || 'failed')}</div>`;
+}
+function _perfEmpty(msg) {
+    return `<div class="empty">${_esc(msg)}</div>`;
+}
+
+async function loadPerfErrors() {
+    const el = document.getElementById('perf-errors-container');
+    if (!el) return;
+
+    // The four RPCs are superadmin-gated server-side. Self-gate in the UI
+    // so plain admins get a clear message instead of four 42501 errors.
+    if (auth.isSuperadmin?.() !== true) {
+        el.innerHTML = `<div class="empty">Performance &amp; error telemetry is <strong>superadmin-only</strong>. The data is collected for every visitor (Web Vitals, JS errors, 404s, auth failures) but the read RPCs require superadmin.</div>`;
+        return;
+    }
+
+    const days = parseInt(document.getElementById('perf-window')?.value, 10) || 30;
+    el.innerHTML = `<div class="empty">Loading ${days}-day telemetry…</div>`;
+
+    const [perf, errors, notfound, authfail] = await Promise.all([
+        fetchPerfSummary(Math.min(days, 30)),   // perf RPC caps at 50 rows; 30d is plenty
+        fetchTopErrors(days),
+        fetchTop404s(days),
+        fetchTopAuthFailures(days),
+    ]);
+
+    let html = '';
+
+    // Web Vitals + app perf. Values are ms (CLS is ×1000 per the RPC).
+    if (!perf.ok) {
+        html += _perfSection('Web Vitals &amp; Perf', _perfErr(perf, 'perf summary'));
+    } else if (!perf.data.length) {
+        html += _perfSection('Web Vitals &amp; Perf', _perfEmpty('No vitals samples in window (25% sampled — needs traffic).'));
+    } else {
+        let t = '<table><thead><tr><th>Metric</th><th>Route</th><th>Samples</th><th>p50</th><th>p95</th><th>Poor</th></tr></thead><tbody>';
+        for (const r of perf.data) {
+            const p95 = Number(r.p95) || 0;
+            const poor = Number(r.poor_count) || 0;
+            const poorColor = poor > 0 ? '#ffb454' : '#556';
+            t += `<tr>`
+              +  `<td style="color:#9cf;font-weight:600">${_esc(r.metric_name)}</td>`
+              +  `<td style="font-family:ui-monospace,monospace;font-size:.76rem;color:#aab">${_esc(r.route || '—')}</td>`
+              +  `<td style="color:#aab">${Number(r.samples || 0).toLocaleString()}</td>`
+              +  `<td style="color:#cde">${(Number(r.p50) || 0).toLocaleString()}</td>`
+              +  `<td style="color:${p95 > 0 ? '#cde' : '#556'}">${p95.toLocaleString()}</td>`
+              +  `<td style="color:${poorColor};font-weight:${poor > 0 ? '700' : '400'}">${poor.toLocaleString()}</td>`
+              +  `</tr>`;
+        }
+        t += '</tbody></table>';
+        html += _perfSection('Web Vitals &amp; Perf <span style="color:#556;font-weight:400;text-transform:none">· ms (CLS ×1000)</span>', t);
+    }
+
+    // Top JS errors.
+    if (!errors.ok) {
+        html += _perfSection('Top JS Errors', _perfErr(errors, 'errors'));
+    } else if (!errors.data.length) {
+        html += _perfSection('Top JS Errors', _perfEmpty('No JS errors in window. 🎉'));
+    } else {
+        let t = '<table><thead><tr><th>Error</th><th>Hits</th><th>Users</th><th>Routes</th><th>Last seen</th></tr></thead><tbody>';
+        for (const e of errors.data) {
+            const occ = Number(e.occurrences) || 0;
+            t += `<tr>`
+              +  `<td style="max-width:380px"><div style="color:#ff9c9c;font-size:.8rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(e.sample_message || '')}\n\n${_esc(e.sample_stack || '')}">${_esc(e.sample_message || '(no message)')}</div><div style="color:#556;font-size:.68rem;font-family:ui-monospace,monospace">${_esc(e.fingerprint)} · ${_esc(e.sample_route || '')}</div></td>`
+              +  `<td style="color:${occ > 10 ? '#ff8080' : '#cde'};font-weight:${occ > 10 ? '700' : '400'}">${occ.toLocaleString()}</td>`
+              +  `<td style="color:#aab">${Number(e.distinct_users || 0).toLocaleString()}</td>`
+              +  `<td style="color:#aab">${Number(e.distinct_routes || 0).toLocaleString()}</td>`
+              +  `<td style="color:#889;font-size:.76rem">${_esc(_timeAgo(e.last_seen))}</td>`
+              +  `</tr>`;
+        }
+        t += '</tbody></table>';
+        html += _perfSection('Top JS Errors', t);
+    }
+
+    // Top 404s.
+    if (!notfound.ok) {
+        html += _perfSection('Top 404s', _perfErr(notfound, '404s'));
+    } else if (!notfound.data.length) {
+        html += _perfSection('Top 404s', _perfEmpty('No 404s in window.'));
+    } else {
+        let t = '<table><thead><tr><th>Route</th><th>Hits</th><th>Sessions</th><th>Last seen</th></tr></thead><tbody>';
+        for (const n of notfound.data) {
+            t += `<tr>`
+              +  `<td style="font-family:ui-monospace,monospace;font-size:.78rem;color:#cde">${_esc(n.route)}</td>`
+              +  `<td style="color:#cde">${Number(n.occurrences || 0).toLocaleString()}</td>`
+              +  `<td style="color:#aab">${Number(n.distinct_sessions || 0).toLocaleString()}</td>`
+              +  `<td style="color:#889;font-size:.76rem">${_esc(_timeAgo(n.last_seen))}</td>`
+              +  `</tr>`;
+        }
+        t += '</tbody></table>';
+        html += _perfSection('Top 404s', t);
+    }
+
+    // Top auth failures.
+    if (!authfail.ok) {
+        html += _perfSection('Top Auth Failures', _perfErr(authfail, 'auth failures'));
+    } else if (!authfail.data.length) {
+        html += _perfSection('Top Auth Failures', _perfEmpty('No auth failures in window.'));
+    } else {
+        let t = '<table><thead><tr><th>Reason</th><th>Source</th><th>Occurrences</th><th>Actors</th><th>Last seen</th></tr></thead><tbody>';
+        for (const a of authfail.data) {
+            const occ = Number(a.occurrences) || 0;
+            t += `<tr>`
+              +  `<td style="color:#ffb0b0">${_esc(a.reason)}</td>`
+              +  `<td style="font-family:ui-monospace,monospace;font-size:.74rem;color:#9ad">${_esc(a.source)}</td>`
+              +  `<td style="color:${occ > 25 ? '#ff8080' : '#cde'};font-weight:${occ > 25 ? '700' : '400'}">${occ.toLocaleString()}</td>`
+              +  `<td style="color:#aab">${Number(a.distinct_actors || 0).toLocaleString()}</td>`
+              +  `<td style="color:#889;font-size:.76rem">${_esc(_timeAgo(a.last_seen))}</td>`
+              +  `</tr>`;
+        }
+        t += '</tbody></table>';
+        html += _perfSection('Top Auth Failures', t);
+    }
+
+    el.innerHTML = html;
+}
+
+document.getElementById('btn-refresh-perf')?.addEventListener('click', loadPerfErrors);
+document.getElementById('perf-window')?.addEventListener('change', loadPerfErrors);
+
 document.getElementById('btn-gen-invite').addEventListener('click', async () => {
     const btn = document.getElementById('btn-gen-invite');
     btn.textContent = 'Generating...'; btn.disabled = true;
@@ -2628,11 +2842,21 @@ async function _mountPipelineAnalytics() {
     }
 }
 document.querySelector('.tab[data-tab="system"]')?.addEventListener('click', _mountPipelineAnalytics);
+// Lazy-load Performance & Errors on first System-tab open (one fetch
+// burst, then the auto-refresh loop keeps it current).
+let _perfLoaded = false;
+function _mountPerfErrors() {
+    if (_perfLoaded) return;
+    _perfLoaded = true;
+    loadPerfErrors();
+}
+document.querySelector('.tab[data-tab="system"]')?.addEventListener('click', _mountPerfErrors);
 // If the page deep-links into #system or the System tab is already active,
 // fire once on load so the card isn't blank until the user clicks away and
 // back.
 if (document.getElementById('panel-system')?.classList.contains('active')) {
     _mountPipelineAnalytics();
+    _mountPerfErrors();
 }
 document.getElementById('btn-schema').addEventListener('click', () => window.open('supabase-schema.sql', '_blank'));
 document.getElementById('btn-export').addEventListener('click', async () => {
@@ -2794,7 +3018,7 @@ const _refreshLoaders = {
     activation: () => Promise.allSettled([loadActivationAll(), loadOnboardingAll()]),
     analytics:  () => Promise.allSettled([loadVisitorFlow(), loadSessions()]),
     invites:    () => Promise.allSettled([loadInvites(), loadEmailActivity()]),
-    system:     () => Promise.allSettled([loadPipelineHeartbeat(), loadProxyFreshness(), loadCronStatus()]),
+    system:     () => Promise.allSettled([loadPipelineHeartbeat(), loadProxyFreshness(), loadCronStatus(), (_perfLoaded ? loadPerfErrors() : Promise.resolve())]),
 };
 
 let _refreshTimer    = null;
@@ -2816,6 +3040,7 @@ async function refreshAnalyticsNow() {
         await Promise.allSettled([
             loadKPIs(),
             loadRevenueKPIs(),
+            loadConsentKPI(),
             tabLoad(),
         ]);
         if (stamp) stamp.textContent = `Last refresh: ${new Date().toLocaleTimeString()}`;

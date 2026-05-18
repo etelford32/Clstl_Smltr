@@ -198,7 +198,28 @@ export function initNav(activeId = '') {
 
     // First-party analytics: auto-tracks page views, time-on-page, scroll
     // depth, and (opt-in) clicks. Side-effect import — singleton inside.
-    import('./analytics.js').catch(() => { /* analytics must not break nav */ });
+    //
+    // Shared identify bootstrap: identify() was previously only wired into
+    // the auth pages (signin/signup/auth-callback/settings/welcome), so a
+    // returning user landing straight on an app page never tagged their
+    // analytics_events rows with a user_id. The admin "unique users" KPIs
+    // filter out null user_id, so they read 0 despite real traffic. nav.js
+    // loads on every page and re-runs on `auth-changed`, so this is the
+    // single place that reliably knows "who is signed in, on every page".
+    // Guarded on the user id so re-renders don't spam identify()/heartbeat;
+    // a sign-out (auth → null) resets the guard so a later sign-in
+    // re-identifies.
+    import('./analytics.js')
+        .then(m => {
+            const uid = auth?.id;
+            if (uid && window._ppAnalyticsIdentified !== uid) {
+                window._ppAnalyticsIdentified = uid;
+                m.analytics?.identify?.(uid, { plan: auth.plan, role: auth.role });
+            } else if (!uid) {
+                window._ppAnalyticsIdentified = null;
+            }
+        })
+        .catch(() => { /* analytics must not break nav */ });
 
     // Re-render nav when profile fetches real role (fixes admin button
     // not showing because nav rendered before fetchProfile() resolved)

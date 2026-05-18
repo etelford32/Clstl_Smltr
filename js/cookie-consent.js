@@ -58,6 +58,23 @@ function _gpcRefuses() {
     return navigator.globalPrivacyControl === true;
 }
 
+// ── Opt-in measurement ───────────────────────────────────────────────────────
+// Records consent prompt impressions + decisions so the admin can compute
+// the analytics opt-in rate (the correction factor for every consent-gated
+// KPI). Goes through telemetry.js, which is anonymous-safe and intentionally
+// bypasses consent — measuring the consent decision can't itself require
+// consent. Lazy, cached, fire-and-forget: a telemetry failure must never
+// affect the banner.
+let _telemetryPromise = null;
+function _recordConsent(event, meta) {
+    try {
+        if (!_telemetryPromise) {
+            _telemetryPromise = import('./telemetry.js').then(m => m.telemetry).catch(() => null);
+        }
+        _telemetryPromise.then(t => { try { t?.recordConsent?.(event, meta); } catch (_) {} });
+    } catch (_) { /* never throw from a reporter */ }
+}
+
 // ── State management ─────────────────────────────────────────────────────────
 
 function getState() {
@@ -265,6 +282,7 @@ function _renderBanner() {
         else if (action === 'customize') _openModal();
     });
     document.body.appendChild(bannerEl);
+    _recordConsent('prompt_shown', { gpc: _gpcRefuses() ? 1 : 0 });
 }
 
 function _hideBanner() {
@@ -277,6 +295,12 @@ function _accept(allCategories) {
     setState({
         functional: !!allCategories,
         analytics:  !!allCategories,
+    });
+    _recordConsent('decision', {
+        analytics:  allCategories ? 1 : 0,
+        functional: allCategories ? 1 : 0,
+        action:     allCategories ? 'accept_all' : 'reject',
+        gpc:        _gpcRefuses() ? 1 : 0,
     });
     _hideBanner();
     _closeModal();
@@ -364,6 +388,12 @@ function _openModal() {
             const fn = modalEl.querySelector('[data-toggle="functional"]')?.classList.contains('on');
             const an = modalEl.querySelector('[data-toggle="analytics"]')?.classList.contains('on');
             setState({ functional: !!fn, analytics: !!an });
+            _recordConsent('decision', {
+                analytics:  an ? 1 : 0,
+                functional: fn ? 1 : 0,
+                action:     'save',
+                gpc:        _gpcRefuses() ? 1 : 0,
+            });
             _hideBanner();
             _closeModal();
         }

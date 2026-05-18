@@ -353,6 +353,10 @@ async function boot() {
             try {
                 await logActivation('signin_succeeded', { retry_count: 0, source: callbackSource });
             } catch {}
+            // GA4 recommended `login` event for returning OAuth/magic-link
+            // users. Mirrors to gtag via analytics.event(); method carries
+            // the provider (google/apple/magic_link) for GA4 segmentation.
+            try { analytics.event('login', { method: callbackSource || 'oauth' }); } catch {}
             try {
                 funnel.step('auth_callback_succeeded', {
                     source:     callbackSource,
