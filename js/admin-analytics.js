@@ -1807,3 +1807,40 @@ export async function fetchTopAuthFailures(days = 30, limit = 15) {
         return { ok: false, error: _telemetryHint(err, 'telemetry_top_auth_failures', 'supabase-client-telemetry-migration.sql') };
     }
 }
+
+/**
+ * Live revenue metrics from Stripe via /api/stripe/admin-metrics
+ * (server-side; the browser can't hold the Stripe key). Replaces the
+ * plan-count × hardcoded-price estimate on the Revenue row. Returns
+ * { ok:true, data:{ mrr, arpu, activeSubs, trialing, pastDue,
+ * canceled30d, churnRate30d, churnLostMrr, failedPayments30d,
+ * failedAmount30d, collected30d, currency, asOf, truncated, byPlan } }.
+ */
+export async function fetchStripeMetrics() {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data: { session } } = await client.auth.getSession();
+        const token = session?.access_token;
+        if (!token) return { ok: false, error: 'No active session' };
+
+        const res = await fetch('/api/stripe/admin-metrics', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || body?.ok === false) {
+            const code = body?.error || `http_${res.status}`;
+            const hint = code === 'not_configured'
+                ? 'Stripe not configured — set STRIPE_SECRET_KEY in the deploy env for live revenue'
+                : code === 'unauthorized'
+                ? 'Admin access required for Stripe metrics'
+                : (body?.detail || code);
+            return { ok: false, error: hint };
+        }
+        return { ok: true, data: body };
+    } catch (err) {
+        return { ok: false, error: err.message || 'Stripe metrics request failed' };
+    }
+}
