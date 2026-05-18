@@ -254,13 +254,16 @@
         </div>
 
         <!-- Revenue & Subscription Metrics -->
-        <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.1em;color:#556;font-weight:700;margin-bottom:10px">Revenue &amp; Subscriptions</div>
+        <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.1em;color:#556;font-weight:700;margin-bottom:4px">Revenue &amp; Subscriptions</div>
+        <div id="revenue-provenance" style="font-size:.68rem;color:#667;margin-bottom:10px">&nbsp;</div>
         <div class="kpi-grid" id="kpi-revenue-grid" style="margin-bottom:24px">
-            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-mrr">--</div><div class="kpi-label">MRR (est.)</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-mrr">--</div><div class="kpi-label">MRR</div></div>
             <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-active-subs">--</div><div class="kpi-label">Active Subs</div></div>
             <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-trialing">--</div><div class="kpi-label">Trialing</div></div>
             <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-past-due">--</div><div class="kpi-label">Past Due</div></div>
             <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-canceled">--</div><div class="kpi-label">Canceled (30d)</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-churn">--</div><div class="kpi-label">Churn (30d)</div><div class="kpi-sub" id="kpi-churn-sub"></div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-failed">--</div><div class="kpi-label">Failed Pmts (30d)</div><div class="kpi-sub" id="kpi-failed-sub"></div></div>
             <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-free-users">--</div><div class="kpi-label">Free Users</div></div>
             <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-conversion">--</div><div class="kpi-label">Conversion Rate</div></div>
             <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-testers">--</div><div class="kpi-label">Testers</div></div>
@@ -871,7 +874,7 @@
 import { auth } from './js/auth.js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY, isConfigured, getSupabase, testConnection } from './js/supabase-config.js';
 import { GA_MEASUREMENT_ID } from './js/analytics.js';
-import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchActivationFunnel, fetchActivationDaily, fetchActivationOverview, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap, fetchWizardFunnel, fetchTourMetrics, fetchDemoMetrics, fetchAuthFlowMetrics, fetchAuthFunnelDropoffs, fetchNewVsReturning, fetchVisitorFlow, fetchEntryDestinations, fetchAccumulatorStats, fetchExperimentAB, fetchPerfSummary, fetchTopErrors, fetchTop404s, fetchTopAuthFailures } from './js/admin-analytics.js';
+import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchActivationFunnel, fetchActivationDaily, fetchActivationOverview, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap, fetchWizardFunnel, fetchTourMetrics, fetchDemoMetrics, fetchAuthFlowMetrics, fetchAuthFunnelDropoffs, fetchNewVsReturning, fetchVisitorFlow, fetchEntryDestinations, fetchAccumulatorStats, fetchExperimentAB, fetchPerfSummary, fetchTopErrors, fetchTop404s, fetchTopAuthFailures, fetchConsentOptinRate, fetchStripeMetrics } from './js/admin-analytics.js';
 import { createInviteCode, fetchInviteCodes, deactivateInvite, sendInviteEmail } from './js/admin-invites.js';
 
 // ── Tabs (wired first so they always work) ──────────────────────────────────
@@ -1089,6 +1092,51 @@ async function loadRevenueKPIs() {
         set('kpi-conversion', conversion, 'green');
         set('kpi-testers', testers, 'blue');
         set('kpi-arpu', arpu, 'gold');
+
+        // ── Live Stripe overlay ──────────────────────────────────────
+        // The numbers above are an ESTIMATE (plan counts × hardcoded
+        // prices). When the Stripe endpoint is reachable, overwrite the
+        // money/subscription cards with real figures and light up the
+        // Churn + Failed-payment cards the estimate can't produce. The
+        // estimate stays as the rendered fallback so a Stripe outage or
+        // missing key degrades gracefully instead of blanking the row.
+        const prov = document.getElementById('revenue-provenance');
+        try {
+            const sres = await fetchStripeMetrics();
+            if (sres.ok) {
+                const d = sres.data;
+                const money = (n) => '$' + Math.round(Number(n) || 0).toLocaleString();
+                set('kpi-mrr', money(d.mrr), 'green');
+                set('kpi-active-subs', d.activeSubs ?? 0, 'blue');
+                set('kpi-trialing', d.trialing ?? 0, 'purple');
+                set('kpi-past-due', d.pastDue ?? 0, (d.pastDue > 0) ? 'red' : 'white');
+                set('kpi-canceled', d.canceled30d ?? 0, (d.canceled30d > 0) ? 'red' : 'white');
+                set('kpi-arpu', '$' + (Number(d.arpu) || 0).toFixed(0), 'gold');
+
+                const churnPct = Math.round((Number(d.churnRate30d) || 0) * 100);
+                set('kpi-churn', churnPct + '%', churnPct >= 10 ? 'red' : churnPct > 0 ? 'gold' : 'green');
+                const churnSub = document.getElementById('kpi-churn-sub');
+                if (churnSub) churnSub.textContent = `${d.canceled30d || 0} canceled · -${money(d.churnLostMrr)}/mo`;
+
+                set('kpi-failed', d.failedPayments30d ?? 0, (d.failedPayments30d > 0) ? 'red' : 'green');
+                const failSub = document.getElementById('kpi-failed-sub');
+                if (failSub) failSub.textContent = `${money(d.failedAmount30d)} at risk · ${money(d.collected30d)} collected`;
+
+                if (prov) {
+                    const t = d.asOf ? new Date(d.asOf).toLocaleTimeString() : '';
+                    prov.innerHTML = `<span style="color:#4eff91">●</span> Live from Stripe`
+                        + (t ? ` · as of ${t}` : '')
+                        + (d.truncated ? ` · <span style="color:#ffb454">partial (cap reached)</span>` : '');
+                }
+            } else {
+                set('kpi-churn', '—', 'white');
+                set('kpi-failed', '—', 'white');
+                if (prov) prov.innerHTML = `<span style="color:#ffb454">●</span> Estimated from plan counts — ${_esc(sres.error || 'Stripe unavailable')}`;
+            }
+        } catch (se) {
+            if (prov) prov.innerHTML = `<span style="color:#ffb454">●</span> Estimated from plan counts — Stripe overlay failed`;
+            console.warn('[Admin] Stripe overlay failed:', se.message);
+        }
 
         // Alerts fired in last 24h
         const { count } = await sb.from('alert_history')
