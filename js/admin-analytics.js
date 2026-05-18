@@ -90,10 +90,17 @@ export async function fetchKPIs() {
                 .gte('created_at', daysAgo(30))
                 .not('user_id', 'is', null),
 
-            // Sign-ins (last 30 days)
-            client.from('analytics_events')
+            // Sign-ins (last 30 days). Counts every successful sign-in,
+            // not distinct users — signin_succeeded is intentionally NOT a
+            // single-fire activation event (see js/activation.js SINGLE_FIRE),
+            // so each sign-in writes its own row. The old query targeted
+            // analytics_events.event_name='sign_in', an event no code ever
+            // emits, so this KPI was structurally pinned at 0. activation_events
+            // is the canonical signin pipeline (same source as the auth-flow
+            // card via auth_flow_metrics) and is admin-readable under RLS.
+            client.from('activation_events')
                 .select('id', { count: 'exact', head: true })
-                .eq('event_name', 'sign_in')
+                .eq('event', 'signin_succeeded')
                 .gte('created_at', daysAgo(30)),
 
             // Total minutes used (sum of session durations)
