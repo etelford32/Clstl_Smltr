@@ -936,13 +936,48 @@ document.getElementById('auth-gate-signout')?.addEventListener('click', async (e
     location.href = 'signin.html';
 });
 
-if (!auth.isSignedIn()) {
+// Belt-and-suspenders signed-in check, mirroring dashboard.html's
+// _hasPersistedSession(): the auth module first, then the legacy pp_auth
+// localStorage mirror. Supabase session restore is async and racey on
+// cold load (and silently falls back to mock auth — a console.warn, not
+// an error — if the CDN import or getSession() flakes). Without this
+// fallback admin.html was the only gated page that hard dead-ended on
+// "Admin Access Required" while the rest of the site stayed signed in
+// via this same mirror. This does NOT weaken the gate: the unbypassable
+// server-side verifyAdminServerSide() check below still runs and still
+// throws (with diagnostics) for non-admins.
+function _hasPersistedSession() {
+    if (auth.isSignedIn()) return true;
+    try {
+        const raw = localStorage.getItem('pp_auth') || sessionStorage.getItem('pp_auth');
+        if (!raw) return false;
+        const parsed = JSON.parse(raw);
+        return !!parsed?.signedIn;
+    } catch { return false; }
+}
+
+if (!_hasPersistedSession()) {
+    // No session anywhere — genuinely signed out. Pass a diag string so
+    // the Retry + Sign-out actions render instead of a dead-end overlay
+    // (showGate only shows those controls when diag is provided).
     showGate(
         'Admin Access Required',
-        'You must be signed in with an admin account to view this page.'
+        'You must be signed in with an admin account to view this page.',
+        'No active session found on this device.\n\n'
+        + 'Recovery options:\n'
+        + ' 1. Click "Refresh session & retry" below.\n'
+        + ' 2. Sign out and sign back in.\n'
+        + ' 3. If you signed in on a different hostname (e.g. www vs the\n'
+        + '    bare domain), sign in again on THIS hostname — the session\n'
+        + '    is stored per-origin.',
     );
     throw '';
 }
+// If we get here with auth.isSignedIn() === false, the live Supabase
+// session lost the cold-load race (or fell back to mock). Don't
+// dead-end — fall through to the server-side verification below, which
+// already does a refreshSession() retry and surfaces full diagnostics
+// plus the Retry button.
 
 // Server-side admin verification: validates JWT with Supabase Auth server
 // and queries user_profiles for role. Cannot be bypassed via localStorage.
