@@ -877,7 +877,29 @@ function computeVehicleBBox(vehicleRoot) {
 
 function frameForView(name, vehicle, fovDeg, aspect) {
     const preset = VIEW_PRESETS[name] || VIEW_PRESETS.threequarter;
-    const bbox = vehicle.bbox || new THREE.Box3();
+    let bbox = vehicle.bbox;
+    // Degenerate-bbox guard. An empty Box3 has min=+Inf / max=-Inf; left
+    // unchecked it makes halfX/halfZ Infinity → dist Infinity → the camera
+    // flies to (Inf,Inf,Inf) and the scene renders as a bare pad/tower with
+    // no rocket. A near-zero box collapses dist to the floor and parks the
+    // camera at ground level inside the launch-tower lattice. Either way the
+    // symptom is "camera defaults to staring at the orange tower". Synthesize
+    // a sane box from the vehicle's nominal height so framing is always
+    // finite and rocket-centred even if the mesh bbox is missing/degenerate.
+    const finiteBox = bbox && !bbox.isEmpty() &&
+        Number.isFinite(bbox.min.y) && Number.isFinite(bbox.max.y) &&
+        Number.isFinite(bbox.min.x) && Number.isFinite(bbox.max.x) &&
+        Number.isFinite(bbox.min.z) && Number.isFinite(bbox.max.z) &&
+        (bbox.max.y - bbox.min.y) > 1;
+    if (!finiteBox) {
+        const h     = Math.max(Number(vehicle.height) || 50, 10);
+        const baseY = Number(vehicle.basePadY) || 0;
+        const r     = Math.max(h * 0.12, 4);
+        bbox = new THREE.Box3(
+            new THREE.Vector3(-r, baseY,     -r),
+            new THREE.Vector3( r, baseY + h,  r),
+        );
+    }
     const center = bbox.getCenter(new THREE.Vector3());
     const size   = bbox.getSize(new THREE.Vector3());
 
@@ -1205,6 +1227,14 @@ export function initVehicleCanvas(canvas, opts = {}) {
         pitchMax:  Math.PI / 2 - 0.02,
     };
 
+    // Latches true the moment the user actually manipulates the free-fly
+    // camera (look-drag, wheel-dolly, WASD/QE move). While false, every
+    // resize re-auto-frames the current preset; once true, resizes only
+    // re-measure (aspect) and leave the user's framing alone. Reset to
+    // false on vehicle swap and on explicit preset/recenter so auto-framing
+    // resumes for the new shot.
+    let userControlledCamera = false;
+
     const _fwd   = new THREE.Vector3();
     const _right = new THREE.Vector3();
     const _move  = new THREE.Vector3();
@@ -1296,6 +1326,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
         const dy = e.clientY - cam.lastY;
         cam.lastX = e.clientX;
         cam.lastY = e.clientY;
+        if (dx || dy) userControlledCamera = true;   // real look-drag
         cam.yaw   -= dx * cam.lookSpeed;
         cam.pitch -= dy * cam.lookSpeed;
         cam.pitch  = THREE.MathUtils.clamp(cam.pitch, cam.pitchMin, cam.pitchMax);
@@ -1315,6 +1346,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
         // moves forward. We do preventDefault here because we want the
         // wheel to drive the camera when the cursor is on the canvas.
         e.preventDefault();
+        userControlledCamera = true;                 // wheel-dolly
         camForward(_fwd);
         const dir = e.deltaY > 0 ? -1 : 1;
         cam.pos.addScaledVector(_fwd, dir * cam.dollyStep);
@@ -1322,7 +1354,10 @@ export function initVehicleCanvas(canvas, opts = {}) {
     function setKey(key, down) {
         const k = key.length === 1 ? key.toLowerCase() : key;
         if (k === 'Shift' || k === 'shift') { cam.keys.shift = down; return; }
-        if ('wasdqe'.includes(k)) cam.keys[k] = down;
+        if ('wasdqe'.includes(k)) {
+            cam.keys[k] = down;
+            if (down) userControlledCamera = true;    // WASD/QE fly
+        }
     }
     function onKeyDown(e) {
         // Only intercept movement keys when the canvas has focus, so
@@ -1463,8 +1498,11 @@ export function initVehicleCanvas(canvas, opts = {}) {
         const padOpts = { boosterDiameter: parseFloat(v.info?.diameter_m) || undefined };
         swapPad(v.padId, padOpts);
 
-        // A new vehicle starts framed from the canonical 3/4 angle.
+        // A new vehicle starts framed from the canonical 3/4 angle, and
+        // re-arms auto-framing so any post-swap resize keeps it centred
+        // until the user grabs the camera again.
         currentViewName = 'threequarter';
+        userControlledCamera = false;
         const aspect = camera.aspect || 16/10;
         const view = frameForView(currentViewName, current, cameraFov, aspect);
         cam.pos.set(...view.pos);
@@ -1685,12 +1723,21 @@ export function initVehicleCanvas(canvas, opts = {}) {
     // state. While collapsed, clientWidth/clientHeight are 0. We must NOT
     // derive aspect from that (0/0 = NaN) nor setSize(0), and we must NOT
     // substitute an arbitrary fallback size — doing so bakes a wrong aspect
-    // into setVehicle's framing that nothing ever corrects. Instead we bail
-    // until a real box exists, then re-fit the framing exactly once, so a
-    // cold load with the panel collapsed self-corrects the instant it's
-    // revealed. The same path cleanly re-measures after the compact-density
-    // toggle (host aspect-ratio 16/10 → 16/9, min-height 380 → 300).
-    let framedForValidSize = false;
+    // into setVehicle's framing that nothing ever corrects.
+    //
+    // CAMERA-FRAMING CONTRACT (the "fix it once and for all" rule):
+    //   Auto-reframe on EVERY resize, for as long as the user hasn't grabbed
+    //   the free-fly camera. Page layout — especially the documented Mac
+    //   Firefox/Safari grid-track thrash — emits a *sequence* of resize
+    //   boxes during load (intermediate width, aspect-ratio not yet applied,
+    //   min-height-only, …) before settling. A one-shot "frame on the first
+    //   valid box" latch frames against whichever transient box arrives
+    //   first and is then stuck there forever — the recurring "camera
+    //   defaults to the orange tower" bug. Reframing on every resize means
+    //   the camera is correct the instant layout settles, no matter what it
+    //   passed through. Once the user actually drags / wheels / WASDs the
+    //   camera (userControlledCamera = true) we stop yanking it — they own
+    //   it from then until the next vehicle swap or explicit recenter.
     function resize() {
         const w = canvas.clientWidth;
         const h = canvas.clientHeight;
@@ -1700,16 +1747,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
         renderer.setSize(w, h, false);
         camera.aspect = w / h;
         camera.updateProjectionMatrix();
-        // First real box we ever see: (re)frame the current vehicle for the
-        // now-known aspect. Covers the panel-mounted-collapsed cold load,
-        // where the init-time frame ran against the placeholder aspect and
-        // would otherwise stay mis-framed forever. Subsequent resizes
-        // (window resize, density toggle) only re-measure — the user owns
-        // the free-fly camera and we don't yank it back to a preset.
-        if (!framedForValidSize) {
-            framedForValidSize = true;
-            reframeCurrentView();
-        }
+        if (!userControlledCamera) reframeCurrentView();
     }
     // Observe the host element, not just the canvas: the host is what
     // gains/loses its layout box when the collapse panel toggles
@@ -1793,6 +1831,10 @@ export function initVehicleCanvas(canvas, opts = {}) {
     function setView(name) {
         if (!VIEW_PRESETS[name]) return;
         currentViewName = name;
+        // Picking a preset (or recenter) re-arms auto-framing: the user
+        // explicitly asked for a canonical shot, so a later resize should
+        // keep THAT preset framed rather than freeze the tween's end pose.
+        userControlledCamera = false;
         cancelViewTween();
 
         const aspect = camera.aspect || 16/10;
@@ -1831,6 +1873,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
     // God-mode dolly along the current view direction. factor < 1 zooms
     // in (forward), > 1 zooms out (back). 20 m per click is comfortable.
     function setZoom(factor) {
+        userControlledCamera = true;                 // deliberate user dolly
         camForward(_fwd);
         const stepM = (factor < 1) ? 20 : -20;
         cam.pos.addScaledVector(_fwd, stepM);
@@ -1902,7 +1945,9 @@ export function initVehicleCanvas(canvas, opts = {}) {
         // Optional explicit w/h is an escape hatch for callers that already
         // know the target box.
         refresh() {
-            framedForValidSize = false;     // let the next resize() reframe
+            // Explicit host request to re-fit — re-arm auto-framing so the
+            // reframe actually happens even if the user had grabbed the cam.
+            userControlledCamera = false;
             resize();
         },
         resize(w, h) {
@@ -1912,7 +1957,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
                 camera.updateProjectionMatrix();
                 reframeCurrentView();
             } else {
-                framedForValidSize = false;
+                userControlledCamera = false;
                 resize();
             }
         },
