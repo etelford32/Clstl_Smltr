@@ -27,7 +27,7 @@
  *   Distances are in KILOMETRES unless suffixed Units.
  */
 
-import * as THREE from 'three';
+import * as THREE from './vec-lite.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 export const DEG  = Math.PI / 180;

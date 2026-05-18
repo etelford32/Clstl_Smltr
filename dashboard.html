@@ -17,14 +17,27 @@
 <meta name="robots" content="noindex,nofollow">
 <link rel="stylesheet" href="js/nav-styles.css">
 
-<!-- Import map — resolves the bare "three" specifier used transitively by
-     js/trip-planner.js → js/geo/coords.js (and anything else that reaches
-     for THREE.Vector3 scratch math). MUST live in <head> before the first
-     <script type="module"> on the page (the shared-nav loader). If a module
-     script is parsed first the browser rejects the map ("An import map is
-     added after module script load was triggered") and the dashboard dies
-     on load with "The specifier 'three' was a bare specifier, but was not
-     remapped to anything." Same CDN + version as every other sim page. -->
+<!-- Import map for the bare "three" specifier.
+
+     "three" is NO LONGER in the dashboard's static/initial graph: the
+     coordinate-math path (trip-planner.js → geo/coords.js) now resolves
+     to js/geo/vec-lite.js, so first render pulls zero three.js. The map
+     stays only for the LAZY path — alert-engine.js → conjunction-alert.js
+     dynamically `import()`s satellite-tracker.js, a genuine 3D consumer
+     that needs real three. If that feature ever triggers, the bare
+     specifier must resolve, so the map must remain.
+
+     It MUST live in <head> before the first <script type="module"> (the
+     shared-nav loader). A module script parsed first makes the browser
+     reject the map ("An import map is added after module script load was
+     triggered"). That mis-ordering is the original bug; this placement +
+     the runCard() isolation around the conjunction path keep it dead.
+
+     No <link rel="modulepreload"> for three on purpose: eagerly fetching
+     ~600 KB of three.js on every dashboard load would undo the whole
+     point of de-three-ing the static graph. The lazy import fetches it
+     only if/when the conjunction feature actually runs; the cheap
+     connection hints below just warm the socket for that case. -->
 <script type="importmap">
 {"imports":{
     "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
@@ -34,7 +47,6 @@
 <!-- perf-hints:start -->
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
-<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" crossorigin>
 <!-- perf-hints:end -->
 
 <style>

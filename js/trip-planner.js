@@ -14,7 +14,7 @@
  *                             sharing / deep-linking between pages.
  */
 
-import * as THREE from 'three';
+import * as THREE from './geo/vec-lite.js';
 import { geo, RAD } from './geo/coords.js';
 
 // All Open-Meteo traffic now routes through our backend proxy. Benefits
