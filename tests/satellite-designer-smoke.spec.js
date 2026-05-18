@@ -83,4 +83,55 @@ test.describe('satellite-designer.html smoke', () => {
         expect(dv).toBeGreaterThan(1950);
         expect(dv).toBeLessThan(2150);
     });
+
+    test('builder self-test passes', async ({ page }) => {
+        await page.goto(URL);
+        await page.waitForFunction(() => !!window.__sd, { timeout: BOOT_TIMEOUT_MS });
+        const results = await page.evaluate(() => window.__sd.builder.selfTest());
+        const failures = results.filter(r => !r.pass);
+        expect(failures,
+            `builder self-tests pass (failures: ${failures.map(f => f.msg).join('; ')})`
+        ).toHaveLength(0);
+    });
+
+    test('design bay opens, configures parts and applies to the ship', async ({ page }) => {
+        await page.goto(URL);
+        await page.waitForFunction(() => !!window.__sd, { timeout: BOOT_TIMEOUT_MS });
+
+        await page.click('#b-bay');
+        await page.waitForSelector('#bay.show', { timeout: 4000 });
+        // Part chips render even when the 3-D CDN is blocked (graceful degrade).
+        await page.waitForFunction(
+            () => document.querySelectorAll('#bay-body .opt').length >= 3, { timeout: 4000 });
+
+        const specHasNumber = await page.evaluate(() =>
+            /\d/.test(document.querySelector('#bs-mass').textContent));
+        expect(specHasNumber, 'bay spec readout populated').toBe(true);
+
+        // Pick the big bus + remove panels, then apply — dry mass must jump and
+        // Cd must collapse to the bare-bus value.
+        await page.click('#bay-body .opt[data-v="bus_med"]');
+        await page.click('#bay-panel .opt[data-v="none"]');
+        await page.click('#bay-apply');
+        await page.waitForSelector('#bay:not(.show)', { timeout: 4000 });
+
+        const form = await page.evaluate(() => ({
+            dry: Number(document.querySelector('#f-dry').value),
+            cd: Number(document.querySelector('#f-cd').value),
+            build: window.__sd.bay.getBuild(),
+        }));
+        expect(form.dry, 'medium bus is heavy').toBeGreaterThan(300);
+        expect(form.cd, 'no panels ⇒ bare-bus Cd').toBeCloseTo(2.2, 1);
+        expect(form.build.body).toBe('bus_med');
+    });
+
+    test('build config round-trips through the design draft', async ({ page }) => {
+        await page.goto(URL);
+        await page.waitForFunction(() => !!window.__sd, { timeout: BOOT_TIMEOUT_MS });
+
+        const data = await page.evaluate(() => window.__sd.ui.currentDesignData());
+        expect(data.build, 'design data carries the 3-D build').toBeTruthy();
+        expect(data.build.body, 'build has a chassis').toBeTruthy();
+        expect(data.build.thruster, 'build has a thruster type').toBeTruthy();
+    });
 });

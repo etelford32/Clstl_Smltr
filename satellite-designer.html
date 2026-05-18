@@ -22,6 +22,12 @@
 <meta name="twitter:description" content="Design a spacecraft, then fly it through the real upper atmosphere. Balance thrust, drag and propellant to hold your orbit against thermospheric decay.">
 <meta name="twitter:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
 <meta name="description" content="Satellite Designer — build a spacecraft and fly it through a physically realistic thermosphere. Drag, thrust, and the rocket equation, scored as a game.">
+<script type="importmap">
+{"imports":{
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
 <style>
 :root{
   --c-accent:#00c6ff; --c-accent-rgb:0,200,255;
@@ -179,6 +185,51 @@ select option{background:#0a1024}
 .toast.bad{border-color:rgba(255,107,125,.6);color:var(--c-bad)}
 .warmup{display:flex;align-items:center;justify-content:center;height:100%;
   color:var(--c-text-3);font-size:.85rem}
+
+/* ─── 3D Design Bay ───────────────────────────────────── */
+.bay-open-btn{width:100%;margin-top:10px}
+#bay{position:fixed;inset:0;z-index:80;display:none;
+  background:rgba(2,4,10,.82);backdrop-filter:blur(4px)}
+#bay.show{display:flex;align-items:center;justify-content:center;padding:22px}
+.bay-shell{display:grid;grid-template-columns:300px 1fr;
+  grid-template-rows:1fr auto;gap:0;
+  width:min(1080px,96vw);height:min(680px,92vh);
+  background:linear-gradient(180deg,var(--c-surface-1),var(--c-surface-2));
+  border:1px solid var(--c-accent-border-hi);border-radius:var(--r-xl);
+  overflow:hidden;box-shadow:var(--shadow)}
+@media (max-width:760px){.bay-shell{grid-template-columns:1fr;
+  grid-template-rows:auto 1fr auto;height:94vh}}
+.bay-side{padding:16px 17px;overflow:auto;border-right:1px solid rgba(255,255,255,.08)}
+.bay-side h2{font-size:.72rem;text-transform:uppercase;letter-spacing:.15em;
+  color:var(--c-accent);font-weight:800;margin-bottom:13px;
+  display:flex;justify-content:space-between;align-items:center}
+.bay-view{position:relative;background:radial-gradient(120% 100% at 50% 30%,#0a1733,#02030a)}
+#bay-canvas{display:block;width:100%;height:100%}
+.bay-spec{position:absolute;left:14px;right:14px;bottom:14px;
+  display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
+  background:rgba(255,255,255,.07);border-radius:var(--r-md);overflow:hidden;
+  pointer-events:none}
+.bay-spec .metric{padding:7px 9px}
+.bay-hint{position:absolute;top:14px;left:14px;font-size:.66rem;
+  color:var(--c-text-3);background:rgba(4,8,18,.6);padding:5px 10px;
+  border-radius:999px;pointer-events:none}
+.opt-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:13px}
+.opt{flex:1 1 auto;min-width:74px;text-align:center;cursor:pointer;
+  border:1px solid rgba(255,255,255,.13);border-radius:var(--r-md);
+  padding:8px 6px;font-size:.7rem;font-weight:700;color:var(--c-text-2);
+  background:rgba(255,255,255,.03);transition:.12s;user-select:none}
+.opt:hover{border-color:var(--c-accent-border-hi);color:var(--c-text)}
+.opt.active{background:rgba(var(--c-accent-rgb),.22);
+  border-color:var(--c-accent-border-hi);color:#fff}
+.opt small{display:block;font-weight:600;color:var(--c-text-3);
+  font-size:.6rem;margin-top:2px}
+.bay-grp{font-size:.64rem;text-transform:uppercase;letter-spacing:.1em;
+  color:var(--c-text-3);font-weight:800;margin:4px 0 7px}
+.bay-foot{grid-column:1/-1;display:flex;gap:9px;padding:13px 17px;
+  border-top:1px solid rgba(255,255,255,.08);background:rgba(0,0,0,.25)}
+.bay-loading{position:absolute;inset:0;display:flex;align-items:center;
+  justify-content:center;color:var(--c-text-3);font-size:.85rem;text-align:center;
+  padding:20px}
 </style>
 </head>
 <body>
@@ -249,6 +300,8 @@ select option{background:#0a1024}
         <div class="metric"><div class="k">Ballistic coeff</div><div class="v" id="d-bc">—</div></div>
         <div class="metric"><div class="k">Mass ratio</div><div class="v" id="d-mr">—</div></div>
       </div>
+
+      <button class="btn primary bay-open-btn" id="b-bay">🛠 Open 3D Design Bay</button>
     </div>
 
     <div class="panel">
@@ -382,12 +435,56 @@ select option{background:#0a1024}
 
 </div>
 
+<!-- ─────────── 3D Design Bay (modal) ─────────── -->
+<div id="bay" role="dialog" aria-label="3D satellite design bay">
+  <div class="bay-shell">
+    <div class="bay-side">
+      <h2>🛠 Design Bay</h2>
+
+      <div class="bay-grp">Bus / chassis</div>
+      <div class="opt-row" id="bay-body"></div>
+
+      <div class="bay-grp">Thrusters</div>
+      <div class="opt-row" id="bay-thruster"></div>
+      <label class="field" style="margin-bottom:14px">
+        <div class="row"><span>Thruster count</span><b><span id="bay-tc-v">2</span>×</b></div>
+        <input type="range" id="bay-tc" min="1" max="8" step="1" value="2">
+      </label>
+
+      <div class="bay-grp">Solar array</div>
+      <div class="opt-row" id="bay-panel"></div>
+      <label class="field" style="margin-bottom:4px">
+        <div class="row"><span>Wing span</span><b><span id="bay-span-v">2.2</span> m</b></div>
+        <input type="range" id="bay-span" min="0.5" max="6" step="0.1" value="2.2">
+      </label>
+    </div>
+
+    <div class="bay-view">
+      <canvas id="bay-canvas"></canvas>
+      <div class="bay-hint">drag to orbit · scroll to zoom</div>
+      <div class="bay-loading" id="bay-loading">Loading 3D engine…</div>
+      <div class="bay-spec">
+        <div class="metric"><div class="k">Dry mass</div><div class="v" id="bs-mass">—</div></div>
+        <div class="metric"><div class="k">Ram area</div><div class="v" id="bs-area">—</div></div>
+        <div class="metric"><div class="k">Drag C<sub>d</sub></div><div class="v" id="bs-cd">—</div></div>
+        <div class="metric"><div class="k">Thrust</div><div class="v" id="bs-thr">—</div></div>
+      </div>
+    </div>
+
+    <div class="bay-foot">
+      <button class="btn primary" id="bay-apply" style="flex:1">✔ Apply to ship</button>
+      <button class="btn" id="bay-close">Close</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script type="module">
 import { auth } from './js/auth.js';
 import { getSupabase, isConfigured } from './js/supabase-config.js';
 import * as ENG from './js/satellite-designer-engine.js';
+import * as BUILDER from './js/satellite-builder.js';
 
 // ── DOM helpers ─────────────────────────────────────────────────────────────
 const $ = (id) => document.getElementById(id);
@@ -410,6 +507,7 @@ const sim = {
   stationSeconds: 0, score: 0, best: 0, orbits: 0,
   lastAngle: 0, viewScale: 1,
 };
+let sdBuild = BUILDER.defaultBuild();
 
 // ── Design from the form ────────────────────────────────────────────────────
 function readDesign() {
@@ -782,11 +880,13 @@ function applyDesign(dd) {
   if (dd.periKm != null) { $('f-peri').value = dd.periKm; $('v-peri').textContent = dd.periKm; }
   if (dd.apoKm != null) { $('f-apo').value = dd.apoKm; $('v-apo').textContent = dd.apoKm; }
   if (dd.targetKm != null) { $('f-tgt').value = dd.targetKm; $('v-tgt').textContent = dd.targetKm; }
+  if (dd.build && dd.build.body) { sdBuild = { ...BUILDER.defaultBuild(), ...dd.build }; syncBayUI(); }
   refreshDesignReadouts();
 }
 function currentDesignData() {
   const d = readDesign();
-  return { ...d, periKm: +$('f-peri').value, apoKm: +$('f-apo').value, targetKm: +$('f-tgt').value };
+  return { ...d, periKm: +$('f-peri').value, apoKm: +$('f-apo').value,
+           targetKm: +$('f-tgt').value, build: { ...sdBuild } };
 }
 function renderHangar(list) {
   const body = $('hangar-body');
@@ -904,8 +1004,163 @@ async function initAuth() {
 $('b-save').addEventListener('click', saveShip);
 $('b-refresh').addEventListener('click', refreshHangar);
 
+// ── 3D Design Bay ───────────────────────────────────────────────────────────
+const BAY = { open: false, ready: false, three: null, raf: 0,
+  scene: null, camera: null, renderer: null, controls: null, group: null };
+
+function chip(label, sub, active) {
+  return `<div class="opt${active ? ' active' : ''}" data-v="${label.key}">
+    ${label.name}<small>${sub}</small></div>`;
+}
+function renderOptChips() {
+  $('bay-body').innerHTML = Object.entries(BUILDER.BODIES).map(([k, v]) =>
+    chip({ key: k, name: v.label }, `${v.mass} kg`, k === sdBuild.body)).join('');
+  $('bay-thruster').innerHTML = Object.entries(BUILDER.THRUSTER_UNITS).map(([k, v]) => {
+    const p = ENG.ENGINE_PRESETS[k];
+    return chip({ key: k, name: v.label.split(' ')[0] },
+      p ? `${p.thrust} N · ${p.isp}s` : '', k === sdBuild.thruster);
+  }).join('');
+  $('bay-panel').innerHTML = Object.entries(BUILDER.PANELS).map(([k, v]) =>
+    chip({ key: k, name: v.label }, v.wings ? `${v.wings} wing${v.wings > 1 ? 's' : ''}` : 'fixed',
+      k === sdBuild.panel)).join('');
+}
+function syncBayUI() {
+  const tc = $('bay-tc'), sp = $('bay-span');
+  if (tc) { tc.value = sdBuild.thrusterCount; $('bay-tc-v').textContent = sdBuild.thrusterCount; }
+  if (sp) { sp.value = sdBuild.panelSpan; $('bay-span-v').textContent = (+sdBuild.panelSpan).toFixed(1); }
+  for (const [grp, key] of [['bay-body', 'body'], ['bay-thruster', 'thruster'], ['bay-panel', 'panel']]) {
+    const box = $(grp); if (!box) continue;
+    box.querySelectorAll('.opt').forEach(o =>
+      o.classList.toggle('active', o.dataset.v === sdBuild[key]));
+  }
+}
+function refreshBaySpec() {
+  const d = BUILDER.deriveDesign(sdBuild, ENG.ENGINE_PRESETS);
+  $('bs-mass').innerHTML = fmt(d.dryMass, 1) + ' <small>kg</small>';
+  $('bs-area').innerHTML = fmt(d.area, 2) + ' <small>m²</small>';
+  $('bs-cd').textContent = d.cd.toFixed(2);
+  $('bs-thr').innerHTML = fmt(d.thrust, d.thrust < 10 ? 2 : 0) + ' <small>N</small>';
+  return d;
+}
+function disposeGroup(grp) {
+  grp?.traverse?.(o => {
+    if (o.isMesh) { o.geometry?.dispose?.();
+      (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m?.dispose?.()); }
+  });
+}
+function fitBayCamera() {
+  if (!BAY.ready) return;
+  const E = BUILDER.buildExtent(sdBuild);
+  const dist = (E / 2) / Math.tan((45 * Math.PI / 180) / 2) * 1.55;
+  BAY.camera.position.set(dist * 0.62, dist * 0.42, dist * 0.78);
+  BAY.camera.near = E / 100; BAY.camera.far = E * 40;
+  BAY.camera.updateProjectionMatrix();
+  BAY.controls.target.set(0, 0, 0); BAY.controls.update();
+}
+function rebuildMesh() {
+  refreshBaySpec();
+  if (!BAY.ready) return;
+  if (BAY.group) { BAY.scene.remove(BAY.group); disposeGroup(BAY.group); }
+  BAY.group = BUILDER.buildGroup(BAY.three, sdBuild);
+  BAY.scene.add(BAY.group);
+  fitBayCamera();
+}
+async function ensureThree() {
+  if (BAY.ready) return true;
+  try {
+    const THREE = await import('three');
+    const { OrbitControls } = await import('three/addons/controls/OrbitControls.js');
+    BAY.three = THREE;
+    const cv = $('bay-canvas');
+    BAY.renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true });
+    BAY.renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1));
+    BAY.scene = new THREE.Scene();
+    BAY.camera = new THREE.PerspectiveCamera(45, 1, 0.01, 100);
+    BAY.scene.add(new THREE.AmbientLight(0x4a5566, 1.05));
+    const key = new THREE.DirectionalLight(0xffffff, 1.25); key.position.set(3, 4, 5);
+    const rim = new THREE.DirectionalLight(0x5577ff, 0.4); rim.position.set(-4, -2, -3);
+    BAY.scene.add(key, rim);
+    BAY.controls = new OrbitControls(BAY.camera, cv);
+    BAY.controls.enableDamping = true; BAY.controls.dampingFactor = 0.08;
+    BAY.controls.autoRotate = true; BAY.controls.autoRotateSpeed = 1.1;
+    BAY.controls.addEventListener('start', () => { BAY.controls.autoRotate = false; });
+    BAY.ready = true;
+    $('bay-loading').style.display = 'none';
+    return true;
+  } catch (e) {
+    console.warn('[Bay] 3D engine unavailable:', e.message);
+    $('bay-loading').textContent =
+      'Offline: 3-D preview unavailable here, but you can still configure parts and apply them.';
+    return false;
+  }
+}
+function resizeBay() {
+  if (!BAY.ready) return;
+  const cv = $('bay-canvas'), r = cv.getBoundingClientRect();
+  if (r.width < 2 || r.height < 2) return;
+  BAY.renderer.setSize(r.width, r.height, false);
+  BAY.camera.aspect = r.width / r.height;
+  BAY.camera.updateProjectionMatrix();
+}
+function bayLoop() {
+  if (!BAY.open) return;
+  BAY.raf = requestAnimationFrame(bayLoop);
+  if (BAY.ready) { BAY.controls.update(); BAY.renderer.render(BAY.scene, BAY.camera); }
+}
+async function openBay() {
+  $('bay').classList.add('show');
+  BAY.open = true;
+  renderOptChips(); syncBayUI(); refreshBaySpec();
+  const ok = await ensureThree();
+  if (ok) { resizeBay(); rebuildMesh(); }
+  cancelAnimationFrame(BAY.raf); bayLoop();
+}
+function closeBay() {
+  BAY.open = false;
+  cancelAnimationFrame(BAY.raf);
+  $('bay').classList.remove('show');
+}
+function applyBuild() {
+  const d = BUILDER.deriveDesign(sdBuild, ENG.ENGINE_PRESETS);
+  $('f-engine').value = d.engine;
+  $('f-thrust').value = d.thrust;
+  $('f-isp').value = d.isp;
+  $('f-dry').value = d.dryMass;
+  $('f-area').value = d.area;
+  $('f-cd').value = d.cd;
+  refreshDesignReadouts(); saveDraft();
+  toast(`Applied ${BUILDER.BODIES[sdBuild.body].label}: ${fmt(d.dryMass, 0)} kg · ${fmt(d.area, 2)} m²`);
+  closeBay();
+}
+
+$('b-bay').addEventListener('click', openBay);
+$('bay-close').addEventListener('click', closeBay);
+$('bay-apply').addEventListener('click', applyBuild);
+$('bay').addEventListener('mousedown', (e) => { if (e.target === $('bay')) closeBay(); });
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && BAY.open) closeBay(); });
+for (const [grp, key] of [['bay-body', 'body'], ['bay-thruster', 'thruster'], ['bay-panel', 'panel']]) {
+  $(grp).addEventListener('click', (e) => {
+    const o = e.target.closest('.opt'); if (!o) return;
+    sdBuild[key] = o.dataset.v;
+    $(grp).querySelectorAll('.opt').forEach(x => x.classList.toggle('active', x === o));
+    rebuildMesh(); saveDraft();
+  });
+}
+$('bay-tc').addEventListener('input', (e) => {
+  sdBuild.thrusterCount = +e.target.value;
+  $('bay-tc-v').textContent = e.target.value; rebuildMesh(); saveDraft();
+});
+$('bay-span').addEventListener('input', (e) => {
+  sdBuild.panelSpan = +e.target.value;
+  $('bay-span-v').textContent = (+e.target.value).toFixed(1); rebuildMesh(); saveDraft();
+});
+addEventListener('resize', () => { if (BAY.open) resizeBay(); });
+
 // ── Boot ────────────────────────────────────────────────────────────────────
-window.__sd = { auth, engine: ENG, sim, ui: { readDesign, currentDesignData } };
+window.__sd = { auth, engine: ENG, sim, builder: BUILDER,
+  ui: { readDesign, currentDesignData },
+  bay: { open: openBay, close: closeBay, apply: applyBuild,
+         getBuild: () => ({ ...sdBuild }) } };
 
 (async function boot() {
   loadDraft();
