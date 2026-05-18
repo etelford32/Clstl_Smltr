@@ -243,6 +243,16 @@
             Revenue &amp; Admin Users come from account records and are exact.
         </div>
 
+        <div style="font-size:.72rem;line-height:1.5;color:#667;margin:-6px 0 22px">
+            Visitors, Sign-ins, Minutes &amp; Online Now are derived from
+            first-party analytics that only fire <strong>after a visitor
+            accepts the analytics cookie</strong> &mdash; treat them as a
+            lower bound on real traffic, not totals. <em>Visitors</em> is
+            distinct sessions (anonymous included); the <em>signed&nbsp;in</em>
+            sub-figure is distinct logged-in users. Sign-ups, Subscribers,
+            Revenue &amp; Admin Users come from account records and are exact.
+        </div>
+
         <!-- Revenue & Subscription Metrics -->
         <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.1em;color:#556;font-weight:700;margin-bottom:10px">Revenue &amp; Subscriptions</div>
         <div class="kpi-grid" id="kpi-revenue-grid" style="margin-bottom:24px">
@@ -861,7 +871,7 @@
 import { auth } from './js/auth.js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY, isConfigured, getSupabase, testConnection } from './js/supabase-config.js';
 import { GA_MEASUREMENT_ID } from './js/analytics.js';
-import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchActivationFunnel, fetchActivationDaily, fetchActivationOverview, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap, fetchWizardFunnel, fetchTourMetrics, fetchDemoMetrics, fetchAuthFlowMetrics, fetchAuthFunnelDropoffs, fetchNewVsReturning, fetchVisitorFlow, fetchEntryDestinations, fetchAccumulatorStats, fetchExperimentAB, fetchPerfSummary, fetchTopErrors, fetchTop404s, fetchTopAuthFailures, fetchConsentOptinRate } from './js/admin-analytics.js';
+import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchActivationFunnel, fetchActivationDaily, fetchActivationOverview, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap, fetchWizardFunnel, fetchTourMetrics, fetchDemoMetrics, fetchAuthFlowMetrics, fetchAuthFunnelDropoffs, fetchNewVsReturning, fetchVisitorFlow, fetchEntryDestinations, fetchAccumulatorStats, fetchExperimentAB, fetchPerfSummary, fetchTopErrors, fetchTop404s, fetchTopAuthFailures } from './js/admin-analytics.js';
 import { createInviteCode, fetchInviteCodes, deactivateInvite, sendInviteEmail } from './js/admin-invites.js';
 
 // ── Tabs (wired first so they always work) ──────────────────────────────────
