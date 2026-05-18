@@ -59,6 +59,8 @@
         }
         .kpi-val { font-size: 1.8rem; font-weight: 800; line-height: 1; margin-bottom: 6px; }
         .kpi-label { font-size: .72rem; color: #666; text-transform: uppercase; letter-spacing: .06em; }
+        .kpi-sub { font-size: .62rem; color: #6c8; margin-top: 5px; letter-spacing: .02em; }
+        .kpi-sub:empty { display: none; }
         .kpi-val.green { color: #4eff91; }
         .kpi-val.blue { color: #4fc3f7; }
         .kpi-val.purple { color: #c080ff; }
@@ -213,9 +215,9 @@
     <!-- ═══════════════════ OVERVIEW TAB ═══════════════════ -->
     <div class="tab-panel active" id="panel-overview">
         <div class="kpi-grid" id="kpi-grid">
-            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-dau">--</div><div class="kpi-label">Daily Uniques</div></div>
-            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-wau">--</div><div class="kpi-label">Weekly Uniques</div></div>
-            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-mau">--</div><div class="kpi-label">Monthly Uniques</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-dau">--</div><div class="kpi-label">Daily Visitors</div><div class="kpi-sub" id="kpi-dau-sub"></div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-wau">--</div><div class="kpi-label">Weekly Visitors</div><div class="kpi-sub" id="kpi-wau-sub"></div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-mau">--</div><div class="kpi-label">Monthly Visitors</div><div class="kpi-sub" id="kpi-mau-sub"></div></div>
             <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-signins">--</div><div class="kpi-label">Sign-ins (30d)</div></div>
             <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-minutes">--</div><div class="kpi-label">Minutes Used (30d)</div></div>
             <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-signups">--</div><div class="kpi-label">Users Signed Up</div></div>
@@ -229,12 +231,12 @@
         </div>
 
         <div style="font-size:.72rem;line-height:1.5;color:#667;margin:-6px 0 22px">
-            Uniques, Sign-ins, Minutes &amp; Online Now are derived from
+            Visitors, Sign-ins, Minutes &amp; Online Now are derived from
             first-party analytics that only fire <strong>after a visitor
             accepts the analytics cookie</strong> &mdash; treat them as a
-            lower bound on real traffic, not totals. Uniques count
-            <em>signed-in</em> users (events tagged with a user&nbsp;id);
-            logged-out visits are not included. Sign-ups, Subscribers,
+            lower bound on real traffic, not totals. <em>Visitors</em> is
+            distinct sessions (anonymous included); the <em>signed&nbsp;in</em>
+            sub-figure is distinct logged-in users. Sign-ups, Subscribers,
             Revenue &amp; Admin Users come from account records and are exact.
         </div>
 
@@ -974,9 +976,17 @@ async function loadKPIs() {
         el.textContent = typeof val === 'number' ? val.toLocaleString() : val;
         el.className = 'kpi-val ' + cls;
     };
-    set('kpi-dau', d.dailyUnique, 'white');
-    set('kpi-wau', d.weeklyUnique, 'white');
-    set('kpi-mau', d.monthlyUnique, 'white');
+    // Headline = unique visitors (distinct session_id, anonymous-inclusive).
+    // Sub-line = signed-in users (distinct user_id). The empty-state CSS
+    // hides the sub-line until data resolves.
+    const setVisitors = (valId, subId, visitors, users) => {
+        set(valId, visitors ?? 0, 'white');
+        const sub = document.getElementById(subId);
+        if (sub) sub.textContent = `${(users ?? 0).toLocaleString()} signed in`;
+    };
+    setVisitors('kpi-dau', 'kpi-dau-sub', d.dailyVisitors, d.dailyUnique);
+    setVisitors('kpi-wau', 'kpi-wau-sub', d.weeklyVisitors, d.weeklyUnique);
+    setVisitors('kpi-mau', 'kpi-mau-sub', d.monthlyVisitors, d.monthlyUnique);
     set('kpi-signins', d.signIns, 'blue');
     set('kpi-minutes', d.minutesUsed, 'blue');
     set('kpi-signups', d.signUps, 'green');

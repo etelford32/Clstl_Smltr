@@ -71,24 +71,29 @@ export async function fetchKPIs() {
             signUpsRes,
             plansRes,
             onlineRes,
+            uniqCountsRes,
         ] = await Promise.allSettled([
-            // Daily unique users (distinct user_id in analytics_events today)
+            // Daily traffic. We pull both session_id and user_id so the
+            // dashboard can show "unique visitors" (distinct session_id —
+            // includes logged-out + pre-identify traffic) as the headline
+            // and "signed-in users" (distinct non-null user_id) as the
+            // sub-metric. The old query filtered user_id IS NOT NULL, which
+            // discarded every anonymous row and (before the identify fix)
+            // every row period. session_id is set on every event from the
+            // first page_view, so it survives the consent gate the same way.
             client.from('analytics_events')
-                .select('user_id')
-                .gte('created_at', daysAgo(1))
-                .not('user_id', 'is', null),
+                .select('session_id, user_id')
+                .gte('created_at', daysAgo(1)),
 
-            // Weekly unique users
+            // Weekly traffic
             client.from('analytics_events')
-                .select('user_id')
-                .gte('created_at', daysAgo(7))
-                .not('user_id', 'is', null),
+                .select('session_id, user_id')
+                .gte('created_at', daysAgo(7)),
 
-            // Monthly unique users
+            // Monthly traffic
             client.from('analytics_events')
-                .select('user_id')
-                .gte('created_at', daysAgo(30))
-                .not('user_id', 'is', null),
+                .select('session_id, user_id')
+                .gte('created_at', daysAgo(30)),
 
             // Sign-ins (last 30 days). Counts every successful sign-in,
             // not distinct users — signin_succeeded is intentionally NOT a
@@ -121,12 +126,29 @@ export async function fetchKPIs() {
                 .select('session_id, user_id')
                 .gte('last_seen', new Date(Date.now() - 2 * 60 * 1000).toISOString())
                 .eq('ended', false),
+
+            // Accurate distinct visitor/user counts, computed server-side
+            // (supabase-analytics-unique-counts-migration.sql). Preferred
+            // over the row-scan above: COUNT(DISTINCT …) on the server
+            // can't be truncated by PostgREST's max-rows cap the way a
+            // 30-day analytics_events SELECT can. If the migration hasn't
+            // been applied yet this rejects (PGRST202 / 404) and we fall
+            // back to the in-JS de-dupe of the scans above.
+            client.rpc('analytics_unique_counts'),
         ]);
 
-        // Extract unique user_ids
+        // Distinct non-null user_id → signed-in users.
         const uniqueUserIds = (res) => {
             if (res.status !== 'fulfilled' || res.value.error) return 0;
             const ids = new Set(res.value.data?.map(r => r.user_id).filter(Boolean));
+            return ids.size;
+        };
+        // Distinct session_id → unique visitors (anonymous-inclusive). A
+        // null/blank session_id is dropped rather than collapsed into one
+        // bogus "visitor" bucket.
+        const uniqueSessionIds = (res) => {
+            if (res.status !== 'fulfilled' || res.value.error) return 0;
+            const ids = new Set(res.value.data?.map(r => r.session_id).filter(Boolean));
             return ids.size;
         };
 
@@ -165,12 +187,49 @@ export async function fetchKPIs() {
             onlineNow = onlineRes.value.data?.length || 0;
         }
 
+        // Prefer the server-side distinct counts; fall back to de-duping
+        // the row scans in JS if the RPC isn't deployed. The fallback is
+        // still subject to PostgREST's row cap on a busy 30-day window —
+        // it's a transitional path until the migration is applied.
+        let visitors = { day: 0, week: 0, month: 0 };
+        let users    = { day: 0, week: 0, month: 0 };
+        const rpcRows = (uniqCountsRes.status === 'fulfilled'
+            && !uniqCountsRes.value.error
+            && Array.isArray(uniqCountsRes.value.data))
+            ? uniqCountsRes.value.data : null;
+        if (rpcRows) {
+            for (const row of rpcRows) {
+                const k = row.window_label;
+                if (k === 'day' || k === 'week' || k === 'month') {
+                    visitors[k] = Number(row.unique_visitors) || 0;
+                    users[k]    = Number(row.signed_in_users) || 0;
+                }
+            }
+        } else {
+            visitors = {
+                day:   uniqueSessionIds(dailyRes),
+                week:  uniqueSessionIds(weeklyRes),
+                month: uniqueSessionIds(monthlyRes),
+            };
+            users = {
+                day:   uniqueUserIds(dailyRes),
+                week:  uniqueUserIds(weeklyRes),
+                month: uniqueUserIds(monthlyRes),
+            };
+        }
+
         return {
             ok: true,
             data: {
-                dailyUnique: uniqueUserIds(dailyRes),
-                weeklyUnique: uniqueUserIds(weeklyRes),
-                monthlyUnique: uniqueUserIds(monthlyRes),
+                // Headline = unique visitors (distinct session_id).
+                dailyVisitors: visitors.day,
+                weeklyVisitors: visitors.week,
+                monthlyVisitors: visitors.month,
+                // Sub-metric = signed-in users (distinct user_id). Kept under
+                // the original *Unique keys so existing consumers don't break.
+                dailyUnique: users.day,
+                weeklyUnique: users.week,
+                monthlyUnique: users.month,
                 signIns: signInsRes.status === 'fulfilled' ? (signInsRes.value.count || 0) : 0,
                 minutesUsed,
                 signUps: signUpsRes.status === 'fulfilled' ? (signUpsRes.value.count || 0) : 0,
