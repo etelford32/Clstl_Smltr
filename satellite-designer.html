@@ -1,0 +1,924 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Satellite Designer · Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/satellite-designer">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/satellite-designer">
+<meta property="og:title" content="Satellite Designer — Parkers Physics">
+<meta property="og:description" content="Design a spacecraft, then fly it through the real upper atmosphere. Balance thrust, drag and propellant to hold your orbit against thermospheric decay.">
+<meta property="og:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+<meta property="og:image:alt" content="Parkers Physics — real-time astrophysics simulations">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Satellite Designer — Parkers Physics">
+<meta name="twitter:description" content="Design a spacecraft, then fly it through the real upper atmosphere. Balance thrust, drag and propellant to hold your orbit against thermospheric decay.">
+<meta name="twitter:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+<meta name="description" content="Satellite Designer — build a spacecraft and fly it through a physically realistic thermosphere. Drag, thrust, and the rocket equation, scored as a game.">
+<style>
+:root{
+  --c-accent:#00c6ff; --c-accent-rgb:0,200,255;
+  --c-accent-soft:rgba(0,200,255,.15);
+  --c-accent-border:rgba(0,200,255,.22);
+  --c-accent-border-hi:rgba(0,200,255,.34);
+  --c-warn:#ffb066; --c-warn-rgb:255,176,102;
+  --c-good:#5fe39a; --c-bad:#ff6b7d;
+  --c-surface-1:rgba(8,12,26,.86);
+  --c-surface-2:rgba(2,4,12,.94);
+  --c-text:#d6dee6; --c-text-2:#9fb6c6; --c-text-3:#6f8a9a;
+  --r-md:6px; --r-lg:10px; --r-xl:14px;
+  --blur:blur(13px) saturate(1.15);
+  --shadow:0 4px 26px rgba(0,16,40,.55);
+}
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html{height:auto;overflow-y:auto}
+body{
+  min-height:100vh;overflow-x:hidden;
+  background:radial-gradient(120% 90% at 70% -10%,#0a1530,#040210 60%);
+  color:var(--c-text);
+  font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
+  font-size:14px;
+}
+#sd-app{
+  display:grid;grid-template-columns:330px 1fr 340px;
+  gap:14px;padding:14px;min-height:calc(100vh - 52px);
+}
+@media (max-width:1320px){
+  #sd-app{grid-template-columns:300px 1fr}
+  #sd-right{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:14px}
+}
+@media (max-width:880px){
+  #sd-app{grid-template-columns:1fr;padding:10px;gap:10px}
+  #sd-right{grid-template-columns:1fr}
+}
+.sd-col{display:flex;flex-direction:column;gap:14px;min-width:0}
+.panel{
+  background:linear-gradient(180deg,var(--c-surface-1),var(--c-surface-2));
+  backdrop-filter:var(--blur);
+  border:1px solid var(--c-accent-border);
+  border-radius:var(--r-xl);padding:14px 15px;box-shadow:var(--shadow);
+}
+.panel h2{
+  font-size:.66rem;text-transform:uppercase;letter-spacing:.15em;
+  color:var(--c-accent);font-weight:800;margin-bottom:11px;
+  display:flex;align-items:center;gap:7px;
+}
+.panel h2 .sub{color:var(--c-text-3);font-weight:600;letter-spacing:.06em;text-transform:none}
+#sd-hero{grid-column:1/-1;display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  padding:15px 18px}
+#sd-hero h1{
+  font-size:1.3rem;font-weight:800;
+  background:linear-gradient(100deg,#fff 40%,#7fdcff);
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;
+}
+#sd-hero p{font-size:.8rem;color:var(--c-text-2);margin-top:3px;max-width:62ch;line-height:1.5}
+.badge{display:inline-block;padding:3px 9px;border-radius:5px;font-size:.6rem;
+  font-weight:800;letter-spacing:.09em;background:var(--c-accent-soft);
+  color:var(--c-accent);border:1px solid var(--c-accent-border-hi)}
+
+label.field{display:block;margin-bottom:10px;font-size:.74rem;color:var(--c-text-2)}
+label.field .row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px}
+label.field b{color:var(--c-text);font-weight:700;font-variant-numeric:tabular-nums}
+input[type=text],input[type=number],select{
+  width:100%;background:rgba(255,255,255,.05);color:var(--c-text);
+  border:1px solid rgba(255,255,255,.14);border-radius:var(--r-md);
+  padding:7px 9px;font:inherit;font-size:.8rem;
+}
+input[type=text]:focus,input[type=number]:focus,select:focus{
+  outline:none;border-color:var(--c-accent-border-hi);
+  box-shadow:0 0 0 2px var(--c-accent-soft)}
+input[type=range]{width:100%;accent-color:var(--c-accent);margin-top:3px}
+select option{background:#0a1024}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px 10px}
+.btn{
+  appearance:none;border:1px solid var(--c-accent-border);
+  background:rgba(var(--c-accent-rgb),.10);color:var(--c-text);
+  border-radius:var(--r-md);padding:8px 12px;font:inherit;font-size:.78rem;
+  font-weight:700;cursor:pointer;transition:.12s;
+}
+.btn:hover{border-color:var(--c-accent-border-hi);background:rgba(var(--c-accent-rgb),.2)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn.primary{background:linear-gradient(180deg,#0090c8,#006a98);
+  border-color:var(--c-accent-border-hi);color:#fff}
+.btn.warn{background:rgba(var(--c-warn-rgb),.14);border-color:rgba(var(--c-warn-rgb),.4);
+  color:var(--c-warn)}
+.btn.sm{padding:5px 9px;font-size:.7rem}
+.btn-row{display:flex;gap:7px;flex-wrap:wrap}
+.toggle-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.toggle{
+  flex:1 1 auto;min-width:62px;text-align:center;cursor:pointer;
+  border:1px solid rgba(255,255,255,.14);border-radius:var(--r-md);
+  padding:7px 4px;font-size:.7rem;font-weight:700;color:var(--c-text-2);
+  background:rgba(255,255,255,.03);transition:.12s;user-select:none;
+}
+.toggle.active{background:rgba(var(--c-accent-rgb),.22);
+  border-color:var(--c-accent-border-hi);color:#fff}
+.toggle.warn.active{background:rgba(var(--c-warn-rgb),.22);
+  border-color:rgba(var(--c-warn-rgb),.5);color:var(--c-warn)}
+
+#sd-stage{position:relative;flex:1;min-height:440px;border-radius:var(--r-xl);
+  overflow:hidden;border:1px solid var(--c-accent-border);
+  background:radial-gradient(130% 100% at 50% 40%,#060f24,#02030a)}
+#sd-canvas{display:block;width:100%;height:100%}
+#sd-status{
+  position:absolute;top:12px;left:12px;right:12px;display:flex;
+  justify-content:space-between;gap:10px;pointer-events:none;flex-wrap:wrap}
+.status-pill{
+  pointer-events:auto;font-size:.72rem;font-weight:700;font-family:monospace;
+  padding:6px 12px;border-radius:999px;background:rgba(4,8,18,.7);
+  border:1px solid rgba(255,255,255,.16);backdrop-filter:blur(6px);
+}
+.status-pill.good{color:var(--c-good);border-color:rgba(95,227,154,.4)}
+.status-pill.warn{color:var(--c-warn);border-color:rgba(var(--c-warn-rgb),.5)}
+.status-pill.bad{color:var(--c-bad);border-color:rgba(255,107,125,.5)}
+
+.metrics{display:grid;grid-template-columns:1fr 1fr;gap:1px;
+  background:rgba(255,255,255,.06);border-radius:var(--r-md);overflow:hidden}
+.metric{background:var(--c-surface-2);padding:8px 10px}
+.metric .k{font-size:.6rem;text-transform:uppercase;letter-spacing:.09em;
+  color:var(--c-text-3);font-weight:700}
+.metric .v{font-size:.95rem;font-weight:800;font-variant-numeric:tabular-nums;
+  margin-top:2px;color:var(--c-text)}
+.metric .v small{font-size:.62rem;color:var(--c-text-3);font-weight:600;margin-left:3px}
+.metric.flag-warn .v{color:var(--c-warn)}
+.metric.flag-bad .v{color:var(--c-bad)}
+.metric.flag-good .v{color:var(--c-good)}
+.bar{height:7px;border-radius:4px;background:rgba(255,255,255,.08);
+  overflow:hidden;margin-top:7px}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,#00c6ff,#5fe39a);
+  border-radius:4px;transition:width .2s}
+.bar.fuel i{background:linear-gradient(90deg,#ffb066,#ff6b7d)}
+#sd-spark{display:block;width:100%;height:84px;margin-top:9px;
+  border-radius:var(--r-md);background:rgba(255,255,255,.03)}
+
+.hangar-list{display:flex;flex-direction:column;gap:7px;max-height:230px;
+  overflow:auto;margin-top:4px}
+.ship{display:flex;align-items:center;gap:8px;padding:7px 9px;
+  border:1px solid rgba(255,255,255,.1);border-radius:var(--r-md);
+  background:rgba(255,255,255,.03)}
+.ship .nm{flex:1;min-width:0;font-size:.78rem;font-weight:700;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ship .meta{font-size:.62rem;color:var(--c-text-3)}
+.hint{font-size:.72rem;color:var(--c-text-3);line-height:1.5}
+.hint a{color:var(--c-accent);text-decoration:none}
+.hint a:hover{text-decoration:underline}
+.toast{
+  position:fixed;bottom:18px;left:50%;transform:translateX(-50%) translateY(20px);
+  background:rgba(8,14,28,.96);border:1px solid var(--c-accent-border-hi);
+  color:var(--c-text);padding:11px 18px;border-radius:var(--r-lg);
+  font-size:.8rem;font-weight:600;opacity:0;pointer-events:none;
+  transition:.25s;z-index:60;box-shadow:var(--shadow)}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast.bad{border-color:rgba(255,107,125,.6);color:var(--c-bad)}
+.warmup{display:flex;align-items:center;justify-content:center;height:100%;
+  color:var(--c-text-3);font-size:.85rem}
+</style>
+</head>
+<body>
+
+<!-- ─── Nav (shared via nav.js) ──────────────────────────────── -->
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("satellite-designer");</script>
+
+<div id="sd-app">
+
+  <div class="panel" id="sd-hero">
+    <div>
+      <h1>🛰️ Satellite Designer</h1>
+      <p>Build a spacecraft, then fly it through a physically real thermosphere.
+         Atmospheric drag is always pulling you down — spend propellant wisely to
+         hold your orbit. Gravity, the rocket equation and a species-resolved
+         density model are all live.</p>
+    </div>
+    <span class="badge">PHYSICS · LEO</span>
+  </div>
+
+  <!-- ─────────── LEFT: spacecraft + hangar ─────────── -->
+  <div class="sd-col" id="sd-left">
+    <div class="panel">
+      <h2>🔧 Spacecraft <span class="sub">design</span></h2>
+
+      <label class="field">
+        <div class="row"><span>Ship name</span></div>
+        <input type="text" id="f-name" value="Scout-1" maxlength="60">
+      </label>
+
+      <label class="field">
+        <div class="row"><span>Propulsion</span></div>
+        <select id="f-engine"></select>
+      </label>
+
+      <div class="grid2">
+        <label class="field">
+          <div class="row"><span>Thrust</span><b id="v-thrust">22</b></div>
+          <input type="number" id="f-thrust" min="0" max="50000" step="0.1" value="22">
+        </label>
+        <label class="field">
+          <div class="row"><span>Iₛₚ (s)</span><b id="v-isp">225</b></div>
+          <input type="number" id="f-isp" min="10" max="5000" step="1" value="225">
+        </label>
+        <label class="field">
+          <div class="row"><span>Dry mass (kg)</span></div>
+          <input type="number" id="f-dry" min="1" max="100000" step="1" value="120">
+        </label>
+        <label class="field">
+          <div class="row"><span>Propellant (kg)</span></div>
+          <input type="number" id="f-fuel" min="0" max="500000" step="1" value="60">
+        </label>
+        <label class="field">
+          <div class="row"><span>Frontal area (m²)</span></div>
+          <input type="number" id="f-area" min="0.01" max="5000" step="0.1" value="1.2">
+        </label>
+        <label class="field">
+          <div class="row"><span>Drag C<sub>d</sub></span></div>
+          <input type="number" id="f-cd" min="1" max="4" step="0.05" value="2.2">
+        </label>
+      </div>
+
+      <div class="metrics" style="margin-top:4px">
+        <div class="metric"><div class="k">Wet mass</div><div class="v" id="d-wet">—</div></div>
+        <div class="metric"><div class="k">Δv budget</div><div class="v" id="d-dv">—</div></div>
+        <div class="metric"><div class="k">Ballistic coeff</div><div class="v" id="d-bc">—</div></div>
+        <div class="metric"><div class="k">Mass ratio</div><div class="v" id="d-mr">—</div></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>🛰️ Hangar <span class="sub">saved ships</span></h2>
+      <div id="hangar-body">
+        <div class="hint" id="hangar-auth">Checking sign-in…</div>
+      </div>
+      <div class="btn-row" style="margin-top:10px" id="hangar-actions" hidden>
+        <button class="btn primary sm" id="b-save">Save ship</button>
+        <button class="btn sm" id="b-refresh">Refresh</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─────────── CENTER: flight ─────────── -->
+  <div class="sd-col" id="sd-center">
+    <div id="sd-stage">
+      <canvas id="sd-canvas"></canvas>
+      <div id="sd-status">
+        <span class="status-pill" id="st-phase">Pre-flight</span>
+        <span class="status-pill" id="st-warp">▶ ×1</span>
+      </div>
+      <div class="warmup" id="sd-warmup">Loading atmosphere model…</div>
+    </div>
+
+    <div class="panel">
+      <h2>🎮 Flight controls</h2>
+      <div class="grid2" style="margin-bottom:8px">
+        <label class="field" style="margin:0">
+          <div class="row"><span>Perigee alt</span><b><span id="v-peri">300</span> km</b></div>
+          <input type="range" id="f-peri" min="100" max="1200" step="5" value="300">
+        </label>
+        <label class="field" style="margin:0">
+          <div class="row"><span>Apogee alt</span><b><span id="v-apo">300</span> km</b></div>
+          <input type="range" id="f-apo" min="100" max="1200" step="5" value="300">
+        </label>
+        <label class="field" style="margin:0">
+          <div class="row"><span>Target / station-keep alt</span><b><span id="v-tgt">300</span> km</b></div>
+          <input type="range" id="f-tgt" min="100" max="1200" step="5" value="300">
+        </label>
+        <label class="field" style="margin:0">
+          <div class="row"><span>Throttle</span><b><span id="v-thr">60</span>%</b></div>
+          <input type="range" id="f-throttle" min="0" max="100" step="1" value="60">
+        </label>
+      </div>
+
+      <div class="btn-row" style="margin-bottom:8px">
+        <button class="btn primary" id="b-launch">▶ Launch</button>
+        <button class="btn" id="b-pause" disabled>Pause</button>
+        <button class="btn warn" id="b-reset" disabled>Reset</button>
+        <label class="toggle warn" id="b-auto" title="Auto fire prograde to defend the target altitude">⟳ Auto station-keep</label>
+      </div>
+
+      <div class="row" style="display:flex;justify-content:space-between;margin-bottom:4px">
+        <span style="font-size:.68rem;color:var(--c-text-3);font-weight:700;letter-spacing:.06em;text-transform:uppercase">Burn vector</span>
+      </div>
+      <div class="toggle-row" id="thrust-modes">
+        <div class="toggle active" data-mode="off">Off</div>
+        <div class="toggle" data-mode="prograde">Prograde ⏩</div>
+        <div class="toggle" data-mode="retrograde">Retro ⏪</div>
+        <div class="toggle" data-mode="radial-out">Radial ⬆</div>
+        <div class="toggle" data-mode="radial-in">Radial ⬇</div>
+      </div>
+
+      <div class="row" style="display:flex;justify-content:space-between;margin:10px 0 4px">
+        <span style="font-size:.68rem;color:var(--c-text-3);font-weight:700;letter-spacing:.06em;text-transform:uppercase">Time warp</span>
+      </div>
+      <div class="toggle-row" id="warp-modes">
+        <div class="toggle active" data-warp="1">×1</div>
+        <div class="toggle" data-warp="10">×10</div>
+        <div class="toggle" data-warp="60">×60</div>
+        <div class="toggle" data-warp="600">×600</div>
+        <div class="toggle" data-warp="3600">×3600</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─────────── RIGHT: telemetry + objective ─────────── -->
+  <div class="sd-col" id="sd-right">
+    <div class="panel">
+      <h2>📡 Telemetry</h2>
+      <div class="metrics">
+        <div class="metric" id="m-alt"><div class="k">Altitude</div><div class="v">—</div></div>
+        <div class="metric" id="m-spd"><div class="k">Speed</div><div class="v">—</div></div>
+        <div class="metric" id="m-peri"><div class="k">Perigee</div><div class="v">—</div></div>
+        <div class="metric" id="m-apo"><div class="k">Apogee</div><div class="v">—</div></div>
+        <div class="metric" id="m-period"><div class="k">Period</div><div class="v">—</div></div>
+        <div class="metric" id="m-ecc"><div class="k">Eccentricity</div><div class="v">—</div></div>
+        <div class="metric" id="m-rho"><div class="k">Air density</div><div class="v">—</div></div>
+        <div class="metric" id="m-q"><div class="k">Dyn. pressure</div><div class="v">—</div></div>
+        <div class="metric" id="m-drag"><div class="k">Drag decel</div><div class="v">—</div></div>
+        <div class="metric" id="m-decay"><div class="k">Decay rate</div><div class="v">—</div></div>
+      </div>
+
+      <div style="margin-top:11px">
+        <div style="display:flex;justify-content:space-between;font-size:.66rem;color:var(--c-text-3);font-weight:700">
+          <span>PROPELLANT</span><span id="fuel-lbl">—</span>
+        </div>
+        <div class="bar fuel"><i id="fuel-bar" style="width:100%"></i></div>
+        <div style="display:flex;justify-content:space-between;font-size:.66rem;color:var(--c-text-3);font-weight:700;margin-top:8px">
+          <span>Δv REMAINING</span><span id="dv-lbl">—</span>
+        </div>
+        <div class="bar"><i id="dv-bar" style="width:100%"></i></div>
+      </div>
+
+      <canvas id="sd-spark"></canvas>
+      <div style="font-size:.62rem;color:var(--c-text-3);text-align:center;margin-top:3px">
+        altitude vs. mission time
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>🏆 Mission <span class="sub">station-keeping endurance</span></h2>
+      <div class="metrics">
+        <div class="metric flag-good"><div class="k">Score</div><div class="v" id="o-score">0</div></div>
+        <div class="metric"><div class="k">On-station</div><div class="v" id="o-station">0<small>s</small></div></div>
+        <div class="metric"><div class="k">Orbits</div><div class="v" id="o-orbits">0</div></div>
+        <div class="metric"><div class="k">Mission clock</div><div class="v" id="o-clock">0<small>s</small></div></div>
+      </div>
+      <p class="hint" style="margin-top:10px">
+        You stay <b>on-station</b> while altitude ≥ target. Drag steals energy
+        every pass — burn <b>prograde</b> at perigee to re-boost, or flip on
+        auto station-keeping and see how long your Δv lasts. Best run is saved
+        with the ship.
+      </p>
+      <div class="metric" style="margin-top:8px;border-radius:var(--r-md)">
+        <div class="k">Best run (this ship)</div><div class="v" id="o-best">0</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module">
+import { auth } from './js/auth.js';
+import { getSupabase, isConfigured } from './js/supabase-config.js';
+import * as ENG from './js/satellite-designer-engine.js';
+
+// ── DOM helpers ─────────────────────────────────────────────────────────────
+const $ = (id) => document.getElementById(id);
+const fmt = (x, d = 0) => (isFinite(x) ? x.toLocaleString('en-US',
+  { minimumFractionDigits: d, maximumFractionDigits: d }) : '—');
+function toast(msg, bad = false) {
+  const t = $('toast');
+  t.textContent = msg; t.classList.toggle('bad', bad); t.classList.add('show');
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), 3200);
+}
+
+// ── State ───────────────────────────────────────────────────────────────────
+const env = ENG.defaultEnv();
+const sim = {
+  running: false, paused: false, warp: 1,
+  design: null, state: null, env,
+  control: { throttle: 0.6, mode: 'off' },
+  auto: false,
+  trail: [], altHist: [],
+  stationSeconds: 0, score: 0, best: 0, orbits: 0,
+  lastAngle: 0, viewScale: 1,
+};
+
+// ── Design from the form ────────────────────────────────────────────────────
+function readDesign() {
+  return ENG.makeDesign({
+    name: $('f-name').value || 'Untitled',
+    engine: $('f-engine').value,
+    thrust: +$('f-thrust').value, isp: +$('f-isp').value,
+    dryMass: +$('f-dry').value, fuelMass: +$('f-fuel').value,
+    area: +$('f-area').value, cd: +$('f-cd').value,
+  });
+}
+function refreshDesignReadouts() {
+  const d = readDesign();
+  const wet = d.dryMass + d.fuelMass;
+  const dv = d.fuelMass > 0 ? d.isp * ENG.G0 * Math.log(wet / d.dryMass) : 0;
+  $('v-thrust').textContent = fmt(d.thrust, d.thrust < 10 ? 2 : 0);
+  $('v-isp').textContent = fmt(d.isp);
+  $('d-wet').innerHTML = fmt(wet) + ' <small>kg</small>';
+  $('d-dv').innerHTML = fmt(dv) + ' <small>m/s</small>';
+  $('d-bc').innerHTML = fmt(wet / (d.cd * d.area), 1) + ' <small>kg/m²</small>';
+  $('d-mr').textContent = (wet / d.dryMass).toFixed(2) + '×';
+}
+
+// Engine preset dropdown
+{
+  const sel = $('f-engine');
+  for (const [k, v] of Object.entries(ENG.ENGINE_PRESETS)) {
+    const o = document.createElement('option');
+    o.value = k; o.textContent = `${v.label}  (${v.thrust} N · ${v.isp}s)`;
+    sel.appendChild(o);
+  }
+  sel.value = 'monoprop';
+  sel.addEventListener('change', () => {
+    const p = ENG.ENGINE_PRESETS[sel.value];
+    if (p) { $('f-thrust').value = p.thrust; $('f-isp').value = p.isp; }
+    refreshDesignReadouts(); saveDraft();
+  });
+}
+['f-name','f-thrust','f-isp','f-dry','f-fuel','f-area','f-cd']
+  .forEach(id => $(id).addEventListener('input', () => { refreshDesignReadouts(); saveDraft(); }));
+
+// Orbit / control sliders
+function bindSlider(id, lblId) {
+  const el = $(id), out = $(lblId);
+  const sync = () => { out.textContent = el.value; };
+  el.addEventListener('input', sync); sync();
+}
+bindSlider('f-peri', 'v-peri'); bindSlider('f-apo', 'v-apo');
+bindSlider('f-tgt', 'v-tgt'); bindSlider('f-throttle', 'v-thr');
+$('f-peri').addEventListener('input', () => {
+  if (+$('f-apo').value < +$('f-peri').value) { $('f-apo').value = $('f-peri').value; $('v-apo').textContent = $('f-apo').value; }
+});
+$('f-apo').addEventListener('input', () => {
+  if (+$('f-apo').value < +$('f-peri').value) { $('f-peri').value = $('f-apo').value; $('v-peri').textContent = $('f-peri').value; }
+});
+$('f-throttle').addEventListener('input', () => { sim.control.throttle = (+$('f-throttle').value) / 100; });
+
+// Thrust mode buttons
+$('thrust-modes').addEventListener('click', (e) => {
+  const t = e.target.closest('.toggle'); if (!t) return;
+  sim.control.mode = t.dataset.mode;
+  $('thrust-modes').querySelectorAll('.toggle').forEach(x =>
+    x.classList.toggle('active', x === t));
+});
+// Time warp
+$('warp-modes').addEventListener('click', (e) => {
+  const t = e.target.closest('.toggle'); if (!t) return;
+  sim.warp = +t.dataset.warp;
+  $('warp-modes').querySelectorAll('.toggle').forEach(x =>
+    x.classList.toggle('active', x === t));
+  $('st-warp').textContent = (sim.paused ? '⏸ ' : '▶ ') + '×' + sim.warp;
+});
+// Auto station-keep
+$('b-auto').addEventListener('click', () => {
+  sim.auto = !sim.auto;
+  $('b-auto').classList.toggle('active', sim.auto);
+});
+
+// ── Mission control ─────────────────────────────────────────────────────────
+function launch() {
+  sim.design = readDesign();
+  const peri = +$('f-peri').value, apo = Math.max(+$('f-apo').value, peri);
+  sim.state = ENG.initState(sim.design, { periKm: peri, apoKm: apo });
+  sim.trail = []; sim.altHist = [];
+  sim.stationSeconds = 0; sim.score = 0; sim.orbits = 0;
+  sim.lastAngle = Math.atan2(sim.state.y, sim.state.x);
+  sim.running = true; sim.paused = false;
+  $('b-launch').disabled = true; $('b-pause').disabled = false; $('b-reset').disabled = false;
+  $('b-pause').textContent = 'Pause';
+  setPhase('In flight', 'good');
+}
+function resetSim() {
+  sim.running = false; sim.paused = false; sim.state = null;
+  $('b-launch').disabled = false; $('b-pause').disabled = true; $('b-reset').disabled = true;
+  setPhase('Pre-flight', '');
+  draw(); // clear to empty orbit
+}
+function setPhase(text, cls) {
+  const p = $('st-phase');
+  p.textContent = text;
+  p.className = 'status-pill' + (cls ? ' ' + cls : '');
+}
+$('b-launch').addEventListener('click', launch);
+$('b-reset').addEventListener('click', resetSim);
+$('b-pause').addEventListener('click', () => {
+  sim.paused = !sim.paused;
+  $('b-pause').textContent = sim.paused ? 'Resume' : 'Pause';
+  $('st-warp').textContent = (sim.paused ? '⏸ ' : '▶ ') + '×' + sim.warp;
+});
+addEventListener('keydown', (e) => {
+  if (e.target.matches('input,select,textarea')) return;
+  if (e.code === 'Space') { e.preventDefault(); if (sim.running) $('b-pause').click(); else launch(); }
+});
+
+// ── Simulation loop ─────────────────────────────────────────────────────────
+let lastT = performance.now();
+function frame(now) {
+  const realDt = Math.min(0.05, (now - lastT) / 1000);
+  lastT = now;
+
+  if (sim.running && !sim.paused && sim.state?.alive) {
+    let simSecs = Math.min(realDt * sim.warp, 240);
+
+    // Auto station-keeping: defend the target perigee with prograde burns.
+    if (sim.auto) {
+      const tgt = +$('f-tgt').value;
+      const tel = ENG.telemetry(sim.state, sim.design, sim.env);
+      if (tel.periAltKm < tgt && sim.state.fuel > 0) {
+        sim.control.mode = 'prograde';
+        syncModeUI('prograde');
+      } else if (tel.periAltKm > tgt + 8 && sim.control.mode === 'prograde') {
+        sim.control.mode = 'off';
+        syncModeUI('off');
+      }
+    }
+
+    const r = ENG.advance(sim.state, sim.design, sim.env, sim.control, simSecs);
+    const prev = sim.state;
+    sim.state = r.state;
+
+    // Orbit counter — count prograde crossings of the +x axis.
+    const ang = Math.atan2(sim.state.y, sim.state.x);
+    if (sim.lastAngle < 0 && ang >= 0 && sim.lastAngle < -0.1) sim.orbits++;
+    sim.lastAngle = ang;
+
+    // Scoring: time spent at/above the target altitude.
+    const tgt = +$('f-tgt').value;
+    const tel = ENG.telemetry(sim.state, sim.design, sim.env);
+    if (tel.altKm >= tgt) sim.stationSeconds += simSecs;
+    sim.score = Math.floor(sim.stationSeconds + sim.orbits * 50);
+    if (sim.score > sim.best) sim.best = sim.score;
+
+    // Trail + altitude history.
+    sim.trail.push([sim.state.x, sim.state.y]);
+    if (sim.trail.length > 1800) sim.trail.shift();
+    sim.altHist.push([sim.state.t, tel.altKm]);
+    if (sim.altHist.length > 600) sim.altHist.shift();
+
+    if (!sim.state.alive) {
+      sim.running = false;
+      setPhase(sim.state.reason === 'reentry' ? '🔥 Burned up on re-entry' : 'Mission ended', 'bad');
+      $('b-pause').disabled = true;
+      toast('Re-entry: the craft burned up in the lower atmosphere.', true);
+      maybePersistBest();
+    } else if (tel.fuel <= 0 && sim.control.mode === 'prograde') {
+      setPhase('⚠ Out of propellant — decaying', 'warn');
+    }
+    updateTelemetry(tel);
+  }
+
+  draw();
+  requestAnimationFrame(frame);
+}
+function syncModeUI(mode) {
+  $('thrust-modes').querySelectorAll('.toggle').forEach(x =>
+    x.classList.toggle('active', x.dataset.mode === mode));
+}
+
+// ── Telemetry panel ─────────────────────────────────────────────────────────
+function setMetric(id, html, flag) {
+  const el = $(id);
+  el.querySelector('.v').innerHTML = html;
+  el.classList.remove('flag-warn', 'flag-bad', 'flag-good');
+  if (flag) el.classList.add('flag-' + flag);
+}
+function updateTelemetry(t) {
+  setMetric('m-alt', fmt(t.altKm, 1) + ' <small>km</small>',
+    t.altKm < 130 ? 'bad' : t.altKm < 200 ? 'warn' : 'good');
+  setMetric('m-spd', fmt(t.speed, 0) + ' <small>m/s</small>');
+  setMetric('m-peri', fmt(t.periAltKm, 1) + ' <small>km</small>',
+    t.periAltKm < 120 ? 'bad' : t.periAltKm < 180 ? 'warn' : null);
+  setMetric('m-apo', isFinite(t.apoAltKm) ? fmt(t.apoAltKm, 1) + ' <small>km</small>' : 'escape',
+    !t.bound ? 'warn' : null);
+  setMetric('m-period', isFinite(t.period) ? fmt(t.period / 60, 1) + ' <small>min</small>' : '—');
+  setMetric('m-ecc', t.ecc.toFixed(4));
+  setMetric('m-rho', t.rho.toExponential(2) + ' <small>kg/m³</small>');
+  setMetric('m-q', fmt(t.qdyn, 2) + ' <small>Pa</small>',
+    t.qdyn > 50 ? 'bad' : t.qdyn > 5 ? 'warn' : null);
+  setMetric('m-drag', t.dragAccel.toExponential(2) + ' <small>m/s²</small>',
+    t.dragG > 0.01 ? 'warn' : null);
+  setMetric('m-decay', isFinite(t.daysToReentry) && t.daysToReentry < 9999
+      ? fmt(t.decayPerOrbitKm, 3) + ' <small>km/orbit</small>'
+      : 'stable',
+    t.decayPerOrbitKm < -1 ? 'bad' : t.decayPerOrbitKm < -0.05 ? 'warn' : null);
+
+  $('fuel-lbl').textContent = fmt(t.fuel, 1) + ' kg';
+  $('fuel-bar').style.width = (t.fuelFrac * 100).toFixed(1) + '%';
+  const dvMax = sim.design ? sim.design.isp * ENG.G0 *
+    Math.log((sim.design.dryMass + sim.design.fuelMass) / sim.design.dryMass) : 1;
+  $('dv-lbl').textContent = fmt(t.dvRemaining, 0) + ' m/s';
+  $('dv-bar').style.width = (dvMax > 0 ? Math.min(1, t.dvRemaining / dvMax) * 100 : 0).toFixed(1) + '%';
+
+  $('o-score').textContent = fmt(sim.score);
+  $('o-station').innerHTML = fmt(sim.stationSeconds, 0) + '<small>s</small>';
+  $('o-orbits').textContent = fmt(sim.orbits);
+  $('o-clock').innerHTML = fmt(t.missionTime, 0) + '<small>s</small>';
+  $('o-best').textContent = fmt(sim.best);
+}
+
+// ── Rendering ───────────────────────────────────────────────────────────────
+const cv = $('sd-canvas'), cx = cv.getContext('2d');
+let stars = [];
+function resize() {
+  const r = $('sd-stage').getBoundingClientRect();
+  const dpr = Math.min(2, devicePixelRatio || 1);
+  cv.width = r.width * dpr; cv.height = r.height * dpr;
+  cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  cv._w = r.width; cv._h = r.height;
+  stars = Array.from({ length: 90 }, () => ({
+    x: Math.random() * r.width, y: Math.random() * r.height,
+    s: Math.random() * 1.3 + 0.3, a: Math.random() * 0.5 + 0.2,
+  }));
+}
+addEventListener('resize', resize);
+
+function draw() {
+  const W = cv._w || 600, H = cv._h || 480;
+  cx.clearRect(0, 0, W, H);
+  // starfield
+  for (const s of stars) {
+    cx.globalAlpha = s.a; cx.fillStyle = '#bcdcff';
+    cx.fillRect(s.x, s.y, s.s, s.s);
+  }
+  cx.globalAlpha = 1;
+
+  const cxp = W / 2, cyp = H / 2;
+  // auto-fit: show out to current apogee (or the apogee slider when idle)
+  let rMax = ENG.R_EARTH + 1200_000;
+  if (sim.state) {
+    const el = ENG.elements(sim.state);
+    rMax = Math.max(el.r, isFinite(el.ra) ? el.ra : el.r) * 1.18;
+  } else {
+    rMax = ENG.R_EARTH + (+$('f-apo').value) * 1000 * 1.25;
+  }
+  const scale = (Math.min(W, H) * 0.46) / rMax;
+  const px = (x) => cxp + x * scale;
+  const py = (y) => cyp - y * scale;
+  const Re = ENG.R_EARTH * scale;
+
+  // atmosphere shell (80 → 600 km), the part that bites
+  const atmOuter = (ENG.R_EARTH + 600_000) * scale;
+  const g = cx.createRadialGradient(cxp, cyp, Re, cxp, cyp, atmOuter);
+  g.addColorStop(0, 'rgba(90,170,255,.30)');
+  g.addColorStop(0.45, 'rgba(60,130,220,.12)');
+  g.addColorStop(1, 'rgba(40,90,160,0)');
+  cx.fillStyle = g;
+  cx.beginPath(); cx.arc(cxp, cyp, atmOuter, 0, 7); cx.fill();
+
+  // target-altitude ring
+  const tgtR = (ENG.R_EARTH + (+$('f-tgt').value) * 1000) * scale;
+  cx.strokeStyle = 'rgba(95,227,154,.45)'; cx.setLineDash([5, 6]); cx.lineWidth = 1;
+  cx.beginPath(); cx.arc(cxp, cyp, tgtR, 0, 7); cx.stroke();
+  cx.setLineDash([]);
+
+  // Earth
+  const eg = cx.createRadialGradient(cxp - Re * .35, cyp - Re * .35, Re * .1, cxp, cyp, Re);
+  eg.addColorStop(0, '#3b86c9'); eg.addColorStop(.6, '#16406e'); eg.addColorStop(1, '#081f38');
+  cx.fillStyle = eg;
+  cx.beginPath(); cx.arc(cxp, cyp, Re, 0, 7); cx.fill();
+  cx.strokeStyle = 'rgba(120,200,255,.5)'; cx.lineWidth = 1;
+  cx.beginPath(); cx.arc(cxp, cyp, Re, 0, 7); cx.stroke();
+
+  // orbit trail
+  if (sim.trail.length > 1) {
+    cx.strokeStyle = 'rgba(0,198,255,.55)'; cx.lineWidth = 1.4;
+    cx.beginPath();
+    for (let i = 0; i < sim.trail.length; i++) {
+      const [x, y] = sim.trail[i];
+      i ? cx.lineTo(px(x), py(y)) : cx.moveTo(px(x), py(y));
+    }
+    cx.stroke();
+  }
+
+  // satellite + vectors
+  if (sim.state) {
+    const X = px(sim.state.x), Y = py(sim.state.y);
+    // velocity vector
+    const vmag = Math.hypot(sim.state.vx, sim.state.vy) || 1;
+    cx.strokeStyle = 'rgba(0,198,255,.9)'; cx.lineWidth = 2;
+    cx.beginPath(); cx.moveTo(X, Y);
+    cx.lineTo(X + sim.state.vx / vmag * 26, Y - sim.state.vy / vmag * 26); cx.stroke();
+    // thrust vector
+    if (sim.running && sim.control.mode !== 'off' && sim.control.throttle > 0 && sim.state.fuel > 0) {
+      let dx = 0, dy = 0, r = ENG.elements(sim.state).r;
+      if (sim.control.mode === 'prograde') { dx = sim.state.vx / vmag; dy = sim.state.vy / vmag; }
+      else if (sim.control.mode === 'retrograde') { dx = -sim.state.vx / vmag; dy = -sim.state.vy / vmag; }
+      else if (sim.control.mode === 'radial-out') { dx = sim.state.x / r; dy = sim.state.y / r; }
+      else if (sim.control.mode === 'radial-in') { dx = -sim.state.x / r; dy = -sim.state.y / r; }
+      cx.strokeStyle = '#ffb066'; cx.lineWidth = 3;
+      cx.beginPath(); cx.moveTo(X, Y);
+      cx.lineTo(X - dx * 30, Y + dy * 30); cx.stroke(); // exhaust points opposite thrust
+    }
+    cx.fillStyle = '#fff';
+    cx.beginPath(); cx.arc(X, Y, 4.2, 0, 7); cx.fill();
+    cx.strokeStyle = '#00c6ff'; cx.lineWidth = 2;
+    cx.beginPath(); cx.arc(X, Y, 7, 0, 7); cx.stroke();
+  }
+
+  drawSpark();
+}
+
+const sp = $('sd-spark'), spx = sp.getContext('2d');
+function drawSpark() {
+  const r = sp.getBoundingClientRect();
+  if (sp.width !== r.width) { sp.width = r.width; sp.height = 84; }
+  const W = sp.width, H = sp.height;
+  spx.clearRect(0, 0, W, H);
+  if (sim.altHist.length < 2) return;
+  let lo = Infinity, hi = -Infinity;
+  for (const [, a] of sim.altHist) { lo = Math.min(lo, a); hi = Math.max(hi, a); }
+  const tgt = +$('f-tgt').value;
+  lo = Math.min(lo, tgt); hi = Math.max(hi, tgt);
+  const pad = (hi - lo) * 0.12 || 10; lo -= pad; hi += pad;
+  const t0 = sim.altHist[0][0], t1 = sim.altHist[sim.altHist.length - 1][0] || 1;
+  const xx = (t) => ((t - t0) / Math.max(1, t1 - t0)) * W;
+  const yy = (a) => H - ((a - lo) / Math.max(1e-6, hi - lo)) * H;
+  // target line
+  spx.strokeStyle = 'rgba(95,227,154,.5)'; spx.setLineDash([4, 4]); spx.lineWidth = 1;
+  spx.beginPath(); spx.moveTo(0, yy(tgt)); spx.lineTo(W, yy(tgt)); spx.stroke();
+  spx.setLineDash([]);
+  spx.strokeStyle = '#00c6ff'; spx.lineWidth = 1.6;
+  spx.beginPath();
+  sim.altHist.forEach(([t, a], i) => i ? spx.lineTo(xx(t), yy(a)) : spx.moveTo(xx(t), yy(a)));
+  spx.stroke();
+}
+
+// ── Hangar (Supabase saved ships) ───────────────────────────────────────────
+let user = null;
+async function loadDesignsList() {
+  if (!user) return [];
+  try {
+    const sb = await getSupabase();
+    const { data, error } = await sb.from('satellite_designs')
+      .select('*').eq('user_id', user.id).order('updated_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  } catch (e) {
+    console.warn('[SD] list failed', e.message);
+    toast('Could not load saved ships (' + e.message + ')', true);
+    return [];
+  }
+}
+function applyDesign(dd) {
+  if (!dd) return;
+  $('f-name').value = dd.name ?? 'Loaded';
+  if (dd.engine) $('f-engine').value = dd.engine;
+  for (const [k, id] of [['thrust','f-thrust'],['isp','f-isp'],['dryMass','f-dry'],
+      ['fuelMass','f-fuel'],['area','f-area'],['cd','f-cd']])
+    if (dd[k] != null) $(id).value = dd[k];
+  if (dd.periKm != null) { $('f-peri').value = dd.periKm; $('v-peri').textContent = dd.periKm; }
+  if (dd.apoKm != null) { $('f-apo').value = dd.apoKm; $('v-apo').textContent = dd.apoKm; }
+  if (dd.targetKm != null) { $('f-tgt').value = dd.targetKm; $('v-tgt').textContent = dd.targetKm; }
+  refreshDesignReadouts();
+}
+function currentDesignData() {
+  const d = readDesign();
+  return { ...d, periKm: +$('f-peri').value, apoKm: +$('f-apo').value, targetKm: +$('f-tgt').value };
+}
+function renderHangar(list) {
+  const body = $('hangar-body');
+  if (!list.length) {
+    body.innerHTML = '<div class="hint">No saved ships yet. Tune a design and hit <b>Save ship</b>.</div>';
+    return;
+  }
+  body.innerHTML = '<div class="hangar-list"></div>';
+  const ul = body.querySelector('.hangar-list');
+  for (const row of list) {
+    const dd = row.design_data || {};
+    const el = document.createElement('div');
+    el.className = 'ship';
+    el.innerHTML = `<div style="flex:1;min-width:0">
+        <div class="nm">${escapeHtml(row.name)}</div>
+        <div class="meta">${ENG.ENGINE_PRESETS[dd.engine]?.label || 'custom'} ·
+          best ${Math.round(row.best_score || 0)}</div>
+      </div>`;
+    const load = document.createElement('button');
+    load.className = 'btn sm'; load.textContent = 'Load';
+    load.onclick = () => { applyDesign(dd); sim.best = row.best_score || 0;
+      $('o-best').textContent = fmt(sim.best); toast('Loaded "' + row.name + '"'); };
+    const del = document.createElement('button');
+    del.className = 'btn sm warn'; del.textContent = '✕';
+    del.title = 'Delete'; del.onclick = () => deleteDesign(row.id, row.name);
+    el.appendChild(load); el.appendChild(del);
+    ul.appendChild(el);
+  }
+}
+async function refreshHangar() {
+  if (!user) return;
+  renderHangar(await loadDesignsList());
+}
+async function saveShip() {
+  if (!user) return;
+  const name = ($('f-name').value || 'Untitled').slice(0, 60);
+  try {
+    const sb = await getSupabase();
+    const { error } = await sb.from('satellite_designs').upsert({
+      user_id: user.id, name,
+      design_data: currentDesignData(),
+      best_score: Math.max(0, Math.round(sim.best)),
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id,name' });
+    if (error) throw error;
+    toast('Saved "' + name + '" to your hangar');
+    refreshHangar();
+  } catch (e) {
+    toast('Save failed: ' + e.message, true);
+  }
+}
+async function deleteDesign(id, name) {
+  if (!confirm('Delete "' + name + '"?')) return;
+  try {
+    const sb = await getSupabase();
+    const { error } = await sb.from('satellite_designs')
+      .delete().eq('id', id).eq('user_id', user.id);
+    if (error) throw error;
+    toast('Deleted "' + name + '"'); refreshHangar();
+  } catch (e) { toast('Delete failed: ' + e.message, true); }
+}
+async function maybePersistBest() {
+  if (!user || sim.best <= 0) return;
+  const name = ($('f-name').value || 'Untitled').slice(0, 60);
+  try {
+    const sb = await getSupabase();
+    await sb.from('satellite_designs').update({ best_score: Math.round(sim.best) })
+      .eq('user_id', user.id).eq('name', name);
+  } catch { /* best-effort */ }
+}
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// localStorage draft so signed-out players keep their build
+function saveDraft() {
+  try { localStorage.setItem('pp_sd_draft', JSON.stringify(currentDesignData())); } catch {}
+}
+function loadDraft() {
+  try {
+    const d = JSON.parse(localStorage.getItem('pp_sd_draft') || 'null');
+    if (d) applyDesign(d);
+  } catch {}
+}
+
+// ── Auth wiring ─────────────────────────────────────────────────────────────
+async function initAuth() {
+  const authBox = $('hangar-auth');
+  if (!isConfigured()) {
+    authBox.innerHTML = '<div class="hint">Cloud hangar offline — designs stay in this browser.</div>';
+    return;
+  }
+  await auth.ready();
+  function applyState() {
+    if (auth.isSignedIn()) {
+      user = auth.getUser();
+      $('hangar-actions').hidden = false;
+      authBox.innerHTML = `<div class="hint">Signed in as <b>${escapeHtml(user.email || 'pilot')}</b>.
+        Your ships sync across devices.</div>`;
+      refreshHangar();
+    } else {
+      user = null;
+      $('hangar-actions').hidden = true;
+      const ret = encodeURIComponent(location.pathname + location.search);
+      authBox.innerHTML = `<div class="hint">
+        <a href="signin.html?redirect=${ret}">Sign in</a> or
+        <a href="signup.html?redirect=${ret}">create an account</a>
+        to save ships to your hangar and keep your best runs.</div>`;
+    }
+  }
+  applyState();
+  addEventListener('auth-changed', applyState);
+}
+$('b-save').addEventListener('click', saveShip);
+$('b-refresh').addEventListener('click', refreshHangar);
+
+// ── Boot ────────────────────────────────────────────────────────────────────
+window.__sd = { auth, engine: ENG, sim, ui: { readDesign, currentDesignData } };
+
+(async function boot() {
+  loadDraft();
+  refreshDesignReadouts();
+  resize();
+  // Warm the thermosphere model with one sample, then drop the overlay.
+  try { ENG.airDensity(400_000, env); } catch (e) { console.warn(e); }
+  $('sd-warmup').style.display = 'none';
+  resetSim();
+  requestAnimationFrame((t) => { lastT = t; frame(t); });
+  initAuth();
+})();
+</script>
+
+</body>
+</html>

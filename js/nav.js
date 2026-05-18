@@ -39,6 +39,7 @@ const NAV_DROPDOWNS = [
             { href: 'satellites.html',        label: 'Satellites',          sub: 'Real-time orbital tracking',           tier: 'public', icon: '🛰️' },
             { href: 'launch-planner.html',    label: 'Launch Planner',      sub: 'SpaceX/Blue Origin launches + weather', tier: 'public', icon: '🚀', id: 'launch-planner' },
             { href: 'upper-atmosphere.html',  label: 'Upper Atmosphere',    sub: 'Thermosphere + exosphere simulator',    tier: 'public', icon: '🌡️', id: 'upper-atmosphere' },
+            { href: 'satellite-designer.html', label: 'Satellite Designer', sub: 'Build a craft · fly drag vs thrust',     tier: 'public', icon: '🛰️', badge: 'NEW', id: 'satellite-designer' },
         ],
     },
     {
