@@ -903,6 +903,10 @@
                 if (u?.id && window._ppAuth?.analytics?.identify) {
                     window._ppAuth.analytics.identify(u.id, { plan: u.plan, role: u.role });
                 }
+                // GA4 recommended `login` event. analytics.event() mirrors
+                // to gtag, so this lands in GA4 alongside the first-party
+                // analytics_events row. method matches GA4's convention.
+                window._ppAuth?.analytics?.event?.('login', { method: 'password' });
             } catch {}
             // Perf: time from page-navigation start to a successful
             // login. Captures the form-fill + supabase round-trip path
