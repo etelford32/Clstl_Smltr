@@ -277,7 +277,7 @@ export default async function handler(req) {
             'mode':                         'subscription',
             'line_items[0][price]':         priceId,
             'line_items[0][quantity]':       '1',
-            'success_url':                  `${APP_URL}/dashboard.html?checkout=success&plan=${_basePlan}`,
+            'success_url':                  `${APP_URL}/dashboard.html?checkout=success&plan=${_basePlan}&session_id={CHECKOUT_SESSION_ID}`,
             'cancel_url':                   `${APP_URL}/pricing.html?checkout=canceled`,
             'subscription_data[metadata][supabase_uid]': user.id,
             'subscription_data[metadata][plan]':         _basePlan,

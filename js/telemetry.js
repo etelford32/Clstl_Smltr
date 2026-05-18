@@ -268,6 +268,31 @@ class Telemetry {
         });
     }
 
+    /**
+     * Record a cookie-consent prompt impression or decision.
+     *
+     * Anonymous-safe and 100% sampled, exactly like recordFunnel: the
+     * payload carries no PII, no fingerprint, no IP — just which
+     * non-essential categories the visitor allowed. This MUST run
+     * pre-consent (it measures the consent decision itself), which is
+     * the same first-party-operational-telemetry justification the auth
+     * funnel uses. Without it the analytics opt-in rate — the
+     * correction factor for every consent-gated KPI — is unknowable.
+     *
+     * @param {string} event  'prompt_shown' | 'decision'
+     * @param {object} [meta]  { analytics:0|1, functional:0|1,
+     *                           action:'accept_all'|'reject'|'save',
+     *                           gpc:0|1 }
+     */
+    recordConsent(event, meta = {}) {
+        if (!event || typeof event !== 'string') return;
+        this._enqueue({
+            kind:     'consent',
+            severity: 'info',
+            metadata: { event: event.slice(0, 40), ...meta },
+        });
+    }
+
     // ── Internals ───────────────────────────────────────────────────
 
     _enqueue(event) {

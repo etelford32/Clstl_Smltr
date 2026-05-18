@@ -71,29 +71,41 @@ export async function fetchKPIs() {
             signUpsRes,
             plansRes,
             onlineRes,
+            uniqCountsRes,
         ] = await Promise.allSettled([
-            // Daily unique users (distinct user_id in analytics_events today)
+            // Daily traffic. We pull both session_id and user_id so the
+            // dashboard can show "unique visitors" (distinct session_id —
+            // includes logged-out + pre-identify traffic) as the headline
+            // and "signed-in users" (distinct non-null user_id) as the
+            // sub-metric. The old query filtered user_id IS NOT NULL, which
+            // discarded every anonymous row and (before the identify fix)
+            // every row period. session_id is set on every event from the
+            // first page_view, so it survives the consent gate the same way.
             client.from('analytics_events')
-                .select('user_id')
-                .gte('created_at', daysAgo(1))
-                .not('user_id', 'is', null),
+                .select('session_id, user_id')
+                .gte('created_at', daysAgo(1)),
 
-            // Weekly unique users
+            // Weekly traffic
             client.from('analytics_events')
-                .select('user_id')
-                .gte('created_at', daysAgo(7))
-                .not('user_id', 'is', null),
+                .select('session_id, user_id')
+                .gte('created_at', daysAgo(7)),
 
-            // Monthly unique users
+            // Monthly traffic
             client.from('analytics_events')
-                .select('user_id')
-                .gte('created_at', daysAgo(30))
-                .not('user_id', 'is', null),
+                .select('session_id, user_id')
+                .gte('created_at', daysAgo(30)),
 
-            // Sign-ins (last 30 days)
-            client.from('analytics_events')
+            // Sign-ins (last 30 days). Counts every successful sign-in,
+            // not distinct users — signin_succeeded is intentionally NOT a
+            // single-fire activation event (see js/activation.js SINGLE_FIRE),
+            // so each sign-in writes its own row. The old query targeted
+            // analytics_events.event_name='sign_in', an event no code ever
+            // emits, so this KPI was structurally pinned at 0. activation_events
+            // is the canonical signin pipeline (same source as the auth-flow
+            // card via auth_flow_metrics) and is admin-readable under RLS.
+            client.from('activation_events')
                 .select('id', { count: 'exact', head: true })
-                .eq('event_name', 'sign_in')
+                .eq('event', 'signin_succeeded')
                 .gte('created_at', daysAgo(30)),
 
             // Total minutes used (sum of session durations)
@@ -114,12 +126,29 @@ export async function fetchKPIs() {
                 .select('session_id, user_id')
                 .gte('last_seen', new Date(Date.now() - 2 * 60 * 1000).toISOString())
                 .eq('ended', false),
+
+            // Accurate distinct visitor/user counts, computed server-side
+            // (supabase-analytics-unique-counts-migration.sql). Preferred
+            // over the row-scan above: COUNT(DISTINCT …) on the server
+            // can't be truncated by PostgREST's max-rows cap the way a
+            // 30-day analytics_events SELECT can. If the migration hasn't
+            // been applied yet this rejects (PGRST202 / 404) and we fall
+            // back to the in-JS de-dupe of the scans above.
+            client.rpc('analytics_unique_counts'),
         ]);
 
-        // Extract unique user_ids
+        // Distinct non-null user_id → signed-in users.
         const uniqueUserIds = (res) => {
             if (res.status !== 'fulfilled' || res.value.error) return 0;
             const ids = new Set(res.value.data?.map(r => r.user_id).filter(Boolean));
+            return ids.size;
+        };
+        // Distinct session_id → unique visitors (anonymous-inclusive). A
+        // null/blank session_id is dropped rather than collapsed into one
+        // bogus "visitor" bucket.
+        const uniqueSessionIds = (res) => {
+            if (res.status !== 'fulfilled' || res.value.error) return 0;
+            const ids = new Set(res.value.data?.map(r => r.session_id).filter(Boolean));
             return ids.size;
         };
 
@@ -158,12 +187,49 @@ export async function fetchKPIs() {
             onlineNow = onlineRes.value.data?.length || 0;
         }
 
+        // Prefer the server-side distinct counts; fall back to de-duping
+        // the row scans in JS if the RPC isn't deployed. The fallback is
+        // still subject to PostgREST's row cap on a busy 30-day window —
+        // it's a transitional path until the migration is applied.
+        let visitors = { day: 0, week: 0, month: 0 };
+        let users    = { day: 0, week: 0, month: 0 };
+        const rpcRows = (uniqCountsRes.status === 'fulfilled'
+            && !uniqCountsRes.value.error
+            && Array.isArray(uniqCountsRes.value.data))
+            ? uniqCountsRes.value.data : null;
+        if (rpcRows) {
+            for (const row of rpcRows) {
+                const k = row.window_label;
+                if (k === 'day' || k === 'week' || k === 'month') {
+                    visitors[k] = Number(row.unique_visitors) || 0;
+                    users[k]    = Number(row.signed_in_users) || 0;
+                }
+            }
+        } else {
+            visitors = {
+                day:   uniqueSessionIds(dailyRes),
+                week:  uniqueSessionIds(weeklyRes),
+                month: uniqueSessionIds(monthlyRes),
+            };
+            users = {
+                day:   uniqueUserIds(dailyRes),
+                week:  uniqueUserIds(weeklyRes),
+                month: uniqueUserIds(monthlyRes),
+            };
+        }
+
         return {
             ok: true,
             data: {
-                dailyUnique: uniqueUserIds(dailyRes),
-                weeklyUnique: uniqueUserIds(weeklyRes),
-                monthlyUnique: uniqueUserIds(monthlyRes),
+                // Headline = unique visitors (distinct session_id).
+                dailyVisitors: visitors.day,
+                weeklyVisitors: visitors.week,
+                monthlyVisitors: visitors.month,
+                // Sub-metric = signed-in users (distinct user_id). Kept under
+                // the original *Unique keys so existing consumers don't break.
+                dailyUnique: users.day,
+                weeklyUnique: users.week,
+                monthlyUnique: users.month,
                 signIns: signInsRes.status === 'fulfilled' ? (signInsRes.value.count || 0) : 0,
                 minutesUsed,
                 signUps: signUpsRes.status === 'fulfilled' ? (signUpsRes.value.count || 0) : 0,
@@ -1634,5 +1700,147 @@ export async function fetchNewVsReturning(days = 30) {
             ? 'new_vs_returning RPC missing — apply supabase-onboarding-events-migration.sql'
             : err.message;
         return { ok: false, error: hint };
+    }
+}
+
+// ── Client telemetry: perf / errors / 404s / auth failures ──────────────────
+// All four RPCs live in supabase-client-telemetry-migration.sql and are
+// superadmin-gated server-side (is_superadmin()), so a plain admin gets a
+// 42501 and the shared hint below. Data is written by js/telemetry.js
+// (web_vital / error / not_found / auth_failure kinds in client_telemetry).
+
+function _telemetryHint(err, rpc, migration) {
+    const msg = err?.message || '';
+    if (/function .* does not exist|PGRST202/i.test(msg)) {
+        return `${rpc} RPC missing — apply ${migration}`;
+    }
+    if (/forbidden|permission|42501|superadmin/i.test(msg)) {
+        return 'Superadmin only — sign in as a superadmin to view this';
+    }
+    return msg || 'Unknown error';
+}
+
+/** Web Vitals + app-perf p50/p95 per (metric, route). */
+export async function fetchPerfSummary(days = 7, limit = 50) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client.rpc('telemetry_perf_summary', { p_days: days, p_limit: limit });
+        if (error) throw error;
+        return { ok: true, data: data || [] };
+    } catch (err) {
+        return { ok: false, error: _telemetryHint(err, 'telemetry_perf_summary', 'supabase-client-telemetry-migration.sql') };
+    }
+}
+
+/** Top JS error fingerprints in the window. */
+export async function fetchTopErrors(days = 30, limit = 25) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client.rpc('telemetry_top_errors', { p_days: days, p_limit: limit });
+        if (error) throw error;
+        return { ok: true, data: data || [] };
+    } catch (err) {
+        return { ok: false, error: _telemetryHint(err, 'telemetry_top_errors', 'supabase-client-telemetry-migration.sql') };
+    }
+}
+
+/** Top 404 routes in the window. */
+export async function fetchTop404s(days = 30, limit = 25) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client.rpc('telemetry_top_404s', { p_days: days, p_limit: limit });
+        if (error) throw error;
+        return { ok: true, data: data || [] };
+    } catch (err) {
+        return { ok: false, error: _telemetryHint(err, 'telemetry_top_404s', 'supabase-client-telemetry-migration.sql') };
+    }
+}
+
+/**
+ * Analytics consent opt-in rate — the correction factor for every
+ * consent-gated KPI. Returns prompts / decisions / analytics_opt_in /
+ * functional_opt_in / optin_rate / engagement_rate (rates 0..1 or null
+ * before any traffic). Admin-gated server-side.
+ */
+export async function fetchConsentOptinRate(days = 30) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client.rpc('consent_optin_rate', { p_days: days });
+        if (error) throw error;
+        const row = Array.isArray(data) ? data[0] : data;
+        return {
+            ok: true,
+            data: {
+                prompts:          Number(row?.prompts) || 0,
+                decisions:        Number(row?.decisions) || 0,
+                analyticsOptIn:   Number(row?.analytics_opt_in) || 0,
+                functionalOptIn:  Number(row?.functional_opt_in) || 0,
+                // null (not 0) when undefined so the UI shows "—" rather
+                // than a misleading 0% before any decisions are recorded.
+                optinRate:        row?.optin_rate == null ? null : Number(row.optin_rate),
+                engagementRate:   row?.engagement_rate == null ? null : Number(row.engagement_rate),
+            },
+        };
+    } catch (err) {
+        return { ok: false, error: _telemetryHint(err, 'consent_optin_rate', 'supabase-consent-telemetry-migration.sql') };
+    }
+}
+
+/** Top auth-failure reasons (client_telemetry ∪ auth_failures). */
+export async function fetchTopAuthFailures(days = 30, limit = 15) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client.rpc('telemetry_top_auth_failures', { p_days: days, p_limit: limit });
+        if (error) throw error;
+        return { ok: true, data: data || [] };
+    } catch (err) {
+        return { ok: false, error: _telemetryHint(err, 'telemetry_top_auth_failures', 'supabase-client-telemetry-migration.sql') };
+    }
+}
+
+/**
+ * Live revenue metrics from Stripe via /api/stripe/admin-metrics
+ * (server-side; the browser can't hold the Stripe key). Replaces the
+ * plan-count × hardcoded-price estimate on the Revenue row. Returns
+ * { ok:true, data:{ mrr, arpu, activeSubs, trialing, pastDue,
+ * canceled30d, churnRate30d, churnLostMrr, failedPayments30d,
+ * failedAmount30d, collected30d, currency, asOf, truncated, byPlan } }.
+ */
+export async function fetchStripeMetrics() {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data: { session } } = await client.auth.getSession();
+        const token = session?.access_token;
+        if (!token) return { ok: false, error: 'No active session' };
+
+        const res = await fetch('/api/stripe/admin-metrics', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || body?.ok === false) {
+            const code = body?.error || `http_${res.status}`;
+            const hint = code === 'not_configured'
+                ? 'Stripe not configured — set STRIPE_SECRET_KEY in the deploy env for live revenue'
+                : code === 'unauthorized'
+                ? 'Admin access required for Stripe metrics'
+                : (body?.detail || code);
+            return { ok: false, error: hint };
+        }
+        return { ok: true, data: body };
+    } catch (err) {
+        return { ok: false, error: err.message || 'Stripe metrics request failed' };
     }
 }
