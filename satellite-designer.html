@@ -377,6 +377,38 @@ select option{background:#0a1024}
         <div class="toggle" data-warp="3600">×3600</div>
       </div>
     </div>
+
+    <div class="panel">
+      <h2>🌪 Drag conditions <span class="sub">thermosphere &amp; attitude</span></h2>
+
+      <div class="row" style="display:flex;justify-content:space-between;margin-bottom:4px">
+        <span style="font-size:.68rem;color:var(--c-text-3);font-weight:700;letter-spacing:.06em;text-transform:uppercase">Space weather</span>
+      </div>
+      <div class="toggle-row" id="sw-presets"></div>
+
+      <div class="grid2" style="margin-top:10px">
+        <label class="field" style="margin:0">
+          <div class="row"><span>F10.7 flux</span><b><span id="v-f107">150</span> sfu</b></div>
+          <input type="range" id="f-f107" min="65" max="300" step="1" value="150">
+        </label>
+        <label class="field" style="margin:0">
+          <div class="row"><span>Ap (geomag.)</span><b><span id="v-ap">12</span></b></div>
+          <input type="range" id="f-ap" min="0" max="400" step="1" value="12">
+        </label>
+      </div>
+
+      <div class="row" style="display:flex;justify-content:space-between;margin:12px 0 4px">
+        <span style="font-size:.68rem;color:var(--c-text-3);font-weight:700;letter-spacing:.06em;text-transform:uppercase">Drag attitude</span>
+      </div>
+      <div class="toggle-row" id="att-modes"></div>
+
+      <div class="metrics" style="margin-top:11px">
+        <div class="metric"><div class="k">ρ @ 400 km</div><div class="v" id="d-rho400">—</div></div>
+        <div class="metric"><div class="k">vs. nominal</div><div class="v" id="d-rhox">—</div></div>
+        <div class="metric"><div class="k">Eff. drag area</div><div class="v" id="d-effarea">—</div></div>
+        <div class="metric"><div class="k">Ballistic coeff</div><div class="v" id="d-bc2">—</div></div>
+      </div>
+    </div>
   </div>
 
   <!-- ─────────── RIGHT: telemetry + objective ─────────── -->
@@ -501,7 +533,8 @@ const env = ENG.defaultEnv();
 const sim = {
   running: false, paused: false, warp: 1,
   design: null, state: null, env,
-  control: { throttle: 0.6, mode: 'off' },
+  control: { throttle: 0.6, mode: 'off', attitudeMult: 1 },
+  attitude: 'nominal',
   auto: false,
   trail: [], altHist: [],
   stationSeconds: 0, score: 0, best: 0, orbits: 0,
@@ -529,6 +562,7 @@ function refreshDesignReadouts() {
   $('d-dv').innerHTML = fmt(dv) + ' <small>m/s</small>';
   $('d-bc').innerHTML = fmt(wet / (d.cd * d.area), 1) + ' <small>kg/m²</small>';
   $('d-mr').textContent = (wet / d.dryMass).toFixed(2) + '×';
+  refreshConditions();
 }
 
 // Engine preset dropdown
@@ -548,6 +582,77 @@ function refreshDesignReadouts() {
 }
 ['f-name','f-thrust','f-isp','f-dry','f-fuel','f-area','f-cd']
   .forEach(id => $(id).addEventListener('input', () => { refreshDesignReadouts(); saveDraft(); }));
+
+// ── Drag conditions: space weather + attitude ───────────────────────────────
+const NOMINAL_RHO400 = ENG.airDensity(400_000, ENG.defaultEnv());
+
+function renderSWPresets() {
+  $('sw-presets').innerHTML = Object.entries(ENG.SPACE_WEATHER_PRESETS).map(([k, v]) =>
+    `<div class="toggle" data-sw="${k}">${v.label}</div>`).join('');
+}
+function renderAttModes() {
+  $('att-modes').innerHTML = Object.entries(ENG.ATTITUDE_MODES).map(([k, v]) =>
+    `<div class="toggle${k === sim.attitude ? ' active' : ''}" data-att="${k}">
+       ${v.label}<small style="display:block;font-size:.6rem;color:var(--c-text-3);font-weight:600">${v.mult}× area</small>
+     </div>`).join('');
+}
+function matchSWPreset() {
+  for (const [k, v] of Object.entries(ENG.SPACE_WEATHER_PRESETS))
+    if (Math.abs(v.f107Sfu - env.f107Sfu) < 0.5 && Math.abs(v.ap - env.ap) < 0.5) return k;
+  return null;
+}
+function syncSWChips() {
+  const m = matchSWPreset();
+  $('sw-presets')?.querySelectorAll('.toggle').forEach(o =>
+    o.classList.toggle('active', o.dataset.sw === m));
+}
+function refreshConditions() {
+  if (!$('d-rho400')) return;
+  const rho = ENG.airDensity(400_000, env);
+  const ratio = rho / NOMINAL_RHO400;
+  const d = readDesign();
+  const mult = sim.control.attitudeMult || 1;
+  const effArea = d.area * mult;
+  const wet = d.dryMass + d.fuelMass;
+  $('d-rho400').innerHTML = rho.toExponential(2) + ' <small>kg/m³</small>';
+  const rx = $('d-rhox').closest('.metric');
+  $('d-rhox').textContent = ratio.toFixed(2) + '×';
+  rx.classList.remove('flag-warn', 'flag-bad', 'flag-good');
+  rx.classList.add(ratio >= 5 ? 'flag-bad' : ratio >= 2 ? 'flag-warn' : 'flag-good');
+  $('d-effarea').innerHTML = fmt(effArea, 2) + ' <small>m²</small>';
+  $('d-bc2').innerHTML = fmt(wet / (d.cd * effArea), 1) + ' <small>kg/m²</small>';
+  syncSWChips();
+}
+function setSWPreset(key) {
+  const p = ENG.SPACE_WEATHER_PRESETS[key]; if (!p) return;
+  env.f107Sfu = p.f107Sfu; env.ap = p.ap;
+  $('f-f107').value = p.f107Sfu; $('v-f107').textContent = p.f107Sfu;
+  $('f-ap').value = p.ap; $('v-ap').textContent = p.ap;
+  refreshConditions(); saveDraft();
+}
+function setAttitude(key) {
+  const a = ENG.ATTITUDE_MODES[key]; if (!a) return;
+  sim.attitude = key;
+  sim.control.attitudeMult = a.mult;
+  $('att-modes')?.querySelectorAll('.toggle').forEach(o =>
+    o.classList.toggle('active', o.dataset.att === key));
+  refreshConditions(); saveDraft();
+}
+function applyEnvFromSliders() {
+  env.f107Sfu = +$('f-f107').value; env.ap = +$('f-ap').value;
+  $('v-f107').textContent = $('f-f107').value;
+  $('v-ap').textContent = $('f-ap').value;
+  refreshConditions(); saveDraft();
+}
+renderSWPresets(); renderAttModes();
+$('sw-presets').addEventListener('click', (e) => {
+  const o = e.target.closest('.toggle'); if (o) setSWPreset(o.dataset.sw);
+});
+$('att-modes').addEventListener('click', (e) => {
+  const o = e.target.closest('.toggle'); if (o) setAttitude(o.dataset.att);
+});
+$('f-f107').addEventListener('input', applyEnvFromSliders);
+$('f-ap').addEventListener('input', applyEnvFromSliders);
 
 // Orbit / control sliders
 function bindSlider(id, lblId) {
@@ -634,7 +739,7 @@ function frame(now) {
     // Auto station-keeping: defend the target perigee with prograde burns.
     if (sim.auto) {
       const tgt = +$('f-tgt').value;
-      const tel = ENG.telemetry(sim.state, sim.design, sim.env);
+      const tel = ENG.telemetry(sim.state, sim.design, sim.env, sim.control.attitudeMult);
       if (tel.periAltKm < tgt && sim.state.fuel > 0) {
         sim.control.mode = 'prograde';
         syncModeUI('prograde');
@@ -655,7 +760,7 @@ function frame(now) {
 
     // Scoring: time spent at/above the target altitude.
     const tgt = +$('f-tgt').value;
-    const tel = ENG.telemetry(sim.state, sim.design, sim.env);
+    const tel = ENG.telemetry(sim.state, sim.design, sim.env, sim.control.attitudeMult);
     if (tel.altKm >= tgt) sim.stationSeconds += simSecs;
     sim.score = Math.floor(sim.stationSeconds + sim.orbits * 50);
     if (sim.score > sim.best) sim.best = sim.score;
@@ -881,12 +986,20 @@ function applyDesign(dd) {
   if (dd.apoKm != null) { $('f-apo').value = dd.apoKm; $('v-apo').textContent = dd.apoKm; }
   if (dd.targetKm != null) { $('f-tgt').value = dd.targetKm; $('v-tgt').textContent = dd.targetKm; }
   if (dd.build && dd.build.body) { sdBuild = { ...BUILDER.defaultBuild(), ...dd.build }; syncBayUI(); }
+  if (dd.env && isFinite(dd.env.f107Sfu)) {
+    env.f107Sfu = dd.env.f107Sfu; env.ap = dd.env.ap;
+    $('f-f107').value = env.f107Sfu; $('v-f107').textContent = Math.round(env.f107Sfu);
+    $('f-ap').value = env.ap; $('v-ap').textContent = Math.round(env.ap);
+  }
+  if (dd.attitude && ENG.ATTITUDE_MODES[dd.attitude]) setAttitude(dd.attitude);
   refreshDesignReadouts();
+  syncSWChips();
 }
 function currentDesignData() {
   const d = readDesign();
   return { ...d, periKm: +$('f-peri').value, apoKm: +$('f-apo').value,
-           targetKm: +$('f-tgt').value, build: { ...sdBuild } };
+           targetKm: +$('f-tgt').value, build: { ...sdBuild },
+           env: { f107Sfu: env.f107Sfu, ap: env.ap }, attitude: sim.attitude };
 }
 function renderHangar(list) {
   const body = $('hangar-body');
@@ -1160,7 +1273,11 @@ addEventListener('resize', () => { if (BAY.open) resizeBay(); });
 window.__sd = { auth, engine: ENG, sim, builder: BUILDER,
   ui: { readDesign, currentDesignData },
   bay: { open: openBay, close: closeBay, apply: applyBuild,
-         getBuild: () => ({ ...sdBuild }) } };
+         getBuild: () => ({ ...sdBuild }) },
+  conditions: { setSWPreset, setAttitude,
+                getEnv: () => ({ ...env }),
+                getAttitude: () => sim.attitude,
+                rho400: () => ENG.airDensity(400_000, env) } };
 
 (async function boot() {
   loadDraft();

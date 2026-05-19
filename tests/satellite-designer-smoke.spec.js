@@ -133,5 +133,48 @@ test.describe('satellite-designer.html smoke', () => {
         expect(data.build, 'design data carries the 3-D build').toBeTruthy();
         expect(data.build.body, 'build has a chassis').toBeTruthy();
         expect(data.build.thruster, 'build has a thruster type').toBeTruthy();
+        expect(data.env, 'design data carries space-weather env').toBeTruthy();
+        expect(data.attitude, 'design data carries drag attitude').toBeTruthy();
+    });
+
+    test('space-weather presets swing the thermosphere density', async ({ page }) => {
+        await page.goto(URL);
+        await page.waitForFunction(() => !!window.__sd, { timeout: BOOT_TIMEOUT_MS });
+
+        const r = await page.evaluate(() => {
+            window.__sd.conditions.setSWPreset('solar_min');
+            const lo = window.__sd.conditions.rho400();
+            window.__sd.conditions.setSWPreset('carrington');
+            const hi = window.__sd.conditions.rho400();
+            return { lo, hi, env: window.__sd.conditions.getEnv() };
+        });
+        // Carrington-class storm density at 400 km is many× solar-min.
+        expect(r.hi).toBeGreaterThan(r.lo * 5);
+        expect(r.env.ap).toBe(400);
+
+        // Preset chip + slider readout reflect the active regime.
+        await page.click('#sw-presets .toggle[data-sw="solar_max"]');
+        const f107 = await page.evaluate(() => Number(document.querySelector('#f-f107').value));
+        expect(f107).toBe(230);
+    });
+
+    test('drag attitude scales the effective drag area', async ({ page }) => {
+        await page.goto(URL);
+        await page.waitForFunction(() => !!window.__sd, { timeout: BOOT_TIMEOUT_MS });
+
+        const r = await page.evaluate(() => {
+            window.__sd.conditions.setAttitude('feathered');
+            const f = window.__sd.sim.control.attitudeMult;
+            window.__sd.conditions.setAttitude('broadside');
+            const b = window.__sd.sim.control.attitudeMult;
+            return { f, b, att: window.__sd.conditions.getAttitude() };
+        });
+        expect(r.f).toBeLessThan(1);
+        expect(r.b).toBeGreaterThan(1.5);
+        expect(r.att).toBe('broadside');
+
+        // The effective-area readout updates with attitude.
+        const effText = await page.textContent('#d-effarea');
+        expect(/\d/.test(effText), 'effective drag area shown').toBe(true);
     });
 });
