@@ -177,4 +177,24 @@ test.describe('satellite-designer.html smoke', () => {
         const effText = await page.textContent('#d-effarea');
         expect(/\d/.test(effText), 'effective drag area shown').toBe(true);
     });
+
+    test('the 3-D ship layer mounts over the orbit stage', async ({ page }) => {
+        await page.goto(URL);
+        await page.waitForFunction(() => !!window.__sd, { timeout: BOOT_TIMEOUT_MS });
+
+        const canvas = page.locator('#sd-shipgl');
+        await expect(canvas, 'ship WebGL canvas overlays the stage').toBeAttached();
+
+        // boot() fires ensureShipGL(); it either initialises (WebGL present)
+        // or fails gracefully — either way it must have been attempted, and
+        // the 2-D marker keeps the craft visible if it could not.
+        const r = await page.evaluate(async () => {
+            await window.__sd.stage.ensureShipGL();
+            return { tried: window.__sd.stage.shipTried(),
+                     ready: window.__sd.stage.shipReady() };
+        });
+        expect(r.tried, 'ship layer initialisation was attempted').toBe(true);
+        // Chromium ships WebGL, so in CI this should come up ready.
+        expect(r.ready, 'ship layer initialised under WebGL').toBe(true);
+    });
 });

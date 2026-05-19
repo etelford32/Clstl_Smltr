@@ -133,6 +133,8 @@ select option{background:#0a1024}
   overflow:hidden;border:1px solid var(--c-accent-border);
   background:radial-gradient(130% 100% at 50% 40%,#060f24,#02030a)}
 #sd-canvas{display:block;width:100%;height:100%}
+#sd-shipgl{position:absolute;inset:0;width:100%;height:100%;
+  pointer-events:none;z-index:1}
 #sd-status{
   position:absolute;top:12px;left:12px;right:12px;display:flex;
   justify-content:space-between;gap:10px;pointer-events:none;flex-wrap:wrap}
@@ -320,6 +322,7 @@ select option{background:#0a1024}
   <div class="sd-col" id="sd-center">
     <div id="sd-stage">
       <canvas id="sd-canvas"></canvas>
+      <canvas id="sd-shipgl"></canvas>
       <div id="sd-status">
         <span class="status-pill" id="st-phase">Pre-flight</span>
         <span class="status-pill" id="st-warp">▶ ×1</span>
@@ -850,6 +853,7 @@ addEventListener('resize', resize);
 
 function draw() {
   const W = cv._w || 600, H = cv._h || 480;
+  let shipArg = null;
   cx.clearRect(0, 0, W, H);
   // starfield
   for (const s of stars) {
@@ -925,12 +929,20 @@ function draw() {
       cx.beginPath(); cx.moveTo(X, Y);
       cx.lineTo(X - dx * 30, Y + dy * 30); cx.stroke(); // exhaust points opposite thrust
     }
-    cx.fillStyle = '#fff';
-    cx.beginPath(); cx.arc(X, Y, 4.2, 0, 7); cx.fill();
-    cx.strokeStyle = '#00c6ff'; cx.lineWidth = 2;
-    cx.beginPath(); cx.arc(X, Y, 7, 0, 7); cx.stroke();
+    if (SHIP.ready) {
+      // The 3-D model marks the craft; keep just a faint locator ring.
+      cx.strokeStyle = 'rgba(0,198,255,.35)'; cx.lineWidth = 1;
+      cx.beginPath(); cx.arc(X, Y, 13, 0, 7); cx.stroke();
+    } else {
+      cx.fillStyle = '#fff';
+      cx.beginPath(); cx.arc(X, Y, 4.2, 0, 7); cx.fill();
+      cx.strokeStyle = '#00c6ff'; cx.lineWidth = 2;
+      cx.beginPath(); cx.arc(X, Y, 7, 0, 7); cx.stroke();
+    }
+    shipArg = { sx: X, sy: Y, vangle: Math.atan2(sim.state.vy, sim.state.vx) };
   }
 
+  renderShip(W, H, shipArg);
   drawSpark();
 }
 
@@ -1161,6 +1173,82 @@ function disposeGroup(grp) {
       (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m?.dispose?.()); }
   });
 }
+// ── Live ship on the main stage ─────────────────────────────────────────────
+// A transparent WebGL layer over the 2-D orbit canvas that renders the
+// actual built satellite: a slow turntable pre-flight, flying nose-to-
+// velocity once launched. Self-syncs to sdBuild; degrades silently to the
+// 2-D marker if three/WebGL can't load (offline).
+const SHIP = { ready: false, tried: false, three: null, renderer: null,
+  scene: null, camera: null, pivot: null, orient: null, model: null,
+  sig: '', W: 0, H: 0, spin: 0 };
+
+async function ensureShipGL() {
+  if (SHIP.ready || SHIP.tried) return SHIP.ready;
+  SHIP.tried = true;
+  try {
+    const THREE = await import('three');
+    SHIP.three = THREE;
+    const cv = $('sd-shipgl');
+    SHIP.renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true });
+    SHIP.renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1));
+    SHIP.renderer.setClearColor(0x000000, 0);
+    SHIP.scene = new THREE.Scene();
+    SHIP.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -2000, 2000);
+    SHIP.scene.add(new THREE.AmbientLight(0x4a5566, 1.0));
+    const key = new THREE.DirectionalLight(0xffffff, 1.3); key.position.set(3, 5, 6);
+    const rim = new THREE.DirectionalLight(0x5577ff, 0.45); rim.position.set(-4, -2, -4);
+    SHIP.scene.add(key, rim);
+    SHIP.orient = new THREE.Group();
+    SHIP.pivot = new THREE.Group();
+    SHIP.pivot.add(SHIP.orient);
+    SHIP.scene.add(SHIP.pivot);
+    SHIP.ready = true;
+    return true;
+  } catch (e) {
+    console.warn('[Stage] 3-D ship layer unavailable:', e.message);
+    return false;
+  }
+}
+function rebuildShipModel() {
+  if (!SHIP.ready) return;
+  if (SHIP.model) { SHIP.orient.remove(SHIP.model); disposeGroup(SHIP.model); }
+  SHIP.model = BUILDER.buildGroup(SHIP.three, sdBuild);
+  // Engine thrust axis is +z; yaw it so the long axis & wings lie in the
+  // screen plane (a readable side-on silhouette, nose toward +x).
+  SHIP.model.rotation.y = Math.PI / 2;
+  SHIP.orient.add(SHIP.model);
+}
+// Called every frame from draw(). ship = null pre-flight (centred hero
+// turntable); else { sx, sy, vangle } with sx/sy in canvas-pixel space.
+function renderShip(W, H, ship) {
+  if (!SHIP.ready || W < 2 || H < 2) return;
+  if (W !== SHIP.W || H !== SHIP.H) {
+    SHIP.W = W; SHIP.H = H;
+    SHIP.renderer.setSize(W, H, false);
+    const c = SHIP.camera;
+    c.left = -W / 2; c.right = W / 2; c.top = H / 2; c.bottom = -H / 2;
+    c.updateProjectionMatrix();
+  }
+  const sig = JSON.stringify(sdBuild);
+  if (sig !== SHIP.sig) { SHIP.sig = sig; rebuildShipModel(); }
+  if (!SHIP.model) return;
+
+  const extent = Math.max(0.2, BUILDER.buildExtent(sdBuild));
+  if (ship) {
+    SHIP.pivot.position.set(ship.sx - W / 2, H / 2 - ship.sy, 0);
+    const targetPx = Math.max(34, Math.min(W, H) * 0.085);
+    SHIP.pivot.scale.setScalar(targetPx / extent);
+    SHIP.pivot.rotation.z = ship.vangle;
+    SHIP.orient.rotation.set(-0.42, 0, 0);
+  } else {
+    SHIP.pivot.position.set(0, 0, 0);
+    SHIP.pivot.scale.setScalar((Math.min(W, H) * 0.46) / extent);
+    SHIP.pivot.rotation.z = 0;
+    SHIP.spin += 0.0065;
+    SHIP.orient.rotation.set(-0.42, SHIP.spin, 0);
+  }
+  SHIP.renderer.render(SHIP.scene, SHIP.camera);
+}
 function fitBayCamera() {
   if (!BAY.ready) return;
   const E = BUILDER.buildExtent(sdBuild);
@@ -1277,7 +1365,10 @@ window.__sd = { auth, engine: ENG, sim, builder: BUILDER,
   conditions: { setSWPreset, setAttitude,
                 getEnv: () => ({ ...env }),
                 getAttitude: () => sim.attitude,
-                rho400: () => ENG.airDensity(400_000, env) } };
+                rho400: () => ENG.airDensity(400_000, env) },
+  stage: { ensureShipGL,
+           shipReady: () => SHIP.ready,
+           shipTried: () => SHIP.tried } };
 
 (async function boot() {
   loadDraft();
@@ -1287,6 +1378,7 @@ window.__sd = { auth, engine: ENG, sim, builder: BUILDER,
   try { ENG.airDensity(400_000, env); } catch (e) { console.warn(e); }
   $('sd-warmup').style.display = 'none';
   resetSim();
+  ensureShipGL();   // fire-and-forget; 2-D marker covers until ready
   requestAnimationFrame((t) => { lastT = t; frame(t); });
   initAuth();
 })();
