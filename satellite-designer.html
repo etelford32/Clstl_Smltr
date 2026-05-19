@@ -22,6 +22,12 @@
 <meta name="twitter:description" content="Design a spacecraft, then fly it through the real upper atmosphere. Balance thrust, drag and propellant to hold your orbit against thermospheric decay.">
 <meta name="twitter:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
 <meta name="description" content="Satellite Designer — build a spacecraft and fly it through a physically realistic thermosphere. Drag, thrust, and the rocket equation, scored as a game.">
+<script type="importmap">
+{"imports":{
+  "three": "./js/vendor/three-0.160.0/three.module.js",
+  "three/addons/": "./js/vendor/three-0.160.0/jsm/"
+}}
+</script>
 <style>
 :root{
   --c-accent:#00c6ff; --c-accent-rgb:0,200,255;
@@ -44,46 +50,47 @@ body{
   background:radial-gradient(120% 90% at 70% -10%,#0a1530,#040210 60%);
   color:var(--c-text);
   font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
-  font-size:14px;
+  font-size:13px;
 }
 #sd-app{
-  display:grid;grid-template-columns:330px 1fr 340px;
-  gap:14px;padding:14px;min-height:calc(100vh - 52px);
+  display:grid;grid-template-columns:1fr 1fr;align-items:start;
+  gap:12px;padding:12px;min-height:calc(100vh - 40px);
 }
-@media (max-width:1320px){
-  #sd-app{grid-template-columns:300px 1fr}
-  #sd-right{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:980px){
+  #sd-app{grid-template-columns:1fr;padding:9px;gap:9px}
 }
-@media (max-width:880px){
-  #sd-app{grid-template-columns:1fr;padding:10px;gap:10px}
-  #sd-right{grid-template-columns:1fr}
-}
-.sd-col{display:flex;flex-direction:column;gap:14px;min-width:0}
+.sd-col,.area{display:flex;flex-direction:column;gap:10px;min-width:0}
+.area-hd{display:flex;align-items:baseline;gap:9px;
+  padding:4px 4px 7px;border-bottom:1px solid var(--c-accent-border)}
+.area-hd b{font-size:.98rem;font-weight:800;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--c-accent)}
+.area-hd span{font-size:.66rem;color:var(--c-text-3);font-weight:600;
+  letter-spacing:.04em}
 .panel{
   background:linear-gradient(180deg,var(--c-surface-1),var(--c-surface-2));
   backdrop-filter:var(--blur);
   border:1px solid var(--c-accent-border);
-  border-radius:var(--r-xl);padding:14px 15px;box-shadow:var(--shadow);
+  border-radius:var(--r-lg);padding:10px 11px;box-shadow:var(--shadow);
 }
 .panel h2{
-  font-size:.66rem;text-transform:uppercase;letter-spacing:.15em;
-  color:var(--c-accent);font-weight:800;margin-bottom:11px;
+  font-size:.62rem;text-transform:uppercase;letter-spacing:.14em;
+  color:var(--c-accent);font-weight:800;margin-bottom:8px;
   display:flex;align-items:center;gap:7px;
 }
 .panel h2 .sub{color:var(--c-text-3);font-weight:600;letter-spacing:.06em;text-transform:none}
 #sd-hero{grid-column:1/-1;display:flex;align-items:center;gap:14px;flex-wrap:wrap;
-  padding:15px 18px}
+  padding:10px 15px}
 #sd-hero h1{
-  font-size:1.3rem;font-weight:800;
+  font-size:1.12rem;font-weight:800;
   background:linear-gradient(100deg,#fff 40%,#7fdcff);
   -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;
 }
-#sd-hero p{font-size:.8rem;color:var(--c-text-2);margin-top:3px;max-width:62ch;line-height:1.5}
+#sd-hero p{font-size:.72rem;color:var(--c-text-2);margin-top:2px;max-width:70ch;line-height:1.45}
 .badge{display:inline-block;padding:3px 9px;border-radius:5px;font-size:.6rem;
   font-weight:800;letter-spacing:.09em;background:var(--c-accent-soft);
   color:var(--c-accent);border:1px solid var(--c-accent-border-hi)}
 
-label.field{display:block;margin-bottom:10px;font-size:.74rem;color:var(--c-text-2)}
+label.field{display:block;margin-bottom:7px;font-size:.72rem;color:var(--c-text-2)}
 label.field .row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px}
 label.field b{color:var(--c-text);font-weight:700;font-variant-numeric:tabular-nums}
 input[type=text],input[type=number],select{
@@ -96,7 +103,7 @@ input[type=text]:focus,input[type=number]:focus,select:focus{
   box-shadow:0 0 0 2px var(--c-accent-soft)}
 input[type=range]{width:100%;accent-color:var(--c-accent);margin-top:3px}
 select option{background:#0a1024}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px 10px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:5px 8px}
 .btn{
   appearance:none;border:1px solid var(--c-accent-border);
   background:rgba(var(--c-accent-rgb),.10);color:var(--c-text);
@@ -123,10 +130,12 @@ select option{background:#0a1024}
 .toggle.warn.active{background:rgba(var(--c-warn-rgb),.22);
   border-color:rgba(var(--c-warn-rgb),.5);color:var(--c-warn)}
 
-#sd-stage{position:relative;flex:1;min-height:440px;border-radius:var(--r-xl);
+#sd-stage{position:relative;height:320px;min-height:320px;border-radius:var(--r-lg);
   overflow:hidden;border:1px solid var(--c-accent-border);
   background:radial-gradient(130% 100% at 50% 40%,#060f24,#02030a)}
 #sd-canvas{display:block;width:100%;height:100%}
+#sd-shipgl{position:absolute;inset:0;width:100%;height:100%;
+  pointer-events:none;z-index:1}
 #sd-status{
   position:absolute;top:12px;left:12px;right:12px;display:flex;
   justify-content:space-between;gap:10px;pointer-events:none;flex-wrap:wrap}
@@ -141,10 +150,10 @@ select option{background:#0a1024}
 
 .metrics{display:grid;grid-template-columns:1fr 1fr;gap:1px;
   background:rgba(255,255,255,.06);border-radius:var(--r-md);overflow:hidden}
-.metric{background:var(--c-surface-2);padding:8px 10px}
+.metric{background:var(--c-surface-2);padding:6px 8px}
 .metric .k{font-size:.6rem;text-transform:uppercase;letter-spacing:.09em;
   color:var(--c-text-3);font-weight:700}
-.metric .v{font-size:.95rem;font-weight:800;font-variant-numeric:tabular-nums;
+.metric .v{font-size:.86rem;font-weight:800;font-variant-numeric:tabular-nums;
   margin-top:2px;color:var(--c-text)}
 .metric .v small{font-size:.62rem;color:var(--c-text-3);font-weight:600;margin-left:3px}
 .metric.flag-warn .v{color:var(--c-warn)}
@@ -179,6 +188,35 @@ select option{background:#0a1024}
 .toast.bad{border-color:rgba(255,107,125,.6);color:var(--c-bad)}
 .warmup{display:flex;align-items:center;justify-content:center;height:100%;
   color:var(--c-text-3);font-size:.85rem}
+
+/* ─── Inline 3-D build view + part chips ───────────────── */
+.bay-view{position:relative;height:230px;border-radius:var(--r-lg);
+  overflow:hidden;border:1px solid var(--c-accent-border);
+  background:radial-gradient(120% 100% at 50% 30%,#0a1733,#02030a)}
+#bay-canvas{display:block;width:100%;height:100%}
+.bay-spec{position:absolute;left:9px;right:9px;bottom:9px;
+  display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
+  background:rgba(255,255,255,.07);border-radius:var(--r-md);overflow:hidden;
+  pointer-events:none}
+.bay-spec .metric{padding:5px 7px}
+.bay-hint{position:absolute;top:9px;left:9px;font-size:.6rem;
+  color:var(--c-text-3);background:rgba(4,8,18,.6);padding:4px 9px;
+  border-radius:999px;pointer-events:none}
+.opt-row{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:9px}
+.opt{flex:1 1 auto;min-width:62px;text-align:center;cursor:pointer;
+  border:1px solid rgba(255,255,255,.13);border-radius:var(--r-md);
+  padding:6px 5px;font-size:.66rem;font-weight:700;color:var(--c-text-2);
+  background:rgba(255,255,255,.03);transition:.12s;user-select:none}
+.opt:hover{border-color:var(--c-accent-border-hi);color:var(--c-text)}
+.opt.active{background:rgba(var(--c-accent-rgb),.22);
+  border-color:var(--c-accent-border-hi);color:#fff}
+.opt small{display:block;font-weight:600;color:var(--c-text-3);
+  font-size:.56rem;margin-top:2px}
+.bay-grp{font-size:.6rem;text-transform:uppercase;letter-spacing:.1em;
+  color:var(--c-text-3);font-weight:800;margin:2px 0 6px}
+.bay-loading{position:absolute;inset:0;display:flex;align-items:center;
+  justify-content:center;color:var(--c-text-3);font-size:.78rem;text-align:center;
+  padding:16px}
 </style>
 </head>
 <body>
@@ -201,22 +239,53 @@ select option{background:#0a1024}
     <span class="badge">PHYSICS · LEO</span>
   </div>
 
-  <!-- ─────────── LEFT: spacecraft + hangar ─────────── -->
-  <div class="sd-col" id="sd-left">
+  <!-- ════════════════ SATELLITE DESIGN ════════════════ -->
+  <section class="area" id="sd-design">
+    <div class="area-hd"><b>🛠 Satellite Design</b><span>build the spacecraft — parts drive the flight physics</span></div>
+
+    <div class="panel" style="padding:9px">
+      <div class="bay-view">
+        <canvas id="bay-canvas"></canvas>
+        <div class="bay-hint">drag to orbit · scroll to zoom</div>
+        <div class="bay-loading" id="bay-loading">Loading 3D engine…</div>
+        <div class="bay-spec">
+          <div class="metric"><div class="k">Dry mass</div><div class="v" id="bs-mass">—</div></div>
+          <div class="metric"><div class="k">Ram area</div><div class="v" id="bs-area">—</div></div>
+          <div class="metric"><div class="k">Drag C<sub>d</sub></div><div class="v" id="bs-cd">—</div></div>
+          <div class="metric"><div class="k">Thrust</div><div class="v" id="bs-thr">—</div></div>
+        </div>
+      </div>
+    </div>
+
     <div class="panel">
-      <h2>🔧 Spacecraft <span class="sub">design</span></h2>
-
-      <label class="field">
-        <div class="row"><span>Ship name</span></div>
-        <input type="text" id="f-name" value="Scout-1" maxlength="60">
+      <h2>🔩 Parts <span class="sub">auto-applied to the ship</span></h2>
+      <div class="bay-grp">Bus / chassis</div>
+      <div class="opt-row" id="bay-body"></div>
+      <div class="bay-grp">Thrusters</div>
+      <div class="opt-row" id="bay-thruster"></div>
+      <label class="field" style="margin-bottom:9px">
+        <div class="row"><span>Thruster count</span><b><span id="bay-tc-v">2</span>×</b></div>
+        <input type="range" id="bay-tc" min="1" max="8" step="1" value="2">
       </label>
-
-      <label class="field">
-        <div class="row"><span>Propulsion</span></div>
-        <select id="f-engine"></select>
+      <div class="bay-grp">Solar array</div>
+      <div class="opt-row" id="bay-panel"></div>
+      <label class="field" style="margin:0">
+        <div class="row"><span>Wing span</span><b><span id="bay-span-v">2.2</span> m</b></div>
+        <input type="range" id="bay-span" min="0.5" max="6" step="0.1" value="2.2">
       </label>
+    </div>
 
+    <div class="panel">
+      <h2>🔧 Spacecraft <span class="sub">fine-tuning</span></h2>
       <div class="grid2">
+        <label class="field" style="grid-column:1/-1">
+          <div class="row"><span>Ship name</span></div>
+          <input type="text" id="f-name" value="Scout-1" maxlength="60">
+        </label>
+        <label class="field" style="grid-column:1/-1">
+          <div class="row"><span>Propulsion</span></div>
+          <select id="f-engine"></select>
+        </label>
         <label class="field">
           <div class="row"><span>Thrust</span><b id="v-thrust">22</b></div>
           <input type="number" id="f-thrust" min="0" max="50000" step="0.1" value="22">
@@ -242,7 +311,6 @@ select option{background:#0a1024}
           <input type="number" id="f-cd" min="1" max="4" step="0.05" value="2.2">
         </label>
       </div>
-
       <div class="metrics" style="margin-top:4px">
         <div class="metric"><div class="k">Wet mass</div><div class="v" id="d-wet">—</div></div>
         <div class="metric"><div class="k">Δv budget</div><div class="v" id="d-dv">—</div></div>
@@ -256,17 +324,20 @@ select option{background:#0a1024}
       <div id="hangar-body">
         <div class="hint" id="hangar-auth">Checking sign-in…</div>
       </div>
-      <div class="btn-row" style="margin-top:10px" id="hangar-actions" hidden>
+      <div class="btn-row" style="margin-top:9px" id="hangar-actions" hidden>
         <button class="btn primary sm" id="b-save">Save ship</button>
         <button class="btn sm" id="b-refresh">Refresh</button>
       </div>
     </div>
-  </div>
+  </section>
 
-  <!-- ─────────── CENTER: flight ─────────── -->
-  <div class="sd-col" id="sd-center">
+  <!-- ════════════════ MISSION STATE ════════════════ -->
+  <section class="area" id="sd-mission">
+    <div class="area-hd"><b>📡 Mission State</b><span>fly the orbit &amp; hold station against drag</span></div>
+
     <div id="sd-stage">
       <canvas id="sd-canvas"></canvas>
+      <canvas id="sd-shipgl"></canvas>
       <div id="sd-status">
         <span class="status-pill" id="st-phase">Pre-flight</span>
         <span class="status-pill" id="st-warp">▶ ×1</span>
@@ -324,10 +395,40 @@ select option{background:#0a1024}
         <div class="toggle" data-warp="3600">×3600</div>
       </div>
     </div>
-  </div>
 
-  <!-- ─────────── RIGHT: telemetry + objective ─────────── -->
-  <div class="sd-col" id="sd-right">
+    <div class="panel">
+      <h2>🌪 Drag conditions <span class="sub">thermosphere &amp; attitude</span></h2>
+
+      <div class="row" style="display:flex;justify-content:space-between;margin-bottom:4px">
+        <span style="font-size:.68rem;color:var(--c-text-3);font-weight:700;letter-spacing:.06em;text-transform:uppercase">Space weather</span>
+      </div>
+      <div class="toggle-row" id="sw-presets"></div>
+
+      <div class="grid2" style="margin-top:10px">
+        <label class="field" style="margin:0">
+          <div class="row"><span>F10.7 flux</span><b><span id="v-f107">150</span> sfu</b></div>
+          <input type="range" id="f-f107" min="65" max="300" step="1" value="150">
+        </label>
+        <label class="field" style="margin:0">
+          <div class="row"><span>Ap (geomag.)</span><b><span id="v-ap">12</span></b></div>
+          <input type="range" id="f-ap" min="0" max="400" step="1" value="12">
+        </label>
+      </div>
+
+      <div class="row" style="display:flex;justify-content:space-between;margin:12px 0 4px">
+        <span style="font-size:.68rem;color:var(--c-text-3);font-weight:700;letter-spacing:.06em;text-transform:uppercase">Drag attitude</span>
+      </div>
+      <div class="toggle-row" id="att-modes"></div>
+
+      <div class="metrics" style="margin-top:11px">
+        <div class="metric"><div class="k">ρ @ 400 km</div><div class="v" id="d-rho400">—</div></div>
+        <div class="metric"><div class="k">vs. nominal</div><div class="v" id="d-rhox">—</div></div>
+        <div class="metric"><div class="k">Eff. drag area</div><div class="v" id="d-effarea">—</div></div>
+        <div class="metric"><div class="k">Ballistic coeff</div><div class="v" id="d-bc2">—</div></div>
+      </div>
+    </div>
+
+    <!-- ── telemetry + objective ── -->
     <div class="panel">
       <h2>📡 Telemetry</h2>
       <div class="metrics">
@@ -378,7 +479,7 @@ select option{background:#0a1024}
         <div class="k">Best run (this ship)</div><div class="v" id="o-best">0</div>
       </div>
     </div>
-  </div>
+  </section>
 
 </div>
 
@@ -388,6 +489,7 @@ select option{background:#0a1024}
 import { auth } from './js/auth.js';
 import { getSupabase, isConfigured } from './js/supabase-config.js';
 import * as ENG from './js/satellite-designer-engine.js';
+import * as BUILDER from './js/satellite-builder.js';
 
 // ── DOM helpers ─────────────────────────────────────────────────────────────
 const $ = (id) => document.getElementById(id);
@@ -404,12 +506,14 @@ const env = ENG.defaultEnv();
 const sim = {
   running: false, paused: false, warp: 1,
   design: null, state: null, env,
-  control: { throttle: 0.6, mode: 'off' },
+  control: { throttle: 0.6, mode: 'off', attitudeMult: 1 },
+  attitude: 'nominal',
   auto: false,
   trail: [], altHist: [],
   stationSeconds: 0, score: 0, best: 0, orbits: 0,
   lastAngle: 0, viewScale: 1,
 };
+let sdBuild = BUILDER.defaultBuild();
 
 // ── Design from the form ────────────────────────────────────────────────────
 function readDesign() {
@@ -431,6 +535,7 @@ function refreshDesignReadouts() {
   $('d-dv').innerHTML = fmt(dv) + ' <small>m/s</small>';
   $('d-bc').innerHTML = fmt(wet / (d.cd * d.area), 1) + ' <small>kg/m²</small>';
   $('d-mr').textContent = (wet / d.dryMass).toFixed(2) + '×';
+  refreshConditions();
 }
 
 // Engine preset dropdown
@@ -450,6 +555,77 @@ function refreshDesignReadouts() {
 }
 ['f-name','f-thrust','f-isp','f-dry','f-fuel','f-area','f-cd']
   .forEach(id => $(id).addEventListener('input', () => { refreshDesignReadouts(); saveDraft(); }));
+
+// ── Drag conditions: space weather + attitude ───────────────────────────────
+const NOMINAL_RHO400 = ENG.airDensity(400_000, ENG.defaultEnv());
+
+function renderSWPresets() {
+  $('sw-presets').innerHTML = Object.entries(ENG.SPACE_WEATHER_PRESETS).map(([k, v]) =>
+    `<div class="toggle" data-sw="${k}">${v.label}</div>`).join('');
+}
+function renderAttModes() {
+  $('att-modes').innerHTML = Object.entries(ENG.ATTITUDE_MODES).map(([k, v]) =>
+    `<div class="toggle${k === sim.attitude ? ' active' : ''}" data-att="${k}">
+       ${v.label}<small style="display:block;font-size:.6rem;color:var(--c-text-3);font-weight:600">${v.mult}× area</small>
+     </div>`).join('');
+}
+function matchSWPreset() {
+  for (const [k, v] of Object.entries(ENG.SPACE_WEATHER_PRESETS))
+    if (Math.abs(v.f107Sfu - env.f107Sfu) < 0.5 && Math.abs(v.ap - env.ap) < 0.5) return k;
+  return null;
+}
+function syncSWChips() {
+  const m = matchSWPreset();
+  $('sw-presets')?.querySelectorAll('.toggle').forEach(o =>
+    o.classList.toggle('active', o.dataset.sw === m));
+}
+function refreshConditions() {
+  if (!$('d-rho400')) return;
+  const rho = ENG.airDensity(400_000, env);
+  const ratio = rho / NOMINAL_RHO400;
+  const d = readDesign();
+  const mult = sim.control.attitudeMult || 1;
+  const effArea = d.area * mult;
+  const wet = d.dryMass + d.fuelMass;
+  $('d-rho400').innerHTML = rho.toExponential(2) + ' <small>kg/m³</small>';
+  const rx = $('d-rhox').closest('.metric');
+  $('d-rhox').textContent = ratio.toFixed(2) + '×';
+  rx.classList.remove('flag-warn', 'flag-bad', 'flag-good');
+  rx.classList.add(ratio >= 5 ? 'flag-bad' : ratio >= 2 ? 'flag-warn' : 'flag-good');
+  $('d-effarea').innerHTML = fmt(effArea, 2) + ' <small>m²</small>';
+  $('d-bc2').innerHTML = fmt(wet / (d.cd * effArea), 1) + ' <small>kg/m²</small>';
+  syncSWChips();
+}
+function setSWPreset(key) {
+  const p = ENG.SPACE_WEATHER_PRESETS[key]; if (!p) return;
+  env.f107Sfu = p.f107Sfu; env.ap = p.ap;
+  $('f-f107').value = p.f107Sfu; $('v-f107').textContent = p.f107Sfu;
+  $('f-ap').value = p.ap; $('v-ap').textContent = p.ap;
+  refreshConditions(); saveDraft();
+}
+function setAttitude(key) {
+  const a = ENG.ATTITUDE_MODES[key]; if (!a) return;
+  sim.attitude = key;
+  sim.control.attitudeMult = a.mult;
+  $('att-modes')?.querySelectorAll('.toggle').forEach(o =>
+    o.classList.toggle('active', o.dataset.att === key));
+  refreshConditions(); saveDraft();
+}
+function applyEnvFromSliders() {
+  env.f107Sfu = +$('f-f107').value; env.ap = +$('f-ap').value;
+  $('v-f107').textContent = $('f-f107').value;
+  $('v-ap').textContent = $('f-ap').value;
+  refreshConditions(); saveDraft();
+}
+renderSWPresets(); renderAttModes();
+$('sw-presets').addEventListener('click', (e) => {
+  const o = e.target.closest('.toggle'); if (o) setSWPreset(o.dataset.sw);
+});
+$('att-modes').addEventListener('click', (e) => {
+  const o = e.target.closest('.toggle'); if (o) setAttitude(o.dataset.att);
+});
+$('f-f107').addEventListener('input', applyEnvFromSliders);
+$('f-ap').addEventListener('input', applyEnvFromSliders);
 
 // Orbit / control sliders
 function bindSlider(id, lblId) {
@@ -536,7 +712,7 @@ function frame(now) {
     // Auto station-keeping: defend the target perigee with prograde burns.
     if (sim.auto) {
       const tgt = +$('f-tgt').value;
-      const tel = ENG.telemetry(sim.state, sim.design, sim.env);
+      const tel = ENG.telemetry(sim.state, sim.design, sim.env, sim.control.attitudeMult);
       if (tel.periAltKm < tgt && sim.state.fuel > 0) {
         sim.control.mode = 'prograde';
         syncModeUI('prograde');
@@ -557,7 +733,7 @@ function frame(now) {
 
     // Scoring: time spent at/above the target altitude.
     const tgt = +$('f-tgt').value;
-    const tel = ENG.telemetry(sim.state, sim.design, sim.env);
+    const tel = ENG.telemetry(sim.state, sim.design, sim.env, sim.control.attitudeMult);
     if (tel.altKm >= tgt) sim.stationSeconds += simSecs;
     sim.score = Math.floor(sim.stationSeconds + sim.orbits * 50);
     if (sim.score > sim.best) sim.best = sim.score;
@@ -647,6 +823,7 @@ addEventListener('resize', resize);
 
 function draw() {
   const W = cv._w || 600, H = cv._h || 480;
+  let shipArg = null;
   cx.clearRect(0, 0, W, H);
   // starfield
   for (const s of stars) {
@@ -722,12 +899,20 @@ function draw() {
       cx.beginPath(); cx.moveTo(X, Y);
       cx.lineTo(X - dx * 30, Y + dy * 30); cx.stroke(); // exhaust points opposite thrust
     }
-    cx.fillStyle = '#fff';
-    cx.beginPath(); cx.arc(X, Y, 4.2, 0, 7); cx.fill();
-    cx.strokeStyle = '#00c6ff'; cx.lineWidth = 2;
-    cx.beginPath(); cx.arc(X, Y, 7, 0, 7); cx.stroke();
+    if (SHIP.ready) {
+      // The 3-D model marks the craft; keep just a faint locator ring.
+      cx.strokeStyle = 'rgba(0,198,255,.35)'; cx.lineWidth = 1;
+      cx.beginPath(); cx.arc(X, Y, 13, 0, 7); cx.stroke();
+    } else {
+      cx.fillStyle = '#fff';
+      cx.beginPath(); cx.arc(X, Y, 4.2, 0, 7); cx.fill();
+      cx.strokeStyle = '#00c6ff'; cx.lineWidth = 2;
+      cx.beginPath(); cx.arc(X, Y, 7, 0, 7); cx.stroke();
+    }
+    shipArg = { sx: X, sy: Y, vangle: Math.atan2(sim.state.vy, sim.state.vx) };
   }
 
+  renderShip(W, H, shipArg);
   drawSpark();
 }
 
@@ -782,11 +967,24 @@ function applyDesign(dd) {
   if (dd.periKm != null) { $('f-peri').value = dd.periKm; $('v-peri').textContent = dd.periKm; }
   if (dd.apoKm != null) { $('f-apo').value = dd.apoKm; $('v-apo').textContent = dd.apoKm; }
   if (dd.targetKm != null) { $('f-tgt').value = dd.targetKm; $('v-tgt').textContent = dd.targetKm; }
+  if (dd.build && dd.build.body) {
+    sdBuild = { ...BUILDER.defaultBuild(), ...dd.build };
+    syncBayUI(); rebuildMesh();
+  }
+  if (dd.env && isFinite(dd.env.f107Sfu)) {
+    env.f107Sfu = dd.env.f107Sfu; env.ap = dd.env.ap;
+    $('f-f107').value = env.f107Sfu; $('v-f107').textContent = Math.round(env.f107Sfu);
+    $('f-ap').value = env.ap; $('v-ap').textContent = Math.round(env.ap);
+  }
+  if (dd.attitude && ENG.ATTITUDE_MODES[dd.attitude]) setAttitude(dd.attitude);
   refreshDesignReadouts();
+  syncSWChips();
 }
 function currentDesignData() {
   const d = readDesign();
-  return { ...d, periKm: +$('f-peri').value, apoKm: +$('f-apo').value, targetKm: +$('f-tgt').value };
+  return { ...d, periKm: +$('f-peri').value, apoKm: +$('f-apo').value,
+           targetKm: +$('f-tgt').value, build: { ...sdBuild },
+           env: { f107Sfu: env.f107Sfu, ap: env.ap }, attitude: sim.attitude };
 }
 function renderHangar(list) {
   const body = $('hangar-body');
@@ -904,8 +1102,243 @@ async function initAuth() {
 $('b-save').addEventListener('click', saveShip);
 $('b-refresh').addEventListener('click', refreshHangar);
 
+// ── 3D Design Bay ───────────────────────────────────────────────────────────
+const BAY = { ready: false, three: null, raf: 0,
+  scene: null, camera: null, renderer: null, controls: null, group: null };
+
+function chip(label, sub, active) {
+  return `<div class="opt${active ? ' active' : ''}" data-v="${label.key}">
+    ${label.name}<small>${sub}</small></div>`;
+}
+function renderOptChips() {
+  $('bay-body').innerHTML = Object.entries(BUILDER.BODIES).map(([k, v]) =>
+    chip({ key: k, name: v.label }, `${v.mass} kg`, k === sdBuild.body)).join('');
+  $('bay-thruster').innerHTML = Object.entries(BUILDER.THRUSTER_UNITS).map(([k, v]) => {
+    const p = ENG.ENGINE_PRESETS[k];
+    return chip({ key: k, name: v.label.split(' ')[0] },
+      p ? `${p.thrust} N · ${p.isp}s` : '', k === sdBuild.thruster);
+  }).join('');
+  $('bay-panel').innerHTML = Object.entries(BUILDER.PANELS).map(([k, v]) =>
+    chip({ key: k, name: v.label }, v.wings ? `${v.wings} wing${v.wings > 1 ? 's' : ''}` : 'fixed',
+      k === sdBuild.panel)).join('');
+}
+function syncBayUI() {
+  const tc = $('bay-tc'), sp = $('bay-span');
+  if (tc) { tc.value = sdBuild.thrusterCount; $('bay-tc-v').textContent = sdBuild.thrusterCount; }
+  if (sp) { sp.value = sdBuild.panelSpan; $('bay-span-v').textContent = (+sdBuild.panelSpan).toFixed(1); }
+  for (const [grp, key] of [['bay-body', 'body'], ['bay-thruster', 'thruster'], ['bay-panel', 'panel']]) {
+    const box = $(grp); if (!box) continue;
+    box.querySelectorAll('.opt').forEach(o =>
+      o.classList.toggle('active', o.dataset.v === sdBuild[key]));
+  }
+}
+function refreshBaySpec() {
+  const d = BUILDER.deriveDesign(sdBuild, ENG.ENGINE_PRESETS);
+  $('bs-mass').innerHTML = fmt(d.dryMass, 1) + ' <small>kg</small>';
+  $('bs-area').innerHTML = fmt(d.area, 2) + ' <small>m²</small>';
+  $('bs-cd').textContent = d.cd.toFixed(2);
+  $('bs-thr').innerHTML = fmt(d.thrust, d.thrust < 10 ? 2 : 0) + ' <small>N</small>';
+  return d;
+}
+function disposeGroup(grp) {
+  grp?.traverse?.(o => {
+    if (o.isMesh) { o.geometry?.dispose?.();
+      (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m?.dispose?.()); }
+  });
+}
+// ── Live ship on the main stage ─────────────────────────────────────────────
+// A transparent WebGL layer over the 2-D orbit canvas that renders the
+// actual built satellite: a slow turntable pre-flight, flying nose-to-
+// velocity once launched. Self-syncs to sdBuild; degrades silently to the
+// 2-D marker if three/WebGL can't load (offline).
+const SHIP = { ready: false, tried: false, three: null, renderer: null,
+  scene: null, camera: null, pivot: null, orient: null, model: null,
+  sig: '', W: 0, H: 0, spin: 0 };
+
+async function ensureShipGL() {
+  if (SHIP.ready || SHIP.tried) return SHIP.ready;
+  SHIP.tried = true;
+  try {
+    const THREE = await import('three');
+    SHIP.three = THREE;
+    const cv = $('sd-shipgl');
+    SHIP.renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true });
+    SHIP.renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1));
+    SHIP.renderer.setClearColor(0x000000, 0);
+    SHIP.scene = new THREE.Scene();
+    SHIP.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -2000, 2000);
+    SHIP.scene.add(new THREE.AmbientLight(0x4a5566, 1.0));
+    const key = new THREE.DirectionalLight(0xffffff, 1.3); key.position.set(3, 5, 6);
+    const rim = new THREE.DirectionalLight(0x5577ff, 0.45); rim.position.set(-4, -2, -4);
+    SHIP.scene.add(key, rim);
+    SHIP.orient = new THREE.Group();
+    SHIP.pivot = new THREE.Group();
+    SHIP.pivot.add(SHIP.orient);
+    SHIP.scene.add(SHIP.pivot);
+    SHIP.ready = true;
+    return true;
+  } catch (e) {
+    console.warn('[Stage] 3-D ship layer unavailable:', e.message);
+    return false;
+  }
+}
+function rebuildShipModel() {
+  if (!SHIP.ready) return;
+  if (SHIP.model) { SHIP.orient.remove(SHIP.model); disposeGroup(SHIP.model); }
+  SHIP.model = BUILDER.buildGroup(SHIP.three, sdBuild);
+  // Engine thrust axis is +z; yaw it so the long axis & wings lie in the
+  // screen plane (a readable side-on silhouette, nose toward +x).
+  SHIP.model.rotation.y = Math.PI / 2;
+  SHIP.orient.add(SHIP.model);
+}
+// Called every frame from draw(). ship = null pre-flight (centred hero
+// turntable); else { sx, sy, vangle } with sx/sy in canvas-pixel space.
+function renderShip(W, H, ship) {
+  if (!SHIP.ready || W < 2 || H < 2) return;
+  if (W !== SHIP.W || H !== SHIP.H) {
+    SHIP.W = W; SHIP.H = H;
+    SHIP.renderer.setSize(W, H, false);
+    const c = SHIP.camera;
+    c.left = -W / 2; c.right = W / 2; c.top = H / 2; c.bottom = -H / 2;
+    c.updateProjectionMatrix();
+  }
+  const sig = JSON.stringify(sdBuild);
+  if (sig !== SHIP.sig) { SHIP.sig = sig; rebuildShipModel(); }
+  if (!SHIP.model) return;
+
+  const extent = Math.max(0.2, BUILDER.buildExtent(sdBuild));
+  if (ship) {
+    SHIP.pivot.position.set(ship.sx - W / 2, H / 2 - ship.sy, 0);
+    const targetPx = Math.max(34, Math.min(W, H) * 0.085);
+    SHIP.pivot.scale.setScalar(targetPx / extent);
+    SHIP.pivot.rotation.z = ship.vangle;
+    SHIP.orient.rotation.set(-0.42, 0, 0);
+  } else {
+    SHIP.pivot.position.set(0, 0, 0);
+    SHIP.pivot.scale.setScalar((Math.min(W, H) * 0.46) / extent);
+    SHIP.pivot.rotation.z = 0;
+    SHIP.spin += 0.0065;
+    SHIP.orient.rotation.set(-0.42, SHIP.spin, 0);
+  }
+  SHIP.renderer.render(SHIP.scene, SHIP.camera);
+}
+function fitBayCamera() {
+  if (!BAY.ready) return;
+  const E = BUILDER.buildExtent(sdBuild);
+  const dist = (E / 2) / Math.tan((45 * Math.PI / 180) / 2) * 1.55;
+  BAY.camera.position.set(dist * 0.62, dist * 0.42, dist * 0.78);
+  BAY.camera.near = E / 100; BAY.camera.far = E * 40;
+  BAY.camera.updateProjectionMatrix();
+  BAY.controls.target.set(0, 0, 0); BAY.controls.update();
+}
+function rebuildMesh() {
+  refreshBaySpec();
+  if (!BAY.ready) return;
+  if (BAY.group) { BAY.scene.remove(BAY.group); disposeGroup(BAY.group); }
+  BAY.group = BUILDER.buildGroup(BAY.three, sdBuild);
+  BAY.scene.add(BAY.group);
+  fitBayCamera();
+}
+async function ensureThree() {
+  if (BAY.ready) return true;
+  try {
+    const THREE = await import('three');
+    const { OrbitControls } = await import('three/addons/controls/OrbitControls.js');
+    BAY.three = THREE;
+    const cv = $('bay-canvas');
+    BAY.renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true });
+    BAY.renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1));
+    BAY.scene = new THREE.Scene();
+    BAY.camera = new THREE.PerspectiveCamera(45, 1, 0.01, 100);
+    BAY.scene.add(new THREE.AmbientLight(0x4a5566, 1.05));
+    const key = new THREE.DirectionalLight(0xffffff, 1.25); key.position.set(3, 4, 5);
+    const rim = new THREE.DirectionalLight(0x5577ff, 0.4); rim.position.set(-4, -2, -3);
+    BAY.scene.add(key, rim);
+    BAY.controls = new OrbitControls(BAY.camera, cv);
+    BAY.controls.enableDamping = true; BAY.controls.dampingFactor = 0.08;
+    BAY.controls.autoRotate = true; BAY.controls.autoRotateSpeed = 1.1;
+    BAY.controls.addEventListener('start', () => { BAY.controls.autoRotate = false; });
+    BAY.ready = true;
+    $('bay-loading').style.display = 'none';
+    return true;
+  } catch (e) {
+    console.warn('[Bay] 3D engine unavailable:', e.message);
+    $('bay-loading').textContent =
+      'Offline: 3-D preview unavailable here, but you can still configure parts and apply them.';
+    return false;
+  }
+}
+function resizeBay() {
+  if (!BAY.ready) return;
+  const cv = $('bay-canvas'), r = cv.getBoundingClientRect();
+  if (r.width < 2 || r.height < 2) return;
+  BAY.renderer.setSize(r.width, r.height, false);
+  BAY.camera.aspect = r.width / r.height;
+  BAY.camera.updateProjectionMatrix();
+}
+function bayLoop() {
+  BAY.raf = requestAnimationFrame(bayLoop);
+  if (BAY.ready) { BAY.controls.update(); BAY.renderer.render(BAY.scene, BAY.camera); }
+}
+// The build view is now permanently inline — initialise once at boot and
+// keep rendering. No modal to open/close.
+async function initBay() {
+  renderOptChips(); syncBayUI(); refreshBaySpec();
+  const ok = await ensureThree();
+  if (ok) { resizeBay(); rebuildMesh(); }
+  cancelAnimationFrame(BAY.raf); bayLoop();
+}
+// Push the parametric build's derived physics into the editable ship form.
+function pushBuildToForm() {
+  const d = BUILDER.deriveDesign(sdBuild, ENG.ENGINE_PRESETS);
+  $('f-engine').value = d.engine;
+  $('f-thrust').value = d.thrust;
+  $('f-isp').value = d.isp;
+  $('f-dry').value = d.dryMass;
+  $('f-area').value = d.area;
+  $('f-cd').value = d.cd;
+  refreshDesignReadouts(); saveDraft();
+  return d;
+}
+// Build edits auto-apply to the ship; called live from the part controls.
+function syncBuild() { rebuildMesh(); pushBuildToForm(); }
+// Kept for programmatic/test use (window.__sd.bay.apply) — same effect,
+// with a confirmation toast.
+function applyBuild() {
+  const d = pushBuildToForm();
+  toast(`Applied ${BUILDER.BODIES[sdBuild.body].label}: ${fmt(d.dryMass, 0)} kg · ${fmt(d.area, 2)} m²`);
+}
+
+for (const [grp, key] of [['bay-body', 'body'], ['bay-thruster', 'thruster'], ['bay-panel', 'panel']]) {
+  $(grp).addEventListener('click', (e) => {
+    const o = e.target.closest('.opt'); if (!o) return;
+    sdBuild[key] = o.dataset.v;
+    $(grp).querySelectorAll('.opt').forEach(x => x.classList.toggle('active', x === o));
+    syncBuild();
+  });
+}
+$('bay-tc').addEventListener('input', (e) => {
+  sdBuild.thrusterCount = +e.target.value;
+  $('bay-tc-v').textContent = e.target.value; syncBuild();
+});
+$('bay-span').addEventListener('input', (e) => {
+  sdBuild.panelSpan = +e.target.value;
+  $('bay-span-v').textContent = (+e.target.value).toFixed(1); syncBuild();
+});
+addEventListener('resize', resizeBay);
+
 // ── Boot ────────────────────────────────────────────────────────────────────
-window.__sd = { auth, engine: ENG, sim, ui: { readDesign, currentDesignData } };
+window.__sd = { auth, engine: ENG, sim, builder: BUILDER,
+  ui: { readDesign, currentDesignData },
+  bay: { apply: applyBuild, sync: syncBuild,
+         getBuild: () => ({ ...sdBuild }) },
+  conditions: { setSWPreset, setAttitude,
+                getEnv: () => ({ ...env }),
+                getAttitude: () => sim.attitude,
+                rho400: () => ENG.airDensity(400_000, env) },
+  stage: { ensureShipGL,
+           shipReady: () => SHIP.ready,
+           shipTried: () => SHIP.tried } };
 
 (async function boot() {
   loadDraft();
@@ -915,6 +1348,8 @@ window.__sd = { auth, engine: ENG, sim, ui: { readDesign, currentDesignData } };
   try { ENG.airDensity(400_000, env); } catch (e) { console.warn(e); }
   $('sd-warmup').style.display = 'none';
   resetSim();
+  ensureShipGL();   // fire-and-forget; 2-D marker covers until ready
+  initBay();        // inline 3-D build view, always on
   requestAnimationFrame((t) => { lastT = t; frame(t); });
   initAuth();
 })();
