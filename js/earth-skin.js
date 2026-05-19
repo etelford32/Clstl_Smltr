@@ -236,9 +236,11 @@ void main() {
 export const CLOUD_VERT = /* glsl */`
 varying vec3 vNormalLocal;     // object-space unit direction (sphere normal)
 varying vec3 vWorldNormal;
+varying vec3 vWorldPos;        // world-space position — view dir for parallax/scatter
 void main() {
     vNormalLocal = normalize(position);
     vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+    vWorldPos    = (modelMatrix * vec4(position, 1.0)).xyz;
     gl_Position  = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }`;
 
@@ -277,6 +279,7 @@ uniform int  u_storm_count;
 
 varying vec3 vNormalLocal;
 varying vec3 vWorldNormal;
+varying vec3 vWorldPos;
 
 // ── Procedural noise for natural cloud shapes ────────────────────────────────
 // Hash-based value noise + FBM give multi-scale cloud structure directly in
@@ -369,6 +372,21 @@ float warpedFbm3(vec3 p, int octaves) {
     return fbm3(p + warp * 1.15, octaves);
 }
 
+// ── Cheap cloud-form field for relief + self-shadow ───────────────────────────
+// The visible cloud alpha is driven by the expensive warpedFbm3 calls in
+// main(). Re-running those at the extra sample points a bump normal and a
+// sun-march would need is too costly at 60 fps on a full icosphere. Instead
+// this is a lightweight 3-octave field that tracks the *dominant* cumulus
+// lumps closely enough that lighting their relief reads as real 3-D form.
+// One scalar in, one scalar out, ≤3 vnoise3 taps — cheap enough to call ~5×
+// per fragment (centre + 2 gradient offsets + 1 shadow step). Kept at 2
+// octaves on purpose: relief only needs the dominant lump, and the headless
+// CI smoke test enforces ≥25 fps under software GL, so the tap budget is
+// tight — the fine detail is already supplied by the warpedFbm3 alpha field.
+float cloudForm(vec3 p) {
+    return fbm3(p * 13.0, 2);
+}
+
 // ── Rotations on the unit sphere ──────────────────────────────────────────────
 // The cloud noise and storm swirl used to operate on equirectangular UV
 // offsets, which produced stripes (UV-space stretch + hard-coded cirrus
@@ -457,8 +475,16 @@ void main() {
 
     vec3  N     = normalize(vWorldNormal);
     float NdotL = dot(N, u_sun_dir);
-    float lit   = clamp(NdotL * 0.5 + 0.5, 0.0, 1.0);
-    lit = lit * lit;
+
+    // View direction + the tangent-plane component of it. The tangential
+    // part is what drives inter-layer PARALLAX: when you orbit toward the
+    // limb, a layer that floats higher must slide further across the deck
+    // below it. Giving low/mid/high distinct parallax shifts turns the flat
+    // decal into a stack of sheets at real altitudes — the single biggest
+    // "this looks 3-D now" cue, and it costs no extra noise taps because the
+    // offset is folded into the sample normal *before* the FBM lookups.
+    vec3 V    = normalize(cameraPosition - vWorldPos);
+    vec3 Vt   = V - N_sphere * dot(V, N_sphere);   // 0 at sub-view point, max at limb
 
     // ── Sample-normal advection ──────────────────────────────────────────────
     // Apply cyclonic swirl + slow eastward drift directly to the 3-D sampling
@@ -474,9 +500,14 @@ void main() {
     const float yawMid  = 0.0000480 * TAU;
     const float yawHigh = 0.0000720 * TAU;
 
-    vec3 N_low  = rotateY(N_swirled, u_time * yawLow);
-    vec3 N_mid  = rotateY(N_swirled, u_time * yawMid);
-    vec3 N_high = rotateY(N_swirled, u_time * yawHigh);
+    // Per-layer parallax: shift the sample point against the tangential view
+    // by an amount proportional to that layer's altitude (low ≈ 2 km, mid ≈
+    // 6 km, high ≈ 10 km → relative 0.018 / 0.045 / 0.075 of a globe radius,
+    // exaggerated from physical scale so the depth separation is legible at
+    // typical zoom). Re-normalised so it stays a unit sphere direction.
+    vec3 N_low  = normalize(rotateY(N_swirled, u_time * yawLow)  - Vt * 0.018);
+    vec3 N_mid  = normalize(rotateY(N_swirled, u_time * yawMid)  - Vt * 0.045);
+    vec3 N_high = normalize(rotateY(N_swirled, u_time * yawHigh) - Vt * 0.075);
 
     float tLow  = u_time * 0.00060;
     float tMid  = u_time * 0.00085;
@@ -555,13 +586,23 @@ void main() {
             // own noise field. Precipitation channel is read regardless of
             // strength because it gates the streak overlay, which is
             // meaningful independent of the modulation weight.
-            float modLow  = 1.0 + (clLow  - 0.5) * u_cloud_data_strength;
-            float modMid  = 1.0 + (clMid  - 0.5) * u_cloud_data_strength;
-            float modHigh = 1.0 + (clHigh - 0.5) * u_cloud_data_strength;
+            // Data-GATED coverage. The old formula was
+            //   alpha = shape * base * (1 + (cl-0.5)*strength)
+            // so a clear grid cell (cl=0) still rendered base*0.75 ≈ 0.54
+            // cloud — the whole globe was permanently ~half overcast and
+            // every sky looked like the same grey soup. Now the data drives a
+            // coverage gate from a thin fair-weather floor up to full
+            // overcast, so clear cells actually read as clear and storm decks
+            // stand out as solid. strength still scales how literally the
+            // data is obeyed (0 = procedural, 0.5 = default, 1 = data-locked).
+            float g = clamp(u_cloud_data_strength * 2.0, 0.0, 1.0);
+            float covLow  = mix(1.0, mix(0.28, 1.15, clLow),  g);
+            float covMid  = mix(1.0, mix(0.20, 1.10, clMid),  g);
+            float covHigh = mix(1.0, mix(0.16, 1.08, clHigh), g);
 
-            alphaLow  = shapeLow  * baseLow  * modLow;
-            alphaMid  = shapeMid  * baseMid  * modMid;
-            alphaHigh = shapeHigh * baseHigh * modHigh;
+            alphaLow  = shapeLow  * baseLow  * covLow;
+            alphaMid  = shapeMid  * baseMid  * covMid;
+            alphaHigh = shapeHigh * baseHigh * covHigh;
         }
     } else {
         // No weather data: pure noise-driven clouds at the base density.
@@ -614,90 +655,116 @@ void main() {
         alpha  = clamp(alpha, 0.0, 0.95);
     }
 
+    // ── Relief lighting ──────────────────────────────────────────────────────
+    // The old shader lit the cloud with a flat half-Lambert and never
+    // perturbed the normal, so it read as a painted decal. We now build a
+    // bump normal from the cheap cloud-form field's gradient (same trick the
+    // Earth surface shader uses for terrain) so cumulus towers catch the sun
+    // on their sunward face and self-shade on the lee. The bump amplitude is
+    // gated by the local cloud amount, so flat thin overcast stays flat while
+    // a deep convective stack stands proud.
+    vec3  up   = abs(N_sphere.y) < 0.985 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    vec3  tE   = normalize(cross(up, N_sphere));      // local east-ish tangent
+    vec3  tN   = normalize(cross(N_sphere, tE));      // local north-ish tangent
+    const float EPS = 0.02;
+    float fC   = cloudForm(N_low);
+    float fE   = cloudForm(normalize(N_low + tE * EPS));
+    float fN   = cloudForm(normalize(N_low + tN * EPS));
+    float relAmp = clamp(alpha * 1.6, 0.0, 1.0);
+    vec3  Nb   = normalize(N - (tE * (fE - fC) + tN * (fN - fC)) * 8.0 * relAmp);
+
+    // Self-shadow / contact occlusion: one extra form tap a short step toward
+    // the sun in the tangent plane. If the cloud is thicker there, this point
+    // sits in its shadow. Cheap one-tap approximation of a sun-march.
+    vec3  Lt     = u_sun_dir - N_sphere * dot(u_sun_dir, N_sphere);
+    float fSun   = cloudForm(normalize(N_low + normalize(Lt + 1e-4) * 0.045));
+    float selfSh = clamp((fSun - fC) * 3.2, 0.0, 1.0) * relAmp;
+
+    float NdotLb = dot(Nb, u_sun_dir);
+    float dayMix = smoothstep(-0.18, 0.20, NdotL);
+    float sun    = clamp(NdotLb * 0.5 + 0.5, 0.0, 1.0);
+    sun          = sun * sun;
+    float lit    = mix(0.30, 1.0, sun) * (1.0 - 0.60 * selfSh);
+
+    // Forward (Mie) scatter — the "silver lining". When the view is roughly
+    // sun-aligned, thin cloud edges glow brightly because sunlight scatters
+    // forward through them. This is the cue that most sells cloud volume.
+    float VdotL  = dot(V, u_sun_dir);
+    float forward = pow(clamp(VdotL, 0.0, 1.0), 6.0);
+    float thinEdge = 1.0 - smoothstep(0.0, 0.55, alpha);
+    float silver  = forward * (0.30 + 0.70 * thinEdge) * dayMix;
+
     // ── Cloud colour ──────────────────────────────────────────────────────────
-    vec3 cloudWhite = mix(vec3(0.82, 0.85, 0.92), vec3(0.97, 0.98, 1.00), lit);
-    vec3 rainGrey   = vec3(0.50, 0.53, 0.62);
-    vec3 cirrusTint = vec3(0.88, 0.92, 1.00);
-    vec3 nightCol   = vec3(0.22, 0.26, 0.38);
+    // Density-driven: thick cores opaque bright white, thin wisps a cooler
+    // translucent grey. The shadowed side fills with sky-blue ambient rather
+    // than going to black, which is what real cloud underbellies do.
+    float thick    = smoothstep(0.12, 0.78, clamp(alpha * 1.3, 0.0, 1.0));
+    vec3  thinGrey = vec3(0.60, 0.66, 0.78);
+    vec3  coreWhite= vec3(0.98, 0.99, 1.00);
+    vec3  baseCol  = mix(thinGrey, coreWhite, thick);
+    vec3  skyFill  = vec3(0.40, 0.50, 0.66);          // shaded-underside ambient
+    vec3  dayCol   = mix(skyFill, baseCol, lit);
+    dayCol        += vec3(1.00, 0.95, 0.82) * silver * 0.55;   // golden rim
+    vec3  nightCol = vec3(0.15, 0.18, 0.29) * (0.65 + 0.35 * (1.0 - selfSh));
+    vec3  col      = mix(nightCol, dayCol, dayMix);
 
-    float dayMix  = smoothstep(-0.12, 0.20, NdotL);
-    vec3  col     = mix(nightCol, cloudWhite, dayMix);
-
-    // Thin cloud edges: slightly blue-tinted for translucency
-    float edgeSoft = smoothstep(0.0, 0.35, alpha);
-    col = mix(col * vec3(0.92, 0.94, 1.0), col, edgeSoft);
-
-    // Blend in precipitation darkening (only visible side)
-    float precipVis = precip * dayMix;
-    col = mix(col, rainGrey, precipVis * 0.55);
-
-    // Blend in cirrus tint where high-cloud fraction dominates
+    // Cirrus reads as a thin icy veil where the high fraction dominates
     float cirrusDom = alphaHigh / max(0.01, alpha);
-    col = mix(col, cirrusTint, cirrusDom * dayMix * 0.35);
+    col = mix(col, vec3(0.90, 0.93, 1.00), cirrusDom * dayMix * 0.30);
 
     // Warm golden tint at terminator (sunrise/sunset through clouds)
-    float termZone = smoothstep(-0.10, 0.0, NdotL) * smoothstep(0.22, 0.06, NdotL);
-    col = mix(col, vec3(0.95, 0.72, 0.28), termZone * 0.32 * (1.0 - precipVis * 0.5));
+    float termZone = smoothstep(-0.12, 0.0, NdotL) * smoothstep(0.24, 0.06, NdotL);
+    col = mix(col, vec3(0.97, 0.66, 0.32), termZone * 0.30);
 
-    // ── Falling precipitation streaks ────────────────────────────────────────
-    // Where the weather feed's precipitation channel is non-zero, paint short
-    // downward-scrolling streaks on top of the cloud. The pattern is purely
-    // procedural: narrow stripes in longitude, short dashes in latitude, the
-    // dashes slide toward the equator-facing side over time to read as rain
-    // falling out of the cloud base.
+    // ── Precipitation: 3-D rain / snow shafts ────────────────────────────────
+    // The old version drew fract() stripes in equirectangular UV: they
+    // stretched toward the poles, "fell" southward along the lat axis instead
+    // of screen-down, and crawled like marching texture on the spinning
+    // globe. The replacement is a noise veil sampled in the local TANGENT
+    // frame and scrolled along the local vertical, so it reads as shafts
+    // hanging under the cloud base regardless of where on the globe it is.
     //
-    // Regime separation: tropical latitudes render tighter, denser, faster
-    // streaks (convective cells); mid-latitudes render longer, sparser,
-    // slower streaks (frontal rain). High-latitude precip shifts toward a
-    // lighter blue-white tint so it reads as sleet/snow rather than rain.
-    if (u_weather_on > 0.5 && precip > 0.02) {
-        float latDeg = uvToLatLonDeg(vUv).x;
-        float absLat = abs(latDeg);
+    // Two physical inputs the old code ignored:
+    //   • Intensity uses a perceptual (sqrt) curve so drizzle is visible and
+    //     heavy rain saturates — the stored channel is linear mm/hr·0.1, so
+    //     light rain (the common case) used to be ~invisible.
+    //   • Phase (rain↔snow) comes from the weather grid's TEMPERATURE, not
+    //     latitude — snow falls in a winter mid-latitude storm and not over a
+    //     warm tropical highland, which the old abs(lat) test got backwards.
+    if (u_weather_on > 0.5 && precip > 0.004) {
+        float precipI = clamp(sqrt(precip * 1.7), 0.0, 1.0);
 
-        // 0 = tropical (convective), 1 = frontal (stratiform)
-        float regime = smoothstep(15.0, 45.0, absLat);
+        float tC       = texture2D(u_weather, vUv).r * 110.0 - 60.0;   // °C
+        float snowFrac = smoothstep(2.0, -1.5, tC);                    // 1 = snow
 
-        float freqX     = mix(260.0, 210.0, regime);   // streak density across lon
-        float freqY     = mix(160.0, 105.0, regime);   // dash length along lat
-        float fallSpd   = mix(0.055, 0.032, regime);   // v-axis scroll rate
+        vec3  rainDark = vec3(0.34, 0.40, 0.52);
+        vec3  snowPale = vec3(0.90, 0.94, 1.00);
+        vec3  pcol     = mix(rainDark, snowPale, snowFrac);
 
-        // Per-column random phase so dashes don't march in lockstep across
-        // whole latitude bands. hash21 is defined in the noise block above.
-        float colId    = floor(vUv.x * freqX);
-        float colPhase = hash21(vec2(colId, 17.3)) * 3.0;
+        // Local-frame coordinates → streaks stay vertical & unstretched at
+        // every latitude. Smeared hard along the fall axis, tight across it,
+        // and scrolled by time so it descends. Snow: coarser + slower drift.
+        // Scroll rate is decoupled from the spatial frequency on purpose:
+        // u_time is unbounded elapsed seconds and the shader is mediump, so
+        // folding scl (~400) into the time term would burn float precision
+        // within a few minutes and freeze the rain. Keeping `fall` small
+        // (≈ the old code's u_time·fallSpd·freqY magnitude) stays in the
+        // precision regime the shipped shader already ran in.
+        vec2  rc    = vec2(dot(N_sphere, tE), dot(N_sphere, tN));
+        float scl   = mix(430.0, 250.0, snowFrac);
+        float fall  = mix(7.0, 2.5, snowFrac);
+        float n1    = fbm(vec2(rc.x * scl, rc.y * scl * 0.20 - u_time * fall), 3);
+        float shaft = smoothstep(0.46, 0.80, n1);
 
-        float sx = vUv.x * freqX;
-        float sy = vUv.y * freqY - u_time * fallSpd * freqY - colPhase;
-
-        // Horizontal mask — thin vertical stripe centred in each unit cell.
-        float streakH = 1.0 - smoothstep(0.06, 0.16, abs(fract(sx) - 0.5));
-
-        // Vertical mask — short dash that fades in and out within each cell.
-        float fy = fract(sy);
-        float streakV = smoothstep(0.0, 0.28, fy) * (1.0 - smoothstep(0.52, 0.92, fy));
-
-        float streak = streakH * streakV;
-
-        // Gate by precip intensity (0.02 → fade in, 0.30 → full) and modulate
-        // by daylight so the streaks don't overwhelm the night side where the
-        // cloud base is already dark. They stay faintly visible at night so
-        // storms remain identifiable over populated regions.
-        float precipMask = smoothstep(0.02, 0.30, precip);
-        streak *= precipMask * (0.35 + 0.65 * dayMix);
-
-        // Rain colour: mid grey-blue on warm regions, pale icy blue toward
-        // the poles to hint at frozen precipitation.
-        vec3 rainShade = mix(
-            vec3(0.30, 0.38, 0.52),    // rain
-            vec3(0.78, 0.86, 1.00),    // sleet/snow
-            smoothstep(55.0, 72.0, absLat)
-        );
-
-        // Apply: darken the cloud under the streaks and bump alpha so the
-        // rain shows even over already-opaque overcast.
-        col    = mix(col, rainShade, streak * 0.70);
-        alpha  = clamp(alpha + streak * 0.30, 0.0, 0.98);
+        float veil = precipI * (0.30 + 0.70 * dayMix);
+        // Ambient "it is raining here" wash + brighter/darker falling shafts.
+        col   = mix(col, pcol, veil * 0.42);
+        col   = mix(col, pcol * mix(0.80, 1.30, snowFrac), shaft * veil * 0.50);
+        alpha = clamp(alpha + (0.10 + shaft * 0.20) * veil, 0.0, 0.98);
     }
+
+    // Thin cloud edges stay translucent so they don't read as hard cut-outs
+    alpha *= mix(0.55, 1.0, smoothstep(0.0, 0.30, alpha));
 
     // ── Research-mode no-data hatch ──────────────────────────────────────────
     // In composite mode this branch is dormant (satNoDataMask = 0). In
