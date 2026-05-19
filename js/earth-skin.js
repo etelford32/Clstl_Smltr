@@ -747,7 +747,7 @@ void main() {
         // Scroll rate is decoupled from the spatial frequency on purpose:
         // u_time is unbounded elapsed seconds and the shader is mediump, so
         // folding scl (~400) into the time term would burn float precision
-        // within a few minutes and freeze the rain. Keeping `fall` small
+        // within a few minutes and freeze the rain. Keeping 'fall' small
         // (≈ the old code's u_time·fallSpd·freqY magnitude) stays in the
         // precision regime the shipped shader already ran in.
         vec2  rc    = vec2(dot(N_sphere, tE), dot(N_sphere, tN));
