@@ -590,20 +590,27 @@ export class WeatherFeed {
         const fV  = this._bilinear(V,  gridW, gridH, TEX_W, TEX_H, true);
         const fW  = this._bilinear(W,  gridW, gridH, TEX_W, TEX_H, true);
 
-        // Cloud channels: bilinear + box-blur to soften upsample blockiness.
-        // Blur radius scales to the upstream cell pitch so the blur covers
-        // about one input cell — at 10° grid (legacy) one cell ≈ 11 px → R≈5,
-        // at 5° (current) one cell ≈ 5 px → R≈3. Two passes ≈ Gaussian σ ≈ R·√2.
+        // Cloud channels: bilinear upsample + a SINGLE structure-preserving
+        // smoothing pass. The previous code ran two box-blur passes (≈
+        // Gaussian σ ≈ R·√2 ≈ 4–7 px on a 360-wide texture). That was enough
+        // to dissolve fronts, cyclone bands and the dry slot into a uniform
+        // low-frequency haze — so on screen the only structure left came from
+        // the shader's procedural noise, not the real Open-Meteo field. One
+        // light pass is plenty to hide the 5° upsample blockiness while
+        // keeping the synoptic gradient that makes weather systems legible.
+        // High cloud (cirrus) is naturally wispy and sharp-edged, so it gets
+        // an even lighter touch than the low/mid decks.
         const fCL = this._bilinear(cL, gridW, gridH, TEX_W, TEX_H, true);
         const fCM = this._bilinear(cM, gridW, gridH, TEX_W, TEX_H, true);
         const fCH = this._bilinear(cH, gridW, gridH, TEX_W, TEX_H, true);
         const fPr = this._bilinear(Pr, gridW, gridH, TEX_W, TEX_H, true);
         const cellPx  = Math.max(1, Math.round(TEX_W / gridW));
-        const blurR   = Math.max(2, Math.round(cellPx * 0.55));
-        const precipR = Math.max(2, Math.round(cellPx * 0.45));
-        const sLow    = this._boxBlur(this._boxBlur(fCL, TEX_W, TEX_H, blurR), TEX_W, TEX_H, blurR);
-        const sMid    = this._boxBlur(this._boxBlur(fCM, TEX_W, TEX_H, blurR), TEX_W, TEX_H, blurR);
-        const sHigh   = this._boxBlur(this._boxBlur(fCH, TEX_W, TEX_H, blurR), TEX_W, TEX_H, blurR);
+        const blurR   = Math.max(1, Math.round(cellPx * 0.40));
+        const cirrusR = Math.max(1, Math.round(cellPx * 0.25));
+        const precipR = Math.max(1, Math.round(cellPx * 0.35));
+        const sLow    = this._boxBlur(fCL, TEX_W, TEX_H, blurR);
+        const sMid    = this._boxBlur(fCM, TEX_W, TEX_H, blurR);
+        const sHigh   = this._boxBlur(fCH, TEX_W, TEX_H, cirrusR);
         const sPrecip = this._boxBlur(fPr, TEX_W, TEX_H, precipR);
 
         const NTEX = TEX_W * TEX_H;
