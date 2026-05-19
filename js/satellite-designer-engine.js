@@ -75,6 +75,39 @@ export function defaultEnv() {
     return { f107Sfu: 150, ap: 12 };
 }
 
+// ── Space-weather presets ───────────────────────────────────────────────────
+// Thermospheric density at a fixed altitude swings by ~an order of magnitude
+// across these regimes — the single largest source of real LEO-drag
+// variability. F10.7 is the 10.7 cm solar radio flux (solar EUV proxy, sfu);
+// Ap is the daily planetary geomagnetic index (Joule heating proxy). The
+// Carrington/Gannon extremes saturate Ap near its 400 ceiling.
+export const SPACE_WEATHER_PRESETS = {
+    solar_min:   { label: 'Solar minimum',     f107Sfu: 68,  ap: 4   },
+    nominal:     { label: 'Nominal',           f107Sfu: 150, ap: 12  },
+    solar_max:   { label: 'Solar maximum',     f107Sfu: 230, ap: 20  },
+    geo_storm:   { label: 'Geomagnetic storm', f107Sfu: 180, ap: 120 },
+    carrington:  { label: 'Carrington-class',  f107Sfu: 250, ap: 400 },
+};
+
+// ── Drag attitude ───────────────────────────────────────────────────────────
+// How the vehicle is pointed multiplies its effective Cd·A relative to the
+// "as-designed" broadside reference area. Feathered ≈ knife-edge / sun-
+// pointing minimum section (Starlink in safe mode); broadside ≈ panels flat
+// to the flow (aerobraking); tumbling ≈ orientation-averaged for a convex
+// body (≈¼ of the wetted area vs. the max projected face).
+export const ATTITUDE_MODES = {
+    feathered: { label: 'Feathered',  mult: 0.30 },
+    nominal:   { label: 'Nominal',    mult: 1.00 },
+    broadside: { label: 'Broadside',  mult: 1.90 },
+    tumbling:  { label: 'Tumbling',   mult: 0.70 },
+};
+
+/** Effective drag-area multiplier for a control object (default 1×). */
+export function attitudeMult(control) {
+    const m = control && Number(control.attitudeMult);
+    return Number.isFinite(m) && m > 0 ? m : 1;
+}
+
 // ── State construction ──────────────────────────────────────────────────────
 /**
  * Place the vehicle on an orbit defined by perigee/apogee altitude (km).
@@ -147,8 +180,11 @@ function derivatives(s, design, env, control) {
     const wy = s.vy - vAtmY;
     const vrel = Math.hypot(wx, wy);
     const rho = airDensity(alt, env);
-    // a_drag = −½ ρ |v_rel| (Cd A / m) v_rel
-    const k = 0.5 * rho * vrel * design.cd * design.area / mass;
+    // a_drag = −½ ρ |v_rel| (Cd A · attitude / m) v_rel. The attitude
+    // multiplier scales the effective frontal area: feathering shrinks it,
+    // flying broadside (aerobrake) inflates it.
+    const aMult = attitudeMult(control);
+    const k = 0.5 * rho * vrel * design.cd * design.area * aMult / mass;
     const aDragX = -k * wx;
     const aDragY = -k * wy;
     ax += aDragX;
@@ -273,16 +309,16 @@ export function elements(s) {
 /**
  * Live mission telemetry — everything the cockpit gauges show.
  */
-export function telemetry(s, design, env) {
+export function telemetry(s, design, env, attMult = 1) {
     const el = elements(s);
     const mass = design.dryMass + Math.max(s.fuel, 0);
-    const d = derivatives(s, design, { ...env }, { throttle: 0, mode: 'off' });
+    const d = derivatives(s, design, { ...env }, { throttle: 0, mode: 'off', attitudeMult: attMult });
 
     // Δv still in the tank (Tsiolkovsky), and the drag-only decay estimate.
     const dvRemaining = s.fuel > 0
         ? design.isp * G0 * Math.log((design.dryMass + s.fuel) / design.dryMass)
         : 0;
-    const ballisticCoeff = mass / (design.cd * design.area);   // kg/m²
+    const ballisticCoeff = mass / (design.cd * design.area * (attMult || 1));   // kg/m²
 
     // Specific-energy loss rate from drag → semi-major-axis decay rate.
     // ε̇ = a_nongrav · v ;  ȧ = (2 a² / μ) ε̇
@@ -392,6 +428,29 @@ export function selfTest() {
     let sp = initState(plunge, { periKm: 95, apoKm: 95 });
     const rp = advance(sp, plunge, env, { throttle: 0, mode: 'off' }, 6 * 3600);
     T(!rp.state.alive && rp.state.reason === 'reentry', `decaying craft re-enters & ends mission`);
+
+    // 8. Space weather: a geomagnetic storm swells the thermosphere, so ρ at
+    //    400 km is far higher than at solar minimum, and decay is faster.
+    const eMin = SPACE_WEATHER_PRESETS.solar_min;
+    const eStorm = SPACE_WEATHER_PRESETS.geo_storm;
+    const rhoMin = airDensity(400_000, eMin);
+    const rhoStorm = airDensity(400_000, eStorm);
+    T(rhoStorm > rhoMin * 3,
+        `storm ρ(400 km) ≫ solar-min (${rhoStorm.toExponential(1)} vs ${rhoMin.toExponential(1)})`);
+    const sat = makeDesign({ dryMass: 60, fuelMass: 0, area: 3, cd: 2.2 });
+    const dMin = advance(initState(sat, { periKm: 320 }), sat, eMin, { throttle: 0, mode: 'off' }, 12 * 3600);
+    const dStorm = advance(initState(sat, { periKm: 320 }), sat, eStorm, { throttle: 0, mode: 'off' }, 12 * 3600);
+    T(elements(dStorm.state).a < elements(dMin.state).a,
+        `storm decays faster than solar-min over 12 h`);
+
+    // 9. Attitude: flying broadside bleeds the orbit faster than feathered.
+    const att = makeDesign({ dryMass: 80, fuelMass: 0, area: 3, cd: 2.2 });
+    const feath = advance(initState(att, { periKm: 300 }), att, env,
+        { throttle: 0, mode: 'off', attitudeMult: ATTITUDE_MODES.feathered.mult }, 12 * 3600);
+    const broad = advance(initState(att, { periKm: 300 }), att, env,
+        { throttle: 0, mode: 'off', attitudeMult: ATTITUDE_MODES.broadside.mult }, 12 * 3600);
+    T(elements(broad.state).a < elements(feath.state).a,
+        `broadside decays faster than feathered (a ${(elements(feath.state).a/1000).toFixed(0)} vs ${(elements(broad.state).a/1000).toFixed(0)} km)`);
 
     return out;
 }
