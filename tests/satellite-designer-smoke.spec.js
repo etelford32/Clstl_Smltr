@@ -197,4 +197,48 @@ test.describe('satellite-designer.html smoke', () => {
         // Chromium ships WebGL, so in CI this should come up ready.
         expect(r.ready, 'ship layer initialised under WebGL').toBe(true);
     });
+
+    test('launch → pause → reset drives the simulation loop', async ({ page }) => {
+        await page.goto(URL);
+        await page.waitForFunction(() => !!window.__sd, { timeout: BOOT_TIMEOUT_MS });
+
+        // Pre-flight: readouts blank, Reset always available, Pause inert.
+        await expect(page.locator('#st-phase')).toHaveText(/pre-flight/i);
+        await expect(page.locator('#b-reset')).toBeEnabled();
+        await expect(page.locator('#m-alt .v')).toHaveText('—');
+
+        // Crank time-warp so a few orbits pass in well under a second.
+        await page.click('#warp-modes .toggle[data-warp="3600"]');
+        await page.click('#b-launch');
+        await expect(page.locator('#st-phase')).toHaveText(/in flight/i);
+
+        // The loop must advance physics and push it to the gauges.
+        await page.waitForFunction(() => {
+            const s = window.__sd.sim;
+            return s.running && s.state && s.state.t > 0 && s.trail.length > 2;
+        }, { timeout: 5000 });
+        await expect(page.locator('#m-alt .v')).not.toHaveText('—');
+        const movedClock = await page.evaluate(() =>
+            Number(document.querySelector('#o-clock').textContent.replace(/\D/g, '')) > 0);
+        expect(movedClock, 'mission clock advances').toBe(true);
+
+        // Pause freezes the loop and is reflected in the status pill.
+        await page.click('#b-pause');
+        await expect(page.locator('#st-phase')).toHaveText(/paused/i);
+        const t1 = await page.evaluate(() => window.__sd.sim.state.t);
+        await page.waitForTimeout(250);
+        const t2 = await page.evaluate(() => window.__sd.sim.state.t);
+        expect(t2, 'state frozen while paused').toBe(t1);
+
+        // Reset returns to an editable pre-flight board with blank readouts.
+        await page.click('#b-reset');
+        await expect(page.locator('#st-phase')).toHaveText(/pre-flight/i);
+        await expect(page.locator('#m-alt .v')).toHaveText('—');
+        const cleared = await page.evaluate(() => {
+            const s = window.__sd.sim;
+            return !s.running && s.state === null && s.trail.length === 0;
+        });
+        expect(cleared, 'sim fully cleared on reset').toBe(true);
+        await expect(page.locator('#b-launch')).toBeEnabled();
+    });
 });

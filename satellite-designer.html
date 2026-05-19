@@ -368,8 +368,8 @@ select option{background:#0a1024}
 
       <div class="btn-row" style="margin-bottom:8px">
         <button class="btn primary" id="b-launch">▶ Launch</button>
-        <button class="btn" id="b-pause" disabled>Pause</button>
-        <button class="btn warn" id="b-reset" disabled>Reset</button>
+        <button class="btn" id="b-pause" disabled>⏸ Pause</button>
+        <button class="btn warn" id="b-reset">↺ Reset</button>
         <label class="toggle warn" id="b-auto" title="Auto fire prograde to defend the target altitude">⟳ Auto station-keep</label>
       </div>
 
@@ -673,14 +673,39 @@ function launch() {
   sim.stationSeconds = 0; sim.score = 0; sim.orbits = 0;
   sim.lastAngle = Math.atan2(sim.state.y, sim.state.x);
   sim.running = true; sim.paused = false;
-  $('b-launch').disabled = true; $('b-pause').disabled = false; $('b-reset').disabled = false;
-  $('b-pause').textContent = 'Pause';
+  $('b-launch').disabled = true;
+  $('b-pause').disabled = false; $('b-pause').textContent = '⏸ Pause';
+  $('b-reset').disabled = false;
+  $('st-warp').textContent = '▶ ×' + sim.warp;
   setPhase('In flight', 'good');
 }
+// Blank every live readout so each test run starts from a clean board.
+function clearReadouts() {
+  for (const id of ['m-alt','m-spd','m-peri','m-apo','m-period','m-ecc',
+                     'm-rho','m-q','m-drag','m-decay'])
+    setMetric(id, '—', null);
+  $('fuel-lbl').textContent = '—';
+  $('dv-lbl').textContent = '—';
+  $('fuel-bar').style.width = '0%';
+  $('dv-bar').style.width = '0%';
+  $('o-score').textContent = '0';
+  $('o-station').innerHTML = '0<small>s</small>';
+  $('o-orbits').textContent = '0';
+  $('o-clock').innerHTML = '0<small>s</small>';
+  $('o-best').textContent = fmt(sim.best);
+}
+// Hard stop → back to an editable pre-flight state. Always available so the
+// player can clear the board and try a different configuration instantly.
 function resetSim() {
   sim.running = false; sim.paused = false; sim.state = null;
-  $('b-launch').disabled = false; $('b-pause').disabled = true; $('b-reset').disabled = true;
+  sim.trail = []; sim.altHist = [];
+  sim.stationSeconds = 0; sim.score = 0; sim.orbits = 0;
+  $('b-launch').disabled = false;
+  $('b-pause').disabled = true; $('b-pause').textContent = '⏸ Pause';
+  $('b-reset').disabled = false;
+  $('st-warp').textContent = '▶ ×' + sim.warp;
   setPhase('Pre-flight', '');
+  clearReadouts();
   draw(); // clear to empty orbit
 }
 function setPhase(text, cls) {
@@ -691,9 +716,11 @@ function setPhase(text, cls) {
 $('b-launch').addEventListener('click', launch);
 $('b-reset').addEventListener('click', resetSim);
 $('b-pause').addEventListener('click', () => {
+  if (!sim.running) return;
   sim.paused = !sim.paused;
-  $('b-pause').textContent = sim.paused ? 'Resume' : 'Pause';
+  $('b-pause').textContent = sim.paused ? '▶ Resume' : '⏸ Pause';
   $('st-warp').textContent = (sim.paused ? '⏸ ' : '▶ ') + '×' + sim.warp;
+  setPhase(sim.paused ? '⏸ Paused' : 'In flight', sim.paused ? 'warn' : 'good');
 });
 addEventListener('keydown', (e) => {
   if (e.target.matches('input,select,textarea')) return;
@@ -745,9 +772,11 @@ function frame(now) {
     if (sim.altHist.length > 600) sim.altHist.shift();
 
     if (!sim.state.alive) {
-      sim.running = false;
+      sim.running = false; sim.paused = false;
       setPhase(sim.state.reason === 'reentry' ? '🔥 Burned up on re-entry' : 'Mission ended', 'bad');
-      $('b-pause').disabled = true;
+      // Re-arm the controls so a new configuration can be flown immediately.
+      $('b-pause').disabled = true; $('b-pause').textContent = '⏸ Pause';
+      $('b-launch').disabled = false;
       toast('Re-entry: the craft burned up in the lower atmosphere.', true);
       maybePersistBest();
     } else if (tel.fuel <= 0 && sim.control.mode === 'prograde') {
