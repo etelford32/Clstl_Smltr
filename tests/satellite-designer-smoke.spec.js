@@ -94,26 +94,26 @@ test.describe('satellite-designer.html smoke', () => {
         ).toHaveLength(0);
     });
 
-    test('design bay opens, configures parts and applies to the ship', async ({ page }) => {
+    test('inline design view configures parts and auto-applies to the ship', async ({ page }) => {
         await page.goto(URL);
         await page.waitForFunction(() => !!window.__sd, { timeout: BOOT_TIMEOUT_MS });
 
-        await page.click('#b-bay');
-        await page.waitForSelector('#bay.show', { timeout: 4000 });
-        // Part chips render even when the 3-D CDN is blocked (graceful degrade).
+        // No modal: the labelled SATELLITE DESIGN section and its part chips
+        // are present on the core page from the start.
+        await expect(page.locator('#sd-design .area-hd')).toContainText(/satellite design/i);
+        await expect(page.locator('#sd-mission .area-hd')).toContainText(/mission state/i);
+        await expect(page.locator('#bay')).toHaveCount(0);
         await page.waitForFunction(
             () => document.querySelectorAll('#bay-body .opt').length >= 3, { timeout: 4000 });
 
         const specHasNumber = await page.evaluate(() =>
             /\d/.test(document.querySelector('#bs-mass').textContent));
-        expect(specHasNumber, 'bay spec readout populated').toBe(true);
+        expect(specHasNumber, 'build spec readout populated').toBe(true);
 
-        // Pick the big bus + remove panels, then apply — dry mass must jump and
-        // Cd must collapse to the bare-bus value.
+        // Pick the big bus + remove panels — changes auto-apply to the ship
+        // form: dry mass jumps and Cd collapses to the bare-bus value.
         await page.click('#bay-body .opt[data-v="bus_med"]');
         await page.click('#bay-panel .opt[data-v="none"]');
-        await page.click('#bay-apply');
-        await page.waitForSelector('#bay:not(.show)', { timeout: 4000 });
 
         const form = await page.evaluate(() => ({
             dry: Number(document.querySelector('#f-dry').value),
