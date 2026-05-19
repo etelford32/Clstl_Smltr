@@ -83,4 +83,118 @@ test.describe('satellite-designer.html smoke', () => {
         expect(dv).toBeGreaterThan(1950);
         expect(dv).toBeLessThan(2150);
     });
+
+    test('builder self-test passes', async ({ page }) => {
+        await page.goto(URL);
+        await page.waitForFunction(() => !!window.__sd, { timeout: BOOT_TIMEOUT_MS });
+        const results = await page.evaluate(() => window.__sd.builder.selfTest());
+        const failures = results.filter(r => !r.pass);
+        expect(failures,
+            `builder self-tests pass (failures: ${failures.map(f => f.msg).join('; ')})`
+        ).toHaveLength(0);
+    });
+
+    test('inline design view configures parts and auto-applies to the ship', async ({ page }) => {
+        await page.goto(URL);
+        await page.waitForFunction(() => !!window.__sd, { timeout: BOOT_TIMEOUT_MS });
+
+        // No modal: the labelled SATELLITE DESIGN section and its part chips
+        // are present on the core page from the start.
+        await expect(page.locator('#sd-design .area-hd')).toContainText(/satellite design/i);
+        await expect(page.locator('#sd-mission .area-hd')).toContainText(/mission state/i);
+        await expect(page.locator('#bay')).toHaveCount(0);
+        await page.waitForFunction(
+            () => document.querySelectorAll('#bay-body .opt').length >= 3, { timeout: 4000 });
+
+        const specHasNumber = await page.evaluate(() =>
+            /\d/.test(document.querySelector('#bs-mass').textContent));
+        expect(specHasNumber, 'build spec readout populated').toBe(true);
+
+        // Pick the big bus + remove panels — changes auto-apply to the ship
+        // form: dry mass jumps and Cd collapses to the bare-bus value.
+        await page.click('#bay-body .opt[data-v="bus_med"]');
+        await page.click('#bay-panel .opt[data-v="none"]');
+
+        const form = await page.evaluate(() => ({
+            dry: Number(document.querySelector('#f-dry').value),
+            cd: Number(document.querySelector('#f-cd').value),
+            build: window.__sd.bay.getBuild(),
+        }));
+        expect(form.dry, 'medium bus is heavy').toBeGreaterThan(300);
+        expect(form.cd, 'no panels ⇒ bare-bus Cd').toBeCloseTo(2.2, 1);
+        expect(form.build.body).toBe('bus_med');
+    });
+
+    test('build config round-trips through the design draft', async ({ page }) => {
+        await page.goto(URL);
+        await page.waitForFunction(() => !!window.__sd, { timeout: BOOT_TIMEOUT_MS });
+
+        const data = await page.evaluate(() => window.__sd.ui.currentDesignData());
+        expect(data.build, 'design data carries the 3-D build').toBeTruthy();
+        expect(data.build.body, 'build has a chassis').toBeTruthy();
+        expect(data.build.thruster, 'build has a thruster type').toBeTruthy();
+        expect(data.env, 'design data carries space-weather env').toBeTruthy();
+        expect(data.attitude, 'design data carries drag attitude').toBeTruthy();
+    });
+
+    test('space-weather presets swing the thermosphere density', async ({ page }) => {
+        await page.goto(URL);
+        await page.waitForFunction(() => !!window.__sd, { timeout: BOOT_TIMEOUT_MS });
+
+        const r = await page.evaluate(() => {
+            window.__sd.conditions.setSWPreset('solar_min');
+            const lo = window.__sd.conditions.rho400();
+            window.__sd.conditions.setSWPreset('carrington');
+            const hi = window.__sd.conditions.rho400();
+            return { lo, hi, env: window.__sd.conditions.getEnv() };
+        });
+        // Carrington-class storm density at 400 km is many× solar-min.
+        expect(r.hi).toBeGreaterThan(r.lo * 5);
+        expect(r.env.ap).toBe(400);
+
+        // Preset chip + slider readout reflect the active regime.
+        await page.click('#sw-presets .toggle[data-sw="solar_max"]');
+        const f107 = await page.evaluate(() => Number(document.querySelector('#f-f107').value));
+        expect(f107).toBe(230);
+    });
+
+    test('drag attitude scales the effective drag area', async ({ page }) => {
+        await page.goto(URL);
+        await page.waitForFunction(() => !!window.__sd, { timeout: BOOT_TIMEOUT_MS });
+
+        const r = await page.evaluate(() => {
+            window.__sd.conditions.setAttitude('feathered');
+            const f = window.__sd.sim.control.attitudeMult;
+            window.__sd.conditions.setAttitude('broadside');
+            const b = window.__sd.sim.control.attitudeMult;
+            return { f, b, att: window.__sd.conditions.getAttitude() };
+        });
+        expect(r.f).toBeLessThan(1);
+        expect(r.b).toBeGreaterThan(1.5);
+        expect(r.att).toBe('broadside');
+
+        // The effective-area readout updates with attitude.
+        const effText = await page.textContent('#d-effarea');
+        expect(/\d/.test(effText), 'effective drag area shown').toBe(true);
+    });
+
+    test('the 3-D ship layer mounts over the orbit stage', async ({ page }) => {
+        await page.goto(URL);
+        await page.waitForFunction(() => !!window.__sd, { timeout: BOOT_TIMEOUT_MS });
+
+        const canvas = page.locator('#sd-shipgl');
+        await expect(canvas, 'ship WebGL canvas overlays the stage').toBeAttached();
+
+        // boot() fires ensureShipGL(); it either initialises (WebGL present)
+        // or fails gracefully — either way it must have been attempted, and
+        // the 2-D marker keeps the craft visible if it could not.
+        const r = await page.evaluate(async () => {
+            await window.__sd.stage.ensureShipGL();
+            return { tried: window.__sd.stage.shipTried(),
+                     ready: window.__sd.stage.shipReady() };
+        });
+        expect(r.tried, 'ship layer initialisation was attempted').toBe(true);
+        // Chromium ships WebGL, so in CI this should come up ready.
+        expect(r.ready, 'ship layer initialised under WebGL').toBe(true);
+    });
 });
