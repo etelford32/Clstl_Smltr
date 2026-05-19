@@ -8,6 +8,11 @@ nav {
     background: rgba(4,2,16,.93); backdrop-filter: blur(16px);
     border-bottom: 1px solid rgba(255,255,255,.07);
     display: flex; align-items: center; padding: 0 16px; gap: 6px;
+    /* Pin the nav typeface to the app face. nav-items use
+       `font-family: inherit`, so without this the bar adopts each host
+       page's body font (e.g. the editorial Inter/serif on the
+       satellite-operator microsite) and looks different per page. */
+    font-family: 'Space Grotesk', 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
 }
 .nav-brand {
     display: flex; align-items: center; gap: 8px;
