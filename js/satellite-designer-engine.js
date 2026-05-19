@@ -48,6 +48,14 @@ export const ENGINE_PRESETS = {
     biprop:        { label: 'Bipropellant (MMH/NTO)', thrust: 445.0,  isp: 321  },
     hall_ion:      { label: 'Hall-effect ion',        thrust: 0.25,   isp: 1800 },
     gridded_ion:   { label: 'Gridded ion (Xe)',       thrust: 0.092,  isp: 3300 },
+    // ── Cutting-edge electric propulsion ──
+    // High Isp, tiny thrust, and (the new lever) a real electrical-power
+    // appetite — see js/satellite-builder.js THRUSTER_UNITS .power. Under-
+    // power one and it throttles down proportionally.
+    hall_shielded: { label: 'Mag-shielded Hall',      thrust: 0.30,   isp: 2000 },
+    iodine_ion:    { label: 'Iodine gridded ion',     thrust: 0.010,  isp: 2200 },
+    electrospray:  { label: 'Electrospray / FEEP',    thrust: 0.0011, isp: 2800 },
+    water_resisto: { label: 'Water electrothermal',   thrust: 0.060,  isp: 165  },
 };
 
 /**

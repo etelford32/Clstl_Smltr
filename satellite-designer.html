@@ -195,7 +195,7 @@ select option{background:#0a1024}
   background:radial-gradient(120% 100% at 50% 30%,#0a1733,#02030a)}
 #bay-canvas{display:block;width:100%;height:100%}
 .bay-spec{position:absolute;left:9px;right:9px;bottom:9px;
-  display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
+  display:grid;grid-template-columns:repeat(3,1fr);gap:1px;
   background:rgba(255,255,255,.07);border-radius:var(--r-md);overflow:hidden;
   pointer-events:none}
 .bay-spec .metric{padding:5px 7px}
@@ -253,6 +253,8 @@ select option{background:#0a1024}
           <div class="metric"><div class="k">Ram area</div><div class="v" id="bs-area">—</div></div>
           <div class="metric"><div class="k">Drag C<sub>d</sub></div><div class="v" id="bs-cd">—</div></div>
           <div class="metric"><div class="k">Thrust</div><div class="v" id="bs-thr">—</div></div>
+          <div class="metric"><div class="k">Array power</div><div class="v" id="bs-pwr">—</div></div>
+          <div class="metric" id="bs-margin-m"><div class="k">Pwr margin</div><div class="v" id="bs-margin">—</div></div>
         </div>
       </div>
     </div>
@@ -1166,7 +1168,15 @@ function refreshBaySpec() {
   $('bs-mass').innerHTML = fmt(d.dryMass, 1) + ' <small>kg</small>';
   $('bs-area').innerHTML = fmt(d.area, 2) + ' <small>m²</small>';
   $('bs-cd').textContent = d.cd.toFixed(2);
-  $('bs-thr').innerHTML = fmt(d.thrust, d.thrust < 10 ? 2 : 0) + ' <small>N</small>';
+  const thrDp = d.thrust > 0 && d.thrust < 1 ? 4 : d.thrust < 10 ? 2 : 0;
+  $('bs-thr').innerHTML = fmt(d.thrust, thrDp) + ' <small>N</small>'
+    + (d.electric && d.powerFrac < 1
+        ? ` <small style="color:var(--c-bad)">${Math.round(d.powerFrac * 100)}%</small>` : '');
+  $('bs-pwr').innerHTML = fmt(d.power, 0) + ' <small>W</small>';
+  $('bs-margin').innerHTML = (d.powerMargin >= 0 ? '+' : '') + fmt(d.powerMargin, 0) + ' <small>W</small>';
+  const mm = $('bs-margin-m');
+  mm.classList.remove('flag-good', 'flag-warn', 'flag-bad');
+  mm.classList.add(d.powerMargin < 0 ? 'flag-bad' : d.powerMargin < 50 ? 'flag-warn' : 'flag-good');
   return d;
 }
 function disposeGroup(grp) {

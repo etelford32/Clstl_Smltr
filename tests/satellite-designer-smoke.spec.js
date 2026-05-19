@@ -241,4 +241,51 @@ test.describe('satellite-designer.html smoke', () => {
         expect(cleared, 'sim fully cleared on reset').toBe(true);
         await expect(page.locator('#b-launch')).toBeEnabled();
     });
+
+    test('power budget gates electric propulsion', async ({ page }) => {
+        await page.goto(URL);
+        await page.waitForFunction(() => !!window.__sd, { timeout: BOOT_TIMEOUT_MS });
+
+        // Flagship Hall thruster on a body-only build: no array power, so it
+        // is fully starved — zero thrust, negative margin (flagged red).
+        await page.click('#bay-thruster .opt[data-v="hall_shielded"]');
+        await page.click('#bay-panel .opt[data-v="none"]');
+        let s = await page.evaluate(() => ({
+            thr: Number(document.querySelector('#f-thrust').value),
+            d: window.__sd.builder.deriveDesign(
+                 window.__sd.bay.getBuild(), window.__sd.engine.ENGINE_PRESETS),
+            marginBad: document.querySelector('#bs-margin-m')
+                          .classList.contains('flag-bad'),
+        }));
+        expect(s.d.electric, 'hall is electric').toBe(true);
+        expect(s.d.powerFrac, 'starved EP makes no thrust').toBe(0);
+        expect(s.thr, 'form thrust starved to zero').toBe(0);
+        expect(s.marginBad, 'negative power margin flagged').toBe(true);
+
+        // Strap on a big quad array → fully powered, rated thrust restored.
+        await page.click('#bay-panel .opt[data-v="quad"]');
+        await page.evaluate(() => {
+            const sp = document.querySelector('#bay-span');
+            sp.value = '6'; sp.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        s = await page.evaluate(() => ({
+            thr: Number(document.querySelector('#f-thrust').value),
+            d: window.__sd.builder.deriveDesign(
+                 window.__sd.bay.getBuild(), window.__sd.engine.ENGINE_PRESETS),
+            pwrShown: /\d/.test(document.querySelector('#bs-pwr').textContent),
+        }));
+        expect(s.d.powerFrac, 'ample power ⇒ full thrust').toBe(1);
+        expect(s.thr, 'rated Hall thrust applied to ship').toBeCloseTo(0.30, 2);
+        expect(s.pwrShown, 'array-power readout populated').toBe(true);
+
+        // Chemical thrusters ignore the array entirely.
+        await page.click('#bay-thruster .opt[data-v="monoprop"]');
+        await page.click('#bay-panel .opt[data-v="none"]');
+        const chem = await page.evaluate(() => window.__sd.builder.deriveDesign(
+            window.__sd.bay.getBuild(), window.__sd.engine.ENGINE_PRESETS));
+        expect(chem.electric, 'monoprop is chemical').toBe(false);
+        expect(chem.powerFrac, 'chemical thrust unaffected by power').toBe(1);
+        expect(chem.thrust, 'monoprop still produces thrust with no panels')
+            .toBeGreaterThan(0);
+    });
 });
