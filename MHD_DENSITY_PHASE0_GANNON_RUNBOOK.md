@@ -108,33 +108,130 @@ of magnitude for Gannon peak forcing.
 **Day 1 done when:** all five fixture files present, non-empty, and
 `head`/`tail` rows pass eyeball checks.
 
-### Smoke-test status (this session)
+### Smoke-test status (re-confirmed 2026-05-20)
 
-The Day-1 smoke-tests were attempted in the remote-execution sandbox
-on 2026-05-20. All three external endpoints returned **HTTP 403** —
-not because the URLs are wrong, but because this environment's egress
-proxy denies non-allowlisted hosts (a plain `curl https://api.github.com/`
-also returns 403, confirming the policy block rather than a real
-upstream 4xx). Captured:
+Day-1 smoke-tests were attempted from the remote-execution sandbox.
+All four external hosts the pipeline needs return **HTTP 403** from
+the sandbox's egress proxy (DNS resolves; the block is at the proxy
+layer, not the upstream). A control probe of `api.github.com` also
+returns 403 — uniform policy filter, not real upstream 4xx.
 
 ```
-spdf:  https://spdf.gsfc.nasa.gov/.../omni_min202405.asc            → 403
-gfz:   https://kp.gfz-potsdam.de/app/files/Kp_ap_Ap_SN_F107_*.txt   → 403
-tud:   http://thermosphere.tudelft.nl/.../grcfo_density_2024_*.txt  → 403
+spdf.gsfc.nasa.gov          403   (OMNI 1-min IMF)
+kp.gfz-potsdam.de           403   (definitive Ap + F10.7)
+thermosphere.tudelft.nl     403   (GRACE-FO / Swarm density)
+omniweb.gsfc.nasa.gov       403   (OMNI alt access)
+api.github.com              403   (also blocks SWMF clone)
+raw.githubusercontent.com   301   (redirect-followable read; minimal use)
 ```
 
-**Action.** Day-1 pulls must be executed from an environment with
-outbound HTTPS to `spdf.gsfc.nasa.gov`, `kp.gfz-potsdam.de`,
-`thermosphere.tudelft.nl` (either a local dev box, or this remote
-environment after its network policy is widened). The fetcher CLIs
-themselves are unchanged — re-run the same `--smoke-test` commands
-above; they should return `200/206` rather than `403`.
+#### What the sandbox needs
 
-The third ground-mag fixture (the user's reconstruction) is **not**
-blocked by this — it has no network dependency. See the import shim
-below.
+To run Day-1 from inside this remote environment, the network policy
+has to allow outbound HTTPS (and one HTTP for TU Delft) to:
+
+| Host | Protocol | Purpose |
+|---|---|---|
+| `spdf.gsfc.nasa.gov` | HTTPS | OMNI HRO 1-min IMF |
+| `omniweb.gsfc.nasa.gov` | HTTPS | OMNI fallback |
+| `kp.gfz-potsdam.de` | HTTPS | GFZ Kp/Ap definitive series |
+| `thermosphere.tudelft.nl` | HTTP | TU Delft accelerometer densities |
+| `github.com` + `*.githubusercontent.com` | HTTPS | SWMF clone for BATS-R-US build |
+
+That last row is what unblocks BATS-R-US (Day 2). See the
+"BATS-R-US in this sandbox" section below for why even with network
+the build doesn't yet run here.
+
+#### Workstation operator path (no allowlist required)
+
+If you'd rather pull from a workstation that has plain internet
+access and drop the files in, the exact commands are:
+
+```sh
+# 1) OMNI 1-min IMF — May 2024 monthly file (covers the 10-13 May window)
+curl -fSL --create-dirs -o swmf/raw/omni/omni_min202405.asc \
+  'https://spdf.gsfc.nasa.gov/pub/data/omni/high_res_omni/monthly_1min/omni_min202405.asc'
+
+# 2) GFZ definitive Ap + F10.7 (one file covers all time; filter to window)
+curl -fSL --create-dirs -o dsmc/raw/gfz/Kp_ap_Ap_SN_F107_since_1932.txt \
+  'https://kp.gfz-potsdam.de/app/files/Kp_ap_Ap_SN_F107_since_1932.txt'
+
+# 3) GRACE-FO density — three daily files spanning 10-12 May
+for d in 10 11 12; do
+  curl -fSL --create-dirs \
+    -o dsmc/raw/grace_fo/grcfo_density_2024_05_${d}.txt \
+    "http://thermosphere.tudelft.nl/acceldata/GraceFO/v02/density/2024/grcfo_density_2024_05_${d}.txt"
+done
+
+# 4) Swarm-C density — paths shift; verify on TU Delft's index first
+# (placeholder — fill in once the v02 Swarm-C tree is browsed)
+```
+
+Then run the existing fetchers in local-glob mode (already supported
+by `fetch_grace_density`) to canonicalise the inputs. The two upstream
+fetchers (`fetch_omni_imf`, `fetch_historical_indices`) currently only
+network-fetch — when the time comes we'll add a `--from-file` flag to
+each so the same drop-in pattern works for them too. For now,
+copy/format manually using their parse functions as a reference.
+
+The ground-mag fixture is independent of all of the above — see the
+import shim below.
 
 ## Day 2 — replay + fit
+
+### BATS-R-US in this sandbox (status snapshot)
+
+For the remote-execution sandbox specifically, Day-2 has four hard
+prerequisites of which **none** is met today:
+
+| Prereq | Status (2026-05-20) | Why it matters |
+|---|---|---|
+| Outbound HTTPS to `github.com` | 403 (egress proxy) | `swmf/Dockerfile` clones SWMF from github |
+| `gfortran` / `gfortran-12` | not installed | SWMF requires gfortran 9+ |
+| OpenMPI dev (`mpicc`, `mpiexec`) | not installed | SWMF coupled solver is MPI-parallel |
+| L1 IMF data on disk | not present | feeds `gen_param --imf-file` |
+
+Practical consequence: BATS-R-US for Gannon cannot run from inside
+this sandbox in its current configuration. To unblock from here:
+widen the network policy as listed above **and** rebuild the
+sandbox image with `gfortran-12 libopenmpi-dev openmpi-bin`
+pre-installed (or wrap the run in `docker compose up` against
+`docker-compose.swmf.yml`, since Docker *is* installed here — but
+the in-image build still needs network for the SWMF clone).
+
+To unblock from a workstation: install the prereqs, follow the
+container instructions in `swmf/Dockerfile`, and post the runner
+output JSON back into this repo at
+`data/hindcast/gannon_may_2024_hindcast.json`.
+
+#### Placeholder mode for Day-2 plumbing tests
+
+So the MHD-track fitter can be exercised today without BATS-R-US,
+`scripts/gen_gannon_placeholder_mhd.py` synthesises a Gannon-shaped
+hindcast JSON from the page-side replay bundle. The output carries
+top-level `"is_placeholder": true`; `fit_pseudo_ap.py` refuses to
+fit it unless `--allow-placeholder` is set, and even then the
+output fit omits the legacy `a/b/c` shortcut keys so
+`hindcast_runner.PseudoApFit.from_json` can't accidentally load it.
+
+```sh
+python3 scripts/gen_gannon_placeholder_mhd.py
+# → data/hindcast/gannon_may_2024_hindcast.json  (865 samples, 5-min cadence,
+#   peak Φ_PC ≈ 332 kV, peak HPI ≈ 450 GW)
+```
+
+Smoke-tested 2026-05-20; both tracks lined up side-by-side:
+
+| Track | Coefficients (synthetic only) | R² |
+|---|---|---|
+| MHD (`--hindcast …_hindcast.json`)        | `Ap* = +6.92 + 4.616·Φ_PC − 2.725·HPI` | 0.79 |
+| Ground-mag (`--features-csv …ground_mag.csv`) | `Ap* = +67.11 − 0.045·SME + 0.561·jh_proxy` | 0.48 |
+
+These are numerically meaningless on their own — they're fit to a
+synthetic surrogate against an Ap series saturated at 400 for ~24 h.
+What they verify is the pipeline plumbing: pairing, OLS, refusal
+contract, output schema. Real BATS-R-US output will overwrite
+the hindcast JSON in place and these tables get re-populated.
 
 ### Generate PARAM.in
 

@@ -395,6 +395,73 @@ def test_cli_features_csv_allow_placeholder_writes_flag(tmp_path: Path):
     assert fit["is_placeholder_input"] is True
 
 
+def _write_placeholder_mhd_json(path: Path) -> None:
+    """Minimal flagged MHD hindcast JSON, schema matching the runner."""
+    import json
+    path.write_text(json.dumps({
+        "event_id":   "gannon_placeholder_test",
+        "window_utc": ["2024-05-10T12:00:00Z", "2024-05-11T00:00:00Z"],
+        "is_placeholder": True,
+        "_warning":   "synthetic; not BATS-R-US",
+        "samples": [
+            {"t": "2024-05-10T12:00:00Z", "phi_pc_kv": 25,  "hpi_gw": 22},
+            {"t": "2024-05-10T15:00:00Z", "phi_pc_kv": 90,  "hpi_gw": 110},
+            {"t": "2024-05-10T18:00:00Z", "phi_pc_kv": 185, "hpi_gw": 230},
+            {"t": "2024-05-10T21:00:00Z", "phi_pc_kv": 260, "hpi_gw": 340},
+            {"t": "2024-05-11T00:00:00Z", "phi_pc_kv": 305, "hpi_gw": 410},
+        ],
+    }))
+
+
+def test_cli_hindcast_refuses_placeholder(tmp_path: Path):
+    """Symmetric to test_cli_features_csv_refuses_placeholder: a flagged
+    MHD hindcast JSON must trigger a clear refusal exit before any fit
+    is computed, and no output file must be written."""
+    hindcast = tmp_path / "hindcast.json"
+    histap   = tmp_path / "historical_ap.csv"
+    out      = tmp_path / "fit.json"
+    _write_placeholder_mhd_json(hindcast)
+    _write_historical_ap_csv(histap)
+    rc = fit_main([
+        "--hindcast", str(hindcast),
+        "--historical-ap", str(histap),
+        "--out", str(out),
+    ])
+    assert rc == 1
+    assert not out.exists()
+
+
+def test_cli_hindcast_allow_placeholder_omits_v1_keys(tmp_path: Path):
+    """With --allow-placeholder the fit runs, but the output JSON must
+    omit the legacy a/b/c shortcut keys so hindcast_runner.PseudoApFit
+    raises a clear "missing fields" error rather than silently loading
+    a fit derived from synthetic input. is_placeholder_input=true must
+    be set."""
+    hindcast = tmp_path / "hindcast.json"
+    histap   = tmp_path / "historical_ap.csv"
+    out      = tmp_path / "fit.json"
+    _write_placeholder_mhd_json(hindcast)
+    _write_historical_ap_csv(histap)
+    rc = fit_main([
+        "--hindcast", str(hindcast),
+        "--historical-ap", str(histap),
+        "--allow-placeholder",
+        "--out", str(out),
+    ])
+    assert rc == 0
+    import json
+    fit = json.loads(out.read_text())
+    assert fit["is_placeholder_input"] is True
+    assert fit["fit_source"] == "hindcast-json"
+    # The v1 shortcut keys must be GONE when flagged.
+    assert "a" not in fit
+    assert "b" not in fit
+    assert "c" not in fit
+    # v2 fields still present.
+    assert "coefficients" in fit
+    assert fit["features"] == ["phi_pc_kv", "hpi_gw"]
+
+
 def test_cli_mhd_path_preserves_v1_compat_keys(tmp_path: Path):
     """The MHD-driven path must keep emitting numeric a/b/c so
     swmf/pipeline/hindcast_runner.PseudoApFit.from_json keeps loading

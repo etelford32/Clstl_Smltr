@@ -209,6 +209,16 @@ def _load_hindcast(path: Path) -> dict:
     return payload
 
 
+def _hindcast_is_placeholder(payload: dict) -> bool:
+    """
+    A hindcast JSON is flagged when it carries a truthy top-level
+    ``is_placeholder`` field (the convention emitted by
+    ``scripts/gen_gannon_placeholder_mhd.py``). Mirrors the
+    ``_is_placeholder`` *column* convention on the features-CSV side.
+    """
+    return bool(payload.get("is_placeholder"))
+
+
 def _load_historical_ap(path: Path) -> list[dict]:
     out: list[dict] = []
     with path.open() as fh:
@@ -374,7 +384,13 @@ def _write_fit(
     }
     # Backwards-compatible shortcut keys for the MHD 2-feature case.
     # `hindcast_runner.PseudoApFit.from_json` requires numeric a/b/c.
-    if fit_source == "hindcast-json" and len(feature_names) == 2:
+    # We deliberately OMIT them when the input was flagged as a placeholder
+    # — `hindcast_runner` doesn't know about `is_placeholder_input` yet, and
+    # the safest failure mode is for it to raise a clear "missing a, b, c"
+    # error rather than silently load a fit derived from synthetic data.
+    if (fit_source == "hindcast-json"
+            and len(feature_names) == 2
+            and not is_placeholder_input):
         payload["a"] = intercept
         payload["b"] = feat_coeffs[0]
         payload["c"] = feat_coeffs[1]
@@ -417,13 +433,31 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     if args.hindcast is not None:
         hindcast = _load_hindcast(args.hindcast)
+        is_placeholder_mhd = _hindcast_is_placeholder(hindcast)
+        if is_placeholder_mhd and not args.allow_placeholder:
+            log.error(
+                "REFUSING to fit %s — top-level `is_placeholder: true` is set, "
+                "which means the input is a synthetic stand-in (typically from "
+                "`scripts/gen_gannon_placeholder_mhd.py`). Replace with the "
+                "real BATS-R-US hindcast_runner.py output before fitting, or "
+                "pass --allow-placeholder to proceed for plumbing-only "
+                "purposes (the resulting fit JSON will be flagged so "
+                "downstream consumers must refuse to score it as a real "
+                "result).",
+                args.hindcast,
+            )
+            return 1
         pairs = _pair_mhd(hindcast["samples"], ap_series)
         feature_names = ["phi_pc_kv", "hpi_gw"]
         event_id = hindcast["event_id"]
         window_utc = hindcast.get("window_utc")
         fit_source = "hindcast-json"
-        is_placeholder = None
-        log.info("Paired %d MHD ↔ Ap samples for %s", len(pairs), event_id)
+        # Propagate the flag the same way the features-CSV path does:
+        # None when not flagged at all (so we omit the key from output);
+        # True when --allow-placeholder lifted the refusal.
+        is_placeholder = True if is_placeholder_mhd else None
+        tag = " [PLACEHOLDER]" if is_placeholder_mhd else ""
+        log.info("Paired %d MHD ↔ Ap samples for %s%s", len(pairs), event_id, tag)
     else:
         if not args.feature_cols:
             log.error("--features-csv requires --feature-cols 'col1,col2,...'")
