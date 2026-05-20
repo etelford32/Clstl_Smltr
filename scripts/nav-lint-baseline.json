@@ -39,11 +39,6 @@
   "galactic-map.html": [
     "ghostCss"
   ],
-  "home-v2.html": [
-    "ghostCss",
-    "noNavJs",
-    "noNavStyles"
-  ],
   "hydro-demo.html": [
     "noNavJs",
     "noNavStyles"

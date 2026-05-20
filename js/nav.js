@@ -24,7 +24,10 @@ import { tierLevel as _cfgTierLevel, PAID_PLAN_IDS } from './tier-config.js';
 // embedded simulators) opt-in by importing js/telemetry.js directly.
 import './telemetry.js';
 
-const LOGO_IMG = 'ParkersPhysics_logo2.jpg';
+// Root-absolute so the shared nav renders identically from any directory
+// depth — pages under /satellite-operator/ etc. would otherwise 404 the
+// logo and every nav link (relative paths resolve against the subdir).
+const LOGO_IMG = '/ParkersPhysics_logo2.jpg';
 
 // ── Navigation Structure ─────────────────────────────────────────────────────
 
@@ -230,7 +233,7 @@ export function initNav(activeId = '') {
     }
 
     let html = `
-        <a href="index.html" class="nav-brand" aria-label="Parkers Physics home">
+        <a href="/index.html" class="nav-brand" aria-label="Parkers Physics home">
             <img src="${LOGO_IMG}" class="nav-logo-img" alt="Parkers Physics">
             Parkers Physics
         </a>
@@ -243,7 +246,7 @@ export function initNav(activeId = '') {
     `;
 
     // Home link
-    html += `<a href="index.html" class="nav-item${activeId === 'home' ? ' active' : ''}">Home</a>`;
+    html += `<a href="/index.html" class="nav-item${activeId === 'home' ? ' active' : ''}">Home</a>`;
 
     // Dropdown menus
     for (const dd of NAV_DROPDOWNS) {
@@ -267,7 +270,7 @@ export function initNav(activeId = '') {
             const hasAccess = userTier >= required || item.tier === 'public';
 
             if (!hasAccess && item.tier === 'advanced') {
-                html += `<a href="pricing.html" class="nav-drop-link" style="opacity:0.5" role="menuitem" title="Available on Advanced plan">
+                html += `<a href="/pricing.html" class="nav-drop-link" style="opacity:0.5" role="menuitem" title="Available on Advanced plan">
                     <span class="ndl-icon">${item.icon || ''}</span>
                     <span class="ndl-body">
                         <span class="ndl-title">${item.label} <span class="nav-badge-pro">PRO</span></span>
@@ -275,7 +278,7 @@ export function initNav(activeId = '') {
                     </span>
                 </a>`;
             } else if (!hasAccess) {
-                html += `<a href="signin.html" class="nav-drop-link" style="opacity:0.4" role="menuitem" title="Sign up for free to access">
+                html += `<a href="/signin.html" class="nav-drop-link" style="opacity:0.4" role="menuitem" title="Sign up for free to access">
                     <span class="ndl-icon">${item.icon || ''}</span>
                     <span class="ndl-body">
                         <span class="ndl-title">${item.label} <span style="font-size:.6rem;color:#665">Sign up</span></span>
@@ -285,7 +288,7 @@ export function initNav(activeId = '') {
             } else {
                 const _hid = item.id || item.href.replace('.html','');
                 const _isAct = _hid === activeId || _hid.startsWith(activeId) || activeId.startsWith(_hid);
-                html += `<a href="${item.href}" class="nav-drop-link${_isAct ? ' active' : ''}" role="menuitem">
+                html += `<a href="/${item.href}" class="nav-drop-link${_isAct ? ' active' : ''}" role="menuitem">
                     <span class="ndl-icon">${item.icon || ''}</span>
                     <span class="ndl-body">
                         <span class="ndl-title">${item.label}${item.badge ? (
@@ -312,12 +315,12 @@ export function initNav(activeId = '') {
     const isPro = userTier >= 3;
     html += `<div class="nav-utility-links">`;
     if (isSignedIn) {
-        html += `<a href="dashboard.html" class="nav-util-link">Dashboard</a>`;
-        html += `<a href="account.html" class="nav-util-link">Account</a>`;
+        html += `<a href="/dashboard.html" class="nav-util-link">Dashboard</a>`;
+        html += `<a href="/account.html" class="nav-util-link">Account</a>`;
     }
-    html += `<a href="pricing.html" class="nav-util-link">Pricing</a>`;
+    html += `<a href="/pricing.html" class="nav-util-link">Pricing</a>`;
     if (!isPro) {
-        html += `<a href="pricing.html" class="nav-pro-promo" title="Unlock Satellites, Launch Planner & Upper Atmosphere with PRO">
+        html += `<a href="/pricing.html" class="nav-pro-promo" title="Unlock Satellites, Launch Planner & Upper Atmosphere with PRO">
             <span class="nav-pro-spark">✨</span><span class="nav-pro-text">PRO unlocks Satellites · Launch Planner · Upper Atmosphere</span><span class="nav-pro-arrow" aria-hidden="true">→</span>
         </a>`;
     }
@@ -345,7 +348,7 @@ export function initNav(activeId = '') {
                     <div class="nav-bell-list" id="nav-bell-list">
                         <div style="padding:20px;text-align:center;color:#556;font-size:.78rem">No alerts yet</div>
                     </div>
-                    <a href="dashboard.html" class="nav-bell-footer">View all alerts</a>
+                    <a href="/dashboard.html" class="nav-bell-footer">View all alerts</a>
                 </div>
             </div>`;
         }
@@ -353,12 +356,12 @@ export function initNav(activeId = '') {
             html += `<span class="nav-item" style="background:rgba(0,200,200,.12);color:#0cc;border-color:rgba(0,200,200,.25);font-weight:700;font-size:.7rem;cursor:default">TESTER</span>`;
         }
         if (isAdmin) {
-            html += `<a href="admin.html" class="nav-item nav-admin-link">${auth.role === 'superadmin' ? 'SUPER' : 'ADMIN'}</a>`;
+            html += `<a href="/admin.html" class="nav-item nav-admin-link">${auth.role === 'superadmin' ? 'SUPER' : 'ADMIN'}</a>`;
         }
         html += `<button class="nav-item nav-signout" id="nav-signout-btn">Sign Out</button>`;
     } else {
-        html += `<a href="signin.html" class="nav-item nav-login">Sign In</a>`;
-        html += `<a href="signup.html" class="nav-item nav-signup">Sign Up Free</a>`;
+        html += `<a href="/signin.html" class="nav-item nav-login">Sign In</a>`;
+        html += `<a href="/signup.html" class="nav-item nav-signup">Sign Up Free</a>`;
     }
 
     html += '</div>';
@@ -488,12 +491,12 @@ export function initNav(activeId = '') {
         try {
             const { auth } = await import('./auth.js');
             await auth.ready();
-            auth.signOut('index.html');
+            auth.signOut('/index.html');
         } catch (_) {
             // Fallback if auth module fails to load
             try { localStorage.removeItem(AUTH_KEY); } catch (_e) {}
             try { sessionStorage.removeItem(AUTH_KEY); } catch (_e) {}
-            window.location.href = 'index.html';
+            window.location.href = '/index.html';
         }
     });
 
