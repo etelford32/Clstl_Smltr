@@ -279,6 +279,20 @@ export class WeatherForecastFeed {
         // sent timezone=UTC. Append 'Z' before parsing to be explicit.
         const fetchedAt     = Date.now();
         const firstLocTimes = merged[0]?.hourly?.time ?? [];
+
+        // Truncation guard. The API can return fewer hours than the
+        // start_hour/end_hour window asked for (data not yet available
+        // at the deepest horizon, model availability boundary). Emit
+        // a diagnostic event so the UI / tests can detect a partial
+        // batch — we still ingest what came back.
+        const expectedHours = Math.round((endMs - startMs) / HOUR_MS) + 1;
+        if (firstLocTimes.length < expectedHours) {
+            _emit('weather-forecast-truncated', {
+                requested: expectedHours,
+                received:  firstLocTimes.length,
+                startMs, endMs,
+            });
+        }
         let ingested = 0;
         for (let h = 0; h < firstLocTimes.length; h++) {
             const t = Date.parse(firstLocTimes[h] + 'Z');
@@ -327,19 +341,94 @@ export class WeatherForecastFeed {
         return ingested;
     }
 
-    async _fetchChunk(start, end, startMs, endMs) {
+    // Per-chunk fetch with exponential backoff + per-attempt timeout.
+    //
+    // Retry policy
+    // ────────────
+    //   • 3 attempts max (initial + 2 retries). Backoff = 2^(n-1) seconds,
+    //     i.e. 0s, 1s, 2s between attempts. Bounded so a downed upstream
+    //     fails fast instead of holding the inflight promise for minutes.
+    //   • 429 honours `Retry-After` if the server set it (Open-Meteo does
+    //     when the daily quota is exhausted). Falls back to exp backoff.
+    //   • 5xx + network errors (AbortError, TypeError "Failed to fetch")
+    //     retry. 4xx other than 429 (e.g. 400 = bad coordinate) fail fast.
+    //   • 20s AbortController per attempt — Open-Meteo p99 is ~3s, so
+    //     anything past 20s is almost certainly a stalled connection.
+    //
+    // Schema validation
+    // ─────────────────
+    //   Confirms response is a non-empty array and every element has
+    //   `hourly.time` as an array. Catches the "empty 200" mode where the
+    //   API responds with `[{}]` (no hourly key) — left unchecked, the
+    //   pivot loop would silently zero-fill the entire grid.
+    async _fetchChunk(start, end, startMs, endMs, attempt = 1) {
+        const MAX_ATTEMPTS  = 3;
+        const ATTEMPT_TO_MS = 20_000;
         const url = _chunkUrl(start, end, startMs, endMs);
-        const res = await fetch(url, { headers: { Accept: 'application/json' } });
-        if (!res.ok) {
-            const body = await res.text().catch(() => '');
-            throw new Error(`HTTP ${res.status} on chunk ${start}-${end}: ${body.slice(0, 200)}`);
+
+        const ctrl = new AbortController();
+        const timeoutId = setTimeout(() => ctrl.abort(), ATTEMPT_TO_MS);
+
+        const _retry = async (waitMs) => {
+            if (attempt >= MAX_ATTEMPTS) return null;
+            if (waitMs > 0) await new Promise(r => setTimeout(r, waitMs));
+            return this._fetchChunk(start, end, startMs, endMs, attempt + 1);
+        };
+
+        try {
+            const res = await fetch(url, {
+                headers: { Accept: 'application/json' },
+                signal:  ctrl.signal,
+            });
+
+            if (res.status === 429) {
+                const hdr = Number(res.headers.get('Retry-After'));
+                const waitMs = Number.isFinite(hdr) && hdr > 0
+                    ? Math.min(hdr * 1000, 10_000)
+                    : (2 ** (attempt - 1)) * 1000;
+                const r = await _retry(waitMs);
+                if (r !== null) return r;
+                throw new Error(`HTTP 429 (rate-limited) on chunk ${start}-${end} after ${attempt} attempts`);
+            }
+            if (!res.ok) {
+                if (res.status >= 500 && res.status < 600) {
+                    const r = await _retry((2 ** (attempt - 1)) * 1000);
+                    if (r !== null) return r;
+                }
+                const body = await res.text().catch(() => '');
+                throw new Error(`HTTP ${res.status} on chunk ${start}-${end}: ${body.slice(0, 200)}`);
+            }
+
+            const json = await res.json();
+            // Open-Meteo error envelope: {"error":true,"reason":"..."}
+            if (json && typeof json === 'object' && !Array.isArray(json) && json.error === true) {
+                throw new Error(`upstream error chunk ${start}-${end}: ${json.reason ?? 'unknown'}`);
+            }
+            const arr = Array.isArray(json) ? json : [json];
+            if (arr.length === 0) {
+                throw new Error(`chunk ${start}-${end}: empty response array`);
+            }
+            for (let i = 0; i < arr.length; i++) {
+                const h = arr[i]?.hourly;
+                if (!h || !Array.isArray(h.time)) {
+                    throw new Error(`chunk ${start}-${end}: missing hourly.time at idx ${i}`);
+                }
+            }
+            return arr;
+        } catch (err) {
+            // Transient network failures retry. AbortError covers the
+            // per-attempt timeout; TypeError "Failed to fetch" covers
+            // DNS/socket level failures in browsers.
+            const transient = err?.name === 'AbortError'
+                || (err?.name === 'TypeError' && /fetch/i.test(err?.message ?? ''));
+            if (transient) {
+                const r = await _retry((2 ** (attempt - 1)) * 1000);
+                if (r !== null) return r;
+            }
+            throw err;
+        } finally {
+            clearTimeout(timeoutId);
         }
-        const json = await res.json();
-        // Open-Meteo error envelope: {"error":true,"reason":"..."}
-        if (json && typeof json === 'object' && !Array.isArray(json) && json.error === true) {
-            throw new Error(`upstream error chunk ${start}-${end}: ${json.reason ?? 'unknown'}`);
-        }
-        return Array.isArray(json) ? json : [json];
     }
 }
 
