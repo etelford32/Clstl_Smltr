@@ -185,23 +185,41 @@ fit two independent models and report both:
   Ap*_gnd = a' + b'·SME + c'·dΦ/dt + d'·jh_proxy
   ```
 
-`fit_pseudo_ap` currently takes a single regression spec; extend it
-with `--target-source mhd|ground` (or just call it twice with
-different `--features-csv` inputs).
+`fit_pseudo_ap.py` supports both paths natively (mutually exclusive
+`--hindcast` and `--features-csv` flags). The features-CSV path
+**refuses** to score against any input carrying the `_is_placeholder`
+column — pass `--allow-placeholder` only when you intentionally want
+a plumbing-only fit; the resulting JSON is then stamped
+`"is_placeholder_input": true` so downstream consumers can refuse to
+treat it as real.
 
 ```sh
 cd dsmc
+# MHD track (writes v1-compat a/b/c plus v2 coefficients/features keys
+# so hindcast_runner.PseudoApFit.from_json keeps loading it unchanged):
 python3 -m pipeline.fit_pseudo_ap \
   --hindcast ../data/hindcast/gannon_may_2024_hindcast.json \
   --historical-ap fixtures/hindcast/gannon_may_2024/historical_ap.csv \
   --out ../data/hindcast/gannon_may_2024_pseudo_ap_fit.json -v
 
+# Ground-mag track (independent OLS, n features general):
 python3 -m pipeline.fit_pseudo_ap \
   --features-csv fixtures/hindcast/gannon_may_2024/ground_mag.csv \
-  --historical-ap fixtures/hindcast/gannon_may_2024/historical_ap.csv \
   --feature-cols sme_nt,jh_proxy_gw \
+  --historical-ap fixtures/hindcast/gannon_may_2024/historical_ap.csv \
+  --event-id gannon_may_2024 \
   --out ../data/hindcast/gannon_may_2024_pseudo_ap_fit_ground.json -v
 ```
+
+Smoke-tested against the synthetic placeholder fixture: without
+`--allow-placeholder` the CLI exits 1 with a clear refusal message
+and writes no JSON; with it, the fit lands at
+`Ap* = +67.1 − 0.045·sme_nt + 0.561·jh_proxy_gw` (R² ≈ 0.48 against
+the saturated-at-400 historical Ap — the low R² is the
+Ap-ceiling signature, not a regression bug). When the real
+reconstruction lands and Ap is no longer treated as saturating
+truth (since the whole point is that it isn't), this number
+becomes the storm-peak skill comparison.
 
 **Gannon-specific sanity bounds.** Because Ap is saturated for most
 of the storm peak, single-event OLS will under-fit the high end.

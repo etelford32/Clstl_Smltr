@@ -1,44 +1,72 @@
 #!/usr/bin/env python3
 """
-fit_pseudo_ap.py — fit the (a, b, c) coefficients for pseudo-Ap
+fit_pseudo_ap.py — fit a non-saturating Ap* regression
 =================================================================
-Solves the regression
+Two fit modes, sharing one OLS solver:
 
-    Ap(t) ≈ a + b · Φ_PC(t) [kV] + c · HPI(t) [GW]
+  (1) MHD-driven (the original path):
+        Ap*(t) ≈ a + b · Φ_PC(t) [kV] + c · HPI(t) [GW]
+      Inputs: a hindcast JSON written by
+      ``swmf/pipeline/hindcast_runner.py`` + the historical Ap CSV.
 
-by ordinary least squares against historical NOAA Ap, given the
-MHD-output JSON written by `swmf/pipeline/hindcast_runner.py` and the
-historical Ap CSV written by `fetch_historical_indices.py`.
+  (2) Features-CSV (added for the ground-magnetometer track):
+        Ap*(t) ≈ a + Σ_i  k_i · feature_i(t)
+      Inputs: any CSV with a `t` column + N numeric feature columns
+      (e.g. produced by ``dsmc/pipeline/import_ground_mag.py``).
 
-Pure-Python OLS via the normal equations — no numpy required, so this
-runs in any environment that has the rest of the harness installed.
-The matrix is 3×3, condition number is fine for the storms we care
-about.
+Both paths solve N+1 linear normal equations by Gauss-Jordan with
+partial pivoting — pure Python, no numpy.
 
-Output
-------
-Writes a JSON file at --out:
+Refusal contract
+----------------
+The features-CSV path refuses to fit any input that carries an
+``_is_placeholder`` column (set by ``import_ground_mag.py
+--placeholder``). Pass ``--allow-placeholder`` to override for
+plumbing-only runs; the output JSON then records
+``is_placeholder_input: true`` so downstream consumers can refuse
+to score it as a real result.
 
-  {
-    "version": "v1",
-    "event_id": "...",
-    "n_samples": 412,
-    "a": -3.21, "b": 0.412, "c": 0.587,
-    "rmse_ap":  4.7,
-    "r2":       0.84,
-    "formula":  "Ap = -3.21 + 0.412·Φ_PC + 0.587·HPI",
-    "fit_window_utc": ["...", "..."]
-  }
+Output JSON
+-----------
+MHD mode keeps the v1 fields so existing consumers
+(``hindcast_runner.PseudoApFit.from_json``) stay green:
 
-Drop the (a, b, c) into hindcast_runner.PseudoApFit (or pass via
---regression-json once that wiring lands) and re-run validate_density.
+  { "version": "v2", "fit_source": "hindcast-json",
+    "event_id": "...", "n_samples": ...,
+    "a": ..., "b": ..., "c": ...,                  ← v1 compatibility
+    "coefficients": {"intercept": ..., "phi_pc_kv": ..., "hpi_gw": ...},
+    "features": ["phi_pc_kv", "hpi_gw"],
+    "rmse_ap": ..., "r2": ...,
+    "formula": "Ap* = ...",
+    "fit_window_utc": ["...", "..."] }
+
+Features-CSV mode emits the same shape minus the v1 ``a/b/c``
+shortcut keys (they don't generalise to arbitrary feature counts):
+
+  { "version": "v2", "fit_source": "features-csv",
+    "event_id": "...", "n_samples": ...,
+    "coefficients": {"intercept": ..., "<col>": ..., ...},
+    "features": ["<col>", "..."],
+    "rmse_ap": ..., "r2": ...,
+    "formula": "Ap* = ...",
+    "fit_window_utc": ["...", "..."],
+    "is_placeholder_input": <bool> }
 
 Usage
 -----
+  # MHD path (unchanged)
   python -m pipeline.fit_pseudo_ap \\
-      --hindcast data/hindcast/feb_2022_starlink_hindcast.json \\
-      --historical-ap dsmc/fixtures/hindcast/feb_2022_starlink/historical_ap.csv \\
-      --out data/hindcast/feb_2022_starlink_pseudo_ap_fit.json
+      --hindcast      data/hindcast/feb_2022_starlink_hindcast.json \\
+      --historical-ap fixtures/hindcast/feb_2022_starlink/historical_ap.csv \\
+      --out           data/hindcast/feb_2022_starlink_pseudo_ap_fit.json
+
+  # Features-CSV path (ground-mag reconstruction)
+  python -m pipeline.fit_pseudo_ap \\
+      --features-csv  fixtures/hindcast/gannon_may_2024/ground_mag.csv \\
+      --feature-cols  sme_nt,jh_proxy_gw \\
+      --historical-ap fixtures/hindcast/gannon_may_2024/historical_ap.csv \\
+      --event-id      gannon_may_2024 \\
+      --out           data/hindcast/gannon_may_2024_pseudo_ap_fit_ground.json
 """
 
 from __future__ import annotations
@@ -50,9 +78,11 @@ import logging
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
 log = logging.getLogger("dsmc.fit_pseudo_ap")
+
+PLACEHOLDER_COLUMN = "_is_placeholder"
 
 
 def _parse_iso(t: str) -> datetime:
@@ -69,23 +99,28 @@ def _step_lookup(series: list[dict], when: datetime, key: str) -> Optional[float
     return None if chosen is None else float(chosen)
 
 
-# ── 3×3 OLS via normal equations, no numpy ────────────────────────────────────
+# ── General OLS via normal equations ──────────────────────────────────────────
 
-def _solve_3x3(A: list[list[float]], b: list[float]) -> list[float]:
-    """Gauss–Jordan with partial pivot. Hand-rolled to avoid numpy."""
-    M = [row[:] + [b[i]] for i, row in enumerate(A)]
-    n = 3
+def _solve_nxn(A: list[list[float]], rhs: list[float]) -> list[float]:
+    """
+    Gauss-Jordan with partial pivoting on a square system. Hand-rolled to
+    keep zero external deps (the rest of the harness must run in
+    sandbox CI without numpy). Stable enough for the well-conditioned
+    storm-window problems we throw at it; raises on singular systems.
+    """
+    n = len(A)
+    M = [row[:] + [rhs[i]] for i, row in enumerate(A)]
     for i in range(n):
-        # pivot
         piv = i
         for k in range(i + 1, n):
             if abs(M[k][i]) > abs(M[piv][i]):
                 piv = k
         if abs(M[piv][i]) < 1e-12:
-            raise ValueError("singular normal-equation matrix; "
-                             "regression underdetermined or perfectly colinear")
+            raise ValueError(
+                "singular normal-equation matrix; "
+                "regression underdetermined or perfectly colinear"
+            )
         M[i], M[piv] = M[piv], M[i]
-        # eliminate
         for k in range(n):
             if k == i:
                 continue
@@ -95,46 +130,77 @@ def _solve_3x3(A: list[list[float]], b: list[float]) -> list[float]:
     return [M[i][n] / M[i][i] for i in range(n)]
 
 
-def _ols_fit(rows: list[tuple[float, float, float]]
-             ) -> tuple[float, float, float, float, float]:
+# Legacy alias — pre-Phase-0 code (and the test suite) imports this name.
+# The general solver handles the 3×3 case identically.
+_solve_3x3 = _solve_nxn
+
+
+def _ols_fit_general(rows: Sequence[Sequence[float]], n_features: int
+                     ) -> tuple[float, list[float], float, float]:
     """
-    rows: list of (phi_pc, hpi, ap_observed).
-    Returns (a, b, c, rmse, r2).
+    Generic OLS for an intercept + N features.
+
+    rows: each element is (feat_1, ..., feat_N, target). The target is
+    always the last element.
+
+    Returns (intercept, [coeff_1, ..., coeff_N], rmse, r2).
     """
     n = len(rows)
-    if n < 4:
-        raise ValueError(f"need ≥ 4 paired samples; got {n}")
+    if n < n_features + 2:
+        raise ValueError(
+            f"need ≥ {n_features + 2} paired samples for {n_features}-feature OLS; got {n}"
+        )
 
-    # Sufficient statistics for normal equations.
-    s1   = float(n)
-    sx   = sy = sz = 0.0
-    sxx  = sxy = sxz = syy = syz = szz = 0.0
-    for x, y, z in rows:    # x=phi_pc, y=hpi, z=ap
-        sx  += x;  sy  += y;  sz  += z
-        sxx += x * x;  sxy += x * y;  sxz += x * z
-        syy += y * y;  syz += y * z;  szz += z * z
+    size = n_features + 1
+    M = [[0.0] * size for _ in range(size)]
+    rhs = [0.0] * size
+    for row in rows:
+        feats = row[:-1]
+        t = row[-1]
+        # First row/col of normal equations covers the intercept.
+        M[0][0] += 1.0
+        rhs[0] += t
+        for i, fi in enumerate(feats):
+            M[0][i + 1] += fi
+            M[i + 1][0] += fi
+            rhs[i + 1] += fi * t
+            for j, fj in enumerate(feats):
+                M[i + 1][j + 1] += fi * fj
 
-    A = [
-        [s1,  sx,  sy],
-        [sx,  sxx, sxy],
-        [sy,  sxy, syy],
-    ]
-    rhs = [sz, sxz, syz]
-    a, b, c = _solve_3x3(A, rhs)
+    coeffs = _solve_nxn(M, rhs)
+    intercept = coeffs[0]
+    feat_coeffs = coeffs[1:]
 
-    # Residuals
     sse = 0.0
-    for x, y, ap in rows:
-        pred = a + b * x + c * y
-        sse += (pred - ap) ** 2
+    sum_t = 0.0
+    for row in rows:
+        feats = row[:-1]
+        t = row[-1]
+        pred = intercept + sum(c * f for c, f in zip(feat_coeffs, feats))
+        sse += (pred - t) ** 2
+        sum_t += t
     rmse = (sse / n) ** 0.5
-    mean_z = sz / n
-    sst = sum((ap - mean_z) ** 2 for _, _, ap in rows)
+    mean_t = sum_t / n
+    sst = sum((row[-1] - mean_t) ** 2 for row in rows)
     r2 = 1.0 - (sse / sst) if sst > 0 else float("nan")
-    return a, b, c, rmse, r2
+    return intercept, feat_coeffs, rmse, r2
 
 
-# ── Pairing ───────────────────────────────────────────────────────────────────
+def _ols_fit(rows: Sequence[Sequence[float]]
+             ) -> tuple[float, float, float, float, float]:
+    """
+    Legacy 2-feature wrapper. rows: (phi_pc, hpi, ap_observed).
+    Kept for the existing test suite + any external caller; the
+    features-CSV path goes through _ols_fit_general directly.
+
+    Returns (a, b, c, rmse, r2).
+    """
+    intercept, feat_coeffs, rmse, r2 = _ols_fit_general(rows, 2)
+    b, c = feat_coeffs
+    return intercept, b, c, rmse, r2
+
+
+# ── MHD-path loaders (unchanged) ──────────────────────────────────────────────
 
 def _load_hindcast(path: Path) -> dict:
     payload = json.loads(path.read_text())
@@ -152,12 +218,9 @@ def _load_historical_ap(path: Path) -> list[dict]:
     return out
 
 
-def _pair(hindcast_samples: list[dict], ap_series: list[dict]
-          ) -> list[tuple[float, float, float]]:
-    """
-    For every MHD sample, look up the matching 3-hour Ap (step interp)
-    and pair them. Returns (phi_pc, hpi, ap).
-    """
+def _pair_mhd(hindcast_samples: list[dict], ap_series: list[dict]
+              ) -> list[tuple[float, float, float]]:
+    """(phi_pc, hpi, ap_observed) for every MHD sample with a step-Ap match."""
     pairs: list[tuple[float, float, float]] = []
     for s in hindcast_samples:
         ap = _step_lookup(ap_series, s["t"], "ap")
@@ -167,13 +230,182 @@ def _pair(hindcast_samples: list[dict], ap_series: list[dict]
     return pairs
 
 
+# Legacy alias — pre-Phase-0 code (and the test suite) imports this name.
+_pair = _pair_mhd
+
+
+# ── Features-CSV loader + pairing ─────────────────────────────────────────────
+
+def _read_features_csv(
+    path: Path,
+    feature_cols: Sequence[str],
+    *,
+    allow_placeholder: bool,
+) -> tuple[list[dict], bool]:
+    """
+    Read an arbitrary features CSV (with optional `#`-comment preamble)
+    and return (rows, is_placeholder_input).
+
+    Rows: list of {t: datetime, <feature_col>: float, ...} dicts.
+
+    Raises SystemExit if the file carries the _is_placeholder sentinel
+    and `allow_placeholder` is False. We refuse early — before any
+    fitting work — so the operator gets a clear error rather than a
+    plausible-looking fit they might mistake for real.
+    """
+    raw_lines = [
+        ln for ln in path.read_text().splitlines()
+        if ln.strip() and not ln.lstrip().startswith("#")
+    ]
+    if not raw_lines:
+        raise SystemExit(f"fit_pseudo_ap: {path.name} has no non-comment rows.")
+    reader = csv.DictReader(raw_lines)
+    header = reader.fieldnames or []
+
+    is_placeholder = PLACEHOLDER_COLUMN in header
+    if is_placeholder and not allow_placeholder:
+        raise SystemExit(
+            f"fit_pseudo_ap: REFUSING to fit {path} — it carries the "
+            f"`{PLACEHOLDER_COLUMN}` column, which means the input is a "
+            f"synthetic placeholder produced by "
+            f"`import_ground_mag.py --placeholder`. Replace with the real "
+            f"reconstruction before fitting, or pass --allow-placeholder "
+            f"to proceed for plumbing-only purposes (the resulting fit "
+            f"JSON will be flagged so downstream consumers must refuse "
+            f"to score it as a real result)."
+        )
+
+    if "t" not in header:
+        raise SystemExit(
+            f"fit_pseudo_ap: features CSV {path.name} is missing a `t` column; "
+            f"got columns {header}."
+        )
+    missing = [c for c in feature_cols if c not in header]
+    if missing:
+        raise SystemExit(
+            f"fit_pseudo_ap: --feature-cols {missing} not present in "
+            f"{path.name}; available columns: {header}."
+        )
+
+    rows: list[dict] = []
+    for r in reader:
+        t_raw = (r.get("t") or "").strip()
+        if not t_raw:
+            continue
+        try:
+            t = _parse_iso(t_raw)
+        except ValueError:
+            continue
+        row: dict = {"t": t}
+        ok = True
+        for col in feature_cols:
+            v = (r.get(col) or "").strip()
+            if not v:
+                ok = False
+                break
+            try:
+                row[col] = float(v)
+            except ValueError:
+                ok = False
+                break
+        if ok:
+            rows.append(row)
+    if not rows:
+        raise SystemExit(
+            f"fit_pseudo_ap: no usable rows parsed from {path.name} "
+            f"with feature-cols {list(feature_cols)}."
+        )
+    return rows, is_placeholder
+
+
+def _pair_features(feature_rows: list[dict],
+                   ap_series: list[dict],
+                   feature_cols: Sequence[str]
+                   ) -> list[tuple[float, ...]]:
+    """For every features row, step-look up Ap and pair into (feat..., ap)."""
+    pairs: list[tuple[float, ...]] = []
+    for r in feature_rows:
+        ap = _step_lookup(ap_series, r["t"], "ap")
+        if ap is None:
+            continue
+        pairs.append(tuple(r[c] for c in feature_cols) + (ap,))
+    return pairs
+
+
+# ── Output writer ─────────────────────────────────────────────────────────────
+
+def _format_formula(intercept: float, coeffs: list[float],
+                    feature_names: Sequence[str]) -> str:
+    terms = [f"{intercept:+.4f}"]
+    for k, name in zip(coeffs, feature_names):
+        terms.append(f"{k:+.4f}·{name}")
+    return "Ap* = " + " ".join(terms)
+
+
+def _write_fit(
+    out: Path,
+    *,
+    fit_source: str,
+    event_id: str,
+    intercept: float,
+    feat_coeffs: list[float],
+    feature_names: Sequence[str],
+    rmse: float,
+    r2: float,
+    n_samples: int,
+    window_utc: list[str] | None,
+    is_placeholder_input: bool | None = None,
+) -> None:
+    coefficients = {"intercept": intercept}
+    for name, k in zip(feature_names, feat_coeffs):
+        coefficients[name] = k
+
+    payload: dict = {
+        "version":          "v2",
+        "fit_source":       fit_source,
+        "event_id":         event_id,
+        "n_samples":        n_samples,
+        "coefficients":     coefficients,
+        "features":         list(feature_names),
+        "rmse_ap":          rmse,
+        "r2":               r2,
+        "formula":          _format_formula(intercept, feat_coeffs, feature_names),
+        "fit_window_utc":   window_utc,
+    }
+    # Backwards-compatible shortcut keys for the MHD 2-feature case.
+    # `hindcast_runner.PseudoApFit.from_json` requires numeric a/b/c.
+    if fit_source == "hindcast-json" and len(feature_names) == 2:
+        payload["a"] = intercept
+        payload["b"] = feat_coeffs[0]
+        payload["c"] = feat_coeffs[1]
+    if is_placeholder_input is not None:
+        payload["is_placeholder_input"] = is_placeholder_input
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(payload, indent=2))
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main(argv: Optional[list[str]] = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
-    p.add_argument("--hindcast",        type=Path, required=True)
-    p.add_argument("--historical-ap",   type=Path, required=True)
-    p.add_argument("--out",             type=Path, required=True)
+    src = p.add_mutually_exclusive_group(required=True)
+    src.add_argument("--hindcast", type=Path,
+                     help="MHD hindcast JSON from swmf/pipeline/hindcast_runner.py.")
+    src.add_argument("--features-csv", type=Path,
+                     help="Arbitrary features CSV (e.g. ground-mag reconstruction).")
+    p.add_argument("--feature-cols",
+                   help="Comma-separated feature column names for --features-csv "
+                        "(e.g. 'sme_nt,jh_proxy_gw').")
+    p.add_argument("--event-id",
+                   help="Event ID label (required with --features-csv; inferred "
+                        "from the hindcast JSON otherwise).")
+    p.add_argument("--historical-ap", type=Path, required=True)
+    p.add_argument("--out", type=Path, required=True)
+    p.add_argument("--allow-placeholder", action="store_true",
+                   help="Permit fitting against a features CSV that carries the "
+                        "_is_placeholder sentinel column. The output JSON is "
+                        "flagged so downstream consumers can refuse to score it.")
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args(argv)
     logging.basicConfig(
@@ -181,30 +413,71 @@ def main(argv: Optional[list[str]] = None) -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    hindcast = _load_hindcast(args.hindcast)
     ap_series = _load_historical_ap(args.historical_ap)
-    pairs = _pair(hindcast["samples"], ap_series)
-    log.info("Paired %d MHD ↔ Ap samples for %s",
-             len(pairs), hindcast["event_id"])
+
+    if args.hindcast is not None:
+        hindcast = _load_hindcast(args.hindcast)
+        pairs = _pair_mhd(hindcast["samples"], ap_series)
+        feature_names = ["phi_pc_kv", "hpi_gw"]
+        event_id = hindcast["event_id"]
+        window_utc = hindcast.get("window_utc")
+        fit_source = "hindcast-json"
+        is_placeholder = None
+        log.info("Paired %d MHD ↔ Ap samples for %s", len(pairs), event_id)
+    else:
+        if not args.feature_cols:
+            log.error("--features-csv requires --feature-cols 'col1,col2,...'")
+            return 2
+        feature_names = [c.strip() for c in args.feature_cols.split(",") if c.strip()]
+        if not feature_names:
+            log.error("--feature-cols produced no usable column names")
+            return 2
+        rows, is_placeholder = _read_features_csv(
+            args.features_csv, feature_names,
+            allow_placeholder=args.allow_placeholder,
+        )
+        pairs = _pair_features(rows, ap_series, feature_names)
+        event_id = (
+            args.event_id
+            or args.features_csv.parent.name        # fixtures/hindcast/<event>/...
+            or args.features_csv.stem
+        )
+        window_utc = [
+            rows[0]["t"].isoformat().replace("+00:00", "Z"),
+            rows[-1]["t"].isoformat().replace("+00:00", "Z"),
+        ]
+        fit_source = "features-csv"
+        tag = " [PLACEHOLDER]" if is_placeholder else ""
+        log.info("Paired %d feature-rows ↔ Ap samples for %s%s",
+                 len(pairs), event_id, tag)
 
     try:
-        a, b, c, rmse, r2 = _ols_fit(pairs)
+        intercept, feat_coeffs, rmse, r2 = _ols_fit_general(pairs, len(feature_names))
     except ValueError as exc:
-        log.error("%s", exc); return 2
+        log.error("%s", exc)
+        return 2
 
-    formula = f"Ap = {a:+.4f} + {b:+.4f}·Φ_PC[kV] + {c:+.4f}·HPI[GW]"
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps({
-        "version":          "v1",
-        "event_id":         hindcast["event_id"],
-        "n_samples":        len(pairs),
-        "a": a, "b": b, "c": c,
-        "rmse_ap":          rmse,
-        "r2":               r2,
-        "formula":          formula,
-        "fit_window_utc":   hindcast["window_utc"],
-    }, indent=2))
+    _write_fit(
+        args.out,
+        fit_source=fit_source,
+        event_id=event_id,
+        intercept=intercept,
+        feat_coeffs=feat_coeffs,
+        feature_names=feature_names,
+        rmse=rmse,
+        r2=r2,
+        n_samples=len(pairs),
+        window_utc=window_utc,
+        is_placeholder_input=is_placeholder,
+    )
+
+    formula = _format_formula(intercept, feat_coeffs, feature_names)
     log.info("Fit %s  (RMSE=%.2f, R²=%.3f) → %s", formula, rmse, r2, args.out)
+    if is_placeholder:
+        log.warning(
+            "Output is flagged is_placeholder_input=true; downstream "
+            "consumers MUST refuse to score this fit as a real result."
+        )
     return 0
 
 
