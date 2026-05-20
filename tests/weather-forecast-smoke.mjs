@@ -234,6 +234,10 @@ check('URLs use start_hour / end_hour and required Open-Meteo params', () => {
         assert.match(url, /wind_speed_unit=ms/);
         assert.match(url, /start_hour=\d{4}-\d{2}-\d{2}T\d{2}:00/);
         assert.match(url, /end_hour=\d{4}-\d{2}-\d{2}T\d{2}:00/);
+        // Open-Meteo defaults to forecast_days=7; without the explicit
+        // bump the right half of the +14d scrub bar returns truncated
+        // arrays and the globe freezes mid-drag.
+        assert.match(url, /forecast_days=16/);
     }
 });
 

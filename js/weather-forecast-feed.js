@@ -114,6 +114,12 @@ function _isoHour(ms) {
     return `${yyyy}-${mm}-${dd}T${HH}:00`;
 }
 
+// Open-Meteo defaults to forecast_days=7 even when start_hour/end_hour
+// reach further out. Without the explicit bump, the right half of the
+// scrub bar (anything past +7 d) gets truncated arrays back and the
+// resolver clamps to the last available hour, leaving the globe frozen
+// while the user keeps dragging. 16 is the API's hard ceiling and lines
+// up with the GFS extended range that `best_match` falls through to.
 function _chunkUrl(start, end, startMs, endMs) {
     const { lat, lon } = _chunkCoords(start, end);
     return `${OPEN_METEO_FORECAST}`
@@ -122,6 +128,7 @@ function _chunkUrl(start, end, startMs, endMs) {
         + `&hourly=${HOURLY_VARS}`
         + `&wind_speed_unit=ms`
         + `&timezone=UTC`
+        + `&forecast_days=16`
         + `&start_hour=${_isoHour(startMs)}`
         + `&end_hour=${_isoHour(endMs)}`;
 }
