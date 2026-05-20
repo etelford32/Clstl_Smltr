@@ -1,10 +1,20 @@
 # Weather LSTM offline trainer
 
 Produces the pretrained per-channel weight files that ship as static
-assets under `/js/`. v1 covers `temperature_2m`; the package is
-factored so adding U/V/precip is a matter of (a) swapping the feature
-builder, (b) bumping the model's `output_size`, and (c) registering a
-new channel name in `train.py`.
+assets under `/js/`. v1 ships two channels:
+
+| Channel | Input size | Output | Output file |
+|---------|------------|--------|-------------|
+| `temperature` | 8 | 1 (`T_norm`) | `js/weather-temperature-lstm-weights.json` |
+| `wind` | 9 | 2 (`U_norm`, `V_norm`) | `js/weather-wind-lstm-weights.json` |
+
+Per-channel config (variables to fetch, normalisation, feature layout,
+output path) lives in [`channels.py`](./channels.py). Adding a third
+channel — precipitation, surface pressure, cloud cover — is the same
+shape: define a `ChannelConfig`, write a small `_extract_*` function
+that returns the dynamic features + targets + normalisation dict, and
+register it in the `CHANNELS` map. The data fetcher, window slicer,
+train loop, and weight exporter are channel-agnostic.
 
 The browser-side loader pattern (`solar-lstm.js#loadPretrainedWeights`)
 expects the exact JSON shape this exporter produces — see
@@ -42,18 +52,27 @@ modern laptop CPU.
 ## Run
 
 ```bash
-# from the repo root
+# from the repo root — temperature
 python -m scripts.train_weather_lstm.train \
     --start 2024-01-01 --end 2025-01-01 \
-    --epochs 12 \
-    --output js/weather-temperature-lstm-weights.json
+    --epochs 12
+
+# wind (U, V) — same shape, different normalisation
+python -m scripts.train_weather_lstm.train --channel wind \
+    --start 2024-01-01 --end 2025-01-01 \
+    --epochs 12
 ```
 
-The first invocation downloads the Open-Meteo archive (~10–20 MB at
-10° grid resolution) and caches it under
-`scripts/train_weather_lstm/.cache/archive.npz`. Subsequent runs reuse
-the cache; pass `--cache /tmp/other.npz` (or delete the file) to
-force a refresh.
+The first invocation per channel downloads the Open-Meteo archive
+(~10–20 MB for temperature; ~20–40 MB for wind which needs both speed
+and direction) and caches it under
+`scripts/train_weather_lstm/.cache/archive-<channel>.npz`. Subsequent
+runs reuse the cache. Pass `--cache /shared.npz` if you want one
+cache file to serve multiple channels — `data.py` does a key-set
+check and refetches only if a needed variable is missing.
+
+The output file defaults to the channel's `output_path` from
+`channels.py`; override with `--output some/other.json`.
 
 ### Smoke run
 
@@ -84,6 +103,10 @@ Top-level keys:
 | `metrics.persistence_mae_C` | Naive "next hour = this hour" baseline MAE.     |
 | `metrics.skill_vs_persistence_1h` | `1 − MAE_model / MAE_persistence`, the    |
 |                           | Murphy skill score the in-page validator computes. |
+| `metrics.val_mae_norm[<feature>]` | Per-output normalised MAE — one entry  |
+|                           | per output dimension (1 for temperature, 2 for     |
+|                           | wind), useful for spotting whether U or V is the   |
+|                           | weaker component.                                  |
 | `metrics.n_train_windows` / `metrics.n_val_windows` | Sample counts. |
 | `nTrained`                | Total SGD steps, matches solar-lstm's bookkeeping. |
 | `trainedAt`               | ISO UTC timestamp of the train run.                |
@@ -120,18 +143,30 @@ export_weights()        -> JSON in the solar-lstm.js shape, including
 * `--max-windows` deterministically subsamples (seeded) so the CI
   smoke run produces a reproducible subset of windows.
 
-## Extending to U/V/precip
+## Extending to precip / cloud / surface pressure
 
-1. Pull `wind_speed_10m,wind_direction_10m,precipitation` alongside
-   `temperature_2m` in `data.py`. Decompose wind to U/V at fetch time
-   to keep the trainer channel-agnostic.
-2. Adjust `T_MIN_C`/`T_MAX_C` to per-channel physical bounds (e.g. wind
-   `|v| ≤ 60 m/s`, precip `log1p(mm)` to compress the heavy tail).
-3. Bump `ModelSpec.output_size` if a channel benefits from multi-output
-   (e.g. precip as `[P(rain), intensity_log_mm]` per the earlier design
-   review).
-4. Write one weights file per channel — `weather-{channel}-lstm-weights.json`.
-   The browser registry pattern is one forecaster per file.
+The wind channel is a worked example of the multi-output path. To
+add another channel:
+
+1. Define an `_extract_<name>` function in `channels.py` that returns
+   `(dynamic_features, targets, norm_meta)` — all already normalised
+   to roughly `[-1, 1]` or `[0, 1]`. For heavy-tailed channels (precip)
+   apply `log1p(mm)` before normalising; the JS-side denormaliser
+   inverts via `expm1`.
+2. Build a `ChannelConfig`: list of `hourly_vars` to fetch from
+   Open-Meteo, `output_size`, `feature_layout`, default `output_path`,
+   physical-units `unit` and `physical_scale`. Register it in the
+   `CHANNELS` map.
+3. Run `python -m scripts.train_weather_lstm.train --channel <name>`.
+   The data fetcher, window slicer, train loop, gate-remap exporter,
+   and Murphy-skill metric all pick it up automatically.
+
+For channels that benefit from a classification + intensity head
+(precip is the canonical case — predict `P(rain > threshold)` for
+threshold ∈ {0.1, 1, 5, 10 mm} alongside conditional intensity), use
+`output_size = 5` and put the per-threshold class logits + intensity
+in successive output slots. The exporter ships the full vector head
+without needing changes.
 
 ## What's intentionally not here
 

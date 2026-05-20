@@ -6,11 +6,19 @@ default to stay well under the 10k-calls/day quota — that's 648 cells
 which we chunk into ~80-cell URLs, so a 12-month pull is 9 HTTP calls.
 
 Cache shape on disk (one .npz per grid pull):
-    cells:  int32  (N,)         linear cell index
-    lat:    float32 (N,)         cell latitude in degrees
-    lon:    float32 (N,)         cell longitude in degrees
-    time:   int64   (T,)         epoch seconds, UTC, hour-aligned
-    temp:   float32 (N, T)       temperature_2m in degC; NaN = missing
+    cells:    int32  (N,)         linear cell index
+    lat:      float32 (N,)        cell latitude in degrees
+    lon:      float32 (N,)        cell longitude in degrees
+    time:     int64   (T,)        epoch seconds, UTC, hour-aligned
+    <var>:    float32 (N, T)      one array per requested Open-Meteo
+                                  variable (`temperature_2m`,
+                                  `wind_speed_10m`, etc). NaN = missing.
+
+The cache key is the (start, end, lats, lons, vars) tuple — pulling
+the same grid with a different variable list invalidates the cache.
+The caller chooses the path so they can keep multiple caches around
+(one per channel, or one shared cache requesting every variable
+they intend to train).
 """
 
 from __future__ import annotations
@@ -54,6 +62,7 @@ def build_coarse_grid(lat_step: float = 10.0,
 
 def _fetch_chunk(lats: np.ndarray, lons: np.ndarray,
                  start_date: str, end_date: str,
+                 hourly_vars: list[str],
                  timeout_s: float = 60.0,
                  retries: int = 3,
                  ) -> list[dict]:
@@ -66,7 +75,7 @@ def _fetch_chunk(lats: np.ndarray, lons: np.ndarray,
         "longitude": ",".join(f"{x:.4f}" for x in lons),
         "start_date": start_date,
         "end_date":   end_date,
-        "hourly":     "temperature_2m",
+        "hourly":     ",".join(hourly_vars),
         "timezone":   "UTC",
     }
     for attempt in range(1, retries + 1):
@@ -102,23 +111,39 @@ def _fetch_chunk(lats: np.ndarray, lons: np.ndarray,
 
 def fetch_archive_grid(start_date: str,
                        end_date: str,
+                       hourly_vars: Iterable[str],
                        lats: np.ndarray | None = None,
                        lons: np.ndarray | None = None,
                        chunk: int = DEFAULT_CHUNK,
                        sleep_between_chunks_s: float = 0.0,
                        cache_path: Path | None = None,
                        ) -> dict[str, np.ndarray]:
-    """Pull `temperature_2m` for every (lat, lon) cell across the
-    full date range. Returns the structured arrays documented at the
-    top of this module. Round-trips through `cache_path` if provided
-    so re-runs are idempotent — the slow part of a re-train is the
-    download, not the gradient steps.
+    """Pull every variable in `hourly_vars` for every (lat, lon) cell
+    across the full date range. Returns a dict keyed by variable name
+    (Open-Meteo's native key) plus the cells/lat/lon/time bookkeeping
+    arrays. Round-trips through `cache_path` if provided so re-runs
+    are idempotent — the slow part of a re-train is the download, not
+    the gradient steps.
+
+    The cache is content-checked: if it exists but is missing one of
+    the requested variables, we fall through to a fresh fetch rather
+    than silently feeding stale data into the trainer.
     """
+    hourly_vars = list(hourly_vars)
+    if not hourly_vars:
+        raise ValueError("fetch_archive_grid needs at least one hourly_var")
+
     if cache_path is not None and Path(cache_path).exists():
         z = np.load(cache_path)
-        print(f"[data] cache hit: {cache_path} "
-              f"({z['cells'].shape[0]} cells x {z['time'].shape[0]} hours)")
-        return {k: z[k] for k in z.files}
+        keys_on_disk = set(z.files)
+        missing = [v for v in hourly_vars if v not in keys_on_disk]
+        if missing:
+            print(f"[data] cache miss: {cache_path} lacks {missing}; refetching")
+        else:
+            print(f"[data] cache hit: {cache_path} "
+                  f"({z['cells'].shape[0]} cells x {z['time'].shape[0]} hours, "
+                  f"vars={sorted(set(z.files) - {'cells','lat','lon','time'})})")
+            return {k: z[k] for k in z.files}
 
     if lats is None or lons is None:
         lats, lons = build_coarse_grid()
@@ -129,9 +154,11 @@ def fetch_archive_grid(start_date: str,
               f"{DAILY_FREE_BUDGET}/day quota — consider a coarser grid")
 
     print(f"[data] fetching {n_cells} cells x ({start_date}..{end_date}) "
-          f"in {n_calls} chunks of {chunk}")
+          f"x {len(hourly_vars)} vars in {n_calls} chunks of {chunk}")
+    print(f"[data]   vars: {hourly_vars}")
 
-    all_temp_rows: list[np.ndarray] = []
+    # One growing list per variable. Final stack to (N_cells, T_hours).
+    rows_by_var: dict[str, list[np.ndarray]] = {v: [] for v in hourly_vars}
     canonical_time: np.ndarray | None = None
 
     for ci in range(n_calls):
@@ -140,7 +167,8 @@ def fetch_archive_grid(start_date: str,
         sub_lats = lats[i0:i1]
         sub_lons = lons[i0:i1]
         t0 = time.time()
-        rows = _fetch_chunk(sub_lats, sub_lons, start_date, end_date)
+        rows = _fetch_chunk(sub_lats, sub_lons, start_date, end_date,
+                            hourly_vars=hourly_vars)
         if len(rows) != (i1 - i0):
             raise RuntimeError(
                 f"chunk {ci}: requested {i1 - i0} cells, got {len(rows)}")
@@ -158,17 +186,22 @@ def fetch_archive_grid(start_date: str,
         elif not np.array_equal(canonical_time, times_epoch):
             raise RuntimeError(f"chunk {ci}: time axis disagreement")
 
-        # Per-cell temperature column.
+        # Per-cell, per-variable column.
         for cell_idx, row in enumerate(rows):
-            t_arr = row.get("hourly", {}).get("temperature_2m", [])
-            if len(t_arr) != canonical_time.shape[0]:
-                raise RuntimeError(
-                    f"chunk {ci} cell {cell_idx}: hour length mismatch")
-            # None -> NaN. Open-Meteo returns null at the boundaries of
-            # data availability (rare in archive; common in forecast).
-            arr = np.array([np.nan if v is None else v for v in t_arr],
-                           dtype=np.float32)
-            all_temp_rows.append(arr)
+            hourly = row.get("hourly", {})
+            for var in hourly_vars:
+                arr_in = hourly.get(var, [])
+                if len(arr_in) != canonical_time.shape[0]:
+                    raise RuntimeError(
+                        f"chunk {ci} cell {cell_idx} var {var}: "
+                        f"hour length mismatch "
+                        f"({len(arr_in)} vs {canonical_time.shape[0]})")
+                # None -> NaN. Open-Meteo returns null at boundaries
+                # of data availability (rare in archive; common in
+                # forecast). Downstream WindowDataset skips NaN windows.
+                arr = np.array([np.nan if v is None else v for v in arr_in],
+                               dtype=np.float32)
+                rows_by_var[var].append(arr)
 
         dt = time.time() - t0
         print(f"[data]   chunk {ci + 1}/{n_calls} ok "
@@ -178,19 +211,20 @@ def fetch_archive_grid(start_date: str,
             time.sleep(sleep_between_chunks_s)
 
     assert canonical_time is not None
-    temp = np.stack(all_temp_rows, axis=0)
-    if temp.shape != (n_cells, canonical_time.shape[0]):
-        raise RuntimeError(
-            f"stacked temp shape {temp.shape} != ({n_cells}, "
-            f"{canonical_time.shape[0]})")
-
-    out = {
+    n_hours = canonical_time.shape[0]
+    out: dict[str, np.ndarray] = {
         "cells": np.arange(n_cells, dtype=np.int32),
         "lat":   lats.astype(np.float32),
         "lon":   lons.astype(np.float32),
         "time":  canonical_time,
-        "temp":  temp,
     }
+    for var, rows_list in rows_by_var.items():
+        stacked = np.stack(rows_list, axis=0)
+        if stacked.shape != (n_cells, n_hours):
+            raise RuntimeError(
+                f"stacked {var} shape {stacked.shape} != ({n_cells}, {n_hours})")
+        out[var] = stacked
+
     if cache_path is not None:
         Path(cache_path).parent.mkdir(parents=True, exist_ok=True)
         np.savez_compressed(cache_path, **out)
@@ -199,13 +233,18 @@ def fetch_archive_grid(start_date: str,
 
 
 def report_coverage(data: dict[str, np.ndarray]) -> None:
-    """Print a one-shot summary of NaN coverage so the operator
-    notices if the archive returned spotty rows (e.g. when an ocean
-    cell has been masked out upstream)."""
-    temp = data["temp"]
-    n_cells, n_hours = temp.shape
-    nan_per_cell = np.isnan(temp).sum(axis=1)
-    bad_cells = int((nan_per_cell > n_hours * 0.05).sum())
-    print(f"[data] coverage: {n_cells} cells x {n_hours} hours, "
-          f"{bad_cells} cells >5% NaN, "
-          f"global NaN rate = {np.isnan(temp).mean():.4f}")
+    """One-shot NaN coverage summary across every variable in `data`
+    so the operator notices if the archive returned spotty rows
+    (ocean cell masked upstream, date range straddling a data-
+    availability boundary, etc)."""
+    skip_keys = {"cells", "lat", "lon", "time"}
+    for var in sorted(set(data) - skip_keys):
+        arr = data[var]
+        if arr.ndim != 2:
+            continue
+        n_cells, n_hours = arr.shape
+        nan_per_cell = np.isnan(arr).sum(axis=1)
+        bad_cells = int((nan_per_cell > n_hours * 0.05).sum())
+        print(f"[data] coverage[{var}]: {n_cells} cells x {n_hours} hours, "
+              f"{bad_cells} cells >5% NaN, "
+              f"global NaN rate = {np.isnan(arr).mean():.4f}")
