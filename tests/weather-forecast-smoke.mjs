@@ -333,6 +333,121 @@ check('bracket() works with empty past ring + populated forecast ring', () => {
     assert.equal(br.before.isForecast, true);
 });
 
+// ── Resilience: 5xx retries succeed on a later attempt ──────────────────
+// Each chunk fails its first call then succeeds. Per-chunk failure
+// tracking (rather than a global counter) makes the assertion robust to
+// the order in which the three parallel chunks resolve.
+{
+    const failuresByChunk = new Map();   // chunk-start → fail count
+    globalThis.fetch = async (url) => {
+        const chunkStart = url.match(/latitude=([^&]+)/)[1].split(',')[0];
+        const prior = failuresByChunk.get(chunkStart) ?? 0;
+        if (prior < 1) {
+            failuresByChunk.set(chunkStart, prior + 1);
+            return { ok: false, status: 503, headers: new Map(),
+                     text: async () => 'unavail', json: async () => ({}) };
+        }
+        const startMatch = url.match(/start_hour=(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})/);
+        const endMatch   = url.match(/end_hour=(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})/);
+        const startMs = Date.parse(startMatch[1] + 'Z');
+        const endMs   = Date.parse(endMatch[1]   + 'Z');
+        const hoursReq = Math.round((endMs - startMs) / HOUR_MS) + 1;
+        const nLocs = url.match(/latitude=([^&]+)/)[1].split(',').length;
+        const arr = Array.from({ length: nLocs }, () => buildLocation(startMs, hoursReq));
+        return { ok: true, status: 200, headers: new Map(),
+                 json: async () => arr, text: async () => JSON.stringify(arr) };
+    };
+    const history6 = new WeatherHistory();
+    await history6.open();
+    const feed6 = new WeatherForecastFeed({ history: history6, batchHours: 1 });
+    const ingested = await feed6.ensureLoadedUntil(Date.now() + HOUR_MS);
+    check('5xx is retried per-chunk and the batch eventually succeeds', () => {
+        // Each of the 3 chunks failed once then succeeded → 1 retry per
+        // chunk, batch ingests at least the first hour.
+        for (const count of failuresByChunk.values()) {
+            assert.equal(count, 1, 'each chunk failed once before succeeding');
+        }
+        assert.ok(ingested >= 1, 'eventually ingested');
+        assert.equal(history6.forecastSize, ingested);
+    });
+}
+
+// ── Resilience: 429 with Retry-After honoured (small value so test is fast) ──
+{
+    let attempts = 0;
+    globalThis.fetch = async (url) => {
+        attempts++;
+        // First call across all 3 chunks → 429 with Retry-After: 0
+        if (attempts <= 3) {
+            return { ok: false, status: 429,
+                     headers: new Map([['Retry-After', '0']]),
+                     text: async () => 'rate-limited', json: async () => ({}) };
+        }
+        const startMatch = url.match(/start_hour=(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})/);
+        const endMatch   = url.match(/end_hour=(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})/);
+        const startMs = Date.parse(startMatch[1] + 'Z');
+        const endMs   = Date.parse(endMatch[1]   + 'Z');
+        const hoursReq = Math.round((endMs - startMs) / HOUR_MS) + 1;
+        const nLocs = url.match(/latitude=([^&]+)/)[1].split(',').length;
+        const arr = Array.from({ length: nLocs }, () => buildLocation(startMs, hoursReq));
+        return { ok: true, status: 200, headers: new Map(),
+                 json: async () => arr, text: async () => JSON.stringify(arr) };
+    };
+    const history7 = new WeatherHistory();
+    await history7.open();
+    const feed7 = new WeatherForecastFeed({ history: history7, batchHours: 1 });
+    const ingested = await feed7.ensureLoadedUntil(Date.now() + HOUR_MS);
+    check('429 + Retry-After is retried and succeeds', () => {
+        assert.ok(attempts >= 6, `at least 1 retry per chunk, got ${attempts}`);
+        assert.ok(ingested >= 1);
+    });
+}
+
+// ── Schema validation: empty array rejected ─────────────────────────────
+{
+    globalThis.fetch = async () => ({
+        ok: true, status: 200, headers: new Map(),
+        json: async () => [],
+        text: async () => '[]',
+    });
+    const history8 = new WeatherHistory();
+    await history8.open();
+    const feed8 = new WeatherForecastFeed({ history: history8, batchHours: 1 });
+    // Empty schema → all 3 parallel chunks reject → batch fails. We
+    // assert the count of ingested frames is zero and no NaN/zero-fill
+    // crept into the ring.
+    const ingested = await feed8.ensureLoadedUntil(Date.now() + HOUR_MS);
+    check('empty array response yields zero ingest, no zero-fill', () => {
+        assert.equal(ingested, 0);
+        assert.equal(history8.forecastSize, 0);
+    });
+}
+
+// ── Truncation diagnostic: response shorter than window emits event ─────
+{
+    globalThis.fetch = async (url) => {
+        const startMatch = url.match(/start_hour=(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})/);
+        const startMs = Date.parse(startMatch[1] + 'Z');
+        // Caller asked for 24h but we only return 12h.
+        const nLocs = url.match(/latitude=([^&]+)/)[1].split(',').length;
+        const arr = Array.from({ length: nLocs }, () => buildLocation(startMs, 12));
+        return { ok: true, status: 200, headers: new Map(),
+                 json: async () => arr, text: async () => JSON.stringify(arr) };
+    };
+    const truncEvents = [];
+    document.addEventListener('weather-forecast-truncated',
+        (ev) => truncEvents.push(ev.detail));
+    const history9 = new WeatherHistory();
+    await history9.open();
+    const feed9 = new WeatherForecastFeed({ history: history9, batchHours: 24 });
+    await feed9.ensureLoadedUntil(Date.now() + 24 * HOUR_MS);
+    check('truncated response emits weather-forecast-truncated', () => {
+        assert.ok(truncEvents.length >= 1, 'truncation event fired');
+        assert.ok(truncEvents[0].received < truncEvents[0].requested,
+            'event payload reports the shortfall');
+    });
+}
+
 console.log('───────────────────────────');
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

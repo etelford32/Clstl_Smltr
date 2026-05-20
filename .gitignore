@@ -67,3 +67,5 @@ node_modules/
 package-lock.json
 test-results/
 playwright-report/
+scripts/train_weather_lstm/.cache/
+scripts/train_weather_lstm/__pycache__/
