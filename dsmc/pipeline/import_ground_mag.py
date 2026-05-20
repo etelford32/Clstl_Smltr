@@ -79,6 +79,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import json
 import math
 import sys
@@ -89,6 +90,7 @@ from typing import Iterable, Sequence
 
 
 CANONICAL_HEADER = ["t", "sme_nt", "smu_nt", "sml_nt", "h_comp_mean_nt", "jh_proxy_gw"]
+PLACEHOLDER_COLUMN = "_is_placeholder"
 
 
 # Aliases — keys are lowercase canonical names; values are the column
@@ -176,7 +178,17 @@ def _parse_columns_arg(spec: str) -> dict[str, str]:
 
 
 def _read_csv(path: Path, override: dict[str, str] | None) -> list[RawRow]:
-    with path.open() as fh:
+    # Pre-pass: filter `#`-prefixed comment lines and blank lines so the
+    # sniffer and csv.reader only see real data rows. Comments are a
+    # standard SuperMAG/INTERMAGNET convention and we accept them.
+    raw_lines = [
+        line for line in path.read_text().splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    if not raw_lines:
+        raise SystemExit(f"import_ground_mag: {path.name} has no non-comment rows.")
+    src = "\n".join(raw_lines) + "\n"
+    with io.StringIO(src) as fh:
         sniff = fh.read(4096)
         fh.seek(0)
         has_header = csv.Sniffer().has_header(sniff)
@@ -354,20 +366,41 @@ def canonicalise(
     return grid
 
 
-def write_canonical(path: Path, rows: Sequence[RawRow]) -> None:
+def write_canonical(path: Path, rows: Sequence[RawRow], *, placeholder: bool = False) -> None:
+    """
+    Write the canonical CSV.
+
+    If `placeholder=True`, append a `_is_placeholder` column with `1` on
+    every row and prefix the file with a `#` comment line warning that
+    the data is synthetic. Downstream consumers (fit_pseudo_ap,
+    validate_density) MUST refuse to produce a scored result when this
+    column is present and truthy — the column is the in-band signal.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
+    header = list(CANONICAL_HEADER)
+    if placeholder:
+        header.append(PLACEHOLDER_COLUMN)
     with path.open("w", newline="") as fh:
+        if placeholder:
+            fh.write(
+                "# WARNING: synthetic placeholder ground-mag reconstruction. "
+                "The _is_placeholder column is 1 on every row; downstream fits "
+                "must refuse to score this fixture as real data.\n"
+            )
         w = csv.writer(fh)
-        w.writerow(CANONICAL_HEADER)
+        w.writerow(header)
         for r in rows:
-            w.writerow([
+            row = [
                 r.t.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "" if r.sme_nt is None else f"{r.sme_nt:.2f}",
                 "" if r.smu_nt is None else f"{r.smu_nt:.2f}",
                 "" if r.sml_nt is None else f"{r.sml_nt:.2f}",
                 "" if r.h_comp_mean_nt is None else f"{r.h_comp_mean_nt:.2f}",
                 "" if r.jh_proxy_gw is None else f"{r.jh_proxy_gw:.3f}",
-            ])
+            ]
+            if placeholder:
+                row.append("1")
+            w.writerow(row)
 
 
 # ── CLI ─────────────────────────────────────────────────────────────
@@ -387,6 +420,11 @@ def _main(argv: list[str] | None = None) -> int:
                         "'canon,canon,...' positional list for header-less CSV.")
     p.add_argument("--proxy", choices=("knipp", "ahn", "none"), default="knipp",
                    help="Joule-heating proxy kind (default: knipp).")
+    p.add_argument("--placeholder", action="store_true",
+                   help="Tag the output as a synthetic placeholder: prepend a "
+                        "warning comment line and append an _is_placeholder=1 "
+                        "column. Use ONLY when the input is not real "
+                        "reconstructed data; downstream fits must refuse.")
     p.add_argument("--dry-run", action="store_true",
                    help="Parse and resample but do not write the output file.")
     p.add_argument("-v", "--verbose", action="store_true")
@@ -420,9 +458,16 @@ def _main(argv: list[str] | None = None) -> int:
             print("import_ground_mag: --dry-run, skipping write.", file=sys.stderr)
         return 0
 
-    write_canonical(a.out, canonical)
+    write_canonical(a.out, canonical, placeholder=a.placeholder)
     if a.verbose:
-        print(f"import_ground_mag: wrote {a.out}", file=sys.stderr)
+        tag = " [PLACEHOLDER]" if a.placeholder else ""
+        print(f"import_ground_mag: wrote {a.out}{tag}", file=sys.stderr)
+    if a.placeholder:
+        print(
+            "import_ground_mag: NOTE — output is flagged as a placeholder; "
+            "downstream fits must refuse to score this fixture as real.",
+            file=sys.stderr,
+        )
     return 0
 
 

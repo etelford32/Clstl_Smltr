@@ -204,6 +204,63 @@ def test_json_input(tmp_path: Path):
     assert canon[5].sme_nt == 3500.0
 
 
+# ── comment stripping + placeholder flag ───────────────────────────
+
+def test_csv_skips_comment_lines(tmp_path: Path):
+    src = tmp_path / "with_comments.csv"
+    src.write_text(
+        "# preamble one\n"
+        "# preamble two\n"
+        "time,sme,smu,sml\n"
+        "2024-05-10T12:00:00Z,150,80,-70\n"
+        "2024-05-10T12:02:00Z,1700,900,-800\n"
+    )
+    rows = _read_csv(src, override=None)
+    assert len(rows) == 2
+    assert rows[0].sme_nt == 150.0
+
+
+def test_placeholder_write_adds_warning_and_column(tmp_path: Path):
+    src = tmp_path / "raw.csv"
+    src.write_text(CSV_WITH_HEADER)
+    rows = _read_csv(src, override=None)
+    canon = canonicalise(
+        rows,
+        start=_iso("2024-05-10T12:00:00Z"),
+        end=_iso("2024-05-10T12:06:00Z"),
+        proxy_kind="knipp",
+    )
+    out = tmp_path / "canonical_placeholder.csv"
+    write_canonical(out, canon, placeholder=True)
+    txt = out.read_text()
+    # Warning comment is the first line.
+    assert txt.startswith("# WARNING"), "missing leading warning comment"
+    # Header carries the sentinel column.
+    body = [ln for ln in txt.splitlines() if ln and not ln.startswith("#")]
+    assert body[0].endswith(",_is_placeholder")
+    # Every data row carries _is_placeholder=1.
+    for ln in body[1:]:
+        assert ln.endswith(",1"), f"data row missing sentinel: {ln!r}"
+
+
+def test_non_placeholder_write_clean(tmp_path: Path):
+    src = tmp_path / "raw.csv"
+    src.write_text(CSV_WITH_HEADER)
+    rows = _read_csv(src, override=None)
+    canon = canonicalise(
+        rows,
+        start=_iso("2024-05-10T12:00:00Z"),
+        end=_iso("2024-05-10T12:06:00Z"),
+        proxy_kind="knipp",
+    )
+    out = tmp_path / "canonical_real.csv"
+    write_canonical(out, canon, placeholder=False)
+    txt = out.read_text()
+    assert not txt.startswith("#"), "real-data write must not have a comment"
+    header_line = txt.splitlines()[0]
+    assert "_is_placeholder" not in header_line
+
+
 if __name__ == "__main__":
     # Allow running as a plain script for the quick-feedback case.
     import pytest
