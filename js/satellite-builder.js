@@ -34,29 +34,49 @@ export const BODIES = {
 
 // ── Thruster units ──────────────────────────────────────────────────────────
 // Keys MUST match satellite-designer-engine.js ENGINE_PRESETS so the flight
-// model's thrust/Isp stay the single source of truth. Here we only add the
-// per-unit dry mass + the nozzle size used for the 3-D model.
+// model's thrust/Isp stay the single source of truth. Here we add the
+// per-unit dry mass, the nozzle size used for the 3-D model, and the
+// per-unit electrical power draw at rated thrust.
+//
+//   power = 0   → chemical: stored-energy propellant, thrust is power-
+//                 independent (cold-gas, mono-/bi-propellant).
+//   power > 0   → electric: needs that many watts (≈ ½·T·Isp·g₀ / η) to
+//                 make rated thrust. Starve it of array power and thrust
+//                 throttles down linearly (deriveDesign, below).
 export const THRUSTER_UNITS = {
-    cold_gas:    { label: 'Cold-gas (N₂)',          unitMass: 0.6,  nozzle: 0.04 },
-    monoprop:    { label: 'Monoprop hydrazine',     unitMass: 4.0,  nozzle: 0.07 },
-    biprop:      { label: 'Bipropellant (MMH/NTO)', unitMass: 12.0, nozzle: 0.11 },
-    hall_ion:    { label: 'Hall-effect ion',        unitMass: 8.0,  nozzle: 0.09 },
-    gridded_ion: { label: 'Gridded ion (Xe)',       unitMass: 10.0, nozzle: 0.10 },
+    cold_gas:      { label: 'Cold-gas (N₂)',          unitMass: 0.6,  nozzle: 0.04, power: 0    },
+    monoprop:      { label: 'Monoprop hydrazine',     unitMass: 4.0,  nozzle: 0.07, power: 0    },
+    biprop:        { label: 'Bipropellant (MMH/NTO)', unitMass: 12.0, nozzle: 0.11, power: 0    },
+    hall_ion:      { label: 'Hall-effect ion',        unitMass: 8.0,  nozzle: 0.09, power: 1100 },
+    gridded_ion:   { label: 'Gridded ion (Xe)',       unitMass: 10.0, nozzle: 0.10, power: 650  },
+    hall_shielded: { label: 'Mag-shielded Hall',      unitMass: 11.0, nozzle: 0.09, power: 1500 },
+    iodine_ion:    { label: 'Iodine gridded ion',     unitMass: 2.2,  nozzle: 0.06, power: 220  },
+    electrospray:  { label: 'Electrospray / FEEP',    unitMass: 0.5,  nozzle: 0.035, power: 35  },
+    water_resisto: { label: 'Water electrothermal',   unitMass: 1.6,  nozzle: 0.05, power: 90   },
 };
 
 // ── Solar arrays ────────────────────────────────────────────────────────────
 // wings = number of deployable panels, areaKgM2 = panel areal density,
 // ramFactor = fraction of full panel area that actually faces the ram (sun-
 // tracking arrays spend a lot of the orbit broadside to the flow), cd = flat-
-// plate free-molecular drag coefficient.
+// plate free-molecular drag coefficient, wPerM2 = electrical power generated
+// per m² of panel (BOL, 1 AU, after packing/efficiency).
+//
+// "Body-mounted only" makes no deployable power, so an electric thruster on
+// it is starved → no thrust. Roll-out (ROSA) and thin-film are the cutting-
+// edge picks: far lighter per watt, so you can carry the kilowatts an ion
+// engine needs without the mass — at the cost of more drag area.
 export const PANELS = {
-    none:  { label: 'Body-mounted only', wings: 0, areaKgM2: 0,   ramFactor: 0,    cd: 0   },
-    dual:  { label: 'Dual deployable',   wings: 2, areaKgM2: 2.3, ramFactor: 0.55, cd: 2.5 },
-    quad:  { label: 'Quad deployable',   wings: 4, areaKgM2: 2.3, ramFactor: 0.55, cd: 2.5 },
-    large: { label: 'Large array',       wings: 2, areaKgM2: 1.8, ramFactor: 0.6,  cd: 2.6 },
+    none:     { label: 'Body-mounted only', wings: 0, areaKgM2: 0,    ramFactor: 0,    cd: 0,   wPerM2: 0   },
+    dual:     { label: 'Dual deployable',   wings: 2, areaKgM2: 2.3,  ramFactor: 0.55, cd: 2.5, wPerM2: 180 },
+    quad:     { label: 'Quad deployable',   wings: 4, areaKgM2: 2.3,  ramFactor: 0.55, cd: 2.5, wPerM2: 180 },
+    large:    { label: 'Large array',       wings: 2, areaKgM2: 1.8,  ramFactor: 0.6,  cd: 2.6, wPerM2: 170 },
+    rosa:     { label: 'Roll-out (ROSA)',   wings: 2, areaKgM2: 1.0,  ramFactor: 0.55, cd: 2.5, wPerM2: 200 },
+    thinfilm: { label: 'Thin-film flex',    wings: 2, areaKgM2: 0.55, ramFactor: 0.6,  cd: 2.6, wPerM2: 140 },
 };
 
-const AVIONICS_MASS = 6;     // kg — flight computer, comms, harness, reaction wheels
+const AVIONICS_MASS  = 6;    // kg — flight computer, comms, harness, reaction wheels
+const HOUSEKEEPING_W = 20;   // W  — baseline bus load drawn before any propulsion
 
 export function defaultBuild() {
     return { body: 'smallsat', thruster: 'monoprop', thrusterCount: 2,
@@ -73,7 +93,8 @@ function wingArea(span) { return clampNum(span, 0.3, 8, 2) * 0.45; }
  * @param {object} [presets] ENGINE_PRESETS from the flight engine. When
  *        supplied, thrust/isp are filled in (single source of truth).
  * @returns {{dryMass,area,cd,engine,thrusterCount,thrust,isp,
- *            bodyArea,panelArea,panelMass}}
+ *            bodyArea,panelArea,panelMass,
+ *            power,powerReq,powerMargin,powerFrac,electric}}
  */
 export function deriveDesign(build, presets = null) {
     const b = BODIES[build.body] || BODIES.smallsat;
@@ -100,6 +121,21 @@ export function deriveDesign(build, presets = null) {
 
     const dryMass = b.mass + tu.unitMass * count + panelMass + AVIONICS_MASS;
 
+    // ── Power budget ──────────────────────────────────────────────────────
+    // Sun-tracking arrays generate from their *full* area (orientation only
+    // affects drag, not illumination). The bus draws a fixed housekeeping
+    // load first; whatever is left feeds propulsion.
+    const powerGen   = totalPanelArea * p.wPerM2;             // W generated
+    const electric   = tu.power > 0;
+    const thrPwrFull = tu.power * count;                      // W at rated thrust
+    const powerReq   = HOUSEKEEPING_W + (electric ? thrPwrFull : 0);
+    const powerAvail = Math.max(0, powerGen - HOUSEKEEPING_W);
+    // Electric thrust scales linearly with the power it actually gets; a
+    // chemical thruster ignores the array entirely.
+    const powerFrac  = electric
+        ? (thrPwrFull > 0 ? Math.min(1, powerAvail / thrPwrFull) : 1)
+        : 1;
+
     const out = {
         dryMass:      round(dryMass, 1),
         area:         round(area, 3),
@@ -109,9 +145,14 @@ export function deriveDesign(build, presets = null) {
         bodyArea:     round(bodyArea, 3),
         panelArea:    round(totalPanelArea, 3),
         panelMass:    round(panelMass, 2),
+        power:        round(powerGen, 0),
+        powerReq:     round(powerReq, 0),
+        powerMargin:  round(powerGen - powerReq, 0),
+        powerFrac:    round(powerFrac, 3),
+        electric,
     };
     if (presets && presets[build.thruster]) {
-        out.thrust = round(presets[build.thruster].thrust * count, 3);
+        out.thrust = round(presets[build.thruster].thrust * count * powerFrac, 4);
         out.isp = presets[build.thruster].isp;
     }
     return out;
@@ -215,7 +256,11 @@ function round(v, d) { const f = 10 ** d; return Math.round(v * f) / f; }
 export function selfTest() {
     const out = [];
     const T = (c, m) => out.push({ pass: !!c, msg: m });
-    const presets = { monoprop: { thrust: 22, isp: 225 }, hall_ion: { thrust: 0.25, isp: 1800 } };
+    const presets = {
+        monoprop:      { thrust: 22,   isp: 225  },
+        hall_ion:      { thrust: 0.25, isp: 1800 },
+        hall_shielded: { thrust: 0.30, isp: 2000 },
+    };
 
     const d = deriveDesign(defaultBuild(), presets);
     T(d.dryMass > 0 && d.area > 0 && d.cd >= 2 && d.cd <= 2.7,
@@ -243,6 +288,42 @@ export function selfTest() {
     const big = deriveDesign({ ...defaultBuild(), body: 'bus_med', panel: 'none' }, presets);
     T(big.dryMass > cube.dryMass && big.area > cube.area,
         `bus_med ≫ 3U (m ${cube.dryMass}→${big.dryMass}, A ${cube.area}→${big.area})`);
+
+    // ── Power budget ──────────────────────────────────────────────────────
+    // Arrays generate power; power scales with span.
+    const pw1 = deriveDesign({ ...defaultBuild(), panelSpan: 1 }, presets);
+    const pw5 = deriveDesign({ ...defaultBuild(), panelSpan: 5 }, presets);
+    T(pw5.power > pw1.power && pw1.power > 0,
+        `array power grows with span (${pw1.power} → ${pw5.power} W)`);
+
+    // An electric thruster on a body-only build is starved → ~no thrust.
+    const epStarved = deriveDesign(
+        { body: 'smallsat', thruster: 'hall_shielded', thrusterCount: 1,
+          panel: 'none', panelSpan: 2 }, presets);
+    T(epStarved.electric && epStarved.powerFrac === 0 && epStarved.thrust === 0,
+        `electric + no panels ⇒ 0 thrust (frac ${epStarved.powerFrac})`);
+    T(epStarved.powerMargin < 0, `starved EP shows negative power margin`);
+
+    // Give it a big quad array → full rated thrust, positive margin.
+    const epFed = deriveDesign(
+        { body: 'smallsat', thruster: 'hall_shielded', thrusterCount: 1,
+          panel: 'quad', panelSpan: 6 }, presets);
+    T(epFed.powerFrac === 1 && Math.abs(epFed.thrust - 0.30) < 1e-6,
+        `electric + ample power ⇒ rated thrust (${epFed.thrust} N)`);
+    T(epFed.powerMargin > 0, `well-fed EP shows positive power margin`);
+
+    // Chemical thrust is power-independent: same with or without panels.
+    const chemNo = deriveDesign({ ...defaultBuild(), panel: 'none' }, presets);
+    const chemBig = deriveDesign({ ...defaultBuild(), panel: 'large', panelSpan: 5 }, presets);
+    T(chemNo.thrust === chemBig.thrust && chemNo.electric === false,
+        `chemical thrust ignores power (${chemNo.thrust} N both)`);
+
+    // ROSA beats rigid on specific power (W per kg of array).
+    const span = 5;
+    const rosa = deriveDesign({ ...defaultBuild(), panel: 'rosa',  panelSpan: span }, presets);
+    const rigid = deriveDesign({ ...defaultBuild(), panel: 'large', panelSpan: span }, presets);
+    T(rosa.power / rosa.panelMass > rigid.power / rigid.panelMass,
+        `ROSA > rigid on W/kg (${(rosa.power/rosa.panelMass).toFixed(0)} vs ${(rigid.power/rigid.panelMass).toFixed(0)})`);
 
     return out;
 }
