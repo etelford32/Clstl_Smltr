@@ -1,0 +1,9 @@
+# Pinned to versions that run on the Linux 6.18 container the harness
+# spins up. Torch CPU wheels are ~200 MB; install with:
+#   pip install -r scripts/train_weather_lstm/requirements.txt
+#
+# Kept separate from the repo-root requirements.txt so the existing
+# pygame/PyOpenGL deps don't have to drag torch onto every dev box.
+torch>=2.1,<2.5
+numpy>=1.24
+requests>=2.31
