@@ -72,19 +72,67 @@ Then drop the `--smoke-test` and write fixtures.
 
 ### Ground-mag reconstruction import
 
-If the ground-mag work was done outside this repo, write a small
-shim under `dsmc/pipeline/import_ground_mag.py` that:
+`dsmc/pipeline/import_ground_mag.py` (shipped on this branch) takes
+whatever shape the user's reconstruction is in and writes the canonical
+schema. It:
 
-1. Reads the user's CSV/HDF in whatever cadence it was produced (1 min
-   is ideal; resample to 1 min if finer).
-2. Emits the canonical schema:
-   `t, sme_nt, smu_nt, sml_nt, h_comp_mean_nt`.
-3. Computes a Newell-Gjerloev coupling-function-style derived
-   Joule-heating proxy `jh_proxy_gw` and appends it as an extra
-   column so `fit_pseudo_ap` has a direct GW input.
+1. Reads CSV or JSON (header auto-detected; non-standard column names
+   handled via a built-in alias table or an explicit `--columns
+   raw:canon,...` map).
+2. Linear-interpolates onto a 1-minute uniform grid in the requested
+   window, deriving `sme = smu - sml` when SME is missing.
+3. Computes an Ahn-Akasofu-style Joule-heating proxy in GW
+   (`--proxy knipp` default — quadratic; `--proxy ahn` linear;
+   `--proxy none` to skip).
+4. Writes the canonical fixture:
+   `t, sme_nt, smu_nt, sml_nt, h_comp_mean_nt, jh_proxy_gw`.
+
+Concrete invocation for Gannon:
+
+```sh
+cd dsmc
+python3 -m pipeline.import_ground_mag \
+  --in raw/supermag/gannon_may_2024.csv \
+  --out fixtures/hindcast/gannon_may_2024/ground_mag.csv \
+  --start 2024-05-10T12:00:00Z \
+  --end   2024-05-13T12:00:00Z \
+  -v
+```
+
+Unit tests covering the shim: `dsmc/tests/test_import_ground_mag.py`.
+Smoke-tested in this session on a 5-row synthetic input → 4 321 rows
+on the 1-min grid; SME peak 3 110 nT → 432 GW Joule-heating proxy at
+~midway between raw samples (interpolated), which is the right order
+of magnitude for Gannon peak forcing.
 
 **Day 1 done when:** all five fixture files present, non-empty, and
 `head`/`tail` rows pass eyeball checks.
+
+### Smoke-test status (this session)
+
+The Day-1 smoke-tests were attempted in the remote-execution sandbox
+on 2026-05-20. All three external endpoints returned **HTTP 403** —
+not because the URLs are wrong, but because this environment's egress
+proxy denies non-allowlisted hosts (a plain `curl https://api.github.com/`
+also returns 403, confirming the policy block rather than a real
+upstream 4xx). Captured:
+
+```
+spdf:  https://spdf.gsfc.nasa.gov/.../omni_min202405.asc            → 403
+gfz:   https://kp.gfz-potsdam.de/app/files/Kp_ap_Ap_SN_F107_*.txt   → 403
+tud:   http://thermosphere.tudelft.nl/.../grcfo_density_2024_*.txt  → 403
+```
+
+**Action.** Day-1 pulls must be executed from an environment with
+outbound HTTPS to `spdf.gsfc.nasa.gov`, `kp.gfz-potsdam.de`,
+`thermosphere.tudelft.nl` (either a local dev box, or this remote
+environment after its network policy is widened). The fetcher CLIs
+themselves are unchanged — re-run the same `--smoke-test` commands
+above; they should return `200/206` rather than `403`.
+
+The third ground-mag fixture (the user's reconstruction) is **not**
+blocked by this — it has no network dependency. See the import shim
+below.
 
 ## Day 2 — replay + fit
 
