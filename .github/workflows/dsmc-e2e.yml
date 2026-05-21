@@ -97,7 +97,12 @@ jobs:
 
       - name: Verify profile endpoint returns SPARTA-bootstrap model
         run: |
-          body="$(curl -fs "$DSMC_API_URL/v1/atmosphere/profile?f107=150&ap=15&n_points=6")"
+          # n_points=8 — must be ≥ the endpoint's ge=8 constraint; the
+          # downstream Python assertion requires len(samples) ≥ 6, so 8
+          # satisfies both. With n_points=6 the endpoint returns HTTP 422
+          # (Unprocessable Entity) and curl -fs exits non-zero, which is
+          # exactly how this job was failing pre-fix.
+          body="$(curl -fs "$DSMC_API_URL/v1/atmosphere/profile?f107=150&ap=15&n_points=8")"
           echo "$body" | head -c 600; echo
           echo "$body" | python3 -c "
           import json, sys
