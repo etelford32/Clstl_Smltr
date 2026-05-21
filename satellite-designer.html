@@ -130,15 +130,53 @@ select option{background:#0a1024}
 .toggle.warn.active{background:rgba(var(--c-warn-rgb),.22);
   border-color:rgba(var(--c-warn-rgb),.5);color:var(--c-warn)}
 
-#sd-stage{position:relative;height:320px;min-height:320px;border-radius:var(--r-lg);
+#sd-stage{position:relative;height:440px;min-height:440px;border-radius:var(--r-lg);
   overflow:hidden;border:1px solid var(--c-accent-border);
   background:radial-gradient(130% 100% at 50% 40%,#060f24,#02030a)}
-#sd-canvas{display:block;width:100%;height:100%}
-#sd-shipgl{position:absolute;inset:0;width:100%;height:100%;
-  pointer-events:none;z-index:1}
+#sd-canvas{display:block;width:100%;height:100%;cursor:grab;touch-action:none}
+#sd-canvas:active{cursor:grabbing}
 #sd-status{
   position:absolute;top:12px;left:12px;right:12px;display:flex;
   justify-content:space-between;gap:10px;pointer-events:none;flex-wrap:wrap}
+#sd-cam{position:absolute;bottom:12px;left:12px;display:flex;gap:6px;align-items:center;
+  pointer-events:auto;flex-wrap:wrap}
+#sd-cam .cam-group{display:flex;gap:2px;background:rgba(4,8,18,.78);
+  border:1px solid rgba(255,255,255,.14);padding:3px;border-radius:999px;
+  backdrop-filter:blur(6px)}
+#sd-cam .cam-btn{font-size:.66rem;font-weight:700;font-family:monospace;
+  padding:5px 11px;border-radius:999px;cursor:pointer;color:var(--c-text-2);
+  border:1px solid transparent;background:transparent;letter-spacing:.06em;
+  user-select:none}
+#sd-cam .cam-btn:hover{color:var(--c-text);background:rgba(255,255,255,.04)}
+#sd-cam .cam-btn.active{background:rgba(var(--c-accent-rgb),.22);
+  color:#fff;border-color:var(--c-accent-border-hi)}
+#sd-cam .cam-act{font-size:.66rem;font-weight:700;font-family:monospace;
+  padding:6px 11px;border-radius:999px;cursor:pointer;color:var(--c-text);
+  background:rgba(4,8,18,.78);border:1px solid rgba(255,255,255,.14);
+  backdrop-filter:blur(6px);letter-spacing:.06em;user-select:none}
+#sd-cam .cam-act:hover{border-color:var(--c-accent-border-hi);color:var(--c-accent)}
+#sd-cam .cam-act kbd{font-size:.55rem;color:var(--c-text-3);font-family:monospace;
+  border:1px solid rgba(255,255,255,.15);border-radius:3px;padding:0 3px;margin-left:5px}
+#sd-banner{position:absolute;left:50%;bottom:60px;transform:translateX(-50%);
+  max-width:80%;padding:6px 14px;border-radius:999px;font-size:.74rem;
+  font-weight:700;background:rgba(4,8,18,.78);
+  border:1px solid var(--c-accent-border);color:var(--c-text);
+  text-align:center;pointer-events:none;backdrop-filter:blur(6px);
+  transition:opacity .25s;opacity:0}
+#sd-banner.show{opacity:1}
+#sd-banner.good{border-color:rgba(95,227,154,.55);color:var(--c-good)}
+#sd-banner.warn{border-color:rgba(var(--c-warn-rgb),.55);color:var(--c-warn)}
+#sd-banner.bad{border-color:rgba(255,107,125,.55);color:var(--c-bad)}
+#sd-hint{position:absolute;top:50px;right:12px;font-size:.6rem;
+  color:var(--c-text-3);pointer-events:none;text-align:right;line-height:1.5;
+  background:rgba(4,8,18,.55);padding:5px 9px;border-radius:6px;backdrop-filter:blur(4px)}
+#sd-hint kbd{font-size:.55rem;color:var(--c-text-2);font-family:monospace;
+  border:1px solid rgba(255,255,255,.15);border-radius:3px;padding:0 3px}
+#sd-view{position:absolute;bottom:12px;right:12px;font-size:.62rem;
+  color:var(--c-text-2);font-family:monospace;pointer-events:none;
+  background:rgba(4,8,18,.78);padding:4px 9px;border-radius:6px;
+  border:1px solid rgba(255,255,255,.14);backdrop-filter:blur(6px);
+  font-variant-numeric:tabular-nums;letter-spacing:.04em}
 .status-pill{
   pointer-events:auto;font-size:.72rem;font-weight:700;font-family:monospace;
   padding:6px 12px;border-radius:999px;background:rgba(4,8,18,.7);
@@ -188,6 +226,38 @@ select option{background:#0a1024}
 .toast.bad{border-color:rgba(255,107,125,.6);color:var(--c-bad)}
 .warmup{display:flex;align-items:center;justify-content:center;height:100%;
   color:var(--c-text-3);font-size:.85rem}
+.ctl-label{font-size:.62rem;color:var(--c-text-3);font-weight:800;
+  letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px}
+.toggle.locked{opacity:.35;cursor:not-allowed;position:relative}
+.toggle.locked::after{content:"🔒";position:absolute;top:1px;right:4px;font-size:.5rem;opacity:.7}
+.toggle.locked:hover{color:var(--c-text-2);background:rgba(255,255,255,.03);
+  border-color:rgba(255,255,255,.14)}
+.pilot-hd{display:flex;align-items:center;gap:11px}
+.rank-badge{font-size:1.6rem;line-height:1;
+  filter:drop-shadow(0 2px 8px rgba(0,200,255,.4))}
+.rank-meta{flex:1;min-width:0}
+.rank-name{font-size:.95rem;font-weight:800;letter-spacing:.04em;
+  background:linear-gradient(100deg,#fff,#7fdcff);
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.rank-xp{font-size:.7rem;color:var(--c-text-3);font-variant-numeric:tabular-nums;margin-top:1px}
+.unlock-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:3px}
+.unlock{padding:5px 8px;border-radius:var(--r-md);font-size:.66rem;
+  background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);
+  display:flex;align-items:center;gap:6px;line-height:1.25}
+.unlock.owned{border-color:rgba(95,227,154,.35);
+  background:rgba(95,227,154,.07);color:var(--c-text)}
+.unlock.locked{opacity:.55;color:var(--c-text-2)}
+.unlock b{font-weight:800;color:var(--c-text);font-size:.66rem}
+.unlock .lk{font-size:.55rem;color:var(--c-text-3);font-weight:700;
+  letter-spacing:.06em;text-transform:uppercase;margin-left:auto}
+#rank-bar i{background:linear-gradient(90deg,#7fdcff,#ffd166)}
+.advanced{font-size:.7rem;color:var(--c-text-3)}
+.advanced summary{cursor:pointer;padding:6px 0;font-weight:700;
+  letter-spacing:.06em;text-transform:uppercase;font-size:.62rem;
+  color:var(--c-text-2);user-select:none}
+.advanced summary:hover{color:var(--c-accent)}
+.advanced[open] summary{color:var(--c-accent);margin-bottom:2px}
+.advanced summary::-webkit-details-marker{color:var(--c-text-3)}
 
 /* ─── Inline 3-D build view + part chips ───────────────── */
 .bay-view{position:relative;height:230px;border-radius:var(--r-lg);
@@ -278,47 +348,52 @@ select option{background:#0a1024}
     </div>
 
     <div class="panel">
-      <h2>🔧 Spacecraft <span class="sub">fine-tuning</span></h2>
+      <h2>🔧 Spacecraft</h2>
       <div class="grid2">
-        <label class="field" style="grid-column:1/-1">
+        <label class="field" style="grid-column:1/-1;margin:0">
           <div class="row"><span>Ship name</span></div>
           <input type="text" id="f-name" value="Scout-1" maxlength="60">
         </label>
-        <label class="field" style="grid-column:1/-1">
-          <div class="row"><span>Propulsion</span></div>
-          <select id="f-engine"></select>
-        </label>
-        <label class="field">
-          <div class="row"><span>Thrust</span><b id="v-thrust">22</b></div>
-          <input type="number" id="f-thrust" min="0" max="50000" step="0.1" value="22">
-        </label>
-        <label class="field">
-          <div class="row"><span>Iₛₚ (s)</span><b id="v-isp">225</b></div>
-          <input type="number" id="f-isp" min="10" max="5000" step="1" value="225">
-        </label>
-        <label class="field">
-          <div class="row"><span>Dry mass (kg)</span></div>
-          <input type="number" id="f-dry" min="1" max="100000" step="1" value="120">
-        </label>
-        <label class="field">
-          <div class="row"><span>Propellant (kg)</span></div>
-          <input type="number" id="f-fuel" min="0" max="500000" step="1" value="60">
-        </label>
-        <label class="field">
-          <div class="row"><span>Frontal area (m²)</span></div>
-          <input type="number" id="f-area" min="0.01" max="5000" step="0.1" value="1.2">
-        </label>
-        <label class="field">
-          <div class="row"><span>Drag C<sub>d</sub></span></div>
-          <input type="number" id="f-cd" min="1" max="4" step="0.05" value="2.2">
+        <label class="field" style="grid-column:1/-1;margin:0">
+          <div class="row"><span>Propellant</span><b><span id="v-fuel">60</span> kg</b></div>
+          <input type="range" id="f-fuel" min="0" max="1000" step="5" value="60">
         </label>
       </div>
-      <div class="metrics" style="margin-top:4px">
+      <div class="metrics" style="margin-top:9px">
         <div class="metric"><div class="k">Wet mass</div><div class="v" id="d-wet">—</div></div>
         <div class="metric"><div class="k">Δv budget</div><div class="v" id="d-dv">—</div></div>
         <div class="metric"><div class="k">Ballistic coeff</div><div class="v" id="d-bc">—</div></div>
         <div class="metric"><div class="k">Mass ratio</div><div class="v" id="d-mr">—</div></div>
       </div>
+      <details class="advanced" style="margin-top:9px">
+        <summary>Manual fine-tune · advanced</summary>
+        <div class="grid2" style="margin-top:6px">
+          <label class="field" style="grid-column:1/-1;margin:0">
+            <div class="row"><span>Propulsion preset</span></div>
+            <select id="f-engine"></select>
+          </label>
+          <label class="field" style="margin:0">
+            <div class="row"><span>Thrust</span><b id="v-thrust">22</b></div>
+            <input type="number" id="f-thrust" min="0" max="50000" step="0.1" value="22">
+          </label>
+          <label class="field" style="margin:0">
+            <div class="row"><span>Iₛₚ (s)</span><b id="v-isp">225</b></div>
+            <input type="number" id="f-isp" min="10" max="5000" step="1" value="225">
+          </label>
+          <label class="field" style="margin:0">
+            <div class="row"><span>Dry mass (kg)</span></div>
+            <input type="number" id="f-dry" min="1" max="100000" step="1" value="120">
+          </label>
+          <label class="field" style="margin:0">
+            <div class="row"><span>Frontal area (m²)</span></div>
+            <input type="number" id="f-area" min="0.01" max="5000" step="0.1" value="1.2">
+          </label>
+          <label class="field" style="margin:0;grid-column:1/-1">
+            <div class="row"><span>Drag C<sub>d</sub></span></div>
+            <input type="number" id="f-cd" min="1" max="4" step="0.05" value="2.2">
+          </label>
+        </div>
+      </details>
     </div>
 
     <div class="panel">
@@ -327,8 +402,7 @@ select option{background:#0a1024}
         <div class="hint" id="hangar-auth">Checking sign-in…</div>
       </div>
       <div class="btn-row" style="margin-top:9px" id="hangar-actions" hidden>
-        <button class="btn primary sm" id="b-save">Save ship</button>
-        <button class="btn sm" id="b-refresh">Refresh</button>
+        <button class="btn primary sm" id="b-save">💾 Save ship</button>
       </div>
     </div>
   </section>
@@ -339,87 +413,128 @@ select option{background:#0a1024}
 
     <div id="sd-stage">
       <canvas id="sd-canvas"></canvas>
-      <canvas id="sd-shipgl"></canvas>
       <div id="sd-status">
         <span class="status-pill" id="st-phase">Pre-flight</span>
         <span class="status-pill" id="st-warp">▶ ×1</span>
       </div>
+      <div id="sd-hint">
+        <kbd>drag</kbd> orbit<br>
+        <kbd>right-drag</kbd> pan<br>
+        <kbd>scroll</kbd> zoom
+      </div>
+      <div id="sd-cam">
+        <div class="cam-group">
+          <div class="cam-btn" data-cam="wide">WIDE</div>
+          <div class="cam-btn" data-cam="follow">FOLLOW</div>
+          <div class="cam-btn active" data-cam="free">FREE</div>
+        </div>
+        <div class="cam-act" id="cam-focus" title="Center camera on the satellite">📍 Focus<kbd>F</kbd></div>
+        <div class="cam-act" id="cam-reset" title="Reset to the wide system view">↺ Reset<kbd>R</kbd></div>
+      </div>
+      <div id="sd-view">view —</div>
+      <div id="sd-banner"></div>
       <div class="warmup" id="sd-warmup">Loading atmosphere model…</div>
+    </div>
+
+    <div class="panel">
+      <h2>🎯 Mission <span class="sub">pick a scenario</span></h2>
+      <div class="toggle-row" id="mission-select"></div>
+      <p class="hint" id="mission-blurb" style="margin-top:9px"></p>
+      <div style="margin-top:9px;padding:7px 9px;background:rgba(255,255,255,.03);
+                  border-radius:var(--r-md);border:1px solid rgba(255,255,255,.08)">
+        <div style="display:flex;justify-content:space-between;font-size:.66rem;
+                    color:var(--c-text-3);font-weight:700;letter-spacing:.06em;text-transform:uppercase">
+          <span>Objective</span><span id="obj-extras"></span>
+        </div>
+        <div id="obj-label" style="font-size:.82rem;font-weight:700;margin-top:4px">—</div>
+        <div class="bar" style="margin-top:6px"><i id="obj-bar" style="width:0%"></i></div>
+      </div>
+      <p class="hint" id="mission-tip" style="margin-top:9px;font-style:italic"></p>
     </div>
 
     <div class="panel">
       <h2>🎮 Flight controls</h2>
       <div class="grid2" style="margin-bottom:8px">
         <label class="field" style="margin:0">
-          <div class="row"><span>Perigee alt</span><b><span id="v-peri">300</span> km</b></div>
+          <div class="row"><span>Starting altitude</span><b><span id="v-peri">300</span> km</b></div>
           <input type="range" id="f-peri" min="100" max="1200" step="5" value="300">
         </label>
         <label class="field" style="margin:0">
-          <div class="row"><span>Apogee alt</span><b><span id="v-apo">300</span> km</b></div>
-          <input type="range" id="f-apo" min="100" max="1200" step="5" value="300">
-        </label>
-        <label class="field" style="margin:0">
-          <div class="row"><span>Target / station-keep alt</span><b><span id="v-tgt">300</span> km</b></div>
+          <div class="row"><span>Target altitude</span><b><span id="v-tgt">300</span> km</b></div>
           <input type="range" id="f-tgt" min="100" max="1200" step="5" value="300">
         </label>
-        <label class="field" style="margin:0">
+        <label class="field" style="margin:0;grid-column:1/-1">
           <div class="row"><span>Throttle</span><b><span id="v-thr">60</span>%</b></div>
           <input type="range" id="f-throttle" min="0" max="100" step="1" value="60">
         </label>
       </div>
+      <!-- Hidden apogee slider keeps the engine API circular by default;
+           the elliptical disclosure reveals it for power users. -->
+      <details class="advanced" style="margin-bottom:8px">
+        <summary>Elliptical orbit · advanced</summary>
+        <label class="field" style="margin:8px 0 0">
+          <div class="row"><span>Apogee altitude</span><b><span id="v-apo">300</span> km</b></div>
+          <input type="range" id="f-apo" min="100" max="1200" step="5" value="300">
+        </label>
+      </details>
 
-      <div class="btn-row" style="margin-bottom:8px">
+      <div class="btn-row" style="margin-bottom:10px">
         <button class="btn primary" id="b-launch">▶ Launch</button>
         <button class="btn" id="b-pause" disabled>⏸ Pause</button>
         <button class="btn warn" id="b-reset">↺ Reset</button>
-        <label class="toggle warn" id="b-auto" title="Auto fire prograde to defend the target altitude">⟳ Auto station-keep</label>
+        <label class="toggle warn" id="b-auto" title="Auto-fire prograde to defend the target altitude">⟳ Auto-keep</label>
       </div>
 
-      <div class="row" style="display:flex;justify-content:space-between;margin-bottom:4px">
-        <span style="font-size:.68rem;color:var(--c-text-3);font-weight:700;letter-spacing:.06em;text-transform:uppercase">Burn vector</span>
-      </div>
-      <div class="toggle-row" id="thrust-modes">
-        <div class="toggle active" data-mode="off">Off</div>
-        <div class="toggle" data-mode="prograde">Prograde ⏩</div>
-        <div class="toggle" data-mode="retrograde">Retro ⏪</div>
-        <div class="toggle" data-mode="radial-out">Radial ⬆</div>
-        <div class="toggle" data-mode="radial-in">Radial ⬇</div>
+      <div class="ctl-group">
+        <div class="ctl-label">Burn vector <small style="color:var(--c-text-3);font-weight:600;text-transform:none;letter-spacing:0;margin-left:8px">⌨ 1–5</small></div>
+        <div class="toggle-row" id="thrust-modes">
+          <div class="toggle active" data-mode="off">⏹ Off</div>
+          <div class="toggle" data-mode="prograde">⏩ Prograde</div>
+          <div class="toggle" data-mode="retrograde">⏪ Retro</div>
+          <div class="toggle" data-mode="radial-out" data-unlock="radial">⬆ Radial-out</div>
+          <div class="toggle" data-mode="radial-in" data-unlock="radial">⬇ Radial-in</div>
+          <div class="toggle" data-mode="manual" data-unlock="manual_steer">🎯 Manual</div>
+        </div>
+        <p class="hint" id="manual-hint" style="margin-top:6px;display:none">
+          🕹 <b>A/D</b> rotate heading · <b>Q/E</b> fine · <b>W/S</b> fire fwd/rev (hold).
+        </p>
       </div>
 
-      <div class="row" style="display:flex;justify-content:space-between;margin:10px 0 4px">
-        <span style="font-size:.68rem;color:var(--c-text-3);font-weight:700;letter-spacing:.06em;text-transform:uppercase">Time warp</span>
-      </div>
-      <div class="toggle-row" id="warp-modes">
-        <div class="toggle active" data-warp="1">×1</div>
-        <div class="toggle" data-warp="10">×10</div>
-        <div class="toggle" data-warp="60">×60</div>
-        <div class="toggle" data-warp="600">×600</div>
-        <div class="toggle" data-warp="3600">×3600</div>
+      <div class="ctl-group" style="margin-top:10px">
+        <div class="ctl-label">Time warp</div>
+        <div class="toggle-row" id="warp-modes">
+          <div class="toggle active" data-warp="1">×1</div>
+          <div class="toggle" data-warp="10" data-unlock="warp_x10">×10</div>
+          <div class="toggle" data-warp="100" data-unlock="warp_x100">×100</div>
+          <div class="toggle" data-warp="1000" data-unlock="warp_x1000">×1000</div>
+        </div>
       </div>
     </div>
 
-    <div class="panel">
-      <h2>🌪 Drag conditions <span class="sub">thermosphere &amp; attitude</span></h2>
-
-      <div class="row" style="display:flex;justify-content:space-between;margin-bottom:4px">
-        <span style="font-size:.68rem;color:var(--c-text-3);font-weight:700;letter-spacing:.06em;text-transform:uppercase">Space weather</span>
+    <div class="panel" id="pilot-panel">
+      <h2>🎖 Pilot profile <span class="sub">progression &amp; unlocks</span></h2>
+      <div class="pilot-hd">
+        <span class="rank-badge" id="rank-badge">🟢</span>
+        <div class="rank-meta">
+          <div class="rank-name" id="rank-name">Cadet</div>
+          <div class="rank-xp" id="rank-xp">0 XP</div>
+        </div>
       </div>
+      <div class="bar" style="margin:7px 0 9px"><i id="rank-bar" style="width:0%"></i></div>
+      <div id="rank-next" class="hint" style="margin-bottom:8px">—</div>
+      <div class="ctl-label" style="margin-top:4px">Unlocked</div>
+      <div class="unlock-grid" id="unlocks-owned"></div>
+      <div class="ctl-label" style="margin-top:10px">Locked</div>
+      <div class="unlock-grid" id="unlocks-locked"></div>
+    </div>
+
+    <div class="panel">
+      <h2>🌪 Drag conditions</h2>
+
+      <div class="ctl-label">Space weather</div>
       <div class="toggle-row" id="sw-presets"></div>
 
-      <div class="grid2" style="margin-top:10px">
-        <label class="field" style="margin:0">
-          <div class="row"><span>F10.7 flux</span><b><span id="v-f107">150</span> sfu</b></div>
-          <input type="range" id="f-f107" min="65" max="300" step="1" value="150">
-        </label>
-        <label class="field" style="margin:0">
-          <div class="row"><span>Ap (geomag.)</span><b><span id="v-ap">12</span></b></div>
-          <input type="range" id="f-ap" min="0" max="400" step="1" value="12">
-        </label>
-      </div>
-
-      <div class="row" style="display:flex;justify-content:space-between;margin:12px 0 4px">
-        <span style="font-size:.68rem;color:var(--c-text-3);font-weight:700;letter-spacing:.06em;text-transform:uppercase">Drag attitude</span>
-      </div>
+      <div class="ctl-label" style="margin-top:11px">Drag attitude</div>
       <div class="toggle-row" id="att-modes"></div>
 
       <div class="metrics" style="margin-top:11px">
@@ -428,6 +543,20 @@ select option{background:#0a1024}
         <div class="metric"><div class="k">Eff. drag area</div><div class="v" id="d-effarea">—</div></div>
         <div class="metric"><div class="k">Ballistic coeff</div><div class="v" id="d-bc2">—</div></div>
       </div>
+
+      <details class="advanced" style="margin-top:9px">
+        <summary>Custom F10.7 / Ap · advanced</summary>
+        <div class="grid2" style="margin-top:6px">
+          <label class="field" style="margin:0">
+            <div class="row"><span>F10.7 flux</span><b><span id="v-f107">150</span> sfu</b></div>
+            <input type="range" id="f-f107" min="65" max="300" step="1" value="150">
+          </label>
+          <label class="field" style="margin:0">
+            <div class="row"><span>Ap (geomag.)</span><b><span id="v-ap">12</span></b></div>
+            <input type="range" id="f-ap" min="0" max="400" step="1" value="12">
+          </label>
+        </div>
+      </details>
     </div>
 
     <!-- ── telemetry + objective ── -->
@@ -464,22 +593,15 @@ select option{background:#0a1024}
     </div>
 
     <div class="panel">
-      <h2>🏆 Mission <span class="sub">station-keeping endurance</span></h2>
+      <h2>🏆 Score</h2>
       <div class="metrics">
         <div class="metric flag-good"><div class="k">Score</div><div class="v" id="o-score">0</div></div>
-        <div class="metric"><div class="k">On-station</div><div class="v" id="o-station">0<small>s</small></div></div>
-        <div class="metric"><div class="k">Orbits</div><div class="v" id="o-orbits">0</div></div>
         <div class="metric"><div class="k">Mission clock</div><div class="v" id="o-clock">0<small>s</small></div></div>
+        <div class="metric" style="grid-column:1/-1"><div class="k">Best run (this ship)</div><div class="v" id="o-best">0</div></div>
       </div>
-      <p class="hint" style="margin-top:10px">
-        You stay <b>on-station</b> while altitude ≥ target. Drag steals energy
-        every pass — burn <b>prograde</b> at perigee to re-boost, or flip on
-        auto station-keeping and see how long your Δv lasts. Best run is saved
-        with the ship.
-      </p>
-      <div class="metric" style="margin-top:8px;border-radius:var(--r-md)">
-        <div class="k">Best run (this ship)</div><div class="v" id="o-best">0</div>
-      </div>
+      <!-- Hidden legacy cards — engine code still writes to these IDs.
+           Kept off-screen so we don't have to refactor the writers. -->
+      <span id="o-station" hidden></span><span id="o-orbits" hidden></span>
     </div>
   </section>
 
@@ -492,6 +614,9 @@ import { auth } from './js/auth.js';
 import { getSupabase, isConfigured } from './js/supabase-config.js';
 import * as ENG from './js/satellite-designer-engine.js';
 import * as BUILDER from './js/satellite-builder.js';
+import * as SCENE3D from './js/satellite-designer-3d.js';
+import { MISSIONS, MISSION_ORDER } from './js/satellite-missions.js';
+import * as PROG from './js/satellite-progression.js';
 
 // ── DOM helpers ─────────────────────────────────────────────────────────────
 const $ = (id) => document.getElementById(id);
@@ -508,14 +633,30 @@ const env = ENG.defaultEnv();
 const sim = {
   running: false, paused: false, warp: 1,
   design: null, state: null, env,
-  control: { throttle: 0.6, mode: 'off', attitudeMult: 1 },
+  control: {
+    throttle: 0.6,
+    mode: 'off',
+    attitudeMult: 1,
+    heading: 0,                          // pilot heading in orbit plane (rad)
+  },
   attitude: 'nominal',
   auto: false,
   trail: [], altHist: [],
-  stationSeconds: 0, score: 0, best: 0, orbits: 0,
-  lastAngle: 0, viewScale: 1,
+  score: 0, best: 0,
+  viewScale: 1,
+  // Mission scoring (delegated to active mission module).
+  missionId: 'station',
+  missionCtx: null,
+  earthSpin: 0,
+  targetSatM: null,    // { x, y } when a target exists (rendezvous)
+  debrisM: null,       // { x, y } when debris exists (avoidance)
+  // Pilot input — set by keyboard while a key is held; consumed in frame().
+  inputs: { rotL: false, rotR: false, fwd: false, rev: false, fine: false },
+  prevMissionComplete: null,
 };
 let sdBuild = BUILDER.defaultBuild();
+// Persistent pilot profile (XP, rank, unlocks) — see js/satellite-progression.js
+let profile = PROG.loadProfile();
 
 // ── Design from the form ────────────────────────────────────────────────────
 function readDesign() {
@@ -637,24 +778,50 @@ function bindSlider(id, lblId) {
 }
 bindSlider('f-peri', 'v-peri'); bindSlider('f-apo', 'v-apo');
 bindSlider('f-tgt', 'v-tgt'); bindSlider('f-throttle', 'v-thr');
+bindSlider('f-fuel', 'v-fuel');
+$('f-tgt').addEventListener('input', () => { SCENE?.setTargetAlt(+$('f-tgt').value); });
+// "Starting altitude" controls perigee AND mirrors apogee — unless the user
+// has explicitly opened the elliptical disclosure to tune them apart.
 $('f-peri').addEventListener('input', () => {
-  if (+$('f-apo').value < +$('f-peri').value) { $('f-apo').value = $('f-peri').value; $('v-apo').textContent = $('f-apo').value; }
+  const ellOpen = $('f-apo').closest('details')?.open;
+  if (!ellOpen) { $('f-apo').value = $('f-peri').value; $('v-apo').textContent = $('f-peri').value; }
+  else if (+$('f-apo').value < +$('f-peri').value) { $('f-apo').value = $('f-peri').value; $('v-apo').textContent = $('f-apo').value; }
 });
 $('f-apo').addEventListener('input', () => {
   if (+$('f-apo').value < +$('f-peri').value) { $('f-peri').value = $('f-apo').value; $('v-peri').textContent = $('f-peri').value; }
 });
 $('f-throttle').addEventListener('input', () => { sim.control.throttle = (+$('f-throttle').value) / 100; });
 
-// Thrust mode buttons
+// Thrust mode buttons — refuses to activate locked modes (gated by rank).
 $('thrust-modes').addEventListener('click', (e) => {
   const t = e.target.closest('.toggle'); if (!t) return;
-  sim.control.mode = t.dataset.mode;
-  $('thrust-modes').querySelectorAll('.toggle').forEach(x =>
-    x.classList.toggle('active', x === t));
+  const unlock = t.dataset.unlock;
+  if (unlock && !PROG.hasUnlock(profile, unlock)) {
+    const u = PROG.UNLOCKS[unlock];
+    toast(`🔒 Unlocks at ${PROG.RANKS[u.rank].name} — ${u.desc}`, true);
+    return;
+  }
+  setBurnMode(t.dataset.mode);
 });
-// Time warp
+function setBurnMode(mode) {
+  sim.control.mode = mode;
+  // 'manual-retro' is the W-vs-S split inside Manual mode; the chip itself
+  // doesn't need to distinguish, so treat both as the Manual chip.
+  const chipMode = mode === 'manual-retro' ? 'manual' : mode;
+  $('thrust-modes').querySelectorAll('.toggle').forEach(x =>
+    x.classList.toggle('active', x.dataset.mode === chipMode));
+  $('manual-hint').style.display =
+    (mode === 'manual' || mode === 'manual-retro') ? 'block' : 'none';
+}
+// Time warp — same gating
 $('warp-modes').addEventListener('click', (e) => {
   const t = e.target.closest('.toggle'); if (!t) return;
+  const unlock = t.dataset.unlock;
+  if (unlock && !PROG.hasUnlock(profile, unlock)) {
+    const u = PROG.UNLOCKS[unlock];
+    toast(`🔒 Unlocks at ${PROG.RANKS[u.rank].name}`, true);
+    return;
+  }
   sim.warp = +t.dataset.warp;
   $('warp-modes').querySelectorAll('.toggle').forEach(x =>
     x.classList.toggle('active', x === t));
@@ -672,14 +839,20 @@ function launch() {
   const peri = +$('f-peri').value, apo = Math.max(+$('f-apo').value, peri);
   sim.state = ENG.initState(sim.design, { periKm: peri, apoKm: apo });
   sim.trail = []; sim.altHist = [];
-  sim.stationSeconds = 0; sim.score = 0; sim.orbits = 0;
-  sim.lastAngle = Math.atan2(sim.state.y, sim.state.x);
+  sim.score = 0;
+  sim.targetSatM = null; sim.debrisM = null;
   sim.running = true; sim.paused = false;
+  sim.prevMissionComplete = null;
+  // Heading starts aligned to velocity so manual-fire = prograde by default.
+  sim.control.heading = Math.atan2(sim.state.vy, sim.state.vx);
+  sim.inputs = { rotL: false, rotR: false, fwd: false, rev: false, fine: false };
   $('b-launch').disabled = true;
   $('b-pause').disabled = false; $('b-pause').textContent = '⏸ Pause';
   $('b-reset').disabled = false;
   $('st-warp').textContent = '▶ ×' + sim.warp;
   setPhase('In flight', 'good');
+  // Spin up the active mission.
+  startMission();
 }
 // Blank every live readout so each test run starts from a clean board.
 function clearReadouts() {
@@ -701,14 +874,17 @@ function clearReadouts() {
 function resetSim() {
   sim.running = false; sim.paused = false; sim.state = null;
   sim.trail = []; sim.altHist = [];
-  sim.stationSeconds = 0; sim.score = 0; sim.orbits = 0;
+  sim.score = 0;
+  sim.targetSatM = null; sim.debrisM = null;
   $('b-launch').disabled = false;
   $('b-pause').disabled = true; $('b-pause').textContent = '⏸ Pause';
   $('b-reset').disabled = false;
   $('st-warp').textContent = '▶ ×' + sim.warp;
   setPhase('Pre-flight', '');
   clearReadouts();
-  draw(); // clear to empty orbit
+  setBanner('', '');
+  // Refresh the inline objective text so the panel doesn't show stale data.
+  refreshObjectivePanel();
 }
 function setPhase(text, cls) {
   const p = $('st-phase');
@@ -738,6 +914,18 @@ function frame(now) {
   if (sim.running && !sim.paused && sim.state?.alive) {
     let simSecs = Math.min(realDt * sim.warp, 240);
 
+    // Pilot stick input — A/D rotate heading, W/S fire manual fwd/rev.
+    // Rotation rate is independent of warp so it's predictable at any speed.
+    if (PROG.hasUnlock(profile, 'manual_steer')) {
+      const rate = (sim.inputs.fine ? 0.7 : 2.0) * realDt;
+      if (sim.inputs.rotL) sim.control.heading += rate;
+      if (sim.inputs.rotR) sim.control.heading -= rate;
+      // W/S engage manual fire while held; release returns to Off.
+      if (sim.inputs.fwd) { if (sim.control.mode !== 'manual')       setBurnMode('manual'); }
+      else if (sim.inputs.rev) { if (sim.control.mode !== 'manual-retro') setBurnMode('manual-retro'); }
+      else if (sim.control.mode === 'manual' || sim.control.mode === 'manual-retro') setBurnMode('off');
+    }
+
     // Auto station-keeping: defend the target perigee with prograde burns.
     if (sim.auto) {
       const tgt = +$('f-tgt').value;
@@ -752,42 +940,71 @@ function frame(now) {
     }
 
     const r = ENG.advance(sim.state, sim.design, sim.env, sim.control, simSecs);
-    const prev = sim.state;
     sim.state = r.state;
+    sim.earthSpin += simSecs * ENG.OMEGA_EARTH;
 
-    // Orbit counter — count prograde crossings of the +x axis.
-    const ang = Math.atan2(sim.state.y, sim.state.x);
-    if (sim.lastAngle < 0 && ang >= 0 && sim.lastAngle < -0.1) sim.orbits++;
-    sim.lastAngle = ang;
-
-    // Scoring: time spent at/above the target altitude.
-    const tgt = +$('f-tgt').value;
     const tel = ENG.telemetry(sim.state, sim.design, sim.env, sim.control.attitudeMult);
-    if (tel.altKm >= tgt) sim.stationSeconds += simSecs;
-    sim.score = Math.floor(sim.stationSeconds + sim.orbits * 50);
+
+    // Mission tick — let the active scenario advance its state machine and
+    // contribute to the score. `missionCtx` was prepped in startMission().
+    if (sim.missionCtx) {
+      sim.missionCtx.targetAltKm = +$('f-tgt').value;
+      sim.missionCtx.lastPeriKm = tel.periAltKm;
+      const mission = MISSIONS[sim.missionId];
+      const out = mission.tick?.(sim.missionCtx, simSecs, tel) || {};
+      if (out.scoreDelta) sim.score += out.scoreDelta;
+      if (out.done) {
+        sim.running = false;
+        setPhase('🏁 Mission complete', 'good');
+        $('b-pause').disabled = true;
+        $('b-launch').disabled = false;
+        maybePersistBest();
+        grantMissionXp(true);
+      }
+    }
+    // Final score from the mission's accumulator (overrides delta sum when
+    // a closed-form score makes more sense, e.g. rendezvous = f(best miss)).
+    const mission = MISSIONS[sim.missionId];
+    if (mission && typeof mission.score === 'function') {
+      sim.score = mission.score(sim.missionCtx);
+    }
     if (sim.score > sim.best) sim.best = sim.score;
 
     // Trail + altitude history.
     sim.trail.push([sim.state.x, sim.state.y]);
-    if (sim.trail.length > 1800) sim.trail.shift();
+    if (sim.trail.length > 2400) sim.trail.shift();
     sim.altHist.push([sim.state.t, tel.altKm]);
     if (sim.altHist.length > 600) sim.altHist.shift();
 
     if (!sim.state.alive) {
       sim.running = false; sim.paused = false;
-      setPhase(sim.state.reason === 'reentry' ? '🔥 Burned up on re-entry' : 'Mission ended', 'bad');
-      // Re-arm the controls so a new configuration can be flown immediately.
+      setPhase(sim.state.reason === 'reentry' ? '🔥 Re-entry — vehicle destroyed' : 'Mission ended', 'bad');
       $('b-pause').disabled = true; $('b-pause').textContent = '⏸ Pause';
       $('b-launch').disabled = false;
-      toast('Re-entry: the craft burned up in the lower atmosphere.', true);
+      // For Deorbit, hitting the atmosphere with perigee in the window is success.
+      const deorbitSuccess = sim.missionId === 'deorbit'
+        && (sim.missionCtx?.lastPeriKm ?? 999) >= 60
+        && sim.missionCtx?.lastPeriKm <= 100;
+      if (sim.missionId === 'deorbit') {
+        toast(deorbitSuccess ? '🎯 Re-entry inside the safe window — mission success.'
+                             : 'Re-entry — outside the safe window.', !deorbitSuccess);
+      } else {
+        toast('Re-entry: the craft burned up in the lower atmosphere.', true);
+      }
       maybePersistBest();
+      grantMissionXp(deorbitSuccess);
     } else if (tel.fuel <= 0 && sim.control.mode === 'prograde') {
       setPhase('⚠ Out of propellant — decaying', 'warn');
     }
     updateTelemetry(tel);
+    refreshObjectivePanel(tel);
+  } else if (sim.state) {
+    // Live telemetry tick even when paused so the objective bar reflects truth.
+    refreshObjectivePanel(ENG.telemetry(sim.state, sim.design, sim.env, sim.control.attitudeMult));
   }
 
   draw();
+  updateViewReadout();
   requestAnimationFrame(frame);
 }
 function syncModeUI(mode) {
@@ -830,120 +1047,88 @@ function updateTelemetry(t) {
   $('dv-bar').style.width = (dvMax > 0 ? Math.min(1, t.dvRemaining / dvMax) * 100 : 0).toFixed(1) + '%';
 
   $('o-score').textContent = fmt(sim.score);
-  $('o-station').innerHTML = fmt(sim.stationSeconds, 0) + '<small>s</small>';
-  $('o-orbits').textContent = fmt(sim.orbits);
+  // 'on-station' & 'orbits' are mission-specific now — pull from the live
+  // mission context when the station-keeper or CME scenario is active.
+  const mst = sim.missionCtx?.state || {};
+  $('o-station').innerHTML = fmt(mst.stationSeconds || mst.stormSeconds || 0, 0) + '<small>s</small>';
+  $('o-orbits').textContent = fmt(mst.orbits || 0);
   $('o-clock').innerHTML = fmt(t.missionTime, 0) + '<small>s</small>';
   $('o-best').textContent = fmt(sim.best);
 }
 
-// ── Rendering ───────────────────────────────────────────────────────────────
-const cv = $('sd-canvas'), cx = cv.getContext('2d');
-let stars = [];
+// ── Rendering — 3-D mission canvas ─────────────────────────────────────────
+// All Earth/orbit/satellite drawing lives in satellite-designer-3d.js; this
+// page just feeds it the engine state every frame.
+const cv = $('sd-canvas');
+let SCENE = null;        // returned by SCENE3D.init(); null until WebGL is up
+let scenePending = false;
+
+async function ensureScene() {
+  if (SCENE || scenePending) return SCENE;
+  scenePending = true;
+  try {
+    const THREE = await import('three');
+    SCENE = await SCENE3D.init(cv, THREE);
+    SCENE.setTargetAlt(+$('f-tgt').value);
+    SCENE.update({ build: sdBuild });
+    SCENE.resize();
+    return SCENE;
+  } catch (e) {
+    console.warn('[3D] scene unavailable:', e.message);
+    cv.replaceWith(Object.assign(document.createElement('div'),
+      { className: 'warmup', textContent: '3-D scene unavailable in this browser.' }));
+    return null;
+  }
+}
 function resize() {
-  const r = $('sd-stage').getBoundingClientRect();
-  const dpr = Math.min(2, devicePixelRatio || 1);
-  cv.width = r.width * dpr; cv.height = r.height * dpr;
-  cx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  cv._w = r.width; cv._h = r.height;
-  stars = Array.from({ length: 90 }, () => ({
-    x: Math.random() * r.width, y: Math.random() * r.height,
-    s: Math.random() * 1.3 + 0.3, a: Math.random() * 0.5 + 0.2,
-  }));
+  if (SCENE) SCENE.resize();
 }
 addEventListener('resize', resize);
 
+let lastBuildSig = '';
 function draw() {
-  const W = cv._w || 600, H = cv._h || 480;
-  let shipArg = null;
-  cx.clearRect(0, 0, W, H);
-  // starfield
-  for (const s of stars) {
-    cx.globalAlpha = s.a; cx.fillStyle = '#bcdcff';
-    cx.fillRect(s.x, s.y, s.s, s.s);
-  }
-  cx.globalAlpha = 1;
+  if (!SCENE) return;
+  // Push the active build into the scene only when it changes (cheap diff).
+  const sig = JSON.stringify(sdBuild);
+  const buildChanged = sig !== lastBuildSig;
+  if (buildChanged) lastBuildSig = sig;
 
-  const cxp = W / 2, cyp = H / 2;
-  // auto-fit: show out to current apogee (or the apogee slider when idle)
-  let rMax = ENG.R_EARTH + 1200_000;
+  const update = {
+    earthSpin: sim.earthSpin,
+    trailM: sim.trail,
+  };
+  if (buildChanged) update.build = sdBuild;
+  const manual = sim.control.mode === 'manual' || sim.control.mode === 'manual-retro';
   if (sim.state) {
-    const el = ENG.elements(sim.state);
-    rMax = Math.max(el.r, isFinite(el.ra) ? el.ra : el.r) * 1.18;
+    update.satM = [sim.state.x, sim.state.y];
+    // In manual mode the bus visually points where the pilot is aiming;
+    // otherwise it stays velocity-aligned like a real momentum-biased craft.
+    update.satRotZ = manual
+      ? sim.control.heading
+      : Math.atan2(sim.state.vy, sim.state.vx);
   } else {
-    rMax = ENG.R_EARTH + (+$('f-apo').value) * 1000 * 1.25;
+    // Pre-flight: park the satellite on the prospective perigee so the
+    // player can see the design relative to Earth before launch.
+    const r = ENG.R_EARTH + (+$('f-peri').value) * 1000;
+    update.satM = [r, 0];
+    update.satRotZ = Math.PI / 2;       // facing +y (prograde)
   }
-  const scale = (Math.min(W, H) * 0.46) / rMax;
-  const px = (x) => cxp + x * scale;
-  const py = (y) => cyp - y * scale;
-  const Re = ENG.R_EARTH * scale;
+  // Heading reticle: always shown once Manual Steering is unlocked, so the
+  // pilot can pre-aim before committing to a burn. Goes hot when firing.
+  update.headingRad = sim.control.heading;
+  update.headingVisible = PROG.hasUnlock(profile, 'manual_steer') && !!sim.state;
+  update.headingFiring = manual && sim.state?.fuel > 0 && sim.control.throttle > 0;
+  if (sim.targetSatM) update.targetSat = [sim.targetSatM.x, sim.targetSatM.y];
+  if (sim.debrisM)    update.debris    = [sim.debrisM.x,    sim.debrisM.y];
 
-  // atmosphere shell (80 → 600 km), the part that bites
-  const atmOuter = (ENG.R_EARTH + 600_000) * scale;
-  const g = cx.createRadialGradient(cxp, cyp, Re, cxp, cyp, atmOuter);
-  g.addColorStop(0, 'rgba(90,170,255,.30)');
-  g.addColorStop(0.45, 'rgba(60,130,220,.12)');
-  g.addColorStop(1, 'rgba(40,90,160,0)');
-  cx.fillStyle = g;
-  cx.beginPath(); cx.arc(cxp, cyp, atmOuter, 0, 7); cx.fill();
+  SCENE.update(update);
 
-  // target-altitude ring
-  const tgtR = (ENG.R_EARTH + (+$('f-tgt').value) * 1000) * scale;
-  cx.strokeStyle = 'rgba(95,227,154,.45)'; cx.setLineDash([5, 6]); cx.lineWidth = 1;
-  cx.beginPath(); cx.arc(cxp, cyp, tgtR, 0, 7); cx.stroke();
-  cx.setLineDash([]);
+  // Auto-fit only matters in wide mode; render passes the current apogee km.
+  const apoKm = sim.state
+    ? Math.max(ENG.elements(sim.state).ra, ENG.elements(sim.state).r) / 1000 - ENG.R_EARTH / 1000
+    : Math.max(+$('f-apo').value, +$('f-peri').value);
+  SCENE.render(apoKm);
 
-  // Earth
-  const eg = cx.createRadialGradient(cxp - Re * .35, cyp - Re * .35, Re * .1, cxp, cyp, Re);
-  eg.addColorStop(0, '#3b86c9'); eg.addColorStop(.6, '#16406e'); eg.addColorStop(1, '#081f38');
-  cx.fillStyle = eg;
-  cx.beginPath(); cx.arc(cxp, cyp, Re, 0, 7); cx.fill();
-  cx.strokeStyle = 'rgba(120,200,255,.5)'; cx.lineWidth = 1;
-  cx.beginPath(); cx.arc(cxp, cyp, Re, 0, 7); cx.stroke();
-
-  // orbit trail
-  if (sim.trail.length > 1) {
-    cx.strokeStyle = 'rgba(0,198,255,.55)'; cx.lineWidth = 1.4;
-    cx.beginPath();
-    for (let i = 0; i < sim.trail.length; i++) {
-      const [x, y] = sim.trail[i];
-      i ? cx.lineTo(px(x), py(y)) : cx.moveTo(px(x), py(y));
-    }
-    cx.stroke();
-  }
-
-  // satellite + vectors
-  if (sim.state) {
-    const X = px(sim.state.x), Y = py(sim.state.y);
-    // velocity vector
-    const vmag = Math.hypot(sim.state.vx, sim.state.vy) || 1;
-    cx.strokeStyle = 'rgba(0,198,255,.9)'; cx.lineWidth = 2;
-    cx.beginPath(); cx.moveTo(X, Y);
-    cx.lineTo(X + sim.state.vx / vmag * 26, Y - sim.state.vy / vmag * 26); cx.stroke();
-    // thrust vector
-    if (sim.running && sim.control.mode !== 'off' && sim.control.throttle > 0 && sim.state.fuel > 0) {
-      let dx = 0, dy = 0, r = ENG.elements(sim.state).r;
-      if (sim.control.mode === 'prograde') { dx = sim.state.vx / vmag; dy = sim.state.vy / vmag; }
-      else if (sim.control.mode === 'retrograde') { dx = -sim.state.vx / vmag; dy = -sim.state.vy / vmag; }
-      else if (sim.control.mode === 'radial-out') { dx = sim.state.x / r; dy = sim.state.y / r; }
-      else if (sim.control.mode === 'radial-in') { dx = -sim.state.x / r; dy = -sim.state.y / r; }
-      cx.strokeStyle = '#ffb066'; cx.lineWidth = 3;
-      cx.beginPath(); cx.moveTo(X, Y);
-      cx.lineTo(X - dx * 30, Y + dy * 30); cx.stroke(); // exhaust points opposite thrust
-    }
-    if (SHIP.ready) {
-      // The 3-D model marks the craft; keep just a faint locator ring.
-      cx.strokeStyle = 'rgba(0,198,255,.35)'; cx.lineWidth = 1;
-      cx.beginPath(); cx.arc(X, Y, 13, 0, 7); cx.stroke();
-    } else {
-      cx.fillStyle = '#fff';
-      cx.beginPath(); cx.arc(X, Y, 4.2, 0, 7); cx.fill();
-      cx.strokeStyle = '#00c6ff'; cx.lineWidth = 2;
-      cx.beginPath(); cx.arc(X, Y, 7, 0, 7); cx.stroke();
-    }
-    shipArg = { sx: X, sy: Y, vangle: Math.atan2(sim.state.vy, sim.state.vx) };
-  }
-
-  renderShip(W, H, shipArg);
   drawSpark();
 }
 
@@ -995,6 +1180,7 @@ function applyDesign(dd) {
   for (const [k, id] of [['thrust','f-thrust'],['isp','f-isp'],['dryMass','f-dry'],
       ['fuelMass','f-fuel'],['area','f-area'],['cd','f-cd']])
     if (dd[k] != null) $(id).value = dd[k];
+  if (dd.fuelMass != null) $('v-fuel').textContent = dd.fuelMass;
   if (dd.periKm != null) { $('f-peri').value = dd.periKm; $('v-peri').textContent = dd.periKm; }
   if (dd.apoKm != null) { $('f-apo').value = dd.apoKm; $('v-apo').textContent = dd.apoKm; }
   if (dd.targetKm != null) { $('f-tgt').value = dd.targetKm; $('v-tgt').textContent = dd.targetKm; }
@@ -1131,7 +1317,6 @@ async function initAuth() {
   addEventListener('auth-changed', applyState);
 }
 $('b-save').addEventListener('click', saveShip);
-$('b-refresh').addEventListener('click', refreshHangar);
 
 // ── 3D Design Bay ───────────────────────────────────────────────────────────
 const BAY = { ready: false, three: null, raf: 0,
@@ -1184,82 +1369,6 @@ function disposeGroup(grp) {
     if (o.isMesh) { o.geometry?.dispose?.();
       (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m?.dispose?.()); }
   });
-}
-// ── Live ship on the main stage ─────────────────────────────────────────────
-// A transparent WebGL layer over the 2-D orbit canvas that renders the
-// actual built satellite: a slow turntable pre-flight, flying nose-to-
-// velocity once launched. Self-syncs to sdBuild; degrades silently to the
-// 2-D marker if three/WebGL can't load (offline).
-const SHIP = { ready: false, tried: false, three: null, renderer: null,
-  scene: null, camera: null, pivot: null, orient: null, model: null,
-  sig: '', W: 0, H: 0, spin: 0 };
-
-async function ensureShipGL() {
-  if (SHIP.ready || SHIP.tried) return SHIP.ready;
-  SHIP.tried = true;
-  try {
-    const THREE = await import('three');
-    SHIP.three = THREE;
-    const cv = $('sd-shipgl');
-    SHIP.renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true });
-    SHIP.renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1));
-    SHIP.renderer.setClearColor(0x000000, 0);
-    SHIP.scene = new THREE.Scene();
-    SHIP.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -2000, 2000);
-    SHIP.scene.add(new THREE.AmbientLight(0x4a5566, 1.0));
-    const key = new THREE.DirectionalLight(0xffffff, 1.3); key.position.set(3, 5, 6);
-    const rim = new THREE.DirectionalLight(0x5577ff, 0.45); rim.position.set(-4, -2, -4);
-    SHIP.scene.add(key, rim);
-    SHIP.orient = new THREE.Group();
-    SHIP.pivot = new THREE.Group();
-    SHIP.pivot.add(SHIP.orient);
-    SHIP.scene.add(SHIP.pivot);
-    SHIP.ready = true;
-    return true;
-  } catch (e) {
-    console.warn('[Stage] 3-D ship layer unavailable:', e.message);
-    return false;
-  }
-}
-function rebuildShipModel() {
-  if (!SHIP.ready) return;
-  if (SHIP.model) { SHIP.orient.remove(SHIP.model); disposeGroup(SHIP.model); }
-  SHIP.model = BUILDER.buildGroup(SHIP.three, sdBuild);
-  // Engine thrust axis is +z; yaw it so the long axis & wings lie in the
-  // screen plane (a readable side-on silhouette, nose toward +x).
-  SHIP.model.rotation.y = Math.PI / 2;
-  SHIP.orient.add(SHIP.model);
-}
-// Called every frame from draw(). ship = null pre-flight (centred hero
-// turntable); else { sx, sy, vangle } with sx/sy in canvas-pixel space.
-function renderShip(W, H, ship) {
-  if (!SHIP.ready || W < 2 || H < 2) return;
-  if (W !== SHIP.W || H !== SHIP.H) {
-    SHIP.W = W; SHIP.H = H;
-    SHIP.renderer.setSize(W, H, false);
-    const c = SHIP.camera;
-    c.left = -W / 2; c.right = W / 2; c.top = H / 2; c.bottom = -H / 2;
-    c.updateProjectionMatrix();
-  }
-  const sig = JSON.stringify(sdBuild);
-  if (sig !== SHIP.sig) { SHIP.sig = sig; rebuildShipModel(); }
-  if (!SHIP.model) return;
-
-  const extent = Math.max(0.2, BUILDER.buildExtent(sdBuild));
-  if (ship) {
-    SHIP.pivot.position.set(ship.sx - W / 2, H / 2 - ship.sy, 0);
-    const targetPx = Math.max(34, Math.min(W, H) * 0.085);
-    SHIP.pivot.scale.setScalar(targetPx / extent);
-    SHIP.pivot.rotation.z = ship.vangle;
-    SHIP.orient.rotation.set(-0.42, 0, 0);
-  } else {
-    SHIP.pivot.position.set(0, 0, 0);
-    SHIP.pivot.scale.setScalar((Math.min(W, H) * 0.46) / extent);
-    SHIP.pivot.rotation.z = 0;
-    SHIP.spin += 0.0065;
-    SHIP.orient.rotation.set(-0.42, SHIP.spin, 0);
-  }
-  SHIP.renderer.render(SHIP.scene, SHIP.camera);
 }
 function fitBayCamera() {
   if (!BAY.ready) return;
@@ -1366,6 +1475,229 @@ $('bay-span').addEventListener('input', (e) => {
 });
 addEventListener('resize', resizeBay);
 
+// ── Stage banner & camera modes ─────────────────────────────────────────────
+const bannerEl = $('sd-banner');
+let bannerHideT = 0;
+function setBanner(msg, cls = '') {
+  if (!msg) { bannerEl.classList.remove('show'); return; }
+  bannerEl.classList.remove('good', 'warn', 'bad');
+  if (cls) bannerEl.classList.add(cls);
+  bannerEl.textContent = msg;
+  bannerEl.classList.add('show');
+  clearTimeout(bannerHideT);
+  // Status messages auto-fade after 6 s; missions re-assert critical alerts.
+  bannerHideT = setTimeout(() => bannerEl.classList.remove('show'), 6000);
+}
+$('sd-cam').addEventListener('click', (e) => {
+  const b = e.target.closest('.cam-btn');
+  if (b && SCENE) {
+    SCENE.setCameraMode(b.dataset.cam, { snap: true });
+    $('sd-cam').querySelectorAll('.cam-btn').forEach(x =>
+      x.classList.toggle('active', x === b));
+    return;
+  }
+  if (e.target.closest('#cam-focus') && SCENE) SCENE.focusSatellite();
+  if (e.target.closest('#cam-reset') && SCENE) { SCENE.resetView(); setCamModeButton('wide'); }
+});
+function setCamModeButton(mode) {
+  $('sd-cam').querySelectorAll('.cam-btn').forEach(x =>
+    x.classList.toggle('active', x.dataset.cam === mode));
+}
+// Keyboard shortcuts — F focus, R reset, C cycle. Avoid stealing form input.
+addEventListener('keydown', (e) => {
+  if (e.target.matches('input,select,textarea')) return;
+  if (!SCENE) return;
+  if (e.key === 'f' || e.key === 'F') { SCENE.focusSatellite(); }
+  else if (e.key === 'r' || e.key === 'R') { SCENE.resetView(); setCamModeButton('wide'); }
+  else if (e.key === 'c' || e.key === 'C') {
+    const order = ['wide', 'follow', 'free'];
+    const next = order[(order.indexOf(SCENE.getMode()) + 1) % order.length];
+    SCENE.setCameraMode(next, { snap: true }); setCamModeButton(next);
+  }
+});
+// View-distance readout — updates ~5×/sec
+let viewLastT = 0;
+function updateViewReadout() {
+  if (!SCENE) return;
+  const now = performance.now();
+  if (now - viewLastT < 200) return;
+  viewLastT = now;
+  const v = SCENE.viewInfo();
+  const a = v.altKm > 9999 ? (v.altKm / 1000).toFixed(1) + ' Mm'
+          : v.altKm.toFixed(0) + ' km';
+  $('sd-view').textContent = `view ${a} · ${v.mode}`;
+}
+
+// ── Mission picker ──────────────────────────────────────────────────────────
+function renderMissionPicker() {
+  $('mission-select').innerHTML = MISSION_ORDER.map(id => {
+    const m = MISSIONS[id];
+    return `<div class="toggle${id === sim.missionId ? ' active' : ''}" data-mid="${id}">${m.name}</div>`;
+  }).join('');
+}
+$('mission-select').addEventListener('click', (e) => {
+  const t = e.target.closest('.toggle'); if (!t) return;
+  setMission(t.dataset.mid);
+});
+function setMission(id) {
+  if (!MISSIONS[id]) return;
+  sim.missionId = id;
+  const m = MISSIONS[id];
+  $('mission-select').querySelectorAll('.toggle').forEach(t =>
+    t.classList.toggle('active', t.dataset.mid === id));
+  $('mission-blurb').textContent = m.blurb;
+  $('mission-tip').textContent = '💡 ' + m.tip;
+  // Apply scenario defaults to the orbit/throttle sliders unless we're
+  // mid-flight (don't yank the wheel out of the pilot's hands).
+  if (!sim.running && m.defaults) {
+    const d = m.defaults;
+    if (d.periKm != null) { $('f-peri').value = d.periKm; $('v-peri').textContent = d.periKm; }
+    if (d.apoKm  != null) { $('f-apo').value  = d.apoKm;  $('v-apo').textContent  = d.apoKm;  }
+    if (d.tgtKm  != null) { $('f-tgt').value  = d.tgtKm;  $('v-tgt').textContent  = d.tgtKm;  }
+    if (d.throttle != null) { $('f-throttle').value = d.throttle; $('v-thr').textContent = d.throttle;
+                              sim.control.throttle = d.throttle / 100; }
+    if (d.fuelMass != null) { $('f-fuel').value = d.fuelMass; $('v-fuel').textContent = d.fuelMass; refreshDesignReadouts(); }
+    if (d.swPreset) setSWPreset(d.swPreset);
+    if (d.attitude) setAttitude(d.attitude);
+    SCENE?.setTargetAlt(+$('f-tgt').value);
+  }
+  refreshObjectivePanel();
+}
+function startMission() {
+  const m = MISSIONS[sim.missionId]; if (!m) return;
+  // Mission context — read/write surface the scenario uses to mutate the world.
+  sim.missionCtx = {
+    sim, env, design: sim.design, control: sim.control,
+    R_EARTH: ENG.R_EARTH, MU: ENG.MU,
+    targetAltKm: +$('f-tgt').value,
+    lastPeriKm: +$('f-peri').value,
+    state: null,
+    setTarget: (o) => { sim.targetSatM = o; },
+    setDebris: (o) => { sim.debrisM = o; },
+    getTarget: () => sim.targetSatM,
+    getDebris: () => sim.debrisM,
+    event: (type) => { /* hook point for analytics / sounds */ },
+    setBanner,
+  };
+  m.setup?.(sim.missionCtx);
+  refreshObjectivePanel();
+}
+
+// ── Objective panel ─────────────────────────────────────────────────────────
+function refreshObjectivePanel(tel) {
+  const m = MISSIONS[sim.missionId]; if (!m) return;
+  const ctx = sim.missionCtx;
+  if (!ctx) {                                  // pre-launch preview
+    $('obj-label').textContent = m.blurb;
+    $('obj-bar').style.width = '0%';
+    $('obj-extras').textContent = '';
+    return;
+  }
+  ctx.targetAltKm = +$('f-tgt').value;
+  const t = tel || (sim.state ? ENG.telemetry(sim.state, sim.design, sim.env, sim.control.attitudeMult) : null);
+  if (!t) return;
+  const o = m.objective?.(ctx, t);
+  if (!o) return;
+  $('obj-label').textContent = o.label;
+  $('obj-bar').style.width = Math.round((o.progress || 0) * 100) + '%';
+  $('obj-extras').textContent = Object.entries(o.extras || {})
+    .map(([k, v]) => `${k}: ${v}`).join(' · ');
+}
+
+// ── Pilot progression (roguelike-style unlocks) ─────────────────────────────
+function renderPilotPanel() {
+  const xp = PROG.xpFor(profile);
+  $('rank-badge').textContent = xp.rank.badge;
+  $('rank-name').textContent = xp.rank.name;
+  $('rank-xp').textContent = `${xp.total} XP · ${profile.totalMissions || 0} missions flown`;
+  $('rank-bar').style.width = Math.min(100, xp.pct * 100).toFixed(1) + '%';
+  $('rank-next').textContent = xp.atMax
+    ? '🏅 Max rank — top of the operator ladder.'
+    : `Next: ${xp.nextRankName} · ${xp.span - xp.intoRank} XP to go`;
+  const owned = PROG.unlocksOwned(profile);
+  const locked = PROG.unlocksLocked(profile);
+  $('unlocks-owned').innerHTML = owned.length
+    ? owned.map(u => `<div class="unlock owned"><div><b>${u.name}</b><br><span style="color:var(--c-text-3);font-size:.6rem">${u.desc}</span></div></div>`).join('')
+    : '<div class="hint">No unlocks yet — complete a mission to earn XP.</div>';
+  $('unlocks-locked').innerHTML = locked.length
+    ? locked.map(u => `<div class="unlock locked"><div><b>${u.name}</b><br><span style="font-size:.6rem">${u.desc}</span></div><span class="lk">${PROG.RANKS[u.rank].name}</span></div>`).join('')
+    : '<div class="hint">Everything unlocked — full operator suite.</div>';
+}
+// Reflect locked controls in the chip rows (locked chips can't be activated).
+function applyUnlockLocks() {
+  document.querySelectorAll('.toggle[data-unlock]').forEach(el => {
+    const need = el.dataset.unlock;
+    const ok = PROG.hasUnlock(profile, need);
+    el.classList.toggle('locked', !ok);
+    if (!ok) {
+      const u = PROG.UNLOCKS[need];
+      el.title = `🔒 Unlocks at ${PROG.RANKS[u.rank].name} — ${u.desc}`;
+    } else {
+      el.title = '';
+    }
+  });
+}
+// Called when a mission ends (success or — for deorbit — useful failure).
+// Awards XP, persists the profile, and notifies the pilot of any rank-up
+// + freshly granted unlocks.
+function grantMissionXp(success) {
+  if (sim.prevMissionComplete === sim.missionId) return;     // dedupe
+  sim.prevMissionComplete = sim.missionId;
+  const usable = success ? Math.max(0, sim.score) : Math.max(0, Math.floor(sim.score * 0.3));
+  if (!success && usable < 5) {                              // no XP for face-plants
+    renderPilotPanel(); return;
+  }
+  const r = PROG.awardXp(profile, sim.missionId, usable);
+  profile = r.profile;
+  toast(`+${r.gained} XP${r.firstTime ? ' · 🆕 first-time bonus' : ''}`);
+  if (r.rankedUp) {
+    setTimeout(() => toast(`🎖 Promoted to ${r.toRank.name}!`), 900);
+    if (r.newUnlocks.length) {
+      const names = r.newUnlocks.map(k => PROG.UNLOCKS[k].name).join(' · ');
+      setTimeout(() => toast(`🔓 Unlocked: ${names}`), 1800);
+    }
+  }
+  applyUnlockLocks();
+  renderPilotPanel();
+}
+
+// ── Pilot keyboard steering ────────────────────────────────────────────────
+// A/D rotate heading; Q/E fine; W/S fire fwd/rev along heading (hold).
+// 1–5 quick-select burn vector chips. Camera shortcuts (F/R/C) live higher
+// up in the file. We swallow keys only when the sim is running so we don't
+// fight the parts UI.
+addEventListener('keydown', (e) => {
+  if (e.target.matches('input,select,textarea')) return;
+  const k = e.key.toLowerCase();
+  if (k === 'a') sim.inputs.rotL = true;
+  else if (k === 'd') sim.inputs.rotR = true;
+  else if (k === 'q') { sim.inputs.rotL = true; sim.inputs.fine = true; }
+  else if (k === 'e') { sim.inputs.rotR = true; sim.inputs.fine = true; }
+  else if (k === 'w') sim.inputs.fwd = true;
+  else if (k === 's') sim.inputs.rev = true;
+  else if (k >= '1' && k <= '5') {
+    const map = { '1': 'off', '2': 'prograde', '3': 'retrograde',
+                  '4': 'radial-out', '5': 'radial-in' };
+    const mode = map[k];
+    const need = $('thrust-modes').querySelector(`.toggle[data-mode="${mode}"]`)?.dataset.unlock;
+    if (need && !PROG.hasUnlock(profile, need)) {
+      const u = PROG.UNLOCKS[need];
+      toast(`🔒 Unlocks at ${PROG.RANKS[u.rank].name}`, true);
+    } else {
+      setBurnMode(mode);
+    }
+  }
+});
+addEventListener('keyup', (e) => {
+  const k = e.key.toLowerCase();
+  if (k === 'a') sim.inputs.rotL = false;
+  else if (k === 'd') sim.inputs.rotR = false;
+  else if (k === 'q') { sim.inputs.rotL = false; sim.inputs.fine = false; }
+  else if (k === 'e') { sim.inputs.rotR = false; sim.inputs.fine = false; }
+  else if (k === 'w') sim.inputs.fwd = false;
+  else if (k === 's') sim.inputs.rev = false;
+});
+
 // ── Boot ────────────────────────────────────────────────────────────────────
 window.__sd = { auth, engine: ENG, sim, builder: BUILDER,
   ui: { readDesign, currentDesignData },
@@ -1375,20 +1707,30 @@ window.__sd = { auth, engine: ENG, sim, builder: BUILDER,
                 getEnv: () => ({ ...env }),
                 getAttitude: () => sim.attitude,
                 rho400: () => ENG.airDensity(400_000, env) },
-  stage: { ensureShipGL,
-           shipReady: () => SHIP.ready,
-           shipTried: () => SHIP.tried } };
+  stage: { ensureScene,
+           sceneReady: () => !!SCENE,
+           setCameraMode: (m) => SCENE?.setCameraMode(m),
+           getCameraMode: () => SCENE?.getMode() ?? null },
+  missions: { list: MISSION_ORDER, get: (k) => MISSIONS[k],
+              current: () => sim.missionId,
+              setMission },
+  progression: { getProfile: () => ({ ...profile }),
+                 reset: () => { profile = PROG.resetProfile(); applyUnlockLocks(); renderPilotPanel(); toast('Pilot profile reset.'); },
+                 award: (xp) => { profile.xp += +xp; PROG.saveProfile(profile); applyUnlockLocks(); renderPilotPanel(); } } };
 
 (async function boot() {
+  renderMissionPicker();
+  renderPilotPanel();
+  applyUnlockLocks();
   loadDraft();
   refreshDesignReadouts();
-  resize();
   // Warm the thermosphere model with one sample, then drop the overlay.
   try { ENG.airDensity(400_000, env); } catch (e) { console.warn(e); }
   $('sd-warmup').style.display = 'none';
   resetSim();
-  ensureShipGL();   // fire-and-forget; 2-D marker covers until ready
-  initBay();        // inline 3-D build view, always on
+  setMission('station');             // Default scenario
+  await ensureScene();               // Build the 3-D stage
+  initBay();                          // inline 3-D build view, always on
   requestAnimationFrame((t) => { lastT = t; frame(t); });
   initAuth();
 })();
