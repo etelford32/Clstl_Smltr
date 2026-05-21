@@ -331,6 +331,7 @@ body {
 <!-- ── Engine bootstrap ───────────────────────────────── -->
 <script type="module">
 import { loadReplay, createPlayer, skillSummary } from './js/gannon-superstorm-engine.js?v=1';
+import { createApSaturationChart } from './js/gannon-superstorm-charts.js?v=1';
 
 const els = {
     scrub:    document.getElementById('gn-scrubber'),
@@ -405,10 +406,26 @@ function paint(sample) {
     els.scrub.max = player.durationHours;
     els.scrub.step = 0.25;
 
+    // Render the Ap-saturation chart. Click-to-seek wires the chart back
+    // to the scrubber so users can jump to a moment they hover over.
+    const apChart = createApSaturationChart(
+        document.getElementById('gn-chart-ap'),
+        replay,
+        player,
+        {
+            placeholder: !!replay._is_placeholder,
+            onClickSeekHours(h) {
+                els.scrub.value = h;
+                onScrub();
+            },
+        },
+    );
+
     function onScrub() {
         const h = parseFloat(els.scrub.value);
         const s = player.seekHours(h);
         paint(s);
+        apChart.setCursor(h);
     }
     els.scrub.addEventListener('input', onScrub);
     document.querySelectorAll('[data-seek-h]').forEach(btn => {

@@ -1,0 +1,424 @@
+/**
+ * gannon-superstorm-charts.js — inline-SVG charts for the Gannon page
+ * ═══════════════════════════════════════════════════════════════════════
+ * Zero-dependency SVG renderer for the page's central panels. Built
+ * against the existing replay bundle (`drivers_compact`); no chart
+ * library, no canvas, no WASM. The same primitives (axes, gridlines,
+ * traces, cursor, hover tooltip, phase shading) get reused by the
+ * ρ@400 km panel and the residual histogram in follow-up passes.
+ *
+ * Exports:
+ *   createApSaturationChart(container, replay, player, opts) → { setCursor }
+ *
+ * Why inline SVG: viewBox-scaled SVG is crisper than canvas at any
+ * zoom, picks up the page's color tokens via CSS, and produces share-
+ * worthy OG images without an offscreen-canvas dance. The trade is
+ * verbosity — that's why this module exists, to keep the page tidy.
+ */
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+const MARGIN   = { top: 14, right: 16, bottom: 36, left: 50 };
+const PLOT_W   = 800;
+const PLOT_H   = 240;
+
+const COLORS = {
+    real:        "#888",
+    mhd:         "#f96",
+    gnd:         "#6cf",
+    ceiling:     "#aaa",
+    ssc:         "#ffb866",
+    axis:        "rgba(255,255,255,.22)",
+    grid:        "rgba(255,255,255,.07)",
+    text:        "#bcd",
+    textSubtle:  "#789",
+    cursor:      "#fff",
+    tooltipBg:   "rgba(8,4,20,0.96)",
+    tooltipBd:   "rgba(255,255,255,0.18)",
+};
+
+const PHASE_FILL = {
+    ramp:     "rgba(255,200,80,0.05)",
+    peak:     "rgba(255,80,80,0.07)",
+    recovery: "rgba(120,200,255,0.04)",
+};
+
+// Storm-phase boundaries in hours from window start. Matches the
+// engine module's PHASE_BOUNDARIES; we duplicate the literal here so
+// the chart's annotations don't fall out of sync if either side
+// edits the other. Worth pinning in a follow-up.
+const PHASE_BOUNDARIES = { rampEndH: 8, peakEndH: 30 };
+
+// SSC arrival (hours from 2024-05-10T12:00:00Z). Per NOAA SWPC the
+// sheath shock hit DSCOVR at ~17:05 UT on 2024-05-10 — see
+// MHD_DENSITY_PHASE0_GANNON_RUNBOOK.md.
+const SSC_HOURS = 5 + 5 / 60;
+
+// ── tiny SVG helper ─────────────────────────────────────────────────
+
+function svg(tag, attrs = {}, children = []) {
+    const el = document.createElementNS(SVG_NS, tag);
+    for (const k in attrs) {
+        if (attrs[k] === null || attrs[k] === undefined) continue;
+        el.setAttribute(k, attrs[k]);
+    }
+    for (const c of children) {
+        if (c == null) continue;
+        if (typeof c === "string") el.appendChild(document.createTextNode(c));
+        else                       el.appendChild(c);
+    }
+    return el;
+}
+
+// ── formatting ──────────────────────────────────────────────────────
+
+function _fmtClock(t0Ms, hours) {
+    const d = new Date(t0Ms + hours * 3600_000);
+    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(d.getUTCDate()).padStart(2, "0");
+    const hh = String(d.getUTCHours()).padStart(2, "0");
+    const mn = String(d.getUTCMinutes()).padStart(2, "0");
+    return `${mm}-${dd} ${hh}:${mn}`;
+}
+
+// ── main chart factory ──────────────────────────────────────────────
+
+/**
+ * Render the Ap-saturation chart into `container`. Returns an object
+ * with a `setCursor(hoursFromStart)` method the page wires to the
+ * scrubber's `input` event.
+ *
+ * `opts.placeholder` — when true, draws a subtle "PLACEHOLDER" stamp
+ * across the plot so screenshots of the synthetic bundle never
+ * masquerade as real results.
+ */
+export function createApSaturationChart(container, replay, player, opts = {}) {
+    const drivers  = replay.drivers_compact;
+    const win      = replay.window;
+    const t0Ms     = Date.parse(win.start);
+    const t1Ms     = Date.parse(win.end);
+    const dur_h    = (t1Ms - t0Ms) / 3600_000;
+    const stepMin  = win.step_minutes || 60;
+    const n        = drivers.ap_real.length;
+
+    const isPlaceholder = !!opts.placeholder ?? !!replay._is_placeholder;
+
+    // Y-axis range — leave headroom above the tallest surrogate trace.
+    const yMaxData = Math.max(
+        ...drivers.ap_real, ...drivers.ap_mhd, ...drivers.ap_gnd
+    );
+    const yPlotMax = Math.ceil((yMaxData + 50) / 100) * 100;
+
+    // ── scales ─────────────────────────────────────────────────────
+    const plotW = PLOT_W - MARGIN.left - MARGIN.right;
+    const plotH = PLOT_H - MARGIN.top  - MARGIN.bottom;
+    const xScale = h  => MARGIN.left + (h / dur_h) * plotW;
+    const yScale = ap => MARGIN.top  + (1 - ap / yPlotMax) * plotH;
+    const xs     = i  => i * stepMin / 60;
+    const idxAt  = h  => Math.max(0, Math.min(n - 1, Math.round(h * 60 / stepMin)));
+
+    // ── build the SVG ──────────────────────────────────────────────
+    container.innerHTML = "";
+    container.classList.remove("gn-pulse");
+
+    const root = svg("svg", {
+        viewBox: `0 0 ${PLOT_W} ${PLOT_H}`,
+        preserveAspectRatio: "none",
+        width:  "100%",
+        height: "100%",
+        role:   "img",
+        "aria-label":
+            "Ap index timeseries during the May 2024 Gannon superstorm: " +
+            "official Ap pinned at the 400 ceiling, MHD- and ground-magnetometer-" +
+            "derived surrogates climbing past it.",
+        style:  "display:block;",
+    });
+
+    // 1. Phase shading + labels
+    const phases = [
+        { name: "ramp",     start: 0,                          end: PHASE_BOUNDARIES.rampEndH, fill: PHASE_FILL.ramp     },
+        { name: "peak",     start: PHASE_BOUNDARIES.rampEndH,  end: PHASE_BOUNDARIES.peakEndH, fill: PHASE_FILL.peak     },
+        { name: "recovery", start: PHASE_BOUNDARIES.peakEndH,  end: dur_h,                     fill: PHASE_FILL.recovery },
+    ];
+    for (const p of phases) {
+        const x0 = xScale(p.start);
+        const x1 = xScale(p.end);
+        root.appendChild(svg("rect", {
+            x: x0, y: MARGIN.top, width: x1 - x0, height: plotH, fill: p.fill,
+        }));
+        root.appendChild(svg("text", {
+            x: (x0 + x1) / 2, y: MARGIN.top + 11,
+            "text-anchor": "middle",
+            fill: COLORS.textSubtle,
+            "font-size": 9,
+            "font-family": "ui-monospace, monospace",
+            "letter-spacing": "0.12em",
+            opacity: 0.65,
+        }, [p.name.toUpperCase()]));
+    }
+
+    // 2. Y gridlines + ticks (Ap = 400 ceiling highlighted)
+    for (let v = 0; v <= yPlotMax; v += 100) {
+        const yPx = yScale(v);
+        const isCeiling = v === 400;
+        root.appendChild(svg("line", {
+            x1: MARGIN.left, x2: PLOT_W - MARGIN.right,
+            y1: yPx, y2: yPx,
+            stroke: isCeiling ? COLORS.ceiling : COLORS.grid,
+            "stroke-dasharray": isCeiling ? "4 4" : null,
+            "stroke-width": isCeiling ? 1.2 : 1,
+            opacity: isCeiling ? 0.8 : 1,
+        }));
+        root.appendChild(svg("text", {
+            x: MARGIN.left - 7, y: yPx + 3,
+            "text-anchor": "end",
+            fill: COLORS.text,
+            "font-size": 10,
+            "font-family": "ui-monospace, monospace",
+        }, [String(v)]));
+    }
+    // Ceiling annotation: the page's headline.
+    root.appendChild(svg("text", {
+        x: PLOT_W - MARGIN.right - 4, y: yScale(400) - 4,
+        "text-anchor": "end",
+        fill: COLORS.ceiling,
+        "font-size": 10,
+        "font-family": "ui-monospace, monospace",
+        opacity: 0.9,
+    }, ["Ap = 400  (empirical ceiling)"]));
+
+    // 3. X axis ticks
+    const xTickEveryH = dur_h >= 60 ? 12 : 6;
+    for (let h = 0; h <= dur_h; h += xTickEveryH) {
+        const x = xScale(h);
+        root.appendChild(svg("line", {
+            x1: x, x2: x, y1: MARGIN.top, y2: PLOT_H - MARGIN.bottom,
+            stroke: COLORS.grid,
+        }));
+        root.appendChild(svg("text", {
+            x, y: PLOT_H - MARGIN.bottom + 14,
+            "text-anchor": "middle",
+            fill: COLORS.text,
+            "font-size": 10,
+            "font-family": "ui-monospace, monospace",
+        }, [_fmtClock(t0Ms, h)]));
+    }
+    root.appendChild(svg("text", {
+        x: PLOT_W - MARGIN.right, y: PLOT_H - 4,
+        "text-anchor": "end",
+        fill: COLORS.textSubtle,
+        "font-size": 9,
+        "font-family": "ui-monospace, monospace",
+        "letter-spacing": "0.08em",
+    }, ["UT  (mm-dd hh:mm)"]));
+    root.appendChild(svg("text", {
+        x: 8, y: MARGIN.top + 8,
+        fill: COLORS.textSubtle,
+        "font-size": 9,
+        "font-family": "ui-monospace, monospace",
+        "letter-spacing": "0.08em",
+        transform: `rotate(-90 8 ${MARGIN.top + 8})`,
+    }, ["Ap"]));
+
+    // 4. SSC marker
+    const sscX = xScale(SSC_HOURS);
+    root.appendChild(svg("line", {
+        x1: sscX, x2: sscX,
+        y1: MARGIN.top + 18, y2: PLOT_H - MARGIN.bottom,
+        stroke: COLORS.ssc,
+        "stroke-dasharray": "3 3",
+        "stroke-width": 1,
+        opacity: 0.7,
+    }));
+    root.appendChild(svg("text", {
+        x: sscX + 4, y: MARGIN.top + 24,
+        fill: COLORS.ssc,
+        "font-size": 10,
+        "font-family": "ui-monospace, monospace",
+        opacity: 0.88,
+    }, ["SSC  17:05 UT"]));
+
+    // 5. Traces — Ap real is *stepped* (3-h bins); surrogates are smooth.
+    function pathSmooth(arr) {
+        let d = "";
+        for (let i = 0; i < arr.length; i++) {
+            const x = xScale(xs(i)).toFixed(2);
+            const y = yScale(arr[i]).toFixed(2);
+            d += (i ? "L" : "M") + x + " " + y + " ";
+        }
+        return d;
+    }
+    function pathStep(arr) {
+        // step-after: each segment is constant from xs(i) to xs(i+1) at arr[i].
+        let d = "";
+        for (let i = 0; i < arr.length; i++) {
+            const x = xScale(xs(i)).toFixed(2);
+            const y = yScale(arr[i]).toFixed(2);
+            if (i === 0) {
+                d += `M${x} ${y} `;
+            } else {
+                const prevY = yScale(arr[i - 1]).toFixed(2);
+                d += `L${x} ${prevY} L${x} ${y} `;
+            }
+        }
+        return d;
+    }
+    // Order matters — surrogates on top of real, ground above MHD so the
+    // visual hierarchy reads "look how far past the ceiling we go".
+    root.appendChild(svg("path", {
+        d: pathStep(drivers.ap_real),
+        stroke: COLORS.real, fill: "none", "stroke-width": 1.6, opacity: 0.85,
+    }));
+    root.appendChild(svg("path", {
+        d: pathSmooth(drivers.ap_mhd),
+        stroke: COLORS.mhd, fill: "none", "stroke-width": 2.4,
+    }));
+    root.appendChild(svg("path", {
+        d: pathSmooth(drivers.ap_gnd),
+        stroke: COLORS.gnd, fill: "none", "stroke-width": 2.4,
+    }));
+
+    // 6. Plot border
+    root.appendChild(svg("rect", {
+        x: MARGIN.left, y: MARGIN.top, width: plotW, height: plotH,
+        fill: "none", stroke: COLORS.axis, "stroke-width": 1,
+    }));
+
+    // 7. Cursor + dots (scrubber-driven)
+    const cursorLine = svg("line", {
+        x1: MARGIN.left, x2: MARGIN.left,
+        y1: MARGIN.top,  y2: PLOT_H - MARGIN.bottom,
+        stroke: COLORS.cursor, "stroke-width": 1.2, opacity: 0.55,
+    });
+    const dotR = svg("circle", { r: 3.6, fill: COLORS.real, stroke: "#000", "stroke-width": 1.5 });
+    const dotM = svg("circle", { r: 4.2, fill: COLORS.mhd,  stroke: "#000", "stroke-width": 1.5 });
+    const dotG = svg("circle", { r: 4.2, fill: COLORS.gnd,  stroke: "#000", "stroke-width": 1.5 });
+    root.appendChild(cursorLine);
+    root.appendChild(dotR);
+    root.appendChild(dotM);
+    root.appendChild(dotG);
+
+    // 8. Hover tooltip
+    const hoverG = svg("g", { style: "pointer-events:none; opacity:0;" });
+    const hoverLine = svg("line", {
+        y1: MARGIN.top, y2: PLOT_H - MARGIN.bottom,
+        stroke: "rgba(255,255,255,0.4)",
+        "stroke-dasharray": "2 3",
+    });
+    const ttBg = svg("rect", {
+        rx: 4, ry: 4, fill: COLORS.tooltipBg, stroke: COLORS.tooltipBd,
+    });
+    const ttText = svg("text", {
+        "font-family": "ui-monospace, monospace",
+        "font-size": 10,
+        fill: "#fff",
+    });
+    hoverG.appendChild(hoverLine);
+    hoverG.appendChild(ttBg);
+    hoverG.appendChild(ttText);
+    root.appendChild(hoverG);
+
+    function paintTooltip(hours) {
+        const x   = xScale(hours);
+        const idx = idxAt(hours);
+        const vR  = drivers.ap_real[idx];
+        const vM  = drivers.ap_mhd[idx];
+        const vG  = drivers.ap_gnd[idx];
+        hoverLine.setAttribute("x1", x);
+        hoverLine.setAttribute("x2", x);
+
+        const ttW = 158;
+        const ttH = 64;
+        const pad = 7;
+        const onRight = hours < dur_h / 2;
+        const ttX = onRight
+            ? Math.min(x + 10, PLOT_W - MARGIN.right - ttW - 2)
+            : Math.max(x - ttW - 10, MARGIN.left + 2);
+        const ttY = MARGIN.top + 6;
+        ttBg.setAttribute("x", ttX);
+        ttBg.setAttribute("y", ttY);
+        ttBg.setAttribute("width", ttW);
+        ttBg.setAttribute("height", ttH);
+        ttText.setAttribute("x", ttX + pad);
+        ttText.setAttribute("y", ttY + pad + 9);
+
+        ttText.innerHTML = "";
+        const rows = [
+            [`${_fmtClock(t0Ms, hours)} UT`, null],
+            ["Ap real",     Math.round(vR)],
+            ["Ap* MHD",     Math.round(vM)],
+            ["Ap* mag",     Math.round(vG)],
+        ];
+        for (let i = 0; i < rows.length; i++) {
+            const [label, val] = rows[i];
+            const tspan = document.createElementNS(SVG_NS, "tspan");
+            tspan.setAttribute("x", ttX + pad);
+            tspan.setAttribute("dy", i === 0 ? 0 : 13);
+            tspan.textContent = (val === null)
+                ? label
+                : `${label.padEnd(8)} ${String(val).padStart(4)}`;
+            if (i === 1) tspan.setAttribute("fill", COLORS.real);
+            if (i === 2) tspan.setAttribute("fill", COLORS.mhd);
+            if (i === 3) tspan.setAttribute("fill", COLORS.gnd);
+            ttText.appendChild(tspan);
+        }
+        hoverG.style.opacity = 1;
+    }
+
+    // Capture rect — must be the last child of root so it catches events.
+    const capture = svg("rect", {
+        x: MARGIN.left, y: MARGIN.top, width: plotW, height: plotH,
+        fill: "transparent",
+        style: "cursor:crosshair;",
+    });
+    capture.addEventListener("mousemove", evt => {
+        const rect = root.getBoundingClientRect();
+        const px = ((evt.clientX - rect.left) / rect.width) * PLOT_W;
+        const hFrac = Math.max(0, Math.min(1, (px - MARGIN.left) / plotW));
+        paintTooltip(hFrac * dur_h);
+    });
+    capture.addEventListener("mouseleave", () => { hoverG.style.opacity = 0; });
+    // Click jumps the scrubber and the player to that moment.
+    capture.addEventListener("click", evt => {
+        const rect = root.getBoundingClientRect();
+        const px = ((evt.clientX - rect.left) / rect.width) * PLOT_W;
+        const hFrac = Math.max(0, Math.min(1, (px - MARGIN.left) / plotW));
+        if (typeof opts.onClickSeekHours === "function") {
+            opts.onClickSeekHours(hFrac * dur_h);
+        }
+    });
+    root.appendChild(capture);
+
+    // 9. Placeholder watermark — only when the bundle is synthetic.
+    if (isPlaceholder) {
+        root.appendChild(svg("text", {
+            x: PLOT_W / 2, y: PLOT_H / 2 + 6,
+            "text-anchor": "middle",
+            fill: "rgba(255,200,80,0.16)",
+            "font-size": 56,
+            "font-weight": 800,
+            "font-family": "ui-monospace, monospace",
+            "letter-spacing": "0.18em",
+            transform: `rotate(-12 ${PLOT_W / 2} ${PLOT_H / 2})`,
+            "pointer-events": "none",
+        }, ["PLACEHOLDER"]));
+    }
+
+    container.appendChild(root);
+
+    // ── public API ────────────────────────────────────────────────
+    function setCursor(hoursFromStart) {
+        const h   = Math.max(0, Math.min(dur_h, hoursFromStart));
+        const x   = xScale(h);
+        const idx = idxAt(h);
+        cursorLine.setAttribute("x1", x);
+        cursorLine.setAttribute("x2", x);
+        dotR.setAttribute("cx", x); dotR.setAttribute("cy", yScale(drivers.ap_real[idx]));
+        dotM.setAttribute("cx", x); dotM.setAttribute("cy", yScale(drivers.ap_mhd[idx]));
+        dotG.setAttribute("cx", x); dotG.setAttribute("cy", yScale(drivers.ap_gnd[idx]));
+    }
+
+    setCursor(0);
+
+    return { setCursor };
+}
