@@ -197,6 +197,14 @@ let _gtagReady = false;   // gtag.js <script> finished loading (status only)
 let _gaActive  = false;   // GA initialized + gtag queue installed — safe to send
 let _heartbeatTimer = null;
 
+// Stable visitor id (matches js/experiments.js — same localStorage key).
+// Read here lazily so we don't import experiments.js (cycle) and so admin
+// pages that never load experiments.js still get a non-null value when
+// available. Returns null if localStorage is blocked.
+function _visitorId() {
+    try { return localStorage.getItem('pp_vid') || null; } catch (_) { return null; }
+}
+
 // Lazy import of telemetry to forward analytics failures upstream.
 // Cached so we never re-import on retry storms. Loading telemetry has
 // no side effects beyond its own auto-init, which is idempotent.
@@ -357,6 +365,7 @@ function _onClick(e) {
         session_id: _sessionId,
         user_id: _userId,
         properties: {
+            visitor_id: _visitorId(),
             x_pct: xp,
             y_pct: yp,
             vw: w,
@@ -393,7 +402,7 @@ function _onScroll() {
                 page_title: (document.title || '').slice(0, 300),
                 session_id: _sessionId,
                 user_id: _userId,
-                properties: { milestone: m },
+                properties: { visitor_id: _visitorId(), milestone: m },
                 created_at: new Date().toISOString(),
             });
         }
@@ -431,7 +440,7 @@ function _emitSessionStart() {
         page_title: (document.title || '').slice(0, 300),
         session_id: _sessionId,
         user_id: _userId,
-        properties: { ..._firstTouch },
+        properties: { visitor_id: _visitorId(), ..._firstTouch },
         created_at: new Date(_sessionStart).toISOString(),
     });
     _sessionEvents.push({ name: 'session_start', at: _sessionStart, props: { ..._firstTouch } });
@@ -517,6 +526,7 @@ class Analytics {
                     session_id: _sessionId,
                     user_id: _userId,
                     properties: {
+                        visitor_id: _visitorId(),
                         time_on_page_s: dwell,
                         max_scroll_pct: _maxScrollPct,
                     },
@@ -563,7 +573,7 @@ class Analytics {
             referrer: safeReferrer,
             session_id: _sessionId,
             user_id: _userId,
-            properties: { ...props },
+            properties: { visitor_id: _visitorId(), ...props },
             created_at: new Date().toISOString(),
         };
 
@@ -609,7 +619,7 @@ class Analytics {
             page_title: (document.title || '').slice(0, 300),
             session_id: _sessionId,
             user_id: _userId,
-            properties: { ...safeProps },
+            properties: { visitor_id: _visitorId(), ...safeProps },
             created_at: new Date().toISOString(),
         };
 

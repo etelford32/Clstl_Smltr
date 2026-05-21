@@ -499,6 +499,37 @@
             <div id="ab-home-container"><div class="empty">Loading…</div></div>
         </div>
 
+        <!-- ── Experiments — Deep View (all running experiments) ─────
+             Per-variant × per-goal conversion (with Wilson 95% CI),
+             two-proportion z-test for lift significance, and a Day-N
+             retention curve per variant. Reads analytics_events via the
+             v2 RPCs in supabase-experiment-ab-v2-migration.sql. -->
+        <div class="card" style="margin-bottom:18px">
+            <h3>
+                Experiments — Deep View
+                <span style="font-size:.72rem;color:#666;font-weight:400;margin-left:6px">multi-goal conversion + Day-N retention per variant</span>
+                <span style="float:right;display:flex;gap:6px;align-items:center;font-size:.72rem;color:#888;font-weight:400">
+                    <select id="exp-window" class="btn btn-sm" style="padding:2px 8px;font-size:.7rem">
+                        <option value="7">last 7d</option>
+                        <option value="30" selected>last 30d</option>
+                        <option value="60">last 60d</option>
+                        <option value="90">last 90d</option>
+                    </select>
+                    <button class="btn btn-sm" id="btn-refresh-exp">Refresh</button>
+                </span>
+            </h3>
+            <div style="font-size:.72rem;color:#667;margin-bottom:14px;line-height:1.5">
+                Conversion = a visitor with an <code style="color:#9ac">experiment_exposure</code> event for this experiment
+                later emitted the goal event at least once. Wilson 95% bounds shown after the rate.
+                Lift = (variant − control) / control; two-proportion z-test marks <span style="color:#4eff91">sig</span> at p&lt;0.05.
+                Day-N retention = % of exposed visitors active on day N (24h bucket); only visitors with full follow-up time
+                are scored, so the trailing edge isn't artificially low.
+                <strong style="color:#aab">Data populates from when v2 instrumentation shipped onward</strong> — earlier
+                exposures don't carry the visitor id needed for these joins.
+            </div>
+            <div id="exp-deep-container"><div class="empty">Loading…</div></div>
+        </div>
+
         <!-- ── Activation funnel ──────────────────────────────────── -->
         <div class="card" style="margin-bottom:18px">
             <h3>
@@ -940,7 +971,8 @@
 import { auth } from './js/auth.js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY, isConfigured, getSupabase, testConnection } from './js/supabase-config.js';
 import { GA_MEASUREMENT_ID } from './js/analytics.js';
-import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchActivationFunnel, fetchActivationDaily, fetchActivationOverview, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap, fetchWizardFunnel, fetchTourMetrics, fetchDemoMetrics, fetchAuthFlowMetrics, fetchAuthFunnelDropoffs, fetchNewVsReturning, fetchVisitorFlow, fetchEntryDestinations, fetchAcquisition, fetchAccumulatorStats, fetchExperimentAB, fetchPerfSummary, fetchTopErrors, fetchTop404s, fetchTopAuthFailures, fetchConsentOptinRate, fetchStripeMetrics } from './js/admin-analytics.js';
+import { EXPERIMENTS, EXPERIMENT_GOALS } from './js/experiments.js';
+import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchActivationFunnel, fetchActivationDaily, fetchActivationOverview, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap, fetchWizardFunnel, fetchTourMetrics, fetchDemoMetrics, fetchAuthFlowMetrics, fetchAuthFunnelDropoffs, fetchNewVsReturning, fetchVisitorFlow, fetchEntryDestinations, fetchAcquisition, fetchAccumulatorStats, fetchExperimentAB, fetchExperimentGoals, fetchExperimentRetention, wilsonCI95, twoProportionZ, fetchPerfSummary, fetchTopErrors, fetchTop404s, fetchTopAuthFailures, fetchConsentOptinRate, fetchStripeMetrics } from './js/admin-analytics.js';
 import { createInviteCode, fetchInviteCodes, deactivateInvite, sendInviteEmail } from './js/admin-invites.js';
 
 // ── Tabs (wired first so they always work) ──────────────────────────────────
@@ -1939,6 +1971,7 @@ async function loadActivationAll() {
         loadTopSimsByPlan(),
         loadAtRisk(),
         loadExperimentAB(),
+        loadExperimentsDeep(),
     ]);
     _activationLoaded = true;
 }
@@ -1953,6 +1986,188 @@ document.getElementById('activation-window')?.addEventListener('change', () => {
 });
 document.getElementById('btn-refresh-ab')?.addEventListener('click', loadExperimentAB);
 document.getElementById('ab-window')?.addEventListener('change', loadExperimentAB);
+
+// ── Experiments — Deep View (multi-goal + retention) ───────────────────────
+// One subsection per running experiment. Each subsection renders a goals
+// table (rate ± Wilson 95% CI, lift, z-test verdict) and a Day-N retention
+// table per variant. Reads analytics_events via the v2 RPCs.
+function _expPct(x, digits = 1) {
+    if (x == null || !Number.isFinite(x)) return '—';
+    return (x * 100).toFixed(digits) + '%';
+}
+function _expCIChip(c, n) {
+    const ci = wilsonCI95(c, n);
+    if (ci.point == null) return '<span style="color:#444">—</span>';
+    return `<span style="color:#fff;font-weight:600">${_expPct(ci.point, 2)}</span>`
+         + ` <span style="color:#667;font-size:.72rem">[${_expPct(ci.lo, 1)}, ${_expPct(ci.hi, 1)}]</span>`;
+}
+function _expLiftChip(cV, nV, cC, nC) {
+    if (!(nV > 0 && nC > 0 && cC > 0)) return '<span style="color:#444">—</span>';
+    const pV = cV / nV, pC = cC / nC;
+    if (pC === 0) return '<span style="color:#444">—</span>';
+    const lift = (pV - pC) / pC;
+    const t = twoProportionZ(cC, nC, cV, nV);
+    const liftCol = lift >= 0 ? '#4eff91' : '#ff8080';
+    const sigChip = t.significant
+        ? `<span style="color:#4eff91;font-weight:700;margin-left:6px">sig</span>`
+        : `<span style="color:#667;margin-left:6px">ns</span>`;
+    const zStr = t.z == null ? '' : ` <span style="color:#556;font-size:.7rem">|z|=${Math.abs(t.z).toFixed(2)}</span>`;
+    return `<span style="color:${liftCol};font-weight:700">${lift >= 0 ? '+' : ''}${(lift * 100).toFixed(1)}%</span>${sigChip}${zStr}`;
+}
+
+function _renderExperimentBlock(key, goalsResult, retentionResult) {
+    const cfg   = EXPERIMENTS[key] || {};
+    const goals = EXPERIMENT_GOALS[key] || [];
+    if (!goals.length) {
+        return `<div style="margin-bottom:18px;padding:12px;background:rgba(255,255,255,.02);border-radius:8px">
+            <strong style="color:#cdd">${_esc(key)}</strong>
+            <div class="empty" style="margin-top:8px">No goals registered in EXPERIMENT_GOALS — add an entry in js/experiments.js.</div>
+        </div>`;
+    }
+
+    // Goals table: rows = variants, columns = goals. Each cell shows
+    // conv rate ± Wilson CI, plus a per-goal lift column on non-control
+    // rows. Control row anchors the lift comparison.
+    const declaredVariants = (cfg.variants || []).map(v => v.id);
+    const liveVariants = goalsResult?.ok ? (goalsResult.data.variants || []) : [];
+    // Show declared variants first (in registry order), then any extras
+    // that showed up in data but aren't declared.
+    const variants = [...declaredVariants];
+    for (const v of liveVariants) if (!variants.includes(v)) variants.push(v);
+
+    // Index cells by (variant, goal) for O(1) lookup.
+    const cellIdx = new Map();
+    if (goalsResult?.ok) {
+        for (const r of goalsResult.data.rows) {
+            cellIdx.set(r.variant + '|' + r.goal, r);
+        }
+    }
+    const cellFor = (variant, goal) => cellIdx.get(variant + '|' + goal) || { exposures: 0, conversions: 0 };
+    const controlVariant = declaredVariants[0] || 'control';
+
+    // ── Goals table ─────────────────────────────────────────────────
+    let goalsHtml;
+    if (!goalsResult?.ok) {
+        goalsHtml = `<div class="empty" style="color:#ff8080">${_esc(goalsResult?.error || 'no data')}</div>`;
+    } else if (!variants.length) {
+        goalsHtml = '<div class="empty">No exposures yet — emit the experiment on a live page.</div>';
+    } else {
+        let html = '<div style="overflow-x:auto"><table style="font-size:.78rem"><thead><tr>';
+        html += '<th style="text-align:left;color:#cdd">Variant</th>';
+        html += '<th style="text-align:right;color:#cdd">Exposed</th>';
+        for (const g of goals) {
+            html += `<th style="text-align:right;color:#cdd">${_esc(g.label)}<br><span style="color:#556;font-weight:400">rate · lift</span></th>`;
+        }
+        html += '</tr></thead><tbody>';
+        for (const v of variants) {
+            const isCtrl = v === controlVariant;
+            // Exposures should match across goals for the same variant
+            // (they're the same cohort), but coalesce defensively in case
+            // the join produced empty rows for goals that had no data.
+            const expVal = Math.max(0, ...goals.map(g => cellFor(v, g.stage).exposures));
+            html += `<tr><td style="color:${isCtrl ? '#9ad36f' : '#fff'};font-weight:600">${_esc(v)}${isCtrl ? ' <span style="color:#556;font-weight:400;font-size:.7rem">(control)</span>' : ''}</td>`;
+            html += `<td style="text-align:right;color:#cdd">${Number(expVal).toLocaleString()}</td>`;
+            for (const g of goals) {
+                const cell = cellFor(v, g.stage);
+                const rate = _expCIChip(cell.conversions, cell.exposures);
+                let liftHtml = '';
+                if (isCtrl) {
+                    liftHtml = '<div style="color:#445;font-size:.72rem">baseline</div>';
+                } else {
+                    const ctrlCell = cellFor(controlVariant, g.stage);
+                    liftHtml = `<div style="font-size:.74rem">${_expLiftChip(cell.conversions, cell.exposures, ctrlCell.conversions, ctrlCell.exposures)}</div>`;
+                }
+                html += `<td style="text-align:right">${rate}${liftHtml}</td>`;
+            }
+            html += '</tr>';
+        }
+        html += '</tbody></table></div>';
+        goalsHtml = html;
+    }
+
+    // ── Retention table ────────────────────────────────────────────
+    let retHtml;
+    if (!retentionResult?.ok) {
+        retHtml = `<div class="empty" style="color:#ff8080">${_esc(retentionResult?.error || 'no data')}</div>`;
+    } else {
+        const rows = retentionResult.data.rows || [];
+        if (!rows.length) {
+            retHtml = '<div class="empty" style="font-size:.74rem">Retention curves need at least 2 days of exposure history.</div>';
+        } else {
+            const dayBuckets = [1, 3, 7, 14, 28];
+            const idx = new Map();
+            for (const r of rows) idx.set(r.variant + '|' + r.day_n, r);
+            let html = '<div style="overflow-x:auto"><table style="font-size:.78rem"><thead><tr>';
+            html += '<th style="text-align:left;color:#cdd">Variant</th>';
+            for (const d of dayBuckets) html += `<th style="text-align:right;color:#cdd">Day ${d}</th>`;
+            html += '</tr></thead><tbody>';
+            for (const v of variants) {
+                const isCtrl = v === controlVariant;
+                html += `<tr><td style="color:${isCtrl ? '#9ad36f' : '#fff'};font-weight:600">${_esc(v)}</td>`;
+                for (const d of dayBuckets) {
+                    const cell = idx.get(v + '|' + d);
+                    if (!cell || !cell.exposed) {
+                        html += '<td style="text-align:right;color:#445">—</td>';
+                        continue;
+                    }
+                    const ci = wilsonCI95(cell.returned, cell.exposed);
+                    const pct = (ci.point * 100).toFixed(1);
+                    // Color the rate by retention strength so the trend
+                    // is visible at a glance — green > 30%, gold > 10%.
+                    const col = ci.point > 0.30 ? '#4eff91' : ci.point > 0.10 ? '#e5c46d' : '#cdd';
+                    html += `<td style="text-align:right"><span style="color:${col};font-weight:600">${pct}%</span> `
+                          + `<span style="color:#556;font-size:.7rem">n=${cell.exposed.toLocaleString()}</span></td>`;
+                }
+                html += '</tr>';
+            }
+            html += '</tbody></table></div>';
+            retHtml = html;
+        }
+    }
+
+    return `<div style="margin-bottom:22px;padding-bottom:18px;border-bottom:1px solid rgba(255,255,255,.05)">
+        <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:10px">
+            <strong style="color:#fff;font-size:.94rem"><code style="color:#9ad36f">${_esc(key)}</code></strong>
+            <span style="color:#556;font-size:.72rem">${cfg.status || 'running'} &middot; ${(cfg.variants || []).length} variants</span>
+        </div>
+        <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:#778;font-weight:700;margin-bottom:6px">Goals</div>
+        ${goalsHtml}
+        <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:#778;font-weight:700;margin:14px 0 6px">Day-N Retention</div>
+        ${retHtml}
+    </div>`;
+}
+
+async function loadExperimentsDeep() {
+    const container = document.getElementById('exp-deep-container');
+    if (!container) return;
+    container.innerHTML = '<div class="empty">Loading…</div>';
+    const days = parseInt(document.getElementById('exp-window').value, 10) || 30;
+
+    const running = Object.entries(EXPERIMENTS).filter(([, c]) => c.status === 'running').map(([k]) => k);
+    if (!running.length) {
+        container.innerHTML = '<div class="empty">No experiments are running. Enable one in js/experiments.js.</div>';
+        return;
+    }
+
+    // Fire all calls in parallel — two RPCs per experiment, all
+    // independent. The retention RPC reads a wider window than the goals
+    // RPC so the older day buckets actually have a cohort to score.
+    const tasks = running.map(async (key) => {
+        const goals = (EXPERIMENT_GOALS[key] || []).map(g => g.stage);
+        if (!goals.length) return { key, goalsResult: { ok: true, data: { rows: [], variants: [] } }, retentionResult: { ok: true, data: { rows: [], variants: [] } } };
+        const [goalsResult, retentionResult] = await Promise.all([
+            fetchExperimentGoals(key, goals, days),
+            fetchExperimentRetention(key, Math.max(days, 60)),
+        ]);
+        return { key, goalsResult, retentionResult };
+    });
+
+    const results = await Promise.all(tasks);
+    container.innerHTML = results.map(r => _renderExperimentBlock(r.key, r.goalsResult, r.retentionResult)).join('');
+}
+
+document.getElementById('btn-refresh-exp')?.addEventListener('click', loadExperimentsDeep);
+document.getElementById('exp-window')?.addEventListener('change', loadExperimentsDeep);
 
 // ── Onboarding section (wizard / tour / demo / auth flow) ──────────────────
 // Renders five mini-cards inside the Activation tab. Each fetcher

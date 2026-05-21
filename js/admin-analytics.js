@@ -804,6 +804,132 @@ export async function fetchExperimentAB(experiment, days = 30) {
     }
 }
 
+// ── Stats helpers (Wilson CI + two-proportion z-test) ───────────────────────
+// Kept client-side so we can iterate without re-deploying SQL. Wilson is the
+// standard recommended interval for binomial proportions — handles n=0 and
+// extreme rates (p near 0 or 1) gracefully where the normal approximation
+// falls apart. Exported so the dashboard JS can render bounds directly.
+
+/**
+ * Wilson score 95% confidence interval for a binomial proportion.
+ * Returns { lo, hi, point } as fractions in [0, 1]. n=0 returns nulls.
+ */
+export function wilsonCI95(conversions, exposures) {
+    const n = Number(exposures) || 0;
+    const c = Number(conversions) || 0;
+    if (n <= 0) return { lo: null, hi: null, point: null };
+    const p = c / n;
+    const z = 1.96;
+    const z2 = z * z;
+    const denom = 1 + z2 / n;
+    const center = (p + z2 / (2 * n)) / denom;
+    const margin = (z * Math.sqrt((p * (1 - p) + z2 / (4 * n)) / n)) / denom;
+    return {
+        point: p,
+        lo:    Math.max(0, center - margin),
+        hi:    Math.min(1, center + margin),
+    };
+}
+
+/**
+ * Two-proportion z-test (pooled). Returns { z, pTwoSided, significant }.
+ * Significance threshold is the operator-friendly p<0.05 (|z|>1.96).
+ */
+export function twoProportionZ(c1, n1, c2, n2) {
+    n1 = Number(n1) || 0; n2 = Number(n2) || 0;
+    c1 = Number(c1) || 0; c2 = Number(c2) || 0;
+    if (n1 === 0 || n2 === 0) return { z: null, pTwoSided: null, significant: false };
+    const p1 = c1 / n1, p2 = c2 / n2;
+    const pp = (c1 + c2) / (n1 + n2);
+    const se = Math.sqrt(pp * (1 - pp) * (1 / n1 + 1 / n2));
+    if (!(se > 0)) return { z: 0, pTwoSided: 1, significant: false };
+    const z = (p2 - p1) / se;
+    // Two-sided p-value via the standard-normal survival approximation.
+    // Abramowitz & Stegun 26.2.17 — accurate to ~7.5e-8 for any |z|.
+    const az = Math.abs(z);
+    const t = 1 / (1 + 0.2316419 * az);
+    const d = 0.3989422804014327 * Math.exp(-az * az / 2);
+    const tail = d * (((((1.330274429 * t - 1.821255978) * t) + 1.781477937) * t - 0.356563782) * t + 0.319381530) * t;
+    const pTwoSided = 2 * tail;
+    return { z, pTwoSided, significant: az > 1.96 };
+}
+
+/**
+ * Per-variant × per-goal exposures and conversions for an experiment.
+ * Reads analytics_events via telemetry_experiment_goals_summary RPC.
+ *
+ * Returns:
+ *   {
+ *     ok, data: {
+ *       experiment, days, goals, variants,
+ *       rows: [{ variant, goal, exposures, conversions }, ...],
+ *     }
+ *   }
+ *
+ * The client (or dashboard) renders Wilson CIs from the raw counts using
+ * wilsonCI95() and lift / significance using twoProportionZ() above.
+ */
+export async function fetchExperimentGoals(experiment, goals, days = 30) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    if (!experiment || !Array.isArray(goals) || goals.length === 0) {
+        return { ok: false, error: 'experiment + goals[] required' };
+    }
+    try {
+        const { data, error } = await client.rpc('telemetry_experiment_goals_summary', {
+            p_experiment: experiment,
+            p_goals:      goals,
+            p_days:       days,
+        });
+        if (error) throw error;
+        const rows = data || [];
+        const variants = Array.from(new Set(rows.map(r => r.variant))).sort();
+        return {
+            ok: true,
+            data: { experiment, days, goals, variants, rows },
+        };
+    } catch (err) {
+        const hint = /function .* does not exist|PGRST202/i.test(err.message || '')
+            ? 'telemetry_experiment_goals_summary RPC missing — run supabase-experiment-ab-v2-migration.sql'
+            : err.message;
+        return { ok: false, error: hint };
+    }
+}
+
+/**
+ * Per-variant Day-N retention curve. Day buckets are fixed server-side at
+ * {1, 3, 7, 14, 28}; only visitors with sufficient follow-up time are
+ * scored for a given bucket so retention isn't artificially low on the
+ * trailing edge of the window.
+ *
+ * Returns: { ok, data: { experiment, days, variants, rows: [{ variant, day_n, exposed, returned }] } }
+ */
+export async function fetchExperimentRetention(experiment, days = 60) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    if (!experiment) return { ok: false, error: 'experiment required' };
+    try {
+        const { data, error } = await client.rpc('telemetry_experiment_retention', {
+            p_experiment: experiment,
+            p_days:       days,
+        });
+        if (error) throw error;
+        const rows = data || [];
+        const variants = Array.from(new Set(rows.map(r => r.variant))).sort();
+        return {
+            ok: true,
+            data: { experiment, days, variants, rows },
+        };
+    } catch (err) {
+        const hint = /function .* does not exist|PGRST202/i.test(err.message || '')
+            ? 'telemetry_experiment_retention RPC missing — run supabase-experiment-ab-v2-migration.sql'
+            : err.message;
+        return { ok: false, error: hint };
+    }
+}
+
 /**
  * Activation overview KPIs for the last N days. Single round trip to
  * activation_events; aggregated client-side. Returns:
