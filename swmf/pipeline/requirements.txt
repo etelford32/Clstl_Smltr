@@ -1,12 +1,15 @@
 # Parker Physics SWMF pipeline dependencies
+# NumPy capped below 2.1 — spacepy ≤0.5 and several swmfpy releases still
+# call removed APIs (np.float_, np.product). Lift the cap once spacepy
+# pins a numpy-2-safe minimum.
 httpx>=0.27.0
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
-pandas>=2.2.0
-numpy>=1.26.0
-scipy>=1.13.0
+pandas>=2.2.0,<2.3
+numpy>=1.26,<2.1
+scipy>=1.13.0,<1.15
 swmfpy>=0.3.0
-astropy>=6.0.0
+astropy>=6.0.0,<7
 # Database
 psycopg2-binary>=2.9.9
 redis>=5.0.0
@@ -16,3 +19,9 @@ prometheus-client>=0.20.0
 schedule>=1.2.0
 # Type stubs
 pydantic>=2.7.0
+# Heavy science deps consolidated here (previously installed via a second
+# pip block in the Dockerfile). Listing them with the rest lets a single
+# `pip install --only-binary=:all: -r requirements.txt` resolve the full
+# graph and fail fast if a wheel is missing for the build arch — important
+# on ARM64 hosts (Apple Silicon, Graviton) where spacepy wheels lag.
+spacepy>=0.5,<0.7
