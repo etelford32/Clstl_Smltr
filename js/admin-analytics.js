@@ -1149,6 +1149,154 @@ export async function fetchVisitorFlow(days = 7) {
 }
 
 /**
+ * First-touch acquisition breakdown — slices new sessions by the attribution
+ * snapshot emitted by analytics.js (`session_start` event) on the page where
+ * each session was minted. One round trip, capped at 30k rows; aggregation
+ * runs client-side so we can pivot on any dimension without an RPC per slice.
+ *
+ * Returns:
+ *   {
+ *     totalSessions,
+ *     identifiedSessions,                 // sessions that ever had a user_id
+ *     identifiedShare,
+ *     byChannel:    [{ key, sessions, identified, identifiedRate, share }],
+ *     bySource:     [{ key, ... }],       // utm_source (or '(none)')
+ *     byMedium:     [{ key, ... }],       // utm_medium
+ *     byCampaign:   [{ key, ... }],
+ *     byLanding:    [{ key, ... }],       // landing_page
+ *     byReferrer:   [{ key, ... }],       // referrer_host (non-paid only)
+ *     byDevice:     [{ key, ... }],       // mobile | tablet | desktop
+ *     byCountry:    [{ key, ... }],       // tz_offset_min bucketed (rough)
+ *     truncated,
+ *   }
+ *
+ * "Identified" = downstream proxy for conversion: did this session ever
+ * carry a user_id on any later analytics_events row? Cheap signal, joins
+ * across event types without needing a new RPC.
+ */
+export async function fetchAcquisition(days = 30) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+
+    const HARD_CAP = 30000;
+    try {
+        // session_start rows carry the first-touch payload; pull the window.
+        const startsP = client
+            .from('analytics_events')
+            .select('session_id, user_id, properties, created_at')
+            .eq('event_type', 'event')
+            .eq('event_name', 'session_start')
+            .gte('created_at', daysAgo(days))
+            .order('created_at', { ascending: false })
+            .limit(HARD_CAP);
+
+        // All sessions with a user_id in the same window — used to mark which
+        // session_start sessions converted to identified at any point.
+        const idsP = client
+            .from('analytics_events')
+            .select('session_id')
+            .not('user_id', 'is', null)
+            .gte('created_at', daysAgo(days))
+            .limit(HARD_CAP);
+
+        const [{ data: starts, error: e1 }, { data: ids, error: e2 }] = await Promise.all([startsP, idsP]);
+        if (e1) throw e1;
+        if (e2) throw e2;
+
+        const rows = starts || [];
+        const truncated = rows.length >= HARD_CAP;
+        const identifiedSet = new Set((ids || []).map(r => r.session_id).filter(Boolean));
+
+        // Bucket builders keyed by dimension. Each cell tracks both totals
+        // and identified-counts so the ratio survives aggregation.
+        const cells = {
+            channel: new Map(), source: new Map(), medium: new Map(),
+            campaign: new Map(), landing: new Map(), referrer: new Map(),
+            device: new Map(), country: new Map(),
+        };
+        const bump = (m, key, identified) => {
+            const k = key == null || key === '' ? '(none)' : String(key).slice(0, 120);
+            const cur = m.get(k) || { sessions: 0, identified: 0 };
+            cur.sessions++;
+            if (identified) cur.identified++;
+            m.set(k, cur);
+        };
+
+        // tz_offset_min → rough country/region bucket. Not authoritative — a
+        // proper geo lookup needs server-side IP resolution — but it's a
+        // useful coarse cut today without any new dependency.
+        const tzBucket = (off) => {
+            if (off == null || !Number.isFinite(off)) return null;
+            // JS getTimezoneOffset returns minutes WEST of UTC, sign flipped
+            // from the usual UTC±N convention. Convert: +480 → UTC-8.
+            const utc = -Math.round(off / 60);
+            if (utc >= -10 && utc <= -4) return 'Americas';
+            if (utc >= -3 && utc <= 3)   return 'Europe/Africa';
+            if (utc >= 4  && utc <= 11)  return 'Asia/Oceania';
+            return `UTC${utc >= 0 ? '+' : ''}${utc}`;
+        };
+
+        let totalSessions = 0;
+        let identifiedSessions = 0;
+        const seenSessions = new Set();   // dedupe in case the same session got two session_start rows
+
+        for (const r of rows) {
+            const sid = r.session_id;
+            if (!sid || seenSessions.has(sid)) continue;
+            seenSessions.add(sid);
+            const p = r.properties || {};
+            const wasIdentified = identifiedSet.has(sid) || !!r.user_id;
+            totalSessions++;
+            if (wasIdentified) identifiedSessions++;
+
+            bump(cells.channel,  p.channel || 'direct', wasIdentified);
+            bump(cells.source,   p.utm_source,          wasIdentified);
+            bump(cells.medium,   p.utm_medium,          wasIdentified);
+            bump(cells.campaign, p.utm_campaign,        wasIdentified);
+            bump(cells.landing,  p.landing_page,        wasIdentified);
+            // Don't count paid traffic in the organic referrer breakdown —
+            // it conflates ad networks with editorial links.
+            if (p.channel !== 'paid') bump(cells.referrer, p.referrer_host, wasIdentified);
+            bump(cells.device,   p.device,              wasIdentified);
+            bump(cells.country,  tzBucket(p.tz_offset_min), wasIdentified);
+        }
+
+        const top = (m, n = 10) => {
+            const arr = Array.from(m, ([key, v]) => ({
+                key,
+                sessions:       v.sessions,
+                identified:     v.identified,
+                identifiedRate: v.sessions ? +(v.identified / v.sessions).toFixed(3) : 0,
+                share:          totalSessions ? +(v.sessions / totalSessions).toFixed(3) : 0,
+            }));
+            return arr.sort((a, b) => b.sessions - a.sessions).slice(0, n);
+        };
+
+        return {
+            ok: true,
+            data: {
+                windowDays:         days,
+                totalSessions,
+                identifiedSessions,
+                identifiedShare:    totalSessions ? +(identifiedSessions / totalSessions).toFixed(3) : 0,
+                byChannel:          top(cells.channel,  8),
+                bySource:           top(cells.source,   12),
+                byMedium:           top(cells.medium,   12),
+                byCampaign:         top(cells.campaign, 12),
+                byLanding:          top(cells.landing,  15),
+                byReferrer:         top(cells.referrer, 15),
+                byDevice:           top(cells.device,   4),
+                byCountry:          top(cells.country,  10),
+                truncated,
+            },
+        };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+}
+
+/**
  * Last-page-of-session distribution, but bucketed by whether the visitor
  * ever signed in. Lets the dashboard show "of anonymous visitors who
  * landed on /pricing, X% bounced and Y% navigated to /signup".

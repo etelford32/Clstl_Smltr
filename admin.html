@@ -621,6 +621,72 @@
             </div>
         </div>
 
+        <!-- ── First-touch Acquisition ───────────────────────────────── -->
+        <div class="card" style="margin-bottom:18px">
+            <h3>Acquisition
+                <span style="font-size:.72rem;color:#666;font-weight:400;margin-left:6px">where new sessions come from — first moment of every visit</span>
+                <span style="float:right;display:flex;gap:6px;align-items:center;font-size:.72rem;color:#888;font-weight:400">
+                    <select id="acq-window" class="btn btn-sm" style="padding:2px 8px;font-size:.7rem">
+                        <option value="7">last 7d</option>
+                        <option value="14">last 14d</option>
+                        <option value="30" selected>last 30d</option>
+                        <option value="90">last 90d</option>
+                    </select>
+                    <button class="btn btn-sm" id="btn-refresh-acq">Refresh</button>
+                </span>
+            </h3>
+            <div style="font-size:.72rem;color:#667;margin-bottom:12px;line-height:1.5">
+                <strong style="color:#9ad36f">Identified rate</strong> = % of sessions from this source that eventually carried a signed-in user id —
+                a coarse conversion proxy. Data starts populating from the moment first-touch instrumentation ships;
+                rows from before that point won't appear here.
+            </div>
+            <div class="kpi-grid" id="acq-kpis" style="margin-bottom:18px">
+                <div class="kpi"><div class="kpi-val kpi-loading" id="acq-total">--</div><div class="kpi-label">New Sessions</div></div>
+                <div class="kpi"><div class="kpi-val kpi-loading" id="acq-identified">--</div><div class="kpi-label">Identified</div></div>
+                <div class="kpi"><div class="kpi-val kpi-loading" id="acq-rate">--</div><div class="kpi-label">Identified Rate</div></div>
+            </div>
+            <div class="row2" style="margin-bottom:14px">
+                <div>
+                    <div style="font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:#778;font-weight:700;margin-bottom:8px">Channel <span style="color:#445;font-weight:400;text-transform:none">— direct / search / social / referral / paid</span></div>
+                    <div id="acq-channel-list"><div class="empty">Loading…</div></div>
+                </div>
+                <div>
+                    <div style="font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:#778;font-weight:700;margin-bottom:8px">Device <span style="color:#445;font-weight:400;text-transform:none">— viewport-class at landing</span></div>
+                    <div id="acq-device-list"><div class="empty">Loading…</div></div>
+                </div>
+            </div>
+            <div class="row2" style="margin-bottom:14px">
+                <div>
+                    <div style="font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:#778;font-weight:700;margin-bottom:8px">UTM Source</div>
+                    <div id="acq-source-list"><div class="empty">Loading…</div></div>
+                </div>
+                <div>
+                    <div style="font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:#778;font-weight:700;margin-bottom:8px">UTM Medium</div>
+                    <div id="acq-medium-list"><div class="empty">Loading…</div></div>
+                </div>
+            </div>
+            <div class="row2" style="margin-bottom:14px">
+                <div>
+                    <div style="font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:#778;font-weight:700;margin-bottom:8px">UTM Campaign</div>
+                    <div id="acq-campaign-list"><div class="empty">Loading…</div></div>
+                </div>
+                <div>
+                    <div style="font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:#778;font-weight:700;margin-bottom:8px">Referrer Host <span style="color:#445;font-weight:400;text-transform:none">— organic only</span></div>
+                    <div id="acq-referrer-list"><div class="empty">Loading…</div></div>
+                </div>
+            </div>
+            <div class="row2">
+                <div>
+                    <div style="font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:#778;font-weight:700;margin-bottom:8px">Landing Page <span style="color:#445;font-weight:400;text-transform:none">— first URL of every session</span></div>
+                    <div id="acq-landing-list"><div class="empty">Loading…</div></div>
+                </div>
+                <div>
+                    <div style="font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:#778;font-weight:700;margin-bottom:8px">Region <span style="color:#445;font-weight:400;text-transform:none">— rough, from timezone</span></div>
+                    <div id="acq-country-list"><div class="empty">Loading…</div></div>
+                </div>
+            </div>
+        </div>
+
         <div class="row2" style="margin-bottom:18px">
             <div class="card">
                 <h3>Google Analytics (GA4)</h3>
@@ -874,7 +940,7 @@
 import { auth } from './js/auth.js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY, isConfigured, getSupabase, testConnection } from './js/supabase-config.js';
 import { GA_MEASUREMENT_ID } from './js/analytics.js';
-import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchActivationFunnel, fetchActivationDaily, fetchActivationOverview, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap, fetchWizardFunnel, fetchTourMetrics, fetchDemoMetrics, fetchAuthFlowMetrics, fetchAuthFunnelDropoffs, fetchNewVsReturning, fetchVisitorFlow, fetchEntryDestinations, fetchAccumulatorStats, fetchExperimentAB, fetchPerfSummary, fetchTopErrors, fetchTop404s, fetchTopAuthFailures, fetchConsentOptinRate, fetchStripeMetrics } from './js/admin-analytics.js';
+import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchActivationFunnel, fetchActivationDaily, fetchActivationOverview, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap, fetchWizardFunnel, fetchTourMetrics, fetchDemoMetrics, fetchAuthFlowMetrics, fetchAuthFunnelDropoffs, fetchNewVsReturning, fetchVisitorFlow, fetchEntryDestinations, fetchAcquisition, fetchAccumulatorStats, fetchExperimentAB, fetchPerfSummary, fetchTopErrors, fetchTop404s, fetchTopAuthFailures, fetchConsentOptinRate, fetchStripeMetrics } from './js/admin-analytics.js';
 import { createInviteCode, fetchInviteCodes, deactivateInvite, sendInviteEmail } from './js/admin-invites.js';
 
 // ── Tabs (wired first so they always work) ──────────────────────────────────
@@ -3081,10 +3147,86 @@ async function loadVisitorFlow() {
 document.getElementById('btn-refresh-flow')?.addEventListener('click', loadVisitorFlow);
 document.getElementById('flow-window')?.addEventListener('change', loadVisitorFlow);
 
+// ── Acquisition (first-touch attribution) ──────────────────────────────────
+// Reads session_start events emitted by js/analytics.js on session creation.
+// All math + sorting client-side; one extra round trip joins identified
+// sessions to compute the per-source identified-rate.
+async function loadAcquisition() {
+    const days = parseInt(document.getElementById('acq-window').value, 10) || 30;
+    const res = await fetchAcquisition(days);
+
+    const setKpi = (id, val, cls) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = typeof val === 'number' ? val.toLocaleString() : val;
+        el.className = 'kpi-val ' + (cls || 'white');
+    };
+    const listIds = ['acq-channel-list','acq-device-list','acq-source-list','acq-medium-list','acq-campaign-list','acq-referrer-list','acq-landing-list','acq-country-list'];
+
+    if (!res.ok) {
+        setKpi('acq-total', '—', 'white');
+        setKpi('acq-identified', '—', 'white');
+        setKpi('acq-rate', '—', 'white');
+        const msg = `<div class="empty" style="color:#ff8080">${_esc(res.error)}</div>`;
+        for (const id of listIds) { const el = document.getElementById(id); if (el) el.innerHTML = msg; }
+        return;
+    }
+
+    const d = res.data;
+    setKpi('acq-total',      d.totalSessions, 'white');
+    setKpi('acq-identified', d.identifiedSessions, 'green');
+    setKpi('acq-rate',       _flowPct(d.identifiedShare),
+        d.identifiedShare > 0.15 ? 'green' : d.identifiedShare > 0.05 ? 'gold' : 'white');
+
+    const renderRows = (id, rows, totalLabel = 'sessions') => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (!rows.length) {
+            el.innerHTML = '<div class="empty">No data yet — sessions emitted before first-touch shipped won\'t appear here.</div>';
+            return;
+        }
+        // Per-row bar uses the row's share of total sessions; right-side
+        // chip shows count + identified-rate so the operator can spot which
+        // channels actually convert vs. which just inflate top-of-funnel.
+        el.innerHTML = rows.map(r => {
+            const pct = Math.max(3, r.share * 100);
+            const idCls = r.identifiedRate > 0.15 ? '#9ad36f'
+                        : r.identifiedRate > 0.05 ? '#e5c46d' : '#778';
+            return `<div style="margin-bottom:7px">
+                <div style="display:flex;justify-content:space-between;font-size:.8rem;margin-bottom:3px">
+                    <span style="color:#cdd;word-break:break-all">${_esc(r.key)}</span>
+                    <span style="color:#778">${r.sessions.toLocaleString()} ${_esc(totalLabel)} &middot; <span style="color:${idCls}">${_flowPct(r.identifiedRate)} id'd</span></span>
+                </div>
+                <div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden">
+                    <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#c080ff,#4fc3f7);border-radius:2px"></div>
+                </div>
+            </div>`;
+        }).join('');
+    };
+
+    renderRows('acq-channel-list',  d.byChannel);
+    renderRows('acq-device-list',   d.byDevice);
+    renderRows('acq-source-list',   d.bySource);
+    renderRows('acq-medium-list',   d.byMedium);
+    renderRows('acq-campaign-list', d.byCampaign);
+    renderRows('acq-referrer-list', d.byReferrer);
+    renderRows('acq-landing-list',  d.byLanding);
+    renderRows('acq-country-list',  d.byCountry);
+
+    if (d.truncated) {
+        const el = document.getElementById('acq-channel-list');
+        if (el) el.insertAdjacentHTML('beforeend',
+            `<div style="font-size:.7rem;color:#a80;margin-top:8px">⚠ Result capped at 30k events — narrow the window.</div>`);
+    }
+}
+
+document.getElementById('btn-refresh-acq')?.addEventListener('click', loadAcquisition);
+document.getElementById('acq-window')?.addEventListener('change', loadAcquisition);
+
 // Lazy-load on first analytics-tab open (so the Overview tab stays light).
 let _flowLoaded = false;
 document.querySelector('.tab[data-tab="analytics"]')?.addEventListener('click', () => {
-    if (!_flowLoaded) { _flowLoaded = true; loadVisitorFlow(); }
+    if (!_flowLoaded) { _flowLoaded = true; loadVisitorFlow(); loadAcquisition(); }
 });
 
 // ── Analytics auto-refresh loop ─────────────────────────────────────────────
@@ -3099,7 +3241,7 @@ const _refreshLoaders = {
     overview:   () => Promise.allSettled([loadTrend(), loadTopPages()]),
     users:      () => Promise.allSettled([loadUsers()]),
     activation: () => Promise.allSettled([loadActivationAll(), loadOnboardingAll()]),
-    analytics:  () => Promise.allSettled([loadVisitorFlow(), loadSessions()]),
+    analytics:  () => Promise.allSettled([loadVisitorFlow(), loadAcquisition(), loadSessions()]),
     invites:    () => Promise.allSettled([loadInvites(), loadEmailActivity()]),
     system:     () => Promise.allSettled([loadPipelineHeartbeat(), loadProxyFreshness(), loadCronStatus(), (_perfLoaded ? loadPerfErrors() : Promise.resolve())]),
 };
