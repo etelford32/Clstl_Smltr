@@ -155,6 +155,25 @@ export async function init(canvas, THREE) {
     satExtent = Math.max(0.3, BUILDER.buildExtent(build));
   }
 
+  // ── Heading reticle — shows where the satellite is *pointed* in manual ──
+  // A short ribbon drawn ahead of the satellite along the current heading.
+  // Always visible in the 3-D scene so the pilot can pre-aim before firing.
+  const headingGeom = new THREE.BufferGeometry();
+  const headingPts = new Float32Array(6);   // 2 points × xyz
+  headingGeom.setAttribute('position', new THREE.BufferAttribute(headingPts, 3));
+  const headingMat = new THREE.LineBasicMaterial({
+    color: 0xffd166, transparent: true, opacity: 0.85,
+  });
+  const headingLine = new THREE.Line(headingGeom, headingMat);
+  scene.add(headingLine);
+  // A tiny chevron at the tip helps direction read at a glance.
+  const headingTip = new THREE.Mesh(
+    new THREE.ConeGeometry(40, 120, 8),
+    new THREE.MeshBasicMaterial({ color: 0xffd166 })
+  );
+  headingTip.rotation.z = -Math.PI / 2;       // point along +x by default
+  scene.add(headingTip);
+
   // ── Target satellite / debris markers (for missions) ─────────────────────
   const targetSatMesh = new THREE.Mesh(
     new THREE.SphereGeometry(60, 16, 12),
@@ -344,6 +363,38 @@ export async function init(canvas, THREE) {
       // Velocity-aligned: rotate the model so its model-+x (after the
       // builder's Math.PI/2 yaw, that's the long axis) lies along velocity.
       if (typeof s.satRotZ === 'number') satPivot.rotation.z = s.satRotZ;
+
+      // Heading reticle — drawn ahead of the satellite along control.heading.
+      // s.headingRad is independent of velocity so the pilot can pre-aim;
+      // colour goes hot when an actual manual burn is firing.
+      if (typeof s.headingRad === 'number') {
+        const px = satPivot.position.x, py = satPivot.position.y;
+        const camDist = camera.position.distanceTo(satPivot.position);
+        // Length & tip scale clamp so the reticle stays readable from
+        // both nose-close (FOLLOW) and system-wide (FREE) viewpoints.
+        const len = Math.min(1500, Math.max(80, camDist * 0.04));
+        const tx = px + Math.cos(s.headingRad) * len;
+        const ty = py + Math.sin(s.headingRad) * len;
+        headingPts[0] = px; headingPts[1] = py; headingPts[2] = 0;
+        headingPts[3] = tx; headingPts[4] = ty; headingPts[5] = 0;
+        headingGeom.attributes.position.needsUpdate = true;
+        headingTip.position.set(tx, ty, 0);
+        headingTip.scale.setScalar(Math.min(8, Math.max(0.3, camDist * 0.00018)));
+        headingTip.rotation.z = s.headingRad - Math.PI / 2;
+        // Hot = firing, cool = aim preview. Material is shared so we just
+        // swap the colour & opacity.
+        const firing = !!s.headingFiring;
+        const hot = firing ? 0xff9050 : 0xffd166;
+        headingMat.color.setHex(hot);
+        headingMat.opacity = firing ? 1.0 : 0.55;
+        headingTip.material.color.setHex(hot);
+        const visible = !!s.headingVisible;
+        headingLine.visible = visible;
+        headingTip.visible = visible;
+      } else {
+        headingLine.visible = false;
+        headingTip.visible = false;
+      }
     }
     if (s.trailM) writeTrail(s.trailM);
 

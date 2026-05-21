@@ -207,10 +207,15 @@ function derivatives(s, design, env, control) {
     if (thr > 0 && s.fuel > 0 && control.mode && control.mode !== 'off') {
         let dirX = 0, dirY = 0;
         const vmag = Math.hypot(s.vx, s.vy) || 1;
+        // 'manual' / 'manual-retro' fire along (or opposite) a pilot-controlled
+        // heading in the orbit plane. Heading 0 = +x, π/2 = +y.
+        const h = typeof control.heading === 'number' ? control.heading : Math.atan2(s.vy, s.vx);
         if (control.mode === 'prograde')       { dirX =  s.vx / vmag; dirY =  s.vy / vmag; }
         else if (control.mode === 'retrograde'){ dirX = -s.vx / vmag; dirY = -s.vy / vmag; }
         else if (control.mode === 'radial-out'){ dirX =  s.x / r;     dirY =  s.y / r;     }
         else if (control.mode === 'radial-in') { dirX = -s.x / r;     dirY = -s.y / r;     }
+        else if (control.mode === 'manual')      { dirX =  Math.cos(h); dirY =  Math.sin(h); }
+        else if (control.mode === 'manual-retro'){ dirX = -Math.cos(h); dirY = -Math.sin(h); }
         const aThr = thr / mass;
         ax += aThr * dirX;
         ay += aThr * dirY;

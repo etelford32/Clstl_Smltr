@@ -228,6 +228,29 @@ select option{background:#0a1024}
   color:var(--c-text-3);font-size:.85rem}
 .ctl-label{font-size:.62rem;color:var(--c-text-3);font-weight:800;
   letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px}
+.toggle.locked{opacity:.35;cursor:not-allowed;position:relative}
+.toggle.locked::after{content:"🔒";position:absolute;top:1px;right:4px;font-size:.5rem;opacity:.7}
+.toggle.locked:hover{color:var(--c-text-2);background:rgba(255,255,255,.03);
+  border-color:rgba(255,255,255,.14)}
+.pilot-hd{display:flex;align-items:center;gap:11px}
+.rank-badge{font-size:1.6rem;line-height:1;
+  filter:drop-shadow(0 2px 8px rgba(0,200,255,.4))}
+.rank-meta{flex:1;min-width:0}
+.rank-name{font-size:.95rem;font-weight:800;letter-spacing:.04em;
+  background:linear-gradient(100deg,#fff,#7fdcff);
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.rank-xp{font-size:.7rem;color:var(--c-text-3);font-variant-numeric:tabular-nums;margin-top:1px}
+.unlock-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:3px}
+.unlock{padding:5px 8px;border-radius:var(--r-md);font-size:.66rem;
+  background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);
+  display:flex;align-items:center;gap:6px;line-height:1.25}
+.unlock.owned{border-color:rgba(95,227,154,.35);
+  background:rgba(95,227,154,.07);color:var(--c-text)}
+.unlock.locked{opacity:.55;color:var(--c-text-2)}
+.unlock b{font-weight:800;color:var(--c-text);font-size:.66rem}
+.unlock .lk{font-size:.55rem;color:var(--c-text-3);font-weight:700;
+  letter-spacing:.06em;text-transform:uppercase;margin-left:auto}
+#rank-bar i{background:linear-gradient(90deg,#7fdcff,#ffd166)}
 .advanced{font-size:.7rem;color:var(--c-text-3)}
 .advanced summary{cursor:pointer;padding:6px 0;font-weight:700;
   letter-spacing:.06em;text-transform:uppercase;font-size:.62rem;
@@ -463,25 +486,46 @@ select option{background:#0a1024}
       </div>
 
       <div class="ctl-group">
-        <div class="ctl-label">Burn vector</div>
+        <div class="ctl-label">Burn vector <small style="color:var(--c-text-3);font-weight:600;text-transform:none;letter-spacing:0;margin-left:8px">⌨ 1–5</small></div>
         <div class="toggle-row" id="thrust-modes">
           <div class="toggle active" data-mode="off">⏹ Off</div>
           <div class="toggle" data-mode="prograde">⏩ Prograde</div>
           <div class="toggle" data-mode="retrograde">⏪ Retro</div>
-          <div class="toggle" data-mode="radial-out">⬆ Radial-out</div>
-          <div class="toggle" data-mode="radial-in">⬇ Radial-in</div>
+          <div class="toggle" data-mode="radial-out" data-unlock="radial">⬆ Radial-out</div>
+          <div class="toggle" data-mode="radial-in" data-unlock="radial">⬇ Radial-in</div>
+          <div class="toggle" data-mode="manual" data-unlock="manual_steer">🎯 Manual</div>
         </div>
+        <p class="hint" id="manual-hint" style="margin-top:6px;display:none">
+          🕹 <b>A/D</b> rotate heading · <b>Q/E</b> fine · <b>W/S</b> fire fwd/rev (hold).
+        </p>
       </div>
 
       <div class="ctl-group" style="margin-top:10px">
         <div class="ctl-label">Time warp</div>
         <div class="toggle-row" id="warp-modes">
           <div class="toggle active" data-warp="1">×1</div>
-          <div class="toggle" data-warp="10">×10</div>
-          <div class="toggle" data-warp="100">×100</div>
-          <div class="toggle" data-warp="1000">×1000</div>
+          <div class="toggle" data-warp="10" data-unlock="warp_x10">×10</div>
+          <div class="toggle" data-warp="100" data-unlock="warp_x100">×100</div>
+          <div class="toggle" data-warp="1000" data-unlock="warp_x1000">×1000</div>
         </div>
       </div>
+    </div>
+
+    <div class="panel" id="pilot-panel">
+      <h2>🎖 Pilot profile <span class="sub">progression &amp; unlocks</span></h2>
+      <div class="pilot-hd">
+        <span class="rank-badge" id="rank-badge">🟢</span>
+        <div class="rank-meta">
+          <div class="rank-name" id="rank-name">Cadet</div>
+          <div class="rank-xp" id="rank-xp">0 XP</div>
+        </div>
+      </div>
+      <div class="bar" style="margin:7px 0 9px"><i id="rank-bar" style="width:0%"></i></div>
+      <div id="rank-next" class="hint" style="margin-bottom:8px">—</div>
+      <div class="ctl-label" style="margin-top:4px">Unlocked</div>
+      <div class="unlock-grid" id="unlocks-owned"></div>
+      <div class="ctl-label" style="margin-top:10px">Locked</div>
+      <div class="unlock-grid" id="unlocks-locked"></div>
     </div>
 
     <div class="panel">
@@ -572,6 +616,7 @@ import * as ENG from './js/satellite-designer-engine.js';
 import * as BUILDER from './js/satellite-builder.js';
 import * as SCENE3D from './js/satellite-designer-3d.js';
 import { MISSIONS, MISSION_ORDER } from './js/satellite-missions.js';
+import * as PROG from './js/satellite-progression.js';
 
 // ── DOM helpers ─────────────────────────────────────────────────────────────
 const $ = (id) => document.getElementById(id);
@@ -588,7 +633,12 @@ const env = ENG.defaultEnv();
 const sim = {
   running: false, paused: false, warp: 1,
   design: null, state: null, env,
-  control: { throttle: 0.6, mode: 'off', attitudeMult: 1 },
+  control: {
+    throttle: 0.6,
+    mode: 'off',
+    attitudeMult: 1,
+    heading: 0,                          // pilot heading in orbit plane (rad)
+  },
   attitude: 'nominal',
   auto: false,
   trail: [], altHist: [],
@@ -600,8 +650,13 @@ const sim = {
   earthSpin: 0,
   targetSatM: null,    // { x, y } when a target exists (rendezvous)
   debrisM: null,       // { x, y } when debris exists (avoidance)
+  // Pilot input — set by keyboard while a key is held; consumed in frame().
+  inputs: { rotL: false, rotR: false, fwd: false, rev: false, fine: false },
+  prevMissionComplete: null,
 };
 let sdBuild = BUILDER.defaultBuild();
+// Persistent pilot profile (XP, rank, unlocks) — see js/satellite-progression.js
+let profile = PROG.loadProfile();
 
 // ── Design from the form ────────────────────────────────────────────────────
 function readDesign() {
@@ -737,16 +792,36 @@ $('f-apo').addEventListener('input', () => {
 });
 $('f-throttle').addEventListener('input', () => { sim.control.throttle = (+$('f-throttle').value) / 100; });
 
-// Thrust mode buttons
+// Thrust mode buttons — refuses to activate locked modes (gated by rank).
 $('thrust-modes').addEventListener('click', (e) => {
   const t = e.target.closest('.toggle'); if (!t) return;
-  sim.control.mode = t.dataset.mode;
-  $('thrust-modes').querySelectorAll('.toggle').forEach(x =>
-    x.classList.toggle('active', x === t));
+  const unlock = t.dataset.unlock;
+  if (unlock && !PROG.hasUnlock(profile, unlock)) {
+    const u = PROG.UNLOCKS[unlock];
+    toast(`🔒 Unlocks at ${PROG.RANKS[u.rank].name} — ${u.desc}`, true);
+    return;
+  }
+  setBurnMode(t.dataset.mode);
 });
-// Time warp
+function setBurnMode(mode) {
+  sim.control.mode = mode;
+  // 'manual-retro' is the W-vs-S split inside Manual mode; the chip itself
+  // doesn't need to distinguish, so treat both as the Manual chip.
+  const chipMode = mode === 'manual-retro' ? 'manual' : mode;
+  $('thrust-modes').querySelectorAll('.toggle').forEach(x =>
+    x.classList.toggle('active', x.dataset.mode === chipMode));
+  $('manual-hint').style.display =
+    (mode === 'manual' || mode === 'manual-retro') ? 'block' : 'none';
+}
+// Time warp — same gating
 $('warp-modes').addEventListener('click', (e) => {
   const t = e.target.closest('.toggle'); if (!t) return;
+  const unlock = t.dataset.unlock;
+  if (unlock && !PROG.hasUnlock(profile, unlock)) {
+    const u = PROG.UNLOCKS[unlock];
+    toast(`🔒 Unlocks at ${PROG.RANKS[u.rank].name}`, true);
+    return;
+  }
   sim.warp = +t.dataset.warp;
   $('warp-modes').querySelectorAll('.toggle').forEach(x =>
     x.classList.toggle('active', x === t));
@@ -767,6 +842,10 @@ function launch() {
   sim.score = 0;
   sim.targetSatM = null; sim.debrisM = null;
   sim.running = true; sim.paused = false;
+  sim.prevMissionComplete = null;
+  // Heading starts aligned to velocity so manual-fire = prograde by default.
+  sim.control.heading = Math.atan2(sim.state.vy, sim.state.vx);
+  sim.inputs = { rotL: false, rotR: false, fwd: false, rev: false, fine: false };
   $('b-launch').disabled = true;
   $('b-pause').disabled = false; $('b-pause').textContent = '⏸ Pause';
   $('b-reset').disabled = false;
@@ -835,6 +914,18 @@ function frame(now) {
   if (sim.running && !sim.paused && sim.state?.alive) {
     let simSecs = Math.min(realDt * sim.warp, 240);
 
+    // Pilot stick input — A/D rotate heading, W/S fire manual fwd/rev.
+    // Rotation rate is independent of warp so it's predictable at any speed.
+    if (PROG.hasUnlock(profile, 'manual_steer')) {
+      const rate = (sim.inputs.fine ? 0.7 : 2.0) * realDt;
+      if (sim.inputs.rotL) sim.control.heading += rate;
+      if (sim.inputs.rotR) sim.control.heading -= rate;
+      // W/S engage manual fire while held; release returns to Off.
+      if (sim.inputs.fwd) { if (sim.control.mode !== 'manual')       setBurnMode('manual'); }
+      else if (sim.inputs.rev) { if (sim.control.mode !== 'manual-retro') setBurnMode('manual-retro'); }
+      else if (sim.control.mode === 'manual' || sim.control.mode === 'manual-retro') setBurnMode('off');
+    }
+
     // Auto station-keeping: defend the target perigee with prograde burns.
     if (sim.auto) {
       const tgt = +$('f-tgt').value;
@@ -868,6 +959,7 @@ function frame(now) {
         $('b-pause').disabled = true;
         $('b-launch').disabled = false;
         maybePersistBest();
+        grantMissionXp(true);
       }
     }
     // Final score from the mission's accumulator (overrides delta sum when
@@ -890,14 +982,17 @@ function frame(now) {
       $('b-pause').disabled = true; $('b-pause').textContent = '⏸ Pause';
       $('b-launch').disabled = false;
       // For Deorbit, hitting the atmosphere with perigee in the window is success.
+      const deorbitSuccess = sim.missionId === 'deorbit'
+        && (sim.missionCtx?.lastPeriKm ?? 999) >= 60
+        && sim.missionCtx?.lastPeriKm <= 100;
       if (sim.missionId === 'deorbit') {
-        const inWin = (sim.missionCtx?.lastPeriKm ?? 999) >= 60 && sim.missionCtx?.lastPeriKm <= 100;
-        toast(inWin ? '🎯 Re-entry inside the safe window — mission success.'
-                    : 'Re-entry — outside the safe window.', !inWin);
+        toast(deorbitSuccess ? '🎯 Re-entry inside the safe window — mission success.'
+                             : 'Re-entry — outside the safe window.', !deorbitSuccess);
       } else {
         toast('Re-entry: the craft burned up in the lower atmosphere.', true);
       }
       maybePersistBest();
+      grantMissionXp(deorbitSuccess);
     } else if (tel.fuel <= 0 && sim.control.mode === 'prograde') {
       setPhase('⚠ Out of propellant — decaying', 'warn');
     }
@@ -1003,9 +1098,14 @@ function draw() {
     trailM: sim.trail,
   };
   if (buildChanged) update.build = sdBuild;
+  const manual = sim.control.mode === 'manual' || sim.control.mode === 'manual-retro';
   if (sim.state) {
     update.satM = [sim.state.x, sim.state.y];
-    update.satRotZ = Math.atan2(sim.state.vy, sim.state.vx);
+    // In manual mode the bus visually points where the pilot is aiming;
+    // otherwise it stays velocity-aligned like a real momentum-biased craft.
+    update.satRotZ = manual
+      ? sim.control.heading
+      : Math.atan2(sim.state.vy, sim.state.vx);
   } else {
     // Pre-flight: park the satellite on the prospective perigee so the
     // player can see the design relative to Earth before launch.
@@ -1013,6 +1113,11 @@ function draw() {
     update.satM = [r, 0];
     update.satRotZ = Math.PI / 2;       // facing +y (prograde)
   }
+  // Heading reticle: always shown once Manual Steering is unlocked, so the
+  // pilot can pre-aim before committing to a burn. Goes hot when firing.
+  update.headingRad = sim.control.heading;
+  update.headingVisible = PROG.hasUnlock(profile, 'manual_steer') && !!sim.state;
+  update.headingFiring = manual && sim.state?.fuel > 0 && sim.control.throttle > 0;
   if (sim.targetSatM) update.targetSat = [sim.targetSatM.x, sim.targetSatM.y];
   if (sim.debrisM)    update.debris    = [sim.debrisM.x,    sim.debrisM.y];
 
@@ -1499,6 +1604,100 @@ function refreshObjectivePanel(tel) {
     .map(([k, v]) => `${k}: ${v}`).join(' · ');
 }
 
+// ── Pilot progression (roguelike-style unlocks) ─────────────────────────────
+function renderPilotPanel() {
+  const xp = PROG.xpFor(profile);
+  $('rank-badge').textContent = xp.rank.badge;
+  $('rank-name').textContent = xp.rank.name;
+  $('rank-xp').textContent = `${xp.total} XP · ${profile.totalMissions || 0} missions flown`;
+  $('rank-bar').style.width = Math.min(100, xp.pct * 100).toFixed(1) + '%';
+  $('rank-next').textContent = xp.atMax
+    ? '🏅 Max rank — top of the operator ladder.'
+    : `Next: ${xp.nextRankName} · ${xp.span - xp.intoRank} XP to go`;
+  const owned = PROG.unlocksOwned(profile);
+  const locked = PROG.unlocksLocked(profile);
+  $('unlocks-owned').innerHTML = owned.length
+    ? owned.map(u => `<div class="unlock owned"><div><b>${u.name}</b><br><span style="color:var(--c-text-3);font-size:.6rem">${u.desc}</span></div></div>`).join('')
+    : '<div class="hint">No unlocks yet — complete a mission to earn XP.</div>';
+  $('unlocks-locked').innerHTML = locked.length
+    ? locked.map(u => `<div class="unlock locked"><div><b>${u.name}</b><br><span style="font-size:.6rem">${u.desc}</span></div><span class="lk">${PROG.RANKS[u.rank].name}</span></div>`).join('')
+    : '<div class="hint">Everything unlocked — full operator suite.</div>';
+}
+// Reflect locked controls in the chip rows (locked chips can't be activated).
+function applyUnlockLocks() {
+  document.querySelectorAll('.toggle[data-unlock]').forEach(el => {
+    const need = el.dataset.unlock;
+    const ok = PROG.hasUnlock(profile, need);
+    el.classList.toggle('locked', !ok);
+    if (!ok) {
+      const u = PROG.UNLOCKS[need];
+      el.title = `🔒 Unlocks at ${PROG.RANKS[u.rank].name} — ${u.desc}`;
+    } else {
+      el.title = '';
+    }
+  });
+}
+// Called when a mission ends (success or — for deorbit — useful failure).
+// Awards XP, persists the profile, and notifies the pilot of any rank-up
+// + freshly granted unlocks.
+function grantMissionXp(success) {
+  if (sim.prevMissionComplete === sim.missionId) return;     // dedupe
+  sim.prevMissionComplete = sim.missionId;
+  const usable = success ? Math.max(0, sim.score) : Math.max(0, Math.floor(sim.score * 0.3));
+  if (!success && usable < 5) {                              // no XP for face-plants
+    renderPilotPanel(); return;
+  }
+  const r = PROG.awardXp(profile, sim.missionId, usable);
+  profile = r.profile;
+  toast(`+${r.gained} XP${r.firstTime ? ' · 🆕 first-time bonus' : ''}`);
+  if (r.rankedUp) {
+    setTimeout(() => toast(`🎖 Promoted to ${r.toRank.name}!`), 900);
+    if (r.newUnlocks.length) {
+      const names = r.newUnlocks.map(k => PROG.UNLOCKS[k].name).join(' · ');
+      setTimeout(() => toast(`🔓 Unlocked: ${names}`), 1800);
+    }
+  }
+  applyUnlockLocks();
+  renderPilotPanel();
+}
+
+// ── Pilot keyboard steering ────────────────────────────────────────────────
+// A/D rotate heading; Q/E fine; W/S fire fwd/rev along heading (hold).
+// 1–5 quick-select burn vector chips. Camera shortcuts (F/R/C) live higher
+// up in the file. We swallow keys only when the sim is running so we don't
+// fight the parts UI.
+addEventListener('keydown', (e) => {
+  if (e.target.matches('input,select,textarea')) return;
+  const k = e.key.toLowerCase();
+  if (k === 'a') sim.inputs.rotL = true;
+  else if (k === 'd') sim.inputs.rotR = true;
+  else if (k === 'q') { sim.inputs.rotL = true; sim.inputs.fine = true; }
+  else if (k === 'e') { sim.inputs.rotR = true; sim.inputs.fine = true; }
+  else if (k === 'w') sim.inputs.fwd = true;
+  else if (k === 's') sim.inputs.rev = true;
+  else if (k >= '1' && k <= '5') {
+    const map = { '1': 'off', '2': 'prograde', '3': 'retrograde',
+                  '4': 'radial-out', '5': 'radial-in' };
+    const mode = map[k];
+    const need = $('thrust-modes').querySelector(`.toggle[data-mode="${mode}"]`)?.dataset.unlock;
+    if (need && !PROG.hasUnlock(profile, need)) {
+      const u = PROG.UNLOCKS[need];
+      toast(`🔒 Unlocks at ${PROG.RANKS[u.rank].name}`, true);
+    } else {
+      setBurnMode(mode);
+    }
+  }
+});
+addEventListener('keyup', (e) => {
+  const k = e.key.toLowerCase();
+  if (k === 'a') sim.inputs.rotL = false;
+  else if (k === 'd') sim.inputs.rotR = false;
+  else if (k === 'q') { sim.inputs.rotL = false; sim.inputs.fine = false; }
+  else if (k === 'e') { sim.inputs.rotR = false; sim.inputs.fine = false; }
+  else if (k === 'w') sim.inputs.fwd = false;
+  else if (k === 's') sim.inputs.rev = false;
+});
+
 // ── Boot ────────────────────────────────────────────────────────────────────
 window.__sd = { auth, engine: ENG, sim, builder: BUILDER,
   ui: { readDesign, currentDesignData },
@@ -1514,10 +1713,15 @@ window.__sd = { auth, engine: ENG, sim, builder: BUILDER,
            getCameraMode: () => SCENE?.getMode() ?? null },
   missions: { list: MISSION_ORDER, get: (k) => MISSIONS[k],
               current: () => sim.missionId,
-              setMission } };
+              setMission },
+  progression: { getProfile: () => ({ ...profile }),
+                 reset: () => { profile = PROG.resetProfile(); applyUnlockLocks(); renderPilotPanel(); toast('Pilot profile reset.'); },
+                 award: (xp) => { profile.xp += +xp; PROG.saveProfile(profile); applyUnlockLocks(); renderPilotPanel(); } } };
 
 (async function boot() {
   renderMissionPicker();
+  renderPilotPanel();
+  applyUnlockLocks();
   loadDraft();
   refreshDesignReadouts();
   // Warm the thermosphere model with one sample, then drop the overlay.
