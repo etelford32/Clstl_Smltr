@@ -41,8 +41,60 @@ const HEARTBEAT_INTERVAL = 60_000;
 
 // ── State ────────────────────────────────────────────────────────────────────
 
-const _sessionId = _makeSessionId();
-const _sessionStart = Date.now();
+/**
+ * Session continuity across page loads.
+ *
+ * This is a multi-page app — every full-page navigation re-runs analytics.js.
+ * If we mint a fresh session ID on each load, every analytics_events row sits
+ * in its own "session", which inflates session counts, pins pages-per-session
+ * at 1 and bounce rate at 100%. We persist the ID in sessionStorage with a
+ * sliding idle timeout (GA4-style, 30 min) so navigations within the same
+ * tab share a session. The anon → signed-in transition keeps the same ID,
+ * which is what the visitor-flow `anonConverted` metric needs.
+ */
+const SESSION_STORAGE_KEY = 'pp_analytics_session';
+const SESSION_IDLE_MS = 30 * 60 * 1000;
+
+function _makeSessionId() {
+    return 'sess_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+}
+
+function _readStoredSession() {
+    try {
+        const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
+        if (!raw) return null;
+        const obj = JSON.parse(raw);
+        if (!obj || typeof obj.id !== 'string') return null;
+        return obj;
+    } catch (_) { return null; }
+}
+
+function _writeStoredSession(id, start, lastActivity) {
+    try {
+        sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({ id, start, lastActivity }));
+    } catch (_) { /* private mode / quota — fall back to in-memory only */ }
+}
+
+function _resolveSession() {
+    const now = Date.now();
+    const stored = _readStoredSession();
+    if (stored && (now - (stored.lastActivity || 0)) < SESSION_IDLE_MS) {
+        _writeStoredSession(stored.id, stored.start || now, now);
+        return { id: stored.id, start: stored.start || now };
+    }
+    const id = _makeSessionId();
+    _writeStoredSession(id, now, now);
+    return { id, start: now };
+}
+
+const _resolved = _resolveSession();
+let _sessionId = _resolved.id;
+let _sessionStart = _resolved.start;
+
+function _touchSession() {
+    _writeStoredSession(_sessionId, _sessionStart, Date.now());
+}
+
 const _buffer = [];
 const _sessionEvents = [];
 let _userId = null;
@@ -52,10 +104,6 @@ let _supabaseReady = false;
 let _gtagReady = false;   // gtag.js <script> finished loading (status only)
 let _gaActive  = false;   // GA initialized + gtag queue installed — safe to send
 let _heartbeatTimer = null;
-
-function _makeSessionId() {
-    return 'sess_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
-}
 
 // Lazy import of telemetry to forward analytics failures upstream.
 // Cached so we never re-import on retry storms. Loading telemetry has
@@ -133,6 +181,7 @@ async function _flush() {
 
 async function _heartbeat() {
     if (!_supabase) return;
+    _touchSession();
     try {
         await _supabase.rpc('session_heartbeat', {
             p_session_id: _sessionId,
@@ -201,6 +250,7 @@ function _onClick(e) {
     const now = Date.now();
     if (now - _lastClickAt < _CLICK_THROTTLE_MS) return;
     _lastClickAt = now;
+    _touchSession();
 
     const w = window.innerWidth  || 1;
     const h = window.innerHeight || 1;
@@ -243,6 +293,7 @@ function _onScroll() {
     for (const m of [25, 50, 75, 100]) {
         if (pct >= m && !_scrollMilestones.has(m)) {
             _scrollMilestones.add(m);
+            _touchSession();
             _buffer.push({
                 event_type: 'event',
                 event_name: 'scroll_depth',
@@ -369,6 +420,7 @@ class Analytics {
      * @param {object} [props] - Additional properties
      */
     page(pageName, props = {}) {
+        _touchSession();
         const path = window.location.pathname;
         // Sanitize: truncate fields to match RLS policy limits, minimize PII
         const safeName = (pageName || path).slice(0, 100);
@@ -411,6 +463,7 @@ class Analytics {
      */
     event(name, props = {}) {
         if (!name || typeof name !== 'string') return;
+        _touchSession();
         const safeName = name.slice(0, 100);
         const safePath = window.location.pathname.slice(0, 200);
 
