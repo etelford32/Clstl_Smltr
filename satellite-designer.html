@@ -130,15 +130,35 @@ select option{background:#0a1024}
 .toggle.warn.active{background:rgba(var(--c-warn-rgb),.22);
   border-color:rgba(var(--c-warn-rgb),.5);color:var(--c-warn)}
 
-#sd-stage{position:relative;height:320px;min-height:320px;border-radius:var(--r-lg);
+#sd-stage{position:relative;height:440px;min-height:440px;border-radius:var(--r-lg);
   overflow:hidden;border:1px solid var(--c-accent-border);
   background:radial-gradient(130% 100% at 50% 40%,#060f24,#02030a)}
-#sd-canvas{display:block;width:100%;height:100%}
-#sd-shipgl{position:absolute;inset:0;width:100%;height:100%;
-  pointer-events:none;z-index:1}
+#sd-canvas{display:block;width:100%;height:100%;cursor:grab;touch-action:none}
+#sd-canvas:active{cursor:grabbing}
 #sd-status{
   position:absolute;top:12px;left:12px;right:12px;display:flex;
   justify-content:space-between;gap:10px;pointer-events:none;flex-wrap:wrap}
+#sd-cam{position:absolute;bottom:12px;left:12px;display:flex;gap:5px;
+  pointer-events:auto;background:rgba(4,8,18,.72);border:1px solid rgba(255,255,255,.14);
+  padding:4px;border-radius:999px;backdrop-filter:blur(6px)}
+#sd-cam .cam-btn{font-size:.66rem;font-weight:700;font-family:monospace;
+  padding:5px 11px;border-radius:999px;cursor:pointer;color:var(--c-text-2);
+  border:1px solid transparent;background:transparent;letter-spacing:.06em}
+#sd-cam .cam-btn:hover{color:var(--c-text)}
+#sd-cam .cam-btn.active{background:rgba(var(--c-accent-rgb),.22);
+  color:#fff;border-color:var(--c-accent-border-hi)}
+#sd-banner{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);
+  max-width:80%;padding:6px 14px;border-radius:999px;font-size:.74rem;
+  font-weight:700;background:rgba(4,8,18,.78);
+  border:1px solid var(--c-accent-border);color:var(--c-text);
+  text-align:center;pointer-events:none;backdrop-filter:blur(6px);
+  transition:opacity .25s;opacity:0}
+#sd-banner.show{opacity:1}
+#sd-banner.good{border-color:rgba(95,227,154,.55);color:var(--c-good)}
+#sd-banner.warn{border-color:rgba(var(--c-warn-rgb),.55);color:var(--c-warn)}
+#sd-banner.bad{border-color:rgba(255,107,125,.55);color:var(--c-bad)}
+#sd-hint{position:absolute;top:50px;right:12px;font-size:.6rem;
+  color:var(--c-text-3);pointer-events:none;text-align:right;line-height:1.4}
 .status-pill{
   pointer-events:auto;font-size:.72rem;font-weight:700;font-family:monospace;
   padding:6px 12px;border-radius:999px;background:rgba(4,8,18,.7);
@@ -339,12 +359,34 @@ select option{background:#0a1024}
 
     <div id="sd-stage">
       <canvas id="sd-canvas"></canvas>
-      <canvas id="sd-shipgl"></canvas>
       <div id="sd-status">
         <span class="status-pill" id="st-phase">Pre-flight</span>
         <span class="status-pill" id="st-warp">▶ ×1</span>
       </div>
+      <div id="sd-hint">drag · orbit<br>scroll · zoom</div>
+      <div id="sd-cam">
+        <div class="cam-btn active" data-cam="wide">WIDE</div>
+        <div class="cam-btn" data-cam="follow">FOLLOW</div>
+        <div class="cam-btn" data-cam="free">FREE</div>
+      </div>
+      <div id="sd-banner"></div>
       <div class="warmup" id="sd-warmup">Loading atmosphere model…</div>
+    </div>
+
+    <div class="panel">
+      <h2>🎯 Mission <span class="sub">pick a scenario</span></h2>
+      <div class="toggle-row" id="mission-select"></div>
+      <p class="hint" id="mission-blurb" style="margin-top:9px"></p>
+      <div style="margin-top:9px;padding:7px 9px;background:rgba(255,255,255,.03);
+                  border-radius:var(--r-md);border:1px solid rgba(255,255,255,.08)">
+        <div style="display:flex;justify-content:space-between;font-size:.66rem;
+                    color:var(--c-text-3);font-weight:700;letter-spacing:.06em;text-transform:uppercase">
+          <span>Objective</span><span id="obj-extras"></span>
+        </div>
+        <div id="obj-label" style="font-size:.82rem;font-weight:700;margin-top:4px">—</div>
+        <div class="bar" style="margin-top:6px"><i id="obj-bar" style="width:0%"></i></div>
+      </div>
+      <p class="hint" id="mission-tip" style="margin-top:9px;font-style:italic"></p>
     </div>
 
     <div class="panel">
@@ -492,6 +534,8 @@ import { auth } from './js/auth.js';
 import { getSupabase, isConfigured } from './js/supabase-config.js';
 import * as ENG from './js/satellite-designer-engine.js';
 import * as BUILDER from './js/satellite-builder.js';
+import * as SCENE3D from './js/satellite-designer-3d.js';
+import { MISSIONS, MISSION_ORDER } from './js/satellite-missions.js';
 
 // ── DOM helpers ─────────────────────────────────────────────────────────────
 const $ = (id) => document.getElementById(id);
@@ -512,8 +556,14 @@ const sim = {
   attitude: 'nominal',
   auto: false,
   trail: [], altHist: [],
-  stationSeconds: 0, score: 0, best: 0, orbits: 0,
-  lastAngle: 0, viewScale: 1,
+  score: 0, best: 0,
+  viewScale: 1,
+  // Mission scoring (delegated to active mission module).
+  missionId: 'station',
+  missionCtx: null,
+  earthSpin: 0,
+  targetSatM: null,    // { x, y } when a target exists (rendezvous)
+  debrisM: null,       // { x, y } when debris exists (avoidance)
 };
 let sdBuild = BUILDER.defaultBuild();
 
@@ -637,6 +687,7 @@ function bindSlider(id, lblId) {
 }
 bindSlider('f-peri', 'v-peri'); bindSlider('f-apo', 'v-apo');
 bindSlider('f-tgt', 'v-tgt'); bindSlider('f-throttle', 'v-thr');
+$('f-tgt').addEventListener('input', () => { SCENE?.setTargetAlt(+$('f-tgt').value); });
 $('f-peri').addEventListener('input', () => {
   if (+$('f-apo').value < +$('f-peri').value) { $('f-apo').value = $('f-peri').value; $('v-apo').textContent = $('f-apo').value; }
 });
@@ -672,14 +723,16 @@ function launch() {
   const peri = +$('f-peri').value, apo = Math.max(+$('f-apo').value, peri);
   sim.state = ENG.initState(sim.design, { periKm: peri, apoKm: apo });
   sim.trail = []; sim.altHist = [];
-  sim.stationSeconds = 0; sim.score = 0; sim.orbits = 0;
-  sim.lastAngle = Math.atan2(sim.state.y, sim.state.x);
+  sim.score = 0;
+  sim.targetSatM = null; sim.debrisM = null;
   sim.running = true; sim.paused = false;
   $('b-launch').disabled = true;
   $('b-pause').disabled = false; $('b-pause').textContent = '⏸ Pause';
   $('b-reset').disabled = false;
   $('st-warp').textContent = '▶ ×' + sim.warp;
   setPhase('In flight', 'good');
+  // Spin up the active mission.
+  startMission();
 }
 // Blank every live readout so each test run starts from a clean board.
 function clearReadouts() {
@@ -701,14 +754,17 @@ function clearReadouts() {
 function resetSim() {
   sim.running = false; sim.paused = false; sim.state = null;
   sim.trail = []; sim.altHist = [];
-  sim.stationSeconds = 0; sim.score = 0; sim.orbits = 0;
+  sim.score = 0;
+  sim.targetSatM = null; sim.debrisM = null;
   $('b-launch').disabled = false;
   $('b-pause').disabled = true; $('b-pause').textContent = '⏸ Pause';
   $('b-reset').disabled = false;
   $('st-warp').textContent = '▶ ×' + sim.warp;
   setPhase('Pre-flight', '');
   clearReadouts();
-  draw(); // clear to empty orbit
+  setBanner('', '');
+  // Refresh the inline objective text so the panel doesn't show stale data.
+  refreshObjectivePanel();
 }
 function setPhase(text, cls) {
   const p = $('st-phase');
@@ -752,39 +808,63 @@ function frame(now) {
     }
 
     const r = ENG.advance(sim.state, sim.design, sim.env, sim.control, simSecs);
-    const prev = sim.state;
     sim.state = r.state;
+    sim.earthSpin += simSecs * ENG.OMEGA_EARTH;
 
-    // Orbit counter — count prograde crossings of the +x axis.
-    const ang = Math.atan2(sim.state.y, sim.state.x);
-    if (sim.lastAngle < 0 && ang >= 0 && sim.lastAngle < -0.1) sim.orbits++;
-    sim.lastAngle = ang;
-
-    // Scoring: time spent at/above the target altitude.
-    const tgt = +$('f-tgt').value;
     const tel = ENG.telemetry(sim.state, sim.design, sim.env, sim.control.attitudeMult);
-    if (tel.altKm >= tgt) sim.stationSeconds += simSecs;
-    sim.score = Math.floor(sim.stationSeconds + sim.orbits * 50);
+
+    // Mission tick — let the active scenario advance its state machine and
+    // contribute to the score. `missionCtx` was prepped in startMission().
+    if (sim.missionCtx) {
+      sim.missionCtx.targetAltKm = +$('f-tgt').value;
+      sim.missionCtx.lastPeriKm = tel.periAltKm;
+      const mission = MISSIONS[sim.missionId];
+      const out = mission.tick?.(sim.missionCtx, simSecs, tel) || {};
+      if (out.scoreDelta) sim.score += out.scoreDelta;
+      if (out.done) {
+        sim.running = false;
+        setPhase('🏁 Mission complete', 'good');
+        $('b-pause').disabled = true;
+        $('b-launch').disabled = false;
+        maybePersistBest();
+      }
+    }
+    // Final score from the mission's accumulator (overrides delta sum when
+    // a closed-form score makes more sense, e.g. rendezvous = f(best miss)).
+    const mission = MISSIONS[sim.missionId];
+    if (mission && typeof mission.score === 'function') {
+      sim.score = mission.score(sim.missionCtx);
+    }
     if (sim.score > sim.best) sim.best = sim.score;
 
     // Trail + altitude history.
     sim.trail.push([sim.state.x, sim.state.y]);
-    if (sim.trail.length > 1800) sim.trail.shift();
+    if (sim.trail.length > 2400) sim.trail.shift();
     sim.altHist.push([sim.state.t, tel.altKm]);
     if (sim.altHist.length > 600) sim.altHist.shift();
 
     if (!sim.state.alive) {
       sim.running = false; sim.paused = false;
-      setPhase(sim.state.reason === 'reentry' ? '🔥 Burned up on re-entry' : 'Mission ended', 'bad');
-      // Re-arm the controls so a new configuration can be flown immediately.
+      setPhase(sim.state.reason === 'reentry' ? '🔥 Re-entry — vehicle destroyed' : 'Mission ended', 'bad');
       $('b-pause').disabled = true; $('b-pause').textContent = '⏸ Pause';
       $('b-launch').disabled = false;
-      toast('Re-entry: the craft burned up in the lower atmosphere.', true);
+      // For Deorbit, hitting the atmosphere with perigee in the window is success.
+      if (sim.missionId === 'deorbit') {
+        const inWin = (sim.missionCtx?.lastPeriKm ?? 999) >= 60 && sim.missionCtx?.lastPeriKm <= 100;
+        toast(inWin ? '🎯 Re-entry inside the safe window — mission success.'
+                    : 'Re-entry — outside the safe window.', !inWin);
+      } else {
+        toast('Re-entry: the craft burned up in the lower atmosphere.', true);
+      }
       maybePersistBest();
     } else if (tel.fuel <= 0 && sim.control.mode === 'prograde') {
       setPhase('⚠ Out of propellant — decaying', 'warn');
     }
     updateTelemetry(tel);
+    refreshObjectivePanel(tel);
+  } else if (sim.state) {
+    // Live telemetry tick even when paused so the objective bar reflects truth.
+    refreshObjectivePanel(ENG.telemetry(sim.state, sim.design, sim.env, sim.control.attitudeMult));
   }
 
   draw();
@@ -830,120 +910,78 @@ function updateTelemetry(t) {
   $('dv-bar').style.width = (dvMax > 0 ? Math.min(1, t.dvRemaining / dvMax) * 100 : 0).toFixed(1) + '%';
 
   $('o-score').textContent = fmt(sim.score);
-  $('o-station').innerHTML = fmt(sim.stationSeconds, 0) + '<small>s</small>';
-  $('o-orbits').textContent = fmt(sim.orbits);
+  // 'on-station' & 'orbits' are mission-specific now — pull from the live
+  // mission context when the station-keeper or CME scenario is active.
+  const mst = sim.missionCtx?.state || {};
+  $('o-station').innerHTML = fmt(mst.stationSeconds || mst.stormSeconds || 0, 0) + '<small>s</small>';
+  $('o-orbits').textContent = fmt(mst.orbits || 0);
   $('o-clock').innerHTML = fmt(t.missionTime, 0) + '<small>s</small>';
   $('o-best').textContent = fmt(sim.best);
 }
 
-// ── Rendering ───────────────────────────────────────────────────────────────
-const cv = $('sd-canvas'), cx = cv.getContext('2d');
-let stars = [];
+// ── Rendering — 3-D mission canvas ─────────────────────────────────────────
+// All Earth/orbit/satellite drawing lives in satellite-designer-3d.js; this
+// page just feeds it the engine state every frame.
+const cv = $('sd-canvas');
+let SCENE = null;        // returned by SCENE3D.init(); null until WebGL is up
+let scenePending = false;
+
+async function ensureScene() {
+  if (SCENE || scenePending) return SCENE;
+  scenePending = true;
+  try {
+    const THREE = await import('three');
+    SCENE = await SCENE3D.init(cv, THREE);
+    SCENE.setTargetAlt(+$('f-tgt').value);
+    SCENE.update({ build: sdBuild });
+    SCENE.resize();
+    return SCENE;
+  } catch (e) {
+    console.warn('[3D] scene unavailable:', e.message);
+    cv.replaceWith(Object.assign(document.createElement('div'),
+      { className: 'warmup', textContent: '3-D scene unavailable in this browser.' }));
+    return null;
+  }
+}
 function resize() {
-  const r = $('sd-stage').getBoundingClientRect();
-  const dpr = Math.min(2, devicePixelRatio || 1);
-  cv.width = r.width * dpr; cv.height = r.height * dpr;
-  cx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  cv._w = r.width; cv._h = r.height;
-  stars = Array.from({ length: 90 }, () => ({
-    x: Math.random() * r.width, y: Math.random() * r.height,
-    s: Math.random() * 1.3 + 0.3, a: Math.random() * 0.5 + 0.2,
-  }));
+  if (SCENE) SCENE.resize();
 }
 addEventListener('resize', resize);
 
+let lastBuildSig = '';
 function draw() {
-  const W = cv._w || 600, H = cv._h || 480;
-  let shipArg = null;
-  cx.clearRect(0, 0, W, H);
-  // starfield
-  for (const s of stars) {
-    cx.globalAlpha = s.a; cx.fillStyle = '#bcdcff';
-    cx.fillRect(s.x, s.y, s.s, s.s);
-  }
-  cx.globalAlpha = 1;
+  if (!SCENE) return;
+  // Push the active build into the scene only when it changes (cheap diff).
+  const sig = JSON.stringify(sdBuild);
+  const buildChanged = sig !== lastBuildSig;
+  if (buildChanged) lastBuildSig = sig;
 
-  const cxp = W / 2, cyp = H / 2;
-  // auto-fit: show out to current apogee (or the apogee slider when idle)
-  let rMax = ENG.R_EARTH + 1200_000;
+  const update = {
+    earthSpin: sim.earthSpin,
+    trailM: sim.trail,
+  };
+  if (buildChanged) update.build = sdBuild;
   if (sim.state) {
-    const el = ENG.elements(sim.state);
-    rMax = Math.max(el.r, isFinite(el.ra) ? el.ra : el.r) * 1.18;
+    update.satM = [sim.state.x, sim.state.y];
+    update.satRotZ = Math.atan2(sim.state.vy, sim.state.vx);
   } else {
-    rMax = ENG.R_EARTH + (+$('f-apo').value) * 1000 * 1.25;
+    // Pre-flight: park the satellite on the prospective perigee so the
+    // player can see the design relative to Earth before launch.
+    const r = ENG.R_EARTH + (+$('f-peri').value) * 1000;
+    update.satM = [r, 0];
+    update.satRotZ = Math.PI / 2;       // facing +y (prograde)
   }
-  const scale = (Math.min(W, H) * 0.46) / rMax;
-  const px = (x) => cxp + x * scale;
-  const py = (y) => cyp - y * scale;
-  const Re = ENG.R_EARTH * scale;
+  if (sim.targetSatM) update.targetSat = [sim.targetSatM.x, sim.targetSatM.y];
+  if (sim.debrisM)    update.debris    = [sim.debrisM.x,    sim.debrisM.y];
 
-  // atmosphere shell (80 → 600 km), the part that bites
-  const atmOuter = (ENG.R_EARTH + 600_000) * scale;
-  const g = cx.createRadialGradient(cxp, cyp, Re, cxp, cyp, atmOuter);
-  g.addColorStop(0, 'rgba(90,170,255,.30)');
-  g.addColorStop(0.45, 'rgba(60,130,220,.12)');
-  g.addColorStop(1, 'rgba(40,90,160,0)');
-  cx.fillStyle = g;
-  cx.beginPath(); cx.arc(cxp, cyp, atmOuter, 0, 7); cx.fill();
+  SCENE.update(update);
 
-  // target-altitude ring
-  const tgtR = (ENG.R_EARTH + (+$('f-tgt').value) * 1000) * scale;
-  cx.strokeStyle = 'rgba(95,227,154,.45)'; cx.setLineDash([5, 6]); cx.lineWidth = 1;
-  cx.beginPath(); cx.arc(cxp, cyp, tgtR, 0, 7); cx.stroke();
-  cx.setLineDash([]);
+  // Auto-fit only matters in wide mode; render passes the current apogee km.
+  const apoKm = sim.state
+    ? Math.max(ENG.elements(sim.state).ra, ENG.elements(sim.state).r) / 1000 - ENG.R_EARTH / 1000
+    : Math.max(+$('f-apo').value, +$('f-peri').value);
+  SCENE.render(apoKm);
 
-  // Earth
-  const eg = cx.createRadialGradient(cxp - Re * .35, cyp - Re * .35, Re * .1, cxp, cyp, Re);
-  eg.addColorStop(0, '#3b86c9'); eg.addColorStop(.6, '#16406e'); eg.addColorStop(1, '#081f38');
-  cx.fillStyle = eg;
-  cx.beginPath(); cx.arc(cxp, cyp, Re, 0, 7); cx.fill();
-  cx.strokeStyle = 'rgba(120,200,255,.5)'; cx.lineWidth = 1;
-  cx.beginPath(); cx.arc(cxp, cyp, Re, 0, 7); cx.stroke();
-
-  // orbit trail
-  if (sim.trail.length > 1) {
-    cx.strokeStyle = 'rgba(0,198,255,.55)'; cx.lineWidth = 1.4;
-    cx.beginPath();
-    for (let i = 0; i < sim.trail.length; i++) {
-      const [x, y] = sim.trail[i];
-      i ? cx.lineTo(px(x), py(y)) : cx.moveTo(px(x), py(y));
-    }
-    cx.stroke();
-  }
-
-  // satellite + vectors
-  if (sim.state) {
-    const X = px(sim.state.x), Y = py(sim.state.y);
-    // velocity vector
-    const vmag = Math.hypot(sim.state.vx, sim.state.vy) || 1;
-    cx.strokeStyle = 'rgba(0,198,255,.9)'; cx.lineWidth = 2;
-    cx.beginPath(); cx.moveTo(X, Y);
-    cx.lineTo(X + sim.state.vx / vmag * 26, Y - sim.state.vy / vmag * 26); cx.stroke();
-    // thrust vector
-    if (sim.running && sim.control.mode !== 'off' && sim.control.throttle > 0 && sim.state.fuel > 0) {
-      let dx = 0, dy = 0, r = ENG.elements(sim.state).r;
-      if (sim.control.mode === 'prograde') { dx = sim.state.vx / vmag; dy = sim.state.vy / vmag; }
-      else if (sim.control.mode === 'retrograde') { dx = -sim.state.vx / vmag; dy = -sim.state.vy / vmag; }
-      else if (sim.control.mode === 'radial-out') { dx = sim.state.x / r; dy = sim.state.y / r; }
-      else if (sim.control.mode === 'radial-in') { dx = -sim.state.x / r; dy = -sim.state.y / r; }
-      cx.strokeStyle = '#ffb066'; cx.lineWidth = 3;
-      cx.beginPath(); cx.moveTo(X, Y);
-      cx.lineTo(X - dx * 30, Y + dy * 30); cx.stroke(); // exhaust points opposite thrust
-    }
-    if (SHIP.ready) {
-      // The 3-D model marks the craft; keep just a faint locator ring.
-      cx.strokeStyle = 'rgba(0,198,255,.35)'; cx.lineWidth = 1;
-      cx.beginPath(); cx.arc(X, Y, 13, 0, 7); cx.stroke();
-    } else {
-      cx.fillStyle = '#fff';
-      cx.beginPath(); cx.arc(X, Y, 4.2, 0, 7); cx.fill();
-      cx.strokeStyle = '#00c6ff'; cx.lineWidth = 2;
-      cx.beginPath(); cx.arc(X, Y, 7, 0, 7); cx.stroke();
-    }
-    shipArg = { sx: X, sy: Y, vangle: Math.atan2(sim.state.vy, sim.state.vx) };
-  }
-
-  renderShip(W, H, shipArg);
   drawSpark();
 }
 
@@ -1185,82 +1223,6 @@ function disposeGroup(grp) {
       (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m?.dispose?.()); }
   });
 }
-// ── Live ship on the main stage ─────────────────────────────────────────────
-// A transparent WebGL layer over the 2-D orbit canvas that renders the
-// actual built satellite: a slow turntable pre-flight, flying nose-to-
-// velocity once launched. Self-syncs to sdBuild; degrades silently to the
-// 2-D marker if three/WebGL can't load (offline).
-const SHIP = { ready: false, tried: false, three: null, renderer: null,
-  scene: null, camera: null, pivot: null, orient: null, model: null,
-  sig: '', W: 0, H: 0, spin: 0 };
-
-async function ensureShipGL() {
-  if (SHIP.ready || SHIP.tried) return SHIP.ready;
-  SHIP.tried = true;
-  try {
-    const THREE = await import('three');
-    SHIP.three = THREE;
-    const cv = $('sd-shipgl');
-    SHIP.renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true });
-    SHIP.renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1));
-    SHIP.renderer.setClearColor(0x000000, 0);
-    SHIP.scene = new THREE.Scene();
-    SHIP.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -2000, 2000);
-    SHIP.scene.add(new THREE.AmbientLight(0x4a5566, 1.0));
-    const key = new THREE.DirectionalLight(0xffffff, 1.3); key.position.set(3, 5, 6);
-    const rim = new THREE.DirectionalLight(0x5577ff, 0.45); rim.position.set(-4, -2, -4);
-    SHIP.scene.add(key, rim);
-    SHIP.orient = new THREE.Group();
-    SHIP.pivot = new THREE.Group();
-    SHIP.pivot.add(SHIP.orient);
-    SHIP.scene.add(SHIP.pivot);
-    SHIP.ready = true;
-    return true;
-  } catch (e) {
-    console.warn('[Stage] 3-D ship layer unavailable:', e.message);
-    return false;
-  }
-}
-function rebuildShipModel() {
-  if (!SHIP.ready) return;
-  if (SHIP.model) { SHIP.orient.remove(SHIP.model); disposeGroup(SHIP.model); }
-  SHIP.model = BUILDER.buildGroup(SHIP.three, sdBuild);
-  // Engine thrust axis is +z; yaw it so the long axis & wings lie in the
-  // screen plane (a readable side-on silhouette, nose toward +x).
-  SHIP.model.rotation.y = Math.PI / 2;
-  SHIP.orient.add(SHIP.model);
-}
-// Called every frame from draw(). ship = null pre-flight (centred hero
-// turntable); else { sx, sy, vangle } with sx/sy in canvas-pixel space.
-function renderShip(W, H, ship) {
-  if (!SHIP.ready || W < 2 || H < 2) return;
-  if (W !== SHIP.W || H !== SHIP.H) {
-    SHIP.W = W; SHIP.H = H;
-    SHIP.renderer.setSize(W, H, false);
-    const c = SHIP.camera;
-    c.left = -W / 2; c.right = W / 2; c.top = H / 2; c.bottom = -H / 2;
-    c.updateProjectionMatrix();
-  }
-  const sig = JSON.stringify(sdBuild);
-  if (sig !== SHIP.sig) { SHIP.sig = sig; rebuildShipModel(); }
-  if (!SHIP.model) return;
-
-  const extent = Math.max(0.2, BUILDER.buildExtent(sdBuild));
-  if (ship) {
-    SHIP.pivot.position.set(ship.sx - W / 2, H / 2 - ship.sy, 0);
-    const targetPx = Math.max(34, Math.min(W, H) * 0.085);
-    SHIP.pivot.scale.setScalar(targetPx / extent);
-    SHIP.pivot.rotation.z = ship.vangle;
-    SHIP.orient.rotation.set(-0.42, 0, 0);
-  } else {
-    SHIP.pivot.position.set(0, 0, 0);
-    SHIP.pivot.scale.setScalar((Math.min(W, H) * 0.46) / extent);
-    SHIP.pivot.rotation.z = 0;
-    SHIP.spin += 0.0065;
-    SHIP.orient.rotation.set(-0.42, SHIP.spin, 0);
-  }
-  SHIP.renderer.render(SHIP.scene, SHIP.camera);
-}
 function fitBayCamera() {
   if (!BAY.ready) return;
   const E = BUILDER.buildExtent(sdBuild);
@@ -1366,6 +1328,102 @@ $('bay-span').addEventListener('input', (e) => {
 });
 addEventListener('resize', resizeBay);
 
+// ── Stage banner & camera modes ─────────────────────────────────────────────
+const bannerEl = $('sd-banner');
+let bannerHideT = 0;
+function setBanner(msg, cls = '') {
+  if (!msg) { bannerEl.classList.remove('show'); return; }
+  bannerEl.classList.remove('good', 'warn', 'bad');
+  if (cls) bannerEl.classList.add(cls);
+  bannerEl.textContent = msg;
+  bannerEl.classList.add('show');
+  clearTimeout(bannerHideT);
+  // Status messages auto-fade after 6 s; missions re-assert critical alerts.
+  bannerHideT = setTimeout(() => bannerEl.classList.remove('show'), 6000);
+}
+$('sd-cam').addEventListener('click', (e) => {
+  const b = e.target.closest('.cam-btn'); if (!b || !SCENE) return;
+  SCENE.setCameraMode(b.dataset.cam);
+  $('sd-cam').querySelectorAll('.cam-btn').forEach(x =>
+    x.classList.toggle('active', x === b));
+});
+
+// ── Mission picker ──────────────────────────────────────────────────────────
+function renderMissionPicker() {
+  $('mission-select').innerHTML = MISSION_ORDER.map(id => {
+    const m = MISSIONS[id];
+    return `<div class="toggle${id === sim.missionId ? ' active' : ''}" data-mid="${id}">${m.name}</div>`;
+  }).join('');
+}
+$('mission-select').addEventListener('click', (e) => {
+  const t = e.target.closest('.toggle'); if (!t) return;
+  setMission(t.dataset.mid);
+});
+function setMission(id) {
+  if (!MISSIONS[id]) return;
+  sim.missionId = id;
+  const m = MISSIONS[id];
+  $('mission-select').querySelectorAll('.toggle').forEach(t =>
+    t.classList.toggle('active', t.dataset.mid === id));
+  $('mission-blurb').textContent = m.blurb;
+  $('mission-tip').textContent = '💡 ' + m.tip;
+  // Apply scenario defaults to the orbit/throttle sliders unless we're
+  // mid-flight (don't yank the wheel out of the pilot's hands).
+  if (!sim.running && m.defaults) {
+    const d = m.defaults;
+    if (d.periKm != null) { $('f-peri').value = d.periKm; $('v-peri').textContent = d.periKm; }
+    if (d.apoKm  != null) { $('f-apo').value  = d.apoKm;  $('v-apo').textContent  = d.apoKm;  }
+    if (d.tgtKm  != null) { $('f-tgt').value  = d.tgtKm;  $('v-tgt').textContent  = d.tgtKm;  }
+    if (d.throttle != null) { $('f-throttle').value = d.throttle; $('v-thr').textContent = d.throttle;
+                              sim.control.throttle = d.throttle / 100; }
+    if (d.fuelMass != null) { $('f-fuel').value = d.fuelMass; refreshDesignReadouts(); }
+    if (d.swPreset) setSWPreset(d.swPreset);
+    if (d.attitude) setAttitude(d.attitude);
+    SCENE?.setTargetAlt(+$('f-tgt').value);
+  }
+  refreshObjectivePanel();
+}
+function startMission() {
+  const m = MISSIONS[sim.missionId]; if (!m) return;
+  // Mission context — read/write surface the scenario uses to mutate the world.
+  sim.missionCtx = {
+    sim, env, design: sim.design, control: sim.control,
+    R_EARTH: ENG.R_EARTH, MU: ENG.MU,
+    targetAltKm: +$('f-tgt').value,
+    lastPeriKm: +$('f-peri').value,
+    state: null,
+    setTarget: (o) => { sim.targetSatM = o; },
+    setDebris: (o) => { sim.debrisM = o; },
+    getTarget: () => sim.targetSatM,
+    getDebris: () => sim.debrisM,
+    event: (type) => { /* hook point for analytics / sounds */ },
+    setBanner,
+  };
+  m.setup?.(sim.missionCtx);
+  refreshObjectivePanel();
+}
+
+// ── Objective panel ─────────────────────────────────────────────────────────
+function refreshObjectivePanel(tel) {
+  const m = MISSIONS[sim.missionId]; if (!m) return;
+  const ctx = sim.missionCtx;
+  if (!ctx) {                                  // pre-launch preview
+    $('obj-label').textContent = m.blurb;
+    $('obj-bar').style.width = '0%';
+    $('obj-extras').textContent = '';
+    return;
+  }
+  ctx.targetAltKm = +$('f-tgt').value;
+  const t = tel || (sim.state ? ENG.telemetry(sim.state, sim.design, sim.env, sim.control.attitudeMult) : null);
+  if (!t) return;
+  const o = m.objective?.(ctx, t);
+  if (!o) return;
+  $('obj-label').textContent = o.label;
+  $('obj-bar').style.width = Math.round((o.progress || 0) * 100) + '%';
+  $('obj-extras').textContent = Object.entries(o.extras || {})
+    .map(([k, v]) => `${k}: ${v}`).join(' · ');
+}
+
 // ── Boot ────────────────────────────────────────────────────────────────────
 window.__sd = { auth, engine: ENG, sim, builder: BUILDER,
   ui: { readDesign, currentDesignData },
@@ -1375,20 +1433,25 @@ window.__sd = { auth, engine: ENG, sim, builder: BUILDER,
                 getEnv: () => ({ ...env }),
                 getAttitude: () => sim.attitude,
                 rho400: () => ENG.airDensity(400_000, env) },
-  stage: { ensureShipGL,
-           shipReady: () => SHIP.ready,
-           shipTried: () => SHIP.tried } };
+  stage: { ensureScene,
+           sceneReady: () => !!SCENE,
+           setCameraMode: (m) => SCENE?.setCameraMode(m),
+           getCameraMode: () => SCENE?.getMode() ?? null },
+  missions: { list: MISSION_ORDER, get: (k) => MISSIONS[k],
+              current: () => sim.missionId,
+              setMission } };
 
 (async function boot() {
+  renderMissionPicker();
   loadDraft();
   refreshDesignReadouts();
-  resize();
   // Warm the thermosphere model with one sample, then drop the overlay.
   try { ENG.airDensity(400_000, env); } catch (e) { console.warn(e); }
   $('sd-warmup').style.display = 'none';
   resetSim();
-  ensureShipGL();   // fire-and-forget; 2-D marker covers until ready
-  initBay();        // inline 3-D build view, always on
+  setMission('station');             // Default scenario
+  await ensureScene();               // Build the 3-D stage
+  initBay();                          // inline 3-D build view, always on
   requestAnimationFrame((t) => { lastT = t; frame(t); });
   initAuth();
 })();
