@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script src="js/preview-mode.js"></script>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gannon Superstorm Hindcast · Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/gannon-superstorm">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/gannon-superstorm">
+<meta property="og:title" content="May 2024 Gannon Superstorm — MHD-corrected density hindcast">
+<meta property="og:description" content="Replay of the May 2024 G5 storm with BATS-R-US-driven thermospheric density vs. saturated-Ap MSIS. Exposes the Ap=400 ceiling that empirical models can't see past.">
+<meta property="og:image" content="https://parkersphysics.com/static/og/gannon-superstorm.jpg">
+<meta property="og:image:alt" content="Gannon May 2024 G5 superstorm hindcast">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="May 2024 Gannon Superstorm — MHD-corrected density hindcast">
+<meta name="twitter:description" content="Replay of the May 2024 G5 storm with BATS-R-US-driven thermospheric density vs. saturated-Ap MSIS.">
+<meta name="twitter:image" content="https://parkersphysics.com/static/og/gannon-superstorm.jpg">
+<meta name="description" content="Interactive hindcast of the May 2024 Gannon G5 superstorm. MHD-corrected thermospheric density vs. saturated-Ap MSIS, validated against GRACE-FO and Swarm-C accelerometer truth.">
+
+<link rel="stylesheet" href="colors_and_type.css">
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { height:auto; overflow-y:auto; }
+body {
+    width:100%; min-height:100vh; overflow-x:hidden;
+    background:#040210; color:#d0cce8;
+    font-family:'Segoe UI', system-ui, sans-serif;
+}
+
+/* ── Layout ─────────────────────────────────────────────── */
+#gn-app {
+    display:grid;
+    grid-template-columns: 340px 1fr 380px;
+    gap:14px; padding:14px;
+    min-height:calc(100vh - 50px);
+}
+@media (max-width: 1280px) {
+    #gn-app { grid-template-columns: 300px 1fr; }
+    #gn-right { grid-column: 1 / -1; display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+}
+@media (max-width: 900px) {
+    #gn-app { grid-template-columns: 1fr; padding:10px; gap:10px; }
+    #gn-right { grid-template-columns:1fr; }
+}
+
+.gn-panel {
+    background: rgba(10,6,28,.72); backdrop-filter: blur(14px);
+    border: 1px solid rgba(255,140,80,.18);
+    border-radius: 12px;
+    padding: 14px 16px;
+}
+.gn-panel h2 {
+    font-size:.68rem; text-transform:uppercase; letter-spacing:.14em;
+    color:#f96; font-weight:700; margin-bottom:10px;
+}
+
+/* ── Hero ──────────────────────────────────────────────── */
+#gn-hero { padding:18px 22px 16px; grid-column:1 / -1; }
+#gn-hero-row { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+#gn-hero h1 {
+    font-size: 1.45rem; font-weight: 800;
+    background: linear-gradient(100deg, #ffd 35%, #f96 80%);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+    margin: 0;
+}
+#gn-hero p { font-size:.84rem; color:#bcd; line-height:1.5; margin-top:6px; max-width:760px; }
+.gn-badge {
+    display:inline-block; padding:3px 9px; border-radius:4px;
+    font-size:.62rem; font-weight:800; letter-spacing:.08em;
+    background: rgba(255,140,80,.14); color:#f96;
+    border:1px solid rgba(255,140,80,.32);
+}
+.gn-pill {
+    display:inline-flex; align-items:center; gap:6px;
+    padding:3px 10px; border-radius:999px;
+    font-size:.66rem; font-weight:700; letter-spacing:.04em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.18);
+    color:#bcd;
+}
+.gn-pill--placeholder { color:#fc6; border-color: rgba(255,200,80,.55); background: rgba(255,200,80,.06); }
+.gn-pill--validated   { color:#6f8; border-color: rgba(100,240,150,.5); }
+
+/* ── Chart skeletons (filled by gannon-superstorm-ui.js) ──── */
+.gn-chart {
+    width: 100%; height: 240px;
+    border-radius: 8px;
+    background: rgba(255,255,255,.02);
+    border: 1px dashed rgba(255,255,255,.12);
+    display: flex; align-items:center; justify-content:center;
+    color: #889; font-size:.78rem;
+}
+.gn-chart canvas, .gn-chart svg { display:block; width:100%; height:100%; }
+
+/* ── Legend ─────────────────────────────────────────────── */
+.gn-legend { display:flex; gap:14px; flex-wrap:wrap; margin-top:10px; }
+.gn-legend-row { display:flex; align-items:center; gap:6px; font-size:.74rem; color:#bcd; }
+.gn-legend-swatch { width:14px; height:3px; border-radius:2px; }
+.gn-swatch--real { background:#888; }
+.gn-swatch--mhd  { background:#f96; }
+.gn-swatch--gnd  { background:#6cf; }
+.gn-swatch--truth{ background:#fc6; }
+
+/* ── Scrubber ──────────────────────────────────────────── */
+#gn-scrubber {
+    width:100%; appearance:none; height:6px;
+    background: linear-gradient(90deg,#234,#f96,#234);
+    border-radius:3px; outline:none;
+}
+#gn-scrubber::-webkit-slider-thumb {
+    appearance:none; width:18px; height:18px; border-radius:50%;
+    background:#fff; border:2px solid #f96; cursor:pointer;
+}
+.gn-scrubber-row { display:flex; align-items:center; gap:12px; margin-top:8px; }
+.gn-scrubber-row .gn-time { font-family: ui-monospace, monospace; font-size:.84rem; color:#fc9; }
+.gn-controls button {
+    background: rgba(255,140,80,.14); color:#f96;
+    border: 1px solid rgba(255,140,80,.32);
+    border-radius: 6px; padding: 4px 12px;
+    font-weight: 700; font-size:.72rem; cursor:pointer;
+}
+.gn-controls button:hover { background: rgba(255,140,80,.24); }
+
+/* ── Phase chip ─────────────────────────────────────────── */
+.gn-phase {
+    display:inline-block; padding:2px 9px; border-radius:4px;
+    font-size:.66rem; font-weight:800; letter-spacing:.06em;
+    text-transform:uppercase;
+}
+.gn-phase--ramp     { background: rgba(255,200,80,.12); color:#fc6; border:1px solid rgba(255,200,80,.4); }
+.gn-phase--peak     { background: rgba(255,80,80,.14);  color:#f88; border:1px solid rgba(255,80,80,.45); }
+.gn-phase--recovery { background: rgba(120,200,255,.12); color:#6cf; border:1px solid rgba(120,200,255,.45); }
+
+/* ── KPI tiles ──────────────────────────────────────────── */
+.gn-kpi-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; }
+.gn-kpi {
+    background: rgba(255,255,255,.03);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius: 8px; padding: 10px 12px;
+}
+.gn-kpi-label { font-size:.64rem; color:#8ab; text-transform:uppercase; letter-spacing:.08em; margin-bottom:4px; }
+.gn-kpi-value { font-size:1.05rem; font-weight:700; color:#fff; font-family: ui-monospace, monospace; }
+.gn-kpi-sub   { font-size:.68rem; color:#8ab; margin-top:2px; }
+
+/* ── Methodology ──────────────────────────────────────────── */
+#gn-methodology p { font-size:.78rem; line-height:1.55; color:#bcd; margin-bottom:8px; }
+#gn-methodology a { color:#f96; text-decoration: none; }
+#gn-methodology a:hover { text-decoration: underline; }
+
+/* ── Empty-state pulse ──────────────────────────────────── */
+@keyframes pulse { 0%,100% { opacity:.6; } 50% { opacity:1; } }
+.gn-pulse { animation: pulse 1.8s ease-in-out infinite; }
+
+/* ── Narration band ─────────────────────────────────────── */
+.gn-narration { position: relative; padding: 8px 0 0; min-height: 110px; }
+.gn-narration-track {
+    position: relative;
+    height: 30px;
+    border-top: 1px solid rgba(255,255,255,.18);
+    margin-top: 22px;   /* room for labels above the rule */
+}
+.gn-narration-moment {
+    position: absolute;
+    top: -22px;
+    transform: translateX(-50%);
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    color: inherit;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    font: inherit;
+    width: max-content;
+    max-width: 14ch;
+    text-align: center;
+}
+.gn-narration-label {
+    font-size: .66rem;
+    color: #bcd;
+    font-family: ui-monospace, monospace;
+    letter-spacing: .04em;
+    opacity: .75;
+    transition: color .12s ease, opacity .12s ease;
+    white-space: nowrap;
+}
+.gn-narration-tick {
+    display: block;
+    width: 1px;
+    height: 8px;
+    background: rgba(255,255,255,.35);
+    margin-top: 2px;
+}
+.gn-narration-dot {
+    display: block;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: rgba(255,255,255,.18);
+    border: 1px solid rgba(255,255,255,.35);
+    margin-top: 4px;
+    transition: background .12s ease, transform .12s ease, box-shadow .12s ease;
+}
+.gn-narration-moment:hover .gn-narration-label { opacity: 1; color: #fff; }
+.gn-narration-moment:hover .gn-narration-dot   { transform: scale(1.18); }
+.gn-narration-moment:focus-visible { outline: none; }
+.gn-narration-moment:focus-visible .gn-narration-dot {
+    box-shadow: 0 0 0 2px rgba(255,255,255,.45);
+}
+
+/* Phase-tinted ticks/dots. */
+.gn-narration-moment--ramp     .gn-narration-tick { background: #fc6; }
+.gn-narration-moment--ramp     .gn-narration-dot  { background: rgba(255,200,80,.35); border-color: #fc6; }
+.gn-narration-moment--peak     .gn-narration-tick { background: #f88; }
+.gn-narration-moment--peak     .gn-narration-dot  { background: rgba(255,90,90,.45);  border-color: #f88; }
+.gn-narration-moment--recovery .gn-narration-tick { background: #6cf; }
+.gn-narration-moment--recovery .gn-narration-dot  { background: rgba(120,200,255,.4); border-color: #6cf; }
+
+/* Active moment — brighter dot + label, soft halo. */
+.gn-narration-moment.is-active .gn-narration-label { opacity: 1; color: #fff; font-weight: 600; }
+.gn-narration-moment.is-active .gn-narration-dot {
+    transform: scale(1.32);
+    box-shadow: 0 0 12px 2px rgba(255,200,120,.45);
+}
+.gn-narration-moment--peak.is-active .gn-narration-dot     { box-shadow: 0 0 12px 2px rgba(255,90,90,.55); }
+.gn-narration-moment--recovery.is-active .gn-narration-dot { box-shadow: 0 0 12px 2px rgba(120,200,255,.45); }
+
+.gn-narration-caption { padding: 14px 4px 4px; min-height: 60px; }
+.gn-narration-clock {
+    font-size: .68rem;
+    color: #8ab;
+    font-family: ui-monospace, monospace;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+.gn-narration-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #fff;
+    margin-top: 2px;
+}
+.gn-narration-body {
+    font-size: .82rem;
+    line-height: 1.45;
+    color: #bcd;
+    margin-top: 4px;
+    max-width: 64ch;
+}
+</style>
+</head>
+<body>
+
+<!-- ── Nav (shared via nav.js) ───────────────────────────── -->
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("gannon-superstorm");</script>
+
+<div id="gn-app">
+
+  <!-- ── Hero ───────────────────────────────────────── -->
+  <section id="gn-hero" class="gn-panel">
+    <div id="gn-hero-row">
+      <h1>May 2024 Gannon Superstorm — MHD-corrected density hindcast</h1>
+      <span class="gn-badge">G5 · Dst −412</span>
+      <span id="gn-source-pill" class="gn-pill gn-pill--placeholder">⚠ PLACEHOLDER DATA</span>
+    </div>
+    <p>
+      A 72-hour replay (10 May 12:00 UTC → 13 May 12:00 UTC) of the first G5
+      storm since 2003. Empirical density models drove the thermosphere from
+      a 3-hour Ap index that pegged at its 400 ceiling for ~24 h on May 11 —
+      they could not see the storm climbing past the cap. This hindcast
+      replaces saturated Ap with two surrogates: one from a BATS-R-US replay
+      of the L1 IMF, one reconstructed from ground magnetometers. Both
+      surrogates are validated against GRACE-FO and Swarm-C accelerometer
+      truth.
+    </p>
+  </section>
+
+  <!-- ── Left: drivers & scrubber ───────────────────── -->
+  <aside id="gn-left">
+
+    <section class="gn-panel">
+      <h2>Time scrubber</h2>
+      <input id="gn-scrubber" type="range" min="0" max="72" step="0.25" value="0">
+      <div class="gn-scrubber-row">
+        <span id="gn-time" class="gn-time">2024-05-10T12:00:00Z</span>
+        <span id="gn-phase" class="gn-phase gn-phase--ramp">ramp</span>
+      </div>
+      <div class="gn-controls" style="display:flex; gap:8px; margin-top:10px;">
+        <button data-seek-h="0">SSC</button>
+        <button data-seek-h="14">peak</button>
+        <button data-seek-h="36">+24 h</button>
+        <button data-seek-h="60">+48 h</button>
+        <button id="gn-play">▶ play 60×</button>
+      </div>
+    </section>
+
+    <section class="gn-panel" style="margin-top:14px;">
+      <h2>Drivers at cursor</h2>
+      <div class="gn-kpi-grid">
+        <div class="gn-kpi"><div class="gn-kpi-label">Ap (real)</div>
+          <div class="gn-kpi-value" id="gn-kpi-ap-real">—</div>
+          <div class="gn-kpi-sub">GFZ definitive · capped 400</div></div>
+        <div class="gn-kpi"><div class="gn-kpi-label">Ap*  (MHD)</div>
+          <div class="gn-kpi-value" id="gn-kpi-ap-mhd">—</div>
+          <div class="gn-kpi-sub">from Φ<sub>PC</sub> + HPI</div></div>
+        <div class="gn-kpi"><div class="gn-kpi-label">Ap*  (mag)</div>
+          <div class="gn-kpi-value" id="gn-kpi-ap-gnd">—</div>
+          <div class="gn-kpi-sub">from SME + Joule proxy</div></div>
+        <div class="gn-kpi"><div class="gn-kpi-label">Bz (GSM)</div>
+          <div class="gn-kpi-value" id="gn-kpi-bz">—</div>
+          <div class="gn-kpi-sub">OMNI 1-min</div></div>
+        <div class="gn-kpi"><div class="gn-kpi-label">V<sub>SW</sub></div>
+          <div class="gn-kpi-value" id="gn-kpi-vsw">—</div>
+          <div class="gn-kpi-sub">km/s</div></div>
+        <div class="gn-kpi"><div class="gn-kpi-label">Φ<sub>PC</sub></div>
+          <div class="gn-kpi-value" id="gn-kpi-phi">—</div>
+          <div class="gn-kpi-sub">kV · BATS-R-US</div></div>
+      </div>
+    </section>
+
+  </aside>
+
+  <!-- ── Center: charts ─────────────────────────────── -->
+  <main id="gn-center">
+
+    <section class="gn-panel">
+      <h2>Storm narrative</h2>
+      <div id="gn-narration" class="gn-pulse">Storm timeline renders here</div>
+    </section>
+
+    <section class="gn-panel" style="margin-top:14px;">
+      <h2>Ap saturation — three tracks overlaid</h2>
+      <div id="gn-chart-ap" class="gn-chart gn-pulse">Ap timeseries renders here</div>
+      <div class="gn-legend">
+        <div class="gn-legend-row"><span class="gn-legend-swatch gn-swatch--real"></span> Ap (real, GFZ, capped)</div>
+        <div class="gn-legend-row"><span class="gn-legend-swatch gn-swatch--mhd"></span>  Ap* MHD (Φ<sub>PC</sub>+HPI)</div>
+        <div class="gn-legend-row"><span class="gn-legend-swatch gn-swatch--gnd"></span>  Ap* ground-mag</div>
+      </div>
+    </section>
+
+    <section class="gn-panel" style="margin-top:14px;">
+      <h2>Thermospheric density @ 400 km — model vs. truth</h2>
+      <div id="gn-chart-rho" class="gn-chart gn-pulse">ρ(400 km) trace + GRACE-FO / Swarm-C scatter renders here</div>
+      <div class="gn-legend">
+        <div class="gn-legend-row"><span class="gn-legend-swatch gn-swatch--real"></span> MSIS + Ap-real (baseline)</div>
+        <div class="gn-legend-row"><span class="gn-legend-swatch gn-swatch--mhd"></span>  MSIS + Ap* MHD</div>
+        <div class="gn-legend-row"><span class="gn-legend-swatch gn-swatch--gnd"></span>  MSIS + Ap* mag</div>
+        <div class="gn-legend-row"><span class="gn-legend-swatch gn-swatch--truth"></span> GRACE-FO / Swarm-C truth</div>
+      </div>
+    </section>
+
+    <section class="gn-panel" style="margin-top:14px;">
+      <h2>Residuals — truth minus model, per observation</h2>
+      <div id="gn-chart-residuals" class="gn-chart gn-pulse">Residual scatter renders here</div>
+      <div class="gn-legend">
+        <div class="gn-legend-row"><span class="gn-legend-swatch gn-swatch--real"></span> Δρ vs MSIS+Ap-real</div>
+        <div class="gn-legend-row"><span class="gn-legend-swatch gn-swatch--mhd"></span>  Δρ vs MSIS+Ap* MHD</div>
+        <div class="gn-legend-row"><span class="gn-legend-swatch gn-swatch--gnd"></span>  Δρ vs MSIS+Ap* mag</div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ── Right: skill + methodology + fleet ──────────── -->
+  <aside id="gn-right">
+
+    <section class="gn-panel">
+      <h2>Skill vs. MSIS baseline</h2>
+      <div class="gn-kpi-grid">
+        <div class="gn-kpi"><div class="gn-kpi-label">RMSE base</div>
+          <div class="gn-kpi-value" id="gn-skill-base">—</div>
+          <div class="gn-kpi-sub">MSIS + saturated Ap</div></div>
+        <div class="gn-kpi"><div class="gn-kpi-label">RMSE MHD</div>
+          <div class="gn-kpi-value" id="gn-skill-mhd">—</div>
+          <div class="gn-kpi-sub" id="gn-skill-mhd-pct">skill —</div></div>
+        <div class="gn-kpi"><div class="gn-kpi-label">RMSE mag</div>
+          <div class="gn-kpi-value" id="gn-skill-gnd">—</div>
+          <div class="gn-kpi-sub" id="gn-skill-gnd-pct">skill —</div></div>
+        <div class="gn-kpi"><div class="gn-kpi-label">Gate</div>
+          <div class="gn-kpi-value" id="gn-skill-gate">PENDING</div>
+          <div class="gn-kpi-sub">≥ 25 % storm-time</div></div>
+      </div>
+    </section>
+
+    <section class="gn-panel" style="margin-top:14px;">
+      <h2>Per-spacecraft — your NORAD list</h2>
+      <p style="font-size:.76rem; color:#8ab; margin-bottom:8px;">
+        Counterfactual perigee-altitude bands across the 72 h replay.
+        Phase-3 deliverable — wires into <code>drag_forecast.py</code>.
+      </p>
+      <input type="text" id="gn-norad-input" placeholder="44713, 53247, ..."
+        style="width:100%; padding:8px 10px; border-radius:6px;
+               background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.14);
+               color:#fff; font-family: ui-monospace, monospace; font-size:.82rem;">
+      <div id="gn-fleet-result" class="gn-chart" style="margin-top:10px;">
+        Add NORAD IDs to see per-orbit drag — coming with Phase 3.
+      </div>
+    </section>
+
+    <section id="gn-methodology" class="gn-panel" style="margin-top:14px;">
+      <h2>Methodology</h2>
+      <p>
+        L1 IMF (OMNI HRO 1-min) is replayed into BATS-R-US under SWMF
+        to yield Φ<sub>PC</sub> and HPI at 5-minute cadence. Φ<sub>PC</sub>
+        and HPI drive an OLS regression against the GFZ historical Ap
+        to produce a non-saturating <em>pseudo-Ap</em> series; a parallel
+        regression is fit from ground-magnetometer SME and a
+        Newell-Gjerloev-style Joule-heating proxy. NRLMSISE-00 is then
+        evaluated at 400 km under each Ap track. Validation uses
+        TU Delft GRACE-FO v02 and ESA Swarm-C accelerometer-derived
+        density.
+      </p>
+      <p>
+        Full reproducibility steps in
+        <a href="/MHD_DENSITY_PHASE0_GANNON_RUNBOOK.md" target="_blank">the Gannon runbook</a>
+        and design rationale in
+        <a href="/GANNON_SIMULATION_DESIGN.md" target="_blank">the simulation design doc</a>.
+      </p>
+      <p>
+        Sources: NOAA SWPC · NASA SPDF (OMNI/DSCOVR) · GFZ Potsdam ·
+        TU Delft Thermosphere · ESA Swarm · SuperMAG · INTERMAGNET.
+      </p>
+    </section>
+
+  </aside>
+
+</div>
+
+<!-- ── Engine bootstrap ───────────────────────────────── -->
+<script type="module">
+import { loadReplay, createPlayer, skillSummary } from './js/gannon-superstorm-engine.js?v=1';
+import { createApSaturationChart, createDensityChart, createResidualsChart } from './js/gannon-superstorm-charts.js?v=3';
+import { createNarrationBand } from './js/gannon-superstorm-narration.js?v=1';
+
+const els = {
+    scrub:    document.getElementById('gn-scrubber'),
+    time:     document.getElementById('gn-time'),
+    phase:    document.getElementById('gn-phase'),
+    play:     document.getElementById('gn-play'),
+    pill:     document.getElementById('gn-source-pill'),
+    apReal:   document.getElementById('gn-kpi-ap-real'),
+    apMhd:    document.getElementById('gn-kpi-ap-mhd'),
+    apGnd:    document.getElementById('gn-kpi-ap-gnd'),
+    bz:       document.getElementById('gn-kpi-bz'),
+    vsw:      document.getElementById('gn-kpi-vsw'),
+    phi:      document.getElementById('gn-kpi-phi'),
+    skill: {
+        base: document.getElementById('gn-skill-base'),
+        mhd:  document.getElementById('gn-skill-mhd'),
+        gnd:  document.getElementById('gn-skill-gnd'),
+        gate: document.getElementById('gn-skill-gate'),
+        mhdPct: document.getElementById('gn-skill-mhd-pct'),
+        gndPct: document.getElementById('gn-skill-gnd-pct'),
+    },
+};
+
+function fmt(x, d = 1) { return (x === null || x === undefined) ? '—' : Number(x).toFixed(d); }
+
+function paint(sample) {
+    els.time.textContent = sample.t;
+    els.phase.textContent = sample.phase;
+    els.phase.className = `gn-phase gn-phase--${sample.phase}`;
+    els.apReal.textContent = fmt(sample.drivers.ap_real, 0);
+    els.apMhd.textContent  = fmt(sample.drivers.ap_mhd,  0);
+    els.apGnd.textContent  = fmt(sample.drivers.ap_gnd,  0);
+    els.bz.textContent     = fmt(sample.drivers.bz_nt,   1) + ' nT';
+    els.vsw.textContent    = fmt(sample.drivers.v_kms,   0) + ' km/s';
+    els.phi.textContent    = fmt(sample.drivers.phi_pc_kv, 0) + ' kV';
+}
+
+(async function boot() {
+    let replay, player;
+    try {
+        replay = await loadReplay();
+        player = createPlayer(replay);
+    } catch (e) {
+        console.error('gannon: replay load failed', e);
+        els.pill.textContent = '⚠ replay load failed';
+        return;
+    }
+
+    // Reflect placeholder/validated state.
+    if (replay._is_placeholder) {
+        els.pill.textContent = '⚠ PLACEHOLDER DATA';
+        els.pill.classList.add('gn-pill--placeholder');
+    } else {
+        els.pill.textContent = '✓ VALIDATED HINDCAST';
+        els.pill.classList.remove('gn-pill--placeholder');
+        els.pill.classList.add('gn-pill--validated');
+    }
+
+    const skill = skillSummary(replay);
+    els.skill.base.textContent = fmt(skill.rmse_base, 2);
+    els.skill.mhd.textContent  = fmt(skill.rmse_mhd,  2);
+    els.skill.gnd.textContent  = fmt(skill.rmse_gnd,  2);
+    if (skill.skill_mhd !== null && skill.skill_mhd !== undefined) {
+        els.skill.mhdPct.textContent = `skill ${(skill.skill_mhd*100).toFixed(0)} %`;
+        els.skill.gndPct.textContent = `skill ${(skill.skill_gnd*100).toFixed(0)} %`;
+        const best = Math.max(skill.skill_mhd, skill.skill_gnd);
+        els.skill.gate.textContent = best >= 0.25 ? 'PASS' : 'FAIL';
+    }
+
+    // Wire scrubber + buttons.
+    els.scrub.min = 0;
+    els.scrub.max = player.durationHours;
+    els.scrub.step = 0.25;
+
+    // Render the Ap-saturation + density charts. Click-to-seek on either
+    // wires back to the scrubber so users can jump to a moment they
+    // hover over on either panel.
+    const sharedOpts = {
+        placeholder: !!replay._is_placeholder,
+        onClickSeekHours(h) {
+            els.scrub.value = h;
+            onScrub();
+        },
+    };
+    const apChart = createApSaturationChart(
+        document.getElementById('gn-chart-ap'),
+        replay, player, sharedOpts,
+    );
+    const rhoChart = createDensityChart(
+        document.getElementById('gn-chart-rho'),
+        replay, player, sharedOpts,
+    );
+    const resChart = createResidualsChart(
+        document.getElementById('gn-chart-residuals'),
+        replay, player, sharedOpts,
+    );
+    const narration = createNarrationBand(
+        document.getElementById('gn-narration'),
+        replay,
+        {
+            onSeekHours(h) {
+                els.scrub.value = h;
+                onScrub();
+            },
+        },
+    );
+
+    function onScrub() {
+        const h = parseFloat(els.scrub.value);
+        const s = player.seekHours(h);
+        paint(s);
+        apChart.setCursor(h);
+        rhoChart.setCursor(h);
+        resChart.setCursor(h);
+        narration.setCursor(h);
+    }
+    els.scrub.addEventListener('input', onScrub);
+    document.querySelectorAll('[data-seek-h]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            els.scrub.value = btn.dataset.seekH;
+            onScrub();
+        });
+    });
+
+    let playing = false, raf = null, lastT = 0;
+    function tick(now) {
+        if (!playing) return;
+        if (!lastT) lastT = now;
+        const dt = (now - lastT) / 1000;
+        lastT = now;
+        const h = Math.min(player.durationHours, player.cursorHours + dt * 60 / 60 * 60); // 60× wall clock
+        els.scrub.value = h;
+        onScrub();
+        if (h >= player.durationHours) { playing = false; els.play.textContent = '▶ play 60×'; return; }
+        raf = requestAnimationFrame(tick);
+    }
+    els.play.addEventListener('click', () => {
+        playing = !playing;
+        els.play.textContent = playing ? '⏸ pause' : '▶ play 60×';
+        if (playing) { lastT = 0; raf = requestAnimationFrame(tick); }
+        else if (raf) cancelAnimationFrame(raf);
+    });
+
+    paint(player.sample());
+})();
+</script>
+
+</body>
+</html>
