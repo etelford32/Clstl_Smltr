@@ -158,6 +158,105 @@ body {
 /* ── Empty-state pulse ──────────────────────────────────── */
 @keyframes pulse { 0%,100% { opacity:.6; } 50% { opacity:1; } }
 .gn-pulse { animation: pulse 1.8s ease-in-out infinite; }
+
+/* ── Narration band ─────────────────────────────────────── */
+.gn-narration { position: relative; padding: 8px 0 0; min-height: 110px; }
+.gn-narration-track {
+    position: relative;
+    height: 30px;
+    border-top: 1px solid rgba(255,255,255,.18);
+    margin-top: 22px;   /* room for labels above the rule */
+}
+.gn-narration-moment {
+    position: absolute;
+    top: -22px;
+    transform: translateX(-50%);
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    color: inherit;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    font: inherit;
+    width: max-content;
+    max-width: 14ch;
+    text-align: center;
+}
+.gn-narration-label {
+    font-size: .66rem;
+    color: #bcd;
+    font-family: ui-monospace, monospace;
+    letter-spacing: .04em;
+    opacity: .75;
+    transition: color .12s ease, opacity .12s ease;
+    white-space: nowrap;
+}
+.gn-narration-tick {
+    display: block;
+    width: 1px;
+    height: 8px;
+    background: rgba(255,255,255,.35);
+    margin-top: 2px;
+}
+.gn-narration-dot {
+    display: block;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: rgba(255,255,255,.18);
+    border: 1px solid rgba(255,255,255,.35);
+    margin-top: 4px;
+    transition: background .12s ease, transform .12s ease, box-shadow .12s ease;
+}
+.gn-narration-moment:hover .gn-narration-label { opacity: 1; color: #fff; }
+.gn-narration-moment:hover .gn-narration-dot   { transform: scale(1.18); }
+.gn-narration-moment:focus-visible { outline: none; }
+.gn-narration-moment:focus-visible .gn-narration-dot {
+    box-shadow: 0 0 0 2px rgba(255,255,255,.45);
+}
+
+/* Phase-tinted ticks/dots. */
+.gn-narration-moment--ramp     .gn-narration-tick { background: #fc6; }
+.gn-narration-moment--ramp     .gn-narration-dot  { background: rgba(255,200,80,.35); border-color: #fc6; }
+.gn-narration-moment--peak     .gn-narration-tick { background: #f88; }
+.gn-narration-moment--peak     .gn-narration-dot  { background: rgba(255,90,90,.45);  border-color: #f88; }
+.gn-narration-moment--recovery .gn-narration-tick { background: #6cf; }
+.gn-narration-moment--recovery .gn-narration-dot  { background: rgba(120,200,255,.4); border-color: #6cf; }
+
+/* Active moment — brighter dot + label, soft halo. */
+.gn-narration-moment.is-active .gn-narration-label { opacity: 1; color: #fff; font-weight: 600; }
+.gn-narration-moment.is-active .gn-narration-dot {
+    transform: scale(1.32);
+    box-shadow: 0 0 12px 2px rgba(255,200,120,.45);
+}
+.gn-narration-moment--peak.is-active .gn-narration-dot     { box-shadow: 0 0 12px 2px rgba(255,90,90,.55); }
+.gn-narration-moment--recovery.is-active .gn-narration-dot { box-shadow: 0 0 12px 2px rgba(120,200,255,.45); }
+
+.gn-narration-caption { padding: 14px 4px 4px; min-height: 60px; }
+.gn-narration-clock {
+    font-size: .68rem;
+    color: #8ab;
+    font-family: ui-monospace, monospace;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+.gn-narration-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #fff;
+    margin-top: 2px;
+}
+.gn-narration-body {
+    font-size: .82rem;
+    line-height: 1.45;
+    color: #bcd;
+    margin-top: 4px;
+    max-width: 64ch;
+}
 </style>
 </head>
 <body>
@@ -236,6 +335,11 @@ body {
   <main id="gn-center">
 
     <section class="gn-panel">
+      <h2>Storm narrative</h2>
+      <div id="gn-narration" class="gn-pulse">Storm timeline renders here</div>
+    </section>
+
+    <section class="gn-panel" style="margin-top:14px;">
       <h2>Ap saturation — three tracks overlaid</h2>
       <div id="gn-chart-ap" class="gn-chart gn-pulse">Ap timeseries renders here</div>
       <div class="gn-legend">
@@ -337,6 +441,7 @@ body {
 <script type="module">
 import { loadReplay, createPlayer, skillSummary } from './js/gannon-superstorm-engine.js?v=1';
 import { createApSaturationChart, createDensityChart, createResidualsChart } from './js/gannon-superstorm-charts.js?v=3';
+import { createNarrationBand } from './js/gannon-superstorm-narration.js?v=1';
 
 const els = {
     scrub:    document.getElementById('gn-scrubber'),
@@ -433,6 +538,16 @@ function paint(sample) {
         document.getElementById('gn-chart-residuals'),
         replay, player, sharedOpts,
     );
+    const narration = createNarrationBand(
+        document.getElementById('gn-narration'),
+        replay,
+        {
+            onSeekHours(h) {
+                els.scrub.value = h;
+                onScrub();
+            },
+        },
+    );
 
     function onScrub() {
         const h = parseFloat(els.scrub.value);
@@ -441,6 +556,7 @@ function paint(sample) {
         apChart.setCursor(h);
         rhoChart.setCursor(h);
         resChart.setCursor(h);
+        narration.setCursor(h);
     }
     els.scrub.addEventListener('input', onScrub);
     document.querySelectorAll('[data-seek-h]').forEach(btn => {
