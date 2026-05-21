@@ -1,5 +1,11 @@
+# syntax=docker/dockerfile:1.7
 # ─────────────────────────────────────────────────────────────────────────────
 # SWMF / BATS-R-US containerization — Phase 0 + Phase 1
+#
+# The `# syntax` directive above MUST be the first non-blank line in this
+# file — it enables BuildKit features (heredoc COPY <<EOF, --mount=type=cache,
+# etc.) that this Dockerfile relies on. Removing it will silently break the
+# build on classic-builder hosts (DOCKER_BUILDKIT=0).
 #
 # Components built into SWMF.exe:
 #   SC — Solar Corona              (1 → 24 R☉)
@@ -60,9 +66,21 @@ RUN update-alternatives --install /usr/bin/gfortran gfortran /usr/bin/gfortran-1
 #   IE — Ionosphere Electrodynamics (Ridley_serial; needed for Φ_PC + HPI
 #                                    timeseries that pseudo-Ap regresses on)
 # Force HTTPS for all github.com submodules (SWMFsoftware .gitmodules uses SSH URLs)
+#
+# Drop --depth=1: Config.pl reads git metadata to stamp version strings
+# and the shallow clone has bitten us with "fatal: bad revision HEAD" in
+# share/Library hooks. Full clone adds ~150 MB but is paid once at build.
+#
+# Submodule init now includes `util/` — it carries DATAREAD, EMPIRICAL,
+# TIMING, NOMPI, CRASH_data which BATS-R-US links against. Omitting it
+# causes `make SWMF` to die with missing `.a` files ~5 min into the build.
+#
+# Pin a SWMF release tag below (TODO: replace v2.30 with whatever tag you
+# validate against). Tracking master is unstable for an ops pipeline.
+ARG SWMF_REF=master
 WORKDIR /opt
 RUN git config --global url."https://github.com/".insteadOf "git@github.com:" \
- && git clone --depth=1 https://github.com/SWMFsoftware/SWMF.git swmf \
+ && git clone --branch ${SWMF_REF} https://github.com/SWMFsoftware/SWMF.git swmf \
  && cd swmf \
  && git submodule update --init --recursive \
         BATL \
@@ -70,7 +88,8 @@ RUN git config --global url."https://github.com/".insteadOf "git@github.com:" \
         IH/BATSRUS \
         GM/BATSRUS \
         IE/Ridley_serial \
-        share
+        share \
+        util
 
 WORKDIR /opt/swmf
 
@@ -81,9 +100,16 @@ RUN perl Config.pl -install -compiler=gfortran -mpi=openmpi \
 
 # Configure all four components for the coupled hindcast run.
 # SC: 1–24 R☉   |  IH: 24 R☉ → 2 AU  |  GM: Earth magnetosphere  |  IE: Ridley
-# If submodule paths drift in a future SWMF release, run `git submodule status`
-# in /opt/swmf and update the COPY lines in stage 2 plus the -GM/-IE arg here.
-RUN perl Config.pl -v -SC -IH -GM/BATSRUS -IE/Ridley_serial
+#
+# Component-version selection uses the documented `-v=COMPONENT/VERSION,...`
+# syntax. The old `-COMPONENT/VERSION` bare form is silently ignored by
+# recent Config.pl, which previously caused a configure-time no-op and a
+# downstream `make SWMF` link failure that looked like a missing source
+# bug. If submodule paths drift in a future SWMF release, run
+# `git submodule status` in /opt/swmf and update the COPY lines in stage 2
+# plus the -v= arg here.
+RUN perl Config.pl -v=SC/BATSRUS,IH/BATSRUS,GM/BATSRUS,IE/Ridley_serial \
+ && perl Config.pl -show
 
 # Compile — use all available cores; coupled SWMF build typically takes
 # 30-50 min on a 4-core machine (vs. 20-30 for SC+IH alone).
@@ -146,23 +172,18 @@ COPY --from=builder /opt/swmf/SWMF.exe      /opt/swmf/SWMF.exe
 # Copy SWMF Scripts and utilities
 COPY --from=builder /opt/swmf/share/Scripts /opt/swmf/share/Scripts
 
-# Install Python pipeline dependencies
+# Install Python pipeline dependencies.
+#
+# --only-binary=:all: forces pip to use wheels — if a wheel is missing
+# (common for spacepy on aarch64 before ~0.6), pip fails in seconds rather
+# than spending 30 min compiling from source against build tools we stripped
+# out of this runtime stage. The previous "two pip install blocks" pattern
+# is gone: everything is pinned in requirements.txt so the resolver sees
+# one consistent graph.
 WORKDIR /app
 COPY pipeline/requirements.txt ./pipeline/requirements.txt
-RUN pip3 install --no-cache-dir -r pipeline/requirements.txt
-
-# Install swmfpy (University of Michigan SWMF Python tools)
-RUN pip3 install --no-cache-dir \
-    swmfpy \
-    spacepy \
-    astropy \
-    "fastapi[standard]" \
-    uvicorn \
-    httpx \
-    schedule \
-    pandas \
-    numpy \
-    scipy
+RUN pip3 install --no-cache-dir --only-binary=:all: \
+        -r pipeline/requirements.txt
 
 # Copy pipeline, config, benchmark
 COPY pipeline/ ./pipeline/
@@ -179,8 +200,14 @@ nodaemon=true
 user=root
 logfile=/data/logs/supervisord.log
 
+# ingest / forecast invoke via `python -m pipeline.MODULE` so the
+# `pipeline` package is importable. Running `python /app/pipeline/X.py`
+# instead puts sys.path[0] at /app/pipeline (not /app), which breaks
+# the `from pipeline import db` imports at module load.
 [program:ingest]
-command=python3 /app/pipeline/ingest_l1.py --daemon
+command=python3 -m pipeline.ingest_l1 --daemon
+directory=/app
+environment=PYTHONPATH="/app"
 stdout_logfile=/data/logs/ingest.log
 stderr_logfile=/data/logs/ingest_err.log
 autorestart=true
@@ -189,13 +216,16 @@ startretries=10
 [program:api]
 command=python3 -m uvicorn pipeline.serve_results:app --host 0.0.0.0 --port 8000
 directory=/app
+environment=PYTHONPATH="/app"
 stdout_logfile=/data/logs/api.log
 stderr_logfile=/data/logs/api_err.log
 autorestart=true
 startretries=5
 
 [program:forecast]
-command=python3 /app/pipeline/run_forecast.py --daemon
+command=python3 -m pipeline.run_forecast --daemon
+directory=/app
+environment=PYTHONPATH="/app"
 stdout_logfile=/data/logs/forecast.log
 stderr_logfile=/data/logs/forecast_err.log
 autorestart=true
