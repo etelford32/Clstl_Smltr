@@ -10,10 +10,7 @@
  * Exports:
  *   createApSaturationChart(container, replay, player, opts) → { setCursor }
  *   createDensityChart      (container, replay, player, opts) → { setCursor }
- *
- * The next chart in the series (residual histogram) will reuse the
- * same `_buildPlotFrame` + cursor + hover system; only the trace
- * rendering changes.
+ *   createResidualsChart    (container, replay, player, opts) → { setCursor }
  */
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -595,6 +592,204 @@ export function createDensityChart(container, replay, _player, opts = {}) {
             yScale(dens.msis_apgnd[idx]),
         ]);
     }
+    setCursor(0);
+    return { setCursor };
+}
+
+// ── Chart 3: per-observation residuals ─────────────────────────────
+//
+// At each truth observation (GRACE-FO ∪ Swarm-C), compute three
+// residuals (truth − model) — one per model track — and scatter them
+// against time, with thin connecting lines so the eye can follow each
+// model. The y-axis is symmetric around zero with a bold `model = truth`
+// reference line. Saturated-Ap baseline residuals climb above zero
+// during PEAK; surrogate residuals stay near zero. That divergence
+// is the page's quantitative argument and what the prose claim
+// "MHD-corrected density beats MSIS at storm peak" rests on.
+//
+// Note: we deliberately do NOT show interpolated cursor dots here —
+// residuals only exist at the sparse truth times, so following the
+// scrubber continuously with dots would imply between-observation
+// knowledge we don't have. The cursor line still moves; the hover
+// snaps to the nearest truth obs.
+
+export function createResidualsChart(container, replay, _player, opts = {}) {
+    const frame = _buildPlotFrame(container, replay, {
+        ...opts,
+        ariaLabel:
+            "Per-observation residuals (truth minus model) for the three " +
+            "model tracks at every GRACE-FO and Swarm-C accelerometer-derived " +
+            "density observation in the 72-hour Gannon window. Y-axis " +
+            "is symmetric around zero; positive residuals mean the model " +
+            "underestimated.",
+    });
+    const dens  = replay.density_400km;
+    const truth = replay.truth_400km || { grace_fo: [], swarm_c: [] };
+    const { traceLayer, root, xScale, plotH, stepMin } = frame;
+
+    // Combine truth into one time-sorted list, preserving the source
+    // label for the tooltip.
+    const obs = [
+        ...(truth.grace_fo || []).map(p => ({ h: p.h, rho: p.rho, src: "GRACE-FO" })),
+        ...(truth.swarm_c  || []).map(p => ({ h: p.h, rho: p.rho, src: "Swarm-C"  })),
+    ].sort((a, b) => a.h - b.h);
+
+    // Degenerate case: no truth yet (real-data day 1 before either feed
+    // is populated). Render a stub and bail — the page should still
+    // load and the cursor binding shouldn't throw.
+    if (obs.length === 0) {
+        traceLayer.appendChild(svg("text", {
+            x: PLOT_W / 2, y: MARGIN.top + plotH / 2,
+            "text-anchor": "middle",
+            fill: COLORS.textSubtle,
+            "font-size": 11,
+            "font-family": "ui-monospace, monospace",
+        }, ["No truth observations in this bundle — load GRACE-FO / Swarm-C density to populate."]));
+        return { setCursor() { /* no-op */ } };
+    }
+
+    // Sample each model trace at each observation's time via linear
+    // interp over the bundle's step_minutes cadence.
+    function modelAt(arr, h) {
+        const stepH = stepMin / 60;
+        const f = h / stepH;
+        const lo = Math.max(0, Math.min(arr.length - 1, Math.floor(f)));
+        const hi = Math.max(0, Math.min(arr.length - 1, lo + 1));
+        if (lo === hi) return arr[lo];
+        const t = f - lo;
+        return arr[lo] * (1 - t) + arr[hi] * t;
+    }
+
+    const residuals = obs.map(p => ({
+        h:    p.h,
+        src:  p.src,
+        real: p.rho - modelAt(dens.msis_apreal, p.h),
+        mhd:  p.rho - modelAt(dens.msis_apmhd,  p.h),
+        gnd:  p.rho - modelAt(dens.msis_apgnd,  p.h),
+    }));
+
+    // Y axis: symmetric around zero, in display units of Δρ × 10¹².
+    const SCALE = 1e12;
+    const allRes = residuals.flatMap(r => [r.real, r.mhd, r.gnd]).map(x => x * SCALE);
+    const yAbs   = Math.max(1, ...allRes.map(Math.abs));
+    const yPlotMax = Math.ceil((yAbs + 5) / 10) * 10;
+    const yScale = res =>
+        MARGIN.top + (1 - (res * SCALE + yPlotMax) / (2 * yPlotMax)) * plotH;
+
+    // Symmetric tick ladder with the zero line emphasised.
+    {
+        const targetTicks = 7;
+        const raw = (2 * yPlotMax) / targetTicks;
+        const pow = 10 ** Math.floor(Math.log10(raw));
+        const nice = [1, 2, 5, 10].find(m => m * pow >= raw) * pow;
+        for (let v = -yPlotMax; v <= yPlotMax + 1e-9; v += nice) {
+            const isZero = Math.abs(v) < nice / 2;
+            // yScale takes a *raw* residual, but our tick values are in
+            // display units (×10¹²). Reconstruct pixel position directly.
+            const yPx = MARGIN.top + (1 - (v + yPlotMax) / (2 * yPlotMax)) * plotH;
+            root.appendChild(svg("line", {
+                x1: MARGIN.left, x2: PLOT_W - MARGIN.right,
+                y1: yPx, y2: yPx,
+                stroke: isZero ? COLORS.ceiling : COLORS.grid,
+                "stroke-dasharray": isZero ? "4 4" : null,
+                "stroke-width": isZero ? 1.4 : 1,
+                opacity: isZero ? 0.95 : 1,
+            }));
+            const label = isZero ? "0" : (v > 0 ? "+" + v : String(v));
+            root.appendChild(svg("text", {
+                x: MARGIN.left - 7, y: yPx + 3,
+                "text-anchor": "end",
+                fill: COLORS.text,
+                "font-size": 10,
+                "font-family": "ui-monospace, monospace",
+            }, [label]));
+        }
+        // Reference-line label for the zero crossing.
+        const zeroPx = MARGIN.top + (1 - yPlotMax / (2 * yPlotMax)) * plotH;
+        root.appendChild(svg("text", {
+            x: PLOT_W - MARGIN.right - 4, y: zeroPx - 4,
+            "text-anchor": "end",
+            fill: COLORS.ceiling,
+            "font-size": 10,
+            "font-family": "ui-monospace, monospace",
+            opacity: 0.9,
+        }, ["model = truth"]));
+    }
+    _yAxisLabel(root, "(truth − model) × 10¹²  (kg/m³)", plotH / 2);
+
+    // Connecting lines, low opacity — they're a visual aid, not a
+    // claim about between-observation behaviour.
+    function lineThrough(values) {
+        let d = "";
+        for (let i = 0; i < residuals.length; i++) {
+            const x = xScale(residuals[i].h).toFixed(2);
+            const y = yScale(values[i]).toFixed(2);
+            d += (i ? "L" : "M") + x + " " + y + " ";
+        }
+        return d;
+    }
+    traceLayer.appendChild(svg("path", {
+        d: lineThrough(residuals.map(r => r.real)),
+        stroke: COLORS.real, fill: "none", "stroke-width": 1.4, opacity: 0.35,
+    }));
+    traceLayer.appendChild(svg("path", {
+        d: lineThrough(residuals.map(r => r.mhd)),
+        stroke: COLORS.mhd, fill: "none", "stroke-width": 1.4, opacity: 0.35,
+    }));
+    traceLayer.appendChild(svg("path", {
+        d: lineThrough(residuals.map(r => r.gnd)),
+        stroke: COLORS.gnd, fill: "none", "stroke-width": 1.4, opacity: 0.35,
+    }));
+
+    // Dots — three per observation, slight X-offset so colocated points
+    // don't overlap. Order left-to-right matches the legend.
+    const DOT_DX = 2.5;
+    for (const r of residuals) {
+        const x = xScale(r.h);
+        traceLayer.appendChild(svg("circle", {
+            cx: x - DOT_DX, cy: yScale(r.real),
+            r: 3.4, fill: COLORS.real,
+            stroke: "rgba(0,0,0,0.55)", "stroke-width": 1,
+        }));
+        traceLayer.appendChild(svg("circle", {
+            cx: x,           cy: yScale(r.mhd),
+            r: 3.4, fill: COLORS.mhd,
+            stroke: "rgba(0,0,0,0.55)", "stroke-width": 1,
+        }));
+        traceLayer.appendChild(svg("circle", {
+            cx: x + DOT_DX,  cy: yScale(r.gnd),
+            r: 3.4, fill: COLORS.gnd,
+            stroke: "rgba(0,0,0,0.55)", "stroke-width": 1,
+        }));
+    }
+
+    // Hover: snap to the truth observation nearest the cursor's hour
+    // and report all three residuals + the source label.
+    function nearestObs(hours) {
+        let best = residuals[0], bestDist = Math.abs(residuals[0].h - hours);
+        for (const r of residuals) {
+            const d = Math.abs(r.h - hours);
+            if (d < bestDist) { best = r; bestDist = d; }
+        }
+        return best;
+    }
+    function fmtRes(rho) {
+        const v = rho * SCALE;
+        const s = (v >= 0 ? "+" : "") + v.toFixed(1);
+        return s.padStart(7);
+    }
+    frame.setHoverFormatter((_idx, hours) => {
+        const r = nearestObs(hours);
+        return [
+            { text: `${_fmtClock(frame.t0Ms, r.h)} UT  (${r.src})` },
+            { text: `Δρ real  ${fmtRes(r.real)}`, color: COLORS.real },
+            { text: `Δρ MHD   ${fmtRes(r.mhd)}`,  color: COLORS.mhd  },
+            { text: `Δρ mag   ${fmtRes(r.gnd)}`,  color: COLORS.gnd  },
+        ];
+    });
+
+    // Cursor: line only — no per-observation dots, intentionally.
+    function setCursor(hours) { frame.setCursor(hours, []); }
     setCursor(0);
     return { setCursor };
 }

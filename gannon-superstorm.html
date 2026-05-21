@@ -257,8 +257,13 @@ body {
     </section>
 
     <section class="gn-panel" style="margin-top:14px;">
-      <h2>Residuals by storm phase</h2>
-      <div id="gn-chart-residuals" class="gn-chart">Residual histogram (ramp / peak / recovery) — populated post-validate.</div>
+      <h2>Residuals — truth minus model, per observation</h2>
+      <div id="gn-chart-residuals" class="gn-chart gn-pulse">Residual scatter renders here</div>
+      <div class="gn-legend">
+        <div class="gn-legend-row"><span class="gn-legend-swatch gn-swatch--real"></span> Δρ vs MSIS+Ap-real</div>
+        <div class="gn-legend-row"><span class="gn-legend-swatch gn-swatch--mhd"></span>  Δρ vs MSIS+Ap* MHD</div>
+        <div class="gn-legend-row"><span class="gn-legend-swatch gn-swatch--gnd"></span>  Δρ vs MSIS+Ap* mag</div>
+      </div>
     </section>
 
   </main>
@@ -331,7 +336,7 @@ body {
 <!-- ── Engine bootstrap ───────────────────────────────── -->
 <script type="module">
 import { loadReplay, createPlayer, skillSummary } from './js/gannon-superstorm-engine.js?v=1';
-import { createApSaturationChart, createDensityChart } from './js/gannon-superstorm-charts.js?v=2';
+import { createApSaturationChart, createDensityChart, createResidualsChart } from './js/gannon-superstorm-charts.js?v=3';
 
 const els = {
     scrub:    document.getElementById('gn-scrubber'),
@@ -424,6 +429,10 @@ function paint(sample) {
         document.getElementById('gn-chart-rho'),
         replay, player, sharedOpts,
     );
+    const resChart = createResidualsChart(
+        document.getElementById('gn-chart-residuals'),
+        replay, player, sharedOpts,
+    );
 
     function onScrub() {
         const h = parseFloat(els.scrub.value);
@@ -431,6 +440,7 @@ function paint(sample) {
         paint(s);
         apChart.setCursor(h);
         rhoChart.setCursor(h);
+        resChart.setCursor(h);
     }
     els.scrub.addEventListener('input', onScrub);
     document.querySelectorAll('[data-seek-h]').forEach(btn => {
