@@ -108,13 +108,15 @@ of magnitude for Gannon peak forcing.
 **Day 1 done when:** all five fixture files present, non-empty, and
 `head`/`tail` rows pass eyeball checks.
 
-### Smoke-test status (re-confirmed 2026-05-20)
+### Smoke-test status (re-confirmed 2026-05-21)
 
 Day-1 smoke-tests were attempted from the remote-execution sandbox.
-All four external hosts the pipeline needs return **HTTP 403** from
-the sandbox's egress proxy (DNS resolves; the block is at the proxy
-layer, not the upstream). A control probe of `api.github.com` also
-returns 403 — uniform policy filter, not real upstream 4xx.
+All external hosts the pipeline needs return **HTTP 403** (or
+connection-timeout) from the sandbox's egress proxy (DNS resolves;
+the block is at the proxy layer, not the upstream). A control probe
+of `api.github.com` also returns 403 — uniform policy filter, not
+real upstream 4xx. Probe results from `node scripts/fetch-omni.mjs
+--probe` and `node scripts/fetch-grace.mjs --probe`:
 
 ```
 spdf.gsfc.nasa.gov          403   (OMNI 1-min IMF)
@@ -176,6 +178,45 @@ copy/format manually using their parse functions as a reference.
 
 The ground-mag fixture is independent of all of the above — see the
 import shim below.
+
+### Node fetchers (workstation drop-in path, JSON output)
+
+For the JS-side pipeline (the `gannon-superstorm.html` replay bundle),
+there are also two Node fetchers that mirror the Python ones above
+but support `--from-file` / `--local-dir` natively and write canonical
+JSON instead of SWMF/CSV. They live at:
+
+* `scripts/fetch-omni.mjs`   — OMNI 1-min IMF → `data/hindcast/inputs/imf_l1.json`
+* `scripts/fetch-grace.mjs`  — GRACE-FO v02   → `data/hindcast/inputs/grace_fo_density.json`
+
+Both ship with `--smoke-test` (embedded synthetic input, no network,
+no file writes), `--probe` (HEAD each upstream URL the window needs),
+and the `--from-file` / `--local-dir` drop-in modes for the
+workstation path. From inside this sandbox both probes return 403
+(re-confirmed 2026-05-21); from a workstation:
+
+```sh
+# OMNI — single monthly file covers the 72 h window
+curl -fSL --create-dirs -o raw/omni/omni_min202405.asc \
+  'https://spdf.gsfc.nasa.gov/pub/data/omni/high_res_omni/monthly_1min/omni_min202405.asc'
+node scripts/fetch-omni.mjs \
+  --start 2024-05-10 --end 2024-05-13 \
+  --from-file raw/omni/omni_min202405.asc
+
+# GRACE-FO — three daily files for 10/11/12 May
+for d in 10 11 12; do
+  curl -fSL --create-dirs \
+    -o raw/grace_fo/grcfo_density_2024_05_${d}.txt \
+    "http://thermosphere.tudelft.nl/acceldata/GraceFO/v02/density/2024/grcfo_density_2024_05_${d}.txt"
+done
+node scripts/fetch-grace.mjs \
+  --start 2024-05-10 --end 2024-05-13 \
+  --local-dir raw/grace_fo
+```
+
+Both write the canonical JSON at `data/hindcast/inputs/*.json` for
+the bundle builder (Day 2-3) to ingest. The Python peers keep writing
+their SWMF/CSV fixtures in parallel; the two pipelines coexist.
 
 ## Day 2 — replay + fit
 
