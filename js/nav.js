@@ -50,6 +50,7 @@ const NAV_DROPDOWNS = [
         id: 'space-weather',
         items: [
             { href: 'space-weather.html', label: 'Space Weather',  sub: 'Live solar & geomagnetic data',   tier: 'public', icon: '🌤️', id: 'weather' },
+            { href: 'gannon-superstorm.html', label: 'Gannon Superstorm', sub: 'May 2024 G5 hindcast · MHD-corrected density', tier: 'public', icon: '⚡', badge: 'NEW', id: 'gannon-superstorm' },
             { href: 'threejs.html',       label: 'Solar System',   sub: '31 moons · live Galilean N-body', tier: 'public', icon: '🪐', id: 'solar' },
             { href: 'sun.html',           label: 'The Sun',        sub: 'Real-time solar surface view',    tier: 'public', icon: '☀️' },
             { href: 'missions.html',      label: 'Space Missions', sub: 'Inner solar system fleet roster', tier: 'public', icon: '🛸', id: 'missions' },
