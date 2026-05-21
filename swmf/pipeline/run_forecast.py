@@ -113,8 +113,13 @@ def launch_batsrus(run_dir: Path, nproc: int = MPI_NPROC) -> subprocess.Popen:
     log_path = run_dir / "batsrus_stdout.log"
     err_path = run_dir / "batsrus_stderr.log"
 
+    # OpenMPI 4+ refuses to run as root unless --allow-run-as-root is set.
+    # The container runs as root by default; flip MPI_ALLOW_ROOT=0 if you
+    # add a non-root USER to the Dockerfile.
+    allow_root = os.environ.get("MPI_ALLOW_ROOT", "1") == "1"
     cmd = [
         "mpiexec",
+        *(["--allow-run-as-root"] if allow_root else []),
         "-n", str(nproc),
         "--bind-to", "core",
         str(BATSRUS_IH),
