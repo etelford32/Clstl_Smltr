@@ -804,6 +804,132 @@ export async function fetchExperimentAB(experiment, days = 30) {
     }
 }
 
+// ── Stats helpers (Wilson CI + two-proportion z-test) ───────────────────────
+// Kept client-side so we can iterate without re-deploying SQL. Wilson is the
+// standard recommended interval for binomial proportions — handles n=0 and
+// extreme rates (p near 0 or 1) gracefully where the normal approximation
+// falls apart. Exported so the dashboard JS can render bounds directly.
+
+/**
+ * Wilson score 95% confidence interval for a binomial proportion.
+ * Returns { lo, hi, point } as fractions in [0, 1]. n=0 returns nulls.
+ */
+export function wilsonCI95(conversions, exposures) {
+    const n = Number(exposures) || 0;
+    const c = Number(conversions) || 0;
+    if (n <= 0) return { lo: null, hi: null, point: null };
+    const p = c / n;
+    const z = 1.96;
+    const z2 = z * z;
+    const denom = 1 + z2 / n;
+    const center = (p + z2 / (2 * n)) / denom;
+    const margin = (z * Math.sqrt((p * (1 - p) + z2 / (4 * n)) / n)) / denom;
+    return {
+        point: p,
+        lo:    Math.max(0, center - margin),
+        hi:    Math.min(1, center + margin),
+    };
+}
+
+/**
+ * Two-proportion z-test (pooled). Returns { z, pTwoSided, significant }.
+ * Significance threshold is the operator-friendly p<0.05 (|z|>1.96).
+ */
+export function twoProportionZ(c1, n1, c2, n2) {
+    n1 = Number(n1) || 0; n2 = Number(n2) || 0;
+    c1 = Number(c1) || 0; c2 = Number(c2) || 0;
+    if (n1 === 0 || n2 === 0) return { z: null, pTwoSided: null, significant: false };
+    const p1 = c1 / n1, p2 = c2 / n2;
+    const pp = (c1 + c2) / (n1 + n2);
+    const se = Math.sqrt(pp * (1 - pp) * (1 / n1 + 1 / n2));
+    if (!(se > 0)) return { z: 0, pTwoSided: 1, significant: false };
+    const z = (p2 - p1) / se;
+    // Two-sided p-value via the standard-normal survival approximation.
+    // Abramowitz & Stegun 26.2.17 — accurate to ~7.5e-8 for any |z|.
+    const az = Math.abs(z);
+    const t = 1 / (1 + 0.2316419 * az);
+    const d = 0.3989422804014327 * Math.exp(-az * az / 2);
+    const tail = d * (((((1.330274429 * t - 1.821255978) * t) + 1.781477937) * t - 0.356563782) * t + 0.319381530) * t;
+    const pTwoSided = 2 * tail;
+    return { z, pTwoSided, significant: az > 1.96 };
+}
+
+/**
+ * Per-variant × per-goal exposures and conversions for an experiment.
+ * Reads analytics_events via telemetry_experiment_goals_summary RPC.
+ *
+ * Returns:
+ *   {
+ *     ok, data: {
+ *       experiment, days, goals, variants,
+ *       rows: [{ variant, goal, exposures, conversions }, ...],
+ *     }
+ *   }
+ *
+ * The client (or dashboard) renders Wilson CIs from the raw counts using
+ * wilsonCI95() and lift / significance using twoProportionZ() above.
+ */
+export async function fetchExperimentGoals(experiment, goals, days = 30) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    if (!experiment || !Array.isArray(goals) || goals.length === 0) {
+        return { ok: false, error: 'experiment + goals[] required' };
+    }
+    try {
+        const { data, error } = await client.rpc('telemetry_experiment_goals_summary', {
+            p_experiment: experiment,
+            p_goals:      goals,
+            p_days:       days,
+        });
+        if (error) throw error;
+        const rows = data || [];
+        const variants = Array.from(new Set(rows.map(r => r.variant))).sort();
+        return {
+            ok: true,
+            data: { experiment, days, goals, variants, rows },
+        };
+    } catch (err) {
+        const hint = /function .* does not exist|PGRST202/i.test(err.message || '')
+            ? 'telemetry_experiment_goals_summary RPC missing — run supabase-experiment-ab-v2-migration.sql'
+            : err.message;
+        return { ok: false, error: hint };
+    }
+}
+
+/**
+ * Per-variant Day-N retention curve. Day buckets are fixed server-side at
+ * {1, 3, 7, 14, 28}; only visitors with sufficient follow-up time are
+ * scored for a given bucket so retention isn't artificially low on the
+ * trailing edge of the window.
+ *
+ * Returns: { ok, data: { experiment, days, variants, rows: [{ variant, day_n, exposed, returned }] } }
+ */
+export async function fetchExperimentRetention(experiment, days = 60) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    if (!experiment) return { ok: false, error: 'experiment required' };
+    try {
+        const { data, error } = await client.rpc('telemetry_experiment_retention', {
+            p_experiment: experiment,
+            p_days:       days,
+        });
+        if (error) throw error;
+        const rows = data || [];
+        const variants = Array.from(new Set(rows.map(r => r.variant))).sort();
+        return {
+            ok: true,
+            data: { experiment, days, variants, rows },
+        };
+    } catch (err) {
+        const hint = /function .* does not exist|PGRST202/i.test(err.message || '')
+            ? 'telemetry_experiment_retention RPC missing — run supabase-experiment-ab-v2-migration.sql'
+            : err.message;
+        return { ok: false, error: hint };
+    }
+}
+
 /**
  * Activation overview KPIs for the last N days. Single round trip to
  * activation_events; aggregated client-side. Returns:
@@ -932,6 +1058,100 @@ export async function fetchActivationDaily(days = 30) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ── Retention depth: daily curve, stickiness, feature return rates ──────────
+// Backed by supabase-retention-depth-migration.sql. All three RPCs are
+// is_admin()-gated and read existing tables (no schema change).
+
+/**
+ * Day-N retention curve from the signup cohort. Day buckets fixed server-
+ * side at {1, 2, 3, 7, 14, 28}; only signups with enough follow-up time
+ * elapsed are scored for a given bucket. Cohort source is
+ * activation_events.event='signup'; return signal is any analytics_events
+ * row with the user's user_id in the day-N follow-up window.
+ *
+ * Returns: { ok, data: { cohortDays, rows: [{ day_n, exposed, returned }] } }
+ */
+export async function fetchDailyRetentionCurve(cohortDays = 60) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client.rpc('retention_daily_curve', {
+            p_cohort_days: cohortDays,
+        });
+        if (error) throw error;
+        return { ok: true, data: { cohortDays, rows: data || [] } };
+    } catch (err) {
+        const hint = /function .* does not exist|PGRST202/i.test(err.message || '')
+            ? 'retention_daily_curve RPC missing — run supabase-retention-depth-migration.sql'
+            : err.message;
+        return { ok: false, error: hint };
+    }
+}
+
+/**
+ * DAU / WAU / MAU stickiness for both signed-in users and anonymous
+ * visitors. Stickiness is DAU/MAU as a percentage — the standard SaaS
+ * read is <10% low, 10-20% healthy, >20% strong daily habit.
+ *
+ * Returns: { ok, data: { dau, wau, mau, anonDau, anonWau, anonMau, stickiness, anonStickiness } }
+ */
+export async function fetchStickiness() {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client.rpc('retention_stickiness');
+        if (error) throw error;
+        const r = (data && data[0]) || {};
+        return {
+            ok: true,
+            data: {
+                dau:            Number(r.dau) || 0,
+                wau:            Number(r.wau) || 0,
+                mau:            Number(r.mau) || 0,
+                anonDau:        Number(r.anon_dau) || 0,
+                anonWau:        Number(r.anon_wau) || 0,
+                anonMau:        Number(r.anon_mau) || 0,
+                stickiness:     r.stickiness != null     ? Number(r.stickiness)     : null,
+                anonStickiness: r.anon_stickiness != null ? Number(r.anon_stickiness) : null,
+            },
+        };
+    } catch (err) {
+        const hint = /function .* does not exist|PGRST202/i.test(err.message || '')
+            ? 'retention_stickiness RPC missing — run supabase-retention-depth-migration.sql'
+            : err.message;
+        return { ok: false, error: hint };
+    }
+}
+
+/**
+ * Per-feature (page_path) return-within-N-days rate. Top-K features by
+ * use volume; for each, the % of distinct visitors whose first use was
+ * followed by another use within p_window_days.
+ *
+ * Returns: { ok, data: { days, windowDays, rows: [{ feature, first_users, returners, total_uses }] } }
+ */
+export async function fetchFeatureReturnRates(days = 30, limit = 20, windowDays = 7) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client.rpc('feature_return_rates', {
+            p_days:        days,
+            p_limit:       limit,
+            p_window_days: windowDays,
+        });
+        if (error) throw error;
+        return { ok: true, data: { days, windowDays, rows: data || [] } };
+    } catch (err) {
+        const hint = /function .* does not exist|PGRST202/i.test(err.message || '')
+            ? 'feature_return_rates RPC missing — run supabase-retention-depth-migration.sql'
+            : err.message;
+        return { ok: false, error: hint };
+    }
+}
+
 // Cohort retention — by signup-week, week-N return-visit rate.
 // "Did the user have ANY activation event in week N after signup?"
 // Approximation of true retention; cheaper than maintaining a session table.
@@ -1140,6 +1360,154 @@ export async function fetchVisitorFlow(days = 7) {
                 exitPages:             sortTop(exitCount, 10),
                 transitions:           topTransitions,
                 referrers:             topReferrers,
+                truncated,
+            },
+        };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+}
+
+/**
+ * First-touch acquisition breakdown — slices new sessions by the attribution
+ * snapshot emitted by analytics.js (`session_start` event) on the page where
+ * each session was minted. One round trip, capped at 30k rows; aggregation
+ * runs client-side so we can pivot on any dimension without an RPC per slice.
+ *
+ * Returns:
+ *   {
+ *     totalSessions,
+ *     identifiedSessions,                 // sessions that ever had a user_id
+ *     identifiedShare,
+ *     byChannel:    [{ key, sessions, identified, identifiedRate, share }],
+ *     bySource:     [{ key, ... }],       // utm_source (or '(none)')
+ *     byMedium:     [{ key, ... }],       // utm_medium
+ *     byCampaign:   [{ key, ... }],
+ *     byLanding:    [{ key, ... }],       // landing_page
+ *     byReferrer:   [{ key, ... }],       // referrer_host (non-paid only)
+ *     byDevice:     [{ key, ... }],       // mobile | tablet | desktop
+ *     byCountry:    [{ key, ... }],       // tz_offset_min bucketed (rough)
+ *     truncated,
+ *   }
+ *
+ * "Identified" = downstream proxy for conversion: did this session ever
+ * carry a user_id on any later analytics_events row? Cheap signal, joins
+ * across event types without needing a new RPC.
+ */
+export async function fetchAcquisition(days = 30) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+
+    const HARD_CAP = 30000;
+    try {
+        // session_start rows carry the first-touch payload; pull the window.
+        const startsP = client
+            .from('analytics_events')
+            .select('session_id, user_id, properties, created_at')
+            .eq('event_type', 'event')
+            .eq('event_name', 'session_start')
+            .gte('created_at', daysAgo(days))
+            .order('created_at', { ascending: false })
+            .limit(HARD_CAP);
+
+        // All sessions with a user_id in the same window — used to mark which
+        // session_start sessions converted to identified at any point.
+        const idsP = client
+            .from('analytics_events')
+            .select('session_id')
+            .not('user_id', 'is', null)
+            .gte('created_at', daysAgo(days))
+            .limit(HARD_CAP);
+
+        const [{ data: starts, error: e1 }, { data: ids, error: e2 }] = await Promise.all([startsP, idsP]);
+        if (e1) throw e1;
+        if (e2) throw e2;
+
+        const rows = starts || [];
+        const truncated = rows.length >= HARD_CAP;
+        const identifiedSet = new Set((ids || []).map(r => r.session_id).filter(Boolean));
+
+        // Bucket builders keyed by dimension. Each cell tracks both totals
+        // and identified-counts so the ratio survives aggregation.
+        const cells = {
+            channel: new Map(), source: new Map(), medium: new Map(),
+            campaign: new Map(), landing: new Map(), referrer: new Map(),
+            device: new Map(), country: new Map(),
+        };
+        const bump = (m, key, identified) => {
+            const k = key == null || key === '' ? '(none)' : String(key).slice(0, 120);
+            const cur = m.get(k) || { sessions: 0, identified: 0 };
+            cur.sessions++;
+            if (identified) cur.identified++;
+            m.set(k, cur);
+        };
+
+        // tz_offset_min → rough country/region bucket. Not authoritative — a
+        // proper geo lookup needs server-side IP resolution — but it's a
+        // useful coarse cut today without any new dependency.
+        const tzBucket = (off) => {
+            if (off == null || !Number.isFinite(off)) return null;
+            // JS getTimezoneOffset returns minutes WEST of UTC, sign flipped
+            // from the usual UTC±N convention. Convert: +480 → UTC-8.
+            const utc = -Math.round(off / 60);
+            if (utc >= -10 && utc <= -4) return 'Americas';
+            if (utc >= -3 && utc <= 3)   return 'Europe/Africa';
+            if (utc >= 4  && utc <= 11)  return 'Asia/Oceania';
+            return `UTC${utc >= 0 ? '+' : ''}${utc}`;
+        };
+
+        let totalSessions = 0;
+        let identifiedSessions = 0;
+        const seenSessions = new Set();   // dedupe in case the same session got two session_start rows
+
+        for (const r of rows) {
+            const sid = r.session_id;
+            if (!sid || seenSessions.has(sid)) continue;
+            seenSessions.add(sid);
+            const p = r.properties || {};
+            const wasIdentified = identifiedSet.has(sid) || !!r.user_id;
+            totalSessions++;
+            if (wasIdentified) identifiedSessions++;
+
+            bump(cells.channel,  p.channel || 'direct', wasIdentified);
+            bump(cells.source,   p.utm_source,          wasIdentified);
+            bump(cells.medium,   p.utm_medium,          wasIdentified);
+            bump(cells.campaign, p.utm_campaign,        wasIdentified);
+            bump(cells.landing,  p.landing_page,        wasIdentified);
+            // Don't count paid traffic in the organic referrer breakdown —
+            // it conflates ad networks with editorial links.
+            if (p.channel !== 'paid') bump(cells.referrer, p.referrer_host, wasIdentified);
+            bump(cells.device,   p.device,              wasIdentified);
+            bump(cells.country,  tzBucket(p.tz_offset_min), wasIdentified);
+        }
+
+        const top = (m, n = 10) => {
+            const arr = Array.from(m, ([key, v]) => ({
+                key,
+                sessions:       v.sessions,
+                identified:     v.identified,
+                identifiedRate: v.sessions ? +(v.identified / v.sessions).toFixed(3) : 0,
+                share:          totalSessions ? +(v.sessions / totalSessions).toFixed(3) : 0,
+            }));
+            return arr.sort((a, b) => b.sessions - a.sessions).slice(0, n);
+        };
+
+        return {
+            ok: true,
+            data: {
+                windowDays:         days,
+                totalSessions,
+                identifiedSessions,
+                identifiedShare:    totalSessions ? +(identifiedSessions / totalSessions).toFixed(3) : 0,
+                byChannel:          top(cells.channel,  8),
+                bySource:           top(cells.source,   12),
+                byMedium:           top(cells.medium,   12),
+                byCampaign:         top(cells.campaign, 12),
+                byLanding:          top(cells.landing,  15),
+                byReferrer:         top(cells.referrer, 15),
+                byDevice:           top(cells.device,   4),
+                byCountry:          top(cells.country,  10),
                 truncated,
             },
         };

@@ -79,6 +79,38 @@ export const EXPERIMENTS = Object.freeze({
     },
 });
 
+/* ── Goals registry ─────────────────────────────────────────────────────
+ * Per-experiment conversion goals the admin dashboard charts. The first
+ * goal is the primary lift metric; the rest are guardrail / secondary.
+ *
+ * Each entry is the event_name actually emitted somewhere in the app via
+ * `experiments.track()` / `analytics.event()` / `funnel.step()` — so adding
+ * a new goal here is *only* a UI registration, the underlying event must
+ * already fire. Stages that double as funnel steps (landing_cta_click,
+ * signup_succeeded) work out of the box because experiments.track() routes
+ * through both client_telemetry and analytics_events.
+ *
+ * To launch a new goal: emit the event from app code, then add it here.
+ * ─────────────────────────────────────────────────────────────────────── */
+export const EXPERIMENT_GOALS = Object.freeze({
+    home_hero: [
+        { stage: 'landing_cta_click',  label: 'CTA click (primary)' },
+        { stage: 'signup_succeeded',   label: 'Signup' },
+    ],
+    home_cta: [
+        { stage: 'landing_cta_click',  label: 'CTA click (primary)' },
+        { stage: 'signup_succeeded',   label: 'Signup' },
+    ],
+    hero_bg: [
+        { stage: 'landing_cta_click',  label: 'CTA click (primary)' },
+        { stage: 'scroll_depth',       label: 'Scroll past hero' },
+    ],
+    home_redesign: [
+        { stage: 'landing_cta_click',  label: 'CTA click (primary)' },
+        { stage: 'signup_succeeded',   label: 'Signup' },
+    ],
+});
+
 /* ── Storage keys ───────────────────────────────────────────────────── */
 const VID_KEY      = 'pp_vid';            // localStorage — stable visitor id
 const PERSONA_KEY  = 'pp_persona';        // localStorage — sticky persona
@@ -235,12 +267,20 @@ class Experiments {
         this._assignments[key] = variant;
         if (!seenSet().has(key)) {
             markSeen(key);
+            // visitor_id is the stable localStorage UUID. Including it on
+            // the exposure event is what enables cross-day retention
+            // queries — the admin retention RPC groups returns by this id.
+            // Privacy posture is unchanged: pp_vid is a random opaque
+            // token that has always existed client-side and is never
+            // joined to identity.
+            const vid = visitorId();
             funnel.step('experiment_exposure', {
                 experiment: key,
                 variant,
                 persona: this._persona,
+                visitor_id: vid,
             });
-            this._mirror('experiment_exposure', { experiment: key, variant });
+            this._mirror('experiment_exposure', { experiment: key, variant, visitor_id: vid });
         }
         return variant;
     }

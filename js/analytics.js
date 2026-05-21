@@ -41,8 +41,152 @@ const HEARTBEAT_INTERVAL = 60_000;
 
 // ── State ────────────────────────────────────────────────────────────────────
 
-const _sessionId = _makeSessionId();
-const _sessionStart = Date.now();
+/**
+ * Session continuity across page loads.
+ *
+ * This is a multi-page app — every full-page navigation re-runs analytics.js.
+ * If we mint a fresh session ID on each load, every analytics_events row sits
+ * in its own "session", which inflates session counts, pins pages-per-session
+ * at 1 and bounce rate at 100%. We persist the ID in sessionStorage with a
+ * sliding idle timeout (GA4-style, 30 min) so navigations within the same
+ * tab share a session. The anon → signed-in transition keeps the same ID,
+ * which is what the visitor-flow `anonConverted` metric needs.
+ */
+const SESSION_STORAGE_KEY = 'pp_analytics_session';
+const SESSION_IDLE_MS = 30 * 60 * 1000;
+
+function _makeSessionId() {
+    return 'sess_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+}
+
+// ── First-touch attribution ──────────────────────────────────────────────────
+// Captured ONCE at session creation and stored next to the session_id. Every
+// downstream metric (retention, A/B, funnels) can be sliced by these fields
+// by joining on session_id against the `session_start` event emitted below.
+
+const _UTM_KEYS  = ['utm_source','utm_medium','utm_campaign','utm_term','utm_content'];
+const _AD_KEYS   = ['gclid','fbclid','msclkid','ttclid','li_fat_id'];
+const _SEARCH_HOSTS = /(^|\.)(google|bing|yahoo|duckduckgo|baidu|yandex|ecosia|brave|kagi)\./i;
+const _SOCIAL_HOSTS = /(^|\.)(facebook|twitter|x|t\.co|linkedin|reddit|youtube|tiktok|instagram|pinterest|threads|bsky|mastodon)\./i;
+
+function _classifyReferrer(host, hasAdClick) {
+    if (hasAdClick) return 'paid';
+    if (!host) return 'direct';
+    if (_SEARCH_HOSTS.test(host)) return 'search';
+    if (_SOCIAL_HOSTS.test(host)) return 'social';
+    return 'referral';
+}
+
+function _deviceClass(w) {
+    if (w < 640)  return 'mobile';
+    if (w < 1024) return 'tablet';
+    return 'desktop';
+}
+
+function _captureFirstTouch() {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return null;
+    let utm = null, ad = null, referrerOrigin = null, referrerHost = null;
+    try {
+        const p = new URLSearchParams(window.location.search);
+        for (const k of _UTM_KEYS) {
+            const v = p.get(k);
+            if (v) { utm = utm || {}; utm[k] = v.slice(0, 80); }
+        }
+        for (const k of _AD_KEYS) {
+            const v = p.get(k);
+            if (v) { ad = ad || {}; ad[k] = v.slice(0, 120); }
+        }
+    } catch (_) {}
+    try {
+        if (document.referrer) {
+            const u = new URL(document.referrer);
+            referrerOrigin = u.origin;
+            referrerHost   = u.hostname;
+        }
+    } catch (_) {}
+
+    // Same-origin referrers are intra-site navigations, not acquisition signal.
+    try {
+        if (referrerOrigin && referrerOrigin === window.location.origin) {
+            referrerOrigin = null;
+            referrerHost   = null;
+        }
+    } catch (_) {}
+
+    const vw = window.innerWidth  || 0;
+    const vh = window.innerHeight || 0;
+    const channel = _classifyReferrer(referrerHost, !!ad);
+
+    // Best-effort connection info — Safari/iOS lacks navigator.connection.
+    let connection = null;
+    try {
+        const c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+        if (c?.effectiveType) connection = String(c.effectiveType).slice(0, 12);
+    } catch (_) {}
+
+    return {
+        landing_page:    (window.location.pathname || '/').slice(0, 200),
+        landing_title:   (document.title || '').slice(0, 200),
+        // utm_source / medium / campaign / term / content if present
+        ...(utm || {}),
+        // Click IDs flattened so they're queryable directly.
+        ...(ad  || {}),
+        referrer_origin: referrerOrigin,
+        referrer_host:   referrerHost,
+        channel,                          // direct | search | social | referral | paid
+        device:          _deviceClass(vw),
+        viewport_w:      vw,
+        viewport_h:      vh,
+        screen_w:        (screen && screen.width)  || 0,
+        screen_h:        (screen && screen.height) || 0,
+        dpr:             window.devicePixelRatio || 1,
+        language:        (navigator.language || '').slice(0, 16),
+        tz_offset_min:   new Date().getTimezoneOffset(),
+        connection,                       // 4g | 3g | 2g | slow-2g | null
+        reduced_motion:  !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches),
+        color_scheme:    (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light',
+    };
+}
+
+function _readStoredSession() {
+    try {
+        const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
+        if (!raw) return null;
+        const obj = JSON.parse(raw);
+        if (!obj || typeof obj.id !== 'string') return null;
+        return obj;
+    } catch (_) { return null; }
+}
+
+function _writeStoredSession(id, start, lastActivity, firstTouch) {
+    try {
+        sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({ id, start, lastActivity, firstTouch }));
+    } catch (_) { /* private mode / quota — fall back to in-memory only */ }
+}
+
+function _resolveSession() {
+    const now = Date.now();
+    const stored = _readStoredSession();
+    if (stored && (now - (stored.lastActivity || 0)) < SESSION_IDLE_MS) {
+        _writeStoredSession(stored.id, stored.start || now, now, stored.firstTouch || null);
+        return { id: stored.id, start: stored.start || now, firstTouch: stored.firstTouch || null, isNew: false };
+    }
+    const id = _makeSessionId();
+    const firstTouch = _captureFirstTouch();
+    _writeStoredSession(id, now, now, firstTouch);
+    return { id, start: now, firstTouch, isNew: true };
+}
+
+const _resolved = _resolveSession();
+let _sessionId    = _resolved.id;
+let _sessionStart = _resolved.start;
+let _firstTouch   = _resolved.firstTouch;
+let _isNewSession = _resolved.isNew;
+
+function _touchSession() {
+    _writeStoredSession(_sessionId, _sessionStart, Date.now(), _firstTouch);
+}
+
 const _buffer = [];
 const _sessionEvents = [];
 let _userId = null;
@@ -53,8 +197,12 @@ let _gtagReady = false;   // gtag.js <script> finished loading (status only)
 let _gaActive  = false;   // GA initialized + gtag queue installed — safe to send
 let _heartbeatTimer = null;
 
-function _makeSessionId() {
-    return 'sess_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+// Stable visitor id (matches js/experiments.js — same localStorage key).
+// Read here lazily so we don't import experiments.js (cycle) and so admin
+// pages that never load experiments.js still get a non-null value when
+// available. Returns null if localStorage is blocked.
+function _visitorId() {
+    try { return localStorage.getItem('pp_vid') || null; } catch (_) { return null; }
 }
 
 // Lazy import of telemetry to forward analytics failures upstream.
@@ -133,6 +281,7 @@ async function _flush() {
 
 async function _heartbeat() {
     if (!_supabase) return;
+    _touchSession();
     try {
         await _supabase.rpc('session_heartbeat', {
             p_session_id: _sessionId,
@@ -201,6 +350,7 @@ function _onClick(e) {
     const now = Date.now();
     if (now - _lastClickAt < _CLICK_THROTTLE_MS) return;
     _lastClickAt = now;
+    _touchSession();
 
     const w = window.innerWidth  || 1;
     const h = window.innerHeight || 1;
@@ -215,6 +365,7 @@ function _onClick(e) {
         session_id: _sessionId,
         user_id: _userId,
         properties: {
+            visitor_id: _visitorId(),
             x_pct: xp,
             y_pct: yp,
             vw: w,
@@ -243,6 +394,7 @@ function _onScroll() {
     for (const m of [25, 50, 75, 100]) {
         if (pct >= m && !_scrollMilestones.has(m)) {
             _scrollMilestones.add(m);
+            _touchSession();
             _buffer.push({
                 event_type: 'event',
                 event_name: 'scroll_depth',
@@ -250,7 +402,7 @@ function _onScroll() {
                 page_title: (document.title || '').slice(0, 300),
                 session_id: _sessionId,
                 user_id: _userId,
-                properties: { milestone: m },
+                properties: { visitor_id: _visitorId(), milestone: m },
                 created_at: new Date().toISOString(),
             });
         }
@@ -268,6 +420,38 @@ function _hasAnalyticsConsent() {
 }
 
 let _consentInitDone = false;
+
+// ── First-touch emission ─────────────────────────────────────────────────────
+// Fires exactly once per session, on the page where the session was minted.
+// Buffered like any other event — flushes after consent + Supabase init, or
+// is dropped if consent is withdrawn before flush.
+
+let _sessionStartEmitted = false;
+function _emitSessionStart() {
+    if (_sessionStartEmitted || !_isNewSession || !_firstTouch) return;
+    _sessionStartEmitted = true;
+
+    // Keep within the 2KB property cap enforced by event(). The first-touch
+    // payload is well under that on its own.
+    _buffer.push({
+        event_type: 'event',
+        event_name: 'session_start',
+        page_path: (window.location.pathname || '/').slice(0, 200),
+        page_title: (document.title || '').slice(0, 300),
+        session_id: _sessionId,
+        user_id: _userId,
+        properties: { visitor_id: _visitorId(), ..._firstTouch },
+        created_at: new Date(_sessionStart).toISOString(),
+    });
+    _sessionEvents.push({ name: 'session_start', at: _sessionStart, props: { ..._firstTouch } });
+
+    if (_gaActive) {
+        // GA4 reserves the `session_start` event name — sending it as a
+        // custom event would collide. Mirror under a distinct name so the
+        // attribution fields surface in the GA4 explorer too.
+        window.gtag('event', 'first_touch', { ..._firstTouch });
+    }
+}
 
 // ── Core API ─────────────────────────────────────────────────────────────────
 
@@ -311,6 +495,7 @@ class Analytics {
                 if (_autoPaged) return;
                 _autoPaged = true;
                 _pageStart = Date.now();
+                _emitSessionStart();
                 this.page(_autoPageName());
                 _initClickmap();
             };
@@ -341,6 +526,7 @@ class Analytics {
                     session_id: _sessionId,
                     user_id: _userId,
                     properties: {
+                        visitor_id: _visitorId(),
                         time_on_page_s: dwell,
                         max_scroll_pct: _maxScrollPct,
                     },
@@ -369,6 +555,7 @@ class Analytics {
      * @param {object} [props] - Additional properties
      */
     page(pageName, props = {}) {
+        _touchSession();
         const path = window.location.pathname;
         // Sanitize: truncate fields to match RLS policy limits, minimize PII
         const safeName = (pageName || path).slice(0, 100);
@@ -386,7 +573,7 @@ class Analytics {
             referrer: safeReferrer,
             session_id: _sessionId,
             user_id: _userId,
-            properties: { ...props },
+            properties: { visitor_id: _visitorId(), ...props },
             created_at: new Date().toISOString(),
         };
 
@@ -411,6 +598,7 @@ class Analytics {
      */
     event(name, props = {}) {
         if (!name || typeof name !== 'string') return;
+        _touchSession();
         const safeName = name.slice(0, 100);
         const safePath = window.location.pathname.slice(0, 200);
 
@@ -431,7 +619,7 @@ class Analytics {
             page_title: (document.title || '').slice(0, 300),
             session_id: _sessionId,
             user_id: _userId,
-            properties: { ...safeProps },
+            properties: { visitor_id: _visitorId(), ...safeProps },
             created_at: new Date().toISOString(),
         };
 
@@ -486,6 +674,17 @@ class Analytics {
             userId: _userId,
             userProps: { ..._userProps },
         };
+    }
+
+    /**
+     * First-touch attribution snapshot captured when this session was minted.
+     * Stable for the life of the session (sessionStorage-backed). Returns null
+     * if the session predates this instrumentation. Consumers (auth-funnel,
+     * experiments) should attach the relevant subset to their own events so
+     * we can slice retention / conversion by acquisition source.
+     */
+    getAttribution() {
+        return _firstTouch ? { ..._firstTouch } : null;
     }
 
     /** Get GA4 config status. */
