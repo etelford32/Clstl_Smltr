@@ -116,24 +116,27 @@ RUN perl Config.pl -v=SC/BATSRUS,IH/BATSRUS,GM/BATSRUS,IE/Ridley_serial \
 # Compile — use all available cores; coupled SWMF build typically takes
 # 30-50 min on a 4-core machine (vs. 20-30 for SC+IH alone).
 # SWMF= the coupled binary, PostIDL = output converter
+#
+# After this step succeeds, /opt/swmf/SWMF.exe is the production binary
+# that runs SC + IH + GM + IE together — that's what run_forecast.py
+# invokes for coupled hindcasts and forecasts.
 RUN make -j$(nproc) SWMF \
  && make -j$(nproc) PIDL
 
-# Build standalone IH/BATSRUS for simpler solar-wind-only runs (Phase 0 IH-only fallback)
-WORKDIR /opt/swmf/IH/BATSRUS
-RUN make -j$(nproc) BATSRUS
-
-# Build standalone GM/BATSRUS for magnetosphere-only smoke tests
-WORKDIR /opt/swmf/GM/BATSRUS
-RUN make -j$(nproc) BATSRUS
+# NOTE: standalone BATSRUS.exe builds (IH-only / GM-only smoke tests) used
+# to live here but were removed — `make BATSRUS` is not a target in current
+# SWMF (Makefile errors with "No rule to make target 'BATSRUS'"). The
+# standalone executables aren't required by run_forecast.py's coupled
+# path; if you later want IH-only smoke tests, the modern recipe is
+# something like `cd IH/BATSRUS && perl Config.pl -install && make`
+# (default target) — verify against the SWMF_REF you're pinning before
+# adding it back.
 
 WORKDIR /opt/swmf
 
-# Verify binaries
+# Verify the coupled binary built.
 RUN ls -la /opt/swmf/bin/ \
- && ls -la /opt/swmf/IH/BATSRUS/BATSRUS.exe \
-            /opt/swmf/GM/BATSRUS/BATSRUS.exe \
-            /opt/swmf/SWMF.exe \
+ && ls -la /opt/swmf/SWMF.exe \
  && echo "SWMF coupled-build OK"
 
 # ── Stage 2: runtime image ─────────────────────────────────────────────────────
@@ -142,7 +145,7 @@ FROM ubuntu:22.04 AS runtime
 ENV DEBIAN_FRONTEND=noninteractive
 ENV SWMF_ROOT=/opt/swmf
 ENV SWMF_BIN=/opt/swmf/bin
-ENV PATH="${SWMF_BIN}:/opt/swmf/IH/BATSRUS:/opt/swmf/GM/BATSRUS:${PATH}"
+ENV PATH="${SWMF_BIN}:${PATH}"
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
@@ -158,14 +161,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     supervisor curl \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Copy compiled SWMF binaries from builder.
-# SWMF.exe is the coupled binary that runs SC + IH + GM + IE together.
-# Per-component BATSRUS.exes are kept for standalone smoke tests.
-COPY --from=builder /opt/swmf/bin/          /opt/swmf/bin/
-COPY --from=builder /opt/swmf/IH/BATSRUS/BATSRUS.exe  /opt/swmf/IH/BATSRUS/BATSRUS.exe
-COPY --from=builder /opt/swmf/SC/BATSRUS/BATSRUS.exe  /opt/swmf/SC/BATSRUS/BATSRUS.exe
-COPY --from=builder /opt/swmf/GM/BATSRUS/BATSRUS.exe  /opt/swmf/GM/BATSRUS/BATSRUS.exe
-COPY --from=builder /opt/swmf/SWMF.exe      /opt/swmf/SWMF.exe
+# Copy compiled SWMF binary from builder.
+# SWMF.exe is the coupled binary that runs SC + IH + GM + IE together —
+# that's the production binary. The per-component standalone
+# BATSRUS.exe files used to be copied here too; the standalone builds
+# were removed (see note in stage 1) so the COPY lines are gone too.
+COPY --from=builder /opt/swmf/bin/      /opt/swmf/bin/
+COPY --from=builder /opt/swmf/SWMF.exe  /opt/swmf/SWMF.exe
 
 # IE/Ridley_serial is a serial Fortran component — its compiled object
 # files live alongside the SWMF binary and are linked into SWMF.exe.
