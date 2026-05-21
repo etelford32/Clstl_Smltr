@@ -203,37 +203,101 @@ export async function init(canvas, THREE) {
   const stars = new THREE.Points(sg, starMat);
   scene.add(stars);
 
-  // ── Controls (one OrbitControls, reconfigured per mode) ──────────────────
+  // ── Controls — single OrbitControls reconfigured per mode ───────────────
+  // The pilot has full god-mode authority: left-drag rotates, right-drag
+  // pans in screen space, scroll/middle-drag zooms. Two-finger trackpad
+  // gestures map to dolly+pan. Pan and zoom limits widen in FREE so the
+  // operator can fly the camera anywhere from sat-side up to a system view.
   const controls = new OrbitControls(camera, canvas);
   controls.enableDamping = true;
   controls.dampingFactor = 0.085;
   controls.rotateSpeed = 0.8;
-  controls.zoomSpeed = 0.85;
-  controls.minDistance = R_EARTH_KM * 1.05;
-  controls.maxDistance = 90_000;
-  controls.autoRotate = true;
+  controls.zoomSpeed = 0.95;
+  controls.panSpeed = 1.0;
+  controls.enablePan = true;
+  controls.screenSpacePanning = true;
+  controls.minDistance = 30;
+  controls.maxDistance = 200_000;
+  controls.autoRotate = false;
   controls.autoRotateSpeed = 0.35;
-  // Pointer interaction breaks the auto-orbit until the mode is reset.
-  controls.addEventListener('start', () => { controls.autoRotate = false; });
 
-  let cameraMode = 'wide';
-  function setCameraMode(mode) {
+  // ── Smooth target lerp — used by FOLLOW and the Focus button ────────────
+  // We never *snap* the camera target; instead we move it toward a desired
+  // point each frame. This keeps the satellite under the cursor smoothly
+  // even as it whips around at ~7 km/s.
+  const targetWanted = new THREE.Vector3();
+  let targetLerp = 0;          // 0..1, how fast the target chases (per frame)
+
+  let cameraMode = 'free';
+  function setCameraMode(mode, opts = {}) {
     cameraMode = mode;
+    // Default: smooth move; opts.snap = true does it instantly.
+    const snap = !!opts.snap;
     if (mode === 'wide') {
-      controls.target.set(0, 0, 0);
+      // Look at Earth's centre from a slight elevation; auto-orbit unless
+      // the pilot grabs the camera. fitToApogee() drives the zoom level.
+      targetWanted.set(0, 0, 0);
       controls.autoRotate = true;
       controls.minDistance = R_EARTH_KM * 1.05;
-      controls.maxDistance = 90_000;
+      controls.maxDistance = 200_000;
+      if (snap) {
+        controls.target.copy(targetWanted);
+        // If the camera is currently glued to the satellite (returning from
+        // FOLLOW), pull back to a comfortable system view.
+        if (camera.position.length() < R_EARTH_KM * 1.6) {
+          camera.position.set(0, -22000, 9000);
+        }
+      }
+      targetLerp = 0.08;
     } else if (mode === 'follow') {
       controls.autoRotate = false;
-      controls.minDistance = 40;     // get *right* up close to the satellite
-      controls.maxDistance = 9000;
-    } else { // free
-      controls.target.set(0, 0, 0);
+      controls.minDistance = 25;          // can get nose-to-bus close
+      controls.maxDistance = 12_000;
+      // Pose the camera at a comfortable trailing-quarter angle so users
+      // land in a recognisable view rather than wherever they last left it.
+      if (snap && satPivot.position.lengthSq() > 0) {
+        const off = new THREE.Vector3(0, -350, 180);
+        camera.position.copy(satPivot.position).add(off);
+        controls.target.copy(satPivot.position);
+      }
+      targetLerp = 0.18;
+    } else { // free — fully unconstrained god-mode
       controls.autoRotate = false;
-      controls.minDistance = R_EARTH_KM * 1.05;
+      controls.minDistance = 30;
       controls.maxDistance = 200_000;
+      targetLerp = 0.0;                   // pilot owns the target
+      if (snap) {
+        // First-entry framing: keep the user's current orbit/zoom but
+        // park the look-at on Earth's centre so they have a stable pivot.
+        controls.target.set(0, 0, 0);
+      }
     }
+  }
+
+  // Smoothly recenter the controls target on the satellite, regardless of
+  // current camera mode. The camera position is preserved (just look-at
+  // shifts) so the pilot's framing isn't yanked.
+  function focusSatellite() {
+    targetWanted.copy(satPivot.position);
+    targetLerp = 0.22;
+    // In free mode we also pull the camera in if it's farther than 4× the
+    // satellite altitude — otherwise "focus" is invisible from a system view.
+    if (cameraMode === 'free') {
+      const distEarth = satPivot.position.length() || R_EARTH_KM;
+      const camDist = camera.position.distanceTo(satPivot.position);
+      const cap = distEarth * 4 + 800;
+      if (camDist > cap) {
+        const dir = camera.position.clone().sub(satPivot.position).normalize();
+        camera.position.copy(satPivot.position).addScaledVector(dir, cap);
+      }
+    }
+  }
+
+  // Snap the camera back to the wide-system view. Used by the R shortcut
+  // and the "↺ Reset view" button.
+  function resetView() {
+    setCameraMode('wide', { snap: true });
+    camera.position.set(0, -22000, 9000);
   }
 
   // ── Sat scale: visible from any altitude ─────────────────────────────────
@@ -306,9 +370,11 @@ export async function init(canvas, THREE) {
       grid.rotation.z = earthRot;
     }
 
-    // Follow mode: keep the controls target locked to the satellite.
+    // Follow mode keeps the camera target glued to the satellite; the smooth
+    // lerp below handles the actual movement so the pilot's rotate/zoom
+    // inputs don't fight with a hard snap each frame.
     if (cameraMode === 'follow' && s.satM) {
-      controls.target.copy(satPivot.position);
+      targetWanted.copy(satPivot.position);
     }
   }
 
@@ -336,9 +402,21 @@ export async function init(canvas, THREE) {
 
   function render(rApoKm) {
     if (typeof rApoKm === 'number') fitToApogee(rApoKm);
+    // Smoothly chase the desired look-at target. In FREE we set targetLerp
+    // to zero so pan input is preserved exactly.
+    if (targetLerp > 0) {
+      controls.target.lerp(targetWanted, targetLerp);
+    }
     setSatScale();
     controls.update();
     renderer.render(scene, camera);
+  }
+
+  // Camera diagnostics for the UI readout (km).
+  function viewInfo() {
+    const altKm = Math.max(0, camera.position.length() - R_EARTH_KM);
+    const distSatKm = camera.position.distanceTo(satPivot.position);
+    return { altKm, distSatKm, mode: cameraMode };
   }
 
   function dispose() {
@@ -352,10 +430,13 @@ export async function init(canvas, THREE) {
     });
   }
 
-  // First sizing.
+  // First sizing — default to FREE so the user lands in true god-mode (full
+  // pan/zoom/rotate around Earth) but framed wide.
   resize();
-  setCameraMode('wide');
+  resetView();
+  setCameraMode('free', { snap: true });
 
   return { resize, render, update, setCameraMode, setTargetAlt, dispose,
+           focusSatellite, resetView, viewInfo,
            getMode: () => cameraMode };
 }
