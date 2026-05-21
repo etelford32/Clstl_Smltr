@@ -571,6 +571,54 @@
             <div id="cohort-container"><div class="empty">Loading...</div></div>
         </div>
 
+        <!-- ── Retention Depth (Day-N curve + stickiness + feature) ──
+             Backed by supabase-retention-depth-migration.sql. Day-N
+             curve is signup-cohort based, stickiness covers both signed-in
+             and anon, feature return rates rank pages by their second-use
+             rate (the cleanest signal for which features pull people back). -->
+        <div class="card" style="margin-bottom:18px">
+            <h3>
+                Retention Depth
+                <span style="font-size:.72rem;color:#666;font-weight:400;margin-left:6px">Day-N curve · DAU/WAU/MAU · feature return rates</span>
+                <span style="float:right;display:flex;gap:6px;align-items:center;font-size:.72rem;color:#888;font-weight:400">
+                    <select id="ret-window" class="btn btn-sm" style="padding:2px 8px;font-size:.7rem">
+                        <option value="30">last 30d signups</option>
+                        <option value="60" selected>last 60d signups</option>
+                        <option value="90">last 90d signups</option>
+                    </select>
+                    <button class="btn btn-sm" id="btn-refresh-ret">Refresh</button>
+                </span>
+            </h3>
+
+            <!-- Stickiness KPIs -->
+            <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:#778;font-weight:700;margin-bottom:8px">Stickiness <span style="color:#445;font-weight:400;text-transform:none">— DAU/MAU = % of monthly actives who came back today</span></div>
+            <div class="kpi-grid" id="ret-stickiness-kpis" style="margin-bottom:18px">
+                <div class="kpi"><div class="kpi-val kpi-loading" id="ret-dau">--</div><div class="kpi-label">DAU (signed-in)</div></div>
+                <div class="kpi"><div class="kpi-val kpi-loading" id="ret-wau">--</div><div class="kpi-label">WAU</div></div>
+                <div class="kpi"><div class="kpi-val kpi-loading" id="ret-mau">--</div><div class="kpi-label">MAU</div></div>
+                <div class="kpi"><div class="kpi-val kpi-loading" id="ret-stickiness">--</div><div class="kpi-label">DAU/MAU stickiness</div></div>
+                <div class="kpi"><div class="kpi-val kpi-loading" id="ret-anon-dau">--</div><div class="kpi-label">Anon DAU</div></div>
+                <div class="kpi"><div class="kpi-val kpi-loading" id="ret-anon-mau">--</div><div class="kpi-label">Anon MAU</div></div>
+                <div class="kpi"><div class="kpi-val kpi-loading" id="ret-anon-stickiness">--</div><div class="kpi-label">Anon DAU/MAU</div></div>
+            </div>
+
+            <!-- Day-N curve -->
+            <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:#778;font-weight:700;margin-bottom:8px">Day-N Retention Curve <span style="color:#445;font-weight:400;text-transform:none">— % of signup cohort active on day N</span></div>
+            <div id="ret-curve-container" style="margin-bottom:22px"><div class="empty">Loading…</div></div>
+
+            <!-- Feature return rates -->
+            <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px">
+                <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:#778;font-weight:700">Feature Return Rates <span style="color:#445;font-weight:400;text-transform:none">— % of first-time users who came back within</span></div>
+                <select id="ret-feature-window" class="btn btn-sm" style="padding:2px 8px;font-size:.7rem">
+                    <option value="1">1 day</option>
+                    <option value="3">3 days</option>
+                    <option value="7" selected>7 days</option>
+                    <option value="14">14 days</option>
+                </select>
+            </div>
+            <div id="ret-features-container"><div class="empty">Loading…</div></div>
+        </div>
+
         <!-- ── Class-roster snapshot (educator/institution health) ──── -->
         <div class="card" style="margin-bottom:18px">
             <h3>Educator / Institution Roster Health</h3>
@@ -972,7 +1020,7 @@ import { auth } from './js/auth.js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY, isConfigured, getSupabase, testConnection } from './js/supabase-config.js';
 import { GA_MEASUREMENT_ID } from './js/analytics.js';
 import { EXPERIMENTS, EXPERIMENT_GOALS } from './js/experiments.js';
-import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchActivationFunnel, fetchActivationDaily, fetchActivationOverview, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap, fetchWizardFunnel, fetchTourMetrics, fetchDemoMetrics, fetchAuthFlowMetrics, fetchAuthFunnelDropoffs, fetchNewVsReturning, fetchVisitorFlow, fetchEntryDestinations, fetchAcquisition, fetchAccumulatorStats, fetchExperimentAB, fetchExperimentGoals, fetchExperimentRetention, wilsonCI95, twoProportionZ, fetchPerfSummary, fetchTopErrors, fetchTop404s, fetchTopAuthFailures, fetchConsentOptinRate, fetchStripeMetrics } from './js/admin-analytics.js';
+import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchActivationFunnel, fetchActivationDaily, fetchActivationOverview, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap, fetchWizardFunnel, fetchTourMetrics, fetchDemoMetrics, fetchAuthFlowMetrics, fetchAuthFunnelDropoffs, fetchNewVsReturning, fetchVisitorFlow, fetchEntryDestinations, fetchAcquisition, fetchAccumulatorStats, fetchExperimentAB, fetchExperimentGoals, fetchExperimentRetention, fetchDailyRetentionCurve, fetchStickiness, fetchFeatureReturnRates, wilsonCI95, twoProportionZ, fetchPerfSummary, fetchTopErrors, fetchTop404s, fetchTopAuthFailures, fetchConsentOptinRate, fetchStripeMetrics } from './js/admin-analytics.js';
 import { createInviteCode, fetchInviteCodes, deactivateInvite, sendInviteEmail } from './js/admin-invites.js';
 
 // ── Tabs (wired first so they always work) ──────────────────────────────────
@@ -1834,6 +1882,148 @@ async function loadCohorts() {
     el.innerHTML = html;
 }
 
+// ── Retention Depth (Day-N curve + stickiness + feature return rates) ─────
+// Three independent RPC calls in parallel; the goal is so the operator can
+// answer at a glance: are users sticking around, when do they drop off,
+// and which features actually pull them back?
+function _retFmtPct(num, digits = 1) {
+    if (num == null || !Number.isFinite(num)) return '—';
+    return (num * 100).toFixed(digits) + '%';
+}
+function _retStickinessColor(pct) {
+    if (pct == null) return 'white';
+    if (pct >= 20) return 'green';
+    if (pct >= 10) return 'gold';
+    return 'red';
+}
+
+async function loadRetentionDepth() {
+    const days = parseInt(document.getElementById('ret-window').value, 10) || 60;
+    const featWin = parseInt(document.getElementById('ret-feature-window').value, 10) || 7;
+
+    const setKpi = (id, val, cls) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = typeof val === 'number' ? val.toLocaleString() : val;
+        el.className = 'kpi-val ' + (cls || 'white');
+    };
+
+    // Reset visual state while loading.
+    for (const id of ['ret-dau','ret-wau','ret-mau','ret-stickiness','ret-anon-dau','ret-anon-mau','ret-anon-stickiness']) {
+        const el = document.getElementById(id); if (el) { el.textContent = '--'; el.className = 'kpi-val kpi-loading'; }
+    }
+    document.getElementById('ret-curve-container').innerHTML    = '<div class="empty">Loading…</div>';
+    document.getElementById('ret-features-container').innerHTML = '<div class="empty">Loading…</div>';
+
+    // All three RPCs are independent; fire in parallel.
+    const [stickRes, curveRes, featRes] = await Promise.all([
+        fetchStickiness(),
+        fetchDailyRetentionCurve(days),
+        fetchFeatureReturnRates(days, 20, featWin),
+    ]);
+
+    // ── Stickiness KPIs ────────────────────────────────────────────
+    if (stickRes.ok) {
+        const s = stickRes.data;
+        setKpi('ret-dau',  s.dau,  'white');
+        setKpi('ret-wau',  s.wau,  'blue');
+        setKpi('ret-mau',  s.mau,  'blue');
+        setKpi('ret-stickiness',
+            s.stickiness == null ? '—' : s.stickiness.toFixed(1) + '%',
+            _retStickinessColor(s.stickiness));
+        setKpi('ret-anon-dau', s.anonDau, 'purple');
+        setKpi('ret-anon-mau', s.anonMau, 'purple');
+        setKpi('ret-anon-stickiness',
+            s.anonStickiness == null ? '—' : s.anonStickiness.toFixed(1) + '%',
+            _retStickinessColor(s.anonStickiness));
+    } else {
+        for (const id of ['ret-dau','ret-wau','ret-mau','ret-stickiness','ret-anon-dau','ret-anon-mau','ret-anon-stickiness']) {
+            setKpi(id, '—', 'red');
+        }
+    }
+
+    // ── Day-N retention curve ──────────────────────────────────────
+    const curveEl = document.getElementById('ret-curve-container');
+    if (!curveRes.ok) {
+        curveEl.innerHTML = `<div class="empty" style="color:#ff8080">${_esc(curveRes.error)}</div>`;
+    } else if (!curveRes.data.rows.length) {
+        curveEl.innerHTML = '<div class="empty">No signup cohort yet, or v3 instrumentation hasn\'t accumulated enough follow-up days.</div>';
+    } else {
+        // Render as a row of bars — Day-N on x-axis, % on bar, with CI
+        // bounds underneath. Stronger retention = green, weaker = red.
+        const rows = curveRes.data.rows.slice().sort((a, b) => a.day_n - b.day_n);
+        let html = '<div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap">';
+        for (const r of rows) {
+            const ci = wilsonCI95(r.returned, r.exposed);
+            const pct = ci.point == null ? 0 : ci.point * 100;
+            const col = pct > 40 ? '#4eff91' : pct > 20 ? '#e5c46d' : pct > 5 ? '#ff8c00' : '#ff6060';
+            // Bar height scales to 100% retention = 90px.
+            const h = Math.max(2, Math.round((pct / 100) * 90));
+            const ciStr = ci.point == null ? '' :
+                `<div style="font-size:.65rem;color:#556">[${_retFmtPct(ci.lo, 0)}, ${_retFmtPct(ci.hi, 0)}]</div>`;
+            html += `<div style="flex:1;min-width:90px;text-align:center">
+                <div style="height:90px;display:flex;align-items:flex-end;justify-content:center;margin-bottom:4px">
+                    <div style="width:38px;height:${h}px;background:linear-gradient(180deg,${col},${col}aa);border-radius:3px"></div>
+                </div>
+                <div style="color:${col};font-weight:700;font-size:.92rem">${ci.point == null ? '—' : pct.toFixed(1) + '%'}</div>
+                <div style="color:#cdd;font-size:.74rem">Day ${r.day_n}</div>
+                <div style="color:#556;font-size:.7rem">n=${Number(r.exposed).toLocaleString()}</div>
+                ${ciStr}
+            </div>`;
+        }
+        html += '</div>';
+        curveEl.innerHTML = html;
+    }
+
+    // ── Feature return rates ───────────────────────────────────────
+    const featEl = document.getElementById('ret-features-container');
+    if (!featRes.ok) {
+        featEl.innerHTML = `<div class="empty" style="color:#ff8080">${_esc(featRes.error)}</div>`;
+    } else if (!featRes.data.rows.length) {
+        featEl.innerHTML = '<div class="empty">No feature usage in window.</div>';
+    } else {
+        // Sort by return rate descending — most sticky features at top —
+        // but keep low-volume rows from dominating with a min-cohort guard.
+        const rows = featRes.data.rows
+            .map(r => {
+                const ci = wilsonCI95(r.returners, r.first_users);
+                return { ...r, rate: ci.point, lo: ci.lo, hi: ci.hi };
+            })
+            .filter(r => r.first_users >= 5)              // hide noise
+            .sort((a, b) => (b.rate ?? -1) - (a.rate ?? -1));
+        if (!rows.length) {
+            featEl.innerHTML = '<div class="empty">Not enough usage volume yet (minimum 5 first-time users per feature).</div>';
+        } else {
+            let html = `<table style="font-size:.78rem"><thead><tr>
+                <th style="text-align:left">Feature</th>
+                <th style="text-align:right">Total Uses</th>
+                <th style="text-align:right">First-time Users</th>
+                <th style="text-align:right">Returners (≤${featWin}d)</th>
+                <th style="text-align:right">Return Rate</th>
+            </tr></thead><tbody>`;
+            for (const r of rows) {
+                const pct = r.rate == null ? 0 : r.rate * 100;
+                const col = pct > 30 ? '#4eff91' : pct > 15 ? '#e5c46d' : '#cdd';
+                const ciStr = r.rate == null ? '' :
+                    ` <span style="color:#556;font-size:.7rem">[${_retFmtPct(r.lo, 0)}, ${_retFmtPct(r.hi, 0)}]</span>`;
+                html += `<tr>
+                    <td style="color:#cdd;font-family:monospace;word-break:break-all">${_esc(r.feature)}</td>
+                    <td style="text-align:right;color:#cdd">${Number(r.total_uses).toLocaleString()}</td>
+                    <td style="text-align:right;color:#cdd">${Number(r.first_users).toLocaleString()}</td>
+                    <td style="text-align:right;color:#cdd">${Number(r.returners).toLocaleString()}</td>
+                    <td style="text-align:right"><span style="color:${col};font-weight:700">${r.rate == null ? '—' : pct.toFixed(1) + '%'}</span>${ciStr}</td>
+                </tr>`;
+            }
+            html += '</tbody></table>';
+            featEl.innerHTML = html;
+        }
+    }
+}
+
+document.getElementById('btn-refresh-ret')?.addEventListener('click', loadRetentionDepth);
+document.getElementById('ret-window')?.addEventListener('change', loadRetentionDepth);
+document.getElementById('ret-feature-window')?.addEventListener('change', loadRetentionDepth);
+
 async function loadEducatorRoster() {
     const el = document.getElementById('edu-roster-container');
     el.innerHTML = '<div class="empty">Loading…</div>';
@@ -1967,6 +2157,7 @@ async function loadActivationAll() {
         loadActivationChart(),
         loadConversion(),
         loadCohorts(),
+        loadRetentionDepth(),
         loadEducatorRoster(),
         loadTopSimsByPlan(),
         loadAtRisk(),

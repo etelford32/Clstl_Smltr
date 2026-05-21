@@ -1058,6 +1058,100 @@ export async function fetchActivationDaily(days = 30) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ── Retention depth: daily curve, stickiness, feature return rates ──────────
+// Backed by supabase-retention-depth-migration.sql. All three RPCs are
+// is_admin()-gated and read existing tables (no schema change).
+
+/**
+ * Day-N retention curve from the signup cohort. Day buckets fixed server-
+ * side at {1, 2, 3, 7, 14, 28}; only signups with enough follow-up time
+ * elapsed are scored for a given bucket. Cohort source is
+ * activation_events.event='signup'; return signal is any analytics_events
+ * row with the user's user_id in the day-N follow-up window.
+ *
+ * Returns: { ok, data: { cohortDays, rows: [{ day_n, exposed, returned }] } }
+ */
+export async function fetchDailyRetentionCurve(cohortDays = 60) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client.rpc('retention_daily_curve', {
+            p_cohort_days: cohortDays,
+        });
+        if (error) throw error;
+        return { ok: true, data: { cohortDays, rows: data || [] } };
+    } catch (err) {
+        const hint = /function .* does not exist|PGRST202/i.test(err.message || '')
+            ? 'retention_daily_curve RPC missing — run supabase-retention-depth-migration.sql'
+            : err.message;
+        return { ok: false, error: hint };
+    }
+}
+
+/**
+ * DAU / WAU / MAU stickiness for both signed-in users and anonymous
+ * visitors. Stickiness is DAU/MAU as a percentage — the standard SaaS
+ * read is <10% low, 10-20% healthy, >20% strong daily habit.
+ *
+ * Returns: { ok, data: { dau, wau, mau, anonDau, anonWau, anonMau, stickiness, anonStickiness } }
+ */
+export async function fetchStickiness() {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client.rpc('retention_stickiness');
+        if (error) throw error;
+        const r = (data && data[0]) || {};
+        return {
+            ok: true,
+            data: {
+                dau:            Number(r.dau) || 0,
+                wau:            Number(r.wau) || 0,
+                mau:            Number(r.mau) || 0,
+                anonDau:        Number(r.anon_dau) || 0,
+                anonWau:        Number(r.anon_wau) || 0,
+                anonMau:        Number(r.anon_mau) || 0,
+                stickiness:     r.stickiness != null     ? Number(r.stickiness)     : null,
+                anonStickiness: r.anon_stickiness != null ? Number(r.anon_stickiness) : null,
+            },
+        };
+    } catch (err) {
+        const hint = /function .* does not exist|PGRST202/i.test(err.message || '')
+            ? 'retention_stickiness RPC missing — run supabase-retention-depth-migration.sql'
+            : err.message;
+        return { ok: false, error: hint };
+    }
+}
+
+/**
+ * Per-feature (page_path) return-within-N-days rate. Top-K features by
+ * use volume; for each, the % of distinct visitors whose first use was
+ * followed by another use within p_window_days.
+ *
+ * Returns: { ok, data: { days, windowDays, rows: [{ feature, first_users, returners, total_uses }] } }
+ */
+export async function fetchFeatureReturnRates(days = 30, limit = 20, windowDays = 7) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client.rpc('feature_return_rates', {
+            p_days:        days,
+            p_limit:       limit,
+            p_window_days: windowDays,
+        });
+        if (error) throw error;
+        return { ok: true, data: { days, windowDays, rows: data || [] } };
+    } catch (err) {
+        const hint = /function .* does not exist|PGRST202/i.test(err.message || '')
+            ? 'feature_return_rates RPC missing — run supabase-retention-depth-migration.sql'
+            : err.message;
+        return { ok: false, error: hint };
+    }
+}
+
 // Cohort retention — by signup-week, week-N return-visit rate.
 // "Did the user have ANY activation event in week N after signup?"
 // Approximation of true retention; cheaper than maintaining a session table.
