@@ -71,25 +71,27 @@ RUN update-alternatives --install /usr/bin/gfortran gfortran /usr/bin/gfortran-1
 # and the shallow clone has bitten us with "fatal: bad revision HEAD" in
 # share/Library hooks. Full clone adds ~150 MB but is paid once at build.
 #
-# Submodule init now includes `util/` — it carries DATAREAD, EMPIRICAL,
-# TIMING, NOMPI, CRASH_data which BATS-R-US links against. Omitting it
-# causes `make SWMF` to die with missing `.a` files ~5 min into the build.
+# Submodule strategy: pull whatever the top-level repo's .gitmodules
+# declares (no path filter — earlier attempts hard-coded BATL/util/share
+# paths that no longer exist as direct submodules in recent SWMFsoftware
+# layouts). The real per-component setup is driven by `Config.pl -install`
+# below; this `git submodule update` just makes sure any submodules that
+# ARE registered (typically SC/BATSRUS, IH/BATSRUS, sometimes GM/BATSRUS)
+# come down before Config.pl runs. `git submodule status` prints what's
+# there so the build log shows the actual layout for this SWMF tag.
 #
-# Pin a SWMF release tag below (TODO: replace v2.30 with whatever tag you
+# Pin a SWMF release tag below (TODO: replace master with whatever tag you
 # validate against). Tracking master is unstable for an ops pipeline.
 ARG SWMF_REF=master
 WORKDIR /opt
 RUN git config --global url."https://github.com/".insteadOf "git@github.com:" \
  && git clone --branch ${SWMF_REF} https://github.com/SWMFsoftware/SWMF.git swmf \
  && cd swmf \
+ && echo "=== .gitmodules (if present) ===" \
+ && (cat .gitmodules 2>/dev/null || echo "(no .gitmodules at top level)") \
  && git submodule update --init --recursive \
-        BATL \
-        SC/BATSRUS \
-        IH/BATSRUS \
-        GM/BATSRUS \
-        IE/Ridley_serial \
-        share \
-        util
+ && echo "=== submodule status after init ===" \
+ && git submodule status
 
 WORKDIR /opt/swmf
 
