@@ -98,8 +98,11 @@ EVENTS: dict[str, Event] = {
     "may_2024_gannon": Event(
         event_id="may_2024_gannon",
         label="May 2024 Gannon storm (G5)",
-        window_start=_utc(2024, 5, 10),
-        window_end=_utc(2024, 5, 12),
+        # 72 h window — wider than Feb 2022 because Gannon is multi-pulse
+        # and the recovery phase is what stresses MSIS+Ap hardest.
+        # Matches MHD_DENSITY_PHASE0_GANNON_RUNBOOK.md.
+        window_start=datetime(2024, 5, 10, 12, tzinfo=timezone.utc),
+        window_end=datetime(2024, 5, 13, 12, tzinfo=timezone.utc),
         storm_class="G5",
         notes="Ap pinned at 400. MSIS saturates; MHD does not.",
     ),
