@@ -3127,7 +3127,18 @@ function _perfSection(title, bodyHtml) {
          + bodyHtml + `</div>`;
 }
 function _perfErr(res, what) {
-    return `<div class="empty" style="color:#ff9090">${what}: ${_esc(res.error || 'failed')}</div>`;
+    const msg = String(res.error || 'failed');
+    // Common case: an RPC reports back "telemetry_perf_summary RPC missing
+    // — apply supabase-client-telemetry-migration.sql". Surface that
+    // filename as a one-click copy so the operator can paste it into the
+    // Supabase SQL editor without having to retype it from the screen.
+    const sqlMatch = msg.match(/([a-z0-9_-]+\.sql)/i);
+    let extra = '';
+    if (sqlMatch) {
+        const file = sqlMatch[1];
+        extra = ` <button class="btn btn-sm" data-copy-text="${_esc(file)}" style="margin-left:8px;vertical-align:middle">Copy ${_esc(file)}</button>`;
+    }
+    return `<div class="empty" style="color:#ff9090">${what}: ${_esc(msg)}${extra}</div>`;
 }
 function _perfEmpty(msg) {
     return `<div class="empty">${_esc(msg)}</div>`;
@@ -3243,6 +3254,24 @@ async function loadPerfErrors() {
 
     el.innerHTML = html;
 }
+
+// Delegate "Copy <filename>.sql" affordances rendered inside _perfErr. Doing
+// this once at mount time so we don't have to re-bind after every redraw.
+document.getElementById('perf-errors-container')?.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-copy-text]');
+    if (!btn) return;
+    const text = btn.getAttribute('data-copy-text') || '';
+    try {
+        await navigator.clipboard.writeText(text);
+        const prev = btn.textContent;
+        btn.textContent = 'Copied ✓';
+        setTimeout(() => { btn.textContent = prev; }, 1400);
+    } catch (_) {
+        // Clipboard API can be blocked (insecure context, denied permission).
+        // Fall back to a window.prompt so the operator can still copy manually.
+        try { window.prompt('Copy this filename:', text); } catch (_) {}
+    }
+});
 
 document.getElementById('btn-refresh-perf')?.addEventListener('click', loadPerfErrors);
 document.getElementById('perf-window')?.addEventListener('change', loadPerfErrors);
