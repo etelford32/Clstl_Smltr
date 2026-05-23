@@ -135,6 +135,12 @@ RUN make -j$(nproc) SWMF \
 WORKDIR /opt/swmf
 
 # Verify the coupled binary built.
+# In current SWMF, `make SWMF` drops SWMF.exe into /opt/swmf/bin/ alongside
+# PostIDL.exe (older SWMF docs show it at the top-level /opt/swmf/SWMF.exe;
+# that path is gone in 2024+ releases).
+RUN ls -la /opt/swmf/bin/ \
+ && test -x /opt/swmf/bin/SWMF.exe \
+ && echo "SWMF coupled-build OK — $(stat -c '%s bytes' /opt/swmf/bin/SWMF.exe)"
 RUN ls -la /opt/swmf/bin/ \
  && ls -la /opt/swmf/SWMF.exe \
  && echo "SWMF coupled-build OK"
@@ -162,6 +168,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Copy compiled SWMF binary from builder.
+# SWMF.exe (the coupled binary running SC + IH + GM + IE together) and
+# PostIDL.exe both live under /opt/swmf/bin/ in current SWMF, so the
+# single COPY of that directory picks up everything we need. The
+# separate `COPY /opt/swmf/SWMF.exe` line that older docs reference is
+# gone — that path doesn't exist in 2024+ SWMF layouts.
+COPY --from=builder /opt/swmf/bin/  /opt/swmf/bin/
 # SWMF.exe is the coupled binary that runs SC + IH + GM + IE together —
 # that's the production binary. The per-component standalone
 # BATSRUS.exe files used to be copied here too; the standalone builds

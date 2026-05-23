@@ -24,4 +24,9 @@ pydantic>=2.7.0
 # `pip install --only-binary=:all: -r requirements.txt` resolve the full
 # graph and fail fast if a wheel is missing for the build arch — important
 # on ARM64 hosts (Apple Silicon, Graviton) where spacepy wheels lag.
-spacepy>=0.5,<0.7
+#
+# spacepy<0.7 was capped here originally to dodge numpy-2 incompatibilities
+# in 0.5/0.6, but on aarch64 the *only* version with a published wheel is
+# 0.7.0 (which fixes numpy-2 properly). Pinning to 0.7.x exactly so the
+# resolver stays inside the wheel-bearing range.
+spacepy>=0.7,<0.8
