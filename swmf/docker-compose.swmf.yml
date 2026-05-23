@@ -129,7 +129,11 @@ services:
       - dsmc-tables:/app/sparta/tables
       - dsmc-logs:/data/dsmc/logs
       - ../dsmc/pipeline:/app/pipeline:ro
-      - ../dsmc/sparta:/app/sparta:ro
+      # `../dsmc/sparta` is NOT :ro — the `dsmc-tables` named volume mounts
+      # a writable subdirectory at /app/sparta/tables, and Docker cannot
+      # create that mountpoint inside a read-only parent. Without this:
+      #   "failed to create task ... mkdirat /app/sparta/tables: read-only file system"
+      - ../dsmc/sparta:/app/sparta
       - ../dsmc/benchmark:/app/benchmark:ro
     ports:
       - "8001:8001"
