@@ -134,7 +134,25 @@ export function initState(design, { periKm = 400, apoKm = null } = {}) {
         t: 0,             // mission elapsed sim-seconds
         alive: true,
         reason: '',       // why the mission ended, if it did
+        // Realism extras the new flight model writes to:
+        burnSeconds: 0,   // accumulated full-throttle-equivalent burn time
+        tumbleRate:  0,   // body angular rate (rad/s) about the orbit normal
+        attitudeErr: 0,   // angle off the commanded heading (rad)
     };
+}
+
+// ── Atmospheric turbulence ─────────────────────────────────────────────────
+// Low-frequency density fluctuation driven by gravity waves & solar
+// activity. Two octaves of sinusoid + a slow random walk give a credible
+// ±15 % wobble around the model mean that the pilot can feel: drag
+// throbs, the spacecraft tumbles more under high q. Amplitude scales
+// with Ap (storm-time mesoscale variability is much higher).
+function turbulenceFactor(t, env) {
+    const apFrac = Math.min(1, (env.ap ?? 12) / 250);
+    const baseAmp = 0.05 + 0.18 * apFrac;       // ±5 % quiet, ±23 % storm
+    const a = Math.sin(t * 0.011) * 0.6;
+    const b = Math.sin(t * 0.043 + 1.7) * 0.4;
+    return 1 + baseAmp * (a + b);
 }
 
 // ── Atmosphere ──────────────────────────────────────────────────────────────
@@ -187,12 +205,20 @@ function derivatives(s, design, env, control) {
     const wx = s.vx - vAtmX;
     const wy = s.vy - vAtmY;
     const vrel = Math.hypot(wx, wy);
-    const rho = airDensity(alt, env);
+    // Mean-density model multiplied by a turbulence factor — gravity-wave +
+    // storm-time mesoscale variability. Pilots feel a throb in drag during
+    // storms; the value is also fed into a stochastic tumble term below.
+    const rhoMean = airDensity(alt, env);
+    const turb = turbulenceFactor(s.t, env);
+    const rho = rhoMean * turb;
     // a_drag = −½ ρ |v_rel| (Cd A · attitude / m) v_rel. The attitude
     // multiplier scales the effective frontal area: feathering shrinks it,
-    // flying broadside (aerobrake) inflates it.
+    // flying broadside (aerobrake) inflates it. Lost attitude (tumble)
+    // bloats effective area toward broadside — costs you energy when the
+    // bus is spinning into the wind.
     const aMult = attitudeMult(control);
-    const k = 0.5 * rho * vrel * design.cd * design.area * aMult / mass;
+    const tumblePenalty = 1 + 0.7 * Math.min(1.5, Math.abs(s.tumbleRate || 0));
+    const k = 0.5 * rho * vrel * design.cd * design.area * aMult * tumblePenalty / mass;
     const aDragX = -k * wx;
     const aDragY = -k * wy;
     ax += aDragX;
@@ -201,9 +227,20 @@ function derivatives(s, design, env, control) {
     const qdyn = 0.5 * rho * vrel * vrel;
 
     // Thrust. Direction is defined relative to the *inertial* velocity /
-    // radius, the way real burns are planned.
+    // radius, the way real burns are planned. Three realism layers are
+    // bolted on:
+    //   • throat erosion → Isp & thrust decay with accumulated burn time
+    //   • gimbal vectoring → control.gimbal (rad) rotates the thrust
+    //     vector by up to ±design.gimbalRad off the burn axis
+    //   • turbulence-driven attitude noise → small misalignment penalty
     let dfuel = 0;
-    const thr = (control?.throttle ?? 0) * design.thrust;
+    const baseThr = (control?.throttle ?? 0) * design.thrust;
+    // Erosion factor: 0 burn → 1.0; ≥ throatLifeS at full power → 0.75
+    // (capped 25 % loss; players still get a craft they can fly home).
+    const life = Math.max(1, design.throatLifeS ?? 6_000);
+    const erosionFrac = Math.min(1, (s.burnSeconds || 0) / life);
+    const erosionFactor = 1 - 0.25 * erosionFrac;
+    const thr = baseThr * erosionFactor;
     if (thr > 0 && s.fuel > 0 && control.mode && control.mode !== 'off') {
         let dirX = 0, dirY = 0;
         const vmag = Math.hypot(s.vx, s.vy) || 1;
@@ -216,13 +253,29 @@ function derivatives(s, design, env, control) {
         else if (control.mode === 'radial-in') { dirX = -s.x / r;     dirY = -s.y / r;     }
         else if (control.mode === 'manual')      { dirX =  Math.cos(h); dirY =  Math.sin(h); }
         else if (control.mode === 'manual-retro'){ dirX = -Math.cos(h); dirY = -Math.sin(h); }
+        // Gimbal: rotate (dirX, dirY) by the commanded vector angle, clamped
+        // to the engine's mechanical authority. Default zero so legacy
+        // callers see no change.
+        const gMax = design.gimbalRad ?? 0;
+        const gCmd = Math.max(-gMax, Math.min(gMax, control.gimbal ?? 0));
+        if (gCmd !== 0) {
+            const c = Math.cos(gCmd), si = Math.sin(gCmd);
+            const rx = dirX * c - dirY * si;
+            const ry = dirX * si + dirY * c;
+            dirX = rx; dirY = ry;
+        }
         const aThr = thr / mass;
         ax += aThr * dirX;
         ay += aThr * dirY;
-        dfuel = -thr / (design.isp * G0);   // Tsiolkovsky mass flow
+        // Isp loses the same fraction as thrust under erosion — both depend
+        // on the throat keeping its geometry.
+        const effIsp = design.isp * erosionFactor;
+        dfuel = -thr / (effIsp * G0);       // Tsiolkovsky mass flow
     }
 
-    return { ax, ay, dfuel, diag: { rho, vrel, qdyn, aDrag: aDragMag, alt } };
+    return { ax, ay, dfuel,
+             diag: { rho, rhoMean, turb, vrel, qdyn,
+                     aDrag: aDragMag, alt, erosion: erosionFrac } };
 }
 
 /**
@@ -237,6 +290,13 @@ export function step(s, design, env, control, dt) {
         vx: st.vx + k.dvx * h,
         vy: st.vy + k.dvy * h,
         fuel: Math.max(0, st.fuel + k.df * h),
+        // Advance the clock so time-dependent derivatives (turbulence) sample
+        // the right phase at each RK4 stage. Preserve the slow-moving state
+        // fields too — derivatives reads `tumbleRate` for the drag penalty.
+        t:  st.t + h,
+        burnSeconds: st.burnSeconds ?? 0,
+        tumbleRate:  st.tumbleRate  ?? 0,
+        attitudeErr: st.attitudeErr ?? 0,
     });
     const deriv = (st) => {
         const d = derivatives(st, design, env, control);
@@ -257,7 +317,46 @@ export function step(s, design, env, control, dt) {
         t: s.t + dt,
         alive: true,
         reason: '',
+        // Carry through realism extras.
+        burnSeconds: s.burnSeconds ?? 0,
+        tumbleRate:  s.tumbleRate  ?? 0,
+        attitudeErr: s.attitudeErr ?? 0,
     };
+
+    // ── Burn-time accounting (throat erosion clock) ──────────────────────
+    // Equivalent full-throttle seconds — half throttle for 2 s ≈ 1 sec of
+    // erosion. Only counts when an active burn mode is selected and fuel
+    // remained throughout the step. This is the clock deriveDesign+turn
+    // erosionFactor against.
+    const burning = control?.mode && control.mode !== 'off'
+                 && (control.throttle ?? 0) > 0 && out.fuel > 0;
+    if (burning) out.burnSeconds += (control.throttle ?? 0) * dt;
+
+    // ── Disturbance torque & tumble ──────────────────────────────────────
+    // The atmospheric drag acts at the centre of pressure (offset from the
+    // centre of mass by design.copOffset). That creates a torque whose
+    // sign flips with the local turbulence direction. Damping = a constant
+    // restoring term proportional to body inertia (mocked as a single τ).
+    // Result: high-q + long lever arms (telescope, tug-with-tall-payload)
+    // makes the bird wander off heading, bloats drag, costs you altitude.
+    const d1 = k1.diag;
+    if (d1) {
+        const cop = design.copOffset ?? 0.05;
+        // Torque ∝ aero force × lever × turbulence sign. Inertia proxy:
+        // mass × maxSide² (gives reasonable rad/s² magnitudes).
+        const inertia = (design.dryMass + Math.max(out.fuel, 0))
+                      * Math.max(0.5, (design.maxSide ?? 1)) ** 2;
+        const torque = d1.aDrag * (design.dryMass + Math.max(out.fuel, 0)) * cop
+                     * (d1.turb - 1) * 0.6;
+        // Reaction wheels & control authority gently damp tumble; chemical
+        // bus has weaker authority than an actively-pointed payload bus.
+        const damp = 0.18;
+        out.tumbleRate += (torque / inertia - out.tumbleRate * damp) * dt;
+        out.attitudeErr += out.tumbleRate * dt;
+        // Hard clamp so the sim doesn't go to spinning-numerically-unstable.
+        if (out.tumbleRate >  3) out.tumbleRate =  3;
+        if (out.tumbleRate < -3) out.tumbleRate = -3;
+    }
 
     const alt = Math.hypot(out.x, out.y) - R_EARTH;
     if (alt <= REENTRY_ALT_M) {
@@ -369,6 +468,15 @@ export function telemetry(s, design, env, attMult = 1) {
         missionTime: s.t,
         alive: s.alive,
         reason: s.reason,
+        // ── Realism extras (new gauges) ──
+        turbulence:  d.diag.turb ?? 1,
+        rhoMean:     d.diag.rhoMean ?? d.diag.rho,
+        erosion:     d.diag.erosion ?? 0,
+        burnSeconds: s.burnSeconds ?? 0,
+        tumbleRate:  s.tumbleRate ?? 0,
+        attitudeErr: s.attitudeErr ?? 0,
+        ispEff:      design.isp * (1 - 0.25 * (d.diag.erosion ?? 0)),
+        thrustEff:   design.thrust * (1 - 0.25 * (d.diag.erosion ?? 0)),
     };
 }
 
