@@ -1768,6 +1768,52 @@ nav {
 #tc-scrub:focus::-webkit-slider-thumb { box-shadow: 0 0 10px rgba(0,200,200,.7); }
 #tc-scrub:focus::-moz-range-thumb     { box-shadow: 0 0 10px rgba(0,200,200,.7); }
 
+/* Wind-forecast skill strip. Five cells stacked horizontally below the
+   scrubber, each a tiny bar coloured green→amber→red based on Murphy
+   skill of our best wind forecaster vs persistence at that horizon.
+   Painted from the WeatherForecastValidator summary on
+   'weather-forecast-validation-update' events. Always visible — gives
+   the user one-glance confidence as they consider scrubbing forward. */
+#tc-skill-strip {
+    display: flex; align-items: center; gap: 6px;
+    padding: 1px 4px 0; font-size: 9px; color: #557;
+    font-family: monospace; letter-spacing: .04em;
+}
+.tc-skill-label {
+    color: #446; text-transform: uppercase;
+    font-size: 8px; letter-spacing: .08em;
+    min-width: 60px;
+}
+.tc-skill-cell {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; gap: 1px; min-width: 24px;
+    height: 18px;
+}
+.tc-skill-bar {
+    display: block; width: 100%; height: 8px;
+    background: linear-gradient(to top,
+        rgba(0,200,200,.10) 0%, rgba(0,200,200,.10) 100%);
+    border-radius: 1px; border: 1px solid rgba(255,255,255,.05);
+    /* Bar fill is driven by --skill (0..1) via a CSS var, painted at
+       runtime. Default empty state is the faint cyan above. */
+    --skill: 0;
+    --skill-color: #557;
+    background-image:
+        linear-gradient(to top,
+            var(--skill-color) 0%,
+            var(--skill-color) calc(var(--skill) * 100%),
+            transparent calc(var(--skill) * 100%));
+    transition: --skill .3s, --skill-color .3s, background-image .3s;
+}
+.tc-skill-tag {
+    font-size: 8px; color: #667; line-height: 1;
+}
+.tc-skill-cell[data-state="warm"]  .tc-skill-tag { color: #99a; }
+.tc-skill-cell[data-state="cold"]  .tc-skill-tag { color: #445; }
+.tc-skill-cell[data-state="poor"]  .tc-skill-tag { color: #cc4; }
+.tc-skill-cell[data-state="good"]  .tc-skill-tag { color: #4c8; }
+.tc-skill-cell[data-state="best"]  .tc-skill-tag { color: #4cf; font-weight: 700; }
+
 /* Forecast-loading indicator. Sits as a third row inside #time-controls,
    only rendered while WeatherForecastFeed has a chunked triplet in
    flight. The amber palette matches the readout-toggle pill so the
@@ -3109,6 +3155,20 @@ nav {
                    aria-label="Time scrub — drag left for up to 1 week of history, right for up to 14 days of forecast"
                    title="Drag left to replay (up to 1 week back) or right to preview (up to 14 days ahead)">
             <span class="tc-scrub-edge right">+2w</span>
+        </div>
+        <!-- Wind-forecast skill strip. Five cells aligned roughly under
+             the scrubber's forecast half (+1h, +3h, +6h, +12h, +24h).
+             Each cell is a tiny vertical bar coloured by Murphy skill of
+             our best wind forecaster vs persistence at that horizon:
+             green = beating persistence, red = losing. Dashes until the
+             validator has matched ≥5 forecasts at that horizon. -->
+        <div id="tc-skill-strip" title="Wind-forecast skill vs persistence at each lead time. Bars fill upward as confidence rises; an em-dash means not enough validated forecasts yet (≥5 needed).">
+            <span class="tc-skill-label">wind skill</span>
+            <span class="tc-skill-cell" data-h="1">  <span class="tc-skill-bar"></span><span class="tc-skill-tag">1h</span></span>
+            <span class="tc-skill-cell" data-h="3">  <span class="tc-skill-bar"></span><span class="tc-skill-tag">3h</span></span>
+            <span class="tc-skill-cell" data-h="6">  <span class="tc-skill-bar"></span><span class="tc-skill-tag">6h</span></span>
+            <span class="tc-skill-cell" data-h="12"> <span class="tc-skill-bar"></span><span class="tc-skill-tag">12h</span></span>
+            <span class="tc-skill-cell" data-h="24"> <span class="tc-skill-bar"></span><span class="tc-skill-tag">24h</span></span>
         </div>
         <div id="tc-buttons-row">
             <button class="tc-btn" id="tc-play" title="Pause">⏸</button>
@@ -5720,11 +5780,33 @@ const wxForecastFeed = new WeatherForecastFeed({ history: wxGridHistory });
 // fires regardless of how simTime moved (slider drag, Operations
 // console, keyboard step).
 const PREFETCH_MS = 6 * 60 * 60_000;
+// Fire the first forecast fetch as soon as the user nudges the slider
+// past +5 min — well inside the resolver's 30-min liveBypass — so the
+// chunked Open-Meteo triplet (~2 s on a fast link) is on the wire and
+// the +24h forecast ring is populated by the time the user reaches the
+// replay window. Previous threshold of +30 min meant scrubbing forward
+// hit the liveBypass→replay transition with an empty forecast ring,
+// the resolver fell back to _dispatchLive, and the globe appeared to
+// "not move" until the next slider tick crossed the threshold again.
 const _futureFetchUnsub = timeBus.subscribe((snap) => {
-    if (snap.simTimeMs > Date.now() + 30 * 60_000) {
+    if (snap.simTimeMs > Date.now() + 5 * 60_000) {
         wxForecastFeed.ensureLoadedUntil(snap.simTimeMs + PREFETCH_MS);
     }
 });
+
+// Idle pre-warm. After the page has been open for ~8 s with the user
+// presumably done with first-paint settling, fetch the first +24 h of
+// hourly forecast unconditionally. This burns ~2-3 MB of egress per
+// session whether or not the user ever scrubs forward, but it makes
+// the first future-scrub feel instant instead of "drag → wait → globe
+// finally updates". Skipped when the tab loaded hidden (the user
+// hasn't touched the page yet; don't pay the bandwidth until they do).
+setTimeout(() => {
+    if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        wxForecastFeed.ensureLoadedUntil(Date.now() + 24 * 3_600_000)
+            .catch(() => { /* surfaced via the fetch-end status event */ });
+    }
+}, 8000);
 
 // Re-bracket on forecast ingest so the slider's current position picks
 // up the fresh forecast frames immediately, instead of waiting for the
@@ -6105,6 +6187,91 @@ document.addEventListener('weather-forecast-validation-update', (ev) => {
 // Initial paint with whatever the validator already has on disk so the
 // table isn't blank on a fresh page load with prior history.
 _paintForecastSkill(wxForecastValidator.summary());
+
+// ── Wind-skill strip (under the scrub bar) ──────────────────────────────
+// Companion to the wx-panel skill grid: surfaces a one-glance read of
+// "how well are we predicting wind right now?" at each of the five
+// horizons, immediately next to the slider so the user can correlate
+// their scrub position with model confidence.
+//
+// Scoring policy
+//   For each horizon h, pick the highest-skill registered wind model
+//   (averaged across the U and V channels) and convert its Murphy skill
+//   to a 0..1 bar fill. Negative skill (model worse than persistence)
+//   pegs to a faint red sliver; positive skill scales linearly to 1.0
+//   at +30 % skill so a "good" model fills the bar visibly. Cells where
+//   the validator has < 5 paired samples paint a dash and stay cold.
+const _SKILL_HORIZONS = [1, 3, 6, 12, 24];
+const _SKILL_CHANNELS = ['U', 'V'];
+function _paintWindSkillStrip(summary) {
+    const strip = document.getElementById('tc-skill-strip');
+    if (!strip) return;
+    const models = Object.keys(summary).filter(id => id !== 'persistence-v1');
+    const ref = summary['persistence-v1'];
+    for (const h of _SKILL_HORIZONS) {
+        const cell = strip.querySelector(`.tc-skill-cell[data-h="${h}"]`);
+        if (!cell) continue;
+        const bar = cell.querySelector('.tc-skill-bar');
+        let bestSkill = -Infinity;
+        let bestModel = null;
+        let bestN     = 0;
+        for (const id of models) {
+            // Average MSE across U + V for this horizon. Need ≥5 samples
+            // on both the model and the persistence reference for the
+            // Murphy denominator to be meaningful.
+            let mseM = 0, mseR = 0, nMin = Infinity, valid = true;
+            for (const ch of _SKILL_CHANNELS) {
+                const m = summary[id]?.[ch]?.[h];
+                const r = ref?.[ch]?.[h];
+                if (!m || !r || !Number.isFinite(m.mse) || !Number.isFinite(r.mse) || r.mse <= 0) {
+                    valid = false; break;
+                }
+                mseM += m.mse; mseR += r.mse;
+                nMin = Math.min(nMin, m.n | 0, r.n | 0);
+            }
+            if (!valid || nMin < 5) continue;
+            const skill = 1 - (mseM / mseR);
+            if (skill > bestSkill) { bestSkill = skill; bestModel = id; bestN = nMin; }
+        }
+        let fill = 0, color = '#557', state = 'cold', label;
+        if (bestModel === null) {
+            label = '—';
+            state = 'cold';
+        } else if (bestSkill < 0) {
+            // Losing to persistence: tiny red sliver so it's visible
+            // without being alarming. Scale so −30 % skill fills ~30 %.
+            fill = Math.max(0.05, Math.min(0.3, Math.abs(bestSkill)));
+            color = '#cc4';
+            state = 'poor';
+            label = `${(bestSkill * 100).toFixed(0)}%`;
+        } else {
+            // Beating persistence. Linear ramp: +30 % skill fills the
+            // bar; higher saturates at 1.0 (capped so a freak run doesn't
+            // visually dominate the strip).
+            fill = Math.min(1, bestSkill / 0.30);
+            // Color: cool cyan for any positive skill; brighter for ≥+10 %.
+            if (bestSkill >= 0.10) { color = '#4cf'; state = 'best'; }
+            else                    { color = '#4c8'; state = 'good'; }
+            label = `${(bestSkill * 100).toFixed(0)}%`;
+        }
+        bar.style.setProperty('--skill', fill.toString());
+        bar.style.setProperty('--skill-color', color);
+        // Force background-image recompute on browsers that don't yet
+        // animate CSS custom-property transitions.
+        bar.style.backgroundImage =
+            `linear-gradient(to top, ${color} 0%, ${color} ${fill * 100}%, transparent ${fill * 100}%)`;
+        cell.dataset.state = state;
+        cell.title = bestModel === null
+            ? `wind +${h}h — awaiting validation (${bestN} samples)`
+            : `wind +${h}h — ${bestModel}: ${label} skill vs persistence (n=${bestN})`;
+        const tag = cell.querySelector('.tc-skill-tag');
+        if (tag) tag.textContent = `${h}h`;
+    }
+}
+document.addEventListener('weather-forecast-validation-update', (ev) => {
+    _paintWindSkillStrip(ev.detail?.summary ?? {});
+});
+_paintWindSkillStrip(wxForecastValidator.summary());
 
 // ── Precipitation long-memory coverage HUD ────────────────────────────────
 // Two readouts under the skill grid: climatology coverage (per-cell ×
@@ -8804,6 +8971,29 @@ let simTimeMs = timeBus.getState().simTimeMs;
 let simSpeed  = 1;                  // last user-selected speed for resume
 let simPaused = false;              // mirrors bus mode==='scrub'
 
+// ── Slider input wiring (hoisted) ──────────────────────────────────────
+// Attach the scrub-bar input listener as the FIRST thing after the bus
+// starts, ahead of all heavy module init below. If anything later in
+// this module throws (a feed constructor, a shader compile, a missing
+// DOM node) the slider still drives simTimeMs — the page stays usable
+// rather than locking the user out of time scrubbing entirely.
+// The element is read once into `_scrubEl`; the late writeback path in
+// animate() reads the same `const` binding.
+const _scrubEl = document.getElementById('tc-scrub');
+if (_scrubEl) {
+    _scrubEl.addEventListener('input', () => {
+        // value is "minutes from now" in [-10080, +20160] (-7d / +14d).
+        // Negative = past (replay observations); positive = future
+        // (forecast preview through the WeatherForecastFeed ring).
+        // setSimTime({ fromUser: true }) makes the bus auto-flip to
+        // 'scrub' mode if it was live/replay — no manual pause toggle
+        // needed. Local simPaused is mirrored back via the subscription.
+        const minutesFromNow = Number(_scrubEl.value);
+        timeBus.setSimTime(Date.now() + minutesFromNow * 60_000,
+                           { fromUser: true });
+    });
+}
+
 // Subscribe to bus state so external writes (Operations console, or
 // keyboard shortcuts on either page) propagate to Earth's UI. Throttled
 // to ≤10 Hz by the bus itself; cheap to re-evaluate.
@@ -8969,27 +9159,13 @@ document.querySelectorAll('.tc-btn[data-speed]').forEach(btn => {
 _setSimSpeed(1);
 _setSimPaused(false);
 
-// ── 24-h replay slider ──────────────────────────────────────────────────
-// Bidirectional binding to simTimeMs:
-//   • input event (drag / keyboard)   → write simTimeMs
-//   • animate() natural advance (1×, 60×, …) → write slider.value
-// The writeback is suppressed while the slider has focus so we don't
-// fight the user mid-drag (browsers fire `input` continuously during
-// drag; document.activeElement === slider lasts from pointerdown
-// through pointerup-or-tab-out).
-const _scrubEl = document.getElementById('tc-scrub');
+// ── 24-h replay slider — release-side wiring ────────────────────────────
+// The `input` listener (drag/keyboard → simTimeMs) is hoisted to right
+// after timeBus.start() so it survives any throw in the heavy init that
+// follows. Only the `change` resume-on-release behaviour lives here,
+// because it depends on `_setSimPaused`/`simPaused` declared above.
+// The animate() writeback (simTimeMs → slider.value) lives further down.
 if (_scrubEl) {
-    _scrubEl.addEventListener('input', () => {
-        const minutesFromNow = Number(_scrubEl.value);
-        // value is "minutes from now" in [-10080, +20160] (-7d / +14d).
-        // Negative = past (replay observations); positive = future
-        // (forecast preview through the WeatherForecastFeed ring).
-        // setSimTime({ fromUser: true }) makes the bus auto-flip to
-        // 'scrub' mode if it was live/replay — no manual pause toggle
-        // needed. Local simPaused is mirrored back via the subscription.
-        timeBus.setSimTime(Date.now() + minutesFromNow * 60_000,
-                           { fromUser: true });
-    });
     // Resume natural advance on release if the user dragged back to
     // "now" — otherwise leave them paused at the historical/forecast
     // instant they chose.
