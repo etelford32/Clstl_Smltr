@@ -198,6 +198,43 @@ export async function init(canvas, THREE) {
     satExtent = Math.max(0.3, BUILDER.buildExtent(build));
   }
 
+  // ── Thrust flame — visible exhaust plume tied to throttle ────────────────
+  // A glowing cone tucked behind the satellite. Lives at scene root so it
+  // doesn't inherit satPivot's render-scale (which would make it huge in
+  // wide views). Length & opacity track throttle × fuel-present; colour
+  // shifts cyan↔orange for electric vs chemical engines.
+  const flameTex = (() => {
+    const c = document.createElement('canvas');
+    c.width = 64; c.height = 256;
+    const g = c.getContext('2d');
+    const grad = g.createLinearGradient(0, 0, 0, 256);
+    grad.addColorStop(0,    'rgba(255,255,255,1)');
+    grad.addColorStop(0.15, 'rgba(255,220,140,0.95)');
+    grad.addColorStop(0.45, 'rgba(255,140, 60,0.65)');
+    grad.addColorStop(0.8,  'rgba(255, 90, 30,0.25)');
+    grad.addColorStop(1,    'rgba(120, 30, 10,0)');
+    g.fillStyle = grad;
+    // Tapered ellipse: bright bell at top, fading wisp downstream.
+    g.beginPath();
+    g.moveTo(32, 0);
+    g.quadraticCurveTo(64, 80, 36, 256);
+    g.quadraticCurveTo(32, 256, 28, 256);
+    g.quadraticCurveTo(0, 80, 32, 0);
+    g.closePath();
+    g.fill();
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  })();
+  const flameMat = new THREE.SpriteMaterial({
+    map: flameTex, transparent: true, depthWrite: false,
+    blending: THREE.AdditiveBlending, opacity: 0.95, color: 0xffffff,
+  });
+  const flame = new THREE.Sprite(flameMat);
+  flame.visible = false;
+  flame.renderOrder = 998;
+  scene.add(flame);
+
   // ── Heading reticle — shows where the satellite is *pointed* in manual ──
   // A short ribbon drawn ahead of the satellite along the current heading.
   // Always visible in the 3-D scene so the pilot can pre-aim before firing.
@@ -454,6 +491,31 @@ export async function init(canvas, THREE) {
       } else {
         headingLine.visible = false;
         headingTip.visible = false;
+      }
+
+      // ── Thrust plume — sized by throttle, oriented opposite the burn ──
+      // s.thrust = { throttle:0..1, dirX, dirY, electric, fuelOk }
+      // dirX/dirY = the burn direction (where thrust pushes); plume
+      // extends in the opposite direction, "behind" the satellite.
+      const t = s.thrust;
+      const firing = t && t.throttle > 0 && t.fuelOk && t.dirX !== undefined;
+      if (firing) {
+        const camDist = camera.position.distanceTo(satPivot.position);
+        const baseLen = Math.max(160, camDist * 0.06);
+        const length = baseLen * (0.4 + 0.6 * t.throttle);  // floor + scale with throttle
+        const width  = length * 0.22;
+        // Plume centre sits one half-length behind the satellite.
+        const ang = Math.atan2(t.dirY, t.dirX);
+        const cx = satPivot.position.x - Math.cos(ang) * length * 0.5;
+        const cy = satPivot.position.y - Math.sin(ang) * length * 0.5;
+        flame.position.set(cx, cy, 0);
+        flame.scale.set(width, length, 1);
+        flame.material.rotation = ang - Math.PI / 2;  // sprite +y points along plume
+        flame.material.color.setHex(t.electric ? 0x66c8ff : 0xffb066);
+        flame.material.opacity = 0.55 + 0.45 * t.throttle;
+        flame.visible = true;
+      } else {
+        flame.visible = false;
       }
     }
     if (s.trailM) writeTrail(s.trailM);

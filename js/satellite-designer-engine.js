@@ -80,7 +80,17 @@ export function makeDesign(raw = {}) {
 export function defaultEnv() {
     // F10.7 ≈ 150 sfu / Ap ≈ 12 ≈ a moderately active Sun — the regime
     // where solar-cycle thermosphere swelling is clearly felt in LEO.
-    return { f107Sfu: 150, ap: 12 };
+    // gravityMul scales the planet's GM in real time — 1.0 = Earth,
+    // 0.16 ≈ Moon, 2.0 ≈ super-Earth — for "what if" gameplay.
+    return { f107Sfu: 150, ap: 12, gravityMul: 1.0 };
+}
+
+/** Effective GM for the current env. Centralised so every consumer
+ *  (gravity force, orbital elements, surface g, circular speed) reads
+ *  the same scaled value when the pilot moves the gravity slider. */
+export function effectiveMU(env) {
+    const m = +(env?.gravityMul ?? 1);
+    return MU * (isFinite(m) && m > 0 ? m : 1);
 }
 
 // ── Space-weather presets ───────────────────────────────────────────────────
@@ -121,12 +131,14 @@ export function attitudeMult(control) {
  * Place the vehicle on an orbit defined by perigee/apogee altitude (km).
  * Starts at perigee on the +x axis, moving prograde (+y).
  */
-export function initState(design, { periKm = 400, apoKm = null } = {}) {
+export function initState(design, { periKm = 400, apoKm = null, env = null } = {}) {
     const rp = R_EARTH + Math.max(periKm, 5) * 1000;
     const ra = R_EARTH + Math.max(apoKm ?? periKm, periKm) * 1000;
     const a  = 0.5 * (rp + ra);
-    // vis-viva at perigee
-    const vp = Math.sqrt(MU * (2 / rp - 1 / a));
+    // vis-viva at perigee — uses the *effective* GM so the chosen perigee
+    // really is the orbit's perigee under the current gravity slider.
+    const mu = effectiveMU(env);
+    const vp = Math.sqrt(mu * (2 / rp - 1 / a));
     return {
         x: rp, y: 0,
         vx: 0, vy: vp,
@@ -175,10 +187,11 @@ export function airDensity(altM, env) {
     return rho80 * Math.exp((80 - hKm) / 7.0);
 }
 
-/** Local gravitational acceleration magnitude [m/s²]. */
-export function gravityAt(altM) {
+/** Local gravitational acceleration magnitude [m/s²]. Pass env to honour
+ *  the user's gravity-slider override; without env you get base Earth. */
+export function gravityAt(altM, env = null) {
     const r = R_EARTH + altM;
-    return MU / (r * r);
+    return effectiveMU(env) / (r * r);
 }
 
 // ── Equations of motion ─────────────────────────────────────────────────────
@@ -192,8 +205,11 @@ function derivatives(s, design, env, control) {
     const r = Math.hypot(s.x, s.y);
     const alt = r - R_EARTH;
 
-    // Gravity (inverse-square, central).
-    const gOverR = -MU / (r * r * r);
+    // Gravity (inverse-square, central). MU scales with env.gravityMul so
+    // the pilot's gravity slider reshapes orbits in real time without
+    // requiring a sim reset.
+    const mu = effectiveMU(env);
+    const gOverR = -mu / (r * r * r);
     let ax = gOverR * s.x;
     let ay = gOverR * s.y;
 
@@ -391,23 +407,26 @@ export function advance(s, design, env, control, seconds) {
 }
 
 // ── Orbital elements & telemetry ────────────────────────────────────────────
-/** Classical 2-D elements from the state vector. */
-export function elements(s) {
+/** Classical 2-D elements from the state vector. Accepts an optional env
+ *  so a non-default gravity slider feeds through to apo/peri/period; if
+ *  omitted, defaults to Earth μ. */
+export function elements(s, env = null) {
+    const mu = effectiveMU(env);
     const r = Math.hypot(s.x, s.y);
     const v2 = s.vx * s.vx + s.vy * s.vy;
-    const energy = v2 / 2 - MU / r;            // specific orbital energy
-    const a = -MU / (2 * energy);              // semi-major axis (∞ if parabolic)
+    const energy = v2 / 2 - mu / r;            // specific orbital energy
+    const a = -mu / (2 * energy);              // semi-major axis (∞ if parabolic)
     const hz = s.x * s.vy - s.y * s.vx;        // specific angular momentum (z)
     const rDotV = s.x * s.vx + s.y * s.vy;
     // Eccentricity vector e = ((v²−μ/r) r − (r·v) v) / μ
-    const c = v2 - MU / r;
-    const ex = (c * s.x - rDotV * s.vx) / MU;
-    const ey = (c * s.y - rDotV * s.vy) / MU;
+    const c = v2 - mu / r;
+    const ex = (c * s.x - rDotV * s.vx) / mu;
+    const ey = (c * s.y - rDotV * s.vy) / mu;
     const ecc = Math.hypot(ex, ey);
     const bound = energy < 0 && isFinite(a);
     const rp = bound ? a * (1 - ecc) : r;
     const ra = bound ? a * (1 + ecc) : Infinity;
-    const period = bound ? 2 * Math.PI * Math.sqrt((a * a * a) / MU) : Infinity;
+    const period = bound ? 2 * Math.PI * Math.sqrt((a * a * a) / mu) : Infinity;
     return {
         r, speed: Math.sqrt(v2), a, ecc, hz, energy, bound,
         rp, ra,
@@ -422,7 +441,7 @@ export function elements(s) {
  * Live mission telemetry — everything the cockpit gauges show.
  */
 export function telemetry(s, design, env, attMult = 1) {
-    const el = elements(s);
+    const el = elements(s, env);
     const mass = design.dryMass + Math.max(s.fuel, 0);
     const d = derivatives(s, design, { ...env }, { throttle: 0, mode: 'off', attitudeMult: attMult });
 
@@ -434,10 +453,11 @@ export function telemetry(s, design, env, attMult = 1) {
 
     // Specific-energy loss rate from drag → semi-major-axis decay rate.
     // ε̇ = a_nongrav · v ;  ȧ = (2 a² / μ) ε̇
+    const muEff = effectiveMU(env);
     const dragPower = -(d.diag.aDrag) * el.speed;              // ≤ 0 (J/kg/s)
     let aDot = 0, decayPerOrbitKm = 0, daysToReentry = Infinity;
     if (el.bound) {
-        aDot = (2 * el.a * el.a / MU) * dragPower;             // m/s, ≤ 0
+        aDot = (2 * el.a * el.a / muEff) * dragPower;          // m/s, ≤ 0
         decayPerOrbitKm = (aDot * el.period) / 1000;
         if (aDot < -1e-9) {
             const aReentry = R_EARTH + 100_000;
