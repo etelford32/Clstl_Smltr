@@ -164,6 +164,42 @@ nav {
 #hud .sep { border-top:1px solid rgba(255,180,0,.2); margin:5px 0; }
 #fps-display { color:#40ff80; font-weight:600; }
 
+/* ─── Smart tour overlay ─────────────────────────────────────── */
+#smart-tour-overlay {
+    position:absolute; top:12px; left:50%; transform:translateX(-50%);
+    z-index:55; min-width:300px; max-width:420px;
+    background:rgba(8,4,0,.78); backdrop-filter:blur(10px);
+    border:1px solid rgba(255,140,40,.35); border-radius:9px;
+    padding:8px 14px; font-size:11px; line-height:1.55;
+    pointer-events:none; display:none;
+    box-shadow:0 4px 22px rgba(255,120,0,.18);
+}
+#smart-tour-overlay.show { display:block; animation:tour-fade .35s ease-out; }
+#smart-tour-overlay.interrupt { border-color:rgba(255,60,0,.7); box-shadow:0 0 26px rgba(255,80,0,.45); }
+@keyframes tour-fade { from{opacity:0;transform:translate(-50%,-6px)} to{opacity:1;transform:translate(-50%,0)} }
+#sto-hd {
+    display:flex; align-items:center; gap:8px; font-size:10px;
+    text-transform:uppercase; letter-spacing:.08em; color:#ff9944;
+    border-bottom:1px solid rgba(255,140,40,.18); padding-bottom:4px; margin-bottom:5px;
+}
+#sto-hd .dot { width:7px; height:7px; border-radius:50%; background:#ff8800; box-shadow:0 0 8px #ff8800; animation:tour-pulse 1.6s ease-in-out infinite; }
+@keyframes tour-pulse { 0%,100%{opacity:1} 50%{opacity:.45} }
+#sto-title { font-size:15px; font-weight:700; color:#ffd080; letter-spacing:.04em; }
+#sto-loc   { color:#ffaa66; font-weight:600; }
+#sto-row   { display:flex; gap:14px; flex-wrap:wrap; margin-top:3px; color:#ddccaa; }
+#sto-row .k { color:#776655; margin-right:3px; }
+#sto-tier  { display:inline-block; padding:1px 8px; border-radius:9px;
+             font-size:10px; font-weight:700; letter-spacing:.06em; }
+.tier-low      { background:rgba(80,180,120,.18);  border:1px solid rgba(80,180,120,.4); color:#88dd99; }
+.tier-mod      { background:rgba(220,180,60,.18);  border:1px solid rgba(220,180,60,.4); color:#ffd864; }
+.tier-high     { background:rgba(255,140,40,.20);  border:1px solid rgba(255,140,40,.5); color:#ffaa66; }
+.tier-severe   { background:rgba(255,60,40,.22);   border:1px solid rgba(255,60,40,.6);  color:#ff8866;
+                 animation:tour-pulse 1.2s ease-in-out infinite; }
+#sto-progress {
+    height:2px; background:rgba(255,140,40,.12); border-radius:2px; overflow:hidden; margin-top:6px;
+}
+#sto-progress .bar { height:100%; background:linear-gradient(90deg,#ff8800,#ffd864); width:0%; transition:width .25s linear; }
+
 .cv-btn {
     position: absolute; z-index: 60;
     background: rgba(4,2,0,.80); backdrop-filter: blur(8px);
@@ -810,6 +846,20 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
             <div style="margin-top:3px">FPS: <span id="fps-display">--</span></div>
             <div class="dim" style="margin-top:2px">Drag · Pinch · Scroll</div>
         </div>
+        <!-- Smart Tour overlay — populated by smartTour module -->
+        <div id="smart-tour-overlay">
+            <div id="sto-hd"><span class="dot"></span><span id="sto-mode">SMART TOUR</span><span style="flex:1"></span><span id="sto-tier"></span></div>
+            <div><span id="sto-title">—</span> <span style="color:#665544;font-size:10px">·</span> <span id="sto-loc">—</span></div>
+            <div id="sto-row">
+                <div><span class="k">Mag:</span><span id="sto-mag">—</span></div>
+                <div><span class="k">Δλ to Earth-line:</span><span id="sto-merid">—</span></div>
+                <div><span class="k">Area:</span><span id="sto-area">—</span></div>
+                <div><span class="k">Last flare:</span><span id="sto-lastflare">—</span></div>
+            </div>
+            <div id="sto-why" style="margin-top:3px;color:#aa9988;font-size:10px;font-style:italic">—</div>
+            <div id="sto-progress"><div class="bar"></div></div>
+        </div>
+
         <!-- Flare Alert Banner -->
         <div id="flare-alert-banner"></div>
 
@@ -1168,6 +1218,17 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
                         <button id="cam-default" class="active">Default</button>
                         <button id="cam-close">Close-up</button>
                         <button id="cam-wide">Wide</button>
+                    </div>
+                    <div class="toggle-row" style="margin-top:8px">
+                        <input type="checkbox" id="tog-smart-tour">
+                        <label for="tog-smart-tour" title="Auto-cycle the camera through the most Earth-affecting active regions">⚡ Smart tour — Earth-affecting regions</label>
+                    </div>
+                    <div class="btn-row" id="smart-tour-controls" style="margin-top:4px;display:none">
+                        <button id="tour-next" title="Skip to next active region">↻ Next AR</button>
+                        <button id="tour-pause" title="Pause/resume auto-cycle">⏸ Pause</button>
+                    </div>
+                    <div style="font-size:9.5px;color:#776655;margin-top:6px;line-height:1.45">
+                        Scoring: meridian proximity (Earth-firing line) × magnetic complexity (β/γ/δ) × area × recent flare class. Live M/X flares interrupt the cycle.
                     </div>
                 </div>
             </div>
@@ -7407,6 +7468,11 @@ function animate() {
         uniforms.u_flare_intensity.value = 0.0;
     }
 
+    // Smart tour scheduler — advances every dwell, updates progress bar
+    if (typeof smartTour !== 'undefined' && smartTour.active) {
+        smartTour.tick(performance.now());
+    }
+
     // Phase 4.1 — keep the radial-corona-diffusion pass in sync with the
     // current flare flash so the gather strength + HDR clamp dampen the
     // horizontal "death laser" during M/X events.
@@ -7730,6 +7796,12 @@ const CAMS = {
     wide:    [0, 3, 14],
 };
 function setCam(k) {
+    // If the smart tour is running, manual cam input cancels it
+    if (typeof smartTour !== 'undefined' && smartTour.active) {
+        const tog = document.getElementById('tog-smart-tour');
+        if (tog?.checked) tog.checked = false;
+        smartTour.stop();
+    }
     document.querySelectorAll('.btn-row button[id^=cam]').forEach(b => b.classList.remove('active'));
     document.getElementById('cam-' + k)?.classList.add('active');
     camera.position.set(...CAMS[k]); controls.target.set(0,0,0); controls.update();
@@ -8232,26 +8304,290 @@ async function fetchLiveSolarData() {
 }
 
 // ── Fly camera to a heliographic region position ──────────────────────────
-function flyToRegion(lat, lon) {
+// distR:  camera distance from sun centre along the AR's outward normal
+// frame:  0 = look at sun centre (AR sits at edge), 1 = look at AR (AR centered, close-up)
+// dur:    fly duration in ms
+function flyToRegion(lat, lon, distR = 3.0, frame = 0.0, dur = 900) {
     const lr  = lat * Math.PI / 180;
-    const lnr = lon * Math.PI / 180 + solarRotAngle;  // offset by current rotation
+    const lnr = lon * Math.PI / 180 + solarRotAngle;
     const dir = new THREE.Vector3(
         Math.cos(lr) * Math.sin(lnr),
         Math.sin(lr),
         Math.cos(lr) * Math.cos(lnr)
     ).normalize();
-    const dest  = dir.multiplyScalar(3.0);
+    const arPos = dir.clone();                      // unit-sphere AR position
+    const dest  = dir.clone().multiplyScalar(distR);
+    const tgtAt = arPos.clone().multiplyScalar(frame);   // lerp(centre, AR)
     const start = camera.position.clone();
+    const startTgt = controls.target.clone();
     const t0    = performance.now();
     (function step(now) {
-        const raw  = Math.min((now - t0) / 900, 1);
+        const raw  = Math.min((now - t0) / dur, 1);
         const ease = raw < 0.5 ? 2*raw*raw : -1 + (4-2*raw)*raw;
         camera.position.lerpVectors(start, dest, ease);
-        controls.target.set(0, 0, 0);
+        controls.target.lerpVectors(startTgt, tgtAt, ease);
         controls.update();
         if (raw < 1) requestAnimationFrame(step);
     })(performance.now());
 }
+
+// ══════════════════════════════════════════════════════════════════════════
+//  SMART TOUR — auto-cycle the camera through the most Earth-affecting
+//  active regions. Interrupts on live M/X flares. Geoeffectiveness score:
+//
+//    score = wMerid * (1 - |lon|/90)^1.4    (front-side meridian proximity)
+//          + wMag   * complexity / 3        (α=0, β=1, βγ=2, βγδ=3)
+//          + wArea  * sqrt(area / 600)      (umbral + penumbral coverage)
+//          + wFlare * recentFlareWeight     (24h flare history at this AR)
+//
+//  ARs with |lon| > 80° are filtered (back-side, can't affect Earth this
+//  rotation). Sub-Earth point is heliographic lon = 0° → ARs near 0° are
+//  Earth-firing if they erupt now.
+// ══════════════════════════════════════════════════════════════════════════
+const smartTour = (() => {
+    const HOLD_MS_BASE   = 12000;    // dwell per AR
+    const HOLD_MS_FLARE  = 22000;    // dwell when interrupted by live flare
+    const FLY_MS         = 1400;     // fly-to duration
+    const DIST_R         = 2.05;     // camera distance from sun centre (R_sun units)
+    const FRAME          = 0.62;     // 0 = look at centre, 1 = look at AR
+    const FLARE_INTERRUPT_CLASSES = new Set(['M','X']);
+
+    let active        = false;
+    let paused        = false;
+    let interrupted   = false;       // currently locked on a live flare
+    let currentIdx    = 0;
+    let nextSwitchAt  = 0;
+    let dwellStart    = 0;
+    let dwellMs       = HOLD_MS_BASE;
+    let savedCamPos   = null;        // restore when tour off
+    let savedTarget   = null;
+    let lastRanked    = [];          // cached ranking, refreshed on advance
+    let lastTier      = '';
+
+    function magComplexityFromString(mag) { return magComplexity(mag); }
+
+    // Earth-line: heliographic lon = 0 is sub-Earth point (NOAA Stonyhurst W=+, E=-)
+    function meridianFactor(lonDeg) {
+        const a = Math.abs(lonDeg);
+        if (a > 80) return -1;        // off the Earth-facing disc
+        return Math.pow(1 - a / 90, 1.4);
+    }
+
+    // Find max-class flare for this AR within last 24h
+    function lastFlareForAR(regNum, withinMs = 24 * 3600e3) {
+        if (!liveFlares?.length) return null;
+        const cutoff = Date.now() - withinMs;
+        let best = null;
+        for (const f of liveFlares) {
+            if (String(f.reg) !== String(regNum)) continue;
+            const t = new Date(f.time).getTime();
+            if (!(t > cutoff)) continue;
+            const cls = String(f.cls ?? '');
+            const rank = cls[0] === 'X' ? 4 : cls[0] === 'M' ? 3 : cls[0] === 'C' ? 2 : cls[0] === 'B' ? 1 : 0;
+            const mag  = parseFloat(cls.slice(1)) || 0;
+            const w = rank * 10 + mag;
+            if (!best || w > best.w) best = { f, w, rank };
+        }
+        return best;
+    }
+
+    function score(reg) {
+        const c = parseLoc(reg.loc); if (!c) return -1;
+        const mf = meridianFactor(c.lon);
+        if (mf < 0) return -1;
+        const mc = magComplexityFromString(reg.mag);
+        const af = Math.sqrt(Math.min(reg.area || 0, 1200) / 600);
+        const bf = lastFlareForAR(reg.num);
+        const ff = bf ? Math.min(1.5, bf.rank * 0.35 + 0.05) : 0;
+        // Weights: meridian is dominant (Earth-line gates the entire chain)
+        return mf * 1.40 + (mc / 3) * 0.70 + af * 0.55 + ff * 0.85;
+    }
+
+    function ranked() {
+        if (!liveRegions?.length) return [];
+        return liveRegions
+            .map(r => ({ reg: r, s: score(r), loc: parseLoc(r.loc) }))
+            .filter(x => x.s > 0 && x.loc)
+            .sort((a, b) => b.s - a.s);
+    }
+
+    function tier(s) {
+        if (s >= 2.3) return { k:'severe', label:'SEVERE' };
+        if (s >= 1.7) return { k:'high',   label:'HIGH'   };
+        if (s >= 1.1) return { k:'mod',    label:'MOD'    };
+        return            { k:'low',    label:'LOW'    };
+    }
+
+    function whyText(reg, loc, lf) {
+        // Stonyhurst convention: lon > 0 = W (rotating away from Earth-line),
+        //                        lon < 0 = E (rotating toward Earth-line).
+        const bits = [];
+        const a   = Math.abs(loc.lon);
+        const dir = loc.lon < 0 ? 'E' : 'W';
+        if (a < 12)       bits.push('on Earth-firing meridian — CME from here points at Earth');
+        else if (a < 35)  bits.push(`${a.toFixed(0)}°${dir} of meridian — ${loc.lon < 0 ? 'rotating into Earth-firing zone' : 'rotating out of Earth view'}`);
+        else              bits.push(`${a.toFixed(0)}°${dir} — glancing CMEs only`);
+        const mc = magComplexityFromString(reg.mag);
+        if (mc >= 3) bits.push('β-γ-δ → high flare/CME risk');
+        else if (mc === 2) bits.push('β-γ complexity');
+        if (lf?.f?.cls) bits.push(`recent ${lf.f.cls}`);
+        return bits.join(' · ');
+    }
+
+    function showOverlay(entry) {
+        const reg = entry.reg, loc = entry.loc;
+        const lf  = lastFlareForAR(reg.num);
+        const t   = tier(entry.s);
+        lastTier  = t.k;
+        const ov  = document.getElementById('smart-tour-overlay');
+        const tch = document.getElementById('sto-tier');
+        document.getElementById('sto-mode').textContent  = interrupted ? '⚡ LIVE FLARE — LOCKED' : 'SMART TOUR';
+        document.getElementById('sto-title').textContent = 'AR ' + (reg.num || '?');
+        document.getElementById('sto-loc').textContent   = reg.loc;
+        document.getElementById('sto-mag').textContent   = reg.mag || '—';
+        document.getElementById('sto-merid').textContent = `${Math.abs(loc.lon).toFixed(0)}°`;
+        document.getElementById('sto-area').textContent  = (reg.area || 0) + ' μH';
+        document.getElementById('sto-lastflare').textContent = lf?.f?.cls ? `${lf.f.cls} (${_timeAgo(lf.f.time)})` : 'none (24h)';
+        document.getElementById('sto-why').textContent   = whyText(reg, loc, lf);
+        tch.className = 'tier-' + t.k;
+        tch.textContent = t.label;
+        ov.classList.toggle('interrupt', interrupted);
+        ov.classList.add('show');
+    }
+
+    function hideOverlay() {
+        document.getElementById('smart-tour-overlay')?.classList.remove('show', 'interrupt');
+    }
+
+    function gotoIdx(i) {
+        const list = lastRanked.length ? lastRanked : ranked();
+        if (!list.length) {
+            document.getElementById('sto-mode').textContent = 'SMART TOUR — no front-side ARs';
+            document.getElementById('sto-title').textContent = '—';
+            document.getElementById('sto-loc').textContent = 'Waiting for NOAA active-region data';
+            document.getElementById('sto-why').textContent = '';
+            document.getElementById('smart-tour-overlay')?.classList.add('show');
+            return;
+        }
+        lastRanked = list;
+        currentIdx = ((i % list.length) + list.length) % list.length;
+        const entry = list[currentIdx];
+        showOverlay(entry);
+        flyToRegion(entry.loc.lat, entry.loc.lon, DIST_R, FRAME, FLY_MS);
+        dwellStart   = performance.now();
+        dwellMs      = interrupted ? HOLD_MS_FLARE : HOLD_MS_BASE;
+        nextSwitchAt = dwellStart + dwellMs;
+    }
+
+    function advance() {
+        if (!active || paused) return;
+        // Refresh ranking each advance (data may have updated)
+        lastRanked = ranked();
+        // Loop only through top-5 to keep the tour focused
+        const topN = Math.min(5, lastRanked.length);
+        if (!topN) { gotoIdx(0); return; }
+        gotoIdx((currentIdx + 1) % topN);
+    }
+
+    function tick(now) {
+        if (!active || paused) return;
+        const elapsed = now - dwellStart;
+        const pct = Math.min(1, elapsed / dwellMs);
+        const bar = document.querySelector('#sto-progress .bar');
+        if (bar) bar.style.width = (pct * 100).toFixed(1) + '%';
+        if (now >= nextSwitchAt) {
+            if (interrupted) interrupted = false;   // release lock after dwell
+            advance();
+        }
+    }
+
+    function start() {
+        if (active) return;
+        active = true; paused = false; interrupted = false;
+        savedCamPos = camera.position.clone();
+        savedTarget = controls.target.clone();
+        document.getElementById('smart-tour-controls').style.display = 'flex';
+        document.querySelectorAll('.btn-row button[id^=cam]').forEach(b => b.classList.remove('active'));
+        currentIdx = -1;
+        advance();
+    }
+
+    function stop() {
+        if (!active) return;
+        active = false; paused = false; interrupted = false;
+        document.getElementById('smart-tour-controls').style.display = 'none';
+        hideOverlay();
+        // Restore previous view
+        if (savedCamPos) {
+            const start = camera.position.clone();
+            const startTgt = controls.target.clone();
+            const t0 = performance.now();
+            (function step(now) {
+                const raw = Math.min((now - t0) / 800, 1);
+                const ease = raw < 0.5 ? 2*raw*raw : -1 + (4-2*raw)*raw;
+                camera.position.lerpVectors(start, savedCamPos, ease);
+                controls.target.lerpVectors(startTgt, savedTarget, ease);
+                controls.update();
+                if (raw < 1) requestAnimationFrame(step);
+            })(performance.now());
+        }
+    }
+
+    function setPaused(p) {
+        paused = p;
+        const btn = document.getElementById('tour-pause');
+        if (btn) btn.textContent = p ? '▶ Resume' : '⏸ Pause';
+        if (!p) {
+            // Resume progress from now
+            const remaining = Math.max(0, nextSwitchAt - performance.now());
+            dwellStart = performance.now() - (dwellMs - remaining);
+            nextSwitchAt = performance.now() + remaining;
+        }
+    }
+
+    // Called when a live M/X flare arrives — lock the tour to that AR
+    function interruptOnFlare(latDeg, lonDeg, cls, regNum) {
+        if (!active) return;
+        const clsCh = String(cls || '')[0]?.toUpperCase();
+        if (!FLARE_INTERRUPT_CLASSES.has(clsCh)) return;
+        // Find the closest known AR to the flare location (within 8°)
+        let best = null, bestD = 999;
+        liveRegions.forEach((r, i) => {
+            const c = parseLoc(r.loc); if (!c) return;
+            const d = Math.hypot(c.lat - latDeg, c.lon - lonDeg);
+            if (d < bestD) { bestD = d; best = { reg: r, loc: c, idx: i }; }
+        });
+        // If no matching AR is on the disc, fly to the raw flare location
+        interrupted = true;
+        if (best && bestD < 12) {
+            const entry = { reg: best.reg, loc: best.loc, s: score(best.reg) + 2.0 /* boost so tier reads severe */ };
+            // Ensure entry exists in lastRanked at front
+            lastRanked = [entry, ...lastRanked.filter(x => x.reg.num !== best.reg.num)];
+            currentIdx = 0;
+            gotoIdx(0);
+        } else {
+            // Synthetic entry for raw flare site
+            const synth = {
+                reg: { num: regNum || '?', loc: '—', mag: '—', area: 0, z: 'A' },
+                loc: { lat: latDeg, lon: lonDeg },
+                s:   2.5,
+            };
+            lastRanked = [synth, ...lastRanked];
+            currentIdx = 0;
+            gotoIdx(0);
+        }
+    }
+
+    return { start, stop, tick, setPaused, advance, interruptOnFlare,
+             get active() { return active; }, get paused() { return paused; } };
+})();
+
+// Wire smart-tour UI
+document.getElementById('tog-smart-tour')?.addEventListener('change', e => {
+    if (e.target.checked) smartTour.start(); else smartTour.stop();
+});
+document.getElementById('tour-next')?.addEventListener('click',  () => smartTour.advance());
+document.getElementById('tour-pause')?.addEventListener('click', () => smartTour.setPaused(!smartTour.paused));
 
 // ── Recent flare replay ────────────────────────────────────────────────────
 // After data load, replay flares from the past hour to pre-seed the
@@ -8967,6 +9303,10 @@ window.addEventListener('swpc-update', (ev) => {
             spawnEruptingProminence(lat_r, lon_r, clsCh);
 
             // Brief bloom spike (already handled by flareBoost in animate loop)
+
+            // ── Smart tour: lock onto this flare (M/X only) ──────────────────
+            try { smartTour.interruptOnFlare(latDeg, lonDeg, sw.flare_class, sw.flare_region); }
+            catch (e) { /* tour not initialized yet */ }
         }
         // Show flare alert banner
         showFlareAlertBanner(sw.flare_class ?? 'M-class', sw.flare_location);
