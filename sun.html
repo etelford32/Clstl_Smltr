@@ -7626,8 +7626,10 @@ function animate() {
         uniforms.u_flare_intensity.value = 0.0;
     }
 
-    // Smart tour scheduler — advances every dwell, updates progress bar
-    if (typeof smartTour !== 'undefined' && smartTour.active) {
+    // Smart tour scheduler — advances every dwell, updates progress bar.
+    // `smartTour` is var-hoisted (undefined until its IIFE runs), so the
+    // explicit `&& smartTour.active` short-circuits cleanly on early frames.
+    if (smartTour && smartTour.active) {
         smartTour.tick(performance.now());
     }
 
@@ -7954,8 +7956,9 @@ const CAMS = {
     wide:    [0, 3, 14],
 };
 function setCam(k) {
-    // If the smart tour is running, manual cam input cancels it
-    if (typeof smartTour !== 'undefined' && smartTour.active) {
+    // If the smart tour is running, manual cam input cancels it.
+    // smartTour is var-hoisted; guard with `&&` to avoid TDZ on early calls.
+    if (smartTour && smartTour.active) {
         const tog = document.getElementById('tog-smart-tour');
         if (tog?.checked) tog.checked = false;
         smartTour.stop();
@@ -8501,8 +8504,12 @@ function flyToRegion(lat, lon, distR = 3.0, frame = 0.0, dur = 900) {
 //  ARs with |lon| > 80° are filtered (back-side, can't affect Earth this
 //  rotation). Sub-Earth point is heliographic lon = 0° → ARs near 0° are
 //  Earth-firing if they erupt now.
+//
+//  NOTE: declared with `var` (not `const`) so the binding is hoisted —
+//  animate() references `smartTour` from frame 0, before this IIFE runs,
+//  and a TDZ on a `const` would throw inside the rAF loop and freeze the sim.
 // ══════════════════════════════════════════════════════════════════════════
-const smartTour = (() => {
+var smartTour = (() => {
     const HOLD_MS_BASE   = 12000;    // dwell per AR
     const HOLD_MS_FLARE  = 22000;    // dwell when interrupted by live flare
     const FLY_MS         = 1400;     // fly-to duration
