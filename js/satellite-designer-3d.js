@@ -137,6 +137,49 @@ export async function init(canvas, THREE) {
   scene.add(satPivot);
   let satModel = null;
   let satExtent = 1;
+
+  // Always-visible locator halo — a sprite that never shrinks below a fixed
+  // pixel size, so the satellite is findable even from a system view. The
+  // sprite is built from a tiny canvas so we don't need an image asset.
+  const haloTex = (() => {
+    const c = document.createElement('canvas');
+    c.width = 128; c.height = 128;
+    const g = c.getContext('2d');
+    // Outer ring
+    g.strokeStyle = '#00e2ff'; g.lineWidth = 6;
+    g.beginPath(); g.arc(64, 64, 50, 0, Math.PI * 2); g.stroke();
+    // Four tick marks (the "reticle")
+    g.lineWidth = 3;
+    for (let i = 0; i < 4; i++) {
+      const a = i * Math.PI / 2;
+      const ix = 64 + Math.cos(a) * 38, iy = 64 + Math.sin(a) * 38;
+      const ox = 64 + Math.cos(a) * 60, oy = 64 + Math.sin(a) * 60;
+      g.beginPath(); g.moveTo(ix, iy); g.lineTo(ox, oy); g.stroke();
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  })();
+  const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: haloTex, transparent: true, depthTest: false, depthWrite: false,
+    sizeAttenuation: false,        // <- always constant viewport-fraction size
+  }));
+  halo.scale.set(0.08, 0.08, 1);   // ~8% of viewport height
+  halo.renderOrder = 999;          // always on top of Earth
+  // IMPORTANT: not a child of satPivot — satPivot is scaled ~100× to make
+  // the model visible, which would balloon the halo. We sync position
+  // ourselves each frame in update().
+  scene.add(halo);
+  // Pickable bounding sphere (invisible) for raycasting clicks. Sits at
+  // scene root too so its scale isn't yanked by satPivot's render-scale.
+  const satPickProxy = new THREE.Mesh(
+    new THREE.SphereGeometry(1, 12, 8),
+    new THREE.MeshBasicMaterial({ visible: false })
+  );
+  satPickProxy.userData.kind = 'satellite';
+  scene.add(satPickProxy);
+  earth.userData.kind = 'earth';
+
   function rebuildSat(build) {
     if (satModel) {
       satPivot.remove(satModel);
@@ -322,18 +365,31 @@ export async function init(canvas, THREE) {
   // ── Sat scale: visible from any altitude ─────────────────────────────────
   // We size the satellite so its largest extent is a fixed *fraction* of its
   // distance from the camera. In follow mode at minimum zoom this approaches
-  // true scale; in wide mode it stays at ~80 km so the operator can see it.
+  // true scale; in wide / free modes it grows linearly with distance so the
+  // bird is always findable against Earth. The halo sprite is independent
+  // of this scale — it stays a constant pixel size as a backstop locator.
   function setSatScale() {
     if (!satModel) return;
     const camDist = camera.position.distanceTo(satPivot.position);
     let targetExtent;
     if (cameraMode === 'follow') {
-      // Smoothly true-scale up to ~200 km out, then keep readable.
-      targetExtent = Math.max(satExtent * KM, Math.min(camDist * 0.05, 200));
+      // True-scale up close, then keep readable as the player zooms out.
+      // Capped at 250 km so the model doesn't dominate when very far in FOLLOW.
+      targetExtent = Math.max(satExtent * KM, Math.min(camDist * 0.05, 250));
     } else {
-      targetExtent = Math.max(80, camDist * 0.018);
+      // Wide / Free: ~2.5 % of camera distance with a 600 km cap so even at
+      // extreme zoom-out the satellite stays smaller than Earth. The halo
+      // sprite is the real find-the-bird locator at huge distances.
+      targetExtent = Math.max(140, Math.min(camDist * 0.025, 600));
     }
+    // satPivot scales the geometry; the pick proxy lives at root, so we
+    // size it directly in scene units so a raycast comfortably hits the
+    // visible bounds at any zoom.
     satPivot.scale.setScalar(targetExtent / satExtent);
+    satPickProxy.scale.setScalar(targetExtent);
+    // Halo: hide in close FOLLOW when the model itself fills the screen,
+    // so the reticle doesn't visually dominate up close.
+    halo.visible = !(cameraMode === 'follow' && camDist < 600);
   }
 
   // ── Trail buffer ─────────────────────────────────────────────────────────
@@ -360,6 +416,10 @@ export async function init(canvas, THREE) {
 
     if (s.satM) {
       satPivot.position.set(s.satM[0] * KM, s.satM[1] * KM, 0);
+      // Halo & pick-proxy track the satellite directly (they live at the
+      // scene root so satPivot's render-scale doesn't distort them).
+      halo.position.copy(satPivot.position);
+      satPickProxy.position.copy(satPivot.position);
       // Velocity-aligned: rotate the model so its model-+x (after the
       // builder's Math.PI/2 yaw, that's the long axis) lies along velocity.
       if (typeof s.satRotZ === 'number') satPivot.rotation.z = s.satRotZ;
@@ -421,11 +481,12 @@ export async function init(canvas, THREE) {
       grid.rotation.z = earthRot;
     }
 
-    // Follow mode keeps the camera target glued to the satellite; the smooth
-    // lerp below handles the actual movement so the pilot's rotate/zoom
-    // inputs don't fight with a hard snap each frame.
-    if (cameraMode === 'follow' && s.satM) {
+    // Subject lock — when the pilot has selected the satellite, glue the
+    // camera target to it in any camera mode (FOLLOW does this anyway).
+    // The smooth lerp handles motion so pointer input isn't overridden.
+    if (s.satM && (cameraMode === 'follow' || subject === 'satellite')) {
       targetWanted.copy(satPivot.position);
+      if (targetLerp < 0.12) targetLerp = 0.12;
     }
   }
 
@@ -467,7 +528,46 @@ export async function init(canvas, THREE) {
   function viewInfo() {
     const altKm = Math.max(0, camera.position.length() - R_EARTH_KM);
     const distSatKm = camera.position.distanceTo(satPivot.position);
-    return { altKm, distSatKm, mode: cameraMode };
+    return { altKm, distSatKm, mode: cameraMode, subject };
+  }
+
+  // ── Focal subject — Earth vs Satellite ──────────────────────────────────
+  // The pilot can lock the camera's look-at on either body. Earth keeps the
+  // classic system view; Satellite makes the camera chase the bird in any
+  // mode (so even WIDE / FREE auto-pan keeps the spacecraft centred).
+  let subject = 'earth';
+  function setSubject(s) {
+    subject = s === 'satellite' ? 'satellite' : 'earth';
+    if (subject === 'satellite') {
+      // Force a smooth chase from the current target to the satellite.
+      targetWanted.copy(satPivot.position);
+      targetLerp = Math.max(targetLerp, 0.2);
+      // Pull the camera in if we're way out in WIDE mode.
+      const camDist = camera.position.distanceTo(satPivot.position);
+      if (camDist > 8000) {
+        const dir = camera.position.clone().sub(satPivot.position).normalize();
+        camera.position.copy(satPivot.position).addScaledVector(dir, 1800);
+      }
+    } else {
+      targetWanted.set(0, 0, 0);
+      targetLerp = Math.max(targetLerp, 0.06);
+    }
+  }
+
+  // Raycast from a normalised-device click into the scene; return the kind
+  // of body the user picked, or null. Used by the page to wire click-to-focus
+  // on the canvas — click Earth or the satellite halo to select.
+  const raycaster = new THREE.Raycaster();
+  const ndcVec = new THREE.Vector2();
+  function pickAt(ndcX, ndcY) {
+    ndcVec.set(ndcX, ndcY);
+    raycaster.setFromCamera(ndcVec, camera);
+    // Test the satellite pick-proxy first (it's small but always on top).
+    const satHits = raycaster.intersectObject(satPickProxy, false);
+    if (satHits.length) return 'satellite';
+    const earthHits = raycaster.intersectObject(earth, false);
+    if (earthHits.length) return 'earth';
+    return null;
   }
 
   function dispose() {
@@ -489,5 +589,7 @@ export async function init(canvas, THREE) {
 
   return { resize, render, update, setCameraMode, setTargetAlt, dispose,
            focusSatellite, resetView, viewInfo,
-           getMode: () => cameraMode };
+           setSubject, pickAt,
+           getMode: () => cameraMode,
+           getSubject: () => subject };
 }
