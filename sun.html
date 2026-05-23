@@ -164,6 +164,42 @@ nav {
 #hud .sep { border-top:1px solid rgba(255,180,0,.2); margin:5px 0; }
 #fps-display { color:#40ff80; font-weight:600; }
 
+/* ─── Smart tour overlay ─────────────────────────────────────── */
+#smart-tour-overlay {
+    position:absolute; top:12px; left:50%; transform:translateX(-50%);
+    z-index:55; min-width:300px; max-width:420px;
+    background:rgba(8,4,0,.78); backdrop-filter:blur(10px);
+    border:1px solid rgba(255,140,40,.35); border-radius:9px;
+    padding:8px 14px; font-size:11px; line-height:1.55;
+    pointer-events:none; display:none;
+    box-shadow:0 4px 22px rgba(255,120,0,.18);
+}
+#smart-tour-overlay.show { display:block; animation:tour-fade .35s ease-out; }
+#smart-tour-overlay.interrupt { border-color:rgba(255,60,0,.7); box-shadow:0 0 26px rgba(255,80,0,.45); }
+@keyframes tour-fade { from{opacity:0;transform:translate(-50%,-6px)} to{opacity:1;transform:translate(-50%,0)} }
+#sto-hd {
+    display:flex; align-items:center; gap:8px; font-size:10px;
+    text-transform:uppercase; letter-spacing:.08em; color:#ff9944;
+    border-bottom:1px solid rgba(255,140,40,.18); padding-bottom:4px; margin-bottom:5px;
+}
+#sto-hd .dot { width:7px; height:7px; border-radius:50%; background:#ff8800; box-shadow:0 0 8px #ff8800; animation:tour-pulse 1.6s ease-in-out infinite; }
+@keyframes tour-pulse { 0%,100%{opacity:1} 50%{opacity:.45} }
+#sto-title { font-size:15px; font-weight:700; color:#ffd080; letter-spacing:.04em; }
+#sto-loc   { color:#ffaa66; font-weight:600; }
+#sto-row   { display:flex; gap:14px; flex-wrap:wrap; margin-top:3px; color:#ddccaa; }
+#sto-row .k { color:#776655; margin-right:3px; }
+#sto-tier  { display:inline-block; padding:1px 8px; border-radius:9px;
+             font-size:10px; font-weight:700; letter-spacing:.06em; }
+.tier-low      { background:rgba(80,180,120,.18);  border:1px solid rgba(80,180,120,.4); color:#88dd99; }
+.tier-mod      { background:rgba(220,180,60,.18);  border:1px solid rgba(220,180,60,.4); color:#ffd864; }
+.tier-high     { background:rgba(255,140,40,.20);  border:1px solid rgba(255,140,40,.5); color:#ffaa66; }
+.tier-severe   { background:rgba(255,60,40,.22);   border:1px solid rgba(255,60,40,.6);  color:#ff8866;
+                 animation:tour-pulse 1.2s ease-in-out infinite; }
+#sto-progress {
+    height:2px; background:rgba(255,140,40,.12); border-radius:2px; overflow:hidden; margin-top:6px;
+}
+#sto-progress .bar { height:100%; background:linear-gradient(90deg,#ff8800,#ffd864); width:0%; transition:width .25s linear; }
+
 .cv-btn {
     position: absolute; z-index: 60;
     background: rgba(4,2,0,.80); backdrop-filter: blur(8px);
@@ -810,6 +846,20 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
             <div style="margin-top:3px">FPS: <span id="fps-display">--</span></div>
             <div class="dim" style="margin-top:2px">Drag · Pinch · Scroll</div>
         </div>
+        <!-- Smart Tour overlay — populated by smartTour module -->
+        <div id="smart-tour-overlay">
+            <div id="sto-hd"><span class="dot"></span><span id="sto-mode">SMART TOUR</span><span style="flex:1"></span><span id="sto-tier"></span></div>
+            <div><span id="sto-title">—</span> <span style="color:#665544;font-size:10px">·</span> <span id="sto-loc">—</span></div>
+            <div id="sto-row">
+                <div><span class="k">Mag:</span><span id="sto-mag">—</span></div>
+                <div><span class="k">Δλ to Earth-line:</span><span id="sto-merid">—</span></div>
+                <div><span class="k">Area:</span><span id="sto-area">—</span></div>
+                <div><span class="k">Last flare:</span><span id="sto-lastflare">—</span></div>
+            </div>
+            <div id="sto-why" style="margin-top:3px;color:#aa9988;font-size:10px;font-style:italic">—</div>
+            <div id="sto-progress"><div class="bar"></div></div>
+        </div>
+
         <!-- Flare Alert Banner -->
         <div id="flare-alert-banner"></div>
 
@@ -1168,6 +1218,17 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
                         <button id="cam-default" class="active">Default</button>
                         <button id="cam-close">Close-up</button>
                         <button id="cam-wide">Wide</button>
+                    </div>
+                    <div class="toggle-row" style="margin-top:8px">
+                        <input type="checkbox" id="tog-smart-tour">
+                        <label for="tog-smart-tour" title="Auto-cycle the camera through the most Earth-affecting active regions">⚡ Smart tour — Earth-affecting regions</label>
+                    </div>
+                    <div class="btn-row" id="smart-tour-controls" style="margin-top:4px;display:none">
+                        <button id="tour-next" title="Skip to next active region">↻ Next AR</button>
+                        <button id="tour-pause" title="Pause/resume auto-cycle">⏸ Pause</button>
+                    </div>
+                    <div style="font-size:9.5px;color:#776655;margin-top:6px;line-height:1.45">
+                        Scoring: meridian proximity (Earth-firing line) × magnetic complexity (β/γ/δ) × area × recent flare class. Live M/X flares interrupt the cycle.
                     </div>
                 </div>
             </div>
@@ -2614,6 +2675,18 @@ const sunFS = /* glsl */`
         return mix(c3, c4, (t-0.8)/0.2);
     }
 
+    // ── ACES filmic tonemap (Narkowicz 2015 approximation) ────────────────────
+    // Compresses HDR highlights into a graceful S-curve so flares saturate
+    // creamy-white instead of clipping to pure white, and dim regions get a
+    // touch more shoulder contrast. Channel-independent so colour shifts
+    // slightly in the highlights (the "filmic" look). Applied in linear-light
+    // space before the global ACES the renderer already applies — kept gentle
+    // so the two don't double up.
+    vec3 acesFilm(vec3 x) {
+        const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
+        return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+    }
+
     void main() {
         vec3  nrm  = normalize(vNormal);
         vec3  vDir = normalize(vViewDir);
@@ -2629,12 +2702,18 @@ const sunFS = /* glsl */`
         float lon = atan(vPosition.x, vPosition.z);
 
         // Differential rotation (Snodgrass 1990): Ω(lat) = A + B sin²(lat) + C sin⁴(lat)
+        // Equator turns ~25 d, poles ~34 d — diffRot ranges from 1.0 at equator
+        // down to ~0.72 at the poles. We apply it to ALL latitude-keyed scrolls
+        // (granulation, supergranulation, domain warp, fine turbulence, spicules)
+        // so high-latitude features visibly drift slower than equatorial ones.
         float sinLat2 = sin(lat) * sin(lat);
         float diffRot  = 1.0 - 0.19 * sinLat2 - 0.09 * sinLat2 * sinLat2;
         float rotLon   = lon + u_time * 0.014 * u_rot * diffRot;
+        // Combined rotation factor used by all texture-scrolling terms below
+        float rotF     = u_rot * diffRot;
 
         // ── Supergranulation (~30 000 km cells, flow pattern beneath granules) ──
-        vec3  sgPos  = vPosition * 2.2 + vec3(u_time * 0.0008 * u_rot);
+        vec3  sgPos  = vPosition * 2.2 + vec3(u_time * 0.0008 * rotF);
         vec2  sgCell = voronoi(sgPos);
         // Bright cell centres (upwelling), dark lanes (downflow at boundaries)
         float superGran = smoothstep(0.0, 0.45, sgCell.x) * 0.08;
@@ -2645,11 +2724,11 @@ const sunFS = /* glsl */`
         // noise atlas via fbmTex (triplanar 2D lookups). Same visual feel,
         // ~5× cheaper per fragment than the procedural fbm path.
         vec3 dwarp = vec3(
-            fbmTex(vPosition * 5.5 + vec3(u_time * 0.0032)),
-            fbmTex(vPosition * 5.5 + vec3(u_time * 0.0032 + 1.7)),
-            fbmTex(vPosition * 5.5 + vec3(u_time * 0.0032 + 3.4))
+            fbmTex(vPosition * 5.5 + vec3(u_time * 0.0032 * rotF)),
+            fbmTex(vPosition * 5.5 + vec3(u_time * 0.0032 * rotF + 1.7)),
+            fbmTex(vPosition * 5.5 + vec3(u_time * 0.0032 * rotF + 3.4))
         ) * 0.18;
-        vec3 gPos   = vPosition * 10.5 + dwarp + vec3(u_time * 0.0065 * u_rot);
+        vec3 gPos   = vPosition * 10.5 + dwarp + vec3(u_time * 0.0065 * rotF);
         vec2 gCell  = voronoi(gPos);
         // Crisper cell structure: narrower lane-transition for sharp dark
         // edges between bright cell interiors. Adds a subtle radial-bulge
@@ -2685,11 +2764,11 @@ const sunFS = /* glsl */`
         granLight *= 1.0 + explode * 0.45;
 
         // ── Fine sub-granulation turbulence ─────────────────────────────────
-        float fineTurb = fbmTex(vPosition * 30.0 + vec3(u_time * 0.012)) * 0.08;
+        float fineTurb = fbmTex(vPosition * 30.0 + vec3(u_time * 0.012 * rotF)) * 0.08;
 
         // ── Magnetic bright points at intergranular lanes ─────────────────────
         // Tiny intense specks where kG flux tubes emerge between granules
-        float mbpNoise = vnoise(vPosition * 52.0 + vec3(u_time * 0.030));
+        float mbpNoise = vnoise(vPosition * 52.0 + vec3(u_time * 0.030 * rotF));
         float laneMask = 1.0 - laneD;  // 1=dark lane, 0=bright interior (for MBP placement)
         float mbp = smoothstep(0.82, 0.92, mbpNoise) * laneMask * 0.55;
 
@@ -2720,6 +2799,15 @@ const sunFS = /* glsl */`
         float facular     = 0.0;
         float flareActive = 0.0;
         float fibrils     = 0.0;
+        // ── Facular / plage network — bright magnetic carpet around each AR.
+        // Accumulated separately from the spot-local Wilson facular term so
+        // the wider halo can be coloured independently. SDO HMI continuum
+        // shows a faint bright veil 3-5 spot-radii beyond the penumbra,
+        // brightest near the limb (Wilson depression of the bright flux-tube
+        // walls), and modulated by the underlying supergranular network --
+        // bright on cell boundaries, dim in cell interiors. This is the
+        // "plage" you see ringing every AR in EUV/UV.
+        float plage = 0.0;
 
         vec3 fragUnit = normalize(vPosition);
 
@@ -2732,7 +2820,30 @@ const sunFS = /* glsl */`
             float complexFlag = arWS < 0.0 ? 1.0 : 0.0;
 
             float cosAng = dot(fragUnit, arSP);
-            if (cosAng < 0.985) continue;          // skip if > ~10° away
+
+            // ── Plage halo (Tier-A facular network) ────────────────────────
+            // Sample a much wider zone (~6x spot radius) so the halo precedes
+            // the spot itself in the AR loop cosAng > 0.985 cutoff. Done
+            // separately to avoid the per-AR continue gate.
+            if (cosAng > 0.94) {                  // ~20° angular reach
+                float plageAng  = acos(clamp(cosAng, -1.0, 1.0));
+                float plageR    = 0.045 + areaN * 0.060;      // outer halo radius
+                float plageCore = 0.012 + areaN * 0.020;      // inner exclusion (spot itself)
+                float halo      = smoothstep(plageR, plageCore, plageAng)
+                                * smoothstep(plageCore * 0.55, plageCore * 1.00, plageAng);
+                // Brightest near the limb (Wilson walls of the flux tubes).
+                halo *= 0.55 + 0.85 * (1.0 - mu);
+                // Modulate by the underlying supergranular network — plage
+                // concentrates in cell boundaries (kG flux tubes pumped there).
+                float netGran = smoothstep(0.20, 0.45, sgCell.y - sgCell.x);
+                halo *= 0.30 + 0.70 * netGran;
+                // Sprinkle in fine network-element pops (~1-3 Mm flux tubes)
+                float netSeed = vnoise(vPosition * 36.0 + vec3(u_time * 0.018 * rotF));
+                halo *= 0.75 + 0.45 * smoothstep(0.55, 0.85, netSeed);
+                plage = max(plage, halo * areaN);
+            }
+
+            if (cosAng < 0.985) continue;          // skip spot-local code if > ~10° away
             float ang = acos(clamp(cosAng, -1.0, 1.0));
 
             // Spot radii scale with normalised area (NOAA millionths/800).
@@ -2835,8 +2946,16 @@ const sunFS = /* glsl */`
         // Nanoflare transient brightenings — hot white-yellow pops
         col += vec3(1.5, 1.3, 0.8) * microflare * (1.0 - umbra) * u_showFlares;
 
-        // Facular brightening near limb
+        // Facular brightening near limb (spot-local Wilson walls)
         col += baseCol * facular * 0.65;
+
+        // ── Plage / facular network around active regions ──────────────────
+        // Warm-white halo: hotter than the photosphere (~6500-7000 K) with a
+        // slight blue-violet tint where Ca II K and UV continuum dominate.
+        // Coupled to u_showSpots so the user's "Sunspot regions" toggle owns
+        // the entire AR visual chain (spots + plage together).
+        vec3 plageColor = mix(baseCol * 1.18, vec3(1.05, 1.02, 0.95), 0.55);
+        col += plageColor * plage * 0.42 * u_showSpots;
 
         // ── Sunspot umbra (T_umbra ~ 0.60 × T_eff ≈ 3470 K) ──────────────────
         float umbraT = u_teff * (0.60 - umbra * 0.18);
@@ -2977,14 +3096,18 @@ const sunFS = /* glsl */`
         // more of the upper-altitude colouring (warmer rim, brighter spicule
         // fringe) so the photosphere reads as a complete picture on its own.
         if (u_photIso > 0.5) {
-            // Stronger spicule fringe + chromospheric tint at extreme limb
-            float isoRim = pow(1.0 - mu, 3.0);
-            col += vec3(1.10, 0.32, 0.10) * isoRim * 0.40;
+            // Stronger spicule fringe + chromospheric tint at extreme limb.
+            // Tier-C: sharpen the falloff (was pow 3.0 → 2.0) and lift the
+            // amplitude so the isolated photosphere reads with a clear pink
+            // ring instead of a faint blush — closer to eclipse appearance.
+            float isoRim = pow(1.0 - mu, 2.0);
+            col += vec3(1.20, 0.42, 0.18) * isoRim * 0.75;
         }
 
         // ── HDR amplification — drives the bloom glow ─────────────────────────
         // Kept moderate so granulation contrast and sunspot detail remain visible.
         // Only flare impulsive phase pushes significantly above bloom threshold.
+        // Pre-exposure for ACES tonemap below.
         col *= 2.20 + u_flare_intensity * 1.10;
 
         // ── F10.7 solar-cycle boost — solar maximum = hotter, brighter photosphere ──
@@ -3002,17 +3125,53 @@ const sunFS = /* glsl */`
         // ── Spicule forest at extreme limb ────────────────────────────────────
         // Type II spicules (fast jets, 50-150 km/s, ~10 Mm tall) create a
         // "hairy" fringe at the solar limb, visible in Hα and Ca II.
-        float spiculeNoise = vnoise(vPosition * 40.0 + vec3(u_time * 0.05));
-        float spicule2     = vnoise(vPosition * 65.0 - vec3(u_time * 0.07));
+        float spiculeNoise = vnoise(vPosition * 40.0 + vec3(u_time * 0.05 * rotF));
+        float spicule2     = vnoise(vPosition * 65.0 - vec3(u_time * 0.07 * rotF));
         float spiculePattern = spiculeNoise * 0.55 + spicule2 * 0.45;
         float spiculeMask = smoothstep(0.20, 0.03, mu);  // only at extreme limb
         float spiculeHairs = spiculeMask * spiculePattern * 0.50;
         col += vec3(0.85, 0.40, 0.15) * spiculeHairs;
 
         // ── Chromospheric / transition-region emission at extreme limb ─────────
-        // Pink-red Hα + Ca H&K + extreme-UV pink at very low μ.
-        float fr = pow(max(1.0 - mu, 0.0), 3.0);
-        col += vec3(1.10, 0.32, 0.10) * fr * 0.75;
+        // Pink-red Hα + Ca H&K + extreme-UV pink at very low μ. Tier-C:
+        // brightened and lifted slightly inward (pow 3.0 → 2.4) so the
+        // chromospheric rim hint is visible even at modest zooms, not only
+        // at extreme limb — closer to SDO AIA 304 Å limb appearance.
+        float fr  = pow(max(1.0 - mu, 0.0), 2.4);
+        col += vec3(1.18, 0.34, 0.12) * fr * 0.95;
+        // Inner pink "lip" — narrow band right at the disc edge that hints
+        // at chromosphere even when only the photosphere layer is on.
+        float lip = pow(max(1.0 - mu, 0.0), 8.0);
+        col += vec3(1.30, 0.55, 0.35) * lip * 0.50;
+
+        // ── Tier-C chromatic aberration on flare flash ────────────────────────
+        // Real bright impulsive sources observed through any imager show a
+        // subtle radial RGB dispersion (atmospheric/optic dispersion). When a
+        // flare drives u_flare_intensity high, push the red channel inward
+        // and blue outward in screen-radial direction to mimic this. Per-
+        // fragment trick using vNormal projected onto the view plane —
+        // cheap and avoids a separate post-process pass.
+        if (u_flare_intensity > 0.10) {
+            // Project surface normal onto view plane → screen-space radial vector
+            vec3 viewN  = normalize(nrm - dot(nrm, vDir) * vDir + vec3(1e-6));
+            // Strength scales with flash + edge-fall (centre-of-disc unaffected)
+            float caStr = u_flare_intensity * (0.18 + 0.42 * (1.0 - mu));
+            // Modulate luminance per channel: shift toward red on inner side,
+            // blue on outer side — colours diverge radially.
+            // (Cheap radial-dispersion proxy: sin-shift on projected normal.)
+            float dispR = sin(viewN.x * 9.0 + viewN.y * 11.0) * caStr * 0.10;
+            float dispB = sin(viewN.x * 9.0 + viewN.y * 11.0 + 1.57) * caStr * 0.10;
+            col.r *= 1.0 + dispR;
+            col.b *= 1.0 - dispB;
+        }
+
+        // ── ACES filmic tonemap — Tier-A HDR roll-off ─────────────────────────
+        // Compresses bright flare/limb/AR-stack regions onto a graceful curve
+        // so they saturate cream-white instead of pure-white, lifting shoulder
+        // detail. The renderer also has THREE.ACESFilmicToneMapping on, so this
+        // pre-conditioning is intentionally gentle (the post-stage will run on
+        // the bloom-accumulated output).
+        col = acesFilm(col * 0.95) * 1.18;
 
         gl_FragColor = vec4(col, 1.0);
     }
@@ -4683,8 +4842,36 @@ const coronaFS = /* glsl */`
         // CBPs — small bright Fe XII green dots (gentler)
         col += col193 * cbpMask * pow(max(1.0 - rim, 0.0), 0.4) * 0.40;
 
-        // Coronal-hole darkening
-        col *= 1.0 - poleHole * 0.45;
+        // ── Tier-B helmet-streamer cusps ──────────────────────────────────────
+        // Where the closed-field streamer belt meets open field, a sharp
+        // cusp forms — the "tip" of the helmet. Observed in white-light
+        // eclipse data as a bright narrow point on top of each streamer.
+        // We model it as a brightening along the HCS where the belt is
+        // narrowest (high helmetBelt) AND we are at the rim (high rim var).
+        // The cusp's vertical extent is gated by openField so it only fires
+        // at the streamer-belt / open-field boundary.
+        float cusp = pow(helmetBelt, 4.0) * pow(rim, 1.4)
+                   * smoothstep(0.0, 0.35, openField);
+        col += vec3(1.20, 1.05, 0.78) * cusp * (0.55 + u_activity * 0.55);
+        alpha += cusp * 0.22;
+
+        // ── Tier-A polar coronal holes — enhanced signature ───────────────────
+        // Real polar holes are not only darker — they're slightly blue-shifted
+        // in EUV (fast plasma escaping = Doppler shift toward shorter λ in
+        // line-of-sight; observers see a cooler/dimmer Fe-XII glow). Plus
+        // they show fine radial striping from the open-field plumes that
+        // accelerate the fast solar wind. We add (a) a darker base, (b) a
+        // cool blue tint, (c) sharper radial fine-stripe modulation.
+        float holeStripe = pow(0.5 + 0.5 * sin(lon * 41.0 + u_time * 0.003), 3.0);
+        holeStripe = mix(0.85, 1.10, holeStripe);   // gentle radial striation
+        // Deeper darkening (was 0.45 → 0.55) and apply stripe inside hole
+        col *= 1.0 - poleHole * 0.55;
+        col *= mix(1.0, holeStripe, poleHole * 0.60);
+        // Cool-blue tint where the hole is strongest — signature of the fast
+        // wind source. Modulated by u_wind_speed_norm so visibly intensifies
+        // during fast-wind streams.
+        vec3 holeTint = vec3(0.62, 0.82, 1.20);
+        col = mix(col, col * holeTint, poleHole * (0.18 + 0.22 * u_wind_speed_norm));
 
         // ══════════════════════════════════════════════════════════════════
         // 10.  Live-data couplings (preserved from previous shader)
@@ -5557,7 +5744,8 @@ let loopGroup = null;
 const LOOP_VS = /* glsl */`
     attribute float aS;       // [0,1] arclength fraction along the loop
     attribute vec3  aTangent; // unit tangent at this vertex (precomputed)
-    varying vec3 vColor;
+    varying vec3  vColor;
+    varying float vS;
     uniform float uTime;
     uniform float uAmp;       // R☉ — peak displacement at apex
     uniform float uFreq;      // rad / sim-time
@@ -5573,14 +5761,45 @@ const LOOP_VS = /* glsl */`
         // 70% transverse + 30% radial bobbing — looks like a kink mode.
         vec3 disp = nLoop * wave + outward * (wave * 0.30);
         vColor = color;
+        vS     = aS;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(p + disp, 1.0);
     }
 `;
 const LOOP_FS = /* glsl */`
-    varying vec3 vColor;
+    varying vec3  vColor;
+    varying float vS;
     uniform float uOpacity;
+    uniform float uTime;
     void main() {
-        gl_FragColor = vec4(vColor, uOpacity);
+        // ── Tier-B opacity gradient along arclength ───────────────────────────
+        // Real coronal loops are radiometrically brightest near the chromos-
+        // pheric footpoints (dense 1-2 MK plasma being fed by evaporation),
+        // dim through the mid-leg, and have a faint hot apex (the
+        // reconnection-fed top is hotter but ~10× less dense — so emission
+        // measure ∝ n² makes it dimmer in EUV).
+        //
+        // Profile: U-shape — peak at s=0 and s=1, minimum at s=0.5.
+        //   foot   = 0.55 + 0.45 * |2s-1|^1.6      → 1.00 at feet, 0.55 at apex
+        //   hotApx = bonus glow at s≈0.5 from hot plasma                       (subtle)
+        float ss     = clamp(vS, 0.0, 1.0);
+        float foot   = 0.55 + 0.45 * pow(abs(2.0 * ss - 1.0), 1.6);
+        float hotApx = exp(-(ss - 0.5) * (ss - 0.5) / 0.020) * 0.12;
+        float profile = foot + hotApx;
+
+        // ── Footpoint flicker — chromospheric evaporation jitter ──────────────
+        // The base of each loop pulses on ~1-3 s timescales as upflows arrive.
+        // Gated to the bottom 15% of the loop so the apex stays steady.
+        float footMask = smoothstep(0.85, 1.00, abs(2.0 * ss - 1.0));
+        float flick    = 0.5 + 0.5 * sin(uTime * 5.3 + ss * 11.0);
+        profile *= 1.0 + footMask * flick * 0.18;
+
+        // Slight per-fragment colour shift: cooler at apex (whiter/bluer),
+        // warmer at footpoints (gold-pink chromospheric tinge).
+        vec3 hot = vColor * vec3(0.85, 0.92, 1.10);     // apex (hotter look)
+        vec3 ftc = vColor * vec3(1.10, 0.92, 0.72);     // footpoint (warm)
+        vec3 colOut = mix(hot, ftc, foot * foot);
+
+        gl_FragColor = vec4(colOut, uOpacity * profile);
     }
 `;
 
@@ -7407,6 +7626,11 @@ function animate() {
         uniforms.u_flare_intensity.value = 0.0;
     }
 
+    // Smart tour scheduler — advances every dwell, updates progress bar
+    if (typeof smartTour !== 'undefined' && smartTour.active) {
+        smartTour.tick(performance.now());
+    }
+
     // Phase 4.1 — keep the radial-corona-diffusion pass in sync with the
     // current flare flash so the gather strength + HDR clamp dampen the
     // horizontal "death laser" during M/X events.
@@ -7730,6 +7954,12 @@ const CAMS = {
     wide:    [0, 3, 14],
 };
 function setCam(k) {
+    // If the smart tour is running, manual cam input cancels it
+    if (typeof smartTour !== 'undefined' && smartTour.active) {
+        const tog = document.getElementById('tog-smart-tour');
+        if (tog?.checked) tog.checked = false;
+        smartTour.stop();
+    }
     document.querySelectorAll('.btn-row button[id^=cam]').forEach(b => b.classList.remove('active'));
     document.getElementById('cam-' + k)?.classList.add('active');
     camera.position.set(...CAMS[k]); controls.target.set(0,0,0); controls.update();
@@ -8232,26 +8462,290 @@ async function fetchLiveSolarData() {
 }
 
 // ── Fly camera to a heliographic region position ──────────────────────────
-function flyToRegion(lat, lon) {
+// distR:  camera distance from sun centre along the AR's outward normal
+// frame:  0 = look at sun centre (AR sits at edge), 1 = look at AR (AR centered, close-up)
+// dur:    fly duration in ms
+function flyToRegion(lat, lon, distR = 3.0, frame = 0.0, dur = 900) {
     const lr  = lat * Math.PI / 180;
-    const lnr = lon * Math.PI / 180 + solarRotAngle;  // offset by current rotation
+    const lnr = lon * Math.PI / 180 + solarRotAngle;
     const dir = new THREE.Vector3(
         Math.cos(lr) * Math.sin(lnr),
         Math.sin(lr),
         Math.cos(lr) * Math.cos(lnr)
     ).normalize();
-    const dest  = dir.multiplyScalar(3.0);
+    const arPos = dir.clone();                      // unit-sphere AR position
+    const dest  = dir.clone().multiplyScalar(distR);
+    const tgtAt = arPos.clone().multiplyScalar(frame);   // lerp(centre, AR)
     const start = camera.position.clone();
+    const startTgt = controls.target.clone();
     const t0    = performance.now();
     (function step(now) {
-        const raw  = Math.min((now - t0) / 900, 1);
+        const raw  = Math.min((now - t0) / dur, 1);
         const ease = raw < 0.5 ? 2*raw*raw : -1 + (4-2*raw)*raw;
         camera.position.lerpVectors(start, dest, ease);
-        controls.target.set(0, 0, 0);
+        controls.target.lerpVectors(startTgt, tgtAt, ease);
         controls.update();
         if (raw < 1) requestAnimationFrame(step);
     })(performance.now());
 }
+
+// ══════════════════════════════════════════════════════════════════════════
+//  SMART TOUR — auto-cycle the camera through the most Earth-affecting
+//  active regions. Interrupts on live M/X flares. Geoeffectiveness score:
+//
+//    score = wMerid * (1 - |lon|/90)^1.4    (front-side meridian proximity)
+//          + wMag   * complexity / 3        (α=0, β=1, βγ=2, βγδ=3)
+//          + wArea  * sqrt(area / 600)      (umbral + penumbral coverage)
+//          + wFlare * recentFlareWeight     (24h flare history at this AR)
+//
+//  ARs with |lon| > 80° are filtered (back-side, can't affect Earth this
+//  rotation). Sub-Earth point is heliographic lon = 0° → ARs near 0° are
+//  Earth-firing if they erupt now.
+// ══════════════════════════════════════════════════════════════════════════
+const smartTour = (() => {
+    const HOLD_MS_BASE   = 12000;    // dwell per AR
+    const HOLD_MS_FLARE  = 22000;    // dwell when interrupted by live flare
+    const FLY_MS         = 1400;     // fly-to duration
+    const DIST_R         = 2.05;     // camera distance from sun centre (R_sun units)
+    const FRAME          = 0.62;     // 0 = look at centre, 1 = look at AR
+    const FLARE_INTERRUPT_CLASSES = new Set(['M','X']);
+
+    let active        = false;
+    let paused        = false;
+    let interrupted   = false;       // currently locked on a live flare
+    let currentIdx    = 0;
+    let nextSwitchAt  = 0;
+    let dwellStart    = 0;
+    let dwellMs       = HOLD_MS_BASE;
+    let savedCamPos   = null;        // restore when tour off
+    let savedTarget   = null;
+    let lastRanked    = [];          // cached ranking, refreshed on advance
+    let lastTier      = '';
+
+    function magComplexityFromString(mag) { return magComplexity(mag); }
+
+    // Earth-line: heliographic lon = 0 is sub-Earth point (NOAA Stonyhurst W=+, E=-)
+    function meridianFactor(lonDeg) {
+        const a = Math.abs(lonDeg);
+        if (a > 80) return -1;        // off the Earth-facing disc
+        return Math.pow(1 - a / 90, 1.4);
+    }
+
+    // Find max-class flare for this AR within last 24h
+    function lastFlareForAR(regNum, withinMs = 24 * 3600e3) {
+        if (!liveFlares?.length) return null;
+        const cutoff = Date.now() - withinMs;
+        let best = null;
+        for (const f of liveFlares) {
+            if (String(f.reg) !== String(regNum)) continue;
+            const t = new Date(f.time).getTime();
+            if (!(t > cutoff)) continue;
+            const cls = String(f.cls ?? '');
+            const rank = cls[0] === 'X' ? 4 : cls[0] === 'M' ? 3 : cls[0] === 'C' ? 2 : cls[0] === 'B' ? 1 : 0;
+            const mag  = parseFloat(cls.slice(1)) || 0;
+            const w = rank * 10 + mag;
+            if (!best || w > best.w) best = { f, w, rank };
+        }
+        return best;
+    }
+
+    function score(reg) {
+        const c = parseLoc(reg.loc); if (!c) return -1;
+        const mf = meridianFactor(c.lon);
+        if (mf < 0) return -1;
+        const mc = magComplexityFromString(reg.mag);
+        const af = Math.sqrt(Math.min(reg.area || 0, 1200) / 600);
+        const bf = lastFlareForAR(reg.num);
+        const ff = bf ? Math.min(1.5, bf.rank * 0.35 + 0.05) : 0;
+        // Weights: meridian is dominant (Earth-line gates the entire chain)
+        return mf * 1.40 + (mc / 3) * 0.70 + af * 0.55 + ff * 0.85;
+    }
+
+    function ranked() {
+        if (!liveRegions?.length) return [];
+        return liveRegions
+            .map(r => ({ reg: r, s: score(r), loc: parseLoc(r.loc) }))
+            .filter(x => x.s > 0 && x.loc)
+            .sort((a, b) => b.s - a.s);
+    }
+
+    function tier(s) {
+        if (s >= 2.3) return { k:'severe', label:'SEVERE' };
+        if (s >= 1.7) return { k:'high',   label:'HIGH'   };
+        if (s >= 1.1) return { k:'mod',    label:'MOD'    };
+        return            { k:'low',    label:'LOW'    };
+    }
+
+    function whyText(reg, loc, lf) {
+        // Stonyhurst convention: lon > 0 = W (rotating away from Earth-line),
+        //                        lon < 0 = E (rotating toward Earth-line).
+        const bits = [];
+        const a   = Math.abs(loc.lon);
+        const dir = loc.lon < 0 ? 'E' : 'W';
+        if (a < 12)       bits.push('on Earth-firing meridian — CME from here points at Earth');
+        else if (a < 35)  bits.push(`${a.toFixed(0)}°${dir} of meridian — ${loc.lon < 0 ? 'rotating into Earth-firing zone' : 'rotating out of Earth view'}`);
+        else              bits.push(`${a.toFixed(0)}°${dir} — glancing CMEs only`);
+        const mc = magComplexityFromString(reg.mag);
+        if (mc >= 3) bits.push('β-γ-δ → high flare/CME risk');
+        else if (mc === 2) bits.push('β-γ complexity');
+        if (lf?.f?.cls) bits.push(`recent ${lf.f.cls}`);
+        return bits.join(' · ');
+    }
+
+    function showOverlay(entry) {
+        const reg = entry.reg, loc = entry.loc;
+        const lf  = lastFlareForAR(reg.num);
+        const t   = tier(entry.s);
+        lastTier  = t.k;
+        const ov  = document.getElementById('smart-tour-overlay');
+        const tch = document.getElementById('sto-tier');
+        document.getElementById('sto-mode').textContent  = interrupted ? '⚡ LIVE FLARE — LOCKED' : 'SMART TOUR';
+        document.getElementById('sto-title').textContent = 'AR ' + (reg.num || '?');
+        document.getElementById('sto-loc').textContent   = reg.loc;
+        document.getElementById('sto-mag').textContent   = reg.mag || '—';
+        document.getElementById('sto-merid').textContent = `${Math.abs(loc.lon).toFixed(0)}°`;
+        document.getElementById('sto-area').textContent  = (reg.area || 0) + ' μH';
+        document.getElementById('sto-lastflare').textContent = lf?.f?.cls ? `${lf.f.cls} (${_timeAgo(lf.f.time)})` : 'none (24h)';
+        document.getElementById('sto-why').textContent   = whyText(reg, loc, lf);
+        tch.className = 'tier-' + t.k;
+        tch.textContent = t.label;
+        ov.classList.toggle('interrupt', interrupted);
+        ov.classList.add('show');
+    }
+
+    function hideOverlay() {
+        document.getElementById('smart-tour-overlay')?.classList.remove('show', 'interrupt');
+    }
+
+    function gotoIdx(i) {
+        const list = lastRanked.length ? lastRanked : ranked();
+        if (!list.length) {
+            document.getElementById('sto-mode').textContent = 'SMART TOUR — no front-side ARs';
+            document.getElementById('sto-title').textContent = '—';
+            document.getElementById('sto-loc').textContent = 'Waiting for NOAA active-region data';
+            document.getElementById('sto-why').textContent = '';
+            document.getElementById('smart-tour-overlay')?.classList.add('show');
+            return;
+        }
+        lastRanked = list;
+        currentIdx = ((i % list.length) + list.length) % list.length;
+        const entry = list[currentIdx];
+        showOverlay(entry);
+        flyToRegion(entry.loc.lat, entry.loc.lon, DIST_R, FRAME, FLY_MS);
+        dwellStart   = performance.now();
+        dwellMs      = interrupted ? HOLD_MS_FLARE : HOLD_MS_BASE;
+        nextSwitchAt = dwellStart + dwellMs;
+    }
+
+    function advance() {
+        if (!active || paused) return;
+        // Refresh ranking each advance (data may have updated)
+        lastRanked = ranked();
+        // Loop only through top-5 to keep the tour focused
+        const topN = Math.min(5, lastRanked.length);
+        if (!topN) { gotoIdx(0); return; }
+        gotoIdx((currentIdx + 1) % topN);
+    }
+
+    function tick(now) {
+        if (!active || paused) return;
+        const elapsed = now - dwellStart;
+        const pct = Math.min(1, elapsed / dwellMs);
+        const bar = document.querySelector('#sto-progress .bar');
+        if (bar) bar.style.width = (pct * 100).toFixed(1) + '%';
+        if (now >= nextSwitchAt) {
+            if (interrupted) interrupted = false;   // release lock after dwell
+            advance();
+        }
+    }
+
+    function start() {
+        if (active) return;
+        active = true; paused = false; interrupted = false;
+        savedCamPos = camera.position.clone();
+        savedTarget = controls.target.clone();
+        document.getElementById('smart-tour-controls').style.display = 'flex';
+        document.querySelectorAll('.btn-row button[id^=cam]').forEach(b => b.classList.remove('active'));
+        currentIdx = -1;
+        advance();
+    }
+
+    function stop() {
+        if (!active) return;
+        active = false; paused = false; interrupted = false;
+        document.getElementById('smart-tour-controls').style.display = 'none';
+        hideOverlay();
+        // Restore previous view
+        if (savedCamPos) {
+            const start = camera.position.clone();
+            const startTgt = controls.target.clone();
+            const t0 = performance.now();
+            (function step(now) {
+                const raw = Math.min((now - t0) / 800, 1);
+                const ease = raw < 0.5 ? 2*raw*raw : -1 + (4-2*raw)*raw;
+                camera.position.lerpVectors(start, savedCamPos, ease);
+                controls.target.lerpVectors(startTgt, savedTarget, ease);
+                controls.update();
+                if (raw < 1) requestAnimationFrame(step);
+            })(performance.now());
+        }
+    }
+
+    function setPaused(p) {
+        paused = p;
+        const btn = document.getElementById('tour-pause');
+        if (btn) btn.textContent = p ? '▶ Resume' : '⏸ Pause';
+        if (!p) {
+            // Resume progress from now
+            const remaining = Math.max(0, nextSwitchAt - performance.now());
+            dwellStart = performance.now() - (dwellMs - remaining);
+            nextSwitchAt = performance.now() + remaining;
+        }
+    }
+
+    // Called when a live M/X flare arrives — lock the tour to that AR
+    function interruptOnFlare(latDeg, lonDeg, cls, regNum) {
+        if (!active) return;
+        const clsCh = String(cls || '')[0]?.toUpperCase();
+        if (!FLARE_INTERRUPT_CLASSES.has(clsCh)) return;
+        // Find the closest known AR to the flare location (within 8°)
+        let best = null, bestD = 999;
+        liveRegions.forEach((r, i) => {
+            const c = parseLoc(r.loc); if (!c) return;
+            const d = Math.hypot(c.lat - latDeg, c.lon - lonDeg);
+            if (d < bestD) { bestD = d; best = { reg: r, loc: c, idx: i }; }
+        });
+        // If no matching AR is on the disc, fly to the raw flare location
+        interrupted = true;
+        if (best && bestD < 12) {
+            const entry = { reg: best.reg, loc: best.loc, s: score(best.reg) + 2.0 /* boost so tier reads severe */ };
+            // Ensure entry exists in lastRanked at front
+            lastRanked = [entry, ...lastRanked.filter(x => x.reg.num !== best.reg.num)];
+            currentIdx = 0;
+            gotoIdx(0);
+        } else {
+            // Synthetic entry for raw flare site
+            const synth = {
+                reg: { num: regNum || '?', loc: '—', mag: '—', area: 0, z: 'A' },
+                loc: { lat: latDeg, lon: lonDeg },
+                s:   2.5,
+            };
+            lastRanked = [synth, ...lastRanked];
+            currentIdx = 0;
+            gotoIdx(0);
+        }
+    }
+
+    return { start, stop, tick, setPaused, advance, interruptOnFlare,
+             get active() { return active; }, get paused() { return paused; } };
+})();
+
+// Wire smart-tour UI
+document.getElementById('tog-smart-tour')?.addEventListener('change', e => {
+    if (e.target.checked) smartTour.start(); else smartTour.stop();
+});
+document.getElementById('tour-next')?.addEventListener('click',  () => smartTour.advance());
+document.getElementById('tour-pause')?.addEventListener('click', () => smartTour.setPaused(!smartTour.paused));
 
 // ── Recent flare replay ────────────────────────────────────────────────────
 // After data load, replay flares from the past hour to pre-seed the
@@ -8967,6 +9461,10 @@ window.addEventListener('swpc-update', (ev) => {
             spawnEruptingProminence(lat_r, lon_r, clsCh);
 
             // Brief bloom spike (already handled by flareBoost in animate loop)
+
+            // ── Smart tour: lock onto this flare (M/X only) ──────────────────
+            try { smartTour.interruptOnFlare(latDeg, lonDeg, sw.flare_class, sw.flare_region); }
+            catch (e) { /* tour not initialized yet */ }
         }
         // Show flare alert banner
         showFlareAlertBanner(sw.flare_class ?? 'M-class', sw.flare_location);
