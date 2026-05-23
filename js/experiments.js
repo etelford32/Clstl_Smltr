@@ -46,6 +46,28 @@ export const EXPERIMENTS = Object.freeze({
             { id: 'punch',   w: 50 },   // loss-framed / urgency headline
         ],
     },
+    // Legacy index.html hero headline. Variants are owned by the page's
+    // inline copy map; experiments.js only does the bucketing + exposure.
+    // New variants can be added without code change to the renderer — any
+    // id not in the page map falls back to `control` at render time.
+    home_headline: {
+        status: 'running',
+        variants: [
+            { id: 'control', w: 25 },   // "Space-Grade Data. On Demand."
+            { id: 'palm',    w: 25 },   // "Space-Grade Data, in your palm"
+            { id: 'cosmos',  w: 25 },   // "Hold the cosmos in your hand"
+            { id: 'wonder',  w: 25 },   // "Real Physics. Real Data. Real Wonder."
+        ],
+    },
+    // Legacy index.html hero sub-paragraph. control = short punchy blurb,
+    // long = the expanded narrative variant marketing wants to test.
+    home_sub: {
+        status: 'running',
+        variants: [
+            { id: 'control', w: 50 },
+            { id: 'long',    w: 50 },
+        ],
+    },
     home_cta: {
         status: 'running',
         variants: [
@@ -95,6 +117,16 @@ export const EXPERIMENTS = Object.freeze({
 export const EXPERIMENT_GOALS = Object.freeze({
     home_hero: [
         { stage: 'landing_cta_click',  label: 'CTA click (primary)' },
+        { stage: 'signup_succeeded',   label: 'Signup' },
+    ],
+    home_headline: [
+        { stage: 'landing_cta_click',  label: 'CTA click (primary)' },
+        { stage: 'scroll_depth',       label: 'Scroll past hero' },
+        { stage: 'signup_succeeded',   label: 'Signup' },
+    ],
+    home_sub: [
+        { stage: 'landing_cta_click',  label: 'CTA click (primary)' },
+        { stage: 'scroll_depth',       label: 'Scroll past hero' },
         { stage: 'signup_succeeded',   label: 'Signup' },
     ],
     home_cta: [
