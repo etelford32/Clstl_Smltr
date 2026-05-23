@@ -141,6 +141,9 @@ WORKDIR /opt/swmf
 RUN ls -la /opt/swmf/bin/ \
  && test -x /opt/swmf/bin/SWMF.exe \
  && echo "SWMF coupled-build OK — $(stat -c '%s bytes' /opt/swmf/bin/SWMF.exe)"
+RUN ls -la /opt/swmf/bin/ \
+ && ls -la /opt/swmf/SWMF.exe \
+ && echo "SWMF coupled-build OK"
 
 # ── Stage 2: runtime image ─────────────────────────────────────────────────────
 FROM ubuntu:22.04 AS runtime
@@ -171,6 +174,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # separate `COPY /opt/swmf/SWMF.exe` line that older docs reference is
 # gone — that path doesn't exist in 2024+ SWMF layouts.
 COPY --from=builder /opt/swmf/bin/  /opt/swmf/bin/
+# SWMF.exe is the coupled binary that runs SC + IH + GM + IE together —
+# that's the production binary. The per-component standalone
+# BATSRUS.exe files used to be copied here too; the standalone builds
+# were removed (see note in stage 1) so the COPY lines are gone too.
+COPY --from=builder /opt/swmf/bin/      /opt/swmf/bin/
+COPY --from=builder /opt/swmf/SWMF.exe  /opt/swmf/SWMF.exe
 
 # IE/Ridley_serial is a serial Fortran component — its compiled object
 # files live alongside the SWMF binary and are linked into SWMF.exe.
