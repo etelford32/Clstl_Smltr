@@ -139,12 +139,22 @@ function wingArea(span) { return clampNum(span, 0.3, 8, 2) * 0.45; }
  *            bodyArea,panelArea,panelMass,
  *            power,powerReq,powerMargin,powerFrac,electric}}
  */
-export function deriveDesign(build, presets = null) {
+export function deriveDesign(build, presets = null, tierMods = null) {
     const b  = BODIES[build.body] || BODIES.smallsat;
     const tu = THRUSTER_UNITS[build.thruster] || THRUSTER_UNITS.monoprop;
     const p  = PANELS[build.panel] || PANELS.none;
     const pl = PAYLOADS[build.payload] || PAYLOADS.none;
     const count = Math.max(1, Math.round(build.thrusterCount || 1));
+
+    // ── Tier modifiers ──────────────────────────────────────────────────
+    // tierMods is supplied by the progression module — { body:{massMul,...},
+    // thruster:{...}, panel:{...}, payload:{...} } — so the builder stays
+    // decoupled from XP/persistence. Missing entries default to 1× (Mk I).
+    const tm = tierMods || {};
+    const mB  = tm.body     || {};
+    const mTu = tm.thruster || {};
+    const mP  = tm.panel    || {};
+    const mPl = tm.payload  || {};
 
     // Bus broadside ram area (largest face for box, side rectangle for cyl,
     // length × diameter for the long telescope tube).
@@ -155,41 +165,50 @@ export function deriveDesign(build, presets = null) {
 
     const perWing = wingArea(build.panelSpan);
     const totalPanelArea = perWing * p.wings;
-    const panelRamArea = totalPanelArea * p.ramFactor;
-    const panelMass = totalPanelArea * p.areaKgM2;
+    const panelRamArea = totalPanelArea * p.ramFactor * (mP.cdMul ?? 1);
+    const panelMass = totalPanelArea * p.areaKgM2 * (mP.massMul ?? 1);
 
-    const area = bodyArea + panelRamArea + pl.area;
-    // Area-weighted blend of body vs. flat-plate panel vs. payload drag coefficients.
+    // Apply per-slot Cd multipliers to each contribution (Mk II/III bodies
+    // are slicker, etc) — area is unchanged but blended Cd shifts.
+    const bodyCdEff    = b.cd  * (mB.cdMul  ?? 1);
+    const panelCdEff   = p.cd  * (mP.cdMul  ?? 1);
+    const payloadCdEff = pl.cd * (mPl.cdMul ?? 1);
+    const payloadArea  = pl.area * (mPl.cdMul ? 1 : 1);   // area unchanged by Cd; reserved hook
+
+    const area = bodyArea + panelRamArea + payloadArea;
     const cd = area > 0
-        ? (b.cd * bodyArea + p.cd * panelRamArea + pl.cd * pl.area) / area
-        : b.cd;
+        ? (bodyCdEff * bodyArea + panelCdEff * panelRamArea + payloadCdEff * payloadArea) / area
+        : bodyCdEff;
 
-    const dryMass = b.mass + tu.unitMass * count + panelMass + pl.mass + AVIONICS_MASS;
+    const dryMass = b.mass * (mB.massMul ?? 1)
+                  + tu.unitMass * count * (mTu.massMul ?? 1)
+                  + panelMass
+                  + pl.mass * (mPl.massMul ?? 1)
+                  + AVIONICS_MASS;
 
     // ── Power budget ──────────────────────────────────────────────────────
-    // Sun-tracking arrays generate from their *full* area (orientation only
-    // affects drag, not illumination). Housekeeping + the payload's fixed
-    // electrical load come off the top before anything reaches propulsion.
-    const powerGen   = totalPanelArea * p.wPerM2;             // W generated
+    const powerGen   = totalPanelArea * p.wPerM2 * (mP.wMul ?? 1);
     const electric   = tu.power > 0;
     const thrPwrFull = tu.power * count;                      // W at rated thrust
-    const fixedLoad  = HOUSEKEEPING_W + pl.powerW;
+    const payloadW   = pl.powerW * (mPl.powerMul ?? 1);
+    const fixedLoad  = HOUSEKEEPING_W + payloadW;
     const powerReq   = fixedLoad + (electric ? thrPwrFull : 0);
     const powerAvail = Math.max(0, powerGen - fixedLoad);
-    // Electric thrust scales linearly with the power it actually gets; a
-    // chemical thruster ignores the array entirely.
     const powerFrac  = electric
         ? (thrPwrFull > 0 ? Math.min(1, powerAvail / thrPwrFull) : 1)
         : 1;
 
     // Centre-of-pressure offset (m): the lever arm between the geometric
     // centre of drag and the centre of mass, used by the engine to compute
-    // disturbance torques. Telescopes / tugs with off-axis payloads are
-    // more prone to tumble under high-q.
+    // disturbance torques.
     const maxSide = Math.max(dx, dy, dz);
     const baseArm = maxSide * (b.momentArmMul ?? 0.18);
-    const payloadArm = pl.centreOffset * (pl.mass / Math.max(1, dryMass));
-    const copOffset = baseArm + payloadArm * 0.5;
+    const payloadArmRaw = pl.centreOffset * (pl.mass / Math.max(1, dryMass));
+    const copOffset = baseArm + payloadArmRaw * 0.5;
+
+    // Thruster gimbal / throat life with tier mods. Default 1× (Mk I).
+    const gimbalDeg   = tu.gimbalDeg   * (mTu.gimbalMul     ?? 1);
+    const throatLifeS = tu.throatLifeS * (mTu.throatLifeMul ?? 1);
 
     const out = {
         dryMass:      round(dryMass, 1),
@@ -201,25 +220,24 @@ export function deriveDesign(build, presets = null) {
         panelArea:    round(totalPanelArea, 3),
         panelMass:    round(panelMass, 2),
         payload:      build.payload || 'none',
-        payloadMass:  round(pl.mass, 1),
-        payloadArea:  round(pl.area, 3),
-        payloadPower: pl.powerW,
+        payloadMass:  round(pl.mass * (mPl.massMul ?? 1), 1),
+        payloadArea:  round(payloadArea, 3),
+        payloadPower: round(payloadW, 0),
         power:        round(powerGen, 0),
         powerReq:     round(powerReq, 0),
         powerMargin:  round(powerGen - powerReq, 0),
         powerFrac:    round(powerFrac, 3),
         electric,
-        // Per-thruster *modifier* hand-offs the flight model consumes:
-        gimbalDeg:    tu.gimbalDeg,
-        gimbalRad:    tu.gimbalDeg * Math.PI / 180,
-        throatLifeS:  tu.throatLifeS,
-        // Geometric properties the engine uses for torque / tumble math.
+        gimbalDeg:    round(gimbalDeg, 1),
+        gimbalRad:    gimbalDeg * Math.PI / 180,
+        throatLifeS:  Math.round(throatLifeS),
         copOffset:    round(copOffset, 3),
         maxSide:      round(maxSide, 3),
     };
     if (presets && presets[build.thruster]) {
-        out.thrust = round(presets[build.thruster].thrust * count * powerFrac, 4);
-        out.isp = presets[build.thruster].isp;
+        const ptu = presets[build.thruster];
+        out.thrust = round(ptu.thrust * count * powerFrac * (mTu.thrustMul ?? 1), 4);
+        out.isp    = round(ptu.isp * (mTu.ispMul ?? 1), 1);
     }
     return out;
 }

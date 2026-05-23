@@ -323,6 +323,15 @@ select option{background:#0a1024}
   filter:drop-shadow(0 1px 4px rgba(0,200,255,.35))}
 .opt-row.big .opt.active{box-shadow:inset 0 0 0 1px rgba(0,200,255,.35),
   0 2px 8px rgba(0,200,255,.18)}
+.opt-row.big .opt{position:relative}
+.tier{position:absolute;top:2px;right:3px;font-size:.5rem;font-weight:800;
+  padding:1px 4px;border-radius:3px;letter-spacing:.04em;line-height:1.2;
+  background:rgba(255,210,90,.16);color:#ffd166;border:1px solid rgba(255,210,90,.4);
+  cursor:pointer;z-index:2}
+.tier:hover{background:rgba(255,210,90,.34);color:#fff;border-color:#ffd166}
+.tier-3{background:rgba(0,230,180,.18);color:#7fffd4;border-color:rgba(0,230,180,.5)}
+.tier-3:hover{background:rgba(0,230,180,.38);color:#fff;border-color:#7fffd4}
+.hint-tiny{font-size:.6rem;color:var(--c-text-3);font-weight:600;letter-spacing:.02em}
 .part-row{margin-bottom:11px}
 .part-row:last-child{margin-bottom:0}
 .part-row-hd{display:flex;justify-content:space-between;align-items:baseline;
@@ -394,6 +403,10 @@ select option{background:#0a1024}
         <div class="part-row-hd"><span>☀ Solar arrays</span><span><b id="bay-span-v">2.2</b><small>m wing</small></span></div>
         <div class="opt-row big" id="bay-panel"></div>
         <input type="range" id="bay-span" min="0.5" max="6" step="0.1" value="2.2" class="row-slider">
+      </div>
+      <div class="part-row">
+        <div class="part-row-hd"><span>📦 Payload</span><span class="hint-tiny" id="payload-tip">—</span></div>
+        <div class="opt-row big" id="bay-payload"></div>
       </div>
       <div class="part-row">
         <div class="part-row-hd"><span>⛽ Propellant</span><span><b id="v-fuel">60</b><small>kg</small></span></div>
@@ -624,6 +637,13 @@ select option{background:#0a1024}
         <div class="bar"><i id="dv-bar" style="width:100%"></i></div>
       </div>
       <canvas id="sd-spark"></canvas>
+      <!-- Realism gauges — always visible because they drive pilot decisions. -->
+      <div class="metrics metrics-quad" style="margin-top:6px">
+        <div class="metric" id="m-turb"><div class="k">Turbulence</div><div class="v">—</div></div>
+        <div class="metric" id="m-tumble"><div class="k">Tumble</div><div class="v">—</div></div>
+        <div class="metric" id="m-erosion"><div class="k">Throat life</div><div class="v">—</div></div>
+        <div class="metric" id="m-ispEff"><div class="k">Eff. Iₛₚ</div><div class="v">—</div></div>
+      </div>
       <details class="advanced" style="margin-top:4px">
         <summary>Extended telemetry</summary>
         <div class="metrics metrics-quad" style="margin-top:6px">
@@ -905,7 +925,8 @@ function launch() {
 // Blank every live readout so each test run starts from a clean board.
 function clearReadouts() {
   for (const id of ['m-alt','m-spd','m-peri','m-apo','m-period','m-ecc',
-                     'm-rho','m-q','m-drag','m-decay'])
+                     'm-rho','m-q','m-drag','m-decay',
+                     'm-turb','m-tumble','m-erosion','m-ispEff'])
     setMetric(id, '—', null);
   $('fuel-lbl').textContent = '—';
   $('dv-lbl').textContent = '—';
@@ -1086,6 +1107,30 @@ function updateTelemetry(t) {
       ? fmt(t.decayPerOrbitKm, 3) + ' <small>km/orbit</small>'
       : 'stable',
     t.decayPerOrbitKm < -1 ? 'bad' : t.decayPerOrbitKm < -0.05 ? 'warn' : null);
+
+  // ── Realism gauges ────────────────────────────────────────────────────
+  // Turbulence is the multiplier on the mean atmosphere model — ±5% quiet,
+  // up to ±23% in a storm. Warn when it's moving the needle.
+  const turbPct = ((t.turbulence ?? 1) - 1) * 100;
+  setMetric('m-turb',
+    (turbPct >= 0 ? '+' : '') + fmt(turbPct, 1) + '<small>%</small>',
+    Math.abs(turbPct) > 15 ? 'warn' : null);
+  // Tumble = angular rate of the bus (rad/s) — high when drag torque
+  // overpowers reaction wheels; the engine bloats effective area when this
+  // grows. Visualised in °/s for legibility.
+  const tumbleDegS = (t.tumbleRate ?? 0) * 180 / Math.PI;
+  setMetric('m-tumble',
+    fmt(Math.abs(tumbleDegS), 1) + '<small>°/s</small>',
+    Math.abs(tumbleDegS) > 30 ? 'bad' : Math.abs(tumbleDegS) > 10 ? 'warn' : null);
+  // Throat life remaining (0 % = factory new; 100 % = 25 % perf loss capped).
+  const lifeUsed = (t.erosion ?? 0) * 100;
+  setMetric('m-erosion',
+    fmt(100 - lifeUsed, 0) + '<small>%</small>',
+    lifeUsed > 60 ? 'bad' : lifeUsed > 25 ? 'warn' : null);
+  // Effective Isp (degraded by erosion).
+  setMetric('m-ispEff',
+    isFinite(t.ispEff) ? fmt(t.ispEff, 0) + '<small>s</small>' : '—',
+    t.ispEff < (sim.design?.isp ?? Infinity) * 0.85 ? 'warn' : null);
 
   $('fuel-lbl').textContent = fmt(t.fuel, 1) + ' kg';
   $('fuel-bar').style.width = (t.fuelFrac * 100).toFixed(1) + '%';
@@ -1374,49 +1419,86 @@ const BAY = { ready: false, three: null, raf: 0,
 // shapes for buses, a flame/leaf for chemical-vs-electric thrusters, sun
 // motifs for arrays. Keep these in sync with BUILDER's keys.
 const PART_ICONS = {
-  body: { cubesat_3u: '🧊', cubesat_12u: '📦', smallsat: '🛰', bus_med: '🚛', tank_cyl: '🛢' },
+  body: { cubesat_3u: '🧊', cubesat_12u: '📦', cubesat_grid: '🧱',
+          smallsat: '🛰', bus_med: '🚛', tank_cyl: '🛢',
+          tug: '🚚', telescope: '🔭' },
   thruster: { cold_gas: '💨', monoprop: '🔥', biprop: '🚀',
               hall_ion: '⚡', gridded_ion: '⚛', hall_shielded: '🛡',
               iodine_ion: '🟣', electrospray: '💧', water_resisto: '💦' },
   panel: { none: '⬛', dual: '☀', quad: '🔆', large: '🌞', rosa: '📜', thinfilm: '🪶' },
+  payload: { none: '➖', optical_cam: '📷', wide_imager: '🎥',
+             commsat_dish: '📡', sar_radar: '🛰', mass_driver: '🧨' },
 };
-function chip(label, sub, active, icon) {
+// Render a single part chip. The tier badge is appended for non-Mk-I parts
+// to advertise upgraded gear. The whole chip is clickable to select; the
+// tier badge is independently clickable to attempt an upgrade.
+function chip(slot, label, sub, active, icon, tier) {
   const ic = icon ? `<span class="ico">${icon}</span>` : '';
+  const badge = tier > 1
+    ? `<span class="tier tier-${tier}" data-slot="${slot}" data-key="${label.key}" title="Tier ${tier}">${PROG.PART_TIER_NAMES[tier-1]}</span>`
+    : '';
   return `<div class="opt${active ? ' active' : ''}" data-v="${label.key}" title="${label.full || label.name}">
-    ${ic}${label.name}<small>${sub}</small></div>`;
+    ${badge}${ic}${label.name}<small>${sub}</small></div>`;
 }
 function renderOptChips() {
+  const tT = (slot, k) => PROG.partTier(profile, slot, k);
   $('bay-body').innerHTML = Object.entries(BUILDER.BODIES).map(([k, v]) =>
-    chip({ key: k, name: v.label.replace(' CubeSat', '').replace('SmallSat ', ''),
-           full: `${v.label} · ${v.mass} kg` },
-         `${v.mass} kg`, k === sdBuild.body, PART_ICONS.body[k])).join('');
+    chip('body',
+      { key: k, name: v.label.replace(' CubeSat', '').replace('SmallSat ', ''),
+        full: `${v.label} · ${v.mass} kg` },
+      `${v.mass} kg`, k === sdBuild.body, PART_ICONS.body[k], tT('body', k))).join('');
   $('bay-thruster').innerHTML = Object.entries(BUILDER.THRUSTER_UNITS).map(([k, v]) => {
     const p = ENG.ENGINE_PRESETS[k];
     const short = v.label.split(/[\s\/(]/)[0];
-    return chip({ key: k, name: short, full: v.label },
+    return chip('thruster', { key: k, name: short, full: v.label },
       p ? `${p.thrust < 1 ? p.thrust : Math.round(p.thrust)} N · ${p.isp}s` : '',
-      k === sdBuild.thruster, PART_ICONS.thruster[k]);
+      k === sdBuild.thruster, PART_ICONS.thruster[k], tT('thruster', k));
   }).join('');
   $('bay-panel').innerHTML = Object.entries(BUILDER.PANELS).map(([k, v]) => {
     const short = v.label.replace(' deployable', '').replace(' array', '')
                           .replace(' (ROSA)', '').replace(' flex', '');
-    return chip({ key: k, name: short, full: v.label },
+    return chip('panel', { key: k, name: short, full: v.label },
       v.wings ? `${v.wings} wing${v.wings > 1 ? 's' : ''}` : 'fixed',
-      k === sdBuild.panel, PART_ICONS.panel[k]);
+      k === sdBuild.panel, PART_ICONS.panel[k], tT('panel', k));
   }).join('');
+  $('bay-payload').innerHTML = Object.entries(BUILDER.PAYLOADS).map(([k, v]) => {
+    const short = v.label.replace(' camera', '').replace(' (exp.)', '')
+                          .replace('Comms HG ', '').replace(' phased array', '');
+    return chip('payload', { key: k, name: short, full: v.label },
+      v.mass > 0 ? `${v.mass}kg · ${v.powerW}W` : 'none',
+      k === sdBuild.payload, PART_ICONS.payload[k], tT('payload', k));
+  }).join('');
+  // Live caption under the row header showing what's selected.
+  const plKey = sdBuild.payload || 'none';
+  const pl = BUILDER.PAYLOADS[plKey];
+  $('payload-tip').textContent = pl
+    ? `${pl.label} — ${pl.mass}kg · ${pl.area}m² · ${pl.powerW}W`
+    : '';
 }
 function syncBayUI() {
   const tc = $('bay-tc'), sp = $('bay-span');
   if (tc) { tc.value = sdBuild.thrusterCount; $('bay-tc-v').textContent = sdBuild.thrusterCount; }
   if (sp) { sp.value = sdBuild.panelSpan; $('bay-span-v').textContent = (+sdBuild.panelSpan).toFixed(1); }
-  for (const [grp, key] of [['bay-body', 'body'], ['bay-thruster', 'thruster'], ['bay-panel', 'panel']]) {
+  for (const [grp, key] of [['bay-body', 'body'], ['bay-thruster', 'thruster'],
+                            ['bay-panel', 'panel'], ['bay-payload', 'payload']]) {
     const box = $(grp); if (!box) continue;
     box.querySelectorAll('.opt').forEach(o =>
       o.classList.toggle('active', o.dataset.v === sdBuild[key]));
   }
 }
+// Build the per-slot tierMods object the builder expects, from the active
+// profile's persistent partTiers map. Each chip's modifiers are computed
+// at use-time so a tier upgrade is reflected immediately.
+function activeTierMods() {
+  return {
+    body:     PROG.tierMods('body',     PROG.partTier(profile, 'body',     sdBuild.body)),
+    thruster: PROG.tierMods('thruster', PROG.partTier(profile, 'thruster', sdBuild.thruster)),
+    panel:    PROG.tierMods('panel',    PROG.partTier(profile, 'panel',    sdBuild.panel)),
+    payload:  PROG.tierMods('payload',  PROG.partTier(profile, 'payload',  sdBuild.payload || 'none')),
+  };
+}
 function refreshBaySpec() {
-  const d = BUILDER.deriveDesign(sdBuild, ENG.ENGINE_PRESETS);
+  const d = BUILDER.deriveDesign(sdBuild, ENG.ENGINE_PRESETS, activeTierMods());
   $('bs-mass').innerHTML = fmt(d.dryMass, 1) + ' <small>kg</small>';
   $('bs-area').innerHTML = fmt(d.area, 2) + ' <small>m²</small>';
   $('bs-cd').textContent = d.cd.toFixed(2);
@@ -1505,7 +1587,7 @@ async function initBay() {
 }
 // Push the parametric build's derived physics into the editable ship form.
 function pushBuildToForm() {
-  const d = BUILDER.deriveDesign(sdBuild, ENG.ENGINE_PRESETS);
+  const d = BUILDER.deriveDesign(sdBuild, ENG.ENGINE_PRESETS, activeTierMods());
   $('f-engine').value = d.engine;
   $('f-thrust').value = d.thrust;
   $('f-isp').value = d.isp;
@@ -1524,14 +1606,48 @@ function applyBuild() {
   toast(`Applied ${BUILDER.BODIES[sdBuild.body].label}: ${fmt(d.dryMass, 0)} kg · ${fmt(d.area, 2)} m²`);
 }
 
-for (const [grp, key] of [['bay-body', 'body'], ['bay-thruster', 'thruster'], ['bay-panel', 'panel']]) {
+for (const [grp, key] of [['bay-body', 'body'], ['bay-thruster', 'thruster'],
+                          ['bay-panel', 'panel'], ['bay-payload', 'payload']]) {
   $(grp).addEventListener('click', (e) => {
+    // Tier-badge click — try to upgrade that specific part, don't select it.
+    const tierBadge = e.target.closest('.tier');
+    if (tierBadge) { e.stopPropagation(); tryUpgradePart(tierBadge.dataset.slot, tierBadge.dataset.key); return; }
     const o = e.target.closest('.opt'); if (!o) return;
+    // Right-click (or alt-click) on a chip opens its upgrade flow instead.
+    if (e.altKey) { tryUpgradePart(key, o.dataset.v); return; }
     sdBuild[key] = o.dataset.v;
     $(grp).querySelectorAll('.opt').forEach(x => x.classList.toggle('active', x === o));
     syncBuild();
   });
+  // Right-click anywhere in a chip row triggers the upgrade flow.
+  $(grp).addEventListener('contextmenu', (e) => {
+    const o = e.target.closest('.opt'); if (!o) return;
+    e.preventDefault();
+    tryUpgradePart(key, o.dataset.v);
+  });
 }
+// Upgrade flow — spends XP from the available pool. Shows a toast either way.
+function tryUpgradePart(slot, key) {
+  const curTier = PROG.partTier(profile, slot, key);
+  if (curTier >= 3) { toast(`${BUILDER[slotsToConst[slot]]?.[key]?.label || key}: already Mk III (max).`); return; }
+  const cost = PROG.PART_TIER_COST[curTier];
+  const avail = PROG.availableXp(profile);
+  const partName = BUILDER[slotsToConst[slot]]?.[key]?.label || key;
+  if (avail < cost) {
+    toast(`🔒 Mk ${PROG.PART_TIER_NAMES[curTier].split(' ')[1]} ${partName} costs ${cost} XP — you have ${avail}.`, true);
+    return;
+  }
+  if (!confirm(`Upgrade ${partName} to ${PROG.PART_TIER_NAMES[curTier]} for ${cost} XP?\n\nAvailable XP: ${avail}`)) return;
+  const r = PROG.upgradePart(profile, slot, key);
+  if (r.ok) {
+    toast(`✨ ${partName} → ${PROG.PART_TIER_NAMES[r.newTier - 1]} (–${r.cost} XP)`);
+    renderOptChips(); syncBayUI(); refreshBaySpec();
+    refreshDesignReadouts(); renderPilotPanel();
+  } else {
+    toast(`Upgrade failed: ${r.reason}`, true);
+  }
+}
+const slotsToConst = { body: 'BODIES', thruster: 'THRUSTER_UNITS', panel: 'PANELS', payload: 'PAYLOADS' };
 $('bay-tc').addEventListener('input', (e) => {
   sdBuild.thrusterCount = +e.target.value;
   $('bay-tc-v').textContent = e.target.value; syncBuild();
@@ -1717,13 +1833,20 @@ function refreshObjectivePanel(tel) {
 // ── Pilot progression (roguelike-style unlocks) ─────────────────────────────
 function renderPilotPanel() {
   const xp = PROG.xpFor(profile);
+  const avail = PROG.availableXp(profile);
   $('rank-badge').textContent = xp.rank.badge;
   $('rank-name').textContent = xp.rank.name;
-  $('rank-xp').textContent = `${xp.total} XP · ${profile.totalMissions || 0} missions flown`;
+  // Two-line summary: total earned, available-to-spend (xp not yet sunk
+  // into part-tier upgrades). The available number is what tier-upgrade
+  // clicks draw down.
+  $('rank-xp').innerHTML =
+    `${xp.total} XP <small style="color:var(--c-text-3)">earned</small> · ` +
+    `<b style="color:var(--c-good)">${avail}</b> <small style="color:var(--c-text-3)">to spend</small> · ` +
+    `${profile.totalMissions || 0} <small style="color:var(--c-text-3)">flown</small>`;
   $('rank-bar').style.width = Math.min(100, xp.pct * 100).toFixed(1) + '%';
   $('rank-next').textContent = xp.atMax
-    ? '🏅 Max rank — top of the operator ladder.'
-    : `Next: ${xp.nextRankName} · ${xp.span - xp.intoRank} XP to go`;
+    ? '🏅 Max rank — top of the operator ladder. Alt-click any chip to spend XP on Mk II/III.'
+    : `Next: ${xp.nextRankName} · ${xp.span - xp.intoRank} XP to go · Alt-click chips to upgrade`;
   const owned = PROG.unlocksOwned(profile);
   const locked = PROG.unlocksLocked(profile);
   $('unlocks-owned').innerHTML = owned.length
