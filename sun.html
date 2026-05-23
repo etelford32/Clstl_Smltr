@@ -2675,6 +2675,18 @@ const sunFS = /* glsl */`
         return mix(c3, c4, (t-0.8)/0.2);
     }
 
+    // ── ACES filmic tonemap (Narkowicz 2015 approximation) ────────────────────
+    // Compresses HDR highlights into a graceful S-curve so flares saturate
+    // creamy-white instead of clipping to pure white, and dim regions get a
+    // touch more shoulder contrast. Channel-independent so colour shifts
+    // slightly in the highlights (the "filmic" look). Applied in linear-light
+    // space before the global ACES the renderer already applies — kept gentle
+    // so the two don't double up.
+    vec3 acesFilm(vec3 x) {
+        const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
+        return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+    }
+
     void main() {
         vec3  nrm  = normalize(vNormal);
         vec3  vDir = normalize(vViewDir);
@@ -2690,12 +2702,18 @@ const sunFS = /* glsl */`
         float lon = atan(vPosition.x, vPosition.z);
 
         // Differential rotation (Snodgrass 1990): Ω(lat) = A + B sin²(lat) + C sin⁴(lat)
+        // Equator turns ~25 d, poles ~34 d — diffRot ranges from 1.0 at equator
+        // down to ~0.72 at the poles. We apply it to ALL latitude-keyed scrolls
+        // (granulation, supergranulation, domain warp, fine turbulence, spicules)
+        // so high-latitude features visibly drift slower than equatorial ones.
         float sinLat2 = sin(lat) * sin(lat);
         float diffRot  = 1.0 - 0.19 * sinLat2 - 0.09 * sinLat2 * sinLat2;
         float rotLon   = lon + u_time * 0.014 * u_rot * diffRot;
+        // Combined rotation factor used by all texture-scrolling terms below
+        float rotF     = u_rot * diffRot;
 
         // ── Supergranulation (~30 000 km cells, flow pattern beneath granules) ──
-        vec3  sgPos  = vPosition * 2.2 + vec3(u_time * 0.0008 * u_rot);
+        vec3  sgPos  = vPosition * 2.2 + vec3(u_time * 0.0008 * rotF);
         vec2  sgCell = voronoi(sgPos);
         // Bright cell centres (upwelling), dark lanes (downflow at boundaries)
         float superGran = smoothstep(0.0, 0.45, sgCell.x) * 0.08;
@@ -2706,11 +2724,11 @@ const sunFS = /* glsl */`
         // noise atlas via fbmTex (triplanar 2D lookups). Same visual feel,
         // ~5× cheaper per fragment than the procedural fbm path.
         vec3 dwarp = vec3(
-            fbmTex(vPosition * 5.5 + vec3(u_time * 0.0032)),
-            fbmTex(vPosition * 5.5 + vec3(u_time * 0.0032 + 1.7)),
-            fbmTex(vPosition * 5.5 + vec3(u_time * 0.0032 + 3.4))
+            fbmTex(vPosition * 5.5 + vec3(u_time * 0.0032 * rotF)),
+            fbmTex(vPosition * 5.5 + vec3(u_time * 0.0032 * rotF + 1.7)),
+            fbmTex(vPosition * 5.5 + vec3(u_time * 0.0032 * rotF + 3.4))
         ) * 0.18;
-        vec3 gPos   = vPosition * 10.5 + dwarp + vec3(u_time * 0.0065 * u_rot);
+        vec3 gPos   = vPosition * 10.5 + dwarp + vec3(u_time * 0.0065 * rotF);
         vec2 gCell  = voronoi(gPos);
         // Crisper cell structure: narrower lane-transition for sharp dark
         // edges between bright cell interiors. Adds a subtle radial-bulge
@@ -2746,11 +2764,11 @@ const sunFS = /* glsl */`
         granLight *= 1.0 + explode * 0.45;
 
         // ── Fine sub-granulation turbulence ─────────────────────────────────
-        float fineTurb = fbmTex(vPosition * 30.0 + vec3(u_time * 0.012)) * 0.08;
+        float fineTurb = fbmTex(vPosition * 30.0 + vec3(u_time * 0.012 * rotF)) * 0.08;
 
         // ── Magnetic bright points at intergranular lanes ─────────────────────
         // Tiny intense specks where kG flux tubes emerge between granules
-        float mbpNoise = vnoise(vPosition * 52.0 + vec3(u_time * 0.030));
+        float mbpNoise = vnoise(vPosition * 52.0 + vec3(u_time * 0.030 * rotF));
         float laneMask = 1.0 - laneD;  // 1=dark lane, 0=bright interior (for MBP placement)
         float mbp = smoothstep(0.82, 0.92, mbpNoise) * laneMask * 0.55;
 
@@ -2781,6 +2799,15 @@ const sunFS = /* glsl */`
         float facular     = 0.0;
         float flareActive = 0.0;
         float fibrils     = 0.0;
+        // ── Facular / plage network — bright magnetic carpet around each AR.
+        // Accumulated separately from the spot-local Wilson facular term so
+        // the wider halo can be coloured independently. SDO HMI continuum
+        // shows a faint bright veil 3-5 spot-radii beyond the penumbra,
+        // brightest near the limb (Wilson depression of the bright flux-tube
+        // walls), and modulated by the underlying supergranular network --
+        // bright on cell boundaries, dim in cell interiors. This is the
+        // "plage" you see ringing every AR in EUV/UV.
+        float plage = 0.0;
 
         vec3 fragUnit = normalize(vPosition);
 
@@ -2793,7 +2820,30 @@ const sunFS = /* glsl */`
             float complexFlag = arWS < 0.0 ? 1.0 : 0.0;
 
             float cosAng = dot(fragUnit, arSP);
-            if (cosAng < 0.985) continue;          // skip if > ~10° away
+
+            // ── Plage halo (Tier-A facular network) ────────────────────────
+            // Sample a much wider zone (~6x spot radius) so the halo precedes
+            // the spot itself in the AR loop cosAng > 0.985 cutoff. Done
+            // separately to avoid the per-AR continue gate.
+            if (cosAng > 0.94) {                  // ~20° angular reach
+                float plageAng  = acos(clamp(cosAng, -1.0, 1.0));
+                float plageR    = 0.045 + areaN * 0.060;      // outer halo radius
+                float plageCore = 0.012 + areaN * 0.020;      // inner exclusion (spot itself)
+                float halo      = smoothstep(plageR, plageCore, plageAng)
+                                * smoothstep(plageCore * 0.55, plageCore * 1.00, plageAng);
+                // Brightest near the limb (Wilson walls of the flux tubes).
+                halo *= 0.55 + 0.85 * (1.0 - mu);
+                // Modulate by the underlying supergranular network — plage
+                // concentrates in cell boundaries (kG flux tubes pumped there).
+                float netGran = smoothstep(0.20, 0.45, sgCell.y - sgCell.x);
+                halo *= 0.30 + 0.70 * netGran;
+                // Sprinkle in fine network-element pops (~1-3 Mm flux tubes)
+                float netSeed = vnoise(vPosition * 36.0 + vec3(u_time * 0.018 * rotF));
+                halo *= 0.75 + 0.45 * smoothstep(0.55, 0.85, netSeed);
+                plage = max(plage, halo * areaN);
+            }
+
+            if (cosAng < 0.985) continue;          // skip spot-local code if > ~10° away
             float ang = acos(clamp(cosAng, -1.0, 1.0));
 
             // Spot radii scale with normalised area (NOAA millionths/800).
@@ -2896,8 +2946,16 @@ const sunFS = /* glsl */`
         // Nanoflare transient brightenings — hot white-yellow pops
         col += vec3(1.5, 1.3, 0.8) * microflare * (1.0 - umbra) * u_showFlares;
 
-        // Facular brightening near limb
+        // Facular brightening near limb (spot-local Wilson walls)
         col += baseCol * facular * 0.65;
+
+        // ── Plage / facular network around active regions ──────────────────
+        // Warm-white halo: hotter than the photosphere (~6500-7000 K) with a
+        // slight blue-violet tint where Ca II K and UV continuum dominate.
+        // Coupled to u_showSpots so the user's "Sunspot regions" toggle owns
+        // the entire AR visual chain (spots + plage together).
+        vec3 plageColor = mix(baseCol * 1.18, vec3(1.05, 1.02, 0.95), 0.55);
+        col += plageColor * plage * 0.42 * u_showSpots;
 
         // ── Sunspot umbra (T_umbra ~ 0.60 × T_eff ≈ 3470 K) ──────────────────
         float umbraT = u_teff * (0.60 - umbra * 0.18);
@@ -3038,14 +3096,18 @@ const sunFS = /* glsl */`
         // more of the upper-altitude colouring (warmer rim, brighter spicule
         // fringe) so the photosphere reads as a complete picture on its own.
         if (u_photIso > 0.5) {
-            // Stronger spicule fringe + chromospheric tint at extreme limb
-            float isoRim = pow(1.0 - mu, 3.0);
-            col += vec3(1.10, 0.32, 0.10) * isoRim * 0.40;
+            // Stronger spicule fringe + chromospheric tint at extreme limb.
+            // Tier-C: sharpen the falloff (was pow 3.0 → 2.0) and lift the
+            // amplitude so the isolated photosphere reads with a clear pink
+            // ring instead of a faint blush — closer to eclipse appearance.
+            float isoRim = pow(1.0 - mu, 2.0);
+            col += vec3(1.20, 0.42, 0.18) * isoRim * 0.75;
         }
 
         // ── HDR amplification — drives the bloom glow ─────────────────────────
         // Kept moderate so granulation contrast and sunspot detail remain visible.
         // Only flare impulsive phase pushes significantly above bloom threshold.
+        // Pre-exposure for ACES tonemap below.
         col *= 2.20 + u_flare_intensity * 1.10;
 
         // ── F10.7 solar-cycle boost — solar maximum = hotter, brighter photosphere ──
@@ -3063,17 +3125,53 @@ const sunFS = /* glsl */`
         // ── Spicule forest at extreme limb ────────────────────────────────────
         // Type II spicules (fast jets, 50-150 km/s, ~10 Mm tall) create a
         // "hairy" fringe at the solar limb, visible in Hα and Ca II.
-        float spiculeNoise = vnoise(vPosition * 40.0 + vec3(u_time * 0.05));
-        float spicule2     = vnoise(vPosition * 65.0 - vec3(u_time * 0.07));
+        float spiculeNoise = vnoise(vPosition * 40.0 + vec3(u_time * 0.05 * rotF));
+        float spicule2     = vnoise(vPosition * 65.0 - vec3(u_time * 0.07 * rotF));
         float spiculePattern = spiculeNoise * 0.55 + spicule2 * 0.45;
         float spiculeMask = smoothstep(0.20, 0.03, mu);  // only at extreme limb
         float spiculeHairs = spiculeMask * spiculePattern * 0.50;
         col += vec3(0.85, 0.40, 0.15) * spiculeHairs;
 
         // ── Chromospheric / transition-region emission at extreme limb ─────────
-        // Pink-red Hα + Ca H&K + extreme-UV pink at very low μ.
-        float fr = pow(max(1.0 - mu, 0.0), 3.0);
-        col += vec3(1.10, 0.32, 0.10) * fr * 0.75;
+        // Pink-red Hα + Ca H&K + extreme-UV pink at very low μ. Tier-C:
+        // brightened and lifted slightly inward (pow 3.0 → 2.4) so the
+        // chromospheric rim hint is visible even at modest zooms, not only
+        // at extreme limb — closer to SDO AIA 304 Å limb appearance.
+        float fr  = pow(max(1.0 - mu, 0.0), 2.4);
+        col += vec3(1.18, 0.34, 0.12) * fr * 0.95;
+        // Inner pink "lip" — narrow band right at the disc edge that hints
+        // at chromosphere even when only the photosphere layer is on.
+        float lip = pow(max(1.0 - mu, 0.0), 8.0);
+        col += vec3(1.30, 0.55, 0.35) * lip * 0.50;
+
+        // ── Tier-C chromatic aberration on flare flash ────────────────────────
+        // Real bright impulsive sources observed through any imager show a
+        // subtle radial RGB dispersion (atmospheric/optic dispersion). When a
+        // flare drives u_flare_intensity high, push the red channel inward
+        // and blue outward in screen-radial direction to mimic this. Per-
+        // fragment trick using vNormal projected onto the view plane —
+        // cheap and avoids a separate post-process pass.
+        if (u_flare_intensity > 0.10) {
+            // Project surface normal onto view plane → screen-space radial vector
+            vec3 viewN  = normalize(nrm - dot(nrm, vDir) * vDir + vec3(1e-6));
+            // Strength scales with flash + edge-fall (centre-of-disc unaffected)
+            float caStr = u_flare_intensity * (0.18 + 0.42 * (1.0 - mu));
+            // Modulate luminance per channel: shift toward red on inner side,
+            // blue on outer side — colours diverge radially.
+            // (Cheap radial-dispersion proxy: sin-shift on projected normal.)
+            float dispR = sin(viewN.x * 9.0 + viewN.y * 11.0) * caStr * 0.10;
+            float dispB = sin(viewN.x * 9.0 + viewN.y * 11.0 + 1.57) * caStr * 0.10;
+            col.r *= 1.0 + dispR;
+            col.b *= 1.0 - dispB;
+        }
+
+        // ── ACES filmic tonemap — Tier-A HDR roll-off ─────────────────────────
+        // Compresses bright flare/limb/AR-stack regions onto a graceful curve
+        // so they saturate cream-white instead of pure-white, lifting shoulder
+        // detail. The renderer also has THREE.ACESFilmicToneMapping on, so this
+        // pre-conditioning is intentionally gentle (the post-stage will run on
+        // the bloom-accumulated output).
+        col = acesFilm(col * 0.95) * 1.18;
 
         gl_FragColor = vec4(col, 1.0);
     }
@@ -4744,8 +4842,36 @@ const coronaFS = /* glsl */`
         // CBPs — small bright Fe XII green dots (gentler)
         col += col193 * cbpMask * pow(max(1.0 - rim, 0.0), 0.4) * 0.40;
 
-        // Coronal-hole darkening
-        col *= 1.0 - poleHole * 0.45;
+        // ── Tier-B helmet-streamer cusps ──────────────────────────────────────
+        // Where the closed-field streamer belt meets open field, a sharp
+        // cusp forms — the "tip" of the helmet. Observed in white-light
+        // eclipse data as a bright narrow point on top of each streamer.
+        // We model it as a brightening along the HCS where the belt is
+        // narrowest (high helmetBelt) AND we are at the rim (high rim var).
+        // The cusp's vertical extent is gated by openField so it only fires
+        // at the streamer-belt / open-field boundary.
+        float cusp = pow(helmetBelt, 4.0) * pow(rim, 1.4)
+                   * smoothstep(0.0, 0.35, openField);
+        col += vec3(1.20, 1.05, 0.78) * cusp * (0.55 + u_activity * 0.55);
+        alpha += cusp * 0.22;
+
+        // ── Tier-A polar coronal holes — enhanced signature ───────────────────
+        // Real polar holes are not only darker — they're slightly blue-shifted
+        // in EUV (fast plasma escaping = Doppler shift toward shorter λ in
+        // line-of-sight; observers see a cooler/dimmer Fe-XII glow). Plus
+        // they show fine radial striping from the open-field plumes that
+        // accelerate the fast solar wind. We add (a) a darker base, (b) a
+        // cool blue tint, (c) sharper radial fine-stripe modulation.
+        float holeStripe = pow(0.5 + 0.5 * sin(lon * 41.0 + u_time * 0.003), 3.0);
+        holeStripe = mix(0.85, 1.10, holeStripe);   // gentle radial striation
+        // Deeper darkening (was 0.45 → 0.55) and apply stripe inside hole
+        col *= 1.0 - poleHole * 0.55;
+        col *= mix(1.0, holeStripe, poleHole * 0.60);
+        // Cool-blue tint where the hole is strongest — signature of the fast
+        // wind source. Modulated by u_wind_speed_norm so visibly intensifies
+        // during fast-wind streams.
+        vec3 holeTint = vec3(0.62, 0.82, 1.20);
+        col = mix(col, col * holeTint, poleHole * (0.18 + 0.22 * u_wind_speed_norm));
 
         // ══════════════════════════════════════════════════════════════════
         // 10.  Live-data couplings (preserved from previous shader)
@@ -5618,7 +5744,8 @@ let loopGroup = null;
 const LOOP_VS = /* glsl */`
     attribute float aS;       // [0,1] arclength fraction along the loop
     attribute vec3  aTangent; // unit tangent at this vertex (precomputed)
-    varying vec3 vColor;
+    varying vec3  vColor;
+    varying float vS;
     uniform float uTime;
     uniform float uAmp;       // R☉ — peak displacement at apex
     uniform float uFreq;      // rad / sim-time
@@ -5634,14 +5761,45 @@ const LOOP_VS = /* glsl */`
         // 70% transverse + 30% radial bobbing — looks like a kink mode.
         vec3 disp = nLoop * wave + outward * (wave * 0.30);
         vColor = color;
+        vS     = aS;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(p + disp, 1.0);
     }
 `;
 const LOOP_FS = /* glsl */`
-    varying vec3 vColor;
+    varying vec3  vColor;
+    varying float vS;
     uniform float uOpacity;
+    uniform float uTime;
     void main() {
-        gl_FragColor = vec4(vColor, uOpacity);
+        // ── Tier-B opacity gradient along arclength ───────────────────────────
+        // Real coronal loops are radiometrically brightest near the chromos-
+        // pheric footpoints (dense 1-2 MK plasma being fed by evaporation),
+        // dim through the mid-leg, and have a faint hot apex (the
+        // reconnection-fed top is hotter but ~10× less dense — so emission
+        // measure ∝ n² makes it dimmer in EUV).
+        //
+        // Profile: U-shape — peak at s=0 and s=1, minimum at s=0.5.
+        //   foot   = 0.55 + 0.45 * |2s-1|^1.6      → 1.00 at feet, 0.55 at apex
+        //   hotApx = bonus glow at s≈0.5 from hot plasma                       (subtle)
+        float ss     = clamp(vS, 0.0, 1.0);
+        float foot   = 0.55 + 0.45 * pow(abs(2.0 * ss - 1.0), 1.6);
+        float hotApx = exp(-(ss - 0.5) * (ss - 0.5) / 0.020) * 0.12;
+        float profile = foot + hotApx;
+
+        // ── Footpoint flicker — chromospheric evaporation jitter ──────────────
+        // The base of each loop pulses on ~1-3 s timescales as upflows arrive.
+        // Gated to the bottom 15% of the loop so the apex stays steady.
+        float footMask = smoothstep(0.85, 1.00, abs(2.0 * ss - 1.0));
+        float flick    = 0.5 + 0.5 * sin(uTime * 5.3 + ss * 11.0);
+        profile *= 1.0 + footMask * flick * 0.18;
+
+        // Slight per-fragment colour shift: cooler at apex (whiter/bluer),
+        // warmer at footpoints (gold-pink chromospheric tinge).
+        vec3 hot = vColor * vec3(0.85, 0.92, 1.10);     // apex (hotter look)
+        vec3 ftc = vColor * vec3(1.10, 0.92, 0.72);     // footpoint (warm)
+        vec3 colOut = mix(hot, ftc, foot * foot);
+
+        gl_FragColor = vec4(colOut, uOpacity * profile);
     }
 `;
 

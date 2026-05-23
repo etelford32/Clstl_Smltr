@@ -157,6 +157,18 @@ select option{background:#0a1024}
 #sd-cam .cam-act:hover{border-color:var(--c-accent-border-hi);color:var(--c-accent)}
 #sd-cam .cam-act kbd{font-size:.55rem;color:var(--c-text-3);font-family:monospace;
   border:1px solid rgba(255,255,255,.15);border-radius:3px;padding:0 3px;margin-left:5px}
+#sd-subject{position:absolute;top:12px;left:50%;transform:translateX(-50%);
+  display:flex;gap:2px;align-items:center;background:rgba(4,8,18,.82);
+  border:1px solid rgba(255,255,255,.16);padding:3px 3px 3px 9px;
+  border-radius:999px;backdrop-filter:blur(6px);pointer-events:auto}
+#sd-subject .subj-lbl{font-size:.55rem;letter-spacing:.1em;font-weight:800;
+  color:var(--c-text-3);text-transform:uppercase;margin-right:4px}
+#sd-subject .subj-btn{font-size:.7rem;font-weight:700;padding:4px 12px;
+  border-radius:999px;cursor:pointer;color:var(--c-text-2);user-select:none;
+  border:1px solid transparent;letter-spacing:.02em;line-height:1}
+#sd-subject .subj-btn:hover{color:var(--c-text);background:rgba(255,255,255,.04)}
+#sd-subject .subj-btn.active{background:rgba(var(--c-accent-rgb),.28);
+  color:#fff;border-color:var(--c-accent-border-hi)}
 #sd-banner{position:absolute;left:50%;bottom:60px;transform:translateX(-50%);
   max-width:80%;padding:6px 14px;border-radius:999px;font-size:.74rem;
   font-weight:700;background:rgba(4,8,18,.78);
@@ -188,6 +200,10 @@ select option{background:#0a1024}
 
 .metrics{display:grid;grid-template-columns:1fr 1fr;gap:1px;
   background:rgba(255,255,255,.06);border-radius:var(--r-md);overflow:hidden}
+.metrics-quad{grid-template-columns:repeat(4,1fr)}
+.metrics-quad .metric{padding:5px 6px}
+.metrics-quad .metric .v{font-size:.74rem}
+.metrics-quad .metric .k{font-size:.55rem}
 .metric{background:var(--c-surface-2);padding:6px 8px}
 .metric .k{font-size:.6rem;text-transform:uppercase;letter-spacing:.09em;
   color:var(--c-text-3);font-weight:700}
@@ -228,11 +244,25 @@ select option{background:#0a1024}
   color:var(--c-text-3);font-size:.85rem}
 .ctl-label{font-size:.62rem;color:var(--c-text-3);font-weight:800;
   letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px}
+/* Compact slider row — label · slider · value all on one line so we can
+   stack twice as many controls in the same vertical space. */
+.cslide{display:grid;grid-template-columns:88px 1fr 58px;gap:8px;
+  align-items:center;font-size:.72rem;color:var(--c-text-2);margin:0 0 6px}
+.cslide input[type=range]{margin:0;width:100%}
+.cslide b{font-size:.72rem;color:var(--c-text);text-align:right;
+  font-variant-numeric:tabular-nums;font-weight:700}
+.cslide small{font-size:.6rem;color:var(--c-text-3);margin-left:2px;font-weight:600}
+.panel{padding:9px 10px}
+.panel h2{margin-bottom:6px}
 .toggle.locked{opacity:.35;cursor:not-allowed;position:relative}
 .toggle.locked::after{content:"🔒";position:absolute;top:1px;right:4px;font-size:.5rem;opacity:.7}
 .toggle.locked:hover{color:var(--c-text-2);background:rgba(255,255,255,.03);
   border-color:rgba(255,255,255,.14)}
 .pilot-hd{display:flex;align-items:center;gap:11px}
+.score-side{display:flex;gap:1px;background:rgba(255,255,255,.06);
+  border-radius:var(--r-md);overflow:hidden;margin-left:auto}
+.score-side .metric{padding:5px 9px;background:var(--c-surface-2);min-width:54px;text-align:center}
+.score-side .metric .v{font-size:.86rem;margin-top:1px}
 .rank-badge{font-size:1.6rem;line-height:1;
   filter:drop-shadow(0 2px 8px rgba(0,200,255,.4))}
 .rank-meta{flex:1;min-width:0}
@@ -282,6 +312,62 @@ select option{background:#0a1024}
   border-color:var(--c-accent-border-hi);color:#fff}
 .opt small{display:block;font-weight:600;color:var(--c-text-3);
   font-size:.56rem;margin-top:2px}
+/* Bigger chip variant for the front-line Parts panel. Each chip is a
+   readable tile with an icon, label, and the headline trade-off metric. */
+.opt-row.big{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));
+  gap:6px;margin-bottom:0}
+.opt-row.big .opt{padding:9px 7px;font-size:.72rem;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;min-height:54px;line-height:1.15}
+.opt-row.big .opt small{font-size:.58rem;margin-top:3px;letter-spacing:.02em}
+.opt-row.big .opt .ico{font-size:1.1rem;line-height:1;margin-bottom:3px;
+  filter:drop-shadow(0 1px 4px rgba(0,200,255,.35))}
+.opt-row.big .opt.active{box-shadow:inset 0 0 0 1px rgba(0,200,255,.35),
+  0 2px 8px rgba(0,200,255,.18)}
+.opt-row.big .opt{position:relative}
+.tier{position:absolute;top:2px;right:3px;font-size:.5rem;font-weight:800;
+  padding:1px 4px;border-radius:3px;letter-spacing:.04em;line-height:1.2;
+  background:rgba(255,210,90,.16);color:#ffd166;border:1px solid rgba(255,210,90,.4);
+  cursor:pointer;z-index:2}
+.tier:hover{background:rgba(255,210,90,.34);color:#fff;border-color:#ffd166}
+.tier-3{background:rgba(0,230,180,.18);color:#7fffd4;border-color:rgba(0,230,180,.5)}
+.tier-3:hover{background:rgba(0,230,180,.38);color:#fff;border-color:#7fffd4}
+.hint-tiny{font-size:.6rem;color:var(--c-text-3);font-weight:600;letter-spacing:.02em}
+/* Primary stick controls — beefy throttle + gravity sliders sitting
+   directly below the stage. The native range stays clickable but the
+   coloured fill overlay gives a fuel-gauge-like feel. */
+.primary-controls{display:grid;grid-template-columns:1fr 1fr;gap:9px;padding:9px 11px}
+@media (max-width:980px){ .primary-controls{grid-template-columns:1fr} }
+.big-slider{position:relative;display:block;background:rgba(255,255,255,.025);
+  border:1px solid rgba(255,255,255,.1);border-radius:var(--r-md);padding:8px 10px}
+.big-slider .bs-row{display:flex;justify-content:space-between;align-items:baseline;
+  margin-bottom:5px;font-size:.66rem;letter-spacing:.05em;text-transform:uppercase;
+  font-weight:800;color:var(--c-text-2)}
+.big-slider .bs-row b{font-size:.95rem;color:#fff;text-transform:none;letter-spacing:0;
+  font-variant-numeric:tabular-nums;font-weight:800}
+.big-slider .bs-row b small{color:var(--c-text-3);font-weight:600;font-size:.65rem;margin-left:4px}
+.big-slider input[type=range]{width:100%;margin:0;position:relative;z-index:2;
+  background:transparent;height:18px}
+.big-slider .bs-fill{position:absolute;left:10px;right:10px;bottom:14px;height:6px;
+  border-radius:3px;background:rgba(255,255,255,.06);overflow:hidden;pointer-events:none;z-index:1}
+.big-slider .bs-fill::after{content:'';display:block;height:100%;
+  background:linear-gradient(90deg,#ffb066,#ff6b7d);border-radius:3px;
+  width:var(--fill,60%);transition:width .12s}
+.big-slider.grv .bs-fill::after{background:linear-gradient(90deg,#5fe39a,#7fdcff,#c084fc)}
+.big-slider .bs-presets{display:flex;gap:4px;margin-top:5px;justify-content:space-between}
+.big-slider .bs-preset{font-size:.6rem;padding:2px 6px;border-radius:6px;cursor:pointer;
+  color:var(--c-text-3);background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);
+  font-weight:700;user-select:none;letter-spacing:.02em}
+.big-slider .bs-preset:hover{color:var(--c-text);border-color:var(--c-accent-border-hi);
+  background:rgba(var(--c-accent-rgb),.12)}
+.part-row{margin-bottom:11px}
+.part-row:last-child{margin-bottom:0}
+.part-row-hd{display:flex;justify-content:space-between;align-items:baseline;
+  margin-bottom:5px;font-size:.66rem;color:var(--c-text-2);font-weight:700;
+  letter-spacing:.04em}
+.part-row-hd b{color:var(--c-text);font-variant-numeric:tabular-nums}
+.part-row-hd small{font-size:.58rem;color:var(--c-text-3);font-weight:600;margin-left:2px}
+.row-slider{width:100%;accent-color:var(--c-accent);margin-top:6px}
+.parts-panel{padding:11px 11px}
 .bay-grp{font-size:.6rem;text-transform:uppercase;letter-spacing:.1em;
   color:var(--c-text-3);font-weight:800;margin:2px 0 6px}
 .bay-loading{position:absolute;inset:0;display:flex;align-items:center;
@@ -329,41 +415,43 @@ select option{background:#0a1024}
       </div>
     </div>
 
-    <div class="panel">
-      <h2>🔩 Parts <span class="sub">auto-applied to the ship</span></h2>
-      <div class="bay-grp">Bus / chassis</div>
-      <div class="opt-row" id="bay-body"></div>
-      <div class="bay-grp">Thrusters</div>
-      <div class="opt-row" id="bay-thruster"></div>
-      <label class="field" style="margin-bottom:9px">
-        <div class="row"><span>Thruster count</span><b><span id="bay-tc-v">2</span>×</b></div>
-        <input type="range" id="bay-tc" min="1" max="8" step="1" value="2">
-      </label>
-      <div class="bay-grp">Solar array</div>
-      <div class="opt-row" id="bay-panel"></div>
-      <label class="field" style="margin:0">
-        <div class="row"><span>Wing span</span><b><span id="bay-span-v">2.2</span> m</b></div>
-        <input type="range" id="bay-span" min="0.5" max="6" step="0.1" value="2.2">
-      </label>
+    <div class="panel parts-panel">
+      <h2>🔩 Parts <span class="sub">auto-applied · live preview above</span></h2>
+      <div class="part-row">
+        <div class="part-row-hd"><span>🚀 Bus / chassis</span></div>
+        <div class="opt-row big" id="bay-body"></div>
+      </div>
+      <div class="part-row">
+        <div class="part-row-hd"><span>🔥 Thrusters</span><span><b id="bay-tc-v">2</b><small>× count</small></span></div>
+        <div class="opt-row big" id="bay-thruster"></div>
+        <input type="range" id="bay-tc" min="1" max="8" step="1" value="2" class="row-slider">
+      </div>
+      <div class="part-row">
+        <div class="part-row-hd"><span>☀ Solar arrays</span><span><b id="bay-span-v">2.2</b><small>m wing</small></span></div>
+        <div class="opt-row big" id="bay-panel"></div>
+        <input type="range" id="bay-span" min="0.5" max="6" step="0.1" value="2.2" class="row-slider">
+      </div>
+      <div class="part-row">
+        <div class="part-row-hd"><span>📦 Payload</span><span class="hint-tiny" id="payload-tip">—</span></div>
+        <div class="opt-row big" id="bay-payload"></div>
+      </div>
+      <div class="part-row">
+        <div class="part-row-hd"><span>⛽ Propellant</span><span><b id="v-fuel">60</b><small>kg</small></span></div>
+        <input type="range" id="f-fuel" min="0" max="1000" step="5" value="60" class="row-slider">
+      </div>
     </div>
 
     <div class="panel">
       <h2>🔧 Spacecraft</h2>
-      <div class="grid2">
-        <label class="field" style="grid-column:1/-1;margin:0">
-          <div class="row"><span>Ship name</span></div>
-          <input type="text" id="f-name" value="Scout-1" maxlength="60">
-        </label>
-        <label class="field" style="grid-column:1/-1;margin:0">
-          <div class="row"><span>Propellant</span><b><span id="v-fuel">60</span> kg</b></div>
-          <input type="range" id="f-fuel" min="0" max="1000" step="5" value="60">
-        </label>
-      </div>
-      <div class="metrics" style="margin-top:9px">
-        <div class="metric"><div class="k">Wet mass</div><div class="v" id="d-wet">—</div></div>
-        <div class="metric"><div class="k">Δv budget</div><div class="v" id="d-dv">—</div></div>
-        <div class="metric"><div class="k">Ballistic coeff</div><div class="v" id="d-bc">—</div></div>
-        <div class="metric"><div class="k">Mass ratio</div><div class="v" id="d-mr">—</div></div>
+      <label class="field" style="margin:0 0 7px">
+        <div class="row"><span>Ship name</span></div>
+        <input type="text" id="f-name" value="Scout-1" maxlength="60">
+      </label>
+      <div class="metrics metrics-quad">
+        <div class="metric"><div class="k">Wet</div><div class="v" id="d-wet">—</div></div>
+        <div class="metric"><div class="k">Δv</div><div class="v" id="d-dv">—</div></div>
+        <div class="metric"><div class="k">Ballistic</div><div class="v" id="d-bc">—</div></div>
+        <div class="metric"><div class="k">Mass r.</div><div class="v" id="d-mr">—</div></div>
       </div>
       <details class="advanced" style="margin-top:9px">
         <summary>Manual fine-tune · advanced</summary>
@@ -418,9 +506,15 @@ select option{background:#0a1024}
         <span class="status-pill" id="st-warp">▶ ×1</span>
       </div>
       <div id="sd-hint">
+        <kbd>click</kbd> select<br>
         <kbd>drag</kbd> orbit<br>
         <kbd>right-drag</kbd> pan<br>
         <kbd>scroll</kbd> zoom
+      </div>
+      <div id="sd-subject">
+        <span class="subj-lbl">Focus</span>
+        <div class="subj-btn active" data-subj="earth" title="Lock camera focus on Earth">🌍 Earth</div>
+        <div class="subj-btn" data-subj="satellite" title="Lock camera focus on the satellite">🛰 Satellite</div>
       </div>
       <div id="sd-cam">
         <div class="cam-group">
@@ -428,12 +522,33 @@ select option{background:#0a1024}
           <div class="cam-btn" data-cam="follow">FOLLOW</div>
           <div class="cam-btn active" data-cam="free">FREE</div>
         </div>
-        <div class="cam-act" id="cam-focus" title="Center camera on the satellite">📍 Focus<kbd>F</kbd></div>
         <div class="cam-act" id="cam-reset" title="Reset to the wide system view">↺ Reset<kbd>R</kbd></div>
       </div>
       <div id="sd-view">view —</div>
       <div id="sd-banner"></div>
       <div class="warmup" id="sd-warmup">Loading atmosphere model…</div>
+    </div>
+
+    <!-- ── Primary stick controls — sit directly under the stage so the
+         pilot's two most-direct inputs (engine throttle, world gravity)
+         are always at hand. Same f-throttle ID drives sim.control. -->
+    <div class="panel primary-controls">
+      <label class="big-slider thr">
+        <div class="bs-row"><span class="bs-lbl">🚀 Throttle</span><b><span id="v-thr">60</span>%</b></div>
+        <input type="range" id="f-throttle" min="0" max="100" step="1" value="60">
+        <div class="bs-fill" id="thr-fill"></div>
+      </label>
+      <label class="big-slider grv">
+        <div class="bs-row"><span class="bs-lbl">🌍 Gravity</span><b><span id="v-grav">1.0</span>× <small id="v-grav-g">9.8 m/s²</small></b></div>
+        <input type="range" id="f-gravity" min="0.05" max="3" step="0.05" value="1">
+        <div class="bs-fill grv" id="grv-fill"></div>
+        <div class="bs-presets">
+          <span class="bs-preset" data-g="0.165" title="Lunar gravity">🌑 Moon</span>
+          <span class="bs-preset" data-g="0.38" title="Mars gravity">🔴 Mars</span>
+          <span class="bs-preset" data-g="1" title="Earth">🌍 Earth</span>
+          <span class="bs-preset" data-g="2.5" title="Super-Earth">🪐 2.5×</span>
+        </div>
+      </label>
     </div>
 
     <div class="panel">
@@ -453,29 +568,18 @@ select option{background:#0a1024}
     </div>
 
     <div class="panel">
-      <h2>🎮 Flight controls</h2>
-      <div class="grid2" style="margin-bottom:8px">
-        <label class="field" style="margin:0">
-          <div class="row"><span>Starting altitude</span><b><span id="v-peri">300</span> km</b></div>
-          <input type="range" id="f-peri" min="100" max="1200" step="5" value="300">
-        </label>
-        <label class="field" style="margin:0">
-          <div class="row"><span>Target altitude</span><b><span id="v-tgt">300</span> km</b></div>
-          <input type="range" id="f-tgt" min="100" max="1200" step="5" value="300">
-        </label>
-        <label class="field" style="margin:0;grid-column:1/-1">
-          <div class="row"><span>Throttle</span><b><span id="v-thr">60</span>%</b></div>
-          <input type="range" id="f-throttle" min="0" max="100" step="1" value="60">
-        </label>
-      </div>
-      <!-- Hidden apogee slider keeps the engine API circular by default;
-           the elliptical disclosure reveals it for power users. -->
+      <h2>🎮 Flight controls <small style="color:var(--c-text-3);font-weight:600;letter-spacing:0;text-transform:none;margin-left:8px">throttle is above ⬆</small></h2>
+      <label class="cslide"><span>Start alt</span>
+        <input type="range" id="f-peri" min="100" max="1200" step="5" value="300">
+        <b><span id="v-peri">300</span><small>km</small></b></label>
+      <label class="cslide" style="margin-bottom:8px"><span>Target alt</span>
+        <input type="range" id="f-tgt" min="100" max="1200" step="5" value="300">
+        <b><span id="v-tgt">300</span><small>km</small></b></label>
       <details class="advanced" style="margin-bottom:8px">
         <summary>Elliptical orbit · advanced</summary>
-        <label class="field" style="margin:8px 0 0">
-          <div class="row"><span>Apogee altitude</span><b><span id="v-apo">300</span> km</b></div>
+        <label class="cslide" style="margin-top:6px"><span>Apogee alt</span>
           <input type="range" id="f-apo" min="100" max="1200" step="5" value="300">
-        </label>
+          <b><span id="v-apo">300</span><small>km</small></b></label>
       </details>
 
       <div class="btn-row" style="margin-bottom:10px">
@@ -512,97 +616,99 @@ select option{background:#0a1024}
     </div>
 
     <div class="panel" id="pilot-panel">
-      <h2>🎖 Pilot profile <span class="sub">progression &amp; unlocks</span></h2>
       <div class="pilot-hd">
         <span class="rank-badge" id="rank-badge">🟢</span>
         <div class="rank-meta">
           <div class="rank-name" id="rank-name">Cadet</div>
           <div class="rank-xp" id="rank-xp">0 XP</div>
         </div>
+        <div class="score-side">
+          <div class="metric"><div class="k">Score</div><div class="v" id="o-score">0</div></div>
+          <div class="metric"><div class="k">Best</div><div class="v" id="o-best">0</div></div>
+        </div>
       </div>
-      <div class="bar" style="margin:7px 0 9px"><i id="rank-bar" style="width:0%"></i></div>
-      <div id="rank-next" class="hint" style="margin-bottom:8px">—</div>
-      <div class="ctl-label" style="margin-top:4px">Unlocked</div>
-      <div class="unlock-grid" id="unlocks-owned"></div>
-      <div class="ctl-label" style="margin-top:10px">Locked</div>
-      <div class="unlock-grid" id="unlocks-locked"></div>
+      <div class="bar" style="margin:7px 0 4px"><i id="rank-bar" style="width:0%"></i></div>
+      <div id="rank-next" class="hint" style="font-size:.62rem;margin-bottom:4px">—</div>
+      <details class="advanced">
+        <summary>Unlocks ladder</summary>
+        <div class="ctl-label" style="margin-top:8px">Unlocked</div>
+        <div class="unlock-grid" id="unlocks-owned"></div>
+        <div class="ctl-label" style="margin-top:10px">Locked</div>
+        <div class="unlock-grid" id="unlocks-locked"></div>
+      </details>
     </div>
 
     <div class="panel">
       <h2>🌪 Drag conditions</h2>
-
       <div class="ctl-label">Space weather</div>
       <div class="toggle-row" id="sw-presets"></div>
-
-      <div class="ctl-label" style="margin-top:11px">Drag attitude</div>
+      <div class="ctl-label" style="margin-top:9px">Drag attitude</div>
       <div class="toggle-row" id="att-modes"></div>
-
-      <div class="metrics" style="margin-top:11px">
+      <div class="metrics metrics-quad" style="margin-top:9px">
         <div class="metric"><div class="k">ρ @ 400 km</div><div class="v" id="d-rho400">—</div></div>
         <div class="metric"><div class="k">vs. nominal</div><div class="v" id="d-rhox">—</div></div>
-        <div class="metric"><div class="k">Eff. drag area</div><div class="v" id="d-effarea">—</div></div>
-        <div class="metric"><div class="k">Ballistic coeff</div><div class="v" id="d-bc2">—</div></div>
+        <div class="metric"><div class="k">Eff. area</div><div class="v" id="d-effarea">—</div></div>
+        <div class="metric"><div class="k">Ballistic</div><div class="v" id="d-bc2">—</div></div>
       </div>
-
-      <details class="advanced" style="margin-top:9px">
+      <details class="advanced" style="margin-top:7px">
         <summary>Custom F10.7 / Ap · advanced</summary>
-        <div class="grid2" style="margin-top:6px">
-          <label class="field" style="margin:0">
-            <div class="row"><span>F10.7 flux</span><b><span id="v-f107">150</span> sfu</b></div>
-            <input type="range" id="f-f107" min="65" max="300" step="1" value="150">
-          </label>
-          <label class="field" style="margin:0">
-            <div class="row"><span>Ap (geomag.)</span><b><span id="v-ap">12</span></b></div>
-            <input type="range" id="f-ap" min="0" max="400" step="1" value="12">
-          </label>
-        </div>
+        <label class="cslide" style="margin-top:6px"><span>F10.7</span>
+          <input type="range" id="f-f107" min="65" max="300" step="1" value="150">
+          <b><span id="v-f107">150</span><small>sfu</small></b></label>
+        <label class="cslide"><span>Ap index</span>
+          <input type="range" id="f-ap" min="0" max="400" step="1" value="12">
+          <b><span id="v-ap">12</span></b></label>
       </details>
     </div>
 
     <!-- ── telemetry + objective ── -->
     <div class="panel">
       <h2>📡 Telemetry</h2>
-      <div class="metrics">
-        <div class="metric" id="m-alt"><div class="k">Altitude</div><div class="v">—</div></div>
+      <!-- Primary 4 are always visible — the cockpit gauges a pilot
+           actually scans during a burn. Rest are behind a disclosure. -->
+      <div class="metrics metrics-quad">
+        <div class="metric" id="m-alt"><div class="k">Alt</div><div class="v">—</div></div>
         <div class="metric" id="m-spd"><div class="k">Speed</div><div class="v">—</div></div>
         <div class="metric" id="m-peri"><div class="k">Perigee</div><div class="v">—</div></div>
         <div class="metric" id="m-apo"><div class="k">Apogee</div><div class="v">—</div></div>
-        <div class="metric" id="m-period"><div class="k">Period</div><div class="v">—</div></div>
-        <div class="metric" id="m-ecc"><div class="k">Eccentricity</div><div class="v">—</div></div>
-        <div class="metric" id="m-rho"><div class="k">Air density</div><div class="v">—</div></div>
-        <div class="metric" id="m-q"><div class="k">Dyn. pressure</div><div class="v">—</div></div>
-        <div class="metric" id="m-drag"><div class="k">Drag decel</div><div class="v">—</div></div>
-        <div class="metric" id="m-decay"><div class="k">Decay rate</div><div class="v">—</div></div>
       </div>
-
-      <div style="margin-top:11px">
-        <div style="display:flex;justify-content:space-between;font-size:.66rem;color:var(--c-text-3);font-weight:700">
+      <div style="margin-top:8px">
+        <div style="display:flex;justify-content:space-between;font-size:.62rem;color:var(--c-text-3);font-weight:700">
           <span>PROPELLANT</span><span id="fuel-lbl">—</span>
         </div>
         <div class="bar fuel"><i id="fuel-bar" style="width:100%"></i></div>
-        <div style="display:flex;justify-content:space-between;font-size:.66rem;color:var(--c-text-3);font-weight:700;margin-top:8px">
+        <div style="display:flex;justify-content:space-between;font-size:.62rem;color:var(--c-text-3);font-weight:700;margin-top:7px">
           <span>Δv REMAINING</span><span id="dv-lbl">—</span>
         </div>
         <div class="bar"><i id="dv-bar" style="width:100%"></i></div>
       </div>
-
       <canvas id="sd-spark"></canvas>
-      <div style="font-size:.62rem;color:var(--c-text-3);text-align:center;margin-top:3px">
-        altitude vs. mission time
+      <!-- Realism gauges — always visible because they drive pilot decisions. -->
+      <div class="metrics metrics-quad" style="margin-top:6px">
+        <div class="metric" id="m-turb"><div class="k">Turbulence</div><div class="v">—</div></div>
+        <div class="metric" id="m-tumble"><div class="k">Tumble</div><div class="v">—</div></div>
+        <div class="metric" id="m-erosion"><div class="k">Throat life</div><div class="v">—</div></div>
+        <div class="metric" id="m-ispEff"><div class="k">Eff. Iₛₚ</div><div class="v">—</div></div>
       </div>
+      <details class="advanced" style="margin-top:4px">
+        <summary>Extended telemetry</summary>
+        <div class="metrics metrics-quad" style="margin-top:6px">
+          <div class="metric" id="m-period"><div class="k">Period</div><div class="v">—</div></div>
+          <div class="metric" id="m-ecc"><div class="k">Ecc</div><div class="v">—</div></div>
+          <div class="metric" id="m-rho"><div class="k">ρ air</div><div class="v">—</div></div>
+          <div class="metric" id="m-q"><div class="k">q dyn</div><div class="v">—</div></div>
+          <div class="metric" id="m-drag" style="grid-column:1/3"><div class="k">Drag decel</div><div class="v">—</div></div>
+          <div class="metric" id="m-decay" style="grid-column:3/5"><div class="k">Decay rate</div><div class="v">—</div></div>
+        </div>
+      </details>
     </div>
 
-    <div class="panel">
-      <h2>🏆 Score</h2>
-      <div class="metrics">
-        <div class="metric flag-good"><div class="k">Score</div><div class="v" id="o-score">0</div></div>
-        <div class="metric"><div class="k">Mission clock</div><div class="v" id="o-clock">0<small>s</small></div></div>
-        <div class="metric" style="grid-column:1/-1"><div class="k">Best run (this ship)</div><div class="v" id="o-best">0</div></div>
-      </div>
-      <!-- Hidden legacy cards — engine code still writes to these IDs.
-           Kept off-screen so we don't have to refactor the writers. -->
-      <span id="o-station" hidden></span><span id="o-orbits" hidden></span>
-    </div>
+    <!-- Mission clock + legacy mission-state counters live with the
+         telemetry strip; the score/best cards moved into the pilot panel
+         header so the player sees their current run + lifetime best at a
+         glance. These hidden spans keep the engine writers happy. -->
+    <span id="o-clock" hidden></span>
+    <span id="o-station" hidden></span><span id="o-orbits" hidden></span>
   </section>
 
 </div>
@@ -790,7 +896,45 @@ $('f-peri').addEventListener('input', () => {
 $('f-apo').addEventListener('input', () => {
   if (+$('f-apo').value < +$('f-peri').value) { $('f-peri').value = $('f-apo').value; $('v-peri').textContent = $('f-peri').value; }
 });
-$('f-throttle').addEventListener('input', () => { sim.control.throttle = (+$('f-throttle').value) / 100; });
+// Throttle — drives both the control and its fuel-gauge-style fill bar.
+function syncThrottleFill() {
+  const v = +$('f-throttle').value;
+  $('thr-fill').style.setProperty('--fill', v + '%');
+}
+$('f-throttle').addEventListener('input', () => {
+  sim.control.throttle = (+$('f-throttle').value) / 100;
+  syncThrottleFill();
+});
+syncThrottleFill();
+
+// Gravity slider — scales env.gravityMul in real time. Pre-flight changes
+// modify the upcoming initial orbit; in-flight changes warp the trajectory
+// immediately (great way to *see* how μ shapes the orbit).
+function syncGravityFill() {
+  const v = +$('f-gravity').value;
+  // Range 0.05..3 → 0..100% of fill bar
+  const pct = ((v - 0.05) / (3 - 0.05)) * 100;
+  $('grv-fill').style.setProperty('--fill', pct.toFixed(1) + '%');
+  $('v-grav').textContent = v.toFixed(2).replace(/\.?0+$/, '') || v.toFixed(2);
+  // Surface g for context. Real Earth surface ≈ 9.82 m/s² at the
+  // engine's R_EARTH (slight variation from 9.80665 standard).
+  const g = ENG.gravityAt(0, env);
+  $('v-grav-g').textContent = g.toFixed(2) + ' m/s²';
+}
+$('f-gravity').addEventListener('input', () => {
+  env.gravityMul = +$('f-gravity').value;
+  syncGravityFill();
+});
+$('.bs-presets')?.addEventListener; // no-op; the next line attaches the handler properly
+document.querySelectorAll('.bs-preset').forEach(el => {
+  el.addEventListener('click', () => {
+    const g = +el.dataset.g;
+    $('f-gravity').value = g;
+    env.gravityMul = g;
+    syncGravityFill();
+    toast(`Gravity → ${g}× Earth`);
+  });
+});
 
 // Thrust mode buttons — refuses to activate locked modes (gated by rank).
 $('thrust-modes').addEventListener('click', (e) => {
@@ -837,7 +981,7 @@ $('b-auto').addEventListener('click', () => {
 function launch() {
   sim.design = readDesign();
   const peri = +$('f-peri').value, apo = Math.max(+$('f-apo').value, peri);
-  sim.state = ENG.initState(sim.design, { periKm: peri, apoKm: apo });
+  sim.state = ENG.initState(sim.design, { periKm: peri, apoKm: apo, env });
   sim.trail = []; sim.altHist = [];
   sim.score = 0;
   sim.targetSatM = null; sim.debrisM = null;
@@ -851,13 +995,22 @@ function launch() {
   $('b-reset').disabled = false;
   $('st-warp').textContent = '▶ ×' + sim.warp;
   setPhase('In flight', 'good');
+  // Auto-snap the camera to the bird so the pilot actually sees what they
+  // just launched. They can switch back to Earth or WIDE any time.
+  if (SCENE) {
+    SCENE.setCameraMode('follow', { snap: true });
+    SCENE.setSubject('satellite');
+    setCamModeButton('follow');
+    setSubjectButton('satellite');
+  }
   // Spin up the active mission.
   startMission();
 }
 // Blank every live readout so each test run starts from a clean board.
 function clearReadouts() {
   for (const id of ['m-alt','m-spd','m-peri','m-apo','m-period','m-ecc',
-                     'm-rho','m-q','m-drag','m-decay'])
+                     'm-rho','m-q','m-drag','m-decay',
+                     'm-turb','m-tumble','m-erosion','m-ispEff'])
     setMetric(id, '—', null);
   $('fuel-lbl').textContent = '—';
   $('dv-lbl').textContent = '—';
@@ -1039,6 +1192,30 @@ function updateTelemetry(t) {
       : 'stable',
     t.decayPerOrbitKm < -1 ? 'bad' : t.decayPerOrbitKm < -0.05 ? 'warn' : null);
 
+  // ── Realism gauges ────────────────────────────────────────────────────
+  // Turbulence is the multiplier on the mean atmosphere model — ±5% quiet,
+  // up to ±23% in a storm. Warn when it's moving the needle.
+  const turbPct = ((t.turbulence ?? 1) - 1) * 100;
+  setMetric('m-turb',
+    (turbPct >= 0 ? '+' : '') + fmt(turbPct, 1) + '<small>%</small>',
+    Math.abs(turbPct) > 15 ? 'warn' : null);
+  // Tumble = angular rate of the bus (rad/s) — high when drag torque
+  // overpowers reaction wheels; the engine bloats effective area when this
+  // grows. Visualised in °/s for legibility.
+  const tumbleDegS = (t.tumbleRate ?? 0) * 180 / Math.PI;
+  setMetric('m-tumble',
+    fmt(Math.abs(tumbleDegS), 1) + '<small>°/s</small>',
+    Math.abs(tumbleDegS) > 30 ? 'bad' : Math.abs(tumbleDegS) > 10 ? 'warn' : null);
+  // Throat life remaining (0 % = factory new; 100 % = 25 % perf loss capped).
+  const lifeUsed = (t.erosion ?? 0) * 100;
+  setMetric('m-erosion',
+    fmt(100 - lifeUsed, 0) + '<small>%</small>',
+    lifeUsed > 60 ? 'bad' : lifeUsed > 25 ? 'warn' : null);
+  // Effective Isp (degraded by erosion).
+  setMetric('m-ispEff',
+    isFinite(t.ispEff) ? fmt(t.ispEff, 0) + '<small>s</small>' : '—',
+    t.ispEff < (sim.design?.isp ?? Infinity) * 0.85 ? 'warn' : null);
+
   $('fuel-lbl').textContent = fmt(t.fuel, 1) + ' kg';
   $('fuel-bar').style.width = (t.fuelFrac * 100).toFixed(1) + '%';
   const dvMax = sim.design ? sim.design.isp * ENG.G0 *
@@ -1121,11 +1298,35 @@ function draw() {
   if (sim.targetSatM) update.targetSat = [sim.targetSatM.x, sim.targetSatM.y];
   if (sim.debrisM)    update.debris    = [sim.debrisM.x,    sim.debrisM.y];
 
+  // Thrust plume — compute the burn direction so the 3-D scene can paint
+  // a flame trailing in the opposite direction. Visible whenever the
+  // throttle is open, the engine is in a burn mode, and fuel remains.
+  if (sim.state) {
+    const mode = sim.control.mode;
+    const thr = sim.control.throttle || 0;
+    const fuelOk = (sim.state.fuel ?? 0) > 0;
+    if (thr > 0 && mode && mode !== 'off' && fuelOk) {
+      const vmag = Math.hypot(sim.state.vx, sim.state.vy) || 1;
+      const rmag = Math.hypot(sim.state.x, sim.state.y) || 1;
+      const h = sim.control.heading;
+      let dx = 0, dy = 0;
+      if      (mode === 'prograde')      { dx =  sim.state.vx / vmag; dy =  sim.state.vy / vmag; }
+      else if (mode === 'retrograde')    { dx = -sim.state.vx / vmag; dy = -sim.state.vy / vmag; }
+      else if (mode === 'radial-out')    { dx =  sim.state.x / rmag;  dy =  sim.state.y / rmag;  }
+      else if (mode === 'radial-in')     { dx = -sim.state.x / rmag;  dy = -sim.state.y / rmag;  }
+      else if (mode === 'manual')        { dx =  Math.cos(h);         dy =  Math.sin(h);         }
+      else if (mode === 'manual-retro')  { dx = -Math.cos(h);         dy = -Math.sin(h);         }
+      const electric = !!(sim.design && ENG.ENGINE_PRESETS[sim.design.engine || ''] && ENG.ENGINE_PRESETS[sim.design.engine].isp > 1000);
+      update.thrust = { throttle: thr, dirX: dx, dirY: dy, electric, fuelOk: true };
+    }
+  }
+
   SCENE.update(update);
 
   // Auto-fit only matters in wide mode; render passes the current apogee km.
+  // Pass env so the elements() call honours the current gravity-slider μ.
   const apoKm = sim.state
-    ? Math.max(ENG.elements(sim.state).ra, ENG.elements(sim.state).r) / 1000 - ENG.R_EARTH / 1000
+    ? Math.max(ENG.elements(sim.state, env).ra, ENG.elements(sim.state, env).r) / 1000 - ENG.R_EARTH / 1000
     : Math.max(+$('f-apo').value, +$('f-peri').value);
   SCENE.render(apoKm);
 
@@ -1322,34 +1523,90 @@ $('b-save').addEventListener('click', saveShip);
 const BAY = { ready: false, three: null, raf: 0,
   scene: null, camera: null, renderer: null, controls: null, group: null };
 
-function chip(label, sub, active) {
-  return `<div class="opt${active ? ' active' : ''}" data-v="${label.key}">
-    ${label.name}<small>${sub}</small></div>`;
+// Iconography for the parts chips. Picked to read at a glance: cube
+// shapes for buses, a flame/leaf for chemical-vs-electric thrusters, sun
+// motifs for arrays. Keep these in sync with BUILDER's keys.
+const PART_ICONS = {
+  body: { cubesat_3u: '🧊', cubesat_12u: '📦', cubesat_grid: '🧱',
+          smallsat: '🛰', bus_med: '🚛', tank_cyl: '🛢',
+          tug: '🚚', telescope: '🔭' },
+  thruster: { cold_gas: '💨', monoprop: '🔥', biprop: '🚀',
+              hall_ion: '⚡', gridded_ion: '⚛', hall_shielded: '🛡',
+              iodine_ion: '🟣', electrospray: '💧', water_resisto: '💦' },
+  panel: { none: '⬛', dual: '☀', quad: '🔆', large: '🌞', rosa: '📜', thinfilm: '🪶' },
+  payload: { none: '➖', optical_cam: '📷', wide_imager: '🎥',
+             commsat_dish: '📡', sar_radar: '🛰', mass_driver: '🧨' },
+};
+// Render a single part chip. The tier badge is appended for non-Mk-I parts
+// to advertise upgraded gear. The whole chip is clickable to select; the
+// tier badge is independently clickable to attempt an upgrade.
+function chip(slot, label, sub, active, icon, tier) {
+  const ic = icon ? `<span class="ico">${icon}</span>` : '';
+  const badge = tier > 1
+    ? `<span class="tier tier-${tier}" data-slot="${slot}" data-key="${label.key}" title="Tier ${tier}">${PROG.PART_TIER_NAMES[tier-1]}</span>`
+    : '';
+  return `<div class="opt${active ? ' active' : ''}" data-v="${label.key}" title="${label.full || label.name}">
+    ${badge}${ic}${label.name}<small>${sub}</small></div>`;
 }
 function renderOptChips() {
+  const tT = (slot, k) => PROG.partTier(profile, slot, k);
   $('bay-body').innerHTML = Object.entries(BUILDER.BODIES).map(([k, v]) =>
-    chip({ key: k, name: v.label }, `${v.mass} kg`, k === sdBuild.body)).join('');
+    chip('body',
+      { key: k, name: v.label.replace(' CubeSat', '').replace('SmallSat ', ''),
+        full: `${v.label} · ${v.mass} kg` },
+      `${v.mass} kg`, k === sdBuild.body, PART_ICONS.body[k], tT('body', k))).join('');
   $('bay-thruster').innerHTML = Object.entries(BUILDER.THRUSTER_UNITS).map(([k, v]) => {
     const p = ENG.ENGINE_PRESETS[k];
-    return chip({ key: k, name: v.label.split(' ')[0] },
-      p ? `${p.thrust} N · ${p.isp}s` : '', k === sdBuild.thruster);
+    const short = v.label.split(/[\s\/(]/)[0];
+    return chip('thruster', { key: k, name: short, full: v.label },
+      p ? `${p.thrust < 1 ? p.thrust : Math.round(p.thrust)} N · ${p.isp}s` : '',
+      k === sdBuild.thruster, PART_ICONS.thruster[k], tT('thruster', k));
   }).join('');
-  $('bay-panel').innerHTML = Object.entries(BUILDER.PANELS).map(([k, v]) =>
-    chip({ key: k, name: v.label }, v.wings ? `${v.wings} wing${v.wings > 1 ? 's' : ''}` : 'fixed',
-      k === sdBuild.panel)).join('');
+  $('bay-panel').innerHTML = Object.entries(BUILDER.PANELS).map(([k, v]) => {
+    const short = v.label.replace(' deployable', '').replace(' array', '')
+                          .replace(' (ROSA)', '').replace(' flex', '');
+    return chip('panel', { key: k, name: short, full: v.label },
+      v.wings ? `${v.wings} wing${v.wings > 1 ? 's' : ''}` : 'fixed',
+      k === sdBuild.panel, PART_ICONS.panel[k], tT('panel', k));
+  }).join('');
+  $('bay-payload').innerHTML = Object.entries(BUILDER.PAYLOADS).map(([k, v]) => {
+    const short = v.label.replace(' camera', '').replace(' (exp.)', '')
+                          .replace('Comms HG ', '').replace(' phased array', '');
+    return chip('payload', { key: k, name: short, full: v.label },
+      v.mass > 0 ? `${v.mass}kg · ${v.powerW}W` : 'none',
+      k === sdBuild.payload, PART_ICONS.payload[k], tT('payload', k));
+  }).join('');
+  // Live caption under the row header showing what's selected.
+  const plKey = sdBuild.payload || 'none';
+  const pl = BUILDER.PAYLOADS[plKey];
+  $('payload-tip').textContent = pl
+    ? `${pl.label} — ${pl.mass}kg · ${pl.area}m² · ${pl.powerW}W`
+    : '';
 }
 function syncBayUI() {
   const tc = $('bay-tc'), sp = $('bay-span');
   if (tc) { tc.value = sdBuild.thrusterCount; $('bay-tc-v').textContent = sdBuild.thrusterCount; }
   if (sp) { sp.value = sdBuild.panelSpan; $('bay-span-v').textContent = (+sdBuild.panelSpan).toFixed(1); }
-  for (const [grp, key] of [['bay-body', 'body'], ['bay-thruster', 'thruster'], ['bay-panel', 'panel']]) {
+  for (const [grp, key] of [['bay-body', 'body'], ['bay-thruster', 'thruster'],
+                            ['bay-panel', 'panel'], ['bay-payload', 'payload']]) {
     const box = $(grp); if (!box) continue;
     box.querySelectorAll('.opt').forEach(o =>
       o.classList.toggle('active', o.dataset.v === sdBuild[key]));
   }
 }
+// Build the per-slot tierMods object the builder expects, from the active
+// profile's persistent partTiers map. Each chip's modifiers are computed
+// at use-time so a tier upgrade is reflected immediately.
+function activeTierMods() {
+  return {
+    body:     PROG.tierMods('body',     PROG.partTier(profile, 'body',     sdBuild.body)),
+    thruster: PROG.tierMods('thruster', PROG.partTier(profile, 'thruster', sdBuild.thruster)),
+    panel:    PROG.tierMods('panel',    PROG.partTier(profile, 'panel',    sdBuild.panel)),
+    payload:  PROG.tierMods('payload',  PROG.partTier(profile, 'payload',  sdBuild.payload || 'none')),
+  };
+}
 function refreshBaySpec() {
-  const d = BUILDER.deriveDesign(sdBuild, ENG.ENGINE_PRESETS);
+  const d = BUILDER.deriveDesign(sdBuild, ENG.ENGINE_PRESETS, activeTierMods());
   $('bs-mass').innerHTML = fmt(d.dryMass, 1) + ' <small>kg</small>';
   $('bs-area').innerHTML = fmt(d.area, 2) + ' <small>m²</small>';
   $('bs-cd').textContent = d.cd.toFixed(2);
@@ -1438,7 +1695,7 @@ async function initBay() {
 }
 // Push the parametric build's derived physics into the editable ship form.
 function pushBuildToForm() {
-  const d = BUILDER.deriveDesign(sdBuild, ENG.ENGINE_PRESETS);
+  const d = BUILDER.deriveDesign(sdBuild, ENG.ENGINE_PRESETS, activeTierMods());
   $('f-engine').value = d.engine;
   $('f-thrust').value = d.thrust;
   $('f-isp').value = d.isp;
@@ -1457,14 +1714,48 @@ function applyBuild() {
   toast(`Applied ${BUILDER.BODIES[sdBuild.body].label}: ${fmt(d.dryMass, 0)} kg · ${fmt(d.area, 2)} m²`);
 }
 
-for (const [grp, key] of [['bay-body', 'body'], ['bay-thruster', 'thruster'], ['bay-panel', 'panel']]) {
+for (const [grp, key] of [['bay-body', 'body'], ['bay-thruster', 'thruster'],
+                          ['bay-panel', 'panel'], ['bay-payload', 'payload']]) {
   $(grp).addEventListener('click', (e) => {
+    // Tier-badge click — try to upgrade that specific part, don't select it.
+    const tierBadge = e.target.closest('.tier');
+    if (tierBadge) { e.stopPropagation(); tryUpgradePart(tierBadge.dataset.slot, tierBadge.dataset.key); return; }
     const o = e.target.closest('.opt'); if (!o) return;
+    // Right-click (or alt-click) on a chip opens its upgrade flow instead.
+    if (e.altKey) { tryUpgradePart(key, o.dataset.v); return; }
     sdBuild[key] = o.dataset.v;
     $(grp).querySelectorAll('.opt').forEach(x => x.classList.toggle('active', x === o));
     syncBuild();
   });
+  // Right-click anywhere in a chip row triggers the upgrade flow.
+  $(grp).addEventListener('contextmenu', (e) => {
+    const o = e.target.closest('.opt'); if (!o) return;
+    e.preventDefault();
+    tryUpgradePart(key, o.dataset.v);
+  });
 }
+// Upgrade flow — spends XP from the available pool. Shows a toast either way.
+function tryUpgradePart(slot, key) {
+  const curTier = PROG.partTier(profile, slot, key);
+  if (curTier >= 3) { toast(`${BUILDER[slotsToConst[slot]]?.[key]?.label || key}: already Mk III (max).`); return; }
+  const cost = PROG.PART_TIER_COST[curTier];
+  const avail = PROG.availableXp(profile);
+  const partName = BUILDER[slotsToConst[slot]]?.[key]?.label || key;
+  if (avail < cost) {
+    toast(`🔒 Mk ${PROG.PART_TIER_NAMES[curTier].split(' ')[1]} ${partName} costs ${cost} XP — you have ${avail}.`, true);
+    return;
+  }
+  if (!confirm(`Upgrade ${partName} to ${PROG.PART_TIER_NAMES[curTier]} for ${cost} XP?\n\nAvailable XP: ${avail}`)) return;
+  const r = PROG.upgradePart(profile, slot, key);
+  if (r.ok) {
+    toast(`✨ ${partName} → ${PROG.PART_TIER_NAMES[r.newTier - 1]} (–${r.cost} XP)`);
+    renderOptChips(); syncBayUI(); refreshBaySpec();
+    refreshDesignReadouts(); renderPilotPanel();
+  } else {
+    toast(`Upgrade failed: ${r.reason}`, true);
+  }
+}
+const slotsToConst = { body: 'BODIES', thruster: 'THRUSTER_UNITS', panel: 'PANELS', payload: 'PAYLOADS' };
 $('bay-tc').addEventListener('input', (e) => {
   sdBuild.thrusterCount = +e.target.value;
   $('bay-tc-v').textContent = e.target.value; syncBuild();
@@ -1496,20 +1787,59 @@ $('sd-cam').addEventListener('click', (e) => {
       x.classList.toggle('active', x === b));
     return;
   }
-  if (e.target.closest('#cam-focus') && SCENE) SCENE.focusSatellite();
-  if (e.target.closest('#cam-reset') && SCENE) { SCENE.resetView(); setCamModeButton('wide'); }
+  if (e.target.closest('#cam-reset') && SCENE) { SCENE.resetView(); setCamModeButton('wide'); setSubjectButton('earth'); }
 });
 function setCamModeButton(mode) {
   $('sd-cam').querySelectorAll('.cam-btn').forEach(x =>
     x.classList.toggle('active', x.dataset.cam === mode));
 }
+function setSubjectButton(s) {
+  $('sd-subject').querySelectorAll('.subj-btn').forEach(x =>
+    x.classList.toggle('active', x.dataset.subj === s));
+}
+// Subject toggle — Earth vs Satellite focal lock. Works in any camera mode.
+$('sd-subject').addEventListener('click', (e) => {
+  const b = e.target.closest('.subj-btn'); if (!b || !SCENE) return;
+  SCENE.setSubject(b.dataset.subj);
+  setSubjectButton(b.dataset.subj);
+});
+// Click-to-focus on the canvas — pick Earth or the satellite halo and lock
+// the focal subject. We distinguish click from drag by tracking the down-up
+// pixel delta; OrbitControls owns drags.
+let _downX = 0, _downY = 0, _downT = 0;
+$('sd-canvas').addEventListener('pointerdown', (e) => {
+  _downX = e.clientX; _downY = e.clientY; _downT = performance.now();
+});
+$('sd-canvas').addEventListener('pointerup', (e) => {
+  if (!SCENE) return;
+  const dx = e.clientX - _downX, dy = e.clientY - _downY;
+  if (dx * dx + dy * dy > 16 || performance.now() - _downT > 350) return;   // drag, not click
+  const r = $('sd-canvas').getBoundingClientRect();
+  const ndcX = ((e.clientX - r.left) / r.width) * 2 - 1;
+  const ndcY = -((e.clientY - r.top) / r.height) * 2 + 1;
+  const hit = SCENE.pickAt(ndcX, ndcY);
+  if (!hit) return;
+  SCENE.setSubject(hit);
+  setSubjectButton(hit);
+  // Earth subject in WIDE feels natural; satellite click also snaps the
+  // camera mode to FOLLOW so the user actually sees the bird up close.
+  if (hit === 'satellite') {
+    SCENE.setCameraMode('follow', { snap: true });
+    setCamModeButton('follow');
+  }
+});
 // Keyboard shortcuts — F focus, R reset, C cycle. Avoid stealing form input.
 addEventListener('keydown', (e) => {
   if (e.target.matches('input,select,textarea')) return;
   if (!SCENE) return;
-  if (e.key === 'f' || e.key === 'F') { SCENE.focusSatellite(); }
-  else if (e.key === 'r' || e.key === 'R') { SCENE.resetView(); setCamModeButton('wide'); }
-  else if (e.key === 'c' || e.key === 'C') {
+  if (e.key === 'f' || e.key === 'F') {
+    SCENE.setSubject('satellite');
+    SCENE.focusSatellite();
+    setSubjectButton('satellite');
+  } else if (e.key === 'r' || e.key === 'R') {
+    SCENE.resetView(); SCENE.setSubject('earth');
+    setCamModeButton('wide'); setSubjectButton('earth');
+  } else if (e.key === 'c' || e.key === 'C') {
     const order = ['wide', 'follow', 'free'];
     const next = order[(order.indexOf(SCENE.getMode()) + 1) % order.length];
     SCENE.setCameraMode(next, { snap: true }); setCamModeButton(next);
@@ -1523,9 +1853,13 @@ function updateViewReadout() {
   if (now - viewLastT < 200) return;
   viewLastT = now;
   const v = SCENE.viewInfo();
-  const a = v.altKm > 9999 ? (v.altKm / 1000).toFixed(1) + ' Mm'
-          : v.altKm.toFixed(0) + ' km';
-  $('sd-view').textContent = `view ${a} · ${v.mode}`;
+  // In FOLLOW we report distance to the satellite (more useful than alt);
+  // otherwise the camera's altitude above Earth's surface.
+  const isFollow = v.mode === 'follow' || v.subject === 'satellite';
+  const d = isFollow ? v.distSatKm : v.altKm;
+  const a = d > 9999 ? (d / 1000).toFixed(1) + ' Mm' : d.toFixed(0) + ' km';
+  const subjBadge = v.subject === 'satellite' ? '🛰' : '🌍';
+  $('sd-view').textContent = `${subjBadge} ${isFollow ? 'sat' : 'view'} ${a} · ${v.mode}`;
 }
 
 // ── Mission picker ──────────────────────────────────────────────────────────
@@ -1607,13 +1941,20 @@ function refreshObjectivePanel(tel) {
 // ── Pilot progression (roguelike-style unlocks) ─────────────────────────────
 function renderPilotPanel() {
   const xp = PROG.xpFor(profile);
+  const avail = PROG.availableXp(profile);
   $('rank-badge').textContent = xp.rank.badge;
   $('rank-name').textContent = xp.rank.name;
-  $('rank-xp').textContent = `${xp.total} XP · ${profile.totalMissions || 0} missions flown`;
+  // Two-line summary: total earned, available-to-spend (xp not yet sunk
+  // into part-tier upgrades). The available number is what tier-upgrade
+  // clicks draw down.
+  $('rank-xp').innerHTML =
+    `${xp.total} XP <small style="color:var(--c-text-3)">earned</small> · ` +
+    `<b style="color:var(--c-good)">${avail}</b> <small style="color:var(--c-text-3)">to spend</small> · ` +
+    `${profile.totalMissions || 0} <small style="color:var(--c-text-3)">flown</small>`;
   $('rank-bar').style.width = Math.min(100, xp.pct * 100).toFixed(1) + '%';
   $('rank-next').textContent = xp.atMax
-    ? '🏅 Max rank — top of the operator ladder.'
-    : `Next: ${xp.nextRankName} · ${xp.span - xp.intoRank} XP to go`;
+    ? '🏅 Max rank — top of the operator ladder. Alt-click any chip to spend XP on Mk II/III.'
+    : `Next: ${xp.nextRankName} · ${xp.span - xp.intoRank} XP to go · Alt-click chips to upgrade`;
   const owned = PROG.unlocksOwned(profile);
   const locked = PROG.unlocksLocked(profile);
   $('unlocks-owned').innerHTML = owned.length
@@ -1724,6 +2065,8 @@ window.__sd = { auth, engine: ENG, sim, builder: BUILDER,
   applyUnlockLocks();
   loadDraft();
   refreshDesignReadouts();
+  syncThrottleFill();
+  syncGravityFill();
   // Warm the thermosphere model with one sample, then drop the overlay.
   try { ENG.airDensity(400_000, env); } catch (e) { console.warn(e); }
   $('sd-warmup').style.display = 'none';
