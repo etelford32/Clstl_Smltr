@@ -974,6 +974,170 @@ canvas { display:block; width:100% !important; height:100% !important; }
     border-color: var(--c-accent-border-hi);
     color: var(--c-text-primary);
 }
+
+/* ─── Tour & Categories panel (above zoom-bar) ────────────────── */
+#tour-panel {
+    position: absolute;
+    bottom: 78px; left: 50%;
+    transform: translateX(-50%);
+    z-index: 105;
+    max-width: calc(100vw - 28px);
+    min-width: 320px;
+}
+#tour-panel.gp-positioned { transform: none; }
+#tour-panel .gp-body {
+    padding: var(--sp-3) var(--sp-4) var(--sp-4);
+    display: flex; flex-direction: column; gap: var(--sp-3);
+}
+.tour-cat-row {
+    display: flex; align-items: center; gap: var(--sp-3);
+}
+.tour-arrow {
+    background: var(--c-accent-soft);
+    border: 1px solid var(--c-accent-border);
+    border-radius: var(--r-sm);
+    color: var(--c-accent);
+    width: 32px; height: 32px;
+    font-size: 16px; font-weight: 700;
+    line-height: 1; cursor: pointer; font-family: inherit;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    transition: background var(--t-snap), border-color var(--t-snap),
+                color var(--t-snap), transform var(--t-fast);
+    -webkit-tap-highlight-color: transparent;
+}
+.tour-arrow:hover {
+    background: rgba(var(--c-accent-rgb), .25);
+    border-color: var(--c-accent-border-hi);
+    color: #fff;
+}
+.tour-arrow:active { transform: scale(.92); }
+.tour-cat-label {
+    flex: 1;
+    text-align: center;
+    font-size: 12.5px; font-weight: 700;
+    color: var(--c-text-primary);
+    letter-spacing: .02em;
+    padding: 4px 8px;
+    min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tour-cat-label .tour-cat-icon {
+    margin-right: 6px;
+    color: var(--c-accent);
+}
+.tour-obj-line {
+    display: flex; align-items: center; gap: var(--sp-3);
+    font-size: 11px; color: var(--c-text-muted);
+    background: rgba(0,0,0,.32);
+    border: 1px solid var(--c-border-faint);
+    border-radius: var(--r-sm);
+    padding: 5px 10px;
+    line-height: 1.3;
+}
+.tour-obj-rank {
+    color: var(--c-accent);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+}
+.tour-obj-name {
+    color: var(--c-text-primary);
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.tour-obj-meta {
+    margin-left: auto;
+    color: var(--c-text-faint);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+}
+.tour-controls {
+    display: flex; align-items: center; gap: var(--sp-3);
+    justify-content: center;
+}
+.tour-btn {
+    background: var(--c-accent-soft);
+    border: 1px solid var(--c-accent-border);
+    border-radius: var(--r-sm);
+    color: var(--c-accent);
+    padding: 6px 12px; font-size: 11px; font-weight: 600;
+    font-family: inherit; cursor: pointer; min-height: 32px;
+    transition: background var(--t-snap), border-color var(--t-snap),
+                color var(--t-snap), transform var(--t-fast);
+    -webkit-tap-highlight-color: transparent;
+    flex-shrink: 0;
+}
+.tour-btn:hover {
+    background: rgba(var(--c-accent-rgb), .25);
+    border-color: var(--c-accent-border-hi);
+    color: #fff;
+}
+.tour-btn:active { transform: scale(.96); }
+.tour-btn.is-play {
+    background: rgba(255, 200, 80, .18);
+    border-color: rgba(255, 200, 80, .45);
+    color: #ffcc66;
+}
+.tour-btn.is-play:hover {
+    background: rgba(255, 200, 80, .35);
+    color: #fff;
+}
+.tour-btn.is-play.playing {
+    background: rgba(255, 200, 80, .55);
+    color: #fff;
+    border-color: #ffd58a;
+    box-shadow: 0 0 10px rgba(255,200,80,.45);
+}
+.tour-progress {
+    height: 2px;
+    background: rgba(255,255,255,.06);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-top: 2px;
+}
+.tour-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--c-accent), #ffcc66);
+    width: 0%;
+    transition: width .15s linear;
+}
+
+/* Tablet/phone: shrink the panel and stack controls more tightly */
+@media (max-width: 768px) {
+    #tour-panel { min-width: 280px; bottom: 124px; }
+    #tour-panel .gp-body { padding: var(--sp-2) var(--sp-3) var(--sp-3); }
+    .tour-cat-label { font-size: 11.5px; padding: 2px 4px; }
+    .tour-obj-line { font-size: 10.5px; padding: 4px 8px; }
+    .tour-btn { padding: 6px 10px; font-size: 10.5px; min-height: 34px; }
+    .tour-arrow { width: 30px; height: 30px; font-size: 15px; min-height: 30px; }
+}
+@media (max-width: 600px) {
+    #tour-panel {
+        min-width: 0;
+        left: 8px; right: 8px;
+        bottom: 122px;
+        width: auto; max-width: none;
+        transform: none;
+    }
+    #tour-panel .gp-header { padding: 4px 8px; }
+    #tour-panel .gp-title { font-size: 11px; }
+    .tour-obj-line { padding: 4px 7px; }
+    .tour-obj-meta { display: none; }
+    .tour-controls { gap: 4px; flex-wrap: wrap; }
+    .tour-btn { flex: 1 1 auto; min-width: 60px; padding: 7px 8px; }
+}
+@media (max-height: 500px) and (orientation: landscape) {
+    #tour-panel { bottom: 50px; min-width: 240px; }
+    #tour-panel .gp-body { padding: 3px 6px 4px; gap: 4px; }
+    .tour-cat-label { font-size: 10.5px; }
+    .tour-obj-line { padding: 3px 6px; font-size: 10px; }
+    .tour-btn { padding: 4px 8px; min-height: 26px; font-size: 10px; }
+    .tour-arrow { width: 26px; height: 26px; min-height: 26px; font-size: 13px; }
+}
 </style>
 <script type="application/ld+json">
 {
@@ -1162,6 +1326,46 @@ canvas { display:block; width:100% !important; height:100% !important; }
                 </button>
                 <button id="zoom-universe" class="zb-btn-warn"
                         title="Log-scale universe view — distances beyond 60 kly are radially compressed so extragalactic targets fit on screen.">Universe ⚠ log</button>
+            </div>
+        </div>
+
+        <!-- Tour & Categories — cycle through curated lists, auto-tour -->
+        <div id="tour-panel" class="gp-panel" data-panel-key="tour-panel">
+            <div class="gp-header" data-drag-handle
+                 title="Drag to reposition. Hit − to minimize.">
+                <span class="gp-grip" aria-hidden="true"></span>
+                <span class="gp-title">🎯 Tour &amp; Categories</span>
+                <button type="button" class="gp-min-btn" data-min-btn
+                        title="Minimize panel" aria-label="Minimize Tour panel"></button>
+            </div>
+            <div class="gp-body">
+                <div class="tour-cat-row">
+                    <button type="button" class="tour-arrow" id="tour-cat-prev"
+                            title="Previous category" aria-label="Previous category">‹</button>
+                    <div class="tour-cat-label" id="tour-cat-label">
+                        <span class="tour-cat-icon">⭐</span>
+                        <span id="tour-cat-name">Most Interesting</span>
+                    </div>
+                    <button type="button" class="tour-arrow" id="tour-cat-next"
+                            title="Next category" aria-label="Next category">›</button>
+                </div>
+                <div class="tour-obj-line" id="tour-obj-line"
+                     title="Current object in the tour. Click to jump.">
+                    <span class="tour-obj-rank" id="tour-obj-rank">1/10</span>
+                    <span class="tour-obj-name" id="tour-obj-name">—</span>
+                    <span class="tour-obj-meta" id="tour-obj-meta"></span>
+                </div>
+                <div class="tour-controls">
+                    <button type="button" class="tour-btn" id="tour-prev"
+                            title="Previous object in this category">‹ Prev</button>
+                    <button type="button" class="tour-btn is-play" id="tour-play"
+                            title="Start auto-tour — advances every 6 seconds">▶ Tour</button>
+                    <button type="button" class="tour-btn" id="tour-next"
+                            title="Next object in this category">Next ›</button>
+                </div>
+                <div class="tour-progress" id="tour-progress" aria-hidden="true">
+                    <div class="tour-progress-fill" id="tour-progress-fill"></div>
+                </div>
             </div>
         </div>
 
@@ -10262,6 +10466,394 @@ document.getElementById('zoom-local').classList.remove('active');
 // ── Solar System cross-scale navigation ───────────────────────────────────────
 // The "☀️ Solar Sys." zoom-bar button navigates out to threejs.html
 document.getElementById('zoom-solar-system').addEventListener('click', () => navigateTo('threejs.html'));
+
+// ══════════════════════════════════════════════════════════════════════════
+//  TOUR & CATEGORIES — cycle through curated lists of catalog objects.
+//
+//  Categories are curated id arrays (ranked or filter-derived). "Most
+//  Interesting" is data-driven: each object's selection count is tallied in
+//  localStorage and (best-effort) beaconed to the telemetry pipeline so a
+//  future aggregation job can surface a global leaderboard. With no local
+//  history, falls back to a hand-picked default ranking of iconic targets.
+// ══════════════════════════════════════════════════════════════════════════
+(function wireTourPanel() {
+    const STORAGE_CLICKS = 'pp.gmap.clicks.v1';
+    const STORAGE_CAT    = 'pp.gmap.tour.category';
+    const TOUR_INTERVAL_MS = 6000;
+
+    // ── Click telemetry ──────────────────────────────────────────────
+    function loadClicks() {
+        try {
+            const raw = localStorage.getItem(STORAGE_CLICKS);
+            return raw ? JSON.parse(raw) : {};
+        } catch { return {}; }
+    }
+    function saveClicks(c) {
+        try { localStorage.setItem(STORAGE_CLICKS, JSON.stringify(c)); } catch {}
+    }
+    let clickCounts = loadClicks();
+
+    // Default "interesting" ranking when the user has no click history yet —
+    // iconic, headline-grabbing targets across scales.
+    const DEFAULT_INTERESTING = [
+        'sgr_a', 'betelgeuse', 'm87', 'ton618', 'crab_nebula',
+        'eta_carinae', 'cygnus_x1', 'orion_nebula', 'm31', 'sun',
+    ];
+
+    // Best-effort: ship a click ping to telemetry so a future aggregator can
+    // assemble a true global "Most Interesting" board. We don't await it.
+    function pingClickTelemetry(id) {
+        try {
+            import('./js/telemetry.js').then(({ telemetry }) => {
+                if (telemetry && typeof telemetry.recordPerf === 'function') {
+                    telemetry.recordPerf('gmap.click.' + id, 1);
+                }
+            }).catch(() => {});
+        } catch {}
+    }
+
+    function recordClick(id) {
+        if (!id) return;
+        clickCounts[id] = (clickCounts[id] || 0) + 1;
+        saveClicks(clickCounts);
+        pingClickTelemetry(id);
+        if (tourState.cat === 'interesting') {
+            // The ordering may have shifted — refresh the display without
+            // disrupting the user's current tour index.
+            refreshCategoryItems();
+            renderItem();
+        }
+    }
+
+    // selectStar() is module-scoped and called by many existing handlers
+    // (list-item clicks, canvas pick raycaster, etc.). Rather than rewriting
+    // it, observe the same user paths via document-level listeners. This
+    // covers list-item clicks; the canvas pick is caught by the pointerup
+    // listener below, which fires after selectedId has been updated.
+    document.addEventListener('click', (e) => {
+        const item = e.target.closest('.star-item');
+        if (item && item.id && item.id.startsWith('li-')) {
+            recordClick(item.id.slice(3));
+        }
+    }, true);
+    let _lastTrackedId = null;
+    renderer.domElement.addEventListener('pointerup', () => {
+        // selectedId is updated synchronously by the existing pointerup
+        // handler before this one fires. Only count it when the selection
+        // actually changed — otherwise idle clicks on empty sky would
+        // inflate the previously-selected object's count.
+        setTimeout(() => {
+            if (selectedId && selectedId !== _lastTrackedId) {
+                _lastTrackedId = selectedId;
+                recordClick(selectedId);
+            }
+        }, 0);
+    });
+
+    // ── Catalog helpers ──────────────────────────────────────────────
+    const byId = (id) => CATALOG.find(s => s.id === id);
+    const liveIds = (ids) => ids.filter(id => byId(id));
+
+    function topClicked(n) {
+        const ranked = Object.entries(clickCounts)
+            .sort((a, b) => b[1] - a[1])
+            .map(([id]) => id)
+            .filter(id => byId(id));
+        // Backfill from defaults so the list always shows N entries.
+        for (const id of DEFAULT_INTERESTING) {
+            if (!ranked.includes(id) && byId(id)) ranked.push(id);
+        }
+        return ranked.slice(0, n);
+    }
+
+    // ── Category definitions ─────────────────────────────────────────
+    //   Curated lists are pre-ranked (e.g. largest-first).  Some are
+    //   computed (`getIds` function), the rest are static arrays.
+    const CATEGORIES = [
+        {
+            id: 'interesting', icon: '⭐', name: 'Top 10 Most Interesting',
+            getIds: () => topClicked(10),
+            metaFor: (id) => {
+                const c = clickCounts[id] || 0;
+                return c > 0 ? c + '×' : '—';
+            },
+        },
+        {
+            id: 'black_holes', icon: '⚫', name: 'Top 10 Largest Black Holes',
+            ids: [
+                'ton618',          // ~40–66 billion M☉
+                'apm08279',        // ~23 billion M☉
+                'ngc4889',         // ~21 billion M☉
+                'oj287',           // ~18 billion M☉ (binary SMBH)
+                'j0529_4351',      // ~17 billion M☉
+                'phoenix_cluster', // ~10 billion M☉
+                'm87',             // ~6.5 billion M☉
+                'j0313_1806',      // ~1.6 billion M☉ (z ≈ 7.6)
+                'ulas_j1342',      // ~800 million M☉
+                'sgr_a',           // ~4 million M☉ (our own SMBH)
+            ],
+        },
+        {
+            id: 'large_stars', icon: '🌟', name: 'Top 10 Largest Stars',
+            ids: [
+                'eta_carinae',     // LBV, ~700+ R☉ / ~5M L☉
+                'betelgeuse',      // ~764 R☉ red supergiant
+                'antares',         // ~700 R☉ red supergiant
+                'westerlund1',     // host of Wd 1-26 (one of largest known)
+                'deneb',           // A2 Ia supergiant, ~200 R☉
+                'iota_sco',        // F2 Ia hypergiant, ~85 R☉
+                'rigel',           // B8 Ia supergiant, ~80 R☉
+                'canopus',         // F0 II, ~70 R☉
+                'aldebaran',       // K5 III red giant, ~44 R☉
+                'sargas',          // F1 II hypergiant
+            ],
+        },
+        {
+            id: 'supernova', icon: '💥', name: 'Top 5 Supernova Candidates',
+            ids: [
+                'eta_carinae',     // LBV — Great Eruption 1843
+                'betelgeuse',      // Great Dimming 2019–2020
+                'antares',         // RSG — late stage burning
+                'wr_104',          // WR — candidate long GRB progenitor
+                'rigel',           // B supergiant
+            ],
+        },
+        {
+            id: 'nebulae', icon: '☄️', name: 'Nebulae & Remnants',
+            ids: [
+                'orion_nebula', 'crab_nebula', 'eagle_nebula', 'carina_nebula',
+                'cassiopeia_a', 'helix_nebula', 'vela_pulsar',
+            ],
+        },
+        {
+            id: 'galaxies', icon: '🌌', name: 'Galaxies',
+            ids: [
+                'm31', 'm33', 'lmc', 'smc', 'm87', 'cen_a', 'm82', 'm81',
+                'ngc253', 'm51', 'm104', 'antennae', 'ngc6240',
+                'sculptor_dsph', 'fornax_dsph', 'draco_dsph', 'leo1_dsph',
+                'antlia2_dsph', 'sag_dwarf', 'ic1101', 'ngc4889',
+            ],
+        },
+        {
+            id: 'quasars', icon: '🔭', name: 'Quasars & AGN',
+            ids: [
+                '3c273', 'ton618', 'apm08279', 'j0529_4351', 'oj287',
+                'txs0506', 'm87', 'phoenix_cluster', 'cen_a', 'ngc6240',
+                'j0313_1806', 'ulas_j1342',
+            ],
+        },
+        {
+            id: 'cosmic_dawn', icon: '🌠', name: 'Cosmic Dawn (z > 6)',
+            ids: [
+                'mom_z14', 'jades_z14_0', 'jades_z14_1', 'hd1', 'jades_z13_0',
+                'ghz2', 'jades_gs_z11_0', 'gn_z11', 'macs0647_jd',
+                'macs1149_jd1', 'egsy8p7', 'grb090423', 'j0313_1806',
+                'ulas_j1342', 'gn_108036', 'earendel',
+            ],
+        },
+        {
+            id: 'nearby', icon: '🪐', name: 'Nearby Stars (< 50 ly)',
+            getIds: () => CATALOG
+                .filter(s => !s.isHeader && !s.isSstar && !s.isIntergalactic
+                          && !s.isGC && typeof s.dist === 'number'
+                          && s.dist > 0 && s.dist < 50)
+                .sort((a, b) => a.dist - b.dist)
+                .map(s => s.id),
+            metaFor: (id) => { const s = byId(id); return s ? fmtLy(s.dist) : ''; },
+        },
+        {
+            id: 'sstars', icon: '🛰', name: 'S-stars (Sgr A* cluster)',
+            getIds: () => CATALOG.filter(s => s.isSstar).map(s => s.id),
+        },
+        {
+            id: 'large_scale', icon: '🕸', name: 'Large-scale Structure',
+            ids: [
+                'hcb_great_wall', 'huge_lqg', 'sloan_great_wall', 'saraswati',
+                'laniakea', 'great_attractor', 'coma_cluster', 'bootes_void',
+                'stephans_quintet',
+            ],
+        },
+    ];
+
+    // ── State ────────────────────────────────────────────────────────
+    const tourState = {
+        cat: 'interesting',
+        index: 0,
+        items: [],           // resolved live id list for the current category
+        playing: false,
+        timerId: null,
+        progressId: null,
+        progress: 0,         // 0..1 progress within the current dwell
+    };
+
+    function getCategory(id) {
+        return CATEGORIES.find(c => c.id === id) || CATEGORIES[0];
+    }
+
+    function refreshCategoryItems() {
+        const cat = getCategory(tourState.cat);
+        const raw = typeof cat.getIds === 'function' ? cat.getIds() : (cat.ids || []);
+        tourState.items = liveIds(raw);
+        if (tourState.index >= tourState.items.length) tourState.index = 0;
+    }
+
+    // ── Rendering ────────────────────────────────────────────────────
+    const elCatName  = document.getElementById('tour-cat-name');
+    const elCatIcon  = document.querySelector('#tour-cat-label .tour-cat-icon');
+    const elObjLine  = document.getElementById('tour-obj-line');
+    const elObjRank  = document.getElementById('tour-obj-rank');
+    const elObjName  = document.getElementById('tour-obj-name');
+    const elObjMeta  = document.getElementById('tour-obj-meta');
+    const elPlay     = document.getElementById('tour-play');
+    const elProgress = document.getElementById('tour-progress-fill');
+
+    function renderCategory() {
+        const cat = getCategory(tourState.cat);
+        elCatIcon.textContent = cat.icon;
+        elCatName.textContent = cat.name;
+    }
+
+    function renderItem() {
+        const cat = getCategory(tourState.cat);
+        const total = tourState.items.length;
+        if (total === 0) {
+            elObjRank.textContent = '0/0';
+            elObjName.textContent = '(no objects)';
+            elObjMeta.textContent = '';
+            return;
+        }
+        const id = tourState.items[tourState.index];
+        const s  = byId(id);
+        elObjRank.textContent = (tourState.index + 1) + '/' + total;
+        elObjName.textContent = s ? s.name : id;
+        let meta = '';
+        if (cat.metaFor) {
+            meta = cat.metaFor(id);
+        } else if (s && typeof s.dist === 'number' && !s.isGC) {
+            meta = fmtLy(s.dist);
+        }
+        elObjMeta.textContent = meta;
+    }
+
+    function flyToCurrent() {
+        const id = tourState.items[tourState.index];
+        if (!id) return;
+        recordClick(id);
+        // selectStar() handles the camera fly + UI panels.
+        selectStar(id, true);
+    }
+
+    function setCategoryByOffset(delta) {
+        const i = CATEGORIES.findIndex(c => c.id === tourState.cat);
+        const next = (i + delta + CATEGORIES.length) % CATEGORIES.length;
+        tourState.cat = CATEGORIES[next].id;
+        tourState.index = 0;
+        try { localStorage.setItem(STORAGE_CAT, tourState.cat); } catch {}
+        refreshCategoryItems();
+        renderCategory();
+        renderItem();
+        if (tourState.playing) restartProgress();
+    }
+
+    function step(delta) {
+        if (tourState.items.length === 0) return;
+        tourState.index = (tourState.index + delta + tourState.items.length)
+                         % tourState.items.length;
+        renderItem();
+        flyToCurrent();
+        if (tourState.playing) restartProgress();
+    }
+
+    // ── Auto-play ────────────────────────────────────────────────────
+    function clearTimers() {
+        if (tourState.timerId)    { clearTimeout(tourState.timerId);     tourState.timerId = null; }
+        if (tourState.progressId) { clearInterval(tourState.progressId); tourState.progressId = null; }
+    }
+    function restartProgress() {
+        clearTimers();
+        tourState.progress = 0;
+        elProgress.style.width = '0%';
+        const startedAt = performance.now();
+        tourState.progressId = setInterval(() => {
+            const elapsed = performance.now() - startedAt;
+            const p = Math.min(1, elapsed / TOUR_INTERVAL_MS);
+            elProgress.style.width = (p * 100).toFixed(1) + '%';
+        }, 100);
+        tourState.timerId = setTimeout(() => { step(+1); }, TOUR_INTERVAL_MS);
+    }
+    function startTour() {
+        if (tourState.items.length === 0) return;
+        tourState.playing = true;
+        elPlay.classList.add('playing');
+        elPlay.textContent = '⏸ Pause';
+        // Fly to the current item immediately so the user sees something happen.
+        flyToCurrent();
+        restartProgress();
+    }
+    function stopTour() {
+        tourState.playing = false;
+        elPlay.classList.remove('playing');
+        elPlay.textContent = '▶ Tour';
+        clearTimers();
+        elProgress.style.width = '0%';
+    }
+    function togglePlay() {
+        if (tourState.playing) stopTour(); else startTour();
+    }
+
+    // ── Wire DOM ─────────────────────────────────────────────────────
+    document.getElementById('tour-cat-prev').addEventListener('click', () => setCategoryByOffset(-1));
+    document.getElementById('tour-cat-next').addEventListener('click', () => setCategoryByOffset(+1));
+    document.getElementById('tour-prev').addEventListener('click', () => step(-1));
+    document.getElementById('tour-next').addEventListener('click', () => step(+1));
+    elPlay.addEventListener('click', togglePlay);
+    // Click the object readout to fly to it without advancing.
+    elObjLine.addEventListener('click', () => flyToCurrent());
+
+    // Swipe left/right on mobile to cycle categories.
+    let touchStartX = null;
+    const panelEl = document.getElementById('tour-panel');
+    panelEl.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 1) touchStartX = e.touches[0].clientX;
+    }, { passive: true });
+    panelEl.addEventListener('touchend', (e) => {
+        if (touchStartX === null) return;
+        const endX = (e.changedTouches[0] || {}).clientX;
+        const dx = endX - touchStartX;
+        touchStartX = null;
+        if (Math.abs(dx) > 60) setCategoryByOffset(dx < 0 ? +1 : -1);
+    });
+
+    // Keyboard: [ / ] cycle categories; , / . step objects; space toggles tour.
+    window.addEventListener('keydown', (e) => {
+        // Ignore when typing in a form field.
+        if (e.target && /^(input|textarea|select)$/i.test(e.target.tagName)) return;
+        if (e.key === '[') setCategoryByOffset(-1);
+        else if (e.key === ']') setCategoryByOffset(+1);
+        else if (e.key === ',') step(-1);
+        else if (e.key === '.') step(+1);
+        else if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
+    });
+
+    // Stop tour the moment the user interacts manually (click in scene,
+    // drawer item, zoom preset, recenter, etc.) to avoid fighting them.
+    function pauseOnManualNav() { if (tourState.playing) stopTour(); }
+    renderer.domElement.addEventListener('pointerdown', pauseOnManualNav);
+    document.getElementById('zoom-bar')?.addEventListener('click', pauseOnManualNav);
+    document.getElementById('cam-controls')?.addEventListener('click', pauseOnManualNav);
+    document.getElementById('sidebar')?.addEventListener('click', (e) => {
+        if (e.target.closest('.star-item')) pauseOnManualNav();
+    });
+
+    // ── Boot ─────────────────────────────────────────────────────────
+    try {
+        const saved = localStorage.getItem(STORAGE_CAT);
+        if (saved && CATEGORIES.some(c => c.id === saved)) tourState.cat = saved;
+    } catch {}
+    refreshCategoryItems();
+    renderCategory();
+    renderItem();
+})();
 
 animate();
 console.log('%c[Galactic Map · Celestial Simulator]', 'color:#a060ff;font-weight:bold;font-size:13px');
