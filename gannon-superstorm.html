@@ -220,6 +220,8 @@ body {
 }
 
 /* Phase-tinted ticks/dots. */
+.gn-narration-moment--preroll  .gn-narration-tick { background: #b8b0e0; }
+.gn-narration-moment--preroll  .gn-narration-dot  { background: rgba(180,170,230,.32); border-color: #b8b0e0; }
 .gn-narration-moment--ramp     .gn-narration-tick { background: #fc6; }
 .gn-narration-moment--ramp     .gn-narration-dot  { background: rgba(255,200,80,.35); border-color: #fc6; }
 .gn-narration-moment--peak     .gn-narration-tick { background: #f88; }
@@ -233,7 +235,8 @@ body {
     transform: scale(1.32);
     box-shadow: 0 0 12px 2px rgba(255,200,120,.45);
 }
-.gn-narration-moment--peak.is-active .gn-narration-dot     { box-shadow: 0 0 12px 2px rgba(255,90,90,.55); }
+.gn-narration-moment--preroll.is-active  .gn-narration-dot { box-shadow: 0 0 12px 2px rgba(180,170,230,.55); }
+.gn-narration-moment--peak.is-active     .gn-narration-dot { box-shadow: 0 0 12px 2px rgba(255,90,90,.55); }
 .gn-narration-moment--recovery.is-active .gn-narration-dot { box-shadow: 0 0 12px 2px rgba(120,200,255,.45); }
 
 .gn-narration-caption { padding: 14px 4px 4px; min-height: 60px; }
@@ -292,15 +295,17 @@ body {
 
     <section class="gn-panel">
       <h2>Time scrubber</h2>
-      <input id="gn-scrubber" type="range" min="0" max="72" step="0.25" value="0">
+      <input id="gn-scrubber" type="range" min="-60" max="72" step="0.25" value="0">
       <div class="gn-scrubber-row">
         <span id="gn-time" class="gn-time">2024-05-10T12:00:00Z</span>
         <span id="gn-phase" class="gn-phase gn-phase--ramp">ramp</span>
       </div>
       <div class="gn-controls" style="display:flex; gap:8px; margin-top:10px;">
-        <button data-seek-h="0">SSC</button>
+        <button data-seek-h="-54.85">CME 1</button>
+        <button data-seek-h="-18.62">CME 3</button>
+        <button data-seek-h="0">window</button>
+        <button data-seek-h="5.08">SSC</button>
         <button data-seek-h="14">peak</button>
-        <button data-seek-h="36">+24 h</button>
         <button data-seek-h="60">+48 h</button>
         <button id="gn-play">▶ play 60×</button>
       </div>
@@ -440,9 +445,9 @@ body {
 
 <!-- ── Engine bootstrap ───────────────────────────────── -->
 <script type="module">
-import { loadReplay, createPlayer, skillSummary } from './js/gannon-superstorm-engine.js?v=1';
-import { createApSaturationChart, createDensityChart, createResidualsChart } from './js/gannon-superstorm-charts.js?v=3';
-import { createNarrationBand } from './js/gannon-superstorm-narration.js?v=1';
+import { loadReplay, createPlayer, skillSummary } from './js/gannon-superstorm-engine.js?v=2';
+import { createApSaturationChart, createDensityChart, createResidualsChart } from './js/gannon-superstorm-charts.js?v=4';
+import { createNarrationBand } from './js/gannon-superstorm-narration.js?v=2';
 
 const els = {
     scrub:    document.getElementById('gn-scrubber'),
@@ -512,9 +517,11 @@ function paint(sample) {
         els.skill.gate.textContent = best >= 0.25 ? 'PASS' : 'FAIL';
     }
 
-    // Wire scrubber + buttons.
-    els.scrub.min = 0;
-    els.scrub.max = player.durationHours;
+    // Wire scrubber + buttons. Range covers preroll (Sun-side CME launches)
+    // through end of the Earth-side ground-truth window. h=0 is anchored at
+    // 2024-05-10T12:00 UT (original window opening).
+    els.scrub.min = player.hoursMin;
+    els.scrub.max = player.hoursMax;
     els.scrub.step = 0.25;
 
     // Render the Ap-saturation + density charts. Click-to-seek on either
@@ -573,10 +580,10 @@ function paint(sample) {
         if (!lastT) lastT = now;
         const dt = (now - lastT) / 1000;
         lastT = now;
-        const h = Math.min(player.durationHours, player.cursorHours + dt * 60 / 60 * 60); // 60× wall clock
+        const h = Math.min(player.hoursMax, player.cursorHours + dt * 60); // 60× wall-clock (1 wall-second = 1 storm-minute)
         els.scrub.value = h;
         onScrub();
-        if (h >= player.durationHours) { playing = false; els.play.textContent = '▶ play 60×'; return; }
+        if (h >= player.hoursMax) { playing = false; els.play.textContent = '▶ play 60×'; return; }
         raf = requestAnimationFrame(tick);
     }
     els.play.addEventListener('click', () => {

@@ -30,14 +30,61 @@
 // can use natural-language month names ("May 10 17:05 UT") instead
 // of YYYY-MM-DD.
 const MOMENTS = [
+    // ── Preroll: Sun-side events (May 8–10) ─────────────────────────
+    // h values are anchor-relative (h=0 = May 10 12:00 UT).
+    {
+        h:     -54.85,
+        clock: "May 8 · 05:09 UT",
+        title: "First X-class flare from AR 13664",
+        body:
+            "Active region 13664 launches an X1.0 flare and a halo " +
+            "CME at ~1,500 km/s. The leading CME is now on a 40-hour " +
+            "trajectory toward Earth — pre-conditioning the inter- " +
+            "planetary medium for the larger events to come.",
+        phase: "preroll",
+    },
+    {
+        h:     -38.87,
+        clock: "May 8 · 21:08 UT",
+        title: "Second X-class CME launches",
+        body:
+            "A second X1.0 flare and full-halo CME at ~1,500 km/s. " +
+            "AR 13664 is now central on the solar disk — every CME " +
+            "from here is geo-effective. CMEs 1 and 2 are starting " +
+            "to merge en route.",
+        phase: "preroll",
+    },
+    {
+        h:     -18.62,
+        clock: "May 9 · 17:23 UT",
+        title: "X2.2 — the SSC progenitor",
+        body:
+            "Largest X-class so far, with a halo CME at ~1,900 km/s — " +
+            "the fastest of the cluster. This is the shock that will " +
+            "arrive at DSCOVR ~24 hours later as the storm's sudden " +
+            "commencement.",
+        phase: "preroll",
+    },
+    {
+        h:     -5.10,
+        clock: "May 10 · 06:54 UT",
+        title: "X3.9 reinforcement CME",
+        body:
+            "Another halo CME at ~1,820 km/s. CME pile-up is now " +
+            "imminent: three shocks merging into a compound structure " +
+            "10 hours from L1. The ground-truth window is about to open.",
+        phase: "preroll",
+    },
+    // ── Window opens (h = 0) ───────────────────────────────────────
     {
         h:     0,
         clock: "May 10 · 12:00 UT",
-        title: "Pre-storm baseline",
+        title: "Ground-truth window opens",
         body:
-            "The thermosphere is quiet. Real Ap sits near 30, " +
-            "ρ at 400 km is ~3×10⁻¹² kg/m³, and the three model " +
-            "tracks agree to within a few percent. The window opens.",
+            "Earth-side baseline: thermosphere still quiet. Real Ap ~4, " +
+            "ρ at 400 km ~3×10⁻¹² kg/m³, three model tracks agree to " +
+            "within a few percent. The compound CME-shock is at " +
+            "~0.95 AU and closing fast.",
         phase: "ramp",
     },
     {
@@ -121,10 +168,15 @@ function _phaseClass(phase) {
 }
 
 export function createNarrationBand(container, replay, opts = {}) {
-    const win   = replay.window;
-    const t0Ms  = Date.parse(win.start);
-    const t1Ms  = Date.parse(win.end);
-    const dur_h = (t1Ms - t0Ms) / 3600_000;
+    const win      = replay.window;
+    const t0Ms     = Date.parse(win.start);
+    const t1Ms     = Date.parse(win.end);
+    const anchorMs = Date.parse(win.anchor_iso || win.start);
+    // Anchor-relative hours range. hoursMin is negative for any window
+    // that includes preroll (Sun-Earth-chain CME launches).
+    const hoursMin = (t0Ms - anchorMs) / 3600_000;
+    const hoursMax = (t1Ms - anchorMs) / 3600_000;
+    const dur_h    = hoursMax - hoursMin;
 
     // Reset the container and reuse the page's pulse class for the
     // skeleton-loading look until we render.
@@ -141,14 +193,15 @@ export function createNarrationBand(container, replay, opts = {}) {
     const usablePct = 100 - TRACK_INSET_LEFT_PCT - TRACK_INSET_RIGHT_PCT;
 
     // Filter moments to within the window (defensive — if the window
-    // ever changes, moments outside get dropped).
-    const moments = MOMENTS.filter(m => m.h >= 0 && m.h <= dur_h);
+    // ever changes, moments outside get dropped). h is anchor-relative,
+    // so for an extended window with preroll, hoursMin is negative.
+    const moments = MOMENTS.filter(m => m.h >= hoursMin && m.h <= hoursMax);
 
     const momentEls = [];
     for (const m of moments) {
         // Position relative to the track (not the container) so layouts
-        // stay simple at any container width.
-        const pctWithinTrack = (m.h / dur_h) * 100;
+        // stay simple at any container width. Track spans [hoursMin, hoursMax].
+        const pctWithinTrack = ((m.h - hoursMin) / dur_h) * 100;
 
         const btn = document.createElement("button");
         btn.type = "button";
@@ -227,15 +280,22 @@ export function createNarrationBand(container, replay, opts = {}) {
 
 // Short on-track label. Full title lives in the caption + tooltip.
 function _shorthand(m) {
-    // Map full titles to ~12-character on-track labels.
+    // Map full titles to short on-track labels (~12 chars max).
     const map = {
-        "Pre-storm baseline":              "baseline",
-        "Sheath shock arrives at DSCOVR":  "SSC",
-        "Bz turns sharply southward":      "Bz southward",
-        "Ap saturates at 400":             "Ap = 400",
-        "Thermospheric density doubles":   "peak ρ",
-        "Aurora visible to low latitudes": "low-lat aurora",
-        "Recovery begins":                 "recovery",
+        // Sun-side preroll
+        "First X-class flare from AR 13664": "X1.0 · CME 1",
+        "Second X-class CME launches":       "X1.0 · CME 2",
+        "X2.2 — the SSC progenitor":         "X2.2 · CME 3",
+        "X3.9 reinforcement CME":            "X3.9 · CME 4",
+        // Earth-side ground-truth window
+        "Ground-truth window opens":         "window opens",
+        "Pre-storm baseline":                "baseline",
+        "Sheath shock arrives at DSCOVR":    "SSC",
+        "Bz turns sharply southward":        "Bz southward",
+        "Ap saturates at 400":               "Ap = 400",
+        "Thermospheric density doubles":     "peak ρ",
+        "Aurora visible to low latitudes":   "low-lat aurora",
+        "Recovery begins":                   "recovery",
     };
     return map[m.title] || m.title;
 }

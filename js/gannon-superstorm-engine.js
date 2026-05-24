@@ -71,34 +71,53 @@ export function createPlayer(replay) {
     const nSamples = Math.round((t1Ms - t0Ms) / stepMs) + 1;
     const dur = (t1Ms - t0Ms) / 1000;     // seconds
 
-    let cursorS = 0;                       // seconds from window start
+    // Anchor: h=0 in the public-facing API corresponds to this UT moment
+    // (May 10 12:00 UT for Gannon — original ground-truth window start).
+    // Defaults to window.start for back-compat with pre-extension bundles
+    // that didn't carry the anchor explicitly.
+    const anchorMs = Date.parse(w.anchor_iso || w.start);
+    const anchorOffsetS = (anchorMs - t0Ms) / 1000;   // ≥ 0; positive iff window starts before anchor
 
-    function clampS(s) { return Math.max(0, Math.min(dur, s)); }
+    // Anchor-relative hours range. `hoursMin` is negative for any window
+    // whose start precedes the anchor (e.g. the Sun-Earth-chain preroll).
+    const hoursMin = -anchorOffsetS / 3600;
+    const hoursMax = (dur - anchorOffsetS) / 3600;
 
-    function indexAt(s) {
-        return Math.max(0, Math.min(nSamples - 1, Math.round(s / (stepMs / 1000))));
+    let cursorH = 0;                       // hours from anchor (public API)
+
+    function clampH(h) { return Math.max(hoursMin, Math.min(hoursMax, h)); }
+
+    function indexAt_h(h) {
+        // h is anchor-relative; convert to seconds-from-window-start for array indexing.
+        const sFromStart = (h - hoursMin) * 3600;
+        return Math.max(0, Math.min(nSamples - 1, Math.round(sFromStart / (stepMs / 1000))));
     }
 
-    function phaseAt(s) {
-        const h = s / 3600;
+    function phaseAt(h) {
+        // Negative h is preroll — CMEs are in transit, Earth is quiet.
+        if (h < 0) return 'preroll';
         if (h < PHASE_BOUNDARIES.rampEndH) return 'ramp';
         if (h < PHASE_BOUNDARIES.peakEndH) return 'peak';
         return 'recovery';
     }
 
-    function timestampAt(s) {
-        return new Date(t0Ms + s * 1000).toISOString();
+    function timestampAt(h) {
+        return new Date(anchorMs + h * 3600_000).toISOString();
     }
 
     function sample() {
-        const idx = indexAt(cursorS);
+        const idx = indexAt_h(cursorH);
         const drv = replay.drivers_compact;
         const dens = replay.density_400km;
         return {
-            t: timestampAt(cursorS),
-            hoursFromStart: cursorS / 3600,
+            t: timestampAt(cursorH),
+            hoursFromAnchor: cursorH,
+            // Back-compat alias — the previous engine called it
+            // "hoursFromStart" because there was no preroll. Same value
+            // when no preroll; offset by hoursMin when there is.
+            hoursFromStart:  cursorH - hoursMin,
             idx,
-            phase: phaseAt(cursorS),
+            phase: phaseAt(cursorH),
             drivers: {
                 ap_real:    drv.ap_real[idx],
                 ap_mhd:     drv.ap_mhd[idx],
@@ -120,15 +139,16 @@ export function createPlayer(replay) {
     return {
         get replay() { return replay; },
         get nSamples() { return nSamples; },
-        get cursorSeconds() { return cursorS; },
-        get cursorHours() { return cursorS / 3600; },
-        get durationHours() { return dur / 3600; },
-        seekSeconds(s) { cursorS = clampS(s); return sample(); },
-        seekHours(h)   { cursorS = clampS(h * 3600); return sample(); },
-        seekFraction(f){ cursorS = clampS(f * dur); return sample(); },
+        get cursorHours() { return cursorH; },      // anchor-relative
+        get durationHours() { return hoursMax - hoursMin; },
+        get hoursMin() { return hoursMin; },
+        get hoursMax() { return hoursMax; },
+        get anchorISO() { return new Date(anchorMs).toISOString(); },
+        seekHours(h)   { cursorH = clampH(h); return sample(); },
+        seekFraction(f){ cursorH = clampH(hoursMin + f * (hoursMax - hoursMin)); return sample(); },
         seekISO(iso) {
-            const s = (Date.parse(iso) - t0Ms) / 1000;
-            cursorS = clampS(s);
+            const h = (Date.parse(iso) - anchorMs) / 3600_000;
+            cursorH = clampH(h);
             return sample();
         },
         sample,
