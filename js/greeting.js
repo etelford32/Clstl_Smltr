@@ -26,7 +26,7 @@ const FEATURES = [
     { page: 'earth',            title: 'Earth Simulation',      desc: 'Interactive magnetosphere with real-time solar wind',         href: 'earth.html',            icon: '🌍',  tier: 'free' },
     { page: 'moon',             title: 'Moon Explorer',         desc: 'Lunar phases, libration, and surface features',              href: 'moon.html',             icon: '🌙',  tier: 'free' },
     { page: 'sun',              title: 'The Sun',               desc: 'Solar structure, CMEs, and live X-ray monitoring',            href: 'sun.html',              icon: '☀️',   tier: 'free' },
-    { page: 'solar-system',     title: 'Solar System',          desc: '3D orbital mechanics with all 8 planets',                    href: 'threejs.html',          icon: '🪐',  tier: 'free' },
+    { page: 'solar-system',     title: 'Solar System',          desc: '3D orbital mechanics with all 8 planets',                    href: 'solar-system.html',          icon: '🪐',  tier: 'free' },
     { page: 'satellites',       title: 'Satellite Tracker',     desc: 'Track 4,500+ satellites with real CelesTrak TLE data',       href: 'satellites.html',       icon: '🛰️',  tier: 'free' },
     { page: 'galactic-map',     title: 'Galaxy Map',            desc: 'Explore the Milky Way with 100,000+ stars',                  href: 'galactic-map.html',     icon: '🌌',  tier: 'free' },
     { page: 'sirius',           title: 'Sirius Binary',         desc: 'Sirius A/B binary star system simulation',                   href: 'sirius.html',           icon: '⭐',  tier: 'free' },
@@ -38,7 +38,7 @@ const FEATURES = [
     { page: 'star2d',           title: '2D Stellar Modeler',    desc: 'HR diagram classification and stellar evolution',            href: 'star2d.html',           icon: '📊',  tier: 'free' },
     { page: 'star2d-advanced',  title: 'Advanced Solar 2D',     desc: 'CME propagation, Parker spirals, and MHD fluid',             href: 'star2d-advanced.html',  icon: '🔬',  tier: 'free' },
     { page: 'black-hole-fluid', title: 'Black Hole Accretion',  desc: 'Relativistic fluid dynamics around a black hole',            href: 'black-hole-fluid.html', icon: '🕳️',  tier: 'free' },
-    { page: 'star3d',           title: 'Sirius Planetary',      desc: '3D stellar system with planetary orbits',                    href: 'star3d.html',           icon: '🪐',  tier: 'free' },
+    { page: 'sirius-planetary', title: 'Sirius Planetary',      desc: '3D stellar system with planetary orbits',                    href: 'sirius-planetary.html', icon: '🪐',  tier: 'free' },
     { page: 'dashboard',        title: 'Your Dashboard',        desc: 'Personalized space weather, aurora, and ISS passes',         href: 'dashboard.html',        icon: '📋',  tier: 'free' },
 ];
 

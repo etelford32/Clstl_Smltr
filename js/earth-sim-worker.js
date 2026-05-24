@@ -24,7 +24,7 @@
  *                 earth:Float32Array } }
  *       Each Float32Array holds count*3 floats (x,y,z), transferred zero-copy.
  *       'earth' is heliocentric AU; the three moons are parent-centric km,
- *       expressed in the *parent equator* frame (matches threejs.html's pipeline).
+ *       expressed in the *parent equator* frame (matches solar-system.html's pipeline).
  *
  *   out { type:'error', id, error }
  *
