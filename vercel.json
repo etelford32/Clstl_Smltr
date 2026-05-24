@@ -199,6 +199,18 @@
       ]
     }
   ],
+  "redirects": [
+    {
+      "source": "/threejs.html",
+      "destination": "/solar-system.html",
+      "statusCode": 301
+    },
+    {
+      "source": "/star3d.html",
+      "destination": "/sirius-planetary.html",
+      "statusCode": 301
+    }
+  ],
   "rewrites": [
     {
       "source": "/rust/www/:path*",

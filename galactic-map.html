@@ -1311,7 +1311,7 @@ import './js/telemetry.js';
             </div>
             <div class="gp-body">
                 <button id="zoom-solar-system" class="zb-btn-solar"
-                        title="Cross-scale zoom out — open the Solar System simulator (threejs.html).">
+                        title="Cross-scale zoom out — open the Solar System simulator (solar-system.html).">
                     ☀️ Solar Sys.
                 </button>
                 <span class="zb-sep" aria-hidden="true"></span>
@@ -10467,8 +10467,8 @@ document.getElementById('zoom-local').classList.remove('active');
 // hud-view will be populated by updateCoordDisplay() on the first animate frame
 
 // ── Solar System cross-scale navigation ───────────────────────────────────────
-// The "☀️ Solar Sys." zoom-bar button navigates out to threejs.html
-document.getElementById('zoom-solar-system').addEventListener('click', () => navigateTo('threejs.html'));
+// The "☀️ Solar Sys." zoom-bar button navigates out to solar-system.html
+document.getElementById('zoom-solar-system').addEventListener('click', () => navigateTo('solar-system.html'));
 
 // ══════════════════════════════════════════════════════════════════════════
 //  TOUR & CATEGORIES — cycle through curated lists of catalog objects.
