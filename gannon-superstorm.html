@@ -459,7 +459,7 @@ body {
 import { loadReplay, createPlayer, skillSummary } from './js/gannon-superstorm-engine.js?v=2';
 import { createApSaturationChart, createDensityChart, createResidualsChart } from './js/gannon-superstorm-charts.js?v=4';
 import { createNarrationBand } from './js/gannon-superstorm-narration.js?v=2';
-import { createSunEarthScene } from './js/gannon-superstorm-sun-earth.js?v=1';
+import { createSunEarthScene } from './js/gannon-superstorm-sun-earth.js?v=2';
 
 const els = {
     scrub:    document.getElementById('gn-scrubber'),
@@ -572,6 +572,89 @@ function paint(sample) {
         document.getElementById('gn-sun-earth'),
         replay, player, sharedOpts,
     );
+
+    // Lift the CME catalog from real NASA DONKI in the background. The
+    // Vercel Edge endpoint /api/hindcast/gannon fetches DONKI CMEAnalysis +
+    // FLR for May 8-13 2024 and returns a real cme_events array. If it
+    // resolves, swap the static (hand-vetted) catalog for the live one,
+    // re-paint the Sun-Earth scene, and update the provenance pill.
+    // Failure is silent — the page keeps the static catalog (which is
+    // already hand-matched to the canonical NOAA SWPC record).
+    (async () => {
+        try {
+            const r = await fetch('/api/hindcast/gannon', { cache: 'force-cache' });
+            if (!r.ok) return;
+            const j = await r.json();
+            const real = j?.data?.cme_events;
+            if (!Array.isArray(real) || real.length === 0) return;
+            // Sanity: each real event must have launch_iso + a valid date.
+            const valid = real.filter(c =>
+                c.launch_iso && !isNaN(Date.parse(c.launch_iso)));
+            if (valid.length === 0) return;
+            sunEarth.setCmeEvents(valid);
+            sunEarth.setCursor(parseFloat(els.scrub.value));
+            // Mark provenance — the page-side replay copy gets the new catalog
+            // for any future consumer.
+            replay.cme_events = valid;
+            replay.provenance = replay.provenance || {};
+            replay.provenance.cme_catalog = j.source ?? 'NASA DONKI (live)';
+            console.log(`[gannon] CME catalog upgraded to real NASA DONKI (${valid.length} events)`);
+        } catch (_) { /* offline / blocked / sandbox — keep the static catalog */ }
+    })();
+
+    // Lift the IMF + solar-wind series from real NASA SPDF OMNI in the
+    // background. The Edge endpoint /api/omni/imf parses the OMNI HRO
+    // 1-min monthly ASCII for the Gannon window and returns Bz_GSM + V
+    // + Np + Pdyn at 60-min cadence aligned with the bundle's grid. If
+    // it resolves, swap bz_nt + v_kms in place; the next setCursor()
+    // repaints the KPI cards. Failure is silent (sandbox / offline keeps
+    // the placeholder series).
+    (async () => {
+        try {
+            const r = await fetch(
+                '/api/omni/imf?start=2024-05-08&end=2024-05-13&step_min=60&fields=t,bz_gsm,v,np,pdyn',
+                { cache: 'force-cache' });
+            if (!r.ok) return;
+            const j  = await r.json();
+            const t  = j?.data?.t;
+            const bz = j?.data?.bz_gsm;
+            const v  = j?.data?.v;
+            if (!Array.isArray(t) || !Array.isArray(bz) || !Array.isArray(v)) return;
+            if (t.length === 0) return;
+            // Build an index { hourFloorISO → omniIdx } so we can splice OMNI
+            // values into the bundle's grid even if SPDF has minute-scale gaps.
+            const omniByHour = new Map();
+            for (let i = 0; i < t.length; i++) {
+                const hourISO = t[i].slice(0, 13);  // "YYYY-MM-DDTHH"
+                if (!omniByHour.has(hourISO)) omniByHour.set(hourISO, i);
+            }
+            const bundleStartMs = Date.parse(replay.window.start);
+            const stepMs = (replay.window.step_minutes || 60) * 60_000;
+            let bzSwap = 0, vSwap = 0;
+            for (let i = 0; i < replay.drivers_compact.bz_nt.length; i++) {
+                const tMs = bundleStartMs + i * stepMs;
+                const hourISO = new Date(tMs).toISOString().slice(0, 13);
+                const oi = omniByHour.get(hourISO);
+                if (oi == null) continue;
+                if (typeof bz[oi] === 'number') {
+                    replay.drivers_compact.bz_nt[i] = bz[oi];
+                    bzSwap++;
+                }
+                if (typeof v[oi] === 'number') {
+                    replay.drivers_compact.v_kms[i] = v[oi];
+                    vSwap++;
+                }
+            }
+            replay.provenance = replay.provenance || {};
+            replay.provenance.imf =
+                `${j.source ?? 'NASA SPDF OMNI HRO 1-min'} (${bzSwap}/${replay.drivers_compact.bz_nt.length} Bz, ${vSwap}/${replay.drivers_compact.v_kms.length} V)`;
+            // Re-render — paint() reads the (now mutated) drivers_compact for
+            // the KPI cards on the next scrubber tick. Drive it manually here
+            // so the user doesn't have to move the scrubber to see the swap.
+            onScrub();
+            console.log(`[gannon] IMF + solar wind upgraded to real NASA SPDF OMNI (${bzSwap} Bz, ${vSwap} V samples)`);
+        } catch (_) { /* offline / blocked / sandbox — keep placeholder bz_nt + v_kms */ }
+    })();
 
     function onScrub() {
         const h = parseFloat(els.scrub.value);
