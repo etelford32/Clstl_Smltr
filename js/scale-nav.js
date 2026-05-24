@@ -8,7 +8,7 @@
  * Scale hierarchy (zoom in → zoom out):
  *
  *   🌍 Earth  ←→  ☀️ Solar System  ←→  🌀 Galaxy  ←→  🌌 Universe
- *   earth.html    threejs.html         galactic-map.html  galactic-map.html
+ *   earth.html    solar-system.html         galactic-map.html  galactic-map.html
  *
  * ── Usage ─────────────────────────────────────────────────────────────────
  *   // In any page's <script type="module">:
@@ -31,7 +31,7 @@
 export const SCALE_LEVELS = [
     { id: 'universe', emoji: '🌌', label: 'Universe',     url: 'galactic-map.html' },
     { id: 'galaxy',   emoji: '🌀', label: 'Galaxy Map',   url: 'galactic-map.html' },
-    { id: 'solar',    emoji: '☀️',  label: 'Solar System', url: 'threejs.html'      },
+    { id: 'solar',    emoji: '☀️',  label: 'Solar System', url: 'solar-system.html'      },
     { id: 'earth',    emoji: '🌍', label: 'Earth',         url: 'earth.html'        },
 ];
 

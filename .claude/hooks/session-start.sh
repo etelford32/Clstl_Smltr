@@ -1,5 +1,5 @@
 #!/bin/bash
-# Session-start hook for Clstl_Smltr
+# Session-start hook for ParkersPhysics
 # Ensures Rust/cargo is on PATH and the wasm32 target is available.
 # No internet access required — uses the pre-installed toolchain.
 set -euo pipefail

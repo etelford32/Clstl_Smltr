@@ -161,7 +161,7 @@ Always ask before:
 - Moving the `http` extension out of `public`.
 - Deleting any file under `swmf/` or `dsmc/` — these are physics pipeline assets that took weeks to wire up.
 - Adding a JS framework or bundler.
-- Renaming the repo, renaming the GitHub Pages deploy, or changing the `Clstl_Smltr` slug. The author intends to migrate this eventually but has not.
+- Renaming the repo or the GitHub Pages deploy. The repo was renamed from `Clstl_Smltr` to `ParkersPhysics` in May 2026; one frozen schema identifier (`clstl_smltr.system.v1` in `sirius-planetary.html`) intentionally preserves the legacy name so saved system payloads stay valid — do not rename that string.
 
 ---
 
