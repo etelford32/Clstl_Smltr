@@ -346,6 +346,17 @@ body {
     </section>
 
     <section class="gn-panel" style="margin-top:14px;">
+      <h2>Sun → Earth — CMEs in transit</h2>
+      <div id="gn-sun-earth" class="gn-chart gn-pulse" style="height:280px;">Sun-Earth scene renders here</div>
+      <div class="gn-legend" style="margin-top:8px;">
+        <div class="gn-legend-row"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ffb347;"></span> Sun (AR 13664 pip)</div>
+        <div class="gn-legend-row"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f96;border:1px solid rgba(0,0,0,.4);"></span> X-class CME (size ∝ X-class magnitude)</div>
+        <div class="gn-legend-row"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#3e6ab0;"></span> Earth (magnetosphere bowshock compresses on impact)</div>
+        <div class="gn-legend-row"><span style="display:inline-block;width:14px;height:0;border-top:1px dashed rgba(255,255,255,.22);"></span> L1 (DSCOVR · ACE)</div>
+      </div>
+    </section>
+
+    <section class="gn-panel" style="margin-top:14px;">
       <h2>Ap saturation — three tracks overlaid</h2>
       <div id="gn-chart-ap" class="gn-chart gn-pulse">Ap timeseries renders here</div>
       <div class="gn-legend">
@@ -448,6 +459,7 @@ body {
 import { loadReplay, createPlayer, skillSummary } from './js/gannon-superstorm-engine.js?v=2';
 import { createApSaturationChart, createDensityChart, createResidualsChart } from './js/gannon-superstorm-charts.js?v=4';
 import { createNarrationBand } from './js/gannon-superstorm-narration.js?v=2';
+import { createSunEarthScene } from './js/gannon-superstorm-sun-earth.js?v=1';
 
 const els = {
     scrub:    document.getElementById('gn-scrubber'),
@@ -556,11 +568,16 @@ function paint(sample) {
             },
         },
     );
+    const sunEarth = createSunEarthScene(
+        document.getElementById('gn-sun-earth'),
+        replay, player, sharedOpts,
+    );
 
     function onScrub() {
         const h = parseFloat(els.scrub.value);
         const s = player.seekHours(h);
         paint(s);
+        sunEarth.setCursor(h);
         apChart.setCursor(h);
         rhoChart.setCursor(h);
         resChart.setCursor(h);

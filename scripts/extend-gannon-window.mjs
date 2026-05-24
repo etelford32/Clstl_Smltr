@@ -54,6 +54,11 @@ const PREROLL_HOURS = 60;
 // May-2024 cluster's v₀ values were unusually high (1500-1900 km/s).
 // Helio coords from AR 13664's drift position during the active week.
 const CME_EVENTS = [
+    // gamma_km_inv per event captures the CME-train medium-clearing
+    // effect: each CME after the first sees pre-accelerated, less-dense
+    // background, so its DBM drag coefficient is lower. Tuned so the
+    // X2.2 arrives at h≈5 (matching the 17:05 UT SSC) and the X3.9
+    // arrives near the storm peak.
     {
         id:           "cme1",
         label:        "X1.0 flare · AR 13664",
@@ -62,6 +67,7 @@ const CME_EVENTS = [
         v0_kms:       1500,
         src_lat_deg:  14,           // AR 13664 northern hemisphere
         src_lon_deg:  -22,          // east limb on May 8
+        gamma_km_inv: 1.2e-8,       // fresh medium, full DBM drag
         notes:        "First X-class flare of the May 2024 cluster.",
     },
     {
@@ -72,6 +78,7 @@ const CME_EVENTS = [
         v0_kms:       1500,
         src_lat_deg:  14,
         src_lon_deg:  -10,
+        gamma_km_inv: 8.0e-9,       // partially cleared
         notes:        "Second X-class — full halo CME, central trajectory toward Earth.",
     },
     {
@@ -82,6 +89,7 @@ const CME_EVENTS = [
         v0_kms:       1900,
         src_lat_deg:  12,
         src_lon_deg:  0,            // straight at Earth
+        gamma_km_inv: 4.0e-9,       // CME-train cleared the path
         notes:        "The shock that hit DSCOVR at 17:05 UT May 10 (h=+5.08). Halo + west-limb trajectory geometry.",
     },
     {
@@ -92,6 +100,7 @@ const CME_EVENTS = [
         v0_kms:       1820,
         src_lat_deg:  11,
         src_lon_deg:  8,
+        gamma_km_inv: 4.0e-9,       // ditto
         notes:        "Compound-CME pile-up reinforcement. Arrived during the storm peak.",
     },
     {
@@ -102,6 +111,7 @@ const CME_EVENTS = [
         v0_kms:       1500,
         src_lat_deg:  10,
         src_lon_deg:  20,
+        gamma_km_inv: 3.5e-9,
         notes:        "Largest X-class of the cluster but launched mid-storm — extends recovery phase.",
     },
 ];
@@ -200,11 +210,15 @@ function sigmoid(x) { return 1 / (1 + Math.exp(-x)); }
 function main() {
     const bundle = JSON.parse(readFileSync(BUNDLE_PATH, "utf8"));
 
-    // Idempotency check — if already extended, no-op.
+    // Idempotency check — if already extended, only refresh the CME catalog
+    // (preserves the preroll work but lets us tune per-event DBM params
+    // by re-running the script).
     if (bundle.window?.start === NEW_START_ISO &&
         Array.isArray(bundle.drivers_compact?.ap_real) &&
         bundle.drivers_compact.ap_real.length === 133) {
-        console.log("bundle already extended; no changes written.");
+        bundle.cme_events = CME_EVENTS;
+        writeFileSync(BUNDLE_PATH, JSON.stringify(bundle, null, 0) + "\n");
+        console.log("bundle already extended; refreshed cme_events only.");
         return;
     }
 
