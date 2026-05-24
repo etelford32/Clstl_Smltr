@@ -147,13 +147,26 @@ const ATTEMPTS = [
 // worker on a globally-degraded upstream.
 const UPSTREAM_TIMEOUT_MS = 12000;
 
+// Header access is runtime-shaped: on Edge, `request.headers` is a Fetch
+// `Headers` instance with `.get()`; on Node serverless (`runtime: 'nodejs'`,
+// which this file declares), it's a plain `IncomingHttpHeaders` object with
+// lowercase string keys. Calling `.get()` on the Node form throws
+// `TypeError: request.headers.get is not a function` — which is what froze
+// this pipeline for 28 days before the heartbeat could even record a failure.
+function readHeader(request, name) {
+    const headers = request?.headers;
+    if (!headers) return '';
+    if (typeof headers.get === 'function') return headers.get(name) ?? '';
+    return headers[name.toLowerCase()] ?? '';
+}
+
 function isAuthorized(request) {
-    const hdr = request.headers.get('authorization') ?? '';
+    const hdr = readHeader(request, 'authorization');
     if (CRON_SECRET && hdr === `Bearer ${CRON_SECRET}`) return true;
     // Vercel cron always sends this header, and it cannot be set by an
     // external client (Vercel strips it at the edge). Treat as proof-of-
     // cron when CRON_SECRET hasn't been configured yet.
-    if (request.headers.get('x-vercel-cron')) return true;
+    if (readHeader(request, 'x-vercel-cron')) return true;
     return false;
 }
 
@@ -674,6 +687,21 @@ export default async function handler(request) {
     });
     try {
         return await Promise.race([runRefresh(request), watchdog]);
+    } catch (err) {
+        // Catches synchronous throws from the request path (auth-check bugs,
+        // import-time errors, anything that fires before runRefresh's own
+        // try/catch). Without this, a thrown handler returns 500 and never
+        // records a failure — exactly the mode that left pipeline_heartbeat
+        // frozen for 28 days with consecutive_fail stuck at 36.
+        const reason = `handler_threw: ${err?.name || 'Error'}: ${err?.message || String(err)}`;
+        await supabaseCallRpc('record_pipeline_failure', {
+            p_name:   'weather_grid',
+            p_reason: reason,
+        }).catch(() => {});
+        return new Response(JSON.stringify({ ok: false, reason }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+        });
     } finally {
         clearTimeout(timer);
     }
