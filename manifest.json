@@ -53,7 +53,7 @@
     }
   ],
   "shortcuts": [
-    { "name": "Solar System", "url": "/threejs.html", "description": "Interactive 3D Solar System" },
+    { "name": "Solar System", "url": "/solar-system.html", "description": "Interactive 3D Solar System" },
     { "name": "The Sun",      "url": "/sun.html",     "description": "Real-time Solar Activity" },
     { "name": "Galactic Map", "url": "/galactic-map.html", "description": "Explore the Galaxy" }
   ]

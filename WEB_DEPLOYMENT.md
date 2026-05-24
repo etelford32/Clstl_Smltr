@@ -12,7 +12,7 @@ Your Celestial Studio is ready to go live! Here's how:
 ### Step 1: Enable GitHub Pages
 
 1. Go to your repository on GitHub:
-   `https://github.com/etelford32/Clstl_Smltr`
+   `https://github.com/etelford32/ParkersPhysics`
 
 2. Click **Settings** (top navigation)
 
@@ -49,7 +49,7 @@ The workflow will:
 Once deployed, your studio will be live at:
 
 ```
-https://etelford32.github.io/Clstl_Smltr/
+https://etelford32.github.io/ParkersPhysics/
 ```
 
 🎉 **Anyone in the world can now access your Celestial Object Creator!**
@@ -73,7 +73,7 @@ Check the Actions logs for errors:
 
 1. Wait 5 minutes after deployment (GitHub Pages needs time)
 2. Check GitHub Pages settings are correct
-3. Try accessing: `https://etelford32.github.io/Clstl_Smltr/index.html`
+3. Try accessing: `https://etelford32.github.io/ParkersPhysics/index.html`
 4. Clear browser cache and try again
 
 ## 🎨 What Users Will See
@@ -142,7 +142,7 @@ Once live, you can:
 
 1. **Share your link:**
    ```
-   https://etelford32.github.io/Clstl_Smltr/
+   https://etelford32.github.io/ParkersPhysics/
    ```
 
 2. **Add to README** as a live demo link
