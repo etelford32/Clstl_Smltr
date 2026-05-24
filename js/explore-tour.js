@@ -32,7 +32,7 @@ const TOURS = {
             cta:   'Next: the Real-Time Solar System →',
         },
         {
-            page:  'threejs.html',
+            page:  'solar-system.html',
             icon:  '🪐',
             title: 'Stop 2 / 3 — Real-Time Solar System',
             body:  'This is where the planets are right now. Every orbit, every position — live, updated continuously from NASA ephemerides. No animation loop pretending. Drag to orbit, scroll to zoom.',

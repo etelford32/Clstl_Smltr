@@ -2,7 +2,7 @@
  * space-missions.js — Canonical roster of active and historically-important
  * inner-solar-system space missions, grouped by science domain.
  *
- * Used by sun.html (Heliophysics Fleet panel), threejs.html (inner-planet
+ * Used by sun.html (Heliophysics Fleet panel), solar-system.html (inner-planet
  * overlay), and space-weather.html (live-asset provenance) to surface
  * "who's measuring what" next to the data those missions feed.
  *

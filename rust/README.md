@@ -244,7 +244,7 @@ cargo test
 
 ## License
 
-Part of the Clstl_Smltr (Celestial Simulator) project.
+Part of the ParkersPhysics (Celestial Simulator) project.
 
 ## Links
 

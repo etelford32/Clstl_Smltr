@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * dev-server.mjs — Local development server for Clstl_Smltr
+ * dev-server.mjs — Local development server for ParkersPhysics
  *
  * Serves static files AND runs the Vercel Edge Functions locally by dynamically
  * importing them.  Node.js 18+ ships `fetch`, `Request`, `Response` as globals,
@@ -301,7 +301,7 @@ const server = createServer(async (req, res) => {
 
 server.listen(PORT, () => {
     console.log('');
-    console.log('  Clstl_Smltr dev server');
+    console.log('  ParkersPhysics dev server');
     console.log(`  → http://localhost:${PORT}`);
     console.log(`  → http://localhost:${PORT}/space-weather.html`);
     console.log('');
