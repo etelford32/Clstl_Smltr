@@ -1,0 +1,182 @@
+# CLAUDE.md — agent orientation for parkersphysics.com
+
+> **Read this file in full before making any edits.** It exists to prevent the reversion pattern this repo has accumulated. If you skim, you will rediscover bugs that have already been fixed.
+
+---
+
+## 1. What this repo is (and isn't)
+
+This is **parkersphysics.com** — a physics-first space weather forecasting platform serving satellite operators, government, and research. It is a **~110k-line production web application**, not the celestial simulator the repo name and historical README suggested.
+
+- **NOT** a pygame demo. Files like `star_simulation.py`, `celestial_studio.py`, `main.py`, `simple_star_test.py`, `test_display.py`, and the toy `rust/` crate are origin artifacts — kept for archaeological reasons, not deployed. Do not modify them in the course of unrelated work. Do not delete them either; doing so has surprised the author.
+- **NOT** a Next.js / React / Vue / Svelte / SvelteKit / Astro app. There is no bundler. Pages are individual `*.html` files at the repo root that load ES modules from `js/` directly. **Do not introduce a framework or bundler under any circumstances.** Past sessions have tried; it is always wrong.
+- **IS** a Vercel-deployed app with ~55 HTML pages, ~75 serverless functions in `api/`, ~100 ES modules in `js/`, multiple Rust crates compiled to WASM, and Python pipelines for SWMF / DSMC.
+
+---
+
+## 2. Mental model of the stack
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Browser (vanilla HTML + ES modules from js/)                    │
+│    auth.js  ─────────┐                                            │
+│    telemetry.js ─┐   │                                            │
+│    config.js     │   │                                            │
+│    nav.js        │   │ (singleton, isConfigured() / getSupabase)  │
+│    ...           │   │                                            │
+└──────────────────┼───┼────────────────────────────────────────────┘
+                   │   │
+                   │   └──── Supabase JS client (CDN) ──┐
+                   │                                     │
+                   ▼                                     ▼
+┌──────────────────────────────┐    ┌────────────────────────────────┐
+│  Vercel serverless (api/*)   │    │  Supabase (aijsboodkivnhzfstvdq)│
+│  - Node 22, ESM              │    │  - Postgres 17, us-east-1       │
+│  - One file per route        │    │  - Auth: email+password +Google │
+│  - 5 cron schedules          │    │  - Storage: localStorage JWT    │
+│  - _lib/ helpers             │    │  - RLS on every public table    │
+└──────────────────────────────┘    │  - 50+ SECURITY DEFINER funcs   │
+                   │                 └────────────────────────────────┘
+                   ▼
+   External: NOAA SWPC, NASA DONKI/HEK, CelesTrak, NWS, Stripe, Resend
+```
+
+**Build:** `build-wasm.sh` compiles the Rust crates to WASM. Vercel runs it on deploy. There is no JS bundle step — the browser loads ES modules directly.
+
+**Dev:** `node dev-server.mjs` (or `npm run dev`) on port 3000. It serves static files AND runs the edge functions locally by dynamically importing them. **Not** `vercel dev` — that was used historically but the homegrown server is current.
+
+---
+
+## 3. Files an agent should read before specific work
+
+| If you're touching… | Read first |
+|---------------------|-----------|
+| Auth (signin/signup/callback/admin gate) | `AUTH_FLOW_REVIEW.md`, then `js/auth.js` end-to-end, then `OAUTH_SETUP.md` |
+| Tier gates / plan logic | `js/config.js` (TIER constants), `js/tier-config.js`, `TIER_EXPANSION_SPRINT.md` |
+| Telemetry / analytics RPCs | `ANALYTICS.md`, `js/telemetry.js`, `js/auth-funnel.js` |
+| Vercel cron / pipeline ops | `OPERATIONS_STATUS.md`, `vercel.json`, `api/cron/*` |
+| SWMF Docker container | `swmf/Dockerfile` header comments, `MHD_DENSITY_PHASE0_RUNBOOK.md` |
+| Gannon hindcast | `GANNON_SIMULATION_DESIGN.md`, `MHD_DENSITY_PHASE0_GANNON_RUNBOOK.md` |
+| Earth / weather forecast | `WEATHER_FORECAST_PLAN.md`, `EARTH_LOD_NASA_PRECIP_PLAN.md` |
+| Navigation across pages | Run `node scripts/lint-nav.mjs`. There is a structural CI gate. |
+| Design system / tokens | `DESIGN_TOKENS.md` |
+| Deploy procedure | `DEPLOYMENT.md`, `VERCEL_SETUP.md`, `WEB_DEPLOYMENT.md` |
+
+---
+
+## 4. Load-bearing invariants — do not "clean these up"
+
+These are things that **look** wrong to a fresh reader, **are** intentional, and have been re-broken at least once already. Every item here has scar tissue behind it.
+
+### 4.1 In `js/auth.js`
+
+- **`_persistToStorage()` is called BEFORE `await this.fetchProfile()`** in `_init`. Reason: a transient RLS error on `user_profiles` (network blip, brief schema drift) used to leave `pp_auth` empty, which made the dashboard's localStorage fallback fail the auth gate even though Supabase had a valid session. Order matters. Don't reorder it.
+- **The `onAuthStateChange` handler MERGES the new auth payload onto the existing `_user` object — it does not replace it.** Reason: `_mapSupabaseUser` builds from `user_metadata`, which does NOT carry `role` / `plan` / seat info (those live in `user_profiles` and arrive via `fetchProfile`). Wiping `_user` on every `TOKEN_REFRESHED` event silently demoted admins. Keep the merge.
+- **`SIGNED_OUT` clears `_user`; everything else merges and re-runs `fetchProfile`.** That asymmetry is the fix.
+- **`fetchProfile` has a fallback `select` that omits `role`** for the case where the SQL migration hasn't been run yet. It's defensive against developers running against a stale Supabase project. Don't remove it without verifying every environment has run `supabase-admin.sql`.
+- **`telemetry.recordAuthFailure('token_refresh_failed', ...)` fires on `TOKEN_REFRESHED` with a missing `access_token`.** Supabase doesn't surface a dedicated refresh-failure event, so this inference is the only signal we have. Don't delete it as "dead code."
+- **`_effectiveRole()` and `_effectivePlan()` honor a `sessionStorage['pp-view-as']` override, but ONLY when `_user.role === 'superadmin'`.** This is the "view as a different tier" debugging tool. `getRealRole()` bypasses it. Keep both.
+- **The `effective_plan_for` RPC call in `fetchProfile`** resolves class-seat students to their parent account's plan. Failure is non-fatal — `getPlan()` falls back to the stored value. Don't promote the failure to an error.
+
+### 4.2 In Supabase / Postgres
+
+These advisor warnings will fire on every `get_advisors` call. They are **intentional**:
+
+- **~50 `SECURITY DEFINER` functions are EXECUTE-able by the `anon` role.** This is the telemetry surface — `log_auth_failure`, `log_activation_event`, `log_client_telemetry`, `session_heartbeat`, etc. are called fire-and-forget by signed-out users. Revoking EXECUTE breaks anonymous instrumentation.
+- **`analytics_events`, `user_sessions`, `feedback`, `beta_invite_uses`** have permissive RLS (`WITH CHECK (true)` on INSERT). Again, anonymous instrumentation. Required.
+- **`forecast_log`, `solar_wind_samples`, `weather_grid_cache`** have RLS enabled but zero policies. **This is correct** — they are service-role-only (written by cron jobs, read by RPCs). Adding a permissive policy would expose internal data. The advisor flag is a false positive in this context.
+- **Three different `redeem_invite` overloads exist** (`(text, text, uuid)`, `(uuid)`, `(uuid, text)`). They are not duplicates — they are progressively expanded signatures for different invite flows. Resist the urge to consolidate without reading every call site.
+- **Leaked-password protection is disabled in Supabase Auth.** Decision was conscious — the bcrypt server-side hash plus rate-limited `log_auth_failure` is judged sufficient for the threat model. Flip it on only if you're confident the HaveIBeenPwned check won't degrade signup conversion.
+- **The `http` extension is in the `public` schema.** Should be moved, but doing so breaks `record_solar_wind_sample` and other functions that call it unqualified. Coordinate the schema move with a function-update migration if you change this.
+
+### 4.3 In the Vercel surface
+
+- **`api/auth/log-failure.js`** HMAC-SHA-256-hashes the email with a server-side pepper before persisting. Plaintext emails never hit `auth_failures`. Don't "simplify" this away — it is the PII guarantee that lets the table exist at all.
+- **`build-wasm.sh` checks BOTH `~/.cargo/bin` and `/rust/bin`** for rustc. Vercel's build image uses `/rust/bin`; local dev typically uses `~/.cargo/env`. Don't pick one and remove the other.
+- **The `crons` array in `vercel.json` is the source of truth for scheduled jobs.** If you add a function to `api/cron/`, you MUST add it to `crons` or it won't run. Conversely, an entry in `crons` for a missing function will surface as a deploy warning, not a hard error — easy to overlook.
+
+### 4.4 In `js/nav.js` and friends
+
+- There is a **CI gate** (`scripts/lint-nav.mjs`, workflow `nav-lint.yml`) that runs on every PR. It checks that every page uses the canonical navigation structure. The workflow comment explicitly states: "so parallel sessions cannot merge new nav drift." Respect the gate. If you must edit `js/nav.js` or any page's `<nav>` block, run `node scripts/lint-nav.mjs` locally before opening a PR.
+- The lint-baseline is `scripts/nav-lint-baseline.json`. Adding pages to it is a deliberate choice, not a default.
+
+---
+
+## 5. The reversion pattern — how to not become part of it
+
+This repo's history contains an instructive failure mode. The same PR title sometimes appears 3–5 times in a row, and in several cases (PRs #762, #763, #765, #766 all titled "3d satellite orbit") **all but the first had zero net code changes** — they were empty merges. Other series (admin analytics, swmf container review, earth scrub bar) show genuine code churn that goes back and forth.
+
+**Before opening a PR:**
+
+1. **Read the last 30 commits.** `git log --since="30 days ago" --oneline`. If your intended title or scope matches a recent commit, your change may already be merged.
+2. **Diff your work against `origin/main` and look at it skeptically.** If `git diff origin/main` is empty, do not open the PR. If it reverts changes from the last week, stop and read those commits' messages and inline comments — they exist for a reason.
+3. **Search inline comments in the file you're editing for the keywords `CRITICAL`, `WARNING`, `previously`, `silently`, `regression`, `hot path`, `load-bearing`.** If any apply to the lines you're about to change, treat that as a stop sign. Read what the previous session wrote before deciding to override it.
+4. **If you genuinely need to revert a recent fix**, say so in the PR title — `revert: ...` or `Reapply: ...`. Don't title a revert with the same name as the original fix; that's how the history got muddled.
+
+---
+
+## 6. Database orientation (Supabase project `aijsboodkivnhzfstvdq`)
+
+- **Postgres 17.6**, us-east-1, free tier, status `ACTIVE_HEALTHY`.
+- **Auth methods:** email+password + Google OAuth. Apple staged behind `SOCIAL_PROVIDERS` flag in `js/config.js`. MFA scaffolding exists (`auth.mfa_factors`, `auth.mfa_challenges`) but is unused.
+- **Sessions:** Supabase JWT in localStorage by default, sessionStorage when "remember me" is unchecked. Mirrored to `pp_auth` JSON for legacy modules.
+- **Tables that matter:**
+  - `auth.users` — Supabase-managed. PK joined by FK from `public.user_profiles.id`.
+  - `public.user_profiles` — 45+ columns. Role, plan, location, 13 notify_* toggles, Stripe IDs, classroom seats, branding JSON. **One column = one feature flag** is the prevailing pattern; resist normalization without a migration plan.
+  - `public.analytics_events` (3000+ rows), `public.user_sessions` (500+), `public.client_telemetry` (1500+) — anonymous-write surface.
+  - `public.solar_wind_samples` (6700+ rows) — NOAA-SWPC samples, the primary live data feed.
+  - `public.forecast_log` — empty as of last check; populated by `record_forecast_batch`.
+  - `public.pipeline_heartbeat` — three rows, three cron pipelines. Watchdog cron reads this.
+- **The `user_profiles.plan` enum** is: `free`, `basic`, `educator`, `advanced`, `institution`, `enterprise`. There is also a `tester` plan that some functions accept but the enum CHECK constraint does NOT include — `apply_invite_plan` writes it with a coalesce. This is a known split; do not "fix" the enum without coordinating with `js/config.js planToTier()`.
+
+---
+
+## 7. Strategic frame (so you know what to optimize for)
+
+The product is pivoting from a consumer-SaaS framing (Stripe tiers, classroom seats, branding, signup flow with plan dropdown) to a B2G + satellite-operator framing (SBIR, NAICS 541715/541330/541511/541512, LEO drag forecasting wedge, `request-access.html` replacing the signup page). The database schema is still consumer-shaped. **When in doubt about whether to build for the consumer or the B2G surface, ask the user — do not assume.**
+
+The physics differentiator is **MHD-grounded modeling** (SWMF / BATS-R-US) and physics-first ground truth, NOT ML black boxes. The February 2022 Starlink event (38 satellites lost, NRLMSIS underperformance) is the canonical proof point. The Gannon May-2024 G5 storm is the hindcast validation. **Marketing copy should reflect this; do not generate generic "AI-powered space weather" language.**
+
+---
+
+## 8. Heuristics for common asks
+
+- **"Add a new alert type"** → New `notify_*` column on `user_profiles` (via migration), new check in `js/alert-engine.js`, new toggle in `account.html`, audit telemetry in `js/activation.js`.
+- **"Add a new data feed"** → New file in `api/<source>/`, new `INTERVALS` bucket assignment in `js/config.js`, new module under `js/`, wire to the page that needs it. NOAA endpoints are browser-direct (CORS-enabled); NASA endpoints go through the edge to protect the API key.
+- **"Add a new page"** → New top-level `*.html`, copy the `<nav>` block from `dashboard.html`, copy the `<head>` from a sibling page, register in `scripts/nav-lint-baseline.json` only if you cannot make it pass `lint-nav.mjs` immediately. **Don't** create the page as a subdirectory `index.html` — Vercel-style routing in this repo is flat `*.html` only.
+- **"Make this responsive / fix mobile"** → Check `DESIGN_TOKENS.md` first. Mobile breakpoint is `@media (max-width: 768px)`. Many pages have already been mobile-tuned; do not undo container queries that already work.
+- **"Add a new SECURITY DEFINER function"** → Create the migration under the top-level `supabase-*-migration.sql` naming pattern. SET `search_path = public, pg_temp` explicitly to avoid the mutable-search-path advisor. Revoke EXECUTE from `anon` if it's not part of the anonymous-telemetry surface.
+
+---
+
+## 9. Things to ASK before doing
+
+Always ask before:
+
+- Removing pygame / OpenGL / `rust/` origin files (the author has emotional attachment).
+- Consolidating the three `redeem_invite` overloads.
+- Disabling `SECURITY DEFINER` on any function called from a signed-out page.
+- Changing the `*.html`-at-root layout to a folder structure.
+- Switching from CDN-loaded Supabase JS to a bundled import.
+- Moving the `http` extension out of `public`.
+- Deleting any file under `swmf/` or `dsmc/` — these are physics pipeline assets that took weeks to wire up.
+- Adding a JS framework or bundler.
+- Renaming the repo, renaming the GitHub Pages deploy, or changing the `Clstl_Smltr` slug. The author intends to migrate this eventually but has not.
+
+---
+
+## 10. Quick session-start checklist
+
+When you start a new Claude Code session in this repo:
+
+1. Run `git log --since="14 days ago" --oneline` and read the last two weeks of commits.
+2. Run `git status` and `git diff origin/main` — confirm a clean baseline.
+3. If your task touches auth, read `AUTH_FLOW_REVIEW.md` even if you "remember" the auth setup.
+4. If your task touches the database, run a `list_tables` against `aijsboodkivnhzfstvdq` — schema may have moved since the last session.
+5. State to the user, in one line, what you understand the task to be and which files you expect to change. **Wait for confirmation** before making large edits.
+6. After making changes, run the relevant smoke test under `tests/`. If you can't run it, say so explicitly — don't claim verification you didn't do.
+7. Before opening a PR, re-read section 5 of this file.
+
+---
+
+*Last updated: 2026-05-23. If the repo state has drifted significantly from what this document describes, that is a signal to update this document — not to ignore it.*
