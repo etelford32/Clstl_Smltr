@@ -8,7 +8,7 @@ This guide shows you how to set up automatic deployments to Vercel whenever you 
 
 1. Go to [vercel.com](https://vercel.com) and sign in with GitHub
 2. Click **"Add New Project"**
-3. Import `etelford32/Clstl_Smltr` repository
+3. Import `etelford32/ParkersPhysics` repository
 4. Configure:
    - **Framework Preset**: Other
    - **Root Directory**: `./` (leave as default)
@@ -35,8 +35,8 @@ That's it! Now every time you push to your repository:
 
 After deployment, you'll have:
 
-- **Production**: `https://clstl-smltr.vercel.app` (or your custom domain)
-- **Previews**: `https://clstl-smltr-<git-branch>.vercel.app`
+- **Production**: `https://parkersphysics.vercel.app` (or your custom domain)
+- **Previews**: `https://parkersphysics-<git-branch>.vercel.app`
 
 ## Testing Locally Before Deploy
 
@@ -68,7 +68,7 @@ If you add any secrets or API keys later:
 
 ## Deployment Branches
 
-- `main` → Production (`https://clstl-smltr.vercel.app`)
+- `main` → Production (`https://parkersphysics.vercel.app`)
 - All other branches → Preview deployments
 - Pull requests → Automatic preview deployments
 
@@ -108,7 +108,7 @@ If you add any secrets or API keys later:
 ## Support
 
 - Vercel Docs: https://vercel.com/docs
-- This repo's issues: https://github.com/etelford32/Clstl_Smltr/issues
+- This repo's issues: https://github.com/etelford32/ParkersPhysics/issues
 
 ---
 

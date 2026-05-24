@@ -38,103 +38,7 @@ nav {
     border-bottom:1px solid rgba(255,255,255,.07);
     display:flex; align-items:center; padding:0 16px; gap:6px;
 }
-.nav-brand {
-    display:flex; align-items:center; gap:8px;
-    font-size:.95rem; font-weight:700; text-decoration:none; white-space:nowrap;
-    background:linear-gradient(45deg,#ffd700,#ff8c00);
-    -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
-    margin-right:2px;
-}
-
-/* nav-menu stretches to fill all remaining space */
-
-.nav-item {
-    padding:5px 10px; background:rgba(255,255,255,.07);
-    border:1px solid rgba(255,255,255,.12); border-radius:5px;
-    color:#ccc; text-decoration:none; font-size:.8rem; white-space:nowrap;
-    transition:background .2s, border-color .2s; flex-shrink:0;
-}
-.nav-item:hover { background:rgba(255,255,255,.16); border-color:rgba(255,200,0,.4); color:#fff; }
-
-.nav-drop-btn {
-    padding:5px 10px; background:rgba(255,255,255,.07);
-    border:1px solid rgba(255,255,255,.12); border-radius:5px;
-    color:#ccc; font-size:.8rem; cursor:pointer; font-family:inherit;
-    transition:background .2s, border-color .2s; white-space:nowrap;
-}
-.nav-drop-btn:hover { background:rgba(255,255,255,.16); color:#fff; }
-
-/* Rich dropdown panel */
-.nav-drop-menu {
-    display:block; position:absolute; top:calc(100% + 5px); left:0;
-    background:rgba(5,2,18,.97); backdrop-filter:blur(18px);
-    border:1px solid rgba(255,255,255,.11); border-radius:9px;
-    padding:6px 0 8px; min-width:268px; z-index:800;
-    box-shadow:0 14px 44px rgba(0,0,0,.80);
-    opacity:0; visibility:hidden; pointer-events:none;
-    transform:translateY(-4px);
-    transition:opacity .18s ease, visibility .18s ease, transform .18s ease;
-}
-.nav-drop:hover .nav-drop-menu, .nav-drop.open .nav-drop-menu {
-    opacity:1; visibility:visible; pointer-events:auto; transform:translateY(0);
-}
-/* Each item in the dropdown */
-.nav-drop-link {
-    display:flex; align-items:center; gap:11px;
-    padding:7px 16px; text-decoration:none; transition:background .15s;
-}
-.nav-drop-link:hover { background:rgba(255,255,255,.07); }
-
-.nav-drop-link.active .ndl-icon  { opacity:1; }
-.ndl-icon  { font-size:1.05rem; width:20px; text-align:center; flex-shrink:0; opacity:.72; }
-
-.ndl-title { color:#c8c8c8; font-size:.82rem; font-weight:500; line-height:1.25; }
-.ndl-sub   { color:#484e60; font-size:.70rem; line-height:1.2; }
-.nav-drop-link:hover .ndl-title { color:#fff; }
-.nav-drop-link:hover .ndl-sub   { color:#7a8090; }
-/* Section label inside dropdown */
-
-/* Spacer that pushes auth buttons to the far right */
-
-/* Auth */
-
-.nav-login:hover  { background:rgba(255,255,255,.1) !important; color:#fff !important; border-color:rgba(255,255,255,.4) !important; }
-.nav-signup { background:linear-gradient(45deg,#ff8c00,#ffd700) !important; border-color:#ff8c00 !important; color:#000 !important; font-weight:700 !important; letter-spacing:.01em; }
-
-/* Burger */
-.nav-burger {
-    display:none; margin-left:auto;
-    background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.14);
-    border-radius:5px; color:#fff; padding:5px 10px; font-size:1.1rem;
-    cursor:pointer; line-height:1; transition:background .2s;
-}
-.nav-burger:hover { background:rgba(255,255,255,.18); }
-@media (max-width:1024px) {
-    .nav-burger { display:block; }
-    .nav-menu {
-        display:none; flex-direction:column; align-items:stretch;
-        position:absolute; top:50px; left:0; right:0;
-        background:rgba(3,1,14,.98); backdrop-filter:blur(18px);
-        border-bottom:1px solid rgba(255,255,255,.1);
-        padding:8px 12px 14px; gap:3px; z-index:700;
-        max-height:calc(100vh - 50px); overflow-y:auto;
-    }
-    .nav-menu.open { display:flex; }
-    .nav-item, .nav-drop-btn { padding:11px 14px; font-size:.9rem; }
-    .nav-drop-menu {
-        position:static; box-shadow:none; border-radius:5px; min-width:0;
-        background:rgba(255,255,255,.04); border-color:rgba(255,255,255,.07);
-        display:none; opacity:1; visibility:visible; transform:none;
-        transition:none; pointer-events:auto; padding:2px 0 6px;
-    }
-    .nav-drop-link { padding:8px 14px 8px 22px; }
-    .ndl-sub { display:none; }
-    .nav-drop-section { padding:5px 14px 2px 22px; }
-    .nav-drop:hover .nav-drop-menu { display:none !important; }
-    .nav-drop.open  .nav-drop-menu { display:block !important; }
-    .nav-spacer { display:none; }
-    .nav-auth-sep { display:none; }
-}
+/* nav-* class styling lives in js/nav-styles.css (loaded on every page) */
 
 #app { position: relative; width: 100%; height: calc(100vh - 50px); overflow: hidden; }
 /* On mobile the canvas is ~78 % of the viewport so the description section
@@ -324,9 +228,6 @@ nav {
 .sw-r-letter.R3 { color:#ff9900; text-shadow:0 0 8px #ff990060; }
 .sw-r-letter.R4 { color:#ff5500; text-shadow:0 0 10px #ff550080; }
 .sw-r-letter.R5 { color:#ff2200; text-shadow:0 0 12px #ff220099; animation:xpulse 0.9s ease-in-out infinite; }
-
-/* ── CME shock wave arrival indicator ───────────────────────── */
-.cme-shock-active #sw-earth-chip { border-color:rgba(255,140,0,.7); box-shadow:0 0 12px rgba(255,100,0,.3); }
 
 #panel {
     position: absolute; top:0; right:0; bottom:0; width: min(296px, 88vw);
@@ -519,7 +420,6 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
     background:rgba(100,200,80,.12); border-color:rgba(100,200,80,.3); color:#88dd66;
 }
 .cme-meta   { font-size:9px; color:#664433; line-height:1.5; }
-.cme-eta    { font-size:9.5px; font-weight:600; color:#ffcc44; }
 .cme-time-ago { font-size:8.5px; color:#554433; }
 
 /* ── SWPC Alerts section ───────────────────────────────────── */
@@ -677,12 +577,6 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
 /* Clickable flare rows (panel + popup) */
 .flare-row[data-lat] { cursor:pointer; }
 .flare-row[data-lat]:hover { background:rgba(255,140,0,.09); border-radius:3px; }
-
-/* ── Wind speed dial ───────────────────────────────────────── */
-.wind-dial-wrap { display:flex; align-items:center; gap:10px; margin:6px 0 10px; }
-.wind-dial-svg  { flex-shrink:0; }
-.wind-dial-info { font-size:10px; color:#885544; line-height:1.6; }
-.wind-dial-val  { font-size:16px; font-weight:800; color:#ffaa44; }
 
 /* ── Sparkline ─────────────────────────────────────────────── */
 .sparkline-wrap { margin:6px 0 10px; }
@@ -1757,7 +1651,7 @@ import { UnrealBloomPass }    from 'three/addons/postprocessing/UnrealBloomPass.
 import { ShaderPass }         from 'three/addons/postprocessing/ShaderPass.js';
 import { SolarWeatherHistory, seedSyntheticHistory } from './js/solar-weather-history.js';
 import { loadRealHistory } from './js/history-loader.js';
-import { SolarWeatherForecaster } from './js/solar-weather-forecast.js';
+import { SolarWeatherForecaster, solarCyclePhase } from './js/solar-weather-forecast.js';
 import { ModelValidator }     from './js/model-validation.js';
 import { SolarLSTM, normalise as lstmNormalise, denormalise as lstmDenorm, FEATURES } from './js/solar-lstm.js';
 
@@ -1912,7 +1806,6 @@ const _lstm = new SolarLSTM({ hiddenSize: 32, seqLen: 24, lr: 0.001 });
         const sl = document.getElementById('sl-scrub');
         sl.max   = Math.max(0, swpcTimeline.length - 1);
         sl.value = scrubLiveIdx;   // start at live (not forecast)
-        console.log(`[SWPC] Timeline: ${observed.length} observed + ${forecastPts.length} forecast (LSTM confidence ${(_lstm.confidence * 100).toFixed(0)}%)`);
 
         // Mark feeds as live
         ['fd-wind','fd-imf'].forEach(id => {
@@ -4980,7 +4873,6 @@ if (_coronaMode === 'volumetric' || _coronaMode === 'vol') {
             }
             // Initial population from whatever liveRegions are loaded.
             _refreshVolumetricCorona();
-            console.log(`[corona-vol] mounted (channel=${_coronaChannel})`);
         } catch (e) {
             console.warn('[corona-vol] init failed, falling back to legacy:', e);
             coronaMesh.visible = true;
@@ -5434,7 +5326,6 @@ function spawnCMEShock(speedNorm) {
     const mesh = new THREE.Mesh(new THREE.SphereGeometry(1.0, 40, 24), mat);
     scene.add(mesh);
     cmeShockWaves.push({ mesh, t0: uniforms.u_time.value, speed: speedNorm });
-    console.log(`[CME Shock] Spawned — speed_norm=${speedNorm.toFixed(2)}`);
 }
 
 // ─── CME MAGNETIC FLUX ROPE ───────────────────────────────────────────────────
@@ -5567,7 +5458,6 @@ function spawnFluxRope(latRad, lonRad, speedNorm) {
     const mesh = new THREE.Mesh(geo, mat);
     scene.add(mesh);
     cmeFluxRopes.push({ mesh, t0: uniforms.u_time.value, speed: speedNorm, lat: latRad, lon: lonRad });
-    console.log(`[FluxRope] Spawned at lat=${(latRad*180/Math.PI).toFixed(1)}° lon=${(lonRad*180/Math.PI).toFixed(1)}° apex=${(1.85+speedNorm*2.8).toFixed(1)} R☉`);
 }
 
 // ─── SEP SOLAR ENERGETIC PARTICLES ───────────────────────────────────────────
@@ -6685,7 +6575,6 @@ if (DEBUG_ANY_ATLAS) {
         try {
             const mod = await import('./js/field-atlas.js');
             await mod.ensureFieldAtlasWasm();
-            console.log('[sunfield] field-atlas WASM ready');
             return mod;
         } catch (e) {
             console.warn('[sunfield] init failed:', e);
@@ -6712,7 +6601,6 @@ if (DEBUG_ANY_ATLAS) {
             ]);
             _flareRibbonsModule = r;
             _flareHxrModule = h;
-            console.log('[flare-ribbons + hxr] modules loaded');
         } catch (e) {
             console.warn('[flare-ribbons / hxr] init failed:', e);
         }
@@ -6728,7 +6616,6 @@ if (DEBUG_PROMINENCE) {
                 import('./js/eruption-scorecard.js'),
             ]);
             _scorecardModule = scorecardMod;
-            console.log('[prominence] bundle + classifier + scorecard modules loaded');
             return { bundle: bundleMod, classifier: classifierMod };
         } catch (e) {
             console.warn('[prominence] init failed:', e);
@@ -6750,14 +6637,8 @@ if (DEBUG_PROMINENCE) {
 // fragment shader. Falls through silently when no atlas / no ribbons —
 // shader keeps using the legacy straight-arc fallback.
 function _refreshFlareRibbons(latRad, lonRad) {
-    if (!_flareRibbonsModule) {
-        console.log('[flare-ribbons] module not loaded yet — legacy ribbons render');
-        return;
-    }
-    if (!_promCachedAtlas) {
-        console.log('[flare-ribbons] no atlas — load with ?debug=prominence and wait for AR feed');
-        return;
-    }
+    if (!_flareRibbonsModule) return;
+    if (!_promCachedAtlas) return;
 
     // Find the live AR closest to the flare site (must match meta[2] arIdx).
     let bestArIdx = -1, bestDist = 25 * Math.PI / 180;
@@ -6771,10 +6652,7 @@ function _refreshFlareRibbons(latRad, lonRad) {
         const d = Math.acos(Math.max(-1, Math.min(1, c)));
         if (d < bestDist) { bestDist = d; bestArIdx = i; }
     }
-    if (bestArIdx < 0) {
-        console.log(`[flare-ribbons] no AR within 25° of flare site — legacy ribbons render`);
-        return;
-    }
+    if (bestArIdx < 0) return;
 
     const n = _flareRibbonsModule.updateRibbonsForAr(_promCachedAtlas, bestArIdx);
     if (n >= 2) {
@@ -6783,10 +6661,8 @@ function _refreshFlareRibbons(latRad, lonRad) {
         }
         uniforms.u_flare_ribbons_count.value  = n;
         uniforms.u_flare_ribbons_active.value = 1.0;
-        console.log(`[flare-ribbons] AR #${bestArIdx} → ${n}-pt polyline ribbons`);
     } else {
         uniforms.u_flare_ribbons_active.value = 0.0;
-        console.log(`[flare-ribbons] AR #${bestArIdx} has no PIL bundles in atlas — legacy ribbons render`);
     }
 
     // Phase 3.2 — light up the HXR footpoint kernels with the same atlas
@@ -6798,9 +6674,6 @@ function _refreshFlareRibbons(latRad, lonRad) {
         }
         const pairs = _flareRibbonsModule.getCurrentFootpointPairs();
         _flareHxrSystem.update(pairs);
-        if (pairs.length > 0) {
-            console.log(`[flare-hxr] ${_flareHxrSystem.activeKernels} kernels (${pairs.length} pairs)`);
-        }
     }
 }
 
@@ -6878,7 +6751,6 @@ function _eruptNearestFilament() {
     const loc = `${ns}${String(Math.round(Math.abs(latDeg))).padStart(2,'0')}` +
                 `${ew}${String(Math.round(Math.abs(lonDeg))).padStart(2,'0')}`;
     status(`▲ Erupting bundle #${bestIdx} at ${loc}`);
-    console.log(`[erupt] manual EP triggered on bundle ${bestIdx} at ${loc} (cos∠cam=${bestDot.toFixed(2)})`);
 
     // ── Educational scorecard (manual eruptions only) ────────────────────────
     // Compute metrics now from the bundle's current state, schedule the card
@@ -6949,7 +6821,6 @@ async function rebuildDebugFieldAtlas() {
                     scene,
                     quality: bMod.getQualityFromString(PROMINENCE_QUALITY),
                 });
-                console.log(`[prominence] system created (quality=${prominenceBundleSystem.quality}, budget=${prominenceBundleSystem.threadBudget})`);
             }
 
             // Cache for the per-frame classifier tick in animate().
@@ -6957,7 +6828,6 @@ async function rebuildDebugFieldAtlas() {
             _promCachedTextures = textures;
             _promClassifierRef  = cMod;
 
-            // One-shot classify + log so the console reflects new AR state.
             const bundles = cMod.classifyBundles({
                 atlas,
                 liveRegions,
@@ -6970,14 +6840,8 @@ async function rebuildDebugFieldAtlas() {
                 activity: uniforms?.u_activity?.value ?? 0.5,
                 bundles,
             });
-            const counts = bundles.reduce((m, b) => { m[b.classId] = (m[b.classId] || 0) + 1; return m; }, {});
-            const NAMES = ['QP','IP','ARP','HEDGEROW','TORNADO','EP','RAIN'];
-            const summary = Object.keys(counts).map(k => `${NAMES[k]}=${counts[k]}`).join(' ');
-            console.log(`[prominence] ${bundles.length} bundles · ${prominenceBundleSystem.activeThreads} threads · ${summary}`);
         }
     }
-
-    console.log(`[sunfield] ${atlas.lineCount} lines (${ars.length} ARs) in ${dt.toFixed(1)} ms`);
 }
 
 function buildFieldLines() {
@@ -8376,8 +8240,6 @@ async function fetchLiveSolarData() {
         if (parsed.length > 0) {
             liveRegions = parsed;
         }
-        console.log('[Sun] Regions parsed:', parsed.length, 'from', rJ?.length ?? 0, 'rows',
-            parsed.length ? '→ ' + parsed.map(r => 'AR' + r.num + ' ' + r.loc).join(', ') : '');
 
         // ── Flares from edited_events.json ────────────────────────────────────
         // Format: array of objects with serial_number, event, begin_datetime,
@@ -8405,11 +8267,9 @@ async function fetchLiveSolarData() {
                 reg:  String(e.active_region ?? e.active_region_num ?? e.activeRegion ?? '—'),
             }));
         if (parsedFlares.length > 0) liveFlares = parsedFlares;
-        console.log('[Sun] Flares parsed:', parsedFlares.length, 'from', eJ?.length ?? 0, 'events');
 
         // ── X-ray flux — scan from end for valid non-null reading ──────────────
         // xrays-1-day.json: [{time_tag, flux, observed_flux, energy, ...}]
-        console.log('[Sun] X-ray data:', xJ?.length ?? 0, 'readings');
         if (Array.isArray(xJ) && xJ.length > 0) {
             for (let i = xJ.length - 1; i >= Math.max(0, xJ.length - 20); i--) {
                 const v = parseFloat(xJ[i].flux ?? xJ[i].observed_flux ?? xJ[i][1]);
@@ -8785,7 +8645,6 @@ function replayRecentFlares() {
         uniforms.u_flare_lat.value = lat_r;
         uniforms.u_flare_lon.value = lon_r;
         uniforms.u_flare_t.value   = ageSimUnits;
-        console.log(`[Flare Replay] ${f.cls} at ${f.loc} — ${Math.round(ageMs / 60000)} min ago → sim-t ${ageSimUnits.toFixed(0)}`);
     });
 }
 
@@ -8942,7 +8801,7 @@ let   _lastForecast = null;
 
 // Ingest every swpc-update event into history + re-forecast every 5 min
 let _lastForecastAt = 0;
-window.addEventListener('swpc-update', (ev) => {
+function _onSwpcUpdate_forecast(ev) {
     const sw = ev.detail?.solar_wind ?? {};
     const kp = ev.detail?.kp ?? 0;
     const coupling = {
@@ -8963,7 +8822,7 @@ window.addEventListener('swpc-update', (ev) => {
         // Persist LSTM weights every 5 minutes
         if (typeof _lstm !== 'undefined') _lstm.saveToStorage();
     }
-}, { passive: true });
+}
 
 // Update forecast display panel
 function _updateForecastPanel(fc) {
@@ -9047,9 +8906,6 @@ window.addEventListener('swpc-update', (ev) => {
     const kp  = sw.kp ?? 0;
     const bz  = sw.solar_wind?.bz  ?? 0;
     const spd = sw.solar_wind?.speed       ?? 400;
-
-    // ── Diagnostic: confirm event is firing + log key values ─────────────────
-    console.log(`[SWPC] ${sw.status} | wind ${spd} km/s | kp ${kp} | bz ${bz.toFixed(1)} nT | xray ${sw.xray_class ?? '?'}`);
 
     const dns = sw.solar_wind?.density     ?? 5;
     const bt  = sw.solar_wind?.bt          ?? 5;
@@ -9437,7 +9293,6 @@ window.addEventListener('swpc-update', (ev) => {
                 uniforms.u_flare_lon.value = loc.lon * Math.PI / 180;
                 uniforms.u_flare_t.value   = simAge;
             }
-            console.log(`[Flare] ${f.cls} at ${f.location} — ${Math.round(ageMs/60000)}m ago → ring placed`);
         });
     }
 
@@ -9446,7 +9301,6 @@ window.addEventListener('swpc-update', (ev) => {
     if (sw.new_major_flare) {
         const cls   = sw.flare_class ?? 'M';
         const clsCh = cls[0];
-        console.log(`[Sun] Real ${cls} flare detected — ribbon + prominence eruption`);
         _triggerSunFlashFromSWPC(sw.flare_direction);
 
         if (sw.flare_direction) {
@@ -9480,7 +9334,6 @@ window.addEventListener('swpc-update', (ev) => {
         showFlareAlertBanner(sw.flare_class ?? 'M-class', sw.flare_location);
     }
     if (sw.new_cme_detected && sw.earth_directed_cme) {
-        console.log('[Sun] New Earth-directed CME from DONKI — flux rope + shock wave');
         const cmeSpeedNorm = Math.max(0, Math.min(1, ((sw.earth_directed_cme.speed ?? 800) - 300) / 2200));
         // Spawn the 3D flux rope (twisted magnetic field tube)
         const cmeLat = sw.earth_directed_cme.lat_rad ?? (sw.flare_direction?.lat_rad ?? 0);
@@ -9567,8 +9420,6 @@ window.addEventListener('swpc-update', (ev) => {
         buildFieldLines();
         buildProminences();
         updateLivePanel(false);
-        console.log('[SWPC→3D] Regions updated:', liveRegions.length, 'ARs →',
-            liveRegions.map(r => 'AR' + r.num).join(', '));
     }
 });
 
@@ -9817,7 +9668,6 @@ function showFlareAlertBanner(cls, loc) {
     _flareAlertTimer = setTimeout(() => { banner.style.display = 'none'; }, 12000);
 }
 
-console.log('%c[Sun · G2V Simulator]', 'color:#ffb830;font-weight:bold;font-size:13px');
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // FLARE / REGION ANALYSIS POPUP
@@ -10083,7 +9933,7 @@ document.getElementById('flare-list').addEventListener('click', e => {
 // swpc-feed T3 (15 min) is less frequent than fetchLiveSolarData (5 min), so
 // we only fill in the flare list from swpc-update when the panel is still empty
 // (no live NOAA fetch has succeeded yet).
-window.addEventListener('swpc-update', (ev) => {
+function _onSwpcUpdate_flareListFallback(ev) {
     const rf = ev.detail?.recent_flares;
     if (!Array.isArray(rf) || rf.length === 0 || liveFlares.length > 0) return;
     // Convert swpc-feed format → panel format
@@ -10094,9 +9944,8 @@ window.addEventListener('swpc-update', (ev) => {
         reg:  f.region   != null ? String(f.region) : '—',
     }));
     updateLivePanel(false);
-});
+}
 
-console.log('%c[Sun] Analysis popup + 3-D marker raycasting active', 'color:#ffaa44');
 
 // ═══════════════════════════════════════════════════════════════
 //  SOLAR INTERIOR PANEL — live physics calculations
@@ -10698,8 +10547,8 @@ document.querySelectorAll('.atm-jump').forEach(btn => {
 });
 
 // Wire SWPC data to update coronal temperature estimate
-window.addEventListener('swpc-update', e => {
-    const sw = e.detail;
+function _onSwpcUpdate_atmosphere(ev) {
+    const sw = ev.detail;
     const xray = sw.xray_flux ?? 1e-7;
     _atmXrayFlux = xray;
     _atmF107 = sw.f107_flux ?? 150;
@@ -10721,6 +10570,55 @@ window.addEventListener('swpc-update', e => {
     }
 
     updateAtmospherePanel();
+}
+
+// ── Daily Solar Summary banner ──────────────────────────────────────────────
+function _onSwpcUpdate_dailySummary(ev) {
+    const sw = ev.detail;
+    const el = document.getElementById('sun-daily-summary');
+    if (!el) return;
+    el.style.display = '';
+
+    const flareClass = f => f >= 1e-4 ? 'X' : f >= 1e-5 ? 'M' : f >= 1e-6 ? 'C' : f >= 1e-7 ? 'B' : 'A';
+    const gScale     = kp => kp >= 9 ? 5 : kp >= 8 ? 4 : kp >= 7 ? 3 : kp >= 6 ? 2 : kp >= 5 ? 1 : 0;
+
+    const kp    = sw.kp ?? 0;
+    const g     = gScale(kp);
+    const xray  = sw.xray_flux ?? 1e-8;
+    const cls   = flareClass(xray);
+    const speed = Math.round(sw.solar_wind?.speed ?? 400);
+    const bz    = (sw.solar_wind?.bz ?? 0).toFixed(1);
+    const cycle = solarCyclePhase();
+    const cme   = sw.earth_directed_cme;
+
+    let level, color;
+    if (g >= 4)      { level = 'EXTREME';   color = '#ff2255'; }
+    else if (g >= 3) { level = 'SEVERE';    color = '#ff4444'; }
+    else if (g >= 2) { level = 'ACTIVE';    color = '#ff9900'; }
+    else if (kp >= 4){ level = 'UNSETTLED'; color = '#ffcc00'; }
+    else             { level = 'QUIET';     color = '#44cc88'; }
+
+    const badge = document.getElementById('sun-summary-level');
+    if (badge) {
+        badge.textContent = level;
+        badge.style.background = color + '20';
+        badge.style.color = color;
+    }
+
+    let text = `Kp ${kp.toFixed(1)} (G${g}) · ${cls}-class · Wind ${speed} km/s · Bz ${bz} nT`;
+    text += ` · SC25 ${cycle.phaseName} (SSN≈${cycle.smoothedSSN})`;
+    if (cme) text += ` · CME ${cme.speed} km/s`;
+    document.getElementById('sun-summary-text').textContent = text;
+}
+
+// Single dispatcher for the four non-capture, non-shader swpc-update consumers.
+// Capture-phase #_lastSwpcFireAt timestamp (line ~8885) stays separate by design.
+// The main shader-uniform writer (~30 fields, 12 DOM dots) also stays separate.
+window.addEventListener('swpc-update', (ev) => {
+    _onSwpcUpdate_forecast(ev);
+    _onSwpcUpdate_flareListFallback(ev);
+    _onSwpcUpdate_atmosphere(ev);
+    _onSwpcUpdate_dailySummary(ev);
 }, { passive: true });
 
 // Initial render
@@ -10825,47 +10723,5 @@ updateAtmospherePanel();
   </div>
 </section>
 
-<script type="module">
-// ── Daily Solar Summary for Sun page ─────────────────────────────────────────
-import { solarCyclePhase } from './js/solar-weather-forecast.js';
-
-function flareClass(f) { return f >= 1e-4 ? 'X' : f >= 1e-5 ? 'M' : f >= 1e-6 ? 'C' : f >= 1e-7 ? 'B' : 'A'; }
-function gScale(kp) { return kp >= 9 ? 5 : kp >= 8 ? 4 : kp >= 7 ? 3 : kp >= 6 ? 2 : kp >= 5 ? 1 : 0; }
-
-window.addEventListener('swpc-update', ev => {
-    const sw = ev.detail;
-    const el = document.getElementById('sun-daily-summary');
-    if (!el) return;
-    el.style.display = '';
-
-    const kp    = sw.kp ?? 0;
-    const g     = gScale(kp);
-    const xray  = sw.xray_flux ?? 1e-8;
-    const cls   = flareClass(xray);
-    const speed = Math.round(sw.solar_wind?.speed ?? 400);
-    const bz    = (sw.solar_wind?.bz ?? 0).toFixed(1);
-    const cycle = solarCyclePhase();
-    const cme   = sw.earth_directed_cme;
-
-    let level, color;
-    if (g >= 4) { level = 'EXTREME'; color = '#ff2255'; }
-    else if (g >= 3) { level = 'SEVERE'; color = '#ff4444'; }
-    else if (g >= 2) { level = 'ACTIVE'; color = '#ff9900'; }
-    else if (kp >= 4) { level = 'UNSETTLED'; color = '#ffcc00'; }
-    else { level = 'QUIET'; color = '#44cc88'; }
-
-    const badge = document.getElementById('sun-summary-level');
-    if (badge) {
-        badge.textContent = level;
-        badge.style.background = color + '20';
-        badge.style.color = color;
-    }
-
-    let text = `Kp ${kp.toFixed(1)} (G${g}) · ${cls}-class · Wind ${speed} km/s · Bz ${bz} nT`;
-    text += ` · SC25 ${cycle.phaseName} (SSN≈${cycle.smoothedSSN})`;
-    if (cme) text += ` · CME ${cme.speed} km/s`;
-    document.getElementById('sun-summary-text').textContent = text;
-});
-</script>
 </body>
 </html>

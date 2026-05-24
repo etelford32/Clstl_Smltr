@@ -55,7 +55,7 @@ python star_simulation.py
 
 4. **Access your live simulation at:**
    ```
-   https://YOUR_USERNAME.github.io/Clstl_Smltr/
+   https://YOUR_USERNAME.github.io/ParkersPhysics/
    ```
 
 **That's it!** Your simulation is now live and accessible worldwide! 🌍
@@ -70,8 +70,8 @@ python star_simulation.py
 # Create a droplet (Ubuntu 22.04)
 # SSH into it, then:
 
-git clone https://github.com/YOUR_USERNAME/Clstl_Smltr.git
-cd Clstl_Smltr
+git clone https://github.com/YOUR_USERNAME/ParkersPhysics.git
+cd ParkersPhysics
 sudo apt install docker.io docker-compose
 sudo docker-compose up -d
 
@@ -82,7 +82,7 @@ sudo docker-compose up -d
 
 1. Go to [railway.app](https://railway.app)
 2. Click "New Project" → "Deploy from GitHub repo"
-3. Select your `Clstl_Smltr` repository
+3. Select your `ParkersPhysics` repository
 4. Railway auto-detects Dockerfile and deploys!
 5. Access via your Railway URL
 
@@ -91,7 +91,7 @@ sudo docker-compose up -d
 ## Need Help?
 
 - 📖 Full guide: [DEPLOYMENT.md](DEPLOYMENT.md)
-- 🐛 Issues: [GitHub Issues](https://github.com/etelford32/Clstl_Smltr/issues)
+- 🐛 Issues: [GitHub Issues](https://github.com/etelford32/ParkersPhysics/issues)
 - 💬 Questions: Open a discussion
 
 ---

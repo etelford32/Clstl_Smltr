@@ -40,7 +40,7 @@ case $choice in
         echo "To deploy to GitHub Pages:"
         echo "  1. Push to your repository"
         echo "  2. Enable GitHub Actions workflow"
-        echo "  3. Your site will be at: https://yourusername.github.io/Clstl_Smltr/"
+        echo "  3. Your site will be at: https://yourusername.github.io/ParkersPhysics/"
         ;;
 
     2)
@@ -102,7 +102,7 @@ case $choice in
         echo "  2. Go to GitHub → Settings → Pages"
         echo "  3. Enable 'GitHub Actions' as source"
         echo "  4. The workflow will auto-deploy to:"
-        echo "     https://yourusername.github.io/Clstl_Smltr/"
+        echo "     https://yourusername.github.io/ParkersPhysics/"
         ;;
 
     5)

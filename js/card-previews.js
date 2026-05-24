@@ -23,7 +23,7 @@ const SIM_URLS = {
   sun:               'sun.html?preview=1',
   'space-weather':   'space-weather.html?preview=1',
   'upper-atmosphere':'upper-atmosphere.html?preview=1',
-  stars:             'star3d.html?preview=1',
+  stars:             'sirius-planetary.html?preview=1',
   galaxy:            'galactic-map.html?preview=1',
 };
 

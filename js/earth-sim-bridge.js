@@ -8,7 +8,7 @@
  * closed-form function of JD, the same (jd0, dt_s, count) input always
  * yields the same bytes (verified by `hash`).
  *
- * Typical usage in threejs.html:
+ * Typical usage in solar-system.html:
  *
  *   import { EarthSimBridge } from './js/earth-sim-bridge.js';
  *   const bridge = new EarthSimBridge();

@@ -1,6 +1,6 @@
 # parkersphysics.com
 
-> **This repo is parkersphysics.com** — a physics-first space weather forecasting platform for satellite operators, government, and research users. The repo name (`Clstl_Smltr`) and earlier description are historical; the project outgrew its origins as a celestial simulator. **Do not assume from the repo name that this is a small pygame demo — it is a ~100k-line production web application.**
+> **This repo is parkersphysics.com** — a physics-first space weather forecasting platform for satellite operators, government, and research users. The project began life as a celestial simulator (the repo was previously named `Clstl_Smltr`) and outgrew those origins. **Do not assume this is a small pygame demo — it is a ~100k-line production web application.**
 
 Live site: [parkersphysics.com](https://parkersphysics.com)
 
