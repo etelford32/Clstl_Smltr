@@ -457,7 +457,7 @@ body {
 <!-- ── Engine bootstrap ───────────────────────────────── -->
 <script type="module">
 import { loadReplay, createPlayer, skillSummary } from './js/gannon-superstorm-engine.js?v=2';
-import { createApSaturationChart, createDensityChart, createResidualsChart } from './js/gannon-superstorm-charts.js?v=4';
+import { createApSaturationChart, createDensityChart, createResidualsChart } from './js/gannon-superstorm-charts.js?v=5';
 import { createNarrationBand } from './js/gannon-superstorm-narration.js?v=2';
 import { createSunEarthScene } from './js/gannon-superstorm-sun-earth.js?v=2';
 
@@ -654,6 +654,62 @@ function paint(sample) {
             onScrub();
             console.log(`[gannon] IMF + solar wind upgraded to real NASA SPDF OMNI (${bzSwap} Bz, ${vSwap} V samples)`);
         } catch (_) { /* offline / blocked / sandbox — keep placeholder bz_nt + v_kms */ }
+    })();
+
+    // Lift the GRACE-FO + Swarm-C accelerometer-density truth scatter from
+    // real TU Delft v02 in the background. The Edge endpoint /api/density/
+    // tudelft fetches the daily Doornbos v02 ASCII files for each
+    // satellite, parses them, subsamples to orbit-scale cadence, and
+    // returns the per-observation altitude + density. The page maps each
+    // observation's UT into the bundle's anchor-relative h coordinate,
+    // splices it into replay.truth_400km, and calls rhoChart.updateTruth
+    // to re-render the scatter in place.
+    //
+    // The residuals chart is NOT updated because residuals against still-
+    // placeholder model traces (msis_apreal/mhd/gnd) would be misleading.
+    // It refreshes when the BATS-R-US workstation pipeline lands.
+    (async () => {
+        const anchorMs = Date.parse(replay.window.anchor_iso || replay.window.start);
+        async function fetchMission(mission) {
+            try {
+                const r = await fetch(
+                    `/api/density/tudelft?mission=${mission}&start=2024-05-08&end=2024-05-13&subsample=60`,
+                    { cache: 'force-cache' });
+                if (!r.ok) return null;
+                const j = await r.json();
+                const samples = j?.data?.samples;
+                if (!Array.isArray(samples) || samples.length === 0) return null;
+                return { mission, samples, source: j.source };
+            } catch (_) { return null; }
+        }
+
+        const [grace, swarm] = await Promise.all([
+            fetchMission('grace_fo'),
+            fetchMission('swarm_c'),
+        ]);
+        if (!grace && !swarm) return;
+
+        function toTruthPoint(s) {
+            return {
+                h:   (Date.parse(s.t) - anchorMs) / 3600_000,
+                rho: s.rho_kg_m3,
+                alt: s.alt_km,
+            };
+        }
+        replay.truth_400km = replay.truth_400km || { grace_fo: [], swarm_c: [] };
+        if (grace) replay.truth_400km.grace_fo = grace.samples.map(toTruthPoint);
+        if (swarm) replay.truth_400km.swarm_c  = swarm.samples.map(toTruthPoint);
+
+        rhoChart.updateTruth(replay.truth_400km.grace_fo, replay.truth_400km.swarm_c);
+        replay.provenance = replay.provenance || {};
+        replay.provenance.density_truth =
+            (grace ? `GRACE-FO: ${grace.samples.length} obs · ${grace.source}` : 'GRACE-FO: unavailable') +
+            ' | ' +
+            (swarm ? `Swarm-C: ${swarm.samples.length} obs · ${swarm.source}`  : 'Swarm-C: unavailable');
+        console.log('[gannon] truth scatter upgraded to real TU Delft v02 (' +
+            (grace ? grace.samples.length : 0) + ' GRACE-FO, ' +
+            (swarm ? swarm.samples.length : 0) + ' Swarm-C). Residuals chart still on ' +
+            'placeholder model traces — wait for BATS-R-US for honest deltas.');
     })();
 
     function onScrub() {

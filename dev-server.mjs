@@ -98,6 +98,7 @@ const API_ROUTES = {
     '/api/donki/sep':              'api/donki/sep.js',
     '/api/donki/notifications':    'api/donki/notifications.js',
     '/api/omni/imf':               'api/omni/imf.js',
+    '/api/density/tudelft':        'api/density/tudelft.js',
     '/api/hindcast/gannon':        'api/hindcast/gannon.js',
     '/api/launches/upcoming':      'api/launches/upcoming.js',
     '/api/weather/grid':           'api/weather/grid.js',
