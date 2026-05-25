@@ -302,6 +302,14 @@ export class FrontLayer {
         this._lines   = null;
         this._visible = true;
         this._fronts  = [];
+        // Cache of the last buffers handed to update(). When the user toggles
+        // the layer ON for the first time, we rebuild lazily from these so
+        // they get a populated overlay immediately rather than waiting for
+        // the next weather-update event (which can be 10+ min away once the
+        // initial procedural + real-fetch boot pair has fired).
+        this._lastWeatherBuf = null;
+        this._lastWindBuf    = null;
+        this._dirty          = false;   // last cached buffers haven't been built yet
     }
 
     get fronts() { return this._fronts; }
@@ -313,18 +321,41 @@ export class FrontLayer {
     }
 
     setVisible(v) {
-        this._visible       = v;
+        this._visible = v;
         this._group.visible = v;
+        // Lazy compute on first show. If buffers have arrived since the last
+        // build and we were hidden, rebuild now using the cached references.
+        if (v && this._dirty && this._lastWeatherBuf && this._lastWindBuf) {
+            this._rebuild(this._lastWeatherBuf, this._lastWindBuf);
+        }
     }
 
     /**
-     * Rebuild the front polylines from a fresh (weatherBuffer, windBuffer).
-     * Called on every 'weather-update' event alongside isobarLayer.update().
+     * Receive fresh (weatherBuffer, windBuffer) from a 'weather-update'.
+     *
+     * Hot path: this fires on every WeatherFeed refresh AND (when the user
+     * is scrubbing the forecast bar) potentially many times per second.
+     * We always stash the buffer references for the lazy-on-show path, but
+     * we only run the ~50-ms detect+chain pipeline when the layer is
+     * actually visible. Hidden = O(2) — just a couple of assignments.
      */
     update(weatherBuf, windBuf) {
+        this._lastWeatherBuf = weatherBuf;
+        this._lastWindBuf    = windBuf;
+        this._dirty          = true;
+        if (!this._visible) return;
+        this._rebuild(weatherBuf, windBuf);
+    }
+
+    /**
+     * Internal: do the actual detection + Three.js geometry rebuild.
+     * Split out so setVisible() can replay the last buffers on first show.
+     */
+    _rebuild(weatherBuf, windBuf) {
         const t0 = performance.now();
         const fronts = detectFronts(weatherBuf, windBuf);
         this._fronts = fronts;
+        this._dirty  = false;
 
         if (this._lines) {
             this._lines.geometry.dispose();
