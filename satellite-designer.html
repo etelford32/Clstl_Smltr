@@ -179,6 +179,81 @@ select option{background:#0a1024}
 #sd-banner.good{border-color:rgba(95,227,154,.55);color:var(--c-good)}
 #sd-banner.warn{border-color:rgba(var(--c-warn-rgb),.55);color:var(--c-warn)}
 #sd-banner.bad{border-color:rgba(255,107,125,.55);color:var(--c-bad)}
+
+/* ── BURN button — bottom-of-canvas mobile-first control.
+   touch-action:manipulation kills the iOS 300ms tap delay; user-select:none
+   stops a long-press from triggering native text-selection or context menus
+   on Android. The button sits inside #sd-stage so it overlays the canvas
+   and stays in view when the page is scrolled to a sub-section below. */
+#sd-thrust-btn{
+  position:absolute;left:50%;bottom:14px;transform:translateX(-50%);
+  display:flex;align-items:center;justify-content:center;gap:10px;
+  min-width:min(360px,72%);height:54px;padding:0 22px;
+  background:linear-gradient(180deg,#ff8d3a,#ff5e1f);
+  border:1px solid rgba(255,160,90,.7);border-radius:14px;
+  color:#160a04;font-family:inherit;font-weight:900;font-size:.95rem;
+  letter-spacing:.08em;text-transform:uppercase;cursor:pointer;
+  box-shadow:0 6px 18px rgba(255,107,33,.32),inset 0 1px 0 rgba(255,255,255,.35);
+  touch-action:manipulation;user-select:none;-webkit-user-select:none;
+  -webkit-tap-highlight-color:transparent;
+  transition:transform .08s ease, box-shadow .15s ease, filter .15s ease;
+  z-index:6;
+}
+#sd-thrust-btn .tb-icon{font-size:1.1rem;line-height:1;filter:drop-shadow(0 1px 0 rgba(0,0,0,.25))}
+#sd-thrust-btn .tb-text{line-height:1;white-space:nowrap}
+#sd-thrust-btn .tb-key{display:inline-flex;align-items:center}
+#sd-thrust-btn .tb-key kbd{
+  font-size:.55rem;font-family:monospace;font-weight:700;
+  background:rgba(0,0,0,.22);color:#fff;border:1px solid rgba(0,0,0,.35);
+  border-radius:4px;padding:1px 5px;letter-spacing:.04em;
+}
+#sd-thrust-btn:hover{filter:brightness(1.07)}
+#sd-thrust-btn:active,
+#sd-thrust-btn.firing{
+  transform:translateX(-50%) translateY(1px) scale(.985);
+  box-shadow:0 2px 8px rgba(255,107,33,.55),
+             inset 0 0 0 1px rgba(255,255,255,.45),
+             inset 0 -3px 12px rgba(255,80,0,.55);
+  filter:brightness(1.12) saturate(1.1);
+}
+#sd-thrust-btn.firing{
+  animation:sd-thrust-pulse .4s ease-in-out infinite alternate;
+}
+#sd-thrust-btn[disabled]{
+  background:linear-gradient(180deg,#3b3d44,#2a2c33);color:#7a7d85;
+  border-color:rgba(255,255,255,.08);box-shadow:none;cursor:not-allowed;
+  pointer-events:none;
+}
+@keyframes sd-thrust-pulse {
+  from { box-shadow:0 2px 8px rgba(255,107,33,.55),
+                    inset 0 0 0 1px rgba(255,255,255,.45),
+                    inset 0 -3px 12px rgba(255,80,0,.55); }
+  to   { box-shadow:0 2px 14px rgba(255,160,80,.85),
+                    inset 0 0 0 1px rgba(255,255,255,.65),
+                    inset 0 -3px 18px rgba(255,140,40,.75); }
+}
+/* On phones the button stretches edge-to-edge so it's reachable with the
+   thumb on the bottom rail. */
+@media (max-width:560px){
+  #sd-thrust-btn{min-width:0;left:10px;right:10px;width:auto;transform:none;
+    height:58px;font-size:1rem}
+  #sd-thrust-btn:active,
+  #sd-thrust-btn.firing{transform:translateY(1px) scale(.99)}
+}
+/* Floor-status banner state — orange "DEORBIT WARNING" and red "BREACH"
+   already share the existing banner colours; we just want the BURN button
+   to nudge the player visually when they need to act. */
+#sd-thrust-btn.urgent{
+  animation:sd-thrust-urgent 1s ease-in-out infinite;
+}
+@keyframes sd-thrust-urgent {
+  0%, 100% { box-shadow:0 6px 18px rgba(255,107,33,.32),
+                       inset 0 1px 0 rgba(255,255,255,.35),
+                       0 0 0 0 rgba(255,176,102,.45); }
+  50%      { box-shadow:0 6px 18px rgba(255,107,33,.55),
+                       inset 0 1px 0 rgba(255,255,255,.45),
+                       0 0 0 6px rgba(255,176,102,.08); }
+}
 #sd-hint{position:absolute;top:50px;right:12px;font-size:.6rem;
   color:var(--c-text-3);pointer-events:none;text-align:right;line-height:1.5;
   background:rgba(4,8,18,.55);padding:5px 9px;border-radius:6px;backdrop-filter:blur(4px)}
@@ -335,8 +410,117 @@ select option{background:#0a1024}
 /* Primary stick controls — beefy throttle + gravity sliders sitting
    directly below the stage. The native range stays clickable but the
    coloured fill overlay gives a fuel-gauge-like feel. */
-.primary-controls{display:grid;grid-template-columns:1fr 1fr;gap:9px;padding:9px 11px}
+.primary-controls{display:grid;grid-template-columns:auto 1fr;gap:9px;padding:9px 11px;align-items:stretch}
 @media (max-width:980px){ .primary-controls{grid-template-columns:1fr} }
+
+/* ─── Throttle dial — rotational pilot control, mobile-first.
+   The whole control is one SVG (track + fill arc + tick marks) with the
+   digital readout overlaid in the centre via flex. Pointer events handle
+   drag-around-perimeter; wheel/keyboard provide desktop-grade
+   accessibility. The fill arc uses stroke-dasharray on a path-length-
+   normalised circle so % maps trivially to dash-array; rotate(-90) puts
+   "zero" at 12 o'clock. */
+.throttle-dial-wrap{padding:8px 12px;display:flex;flex-direction:column;align-items:center;gap:6px}
+.throttle-dial-wrap .bs-row{width:100%;display:flex;justify-content:space-between;
+  align-items:baseline;font-size:.66rem;letter-spacing:.05em;text-transform:uppercase;
+  font-weight:800;color:var(--c-text-2)}
+.throttle-dial-wrap .bs-row b{font-size:.95rem;color:#fff;text-transform:none;
+  font-variant-numeric:tabular-nums;font-weight:800}
+.throttle-dial{
+  position:relative;width:148px;height:148px;
+  user-select:none;-webkit-user-select:none;
+  touch-action:none;-webkit-tap-highlight-color:transparent;
+  cursor:pointer;outline:none;
+}
+.throttle-dial:focus-visible{filter:drop-shadow(0 0 4px var(--c-accent))}
+.throttle-dial svg{width:100%;height:100%;overflow:visible;transform:rotate(-90deg)}
+.throttle-dial .td-track{fill:none;stroke:rgba(255,255,255,.07);stroke-width:14}
+.throttle-dial .td-fill{
+  fill:none;stroke-width:14;stroke-linecap:round;
+  stroke:url(#td-grad);
+  transition:stroke-dasharray .12s ease, filter .18s ease;
+}
+.throttle-dial.firing .td-fill{filter:drop-shadow(0 0 6px rgba(255,160,80,.85))}
+.throttle-dial .td-tick{stroke:rgba(255,255,255,.18);stroke-width:1.5}
+.throttle-dial .td-tick.major{stroke:rgba(255,255,255,.36);stroke-width:2}
+.throttle-dial .td-hub{fill:rgba(4,8,18,.85);stroke:rgba(255,255,255,.12);stroke-width:1}
+.throttle-dial .td-readout{
+  position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;pointer-events:none;
+}
+.throttle-dial .td-pct{font-size:1.85rem;font-weight:900;color:#fff;
+  font-variant-numeric:tabular-nums;line-height:1;letter-spacing:-.02em}
+.throttle-dial .td-pct small{font-size:.95rem;color:var(--c-text-3);font-weight:700;
+  margin-left:1px;vertical-align:top}
+.throttle-dial .td-hint{font-size:.5rem;color:var(--c-text-3);
+  letter-spacing:.12em;text-transform:uppercase;font-weight:700;
+  margin-top:2px;text-align:center}
+.throttle-dial.firing .td-pct{color:#ffd49a;text-shadow:0 0 12px rgba(255,140,40,.6)}
+@media (max-width:560px){
+  .throttle-dial{width:128px;height:128px}
+  .throttle-dial .td-pct{font-size:1.6rem}
+}
+
+/* ─── Δv flash readout — pops up when the player releases a burn,
+   showing the Tsiolkovsky-actual Δv they just spent. Floats up + fades
+   out so it doesn't add clutter once the lesson has landed. */
+.dv-flash{
+  position:absolute;left:50%;bottom:78px;transform:translateX(-50%) translateY(0);
+  font-family:monospace;font-weight:800;font-size:1.05rem;
+  color:#ffd49a;text-shadow:0 0 12px rgba(255,140,40,.6);
+  background:rgba(4,8,18,.78);border:1px solid rgba(255,180,90,.45);
+  padding:4px 12px;border-radius:999px;
+  opacity:0;pointer-events:none;z-index:7;
+  transition:opacity .25s ease, transform .9s ease;
+  letter-spacing:.04em;font-variant-numeric:tabular-nums;
+}
+.dv-flash.show{opacity:1;transform:translateX(-50%) translateY(-28px)}
+.dv-flash small{font-size:.65rem;color:var(--c-text-2);margin-left:6px;
+  font-weight:600;letter-spacing:0}
+
+/* Brief screen pulse on burn-start to give the press tactile bite even
+   without sound. Single keyframe, no continuous animation. */
+#sd-stage.burn-pulse::before{
+  content:'';position:absolute;inset:0;pointer-events:none;
+  box-shadow:inset 0 0 0 2px rgba(255,140,60,.55);
+  border-radius:var(--r-lg);
+  animation:sd-burn-pulse .42s ease-out 1;
+  z-index:5;
+}
+@keyframes sd-burn-pulse {
+  from { box-shadow:inset 0 0 0 14px rgba(255,140,60,.35); opacity:1 }
+  to   { box-shadow:inset 0 0 0  2px rgba(255,140,60,0);    opacity:0 }
+}
+
+/* ─── Plan-burn popover — flexible scheduler for advanced pilots.
+   Sits anchored under the Plan button, dismissed by click-outside or
+   Esc. Keep narrow so it fits inside the right column on mobile. */
+.plan-pop{
+  position:absolute;z-index:30;min-width:240px;max-width:300px;
+  background:rgba(8,12,24,.96);border:1px solid var(--c-accent-border-hi);
+  border-radius:var(--r-md);padding:10px 12px;
+  box-shadow:0 12px 32px rgba(0,0,0,.55);
+  backdrop-filter:blur(8px);
+}
+.plan-pop[hidden]{display:none}
+.plan-pop .pp-hd{font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;
+  font-weight:800;color:var(--c-text-2);margin-bottom:6px}
+.plan-pop .pp-row{display:flex;align-items:center;justify-content:space-between;
+  gap:8px;font-size:.72rem;font-weight:700;color:var(--c-text-2);margin-bottom:6px}
+.plan-pop .pp-row b{color:#fff;font-variant-numeric:tabular-nums}
+.plan-pop select, .plan-pop input[type=range]{width:55%}
+.plan-pop select{background:rgba(255,255,255,.05);color:var(--c-text);
+  border:1px solid rgba(255,255,255,.14);border-radius:6px;padding:3px 6px;
+  font-size:.72rem;font-weight:700}
+.plan-pop .pp-actions{display:flex;gap:6px;margin-top:8px}
+.plan-pop .pp-actions .btn{flex:1;font-size:.72rem;padding:6px 10px}
+
+/* Status pill showing an armed scheduled burn — lives inside #sd-status
+   alongside phase/warp so the player always knows something is queued. */
+.status-pill.sched{color:#ffd49a;border-color:rgba(255,180,90,.55);
+  background:rgba(40,18,4,.78);cursor:pointer}
+.status-pill.sched .x{margin-left:6px;color:var(--c-text-3);font-weight:900}
+.status-pill.sched:hover .x{color:var(--c-bad)}
 .big-slider{position:relative;display:block;background:rgba(255,255,255,.025);
   border:1px solid rgba(255,255,255,.1);border-radius:var(--r-md);padding:8px 10px}
 .big-slider .bs-row{display:flex;justify-content:space-between;align-items:baseline;
@@ -504,6 +688,8 @@ select option{background:#0a1024}
       <div id="sd-status">
         <span class="status-pill" id="st-phase">Pre-flight</span>
         <span class="status-pill" id="st-warp">▶ ×1</span>
+        <span class="status-pill sched" id="st-sched" hidden
+              title="Scheduled burn — click to cancel">⏰ —<span class="x">✕</span></span>
       </div>
       <div id="sd-hint">
         <kbd>click</kbd> select<br>
@@ -527,17 +713,52 @@ select option{background:#0a1024}
       <div id="sd-view">view —</div>
       <div id="sd-banner"></div>
       <div class="warmup" id="sd-warmup">Loading atmosphere model…</div>
+      <!-- ── Big "burn-on-hold" button — mobile-friendly, also fires when
+           SPACE is held on desktop. The slider above sets *how hard*, this
+           button sets *when*. Designed to be the most-touched control in
+           the cockpit. -->
+      <button id="sd-thrust-btn" type="button" aria-label="Hold to fire engines">
+        <span class="tb-icon">🚀</span>
+        <span class="tb-text">HOLD&nbsp;TO&nbsp;BURN</span>
+        <span class="tb-key"><kbd>SPACE</kbd></span>
+      </button>
+      <!-- Δv flash readout — populated on burn release. Floats up and fades. -->
+      <div class="dv-flash" id="dv-flash"></div>
     </div>
 
     <!-- ── Primary stick controls — sit directly under the stage so the
          pilot's two most-direct inputs (engine throttle, world gravity)
          are always at hand. Same f-throttle ID drives sim.control. -->
     <div class="panel primary-controls">
-      <label class="big-slider thr">
+      <div class="big-slider thr throttle-dial-wrap">
         <div class="bs-row"><span class="bs-lbl">🚀 Throttle</span><b><span id="v-thr">60</span>%</b></div>
-        <input type="range" id="f-throttle" min="0" max="100" step="1" value="60">
-        <div class="bs-fill" id="thr-fill"></div>
-      </label>
+        <div class="throttle-dial" id="throttle-dial" role="slider"
+             aria-label="Engine throttle" aria-valuemin="0" aria-valuemax="100"
+             aria-valuenow="60" tabindex="0">
+          <svg viewBox="-100 -100 200 200" aria-hidden="true">
+            <defs>
+              <linearGradient id="td-grad" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%"   stop-color="#ffb066"/>
+                <stop offset="55%"  stop-color="#ff8a3a"/>
+                <stop offset="100%" stop-color="#ff5e1f"/>
+              </linearGradient>
+            </defs>
+            <circle class="td-track" cx="0" cy="0" r="78" pathLength="100"/>
+            <circle class="td-fill"  cx="0" cy="0" r="78" pathLength="100"
+                    id="td-fill" stroke-dasharray="60 100"/>
+            <g id="td-ticks"></g>
+            <circle class="td-hub" cx="0" cy="0" r="56"/>
+          </svg>
+          <div class="td-readout">
+            <div class="td-pct"><span id="td-pct">60</span><small>%</small></div>
+            <div class="td-hint">drag · scroll · keys</div>
+          </div>
+        </div>
+        <!-- Hidden compat input — every legacy call site reads f-throttle.
+             We sync this from the dial and dispatch 'input' so existing
+             listeners keep firing without modification. -->
+        <input type="range" id="f-throttle" min="0" max="100" step="1" value="60" hidden>
+      </div>
       <label class="big-slider grv">
         <div class="bs-row"><span class="bs-lbl">🌍 Gravity</span><b><span id="v-grav">1.0</span>× <small id="v-grav-g">9.8 m/s²</small></b></div>
         <input type="range" id="f-gravity" min="0.05" max="3" step="0.05" value="1">
@@ -582,11 +803,46 @@ select option{background:#0a1024}
           <b><span id="v-apo">300</span><small>km</small></b></label>
       </details>
 
-      <div class="btn-row" style="margin-bottom:10px">
+      <div class="btn-row" style="margin-bottom:10px;position:relative">
         <button class="btn primary" id="b-launch">▶ Launch</button>
         <button class="btn" id="b-pause" disabled>⏸ Pause</button>
         <button class="btn warn" id="b-reset">↺ Reset</button>
-        <label class="toggle warn" id="b-auto" title="Auto-fire prograde to defend the target altitude">⟳ Auto-keep</label>
+        <button class="btn" id="b-plan" title="Schedule a future burn at apogee, perigee, or a forecast peak">⏰ Plan</button>
+        <label class="toggle warn" id="b-auto"
+               title="Autopilot (reactive): only fires when perigee breaches the mission floor. Eats efficiency score while engaged.">🤖 Autopilot</label>
+        <!-- Plan-burn popover — anchored under the Plan button via JS. -->
+        <div class="plan-pop" id="plan-pop" hidden>
+          <div class="pp-hd">Schedule burn</div>
+          <div class="pp-row">
+            <span>Trigger</span>
+            <select id="pp-trigger">
+              <option value="apogee">Next apogee</option>
+              <option value="perigee">Next perigee</option>
+              <option value="forecast-peak">Forecast peak</option>
+            </select>
+          </div>
+          <div class="pp-row">
+            <span>Direction</span>
+            <select id="pp-mode">
+              <option value="prograde">⏩ Prograde (raise)</option>
+              <option value="retrograde">⏪ Retrograde (lower)</option>
+            </select>
+          </div>
+          <div class="pp-row">
+            <span>Throttle</span>
+            <input type="range" id="pp-throttle" min="10" max="100" step="5" value="80">
+            <b><span id="pp-throttle-v">80</span>%</b>
+          </div>
+          <div class="pp-row">
+            <span>Duration</span>
+            <input type="range" id="pp-duration" min="1" max="30" step="1" value="5">
+            <b><span id="pp-duration-v">5</span>s</b>
+          </div>
+          <div class="pp-actions">
+            <button class="btn primary" id="pp-commit">Schedule</button>
+            <button class="btn" id="pp-close">Cancel</button>
+          </div>
+        </div>
       </div>
 
       <div class="ctl-group">
@@ -721,7 +977,8 @@ import { getSupabase, isConfigured } from './js/supabase-config.js';
 import * as ENG from './js/satellite-designer-engine.js';
 import * as BUILDER from './js/satellite-builder.js';
 import * as SCENE3D from './js/satellite-designer-3d.js';
-import { MISSIONS, MISSION_ORDER } from './js/satellite-missions.js';
+import { MISSIONS, MISSION_ORDER, assessFloorStatus, BREACH_SCORE_PENALTY_PER_SEC } from './js/satellite-missions.js';
+import * as FORECAST from './js/satellite-designer-forecast.js';
 import * as PROG from './js/satellite-progression.js';
 
 // ── DOM helpers ─────────────────────────────────────────────────────────────
@@ -757,7 +1014,13 @@ const sim = {
   targetSatM: null,    // { x, y } when a target exists (rendezvous)
   debrisM: null,       // { x, y } when debris exists (avoidance)
   // Pilot input — set by keyboard while a key is held; consumed in frame().
-  inputs: { rotL: false, rotR: false, fwd: false, rev: false, fine: false },
+  // `burn` is the momentary thrust trigger (SPACE key, the big BURN button,
+  // or touch-and-hold). It overrides mode → 'prograde' while held and
+  // restores the prior mode on release.
+  inputs: { rotL: false, rotR: false, fwd: false, rev: false, fine: false,
+            burn: false },
+  // Restored when `inputs.burn` flips back to false.
+  _burnPriorMode: null,
   prevMissionComplete: null,
 };
 let sdBuild = BUILDER.defaultBuild();
@@ -897,14 +1160,101 @@ $('f-apo').addEventListener('input', () => {
   if (+$('f-apo').value < +$('f-peri').value) { $('f-peri').value = $('f-apo').value; $('v-peri').textContent = $('f-peri').value; }
 });
 // Throttle — drives both the control and its fuel-gauge-style fill bar.
+// Throttle dial — drives the hidden f-throttle input and the dial's SVG
+// fill arc + digital readout. Single funnel through setThrottlePct keeps
+// the legacy slider listeners, the dial render, and ARIA in sync.
 function syncThrottleFill() {
   const v = +$('f-throttle').value;
-  $('thr-fill').style.setProperty('--fill', v + '%');
+  // SVG fill arc — pathLength is normalised to 100 so the dash is just %.
+  const fill = $('td-fill'); if (fill) fill.setAttribute('stroke-dasharray', `${v} 100`);
+  const pct = $('td-pct');  if (pct)  pct.textContent = v;
+  const dial = $('throttle-dial');
+  if (dial) dial.setAttribute('aria-valuenow', String(v));
+}
+function setThrottlePct(pct, opts = {}) {
+  const clamped = Math.max(0, Math.min(100, Math.round(pct)));
+  const inp = $('f-throttle');
+  if (+inp.value === clamped) return;
+  inp.value = String(clamped);
+  // Dispatch input so the existing slider listener + bindSlider readout fire.
+  inp.dispatchEvent(new Event('input', { bubbles: true }));
 }
 $('f-throttle').addEventListener('input', () => {
   sim.control.throttle = (+$('f-throttle').value) / 100;
   syncThrottleFill();
 });
+
+// Render the tick-mark ring once. 20 ticks (every 5%), majors every 25%.
+{
+  const ticks = $('td-ticks');
+  if (ticks) {
+    const N = 20;
+    let svg = '';
+    for (let i = 0; i < N; i++) {
+      const a = (i / N) * Math.PI * 2;
+      const major = i % 5 === 0;
+      const r1 = major ? 85 : 87, r2 = 92;
+      const x1 = r1 * Math.cos(a), y1 = r1 * Math.sin(a);
+      const x2 = r2 * Math.cos(a), y2 = r2 * Math.sin(a);
+      svg += `<line class="td-tick${major ? ' major' : ''}" x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}"/>`;
+    }
+    ticks.innerHTML = svg;
+  }
+}
+
+// Pointer interaction — drag-around-perimeter or tap-to-set. Angle is
+// computed in dial-local coordinates with 0° at 12 o'clock (the dial's
+// SVG is rotated -90°, so we add π/2 to the raw atan2 angle).
+{
+  const dial = $('throttle-dial');
+  if (dial) {
+    const angleToPct = (clientX, clientY) => {
+      const rect = dial.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top  + rect.height / 2;
+      let a = Math.atan2(clientY - cy, clientX - cx) + Math.PI / 2;
+      if (a < 0) a += Math.PI * 2;
+      return (a / (Math.PI * 2)) * 100;
+    };
+    let dragging = false;
+    const press = (ev) => {
+      ev.preventDefault();
+      dragging = true;
+      try { dial.setPointerCapture?.(ev.pointerId); } catch (_) {}
+      setThrottlePct(angleToPct(ev.clientX, ev.clientY));
+    };
+    const move = (ev) => {
+      if (!dragging) return;
+      setThrottlePct(angleToPct(ev.clientX, ev.clientY));
+    };
+    const release = (ev) => {
+      if (!dragging) return;
+      dragging = false;
+      try { dial.releasePointerCapture?.(ev.pointerId); } catch (_) {}
+    };
+    dial.addEventListener('pointerdown',   press);
+    dial.addEventListener('pointermove',   move);
+    dial.addEventListener('pointerup',     release);
+    dial.addEventListener('pointercancel', release);
+    dial.addEventListener('pointerleave',  release);
+    // Scroll-to-adjust on desktop. Inverted (wheel-up = throttle-up) feels
+    // natural with a vertical pilot mindset.
+    dial.addEventListener('wheel', (ev) => {
+      ev.preventDefault();
+      const step = ev.shiftKey ? 1 : 5;
+      setThrottlePct(+$('f-throttle').value + (ev.deltaY < 0 ? step : -step));
+    }, { passive: false });
+    // Keyboard nudge — Arrow keys ±5, Shift+Arrow ±1, Home/End hard stops.
+    dial.addEventListener('keydown', (ev) => {
+      const cur = +$('f-throttle').value;
+      const step = ev.shiftKey ? 1 : 5;
+      if (ev.key === 'ArrowUp'   || ev.key === 'ArrowRight') { ev.preventDefault(); setThrottlePct(cur + step); }
+      else if (ev.key === 'ArrowDown' || ev.key === 'ArrowLeft')  { ev.preventDefault(); setThrottlePct(cur - step); }
+      else if (ev.key === 'Home') { ev.preventDefault(); setThrottlePct(0); }
+      else if (ev.key === 'End')  { ev.preventDefault(); setThrottlePct(100); }
+    });
+  }
+}
 syncThrottleFill();
 
 // Gravity slider — scales env.gravityMul in real time. Pre-flight changes
@@ -971,11 +1321,116 @@ $('warp-modes').addEventListener('click', (e) => {
     x.classList.toggle('active', x === t));
   $('st-warp').textContent = (sim.paused ? '⏸ ' : '▶ ') + '×' + sim.warp;
 });
-// Auto station-keep
+// Autopilot (reactive) — only meaningful while the sim is running. The
+// frame loop checks sim.auto + the mission floor; this toggle just owns
+// the on/off state. Renamed from "auto-keep" and rebalanced in the loop
+// (no preemptive firing; efficiency penalty applied while engaged).
 $('b-auto').addEventListener('click', () => {
   sim.auto = !sim.auto;
   $('b-auto').classList.toggle('active', sim.auto);
+  if (sim.auto) toast('🤖 Autopilot armed — reactive only (fires when floor is breached).');
 });
+
+// ── Plan-burn popover ───────────────────────────────────────────────────────
+// A small scheduler that queues one prograde or retrograde burn to fire
+// at the next apogee, perigee, or forecast peak. The frame loop watches
+// for the trigger condition; once met, the burn fires for the configured
+// duration and self-disarms. Educational: forces the player to think in
+// terms of orbit phase rather than "burn now".
+{
+  const pop = $('plan-pop');
+  const planBtn = $('b-plan');
+  // Live readouts inside the popover.
+  $('pp-throttle').addEventListener('input', () => {
+    $('pp-throttle-v').textContent = $('pp-throttle').value;
+  });
+  $('pp-duration').addEventListener('input', () => {
+    $('pp-duration-v').textContent = $('pp-duration').value;
+  });
+  const openPopover = () => {
+    // Anchor under the Plan button. Inline positioning so the popover
+    // works even if the surrounding panel doesn't itself relative-position.
+    const r = planBtn.getBoundingClientRect();
+    const host = planBtn.offsetParent || document.body;
+    const hr = host.getBoundingClientRect();
+    pop.style.top  = (planBtn.offsetTop + planBtn.offsetHeight + 6) + 'px';
+    pop.style.left = (planBtn.offsetLeft) + 'px';
+    pop.hidden = false;
+    // Seed the throttle slider with the current dial value so 'commit'
+    // matches the player's intuition unless they tweak it.
+    $('pp-throttle').value = $('f-throttle').value;
+    $('pp-throttle-v').textContent = $('pp-throttle').value;
+  };
+  const closePopover = () => { pop.hidden = true; };
+  planBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (pop.hidden) openPopover(); else closePopover();
+  });
+  $('pp-close').addEventListener('click', closePopover);
+  // Click-outside / Esc to dismiss. Keep listeners attached at document
+  // level — they're cheap and self-no-op when the popover is hidden.
+  document.addEventListener('click', (e) => {
+    if (pop.hidden) return;
+    if (pop.contains(e.target) || planBtn.contains(e.target)) return;
+    closePopover();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !pop.hidden) closePopover();
+  });
+  $('pp-commit').addEventListener('click', () => {
+    if (!sim.running) {
+      toast('Launch first — schedules a burn during flight.', true);
+      return;
+    }
+    sim.scheduledBurn = {
+      trigger:  $('pp-trigger').value,        // apogee | perigee | forecast-peak
+      mode:     $('pp-mode').value,           // prograde | retrograde
+      throttle: (+$('pp-throttle').value) / 100,
+      durationS: +$('pp-duration').value,
+      armedAt:  sim.state ? sim.state.t : 0,
+      firingUntilT: null,                     // set when trigger fires
+      _peakSimSec: null,
+    };
+    // Snapshot the forecast peak at commit-time so the trigger fires at a
+    // deterministic sim-time even if the projection updates mid-flight.
+    if (sim.scheduledBurn.trigger === 'forecast-peak') {
+      if (sim._forecastPeakSimSec != null) {
+        sim.scheduledBurn._peakSimSec = sim._forecastPeakSimSec;
+      } else {
+        sim.scheduledBurn = null;
+        toast('No forecast peak available — fetch is still warming up.', true);
+        return;
+      }
+    }
+    closePopover();
+    updateSchedPill();
+    toast(`⏰ Burn queued — ${sim.scheduledBurn.mode} ${$('pp-duration').value}s @ ${$('pp-throttle').value}% on next ${$('pp-trigger').value}.`);
+  });
+  // Status pill: click to cancel an armed scheduled burn.
+  $('st-sched').addEventListener('click', () => {
+    if (!sim.scheduledBurn) return;
+    if (sim.scheduledBurn.firingUntilT) return;  // can't cancel mid-fire
+    sim.scheduledBurn = null;
+    updateSchedPill();
+    toast('Scheduled burn cancelled.');
+  });
+}
+
+// Refresh the scheduled-burn status pill from sim state. Called whenever
+// the schedule changes and once per second during flight.
+function updateSchedPill() {
+  const pill = $('st-sched');
+  if (!pill) return;
+  const sb = sim.scheduledBurn;
+  if (!sb) { pill.hidden = true; return; }
+  pill.hidden = false;
+  if (sb.firingUntilT != null) {
+    const remaining = Math.max(0, sb.firingUntilT - (sim.state?.t || 0));
+    pill.firstChild.nodeValue = `🔥 ${sb.mode.toUpperCase()} ${remaining.toFixed(1)}s `;
+  } else {
+    pill.firstChild.nodeValue = `⏰ ${sb.trigger} · ${sb.mode} ${sb.durationS}s `;
+  }
+}
 
 // ── Mission control ─────────────────────────────────────────────────────────
 function launch() {
@@ -989,7 +1444,27 @@ function launch() {
   sim.prevMissionComplete = null;
   // Heading starts aligned to velocity so manual-fire = prograde by default.
   sim.control.heading = Math.atan2(sim.state.vy, sim.state.vx);
-  sim.inputs = { rotL: false, rotR: false, fwd: false, rev: false, fine: false };
+  sim.inputs = { rotL: false, rotR: false, fwd: false, rev: false, fine: false, burn: false };
+  sim._burnPriorMode = null; sim._lastFloorStatus = null;
+  sim._prevRdot = null; sim.scheduledBurn = null; sim._burnAnchor = null;
+  sim._forecastBurnMultiplier = 1.0;
+  updateSchedPill();
+  // Anchor sim time = 0 to wallclock now so forecast-peak triggers can map
+  // real-world AR(1) horizons onto sim seconds.
+  sim._launchedWallMs = Date.now();
+  // Refresh forecast and pre-compute the next peak F10.7 horizon in sim
+  // seconds. Silent on failure — forecast-peak trigger simply won't fire.
+  FORECAST.ensureForecastReady().then(() => {
+    try {
+      const series = FORECAST.getForecastSeries({ horizons: [0, 1, 2, 3, 4, 6] });
+      if (!series?.length) return;
+      let peakHr = 0, peakF = -Infinity;
+      for (const s of series) {
+        if (s.f107 > peakF) { peakF = s.f107; peakHr = s.horizonHours; }
+      }
+      sim._forecastPeakSimSec = peakHr > 0 ? peakHr * 3600 : null;
+    } catch (_) { sim._forecastPeakSimSec = null; }
+  }).catch(() => {});
   $('b-launch').disabled = true;
   $('b-pause').disabled = false; $('b-pause').textContent = '⏸ Pause';
   $('b-reset').disabled = false;
@@ -1036,6 +1511,14 @@ function resetSim() {
   setPhase('Pre-flight', '');
   clearReadouts();
   setBanner('', '');
+  // Drop any lingering momentary-thrust state from the previous mission.
+  sim.inputs.burn = false; sim._burnPriorMode = null;
+  sim._lastFloorStatus = null;
+  sim._prevRdot = null; sim.scheduledBurn = null; sim._burnAnchor = null;
+  $('sd-thrust-btn')?.classList.remove('urgent','firing');
+  $('throttle-dial')?.classList.remove('firing');
+  updateSchedPill();
+  $('sd-thrust-btn')?.classList.remove('urgent','firing');
   // Refresh the inline objective text so the panel doesn't show stale data.
   refreshObjectivePanel();
 }
@@ -1053,10 +1536,175 @@ $('b-pause').addEventListener('click', () => {
   $('st-warp').textContent = (sim.paused ? '⏸ ' : '▶ ') + '×' + sim.warp;
   setPhase(sim.paused ? '⏸ Paused' : 'In flight', sim.paused ? 'warn' : 'good');
 });
+// SPACE = hold-to-burn. While flying, SPACE forces a prograde tangential
+// fire at the slider throttle and releases back to whatever mode was active
+// before. While *not* flying, SPACE still launches (muscle memory). Pause
+// has moved to the dedicated button + 'P' key — losing SPACE-pause is the
+// price of having a real hold-to-thrust control.
 addEventListener('keydown', (e) => {
   if (e.target.matches('input,select,textarea')) return;
-  if (e.code === 'Space') { e.preventDefault(); if (sim.running) $('b-pause').click(); else launch(); }
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (!sim.running) { launch(); return; }
+    if (e.repeat) return;                 // ignore auto-repeat ticks
+    setBurnInput(true);
+  } else if (e.code === 'KeyP' && sim.running) {
+    e.preventDefault();
+    $('b-pause').click();
+  }
 });
+addEventListener('keyup', (e) => {
+  if (e.code === 'Space') setBurnInput(false);
+});
+
+// The BURN button: pointer events cover mouse + touch + stylus uniformly.
+// `pointerdown` fires, `pointerup` / `pointercancel` / `pointerleave`
+// releases. Calling setPointerCapture means a finger that slides off the
+// button still releases properly when lifted.
+{
+  const btn = $('sd-thrust-btn');
+  const press = (ev) => {
+    if (btn.disabled) return;
+    ev.preventDefault();
+    if (!sim.running) { launch(); return; }
+    try { btn.setPointerCapture?.(ev.pointerId); } catch (_) {}
+    setBurnInput(true);
+  };
+  const release = (ev) => {
+    if (!sim.running && !sim.inputs.burn) return;
+    try { btn.releasePointerCapture?.(ev.pointerId); } catch (_) {}
+    setBurnInput(false);
+  };
+  btn.addEventListener('pointerdown',   press);
+  btn.addEventListener('pointerup',     release);
+  btn.addEventListener('pointercancel', release);
+  btn.addEventListener('pointerleave',  release);
+  // Belt-and-braces — fired when the page is hidden mid-press (tab switch,
+  // alt-tab, browser scroll-jacking). Without this the engine keeps thrusting.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') setBurnInput(false);
+  });
+}
+
+// setBurnInput is the single funnel for momentary thrust. Saves the prior
+// burn mode on press, forces 'prograde' (the tangential orbit-raising vector
+// the player almost always wants), restores on release. Skips the override
+// while the player is hand-flying in manual mode — W/S already handle that.
+function setBurnInput(on) {
+  if (on === sim.inputs.burn) return;
+  sim.inputs.burn = !!on;
+  const btn = $('sd-thrust-btn');
+  if (!btn) return;
+  btn.classList.toggle('firing', sim.inputs.burn);
+  if (sim.inputs.burn) {
+    // Don't override manual modes — those have their own W/S hold semantics.
+    if (sim.control.mode === 'manual' || sim.control.mode === 'manual-retro') return;
+    sim._burnPriorMode = sim.control.mode;
+    setBurnMode('prograde');
+  } else if (sim._burnPriorMode != null) {
+    setBurnMode(sim._burnPriorMode);
+    sim._burnPriorMode = null;
+  }
+}
+
+// The BURN button: pointer events cover mouse + touch + stylus uniformly.
+// `pointerdown` fires, `pointerup` / `pointercancel` / `pointerleave`
+// releases. Calling setPointerCapture means a finger that slides off the
+// button still releases properly when lifted.
+{
+  const btn = $('sd-thrust-btn');
+  const press = (ev) => {
+    if (btn.disabled) return;
+    ev.preventDefault();
+    if (!sim.running) { launch(); return; }
+    try { btn.setPointerCapture?.(ev.pointerId); } catch (_) {}
+    setBurnInput(true);
+  };
+  const release = (ev) => {
+    if (!sim.running && !sim.inputs.burn) return;
+    try { btn.releasePointerCapture?.(ev.pointerId); } catch (_) {}
+    setBurnInput(false);
+  };
+  btn.addEventListener('pointerdown',   press);
+  btn.addEventListener('pointerup',     release);
+  btn.addEventListener('pointercancel', release);
+  btn.addEventListener('pointerleave',  release);
+  // Belt-and-braces — fired when the page is hidden mid-press (tab switch,
+  // alt-tab, browser scroll-jacking). Without this the engine keeps thrusting.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') setBurnInput(false);
+  });
+}
+
+// setBurnInput is the single funnel for momentary thrust. Saves the prior
+// burn mode on press, forces 'prograde' (the tangential orbit-raising vector
+// the player almost always wants), restores on release. Skips the override
+// while the player is hand-flying in manual mode — W/S already handle that.
+function setBurnInput(on) {
+  if (on === sim.inputs.burn) return;
+  sim.inputs.burn = !!on;
+  const btn  = $('sd-thrust-btn');
+  const dial = $('throttle-dial');
+  if (btn)  btn.classList.toggle('firing', sim.inputs.burn);
+  if (dial) dial.classList.toggle('firing', sim.inputs.burn);
+  if (sim.inputs.burn) {
+    // Don't override manual modes — those have their own W/S hold semantics.
+    if (sim.control.mode === 'manual' || sim.control.mode === 'manual-retro') return;
+    sim._burnPriorMode = sim.control.mode;
+    setBurnMode('prograde');
+    // Record an anchor so we can compute Δv-delivered on release. We use
+    // fuel actually consumed × eff. Isp · g₀ (Tsiolkovsky) — that's the
+    // honest figure, not just |Δv_inertial| which would include drag.
+    if (sim.state) {
+      sim._burnAnchor = {
+        fuel: sim.state.fuel,
+        t:    sim.state.t,
+        speed:  Math.hypot(sim.state.vx, sim.state.vy),
+        scoreBonus: 0,
+      };
+    }
+    // Haptic + visual bite. vibrate() is a no-op (returns false) when the
+    // device doesn't support it or the user has muted vibrations.
+    try { navigator.vibrate?.(18); } catch (_) {}
+    const stage = $('sd-stage');
+    if (stage) {
+      stage.classList.remove('burn-pulse');
+      // Force reflow so the animation re-runs on rapid taps.
+      void stage.offsetWidth;
+      stage.classList.add('burn-pulse');
+    }
+  } else if (sim._burnPriorMode != null) {
+    setBurnMode(sim._burnPriorMode);
+    sim._burnPriorMode = null;
+    // Δv-delivered flash. Use the eroded effective Isp at burn-end; over a
+    // short burn it's a close-enough constant. Skip the popup for
+    // sub-millisecond burns (touch noise) or zero-fuel cases.
+    if (sim._burnAnchor && sim.state) {
+      const fuelUsed = Math.max(0, sim._burnAnchor.fuel - sim.state.fuel);
+      const burnT    = Math.max(0, sim.state.t - sim._burnAnchor.t);
+      if (fuelUsed > 1e-4 && burnT > 0.05) {
+        const m0 = sim.design.dryMass + sim._burnAnchor.fuel;
+        const mf = sim.design.dryMass + sim.state.fuel;
+        const ispEff = sim.design.isp * (1 - 0.25 * (sim.state.burnSeconds
+                       ? Math.min(1, sim.state.burnSeconds / (sim.design.throatLifeS ?? 6000)) : 0));
+        const dv = ispEff * ENG.G0 * Math.log(m0 / Math.max(mf, 1e-9));
+        const bonus = sim._burnAnchor.scoreBonus || 0;
+        const flash = $('dv-flash');
+        if (flash) {
+          flash.innerHTML = `+${dv.toFixed(2)} m/s<small>${fuelUsed.toFixed(2)} kg · ${burnT.toFixed(1)}s</small>`
+                          + (bonus > 0 ? ` <small style="color:#7fdcff">⚡ +2× FORECAST</small>` : '');
+          flash.classList.remove('show');
+          void flash.offsetWidth;
+          flash.classList.add('show');
+          clearTimeout(setBurnInput._flashT);
+          setBurnInput._flashT = setTimeout(() => flash.classList.remove('show'), 1100);
+        }
+      }
+      sim._burnAnchor = null;
+    }
+    try { navigator.vibrate?.(8); } catch (_) {}
+  }
+}
 
 // ── Simulation loop ─────────────────────────────────────────────────────────
 let lastT = performance.now();
@@ -1066,6 +1714,17 @@ function frame(now) {
 
   if (sim.running && !sim.paused && sim.state?.alive) {
     let simSecs = Math.min(realDt * sim.warp, 240);
+    // When an apogee/perigee-triggered burn is armed, cap the per-frame
+    // step so the rdot sign-change detector can't skip across an extremum
+    // in a single tick at high time-warp. 30 s is well under any LEO
+    // half-period; the cost is the sim runs slower while a schedule is
+    // queued — a fair trade for reliable triggers.
+    if (sim.scheduledBurn
+        && sim.scheduledBurn.firingUntilT == null
+        && (sim.scheduledBurn.trigger === 'apogee'
+            || sim.scheduledBurn.trigger === 'perigee')) {
+      simSecs = Math.min(simSecs, 30);
+    }
 
     // Pilot stick input — A/D rotate heading, W/S fire manual fwd/rev.
     // Rotation rate is independent of warp so it's predictable at any speed.
@@ -1079,16 +1738,63 @@ function frame(now) {
       else if (sim.control.mode === 'manual' || sim.control.mode === 'manual-retro') setBurnMode('off');
     }
 
-    // Auto station-keeping: defend the target perigee with prograde burns.
+    // Autopilot (reactive). Only engages when perigee has *already* dipped
+    // below the mission's altitude floor — pre-emptive station-keeping is
+    // the player's job, not the autopilot's. This removes the "one toggle
+    // and the game plays itself" failure mode while keeping a safety net
+    // that catches mid-burn distractions.
     if (sim.auto) {
-      const tgt = +$('f-tgt').value;
-      const tel = ENG.telemetry(sim.state, sim.design, sim.env, sim.control.attitudeMult);
-      if (tel.periAltKm < tgt && sim.state.fuel > 0) {
-        sim.control.mode = 'prograde';
-        syncModeUI('prograde');
-      } else if (tel.periAltKm > tgt + 8 && sim.control.mode === 'prograde') {
+      const mission0 = MISSIONS[sim.missionId];
+      const floor = mission0?.altitudeFloorKm
+                  ?? Math.max(150, +$('f-tgt').value - 50);
+      const tel0 = ENG.telemetry(sim.state, sim.design, sim.env, sim.control.attitudeMult);
+      if (tel0.periAltKm < floor && sim.state.fuel > 0) {
+        if (sim.control.mode !== 'prograde') { sim.control.mode = 'prograde'; syncModeUI('prograde'); }
+      } else if (tel0.periAltKm > floor + 12 && sim.control.mode === 'prograde') {
         sim.control.mode = 'off';
         syncModeUI('off');
+      }
+    }
+
+    // Scheduled-burn trigger. Detect apogee/perigee via the sign of r·v
+    // (radial velocity component): positive = climbing, negative = falling.
+    // Sign-change positive→negative ≡ apogee passage; negative→positive ≡
+    // perigee. Forecast-peak fires at a precomputed sim-time anchored to
+    // launch. While firing, override throttle + mode; restore on completion.
+    if (sim.scheduledBurn) {
+      const sb = sim.scheduledBurn;
+      // Compute r·v *before* the advance — caught at the right phase.
+      const rdot = (sim.state.x * sim.state.vx + sim.state.y * sim.state.vy)
+                 / Math.hypot(sim.state.x, sim.state.y);
+      const prev = sim._prevRdot;
+      sim._prevRdot = rdot;
+
+      // Fire trigger detection — only if not already firing.
+      if (sb.firingUntilT == null && prev != null) {
+        let fire = false;
+        if (sb.trigger === 'apogee'  && prev > 0 && rdot <= 0) fire = true;
+        if (sb.trigger === 'perigee' && prev < 0 && rdot >= 0) fire = true;
+        if (sb.trigger === 'forecast-peak' && sb._peakSimSec != null
+            && sim.state.t >= sb._peakSimSec) fire = true;
+        if (fire) {
+          sb.firingUntilT = sim.state.t + sb.durationS;
+          sb._priorMode    = sim.control.mode;
+          sb._priorThrPct  = +$('f-throttle').value;
+          setBurnMode(sb.mode);
+          setThrottlePct(sb.throttle * 100);
+          try { navigator.vibrate?.(25); } catch (_) {}
+          toast(`🔥 Scheduled burn firing — ${sb.mode} ${sb.durationS}s @ ${(sb.throttle*100|0)}%`);
+        }
+      }
+
+      // Firing-completion check.
+      if (sb.firingUntilT != null && sim.state.t >= sb.firingUntilT) {
+        // Restore prior mode + throttle, clear the schedule.
+        if (sb._priorMode  != null) setBurnMode(sb._priorMode);
+        if (sb._priorThrPct != null) setThrottlePct(sb._priorThrPct);
+        sim.scheduledBurn = null;
+        updateSchedPill();
+        toast('✅ Scheduled burn complete.');
       }
     }
 
@@ -1098,6 +1804,25 @@ function frame(now) {
 
     const tel = ENG.telemetry(sim.state, sim.design, sim.env, sim.control.attitudeMult);
 
+    // Forecast-aligned 2× scoring multiplier. The player is rewarded for
+    // burning *during a forecast-peak window* (manual, sim.inputs.burn).
+    // We surface the multiplier via sim._forecastBurnMultiplier and apply
+    // it below to any mission-emitted scoreDelta. Autopilot-driven burns
+    // get a 0.6× efficiency penalty — the price of letting the computer
+    // fly. The penalty multiplies onto the same scoreDelta channel.
+    let _scoreMult = 1.0;
+    if (sim.inputs.burn) {
+      const peakSec = sim._forecastPeakSimSec;
+      if (peakSec != null && Math.abs(sim.state.t - peakSec) < 1800) {
+        _scoreMult = 2.0;
+      }
+    }
+    if (sim.auto && sim.control.mode === 'prograde' && !sim.inputs.burn) {
+      _scoreMult *= 0.6;
+    }
+    sim._forecastBurnMultiplier = _scoreMult;
+    if (sim._burnAnchor) sim._burnAnchor.scoreBonus = _scoreMult >= 2 ? 1 : 0;
+
     // Mission tick — let the active scenario advance its state machine and
     // contribute to the score. `missionCtx` was prepped in startMission().
     if (sim.missionCtx) {
@@ -1105,7 +1830,7 @@ function frame(now) {
       sim.missionCtx.lastPeriKm = tel.periAltKm;
       const mission = MISSIONS[sim.missionId];
       const out = mission.tick?.(sim.missionCtx, simSecs, tel) || {};
-      if (out.scoreDelta) sim.score += out.scoreDelta;
+      if (out.scoreDelta) sim.score += out.scoreDelta * _scoreMult;
       if (out.done) {
         sim.running = false;
         setPhase('🏁 Mission complete', 'good');
@@ -1129,11 +1854,44 @@ function frame(now) {
     sim.altHist.push([sim.state.t, tel.altKm]);
     if (sim.altHist.length > 600) sim.altHist.shift();
 
+    // ── Floor / decay warning state ────────────────────────────────────────
+    // Mission floors are *above* the engine's hard re-entry floor (80 km).
+    // We escalate "ok → warn → breach" so the player has time to read the
+    // forecast, choose a thrust schedule, and execute. Actual failure still
+    // happens only when the engine reports reentry.
+    const mission_ = MISSIONS[sim.missionId];
+    if (mission_ && mission_.altitudeFloorKm != null && sim.state.alive) {
+      const fs = assessFloorStatus(mission_, tel,
+        (n) => ENG.projectPerigee(tel, n, { playerDvPerOrbit: 0 }));
+      if (fs.status !== sim._lastFloorStatus) {
+        sim._lastFloorStatus = fs.status;
+        if (fs.status === 'warn') {
+          setBanner(`⚠ DEORBIT WARNING — perigee will dip below ${fs.floorKm} km`, 'warn');
+          $('sd-thrust-btn')?.classList.add('urgent');
+        } else if (fs.status === 'breach') {
+          setBanner(`🔴 FLOOR BREACHED — perigee ${fs.periKm.toFixed(0)} km < ${fs.floorKm} km. Burn now.`, 'bad');
+          $('sd-thrust-btn')?.classList.add('urgent');
+        } else if (fs.status === 'ok') {
+          $('sd-thrust-btn')?.classList.remove('urgent');
+          // Don't clear a banner the mission itself set — only our own.
+          if ($('sd-banner').dataset.owner === 'floor') setBanner('', '');
+        }
+        $('sd-banner').dataset.owner = fs.status === 'ok' ? '' : 'floor';
+      }
+      // Passive score erosion while breached — pushes the player to fix it
+      // instead of grinding through the warning band.
+      if (fs.status === 'breach') {
+        sim.score = Math.max(0, sim.score - BREACH_SCORE_PENALTY_PER_SEC * simSecs);
+      }
+    }
+
     if (!sim.state.alive) {
       sim.running = false; sim.paused = false;
       setPhase(sim.state.reason === 'reentry' ? '🔥 Re-entry — vehicle destroyed' : 'Mission ended', 'bad');
       $('b-pause').disabled = true; $('b-pause').textContent = '⏸ Pause';
       $('b-launch').disabled = false;
+      $('sd-thrust-btn')?.classList.remove('urgent','firing');
+      setBurnInput(false);
       // For Deorbit, hitting the atmosphere with perigee in the window is success.
       const deorbitSuccess = sim.missionId === 'deorbit'
         && (sim.missionCtx?.lastPeriKm ?? 999) >= 60
@@ -1151,6 +1909,9 @@ function frame(now) {
     }
     updateTelemetry(tel);
     refreshObjectivePanel(tel);
+    // Scheduled-burn pill ticks the countdown when armed/firing. Cheap so
+    // we run it every frame; visual delta only when text actually changes.
+    if (sim.scheduledBurn) updateSchedPill();
   } else if (sim.state) {
     // Live telemetry tick even when paused so the objective bar reflects truth.
     refreshObjectivePanel(ENG.telemetry(sim.state, sim.design, sim.env, sim.control.attitudeMult));
@@ -2057,7 +2818,16 @@ window.__sd = { auth, engine: ENG, sim, builder: BUILDER,
               setMission },
   progression: { getProfile: () => ({ ...profile }),
                  reset: () => { profile = PROG.resetProfile(); applyUnlockLocks(); renderPilotPanel(); toast('Pilot profile reset.'); },
-                 award: (xp) => { profile.xp += +xp; PROG.saveProfile(profile); applyUnlockLocks(); renderPilotPanel(); } } };
+                 award: (xp) => { profile.xp += +xp; PROG.saveProfile(profile); applyUnlockLocks(); renderPilotPanel(); } },
+  forecast: { ensureReady: FORECAST.ensureForecastReady,
+              get: FORECAST.getForecast,
+              series: FORECAST.getForecastSeries,
+              nowcast: FORECAST.getNowcast,
+              status: FORECAST.getStatus,
+              setOverride: FORECAST.setMissionOverride },
+  thrust: { pressBurn: () => setBurnInput(true),
+            releaseBurn: () => setBurnInput(false),
+            isFiring: () => !!sim.inputs.burn } };
 
 (async function boot() {
   renderMissionPicker();
@@ -2070,6 +2840,10 @@ window.__sd = { auth, engine: ENG, sim, builder: BUILDER,
   // Warm the thermosphere model with one sample, then drop the overlay.
   try { ENG.airDensity(400_000, env); } catch (e) { console.warn(e); }
   $('sd-warmup').style.display = 'none';
+  // Kick off the NOAA forecast fetch in the background — the HUD will start
+  // surfacing real F10.7/Ap projections as soon as it returns. Failure is
+  // silent; the module falls back to a single-point persistence forecast.
+  FORECAST.ensureForecastReady().catch(() => {});
   resetSim();
   setMission('station');             // Default scenario
   await ensureScene();               // Build the 3-D stage
