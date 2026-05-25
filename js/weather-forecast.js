@@ -118,6 +118,86 @@ export class PersistenceForecaster {
     }
 }
 
+// ── Open-Meteo NWP forecaster ──────────────────────────────────────────────
+
+/**
+ * Wraps the upstream NWP (Open-Meteo GFS-blend) already in the WeatherHistory
+ * forecast ring as a Forecaster. No prediction logic — the heavy lifting
+ * happens on NOAA / DWD's compute. We just expose what's in the ring as
+ * predictions so the validator can score them against the in-browser models
+ * (persistence, anomaly-AR, optical-flow, wind-advection) on the same
+ * pooled-MAE / Murphy-skill scale.
+ *
+ * Honesty model
+ *   At each weather-history-ingest event (T0), runAll() invokes us. We read
+ *   the forecast ring's frame at T0 + h·HOUR for each h ∈ FORECAST_HORIZONS_H
+ *   and register it as a pending prediction. WeatherHistory.purgeStaleForecasts
+ *   has already removed the ring entry at T0 by the time we run, so we cannot
+ *   accidentally use ground truth as a prediction. When the observation for
+ *   T0 + h arrives an hour later, the validator scores our pending row against
+ *   it just like every other forecaster's output.
+ *
+ * Caveat
+ *   The NWP frame for target T was issued by some GFS cycle (00/06/12/18 UTC)
+ *   before T0. The effective lead time at NWP-issue is therefore ≥ h hours,
+ *   not exactly h. Our headline "h-hour skill" characterises "what does the
+ *   latest GFS run available to a browser at T0 say about T0 + h" — which is
+ *   the right thing for ranking models in this registry, but slightly
+ *   pessimistic for GFS vs. its native ≥h-hour skill at issue time.
+ */
+const HOUR_MS = 3_600_000;
+
+export class OpenMeteoNWPForecaster {
+    static id = 'open-meteo-gfs-v1';
+
+    constructor() {
+        this.id = OpenMeteoNWPForecaster.id;
+    }
+
+    forecast({ history }) {
+        const past = history.all();
+        if (past.length === 0) return null;
+        const newest = past[past.length - 1];
+        const { t: issuedMs, gridW, gridH } = newest;
+
+        const futures = typeof history.allForecasts === 'function'
+            ? history.allForecasts()
+            : [];
+        if (futures.length === 0) return null;
+
+        // Index by hour-aligned t. WeatherHistory.ingestForecast already
+        // hour-floors `t`, so an exact === lookup suffices.
+        const byTarget = new Map();
+        for (const f of futures) byTarget.set(f.t, f);
+
+        const frames  = {};
+        const targets = {};
+        const matched = [];
+        for (const h of FORECAST_HORIZONS_H) {
+            const tt = Math.floor((issuedMs + h * HOUR_MS) / HOUR_MS) * HOUR_MS;
+            const f  = byTarget.get(tt);
+            if (!f || f.gridW !== gridW || f.gridH !== gridH) continue;
+            if (!(f.coarse instanceof Float32Array)) continue;
+            // Defensive copy. The forecast ring entry may be overwritten on
+            // the next batch fetch; the validator may hold this in IDB for
+            // up to MATCH_GRACE_MS waiting for ground truth.
+            frames[h]  = new Float32Array(f.coarse);
+            targets[h] = f.t;
+            matched.push(h);
+        }
+        if (matched.length === 0) return null;
+
+        return {
+            model_id:  this.id,
+            issued_ms: issuedMs,
+            horizons:  matched,
+            gridW, gridH,
+            frames,
+            target_ms: targets,
+        };
+    }
+}
+
 // ── Forecast registry ──────────────────────────────────────────────────────
 
 /**
