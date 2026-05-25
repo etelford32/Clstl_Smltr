@@ -551,31 +551,38 @@ export function createDensityChart(container, replay, _player, opts = {}) {
 
     // Truth scatter on top — GRACE-FO as filled circles, Swarm-C as crosses
     // so the two sources stay distinguishable in print and at small sizes.
+    // Re-buildable so /api/density/tudelft can swap real observations in at
+    // runtime — updateTruth(grace_fo, swarm_c) calls _drawTruth again.
     const truthLayer = svg("g", { class: "gn-truth" });
-    for (const p of truth.grace_fo || []) {
-        truthLayer.appendChild(svg("circle", {
-            cx: xScale(p.h), cy: yScale(p.rho),
-            r: 4,
-            fill: COLORS.truth,
-            stroke: "rgba(0,0,0,0.55)",
-            "stroke-width": 1,
-        }));
-    }
-    for (const p of truth.swarm_c || []) {
-        const cx = xScale(p.h);
-        const cy = yScale(p.rho);
-        const s  = 4.2;
-        // Cross/X glyph rendered as a small group of two lines.
-        truthLayer.appendChild(svg("line", {
-            x1: cx - s, y1: cy - s, x2: cx + s, y2: cy + s,
-            stroke: COLORS.truthAlt, "stroke-width": 1.6, "stroke-linecap": "round",
-        }));
-        truthLayer.appendChild(svg("line", {
-            x1: cx - s, y1: cy + s, x2: cx + s, y2: cy - s,
-            stroke: COLORS.truthAlt, "stroke-width": 1.6, "stroke-linecap": "round",
-        }));
-    }
     traceLayer.appendChild(truthLayer);
+
+    function _drawTruth(grace_fo, swarm_c) {
+        while (truthLayer.firstChild) truthLayer.removeChild(truthLayer.firstChild);
+        for (const p of grace_fo || []) {
+            truthLayer.appendChild(svg("circle", {
+                cx: xScale(p.h), cy: yScale(p.rho),
+                r: 4,
+                fill: COLORS.truth,
+                stroke: "rgba(0,0,0,0.55)",
+                "stroke-width": 1,
+            }));
+        }
+        for (const p of swarm_c || []) {
+            const cx = xScale(p.h);
+            const cy = yScale(p.rho);
+            const s  = 4.2;
+            // Cross/X glyph rendered as a small group of two lines.
+            truthLayer.appendChild(svg("line", {
+                x1: cx - s, y1: cy - s, x2: cx + s, y2: cy + s,
+                stroke: COLORS.truthAlt, "stroke-width": 1.6, "stroke-linecap": "round",
+            }));
+            truthLayer.appendChild(svg("line", {
+                x1: cx - s, y1: cy + s, x2: cx + s, y2: cy - s,
+                stroke: COLORS.truthAlt, "stroke-width": 1.6, "stroke-linecap": "round",
+            }));
+        }
+    }
+    _drawTruth(truth.grace_fo, truth.swarm_c);
 
     // Inline source legend for the truth markers — the page legend
     // already calls out the model colors, but the GRACE/Swarm shape
@@ -628,8 +635,13 @@ export function createDensityChart(container, replay, _player, opts = {}) {
             yScale(dens.msis_apgnd[idx]),
         ]);
     }
+    // Swap truth scatter at runtime — used by the page bootstrap when
+    // /api/density/tudelft returns real TU Delft observations.
+    function updateTruth(grace_fo, swarm_c) {
+        _drawTruth(grace_fo, swarm_c);
+    }
     setCursor(0);
-    return { setCursor };
+    return { setCursor, updateTruth };
 }
 
 // ── Chart 3: per-observation residuals ─────────────────────────────

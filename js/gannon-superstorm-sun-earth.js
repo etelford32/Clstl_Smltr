@@ -342,30 +342,40 @@ export function createSunEarthScene(container, replay, player, opts = {}) {
     }, ["EARTH"]));
 
     // ── CME layer ──────────────────────────────────────────────────
-    // One <g> per CME — repositioned on every setCursor call.
-    const cmeNodes = events.map(evt => {
+    // One <g> per CME — repositioned on every setCursor call. We keep
+    // the array mutable so setCmeEvents() can rebuild the glyphs in
+    // place when real-data DONKI events land from the hindcast API.
+    let cmeNodes = [];
+    // Common parent for all CME glyphs so we can remove them as a unit
+    // when the catalog gets swapped.
+    const cmeLayer = svg("g", { class: "gn-cme-layer" });
+    root.appendChild(cmeLayer);
+
+    function _buildGlyph(evt) {
         const g = svg("g", { class: "gn-cme", opacity: 0 });
         const radius = cmeRadius(evt.flare_class);
         const color = cmeColor(evt.flare_class);
-        // Outer glow
         const glow = svg("circle", { r: radius * 2.4, fill: color, opacity: 0.18,
             "pointer-events": "none" });
-        // Body
         const body = svg("circle", { r: radius, fill: color, stroke: "rgba(0,0,0,0.4)",
             "stroke-width": 0.8 });
-        // Velocity vector (arrow trailing behind the body, pointing forward)
         const trail = svg("path", { d: "", stroke: color, "stroke-width": 1.5,
             opacity: 0.6, fill: "none", "stroke-linecap": "round" });
-        // Tooltip label (shown on hover via title element)
         const title = svg("title");
         title.textContent = `${evt.label}\n${evt.launch_iso} UT · v₀ = ${evt.v0_kms} km/s`;
         g.appendChild(glow);
         g.appendChild(trail);
         g.appendChild(body);
         g.appendChild(title);
-        root.appendChild(g);
+        cmeLayer.appendChild(g);
         return { evt, g, glow, body, trail };
-    });
+    }
+
+    function _buildAllGlyphs(eventList) {
+        for (const node of cmeNodes) cmeLayer.removeChild(node.g);
+        cmeNodes = eventList.map(_buildGlyph);
+    }
+    _buildAllGlyphs(events);
 
     // ── Time + CME status readout (top-right) ──────────────────────
     const readoutY = MARGIN.top + 4;
@@ -493,9 +503,23 @@ export function createSunEarthScene(container, replay, player, opts = {}) {
         tCmeStatus.textContent = parts.join(" · ");
     }
 
+    // Swap the CME catalog at runtime (e.g. when the hindcast API
+    // returns real DONKI data after the static bundle has rendered).
+    // Re-annotates each event with launch_h then rebuilds the glyphs;
+    // a follow-up setCursor() repaints positions in place.
+    function setCmeEvents(newEvents) {
+        const annotated = (newEvents || []).map(c => ({
+            ...c,
+            launch_h: (Date.parse(c.launch_iso) - anchorMs) / 3600_000,
+        }));
+        events.length = 0;
+        Array.prototype.push.apply(events, annotated);
+        _buildAllGlyphs(events);
+    }
+
     setCursor(0);
 
-    return { setCursor };
+    return { setCursor, setCmeEvents };
 }
 
 // Magnetosphere compression metric: 1.0 = nominal (10 R_E sunward),
