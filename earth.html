@@ -2530,6 +2530,7 @@ import './js/telemetry.js';
                     <input type="checkbox" id="lyr-jet"><span class="lyr-status" data-layer="jet" title="waiting"></span><label for="lyr-jet">Jet Stream</label>
                 </div>
                 <div class="lyr"><input type="checkbox" id="lyr-isobars" checked><span class="lyr-status" data-layer="isobars" title="waiting"></span><label for="lyr-isobars">Isobars</label><label class="lyr-rd" for="rd-pressure" title="Show surface pressure (hPa) on cursor hover"><input type="checkbox" id="rd-pressure"><span class="lyr-rd-badge">#</span></label></div>
+                <div class="lyr" title="Synoptic fronts detected from the temperature gradient and wind. Blue = cold front (cold air advancing into warm), red = warm front (warm air advancing into cold), grey = stationary. Mid-latitudes only (|lat| < 75°)."><input type="checkbox" id="lyr-fronts"><span class="lyr-status" data-layer="fronts" title="waiting"></span><label for="lyr-fronts">Fronts</label></div>
                 <label class="lyr"><input type="checkbox" id="lyr-alerts"><span class="lyr-status" data-layer="alerts" title="waiting"></span><label for="lyr-alerts">Storm Alerts</label></label>
                 <label class="lyr" title="5-day kinematic extrapolation cone for every active tropical cyclone. NOT NHC's official forecast — this is a great-circle projection of current motion with NHC's published average track-error radii applied for the cone width. Click a storm card to focus its cone."><input type="checkbox" id="lyr-storm-tracks"><span class="lyr-status" data-layer="storm-tracks" title="waiting"></span><label for="lyr-storm-tracks">Storm Tracks (5-day)</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-earthquakes"><span class="lyr-status" data-layer="earthquakes" title="waiting"></span><label for="lyr-earthquakes">Earthquakes</label></label>
@@ -3036,6 +3037,10 @@ import './js/telemetry.js';
             <span class="wx-v" id="wx-centers">—</span>
         </div>
         <div id="wx-centers-list" style="font-size:9px;color:#668;margin-top:2px;margin-bottom:4px;line-height:1.6;"></div>
+        <div class="wx-row" title="Synoptic-front count by type (cold/warm/stationary), updated every weather refresh. Toggle the 'Fronts' layer to see them on the globe.">
+            <span class="wx-k">Fronts</span>
+            <span class="wx-v" id="wx-fronts">—</span>
+        </div>
         <hr class="ir-sep">
         <!-- Forecaster skill table (Phase 1: persistence baseline only).
              Cells = pooled MAE per channel × horizon. Future ML models
@@ -3339,6 +3344,7 @@ import { makePanelDraggable, resetPanelPosition, makePanelResizable, resetPanelS
 import { NWSAlerts, ALERT_COLORS, ALERT_CSS_COLORS, ALERT_PULSE_FREQ, SEVERITY_ORDER, classifyAlertEvent } from './js/nws-alerts.js';
 import { getAlertIconTexture, precomputeAlertIcons } from './js/alert-icons.js';
 import { IsobarLayer, geoWindMs, ISOBAR_LEVELS } from './js/isobar-engine.js';
+import { FrontLayer }                            from './js/front-engine.js';
 import {
     MagnetosphereEngine,
     computeShue, computePlasmapause, computeIonoLayers,
@@ -5706,6 +5712,7 @@ function _updateLayerTooltips() {
         'lyr-weather': `Weather (temp)\n${wxTip}`,
         'lyr-wind':    `Wind Particles\n${windTip}`,
         'lyr-isobars': `Isobars\n${isoTip}`,
+        'lyr-fronts':  `Synoptic Fronts (cold / warm / stationary)\n${isoTip}`,
         'lyr-alerts':  `Storm Alerts\n${alertTip}\n\nTropical storms: ${stormTip}`,
     };
     for (const [id, tip] of Object.entries(tips)) {
@@ -6967,6 +6974,15 @@ document.addEventListener('weather-update', e => {
 
     // Rebuild isobar contours from the fresh pressure field
     isobarLayer.update(weatherBuffer);
+    // Frontal lines need both the pressure-decoded weatherBuffer (T-channel)
+    // and the windBuffer to classify cold vs warm. Runs even when the layer
+    // is hidden so the wx-fronts readout updates regardless of toggle state.
+    frontLayer.update(weatherBuffer, windBuffer);
+    const fs = frontLayer.stats;
+    const fEl = document.getElementById('wx-fronts');
+    if (fEl) fEl.textContent = fs.total === 0
+        ? '— (no detected fronts)'
+        : `${fs.cold} cold · ${fs.warm} warm · ${fs.stationary} stationary`;
 
     // Rebuild the jet-stream ribbons from the fresh wind field and refresh
     // the wx-panel peak readout. Runs once per feed refresh (~15 min); the
@@ -8354,12 +8370,22 @@ document.addEventListener('click', (e) => {
 //  ISOBAR LAYER — marching-squares pressure contours
 // ═══════════════════════════════════════════════════════════════
 const isobarLayer = new IsobarLayer(earthMesh);
+// Frontal-line overlay. Sits between the isobar contours and the H/L sprites
+// in the visual stack (renderOrder 3 vs 2 vs sprite-default). Defaults to
+// hidden on first load — the colored polylines are loud relative to the
+// other weather layers and we want the user to opt in. See js/front-engine.js
+// for the detection algorithm and classification rules.
+const frontLayer  = new FrontLayer(earthMesh);
+frontLayer.setVisible(false);
 
 // IsobarLayer is populated on the first 'weather-update' event
 // (WeatherFeed fires this after async fetch + procedural fallback)
 
 document.getElementById('lyr-isobars').addEventListener('change', e => {
     isobarLayer.setVisible(e.target.checked);
+});
+document.getElementById('lyr-fronts')?.addEventListener('change', e => {
+    frontLayer.setVisible(e.target.checked);
 });
 
 function updateIsobarPanel() {
@@ -10166,7 +10192,7 @@ _backdrop.addEventListener('click', _closeMobilePanel);
 [
     'lyr-clouds', 'lyr-atm', 'lyr-aurora', 'lyr-lights', 'lyr-grid',
     'lyr-tropic', 'lyr-subsolar', 'lyr-weather', 'lyr-wind', 'lyr-jet',
-    'lyr-isobars', 'lyr-alerts', 'lyr-earthquakes', 'lyr-iss',
+    'lyr-isobars', 'lyr-fronts', 'lyr-alerts', 'lyr-earthquakes', 'lyr-iss',
     'lyr-rotate',
     // Derived weather overlays (humidity / precip-rate / mist) — share
     // the existing weather DataTextures, so they need the same synthetic
