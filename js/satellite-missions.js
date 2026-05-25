@@ -20,6 +20,64 @@
 
 const TAU = Math.PI * 2;
 
+/**
+ * Mission floor & warning system
+ * ──────────────────────────────
+ * Each mission can declare an `altitudeFloorKm` — a soft warning threshold
+ * *above* the engine's hard 80 km re-entry floor. Combined with the engine's
+ * projected-perigee helper, this drives three escalating cockpit states:
+ *
+ *   ok      — predicted perigee stays above the floor for `lookaheadOrbits`
+ *   warn    — predicted perigee dips below the floor within the look-ahead
+ *             but you're not there yet (orange "DEORBIT WARNING")
+ *   breach  — current perigee is already below the floor (red "BREACHED",
+ *             passive score penalty applied per second in this band)
+ *
+ * Actual mission failure only triggers when the engine's re-entry threshold
+ * is hit (alt < 80 km). The graduated warning gives the player time to react
+ * — read the forecast, schedule a burn, recover — before the orbit is lost.
+ *
+ * Missions can opt out of the floor system by leaving altitudeFloorKm null.
+ * deorbit deliberately does this (you WANT to drop). rendezvous focuses on
+ * the docking objective and skips it too.
+ */
+export const DEFAULT_LOOKAHEAD_ORBITS = 8;
+export const BREACH_SCORE_PENALTY_PER_SEC = 1.0;
+
+/**
+ * Classify the player's current orbital margin against the active mission's
+ * floor. Pure: depends only on the mission spec + telemetry + a projection
+ * helper that the caller supplies. The caller passes `projectFn(orbits)` so
+ * we don't import the engine here (avoiding a circular dep) — typically
+ * `(n) => ENG.projectPerigee(tel, n, { playerDvPerOrbit: 0 })`.
+ *
+ * @param {object} mission
+ * @param {object} tel
+ * @param {(n:number) => {periAltKmAfter:number}} projectFn
+ * @returns {{ status:'ok'|'warn'|'breach',
+ *             floorKm:number|null, periKm:number, projectedPeriKm:number,
+ *             margin:number, lookaheadOrbits:number }}
+ */
+export function assessFloorStatus(mission, tel, projectFn) {
+  const floor = mission?.altitudeFloorKm;
+  const lookahead = mission?.lookaheadOrbits ?? DEFAULT_LOOKAHEAD_ORBITS;
+  if (floor == null || !tel) {
+    return { status: 'ok', floorKm: null, periKm: tel?.periAltKm ?? NaN,
+             projectedPeriKm: tel?.periAltKm ?? NaN, margin: Infinity, lookaheadOrbits: lookahead };
+  }
+  const periKm = tel.periAltKm;
+  const proj = (typeof projectFn === 'function') ? projectFn(lookahead) : null;
+  const projectedPeriKm = proj?.periAltKmAfter ?? periKm;
+  let status;
+  if (periKm < floor) status = 'breach';
+  else if (projectedPeriKm < floor) status = 'warn';
+  else status = 'ok';
+  return {
+    status, floorKm: floor, periKm, projectedPeriKm,
+    margin: periKm - floor, lookaheadOrbits: lookahead,
+  };
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 function circleOrbitState(MU, R, altKm, phaseRad = 0) {
   const r = R + altKm * 1000;
@@ -43,6 +101,11 @@ export const stationKeeper = {
   tip: 'Real LEO operators schedule routine prograde drag-make-up burns. Watch perigee — it falls first.',
   defaults: { periKm: 350, apoKm: 350, tgtKm: 350, throttle: 60,
               swPreset: 'quiet', attitude: 'nominal', fuelMass: 60 },
+  // Warning floor 50 km below the default station — drag-only decay reaches
+  // here in tens of orbits at solar nominal, faster during storms. Drives the
+  // cockpit's "DEORBIT WARNING → BREACHED" escalation.
+  altitudeFloorKm: 300,
+  lookaheadOrbits: 8,
   setup(ctx) {
     ctx.state = { stationSeconds: 0, orbits: 0, lastAngle: 0, startTime: 0 };
   },
@@ -81,6 +144,10 @@ export const cmeSurvival = {
   tip: 'Geomag storms can multiply density 3–10× at 400 km. Operators get NOAA G-scale alerts hours ahead.',
   defaults: { periKm: 380, apoKm: 380, tgtKm: 380, throttle: 70,
               swPreset: 'quiet', attitude: 'nominal', fuelMass: 80 },
+  // Storm-time floor is generous — the projected-perigee model spikes during
+  // the CME and the pilot needs warning, not punishment.
+  altitudeFloorKm: 340,
+  lookaheadOrbits: 6,
   setup(ctx) {
     ctx.state = { phase: 'quiet', triggerT: 120, stormSeconds: 0,
                   belowTarget: 0, lostAltAtTrigger: false };
@@ -253,6 +320,8 @@ export const avoidance = {
   tip: 'Real CARA teams (18 SDS) issue conjunction data messages 72 h ahead. A few cm/s burn can avert disaster.',
   defaults: { periKm: 420, apoKm: 420, tgtKm: 420, throttle: 50,
               swPreset: 'quiet', attitude: 'nominal', fuelMass: 50 },
+  altitudeFloorKm: 380,
+  lookaheadOrbits: 4,
   setup(ctx) {
     // Debris on a near-coplanar slightly-elliptical orbit, phased to cross
     // the player's path ~90 s after launch.
