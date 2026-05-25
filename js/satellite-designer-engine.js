@@ -177,14 +177,19 @@ function turbulenceFactor(t, env) {
  */
 export function airDensity(altM, env) {
     const hKm = altM / 1000;
+    // densityMul: optional multiplier hindcast missions use to model the
+    // observation that real storms run noticeably above the NRLMSIS climate
+    // mean (Feb 2022 Starlink: ~1.5×; Gannon May 2024: 2–3× over baseline
+    // at LEO altitudes). Default 1.0 — live forecasts leave it alone.
+    const mul = +(env?.densityMul ?? 1);
     if (hKm >= 80) {
         const r = thermosphereDensity({ altitudeKm: hKm, f107Sfu: env.f107Sfu, ap: env.ap });
-        return r.rho;
+        return r.rho * mul;
     }
     // Continuation below the model floor: anchor on ρ(80 km) and grow with a
     // ~7 km scale height down toward sea level.
     const rho80 = thermosphereDensity({ altitudeKm: 80, f107Sfu: env.f107Sfu, ap: env.ap }).rho;
-    return rho80 * Math.exp((80 - hKm) / 7.0);
+    return rho80 * mul * Math.exp((80 - hKm) / 7.0);
 }
 
 /** Local gravitational acceleration magnitude [m/s²]. Pass env to honour

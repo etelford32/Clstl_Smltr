@@ -521,6 +521,177 @@ select option{background:#0a1024}
   background:rgba(40,18,4,.78);cursor:pointer}
 .status-pill.sched .x{margin-left:6px;color:var(--c-text-3);font-weight:900}
 .status-pill.sched:hover .x{color:var(--c-bad)}
+
+/* ─── STORM RADAR HUD ─────────────────────────────────────────────────
+   A horizontal strip docked above the camera buttons. Three cells:
+   (1) live F10.7 / Ap nowcast, (2) forecast trace with peak-window
+   shading, (3) perigee floor margin + Δv budget gauge. Updated by
+   updateStormRadar() once per frame while sim is running. Click on the
+   forecast cell opens the plan-burn popover pre-set to forecast-peak. */
+#sd-radar{
+  position:absolute;left:12px;right:12px;bottom:54px;height:74px;
+  display:grid;grid-template-columns:auto 1fr auto;gap:0;
+  background:rgba(4,8,18,.82);border:1px solid rgba(127,220,255,.22);
+  border-radius:var(--r-md);backdrop-filter:blur(8px);
+  font-family:monospace;color:var(--c-text);pointer-events:auto;
+  overflow:hidden;z-index:4;
+  box-shadow:0 6px 20px rgba(0,0,0,.4);
+}
+#sd-radar[hidden]{display:none}
+#sd-radar .sr-cell{padding:7px 11px;display:flex;flex-direction:column;
+  justify-content:center;border-right:1px solid rgba(255,255,255,.08);
+  min-width:0}
+#sd-radar .sr-cell:last-child{border-right:none}
+#sd-radar .sr-hd{font-size:.52rem;letter-spacing:.14em;text-transform:uppercase;
+  font-weight:800;color:var(--c-text-3);margin-bottom:3px;display:flex;
+  justify-content:space-between;align-items:baseline;gap:8px}
+#sd-radar .sr-hd .sr-skill{font-size:.5rem;color:var(--c-text-3);font-weight:700;
+  letter-spacing:.04em;text-transform:none}
+#sd-radar .sr-vals{display:flex;gap:10px;font-variant-numeric:tabular-nums}
+#sd-radar .sr-val{display:flex;flex-direction:column;line-height:1}
+#sd-radar .sr-val b{font-size:1.05rem;font-weight:900;color:#fff}
+#sd-radar .sr-val small{font-size:.5rem;color:var(--c-text-3);
+  letter-spacing:.1em;text-transform:uppercase;margin-top:2px;font-weight:700}
+#sd-radar .sr-now b{color:#ffd166}
+#sd-radar .sr-now.storm b{color:#ff6b7d;text-shadow:0 0 8px rgba(255,80,100,.45)}
+
+/* Forecast cell — SVG trace + click-target to schedule on the peak. */
+#sd-radar .sr-fc{position:relative;cursor:pointer;min-width:140px}
+#sd-radar .sr-fc:hover{background:rgba(127,220,255,.04)}
+#sd-radar .sr-fc:hover .sr-fc-cta{opacity:1}
+#sd-radar .sr-fc-cta{position:absolute;bottom:3px;right:7px;
+  font-size:.5rem;letter-spacing:.08em;color:var(--c-accent);
+  opacity:.6;transition:opacity .15s;font-weight:700;text-transform:uppercase}
+#sd-radar .sr-fc svg{width:100%;height:40px;display:block;margin-top:2px}
+#sd-radar .sr-fc-band{fill:rgba(127,220,255,.10);stroke:none}
+#sd-radar .sr-fc-line{fill:none;stroke:#ffd166;stroke-width:1.8;
+  stroke-linejoin:round;stroke-linecap:round}
+#sd-radar .sr-fc-now{fill:#fff;stroke:#ffd166;stroke-width:1.5}
+#sd-radar .sr-fc-peak{fill:#ff8a3a;stroke:#ffd49a;stroke-width:1.4}
+#sd-radar .sr-fc-peak-glow{fill:rgba(255,140,60,.18);stroke:rgba(255,140,60,.45);
+  stroke-width:1;stroke-dasharray:2 3}
+#sd-radar .sr-fc.bonus-active{background:rgba(127,220,255,.10);
+  box-shadow:inset 0 0 0 1px rgba(255,140,60,.45)}
+#sd-radar .sr-fc.bonus-active::after{
+  content:'⚡ +2×';position:absolute;top:5px;right:7px;
+  font-size:.55rem;font-weight:900;color:#ffd49a;letter-spacing:.06em;
+  text-shadow:0 0 6px rgba(255,140,40,.7)}
+
+/* Right cell — perigee margin + Δv budget bars. */
+#sd-radar .sr-budget{min-width:118px}
+#sd-radar .sr-bar{display:flex;align-items:center;gap:6px;font-size:.6rem;
+  color:var(--c-text-2);margin-top:3px;line-height:1}
+#sd-radar .sr-bar .sr-bar-lbl{width:18px;font-weight:800;color:var(--c-text-3)}
+#sd-radar .sr-bar .sr-bar-track{flex:1;height:6px;border-radius:3px;
+  background:rgba(255,255,255,.06);overflow:hidden;position:relative}
+#sd-radar .sr-bar .sr-bar-fill{position:absolute;left:0;top:0;bottom:0;
+  border-radius:3px;transition:width .15s ease, background .2s ease}
+#sd-radar .sr-bar .sr-bar-val{width:42px;text-align:right;font-weight:800;
+  color:#fff;font-variant-numeric:tabular-nums}
+#sd-radar .sr-bar.peri .sr-bar-fill{background:linear-gradient(90deg,#5fe39a,#7fdcff)}
+#sd-radar .sr-bar.peri.warn .sr-bar-fill{background:linear-gradient(90deg,#ffb066,#ff6b7d)}
+#sd-radar .sr-bar.peri.crit .sr-bar-fill{background:linear-gradient(90deg,#ff6b7d,#ff3d5a)}
+#sd-radar .sr-bar.dv .sr-bar-fill{background:linear-gradient(90deg,#ffd166,#ff8a3a)}
+#sd-radar .sr-bar.dv.low .sr-bar-fill{background:linear-gradient(90deg,#ff6b7d,#ff3d5a)}
+
+/* Collapse the cam-group's space on narrow viewports so the radar fits. */
+@media (max-width:560px){
+  #sd-radar{height:68px;bottom:48px;left:8px;right:8px}
+  #sd-radar .sr-cell{padding:6px 8px}
+  #sd-radar .sr-val b{font-size:.95rem}
+  #sd-radar .sr-fc svg{height:34px}
+  #sd-radar .sr-budget{min-width:100px}
+}
+
+/* Toggle button in #sd-status — collapses the HUD when the player wants
+   a cleaner stage. Defaults to expanded. */
+.status-pill.radar-toggle{cursor:pointer;color:#7fdcff;
+  border-color:rgba(127,220,255,.35);pointer-events:auto}
+.status-pill.radar-toggle.off{color:var(--c-text-3);
+  border-color:rgba(255,255,255,.12)}
+
+/* ─── End-of-mission scorecard ───────────────────────────────────────
+   Modal overlay rendered on mission complete, re-entry, or out-of-fuel.
+   Shows burn-timing grade, Δv-efficiency, and forecast-bonus capture %
+   on top of the mission's own final-score line. Card breakdown is
+   composed in JS so missions can append custom rows via the optional
+   `scorecard(stats, ctx)` hook (see satellite-missions.js). */
+.scorecard-overlay{
+  position:fixed;inset:0;z-index:100;display:flex;align-items:center;
+  justify-content:center;padding:18px;background:rgba(2,4,12,.72);
+  backdrop-filter:blur(6px);
+  animation:scorecard-in .22s ease-out 1;
+}
+.scorecard-overlay[hidden]{display:none}
+@keyframes scorecard-in {
+  from { opacity:0; transform:scale(.96) }
+  to   { opacity:1; transform:scale(1) }
+}
+.scorecard{
+  width:min(520px,100%);background:linear-gradient(180deg,#0c1326,#070a16);
+  border:1px solid var(--c-accent-border-hi);border-radius:var(--r-lg);
+  box-shadow:0 30px 60px rgba(0,0,0,.6);overflow:hidden;
+  font-family:var(--font-body,system-ui);color:var(--c-text);
+  max-height:90vh;display:flex;flex-direction:column;
+}
+.scorecard .sc-hd{padding:16px 20px 10px;
+  border-bottom:1px solid rgba(255,255,255,.08);
+  display:flex;align-items:center;gap:12px}
+.scorecard .sc-rank{font-size:2.2rem;line-height:1;
+  filter:drop-shadow(0 2px 10px rgba(127,220,255,.5))}
+.scorecard .sc-title{flex:1;min-width:0}
+.scorecard .sc-mission{font-size:.62rem;letter-spacing:.14em;
+  text-transform:uppercase;font-weight:800;color:var(--c-text-3)}
+.scorecard .sc-outcome{font-size:1.1rem;font-weight:900;color:#fff;
+  background:linear-gradient(100deg,#fff,#7fdcff);-webkit-background-clip:text;
+  background-clip:text;-webkit-text-fill-color:transparent;margin-top:2px}
+.scorecard .sc-outcome.bad{background:linear-gradient(100deg,#fff,#ff8a9c);
+  -webkit-background-clip:text;background-clip:text;
+  -webkit-text-fill-color:transparent}
+.scorecard .sc-score{font-size:1.6rem;font-weight:900;
+  font-variant-numeric:tabular-nums;color:#ffd166}
+.scorecard .sc-body{padding:14px 20px;overflow-y:auto;flex:1}
+.scorecard .sc-grade-grid{display:grid;
+  grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+.scorecard .sc-grade{background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.1);border-radius:var(--r-md);
+  padding:10px 11px;text-align:center;position:relative}
+.scorecard .sc-grade-letter{font-size:1.8rem;font-weight:900;
+  line-height:1;font-family:monospace}
+.scorecard .sc-grade-letter.A{color:#5fe39a;text-shadow:0 0 12px rgba(95,227,154,.5)}
+.scorecard .sc-grade-letter.B{color:#7fdcff}
+.scorecard .sc-grade-letter.C{color:#ffd166}
+.scorecard .sc-grade-letter.D{color:#ffb066}
+.scorecard .sc-grade-letter.F{color:#ff6b7d}
+.scorecard .sc-grade-name{font-size:.55rem;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--c-text-3);margin-top:5px;font-weight:800}
+.scorecard .sc-grade-val{font-size:.7rem;color:var(--c-text-2);
+  margin-top:3px;font-variant-numeric:tabular-nums;font-weight:700}
+.scorecard .sc-rows{display:flex;flex-direction:column;gap:1px;
+  background:rgba(255,255,255,.06);border-radius:var(--r-md);
+  overflow:hidden;border:1px solid rgba(255,255,255,.06)}
+.scorecard .sc-row{display:flex;justify-content:space-between;
+  align-items:baseline;padding:6px 11px;background:rgba(4,8,18,.5);
+  font-size:.72rem;gap:10px}
+.scorecard .sc-row .sc-lbl{color:var(--c-text-2);font-weight:700}
+.scorecard .sc-row .sc-val{font-variant-numeric:tabular-nums;
+  color:#fff;font-weight:800}
+.scorecard .sc-row.bonus .sc-val{color:#ffd49a}
+.scorecard .sc-row.warn .sc-val{color:var(--c-warn)}
+.scorecard .sc-row.bad  .sc-val{color:var(--c-bad)}
+.scorecard .sc-tip{font-size:.7rem;color:var(--c-text-3);
+  margin-top:10px;line-height:1.45;padding:8px 10px;
+  background:rgba(127,220,255,.05);border-left:2px solid var(--c-accent-border);
+  border-radius:4px}
+.scorecard .sc-actions{padding:12px 20px 16px;
+  border-top:1px solid rgba(255,255,255,.08);display:flex;gap:8px;
+  flex-wrap:wrap;justify-content:flex-end}
+.scorecard .sc-actions .btn{font-size:.78rem;padding:7px 14px}
+@media (max-width:560px){
+  .scorecard .sc-grade-grid{grid-template-columns:1fr 1fr 1fr;gap:6px}
+  .scorecard .sc-grade{padding:8px 6px}
+  .scorecard .sc-grade-letter{font-size:1.5rem}
+}
 .big-slider{position:relative;display:block;background:rgba(255,255,255,.025);
   border:1px solid rgba(255,255,255,.1);border-radius:var(--r-md);padding:8px 10px}
 .big-slider .bs-row{display:flex;justify-content:space-between;align-items:baseline;
@@ -690,6 +861,46 @@ select option{background:#0a1024}
         <span class="status-pill" id="st-warp">▶ ×1</span>
         <span class="status-pill sched" id="st-sched" hidden
               title="Scheduled burn — click to cancel">⏰ —<span class="x">✕</span></span>
+        <span class="status-pill radar-toggle" id="st-radar"
+              title="Toggle STORM RADAR HUD">📡 RADAR</span>
+      </div>
+
+      <!-- ── STORM RADAR HUD strip — three cells: nowcast | forecast trace |
+           perigee & Δv budget. Hidden until launch; click the forecast
+           cell to schedule a burn at the projected peak. -->
+      <div id="sd-radar" hidden>
+        <div class="sr-cell sr-now" id="sr-now">
+          <div class="sr-hd"><span>SPACE WX</span><span class="sr-skill" id="sr-skill">—</span></div>
+          <div class="sr-vals">
+            <div class="sr-val"><b id="sr-f107">—</b><small>F10.7 SFU</small></div>
+            <div class="sr-val"><b id="sr-ap">—</b><small>Ap</small></div>
+          </div>
+        </div>
+        <div class="sr-cell sr-fc" id="sr-fc"
+             title="Click to schedule a burn at the forecasted peak">
+          <div class="sr-hd"><span>F10.7 FORECAST · 0–12h</span><span id="sr-peak-lbl">peak —</span></div>
+          <svg id="sr-fc-svg" viewBox="0 0 200 40" preserveAspectRatio="none" aria-hidden="true">
+            <path id="sr-fc-band-path" class="sr-fc-band"/>
+            <rect id="sr-fc-peak-glow" class="sr-fc-peak-glow" x="0" y="0" width="0" height="40" rx="2" hidden/>
+            <path id="sr-fc-line-path" class="sr-fc-line"/>
+            <circle id="sr-fc-now-dot" class="sr-fc-now" cx="0" cy="20" r="3"/>
+            <circle id="sr-fc-peak-dot" class="sr-fc-peak" cx="0" cy="20" r="3" hidden/>
+          </svg>
+          <span class="sr-fc-cta">⏰ schedule</span>
+        </div>
+        <div class="sr-cell sr-budget">
+          <div class="sr-hd"><span>FLIGHT BUDGET</span></div>
+          <div class="sr-bar peri" id="sr-bar-peri">
+            <span class="sr-bar-lbl">PE</span>
+            <div class="sr-bar-track"><div class="sr-bar-fill" style="width:0%"></div></div>
+            <span class="sr-bar-val">—</span>
+          </div>
+          <div class="sr-bar dv" id="sr-bar-dv">
+            <span class="sr-bar-lbl">Δv</span>
+            <div class="sr-bar-track"><div class="sr-bar-fill" style="width:0%"></div></div>
+            <span class="sr-bar-val">—</span>
+          </div>
+        </div>
       </div>
       <div id="sd-hint">
         <kbd>click</kbd> select<br>
@@ -970,6 +1181,51 @@ select option{background:#0a1024}
 </div>
 
 <div class="toast" id="toast"></div>
+
+<!-- ── End-of-mission scorecard overlay. Hidden by default; populated and
+     revealed by showScorecard() on mission complete, re-entry, or
+     out-of-fuel terminations. -->
+<div class="scorecard-overlay" id="scorecard-overlay" hidden role="dialog"
+     aria-labelledby="sc-outcome" aria-modal="true">
+  <div class="scorecard">
+    <div class="sc-hd">
+      <div class="sc-rank" id="sc-rank">🏁</div>
+      <div class="sc-title">
+        <div class="sc-mission" id="sc-mission">Mission</div>
+        <div class="sc-outcome" id="sc-outcome">—</div>
+      </div>
+      <div class="sc-score" id="sc-score">0</div>
+    </div>
+    <div class="sc-body">
+      <!-- Three signature grades populated by showScorecard(). -->
+      <div class="sc-grade-grid">
+        <div class="sc-grade">
+          <div class="sc-grade-letter" id="sc-g-timing">—</div>
+          <div class="sc-grade-name">Burn Timing</div>
+          <div class="sc-grade-val" id="sc-g-timing-v">—</div>
+        </div>
+        <div class="sc-grade">
+          <div class="sc-grade-letter" id="sc-g-dv">—</div>
+          <div class="sc-grade-name">Δv Efficiency</div>
+          <div class="sc-grade-val" id="sc-g-dv-v">—</div>
+        </div>
+        <div class="sc-grade">
+          <div class="sc-grade-letter" id="sc-g-bonus">—</div>
+          <div class="sc-grade-name">Forecast Bonus</div>
+          <div class="sc-grade-val" id="sc-g-bonus-v">—</div>
+        </div>
+      </div>
+      <!-- Detailed breakdown — mission-specific rows appended via the
+           mission.scorecard(stats, ctx) hook (optional). -->
+      <div class="sc-rows" id="sc-rows"></div>
+      <div class="sc-tip" id="sc-tip" hidden></div>
+    </div>
+    <div class="sc-actions">
+      <button class="btn" id="sc-close">Close</button>
+      <button class="btn primary" id="sc-replay">↺ Try Again</button>
+    </div>
+  </div>
+</div>
 
 <script type="module">
 import { auth } from './js/auth.js';
@@ -1432,6 +1688,627 @@ function updateSchedPill() {
   }
 }
 
+// ── STORM RADAR HUD ─────────────────────────────────────────────────────────
+// One source of truth for the strip above the cam controls. Reads
+// sim.state / sim.design / FORECAST and updates DOM in place. The hot
+// path is the SVG path-build for the F10.7 trace — kept O(N) over a
+// fixed 6-point series so a per-frame call is fine even at high warp.
+const STORM_RADAR = (() => {
+  const HORIZONS = [0, 1, 2, 3, 4, 6];               // hours
+  const PERI_FLOOR_DEFAULT = 250;                    // km, fallback when mission has no floor
+  const PERI_CEIL          = 800;                    // km, scale top for the bar
+  let _hidden = false;
+  let _lastFcSig = '';                               // memoised serialisation of last drawn series
+  let _periHist  = [];                               // ring of [t, periKm] samples for trend nicety
+  let _lastSampleT = -Infinity;
+
+  function setVisible(on) {
+    _hidden = !on;
+    const el = $('sd-radar');
+    if (el) el.hidden = !on;
+    const tog = $('st-radar');
+    if (tog) tog.classList.toggle('off', !on);
+  }
+  function recordPeri(simT, periKm) {
+    // 8 sim-second decimation — keeps the buffer compact at any warp.
+    if (simT - _lastSampleT < 8 && _periHist.length > 0) return;
+    _lastSampleT = simT;
+    _periHist.push([simT, periKm]);
+    if (_periHist.length > 120) _periHist.shift();
+  }
+  function resetHistory() {
+    _periHist = [];
+    _lastSampleT = -Infinity;
+    _lastFcSig = '';
+  }
+
+  // Nowcast cell — current F10.7 / Ap from the forecast module's nowcast.
+  function paintNowcast() {
+    const nc = (typeof FORECAST !== 'undefined') ? FORECAST.getNowcast?.() : null;
+    const status = (typeof FORECAST !== 'undefined') ? FORECAST.getStatus?.() : null;
+    const f107El = $('sr-f107'), apEl = $('sr-ap'), skEl = $('sr-skill'), nowEl = $('sr-now');
+    if (!f107El) return;
+    const f = nc?.f107, a = nc?.ap;
+    f107El.textContent = Number.isFinite(f) ? f.toFixed(0) : '—';
+    apEl.textContent   = Number.isFinite(a) ? a.toFixed(0) : '—';
+    // Storm classification — Ap ≥ 50 is moderate-storm threshold; Ap ≥ 100 severe.
+    nowEl.classList.toggle('storm', Number.isFinite(a) && a >= 50);
+    if (skEl) {
+      const src = status?.source || (nc ? 'nowcast' : 'pending');
+      skEl.textContent = src;
+    }
+  }
+
+  // Forecast trace — 6 horizon samples drawn as a polyline + envelope band.
+  function paintForecast() {
+    if (typeof FORECAST === 'undefined') return;
+    let series;
+    try { series = FORECAST.getForecastSeries({ horizons: HORIZONS }); }
+    catch (_) { series = null; }
+    if (!series || !series.length) return;
+
+    // Cheap memoisation — skip the path rebuild when the values haven't
+    // moved (forecast updates every ~5 min, sim ticks at 60 fps).
+    const sig = series.map(s => `${(s.f107|0)}:${(s.ap|0)}`).join('|');
+    if (sig === _lastFcSig) return;
+    _lastFcSig = sig;
+
+    // Plot space: viewBox is 200 × 40. Pad 4px on each side, top 2 / bot 4.
+    const W = 200, H = 40, padX = 6, padTop = 4, padBot = 6;
+    const innerW = W - padX * 2, innerH = H - padTop - padBot;
+    const xs = HORIZONS.map((_, i) => padX + (i / (HORIZONS.length - 1)) * innerW);
+
+    // Y-scale: cover [60, 320] SFU so the trace stays visible across
+    // quiet (~70) and storm (~250+) regimes without re-scaling per tick.
+    const F_MIN = 60, F_MAX = 320;
+    const yOf = (f) => {
+      const v = Math.max(F_MIN, Math.min(F_MAX, Number.isFinite(f) ? f : F_MIN));
+      return padTop + innerH * (1 - (v - F_MIN) / (F_MAX - F_MIN));
+    };
+
+    // Line through nominal F10.7
+    const linePts = series.map((s, i) => `${xs[i].toFixed(1)},${yOf(s.f107).toFixed(1)}`);
+    $('sr-fc-line-path').setAttribute('d', 'M ' + linePts.join(' L '));
+
+    // Envelope band — adverse upper, benign lower. Skip if forcing absent.
+    const hasBand = series.every(s => s.forcing?.adverse && s.forcing?.benign);
+    if (hasBand) {
+      const upper = series.map((s, i) => `${xs[i].toFixed(1)},${yOf(s.forcing.adverse.f107).toFixed(1)}`);
+      const lower = series.map((s, i) => `${xs[i].toFixed(1)},${yOf(s.forcing.benign.f107).toFixed(1)}`).reverse();
+      $('sr-fc-band-path').setAttribute('d', 'M ' + upper.join(' L ') + ' L ' + lower.join(' L ') + ' Z');
+    } else {
+      $('sr-fc-band-path').setAttribute('d', '');
+    }
+
+    // Peak detection — same logic the plan-burn scheduler + score
+    // multiplier use. Skip "peak is now" (horizon 0) since it's not
+    // anticipatable. The peak window pill below the trace previews
+    // the 2× bonus zone. We also stash the live peak as sim seconds
+    // from launch so the 2× bonus check in the frame loop reads the
+    // SAME peak the player can see on the HUD.
+    let peakIdx = -1, peakF = -Infinity;
+    for (let i = 1; i < series.length; i++) {
+      if (series[i].f107 > peakF) { peakF = series[i].f107; peakIdx = i; }
+    }
+    if (sim.running && peakIdx > 0) {
+      // Convert horizon hours → sim seconds. The radar's clock anchor is
+      // the sim's launch wallclock; the forecast horizon is from "now"
+      // (real wallclock), so we add the elapsed real-time since launch
+      // to keep the peak anchored to its actual wallclock-future moment.
+      const elapsedSimSec = sim.state ? sim.state.t : 0;
+      sim._forecastPeakSimSec = elapsedSimSec + HORIZONS[peakIdx] * 3600;
+    } else if (peakIdx < 0) {
+      sim._forecastPeakSimSec = null;
+    }
+    const peakDot = $('sr-fc-peak-dot');
+    const peakGlow = $('sr-fc-peak-glow');
+    const peakLbl  = $('sr-peak-lbl');
+    if (peakIdx > 0 && Number.isFinite(peakF)) {
+      const px = xs[peakIdx], py = yOf(peakF);
+      peakDot.setAttribute('cx', px.toFixed(1));
+      peakDot.setAttribute('cy', py.toFixed(1));
+      peakDot.removeAttribute('hidden');
+      // ±30-min bonus window around the peak, mapped onto the X axis.
+      // Each horizon-step represents (HORIZONS[1] - HORIZONS[0]) hours;
+      // 30 minutes = 0.5 h. We shade a band of width 1h ÷ stepHr × pxPerStep.
+      const stepHr = HORIZONS[1] - HORIZONS[0];
+      const pxPerHr = (xs[1] - xs[0]) / stepHr;
+      const halfPx  = Math.max(4, 0.5 * pxPerHr);
+      peakGlow.setAttribute('x', (px - halfPx).toFixed(1));
+      peakGlow.setAttribute('width', (2 * halfPx).toFixed(1));
+      peakGlow.removeAttribute('hidden');
+      peakLbl.textContent = `peak ${peakF.toFixed(0)} SFU @ +${HORIZONS[peakIdx]}h`;
+    } else {
+      peakDot.setAttribute('hidden', '');
+      peakGlow.setAttribute('hidden', '');
+      peakLbl.textContent = 'no peak';
+    }
+
+    // Nowcast dot — sample 0 (horizon = 0) anchors the trace at "now".
+    $('sr-fc-now-dot').setAttribute('cx', xs[0].toFixed(1));
+    $('sr-fc-now-dot').setAttribute('cy', yOf(series[0].f107).toFixed(1));
+  }
+
+  // Right cell — perigee margin bar + Δv-budget bar. Both live; bar
+  // colour reflects threat level so peripheral vision catches trouble.
+  function paintBudget() {
+    const sf = sim.state, sd = sim.design;
+    const mission = MISSIONS[sim.missionId];
+    const floor   = mission?.altitudeFloorKm ?? PERI_FLOOR_DEFAULT;
+
+    // Perigee bar — show altitude above floor as % of (ceil - floor).
+    let periPct = 0, periTxt = '—', periCls = '';
+    if (sf && sd) {
+      const tel = ENG.telemetry(sf, sd, sim.env, sim.control.attitudeMult);
+      const peri = tel.periAltKm;
+      recordPeri(sf.t, peri);
+      periTxt = peri.toFixed(0) + ' km';
+      const range = PERI_CEIL - floor;
+      periPct = Math.max(0, Math.min(100, ((peri - floor) / range) * 100));
+      // Margin-based threat: < floor → critical, within 30 km → warn.
+      if (peri < floor)         periCls = 'crit';
+      else if (peri < floor+30) periCls = 'warn';
+    }
+    const periBar = $('sr-bar-peri');
+    if (periBar) {
+      periBar.classList.remove('warn', 'crit');
+      if (periCls) periBar.classList.add(periCls);
+      periBar.querySelector('.sr-bar-fill').style.width = periPct.toFixed(1) + '%';
+      periBar.querySelector('.sr-bar-val').textContent  = periTxt;
+    }
+
+    // Δv-budget bar — current vs initial Tsiolkovsky budget. The Isp
+    // erosion factor matches setBurnInput's flash-readout formula so
+    // the gauge reads honestly throughout a burn.
+    let dvPct = 0, dvTxt = '—', dvCls = '';
+    if (sf && sd && sd.fuelMass > 0) {
+      const ispEff = sd.isp * (1 - 0.25 * (sf.burnSeconds
+                     ? Math.min(1, sf.burnSeconds / (sd.throatLifeS ?? 6000)) : 0));
+      const dvNow  = ispEff * ENG.G0 * Math.log((sd.dryMass + sf.fuel) / Math.max(sd.dryMass, 1e-9));
+      const dvMax  = sd.isp   * ENG.G0 * Math.log((sd.dryMass + sd.fuelMass) / sd.dryMass);
+      dvPct = Math.max(0, Math.min(100, (dvNow / Math.max(dvMax, 1e-9)) * 100));
+      dvTxt = dvNow.toFixed(0) + ' m/s';
+      if (dvPct < 20) dvCls = 'low';
+    }
+    const dvBar = $('sr-bar-dv');
+    if (dvBar) {
+      dvBar.classList.remove('low');
+      if (dvCls) dvBar.classList.add(dvCls);
+      dvBar.querySelector('.sr-bar-fill').style.width = dvPct.toFixed(1) + '%';
+      dvBar.querySelector('.sr-bar-val').textContent  = dvTxt;
+    }
+  }
+
+  // Bonus-active indicator on the forecast cell — lights up while the
+  // player is holding BURN inside the ±30-min peak window. The scoring
+  // logic already lives in the frame loop; here we just mirror its
+  // multiplier into the HUD so the cell-glow tracks the actual bonus.
+  function paintBonus() {
+    const fc = $('sr-fc');
+    if (!fc) return;
+    fc.classList.toggle('bonus-active', (sim._forecastBurnMultiplier ?? 1) >= 2);
+  }
+
+  function update() {
+    if (_hidden) return;
+    paintNowcast();
+    paintForecast();
+    paintBudget();
+    paintBonus();
+  }
+
+  return { setVisible, update, resetHistory };
+})();
+
+// Wire the radar-toggle pill + forecast-cell click. The cell click opens
+// the plan-burn popover and seeds the trigger dropdown to forecast-peak
+// so a single tap arms the bonus-window burn.
+{
+  const tog = $('st-radar');
+  if (tog) {
+    tog.addEventListener('click', () => {
+      const next = $('sd-radar').hidden;       // currently hidden? we'll show.
+      STORM_RADAR.setVisible(next);
+    });
+  }
+  const fc = $('sr-fc');
+  if (fc) {
+    fc.addEventListener('click', () => {
+      if (!sim.running) { toast('Launch first — schedule needs a live orbit.', true); return; }
+      if (sim._forecastPeakSimSec == null) {
+        toast('No forecast peak yet — try again once the forecast warms up.', true);
+        return;
+      }
+      $('pp-trigger').value = 'forecast-peak';
+      // Trigger the Plan popover's open path by clicking the button —
+      // re-uses its anchoring + state-seeding logic without duplication.
+      $('b-plan').click();
+    });
+  }
+}
+
+// ── Flight stats / scorecard ────────────────────────────────────────────────
+// We log every burn the player executes plus a few aggregate counters
+// during flight. On mission end (success, re-entry, or out-of-fuel) the
+// scorecard renders three signature grades:
+//
+//   • Burn timing — fraction of prograde burns fired near perigee (or
+//     retrograde burns near apogee). Oberth: same Δv → bigger Δenergy
+//     when fired deep in the gravity well.
+//   • Δv efficiency — Δv-delivered relative to Δv-budgeted, penalised
+//     by mid-orbit drift burns that didn't change the apsides much.
+//   • Forecast bonus — what fraction of total Δv was spent during a
+//     2× forecast-peak window. Caps the value of pre-burning before
+//     storms instead of grinding through them.
+//
+// Mission scenarios can append custom rows via the optional
+// `mission.scorecard(stats, ctx)` hook — see js/satellite-missions.js
+// header docs for the schema.
+function makeFlightStats() {
+  return {
+    burns: [],                          // { startT, endT, mode, fuelStart, fuelEnd, dvEng, phaseFracStart, bonusActive }
+    totalDvDelivered: 0,                // m/s — sum of Tsiolkovsky-delivered Δv across burns
+    bonusDvDelivered: 0,                // m/s — Δv delivered during 2× bonus windows
+    bonusBurnCount:   0,                // burns that hit any part of the bonus window
+    peakWindowsSeen:  0,                // distinct ±30-min peak windows the flight passed through
+    peakWindowsCaptured: 0,             // of those, how many had ≥1 player burn during
+    floorBreachSec:   0,                // total sim-seconds spent below mission floor
+    dvBudgetInitial:  0,                // Tsiolkovsky max at launch
+    initialPeriKm: 0, initialApoKm: 0,  // for outcome summary
+    finalPeriKm: 0,   finalApoKm: 0,
+    _wasInBonus: false,                 // edge-detector for peakWindowsSeen
+    _bonusUsedThisWindow: false,
+  };
+}
+
+// Compute the "phase fraction" for a position: 0 means at perigee, 1
+// means at apogee. We use cos((r - peri) / (apo - peri) → arccos-ish)
+// — but cheaper: linear in (r - peri)/(apo - peri). Good enough as a
+// timing proxy.
+function _phaseFracAt(state, tel) {
+  if (!state || !tel) return 0.5;
+  const r  = Math.hypot(state.x, state.y);
+  const rp = (tel.periAltKm + 6371) * 1000;
+  const ra = (tel.apoAltKm  + 6371) * 1000;
+  const span = ra - rp;
+  if (span <= 1e-3) return 0;          // circular orbit — every spot is "perigee"
+  return Math.max(0, Math.min(1, (r - rp) / span));
+}
+
+// Letter grade from a 0-1 score. Wide A-band rewards strong play; F is
+// reserved for clear failure modes (no burns, or all burns at apogee).
+function _gradeFromScore(s) {
+  if (s >= 0.85) return 'A';
+  if (s >= 0.7)  return 'B';
+  if (s >= 0.5)  return 'C';
+  if (s >= 0.3)  return 'D';
+  return 'F';
+}
+
+function computeScorecardGrades(stats) {
+  // Burn-timing: average across all burns. For prograde the "ideal"
+  // phase is 0 (perigee), for retrograde it's 1 (apogee). Manual burns
+  // count both ways depending on direction.
+  let timingScore = 0.5, timingDetail = 'no burns';
+  if (stats.burns.length > 0) {
+    let acc = 0;
+    for (const b of stats.burns) {
+      const isRetro = b.mode === 'retrograde' || b.mode === 'manual-retro';
+      // Higher score for being closer to the ideal phase for the burn direction.
+      const dist = isRetro ? (1 - b.phaseFracStart) : b.phaseFracStart;
+      acc += 1 - dist;                  // dist=0 → score 1, dist=1 → score 0
+    }
+    timingScore = acc / stats.burns.length;
+    const meanPhase = stats.burns.reduce((a, b) => a + b.phaseFracStart, 0) / stats.burns.length;
+    timingDetail = `${stats.burns.length} burns · avg φ=${(meanPhase * 100).toFixed(0)}%`;
+  }
+
+  // Δv-efficiency: ratio of Δv-delivered to Δv-budgeted, then graded
+  // *against* the orbit work actually accomplished. We use a simple
+  // model: efficiency = (apsides changed in km) / (Δv spent in m/s),
+  // normalised against a known-good ratio of ~0.5 km/m·s for LEO.
+  // For station-keeping (no apsides change goal), we instead grade by
+  // "Δv conserved" — less is better.
+  let dvScore = 0.5, dvDetail = '0 m/s';
+  const dvUsed = stats.totalDvDelivered;
+  if (stats.dvBudgetInitial > 0 && dvUsed > 0.01) {
+    const dvBudgetPct = dvUsed / stats.dvBudgetInitial;
+    const apsidesShift = Math.abs((stats.finalPeriKm + stats.finalApoKm)
+                                - (stats.initialPeriKm + stats.initialApoKm));
+    // The "useful Δv" benchmark — for a circular Hohmann at LEO, ~0.55
+    // km/m·s of apsides-shift is a strong score. Below 0.2 is wasteful.
+    const effRatio = apsidesShift / dvUsed;
+    // Station-keep / endurance: low Δv used is good (regardless of shift).
+    const conserveScore = 1 - Math.min(1, dvBudgetPct);
+    const shiftScore    = Math.min(1, effRatio / 0.55);
+    dvScore = Math.max(conserveScore, shiftScore);
+    dvDetail = `${dvUsed.toFixed(0)} m/s · ${(dvBudgetPct*100).toFixed(0)}% of budget`;
+  } else if (stats.dvBudgetInitial > 0) {
+    // No burns at all — full conservation for endurance, but flagged.
+    dvScore = 0.8;
+    dvDetail = `0 m/s · 0% of budget`;
+  }
+
+  // Forecast-bonus capture: peakWindowsCaptured / peakWindowsSeen. If
+  // no peaks happened during the flight, treat as neutral 0.5 (can't
+  // grade what wasn't there).
+  let bonusScore = 0.5, bonusDetail = 'no peaks';
+  if (stats.peakWindowsSeen > 0) {
+    bonusScore = stats.peakWindowsCaptured / stats.peakWindowsSeen;
+    const pct = (stats.bonusDvDelivered / Math.max(stats.totalDvDelivered, 1e-6)) * 100;
+    bonusDetail = `${stats.peakWindowsCaptured}/${stats.peakWindowsSeen} peaks · ${pct.toFixed(0)}% of Δv`;
+  } else if (dvUsed > 0.01) {
+    bonusDetail = 'no forecast peaks';
+  }
+
+  return {
+    timing: { score: timingScore, grade: _gradeFromScore(timingScore), detail: timingDetail },
+    dv:     { score: dvScore,     grade: _gradeFromScore(dvScore),     detail: dvDetail },
+    bonus:  { score: bonusScore,  grade: _gradeFromScore(bonusScore),  detail: bonusDetail },
+  };
+}
+
+// Per-frame stats update — called from the main loop after the advance
+// step. Tracks bonus-window edges (so we count distinct windows), and
+// accumulates floor-breach time.
+function tickFlightStats(simSecs, tel) {
+  const fs = sim.flightStats;
+  if (!fs || !sim.state) return;
+
+  // Peak-window edge detection — we count a "window seen" each time we
+  // first enter a bonus zone, and "captured" if the player burned at
+  // any point during it.
+  const inBonus = (sim._forecastBurnMultiplier ?? 1) >= 2;
+  // The multiplier only flips ≥2 when sim.inputs.burn is true. The
+  // window itself is broader — we detect it by the peak-distance
+  // condition matching the frame-loop logic.
+  const peakSec = sim._forecastPeakSimSec;
+  const inWindow = (peakSec != null) && Math.abs(sim.state.t - peakSec) < 1800;
+  if (inWindow && !fs._wasInBonus) {
+    fs.peakWindowsSeen++;
+    fs._bonusUsedThisWindow = false;
+  } else if (!inWindow && fs._wasInBonus && fs._bonusUsedThisWindow) {
+    fs.peakWindowsCaptured++;
+  }
+  if (inBonus) fs._bonusUsedThisWindow = true;
+  fs._wasInBonus = inWindow;
+
+  // Floor breach accumulator — sim.state.alive + below floor → seconds.
+  const mission = MISSIONS[sim.missionId];
+  if (mission?.altitudeFloorKm != null && tel.periAltKm < mission.altitudeFloorKm) {
+    fs.floorBreachSec += simSecs;
+  }
+
+  fs.finalPeriKm = tel.periAltKm;
+  fs.finalApoKm  = tel.apoAltKm;
+}
+
+// Burn-event recorders — called from setBurnInput so we capture both
+// player-held and scheduled burns uniformly.
+function recordBurnStart() {
+  const fs = sim.flightStats;
+  if (!fs || !sim.state || !sim.design) return;
+  const tel = ENG.telemetry(sim.state, sim.design, sim.env, sim.control.attitudeMult);
+  fs._currentBurn = {
+    startT:     sim.state.t,
+    mode:       sim.control.mode,
+    fuelStart:  sim.state.fuel,
+    phaseFracStart: _phaseFracAt(sim.state, tel),
+    bonusActive: false,                 // promoted to true if any frame fires in the 2× zone
+  };
+}
+function recordBurnEnd() {
+  const fs = sim.flightStats;
+  if (!fs || !fs._currentBurn || !sim.state || !sim.design) return;
+  const b = fs._currentBurn; fs._currentBurn = null;
+  b.endT = sim.state.t;
+  b.fuelEnd = sim.state.fuel;
+  b.durationS = b.endT - b.startT;
+  // Tsiolkovsky on actual fuel consumed — mirrors the Δv-flash readout.
+  const m0 = sim.design.dryMass + b.fuelStart;
+  const mf = sim.design.dryMass + b.fuelEnd;
+  if (mf > 0 && m0 > mf) {
+    const ispEff = sim.design.isp * (1 - 0.25 * (sim.state.burnSeconds
+                   ? Math.min(1, sim.state.burnSeconds / (sim.design.throatLifeS ?? 6000)) : 0));
+    b.dvEng = ispEff * ENG.G0 * Math.log(m0 / Math.max(mf, 1e-9));
+  } else {
+    b.dvEng = 0;
+  }
+  fs.totalDvDelivered += b.dvEng;
+  if (b.bonusActive) {
+    fs.bonusBurnCount++;
+    fs.bonusDvDelivered += b.dvEng;
+  }
+  fs.burns.push(b);
+}
+// Called each frame while a burn is live so we can mark whether the
+// bonus window was active at any point during it (a single tick is
+// enough to count — the player saw the ⚡ +2× indicator).
+function noteBurnFrameBonus() {
+  const fs = sim.flightStats;
+  if (fs?._currentBurn && (sim._forecastBurnMultiplier ?? 1) >= 2) {
+    fs._currentBurn.bonusActive = true;
+  }
+}
+
+// Render the scorecard. Outcome string + bad-flag set by the caller so
+// re-entry vs success vs ran-out-of-fuel can share the same layout.
+function showScorecard({ outcome, ok, rank }) {
+  const fs = sim.flightStats || makeFlightStats();
+  // Finalise any in-flight burn — re-entry can fire while burn was held.
+  if (fs._currentBurn) recordBurnEnd();
+
+  const grades = computeScorecardGrades(fs);
+  const mission = MISSIONS[sim.missionId];
+
+  $('sc-mission').textContent = (mission?.name ?? sim.missionId ?? 'Mission') + ' · final report';
+  const outEl = $('sc-outcome');
+  outEl.textContent = outcome;
+  outEl.classList.toggle('bad', !ok);
+  $('sc-rank').textContent = rank ?? (ok ? '🏁' : '💥');
+  $('sc-score').textContent = Math.floor(sim.score || 0);
+
+  for (const [key, ids] of Object.entries({
+    timing: ['sc-g-timing', 'sc-g-timing-v'],
+    dv:     ['sc-g-dv',     'sc-g-dv-v'],
+    bonus:  ['sc-g-bonus',  'sc-g-bonus-v'],
+  })) {
+    const g = grades[key];
+    const letter = $(ids[0]), val = $(ids[1]);
+    letter.textContent = g.grade;
+    letter.classList.remove('A','B','C','D','F');
+    letter.classList.add(g.grade);
+    val.textContent = g.detail;
+  }
+
+  // Default rows everyone gets. Mission-specific rows append after.
+  const rows = [
+    { lbl: 'Final orbit',  val: `${fs.finalPeriKm.toFixed(0)} × ${fs.finalApoKm.toFixed(0)} km` },
+    { lbl: 'Δv delivered', val: `${fs.totalDvDelivered.toFixed(1)} m/s` },
+    { lbl: 'Burns fired',  val: String(fs.burns.length) },
+    { lbl: '2× bonus Δv',  val: `${fs.bonusDvDelivered.toFixed(1)} m/s`,
+      cls: fs.bonusDvDelivered > 0 ? 'bonus' : '' },
+  ];
+  if (mission?.altitudeFloorKm != null && fs.floorBreachSec > 0.5) {
+    rows.push({
+      lbl: 'Floor breach', val: `${fs.floorBreachSec.toFixed(0)} s below ${mission.altitudeFloorKm} km`,
+      cls: 'warn',
+    });
+  }
+  // Mission-specific scorecard hook — append rows + optional tip.
+  let tipText = null;
+  try {
+    const extra = mission?.scorecard?.(fs, sim.missionCtx) || {};
+    if (Array.isArray(extra.rows)) for (const r of extra.rows) rows.push(r);
+    if (typeof extra.tip === 'string') tipText = extra.tip;
+  } catch (err) {
+    if (typeof console !== 'undefined') console.warn('[scorecard] mission hook threw:', err);
+  }
+
+  const rowsEl = $('sc-rows');
+  rowsEl.innerHTML = rows.map(r =>
+    `<div class="sc-row ${r.cls || ''}"><span class="sc-lbl">${r.lbl}</span>` +
+    `<span class="sc-val">${r.val}</span></div>`).join('');
+
+  const tipEl = $('sc-tip');
+  if (tipText) { tipEl.textContent = tipText; tipEl.hidden = false; }
+  else         { tipEl.hidden = true; }
+
+  $('scorecard-overlay').hidden = false;
+}
+function hideScorecard() { $('scorecard-overlay').hidden = true; }
+// Re-arm "Try Again" — close the card and re-launch with the same
+// mission selected. Close just dismisses the card; players can still
+// hit Launch to retry manually.
+$('sc-close')?.addEventListener('click', hideScorecard);
+$('sc-replay')?.addEventListener('click', () => {
+  hideScorecard();
+  // Reset cleans the trail/state; launch boots a new mission instance.
+  resetSim();
+  setTimeout(() => launch(), 60);   // give resetSim a tick to settle
+});
+
+// ── Plan-burn popover ───────────────────────────────────────────────────────
+// A small scheduler that queues one prograde or retrograde burn to fire
+// at the next apogee, perigee, or forecast peak. The frame loop watches
+// for the trigger condition; once met, the burn fires for the configured
+// duration and self-disarms. Educational: forces the player to think in
+// terms of orbit phase rather than "burn now".
+{
+  const pop = $('plan-pop');
+  const planBtn = $('b-plan');
+  // Live readouts inside the popover.
+  $('pp-throttle').addEventListener('input', () => {
+    $('pp-throttle-v').textContent = $('pp-throttle').value;
+  });
+  $('pp-duration').addEventListener('input', () => {
+    $('pp-duration-v').textContent = $('pp-duration').value;
+  });
+  const openPopover = () => {
+    // Anchor under the Plan button. Inline positioning so the popover
+    // works even if the surrounding panel doesn't itself relative-position.
+    const r = planBtn.getBoundingClientRect();
+    const host = planBtn.offsetParent || document.body;
+    const hr = host.getBoundingClientRect();
+    pop.style.top  = (planBtn.offsetTop + planBtn.offsetHeight + 6) + 'px';
+    pop.style.left = (planBtn.offsetLeft) + 'px';
+    pop.hidden = false;
+    // Seed the throttle slider with the current dial value so 'commit'
+    // matches the player's intuition unless they tweak it.
+    $('pp-throttle').value = $('f-throttle').value;
+    $('pp-throttle-v').textContent = $('pp-throttle').value;
+  };
+  const closePopover = () => { pop.hidden = true; };
+  planBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (pop.hidden) openPopover(); else closePopover();
+  });
+  $('pp-close').addEventListener('click', closePopover);
+  // Click-outside / Esc to dismiss. Keep listeners attached at document
+  // level — they're cheap and self-no-op when the popover is hidden.
+  document.addEventListener('click', (e) => {
+    if (pop.hidden) return;
+    if (pop.contains(e.target) || planBtn.contains(e.target)) return;
+    closePopover();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !pop.hidden) closePopover();
+  });
+  $('pp-commit').addEventListener('click', () => {
+    if (!sim.running) {
+      toast('Launch first — schedules a burn during flight.', true);
+      return;
+    }
+    sim.scheduledBurn = {
+      trigger:  $('pp-trigger').value,        // apogee | perigee | forecast-peak
+      mode:     $('pp-mode').value,           // prograde | retrograde
+      throttle: (+$('pp-throttle').value) / 100,
+      durationS: +$('pp-duration').value,
+      armedAt:  sim.state ? sim.state.t : 0,
+      firingUntilT: null,                     // set when trigger fires
+      _peakSimSec: null,
+    };
+    // Snapshot the forecast peak at commit-time so the trigger fires at a
+    // deterministic sim-time even if the projection updates mid-flight.
+    if (sim.scheduledBurn.trigger === 'forecast-peak') {
+      if (sim._forecastPeakSimSec != null) {
+        sim.scheduledBurn._peakSimSec = sim._forecastPeakSimSec;
+      } else {
+        sim.scheduledBurn = null;
+        toast('No forecast peak available — fetch is still warming up.', true);
+        return;
+      }
+    }
+    closePopover();
+    updateSchedPill();
+    toast(`⏰ Burn queued — ${sim.scheduledBurn.mode} ${$('pp-duration').value}s @ ${$('pp-throttle').value}% on next ${$('pp-trigger').value}.`);
+  });
+  // Status pill: click to cancel an armed scheduled burn.
+  $('st-sched').addEventListener('click', () => {
+    if (!sim.scheduledBurn) return;
+    if (sim.scheduledBurn.firingUntilT) return;  // can't cancel mid-fire
+    sim.scheduledBurn = null;
+    updateSchedPill();
+    toast('Scheduled burn cancelled.');
+  });
+}
+
+// Refresh the scheduled-burn status pill from sim state. Called whenever
+// the schedule changes and once per second during flight.
+function updateSchedPill() {
+  const pill = $('st-sched');
+  if (!pill) return;
+  const sb = sim.scheduledBurn;
+  if (!sb) { pill.hidden = true; return; }
+  pill.hidden = false;
+  if (sb.firingUntilT != null) {
+    const remaining = Math.max(0, sb.firingUntilT - (sim.state?.t || 0));
+    pill.firstChild.nodeValue = `🔥 ${sb.mode.toUpperCase()} ${remaining.toFixed(1)}s `;
+  } else {
+    pill.firstChild.nodeValue = `⏰ ${sb.trigger} · ${sb.mode} ${sb.durationS}s `;
+  }
+}
+
 // ── Mission control ─────────────────────────────────────────────────────────
 function launch() {
   sim.design = readDesign();
@@ -1449,6 +2326,18 @@ function launch() {
   sim._prevRdot = null; sim.scheduledBurn = null; sim._burnAnchor = null;
   sim._forecastBurnMultiplier = 1.0;
   updateSchedPill();
+  // STORM RADAR HUD — show on launch, clear any leftover history.
+  STORM_RADAR.resetHistory();
+  STORM_RADAR.setVisible(true);
+  // Flight stats — fresh slate per mission. Captured for the scorecard.
+  sim.flightStats = makeFlightStats();
+  sim.flightStats.dvBudgetInitial = sim.design.fuelMass > 0
+    ? sim.design.isp * ENG.G0 * Math.log((sim.design.dryMass + sim.design.fuelMass) / sim.design.dryMass)
+    : 0;
+  sim.flightStats.initialPeriKm = peri;
+  sim.flightStats.initialApoKm  = apo;
+  sim.flightStats.finalPeriKm   = peri;
+  sim.flightStats.finalApoKm    = apo;
   // Anchor sim time = 0 to wallclock now so forecast-peak triggers can map
   // real-world AR(1) horizons onto sim seconds.
   sim._launchedWallMs = Date.now();
@@ -1519,6 +2408,19 @@ function resetSim() {
   $('throttle-dial')?.classList.remove('firing');
   updateSchedPill();
   $('sd-thrust-btn')?.classList.remove('urgent','firing');
+  $('throttle-dial')?.classList.remove('firing');
+  updateSchedPill();
+  // Hide the STORM RADAR HUD back into pre-flight stealth.
+  STORM_RADAR.setVisible(false);
+  STORM_RADAR.resetHistory();
+  // Drop flight stats — fresh report on next launch.
+  sim.flightStats = null;
+  hideScorecard();
+  // Tear down the mission (clears any forecast override it installed)
+  // and drop the context so the next launch builds a fresh one.
+  try { MISSIONS[sim.missionId]?.teardown?.(sim.missionCtx); } catch (_) {}
+  FORECAST.setMissionOverride(null);
+  sim.missionCtx = null;
   // Refresh the inline objective text so the panel doesn't show stale data.
   refreshObjectivePanel();
 }
@@ -1586,6 +2488,35 @@ addEventListener('keyup', (e) => {
   });
 }
 
+// The BURN button: pointer events cover mouse + touch + stylus uniformly.
+// `pointerdown` fires, `pointerup` / `pointercancel` / `pointerleave`
+// releases. Calling setPointerCapture means a finger that slides off the
+// button still releases properly when lifted.
+{
+  const btn = $('sd-thrust-btn');
+  const press = (ev) => {
+    if (btn.disabled) return;
+    ev.preventDefault();
+    if (!sim.running) { launch(); return; }
+    try { btn.setPointerCapture?.(ev.pointerId); } catch (_) {}
+    setBurnInput(true);
+  };
+  const release = (ev) => {
+    if (!sim.running && !sim.inputs.burn) return;
+    try { btn.releasePointerCapture?.(ev.pointerId); } catch (_) {}
+    setBurnInput(false);
+  };
+  btn.addEventListener('pointerdown',   press);
+  btn.addEventListener('pointerup',     release);
+  btn.addEventListener('pointercancel', release);
+  btn.addEventListener('pointerleave',  release);
+  // Belt-and-braces — fired when the page is hidden mid-press (tab switch,
+  // alt-tab, browser scroll-jacking). Without this the engine keeps thrusting.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') setBurnInput(false);
+  });
+}
+
 // setBurnInput is the single funnel for momentary thrust. Saves the prior
 // burn mode on press, forces 'prograde' (the tangential orbit-raising vector
 // the player almost always wants), restores on release. Skips the override
@@ -1593,17 +2524,72 @@ addEventListener('keyup', (e) => {
 function setBurnInput(on) {
   if (on === sim.inputs.burn) return;
   sim.inputs.burn = !!on;
-  const btn = $('sd-thrust-btn');
-  if (!btn) return;
-  btn.classList.toggle('firing', sim.inputs.burn);
+  const btn  = $('sd-thrust-btn');
+  const dial = $('throttle-dial');
+  if (btn)  btn.classList.toggle('firing', sim.inputs.burn);
+  if (dial) dial.classList.toggle('firing', sim.inputs.burn);
   if (sim.inputs.burn) {
     // Don't override manual modes — those have their own W/S hold semantics.
     if (sim.control.mode === 'manual' || sim.control.mode === 'manual-retro') return;
     sim._burnPriorMode = sim.control.mode;
     setBurnMode('prograde');
+    // Record an anchor so we can compute Δv-delivered on release. We use
+    // fuel actually consumed × eff. Isp · g₀ (Tsiolkovsky) — that's the
+    // honest figure, not just |Δv_inertial| which would include drag.
+    if (sim.state) {
+      sim._burnAnchor = {
+        fuel: sim.state.fuel,
+        t:    sim.state.t,
+        speed:  Math.hypot(sim.state.vx, sim.state.vy),
+        scoreBonus: 0,
+      };
+    }
+    // Open a stats burn record so the scorecard's burn-timing grade
+    // can score this fire-event regardless of why it started (manual,
+    // scheduled, or the BURN button held down).
+    recordBurnStart();
+    // Haptic + visual bite. vibrate() is a no-op (returns false) when the
+    // device doesn't support it or the user has muted vibrations.
+    try { navigator.vibrate?.(18); } catch (_) {}
+    const stage = $('sd-stage');
+    if (stage) {
+      stage.classList.remove('burn-pulse');
+      // Force reflow so the animation re-runs on rapid taps.
+      void stage.offsetWidth;
+      stage.classList.add('burn-pulse');
+    }
   } else if (sim._burnPriorMode != null) {
     setBurnMode(sim._burnPriorMode);
     sim._burnPriorMode = null;
+    // Δv-delivered flash. Use the eroded effective Isp at burn-end; over a
+    // short burn it's a close-enough constant. Skip the popup for
+    // sub-millisecond burns (touch noise) or zero-fuel cases.
+    if (sim._burnAnchor && sim.state) {
+      const fuelUsed = Math.max(0, sim._burnAnchor.fuel - sim.state.fuel);
+      const burnT    = Math.max(0, sim.state.t - sim._burnAnchor.t);
+      if (fuelUsed > 1e-4 && burnT > 0.05) {
+        const m0 = sim.design.dryMass + sim._burnAnchor.fuel;
+        const mf = sim.design.dryMass + sim.state.fuel;
+        const ispEff = sim.design.isp * (1 - 0.25 * (sim.state.burnSeconds
+                       ? Math.min(1, sim.state.burnSeconds / (sim.design.throatLifeS ?? 6000)) : 0));
+        const dv = ispEff * ENG.G0 * Math.log(m0 / Math.max(mf, 1e-9));
+        const bonus = sim._burnAnchor.scoreBonus || 0;
+        const flash = $('dv-flash');
+        if (flash) {
+          flash.innerHTML = `+${dv.toFixed(2)} m/s<small>${fuelUsed.toFixed(2)} kg · ${burnT.toFixed(1)}s</small>`
+                          + (bonus > 0 ? ` <small style="color:#7fdcff">⚡ +2× FORECAST</small>` : '');
+          flash.classList.remove('show');
+          void flash.offsetWidth;
+          flash.classList.add('show');
+          clearTimeout(setBurnInput._flashT);
+          setBurnInput._flashT = setTimeout(() => flash.classList.remove('show'), 1100);
+        }
+      }
+      sim._burnAnchor = null;
+    }
+    // Close the stats burn record — feeds Δv-efficiency + bonus-Δv totals.
+    recordBurnEnd();
+    try { navigator.vibrate?.(8); } catch (_) {}
   }
 }
 
@@ -1822,6 +2808,9 @@ function frame(now) {
     }
     sim._forecastBurnMultiplier = _scoreMult;
     if (sim._burnAnchor) sim._burnAnchor.scoreBonus = _scoreMult >= 2 ? 1 : 0;
+    // Flight-stats book-keeping (peak windows, breach time, burn-frame bonus).
+    tickFlightStats(simSecs, tel);
+    if (sim.inputs.burn) noteBurnFrameBonus();
 
     // Mission tick — let the active scenario advance its state machine and
     // contribute to the score. `missionCtx` was prepped in startMission().
@@ -1838,6 +2827,7 @@ function frame(now) {
         $('b-launch').disabled = false;
         maybePersistBest();
         grantMissionXp(true);
+        showScorecard({ outcome: 'Mission complete', ok: true, rank: '🏆' });
       }
     }
     // Final score from the mission's accumulator (overrides delta sum when
@@ -1904,6 +2894,22 @@ function frame(now) {
       }
       maybePersistBest();
       grantMissionXp(deorbitSuccess);
+      // Scorecard on re-entry. For the deorbit mission, the outcome
+      // depends on the safe-window check; for everyone else, re-entry
+      // is failure.
+      if (sim.missionId === 'deorbit') {
+        showScorecard({
+          outcome: deorbitSuccess ? 'Re-entry inside safe window' : 'Re-entry outside window',
+          ok: deorbitSuccess,
+          rank: deorbitSuccess ? '🎯' : '💥',
+        });
+      } else {
+        showScorecard({
+          outcome: sim.state.reason === 'reentry' ? 'Re-entry — vehicle destroyed' : 'Mission ended',
+          ok: false,
+          rank: '💥',
+        });
+      }
     } else if (tel.fuel <= 0 && sim.control.mode === 'prograde') {
       setPhase('⚠ Out of propellant — decaying', 'warn');
     }
@@ -1912,9 +2918,13 @@ function frame(now) {
     // Scheduled-burn pill ticks the countdown when armed/firing. Cheap so
     // we run it every frame; visual delta only when text actually changes.
     if (sim.scheduledBurn) updateSchedPill();
+    // STORM RADAR HUD — same per-frame cadence. Internal memoisation keeps
+    // the forecast path-rebuild from running when the values haven't moved.
+    STORM_RADAR.update();
   } else if (sim.state) {
     // Live telemetry tick even when paused so the objective bar reflects truth.
     refreshObjectivePanel(ENG.telemetry(sim.state, sim.design, sim.env, sim.control.attitudeMult));
+    STORM_RADAR.update();
   }
 
   draw();
@@ -2636,6 +3646,13 @@ $('mission-select').addEventListener('click', (e) => {
 });
 function setMission(id) {
   if (!MISSIONS[id]) return;
+  // Tear down the outgoing mission so any installed forecast override
+  // (e.g. starlink2022's scripted G2) doesn't leak across mission picks.
+  const prev = MISSIONS[sim.missionId];
+  if (prev && prev !== MISSIONS[id]) {
+    try { prev.teardown?.(sim.missionCtx); } catch (_) {}
+    FORECAST.setMissionOverride(null);
+  }
   sim.missionId = id;
   const m = MISSIONS[id];
   $('mission-select').querySelectorAll('.toggle').forEach(t =>
@@ -2652,6 +3669,15 @@ function setMission(id) {
     if (d.throttle != null) { $('f-throttle').value = d.throttle; $('v-thr').textContent = d.throttle;
                               sim.control.throttle = d.throttle / 100; }
     if (d.fuelMass != null) { $('f-fuel').value = d.fuelMass; $('v-fuel').textContent = d.fuelMass; refreshDesignReadouts(); }
+    // Hardware overrides — hindcast missions ship a fixed spacecraft
+    // config (Starlink-broom area, ISS-class dryMass) so the player can
+    // recreate the real scenario. Optional; missions that don't set
+    // these leave the bay panel as the player configured it.
+    if (d.area     != null) { const el = $('f-area');     if (el) { el.value = d.area;     refreshDesignReadouts(); } }
+    if (d.dryMass  != null) { const el = $('f-dry');      if (el) { el.value = d.dryMass;  refreshDesignReadouts(); } }
+    if (d.cd       != null) { const el = $('f-cd');       if (el) { el.value = d.cd;       refreshDesignReadouts(); } }
+    if (d.thrust   != null) { const el = $('f-thrust');   if (el) { el.value = d.thrust;   refreshDesignReadouts(); } }
+    if (d.isp      != null) { const el = $('f-isp');      if (el) { el.value = d.isp;      refreshDesignReadouts(); } }
     if (d.swPreset) setSWPreset(d.swPreset);
     if (d.attitude) setAttitude(d.attitude);
     SCENE?.setTargetAlt(+$('f-tgt').value);
@@ -2660,6 +3686,9 @@ function setMission(id) {
 }
 function startMission() {
   const m = MISSIONS[sim.missionId]; if (!m) return;
+  // Clear any prior mission's forecast override so live data is the
+  // baseline. Hindcast missions reinstall their script in setup().
+  FORECAST.setMissionOverride(null);
   // Mission context — read/write surface the scenario uses to mutate the world.
   sim.missionCtx = {
     sim, env, design: sim.design, control: sim.control,
@@ -2673,6 +3702,9 @@ function startMission() {
     getDebris: () => sim.debrisM,
     event: (type) => { /* hook point for analytics / sounds */ },
     setBanner,
+    // Hindcast missions use this to install a scripted F10.7/Ap profile
+    // that the STORM RADAR reads. Passing null clears it.
+    setForecastOverride: (fn) => FORECAST.setMissionOverride(fn),
   };
   m.setup?.(sim.missionCtx);
   refreshObjectivePanel();
