@@ -1648,7 +1648,7 @@ export async function fetchConversionRate(weeks = 8) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Top sims / pages — already exists as fetchTopPages, but admin/analytics
 // surface wants a per-plan breakdown for "do paid users actually use Advanced
-// features?". We piggyback on user_analytics + user_profiles via a join.
+// features?". We piggyback on analytics_events + user_profiles via a join.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function fetchTopSimsByPlan(days = 7) {
@@ -1656,14 +1656,15 @@ export async function fetchTopSimsByPlan(days = 7) {
     if (!client) return { ok: false, error: 'Supabase not configured' };
     if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
     try {
-        // user_analytics lacks plan; we map user_id -> plan in two queries
+        // analytics_events lacks plan; we map user_id -> plan in two queries
         // and join client-side. Cheaper than a SQL view, simple to reason
-        // about.
+        // about. (Filter by event_type — analytics_events.event_name carries
+        // the page slug, not the event kind.)
         const { data: analytics, error: aErr } = await client
-            .from('user_analytics')
-            .select('user_id, page_path, event_name, created_at')
+            .from('analytics_events')
+            .select('user_id, page_path, event_type, created_at')
             .gte('created_at', daysAgo(days))
-            .eq('event_name', 'page_view')
+            .eq('event_type', 'page_view')
             .limit(20000);
         if (aErr) throw aErr;
 
