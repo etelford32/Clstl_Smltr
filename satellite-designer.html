@@ -1518,6 +1518,7 @@ function resetSim() {
   $('sd-thrust-btn')?.classList.remove('urgent','firing');
   $('throttle-dial')?.classList.remove('firing');
   updateSchedPill();
+  $('sd-thrust-btn')?.classList.remove('urgent','firing');
   // Refresh the inline objective text so the panel doesn't show stale data.
   refreshObjectivePanel();
 }
@@ -1555,6 +1556,56 @@ addEventListener('keydown', (e) => {
 addEventListener('keyup', (e) => {
   if (e.code === 'Space') setBurnInput(false);
 });
+
+// The BURN button: pointer events cover mouse + touch + stylus uniformly.
+// `pointerdown` fires, `pointerup` / `pointercancel` / `pointerleave`
+// releases. Calling setPointerCapture means a finger that slides off the
+// button still releases properly when lifted.
+{
+  const btn = $('sd-thrust-btn');
+  const press = (ev) => {
+    if (btn.disabled) return;
+    ev.preventDefault();
+    if (!sim.running) { launch(); return; }
+    try { btn.setPointerCapture?.(ev.pointerId); } catch (_) {}
+    setBurnInput(true);
+  };
+  const release = (ev) => {
+    if (!sim.running && !sim.inputs.burn) return;
+    try { btn.releasePointerCapture?.(ev.pointerId); } catch (_) {}
+    setBurnInput(false);
+  };
+  btn.addEventListener('pointerdown',   press);
+  btn.addEventListener('pointerup',     release);
+  btn.addEventListener('pointercancel', release);
+  btn.addEventListener('pointerleave',  release);
+  // Belt-and-braces — fired when the page is hidden mid-press (tab switch,
+  // alt-tab, browser scroll-jacking). Without this the engine keeps thrusting.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') setBurnInput(false);
+  });
+}
+
+// setBurnInput is the single funnel for momentary thrust. Saves the prior
+// burn mode on press, forces 'prograde' (the tangential orbit-raising vector
+// the player almost always wants), restores on release. Skips the override
+// while the player is hand-flying in manual mode — W/S already handle that.
+function setBurnInput(on) {
+  if (on === sim.inputs.burn) return;
+  sim.inputs.burn = !!on;
+  const btn = $('sd-thrust-btn');
+  if (!btn) return;
+  btn.classList.toggle('firing', sim.inputs.burn);
+  if (sim.inputs.burn) {
+    // Don't override manual modes — those have their own W/S hold semantics.
+    if (sim.control.mode === 'manual' || sim.control.mode === 'manual-retro') return;
+    sim._burnPriorMode = sim.control.mode;
+    setBurnMode('prograde');
+  } else if (sim._burnPriorMode != null) {
+    setBurnMode(sim._burnPriorMode);
+    sim._burnPriorMode = null;
+  }
+}
 
 // The BURN button: pointer events cover mouse + touch + stylus uniformly.
 // `pointerdown` fires, `pointerup` / `pointercancel` / `pointerleave`
