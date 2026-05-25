@@ -1,21 +1,59 @@
 /**
- * Five mission scenarios for the Mission State canvas. Each one is a small
- * state machine on top of the existing orbital sim:
- *   • setup(ctx)  — one-time when the player hits "Launch" with this mission
- *                   selected. May tweak the design slider defaults, env,
- *                   spawn target/debris objects, set its own mission state.
- *   • tick(ctx, dt, tel)  — every frame while flying. Returns
- *                   { event?, scoreDelta?, done?, fail? }.
- *   • objective(ctx, tel) — UI hint: { label, progress (0-1), status }.
+ * Mission scenarios for the Mission State canvas. Each one is a small
+ * state machine on top of the existing orbital sim.
  *
- * `ctx` carries everything missions need to read/write:
+ * ─── Mission object schema ────────────────────────────────────────────
+ *
+ *   id:       short snake-case key used in the URL + storage
+ *   name:     human display name
+ *   blurb:    1–2 sentence pre-flight briefing shown in the objective bar
+ *   tip:      educational note — real-world context for the cockpit card
+ *   defaults: starting slider values  { periKm, apoKm, tgtKm, throttle,
+ *                                       swPreset, attitude, fuelMass }
+ *   altitudeFloorKm: (optional) soft-warning altitude. Drives the
+ *                    "DEORBIT WARNING → BREACHED" escalation.
+ *   lookaheadOrbits: (optional, default DEFAULT_LOOKAHEAD_ORBITS) — how
+ *                    far the projected-perigee helper looks for the
+ *                    floor-status assessment.
+ *
+ * ─── Required methods ─────────────────────────────────────────────────
+ *
+ *   setup(ctx)            — one-time on launch. May write ctx.state,
+ *                            tweak ctx.env, spawn targets/debris.
+ *   tick(ctx, dt, tel)    — every frame while flying. Return:
+ *                            { event?, scoreDelta?, done?, fail? }
+ *   objective(ctx, tel)   — UI hint: { label, progress 0-1, status,
+ *                            extras? }
+ *
+ * ─── Optional methods ─────────────────────────────────────────────────
+ *
+ *   score(ctx)            — closed-form final score (overrides the
+ *                            scoreDelta sum). Use when the mission's
+ *                            success metric is non-monotonic (e.g.
+ *                            rendezvous = f(best miss distance)).
+ *   scorecard(stats, ctx) — end-of-mission breakdown. Return:
+ *                            { rows: [{ lbl, val, cls? }, ...], tip? }
+ *                            cls ∈ '' | 'bonus' | 'warn' | 'bad'.
+ *                            `stats` is sim.flightStats — see schema in
+ *                            satellite-designer.html makeFlightStats().
+ *
+ * ─── ctx surface ──────────────────────────────────────────────────────
+ *
  *   { sim, env, design, control, R_EARTH, MU,
- *     getTarget(), getDebris(),                 // pose helpers, in metres
+ *     targetAltKm, lastPeriKm,
+ *     getTarget(), getDebris(),     // pose helpers, in metres
  *     setTarget(obj), setDebris(obj),
  *     event(type, payload), setBanner(text, cls) }
  *
- * Missions are deliberately small so they're readable and easy to balance.
- * Educational notes are written into `.tip` for the cockpit briefing card.
+ * ─── Adding a new mission ─────────────────────────────────────────────
+ *
+ *   1. Define `export const myMission = { ... }`
+ *   2. Register in MISSIONS at the bottom of this file
+ *   3. Append the id to MISSION_ORDER (sets pre-flight nav order)
+ *   4. Optional: scenes/missions/<id>.js for custom 3D dressing
+ *
+ * Missions are deliberately small so they're readable and easy to
+ * balance. Keep state in ctx.state so the player's reset clears it.
  */
 
 const TAU = Math.PI * 2;
@@ -132,6 +170,21 @@ export const stationKeeper = {
     const s = ctx.state || {};
     return Math.floor((s.stationSeconds || 0) + (s.orbits || 0) * 50);
   },
+  // Station-keeping is fundamentally an endurance/efficiency game, so
+  // the scorecard highlights on-station time + orbits completed and
+  // calls out fuel waste (any Δv spent climbing >25 km above target).
+  scorecard(stats, ctx) {
+    const s = ctx?.state || {};
+    return {
+      rows: [
+        { lbl: 'On-station time', val: `${Math.floor(s.stationSeconds || 0)} s` },
+        { lbl: 'Orbits completed', val: String(s.orbits || 0) },
+      ],
+      tip: stats.bonusDvDelivered > 5
+        ? 'You captured a forecast peak — that 2× window is the cheapest re-boost you can buy. Watch the radar.'
+        : 'Re-boost burns deep in the gravity well (near perigee) give you the most Δenergy per Δv (the Oberth effect).',
+    };
+  },
 };
 
 // ─── 2) CME SURVIVAL ────────────────────────────────────────────────────────
@@ -185,6 +238,23 @@ export const cmeSurvival = {
       status: tel.altKm < tgt - 25 ? 'bad'
             : (st.phase === 'storm' ? 'warn' : 'good'),
       extras: { 'F10.7': Math.round(ctx.env.f107Sfu), Ap: Math.round(ctx.env.ap) },
+    };
+  },
+  // CME survival rewards pre-storm conditioning — burns timed BEFORE the
+  // density spike are far cheaper than fighting through it. The
+  // scorecard surfaces whether the player exploited the bonus window.
+  scorecard(stats, ctx) {
+    const st = ctx?.state || {};
+    return {
+      rows: [
+        { lbl: 'Phase reached', val: st.phase === 'storm' ? 'STORM' : 'Quiet' },
+        { lbl: 'Storm seconds', val: `${Math.floor(st.stormSeconds || 0)} s` },
+        { lbl: 'Below-target time', val: `${Math.floor(st.belowTarget || 0)} s`,
+          cls: (st.belowTarget || 0) > 30 ? 'warn' : '' },
+      ],
+      tip: stats.bonusBurnCount > 0
+        ? 'Forecast-aligned burns are the textbook play here — you used the warning lead time well.'
+        : 'Next time, schedule a prograde burn during the F10.7 peak window on the radar. The 2× score reflects how much real Δv you save by burning *before* the density wall.',
     };
   },
 };
