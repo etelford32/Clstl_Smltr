@@ -573,24 +573,28 @@ async function supabaseCallRpc(fnName, args) {
 
 // ── Handler ─────────────────────────────────────────────────────────────
 
-// Core refresh logic, separate from the watchdog wrapper. Returns the
-// finished Response so the wrapper can race it against the deadline.
+// Core refresh logic, separate from the watchdog wrapper. Returns a
+// {status, body} envelope so the wrapper can race it against the deadline
+// and the public handler can write it via Node-runtime res.status().json().
+// (Earlier versions returned a Fetch `Response` here; Vercel's Node runtime
+// accepts that but emits a "default export returned ..." warning and a 504
+// even when the side effects landed — see PR notes for 2026-05-24.)
 async function runRefresh(request) {
     if (!isAuthorized(request)) {
-        return new Response(JSON.stringify({ error: 'unauthorized' }), {
-            status: 401,
-            headers: { 'Content-Type': 'application/json' },
-        });
+        return { status: 401, body: { error: 'unauthorized' } };
     }
 
     if (!SUPABASE_URL || !SUPABASE_KEY) {
-        return new Response(JSON.stringify({
-            error:   'supabase_not_configured',
-            missing: [
-                !SUPABASE_URL ? 'SUPABASE_URL' : null,
-                !SUPABASE_KEY ? 'SUPABASE_SERVICE_KEY' : null,
-            ].filter(Boolean),
-        }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+        return {
+            status: 500,
+            body: {
+                error:   'supabase_not_configured',
+                missing: [
+                    !SUPABASE_URL ? 'SUPABASE_URL' : null,
+                    !SUPABASE_KEY ? 'SUPABASE_SERVICE_KEY' : null,
+                ].filter(Boolean),
+            },
+        };
     }
 
     let winSource    = null;
@@ -624,10 +628,7 @@ async function runRefresh(request) {
             p_name:   'weather_grid',
             p_reason: reason,
         });
-        return new Response(JSON.stringify({ ok: false, reason }), {
-            status: 502,
-            headers: { 'Content-Type': 'application/json' },
-        });
+        return { status: 502, body: { ok: false, reason } };
     }
 
     // Tag the source with the grid dimensions so the frontend (and the
@@ -644,10 +645,7 @@ async function runRefresh(request) {
             p_name:   'weather_grid',
             p_reason: e.message,
         });
-        return new Response(JSON.stringify({ ok: false, reason: e.message }), {
-            status: 502,
-            headers: { 'Content-Type': 'application/json' },
-        });
+        return { status: 502, body: { ok: false, reason: e.message } };
     }
 
     // Opportunistic retention trim + heartbeat update. Neither is fatal.
@@ -657,20 +655,32 @@ async function runRefresh(request) {
         p_source: sourceWithGrid,
     });
 
-    return new Response(JSON.stringify({
-        ok:        true,
-        id:        insertedId,
-        source:    sourceWithGrid,
-        locations: merged.length,
-        grid:      { w: GRID_W, h: GRID_H, deg: GRID_DEG },
-    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    return {
+        status: 200,
+        body: {
+            ok:        true,
+            id:        insertedId,
+            source:    sourceWithGrid,
+            locations: merged.length,
+            grid:      { w: GRID_W, h: GRID_H, deg: GRID_DEG },
+        },
+    };
 }
 
 // Public handler. Races runRefresh against a watchdog so an over-budget
 // invocation still records a structured failure to pipeline_heartbeat —
 // without this, the four-day silent freeze that prompted this rewrite can
 // recur the next time an upstream goes globally degraded.
-export default async function handler(request) {
+//
+// Dual-shape signature: Vercel Node serverless invokes `handler(req, res)`
+// and expects `res.status().json()`; dev-server.mjs invokes `handler(request)`
+// and expects a Fetch `Response` back. Returning a Response on the Vercel
+// Node runtime works but emits the "default export returned ..." warning
+// and lets Vercel time out the response phase at maxDuration (observed
+// 2026-05-24: consecutive_fail=0 in Supabase yet every tick logged 504).
+// Branching on the presence of `res` keeps both call sites happy without
+// the dev-server needing to know the difference.
+export default async function handler(req, res) {
     let timer;
     const watchdog = new Promise((resolve) => {
         timer = setTimeout(async () => {
@@ -678,15 +688,15 @@ export default async function handler(request) {
                 p_name:   'weather_grid',
                 p_reason: `worker_timeout: exceeded ${WATCHDOG_MS} ms before any source completed`,
             });
-            resolve(new Response(JSON.stringify({
-                ok:     false,
-                reason: 'worker_timeout',
-                budget_ms: WATCHDOG_MS,
-            }), { status: 504, headers: { 'Content-Type': 'application/json' } }));
+            resolve({
+                status: 504,
+                body: { ok: false, reason: 'worker_timeout', budget_ms: WATCHDOG_MS },
+            });
         }, WATCHDOG_MS);
     });
+    let envelope;
     try {
-        return await Promise.race([runRefresh(request), watchdog]);
+        envelope = await Promise.race([runRefresh(req), watchdog]);
     } catch (err) {
         // Catches synchronous throws from the request path (auth-check bugs,
         // import-time errors, anything that fires before runRefresh's own
@@ -698,11 +708,17 @@ export default async function handler(request) {
             p_name:   'weather_grid',
             p_reason: reason,
         }).catch(() => {});
-        return new Response(JSON.stringify({ ok: false, reason }), {
-            status: 500,
-            headers: { 'Content-Type': 'application/json' },
-        });
+        envelope = { status: 500, body: { ok: false, reason } };
     } finally {
         clearTimeout(timer);
     }
+
+    if (res && typeof res.status === 'function') {
+        res.status(envelope.status).json(envelope.body);
+        return;
+    }
+    return new Response(JSON.stringify(envelope.body), {
+        status: envelope.status,
+        headers: { 'Content-Type': 'application/json' },
+    });
 }
