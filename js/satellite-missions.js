@@ -794,6 +794,339 @@ export const gannon2024 = {
   },
 };
 
+// ─── 8) HALLOWEEN 2003 HINDCAST ────────────────────────────────────────────
+// 28 Oct – 4 Nov 2003. A two-week train of X-class flares and ten CMEs
+// produced multiple G5 storms, the SOHO instrument off-pointing event,
+// and ~30 reported satellite anomalies. F10.7 sat ~250–280 SFU, Ap
+// saturated at 400 for days. Decay was the *cumulative* killer — orbit
+// loss happened over many passes, not a single pulse.
+//
+// Mission shape: three-pulse extended G5 over 6 hours sim time. Lower
+// peak drag than Gannon's single G5 burst, but the longer integrated
+// exposure forces the player to pace their Δv budget across the storm.
+//
+// Storm script (sim seconds):
+//   0–900       lead-in — F10.7=170, Ap=20 (Oct 28 quiet)
+//   900–2700    pulse 1 ramp+hold — F10.7→250, Ap→200 (G3)
+//   2700–4500   minor lull — F10.7→230, Ap→100
+//   4500–7200   pulse 2 — F10.7→275, Ap→250 (the 28–29 Oct G5)
+//   7200–9000   recovery 1 — F10.7→230, Ap→120
+//   9000–13500  pulse 3 — F10.7→270, Ap→240 (the 4 Nov G5 finale)
+//   13500–18000 long recovery — back to baseline
+//   18000+      survived
+export const halloween2003 = {
+  id: 'halloween2003',
+  name: 'Halloween · Oct 2003',
+  blurb: '350 km circular. Three G5 pulses over 5 hours. Pace propellant — cumulative decay is the killer.',
+  tip: 'Real event: two weeks of X-class flares, 10 CMEs, ~30 satellite anomalies. Cumulative drag exposure killed more orbits than any single pulse.',
+  defaults: { periKm: 350, apoKm: 350, tgtKm: 350, throttle: 65,
+              swPreset: 'nominal', attitude: 'nominal',
+              // ISS-era ops platform: 22 m² ram area, modest fuel budget.
+              // The educational forcing is *cumulative* storm exposure
+              // across three pulses, not any single peak — Δv pacing is
+              // the discipline being tested.
+              dryMass: 75, fuelMass: 32, area: 22, cd: 2.3,
+              thrust: 22, isp: 235 },
+  altitudeFloorKm: 320,
+  lookaheadOrbits: 6,
+  setup(ctx) {
+    ctx.state = {
+      phase: 'lead-in', breachSec: 0, pulses: 0, survived: false,
+      onStationSec: 0, missionEndT: 18000,
+    };
+    const f107KP = [
+      [0,170],   [900,170],  [1800,250], [2700,250], [3600,230], [4500,275],
+      [6300,275],[7200,230], [9000,230], [10800,270],[13500,270],[15300,220],
+      [18000,180],[20000,170],
+    ];
+    const apKP = [
+      [0,20],    [900,20],   [1800,200], [2700,200], [3600,100], [4500,250],
+      [6300,250],[7200,120], [9000,120], [10800,240],[13500,240],[15300,100],
+      [18000,40], [20000,20],
+    ];
+    // Density multiplier peaks at 4× — less than Carrington's 8× but
+    // sustained across three pulses, so integrated decay exceeds it.
+    // The lulls between pulses are intentionally shallow (2.0×) so the
+    // player can't fully reset — fuel pacing is the discipline.
+    const densityMulKP = [
+      [0,1.1],   [900,1.1],  [1800,3.5], [2700,3.5], [3600,2.2], [4500,4.0],
+      [6300,4.0],[7200,2.2], [9000,2.2], [10800,4.0],[13500,4.0],[15300,1.8],
+      [18000,1.1],[20000,1],
+    ];
+    ctx.state._script = (t) => ({
+      f107: _piecewise(t, f107KP),
+      ap:   _piecewise(t, apKP),
+      densityMul: _piecewise(t, densityMulKP),
+    });
+    ctx.setForecastOverride?.(_makeScriptedOverride(ctx.state._script, ctx.sim));
+    ctx.setBanner('Quiet lead-in · 3 CME pulses forecast across the next 4 hours.', 'good');
+  },
+  tick(ctx, dt, tel) {
+    const st = ctx.state;
+    const t = ctx.sim.state.t;
+    const { f107, ap, densityMul } = st._script(t);
+    ctx.env.f107Sfu = f107; ctx.env.ap = ap;
+    if (densityMul != null) ctx.env.densityMul = densityMul;
+
+    // Phase narration — each pulse, each lull, each recovery beat.
+    if (st.phase === 'lead-in' && t >= 900) {
+      st.phase = 'pulse1'; st.pulses = 1;
+      ctx.setBanner('🌞 Pulse 1 — first G3 onset. Density rising at LEO.', 'warn');
+      ctx.event?.('halloween-pulse-1');
+    } else if (st.phase === 'pulse1' && t >= 3600) {
+      st.phase = 'lull1';
+      ctx.setBanner('Brief lull · pulse 2 forecast in 15 min — top off perigee.', 'warn');
+    } else if (st.phase === 'lull1' && t >= 4500) {
+      st.phase = 'pulse2'; st.pulses = 2;
+      ctx.setBanner('🔥 Pulse 2 — G5 hit. The October 28 storm in full force.', 'bad');
+      ctx.event?.('halloween-pulse-2');
+    } else if (st.phase === 'pulse2' && t >= 7200) {
+      st.phase = 'lull2';
+      ctx.setBanner('Recovery window · pulse 3 (Nov 4 finale) in 30 min.', 'warn');
+    } else if (st.phase === 'lull2' && t >= 10800) {
+      st.phase = 'pulse3'; st.pulses = 3;
+      ctx.setBanner('🔥 Pulse 3 — final G5 of the Halloween series.', 'bad');
+      ctx.event?.('halloween-pulse-3');
+    } else if (st.phase === 'pulse3' && t >= 13500) {
+      st.phase = 'recovery';
+      ctx.setBanner('Storm series passing — long tail of elevated drag remaining.', 'warn');
+    } else if (st.phase === 'recovery' && t >= 18000) {
+      st.phase = 'clear';
+      ctx.setBanner('✅ Survived two weeks of geomagnetic chaos.', 'good');
+    }
+
+    if (tel.altKm >= 340) st.onStationSec += dt;
+    if (tel.periAltKm < 320) st.breachSec += dt;
+
+    if (!st.survived && t >= st.missionEndT && ctx.sim.state.alive) {
+      st.survived = true;
+      const ok = st.breachSec < 600;       // 10-min breach budget across the 5-hour storm
+      return {
+        event: ok ? 'storm-survived' : 'storm-survived-degraded',
+        done: true,
+        scoreDelta: ok ? 9000 : 4000,      // Higher bonus than Gannon — longer fight
+      };
+    }
+    const tickPts = (tel.altKm >= 340
+      ? ((st.phase === 'pulse2' || st.phase === 'pulse3') ? 2 : 1) : 0) * dt;
+    return { scoreDelta: tickPts };
+  },
+  teardown(ctx) {
+    ctx.setForecastOverride?.(null);
+    if (ctx?.env) ctx.env.densityMul = 1;
+  },
+  objective(ctx, tel) {
+    const st = ctx.state || {};
+    const t = ctx.sim.state?.t || 0;
+    const endT = st.missionEndT || 18000;
+    const remaining = Math.max(0, endT - t);
+    return {
+      label: st.survived
+        ? `🏆 5-hour storm survived (${st.breachSec.toFixed(0)} s breach total)`
+        : `Hold 350 km · ${st.phase || 'lead-in'} · ${Math.ceil(remaining / 60)} min left · breach ${st.breachSec.toFixed(0)} s`,
+      progress: Math.min(1, t / endT),
+      status: tel.periAltKm < 320 ? 'bad'
+            : tel.periAltKm < 340 ? 'warn' : 'good',
+      extras: {
+        'F10.7': Math.round(ctx.env.f107Sfu),
+        Ap: Math.round(ctx.env.ap),
+        pulses: st.pulses || 0,
+      },
+    };
+  },
+  score(ctx) {
+    const st = ctx.state || {};
+    const onStation = Math.floor(st.onStationSec || 0);
+    const survivedBonus = st.survived ? (st.breachSec < 600 ? 9000 : 4000) : 0;
+    const breachPenalty = Math.floor((st.breachSec || 0) * 2);
+    return Math.max(0, onStation + survivedBonus - breachPenalty);
+  },
+  scorecard(stats, ctx) {
+    const st = ctx?.state || {};
+    return {
+      rows: [
+        { lbl: 'CME pulses faced',   val: String(st.pulses || 0) },
+        { lbl: 'On-station time',    val: `${Math.floor(st.onStationSec || 0)} s` },
+        { lbl: 'Cumulative breach',  val: `${(st.breachSec || 0).toFixed(0)} s`,
+          cls: (st.breachSec || 0) > 600 ? 'bad' : (st.breachSec || 0) > 120 ? 'warn' : '' },
+        { lbl: 'Storm series outcome',
+          val: st.survived ? (st.breachSec < 600 ? '✅ clean' : '⚠ degraded') : '❌ re-entry',
+          cls: st.survived ? (st.breachSec < 600 ? '' : 'warn') : 'bad' },
+      ],
+      tip: st.survived && st.breachSec < 600
+        ? 'Clean survival of the Halloween series — three G5 pulses metabolised. Operators in 2003 lost SOHO pointing, multiple LEO anomalies, even GPS. Pacing fuel across a multi-day storm series is the lesson.'
+        : 'Halloween 2003 ran 10 CMEs across two weeks. Cumulative drag — not any single pulse — killed orbits. Pacing matters more than peak response: spread re-boosts across the lulls instead of dumping Δv on one pulse.',
+    };
+  },
+};
+
+// ─── 9) CARRINGTON 1859 HINDCAST ───────────────────────────────────────────
+// The benchmark superstorm. Aurora visible at Cuba and Hawaii, telegraph
+// wires arcing, paper records burning. Estimated Dst ~−850 nT (about
+// 2× Gannon), Ap inferred well above the 400 scale ceiling. F10.7 was
+// not measured in 1859 — modern proxy reconstructions put it >300 SFU
+// during the September 1–2 ICME. A direct repeat today is considered
+// the canonical "if it hit now" worst case for LEO operations.
+//
+// Mission shape: deliberately punishing. Starting orbit is already at
+// the boundary where modest drag pushes you under the floor. Density
+// peaks at 6× nominal during the main pulse — enough that passive
+// players re-enter inside the window, and even reactive players need
+// to time their burns well. The lesson: when the storm is *this*
+// extreme, only Δv applied during the forecasted lull survives.
+//
+// Storm script (sim seconds):
+//   0–600       precursor — F10.7=190, Ap=40 (Aug 28 foreshock event)
+//   600–1200    "Carrington flare" — F10.7→260, Ap→200 (Aug 28 G4)
+//   1200–1800   quiet ICME transit — F10.7→210, Ap→80
+//   1800–3000   ICME arrival — F10.7→320, Ap→400 (Sep 1–2 superstorm)
+//   3000–6000   peak — F10.7=320, Ap=400, density ×6
+//   6000–7800   ramp down — F10.7→260, Ap→200
+//   7800–10800  recovery — F10.7→200, Ap→60
+//   10800+      survived
+export const carrington1859 = {
+  id: 'carrington1859',
+  name: 'Carrington · Sep 1859',
+  blurb: '330 km circular. Benchmark superstorm — density peaks 8× nominal. Anticipate via the precursor lull or re-enter.',
+  tip: 'Real event: 1859 superstorm, Dst ~−850 nT. A direct repeat would be the worst-case test of every LEO drag model on record.',
+  defaults: { periKm: 330, apoKm: 330, tgtKm: 330, throttle: 75,
+              swPreset: 'nominal', attitude: 'nominal',
+              // Hardware: Gannon-class, but the starting orbit sits much
+              // closer to the floor. The educational forcing here is
+              // "anticipation beats reaction" — the only winning plays
+              // are pre-burns during the precursor lull.
+              dryMass: 70, fuelMass: 55, area: 22, cd: 2.4,
+              thrust: 24, isp: 240 },
+  altitudeFloorKm: 270,
+  lookaheadOrbits: 8,
+  setup(ctx) {
+    ctx.state = {
+      phase: 'precursor', breachSec: 0, survived: false,
+      onStationSec: 0, missionEndT: 10800, lowestPeri: 330,
+    };
+    const f107KP = [
+      [0,190],   [600,190],  [900,260],  [1200,260], [1500,210], [1800,210],
+      [2400,320],[3000,320], [6000,320], [6900,260], [7800,260], [8700,200],
+      [10800,170],[12000,160],
+    ];
+    const apKP = [
+      [0,40],    [600,40],   [900,200],  [1200,200], [1500,80],  [1800,80],
+      [2400,400],[3000,400], [6000,400], [6900,200], [7800,200], [8700,60],
+      [10800,30], [12000,15],
+    ];
+    // Density multiplier peaks at 8× — Carrington is the boundary where
+    // standard NRLMSIS calibration breaks down entirely. The peak is
+    // sustained for ~80 min sim time so drag has multiple orbital
+    // passes to bite. Pre-burns during the T+25-min lull are the only
+    // way to ride this out cleanly; reactive play meets re-entry.
+    const densityMulKP = [
+      [0,1.2],   [600,1.2],  [900,3.0],  [1200,3.0], [1500,1.8], [1800,1.8],
+      [2400,8.0],[3000,8.0], [6000,8.0], [6900,3.5], [7800,3.5], [8700,2.0],
+      [10800,1.3],[12000,1],
+    ];
+    ctx.state._script = (t) => ({
+      f107: _piecewise(t, f107KP),
+      ap:   _piecewise(t, apKP),
+      densityMul: _piecewise(t, densityMulKP),
+    });
+    ctx.setForecastOverride?.(_makeScriptedOverride(ctx.state._script, ctx.sim));
+    ctx.setBanner('Precursor flare detected · ICME arrival in 30 min · this is Carrington-class.', 'warn');
+  },
+  tick(ctx, dt, tel) {
+    const st = ctx.state;
+    const t = ctx.sim.state.t;
+    const { f107, ap, densityMul } = st._script(t);
+    ctx.env.f107Sfu = f107; ctx.env.ap = ap;
+    if (densityMul != null) ctx.env.densityMul = densityMul;
+
+    if (tel.periAltKm < st.lowestPeri) st.lowestPeri = tel.periAltKm;
+
+    if (st.phase === 'precursor' && t >= 600) {
+      st.phase = 'flare';
+      ctx.setBanner('🌞 Precursor flare — first G4 hit. Brace for ICME at T+30 min.', 'warn');
+      ctx.event?.('carrington-precursor');
+    } else if (st.phase === 'flare' && t >= 1500) {
+      st.phase = 'transit';
+      ctx.setBanner('ICME transit window · final lull before the superstorm.', 'warn');
+    } else if (st.phase === 'transit' && t >= 1800) {
+      st.phase = 'icme';
+      ctx.setBanner('🔥 ICME ARRIVAL — Carrington-class superstorm. Density 8× nominal.', 'bad');
+      ctx.event?.('carrington-icme');
+    } else if (st.phase === 'icme' && t >= 6000) {
+      st.phase = 'recovery';
+      ctx.setBanner('Superstorm peak passing — drag still elevated for hours.', 'warn');
+    } else if (st.phase === 'recovery' && t >= 10800) {
+      st.phase = 'clear';
+      ctx.setBanner('✅ Survived a Carrington-class event — fleet operators worldwide would call.', 'good');
+    }
+
+    if (tel.altKm >= 320) st.onStationSec += dt;
+    if (tel.periAltKm < 270) st.breachSec += dt;
+
+    // Survival at T+10800. Carrington is hard — a generous 8-min breach
+    // budget recognises that even good pilots will dip during the peak.
+    if (!st.survived && t >= st.missionEndT && ctx.sim.state.alive) {
+      st.survived = true;
+      const ok = st.breachSec < 480;
+      return {
+        event: ok ? 'storm-survived' : 'storm-survived-degraded',
+        done: true,
+        scoreDelta: ok ? 12000 : 5000,    // Biggest bonus — biggest storm.
+      };
+    }
+    const tickPts = (tel.altKm >= 320 ? (st.phase === 'icme' ? 3 : 1) : 0) * dt;
+    return { scoreDelta: tickPts };
+  },
+  teardown(ctx) {
+    ctx.setForecastOverride?.(null);
+    if (ctx?.env) ctx.env.densityMul = 1;
+  },
+  objective(ctx, tel) {
+    const st = ctx.state || {};
+    const t = ctx.sim.state?.t || 0;
+    const endT = st.missionEndT || 10800;
+    const remaining = Math.max(0, endT - t);
+    return {
+      label: st.survived
+        ? `🏆 Carrington survived (low ${st.lowestPeri.toFixed(0)} km)`
+        : `Hold 330 km · ${st.phase || 'precursor'} · ${Math.ceil(remaining / 60)} min left · breach ${st.breachSec.toFixed(0)} s`,
+      progress: Math.min(1, t / endT),
+      status: tel.periAltKm < 270 ? 'bad'
+            : tel.periAltKm < 300 ? 'warn' : 'good',
+      extras: {
+        'F10.7': Math.round(ctx.env.f107Sfu),
+        Ap: Math.round(ctx.env.ap),
+        '×ρ': (ctx.env.densityMul || 1).toFixed(1),
+      },
+    };
+  },
+  score(ctx) {
+    const st = ctx.state || {};
+    const onStation = Math.floor(st.onStationSec || 0);
+    const survivedBonus = st.survived ? (st.breachSec < 480 ? 12000 : 5000) : 0;
+    const breachPenalty = Math.floor((st.breachSec || 0) * 3);
+    return Math.max(0, onStation + survivedBonus - breachPenalty);
+  },
+  scorecard(stats, ctx) {
+    const st = ctx?.state || {};
+    return {
+      rows: [
+        { lbl: 'Lowest perigee',    val: `${(st.lowestPeri || 0).toFixed(0)} km`,
+          cls: (st.lowestPeri || 0) < 290 ? 'bad' : (st.lowestPeri || 0) < 310 ? 'warn' : '' },
+        { lbl: 'On-station time',   val: `${Math.floor(st.onStationSec || 0)} s` },
+        { lbl: 'Floor breach time', val: `${(st.breachSec || 0).toFixed(0)} s`,
+          cls: (st.breachSec || 0) > 480 ? 'bad' : (st.breachSec || 0) > 60 ? 'warn' : '' },
+        { lbl: 'Carrington outcome',
+          val: st.survived ? (st.breachSec < 480 ? '✅ clean' : '⚠ degraded') : '❌ re-entry',
+          cls: st.survived ? (st.breachSec < 480 ? '' : 'warn') : 'bad' },
+      ],
+      tip: st.survived && st.breachSec < 480
+        ? 'You survived a Carrington-class hit clean. Reading the precursor flare at T+10 min as the lead-warning, then burning during the T+25 min lull, is the textbook play — the same playbook that would protect a real fleet.'
+        : 'Carrington-class storms are not survivable by reacting — the only winning play is *anticipation*. The precursor flare at T+10 min is your one warning. Burn during the T+25 min lull before the ICME arrives; reactive burns once density hits 6× are spending Δv into a 6× heavier atmosphere.',
+    };
+  },
+};
+
 // ─── Registry ──────────────────────────────────────────────────────────────
 export const MISSIONS = {
   station: stationKeeper,
@@ -803,10 +1136,13 @@ export const MISSIONS = {
   avoid: avoidance,
   starlink2022,
   gannon2024,
+  halloween2003,
+  carrington1859,
 };
-// Ordering puts the historical hindcasts after the classic scenarios —
-// they're the highest-physics-fidelity content and reward radar use.
+// Ordering: classics → historical hindcasts ascending by severity. The
+// Carrington scenario is the most punishing and serves as the endgame
+// test of the player's forecast-reading discipline.
 export const MISSION_ORDER = [
   'station', 'cme', 'rendezvous', 'deorbit', 'avoid',
-  'starlink2022', 'gannon2024',
+  'starlink2022', 'gannon2024', 'halloween2003', 'carrington1859',
 ];
