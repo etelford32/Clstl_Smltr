@@ -179,6 +179,81 @@ select option{background:#0a1024}
 #sd-banner.good{border-color:rgba(95,227,154,.55);color:var(--c-good)}
 #sd-banner.warn{border-color:rgba(var(--c-warn-rgb),.55);color:var(--c-warn)}
 #sd-banner.bad{border-color:rgba(255,107,125,.55);color:var(--c-bad)}
+
+/* ── BURN button — bottom-of-canvas mobile-first control.
+   touch-action:manipulation kills the iOS 300ms tap delay; user-select:none
+   stops a long-press from triggering native text-selection or context menus
+   on Android. The button sits inside #sd-stage so it overlays the canvas
+   and stays in view when the page is scrolled to a sub-section below. */
+#sd-thrust-btn{
+  position:absolute;left:50%;bottom:14px;transform:translateX(-50%);
+  display:flex;align-items:center;justify-content:center;gap:10px;
+  min-width:min(360px,72%);height:54px;padding:0 22px;
+  background:linear-gradient(180deg,#ff8d3a,#ff5e1f);
+  border:1px solid rgba(255,160,90,.7);border-radius:14px;
+  color:#160a04;font-family:inherit;font-weight:900;font-size:.95rem;
+  letter-spacing:.08em;text-transform:uppercase;cursor:pointer;
+  box-shadow:0 6px 18px rgba(255,107,33,.32),inset 0 1px 0 rgba(255,255,255,.35);
+  touch-action:manipulation;user-select:none;-webkit-user-select:none;
+  -webkit-tap-highlight-color:transparent;
+  transition:transform .08s ease, box-shadow .15s ease, filter .15s ease;
+  z-index:6;
+}
+#sd-thrust-btn .tb-icon{font-size:1.1rem;line-height:1;filter:drop-shadow(0 1px 0 rgba(0,0,0,.25))}
+#sd-thrust-btn .tb-text{line-height:1;white-space:nowrap}
+#sd-thrust-btn .tb-key{display:inline-flex;align-items:center}
+#sd-thrust-btn .tb-key kbd{
+  font-size:.55rem;font-family:monospace;font-weight:700;
+  background:rgba(0,0,0,.22);color:#fff;border:1px solid rgba(0,0,0,.35);
+  border-radius:4px;padding:1px 5px;letter-spacing:.04em;
+}
+#sd-thrust-btn:hover{filter:brightness(1.07)}
+#sd-thrust-btn:active,
+#sd-thrust-btn.firing{
+  transform:translateX(-50%) translateY(1px) scale(.985);
+  box-shadow:0 2px 8px rgba(255,107,33,.55),
+             inset 0 0 0 1px rgba(255,255,255,.45),
+             inset 0 -3px 12px rgba(255,80,0,.55);
+  filter:brightness(1.12) saturate(1.1);
+}
+#sd-thrust-btn.firing{
+  animation:sd-thrust-pulse .4s ease-in-out infinite alternate;
+}
+#sd-thrust-btn[disabled]{
+  background:linear-gradient(180deg,#3b3d44,#2a2c33);color:#7a7d85;
+  border-color:rgba(255,255,255,.08);box-shadow:none;cursor:not-allowed;
+  pointer-events:none;
+}
+@keyframes sd-thrust-pulse {
+  from { box-shadow:0 2px 8px rgba(255,107,33,.55),
+                    inset 0 0 0 1px rgba(255,255,255,.45),
+                    inset 0 -3px 12px rgba(255,80,0,.55); }
+  to   { box-shadow:0 2px 14px rgba(255,160,80,.85),
+                    inset 0 0 0 1px rgba(255,255,255,.65),
+                    inset 0 -3px 18px rgba(255,140,40,.75); }
+}
+/* On phones the button stretches edge-to-edge so it's reachable with the
+   thumb on the bottom rail. */
+@media (max-width:560px){
+  #sd-thrust-btn{min-width:0;left:10px;right:10px;width:auto;transform:none;
+    height:58px;font-size:1rem}
+  #sd-thrust-btn:active,
+  #sd-thrust-btn.firing{transform:translateY(1px) scale(.99)}
+}
+/* Floor-status banner state — orange "DEORBIT WARNING" and red "BREACH"
+   already share the existing banner colours; we just want the BURN button
+   to nudge the player visually when they need to act. */
+#sd-thrust-btn.urgent{
+  animation:sd-thrust-urgent 1s ease-in-out infinite;
+}
+@keyframes sd-thrust-urgent {
+  0%, 100% { box-shadow:0 6px 18px rgba(255,107,33,.32),
+                       inset 0 1px 0 rgba(255,255,255,.35),
+                       0 0 0 0 rgba(255,176,102,.45); }
+  50%      { box-shadow:0 6px 18px rgba(255,107,33,.55),
+                       inset 0 1px 0 rgba(255,255,255,.45),
+                       0 0 0 6px rgba(255,176,102,.08); }
+}
 #sd-hint{position:absolute;top:50px;right:12px;font-size:.6rem;
   color:var(--c-text-3);pointer-events:none;text-align:right;line-height:1.5;
   background:rgba(4,8,18,.55);padding:5px 9px;border-radius:6px;backdrop-filter:blur(4px)}
@@ -527,6 +602,15 @@ select option{background:#0a1024}
       <div id="sd-view">view —</div>
       <div id="sd-banner"></div>
       <div class="warmup" id="sd-warmup">Loading atmosphere model…</div>
+      <!-- ── Big "burn-on-hold" button — mobile-friendly, also fires when
+           SPACE is held on desktop. The slider above sets *how hard*, this
+           button sets *when*. Designed to be the most-touched control in
+           the cockpit. -->
+      <button id="sd-thrust-btn" type="button" aria-label="Hold to fire engines">
+        <span class="tb-icon">🚀</span>
+        <span class="tb-text">HOLD&nbsp;TO&nbsp;BURN</span>
+        <span class="tb-key"><kbd>SPACE</kbd></span>
+      </button>
     </div>
 
     <!-- ── Primary stick controls — sit directly under the stage so the
@@ -721,7 +805,8 @@ import { getSupabase, isConfigured } from './js/supabase-config.js';
 import * as ENG from './js/satellite-designer-engine.js';
 import * as BUILDER from './js/satellite-builder.js';
 import * as SCENE3D from './js/satellite-designer-3d.js';
-import { MISSIONS, MISSION_ORDER } from './js/satellite-missions.js';
+import { MISSIONS, MISSION_ORDER, assessFloorStatus, BREACH_SCORE_PENALTY_PER_SEC } from './js/satellite-missions.js';
+import * as FORECAST from './js/satellite-designer-forecast.js';
 import * as PROG from './js/satellite-progression.js';
 
 // ── DOM helpers ─────────────────────────────────────────────────────────────
@@ -757,7 +842,13 @@ const sim = {
   targetSatM: null,    // { x, y } when a target exists (rendezvous)
   debrisM: null,       // { x, y } when debris exists (avoidance)
   // Pilot input — set by keyboard while a key is held; consumed in frame().
-  inputs: { rotL: false, rotR: false, fwd: false, rev: false, fine: false },
+  // `burn` is the momentary thrust trigger (SPACE key, the big BURN button,
+  // or touch-and-hold). It overrides mode → 'prograde' while held and
+  // restores the prior mode on release.
+  inputs: { rotL: false, rotR: false, fwd: false, rev: false, fine: false,
+            burn: false },
+  // Restored when `inputs.burn` flips back to false.
+  _burnPriorMode: null,
   prevMissionComplete: null,
 };
 let sdBuild = BUILDER.defaultBuild();
@@ -989,7 +1080,8 @@ function launch() {
   sim.prevMissionComplete = null;
   // Heading starts aligned to velocity so manual-fire = prograde by default.
   sim.control.heading = Math.atan2(sim.state.vy, sim.state.vx);
-  sim.inputs = { rotL: false, rotR: false, fwd: false, rev: false, fine: false };
+  sim.inputs = { rotL: false, rotR: false, fwd: false, rev: false, fine: false, burn: false };
+  sim._burnPriorMode = null; sim._lastFloorStatus = null;
   $('b-launch').disabled = true;
   $('b-pause').disabled = false; $('b-pause').textContent = '⏸ Pause';
   $('b-reset').disabled = false;
@@ -1036,6 +1128,10 @@ function resetSim() {
   setPhase('Pre-flight', '');
   clearReadouts();
   setBanner('', '');
+  // Drop any lingering momentary-thrust state from the previous mission.
+  sim.inputs.burn = false; sim._burnPriorMode = null;
+  sim._lastFloorStatus = null;
+  $('sd-thrust-btn')?.classList.remove('urgent','firing');
   // Refresh the inline objective text so the panel doesn't show stale data.
   refreshObjectivePanel();
 }
@@ -1053,10 +1149,76 @@ $('b-pause').addEventListener('click', () => {
   $('st-warp').textContent = (sim.paused ? '⏸ ' : '▶ ') + '×' + sim.warp;
   setPhase(sim.paused ? '⏸ Paused' : 'In flight', sim.paused ? 'warn' : 'good');
 });
+// SPACE = hold-to-burn. While flying, SPACE forces a prograde tangential
+// fire at the slider throttle and releases back to whatever mode was active
+// before. While *not* flying, SPACE still launches (muscle memory). Pause
+// has moved to the dedicated button + 'P' key — losing SPACE-pause is the
+// price of having a real hold-to-thrust control.
 addEventListener('keydown', (e) => {
   if (e.target.matches('input,select,textarea')) return;
-  if (e.code === 'Space') { e.preventDefault(); if (sim.running) $('b-pause').click(); else launch(); }
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (!sim.running) { launch(); return; }
+    if (e.repeat) return;                 // ignore auto-repeat ticks
+    setBurnInput(true);
+  } else if (e.code === 'KeyP' && sim.running) {
+    e.preventDefault();
+    $('b-pause').click();
+  }
 });
+addEventListener('keyup', (e) => {
+  if (e.code === 'Space') setBurnInput(false);
+});
+
+// The BURN button: pointer events cover mouse + touch + stylus uniformly.
+// `pointerdown` fires, `pointerup` / `pointercancel` / `pointerleave`
+// releases. Calling setPointerCapture means a finger that slides off the
+// button still releases properly when lifted.
+{
+  const btn = $('sd-thrust-btn');
+  const press = (ev) => {
+    if (btn.disabled) return;
+    ev.preventDefault();
+    if (!sim.running) { launch(); return; }
+    try { btn.setPointerCapture?.(ev.pointerId); } catch (_) {}
+    setBurnInput(true);
+  };
+  const release = (ev) => {
+    if (!sim.running && !sim.inputs.burn) return;
+    try { btn.releasePointerCapture?.(ev.pointerId); } catch (_) {}
+    setBurnInput(false);
+  };
+  btn.addEventListener('pointerdown',   press);
+  btn.addEventListener('pointerup',     release);
+  btn.addEventListener('pointercancel', release);
+  btn.addEventListener('pointerleave',  release);
+  // Belt-and-braces — fired when the page is hidden mid-press (tab switch,
+  // alt-tab, browser scroll-jacking). Without this the engine keeps thrusting.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') setBurnInput(false);
+  });
+}
+
+// setBurnInput is the single funnel for momentary thrust. Saves the prior
+// burn mode on press, forces 'prograde' (the tangential orbit-raising vector
+// the player almost always wants), restores on release. Skips the override
+// while the player is hand-flying in manual mode — W/S already handle that.
+function setBurnInput(on) {
+  if (on === sim.inputs.burn) return;
+  sim.inputs.burn = !!on;
+  const btn = $('sd-thrust-btn');
+  if (!btn) return;
+  btn.classList.toggle('firing', sim.inputs.burn);
+  if (sim.inputs.burn) {
+    // Don't override manual modes — those have their own W/S hold semantics.
+    if (sim.control.mode === 'manual' || sim.control.mode === 'manual-retro') return;
+    sim._burnPriorMode = sim.control.mode;
+    setBurnMode('prograde');
+  } else if (sim._burnPriorMode != null) {
+    setBurnMode(sim._burnPriorMode);
+    sim._burnPriorMode = null;
+  }
+}
 
 // ── Simulation loop ─────────────────────────────────────────────────────────
 let lastT = performance.now();
@@ -1129,11 +1291,44 @@ function frame(now) {
     sim.altHist.push([sim.state.t, tel.altKm]);
     if (sim.altHist.length > 600) sim.altHist.shift();
 
+    // ── Floor / decay warning state ────────────────────────────────────────
+    // Mission floors are *above* the engine's hard re-entry floor (80 km).
+    // We escalate "ok → warn → breach" so the player has time to read the
+    // forecast, choose a thrust schedule, and execute. Actual failure still
+    // happens only when the engine reports reentry.
+    const mission_ = MISSIONS[sim.missionId];
+    if (mission_ && mission_.altitudeFloorKm != null && sim.state.alive) {
+      const fs = assessFloorStatus(mission_, tel,
+        (n) => ENG.projectPerigee(tel, n, { playerDvPerOrbit: 0 }));
+      if (fs.status !== sim._lastFloorStatus) {
+        sim._lastFloorStatus = fs.status;
+        if (fs.status === 'warn') {
+          setBanner(`⚠ DEORBIT WARNING — perigee will dip below ${fs.floorKm} km`, 'warn');
+          $('sd-thrust-btn')?.classList.add('urgent');
+        } else if (fs.status === 'breach') {
+          setBanner(`🔴 FLOOR BREACHED — perigee ${fs.periKm.toFixed(0)} km < ${fs.floorKm} km. Burn now.`, 'bad');
+          $('sd-thrust-btn')?.classList.add('urgent');
+        } else if (fs.status === 'ok') {
+          $('sd-thrust-btn')?.classList.remove('urgent');
+          // Don't clear a banner the mission itself set — only our own.
+          if ($('sd-banner').dataset.owner === 'floor') setBanner('', '');
+        }
+        $('sd-banner').dataset.owner = fs.status === 'ok' ? '' : 'floor';
+      }
+      // Passive score erosion while breached — pushes the player to fix it
+      // instead of grinding through the warning band.
+      if (fs.status === 'breach') {
+        sim.score = Math.max(0, sim.score - BREACH_SCORE_PENALTY_PER_SEC * simSecs);
+      }
+    }
+
     if (!sim.state.alive) {
       sim.running = false; sim.paused = false;
       setPhase(sim.state.reason === 'reentry' ? '🔥 Re-entry — vehicle destroyed' : 'Mission ended', 'bad');
       $('b-pause').disabled = true; $('b-pause').textContent = '⏸ Pause';
       $('b-launch').disabled = false;
+      $('sd-thrust-btn')?.classList.remove('urgent','firing');
+      setBurnInput(false);
       // For Deorbit, hitting the atmosphere with perigee in the window is success.
       const deorbitSuccess = sim.missionId === 'deorbit'
         && (sim.missionCtx?.lastPeriKm ?? 999) >= 60
@@ -2057,7 +2252,16 @@ window.__sd = { auth, engine: ENG, sim, builder: BUILDER,
               setMission },
   progression: { getProfile: () => ({ ...profile }),
                  reset: () => { profile = PROG.resetProfile(); applyUnlockLocks(); renderPilotPanel(); toast('Pilot profile reset.'); },
-                 award: (xp) => { profile.xp += +xp; PROG.saveProfile(profile); applyUnlockLocks(); renderPilotPanel(); } } };
+                 award: (xp) => { profile.xp += +xp; PROG.saveProfile(profile); applyUnlockLocks(); renderPilotPanel(); } },
+  forecast: { ensureReady: FORECAST.ensureForecastReady,
+              get: FORECAST.getForecast,
+              series: FORECAST.getForecastSeries,
+              nowcast: FORECAST.getNowcast,
+              status: FORECAST.getStatus,
+              setOverride: FORECAST.setMissionOverride },
+  thrust: { pressBurn: () => setBurnInput(true),
+            releaseBurn: () => setBurnInput(false),
+            isFiring: () => !!sim.inputs.burn } };
 
 (async function boot() {
   renderMissionPicker();
@@ -2070,6 +2274,10 @@ window.__sd = { auth, engine: ENG, sim, builder: BUILDER,
   // Warm the thermosphere model with one sample, then drop the overlay.
   try { ENG.airDensity(400_000, env); } catch (e) { console.warn(e); }
   $('sd-warmup').style.display = 'none';
+  // Kick off the NOAA forecast fetch in the background — the HUD will start
+  // surfacing real F10.7/Ap projections as soon as it returns. Failure is
+  // silent; the module falls back to a single-point persistence forecast.
+  FORECAST.ensureForecastReady().catch(() => {});
   resetSim();
   setMission('station');             // Default scenario
   await ensureScene();               // Build the 3-D stage

@@ -465,10 +465,23 @@ export function telemetry(s, design, env, attMult = 1) {
         }
     }
 
+    // Burn-budget pair: what drag is pulling out per orbit (as an equivalent
+    // prograde Δv impulse) and what the throttle would supply if held at its
+    // current setting through one full period. Identity used:
+    //   a_drag · P  =  ∫ a_drag dt  =  Δv_lost_per_orbit
+    // The thrust pair uses the eroded thrust + current mass + the burn mode's
+    // tangential-component fraction (1.0 prograde, −1.0 retro, ~0 radial).
+    const reqDvPerOrbit = (el.bound && Number.isFinite(el.period))
+        ? d.diag.aDrag * el.period
+        : 0;
+    const ispEff    = design.isp    * (1 - 0.25 * (d.diag.erosion ?? 0));
+    const thrustEff = design.thrust * (1 - 0.25 * (d.diag.erosion ?? 0));
+
     return {
         altKm: el.altKm,
         periAltKm: el.periAltKm,
         apoAltKm: el.apoAltKm,
+        a: el.a,
         speed: el.speed,
         vrel: d.diag.vrel,
         period: el.period,
@@ -495,9 +508,142 @@ export function telemetry(s, design, env, attMult = 1) {
         burnSeconds: s.burnSeconds ?? 0,
         tumbleRate:  s.tumbleRate ?? 0,
         attitudeErr: s.attitudeErr ?? 0,
-        ispEff:      design.isp * (1 - 0.25 * (d.diag.erosion ?? 0)),
-        thrustEff:   design.thrust * (1 - 0.25 * (d.diag.erosion ?? 0)),
+        ispEff,
+        thrustEff,
+        // ── Burn-budget gauge (the new thrust-vs-drag loop) ──
+        requiredDvPerOrbit: reqDvPerOrbit,
     };
+}
+
+// ── Burn-budget helpers (forecast-aware) ────────────────────────────────────
+/**
+ * Per-orbit prograde Δv the player must add to *net out drag* at the current
+ * state. Derived directly from the energy identity
+ *
+ *   ε̇_drag = −a_drag · v   →   Δa_drag/orbit = −2 a²/μ · a_drag · v · P
+ *   To cancel:  Δa_player = 2 a²·v / μ · Δv_player  ⇒  Δv_player = a_drag · P
+ *
+ * So `required Δv per orbit  =  a_drag · period`. Clean, cheap, exact within
+ * the linearization. Returns 0 for unbound trajectories.
+ *
+ * @param {object} tel  — telemetry record (must include dragAccel & period)
+ */
+export function requiredDvPerOrbit(tel) {
+    if (!tel || !tel.bound) return 0;
+    const aD = +tel.dragAccel, p = +tel.period;
+    if (!Number.isFinite(aD) || !Number.isFinite(p) || p <= 0) return 0;
+    return aD * p;
+}
+
+/**
+ * Equivalent prograde Δv per orbit the player *would* deliver if the current
+ * throttle + burn-mode were held for one full period. The mode determines how
+ * much of the thrust vector is tangential (= contributes to orbit-raising):
+ *
+ *   prograde / manual            →  +1.0
+ *   retrograde / manual-retro    →  −1.0
+ *   radial-in / radial-out / off →   0   (no secular Δa contribution)
+ *
+ * This is the player-side counterpart to requiredDvPerOrbit — the HUD pairs
+ * the two as a "supply vs demand" gauge.
+ *
+ * @param {object} tel
+ * @param {object} design
+ * @param {object} control   — { throttle, mode }
+ */
+export function providedDvPerOrbit(tel, design, control) {
+    if (!tel || !tel.bound || !control) return 0;
+    const thr = +control.throttle;
+    if (!Number.isFinite(thr) || thr <= 0) return 0;
+    const mode = control.mode || 'off';
+    const sign = (mode === 'prograde' || mode === 'manual')          ?  1
+              : (mode === 'retrograde' || mode === 'manual-retro')    ? -1
+              : 0;
+    if (sign === 0) return 0;
+    const mass = +tel.mass, p = +tel.period;
+    const thrustEff = Number.isFinite(tel.thrustEff) ? tel.thrustEff : design.thrust;
+    if (!Number.isFinite(mass) || mass <= 0 || !Number.isFinite(p) || p <= 0) return 0;
+    return sign * thr * thrustEff / mass * p;
+}
+
+/**
+ * Recompute requiredDvPerOrbit at a forecast horizon. Builds a synthetic env
+ * with the projected F10.7/Ap, recomputes drag at the *current* altitude,
+ * attitude and mass, and returns the resulting per-orbit Δv requirement.
+ * Lets the HUD answer "in 6 h, how hard will I have to be burning?" without
+ * running the full integrator forward.
+ *
+ * @param {object} s
+ * @param {object} design
+ * @param {object} env       — current env (gravityMul preserved)
+ * @param {object} control   — current control (attitudeMult honored)
+ * @param {object} forecast  — { f107, ap } from satellite-designer-forecast.js
+ * @returns {number}  Δv [m/s/orbit] required to hold orbit under the forecast
+ */
+export function forecastRequiredDvPerOrbit(s, design, env, control, forecast) {
+    if (!forecast || !Number.isFinite(forecast.f107) || !Number.isFinite(forecast.ap)) return 0;
+    const projEnv = { ...env, f107Sfu: forecast.f107, ap: forecast.ap };
+    const tel = telemetry(s, design, projEnv, attitudeMult(control));
+    return requiredDvPerOrbit(tel);
+}
+
+/**
+ * Linearised perigee projection N orbits ahead. Uses the current per-orbit
+ * decay rate as a constant secular drift; adds the player's per-orbit
+ * tangential Δv contribution via Δa = 2va²·Δv/μ. Eccentricity is assumed
+ * conserved (true for small Δv applied near perigee) so perigee shifts by
+ * the same Δa as the semi-major axis.
+ *
+ * Honest within ~5% over 1–30 orbits at LEO altitudes; not a substitute for
+ * the integrator. Designed for the STORM RADAR's "where will perigee be
+ * in 10 orbits" readout, where order-of-magnitude is what matters.
+ *
+ * @param {object} tel
+ * @param {number} orbits
+ * @param {object} [opts]
+ * @param {number} [opts.playerDvPerOrbit=0]  m/s; signed (prograde +)
+ * @param {object} [opts.env]                  ignored — for symmetry
+ * @returns {{
+ *   periAltKmAfter:number, deltaPeriKm:number,
+ *   orbitsToFloor:number, hoursToFloor:number
+ * }}
+ *   `orbitsToFloor` is for an 80-km re-entry floor; -Infinity if the orbit
+ *   is rising. Callers can scale against any specific mission floor.
+ */
+export function projectPerigee(tel, orbits, opts = {}) {
+    if (!tel || !tel.bound || !Number.isFinite(tel.period)) {
+        return { periAltKmAfter: tel?.periAltKm ?? NaN, deltaPeriKm: 0,
+                 orbitsToFloor: Infinity, hoursToFloor: Infinity };
+    }
+    const N = Math.max(0, +orbits || 0);
+    const playerDv = Number.isFinite(opts.playerDvPerOrbit) ? opts.playerDvPerOrbit : 0;
+
+    // Δa contributions per orbit, in metres.
+    const dragDeltaA_m_per_orbit = (tel.decayPerOrbitKm || 0) * 1000;   // ≤ 0
+    // Tangential Δv → Δa via the vis-viva differential. v ≈ tel.speed.
+    const playerDeltaA_m_per_orbit = (tel.a && tel.speed)
+        ? 2 * tel.speed * tel.a * tel.a * playerDv / MU
+        : 0;
+    const netDeltaA_m_per_orbit = playerDeltaA_m_per_orbit + dragDeltaA_m_per_orbit;
+
+    const deltaPeriKm = (netDeltaA_m_per_orbit * N) / 1000;
+    const periAltKmAfter = tel.periAltKm + deltaPeriKm;
+
+    let orbitsToFloor = Infinity, hoursToFloor = Infinity;
+    if (netDeltaA_m_per_orbit < -1e-3) {
+        // Solve currentPeri + n · netΔa = 80 km
+        const reentryKm = 80;
+        const required_n_orbits = (reentryKm - tel.periAltKm) / (netDeltaA_m_per_orbit / 1000);
+        if (required_n_orbits > 0) {
+            orbitsToFloor = required_n_orbits;
+            hoursToFloor = required_n_orbits * tel.period / 3600;
+        }
+    } else if (netDeltaA_m_per_orbit > 1e-3) {
+        orbitsToFloor = -Infinity;    // orbit rising
+        hoursToFloor  = -Infinity;
+    }
+
+    return { periAltKmAfter, deltaPeriKm, orbitsToFloor, hoursToFloor };
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -592,6 +738,35 @@ export function selfTest() {
         { throttle: 0, mode: 'off', attitudeMult: ATTITUDE_MODES.broadside.mult }, 12 * 3600);
     T(elements(broad.state).a < elements(feath.state).a,
         `broadside decays faster than feathered (a ${(elements(feath.state).a/1000).toFixed(0)} vs ${(elements(broad.state).a/1000).toFixed(0)} km)`);
+
+    // 10. Burn-budget identity: requiredDvPerOrbit + decayPerOrbitKm should
+    //     close the loop. Δv_req = a_drag · period, and over one orbit that
+    //     translates back to Δa_drag = decayPerOrbitKm · 1000. Verify by
+    //     substituting requiredDvPerOrbit into projectPerigee with
+    //     playerDvPerOrbit = +Δv_req and confirming perigee holds.
+    const bb = makeDesign({ dryMass: 80, fuelMass: 20, area: 3, cd: 2.2 });
+    let sbb = initState(bb, { periKm: 320, apoKm: 320 });
+    const telBb = telemetry(sbb, bb, env);
+    const reqDv = requiredDvPerOrbit(telBb);
+    T(reqDv > 0,
+        `Δv-req > 0 at 320 km (got ${reqDv.toExponential(2)} m/s/orbit)`);
+    const proj0 = projectPerigee(telBb, 10);                              // no thrust → decay
+    const projOk = projectPerigee(telBb, 10, { playerDvPerOrbit: reqDv }); // exactly cancels
+    T(proj0.periAltKmAfter < telBb.periAltKm,
+        `no-thrust projection decays (Δ = ${(proj0.periAltKmAfter - telBb.periAltKm).toFixed(2)} km)`);
+    T(Math.abs(projOk.periAltKmAfter - telBb.periAltKm) < 0.05,
+        `Δv-req cancels decay (Δ = ${(projOk.periAltKmAfter - telBb.periAltKm).toExponential(2)} km)`);
+
+    // 11. providedDvPerOrbit pairs with mode: prograde + → throttle, retro →
+    //     negative, radial → 0.
+    const provProg = providedDvPerOrbit(telBb, bb,
+        { throttle: 1, mode: 'prograde' });
+    const provRetro = providedDvPerOrbit(telBb, bb,
+        { throttle: 1, mode: 'retrograde' });
+    const provRad = providedDvPerOrbit(telBb, bb,
+        { throttle: 1, mode: 'radial-out' });
+    T(provProg > 0 && provRetro < 0 && Math.abs(provRad) < 1e-9,
+        `providedDv signs: prog +${provProg.toFixed(2)} retro ${provRetro.toFixed(2)} radial ${provRad.toFixed(2)}`);
 
     return out;
 }
