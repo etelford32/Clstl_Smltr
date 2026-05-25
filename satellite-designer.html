@@ -2208,6 +2208,107 @@ $('sc-replay')?.addEventListener('click', () => {
   setTimeout(() => launch(), 60);   // give resetSim a tick to settle
 });
 
+// ── Plan-burn popover ───────────────────────────────────────────────────────
+// A small scheduler that queues one prograde or retrograde burn to fire
+// at the next apogee, perigee, or forecast peak. The frame loop watches
+// for the trigger condition; once met, the burn fires for the configured
+// duration and self-disarms. Educational: forces the player to think in
+// terms of orbit phase rather than "burn now".
+{
+  const pop = $('plan-pop');
+  const planBtn = $('b-plan');
+  // Live readouts inside the popover.
+  $('pp-throttle').addEventListener('input', () => {
+    $('pp-throttle-v').textContent = $('pp-throttle').value;
+  });
+  $('pp-duration').addEventListener('input', () => {
+    $('pp-duration-v').textContent = $('pp-duration').value;
+  });
+  const openPopover = () => {
+    // Anchor under the Plan button. Inline positioning so the popover
+    // works even if the surrounding panel doesn't itself relative-position.
+    const r = planBtn.getBoundingClientRect();
+    const host = planBtn.offsetParent || document.body;
+    const hr = host.getBoundingClientRect();
+    pop.style.top  = (planBtn.offsetTop + planBtn.offsetHeight + 6) + 'px';
+    pop.style.left = (planBtn.offsetLeft) + 'px';
+    pop.hidden = false;
+    // Seed the throttle slider with the current dial value so 'commit'
+    // matches the player's intuition unless they tweak it.
+    $('pp-throttle').value = $('f-throttle').value;
+    $('pp-throttle-v').textContent = $('pp-throttle').value;
+  };
+  const closePopover = () => { pop.hidden = true; };
+  planBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (pop.hidden) openPopover(); else closePopover();
+  });
+  $('pp-close').addEventListener('click', closePopover);
+  // Click-outside / Esc to dismiss. Keep listeners attached at document
+  // level — they're cheap and self-no-op when the popover is hidden.
+  document.addEventListener('click', (e) => {
+    if (pop.hidden) return;
+    if (pop.contains(e.target) || planBtn.contains(e.target)) return;
+    closePopover();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !pop.hidden) closePopover();
+  });
+  $('pp-commit').addEventListener('click', () => {
+    if (!sim.running) {
+      toast('Launch first — schedules a burn during flight.', true);
+      return;
+    }
+    sim.scheduledBurn = {
+      trigger:  $('pp-trigger').value,        // apogee | perigee | forecast-peak
+      mode:     $('pp-mode').value,           // prograde | retrograde
+      throttle: (+$('pp-throttle').value) / 100,
+      durationS: +$('pp-duration').value,
+      armedAt:  sim.state ? sim.state.t : 0,
+      firingUntilT: null,                     // set when trigger fires
+      _peakSimSec: null,
+    };
+    // Snapshot the forecast peak at commit-time so the trigger fires at a
+    // deterministic sim-time even if the projection updates mid-flight.
+    if (sim.scheduledBurn.trigger === 'forecast-peak') {
+      if (sim._forecastPeakSimSec != null) {
+        sim.scheduledBurn._peakSimSec = sim._forecastPeakSimSec;
+      } else {
+        sim.scheduledBurn = null;
+        toast('No forecast peak available — fetch is still warming up.', true);
+        return;
+      }
+    }
+    closePopover();
+    updateSchedPill();
+    toast(`⏰ Burn queued — ${sim.scheduledBurn.mode} ${$('pp-duration').value}s @ ${$('pp-throttle').value}% on next ${$('pp-trigger').value}.`);
+  });
+  // Status pill: click to cancel an armed scheduled burn.
+  $('st-sched').addEventListener('click', () => {
+    if (!sim.scheduledBurn) return;
+    if (sim.scheduledBurn.firingUntilT) return;  // can't cancel mid-fire
+    sim.scheduledBurn = null;
+    updateSchedPill();
+    toast('Scheduled burn cancelled.');
+  });
+}
+
+// Refresh the scheduled-burn status pill from sim state. Called whenever
+// the schedule changes and once per second during flight.
+function updateSchedPill() {
+  const pill = $('st-sched');
+  if (!pill) return;
+  const sb = sim.scheduledBurn;
+  if (!sb) { pill.hidden = true; return; }
+  pill.hidden = false;
+  if (sb.firingUntilT != null) {
+    const remaining = Math.max(0, sb.firingUntilT - (sim.state?.t || 0));
+    pill.firstChild.nodeValue = `🔥 ${sb.mode.toUpperCase()} ${remaining.toFixed(1)}s `;
+  } else {
+    pill.firstChild.nodeValue = `⏰ ${sb.trigger} · ${sb.mode} ${sb.durationS}s `;
+  }
+}
+
 // ── Mission control ─────────────────────────────────────────────────────────
 function launch() {
   sim.design = readDesign();
@@ -2303,6 +2404,9 @@ function resetSim() {
   sim.inputs.burn = false; sim._burnPriorMode = null;
   sim._lastFloorStatus = null;
   sim._prevRdot = null; sim.scheduledBurn = null; sim._burnAnchor = null;
+  $('sd-thrust-btn')?.classList.remove('urgent','firing');
+  $('throttle-dial')?.classList.remove('firing');
+  updateSchedPill();
   $('sd-thrust-btn')?.classList.remove('urgent','firing');
   $('throttle-dial')?.classList.remove('firing');
   updateSchedPill();
@@ -2485,6 +2589,105 @@ function setBurnInput(on) {
     }
     // Close the stats burn record — feeds Δv-efficiency + bonus-Δv totals.
     recordBurnEnd();
+    try { navigator.vibrate?.(8); } catch (_) {}
+  }
+}
+
+// The BURN button: pointer events cover mouse + touch + stylus uniformly.
+// `pointerdown` fires, `pointerup` / `pointercancel` / `pointerleave`
+// releases. Calling setPointerCapture means a finger that slides off the
+// button still releases properly when lifted.
+{
+  const btn = $('sd-thrust-btn');
+  const press = (ev) => {
+    if (btn.disabled) return;
+    ev.preventDefault();
+    if (!sim.running) { launch(); return; }
+    try { btn.setPointerCapture?.(ev.pointerId); } catch (_) {}
+    setBurnInput(true);
+  };
+  const release = (ev) => {
+    if (!sim.running && !sim.inputs.burn) return;
+    try { btn.releasePointerCapture?.(ev.pointerId); } catch (_) {}
+    setBurnInput(false);
+  };
+  btn.addEventListener('pointerdown',   press);
+  btn.addEventListener('pointerup',     release);
+  btn.addEventListener('pointercancel', release);
+  btn.addEventListener('pointerleave',  release);
+  // Belt-and-braces — fired when the page is hidden mid-press (tab switch,
+  // alt-tab, browser scroll-jacking). Without this the engine keeps thrusting.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') setBurnInput(false);
+  });
+}
+
+// setBurnInput is the single funnel for momentary thrust. Saves the prior
+// burn mode on press, forces 'prograde' (the tangential orbit-raising vector
+// the player almost always wants), restores on release. Skips the override
+// while the player is hand-flying in manual mode — W/S already handle that.
+function setBurnInput(on) {
+  if (on === sim.inputs.burn) return;
+  sim.inputs.burn = !!on;
+  const btn  = $('sd-thrust-btn');
+  const dial = $('throttle-dial');
+  if (btn)  btn.classList.toggle('firing', sim.inputs.burn);
+  if (dial) dial.classList.toggle('firing', sim.inputs.burn);
+  if (sim.inputs.burn) {
+    // Don't override manual modes — those have their own W/S hold semantics.
+    if (sim.control.mode === 'manual' || sim.control.mode === 'manual-retro') return;
+    sim._burnPriorMode = sim.control.mode;
+    setBurnMode('prograde');
+    // Record an anchor so we can compute Δv-delivered on release. We use
+    // fuel actually consumed × eff. Isp · g₀ (Tsiolkovsky) — that's the
+    // honest figure, not just |Δv_inertial| which would include drag.
+    if (sim.state) {
+      sim._burnAnchor = {
+        fuel: sim.state.fuel,
+        t:    sim.state.t,
+        speed:  Math.hypot(sim.state.vx, sim.state.vy),
+        scoreBonus: 0,
+      };
+    }
+    // Haptic + visual bite. vibrate() is a no-op (returns false) when the
+    // device doesn't support it or the user has muted vibrations.
+    try { navigator.vibrate?.(18); } catch (_) {}
+    const stage = $('sd-stage');
+    if (stage) {
+      stage.classList.remove('burn-pulse');
+      // Force reflow so the animation re-runs on rapid taps.
+      void stage.offsetWidth;
+      stage.classList.add('burn-pulse');
+    }
+  } else if (sim._burnPriorMode != null) {
+    setBurnMode(sim._burnPriorMode);
+    sim._burnPriorMode = null;
+    // Δv-delivered flash. Use the eroded effective Isp at burn-end; over a
+    // short burn it's a close-enough constant. Skip the popup for
+    // sub-millisecond burns (touch noise) or zero-fuel cases.
+    if (sim._burnAnchor && sim.state) {
+      const fuelUsed = Math.max(0, sim._burnAnchor.fuel - sim.state.fuel);
+      const burnT    = Math.max(0, sim.state.t - sim._burnAnchor.t);
+      if (fuelUsed > 1e-4 && burnT > 0.05) {
+        const m0 = sim.design.dryMass + sim._burnAnchor.fuel;
+        const mf = sim.design.dryMass + sim.state.fuel;
+        const ispEff = sim.design.isp * (1 - 0.25 * (sim.state.burnSeconds
+                       ? Math.min(1, sim.state.burnSeconds / (sim.design.throatLifeS ?? 6000)) : 0));
+        const dv = ispEff * ENG.G0 * Math.log(m0 / Math.max(mf, 1e-9));
+        const bonus = sim._burnAnchor.scoreBonus || 0;
+        const flash = $('dv-flash');
+        if (flash) {
+          flash.innerHTML = `+${dv.toFixed(2)} m/s<small>${fuelUsed.toFixed(2)} kg · ${burnT.toFixed(1)}s</small>`
+                          + (bonus > 0 ? ` <small style="color:#7fdcff">⚡ +2× FORECAST</small>` : '');
+          flash.classList.remove('show');
+          void flash.offsetWidth;
+          flash.classList.add('show');
+          clearTimeout(setBurnInput._flashT);
+          setBurnInput._flashT = setTimeout(() => flash.classList.remove('show'), 1100);
+        }
+      }
+      sim._burnAnchor = null;
+    }
     try { navigator.vibrate?.(8); } catch (_) {}
   }
 }

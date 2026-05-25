@@ -6974,15 +6974,13 @@ document.addEventListener('weather-update', e => {
 
     // Rebuild isobar contours from the fresh pressure field
     isobarLayer.update(weatherBuffer);
-    // Frontal lines need both the pressure-decoded weatherBuffer (T-channel)
-    // and the windBuffer to classify cold vs warm. Runs even when the layer
-    // is hidden so the wx-fronts readout updates regardless of toggle state.
+    // Hand the new buffers to the front layer. When the toggle is off
+    // (default) this is a couple of assignments — the heavy detect+chain
+    // pipeline only runs when the layer is visible, so scrub-driven
+    // weather-update bursts don't pile up ~50 ms of compute each. See
+    // FrontLayer.update() docstring for the hot/cold path split.
     frontLayer.update(weatherBuffer, windBuffer);
-    const fs = frontLayer.stats;
-    const fEl = document.getElementById('wx-fronts');
-    if (fEl) fEl.textContent = fs.total === 0
-        ? '— (no detected fronts)'
-        : `${fs.cold} cold · ${fs.warm} warm · ${fs.stationary} stationary`;
+    _refreshFrontsReadout();
 
     // Rebuild the jet-stream ribbons from the fresh wind field and refresh
     // the wx-panel peak readout. Runs once per feed refresh (~15 min); the
@@ -8386,7 +8384,22 @@ document.getElementById('lyr-isobars').addEventListener('change', e => {
 });
 document.getElementById('lyr-fronts')?.addEventListener('change', e => {
     frontLayer.setVisible(e.target.checked);
+    _refreshFrontsReadout();
 });
+
+// Single-source readout updater. The wx-fronts row reads from frontLayer
+// directly so we don't have to synchronise two state mirrors — when the
+// layer is hidden the panel says "off", when it's on we show live counts.
+function _refreshFrontsReadout() {
+    const el = document.getElementById('wx-fronts');
+    if (!el) return;
+    const checked = document.getElementById('lyr-fronts')?.checked;
+    if (!checked) { el.textContent = '— (toggle layer to enable)'; return; }
+    const fs = frontLayer.stats;
+    el.textContent = fs.total === 0
+        ? '— (no detected fronts)'
+        : `${fs.cold} cold · ${fs.warm} warm · ${fs.stationary} stationary`;
+}
 
 function updateIsobarPanel() {
     const stats   = isobarLayer.stats;
