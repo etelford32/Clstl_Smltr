@@ -7,11 +7,16 @@
  *
  * T3 endpoint (15-minute cadence).
  *
- * Query params forwarded to DONKI:
- *   ?days=N   Lookback window in days (default: 7, max: 30)
+ * Query modes (two; explicit range wins):
+ *   ?days=N                              recent lookback (default 7, max 30)
+ *   ?start=YYYY-MM-DD&end=YYYY-MM-DD     explicit historical window (max 60 d)
  *
  * Filters for complete cone-model analyses only and adds an
  * `earth_directed` boolean based on latitude/longitude cone half-angle.
+ *
+ * Historical windows are immutable; the response is cached on the
+ * CDN for 24 h (recent-lookback stays at 15 min so the live page
+ * picks up new events promptly).
  */
 import { jsonOk, jsonError, fetchWithTimeout, isoTag } from '../_lib/responses.js';
 
@@ -32,18 +37,52 @@ function isEarthDirected(lat, lon, halfAngle) {
     return dist <= halfAngle;
 }
 
+// Maximum width of an explicit date range. DONKI itself doesn't gate
+// historical windows, but a sane ceiling protects the cache + budget.
+const MAX_RANGE_DAYS = 60;
+
+function _parseISODate(s) {
+    if (!s || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+    const d = new Date(s + 'T00:00:00Z');
+    return isNaN(d) ? null : d;
+}
+
 export default async function handler(request) {
     const nasaKey = (typeof process !== 'undefined' && process.env?.NASA_API_KEY) || 'DEMO_KEY';
 
     const url    = new URL(request.url);
-    const rawDay = parseInt(url.searchParams.get('days') ?? DEFAULT_DAYS, 10);
-    const days   = Math.max(1, Math.min(isNaN(rawDay) ? DEFAULT_DAYS : rawDay, MAX_DAYS));
 
-    const now   = new Date();
-    const start = new Date(now.getTime() - days * 86_400_000);
+    // Two query modes:
+    //   ?days=N (legacy, recent-lookback, default)
+    //   ?start=YYYY-MM-DD&end=YYYY-MM-DD (explicit historical window)
+    // If both are supplied, the explicit window wins.
+    const explicitStart = _parseISODate(url.searchParams.get('start'));
+    const explicitEnd   = _parseISODate(url.searchParams.get('end'));
+
+    let start, end;
+    if (explicitStart && explicitEnd) {
+        if (explicitEnd <= explicitStart) {
+            return jsonError('bad_request', 'end must be after start',
+                { source: 'NASA DONKI' });
+        }
+        const rangeDays = (explicitEnd - explicitStart) / 86_400_000;
+        if (rangeDays > MAX_RANGE_DAYS) {
+            return jsonError('bad_request',
+                `range exceeds ${MAX_RANGE_DAYS}-day cap (got ${rangeDays.toFixed(1)} d)`,
+                { source: 'NASA DONKI' });
+        }
+        start = explicitStart;
+        end   = explicitEnd;
+    } else {
+        const rawDay = parseInt(url.searchParams.get('days') ?? DEFAULT_DAYS, 10);
+        const days   = Math.max(1, Math.min(isNaN(rawDay) ? DEFAULT_DAYS : rawDay, MAX_DAYS));
+        end   = new Date();
+        start = new Date(end.getTime() - days * 86_400_000);
+    }
+
     const fmt   = d => d.toISOString().slice(0, 10);
 
-    const donkiURL = `${DONKI_CME_BASE}?startDate=${fmt(start)}&endDate=${fmt(now)}&api_key=${nasaKey}`;
+    const donkiURL = `${DONKI_CME_BASE}?startDate=${fmt(start)}&endDate=${fmt(end)}&api_key=${nasaKey}`;
 
     let raw;
     try {
@@ -79,15 +118,24 @@ export default async function handler(request) {
         .sort((a, b) => (b.time ?? '').localeCompare(a.time ?? ''));
 
     const earthCme = cmes.find(c => c.earth_directed) ?? null;
+    const isHistorical = !!(explicitStart && explicitEnd);
 
     return jsonOk({
         source:    'NASA DONKI CMEAnalysis via Vercel Edge',
         data: {
             updated:         new Date().toISOString(),
+            window:          {
+                start:        fmt(start) + 'T00:00:00Z',
+                end:          fmt(end)   + 'T00:00:00Z',
+                historical:   isHistorical,
+            },
             cme_count:       cmes.length,
             earth_directed:  !!earthCme,
             latest_earth_cme: earthCme,
             cmes,
         },
-    }, { maxAge: CACHE_TTL, swr: CACHE_SWR });
+        // Historical windows are immutable — let CDN cache long.
+    }, isHistorical
+        ? { maxAge: 86_400, swr: 3600 }
+        : { maxAge: CACHE_TTL, swr: CACHE_SWR });
 }
