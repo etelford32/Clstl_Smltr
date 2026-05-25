@@ -2312,6 +2312,11 @@ function resetSim() {
   // Drop flight stats — fresh report on next launch.
   sim.flightStats = null;
   hideScorecard();
+  // Tear down the mission (clears any forecast override it installed)
+  // and drop the context so the next launch builds a fresh one.
+  try { MISSIONS[sim.missionId]?.teardown?.(sim.missionCtx); } catch (_) {}
+  FORECAST.setMissionOverride(null);
+  sim.missionCtx = null;
   // Refresh the inline objective text so the panel doesn't show stale data.
   refreshObjectivePanel();
 }
@@ -3438,6 +3443,13 @@ $('mission-select').addEventListener('click', (e) => {
 });
 function setMission(id) {
   if (!MISSIONS[id]) return;
+  // Tear down the outgoing mission so any installed forecast override
+  // (e.g. starlink2022's scripted G2) doesn't leak across mission picks.
+  const prev = MISSIONS[sim.missionId];
+  if (prev && prev !== MISSIONS[id]) {
+    try { prev.teardown?.(sim.missionCtx); } catch (_) {}
+    FORECAST.setMissionOverride(null);
+  }
   sim.missionId = id;
   const m = MISSIONS[id];
   $('mission-select').querySelectorAll('.toggle').forEach(t =>
@@ -3454,6 +3466,15 @@ function setMission(id) {
     if (d.throttle != null) { $('f-throttle').value = d.throttle; $('v-thr').textContent = d.throttle;
                               sim.control.throttle = d.throttle / 100; }
     if (d.fuelMass != null) { $('f-fuel').value = d.fuelMass; $('v-fuel').textContent = d.fuelMass; refreshDesignReadouts(); }
+    // Hardware overrides — hindcast missions ship a fixed spacecraft
+    // config (Starlink-broom area, ISS-class dryMass) so the player can
+    // recreate the real scenario. Optional; missions that don't set
+    // these leave the bay panel as the player configured it.
+    if (d.area     != null) { const el = $('f-area');     if (el) { el.value = d.area;     refreshDesignReadouts(); } }
+    if (d.dryMass  != null) { const el = $('f-dry');      if (el) { el.value = d.dryMass;  refreshDesignReadouts(); } }
+    if (d.cd       != null) { const el = $('f-cd');       if (el) { el.value = d.cd;       refreshDesignReadouts(); } }
+    if (d.thrust   != null) { const el = $('f-thrust');   if (el) { el.value = d.thrust;   refreshDesignReadouts(); } }
+    if (d.isp      != null) { const el = $('f-isp');      if (el) { el.value = d.isp;      refreshDesignReadouts(); } }
     if (d.swPreset) setSWPreset(d.swPreset);
     if (d.attitude) setAttitude(d.attitude);
     SCENE?.setTargetAlt(+$('f-tgt').value);
@@ -3462,6 +3483,9 @@ function setMission(id) {
 }
 function startMission() {
   const m = MISSIONS[sim.missionId]; if (!m) return;
+  // Clear any prior mission's forecast override so live data is the
+  // baseline. Hindcast missions reinstall their script in setup().
+  FORECAST.setMissionOverride(null);
   // Mission context — read/write surface the scenario uses to mutate the world.
   sim.missionCtx = {
     sim, env, design: sim.design, control: sim.control,
@@ -3475,6 +3499,9 @@ function startMission() {
     getDebris: () => sim.debrisM,
     event: (type) => { /* hook point for analytics / sounds */ },
     setBanner,
+    // Hindcast missions use this to install a scripted F10.7/Ap profile
+    // that the STORM RADAR reads. Passing null clears it.
+    setForecastOverride: (fn) => FORECAST.setMissionOverride(fn),
   };
   m.setup?.(sim.missionCtx);
   refreshObjectivePanel();
