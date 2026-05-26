@@ -44,13 +44,15 @@ BEGIN
     p_grace_secs := LEAST(GREATEST(COALESCE(p_grace_secs, 120), 0), 3600);
 
     RETURN QUERY
+    -- NB: column aliased to `fid` inside the body to avoid colliding with
+    -- the RETURNS TABLE OUT-param `funnel_id` ("column reference is ambiguous").
     WITH window_rows AS (
         SELECT
-            (t.metadata->>'funnel_id')::text AS funnel_id,
+            (t.metadata->>'funnel_id')::text AS fid,
             (t.metadata->>'stage')::text     AS stage,
-            t.metadata,
-            t.route,
-            t.created_at
+            t.metadata                       AS metadata,
+            t.route                          AS route,
+            t.created_at                     AS created_at
         FROM public.client_telemetry t
         WHERE t.kind = 'auth_funnel'
           AND t.created_at > now() - (p_days || ' days')::interval
@@ -59,22 +61,22 @@ BEGIN
     ),
     latest AS (
         -- One row per funnel_id: the most recent stage event observed.
-        SELECT DISTINCT ON (w.funnel_id)
-            w.funnel_id,
+        SELECT DISTINCT ON (w.fid)
+            w.fid,
             w.stage,
             w.metadata,
             w.route,
             w.created_at
         FROM window_rows w
-        ORDER BY w.funnel_id, w.created_at DESC
+        ORDER BY w.fid, w.created_at DESC
     ),
     counts AS (
-        SELECT funnel_id, COUNT(*)::BIGINT AS stage_count
-        FROM window_rows
-        GROUP BY funnel_id
+        SELECT w.fid, COUNT(*)::BIGINT AS stage_count
+        FROM window_rows w
+        GROUP BY w.fid
     )
     SELECT
-        l.funnel_id,
+        l.fid                                          AS funnel_id,
         l.stage                                        AS last_stage,
         LEFT(COALESCE(l.metadata->>'reason', ''), 200) AS last_reason,
         LEFT(COALESCE(l.metadata->>'code',   ''),  80) AS last_code,
@@ -84,7 +86,7 @@ BEGIN
         l.created_at                                   AS last_seen,
         c.stage_count
     FROM latest l
-    JOIN counts c USING (funnel_id)
+    JOIN counts c ON c.fid = l.fid
     WHERE l.stage NOT IN (
             'signin_succeeded',
             'auth_callback_succeeded',
