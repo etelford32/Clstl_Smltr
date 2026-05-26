@@ -2293,22 +2293,6 @@ $('sc-replay')?.addEventListener('click', () => {
   });
 }
 
-// Refresh the scheduled-burn status pill from sim state. Called whenever
-// the schedule changes and once per second during flight.
-function updateSchedPill() {
-  const pill = $('st-sched');
-  if (!pill) return;
-  const sb = sim.scheduledBurn;
-  if (!sb) { pill.hidden = true; return; }
-  pill.hidden = false;
-  if (sb.firingUntilT != null) {
-    const remaining = Math.max(0, sb.firingUntilT - (sim.state?.t || 0));
-    pill.firstChild.nodeValue = `🔥 ${sb.mode.toUpperCase()} ${remaining.toFixed(1)}s `;
-  } else {
-    pill.firstChild.nodeValue = `⏰ ${sb.trigger} · ${sb.mode} ${sb.durationS}s `;
-  }
-}
-
 // ── Mission control ─────────────────────────────────────────────────────────
 function launch() {
   sim.design = readDesign();
@@ -2620,76 +2604,6 @@ function setBurnInput(on) {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') setBurnInput(false);
   });
-}
-
-// setBurnInput is the single funnel for momentary thrust. Saves the prior
-// burn mode on press, forces 'prograde' (the tangential orbit-raising vector
-// the player almost always wants), restores on release. Skips the override
-// while the player is hand-flying in manual mode — W/S already handle that.
-function setBurnInput(on) {
-  if (on === sim.inputs.burn) return;
-  sim.inputs.burn = !!on;
-  const btn  = $('sd-thrust-btn');
-  const dial = $('throttle-dial');
-  if (btn)  btn.classList.toggle('firing', sim.inputs.burn);
-  if (dial) dial.classList.toggle('firing', sim.inputs.burn);
-  if (sim.inputs.burn) {
-    // Don't override manual modes — those have their own W/S hold semantics.
-    if (sim.control.mode === 'manual' || sim.control.mode === 'manual-retro') return;
-    sim._burnPriorMode = sim.control.mode;
-    setBurnMode('prograde');
-    // Record an anchor so we can compute Δv-delivered on release. We use
-    // fuel actually consumed × eff. Isp · g₀ (Tsiolkovsky) — that's the
-    // honest figure, not just |Δv_inertial| which would include drag.
-    if (sim.state) {
-      sim._burnAnchor = {
-        fuel: sim.state.fuel,
-        t:    sim.state.t,
-        speed:  Math.hypot(sim.state.vx, sim.state.vy),
-        scoreBonus: 0,
-      };
-    }
-    // Haptic + visual bite. vibrate() is a no-op (returns false) when the
-    // device doesn't support it or the user has muted vibrations.
-    try { navigator.vibrate?.(18); } catch (_) {}
-    const stage = $('sd-stage');
-    if (stage) {
-      stage.classList.remove('burn-pulse');
-      // Force reflow so the animation re-runs on rapid taps.
-      void stage.offsetWidth;
-      stage.classList.add('burn-pulse');
-    }
-  } else if (sim._burnPriorMode != null) {
-    setBurnMode(sim._burnPriorMode);
-    sim._burnPriorMode = null;
-    // Δv-delivered flash. Use the eroded effective Isp at burn-end; over a
-    // short burn it's a close-enough constant. Skip the popup for
-    // sub-millisecond burns (touch noise) or zero-fuel cases.
-    if (sim._burnAnchor && sim.state) {
-      const fuelUsed = Math.max(0, sim._burnAnchor.fuel - sim.state.fuel);
-      const burnT    = Math.max(0, sim.state.t - sim._burnAnchor.t);
-      if (fuelUsed > 1e-4 && burnT > 0.05) {
-        const m0 = sim.design.dryMass + sim._burnAnchor.fuel;
-        const mf = sim.design.dryMass + sim.state.fuel;
-        const ispEff = sim.design.isp * (1 - 0.25 * (sim.state.burnSeconds
-                       ? Math.min(1, sim.state.burnSeconds / (sim.design.throatLifeS ?? 6000)) : 0));
-        const dv = ispEff * ENG.G0 * Math.log(m0 / Math.max(mf, 1e-9));
-        const bonus = sim._burnAnchor.scoreBonus || 0;
-        const flash = $('dv-flash');
-        if (flash) {
-          flash.innerHTML = `+${dv.toFixed(2)} m/s<small>${fuelUsed.toFixed(2)} kg · ${burnT.toFixed(1)}s</small>`
-                          + (bonus > 0 ? ` <small style="color:#7fdcff">⚡ +2× FORECAST</small>` : '');
-          flash.classList.remove('show');
-          void flash.offsetWidth;
-          flash.classList.add('show');
-          clearTimeout(setBurnInput._flashT);
-          setBurnInput._flashT = setTimeout(() => flash.classList.remove('show'), 1100);
-        }
-      }
-      sim._burnAnchor = null;
-    }
-    try { navigator.vibrate?.(8); } catch (_) {}
-  }
 }
 
 // ── Simulation loop ─────────────────────────────────────────────────────────
