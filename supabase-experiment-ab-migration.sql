@@ -56,11 +56,13 @@ BEGIN
     p_days := LEAST(GREATEST(COALESCE(p_days, 30), 1), 180);
 
     RETURN QUERY
+    -- NB: variant aliased to `arm` inside the body to avoid colliding with
+    -- the RETURNS TABLE OUT-param `variant` ("column reference is ambiguous").
     WITH exposure AS (
         -- First exposure per funnel pins it to a single arm.
         SELECT DISTINCT ON (t.metadata->>'funnel_id')
                t.metadata->>'funnel_id' AS fid,
-               t.metadata->>'variant'   AS variant,
+               t.metadata->>'variant'   AS arm,
                t.created_at             AS seen_at
         FROM public.client_telemetry t
         WHERE t.kind = 'auth_funnel'
@@ -80,7 +82,7 @@ BEGIN
           AND t.created_at > now() - (p_days || ' days')::interval
     )
     SELECT
-        e.variant,
+        e.arm                                               AS variant,
         COUNT(*)::BIGINT                                    AS exposures,
         COUNT(*) FILTER (WHERE c.fid IS NOT NULL)::BIGINT   AS conversions,
         ROUND(
@@ -91,10 +93,11 @@ BEGIN
         MAX(e.seen_at)                                      AS last_seen
     FROM exposure e
     LEFT JOIN converted c ON c.fid = e.fid
-    GROUP BY e.variant
-    ORDER BY e.variant;
+    GROUP BY e.arm
+    ORDER BY e.arm;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE
+   SET search_path = public, pg_temp;
 
 REVOKE ALL    ON FUNCTION public.telemetry_experiment_ab_summary(TEXT, INTEGER) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.telemetry_experiment_ab_summary(TEXT, INTEGER) TO authenticated;
