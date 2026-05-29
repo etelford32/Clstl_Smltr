@@ -133,6 +133,11 @@ function steelMat({ tint = COLORS.steel, roughness = 0.32, metalness = 0.92 } = 
         metalness,
         clearcoat: 0.35,
         clearcoatRoughness: 0.4,
+        // Polished stainless lives or dies on its reflections. Push the IBL
+        // contribution past 1 so the scene.environment dusk sky (set in
+        // launch-vehicle-3d.js) gleams off the hull instead of reading as a
+        // flat grey metal. No effect until an environment is present.
+        envMapIntensity: 1.35,
     });
 }
 

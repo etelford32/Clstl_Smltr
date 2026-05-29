@@ -769,6 +769,62 @@ function buildSkyTexture() {
     return tex;
 }
 
+// Procedural equirectangular environment for image-based lighting (IBL).
+//
+// WHY this exists: every vehicle surface is a PBR MeshStandard/Physical
+// material — Starship is near-pure metal (metalness 0.92) and Falcon/Dragon
+// are glossy clearcoat white. A metal with no environment to reflect renders
+// almost black (it has no diffuse term; its colour IS its reflection), and a
+// clearcoat coat with nothing to mirror looks like flat matte plastic. Direct
+// lights alone give a single hard highlight and dead shadow side. Feeding the
+// scene a PMREM-prefiltered environment (set as scene.environment in init)
+// makes the steel read as steel and the white panels pick up a soft sheen —
+// the single biggest realism lever for hard-surface vehicles.
+//
+// It's built procedurally (no HDR fetch — this module must work offline) and
+// keyed to the SAME dusk palette as buildSkyTexture(), plus a warm horizon
+// glint roughly aligned with the key light and a cooler bounce opposite it,
+// so the reflections agree with the three directional lights instead of
+// fighting them. EquirectangularReflectionMapping: v=top → zenith (+Y),
+// v=bottom → ground (−Y); u → azimuth.
+function buildEnvTexture() {
+    const W = 512, H = 256;
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const ctx = c.getContext('2d');
+    // Sky → horizon → ground vertical gradient.
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0.00, '#02010a');   // zenith
+    grad.addColorStop(0.38, '#0c0a22');
+    grad.addColorStop(0.48, '#231a33');   // horizon band (brightest sky)
+    grad.addColorStop(0.52, '#3a2842');
+    grad.addColorStop(0.60, '#1b1525');
+    grad.addColorStop(1.00, '#0a0712');   // ground bounce / nadir
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+    // Warm key-light glow just above the horizon — gives metals a specular
+    // hot spot so stainless steel reads as polished metal rather than matte.
+    const gx = W * 0.18, gy = H * 0.46, gr = H * 0.6;
+    const warm = ctx.createRadialGradient(gx, gy, 0, gx, gy, gr);
+    warm.addColorStop(0.0, 'rgba(255,228,184,0.85)');
+    warm.addColorStop(0.4, 'rgba(255,184,120,0.30)');
+    warm.addColorStop(1.0, 'rgba(255,160,100,0.0)');
+    ctx.fillStyle = warm;
+    ctx.fillRect(0, 0, W, H);
+    // Cool blue fill bounce opposite the key — mirrors the rim/fill lights so
+    // the shadow side of the stack still catches a faint reflection.
+    const bx = W * 0.68, by = H * 0.5, br = H * 0.7;
+    const cool = ctx.createRadialGradient(bx, by, 0, bx, by, br);
+    cool.addColorStop(0.0, 'rgba(120,150,225,0.28)');
+    cool.addColorStop(1.0, 'rgba(120,150,225,0.0)');
+    ctx.fillStyle = cool;
+    ctx.fillRect(0, 0, W, H);
+    const tex = new THREE.CanvasTexture(c);
+    tex.mapping = THREE.EquirectangularReflectionMapping;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+}
+
 // Custom-shader starfield with subtle per-star twinkle.
 function buildStarfield() {
     const N = 1500;
@@ -1117,6 +1173,20 @@ export function initVehicleCanvas(canvas, opts = {}) {
     // Atmospheric fog — pulls distant scenery into a soft purple-night haze
     // and hides the hard edge where the ground plane cuts off.
     scene.fog = new THREE.FogExp2(0x1a1428, 0.0025);
+
+    // Image-based lighting. PMREM-prefilter the procedural dusk environment
+    // (see buildEnvTexture) and hang it on scene.environment so every PBR
+    // material in the scene gets reflections/IBL for free — no per-material
+    // wiring. Background stays the gradient sky; environment only drives
+    // reflections. Generated once at init; the source canvas texture and the
+    // generator are disposed immediately, the prefiltered render target
+    // (envRT) lives for the canvas lifetime and is freed in dispose().
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const _envSrc = buildEnvTexture();
+    const envRT = pmrem.fromEquirectangular(_envSrc);
+    scene.environment = envRT.texture;
+    _envSrc.dispose();
+    pmrem.dispose();
 
     const stars = buildStarfield();
     scene.add(stars);
@@ -1933,6 +2003,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
             ro.disconnect();
             io.disconnect();
             controls.dispose();
+            envRT.dispose();
             renderer.dispose();
             scene.traverse(o => {
                 if (o.geometry) o.geometry.dispose();
