@@ -3315,7 +3315,7 @@ import { WeatherFeed, TEX_W, TEX_H, MAX_WIND_MS } from './js/weather-feed.js';
 import { WeatherHistory }        from './js/weather-history.js';
 import { WeatherFrameResolver }  from './js/weather-frame-resolver.js';
 import { WeatherForecastFeed }   from './js/weather-forecast-feed.js';
-import { ForecastRegistry, PersistenceForecaster, OpenMeteoNWPForecaster, CHANNEL_NAMES, FORECAST_HORIZONS_H } from './js/weather-forecast.js';
+import { ForecastRegistry, PersistenceForecaster, OpenMeteoNWPForecaster, ForecastPaintProvider, CHANNEL_NAMES, FORECAST_HORIZONS_H } from './js/weather-forecast.js';
 import { WeatherForecastValidator } from './js/weather-forecast-validation.js';
 import { mountModelsPanel } from './js/models-panel.js';
 import { ProbabilityPicker } from './js/probability-picker.js';
@@ -3332,7 +3332,7 @@ import {
 } from './js/precip-forecast.js';
 import { AtmosphereClimatology }    from './js/atmosphere-climatology.js';
 import { makeAtmosphereForecasters } from './js/atmosphere-forecast.js';
-import { makeWeatherFlowForecasters } from './js/weather-flow.js';
+import { makeWeatherFlowForecasters, WindAdvectionRK2Forecaster } from './js/weather-flow.js';
 import { TracerSkillTracker } from './js/tracer-skill-tracker.js';
 import { WindShearProxy } from './js/wind-shear-proxy.js';
 import { AdvectionGainTracker } from './js/advection-gain-tracker.js';
@@ -5782,35 +5782,27 @@ wxFeed.backfill(wxGridHistory, 24).then(n => {
 // forward, keeping page-load network budget tight.
 const wxForecastFeed = new WeatherForecastFeed({ history: wxGridHistory });
 
-// On every future-scrub tick, ensure the forecast ring covers the
-// scrub position plus a 6-hour prefetch buffer. The feed dedupes
-// against its `_loadedUntilMs` and only fires a chunked triplet for
-// the uncovered tail — first +6h scrub fetches +24h, next +20h scrub
-// fetches +24..+48h, etc. We hook the time-bus snapshot so the trigger
-// fires regardless of how simTime moved (slider drag, Operations
-// console, keyboard step).
-const PREFETCH_MS = 6 * 60 * 60_000;
-// Fire the first forecast fetch as soon as the user nudges the slider
-// past +5 min — well inside the resolver's 30-min liveBypass — so the
-// chunked Open-Meteo triplet (~2 s on a fast link) is on the wire and
-// the +24h forecast ring is populated by the time the user reaches the
-// replay window. Previous threshold of +30 min meant scrubbing forward
-// hit the liveBypass→replay transition with an empty forecast ring,
-// the resolver fell back to _dispatchLive, and the globe appeared to
-// "not move" until the next slider tick crossed the threshold again.
-const _futureFetchUnsub = timeBus.subscribe((snap) => {
-    if (snap.simTimeMs > Date.now() + 5 * 60_000) {
-        wxForecastFeed.ensureLoadedUntil(snap.simTimeMs + PREFETCH_MS);
-    }
-});
+// NOTE (custom-forecast pivot): the future-scrub globe now paints the
+// in-browser RK2 model via ForecastPaintProvider (wired below), NOT the
+// Open-Meteo NWP frames. So we no longer fan a chunked Open-Meteo triplet
+// out of the forecast ring on every slider tick — that per-scrub burst
+// (864 coords × 9 vars × 3 chunks, repeated each drag) blew past
+// Open-Meteo's 600-calls/min free-tier ceiling and surfaced as the
+// "NetworkError when attempting to fetch resource" rate-limit (the 429
+// error path arrives without CORS headers, so the browser reports a bare
+// NetworkError instead of a catchable 429). The per-scrub `timeBus`
+// subscription that drove ensureLoadedUntil(simTime + 6h) has been
+// removed. Open-Meteo is kept ONLY as a scored leaderboard baseline,
+// seeded by the single idle pre-warm below and read from the forecast
+// ring by OpenMeteoNWPForecaster.
 
 // Idle pre-warm. After the page has been open for ~8 s with the user
 // presumably done with first-paint settling, fetch the first +24 h of
-// hourly forecast unconditionally. This burns ~2-3 MB of egress per
-// session whether or not the user ever scrubs forward, but it makes
-// the first future-scrub feel instant instead of "drag → wait → globe
-// finally updates". Skipped when the tab loaded hidden (the user
-// hasn't touched the page yet; don't pay the bandwidth until they do).
+// hourly forecast unconditionally — a single batch, well under the
+// rate-limit ceiling. This keeps the Open-Meteo "are we beating GFS?"
+// baseline populated for the validator. Skipped when the tab loaded
+// hidden (the user hasn't touched the page yet; don't pay the bandwidth
+// until they do).
 setTimeout(() => {
     if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
         wxForecastFeed.ensureLoadedUntil(Date.now() + 24 * 3_600_000)
@@ -6004,6 +5996,41 @@ for (const F of makeWeatherFlowForecasters({
 window._opticalFlowSkillTracker = opticalFlowSkillTracker;
 window._advectionGainTracker    = advectionGainTracker;
 window._windShearProxy          = windShearProxy;
+
+// ── RK2 advection (the "new model") + future-paint pin ───────────────────
+// wind-advection-rk2-v1: multi-substep RK2 semi-Lagrangian with a time-
+// evolving wind (saturating tendency extrapolation). Registered alongside
+// v1 so the validator scores them head-to-head, and pinned as the source
+// the globe paints when the slider scrubs into the future. Its own gain
+// learner (separate modelId) keeps its α[h] independent of v1's.
+const rk2GainTracker = new AdvectionGainTracker({
+    modelId:        'wind-advection-rk2-v1',
+    horizons:       FORECAST_HORIZONS_H,
+    referenceModel: 'persistence-v1',
+});
+const rk2Forecaster = new WindAdvectionRK2Forecaster({
+    gainTracker: rk2GainTracker,
+    shearProxy:  windShearProxy,
+});
+wxForecastRegistry.register(rk2Forecaster);
+window._rk2GainTracker = rk2GainTracker;
+window._rk2Forecaster  = rk2Forecaster;
+
+// Pin the future-scrub globe to the RK2 model's dense hourly forecast.
+// The provider decodes through wxFeed's _decodeCoarse so the forecast
+// flows through the exact same bilinear+blur+pack pipeline observations
+// use, then the resolver lerps/clamps it like any replay frame. Open-Meteo
+// stays a scored leaderboard baseline (read from the forecast ring by
+// OpenMeteoNWPForecaster) and is no longer a paint source.
+const wxPaintProvider = new ForecastPaintProvider({
+    forecaster:  rk2Forecaster,
+    history:     wxGridHistory,
+    decode:      (coarse, w, h) => wxFeed._decodeCoarse(coarse, w, h),
+    maxHorizonH: 24,
+});
+wxResolver?.setForecastProvider(wxPaintProvider);
+if (wxGridHistory.size > 0) wxPaintProvider.refresh();
+window._wxPaintProvider = wxPaintProvider;
 
 // ── Cloud + wind forecasters ─────────────────────────────────────────────
 // Same trio (Climatology / AnomalyPersistence / AnomalyAR) as precip,

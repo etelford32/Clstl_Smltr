@@ -449,6 +449,213 @@ export class WindAdvectionForecaster {
     }
 }
 
+// ── RK2 multi-substep semi-Lagrangian, time-evolving wind ───────────────────
+//
+// wind-advection-rk2-v1 — the "new model" successor to wind-advection-v1.
+// Two upgrades target v1's documented failure mode (a single Euler jump
+// with frozen wind sampled only at the destination, which "can become
+// worse than persistence" past ~6 h):
+//
+//   1. Multi-substep RK2 (midpoint) back-trajectory. Instead of one
+//      h-hour Euler jump, walk back in ~1-hour substeps, taking a
+//      midpoint velocity estimate each substep and re-sampling the wind
+//      ALONG the curving path. Curved flow (troughs, rotating lows) that
+//      a straight Euler jump flies past is now followed. The secant-
+//      latitude metric is recomputed at the trajectory's current
+//      latitude each substep, not frozen at the destination.
+//
+//   2. Time-evolving wind. The wind is extrapolated along the trajectory
+//      from the most recent hourly tendency ΔW = W(t) − W(t−1h):
+//
+//         W_eff(lead τ) = W(t) + τ_eff · ΔW,
+//         τ_eff = T · (1 − e^(−τ/T))          (T = tendencyHorizonH, ~3 h)
+//
+//      τ_eff saturates at T so a 24-hour extrapolation can't run away —
+//      trust the recent trend for the first few hours, then hold. With
+//      only one frame in the ring (no tendency yet) ΔW = 0 and the model
+//      degrades to frozen-wind RK2, still strictly better than v1's
+//      single Euler step.
+//
+// Shares v1's gain/shear hooks: gainAtHour(h) ∈ [0,1] scales the whole
+// wind for horizon h, so gain → 0 recovers the persistence baseline.
+
+const DEG2RAD = Math.PI / 180;
+
+/**
+ * Build advected frames at the requested horizons using RK2 substeps and
+ * a time-evolving wind. The back-trajectory origin is computed once per
+ * (cell, horizon) and reused across all 9 channels. h ≤ 0 yields the
+ * identity (current observation) — used as the τ=0 paint anchor.
+ *
+ * @returns {null | { model_id, issued_ms, horizons, gridW, gridH,
+ *                     frames, target_ms, _meta? }}
+ */
+function rk2BuildHorizons({
+    history, modelId, horizonsH, substepH = 1, tendencyHorizonH = 3, gainAtHour = null,
+}) {
+    const frames = history.all();
+    if (frames.length === 0) return null;
+    const newest = frames[frames.length - 1];
+    const { t, gridW, gridH, coarse } = newest;
+    const N = gridW * gridH;
+
+    const Ut = coarse.subarray(CH_U * N, (CH_U + 1) * N);
+    const Vt = coarse.subarray(CH_V * N, (CH_V + 1) * N);
+
+    // Hourly wind tendency from the previous frame, when present and
+    // grid-compatible. A per-cell delta — no global mean to remove.
+    let tendU = null, tendV = null;
+    if (frames.length >= 2) {
+        const prev = frames[frames.length - 2];
+        if (prev.gridW === gridW && prev.gridH === gridH
+            && prev.coarse?.length === coarse.length) {
+            const Up = prev.coarse.subarray(CH_U * N, (CH_U + 1) * N);
+            const Vp = prev.coarse.subarray(CH_V * N, (CH_V + 1) * N);
+            tendU = new Float32Array(N);
+            tendV = new Float32Array(N);
+            for (let k = 0; k < N; k++) { tendU[k] = Ut[k] - Up[k]; tendV[k] = Vt[k] - Vp[k]; }
+        }
+    }
+    const Tsat = Math.max(0.5, tendencyHorizonH);
+
+    // Wind (m/s) at fractional grid position (col,row) and lead time
+    // `leadH` hours, scaled by `gain`. Up to four bilinear samples.
+    const windAt = (col, row, leadH, gain) => {
+        let u = bilinearSample(Ut, gridW, gridH, col, row);
+        let v = bilinearSample(Vt, gridW, gridH, col, row);
+        if (tendU) {
+            const te = Tsat * (1 - Math.exp(-Math.max(0, leadH) / Tsat));
+            u += te * bilinearSample(tendU, gridW, gridH, col, row);
+            v += te * bilinearSample(tendV, gridW, gridH, col, row);
+        }
+        return { u: u * gain, v: v * gain };
+    };
+
+    const out     = {};
+    const targets = {};
+    const meta    = gainAtHour ? { gain_per_horizon: {} } : null;
+
+    for (const h of horizonsH) {
+        targets[h] = t + h * 3_600_000;
+        const gain = gainAtHour ? Math.max(0, Math.min(1, gainAtHour(h))) : 1;
+        if (meta) meta.gain_per_horizon[h] = gain;
+
+        const frame = new Float32Array(N * NUM_CHANNELS);
+        if (h <= 0) { frame.set(coarse); out[h] = frame; continue; }
+
+        const steps = Math.max(1, Math.round(h / substepH));
+        const dh    = h / steps;          // hours per substep
+        const dsec  = dh * 3600;
+
+        for (let j = 0; j < gridH; j++) {
+            const lat0 = latOfRow(j, gridH);
+            for (let i = 0; i < gridW; i++) {
+                // Walk the parcel backward from (lat,lon) at lead h to its
+                // origin at lead 0, RK2/midpoint per substep.
+                let lat = lat0;
+                let lon = lonOfColumn(i, gridW);
+                let lead = h;
+                for (let s = 0; s < steps; s++) {
+                    const w1   = windAt(colOfLon(lon, gridW), rowOfLat(lat, gridH), lead, gain);
+                    const sec1 = 1 / Math.max(0.02, Math.abs(Math.cos(lat * DEG2RAD)));
+                    const latM = lat - 0.5 * (w1.v * dsec) / M_PER_DEG_LAT;
+                    const lonM = lon - 0.5 * (w1.u * dsec) / M_PER_DEG_LAT * sec1;
+                    const w2   = windAt(colOfLon(lonM, gridW), rowOfLat(latM, gridH), lead - 0.5 * dh, gain);
+                    const secM = 1 / Math.max(0.02, Math.abs(Math.cos(latM * DEG2RAD)));
+                    lat = lat - (w2.v * dsec) / M_PER_DEG_LAT;
+                    lon = lon - (w2.u * dsec) / M_PER_DEG_LAT * secM;
+                    lead -= dh;
+                }
+                const colO = colOfLon(lon, gridW);
+                const rowO = rowOfLat(lat, gridH);
+                const dst  = j * gridW + i;
+                for (let ch = 0; ch < NUM_CHANNELS; ch++) {
+                    const slice = coarse.subarray(ch * N, (ch + 1) * N);
+                    frame[ch * N + dst] = bilinearSample(slice, gridW, gridH, colO, rowO);
+                }
+            }
+        }
+        out[h] = frame;
+    }
+    return {
+        model_id: modelId, issued_ms: t,
+        horizons: horizonsH.slice(),
+        gridW, gridH, frames: out, target_ms: targets,
+        ...(meta ? { _meta: meta } : {}),
+    };
+}
+
+export class WindAdvectionRK2Forecaster {
+    static id = 'wind-advection-rk2-v1';
+    /**
+     * @param {object} [opts]
+     * @param {object} [opts.gainTracker]       AdvectionGainTracker (its own
+     *   modelId), read per-forecast via getGain(h).
+     * @param {object} [opts.shearProxy]        WindShearProxy; refresh()'d
+     *   once per forecast, multiplies the learned gain.
+     * @param {number} [opts.tendencyHorizonH=3]  τ_eff saturation horizon.
+     * @param {number} [opts.substepH=1]           Hours per RK2 substep.
+     */
+    constructor({ gainTracker = null, shearProxy = null, tendencyHorizonH = 3, substepH = 1 } = {}) {
+        this.id                = WindAdvectionRK2Forecaster.id;
+        this._gainTracker      = gainTracker;
+        this._shearProxy       = shearProxy;
+        this._tendencyHorizonH = tendencyHorizonH;
+        this._substepH         = substepH;
+        this._lastDiag         = null;
+    }
+
+    getLastDiag() { return this._lastDiag; }
+
+    // Compose the per-horizon gain (learned α[h] × runtime steadiness),
+    // mirroring WindAdvectionForecaster. Returns { fn, steadiness }.
+    _gainFn(history) {
+        const steadiness = this._shearProxy ? this._shearProxy.refresh(history) : 1.0;
+        const gt = this._gainTracker;
+        return {
+            fn: (h) => (gt ? gt.getGain(h) : 1.0) * steadiness,
+            steadiness,
+        };
+    }
+
+    /** Standard scored horizons (FORECAST_HORIZONS_H) for the validator. */
+    forecast({ history }) {
+        const { fn, steadiness } = this._gainFn(history);
+        const result = rk2BuildHorizons({
+            history, modelId: this.id, horizonsH: FORECAST_HORIZONS_H,
+            substepH: this._substepH, tendencyHorizonH: this._tendencyHorizonH,
+            gainAtHour: fn,
+        });
+        if (result) {
+            this._lastDiag = {
+                steadiness,
+                shear_ms:    this._shearProxy?.diagnostics().shear_ms ?? null,
+                alpha_per_h: result._meta?.gain_per_horizon ?? null,
+                alpha_learned_per_h: this._gainTracker ? this._gainTracker.getAllGains() : null,
+                t: Date.now(),
+            };
+        }
+        return result;
+    }
+
+    /**
+     * Dense hourly horizons (0..maxHorizonH) for the paint provider. h=0
+     * is the current observation, giving a seamless live→forecast handoff.
+     * Not scored — the validator only consumes forecast()'s standard
+     * horizons.
+     */
+    forecastDense({ history, maxHorizonH = 24 }) {
+        const { fn } = this._gainFn(history);
+        const horizons = [];
+        for (let h = 0; h <= maxHorizonH; h++) horizons.push(h);
+        return rk2BuildHorizons({
+            history, modelId: this.id, horizonsH: horizons,
+            substepH: this._substepH, tendencyHorizonH: this._tendencyHorizonH,
+            gainAtHour: fn,
+        });
+    }
+}
+
 /**
  * Estimate a 2D pixel-velocity flow from the last two frames of a
  * weighted tracer-channel blend using Lucas-Kanade, convert to m/s,
