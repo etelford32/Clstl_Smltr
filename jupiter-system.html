@@ -304,6 +304,17 @@ body {
     box-shadow:0 0 8px rgba(255,184,80,.6);
     cursor:grab;
 }
+.js-atmo-readout {
+    display:inline-flex; align-items:center; gap:5px; flex-wrap:wrap;
+    margin-left:auto;
+    font-family:monospace; font-size:.68rem;
+    background:rgba(0,0,0,.28);
+    border:1px solid rgba(255,184,80,.20);
+    border-radius:8px; padding:4px 9px;
+}
+.js-atmo-readout .k { color:#998; text-transform:uppercase; letter-spacing:.05em; font-size:.6rem; }
+.js-atmo-readout .v { color:#ffd9a8; font-weight:700; margin-right:8px; }
+.js-atmo-readout .v:last-child { margin-right:0; }
 
 /* Plot panel */
 #js-app {
@@ -337,7 +348,7 @@ body {
 .js-plot-legend .lg { display:flex; align-items:center; gap:5px; }
 .js-plot-legend .swatch { display:inline-block; width:14px; height:8px; border-radius:1px; }
 .js-plot-wrap { position:relative; height:230px; border-radius:6px; background:rgba(0,0,0,.22); border:1px solid rgba(180,140,255,.10); }
-#js-plot-canvas { display:block; width:100%; height:100%; }
+#js-plot-canvas, #js-wind-canvas { display:block; width:100%; height:100%; }
 
 .js-plot-readout {
     display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr));
@@ -624,6 +635,25 @@ body {
             <button class="js-btn toggle" id="js-view-wide" title="Fullscreen wide-field view — zoom out to the irregular outer moons and watch their orbits precess">⤢ Wide field</button>
         </div>
 
+        <div class="js-row">
+            <span class="js-label" style="width:90px">Atmosphere</span>
+            <span class="js-label">Detail</span>
+            <select class="js-select" id="js-atmo-detail" title="Cloud-shader quality. High adds curl-noise flow, Kelvin–Helmholtz billows, and jet filaments.">
+                <option value="0">Flat bands</option>
+                <option value="1" selected>Flowing (medium)</option>
+                <option value="2">Hydrodynamic (high)</option>
+            </select>
+            <span class="js-label" title="Multiplies the zonal-wind advection rate">Wind</span>
+            <input class="js-slider" type="range" id="js-atmo-wind" min="0" max="3" step="0.1" value="1" style="min-width:120px; max-width:160px">
+            <span class="js-label" title="Meridional eddy-diffusion: how strongly turbulence mixes across jets">Diffusion</span>
+            <input class="js-slider" type="range" id="js-atmo-diff" min="0" max="1" step="0.05" value="0.6" style="min-width:120px; max-width:160px">
+            <span class="js-atmo-readout" id="js-atmo-readout">
+                <span class="k">epoch</span><span class="v" id="js-atmo-epoch">2000.0</span>
+                <span class="k">GRS&nbsp;Ø</span><span class="v" id="js-atmo-grs">—</span>
+                <span class="k">peak&nbsp;jet</span><span class="v" id="js-atmo-jet">150 m/s</span>
+            </span>
+        </div>
+
     </div>
 </div>
 
@@ -658,12 +688,34 @@ body {
         responsible for its sulfur-fed volcanism. Callisto sits outside the resonance.</p>
     </section>
 
+    <!-- Measured zonal-wind profile -->
+    <section class="js-panel">
+        <div class="js-plot-head">
+            <h2 style="flex:0 0 auto">Measured Zonal-Wind Profile <span style="color:#776; text-transform:none; letter-spacing:0; font-weight:400; font-size:.7rem">— the data driving the cloud flow</span></h2>
+            <div class="js-plot-legend">
+                <span class="lg"><span class="swatch" style="background:#7fd0ff"></span>eastward (prograde)</span>
+                <span class="lg"><span class="swatch" style="background:#ff9a7f"></span>westward (retrograde)</span>
+                <span class="lg"><span class="swatch" style="background:#ffb070"></span>GRS latitude</span>
+            </div>
+        </div>
+        <div class="js-plot-wrap">
+            <canvas id="js-wind-canvas"></canvas>
+        </div>
+        <p class="js-warn">Each latitude's clouds are advected at this measured eastward velocity, so the
+        bands shear past one another exactly as Jupiter's jets dictate. The equatorial zone super-rotates at
+        <code>~+140 m/s</code>; the planet's fastest jet sits at <code>~24°N (~+145 m/s)</code>; and the Great Red Spot
+        rolls between a retrograde jet on its poleward flank and a prograde jet to its south. Profile digitized from
+        the published Voyager + Cassini mean winds (Limaye 1986; García-Melendo &amp; Sánchez-Lavega 2001;
+        Porco et&nbsp;al. 2003; Tollefson et&nbsp;al. 2017) — accurate to ~±15 m/s, not a per-image dataset.</p>
+    </section>
+
     <!-- Notes -->
     <section class="js-panel">
         <h2>Why this matters</h2>
         <p><strong>Tidal heating.</strong> If Io's orbit were a perfect circle, tidal stretching from Jupiter would be static — no heating. The Laplace resonance with Europa pumps Io's eccentricity up to ~0.0041, which causes the tidal bulge to flex by ~100 m every orbit. Dissipation of that flexing pours ~10¹⁴ W into Io's interior, more than a thousand times Earth's geothermal flux per unit area, powering the most volcanically active body in the solar system.</p>
         <p><strong>Stable for billions of years.</strong> Pierre-Simon Laplace proved the resonance dynamically stable in 1788. Numerical experiments confirm it has held since shortly after the moons formed; tidal evolution drove the system <em>into</em> the resonance, not out of it. The same physics binds Pluto–Charon, Saturn's Mimas–Tethys, and exoplanet systems like TRAPPIST-1.</p>
         <p><strong>What you're seeing.</strong> A pure Newtonian Yoshida-4 integration in barycentric SI units. No fudge, no special-case forcing — the resonance falls out of pairwise gravity alone. Energy and angular momentum are bounded (symplectic) so the integration stays physical for arbitrarily long runs.</p>
+        <p><strong>The flowing atmosphere.</strong> Jupiter's clouds are rendered as a 2D advected fluid driven by the <em>measured zonal-wind profile</em> plotted above: each latitude's clouds shear at their real jet velocity, divergence-free <em>curl noise</em> warps the field so eddies swirl rather than slide, and a meridional eddy-diffusion blur mixes detail across jets. A second ammonia-cloud layer casts shadows on the deck to read as depth. Riding their bands are the <em>vortex zoo</em> — the Great Red Spot, Oval BA ("Red Spot Jr.") at ~33°S, white-oval anticyclones in the southern temperate region, and dark brown barges in the North Equatorial Belt. Two clocks drive it — wall time for continuous churn, and simulation time for evolution that tracks the controls above: scrub the date and the Great Red Spot drifts (~1.25°/day) and shrinks along its historical track (~40,000 km in the 1880s to ~14,000 km today), while the South Equatorial Belt fades and revives. The wind profile is a digitization of the published Voyager + Cassini winds (~±15 m/s); the GRS history is an approximate fit — neither is a per-image dataset.</p>
     </section>
 
     <section class="js-panel">
@@ -673,6 +725,10 @@ body {
             Yoshida, H. (1990) — <em>Construction of higher order symplectic integrators</em>.<br>
             Murray &amp; Dermott (1999) — <em>Solar System Dynamics</em>, ch. 8 (resonances).<br>
             de Pater &amp; Lissauer (2015) — <em>Planetary Sciences</em> 2nd ed.<br>
+            Ingersoll et al. (2004) — <em>Dynamics of Jupiter's Atmosphere</em> (Jupiter, CUP).<br>
+            Porco et al. (2003) — <em>Cassini Imaging of Jupiter's Atmosphere</em>, Science 299.<br>
+            Simon et al. (2018) — <em>Trends in the Size, Drift, and Color of the GRS</em>, AJ 155.<br>
+            Bridson et al. (2007) — <em>Curl-Noise for Procedural Fluid Flow</em>, SIGGRAPH.<br>
             JPL Planetary Fact Sheets — <code>nssdc.gsfc.nasa.gov/planetary/factsheet/</code>
         </p>
     </section>
@@ -684,6 +740,8 @@ body {
 import * as THREE        from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { JupiterSkin }   from './js/jupiter-skin.js';
+import { grsDiameterKm } from './js/jupiter-shader.js';
+import { JUPITER_ZONAL_WIND, sampleWind, WIND_MAX_ABS_MS } from './js/jupiter-wind-profile.js';
 import {
     yoshida4Step, totalEnergy, elementsToState, stateToElements, G_SI,
 } from './js/gravity-lab/physics.js';
@@ -1137,6 +1195,24 @@ const jupGroup = new THREE.Group();
 scene.add(jupGroup);
 const jupSkin = new JupiterSkin(jupGroup, { radius:1.0, quality:'medium', segments:48 });
 jupSkin.mesh.userData = { kind:'planet', key:'jupiter', label:'Jupiter' };
+
+// ── Atmosphere state (driven into the cloud shader each frame) ────────
+// `diffusion` = meridional eddy-diffusion blur; `windScale` = advection
+// rate multiplier; `quality` = shader tier (1 medium / 2 high). Default
+// medium for mobile; high unlocks curl-flow + KH billows + jet filaments.
+const atmo = { diffusion: 0.6, windScale: 1.0, quality: 1 };
+let atmoReadoutLast = 0;
+
+// Peak jet speed comes from the measured profile (its fastest jet, the
+// ~24°N jet at ~145 m/s); windScale multiplies the rendered advection rate.
+function updateAtmoReadout(epochYear) {
+    const km = grsDiameterKm(epochYear);
+    const earths = km / 12742;   // Earth diameter
+    if (elAtmoEpoch) elAtmoEpoch.textContent = epochYear.toFixed(1);
+    if (elAtmoGrs)   elAtmoGrs.textContent   =
+        `${km.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ',')} km (${earths.toFixed(1)}× Earth)`;
+    if (elAtmoJet)   elAtmoJet.textContent   = `${(WIND_MAX_ABS_MS * atmo.windScale).toFixed(0)} m/s`;
+}
 
 // Add a soft outer halo on top of the JupiterSkin atm shell.
 {
@@ -2050,6 +2126,25 @@ const elPov       = document.getElementById('js-pov');
 const elScale     = document.getElementById('js-scale');
 const elRingsTog  = document.getElementById('js-rings-toggle');
 const elViewWide  = document.getElementById('js-view-wide');
+const elAtmoDetail= document.getElementById('js-atmo-detail');
+const elAtmoWind  = document.getElementById('js-atmo-wind');
+const elAtmoDiff  = document.getElementById('js-atmo-diff');
+const elAtmoEpoch = document.getElementById('js-atmo-epoch');
+const elAtmoGrs   = document.getElementById('js-atmo-grs');
+const elAtmoJet   = document.getElementById('js-atmo-jet');
+
+// Atmosphere controls — quality tier, advection rate, eddy diffusion.
+const QUALITY_NAME = { 0:'low', 1:'medium', 2:'high' };
+elAtmoDetail.addEventListener('change', () => {
+    atmo.quality = parseInt(elAtmoDetail.value, 10) || 0;
+    jupSkin.setQuality(QUALITY_NAME[atmo.quality]);
+});
+elAtmoWind.addEventListener('input', () => {
+    atmo.windScale = parseFloat(elAtmoWind.value);
+});
+elAtmoDiff.addEventListener('input', () => {
+    atmo.diffusion = parseFloat(elAtmoDiff.value);
+});
 
 elPlay.addEventListener('click', () => {
     sim.playing = !sim.playing;
@@ -2550,7 +2645,17 @@ function tick(now) {
 
     syncMeshesFromState();
     starUniforms.uTime.value = now * 0.001;
-    jupSkin.update(now * 0.001);
+    // Drive the atmosphere: wall-clock for continuous churn; sim time +
+    // epoch for the evolution that tracks the page's time controls.
+    const simDays   = sim.t_s / 86400;
+    const epochYear = 2000.0 + simDays / 365.25;   // t_s = 0 at J2000 ≈ 2000.0
+    jupSkin.update(now * 0.001, {
+        simDays,
+        epochYear,
+        diffusion: atmo.diffusion,
+        windScale: atmo.windScale,
+    });
+    if (now - atmoReadoutLast > 250) { updateAtmoReadout(epochYear); atmoReadoutLast = now; }
 
     // Camera updates
     stepCameraTween(now);
@@ -2593,6 +2698,86 @@ function buildFocusOptions() {
     elFocus.innerHTML = html;
 }
 
+// ── Measured zonal-wind profile plot (the data driving the flow) ─────
+const windCanvas = document.getElementById('js-wind-canvas');
+const wctx = windCanvas.getContext('2d');
+const WIND_LAT_RANGE = 65;                       // plot ±65° (jets fade past this)
+const WIND_VMAX = Math.ceil(WIND_MAX_ABS_MS / 50) * 50;   // 150
+function resizeWindPlot() {
+    const rect = windCanvas.getBoundingClientRect();
+    const dpr  = Math.min(devicePixelRatio, 2);
+    windCanvas.width  = Math.max(1, Math.floor(rect.width  * dpr));
+    windCanvas.height = Math.max(1, Math.floor(rect.height * dpr));
+    wctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawWindProfile();
+}
+function drawWindProfile() {
+    const W = windCanvas.clientWidth, H = windCanvas.clientHeight;
+    if (W < 8 || H < 8) return;
+    wctx.clearRect(0, 0, W, H);
+    const padL = 44, padR = 16, padT = 10, padB = 26;
+    const pw = W - padL - padR, ph = H - padT - padB;
+
+    const yOf = lat => padT + (1 - (lat + WIND_LAT_RANGE) / (2 * WIND_LAT_RANGE)) * ph;  // N up
+    const xOf = v   => padL + (v + WIND_VMAX) / (2 * WIND_VMAX) * pw;
+    const x0  = xOf(0);
+
+    // Grid + axes
+    wctx.font = '10px ui-monospace, monospace';
+    wctx.strokeStyle = 'rgba(255,184,80,.10)';
+    wctx.fillStyle = '#776';
+    wctx.lineWidth = 1;
+    for (let v = -WIND_VMAX; v <= WIND_VMAX; v += 50) {
+        const x = xOf(v);
+        wctx.beginPath(); wctx.moveTo(x, padT); wctx.lineTo(x, padT + ph); wctx.stroke();
+        wctx.textAlign = 'center';
+        wctx.fillText(v.toString(), x, H - padB + 13);
+    }
+    for (let lat = -60; lat <= 60; lat += 30) {
+        const y = yOf(lat);
+        wctx.beginPath(); wctx.moveTo(padL, y); wctx.lineTo(W - padR, y); wctx.stroke();
+        wctx.textAlign = 'right';
+        wctx.fillText((lat > 0 ? '+' : '') + lat + '°', padL - 6, y + 3);
+    }
+    wctx.fillStyle = 'rgba(255,184,80,.55)';
+    wctx.textAlign = 'center';
+    wctx.fillText('eastward velocity  (m/s)', padL + pw / 2, H - 4);
+
+    // Horizontal jet bars (intuitive: prograde →, retrograde ←), 1° steps.
+    for (let lat = -WIND_LAT_RANGE; lat <= WIND_LAT_RANGE; lat += 1) {
+        const v = sampleWind(lat);
+        const y = yOf(lat);
+        wctx.strokeStyle = v >= 0 ? 'rgba(127,208,255,.55)' : 'rgba(255,154,127,.55)';
+        wctx.beginPath(); wctx.moveTo(x0, y); wctx.lineTo(xOf(v), y); wctx.stroke();
+    }
+    // Zero line
+    wctx.strokeStyle = 'rgba(255,255,255,.35)';
+    wctx.lineWidth = 1.5;
+    wctx.beginPath(); wctx.moveTo(x0, padT); wctx.lineTo(x0, padT + ph); wctx.stroke();
+
+    // Smooth profile curve on top
+    wctx.strokeStyle = '#ffd9a8';
+    wctx.lineWidth = 1.8;
+    wctx.beginPath();
+    let first = true;
+    for (let lat = -WIND_LAT_RANGE; lat <= WIND_LAT_RANGE; lat += 0.5) {
+        const x = xOf(sampleWind(lat)), y = yOf(lat);
+        if (first) { wctx.moveTo(x, y); first = false; } else wctx.lineTo(x, y);
+    }
+    wctx.stroke();
+
+    // GRS latitude marker (~22° S)
+    const yg = yOf(-22);
+    wctx.strokeStyle = 'rgba(255,176,112,.8)';
+    wctx.setLineDash([4, 3]);
+    wctx.beginPath(); wctx.moveTo(padL, yg); wctx.lineTo(W - padR, yg); wctx.stroke();
+    wctx.setLineDash([]);
+    wctx.fillStyle = '#ffb070';
+    wctx.textAlign = 'left';
+    wctx.fillText('GRS', padL + 4, yg - 4);
+}
+new ResizeObserver(resizeWindPlot).observe(windCanvas);
+
 // ── Boot ─────────────────────────────────────────────────────────────
 buildBodyPicker();
 buildBookmarks();
@@ -2607,6 +2792,7 @@ syncInputsFromSim();
     updateReadouts(res);
 }
 drawPlot();
+resizeWindPlot();
 updateHud();
 requestAnimationFrame(t => { lastT = t; tick(t); });
 </script>

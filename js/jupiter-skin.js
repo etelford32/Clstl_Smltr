@@ -31,6 +31,7 @@
 
 import * as THREE from 'three';
 import { JUPITER_VERT, JUPITER_FRAG, createJupiterUniforms } from './jupiter-shader.js';
+import { buildWindTexture } from './jupiter-wind-profile.js';
 
 const QUALITY_MAP = { low: 0, medium: 1, high: 2 };
 const D2R = Math.PI / 180;
@@ -65,6 +66,10 @@ export class JupiterSkin {
         // ── Cloud deck ───────────────────────────────────────────────────────
         this.jupiterU = createJupiterUniforms(THREE);
         this.jupiterU.u_quality.value = QUALITY_MAP[quality] ?? 1;
+
+        // Drive the cloud shader's zonal shear from the measured wind profile.
+        this.jupiterU.u_windTex.value    = buildWindTexture(THREE);
+        this.jupiterU.u_useWindTex.value = 1.0;
 
         const cloudMat = new THREE.ShaderMaterial({
             vertexShader:   JUPITER_VERT,
@@ -133,13 +138,34 @@ export class JupiterSkin {
         }
     }
 
-    /** Call every frame with elapsed seconds. */
-    update(t) {
+    /**
+     * Call every frame.
+     * @param {number} t      Wall-clock seconds (continuous churn).
+     * @param {object} [opts] Evolution drivers (all optional):
+     *   @param {number} opts.simDays    Simulation days from J2000 — winds
+     *                                   advect and the GRS drifts with this.
+     *   @param {number} opts.epochYear  Decimal year — decadal GRS shrink /
+     *                                   SEB fade-revival.
+     *   @param {number} opts.diffusion  0..1 meridional eddy-diffusion blur.
+     *   @param {number} opts.windScale  Multiplies the advection rate.
+     */
+    update(t, opts = {}) {
         this.jupiterU.u_time.value = t;
         // Accumulate rotation phase (System II rate)
         this._rotPhase += (2 * Math.PI / ROT_PERIOD_S) * (1 / 60);  // assume ~60fps
         this.jupiterU.u_rot_phase.value = this._rotPhase;
+        if (opts.simDays   !== undefined) this.jupiterU.u_sim_days.value   = opts.simDays;
+        if (opts.epochYear !== undefined) this.jupiterU.u_epoch_year.value = opts.epochYear;
+        if (opts.diffusion !== undefined) this.jupiterU.u_diffusion.value  = opts.diffusion;
+        if (opts.windScale !== undefined) this.jupiterU.u_wind_scale.value = opts.windScale;
     }
+
+    /** Set the decimal-year epoch (drives GRS size + SEB cycle). */
+    setEpochYear(y) { this.jupiterU.u_epoch_year.value = y; }
+    /** Set meridional eddy-diffusion strength (0..1). */
+    setDiffusion(d) { this.jupiterU.u_diffusion.value = d; }
+    /** Multiply the zonal advection rate. */
+    setWindScale(s) { this.jupiterU.u_wind_scale.value = s; }
 
     /** Set quality tier. */
     setQuality(q) {
