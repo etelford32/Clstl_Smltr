@@ -118,12 +118,18 @@ export class WeatherFrameResolver {
         lruSize       = DEFAULT_LRU_SIZE,
         redrawThreshMs = DEFAULT_REDRAW_THRESH,
         liveBypassMs   = DEFAULT_LIVE_BYPASS_MS,
+        forecastProvider = null,
     } = {}) {
         if (!feed)    throw new Error('WeatherFrameResolver: feed is required');
         if (!history) throw new Error('WeatherFrameResolver: history is required');
 
         this._feed    = feed;
         this._history = history;
+        // Optional custom-forecast paint source (ForecastPaintProvider).
+        // When set, it takes precedence over the history forecast ring for
+        // future timestamps, so the globe renders our model instead of the
+        // upstream NWP frames. null → unchanged bracket-the-ring behaviour.
+        this._forecastProvider = forecastProvider;
         this._lru     = new LRU(lruSize);
         this._redrawThreshMs = redrawThreshMs;
         this._liveBypassMs   = liveBypassMs;
@@ -213,6 +219,16 @@ export class WeatherFrameResolver {
         this._lastWasLive = null;
     }
 
+    /**
+     * Install (or replace) the custom-forecast paint source. Invalidates
+     * the change-detection memo so the next tick re-dispatches through the
+     * provider. Pass null to revert to bracket-the-ring behaviour.
+     */
+    setForecastProvider(provider) {
+        this._forecastProvider = provider;
+        this.invalidate();
+    }
+
     /** Tear down: remove listeners, clear LRU. */
     stop() {
         document.removeEventListener('weather-update', this._onFeedUpdate);
@@ -241,6 +257,14 @@ export class WeatherFrameResolver {
     }
 
     _dispatchReplay(tEff) {
+        // Custom-forecast paint takes precedence for future timestamps.
+        // The provider returns null for past/live (bracket-the-ring owns
+        // those) and clamps past its deepest horizon.
+        if (this._forecastProvider) {
+            const fp = this._forecastProvider.bracket(tEff);
+            if (fp) { this._dispatchForecast(fp, tEff); return; }
+        }
+
         const br = this._history.bracket(tEff);
         if (!br) {
             // Ring is empty — the very first session before any live
@@ -324,6 +348,62 @@ export class WeatherFrameResolver {
                 meta,
                 texW: TEX_W, texH: TEX_H,
                 replay: true,
+            },
+        }));
+    }
+
+    /**
+     * Paint a custom-forecast frame from the provider. `fp` carries two
+     * already-decoded trios (a, b) and a frac; we lerp into scratch and
+     * dispatch with forecast meta. Mirrors _dispatchReplay's lerp, but the
+     * decode/caching lives in the provider (its frames are keyed by stable
+     * target_ms, not the resolver's 4-slot LRU).
+     */
+    _dispatchForecast(fp, tEff) {
+        const { a, b, frac, meta } = fp;
+        if (a === b || frac <= 0) {
+            this._weatherScratch.set(a.weatherBuf);
+            this._windScratch   .set(a.windBuf);
+            this._cloudScratch  .set(a.cloudBuf);
+        } else if (frac >= 1) {
+            this._weatherScratch.set(b.weatherBuf);
+            this._windScratch   .set(b.windBuf);
+            this._cloudScratch  .set(b.cloudBuf);
+        } else {
+            this._lerpInto(this._weatherScratch, a.weatherBuf, b.weatherBuf, frac);
+            this._lerpInto(this._windScratch,    a.windBuf,    b.windBuf,    frac);
+            this._lerpInto(this._cloudScratch,   a.cloudBuf,   b.cloudBuf,   frac);
+        }
+
+        const dtSec  = Math.floor((tEff - Date.now()) / 1000);
+        const absMin = Math.round(Math.abs(dtSec) / 60);
+        const dtLabel = absMin < 60 ? `${absMin}m` : `${(absMin / 60).toFixed(1)}h`;
+        const issued = Number.isFinite(meta?.issued_ms) ? meta.issued_ms : Date.now();
+        const live   = this._feed.meta;
+        const md = {
+            ...live,
+            source:    `forecast · in ${dtLabel} · ${meta?.source ?? 'model'}`,
+            fetchTime: new Date(issued),
+            demo:      false,
+            loaded:    true,
+            replay:    false,
+            isForecast: true,
+            replayT:   tEff,
+            cacheAgeSeconds: 0,
+            cacheFetchedAt:  new Date(issued).toISOString(),
+            gridW:   meta?.gridW ?? live?.gridW,
+            gridH:   meta?.gridH ?? live?.gridH,
+            gridDeg: meta?.gridH ? 180 / meta.gridH : live?.gridDeg,
+        };
+
+        document.dispatchEvent(new CustomEvent('weather-update', {
+            detail: {
+                weatherBuffer: this._weatherScratch,
+                windBuffer:    this._windScratch,
+                cloudBuffer:   this._cloudScratch,
+                meta:          md,
+                texW: TEX_W, texH: TEX_H,
+                replay: true,    // resolver-origin marker (echo discriminator)
             },
         }));
     }
