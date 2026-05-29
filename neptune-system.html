@@ -1,0 +1,2496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Neptune System — Triton, Rings & Arcs · Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/neptune-system.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/neptune-system.html">
+<meta property="og:title" content="Neptune System — Triton, Rings & Arcs — Parkers Physics">
+<meta property="og:description" content="Research-grade Neptune simulator: live J₂ N-body of the regular moons and the captured, retrograde, tidally-decaying Triton, plus the named rings with the Adams arcs, the 28° obliquity, the tilted magnetic dipole, and a Triton tidal-decay projection.">
+<meta property="og:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+<meta property="og:image:alt" content="Parkers Physics — real-time astrophysics simulations">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Neptune System — Triton, Rings & Arcs — Parkers Physics">
+<meta name="twitter:description" content="Research-grade Neptune simulator: live J₂ N-body of the regular moons and the captured, retrograde, tidally-decaying Triton, plus the named rings with the Adams arcs, the 28° obliquity, the tilted magnetic dipole, and a Triton tidal-decay projection.">
+<meta name="twitter:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+
+<meta name="description" content="Research-grade Neptune simulator: live J₂ N-body of the regular moons and the captured, retrograde, tidally-decaying Triton, plus the named rings with the Adams arcs, the 28° obliquity, the tilted magnetic dipole, and a Triton tidal-decay projection.">
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { height:auto; overflow-y:auto; }
+body {
+    width:100%; min-height:100vh; overflow-x:hidden;
+    background:#02040f; color:#cfe0f5;
+    font-family:'Segoe UI', system-ui, sans-serif;
+}
+
+#ns-hero {
+    padding:28px 24px 18px;
+    background:linear-gradient(180deg, rgba(80,150,255,.12), rgba(2,4,15,0));
+    border-bottom:1px solid rgba(90,160,255,.20);
+}
+#ns-hero h1 {
+    font-size:1.7rem; font-weight:800;
+    background:linear-gradient(100deg,#fff 28%,#5aa0ff);
+    -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+    margin-bottom:8px;
+}
+#ns-hero p { font-size:.92rem; color:#a9bbd8; line-height:1.6; max-width:880px; }
+#ns-hero .ns-tag {
+    display:inline-block; font-family:monospace; font-size:.7rem; letter-spacing:.1em;
+    color:#aad4ff; background:rgba(80,150,255,.14);
+    border:1px solid rgba(90,160,255,.40); border-radius:4px;
+    padding:3px 8px; margin-bottom:10px; text-transform:uppercase;
+}
+
+/* ── Stage ───────────────────────────────────────────────────────────── */
+#ns-stage {
+    position:relative;
+    width:100%; max-width:1280px;
+    margin:18px auto 0;
+    padding:0 18px;
+    display:grid;
+    grid-template-columns:1fr 320px;
+    gap:14px;
+}
+@media (max-width:920px) { #ns-stage { grid-template-columns:1fr; } }
+#ns-canvas-wrap {
+    position:relative;
+    width:100%; height:560px;
+    border:1px solid rgba(90,160,255,.26);
+    border-radius:14px;
+    overflow:hidden;
+    background:radial-gradient(ellipse at center, #050b1c 0%, #01030a 80%);
+    box-shadow:0 12px 40px rgba(0,0,0,.5), inset 0 0 80px rgba(40,90,180,.10);
+}
+#ns-canvas-wrap canvas { display:block; width:100%; height:100%; }
+#ns-canvas-wrap:fullscreen { width:100vw; height:100vh; border-radius:0; border:none; }
+
+/* HUD */
+#ns-hud {
+    position:absolute; top:12px; left:14px; right:14px;
+    display:flex; justify-content:space-between; align-items:flex-start;
+    gap:12px; pointer-events:none;
+    font-family:monospace; font-size:.74rem;
+}
+.ns-hud-card {
+    background:rgba(6,12,30,.72);
+    border:1px solid rgba(90,160,255,.28);
+    border-radius:6px;
+    padding:8px 11px;
+    color:#aad4ff;
+    backdrop-filter:blur(6px);
+    pointer-events:auto;
+    line-height:1.55;
+}
+.ns-hud-card .lbl { color:#8a9bc0; font-size:.62rem; letter-spacing:.08em; text-transform:uppercase; display:block; margin-bottom:1px; }
+.ns-hud-card .val { color:#fff; font-size:.85rem; font-weight:700; }
+.ns-hud-card .sub { color:#a9bbd8; font-size:.66rem; margin-top:2px; }
+
+#ns-mode-pill {
+    position:absolute; top:12px; left:50%; transform:translateX(-50%);
+    font-family:monospace; font-size:.68rem; letter-spacing:.08em;
+    text-transform:uppercase;
+    background:rgba(6,12,30,.78);
+    border:1px solid rgba(102,224,216,.55);
+    color:#66e0d8;
+    padding:5px 12px;
+    border-radius:14px;
+    backdrop-filter:blur(6px);
+    pointer-events:none;
+    transition:all .25s ease;
+}
+#ns-mode-pill.play { border-color:rgba(79,201,127,.55); color:#7fdb9a; }
+
+#ns-legend {
+    position:absolute; bottom:10px; left:14px;
+    display:flex; gap:10px; flex-wrap:wrap;
+    font-family:monospace; font-size:.66rem;
+    background:rgba(6,12,30,.62);
+    border:1px solid rgba(90,160,255,.22);
+    border-radius:6px;
+    padding:6px 10px;
+    color:#a9bbd8;
+    backdrop-filter:blur(6px);
+}
+#ns-legend .lg { display:flex; align-items:center; gap:5px; }
+#ns-legend .dt { width:8px; height:8px; border-radius:50%; }
+
+/* Side panel */
+#ns-side {
+    background:rgba(8,14,34,.82);
+    border:1px solid rgba(90,160,255,.22);
+    border-radius:14px;
+    padding:14px 14px 16px;
+    backdrop-filter:blur(14px);
+    display:flex; flex-direction:column;
+    height:560px; overflow:hidden;
+}
+@media (max-width:920px) { #ns-side { height:auto; max-height:none; } }
+.ns-side-title {
+    font-size:.66rem; color:#8a9bc0; letter-spacing:.12em;
+    text-transform:uppercase; font-weight:700; margin-bottom:8px;
+}
+.ns-body-grid {
+    display:grid; grid-template-columns:repeat(5, 1fr); gap:5px;
+    margin-bottom:14px;
+}
+.ns-body-btn {
+    background:rgba(0,0,0,.30);
+    border:1px solid rgba(90,160,255,.22);
+    border-radius:5px;
+    padding:6px 4px 4px;
+    cursor:pointer;
+    text-align:center;
+    transition:all .15s;
+    font-family:inherit;
+    color:#8a9bc0;
+}
+.ns-body-btn:hover { border-color:rgba(90,160,255,.55); color:#fff; }
+.ns-body-btn.sel {
+    background:rgba(90,160,255,.18);
+    border-color:#5aa0ff;
+    color:#fff;
+    box-shadow:0 0 10px rgba(90,160,255,.30);
+}
+.ns-body-dot {
+    width:14px; height:14px; border-radius:50%;
+    margin:0 auto 3px;
+    box-shadow:0 0 6px currentColor;
+}
+.ns-body-name { font-size:.62rem; font-weight:600; letter-spacing:.04em; }
+.ns-body-group {
+    grid-column:1 / -1;
+    font-size:.58rem; color:#8a9bc0; letter-spacing:.10em;
+    text-transform:uppercase; font-weight:700;
+    margin:6px 0 1px; padding-top:5px;
+    border-top:1px solid rgba(90,160,255,.12);
+}
+.ns-body-group:first-child { margin-top:0; padding-top:0; border-top:none; }
+
+.ns-sel-head {
+    display:flex; align-items:center; gap:8px;
+    padding:6px 0 10px;
+    border-bottom:1px solid rgba(90,160,255,.18);
+    margin-bottom:10px;
+}
+.ns-sel-dot { width:18px; height:18px; border-radius:50%; box-shadow:0 0 8px currentColor; }
+.ns-sel-name { font-size:1.05rem; font-weight:700; color:#fff; }
+.ns-sel-sub  { font-size:.66rem; color:#8a9bc0; font-family:monospace; margin-left:auto; }
+
+.ns-el-table {
+    flex:1;
+    display:grid; grid-template-columns:1fr auto;
+    column-gap:10px; row-gap:6px;
+    align-content:start;
+    font-family:monospace; font-size:.78rem;
+    overflow-y:auto;
+}
+.ns-el-k { color:#8a9bc0; display:flex; align-items:baseline; gap:6px; }
+.ns-el-k .sym { color:#aad4ff; font-weight:700; min-width:20px; display:inline-block; }
+.ns-el-k .nm  { font-size:.66rem; color:#69789a; }
+.ns-el-v { color:#fff; font-variant-numeric:tabular-nums; text-align:right; font-weight:600; }
+.ns-el-v .un { color:#69789a; font-weight:400; margin-left:4px; font-size:.7rem; }
+.ns-el-foot {
+    margin-top:10px; padding-top:8px;
+    border-top:1px solid rgba(90,160,255,.16);
+    font-family:monospace; font-size:.62rem; color:#69789a;
+    line-height:1.55;
+}
+
+/* Time / control card */
+#ns-time { width:100%; max-width:1280px; margin:14px auto 0; padding:0 18px; }
+.ns-time-card {
+    background:rgba(8,14,34,.78); backdrop-filter:blur(14px);
+    border:1px solid rgba(90,160,255,.22);
+    border-radius:12px;
+    padding:16px 18px;
+}
+.ns-row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+.ns-row:last-child { margin-bottom:0; }
+
+.ns-btn {
+    background:rgba(90,160,255,.10);
+    color:#aad4ff;
+    border:1px solid rgba(90,160,255,.32);
+    border-radius:6px;
+    padding:7px 13px;
+    font-family:inherit; font-size:.78rem; font-weight:600;
+    cursor:pointer;
+    transition:background .15s, color .15s, border-color .15s;
+}
+.ns-btn:hover { background:rgba(90,160,255,.24); color:#fff; }
+.ns-btn.primary {
+    background:rgba(79,201,127,.16); color:#7fdb9a; border-color:rgba(79,201,127,.45);
+}
+.ns-btn.primary:hover { background:rgba(79,201,127,.30); color:#fff; }
+.ns-btn.warn {
+    background:rgba(255,184,48,.14); color:#fc7; border-color:rgba(255,184,48,.40);
+}
+.ns-btn.toggle.on {
+    background:rgba(102,224,216,.20); color:#fff; border-color:rgba(102,224,216,.55);
+}
+.ns-btn.live {
+    background:rgba(80,120,255,.20); color:#fff; border-color:rgba(120,160,255,.55);
+}
+.ns-btn.live:hover { background:rgba(80,120,255,.32); }
+.ns-btn.live.on { box-shadow:0 0 0 1px rgba(120,160,255,.55), 0 0 12px rgba(120,160,255,.35); }
+
+.ns-input {
+    background:rgba(0,0,0,.30);
+    color:#fff;
+    border:1px solid rgba(90,160,255,.30);
+    border-radius:5px;
+    padding:6px 8px;
+    font-family:monospace; font-size:.78rem;
+}
+.ns-input:focus { outline:none; border-color:#5aa0ff; }
+
+.ns-bookmarks { display:flex; gap:6px; flex-wrap:wrap; max-width:100%; }
+.ns-bm {
+    background:rgba(0,0,0,.30);
+    color:#8a9bc0;
+    border:1px solid rgba(90,160,255,.20);
+    border-radius:14px;
+    padding:4px 10px;
+    font-family:monospace; font-size:.7rem;
+    cursor:pointer;
+    transition:all .15s;
+}
+.ns-bm:hover {
+    color:#fff; border-color:rgba(90,160,255,.55);
+    background:rgba(90,160,255,.14);
+}
+.ns-bm-yr { color:#566; margin-right:4px; }
+
+.ns-label {
+    font-family:monospace; font-size:.7rem; letter-spacing:.06em;
+    text-transform:uppercase; color:#8a9bc0;
+}
+.ns-select {
+    background:rgba(0,0,0,.30);
+    color:#eef;
+    border:1px solid rgba(90,160,255,.32);
+    border-radius:5px;
+    padding:6px 9px;
+    font-family:monospace; font-size:.78rem;
+    cursor:pointer;
+}
+.ns-slider {
+    flex:1; min-width:200px;
+    -webkit-appearance:none; appearance:none;
+    height:6px; border-radius:3px;
+    background:linear-gradient(90deg, rgba(90,160,255,.35), rgba(102,224,216,.50), rgba(90,160,255,.35));
+    outline:none; cursor:pointer;
+}
+.ns-slider::-webkit-slider-thumb {
+    -webkit-appearance:none; appearance:none;
+    width:18px; height:18px; border-radius:50%;
+    background:#fff; border:2px solid #5aa0ff;
+    box-shadow:0 0 8px rgba(90,160,255,.6);
+    cursor:grab;
+}
+.ns-slider::-moz-range-thumb {
+    width:18px; height:18px; border-radius:50%;
+    background:#fff; border:2px solid #5aa0ff;
+    box-shadow:0 0 8px rgba(90,160,255,.6);
+    cursor:grab;
+}
+
+/* Plot panel */
+#ns-app {
+    max-width:1280px; margin:0 auto;
+    padding:18px 18px 64px;
+    display:grid; gap:18px;
+}
+.ns-panel {
+    background:rgba(8,14,34,.72); backdrop-filter:blur(14px);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:12px;
+    padding:18px 20px;
+}
+.ns-panel h2 {
+    font-size:.78rem; color:#5aa0ff; text-transform:uppercase;
+    letter-spacing:.12em; font-weight:800; margin-bottom:12px;
+}
+.ns-panel p { font-size:.86rem; color:#a9bbd8; line-height:1.6; margin-bottom:8px; }
+.ns-panel p:last-child { margin-bottom:0; }
+.ns-panel code {
+    font-family:monospace; font-size:.78rem;
+    background:rgba(255,255,255,.05); color:#66e0d8;
+    padding:1px 6px; border-radius:3px;
+}
+
+.ns-plot-head {
+    display:flex; align-items:baseline; gap:14px;
+    margin-bottom:8px; flex-wrap:wrap;
+}
+.ns-plot-legend { display:flex; gap:10px; flex-wrap:wrap; font-family:monospace; font-size:.7rem; color:#8a9bc0; }
+.ns-plot-legend .lg { display:flex; align-items:center; gap:5px; }
+.ns-plot-legend .swatch { display:inline-block; width:14px; height:8px; border-radius:1px; }
+.ns-plot-wrap { position:relative; height:230px; border-radius:6px; background:rgba(0,0,0,.22); border:1px solid rgba(102,224,216,.10); }
+#ns-plot-canvas, #ns-triton-canvas { display:block; width:100%; height:100%; }
+
+.ns-plot-readout {
+    display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr));
+    gap:8px; margin-top:10px;
+}
+.ns-plot-readout .cell {
+    background:rgba(255,255,255,.03);
+    border:1px solid rgba(90,160,255,.16);
+    border-radius:6px;
+    padding:8px 10px;
+    font-family:monospace; font-size:.74rem;
+}
+.ns-plot-readout .cell .k { color:#8a9bc0; display:block; font-size:.62rem; text-transform:uppercase; letter-spacing:.06em; }
+.ns-plot-readout .cell .v { color:#fff; font-weight:700; }
+
+.ns-warn {
+    font-size:.74rem; color:#8a9bc0; font-style:italic;
+    border-left:2px solid rgba(102,224,216,.4); padding-left:10px; margin-top:10px;
+}
+
+/* Body labels & hover badges (HTML overlays projected from 3D) */
+.ns-label-3d {
+    position:absolute;
+    pointer-events:none;
+    transform:translate(-50%, -120%);
+    font-family:ui-monospace, Menlo, monospace;
+    font-size:.66rem;
+    font-weight:600;
+    color:#fff;
+    background:rgba(6,12,30,.55);
+    border:1px solid rgba(90,160,255,.30);
+    border-radius:10px;
+    padding:1px 7px;
+    white-space:nowrap;
+    backdrop-filter:blur(6px);
+    box-shadow:0 0 8px rgba(0,0,0,.5);
+    transition:opacity .15s;
+    z-index:6;
+}
+.ns-label-3d .icon { margin-right:3px; }
+.ns-label-3d.minor { font-size:.6rem; padding:0 6px; opacity:.92; border-color:rgba(160,180,210,.30); }
+.ns-label-3d.behind { opacity:0; }
+.ns-label-3d.selected {
+    color:#5aa0ff;
+    border-color:rgba(90,160,255,.65);
+    box-shadow:0 0 12px rgba(90,160,255,.30);
+}
+
+.ns-hover-icon {
+    position:absolute;
+    pointer-events:none;
+    transform:translate(-50%, -50%);
+    font-size:1.2rem;
+    z-index:7;
+    text-shadow:0 0 8px rgba(255,255,255,.4), 0 0 18px rgba(90,160,255,.5);
+    opacity:0;
+    transition:opacity .15s;
+}
+.ns-hover-icon.show {
+    opacity:1;
+    animation:ns-pulse 1.6s ease-in-out infinite;
+}
+@keyframes ns-pulse {
+    0%,100% { transform:translate(-50%, -50%) scale(1); filter:brightness(1); }
+    50%     { transform:translate(-50%, -50%) scale(1.18); filter:brightness(1.4); }
+}
+
+/* Conjunction flash overlay */
+.ns-conjunction {
+    position:absolute;
+    top:48px; left:50%; transform:translateX(-50%);
+    font-family:monospace; font-size:.72rem; letter-spacing:.06em;
+    text-transform:uppercase;
+    background:rgba(6,12,30,.85);
+    border:1px solid rgba(128,224,255,.55);
+    color:#aef0ff;
+    padding:5px 14px;
+    border-radius:14px;
+    backdrop-filter:blur(6px);
+    pointer-events:none;
+    opacity:0;
+    transition:opacity .25s;
+    z-index:8;
+    box-shadow:0 0 16px rgba(120,200,255,.40);
+}
+.ns-conjunction.show { opacity:1; }
+
+/* Tooltip */
+#ns-tooltip {
+    position:absolute;
+    pointer-events:none;
+    background:rgba(6,12,30,.92);
+    border:1px solid rgba(90,160,255,.40);
+    border-radius:6px;
+    padding:8px 10px;
+    font-family:ui-monospace, Menlo, monospace;
+    font-size:.7rem;
+    color:#d6e6ff;
+    backdrop-filter:blur(8px);
+    box-shadow:0 4px 14px rgba(0,0,0,.5);
+    z-index:30;
+    line-height:1.45;
+    transform:translate(12px, 14px);
+    min-width:180px;
+    transition:opacity .12s;
+    opacity:0;
+}
+#ns-tooltip.show { opacity:1; }
+#ns-tooltip .tt-row { display:flex; justify-content:space-between; gap:10px; }
+#ns-tooltip .tt-k { color:#8a9bc0; }
+#ns-tooltip .tt-v { color:#fff; font-weight:700; }
+#ns-tooltip .tt-sep { height:1px; background:rgba(90,160,255,.18); margin:5px 0; }
+#ns-tooltip .tt-hdr {
+    display:flex; align-items:center; gap:6px;
+    color:#5aa0ff; font-weight:700; font-size:.74rem;
+    margin-bottom:5px; padding-bottom:4px;
+    text-transform:uppercase; letter-spacing:.04em;
+    border-bottom:1px solid rgba(90,160,255,.25);
+}
+#ns-tooltip .tt-hdr .dot { width:8px; height:8px; border-radius:50%; box-shadow:0 0 5px currentColor; }
+
+</style>
+<link rel="stylesheet" href="js/nav-styles.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "@id": "https://parkersphysics.com/neptune-system.html#app",
+  "name": "Neptune System — Triton, Rings & Arcs",
+  "description": "Research-grade Neptune simulator: live J₂ N-body of the regular moons and the captured, retrograde, tidally-decaying Triton, plus the named rings with the Adams arcs, the 28° obliquity, the tilted magnetic dipole, and a Triton tidal-decay projection.",
+  "url": "https://parkersphysics.com/neptune-system.html",
+  "image": "https://parkersphysics.com/ParkersPhysics_logo2.jpg",
+  "applicationCategory": "EducationalApplication",
+  "applicationSubCategory": "Planetary science simulation",
+  "operatingSystem": "Web Browser",
+  "browserRequirements": "Requires JavaScript and WebGL",
+  "isAccessibleForFree": true,
+  "publisher": {
+    "@id": "https://parkersphysics.com/#org"
+  },
+  "inLanguage": "en-US"
+}
+</script>
+</head>
+<body>
+
+<script type="importmap">
+{
+    "imports": {
+        "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+}
+</script>
+<!-- perf-hints:start -->
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" crossorigin>
+<!-- perf-hints:end --><nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260503"; initNav("neptune-system");</script>
+
+<div id="ns-hero">
+    <span class="ns-tag">Live Yoshida-4 + J₂ Integration · Retrograde Triton · Adams Ring Arcs</span>
+    <h1>Neptune System — Triton, the Rings & the Arcs</h1>
+    <p>Live N-body integration of Neptune and its seven regular moons (Naiad through Proteus), plus <strong>Triton</strong> — a captured Kuiper-belt object on a <em>retrograde</em>, inclined orbit that holds 99.5% of the satellite mass. Neptune's oblateness (<code>J₂ = 0.003411</code>) is fed directly into the integrator, so the inner moons' orbit planes precess as they really do. The whole system is rendered at Neptune's <strong>28.32° axial tilt</strong>, with the five named rings — Galle, Le Verrier, Lassell, Arago and <strong>Adams</strong> — and the Adams ring's bright dust <strong>arcs</strong> (Fraternité · Égalité · Liberté · Courage), shepherded by Galatea's 42:43 resonance.</p>
+    <p>Triton is doomed: because it orbits backwards, tides on Neptune drag it <em>inward</em>, not outward. The <strong>Triton tidal-decay</strong> panel below integrates that spiral to the Roche limit — where, in a few billion years, Triton will be shredded into a ring brighter than Saturn's. Toggle the tilted, offset <strong>magnetic dipole</strong>, and hit <strong>⤢ Wide field</strong> to follow the captured irregulars out to Neso at ~49 million km — the most distant moon known.</p>
+</div>
+
+<!-- ═══ STAGE ═══ -->
+<div id="ns-stage">
+    <div id="ns-canvas-wrap">
+        <div id="ns-hud">
+            <div class="ns-hud-card">
+                <span class="lbl">Sim Time</span>
+                <div class="val" id="ns-time-display">+ 0.0 d</div>
+                <div class="sub" id="ns-jd-display">JD —</div>
+            </div>
+            <div class="ns-hud-card" style="text-align:right;">
+                <span class="lbl">Energy Drift</span>
+                <div class="val" id="ns-energy-display">—</div>
+                <div class="sub" id="ns-step-display">dt = — s</div>
+            </div>
+        </div>
+        <div id="ns-mode-pill">⏸ Paused</div>
+        <div id="ns-legend"></div>
+        <div id="ns-tooltip" role="tooltip" aria-hidden="true"></div>
+        <div id="ns-conjunction" class="ns-conjunction"></div>
+        <div id="ns-overlay" style="position:absolute; inset:0; pointer-events:none; z-index:5;"></div>
+    </div>
+
+    <aside id="ns-side">
+        <div class="ns-side-title">Body Picker</div>
+        <div class="ns-body-grid" id="ns-body-grid"></div>
+
+        <div class="ns-sel-head">
+            <span class="ns-sel-dot" id="ns-sel-dot"></span>
+            <span class="ns-sel-name" id="ns-sel-name">Triton</span>
+            <span class="ns-sel-sub" id="ns-sel-period">5.877 d</span>
+        </div>
+
+        <div class="ns-el-table" id="ns-el-table"></div>
+
+        <div class="ns-el-foot">
+            Osculating elements relative to the Neptunian centre, computed
+            from the live N-body state. Initial conditions seeded from
+            JPL planetary fact sheets at J2000. Inclinations &gt; 90° are
+            retrograde.
+        </div>
+    </aside>
+</div>
+
+<!-- ═══ TIME CONTROLS ═══ -->
+<div id="ns-time">
+    <div class="ns-time-card">
+
+        <div class="ns-row">
+            <button class="ns-btn primary" id="ns-play">▶ Play</button>
+            <button class="ns-btn" id="ns-rev" title="Reverse direction">⇄ Forward</button>
+            <span class="ns-label">Speed</span>
+            <select class="ns-select" id="ns-speed">
+                <option value="3600">1 hr / s</option>
+                <option value="21600">6 hr / s</option>
+                <option value="86400" selected>1 d / s</option>
+                <option value="259200">3 d / s</option>
+                <option value="864000">10 d / s</option>
+                <option value="2592000">30 d / s</option>
+                <option value="8640000">100 d / s</option>
+                <option value="31557600">1 yr / s</option>
+            </select>
+            <button class="ns-btn" id="ns-step-back">◄ −1 hr</button>
+            <button class="ns-btn" id="ns-step-fwd">+1 hr ►</button>
+            <span style="flex:1"></span>
+            <button class="ns-btn live" id="ns-now" title="Sync to current real-world time">⟲ Now (Live)</button>
+            <button class="ns-btn warn" id="ns-reset" title="Reset simulation to J2000.0 epoch (2000-01-01 12:00 UT)">⟲ J2000</button>
+        </div>
+
+        <div class="ns-row">
+            <span class="ns-label" style="width:90px">Date (UTC)</span>
+            <input class="ns-input" type="date" id="ns-date" min="1500-01-01" max="2200-12-31" style="width:160px">
+            <span class="ns-label">Hr</span>
+            <input class="ns-input" type="number" id="ns-hour" min="0" max="23" step="1" value="12" style="width:64px">
+            <span class="ns-label">JD</span>
+            <input class="ns-input" type="number" id="ns-jd-input" step="0.5" style="width:140px">
+            <span style="flex:1"></span>
+            <span class="ns-label">Jump to</span>
+            <div class="ns-bookmarks" id="ns-bookmarks"></div>
+        </div>
+
+        <div class="ns-row">
+            <span class="ns-label" style="width:90px">Trails</span>
+            <button class="ns-btn toggle on" id="ns-trails-toggle">Trails: ON</button>
+            <span class="ns-label">Length</span>
+            <select class="ns-select" id="ns-trail-len">
+                <option value="600">~1 d</option>
+                <option value="3600" selected>~6 d</option>
+                <option value="10800">~18 d</option>
+            </select>
+            <span class="ns-label" style="margin-left:14px">Ghost orbits</span>
+            <button class="ns-btn toggle" id="ns-ghost-toggle">Keplerian ghost: OFF</button>
+            <span class="ns-label" style="margin-left:14px">Labels</span>
+            <button class="ns-btn toggle on" id="ns-labels-toggle">Labels: ON</button>
+        </div>
+
+        <div class="ns-row">
+            <span class="ns-label" style="width:90px">Rings</span>
+            <button class="ns-btn toggle on" id="ns-rings-toggle">Rings: ON</button>
+            <span class="ns-label" style="margin-left:6px">Magnetic field</span>
+            <button class="ns-btn toggle" id="ns-mag-toggle" title="Show Neptune's dipole field — tilted 47° from the spin axis and offset 0.55 R_N">Dipole: OFF</button>
+            <span class="ns-label" style="margin-left:6px">Oblateness</span>
+            <button class="ns-btn toggle on" id="ns-j2-toggle" title="Feed Neptune's J₂ into the integrator — drives the inner-moon nodal precession">J₂: ON</button>
+        </div>
+
+        <div class="ns-row">
+            <span class="ns-label" style="width:90px">View</span>
+            <button class="ns-btn toggle" id="ns-view-top" title="Top-down (down the ecliptic normal)">⊙ Top-down</button>
+            <button class="ns-btn toggle on" id="ns-view-3d" title="Standard oblique 3D view">⛯ 3D Oblique</button>
+            <button class="ns-btn toggle" id="ns-view-equ" title="Edge-on — see the 28° tilt of the rings and regular moons">— Edge-on</button>
+            <span class="ns-label" style="margin-left:14px">Focus</span>
+            <select class="ns-select" id="ns-focus" title="Lock the camera to a body so it tracks across orbit">
+                <option value="" selected>Free (system view)</option>
+            </select>
+            <button class="ns-btn" id="ns-pov" title="Place the camera on the selected moon's surface, looking toward Neptune">👁 POV</button>
+            <span class="ns-label" style="margin-left:14px">Scale</span>
+            <select class="ns-select" id="ns-scale">
+                <option value="full" selected>Realistic (Triton fits)</option>
+                <option value="zoom">Rings + inner moons</option>
+            </select>
+            <button class="ns-btn toggle" id="ns-view-wide" title="Fullscreen wide-field view — out to the captured irregulars and Neso at ~49 Gm">⤢ Wide field</button>
+        </div>
+
+    </div>
+</div>
+
+<div id="ns-app">
+
+    <!-- Inner-moon dynamics plot -->
+    <section class="ns-panel">
+        <div class="ns-plot-head">
+            <h2 style="flex:0 0 auto">Inner-Moon Dynamics · Naiad–Thalassa Dance <span style="color:#69789a; text-transform:none; letter-spacing:0; font-weight:400; font-size:.7rem">— last ~30 d window</span></h2>
+            <div class="ns-plot-legend">
+                <span class="lg"><span class="swatch" style="background:#5aa0ff"></span>Δλ = λ_Naiad − λ_Thalassa</span>
+                <span class="lg"><span class="swatch" style="background:#9ad0ff"></span>e_Naiad</span>
+                <span class="lg"><span class="swatch" style="background:#66e0d8"></span>e_Despina</span>
+                <span class="lg"><span class="swatch" style="background:#b78cff"></span>e_Galatea</span>
+            </div>
+        </div>
+        <div class="ns-plot-wrap">
+            <canvas id="ns-plot-canvas"></canvas>
+        </div>
+        <div class="ns-plot-readout">
+            <div class="cell"><span class="k">Δλ Naiad–Thalassa</span><span class="v" id="rd-dlam">—</span></div>
+            <div class="cell"><span class="k">e_Naiad (now)</span><span class="v" id="rd-eNa">—</span></div>
+            <div class="cell"><span class="k">e_Despina (now)</span><span class="v" id="rd-eDe">—</span></div>
+            <div class="cell"><span class="k">e_Galatea (now)</span><span class="v" id="rd-eGa">—</span></div>
+            <div class="cell"><span class="k">Triton i / e</span><span class="v" id="rd-tri">—</span></div>
+            <div class="cell"><span class="k">Galatea dΩ/dt (J₂)</span><span class="v" id="rd-prec">—</span></div>
+        </div>
+        <p class="ns-warn">Naiad and Thalassa are locked in an unusual <strong>73:69 inclination resonance</strong> — a "dance of avoidance" in which Naiad rocks ~±28° up and down to dodge Thalassa at every close approach (Brozović et al. 2020). The plot tracks their longitude difference and the forced eccentricities the inner moons swap through mutual perturbation and Neptune's J₂. With J₂ on, the orbit rings visibly precess; toggle it off to see the precession stop.</p>
+    </section>
+
+    <!-- Triton tidal decay -->
+    <section class="ns-panel">
+        <div class="ns-plot-head">
+            <h2 style="flex:0 0 auto">Triton Tidal Decay <span style="color:#69789a; text-transform:none; letter-spacing:0; font-weight:400; font-size:.7rem">— retrograde spiral to the Roche limit</span></h2>
+            <div class="ns-plot-legend">
+                <span class="lg"><span class="swatch" style="background:#e6b98a"></span>a(t) Triton</span>
+                <span class="lg"><span class="swatch" style="background:#ff7a7a"></span>Roche limit</span>
+            </div>
+        </div>
+        <div class="ns-plot-wrap">
+            <canvas id="ns-triton-canvas"></canvas>
+        </div>
+        <div class="ns-row" style="margin-top:12px;">
+            <span class="ns-label" style="width:150px">Neptune tidal Q</span>
+            <input class="ns-slider" id="ns-q-slider" type="range" min="500" max="20000" step="100" value="4600">
+            <span class="ns-label" id="ns-q-val" style="min-width:70px; text-align:right; color:#aad4ff">Q = 4600</span>
+        </div>
+        <div class="ns-plot-readout">
+            <div class="cell"><span class="k">a Triton (now)</span><span class="v" id="rd-tri-a">—</span></div>
+            <div class="cell"><span class="k">da/dt (now)</span><span class="v" id="rd-tri-dadt">—</span></div>
+            <div class="cell"><span class="k">Roche limit</span><span class="v" id="rd-roche">—</span></div>
+            <div class="cell"><span class="k">Time to disruption</span><span class="v" id="rd-tdis">—</span></div>
+        </div>
+        <p class="ns-warn">For a prograde moon (like our Moon) tides transfer angular momentum outward and the orbit expands. Triton orbits <em>backwards</em>, so the tidal bulge it raises on Neptune lags <em>ahead</em> of it and drains its orbital energy — it spirals <strong>in</strong>. Integrating
+        <code>da/dt = −(3 k₂/Q)(m_T/M_N)(R_N/a)⁵ n a</code> with Love number k₂ ≈ 0.41 gives a few-billion-year clock; Neptune's tidal Q is poorly known, so drag the slider to see how sensitive the doomsday is. When <code>a</code> reaches the Roche limit, Triton is torn apart into a ring system.</p>
+    </section>
+
+    <!-- Notes -->
+    <section class="ns-panel">
+        <h2>Why Triton matters</h2>
+        <p><strong>A captured world.</strong> Triton is the only large moon in the Solar System on a retrograde orbit. It cannot have formed in place from Neptune's disc — it was captured, almost certainly a Kuiper-belt object like Pluto (the two are near-twins in size and density). The capture would have scattered Neptune's original regular satellites, which may explain Nereid's wild eccentricity and the cratering record.</p>
+        <p><strong>Active and frigid.</strong> Voyager 2 (1989) found Triton's surface at −235 °C — the coldest directly measured in the Solar System — yet streaked by active nitrogen geysers and resurfaced by cryovolcanism. A thin nitrogen atmosphere and a "cantaloupe terrain" point to an interior still evolving, plausibly over a subsurface ocean.</p>
+        <p><strong>What you're seeing.</strong> A Newtonian Yoshida-4 integration in Neptune-centric SI units with the central-body J₂ term switched on. The retrograde inclination, the inner-moon precession, and the conjunction pattern all fall out of gravity alone — no scripted motion. Energy (including the J₂ potential) is bounded by the symplectic integrator, so the run stays physical indefinitely.</p>
+    </section>
+
+    <section class="ns-panel">
+        <h2>The rings, the arcs, and the magnetic field</h2>
+        <p><strong>Five rings, named for a discovery.</strong> Galle, Le Verrier, Lassell, Arago and Adams honour the people who predicted and found Neptune. They are dark and dusty — invisible from Earth until Voyager — and far fainter than Saturn's.</p>
+        <p><strong>Arcs that shouldn't exist.</strong> The Adams ring isn't smooth: its dust bunches into bright arcs (Fraternité, Égalité, Liberté, Courage) that, left alone, should spread into a uniform ring within years. They survive because the moon <strong>Galatea</strong>, just interior, holds them in a 42:43 corotation-inclination resonance — a natural confinement mechanism we still study for exoplanet discs.</p>
+        <p><strong>A tilted, off-centre magnet.</strong> Neptune's magnetic dipole is inclined ~47° to its spin axis and offset ~0.55 R_N from the planet's centre — so the field strength at the cloud tops varies by an order of magnitude with longitude. Toggle <em>Dipole: ON</em> to see the field geometry.</p>
+    </section>
+
+    <section class="ns-panel">
+        <h2>References</h2>
+        <p style="font-family:monospace; font-size:.74rem; line-height:1.7; color:#8a9bc0;">
+            Smith, B. A. et al. (1989) — <em>Voyager 2 at Neptune: Imaging Science Results</em>, Science 246.<br>
+            Chyba, C. F., Jankowski, D. G. &amp; Nicholson, P. D. (1989) — <em>Tidal evolution in the Neptune–Triton system</em>, A&amp;A 219.<br>
+            Porco, C. C. (1991) — <em>An explanation for Neptune's ring arcs</em>, Science 253.<br>
+            Brozović, M. et al. (2020) — <em>Orbits and resonances of the regular moons of Neptune</em>, Icarus 338.<br>
+            Murray, C. D. &amp; Dermott, S. F. (1999) — <em>Solar System Dynamics</em>, ch. 4 &amp; 8.<br>
+            JPL Planetary Satellite Mean Elements — <code>ssd.jpl.nasa.gov/sats/elem/</code>
+        </p>
+    </section>
+
+</div>
+
+<!-- ═══ SIMULATION ═══ -->
+<script type="module">
+import * as THREE        from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { NeptuneSkin }   from './js/neptune-skin.js';
+import {
+    yoshida4Step, totalEnergy, totalJ2PotentialEnergy,
+    elementsToState, stateToElements, G_SI,
+} from './js/gravity-lab/physics.js';
+import {
+    MINOR_MOONS, MOON_GROUPS, j2NodeRate, j2PeriRate,
+} from './js/neptune-minor-moons.js';
+
+// ── Constants ────────────────────────────────────────────────────────
+const KM = 1000;
+const D2R = Math.PI / 180;
+const R2D = 180 / Math.PI;
+const J2000_JD = 2451545.0;
+const SEC_PER_YEAR = 365.25 * 86400;
+const GYR = SEC_PER_YEAR * 1e9;
+
+// Neptune equatorial radius (m) — the natural length unit for the scene.
+const R_NEP_KM = 24764;
+const R_NEP_M  = R_NEP_KM * KM;
+// Neptune's second zonal harmonic — drives the inner moons' nodal precession.
+const J2_NEP = 0.003411;
+// Axial tilt (obliquity) of Neptune to its orbital plane.
+const OBLIQUITY = 28.32 * D2R;
+const COS_OB = Math.cos(OBLIQUITY);
+const SIN_OB = Math.sin(OBLIQUITY);
+
+const M_PER_UNIT = R_NEP_M;             // 1 scene unit = 1 Neptune radius
+const m2u = m => m / M_PER_UNIT;
+
+// ── Body table (bodies[0] = Neptune; 1..7 regular moons; 8 = Triton) ──
+const NEPTUNE_BODIES = [
+    { key:'neptune',   name:'Neptune',   mass:1.02413e26, radius_km:24764,  color:0x3a6fd0, vis:1.00 },
+    { key:'naiad',     name:'Naiad',     mass:1.9e17,     radius_km:33,     color:0x8fb0d8, vis:0.06 },
+    { key:'thalassa',  name:'Thalassa',  mass:3.5e17,     radius_km:41,     color:0x96b6da, vis:0.06 },
+    { key:'despina',   name:'Despina',   mass:2.1e18,     radius_km:78,     color:0x88a8cc, vis:0.07 },
+    { key:'galatea',   name:'Galatea',   mass:2.12e18,    radius_km:88,     color:0x9ec0e0, vis:0.07 },
+    { key:'larissa',   name:'Larissa',   mass:4.2e18,     radius_km:97,     color:0x82a0c4, vis:0.08 },
+    { key:'hippocamp', name:'Hippocamp', mass:3.0e16,     radius_km:17.4,   color:0xa6c2e2, vis:0.05 },
+    { key:'proteus',   name:'Proteus',   mass:4.4e19,     radius_km:210,    color:0x7e93b4, vis:0.12 },
+    { key:'triton',    name:'Triton',    mass:2.1389e22,  radius_km:1353.4, color:0xe6b98a, vis:0.30 },
+];
+const KEYS = NEPTUNE_BODIES.map(b => b.key);
+const idxOf = Object.fromEntries(KEYS.map((k, i) => [k, i]));
+const N_BODY_MOONS = KEYS.slice(1);     // all integrated moon keys
+
+// ── Initial Neptune-centric mean Keplerian elements at J2000 (approx). ─
+// a in km, angles in degrees. Inclinations referred to Neptune's equator
+// (Laplace plane) for the regulars; Triton's is the retrograde value to the
+// equator. These are MEAN elements (structure, not ephemeris).
+const INIT_EL = {
+    naiad:     { a_km:  48_227, e:0.0003,    i_deg:4.746,   raan_deg: 42.0, argp_deg: 18.0, M_deg:110.0 },
+    thalassa:  { a_km:  50_074, e:0.0002,    i_deg:0.209,   raan_deg:218.0, argp_deg: 88.0, M_deg:300.0 },
+    despina:   { a_km:  52_526, e:0.0002,    i_deg:0.064,   raan_deg: 63.0, argp_deg:192.0, M_deg:179.0 },
+    galatea:   { a_km:  61_953, e:0.0001,    i_deg:0.034,   raan_deg:298.0, argp_deg: 52.0, M_deg:345.0 },
+    larissa:   { a_km:  73_548, e:0.0014,    i_deg:0.205,   raan_deg:130.0, argp_deg:240.0, M_deg: 60.0 },
+    hippocamp: { a_km: 105_283, e:0.0005,    i_deg:0.064,   raan_deg:200.0, argp_deg:100.0, M_deg: 20.0 },
+    proteus:   { a_km: 117_646, e:0.00053,   i_deg:0.075,   raan_deg: 90.0, argp_deg:310.0, M_deg:250.0 },
+    triton:    { a_km: 354_759, e:0.000016,  i_deg:129.6,   raan_deg:178.0, argp_deg:  0.0, M_deg:  0.0 },
+};
+
+const PERIOD_D = {
+    neptune:   60182.0,     // (around Sun, label only)
+    naiad:     0.2944,
+    thalassa:  0.3115,
+    despina:   0.3347,
+    galatea:   0.4287,
+    larissa:   0.5548,
+    hippocamp: 0.9500,
+    proteus:   1.1223,
+    triton:    5.876854,    // retrograde
+};
+
+// ── Behavioural fingerprint per body — dynamic tooltip + hover-icon. ──
+const BODY_BEHAVIOR = {
+    neptune: {
+        icon:  '🔵',
+        title: '17 Earth masses · the windiest planet',
+        bullets: [
+            'Fastest winds in the Solar System — equatorial jets blow ~2,100 km/h, retrograde.',
+            'Radiates 2.6× the heat it receives from the Sun — an unexplained internal source.',
+            'Magnetic field tilted 47° and offset 0.55 R_N from the centre.',
+        ],
+    },
+    naiad: {
+        icon:  '💠',
+        title: 'Innermost moon · tilted 4.7° in a "dance of avoidance"',
+        bullets: [
+            'Locked with Thalassa in a 73:69 resonance — rocks up and down to dodge it.',
+            'Orbits below the rings in just 7 hours.',
+            'A shard of a moon shattered during Triton\'s capture.',
+        ],
+    },
+    thalassa: {
+        icon:  '💠',
+        title: 'Pancake-shaped ring-region moonlet',
+        bullets: [
+            'Its 73:69 resonance with Naiad keeps the two from ever colliding.',
+            'So low-density and fast-spun it may be near its own break-up shape.',
+            'Sits just inside the Le Verrier ring.',
+        ],
+    },
+    despina: {
+        icon:  '🪨',
+        title: 'Le Verrier ring shepherd',
+        bullets: [
+            'Orbits just inside the Le Verrier ring and helps confine it.',
+            'Casts a faint dust ring of its own.',
+            'Sub-synchronous — slowly spiralling toward Neptune.',
+        ],
+    },
+    galatea: {
+        icon:  '🧲',
+        title: 'Shepherd of the Adams ring arcs',
+        bullets: [
+            'Its 42:43 corotation resonance confines the Fraternité–Courage arcs.',
+            'Without Galatea the arcs would smear into a uniform ring in a few years.',
+            'Orbits just interior to the Adams ring.',
+        ],
+    },
+    larissa: {
+        icon:  '🥔',
+        title: 'Irregular, cratered inner moon',
+        bullets: [
+            'Discovered first as a brief stellar-occultation blink in 1981.',
+            'Confirmed by Voyager 2 in 1989.',
+            'Its slightly eccentric orbit precesses visibly under J₂.',
+        ],
+    },
+    hippocamp: {
+        icon:  '🌑',
+        title: 'Tiny moon · likely chipped off Proteus',
+        bullets: [
+            'Only ~35 km across — found in stacked Hubble frames, announced 2019.',
+            'Orbits suspiciously close to giant Proteus.',
+            'Probably debris from a comet impact on Proteus.',
+        ],
+    },
+    proteus: {
+        icon:  '🪨',
+        title: 'Second-largest moon · about as big as a body can get and stay lumpy',
+        bullets: [
+            'Darker than soot — one of the least reflective objects known.',
+            'Just below the size where self-gravity forces a round shape.',
+            'Missed by every telescope until Voyager 2 — too dark and too close in.',
+        ],
+    },
+    triton: {
+        icon:  '❄️',
+        title: 'Captured, retrograde, doomed · 99.5% of the satellite mass',
+        bullets: [
+            'The only large moon orbiting backwards — a captured Kuiper-belt object.',
+            'Coldest measured surface in the Solar System (−235 °C) with active N₂ geysers.',
+            'Tides drag it inward; in ~3.6 Gyr it becomes a ring around Neptune.',
+        ],
+    },
+};
+
+// ── Unified body registry (N-body + analytic minor moons) ────────────
+const ALL_BODIES = [...NEPTUNE_BODIES, ...MINOR_MOONS];
+const MINOR_KEYS = new Set(MINOR_MOONS.map(m => m.key));
+const minorByKey = Object.fromEntries(MINOR_MOONS.map(m => [m.key, m]));
+const isMinor  = key => MINOR_KEYS.has(key);
+const getBody  = key => ALL_BODIES.find(b => b.key === key);
+const M_NEP_KG = NEPTUNE_BODIES[0].mass;
+
+function periodDays(key) {
+    if (PERIOD_D[key] != null) return PERIOD_D[key];
+    const m = minorByKey[key];
+    if (!m) return NaN;
+    const mu = G_SI * (M_NEP_KG + m.mass);
+    const a  = m.a_km * KM;
+    return 2 * Math.PI * Math.sqrt(a * a * a / mu) / 86400;
+}
+function behaviorOf(key) {
+    return BODY_BEHAVIOR[key] || (minorByKey[key] && minorByKey[key].behavior) || {};
+}
+function groupOf(key) {
+    if (key === 'neptune') return null;
+    if (key === 'triton')  return 'triton';
+    if (minorByKey[key])   return minorByKey[key].group;
+    return 'regular';
+}
+
+// ── Minor-moon analytic propagation (Kepler + secular precession) ─────
+function minorSecularRates(m, n_rad_s, a_m, i_rad) {
+    if (m.secular) {
+        return {
+            dRaan: m.secular.node_deg_yr * D2R / SEC_PER_YEAR,
+            dArgp: m.secular.peri_deg_yr * D2R / SEC_PER_YEAR,
+        };
+    }
+    return {
+        dRaan: j2NodeRate(n_rad_s, a_m, m.e, i_rad, J2_NEP, R_NEP_M),
+        dArgp: j2PeriRate(n_rad_s, a_m, m.e, i_rad, J2_NEP, R_NEP_M),
+    };
+}
+function minorMoonElementsAt(m, t_s) {
+    const mu      = G_SI * (M_NEP_KG + m.mass);
+    const a_m     = m.a_km * KM;
+    const n_rad_s = Math.sqrt(mu / (a_m * a_m * a_m));
+    const i_rad   = m.i_deg * D2R;
+    const { dRaan, dArgp } = minorSecularRates(m, n_rad_s, a_m, i_rad);
+    return {
+        a:        a_m,
+        e:        m.e,
+        i_deg:    m.i_deg,
+        raan_deg: m.raan_deg + dRaan * t_s * R2D,
+        argp_deg: m.argp_deg + dArgp * t_s * R2D,
+        M_deg:    m.M_deg    + n_rad_s * t_s * R2D,
+        mu,
+    };
+}
+function minorMoonStateRel(m, t_s) {
+    return elementsToState(minorMoonElementsAt(m, t_s));
+}
+
+// ── Famous Neptune-system epochs (bookmark bar) ──────────────────────
+const NEPTUNE_BOOKMARKS = [
+    { y:1846, m: 9, d:23, label:'Neptune found',  desc:'Galle & d\'Arrest find Neptune within 1° of Le Verrier\'s prediction (Sep 23, 1846).' },
+    { y:1846, m:10, d:10, label:'Triton',         desc:'William Lassell discovers Triton just 17 days after Neptune itself.' },
+    { y:1949, m: 5, d: 1, label:'Nereid',         desc:'Gerard Kuiper discovers the eccentric moon Nereid (1949).' },
+    { y:2000, m: 1, d: 1, label:'J2000',          desc:'Reference epoch — initial conditions are seeded here.' },
+    { y:1989, m: 8, d:25, label:'Voyager 2',      desc:'Voyager 2 flies past Neptune; confirms rings, arcs, and Triton\'s geysers (Aug 25, 1989).' },
+    { y:2002, m: 8, d:14, label:'Irregulars',     desc:'Ground-based survey discovers Halimede, Sao, Laomedeia, Psamathe (2002).' },
+    { y:2011, m: 7, d:12, label:'1 Neptune-yr',   desc:'Neptune completes its first full orbit since discovery (Jul 12, 2011).' },
+    { y:2019, m: 2, d:20, label:'Hippocamp',      desc:'Hippocamp announced from stacked Hubble imagery (2019).' },
+];
+
+// ── Date / JD helpers (Meeus Eqn. 7) ──────────────────────────────────
+function jdFromDate(d) { return d.getTime() / 86400000 + 2440587.5; }
+function dateFromJD(jd) { return new Date((jd - 2440587.5) * 86400000); }
+function jdFromYMD(y, m, d, hr = 12, mi = 0) {
+    const dt = new Date(Date.UTC(2000, 0, 1, hr, mi));
+    dt.setUTCFullYear(y, m - 1, d);
+    return jdFromDate(dt);
+}
+
+// ── Coordinate mapping: SI (Neptune equatorial inertial) → scene ─────
+// Standard axis swap puts the spin axis on world +Y, then we bake the
+// obliquity (rotation about world X) so the whole tilted system is rendered
+// directly — meshes stay children of the scene and carry true world coords.
+function toScene(r) {
+    const x = m2u(r[0]);
+    const y = m2u(r[2]);
+    const z = -m2u(r[1]);
+    return [x, y * COS_OB - z * SIN_OB, y * SIN_OB + z * COS_OB];
+}
+// Apply only the obliquity tilt to an already-swapped scene-space vector.
+function tiltScene(x, y, z) {
+    return [x, y * COS_OB - z * SIN_OB, y * SIN_OB + z * COS_OB];
+}
+
+// ── Build initial state (SI, Neptune-centric equatorial frame) ───────
+function buildInitialBodies() {
+    const bodies = NEPTUNE_BODIES.map(b => ({ m: b.mass, r:[0,0,0], v:[0,0,0], _key:b.key }));
+    const M_nep = bodies[0].m;
+    for (const moonKey of N_BODY_MOONS) {
+        const el = INIT_EL[moonKey];
+        const m  = bodies[idxOf[moonKey]].m;
+        const mu = G_SI * (M_nep + m);
+        const st = elementsToState({
+            a:el.a_km * KM, e:el.e, i_deg:el.i_deg,
+            raan_deg:el.raan_deg, argp_deg:el.argp_deg, M_deg:el.M_deg, mu,
+        });
+        bodies[idxOf[moonKey]].r = st.r;
+        bodies[idxOf[moonKey]].v = st.v;
+    }
+    // Cancel net momentum -> Neptune velocity (barycentric frame).
+    let px=0, py=0, pz=0;
+    for (let i = 1; i < bodies.length; i++) {
+        px += bodies[i].m * bodies[i].v[0];
+        py += bodies[i].m * bodies[i].v[1];
+        pz += bodies[i].m * bodies[i].v[2];
+    }
+    bodies[0].v[0] = -px / bodies[0].m;
+    bodies[0].v[1] = -py / bodies[0].m;
+    bodies[0].v[2] = -pz / bodies[0].m;
+    return bodies;
+}
+
+// ── J₂ oblateness hook for the integrator + energy diagnostic ────────
+let j2Enabled = true;
+const J2_OPTS = { centerIdx:0, J2:J2_NEP, R_eq:R_NEP_M, mu: G_SI * M_NEP_KG };
+const stepOpts = () => (j2Enabled ? { J2: J2_OPTS } : undefined);
+function energyNow(bodies) {
+    const base = totalEnergy(bodies).total;
+    return j2Enabled ? base + totalJ2PotentialEnergy(bodies, J2_OPTS) : base;
+}
+
+// ── State ────────────────────────────────────────────────────────────
+const sim = {
+    bodies:        buildInitialBodies(),
+    t_s:           0,
+    playing:       false,
+    direction:     1,
+    speed:         86400,
+    live:          false,
+    initialEnergy: 0,
+    dtTarget:      120,
+};
+sim.initialEnergy = energyNow(sim.bodies);
+
+const jdFromSimT = t_s => J2000_JD + t_s / 86400;
+const simTFromJD = jd  => (jd - J2000_JD) * 86400;
+
+// Keplerian-ghost state.
+const ghost = { enabled:false, elements:{} };
+function snapshotGhostElements() {
+    const M_nep = sim.bodies[0].m;
+    for (const moonKey of N_BODY_MOONS) {
+        const i  = idxOf[moonKey];
+        const m  = sim.bodies[i].m;
+        const mu = G_SI * (M_nep + m);
+        const rRel = [
+            sim.bodies[i].r[0] - sim.bodies[0].r[0],
+            sim.bodies[i].r[1] - sim.bodies[0].r[1],
+            sim.bodies[i].r[2] - sim.bodies[0].r[2],
+        ];
+        const vRel = [
+            sim.bodies[i].v[0] - sim.bodies[0].v[0],
+            sim.bodies[i].v[1] - sim.bodies[0].v[1],
+            sim.bodies[i].v[2] - sim.bodies[0].v[2],
+        ];
+        const el = stateToElements(rRel, vRel, mu);
+        ghost.elements[moonKey] = {
+            a:el.a, e:el.e, i_deg:el.i_deg, raan_deg:el.raan_deg,
+            argp_deg:el.argp_deg, M0_deg:el.M_deg, t0_s:sim.t_s, mu,
+        };
+    }
+}
+function ghostScenePos(moonKey) {
+    const el = ghost.elements[moonKey];
+    if (!el) return null;
+    const dt_s = sim.t_s - el.t0_s;
+    const n_rad_s = Math.sqrt(el.mu / (el.a * el.a * el.a));
+    const M_now = el.M0_deg + n_rad_s * dt_s * R2D;
+    const st = elementsToState({
+        a:el.a, e:el.e, i_deg:el.i_deg, raan_deg:el.raan_deg,
+        argp_deg:el.argp_deg, M_deg:M_now, mu:el.mu,
+    });
+    const jr = sim.bodies[0].r;
+    const p = toScene([st.r[0] + jr[0], st.r[1] + jr[1], st.r[2] + jr[2]]);
+    return { x:p[0], y:p[1], z:p[2] };
+}
+
+// ── Three.js setup ───────────────────────────────────────────────────
+const wrap = document.getElementById('ns-canvas-wrap');
+const scene  = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(46, 1, 0.05, 14000);
+camera.position.set(0, 14, 30);
+camera.lookAt(0, 0, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping         = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+wrap.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance   = 1.2;
+controls.maxDistance   = 400;
+controls.mouseButtons = { LEFT:THREE.MOUSE.ROTATE, MIDDLE:THREE.MOUSE.DOLLY, RIGHT:null };
+
+// ── Camera state machine ─────────────────────────────────────────────
+const cam = { mode:'free', focusKey:null, tween:null, presetName:'3d' };
+function easeInOut(t) { return t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2) / 2; }
+function startCameraTween(toPos, toTgt, durMs = 600) {
+    cam.tween = {
+        t0:performance.now(), dur:durMs,
+        fromPos:camera.position.clone(), toPos:toPos.clone(),
+        fromTgt:controls.target.clone(), toTgt:toTgt.clone(),
+    };
+}
+function stepCameraTween(now) {
+    if (!cam.tween) return;
+    const t = Math.min(1, (now - cam.tween.t0) / cam.tween.dur);
+    const k = easeInOut(t);
+    camera.position.lerpVectors(cam.tween.fromPos, cam.tween.toPos, k);
+    controls.target.lerpVectors(cam.tween.fromTgt, cam.tween.toTgt, k);
+    if (t >= 1) cam.tween = null;
+}
+
+function resize() {
+    const w = wrap.clientWidth, h = wrap.clientHeight;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+}
+resize();
+new ResizeObserver(resize).observe(wrap);
+
+// ── Background stars (radius beyond Neso at ~1990 units) ─────────────
+const starUniforms = { uTime:{ value:0 } };
+{
+    const n = 3200;
+    const positions = new Float32Array(n * 3);
+    const colors    = new Float32Array(n * 3);
+    const sizes     = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+        const r  = 2800 + Math.random() * 1000;
+        const th = Math.random() * Math.PI * 2;
+        const ph = Math.acos(2 * Math.random() - 1);
+        positions[i*3]   = r * Math.sin(ph) * Math.cos(th);
+        positions[i*3+1] = r * Math.sin(ph) * Math.sin(th);
+        positions[i*3+2] = r * Math.cos(ph);
+        const t = Math.random();
+        if (t < 0.2)      { colors[i*3]=.65; colors[i*3+1]=.78; colors[i*3+2]=1; }
+        else if (t < 0.35){ colors[i*3]=1; colors[i*3+1]=.85; colors[i*3+2]=.7; }
+        else              { const c=.85+.15*Math.random(); colors[i*3]=c; colors[i*3+1]=c; colors[i*3+2]=c; }
+        sizes[i] = 0.7 + Math.pow(Math.random(), 6) * 4.0;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    g.setAttribute('color',    new THREE.Float32BufferAttribute(colors,    3));
+    g.setAttribute('aSize',    new THREE.Float32BufferAttribute(sizes,     1));
+    const starMat = new THREE.ShaderMaterial({
+        uniforms: starUniforms, vertexColors:true,
+        transparent:true, depthWrite:false, blending:THREE.AdditiveBlending,
+        vertexShader:`attribute float aSize; varying vec3 vColor; varying float vTw;
+            uniform float uTime;
+            void main(){
+                vColor = color;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.);
+                gl_PointSize = aSize;
+                float seed = position.x*12.9898 + position.y*78.233 + position.z*37.7;
+                vTw = 0.65 + 0.35 * sin(uTime*1.3 + seed);
+            }`,
+        fragmentShader:`varying vec3 vColor; varying float vTw;
+            void main(){
+                vec2 d = gl_PointCoord - vec2(.5);
+                float r = length(d);
+                if (r > .5) discard;
+                gl_FragColor = vec4(vColor*vTw, smoothstep(.5,0.,r));
+            }`,
+    });
+    scene.add(new THREE.Points(g, starMat));
+}
+
+// ── Neptune (skinned) — group carries the obliquity tilt ─────────────
+const nepGroup = new THREE.Group();
+nepGroup.rotation.x = OBLIQUITY;
+scene.add(nepGroup);
+const nepSkin = new NeptuneSkin(nepGroup, { radius:1.0, quality:'medium', segments:56 });
+nepSkin.mesh.userData = { kind:'planet', key:'neptune', label:'Neptune' };
+
+// Soft outer halo (methane blue).
+{
+    const halo = new THREE.Mesh(
+        new THREE.SphereGeometry(1.32, 32, 32),
+        new THREE.ShaderMaterial({
+            transparent:true, depthWrite:false, side:THREE.BackSide,
+            blending:THREE.AdditiveBlending,
+            vertexShader:`varying vec3 vN; void main(){ vN=normalize(normalMatrix*normal);
+                gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
+            fragmentShader:`varying vec3 vN;
+                void main(){ float r=pow(1.-abs(vN.z),3.); gl_FragColor=vec4(.30,.55,.95,r*.55); }`,
+        }),
+    );
+    nepGroup.add(halo);
+}
+
+// Distant Sun.
+{
+    const dl = new THREE.DirectionalLight(0xfff4e0, 1.5);
+    dl.position.set(35, 8, 0);
+    scene.add(dl);
+    scene.add(new THREE.AmbientLight(0x1a2438, 0.7));
+}
+
+// ── Moon meshes + orbit rings ────────────────────────────────────────
+const meshes  = { neptune: nepSkin.mesh };
+const ghostMeshes = {};
+const trailLines  = {};
+const orbitRings  = {};
+const trailBuffers = {};
+const TRAIL_MAX = 10800;
+
+function makeMoon(b) {
+    const r = b.radius_km / R_NEP_KM;
+    const rVis = Math.max(r * 9, 0.05);
+    const m = new THREE.Mesh(
+        new THREE.SphereGeometry(rVis, 22, 22),
+        new THREE.MeshStandardMaterial({
+            color:b.color, emissive:b.color, emissiveIntensity:0.16,
+            roughness:0.85, metalness:0.05,
+        }),
+    );
+    m.userData = { kind:'moon', key:b.key, label:b.name };
+    scene.add(m);
+    meshes[b.key] = m;
+
+    const halo = new THREE.Mesh(
+        new THREE.SphereGeometry(rVis * 1.30, 18, 18),
+        new THREE.ShaderMaterial({
+            transparent:true, depthWrite:false, side:THREE.BackSide,
+            blending:THREE.AdditiveBlending,
+            uniforms:{ uColor:{ value:new THREE.Color(b.color) } },
+            vertexShader:`varying vec3 vN; void main(){ vN=normalize(normalMatrix*normal);
+                gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
+            fragmentShader:`uniform vec3 uColor; varying vec3 vN;
+                void main(){ float r=pow(1.-abs(vN.z),2.); gl_FragColor=vec4(uColor,r*.55); }`,
+        }),
+    );
+    m.add(halo);
+
+    // Static reference orbit ring at the moon's mean a (equatorial plane,
+    // baked obliquity so it lines up with the tilted system).
+    const a_u = (INIT_EL[b.key].a_km * KM) / M_PER_UNIT;
+    const N = 224;
+    const ringGeo = new THREE.BufferGeometry();
+    const arr = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) {
+        const th = (i / N) * Math.PI * 2;
+        const [x,y,z] = tiltScene(a_u * Math.cos(th), 0, a_u * Math.sin(th));
+        arr[i*3] = x; arr[i*3+1] = y; arr[i*3+2] = z;
+    }
+    ringGeo.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3));
+    const ringMat = new THREE.LineBasicMaterial({
+        color:b.color, transparent:true, opacity:0.20, depthWrite:false,
+    });
+    const ring = new THREE.LineLoop(ringGeo, ringMat);
+    scene.add(ring);
+    orbitRings[b.key] = ring;
+
+    // Trail.
+    const trailGeo = new THREE.BufferGeometry();
+    const positions = new Float32Array(TRAIL_MAX * 3);
+    trailGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    trailGeo.setDrawRange(0, 0);
+    const trailMat = new THREE.LineBasicMaterial({
+        color:b.color, transparent:true, opacity:0.85, depthWrite:false,
+    });
+    const trailLine = new THREE.Line(trailGeo, trailMat);
+    trailLine.frustumCulled = false;
+    scene.add(trailLine);
+    trailLines[b.key]   = trailLine;
+    trailBuffers[b.key] = { positions, idx:0, count:0, capacity:TRAIL_MAX, sampleEvery:120, accum:0 };
+
+    // Ghost marker.
+    const gh = new THREE.Mesh(
+        new THREE.SphereGeometry(rVis * 1.10, 12, 12),
+        new THREE.MeshBasicMaterial({
+            color:b.color, transparent:true, opacity:0.45, wireframe:true, depthWrite:false,
+        }),
+    );
+    gh.visible = false;
+    scene.add(gh);
+    ghostMeshes[b.key] = gh;
+}
+for (const b of NEPTUNE_BODIES.slice(1)) makeMoon(b);
+
+// ── Minor moons (analytic) + their precessing orbit rings ────────────
+const minorRings = {};
+const MINOR_RING_REBUILD_S = 6 * 3600;
+
+function minorVisRadius(m) {
+    const real = m.radius_km / R_NEP_KM;
+    // Floors so the far irregulars stay visible from the wide-field camera
+    // (Neso sits ~2000 units out); Nereid is closer in.
+    const floor = (m.key === 'nereid') ? 2.0 : 7.0;
+    return Math.max(real * 9, floor);
+}
+function makeMinorMoon(m) {
+    const rVis = minorVisRadius(m);
+    const mesh = new THREE.Mesh(
+        new THREE.SphereGeometry(rVis, 16, 16),
+        new THREE.MeshStandardMaterial({
+            color:m.color, emissive:m.color, emissiveIntensity:0.22,
+            roughness:0.9, metalness:0.04,
+        }),
+    );
+    mesh.userData = { kind:'moon', key:m.key, label:m.name };
+    mesh.frustumCulled = false;
+    scene.add(mesh);
+    meshes[m.key] = mesh;
+
+    const N = 200;
+    const posArr = new Float32Array(N * 3);
+    sampleMinorRing(m, 0, posArr, N);
+    const ringGeo = new THREE.BufferGeometry();
+    ringGeo.setAttribute('position', new THREE.Float32BufferAttribute(posArr, 3));
+    ringGeo.computeBoundingSphere();
+    const grpColor = MOON_GROUPS[m.group] ? MOON_GROUPS[m.group].color : m.color;
+    const ringMat = new THREE.LineBasicMaterial({
+        color: grpColor, transparent:true, opacity:0.30, depthWrite:false,
+    });
+    const line = new THREE.LineLoop(ringGeo, ringMat);
+    line.frustumCulled = false;
+    scene.add(line);
+    minorRings[m.key] = { line, posArr, N, lastTs:0 };
+}
+function sampleMinorRing(m, t_s, posArr, N) {
+    const base = minorMoonElementsAt(m, t_s);
+    for (let k = 0; k < N; k++) {
+        const st = elementsToState({
+            a:base.a, e:base.e, i_deg:base.i_deg,
+            raan_deg:base.raan_deg, argp_deg:base.argp_deg,
+            M_deg:(k / N) * 360, mu:base.mu,
+        });
+        const [x,y,z] = toScene(st.r);
+        posArr[k*3] = x; posArr[k*3+1] = y; posArr[k*3+2] = z;
+    }
+}
+function rebuildMinorRing(m, force) {
+    const r = minorRings[m.key];
+    if (!r) return;
+    if (!force && Math.abs(sim.t_s - r.lastTs) < MINOR_RING_REBUILD_S) return;
+    sampleMinorRing(m, sim.t_s, r.posArr, r.N);
+    r.line.geometry.attributes.position.needsUpdate = true;
+    r.line.geometry.computeBoundingSphere();
+    r.lastTs = sim.t_s;
+}
+for (const m of MINOR_MOONS) makeMinorMoon(m);
+
+// Selection + hover rings.
+function makeRing(c, op, t) {
+    const geom = new THREE.RingGeometry(1.0, 1.0 + t, 64);
+    const mat  = new THREE.MeshBasicMaterial({
+        color:c, transparent:true, opacity:op,
+        depthWrite:false, side:THREE.DoubleSide, blending:THREE.AdditiveBlending,
+    });
+    const m = new THREE.Mesh(geom, mat);
+    m.visible = false; m.renderOrder = 10;
+    return m;
+}
+const selRing = makeRing(0x5aa0ff, 0.92, 0.16);
+const hovRing = makeRing(0xaef0ff, 0.55, 0.10);
+scene.add(selRing); scene.add(hovRing);
+
+// ── Legend ───────────────────────────────────────────────────────────
+const legend = document.getElementById('ns-legend');
+legend.innerHTML = Object.values(MOON_GROUPS).map(g =>
+    `<span class="lg" title="${g.note}"><span class="dt" style="background:#${g.color.toString(16).padStart(6,'0')}"></span>${g.label}</span>`
+).join('');
+
+// ── Body picker / element table ──────────────────────────────────────
+const elBodyGrid = document.getElementById('ns-body-grid');
+const elSelDot   = document.getElementById('ns-sel-dot');
+const elSelName  = document.getElementById('ns-sel-name');
+const elSelPer   = document.getElementById('ns-sel-period');
+const elElTbl    = document.getElementById('ns-el-table');
+
+const ELEM_DEFS = [
+    { sym:'a',  nm:'semi-major axis',     unit:'km', fmt:v => (v / KM).toFixed(0) },
+    { sym:'e',  nm:'eccentricity',        unit:'',   fmt:v => v.toFixed(5) },
+    { sym:'i',  nm:'inclination',         unit:'°',  fmt:v => v.toFixed(3) },
+    { sym:'Ω',  nm:'long. asc. node',     unit:'°',  fmt:v => v.toFixed(2) },
+    { sym:'ω',  nm:'arg. of pericentre',  unit:'°',  fmt:v => v.toFixed(2) },
+    { sym:'M',  nm:'mean anomaly',        unit:'°',  fmt:v => v.toFixed(2) },
+    { sym:'λ',  nm:'mean longitude',      unit:'°',  fmt:v => v.toFixed(2) },
+    { sym:'r',  nm:'neptunecentric dist.',unit:'km', fmt:v => (v / KM).toFixed(0) },
+    { sym:'v',  nm:'speed',               unit:'km/s',fmt:v => (v / KM).toFixed(3) },
+];
+
+const PICKER_SECTIONS = [
+    { label:'Neptune',                   keys:['neptune'] },
+    { label:MOON_GROUPS.regular.label,   keys:['naiad','thalassa','despina','galatea','larissa','hippocamp','proteus'] },
+    { label:MOON_GROUPS.triton.label,    keys:['triton'] },
+    { label:MOON_GROUPS.prograde.label,  keys:MINOR_MOONS.filter(m=>m.group==='prograde').map(m=>m.key) },
+    { label:MOON_GROUPS.retrograde.label,keys:MINOR_MOONS.filter(m=>m.group==='retrograde').map(m=>m.key) },
+];
+
+let selected = getBody('triton');
+function buildBodyPicker() {
+    elBodyGrid.innerHTML = '';
+    for (const sec of PICKER_SECTIONS) {
+        const hdr = document.createElement('div');
+        hdr.className = 'ns-body-group';
+        hdr.textContent = sec.label;
+        elBodyGrid.appendChild(hdr);
+        for (const key of sec.keys) {
+            const b = getBody(key);
+            if (!b) continue;
+            const btn = document.createElement('button');
+            btn.className = 'ns-body-btn' + (key === selected.key ? ' sel' : '');
+            btn.dataset.key = key;
+            const hex = '#' + b.color.toString(16).padStart(6, '0');
+            btn.innerHTML =
+                `<div class="ns-body-dot" style="background:${hex};color:${hex}"></div>` +
+                `<div class="ns-body-name">${b.name}</div>`;
+            btn.addEventListener('click', () => selectBody(key));
+            elBodyGrid.appendChild(btn);
+        }
+    }
+    elElTbl.innerHTML = ELEM_DEFS.map(d =>
+        `<div class="ns-el-k"><span class="sym">${d.sym}</span><span class="nm">${d.nm}</span></div>` +
+        `<div class="ns-el-v" data-sym="${d.sym}">—</div>`
+    ).join('');
+}
+function selectBody(key) {
+    selected = getBody(key) || selected;
+    elBodyGrid.querySelectorAll('.ns-body-btn').forEach(b =>
+        b.classList.toggle('sel', b.dataset.key === selected.key));
+    const hex = '#' + selected.color.toString(16).padStart(6, '0');
+    elSelDot.style.background = hex;
+    elSelDot.style.color      = hex;
+    elSelName.textContent = selected.name;
+    elSelPer.textContent  = formatPeriod(periodDays(selected.key));
+    refreshSidePanel();
+}
+function formatPeriod(d) {
+    if (d < 30)  return `${d.toFixed(2)} d`;
+    if (d < 365) return `${d.toFixed(1)} d`;
+    return `${(d/365.25).toFixed(2)} yr`;
+}
+function liveElements(key) {
+    if (isMinor(key)) {
+        const base = minorMoonElementsAt(minorByKey[key], sim.t_s);
+        const st   = elementsToState(base);
+        return stateToElements(st.r, st.v, base.mu);
+    }
+    return meanLonRel(idxOf[key]);
+}
+function refreshSidePanel() {
+    if (selected.key === 'neptune') {
+        const b = sim.bodies[0];
+        const speed = Math.hypot(b.v[0], b.v[1], b.v[2]);
+        for (const d of ELEM_DEFS) {
+            const node = elElTbl.querySelector(`[data-sym="${d.sym}"]`);
+            if (node) node.innerHTML = '—';
+        }
+        const vnode = elElTbl.querySelector('[data-sym="v"]');
+        if (vnode) vnode.innerHTML = (speed / KM).toFixed(4) + '<span class="un">km/s</span>';
+        return;
+    }
+    const el = liveElements(selected.key);
+    const vals = {
+        a:el.a, e:el.e, i:el.i_deg, 'Ω':el.raan_deg, 'ω':el.argp_deg,
+        M:el.M_deg, 'λ':el.mean_lon_deg, r:el.r_mag, v:el.v_mag,
+    };
+    for (const d of ELEM_DEFS) {
+        const node = elElTbl.querySelector(`[data-sym="${d.sym}"]`);
+        if (!node) continue;
+        node.innerHTML = d.fmt(vals[d.sym]) + (d.unit ? `<span class="un">${d.unit}</span>` : '');
+    }
+}
+
+// ── Plot (Naiad–Thalassa Δλ + inner eccentricities) ──────────────────
+const plot = document.getElementById('ns-plot-canvas');
+const pctx = plot.getContext('2d');
+function resizePlot() {
+    const rect = plot.getBoundingClientRect();
+    const dpr  = Math.min(devicePixelRatio, 2);
+    plot.width  = Math.max(1, Math.floor(rect.width  * dpr));
+    plot.height = Math.max(1, Math.floor(rect.height * dpr));
+    pctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+resizePlot();
+new ResizeObserver(resizePlot).observe(plot);
+
+const PLOT_N = 360;
+const plotT   = new Float32Array(PLOT_N);
+const plotDl  = new Float32Array(PLOT_N);
+const plotENa = new Float32Array(PLOT_N);
+const plotEDe = new Float32Array(PLOT_N);
+const plotEGa = new Float32Array(PLOT_N);
+let plotHead = 0, plotCount = 0, lastSampleT = -Infinity;
+const SAMPLE_INTERVAL_S = 6 * 3600;
+
+function pushSample(tSec, dl, eNa, eDe, eGa) {
+    plotT[plotHead]=tSec; plotDl[plotHead]=dl;
+    plotENa[plotHead]=eNa; plotEDe[plotHead]=eDe; plotEGa[plotHead]=eGa;
+    plotHead = (plotHead + 1) % PLOT_N;
+    if (plotCount < PLOT_N) plotCount++;
+}
+function eachSample(fn) {
+    if (plotCount === 0) return;
+    const start = (plotHead - plotCount + PLOT_N) % PLOT_N;
+    for (let k = 0; k < plotCount; k++) {
+        const i = (start + k) % PLOT_N;
+        fn(plotT[i], plotDl[i], plotENa[i], plotEDe[i], plotEGa[i], k);
+    }
+}
+function drawPlot() {
+    const W = plot.clientWidth, H = plot.clientHeight;
+    if (W < 8 || H < 8) return;
+    pctx.clearRect(0, 0, W, H);
+    if (plotCount < 2) {
+        pctx.fillStyle = '#69789a';
+        pctx.font = '12px ui-monospace, monospace';
+        pctx.textAlign = 'center';
+        pctx.fillText('Press ▶ Play to start sampling…', W/2, H/2);
+        return;
+    }
+    const padL = 56, padR = 56, padT = 12, padB = 24;
+    const pw = W - padL - padR, ph = H - padT - padB;
+
+    let tMin = Infinity, tMax = -Infinity;
+    eachSample(t => { if (t < tMin) tMin = t; if (t > tMax) tMax = t; });
+    const tSpan = Math.max(tMax - tMin, 1);
+
+    let dMin = Infinity, dMax = -Infinity;
+    eachSample((t, dl) => { if (dl < dMin) dMin = dl; if (dl > dMax) dMax = dl; });
+    const dPad = Math.max((dMax - dMin) * 0.15, 2);
+    dMin -= dPad; dMax += dPad;
+
+    let eMin = Infinity, eMax = -Infinity;
+    eachSample((t, dl, eNa, eDe, eGa) => {
+        for (const e of [eNa, eDe, eGa]) { if (e < eMin) eMin = e; if (e > eMax) eMax = e; }
+    });
+    const ePad = Math.max((eMax - eMin) * 0.15, 5e-5);
+    eMin -= ePad; eMax += ePad;
+
+    pctx.strokeStyle = 'rgba(90,160,255,.10)';
+    pctx.lineWidth = 1;
+    pctx.font = '10px ui-monospace, monospace';
+    pctx.textBaseline = 'middle';
+    for (let k = 0; k <= 4; k++) {
+        const f = k / 4, x = padL + f * pw;
+        pctx.beginPath(); pctx.moveTo(x, padT); pctx.lineTo(x, padT + ph); pctx.stroke();
+        const t = tMin + f * (tMax - tMin);
+        pctx.fillStyle = '#69789a'; pctx.textAlign = 'center';
+        pctx.fillText((t / 86400).toFixed(1) + ' d', x, H - padB + 12);
+    }
+    for (let k = 0; k <= 4; k++) {
+        const f = k / 4, y = padT + f * ph;
+        pctx.beginPath(); pctx.moveTo(padL, y); pctx.lineTo(W - padR, y); pctx.stroke();
+    }
+    pctx.fillStyle = '#5aa0ff'; pctx.textAlign = 'right';
+    for (let k = 0; k <= 4; k++) {
+        const f = k / 4, v = dMax - f * (dMax - dMin);
+        pctx.fillText(v.toFixed(1) + '°', padL - 6, padT + f * ph);
+    }
+    pctx.fillStyle = '#9ad0ff'; pctx.textAlign = 'left';
+    for (let k = 0; k <= 4; k++) {
+        const f = k / 4, v = eMax - f * (eMax - eMin);
+        pctx.fillText(v.toFixed(4), W - padR + 6, padT + f * ph);
+    }
+    pctx.fillStyle = 'rgba(90,160,255,.55)'; pctx.textAlign = 'center';
+    pctx.save(); pctx.translate(14, padT + ph/2); pctx.rotate(-Math.PI/2);
+    pctx.fillText('Δλ  (deg)', 0, 0); pctx.restore();
+    pctx.fillStyle = 'rgba(154,208,255,.55)';
+    pctx.save(); pctx.translate(W - 14, padT + ph/2); pctx.rotate(Math.PI/2);
+    pctx.fillText('eccentricity', 0, 0); pctx.restore();
+
+    const xOf = t => padL + ((t - tMin) / tSpan) * pw;
+    const yDl = v => padT + (1 - (v - dMin) / (dMax - dMin)) * ph;
+    const yE  = v => padT + (1 - (v - eMin) / (eMax - eMin)) * ph;
+
+    pctx.lineWidth = 2; pctx.strokeStyle = '#5aa0ff';
+    pctx.beginPath(); let first = true;
+    eachSample((t, dl) => {
+        const x = xOf(t), y = yDl(dl);
+        if (first) { pctx.moveTo(x, y); first = false; } else pctx.lineTo(x, y);
+    });
+    pctx.stroke();
+
+    const eccentricSeries = [
+        { color:'#9ad0ff', getter:(t,dl,eNa)         => eNa },
+        { color:'#66e0d8', getter:(t,dl,eNa,eDe)     => eDe },
+        { color:'#b78cff', getter:(t,dl,eNa,eDe,eGa) => eGa },
+    ];
+    pctx.lineWidth = 1.5;
+    for (const ser of eccentricSeries) {
+        pctx.strokeStyle = ser.color;
+        pctx.beginPath(); let f2 = true;
+        eachSample((t, dl, eNa, eDe, eGa) => {
+            const x = xOf(t), y = yE(ser.getter(t, dl, eNa, eDe, eGa));
+            if (f2) { pctx.moveTo(x, y); f2 = false; } else pctx.lineTo(x, y);
+        });
+        pctx.stroke();
+    }
+}
+
+// ── Compute plot quantities from current state ───────────────────────
+function meanLonRel(idx) {
+    const M_nep = sim.bodies[0].m;
+    const m     = sim.bodies[idx].m;
+    const mu    = G_SI * (M_nep + m);
+    const rRel  = [
+        sim.bodies[idx].r[0] - sim.bodies[0].r[0],
+        sim.bodies[idx].r[1] - sim.bodies[0].r[1],
+        sim.bodies[idx].r[2] - sim.bodies[0].r[2],
+    ];
+    const vRel  = [
+        sim.bodies[idx].v[0] - sim.bodies[0].v[0],
+        sim.bodies[idx].v[1] - sim.bodies[0].v[1],
+        sim.bodies[idx].v[2] - sim.bodies[0].v[2],
+    ];
+    return stateToElements(rRel, vRel, mu);
+}
+function computeDynamics() {
+    const elNa = meanLonRel(idxOf.naiad);
+    const elTh = meanLonRel(idxOf.thalassa);
+    const elDe = meanLonRel(idxOf.despina);
+    const elGa = meanLonRel(idxOf.galatea);
+    let dl = elNa.mean_lon_deg - elTh.mean_lon_deg;
+    dl = ((dl % 360) + 360) % 360;
+    if (dl > 180) dl -= 360;        // wrap to [-180, 180] so the dance is centred
+    return { dl, eNa:elNa.e, eDe:elDe.e, eGa:elGa.e };
+}
+// Analytic J₂ nodal precession rate for a regular moon (deg/yr) — what
+// drives the visible orbit-ring precession.
+function galateaNodeRateDegYr() {
+    const el = INIT_EL.galatea;
+    const a_m = el.a_km * KM;
+    const mu  = G_SI * (M_NEP_KG + getBody('galatea').mass);
+    const n   = Math.sqrt(mu / (a_m * a_m * a_m));
+    return j2NodeRate(n, a_m, el.e, el.i_deg * D2R, J2_NEP, R_NEP_M) * R2D * SEC_PER_YEAR;
+}
+function updateReadouts(res) {
+    document.getElementById('rd-dlam').textContent = res.dl.toFixed(2) + '°';
+    document.getElementById('rd-eNa').textContent  = res.eNa.toFixed(5);
+    document.getElementById('rd-eDe').textContent  = res.eDe.toFixed(5);
+    document.getElementById('rd-eGa').textContent  = res.eGa.toFixed(5);
+    const elTri = meanLonRel(idxOf.triton);
+    document.getElementById('rd-tri').textContent  =
+        `${elTri.i_deg.toFixed(2)}° / ${elTri.e.toFixed(5)}`;
+    document.getElementById('rd-prec').textContent =
+        (j2Enabled ? galateaNodeRateDegYr().toFixed(3) : '0 (J₂ off)') + (j2Enabled ? '°/yr' : '');
+}
+
+// ── HUD ──────────────────────────────────────────────────────────────
+const elTimeDisp   = document.getElementById('ns-time-display');
+const elJdDisp     = document.getElementById('ns-jd-display');
+const elEnergyDisp = document.getElementById('ns-energy-display');
+const elStepDisp   = document.getElementById('ns-step-display');
+const elPill       = document.getElementById('ns-mode-pill');
+
+function updateHud() {
+    const days = sim.t_s / 86400;
+    elTimeDisp.textContent = (days >= 0 ? '+ ' : '') + days.toFixed(2) + ' d';
+    elJdDisp.textContent   = 'JD ' + (J2000_JD + days).toFixed(3);
+    const E = energyNow(sim.bodies);
+    const drift = (E - sim.initialEnergy) / Math.abs(sim.initialEnergy);
+    elEnergyDisp.textContent = drift === 0 ? '0' : drift.toExponential(2);
+    elStepDisp.textContent   = `dt = ${sim.dtTarget.toFixed(0)} s`;
+    if (sim.playing) { elPill.textContent = '▶ Playing'; elPill.classList.add('play'); }
+    else             { elPill.textContent = '⏸ Paused';  elPill.classList.remove('play'); }
+}
+
+// ── Render: write SI state into scene ────────────────────────────────
+function syncMeshesFromState() {
+    {
+        const b = sim.bodies[0];
+        const p = toScene(b.r);
+        nepGroup.position.set(p[0], p[1], p[2]);
+        meshes.neptune.position.set(0, 0, 0);   // skin mesh lives in nepGroup
+    }
+    for (let i = 1; i < sim.bodies.length; i++) {
+        const k = NEPTUNE_BODIES[i].key;
+        const p = toScene(sim.bodies[i].r);
+        meshes[k].position.set(p[0], p[1], p[2]);
+    }
+    if (ghost.enabled) {
+        for (let i = 1; i < sim.bodies.length; i++) {
+            const k = NEPTUNE_BODIES[i].key;
+            const p = ghostScenePos(k);
+            if (p) ghostMeshes[k].position.set(p.x, p.y, p.z);
+        }
+    }
+    const jr = sim.bodies[0].r;
+    for (const m of MINOR_MOONS) {
+        const st = minorMoonStateRel(m, sim.t_s);
+        const p = toScene([st.r[0] + jr[0], st.r[1] + jr[1], st.r[2] + jr[2]]);
+        meshes[m.key].position.set(p[0], p[1], p[2]);
+        rebuildMinorRing(m, false);
+    }
+}
+
+function appendTrails(simSecAdvanced) {
+    for (let i = 1; i < sim.bodies.length; i++) {
+        const k = NEPTUNE_BODIES[i].key;
+        const tb = trailBuffers[k];
+        tb.accum += simSecAdvanced;
+        if (tb.accum < tb.sampleEvery) continue;
+        tb.accum = 0;
+        const p = toScene(sim.bodies[i].r);
+        const dst = tb.idx * 3;
+        tb.positions[dst]=p[0]; tb.positions[dst+1]=p[1]; tb.positions[dst+2]=p[2];
+        tb.idx = (tb.idx + 1) % tb.capacity;
+        if (tb.count < tb.capacity) tb.count++;
+        rebuildTrailLine(k);
+    }
+}
+function rebuildTrailLine(key) {
+    const tb = trailBuffers[key], line = trailLines[key];
+    const geo = line.geometry, arr = geo.attributes.position.array;
+    const start = (tb.idx - tb.count + tb.capacity) % tb.capacity;
+    for (let k = 0; k < tb.count; k++) {
+        const src = ((start + k) % tb.capacity) * 3, dst = k * 3;
+        arr[dst]=tb.positions[src]; arr[dst+1]=tb.positions[src+1]; arr[dst+2]=tb.positions[src+2];
+    }
+    geo.setDrawRange(0, tb.count);
+    geo.attributes.position.needsUpdate = true;
+    geo.computeBoundingSphere();
+}
+function clearTrails() {
+    for (const k of Object.keys(trailBuffers)) {
+        const tb = trailBuffers[k];
+        tb.idx = 0; tb.count = 0; tb.accum = 0;
+        trailLines[k].geometry.setDrawRange(0, 0);
+    }
+}
+
+// ── Selection / hover rings ──────────────────────────────────────────
+function visualRadiusOf(key) {
+    if (key === 'neptune') return 1.0;
+    if (isMinor(key)) return minorVisRadius(minorByKey[key]);
+    const b = NEPTUNE_BODIES.find(b => b.key === key);
+    return b ? Math.max((b.radius_km / R_NEP_KM) * 9, 0.05) : 0.05;
+}
+function updateSelRing() {
+    if (!selected || !meshes[selected.key]) { selRing.visible = false; return; }
+    const m = meshes[selected.key];
+    const baseR = selected.key === 'neptune' ? 1.5 : Math.max(visualRadiusOf(selected.key) * 1.6, 0.10);
+    selRing.position.copy(selected.key === 'neptune' ? nepGroup.position : m.position);
+    selRing.scale.setScalar(baseR);
+    selRing.lookAt(camera.position);
+    selRing.visible = true;
+}
+function updateHovRing(key) {
+    if (!key || !meshes[key] || (selected && key === selected.key)) { hovRing.visible = false; return; }
+    const m = meshes[key];
+    const baseR = key === 'neptune' ? 1.7 : Math.max(visualRadiusOf(key) * 1.85, 0.12);
+    hovRing.position.copy(key === 'neptune' ? nepGroup.position : m.position);
+    hovRing.scale.setScalar(baseR);
+    hovRing.lookAt(camera.position);
+    hovRing.visible = true;
+}
+
+// ── Mouse picking ────────────────────────────────────────────────────
+const raycaster = new THREE.Raycaster();
+const ndc       = new THREE.Vector2();
+let hoveredKey  = null;
+const pickables = () => Object.values(meshes);
+const elTooltip = document.getElementById('ns-tooltip');
+
+function hitFromEvent(ev) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    ndc.x =  ((ev.clientX - rect.left) / rect.width)  * 2 - 1;
+    ndc.y = -((ev.clientY - rect.top)  / rect.height) * 2 + 1;
+    raycaster.setFromCamera(ndc, camera);
+    const hits = raycaster.intersectObjects(pickables(), true);
+    if (!hits.length) return null;
+    let obj = hits[0].object;
+    while (obj && (!obj.userData || !obj.userData.kind)) obj = obj.parent;
+    return obj && obj.userData ? obj.userData : null;
+}
+
+// ── Tooltip rendering ────────────────────────────────────────────────
+let pinnedKey = null;
+function buildTooltipHtml(key) {
+    const b = getBody(key);
+    if (!b) return '';
+    const beh = behaviorOf(key);
+    const hex = '#' + b.color.toString(16).padStart(6, '0');
+    const isPinned = (pinnedKey === key);
+    const closeHint = isPinned
+        ? `<span style="margin-left:auto; font-weight:400; font-size:.62rem; color:#69789a">📌 pinned · right-click to unpin</span>`
+        : `<span style="margin-left:auto; font-weight:400; font-size:.62rem; color:#69789a">right-click to pin</span>`;
+    let html = `<div class="tt-hdr"><span class="dot" style="background:${hex};color:${hex}"></span>${b.name}${closeHint}</div>`;
+    if (beh.title) html += `<div style="color:#aad4ff; font-size:.7rem; line-height:1.4; margin-bottom:5px">${beh.title}</div>`;
+
+    if (key === 'neptune') {
+        const speed = Math.hypot(...sim.bodies[0].v);
+        html += `<div class="tt-row"><span class="tt-k">mass</span><span class="tt-v">1.024×10²⁶ kg</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">radius</span><span class="tt-v">24,764 km</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">spin</span><span class="tt-v">16.11 h</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">obliquity</span><span class="tt-v">28.32°</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">J₂</span><span class="tt-v">0.003411</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">v (bary)</span><span class="tt-v">${(speed/KM).toFixed(4)} km/s</span></div>`;
+    } else {
+        const el = liveElements(key);
+        html += `<div class="tt-row"><span class="tt-k">a (live)</span><span class="tt-v">${(el.a / KM).toFixed(0)} km</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">e (live)</span><span class="tt-v">${el.e.toFixed(5)}</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">i</span><span class="tt-v">${el.i_deg.toFixed(2)}°${el.i_deg > 90 ? ' <span style="color:#c89878">(retrograde)</span>' : ''}</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">period</span><span class="tt-v">${formatPeriod(periodDays(key))}</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">r (now)</span><span class="tt-v">${(el.r_mag/KM).toFixed(0)} km</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">v (now)</span><span class="tt-v">${(el.v_mag/KM).toFixed(2)} km/s</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">phys. radius</span><span class="tt-v">${b.radius_km.toFixed(0)} km</span></div>`;
+
+        if (isMinor(key)) {
+            const m = minorByKey[key];
+            const a_m = m.a_km * KM;
+            const mu  = G_SI * (M_NEP_KG + m.mass);
+            const n   = Math.sqrt(mu / (a_m * a_m * a_m));
+            const { dRaan, dArgp } = minorSecularRates(m, n, a_m, m.i_deg * D2R);
+            const src = m.secular ? 'solar' : 'J₂';
+            html += `<div class="tt-sep"></div>`;
+            html += `<div class="tt-row"><span class="tt-k">dΩ/dt (${src})</span><span class="tt-v">${(dRaan * R2D * SEC_PER_YEAR).toFixed(3)}°/yr</span></div>`;
+            html += `<div class="tt-row"><span class="tt-k">dω/dt (${src})</span><span class="tt-v">${(dArgp * R2D * SEC_PER_YEAR).toFixed(3)}°/yr</span></div>`;
+        }
+        if (key === 'triton') {
+            const d = tritonDecay(currentQ);
+            html += `<div class="tt-sep"></div>`;
+            html += `<div class="tt-row"><span class="tt-k">da/dt (tidal)</span><span class="tt-v">${d.dadt_cm_yr.toFixed(2)} cm/yr</span></div>`;
+            html += `<div class="tt-row"><span class="tt-k">→ disruption</span><span class="tt-v">${d.tdis_gyr.toFixed(2)} Gyr</span></div>`;
+        }
+    }
+    if (beh.bullets && beh.bullets.length) {
+        html += `<div class="tt-sep"></div>`;
+        for (const line of beh.bullets)
+            html += `<div style="color:#a9bbd8; font-style:italic; font-size:.66rem; line-height:1.4; margin:2px 0">• ${line}</div>`;
+    }
+    return html;
+}
+function showTooltipAt(key, sx, sy) {
+    elTooltip.innerHTML = buildTooltipHtml(key);
+    elTooltip.style.left = sx + 'px';
+    elTooltip.style.top  = sy + 'px';
+    elTooltip.classList.add('show');
+}
+renderer.domElement.addEventListener('mousemove', ev => {
+    const rect = renderer.domElement.getBoundingClientRect();
+    const sx = ev.clientX - rect.left, sy = ev.clientY - rect.top;
+    const ud = hitFromEvent(ev);
+    const newKey = ud ? ud.key : null;
+    if (newKey !== hoveredKey) {
+        hoveredKey = newKey;
+        renderer.domElement.style.cursor = hoveredKey ? 'pointer' : '';
+    }
+    if (pinnedKey) return;
+    if (ud) showTooltipAt(ud.key, sx, sy);
+    else    elTooltip.classList.remove('show');
+});
+renderer.domElement.addEventListener('mouseleave', () => {
+    hoveredKey = null;
+    renderer.domElement.style.cursor = '';
+    if (!pinnedKey) elTooltip.classList.remove('show');
+});
+function refreshPinnedTooltip() {
+    if (!pinnedKey) return;
+    elTooltip.innerHTML = buildTooltipHtml(pinnedKey);
+}
+
+let lastClickTime = 0, lastClickKey = null;
+renderer.domElement.addEventListener('click', ev => {
+    const ud = hitFromEvent(ev);
+    const now = performance.now();
+    if (ud && ud.key) {
+        selectBody(ud.key);
+        if (lastClickKey === ud.key && now - lastClickTime < 350) {
+            focusBody(ud.key);
+            lastClickTime = 0; lastClickKey = null;
+        } else { lastClickTime = now; lastClickKey = ud.key; }
+    } else if (pinnedKey) {
+        pinnedKey = null; elTooltip.classList.remove('show');
+    }
+});
+renderer.domElement.addEventListener('contextmenu', ev => {
+    ev.preventDefault();
+    const ud = hitFromEvent(ev);
+    const rect = renderer.domElement.getBoundingClientRect();
+    const sx = ev.clientX - rect.left, sy = ev.clientY - rect.top;
+    if (ud && ud.key) {
+        if (pinnedKey === ud.key) { pinnedKey = null; elTooltip.classList.remove('show'); }
+        else { pinnedKey = ud.key; showTooltipAt(ud.key, sx, sy); }
+    } else if (pinnedKey) { pinnedKey = null; elTooltip.classList.remove('show'); }
+});
+
+// ── Time controls ────────────────────────────────────────────────────
+const elPlay      = document.getElementById('ns-play');
+const elRev       = document.getElementById('ns-rev');
+const elSpeed     = document.getElementById('ns-speed');
+const elStepF     = document.getElementById('ns-step-fwd');
+const elStepB     = document.getElementById('ns-step-back');
+const elNow       = document.getElementById('ns-now');
+const elReset     = document.getElementById('ns-reset');
+const elDate      = document.getElementById('ns-date');
+const elHour      = document.getElementById('ns-hour');
+const elJdInput   = document.getElementById('ns-jd-input');
+const elBookmarks = document.getElementById('ns-bookmarks');
+const elTrToggle  = document.getElementById('ns-trails-toggle');
+const elTrLen     = document.getElementById('ns-trail-len');
+const elGhostTog  = document.getElementById('ns-ghost-toggle');
+const elLabelsTog = document.getElementById('ns-labels-toggle');
+const elRingsTog  = document.getElementById('ns-rings-toggle');
+const elMagTog    = document.getElementById('ns-mag-toggle');
+const elJ2Tog     = document.getElementById('ns-j2-toggle');
+const elViewTop   = document.getElementById('ns-view-top');
+const elView3D    = document.getElementById('ns-view-3d');
+const elViewEqu   = document.getElementById('ns-view-equ');
+const elFocus     = document.getElementById('ns-focus');
+const elPov       = document.getElementById('ns-pov');
+const elScale     = document.getElementById('ns-scale');
+const elViewWide  = document.getElementById('ns-view-wide');
+
+elPlay.addEventListener('click', () => {
+    sim.playing = !sim.playing;
+    sim.live = false; elNow.classList.remove('on');
+    elPlay.textContent = sim.playing ? '⏸ Pause' : '▶ Play';
+    updateHud();
+});
+elRev.addEventListener('click', () => {
+    sim.direction *= -1;
+    elRev.textContent = sim.direction > 0 ? '⇄ Forward' : '⇆ Reverse';
+    elRev.classList.toggle('on', sim.direction < 0);
+    sim.live = false; elNow.classList.remove('on');
+});
+elSpeed.addEventListener('change', () => { sim.speed = parseFloat(elSpeed.value); });
+
+function step(simSec) {
+    const absSec = Math.abs(simSec);
+    const dtMag  = Math.min(400, Math.max(40, absSec / 50));
+    const dt     = Math.sign(simSec) * dtMag;
+    sim.dtTarget = dtMag;
+    let remaining = simSec, safety = 200000;
+    const opts = stepOpts();
+    while (Math.abs(remaining) > 1e-6 && safety-- > 0) {
+        const this_dt = (Math.abs(remaining) < Math.abs(dt)) ? remaining : dt;
+        yoshida4Step(sim.bodies, this_dt, opts);
+        sim.t_s += this_dt;
+        remaining -= this_dt;
+        appendTrails(this_dt);
+    }
+}
+function reseedAtSimT(targetTs) {
+    sim.bodies = buildInitialBodies();
+    const M_nep = sim.bodies[0].m;
+    const dt_s  = targetTs;
+    for (const moonKey of N_BODY_MOONS) {
+        const i  = idxOf[moonKey];
+        const m  = sim.bodies[i].m;
+        const mu = G_SI * (M_nep + m);
+        const el = INIT_EL[moonKey];
+        const a_m = el.a_km * KM;
+        const n_rad_s = Math.sqrt(mu / (a_m * a_m * a_m));
+        const M_now = el.M_deg + n_rad_s * dt_s * R2D;
+        const st = elementsToState({
+            a:a_m, e:el.e, i_deg:el.i_deg, raan_deg:el.raan_deg,
+            argp_deg:el.argp_deg, M_deg:M_now, mu,
+        });
+        sim.bodies[i].r = st.r;
+        sim.bodies[i].v = st.v;
+    }
+    let px=0, py=0, pz=0;
+    for (let i = 1; i < sim.bodies.length; i++) {
+        px += sim.bodies[i].m * sim.bodies[i].v[0];
+        py += sim.bodies[i].m * sim.bodies[i].v[1];
+        pz += sim.bodies[i].m * sim.bodies[i].v[2];
+    }
+    sim.bodies[0].v[0] = -px / sim.bodies[0].m;
+    sim.bodies[0].v[1] = -py / sim.bodies[0].m;
+    sim.bodies[0].v[2] = -pz / sim.bodies[0].m;
+    sim.t_s = targetTs;
+    sim.initialEnergy = energyNow(sim.bodies);
+}
+function jumpToJD(jd) {
+    const targetTs = simTFromJD(jd);
+    const dT = targetTs - sim.t_s;
+    const ABS_DT_THRESHOLD = 365.25 * 86400 * 2;
+    if (Math.abs(dT) < ABS_DT_THRESHOLD) {
+        step(dT);
+    } else {
+        reseedAtSimT(targetTs);
+        plotCount = 0; plotHead = 0;
+        clearTrails();
+        if (ghost.enabled) snapshotGhostElements();
+    }
+    syncMeshesFromState();
+    refreshSidePanel();
+    updateHud();
+    drawPlot();
+}
+elStepF.addEventListener('click', () => { step(3600); syncInputsFromSim(); });
+elStepB.addEventListener('click', () => { step(-3600); syncInputsFromSim(); });
+
+elReset.addEventListener('click', () => {
+    sim.bodies = buildInitialBodies();
+    sim.t_s = 0;
+    sim.initialEnergy = energyNow(sim.bodies);
+    sim.live = false; elNow.classList.remove('on');
+    plotCount = 0; plotHead = 0;
+    clearTrails();
+    if (ghost.enabled) snapshotGhostElements();
+    syncMeshesFromState();
+    refreshSidePanel();
+    syncInputsFromSim();
+    updateHud();
+    drawPlot();
+});
+elNow.addEventListener('click', () => {
+    sim.live = true; sim.playing = false;
+    elPlay.textContent = '▶ Play'; elNow.classList.add('on');
+    const now = Date.now() / 86400000 + 2440587.5;
+    jumpToJD(now);
+    syncInputsFromSim();
+});
+
+function syncInputsFromSim() {
+    const jd = jdFromSimT(sim.t_s);
+    const d  = dateFromJD(jd);
+    const yyyy = String(d.getUTCFullYear()).padStart(4, '0');
+    const mm   = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const dd   = String(d.getUTCDate()).padStart(2, '0');
+    elDate.value = `${yyyy}-${mm}-${dd}`;
+    elHour.value = d.getUTCHours();
+    elJdInput.value = jd.toFixed(3);
+}
+function commitDateInputs() {
+    const m = (elDate.value || '').match(/^(-?\d+)-(\d{2})-(\d{2})$/);
+    if (!m) return;
+    const y = parseInt(m[1], 10), mo = parseInt(m[2], 10), da = parseInt(m[3], 10);
+    const hr = Math.max(0, Math.min(23, parseInt(elHour.value, 10) || 0));
+    if (!Number.isFinite(y)) return;
+    const jd = jdFromYMD(y, mo, da, hr);
+    sim.live = false; elNow.classList.remove('on');
+    jumpToJD(jd);
+    syncInputsFromSim();
+}
+elDate.addEventListener('change', commitDateInputs);
+elHour.addEventListener('change', commitDateInputs);
+elJdInput.addEventListener('change', () => {
+    const jd = parseFloat(elJdInput.value);
+    if (!Number.isFinite(jd)) return;
+    sim.live = false; elNow.classList.remove('on');
+    jumpToJD(jd);
+    syncInputsFromSim();
+});
+
+function buildBookmarks() {
+    elBookmarks.innerHTML = '';
+    for (const bm of NEPTUNE_BOOKMARKS) {
+        const btn = document.createElement('button');
+        btn.className = 'ns-bm';
+        btn.title = bm.desc;
+        btn.innerHTML = `<span class="ns-bm-yr">${bm.y}</span>${bm.label}`;
+        btn.addEventListener('click', () => {
+            sim.live = false; elNow.classList.remove('on');
+            sim.playing = false; elPlay.textContent = '▶ Play';
+            const jd = jdFromYMD(bm.y, bm.m || 1, bm.d || 1, bm.hr || 12);
+            jumpToJD(jd);
+            syncInputsFromSim();
+        });
+        elBookmarks.appendChild(btn);
+    }
+}
+
+let trailsOn = true;
+elTrToggle.addEventListener('click', () => {
+    trailsOn = !trailsOn;
+    elTrToggle.classList.toggle('on', trailsOn);
+    elTrToggle.textContent = 'Trails: ' + (trailsOn ? 'ON' : 'OFF');
+    for (const k of Object.keys(trailLines)) trailLines[k].visible = trailsOn;
+});
+elTrLen.addEventListener('change', () => {
+    const max = parseInt(elTrLen.value, 10) || 3600;
+    for (const k of Object.keys(trailBuffers)) {
+        const tb = trailBuffers[k];
+        tb.capacity = Math.min(max, TRAIL_MAX);
+        tb.count    = Math.min(tb.count, tb.capacity);
+        rebuildTrailLine(k);
+    }
+});
+elGhostTog.addEventListener('click', () => {
+    ghost.enabled = !ghost.enabled;
+    elGhostTog.classList.toggle('on', ghost.enabled);
+    elGhostTog.textContent = 'Keplerian ghost: ' + (ghost.enabled ? 'ON' : 'OFF');
+    for (const k of Object.keys(ghostMeshes)) ghostMeshes[k].visible = ghost.enabled;
+    if (ghost.enabled) snapshotGhostElements();
+});
+
+let ringsOn = true;
+elRingsTog.addEventListener('click', () => {
+    ringsOn = !ringsOn;
+    elRingsTog.classList.toggle('on', ringsOn);
+    elRingsTog.textContent = 'Rings: ' + (ringsOn ? 'ON' : 'OFF');
+    nepSkin.setRingsVisible(ringsOn);
+});
+let magOn = false;
+elMagTog.addEventListener('click', () => {
+    magOn = !magOn;
+    elMagTog.classList.toggle('on', magOn);
+    elMagTog.textContent = 'Dipole: ' + (magOn ? 'ON' : 'OFF');
+    nepSkin.setMagnetosphereVisible(magOn);
+});
+elJ2Tog.addEventListener('click', () => {
+    j2Enabled = !j2Enabled;
+    elJ2Tog.classList.toggle('on', j2Enabled);
+    elJ2Tog.textContent = 'J₂: ' + (j2Enabled ? 'ON' : 'OFF');
+    // Re-baseline the energy diagnostic for the new Hamiltonian.
+    sim.initialEnergy = energyNow(sim.bodies);
+    if (ghost.enabled) snapshotGhostElements();
+});
+
+// ── View presets (smooth tweened) ────────────────────────────────────
+const VIEW_PRESETS = {
+    top:  { pos:new THREE.Vector3(0, 40, 0.001), btn:elViewTop, distMax:400 },
+    '3d': { pos:new THREE.Vector3(0, 14, 30),    btn:elView3D,  distMax:400 },
+    equ:  { pos:new THREE.Vector3(0, 1.2, 40),   btn:elViewEqu, distMax:400 },
+};
+function clearWideFlag() {
+    if (!wideOn) return;
+    wideOn = false;
+    elViewWide.classList.remove('on');
+    elViewWide.textContent = '⤢ Wide field';
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+}
+function setView(name) {
+    const preset = VIEW_PRESETS[name];
+    if (!preset) return;
+    clearWideFlag();
+    cam.presetName = name;
+    elViewTop.classList.toggle('on', name === 'top');
+    elView3D .classList.toggle('on', name === '3d');
+    elViewEqu.classList.toggle('on', name === 'equ');
+    cam.mode = 'free'; cam.focusKey = null; elFocus.value = '';
+    controls.maxDistance = preset.distMax;
+    startCameraTween(preset.pos, new THREE.Vector3(0, 0, 0));
+}
+elViewTop.addEventListener('click', () => setView('top'));
+elView3D .addEventListener('click', () => setView('3d'));
+elViewEqu.addEventListener('click', () => setView('equ'));
+
+elScale.addEventListener('change', () => {
+    clearWideFlag();
+    let pos;
+    if (elScale.value === 'zoom') { pos = new THREE.Vector3(0, 2.4, 6.5); controls.maxDistance = 60; }
+    else                         { pos = new THREE.Vector3(0, 14, 30);   controls.maxDistance = 400; }
+    cam.mode = 'free'; cam.focusKey = null; elFocus.value = '';
+    startCameraTween(pos, new THREE.Vector3(0, 0, 0));
+});
+
+// ── Wide-field / fullscreen ──────────────────────────────────────────
+const WINDOWED_MAX_DIST = 400;
+const WIDE_MAX_DIST      = 9000;
+const stageWrap = document.getElementById('ns-canvas-wrap');
+let wideOn = false;
+function setWide(on) {
+    wideOn = on;
+    elViewWide.classList.toggle('on', on);
+    elViewWide.textContent = on ? '⤡ Exit wide' : '⤢ Wide field';
+    cam.mode = 'free'; cam.focusKey = null; elFocus.value = '';
+    if (on) {
+        controls.maxDistance = WIDE_MAX_DIST;
+        startCameraTween(new THREE.Vector3(0, 1100, 1900), new THREE.Vector3(0, 0, 0), 900);
+        if (stageWrap.requestFullscreen) stageWrap.requestFullscreen().catch(() => {});
+    } else {
+        controls.maxDistance = WINDOWED_MAX_DIST;
+        if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+        setView('3d');
+    }
+}
+elViewWide.addEventListener('click', () => setWide(!wideOn));
+document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement && wideOn) setWide(false);
+    setTimeout(resize, 60);
+});
+
+// Focus dropdown.
+elFocus.addEventListener('change', () => focusBody(elFocus.value || null));
+function bodyPosition(key) {
+    if (key === 'neptune') return nepGroup.position.clone();
+    return meshes[key] ? meshes[key].position.clone() : new THREE.Vector3(0,0,0);
+}
+function bodySceneRadius(key) { return visualRadiusOf(key); }
+function focusBody(key) {
+    if (!key) {
+        cam.mode = 'free'; cam.focusKey = null; elFocus.value = '';
+        startCameraTween(VIEW_PRESETS[cam.presetName].pos, new THREE.Vector3(0,0,0));
+        return;
+    }
+    cam.mode = 'focus'; cam.focusKey = key; elFocus.value = key;
+    const tgt = bodyPosition(key);
+    const r   = bodySceneRadius(key);
+    const off = new THREE.Vector3(r * 14, r * 8, r * 14);
+    startCameraTween(tgt.clone().add(off), tgt);
+}
+elPov.addEventListener('click', () => {
+    if (!selected || selected.key === 'neptune') {
+        cam.mode = 'free';
+        startCameraTween(new THREE.Vector3(0, 4, 0.001), new THREE.Vector3(0,0,0));
+        return;
+    }
+    cam.mode = 'pov'; cam.focusKey = selected.key; elFocus.value = selected.key;
+    const moonPos = bodyPosition(selected.key);
+    const r = bodySceneRadius(selected.key);
+    const toNep = new THREE.Vector3().subVectors(nepGroup.position, moonPos).normalize();
+    const camPos = moonPos.clone().add(toNep.clone().multiplyScalar(r * 1.35));
+    startCameraTween(camPos, nepGroup.position.clone());
+});
+function applyFocusOrPov() {
+    if (cam.tween) return;
+    if (cam.mode === 'focus' && cam.focusKey) {
+        const tgt = bodyPosition(cam.focusKey);
+        const offset = camera.position.clone().sub(controls.target);
+        controls.target.copy(tgt);
+        camera.position.copy(tgt).add(offset);
+    } else if (cam.mode === 'pov' && cam.focusKey && meshes[cam.focusKey]) {
+        const moonPos = meshes[cam.focusKey].position;
+        const nepPos  = nepGroup.position;
+        const r = bodySceneRadius(cam.focusKey);
+        const toNep = new THREE.Vector3().subVectors(nepPos, moonPos).normalize();
+        camera.position.copy(moonPos).add(toNep.clone().multiplyScalar(r * 1.35));
+        controls.target.copy(nepPos);
+    }
+}
+
+let labelsOn = true;
+elLabelsTog.addEventListener('click', () => {
+    labelsOn = !labelsOn;
+    elLabelsTog.classList.toggle('on', labelsOn);
+    elLabelsTog.textContent = 'Labels: ' + (labelsOn ? 'ON' : 'OFF');
+});
+
+// ── HTML labels & hover icon ─────────────────────────────────────────
+const overlay = document.getElementById('ns-overlay');
+const labelEls = {};
+const hoverIcon = document.createElement('div');
+hoverIcon.className = 'ns-hover-icon';
+overlay.appendChild(hoverIcon);
+for (const b of ALL_BODIES) {
+    const div = document.createElement('div');
+    div.className = 'ns-label-3d' + (isMinor(b.key) ? ' minor' : '');
+    const beh = behaviorOf(b.key);
+    div.innerHTML = `<span class="icon">${beh.icon || '·'}</span>${b.name}`;
+    overlay.appendChild(div);
+    labelEls[b.key] = div;
+}
+const _projVec = new THREE.Vector3();
+function projectToScreen(pos3) {
+    _projVec.copy(pos3).project(camera);
+    const rect = renderer.domElement.getBoundingClientRect();
+    const x = (_projVec.x * 0.5 + 0.5) * rect.width;
+    const y = (-_projVec.y * 0.5 + 0.5) * rect.height;
+    return { x, y, behind:_projVec.z > 1 };
+}
+function labelPosOf(key) {
+    return key === 'neptune' ? nepGroup.position : (meshes[key] ? meshes[key].position : null);
+}
+function updateLabels() {
+    if (!labelsOn) {
+        for (const el of Object.values(labelEls)) el.style.display = 'none';
+        hoverIcon.classList.remove('show');
+        return;
+    }
+    for (const b of ALL_BODIES) {
+        const el = labelEls[b.key];
+        const pos = labelPosOf(b.key);
+        if (!pos) continue;
+        const isSel = selected && b.key === selected.key;
+        if (isMinor(b.key) && !isSel && b.key !== hoveredKey) { el.style.display = 'none'; continue; }
+        const p = projectToScreen(pos);
+        if (p.behind) { el.classList.add('behind'); el.style.display = 'block'; el.style.left = '-9999px'; continue; }
+        el.classList.remove('behind');
+        el.style.display = 'block';
+        el.style.left = `${p.x}px`;
+        el.style.top  = `${p.y}px`;
+        el.classList.toggle('selected', isSel);
+    }
+    if (hoveredKey && labelPosOf(hoveredKey) && (!selected || hoveredKey !== selected.key)) {
+        const beh = behaviorOf(hoveredKey);
+        if (beh && beh.icon) {
+            hoverIcon.textContent = beh.icon;
+            const p = projectToScreen(labelPosOf(hoveredKey));
+            if (!p.behind) {
+                hoverIcon.style.left = `${p.x}px`;
+                hoverIcon.style.top  = `${p.y - 32}px`;
+                hoverIcon.classList.add('show');
+            } else hoverIcon.classList.remove('show');
+        } else hoverIcon.classList.remove('show');
+    } else hoverIcon.classList.remove('show');
+}
+
+// ── Conjunction detector (bright moons + Triton) ─────────────────────
+const elConjunction = document.getElementById('ns-conjunction');
+let activeConjPair = null;
+const CONJ_KEYS = ['despina','galatea','larissa','proteus','triton'];
+function detectConjunctions() {
+    const lon = {};
+    for (const k of CONJ_KEYS) lon[k] = meanLonRel(idxOf[k]).mean_lon_deg;
+    let nearest = null, nearestDelta = 360;
+    const pairs = [['despina','galatea'],['galatea','larissa'],['larissa','proteus'],['proteus','triton']];
+    for (const [a, b] of pairs) {
+        let d = Math.abs(lon[a] - lon[b]);
+        if (d > 180) d = 360 - d;
+        if (d < nearestDelta) { nearestDelta = d; nearest = [a, b]; }
+    }
+    if (nearestDelta < 4 && nearest) {
+        const tag = nearest.join('+');
+        if (activeConjPair !== tag) {
+            const aName = getBody(nearest[0]).name, bName = getBody(nearest[1]).name;
+            elConjunction.textContent = `✦ ${aName} ↔ ${bName} conjunction (Δλ = ${nearestDelta.toFixed(1)}°)`;
+            elConjunction.classList.add('show');
+            activeConjPair = tag;
+        }
+    } else if (nearestDelta > 7 && activeConjPair) {
+        elConjunction.classList.remove('show');
+        activeConjPair = null;
+    }
+}
+
+// ── Triton tidal decay (analytic projection) ─────────────────────────
+// da/dt = -K a^{-11/2}, K = (3 k2 / Q)(m_T/M_N) R_N^5 sqrt(G M_N).
+// Closed form: a(t)^{13/2} = a0^{13/2} - (13/2) K t  (a decreasing).
+const TRITON_k2  = 0.41;                         // Neptune Love number (estimate)
+const TRITON_a0  = INIT_EL.triton.a_km * KM;     // current semi-major axis (m)
+const TRITON_mT  = getBody('triton').mass;
+// Fluid Roche limit for Triton (ρ_T ≈ 2.06, ρ_N ≈ 1.64 g/cc).
+const RHO_N = 1638, RHO_T = 2061;
+const ROCHE_M = 2.44 * R_NEP_M * Math.cbrt(RHO_N / RHO_T);
+let currentQ = 4600;
+
+function tritonDecay(Q) {
+    const K = (3 * TRITON_k2 / Q) * (TRITON_mT / M_NEP_KG) * Math.pow(R_NEP_M, 5) * Math.sqrt(G_SI * M_NEP_KG);
+    const p = 13 / 2;
+    const a0p = Math.pow(TRITON_a0, p);
+    const aRp = Math.pow(ROCHE_M, p);
+    const tdis_s = (a0p - aRp) / (p * K);         // time until a reaches Roche
+    const dadt = -K * Math.pow(TRITON_a0, -11 / 2);   // m/s now
+    return {
+        K, tdis_s, tdis_gyr: tdis_s / GYR,
+        dadt_cm_yr: dadt * 100 * SEC_PER_YEAR,
+        roche_RN: ROCHE_M / R_NEP_M,
+        // a(t) in metres, t in seconds (clamped to >= Roche)
+        aAt: t => Math.pow(Math.max(aRp, a0p - p * K * t), 1 / p),
+    };
+}
+
+const tcanvas = document.getElementById('ns-triton-canvas');
+const tctx    = tcanvas.getContext('2d');
+function resizeTritonPlot() {
+    const rect = tcanvas.getBoundingClientRect();
+    const dpr  = Math.min(devicePixelRatio, 2);
+    tcanvas.width  = Math.max(1, Math.floor(rect.width  * dpr));
+    tcanvas.height = Math.max(1, Math.floor(rect.height * dpr));
+    tctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+resizeTritonPlot();
+new ResizeObserver(() => { resizeTritonPlot(); drawTritonPlot(); }).observe(tcanvas);
+
+function drawTritonPlot() {
+    const W = tcanvas.clientWidth, H = tcanvas.clientHeight;
+    if (W < 8 || H < 8) return;
+    tctx.clearRect(0, 0, W, H);
+    const d = tritonDecay(currentQ);
+    const padL = 56, padR = 16, padT = 12, padB = 26;
+    const pw = W - padL - padR, ph = H - padT - padB;
+
+    const tEnd = d.tdis_s * 1.05;
+    const aMax = TRITON_a0 / R_NEP_M * 1.05;
+    const aMin = 0;
+    const xOf = t => padL + (t / tEnd) * pw;
+    const yOf = aRN => padT + (1 - (aRN - aMin) / (aMax - aMin)) * ph;
+
+    // Grid + axes
+    tctx.strokeStyle = 'rgba(90,160,255,.10)';
+    tctx.lineWidth = 1; tctx.font = '10px ui-monospace, monospace'; tctx.textBaseline = 'middle';
+    for (let k = 0; k <= 5; k++) {
+        const f = k / 5, x = padL + f * pw;
+        tctx.beginPath(); tctx.moveTo(x, padT); tctx.lineTo(x, padT + ph); tctx.stroke();
+        tctx.fillStyle = '#69789a'; tctx.textAlign = 'center';
+        tctx.fillText((d.tdis_gyr * f * 1.05).toFixed(1), x, H - padB + 13);
+    }
+    for (let k = 0; k <= 4; k++) {
+        const f = k / 4, y = padT + f * ph;
+        tctx.beginPath(); tctx.moveTo(padL, y); tctx.lineTo(W - padR, y); tctx.stroke();
+        const v = aMax - f * (aMax - aMin);
+        tctx.fillStyle = '#69789a'; tctx.textAlign = 'right';
+        tctx.fillText(v.toFixed(0), padL - 6, y);
+    }
+    tctx.fillStyle = 'rgba(90,160,255,.55)'; tctx.textAlign = 'center';
+    tctx.save(); tctx.translate(13, padT + ph/2); tctx.rotate(-Math.PI/2);
+    tctx.fillText('a  (Neptune radii)', 0, 0); tctx.restore();
+    tctx.fillStyle = 'rgba(105,120,154,.8)';
+    tctx.fillText('time from now  (Gyr)', padL + pw/2, H - 6);
+
+    // Roche limit line
+    tctx.strokeStyle = '#ff7a7a'; tctx.setLineDash([5,4]); tctx.lineWidth = 1.5;
+    tctx.beginPath(); tctx.moveTo(padL, yOf(d.roche_RN)); tctx.lineTo(W - padR, yOf(d.roche_RN)); tctx.stroke();
+    tctx.setLineDash([]);
+    tctx.fillStyle = '#ff9a9a'; tctx.textAlign = 'left';
+    tctx.fillText('Roche limit → ring', padL + 6, yOf(d.roche_RN) - 8);
+
+    // a(t) curve
+    tctx.strokeStyle = '#e6b98a'; tctx.lineWidth = 2.4;
+    tctx.beginPath();
+    const STEPS = 240;
+    for (let i = 0; i <= STEPS; i++) {
+        const t = (i / STEPS) * d.tdis_s;
+        const aRN = d.aAt(t) / R_NEP_M;
+        const x = xOf(t), y = yOf(aRN);
+        if (i === 0) tctx.moveTo(x, y); else tctx.lineTo(x, y);
+    }
+    tctx.stroke();
+
+    // Disruption marker
+    tctx.fillStyle = '#ff7a7a';
+    tctx.beginPath(); tctx.arc(xOf(d.tdis_s), yOf(d.roche_RN), 4, 0, Math.PI*2); tctx.fill();
+
+    // Readouts
+    document.getElementById('rd-tri-a').textContent    = (TRITON_a0 / R_NEP_M).toFixed(2) + ' R_N';
+    document.getElementById('rd-tri-dadt').textContent = d.dadt_cm_yr.toFixed(2) + ' cm/yr';
+    document.getElementById('rd-roche').textContent    = d.roche_RN.toFixed(2) + ' R_N (' + (ROCHE_M/KM).toFixed(0) + ' km)';
+    document.getElementById('rd-tdis').textContent     = d.tdis_gyr.toFixed(2) + ' Gyr';
+}
+const elQSlider = document.getElementById('ns-q-slider');
+const elQVal    = document.getElementById('ns-q-val');
+elQSlider.addEventListener('input', () => {
+    currentQ = parseInt(elQSlider.value, 10);
+    elQVal.textContent = 'Q = ' + currentQ;
+    drawTritonPlot();
+});
+
+// ── Loop ─────────────────────────────────────────────────────────────
+let lastT = performance.now();
+function tick(now) {
+    const dt = (now - lastT) / 1000;
+    lastT = now;
+
+    if (sim.live) {
+        const nowJD = Date.now() / 86400000 + 2440587.5;
+        const targetTs = simTFromJD(nowJD);
+        const diff = targetTs - sim.t_s;
+        if (Math.abs(diff) < 7 * 86400) step(diff);
+        else { reseedAtSimT(targetTs); clearTrails(); }
+    } else if (sim.playing) {
+        step(sim.direction * sim.speed * dt);
+    }
+
+    syncMeshesFromState();
+    starUniforms.uTime.value = now * 0.001;
+    nepSkin.update(now * 0.001);
+
+    stepCameraTween(now);
+    applyFocusOrPov();
+
+    if (Math.abs(sim.t_s - lastSampleT) >= SAMPLE_INTERVAL_S || plotCount === 0) {
+        const res = computeDynamics();
+        pushSample(sim.t_s, res.dl, res.eNa, res.eDe, res.eGa);
+        updateReadouts(res);
+        drawPlot();
+        lastSampleT = sim.t_s;
+    }
+    refreshSidePanel();
+    refreshPinnedTooltip();
+    updateSelRing();
+    updateHovRing(hoveredKey);
+    updateLabels();
+    detectConjunctions();
+    updateHud();
+
+    if (sim.live || sim.playing) syncInputsFromSim();
+
+    controls.update();
+    renderer.render(scene, camera);
+    requestAnimationFrame(tick);
+}
+
+function buildFocusOptions() {
+    let html = '<option value="" selected>Free (system view)</option>';
+    for (const sec of PICKER_SECTIONS) {
+        html += `<optgroup label="${sec.label}">`;
+        for (const key of sec.keys) {
+            const b = getBody(key);
+            if (b) html += `<option value="${key}">${b.name}</option>`;
+        }
+        html += '</optgroup>';
+    }
+    elFocus.innerHTML = html;
+}
+
+// ── Boot ─────────────────────────────────────────────────────────────
+buildBodyPicker();
+buildBookmarks();
+buildFocusOptions();
+selectBody('triton');
+syncMeshesFromState();
+syncInputsFromSim();
+{
+    const res = computeDynamics();
+    pushSample(sim.t_s, res.dl, res.eNa, res.eDe, res.eGa);
+    updateReadouts(res);
+}
+drawPlot();
+drawTritonPlot();
+updateHud();
+requestAnimationFrame(t => { lastT = t; tick(t); });
+</script>
+
+</body>
+</html>

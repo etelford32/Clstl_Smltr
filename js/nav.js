@@ -53,6 +53,7 @@ const NAV_DROPDOWNS = [
             { href: 'gannon-superstorm.html', label: 'Gannon Superstorm', sub: 'May 2024 G5 hindcast · MHD-corrected density', tier: 'public', icon: '⚡', badge: 'NEW', id: 'gannon-superstorm' },
             { href: 'solar-system.html',       label: 'Solar System',   sub: '31 moons · live Galilean N-body', tier: 'public', icon: '🪐', id: 'solar' },
             { href: 'jupiter-system.html', label: 'Jupiter System', sub: 'Galilean moons · 4:2:1 Laplace resonance', tier: 'public', icon: '🪐', id: 'jupiter-system' },
+            { href: 'neptune-system.html', label: 'Neptune System', sub: 'Retrograde Triton · rings & arcs · J₂ N-body', tier: 'public', icon: '🔵', badge: 'NEW', id: 'neptune-system' },
             { href: 'sun.html',           label: 'The Sun',        sub: 'Real-time solar surface view',    tier: 'public', icon: '☀️' },
             { href: 'missions.html',      label: 'Space Missions', sub: 'Inner solar system fleet roster', tier: 'public', icon: '🛸', id: 'missions' },
             { href: 'mission-planner.html', label: 'Mission Planner', sub: 'Launch rockets · plan Moon & Mars trips', tier: 'public', icon: '🎯', badge: 'NEW', id: 'mission-planner' },
