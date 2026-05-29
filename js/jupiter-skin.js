@@ -158,6 +158,14 @@ export class JupiterSkin {
         if (opts.epochYear !== undefined) this.jupiterU.u_epoch_year.value = opts.epochYear;
         if (opts.diffusion !== undefined) this.jupiterU.u_diffusion.value  = opts.diffusion;
         if (opts.windScale !== undefined) this.jupiterU.u_wind_scale.value = opts.windScale;
+        // System-III rotation phase in uv units [0,1). Callers that track a
+        // simulation clock pass a pre-wrapped opts.spinPhase (full precision at
+        // far epochs); otherwise fall back to wall-clock at the true period.
+        if (opts.spinPhase !== undefined) {
+            this.jupiterU.u_spin.value = opts.spinPhase;
+        } else {
+            this.jupiterU.u_spin.value = ((t / ROT_PERIOD_S) % 1 + 1) % 1;
+        }
     }
 
     /** Set the decimal-year epoch (drives GRS size + SEB cycle). */

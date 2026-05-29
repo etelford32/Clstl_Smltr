@@ -64,10 +64,35 @@ export function sampleWind(latDeg) {
 }
 
 /**
- * Build a 1-D data texture of the normalised profile for the cloud shader.
- * Encodes v01 = u/WIND_PEAK_MS * 0.5 + 0.5 into the red channel (8-bit);
- * the shader decodes u_norm = (r*2 - 1). Linear-filtered + clamped so the
- * shader can finite-difference it for shear.
+ * Belt(1) / zone(0) classification derived from the wind shear.
+ *
+ * Belts are cyclonic and zones anticyclonic — i.e. the sign of the relative
+ * vorticity ζ = -du/dy relative to the local Coriolis parameter f ∝ sin(lat).
+ * So "belt-ness" ∝ -sign(lat)·du/dlat. The shear is smoothed over a few
+ * degrees so the choppy digitized profile collapses to the major belts/zones,
+ * and the broad equatorial jet is forced bright (it is the Equatorial Zone,
+ * which the mid-latitude vorticity rule does not describe). Returns [0,1].
+ */
+export function bandField(latDeg) {
+    // Smoothed meridional shear du/dlat (m/s per degree).
+    let s = 0, n = 0;
+    for (let d = -4; d <= 4; d++) {
+        s += (sampleWind(latDeg + d + 1) - sampleWind(latDeg + d - 1)) / 2;
+        n++;
+    }
+    s /= n;
+    const cyclonic = -Math.sign(latDeg || 1) * s;          // > 0 → belt
+    let belt = 0.5 + cyclonic / 22;
+    belt = Math.max(0, Math.min(1, belt));
+    const eq = Math.exp(-(latDeg * latDeg) / (2 * 6.5 * 6.5));   // EZ ≈ ±6.5°
+    return belt * (1 - eq) + 0.06 * eq;                    // force EZ bright
+}
+
+/**
+ * Build a 1-D data texture for the cloud shader. Red = normalised wind
+ * (v01 = u/WIND_PEAK_MS·0.5 + 0.5; decode u_norm = r·2 - 1, finite-difference
+ * for shear). Green = belt/zone classification from bandField (so the visible
+ * bands sit on the real jets). Linear-filtered + clamped.
  *
  * @param {object} THREE  three.js namespace
  * @param {number} [N=256]
@@ -78,8 +103,10 @@ export function buildWindTexture(THREE, N = 256) {
     for (let i = 0; i < N; i++) {
         const latDeg = (i / (N - 1)) * 180 - 90;          // -90 … +90
         const v01 = sampleWind(latDeg) / WIND_PEAK_MS * 0.5 + 0.5;
-        const b = Math.round(Math.max(0, Math.min(1, v01)) * 255);
-        data[i * 4] = b; data[i * 4 + 1] = b; data[i * 4 + 2] = b; data[i * 4 + 3] = 255;
+        data[i * 4]     = Math.round(Math.max(0, Math.min(1, v01)) * 255);
+        data[i * 4 + 1] = Math.round(bandField(latDeg) * 255);
+        data[i * 4 + 2] = 0;
+        data[i * 4 + 3] = 255;
     }
     const tex = new THREE.DataTexture(data, N, 1, THREE.RGBAFormat);
     tex.minFilter = THREE.LinearFilter;

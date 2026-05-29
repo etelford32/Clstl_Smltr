@@ -62,7 +62,8 @@ export const JUPITER_FRAG = /* glsl */`
 
     uniform float u_time;        // wall-clock seconds (continuous churn)
     uniform float u_quality;     // 0 / 1 / 2
-    uniform float u_rot_phase;   // cumulative System-II rotation (radians)
+    uniform float u_rot_phase;   // cumulative System-II rotation (radians, legacy)
+    uniform float u_spin;        // System-III rotation phase, uv units [0,1) (JS-wrapped)
     uniform float u_sim_days;    // simulation days from J2000 (evolution)
     uniform float u_epoch_year;  // decimal year (decadal evolution)
     uniform float u_diffusion;   // 0..1 meridional eddy-diffusion strength
@@ -154,15 +155,22 @@ export const JUPITER_FRAG = /* glsl */`
 
     // ── Band structure (zone=0 bright, belt=1 dark) ─────────────────────
     // flowUv is the wind-advected, curl-warped sample coordinate; dif
-    // scales meridional eddy-diffusion blur of the turbulent detail.
+    // scales meridional eddy-diffusion blur of the turbulent detail. When a
+    // measured profile is bound, the base belt/zone field is read from the
+    // wind texture's green channel (belts = cyclonic shear, computed in
+    // jupiter-wind-profile.js) so the dark belts sit exactly on the real
+    // jets; otherwise an analytic band pattern is used as a fallback.
     float bandPattern(float lat, vec2 flowUv, float t, float dif) {
-        float bands = sin(lat * 22.0) * 0.5 + 0.5;
-
-        float eqWidth = smoothstep(0.12, 0.0, abs(lat));
-        bands = mix(bands, 0.0, eqWidth * 0.6);
-
-        float sebZone = smoothstep(0.12, 0.08, lat) * smoothstep(-0.38, -0.12, lat);
-        bands = mix(bands, 1.0, sebZone * 0.4);
+        float bands;
+        if (u_useWindTex > 0.5) {
+            bands = texture2D(u_windTex, vec2(lat * 0.5 + 0.5, 0.5)).g;
+        } else {
+            bands = sin(lat * 22.0) * 0.5 + 0.5;
+            float eqWidth = smoothstep(0.12, 0.0, abs(lat));
+            bands = mix(bands, 0.0, eqWidth * 0.6);
+            float sebZone = smoothstep(0.12, 0.08, lat) * smoothstep(-0.38, -0.12, lat);
+            bands = mix(bands, 1.0, sebZone * 0.4);
+        }
 
         if (u_quality > 0.5) {
             // Turbulent band edges, advected with the flow.
@@ -249,18 +257,25 @@ export const JUPITER_FRAG = /* glsl */`
         vec2 uv  = vUv;
         float lat = (uv.y - 0.5) * 2.0;
 
-        // ── Advection: differential zonal shear + ambient spin ──────────
-        // Sim-time drives the evolution; a small wall-clock term keeps the
-        // flow alive while paused.
-        float advT  = (u_sim_days * 0.65 + u_time * 0.06) * u_wind_scale;
-        float spin  = u_time * 0.004 + u_rot_phase * 0.00001;
+        // ── Advection: everything in longitude is driven by SIM time ────
+        //   spin       = System-III rotation phase (wrapped in JS → u_spin,
+        //                so far-from-J2000 epochs keep full float precision).
+        //   zonalPhase = differential drift of each latitude at its measured
+        //                wind speed, in true uv/day: u[m/s]·86400/(2π·R_eq)/cosφ
+        //                with u = zonalWind·WIND_PEAK (the 0.0289 folds those in).
+        //   churn      = a slow wall-clock term used ONLY to morph the small-
+        //                scale turbulence, so clouds stay alive when paused at
+        //                a date without drifting in longitude.
+        float spin  = u_spin;
+        float churn = u_time * 0.01;
         float uWind = zonalWind(lat);
-        float zonalPhase = uWind * advT * 0.02;
+        float cosphi = max(cos(lat * 1.5707963), 0.2);
+        float zonalPhase = uWind * (u_sim_days * 0.0289 * u_wind_scale) / cosphi;
         vec2 flowUv = vec2(fract(uv.x + spin - zonalPhase), uv.y);
 
-        // ── Curl-noise flow warp (Q2) ───────────────────────────────────
+        // ── Curl-noise flow warp (Q2) — morphs with wall-clock churn ────
         if (u_quality > 1.5) {
-            vec2 w = curlFlow(vec2(flowUv.x * 8.0, lat * 6.0) + advT * 0.05);
+            vec2 w = curlFlow(vec2(flowUv.x * 8.0, lat * 6.0) + churn);
             flowUv += w * vec2(0.010, 0.006);
         }
 
@@ -312,10 +327,10 @@ export const JUPITER_FRAG = /* glsl */`
             cloudCol *= 0.88 + cloudNoise * 0.24;
 
             // High ammonia cloud layer (forms in upwelling zones).
-            float hi  = smoothstep(0.55, 0.82, fbm(flowUv * vec2(14.0, 7.0) + advT * 0.04, 3)) * zoneMask;
+            float hi  = smoothstep(0.55, 0.82, fbm(flowUv * vec2(14.0, 7.0) + churn, 3)) * zoneMask;
             // Shadow it casts on the deck, offset along the light direction.
             vec2  L   = normalize(vec2(0.85, 0.22));
-            float shf = smoothstep(0.55, 0.82, fbm((flowUv - L * 0.018) * vec2(14.0, 7.0) + advT * 0.04, 3)) * zoneMask;
+            float shf = smoothstep(0.55, 0.82, fbm((flowUv - L * 0.018) * vec2(14.0, 7.0) + churn, 3)) * zoneMask;
             cloudCol *= 1.0 - shf * 0.22;                                  // cast shadow → relief
             cloudCol  = mix(cloudCol, vec3(0.95, 0.93, 0.84), hi * 0.55);  // bright high tops
         }
@@ -363,6 +378,7 @@ export function createJupiterUniforms(THREE) {
         u_time:       { value: 0.0 },
         u_quality:    { value: 1.0 },
         u_rot_phase:  { value: 0.0 },
+        u_spin:       { value: 0.0 },
         u_sim_days:   { value: 0.0 },
         u_epoch_year: { value: 2025.0 },   // present-day GRS by default
         u_diffusion:  { value: 0.6 },

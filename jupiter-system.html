@@ -696,6 +696,7 @@ body {
             <div class="js-plot-legend">
                 <span class="lg"><span class="swatch" style="background:#7fd0ff"></span>eastward (prograde)</span>
                 <span class="lg"><span class="swatch" style="background:#ff9a7f"></span>westward (retrograde)</span>
+                <span class="lg"><span class="swatch" style="background:#5e4636"></span>belt (shaded)</span>
                 <span class="lg"><span class="swatch" style="background:#ffb070"></span>GRS latitude</span>
             </div>
         </div>
@@ -703,7 +704,9 @@ body {
             <canvas id="js-wind-canvas"></canvas>
         </div>
         <p class="js-warn">Each latitude's clouds are advected at this measured eastward velocity, so the
-        bands shear past one another exactly as Jupiter's jets dictate. The equatorial zone super-rotates at
+        bands shear past one another exactly as Jupiter's jets dictate. The shaded belts/zones behind the curve are
+        <em>derived from the shear</em> (belts = cyclonic, zones = anticyclonic) by the same classifier the renderer
+        uses, so the dark belts sit on the real jets. The equatorial zone super-rotates at
         <code>~+140 m/s</code>; the planet's fastest jet sits at <code>~24°N (~+145 m/s)</code>; and the Great Red Spot
         rolls between a retrograde jet on its poleward flank and a prograde jet to its south. Profile digitized from
         the published Voyager + Cassini mean winds (Limaye 1986; García-Melendo &amp; Sánchez-Lavega 2001;
@@ -716,7 +719,7 @@ body {
         <p><strong>Tidal heating.</strong> If Io's orbit were a perfect circle, tidal stretching from Jupiter would be static — no heating. The Laplace resonance with Europa pumps Io's eccentricity up to ~0.0041, which causes the tidal bulge to flex by ~100 m every orbit. Dissipation of that flexing pours ~10¹⁴ W into Io's interior, more than a thousand times Earth's geothermal flux per unit area, powering the most volcanically active body in the solar system.</p>
         <p><strong>Stable for billions of years.</strong> Pierre-Simon Laplace proved the resonance dynamically stable in 1788. Numerical experiments confirm it has held since shortly after the moons formed; tidal evolution drove the system <em>into</em> the resonance, not out of it. The same physics binds Pluto–Charon, Saturn's Mimas–Tethys, and exoplanet systems like TRAPPIST-1.</p>
         <p><strong>What you're seeing.</strong> A pure Newtonian Yoshida-4 integration in barycentric SI units. No fudge, no special-case forcing — the resonance falls out of pairwise gravity alone. Energy and angular momentum are bounded (symplectic) so the integration stays physical for arbitrarily long runs.</p>
-        <p><strong>The flowing atmosphere.</strong> Jupiter's clouds are rendered as a 2D advected fluid driven by the <em>measured zonal-wind profile</em> plotted above: each latitude's clouds shear at their real jet velocity, divergence-free <em>curl noise</em> warps the field so eddies swirl rather than slide, and a meridional eddy-diffusion blur mixes detail across jets. A second ammonia-cloud layer casts shadows on the deck to read as depth. Riding their bands are the <em>vortex zoo</em> — the Great Red Spot, Oval BA ("Red Spot Jr.") at ~33°S, white-oval anticyclones in the southern temperate region, and dark brown barges in the North Equatorial Belt. Two clocks drive it — wall time for continuous churn, and simulation time for evolution that tracks the controls above: scrub the date and the Great Red Spot drifts (~1.25°/day) and shrinks along its historical track (~40,000 km in the 1880s to ~14,000 km today), while the South Equatorial Belt fades and revives. The wind profile is a digitization of the published Voyager + Cassini winds (~±15 m/s); the GRS history is an approximate fit — neither is a per-image dataset.</p>
+        <p><strong>The flowing atmosphere.</strong> Jupiter's clouds are rendered as a 2D advected fluid driven by the <em>measured zonal-wind profile</em> plotted above. The bright zones and dark belts are not hand-placed — they are <em>derived from the wind shear</em> (belts cyclonic, zones anticyclonic), so the banding sits on the real jets. Each latitude then advects at its true velocity relative to the planet's System III rotation, divergence-free <em>curl noise</em> warps the field so eddies swirl rather than slide, and a meridional eddy-diffusion blur mixes detail across jets. A second ammonia-cloud layer casts shadows on the deck to read as depth. Riding their bands are the <em>vortex zoo</em> — the Great Red Spot, Oval BA ("Red Spot Jr.") at ~33°S, white-oval anticyclones in the southern temperate region, and dark brown barges in the North Equatorial Belt. The motion is driven by the simulation clock: the planet rotates at its true System III period (9h55m30s), the jets advect, and the date sets the epoch — so pausing freezes the real configuration at that date (a slow wall-clock term only keeps the fine turbulence breathing). Scrub the date and the Great Red Spot drifts (~1.25°/day) and shrinks along its historical track (~40,000 km in the 1880s to ~14,000 km today), while the South Equatorial Belt fades and revives; press Play or Live to watch it rotate. The wind profile is a digitization of the published Voyager + Cassini winds (~±15 m/s); the GRS history is an approximate fit — neither is a per-image dataset.</p>
     </section>
 
     <section class="js-panel">
@@ -742,7 +745,7 @@ import * as THREE        from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { JupiterSkin }   from './js/jupiter-skin.js';
 import { grsDiameterKm } from './js/jupiter-shader.js';
-import { JUPITER_ZONAL_WIND, sampleWind, WIND_MAX_ABS_MS } from './js/jupiter-wind-profile.js';
+import { JUPITER_ZONAL_WIND, sampleWind, WIND_MAX_ABS_MS, bandField } from './js/jupiter-wind-profile.js';
 import {
     yoshida4Step, totalEnergy, elementsToState, stateToElements, G_SI,
 } from './js/gravity-lab/physics.js';
@@ -2672,13 +2675,19 @@ function tick(now) {
 
     syncMeshesFromState();
     starUniforms.uTime.value = now * 0.001;
-    // Drive the atmosphere: wall-clock for continuous churn; sim time +
-    // epoch for the evolution that tracks the page's time controls.
+    // Drive the atmosphere from the simulation clock: rotation, zonal-wind
+    // advection, and epoch evolution all track the page's time controls; a
+    // wall-clock term inside the shader only morphs fine turbulence so the
+    // clouds stay alive when paused at a date.
     const simDays   = sim.t_s / 86400;
     const epochYear = 2000.0 + simDays / 365.25;   // t_s = 0 at J2000 ≈ 2000.0
+    // System-III rotation phase (period 9h55m29.7s ⇒ 2.41817 rev/day),
+    // wrapped here in double precision so far epochs stay smooth.
+    const spinPhase = ((simDays * 2.41817) % 1 + 1) % 1;
     jupSkin.update(now * 0.001, {
         simDays,
         epochYear,
+        spinPhase,
         diffusion: atmo.diffusion,
         windScale: atmo.windScale,
     });
@@ -2748,6 +2757,19 @@ function drawWindProfile() {
     const yOf = lat => padT + (1 - (lat + WIND_LAT_RANGE) / (2 * WIND_LAT_RANGE)) * ph;  // N up
     const xOf = v   => padL + (v + WIND_VMAX) / (2 * WIND_VMAX) * pw;
     const x0  = xOf(0);
+
+    // Belt/zone shading derived from the wind shear (same classifier the
+    // shader uses) — shows the dark belts sitting on the real jets.
+    const dLat = 1;
+    for (let lat = -WIND_LAT_RANGE; lat <= WIND_LAT_RANGE; lat += dLat) {
+        const b = bandField(lat);                       // 0 zone (bright) … 1 belt (dark)
+        const y0 = yOf(lat + dLat / 2), y1 = yOf(lat - dLat / 2);
+        // belts → warm brown wash, zones → pale wash
+        const t = b;
+        const col = `rgba(${Math.round(150 - 80 * t)},${Math.round(120 - 70 * t)},${Math.round(95 - 60 * t)},0.22)`;
+        wctx.fillStyle = col;
+        wctx.fillRect(padL, Math.min(y0, y1), pw, Math.abs(y1 - y0) + 1);
+    }
 
     // Grid + axes
     wctx.font = '10px ui-monospace, monospace';
