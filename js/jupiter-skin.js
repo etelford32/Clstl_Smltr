@@ -133,13 +133,34 @@ export class JupiterSkin {
         }
     }
 
-    /** Call every frame with elapsed seconds. */
-    update(t) {
+    /**
+     * Call every frame.
+     * @param {number} t      Wall-clock seconds (continuous churn).
+     * @param {object} [opts] Evolution drivers (all optional):
+     *   @param {number} opts.simDays    Simulation days from J2000 — winds
+     *                                   advect and the GRS drifts with this.
+     *   @param {number} opts.epochYear  Decimal year — decadal GRS shrink /
+     *                                   SEB fade-revival.
+     *   @param {number} opts.diffusion  0..1 meridional eddy-diffusion blur.
+     *   @param {number} opts.windScale  Multiplies the advection rate.
+     */
+    update(t, opts = {}) {
         this.jupiterU.u_time.value = t;
         // Accumulate rotation phase (System II rate)
         this._rotPhase += (2 * Math.PI / ROT_PERIOD_S) * (1 / 60);  // assume ~60fps
         this.jupiterU.u_rot_phase.value = this._rotPhase;
+        if (opts.simDays   !== undefined) this.jupiterU.u_sim_days.value   = opts.simDays;
+        if (opts.epochYear !== undefined) this.jupiterU.u_epoch_year.value = opts.epochYear;
+        if (opts.diffusion !== undefined) this.jupiterU.u_diffusion.value  = opts.diffusion;
+        if (opts.windScale !== undefined) this.jupiterU.u_wind_scale.value = opts.windScale;
     }
+
+    /** Set the decimal-year epoch (drives GRS size + SEB cycle). */
+    setEpochYear(y) { this.jupiterU.u_epoch_year.value = y; }
+    /** Set meridional eddy-diffusion strength (0..1). */
+    setDiffusion(d) { this.jupiterU.u_diffusion.value = d; }
+    /** Multiply the zonal advection rate. */
+    setWindScale(s) { this.jupiterU.u_wind_scale.value = s; }
 
     /** Set quality tier. */
     setQuality(q) {
