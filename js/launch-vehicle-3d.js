@@ -908,7 +908,7 @@ const VIEW_PRESETS = {
     wide:         { dir: [ 0.62, 0.34,  0.85], biasY:  0.06, distMul: 1.65 },
     front:        { dir: [ 0.00, 0.16,  1.00], biasY:  0.00, distMul: 1.02 },
     side:         { dir: [ 1.00, 0.16,  0.00], biasY:  0.00, distMul: 1.02 },
-    top:          { dir: [ 0.00, 1.00,  0.001], biasY:  0.00, distMul: 1.00 },
+    top:          { dir: [ 0.00, 1.00,  0.001], biasY:  0.00, distMul: 0.85 },
     // Engines preset — bias the look-at toward the booster base. distMul is
     // a fraction of the full-stack fit-distance; we floor it to a meters
     // value below to stop tall stacks from clipping inside the booster skirt.
