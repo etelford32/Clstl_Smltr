@@ -101,26 +101,32 @@ export class JupiterSkin {
         }
 
         // ── Faint ring system ────────────────────────────────────────────────
+        // Real radii, expressed in Jupiter-radii (R_J = 71,492 km), so the
+        // ring edges line up with the inner-moonlet orbits that source them.
+        // Opacities are exaggerated ~100× for visibility.
         this._ringMeshes = [];
         if (rings) {
-            // Jupiter's rings are nearly in the equatorial plane (tilt ~3.13°)
+            // Jupiter's rings are nearly in the equatorial plane (tilt ~3.13°).
+            // [innerR (R_J), outerR (R_J), opacity, color, segments]
             const ringData = [
-                // [innerR multiplier, outerR multiplier, opacity, color]
-                [1.72, 1.81, 0.04, 0x8888aa],   // main ring
-                [1.40, 1.72, 0.02, 0x777799],   // halo ring (broader, fainter)
-                [1.81, 3.00, 0.01, 0x666688],   // gossamer rings (very faint)
+                [1.40, 1.71, 0.022, 0x6f6f92, 64],   // halo ring (thick, dusty)
+                [1.71, 1.806, 0.052, 0x9494b6, 96],   // main ring (Metis/Adrastea dust)
+                [1.806, 2.54, 0.013, 0x686888, 80],   // inner gossamer (to Amalthea)
+                [2.54, 3.11, 0.006, 0x5a5a7c, 80],   // outer gossamer (to Thebe)
             ];
-            for (const [innerM, outerM, opacity, color] of ringData) {
-                const geo = new THREE.RingGeometry(radius * innerM, radius * outerM, 64);
+            for (const [innerM, outerM, opacity, color, seg] of ringData) {
+                const geo = new THREE.RingGeometry(radius * innerM, radius * outerM, seg);
                 const mat = new THREE.MeshBasicMaterial({
                     color,
                     side:        THREE.DoubleSide,
                     transparent: true,
                     opacity,
                     depthWrite:  false,
+                    blending:    THREE.AdditiveBlending,
                 });
                 const ring = new THREE.Mesh(geo, mat);
                 ring.rotation.x = Math.PI / 2 - OBLIQUITY;
+                ring.renderOrder = 1;
                 parent.add(ring);
                 this._ringMeshes.push(ring);
             }
@@ -144,6 +150,11 @@ export class JupiterSkin {
     setVisible(v) {
         this.mesh.visible = v;
         if (this._atmMesh) this._atmMesh.visible = v;
+        for (const r of this._ringMeshes) r.visible = v;
+    }
+
+    /** Toggle only the ring system (leaves the planet + atmosphere alone). */
+    setRingsVisible(v) {
         for (const r of this._ringMeshes) r.visible = v;
     }
 }
