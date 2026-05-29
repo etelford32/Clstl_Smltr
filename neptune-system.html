@@ -696,7 +696,7 @@ body {
     <section class="ns-panel">
         <h2>The rings, the arcs, and the magnetic field</h2>
         <p><strong>Five rings, named for a discovery.</strong> Galle, Le Verrier, Lassell, Arago and Adams honour the people who predicted and found Neptune. They are dark and dusty — invisible from Earth until Voyager — and far fainter than Saturn's.</p>
-        <p><strong>Arcs that shouldn't exist.</strong> The Adams ring isn't smooth: its dust bunches into bright arcs (Fraternité, Égalité, Liberté, Courage) that, left alone, should spread into a uniform ring within years. They survive because the moon <strong>Galatea</strong>, just interior, holds them in a 42:43 corotation-inclination resonance — a natural confinement mechanism we still study for exoplanet discs.</p>
+        <p><strong>Arcs that shouldn't exist.</strong> The Adams ring isn't smooth: its dust bunches into bright arcs (Fraternité, Égalité, Liberté, Courage) that, left alone, should spread into a uniform ring within years. They survive because the moon <strong>Galatea</strong>, just interior, holds them in a 42:43 corotation-inclination resonance — a natural confinement mechanism we still study for exoplanet discs. <strong>Press ▶ Play (or scrub the timeline)</strong> to watch the arc cluster orbit Neptune at the Adams-ring rate and librate slowly back and forth within its resonant trap.</p>
         <p><strong>A tilted, off-centre magnet.</strong> Neptune's magnetic dipole is inclined ~47° to its spin axis and offset ~0.55 R_N from the planet's centre — so the field strength at the cloud tops varies by an order of magnitude with longitude. Toggle <em>Dipole: ON</em> to see the field geometry.</p>
     </section>
 
@@ -1067,8 +1067,8 @@ function ghostScenePos(moonKey) {
 // ── Three.js setup ───────────────────────────────────────────────────
 const wrap = document.getElementById('ns-canvas-wrap');
 const scene  = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(46, 1, 0.05, 14000);
-camera.position.set(0, 14, 30);
+const camera = new THREE.PerspectiveCamera(42, 1, 0.05, 32000);
+camera.position.set(0, 16, 34);
 camera.lookAt(0, 0, 0);
 
 const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
@@ -1081,7 +1081,9 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.minDistance   = 1.2;
-controls.maxDistance   = 400;
+// Generous zoom-out so you can always pull the camera back past the most
+// distant moon (Neso's apoapsis sits ~2,840 R_N out).
+controls.maxDistance   = 9000;
 controls.mouseButtons = { LEFT:THREE.MOUSE.ROTATE, MIDDLE:THREE.MOUSE.DOLLY, RIGHT:null };
 
 // ── Camera state machine ─────────────────────────────────────────────
@@ -1112,15 +1114,15 @@ function resize() {
 resize();
 new ResizeObserver(resize).observe(wrap);
 
-// ── Background stars (radius beyond Neso at ~1990 units) ─────────────
+// ── Background stars (radius beyond the 9000-unit max zoom-out) ──────
 const starUniforms = { uTime:{ value:0 } };
 {
-    const n = 3200;
+    const n = 3600;
     const positions = new Float32Array(n * 3);
     const colors    = new Float32Array(n * 3);
     const sizes     = new Float32Array(n);
     for (let i = 0; i < n; i++) {
-        const r  = 2800 + Math.random() * 1000;
+        const r  = 12000 + Math.random() * 4000;
         const th = Math.random() * Math.PI * 2;
         const ph = Math.acos(2 * Math.random() - 1);
         positions[i*3]   = r * Math.sin(ph) * Math.cos(th);
@@ -1163,7 +1165,7 @@ const starUniforms = { uTime:{ value:0 } };
 const nepGroup = new THREE.Group();
 nepGroup.rotation.x = OBLIQUITY;
 scene.add(nepGroup);
-const nepSkin = new NeptuneSkin(nepGroup, { radius:1.0, quality:'medium', segments:56 });
+const nepSkin = new NeptuneSkin(nepGroup, { radius:1.0, quality:'high', segments:64 });
 nepSkin.mesh.userData = { kind:'planet', key:'neptune', label:'Neptune' };
 
 // Soft outer halo (methane blue).
@@ -1200,7 +1202,7 @@ const TRAIL_MAX = 10800;
 
 function makeMoon(b) {
     const r = b.radius_km / R_NEP_KM;
-    const rVis = Math.max(r * 9, 0.05);
+    const rVis = Math.max(r * 13, 0.07);
     const m = new THREE.Mesh(
         new THREE.SphereGeometry(rVis, 22, 22),
         new THREE.MeshStandardMaterial({
@@ -1281,7 +1283,7 @@ function minorVisRadius(m) {
     // Floors so the far irregulars stay visible from the wide-field camera
     // (Neso sits ~2000 units out); Nereid is closer in.
     const floor = (m.key === 'nereid') ? 2.0 : 7.0;
-    return Math.max(real * 9, floor);
+    return Math.max(real * 13, floor);
 }
 function makeMinorMoon(m) {
     const rVis = minorVisRadius(m);
@@ -1721,7 +1723,7 @@ function visualRadiusOf(key) {
     if (key === 'neptune') return 1.0;
     if (isMinor(key)) return minorVisRadius(minorByKey[key]);
     const b = NEPTUNE_BODIES.find(b => b.key === key);
-    return b ? Math.max((b.radius_km / R_NEP_KM) * 9, 0.05) : 0.05;
+    return b ? Math.max((b.radius_km / R_NEP_KM) * 13, 0.07) : 0.07;
 }
 function updateSelRing() {
     if (!selected || !meshes[selected.key]) { selRing.visible = false; return; }
@@ -2098,10 +2100,11 @@ elJ2Tog.addEventListener('click', () => {
 });
 
 // ── View presets (smooth tweened) ────────────────────────────────────
+const FREE_MAX_DIST = 9000;     // zoom-out cap (same in every preset)
 const VIEW_PRESETS = {
-    top:  { pos:new THREE.Vector3(0, 40, 0.001), btn:elViewTop, distMax:400 },
-    '3d': { pos:new THREE.Vector3(0, 14, 30),    btn:elView3D,  distMax:400 },
-    equ:  { pos:new THREE.Vector3(0, 1.2, 40),   btn:elViewEqu, distMax:400 },
+    top:  { pos:new THREE.Vector3(0, 44, 0.001), btn:elViewTop, distMax:FREE_MAX_DIST },
+    '3d': { pos:new THREE.Vector3(0, 16, 34),    btn:elView3D,  distMax:FREE_MAX_DIST },
+    equ:  { pos:new THREE.Vector3(0, 1.4, 44),   btn:elViewEqu, distMax:FREE_MAX_DIST },
 };
 function clearWideFlag() {
     if (!wideOn) return;
@@ -2128,16 +2131,18 @@ elViewEqu.addEventListener('click', () => setView('equ'));
 
 elScale.addEventListener('change', () => {
     clearWideFlag();
-    let pos;
-    if (elScale.value === 'zoom') { pos = new THREE.Vector3(0, 2.4, 6.5); controls.maxDistance = 60; }
-    else                         { pos = new THREE.Vector3(0, 14, 30);   controls.maxDistance = 400; }
+    // 'zoom' frames Neptune + the rings, arcs and inner moons up close (where
+    // the planet looks largest); 'full' frames out to Triton. Zoom-out stays
+    // unrestricted in both so you can always pull back to the whole system.
+    const pos = (elScale.value === 'zoom')
+        ? new THREE.Vector3(0, 2.2, 5.8)
+        : new THREE.Vector3(0, 16, 34);
+    controls.maxDistance = FREE_MAX_DIST;
     cam.mode = 'free'; cam.focusKey = null; elFocus.value = '';
     startCameraTween(pos, new THREE.Vector3(0, 0, 0));
 });
 
 // ── Wide-field / fullscreen ──────────────────────────────────────────
-const WINDOWED_MAX_DIST = 400;
-const WIDE_MAX_DIST      = 9000;
 const stageWrap = document.getElementById('ns-canvas-wrap');
 let wideOn = false;
 function setWide(on) {
@@ -2145,12 +2150,12 @@ function setWide(on) {
     elViewWide.classList.toggle('on', on);
     elViewWide.textContent = on ? '⤡ Exit wide' : '⤢ Wide field';
     cam.mode = 'free'; cam.focusKey = null; elFocus.value = '';
+    controls.maxDistance = FREE_MAX_DIST;
     if (on) {
-        controls.maxDistance = WIDE_MAX_DIST;
-        startCameraTween(new THREE.Vector3(0, 1100, 1900), new THREE.Vector3(0, 0, 0), 900);
+        // Pull far enough out to actually frame Neso's orbit (~2,840 R_N).
+        startCameraTween(new THREE.Vector3(0, 4200, 7400), new THREE.Vector3(0, 0, 0), 1000);
         if (stageWrap.requestFullscreen) stageWrap.requestFullscreen().catch(() => {});
     } else {
-        controls.maxDistance = WINDOWED_MAX_DIST;
         if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
         setView('3d');
     }
@@ -2435,6 +2440,7 @@ function tick(now) {
     syncMeshesFromState();
     starUniforms.uTime.value = now * 0.001;
     nepSkin.update(now * 0.001);
+    nepSkin.setSimTime(sim.t_s);     // arcs orbit + librate with the timeline
 
     stepCameraTween(now);
     applyFocusOrPov();
