@@ -31,6 +31,7 @@
 
 import * as THREE from 'three';
 import { JUPITER_VERT, JUPITER_FRAG, createJupiterUniforms } from './jupiter-shader.js';
+import { buildWindTexture } from './jupiter-wind-profile.js';
 
 const QUALITY_MAP = { low: 0, medium: 1, high: 2 };
 const D2R = Math.PI / 180;
@@ -65,6 +66,10 @@ export class JupiterSkin {
         // ── Cloud deck ───────────────────────────────────────────────────────
         this.jupiterU = createJupiterUniforms(THREE);
         this.jupiterU.u_quality.value = QUALITY_MAP[quality] ?? 1;
+
+        // Drive the cloud shader's zonal shear from the measured wind profile.
+        this.jupiterU.u_windTex.value    = buildWindTexture(THREE);
+        this.jupiterU.u_useWindTex.value = 1.0;
 
         const cloudMat = new THREE.ShaderMaterial({
             vertexShader:   JUPITER_VERT,

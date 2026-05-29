@@ -67,6 +67,8 @@ export const JUPITER_FRAG = /* glsl */`
     uniform float u_epoch_year;  // decimal year (decadal evolution)
     uniform float u_diffusion;   // 0..1 meridional eddy-diffusion strength
     uniform float u_wind_scale;  // multiplies advection rate
+    uniform sampler2D u_windTex; // measured zonal-wind profile (R = u encoded)
+    uniform float u_useWindTex;  // >0.5 → sample u_windTex instead of analytic
 
     varying vec3 vNormalView;
     varying vec3 vLocalPos;
@@ -112,10 +114,16 @@ export const JUPITER_FRAG = /* glsl */`
     }
 
     // ── Zonal-wind profile u(lat) ───────────────────────────────────────
-    // Normalised eastward velocity: strong prograde equatorial jet plus
-    // alternating mid-latitude jets, tapering to zero at the poles. lat in
-    // [-1, 1] (S→N). Sign = jet direction; magnitude ~ jet speed.
+    // Normalised eastward velocity (units of WIND_PEAK_MS). lat in [-1, 1]
+    // (S→N) maps to planetographic latitude lat*90°. When a measured profile
+    // texture is supplied (u_useWindTex), it is sampled and decoded
+    // (u_norm = R*2 - 1); otherwise a smooth analytic profile is used so
+    // consumers that don't bind the texture still render sensibly.
     float zonalWind(float lat) {
+        if (u_useWindTex > 0.5) {
+            float r = texture2D(u_windTex, vec2(lat * 0.5 + 0.5, 0.5)).r;
+            return r * 2.0 - 1.0;
+        }
         float eq   = exp(-lat * lat / 0.018);             // equatorial super-rotation
         float jets = 0.55 * sin(lat * PI * 5.2);          // ~5 jets / hemisphere
         jets      *= smoothstep(0.04, 0.22, abs(lat));    // let the eq jet dominate near 0
@@ -172,9 +180,12 @@ export const JUPITER_FRAG = /* glsl */`
 
         if (u_quality > 1.5) {
             // Kelvin–Helmholtz billows: oriented rolls where shear is high.
+            // shN normalises shear so this works for both the measured-texture
+            // profile (sharp jets → large shear) and the analytic fallback.
             float sh = windShear(lat);
-            float rolls = sin(flowUv.x * 120.0 + sh * 6.0 + lat * 30.0);
-            bands += rolls * 0.05 * smoothstep(2.0, 9.0, abs(sh));
+            float shN = abs(sh) / 18.0;
+            float rolls = sin(flowUv.x * 120.0 + sh * 4.0 + lat * 30.0);
+            bands += rolls * 0.05 * smoothstep(0.35, 1.1, shN);
         }
 
         return clamp(bands, 0.0, 1.0);
@@ -192,7 +203,7 @@ export const JUPITER_FRAG = /* glsl */`
     float grsPattern(vec2 flowUv, float lat, float t, float sizeScale) {
         if (u_quality < 0.5) return 0.0;
 
-        float grsLat = -0.38;                                  // ~22° S
+        float grsLat = -0.245;                                 // ~22° S (lat·90°)
         // Drifts ~1.25°/day in System II; rides the band flow via flowUv.
         float grsLon = fract(0.35 - u_sim_days * (1.25 / 360.0));
 
@@ -216,6 +227,19 @@ export const JUPITER_FRAG = /* glsl */`
             spot *= 1.0 - 0.25 * smoothstep(0.45, 0.0, dist);   // hollow centre
         }
         return spot;
+    }
+
+    // ── Generic oval vortex ─────────────────────────────────────────────
+    // Coverage [0,1] of an oval centred at (lonC, latC) in the advected flow
+    // frame, with longitudinal/latitudinal radii (rx, ry). Used for the
+    // smaller members of the vortex zoo (Oval BA, white ovals, brown barges).
+    float ovalSpot(vec2 flowUv, float lat, float lonC, float latC, float rx, float ry) {
+        float dlon = flowUv.x - lonC;
+        if (dlon > 0.5)  dlon -= 1.0;
+        if (dlon < -0.5) dlon += 1.0;
+        float dlat = lat - latC;
+        float d = sqrt((dlon * dlon) / (rx * rx) + (dlat * dlat) / (ry * ry));
+        return 1.0 - smoothstep(0.0, 1.0, d);
     }
 
     void main() {
@@ -246,7 +270,7 @@ export const JUPITER_FRAG = /* glsl */`
         vec3  bCol  = beltColor(lat);
 
         // SEB (~7-21° S) periodically fades toward zone colour, then revives.
-        float sebMask = smoothstep(-0.42, -0.30, lat) * (1.0 - smoothstep(-0.16, -0.06, lat));
+        float sebMask = smoothstep(-0.24, -0.20, lat) * (1.0 - smoothstep(-0.10, -0.06, lat));
         float sebFade = 0.5 + 0.5 * sin(u_epoch_year * 6.2831853 / 7.0 + 1.0);
         bCol = mix(bCol, mix(bCol, zCol, 0.75), sebMask * sebFade);
 
@@ -261,6 +285,25 @@ export const JUPITER_FRAG = /* glsl */`
             vec3 grsCenter = vec3(0.82, 0.42, 0.18);
             vec3 grsBlend  = mix(grsCol, grsCenter, grs * grs);
             cloudCol = mix(cloudCol, grsBlend, grs * 0.85);
+        }
+
+        // ── Vortex zoo (Q1+) — ride their bands, drift slowly in longitude ──
+        if (u_quality > 0.5) {
+            // Oval BA "Red Spot Jr." (~33° S), ~half the GRS, pale red.
+            float ba = ovalSpot(flowUv, lat, fract(0.70 - u_sim_days * 0.0006),
+                                -0.367, 0.045, 0.020);
+            cloudCol = mix(cloudCol, vec3(0.80, 0.52, 0.42), ba * 0.7);
+
+            // White ovals — southern temperate anticyclones (~40° S).
+            float wo = ovalSpot(flowUv, lat, fract(0.20 - u_sim_days * 0.0009), -0.44, 0.030, 0.016)
+                     + ovalSpot(flowUv, lat, fract(0.55 - u_sim_days * 0.0009), -0.45, 0.026, 0.015)
+                     + ovalSpot(flowUv, lat, fract(0.85 - u_sim_days * 0.0009), -0.43, 0.028, 0.015);
+            cloudCol = mix(cloudCol, vec3(0.96, 0.94, 0.88), clamp(wo, 0.0, 1.0) * 0.75);
+
+            // Brown barges — elongated cyclones in the NEB (~16° N).
+            float bb = ovalSpot(flowUv, lat, fract(0.30 + u_sim_days * 0.0011), 0.185, 0.060, 0.012)
+                     + ovalSpot(flowUv, lat, fract(0.75 + u_sim_days * 0.0011), 0.185, 0.055, 0.012);
+            cloudCol = mix(cloudCol, vec3(0.38, 0.26, 0.17), clamp(bb, 0.0, 1.0) * 0.6);
         }
 
         // ── Cloud texture + two-layer shadow depth (Q1+) ────────────────
@@ -278,10 +321,11 @@ export const JUPITER_FRAG = /* glsl */`
         }
 
         // ── Jet-stream filaments (Q2) — makes the wind data legible ─────
+        // Bright sheared streaks trace the fastest jets of the measured
+        // profile, so the wind structure reads directly off the planet.
         if (u_quality > 1.5) {
-            float sh = windShear(lat);
-            float jet = smoothstep(4.0, 9.0, abs(sh));
-            // thin sheared streak following the local flow
+            float shN = abs(windShear(lat)) / 18.0;
+            float jet = smoothstep(0.45, 1.2, shN);
             float streak = smoothstep(0.6, 1.0, sin(flowUv.x * 200.0 + lat * 50.0) * 0.5 + 0.5);
             cloudCol = mix(cloudCol, cloudCol * 1.18, jet * streak * 0.5);
         }
@@ -309,6 +353,12 @@ export const JUPITER_FRAG = /* glsl */`
  * @param {object} THREE  three.js namespace
  */
 export function createJupiterUniforms(THREE) {
+    // 1×1 neutral-wind default texture so the sampler is always bound even
+    // when no measured profile is supplied (u_useWindTex stays 0 → analytic).
+    const flat = new THREE.DataTexture(
+        new Uint8Array([128, 128, 128, 255]), 1, 1, THREE.RGBAFormat,
+    );
+    flat.needsUpdate = true;
     return {
         u_time:       { value: 0.0 },
         u_quality:    { value: 1.0 },
@@ -317,6 +367,8 @@ export function createJupiterUniforms(THREE) {
         u_epoch_year: { value: 2025.0 },   // present-day GRS by default
         u_diffusion:  { value: 0.6 },
         u_wind_scale: { value: 1.0 },
+        u_windTex:    { value: flat },
+        u_useWindTex: { value: 0.0 },
     };
 }
 
