@@ -316,7 +316,12 @@ async function fetchEdge(url) {
 
 /** Parse a NOAA 2D-array response into an array of plain objects. */
 function parse2D(raw) {
-    if (!Array.isArray(raw) || raw.length < 2) return [];
+    // Guard raw[0] is itself an array. NOAA occasionally serves an
+    // endpoint as an object-array instead of the documented 2D "CSV-in-
+    // JSON" shape; without this, raw[0].map throws "map is not a function"
+    // (seen in fetchKpForecast, which — unlike fetchDst — didn't pre-check
+    // the row shape before calling parse2D).
+    if (!Array.isArray(raw) || raw.length < 2 || !Array.isArray(raw[0])) return [];
     const headers = raw[0].map(h => String(h).trim().toLowerCase().replace(/\s+/g, '_'));
     return raw.slice(1).map(row =>
         Object.fromEntries(headers.map((h, i) => [h, row[i]]))
