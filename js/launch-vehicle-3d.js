@@ -836,9 +836,22 @@ function buildStarfield() {
 //   distMul       → multiply fit-distance for tighter / wider shots
 
 const VIEW_PRESETS = {
-    threequarter: { dir: [ 0.62, 0.30,  0.85], biasY:  0.00, distMul: 1.10 },
-    front:        { dir: [ 0.00, 0.18,  1.00], biasY:  0.00, distMul: 1.20 },
-    side:         { dir: [ 1.00, 0.18,  0.00], biasY:  0.00, distMul: 1.20 },
+    // Default shot. Intentionally NARROW — distMul 1.0 frames the vehicle to
+    // fill the viewport (the fit already bakes in 5% padding, so the whole
+    // stack stays visible; going below 1.0 starts clipping the nose/bells),
+    // at a shallow elevation so the pad/tower scaffold stays mostly out of
+    // view. This is the "easily see the vehicle at load" frame. The looser,
+    // pulled-back context shot that used to be the default (distMul 1.10) now
+    // lives under the `wide` preset (a button), so it no longer silently
+    // "takes over" after the canvas finishes laying out.
+    // dir = unit vector from target → camera. Low Y (0.22) keeps us closer to
+    // eye-level with the stack instead of looking down its length at the deck.
+    threequarter: { dir: [ 0.55, 0.22,  0.82], biasY:  0.00, distMul: 1.00 },
+    // Pulled-back establishing shot: shows the full stack plus the pad/tower
+    // for context. This is the former default — kept as an explicit option.
+    wide:         { dir: [ 0.62, 0.34,  0.85], biasY:  0.06, distMul: 1.65 },
+    front:        { dir: [ 0.00, 0.16,  1.00], biasY:  0.00, distMul: 1.02 },
+    side:         { dir: [ 1.00, 0.16,  0.00], biasY:  0.00, distMul: 1.02 },
     top:          { dir: [ 0.00, 1.00,  0.001], biasY:  0.00, distMul: 0.85 },
     // Engines preset — bias the look-at toward the booster base. distMul is
     // a fraction of the full-stack fit-distance; we floor it to a meters
