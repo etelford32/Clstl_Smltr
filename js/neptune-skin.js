@@ -82,7 +82,6 @@ export class NeptuneSkin {
         this._parent   = parent;
         this._radius   = radius;
         this._rotPhase = 0;
-        this._arcPhase = 0;
         const tilt = tiltSelf ? OBLIQUITY : 0;
 
         // ── Cloud deck ───────────────────────────────────────────────────────

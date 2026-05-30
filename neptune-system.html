@@ -895,12 +895,6 @@ function periodDays(key) {
 function behaviorOf(key) {
     return BODY_BEHAVIOR[key] || (minorByKey[key] && minorByKey[key].behavior) || {};
 }
-function groupOf(key) {
-    if (key === 'neptune') return null;
-    if (key === 'triton')  return 'triton';
-    if (minorByKey[key])   return minorByKey[key].group;
-    return 'regular';
-}
 
 // ── Minor-moon analytic propagation (Kepler + secular precession) ─────
 function minorSecularRates(m, n_rad_s, a_m, i_rad) {
@@ -1196,7 +1190,6 @@ nepSkin.mesh.userData = { kind:'planet', key:'neptune', label:'Neptune' };
 const meshes  = { neptune: nepSkin.mesh };
 const ghostMeshes = {};
 const trailLines  = {};
-const orbitRings  = {};
 const trailBuffers = {};
 const TRAIL_MAX = 10800;
 
@@ -1245,7 +1238,6 @@ function makeMoon(b) {
     });
     const ring = new THREE.LineLoop(ringGeo, ringMat);
     scene.add(ring);
-    orbitRings[b.key] = ring;
 
     // Trail.
     const trailGeo = new THREE.BufferGeometry();
