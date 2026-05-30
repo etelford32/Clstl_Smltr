@@ -629,8 +629,9 @@ body {
             <button class="js-btn" id="js-pov" title="Place the camera on the selected moon's surface, looking toward Jupiter">👁 POV</button>
             <span class="js-label" style="margin-left:14px">Scale</span>
             <select class="js-select" id="js-scale">
-                <option value="full" selected>Realistic (Callisto fits)</option>
-                <option value="zoom">Inner moons (Io–Europa)</option>
+                <option value="zoom">Inner moonlets (Metis–Io)</option>
+                <option value="full" selected>Galilean (Callisto fits)</option>
+                <option value="system">Full system (irregulars)</option>
             </select>
             <button class="js-btn toggle" id="js-view-wide" title="Fullscreen wide-field view — zoom out to the irregular outer moons and watch their orbits precess">⤢ Wide field</button>
         </div>
@@ -1074,7 +1075,23 @@ function ghostScenePos(moonKey) {
 // ── Three.js setup ───────────────────────────────────────────────────
 const wrap = document.getElementById('js-canvas-wrap');
 const scene  = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(46, 1, 0.05, 4000);
+
+// ── System extent → camera reach ─────────────────────────────────────
+// The outermost orbit (Pasiphae apoapsis ≈ 466 R_J) sets how far the
+// camera must pull back to frame the whole system. Everything below is
+// derived from the data so distances and zoom stay self-consistent.
+const FOV_DEG = 46;
+const OUTER_APO_U = Math.max(
+    (INIT_EL.callisto.a_km * KM) / M_PER_UNIT,
+    ...MINOR_MOONS.map(m => (m.a_km * (1 + m.e) * KM) / M_PER_UNIT),
+);
+// Distance at which a sphere of radius OUTER_APO_U just fits the vertical
+// FOV, with margin — the maximum useful zoom-out.
+const SYSTEM_MAX_DIST = Math.ceil(
+    OUTER_APO_U / Math.tan((FOV_DEG / 2) * Math.PI / 180) * 1.18,
+);
+
+const camera = new THREE.PerspectiveCamera(FOV_DEG, 1, 0.05, 9000);
 camera.position.set(0, 22, 32);
 camera.lookAt(0, 0, 0);
 
@@ -1088,7 +1105,7 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.minDistance   = 1.2;
-controls.maxDistance   = 200;
+controls.maxDistance   = SYSTEM_MAX_DIST;   // reach all the way out to the irregulars
 // Right-click reserved for tooltip pinning — disable OrbitControls' pan.
 controls.mouseButtons = {
     LEFT:   THREE.MOUSE.ROTATE,
@@ -1148,7 +1165,7 @@ const starUniforms = { uTime:{ value:0 } };
     const colors    = new Float32Array(n * 3);
     const sizes     = new Float32Array(n);
     for (let i = 0; i < n; i++) {
-        const r  = 600 + Math.random() * 400;
+        const r  = 4200 + Math.random() * 2200;   // beyond the outer moons, stays a backdrop
         const th = Math.random() * Math.PI * 2;
         const ph = Math.acos(2 * Math.random() - 1);
         positions[i*3]   = r * Math.sin(ph) * Math.cos(th);
@@ -1278,18 +1295,24 @@ function makeMoon(b) {
     );
     m.add(halo);
 
-    // Static reference orbit ring (a circle at the moon's mean a, in the
-    // ecliptic plane). Doesn't need to track the live state; gives the
-    // viewer a sense of where the unperturbed orbit lies.
-    const a_u = (INIT_EL[b.key].a_km * KM) / M_PER_UNIT;
+    // Static reference orbit ring — the true 3D osculating ellipse from the
+    // moon's J2000 elements (inclination + eccentricity + node/pericentre),
+    // not a flat circle. Gives an accurate sense of the unperturbed orbit;
+    // the live N-body trail shows the perturbations on top.
+    const el  = INIT_EL[b.key];
+    const mu  = G_SI * (JOVIAN_BODIES[0].mass + b.mass);
     const N = 192;
     const ringGeo = new THREE.BufferGeometry();
     const arr = new Float32Array(N * 3);
     for (let i = 0; i < N; i++) {
-        const th = (i / N) * Math.PI * 2;
-        arr[i*3]   = a_u * Math.cos(th);
-        arr[i*3+1] = 0;
-        arr[i*3+2] = a_u * Math.sin(th);
+        const st = elementsToState({
+            a:el.a_km * KM, e:el.e, i_deg:el.i_deg,
+            raan_deg:el.raan_deg, argp_deg:el.argp_deg,
+            M_deg:(i / N) * 360, mu,
+        });
+        arr[i*3]     =  m2u(st.r[0]);
+        arr[i*3 + 1] =  m2u(st.r[2]);
+        arr[i*3 + 2] = -m2u(st.r[1]);
     }
     ringGeo.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3));
     const ringMat = new THREE.LineBasicMaterial({
@@ -2353,9 +2376,9 @@ elGhostTog.addEventListener('click', () => {
 
 // ── View presets (smooth tweened) ────────────────────────────────────
 const VIEW_PRESETS = {
-    top:  { pos:new THREE.Vector3(0, 36, 0.001),     btn:elViewTop, distMax:200 },
-    '3d': { pos:new THREE.Vector3(0, 22, 32),        btn:elView3D,  distMax:200 },
-    equ:  { pos:new THREE.Vector3(0, 0.6, 38),       btn:elViewEqu, distMax:200 },
+    top:  { pos:new THREE.Vector3(0, 36, 0.001),     btn:elViewTop, distMax:SYSTEM_MAX_DIST },
+    '3d': { pos:new THREE.Vector3(0, 22, 32),        btn:elView3D,  distMax:SYSTEM_MAX_DIST },
+    equ:  { pos:new THREE.Vector3(0, 0.6, 38),       btn:elViewEqu, distMax:SYSTEM_MAX_DIST },
 };
 // Clears the wide-field flag + fullscreen without re-framing the camera.
 // Hoisted so setView (called by setWide) can use it without recursion.
@@ -2386,26 +2409,28 @@ elViewEqu.addEventListener('click', () => setView('equ'));
 
 elScale.addEventListener('change', () => {
     clearWideFlag();
+    // maxDistance always reaches the outermost moon — the scale presets just
+    // pick a starting framing; the user can freely scroll-zoom from any of them.
+    controls.maxDistance = SYSTEM_MAX_DIST;
     let pos;
     if (elScale.value === 'zoom') {
-        pos = new THREE.Vector3(0, 8, 12);
-        controls.maxDistance = 50;
+        pos = new THREE.Vector3(0, 4, 7);            // inner ring-shepherd moonlets
+    } else if (elScale.value === 'system') {
+        pos = new THREE.Vector3(0, SYSTEM_MAX_DIST * 0.55, SYSTEM_MAX_DIST * 0.80);  // frame the irregulars
     } else {
-        pos = new THREE.Vector3(0, 22, 32);
-        controls.maxDistance = 200;
+        pos = new THREE.Vector3(0, 22, 32);          // Galilean system
     }
     cam.mode = 'free';
     cam.focusKey = null; elFocus.value = '';
-    startCameraTween(pos, new THREE.Vector3(0, 0, 0));
+    startCameraTween(pos, new THREE.Vector3(0, 0, 0), 900);
 });
 
 // ── Wide-field / fullscreen view ─────────────────────────────────────
 // Opt-in immersive mode: enters browser fullscreen on the viewport AND
 // pulls the camera way out so the irregular outer moons (out to ~335 R_J)
 // and their precessing orbits come into frame. Windowed is the default —
-// the normal scale stays mobile-friendly. maxDistance is restored on exit.
-const WINDOWED_MAX_DIST = 200;
-const WIDE_MAX_DIST      = 1300;
+// Windowed mode now reaches the irregulars too, so wide-field is purely the
+// fullscreen-immersion variant (same camera reach, framed on the full system).
 const stageWrap = document.getElementById('js-canvas-wrap');
 let wideOn = false;
 
@@ -2415,14 +2440,16 @@ function setWide(on) {
     elViewWide.textContent = on ? '⤡ Exit wide' : '⤢ Wide field';
     cam.mode = 'free';
     cam.focusKey = null; elFocus.value = '';
+    controls.maxDistance = SYSTEM_MAX_DIST;
     if (on) {
-        controls.maxDistance = WIDE_MAX_DIST;
-        startCameraTween(new THREE.Vector3(0, 360, 620), new THREE.Vector3(0, 0, 0), 900);
+        startCameraTween(
+            new THREE.Vector3(0, SYSTEM_MAX_DIST * 0.55, SYSTEM_MAX_DIST * 0.80),
+            new THREE.Vector3(0, 0, 0), 900,
+        );
         if (stageWrap.requestFullscreen) {
             stageWrap.requestFullscreen().catch(() => {});
         }
     } else {
-        controls.maxDistance = WINDOWED_MAX_DIST;
         if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
         setView('3d');
     }
