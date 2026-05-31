@@ -53,11 +53,12 @@ export class JupiterSkin {
      * @param {number}  [opts.segments=32]      Sphere tessellation
      */
     constructor(parent, {
-        radius     = 1.8,
-        quality    = 'medium',
-        rings      = true,
-        atmosphere = true,
-        segments   = 32,
+        radius      = 1.8,
+        quality     = 'medium',
+        rings       = true,
+        atmosphere  = true,
+        segments    = 32,
+        sunLighting = false,
     } = {}) {
         this._parent  = parent;
         this._radius  = radius;
@@ -66,6 +67,8 @@ export class JupiterSkin {
         // ── Cloud deck ───────────────────────────────────────────────────────
         this.jupiterU = createJupiterUniforms(THREE);
         this.jupiterU.u_quality.value = QUALITY_MAP[quality] ?? 1;
+        // Real sun terminator (opt-in; legacy consumers keep camera-limb look).
+        if (sunLighting) this.jupiterU.u_sunMode.value = 1.0;
 
         // Drive the cloud shader's zonal shear from the measured wind profile.
         this.jupiterU.u_windTex.value    = buildWindTexture(THREE);
@@ -87,14 +90,46 @@ export class JupiterSkin {
         parent.add(this.mesh);
 
         // ── Atmosphere rim glow ──────────────────────────────────────────────
+        // A Fresnel scattering shell: limb-bright H₂/He blue that, when a sun
+        // direction is supplied, brightens on the day side and warms toward a
+        // forward-scattered crescent at the terminator. Default (no sun) is a
+        // uniform blue Fresnel rim — strictly prettier than the old flat fill,
+        // and safe for consumers that never set the sun.
+        this._atmU = {
+            uSunDir:  { value: new THREE.Vector3(0.0, 0.0, 1.0) },
+            uSunMode: { value: sunLighting ? 1.0 : 0.0 },
+        };
         if (atmosphere) {
-            const atmMat = new THREE.MeshBasicMaterial({
-                color:       0x6688bb,
+            const atmMat = new THREE.ShaderMaterial({
+                uniforms:    this._atmU,
                 transparent: true,
-                opacity:     0.08,
-                blending:    THREE.AdditiveBlending,
                 depthWrite:  false,
+                blending:    THREE.AdditiveBlending,
                 side:        THREE.BackSide,
+                vertexShader: /* glsl */`
+                    varying vec3 vN;
+                    void main() {
+                        vN = normalize(normalMatrix * normal);
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    }`,
+                fragmentShader: /* glsl */`
+                    precision highp float;
+                    uniform vec3  uSunDir;
+                    uniform float uSunMode;
+                    varying vec3 vN;
+                    void main() {
+                        float fres = pow(1.0 - abs(vN.z), 3.0);
+                        vec3  base = vec3(0.40, 0.56, 0.95);     // Rayleigh-ish blue
+                        float lit  = 1.0;
+                        if (uSunMode > 0.5) {
+                            float ndl = dot(normalize(vN), normalize(uSunDir));
+                            lit = smoothstep(-0.55, 0.45, ndl);  // day-side limb glows
+                            float warm = smoothstep(-0.1, 0.3, ndl) * (1.0 - smoothstep(0.3, 0.85, ndl));
+                            base = mix(base, vec3(1.0, 0.62, 0.36), warm * 0.6);
+                        }
+                        float a = fres * (0.11 + 0.40 * lit);
+                        gl_FragColor = vec4(base, a);
+                    }`,
             });
             const atmMesh = new THREE.Mesh(
                 new THREE.SphereGeometry(radius * 1.06, Math.round(segments * 0.7), Math.round(segments * 0.7)),
@@ -166,6 +201,16 @@ export class JupiterSkin {
         } else {
             this.jupiterU.u_spin.value = ((t / ROT_PERIOD_S) % 1 + 1) % 1;
         }
+    }
+
+    /**
+     * Point the lighting at the sun. Pass the sun direction in **view space**
+     * (normalized); drives both the cloud terminator and the atmosphere rim.
+     * @param {THREE.Vector3} dirView
+     */
+    setSun(dirView) {
+        this.jupiterU.u_sunDir.value.copy(dirView);
+        this._atmU.uSunDir.value.copy(dirView);
     }
 
     /** Set the decimal-year epoch (drives GRS size + SEB cycle). */

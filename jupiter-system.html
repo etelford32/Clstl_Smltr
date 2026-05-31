@@ -743,6 +743,10 @@ body {
 <script type="module">
 import * as THREE        from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer }  from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass }      from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass }      from 'three/addons/postprocessing/OutputPass.js';
 import { JupiterSkin }   from './js/jupiter-skin.js';
 import { grsDiameterKm } from './js/jupiter-shader.js';
 import { JUPITER_ZONAL_WIND, sampleWind, WIND_MAX_ABS_MS, bandField } from './js/jupiter-wind-profile.js';
@@ -1104,6 +1108,33 @@ renderer.toneMapping         = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
 wrap.appendChild(renderer.domElement);
 
+// ── Post-processing: subtle bloom so bright zones, the GRS, the atmosphere
+// rim, stars and orbit trails glow without washing out. RenderPass keeps the
+// scene linear/HDR through the chain; OutputPass applies the ACES tone map +
+// sRGB at the very end. Falls back to a direct render if the addons can't
+// instantiate (e.g. a context quirk) so the page never goes dark.
+let composer = null;
+try {
+    composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+    composer.addPass(new UnrealBloomPass(
+        new THREE.Vector2(wrap.clientWidth || 1, wrap.clientHeight || 1),
+        0.52,   // strength
+        0.5,    // radius
+        0.85,   // luminance threshold — only highlights bloom
+    ));
+    composer.addPass(new OutputPass());
+} catch (err) {
+    console.warn('[jupiter] post-processing unavailable, rendering without bloom:', err);
+    composer = null;
+}
+
+// Sun direction (world space) → recomputed into view space each frame for the
+// cloud-deck terminator and the atmosphere rim. Matches the DirectionalLight.
+const SUN_WORLD = new THREE.Vector3(35, 8, 0).normalize();
+const _sunView  = new THREE.Vector3();
+const _invView  = new THREE.Matrix4();
+
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
@@ -1154,6 +1185,7 @@ function stepCameraTween(now) {
 function resize() {
     const w = wrap.clientWidth, h = wrap.clientHeight;
     renderer.setSize(w, h, false);
+    if (composer) composer.setSize(w, h);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
 }
@@ -1213,8 +1245,11 @@ const starUniforms = { uTime:{ value:0 } };
 // banded clouds + atmosphere rim + faint ring set.
 const jupGroup = new THREE.Group();
 scene.add(jupGroup);
-const jupSkin = new JupiterSkin(jupGroup, { radius:1.0, quality:'medium', segments:48 });
+const jupSkin = new JupiterSkin(jupGroup, { radius:1.0, quality:'medium', segments:48, sunLighting:true });
 jupSkin.mesh.userData = { kind:'planet', key:'jupiter', label:'Jupiter' };
+// Soft terminator: the night side keeps a faint fill (thermal/ring light) so
+// Jupiter reads clearly from any camera angle while still showing day/night.
+jupSkin.jupiterU.u_nightFill.value = 0.20;
 
 // ── Atmosphere state (driven into the cloud shader each frame) ────────
 // `diffusion` = meridional eddy-diffusion blur; `windScale` = advection
@@ -2716,7 +2751,15 @@ function tick(now) {
     if (sim.live || sim.playing) syncInputsFromSim();
 
     controls.update();
-    renderer.render(scene, camera);
+
+    // Sun direction in view space (camera is final now) → planet terminator + rim.
+    camera.updateMatrixWorld();
+    _invView.copy(camera.matrixWorld).invert();
+    _sunView.copy(SUN_WORLD).transformDirection(_invView);
+    jupSkin.setSun(_sunView);
+
+    if (composer) composer.render();
+    else renderer.render(scene, camera);
     requestAnimationFrame(tick);
 }
 

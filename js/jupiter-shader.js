@@ -70,6 +70,9 @@ export const JUPITER_FRAG = /* glsl */`
     uniform float u_wind_scale;  // multiplies advection rate
     uniform sampler2D u_windTex; // measured zonal-wind profile (R = u encoded)
     uniform float u_useWindTex;  // >0.5 → sample u_windTex instead of analytic
+    uniform vec3  u_sunDir;      // sun direction in VIEW space (normalized)
+    uniform float u_sunMode;     // >0.5 → real sun terminator; else legacy camera-limb
+    uniform float u_nightFill;   // ambient floor on the night side (0..1)
 
     varying vec3 vNormalView;
     varying vec3 vLocalPos;
@@ -112,6 +115,13 @@ export const JUPITER_FRAG = /* glsl */`
         float dx = fbm(p + vec2(e, 0.0), 3) - fbm(p - vec2(e, 0.0), 3);
         float dy = fbm(p + vec2(0.0, e), 3) - fbm(p - vec2(0.0, e), 3);
         return vec2(dy, -dx) / (2.0 * e);
+    }
+
+    // ── Cloud "height" field for relief self-shadowing ──────────────────
+    // Two octaves of the same turbulence the bands are textured with, so the
+    // slope-shading lines up with the visible cloud detail.
+    float reliefHeight(vec2 p) {
+        return fbm(p * vec2(24.0, 12.0), 3) + 0.4 * fbm(p * vec2(60.0, 30.0), 2);
     }
 
     // ── Zonal-wind profile u(lat) ───────────────────────────────────────
@@ -345,6 +355,19 @@ export const JUPITER_FRAG = /* glsl */`
             cloudCol = mix(cloudCol, cloudCol * 1.18, jet * streak * 0.5);
         }
 
+        // ── Cloud relief self-shadowing (Q2, sun-lit pages only) ────────
+        // Slope-shade the cloud height field along the same light direction
+        // the high-cloud shadow uses, so bands and eddies catch a 3-D relief.
+        if (u_sunMode > 0.5 && u_quality > 1.5) {
+            float e2 = 0.004;
+            float hC = reliefHeight(flowUv);
+            float hX = reliefHeight(flowUv + vec2(e2, 0.0));
+            float hY = reliefHeight(flowUv + vec2(0.0, e2));
+            vec2 grad = vec2(hX - hC, hY - hC) / e2;
+            vec2 Ldir = normalize(vec2(0.85, 0.22));
+            cloudCol *= 1.0 + clamp(dot(grad, Ldir), -0.5, 0.5) * 0.26;
+        }
+
         // ── Polar darkening + blue haze ─────────────────────────────────
         float poleFade = smoothstep(0.7, 1.0, abs(lat));
         cloudCol = mix(cloudCol, vec3(0.35, 0.38, 0.48), poleFade * 0.45);
@@ -354,7 +377,29 @@ export const JUPITER_FRAG = /* glsl */`
         float hazeFade = pow(1.0 - mu, 3.0);
         cloudCol = mix(cloudCol, hazeCol, hazeFade * 0.35);
 
-        gl_FragColor = vec4(cloudCol * limb, 1.0);
+        // ── Illumination ────────────────────────────────────────────────
+        // Legacy consumers (u_sunMode = 0) keep the camera-facing limb look.
+        // u_sunMode = 1 lights the planet from u_sunDir: a soft day/night
+        // terminator with a faint night-side fill, plus a warm forward-scatter
+        // crescent where the sunlit limb thins to the terminator.
+        float shade = limb;
+        if (u_sunMode > 0.5) {
+            vec3 N  = normalize(vNormalView);
+            vec3 Ls = normalize(u_sunDir);
+            float ndl = dot(N, Ls);
+            float day = smoothstep(-0.12, 0.32, ndl);          // soft terminator
+            // forward-scattered warm glow right at the day-side limb
+            float crescent = smoothstep(0.0, 0.22, ndl) * (1.0 - smoothstep(0.22, 0.6, ndl));
+            cloudCol += vec3(1.0, 0.72, 0.42) * crescent * pow(1.0 - mu, 1.6) * 0.16;
+
+            // gentle saturation pop so the chromophore tints read richer
+            float lum = dot(cloudCol, vec3(0.299, 0.587, 0.114));
+            cloudCol = mix(vec3(lum), cloudCol, 1.12);
+
+            shade = (u_nightFill + (1.0 - u_nightFill) * day) * limb;
+        }
+
+        gl_FragColor = vec4(cloudCol * shade, 1.0);
     }
 `;
 
@@ -385,6 +430,9 @@ export function createJupiterUniforms(THREE) {
         u_wind_scale: { value: 1.0 },
         u_windTex:    { value: flat },
         u_useWindTex: { value: 0.0 },
+        u_sunDir:     { value: new THREE.Vector3(0.0, 0.0, 1.0) },
+        u_sunMode:    { value: 0.0 },   // legacy camera-limb look by default
+        u_nightFill:  { value: 0.08 },
     };
 }
 
