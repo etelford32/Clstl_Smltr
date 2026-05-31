@@ -1209,6 +1209,113 @@ function moonMaterial(key, color) {
     });
 }
 
+// ── Triton nitrogen geyser plumes ────────────────────────────────────────
+// Voyager 2 (1989) imaged active plumes rising ~8 km from Triton's sunlit
+// south-polar cap, then shearing downwind into the dark fallout streaks baked
+// into the surface texture. These are exaggerated in scale to read at planet
+// size: small particle jets anchored to the cap, rising and bending toward the
+// equator, fading out on the night side.
+const tritonPlumes = [];
+const PLUME_SUN = new THREE.Vector3(35, 8, 0).normalize();   // static Sun dir
+const _pN = new THREE.Vector3(), _pQ = new THREE.Quaternion();
+
+function addTritonPlumes(mesh, rVis) {
+    // Tiny seeded RNG so vent placement is stable across reloads.
+    let s = 0x9e3779b1;
+    const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+
+    const SOURCES = 4, PER = 46;
+    const riseH = rVis * 0.55, drift = rVis * 0.95;
+
+    for (let p = 0; p < SOURCES; p++) {
+        // Vent on the south cap (local −Y hemisphere).
+        const lon = rnd() * Math.PI * 2;
+        const lat = -1.05 + rnd() * 0.45;                 // ~ −60°..−27°
+        const cl = Math.cos(lat);
+        const N = new THREE.Vector3(cl * Math.cos(lon), Math.sin(lat), cl * Math.sin(lon)).normalize();
+        // Downwind tangent: toward the equator (+Y) along the surface.
+        const up = new THREE.Vector3(0, 1, 0);
+        const T = up.clone().addScaledVector(N, -up.dot(N)).normalize();
+        const B = new THREE.Vector3().crossVectors(N, T).normalize();   // lateral
+        const base = N.clone().multiplyScalar(rVis * 1.01);
+
+        // Per-particle constants.
+        const part = [];
+        for (let i = 0; i < PER; i++) {
+            const ang = 0.22 * Math.sqrt(rnd());          // cone half-angle ~12°
+            const az = rnd() * Math.PI * 2;
+            const dir = N.clone()
+                .addScaledVector(T, Math.sin(ang) * Math.cos(az))
+                .addScaledVector(B, Math.sin(ang) * Math.sin(az))
+                .normalize();
+            part.push({ phase: rnd(), speed: 0.11 + rnd() * 0.10, dir, lat: (rnd() - 0.5) * 0.5 });
+        }
+
+        const geo = new THREE.BufferGeometry();
+        const pos = new Float32Array(PER * 3);
+        const alpha = new Float32Array(PER);
+        geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        geo.setAttribute('aAlpha', new THREE.BufferAttribute(alpha, 1));
+
+        const mat = new THREE.ShaderMaterial({
+            transparent: true, depthWrite: false, blending: THREE.NormalBlending,
+            uniforms: {
+                uColor:   { value: new THREE.Color(0.78, 0.86, 0.95) },
+                uSize:    { value: rVis * 52 },
+                uOpacity: { value: 0.0 },
+            },
+            vertexShader: `
+                attribute float aAlpha; varying float vA; uniform float uSize;
+                void main(){
+                    vec4 mv = modelViewMatrix * vec4(position, 1.0);
+                    gl_PointSize = uSize * (300.0 / max(0.001, -mv.z));
+                    gl_Position = projectionMatrix * mv;
+                    vA = aAlpha;
+                }`,
+            fragmentShader: `
+                uniform vec3 uColor; uniform float uOpacity; varying float vA;
+                void main(){
+                    float d = length(gl_PointCoord - 0.5);
+                    float a = smoothstep(0.5, 0.12, d) * vA * uOpacity;
+                    if (a < 0.01) discard;
+                    gl_FragColor = vec4(uColor, a);
+                }`,
+        });
+
+        const pts = new THREE.Points(geo, mat);
+        pts.frustumCulled = false;
+        mesh.add(pts);
+        tritonPlumes.push({ mesh, points: pts, mat, geo, base, T, N, part, riseH, drift });
+    }
+}
+
+function updateTritonPlumes(timeSec) {
+    if (!tritonPlumes.length) return;
+    for (const pl of tritonPlumes) {
+        const pos = pl.geo.attributes.position.array;
+        const alpha = pl.geo.attributes.aAlpha.array;
+        for (let i = 0; i < pl.part.length; i++) {
+            const pt = pl.part[i];
+            const t = (pt.phase + timeSec * pt.speed) % 1;          // lifetime 0..1
+            const rise = pl.riseH * Math.sin(t * Math.PI * 0.5);    // ease-out climb
+            const wind = pl.drift * t * t;                          // shear grows w/ height
+            const o = i * 3;
+            pos[o]   = pl.base.x + pt.dir.x * rise + pl.T.x * wind;
+            pos[o+1] = pl.base.y + pt.dir.y * rise + pl.T.y * wind;
+            pos[o+2] = pl.base.z + pt.dir.z * rise + pl.T.z * wind;
+            alpha[i] = Math.min(1, t / 0.08) * (1 - Math.max(0, (t - 0.5) / 0.5));
+        }
+        pl.geo.attributes.position.needsUpdate = true;
+        pl.geo.attributes.aAlpha.needsUpdate = true;
+
+        // Fade with the local Sun angle so plumes glow only on the lit cap.
+        pl.mesh.getWorldQuaternion(_pQ);
+        _pN.copy(pl.N).applyQuaternion(_pQ);
+        const lit = THREE.MathUtils.smoothstep(_pN.dot(PLUME_SUN), -0.15, 0.30);
+        pl.mat.uniforms.uOpacity.value = lit * 0.9;
+    }
+}
+
 function makeMoon(b) {
     const r = b.radius_km / R_NEP_KM;
     const rVis = Math.max(r * 13, 0.07);
@@ -1220,6 +1327,8 @@ function makeMoon(b) {
     m.userData = { kind:'moon', key:b.key, label:b.name };
     scene.add(m);
     meshes[b.key] = m;
+
+    if (b.key === 'triton') addTritonPlumes(m, rVis);
 
     const halo = new THREE.Mesh(
         new THREE.SphereGeometry(rVis * 1.30, 18, 18),
@@ -2443,6 +2552,7 @@ function tick(now) {
     }
 
     syncMeshesFromState();
+    updateTritonPlumes(now * 0.001);
     starUniforms.uTime.value = now * 0.001;
     nepSkin.update(now * 0.001);
     nepSkin.setSimTime(sim.t_s);     // arcs orbit + librate with the timeline
