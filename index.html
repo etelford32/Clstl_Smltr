@@ -721,6 +721,29 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
   </div>
 </section>
 
+<!-- ── AURORA ALERT CAPTURE ──────────────────────────────────────────────────
+     Anonymous, zero-friction email capture for burst aurora/storm traffic.
+     Styles are injected by js/aurora-capture.js. See AURORA_ALERT_CAPTURE_SPEC.md. -->
+<section class="aurora-capture-band" aria-label="Aurora alerts signup">
+  <div class="aurora-capture-copy">
+    <span class="aurora-kicker">Aurora Alerts · Free</span>
+    <h2>Don't miss the next storm.</h2>
+    <p>We'll email you the moment Kp spikes and the aurora comes within reach — with a live link to watch it hit Earth's magnetosphere.</p>
+  </div>
+  <form data-aurora-capture data-source="home" novalidate>
+    <input type="email" inputmode="email" autocomplete="email" placeholder="you@email.com" aria-label="Email" required>
+    <!-- honeypot: keep visually hidden, not display:none (some bots skip those) -->
+    <input type="text" name="company" tabindex="-1" autocomplete="off"
+           aria-hidden="true" style="position:absolute;left:-9999px;opacity:0;height:0;width:0">
+    <button type="submit">Alert me →</button>
+    <span data-aurora-status class="aurora-status" role="status" aria-live="polite"></span>
+  </form>
+</section>
+<script type="module">
+  import { initAuroraCapture } from './js/aurora-capture.js';
+  initAuroraCapture();
+</script>
+
 <!-- ── FINAL CTA ───────────────────────────────────────────────────────────── -->
 <section id="cta" aria-labelledby="cta-heading">
   <div class="section-inner">
