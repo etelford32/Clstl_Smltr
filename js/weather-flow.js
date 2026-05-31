@@ -62,6 +62,83 @@ const CH_V      = 4;
 const CH_LOW    = 5;
 const CH_MID    = 6;
 const CH_HIGH   = 7;
+const CH_PRECIP = 8;
+
+// ── Cloud → precipitation feedback ───────────────────────────────────────────
+// Pure advection carries the precip channel like an inert dye: it preserves
+// whatever precip/cloud relationship the initial frame had, but it never lets
+// the *evolving* cloud field talk back to the rain. Over a multi-hour horizon
+// that desynchronises the two — a precip cell drifts out from under the deck it
+// fell from (rain in clear air), or a deck thickens into a region and produces
+// no rain. This couples them in the model so the forecast stays physically
+// consistent, the same coupling the cloud/precip shaders do visually:
+//
+//   • Suppression (the strong, safe half): rain cannot persist without a deck
+//     to fall from. As the co-located low/mid cloud fraction thins below
+//     `cloudDry`, advected precip is relaxed toward zero. Cirrus (high cloud)
+//     is excluded — it doesn't rain.
+//   • Generation (the gentle half): a thick deck that has outrun its rain seeds
+//     light precip toward a thickness-scaled capacity, never fabricating more
+//     than `genMax` (light rain) from cloud alone. Conservative on purpose —
+//     overprediction is the failure mode to avoid.
+//
+// Both ramp in with lead time via 1 − e^(−h/relaxH): the τ=0 anchor and short
+// horizons stay close to pure advection (which we trust early), and only the
+// long tail — where advection is least reliable anyway — is fully reconciled.
+export const DEFAULT_PRECIP_FEEDBACK = Object.freeze({
+    enabled:  true,
+    cloudDry: 0.25,   // deck fraction below which rain can't persist
+    cloudWet: 0.55,   // deck fraction at which the suppression gate is fully open
+    relaxH:   6,      // e-folding horizon (hours) for the lead-time ramp
+    genMax:   0.8,    // mm/hr — most precip a thick deck alone will seed
+    genOn:    0.65,   // deck fraction at which generation starts
+    genRate:  0.5,    // fraction of the (capacity − current) shortfall filled at full ramp
+});
+
+// Hermite smoothstep, matching the GLSL the shaders use so the model and the
+// render couple on the same curve.
+function _smoothstep(edge0, edge1, x) {
+    if (edge0 === edge1) return x < edge0 ? 0 : 1;
+    const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+    return t * t * (3 - 2 * t);
+}
+
+/**
+ * In-place reconcile the precip channel (8) of one advected CHW frame with its
+ * co-located low/mid cloud channels (5,6). Pure given (frame, N, h, params);
+ * mutates and returns `frame`. h ≤ 0 (the observation anchor) and a disabled
+ * params object are no-ops, so the live frame is never altered.
+ *
+ * Cloud channels are percent [0,100], precip is mm/hr — the physical units the
+ * coarse buffer stores (decode normalises later).
+ */
+export function reconcilePrecipWithCloud(frame, N, h, params = DEFAULT_PRECIP_FEEDBACK) {
+    const p = params || DEFAULT_PRECIP_FEEDBACK;
+    if (!p.enabled || h <= 0) return frame;
+
+    const w     = 1 - Math.exp(-h / Math.max(0.5, p.relaxH));   // lead-time ramp 0..1
+    const offL  = CH_LOW * N;
+    const offM  = CH_MID * N;
+    const offP  = CH_PRECIP * N;
+
+    for (let k = 0; k < N; k++) {
+        const deck = Math.max(frame[offL + k], frame[offM + k]) / 100;   // 0..1
+        const pAdv = frame[offP + k];
+
+        // Suppression: pAdv · mix(1, gate, w). gate → 0 under a vanished deck,
+        // so precip decays out; gate → 1 under a solid deck leaves rain intact.
+        const gate  = _smoothstep(p.cloudDry, p.cloudWet, deck);
+        const pSupp = pAdv * (1 - w * (1 - gate));
+
+        // Generation: fill part of the shortfall toward a thick-deck capacity.
+        // Strictly additive (≥0), so heavy rain under thick cloud is untouched.
+        const cap  = p.genMax * _smoothstep(p.genOn, 1.0, deck);
+        const pOut = pSupp + Math.max(0, cap - pSupp) * w * p.genRate;
+
+        frame[offP + k] = pOut;
+    }
+    return frame;
+}
 
 // Earth's radius in metres (mean) — used to convert m/s to deg/s.
 // 1° lat ≈ 111_320 m at sea level; 1° lon shrinks by cos(lat).
@@ -492,6 +569,7 @@ const DEG2RAD = Math.PI / 180;
  */
 function rk2BuildHorizons({
     history, modelId, horizonsH, substepH = 1, tendencyHorizonH = 3, gainAtHour = null,
+    precipFeedback = DEFAULT_PRECIP_FEEDBACK,
 }) {
     const frames = history.all();
     if (frames.length === 0) return null;
@@ -575,6 +653,9 @@ function rk2BuildHorizons({
                 }
             }
         }
+        // Cloud → precip feedback: keep the advected rain consistent with the
+        // advected deck at this horizon (no-op for h ≤ 0, handled above).
+        reconcilePrecipWithCloud(frame, N, h, precipFeedback);
         out[h] = frame;
     }
     return {
@@ -596,12 +677,14 @@ export class WindAdvectionRK2Forecaster {
      * @param {number} [opts.tendencyHorizonH=3]  τ_eff saturation horizon.
      * @param {number} [opts.substepH=1]           Hours per RK2 substep.
      */
-    constructor({ gainTracker = null, shearProxy = null, tendencyHorizonH = 3, substepH = 1 } = {}) {
+    constructor({ gainTracker = null, shearProxy = null, tendencyHorizonH = 3, substepH = 1,
+                  precipFeedback = DEFAULT_PRECIP_FEEDBACK } = {}) {
         this.id                = WindAdvectionRK2Forecaster.id;
         this._gainTracker      = gainTracker;
         this._shearProxy       = shearProxy;
         this._tendencyHorizonH = tendencyHorizonH;
         this._substepH         = substepH;
+        this._precipFeedback   = precipFeedback;
         this._lastDiag         = null;
     }
 
@@ -624,7 +707,7 @@ export class WindAdvectionRK2Forecaster {
         const result = rk2BuildHorizons({
             history, modelId: this.id, horizonsH: FORECAST_HORIZONS_H,
             substepH: this._substepH, tendencyHorizonH: this._tendencyHorizonH,
-            gainAtHour: fn,
+            gainAtHour: fn, precipFeedback: this._precipFeedback,
         });
         if (result) {
             this._lastDiag = {
@@ -651,7 +734,7 @@ export class WindAdvectionRK2Forecaster {
         return rk2BuildHorizons({
             history, modelId: this.id, horizonsH: horizons,
             substepH: this._substepH, tendencyHorizonH: this._tendencyHorizonH,
-            gainAtHour: fn,
+            gainAtHour: fn, precipFeedback: this._precipFeedback,
         });
     }
 }
