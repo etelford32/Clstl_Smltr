@@ -140,6 +140,91 @@ export function reconcilePrecipWithCloud(frame, N, h, params = DEFAULT_PRECIP_FE
     return frame;
 }
 
+// ── Convergence-driven microphysics ──────────────────────────────────────────
+// Advection alone is mass-conserving: it transports precip and cloud but never
+// creates them. Real precipitation is non-conserved — it forms where the wind
+// field CONVERGES (∇·V < 0). Converging air has nowhere to go but up; rising
+// moist air cools, condenses into cloud, and rains out. This is the dynamical
+// source term the pure-transport model was missing.
+//
+// For each forecast frame we compute the horizontal divergence of its own
+// (advected) wind field and treat convergence (−∇·V > 0) as an uplift rate.
+// Gated by moisture (RH) — converging *dry* air just subsides somewhere else
+// and doesn't rain — it condenses cloud and produces precip together, so the
+// pair stays consistent (and the cloud→precip reconcile that runs afterwards
+// sees a deck that actually supports the new rain). Growth only: subsidence
+// drying is left to advection + the reconcile's suppression, since a noisy
+// divergence estimate shouldn't be trusted to actively destroy a real deck.
+//
+// The processed fraction is conv[1/s] · moisture · τ(h)[s], where
+// τ(h) = satH·3600·(1 − e^(−h/satH)) saturates so a 24-h forecast can't run
+// away. Synoptic convergence is ~1e-5/s, so with the default gains a strongly
+// converging saturated region grows a few mm/hr and tens of percent of deck
+// over a long horizon — both hard-capped against divergence-estimate noise.
+export const DEFAULT_CONVERGENCE_GROWTH = Object.freeze({
+    enabled:   true,
+    satH:      6,      // τ saturation horizon (hours)
+    kPrecip:   20.0,   // mm/hr per unit processed fraction
+    kCloud:    320.0,  // cloud-cover points (%) per unit processed fraction
+    precipMax: 8.0,    // mm/hr cap on convergence-generated rain
+    cloudMax:  70.0,   // cap (%) on convergence-grown deck per horizon
+    rhFloor:   0.40,   // below this RH fraction, converging air is too dry to rain
+});
+
+/**
+ * In-place grow the precip (8) and low/mid cloud (5,6) channels of one
+ * advected CHW frame wherever its own wind field (3,4) converges. Pure given
+ * (frame, N, gridW, gridH, h, params); mutates and returns `frame`. h ≤ 0 and
+ * disabled params are no-ops. Units: wind m/s, cloud %, precip mm/hr, RH %.
+ *
+ * Runs BEFORE reconcilePrecipWithCloud so the rain it creates is backed by a
+ * deck it also creates, leaving the two channels physically consistent.
+ */
+export function applyConvergenceGrowth(frame, N, gridW, gridH, h, params = DEFAULT_CONVERGENCE_GROWTH) {
+    const p = params || DEFAULT_CONVERGENCE_GROWTH;
+    if (!p.enabled || h <= 0) return frame;
+
+    const U   = frame.subarray(CH_U * N, (CH_U + 1) * N);
+    const V   = frame.subarray(CH_V * N, (CH_V + 1) * N);
+    const RH  = frame.subarray(2 * N, 3 * N);
+    const offL = CH_LOW * N, offM = CH_MID * N, offP = CH_PRECIP * N;
+
+    const tauSec = Math.max(0.5, p.satH) * 3600 * (1 - Math.exp(-h / Math.max(0.5, p.satH)));
+    const dyM    = (180 / gridH) * M_PER_DEG_LAT;          // metres per grid row
+    const dLonDeg = 360 / gridW;
+
+    for (let j = 0; j < gridH; j++) {
+        const lat    = latOfRow(j, gridH);
+        const cosLat = Math.max(0.05, Math.abs(Math.cos(lat * Math.PI / 180)));
+        const dxM    = dLonDeg * M_PER_DEG_LAT * cosLat;   // metres per grid column at this lat
+        const jp = Math.min(gridH - 1, j + 1);
+        const jm = Math.max(0, j - 1);
+        const dySpan = (jp - jm) * dyM || dyM;
+
+        for (let i = 0; i < gridW; i++) {
+            const k  = j * gridW + i;
+            const ip = (i + 1) % gridW;          // longitude wraps
+            const im = (i - 1 + gridW) % gridW;
+
+            const dUdx = (U[j * gridW + ip] - U[j * gridW + im]) / (2 * dxM);
+            const dVdy = (V[jp * gridW + i]  - V[jm * gridW + i]) / dySpan;
+            const conv = -(dUdx + dVdy);          // >0 where the flow converges
+            if (conv <= 0) continue;              // growth only
+
+            // Moisture gate: only converging *moist* air condenses and rains.
+            const moist = _smoothstep(p.rhFloor, 1.0, RH[k] / 100);
+            if (moist <= 0) continue;
+
+            const processed = conv * moist * tauSec;   // dimensionless
+            frame[offP + k] = Math.min(frame[offP + k] + Math.min(p.precipMax, p.kPrecip * processed), 50);
+            const grow = Math.min(p.cloudMax, p.kCloud * processed);
+            frame[offL + k] = Math.min(100, frame[offL + k] + grow);
+            frame[offM + k] = Math.min(100, frame[offM + k] + grow * 0.7);
+        }
+    }
+    return frame;
+}
+
 // Earth's radius in metres (mean) — used to convert m/s to deg/s.
 // 1° lat ≈ 111_320 m at sea level; 1° lon shrinks by cos(lat).
 const M_PER_DEG_LAT = 111_320;
@@ -569,7 +654,7 @@ const DEG2RAD = Math.PI / 180;
  */
 function rk2BuildHorizons({
     history, modelId, horizonsH, substepH = 1, tendencyHorizonH = 3, gainAtHour = null,
-    precipFeedback = DEFAULT_PRECIP_FEEDBACK,
+    precipFeedback = DEFAULT_PRECIP_FEEDBACK, convergenceGrowth = DEFAULT_CONVERGENCE_GROWTH,
 }) {
     const frames = history.all();
     if (frames.length === 0) return null;
@@ -653,8 +738,10 @@ function rk2BuildHorizons({
                 }
             }
         }
-        // Cloud → precip feedback: keep the advected rain consistent with the
-        // advected deck at this horizon (no-op for h ≤ 0, handled above).
+        // Microphysics, in physical order: convergence first lifts moist air
+        // into new cloud + rain, then the cloud→precip reconcile gates the
+        // result so rain and deck stay consistent (both no-ops for h ≤ 0).
+        applyConvergenceGrowth(frame, N, gridW, gridH, h, convergenceGrowth);
         reconcilePrecipWithCloud(frame, N, h, precipFeedback);
         out[h] = frame;
     }
@@ -678,14 +765,16 @@ export class WindAdvectionRK2Forecaster {
      * @param {number} [opts.substepH=1]           Hours per RK2 substep.
      */
     constructor({ gainTracker = null, shearProxy = null, tendencyHorizonH = 3, substepH = 1,
-                  precipFeedback = DEFAULT_PRECIP_FEEDBACK } = {}) {
-        this.id                = WindAdvectionRK2Forecaster.id;
-        this._gainTracker      = gainTracker;
-        this._shearProxy       = shearProxy;
-        this._tendencyHorizonH = tendencyHorizonH;
-        this._substepH         = substepH;
-        this._precipFeedback   = precipFeedback;
-        this._lastDiag         = null;
+                  precipFeedback = DEFAULT_PRECIP_FEEDBACK,
+                  convergenceGrowth = DEFAULT_CONVERGENCE_GROWTH } = {}) {
+        this.id                 = WindAdvectionRK2Forecaster.id;
+        this._gainTracker       = gainTracker;
+        this._shearProxy        = shearProxy;
+        this._tendencyHorizonH  = tendencyHorizonH;
+        this._substepH          = substepH;
+        this._precipFeedback    = precipFeedback;
+        this._convergenceGrowth = convergenceGrowth;
+        this._lastDiag          = null;
     }
 
     getLastDiag() { return this._lastDiag; }
@@ -708,6 +797,7 @@ export class WindAdvectionRK2Forecaster {
             history, modelId: this.id, horizonsH: FORECAST_HORIZONS_H,
             substepH: this._substepH, tendencyHorizonH: this._tendencyHorizonH,
             gainAtHour: fn, precipFeedback: this._precipFeedback,
+            convergenceGrowth: this._convergenceGrowth,
         });
         if (result) {
             this._lastDiag = {
@@ -735,6 +825,7 @@ export class WindAdvectionRK2Forecaster {
             history, modelId: this.id, horizonsH: horizons,
             substepH: this._substepH, tendencyHorizonH: this._tendencyHorizonH,
             gainAtHour: fn, precipFeedback: this._precipFeedback,
+            convergenceGrowth: this._convergenceGrowth,
         });
     }
 }
