@@ -51,6 +51,12 @@ const ROT_PERIOD_S = 16.11 * 3600;
 // Magnetic dipole tilt from the spin axis, and centre offset (in radii).
 const MAG_TILT   = 46.8 * D2R;
 const MAG_OFFSET = 0.55;
+// Adams ring (62,933 km) Keplerian period — the arcs orbit at this rate.
+const ADAMS_PERIOD_S = 0.4392 * 86400;
+// Illustrative libration period of the arcs within Galatea's 42:43
+// corotation resonance — drives a slow back-and-forth of the arc cluster.
+const ADAMS_LIB_PERIOD_S = 2.8 * 365.25 * 86400;
+const ADAMS_LIB_AMP = 0.05;   // rad
 
 export class NeptuneSkin {
     /**
@@ -76,7 +82,6 @@ export class NeptuneSkin {
         this._parent   = parent;
         this._radius   = radius;
         this._rotPhase = 0;
-        this._arcPhase = 0;
         const tilt = tiltSelf ? OBLIQUITY : 0;
 
         // ── Cloud deck ───────────────────────────────────────────────────────
@@ -210,16 +215,24 @@ export class NeptuneSkin {
         }
     }
 
-    /** Call every frame with elapsed seconds (wall clock). */
+    /** Call every frame with elapsed seconds (wall clock) — animates clouds. */
     update(t) {
         this.neptuneU.u_time.value = t;
         this._rotPhase += (2 * Math.PI / ROT_PERIOD_S) * (1 / 60);
         this.neptuneU.u_rot_phase.value = this._rotPhase;
-        // Drift the Adams arcs slowly (visual cue that they orbit).
-        if (this._arcGroup) {
-            this._arcPhase += 0.02 * (1 / 60);
-            this._arcGroup.rotation.y = this._arcPhase;
-        }
+    }
+
+    /**
+     * Advance the *ring evolution* to simulation time t_s (seconds since the
+     * epoch). The Adams ring's dust arcs orbit Neptune at the Adams-ring mean
+     * motion, and librate slowly about Galatea's 42:43 corotation sites — so
+     * scrubbing or playing the timeline makes the arcs sweep and breathe.
+     */
+    setSimTime(t_s) {
+        if (!this._arcGroup) return;
+        const n   = 2 * Math.PI / ADAMS_PERIOD_S;
+        const lib = ADAMS_LIB_AMP * Math.sin(2 * Math.PI * t_s / ADAMS_LIB_PERIOD_S);
+        this._arcGroup.rotation.y = ((n * t_s) % (2 * Math.PI)) + lib;
     }
 
     setQuality(q) { this.neptuneU.u_quality.value = QUALITY_MAP[q] ?? 1; }
