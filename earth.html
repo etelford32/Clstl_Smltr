@@ -3018,6 +3018,20 @@ import './js/telemetry.js';
         <div style="display:flex;justify-content:space-between;font-size:9px;color:#668;margin-top:2px;margin-bottom:6px;">
             <span>0</span><span>30</span><span>60 m/s</span>
         </div>
+        <!-- Convergence / uplift legend. Hidden until the "Convergence / Uplift"
+             layer is toggled on (see the lyr-convergence listener). The canvas
+             mirrors the overlay shader's convergenceColor() exactly, so the
+             diverging swatch is a true key: amber = subsidence (sinking,
+             clearing), indigo→cyan = uplift (rising air, weather building).
+             Ends anchor at ±UPLIFT_FULL_SCALE (2.5×10⁻⁵ s⁻¹). -->
+        <div id="wx-convergence-legend-box" style="display:none;">
+            <div style="margin:0 0 4px;font-size:9px;color:#556;text-transform:uppercase;letter-spacing:.06em">Convergence / uplift</div>
+            <canvas id="wx-convergence-legend" width="200" height="8"
+                    style="width:100%;height:8px;border-radius:3px;display:block;"></canvas>
+            <div style="display:flex;justify-content:space-between;font-size:9px;color:#668;margin-top:2px;margin-bottom:6px;">
+                <span>↓ subsidence</span><span>0</span><span>uplift ↑</span>
+            </div>
+        </div>
         <hr class="ir-sep">
         <!-- Isobar / pressure analysis -->
         <div class="wx-row" style="align-items:flex-start;margin-bottom:2px;">
@@ -3089,6 +3103,17 @@ import './js/telemetry.js';
                 <span class="wx-flow-gain-label">α[h]</span>
                 <div class="wx-flow-gain-bars" id="wx-flow-gain-bars"></div>
             </div>
+        </div>
+        <!-- Non-conserved microphysics status. Unlike the learner HUD above
+             (which matures over time), these are fixed properties of the
+             in-browser RK2 forecast: convergence growth forms new cloud + rain
+             where the wind converges; cloud→precip keeps the rain consistent
+             with its deck over the horizon. Populated once from the live
+             forecaster config (see _initMicrophysicsHud). -->
+        <div id="wx-microphysics"
+             style="margin-top:6px;font-family:monospace;font-size:9.5px;color:#557;line-height:1.55;"
+             title="Non-conserved microphysics applied to the scrubbed forecast. Convergence growth = precip/cloud form where ∇·V<0 (rising air). Cloud→precip = rain relaxes toward its cloud deck so the two layers stay consistent.">
+            <div id="wx-microphysics-line">microphysics: …</div>
         </div>
         <hr class="ir-sep">
         <!-- NWS alert summary. The 🔔 Get Alerts CTA is intentionally
@@ -4559,6 +4584,13 @@ document.getElementById('lyr-wind').addEventListener('change', e => {
     wireOverlay('lyr-precip-rate', 'precip-rate');
     wireOverlay('lyr-mist',        'mist');
     wireOverlay('lyr-convergence', 'convergence');
+    // Reveal the convergence/uplift colour key in the wx-panel only while its
+    // layer is on, so the swatch isn't dead chrome the rest of the time. The
+    // first-render synthetic dispatch fires this with checked=false → hidden.
+    document.getElementById('lyr-convergence')?.addEventListener('change', e => {
+        const box = document.getElementById('wx-convergence-legend-box');
+        if (box) box.style.display = e.target.checked ? '' : 'none';
+    });
 }
 
 // Storm Tracks — 5-day kinematic forecast cones. The overlay rebuilds
@@ -5605,6 +5637,37 @@ function _sampleUpliftAt(lat, lon) {
     }
 })();
 
+// ── Convergence / uplift legend ─────────────────────────────────────────
+// Paint the diverging swatch pixel-by-pixel from the SAME convergenceColor()
+// math the overlay shader (js/weather-overlay.js) uses, so the key is exact.
+// x maps left→right to signed convergence −1→+1: amber (strong subsidence) →
+// neutral notch (the |mag|<0.06 transparent dead-zone) → indigo→cyan (strong
+// uplift). Painted once; the ramp is fixed.
+(function _paintConvergenceLegend() {
+    const cv = document.getElementById('wx-convergence-legend');
+    if (!cv) return;
+    const ctx = cv.getContext('2d');
+    const W = cv.width, H = cv.height;
+    const mix = (a, b, t) => a + (b - a) * t;
+    const ss  = (e0, e1, x) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
+    for (let x = 0; x < W; x++) {
+        const signed = (x / (W - 1)) * 2 - 1;     // −1 … +1
+        const mag = Math.abs(signed);
+        let r, g, b;
+        if (mag < 0.06) {                          // shader's transparent dead-zone → neutral notch
+            r = 0.20; g = 0.22; b = 0.26;
+        } else if (signed >= 0) {                  // uplift: indigo → cyan
+            const t = ss(0, 1, signed);
+            r = mix(0.28, 0.30, t); g = mix(0.20, 0.85, t); b = mix(0.62, 0.95, t);
+        } else {                                   // subsidence: slate → amber
+            const t = ss(0, 1, -signed);
+            r = mix(0.42, 0.92, t); g = mix(0.40, 0.62, t); b = mix(0.34, 0.22, t);
+        }
+        ctx.fillStyle = `rgb(${(r * 255) | 0}, ${(g * 255) | 0}, ${(b * 255) | 0})`;
+        ctx.fillRect(x, 0, 1, H);
+    }
+})();
+
 // ── SST legend ──────────────────────────────────────────────────────────
 // Mirror NASA GIBS GHRSST_L4_MUR_Sea_Surface_Temperature standard palette
 // (−2 °C … 32 °C). Values are pulled from the GIBS WMS GetLegendGraphic
@@ -6074,6 +6137,18 @@ const rk2Forecaster = new WindAdvectionRK2Forecaster({
 wxForecastRegistry.register(rk2Forecaster);
 window._rk2GainTracker = rk2GainTracker;
 window._rk2Forecaster  = rk2Forecaster;
+
+// Microphysics status line in the forecast panel — reads the live forecaster
+// config so it tells the truth if either term is ever disabled. ON in green,
+// OFF in grey. Static (these are fixed model properties), painted once.
+(function _initMicrophysicsHud() {
+    const el = document.getElementById('wx-microphysics-line');
+    if (!el || typeof rk2Forecaster.microphysicsStatus !== 'function') return;
+    const s = rk2Forecaster.microphysicsStatus();
+    const chip = (on, label) =>
+        `${label}: <span style="color:${on ? '#5bd6a0' : '#667'};font-weight:600;">${on ? 'ON' : 'OFF'}</span>`;
+    el.innerHTML = `microphysics · ${chip(s.convergenceGrowth, 'convergence growth')} · ${chip(s.precipFeedback, 'cloud→precip')}`;
+})();
 
 // Pin the future-scrub globe to the RK2 model's dense hourly forecast.
 // The provider decodes through wxFeed's _decodeCoarse so the forecast
