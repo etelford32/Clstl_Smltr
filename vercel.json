@@ -40,6 +40,10 @@
     {
       "path": "/api/cron/archive-forecasts",
       "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/cron/aurora-storm-blast",
+      "schedule": "*/15 * * * *"
     }
   ],
   "headers": [
