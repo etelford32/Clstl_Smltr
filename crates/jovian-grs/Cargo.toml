@@ -1,0 +1,15 @@
+[package]
+name        = "jovian-grs"
+version     = "0.1.0"
+edition     = "2021"
+publish     = false
+description  = "1.5-layer (reduced-gravity) shallow-water model of Jupiter's Great Red Spot, compiled to WebAssembly. Beta-plane channel, Arakawa C-grid, Sadourny energy-conserving advection, seeded with the measured zonal-jet profile to grow a long-lived anticyclone."
+
+[lib]
+# `cdylib` → a freestanding .wasm with linear memory + a flat C ABI for JS.
+# `rlib`   → lets the native cargo tests share the same code.
+crate-type = ["cdylib", "rlib"]
+
+# Zero external deps — same constraint as disc-hydro / stellar-mhd-2d. Keeps
+# wasm32 builds reproducible in sandboxed CI with no network access.
+[dependencies]
