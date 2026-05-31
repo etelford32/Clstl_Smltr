@@ -654,7 +654,7 @@ const DEG2RAD = Math.PI / 180;
  */
 function rk2BuildHorizons({
     history, modelId, horizonsH, substepH = 1, tendencyHorizonH = 3, gainAtHour = null,
-    precipFeedback = DEFAULT_PRECIP_FEEDBACK,
+    precipFeedback = DEFAULT_PRECIP_FEEDBACK, convergenceGrowth = DEFAULT_CONVERGENCE_GROWTH,
 }) {
     const frames = history.all();
     if (frames.length === 0) return null;

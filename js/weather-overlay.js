@@ -38,6 +38,7 @@ const MODE_CODE = Object.freeze({
     'humidity':    0,
     'precip-rate': 1,
     'mist':        2,
+    'convergence': 3,
 });
 
 // Per-mode default opacity. Picked so the overlay reads as a hint about
@@ -47,6 +48,7 @@ const DEFAULT_OPACITY = Object.freeze({
     'humidity':    0.45,
     'precip-rate': 0.70,
     'mist':        0.55,
+    'convergence': 0.60,
 });
 
 const VERT = /* glsl */`
@@ -64,7 +66,8 @@ ${GEO_GLSL}
 
 uniform sampler2D u_weather;        // R=T G=P B=RH A=wind
 uniform sampler2D u_cloud_layers;   // R=low G=mid B=high A=precip
-uniform int       u_mode;           // 0=humidity 1=precip 2=mist
+uniform sampler2D u_uplift;         // R=signed convergence [-1,1] A=|magnitude|
+uniform int       u_mode;           // 0=humidity 1=precip 2=mist 3=convergence
 uniform float     u_opacity;
 uniform float     u_has_data;       // 0 until first weather frame ingested
 
@@ -119,6 +122,26 @@ vec4 precipColor(float mmhr) {
 // fraction" because that's what we have on the existing texture; a
 // future revision could blend in topography so coastal valleys show
 // fog stronger than mountain peaks.
+// Convergence / uplift diagnostic. Input is the signed normalised field
+// the model grows precip from: +1 = strong convergence (rising air, storm
+// genesis), −1 = strong divergence (subsidence, clearing). Diverging cool
+// amber, converging a rising indigo→cyan that brightens with strength so
+// the eye is drawn to where new weather is forming. The magnitude (abs of
+// the signed value) gates alpha so calm regions stay transparent.
+vec4 convergenceColor(float signed, float mag) {
+    if (mag < 0.06) return vec4(0.0);
+    vec3 col;
+    if (signed >= 0.0) {
+        // Uplift: deep indigo → vivid cyan as convergence strengthens.
+        col = mix(vec3(0.28, 0.20, 0.62), vec3(0.30, 0.85, 0.95), smoothstep(0.0, 1.0, signed));
+    } else {
+        // Subsidence: muted slate → warm amber as divergence strengthens.
+        col = mix(vec3(0.42, 0.40, 0.34), vec3(0.92, 0.62, 0.22), smoothstep(0.0, 1.0, -signed));
+    }
+    float a = smoothstep(0.06, 0.55, mag) * 0.85 + 0.15;
+    return vec4(col, a);
+}
+
 vec4 mistColor(float rh, float cloudLow) {
     float gate = smoothstep(0.85, 1.0, rh) * smoothstep(0.30, 0.90, cloudLow);
     if (gate < 0.05) return vec4(0.0);
@@ -153,6 +176,9 @@ void main() {
         col.a *= mix(0.40, 1.0, smoothstep(0.05, 0.45, deck));
     } else if (u_mode == 2) {
         col = mistColor(w.b, c.r);
+    } else if (u_mode == 3) {
+        vec4 up = texture2D(u_uplift, uv);
+        col = convergenceColor(up.r, up.a);
     } else {
         col = vec4(0.0);
     }
@@ -171,6 +197,9 @@ void main() {
  * @param {string} opts.mode               'humidity' | 'precip-rate' | 'mist'.
  * @param {object} opts.weatherTexture     The shared THREE.DataTexture (RGBA = T,P,RH,wind).
  * @param {object} opts.cloudTexture       The shared THREE.DataTexture (RGBA = low,mid,high,precip).
+ * @param {object} [opts.upliftTexture]    The shared THREE.DataTexture (RGBA = signed-convergence,_,_,|mag|).
+ *                                         Only the 'convergence' mode samples it; passing it to every
+ *                                         overlay keeps a valid sampler bound so three.js doesn't warn.
  * @param {number} [opts.opacity]          Override default per-mode opacity.
  * @returns {{ mesh, mat, setOpacity, setHasData, mode }}
  */
@@ -181,6 +210,7 @@ export function createWeatherOverlay({
     mode,
     weatherTexture,
     cloudTexture,
+    upliftTexture = null,
     opacity,
 }) {
     if (!(mode in MODE_CODE)) {
@@ -195,6 +225,7 @@ export function createWeatherOverlay({
         uniforms: {
             u_weather:      { value: weatherTexture },
             u_cloud_layers: { value: cloudTexture },
+            u_uplift:       { value: upliftTexture },
             u_mode:         { value: MODE_CODE[mode] },
             u_opacity:      { value: op },
             // 0 until the weather feed has produced its first frame —

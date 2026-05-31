@@ -2555,6 +2555,10 @@ import './js/telemetry.js';
                         <input type="checkbox" id="lyr-mist"><label for="lyr-mist">Mist &amp; Fog</label>
                         <label class="lyr-rd" for="rd-mist" title="Show RH (%) and low-cloud fraction on cursor hover"><input type="checkbox" id="rd-mist"><span class="lyr-rd-badge">#</span></label>
                     </div>
+                    <div class="lyr" title="Wind convergence / uplift — the dynamical signal the forecast grows precipitation from. Indigo→cyan = converging air rising (storms building); amber = diverging air sinking (clearing). Scrub the timeline to watch storm-genesis lines develop.">
+                        <input type="checkbox" id="lyr-convergence"><label for="lyr-convergence">Convergence / Uplift</label>
+                        <label class="lyr-rd" for="rd-convergence" title="Show convergence/uplift (10⁻⁵ s⁻¹) on cursor hover"><input type="checkbox" id="rd-convergence"><span class="lyr-rd-badge">#</span></label>
+                    </div>
                 </div>
             </div>
             </div>
@@ -3312,6 +3316,7 @@ import {
     clearSavedLocations, formatLocalClock, dayNightBadge,
 } from './js/earth-saved-locations.js';
 import { WeatherFeed, TEX_W, TEX_H, MAX_WIND_MS } from './js/weather-feed.js';
+import { computeUpliftField, UPLIFT_FULL_SCALE } from './js/weather-uplift.js';
 import { WeatherHistory }        from './js/weather-history.js';
 import { WeatherFrameResolver }  from './js/weather-frame-resolver.js';
 import { WeatherForecastFeed }   from './js/weather-forecast-feed.js';
@@ -3803,7 +3808,23 @@ cloudU.u_cloud_layers.value.wrapT     = THREE.ClampToEdgeWrapping;
 cloudU.u_cloud_layers.value.flipY = true;
 cloudU.u_cloud_layers.value.needsUpdate = true;
 
-// ── Derived weather overlays — humidity / precip / mist ───────────────────
+// Convergence / uplift DataTexture (R=signed convergence [-1,1], A=|magnitude|).
+// Not consumed by the surface/cloud shaders — only the convergence overlay
+// samples it — so it lives as a standalone texture, recomputed from the wind
+// buffer on each weather-update (see updateWeatherTextures). Same south-first
+// row order + flipY as the other weather textures.
+const upliftTex = new THREE.DataTexture(
+    new Float32Array(TEX_W * TEX_H * 4), TEX_W, TEX_H,
+    THREE.RGBAFormat, THREE.FloatType
+);
+upliftTex.magFilter = THREE.LinearFilter;
+upliftTex.minFilter = THREE.LinearFilter;
+upliftTex.wrapS     = THREE.RepeatWrapping;
+upliftTex.wrapT     = THREE.ClampToEdgeWrapping;
+upliftTex.flipY     = true;
+upliftTex.needsUpdate = true;
+
+// ── Derived weather overlays — humidity / precip / mist / convergence ──────
 // Three thin shells parented to earthMesh, each reading the same
 // u_weather + u_cloud_layers DataTextures the surface/cloud shaders use.
 // No new fetches; the shader picks one of three colour ramps via mode
@@ -3818,16 +3839,28 @@ const _weatherOverlays = {
         THREE, radius: R_EARTH * 1.0035, icoLevel: ICO_LEVEL, mode: 'humidity',
         weatherTexture: earthU.u_weather.value,
         cloudTexture:   cloudU.u_cloud_layers.value,
+        upliftTexture:  upliftTex,
     }),
     'precip-rate': createWeatherOverlay({
         THREE, radius: R_EARTH * 1.0040, icoLevel: ICO_LEVEL, mode: 'precip-rate',
         weatherTexture: earthU.u_weather.value,
         cloudTexture:   cloudU.u_cloud_layers.value,
+        upliftTexture:  upliftTex,
     }),
     mist: createWeatherOverlay({
         THREE, radius: R_EARTH * 1.0028, icoLevel: ICO_LEVEL, mode: 'mist',
         weatherTexture: earthU.u_weather.value,
         cloudTexture:   cloudU.u_cloud_layers.value,
+        upliftTexture:  upliftTex,
+    }),
+    // Convergence / uplift — the dynamical source the forecast grows precip
+    // from. Sits just above the precip shell so storm-genesis lines read on
+    // top of the rain they're about to produce.
+    convergence: createWeatherOverlay({
+        THREE, radius: R_EARTH * 1.0045, icoLevel: ICO_LEVEL, mode: 'convergence',
+        weatherTexture: earthU.u_weather.value,
+        cloudTexture:   cloudU.u_cloud_layers.value,
+        upliftTexture:  upliftTex,
     }),
 };
 for (const ov of Object.values(_weatherOverlays)) earthMesh.add(ov.mesh);
@@ -4107,6 +4140,24 @@ function _renderHoverReadouts(lat, lon) {
         rows.push(`<div class="ct-readout"><span class="ct-rd-icon">🌫</span>` +
             `<span class="ct-rd-val">${fog}</span> ` +
             `(RH ${wx.rhPct.toFixed(0)}% · low-cloud ${cl.clLow.toFixed(0)}%)</div>`);
+    }
+
+    // Convergence / uplift — the dynamical signal the forecast grows precip
+    // from. Reported in 10⁻⁵ s⁻¹ with the sign spelled out, so a hovered storm
+    // line reads as "↑ uplift" (air rising, weather building) vs "↓ subsidence"
+    // (air sinking, clearing). Threshold mirrors the overlay's alpha cutoff.
+    const wantConv = document.getElementById('rd-convergence')?.checked;
+    if (wantConv) {
+        const up = _sampleUpliftAt(lat, lon);
+        if (up) {
+            const v5 = up.convPerS / 1e-5;                 // → 10⁻⁵ s⁻¹
+            const label = v5 >=  0.15 ? '↑ uplift'
+                        : v5 <= -0.15 ? '↓ subsidence'
+                        : 'neutral';
+            rows.push(`<div class="ct-readout"><span class="ct-rd-icon">⇅</span>` +
+                `<span class="ct-rd-val">${label}</span> ` +
+                `(${v5 >= 0 ? '+' : ''}${v5.toFixed(1)}×10⁻⁵ s⁻¹)</div>`);
+        }
     }
 
     // ── Composite-index advisories ──
@@ -4507,6 +4558,7 @@ document.getElementById('lyr-wind').addEventListener('change', e => {
     wireOverlay('lyr-humidity',   'humidity');
     wireOverlay('lyr-precip-rate', 'precip-rate');
     wireOverlay('lyr-mist',        'mist');
+    wireOverlay('lyr-convergence', 'convergence');
 }
 
 // Storm Tracks — 5-day kinematic forecast cones. The overlay rebuilds
@@ -5462,6 +5514,7 @@ const solarWindParticles = new SolarWindParticles(scene, 3000, SUN_EQ);
 // handler. null until the first feed lands; samplers must guard for that.
 let _lastWeatherBuf = null;   // R=T-norm, G=P-norm, B=RH-norm, A=speed-norm
 let _lastCloudBuf   = null;   // R=cl_low, G=cl_mid, B=cl_high, A=precip/10
+let _lastUpliftBuf  = null;   // R=signed convergence [-1,1], A=|magnitude|
 
 // Bilinear-sample a 4-channel Float32 buffer at (lat,lon). Same row/col
 // convention as WindParticles._lookupWind: longitude wraps, row 0 = 90°S.
@@ -5513,6 +5566,12 @@ function _sampleCloudAt(lat, lon) {
         clHigh:      _wxSampleTmp[2] * 100,
         precipMmHr:  _wxSampleTmp[3] * 10,      //   0…10  mm/hr (capped)
     };
+}
+function _sampleUpliftAt(lat, lon) {
+    if (!_sampleRGBA4(_lastUpliftBuf, lat, lon, _wxSampleTmp)) return null;
+    // R is the signed convergence normalised by UPLIFT_FULL_SCALE; multiply
+    // back to recover s⁻¹. Positive = convergence/uplift, negative = subsidence.
+    return { convPerS: _wxSampleTmp[0] * UPLIFT_FULL_SCALE };
 }
 
 // ── Wind-scale legend ──────────────────────────────────────────────────
@@ -6977,6 +7036,15 @@ function updateWeatherTextures(weatherBuf, wBuf, cloudBuf) {
     if (cloudBuf && cloudU.u_cloud_layers.value) {
         cloudU.u_cloud_layers.value.image.data.set(cloudBuf);
         cloudU.u_cloud_layers.value.needsUpdate = true;
+    }
+    // Recompute the convergence/uplift diagnostic from the same wind field the
+    // forecaster grows precip from. Cheap (one pass over the grid) and runs
+    // per weather-update, so during time-scrub it tracks the FORECAST wind —
+    // the overlay shows where the predicted flow is spinning up new weather.
+    if (wBuf) {
+        computeUpliftField(wBuf, TEX_W, TEX_H, MAX_WIND_MS, upliftTex.image.data);
+        upliftTex.needsUpdate = true;
+        _lastUpliftBuf = upliftTex.image.data;
     }
 }
 
@@ -10238,7 +10306,7 @@ _backdrop.addEventListener('click', _closeMobilePanel);
     // the existing weather DataTextures, so they need the same synthetic
     // change-event dispatch on first render to align mesh visibility
     // with their default-unchecked state.
-    'lyr-humidity', 'lyr-precip-rate', 'lyr-mist',
+    'lyr-humidity', 'lyr-precip-rate', 'lyr-mist', 'lyr-convergence',
     // Storm-tracks layer (5-day kinematic forecast cones). Default off
     // — the cones can clutter the globe at small zoom levels.
     'lyr-storm-tracks',
