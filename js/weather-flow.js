@@ -654,7 +654,7 @@ const DEG2RAD = Math.PI / 180;
  */
 function rk2BuildHorizons({
     history, modelId, horizonsH, substepH = 1, tendencyHorizonH = 3, gainAtHour = null,
-    precipFeedback = DEFAULT_PRECIP_FEEDBACK, convergenceGrowth = DEFAULT_CONVERGENCE_GROWTH,
+    precipFeedback = DEFAULT_PRECIP_FEEDBACK,
 }) {
     const frames = history.all();
     if (frames.length === 0) return null;
@@ -742,6 +742,8 @@ function rk2BuildHorizons({
         // into new cloud + rain, then the cloud→precip reconcile gates the
         // result so rain and deck stay consistent (both no-ops for h ≤ 0).
         applyConvergenceGrowth(frame, N, gridW, gridH, h, convergenceGrowth);
+        // Cloud → precip feedback: keep the advected rain consistent with the
+        // advected deck at this horizon (no-op for h ≤ 0, handled above).
         reconcilePrecipWithCloud(frame, N, h, precipFeedback);
         out[h] = frame;
     }
