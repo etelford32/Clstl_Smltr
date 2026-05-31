@@ -3032,6 +3032,28 @@ import './js/telemetry.js';
                 <span>↓ subsidence</span><span>0</span><span>uplift ↑</span>
             </div>
         </div>
+        <!-- Humidity (RH%) key — mirrors humidityColor() in weather-overlay.js
+             (dry tan → comfort cyan → saturated blue, hidden below 30% RH).
+             Shown only while the Humidity layer is on. -->
+        <div id="wx-humidity-legend-box" style="display:none;">
+            <div style="margin:0 0 4px;font-size:9px;color:#556;text-transform:uppercase;letter-spacing:.06em">Relative humidity (%)</div>
+            <canvas id="wx-humidity-legend" width="200" height="8"
+                    style="width:100%;height:8px;border-radius:3px;display:block;"></canvas>
+            <div style="display:flex;justify-content:space-between;font-size:9px;color:#668;margin-top:2px;margin-bottom:6px;">
+                <span>30</span><span>65</span><span>100 %</span>
+            </div>
+        </div>
+        <!-- Precipitation-rate key — mirrors precipColor() in weather-overlay.js
+             (NEXRAD-style: green → yellow → red → magenta). Log-ish spacing;
+             shown only while the Precip Rate layer is on. -->
+        <div id="wx-precip-legend-box" style="display:none;">
+            <div style="margin:0 0 4px;font-size:9px;color:#556;text-transform:uppercase;letter-spacing:.06em">Precip rate (mm/hr)</div>
+            <canvas id="wx-precip-legend" width="200" height="8"
+                    style="width:100%;height:8px;border-radius:3px;display:block;"></canvas>
+            <div style="display:flex;justify-content:space-between;font-size:9px;color:#668;margin-top:2px;margin-bottom:6px;">
+                <span>0.1</span><span>1</span><span>5</span><span>20</span><span>50</span>
+            </div>
+        </div>
         <hr class="ir-sep">
         <!-- Isobar / pressure analysis -->
         <div class="wx-row" style="align-items:flex-start;margin-bottom:2px;">
@@ -3418,8 +3440,9 @@ import {
     EARTH_VERT, EARTH_FRAG, CLOUD_VERT, CLOUD_FRAG, ATM_VERT, ATM_FRAG,
     AURORA_VERT, AURORA_FRAG,
     createEarthUniforms, createCloudUniforms, createAuroraUniforms,
-    loadEarthTextures,
+    loadEarthTextures, EARTH_TEXTURES,
 } from './js/earth-skin.js';
+import { buildTerrainGradient, makeHeightSamplerFromImageData } from './js/weather-orography.js';
 import { StormFeed } from './js/storm-feed.js';
 import { initDebugOverlay } from './js/debug-overlay.js';
 
@@ -4584,13 +4607,19 @@ document.getElementById('lyr-wind').addEventListener('change', e => {
     wireOverlay('lyr-precip-rate', 'precip-rate');
     wireOverlay('lyr-mist',        'mist');
     wireOverlay('lyr-convergence', 'convergence');
-    // Reveal the convergence/uplift colour key in the wx-panel only while its
-    // layer is on, so the swatch isn't dead chrome the rest of the time. The
-    // first-render synthetic dispatch fires this with checked=false → hidden.
-    document.getElementById('lyr-convergence')?.addEventListener('change', e => {
-        const box = document.getElementById('wx-convergence-legend-box');
-        if (box) box.style.display = e.target.checked ? '' : 'none';
-    });
+    // Reveal each derived-overlay colour key in the wx-panel only while its
+    // layer is on, so the swatches aren't dead chrome the rest of the time.
+    // The first-render synthetic dispatch fires these with checked=false →
+    // hidden. (Mist has no quantitative ramp, so no legend.)
+    const wireLegend = (toggleId, boxId) => {
+        const el = document.getElementById(toggleId);
+        const box = document.getElementById(boxId);
+        if (!el || !box) return;
+        el.addEventListener('change', e => { box.style.display = e.target.checked ? '' : 'none'; });
+    };
+    wireLegend('lyr-convergence', 'wx-convergence-legend-box');
+    wireLegend('lyr-humidity',    'wx-humidity-legend-box');
+    wireLegend('lyr-precip-rate', 'wx-precip-legend-box');
 }
 
 // Storm Tracks — 5-day kinematic forecast cones. The overlay rebuilds
@@ -5668,6 +5697,54 @@ function _sampleUpliftAt(lat, lon) {
     }
 })();
 
+// ── Humidity legend ─────────────────────────────────────────────────────
+// Mirrors humidityColor() in js/weather-overlay.js: x maps 30%→100% RH from
+// dry tan through comfort cyan to saturated blue (the layer draws nothing
+// below 30%, so the swatch starts there too).
+(function _paintHumidityLegend() {
+    const cv = document.getElementById('wx-humidity-legend');
+    if (!cv) return;
+    const ctx = cv.getContext('2d');
+    const W = cv.width, H = cv.height;
+    const mix = (a, b, t) => a + (b - a) * t;
+    const ss  = (e0, e1, x) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
+    const dry = [0.78, 0.66, 0.46], midC = [0.60, 0.84, 0.86], wet = [0.22, 0.50, 0.85];
+    for (let x = 0; x < W; x++) {
+        const rh = 0.30 + (x / (W - 1)) * 0.70;     // 30%…100%
+        const t  = ss(0.30, 1.00, rh);
+        let c = dry.map((d, i) => mix(d, midC[i], ss(0.0, 0.55, t)));
+        c = c.map((v, i) => mix(v, wet[i], ss(0.55, 1.0, t)));
+        ctx.fillStyle = `rgb(${(c[0] * 255) | 0}, ${(c[1] * 255) | 0}, ${(c[2] * 255) | 0})`;
+        ctx.fillRect(x, 0, 1, H);
+    }
+})();
+
+// ── Precip-rate legend ──────────────────────────────────────────────────
+// Mirrors precipColor() in js/weather-overlay.js: NEXRAD ramp green→yellow→
+// red→magenta. x is log-spaced 0.1→50 mm/hr so the common light-rain band
+// isn't crushed into the left edge (matches the tick labels under it).
+(function _paintPrecipLegend() {
+    const cv = document.getElementById('wx-precip-legend');
+    if (!cv) return;
+    const ctx = cv.getContext('2d');
+    const W = cv.width, H = cv.height;
+    const mix = (a, b, t) => a + (b - a) * t;
+    const ss  = (e0, e1, x) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
+    const lo = Math.log(0.1), hi = Math.log(50);
+    const ramp = (mmhr) => {
+        if (mmhr < 1.0)  return [mix(0.55, 0.20, ss(0.10, 1.0, mmhr)), mix(0.85, 0.75, ss(0.10, 1.0, mmhr)), mix(0.55, 0.20, ss(0.10, 1.0, mmhr))];
+        if (mmhr < 5.0)  return [mix(0.20, 0.95, ss(1.0, 5.0, mmhr)),  mix(0.75, 0.90, ss(1.0, 5.0, mmhr)),  mix(0.20, 0.20, ss(1.0, 5.0, mmhr))];
+        if (mmhr < 20.0) return [mix(0.95, 0.95, ss(5.0, 20.0, mmhr)), mix(0.90, 0.25, ss(5.0, 20.0, mmhr)), mix(0.20, 0.15, ss(5.0, 20.0, mmhr))];
+        return [mix(0.95, 0.85, ss(20., 50., mmhr)), mix(0.25, 0.10, ss(20., 50., mmhr)), mix(0.15, 0.65, ss(20., 50., mmhr))];
+    };
+    for (let x = 0; x < W; x++) {
+        const mmhr = Math.exp(lo + (x / (W - 1)) * (hi - lo));
+        const c = ramp(mmhr);
+        ctx.fillStyle = `rgb(${(c[0] * 255) | 0}, ${(c[1] * 255) | 0}, ${(c[2] * 255) | 0})`;
+        ctx.fillRect(x, 0, 1, H);
+    }
+})();
+
 // ── SST legend ──────────────────────────────────────────────────────────
 // Mirror NASA GIBS GHRSST_L4_MUR_Sea_Surface_Temperature standard palette
 // (−2 °C … 32 °C). Values are pulled from the GIBS WMS GetLegendGraphic
@@ -6139,15 +6216,60 @@ window._rk2GainTracker = rk2GainTracker;
 window._rk2Forecaster  = rk2Forecaster;
 
 // Microphysics status line in the forecast panel — reads the live forecaster
-// config so it tells the truth if either term is ever disabled. ON in green,
-// OFF in grey. Static (these are fixed model properties), painted once.
-(function _initMicrophysicsHud() {
+// config so it tells the truth if a term is disabled (or, for orography, not
+// yet loaded). ON green / OFF grey. Re-rendered when the terrain field lands.
+function _renderMicrophysicsHud() {
     const el = document.getElementById('wx-microphysics-line');
     if (!el || typeof rk2Forecaster.microphysicsStatus !== 'function') return;
     const s = rk2Forecaster.microphysicsStatus();
     const chip = (on, label) =>
         `${label}: <span style="color:${on ? '#5bd6a0' : '#667'};font-weight:600;">${on ? 'ON' : 'OFF'}</span>`;
-    el.innerHTML = `microphysics · ${chip(s.convergenceGrowth, 'convergence growth')} · ${chip(s.precipFeedback, 'cloud→precip')}`;
+    el.innerHTML = `microphysics · ${chip(s.convergenceGrowth, 'convergence growth')}`
+        + ` · ${chip(s.precipFeedback, 'cloud→precip')}`
+        + ` · ${chip(s.orographicUplift, 'orographic')}`;
+}
+_renderMicrophysicsHud();
+
+// Orographic uplift needs a terrain-gradient field. Read the Blue-Marble
+// topology heightmap back through a canvas, downsample to the forecast grid,
+// and hand it to the RK2 forecaster. Fully defensive: any failure (CDN block,
+// CORS taint, decode error) leaves terrain null so orography simply stays
+// OFF — it can never break the page or the forecast. Browser-only path; the
+// gradient math itself is unit-tested in tests/weather-orography.mjs.
+(function _loadTerrainForOrography() {
+    try {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+            try {
+                // Modest readback resolution — orography only needs synoptic-
+                // scale slope, and the forecast grid is coarser still.
+                const RW = 720, RH = 360;
+                const cv = document.createElement('canvas');
+                cv.width = RW; cv.height = RH;
+                const cx = cv.getContext('2d', { willReadFrequently: true });
+                cx.drawImage(img, 0, 0, RW, RH);
+                const { data } = cx.getImageData(0, 0, RW, RH);
+                const sampler = makeHeightSamplerFromImageData(data, RW, RH);
+                // Match the live grid if we have frames, else the 72×36 default.
+                const frames = wxGridHistory.size > 0 ? wxGridHistory.all() : [];
+                const newest = frames.length ? frames[frames.length - 1] : null;
+                const gridW = newest?.gridW || 72;
+                const gridH = newest?.gridH || 36;
+                const terrain = buildTerrainGradient({ heightSampler: sampler, gridW, gridH });
+                rk2Forecaster.setTerrain(terrain);
+                window._wxTerrain = terrain;
+                wxPaintProvider.refresh();         // next scrub uses orographic lift
+                _renderMicrophysicsHud();          // flip the indicator to ON
+            } catch (e) {
+                console.warn('[orography] terrain readback failed; orographic uplift stays off:', e?.message || e);
+            }
+        };
+        img.onerror = () => {/* topology unavailable (offline/CDN) — stay off, no log spam */};
+        img.src = EARTH_TEXTURES.topology;
+    } catch (e) {
+        console.warn('[orography] terrain load skipped:', e?.message || e);
+    }
 })();
 
 // Pin the future-scrub globe to the RK2 model's dense hourly forecast.

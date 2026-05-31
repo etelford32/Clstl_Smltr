@@ -151,7 +151,10 @@ check('convergence also thickens the cloud deck (cloud+rain grow together)', () 
 });
 
 check('microphysicsStatus() reflects the live config (for the UI indicator)', () => {
-    assert.deepEqual(fcOn.microphysicsStatus(),  { convergenceGrowth: true,  precipFeedback: true });
+    const on = fcOn.microphysicsStatus();
+    assert.equal(on.convergenceGrowth, true,  'convergence growth ON by default');
+    assert.equal(on.precipFeedback,    true,  'cloud→precip ON by default');
+    assert.equal(on.orographicUplift,  false, 'orographic OFF until terrain is supplied');
     assert.equal(fcOff.microphysicsStatus().convergenceGrowth, false, 'disabled term reports OFF');
     assert.equal(fcOff.microphysicsStatus().precipFeedback,    true,  'the other term stays ON');
 });

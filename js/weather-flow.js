@@ -169,18 +169,28 @@ export const DEFAULT_CONVERGENCE_GROWTH = Object.freeze({
     precipMax: 8.0,    // mm/hr cap on convergence-generated rain
     cloudMax:  70.0,   // cap (%) on convergence-grown deck per horizon
     rhFloor:   0.40,   // below this RH fraction, converging air is too dry to rain
+    oroGain:   1.0,    // scales orographic lift (U·∇h) into the uplift budget; 0 = ignore terrain
 });
 
 /**
  * In-place grow the precip (8) and low/mid cloud (5,6) channels of one
- * advected CHW frame wherever its own wind field (3,4) converges. Pure given
- * (frame, N, gridW, gridH, h, params); mutates and returns `frame`. h ≤ 0 and
- * disabled params are no-ops. Units: wind m/s, cloud %, precip mm/hr, RH %.
+ * advected CHW frame wherever air is forced upward — by wind CONVERGENCE
+ * (−∇·V from the frame's own wind 3,4) and, when a `terrain` gradient is
+ * supplied, by OROGRAPHIC lift (wind blowing upslope, U·∇h). Both are vertical-
+ * motion sources in s⁻¹, so they add into one uplift budget that drives a
+ * single condensation response. Pure given (frame, N, gridW, gridH, h, params,
+ * terrain); mutates and returns `frame`. h ≤ 0 and disabled params are no-ops.
+ * Units: wind m/s, cloud %, precip mm/hr, RH %.
+ *
+ * `terrain`, when present, is { gridW, gridH, dhdx, dhdy } where dhdx/dhdy are
+ * the normalised-height gradient per metre (built by buildTerrainGradient in
+ * weather-orography.js, ocean-masked to 0). A grid mismatch is ignored, so a
+ * stale terrain field can never corrupt a differently-sized forecast frame.
  *
  * Runs BEFORE reconcilePrecipWithCloud so the rain it creates is backed by a
  * deck it also creates, leaving the two channels physically consistent.
  */
-export function applyConvergenceGrowth(frame, N, gridW, gridH, h, params = DEFAULT_CONVERGENCE_GROWTH) {
+export function applyConvergenceGrowth(frame, N, gridW, gridH, h, params = DEFAULT_CONVERGENCE_GROWTH, terrain = null) {
     const p = params || DEFAULT_CONVERGENCE_GROWTH;
     if (!p.enabled || h <= 0) return frame;
 
@@ -188,6 +198,14 @@ export function applyConvergenceGrowth(frame, N, gridW, gridH, h, params = DEFAU
     const V   = frame.subarray(CH_V * N, (CH_V + 1) * N);
     const RH  = frame.subarray(2 * N, 3 * N);
     const offL = CH_LOW * N, offM = CH_MID * N, offP = CH_PRECIP * N;
+
+    // Orographic forcing only contributes when a grid-matched terrain field is
+    // supplied and the gain is on. dhdx/dhdy are normalised-height per metre,
+    // so U·∇h is m/s · m⁻¹ = s⁻¹ — directly commensurate with convergence.
+    const useOro = !!(terrain && p.oroGain && terrain.gridW === gridW
+                      && terrain.gridH === gridH && terrain.dhdx && terrain.dhdy);
+    const dhdx = useOro ? terrain.dhdx : null;
+    const dhdy = useOro ? terrain.dhdy : null;
 
     const tauSec = Math.max(0.5, p.satH) * 3600 * (1 - Math.exp(-h / Math.max(0.5, p.satH)));
     const dyM    = (180 / gridH) * M_PER_DEG_LAT;          // metres per grid row
@@ -208,14 +226,20 @@ export function applyConvergenceGrowth(frame, N, gridW, gridH, h, params = DEFAU
 
             const dUdx = (U[j * gridW + ip] - U[j * gridW + im]) / (2 * dxM);
             const dVdy = (V[jp * gridW + i]  - V[jm * gridW + i]) / dySpan;
-            const conv = -(dUdx + dVdy);          // >0 where the flow converges
-            if (conv <= 0) continue;              // growth only
+            let uplift = -(dUdx + dVdy);          // convergence: >0 where flow converges
 
-            // Moisture gate: only converging *moist* air condenses and rains.
+            // Orographic lift: positive when the wind blows up the slope, negative
+            // in the lee (rain shadow). Added to the convergence budget; the
+            // growth-only gate below then keeps lee subsidence from raining.
+            if (useOro) uplift += p.oroGain * (U[k] * dhdx[k] + V[k] * dhdy[k]);
+
+            if (uplift <= 0) continue;            // growth only
+
+            // Moisture gate: only rising *moist* air condenses and rains.
             const moist = _smoothstep(p.rhFloor, 1.0, RH[k] / 100);
             if (moist <= 0) continue;
 
-            const processed = conv * moist * tauSec;   // dimensionless
+            const processed = uplift * moist * tauSec;   // dimensionless
             frame[offP + k] = Math.min(frame[offP + k] + Math.min(p.precipMax, p.kPrecip * processed), 50);
             const grow = Math.min(p.cloudMax, p.kCloud * processed);
             frame[offL + k] = Math.min(100, frame[offL + k] + grow);
@@ -655,6 +679,7 @@ const DEG2RAD = Math.PI / 180;
 function rk2BuildHorizons({
     history, modelId, horizonsH, substepH = 1, tendencyHorizonH = 3, gainAtHour = null,
     precipFeedback = DEFAULT_PRECIP_FEEDBACK, convergenceGrowth = DEFAULT_CONVERGENCE_GROWTH,
+    terrain = null,
 }) {
     const frames = history.all();
     if (frames.length === 0) return null;
@@ -738,10 +763,10 @@ function rk2BuildHorizons({
                 }
             }
         }
-        // Microphysics, in physical order: convergence first lifts moist air
-        // into new cloud + rain, then the cloud→precip reconcile gates the
-        // result so rain and deck stay consistent (both no-ops for h ≤ 0).
-        applyConvergenceGrowth(frame, N, gridW, gridH, h, convergenceGrowth);
+        // Microphysics, in physical order: convergence + orographic lift first
+        // raise moist air into new cloud + rain, then the cloud→precip reconcile
+        // gates the result so rain and deck stay consistent (no-ops for h ≤ 0).
+        applyConvergenceGrowth(frame, N, gridW, gridH, h, convergenceGrowth, terrain);
         // Cloud → precip feedback: keep the advected rain consistent with the
         // advected deck at this horizon (no-op for h ≤ 0, handled above).
         reconcilePrecipWithCloud(frame, N, h, precipFeedback);
@@ -768,7 +793,7 @@ export class WindAdvectionRK2Forecaster {
      */
     constructor({ gainTracker = null, shearProxy = null, tendencyHorizonH = 3, substepH = 1,
                   precipFeedback = DEFAULT_PRECIP_FEEDBACK,
-                  convergenceGrowth = DEFAULT_CONVERGENCE_GROWTH } = {}) {
+                  convergenceGrowth = DEFAULT_CONVERGENCE_GROWTH, terrain = null } = {}) {
         this.id                 = WindAdvectionRK2Forecaster.id;
         this._gainTracker       = gainTracker;
         this._shearProxy        = shearProxy;
@@ -776,8 +801,17 @@ export class WindAdvectionRK2Forecaster {
         this._substepH          = substepH;
         this._precipFeedback    = precipFeedback;
         this._convergenceGrowth = convergenceGrowth;
+        this._terrain           = terrain;
         this._lastDiag          = null;
     }
+
+    /**
+     * Supply (or clear) the terrain-gradient field that drives orographic
+     * uplift. Async/late-binding friendly — earth.html sets this once the
+     * topology heightmap has loaded and been downsampled to the grid. Pass
+     * null to disable. See buildTerrainGradient in weather-orography.js.
+     */
+    setTerrain(terrain) { this._terrain = terrain || null; }
 
     getLastDiag() { return this._lastDiag; }
 
@@ -787,9 +821,14 @@ export class WindAdvectionRK2Forecaster {
      * a forecaster built with either term disabled reports honestly.
      */
     microphysicsStatus() {
+        const cg = this._convergenceGrowth;
         return {
-            convergenceGrowth: !!(this._convergenceGrowth && this._convergenceGrowth.enabled),
-            precipFeedback:    !!(this._precipFeedback    && this._precipFeedback.enabled),
+            convergenceGrowth: !!(cg && cg.enabled),
+            precipFeedback:    !!(this._precipFeedback && this._precipFeedback.enabled),
+            // Orographic uplift is live only when convergence growth is on (it
+            // shares that machinery), its gain is non-zero, AND a terrain field
+            // has been supplied.
+            orographicUplift:  !!(cg && cg.enabled && cg.oroGain && this._terrain),
         };
     }
 
@@ -812,6 +851,7 @@ export class WindAdvectionRK2Forecaster {
             substepH: this._substepH, tendencyHorizonH: this._tendencyHorizonH,
             gainAtHour: fn, precipFeedback: this._precipFeedback,
             convergenceGrowth: this._convergenceGrowth,
+            terrain:           this._terrain,
         });
         if (result) {
             this._lastDiag = {
@@ -840,6 +880,7 @@ export class WindAdvectionRK2Forecaster {
             substepH: this._substepH, tendencyHorizonH: this._tendencyHorizonH,
             gainAtHour: fn, precipFeedback: this._precipFeedback,
             convergenceGrowth: this._convergenceGrowth,
+            terrain:           this._terrain,
         });
     }
 }
