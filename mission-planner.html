@@ -867,7 +867,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
         </div>
         <div class="mp-mode-toggle" style="margin-top:4px;">
             <button id="mp-cam-follow"    class="mp-mode-btn"    type="button" title="F · Follow active mission" style="flex:1.2;">🎥 Follow</button>
-            <button id="mp-cam-autoframe" class="mp-mode-btn on" type="button" title="Auto-chase new launches (toggle)" style="flex:1.2;">🎬 Auto</button>
+            <button id="mp-cam-autoframe" class="mp-mode-btn" type="button" title="Auto-chase new launches (toggle) — off by default" style="flex:1.2;">🎬 Auto</button>
             <button id="mp-cam-reset"     class="mp-mode-btn"    type="button" title="R · Reset to Earth">⟲ Reset</button>
         </div>
         <div class="mp-mode-toggle" style="margin-top:4px;" title="Camera mode — 'Lock' tracks the focused body, 'Free' decouples">
@@ -1006,7 +1006,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
         <div class="mp-time-display" id="mp-time-display">— UTC</div>
 
         <div class="mp-time-bar" role="toolbar" aria-label="Time playback">
-            <button id="mp-time-pause" type="button" title="Pause / Play (Space)">⏸</button>
+            <button id="mp-time-pause" class="paused" type="button" title="Play / Pause (Space)">▶</button>
             <button id="mp-time-back-d" type="button" title="−1 day">«</button>
             <button id="mp-time-back-h" type="button" title="−1 hour">‹</button>
             <button id="mp-time-fwd-h"  type="button" title="+1 hour">›</button>
@@ -1056,10 +1056,11 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
             <span class="mp-time" id="mp-timescale-val">1.0×</span>
         </div>
 
+        <button id="mp-demo" class="mp-secondary-btn" type="button" title="Spawn a sample LEO mission and start playback" style="border-color:rgba(120,200,255,.40); color:#aad8ff;">▶ Load Demo Mission</button>
         <button id="mp-clear" class="mp-secondary-btn" type="button" style="border-color:rgba(255,120,120,.40); color:#ffaaaa;">Clear All Vehicles</button>
 
         <div class="mp-label">Mission Log</div>
-        <div id="mp-log" class="mp-log"><div class="mp-log-row"><span class="t">--:--</span>Ready for launch.</div></div>
+        <div id="mp-log" class="mp-log"><div class="mp-log-row"><span class="t">--:--</span>Ready — sim is paused. Press ▶ (Space) to run time, build a mission, or “Load Demo Mission”.</div></div>
     </aside>
 
     <main>
@@ -2225,6 +2226,23 @@ function chaseSelectedMission() {
     return m;
 }
 document.getElementById('mp-cam-follow').addEventListener('click', chaseSelectedMission);
+
+// 🎬 Auto — opt into the cinematic camera chase. Off by default (the engine
+// boots with autoFrame=false) so launches don't yank the camera around unless
+// the user asks. This button was previously inert (styled .on but unwired);
+// it now drives the engine's setAutoFrame and reflects the live state.
+const autoframeBtn = document.getElementById('mp-cam-autoframe');
+if (autoframeBtn) {
+    autoframeBtn.classList.toggle('on', planner.getAutoFrame?.() ?? false);
+    autoframeBtn.addEventListener('click', () => {
+        const on = !(planner.getAutoFrame?.() ?? false);
+        planner.setAutoFrame?.(on);
+        autoframeBtn.classList.toggle('on', on);
+        pushLog(on ? '🎬 Auto-chase ON — camera follows new launches'
+                   : '🎬 Auto-chase OFF — camera stays put on launch', 'window');
+    });
+}
+
 document.getElementById('mp-cam-reset').addEventListener('click', () => {
     followedMissionId = null;
     focusBody('earth');
@@ -2421,8 +2439,13 @@ const winFlag    = document.getElementById('mp-window-flag');
 const winFlagMsg = document.getElementById('mp-window-flag-msg');
 
 const timeState  = {
-    paused:        false,
-    rate_d_per_s:  1.0,                 // matches initial ".on" preset (×day)
+    // Default PAUSED: the scene loads still and the user presses ▶ (or Space)
+    // to advance time. Nothing drifts, no mission animates, and the playhead
+    // doesn't move until the user asks for it — the planner is something you
+    // drive, not a movie that plays on load. (Cosmetic Earth/Sun idle spin
+    // still ticks gently — see mission-planner-3d.js — so it doesn't look dead.)
+    paused:        true,
+    rate_d_per_s:  1.0,                 // resume rate when the user hits play
     // simStartJD/simEndJD shadow the planner's bounds so we can render the
     // scrubber + ISO date inputs without round-tripping through getSimBounds
     // every frame. Kept in sync via setBounds() below.
@@ -2505,6 +2528,10 @@ function setPaused(p) {
     }
 }
 pauseBtn.addEventListener('click', () => setPaused(!timeState.paused));
+// Boot in the paused state: the engine spins up with timeScale 1, so push the
+// clock to 0 right away to match timeState.paused above. The scene loads still
+// until the user presses ▶ / Space.
+setPaused(true);
 
 function step(deltaJD) {
     planner.setScenarioJD(planner.getScenarioJD() + deltaJD);
@@ -3286,11 +3313,22 @@ marsDashToggle.addEventListener('click', () => {
     marsDashToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
 });
 
-// ── Auto-launch a starter LEO so the page never looks empty ─────────
-setTimeout(() => {
+// ── Demo mission (opt-in) ───────────────────────────────────────────
+// Previously a starter LEO auto-launched 1.2 s after load "so the page never
+// looks empty" — that made the planner play itself before the user touched
+// anything. It's now behind a button: click it to spawn a sample LEO, frame
+// the camera on it, and start the clock so there's something to watch on
+// demand. Everything stays user-driven.
+document.getElementById('mp-demo').addEventListener('click', () => {
     payloadIn.value = 'Demo-LEO-1';
     planner.launch({ siteId: 'ksc', targetId: 'leo', payloadName: 'Demo-LEO-1' });
-}, 1200);
+    pushLog('🚀 Demo: Falcon-class LEO from KSC. Press ⏸ / Space to pause.', 'launch');
+    // A demo is meant to be watched: frame the just-launched mission (it's the
+    // most recent, so chaseSelectedMission picks it up) and run the clock so
+    // the user sees motion immediately. They can pause/scrub like any mission.
+    chaseSelectedMission();
+    if (timeState.paused) setPaused(false);
+});
 </script>
 
 </body>

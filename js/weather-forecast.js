@@ -284,4 +284,144 @@ export class ForecastRegistry {
     }
 }
 
+// ── Forecast paint provider ─────────────────────────────────────────────────
+
+/**
+ * Bridges a single "pinned" forecaster to the WeatherFrameResolver so the
+ * future-scrub globe renders OUR forecast instead of the upstream NWP
+ * frames sitting in the history forecast ring. This is the "Phase 3
+ * resolver render" hook described in WEATHER_FORECAST_PLAN.md / the
+ * weather-forecast.js header.
+ *
+ * Lifecycle
+ *   On each `weather-history-ingest` (a fresh observation landed) it asks
+ *   the pinned forecaster for a DENSE hourly set (0..maxHorizonH), decodes
+ *   each coarse frame into a renderer trio once, and caches them keyed by
+ *   absolute target_ms. h=0 is the current observation, so the cache spans
+ *   [issued_ms, issued_ms + maxHorizonH·h] continuously and the
+ *   live→forecast handoff has no seam.
+ *
+ *   The resolver calls bracket(tEff) on every future tick; that's a cheap
+ *   binary-search + reference return (no decode), so dragging the slider
+ *   is allocation-light. Recompute/decode happens once per ingest (~hourly).
+ *
+ * Open-Meteo is intentionally NOT consulted here — it stays a scored
+ * leaderboard baseline (read from the history forecast ring by
+ * OpenMeteoNWPForecaster), never a paint source.
+ */
+export class ForecastPaintProvider {
+    /**
+     * @param {object} opts
+     * @param {{ forecastDense(ctx): object|null }} opts.forecaster  Pinned model.
+     * @param {import('./weather-history.js').WeatherHistory} opts.history
+     * @param {(coarse: Float32Array, gridW: number, gridH: number) => object} opts.decode
+     *   CHW-coarse → { weatherBuf, windBuf, cloudBuf }. Pass the feed's
+     *   _decodeCoarse so the forecast goes through the exact same
+     *   bilinear+blur+pack pipeline observations use.
+     * @param {number} [opts.maxHorizonH=24]
+     */
+    constructor({ forecaster, history, decode, maxHorizonH = 24 } = {}) {
+        if (!forecaster || typeof forecaster.forecastDense !== 'function') {
+            throw new Error('ForecastPaintProvider: forecaster with forecastDense() required');
+        }
+        if (!history) throw new Error('ForecastPaintProvider: history required');
+        if (typeof decode !== 'function') throw new Error('ForecastPaintProvider: decode fn required');
+        this._forecaster  = forecaster;
+        this._history     = history;
+        this._decode      = decode;
+        this._maxHorizonH = maxHorizonH;
+
+        this._issuedMs = null;
+        this._targets  = [];          // sorted ascending target_ms
+        this._trios    = new Map();   // target_ms → { weatherBuf, windBuf, cloudBuf }
+        this._gridW    = null;
+        this._gridH    = null;
+        this._modelId  = forecaster.id ?? 'forecast';
+
+        this._onIngest = this.refresh.bind(this);
+        document.addEventListener('weather-history-ingest', this._onIngest);
+    }
+
+    /** Rebuild the dense forecast + decode cache from current history. */
+    refresh() {
+        let dense = null;
+        try {
+            dense = this._forecaster.forecastDense({
+                history: this._history, maxHorizonH: this._maxHorizonH,
+            });
+        } catch (err) {
+            console.info('[ForecastPaintProvider] forecast threw:', err?.message);
+        }
+        this._trios.clear();
+        this._targets = [];
+        if (!dense) { this._issuedMs = null; return; }
+
+        const targets = [];
+        for (const h of dense.horizons) {
+            const coarse = dense.frames[h];
+            const tt     = dense.target_ms[h];
+            if (!(coarse instanceof Float32Array) || !Number.isFinite(tt)) continue;
+            this._trios.set(tt, this._decode(coarse, dense.gridW, dense.gridH));
+            targets.push(tt);
+        }
+        targets.sort((a, b) => a - b);
+        this._targets  = targets;
+        this._issuedMs = dense.issued_ms;
+        this._gridW    = dense.gridW;
+        this._gridH    = dense.gridH;
+        this._modelId  = dense.model_id ?? this._modelId;
+    }
+
+    /**
+     * Bracketing decoded trios for a future timestamp.
+     *   - null when tEff is at/before the issue time (the resolver's own
+     *     replay/clamp path owns the past) or no forecast is loaded.
+     *   - clamps to the deepest horizon beyond the forecast range.
+     * @returns {null | { a, b, frac, meta }}
+     */
+    bracket(tEff) {
+        const targets = this._targets;
+        if (targets.length === 0) return null;
+        const first = targets[0];                       // == issued_ms (h=0 anchor)
+        const last  = targets[targets.length - 1];
+        if (tEff < first) return null;                  // past / live — not ours
+        if (tEff >= last) {
+            const trio = this._trios.get(last);
+            return trio ? { a: trio, b: trio, frac: 0, meta: this._meta(last) } : null;
+        }
+        // First target strictly greater than tEff.
+        let lo = 0, hi = targets.length;
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (targets[mid] <= tEff) lo = mid + 1; else hi = mid;
+        }
+        const beforeT = targets[lo - 1];
+        const afterT  = targets[lo];
+        const a = this._trios.get(beforeT);
+        const b = this._trios.get(afterT);
+        if (!a || !b) return null;
+        const span = afterT - beforeT;
+        const frac = span > 0 ? (tEff - beforeT) / span : 0;
+        return { a, b, frac, meta: this._meta(beforeT) };
+    }
+
+    _meta(targetMs) {
+        return {
+            model_id:  this._modelId,
+            source:    this._modelId,
+            issued_ms: this._issuedMs,
+            target_ms: targetMs,
+            gridW:     this._gridW,
+            gridH:     this._gridH,
+            isForecast: true,
+        };
+    }
+
+    stop() {
+        document.removeEventListener('weather-history-ingest', this._onIngest);
+        this._trios.clear();
+        this._targets = [];
+    }
+}
+
 export { NUM_CHANNELS };

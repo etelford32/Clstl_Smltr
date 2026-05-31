@@ -600,9 +600,26 @@ void main() {
             float covMid  = mix(1.0, mix(0.20, 1.10, clMid),  g);
             float covHigh = mix(1.0, mix(0.16, 1.08, clHigh), g);
 
-            alphaLow  = shapeLow  * baseLow  * covLow;
-            alphaMid  = shapeMid  * baseMid  * covMid;
-            alphaHigh = shapeHigh * baseHigh * covHigh;
+            // Precipitation → cloud coupling. Rain physically falls out of a
+            // cloud deck, so wherever the precip channel is wet we anchor a
+            // deck overhead. Two moves are needed because cloud alpha is
+            // shape*base*cov: the coverage gate alone can't help if the
+            // procedural SHAPE noise left a hole over the storm, so we also
+            // lift the shape floor. Without this the noise field and the
+            // precip field drift apart and storms paint rain over gaps in the
+            // cloud — the "precip and cloud don't line up" artefact. precip is
+            // the normalised channel (/10 mm/hr); 0.02..0.30 ≈ 0.2..3 mm/hr,
+            // i.e. light-rain onset to fully-coupled overcast. Gated by g so a
+            // pure-procedural debug view (strength 0) is unaffected.
+            float wet = smoothstep(0.02, 0.30, precip) * g;
+            covLow    = max(covLow, mix(covLow, 1.10, wet));
+            covMid    = max(covMid, mix(covMid, 1.00, wet));
+            float shapeLowW = max(shapeLow, wet);
+            float shapeMidW = max(shapeMid, wet * 0.85);
+
+            alphaLow  = shapeLowW * baseLow  * covLow;
+            alphaMid  = shapeMidW * baseMid  * covMid;
+            alphaHigh = shapeHigh  * baseHigh * covHigh;
         }
     } else {
         // No weather data: pure noise-driven clouds at the base density.
