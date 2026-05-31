@@ -73,6 +73,21 @@ const COLORS = {
     cme:         "#f96",         // base CME colour, modulated by X-class
     cmeHi:       "#f44",         // highest X-class
     cmeQuiet:    "rgba(255,160,80,0.15)",   // not-yet-launched pip on sun
+
+    // Bz "river" — northward (quiet) → southward (geoeffective).
+    riverNorth:  "#6ca6e0",
+    riverSouth:  "#ff2e1e",
+    // Detailed magnetosphere boundaries.
+    magnetopause:"rgba(130,205,255,0.65)",  // inner boundary (paraboloid)
+    cusp:        "rgba(160,215,255,0.55)",  // polar cusps (open field)
+    tail:        "rgba(150,180,225,0.45)",  // magnetotail lobes
+    aurora:      "#39d98a",                  // auroral oval (Joule heating)
+    auroraHi:    "#c86bff",
+    shock:       "rgba(255,130,90,0.95)",    // compression front on impact
+    // Differentiated atmosphere shells (schematic, not to scale).
+    atmExo:      "rgba(120,160,255,0.55)",   // exosphere
+    atmThermo:   "rgba(120,210,255,0.75)",   // thermosphere
+    atmDrag:     "#ffd24d",                  // ~400 km satellite-drag band
 };
 
 // X-class flare-magnitude → visual scale + colour intensity.
@@ -110,6 +125,66 @@ function hexToRgb(hex) {
     const m = hex.match(/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i);
     if (!m) return { r: 200, g: 150, b: 100 };
     return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
+}
+
+// ── physics-driven visual helpers ───────────────────────────────────
+
+// IMF Bz polarity → colour. Northward (Bz ≥ 0) reads cool/quiet;
+// southward (Bz < 0) ramps warm → hot-red, because southward IMF is the
+// reconnection switch that lets solar-wind energy into the magnetosphere
+// — the single most geoeffective driver of the storm.
+function bzColor(bz) {
+    if (bz >= 0) return lerpColor("#5a7a9a", COLORS.riverNorth, Math.min(1, bz / 15));
+    return lerpColor("#f0a85a", COLORS.riverSouth, Math.min(1, -bz / 30));
+}
+
+// Auroral / Joule-heating intensity 0..1 from hemispheric power (GW),
+// normalised against the storm's own peak so it reads on any bundle.
+function auroraAlpha(hpi, hpiMax) {
+    if (!hpi || hpi <= 0) return 0;
+    return Math.max(0, Math.min(1, hpi / Math.max(40, hpiMax || 0)));
+}
+
+// Magnetopause (inner boundary). Sun is to the LEFT (−x), so the
+// sub-solar nose points sunward (−x) and the tail streams anti-sunward
+// (+x). `compress` ∈ [~0.42, 1]: smaller = more squeezed sunward.
+function magnetopausePath(cx, cy, R, compress) {
+    const nose  = R * 3.4 * compress;   // sunward standoff
+    const flank = R * 3.8;
+    const tail  = R * 6.0;              // anti-sunward
+    return `M ${cx + tail} ${cy - flank}
+            Q ${cx - nose} ${cy - flank}, ${cx - nose} ${cy}
+            Q ${cx - nose} ${cy + flank}, ${cx + tail} ${cy + flank}`;
+}
+
+// Magnetotail lobes — two near-parallel field boundaries streaming
+// anti-sunward (+x). They lengthen with `load` (southward-Bz energy
+// loading) to suggest stretching toward substorm onset.
+function magnetotailPath(cx, cy, R, compress, load) {
+    const flank = R * 3.8;
+    const x0 = cx - R * 1.2;
+    const len = R * (6.5 + 4.0 * load);
+    const flare = flank * (0.7 + 0.25 * load);
+    return `M ${x0} ${cy - flank} L ${cx + len} ${cy - flare}
+            M ${x0} ${cy + flank} L ${cx + len} ${cy + flare}`;
+}
+
+// Polar cusp — short open-field funnel where the boundary dimples in at
+// the pole. `side` = -1 (north) / +1 (south).
+function cuspPath(cx, cy, R, compress, side) {
+    const nose = R * 3.4 * compress;
+    const fy   = cy + side * R * 2.6;
+    return `M ${cx - nose * 0.55} ${fy}
+            L ${cx - R * 0.4} ${cy + side * R * 0.9}`;
+}
+
+// Sunward-facing compression arc that sweeps into the magnetosphere as a
+// CME crosses Earth. Opens toward the incoming wind (the −x / left side).
+function shockArcPath(cx, cy, r) {
+    const a0 = Math.PI * 0.70, a1 = Math.PI * 1.30;
+    const x0 = cx + r * Math.cos(a0), y0 = cy + r * Math.sin(a0);
+    const x1 = cx + r * Math.cos(a1), y1 = cy + r * Math.sin(a1);
+    return `M ${x0} ${y0} A ${r} ${r} 0 0 1 ${x1} ${y1}`;
 }
 
 // ── tiny SVG helper (same as charts module) ────────────────────────
@@ -196,6 +271,21 @@ function _annotateCmes(replay) {
 export function createSunEarthScene(container, replay, player, opts = {}) {
     const { anchorMs, events } = _annotateCmes(replay);
 
+    // Normalisation ranges for the data-driven visuals (computed once
+    // from the bundle so amplitudes read on placeholder OR real data).
+    const _drv  = replay.drivers_compact || {};
+    const _dens = replay.density_400km || {};
+    const _max  = arr => (Array.isArray(arr) && arr.length)
+        ? arr.reduce((m, v) => Math.max(m, v || 0), 0) : 0;
+    const _min  = arr => (Array.isArray(arr) && arr.length)
+        ? arr.reduce((m, v) => Math.min(m, v ?? Infinity), Infinity) : 0;
+    const hpiMax   = _max(_drv.hpi_gw) || 100;
+    const densArr  = _dens.msis_apreal || [];
+    const densMax  = _max(densArr) || 1;
+    const densMin  = densArr.length ? _min(densArr) : 0;
+    const reduceMotion = !!(typeof window !== "undefined" && window.matchMedia &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+
     container.innerHTML = "";
     container.classList.remove("gn-pulse");
 
@@ -213,18 +303,34 @@ export function createSunEarthScene(container, replay, player, opts = {}) {
         style:  "display:block; background: rgba(8,4,20,0.55); border-radius: 6px;",
     });
 
-    // ── background: subtle radial gradient toward the sun ──────────
-    // Two faint Parker-spiral suggestion lines.
-    for (let i = 0; i < 14; i++) {
-        const yOff = (i / 13) * (PLOT_H - MARGIN.top - MARGIN.bottom) - (PLOT_H - MARGIN.top - MARGIN.bottom) / 2;
+    // ── Bz "river": the IMF / solar-wind flow from Sun toward L1 ────
+    // Replaces the old static Parker streaks. Each lane is a dashed flow
+    // line whose COLOUR encodes IMF Bz polarity (cool = northward/quiet,
+    // hot-red = southward/geoeffective) and whose dash motion tracks the
+    // solar-wind speed. Recoloured + advanced every setCursor().
+    const riverLanes = [];
+    const RIVER_N = 11;
+    const _span = PLOT_H - MARGIN.top - MARGIN.bottom;
+    for (let i = 0; i < RIVER_N; i++) {
+        const yOff = (i / (RIVER_N - 1)) * _span - _span / 2;
         const yStart = TRACK_Y + yOff;
-        // Quadratic curve that fans out away from sun.
+        // Quadratic curve fanning out from the sun (Parker-spiral hint).
         const cx = SUN_EDGE_X + 240;
         const cy = TRACK_Y + yOff * 0.4;
-        root.appendChild(svg("path", {
-            d: `M ${SUN_X} ${TRACK_Y} Q ${cx} ${cy} ${EARTH_EDGE_X + 20} ${yStart}`,
-            stroke: COLORS.parker, fill: "none", "stroke-width": 0.7,
-        }));
+        // Central lanes carry the ecliptic flow; outer lanes fade — gives
+        // the band a soft cross-section.
+        const central = 1 - Math.min(1, Math.abs(yOff) / 110);
+        const lane = svg("path", {
+            d: `M ${SUN_EDGE_X} ${TRACK_Y} Q ${cx} ${cy} ${rAUtoX(0.99)} ${yStart}`,
+            stroke: COLORS.parker, fill: "none",
+            "stroke-width": 0.7 + central * 0.8,
+            "stroke-dasharray": "6 11",
+            "stroke-linecap": "round",
+            "pointer-events": "none",
+        });
+        lane._central = central;
+        root.appendChild(lane);
+        riverLanes.push(lane);
     }
 
     // Distance axis at the bottom.
@@ -293,6 +399,14 @@ export function createSunEarthScene(container, replay, player, opts = {}) {
         "pointer-events": "none",
     });
     root.appendChild(arPip);
+    // Flare-flash ring — a quick expanding pulse from AR 13664 when the
+    // cursor crosses a CME's launch hour (driven in setCursor).
+    const flashRing = svg("circle", {
+        cx: SUN_X, cy: TRACK_Y, r: SUN_R + 6,
+        fill: "none", stroke: COLORS.cmeHi, "stroke-width": 2,
+        opacity: 0, "pointer-events": "none",
+    });
+    root.appendChild(flashRing);
     // AR label
     root.appendChild(svg("text", {
         x: SUN_X, y: TRACK_Y + SUN_R + 18,
@@ -322,6 +436,46 @@ export function createSunEarthScene(container, replay, player, opts = {}) {
         "pointer-events": "none",
     });
     root.appendChild(bowshock);
+    // Magnetotail lobes (behind Earth) — stream anti-sunward, lengthen
+    // under southward-Bz energy loading.
+    const magnetotail = svg("path", {
+        d: magnetotailPath(EARTH_X, TRACK_Y, EARTH_R, 1.0, 0),
+        fill: "none", stroke: COLORS.tail, "stroke-width": 1,
+        "stroke-dasharray": "1 4", opacity: 0.5, "pointer-events": "none",
+    });
+    root.appendChild(magnetotail);
+    // Magnetopause — the inner boundary that CMEs press sunward.
+    const magnetopause = svg("path", {
+        d: magnetopausePath(EARTH_X, TRACK_Y, EARTH_R, 1.0),
+        fill: "none", stroke: COLORS.magnetopause, "stroke-width": 1.1,
+        opacity: 0.6, "pointer-events": "none",
+    });
+    root.appendChild(magnetopause);
+    // Polar cusps — open-field funnels at each pole.
+    const cuspN = svg("path", { d: cuspPath(EARTH_X, TRACK_Y, EARTH_R, 1.0, -1),
+        fill: "none", stroke: COLORS.cusp, "stroke-width": 1,
+        "stroke-dasharray": "2 2", opacity: 0.55, "pointer-events": "none" });
+    const cuspS = svg("path", { d: cuspPath(EARTH_X, TRACK_Y, EARTH_R, 1.0, +1),
+        fill: "none", stroke: COLORS.cusp, "stroke-width": 1,
+        "stroke-dasharray": "2 2", opacity: 0.55, "pointer-events": "none" });
+    root.appendChild(cuspN);
+    root.appendChild(cuspS);
+    // Boundary labels (subtle, scientific).
+    root.appendChild(svg("text", {
+        x: EARTH_X - EARTH_R * 4.8, y: TRACK_Y - EARTH_R * 5.4,
+        "text-anchor": "middle", fill: COLORS.textSubtle, "font-size": 8,
+        "font-family": "ui-monospace, monospace", "pointer-events": "none",
+    }, ["bow shock"]));
+    root.appendChild(svg("text", {
+        x: EARTH_X - EARTH_R * 3.2, y: TRACK_Y + EARTH_R * 4.6,
+        "text-anchor": "middle", fill: COLORS.textSubtle, "font-size": 8,
+        "font-family": "ui-monospace, monospace", "pointer-events": "none",
+    }, ["magnetopause"]));
+    root.appendChild(svg("text", {
+        x: EARTH_X + EARTH_R * 5.2, y: TRACK_Y - EARTH_R * 4.4,
+        "text-anchor": "middle", fill: COLORS.textSubtle, "font-size": 8,
+        "font-family": "ui-monospace, monospace", "pointer-events": "none",
+    }, ["magnetotail"]));
     // Atmosphere glow
     root.appendChild(svg("circle", {
         cx: EARTH_X, cy: TRACK_Y, r: EARTH_R + 4,
@@ -340,6 +494,42 @@ export function createSunEarthScene(container, replay, player, opts = {}) {
         "font-family": "ui-monospace, monospace",
         "letter-spacing": "0.06em",
     }, ["EARTH"]));
+
+    // ── Differentiated atmosphere shells (schematic) ───────────────
+    // Concentric shells make the "where satellites fly / where drag
+    // bites" story legible. The drag band (~400 km thermosphere) swells
+    // and brightens with the modelled density (puff-up) in setCursor.
+    const atmExo = svg("circle", { cx: EARTH_X, cy: TRACK_Y, r: EARTH_R + 13,
+        fill: "none", stroke: COLORS.atmExo, "stroke-width": 2.5, opacity: 0.22,
+        "pointer-events": "none" });
+    const atmThermo = svg("circle", { cx: EARTH_X, cy: TRACK_Y, r: EARTH_R + 7,
+        fill: "none", stroke: COLORS.atmThermo, "stroke-width": 3.5, opacity: 0.4,
+        "pointer-events": "none" });
+    const atmDrag = svg("circle", { cx: EARTH_X, cy: TRACK_Y, r: EARTH_R + 4.5,
+        fill: "none", stroke: COLORS.atmDrag, "stroke-width": 2, opacity: 0.6,
+        "pointer-events": "none" });
+    root.appendChild(atmExo);
+    root.appendChild(atmThermo);
+    root.appendChild(atmDrag);
+
+    // Auroral ovals at the poles — brightness ∝ hemispheric power (the
+    // visible signature of Joule heating that puffs the thermosphere).
+    const auroraN = svg("path", {
+        d: `M ${EARTH_X - 8} ${TRACK_Y - 4} Q ${EARTH_X} ${TRACK_Y - 14} ${EARTH_X + 8} ${TRACK_Y - 4}`,
+        fill: "none", stroke: COLORS.aurora, "stroke-width": 1.4, opacity: 0.2,
+        "stroke-linecap": "round", "pointer-events": "none" });
+    const auroraS = svg("path", {
+        d: `M ${EARTH_X - 8} ${TRACK_Y + 4} Q ${EARTH_X} ${TRACK_Y + 14} ${EARTH_X + 8} ${TRACK_Y + 4}`,
+        fill: "none", stroke: COLORS.aurora, "stroke-width": 1.4, opacity: 0.2,
+        "stroke-linecap": "round", "pointer-events": "none" });
+    root.appendChild(auroraN);
+    root.appendChild(auroraS);
+
+    // Shock-compression front — expands through Earth as a CME arrives.
+    const shockArc = svg("path", {
+        d: "", fill: "none", stroke: COLORS.shock, "stroke-width": 1.5,
+        opacity: 0, "stroke-linecap": "round", "pointer-events": "none" });
+    root.appendChild(shockArc);
 
     // ── CME layer ──────────────────────────────────────────────────
     // One <g> per CME — repositioned on every setCursor call. We keep
@@ -396,6 +586,19 @@ export function createSunEarthScene(container, replay, player, opts = {}) {
     }, [""]);
     root.appendChild(tClock);
     root.appendChild(tCmeStatus);
+    // Live IMF Bz + solar-wind speed (the two coupling drivers).
+    const bzReadout = svg("text", {
+        x: PLOT_W - MARGIN.right + 4, y: readoutY + 28,
+        "text-anchor": "end", fill: COLORS.textSubtle,
+        "font-size": 10, "font-family": "ui-monospace, monospace",
+    }, [""]);
+    const vReadout = svg("text", {
+        x: PLOT_W - MARGIN.right + 4, y: readoutY + 42,
+        "text-anchor": "end", fill: COLORS.textSubtle,
+        "font-size": 10, "font-family": "ui-monospace, monospace",
+    }, [""]);
+    root.appendChild(bzReadout);
+    root.appendChild(vReadout);
 
     // ── Title strip (top-left) ─────────────────────────────────────
     root.appendChild(svg("text", {
@@ -405,6 +608,31 @@ export function createSunEarthScene(container, replay, player, opts = {}) {
         "font-family": "ui-monospace, monospace",
         "letter-spacing": "0.08em",
     }, ["SUN → EARTH  ·  drag-based-model CME transit"]));
+
+    // ── Atmosphere-shell legend (colour-matched to the Earth shells) ─
+    const atmLegend = svg("g", { "pointer-events": "none" });
+    const _legendItems = [
+        [COLORS.atmExo,    "exosphere"],
+        [COLORS.atmThermo, "thermosphere"],
+        [COLORS.atmDrag,   "~400 km drag band"],
+    ];
+    let lx = MARGIN.left;
+    const ly = readoutY + 14;
+    atmLegend.appendChild(svg("text", {
+        x: lx, y: ly, fill: COLORS.textSubtle, "font-size": 8,
+        "font-family": "ui-monospace, monospace", "letter-spacing": "0.04em",
+    }, ["ATMOSPHERE"]));
+    lx += 64;
+    for (const [col, label] of _legendItems) {
+        atmLegend.appendChild(svg("circle", { cx: lx, cy: ly - 3, r: 3,
+            fill: "none", stroke: col, "stroke-width": 1.6 }));
+        atmLegend.appendChild(svg("text", {
+            x: lx + 7, y: ly, fill: COLORS.textSubtle, "font-size": 8,
+            "font-family": "ui-monospace, monospace",
+        }, [label]));
+        lx += 13 + label.length * 4.6;
+    }
+    root.appendChild(atmLegend);
 
     // ── Placeholder watermark if bundle is synthetic ───────────────
     if (replay._is_placeholder) {
@@ -427,6 +655,12 @@ export function createSunEarthScene(container, replay, player, opts = {}) {
     function setCursor(cursorH) {
         // Update the clock
         tClock.textContent = `${_fmtClock(anchorMs, cursorH)} UT`;
+
+        // Live storm drivers at this cursor. seekHours is a pure array
+        // index here — the player cursor is already at cursorH during
+        // scrub/play, so this just reads the sample (no intent mutation).
+        const samp = (player && player.seekHours) ? player.seekHours(cursorH) : null;
+        const d = samp ? samp.drivers : null;
 
         // Reposition each CME according to its DBM state.
         let arrivedNow = 0;
@@ -487,12 +721,28 @@ export function createSunEarthScene(container, replay, player, opts = {}) {
             }
         }
 
-        // Magnetosphere compression: bowshock pulls in when CMEs are
-        // either arrived or within ~5% AU of Earth.
-        const compr = computeCompression(cmeNodes, cursorH);
+        // Magnetosphere compression: boundaries pull in when CMEs are
+        // arrived/near Earth, AND — folded in below — when IMF Bz turns
+        // southward and dynamic pressure (∝ v) climbs, so the boundary
+        // stays compressed through the main phase, not only at impact.
+        let compr = computeCompression(cmeNodes, cursorH);
+        let load = 0;
+        if (d) {
+            const bzSquash = d.bz_nt < 0 ? Math.min(0.18, (-d.bz_nt / 40) * 0.18) : 0;
+            const vSquash  = Math.min(0.10, Math.max(0, (d.v_kms - 450) / 550) * 0.10);
+            compr = Math.max(0.42, compr - bzSquash - vSquash);
+            // Tail loading grows with southward Bz (toward substorm onset).
+            load = d.bz_nt < 0 ? Math.min(1, -d.bz_nt / 35) : 0;
+        }
         bowshock.setAttribute("d", bowshockPath(EARTH_X, TRACK_Y, EARTH_R, compr));
         bowshock.setAttribute("opacity", 0.35 + 0.4 * (1 - compr));
         bowshock.setAttribute("stroke-width", 1.0 + 1.5 * (1 - compr));
+        magnetopause.setAttribute("d", magnetopausePath(EARTH_X, TRACK_Y, EARTH_R, compr));
+        magnetopause.setAttribute("opacity", 0.5 + 0.35 * (1 - compr));
+        magnetotail.setAttribute("d", magnetotailPath(EARTH_X, TRACK_Y, EARTH_R, compr, load));
+        magnetotail.setAttribute("opacity", 0.4 + 0.35 * load);
+        cuspN.setAttribute("d", cuspPath(EARTH_X, TRACK_Y, EARTH_R, compr, -1));
+        cuspS.setAttribute("d", cuspPath(EARTH_X, TRACK_Y, EARTH_R, compr, +1));
 
         // Status line
         const parts = [];
@@ -501,6 +751,84 @@ export function createSunEarthScene(container, replay, player, opts = {}) {
         if (arrivedNow > 0)parts.push(`${arrivedNow} at Earth`);
         if (past > 0)      parts.push(`${past} past`);
         tCmeStatus.textContent = parts.join(" · ");
+
+        // ── Bz river: recolour + advance the IMF/solar-wind flow ───
+        if (d) {
+            const col   = bzColor(d.bz_nt);
+            const south = d.bz_nt < 0 ? Math.min(1, -d.bz_nt / 30) : 0;
+            const vNorm = Math.max(0, Math.min(1, (d.v_kms - 300) / 700));
+            const baseOp = 0.10 + 0.30 * south + 0.12 * vNorm;
+            // Dash flow advances with storm-time × wind speed; frozen for
+            // reduced-motion (colour still shows the southward turn).
+            const off = reduceMotion ? 0 : -(cursorH * (6 + vNorm * 30));
+            for (const lane of riverLanes) {
+                lane.setAttribute("stroke", col);
+                lane.setAttribute("opacity", baseOp * (0.35 + 0.65 * lane._central));
+                lane.setAttribute("stroke-dashoffset", off);
+            }
+        }
+
+        // ── Auroral ovals: brightness ∝ hemispheric power ──────────
+        if (d) {
+            const a = auroraAlpha(d.hpi_gw, hpiMax);
+            const auroraCol = lerpColor(COLORS.aurora, COLORS.auroraHi, a);
+            for (const arc of [auroraN, auroraS]) {
+                arc.setAttribute("stroke", auroraCol);
+                arc.setAttribute("opacity", 0.15 + 0.7 * a);
+                arc.setAttribute("stroke-width", 1.2 + 3.0 * a);
+            }
+        }
+
+        // ── Thermospheric drag band: swell + brighten on puff-up ───
+        if (samp && densArr.length && densMax > densMin) {
+            const dn = Math.max(0, Math.min(1,
+                (samp.density400.msis_apreal - densMin) / (densMax - densMin)));
+            atmDrag.setAttribute("opacity", 0.45 + 0.5 * dn);
+            atmDrag.setAttribute("stroke-width", 1.5 + 2.5 * dn);
+            atmDrag.setAttribute("r", (EARTH_R + 4.5) + 2.0 * dn);
+        }
+
+        // ── Live driver readouts ───────────────────────────────────
+        if (d) {
+            bzReadout.textContent = `Bz ${d.bz_nt >= 0 ? "+" : ""}${d.bz_nt.toFixed(1)} nT`;
+            bzReadout.setAttribute("fill", d.bz_nt < 0 ? COLORS.riverSouth : COLORS.textSubtle);
+            vReadout.textContent = `V ${Math.round(d.v_kms)} km/s`;
+        }
+
+        // ── Flare flash at AR 13664 on each CME launch ─────────────
+        let flash = 0, flashCol = COLORS.cmeHi;
+        for (const { evt } of cmeNodes) {
+            const dh = cursorH - evt.launch_h;
+            if (dh >= 0 && dh < 1.5) {
+                const f = 1 - dh / 1.5;
+                if (f > flash) { flash = f; flashCol = cmeColor(evt.flare_class); }
+            }
+        }
+        if (reduceMotion) flash = flash > 0 ? 0.5 : 0;
+        flashRing.setAttribute("opacity", 0.6 * flash);
+        flashRing.setAttribute("r", SUN_R + 6 + 26 * (1 - flash));
+        flashRing.setAttribute("stroke", flashCol);
+        arPip.setAttribute("fill", flash > 0 ? flashCol : COLORS.sunSpot);
+        arPip.setAttribute("rx", 5.5 + 3 * flash);
+        arPip.setAttribute("ry", 3.5 + 2 * flash);
+
+        // ── Shock-compression front sweeping through Earth ─────────
+        let shockP = 0;
+        for (const { evt } of cmeNodes) {
+            const st = cmeStateAt(evt, cursorH);
+            if (st.r_AU > 0.96 && st.r_AU < 1.06) {
+                const p = 1 - Math.abs(st.r_AU - 1.0) / 0.06;
+                if (p > shockP) shockP = p;
+            }
+        }
+        if (shockP > 0.02) {
+            const arcR = EARTH_R * (1.2 + 5.0 * (1 - shockP));
+            shockArc.setAttribute("d", shockArcPath(EARTH_X, TRACK_Y, arcR));
+            shockArc.setAttribute("opacity", (reduceMotion ? 0.4 : 0.7) * shockP);
+            shockArc.setAttribute("stroke-width", 1 + 2.5 * shockP);
+        } else {
+            shockArc.setAttribute("opacity", 0);
+        }
     }
 
     // Swap the CME catalog at runtime (e.g. when the hindcast API
@@ -536,13 +864,16 @@ function computeCompression(cmeNodes, cursorH) {
     return Math.max(0.5, factor);
 }
 
-// SVG path for a stylised bowshock around Earth. `compress` ∈ [0.5, 1].
+// SVG path for a stylised bow shock around Earth. `compress` ∈ [~0.42, 1].
+// The Sun is to the LEFT (−x), so the sub-solar nose points sunward (−x)
+// and the shock flanks open anti-sunward (+x) — i.e. the CME front from
+// the left strikes the dayside nose, which is physically correct.
 function bowshockPath(cx, cy, R, compress) {
-    const upstream = R * 4.0 * compress;   // distance sunward
-    const flank    = R * 5.0;              // perpendicular extent
-    const tail     = R * 7.0;              // anti-sunward extent
-    // Open arc from tail-top → upstream nose → tail-bottom.
-    return `M ${cx - tail} ${cy - flank}
-            Q ${cx + upstream} ${cy - flank * 1.0}, ${cx + upstream} ${cy}
-            Q ${cx + upstream} ${cy + flank * 1.0}, ${cx - tail} ${cy + flank}`;
+    const upstream = R * 4.6 * compress;   // sunward standoff (toward −x)
+    const flank    = R * 5.2;              // perpendicular extent
+    const tail     = R * 7.0;              // anti-sunward extent (toward +x)
+    // Open arc from tail-top → sunward nose → tail-bottom.
+    return `M ${cx + tail} ${cy - flank}
+            Q ${cx - upstream} ${cy - flank * 1.0}, ${cx - upstream} ${cy}
+            Q ${cx - upstream} ${cy + flank * 1.0}, ${cx + tail} ${cy + flank}`;
 }
