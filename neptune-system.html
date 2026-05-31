@@ -719,6 +719,7 @@ body {
 import * as THREE        from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { NeptuneSkin }   from './js/neptune-skin.js';
+import { makeMoonTexture } from './js/neptune-moon-textures.js';
 import {
     yoshida4Step, totalEnergy, totalJ2PotentialEnergy,
     elementsToState, stateToElements, G_SI,
@@ -1193,15 +1194,28 @@ const trailLines  = {};
 const trailBuffers = {};
 const TRAIL_MAX = 10800;
 
+// Build a moon surface material — procedural texture + bump where a recipe
+// exists (see neptune-moon-textures.js), else a plain tinted sphere.
+function moonMaterial(key, color) {
+    const surf = makeMoonTexture(key);
+    if (surf) {
+        return new THREE.MeshStandardMaterial({
+            map: surf.map, bumpMap: surf.bump, bumpScale: 0.010,
+            roughness: 0.95, metalness: 0.0,
+        });
+    }
+    return new THREE.MeshStandardMaterial({
+        color, emissive: color, emissiveIntensity: 0.16, roughness: 0.85, metalness: 0.05,
+    });
+}
+
 function makeMoon(b) {
     const r = b.radius_km / R_NEP_KM;
     const rVis = Math.max(r * 13, 0.07);
+    const seg = rVis > 0.25 ? 40 : 26;     // smoother silhouette for the big moons
     const m = new THREE.Mesh(
-        new THREE.SphereGeometry(rVis, 22, 22),
-        new THREE.MeshStandardMaterial({
-            color:b.color, emissive:b.color, emissiveIntensity:0.16,
-            roughness:0.85, metalness:0.05,
-        }),
+        new THREE.SphereGeometry(rVis, seg, seg),
+        moonMaterial(b.key, b.color),
     );
     m.userData = { kind:'moon', key:b.key, label:b.name };
     scene.add(m);
@@ -1280,11 +1294,8 @@ function minorVisRadius(m) {
 function makeMinorMoon(m) {
     const rVis = minorVisRadius(m);
     const mesh = new THREE.Mesh(
-        new THREE.SphereGeometry(rVis, 16, 16),
-        new THREE.MeshStandardMaterial({
-            color:m.color, emissive:m.color, emissiveIntensity:0.22,
-            roughness:0.9, metalness:0.04,
-        }),
+        new THREE.SphereGeometry(rVis, 24, 24),
+        moonMaterial(m.key, m.color),
     );
     mesh.userData = { kind:'moon', key:m.key, label:m.name };
     mesh.frustumCulled = false;
@@ -1658,6 +1669,7 @@ function syncMeshesFromState() {
         const k = NEPTUNE_BODIES[i].key;
         const p = toScene(sim.bodies[i].r);
         meshes[k].position.set(p[0], p[1], p[2]);
+        meshes[k].lookAt(nepGroup.position);   // tidal lock: keep one face to Neptune
     }
     if (ghost.enabled) {
         for (let i = 1; i < sim.bodies.length; i++) {
@@ -1671,6 +1683,7 @@ function syncMeshesFromState() {
         const st = minorMoonStateRel(m, sim.t_s);
         const p = toScene([st.r[0] + jr[0], st.r[1] + jr[1], st.r[2] + jr[2]]);
         meshes[m.key].position.set(p[0], p[1], p[2]);
+        meshes[m.key].lookAt(nepGroup.position);
         rebuildMinorRing(m, false);
     }
 }
