@@ -137,10 +137,25 @@ void main() {
     vec4  c  = texture2D(u_cloud_layers, uv);
 
     vec4 col;
-    if      (u_mode == 0) col = humidityColor(w.b);
-    else if (u_mode == 1) col = precipColor(c.a * 10.0);    // un-normalise from /10 mm/hr
-    else if (u_mode == 2) col = mistColor(w.b, c.r);
-    else                  col = vec4(0.0);
+    if (u_mode == 0) {
+        col = humidityColor(w.b);
+    } else if (u_mode == 1) {
+        col = precipColor(c.a * 10.0);    // un-normalise from /10 mm/hr
+        // Couple the radar sheet to the cloud deck above it so the two
+        // layers reinforce instead of floating apart: an echo sitting under
+        // a thick low/mid deck reads at full strength (rain confirmed by its
+        // parent cloud), while an echo with no overhead cloud fades back —
+        // it's the bilinear/blur mismatch between the precip and cloud
+        // channels, not a real storm, and shouldn't paint a hard blob in a
+        // clear sky. deck = densest of the low/mid decks (the precipitating
+        // layers; cirrus doesn't rain).
+        float deck = clamp(max(c.r, c.g), 0.0, 1.0);
+        col.a *= mix(0.40, 1.0, smoothstep(0.05, 0.45, deck));
+    } else if (u_mode == 2) {
+        col = mistColor(w.b, c.r);
+    } else {
+        col = vec4(0.0);
+    }
 
     if (col.a < 0.05) discard;
     gl_FragColor = vec4(col.rgb, col.a * u_opacity);
