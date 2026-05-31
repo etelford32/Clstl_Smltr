@@ -972,27 +972,36 @@ function frameForView(name, vehicle, fovDeg, aspect) {
     const center = bbox.getCenter(new THREE.Vector3());
     const size   = bbox.getSize(new THREE.Vector3());
 
-    // Look-at locked to the rocket's vertical axis (x=0, z=0) — every vehicle
-    // builder anchors its stack at that line. Using bbox.center.x/z instead
-    // would aim the camera at the bbox geometric centroid, which for an
-    // asymmetric stack (Shuttle: orbiter mounted ~8.5 m to +Z of the ET;
-    // anything with a side payload / boattail) sits several meters off the
-    // stack axis. The result is a permanently lopsided 3/4 frame where the
-    // rocket appears shoved to one side. autoRotate previously hid this by
-    // sweeping the camera continuously around the off-axis target.
+    // Look-at aimed at the bbox CENTER (x, y, z) so the visible silhouette is
+    // screen-centred for every vehicle.
+    //
+    // This used to be hard-locked to the stack axis (x=0, z=0) on the theory
+    // that aiming at the geometric centroid produced a "lopsided" frame for
+    // asymmetric stacks. That reasoning was inverted: putting the look-at on
+    // the centroid is exactly what centres the visible mass on screen, while
+    // forcing it to the axis left genuinely asymmetric stacks shoved to one
+    // side. The Shuttle is the clearest case (and the default vehicle) — its
+    // orbiter sits ~8.5 m to +Z of the ET, so an axis-locked look-at framed
+    // the empty +X side and pushed the whole stack off-centre the instant the
+    // page loaded. Symmetric vehicles (Falcon 9, Starship) have center.x/z ≈ 0,
+    // so this is a no-op for them; only off-axis stacks move, and they move
+    // toward centre. (The old "lopsided" symptom actually came from the
+    // ThrustOverlay bloating the bbox — fixed separately in computeVehicleBBox
+    // — and from auto-rotate sweeping around an off-axis target; auto-rotate is
+    // now off by default and the orbit camera is gone, so neither applies.)
     const target = new THREE.Vector3(
-        0,
+        center.x,
         center.y + preset.biasY * size.y,
-        0,
+        center.z,
     );
 
-    // Fit-distance must use the *radial* extents of the bbox measured from
-    // the on-axis target, not bbox.size/2. For an asymmetric stack
-    // size.z/2 underestimates how far the bbox actually reaches in +Z away
-    // from x=z=0 — the orbiter would clip out of frame. Take the max of the
-    // four signed extents per horizontal axis.
-    const halfX = Math.max(Math.abs(bbox.max.x), Math.abs(bbox.min.x));
-    const halfZ = Math.max(Math.abs(bbox.max.z), Math.abs(bbox.min.z));
+    // Analytic seed for the probe-fit bracket below. With the look-at on the
+    // bbox centre, the radial half-extents from the target are simply
+    // size.x/2 and size.z/2. This only seeds the iterative solver — the probe
+    // refines the true fit distance — so it just needs to be in the right
+    // ballpark, not exact.
+    const halfX = size.x * 0.5;
+    const halfZ = size.z * 0.5;
     const halfYV = Math.max(size.y, 1) * 0.5 * 1.05;
     const halfH  = Math.max(halfX, halfZ, 1) * 1.05;
 
