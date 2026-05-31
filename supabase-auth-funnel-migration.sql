@@ -195,7 +195,14 @@ BEGIN
             ('auth_callback_enter',          110),
             ('auth_callback_succeeded',      120),
             ('auth_callback_failed',         125),
-            ('auth_callback_signup',         130)
+            ('auth_callback_signup',         130),
+            -- anonymous aurora-alert capture (see AURORA_ALERT_CAPTURE_SPEC.md)
+            ('aurora_capture_view',          140),
+            ('aurora_capture_focus',         145),
+            ('aurora_capture_submit',        150),
+            ('aurora_capture_succeeded',     155),
+            ('aurora_capture_failed',        158),
+            ('aurora_confirmed',             160)
     ),
     counted AS (
         SELECT
@@ -284,7 +291,11 @@ BEGIN
             ('signin_first_interaction','signin_submit'),
             ('signin_submit',         'signin_succeeded'),
             ('oauth_button_clicked',  'auth_callback_succeeded'),
-            ('password_reset_view',   'password_reset_requested')
+            ('password_reset_view',   'password_reset_requested'),
+            -- anonymous aurora-alert capture
+            ('aurora_capture_view',     'aurora_capture_submit'),
+            ('aurora_capture_submit',   'aurora_capture_succeeded'),
+            ('aurora_capture_succeeded','aurora_confirmed')
     ),
     funnels_with_from AS (
         SELECT tr.from_stage, tr.to_stage, fs.funnel_id
