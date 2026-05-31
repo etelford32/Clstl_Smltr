@@ -1,56 +1,47 @@
 /**
- * jupiter-shader.js — GLSL shaders for a detailed 3D Jupiter
+ * jupiter-shader.js — GLSL shaders for a detailed, *flowing* 3D Jupiter
  *
- * Features (quality-tiered):
+ * The atmosphere is treated as a 2D advected fluid painted on the sphere:
+ * a latitude-dependent zonal-wind profile shears the cloud field, a
+ * divergence-free curl-noise flow warps it (so eddies swirl rather than
+ * just translate), and a meridional eddy-diffusion blur mixes detail across
+ * jets. A second, higher ammonia-cloud layer casts shadows on the deck to
+ * read as depth. Two clocks drive it:
  *
- *  Q0 (low — heliosphere far view):
- *    - Basic latitudinal color banding (no noise)
- *    - Simple limb darkening
+ *   u_time      — wall-clock seconds → continuous "always alive" churn.
+ *   u_sim_days  — simulation days from J2000 → the evolution that tracks
+ *                 the page's time controls (winds advect, the GRS drifts).
+ *   u_epoch_year— decimal year → decadal evolution: the Great Red Spot
+ *                 shrinks (Simon et al. 2018) and the SEB fades & revives.
  *
- *  Q1 (medium — heliosphere close):
- *    - Full cloud band structure with turbulent noise
- *    - Zonal wind shear (bands drift at different speeds)
- *    - Great Red Spot (GRS) as animated vortex
- *    - Limb darkening + atmospheric haze at limb
+ * Quality tiers (u_quality):
+ *   Q0 (low):    flat bands + limb darkening (far heliosphere view).
+ *   Q1 (medium): zonal-wind shear, advected turbulence, GRS, cloud shadows.
+ *   Q2 (high):   + curl-noise flow warp, Kelvin–Helmholtz billows at jets,
+ *                meridional diffusion, jet-stream filaments.
  *
- *  Q2 (high — dedicated Jupiter simulator):
- *    - High-frequency turbulence in band edges
- *    - Polar vortex/aurora haze
- *    - GRS with internal spiral structure
- *    - White ovals and smaller storm spots
- *    - Ammonia cloud altitude color variations
+ * ── Atmospheric structure ───────────────────────────────────────────────
+ *  Visible "surface" is the ~0.5 bar ammonia-ice cloud deck. Bright zones
+ *  are upwelling, high NH₃ ice; dark belts are sinking air exposing
+ *  chromophore-tinted NH₄SH. Zonal jets peak ~±150 m/s at band boundaries;
+ *  the equatorial zone super-rotates (System I, 9h50m) faster than the rest
+ *  (System II, 9h55m30s).
  *
- * ── Atmospheric Structure ────────────────────────────────────────────────────
- *  Jupiter's visible "surface" is the ammonia ice cloud deck at ~0.5 bar.
- *  The banded appearance comes from alternating zones (bright, rising air,
- *  high NH₃ ice) and belts (dark, sinking air, exposed NH₄SH/chromophore).
+ * ── Data-quality notes ──────────────────────────────────────────────────
+ *  - Cloud bands / eddies are procedural, not observed imagery.
+ *  - Zonal-wind profile is a smooth analytic approximation of the measured
+ *    jet structure (Porco et al. 2003; Ingersoll et al. 2004), not a fit.
+ *  - GRS diameter vs. epoch is an approximate fit to the historical record
+ *    (~40,000 km in the 1880s → ~14,000 km today); longitude drift ≈
+ *    1.25°/day in System II.
+ *  - SEB fade/revival is a stylised ~7 yr oscillation, not a forecast.
  *
- *  Major bands (planetographic latitude):
- *    EZ   (Equatorial Zone)      ±7°    bright white-tan
- *    NEB  (North Equatorial Belt) 7–17°N  dark brown-red
- *    NTrZ (North Tropical Zone)  17–24°N  bright
- *    NTB  (North Temperate Belt) 24–31°N  dark
- *    SEB  (South Equatorial Belt) 7–21°S  dark brown-red (widest belt)
- *    STrZ (South Tropical Zone)  21–27°S  bright — GRS lives here
- *    STB  (South Temperate Belt) 27–34°S  dark
- *
- *  Zonal winds: EZ drifts east at ~100 m/s (System I, 9h 50m rotation).
- *  Other latitudes rotate at System II (9h 55m 30s).
- *  Wind speed peaks at band boundaries (±150 m/s jets).
- *
- * ── Data Quality Notes ──────────────────────────────────────────────────────
- *  - Cloud bands are procedural approximations, not real imagery.
- *  - GRS size is fixed at ~14,000 km (has been shrinking IRL since 1800s).
- *  - GRS longitude drifts at ~1.25°/day in System II — we approximate this.
- *  - Band colors are artistic; real Jupiter color depends on viewing filter.
- *  - Polar regions are less well-observed; we add subtle darkening + blue haze
- *    based on Juno/HST UV observations.
- *
- * ── Physics References ──────────────────────────────────────────────────────
- *  Ingersoll et al. (2004) "Dynamics of Jupiter's Atmosphere" — Jupiter book
- *  Simon et al. (2018) "Historical and Contemporary Trends in the Size,
- *    Drift, and Color of Jupiter's Great Red Spot" ApJ 162
+ * ── Physics references ──────────────────────────────────────────────────
+ *  Ingersoll et al. (2004) "Dynamics of Jupiter's Atmosphere" (Jupiter, CUP)
  *  Porco et al. (2003) "Cassini Imaging of Jupiter's Atmosphere" Science 299
+ *  Simon et al. (2018) "Trends in the Size, Drift, and Color of Jupiter's
+ *    Great Red Spot" AJ 155, 151
+ *  Bridson et al. (2007) "Curl-Noise for Procedural Fluid Flow" SIGGRAPH
  */
 
 export const JUPITER_VERT = /* glsl */`
@@ -69,15 +60,27 @@ export const JUPITER_VERT = /* glsl */`
 export const JUPITER_FRAG = /* glsl */`
     precision highp float;
 
-    uniform float u_time;
-    uniform float u_quality;
-    uniform float u_rot_phase;   // cumulative rotation (radians, System II)
+    uniform float u_time;        // wall-clock seconds (continuous churn)
+    uniform float u_quality;     // 0 / 1 / 2
+    uniform float u_rot_phase;   // cumulative System-II rotation (radians, legacy)
+    uniform float u_spin;        // System-III rotation phase, uv units [0,1) (JS-wrapped)
+    uniform float u_sim_days;    // simulation days from J2000 (evolution)
+    uniform float u_epoch_year;  // decimal year (decadal evolution)
+    uniform float u_diffusion;   // 0..1 meridional eddy-diffusion strength
+    uniform float u_wind_scale;  // multiplies advection rate
+    uniform sampler2D u_windTex; // measured zonal-wind profile (R = u encoded)
+    uniform float u_useWindTex;  // >0.5 → sample u_windTex instead of analytic
+    uniform vec3  u_sunDir;      // sun direction in VIEW space (normalized)
+    uniform float u_sunMode;     // >0.5 → real sun terminator; else legacy camera-limb
+    uniform float u_nightFill;   // ambient floor on the night side (0..1)
 
     varying vec3 vNormalView;
     varying vec3 vLocalPos;
     varying vec2 vUv;
 
-    // ── Noise ─────────────────────────────────────────────────────────────────
+    #define PI 3.14159265359
+
+    // ── Noise ───────────────────────────────────────────────────────────
     float hash2(vec2 p) {
         p = fract(p * vec2(127.1, 311.7));
         p += dot(p, p + 19.19);
@@ -104,158 +107,345 @@ export const JUPITER_FRAG = /* glsl */`
         return v;
     }
 
-    // ── Band color palette ────────────────────────────────────────────────────
-    // Zone (bright): ammonia ice, high clouds
+    // ── Divergence-free curl-noise flow (Bridson 2007) ──────────────────
+    // velocity = ∇⊥ψ for a scalar potential ψ = fbm. Incompressible-looking
+    // swirling flow — the "hydrodynamic" warp that makes eddies rotate.
+    vec2 curlFlow(vec2 p) {
+        float e = 0.012;
+        float dx = fbm(p + vec2(e, 0.0), 3) - fbm(p - vec2(e, 0.0), 3);
+        float dy = fbm(p + vec2(0.0, e), 3) - fbm(p - vec2(0.0, e), 3);
+        return vec2(dy, -dx) / (2.0 * e);
+    }
+
+    // ── Cloud "height" field for relief self-shadowing ──────────────────
+    // Two octaves of the same turbulence the bands are textured with, so the
+    // slope-shading lines up with the visible cloud detail.
+    float reliefHeight(vec2 p) {
+        return fbm(p * vec2(24.0, 12.0), 3) + 0.4 * fbm(p * vec2(60.0, 30.0), 2);
+    }
+
+    // ── Zonal-wind profile u(lat) ───────────────────────────────────────
+    // Normalised eastward velocity (units of WIND_PEAK_MS). lat in [-1, 1]
+    // (S→N) maps to planetographic latitude lat*90°. When a measured profile
+    // texture is supplied (u_useWindTex), it is sampled and decoded
+    // (u_norm = R*2 - 1); otherwise a smooth analytic profile is used so
+    // consumers that don't bind the texture still render sensibly.
+    float zonalWind(float lat) {
+        if (u_useWindTex > 0.5) {
+            float r = texture2D(u_windTex, vec2(lat * 0.5 + 0.5, 0.5)).r;
+            return r * 2.0 - 1.0;
+        }
+        float eq   = exp(-lat * lat / 0.018);             // equatorial super-rotation
+        float jets = 0.55 * sin(lat * PI * 5.2);          // ~5 jets / hemisphere
+        jets      *= smoothstep(0.04, 0.22, abs(lat));    // let the eq jet dominate near 0
+        float pole = 1.0 - smoothstep(0.82, 1.0, abs(lat));
+        return (1.15 * eq + jets) * pole;
+    }
+    // Meridional shear du/dlat — large at jet boundaries (KH-unstable).
+    float windShear(float lat) {
+        float e = 0.01;
+        return (zonalWind(lat + e) - zonalWind(lat - e)) / (2.0 * e);
+    }
+
+    // ── Band colour palette ─────────────────────────────────────────────
     vec3 zoneColor(float lat) {
-        vec3 eqZone = vec3(0.92, 0.87, 0.72);   // EZ: bright tan-white
-        vec3 midZone = vec3(0.88, 0.82, 0.68);   // mid-latitude zones
-        vec3 polZone = vec3(0.72, 0.68, 0.60);   // polar zones: darker
+        vec3 eqZone  = vec3(0.92, 0.87, 0.72);
+        vec3 midZone = vec3(0.88, 0.82, 0.68);
+        vec3 polZone = vec3(0.72, 0.68, 0.60);
         float polFade = smoothstep(0.8, 1.0, abs(lat));
         return mix(mix(eqZone, midZone, abs(lat) * 1.5), polZone, polFade);
     }
-    // Belt (dark): deeper clouds, chromophore-colored
     vec3 beltColor(float lat) {
-        vec3 eqBelt = vec3(0.62, 0.42, 0.22);    // NEB/SEB: dark reddish-brown
-        vec3 midBelt = vec3(0.55, 0.40, 0.28);    // temperate belts: muted brown
-        vec3 polBelt = vec3(0.40, 0.35, 0.32);    // polar belts: grey-brown
+        vec3 eqBelt  = vec3(0.62, 0.42, 0.22);
+        vec3 midBelt = vec3(0.55, 0.40, 0.28);
+        vec3 polBelt = vec3(0.40, 0.35, 0.32);
         float polFade = smoothstep(0.7, 1.0, abs(lat));
         return mix(mix(eqBelt, midBelt, abs(lat) * 1.2), polBelt, polFade);
     }
 
-    // ── Band structure ────────────────────────────────────────────────────────
-    // Returns 0 = zone (bright), 1 = belt (dark) based on latitude.
-    // The band boundaries have turbulent edges from zonal wind shear.
-    float bandPattern(float lat, vec2 uv, float t) {
-        // Base band pattern: sinusoidal with ~7 band pairs
-        float bands = sin(lat * 22.0) * 0.5 + 0.5;
-
-        // Equatorial zone is wider and brighter
-        float eqWidth = smoothstep(0.12, 0.0, abs(lat));
-        bands = mix(bands, 0.0, eqWidth * 0.6);
-
-        // SEB is wider (extends 7-21° S)
-        float sebZone = smoothstep(0.12, 0.08, lat) * smoothstep(-0.38, -0.12, lat);
-        bands = mix(bands, 1.0, sebZone * 0.4);
+    // ── Band structure (zone=0 bright, belt=1 dark) ─────────────────────
+    // flowUv is the wind-advected, curl-warped sample coordinate; dif
+    // scales meridional eddy-diffusion blur of the turbulent detail. When a
+    // measured profile is bound, the base belt/zone field is read from the
+    // wind texture's green channel (belts = cyclonic shear, computed in
+    // jupiter-wind-profile.js) so the dark belts sit exactly on the real
+    // jets; otherwise an analytic band pattern is used as a fallback.
+    float bandPattern(float lat, vec2 flowUv, float t, float dif) {
+        float bands;
+        if (u_useWindTex > 0.5) {
+            bands = texture2D(u_windTex, vec2(lat * 0.5 + 0.5, 0.5)).g;
+        } else {
+            bands = sin(lat * 22.0) * 0.5 + 0.5;
+            float eqWidth = smoothstep(0.12, 0.0, abs(lat));
+            bands = mix(bands, 0.0, eqWidth * 0.6);
+            float sebZone = smoothstep(0.12, 0.08, lat) * smoothstep(-0.38, -0.12, lat);
+            bands = mix(bands, 1.0, sebZone * 0.4);
+        }
 
         if (u_quality > 0.5) {
-            // Turbulent band edges from zonal wind shear
-            float turb = fbm(vec2(uv.x * 28.0 + t * 0.002, lat * 40.0), 3) * 0.15;
+            // Turbulent band edges, advected with the flow.
+            float turb = fbm(vec2(flowUv.x * 28.0, lat * 40.0), 3) * 0.15;
+            // Meridional diffusion: average with a latitudinally-offset sample.
+            if (dif > 0.001) {
+                float turbN = fbm(vec2(flowUv.x * 28.0, (lat + 0.02) * 40.0), 2) * 0.15;
+                turb = mix(turb, 0.5 * (turb + turbN), dif);
+            }
             bands += turb;
 
-            // Small-scale chevron patterns at belt/zone boundaries
-            float chevron = vnoise(vec2(uv.x * 60.0 + lat * 20.0, lat * 80.0 + t * 0.001)) * 0.08;
+            float chevron = vnoise(vec2(flowUv.x * 60.0 + lat * 20.0, lat * 80.0)) * 0.08;
             bands += chevron;
+        }
+
+        if (u_quality > 1.5) {
+            // Kelvin–Helmholtz billows: oriented rolls where shear is high.
+            // shN normalises shear so this works for both the measured-texture
+            // profile (sharp jets → large shear) and the analytic fallback.
+            float sh = windShear(lat);
+            float shN = abs(sh) / 18.0;
+            float rolls = sin(flowUv.x * 120.0 + sh * 4.0 + lat * 30.0);
+            bands += rolls * 0.05 * smoothstep(0.35, 1.1, shN);
         }
 
         return clamp(bands, 0.0, 1.0);
     }
 
-    // ── Great Red Spot ────────────────────────────────────────────────────────
-    // Anticyclonic vortex at ~22° S, ~14,000 km diameter
-    float grsPattern(vec2 uv, float lat, float t) {
-        if (u_quality < 0.5) return 0.0;  // skip at low quality
+    // ── Great Red Spot diameter vs. epoch (km) ──────────────────────────
+    // Approximate fit to the historical shrink: ~40,000 km (1880s) → ~14,000
+    // km (mid-2020s); held flat outside the record.
+    float grsDiameterKm(float year) {
+        float y = clamp(year, 1880.0, 2050.0);
+        return 14000.0 + 26000.0 * smoothstep(2024.0, 1880.0, y);
+    }
 
-        // GRS position: ~22° S latitude, longitude drifts ~1.25°/day in System II
-        float grsLat = -0.38;  // ~22° S in UV space (0.5 = equator)
-        // Slow longitude drift: GRS drifts ~1.25°/day relative to System II
-        float grsLon = fract(0.35 + t * 0.0000004);  // very slow drift
+    // ── Great Red Spot ──────────────────────────────────────────────────
+    float grsPattern(vec2 flowUv, float lat, float t, float sizeScale) {
+        if (u_quality < 0.5) return 0.0;
+
+        float grsLat = -0.245;                                 // ~22° S (lat·90°)
+        // Drifts ~1.25°/day in System II; rides the band flow via flowUv.
+        float grsLon = fract(0.35 - u_sim_days * (1.25 / 360.0));
 
         float dlat = (lat - grsLat);
-        float dlon = uv.x - grsLon;
-        // Wrap longitude
-        if (dlon > 0.5) dlon -= 1.0;
+        float dlon = flowUv.x - grsLon;
+        if (dlon > 0.5)  dlon -= 1.0;
         if (dlon < -0.5) dlon += 1.0;
 
-        // GRS is oval: ~1.4:1 aspect ratio (wider in longitude)
-        float dist = sqrt(dlon * dlon * 50.0 + dlat * dlat * 100.0);
-
-        // Smooth oval boundary
+        // Oval ~1.4:1, scaled by the epoch size factor.
+        float dist = sqrt(dlon * dlon * 50.0 + dlat * dlat * 100.0) / sizeScale;
         float spot = 1.0 - smoothstep(0.0, 1.0, dist);
 
         if (u_quality > 1.5) {
-            // Internal spiral structure
+            // Spiral circulation + a slightly hollow eye.
+            float ang = atan(dlat, dlon);
             float spiral = vnoise(vec2(
-                dlon * 40.0 + sin(atan(dlat, dlon) * 3.0 + t * 0.003) * 2.0,
-                dlat * 40.0
+                dist * 6.0 + sin(ang * 3.0 + t * 0.0008) * 2.0,
+                ang * 4.0
             ));
-            spot *= 0.7 + spiral * 0.3;
+            spot *= 0.72 + spiral * 0.28;
+            spot *= 1.0 - 0.25 * smoothstep(0.45, 0.0, dist);   // hollow centre
         }
-
         return spot;
     }
 
-    // ── Zonal wind drift ──────────────────────────────────────────────────────
-    // Equatorial zone (System I) rotates faster than the rest (System II)
-    float zonalDrift(float lat) {
-        // EZ: ~100 m/s faster → ~5 min shorter rotation period
-        // This maps to a UV offset that grows with time
-        float eqBoost = exp(-lat * lat / 0.03) * 0.15;
-        // Jet streams at band boundaries
-        float jets = sin(lat * 22.0) * 0.02;
-        return eqBoost + jets;
+    // ── Generic oval vortex ─────────────────────────────────────────────
+    // Coverage [0,1] of an oval centred at (lonC, latC) in the advected flow
+    // frame, with longitudinal/latitudinal radii (rx, ry). Used for the
+    // smaller members of the vortex zoo (Oval BA, white ovals, brown barges).
+    float ovalSpot(vec2 flowUv, float lat, float lonC, float latC, float rx, float ry) {
+        float dlon = flowUv.x - lonC;
+        if (dlon > 0.5)  dlon -= 1.0;
+        if (dlon < -0.5) dlon += 1.0;
+        float dlat = lat - latC;
+        float d = sqrt((dlon * dlon) / (rx * rx) + (dlat * dlat) / (ry * ry));
+        return 1.0 - smoothstep(0.0, 1.0, d);
     }
 
     void main() {
         float mu = max(0.001, vNormalView.z);
-
-        // ── Limb darkening (Rayleigh scattering in H₂/He atmosphere) ─────────
         float limb = 1.0 - 0.55 * (1.0 - mu);
 
-        // ── UV with zonal wind drift ──────────────────────────────────────────
-        vec2 uv = vUv;
-        float lat = (uv.y - 0.5) * 2.0;  // -1 to +1 (S to N)
+        vec2 uv  = vUv;
+        float lat = (uv.y - 0.5) * 2.0;
 
-        // Apply zonal wind drift (equator rotates faster)
-        float drift = zonalDrift(lat) * u_time;
-        uv.x = fract(uv.x + drift * 0.0001 + u_rot_phase * 0.00001);
+        // ── Advection: everything in longitude is driven by SIM time ────
+        //   spin       = System-III rotation phase (wrapped in JS → u_spin,
+        //                so far-from-J2000 epochs keep full float precision).
+        //   zonalPhase = differential drift of each latitude at its measured
+        //                wind speed, in true uv/day: u[m/s]·86400/(2π·R_eq)/cosφ
+        //                with u = zonalWind·WIND_PEAK (the 0.0289 folds those in).
+        //   churn      = a slow wall-clock term used ONLY to morph the small-
+        //                scale turbulence, so clouds stay alive when paused at
+        //                a date without drifting in longitude.
+        float spin  = u_spin;
+        float churn = u_time * 0.01;
+        float uWind = zonalWind(lat);
+        float cosphi = max(cos(lat * 1.5707963), 0.2);
+        float zonalPhase = uWind * (u_sim_days * 0.0289 * u_wind_scale) / cosphi;
+        vec2 flowUv = vec2(fract(uv.x + spin - zonalPhase), uv.y);
 
-        // ── Cloud band structure ──────────────────────────────────────────────
-        float band = bandPattern(lat, uv, u_time);
-        vec3 zCol = zoneColor(lat);
-        vec3 bCol = beltColor(lat);
+        // ── Curl-noise flow warp (Q2) — morphs with wall-clock churn ────
+        if (u_quality > 1.5) {
+            vec2 w = curlFlow(vec2(flowUv.x * 8.0, lat * 6.0) + churn);
+            flowUv += w * vec2(0.010, 0.006);
+        }
+
+        // ── Band field + colour (with SEB fade/revival) ─────────────────
+        float band  = bandPattern(lat, flowUv, u_time, u_diffusion);
+        vec3  zCol  = zoneColor(lat);
+        vec3  bCol  = beltColor(lat);
+
+        // SEB (~7-21° S) periodically fades toward zone colour, then revives.
+        float sebMask = smoothstep(-0.24, -0.20, lat) * (1.0 - smoothstep(-0.10, -0.06, lat));
+        float sebFade = 0.5 + 0.5 * sin(u_epoch_year * 6.2831853 / 7.0 + 1.0);
+        bCol = mix(bCol, mix(bCol, zCol, 0.75), sebMask * sebFade);
+
         vec3 cloudCol = mix(zCol, bCol, band);
+        float zoneMask = 1.0 - band;
 
-        // ── Great Red Spot ────────────────────────────────────────────────────
-        float grs = grsPattern(uv, lat, u_time);
+        // ── Great Red Spot (epoch-scaled) ───────────────────────────────
+        float grsScale = grsDiameterKm(u_epoch_year) / 16000.0;
+        float grs = grsPattern(flowUv, lat, u_time, grsScale);
         if (grs > 0.01) {
-            // GRS color: deep reddish-brown, darker than surrounding SEB
-            vec3 grsCol = vec3(0.72, 0.28, 0.12);
-            // GRS center is slightly brighter (eye of the vortex)
-            vec3 grsCenter = vec3(0.80, 0.40, 0.18);
-            vec3 grsBlend = mix(grsCol, grsCenter, grs * grs);
+            vec3 grsCol    = vec3(0.72, 0.28, 0.12);
+            vec3 grsCenter = vec3(0.82, 0.42, 0.18);
+            vec3 grsBlend  = mix(grsCol, grsCenter, grs * grs);
             cloudCol = mix(cloudCol, grsBlend, grs * 0.85);
         }
 
-        // ── Cloud texture noise (medium+ quality) ─────────────────────────────
+        // ── Vortex zoo (Q1+) — ride their bands, drift slowly in longitude ──
         if (u_quality > 0.5) {
-            float cloudNoise = fbm(uv * vec2(24.0, 12.0) + u_time * 0.0003, 3);
-            cloudCol *= 0.88 + cloudNoise * 0.24;
+            // Oval BA "Red Spot Jr." (~33° S), ~half the GRS, pale red.
+            float ba = ovalSpot(flowUv, lat, fract(0.70 - u_sim_days * 0.0006),
+                                -0.367, 0.045, 0.020);
+            cloudCol = mix(cloudCol, vec3(0.80, 0.52, 0.42), ba * 0.7);
+
+            // White ovals — southern temperate anticyclones (~40° S).
+            float wo = ovalSpot(flowUv, lat, fract(0.20 - u_sim_days * 0.0009), -0.44, 0.030, 0.016)
+                     + ovalSpot(flowUv, lat, fract(0.55 - u_sim_days * 0.0009), -0.45, 0.026, 0.015)
+                     + ovalSpot(flowUv, lat, fract(0.85 - u_sim_days * 0.0009), -0.43, 0.028, 0.015);
+            cloudCol = mix(cloudCol, vec3(0.96, 0.94, 0.88), clamp(wo, 0.0, 1.0) * 0.75);
+
+            // Brown barges — elongated cyclones in the NEB (~16° N).
+            float bb = ovalSpot(flowUv, lat, fract(0.30 + u_sim_days * 0.0011), 0.185, 0.060, 0.012)
+                     + ovalSpot(flowUv, lat, fract(0.75 + u_sim_days * 0.0011), 0.185, 0.055, 0.012);
+            cloudCol = mix(cloudCol, vec3(0.38, 0.26, 0.17), clamp(bb, 0.0, 1.0) * 0.6);
         }
 
-        // ── Polar darkening + blue haze ───────────────────────────────────────
+        // ── Cloud texture + two-layer shadow depth (Q1+) ────────────────
+        if (u_quality > 0.5) {
+            float cloudNoise = fbm(flowUv * vec2(24.0, 12.0), 3);
+            cloudCol *= 0.88 + cloudNoise * 0.24;
+
+            // High ammonia cloud layer (forms in upwelling zones).
+            float hi  = smoothstep(0.55, 0.82, fbm(flowUv * vec2(14.0, 7.0) + churn, 3)) * zoneMask;
+            // Shadow it casts on the deck, offset along the light direction.
+            vec2  L   = normalize(vec2(0.85, 0.22));
+            float shf = smoothstep(0.55, 0.82, fbm((flowUv - L * 0.018) * vec2(14.0, 7.0) + churn, 3)) * zoneMask;
+            cloudCol *= 1.0 - shf * 0.22;                                  // cast shadow → relief
+            cloudCol  = mix(cloudCol, vec3(0.95, 0.93, 0.84), hi * 0.55);  // bright high tops
+        }
+
+        // ── Jet-stream filaments (Q2) — makes the wind data legible ─────
+        // Bright sheared streaks trace the fastest jets of the measured
+        // profile, so the wind structure reads directly off the planet.
+        if (u_quality > 1.5) {
+            float shN = abs(windShear(lat)) / 18.0;
+            float jet = smoothstep(0.45, 1.2, shN);
+            float streak = smoothstep(0.6, 1.0, sin(flowUv.x * 200.0 + lat * 50.0) * 0.5 + 0.5);
+            cloudCol = mix(cloudCol, cloudCol * 1.18, jet * streak * 0.5);
+        }
+
+        // ── Cloud relief self-shadowing (Q2, sun-lit pages only) ────────
+        // Slope-shade the cloud height field along the same light direction
+        // the high-cloud shadow uses, so bands and eddies catch a 3-D relief.
+        if (u_sunMode > 0.5 && u_quality > 1.5) {
+            float e2 = 0.004;
+            float hC = reliefHeight(flowUv);
+            float hX = reliefHeight(flowUv + vec2(e2, 0.0));
+            float hY = reliefHeight(flowUv + vec2(0.0, e2));
+            vec2 grad = vec2(hX - hC, hY - hC) / e2;
+            vec2 Ldir = normalize(vec2(0.85, 0.22));
+            cloudCol *= 1.0 + clamp(dot(grad, Ldir), -0.5, 0.5) * 0.26;
+        }
+
+        // ── Polar darkening + blue haze ─────────────────────────────────
         float poleFade = smoothstep(0.7, 1.0, abs(lat));
         cloudCol = mix(cloudCol, vec3(0.35, 0.38, 0.48), poleFade * 0.45);
 
-        // ── Atmospheric limb haze (Rayleigh → blue tint at limb) ──────────────
-        vec3 hazeCol = vec3(0.45, 0.55, 0.75);  // blue-grey haze
+        // ── Atmospheric limb haze ───────────────────────────────────────
+        vec3 hazeCol = vec3(0.45, 0.55, 0.75);
         float hazeFade = pow(1.0 - mu, 3.0);
         cloudCol = mix(cloudCol, hazeCol, hazeFade * 0.35);
 
-        // ── Apply limb darkening ──────────────────────────────────────────────
-        vec3 finalCol = cloudCol * limb;
+        // ── Illumination ────────────────────────────────────────────────
+        // Legacy consumers (u_sunMode = 0) keep the camera-facing limb look.
+        // u_sunMode = 1 lights the planet from u_sunDir: a soft day/night
+        // terminator with a faint night-side fill, plus a warm forward-scatter
+        // crescent where the sunlit limb thins to the terminator.
+        float shade = limb;
+        if (u_sunMode > 0.5) {
+            vec3 N  = normalize(vNormalView);
+            vec3 Ls = normalize(u_sunDir);
+            float ndl = dot(N, Ls);
+            float day = smoothstep(-0.12, 0.32, ndl);          // soft terminator
+            // forward-scattered warm glow right at the day-side limb
+            float crescent = smoothstep(0.0, 0.22, ndl) * (1.0 - smoothstep(0.22, 0.6, ndl));
+            cloudCol += vec3(1.0, 0.72, 0.42) * crescent * pow(1.0 - mu, 1.6) * 0.16;
 
-        gl_FragColor = vec4(finalCol, 1.0);
+            // gentle saturation pop so the chromophore tints read richer
+            float lum = dot(cloudCol, vec3(0.299, 0.587, 0.114));
+            cloudCol = mix(vec3(lum), cloudCol, 1.12);
+
+            shade = (u_nightFill + (1.0 - u_nightFill) * day) * limb;
+        }
+
+        gl_FragColor = vec4(cloudCol * shade, 1.0);
     }
 `;
 
 /**
- * Create uniform block for Jupiter shader.
+ * Create the uniform block for the Jupiter shader.
+ *
+ * New uniforms default to safe/present-day values so existing consumers
+ * (solar-system.html, heliosphere3d.js, gravity-lab/visuals.js) that only
+ * animate `u_time` keep rendering a sensible present-day Jupiter.
+ *
  * @param {object} THREE  three.js namespace
  */
 export function createJupiterUniforms(THREE) {
+    // 1×1 neutral-wind default texture so the sampler is always bound even
+    // when no measured profile is supplied (u_useWindTex stays 0 → analytic).
+    const flat = new THREE.DataTexture(
+        new Uint8Array([128, 128, 128, 255]), 1, 1, THREE.RGBAFormat,
+    );
+    flat.needsUpdate = true;
     return {
-        u_time:      { value: 0.0 },
-        u_quality:   { value: 1.0 },
-        u_rot_phase: { value: 0.0 },
+        u_time:       { value: 0.0 },
+        u_quality:    { value: 1.0 },
+        u_rot_phase:  { value: 0.0 },
+        u_spin:       { value: 0.0 },
+        u_sim_days:   { value: 0.0 },
+        u_epoch_year: { value: 2025.0 },   // present-day GRS by default
+        u_diffusion:  { value: 0.6 },
+        u_wind_scale: { value: 1.0 },
+        u_windTex:    { value: flat },
+        u_useWindTex: { value: 0.0 },
+        u_sunDir:     { value: new THREE.Vector3(0.0, 0.0, 1.0) },
+        u_sunMode:    { value: 0.0 },   // legacy camera-limb look by default
+        u_nightFill:  { value: 0.08 },
     };
+}
+
+/**
+ * Great Red Spot diameter (km) as a function of decimal year — the JS twin
+ * of the GLSL `grsDiameterKm`, so a UI readout matches what's rendered.
+ * Approximate fit to the historical record (~40,000 km 1880s → 14,000 km now).
+ */
+export function grsDiameterKm(year) {
+    const y = Math.max(1880, Math.min(2050, year));
+    // GLSL smoothstep(2024, 1880, y)
+    let t = (y - 2024) / (1880 - 2024);
+    t = Math.max(0, Math.min(1, t));
+    const s = t * t * (3 - 2 * t);
+    return 14000 + 26000 * s;
 }

@@ -115,6 +115,20 @@ footer a:hover{color:var(--text)}
 
 <main>
 
+  <!-- ── Aurora-alert confirmation banner ──
+       Shown when an anonymous (or signed-in) visitor lands here from the
+       double opt-in confirm link (/api/subscribe/confirm → ?aurora=…). The
+       inline script below reveals it and, crucially, suppresses the auth-gate
+       bounce for anonymous confirmers so they actually see the success state.
+       Self-contained inline styles (amber --c-storm track) — no token sheet
+       dependency. See AURORA_ALERT_CAPTURE_SPEC.md. -->
+  <div id="aurora-banner" role="status" aria-live="polite"
+       style="display:none;max-width:680px;margin:0 auto 28px;padding:18px 22px;border-radius:12px;
+              border:1px solid rgba(255,160,80,.30);background:rgba(255,160,80,.10);color:#d6dee6">
+    <strong id="aurora-banner-title" style="color:#ffb066;display:block;font-size:1.05rem;margin-bottom:4px"></strong>
+    <span id="aurora-banner-msg" style="color:#b0c8d8;font-size:.92rem;line-height:1.5"></span>
+  </div>
+
   <header class="page-header">
     <span class="welcome-eyebrow" id="welcome-eyebrow">Welcome</span>
     <h1 id="welcome-h1">Welcome to Parkers Physics</h1>
@@ -228,11 +242,41 @@ import { funnel } from './js/auth-funnel.js';
 import './js/telemetry.js';
 import { analytics } from './js/analytics.js';
 
+// ── Aurora-alert confirmation landing ──
+// An anonymous visitor arriving from the double opt-in confirm link has NO
+// account — bouncing them to /signin would swallow the success message and
+// is exactly the friction the capture flow exists to avoid. So we handle the
+// ?aurora=… param FIRST, show the banner, fire the funnel stage, and only
+// fall through to the normal auth gate when there's no aurora param.
+const auroraParam = new URLSearchParams(window.location.search).get('aurora');
+if (auroraParam) {
+    const banner = document.getElementById('aurora-banner');
+    const title  = document.getElementById('aurora-banner-title');
+    const msg    = document.getElementById('aurora-banner-msg');
+    const COPY = {
+        confirmed: ['🌌 You\'re on the aurora list.', "We'll email you the moment a geomagnetic storm puts the lights in reach — with a live link to watch it hit Earth's magnetosphere. Meanwhile, explore the simulators below."],
+        invalid:   ['This confirmation link has expired.', 'Re-enter your email on any storm page and we\'ll send a fresh confirmation link.'],
+        error:     ['Something went wrong confirming your email.', 'Please try the link again in a moment, or re-subscribe from any storm page.'],
+    };
+    const [t, m] = COPY[auroraParam] || COPY.error;
+    if (title) title.textContent = t;
+    if (msg)   msg.textContent   = m;
+    if (banner) banner.style.display = '';
+    if (auroraParam === 'confirmed') { try { funnel.step('aurora_confirmed'); } catch {} }
+}
+
 // ── Auth: this page is for signed-in users; bounce anon visitors to
 // /signin?next=/welcome.html via requireAuth(). The auth-gate above is
-// only the fallback if the module script fails to load.
+// only the fallback if the module script fails to load. Anonymous aurora
+// confirmers are the one exception — they see the banner above instead of
+// being bounced.
 await auth.ready();
-if (!auth.requireAuth('signin.html?next=%2Fwelcome.html')) {
+const _auroraAnon = auroraParam && !auth.isSignedIn();
+if (_auroraAnon) {
+    // Anonymous confirmer: keep them here, hide the gate, show the marketing
+    // CTAs (sign up / explore) without demanding a login.
+    document.getElementById('auth-gate')?.classList.add('hidden');
+} else if (!auth.requireAuth('signin.html?next=%2Fwelcome.html')) {
     // Stop here — requireAuth has already navigated away.
 } else {
     document.getElementById('auth-gate').classList.add('hidden');
