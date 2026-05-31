@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Great Red Spot — Shallow-Water Lab · Parkers Physics</title>
+
+<meta name="description" content="A Rust-to-WebAssembly 1.5-layer shallow-water model of Jupiter's Great Red Spot, running live in the browser. Seeded in the measured zonal-jet shear, an anticyclone self-organises into a long-lived oval while a cyclone is shredded — the physics of the GRS, not a texture.">
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html, body { height:100%; }
+body {
+    background:#040210; color:#d8d4ee;
+    font-family:'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    overflow:hidden;
+}
+#wrap { display:grid; grid-template-columns: 360px 1fr; height:100vh; }
+#sidebar {
+    background:rgba(8,4,22,.92); backdrop-filter:blur(20px);
+    border-right:1px solid rgba(255,255,255,.06);
+    padding:18px 18px 24px; overflow-y:auto;
+}
+#sidebar h1 { font-size:1.08rem; font-weight:700; color:#fff; letter-spacing:.02em; }
+#sidebar h1 .accent { color:#ff8a5a; }
+#sidebar p.lead { font-size:.78rem; color:#998878; margin-top:6px; line-height:1.55; }
+.kv { display:flex; align-items:baseline; justify-content:space-between; font-family:monospace; font-size:.74rem; margin:4px 0; }
+.kv-k { color:#998878; } .kv-v { color:#fff; font-weight:700; }
+.section { margin-top:16px; padding-top:12px; border-top:1px solid rgba(255,255,255,.06); }
+.section h2 { font-size:.7rem; text-transform:uppercase; letter-spacing:.08em; color:#ffb088; margin-bottom:8px; font-weight:800; }
+.btn-row { display:flex; gap:8px; flex-wrap:wrap; margin-top:6px; }
+.btn {
+    appearance:none; border:1px solid rgba(255,138,90,.4);
+    background:rgba(255,138,90,.08); color:#ffcbb0;
+    padding:6px 10px; font-size:.72rem; border-radius:6px;
+    cursor:pointer; font-family:monospace; transition: background .15s, transform .1s;
+}
+.btn:hover { background:rgba(255,138,90,.18); }
+.btn:active { transform:scale(.97); }
+.btn[data-on="true"] { background:rgba(255,138,90,.32); color:#fff; box-shadow:inset 0 0 0 1px rgba(255,255,255,.18); }
+.slider-row { margin:8px 0 12px; }
+.slider-row .label { display:flex; justify-content:space-between; font-family:monospace; font-size:.7rem; color:#cbb; margin-bottom:3px; }
+.slider-row .val { color:#fff; font-weight:700; }
+.slider-row input[type=range] { width:100%; height:3px; -webkit-appearance:none; appearance:none; background:rgba(255,255,255,.10); border-radius:2px; outline:none; cursor:pointer; }
+.slider-row input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:12px; height:12px; border-radius:50%; background:#ff8a5a; cursor:pointer; box-shadow:0 0 4px rgba(255,138,90,.5); }
+#stage { position:relative; background:radial-gradient(ellipse at center, #160a14 0%, #0a0510 60%, #000 100%); }
+#stage canvas { position:absolute; inset:0; width:100%; height:100%; display:block; }
+#hud { position:absolute; right:14px; top:14px; background:rgba(10,6,28,.75); backdrop-filter:blur(10px); border:1px solid rgba(255,255,255,.10); border-radius:10px; padding:10px 14px; font-family:monospace; font-size:.7rem; color:#cbb; line-height:1.6; min-width:190px; }
+#hud strong { color:#fff; }
+#stage .badge { position:absolute; left:14px; top:14px; font-family:monospace; font-size:.65rem; color:#ffcbb0; padding:4px 10px; border-radius:999px; background:rgba(255,138,90,.15); border:1px solid rgba(255,138,90,.35); letter-spacing:.08em; text-transform:uppercase; }
+#stage .badge.err { background:rgba(255, 90, 90, .18); border-color:rgba(255, 90, 90, .5); color:#ffd0d0; }
+#stage .cbar { position:absolute; left:14px; bottom:14px; font-family:monospace; font-size:.6rem; color:#cbb; background:rgba(10,6,28,.7); border:1px solid rgba(255,255,255,.1); border-radius:8px; padding:6px 10px; display:flex; align-items:center; gap:8px; }
+#stage .cbar .ramp { width:120px; height:8px; border-radius:3px; background:linear-gradient(90deg,#2aa0ff,#fff,#ff5a28); }
+.note { margin-top:14px; padding:10px; background:rgba(255,255,255,.03); border-radius:8px; font-size:.66rem; line-height:1.6; color:#998878; }
+.note code { background:rgba(255,138,90,.1); color:#ffcbb0; padding:1px 5px; border-radius:3px; font-size:.96em; }
+.note a { color:#ffb088; }
+</style>
+</head>
+<body>
+
+<div id="wrap">
+    <aside id="sidebar">
+        <h1>Great Red Spot <span class="accent">·</span> shallow-water lab</h1>
+        <p class="lead">
+            A 1.5-layer (reduced-gravity) shallow-water model written in Rust,
+            compiled to WebAssembly, advancing live in your browser. The active
+            weather layer is seeded with Jupiter's <em>measured zonal-jet
+            profile</em>; drop in an anticyclone at 22°S and it self-organises
+            into a long-lived oval — the Great Red Spot — while a cyclone of
+            equal strength is strained apart by the very same shear.
+        </p>
+
+        <div class="section">
+            <h2>Kernel</h2>
+            <div class="kv"><span class="kv-k">module</span><span class="kv-v" id="hud-wasm-size">—</span></div>
+            <div class="kv"><span class="kv-k">grid</span><span class="kv-v" id="hud-grid">—</span></div>
+            <div class="kv"><span class="kv-k">deformation radius</span><span class="kv-v" id="hud-ld">—</span></div>
+            <div class="kv"><span class="kv-k">step ms</span><span class="kv-v" id="hud-stepms">—</span></div>
+        </div>
+
+        <div class="section">
+            <h2>Controls</h2>
+            <div class="btn-row">
+                <button class="btn" id="btn-play" data-on="true">▶ Run</button>
+                <button class="btn" id="btn-grs">↻ Re-seed GRS</button>
+                <button class="btn" id="btn-cyc">+ Cyclone</button>
+                <button class="btn" id="btn-clear">Clear vortices</button>
+            </div>
+
+            <div class="slider-row">
+                <div class="label"><span>Speed (sim hours / frame)</span><span class="val" id="lab-dt">3.0</span></div>
+                <input type="range" id="sl-dt" min="0.5" max="12" step="0.5" value="3">
+            </div>
+            <div class="slider-row">
+                <div class="label"><span>Jet strength × measured</span><span class="val" id="lab-wind">1.0</span></div>
+                <input type="range" id="sl-wind" min="0" max="2.5" step="0.1" value="1">
+            </div>
+            <div class="slider-row">
+                <div class="label"><span>Vortex amplitude (m of layer)</span><span class="val" id="lab-amp">1600</span></div>
+                <input type="range" id="sl-amp" min="400" max="3000" step="100" value="1600">
+            </div>
+            <div class="slider-row">
+                <div class="label"><span>Deformation radius (km)</span><span class="val" id="lab-rd">1700</span></div>
+                <input type="range" id="sl-rd" min="1000" max="2500" step="100" value="1700">
+            </div>
+            <div class="slider-row">
+                <div class="label"><span>Resolution (n_x × n_y)</span><span class="val" id="lab-res">192 × 96</span></div>
+                <input type="range" id="sl-res" min="0" max="2" step="1" value="1">
+            </div>
+            <div class="btn-row" style="margin-top:4px">
+                <button class="btn" id="view-vort" data-on="true">vorticity</button>
+                <button class="btn" id="view-h">thickness</button>
+                <button class="btn" id="view-speed">wind speed</button>
+            </div>
+        </div>
+
+        <div class="note">
+            <strong>What you're seeing.</strong> Warm = anticyclonic, cool =
+            cyclonic vorticity. The bands are the measured jets (from the same
+            profile that drives <a href="/jupiter-system.html">jupiter-system</a>);
+            the oval is the seeded vortex. The seed sits in <em>anticyclonic
+            shear</em> at 22°S, which is exactly why an anticyclone survives
+            there and a cyclone does not (Marcus 1988; Dowling &amp; Ingersoll
+            1989). Numerics: Arakawa C-grid · Sadourny energy-conserving
+            advection · SSP-RK2 · biharmonic hyperviscosity · periodic in
+            longitude, sponged walls in latitude. The model is a real PDE
+            solver, not a texture; it is intentionally a <em>reduced</em> model
+            (one active layer, beta-plane), not a global GCM.
+            Rebuild with <code>./scripts/build-wasm.sh</code>.
+        </div>
+    </aside>
+
+    <div id="stage">
+        <div class="badge" id="badge">loading WASM…</div>
+        <canvas id="cv"></canvas>
+        <div id="hud">
+            <div><strong>t</strong> = <span id="hud-t">0.0</span> days</div>
+            <div><strong>peak wind</strong> = <span id="hud-umax">—</span> m/s</div>
+            <div><strong>steps</strong> = <span id="hud-tsteps">0</span></div>
+            <div><strong>fps</strong> = <span id="hud-fps">—</span></div>
+        </div>
+        <div class="cbar"><span id="cbar-lo">cyclonic</span><span class="ramp" id="cbar-ramp"></span><span id="cbar-hi">anticyclonic</span></div>
+    </div>
+</div>
+
+<script type="module">
+import { loadGrs, R_JUP }     from './js/grs/loader.js';
+import { makeGrsRenderer }    from './js/grs/renderer.js';
+import { sampleWind }         from './js/jupiter-wind-profile.js';
+
+const canvas = document.getElementById('cv');
+const badge  = document.getElementById('badge');
+
+// Channel geometry, centred on the Great Red Spot.
+const LAT_CENTER = -22;            // °, planetographic
+const LAT_SPAN   = 26;             // ° of latitude across the channel
+const LY = LAT_SPAN * Math.PI / 180 * R_JUP;
+const LX = 7.0e7;                  // m, ~ a wide longitude window
+const DEG = 180 / Math.PI;
+
+// Resolutions (nx, ny) selectable by slider.
+const RES = [[128, 64], [192, 96], [288, 144]];
+
+function sizeCanvas() {
+    const dpr = Math.min(2, devicePixelRatio || 1);
+    const rect = canvas.parentElement.getBoundingClientRect();
+    canvas.width  = Math.floor(rect.width  * dpr);
+    canvas.height = Math.floor(rect.height * dpr);
+}
+sizeCanvas();
+window.addEventListener('resize', sizeCanvas);
+
+const renderer = makeGrsRenderer(canvas);
+
+let grs = null;
+try {
+    grs = await loadGrs('/static/grs/jovian_grs.wasm');
+    badge.textContent = 'WASM loaded';
+    setTimeout(() => badge.style.opacity = 0, 800);
+} catch (err) {
+    badge.className = 'badge err';
+    badge.textContent = 'WASM load failed — run ./scripts/build-wasm.sh';
+    console.error(err);
+    throw err;
+}
+
+fetch('/static/grs/jovian_grs.wasm', { method: 'HEAD' })
+    .then(r => {
+        const len = +r.headers.get('content-length') || 0;
+        document.getElementById('hud-wasm-size').textContent = len ? `${(len/1024).toFixed(1)} KiB` : 'loaded';
+    }).catch(() => {});
+
+// Build the per-row jet by sampling the MEASURED profile at each row's
+// latitude, removing the channel mean (a uniform Doppler shift only) and
+// scaling by the UI factor.
+function buildJet(ny, windScale) {
+    const dy = LY / ny;
+    const jet = new Float64Array(ny);
+    let mean = 0;
+    for (let j = 0; j < ny; j++) {
+        const yc = (j + 0.5) * dy - 0.5 * LY;
+        const lat = LAT_CENTER + (yc / R_JUP) * DEG;
+        jet[j] = sampleWind(lat);
+        mean += jet[j];
+    }
+    mean /= ny;
+    for (let j = 0; j < ny; j++) jet[j] = (jet[j] - mean) * windScale;
+    return jet;
+}
+
+function curRes()  { return RES[+document.getElementById('sl-res').value]; }
+function curWind() { return +document.getElementById('sl-wind').value; }
+function curAmp()  { return +document.getElementById('sl-amp').value; }
+function curRd()   { return (+document.getElementById('sl-rd').value) * 1e3; }
+
+function initSim({ seedGrs = true } = {}) {
+    const [nx, ny] = curRes();
+    grs.init({
+        nx, ny, latCenterDeg: LAT_CENTER, lx: LX, ly: LY,
+        h0: 5e3, defRadiusM: curRd(), tauJetDays: 6,
+        jet: buildJet(ny, curWind()),
+    });
+    if (seedGrs) grs.seed({ xFrac: 0.5, yFrac: 0.0, amp: curAmp(), rxM: 6e6, ryM: 5e6 });
+    document.getElementById('hud-grid').textContent = `${nx} × ${ny}`;
+    document.getElementById('hud-ld').textContent = `${(curRd()/1e3).toFixed(0)} km`;
+}
+initSim();
+
+// ── UI wiring ────────────────────────────────────────────────────────────────
+const bind = (id, fmt) => {
+    const sl = document.getElementById(id);
+    const lab = document.getElementById(id.replace('sl-', 'lab-'));
+    sl.addEventListener('input', () => lab.textContent = fmt(+sl.value));
+    return sl;
+};
+bind('sl-dt',   v => v.toFixed(1));
+bind('sl-amp',  v => v.toFixed(0));
+bind('sl-rd',   v => v.toFixed(0));
+bind('sl-wind', v => v.toFixed(1)).addEventListener('change', () => initSim());
+
+const slRes = document.getElementById('sl-res');
+slRes.addEventListener('input', () => { const [nx, ny] = curRes(); document.getElementById('lab-res').textContent = `${nx} × ${ny}`; });
+slRes.addEventListener('change', () => initSim());
+document.getElementById('sl-rd').addEventListener('change', () => initSim());
+
+const btnPlay = document.getElementById('btn-play');
+let running = true;
+btnPlay.addEventListener('click', () => {
+    running = !running;
+    btnPlay.dataset.on = running ? 'true' : 'false';
+    btnPlay.textContent = running ? '▶ Run' : '⏸ Pause';
+});
+document.getElementById('btn-grs').addEventListener('click', () => initSim({ seedGrs: true }));
+document.getElementById('btn-cyc').addEventListener('click', () =>
+    grs.seed({ xFrac: Math.random(), yFrac: 0.0, amp: -curAmp(), rxM: 5e6, ryM: 4.5e6 }));
+document.getElementById('btn-clear').addEventListener('click', () => initSim({ seedGrs: false }));
+
+let view = 'vort';
+const viewBtns = { vort: 'view-vort', h: 'view-h', speed: 'view-speed' };
+for (const [v, id] of Object.entries(viewBtns)) {
+    document.getElementById(id).addEventListener('click', () => {
+        view = v;
+        for (const [vv, ii] of Object.entries(viewBtns))
+            document.getElementById(ii).dataset.on = (vv === v) ? 'true' : 'false';
+        const speed = (v === 'speed');
+        document.getElementById('cbar-lo').textContent = speed ? 'calm' : 'cyclonic';
+        document.getElementById('cbar-hi').textContent = speed ? 'fast' : 'anticyclonic';
+        document.getElementById('cbar-ramp').style.background =
+            speed ? 'linear-gradient(90deg,#140a1e,#ffb45a)' : 'linear-gradient(90deg,#2aa0ff,#fff,#ff5a28)';
+    });
+}
+
+// ── Animation loop ───────────────────────────────────────────────────────────
+let lastFpsT = performance.now(), frames = 0, stepMsEma = 0;
+
+function peakWind() {
+    const nx = grs.nx(), ny = grs.ny(), u = grs.u(), v = grs.v();
+    let m = 0;
+    for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+        const uc = u[j * nx + i];
+        const vc = 0.5 * (v[j * nx + i] + v[(j + 1) * nx + i]);
+        const s = Math.hypot(uc, vc); if (s > m) m = s;
+    }
+    return m;
+}
+
+function frame() {
+    if (running && grs) {
+        const dt = (+document.getElementById('sl-dt').value) * 3600;  // hours → s
+        const t0 = performance.now();
+        grs.step(dt);
+        stepMsEma = 0.85 * stepMsEma + 0.15 * (performance.now() - t0);
+    }
+    renderer.render(grs, view);
+
+    frames++;
+    const now = performance.now();
+    if (now - lastFpsT > 500) {
+        document.getElementById('hud-fps').textContent = (frames * 1000 / (now - lastFpsT)).toFixed(0);
+        document.getElementById('hud-stepms').textContent = stepMsEma.toFixed(2);
+        document.getElementById('hud-t').textContent = (grs.time() / 86400).toFixed(1);
+        document.getElementById('hud-tsteps').textContent = grs.steps();
+        document.getElementById('hud-umax').textContent = peakWind().toFixed(0);
+        lastFpsT = now; frames = 0;
+    }
+    requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
