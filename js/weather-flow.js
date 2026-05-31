@@ -781,6 +781,18 @@ export class WindAdvectionRK2Forecaster {
 
     getLastDiag() { return this._lastDiag; }
 
+    /**
+     * Which non-conserved microphysics terms are active, for UI/HUD display.
+     * Reflects the live constructor config rather than the module defaults, so
+     * a forecaster built with either term disabled reports honestly.
+     */
+    microphysicsStatus() {
+        return {
+            convergenceGrowth: !!(this._convergenceGrowth && this._convergenceGrowth.enabled),
+            precipFeedback:    !!(this._precipFeedback    && this._precipFeedback.enabled),
+        };
+    }
+
     // Compose the per-horizon gain (learned α[h] × runtime steadiness),
     // mirroring WindAdvectionForecaster. Returns { fn, steadiness }.
     _gainFn(history) {
