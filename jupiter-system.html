@@ -14,15 +14,15 @@
 <meta property="og:site_name" content="Parkers Physics">
 <meta property="og:url" content="https://parkersphysics.com/jupiter-system.html">
 <meta property="og:title" content="Jovian System — Galilean Moons — Parkers Physics">
-<meta property="og:description" content="Interactive Jupiter system showing Io, Europa, Ganymede, and Callisto in the 4:2:1 Laplace resonance. Tidal heating, magnetosphere, and ring visualization.">
+<meta property="og:description" content="Interactive Jupiter system: the four Galilean moons in live N-body resonance, plus the inner ring-shepherd moonlets and captured irregular moons, with secular orbital precession mapped over time.">
 <meta property="og:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
 <meta property="og:image:alt" content="Parkers Physics — real-time astrophysics simulations">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Jovian System — Galilean Moons — Parkers Physics">
-<meta name="twitter:description" content="Interactive Jupiter system showing Io, Europa, Ganymede, and Callisto in the 4:2:1 Laplace resonance. Tidal heating, magnetosphere, and ring visualization.">
+<meta name="twitter:description" content="Interactive Jupiter system: the four Galilean moons in live N-body resonance, plus the inner ring-shepherd moonlets and captured irregular moons, with secular orbital precession mapped over time.">
 <meta name="twitter:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
 
-<meta name="description" content="Interactive Jupiter system showing Io, Europa, Ganymede, and Callisto in the 4:2:1 Laplace resonance, with tidal heating and magnetosphere.">
+<meta name="description" content="Interactive Jupiter system: the four Galilean moons in live N-body resonance, plus the inner ring-shepherd moonlets and captured irregular moons, with secular orbital precession mapped over time.">
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 html { height:auto; overflow-y:auto; }
@@ -72,6 +72,7 @@ body {
     box-shadow:0 12px 40px rgba(0,0,0,.5), inset 0 0 80px rgba(160,80,40,.08);
 }
 #js-canvas-wrap canvas { display:block; width:100%; height:100%; }
+#js-canvas-wrap:fullscreen { width:100vw; height:100vh; border-radius:0; border:none; }
 
 /* HUD */
 #js-hud {
@@ -166,6 +167,14 @@ body {
     box-shadow:0 0 6px currentColor;
 }
 .js-body-name { font-size:.62rem; font-weight:600; letter-spacing:.04em; }
+.js-body-group {
+    grid-column:1 / -1;
+    font-size:.58rem; color:#998; letter-spacing:.10em;
+    text-transform:uppercase; font-weight:700;
+    margin:6px 0 1px; padding-top:5px;
+    border-top:1px solid rgba(255,184,80,.12);
+}
+.js-body-group:first-child { margin-top:0; padding-top:0; border-top:none; }
 
 .js-sel-head {
     display:flex; align-items:center; gap:8px;
@@ -295,6 +304,17 @@ body {
     box-shadow:0 0 8px rgba(255,184,80,.6);
     cursor:grab;
 }
+.js-atmo-readout {
+    display:inline-flex; align-items:center; gap:5px; flex-wrap:wrap;
+    margin-left:auto;
+    font-family:monospace; font-size:.68rem;
+    background:rgba(0,0,0,.28);
+    border:1px solid rgba(255,184,80,.20);
+    border-radius:8px; padding:4px 9px;
+}
+.js-atmo-readout .k { color:#998; text-transform:uppercase; letter-spacing:.05em; font-size:.6rem; }
+.js-atmo-readout .v { color:#ffd9a8; font-weight:700; margin-right:8px; }
+.js-atmo-readout .v:last-child { margin-right:0; }
 
 /* Plot panel */
 #js-app {
@@ -328,7 +348,7 @@ body {
 .js-plot-legend .lg { display:flex; align-items:center; gap:5px; }
 .js-plot-legend .swatch { display:inline-block; width:14px; height:8px; border-radius:1px; }
 .js-plot-wrap { position:relative; height:230px; border-radius:6px; background:rgba(0,0,0,.22); border:1px solid rgba(180,140,255,.10); }
-#js-plot-canvas { display:block; width:100%; height:100%; }
+#js-plot-canvas, #js-wind-canvas { display:block; width:100%; height:100%; }
 
 .js-plot-readout {
     display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr));
@@ -369,6 +389,7 @@ body {
     z-index:6;
 }
 .js-label-3d .icon { margin-right:3px; }
+.js-label-3d.minor { font-size:.6rem; padding:0 6px; opacity:.92; border-color:rgba(160,180,210,.30); }
 .js-label-3d.behind { opacity:0; }
 .js-label-3d.selected {
     color:#ffb070;
@@ -456,7 +477,7 @@ body {
   "@type": "SoftwareApplication",
   "@id": "https://parkersphysics.com/jupiter-system.html#app",
   "name": "Jovian System — Galilean Moons",
-  "description": "Interactive Jupiter system showing Io, Europa, Ganymede, and Callisto in the 4:2:1 Laplace resonance. Tidal heating, magnetosphere, and ring visualization.",
+  "description": "Interactive Jupiter system: the four Galilean moons in live N-body resonance, plus the inner ring-shepherd moonlets and captured irregular moons, with secular orbital precession mapped over time.",
   "url": "https://parkersphysics.com/jupiter-system.html",
   "image": "https://parkersphysics.com/ParkersPhysics_logo2.jpg",
   "applicationCategory": "EducationalApplication",
@@ -492,6 +513,7 @@ body {
     <span class="js-tag">Live Yoshida-4 Integration · 1:2:4 Mean-Motion Resonance</span>
     <h1>Jovian System — The Galilean Moons</h1>
     <p>Live N-body integration of Jupiter and its four Galilean moons. Io, Europa, and Ganymede are locked in a 1:2:4 orbital resonance — every 7 days, while Ganymede traces one orbit, Europa traces two and Io traces four. The mutual perturbations force a non-zero eccentricity on Io that powers its volcanism through tidal flexing, while the Laplace resonance argument <code>φ_L = λ_Io − 3λ_Europa + 2λ_Ganymede</code> librates tightly around 180° — a coordinated dance that Laplace proved stable in 1788.</p>
+    <p>Beyond the Galileans, the system now carries the inner ring-shepherd moonlets (Metis, Adrastea, Amalthea, Thebe) and a dozen captured irregular moons in the Himalia, Ananke, Carme, and Pasiphae families. These minor moons are propagated analytically with <strong>secular precession</strong> of their nodes and pericentres — driven by Jupiter's oblateness (J₂) close in, and by the Sun far out — so their orbit rings visibly rotate as the simulation advances. Hit <strong>⤢ Wide field</strong> for a fullscreen view out to the retrograde swarm.</p>
 </div>
 
 <!-- ═══ STAGE ═══ -->
@@ -586,6 +608,8 @@ body {
             <button class="js-btn toggle" id="js-ghost-toggle">Keplerian ghost: OFF</button>
             <span class="js-label" style="margin-left:14px">Labels</span>
             <button class="js-btn toggle on" id="js-labels-toggle">Labels: ON</button>
+            <span class="js-label" style="margin-left:14px">Rings</span>
+            <button class="js-btn toggle on" id="js-rings-toggle">Rings: ON</button>
         </div>
 
         <div class="js-row">
@@ -605,9 +629,30 @@ body {
             <button class="js-btn" id="js-pov" title="Place the camera on the selected moon's surface, looking toward Jupiter">👁 POV</button>
             <span class="js-label" style="margin-left:14px">Scale</span>
             <select class="js-select" id="js-scale">
-                <option value="full" selected>Realistic (Callisto fits)</option>
-                <option value="zoom">Inner moons (Io–Europa)</option>
+                <option value="zoom">Inner moonlets (Metis–Io)</option>
+                <option value="full" selected>Galilean (Callisto fits)</option>
+                <option value="system">Full system (irregulars)</option>
             </select>
+            <button class="js-btn toggle" id="js-view-wide" title="Fullscreen wide-field view — zoom out to the irregular outer moons and watch their orbits precess">⤢ Wide field</button>
+        </div>
+
+        <div class="js-row">
+            <span class="js-label" style="width:90px">Atmosphere</span>
+            <span class="js-label">Detail</span>
+            <select class="js-select" id="js-atmo-detail" title="Cloud-shader quality. High adds curl-noise flow, Kelvin–Helmholtz billows, and jet filaments.">
+                <option value="0">Flat bands</option>
+                <option value="1" selected>Flowing (medium)</option>
+                <option value="2">Hydrodynamic (high)</option>
+            </select>
+            <span class="js-label" title="Multiplies the zonal-wind advection rate">Wind</span>
+            <input class="js-slider" type="range" id="js-atmo-wind" min="0" max="3" step="0.1" value="1" style="min-width:120px; max-width:160px">
+            <span class="js-label" title="Meridional eddy-diffusion: how strongly turbulence mixes across jets">Diffusion</span>
+            <input class="js-slider" type="range" id="js-atmo-diff" min="0" max="1" step="0.05" value="0.6" style="min-width:120px; max-width:160px">
+            <span class="js-atmo-readout" id="js-atmo-readout">
+                <span class="k">epoch</span><span class="v" id="js-atmo-epoch">2000.0</span>
+                <span class="k">GRS&nbsp;Ø</span><span class="v" id="js-atmo-grs">—</span>
+                <span class="k">peak&nbsp;jet</span><span class="v" id="js-atmo-jet">150 m/s</span>
+            </span>
         </div>
 
     </div>
@@ -644,12 +689,34 @@ body {
         responsible for its sulfur-fed volcanism. Callisto sits outside the resonance.</p>
     </section>
 
+    <!-- Measured zonal-wind profile -->
+    <section class="js-panel">
+        <div class="js-plot-head">
+            <h2 style="flex:0 0 auto">Measured Zonal-Wind Profile <span style="color:#776; text-transform:none; letter-spacing:0; font-weight:400; font-size:.7rem">— the data driving the cloud flow</span></h2>
+            <div class="js-plot-legend">
+                <span class="lg"><span class="swatch" style="background:#7fd0ff"></span>eastward (prograde)</span>
+                <span class="lg"><span class="swatch" style="background:#ff9a7f"></span>westward (retrograde)</span>
+                <span class="lg"><span class="swatch" style="background:#ffb070"></span>GRS latitude</span>
+            </div>
+        </div>
+        <div class="js-plot-wrap">
+            <canvas id="js-wind-canvas"></canvas>
+        </div>
+        <p class="js-warn">Each latitude's clouds are advected at this measured eastward velocity, so the
+        bands shear past one another exactly as Jupiter's jets dictate. The equatorial zone super-rotates at
+        <code>~+140 m/s</code>; the planet's fastest jet sits at <code>~24°N (~+145 m/s)</code>; and the Great Red Spot
+        rolls between a retrograde jet on its poleward flank and a prograde jet to its south. Profile digitized from
+        the published Voyager + Cassini mean winds (Limaye 1986; García-Melendo &amp; Sánchez-Lavega 2001;
+        Porco et&nbsp;al. 2003; Tollefson et&nbsp;al. 2017) — accurate to ~±15 m/s, not a per-image dataset.</p>
+    </section>
+
     <!-- Notes -->
     <section class="js-panel">
         <h2>Why this matters</h2>
         <p><strong>Tidal heating.</strong> If Io's orbit were a perfect circle, tidal stretching from Jupiter would be static — no heating. The Laplace resonance with Europa pumps Io's eccentricity up to ~0.0041, which causes the tidal bulge to flex by ~100 m every orbit. Dissipation of that flexing pours ~10¹⁴ W into Io's interior, more than a thousand times Earth's geothermal flux per unit area, powering the most volcanically active body in the solar system.</p>
         <p><strong>Stable for billions of years.</strong> Pierre-Simon Laplace proved the resonance dynamically stable in 1788. Numerical experiments confirm it has held since shortly after the moons formed; tidal evolution drove the system <em>into</em> the resonance, not out of it. The same physics binds Pluto–Charon, Saturn's Mimas–Tethys, and exoplanet systems like TRAPPIST-1.</p>
         <p><strong>What you're seeing.</strong> A pure Newtonian Yoshida-4 integration in barycentric SI units. No fudge, no special-case forcing — the resonance falls out of pairwise gravity alone. Energy and angular momentum are bounded (symplectic) so the integration stays physical for arbitrarily long runs.</p>
+        <p><strong>The flowing atmosphere.</strong> Jupiter's clouds are rendered as a 2D advected fluid driven by the <em>measured zonal-wind profile</em> plotted above: each latitude's clouds shear at their real jet velocity, divergence-free <em>curl noise</em> warps the field so eddies swirl rather than slide, and a meridional eddy-diffusion blur mixes detail across jets. A second ammonia-cloud layer casts shadows on the deck to read as depth. Riding their bands are the <em>vortex zoo</em> — the Great Red Spot, Oval BA ("Red Spot Jr.") at ~33°S, white-oval anticyclones in the southern temperate region, and dark brown barges in the North Equatorial Belt. Two clocks drive it — wall time for continuous churn, and simulation time for evolution that tracks the controls above: scrub the date and the Great Red Spot drifts (~1.25°/day) and shrinks along its historical track (~40,000 km in the 1880s to ~14,000 km today), while the South Equatorial Belt fades and revives. The wind profile is a digitization of the published Voyager + Cassini winds (~±15 m/s); the GRS history is an approximate fit — neither is a per-image dataset.</p>
     </section>
 
     <section class="js-panel">
@@ -659,6 +726,10 @@ body {
             Yoshida, H. (1990) — <em>Construction of higher order symplectic integrators</em>.<br>
             Murray &amp; Dermott (1999) — <em>Solar System Dynamics</em>, ch. 8 (resonances).<br>
             de Pater &amp; Lissauer (2015) — <em>Planetary Sciences</em> 2nd ed.<br>
+            Ingersoll et al. (2004) — <em>Dynamics of Jupiter's Atmosphere</em> (Jupiter, CUP).<br>
+            Porco et al. (2003) — <em>Cassini Imaging of Jupiter's Atmosphere</em>, Science 299.<br>
+            Simon et al. (2018) — <em>Trends in the Size, Drift, and Color of the GRS</em>, AJ 155.<br>
+            Bridson et al. (2007) — <em>Curl-Noise for Procedural Fluid Flow</em>, SIGGRAPH.<br>
             JPL Planetary Fact Sheets — <code>nssdc.gsfc.nasa.gov/planetary/factsheet/</code>
         </p>
     </section>
@@ -670,19 +741,28 @@ body {
 import * as THREE        from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { JupiterSkin }   from './js/jupiter-skin.js';
+import { grsDiameterKm } from './js/jupiter-shader.js';
+import { JUPITER_ZONAL_WIND, sampleWind, WIND_MAX_ABS_MS } from './js/jupiter-wind-profile.js';
 import {
     yoshida4Step, totalEnergy, elementsToState, stateToElements, G_SI,
 } from './js/gravity-lab/physics.js';
+import {
+    MINOR_MOONS, MOON_GROUPS, j2NodeRate, j2PeriRate,
+} from './js/jupiter-minor-moons.js';
 
 // ── Constants ────────────────────────────────────────────────────────
 const KM = 1000;                          // m per km
 const D2R = Math.PI / 180;
 const R2D = 180 / Math.PI;
 const J2000_JD = 2451545.0;               // 2000-01-01 12:00 UT
+const SEC_PER_YEAR = 365.25 * 86400;
 
 // Jupiter radius (m) — used as the natural length unit for the scene.
 const R_JUP_KM = 71492;
 const R_JUP_M  = R_JUP_KM * KM;
+// Jupiter's second zonal harmonic — drives the inner moonlets' fast
+// nodal/apsidal precession (their visible "orbital evolution over time").
+const J2_JUP = 0.014736;
 
 // One Jupiter radius = 1 scene unit. So a Galilean moon at 5.9 R_jup
 // (Io) → orbit radius 5.9 in the 3D viewport.
@@ -769,6 +849,79 @@ const BODY_BEHAVIOR = {
         ],
     },
 };
+
+// ── Unified body registry (N-body Galileans + analytic minor moons) ───
+// JOVIAN_BODIES[1..4] are the live N-body moons. MINOR_MOONS are propagated
+// analytically (Kepler + secular precession) — see jupiter-minor-moons.js.
+const ALL_BODIES = [...JOVIAN_BODIES, ...MINOR_MOONS];
+const MINOR_KEYS = new Set(MINOR_MOONS.map(m => m.key));
+const minorByKey = Object.fromEntries(MINOR_MOONS.map(m => [m.key, m]));
+const isMinor  = key => MINOR_KEYS.has(key);
+const getBody  = key => ALL_BODIES.find(b => b.key === key);
+function periodDays(key) {
+    if (PERIOD_D[key] != null) return PERIOD_D[key];
+    const m = minorByKey[key];
+    if (!m) return NaN;
+    // Use the Keplerian period implied by `a`, so the displayed period
+    // matches the on-screen motion (JPL's tabulated mean P for the distant
+    // irregulars is not strictly Kepler-consistent with their mean a).
+    const mu = G_SI * (JOVIAN_BODIES[0].mass + m.mass);
+    const a  = m.a_km * KM;
+    return 2 * Math.PI * Math.sqrt(a * a * a / mu) / 86400;
+}
+function behaviorOf(key) {
+    return BODY_BEHAVIOR[key] || (minorByKey[key] && minorByKey[key].behavior) || {};
+}
+function groupOf(key) {
+    if (key === 'jupiter') return null;
+    if (minorByKey[key]) return minorByKey[key].group;
+    return 'galilean';   // the four Galileans
+}
+
+// ── Minor-moon analytic propagation (Kepler + secular precession) ─────
+// Precession of Ω and ω accumulates linearly from the epoch elements; the
+// inner moonlets use J₂ rates computed on the fly, the irregulars use the
+// tabulated solar-driven `secular` rates. The drift of these angles over
+// sim time is exactly the orbital evolution rendered by the precessing
+// orbit rings.
+const M_JUP_KG = JOVIAN_BODIES[0].mass;
+
+function minorSecularRates(m, n_rad_s, a_m, i_rad) {
+    // → { dRaan, dArgp } in rad/s
+    if (m.secular) {
+        return {
+            dRaan: m.secular.node_deg_yr * D2R / SEC_PER_YEAR,
+            dArgp: m.secular.peri_deg_yr * D2R / SEC_PER_YEAR,
+        };
+    }
+    return {
+        dRaan: j2NodeRate(n_rad_s, a_m, m.e, i_rad, J2_JUP, R_JUP_M),
+        dArgp: j2PeriRate(n_rad_s, a_m, m.e, i_rad, J2_JUP, R_JUP_M),
+    };
+}
+
+// Current osculating elements (precessed) for a minor moon at sim time t_s.
+function minorMoonElementsAt(m, t_s) {
+    const mu      = G_SI * (M_JUP_KG + m.mass);
+    const a_m     = m.a_km * KM;
+    const n_rad_s = Math.sqrt(mu / (a_m * a_m * a_m));
+    const i_rad   = m.i_deg * D2R;
+    const { dRaan, dArgp } = minorSecularRates(m, n_rad_s, a_m, i_rad);
+    return {
+        a:       a_m,
+        e:       m.e,
+        i_deg:   m.i_deg,
+        raan_deg:m.raan_deg + dRaan * t_s * R2D,
+        argp_deg:m.argp_deg + dArgp * t_s * R2D,
+        M_deg:   m.M_deg    + n_rad_s * t_s * R2D,
+        mu,
+    };
+}
+
+// SI state vector relative to Jupiter's centre (no barycentric offset).
+function minorMoonStateRel(m, t_s) {
+    return elementsToState(minorMoonElementsAt(m, t_s));
+}
 
 // ── Famous Jovian-system epochs (for the bookmark bar) ────────────────
 // Dates chosen because something visually interesting was observed or
@@ -922,7 +1075,23 @@ function ghostScenePos(moonKey) {
 // ── Three.js setup ───────────────────────────────────────────────────
 const wrap = document.getElementById('js-canvas-wrap');
 const scene  = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(46, 1, 0.05, 4000);
+
+// ── System extent → camera reach ─────────────────────────────────────
+// The outermost orbit (Pasiphae apoapsis ≈ 466 R_J) sets how far the
+// camera must pull back to frame the whole system. Everything below is
+// derived from the data so distances and zoom stay self-consistent.
+const FOV_DEG = 46;
+const OUTER_APO_U = Math.max(
+    (INIT_EL.callisto.a_km * KM) / M_PER_UNIT,
+    ...MINOR_MOONS.map(m => (m.a_km * (1 + m.e) * KM) / M_PER_UNIT),
+);
+// Distance at which a sphere of radius OUTER_APO_U just fits the vertical
+// FOV, with margin — the maximum useful zoom-out.
+const SYSTEM_MAX_DIST = Math.ceil(
+    OUTER_APO_U / Math.tan((FOV_DEG / 2) * Math.PI / 180) * 1.18,
+);
+
+const camera = new THREE.PerspectiveCamera(FOV_DEG, 1, 0.05, 9000);
 camera.position.set(0, 22, 32);
 camera.lookAt(0, 0, 0);
 
@@ -936,7 +1105,7 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.minDistance   = 1.2;
-controls.maxDistance   = 200;
+controls.maxDistance   = SYSTEM_MAX_DIST;   // reach all the way out to the irregulars
 // Right-click reserved for tooltip pinning — disable OrbitControls' pan.
 controls.mouseButtons = {
     LEFT:   THREE.MOUSE.ROTATE,
@@ -996,7 +1165,7 @@ const starUniforms = { uTime:{ value:0 } };
     const colors    = new Float32Array(n * 3);
     const sizes     = new Float32Array(n);
     for (let i = 0; i < n; i++) {
-        const r  = 600 + Math.random() * 400;
+        const r  = 4200 + Math.random() * 2200;   // beyond the outer moons, stays a backdrop
         const th = Math.random() * Math.PI * 2;
         const ph = Math.acos(2 * Math.random() - 1);
         positions[i*3]   = r * Math.sin(ph) * Math.cos(th);
@@ -1043,6 +1212,24 @@ const jupGroup = new THREE.Group();
 scene.add(jupGroup);
 const jupSkin = new JupiterSkin(jupGroup, { radius:1.0, quality:'medium', segments:48 });
 jupSkin.mesh.userData = { kind:'planet', key:'jupiter', label:'Jupiter' };
+
+// ── Atmosphere state (driven into the cloud shader each frame) ────────
+// `diffusion` = meridional eddy-diffusion blur; `windScale` = advection
+// rate multiplier; `quality` = shader tier (1 medium / 2 high). Default
+// medium for mobile; high unlocks curl-flow + KH billows + jet filaments.
+const atmo = { diffusion: 0.6, windScale: 1.0, quality: 1 };
+let atmoReadoutLast = 0;
+
+// Peak jet speed comes from the measured profile (its fastest jet, the
+// ~24°N jet at ~145 m/s); windScale multiplies the rendered advection rate.
+function updateAtmoReadout(epochYear) {
+    const km = grsDiameterKm(epochYear);
+    const earths = km / 12742;   // Earth diameter
+    if (elAtmoEpoch) elAtmoEpoch.textContent = epochYear.toFixed(1);
+    if (elAtmoGrs)   elAtmoGrs.textContent   =
+        `${km.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ',')} km (${earths.toFixed(1)}× Earth)`;
+    if (elAtmoJet)   elAtmoJet.textContent   = `${(WIND_MAX_ABS_MS * atmo.windScale).toFixed(0)} m/s`;
+}
 
 // Add a soft outer halo on top of the JupiterSkin atm shell.
 {
@@ -1108,18 +1295,24 @@ function makeMoon(b) {
     );
     m.add(halo);
 
-    // Static reference orbit ring (a circle at the moon's mean a, in the
-    // ecliptic plane). Doesn't need to track the live state; gives the
-    // viewer a sense of where the unperturbed orbit lies.
-    const a_u = (INIT_EL[b.key].a_km * KM) / M_PER_UNIT;
+    // Static reference orbit ring — the true 3D osculating ellipse from the
+    // moon's J2000 elements (inclination + eccentricity + node/pericentre),
+    // not a flat circle. Gives an accurate sense of the unperturbed orbit;
+    // the live N-body trail shows the perturbations on top.
+    const el  = INIT_EL[b.key];
+    const mu  = G_SI * (JOVIAN_BODIES[0].mass + b.mass);
     const N = 192;
     const ringGeo = new THREE.BufferGeometry();
     const arr = new Float32Array(N * 3);
     for (let i = 0; i < N; i++) {
-        const th = (i / N) * Math.PI * 2;
-        arr[i*3]   = a_u * Math.cos(th);
-        arr[i*3+1] = 0;
-        arr[i*3+2] = a_u * Math.sin(th);
+        const st = elementsToState({
+            a:el.a_km * KM, e:el.e, i_deg:el.i_deg,
+            raan_deg:el.raan_deg, argp_deg:el.argp_deg,
+            M_deg:(i / N) * 360, mu,
+        });
+        arr[i*3]     =  m2u(st.r[0]);
+        arr[i*3 + 1] =  m2u(st.r[2]);
+        arr[i*3 + 2] = -m2u(st.r[1]);
     }
     ringGeo.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3));
     const ringMat = new THREE.LineBasicMaterial({
@@ -1161,6 +1354,83 @@ function makeMoon(b) {
 }
 for (const b of JOVIAN_BODIES.slice(1)) makeMoon(b);
 
+// ── Minor moons (analytic) + their precessing orbit rings ────────────
+// These are NOT in the N-body. Each gets a sphere (added to `meshes` so
+// it is pickable) and a LineLoop orbit ring that is rebuilt from the
+// moon's precessed elements, so the ring visibly rotates over sim time.
+const minorRings = {};               // { key: { line, posArr, N, lastTs } }
+const MINOR_RING_REBUILD_S = 6 * 3600;   // throttle ring rebuilds
+
+function minorVisRadius(m) {
+    // Exaggerate so they read as dots; irregulars need a larger floor
+    // because they are viewed from hundreds of units away in wide-field.
+    const real = m.radius_km / R_JUP_KM;
+    const floor = (m.group === 'inner') ? 0.05 : 1.1;
+    return Math.max(real * 8, floor);
+}
+
+function makeMinorMoon(m) {
+    const rVis = minorVisRadius(m);
+    const mesh = new THREE.Mesh(
+        new THREE.SphereGeometry(rVis, 16, 16),
+        new THREE.MeshStandardMaterial({
+            color:m.color, emissive:m.color, emissiveIntensity:0.22,
+            roughness:0.9, metalness:0.04,
+        }),
+    );
+    mesh.userData = { kind:'moon', key:m.key, label:m.name };
+    mesh.frustumCulled = false;
+    scene.add(mesh);
+    meshes[m.key] = mesh;
+
+    // Precessing orbit ring. Irregular orbits are big & inclined → more
+    // segments and lower opacity; coloured by orbital family.
+    const N = (m.group === 'inner') ? 128 : 160;
+    const posArr = new Float32Array(N * 3);
+    sampleMinorRing(m, 0, posArr, N);
+    const ringGeo = new THREE.BufferGeometry();
+    ringGeo.setAttribute('position', new THREE.Float32BufferAttribute(posArr, 3));
+    ringGeo.computeBoundingSphere();
+    const grpColor = MOON_GROUPS[m.group] ? MOON_GROUPS[m.group].color : m.color;
+    const ringMat = new THREE.LineBasicMaterial({
+        color: grpColor,
+        transparent:true,
+        opacity: (m.group === 'inner') ? 0.22 : 0.30,
+        depthWrite:false,
+    });
+    const line = new THREE.LineLoop(ringGeo, ringMat);
+    line.frustumCulled = false;
+    scene.add(line);
+    minorRings[m.key] = { line, posArr, N, lastTs:0 };
+}
+
+// Sample one precessed orbit (Jupiter-centred, scene units) into posArr.
+function sampleMinorRing(m, t_s, posArr, N) {
+    const base = minorMoonElementsAt(m, t_s);
+    for (let k = 0; k < N; k++) {
+        const st = elementsToState({
+            a:base.a, e:base.e, i_deg:base.i_deg,
+            raan_deg:base.raan_deg, argp_deg:base.argp_deg,
+            M_deg:(k / N) * 360, mu:base.mu,
+        });
+        posArr[k*3]     =  m2u(st.r[0]);
+        posArr[k*3 + 1] =  m2u(st.r[2]);
+        posArr[k*3 + 2] = -m2u(st.r[1]);
+    }
+}
+
+function rebuildMinorRing(m, force) {
+    const r = minorRings[m.key];
+    if (!r) return;
+    if (!force && Math.abs(sim.t_s - r.lastTs) < MINOR_RING_REBUILD_S) return;
+    sampleMinorRing(m, sim.t_s, r.posArr, r.N);
+    r.line.geometry.attributes.position.needsUpdate = true;
+    r.line.geometry.computeBoundingSphere();
+    r.lastTs = sim.t_s;
+}
+
+for (const m of MINOR_MOONS) makeMinorMoon(m);
+
 // Selection + hover rings
 function makeRing(c, op, t) {
     const geom = new THREE.RingGeometry(1.0, 1.0 + t, 64);
@@ -1177,10 +1447,10 @@ const selRing  = makeRing(0xffb070, 0.92, 0.16);
 const hovRing  = makeRing(0xfff0a0, 0.55, 0.10);
 scene.add(selRing); scene.add(hovRing);
 
-// ── Legend ───────────────────────────────────────────────────────────
+// ── Legend (by orbital family, since there are now ~17 bodies) ───────
 const legend = document.getElementById('js-legend');
-legend.innerHTML = JOVIAN_BODIES.map(b =>
-    `<span class="lg"><span class="dt" style="background:#${b.color.toString(16).padStart(6,'0')}"></span>${b.name}</span>`
+legend.innerHTML = Object.values(MOON_GROUPS).map(g =>
+    `<span class="lg" title="${g.note}"><span class="dt" style="background:#${g.color.toString(16).padStart(6,'0')}"></span>${g.label}</span>`
 ).join('');
 
 // ── Body picker / element table ──────────────────────────────────────
@@ -1202,19 +1472,37 @@ const ELEM_DEFS = [
     { sym:'v',  nm:'speed',               unit:'km/s',fmt:v => (v / KM).toFixed(3) },
 ];
 
+// Picker is grouped into orbital families. Each section gets a full-width
+// header followed by its body buttons.
+const PICKER_SECTIONS = [
+    { label:'Jupiter',                 keys:['jupiter'] },
+    { label:MOON_GROUPS.galilean.label,keys:['io','europa','ganymede','callisto'] },
+    { label:MOON_GROUPS.inner.label,   keys:MINOR_MOONS.filter(m=>m.group==='inner').map(m=>m.key) },
+    { label:MOON_GROUPS.prograde.label,keys:MINOR_MOONS.filter(m=>m.group==='prograde').map(m=>m.key) },
+    { label:MOON_GROUPS.retrograde.label,keys:MINOR_MOONS.filter(m=>m.group==='retrograde').map(m=>m.key) },
+];
+
 let selected = JOVIAN_BODIES[1];   // Io by default
 function buildBodyPicker() {
     elBodyGrid.innerHTML = '';
-    for (const b of JOVIAN_BODIES) {
-        const btn = document.createElement('button');
-        btn.className = 'js-body-btn' + (b.key === selected.key ? ' sel' : '');
-        btn.dataset.key = b.key;
-        const hex = '#' + b.color.toString(16).padStart(6, '0');
-        btn.innerHTML =
-            `<div class="js-body-dot" style="background:${hex};color:${hex}"></div>` +
-            `<div class="js-body-name">${b.name}</div>`;
-        btn.addEventListener('click', () => selectBody(b.key));
-        elBodyGrid.appendChild(btn);
+    for (const sec of PICKER_SECTIONS) {
+        const hdr = document.createElement('div');
+        hdr.className = 'js-body-group';
+        hdr.textContent = sec.label;
+        elBodyGrid.appendChild(hdr);
+        for (const key of sec.keys) {
+            const b = getBody(key);
+            if (!b) continue;
+            const btn = document.createElement('button');
+            btn.className = 'js-body-btn' + (key === selected.key ? ' sel' : '');
+            btn.dataset.key = key;
+            const hex = '#' + b.color.toString(16).padStart(6, '0');
+            btn.innerHTML =
+                `<div class="js-body-dot" style="background:${hex};color:${hex}"></div>` +
+                `<div class="js-body-name">${b.name}</div>`;
+            btn.addEventListener('click', () => selectBody(key));
+            elBodyGrid.appendChild(btn);
+        }
     }
     elElTbl.innerHTML = ELEM_DEFS.map(d =>
         `<div class="js-el-k"><span class="sym">${d.sym}</span><span class="nm">${d.nm}</span></div>` +
@@ -1223,14 +1511,14 @@ function buildBodyPicker() {
 }
 
 function selectBody(key) {
-    selected = JOVIAN_BODIES.find(b => b.key === key) || selected;
+    selected = getBody(key) || selected;
     elBodyGrid.querySelectorAll('.js-body-btn').forEach(b =>
-        b.classList.toggle('sel', b.dataset.key === key));
+        b.classList.toggle('sel', b.dataset.key === selected.key));
     const hex = '#' + selected.color.toString(16).padStart(6, '0');
     elSelDot.style.background = hex;
     elSelDot.style.color      = hex;
     elSelName.textContent = selected.name;
-    elSelPer.textContent  = formatPeriod(PERIOD_D[selected.key]);
+    elSelPer.textContent  = formatPeriod(periodDays(selected.key));
     refreshSidePanel();
 }
 
@@ -1240,8 +1528,18 @@ function formatPeriod(d) {
     return `${(d/365.25).toFixed(2)} yr`;
 }
 
+// Current osculating elements for any moon, normalised to one shape:
+//   Galileans → from the live N-body state; minor moons → analytic.
+function liveElements(key) {
+    if (isMinor(key)) {
+        const base = minorMoonElementsAt(minorByKey[key], sim.t_s);
+        const st   = elementsToState(base);
+        return stateToElements(st.r, st.v, base.mu);
+    }
+    return meanLonRel(idxOf[key]);
+}
+
 function refreshSidePanel() {
-    const i  = idxOf[selected.key];
     if (selected.key === 'jupiter') {
         // Jupiter — show barycentric speed rather than orbital elements.
         const b = sim.bodies[0];
@@ -1257,20 +1555,7 @@ function refreshSidePanel() {
         setVal('v', (speed / KM).toFixed(4) + '<span class="un">km/s</span>');
         return;
     }
-    const M_jup = sim.bodies[0].m;
-    const m     = sim.bodies[i].m;
-    const mu    = G_SI * (M_jup + m);
-    const rRel  = [
-        sim.bodies[i].r[0] - sim.bodies[0].r[0],
-        sim.bodies[i].r[1] - sim.bodies[0].r[1],
-        sim.bodies[i].r[2] - sim.bodies[0].r[2],
-    ];
-    const vRel  = [
-        sim.bodies[i].v[0] - sim.bodies[0].v[0],
-        sim.bodies[i].v[1] - sim.bodies[0].v[1],
-        sim.bodies[i].v[2] - sim.bodies[0].v[2],
-    ];
-    const el = stateToElements(rRel, vRel, mu);
+    const el = liveElements(selected.key);
     const vals = {
         a:  el.a, e: el.e, i: el.i_deg,
         'Ω':el.raan_deg, 'ω':el.argp_deg,
@@ -1562,6 +1847,18 @@ function syncMeshesFromState() {
             if (p) ghostMeshes[k].position.set(p.x, p.y, p.z);
         }
     }
+    // Minor moons (analytic Kepler + secular precession), referred to the
+    // same barycentric frame as the N-body bodies.
+    const jr = sim.bodies[0].r;
+    for (const m of MINOR_MOONS) {
+        const st = minorMoonStateRel(m, sim.t_s);
+        meshes[m.key].position.set(
+            m2u(st.r[0] + jr[0]),
+            m2u(st.r[2] + jr[2]),
+           -m2u(st.r[1] + jr[1]),
+        );
+        rebuildMinorRing(m, false);
+    }
 }
 
 // Append a new trail sample for each moon (called every sim step that
@@ -1613,11 +1910,19 @@ function clearTrails() {
 }
 
 // ── Selection / hover rings ──────────────────────────────────────────
+// Visible sphere radius (scene units) for any body — matches the meshes
+// actually built (minor moons have size floors so they stay pickable).
+function visualRadiusOf(key) {
+    if (key === 'jupiter') return 1.0;
+    if (isMinor(key)) return minorVisRadius(minorByKey[key]);
+    const b = JOVIAN_BODIES.find(b => b.key === key);
+    return b ? Math.max((b.radius_km / R_JUP_KM) * 8, 0.05) : 0.05;
+}
 function updateSelRing() {
     if (!selected || !meshes[selected.key]) { selRing.visible = false; return; }
     const m = meshes[selected.key];
     const baseR = selected.key === 'jupiter' ? 1.5 :
-        Math.max((JOVIAN_BODIES.find(b => b.key === selected.key).radius_km / R_JUP_KM) * 8 * 1.6, 0.10);
+        Math.max(visualRadiusOf(selected.key) * 1.6, 0.10);
     selRing.position.copy(m.position);
     selRing.scale.setScalar(baseR);
     selRing.lookAt(camera.position);
@@ -1628,9 +1933,8 @@ function updateHovRing(key) {
         hovRing.visible = false; return;
     }
     const m = meshes[key];
-    const b = JOVIAN_BODIES.find(b => b.key === key);
     const baseR = key === 'jupiter' ? 1.7 :
-        Math.max(((b ? b.radius_km : 1500) / R_JUP_KM) * 8 * 1.85, 0.12);
+        Math.max(visualRadiusOf(key) * 1.85, 0.12);
     hovRing.position.copy(m.position);
     hovRing.scale.setScalar(baseR);
     hovRing.lookAt(camera.position);
@@ -1670,9 +1974,9 @@ function tidalHeatProxy(eIo) {
 }
 
 function buildTooltipHtml(key) {
-    const b   = JOVIAN_BODIES.find(b => b.key === key);
+    const b   = getBody(key);
     if (!b) return '';
-    const beh = BODY_BEHAVIOR[key] || {};
+    const beh = behaviorOf(key);
     const hex = '#' + b.color.toString(16).padStart(6, '0');
 
     const isPinned = (pinnedKey === key);
@@ -1693,14 +1997,29 @@ function buildTooltipHtml(key) {
         html += `<div class="tt-row"><span class="tt-k">spin</span><span class="tt-v">9.93 h</span></div>`;
         html += `<div class="tt-row"><span class="tt-k">v (bary)</span><span class="tt-v">${(speed/KM).toFixed(4)} km/s</span></div>`;
     } else {
-        const el = meanLonRel(idxOf[key]);
+        const el = liveElements(key);
         html += `<div class="tt-row"><span class="tt-k">a (live)</span><span class="tt-v">${(el.a / KM).toFixed(0)} km</span></div>`;
         html += `<div class="tt-row"><span class="tt-k">e (live)</span><span class="tt-v">${el.e.toFixed(5)}</span></div>`;
-        html += `<div class="tt-row"><span class="tt-k">period</span><span class="tt-v">${formatPeriod(PERIOD_D[key])}</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">i</span><span class="tt-v">${el.i_deg.toFixed(2)}°${el.i_deg > 90 ? ' <span style="color:#c08878">(retrograde)</span>' : ''}</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">period</span><span class="tt-v">${formatPeriod(periodDays(key))}</span></div>`;
         html += `<div class="tt-row"><span class="tt-k">r (now)</span><span class="tt-v">${(el.r_mag/KM).toFixed(0)} km</span></div>`;
         html += `<div class="tt-row"><span class="tt-k">v (now)</span><span class="tt-v">${(el.v_mag/KM).toFixed(2)} km/s</span></div>`;
         html += `<div class="tt-row"><span class="tt-k">λ</span><span class="tt-v">${el.mean_lon_deg.toFixed(1)}°</span></div>`;
         html += `<div class="tt-row"><span class="tt-k">phys. radius</span><span class="tt-v">${b.radius_km.toFixed(0)} km</span></div>`;
+
+        // Minor moons: show the precession that drives their orbital
+        // evolution (the rate the orbit ring is rotating).
+        if (isMinor(key)) {
+            const m = minorByKey[key];
+            const a_m = m.a_km * KM;
+            const mu  = G_SI * (M_JUP_KG + m.mass);
+            const n   = Math.sqrt(mu / (a_m * a_m * a_m));
+            const { dRaan, dArgp } = minorSecularRates(m, n, a_m, m.i_deg * D2R);
+            const src = m.secular ? 'solar' : 'J₂';
+            html += `<div class="tt-sep"></div>`;
+            html += `<div class="tt-row"><span class="tt-k">dΩ/dt (${src})</span><span class="tt-v">${(dRaan * R2D * SEC_PER_YEAR).toFixed(2)}°/yr</span></div>`;
+            html += `<div class="tt-row"><span class="tt-k">dω/dt (${src})</span><span class="tt-v">${(dArgp * R2D * SEC_PER_YEAR).toFixed(2)}°/yr</span></div>`;
+        }
 
         // Resonance status (only meaningful for Io / Europa / Ganymede).
         if (['io','europa','ganymede'].includes(key)) {
@@ -1828,6 +2147,27 @@ const elViewEqu   = document.getElementById('js-view-equ');
 const elFocus     = document.getElementById('js-focus');
 const elPov       = document.getElementById('js-pov');
 const elScale     = document.getElementById('js-scale');
+const elRingsTog  = document.getElementById('js-rings-toggle');
+const elViewWide  = document.getElementById('js-view-wide');
+const elAtmoDetail= document.getElementById('js-atmo-detail');
+const elAtmoWind  = document.getElementById('js-atmo-wind');
+const elAtmoDiff  = document.getElementById('js-atmo-diff');
+const elAtmoEpoch = document.getElementById('js-atmo-epoch');
+const elAtmoGrs   = document.getElementById('js-atmo-grs');
+const elAtmoJet   = document.getElementById('js-atmo-jet');
+
+// Atmosphere controls — quality tier, advection rate, eddy diffusion.
+const QUALITY_NAME = { 0:'low', 1:'medium', 2:'high' };
+elAtmoDetail.addEventListener('change', () => {
+    atmo.quality = parseInt(elAtmoDetail.value, 10) || 0;
+    jupSkin.setQuality(QUALITY_NAME[atmo.quality]);
+});
+elAtmoWind.addEventListener('input', () => {
+    atmo.windScale = parseFloat(elAtmoWind.value);
+});
+elAtmoDiff.addEventListener('input', () => {
+    atmo.diffusion = parseFloat(elAtmoDiff.value);
+});
 
 elPlay.addEventListener('click', () => {
     sim.playing = !sim.playing;
@@ -2036,13 +2376,24 @@ elGhostTog.addEventListener('click', () => {
 
 // ── View presets (smooth tweened) ────────────────────────────────────
 const VIEW_PRESETS = {
-    top:  { pos:new THREE.Vector3(0, 36, 0.001),     btn:elViewTop, distMax:200 },
-    '3d': { pos:new THREE.Vector3(0, 22, 32),        btn:elView3D,  distMax:200 },
-    equ:  { pos:new THREE.Vector3(0, 0.6, 38),       btn:elViewEqu, distMax:200 },
+    top:  { pos:new THREE.Vector3(0, 36, 0.001),     btn:elViewTop, distMax:SYSTEM_MAX_DIST },
+    '3d': { pos:new THREE.Vector3(0, 22, 32),        btn:elView3D,  distMax:SYSTEM_MAX_DIST },
+    equ:  { pos:new THREE.Vector3(0, 0.6, 38),       btn:elViewEqu, distMax:SYSTEM_MAX_DIST },
 };
+// Clears the wide-field flag + fullscreen without re-framing the camera.
+// Hoisted so setView (called by setWide) can use it without recursion.
+function clearWideFlag() {
+    if (!wideOn) return;
+    wideOn = false;
+    elViewWide.classList.remove('on');
+    elViewWide.textContent = '⤢ Wide field';
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+}
+
 function setView(name) {
     const preset = VIEW_PRESETS[name];
     if (!preset) return;
+    clearWideFlag();
     cam.presetName = name;
     elViewTop.classList.toggle('on', name === 'top');
     elView3D .classList.toggle('on', name === '3d');
@@ -2057,17 +2408,57 @@ elView3D .addEventListener('click', () => setView('3d'));
 elViewEqu.addEventListener('click', () => setView('equ'));
 
 elScale.addEventListener('change', () => {
+    clearWideFlag();
+    // maxDistance always reaches the outermost moon — the scale presets just
+    // pick a starting framing; the user can freely scroll-zoom from any of them.
+    controls.maxDistance = SYSTEM_MAX_DIST;
     let pos;
     if (elScale.value === 'zoom') {
-        pos = new THREE.Vector3(0, 8, 12);
-        controls.maxDistance = 50;
+        pos = new THREE.Vector3(0, 4, 7);            // inner ring-shepherd moonlets
+    } else if (elScale.value === 'system') {
+        pos = new THREE.Vector3(0, SYSTEM_MAX_DIST * 0.55, SYSTEM_MAX_DIST * 0.80);  // frame the irregulars
     } else {
-        pos = new THREE.Vector3(0, 22, 32);
-        controls.maxDistance = 200;
+        pos = new THREE.Vector3(0, 22, 32);          // Galilean system
     }
     cam.mode = 'free';
     cam.focusKey = null; elFocus.value = '';
-    startCameraTween(pos, new THREE.Vector3(0, 0, 0));
+    startCameraTween(pos, new THREE.Vector3(0, 0, 0), 900);
+});
+
+// ── Wide-field / fullscreen view ─────────────────────────────────────
+// Opt-in immersive mode: enters browser fullscreen on the viewport AND
+// pulls the camera way out so the irregular outer moons (out to ~335 R_J)
+// and their precessing orbits come into frame. Windowed is the default —
+// Windowed mode now reaches the irregulars too, so wide-field is purely the
+// fullscreen-immersion variant (same camera reach, framed on the full system).
+const stageWrap = document.getElementById('js-canvas-wrap');
+let wideOn = false;
+
+function setWide(on) {
+    wideOn = on;
+    elViewWide.classList.toggle('on', on);
+    elViewWide.textContent = on ? '⤡ Exit wide' : '⤢ Wide field';
+    cam.mode = 'free';
+    cam.focusKey = null; elFocus.value = '';
+    controls.maxDistance = SYSTEM_MAX_DIST;
+    if (on) {
+        startCameraTween(
+            new THREE.Vector3(0, SYSTEM_MAX_DIST * 0.55, SYSTEM_MAX_DIST * 0.80),
+            new THREE.Vector3(0, 0, 0), 900,
+        );
+        if (stageWrap.requestFullscreen) {
+            stageWrap.requestFullscreen().catch(() => {});
+        }
+    } else {
+        if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+        setView('3d');
+    }
+}
+elViewWide.addEventListener('click', () => setWide(!wideOn));
+// Keep button state in sync if the user exits fullscreen via Esc.
+document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement && wideOn) setWide(false);
+    setTimeout(resize, 60);   // canvas re-fits after the FS transition
 });
 
 // Focus dropdown — camera tracks a body each frame.
@@ -2077,9 +2468,7 @@ function bodyPosition(key) {
     return meshes[key] ? meshes[key].position.clone() : new THREE.Vector3(0,0,0);
 }
 function bodySceneRadius(key) {
-    if (key === 'jupiter') return 1.0;
-    const b = JOVIAN_BODIES.find(b => b.key === key);
-    return b ? Math.max((b.radius_km / R_JUP_KM) * 8, 0.05) : 0.05;
+    return visualRadiusOf(key);
 }
 function focusBody(key) {
     if (!key) {
@@ -2146,16 +2535,25 @@ elLabelsTog.addEventListener('click', () => {
     // Visibility update happens each frame via updateLabels()
 });
 
+// Rings toggle — Jupiter's ring system (main/halo/gossamer).
+let ringsOn = true;
+elRingsTog.addEventListener('click', () => {
+    ringsOn = !ringsOn;
+    elRingsTog.classList.toggle('on', ringsOn);
+    elRingsTog.textContent = 'Rings: ' + (ringsOn ? 'ON' : 'OFF');
+    jupSkin.setRingsVisible(ringsOn);
+});
+
 // ── HTML labels & hover icon (3D-projected DOM overlays) ─────────────
 const overlay = document.getElementById('js-overlay');
 const labelEls = {};
 const hoverIcon = document.createElement('div');
 hoverIcon.className = 'js-hover-icon';
 overlay.appendChild(hoverIcon);
-for (const b of JOVIAN_BODIES) {
+for (const b of ALL_BODIES) {
     const div = document.createElement('div');
-    div.className = 'js-label-3d';
-    const beh = BODY_BEHAVIOR[b.key] || {};
+    div.className = 'js-label-3d' + (isMinor(b.key) ? ' minor' : '');
+    const beh = behaviorOf(b.key);
     div.innerHTML = `<span class="icon">${beh.icon || '·'}</span>${b.name}`;
     overlay.appendChild(div);
     labelEls[b.key] = div;
@@ -2175,21 +2573,28 @@ function updateLabels() {
         hoverIcon.classList.remove('show');
         return;
     }
-    for (const b of JOVIAN_BODIES) {
+    for (const b of ALL_BODIES) {
         const el = labelEls[b.key];
         const m  = meshes[b.key];
         if (!m) continue;
+        // Minor moons would clutter the view (12 of them, many far off
+        // screen). Only label them when selected or hovered.
+        const isSel = selected && b.key === selected.key;
+        if (isMinor(b.key) && !isSel && b.key !== hoveredKey) {
+            el.style.display = 'none';
+            continue;
+        }
         const p = projectToScreen(m.position);
         if (p.behind) { el.classList.add('behind'); el.style.display = 'block'; el.style.left = '-9999px'; continue; }
         el.classList.remove('behind');
         el.style.display = 'block';
         el.style.left = `${p.x}px`;
         el.style.top  = `${p.y}px`;
-        el.classList.toggle('selected', selected && b.key === selected.key);
+        el.classList.toggle('selected', isSel);
     }
     // Hover icon (pulses on hovered body, except the selected one)
     if (hoveredKey && meshes[hoveredKey] && (!selected || hoveredKey !== selected.key)) {
-        const beh = BODY_BEHAVIOR[hoveredKey];
+        const beh = behaviorOf(hoveredKey);
         if (beh && beh.icon) {
             hoverIcon.textContent = beh.icon;
             const p = projectToScreen(meshes[hoveredKey].position);
@@ -2267,7 +2672,17 @@ function tick(now) {
 
     syncMeshesFromState();
     starUniforms.uTime.value = now * 0.001;
-    jupSkin.update(now * 0.001);
+    // Drive the atmosphere: wall-clock for continuous churn; sim time +
+    // epoch for the evolution that tracks the page's time controls.
+    const simDays   = sim.t_s / 86400;
+    const epochYear = 2000.0 + simDays / 365.25;   // t_s = 0 at J2000 ≈ 2000.0
+    jupSkin.update(now * 0.001, {
+        simDays,
+        epochYear,
+        diffusion: atmo.diffusion,
+        windScale: atmo.windScale,
+    });
+    if (now - atmoReadoutLast > 250) { updateAtmoReadout(epochYear); atmoReadoutLast = now; }
 
     // Camera updates
     stepCameraTween(now);
@@ -2296,9 +2711,104 @@ function tick(now) {
     requestAnimationFrame(tick);
 }
 
+// Populate the Focus dropdown with every body, grouped into <optgroup>s.
+function buildFocusOptions() {
+    let html = '<option value="" selected>Free (system view)</option>';
+    for (const sec of PICKER_SECTIONS) {
+        html += `<optgroup label="${sec.label}">`;
+        for (const key of sec.keys) {
+            const b = getBody(key);
+            if (b) html += `<option value="${key}">${b.name}</option>`;
+        }
+        html += '</optgroup>';
+    }
+    elFocus.innerHTML = html;
+}
+
+// ── Measured zonal-wind profile plot (the data driving the flow) ─────
+const windCanvas = document.getElementById('js-wind-canvas');
+const wctx = windCanvas.getContext('2d');
+const WIND_LAT_RANGE = 65;                       // plot ±65° (jets fade past this)
+const WIND_VMAX = Math.ceil(WIND_MAX_ABS_MS / 50) * 50;   // 150
+function resizeWindPlot() {
+    const rect = windCanvas.getBoundingClientRect();
+    const dpr  = Math.min(devicePixelRatio, 2);
+    windCanvas.width  = Math.max(1, Math.floor(rect.width  * dpr));
+    windCanvas.height = Math.max(1, Math.floor(rect.height * dpr));
+    wctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawWindProfile();
+}
+function drawWindProfile() {
+    const W = windCanvas.clientWidth, H = windCanvas.clientHeight;
+    if (W < 8 || H < 8) return;
+    wctx.clearRect(0, 0, W, H);
+    const padL = 44, padR = 16, padT = 10, padB = 26;
+    const pw = W - padL - padR, ph = H - padT - padB;
+
+    const yOf = lat => padT + (1 - (lat + WIND_LAT_RANGE) / (2 * WIND_LAT_RANGE)) * ph;  // N up
+    const xOf = v   => padL + (v + WIND_VMAX) / (2 * WIND_VMAX) * pw;
+    const x0  = xOf(0);
+
+    // Grid + axes
+    wctx.font = '10px ui-monospace, monospace';
+    wctx.strokeStyle = 'rgba(255,184,80,.10)';
+    wctx.fillStyle = '#776';
+    wctx.lineWidth = 1;
+    for (let v = -WIND_VMAX; v <= WIND_VMAX; v += 50) {
+        const x = xOf(v);
+        wctx.beginPath(); wctx.moveTo(x, padT); wctx.lineTo(x, padT + ph); wctx.stroke();
+        wctx.textAlign = 'center';
+        wctx.fillText(v.toString(), x, H - padB + 13);
+    }
+    for (let lat = -60; lat <= 60; lat += 30) {
+        const y = yOf(lat);
+        wctx.beginPath(); wctx.moveTo(padL, y); wctx.lineTo(W - padR, y); wctx.stroke();
+        wctx.textAlign = 'right';
+        wctx.fillText((lat > 0 ? '+' : '') + lat + '°', padL - 6, y + 3);
+    }
+    wctx.fillStyle = 'rgba(255,184,80,.55)';
+    wctx.textAlign = 'center';
+    wctx.fillText('eastward velocity  (m/s)', padL + pw / 2, H - 4);
+
+    // Horizontal jet bars (intuitive: prograde →, retrograde ←), 1° steps.
+    for (let lat = -WIND_LAT_RANGE; lat <= WIND_LAT_RANGE; lat += 1) {
+        const v = sampleWind(lat);
+        const y = yOf(lat);
+        wctx.strokeStyle = v >= 0 ? 'rgba(127,208,255,.55)' : 'rgba(255,154,127,.55)';
+        wctx.beginPath(); wctx.moveTo(x0, y); wctx.lineTo(xOf(v), y); wctx.stroke();
+    }
+    // Zero line
+    wctx.strokeStyle = 'rgba(255,255,255,.35)';
+    wctx.lineWidth = 1.5;
+    wctx.beginPath(); wctx.moveTo(x0, padT); wctx.lineTo(x0, padT + ph); wctx.stroke();
+
+    // Smooth profile curve on top
+    wctx.strokeStyle = '#ffd9a8';
+    wctx.lineWidth = 1.8;
+    wctx.beginPath();
+    let first = true;
+    for (let lat = -WIND_LAT_RANGE; lat <= WIND_LAT_RANGE; lat += 0.5) {
+        const x = xOf(sampleWind(lat)), y = yOf(lat);
+        if (first) { wctx.moveTo(x, y); first = false; } else wctx.lineTo(x, y);
+    }
+    wctx.stroke();
+
+    // GRS latitude marker (~22° S)
+    const yg = yOf(-22);
+    wctx.strokeStyle = 'rgba(255,176,112,.8)';
+    wctx.setLineDash([4, 3]);
+    wctx.beginPath(); wctx.moveTo(padL, yg); wctx.lineTo(W - padR, yg); wctx.stroke();
+    wctx.setLineDash([]);
+    wctx.fillStyle = '#ffb070';
+    wctx.textAlign = 'left';
+    wctx.fillText('GRS', padL + 4, yg - 4);
+}
+new ResizeObserver(resizeWindPlot).observe(windCanvas);
+
 // ── Boot ─────────────────────────────────────────────────────────────
 buildBodyPicker();
 buildBookmarks();
+buildFocusOptions();
 selectBody('io');
 syncMeshesFromState();
 syncInputsFromSim();
@@ -2309,6 +2819,7 @@ syncInputsFromSim();
     updateReadouts(res);
 }
 drawPlot();
+resizeWindPlot();
 updateHud();
 requestAnimationFrame(t => { lastT = t; tick(t); });
 </script>

@@ -62,6 +62,168 @@ const CH_V      = 4;
 const CH_LOW    = 5;
 const CH_MID    = 6;
 const CH_HIGH   = 7;
+const CH_PRECIP = 8;
+
+// ── Cloud → precipitation feedback ───────────────────────────────────────────
+// Pure advection carries the precip channel like an inert dye: it preserves
+// whatever precip/cloud relationship the initial frame had, but it never lets
+// the *evolving* cloud field talk back to the rain. Over a multi-hour horizon
+// that desynchronises the two — a precip cell drifts out from under the deck it
+// fell from (rain in clear air), or a deck thickens into a region and produces
+// no rain. This couples them in the model so the forecast stays physically
+// consistent, the same coupling the cloud/precip shaders do visually:
+//
+//   • Suppression (the strong, safe half): rain cannot persist without a deck
+//     to fall from. As the co-located low/mid cloud fraction thins below
+//     `cloudDry`, advected precip is relaxed toward zero. Cirrus (high cloud)
+//     is excluded — it doesn't rain.
+//   • Generation (the gentle half): a thick deck that has outrun its rain seeds
+//     light precip toward a thickness-scaled capacity, never fabricating more
+//     than `genMax` (light rain) from cloud alone. Conservative on purpose —
+//     overprediction is the failure mode to avoid.
+//
+// Both ramp in with lead time via 1 − e^(−h/relaxH): the τ=0 anchor and short
+// horizons stay close to pure advection (which we trust early), and only the
+// long tail — where advection is least reliable anyway — is fully reconciled.
+export const DEFAULT_PRECIP_FEEDBACK = Object.freeze({
+    enabled:  true,
+    cloudDry: 0.25,   // deck fraction below which rain can't persist
+    cloudWet: 0.55,   // deck fraction at which the suppression gate is fully open
+    relaxH:   6,      // e-folding horizon (hours) for the lead-time ramp
+    genMax:   0.8,    // mm/hr — most precip a thick deck alone will seed
+    genOn:    0.65,   // deck fraction at which generation starts
+    genRate:  0.5,    // fraction of the (capacity − current) shortfall filled at full ramp
+});
+
+// Hermite smoothstep, matching the GLSL the shaders use so the model and the
+// render couple on the same curve.
+function _smoothstep(edge0, edge1, x) {
+    if (edge0 === edge1) return x < edge0 ? 0 : 1;
+    const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+    return t * t * (3 - 2 * t);
+}
+
+/**
+ * In-place reconcile the precip channel (8) of one advected CHW frame with its
+ * co-located low/mid cloud channels (5,6). Pure given (frame, N, h, params);
+ * mutates and returns `frame`. h ≤ 0 (the observation anchor) and a disabled
+ * params object are no-ops, so the live frame is never altered.
+ *
+ * Cloud channels are percent [0,100], precip is mm/hr — the physical units the
+ * coarse buffer stores (decode normalises later).
+ */
+export function reconcilePrecipWithCloud(frame, N, h, params = DEFAULT_PRECIP_FEEDBACK) {
+    const p = params || DEFAULT_PRECIP_FEEDBACK;
+    if (!p.enabled || h <= 0) return frame;
+
+    const w     = 1 - Math.exp(-h / Math.max(0.5, p.relaxH));   // lead-time ramp 0..1
+    const offL  = CH_LOW * N;
+    const offM  = CH_MID * N;
+    const offP  = CH_PRECIP * N;
+
+    for (let k = 0; k < N; k++) {
+        const deck = Math.max(frame[offL + k], frame[offM + k]) / 100;   // 0..1
+        const pAdv = frame[offP + k];
+
+        // Suppression: pAdv · mix(1, gate, w). gate → 0 under a vanished deck,
+        // so precip decays out; gate → 1 under a solid deck leaves rain intact.
+        const gate  = _smoothstep(p.cloudDry, p.cloudWet, deck);
+        const pSupp = pAdv * (1 - w * (1 - gate));
+
+        // Generation: fill part of the shortfall toward a thick-deck capacity.
+        // Strictly additive (≥0), so heavy rain under thick cloud is untouched.
+        const cap  = p.genMax * _smoothstep(p.genOn, 1.0, deck);
+        const pOut = pSupp + Math.max(0, cap - pSupp) * w * p.genRate;
+
+        frame[offP + k] = pOut;
+    }
+    return frame;
+}
+
+// ── Convergence-driven microphysics ──────────────────────────────────────────
+// Advection alone is mass-conserving: it transports precip and cloud but never
+// creates them. Real precipitation is non-conserved — it forms where the wind
+// field CONVERGES (∇·V < 0). Converging air has nowhere to go but up; rising
+// moist air cools, condenses into cloud, and rains out. This is the dynamical
+// source term the pure-transport model was missing.
+//
+// For each forecast frame we compute the horizontal divergence of its own
+// (advected) wind field and treat convergence (−∇·V > 0) as an uplift rate.
+// Gated by moisture (RH) — converging *dry* air just subsides somewhere else
+// and doesn't rain — it condenses cloud and produces precip together, so the
+// pair stays consistent (and the cloud→precip reconcile that runs afterwards
+// sees a deck that actually supports the new rain). Growth only: subsidence
+// drying is left to advection + the reconcile's suppression, since a noisy
+// divergence estimate shouldn't be trusted to actively destroy a real deck.
+//
+// The processed fraction is conv[1/s] · moisture · τ(h)[s], where
+// τ(h) = satH·3600·(1 − e^(−h/satH)) saturates so a 24-h forecast can't run
+// away. Synoptic convergence is ~1e-5/s, so with the default gains a strongly
+// converging saturated region grows a few mm/hr and tens of percent of deck
+// over a long horizon — both hard-capped against divergence-estimate noise.
+export const DEFAULT_CONVERGENCE_GROWTH = Object.freeze({
+    enabled:   true,
+    satH:      6,      // τ saturation horizon (hours)
+    kPrecip:   20.0,   // mm/hr per unit processed fraction
+    kCloud:    320.0,  // cloud-cover points (%) per unit processed fraction
+    precipMax: 8.0,    // mm/hr cap on convergence-generated rain
+    cloudMax:  70.0,   // cap (%) on convergence-grown deck per horizon
+    rhFloor:   0.40,   // below this RH fraction, converging air is too dry to rain
+});
+
+/**
+ * In-place grow the precip (8) and low/mid cloud (5,6) channels of one
+ * advected CHW frame wherever its own wind field (3,4) converges. Pure given
+ * (frame, N, gridW, gridH, h, params); mutates and returns `frame`. h ≤ 0 and
+ * disabled params are no-ops. Units: wind m/s, cloud %, precip mm/hr, RH %.
+ *
+ * Runs BEFORE reconcilePrecipWithCloud so the rain it creates is backed by a
+ * deck it also creates, leaving the two channels physically consistent.
+ */
+export function applyConvergenceGrowth(frame, N, gridW, gridH, h, params = DEFAULT_CONVERGENCE_GROWTH) {
+    const p = params || DEFAULT_CONVERGENCE_GROWTH;
+    if (!p.enabled || h <= 0) return frame;
+
+    const U   = frame.subarray(CH_U * N, (CH_U + 1) * N);
+    const V   = frame.subarray(CH_V * N, (CH_V + 1) * N);
+    const RH  = frame.subarray(2 * N, 3 * N);
+    const offL = CH_LOW * N, offM = CH_MID * N, offP = CH_PRECIP * N;
+
+    const tauSec = Math.max(0.5, p.satH) * 3600 * (1 - Math.exp(-h / Math.max(0.5, p.satH)));
+    const dyM    = (180 / gridH) * M_PER_DEG_LAT;          // metres per grid row
+    const dLonDeg = 360 / gridW;
+
+    for (let j = 0; j < gridH; j++) {
+        const lat    = latOfRow(j, gridH);
+        const cosLat = Math.max(0.05, Math.abs(Math.cos(lat * Math.PI / 180)));
+        const dxM    = dLonDeg * M_PER_DEG_LAT * cosLat;   // metres per grid column at this lat
+        const jp = Math.min(gridH - 1, j + 1);
+        const jm = Math.max(0, j - 1);
+        const dySpan = (jp - jm) * dyM || dyM;
+
+        for (let i = 0; i < gridW; i++) {
+            const k  = j * gridW + i;
+            const ip = (i + 1) % gridW;          // longitude wraps
+            const im = (i - 1 + gridW) % gridW;
+
+            const dUdx = (U[j * gridW + ip] - U[j * gridW + im]) / (2 * dxM);
+            const dVdy = (V[jp * gridW + i]  - V[jm * gridW + i]) / dySpan;
+            const conv = -(dUdx + dVdy);          // >0 where the flow converges
+            if (conv <= 0) continue;              // growth only
+
+            // Moisture gate: only converging *moist* air condenses and rains.
+            const moist = _smoothstep(p.rhFloor, 1.0, RH[k] / 100);
+            if (moist <= 0) continue;
+
+            const processed = conv * moist * tauSec;   // dimensionless
+            frame[offP + k] = Math.min(frame[offP + k] + Math.min(p.precipMax, p.kPrecip * processed), 50);
+            const grow = Math.min(p.cloudMax, p.kCloud * processed);
+            frame[offL + k] = Math.min(100, frame[offL + k] + grow);
+            frame[offM + k] = Math.min(100, frame[offM + k] + grow * 0.7);
+        }
+    }
+    return frame;
+}
 
 // Earth's radius in metres (mean) — used to convert m/s to deg/s.
 // 1° lat ≈ 111_320 m at sea level; 1° lon shrinks by cos(lat).
@@ -446,6 +608,227 @@ export class WindAdvectionForecaster {
             };
         }
         return result;
+    }
+}
+
+// ── RK2 multi-substep semi-Lagrangian, time-evolving wind ───────────────────
+//
+// wind-advection-rk2-v1 — the "new model" successor to wind-advection-v1.
+// Two upgrades target v1's documented failure mode (a single Euler jump
+// with frozen wind sampled only at the destination, which "can become
+// worse than persistence" past ~6 h):
+//
+//   1. Multi-substep RK2 (midpoint) back-trajectory. Instead of one
+//      h-hour Euler jump, walk back in ~1-hour substeps, taking a
+//      midpoint velocity estimate each substep and re-sampling the wind
+//      ALONG the curving path. Curved flow (troughs, rotating lows) that
+//      a straight Euler jump flies past is now followed. The secant-
+//      latitude metric is recomputed at the trajectory's current
+//      latitude each substep, not frozen at the destination.
+//
+//   2. Time-evolving wind. The wind is extrapolated along the trajectory
+//      from the most recent hourly tendency ΔW = W(t) − W(t−1h):
+//
+//         W_eff(lead τ) = W(t) + τ_eff · ΔW,
+//         τ_eff = T · (1 − e^(−τ/T))          (T = tendencyHorizonH, ~3 h)
+//
+//      τ_eff saturates at T so a 24-hour extrapolation can't run away —
+//      trust the recent trend for the first few hours, then hold. With
+//      only one frame in the ring (no tendency yet) ΔW = 0 and the model
+//      degrades to frozen-wind RK2, still strictly better than v1's
+//      single Euler step.
+//
+// Shares v1's gain/shear hooks: gainAtHour(h) ∈ [0,1] scales the whole
+// wind for horizon h, so gain → 0 recovers the persistence baseline.
+
+const DEG2RAD = Math.PI / 180;
+
+/**
+ * Build advected frames at the requested horizons using RK2 substeps and
+ * a time-evolving wind. The back-trajectory origin is computed once per
+ * (cell, horizon) and reused across all 9 channels. h ≤ 0 yields the
+ * identity (current observation) — used as the τ=0 paint anchor.
+ *
+ * @returns {null | { model_id, issued_ms, horizons, gridW, gridH,
+ *                     frames, target_ms, _meta? }}
+ */
+function rk2BuildHorizons({
+    history, modelId, horizonsH, substepH = 1, tendencyHorizonH = 3, gainAtHour = null,
+    precipFeedback = DEFAULT_PRECIP_FEEDBACK,
+}) {
+    const frames = history.all();
+    if (frames.length === 0) return null;
+    const newest = frames[frames.length - 1];
+    const { t, gridW, gridH, coarse } = newest;
+    const N = gridW * gridH;
+
+    const Ut = coarse.subarray(CH_U * N, (CH_U + 1) * N);
+    const Vt = coarse.subarray(CH_V * N, (CH_V + 1) * N);
+
+    // Hourly wind tendency from the previous frame, when present and
+    // grid-compatible. A per-cell delta — no global mean to remove.
+    let tendU = null, tendV = null;
+    if (frames.length >= 2) {
+        const prev = frames[frames.length - 2];
+        if (prev.gridW === gridW && prev.gridH === gridH
+            && prev.coarse?.length === coarse.length) {
+            const Up = prev.coarse.subarray(CH_U * N, (CH_U + 1) * N);
+            const Vp = prev.coarse.subarray(CH_V * N, (CH_V + 1) * N);
+            tendU = new Float32Array(N);
+            tendV = new Float32Array(N);
+            for (let k = 0; k < N; k++) { tendU[k] = Ut[k] - Up[k]; tendV[k] = Vt[k] - Vp[k]; }
+        }
+    }
+    const Tsat = Math.max(0.5, tendencyHorizonH);
+
+    // Wind (m/s) at fractional grid position (col,row) and lead time
+    // `leadH` hours, scaled by `gain`. Up to four bilinear samples.
+    const windAt = (col, row, leadH, gain) => {
+        let u = bilinearSample(Ut, gridW, gridH, col, row);
+        let v = bilinearSample(Vt, gridW, gridH, col, row);
+        if (tendU) {
+            const te = Tsat * (1 - Math.exp(-Math.max(0, leadH) / Tsat));
+            u += te * bilinearSample(tendU, gridW, gridH, col, row);
+            v += te * bilinearSample(tendV, gridW, gridH, col, row);
+        }
+        return { u: u * gain, v: v * gain };
+    };
+
+    const out     = {};
+    const targets = {};
+    const meta    = gainAtHour ? { gain_per_horizon: {} } : null;
+
+    for (const h of horizonsH) {
+        targets[h] = t + h * 3_600_000;
+        const gain = gainAtHour ? Math.max(0, Math.min(1, gainAtHour(h))) : 1;
+        if (meta) meta.gain_per_horizon[h] = gain;
+
+        const frame = new Float32Array(N * NUM_CHANNELS);
+        if (h <= 0) { frame.set(coarse); out[h] = frame; continue; }
+
+        const steps = Math.max(1, Math.round(h / substepH));
+        const dh    = h / steps;          // hours per substep
+        const dsec  = dh * 3600;
+
+        for (let j = 0; j < gridH; j++) {
+            const lat0 = latOfRow(j, gridH);
+            for (let i = 0; i < gridW; i++) {
+                // Walk the parcel backward from (lat,lon) at lead h to its
+                // origin at lead 0, RK2/midpoint per substep.
+                let lat = lat0;
+                let lon = lonOfColumn(i, gridW);
+                let lead = h;
+                for (let s = 0; s < steps; s++) {
+                    const w1   = windAt(colOfLon(lon, gridW), rowOfLat(lat, gridH), lead, gain);
+                    const sec1 = 1 / Math.max(0.02, Math.abs(Math.cos(lat * DEG2RAD)));
+                    const latM = lat - 0.5 * (w1.v * dsec) / M_PER_DEG_LAT;
+                    const lonM = lon - 0.5 * (w1.u * dsec) / M_PER_DEG_LAT * sec1;
+                    const w2   = windAt(colOfLon(lonM, gridW), rowOfLat(latM, gridH), lead - 0.5 * dh, gain);
+                    const secM = 1 / Math.max(0.02, Math.abs(Math.cos(latM * DEG2RAD)));
+                    lat = lat - (w2.v * dsec) / M_PER_DEG_LAT;
+                    lon = lon - (w2.u * dsec) / M_PER_DEG_LAT * secM;
+                    lead -= dh;
+                }
+                const colO = colOfLon(lon, gridW);
+                const rowO = rowOfLat(lat, gridH);
+                const dst  = j * gridW + i;
+                for (let ch = 0; ch < NUM_CHANNELS; ch++) {
+                    const slice = coarse.subarray(ch * N, (ch + 1) * N);
+                    frame[ch * N + dst] = bilinearSample(slice, gridW, gridH, colO, rowO);
+                }
+            }
+        }
+        // Microphysics, in physical order: convergence first lifts moist air
+        // into new cloud + rain, then the cloud→precip reconcile gates the
+        // result so rain and deck stay consistent (both no-ops for h ≤ 0).
+        applyConvergenceGrowth(frame, N, gridW, gridH, h, convergenceGrowth);
+        // Cloud → precip feedback: keep the advected rain consistent with the
+        // advected deck at this horizon (no-op for h ≤ 0, handled above).
+        reconcilePrecipWithCloud(frame, N, h, precipFeedback);
+        out[h] = frame;
+    }
+    return {
+        model_id: modelId, issued_ms: t,
+        horizons: horizonsH.slice(),
+        gridW, gridH, frames: out, target_ms: targets,
+        ...(meta ? { _meta: meta } : {}),
+    };
+}
+
+export class WindAdvectionRK2Forecaster {
+    static id = 'wind-advection-rk2-v1';
+    /**
+     * @param {object} [opts]
+     * @param {object} [opts.gainTracker]       AdvectionGainTracker (its own
+     *   modelId), read per-forecast via getGain(h).
+     * @param {object} [opts.shearProxy]        WindShearProxy; refresh()'d
+     *   once per forecast, multiplies the learned gain.
+     * @param {number} [opts.tendencyHorizonH=3]  τ_eff saturation horizon.
+     * @param {number} [opts.substepH=1]           Hours per RK2 substep.
+     */
+    constructor({ gainTracker = null, shearProxy = null, tendencyHorizonH = 3, substepH = 1,
+                  precipFeedback = DEFAULT_PRECIP_FEEDBACK,
+                  convergenceGrowth = DEFAULT_CONVERGENCE_GROWTH } = {}) {
+        this.id                 = WindAdvectionRK2Forecaster.id;
+        this._gainTracker       = gainTracker;
+        this._shearProxy        = shearProxy;
+        this._tendencyHorizonH  = tendencyHorizonH;
+        this._substepH          = substepH;
+        this._precipFeedback    = precipFeedback;
+        this._convergenceGrowth = convergenceGrowth;
+        this._lastDiag          = null;
+    }
+
+    getLastDiag() { return this._lastDiag; }
+
+    // Compose the per-horizon gain (learned α[h] × runtime steadiness),
+    // mirroring WindAdvectionForecaster. Returns { fn, steadiness }.
+    _gainFn(history) {
+        const steadiness = this._shearProxy ? this._shearProxy.refresh(history) : 1.0;
+        const gt = this._gainTracker;
+        return {
+            fn: (h) => (gt ? gt.getGain(h) : 1.0) * steadiness,
+            steadiness,
+        };
+    }
+
+    /** Standard scored horizons (FORECAST_HORIZONS_H) for the validator. */
+    forecast({ history }) {
+        const { fn, steadiness } = this._gainFn(history);
+        const result = rk2BuildHorizons({
+            history, modelId: this.id, horizonsH: FORECAST_HORIZONS_H,
+            substepH: this._substepH, tendencyHorizonH: this._tendencyHorizonH,
+            gainAtHour: fn, precipFeedback: this._precipFeedback,
+            convergenceGrowth: this._convergenceGrowth,
+        });
+        if (result) {
+            this._lastDiag = {
+                steadiness,
+                shear_ms:    this._shearProxy?.diagnostics().shear_ms ?? null,
+                alpha_per_h: result._meta?.gain_per_horizon ?? null,
+                alpha_learned_per_h: this._gainTracker ? this._gainTracker.getAllGains() : null,
+                t: Date.now(),
+            };
+        }
+        return result;
+    }
+
+    /**
+     * Dense hourly horizons (0..maxHorizonH) for the paint provider. h=0
+     * is the current observation, giving a seamless live→forecast handoff.
+     * Not scored — the validator only consumes forecast()'s standard
+     * horizons.
+     */
+    forecastDense({ history, maxHorizonH = 24 }) {
+        const { fn } = this._gainFn(history);
+        const horizons = [];
+        for (let h = 0; h <= maxHorizonH; h++) horizons.push(h);
+        return rk2BuildHorizons({
+            history, modelId: this.id, horizonsH: horizons,
+            substepH: this._substepH, tendencyHorizonH: this._tendencyHorizonH,
+            gainAtHour: fn, precipFeedback: this._precipFeedback,
+            convergenceGrowth: this._convergenceGrowth,
+        });
     }
 }
 

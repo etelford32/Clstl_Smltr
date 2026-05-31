@@ -260,6 +260,36 @@ body {
     margin-top: 4px;
     max-width: 64ch;
 }
+
+/* ── Receipt · operator case study ──────────────────────── */
+#gn-receipt h2 { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
+.gn-receipt-tag {
+    font-size:.54rem; font-weight:800; letter-spacing:.1em;
+    color:#fc6; border:1px solid rgba(255,200,80,.4);
+    background:rgba(255,200,80,.06); border-radius:4px; padding:2px 6px;
+}
+.gn-case {
+    border-left:2px solid rgba(255,255,255,.14);
+    padding:1px 0 1px 11px; margin-bottom:12px;
+}
+.gn-case--proof { border-left-color:#f96; }
+.gn-case-id {
+    font-family: ui-monospace, monospace; font-size:.6rem;
+    letter-spacing:.08em; text-transform:uppercase; color:#8ab; margin-bottom:4px;
+}
+.gn-case-line { font-size:.78rem; line-height:1.5; color:#bcd; }
+.gn-case-line strong { color:#f88; font-weight:800; }
+.gn-case--proof .gn-case-line strong { color:#fc9; }
+.gn-case-line em { color:#fff; font-style:normal; font-weight:600; }
+.gn-receipt-label {
+    font-size:.62rem; text-transform:uppercase; letter-spacing:.1em;
+    color:#8ab; margin:6px 0 8px;
+}
+.gn-receipt-note {
+    font-size:.74rem; line-height:1.5; color:#8ab; margin-top:12px;
+    padding-top:10px; border-top:1px solid rgba(255,255,255,.08);
+}
+.gn-receipt-note strong { color:#bcd; font-weight:700; }
 </style>
 </head>
 <body>
@@ -392,8 +422,28 @@ body {
   <!-- ── Right: skill + methodology + fleet ──────────── -->
   <aside id="gn-right">
 
-    <section class="gn-panel">
-      <h2>Skill vs. MSIS baseline</h2>
+    <section id="gn-receipt" class="gn-panel">
+      <h2>The receipt <span class="gn-receipt-tag">OPERATOR CASE STUDY</span></h2>
+
+      <div class="gn-case">
+        <div class="gn-case-id">Case 01 · Starlink G4-7 · Feb 2022</div>
+        <p class="gn-case-line">
+          A <em>moderate</em> storm lifted thermospheric density days after launch and
+          empirical drag ran low — wrong in the one direction that de-orbits hardware.
+          <strong>38 of 49</strong> satellites never reached operational orbit and reentered.
+        </p>
+      </div>
+
+      <div class="gn-case gn-case--proof">
+        <div class="gn-case-id">Case 02 · Gannon G5 · May 2024</div>
+        <p class="gn-case-line">
+          The first G5 since 2003 — <em>Dst −412</em>, with Ap pegged at its 400 ceiling
+          for ~24 h. We replay it driver-for-driver and score MHD- and magnetometer-corrected
+          density against GRACE-FO / Swarm-C accelerometer truth.
+        </p>
+      </div>
+
+      <div class="gn-receipt-label">Density skill vs. MSIS + saturated-Ap baseline</div>
       <div class="gn-kpi-grid">
         <div class="gn-kpi"><div class="gn-kpi-label">RMSE base</div>
           <div class="gn-kpi-value" id="gn-skill-base">—</div>
@@ -408,6 +458,14 @@ body {
           <div class="gn-kpi-value" id="gn-skill-gate">PENDING</div>
           <div class="gn-kpi-sub">≥ 25 % storm-time</div></div>
       </div>
+
+      <p class="gn-receipt-note">
+        <strong>What this costs you downstream:</strong> storm-time density error
+        propagates into orbit-decay surprises, noisier conjunction screening, and
+        unplanned Δv. The skill above is what your OD pipeline inherits once the
+        Ap = 400 cap stops being the ceiling. Figures populate live from the validation
+        run — until then the hero pill flags placeholder data.
+      </p>
     </section>
 
     <section class="gn-panel" style="margin-top:14px;">
@@ -453,6 +511,29 @@ body {
   </aside>
 
 </div>
+
+<!-- ── AURORA ALERT CAPTURE ──────────────────────────────────────────────────
+     Anonymous, zero-friction email capture for burst aurora/storm traffic.
+     Styles are injected by js/aurora-capture.js. See AURORA_ALERT_CAPTURE_SPEC.md. -->
+<section class="aurora-capture-band" aria-label="Aurora alerts signup">
+  <div class="aurora-capture-copy">
+    <span class="aurora-kicker">Aurora Alerts · Free</span>
+    <h2>Don't miss the next storm.</h2>
+    <p>We'll email you the moment Kp spikes and the aurora comes within reach — with a live link to watch it hit Earth's magnetosphere.</p>
+  </div>
+  <form data-aurora-capture data-source="gannon" novalidate>
+    <input type="email" inputmode="email" autocomplete="email" placeholder="you@email.com" aria-label="Email" required>
+    <!-- honeypot: keep visually hidden, not display:none (some bots skip those) -->
+    <input type="text" name="company" tabindex="-1" autocomplete="off"
+           aria-hidden="true" style="position:absolute;left:-9999px;opacity:0;height:0;width:0">
+    <button type="submit">Alert me →</button>
+    <span data-aurora-status class="aurora-status" role="status" aria-live="polite"></span>
+  </form>
+</section>
+<script type="module">
+  import { initAuroraCapture } from './js/aurora-capture.js';
+  initAuroraCapture();
+</script>
 
 <!-- ── Engine bootstrap ───────────────────────────────── -->
 <script type="module">

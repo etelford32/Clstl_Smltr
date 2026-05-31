@@ -769,6 +769,62 @@ function buildSkyTexture() {
     return tex;
 }
 
+// Procedural equirectangular environment for image-based lighting (IBL).
+//
+// WHY this exists: every vehicle surface is a PBR MeshStandard/Physical
+// material — Starship is near-pure metal (metalness 0.92) and Falcon/Dragon
+// are glossy clearcoat white. A metal with no environment to reflect renders
+// almost black (it has no diffuse term; its colour IS its reflection), and a
+// clearcoat coat with nothing to mirror looks like flat matte plastic. Direct
+// lights alone give a single hard highlight and dead shadow side. Feeding the
+// scene a PMREM-prefiltered environment (set as scene.environment in init)
+// makes the steel read as steel and the white panels pick up a soft sheen —
+// the single biggest realism lever for hard-surface vehicles.
+//
+// It's built procedurally (no HDR fetch — this module must work offline) and
+// keyed to the SAME dusk palette as buildSkyTexture(), plus a warm horizon
+// glint roughly aligned with the key light and a cooler bounce opposite it,
+// so the reflections agree with the three directional lights instead of
+// fighting them. EquirectangularReflectionMapping: v=top → zenith (+Y),
+// v=bottom → ground (−Y); u → azimuth.
+function buildEnvTexture() {
+    const W = 512, H = 256;
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const ctx = c.getContext('2d');
+    // Sky → horizon → ground vertical gradient.
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0.00, '#02010a');   // zenith
+    grad.addColorStop(0.38, '#0c0a22');
+    grad.addColorStop(0.48, '#231a33');   // horizon band (brightest sky)
+    grad.addColorStop(0.52, '#3a2842');
+    grad.addColorStop(0.60, '#1b1525');
+    grad.addColorStop(1.00, '#0a0712');   // ground bounce / nadir
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+    // Warm key-light glow just above the horizon — gives metals a specular
+    // hot spot so stainless steel reads as polished metal rather than matte.
+    const gx = W * 0.18, gy = H * 0.46, gr = H * 0.6;
+    const warm = ctx.createRadialGradient(gx, gy, 0, gx, gy, gr);
+    warm.addColorStop(0.0, 'rgba(255,228,184,0.85)');
+    warm.addColorStop(0.4, 'rgba(255,184,120,0.30)');
+    warm.addColorStop(1.0, 'rgba(255,160,100,0.0)');
+    ctx.fillStyle = warm;
+    ctx.fillRect(0, 0, W, H);
+    // Cool blue fill bounce opposite the key — mirrors the rim/fill lights so
+    // the shadow side of the stack still catches a faint reflection.
+    const bx = W * 0.68, by = H * 0.5, br = H * 0.7;
+    const cool = ctx.createRadialGradient(bx, by, 0, bx, by, br);
+    cool.addColorStop(0.0, 'rgba(120,150,225,0.28)');
+    cool.addColorStop(1.0, 'rgba(120,150,225,0.0)');
+    ctx.fillStyle = cool;
+    ctx.fillRect(0, 0, W, H);
+    const tex = new THREE.CanvasTexture(c);
+    tex.mapping = THREE.EquirectangularReflectionMapping;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+}
+
 // Custom-shader starfield with subtle per-star twinkle.
 function buildStarfield() {
     const N = 1500;
@@ -836,14 +892,27 @@ function buildStarfield() {
 //   distMul       → multiply fit-distance for tighter / wider shots
 
 const VIEW_PRESETS = {
-    threequarter: { dir: [ 0.62, 0.30,  0.85], biasY:  0.00, distMul: 1.10 },
-    front:        { dir: [ 0.00, 0.18,  1.00], biasY:  0.00, distMul: 1.20 },
-    side:         { dir: [ 1.00, 0.18,  0.00], biasY:  0.00, distMul: 1.20 },
+    // Default shot. Intentionally NARROW — distMul 1.0 frames the vehicle to
+    // fill the viewport (the fit already bakes in 5% padding, so the whole
+    // stack stays visible; going below 1.0 starts clipping the nose/bells),
+    // at a shallow elevation so the pad/tower scaffold stays mostly out of
+    // view. This is the "easily see the vehicle at load" frame. The looser,
+    // pulled-back context shot that used to be the default (distMul 1.10) now
+    // lives under the `wide` preset (a button), so it no longer silently
+    // "takes over" after the canvas finishes laying out.
+    // dir = unit vector from target → camera. Low Y (0.22) keeps us closer to
+    // eye-level with the stack instead of looking down its length at the deck.
+    threequarter: { dir: [ 0.55, 0.22,  0.82], biasY:  0.00, distMul: 1.00 },
+    // Pulled-back establishing shot: shows the full stack plus the pad/tower
+    // for context. This is the former default — kept as an explicit option.
+    wide:         { dir: [ 0.62, 0.34,  0.85], biasY:  0.06, distMul: 1.65 },
+    front:        { dir: [ 0.00, 0.16,  1.00], biasY:  0.00, distMul: 1.02 },
+    side:         { dir: [ 1.00, 0.16,  0.00], biasY:  0.00, distMul: 1.02 },
     top:          { dir: [ 0.00, 1.00,  0.001], biasY:  0.00, distMul: 0.85 },
     // Engines preset — bias the look-at toward the booster base. distMul is
     // a fraction of the full-stack fit-distance; we floor it to a meters
     // value below to stop tall stacks from clipping inside the booster skirt.
-    closeup:      { dir: [ 0.55, 0.20,  0.78], biasY: -0.48, distMul: 0.28, distMinM: 14 },
+    closeup:      { dir: [ 0.55, 0.20,  0.78], biasY: -0.48, distMul: 0.28, distMinM: 14, crop: true },
 };
 
 // Compute world-space bounding box of just the visible vehicle hardware,
@@ -934,16 +1003,87 @@ function frameForView(name, vehicle, fovDeg, aspect) {
     const halfFovH = Math.atan(Math.tan(halfFovV) * aspect);
     const distFitV = halfYV / Math.tan(halfFovV);
     const distFitH = halfH  / Math.tan(halfFovH);
-    let dist = Math.max(distFitV, distFitH) * preset.distMul;
-
-    // Clamp so we don't punch through the near plane on tiny vehicles or
-    // sail past the far plane on huge ones. Per-preset floor (distMinM) lets
-    // tight presets like 'closeup' stop short of clipping into the booster
-    // skirt on tall stacks (Starship's 9 m booster + 0.28 distMul → ~5 m,
-    // which puts the camera inside the skirt; floor to ~14 m).
-    dist = Math.max(dist, preset.distMinM ?? 8);
+    // Analytic seed only. This classic perpendicular fit systematically
+    // UNDER-estimates the projected size from an elevated 3/4 angle: the far,
+    // low corners of a tall stack swing wider on screen than a flat
+    // head-on fit predicts, so distMul≈1 clipped the nose and engine skirt
+    // off the top and bottom of the frame. We refine it below.
+    let dist = Math.max(distFitV, distFitH);
 
     const dir = new THREE.Vector3(...preset.dir).normalize();
+
+    // Angle/aspect-correct refinement.
+    //
+    // Place a probe camera along `dir`, oriented exactly like the live camera,
+    // and project the eight bbox corners to NDC. Solve for the smallest
+    // distance at which the most-extreme corner sits at FILL of the way to the
+    // frame edge — i.e. the whole stack fits with constant padding. This is
+    // correct for every vehicle, canvas aspect and view direction, unlike a
+    // flat perpendicular fit (which under-shoots from an elevated 3/4 angle
+    // and clipped the nose/skirt). Cropping presets (engines close-up) opt out
+    // via `preset.crop` and keep the analytic distance so they stay tight on
+    // the booster base instead of zooming out to fit the nose.
+    if (!preset.crop) {
+        const FILL = 0.92;     // most-extreme corner sits 92% of the way out
+        const NEAR = 0.1;
+        const probe = new THREE.PerspectiveCamera(fovDeg, aspect, NEAR, 1e6);
+        // Orient the probe with the SAME yaw/pitch math the live camera uses
+        // (see setLookAt + applyCamToThree), not lookAt(): they agree for
+        // shallow angles but diverge near straight-down, where lookAt's roll
+        // is undefined. Look direction is −dir (the camera sits along +dir
+        // from the target and looks back at it).
+        const yaw   = Math.atan2(dir.x, dir.z);
+        const pitch = THREE.MathUtils.clamp(Math.asin(-dir.y),
+                                            -Math.PI / 2 + 0.02, Math.PI / 2 - 0.02);
+        probe.rotation.set(pitch, yaw, 0, 'YXZ');
+        probe.updateProjectionMatrix();
+        const c = new THREE.Vector3();
+        // Largest |NDC| over the 8 corners at camera distance d. Returns
+        // Infinity if any corner falls at/behind the near plane — that means
+        // the camera is too close (or, for a top-down look at a tall stack,
+        // sitting inside the vehicle's height), which must read as "too tight"
+        // so the solver pushes the camera further out rather than blowing up
+        // on the divide-by-≈0 in the perspective projection.
+        const maxNdc = (d) => {
+            probe.position.copy(target).addScaledVector(dir, d);
+            probe.updateMatrixWorld(true);
+            let m = 0;
+            for (let xi = 0; xi < 2; xi++)
+                for (let yi = 0; yi < 2; yi++)
+                    for (let zi = 0; zi < 2; zi++) {
+                        c.set(xi ? bbox.max.x : bbox.min.x,
+                              yi ? bbox.max.y : bbox.min.y,
+                              zi ? bbox.max.z : bbox.min.z)
+                         .applyMatrix4(probe.matrixWorldInverse);
+                        if (c.z > -NEAR) return Infinity;   // at/behind near plane
+                        c.applyMatrix4(probe.projectionMatrix);   // → clip, then NDC
+                        m = Math.max(m, Math.abs(c.x), Math.abs(c.y));
+                    }
+            return m;
+        };
+        // Bracket then bisect for the distance where maxNdc == FILL. maxNdc is
+        // monotonically decreasing in d (move back → smaller on screen), so a
+        // clean bracket exists. Seed from the analytic estimate.
+        let hi = Math.max(dist, NEAR * 10), guard = 0;
+        while (maxNdc(hi) > FILL && guard++ < 80) hi *= 1.4;     // grow until it fits
+        let lo = hi, g2 = 0;
+        while (maxNdc(lo) <= FILL && g2++ < 80) lo *= 0.7;       // shrink until it doesn't
+        for (let i = 0; i < 30; i++) {
+            const mid = (lo + hi) * 0.5;
+            if (maxNdc(mid) <= FILL) hi = mid; else lo = mid;
+        }
+        dist = hi;
+    }
+
+    // distMul tunes the framed shot AFTER the exact fit: 1.0 = fills the
+    // frame, >1 pulls back for context (the `wide` preset), <1 tightens.
+    dist *= preset.distMul;
+
+    // Floor so we don't punch through the near plane on tiny vehicles. The
+    // per-preset distMinM lets the engines close-up stop short of clipping
+    // into the booster skirt on tall stacks.
+    dist = Math.max(dist, preset.distMinM ?? 8);
+
     const pos = target.clone().addScaledVector(dir, dist);
     return { pos: pos.toArray(), target: target.toArray(), dist };
 }
@@ -1104,6 +1244,20 @@ export function initVehicleCanvas(canvas, opts = {}) {
     // Atmospheric fog — pulls distant scenery into a soft purple-night haze
     // and hides the hard edge where the ground plane cuts off.
     scene.fog = new THREE.FogExp2(0x1a1428, 0.0025);
+
+    // Image-based lighting. PMREM-prefilter the procedural dusk environment
+    // (see buildEnvTexture) and hang it on scene.environment so every PBR
+    // material in the scene gets reflections/IBL for free — no per-material
+    // wiring. Background stays the gradient sky; environment only drives
+    // reflections. Generated once at init; the source canvas texture and the
+    // generator are disposed immediately, the prefiltered render target
+    // (envRT) lives for the canvas lifetime and is freed in dispose().
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const _envSrc = buildEnvTexture();
+    const envRT = pmrem.fromEquirectangular(_envSrc);
+    scene.environment = envRT.texture;
+    _envSrc.dispose();
+    pmrem.dispose();
 
     const stars = buildStarfield();
     scene.add(stars);
@@ -1920,6 +2074,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
             ro.disconnect();
             io.disconnect();
             controls.dispose();
+            envRT.dispose();
             renderer.dispose();
             scene.traverse(o => {
                 if (o.geometry) o.geometry.dispose();
