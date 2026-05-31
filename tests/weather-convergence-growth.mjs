@@ -150,6 +150,12 @@ check('convergence also thickens the cloud deck (cloud+rain grow together)', () 
     assert.ok(onC > offC + 1.0, `deck should grow under convergence (on ${onC.toFixed(2)} vs off ${offC.toFixed(2)})`);
 });
 
+check('microphysicsStatus() reflects the live config (for the UI indicator)', () => {
+    assert.deepEqual(fcOn.microphysicsStatus(),  { convergenceGrowth: true,  precipFeedback: true });
+    assert.equal(fcOff.microphysicsStatus().convergenceGrowth, false, 'disabled term reports OFF');
+    assert.equal(fcOff.microphysicsStatus().precipFeedback,    true,  'the other term stays ON');
+});
+
 console.log('──────────────────────────────');
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
