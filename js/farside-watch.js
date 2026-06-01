@@ -13,9 +13,9 @@
 
 import { auth } from './auth.js';
 import {
-    getLatestMap, getMapSeries,
+    getLatestMap, getMapSeries, getStoredFrames,
     detectSignatures,
-    farSideWatchList,
+    farSideWatchList, farSideWatchListFromFrames,
     dispatchEmergenceAlerts,
     renderFlatMap, renderTopDown,
     SOURCES, VALIDATION_CASES,
@@ -171,13 +171,20 @@ export async function initFarSideWatch() {
 
     wireControls();
 
-    // Pull the 12-hourly series (real numeric if the proxy serves it, else a
-    // labelled synthetic field) and run the full pipeline.
-    const series = await getMapSeries('gong');
-    const map = series[series.length - 1];
+    // Latest map for rendering: real stored grid if the cron has populated one,
+    // else a labelled synthetic field.
+    const map = await getLatestMap('gong');
     _state.map = map;
     _state.dets = detectSignatures(map);
-    _state.watch = farSideWatchList(series);
+
+    // Watch list: prefer the cron's stored detection history; fall back to
+    // detecting a synthetic series when nothing is stored yet.
+    const frames = await getStoredFrames('gong');
+    if (frames && frames.length) {
+        _state.watch = farSideWatchListFromFrames(frames);
+    } else {
+        _state.watch = farSideWatchList(await getMapSeries('gong'));
+    }
 
     setSourcePill(map);
     paintCanvases();

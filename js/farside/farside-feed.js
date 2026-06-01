@@ -138,10 +138,19 @@ function synthesizeMap(source, whenMs) {
     };
 }
 
+/** Decode a base64 Float32 (LE) payload from the proxy into a Float32Array. */
+function b64ToFloat32(b64) {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new Float32Array(bytes.buffer);
+}
+
 /**
- * Attempt to pull a NUMERIC far-side grid from the edge proxy. Returns a
- * FarSideMap on success, or null if the server only has imagery (the common
- * case until the FITS→grid step is deployed). Never throws.
+ * Attempt to pull a NUMERIC far-side grid from the edge proxy (which serves the
+ * latest map the ingestion cron stored). Returns a FarSideMap on success, or
+ * null if nothing is stored yet (501) — the caller then uses the synthetic
+ * field. Never throws.
  */
 async function tryFetchNumeric(source) {
     try {
@@ -150,20 +159,42 @@ async function tryFetchNumeric(source) {
         });
         if (!res.ok) return null;
         const j = await res.json();
-        if (!Array.isArray(j?.data) && !ArrayBuffer.isView(j?.data)) return null;
+        let data = null;
+        if (typeof j?.grid_b64 === 'string') data = b64ToFloat32(j.grid_b64);
+        else if (Array.isArray(j?.data)) data = Float32Array.from(j.data);
+        if (!data) return null;
         const eph = carringtonL0(new Date(j.timestamp ?? Date.now()));
         return {
             source,
             synthetic: false,
             imageUrl: SOURCES[source].endpoint,
             timestamp: j.timestamp ?? new Date().toISOString(),
-            jd: j.jd ?? eph.jd,
+            jd: eph.jd,
             L0: j.L0 ?? eph.L0,
             B0: j.B0 ?? eph.B0,
             grid: j.grid ?? { ...GRID },
-            data: j.data instanceof Float32Array ? j.data : Float32Array.from(j.data),
+            data,
             regions: [],
         };
+    } catch (_) {
+        return null;
+    }
+}
+
+/**
+ * Stored detection history for tracking, oldest → newest. Returns the cron's
+ * real per-map detections from /api/solar/farside?format=series, or null when
+ * nothing is stored yet (the caller falls back to detecting synthetic maps).
+ */
+export async function getStoredFrames(source = 'gong', n = SERIES_LEN) {
+    try {
+        const res = await fetch(`${SOURCES[source].endpoint}&format=series&limit=${n}`, {
+            headers: { Accept: 'application/json' },
+        });
+        if (!res.ok) return null;
+        const j = await res.json();
+        if (!Array.isArray(j?.frames) || !j.frames.length) return null;
+        return j.frames;
     } catch (_) {
         return null;
     }
