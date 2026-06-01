@@ -127,6 +127,13 @@ export function createPlayer(replay) {
                 sme_nt:     drv.sme_nt[idx],
                 bz_nt:      drv.bz_nt[idx],
                 v_kms:      drv.v_kms[idx],
+                // Optional real-OMNI geomagnetic indices. Not in the static
+                // bundle — spliced in at runtime by the /api/omni/imf lift
+                // (see gannon-superstorm.html). Null until then; consumers
+                // (e.g. the Sun-Earth scene) fall back to their proxies.
+                ae_nt:      drv.ae_nt?.[idx]    ?? null,
+                pdyn_npa:   drv.pdyn_npa?.[idx] ?? null,
+                sym_h_nt:   drv.sym_h_nt?.[idx] ?? null,
             },
             density400: {
                 msis_apreal: dens.msis_apreal[idx],

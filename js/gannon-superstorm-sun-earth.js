@@ -178,6 +178,23 @@ function cuspPath(cx, cy, R, compress, side) {
             L ${cx - R * 0.4} ${cy + side * R * 0.9}`;
 }
 
+// Magnetopause standoff scale from real solar-wind dynamic pressure
+// (Shue-like: R_mp ∝ Pdyn^(−1/6)). Returns a compression factor in
+// [~0.42, 1] relative to a ~2 nPa nominal — smaller = boundary pushed
+// sunward. Used when the OMNI lift has supplied real Pdyn.
+function comprFromPdyn(pdyn) {
+    if (!pdyn || pdyn <= 0) return 1;
+    return Math.max(0.42, Math.min(1, Math.pow(2.0 / pdyn, 1 / 6)));
+}
+
+// Auroral intensity 0..1 from the real AE (auroral-electrojet) index in
+// nT — a direct measure of auroral-zone current. ~2000 nT is an
+// extreme-storm reference (Gannon ran well above this).
+function auroraFromAE(ae) {
+    if (!ae || ae <= 0) return 0;
+    return Math.max(0, Math.min(1, ae / 2000));
+}
+
 // Sunward-facing compression arc that sweeps into the magnetosphere as a
 // CME crosses Earth. Opens toward the incoming wind (the −x / left side).
 function shockArcPath(cx, cy, r) {
@@ -597,8 +614,16 @@ export function createSunEarthScene(container, replay, player, opts = {}) {
         "text-anchor": "end", fill: COLORS.textSubtle,
         "font-size": 10, "font-family": "ui-monospace, monospace",
     }, [""]);
+    // Dst / SYM-H — the ring-current storm-severity index. Blank until the
+    // OMNI lift supplies real SYM-H (the static bundle has no Dst track).
+    const dstReadout = svg("text", {
+        x: PLOT_W - MARGIN.right + 4, y: readoutY + 56,
+        "text-anchor": "end", fill: COLORS.textSubtle,
+        "font-size": 10, "font-family": "ui-monospace, monospace",
+    }, [""]);
     root.appendChild(bzReadout);
     root.appendChild(vReadout);
+    root.appendChild(dstReadout);
 
     // ── Title strip (top-left) ─────────────────────────────────────
     root.appendChild(svg("text", {
@@ -729,8 +754,15 @@ export function createSunEarthScene(container, replay, player, opts = {}) {
         let load = 0;
         if (d) {
             const bzSquash = d.bz_nt < 0 ? Math.min(0.18, (-d.bz_nt / 40) * 0.18) : 0;
-            const vSquash  = Math.min(0.10, Math.max(0, (d.v_kms - 450) / 550) * 0.10);
-            compr = Math.max(0.42, compr - bzSquash - vSquash);
+            // Prefer REAL dynamic pressure (OMNI) for the standoff — the
+            // physical driver of magnetopause position; fall back to a
+            // speed proxy only until Pdyn is lifted.
+            const pdynCompr = (d.pdyn_npa != null)
+                ? comprFromPdyn(d.pdyn_npa)
+                : 1 - Math.min(0.10, Math.max(0, (d.v_kms - 450) / 550) * 0.10);
+            // Boundary sits at the more-compressed of the CME-impact and the
+            // ambient pressure term, then eroded further by southward Bz.
+            compr = Math.max(0.42, Math.min(compr, pdynCompr) - bzSquash);
             // Tail loading grows with southward Bz (toward substorm onset).
             load = d.bz_nt < 0 ? Math.min(1, -d.bz_nt / 35) : 0;
         }
@@ -768,9 +800,12 @@ export function createSunEarthScene(container, replay, player, opts = {}) {
             }
         }
 
-        // ── Auroral ovals: brightness ∝ hemispheric power ──────────
+        // ── Auroral ovals: brightness ∝ auroral activity ───────────
+        // Prefer the REAL AE index (OMNI) when lifted; else the bundle's
+        // hemispheric-power proxy.
         if (d) {
-            const a = auroraAlpha(d.hpi_gw, hpiMax);
+            const a = (d.ae_nt != null) ? auroraFromAE(d.ae_nt)
+                                        : auroraAlpha(d.hpi_gw, hpiMax);
             const auroraCol = lerpColor(COLORS.aurora, COLORS.auroraHi, a);
             for (const arc of [auroraN, auroraS]) {
                 arc.setAttribute("stroke", auroraCol);
@@ -793,6 +828,16 @@ export function createSunEarthScene(container, replay, player, opts = {}) {
             bzReadout.textContent = `Bz ${d.bz_nt >= 0 ? "+" : ""}${d.bz_nt.toFixed(1)} nT`;
             bzReadout.setAttribute("fill", d.bz_nt < 0 ? COLORS.riverSouth : COLORS.textSubtle);
             vReadout.textContent = `V ${Math.round(d.v_kms)} km/s`;
+            // Dst (ring current) — the canonical storm-severity number; only
+            // shown once real SYM-H has been lifted from OMNI.
+            if (d.sym_h_nt != null) {
+                dstReadout.textContent = `Dst ${Math.round(d.sym_h_nt)} nT`;
+                dstReadout.setAttribute("fill",
+                    d.sym_h_nt <= -250 ? COLORS.riverSouth :
+                    d.sym_h_nt <= -50  ? COLORS.atmDrag : COLORS.textSubtle);
+            } else {
+                dstReadout.textContent = "";
+            }
         }
 
         // ── Flare flash at AR 13664 on each CME launch ─────────────
