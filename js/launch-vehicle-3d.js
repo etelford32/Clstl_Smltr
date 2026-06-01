@@ -1901,10 +1901,31 @@ export function initVehicleCanvas(canvas, opts = {}) {
     //   passed through. Once the user actually drags / wheels / WASDs the
     //   camera (userControlledCamera = true) we stop yanking it — they own
     //   it from then until the next vehicle swap or explicit recenter.
+    // Last applied box. Tracked so we can skip a setSize when nothing changed
+    // (see resize()) — that's what gives the Firefox/Safari feedback loop a
+    // fixed point and lets it settle.
+    let _lastW = 0, _lastH = 0;
     function resize() {
         const w = canvas.clientWidth;
         const h = canvas.clientHeight;
         if (!w || !h) return;                 // collapsed / not yet laid out
+        // BREAK THE RESIZEOBSERVER FEEDBACK LOOP (the load-time "camera stares
+        // at the orange tower" bug on Mac Firefox/Safari).
+        //
+        // renderer.setSize() writes the canvas's width/height ATTRIBUTES — its
+        // intrinsic content size. Despite minmax(0,1fr) + contain:layout size
+        // on the host, those engines leak that intrinsic size back into grid
+        // track sizing, which resizes the host, which re-fires this observer,
+        // which calls setSize again… an oscillation that never delivers a
+        // clean "settled" box. The camera was then left framed against whatever
+        // transient (wrong-aspect) box happened to be current when the browser
+        // throttled the observer — hence the rocket vanishing off-frame.
+        //
+        // If the box hasn't actually changed, do nothing. No attribute write →
+        // no intrinsic-size change → the loop has a fixed point and stops. On
+        // Chromium (where the size is stable anyway) this is just a cheap skip.
+        if (w === _lastW && h === _lastH) return;
+        _lastW = w; _lastH = h;
         // pixelRatio is locked to 1 (see WebGLRenderer init), so the drawing
         // buffer always equals the CSS box and can't overflow the grid track.
         renderer.setSize(w, h, false);
@@ -1912,13 +1933,23 @@ export function initVehicleCanvas(canvas, opts = {}) {
         camera.updateProjectionMatrix();
         if (!userControlledCamera) reframeCurrentView();
     }
+    // Coalesce a burst of observer callbacks into a single measurement on the
+    // next animation frame, by which point layout for this frame has settled.
+    // We always act on the LATEST box, so an intermediate reflow box can never
+    // be the one the camera ends up framed against — the other half of the
+    // feedback-loop fix above.
+    let _resizeRaf = 0;
+    function scheduleResize() {
+        if (_resizeRaf) return;
+        _resizeRaf = requestAnimationFrame(() => { _resizeRaf = 0; resize(); });
+    }
     // Observe the host element, not just the canvas: the host is what
     // gains/loses its layout box when the collapse panel toggles
     // display:none ⇄ block, so observing it guarantees the expand
     // notification (and the density aspect-ratio change) in every browser.
     const resizeHost = canvas.parentElement || canvas;
     resize();
-    const ro = new ResizeObserver(resize);
+    const ro = new ResizeObserver(scheduleResize);
     ro.observe(resizeHost);
 
     // Initial vehicle.
@@ -2080,6 +2111,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
         dispose() {
             running = false;
             cancelAnimationFrame(rafId);
+            if (_resizeRaf) cancelAnimationFrame(_resizeRaf);
             ro.disconnect();
             io.disconnect();
             controls.dispose();
@@ -2112,6 +2144,10 @@ export function initVehicleCanvas(canvas, opts = {}) {
             // Explicit host request to re-fit — re-arm auto-framing so the
             // reframe actually happens even if the user had grabbed the cam.
             userControlledCamera = false;
+            // Clear the last-applied box so resize()'s change-guard can't skip
+            // this (the panel may have toggled display:none→block at the SAME
+            // size, which is precisely when a forced re-fit is needed).
+            _lastW = 0; _lastH = 0;
             resize();
         },
         resize(w, h) {
