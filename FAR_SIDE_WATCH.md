@@ -14,9 +14,14 @@
 | Reusable physics + data package | `js/farside/` (importable barrel: `js/farside/index.js`) |
 | Page controller | `js/farside-watch.js` |
 | Page | `far-side-watch.html` (Space Weather dropdown, `id: far-side-watch`) |
-| Edge proxy | `api/solar/farside.js` |
+| Edge proxy + read API | `api/solar/farside.js` |
+| Ingestion cron (Phase 1) | `api/cron/farside-ingest.js` |
+| Shared upstream resolver | `api/_lib/farside-sources.js` |
+| FITS reader | `api/_lib/fits.js` |
+| DB migration | `supabase-farside-maps-migration.sql` |
 | Site feed registration | `js/config.js` → `FARSIDE` block |
 | Nav entry | `js/nav.js` → Space Weather dropdown |
+| Cron schedule | `vercel.json` → `/api/cron/farside-ingest` (`30 1,13 * * *`) |
 
 The `js/farside/` package is **DOM-free and feed-loop-free** by design, so the
 Sun (`sun.html`) and Space-Weather (`space-weather.html`) engines can import the
@@ -64,24 +69,69 @@ without a code change:
 FARSIDE_GONG_URL, FARSIDE_SOLO_URL, FARSIDE_STEREO_URL, FARSIDE_HMI_URL
 ```
 
-`format=json` returns **501 today** — the FITS→grid numeric pipeline is the
-Phase-1 ingestion job; until it ships, the browser uses its labelled synthetic
-field rather than guessing numbers.
+## Phase 1 ingestion (cron → Supabase)
+
+`api/cron/farside-ingest.js` runs every 12 h (`30 1,13 * * *`). Per source it:
+fetches the upstream → if FITS, `readFITS` → `resample` to 360×180 → `zNormalize`
+→ `detectSignatures` (the **same** DOM-free module the browser runs) → archives
+the original bytes to R2 for provenance → upserts one `farside_maps` row
+(numeric grid inline as base64 Float32 + detections jsonb). GONG is required and
+gates the `farside_ingest` heartbeat; SolO/STEREO/HMI are best-effort.
+
+Reads flow back through the proxy: `format=json` returns the latest stored grid
+(base64 Float32 → the browser decodes and renders the real field); `format=series`
+returns recent maps' detections so the tracker builds the watch-list from real
+history. Both return **501** until the cron has populated rows, so the browser
+cleanly falls back to its labelled synthetic field — `format=json` is no longer a
+permanent 501.
+
+**Heartbeat + watchdog:** the cron calls `record_pipeline_success/failure` with
+`pipeline_name = 'farside_ingest'`. `pipeline-watchdog` is dynamic (alerts on any
+heartbeat row with `consecutive_fail ≥ 3`), so this is covered with no extra wiring.
+
+**Apply the migration:** run `supabase-farside-maps-migration.sql` in the Supabase
+SQL Editor (repo convention — these `.sql` files are applied manually). Creates
+`farside_maps` (service-role-only) + `trim_farside_maps()` retention (keep 180
+rows/source ≈ 90 days). Then set the upstream env vars (and allow-list the hosts
+in the network policy) for live data:
+`FARSIDE_GONG_URL`, `FARSIDE_SOLO_URL`, `FARSIDE_STEREO_URL`, `FARSIDE_HMI_URL`.
 
 ## Phase status
 
 - **Phase 0 (spike)** ✅ — flat Carrington render + edge proxy.
+- **Phase 1 (ingestion)** ✅ — 12 h cron → `farside_maps`; FITS reader; grid +
+  detections served back through the proxy; R2 provenance; heartbeat/watchdog.
 - **Phase 2 (detection)** ✅ — classical baseline; ML is a drop-in follow-up.
-- **Phase 3 (tracking + ETA)** ✅ — synodic projection, confidence band.
+- **Phase 3 (tracking + ETA)** ✅ — synodic projection, confidence band; runs on
+  both fresh maps and the cron's stored detection history.
 - **Phase 4 (product surface)** ✅ — page panel, rotation view, emergence alert,
   CSV export. Globe overlay on the Solar Physics Engine: import from
   `js/farside/index.js` (deferred).
-- **Phase 1 (ingestion)** ⏳ — scheduled worker → Supabase raw-map archive +
-  `format=json` server-side FITS parse. Slots beside the existing 12-feed
-  architecture as the slowest (12 h) bucket.
-- **Phase 5 (validation = the moat)** ⏳ — backtest harness over historical GONG
-  maps vs. the NOAA emergence record. Report detection rate, median lead time,
-  false-alarm rate against AR13664 (Gannon) and the late-May 2026 region.
+- **Phase 5 (validation = the moat)** ✅ — `js/farside/farside-validate.js`.
+  `runBacktest(frames, truth)` is a pure evaluator over detection frames (the
+  cron's stored shape), reporting detection rate, median lead time, false-alarm
+  rate, and ETA accuracy. `runSyntheticBacktest()` drives the demo over the
+  canonical cases (AR13664 Gannon + late-May 2026) via per-case windows; surfaced
+  on the page as the "Validation backtest" panel. Swaps to the real `farside_maps`
+  archive (one window per known emergence) once it has a few rotations of history.
+
+## Validation methodology (Phase 5)
+
+Each ground-truth region is pinned at the Carrington longitude that makes it
+cross the east limb on its real date (CMD = -90 at the crossing instant), then
+the synthetic detector observes it across a per-case far-side window (≤ the
+~13.6-day far-side dwell — NOT one continuous span, which would recur every
+rotation). Metrics:
+
+- **detection rate** — regions flagged on the far side before crossing / total.
+- **median lead time** — days of warning bought (capped by the far-side dwell).
+- **false-alarm rate** — alert-worthy tracks that matched no truth region. A
+  persistent far-side decoy is planted so this is non-trivially measurable.
+- **ETA accuracy** — predicted vs. actual crossing date from the first-detection
+  frame (validates the synodic projection; ~0.02 d on synthetic ground truth).
+
+The numbers are labelled SYNTHETIC until the archive supplies real history. The
+harness — not the synthetic figures — is the SBIR deliverable.
 
 ## Gating
 

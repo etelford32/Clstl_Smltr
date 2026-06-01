@@ -120,3 +120,20 @@ export const VALIDATION_CASES = Object.freeze([
 
 /** How many successive maps to retain for tracking + trend. */
 export const SERIES_LEN = 6; // 6 × 12 h ≈ 3 days of history
+
+/**
+ * Phase-5 backtest harness settings. The validation story is the moat: a
+ * MEASURED warning horizon (detection rate, median lead time, false-alarm rate)
+ * over historical maps vs. the NOAA emergence record. These tune the matching
+ * and the demo's synthetic-history window.
+ */
+export const BACKTEST = Object.freeze({
+    matchLonDeg: 18,        // a detected track within this Carrington-lon gap of a
+    matchLatDeg: 18,        //   ground-truth region counts as the same region
+    windowDays: 16,         // synthetic history span before each truth crossing
+    cadenceHours: 12,       // GONG cadence
+    // Far-side seismic sensitivity vs central-meridian distance: best near the
+    // antipode (|cmd|≈180), degrades toward the far-side limbs (|cmd|≈90).
+    detectBaseProb: 0.82,
+    minAlertStrength: 1.2,  // a false track must clear this to count as a false alarm
+});

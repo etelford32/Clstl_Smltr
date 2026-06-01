@@ -130,6 +130,15 @@ body {
 }
 .fsw-btn--primary { background: linear-gradient(100deg,#7b5cff,#b69bff); color:#0a0720; border:none; }
 
+/* ── Backtest metrics ──────────────────────────────────── */
+.fsw-bt-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px; }
+.fsw-bt-stat {
+    background: rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.1);
+    border-radius:8px; padding:8px 10px; text-align:center;
+}
+.fsw-bt-stat b { display:block; font-size:1.3rem; color:#fff; font-family: ui-monospace, monospace; }
+.fsw-bt-stat span { font-size:.62rem; color:#9ab; text-transform:uppercase; letter-spacing:.06em; }
+
 /* ── Validation + controls ─────────────────────────────── */
 .fsw-val { border-left:2px solid rgba(255,255,255,.15); padding:5px 0 5px 10px; margin-bottom:8px; }
 .fsw-val--hit { border-left-color:#6f8; }
@@ -224,12 +233,20 @@ body {
     </section>
 
     <section class="fsw-panel" style="margin-top:14px">
-      <h2>Validation targets — the moat</h2>
+      <h2>Validation backtest — the moat</h2>
+      <span id="fsw-bt-pill" class="fsw-pill fsw-pill--synthetic" style="margin-bottom:8px">⚠ SYNTHETIC</span>
+      <div class="fsw-bt-grid">
+        <div class="fsw-bt-stat"><b id="fsw-bt-detect">—</b><span>detection rate</span></div>
+        <div class="fsw-bt-stat"><b id="fsw-bt-lead">—</b><span>median lead</span></div>
+        <div class="fsw-bt-stat"><b id="fsw-bt-far">—</b><span>false-alarm rate</span></div>
+        <div class="fsw-bt-stat"><b id="fsw-bt-eta">—</b><span>mean ETA error</span></div>
+      </div>
       <div id="fsw-validation"></div>
       <p class="fsw-note">
-        The pitch is a <b>measured</b> warning horizon. A backtest harness over
-        historical GONG maps vs. the NOAA emergence record (Phase 5) reports
-        detection rate, median lead time, and false-alarm rate against these cases.
+        The pitch is a <b>measured</b> warning horizon. This harness backtests the
+        detector+tracker against the NOAA emergence record. It runs on a labelled
+        synthetic history today and on the live <code>farside_maps</code> archive
+        once it accumulates a few rotations of real data.
       </p>
     </section>
 
