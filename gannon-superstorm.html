@@ -89,6 +89,16 @@ body {
 .gn-pill--placeholder { color:#fc6; border-color: rgba(255,200,80,.55); background: rgba(255,200,80,.06); }
 .gn-pill--validated   { color:#6f8; border-color: rgba(100,240,150,.5); }
 
+/* ── Live data-source status row ──────────────────────────── */
+.gn-sources { display:flex; flex-wrap:wrap; gap:6px 10px; margin-top:8px; }
+.gn-src {
+    font-size:.6rem; letter-spacing:.03em; color:#789;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    border:1px solid rgba(255,255,255,.10); border-radius:999px;
+    padding:2px 8px; transition: color .2s, border-color .2s;
+}
+.gn-src--live { color:#6f8; border-color: rgba(100,240,150,.45); }
+
 /* ── Chart skeletons (filled by gannon-superstorm-ui.js) ──── */
 .gn-chart {
     width: 100%; height: 240px;
@@ -308,6 +318,12 @@ body {
       <span class="gn-badge">G5 · Dst −412</span>
       <span id="gn-source-pill" class="gn-pill gn-pill--placeholder">⚠ PLACEHOLDER DATA</span>
     </div>
+    <div id="gn-sources" class="gn-sources" aria-label="Live data-source status">
+      <span class="gn-src" data-src="cme">○ CME — NASA DONKI</span>
+      <span class="gn-src" data-src="imf">○ IMF/indices — NASA OMNI</span>
+      <span class="gn-src" data-src="density_truth">○ density truth — TU Delft</span>
+      <span class="gn-src" data-src="model">○ MHD model — BATS-R-US</span>
+    </div>
     <p>
       A 72-hour replay (10 May 12:00 UTC → 13 May 12:00 UTC) of the first G5
       storm since 2003. Empirical density models drove the thermosphere from
@@ -362,6 +378,12 @@ body {
         <div class="gn-kpi"><div class="gn-kpi-label">Φ<sub>PC</sub></div>
           <div class="gn-kpi-value" id="gn-kpi-phi">—</div>
           <div class="gn-kpi-sub">kV · BATS-R-US</div></div>
+        <div class="gn-kpi"><div class="gn-kpi-label">Dst (SYM-H)</div>
+          <div class="gn-kpi-value" id="gn-kpi-dst">—</div>
+          <div class="gn-kpi-sub">OMNI · ring current</div></div>
+        <div class="gn-kpi"><div class="gn-kpi-label">P<sub>dyn</sub></div>
+          <div class="gn-kpi-value" id="gn-kpi-pdyn">—</div>
+          <div class="gn-kpi-sub">OMNI · nPa</div></div>
       </div>
     </section>
 
@@ -537,7 +559,7 @@ body {
 
 <!-- ── Engine bootstrap ───────────────────────────────── -->
 <script type="module">
-import { loadReplay, createPlayer, skillSummary } from './js/gannon-superstorm-engine.js?v=2';
+import { loadReplay, createPlayer, skillSummary } from './js/gannon-superstorm-engine.js?v=3';
 import { createApSaturationChart, createDensityChart, createResidualsChart } from './js/gannon-superstorm-charts.js?v=5';
 import { createNarrationBand } from './js/gannon-superstorm-narration.js?v=2';
 import { createSunEarthScene } from './js/gannon-superstorm-sun-earth.js?v=3';
@@ -554,6 +576,8 @@ const els = {
     bz:       document.getElementById('gn-kpi-bz'),
     vsw:      document.getElementById('gn-kpi-vsw'),
     phi:      document.getElementById('gn-kpi-phi'),
+    dst:      document.getElementById('gn-kpi-dst'),
+    pdyn:     document.getElementById('gn-kpi-pdyn'),
     skill: {
         base: document.getElementById('gn-skill-base'),
         mhd:  document.getElementById('gn-skill-mhd'),
@@ -566,6 +590,16 @@ const els = {
 
 function fmt(x, d = 1) { return (x === null || x === undefined) ? '—' : Number(x).toFixed(d); }
 
+// Flip a data-source badge from placeholder (○) to live (●) when a
+// background lift resolves. Makes the silent-fail lifts observable.
+function markSourceLive(key, label) {
+    const el = document.querySelector(`.gn-src[data-src="${key}"]`);
+    if (!el) return;
+    el.classList.add('gn-src--live');
+    el.textContent = '● ' + el.textContent.replace(/^[○●]\s*/, '');
+    if (label) el.title = String(label);
+}
+
 function paint(sample) {
     els.time.textContent = sample.t;
     els.phase.textContent = sample.phase;
@@ -576,6 +610,9 @@ function paint(sample) {
     els.bz.textContent     = fmt(sample.drivers.bz_nt,   1) + ' nT';
     els.vsw.textContent    = fmt(sample.drivers.v_kms,   0) + ' km/s';
     els.phi.textContent    = fmt(sample.drivers.phi_pc_kv, 0) + ' kV';
+    // Real OMNI indices — '—' until the IMF lift supplies them.
+    els.dst.textContent    = sample.drivers.sym_h_nt != null ? fmt(sample.drivers.sym_h_nt, 0) + ' nT'  : '—';
+    els.pdyn.textContent   = sample.drivers.pdyn_npa != null ? fmt(sample.drivers.pdyn_npa, 1) + ' nPa' : '—';
 }
 
 (async function boot() {
@@ -627,15 +664,18 @@ function paint(sample) {
             onScrub();
         },
     };
-    const apChart = createApSaturationChart(
+    // `let` (not const) so the model-artifact lift can re-mount them in
+    // place once real BATS-R-US tracks land (the static model traces are
+    // drawn at construction, so a fresh build is the clean redraw path).
+    let apChart = createApSaturationChart(
         document.getElementById('gn-chart-ap'),
         replay, player, sharedOpts,
     );
-    const rhoChart = createDensityChart(
+    let rhoChart = createDensityChart(
         document.getElementById('gn-chart-rho'),
         replay, player, sharedOpts,
     );
-    const resChart = createResidualsChart(
+    let resChart = createResidualsChart(
         document.getElementById('gn-chart-residuals'),
         replay, player, sharedOpts,
     );
@@ -679,6 +719,7 @@ function paint(sample) {
             replay.cme_events = valid;
             replay.provenance = replay.provenance || {};
             replay.provenance.cme_catalog = j.source ?? 'NASA DONKI (live)';
+            markSourceLive('cme', `${valid.length} events · ${j.source ?? 'NASA DONKI'}`);
             console.log(`[gannon] CME catalog upgraded to real NASA DONKI (${valid.length} events)`);
         } catch (_) { /* offline / blocked / sandbox — keep the static catalog */ }
     })();
@@ -693,7 +734,7 @@ function paint(sample) {
     (async () => {
         try {
             const r = await fetch(
-                '/api/omni/imf?start=2024-05-08&end=2024-05-13&step_min=60&fields=t,bz_gsm,v,np,pdyn',
+                '/api/omni/imf?start=2024-05-08&end=2024-05-13&step_min=60&fields=t,bz_gsm,v,np,pdyn,ae,sym_h',
                 { cache: 'force-cache' });
             if (!r.ok) return;
             const j  = await r.json();
@@ -702,6 +743,9 @@ function paint(sample) {
             const v  = j?.data?.v;
             if (!Array.isArray(t) || !Array.isArray(bz) || !Array.isArray(v)) return;
             if (t.length === 0) return;
+            const ae    = j?.data?.ae;     // auroral electrojet index, nT
+            const pdyn  = j?.data?.pdyn;   // dynamic pressure, nPa
+            const symh  = j?.data?.sym_h;  // ring-current index (≈ Dst), nT
             // Build an index { hourFloorISO → omniIdx } so we can splice OMNI
             // values into the bundle's grid even if SPDF has minute-scale gaps.
             const omniByHour = new Map();
@@ -709,32 +753,41 @@ function paint(sample) {
                 const hourISO = t[i].slice(0, 13);  // "YYYY-MM-DDTHH"
                 if (!omniByHour.has(hourISO)) omniByHour.set(hourISO, i);
             }
+            const dc = replay.drivers_compact;
+            const n  = dc.bz_nt.length;
+            // The static bundle has no AE / Pdyn / SYM-H tracks — create them
+            // so the engine + Sun-Earth scene can read real geomagnetic
+            // indices (AE→aurora, Pdyn→magnetopause standoff, SYM-H→Dst).
+            if (Array.isArray(ae)   && !dc.ae_nt)    dc.ae_nt    = new Array(n).fill(null);
+            if (Array.isArray(pdyn) && !dc.pdyn_npa) dc.pdyn_npa = new Array(n).fill(null);
+            if (Array.isArray(symh) && !dc.sym_h_nt) dc.sym_h_nt = new Array(n).fill(null);
             const bundleStartMs = Date.parse(replay.window.start);
             const stepMs = (replay.window.step_minutes || 60) * 60_000;
-            let bzSwap = 0, vSwap = 0;
-            for (let i = 0; i < replay.drivers_compact.bz_nt.length; i++) {
+            let bzSwap = 0, vSwap = 0, aeSwap = 0, pdSwap = 0, dstSwap = 0;
+            for (let i = 0; i < n; i++) {
                 const tMs = bundleStartMs + i * stepMs;
                 const hourISO = new Date(tMs).toISOString().slice(0, 13);
                 const oi = omniByHour.get(hourISO);
                 if (oi == null) continue;
-                if (typeof bz[oi] === 'number') {
-                    replay.drivers_compact.bz_nt[i] = bz[oi];
-                    bzSwap++;
-                }
-                if (typeof v[oi] === 'number') {
-                    replay.drivers_compact.v_kms[i] = v[oi];
-                    vSwap++;
-                }
+                if (typeof bz[oi] === 'number')   { dc.bz_nt[i]    = bz[oi];   bzSwap++; }
+                if (typeof v[oi]  === 'number')   { dc.v_kms[i]    = v[oi];    vSwap++; }
+                if (dc.ae_nt    && typeof ae[oi]   === 'number') { dc.ae_nt[i]    = ae[oi];   aeSwap++; }
+                if (dc.pdyn_npa && typeof pdyn[oi] === 'number') { dc.pdyn_npa[i] = pdyn[oi]; pdSwap++; }
+                if (dc.sym_h_nt && typeof symh[oi] === 'number') { dc.sym_h_nt[i] = symh[oi]; dstSwap++; }
             }
             replay.provenance = replay.provenance || {};
             replay.provenance.imf =
-                `${j.source ?? 'NASA SPDF OMNI HRO 1-min'} (${bzSwap}/${replay.drivers_compact.bz_nt.length} Bz, ${vSwap}/${replay.drivers_compact.v_kms.length} V)`;
+                `${j.source ?? 'NASA SPDF OMNI HRO 1-min'} (${bzSwap}/${n} Bz, ${vSwap}/${n} V`
+                + (aeSwap ? `, ${aeSwap} AE` : '') + (pdSwap ? `, ${pdSwap} Pdyn` : '')
+                + (dstSwap ? `, ${dstSwap} SYM-H` : '') + ')';
+            if (typeof markSourceLive === 'function') markSourceLive('imf', 'OMNI 1-min');
             // Re-render — paint() reads the (now mutated) drivers_compact for
             // the KPI cards on the next scrubber tick. Drive it manually here
             // so the user doesn't have to move the scrubber to see the swap.
             onScrub();
-            console.log(`[gannon] IMF + solar wind upgraded to real NASA SPDF OMNI (${bzSwap} Bz, ${vSwap} V samples)`);
-        } catch (_) { /* offline / blocked / sandbox — keep placeholder bz_nt + v_kms */ }
+            console.log(`[gannon] IMF + solar wind upgraded to real NASA SPDF OMNI `
+                + `(${bzSwap} Bz, ${vSwap} V, ${aeSwap} AE, ${pdSwap} Pdyn, ${dstSwap} SYM-H samples)`);
+        } catch (_) { /* offline / blocked / sandbox — keep placeholder series */ }
     })();
 
     // Lift the GRACE-FO + Swarm-C accelerometer-density truth scatter from
@@ -787,10 +840,83 @@ function paint(sample) {
             (grace ? `GRACE-FO: ${grace.samples.length} obs · ${grace.source}` : 'GRACE-FO: unavailable') +
             ' | ' +
             (swarm ? `Swarm-C: ${swarm.samples.length} obs · ${swarm.source}`  : 'Swarm-C: unavailable');
+        markSourceLive('density_truth',
+            `${(grace?grace.samples.length:0)} GRACE-FO · ${(swarm?swarm.samples.length:0)} Swarm-C`);
         console.log('[gannon] truth scatter upgraded to real TU Delft v02 (' +
             (grace ? grace.samples.length : 0) + ' GRACE-FO, ' +
             (swarm ? swarm.samples.length : 0) + ' Swarm-C). Residuals chart still on ' +
             'placeholder model traces — wait for BATS-R-US for honest deltas.');
+    })();
+
+    // Lift the MHD-MODEL tracks (the last placeholder piece) from the
+    // BATS-R-US / SWMF pipeline artifact. The Edge endpoint
+    // /api/hindcast/gannon-model relays an object-storage artifact the
+    // workstation pipeline uploads after a run; until that exists it
+    // returns { available:false } and this is a clean no-op. When it
+    // lands, we splice the real ap_mhd/ap_gnd + msis_apmhd/apgnd tracks,
+    // re-mount the charts (their model traces are drawn at construction),
+    // recompute the skill scores, and lift the PLACEHOLDER stamp.
+    // See GANNON_LIVE_DATA.md + MHD_DENSITY_PHASE0_GANNON_RUNBOOK.md.
+    (async () => {
+        try {
+            const r = await fetch('/api/hindcast/gannon-model', { cache: 'no-cache' });
+            if (!r.ok) return;
+            const j = await r.json();
+            if (!j?.available || !j?.data) return;
+            const m  = j.data;
+            const dc = replay.drivers_compact;
+            const d4 = replay.density_400km;
+            const mdc = m.drivers_compact || {};
+            const md4 = m.density_400km || {};
+            // Splice each model track in place when present + length-aligned.
+            const fits = arr => Array.isArray(arr) && arr.length === dc.ap_real.length;
+            let lifted = [];
+            for (const k of ['ap_mhd', 'ap_gnd', 'phi_pc_kv', 'hpi_gw', 'sme_nt']) {
+                if (fits(mdc[k])) { dc[k] = mdc[k].slice(); lifted.push(k); }
+            }
+            for (const k of ['msis_apmhd', 'msis_apgnd']) {
+                if (fits(md4[k])) { d4[k] = md4[k].slice(); lifted.push(k); }
+            }
+            if (lifted.length === 0) return;
+
+            // No longer placeholder: real model tracks are in.
+            replay._is_placeholder = false;
+            replay.provenance = replay.provenance || {};
+            replay.provenance.model = j.source ?? 'BATS-R-US / SWMF';
+            if (m.run_id) replay.provenance.model_run_id = m.run_id;
+
+            // Re-mount the three model-trace charts so the static MHD/mag
+            // curves redraw against real data; the Sun-Earth scene + KPI
+            // cards refresh on the next onScrub().
+            const liveOpts = { ...sharedOpts, placeholder: false };
+            apChart  = createApSaturationChart(document.getElementById('gn-chart-ap'),       replay, player, liveOpts);
+            rhoChart = createDensityChart(     document.getElementById('gn-chart-rho'),      replay, player, liveOpts);
+            resChart = createResidualsChart(   document.getElementById('gn-chart-residuals'),replay, player, liveOpts);
+            if (rhoChart.updateTruth && replay.truth_400km) {
+                rhoChart.updateTruth(replay.truth_400km.grace_fo || [], replay.truth_400km.swarm_c || []);
+            }
+
+            // Recompute + repaint the skill scoreboard against real tracks.
+            try {
+                const sk = skillSummary(replay);
+                els.skill.base.textContent = fmt(sk.rmse_base, 2);
+                els.skill.mhd.textContent  = fmt(sk.rmse_mhd,  2);
+                els.skill.gnd.textContent  = fmt(sk.rmse_gnd,  2);
+                if (sk.skill_mhd != null) {
+                    els.skill.mhdPct.textContent = `skill ${(sk.skill_mhd*100).toFixed(0)} %`;
+                    els.skill.gndPct.textContent = `skill ${(sk.skill_gnd*100).toFixed(0)} %`;
+                    els.skill.gate.textContent = Math.max(sk.skill_mhd, sk.skill_gnd) >= 0.25 ? 'PASS' : 'FAIL';
+                }
+            } catch (_) { /* skill recompute is best-effort */ }
+
+            // Flip the headline pill to validated.
+            els.pill.textContent = '✓ VALIDATED HINDCAST';
+            els.pill.classList.remove('gn-pill--placeholder');
+            els.pill.classList.add('gn-pill--validated');
+            markSourceLive('model', replay.provenance.model);
+            onScrub();
+            console.log(`[gannon] MHD model tracks lifted from pipeline artifact (${lifted.join(', ')})`);
+        } catch (_) { /* offline / blocked / no artifact — keep placeholder model */ }
     })();
 
     function onScrub() {
