@@ -100,6 +100,7 @@ const API_ROUTES = {
     '/api/omni/imf':               'api/omni/imf.js',
     '/api/density/tudelft':        'api/density/tudelft.js',
     '/api/hindcast/gannon':        'api/hindcast/gannon.js',
+    '/api/hindcast/gannon-model':  'api/hindcast/gannon-model.js',
     '/api/launches/upcoming':      'api/launches/upcoming.js',
     '/api/weather/grid':           'api/weather/grid.js',
     '/api/weather/forecast':       'api/weather/forecast.js',
