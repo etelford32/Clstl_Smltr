@@ -18,3 +18,4 @@ export * from './farside-detect.js';
 export * from './farside-track.js';
 export * from './farside-alerts.js';
 export * from './farside-render.js';
+export * from './farside-validate.js';

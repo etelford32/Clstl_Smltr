@@ -107,9 +107,31 @@ in the network policy) for live data:
 - **Phase 4 (product surface)** ✅ — page panel, rotation view, emergence alert,
   CSV export. Globe overlay on the Solar Physics Engine: import from
   `js/farside/index.js` (deferred).
-- **Phase 5 (validation = the moat)** ⏳ — backtest harness over historical GONG
-  maps vs. the NOAA emergence record. Report detection rate, median lead time,
-  false-alarm rate against AR13664 (Gannon) and the late-May 2026 region.
+- **Phase 5 (validation = the moat)** ✅ — `js/farside/farside-validate.js`.
+  `runBacktest(frames, truth)` is a pure evaluator over detection frames (the
+  cron's stored shape), reporting detection rate, median lead time, false-alarm
+  rate, and ETA accuracy. `runSyntheticBacktest()` drives the demo over the
+  canonical cases (AR13664 Gannon + late-May 2026) via per-case windows; surfaced
+  on the page as the "Validation backtest" panel. Swaps to the real `farside_maps`
+  archive (one window per known emergence) once it has a few rotations of history.
+
+## Validation methodology (Phase 5)
+
+Each ground-truth region is pinned at the Carrington longitude that makes it
+cross the east limb on its real date (CMD = -90 at the crossing instant), then
+the synthetic detector observes it across a per-case far-side window (≤ the
+~13.6-day far-side dwell — NOT one continuous span, which would recur every
+rotation). Metrics:
+
+- **detection rate** — regions flagged on the far side before crossing / total.
+- **median lead time** — days of warning bought (capped by the far-side dwell).
+- **false-alarm rate** — alert-worthy tracks that matched no truth region. A
+  persistent far-side decoy is planted so this is non-trivially measurable.
+- **ETA accuracy** — predicted vs. actual crossing date from the first-detection
+  frame (validates the synodic projection; ~0.02 d on synthetic ground truth).
+
+The numbers are labelled SYNTHETIC until the archive supplies real history. The
+harness — not the synthetic figures — is the SBIR deliverable.
 
 ## Gating
 

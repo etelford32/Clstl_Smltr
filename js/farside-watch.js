@@ -18,7 +18,8 @@ import {
     farSideWatchList, farSideWatchListFromFrames,
     dispatchEmergenceAlerts,
     renderFlatMap, renderTopDown,
-    SOURCES, VALIDATION_CASES,
+    runSyntheticBacktest,
+    SOURCES,
 } from './farside/index.js';
 
 const $ = (id) => document.getElementById(id);
@@ -89,21 +90,28 @@ function renderWatchList() {
             : '');
 }
 
-function renderValidation() {
+function renderBacktest() {
+    const r = _state.backtest;
+    if (!r) return;
+    const pct = (x) => `${(x * 100).toFixed(0)}%`;
+    if ($('fsw-bt-detect')) $('fsw-bt-detect').textContent = pct(r.detectionRate);
+    if ($('fsw-bt-lead'))   $('fsw-bt-lead').textContent = r.medianLeadDays != null ? `${r.medianLeadDays.toFixed(1)}d` : '—';
+    if ($('fsw-bt-far'))    $('fsw-bt-far').textContent = pct(r.falseAlarmRate);
+    if ($('fsw-bt-eta'))    $('fsw-bt-eta').textContent = r.meanEtaErrorDays != null ? `${r.meanEtaErrorDays.toFixed(2)}d` : '—';
+
     const host = $('fsw-validation');
-    if (!host) return;
-    host.innerHTML = VALIDATION_CASES.map((c) => {
-        const matched = _state.watch.find((t) => t.validationCase?.id === c.id);
-        return `
-        <div class="fsw-val ${matched ? 'fsw-val--hit' : ''}">
-          <div class="fsw-val-hd">${matched ? '✓' : '○'} ${c.label}</div>
-          <div class="fsw-val-meta">
-            E-limb crossing ${fmtDay(c.eastLimbCrossingUTC)}
-            · Carrington L${c.carringtonLon}°, lat ${c.carringtonLat}°
-            ${matched ? `· <b>flagged ${matched.etaDays.toFixed(1)} d out</b>` : '· awaiting backtest'}
-          </div>
-        </div>`;
-    }).join('');
+    if (host) {
+        host.innerHTML = r.perCase.map((c) => `
+          <div class="fsw-val ${c.detected ? 'fsw-val--hit' : ''}">
+            <div class="fsw-val-hd">${c.detected ? '✓' : '✗'} ${c.label}</div>
+            <div class="fsw-val-meta">
+              E-limb crossing ${fmtDay(c.crossingUTC)}${c.noaaRegion ? ` · AR${c.noaaRegion}` : ''}
+              ${c.detected
+                ? `· <b>flagged ${c.leadDays.toFixed(1)} d ahead</b> · ETA err ${c.etaErrorDays >= 0 ? '+' : ''}${c.etaErrorDays.toFixed(2)} d`
+                : '· missed'}
+            </div>
+          </div>`).join('');
+    }
 }
 
 function setSourcePill(map) {
@@ -186,10 +194,14 @@ export async function initFarSideWatch() {
         _state.watch = farSideWatchList(await getMapSeries('gong'));
     }
 
+    // Phase-5 backtest: synthetic history today; swaps to the real farside_maps
+    // archive once it has a few rotations covering a known emergence.
+    try { _state.backtest = runSyntheticBacktest(); } catch (_) { _state.backtest = null; }
+
     setSourcePill(map);
     paintCanvases();
     renderWatchList();
-    renderValidation();
+    renderBacktest();
 
     // Fire emergence alerts once for signed-in users (de-duped in the module).
     if (_state.signedIn) dispatchEmergenceAlerts(_state.watch);
