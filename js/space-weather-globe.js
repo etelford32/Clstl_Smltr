@@ -255,6 +255,10 @@ export class SpaceWeatherGlobe {
         this._arBase         = null;       // Carrington-frame base AR list
         this._arBuildRealMs  = 0;          // wall-clock at last AR-set build
         this._arShaderBase   = [];         // per-AR {intensity,complex,lat_rad}
+        // Far-Side Watch regions (Tier 5) — Carrington-frame, fed into the same
+        // photosphere shader as observed ARs but only into leftover u_regions
+        // slots (front-side ARs keep priority). {lat_rad,lon_carr_deg,intensity,is_complex}
+        this._farSideBase    = [];
         this._holeCtx        = { v: 400, activity: 0.5 };
         this._rotLastRebuild = 0;          // last 3-D feature rebuild (perf.now)
 
@@ -2902,6 +2906,20 @@ export class SpaceWeatherGlobe {
     }
     get rotationLapse() { return this._solarLapse; }
 
+    /**
+     * Far-Side Watch (Tier 5): supply Carrington-frame far-side regions to paint
+     * on the photosphere alongside observed ARs. Each entry:
+     *   { lat_rad, lon_carr_deg, intensity?, is_complex? }
+     * (use tracksToShaderRegions() from js/farside to build these). They fill
+     * only leftover u_regions slots; observed ARs always take precedence.
+     */
+    setFarSideRegions(list) {
+        this._farSideBase = Array.isArray(list) ? list : [];
+        // Re-project immediately so the change shows without waiting for a tick.
+        try { this._applySolarRotation(0, true); } catch (_) {}
+        return this._farSideBase.length;
+    }
+
     /** Wall-clock → time-lapsed "solar now" Date (anchored at AR-set build). */
     _solarVirtualDate() {
         if (!this._arBuildRealMs) return new Date();
@@ -2934,6 +2952,19 @@ export class SpaceWeatherGlobe {
             lon_rad: differentialSceneLon(b.lon_carr_deg, b.lat_rad, vDate, eDays),
             lon_deg_carrington: b.lon_carr_deg,
         }));
+        // Far-Side Watch regions, projected through the SAME differential clock
+        // so they rotate in coherently. Appended AFTER observed ARs → they only
+        // ever occupy leftover slots in the 8-wide u_regions uniform.
+        for (const f of this._farSideBase) {
+            regionsApparent.push({
+                lat_rad:   f.lat_rad,
+                lon_rad:   differentialSceneLon(f.lon_carr_deg, f.lat_rad, vDate, eDays),
+                lon_deg_carrington: f.lon_carr_deg,
+                _intensity: f.intensity ?? 0.4,
+                is_complex: !!f.is_complex,
+                _farSide:  true,
+            });
+        }
         const top8 = regionsApparent.slice(0, 8);
 
         // Shader-painted ARs (sunspots / plage) — the dominant "is it

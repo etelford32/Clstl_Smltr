@@ -400,6 +400,10 @@ export class Heliosphere3D {
             cmeActive: false,
             cmeSpeed:  800,
             regions:   [],
+            // Far-Side Watch regions (Tier 5): Carrington-frame far-side
+            // signatures fed into the same u_regions photosphere shader, filling
+            // only leftover slots after observed ARs.
+            farSideRegions: [],
         };
 
         // ── Ephemeris state ───────────────────────────────────────────────────
@@ -641,6 +645,16 @@ export class Heliosphere3D {
             console.warn(`[Heliosphere] Horizons unavailable for JD ${jd}:`, err.message);
             this._meeusUpdate(jd, true);  // Meeus fallback
         }
+    }
+
+    /**
+     * Far-Side Watch (Tier 5): supply far-side regions ({lat_rad, lon_rad,
+     * area_norm, is_complex}, from tracksToShaderRegions()) to paint on the sun
+     * alongside observed ARs. They fill only leftover u_regions slots.
+     */
+    setFarSideRegions(list) {
+        this._sw.farSideRegions = Array.isArray(list) ? list : [];
+        return this._sw.farSideRegions.length;
     }
 
     // ── Event handlers ────────────────────────────────────────────────────────
@@ -2775,7 +2789,10 @@ export class Heliosphere3D {
         // Convert heliographic lat/lon (Carrington frame) to local unit-sphere
         // vectors.  The sphere mesh rotates at this._rot so we subtract the
         // current rotation to keep regions locked to the solar surface.
-        const regions = this._sw.regions ?? [];
+        const frontReg = this._sw.regions ?? [];
+        const farReg   = this._sw.farSideRegions ?? [];
+        // Far-side fills only leftover slots — observed ARs keep priority.
+        const regions = frontReg.length >= 8 ? frontReg : frontReg.concat(farReg).slice(0, 8);
         const nReg    = Math.min(8, regions.length);
         for (let k = 0; k < nReg; k++) {
             const reg    = regions[k];

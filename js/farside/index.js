@@ -19,3 +19,4 @@ export * from './farside-track.js';
 export * from './farside-alerts.js';
 export * from './farside-render.js';
 export * from './farside-validate.js';
+export * from './farside-shader-regions.js';

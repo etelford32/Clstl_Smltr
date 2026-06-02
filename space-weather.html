@@ -2461,6 +2461,20 @@ nav {
                 <li>SDO panel top-left mirrors the channel for live cross-check</li>
             </ul>
         </div>
+
+        <!-- ── Far-Side Watch summary (Tier 5) — far-side regions rotating in ── -->
+        <div id="fsw-sw-card" hidden
+             style="margin-top:10px;padding:9px 11px;border:1px solid rgba(150,120,255,.28);border-radius:8px;background:rgba(120,90,255,.06)">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+            <span style="font-size:.7rem;font-weight:800;letter-spacing:.06em;color:#b69bff">🌗 FAR-SIDE WATCH</span>
+            <a href="/far-side-watch.html" style="font-size:.68rem;color:#9cf;text-decoration:none">open →</a>
+          </div>
+          <div style="font-size:.72rem;color:#bcd;margin-top:5px">
+            <b id="fsw-sw-count" style="color:#fff">—</b> rotating into view · soonest
+            <b id="fsw-sw-eta" style="color:#ffd166">—</b>
+            <span id="fsw-sw-syn" style="font-size:.6rem;color:#fc6"> · synthetic</span>
+          </div>
+        </div>
     </section>
 
     <!-- ── DATA GRID ────────────────────────────────────────────────────────── -->
@@ -4653,6 +4667,43 @@ window.addEventListener('helio-time-update', _updatePlanetTable);
         window.addEventListener('hek-update', ev => {
             _globe?.setRealHoles(ev.detail?.holes ?? []);
         });
+
+        // ── Far-Side Watch → photosphere shader regions (Tier 5) ──────────
+        // Feed far-side detections into the SAME u_regions uniform both sun
+        // sims already use for observed ARs, so they paint on the back of the
+        // sun and rotate into Earth view. Lazy + guarded; never blocks the scene.
+        (async function feedFarSide() {
+            function updateFarSideCard(watch, synthetic) {
+                const card = document.getElementById('fsw-sw-card');
+                if (!card) return;
+                const far = (watch || []).filter(t => !t.onDisc);
+                card.hidden = false;
+                document.getElementById('fsw-sw-count').textContent = String(far.length);
+                const soonest = far.length ? Math.min(...far.map(t => t.etaDays)) : null;
+                document.getElementById('fsw-sw-eta').textContent =
+                    soonest != null ? `~${soonest.toFixed(1)}d` : '—';
+                const syn = document.getElementById('fsw-sw-syn');
+                if (syn) syn.style.display = synthetic ? '' : 'none';
+            }
+            try {
+                const fs = await import('./js/farside/index.js');
+                async function refresh() {
+                    const frames = await fs.getStoredFrames('gong');
+                    const real = !!(frames && frames.length);
+                    const watch = real
+                        ? fs.farSideWatchListFromFrames(frames)
+                        : fs.farSideWatchList(await fs.getMapSeries('gong'));
+                    const regions = fs.tracksToShaderRegions(watch, { max: 3 });
+                    _globe?.setFarSideRegions?.(regions);
+                    _helio?.setFarSideRegions?.(regions);
+                    updateFarSideCard(watch, !real);
+                }
+                await refresh();
+                setInterval(refresh, 30 * 60 * 1000);   // far-side maps refresh every 12 h
+            } catch (e) {
+                console.warn('[sw] far-side regions unavailable:', e?.message ?? e);
+            }
+        })();
 
         // Layer toggle buttons (skip the thermosphere altitude radios)
         document.getElementById('globe-layers')?.addEventListener('click', ev => {

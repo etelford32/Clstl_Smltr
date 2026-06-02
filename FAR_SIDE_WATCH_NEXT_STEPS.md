@@ -183,8 +183,14 @@ Tier-2 backtest.
    + east-limb "horizon" + visibility terminator, in the same CMD convention as
    the existing AR markers (sub-Earth = +Z), co-rotating with the photosphere
    and occluded behind the opaque Sun until you orbit around. Fully guarded.
-2. ⏳ **Embed the panel** in the Space-Weather dashboard (`space-weather.html`)
-   — not yet done; the overlay module + feed make it a small lift.
+2. ✅ **Space-Weather page integration** — a compact "Far-Side Watch" summary
+   card (count rotating in + soonest ETA + link), AND far-side data fed into the
+   shader of **both** sun sims: `tracksToShaderRegions()` converts tracks into the
+   `u_regions` photosphere-uniform shape used by `space-weather-globe.js`
+   (`setFarSideRegions` → `SunSkin.setRegions`) and `heliosphere3d.js`
+   (`setFarSideRegions` → `u_regions`). Far-side fills only leftover slots
+   (observed ARs keep priority) and paints on the back of the sun, rotating into
+   view. Data-path unit-tested; GPU look to be verified in-browser.
 3. ✅ **Real alert wired into `alert-engine.js`** — `notify_region_emergence`
    column (migration applied) + Advanced-gated `account.html` toggle + an
    `ALERT_DEFS` entry (source `'farside'`) run through the standard
@@ -193,8 +199,9 @@ Tier-2 backtest.
 4. ✅ **Operator export** — `api/farside/export.js` (CSV default / JSON), JWT-
    verified and gated to `planToTier === PRO`, serving the watch list computed
    from the `farside_maps` archive.
-5. ⏳ **Status + monitoring** — add `farside_ingest` to `status.html` (watchdog
-   already covers it dynamically).
+5. ✅ **Status + monitoring** — `farside_ingest` added to `status.html` Pipeline
+   Health with 12 h-cadence thresholds (warn >13 h, critical >26 h); watchdog
+   covers it dynamically.
 
 Note: globe-overlay markers carry true current-time positions; they co-rotate
 with the cosmetic photosphere spin for visual coherence. Like the rest of the
