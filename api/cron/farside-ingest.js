@@ -27,10 +27,11 @@
  */
 
 import { createHash } from 'node:crypto';
+import { gunzipSync } from 'node:zlib';
 import { fetchWithTimeout } from '../_lib/responses.js';
 import { putObject, R2_CONFIGURED } from '../_lib/r2-client.js';
 import { resolveUpstream, SOURCES } from '../_lib/farside-sources.js';
-import { readFITS, resample, zNormalize } from '../_lib/fits.js';
+import { readFITS, remapToCarrington, zNormalize } from '../_lib/fits.js';
 import { GRID } from '../../js/farside/farside-config.js';
 import { detectSignatures, isStrong } from '../../js/farside/farside-detect.js';
 import { carringtonL0 } from '../../js/farside/carrington.js';
@@ -92,10 +93,44 @@ function slotStartISO(ms = Date.now()) {
     return new Date(Math.floor(ms / TWELVE_H) * TWELVE_H).toISOString();
 }
 
+function isGzip(buf) {
+    const h = new Uint8Array(buf.slice(0, 2));
+    return h[0] === 0x1f && h[1] === 0x8b;
+}
+
+/** Transparently gunzip a .fits.gz payload; returns the (possibly) inflated ArrayBuffer. */
+function maybeGunzip(buf, url) {
+    if (isGzip(buf) || /\.gz($|\?)/i.test(url)) {
+        const out = gunzipSync(Buffer.from(buf));
+        return out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength);
+    }
+    return buf;
+}
+
 function looksLikeFITS(buf, url) {
-    if (/\.fits?($|\?)/i.test(url)) return true;
+    if (/\.fits?(\.gz)?($|\?)/i.test(url)) return true;
     const head = new Uint8Array(buf.slice(0, 6));
     return String.fromCharCode(...head) === 'SIMPLE';
+}
+
+// Sign + latitude-projection of the upstream, tunable per deployment without a
+// code change (defaults match the GONG far-side convention: AR = negative).
+const SIGNATURE_SIGN = Number(process.env.FARSIDE_SIGNATURE_SIGN || -1);
+const LAT_PROJECTION = process.env.FARSIDE_LAT_PROJECTION || undefined; // 'linear'|'sine'
+
+// Backfill (Tier 2): a URL template for dated GONG archive files, so the
+// validation harness can reconstruct historical windows (AR13664, May 2026).
+// Placeholders: {yyyy} {mm} {dd} {hh}. e.g.
+//   https://farside.nso.edu/oQR/fqo/{yyyy}{mm}/mrfqo{yyyy}{mm}{dd}t{hh}00.fits
+const ARCHIVE_TEMPLATE = process.env.FARSIDE_GONG_ARCHIVE_TEMPLATE || '';
+
+function fmtArchiveURL(template, d) {
+    const p = (n, w = 2) => String(n).padStart(w, '0');
+    return template
+        .replace(/\{yyyy\}/g, d.getUTCFullYear())
+        .replace(/\{mm\}/g, p(d.getUTCMonth() + 1))
+        .replace(/\{dd\}/g, p(d.getUTCDate()))
+        .replace(/\{hh\}/g, p(d.getUTCHours()));
 }
 
 function parseDateObs(header) {
@@ -127,9 +162,13 @@ async function upsertRow(row) {
     }
 }
 
-/** Ingest one source. Returns a summary; throws on hard failure. */
-async function ingestSource(source) {
-    const upstream = resolveUpstream(source);
+/**
+ * Ingest one source. Returns a summary; throws on hard failure.
+ * @param {object} [override] { url, observedISO } — used by backfill to fetch a
+ *   specific dated archive file and pin its observation time.
+ */
+async function ingestSource(source, override = {}) {
+    const upstream = override.url || resolveUpstream(source);
     if (!upstream) throw new Error(`unknown_source_${source}`);
 
     const up = await fetchWithTimeout(upstream, {
@@ -149,11 +188,17 @@ async function ingestSource(source) {
     };
 
     if (looksLikeFITS(buf, upstream)) {
-        const { header, nx, ny, data } = readFITS(buf);
-        const grid = resample(data, nx, ny, GRID.nLon, GRID.nLat);
-        const { data: z, mean, std } = zNormalize(grid);
+        const fitsBuf = maybeGunzip(buf, upstream);
+        const read = readFITS(fitsBuf);
+        const { header, nx, ny } = read;
+        // WCS-aware projection onto the canonical Carrington grid (correct for
+        // the real product's pixel dims / longitude window / latitude projection).
+        const grid = remapToCarrington(read,
+            { nLon: GRID.nLon, nLat: GRID.nLat, latMin: GRID.latMin },
+            { latProjection: LAT_PROJECTION });
+        const { data: z, mean, std } = zNormalize(grid, SIGNATURE_SIGN);
 
-        const observedISO = parseDateObs(header) || slotStartISO();
+        const observedISO = override.observedISO || parseDateObs(header) || slotStartISO();
         // Prefer header Carrington coords; else compute from the observation time.
         const eph = carringtonL0(new Date(observedISO));
         const L0 = Number.isFinite(header.CRLN_OBS) ? header.CRLN_OBS : eph.L0;
@@ -216,6 +261,44 @@ export default async function handler(req) {
     }
 
     const t0 = Date.now();
+    const url = new URL(req.url);
+
+    // ── Backfill mode (Tier 2): ?backfill=<fromISO>..<toISO>[&source=gong] ──
+    // Pages dated archive files at 12 h cadence to reconstruct a historical
+    // window for the validation backtest. Requires FARSIDE_GONG_ARCHIVE_TEMPLATE.
+    const backfill = url.searchParams.get('backfill');
+    if (backfill) {
+        const src = (url.searchParams.get('source') || 'gong').toLowerCase();
+        if (!ARCHIVE_TEMPLATE) {
+            return new Response(JSON.stringify({ ok: false,
+                reason: 'archive_template_not_configured',
+                detail: 'Set FARSIDE_GONG_ARCHIVE_TEMPLATE (placeholders {yyyy}{mm}{dd}{hh}).' }),
+                { status: 503, headers: { 'Content-Type': 'application/json' } });
+        }
+        const [fromS, toS] = backfill.split('..');
+        const from = Date.parse(fromS), to = Date.parse(toS);
+        if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) {
+            return new Response(JSON.stringify({ ok: false, reason: 'bad_backfill_range' }),
+                { status: 400, headers: { 'Content-Type': 'application/json' } });
+        }
+        const out = [];
+        let ok = 0;
+        // Cap the work per invocation to stay inside maxDuration.
+        for (let t = from, n = 0; t <= to && n < 60; t += TWELVE_H, n++) {
+            const d = new Date(t);
+            const url2 = fmtArchiveURL(ARCHIVE_TEMPLATE, d);
+            try {
+                const r = await ingestSource(src, { url: url2, observedISO: d.toISOString() });
+                out.push({ ok: true, ...r }); ok++;
+            } catch (e) {
+                out.push({ ok: false, t: d.toISOString(), error: String(e?.message ?? e).slice(0, 160) });
+            }
+        }
+        return new Response(JSON.stringify({ ok: ok > 0, mode: 'backfill', source: src,
+            ingested: ok, attempted: out.length, dur_ms: Date.now() - t0, results: out }),
+            { status: ok > 0 ? 200 : 502, headers: { 'Content-Type': 'application/json' } });
+    }
+
     // Guard: if the run wedges, record a failure heartbeat before Vercel kills us.
     let done = false;
     const guard = setTimeout(() => { if (!done) recordFailure('watchdog_timeout'); }, WATCHDOG_MS);

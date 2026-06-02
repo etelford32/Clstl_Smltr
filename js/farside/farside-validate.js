@@ -142,9 +142,15 @@ export function runBacktest(frames, truth, opts = {}) {
         const truthLat = c.lat ?? c.carringtonLat;
         const crossingMs = c.crossingMs ?? Date.parse(c.eastLimbCrossingUTC);
 
-        // Tracks whose mean position matches this region.
-        const hits = tracks.filter((t) =>
-            lonSep(t.lon, truthLon) <= o.matchLonDeg && Math.abs(t.lat - truthLat) <= o.matchLatDeg);
+        // A track matches when it forecasts an emergence near the real crossing
+        // (date-based, the physical criterion) at a compatible latitude. Falls
+        // back to a Carrington-longitude gate if the stored lon is the only cue.
+        const hits = tracks.filter((t) => {
+            if (Math.abs(t.lat - truthLat) > o.matchLatDeg) return false;
+            const dateOK = Math.abs(Date.parse(t.emergenceUTC) - crossingMs) <= o.matchDays * DAY;
+            const lonOK = lonSep(t.lon, truthLon) <= o.matchLonDeg;
+            return dateOK || lonOK;
+        });
 
         // Earliest far-side detection across matching tracks, before crossing.
         let firstMs = Infinity, matchedTrack = null;
@@ -260,4 +266,57 @@ export function aggregateBacktest(segments, opts = {}) {
 export function runSyntheticBacktest(opts = {}) {
     const segments = VALIDATION_CASES.map((c) => buildCaseWindow(c, opts));
     return { ...aggregateBacktest(segments, opts), synthetic: true };
+}
+
+/** Normalize a farside_truth row (snake_case) into the backtest's truth shape. */
+function normalizeTruthRow(c) {
+    const crossingMs = Date.parse(c.east_limb_crossing ?? c.eastLimbCrossingUTC ?? c.crossingUTC);
+    const lon = c.carrington_lon ?? c.carringtonLon;
+    return {
+        id: c.case_id ?? c.id,
+        label: c.label,
+        noaaRegion: c.noaa_region ?? c.noaaRegion ?? null,
+        crossingMs,
+        lat: c.carrington_lat ?? c.carringtonLat,
+        lonFeat: lon,            // for real frames, match on the recorded Carrington longitude
+        carringtonLon: lon,
+    };
+}
+
+/**
+ * Real-archive backtest. PURE orchestration with an injected async frame
+ * fetcher, so it unit-tests against a stub and runs in the browser against the
+ * proxy (api/solar/farside?format=series&from=&to=). For each ground-truth case
+ * it pulls the stored detection frames in the window
+ * [crossing - windowDays, crossing] and scores them. Windows with no stored
+ * data score as a miss (we honestly had no map), and `windowsCovered` reports
+ * how many cases actually had archive coverage — so the page can decide whether
+ * to show the live numbers or fall back to the synthetic demo.
+ *
+ * @param {object} args
+ * @param {object[]} args.truth        farside_truth rows (or VALIDATION_CASES)
+ * @param {(fromISO:string,toISO:string)=>Promise<object[]>} args.fetchFrames
+ * @param {object} [args.opts]
+ */
+export async function runArchiveBacktest({ truth, fetchFrames, opts = {} }) {
+    const o = { ...BACKTEST, ...opts };
+    const segments = [];
+    let windowsCovered = 0;
+
+    for (const raw of truth) {
+        const t = normalizeTruthRow(raw);
+        const fromISO = new Date(t.crossingMs - o.windowDays * DAY).toISOString();
+        const toISO = new Date(t.crossingMs).toISOString();
+        let frames = [];
+        try { frames = (await fetchFrames(fromISO, toISO)) || []; } catch (_) { frames = []; }
+        if (frames.length) windowsCovered += 1;
+        segments.push({ frames, truth: t });
+    }
+
+    return {
+        ...aggregateBacktest(segments, o),
+        synthetic: false,
+        windowsCovered,
+        windows: segments.length,
+    };
 }

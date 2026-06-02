@@ -9,6 +9,12 @@
 > item is **real GONG data access** — everything downstream is calibration and
 > product polish on top of a pipeline that already runs.
 
+> **Update (this session):** Tier 1 (WCS-aware parser + gzip + configurable
+> sign) and Tier 2 (ground-truth table, archive-backtest evaluator with
+> date-based matching, backfill mode, read endpoints) are now **code-complete
+> and unit-tested**. They are still **data-blocked** on Tier 0 (no real maps
+> ingested yet). Tiers 3 and 4 are detailed below as concrete build plans.
+
 ---
 
 ## Tier 0 — Go live with real data (the blocker)
@@ -38,83 +44,135 @@ detections, and no watchdog alert.
 
 ---
 
-## Tier 1 — Make the parser + detector survive real data
+## Tier 1 — Make the parser + detector survive real data  ✅ code-complete
 
-The FITS reader and detector thresholds are tuned to synthetic fields. Real GONG
-maps will differ in ways we can only fix once we have one in hand.
+The FITS reader is now robust to the real product (verified with synthetic WCS
+fixtures); only on-real-data calibration remains.
 
-1. **Validate `api/_lib/fits.js` against a real map.** Check BITPIX, multi-HDU,
-   and **gzip** (`.fits.gz` → add `gunzip` in the cron before `readFITS`).
-2. **Get the projection right.** Far-side seismic maps cover the far *hemisphere*
-   in a specific projection (Carrington longitude, possibly sine-latitude), not
-   necessarily a clean 360×180 grid. Fix the `resample` mapping and the renderer's
-   longitude axis to the real coverage, including the low-sensitivity "seismic
-   shadow" near the far-side limbs.
-3. **Confirm the sign + units.** GONG active regions are a negative phase shift;
-   verify and tune `zNormalize(..., signatureSign)` + `DETECT.sigma` against the
-   real background noise so the false-positive floor is sane.
-4. **Re-calibrate `DETECT`** (`sigma`, `minAreaDeg2`, `maxLatDeg`, `strongStrength`)
-   on real maps with known events.
+- ✅ **gzip** handled in the cron (`maybeGunzip`, magic-byte + `.gz` detection).
+- ✅ **WCS-aware projection** (`parseWCS` + `remapToCarrington` in
+  `api/_lib/fits.js`): reads `CRVAL/CDELT/CRPIX/CTYPE` and projects the source
+  onto the canonical Carrington grid — correct for arbitrary pixel dims, a
+  partial far-side longitude window, and **sine-latitude** (CEA) maps. Cells
+  outside coverage stay 0 (no fabricated data in the seismic shadow).
+- ✅ **Configurable sign + projection** via env (`FARSIDE_SIGNATURE_SIGN`,
+  `FARSIDE_LAT_PROJECTION`) — default AR = negative.
+- ⏳ **Remaining (needs a real map):** confirm the actual CTYPE/projection and
+  sign, then re-tune `DETECT` (`sigma`, `minAreaDeg2`, `maxLatDeg`,
+  `strongStrength`) against real background noise.
 
 **Acceptance for Tier 1:** the detector flags the regions a human sees on the
 real map, with a defensible false-positive rate.
 
 ---
 
-## Tier 2 — Real validation (turn the moat from synthetic to measured)
+## Tier 2 — Real validation (the moat)  ✅ code-complete
 
-This is the SBIR/operator deliverable: a **measured** warning horizon.
+The whole validation path is built and unit-tested; it just needs real maps in
+the archive to produce live numbers.
 
-1. **Backfill the GONG far-side archive** for the two canonical windows —
-   ~Apr 2024 (AR13664 / Gannon) and ~May 2026. Add a `?backfill=<from>..<to>` mode
-   to `api/cron/farside-ingest.js` that pages the archive instead of "latest".
-2. **Ingest the NOAA ground truth.** Pull the NOAA SWPC `solar_regions` history
-   (which signatures became NOAA-numbered regions at the east limb, their dates,
-   Carrington coords, and flare productivity) into a `farside_truth` table or a
-   static dataset. This replaces the two hand-coded `VALIDATION_CASES`.
-3. **Point `runBacktest()` at real frames.** It already accepts the cron's stored
-   frame shape — swap `runSyntheticBacktest()` for real per-emergence windows
-   pulled from `farside_maps` + `farside_truth`. Report the real triplet:
-   detection rate, median lead time, false-alarm rate (+ ETA accuracy).
-4. **Publish the result** on the page (drop the SYNTHETIC label) and in the SBIR
-   deck: "we caught AR13664 N days before the limb."
+- ✅ **`farside_truth` table** (`supabase-farside-truth-migration.sql`, applied
+  live) — ground-truth emergence record, public-read, seeded with AR13664 +
+  the 2026 case.
+- ✅ **Backfill mode** — `GET /api/cron/farside-ingest?backfill=<fromISO>..<toISO>`
+  pages dated archive files (template `FARSIDE_GONG_ARCHIVE_TEMPLATE`,
+  placeholders `{yyyy}{mm}{dd}{hh}`), capped per invocation.
+- ✅ **Read endpoints** — proxy `format=truth` and date-ranged `format=series`
+  (`&from=&to=`); feed accessors `getTruth()` / `getArchiveFrames()`.
+- ✅ **Archive-backtest evaluator** — `runArchiveBacktest({truth, fetchFrames})`
+  (pure, injected fetcher). **Date-based matching**: a track matches a truth case
+  when its predicted emergence lands within `BACKTEST.matchDays` of the real
+  crossing at a compatible latitude — robust to longitude bookkeeping drift.
+  Honestly reports `windowsCovered`; the page shows LIVE numbers only when ≥1
+  window has archive coverage, else falls back to the synthetic demo.
+- ⏳ **Remaining (needs Tier 0):** run the backfill for the AR13664 (~Apr 2024)
+  and 2026 windows once the archive URL template + host allow-list are set; the
+  panel then flips to LIVE automatically. Optionally enrich `farside_truth` from
+  the NOAA SWPC `solar_regions` history (a small importer) beyond the two seeds.
 
-**Acceptance for Tier 2:** the backtest panel shows real, dated, cited numbers
-for AR13664 and the 2026 region.
-
----
-
-## Tier 3 — ML detector (Phase 2 upgrade)
-
-The classical detector is the baseline; the ML layer is the wheelhouse.
-
-1. **Assemble the training set:** historical GONG maps labelled by ground truth
-   (Tier 2's `farside_truth`) — which signatures became real regions, and how
-   flare-productive.
-2. **Train a detector** in the Felipe & Asensio Ramos style (CNN trained on
-   Earth-side regions to pull far-side signatures out of the noise). Batch-run
-   every 12 h.
-3. **Slot it behind the stable contract.** `detectSignatures()` already returns a
-   `confidence` in [0,1]; replace the logistic heuristic with the learned
-   probability. No caller changes.
-
-**Acceptance for Tier 3:** ML detection rate and FAR beat the classical baseline
-on a held-out validation set.
+**Acceptance for Tier 2:** the backtest panel shows real, dated numbers for
+AR13664 and the 2026 region (LIVE pill, ≥1 window covered).
 
 ---
 
-## Tier 4 — Cross-source fusion
+## Tier 3 — ML detector (Phase 2 upgrade) — build plan
 
-Use the imagers and the second seismic pipeline to confirm/deny.
+The classical blob detector is the transparent baseline + region proposer; the
+ML layer rescores its proposals out of the noise. Design follows FarNet /
+FarNet-II (Felipe & Asensio Ramos): a U-net that ingests a *sequence* of
+phase-shift maps and emits a far-side activity probability.
 
-1. **HMI/JSOC seismic** as an independent cross-check — agreement with GONG raises
-   a detection's confidence; disagreement flags it.
-2. **SolO / STEREO-A EUV** when geometry cooperates: a direct-imaging confirmation
-   of a seismic detection is the strongest possible signal. Add a fusion step that
-   boosts confidence when ≥2 sources agree, and surface which sources saw it.
+**3.1 Training data (depends on Tier 2 archive).**
+- `X`: a stack of K consecutive z-normalized phase-shift grids (FarNet uses ~11
+  maps; our maps are 12-hourly, so K≈11 ≈ 5.5 days). Pull from
+  `farside_maps.grid_b64` (or the raw R2 archive) in time order.
+- `y`: a per-pixel activity mask — project each `farside_truth` region to its
+  far-side position at each frame's time (fixed Carrington longitude → CMD via
+  `carringtonL0`) as a Gaussian blob, positive only while genuinely far-side.
+  Weakly-labelled but enough for a U-net.
+- Augment with **negatives**: quiet far-side maps with no subsequent emergence.
 
-**Acceptance for Tier 4:** a detection carries a per-source provenance badge and a
-fused confidence.
+**3.2 Model + training (offline, Python — NOT in the Vercel runtime).**
+- U-net encoder/decoder, sequence input, sigmoid activity-map output; focal/Dice
+  loss (activity is rare). Hold out the AR13664 + 2026 windows as the test set.
+- Export to **ONNX** for portable inference.
+
+**3.3 Inference integration (two viable paths).**
+- **(a) ONNX in the Node cron** via `onnxruntime-node`: the classical detector
+  proposes blobs, the model rescores each proposal's `confidence` on the K-map
+  stack (drop sub-threshold). Stays in the existing 12-h cron.
+- **(b) A small Python worker** (the "small worker on a 12-h cron" from the
+  brief): loads the model, reads recent grids from Supabase, writes `detections`
+  back via the service key. Heavier infra, no Node↔ML coupling.
+- Either way the **`Detection` contract is unchanged** (`{lon,lat,strength,
+  confidence,…}`), so tracker/page/alerts/backtest need no edits — swap only the
+  scorer behind `detectSignatures` / the cron.
+
+**3.4 Flare-productivity head (stretch).** Second output predicting
+flare-productivity from the signature evolution (`farside_truth.flare_productive`),
+so the alert can say "strong, likely flare-productive."
+
+**Acceptance for Tier 3:** ML precision/recall, median lead time, and FAR beat
+the classical baseline on the held-out AR13664 + 2026 windows — re-use the
+Tier-2 backtest harness, just feed it ML detections.
+
+---
+
+## Tier 4 — Cross-source fusion — build plan
+
+Confirm/deny seismic detections with the second seismic pipeline and the
+direct-imaging EUV sources. A detection seen by ≥2 independent methods is far
+more trustworthy than GONG alone, and EUV is *direct* (not inference).
+
+**4.1 Ingest the cross-sources** (the cron already loops all four `SOURCES`).
+- `hmi` (seismic) — same FITS path as GONG; an independent holography pipeline.
+- `solo` / `stereo` (EUV) — *image* products. Detecting an AR in a far-side EUV
+  image is its own CV step; start by ingesting STEREO's published far-side AR
+  comparisons / EUV brightenings, then add a simple bright-region detector.
+
+**4.2 Geometry gating for the imagers.** SolO/STEREO see only part of the far
+side. Add `farside-geometry.js`: given a spacecraft heliographic longitude (from
+a published/SPICE-derived ephemeris) and a target Carrington longitude at time t,
+decide whether that longitude is on the craft's visible disk. Only fuse an imager
+where it actually had a view — elsewhere it's "not observed," not "absent."
+
+**4.3 Fusion rule.** Per far-side longitude bin, spatially match per-source
+detections and combine with independent-evidence (noisy-OR):
+`fused = 1 − Π_i (1 − w_i·conf_i)`, EUV weighted highest (direct imaging),
+GONG/HMI seismic lower. Track-level output gains `sources: ['gong','hmi','euv']`
++ `fusedConfidence`.
+
+**4.4 Cross-check metrics.** Report GONG↔HMI agreement and GONG↔EUV confirmation
+rates (cf. the HMI nugget comparing helioseismic detections with STEREO EUV) — a
+second validation axis alongside the NOAA-emergence backtest.
+
+**4.5 Surface it.** Per-source provenance badges + fused confidence on each
+watch-list entry and the map overlays; an EUV-confirmed far-side region is the
+strongest possible operator signal.
+
+**Acceptance for Tier 4:** every track carries source provenance + a fused
+confidence; fusion measurably improves precision/FAR over GONG-only on the
+Tier-2 backtest.
 
 ---
 

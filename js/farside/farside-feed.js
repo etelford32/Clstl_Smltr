@@ -201,6 +201,38 @@ export async function getStoredFrames(source = 'gong', n = SERIES_LEN) {
 }
 
 /**
+ * Stored detection frames within a historical window [fromISO, toISO] — the
+ * Tier-2 backtest accessor. Returns [] (not null) on miss so the backtest can
+ * score the window as "no coverage" cleanly.
+ */
+export async function getArchiveFrames(source = 'gong', fromISO, toISO) {
+    try {
+        const u = `${SOURCES[source].endpoint}&format=series&limit=200`
+                + `&from=${encodeURIComponent(fromISO)}&to=${encodeURIComponent(toISO)}`;
+        const res = await fetch(u, { headers: { Accept: 'application/json' } });
+        if (!res.ok) return [];
+        const j = await res.json();
+        return Array.isArray(j?.frames) ? j.frames : [];
+    } catch (_) {
+        return [];
+    }
+}
+
+/** Ground-truth emergence record (public-read farside_truth via the proxy). */
+export async function getTruth(source = 'gong') {
+    try {
+        const res = await fetch(`${SOURCES[source].endpoint}&format=truth`, {
+            headers: { Accept: 'application/json' },
+        });
+        if (!res.ok) return null;
+        const j = await res.json();
+        return Array.isArray(j?.truth) && j.truth.length ? j.truth : null;
+    } catch (_) {
+        return null;
+    }
+}
+
+/**
  * Latest far-side map for a source (default GONG). Prefers real numeric data,
  * falls back to a synthetic map for the current 12 h slot.
  */
