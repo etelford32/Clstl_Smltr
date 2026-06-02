@@ -895,14 +895,18 @@ const VIEW_PRESETS = {
     // Default shot. Intentionally NARROW — distMul 1.0 frames the vehicle to
     // fill the viewport (the fit already bakes in 5% padding, so the whole
     // stack stays visible; going below 1.0 starts clipping the nose/bells),
-    // at a shallow elevation so the pad/tower scaffold stays mostly out of
-    // view. This is the "easily see the vehicle at load" frame. The looser,
+    // at a modest elevation so the pad/tower scaffold stays out of the lower
+    // frame. This is the "easily see the vehicle at load" frame. The looser,
     // pulled-back context shot that used to be the default (distMul 1.10) now
     // lives under the `wide` preset (a button), so it no longer silently
     // "takes over" after the canvas finishes laying out.
-    // dir = unit vector from target → camera. Low Y (0.22) keeps us closer to
-    // eye-level with the stack instead of looking down its length at the deck.
-    threequarter: { dir: [ 0.55, 0.22,  0.82], biasY:  0.00, distMul: 1.00 },
+    // dir = unit vector from target → camera. The previous eye-line (Y 0.22)
+    // sat too low — at the rocket-fit distance it framed the pad/tower base
+    // across the bottom of the viewport on load. Raise Y to 0.34 to look
+    // slightly DOWN onto the stack (tower base drops below frame) and bump
+    // distMul to 1.12 for a little extra margin so the whole stack clears the
+    // edges after the canvas settles its aspect-ratio/min-height layout.
+    threequarter: { dir: [ 0.55, 0.34,  0.82], biasY:  0.00, distMul: 1.12 },
     // Pulled-back establishing shot: shows the full stack plus the pad/tower
     // for context. This is the former default — kept as an explicit option.
     wide:         { dir: [ 0.62, 0.34,  0.85], biasY:  0.06, distMul: 1.65 },
