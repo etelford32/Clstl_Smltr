@@ -154,3 +154,19 @@ export const EARTHDATA = Object.freeze({
     gibsWms:      'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi',
     gesDisc:      'https://disc.gsfc.nasa.gov',   // future: OPeNDAP numeric grids
 });
+
+// ── Far-Side Watch ────────────────────────────────────────────────────────────
+// A 12-hourly, image-shaped feed — the slowest bucket in the architecture, so
+// it sits outside INTERVALS' T1–T4 polling cadence. The far-side seismic map
+// only refreshes every ~12 h (GONG), and emergence ETAs move at the synodic
+// rotation rate, so there is no real-time pressure. The browser pulls through
+// the /api/solar/farside edge proxy; detailed source config + thresholds live
+// in js/farside/farside-config.js (kept there so the package stays portable to
+// the Sun and Space-Weather engines). Gated to sign-ups; operator export is PRO.
+export const FARSIDE = Object.freeze({
+    endpoint:        '/api/solar/farside',
+    primarySource:   'gong',
+    cadenceHours:    12,
+    synodicDegPerDay: 13.199,   // mirrors js/farside/carrington.js SYNODIC_DEG_PER_DAY
+    page:            '/far-side-watch.html',
+});
