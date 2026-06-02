@@ -176,21 +176,29 @@ Tier-2 backtest.
 
 ---
 
-## Tier 5 — Product surface (finish Phase 4)
+## Tier 5 — Product surface (finish Phase 4)  ✅ mostly done
 
-1. **Globe overlay on the Solar Physics Engine** (`sun.html` / solar engine):
-   import `js/farside/index.js` and render front-side ARs + far-side detections +
-   the east-limb horizon on the rotating 3D globe (deferred from Phase 4).
-2. **Embed the Far-Side Watch panel** in the Space-Weather dashboard
-   (`space-weather.html`).
-3. **Wire the real alert.** Add a `notify_region_emergence` column to
-   `user_profiles` (migration), a toggle in `account.html`, and adopt the
-   `farside-alerts.js` rule into `js/alert-engine.js` (today we dispatch the
-   `user-alert` event directly — the shape already matches the engine).
-4. **Operator export.** Build `api/farside/export` (CSV + REST) as promised,
-   gated to Advanced; the page's CSV button already exists for signed-in users.
-5. **Status + monitoring.** Add the `farside_ingest` pipeline to `status.html`;
-   confirm watchdog alert routing.
+1. ✅ **Globe overlay on the Sun engine** — `js/farside/farside-globe-overlay.js`
+   (reusable, THREE injected) mounted in `sun.html`: far-side detection markers
+   + east-limb "horizon" + visibility terminator, in the same CMD convention as
+   the existing AR markers (sub-Earth = +Z), co-rotating with the photosphere
+   and occluded behind the opaque Sun until you orbit around. Fully guarded.
+2. ⏳ **Embed the panel** in the Space-Weather dashboard (`space-weather.html`)
+   — not yet done; the overlay module + feed make it a small lift.
+3. ✅ **Real alert wired into `alert-engine.js`** — `notify_region_emergence`
+   column (migration applied) + Advanced-gated `account.html` toggle + an
+   `ALERT_DEFS` entry (source `'farside'`) run through the standard
+   cooldown/DB/email/bell path. The engine self-polls the archive (lazy import,
+   advanced + opted-in only) and also listens for `farside-watch-update`.
+4. ✅ **Operator export** — `api/farside/export.js` (CSV default / JSON), JWT-
+   verified and gated to `planToTier === PRO`, serving the watch list computed
+   from the `farside_maps` archive.
+5. ⏳ **Status + monitoring** — add `farside_ingest` to `status.html` (watchdog
+   already covers it dynamically).
+
+Note: globe-overlay markers carry true current-time positions; they co-rotate
+with the cosmetic photosphere spin for visual coherence. Like the rest of the
+layer, they show the labelled synthetic field until the Tier-0 archive is live.
 
 ---
 

@@ -17,7 +17,7 @@ import {
     getArchiveFrames, getTruth,
     detectSignatures,
     farSideWatchList, farSideWatchListFromFrames,
-    dispatchEmergenceAlerts,
+    dispatchEmergenceAlerts, notifyEngine,
     renderFlatMap, renderTopDown,
     runSyntheticBacktest, runArchiveBacktest,
     SOURCES,
@@ -228,8 +228,13 @@ export async function initFarSideWatch() {
     renderWatchList();
     renderBacktest();
 
-    // Fire emergence alerts once for signed-in users (de-duped in the module).
-    if (_state.signedIn) dispatchEmergenceAlerts(_state.watch);
+    // Fire emergence alerts once for signed-in users (de-duped in the module),
+    // and hand the watch list to any running AlertEngine for the pref-gated,
+    // cooldown-managed "region rotating into view" alert.
+    if (_state.signedIn) {
+        dispatchEmergenceAlerts(_state.watch);
+        notifyEngine(_state.watch);
+    }
 
     // Try to drop the upstream image in as a backdrop; hide on failure.
     const img = $('fsw-img');
