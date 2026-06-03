@@ -55,6 +55,56 @@ The engine (`gannon-superstorm-engine.js`) passes these through `sample()`
 as `ae_nt` / `pdyn_npa` / `sym_h_nt` (null until lifted). The scene falls
 back to its bundle proxies when they're absent, so nothing breaks pre-lift.
 
+## Lift 3: how the density mirror lands
+
+TU Delft retired the open **HTTP** tree for the Doornbos v02 accelerometer
+density products in favour of **FTP-only** distribution. Vercel's Edge
+runtime can't `fetch()` an `ftp://` URL, so `/api/density/tudelft` can no
+longer pull the daily files live. The fix is an R2 mirror, populated from a
+workstation that *can* speak FTP:
+
+```
+workstation: pull daily files off TU Delft FTP   (operator, manual)
+        │   e.g. lftp/wget grcfo_density_2024_05_*.txt + swrmc_density_*
+        ▼
+  node scripts/build-density-mirror.mjs --local-dir ./tudelft_dl --upload
+        │   parse (shared api/_lib/tudelft-parse.js) → dedupe → canonical JSON
+        ▼
+  R2:  hindcast/gannon/density-grace_fo-v1.json
+       hindcast/gannon/density-swarm_c-v1.json
+        │
+        ▼
+  GET /api/density/tudelft?mission=…  ── serves the mirror, no upstream touch
+        │
+        ▼
+  page lift 3: real GRACE-FO / Swarm-C truth scatter → density_truth badge ●
+```
+
+`/api/density/tudelft` now tries the **R2 mirror first** and falls back to
+the **live HTTP fetch** (retained for any window/mission still on HTTP, and
+for envs without R2). `?source=mirror|live` forces a path for debugging.
+The response shape is unchanged (`data.samples[]`), so the page lift is
+untouched. The parser is shared between the mirror builder and the live
+fallback via `api/_lib/tudelft-parse.js`, so the two can't drift.
+
+**Mirror artifact** (`density-<mission>-v1.json`):
+
+```jsonc
+{
+  "schema": "tudelft-density-mirror/v1",
+  "mission": "grace_fo",
+  "source": "TU Delft … — mirrored to R2 on <date>",
+  "coverage": { "start": "...", "end": "...", "n_records": 0, "days": [...] },
+  "parser_version": "tudelft-v02-v1",
+  "records": [ { "t": "...", "alt_km": 0, "lat_deg": 0, "lon_deg": 0, "rho_kg_m3": 0 } ]
+}
+```
+
+Records are stored already-parsed + altitude-filtered; the endpoint just
+windows + subsamples per request. `--base-subsample N` shrinks the upload
+(default 1 = full ~10 s cadence). Bump the `-vN` key suffix in lockstep
+with the schema. `--self-test` proves the parser is wired up with no I/O.
+
 ## Lift 4: how the model artifact lands
 
 ```
