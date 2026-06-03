@@ -96,6 +96,33 @@ configured or the artifact isn't uploaded yet — the page lift treats that
 as a clean no-op. **Bump `ARTIFACT_KEY`'s version suffix in lockstep with
 the pipeline** whenever the artifact schema changes.
 
+### Building + publishing the artifact
+
+`scripts/build-gannon-model-artifact.mjs` assembles the contract above from
+the pipeline outputs and (optionally) uploads it to R2:
+
+```
+# after a real BATS-R-US run produces the hindcast + fits + residuals:
+node scripts/build-gannon-model-artifact.mjs --upload
+```
+
+It reads `--bundle` for the grid (window + `ap_real.length` + `f107_daily`),
+resamples the hindcast's `phi_pc_kv`/`hpi_gw` onto that grid, applies the
+pseudo-Ap fits to get `ap_mhd`/`ap_gnd`, and recomputes `msis_apmhd`/
+`msis_apgnd` at 400 km via `js/upper-atmosphere-engine.js density()` — the
+same surrogate that produced the bundle's `msis_apreal`, so all three
+density traces share one backend. The ground track (`ap_gnd`, `sme_nt`,
+`msis_apgnd`) is added only when `--ground-fit` + `--ground-features` are
+supplied; `skill` is filled from `--residuals` (validate_density output).
+
+**Integrity gate:** the hindcast/fit JSONs carry `is_placeholder` /
+`is_placeholder_input` sentinels when produced by the plumbing generators
+rather than a real run. The tool refuses to assemble from them without
+`--allow-placeholder`, and **never** uploads a placeholder-derived
+artifact (so the page can't be made to show ✓ VALIDATED for synthetic
+data). `--self-test` recomputes `msis_apreal` from the bundle to prove the
+density backend matches before you trust a run.
+
 ## Verification notes
 
 - Lifts 1–4 hit external hosts. **The Claude-on-the-web sandbox blocks
