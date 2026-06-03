@@ -647,9 +647,12 @@ const coreVS = /* glsl */`
     varying vec3 vNormal;
     varying vec3 vPosition;
     varying vec3 vViewDir;
+    varying vec3 vWorldPos;
     void main() {
         vNormal   = normalize(normalMatrix * normal);
         vPosition = position;
+        vec4 wp   = modelMatrix * vec4(position, 1.0);
+        vWorldPos = wp.xyz;
         vec4 mv   = modelViewMatrix * vec4(position, 1.0);
         vViewDir  = normalize(-mv.xyz);
         gl_Position = projectionMatrix * mv;
@@ -666,6 +669,7 @@ const coreFS = /* glsl */`
     varying vec3 vNormal;
     varying vec3 vPosition;
     varying vec3 vViewDir;
+    varying vec3 vWorldPos;
 
     // ── Noise primitives ──────────────────────────────────────
     float h3(vec3 p) {
@@ -734,9 +738,19 @@ const coreFS = /* glsl */`
         float rSpeed = u_rot * vScale;
         float t      = u_time;
 
-        // Differential rotation (equator faster)
+        // Differential rotation (equator faster than poles)
         float diffRot = 1.0 - 0.35 * sin(theta) * sin(theta);
         float rotPhi  = phi + t * 0.015 * rSpeed * diffRot;
+
+        // mdot influences turbulence amplitude (denser wind = more chaotic)
+        float mdotLog = log(u_mdot * 1e6 + 1.0) / log(10.0);  // ~0 to 2
+        float mdotFac = 0.6 + clamp(mdotLog * 0.2, 0.0, 0.4);
+
+        // ── Convective granulation (boils + overturns in time) ─
+        vec3 gp = vec3(rotPhi * 1.25, theta * 1.25, 0.0)
+                + vec3(0.0, 0.0, t * 0.05 * rSpeed) + vec3(t * 0.02);
+        float cells = wfbm(gp * 1.1);
+        float granB = cells - 0.5;                 // −0.5 .. 0.5
 
         // ── Turbulence layers ─────────────────────────────────
         // Layer 1: Large-scale wind photosphere blobs
@@ -747,49 +761,73 @@ const coreFS = /* glsl */`
         vec3 p2 = vPosition * 1.4 + vec3(t * 0.018 * rSpeed, t * 0.013 * rSpeed, t * 0.021 * rSpeed);
         float L2 = wfbm(p2);
 
-        // Layer 3: Fine wind streaks (radial outflow pattern)
-        // Create streak effect by using elongated coordinates
-        vec3 streakP = vec3(rotPhi * 2.5, theta * 6.0, t * 0.04 * rSpeed);
+        // Layer 3: Wind-launch filaments flowing OUT from the equator
+        //   (theta advected in time → streaks stream poleward / outward)
+        vec3 streakP = vec3(rotPhi * 2.5, theta * 6.0 - t * 0.10 * rSpeed, t * 0.04 * rSpeed);
         float L3 = vn(streakP) * 0.7 + vn(streakP * 2.1 + vec3(5.3, 2.7, 8.1)) * 0.3;
 
-        // mdot influences turbulence amplitude (denser wind = more chaotic)
-        float mdotLog = log(u_mdot * 1e6 + 1.0) / log(10.0);  // ~0 to 2
-        float mdotFac = 0.6 + clamp(mdotLog * 0.2, 0.0, 0.4);
+        // Combine layers (granulation + multi-scale turbulence)
+        float bmod = 0.52
+            + granB * 0.30 * mdotFac
+            + L1 * 0.18 * mdotFac
+            + L2 * 0.30 * mdotFac
+            + L3 * 0.13;
+        bmod = clamp(bmod, 0.2, 1.5);
 
-        // Combine layers
-        float bmod = 0.55
-            + L1 * 0.25 * mdotFac
-            + L2 * 0.35 * mdotFac
-            + L3 * 0.15;
-        bmod = clamp(bmod, 0.2, 1.4);
-
-        // beta modulates surface smoothness (lower beta = faster wind launch = rougher surface)
+        // beta modulates surface smoothness (lower β = faster launch = rougher)
         float betaNorm = (u_beta - 0.5) / 2.0;  // 0 to 1
-        float surfRough = 1.0 + (1.0 - betaNorm) * 0.3 * (L2 - 0.5);
+        float surfRough = 1.0 + (1.0 - betaNorm) * 0.30 * (L2 - 0.5);
         bmod *= surfRough;
 
-        // ── Limb darkening ────────────────────────────────────
-        // WR stars: flatter limb darkening than normal stars (extended wind photosphere)
+        // ── Limb darkening (flatter: extended wind photosphere) ─
         float limb = 0.50 + 0.50 * mu;
 
         // ── Base color ────────────────────────────────────────
         vec3 base = wrColor(u_teff);
 
-        // Hot spots: bright regions where wind erupts (O/B supergiants show these too)
+        // Hot spots where wind clumps erupt
         float hotPow  = pow(max(L2 * L3 - 0.2, 0.0), 2.0) * 3.0;
         vec3  hotTint = wrColor(u_teff * 1.3);
+
+        // ── Transient eruptions (line-deshadowing instability) ─
+        //   Sparse surface cells flare up and fade, ejecting bright clumps.
+        vec2  cell = floor(vec2(rotPhi * 2.0, theta * 3.0 + 5.0));
+        float cid  = h3(vec3(cell, 1.0));
+        float flare = 0.0;
+        if (cid > 0.55) {
+            float ph    = fract(t * 0.06 * rSpeed + cid * 7.0);
+            float local = vn(vec3(rotPhi * 4.0, theta * 5.0, cid * 10.0));
+            flare = pow(max(1.0 - ph, 0.0), 5.0) * smoothstep(0.55, 0.9, local) * (cid - 0.5) * 2.0;
+        }
 
         // HDR: WR star is intensely luminous
         vec3 col = base * bmod * limb * 2.0;
         col += hotTint * hotPow * 0.8;
+        col += hotTint * flare * 2.2;
 
-        // Emission: slight teal-cyan tinge from HeII and OIII at surface base
-        float emitZone = pow(1.0 - mu, 1.5) * 0.4;
-        col += vec3(0.0, 0.25, 0.5) * emitZone * (u_teff / 210000.0);
+        // ── Limb EMISSION brightening (optically-thin lines) ───
+        //   The continuum is limb-darkened, but HeII / OVI line emission
+        //   peaks at the limb where the slant path through the wind is
+        //   longest — the visual signature of an emission-line star.
+        float limbEmis = pow(1.0 - mu, 1.6);
+        vec3  emisCol  = vec3(0.0, 0.55, 0.85);   // HeII / OVI teal-cyan
+        col += emisCol * limbEmis * 0.55 * clamp(u_teff / 210000.0, 0.2, 1.4) * (0.7 + 0.3 * cells);
 
         // Fresnel glow: very hot corona rim (hotter than photosphere)
         float fr = pow(1.0 - mu, 3.5);
         col += wrColor(u_teff * 1.25) * fr * 1.8;
+
+        // ── Doppler rotational shift across the disk ───────────
+        //   Approaching limb → blueshift, receding limb → redshift.
+        //   Project the solid-body rotation velocity onto the line of
+        //   sight: zero at disk centre, maximal at the limbs.
+        vec3  camDir = normalize(cameraPosition - vWorldPos);
+        vec3  rotVel = cross(vec3(0.0, 1.0, 0.0), normalize(vWorldPos));
+        float los    = dot(rotVel, camDir);
+        float dop    = clamp(los * u_rot * vScale * 0.16, -0.22, 0.22);
+        col.r *= (1.0 - dop);
+        col.g *= (1.0 - 0.25 * dop);
+        col.b *= (1.0 + dop);
 
         gl_FragColor = vec4(col, 1.0);
     }
