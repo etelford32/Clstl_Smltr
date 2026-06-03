@@ -1376,8 +1376,10 @@ export function initVehicleCanvas(canvas, opts = {}) {
     //
     // `controls` is kept as a compat shim with .target (Vector3) so the
     // existing liftoff / view-tween code can continue to write to it. The
-    // target is purely informational — camera orientation comes from
-    // (yaw, pitch), not from look-at.
+    // target is the ORBIT ANCHOR: pointer-drag orbits the camera around it and
+    // the wheel dollies toward/away from it (radius clamped to min/maxDistance
+    // so you can't tunnel through the vehicle). WASD/QE still free-fly cam.pos
+    // directly; (yaw, pitch) are kept in sync via setLookAt after each orbit.
     const cam = {
         pos:       new THREE.Vector3(0, 30, 80),
         yaw:       0,
@@ -1388,8 +1390,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
         lastY:     0,
         moveSpeed: 80,       // m/s base
         sprintMul: 3,
-        lookSpeed: 0.003,    // rad/px of mouse drag
-        dollyStep: 6,        // m per wheel notch
+        lookSpeed: 0.003,    // rad/px of orbit drag
         pitchMin: -Math.PI / 2 + 0.02,
         pitchMax:  Math.PI / 2 - 0.02,
     };
@@ -1405,6 +1406,8 @@ export function initVehicleCanvas(canvas, opts = {}) {
     const _fwd   = new THREE.Vector3();
     const _right = new THREE.Vector3();
     const _move  = new THREE.Vector3();
+    const _orbitOffset = new THREE.Vector3();
+    const _spherical   = new THREE.Spherical();
 
     function camForward(out) {
         return out.set(
@@ -1426,6 +1429,38 @@ export function initVehicleCanvas(canvas, opts = {}) {
     function applyCamToThree() {
         camera.position.copy(cam.pos);
         camera.rotation.set(cam.pitch, cam.yaw, 0, 'YXZ');
+    }
+
+    // Orbit the camera AROUND controls.target (the rocket) by a pixel delta,
+    // preserving the current orbit radius. This is the model-viewer drag:
+    // the rocket stays centered, the camera swings around it — as opposed to
+    // free-look (rotate-in-place), which swings the aim off onto the tower.
+    // phi (polar from +Y) is clamped off the poles so we never gimbal-flip.
+    function orbitAroundTarget(dx, dy) {
+        _orbitOffset.subVectors(cam.pos, controls.target);
+        _spherical.setFromVector3(_orbitOffset);
+        _spherical.theta -= dx * cam.lookSpeed;
+        _spherical.phi   -= dy * cam.lookSpeed;
+        const EPS = 0.02;
+        _spherical.phi = Math.max(EPS, Math.min(Math.PI - EPS, _spherical.phi));
+        _spherical.makeSafe();
+        _orbitOffset.setFromSpherical(_spherical);
+        cam.pos.copy(controls.target).add(_orbitOffset);
+        setLookAt(controls.target);
+    }
+
+    // Dolly toward / away from the target by scaling the orbit radius, clamped
+    // to [minDistance, maxDistance] so the camera can never fly THROUGH the
+    // rocket and end up staring at the tower behind it. factor < 1 = zoom in.
+    function dollyToTarget(factor) {
+        _orbitOffset.subVectors(cam.pos, controls.target);
+        const r = THREE.MathUtils.clamp(
+            _orbitOffset.length() * factor,
+            controls.minDistance, controls.maxDistance,
+        );
+        _orbitOffset.setLength(r);
+        cam.pos.copy(controls.target).add(_orbitOffset);
+        setLookAt(controls.target);
     }
 
     // Compat shim — old code reads/writes `controls.target` and calls
@@ -1493,10 +1528,9 @@ export function initVehicleCanvas(canvas, opts = {}) {
         const dy = e.clientY - cam.lastY;
         cam.lastX = e.clientX;
         cam.lastY = e.clientY;
-        if (dx || dy) userControlledCamera = true;   // real look-drag
-        cam.yaw   -= dx * cam.lookSpeed;
-        cam.pitch -= dy * cam.lookSpeed;
-        cam.pitch  = THREE.MathUtils.clamp(cam.pitch, cam.pitchMin, cam.pitchMax);
+        if (!dx && !dy) return;
+        userControlledCamera = true;                 // real orbit-drag
+        orbitAroundTarget(dx, dy);                    // rotate AROUND the rocket
     }
     function onPointerUp(e) {
         if (!cam.dragging) return;
@@ -1509,14 +1543,13 @@ export function initVehicleCanvas(canvas, opts = {}) {
         e.preventDefault();
     }
     function onWheel(e) {
-        // Smooth dolly along view direction. Negative deltaY (scroll up)
-        // moves forward. We do preventDefault here because we want the
-        // wheel to drive the camera when the cursor is on the canvas.
+        // Zoom toward / away from the rocket. Scroll up (deltaY < 0) zooms in.
+        // Radius-based + clamped so you can't tunnel through the vehicle into
+        // the tower. preventDefault so the wheel drives the camera, not the
+        // page scroll, while the cursor is on the canvas.
         e.preventDefault();
         userControlledCamera = true;                 // wheel-dolly
-        camForward(_fwd);
-        const dir = e.deltaY > 0 ? -1 : 1;
-        cam.pos.addScaledVector(_fwd, dir * cam.dollyStep);
+        dollyToTarget(e.deltaY > 0 ? 1.12 : 1 / 1.12);
     }
     function setKey(key, down) {
         const k = key.length === 1 ? key.toLowerCase() : key;
@@ -2068,13 +2101,12 @@ export function initVehicleCanvas(canvas, opts = {}) {
         );
     }
 
-    // God-mode dolly along the current view direction. factor < 1 zooms
-    // in (forward), > 1 zooms out (back). 20 m per click is comfortable.
+    // Toolbar zoom buttons. factor < 1 zooms in (toward the rocket), > 1 zooms
+    // out. Radius-based + clamped, same as the wheel — never tunnels through
+    // the vehicle. ~25% per click is a comfortable step.
     function setZoom(factor) {
         userControlledCamera = true;                 // deliberate user dolly
-        camForward(_fwd);
-        const stepM = (factor < 1) ? 20 : -20;
-        cam.pos.addScaledVector(_fwd, stepM);
+        dollyToTarget(factor < 1 ? 0.8 : 1.25);
     }
 
     function recenter() {
