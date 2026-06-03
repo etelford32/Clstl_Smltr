@@ -82,13 +82,16 @@ export const SCENARIO_ORDER = ['solar-system'];
 // merge promptly via the Hill-radius criterion in handleCollisions().
 const INCL_MAX_RAD = 0.025;
 
-export function buildInitialBodies(scenario) {
+// `rng` is an injectable [0,1) generator (see rng.js). It defaults to
+// Math.random so any legacy caller still works, but the live sim always passes
+// a seeded generator so a given (scenario, seed) reproduces the same bodies.
+export function buildInitialBodies(scenario, rng = Math.random) {
     const bodies = [];
     const Mstar = scenario.star.Mstar;
     let earthIncl = 0, earthNode = 0;
     for (const emb of scenario.embryos) {
         const a = emb.a_AU * AU;
-        const phase = Math.random() * 2 * Math.PI;
+        const phase = rng() * 2 * Math.PI;
         const v = Math.sqrt(G * Mstar / a);
 
         // Orbital-frame circular state at true anomaly = phase.
@@ -98,8 +101,8 @@ export function buildInitialBodies(scenario) {
         const vyo =  v * Math.cos(phase);
 
         // Per-body inclination + longitude of ascending node, uniform random.
-        let incl = Math.random() * INCL_MAX_RAD;
-        let node = Math.random() * 2 * Math.PI;
+        let incl = rng() * INCL_MAX_RAD;
+        let node = rng() * 2 * Math.PI;
         if (emb.flagEarth) { earthIncl = incl; earthNode = node; }
         // Theia shares Earth's plane so the giant impact actually happens.
         if (emb.flagTheia) { incl = earthIncl; node = earthNode; }

@@ -159,6 +159,63 @@ body {
 }
 .ad-btn-primary:hover { filter:brightness(1.08); }
 
+/* ─── World seed control ─────────────────────────────────────── */
+.ad-seed-wrap { display:flex; gap:6px; align-items:stretch; }
+.ad-seed-wrap input {
+    flex:1; min-width:0;
+    background:rgba(255,255,255,.05);
+    border:1px solid rgba(255,255,255,.12);
+    border-radius:6px; color:#ffd700;
+    font-family:monospace; font-size:.82rem; font-weight:700;
+    padding:7px 9px;
+}
+.ad-seed-wrap input:focus { outline:none; border-color:#ffd700; }
+.ad-seed-reroll {
+    flex:0 0 auto; width:40px;
+    background:rgba(255,255,255,.05);
+    border:1px solid rgba(255,255,255,.12);
+    border-radius:6px; color:#cbd; cursor:pointer; font-size:1.05rem;
+    transition:all .15s;
+}
+.ad-seed-reroll:hover { border-color:rgba(255,200,0,.45); color:#fff; transform:rotate(15deg); }
+.ad-seed-hint { font-size:.64rem; color:#998; margin-top:6px; line-height:1.5; }
+
+/* ─── Launch lobby overlay ───────────────────────────────────── */
+#ad-setup {
+    position:absolute; inset:0; z-index:8;
+    display:flex; align-items:center; justify-content:center; padding:20px;
+    background:radial-gradient(circle at 50% 38%, rgba(10,5,28,.55), rgba(0,0,0,.84));
+    backdrop-filter:blur(3px);
+    transition:opacity .35s ease;
+}
+#ad-setup.ad-hidden { opacity:0; pointer-events:none; }
+.ad-setup-card {
+    max-width:440px; width:100%;
+    background:linear-gradient(160deg, rgba(22,13,44,.97), rgba(4,2,16,.97));
+    border:1px solid rgba(255,200,0,.30);
+    border-radius:14px; padding:22px 24px 22px;
+    box-shadow:0 20px 60px rgba(0,0,0,.6);
+}
+.ad-setup-kicker {
+    font-size:.66rem; color:#ffb84a; text-transform:uppercase;
+    letter-spacing:.18em; font-weight:800;
+}
+.ad-setup-card h2 {
+    font-size:1.4rem; font-weight:800; color:#fff; margin:5px 0 6px; line-height:1.2;
+}
+.ad-setup-lead { font-size:.8rem; color:#cbb; line-height:1.55; margin-bottom:16px; }
+.ad-setup-grid {
+    display:grid; grid-template-columns:1fr 1fr; gap:7px 16px; margin-bottom:18px;
+}
+.ad-setup-grid > div {
+    display:flex; justify-content:space-between; gap:8px; font-size:.76rem;
+    border-bottom:1px solid rgba(255,255,255,.07); padding-bottom:5px;
+}
+.ad-setup-grid span { color:#998; }
+.ad-setup-grid b { color:#fff; font-family:monospace; }
+#ad-begin { width:100%; padding:13px; font-size:.95rem; }
+.ad-setup-foot { font-size:.66rem; color:#998; margin-top:11px; text-align:center; line-height:1.5; }
+
 .ad-warp-wrap {
     background:rgba(255,255,255,.03);
     border:1px solid rgba(255,255,255,.07);
@@ -436,6 +493,13 @@ table.ad-bodies th {
 
     <!-- LEFT SIDEBAR ─────────────────────────────────────────────── -->
     <aside class="ad-side" id="ad-side-left">
+        <div class="ad-label">World seed</div>
+        <div class="ad-seed-wrap">
+            <input id="ad-seed" type="text" inputmode="numeric" spellcheck="false" autocomplete="off" aria-label="World seed" />
+            <button type="button" class="ad-seed-reroll" id="ad-seed-reroll" title="Roll a new world">🎲</button>
+        </div>
+        <div class="ad-seed-hint">Same seed + same settings = the same universe, every time. Reroll for a fresh world; enter a number or a name.</div>
+
         <div class="ad-label">Scenario</div>
         <div class="ad-tabs" id="ad-tabs">
             <button type="button" class="ad-tab on" data-scenario="solar-system">
@@ -446,7 +510,7 @@ table.ad-bodies th {
 
         <div class="ad-label">Initial conditions</div>
         <p style="font-size:.66rem; color:#998; line-height:1.5; margin-bottom:8px;">
-            Tinker live. Changing a slider rebuilds the disc &amp; embryos from scratch.
+            Set up your star, disc &amp; planetesimals, then hit <strong style="color:#ffd700;">Begin Formation</strong> and watch 4.6 Gyr play out. Each control rebuilds the world from your seed.
         </p>
 
         <!-- Star group -->
@@ -585,7 +649,7 @@ table.ad-bodies th {
         <div class="ad-label">Controls</div>
         <div class="ad-controls">
             <div class="ad-btn-row">
-                <button type="button" class="ad-btn ad-btn-primary" id="ad-play">❚❚ Pause</button>
+                <button type="button" class="ad-btn ad-btn-primary" id="ad-play">▶ Begin Formation</button>
                 <button type="button" class="ad-btn" id="ad-reset">↻ Reset</button>
             </div>
         </div>
@@ -609,7 +673,29 @@ table.ad-bodies th {
         <div id="ad-stage-bar">
             <span class="ad-stage-time" id="ad-elapsed">—</span>
         </div>
-        <div id="ad-stage-watermark">LBP α-disc · live</div>
+        <div id="ad-stage-watermark">LBP α-disc · ready</div>
+
+        <!-- Launch lobby: "set up your world, then begin" -->
+        <div id="ad-setup">
+            <div class="ad-setup-card">
+                <div class="ad-setup-kicker">Mission setup</div>
+                <h2>Build a solar system</h2>
+                <p class="ad-setup-lead">
+                    A Hayashi protoplanetary disc and a swarm of planetesimals are staged around your star.
+                    Tune the controls on the left, then begin and watch accretion, migration and giant impacts unfold.
+                </p>
+                <div class="ad-setup-grid">
+                    <div><span>Star</span><b id="ad-sum-star">—</b></div>
+                    <div><span>Disc mass</span><b id="ad-sum-disc">—</b></div>
+                    <div><span>α viscosity</span><b id="ad-sum-alpha">—</b></div>
+                    <div><span>Dust : gas</span><b id="ad-sum-dust">—</b></div>
+                    <div><span>Seeds</span><b id="ad-sum-embryos">—</b></div>
+                    <div><span>World seed</span><b id="ad-sum-seed">—</b></div>
+                </div>
+                <button type="button" class="ad-btn ad-btn-primary" id="ad-begin">▶ Begin Formation</button>
+                <div class="ad-setup-foot">Pause, reset, or reroll the world at any time.</div>
+            </div>
+        </div>
     </main>
 
     <!-- RIGHT SIDEBAR ─────────────────────────────────────────────── -->
@@ -691,7 +777,7 @@ table.ad-bodies th {
 </div>
 
 <script type="module">
-import { boot } from './js/accretion-disc/disc.js?v=20260513e';
+import { boot } from './js/accretion-disc/disc.js?v=20260603a';
 
 const canvas = document.getElementById('ad-canvas');
 const ui = {
@@ -720,8 +806,25 @@ const ui = {
     warpSlider: document.getElementById('ad-warp'),
     warpVal:    document.getElementById('ad-warp-val'),
     exportCsvBtn: document.getElementById('ad-export-csv'),
+
+    // World seed + launch lobby
+    beginBtn:    document.getElementById('ad-begin'),
+    setupOverlay:document.getElementById('ad-setup'),
+    seedInput:   document.getElementById('ad-seed'),
+    seedReroll:  document.getElementById('ad-seed-reroll'),
+    watermark:   document.getElementById('ad-stage-watermark'),
+    sumStar:     document.getElementById('ad-sum-star'),
+    sumDisc:     document.getElementById('ad-sum-disc'),
+    sumAlpha:    document.getElementById('ad-sum-alpha'),
+    sumDust:     document.getElementById('ad-sum-dust'),
+    sumSeed:     document.getElementById('ad-sum-seed'),
+    sumEmbryos:  document.getElementById('ad-sum-embryos'),
 };
-const api = boot({ canvas, ui, scenarioId: 'solar-system' });
+
+// Optional ?seed=… lets a shared link reproduce a specific world (a small step
+// toward the full config permalink planned in Phase 0.2).
+const seedParam = new URLSearchParams(location.search).get('seed');
+const api = boot({ canvas, ui, scenarioId: 'solar-system', seed: seedParam });
 
 // ── Initial-conditions panel binder ─────────────────────────────────────────
 // Each slider's <div class="ad-slider"> carries a data-key path like

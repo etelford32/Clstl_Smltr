@@ -91,7 +91,16 @@ physics, or UX polish.**
 
 Small, self-contained, all client-side. Each item is independently shippable.
 
-### 3.1 Seeded RNG (reproducibility prerequisite)
+### 3.1 Seeded RNG (reproducibility prerequisite) — ✅ IMPLEMENTED
+*Status (2026-06-03):* shipped. `js/accretion-disc/rng.js` (mulberry32 +
+`normalizeSeed`/`randomSeed`) is threaded through `buildInitialBodies(scenario, rng)`
+and the jitter path; the RNG is re-seeded from `sim.seed` at the top of every
+`rebuildDiscAndBodies()`, so `(scenario, seed, cfg)` reproduces an identical
+world. A "world seed" control (numeric or memorable-name input + 🎲 reroll) is in
+the left sidebar; `?seed=` in the URL restores a specific world (a down payment
+on §3.2). Covered by `tests/accretion-disc-seed-smoke.mjs` (determinism +
+divergence + the Theia coupling invariant). The original spec follows:
+
 - Add a tiny PRNG (e.g. `mulberry32` / `splitmix32`, ~10 lines, no deps) in a new
   `js/accretion-disc/rng.js`. Pure function factory: `makeRng(seed) → () => float`.
 - Thread an injectable `rng` through `buildInitialBodies(scenario, rng)` and the
@@ -142,6 +151,18 @@ Small, self-contained, all client-side. Each item is independently shippable.
   they legitimately remove mass/AM (onto the star / in a wind). The closure check
   must credit `disc.Mdotacc` and a new photoevap accumulator, not flag them as
   violations.
+
+### 3.4b Setup lobby ("start a game" framing) — ✅ IMPLEMENTED
+*Added 2026-06-03 per user direction* — make configuring a run feel like setting
+up an Age-of-Empires / RPG match. The lab now opens in a **setup lobby**: the
+world is built and shown as a static, camera-orbitable preview, but physics does
+not advance until the user clicks **Begin Formation**. A launch overlay on the
+stage summarizes the chosen world (star mass, disc mass, α, dust:gas, seed count,
+world seed) and updates live as sliders move. `sim.started` gates the tick;
+`sim.paused` remains the post-launch play/pause. Reset = "replay this exact
+world" (rebuild from current cfg + seed, back to the lobby), which also fixes the
+prior slider-desync where reset silently reverted cfg to defaults. This is a UX
+layer over §3.1's determinism — the seed is the "world seed" the lobby exposes.
 
 ### 3.5 Phase 0 acceptance
 - Two runs with identical `{scenario, seed, cfg}` produce identical body tables

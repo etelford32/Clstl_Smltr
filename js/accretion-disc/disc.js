@@ -27,6 +27,7 @@ import {
 
 import { hzBoundaries, stellarTrack, xuvFlux1AU, planetHabitability } from './habitable.js';
 import { SCENARIOS, buildInitialBodies, updateRadius } from './scenarios.js';
+import { makeRng, randomSeed, normalizeSeed } from './rng.js';
 
 // Visual scale: 1 AU -> 5 scene units.
 const SCENE_PER_AU = 5;
@@ -46,11 +47,17 @@ const Z_EXAG = 2.5;
 const sim = {
     scenario: null,
     cfg: null,                // live overrides — see defaultCfg()
+    seed: 0,                  // world seed — (scenario, seed, cfg) reproduce a run
+    rng: null,                // seeded generator, rebuilt from `seed` on every rebuild
     disc:     null,
     bodies:   [],
     moonletDisc: null,        // post-Theia circumterrestrial debris disc
     ageYr:    0,
     timeWarpYrPerS: 2.5e3,
+    // Lifecycle: the lab opens in a "setup lobby" — the world is built and shown
+    // as a static preview, but physics does not advance until the user hits
+    // Begin Formation (started=true). `paused` is the post-launch play/pause.
+    started: false,
     paused: false,
     impactDone: false,
     moonSpawned: false,
@@ -113,19 +120,64 @@ function defaultCfg(scenario) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Public API
 // ─────────────────────────────────────────────────────────────────────────────
-export function boot({ canvas, ui, scenarioId = 'solar-system' }) {
+export function boot({ canvas, ui, scenarioId = 'solar-system', seed = null }) {
     sim.canvas = canvas;
     sim.ui = ui;
+    sim.seed = (seed != null) ? normalizeSeed(seed) : randomSeed();
     initScenario(scenarioId);
     initThree();
     bindUI();
+    refreshLifecycle();   // show the setup lobby, label the play button "Begin"
+    refreshPreview();     // place embryos + populate the HUD for the static preview
     loop();
     return {
         sim,
         applyConfig,
         getConfig: () => sim.cfg,
         getDefaults: () => defaultCfg(sim.scenario),
+        // ── World-seed + lifecycle API (drives the setup lobby) ──
+        getSeed: () => sim.seed,
+        setSeed,
+        reseed,
+        start: startSim,
+        reset: resetSim,
+        isStarted: () => sim.started,
     };
+}
+
+// ── World seed + lifecycle ──────────────────────────────────────────────────
+// Set an explicit seed (number or memorable string) and rebuild the world.
+// Returns to the setup lobby so the user re-launches their new universe.
+function setSeed(value) {
+    sim.seed = normalizeSeed(value);
+    returnToLobby();
+    return sim.seed;
+}
+// Roll a fresh random world and return to the lobby. Returns the new seed.
+function reseed() {
+    sim.seed = randomSeed();
+    returnToLobby();
+    return sim.seed;
+}
+// Begin the simulation: physics starts advancing from the previewed state.
+function startSim() {
+    sim.started = true;
+    sim.paused  = false;
+    refreshLifecycle();
+}
+// Reset replays the exact same world: rebuild from the current (scenario, seed,
+// cfg) — preserving the user's settings — and return to the setup lobby.
+function resetSim() {
+    returnToLobby();
+}
+// Rebuild from the current (scenario, seed, cfg) and drop back into the lobby as
+// a fresh static preview. rebuildWorld() reseeds the RNG, so the world is
+// reproduced identically; refreshPreview() (called inside rebuildWorld) repaints.
+function returnToLobby() {
+    rebuildWorld();
+    sim.started = false;
+    sim.paused  = false;
+    refreshLifecycle();
 }
 
 // Called from the slider panel. Accepts a partial (deep) override.
@@ -168,6 +220,10 @@ function initScenario(id) {
 // Does NOT touch the Three.js scene.
 function rebuildDiscAndBodies() {
     const cfg = sim.cfg;
+    // Re-seed the generator from the world seed at the START of every rebuild so
+    // that buildInitialBodies + jitter draw from the same fixed stream — a given
+    // (scenario, seed, cfg) therefore reproduces an identical world.
+    sim.rng = makeRng(sim.seed);
     const Mstar = cfg.star.Mstar_solar * M_SUN;
     const trk = stellarTrack(cfg.star.Mstar_solar, sim.ageYr);
     sim.disc = makeDiscGrid({
@@ -187,12 +243,12 @@ function rebuildDiscAndBodies() {
     }
 
     // Build embryos honoring cfg overrides.
-    sim.bodies = buildInitialBodies(sim.scenario);
+    sim.bodies = buildInitialBodies(sim.scenario, sim.rng);
     const out = [];
     for (const b of sim.bodies) {
         if (b.flagTheia && !cfg.embryos.includeTheia) continue;
         b.m *= cfg.embryos.seedMultiplier;
-        const jitter = cfg.embryos.jitterAU * (Math.random() * 2 - 1) * AU;
+        const jitter = cfg.embryos.jitterAU * (sim.rng() * 2 - 1) * AU;
         if (jitter !== 0) {
             const z0 = b.z || 0;
             const a = Math.sqrt(b.x*b.x + b.y*b.y + z0*z0);
@@ -214,9 +270,8 @@ function rebuildDiscAndBodies() {
     sim.bodies = out;
 }
 
-// Full live reset: rebuild physics + swap out the visual meshes.
-function rebuildWorld() {
-    // Tear down old visual companions.
+// Remove all per-body visual companions (meshes, trails, orbits, labels).
+function teardownBodyVisuals() {
     for (const m of sim.bodyMeshes) sim.scene.remove(m);
     for (const t of sim.bodyTrails) sim.scene.remove(t.line);
     for (const o of sim.bodyOrbits) sim.scene.remove(o.line);
@@ -225,6 +280,21 @@ function rebuildWorld() {
     sim.bodyTrails.length = 0;
     sim.bodyOrbits.length = 0;
     sim.bodyLabels.length = 0;
+}
+
+// Create mesh + trail + osculating-orbit + label for every live body.
+function rebuildBodyVisuals() {
+    for (const b of sim.bodies) {
+        const m = makeBodyMesh(b); sim.bodyMeshes.push(m); sim.scene.add(m);
+        const t = makeTrail(b.color); sim.bodyTrails.push(t); sim.scene.add(t.line);
+        const o = makeOrbit(b.color); sim.bodyOrbits.push(o); sim.scene.add(o.line);
+        const l = makeLabelSprite(b.name); sim.bodyLabels.push(l); sim.scene.add(l);
+    }
+}
+
+// Full live reset: rebuild physics + swap out the visual meshes.
+function rebuildWorld() {
+    teardownBodyVisuals();
     if (sim.flash) { sim.scene.remove(sim.flash.mesh); sim.flash = null; }
     removeDustCloud();
     sim.ageYr = sim.cfg.star.ageStartYr;
@@ -247,14 +317,12 @@ function rebuildWorld() {
             sim.scene.add(sim.discMesh);
         }
     }
-    for (const b of sim.bodies) {
-        const m = makeBodyMesh(b); sim.bodyMeshes.push(m); sim.scene.add(m);
-        const t = makeTrail(b.color); sim.bodyTrails.push(t); sim.scene.add(t.line);
-        const o = makeOrbit(b.color); sim.bodyOrbits.push(o); sim.scene.add(o.line);
-        const l = makeLabelSprite(b.name); sim.bodyLabels.push(l); sim.scene.add(l);
-    }
+    rebuildBodyVisuals();
     sim.dust = makeDustCloud();
     sim.scene.add(sim.dust.points);
+    // Reflect the new initial conditions immediately in the preview + HUD even
+    // while the sim is paused / in the lobby, so sliders feel responsive.
+    refreshPreview();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -947,7 +1015,10 @@ function pushTrail(t, x, y, z) {
 const MAX_SUBSTEPS_PER_FRAME = 120;
 
 function tick(dtRealS) {
-    if (sim.paused) return;
+    // In the setup lobby (not yet started) or while paused, physics is frozen —
+    // the scene still renders so the user can orbit the camera around their
+    // previewed world.
+    if (!sim.started || sim.paused) return;
 
     const Mstar = sim.cfg.star.Mstar_solar * M_SUN;
     const sec = sim.timeWarpYrPerS * dtRealS * YEAR;   // simulated seconds advanced this frame
@@ -1020,36 +1091,7 @@ function tick(dtRealS) {
     sim.disc.Lstar = trk.L_W;
     refreshHzRings();
 
-    // Push trails + body positions + osculating orbit + label tag.
-    // Mapping: physics-x → scene-x, physics-y → scene-z, physics-z → scene-y.
-    for (let i = 0; i < sim.bodies.length; i++) {
-        const b = sim.bodies[i];
-        const mesh  = sim.bodyMeshes[i];
-        const orbit = sim.bodyOrbits[i];
-        const label = sim.bodyLabels[i];
-        if (!b.alive) {
-            mesh.visible = false;
-            if (orbit) orbit.line.visible = false;
-            if (label) label.visible = false;
-            continue;
-        }
-        const xs = b.x / AU * SCENE_PER_AU;
-        const zs = b.y / AU * SCENE_PER_AU;
-        const ys = (b.z || 0) / AU * SCENE_PER_AU * Z_EXAG;
-        mesh.position.set(xs, ys, zs);
-        const baseR = mesh.userData.baseRadius || 0.35;
-        const radius = Math.max(0.18, 0.35 * Math.cbrt(b.m / M_EARTH));
-        mesh.scale.setScalar(radius / baseR);
-        // Slow visual self-rotation so the planets feel alive (purely cosmetic).
-        mesh.rotation.y += 0.01;
-        pushTrail(sim.bodyTrails[i], xs, ys, zs);
-        if (orbit) updateOrbit(orbit, b, Mstar);
-        if (label) {
-            label.visible = true;
-            // Pin label above the body; lift scales with body radius.
-            label.position.set(xs, ys + 0.8 + radius * 0.8, zs);
-        }
-    }
+    syncBodyVisuals(Mstar, { trail: true });
 
     // Snow line update.
     updateRing(sim.snowRing, snowLineAU(sim.disc.Lstar) * SCENE_PER_AU);
@@ -1061,6 +1103,61 @@ function tick(dtRealS) {
     updateDustCloud(sec);
 
     updateHud(trk);
+}
+
+// Position every body mesh / orbit / label from the current physics state.
+// Shared by tick() (running) and refreshPreview() (paused/lobby). `opts.trail`
+// appends to the motion trail and spins meshes — skipped for static previews.
+function syncBodyVisuals(Mstar, opts = {}) {
+    const trail = opts.trail === true;
+    // Mapping: physics-x → scene-x, physics-y → scene-z, physics-z → scene-y.
+    for (let i = 0; i < sim.bodies.length; i++) {
+        const b = sim.bodies[i];
+        const mesh  = sim.bodyMeshes[i];
+        const orbit = sim.bodyOrbits[i];
+        const label = sim.bodyLabels[i];
+        if (!mesh) continue;
+        if (!b.alive) {
+            mesh.visible = false;
+            if (orbit) orbit.line.visible = false;
+            if (label) label.visible = false;
+            continue;
+        }
+        mesh.visible = true;
+        const xs = b.x / AU * SCENE_PER_AU;
+        const zs = b.y / AU * SCENE_PER_AU;
+        const ys = (b.z || 0) / AU * SCENE_PER_AU * Z_EXAG;
+        mesh.position.set(xs, ys, zs);
+        const baseR = mesh.userData.baseRadius || 0.35;
+        const radius = Math.max(0.18, 0.35 * Math.cbrt(b.m / M_EARTH));
+        mesh.scale.setScalar(radius / baseR);
+        if (trail) {
+            // Slow visual self-rotation so the planets feel alive (cosmetic).
+            mesh.rotation.y += 0.01;
+            pushTrail(sim.bodyTrails[i], xs, ys, zs);
+        }
+        if (orbit) { orbit.line.visible = true; updateOrbit(orbit, b, Mstar); }
+        if (label) {
+            label.visible = true;
+            // Pin label above the body; lift scales with body radius.
+            label.position.set(xs, ys + 0.8 + radius * 0.8, zs);
+        }
+    }
+}
+
+// Paint the scene + HUD from the current static state without advancing
+// physics — used for the setup-lobby preview and after every rebuild.
+function refreshPreview() {
+    if (!sim.disc) return;
+    const Mstar = sim.cfg.star.Mstar_solar * M_SUN;
+    const trk = stellarTrack(sim.cfg.star.Mstar_solar, sim.ageYr);
+    sim.disc.Lstar = trk.L_W;
+    refreshHzRings();
+    syncBodyVisuals(Mstar, { trail: false });
+    updateRing(sim.snowRing, snowLineAU(sim.disc.Lstar) * SCENE_PER_AU);
+    updateDiscColors();
+    updateHud(trk);
+    updateSetupSummary();
 }
 
 function nearestIndex(arr, v) {
@@ -1452,39 +1549,64 @@ function formatAge(yr) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Setup lobby / lifecycle UI
+// ─────────────────────────────────────────────────────────────────────────────
+// Reflect started/paused state into the play button, the launch overlay, and
+// the stage watermark. Called on boot and on every lifecycle transition.
+function refreshLifecycle() {
+    const ui = sim.ui;
+    if (!ui) return;
+    if (ui.playBtn) {
+        ui.playBtn.textContent = !sim.started ? '▶ Begin Formation'
+                               : sim.paused   ? '▶ Resume'
+                               :                '❚❚ Pause';
+    }
+    // The launch overlay is visible only in the lobby (before first start).
+    if (ui.setupOverlay) ui.setupOverlay.classList.toggle('ad-hidden', sim.started);
+    if (ui.seedInput && document.activeElement !== ui.seedInput) {
+        ui.seedInput.value = String(sim.seed);
+    }
+    if (ui.watermark) {
+        ui.watermark.textContent = sim.started ? 'LBP α-disc · live' : 'LBP α-disc · ready';
+    }
+}
+
+// Populate the launch-overlay "world summary" from the current cfg + seed so it
+// reads like a game lobby: what star, how massive a disc, how many seeds.
+function updateSetupSummary() {
+    const ui = sim.ui;
+    if (!ui || !sim.cfg) return;
+    const c = sim.cfg;
+    ui.sumStar     && (ui.sumStar.textContent     = c.star.Mstar_solar.toFixed(2) + ' M☉');
+    ui.sumDisc     && (ui.sumDisc.textContent     = (c.disc.Mdisc_Msun * 1000).toFixed(1) + ' ×10⁻³ M☉');
+    ui.sumAlpha    && (ui.sumAlpha.textContent    = c.disc.alpha.toExponential(1));
+    ui.sumDust     && (ui.sumDust.textContent     = c.disc.dustGasRatio.toFixed(3));
+    ui.sumSeed     && (ui.sumSeed.textContent     = String(sim.seed));
+    if (ui.sumEmbryos) {
+        const n = sim.bodies ? sim.bodies.length : 0;
+        ui.sumEmbryos.textContent = n + ' planetesimal' + (n === 1 ? '' : 's');
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // UI bindings
 // ─────────────────────────────────────────────────────────────────────────────
 function bindUI() {
     const ui = sim.ui;
     if (!ui) return;
+    // Play button doubles as "Begin" while in the lobby.
     ui.playBtn?.addEventListener('click', () => {
-        sim.paused = !sim.paused;
-        ui.playBtn.textContent = sim.paused ? '▶ Resume' : '❚❚ Pause';
+        if (!sim.started) startSim();
+        else { sim.paused = !sim.paused; refreshLifecycle(); }
     });
-    ui.resetBtn?.addEventListener('click', () => {
-        for (const m of sim.bodyMeshes) sim.scene.remove(m);
-        for (const t of sim.bodyTrails) sim.scene.remove(t.line);
-        for (const o of sim.bodyOrbits) sim.scene.remove(o.line);
-        for (const l of sim.bodyLabels) sim.scene.remove(l);
-        sim.bodyMeshes.length = 0;
-        sim.bodyTrails.length = 0;
-        sim.bodyOrbits.length = 0;
-        sim.bodyLabels.length = 0;
-        if (sim.flash) { sim.scene.remove(sim.flash.mesh); sim.flash = null; }
-        removeDustCloud();
-        initScenario(sim.scenario.id);
-        sim.lastMdotacc = 0;
-        sim.lastMdotAgeYr = sim.ageYr;
-        sim.mdotEMA = NaN;
-        for (const b of sim.bodies) {
-            const m = makeBodyMesh(b); sim.bodyMeshes.push(m); sim.scene.add(m);
-            const t = makeTrail(b.color); sim.bodyTrails.push(t); sim.scene.add(t.line);
-            const o = makeOrbit(b.color); sim.bodyOrbits.push(o); sim.scene.add(o.line);
-            const l = makeLabelSprite(b.name); sim.bodyLabels.push(l); sim.scene.add(l);
-        }
-        sim.dust = makeDustCloud();
-        sim.scene.add(sim.dust.points);
-    });
+    // Big launch button inside the stage overlay.
+    ui.beginBtn?.addEventListener('click', () => startSim());
+    ui.resetBtn?.addEventListener('click', () => resetSim());
+
+    // World-seed controls: edit a seed, or roll a brand-new world.
+    ui.seedInput?.addEventListener('change', () => setSeed(ui.seedInput.value));
+    ui.seedReroll?.addEventListener('click', () => { reseed(); updateSetupSummary(); });
+
     ui.warpSlider?.addEventListener('input', () => {
         const v = +ui.warpSlider.value / 1000;        // 0..1
         // Log scale 1e2 .. 1e6 yr/sec.
