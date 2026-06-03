@@ -266,8 +266,16 @@ nav {
     font-size:10px; font-weight:600; font-variant-numeric:tabular-nums;
 }
 
+/* ─── Spectrum canvas ────────────────────────────────────────── */
+#spec-canvas {
+    width:100%; height:auto; display:block;
+    border:1px solid rgba(64,128,255,.18); border-radius:5px;
+    background:#02030a;
+}
+
 /* ─── Data table ─────────────────────────────────────────────── */
 .dtbl { width:100%; border-collapse:collapse; font-size:11px; }
+.dtbl td.hot { color:#ffd24a !important; }
 .dtbl td { padding:3px 4px; border-bottom:1px solid rgba(255,255,255,.04); vertical-align:top; }
 .dtbl td:first-child { color:#777; width:46%; }
 .dtbl td:last-child  { color:#80d8ff; text-align:right; font-weight:600; }
@@ -347,6 +355,7 @@ nav {
             <div>v<sub>∞</sub>: <span class="val" id="hud-vinf">5000</span> <span class="dim">km/s</span></div>
             <div>β: <span class="val" id="hud-beta">0.80</span></div>
             <div>Ṁ: <span class="val" id="hud-mdot">1.0×10⁻⁵</span> <span class="dim">M☉/yr</span></div>
+            <div>η: <span class="val" id="hud-eta">--</span> <span class="dim">Ṁv∞c/L</span></div>
             <div class="sep"></div>
             <div>Wind particles: <span class="val" id="hud-particles">3000</span></div>
             <div>FPS: <span id="fps-display">--</span></div>
@@ -408,6 +417,11 @@ nav {
                         <input type="range" id="sl-mdot" min="-7" max="-4" step="0.1" value="-5">
                         <span class="vdisp" id="disp-mdot">10⁻⁵</span>
                     </div>
+                    <div class="ctrl">
+                        <label>Clumping</label>
+                        <input type="range" id="sl-clump" min="1" max="10" step="0.5" value="4">
+                        <span class="vdisp" id="disp-clump">4.0×</span>
+                    </div>
                 </div>
             </div>
 
@@ -428,16 +442,20 @@ nav {
                         <label for="tog-inner">Inner wind zone</label>
                     </div>
                     <div class="toggle-row">
-                        <input type="checkbox" id="tog-shell1" checked>
-                        <label for="tog-shell1">HeII ionization zone (r=1.8)</label>
+                        <input type="checkbox" id="tog-vol" checked>
+                        <label for="tog-vol">Volumetric wind (ρ², clumped)</label>
                     </div>
                     <div class="toggle-row">
-                        <input type="checkbox" id="tog-shell2" checked>
-                        <label for="tog-shell2">OVI emission nebula (r=3.2)</label>
+                        <input type="checkbox" id="tog-shell1">
+                        <label for="tog-shell1">HeII shell — smooth (r=1.8)</label>
                     </div>
                     <div class="toggle-row">
-                        <input type="checkbox" id="tog-corona" checked>
-                        <label for="tog-corona">Extended corona</label>
+                        <input type="checkbox" id="tog-shell2">
+                        <label for="tog-shell2">OVI shell — smooth (r=3.2)</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-corona">
+                        <label for="tog-corona">Extended corona — smooth</label>
                     </div>
                 </div>
             </div>
@@ -451,6 +469,38 @@ nav {
                         <button id="cam-close">Close-up</button>
                         <button id="cam-wide">Wide</button>
                     </div>
+                </div>
+            </div>
+
+            <!-- 4b. Synthetic spectrum -->
+            <div class="sec" id="sec-spec">
+                <div class="sec-hd"><span>Synthetic Spectrum</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <canvas id="spec-canvas" width="540" height="250"></canvas>
+                    <div class="note-text" style="margin-top:6px">
+                        Emission-line spectrum of the wind. Line <strong>width</strong>
+                        tracks v<sub>∞</sub> (Doppler), <strong>strength</strong> tracks
+                        Ṁ, and <strong>which ions</strong> appear tracks T<sub>eff</sub>
+                        (ionization). The O VI 3811/34 Å doublet is the defining WO marker.
+                    </div>
+                </div>
+            </div>
+
+            <!-- 4c. Derived physics -->
+            <div class="sec" id="sec-derived">
+                <div class="sec-hd"><span>Derived Quantities</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <table class="dtbl">
+                        <tr><td>Wind momentum η</td><td id="dv-eta">—</td></tr>
+                        <tr><td>L<sub>wind</sub> = ½Ṁv∞²</td><td id="dv-lwind">—</td></tr>
+                        <tr><td>L<sub>wind</sub> / L<sub>★</sub></td><td id="dv-lfrac">—</td></tr>
+                        <tr><td>Eddington Γ</td><td id="dv-edd">—</td></tr>
+                        <tr><td>v<sub>esc</sub></td><td id="dv-vesc">—</td></tr>
+                        <tr><td>v<sub>∞</sub> / v<sub>esc</sub></td><td id="dv-vratio">—</td></tr>
+                        <tr><td>λ<sub>peak</sub> (Wien)</td><td id="dv-lpeak">—</td></tr>
+                        <tr><td>Mass-loss time M/Ṁ</td><td id="dv-tau">—</td></tr>
+                    </table>
+                    <div class="note-text" id="dv-eta-note" style="margin-top:6px"></div>
                 </div>
             </div>
 
@@ -541,6 +591,7 @@ const uniforms = {
     u_beta:    { value: 0.8 },
     u_mdot:    { value: 1e-5 },
     u_rot:     { value: 1.0 },
+    u_clump:   { value: 4.0 },   // wind clumping factor (1 = smooth)
 };
 
 // ────────────────────────────────────────────────────────────────
@@ -891,6 +942,136 @@ const coronaMesh = new THREE.Mesh(
     })
 );
 scene.add(coronaMesh);
+
+// The smooth analytic shells above are kept as a "legacy" comparison layer
+// but are off by default — the volumetric wind below supersedes them with
+// physically-grounded density and emission.
+heiiMesh.visible   = false;
+oviMesh.visible    = false;
+coronaMesh.visible = false;
+
+// ────────────────────────────────────────────────────────────────
+//  VOLUMETRIC CLUMPED WIND  — raymarched emission integral
+//  ρ(r) ∝ Ṁ / (r² · v(r))   with β-law v(r) = v∞(1 − R★/r)^β
+//  Emissivity ∝ ρ² (recombination/collisional), integrated along the
+//  view ray. Clumping multiplies density by an advected noise field
+//  (real WR winds are porous, clumping factor ~4–10), and a 4-armed
+//  co-rotating interaction region (CIR) spiral modulates the azimuth.
+//  Ionization stratification sets colour: O VI (teal) inner → He II
+//  (cyan) → cool blue outer.
+// ────────────────────────────────────────────────────────────────
+const volVS = /* glsl */`
+    varying vec3 vWorld;
+    void main() {
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vWorld  = wp.xyz;
+        gl_Position = projectionMatrix * viewMatrix * wp;
+    }
+`;
+const volFS = /* glsl */`
+    precision highp float;
+    uniform float u_time, u_teff, u_vinf, u_beta, u_mdot, u_rot, u_clump;
+    varying vec3 vWorld;
+
+    float h3(vec3 p){ p=fract(p*vec3(127.1,311.7,74.7)); p+=dot(p,p+19.19); return fract(p.x*p.y*p.z); }
+    float vn(vec3 p){
+        vec3 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);
+        return mix(mix(mix(h3(i),h3(i+vec3(1,0,0)),u.x),mix(h3(i+vec3(0,1,0)),h3(i+vec3(1,1,0)),u.x),u.y),
+                   mix(mix(h3(i+vec3(0,0,1)),h3(i+vec3(1,0,1)),u.x),mix(h3(i+vec3(0,1,1)),h3(i+vec3(1,1,1)),u.x),u.y),u.z);
+    }
+    float fbm(vec3 p){
+        float v=0.0,a=0.5;
+        for(int i=0;i<4;i++){ v+=a*vn(p); p=p*2.07+vec3(19.1,7.3,31.7); a*=0.5; }
+        return v;
+    }
+    // β-law normalised velocity v(r)/v∞
+    float vprof(float r){
+        if (r <= 1.0) return 0.04;
+        return max(pow(1.0 - 1.0/r, u_beta), 0.04);
+    }
+    void main() {
+        const float R_OUT  = 5.5;
+        const float R_STAR = 1.0;
+        const int   STEPS  = 36;
+
+        vec3 ro = cameraPosition;
+        vec3 rd = normalize(vWorld - cameraPosition);
+
+        // Ray vs outer bounding sphere
+        float b = dot(ro, rd);
+        float c = dot(ro, ro) - R_OUT*R_OUT;
+        float disc = b*b - c;
+        if (disc < 0.0) discard;
+        float sq = sqrt(disc);
+        float t0 = max(-b - sq, 0.0);
+        float t1 = -b + sq;
+
+        // Stop the integral at the near face of the opaque core
+        float cc = dot(ro, ro) - R_STAR*R_STAR;
+        float dC = b*b - cc;
+        if (dC > 0.0) {
+            float tn = -b - sqrt(dC);
+            if (tn > t0) t1 = min(t1, tn);
+        }
+        if (t1 <= t0) discard;
+
+        float dt = (t1 - t0) / float(STEPS);
+        float t  = t0 + dt * 0.5;
+        float clumpAmt = clamp((u_clump - 1.0) / 9.0, 0.0, 1.0);
+        float rotPh    = u_time * 0.03 * u_rot;
+        vec3  acc = vec3(0.0);
+
+        for (int i = 0; i < STEPS; i++) {
+            vec3  P = ro + rd * t;
+            float r = length(P);
+            if (r > R_STAR) {
+                vec3  dir = P / r;
+                float v   = vprof(r);
+                float dens = 1.0 / (r * r * v);            // ∝ Ṁ/(r² v)
+
+                // Clumping: advected outward with the wind, scaled by factor
+                vec3  np  = P * 1.6 + dir * (u_time * 0.06);
+                float cn  = fbm(np);
+                float clump = mix(1.0, cn * cn * 4.0, clumpAmt);
+
+                // Co-rotating interaction region: 4-arm azimuthal density spiral
+                float phi  = atan(P.z, P.x);
+                float spir = 0.65 + 0.35 * cos(4.0 * (phi - r * 0.9 + rotPh));
+
+                dens *= clump * spir;
+                float emiss = dens * dens;                 // ρ² emission
+
+                // Ionization stratification → colour by radius
+                vec3 oVI  = vec3(0.20, 0.95, 0.78);        // O VI teal  (inner, hottest)
+                vec3 heII = vec3(0.12, 0.62, 1.00);        // He II cyan (mid)
+                vec3 cool = vec3(0.10, 0.28, 0.85);        // cool blue  (outer)
+                vec3 col  = mix(oVI, heII, smoothstep(1.4, 2.6, r));
+                col       = mix(col, cool, smoothstep(2.6, 4.6, r));
+
+                acc += col * emiss * dt;
+            }
+            t += dt;
+        }
+
+        // Brightness scaling: mass-loss raises the emission measure,
+        // temperature raises ionization/emissivity of the optical lines.
+        float mdotS = clamp(u_mdot * 1e5, 0.05, 60.0);
+        acc *= mdotS * 0.16;
+        acc *= 0.55 + 0.45 * clamp(u_teff / 210000.0, 0.0, 1.4);
+
+        gl_FragColor = vec4(acc, 1.0);
+    }
+`;
+const volMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(5.5, 32, 32),
+    new THREE.ShaderMaterial({
+        vertexShader: volVS, fragmentShader: volFS, uniforms,
+        transparent: true, depthWrite: false, depthTest: false,
+        blending: THREE.AdditiveBlending, side: THREE.BackSide,
+    })
+);
+volMesh.renderOrder = 2;
+scene.add(volMesh);
 
 // ────────────────────────────────────────────────────────────────
 //  WIND PARTICLE SYSTEM  — β-law, GPU-animated
@@ -1248,9 +1429,243 @@ document.getElementById('sl-mdot').addEventListener('input', function() {
     document.getElementById('hud-mdot').textContent  = '10^' + exp;
 });
 
+// ────────────────────────────────────────────────────────────────
+//  CLUMPING SLIDER  +  VOLUMETRIC WIND TOGGLE
+// ────────────────────────────────────────────────────────────────
+document.getElementById('sl-clump').addEventListener('input', function() {
+    const v = +this.value;
+    uniforms.u_clump.value = v;
+    document.getElementById('disp-clump').textContent = v.toFixed(1) + '×';
+});
+document.getElementById('tog-vol').addEventListener('change', e => { volMesh.visible = e.target.checked; });
+
+// ════════════════════════════════════════════════════════════════
+//  SCIENCE PANELS  — synthetic spectrum + derived quantities
+//  These turn the aesthetic sliders into a quantitative instrument.
+// ════════════════════════════════════════════════════════════════
+
+// ── Physical constants (SI) + WR-102 reference parameters ─────────
+const PHYS = {
+    Msun: 1.989e30, Rsun: 6.957e8, Lsun: 3.828e26,
+    G: 6.674e-11, c: 2.998e8, yr: 3.1557e7,
+    bWien: 2.898e-3,   // Wien displacement (m·K)
+    kappa: 0.02,       // electron-scattering opacity (m²/kg, He-rich)
+    M: 17, R: 0.4, logL: 5.45,   // M/M☉, R/R☉, log10(L/L☉)
+};
+
+function fmtExp(x, sig = 2) {
+    if (!isFinite(x) || x === 0) return '0';
+    const e = Math.floor(Math.log10(Math.abs(x)));
+    const m = x / Math.pow(10, e);
+    if (e >= -1 && e <= 3) return x.toPrecision(sig + 1);
+    return m.toFixed(sig) + '×10' + supExp(e);
+}
+function supExp(e) {
+    const sup = { '-':'⁻','0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹' };
+    return String(e).split('').map(c => sup[c] || c).join('');
+}
+
+// ── Derived quantities ────────────────────────────────────────────
+function updateDerived() {
+    const vinf = uniforms.u_vinf.value * 1000;                 // m/s
+    const mdot = uniforms.u_mdot.value * PHYS.Msun / PHYS.yr;  // kg/s
+    const Teff = uniforms.u_teff.value;                        // K
+    const M = PHYS.M * PHYS.Msun;
+    const R = PHYS.R * PHYS.Rsun;
+    const L = Math.pow(10, PHYS.logL) * PHYS.Lsun;             // W
+
+    const Lwind = 0.5 * mdot * vinf * vinf;                    // W
+    const eta   = mdot * vinf * PHYS.c / L;                    // momentum ratio
+    const Ledd  = 4 * Math.PI * PHYS.G * M * PHYS.c / PHYS.kappa;
+    const gamma = L / Ledd;
+    const vesc  = Math.sqrt(2 * PHYS.G * M / R);               // m/s
+    const lpeak = PHYS.bWien / Teff;                           // m
+    const tau   = (PHYS.M * PHYS.Msun) / mdot / PHYS.yr;       // yr
+
+    const set = (id, txt) => { document.getElementById(id).textContent = txt; };
+    set('dv-eta',   eta.toFixed(2));
+    set('dv-lwind', fmtExp(Lwind) + ' W');
+    set('dv-lfrac', (Lwind / L * 100).toFixed(1) + ' %');
+    set('dv-edd',   gamma.toFixed(2));
+    set('dv-vesc',  Math.round(vesc / 1000) + ' km/s');
+    set('dv-vratio',(vinf / vesc).toFixed(2));
+
+    // Wavelength + spectral band of the blackbody peak
+    const lnm = lpeak * 1e9;
+    let band;
+    if      (lnm < 10)  band = 'X-ray';
+    else if (lnm < 121) band = 'EUV';
+    else if (lnm < 380) band = 'UV';
+    else if (lnm < 750) band = 'visible';
+    else                band = 'IR';
+    set('dv-lpeak', (lnm < 1 ? (lpeak * 1e10).toFixed(1) + ' Å' : lnm.toFixed(1) + ' nm') + ' · ' + band);
+    set('dv-tau',   fmtExp(tau) + ' yr');
+
+    // HUD η + emphasis when wind is in the multiple-scattering regime
+    const hudEta = document.getElementById('hud-eta');
+    hudEta.textContent = eta.toFixed(1);
+    const etaCell = document.getElementById('dv-eta');
+    const note    = document.getElementById('dv-eta-note');
+    if (eta > 1) {
+        etaCell.classList.add('hot');
+        note.innerHTML = '<strong>η &gt; 1:</strong> the wind carries more momentum than a ' +
+            'single pass of the star’s light — photons must scatter ' +
+            'multiple times to drive it. A hallmark of Wolf-Rayet winds.';
+    } else {
+        etaCell.classList.remove('hot');
+        note.innerHTML = 'η &lt; 1: a single-scattering radiation-driven wind ' +
+            '(like an O star). Raise Ṁ or v∞ to reach the WR regime.';
+    }
+}
+
+// ── Synthetic emission-line spectrum ──────────────────────────────
+// WO/WC/WN line list: rest wavelength (Å), ion, optimal ionization
+// temperature + Gaussian width (K), and base relative strength.
+const SPEC_LINES = [
+    { l: 3811, ion: 'O VI',  Topt: 200000, Tw: 60000, s: 1.7 },
+    { l: 3834, ion: 'O VI',  Topt: 200000, Tw: 60000, s: 1.0 },
+    { l: 4341, ion: 'O VI',  Topt: 195000, Tw: 60000, s: 0.5 },
+    { l: 4658, ion: 'C IV',  Topt: 95000,  Tw: 45000, s: 0.8 },
+    { l: 4686, ion: 'He II', Topt: 85000,  Tw: 48000, s: 1.2 },
+    { l: 5290, ion: 'O VI',  Topt: 190000, Tw: 60000, s: 0.7 },
+    { l: 5411, ion: 'He II', Topt: 85000,  Tw: 48000, s: 0.6 },
+    { l: 5592, ion: 'O V',   Topt: 150000, Tw: 50000, s: 0.7 },
+    { l: 5808, ion: 'C IV',  Topt: 95000,  Tw: 45000, s: 1.1 },
+    { l: 5876, ion: 'He I',  Topt: 32000,  Tw: 22000, s: 0.6 },
+    { l: 6560, ion: 'He II', Topt: 85000,  Tw: 48000, s: 0.7 },
+];
+const SPEC_MIN = 3650, SPEC_MAX = 6750;   // Å window
+
+// Approximate visible-spectrum colour for a wavelength (Å)
+function waveRGB(angstrom) {
+    const wl = angstrom / 10;  // nm
+    let r = 0, g = 0, b = 0;
+    if      (wl < 380) { r = 0.35; g = 0.0;  b = 0.6; }
+    else if (wl < 440) { r = (440 - wl) / 60 * 0.6; g = 0; b = 1; }
+    else if (wl < 490) { r = 0; g = (wl - 440) / 50; b = 1; }
+    else if (wl < 510) { r = 0; g = 1; b = (510 - wl) / 20; }
+    else if (wl < 580) { r = (wl - 510) / 70; g = 1; b = 0; }
+    else if (wl < 645) { r = 1; g = (645 - wl) / 65; b = 0; }
+    else if (wl < 780) { r = 1; g = 0; b = 0; }
+    else               { r = 0.6; g = 0; b = 0; }
+    return [r, g, b];
+}
+
+const specCanvas = document.getElementById('spec-canvas');
+const specCtx    = specCanvas.getContext('2d');
+
+function drawSpectrum() {
+    const W = specCanvas.width, H = specCanvas.height;
+    const ctx = specCtx;
+    const vinf = uniforms.u_vinf.value;        // km/s
+    const Teff = uniforms.u_teff.value;        // K
+    const mdot = uniforms.u_mdot.value;        // M☉/yr
+
+    const plotB = H - 26;     // baseline (leave room for wavelength axis)
+    const plotT = 16;         // top margin (room for line labels)
+    const xOf = a => (a - SPEC_MIN) / (SPEC_MAX - SPEC_MIN) * W;
+
+    // Mass-loss scaling of line strength (emission measure ∝ density)
+    const mdotFac = Math.pow(mdot / 1e-5, 0.7);
+
+    // Precompute per-line peak strength + Doppler width (σ in Å)
+    const lines = SPEC_LINES.map(L => {
+        const ionFac = Math.exp(-Math.pow((Teff - L.Topt) / L.Tw, 2));
+        const sigma  = (vinf / 299792.458) * L.l / 2.355;   // FWHM→σ
+        return { ...L, str: L.s * ionFac * mdotFac, sigma: Math.max(sigma, 1.5) };
+    });
+
+    // Sample the spectrum: faint Rayleigh-Jeans continuum + emission lines
+    const NS = W;
+    const inten = new Float32Array(NS);
+    let maxI = 1e-6;
+    for (let i = 0; i < NS; i++) {
+        const a = SPEC_MIN + (i / (NS - 1)) * (SPEC_MAX - SPEC_MIN);
+        let y = 0.04 * Math.pow(4500 / a, 4);   // continuum (rises to blue)
+        for (const L of lines) {
+            if (L.str < 1e-4) continue;
+            const d = (a - L.l) / L.sigma;
+            if (Math.abs(d) < 4.5) y += L.str * Math.exp(-d * d);
+        }
+        inten[i] = y;
+        if (y > maxI) maxI = y;
+    }
+
+    // ── Render ───────────────────────────────────────────────
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = '#02030a';
+    ctx.fillRect(0, 0, W, H);
+
+    // Wavelength grid + axis labels
+    ctx.strokeStyle = 'rgba(64,128,255,.12)';
+    ctx.fillStyle   = '#5566aa';
+    ctx.font        = '15px monospace';
+    ctx.textAlign   = 'center';
+    ctx.lineWidth   = 1;
+    for (let a = 4000; a <= 6500; a += 500) {
+        const x = xOf(a);
+        ctx.beginPath(); ctx.moveTo(x, plotT); ctx.lineTo(x, plotB); ctx.stroke();
+        ctx.fillText(a + 'Å', x, H - 8);
+    }
+
+    // Visible-spectrum reference strip along the baseline
+    for (let x = 0; x < W; x += 2) {
+        const a = SPEC_MIN + (x / W) * (SPEC_MAX - SPEC_MIN);
+        const [r, g, b] = waveRGB(a);
+        ctx.fillStyle = `rgba(${r*255|0},${g*255|0},${b*255|0},0.55)`;
+        ctx.fillRect(x, plotB + 1, 2, 4);
+    }
+
+    // Emission curve, colour-coded by wavelength, filled to baseline
+    const yOf = v => plotB - (v / maxI) * (plotB - plotT);
+    for (let i = 0; i < NS - 1; i++) {
+        const a = SPEC_MIN + (i / (NS - 1)) * (SPEC_MAX - SPEC_MIN);
+        const [r, g, b] = waveRGB(a);
+        ctx.fillStyle = `rgba(${r*255|0},${g*255|0},${b*255|0},0.85)`;
+        const yy = yOf(inten[i]);
+        ctx.fillRect(i, yy, 1.4, plotB - yy);
+    }
+    // Crisp top contour
+    ctx.beginPath();
+    ctx.moveTo(0, yOf(inten[0]));
+    for (let i = 1; i < NS; i++) ctx.lineTo(i, yOf(inten[i]));
+    ctx.strokeStyle = 'rgba(220,240,255,.85)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Label the strongest lines (collapse doublets sharing a label/region)
+    const labeled = [...lines].filter(L => L.str > maxI * 0.18)
+        .sort((a, b) => b.str - a.str);
+    const used = [];
+    ctx.textAlign = 'center';
+    ctx.font = '14px monospace';
+    for (const L of labeled) {
+        const x = xOf(L.l);
+        if (used.some(u => Math.abs(u - x) < 46)) continue;
+        used.push(x);
+        const yTop = yOf(L.str + 0.04 * Math.pow(4500 / L.l, 4));
+        ctx.strokeStyle = 'rgba(255,255,255,.25)';
+        ctx.beginPath(); ctx.moveTo(x, yTop); ctx.lineTo(x, plotT + 2); ctx.stroke();
+        ctx.fillStyle = '#cfe2ff';
+        ctx.fillText(L.ion, x, plotT - 2);
+    }
+}
+
+function refreshScience() { updateDerived(); drawSpectrum(); }
+
+// Keep the science panels in sync with every parameter slider.
+['sl-teff', 'sl-vinf', 'sl-mdot', 'sl-beta'].forEach(id =>
+    document.getElementById(id).addEventListener('input', refreshScience));
+
+// Redraw the spectrum at correct resolution when its section is opened.
+document.getElementById('sec-spec').querySelector('.sec-hd')
+    .addEventListener('click', () => requestAnimationFrame(drawSpectrum));
+
+refreshScience();
+
 console.log('%c[WR-102 · Full Simulation]', 'color:#4080ff;font-weight:bold;font-size:13px');
 console.log('  Domain-warped turbulent photosphere | β-law wind particles');
-console.log('  HeII ionization zone | OVI emission nebula | Extended corona');
+console.log('  Volumetric clumped wind (ρ²) | synthetic spectrum | derived physics');
 </script>
 </body>
 </html>
