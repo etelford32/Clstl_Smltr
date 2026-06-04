@@ -1706,6 +1706,61 @@ body {
     flex-shrink: 0;
 }
 
+/* ─── Space-weather regime + scenario controls ─────────── */
+/* The honesty surface: a live readout of which regime the scrubbed
+   instant is in (live / observed / forecast / scenario) plus the skill
+   caveat, and one-click forward storm scenarios. */
+.op-sw-regime {
+    display:flex; align-items:center; gap:7px;
+    font-size:.66rem; line-height:1.35;
+    color:#9bd;
+    padding:5px 8px; margin-bottom:8px;
+    border-radius:6px;
+    background:rgba(0,200,200,.05);
+    border:1px solid rgba(0,200,200,.14);
+}
+.op-sw-regime-dot {
+    width:8px; height:8px; border-radius:50%;
+    background:currentColor; box-shadow:0 0 6px currentColor;
+    flex-shrink:0;
+}
+.op-sw-regime--live     { color:#0fa; border-color:rgba(0,255,170,.28); }
+.op-sw-regime--observed { color:#6cf; border-color:rgba(110,200,255,.28); }
+.op-sw-regime--forecast { color:#fc6; border-color:rgba(255,200,100,.28); background:rgba(255,200,100,.04); }
+.op-sw-regime--scenario { color:#f9a; border-color:rgba(255,140,200,.32); background:rgba(255,140,200,.05); }
+.op-sw-regime-text { min-width:0; }
+.op-sw-regime-cav  { color:#889; font-size:.6rem; }
+
+.op-sw-scn-label {
+    font-size:.58rem; text-transform:uppercase; letter-spacing:.1em;
+    color:#667; font-weight:700;
+    margin:10px 0 5px;
+    padding-top:8px;
+    border-top:1px solid rgba(255,255,255,.05);
+}
+.op-sw-scenarios { display:flex; flex-wrap:wrap; gap:4px; }
+.op-sw-scn {
+    background:rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.12);
+    color:#aab;
+    font:inherit; font-size:.66rem; font-weight:600;
+    padding:4px 10px;
+    border-radius:999px;
+    cursor:pointer;
+    transition:all .12s;
+}
+.op-sw-scn:hover { color:#fff; border-color:rgba(255,255,255,.28); }
+.op-sw-scn--on {
+    background:rgba(255,140,200,.16);
+    border-color:rgba(255,140,200,.5);
+    color:#f9a;
+}
+.op-sw-scn[data-scn=""].op-sw-scn--on {
+    background:rgba(0,255,170,.14);
+    border-color:rgba(0,255,170,.45);
+    color:#0fa;
+}
+
 /* ─── Provenance affordance ─────────────────────────────── */
 [data-prov-key] {
     text-decoration: underline dotted rgba(0,255,200,.22);
@@ -2065,6 +2120,11 @@ body {
                 <div class="op-deck-empty">Loading catalogs…</div>
             </div>
             <div class="op-layer-section" style="margin-top:10px">Overlays</div>
+            <label class="op-layer-row" title="Thermospheric drag shell at ~450 km. Brightens with the space-weather state at the scrubbed time — the drag the fleet is flying through.">
+                <input type="checkbox" id="op-toggle-dragshell">
+                <span class="op-layer-dot" style="color:#fc6;background:#fc6"></span>
+                <span class="op-layer-name">Atmospheric drag shell</span>
+            </label>
             <label class="op-layer-row">
                 <input type="checkbox" id="op-toggle-density">
                 <span class="op-layer-dot" style="color:#f9a;background:#f9a"></span>
@@ -2072,7 +2132,11 @@ body {
             </label>
         </div>
         <div class="op-panel">
-            <h2>Indices</h2>
+            <h2 title="Space-weather drivers at the scrubbed time. Past = observed (persisted), future = forecast with a band that widens with horizon.">Space weather · drivers</h2>
+            <div id="op-sw-regime" class="op-sw-regime op-sw-regime--live">
+                <span class="op-sw-regime-dot"></span>
+                <span class="op-sw-regime-text">Live</span>
+            </div>
             <div class="op-indices">
                 <div class="op-index-row">
                     <span class="op-index-k">F10.7</span>
@@ -2084,6 +2148,20 @@ body {
                     <span class="op-index-v" id="op-idx-ap"></span>
                     <span class="op-index-w" id="op-idx-ap-w"></span>
                 </div>
+                <div class="op-index-row" title="Neutral mass density at 450 km — the drag floor the fleet flies through. Drives the atmospheric drag shell.">
+                    <span class="op-index-k">ρ 450</span>
+                    <span class="op-index-v" id="op-idx-rho"></span>
+                    <span class="op-index-w"></span>
+                </div>
+            </div>
+            <div class="op-sw-scn-label">Forecast scenario</div>
+            <div id="op-sw-scenarios" class="op-sw-scenarios">
+                <button type="button" class="op-sw-scn op-sw-scn--on" data-scn=""
+                        title="No injected storm — F10.7 persistence + climatology-relaxed Ap.">Live forecast</button>
+                <button type="button" class="op-sw-scn" data-scn="gannon"
+                        title="Inject a Gannon-class G5 storm into the forward window (what-if). Scrub forward to watch the shell brighten and decay ETAs shorten.">Gannon G5</button>
+                <button type="button" class="op-sw-scn" data-scn="starlink"
+                        title="Inject the Feb-2022 Starlink-class storm into the forward window (what-if).">Feb-2022</button>
             </div>
         </div>
     </aside>
@@ -2218,6 +2296,11 @@ import { provStore }          from './js/operations/provenance.js';
 import { bindBand }           from './js/operations/bands.js';
 import { delta, attachDelta } from './js/operations/delta.js';
 import { startSwpcBridge }    from './js/operations/swpc-bridge.js';
+import {
+    startSwDriver, STORM_PRESETS, setScenario, getScenario,
+    onScenario, evalSpaceWeatherAt,
+}                            from './js/operations/sw-model.js';
+import { DragShell }          from './js/operations/drag-shell.js';
 import { MyFleet }            from './js/operations/my-fleet.js';
 import {
     mountMyFleet, mountDecayWatch, mountConjunctions, mountPropBudget,
@@ -2402,12 +2485,28 @@ layerLoad
     })
     .catch(err => console.warn('[operations] layer load failed:', err));
 
-/* ─── Live SWPC indices (overrides synthetic from mountIndices) ─ */
-// Synthetic F10.7/Ap stand-ins from mountIndices() stay in place
-// until the first swpc-update event lands; the bridge then
-// overwrites those records with cacheState='live' and the Δ icons
-// activate naturally on the value transition.
+/* ─── Live SWPC feed → space-weather anchor ─────────────── */
+// The bridge no longer writes idx.* directly; it feeds the live F10.7 / Ap
+// "anchor" into sw-model. Until the first swpc-update lands the driver
+// publishes cacheState='synthetic' values, then flips to 'live' on the
+// first anchor — and the Δ icons activate naturally on that transition.
 const stopSwpcBridge = startSwpcBridge();
+
+// Space-weather TIME model: turns simTimeMs into the F10.7 / Ap (and the
+// drag-shell density) at the scrubbed instant, and is the single writer of
+// idx.f107 / idx.ap. Decay Watch + Prop Budget already recompute on those
+// keys, so this is the coupling — scrub into a forecast storm and the decay
+// ETAs shorten. Started before the deck mounts so they read live values on
+// first paint rather than the ?? 150/15 fallbacks.
+const stopSwDriver = startSwDriver();
+
+/* ─── Atmospheric drag shell (globe layer) ─────────────── */
+// The forecast made visible. Brightness/colour track drag.rho450 — the same
+// density the decay maths consume — so a forecast storm visibly brightens
+// the shell as it shortens the ETAs. On by default; toggled in Layers.
+const dragShellOn = localStorage.getItem('op-dragshell') !== 'off';
+const dragShell = new DragShell(globe, { visible: dragShellOn });
+globe.onTick(() => dragShell.tick());
 
 /* ─── My Fleet + decision deck + visuals ───────────────── */
 const myFleet = new MyFleet(fleet.tracker);
@@ -2633,28 +2732,13 @@ function mountLayerPanel(fleet) {
     });
 }
 
-/* ─── Indices (synthetic stand-ins; step 9 wires real SWPC) ── */
+/* ─── Indices (bound to the sw-model driver's provStore keys) ── */
+// The values themselves are owned by startSwDriver() (sw-model.js): it
+// writes idx.f107 / idx.ap / drag.rho450 at the scrubbed simTime, with a
+// regime-aware cacheState ('live' / 'observed' / 'forecast' / 'synthetic'
+// before the first SWPC fetch). Here we only set up the band + Δ bindings
+// so those surfaces reactively re-render as the driver republishes.
 function mountIndices() {
-    // The cacheState 'synthetic' makes the tooltip pill say "Synthetic"
-    // so operators see immediately that these are placeholders, not
-    // live SWPC numbers. The σ values mirror NOAA's published
-    // 27-day forecast spread for F10.7 and the typical short-horizon
-    // Ap forecast residual.
-    provStore.set('idx.f107', {
-        value: 142, unit: 'SFU', sigma: 12,
-        source: 'NOAA SWPC RTSW (synthetic stand-in)',
-        model:  'NOAA 27-day ensemble',
-        cacheState: 'synthetic',
-        description: 'Solar 10.7 cm radio flux. Direct driver of thermospheric heating: higher F10.7 → denser air at LEO altitudes → more drag on every satellite.',
-    });
-    provStore.set('idx.ap', {
-        value: 18, unit: '', sigma: 6,
-        source: 'NOAA SWPC RTSW (synthetic stand-in)',
-        model:  'NOAA 3-day forecast spread',
-        cacheState: 'synthetic',
-        description: 'Daily geomagnetic Ap. Above 27 = G1+ storm; above 50 = G2+; storm activity puffs the thermosphere outward and cleanly steps the drag floor up by 20–40%.',
-    });
-
     const f107Node = document.getElementById('op-idx-f107');
     const apNode   = document.getElementById('op-idx-ap');
 
@@ -2668,16 +2752,107 @@ function mountIndices() {
         style: 'whiskers',
         range: { min: 0, max: 80 },       // calm → severe storm
     });
+    bindBand(document.getElementById('op-idx-rho'), 'drag.rho450', { style: 'sigma' });
 
-    // Δ icons stay quiet until SWPC actually moves these values
-    // (step 9). On first set there's no prior snapshot so the
-    // glyph is a neutral '·'; subsequent updates flip it to ▲ / ▼,
-    // pulse fresh for ~10 s, hold a coloured tint for ~5 min, then
-    // decay to neutral via the periodic refresh.
+    // Δ icons: neutral '·' on first set (no prior snapshot), then flip to
+    // ▲ / ▼ and pulse on each value transition — which now fire both on a
+    // live SWPC update AND on a scrub through a forecast storm.
     attachDelta(f107Node, 'idx.f107');
     attachDelta(apNode,   'idx.ap');
 }
 mountIndices();
+
+/* ─── Forecast-regime readout + storm scenarios (honesty layer) ─ */
+// Surfaces which regime the scrubbed instant is in and the skill caveat,
+// and wires the one-click forward storm scenarios. Selecting a storm jumps
+// the cursor to ~12 h before onset so the operator scrubs from a calm now
+// into the storm and watches the coupling fire.
+function mountSpaceWeatherControls() {
+    const regimeEl = document.getElementById('op-sw-regime');
+    if (regimeEl) {
+        const dot  = regimeEl.querySelector('.op-sw-regime-dot');
+        const text = regimeEl.querySelector('.op-sw-regime-text');
+        const REGIME_COPY = {
+            live:     'Live · real-time SWPC',
+            observed: 'Observed · persisted past',
+            forecast: 'Forecast',
+            scenario: 'Scenario',
+        };
+        let lastKey = '';
+        const update = () => {
+            const { simTimeMs, nowMs } = timeBus.getState();
+            const sw = evalSpaceWeatherAt(simTimeMs, nowMs);
+            const horizon = sw.horizonDays;
+            const hLabel = Math.abs(horizon) < 1
+                ? `${Math.round(Math.abs(horizon) * 24)} h`
+                : `${Math.abs(horizon).toFixed(1)} d`;
+            let label = REGIME_COPY[sw.regime] || 'Live';
+            let cav = '';
+            if (sw.regime === 'forecast') {
+                label += ` +${hLabel}`;
+                cav = horizon > 3 ? '· Ap skill low' : '· widening band';
+            } else if (sw.regime === 'scenario') {
+                label = `Scenario: ${sw.scenario.label}`;
+                cav = `· what-if +${hLabel}`;
+            } else if (sw.regime === 'observed') {
+                label += ` −${hLabel}`;
+            }
+            // Cheap dedupe — this runs off the 10 Hz bus emit.
+            const key = label + cav;
+            if (key === lastKey) return;
+            lastKey = key;
+            regimeEl.className = `op-sw-regime op-sw-regime--${sw.regime}`;
+            text.innerHTML = `<span>${label}</span>` + (cav ? ` <span class="op-sw-regime-cav">${cav}</span>` : '');
+            if (dot) {/* dot inherits currentColor via the regime class */}
+        };
+        timeBus.subscribe(update);
+        onScenario(update);
+    }
+
+    // Scenario chips.
+    const scnHost = document.getElementById('op-sw-scenarios');
+    if (scnHost) {
+        const btns = [...scnHost.querySelectorAll('.op-sw-scn')];
+        const syncOn = () => {
+            const active = getScenario()?.presetId || '';
+            btns.forEach(b => b.classList.toggle('op-sw-scn--on', (b.dataset.scn || '') === active));
+        };
+        btns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const id = btn.dataset.scn || '';
+                if (!id) {
+                    setScenario(null);
+                    timeBus.setMode('live');   // back to real-time, no injected storm
+                    showToast('Live forecast — no injected storm.', 'info', { duration: 1800 });
+                } else {
+                    const scn = setScenario(id);
+                    // Park the cursor ~12 h before onset so the run-up is visible.
+                    timeBus.setSimTime((scn?.onsetMs ?? Date.now()) - 12 * 3600_000, { mode: 'scrub' });
+                    const preset = STORM_PRESETS[id];
+                    showToast(
+                        `${preset.label} injected at +${(((scn.onsetMs - Date.now()) / 86400000)).toFixed(1)} d. ` +
+                        `Scrub forward to watch the drag shell brighten and decay ETAs shorten.`,
+                        'warn', { duration: 5200 },
+                    );
+                }
+                syncOn();
+            });
+        });
+        onScenario(syncOn);
+        syncOn();
+    }
+}
+mountSpaceWeatherControls();
+
+/* ─── Drag-shell overlay toggle ────────────────────────── */
+const dragShellToggle = document.getElementById('op-toggle-dragshell');
+if (dragShellToggle) {
+    dragShellToggle.checked = dragShell.isVisible();
+    dragShellToggle.addEventListener('change', (e) => {
+        dragShell.setVisible(e.target.checked);
+        try { localStorage.setItem('op-dragshell', e.target.checked ? 'on' : 'off'); } catch (_) {}
+    });
+}
 
 /* ─── Data dictionary export ───────────────────────────── */
 function mountDataDictionary() {
@@ -2700,6 +2875,7 @@ window.__op = {
     readAuth, isProPlan, timeBus, globe, fleet, scenario,
     provStore, delta, myFleet, visuals, stopSwpcBridge,
     bPlane, densityMap,
+    stopSwDriver, dragShell, setScenario, getScenario, evalSpaceWeatherAt,
 };
 </script>
 
