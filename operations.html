@@ -558,6 +558,23 @@ body {
     border-radius:3px;
 }
 
+/* ─── LOD status (draw budget) ─────────────────────────── */
+.op-lod-status {
+    margin-top:8px;
+    padding-top:6px;
+    border-top:1px solid rgba(255,255,255,.05);
+    font-size:.6rem; font-family:monospace;
+    color:#788;
+    display:flex; align-items:center; gap:6px;
+    cursor:help;
+}
+.op-lod-status::before {
+    content:''; width:7px; height:7px; border-radius:50%;
+    background:#0cc; box-shadow:0 0 6px #0cc; flex-shrink:0;
+}
+.op-lod-status.op-lod-decimating { color:#fc8; }
+.op-lod-status.op-lod-decimating::before { background:#fc6; box-shadow:0 0 6px #fc6; }
+
 /* ─── Aristotle conjunction table ──────────────────────── */
 .op-aristotle-tbl {
     width:100%; border-collapse:collapse; font-size:.7rem;
@@ -2168,6 +2185,8 @@ body {
                 <span class="op-layer-dot" style="color:#f9a;background:#f9a"></span>
                 <span class="op-layer-name">Debris density map</span>
             </label>
+            <div id="op-lod-status" class="op-lod-status" hidden
+                 title="Level-of-detail: when the catalogue exceeds the draw budget, the cloud is thinned with a uniform-stride index buffer (every object is still propagated). Zoom in to resolve more."></div>
         </div>
         <div class="op-panel">
             <h2 title="Space-weather drivers at the scrubbed time. Past = observed (persisted), future = forecast with a band that widens with horizon.">Space weather · drivers</h2>
@@ -2346,6 +2365,7 @@ import {
     onScenario, evalSpaceWeatherAt,
 }                            from './js/operations/sw-model.js';
 import { DragShell }          from './js/operations/drag-shell.js';
+import { startLodController } from './js/operations/lod.js';
 import { MyFleet }            from './js/operations/my-fleet.js';
 import {
     mountMyFleet, mountDecayWatch, mountConjunctions, mountPropBudget,
@@ -2552,6 +2572,25 @@ const stopSwDriver = startSwDriver();
 const dragShellOn = localStorage.getItem('op-dragshell') !== 'off';
 const dragShell = new DragShell(globe, { visible: dragShellOn });
 globe.onTick(() => dragShell.tick());
+
+/* ─── LOD draw-budget controller (Workstream C) ────────── */
+// Caps individually-drawn catalogue points (~8k zoomed in, ~2.5k zoomed
+// out) and decimates the overflow with a uniform-stride index buffer in
+// the tracker. No-op until a catalogue exceeds the budget; every object is
+// still propagated by the SGP4 worker. Owned fleet (hero meshes + selection
+// sprite + trails) is rendered separately and always legible.
+const lodStatusEl = document.getElementById('op-lod-status');
+const stopLod = startLodController(globe, fleet.tracker, {
+    onStatus: ({ drawn, total, decimating }) => {
+        if (!lodStatusEl) return;
+        if (!total) { lodStatusEl.hidden = true; return; }
+        lodStatusEl.hidden = false;
+        lodStatusEl.classList.toggle('op-lod-decimating', decimating);
+        lodStatusEl.textContent = decimating
+            ? `LOD · drawing ${drawn.toLocaleString()} of ${total.toLocaleString()}`
+            : `LOD · all ${total.toLocaleString()} drawn`;
+    },
+});
 
 /* ─── My Fleet + decision deck + visuals ───────────────── */
 const myFleet = new MyFleet(fleet.tracker);
@@ -2938,6 +2977,7 @@ window.__op = {
     provStore, delta, myFleet, visuals, stopSwpcBridge,
     bPlane, densityMap,
     stopSwDriver, dragShell, setScenario, getScenario, evalSpaceWeatherAt,
+    stopLod,
 };
 </script>
 
