@@ -96,6 +96,12 @@ export const STORM_PRESETS = Object.freeze({
         blurb: 'Only G1–G2, but enough thermospheric drag to down 38 Starlinks at insertion.',
         apPeak: 60, f107Peak: 130, riseH: 8, decayH: 40,
     },
+    ar3842: {
+        id: 'ar3842',
+        label: 'AR3842 (Oct 2024)',
+        blurb: 'X9-class flares + a G4 storm — a solar-max F10.7 spike that lifted the drag floor for days.',
+        apPeak: 180, f107Peak: 255, riseH: 7, decayH: 50,
+    },
 });
 
 // Peak of the rise·decay envelope, memoised per preset so stormState()
@@ -235,6 +241,11 @@ export function dragDensityAt(f107, ap, sigF107 = 0, sigAp = 0, altKm = SHELL_AL
 
 export const SHELL_ALTITUDE_KM = SHELL_ALT_KM;
 
+// Quiet-time reference density at the shell altitude. The drag shell and
+// the "drag ×N vs quiet" overhead both normalise against this, so the
+// number on the panel and the colour on the globe never drift apart.
+export const RHO_REF_450 = density({ altitudeKm: SHELL_ALT_KM, f107Sfu: 150, ap: 12 }).rho;
+
 /* ─── Driver: time-bus → provStore ──────────────────────────────── */
 
 const REPUBLISH_MIN_MS = 120;   // floor between provStore writes (DOM cost)
@@ -306,6 +317,24 @@ function writeIndices(sw) {
         description:
             `Neutral mass density at ${SHELL_ALT_KM} km — the drag floor the fleet flies through. ` +
             `Drives the atmospheric drag shell on the globe. ${caveat}`,
+    });
+
+    // Drag overhead — ρ relative to quiet, the single legible "how much
+    // more drag than a calm day" number. ×1 at quiet, ~×20 at a G5. Its
+    // σ propagates from the ρ band. This is the headline coupling readout:
+    // it spikes the instant a scrub crosses a storm onset.
+    provStore.set('drag.overhead', {
+        value: d.rho / RHO_REF_450, unit: '×', sigma: d.sigma / RHO_REF_450,
+        source: 'derived (ρ ÷ quiet-day ρ)',
+        model:  'Bates(1959) T(z) · diffusive-equilibrium ρ',
+        formula: 'ρ(450 km) / ρ(450 km; F10.7=150, Ap=12)',
+        inputs: ['drag.rho450'],
+        cacheState: sw.haveLive ? 'derived' : 'synthetic',
+        validAt,
+        description:
+            `Drag at ${SHELL_ALT_KM} km relative to a quiet day. ×1 is calm; a G5 storm ` +
+            `pushes it past ×15. This is the multiplier on every satellite's atmospheric ` +
+            `drag — and on how fast perigee decays. ${caveat}`,
     });
 }
 

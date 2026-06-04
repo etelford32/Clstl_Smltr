@@ -19,12 +19,12 @@
 
 import * as THREE     from 'three';
 import { provStore }  from './provenance.js';
-import { density }    from '../upper-atmosphere-engine.js';
-import { SHELL_ALTITUDE_KM } from './sw-model.js';
+import { SHELL_ALTITUDE_KM, RHO_REF_450 } from './sw-model.js';
 
 const EARTH_RADIUS_KM = 6371;
-// Reference (quiet) density the colour ramp is normalised against.
-const RHO_REF = density({ altitudeKm: SHELL_ALTITUDE_KM, f107Sfu: 150, ap: 12 }).rho;
+// Reference (quiet) density the colour ramp is normalised against — shared
+// with the "drag ×N vs quiet" overhead so the globe and the panel agree.
+const RHO_REF = RHO_REF_450;
 
 // Calm → storm colour endpoints (linear RGB-ish; the additive blend warms
 // them further on screen).

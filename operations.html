@@ -1034,6 +1034,25 @@ body {
     text-decoration: underline dotted rgba(0,255,200,.22);
     text-underline-offset: 2px;
 }
+/* Two-line name column: asset name over a perigee · decay-rate subtitle.
+   The subtitle is the literal "perigee drop" — it steepens through a
+   storm scrub in lockstep with the lifetime ETA above it. */
+.op-decay-name-col {
+    display: flex; flex-direction: column; gap: 1px;
+    flex: 1; min-width: 0;
+}
+.op-decay-name-col .op-decay-name { flex: initial; }
+.op-decay-sub {
+    font-size: .6rem;
+    font-family: monospace;
+    color: #889;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.op-decay-peri { color: #9bd; }
+.op-decay-rate-stable { color: #6a8; }
+.op-decay-rate-slow   { color: #9bd; }
+.op-decay-rate-med    { color: #fc8; }
+.op-decay-rate-fast   { color: #f88; font-weight: 600; }
 
 /* ─── Conjunctions ─────────────────────────────────────── */
 .op-conj-toolbar {
@@ -1761,6 +1780,25 @@ body {
     color:#0fa;
 }
 
+/* Drag-overhead headline — the single "how much more drag than a calm
+   day" number. Spikes the instant a scrub crosses a storm onset. */
+.op-sw-overhead {
+    display:flex; align-items:baseline; gap:8px;
+    margin-bottom:9px;
+}
+.op-sw-overhead-val {
+    font-family:monospace; font-weight:700; font-size:1.05rem;
+    line-height:1; color:#0fa;
+    transition:color .18s;
+}
+.op-sw-overhead-lbl {
+    font-size:.56rem; text-transform:uppercase; letter-spacing:.1em;
+    color:#778; font-weight:700;
+}
+.op-sw-overhead--calm  .op-sw-overhead-val { color:#0fa; }
+.op-sw-overhead--mod   .op-sw-overhead-val { color:#fc6; }
+.op-sw-overhead--storm .op-sw-overhead-val { color:#f88; }
+
 /* ─── Provenance affordance ─────────────────────────────── */
 [data-prov-key] {
     text-decoration: underline dotted rgba(0,255,200,.22);
@@ -2137,6 +2175,11 @@ body {
                 <span class="op-sw-regime-dot"></span>
                 <span class="op-sw-regime-text">Live</span>
             </div>
+            <div id="op-sw-overhead" class="op-sw-overhead op-sw-overhead--calm" data-prov-key="drag.overhead"
+                 title="Atmospheric drag at 450 km relative to a quiet day — the multiplier on every satellite's decay.">
+                <span class="op-sw-overhead-val">×1.0</span>
+                <span class="op-sw-overhead-lbl">drag vs&nbsp;quiet</span>
+            </div>
             <div class="op-indices">
                 <div class="op-index-row">
                     <span class="op-index-k">F10.7</span>
@@ -2162,6 +2205,8 @@ body {
                         title="Inject a Gannon-class G5 storm into the forward window (what-if). Scrub forward to watch the shell brighten and decay ETAs shorten.">Gannon G5</button>
                 <button type="button" class="op-sw-scn" data-scn="starlink"
                         title="Inject the Feb-2022 Starlink-class storm into the forward window (what-if).">Feb-2022</button>
+                <button type="button" class="op-sw-scn" data-scn="ar3842"
+                        title="Inject an AR3842-class (Oct 2024) X-flare + G4 event into the forward window (what-if).">AR3842</button>
             </div>
         </div>
     </aside>
@@ -2807,6 +2852,23 @@ function mountSpaceWeatherControls() {
         };
         timeBus.subscribe(update);
         onScenario(update);
+    }
+
+    // Drag-overhead headline — ×N vs a quiet day. Bound to the driver's
+    // drag.overhead key so it tracks the scrubber; colours by severity.
+    const ovEl = document.getElementById('op-sw-overhead');
+    if (ovEl) {
+        const valEl = ovEl.querySelector('.op-sw-overhead-val');
+        const renderOverhead = () => {
+            const rec = provStore.get('drag.overhead');
+            const x = rec?.value;
+            if (!Number.isFinite(x)) return;
+            valEl.textContent = `×${x >= 10 ? Math.round(x) : x.toFixed(1)}`;
+            const sev = x >= 4 ? 'storm' : x >= 1.6 ? 'mod' : 'calm';
+            ovEl.className = `op-sw-overhead op-sw-overhead--${sev}`;
+        };
+        renderOverhead();
+        provStore.subscribe(k => { if (k === 'drag.overhead') renderOverhead(); });
     }
 
     // Scenario chips.
