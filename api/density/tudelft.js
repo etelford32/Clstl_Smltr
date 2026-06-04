@@ -1,15 +1,20 @@
 /**
  * Vercel Edge Function: /api/density/tudelft
  *
- * Proxies TU Delft's accelerometer-derived neutral-density products
- * (Doornbos v02) for GRACE-FO and Swarm-C across a requested date
- * window. Open public data — no API key.
+ * Serves TU Delft's accelerometer-derived neutral-density products
+ * (Doornbos v02) for GRACE-FO and Swarm-C across a requested date window.
  *
- * Source: http://thermosphere.tudelft.nl/acceldata/
+ *   ┌─ R2 mirror (primary) ─ hindcast/gannon/density-<mission>-v1.json
+ *   │     uploaded by scripts/build-density-mirror.mjs from files an
+ *   │     operator pulls off TU Delft's FTP on a workstation.
+ *   └─ live HTTP fetch (fallback) ─ http://thermosphere.tudelft.nl/acceldata/
  *
- * The TU Delft archive's directory layout has shifted across re-
- * processings, so URL templates are stored per-mission in a const map
- * below. If a path moves, edit MISSIONS — no code changes elsewhere.
+ * Why the mirror: TU Delft retired the open HTTP tree in favour of
+ * FTP-only distribution, which the Edge runtime's fetch() cannot reach
+ * (no ftp:// scheme). The mirror lets the page lift real density-truth
+ * without the Edge ever touching the upstream. The live path is retained
+ * as a graceful fallback for any window/mission still served over HTTP and
+ * for environments without R2 configured. See GANNON_LIVE_DATA.md (Lift 3).
  *
  * Query params:
  *   ?mission=grace_fo | swarm_c       (required)
@@ -17,81 +22,39 @@
  *   ?end=YYYY-MM-DD                   (required, UTC; same-day allowed)
  *   ?subsample=N                      (optional, default 60 — keep every
  *                                      N-th record. Raw cadence is ~10 s;
- *                                      N=60 ≈ 10-min cadence ≈ orbit-scale
- *                                      sampling, ~88 points/satellite/day)
+ *                                      N=60 ≈ 10-min cadence)
+ *   ?source=mirror | live | auto      (optional, default auto — force a
+ *                                      path for debugging)
  *
- * Response:
+ * Response (unchanged across both paths — the page keys off data.samples):
  *   {
  *     source: '...',
- *     data: {
- *       mission:   'grace_fo' | 'swarm_c',
- *       window:    { start, end, subsample, n_raw, n_returned, days_404 },
- *       samples:   [ { t, alt_km, lat_deg, lon_deg, rho_kg_m3 }, ... ],
- *     },
- *     provenance: { source_file_urls, parser_version, fetched_at }
+ *     data: { mission, label, window:{…}, samples:[ {t,alt_km,lat_deg,lon_deg,rho_kg_m3} ] },
+ *     provenance: { origin: 'r2-mirror'|'live-http', source_file_urls?, mirror_key?,
+ *                   parser_version, fetched_at, ... }
  *   }
  *
  * Errors:
  *   400 — validation (missing/bad params)
- *   503 — every daily file 404'd (path likely moved)
- *   200 — partial success (some 404s tolerated; days_404 in window)
+ *   503 — mirror absent AND every daily file 404'd
+ *   200 — success (mirror hit, or partial live success with days_404)
  *
- * Cache policy: historical days are immutable. 24h CDN cache on success.
+ * Cache: historical days are immutable. 24h CDN cache on success.
  */
 
 import { jsonOk, jsonError, fetchWithTimeout } from '../_lib/responses.js';
+import { R2_CONFIGURED, getSignedUrl } from '../_lib/r2-client.js';
+import { MISSIONS, parseTudelftLine, expandTemplate, PARSER_VERSION } from '../_lib/tudelft-parse.js';
 
 export const config = { runtime: 'edge' };
 
-// ── URL templates ──────────────────────────────────────────────────
-//
-// Tokens: {Y}=year(4), {M}=month(2, zero-padded), {D}=day(2, zero-padded).
-//
-// GRACE-FO path is the same one the existing scripts/fetch-grace.mjs
-// uses; per the runbook the JS + Python peers agree. Both have the
-// "verify before running" caveat because TU Delft has re-organised
-// this tree in the past. If GRACE-FO 404s, try one of the alternates
-// below by editing the array.
-//
-// Swarm-C URL is documented in TU Delft's data product overview but
-// hasn't been programmatically validated in this repo. Best-effort
-// based on the GraceFO sibling pattern; the alternate paths cover the
-// most likely re-organisations.
-const MISSIONS = {
-    grace_fo: {
-        url_templates: [
-            'http://thermosphere.tudelft.nl/acceldata/GraceFO/v02/density/{Y}/grcfo_density_{Y}_{M}_{D}.txt',
-        ],
-        // Reasonable altitude window for outlier-filtering (GRACE-FO at ~490 km).
-        alt_min: 200,
-        alt_max: 700,
-        label: 'GRACE-FO accelerometer density (Doornbos v02)',
-    },
-    swarm_c: {
-        url_templates: [
-            'http://thermosphere.tudelft.nl/acceldata/Swarm/v02/density/SwarmC/{Y}/swrmc_density_{Y}_{M}_{D}.txt',
-            // Alternate filename patterns seen in older releases:
-            'http://thermosphere.tudelft.nl/acceldata/Swarm/v02/density/SwarmC/{Y}/swarmc_density_{Y}_{M}_{D}.txt',
-            'http://thermosphere.tudelft.nl/acceldata/SwarmC/v02/density/{Y}/swrmc_density_{Y}_{M}_{D}.txt',
-        ],
-        // Swarm-C orbits at ~440 km (post-2014 lower-orbit configuration).
-        alt_min: 200,
-        alt_max: 600,
-        label: 'Swarm-C accelerometer density (Doornbos v02)',
-    },
-};
-
-// File format: whitespace-separated, one record per line:
-//   YYYY-MM-DDThh:mm:ss   alt_km   lat_deg   lon_deg   density_kg_m3
-// Lines starting with # or % are headers and skipped.
-const COL_NAMES = ['t', 'alt', 'lat', 'lon', 'rho'];
-
-const MAX_WINDOW_DAYS  = 14;
-const DEFAULT_SUBSAMPLE = 60;
-const MAX_SUBSAMPLE     = 600;
-const CACHE_TTL         = 86_400;
-const CACHE_SWR         = 3600;
-const FETCH_TIMEOUT_MS  = 25_000;
+const MAX_WINDOW_DAYS   = 14;
+const DEFAULT_SUBSAMPLE  = 60;
+const MAX_SUBSAMPLE      = 600;
+const CACHE_TTL          = 86_400;
+const CACHE_SWR          = 3600;
+const FETCH_TIMEOUT_MS   = 25_000;
+const MIRROR_TIMEOUT_MS  = 15_000;
 
 function _parseISODate(s) {
     if (!s || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
@@ -100,7 +63,6 @@ function _parseISODate(s) {
 }
 
 function _daysInWindow(start, end) {
-    // Inclusive of both endpoints. start == end → 1 day.
     const days = [];
     const cur  = new Date(Date.UTC(
         start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
@@ -111,49 +73,6 @@ function _daysInWindow(start, end) {
         cur.setUTCDate(cur.getUTCDate() + 1);
     }
     return days;
-}
-
-function _expandTemplate(tpl, d) {
-    const Y = String(d.getUTCFullYear());
-    const M = String(d.getUTCMonth() + 1).padStart(2, '0');
-    const D = String(d.getUTCDate()).padStart(2, '0');
-    return tpl.replaceAll('{Y}', Y).replaceAll('{M}', M).replaceAll('{D}', D);
-}
-
-/**
- * Parse one TU Delft v02 ASCII line.
- * Returns null on headers / malformed lines / out-of-range altitudes.
- */
-function parseTudelftLine(line, altMin, altMax) {
-    if (!line) return null;
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('%')) return null;
-    const parts = trimmed.split(/\s+/);
-    if (parts.length < COL_NAMES.length) return null;
-
-    // Timestamp tolerant of "T" / " " separator and missing trailing Z.
-    let ts = parts[0];
-    if (!ts.includes('T') && ts.length >= 19 && ts.length <= 23) ts = ts.replace(' ', 'T');
-    if (!ts.endsWith('Z')) ts = ts + 'Z';
-    const tMs = Date.parse(ts);
-    if (!Number.isFinite(tMs)) return null;
-
-    const alt = Number(parts[1]);
-    const lat = Number(parts[2]);
-    const lon = Number(parts[3]);
-    const rho = Number(parts[4]);
-    if (![alt, lat, lon, rho].every(Number.isFinite)) return null;
-    if (rho <= 0) return null;                       // density strictly positive
-    if (alt < altMin || alt > altMax) return null;   // orbit-altitude sanity
-
-    return {
-        t:         new Date(tMs).toISOString(),
-        t_ms:      tMs,
-        alt_km:    alt,
-        lat_deg:   lat,
-        lon_deg:   lon,
-        rho_kg_m3: rho,
-    };
 }
 
 /** Try a list of URLs in order; return the first successful response text. */
@@ -170,11 +89,79 @@ async function _fetchFirstOK(urls) {
     return null;
 }
 
+/** Subsample + project a sorted record array to the public sample shape. */
+function _toSamples(rawSorted, subsample) {
+    const samples = [];
+    for (let i = 0; i < rawSorted.length; i += subsample) {
+        const r = rawSorted[i];
+        samples.push({
+            t:         r.t,
+            alt_km:    r.alt_km,
+            lat_deg:   r.lat_deg,
+            lon_deg:   r.lon_deg,
+            rho_kg_m3: r.rho_kg_m3,
+        });
+    }
+    return samples;
+}
+
+// ── R2 mirror path ─────────────────────────────────────────────────
+//
+// The mirror artifact (written by scripts/build-density-mirror.mjs):
+//   { schema, mission, label, source, coverage, parser_version,
+//     generated_at, records: [ {t, alt_km, lat_deg, lon_deg, rho_kg_m3} ] }
+// Records are already parsed + altitude-filtered; we just window + subsample.
+async function _tryMirror(mDef, startMs, endMs) {
+    if (!R2_CONFIGURED) return { ok: false, reason: 'r2_not_configured' };
+    let url;
+    try {
+        url = await getSignedUrl(mDef.mirror_key, { expiresIn: 300 });
+    } catch (e) {
+        return { ok: false, reason: `signed_url_failed: ${e.message}` };
+    }
+    let res;
+    try {
+        res = await fetchWithTimeout(url, {
+            headers: { Accept: 'application/json' },
+            timeoutMs: MIRROR_TIMEOUT_MS,
+        });
+    } catch (e) {
+        return { ok: false, reason: `mirror_fetch_failed: ${e.message}` };
+    }
+    if (res.status === 404) return { ok: false, reason: 'mirror_not_uploaded' };
+    if (!res.ok) return { ok: false, reason: `mirror_http_${res.status}` };
+
+    let artifact;
+    try { artifact = await res.json(); }
+    catch (e) { return { ok: false, reason: `mirror_parse_error: ${e.message}` }; }
+
+    const records = artifact?.records;
+    if (!Array.isArray(records)) return { ok: false, reason: 'mirror_missing_records' };
+
+    // Window-filter. Records carry an ISO `t`; derive ms once.
+    const inWindow = [];
+    for (const r of records) {
+        const tMs = Date.parse(r.t);
+        if (!Number.isFinite(tMs) || tMs < startMs || tMs >= endMs) continue;
+        if (!(r.rho_kg_m3 > 0)) continue;
+        inWindow.push({ ...r, t_ms: tMs });
+    }
+    if (inWindow.length === 0) {
+        // Mirror exists but doesn't cover this window — let the caller fall
+        // through to live fetch rather than returning an empty success.
+        return { ok: false, reason: 'mirror_no_records_in_window',
+                 coverage: artifact?.coverage };
+    }
+    inWindow.sort((a, b) => a.t_ms - b.t_ms);
+    return { ok: true, records: inWindow, artifact };
+}
+
 export default async function handler(request) {
     const url     = new URL(request.url);
     const mission = url.searchParams.get('mission');
     const start   = _parseISODate(url.searchParams.get('start'));
     const end     = _parseISODate(url.searchParams.get('end'));
+    const force   = url.searchParams.get('source') || 'auto';   // mirror | live | auto
 
     if (!mission || !MISSIONS[mission]) {
         return jsonError('bad_request',
@@ -201,13 +188,55 @@ export default async function handler(request) {
     const subsample = Math.max(1, Math.min(
         Number.isFinite(subRaw) ? subRaw : DEFAULT_SUBSAMPLE, MAX_SUBSAMPLE));
 
-    const mDef = MISSIONS[mission];
-    const days = _daysInWindow(start, end);
+    const mDef    = MISSIONS[mission];
+    const startMs = start.getTime();
+    const endMs   = end.getTime() + 86_400_000;
 
-    // Fetch each daily file. Per-day failure (404) tolerated — record it
-    // in days_404 and keep going.
+    // ── 1. R2 mirror (primary, unless ?source=live) ────────────────
+    let mirrorMiss = null;
+    if (force !== 'live') {
+        const m = await _tryMirror(mDef, startMs, endMs);
+        if (m.ok) {
+            const samples = _toSamples(m.records, subsample);
+            return jsonOk({
+                source: m.artifact?.source
+                    || 'TU Delft thermosphere density (Doornbos v02) — R2 mirror',
+                data: {
+                    mission,
+                    label: mDef.label,
+                    window: {
+                        start:      start.toISOString(),
+                        end:        end.toISOString(),
+                        subsample,
+                        n_raw:      m.records.length,
+                        n_returned: samples.length,
+                        days_404:   [],
+                    },
+                    samples,
+                },
+                provenance: {
+                    origin:          'r2-mirror',
+                    mirror_key:      mDef.mirror_key,
+                    coverage:        m.artifact?.coverage ?? null,
+                    mirror_built_at: m.artifact?.generated_at ?? null,
+                    parser_version:  m.artifact?.parser_version ?? PARSER_VERSION,
+                    fetched_at:      new Date().toISOString(),
+                },
+            }, { maxAge: CACHE_TTL, swr: CACHE_SWR });
+        }
+        mirrorMiss = m.reason;
+        if (force === 'mirror') {
+            return jsonError('upstream_unavailable',
+                `R2 mirror unavailable for ${mission}: ${mirrorMiss}. ` +
+                `Upload it with scripts/build-density-mirror.mjs --mission ${mission} --upload.`,
+                { source: 'TU Delft thermosphere (mirror)', mirror_key: mDef.mirror_key });
+        }
+    }
+
+    // ── 2. live HTTP fetch (fallback) ──────────────────────────────
+    const days = _daysInWindow(start, end);
     const fetched = await Promise.all(days.map(async d => {
-        const candidates = mDef.url_templates.map(t => _expandTemplate(t, d));
+        const candidates = mDef.url_templates.map(t => expandTemplate(t, d));
         const hit = await _fetchFirstOK(candidates);
         return { date: d, url_tried: candidates, hit };
     }));
@@ -216,7 +245,6 @@ export default async function handler(request) {
     const urlsHit       = [];
     const days_404      = [];
     let combinedText    = '';
-
     for (const f of fetched) {
         urlsAttempted.push(...f.url_tried);
         if (f.hit) {
@@ -229,17 +257,17 @@ export default async function handler(request) {
 
     if (urlsHit.length === 0) {
         return jsonError('upstream_unavailable',
-            `All ${urlsAttempted.length} candidate URLs returned non-2xx. ` +
-            `TU Delft may have re-organised the ${mission} tree — verify the ` +
-            `template list in api/density/tudelft.js. Days attempted: ` +
-            days_404.join(', '),
-            { source: 'TU Delft thermosphere', urls: urlsAttempted });
+            `No data available for ${mission} ${url.searchParams.get('start')}…` +
+            `${url.searchParams.get('end')}. R2 mirror: ${mirrorMiss || 'skipped'}; ` +
+            `live HTTP: all ${urlsAttempted.length} daily URLs returned non-2xx ` +
+            `(TU Delft is FTP-only — populate the mirror via ` +
+            `scripts/build-density-mirror.mjs --mission ${mission} --upload). ` +
+            `Days attempted: ${days_404.join(', ')}`,
+            { source: 'TU Delft thermosphere', urls: urlsAttempted,
+              mirror_key: mDef.mirror_key, mirror_miss: mirrorMiss });
     }
 
-    // Parse + filter to window + subsample.
-    const startMs = start.getTime();
-    const endMs   = end.getTime() + 86_400_000;
-    const raw     = [];
+    const raw = [];
     for (const line of combinedText.split(/\r?\n/)) {
         const r = parseTudelftLine(line, mDef.alt_min, mDef.alt_max);
         if (!r) continue;
@@ -247,38 +275,28 @@ export default async function handler(request) {
         raw.push(r);
     }
     raw.sort((a, b) => a.t_ms - b.t_ms);
-
-    const samples = [];
-    for (let i = 0; i < raw.length; i += subsample) {
-        const r = raw[i];
-        // Drop the internal _ms field from the output.
-        samples.push({
-            t:         r.t,
-            alt_km:    r.alt_km,
-            lat_deg:   r.lat_deg,
-            lon_deg:   r.lon_deg,
-            rho_kg_m3: r.rho_kg_m3,
-        });
-    }
+    const samples = _toSamples(raw, subsample);
 
     return jsonOk({
-        source: 'TU Delft thermosphere density (Doornbos v02) via Vercel Edge',
+        source: 'TU Delft thermosphere density (Doornbos v02) via Vercel Edge (live)',
         data: {
             mission,
             label: mDef.label,
             window: {
-                start:       start.toISOString(),
-                end:         end.toISOString(),
+                start:      start.toISOString(),
+                end:        end.toISOString(),
                 subsample,
-                n_raw:       raw.length,
-                n_returned:  samples.length,
+                n_raw:      raw.length,
+                n_returned: samples.length,
                 days_404,
             },
             samples,
         },
         provenance: {
+            origin:           'live-http',
             source_file_urls: urlsHit,
-            parser_version:   'tudelft-v02-v1',
+            mirror_miss:      mirrorMiss,
+            parser_version:   PARSER_VERSION,
             fetched_at:       new Date().toISOString(),
         },
     }, { maxAge: CACHE_TTL, swr: CACHE_SWR });
