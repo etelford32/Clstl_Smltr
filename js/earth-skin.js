@@ -23,13 +23,22 @@ import * as THREE from 'three';
 import { geo } from './geo/coords.js';
 import { GEO_GLSL } from './geo/coords.glsl.js';
 
-// ── Version-pinned CDN — avoids broken URLs from three-globe package updates ──
-const _CDN = 'https://unpkg.com/three-globe@2.31.0/example/img/';
+// ── Earth textures, vendored locally under js/vendor/three-globe-2.31.0/img ───
+// Previously fetched from the unpkg CDN. The full-screen "Loading Earth
+// textures…" overlay is gated on all four of these downloads (loadEarthTextures
+// → Promise.all, and loadTex has no timeout — it settles only on the image's
+// onLoad/onError). When unpkg was slow, rate-limited, or stalled, the overlay
+// stayed up for the entire fetch — up to the browser's ~minute network timeout
+// — which read to users as the page "freezing for a whole minute on load."
+// Serving same-origin removes that dependency and the freeze. Resolving against
+// import.meta.url keeps the paths correct for every page that imports this
+// shared module, regardless of the page's own location.
+const _IMG = new URL('./vendor/three-globe-2.31.0/img/', import.meta.url).href;
 export const EARTH_TEXTURES = {
-    day:      _CDN + 'earth-blue-marble.jpg',
-    night:    _CDN + 'earth-night.jpg',
-    ocean:    _CDN + 'earth-water.png',
-    topology: _CDN + 'earth-topology.png',
+    day:      _IMG + 'earth-blue-marble.jpg',
+    night:    _IMG + 'earth-night.jpg',
+    ocean:    _IMG + 'earth-water.png',
+    topology: _IMG + 'earth-topology.png',
 };
 
 // ── Safe 1×1 placeholder textures (prevent null-sampler GPU crashes) ─────────

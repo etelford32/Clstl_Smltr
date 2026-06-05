@@ -550,7 +550,9 @@ scene.add(sunLight);
 // or the globe renders upside-down.)
 const earthGeo = new THREE.SphereGeometry(1, 64, 64);
 const earthTex = new THREE.TextureLoader().load(
-    'https://unpkg.com/three-globe@2.31.0/example/img/earth-blue-marble.jpg',
+    // Vendored locally (was unpkg) to remove the third-party CDN dependency —
+    // a slow/stalled unpkg fetch otherwise blocks the globe texture on load.
+    '/js/vendor/three-globe-2.31.0/img/earth-blue-marble.jpg',
     tex => { tex.colorSpace = THREE.SRGBColorSpace; }
 );
 const earthMat = new THREE.MeshStandardMaterial({ map: earthTex, roughness: 0.85 });

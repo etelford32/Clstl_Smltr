@@ -23,7 +23,11 @@ import { sunDirectionEci } from '../sun-altitude.js';
 import { timeBus }        from './time-bus.js';
 
 const EARTH_RADIUS_SCENE = 1.0;
-const EARTH_TEXTURE_URL  = 'https://unpkg.com/three-globe@2.31.0/example/img/earth-blue-marble.jpg';
+// Vendored locally (was unpkg) to remove the third-party CDN dependency — a
+// slow/stalled unpkg fetch otherwise blocks the globe texture on load.
+// Resolved against import.meta.url so it's correct regardless of the importing
+// page's location.
+const EARTH_TEXTURE_URL  = new URL('../vendor/three-globe-2.31.0/img/earth-blue-marble.jpg', import.meta.url).href;
 
 export class OperationsGlobe {
     constructor(canvas) {
