@@ -29,15 +29,23 @@
 // centre of mass, normalised to (max-side / 2). It feeds the engine's drag-
 // torque term: tall buses (telescopes, tugs) want active attitude control
 // or they tumble; symmetric cubes resist disturbance naturally.
+//
+// rcs = optional reaction-control thruster suite — { thrust, isp } (per-axis
+// authority [N] and propellant Isp [s]). Bodies that carry it gain
+// *multidirectional* translation in flight (engine reads design.rcs*): they
+// can push along and across the velocity vector at once, decoupled from the
+// main engine. Only the bigger buses fly RCS — CubeSats hold attitude with
+// magnetorquers/wheels and have no translation clusters. The orbital tug is
+// servicing-grade and carries the strongest, finest RCS in the catalogue.
 export const BODIES = {
     cubesat_3u:   { label: '3U CubeSat',        dims: [0.10, 0.10, 0.34], mass: 4,    cd: 2.2, shape: 'box',  momentArmMul: 0.15 },
     cubesat_12u:  { label: '12U CubeSat',       dims: [0.20, 0.20, 0.34], mass: 14,   cd: 2.2, shape: 'box',  momentArmMul: 0.18 },
     cubesat_grid: { label: '6U Grid (3×2)',     dims: [0.30, 0.20, 0.34], mass: 22,   cd: 2.3, shape: 'grid', momentArmMul: 0.22, gridCells: [3, 2, 1] },
-    smallsat:     { label: 'SmallSat bus',      dims: [0.60, 0.60, 0.80], mass: 90,   cd: 2.2, shape: 'box',  momentArmMul: 0.18 },
-    bus_med:      { label: 'Medium bus',        dims: [1.20, 1.20, 1.50], mass: 320,  cd: 2.2, shape: 'box',  momentArmMul: 0.20 },
-    tank_cyl:     { label: 'Cylindrical bus',   dims: [1.00, 1.00, 2.00], mass: 240,  cd: 2.0, shape: 'cyl',  momentArmMul: 0.30 },
-    tug:          { label: 'Orbital tug',       dims: [1.60, 1.60, 1.10], mass: 480,  cd: 2.1, shape: 'cyl',  momentArmMul: 0.22, tug: true },
-    telescope:    { label: 'Optical telescope', dims: [1.10, 1.10, 3.20], mass: 540,  cd: 2.4, shape: 'tube', momentArmMul: 0.55 },
+    smallsat:     { label: 'SmallSat bus',      dims: [0.60, 0.60, 0.80], mass: 90,   cd: 2.2, shape: 'box',  momentArmMul: 0.18, rcs: { thrust:  2, isp:  80 } },
+    bus_med:      { label: 'Medium bus',        dims: [1.20, 1.20, 1.50], mass: 320,  cd: 2.2, shape: 'box',  momentArmMul: 0.20, rcs: { thrust: 10, isp: 220 } },
+    tank_cyl:     { label: 'Cylindrical bus',   dims: [1.00, 1.00, 2.00], mass: 240,  cd: 2.0, shape: 'cyl',  momentArmMul: 0.30, rcs: { thrust:  8, isp: 220 } },
+    tug:          { label: 'Orbital tug',       dims: [1.60, 1.60, 1.10], mass: 480,  cd: 2.1, shape: 'cyl',  momentArmMul: 0.22, tug: true, rcs: { thrust: 40, isp: 230 } },
+    telescope:    { label: 'Optical telescope', dims: [1.10, 1.10, 3.20], mass: 540,  cd: 2.4, shape: 'tube', momentArmMul: 0.55, rcs: { thrust:  4, isp: 200 } },
 };
 
 // ── Thruster units ──────────────────────────────────────────────────────────
@@ -233,6 +241,14 @@ export function deriveDesign(build, presets = null, tierMods = null) {
         throatLifeS:  Math.round(throatLifeS),
         copOffset:    round(copOffset, 3),
         maxSide:      round(maxSide, 3),
+        // ── Multidirectional RCS suite (body-dependent) ──────────────────
+        // Per-axis translation authority [N] and propellant Isp [s]. Zero /
+        // false for CubeSat-class buses that carry no translation clusters.
+        // Mass of the suite is folded into the bus mass already, so this is
+        // purely the flight-model capability the engine consumes.
+        rcs:          !!b.rcs,
+        rcsThrust:    b.rcs ? round(b.rcs.thrust, 2) : 0,
+        rcsIsp:       b.rcs ? b.rcs.isp : 0,
     };
     if (presets && presets[build.thruster]) {
         const ptu = presets[build.thruster];
@@ -325,6 +341,25 @@ export function buildGroup(THREE, build) {
         noz.position.set(cx * pitch, cy * pitch, -dz / 2 - tu.nozzle * 0.9);
         noz.rotation.x = -Math.PI / 2;               // bell points −z (aft)
         g.add(noz);
+    }
+
+    // ── RCS clusters — tiny lateral thruster pods at the bus corners ──
+    // Visual cue for the multidirectional-thrust suite. Four pods straddling
+    // the +z deck, canted outward, so a glance tells you this bus can strafe.
+    if (b.rcs) {
+        const rcsMat = new THREE.MeshStandardMaterial({
+            color: 0x9a6b3a, metalness: 0.7, roughness: 0.45,
+            emissive: 0x2a1605, emissiveIntensity: 0.5,
+        });
+        const podR = Math.min(dx, dy) * 0.07 + 0.012;
+        for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
+            const pod = new THREE.Mesh(
+                new THREE.ConeGeometry(podR, podR * 2.0, 10), rcsMat);
+            pod.position.set(sx * dx * 0.46, sy * dy * 0.46, dz * 0.30);
+            // Bell points outward along the corner diagonal.
+            pod.rotation.z = Math.atan2(sy, sx) - Math.PI / 2;
+            g.add(pod);
+        }
     }
 
     // ── Solar wings along ±x, with a short yoke ──
@@ -541,6 +576,19 @@ export function selfTest() {
     const rigid = deriveDesign({ ...defaultBuild(), panel: 'large', panelSpan: span }, presets);
     T(rosa.power / rosa.panelMass > rigid.power / rigid.panelMass,
         `ROSA > rigid on W/kg (${(rosa.power/rosa.panelMass).toFixed(0)} vs ${(rigid.power/rigid.panelMass).toFixed(0)})`);
+
+    // ── Multidirectional RCS suite ────────────────────────────────────────
+    // The bigger buses carry RCS clusters; CubeSats don't. The orbital tug
+    // has the strongest per-axis authority of the lot.
+    const cubeRcs = deriveDesign({ ...defaultBuild(), body: 'cubesat_3u' }, presets);
+    const smallRcs = deriveDesign({ ...defaultBuild(), body: 'smallsat' }, presets);
+    const tugRcs = deriveDesign({ ...defaultBuild(), body: 'tug' }, presets);
+    T(cubeRcs.rcs === false && cubeRcs.rcsThrust === 0,
+        `CubeSat carries no RCS (rcs=${cubeRcs.rcs})`);
+    T(smallRcs.rcs === true && smallRcs.rcsThrust > 0 && smallRcs.rcsIsp > 0,
+        `SmallSat has RCS (${smallRcs.rcsThrust} N @ ${smallRcs.rcsIsp}s)`);
+    T(tugRcs.rcs === true && tugRcs.rcsThrust > smallRcs.rcsThrust,
+        `tug RCS ≫ smallsat (${smallRcs.rcsThrust} → ${tugRcs.rcsThrust} N)`);
 
     return out;
 }
