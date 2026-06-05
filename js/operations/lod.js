@@ -42,6 +42,7 @@ export function startLodController(globe, tracker, opts = {}) {
     const cfg = { ...DEFAULTS, ...opts };
     const cam = globe.camera;
 
+    let enabled = opts.enabled ?? true;
     let lastBudget = -1;
     let lastTotal  = -1;
     let lastStatusKey = '';
@@ -51,6 +52,17 @@ export function startLodController(globe, tracker, opts = {}) {
 
     const off = globe.onTick(() => {
         const total = tracker.getCatalogSize();
+
+        // Disabled → draw the whole catalogue (no cull / no decimation) and
+        // report it once, so toggling "adaptive detail" off shows everything.
+        if (!enabled) {
+            if (lastBudget !== Infinity) {
+                lastBudget = Infinity;
+                tracker.setDrawBudget(Infinity);
+                if (cfg.onStatus) cfg.onStatus({ drawn: total, total, decimating: false });
+            }
+            return;
+        }
 
         // Budget from camera distance (Earth at the scene origin).
         const dist = cam.position.length();
@@ -90,5 +102,14 @@ export function startLodController(globe, tracker, opts = {}) {
         }
     });
 
-    return off;
+    return {
+        stop: off,
+        setEnabled(on) {
+            enabled = !!on;
+            // Force the next tick to re-apply (cull or draw-all) immediately.
+            lastBudget = -1;
+            lastCullAt = 0;
+        },
+        isEnabled() { return enabled; },
+    };
 }

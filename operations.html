@@ -575,6 +575,43 @@ body {
 .op-lod-status.op-lod-decimating { color:#fc8; }
 .op-lod-status.op-lod-decimating::before { background:#fc6; box-shadow:0 0 6px #fc6; }
 
+/* ─── L0 fleet glyph labels (overlay over the globe) ───── */
+.op-fleet-glyph-layer {
+    position:absolute; inset:0;
+    overflow:hidden;
+    pointer-events:none;   /* chips re-enable pointer events themselves */
+    z-index:25;
+}
+.op-fleet-glyph-chip {
+    position:absolute; top:0; left:0;
+    pointer-events:auto;
+    display:inline-flex; align-items:center; gap:5px;
+    background:rgba(8,14,20,.82);
+    border:1px solid rgba(0,255,220,.35);
+    border-radius:5px;
+    padding:2px 7px;
+    color:#cffff5; font:inherit; font-size:.68rem; line-height:1.1;
+    white-space:nowrap; cursor:pointer;
+    backdrop-filter:blur(4px);
+    box-shadow:0 2px 10px rgba(0,0,0,.45);
+    transition:border-color .12s, background .12s;
+    will-change:transform;
+}
+.op-fleet-glyph-chip:hover { border-color:rgba(0,255,220,.7); background:rgba(8,20,26,.92); }
+.op-fleet-glyph-chip--sel {
+    border-color:#0ff; color:#fff;
+    box-shadow:0 0 0 1px rgba(0,255,255,.4), 0 2px 12px rgba(0,0,0,.5);
+}
+.op-fleet-glyph-chip--pending { opacity:.6; }
+.op-fleet-glyph-chip--error { border-color:rgba(255,90,120,.5); color:#fbd; }
+.op-fleet-glyph-dot {
+    width:6px; height:6px; border-radius:50%;
+    background:#0ffff0; box-shadow:0 0 6px #0ffff0; flex-shrink:0;
+}
+.op-fleet-glyph-chip--sel .op-fleet-glyph-dot { background:#0ff; box-shadow:0 0 7px #0ff; }
+.op-fleet-glyph-name { font-weight:600; max-width:150px; overflow:hidden; text-overflow:ellipsis; }
+.op-fleet-glyph-alt { color:#7bd; font-family:monospace; font-size:.6rem; }
+
 /* ─── Aristotle conjunction table ──────────────────────── */
 .op-aristotle-tbl {
     width:100%; border-collapse:collapse; font-size:.7rem;
@@ -2185,6 +2222,16 @@ body {
                 <span class="op-layer-dot" style="color:#f9a;background:#f9a"></span>
                 <span class="op-layer-name">Debris density map</span>
             </label>
+            <label class="op-layer-row" title="Reticle + name/altitude label on each of your fleet assets. Always visible and selectable at any zoom.">
+                <input type="checkbox" id="op-toggle-fleet-labels">
+                <span class="op-layer-dot" style="color:#9ffff0;background:#9ffff0"></span>
+                <span class="op-layer-name">Fleet glyphs &amp; labels</span>
+            </label>
+            <label class="op-layer-row" title="Adaptive detail (LOD): draw only the visible, in-front catalogue points, decimated to a budget. Turn off to draw every loaded object (slower on large catalogues).">
+                <input type="checkbox" id="op-toggle-lod">
+                <span class="op-layer-dot" style="color:#0cc;background:#0cc"></span>
+                <span class="op-layer-name">Adaptive detail (LOD)</span>
+            </label>
             <div id="op-lod-status" class="op-lod-status" hidden
                  title="Level-of-detail: when the catalogue exceeds the draw budget, the cloud is thinned with a uniform-stride index buffer (every object is still propagated). Zoom in to resolve more."></div>
         </div>
@@ -2366,6 +2413,7 @@ import {
 }                            from './js/operations/sw-model.js';
 import { DragShell }          from './js/operations/drag-shell.js';
 import { startLodController } from './js/operations/lod.js';
+import { FleetGlyphs }        from './js/operations/fleet-glyphs.js';
 import { MyFleet }            from './js/operations/my-fleet.js';
 import {
     mountMyFleet, mountDecayWatch, mountConjunctions, mountPropBudget,
@@ -2580,7 +2628,8 @@ globe.onTick(() => dragShell.tick());
 // timer), so it's near-free while still. Every object is still propagated by
 // the SGP4 worker; owned fleet renders separately and stays legible.
 const lodStatusEl = document.getElementById('op-lod-status');
-const stopLod = startLodController(globe, fleet.tracker, {
+const lod = startLodController(globe, fleet.tracker, {
+    enabled: localStorage.getItem('op-lod') !== 'off',
     onStatus: ({ drawn, total, decimating }) => {
         if (!lodStatusEl) return;
         if (!total) { lodStatusEl.hidden = true; return; }
@@ -2601,6 +2650,20 @@ const visuals = new OperationsVisuals({
     tracker: fleet.tracker,
 });
 visuals.start();
+
+/* ─── L0 owned-fleet glyphs + labels (Workstream C) ────── */
+// Reticle glyph + selectable name/altitude chip per owned asset. Always
+// drawn and legible at any zoom — immune to the LOD cull/decimation since
+// these are separate objects, not points in the catalogue cloud. Shares the
+// selection bus with the deck, picker, and fleet rows.
+const fleetLabelsOn = localStorage.getItem('op-fleet-labels') !== 'off';
+const fleetGlyphs = new FleetGlyphs(globe, myFleet, fleet.tracker, {
+    host:           document.getElementById('op-globe-wrap'),
+    visible:        fleetLabelsOn,
+    onSelect:       (id) => visuals.setSelectedAsset(id),
+    getSelectedId:  ()   => visuals.getSelectedAsset(),
+    onSelectChange: (fn) => visuals.onSelectionChange(fn),
+});
 
 mountMyFleet(myFleet, {
     onSelect:       (id) => visuals.setSelectedAsset(id),
@@ -2945,13 +3008,31 @@ function mountSpaceWeatherControls() {
 }
 mountSpaceWeatherControls();
 
-/* ─── Drag-shell overlay toggle ────────────────────────── */
+/* ─── Overlay toggles (drag shell · fleet labels · LOD) ── */
 const dragShellToggle = document.getElementById('op-toggle-dragshell');
 if (dragShellToggle) {
     dragShellToggle.checked = dragShell.isVisible();
     dragShellToggle.addEventListener('change', (e) => {
         dragShell.setVisible(e.target.checked);
         try { localStorage.setItem('op-dragshell', e.target.checked ? 'on' : 'off'); } catch (_) {}
+    });
+}
+
+const fleetLabelsToggle = document.getElementById('op-toggle-fleet-labels');
+if (fleetLabelsToggle) {
+    fleetLabelsToggle.checked = fleetGlyphs.isVisible();
+    fleetLabelsToggle.addEventListener('change', (e) => {
+        fleetGlyphs.setVisible(e.target.checked);
+        try { localStorage.setItem('op-fleet-labels', e.target.checked ? 'on' : 'off'); } catch (_) {}
+    });
+}
+
+const lodToggle = document.getElementById('op-toggle-lod');
+if (lodToggle) {
+    lodToggle.checked = lod.isEnabled();
+    lodToggle.addEventListener('change', (e) => {
+        lod.setEnabled(e.target.checked);
+        try { localStorage.setItem('op-lod', e.target.checked ? 'on' : 'off'); } catch (_) {}
     });
 }
 
@@ -2977,7 +3058,7 @@ window.__op = {
     provStore, delta, myFleet, visuals, stopSwpcBridge,
     bPlane, densityMap,
     stopSwDriver, dragShell, setScenario, getScenario, evalSpaceWeatherAt,
-    stopLod,
+    lod, fleetGlyphs,
 };
 </script>
 
