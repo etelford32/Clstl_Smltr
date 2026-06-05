@@ -3431,7 +3431,7 @@ import {
     EARTH_VERT, EARTH_FRAG, CLOUD_VERT, CLOUD_FRAG, ATM_VERT, ATM_FRAG,
     AURORA_VERT, AURORA_FRAG,
     createEarthUniforms, createCloudUniforms, createAuroraUniforms,
-    loadEarthTextures,
+    loadEarthTextures, loadEarthHiRes,
 } from './js/earth-skin.js';
 import { StormFeed } from './js/storm-feed.js';
 import { initDebugOverlay } from './js/debug-overlay.js';
@@ -4023,7 +4023,65 @@ loadEarthTextures(earthU, cloudU, {
     },
 }).then(() => {
     document.getElementById('loading').classList.add('done');
+    // Capture the 4K base handles so the surface-LOD controller can swap back
+    // to them when the camera pulls out (see _updateSurfaceLOD below).
+    _lodBase.day      = earthU.u_day.value;
+    _lodBase.topology = earthU.u_topology.value;
 });
+
+// ═══════════════════════════════════════════════════════════════
+//  SURFACE IMAGERY LOD — lazy 8K swap on deep zoom
+// ═══════════════════════════════════════════════════════════════
+// The globe ships a 4K day/topology base (≈5 km/texel) — plenty for the
+// whole-disk view, blurry once you zoom into a coastline. Rather than pay 8K
+// VRAM for everyone, we fetch the hi-res set lazily the first time the camera
+// gets close and swap the u_day / u_topology samplers; when the camera pulls
+// back out we revert to 4K and dispose the 8K textures to free VRAM (the user
+// chose this trade — a small reload hitch on the next zoom-in vs holding
+// ~270 MB resident). ENTER/EXIT thresholds straddle the distance where the
+// globe overflows the viewport, with a hysteresis gap so small camera jitter
+// at the boundary can't thrash the load/dispose cycle. Night stays 4K.
+const _lodBase  = { day: null, topology: null };  // 4K handles (captured above)
+let   _lodHi    = null;     // { day, topology } 8K handles once loaded
+let   _lodLoading = false;
+let   _lodActive  = false;  // currently showing hi-res?
+const LOD_ENTER = 2.2;      // camera distance (R_EARTH = 1) to switch up to 8K
+const LOD_EXIT  = 2.8;      // … and back down to 4K (hysteresis gap)
+
+function _applyLOD(hi) {
+    const day  = hi ? _lodHi?.day      : _lodBase.day;
+    const topo = hi ? _lodHi?.topology : _lodBase.topology;
+    if (day)  earthU.u_day.value      = day;
+    if (topo) earthU.u_topology.value = topo;
+    _lodActive = hi;
+}
+
+function _updateSurfaceLOD(dist) {
+    if (!_lodBase.day) return;            // base not ready yet
+
+    if (!_lodActive && dist < LOD_ENTER) {
+        if (_lodHi) {                     // already cached → just swap in
+            _applyLOD(true);
+        } else if (!_lodLoading) {
+            _lodLoading = true;
+            loadEarthHiRes({ timeoutMs: 12000 }).then(hi => {
+                _lodLoading = false;
+                if (!hi || (!hi.day && !hi.topology)) return;   // all failed → stay 4K
+                _lodHi = hi;
+                // Apply only if the camera is still in (or near) the zoom band;
+                // otherwise keep the textures cached for the next zoom-in.
+                if (camera.position.length() < LOD_EXIT) _applyLOD(true);
+            });
+        }
+    } else if (_lodActive && dist > LOD_EXIT) {
+        _applyLOD(false);                 // revert to 4K …
+        if (_lodHi) {                     // … and free the 8K VRAM
+            _lodHi.day?.dispose();
+            _lodHi.topology?.dispose();
+            _lodHi = null;
+        }
+    }
+}
 
 // ── Storm-update: push active cyclone positions into cloud shader ─────────────
 new StormFeed().start();
@@ -9527,6 +9585,11 @@ function animate() {
     const _pnow = performance.now();
     if (_prLastFrameMs) _governResolution(_pnow - _prLastFrameMs);
     _prLastFrameMs = _pnow;
+
+    // Surface-imagery LOD: swap in the 8K day/topology set when the camera is
+    // close, revert + free VRAM when it pulls out. Cheap — early-returns unless
+    // a threshold is crossed.
+    _updateSurfaceLOD(camera.position.length());
 
     // ── Read sim time from the shared bus.
     // Bus owns advance (live ticks at wall-clock, replay anchored at

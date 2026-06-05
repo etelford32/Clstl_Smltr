@@ -41,6 +41,18 @@ export const EARTH_TEXTURES = {
     topology: _IMG + 'earth-topology.png',
 };
 
+// ── Hi-res surface set for the zoom LOD (js/vendor/earth-hires) ───────────────
+// 8192×4096 day + topology, vendored same-origin (Solar System Scope, CC BY 4.0
+// — see js/vendor/earth-hires/ATTRIBUTION.md). loadEarthHiRes() fetches these
+// lazily, only when the host page decides the camera is close enough to benefit
+// (earth.html's surface-LOD controller). Night stays at the 4K set — diffuse
+// city-light glow is indistinguishable at 8K and skipping it halves the VRAM.
+const _HI = new URL('./vendor/earth-hires/', import.meta.url).href;
+export const EARTH_TEXTURES_HI = {
+    day:      _HI + 'day-8k.jpg',
+    topology: _HI + 'topo-8k.jpg',
+};
+
 // ── Safe 1×1 placeholder textures (prevent null-sampler GPU crashes) ─────────
 function _blackTex() {
     const t = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1, THREE.RGBAFormat);
@@ -1257,6 +1269,55 @@ export function loadEarthTextures(earthU, cloudU = null, opts = {}) {
     // (no CDN dependency).  Skip loading the old clouds.png.
 
     return Promise.all(promises);
+}
+
+/**
+ * Lazily load the hi-res (8K) day + topology textures for the zoom LOD.
+ *
+ * Unlike loadEarthTextures(), this does NOT touch any uniforms — it just
+ * fetches and configures the textures and hands the caller the handles, so
+ * the host page stays in full control of *when* to swap them in (and back
+ * out / dispose) based on camera distance. A per-texture timeout means a
+ * slow/missing hi-res asset never blocks anything: the caller simply keeps
+ * showing the already-resident 4K base.
+ *
+ * @param {object} [opts]
+ * @param {number} [opts.timeoutMs=12000]  per-texture watchdog
+ * @param {function} [opts.onProgress]     (loaded, total) → void
+ * @returns {Promise<{day: THREE.Texture|null, topology: THREE.Texture|null}>}
+ *          A null entry means that texture failed/timed out — keep the base.
+ */
+export function loadEarthHiRes(opts = {}) {
+    const { timeoutMs = 12000, onProgress = null } = opts;
+    const loader = new THREE.TextureLoader();
+    const total = 2;
+    let settled = 0;
+    const bump = () => { settled++; if (onProgress) { try { onProgress(settled, total); } catch (_) {} } };
+
+    const load = (url, srgb) => new Promise(resolve => {
+        let done = false;
+        const finish = (tex) => { if (done) return; done = true; bump(); resolve(tex); };
+        const timer = setTimeout(() => {
+            console.warn(`[EarthSkin] hi-res slow — keeping 4K base: ${url}`);
+            finish(null);
+        }, timeoutMs);
+        loader.load(url,
+            tex => {
+                clearTimeout(timer);
+                tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+                tex.flipY = false;   // same UV convention as the base set
+                if (srgb) tex.colorSpace = THREE.SRGBColorSpace;
+                finish(tex);
+            },
+            undefined,
+            () => { clearTimeout(timer); console.warn(`[EarthSkin] hi-res failed — keeping 4K base: ${url}`); finish(null); }
+        );
+    });
+
+    return Promise.all([
+        load(EARTH_TEXTURES_HI.day, true),       // albedo → sRGB
+        load(EARTH_TEXTURES_HI.topology, false), // bump/elevation → linear
+    ]).then(([day, topology]) => ({ day, topology }));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
