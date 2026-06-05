@@ -192,6 +192,13 @@ function jsFallbackPropagate(tle, tsince_min) {
 const _temeScratch  = new THREE.Vector3();
 const _sceneScratch = new THREE.Vector3();
 
+// Reused scratch for the LOD frustum + occlusion cull (_collectVisible).
+// Module-level so the per-frame view update allocates nothing.
+const _lodFrustum  = new THREE.Frustum();
+const _lodProj     = new THREE.Matrix4();
+const _lodInvWorld = new THREE.Matrix4();
+const _lodCamLocal = new THREE.Vector3();
+
 // ── Constellation color map ─────────────────────────────────────────────────
 // Each group gets a distinct color for per-vertex coloring.
 const GROUP_COLORS = {
@@ -303,7 +310,9 @@ export class SatelliteTracker {
         // of vertices it would draw on top of each other anyway.
         this._lodEnabled  = false;
         this._lodBudget   = Infinity;
-        this._lodIndexArr = null;   // reused Uint32Array of drawn indices
+        this._lodCull     = false;  // frustum + Earth-occlusion cull (camera-driven)
+        this._lodIndexArr = null;   // reused Uint32Array(n) of drawn indices
+        this._lodCand     = null;   // reused Uint32Array(n) of visible candidates
         this._lodDrawn    = 0;      // points actually drawn last apply
 
         // Batch propagation hot-path. WASM keeps a parallel registry
@@ -917,24 +926,40 @@ export class SatelliteTracker {
         this._pointsMesh.renderOrder = 10;
         this._group.add(this._pointsMesh);
 
-        // Catalogue size changed → the prior index no longer maps. Rebuild
-        // it from the current budget (no-op when LOD is disabled).
+        // Catalogue size changed → the prior index/candidate buffers no
+        // longer map. Drop them and recompute (no-op when LOD is disabled).
         this._lodIndexArr = null;
-        this._applyLodIndex();
+        this._lodCand     = null;
+        this._applyLod(null);
     }
 
     /**
-     * Set the maximum number of points to draw individually. Pass a finite
-     * number to enable LOD decimation (uniform-stride index buffer); pass
-     * Infinity / null to draw the whole catalogue. Cheap and idempotent —
-     * safe to call every frame from a camera-distance driver.
+     * Set the maximum number of points to draw individually (no view cull).
+     * Pass a finite number to enable uniform-stride decimation; Infinity /
+     * null draws the whole catalogue. Cheap and idempotent.
      */
     setDrawBudget(maxDrawn) {
         const b = Number.isFinite(maxDrawn) ? Math.max(1, Math.floor(maxDrawn)) : Infinity;
-        if (b === this._lodBudget) return;
+        if (b === this._lodBudget && !this._lodCull) return;
         this._lodBudget  = b;
+        this._lodCull    = false;
         this._lodEnabled = Number.isFinite(b);
-        this._applyLodIndex();
+        this._applyLod(null);
+    }
+
+    /**
+     * Camera-driven LOD: keep only points inside the frustum and not
+     * occluded by Earth, then decimate that visible set to `budget`. This
+     * spends the draw budget on what's actually on screen instead of the
+     * far side of the globe. Call every frame (the Operations LOD
+     * controller throttles to camera motion). Returns the points drawn.
+     */
+    updateLodView(camera, { budget = this._lodBudget, cull = true } = {}) {
+        this._lodBudget  = Number.isFinite(budget) ? Math.max(1, Math.floor(budget)) : Infinity;
+        this._lodCull    = !!cull && !!camera;
+        this._lodEnabled = Number.isFinite(this._lodBudget) || this._lodCull;
+        this._applyLod(camera);
+        return this._lodDrawn;
     }
 
     /** Points actually drawn (after any LOD decimation). */
@@ -943,38 +968,133 @@ export class SatelliteTracker {
     getCatalogSize() { return this._satellites.length; }
 
     /**
-     * (Re)build the LOD index buffer to match the current budget. When the
-     * budget is ≥ the catalogue size (or LOD is off) the index is removed
-     * so the mesh draws every vertex. Uniform stride samples across the
-     * whole catalogue, so every group thins proportionally rather than a
-     * contiguous prefix swallowing whole groups.
+     * Recompute the draw set. With cull on, the candidate list is the
+     * frustum-visible, un-occluded points; otherwise it's the whole
+     * catalogue. The list is then decimated to the budget via uniform
+     * stride (so every group thins proportionally) and written into a
+     * reused index buffer drawn via setDrawRange — no per-frame realloc.
      */
-    _applyLodIndex() {
+    _applyLod(camera) {
         if (!this._pointsMesh) return;
         const geo = this._pointsMesh.geometry;
         const n = this._satellites.length;
 
-        if (!this._lodEnabled || this._lodBudget >= n || n === 0) {
+        // Disabled, empty, or nothing to thin and no cull → draw everything,
+        // no index. This is the exact pre-LOD path (satellites.html stays here).
+        if (!this._lodEnabled || n === 0 || (!this._lodCull && this._lodBudget >= n)) {
             if (geo.index !== null) geo.setIndex(null);
+            geo.setDrawRange(0, Infinity);
             this._lodDrawn = n;
             return;
         }
 
-        const K = Math.max(1, Math.min(n, Math.floor(this._lodBudget)));
-        const stride = n / K;
-
-        // Reuse the typed array (and the BufferAttribute) when K is steady
-        // so a continuous zoom doesn't churn allocations every frame.
-        let attr = geo.index;
-        if (!this._lodIndexArr || this._lodIndexArr.length !== K || !attr || attr.array !== this._lodIndexArr) {
-            this._lodIndexArr = new Uint32Array(K);
-            attr = new THREE.BufferAttribute(this._lodIndexArr, 1);
-            geo.setIndex(attr);
+        // Candidate list.
+        const cand = this._ensureLodBuf('_lodCand', n);
+        let m;
+        if (this._lodCull && camera) {
+            m = this._collectVisible(camera, cand, n);
+        } else {
+            for (let i = 0; i < n; i++) cand[i] = i;
+            m = n;
         }
-        const idx = this._lodIndexArr;
-        for (let j = 0; j < K; j++) idx[j] = Math.min(n - 1, (j * stride) | 0);
-        attr.needsUpdate = true;
+
+        // Decimate candidates → drawn budget.
+        const budget = this._lodBudget >= n ? m : this._lodBudget;
+        const K = Math.max(0, Math.min(m, budget));
+        const idx = this._ensureLodIndex(n, geo);
+        if (K === m) {
+            idx.set(cand.subarray(0, K));
+        } else if (K > 0) {
+            const stride = m / K;
+            for (let j = 0; j < K; j++) idx[j] = cand[Math.min(m - 1, (j * stride) | 0)];
+        }
+        geo.index.needsUpdate = true;
+        geo.setDrawRange(0, K);
         this._lodDrawn = K;
+    }
+
+    /** Ensure a reused Uint32Array(≥n) field; reallocs only when it grows. */
+    _ensureLodBuf(field, n) {
+        let buf = this[field];
+        if (!buf || buf.length < n) buf = this[field] = new Uint32Array(n);
+        return buf;
+    }
+
+    /** Ensure the geometry's index attribute is our reused full-size array. */
+    _ensureLodIndex(n, geo) {
+        if (!this._lodIndexArr || this._lodIndexArr.length < n) {
+            this._lodIndexArr = new Uint32Array(n);
+            geo.setIndex(new THREE.BufferAttribute(this._lodIndexArr, 1));
+        } else if (geo.index?.array !== this._lodIndexArr) {
+            geo.setIndex(new THREE.BufferAttribute(this._lodIndexArr, 1));
+        }
+        return this._lodIndexArr;
+    }
+
+    /**
+     * Collect indices of points that are inside the camera frustum and not
+     * hidden behind Earth, into `cand`. Returns the count. Works in the
+     * points mesh's local space: the frustum planes and the camera position
+     * are transformed once into local coords, so the per-point test is a
+     * handful of dot products (no per-point matrix multiply). Hidden groups
+     * are skipped so the budget isn't spent on invisible dots.
+     */
+    _collectVisible(camera, cand, n) {
+        const mesh = this._pointsMesh;
+        mesh.updateWorldMatrix(true, false);
+        _lodInvWorld.copy(mesh.matrixWorld).invert();
+        // Our caller runs inside onTick, before the renderer refreshes the
+        // camera matrices — derive a current view matrix ourselves so the
+        // frustum matches what will be drawn this frame.
+        camera.updateMatrixWorld();
+        camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
+        _lodProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+        _lodFrustum.setFromProjectionMatrix(_lodProj);
+        for (const plane of _lodFrustum.planes) plane.applyMatrix4(_lodInvWorld);
+        _lodCamLocal.setFromMatrixPosition(camera.matrixWorld).applyMatrix4(_lodInvWorld);
+
+        const R2 = this._earthR * this._earthR;
+        const cDotC = _lodCamLocal.lengthSq();            // |C-O|², O = origin
+        const cOutside = cDotC > R2;                       // camera above surface
+        const planes = _lodFrustum.planes;
+        const pos = this._positions.array;
+
+        // Precompute hidden groups so the inner loop skips invisible dots.
+        let hidden = null;
+        for (const [name, g] of this._groups) {
+            if (!g.visible || g.dotsHidden) (hidden ??= new Set()).add(name);
+        }
+        const sats = this._satellites;
+
+        let m = 0;
+        for (let i = 0; i < n; i++) {
+            if (hidden && hidden.has(sats[i].group)) continue;
+            const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
+
+            // Frustum: inside all six planes (signed distance ≥ 0).
+            let inside = true;
+            for (let p = 0; p < 6; p++) {
+                const pl = planes[p].normal;
+                if (pl.x * x + pl.y * y + pl.z * z + planes[p].constant < 0) { inside = false; break; }
+            }
+            if (!inside) continue;
+
+            // Earth occlusion: does the segment C→P pierce the globe before P?
+            // Quadratic |C + t(P−C)|² = R² ; occluded if a root lies in (0,1).
+            if (cOutside) {
+                const dx = x - _lodCamLocal.x, dy = y - _lodCamLocal.y, dz = z - _lodCamLocal.z;
+                const a = dx * dx + dy * dy + dz * dz;
+                const b = 2 * (_lodCamLocal.x * dx + _lodCamLocal.y * dy + _lodCamLocal.z * dz);
+                const c = cDotC - R2;
+                const disc = b * b - 4 * a * c;
+                if (disc > 0) {
+                    const t = (-b - Math.sqrt(disc)) / (2 * a);
+                    if (t > 0 && t < 1) continue;          // globe blocks the point
+                }
+            }
+            cand[m++] = i;
+        }
+        return m;
     }
 
     /** Update only the color buffer (for show/hide toggles + alert tints). */
