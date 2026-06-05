@@ -155,6 +155,17 @@ body {
 .fsw-src { font-size:.66rem; color:#9ab; font-family: ui-monospace, monospace; }
 .fsw-src b { color:#cbd; }
 </style>
+
+<!-- Three.js (vendored) for the 3D rotation simulation; see js/farside/farside-globe.js -->
+<script type="importmap">
+{
+    "imports": {
+        "three":         "/js/vendor/three-0.160.0/three.module.js",
+        "three/addons/": "/js/vendor/three-0.160.0/jsm/"
+    }
+}
+</script>
+<link rel="modulepreload" href="/js/vendor/three-0.160.0/three.module.js">
 </head>
 <body>
 
@@ -204,13 +215,13 @@ body {
         <span><i class="fsw-sw" style="background:#777"></i> W-limb</span>
       </div>
 
-      <h2 style="margin-top:16px">Rotation view — looking down the solar axis</h2>
+      <h2 style="margin-top:16px">Rotation view — far side rotating into view (3D)</h2>
       <canvas id="fsw-topdown"></canvas>
-      <p class="fsw-note">
-        Far-side hemisphere shaded violet; Earth is to the right. Detections are
-        placed by their central-meridian distance and labelled with days-to-emergence.
-        As the Sun rotates (~13.2°/day synodic), far-side regions cross the
-        blue east-limb horizon into Earth-facing view.
+      <p class="fsw-note fsw-note-3d">
+        The GONG phase-shift field is wrapped on the photosphere; the far-side
+        hemisphere (violet wash) faces away from Earth. Detections sit on the
+        surface and rotate across the blue east-limb horizon into Earth-facing
+        view as the Sun turns (~13.2°/day synodic).
       </p>
     </section>
   </div>
