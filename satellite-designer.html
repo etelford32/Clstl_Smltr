@@ -980,6 +980,8 @@ select option{background:#0a1024}
           <div class="cam-btn" data-cam="wide">WIDE</div>
           <div class="cam-btn" data-cam="follow">FOLLOW</div>
           <div class="cam-btn active" data-cam="free">FREE</div>
+          <div class="cam-btn" data-cam="chase" title="3rd-person chase camera — trails the bird's heading">CHASE</div>
+          <div class="cam-btn" data-cam="nose" title="First-person nose camera — rides down the ram axis">NOSE</div>
         </div>
         <div class="cam-act" id="cam-reset" title="Reset to the wide system view">↺ Reset<kbd>R</kbd></div>
       </div>
@@ -1129,8 +1131,28 @@ select option{background:#0a1024}
           <div class="toggle" data-mode="manual" data-unlock="manual_steer">🎯 Manual</div>
         </div>
         <p class="hint" id="manual-hint" style="margin-top:6px;display:none">
-          🕹 <b>A/D</b> rotate heading · <b>Q/E</b> fine · <b>W/S</b> fire fwd/rev (hold).
+          🕹 <b>W</b>/<b>↑</b> gas · <b>S</b>/<b>↓</b> ease · <b>A</b>/<b>←</b> · <b>D</b>/<b>→</b> steer · <b>Q/E</b> fine.
         </p>
+        <p class="hint" id="steer-hud" style="margin-top:5px;display:none">↻ slew —</p>
+      </div>
+
+      <!-- ── RCS translation pad — only revealed when the launched bus carries
+           a reaction-control suite (BODIES[].rcs). Multidirectional: hold two
+           pads at once to strafe on the diagonal. Decoupled from the throttle
+           and the main burn vector. -->
+      <div class="ctl-group rcs-group" id="rcs-pad" style="margin-top:10px;display:none">
+        <div class="ctl-label">RCS translation
+          <small style="color:var(--c-text-3);font-weight:600;text-transform:none;letter-spacing:0;margin-left:8px">⌨ I/K · J/L · hold</small>
+          <span class="rcs-tag" id="rcs-tag" title="Per-axis RCS authority">—</span>
+        </div>
+        <div class="rcs-dpad">
+          <button class="rcs-btn up"    data-rcs="out"  title="Radial-out (push away from Earth)">⬆</button>
+          <button class="rcs-btn left"  data-rcs="back" title="Retrograde nudge (lower)">⏪</button>
+          <div class="rcs-core" id="rcs-core">RCS</div>
+          <button class="rcs-btn right" data-rcs="fwd"  title="Prograde nudge (raise)">⏩</button>
+          <button class="rcs-btn down"  data-rcs="in"   title="Radial-in (push toward Earth)">⬇</button>
+        </div>
+        <p class="hint" style="margin-top:6px">Lateral nudges, no rotation needed — hold two for a diagonal.</p>
       </div>
 
       <!-- ── RCS translation pad — only revealed when the launched bus carries
@@ -1367,6 +1389,13 @@ const sim = {
 let sdBuild = BUILDER.defaultBuild();
 // Persistent pilot profile (XP, rank, unlocks) — see js/satellite-progression.js
 let profile = PROG.loadProfile();
+
+// Arcade slew gain — multiplies the design's real (deg/s-scale) slew rate up
+// to a *playable* turn rate. Real spacecraft re-point far too slowly for an
+// arcade cockpit, so we scale uniformly: relative agility between buses is
+// preserved (CMG > wheels), and the HUD shows this same gamified number so
+// what you read matches what you feel.
+const SLEW_GAIN = 12;
 
 // ── Design from the form ────────────────────────────────────────────────────
 function readDesign() {
@@ -1645,8 +1674,9 @@ function setBurnMode(mode) {
   const chipMode = mode === 'manual-retro' ? 'manual' : mode;
   $('thrust-modes').querySelectorAll('.toggle').forEach(x =>
     x.classList.toggle('active', x.dataset.mode === chipMode));
-  $('manual-hint').style.display =
-    (mode === 'manual' || mode === 'manual-retro') ? 'block' : 'none';
+  // The Pilot/steering hint is owned by syncSteerHud (it's persistent in
+  // flight now that arcade control is core) — don't flicker it on burn-mode
+  // changes, which the gas pedal toggles constantly.
 }
 // Time warp — same gating
 $('warp-modes').addEventListener('click', (e) => {
@@ -2390,7 +2420,12 @@ function launch() {
     sim.design.rcs       = !!bd.rcs;
     sim.design.rcsThrust = bd.rcsThrust || 0;
     sim.design.rcsIsp    = bd.rcsIsp || 0;
-  } catch (_) { sim.design.rcs = false; }
+    // Attitude / steering authority — drives A/D slew rate + the HUD readout.
+    sim.design.slewRate  = bd.slewRate || (1.0 * Math.PI / 180);
+    sim.design.slewDeg   = bd.slewDeg  || 1.0;
+    sim.design.attSys    = bd.attSys   || 'Reaction wheels';
+  } catch (_) { sim.design.rcs = false; sim.design.slewRate = 1.0 * Math.PI / 180; }
+  syncSteerHud();
   const peri = +$('f-peri').value, apo = Math.max(+$('f-apo').value, peri);
   sim.state = ENG.initState(sim.design, { periKm: peri, apoKm: apo, env });
   sim.trail = []; sim.altHist = [];
@@ -2402,9 +2437,9 @@ function launch() {
   sim.control.heading = Math.atan2(sim.state.vy, sim.state.vx);
   sim.inputs = { rotL: false, rotR: false, fwd: false, rev: false, fine: false, burn: false,
                  rcsOut: false, rcsIn: false, rcsFwd: false, rcsBack: false };
-  sim.control.rcs = null;
-  // Reveal the RCS pad only when the launched bus carries a translation suite.
-  syncRcsPad();
+  sim.control.rcs = null; sim._steer = 0;
+  // Reveal the RCS pad + steering readout now that sim.running is set.
+  syncRcsPad(); syncSteerHud();
   sim._burnPriorMode = null; sim._lastFloorStatus = null;
   sim._prevRdot = null; sim.scheduledBurn = null; sim._burnAnchor = null;
   sim._forecastBurnMultiplier = 1.0;
@@ -2475,7 +2510,7 @@ function resetSim() {
   sim.running = false; sim.paused = false; sim.state = null;
   sim.trail = []; sim.altHist = [];
   sim.score = 0;
-  sim.control.rcs = null; syncRcsPad();
+  sim.control.rcs = null; sim._steer = 0; syncRcsPad(); syncSteerHud();
   sim.targetSatM = null; sim.debrisM = null;
   $('b-launch').disabled = false;
   $('b-pause').disabled = true; $('b-pause').textContent = '⏸ Pause';
@@ -2726,16 +2761,50 @@ function frame(now) {
       simSecs = Math.min(simSecs, 30);
     }
 
-    // Pilot stick input — A/D rotate heading, W/S fire manual fwd/rev.
-    // Rotation rate is independent of warp so it's predictable at any speed.
+    // ── Pilot flight model (arcade) ──────────────────────────────────────
+    // W/↑ = gas (throttle up + thrust along heading) · S/↓ = ease off · A/←,
+    // D/→ = steer (re-point the bus). Steering speed is the design's real slew
+    // rate — set by its attitude hardware (reaction wheels / CMG / RCS). In
+    // "Pilot" mode the engine fires forward along the heading whenever the
+    // throttle is open, so the gas pedal *is* the thrust; lift to coast.
+    // Rotation is warp-independent so it's predictable at any time-warp.
     if (PROG.hasUnlock(profile, 'manual_steer')) {
-      const rate = (sim.inputs.fine ? 0.7 : 2.0) * realDt;
+      const slew = sim.design?.slewRate || (1.0 * Math.PI / 180);
+      const rate = (sim.inputs.fine ? slew * 0.4 : slew) * realDt * SLEW_GAIN;
       if (sim.inputs.rotL) sim.control.heading += rate;
       if (sim.inputs.rotR) sim.control.heading -= rate;
-      // W/S engage manual fire while held; release returns to Off.
-      if (sim.inputs.fwd) { if (sim.control.mode !== 'manual')       setBurnMode('manual'); }
-      else if (sim.inputs.rev) { if (sim.control.mode !== 'manual-retro') setBurnMode('manual-retro'); }
-      else if (sim.control.mode === 'manual' || sim.control.mode === 'manual-retro') setBurnMode('off');
+      // Gas / ease — adjust the throttle "pedal" (full sweep ≈ 1.1 s).
+      const GAS = 90;   // %/s
+      if (sim.inputs.fwd)  setThrottlePct(+$('f-throttle').value + GAS * realDt);
+      if (sim.inputs.rev)  setThrottlePct(+$('f-throttle').value - GAS * realDt);
+      // Engage Pilot mode the moment the player touches the stick; fire along
+      // heading while the throttle is open, coast when it's at zero.
+      const pilotActive = sim.inputs.fwd || sim.inputs.rev
+                       || sim.inputs.rotL || sim.inputs.rotR
+                       || sim.control.mode === 'manual';
+      if (pilotActive) {
+        if ((sim.control.throttle || 0) > 0.005) {
+          if (sim.control.mode !== 'manual') setBurnMode('manual');
+        } else if (sim.control.mode === 'manual') {
+          setBurnMode('off');
+        }
+      }
+    }
+    // Steering direction for the 3-D bank cue (left positive).
+    sim._steer = (sim.inputs.rotL ? 1 : 0) - (sim.inputs.rotR ? 1 : 0);
+
+    // RCS translation — multidirectional nudges, decoupled from the main
+    // engine's throttle and burn vector. Only the buses that carry a
+    // reaction-control suite respond; the command is a 2-D orbit-frame vector
+    // and holding two pads at once strafes on the diagonal.
+    if (sim.design?.rcs) {
+      const along  = (sim.inputs.rcsFwd ? 1 : 0) + (sim.inputs.rcsBack ? -1 : 0);
+      const radial = (sim.inputs.rcsOut ? 1 : 0) + (sim.inputs.rcsIn   ? -1 : 0);
+      sim.control.rcs = (along || radial) ? { along, radial } : null;
+      const core = $('rcs-core');
+      if (core) core.classList.toggle('live', !!sim.control.rcs && sim.state?.fuel > 0);
+    } else {
+      sim.control.rcs = null;
     }
 
     // RCS translation — multidirectional nudges, decoupled from the main
@@ -3092,6 +3161,7 @@ function draw() {
   // Heading reticle: always shown once Manual Steering is unlocked, so the
   // pilot can pre-aim before committing to a burn. Goes hot when firing.
   update.headingRad = sim.control.heading;
+  update.steer = sim._steer || 0;          // A/D bank cue for the 3-D model
   update.headingVisible = PROG.hasUnlock(profile, 'manual_steer') && !!sim.state;
   update.headingFiring = manual && sim.state?.fuel > 0 && sim.control.throttle > 0;
   if (sim.targetSatM) update.targetSat = [sim.targetSatM.x, sim.targetSatM.y];
@@ -3708,7 +3778,7 @@ addEventListener('keydown', (e) => {
     SCENE.resetView(); SCENE.setSubject('earth');
     setCamModeButton('wide'); setSubjectButton('earth');
   } else if (e.key === 'c' || e.key === 'C') {
-    const order = ['wide', 'follow', 'free'];
+    const order = ['wide', 'follow', 'free', 'chase', 'nose'];
     const next = order[(order.indexOf(SCENE.getMode()) + 1) % order.length];
     SCENE.setCameraMode(next, { snap: true }); setCamModeButton(next);
   }
@@ -3867,6 +3937,7 @@ function applyUnlockLocks() {
       el.title = '';
     }
   });
+  syncSteerHud();   // a fresh unlock may reveal the steering readout mid-flight
 }
 // Called when a mission ends (success or — for deorbit — useful failure).
 // Awards XP, persists the profile, and notifies the pilot of any rank-up
@@ -3893,7 +3964,7 @@ function grantMissionXp(success) {
 }
 
 // ── Pilot keyboard steering ────────────────────────────────────────────────
-// A/D rotate heading; Q/E fine; W/S fire fwd/rev along heading (hold).
+// W/↑ gas · S/↓ ease · A/← · D/→ steer (arcade flight); Q/E fine-steer.
 // 1–5 quick-select burn vector chips. Camera shortcuts (F/R/C) live higher
 // up in the file. We swallow keys only when the sim is running so we don't
 // fight the parts UI.
@@ -3906,6 +3977,12 @@ addEventListener('keydown', (e) => {
   else if (k === 'e') { sim.inputs.rotR = true; sim.inputs.fine = true; }
   else if (k === 'w') sim.inputs.fwd = true;
   else if (k === 's') sim.inputs.rev = true;
+  // Arrow keys mirror W/A/S/D for the arcade flight model (↑ gas · ↓ ease ·
+  // ←/→ steer). preventDefault so they don't scroll the page mid-flight.
+  else if (k === 'arrowup')    { e.preventDefault(); sim.inputs.fwd  = true; }
+  else if (k === 'arrowdown')  { e.preventDefault(); sim.inputs.rev  = true; }
+  else if (k === 'arrowleft')  { e.preventDefault(); sim.inputs.rotL = true; }
+  else if (k === 'arrowright') { e.preventDefault(); sim.inputs.rotR = true; }
   // RCS translation pad — I/K radial, J/L along. Inert without an RCS bus.
   else if (k === 'i') { sim.inputs.rcsOut = true; setRcsBtnFiring('out', true); }
   else if (k === 'k') { sim.inputs.rcsIn = true; setRcsBtnFiring('in', true); }
@@ -3932,6 +4009,10 @@ addEventListener('keyup', (e) => {
   else if (k === 'e') { sim.inputs.rotR = false; sim.inputs.fine = false; }
   else if (k === 'w') sim.inputs.fwd = false;
   else if (k === 's') sim.inputs.rev = false;
+  else if (k === 'arrowup')    sim.inputs.fwd  = false;
+  else if (k === 'arrowdown')  sim.inputs.rev  = false;
+  else if (k === 'arrowleft')  sim.inputs.rotL = false;
+  else if (k === 'arrowright') sim.inputs.rotR = false;
   else if (k === 'i') { sim.inputs.rcsOut = false; setRcsBtnFiring('out', false); }
   else if (k === 'k') { sim.inputs.rcsIn = false; setRcsBtnFiring('in', false); }
   else if (k === 'l') { sim.inputs.rcsFwd = false; setRcsBtnFiring('fwd', false); }
@@ -3945,6 +4026,16 @@ addEventListener('keyup', (e) => {
 const RCS_FLAG = { out: 'rcsOut', in: 'rcsIn', fwd: 'rcsFwd', back: 'rcsBack' };
 function setRcsBtnFiring(dir, on) {
   document.querySelector(`#rcs-pad .rcs-btn[data-rcs="${dir}"]`)?.classList.toggle('firing', on);
+}
+// Steering HUD — surfaces the design's slew rate + attitude-control hardware
+// so the pilot can see *how* (and how fast) this bus re-points.
+function syncSteerHud() {
+  const el = $('steer-hud'); if (!el) return;
+  const show = !!sim.running && PROG.hasUnlock(profile, 'manual_steer') && sim.design?.slewDeg;
+  el.style.display = show ? '' : 'none';
+  // Pair the controls hint with the readout so both appear (and hide) together.
+  const hint = $('manual-hint'); if (hint) hint.style.display = show ? '' : 'none';
+  if (show) el.innerHTML = `↻ slew <b>${(sim.design.slewDeg * SLEW_GAIN).toFixed(0)}°/s</b> · ${sim.design.attSys}`;
 }
 // Reveal/hide the pad for the launched craft and label its authority.
 function syncRcsPad() {
