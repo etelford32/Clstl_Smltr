@@ -2574,11 +2574,11 @@ const dragShell = new DragShell(globe, { visible: dragShellOn });
 globe.onTick(() => dragShell.tick());
 
 /* ─── LOD draw-budget controller (Workstream C) ────────── */
-// Caps individually-drawn catalogue points (~8k zoomed in, ~2.5k zoomed
-// out) and decimates the overflow with a uniform-stride index buffer in
-// the tracker. No-op until a catalogue exceeds the budget; every object is
-// still propagated by the SGP4 worker. Owned fleet (hero meshes + selection
-// sprite + trails) is rendered separately and always legible.
+// Frustum + Earth-occlusion cull, then budget decimation: only points on
+// screen and in front of the globe are drawn, thinned to ~8k zoomed in /
+// ~2.5k zoomed out. The cull re-runs only on camera motion (or a staleness
+// timer), so it's near-free while still. Every object is still propagated by
+// the SGP4 worker; owned fleet renders separately and stays legible.
 const lodStatusEl = document.getElementById('op-lod-status');
 const stopLod = startLodController(globe, fleet.tracker, {
     onStatus: ({ drawn, total, decimating }) => {
