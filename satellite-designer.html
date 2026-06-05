@@ -1155,6 +1155,25 @@ select option{background:#0a1024}
         <p class="hint" style="margin-top:6px">Lateral nudges, no rotation needed — hold two for a diagonal.</p>
       </div>
 
+      <!-- ── RCS translation pad — only revealed when the launched bus carries
+           a reaction-control suite (BODIES[].rcs). Multidirectional: hold two
+           pads at once to strafe on the diagonal. Decoupled from the throttle
+           and the main burn vector. -->
+      <div class="ctl-group rcs-group" id="rcs-pad" style="margin-top:10px;display:none">
+        <div class="ctl-label">RCS translation
+          <small style="color:var(--c-text-3);font-weight:600;text-transform:none;letter-spacing:0;margin-left:8px">⌨ I/K · J/L · hold</small>
+          <span class="rcs-tag" id="rcs-tag" title="Per-axis RCS authority">—</span>
+        </div>
+        <div class="rcs-dpad">
+          <button class="rcs-btn up"    data-rcs="out"  title="Radial-out (push away from Earth)">⬆</button>
+          <button class="rcs-btn left"  data-rcs="back" title="Retrograde nudge (lower)">⏪</button>
+          <div class="rcs-core" id="rcs-core">RCS</div>
+          <button class="rcs-btn right" data-rcs="fwd"  title="Prograde nudge (raise)">⏩</button>
+          <button class="rcs-btn down"  data-rcs="in"   title="Radial-in (push toward Earth)">⬇</button>
+        </div>
+        <p class="hint" style="margin-top:6px">Lateral nudges, no rotation needed — hold two for a diagonal.</p>
+      </div>
+
       <div class="ctl-group" style="margin-top:10px">
         <div class="ctl-label">Time warp</div>
         <div class="toggle-row" id="warp-modes">
@@ -2788,6 +2807,20 @@ function frame(now) {
       sim.control.rcs = null;
     }
 
+    // RCS translation — multidirectional nudges, decoupled from the main
+    // engine's throttle and burn vector. Only the buses that carry a
+    // reaction-control suite respond; the command is a 2-D orbit-frame vector
+    // and holding two pads at once strafes on the diagonal.
+    if (sim.design?.rcs) {
+      const along  = (sim.inputs.rcsFwd ? 1 : 0) + (sim.inputs.rcsBack ? -1 : 0);
+      const radial = (sim.inputs.rcsOut ? 1 : 0) + (sim.inputs.rcsIn   ? -1 : 0);
+      sim.control.rcs = (along || radial) ? { along, radial } : null;
+      const core = $('rcs-core');
+      if (core) core.classList.toggle('live', !!sim.control.rcs && sim.state?.fuel > 0);
+    } else {
+      sim.control.rcs = null;
+    }
+
     // Autopilot (reactive). Only engages when perigee has *already* dipped
     // below the mission's altitude floor — pre-emptive station-keeping is
     // the player's job, not the autopilot's. This removes the "one toggle
@@ -3931,7 +3964,7 @@ function grantMissionXp(success) {
 }
 
 // ── Pilot keyboard steering ────────────────────────────────────────────────
-// A/D rotate heading; Q/E fine; W/S fire fwd/rev along heading (hold).
+// W/↑ gas · S/↓ ease · A/← · D/→ steer (arcade flight); Q/E fine-steer.
 // 1–5 quick-select burn vector chips. Camera shortcuts (F/R/C) live higher
 // up in the file. We swallow keys only when the sim is running so we don't
 // fight the parts UI.

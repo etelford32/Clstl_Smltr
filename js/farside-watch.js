@@ -25,6 +25,8 @@ import {
 const $ = (id) => document.getElementById(id);
 
 let _state = { map: null, dets: [], watch: [], signedIn: false, pro: false };
+let _globe = null;       // FarSideGlobe instance once the 3D view mounts
+let _globe3D = false;    // true once WebGL/Three is confirmed working
 
 function fmtDate(iso) {
     try { return new Date(iso).toUTCString().replace(':00 GMT', ' UTC').replace('GMT', 'UTC'); }
@@ -35,11 +37,39 @@ function fmtDay(iso) {
 }
 
 function paintCanvases() {
-    const { map, dets, watch } = _state;
+    const { map, watch } = _state;
     if (!map) return;
-    const flat = $('fsw-flat'), top = $('fsw-topdown');
+    const flat = $('fsw-flat');
     if (flat) renderFlatMap(flat, map, { tracks: watch, showLimbs: true });
-    if (top) renderTopDown(top, map, { tracks: watch });
+    // The rotation view (#fsw-topdown) is owned by mountRotationView(): the 3D
+    // FarSideGlobe when WebGL is available, the Canvas2D renderTopDown() fallback
+    // otherwise. We must not draw a 2D context on that canvas first, or
+    // WebGLRenderer can no longer acquire a WebGL context from it.
+    if (_globe3D && _globe) _globe.render(map, { tracks: watch });
+}
+
+/**
+ * Mount the 3D rotation simulation on the #fsw-topdown canvas. Dynamically
+ * imports the Three.js globe (kept out of the farside barrel so the Node smoke
+ * test stays clean) and degrades to the Canvas2D renderTopDown() if WebGL or
+ * the import is unavailable.
+ */
+async function mountRotationView() {
+    const canvas = $('fsw-topdown');
+    if (!canvas || !_state.map) return;
+    try {
+        const { FarSideGlobe } = await import('./farside/farside-globe.js');
+        _globe = new FarSideGlobe(canvas);
+        _globe3D = true;
+        _globe.render(_state.map, { tracks: _state.watch });
+        _globe.start();
+        const note = canvas.parentElement?.querySelector('.fsw-note-3d');
+        if (note) note.textContent = 'Drag to orbit · scroll to zoom. The Sun spins at an illustrative rate; real synodic rotation is ~13.2°/day.';
+    } catch (err) {
+        // No WebGL / vendor missing — keep the proven 2D schematic.
+        _globe3D = false;
+        renderTopDown(canvas, _state.map, { tracks: _state.watch });
+    }
 }
 
 function renderWatchList() {
@@ -164,7 +194,12 @@ function wireControls() {
         });
     }
 
-    window.addEventListener('resize', () => paintCanvases(), { passive: true });
+    // The 3D globe self-manages resize (ResizeObserver); only the flat map and
+    // the 2D fallback need a manual repaint here.
+    window.addEventListener('resize', () => {
+        if (_state.map) renderFlatMap($('fsw-flat'), _state.map, { tracks: _state.watch, showLimbs: true });
+        if (!_globe3D && _state.map) renderTopDown($('fsw-topdown'), _state.map, { tracks: _state.watch });
+    }, { passive: true });
 }
 
 export async function initFarSideWatch() {
@@ -200,6 +235,7 @@ export async function initFarSideWatch() {
 
     setSourcePill(map);
     paintCanvases();
+    mountRotationView();      // upgrade the rotation view to 3D (falls back to 2D)
     renderWatchList();
     renderBacktest();
 

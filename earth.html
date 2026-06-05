@@ -3549,6 +3549,51 @@ function onResize() {
 new ResizeObserver(onResize).observe(canvas);
 onResize();
 
+// ── Adaptive resolution governor ─────────────────────────────────────────────
+// Profiling (June 2026) showed this scene is fragment-/fill-rate-bound, not
+// geometry- or JS-bound: ~27 draw calls and ~112k triangles per frame (cheap),
+// but ~24 transparent overlay layers stacked over a multi-tap surface shader
+// (expensive per pixel). Cost therefore scales with rendered-pixel count =
+// cssPixels × pixelRatio². Measured: rendering at 2× device scale costs ~2.5×
+// the frame time of 1×. The static cap above pins everyone at up to 2×, which
+// is why weak/integrated GPUs drop to the 30–45 fps the autoRotate comment
+// notes — and worse on 4K/retina panels.
+//
+// Instead of pinning quality low for all, start at the device-appropriate cap
+// and let measured frame time pull the pixel ratio DOWN on GPUs that can't keep
+// up, then back UP when there's headroom. Capable hardware stays full-res;
+// struggling hardware trades crispness for a smooth frame rate instead of a
+// slideshow. Nothing here touches the scene graph, feeds, or feature defaults.
+const _prCap   = Math.min(devicePixelRatio || 1, /Mobi|Android/i.test(navigator.userAgent) ? 1.5 : 2);
+const _prFloor = Math.min(1, _prCap);   // never upscale past 1:1 CSS pixels
+let   _prNow   = _prCap;                 // matches the setPixelRatio() call above
+let   _prEmaMs = 1000 / 60;             // frame-interval EMA, seeded at 60 fps
+let   _prLastEvalMs = 0;
+function _governResolution(frameMs) {
+    // Ignore intervals that don't reflect GPU load: a backgrounded tab pauses
+    // rAF (huge gap on return), and an occasional GC pause / sync data decode
+    // can spike one frame. Skip those — but DON'T cap at a low frame time, or a
+    // genuinely overloaded GPU rendering at e.g. 300 ms/frame would have every
+    // frame ignored and never get the coarsening it most needs. Only the
+    // hidden-tab signal and an absurd one-off (>1.5 s, ~= alt-tab/devtools break)
+    // are excluded.
+    if (!(frameMs > 0) || frameMs > 1500 || document.hidden) return;
+    // EMA smooths transient spikes so one slow frame doesn't yank resolution.
+    _prEmaMs += (frameMs - _prEmaMs) * 0.1;
+    const now = performance.now();
+    if (now - _prLastEvalMs < 600) return;   // re-evaluate at most ~every 0.6 s
+    _prLastEvalMs = now;
+    let next = _prNow;
+    if (_prEmaMs > 22 && _prNow > _prFloor)     next = Math.max(_prFloor, +(_prNow - 0.25).toFixed(2)); // < ~45 fps → coarsen
+    else if (_prEmaMs < 15 && _prNow < _prCap)  next = Math.min(_prCap,  +(_prNow + 0.25).toFixed(2));  // > ~66 fps → refine
+    if (next !== _prNow) {
+        _prNow = next;
+        renderer.setPixelRatio(_prNow);
+        onResize();   // re-apply the drawing-buffer size at the new ratio
+    }
+}
+let _prLastFrameMs = 0;
+
 // ─── Starfield ────────────────────────────────────────────────
 {
     const pos = new Float32Array(5000 * 3);
@@ -9450,6 +9495,13 @@ function animate() {
     const t  = clock.getElapsedTime();
     const dt = Math.min(t - lastT, 0.1);  // cap dt at 100 ms (tab unfocus recovery)
     lastT = t;
+
+    // Adaptive resolution: feed the real (uncapped) frame interval to the
+    // governor so it can scale pixelRatio to hold a smooth frame rate on weak
+    // GPUs. Uses performance.now() rather than `dt` (which is clamped at 100 ms).
+    const _pnow = performance.now();
+    if (_prLastFrameMs) _governResolution(_pnow - _prLastFrameMs);
+    _prLastFrameMs = _pnow;
 
     // ── Read sim time from the shared bus.
     // Bus owns advance (live ticks at wall-clock, replay anchored at
