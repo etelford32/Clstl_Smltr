@@ -291,6 +291,21 @@ export class SatelliteTracker {
         this._colors = null;
         this._pointsMesh = null;
 
+        // ── LOD draw-budget (opt-in) ────────────────────────────────
+        // Off by default: satellites.html and any caller that never calls
+        // setDrawBudget() draws every catalogued point, exactly as before.
+        // When a caller (the Operations console's LOD controller) sets a
+        // finite budget below the catalogue size, we attach a uniform-
+        // stride index buffer that draws only `budget` points — a
+        // spatially representative decimation across all groups. The
+        // worker still propagates every object (propagation lives off the
+        // render thread); we just stop feeding the GPU tens of thousands
+        // of vertices it would draw on top of each other anyway.
+        this._lodEnabled  = false;
+        this._lodBudget   = Infinity;
+        this._lodIndexArr = null;   // reused Uint32Array of drawn indices
+        this._lodDrawn    = 0;      // points actually drawn last apply
+
         // Batch propagation hot-path. WASM keeps a parallel registry
         // of parsed Sgp4State so the per-frame tick can call one
         // function instead of N (parse + init + propagate)s. The
@@ -901,6 +916,65 @@ export class SatelliteTracker {
         this._pointsMesh = new THREE.Points(bufGeo, this._dotMat);
         this._pointsMesh.renderOrder = 10;
         this._group.add(this._pointsMesh);
+
+        // Catalogue size changed → the prior index no longer maps. Rebuild
+        // it from the current budget (no-op when LOD is disabled).
+        this._lodIndexArr = null;
+        this._applyLodIndex();
+    }
+
+    /**
+     * Set the maximum number of points to draw individually. Pass a finite
+     * number to enable LOD decimation (uniform-stride index buffer); pass
+     * Infinity / null to draw the whole catalogue. Cheap and idempotent —
+     * safe to call every frame from a camera-distance driver.
+     */
+    setDrawBudget(maxDrawn) {
+        const b = Number.isFinite(maxDrawn) ? Math.max(1, Math.floor(maxDrawn)) : Infinity;
+        if (b === this._lodBudget) return;
+        this._lodBudget  = b;
+        this._lodEnabled = Number.isFinite(b);
+        this._applyLodIndex();
+    }
+
+    /** Points actually drawn (after any LOD decimation). */
+    getDrawnCount() { return this._lodDrawn || this._satellites.length; }
+    /** Total catalogued (and still fully propagated) objects. */
+    getCatalogSize() { return this._satellites.length; }
+
+    /**
+     * (Re)build the LOD index buffer to match the current budget. When the
+     * budget is ≥ the catalogue size (or LOD is off) the index is removed
+     * so the mesh draws every vertex. Uniform stride samples across the
+     * whole catalogue, so every group thins proportionally rather than a
+     * contiguous prefix swallowing whole groups.
+     */
+    _applyLodIndex() {
+        if (!this._pointsMesh) return;
+        const geo = this._pointsMesh.geometry;
+        const n = this._satellites.length;
+
+        if (!this._lodEnabled || this._lodBudget >= n || n === 0) {
+            if (geo.index !== null) geo.setIndex(null);
+            this._lodDrawn = n;
+            return;
+        }
+
+        const K = Math.max(1, Math.min(n, Math.floor(this._lodBudget)));
+        const stride = n / K;
+
+        // Reuse the typed array (and the BufferAttribute) when K is steady
+        // so a continuous zoom doesn't churn allocations every frame.
+        let attr = geo.index;
+        if (!this._lodIndexArr || this._lodIndexArr.length !== K || !attr || attr.array !== this._lodIndexArr) {
+            this._lodIndexArr = new Uint32Array(K);
+            attr = new THREE.BufferAttribute(this._lodIndexArr, 1);
+            geo.setIndex(attr);
+        }
+        const idx = this._lodIndexArr;
+        for (let j = 0; j < K; j++) idx[j] = Math.min(n - 1, (j * stride) | 0);
+        attr.needsUpdate = true;
+        this._lodDrawn = K;
     }
 
     /** Update only the color buffer (for show/hide toggles + alert tints). */
