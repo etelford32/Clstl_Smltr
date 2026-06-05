@@ -31,11 +31,12 @@ export const UNLOCKS = {
   prograde:      { name: 'Prograde burn',      rank: 0, desc: 'Burn along the velocity vector to raise the orbit.' },
   retrograde:    { name: 'Retrograde burn',    rank: 0, desc: 'Burn opposite the velocity vector to lower the orbit.' },
   warp_x10:      { name: 'Time warp ×10',      rank: 0, desc: 'Accelerate sim time tenfold.' },
+  // Core arcade flight — available from the first launch so new pilots can fly.
+  manual_steer:  { name: 'Pilot flight',       rank: 0, desc: 'W/↑ gas · S/↓ ease · A/← · D/→ steer. Arcade attitude control.' },
   // Tier 1 — Pilot
   radial:        { name: 'Radial burns',       rank: 1, desc: 'Radial-out / radial-in for plane shaping & rendezvous.' },
   warp_x100:     { name: 'Time warp ×100',     rank: 1, desc: 'Survey multi-orbit drag decay quickly.' },
   // Tier 2 — Operator
-  manual_steer:  { name: 'Manual steering',    rank: 2, desc: 'A/D rotate heading · W/S fire fwd/rev. Real attitude control.' },
   pulse_fire:    { name: 'Pulse fire',         rank: 2, desc: 'Tap-fire for precise impulse burns (< 1 s).' },
   // Tier 3 — Navigator
   warp_x1000:    { name: 'Time warp ×1000',    rank: 3, desc: 'Long-duration station-keeping & decay analysis.' },
@@ -102,8 +103,8 @@ export function tierMods(slot, tier) {
     if (tier === 3) return { thrustMul: 1.18, ispMul: 1.12, throatLifeMul: 2.2, gimbalMul: 1.6, massMul: 1.12 };
   }
   if (slot === 'body') {
-    if (tier === 2) return { massMul: 0.92, cdMul: 0.96 };
-    if (tier === 3) return { massMul: 0.85, cdMul: 0.92, gimbalMul: 1.0 /* reaction-wheel boost handled in engine */ };
+    if (tier === 2) return { massMul: 0.92, cdMul: 0.96, slewMul: 1.12 };
+    if (tier === 3) return { massMul: 0.85, cdMul: 0.92, gimbalMul: 1.0 /* reaction-wheel boost handled in engine */, slewMul: 1.28 };
   }
   if (slot === 'panel') {
     if (tier === 2) return { wMul: 1.15, massMul: 0.92 };
