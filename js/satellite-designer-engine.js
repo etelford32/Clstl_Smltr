@@ -73,6 +73,18 @@ export function makeDesign(raw = {}) {
         thrust:   clampNum(raw.thrust,   0,    50_000,  22),     // N
         isp:      clampNum(raw.isp,      10,   5_000,   225),    // s
     };
+    // Optional multi-axis RCS hardware — reaction-control thruster clusters
+    // that some buses carry (see js/satellite-builder.js BODIES[].rcs). When
+    // present they give the vehicle *multidirectional* translation authority:
+    // it can push along AND across the velocity vector at once, decoupled from
+    // the main engine and its pointing. Passed through untouched so the flight
+    // model reads design.rcs* directly — the builder merges these in. Absent
+    // by default, so legacy single-engine craft are unaffected.
+    if (raw.rcs) {
+        d.rcs       = true;
+        d.rcsThrust = clampNum(raw.rcsThrust, 0,  10_000, 0);    // N, per-axis authority
+        d.rcsIsp    = clampNum(raw.rcsIsp,    10, 5_000,  65);   // s (cold-gas/monoprop class)
+    }
     return d;
 }
 
@@ -294,6 +306,35 @@ function derivatives(s, design, env, control) {
         dfuel = -thr / (effIsp * G0);       // Tsiolkovsky mass flow
     }
 
+    // ── RCS / multidirectional translation thrust ────────────────────────
+    // Reaction-control clusters fire independently of the main engine. The
+    // command is a 2-D vector in the orbit frame:
+    //   control.rcs = { along, radial }   each ∈ [−1, 1]
+    //     along  > 0 → +prograde (raise)      along  < 0 → retro (lower)
+    //     radial > 0 → +radial-out (push up)  radial < 0 → radial-in (push down)
+    // Because the along- and cross-track clusters are separate hardware, a
+    // diagonal command lights both at once: the achievable magnitude on the
+    // diagonal reaches √2 · rcsThrust. That simultaneous multi-axis push —
+    // translating sideways without first rotating the bus — is the whole point
+    // of "multidirectional thrust." Propellant is drawn from the same tank at
+    // the (usually lower) rcsIsp.
+    if (design.rcs && (design.rcsThrust ?? 0) > 0 && s.fuel > 0 && control.rcs) {
+        const along  = Math.max(-1, Math.min(1, +control.rcs.along  || 0));
+        const radial = Math.max(-1, Math.min(1, +control.rcs.radial || 0));
+        if (along !== 0 || radial !== 0) {
+            const vmag = Math.hypot(s.vx, s.vy) || 1;
+            const px = s.vx / vmag, py = s.vy / vmag;   // prograde unit vector
+            const rx = s.x / r,     ry = s.y / r;       // radial-out unit vector
+            const fx = (along * px + radial * rx) * design.rcsThrust;
+            const fy = (along * py + radial * ry) * design.rcsThrust;
+            ax += fx / mass;
+            ay += fy / mass;
+            const rcsMag = Math.hypot(fx, fy);
+            const rcsIsp = Math.max(1, design.rcsIsp ?? 65);
+            dfuel -= rcsMag / (rcsIsp * G0);            // Tsiolkovsky mass flow
+        }
+    }
+
     return { ax, ay, dfuel,
              diag: { rho, rhoMean, turb, vrel, qdyn,
                      aDrag: aDragMag, alt, erosion: erosionFrac } };
@@ -370,8 +411,10 @@ export function step(s, design, env, control, dt) {
         const torque = d1.aDrag * (design.dryMass + Math.max(out.fuel, 0)) * cop
                      * (d1.turb - 1) * 0.6;
         // Reaction wheels & control authority gently damp tumble; chemical
-        // bus has weaker authority than an actively-pointed payload bus.
-        const damp = 0.18;
+        // bus has weaker authority than an actively-pointed payload bus. A bus
+        // with RCS clusters can null disturbance torques actively, so it holds
+        // attitude noticeably better than one relying on wheels alone.
+        const damp = 0.18 * (design.rcs ? 1.6 : 1);
         out.tumbleRate += (torque / inertia - out.tumbleRate * damp) * dt;
         out.attitudeErr += out.tumbleRate * dt;
         // Hard clamp so the sim doesn't go to spinning-numerically-unstable.
@@ -772,6 +815,40 @@ export function selfTest() {
         { throttle: 1, mode: 'radial-out' });
     T(provProg > 0 && provRetro < 0 && Math.abs(provRad) < 1e-9,
         `providedDv signs: prog +${provProg.toFixed(2)} retro ${provRetro.toFixed(2)} radial ${provRad.toFixed(2)}`);
+
+    // 12. RCS translation: an RCS-equipped craft responds to control.rcs and
+    //     burns propellant doing it; a craft with no RCS hardware ignores the
+    //     same command entirely.
+    const rcsShip = makeDesign({ dryMass: 200, fuelMass: 40, area: 0, cd: 2.2,
+        thrust: 0, isp: 200, rcs: true, rcsThrust: 50, rcsIsp: 120 });
+    const sr0 = initState(rcsShip, { periKm: 500, apoKm: 500 });
+    let srBurn = sr0;
+    for (let i = 0; i < 200; i++)
+        srBurn = step(srBurn, rcsShip, env, { throttle: 0, mode: 'off', rcs: { along: 0, radial: 1 } }, 0.5);
+    let srIdle = sr0;
+    for (let i = 0; i < 200; i++)
+        srIdle = step(srIdle, rcsShip, env, { throttle: 0, mode: 'off' }, 0.5);
+    T(srBurn.fuel < sr0.fuel, `RCS burn consumes propellant (${sr0.fuel}→${srBurn.fuel.toFixed(2)} kg)`);
+    T(elements(srBurn).ecc > elements(srIdle).ecc + 1e-4,
+        `radial RCS reshapes the orbit (ecc ${elements(srIdle).ecc.toExponential(1)}→${elements(srBurn).ecc.toExponential(1)})`);
+
+    const noRcs = makeDesign({ dryMass: 200, fuelMass: 40, area: 0, cd: 2.2, thrust: 0, isp: 200 });
+    const snr0 = initState(noRcs, { periKm: 500, apoKm: 500 });
+    let snrBurn = snr0;
+    for (let i = 0; i < 50; i++)
+        snrBurn = step(snrBurn, noRcs, env, { throttle: 0, mode: 'off', rcs: { along: 1, radial: 1 } }, 0.5);
+    T(Math.abs(snrBurn.fuel - snr0.fuel) < 1e-9, `craft without RCS hardware ignores RCS command`);
+
+    // 13. Multidirectional: a diagonal RCS command (along + radial) delivers
+    //     more translation in one step than either single axis — two clusters
+    //     firing at once, magnitude ≈ √2 × single-axis.
+    const base = step(sr0, rcsShip, env, { throttle: 0, mode: 'off' }, 0.1);
+    const axis = step(sr0, rcsShip, env, { throttle: 0, mode: 'off', rcs: { along: 1, radial: 0 } }, 0.1);
+    const diag = step(sr0, rcsShip, env, { throttle: 0, mode: 'off', rcs: { along: 1, radial: 1 } }, 0.1);
+    const dvAxis = Math.hypot(axis.vx - base.vx, axis.vy - base.vy);
+    const dvDiag = Math.hypot(diag.vx - base.vx, diag.vy - base.vy);
+    T(dvDiag > dvAxis * 1.3,
+        `diagonal RCS > single-axis (multidirectional): ${dvDiag.toExponential(2)} vs ${dvAxis.toExponential(2)} m/s`);
 
     return out;
 }

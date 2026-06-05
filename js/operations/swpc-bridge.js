@@ -1,21 +1,23 @@
 /**
- * swpc-bridge.js — Live SWPC indices into the provenance store.
+ * swpc-bridge.js — Live SWPC indices into the space-weather time model.
  *
  * Instantiates the existing SpaceWeatherFeed (the same module that
  * powers space-weather.html), subscribes to its swpc-update events,
- * and re-publishes F10.7 + Ap into provStore so every banded value
- * downstream (decay watch, prop budget, drag analysis) updates in
- * lockstep with reality.
+ * and feeds the live F10.7 + Ap into sw-model.js as the "anchor" the
+ * time model persists / forecasts around. sw-model's driver is the single
+ * writer of `idx.f107` / `idx.ap` in provStore, so every banded value
+ * downstream (decay watch, prop budget, drag shell) tracks both reality
+ * AND the scrubber's simTime from one place.
  *
- * Synthetic stand-ins from step 7 stay registered until the first
- * swpc-update lands, after which this module overwrites them with
- * cacheState='live'. Δ icons activate naturally — first live update
- * is the first ring-buffer transition with a different value.
+ * Synthetic stand-ins stay registered until the first swpc-update lands,
+ * after which the driver republishes the anchor as cacheState='live'. Δ
+ * icons activate naturally — the first live update is the first ring-buffer
+ * transition with a different value.
  */
 
 import { SpaceWeatherFeed }   from '../swpc-feed.js';
 import { TIER, planToTier }   from '../config.js';
-import { provStore }          from './provenance.js';
+import { setLiveAnchor }      from './sw-model.js';
 
 // Standard NOAA Kp → Ap conversion table.
 const KP_TO_AP = Object.freeze([
@@ -40,44 +42,6 @@ function getTier() {
     } catch { return TIER.FREE; }
 }
 
-function publishF107(state) {
-    if (state.f107_flux == null) return;
-    provStore.set('idx.f107', {
-        value: state.f107_flux,
-        unit: 'SFU',
-        sigma: 12,                          // typical NOAA short-horizon spread
-        source: 'NOAA SWPC F10.7 daily product',
-        model:  'NOAA F10.7',
-        cacheState: 'live',
-        fetchedAt: new Date().toISOString(),
-        validAt:   new Date().toISOString(),
-        description:
-            'Solar 10.7 cm radio flux. Direct driver of thermospheric heating: ' +
-            'higher F10.7 → denser air at LEO altitudes → more drag on every satellite.',
-    });
-}
-
-function publishAp(state) {
-    const kp = state.kp_1min ?? state.kp;
-    if (kp == null) return;
-    const ap = kpToAp(kp);
-    if (ap == null) return;
-    provStore.set('idx.ap', {
-        value: ap,
-        unit: '',
-        sigma: 6,
-        source: 'NOAA SWPC Kp 1-minute → Ap',
-        model:  'NOAA Kp + standard Kp→Ap table',
-        cacheState: 'live',
-        fetchedAt: new Date().toISOString(),
-        validAt:   new Date().toISOString(),
-        description:
-            'Daily geomagnetic Ap (here approximated from live Kp via the ' +
-            'standard NOAA mapping). Above 27 = G1+ storm; above 50 = G2+. ' +
-            'Storm activity puffs the thermosphere outward and steps drag up by 20–40%.',
-    });
-}
-
 export function startSwpcBridge() {
     const tier = getTier();
     const feed = new SpaceWeatherFeed({ tier });
@@ -85,8 +49,17 @@ export function startSwpcBridge() {
 
     function onUpdate(e) {
         const s = e.detail || {};
-        publishF107(s);
-        publishAp(s);
+        const f107 = Number.isFinite(s.f107_flux) ? s.f107_flux : undefined;
+        const kp   = s.kp_1min ?? s.kp;
+        const ap   = kpToAp(kp);
+        // Feed whatever arrived this cycle; sw-model honours partial
+        // updates (F10.7 and Kp land on different cadences). The driver
+        // turns this anchor into idx.f107 / idx.ap at the current simTime.
+        setLiveAnchor({
+            f107,
+            ap: Number.isFinite(ap) ? ap : undefined,
+            source: 'NOAA SWPC RTSW (F10.7 daily + Kp→Ap)',
+        });
     }
     window.addEventListener('swpc-update', onUpdate);
 

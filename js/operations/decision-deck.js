@@ -163,6 +163,38 @@ export function fmtLifetime(days) {
     return `${Math.round(days)} d`;
 }
 
+/**
+ * Lifetime-consistent average perigee-decay rate (km/day, ≤ 0). Unlike the
+ * bucketed finite-difference deltaAPerDay (which reads 0 whenever a 25-km
+ * step stays inside one coarse lifetime bucket), this is the smooth rate
+ * implied by the lifetime itself: the perigee must fall from here to the
+ * ~120 km reentry interface over `lifetimeDays`. It is therefore always
+ * non-zero for a finite lifetime and steepens in lockstep with the ETA
+ * when a storm shortens the lifetime — exactly the "perigee drop" signal.
+ */
+function perigeeDropRate(perigeeKm, lifetimeDays) {
+    if (!Number.isFinite(perigeeKm) || !Number.isFinite(lifetimeDays) || lifetimeDays <= 0) return 0;
+    const drop = perigeeKm - 120;          // distance to the reentry interface
+    if (drop <= 0) return 0;
+    return -drop / lifetimeDays;
+}
+
+/**
+ * Format a perigee-decay rate (km/day, ≤ 0) as a compact "↓ rate" string.
+ * Switches to m/day below 1 km/day so a calm-orbit rate stays legible, and
+ * tags the magnitude so the UI can colour fast sinkers. Returns a span so
+ * the caller can drop it straight into innerHTML.
+ */
+export function fmtDecayRate(kmPerDay) {
+    if (!Number.isFinite(kmPerDay) || kmPerDay === 0) {
+        return `<span class="op-decay-rate op-decay-rate-stable">stable</span>`;
+    }
+    const mag = Math.abs(kmPerDay);
+    const txt = mag >= 1 ? `${mag.toFixed(1)} km/d` : `${Math.round(mag * 1000)} m/d`;
+    const cls = mag >= 1 ? 'op-decay-rate-fast' : mag >= 0.1 ? 'op-decay-rate-med' : 'op-decay-rate-slow';
+    return `<span class="op-decay-rate ${cls}" title="Instantaneous perigee-decay rate">↓ ${txt}</span>`;
+}
+
 /* ─── Storm overhead (prop budget) ────────────────────────── */
 
 /**
@@ -324,7 +356,10 @@ export function mountDecayWatch(fleet) {
             const trendId = `op-decay-trend-${a.noradId}`;
             html += `
                 <li class="op-decay-row" data-norad="${a.noradId}">
-                    <span class="op-decay-name" title="${escapeHtml(a.name)}">${escapeHtml(a.name)}</span>
+                    <span class="op-decay-name-col">
+                        <span class="op-decay-name" title="${escapeHtml(a.name)}">${escapeHtml(a.name)}</span>
+                        <span class="op-decay-sub" id="op-decay-sub-${a.noradId}"></span>
+                    </span>
                     <span class="op-decay-life-cell"><span class="op-decay-life" id="${rowId}">—</span><span id="${trendId}"></span></span>
                 </li>
             `;
@@ -380,6 +415,31 @@ export function mountDecayWatch(fleet) {
 
             const trendNode = document.getElementById(`op-decay-trend-${a.noradId}`);
             if (trendNode) attachDelta(trendNode, provKey);
+
+            // Perigee + instantaneous altitude-loss rate — the literal
+            // "perigee drop." Backed by the same model as the lifetime, so
+            // scrubbing into a storm steepens this rate in lockstep with the
+            // ETA shortening. Published for the data dictionary / export.
+            const subNode = document.getElementById(`op-decay-sub-${a.noradId}`);
+            const rateKmDay = perigeeDropRate(r.perigee_km, r.lifetime_days);   // km/day, ≤ 0
+            const rateProvKey = `decay.rate.${a.noradId}`;
+            provStore.set(rateProvKey, {
+                value: rateKmDay, unit: 'km/day',
+                source: 'derived (Operations decay heuristic v1)',
+                model:  'Lifetime-consistent average dā/dt',
+                formula: '−(perigee − 120 km) / lifetime',
+                inputs: ['idx.f107', 'idx.ap'],
+                cacheState: 'derived',
+                description:
+                    `Average perigee-decay rate for ${a.name} at ${r.perigee_km ?? '?'} km — the ` +
+                    `fall to the ~120 km reentry interface spread over the estimated lifetime. ` +
+                    `Negative = sinking. Steepens through a storm as the drag floor rises.`,
+            });
+            if (subNode) {
+                const peri = Number.isFinite(r.perigee_km) ? `${Math.round(r.perigee_km)} km` : '— km';
+                subNode.innerHTML = `<span class="op-decay-peri">${peri}</span> · ${fmtDecayRate(rateKmDay)}`;
+                subNode.dataset.provKey = rateProvKey;
+            }
         }
     }
 
