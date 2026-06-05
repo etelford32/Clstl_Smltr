@@ -1177,12 +1177,39 @@ export function createCloudUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
  * @param {object} cloudU - uniforms object from createCloudUniforms() (unused, kept for API compat)
  * @returns {Promise<void>}
  */
-export function loadEarthTextures(earthU, cloudU = null) {
+export function loadEarthTextures(earthU, cloudU = null, opts = {}) {
+    const { onProgress = null, timeoutMs = 6000 } = opts;
     const loader = new THREE.TextureLoader();
 
+    const total = 4;
+    let settled = 0;
+    const bump = () => {
+        settled++;
+        if (onProgress) { try { onProgress(settled, total); } catch (_) {} }
+    };
+
+    // Each texture settles its promise exactly once — on real load, on error,
+    // or on a `timeoutMs` watchdog. The watchdog is the load-freeze guard: the
+    // host page's full-screen "Loading…" overlay is gated on Promise.all here,
+    // and `loader.load` only ever calls back on success/error — a stalled fetch
+    // (slow CDN, flaky connection) would otherwise leave it pending until the
+    // browser's ~minute network timeout. On timeout we drop in the placeholder
+    // so the scene renders immediately; if the real image arrives later we
+    // still swap it in (a free upgrade — the uniform just updates).
     const loadTex = (url, onLoad, fallbackFn) => new Promise(resolve => {
+        let progressed = false;
+        let gotReal    = false;
+        const finish = () => { if (progressed) return; progressed = true; bump(); resolve(); };
+        const timer = setTimeout(() => {
+            if (gotReal) return;
+            console.warn(`[EarthSkin] texture slow — using placeholder (will upgrade if it arrives): ${url}`);
+            onLoad(fallbackFn());
+            finish();
+        }, timeoutMs);
         loader.load(url,
             tex => {
+                gotReal = true;
+                clearTimeout(timer);
                 tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
                 // Canonical UV convention (js/geo/coords.js): v=0 at +90°N.
                 // TextureLoader defaults flipY=true, which would map image
@@ -1190,14 +1217,15 @@ export function loadEarthTextures(earthU, cloudU = null) {
                 // rendering the globe upside-down. Keep image rows aligned
                 // with the shader's normalToUV() by disabling the flip.
                 tex.flipY = false;
-                onLoad(tex);
-                resolve();
+                onLoad(tex);   // applies even post-timeout: upgrades the placeholder
+                finish();
             },
             undefined,
             () => {
+                clearTimeout(timer);
                 console.warn(`[EarthSkin] texture load failed: ${url}`);
-                onLoad(fallbackFn());
-                resolve();
+                if (!gotReal) onLoad(fallbackFn());
+                finish();
             }
         );
     });

@@ -1309,6 +1309,15 @@ nav {
 }
 @keyframes spin { to { transform:rotate(360deg); } }
 #loading p { margin-top:16px; color:#4a8ab0; font-size:13px; letter-spacing:.5px; }
+#loading-bar {
+    width:180px; height:4px; margin-top:14px; border-radius:2px;
+    background:rgba(120,170,210,.15); overflow:hidden;
+}
+#loading-bar-fill {
+    height:100%; width:0%; border-radius:2px;
+    background:linear-gradient(90deg, #1a6aaa, #00c6ff);
+    transition:width .25s ease;
+}
 
 /* ─── Space Weather button ───────────────────────────────────────── */
 .cv-btn {
@@ -2327,6 +2336,10 @@ import './js/telemetry.js';
     <div id="loading">
         <div id="loading-globe"></div>
         <p>Loading Earth textures…</p>
+        <div id="loading-bar" role="progressbar" aria-label="Loading Earth textures"
+             aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <div id="loading-bar-fill"></div>
+        </div>
     </div>
 
     <!-- Feed-error banner — surfaces upstream failures front-of-mind so the
@@ -3994,9 +4007,21 @@ earthMesh.add(tropicGroup); // child of earthMesh → rotates with globe
 // ═══════════════════════════════════════════════════════════════
 //  TEXTURE LOADING
 // ═══════════════════════════════════════════════════════════════
-// Load textures via shared earth-skin.js loader
-// — version-pinned CDN, RepeatWrapping applied, safe 1×1 fallbacks on error
-loadEarthTextures(earthU, cloudU).then(() => {
+// Load textures via shared earth-skin.js loader — vendored same-origin,
+// RepeatWrapping applied, safe 1×1 fallbacks on error. The loader reports
+// per-texture progress (drives the loading bar) and self-heals on a stalled
+// fetch via a 6 s per-texture timeout that falls back to the placeholder, so
+// the overlay can never hang the page on a slow/missing texture.
+loadEarthTextures(earthU, cloudU, {
+    timeoutMs: 6000,
+    onProgress: (loaded, total) => {
+        const bar  = document.getElementById('loading-bar');
+        const fill = document.getElementById('loading-bar-fill');
+        const pct  = Math.round((loaded / total) * 100);
+        if (fill) fill.style.width = `${pct}%`;
+        if (bar)  bar.setAttribute('aria-valuenow', String(pct));
+    },
+}).then(() => {
     document.getElementById('loading').classList.add('done');
 });
 
