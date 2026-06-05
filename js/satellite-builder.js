@@ -29,15 +29,34 @@
 // centre of mass, normalised to (max-side / 2). It feeds the engine's drag-
 // torque term: tall buses (telescopes, tugs) want active attitude control
 // or they tumble; symmetric cubes resist disturbance naturally.
+//
+// rcs = optional reaction-control thruster suite — { thrust, isp } (per-axis
+// authority [N] and propellant Isp [s]). Bodies that carry it gain
+// *multidirectional* translation in flight (engine reads design.rcs*): they
+// can push along and across the velocity vector at once, decoupled from the
+// main engine. Only the bigger buses fly RCS — CubeSats hold attitude with
+// magnetorquers/wheels and have no translation clusters. The orbital tug is
+// servicing-grade and carries the strongest, finest RCS in the catalogue.
+//
+// attCtrl = how the bus *re-points* (steers its attitude) — never aero
+// surfaces; space has no air. { sys, slewDeg } names the dominant actuator and
+// its base slew rate [deg/s]. Real hardware classes:
+//   • Reaction wheels        — ubiquitous, precise, moderate authority
+//   • Control-moment gyros   — agile high-torque pointing (Pléiades, ISS)
+//   • Magnetorquers + wheels — torque against Earth's B-field, slow (CubeSats)
+//   • RCS thrusters          — fast but propellant-fed (added as a bonus when
+//                              the bus also carries an rcs suite)
+// deriveDesign() turns this into a per-design slewRate, scaled by mass and bus
+// tier — the number the flight model uses for A/D steering.
 export const BODIES = {
-    cubesat_3u:   { label: '3U CubeSat',        dims: [0.10, 0.10, 0.34], mass: 4,    cd: 2.2, shape: 'box',  momentArmMul: 0.15 },
-    cubesat_12u:  { label: '12U CubeSat',       dims: [0.20, 0.20, 0.34], mass: 14,   cd: 2.2, shape: 'box',  momentArmMul: 0.18 },
-    cubesat_grid: { label: '6U Grid (3×2)',     dims: [0.30, 0.20, 0.34], mass: 22,   cd: 2.3, shape: 'grid', momentArmMul: 0.22, gridCells: [3, 2, 1] },
-    smallsat:     { label: 'SmallSat bus',      dims: [0.60, 0.60, 0.80], mass: 90,   cd: 2.2, shape: 'box',  momentArmMul: 0.18 },
-    bus_med:      { label: 'Medium bus',        dims: [1.20, 1.20, 1.50], mass: 320,  cd: 2.2, shape: 'box',  momentArmMul: 0.20 },
-    tank_cyl:     { label: 'Cylindrical bus',   dims: [1.00, 1.00, 2.00], mass: 240,  cd: 2.0, shape: 'cyl',  momentArmMul: 0.30 },
-    tug:          { label: 'Orbital tug',       dims: [1.60, 1.60, 1.10], mass: 480,  cd: 2.1, shape: 'cyl',  momentArmMul: 0.22, tug: true },
-    telescope:    { label: 'Optical telescope', dims: [1.10, 1.10, 3.20], mass: 540,  cd: 2.4, shape: 'tube', momentArmMul: 0.55 },
+    cubesat_3u:   { label: '3U CubeSat',        dims: [0.10, 0.10, 0.34], mass: 4,    cd: 2.2, shape: 'box',  momentArmMul: 0.15, attCtrl: { sys: 'Reaction wheels',        slewDeg: 1.5 } },
+    cubesat_12u:  { label: '12U CubeSat',       dims: [0.20, 0.20, 0.34], mass: 14,   cd: 2.2, shape: 'box',  momentArmMul: 0.18, attCtrl: { sys: 'Magnetorquers + wheels', slewDeg: 1.1 } },
+    cubesat_grid: { label: '6U Grid (3×2)',     dims: [0.30, 0.20, 0.34], mass: 22,   cd: 2.3, shape: 'grid', momentArmMul: 0.22, gridCells: [3, 2, 1], attCtrl: { sys: 'Magnetorquers + wheels', slewDeg: 1.0 } },
+    smallsat:     { label: 'SmallSat bus',      dims: [0.60, 0.60, 0.80], mass: 90,   cd: 2.2, shape: 'box',  momentArmMul: 0.18, rcs: { thrust:  2, isp:  80 }, attCtrl: { sys: 'Reaction wheels',        slewDeg: 1.4 } },
+    bus_med:      { label: 'Medium bus',        dims: [1.20, 1.20, 1.50], mass: 320,  cd: 2.2, shape: 'box',  momentArmMul: 0.20, rcs: { thrust: 10, isp: 220 }, attCtrl: { sys: 'Reaction wheels',        slewDeg: 0.9 } },
+    tank_cyl:     { label: 'Cylindrical bus',   dims: [1.00, 1.00, 2.00], mass: 240,  cd: 2.0, shape: 'cyl',  momentArmMul: 0.30, rcs: { thrust:  8, isp: 220 }, attCtrl: { sys: 'Reaction wheels',        slewDeg: 0.8 } },
+    tug:          { label: 'Orbital tug',       dims: [1.60, 1.60, 1.10], mass: 480,  cd: 2.1, shape: 'cyl',  momentArmMul: 0.22, tug: true, rcs: { thrust: 40, isp: 230 }, attCtrl: { sys: 'RCS thrusters',          slewDeg: 1.6 } },
+    telescope:    { label: 'Optical telescope', dims: [1.10, 1.10, 3.20], mass: 540,  cd: 2.4, shape: 'tube', momentArmMul: 0.55, rcs: { thrust:  4, isp: 200 }, attCtrl: { sys: 'Control-moment gyros',   slewDeg: 2.4 } },
 };
 
 // ── Thruster units ──────────────────────────────────────────────────────────
@@ -210,6 +229,17 @@ export function deriveDesign(build, presets = null, tierMods = null) {
     const gimbalDeg   = tu.gimbalDeg   * (mTu.gimbalMul     ?? 1);
     const throatLifeS = tu.throatLifeS * (mTu.throatLifeMul ?? 1);
 
+    // ── Attitude control / slew authority ───────────────────────────────
+    // How fast the bus can re-point (steer). RCS jets add a slew bonus and a
+    // combined label; lighter craft turn faster (slew ∝ 1/√mass); a tiered
+    // bus adds reaction-wheel authority (mB.slewMul). The flight model reads
+    // slewRate [rad/s] for A/D steering; slewDeg/attSys are for the HUD.
+    const att = b.attCtrl || { sys: 'Reaction wheels', slewDeg: 1.0 };
+    const rcsSlewBonus = b.rcs ? 0.8 : 0;
+    const massSlew = Math.max(0.5, Math.min(1.6, Math.sqrt(180 / Math.max(40, dryMass))));
+    const slewDeg = round((att.slewDeg + rcsSlewBonus) * massSlew * (mB.slewMul ?? 1), 2);
+    const attSys  = (b.rcs && /wheel/i.test(att.sys)) ? 'Reaction wheels + RCS' : att.sys;
+
     const out = {
         dryMass:      round(dryMass, 1),
         area:         round(area, 3),
@@ -233,6 +263,18 @@ export function deriveDesign(build, presets = null, tierMods = null) {
         throatLifeS:  Math.round(throatLifeS),
         copOffset:    round(copOffset, 3),
         maxSide:      round(maxSide, 3),
+        // ── Multidirectional RCS suite (body-dependent) ──────────────────
+        // Per-axis translation authority [N] and propellant Isp [s]. Zero /
+        // false for CubeSat-class buses that carry no translation clusters.
+        // Mass of the suite is folded into the bus mass already, so this is
+        // purely the flight-model capability the engine consumes.
+        rcs:          !!b.rcs,
+        rcsThrust:    b.rcs ? round(b.rcs.thrust, 2) : 0,
+        rcsIsp:       b.rcs ? b.rcs.isp : 0,
+        // Attitude / steering authority (see above).
+        slewDeg:      slewDeg,
+        slewRate:     round(slewDeg * Math.PI / 180, 4),   // rad/s
+        attSys:       attSys,
     };
     if (presets && presets[build.thruster]) {
         const ptu = presets[build.thruster];
@@ -325,6 +367,25 @@ export function buildGroup(THREE, build) {
         noz.position.set(cx * pitch, cy * pitch, -dz / 2 - tu.nozzle * 0.9);
         noz.rotation.x = -Math.PI / 2;               // bell points −z (aft)
         g.add(noz);
+    }
+
+    // ── RCS clusters — tiny lateral thruster pods at the bus corners ──
+    // Visual cue for the multidirectional-thrust suite. Four pods straddling
+    // the +z deck, canted outward, so a glance tells you this bus can strafe.
+    if (b.rcs) {
+        const rcsMat = new THREE.MeshStandardMaterial({
+            color: 0x9a6b3a, metalness: 0.7, roughness: 0.45,
+            emissive: 0x2a1605, emissiveIntensity: 0.5,
+        });
+        const podR = Math.min(dx, dy) * 0.07 + 0.012;
+        for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
+            const pod = new THREE.Mesh(
+                new THREE.ConeGeometry(podR, podR * 2.0, 10), rcsMat);
+            pod.position.set(sx * dx * 0.46, sy * dy * 0.46, dz * 0.30);
+            // Bell points outward along the corner diagonal.
+            pod.rotation.z = Math.atan2(sy, sx) - Math.PI / 2;
+            g.add(pod);
+        }
     }
 
     // ── Solar wings along ±x, with a short yoke ──
@@ -542,5 +603,43 @@ export function selfTest() {
     T(rosa.power / rosa.panelMass > rigid.power / rigid.panelMass,
         `ROSA > rigid on W/kg (${(rosa.power/rosa.panelMass).toFixed(0)} vs ${(rigid.power/rigid.panelMass).toFixed(0)})`);
 
+    // ── Multidirectional RCS suite ────────────────────────────────────────
+    // The bigger buses carry RCS clusters; CubeSats don't. The orbital tug
+    // has the strongest per-axis authority of the lot.
+    const cubeRcs = deriveDesign({ ...defaultBuild(), body: 'cubesat_3u' }, presets);
+    const smallRcs = deriveDesign({ ...defaultBuild(), body: 'smallsat' }, presets);
+    const tugRcs = deriveDesign({ ...defaultBuild(), body: 'tug' }, presets);
+    T(cubeRcs.rcs === false && cubeRcs.rcsThrust === 0,
+        `CubeSat carries no RCS (rcs=${cubeRcs.rcs})`);
+    T(smallRcs.rcs === true && smallRcs.rcsThrust > 0 && smallRcs.rcsIsp > 0,
+        `SmallSat has RCS (${smallRcs.rcsThrust} N @ ${smallRcs.rcsIsp}s)`);
+    T(tugRcs.rcs === true && tugRcs.rcsThrust > smallRcs.rcsThrust,
+        `tug RCS ≫ smallsat (${smallRcs.rcsThrust} → ${tugRcs.rcsThrust} N)`);
+
+    // ── Attitude / slew authority ─────────────────────────────────────────
+    // Every design names a steering system and a positive slew rate. CMG and
+    // RCS buses out-slew a plain reaction-wheel bus; a bus tier upgrade adds
+    // authority.
+    const scope = deriveDesign({ ...defaultBuild(), body: 'telescope' }, presets);
+    const medBus = deriveDesign({ ...defaultBuild(), body: 'bus_med' }, presets);
+    T(medBus.slewRate > 0 && /wheel|RCS/i.test(medBus.attSys),
+        `bus reports slew + attitude system (${medBus.slewDeg}°/s · ${medBus.attSys})`);
+    T(scope.slewDeg > medBus.slewDeg,
+        `CMG telescope out-slews medium bus (${medBus.slewDeg} < ${scope.slewDeg} °/s)`);
+    T(/RCS/.test(tugRcs.attSys),
+        `tug steers on RCS (${tugRcs.attSys})`);
+    const med3 = PROG_BODY_T3(medBus); // computed below via tier mods
+    T(med3 > medBus.slewDeg, `bus tier-III adds slew authority (${medBus.slewDeg} → ${med3} °/s)`);
+
     return out;
+}
+
+// Helper for the slew tier self-test — re-derives a medium bus with the
+// Mk III body slew bonus applied, mirroring the progression tierMods shape.
+function PROG_BODY_T3(_baseline) {
+    const d = deriveDesign({ body: 'bus_med', thruster: 'monoprop', thrusterCount: 2,
+        panel: 'dual', panelSpan: 2.2, payload: 'optical_cam' },
+        { monoprop: { thrust: 22, isp: 225 } },
+        { body: { massMul: 0.85, cdMul: 0.92, slewMul: 1.28 } });
+    return d.slewDeg;
 }
