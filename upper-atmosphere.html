@@ -620,6 +620,93 @@ input[type=range]::-moz-range-thumb {
 .ua-lc-regime--free-molecular { color:#ff9060; }
 .ua-lc-regime--unknown        { color:#778; }
 
+/* ─── Zone drag & turbulence dashboard ─────────────────── */
+.ua-zd { display:flex; flex-direction:column; gap:8px; }
+.ua-zd-controls {
+    display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px;
+    padding:6px 8px; border:1px solid rgba(140,160,200,.14);
+    border-radius:6px; background:rgba(20,28,46,.35);
+    font-size:.68rem; color:#9fb0d0;
+}
+.ua-zd-ctl { display:inline-flex; align-items:center; gap:6px; cursor:pointer; }
+.ua-zd-ctl input[type=number] {
+    width:62px; padding:2px 4px; font-size:.68rem;
+    background:rgba(0,0,0,.35); color:#dce6ff;
+    border:1px solid rgba(140,160,200,.25); border-radius:4px;
+    font-variant-numeric:tabular-nums;
+}
+.ua-zd-ctl--wave { font-weight:600; color:#cdd8f0; }
+
+.ua-zd-rows { display:flex; flex-direction:column; gap:6px; }
+.ua-zd-row {
+    display:grid;
+    grid-template-columns:1fr auto;
+    grid-template-areas:"head head" "metrics metrics" "ti spark";
+    gap:4px 8px;
+    padding:7px 9px;
+    border:1px solid rgba(140,160,200,.14); border-radius:7px;
+    background:rgba(16,22,38,.45);
+}
+.ua-zd-head {
+    grid-area:head; display:flex; align-items:center; gap:8px;
+}
+.ua-zd-swatch {
+    width:12px; height:12px; border-radius:3px; flex:0 0 auto;
+}
+.ua-zd-title { display:flex; align-items:baseline; gap:7px; flex:1 1 auto; }
+.ua-zd-name  { font-size:.78rem; font-weight:600; color:#e6edff; }
+.ua-zd-band  { font-size:.62rem; color:#8294b8; font-variant-numeric:tabular-nums; }
+.ua-zd-regime {
+    font-size:.62rem; font-weight:600; text-transform:uppercase;
+    letter-spacing:.04em;
+}
+.ua-zd-regime--continuum      { color:#88e08c; }
+.ua-zd-regime--slip           { color:#bcd86c; }
+.ua-zd-regime--transition     { color:#ffcc66; }
+.ua-zd-regime--free-molecular { color:#ff9060; }
+.ua-zd-regime--unknown        { color:#778; }
+
+.ua-zd-metrics {
+    grid-area:metrics; display:flex; flex-wrap:wrap; gap:4px 14px;
+}
+.ua-zd-metric { display:inline-flex; align-items:baseline; gap:5px; }
+.ua-zd-metric b {
+    font-size:.74rem; color:#dfe8ff; font-variant-numeric:tabular-nums;
+}
+.ua-zd-metric i { font-size:.6rem; color:#7e8fb4; font-style:normal; }
+
+.ua-zd-ti { grid-area:ti; display:flex; align-items:center; gap:7px; min-width:0; }
+.ua-zd-ti-bar {
+    position:relative; width:84px; height:7px; flex:0 0 auto;
+    background:rgba(120,140,180,.18); border-radius:4px; overflow:hidden;
+}
+.ua-zd-ti-fill {
+    position:absolute; left:0; top:0; bottom:0; width:0%;
+    border-radius:4px; transition:width .4s ease;
+}
+.ua-zd-ti-badge {
+    font-size:.6rem; font-weight:700; text-transform:uppercase;
+    letter-spacing:.04em;
+}
+.ua-zd-ti-badge--calm      { color:#6fd3a8; }
+.ua-zd-ti-badge--unsettled { color:#cfd86c; }
+.ua-zd-ti-badge--turbulent { color:#ffb454; }
+.ua-zd-ti-badge--severe    { color:#ff6d6d; }
+.ua-zd-ti-pct {
+    font-size:.58rem; color:#8294b8; font-variant-numeric:tabular-nums;
+}
+.ua-zd-spark {
+    grid-area:spark; width:150px; height:28px; align-self:center;
+}
+.ua-zd-foot {
+    font-size:.6rem; line-height:1.5; color:#76859f;
+    padding:0 2px;
+}
+@media (max-width:768px) {
+    .ua-zd-row { grid-template-columns:1fr; grid-template-areas:"head" "metrics" "ti" "spark"; }
+    .ua-zd-spark { width:100%; }
+}
+
 /* ─── Trajectory analysis panel ───────────────────────── */
 .ua-traj-panel { display:flex; flex-direction:column; gap:8px; }
 .ua-traj-empty {
@@ -2386,6 +2473,22 @@ input[type=range]::-moz-range-thumb {
 
         <div class="ua-panel" style="margin-bottom:14px;">
             <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px">
+                <h2 style="margin:0">Zone drag &amp; turbulence</h2>
+                <span class="ua-fleet-chip">LIVE · per zone</span>
+            </div>
+            <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:8px">
+                Live drag environment of each atmospheric zone: mass density,
+                ram pressure, and circular-orbit decay rate for a reference
+                body, plus a turbulence index combining storm-driven density
+                variability with the gravity-wave residual. Each sparkline is
+                the zone's density over the last 72&nbsp;h. Toggle the wave
+                field to see the turbulence rippling on the globe's shells.
+            </p>
+            <div id="ua-zone-dashboard"></div>
+        </div>
+
+        <div class="ua-panel" style="margin-bottom:14px;">
+            <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px">
                 <h2 style="margin:0">My fleet</h2>
                 <span class="ua-fleet-chip">OPERATOR · 25 max</span>
             </div>
@@ -2789,6 +2892,7 @@ input[type=range]::-moz-range-thumb {
     import { AtmosphereGlobe } from './js/upper-atmosphere-globe.js';
     import { UpperAtmosphereUI } from './js/upper-atmosphere-ui.js';
     import { FleetPanel } from './js/upper-atmosphere-fleet-panel.js';
+    import { ZoneDashboard } from './js/upper-atmosphere-zone-dashboard.js';
     // Phase E: operator-facing time scrubber. Mounts to the bottom of
     // the globe canvas, drives the shared TimeBus directly. Every
     // downstream consumer (Phase B sat propagation, Phase C realtime
@@ -2899,6 +3003,21 @@ input[type=range]::-moz-range-thumb {
     }) : null;
     fleetPanel?.start();
 
+    // ── Zone drag & turbulence dashboard ──────────────────────────────
+    // Live per-zone drag environment + turbulence index. Reads the fused
+    // forcing from the UI and the 72-h ring from the realtime driver;
+    // feeds its per-zone turbulence indices into the globe's wave-field
+    // ripple, and owns the wave-field master toggle.
+    const zoneDashEl = document.getElementById('ua-zone-dashboard');
+    const zoneDashboard = zoneDashEl ? new ZoneDashboard({
+        host: zoneDashEl,
+        getLiveState: () => ({ f107: ui.state.f107, ap: ui.state.ap }),
+        getHistory:   () => getRealtimeDriver().getHistory(),
+        onTurbulence: (zi)  => globe.setZoneTurbulence?.(zi),
+        onWaveFieldToggle: (on) => globe.setWaveFieldVisible?.(on),
+    }) : null;
+    zoneDashboard?.start();
+
     // Phase E: mount the time scrubber at the bottom of the globe.
     // Constructor wires bus subscriptions + DOM events; no further
     // wiring needed. Destroy() can be called later for cleanup.
@@ -2906,7 +3025,7 @@ input[type=range]::-moz-range-thumb {
     const timeScrubber = scrubberHost ? new TimeScrubber(scrubberHost) : null;
 
     // Expose for devtools poking.
-    window.__ua = { engine, globe, ui, fleetPanel, timeScrubber };
+    window.__ua = { engine, globe, ui, fleetPanel, zoneDashboard, timeScrubber };
 
     /* ─── Aside tabs (Controls / Analysis) ──────────────────── */
     const tabBtns  = document.querySelectorAll('#ua-aside-tabs .ua-tab-btn');

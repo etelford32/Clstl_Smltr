@@ -55,6 +55,7 @@ import { ATMOSPHERIC_LAYER_SCHEMA, layerForAltitude }
 import { LayerParticleSystem } from './upper-atmosphere-particles.js';
 import { layerPhysics, pointPhysics } from './upper-atmosphere-physics.js';
 import { LayerVectorField } from './upper-atmosphere-vector-fields.js';
+import { ZoneWaveField } from './upper-atmosphere-wave-field.js';
 import { DragForecastOverlay } from './drag-forecast-overlay.js';
 import { FleetRibbons } from './upper-atmosphere-fleet-ribbons.js';
 import { MagneticCascade } from './upper-atmosphere-magnetic-cascade.js';
@@ -559,6 +560,7 @@ export class AtmosphereGlobe {
         this._buildLayerShells();
         this._buildLayerParticles();
         this._buildLayerVectorFields();
+        this._buildZoneWaveFields();
         this._buildDragForecastOverlay();
         this._buildFleetRibbons();
         this._buildSatelliteRings();
@@ -668,6 +670,57 @@ export class AtmosphereGlobe {
     }
 
     getVectorFieldMode() { return this._fieldMode ?? 'off'; }
+
+    // ── Zone turbulence wave fields ─────────────────────────────────────────
+    // One ZoneWaveField per atmospheric regime — an animated travelling-
+    // disturbance ripple whose amplitude tracks the zone's live turbulence
+    // index. Master-off by default (zero per-frame cost until shown). The
+    // dashboard pushes per-zone indices via setZoneTurbulence(); setProfile
+    // also seeds a coarse Ap-based baseline so the ripple is alive before
+    // the first dashboard tick lands.
+
+    _buildZoneWaveFields() {
+        this._waveGroup = new THREE.Group();
+        this._waves     = {};
+        this._waveVisible = false;
+        for (const layer of ATMOSPHERIC_LAYER_SCHEMA) {
+            this._waves[layer.id] = new ZoneWaveField({
+                parent: this._waveGroup,
+                layer,
+            });
+        }
+        this._scene.add(this._waveGroup);
+    }
+
+    /** Master toggle for the turbulence wave-field overlay. */
+    setWaveFieldVisible(on) {
+        this._waveVisible = !!on;
+        if (!this._waves) return;
+        for (const id in this._waves) this._waves[id].setVisible(this._waveVisible);
+    }
+
+    getWaveFieldVisible() { return !!this._waveVisible; }
+
+    /**
+     * Push per-zone turbulence indices into the wave-field ripple
+     * amplitudes. Accepts the array `computeZoneTurbulence()` returns
+     * (objects with `{ zoneId, ti }`) or a plain `{ zoneId: ti }` map.
+     */
+    setZoneTurbulence(zi) {
+        if (!this._waves || !zi) return;
+        // Dashboard has taken ownership of the amplitudes — setProfile()
+        // stops seeding its Ap baseline from here on.
+        this._zoneTurbExternal = true;
+        if (Array.isArray(zi)) {
+            for (const z of zi) {
+                if (z && this._waves[z.zoneId]) this._waves[z.zoneId].setTurbulence(z.ti);
+            }
+        } else {
+            for (const id in zi) {
+                if (this._waves[id]) this._waves[id].setTurbulence(zi[id]);
+            }
+        }
+    }
 
     // ── Drag-forecast overlay ───────────────────────────────────────────────
     // Particle flow-line view of LEO drag. Each layer carries its own
@@ -881,6 +934,20 @@ export class AtmosphereGlobe {
             const fld = this._fields?.[layer.id];
             if (fld && this._fieldMode !== 'off') {
                 fld.setPhysics(phys, { f107, ap });
+            }
+        }
+
+        // Seed a coarse turbulence baseline from the current Ap so the
+        // wave-field ripple is alive even before the dashboard's first
+        // (volatility-aware) push lands. Higher Ap → more storm forcing →
+        // a livelier baseline ripple. Once the dashboard calls
+        // setZoneTurbulence() it owns the amplitudes and we stop seeding
+        // here, so the richer index never flickers against this floor.
+        if (this._waves && !this._zoneTurbExternal) {
+            const apNow = Number.isFinite(ap) ? ap : 15;
+            const baseTi = 1 - Math.exp(-Math.max(0, apNow - 5) / 45);
+            for (const layer of ATMOSPHERIC_LAYER_SCHEMA) {
+                this._waves[layer.id].setTurbulence(baseTi);
             }
         }
 
@@ -3708,6 +3775,13 @@ export class AtmosphereGlobe {
                 const sys = this._particles[id];
                 if (sys.points.visible) sys.update(dt);
             }
+        }
+
+        // Turbulence wave-field ripple. Each visible zone advances its
+        // travelling-wave phase from the shared clock; hidden zones early-
+        // out inside update(). One uniform write per visible zone.
+        if (this._waves && this._waveVisible) {
+            for (const id in this._waves) this._waves[id].update(t);
         }
 
         // Drag-forecast tracer advection. Self-gates on visibility so it
