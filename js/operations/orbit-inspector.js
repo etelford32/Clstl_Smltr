@@ -34,6 +34,7 @@ import { provStore } from './provenance.js';
 import { computePills, renderPills } from './satellite-pills.js';
 import { annotate as annotateDebris, hazardEnergyMJ } from '../debris-catalog.js';
 import { onSatcatLoaded } from '../satcat-catalog.js';
+import { density as atmoDensity, dominantSpecies } from '../upper-atmosphere-engine.js';
 
 const MIN_PER_DAY = 1440;
 const RE_KM       = 6378.135;     // WGS-72, matches the SGP4 propagator
@@ -41,6 +42,13 @@ const MU_KM3_S2   = 398600.8;     // WGS-72 μ
 const J2          = 0.001082616;
 const DEG         = Math.PI / 180;
 const RAD         = 180 / Math.PI;
+// Altitude below which atmospheric drag becomes appreciable for the
+// altitude-profile shading. Above ~600 km a circular orbit's lifetime
+// runs to decades+; below it, drag dominates the orbit's evolution.
+const DRAG_FLOOR_KM = 600;
+// Hard ceiling for the thermospheric-density surrogate. Beyond this the
+// model is out of range and ρ is negligible anyway (MEO/GEO/HEO).
+const RHO_MAX_ALT_KM = 2000;
 
 function escapeHtml(s) {
     return String(s ?? '').replace(/[&<>"']/g, c => ({
@@ -120,16 +128,24 @@ function altitudeProfileOverOrbit(tle, epochAnchorMs, samples = 60) {
 
 /**
  * Inline SVG altitude profile. Vertical axis spans [perigee, apogee]
- * with a small breathing room; markers call out apogee + perigee.
+ * with a small breathing room. Beyond the bare polyline this now draws:
+ *   - a gradient-filled area so the eccentric "breathing" reads at a
+ *     glance even on a near-circular orbit;
+ *   - a warm drag-zone band below DRAG_FLOOR_KM, tying the altitude
+ *     picture to the drag/decay + density sections below it;
+ *   - apogee / perigee dots on the curve extrema;
+ *   - a "now" marker at sample 0 (the profile is anchored at the
+ *     current epoch, so sample 0 is the satellite's present position).
  */
 function renderAltSpark(altitudes, perigeeKm, apogeeKm) {
     if (!altitudes || altitudes.length < 3) return '';
     const n = altitudes.length;
-    let lo = Infinity, hi = -Infinity;
-    for (const a of altitudes) {
+    let lo = Infinity, hi = -Infinity, loIdx = 0, hiIdx = 0;
+    for (let i = 0; i < n; i++) {
+        const a = altitudes[i];
         if (!Number.isFinite(a)) continue;
-        if (a < lo) lo = a;
-        if (a > hi) hi = a;
+        if (a < lo) { lo = a; loIdx = i; }
+        if (a > hi) { hi = a; hiIdx = i; }
     }
     if (!Number.isFinite(lo) || !Number.isFinite(hi)) return '';
     // Clamp to perigee/apogee from the TLE for a more honest axis;
@@ -137,29 +153,62 @@ function renderAltSpark(altitudes, perigeeKm, apogeeKm) {
     // perturbations.
     if (Number.isFinite(perigeeKm)) lo = Math.min(lo, perigeeKm);
     if (Number.isFinite(apogeeKm))  hi = Math.max(hi, apogeeKm);
+    // Breathing room so dots near the extrema aren't clipped by the box.
+    const pad = Math.max((hi - lo) * 0.08, 2);
+    lo -= pad; hi += pad;
     const range = Math.max(hi - lo, 1);
 
-    const W = 220, H = 44;
-    const PAD = 2;
+    const W = 220, H = 56;
+    const PAD = 3;
     const dx = (W - 2 * PAD) / (n - 1);
+    const xOf = (i) => PAD + i * dx;
     const yOf = (a) => H - PAD - ((a - lo) / range) * (H - 2 * PAD);
 
-    let d = '';
+    let line = '';
     let prev = false;
     for (let i = 0; i < n; i++) {
         const v = altitudes[i];
         if (!Number.isFinite(v)) { prev = false; continue; }
-        const x = PAD + i * dx;
-        const y = yOf(v);
-        d += (prev ? 'L' : 'M') + x.toFixed(1) + ',' + y.toFixed(1) + ' ';
+        const cmd = prev ? 'L' : 'M';
+        line += `${cmd}${xOf(i).toFixed(1)},${yOf(v).toFixed(1)} `;
         prev = true;
     }
+    line = line.trim();
+    // Area = the line, then down to the baseline and back to the start.
+    const area = `${line} L${xOf(n - 1).toFixed(1)},${(H - PAD).toFixed(1)} L${xOf(0).toFixed(1)},${(H - PAD).toFixed(1)} Z`;
+
+    // Drag-zone band: everything below DRAG_FLOOR_KM that's within view.
+    let dragBand = '';
+    if (lo < DRAG_FLOOR_KM) {
+        const yTop = yOf(Math.min(DRAG_FLOOR_KM, hi));
+        const yBot = H - PAD;
+        if (yBot - yTop > 0.5) {
+            dragBand = `<rect x="${PAD}" y="${yTop.toFixed(1)}" width="${(W - 2 * PAD).toFixed(1)}" height="${(yBot - yTop).toFixed(1)}" class="op-orbit-spark-drag"/>`;
+        }
+    }
+
+    const dot = (i, v, cls) =>
+        `<circle cx="${xOf(i).toFixed(1)}" cy="${yOf(v).toFixed(1)}" r="2.4" class="${cls}"/>`;
+    const nowV = Number.isFinite(altitudes[0]) ? altitudes[0] : null;
+
     return `
-        <svg class="op-orbit-spark" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-hidden="true">
-            <title>Altitude over one orbit (${lo.toFixed(0)} – ${hi.toFixed(0)} km)</title>
-            <path d="${d.trim()}" class="op-orbit-spark-line"/>
-            <text x="${W - 4}" y="11" class="op-orbit-spark-label" text-anchor="end">apo ${hi.toFixed(0)} km</text>
-            <text x="${W - 4}" y="${H - 2}" class="op-orbit-spark-label" text-anchor="end">per ${lo.toFixed(0)} km</text>
+        <svg class="op-orbit-spark" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+            <defs>
+                <linearGradient id="opAltGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%"   stop-color="rgba(0,255,200,.34)"/>
+                    <stop offset="100%" stop-color="rgba(0,255,200,.02)"/>
+                </linearGradient>
+            </defs>
+            <title>Altitude over one orbit (${(lo + pad).toFixed(0)} – ${(hi - pad).toFixed(0)} km)</title>
+            ${dragBand}
+            <path d="${area}" class="op-orbit-spark-area"/>
+            <path d="${line}" class="op-orbit-spark-line"/>
+            ${dot(hiIdx, altitudes[hiIdx], 'op-orbit-spark-apo')}
+            ${dot(loIdx, altitudes[loIdx], 'op-orbit-spark-per')}
+            ${nowV != null ? dot(0, nowV, 'op-orbit-spark-now') : ''}
+            <text x="${W - 4}" y="10" class="op-orbit-spark-label" text-anchor="end">apo ${(hi - pad).toFixed(0)} km</text>
+            <text x="${W - 4}" y="${H - 3}" class="op-orbit-spark-label" text-anchor="end">per ${(lo + pad).toFixed(0)} km</text>
+            ${nowV != null ? `<text x="${(xOf(0) + 5).toFixed(1)}" y="${Math.max(9, yOf(nowV) - 4).toFixed(1)}" class="op-orbit-spark-nowlabel">now</text>` : ''}
         </svg>
     `;
 }
@@ -259,6 +308,117 @@ function renderDragSection(tle) {
             </div>
             <div title="Time until perigee re-entry, with a 1σ band combining solar-index forecast spread and ±25 % B* uncertainty in quadrature.">
                 <span class="op-orbit-tag">life</span>${lifeStr}<span class="op-orbit-unit"> ${sigStr}</span>
+            </div>
+        </div>
+    `;
+}
+
+/** kg/m³ → "3.4 × 10⁻¹²" HTML with a superscript exponent. */
+function fmtRho(rho) {
+    if (!Number.isFinite(rho) || rho <= 0) return '—';
+    const exp = Math.floor(Math.log10(rho));
+    const mant = rho / Math.pow(10, exp);
+    return `${mant.toFixed(1)} × 10<sup>${exp}</sup>`;
+}
+
+/** Dynamic pressure (Pa) → most legible of mPa / µPa / nPa. */
+function fmtPressure(pa) {
+    if (!Number.isFinite(pa) || pa <= 0) return '—';
+    if (pa >= 1e-3) return `${(pa * 1e3).toFixed(1)} mPa`;
+    if (pa >= 1e-6) return `${(pa * 1e6).toFixed(1)} µPa`;
+    return `${(pa * 1e9).toFixed(1)} nPa`;
+}
+
+/**
+ * Atmospheric-density block — the physics-first differentiator. Where
+ * Decay Watch answers "how long does it last," this answers "what is the
+ * air doing to it right now": the neutral mass density ρ the satellite
+ * is flying through at perigee and apogee, the dynamic pressure that
+ * density imposes at orbital speed, and the dominant species. All from
+ * the same NRLMSIS-class thermospheric surrogate the upper-atmosphere
+ * lab uses, driven by the live SWPC F10.7 / Ap the rest of the panel
+ * reads — so a storm visibly inflates ρ here exactly as it shortens the
+ * lifetime above.
+ *
+ * Skipped entirely for orbits whose perigee sits above the surrogate's
+ * valid ceiling (MEO/GEO/HEO) — up there drag is genuinely negligible
+ * and a number would imply false precision.
+ */
+function renderDensitySection(tle) {
+    const perigee = tle?.perigee_km;
+    if (!Number.isFinite(perigee) || perigee < 80 || perigee > RHO_MAX_ALT_KM) return '';
+
+    const f107 = provStore.get('idx.f107')?.value ?? 150;
+    const ap   = provStore.get('idx.ap')?.value   ?? 15;
+
+    // Semi-major axis from mean motion for the vis-viva speed at perigee.
+    const n0_rad_s = (tle.mean_motion * 2 * Math.PI) / 86400;
+    const a_km     = (n0_rad_s > 0) ? Math.cbrt(MU_KM3_S2 / (n0_rad_s * n0_rad_s)) : NaN;
+
+    let rhoPer = NaN, rhoApo = NaN, species = null, qPer = NaN, hKm = NaN;
+    try {
+        const dPer = atmoDensity({ altitudeKm: perigee, f107Sfu: f107, ap });
+        rhoPer  = dPer.rho;
+        hKm     = dPer.H_km;
+        species = dominantSpecies(perigee);
+
+        // Dynamic pressure q = ½ ρ v² at perigee. v from vis-viva
+        // (km/s → m/s). This is the load the residual atmosphere puts
+        // on the vehicle — the quantity drag acceleration scales with.
+        const rPer = RE_KM + perigee;
+        if (Number.isFinite(a_km) && a_km > 0) {
+            const vKms = Math.sqrt(MU_KM3_S2 * (2 / rPer - 1 / a_km));
+            const vMs  = vKms * 1000;
+            qPer = 0.5 * rhoPer * vMs * vMs;
+        }
+    } catch (_) { return ''; }
+
+    // Apogee ρ only when it's still in the surrogate's range; for an
+    // eccentric orbit this shows the perigee/apogee density swing that
+    // drives the asymmetric drag the lifetime model integrates over.
+    const apogee = tle.apogee_km;
+    if (Number.isFinite(apogee) && apogee >= 80 && apogee <= RHO_MAX_ALT_KM
+        && Math.abs(apogee - perigee) > 5) {
+        try { rhoApo = atmoDensity({ altitudeKm: apogee, f107Sfu: f107, ap }).rho; }
+        catch (_) { rhoApo = NaN; }
+    }
+
+    provStore.set?.('atmo.rho.perigee', {
+        value: rhoPer, unit: 'kg/m³',
+        source: 'derived (thermospheric surrogate)',
+        model:  'NRLMSIS-class Bates/exponential profile (upper-atmosphere-engine.js)',
+        inputs: ['idx.f107', 'idx.ap'],
+        cacheState: 'derived',
+        description:
+            `Neutral mass density at the selected asset's perigee ` +
+            `(${perigee.toFixed(0)} km), evaluated at the live F10.7 ${f107.toFixed(0)} / ` +
+            `Ap ${ap.toFixed(0)}. Same surrogate as the upper-atmosphere lab.`,
+    });
+
+    const apoRow = Number.isFinite(rhoApo)
+        ? `<div title="Neutral mass density at apogee — the low end of the per-orbit drag swing.">
+               <span class="op-orbit-tag">ρ apo</span>${fmtRho(rhoApo)}<span class="op-orbit-unit"> kg/m³</span>
+           </div>`
+        : '';
+
+    return `
+        <div class="op-orbit-rates op-orbit-atmo">
+            <div class="op-orbit-rate-title" title="Neutral atmospheric density the satellite flies through, from a thermospheric surrogate driven by live solar/geomagnetic indices. This is the input that drag and decay are computed from.">
+                Atmosphere &amp; drag pressure
+                <span class="op-orbit-rate-conds">F10.7 ${f107.toFixed(0)} · Ap ${ap.toFixed(0)}</span>
+            </div>
+            <div title="Neutral mass density at perigee — where drag bites hardest.">
+                <span class="op-orbit-tag">ρ per</span>${fmtRho(rhoPer)}<span class="op-orbit-unit"> kg/m³</span>
+            </div>
+            ${apoRow}
+            <div title="Dynamic pressure q = ½ρv² at perigee, with v from vis-viva. The aerodynamic load the residual atmosphere imposes at orbital speed.">
+                <span class="op-orbit-tag">q per</span>${fmtPressure(qPer)}
+            </div>
+            <div title="Most abundant neutral species at perigee altitude — atomic oxygen dominates most of LEO, helium/hydrogen higher up.">
+                <span class="op-orbit-tag">species</span>${escapeHtml(species ?? '—')}
+            </div>
+            <div title="Neutral scale height at perigee — the altitude rise over which density falls by 1/e.">
+                <span class="op-orbit-tag">H</span>${Number.isFinite(hKm) ? hKm.toFixed(0) : '—'}<span class="op-orbit-unit"> km</span>
             </div>
         </div>
     `;
@@ -496,6 +656,8 @@ export function mountOrbitInspector(opts = {}) {
             </div>
 
             ${renderDragSection(tle)}
+
+            ${renderDensitySection(tle)}
 
             ${physicalHtml}
 
