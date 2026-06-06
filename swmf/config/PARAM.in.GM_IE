@@ -27,6 +27,14 @@
 #DESCRIPTION
 Parker Physics Phase-0 hindcast: GM + IE driven by L1 IMF		StringDescription
 
+! Processor layout. Current SWMF reads the component map from PARAM.in (the
+! standalone LAYOUT.in is legacy and is NOT consulted) — without this block
+! setup_from_file aborts with "could not find #LAYOUT or #COMPONENTMAP".
+! GM gets ranks 0..N-2, IE (serial) gets the last rank. For -n 4: GM 0-2, IE 3.
+#COMPONENTMAP
+GM			0  -2  1
+IE			-1 -1  1
+
 #TIMEACCURATE
 T			DoTimeAccurate
 
@@ -107,6 +115,19 @@ sphere0			NameArea
 sphere0
 12.0			Radius
 
+! Inner body (Earth) and field-aligned-current mapping radius.
+! rCurrents is the radius at which GM extracts FACs to map down to IE along
+! dipole field lines. It MUST exceed rBody and the planet radius, or the
+! GM↔IE coupling aborts in map_planet_field with "mapping radius is less than
+! planet radius" (rMap=0.0). Values from the validated reference
+! SWMFsoftware/BATSRUS Param/EARTH/PARAM.in — do not zero these out.
+#BODY
+T			UseBody
+2.5			rBody      [rEarth]
+3.5			rCurrents  [rEarth]
+28.0			BodyRhoDim [amu/cc]
+25000.0			BodyTDim   [K]
+
 ! Inner boundary (Earth ionosphere shell).
 #INNERBOUNDARY
 ionosphere		TypeBcInner
@@ -139,6 +160,17 @@ mc3			TypeLimiter
 #TIMESTEPPING
 2			nStage
 0.80			CflNumber
+
+! Non-conservative pressure update inside 6 R_E (standard for storm-time
+! magnetosphere stability), conservative beyond. From the validated reference
+! SWMFsoftware/BATSRUS Param/EARTH/PARAM.in.
+#NONCONSERVATIVE
+T			UseNonConservative
+
+#CONSERVATIVECRITERIA
+1			nConservCrit
+r			TypeConservCrit
+6.0			rConserv
 
 ! Log file: 60s cadence for solar-wind / magnetopause monitoring at the
 ! subsolar point — plug source for Bz, Pdyn timeseries downstream.
