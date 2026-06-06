@@ -707,6 +707,28 @@ input[type=range]::-moz-range-thumb {
     .ua-zd-spark { width:100%; }
 }
 
+/* ─── Density-layers controls ──────────────────────────── */
+.ua-dl-row {
+    display:flex; align-items:center; gap:8px; cursor:pointer;
+    font-size:.78rem; color:#e6edff; margin-bottom:8px;
+}
+.ua-dl-row input { accent-color:#0cc; }
+.ua-dl-ctl {
+    display:flex; align-items:center; gap:8px;
+    font-size:.72rem; color:#9fb0d0;
+}
+.ua-dl-ctl select {
+    padding:3px 6px; font-size:.72rem;
+    background:rgba(0,0,0,.35); color:#dce6ff;
+    border:1px solid rgba(140,160,200,.25); border-radius:4px;
+}
+.ua-dl-readout {
+    margin-top:8px; font-size:.66rem; line-height:1.6;
+    color:#9fb0d0; font-variant-numeric:tabular-nums;
+}
+.ua-dl-readout .ua-dl-iso { display:inline-flex; align-items:center; gap:5px; margin-right:12px; }
+.ua-dl-readout .ua-dl-dot { width:9px; height:9px; border-radius:2px; flex:0 0 auto; }
+
 /* ─── Trajectory analysis panel ───────────────────────── */
 .ua-traj-panel { display:flex; flex-direction:column; gap:8px; }
 .ua-traj-empty {
@@ -2418,6 +2440,44 @@ input[type=range]::-moz-range-thumb {
         </div>
 
         <div class="ua-panel" style="margin-bottom:14px;">
+            <h2>Density layers</h2>
+            <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:8px">
+                Analyse the density structure beyond the five coarse zones.
+                <strong>Sub-shells</strong> slice the 100–2000&nbsp;km column
+                into thin contour shells, each brightened by its local mass
+                density so you can read the exponential falloff. An
+                <strong>isodensity surface</strong> is the shell where
+                ρ&nbsp;= a fixed value; it rises when a storm inflates the
+                thermosphere and sinks on recovery — the atmosphere breathing.
+            </p>
+
+            <label class="ua-dl-row" for="ua-subshell-toggle">
+                <input type="checkbox" id="ua-subshell-toggle">
+                <span>Density sub-shells</span>
+            </label>
+            <div class="ua-dl-ctl">
+                <label for="ua-subshell-step">Shell step</label>
+                <select id="ua-subshell-step">
+                    <option value="25">25 km</option>
+                    <option value="50" selected>50 km</option>
+                    <option value="100">100 km</option>
+                </select>
+            </div>
+
+            <div class="ua-dl-ctl" style="margin-top:8px">
+                <label for="ua-iso-select">Isodensity surface</label>
+                <select id="ua-iso-select">
+                    <option value="off" selected>Off</option>
+                    <option value="1e-11">ρ = 10⁻¹¹ kg/m³</option>
+                    <option value="1e-12">ρ = 10⁻¹² kg/m³</option>
+                    <option value="1e-13">ρ = 10⁻¹³ kg/m³</option>
+                    <option value="all">All three</option>
+                </select>
+            </div>
+            <div id="ua-iso-readout" class="ua-dl-readout"></div>
+        </div>
+
+        <div class="ua-panel" style="margin-bottom:14px;">
             <h2 style="display:flex;align-items:center;gap:8px;">
                 Drag forecast
                 <span id="ua-drag-horizon-chip" class="ua-drag-chip">NOWCAST</span>
@@ -3017,6 +3077,52 @@ input[type=range]::-moz-range-thumb {
         onWaveFieldToggle: (on) => globe.setWaveFieldVisible?.(on),
     }) : null;
     zoneDashboard?.start();
+
+    // ── Density-layer overlays (sub-shells + isodensity surfaces) ─────
+    (function wireDensityLayers() {
+        const subToggle = document.getElementById('ua-subshell-toggle');
+        const subStep   = document.getElementById('ua-subshell-step');
+        const isoSelect = document.getElementById('ua-iso-select');
+        const isoReadout = document.getElementById('ua-iso-readout');
+        const ISO_COLORS = { '1e-11': '#33e1ff', '1e-12': '#9b6bff', '1e-13': '#ff66aa' };
+
+        subToggle?.addEventListener('change', () => {
+            globe.setDensitySubShellsVisible?.(subToggle.checked);
+        });
+        subStep?.addEventListener('change', () => {
+            globe.setDensitySubShellStep?.(Number(subStep.value));
+        });
+        isoSelect?.addEventListener('change', () => {
+            globe.setIsodensityThreshold?.(isoSelect.value);
+            renderIsoReadout();
+        });
+
+        function renderIsoReadout() {
+            if (!isoReadout) return;
+            const sel = isoSelect?.value || 'off';
+            if (sel === 'off') { isoReadout.innerHTML = ''; return; }
+            const alts = globe.getIsodensityAltitudes?.() || {};
+            const rows = [];
+            for (const [thr, color] of Object.entries(ISO_COLORS)) {
+                if (sel !== 'all' && Number(sel) !== Number(thr)) continue;
+                const a = alts[Number(thr)] ?? alts[thr];
+                rows.push(`<span class="ua-dl-iso"><span class="ua-dl-dot" style="background:${color}"></span>`
+                    + `ρ=${Number(thr).toExponential(0)} → ${Number.isFinite(a) ? Math.round(a) + ' km' : 'out of range'}</span>`);
+            }
+            isoReadout.innerHTML = rows.join('');
+        }
+
+        // Keep the altitude readout live as the storm state evolves. The
+        // globe re-solves the surfaces on every setProfile(); we just poll
+        // its solved altitudes at the realtime cadence (throttled).
+        let lastReadoutMs = 0;
+        window.addEventListener('ua-realtime-tick', () => {
+            const now = performance.now();
+            if (now - lastReadoutMs < 900) return;
+            lastReadoutMs = now;
+            if (isoSelect && isoSelect.value !== 'off') renderIsoReadout();
+        });
+    })();
 
     // Phase E: mount the time scrubber at the bottom of the globe.
     // Constructor wires bus subscriptions + DOM events; no further
