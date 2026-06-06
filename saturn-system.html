@@ -1,0 +1,2104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Saturn System — Rings & Moons · Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/saturn-system.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/saturn-system.html">
+<meta property="og:title" content="Saturn System — Rings & Moons — Parkers Physics">
+<meta property="og:description" content="Interactive Saturn system: a physically-structured ring (D–F, Cassini Division, Encke & Keeler gaps) sculpted live by its moons — Mimas opens the Cassini Division, Pan & Daphnis clear gaps, and spiral density waves co-rotate with the moons in real time.">
+<meta property="og:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+<meta property="og:image:alt" content="Parkers Physics — real-time astrophysics simulations">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Saturn System — Rings & Moons — Parkers Physics">
+<meta name="twitter:description" content="Interactive Saturn system: a physically-structured ring sculpted live by its moons — Mimas opens the Cassini Division, Pan & Daphnis clear gaps, and spiral density waves co-rotate with the moons in real time.">
+<meta name="twitter:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+
+<meta name="description" content="Interactive Saturn system: a physically-structured ring (D–F, Cassini Division, Encke & Keeler gaps) sculpted live by its moons — Mimas opens the Cassini Division, Pan & Daphnis clear gaps, and spiral density waves co-rotate with the moons in real time.">
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { height:auto; overflow-y:auto; }
+body {
+    width:100%; min-height:100vh; overflow-x:hidden;
+    background:#040210; color:#d6cfeb;
+    font-family:'Segoe UI', system-ui, sans-serif;
+}
+
+#js-hero {
+    padding:28px 24px 18px;
+    background:linear-gradient(180deg, rgba(255,160,80,.10), rgba(4,2,16,0));
+    border-bottom:1px solid rgba(255,184,80,.18);
+}
+#js-hero h1 {
+    font-size:1.7rem; font-weight:800;
+    background:linear-gradient(100deg,#fff 30%,#ffb070);
+    -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+    margin-bottom:8px;
+}
+#js-hero p { font-size:.92rem; color:#bca; line-height:1.6; max-width:880px; }
+#js-hero .js-tag {
+    display:inline-block; font-family:monospace; font-size:.7rem; letter-spacing:.1em;
+    color:#ffd9a8; background:rgba(255,160,80,.14);
+    border:1px solid rgba(255,184,80,.40); border-radius:4px;
+    padding:3px 8px; margin-bottom:10px; text-transform:uppercase;
+}
+
+/* ── Stage ───────────────────────────────────────────────────────────── */
+#js-stage {
+    position:relative;
+    width:100%; max-width:1280px;
+    margin:18px auto 0;
+    padding:0 18px;
+    display:grid;
+    grid-template-columns:1fr 320px;
+    gap:14px;
+}
+@media (max-width:920px) { #js-stage { grid-template-columns:1fr; } }
+#js-canvas-wrap {
+    position:relative;
+    width:100%; height:560px;
+    border:1px solid rgba(255,184,80,.24);
+    border-radius:14px;
+    overflow:hidden;
+    background:radial-gradient(ellipse at center, #110a04 0%, #02010a 80%);
+    box-shadow:0 12px 40px rgba(0,0,0,.5), inset 0 0 80px rgba(160,80,40,.08);
+}
+#js-canvas-wrap canvas { display:block; width:100%; height:100%; }
+#js-canvas-wrap:fullscreen { width:100vw; height:100vh; border-radius:0; border:none; }
+
+/* HUD */
+#js-hud {
+    position:absolute; top:12px; left:14px; right:14px;
+    display:flex; justify-content:space-between; align-items:flex-start;
+    gap:12px; pointer-events:none;
+    font-family:monospace; font-size:.74rem;
+}
+.js-hud-card {
+    background:rgba(8,4,24,.72);
+    border:1px solid rgba(255,184,80,.26);
+    border-radius:6px;
+    padding:8px 11px;
+    color:#ffd9a8;
+    backdrop-filter:blur(6px);
+    pointer-events:auto;
+    line-height:1.55;
+}
+.js-hud-card .lbl { color:#998; font-size:.62rem; letter-spacing:.08em; text-transform:uppercase; display:block; margin-bottom:1px; }
+.js-hud-card .val { color:#fff; font-size:.85rem; font-weight:700; }
+.js-hud-card .sub { color:#bca; font-size:.66rem; margin-top:2px; }
+
+#js-mode-pill {
+    position:absolute; top:12px; left:50%; transform:translateX(-50%);
+    font-family:monospace; font-size:.68rem; letter-spacing:.08em;
+    text-transform:uppercase;
+    background:rgba(8,4,24,.78);
+    border:1px solid rgba(180,140,255,.55);
+    color:#b78cff;
+    padding:5px 12px;
+    border-radius:14px;
+    backdrop-filter:blur(6px);
+    pointer-events:none;
+    transition:all .25s ease;
+}
+#js-mode-pill.play { border-color:rgba(79,201,127,.55); color:#7fdb9a; }
+
+#js-legend {
+    position:absolute; bottom:10px; left:14px;
+    display:flex; gap:10px; flex-wrap:wrap;
+    font-family:monospace; font-size:.66rem;
+    background:rgba(8,4,24,.62);
+    border:1px solid rgba(255,184,80,.22);
+    border-radius:6px;
+    padding:6px 10px;
+    color:#bca;
+    backdrop-filter:blur(6px);
+}
+#js-legend .lg { display:flex; align-items:center; gap:5px; }
+#js-legend .dt { width:8px; height:8px; border-radius:50%; }
+
+/* Side panel */
+#js-side {
+    background:rgba(12,8,30,.82);
+    border:1px solid rgba(255,184,80,.22);
+    border-radius:14px;
+    padding:14px 14px 16px;
+    backdrop-filter:blur(14px);
+    display:flex; flex-direction:column;
+    height:560px; overflow:hidden;
+}
+@media (max-width:920px) { #js-side { height:auto; max-height:none; } }
+.js-side-title {
+    font-size:.66rem; color:#998; letter-spacing:.12em;
+    text-transform:uppercase; font-weight:700; margin-bottom:8px;
+}
+.js-body-grid {
+    display:grid; grid-template-columns:repeat(5, 1fr); gap:5px;
+    margin-bottom:14px;
+}
+.js-body-btn {
+    background:rgba(0,0,0,.30);
+    border:1px solid rgba(255,184,80,.22);
+    border-radius:5px;
+    padding:6px 4px 4px;
+    cursor:pointer;
+    text-align:center;
+    transition:all .15s;
+    font-family:inherit;
+    color:#aa9;
+}
+.js-body-btn:hover { border-color:rgba(255,184,80,.55); color:#fff; }
+.js-body-btn.sel {
+    background:rgba(255,184,80,.18);
+    border-color:#ffb070;
+    color:#fff;
+    box-shadow:0 0 10px rgba(255,184,80,.30);
+}
+.js-body-dot {
+    width:14px; height:14px; border-radius:50%;
+    margin:0 auto 3px;
+    box-shadow:0 0 6px currentColor;
+}
+.js-body-name { font-size:.62rem; font-weight:600; letter-spacing:.04em; }
+.js-body-group {
+    grid-column:1 / -1;
+    font-size:.58rem; color:#998; letter-spacing:.10em;
+    text-transform:uppercase; font-weight:700;
+    margin:6px 0 1px; padding-top:5px;
+    border-top:1px solid rgba(255,184,80,.12);
+}
+.js-body-group:first-child { margin-top:0; padding-top:0; border-top:none; }
+
+.js-sel-head {
+    display:flex; align-items:center; gap:8px;
+    padding:6px 0 10px;
+    border-bottom:1px solid rgba(255,184,80,.18);
+    margin-bottom:10px;
+}
+.js-sel-dot { width:18px; height:18px; border-radius:50%; box-shadow:0 0 8px currentColor; }
+.js-sel-name { font-size:1.05rem; font-weight:700; color:#fff; }
+.js-sel-sub  { font-size:.66rem; color:#998; font-family:monospace; margin-left:auto; }
+
+.js-el-table {
+    flex:1;
+    display:grid; grid-template-columns:1fr auto;
+    column-gap:10px; row-gap:6px;
+    align-content:start;
+    font-family:monospace; font-size:.78rem;
+    overflow-y:auto;
+}
+.js-el-k { color:#aa9; display:flex; align-items:baseline; gap:6px; }
+.js-el-k .sym { color:#ffd9a8; font-weight:700; min-width:20px; display:inline-block; }
+.js-el-k .nm  { font-size:.66rem; color:#776; }
+.js-el-v { color:#fff; font-variant-numeric:tabular-nums; text-align:right; font-weight:600; }
+.js-el-v .un { color:#776; font-weight:400; margin-left:4px; font-size:.7rem; }
+.js-el-foot {
+    margin-top:10px; padding-top:8px;
+    border-top:1px solid rgba(255,184,80,.16);
+    font-family:monospace; font-size:.62rem; color:#776;
+    line-height:1.55;
+}
+
+/* Time / control card */
+#js-time { width:100%; max-width:1280px; margin:14px auto 0; padding:0 18px; }
+.js-time-card {
+    background:rgba(12,8,30,.78); backdrop-filter:blur(14px);
+    border:1px solid rgba(255,184,80,.22);
+    border-radius:12px;
+    padding:16px 18px;
+}
+.js-row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+.js-row:last-child { margin-bottom:0; }
+
+.js-btn {
+    background:rgba(255,184,80,.10);
+    color:#ffd9a8;
+    border:1px solid rgba(255,184,80,.32);
+    border-radius:6px;
+    padding:7px 13px;
+    font-family:inherit; font-size:.78rem; font-weight:600;
+    cursor:pointer;
+    transition:background .15s, color .15s, border-color .15s;
+}
+.js-btn:hover { background:rgba(255,184,80,.24); color:#fff; }
+.js-btn.primary {
+    background:rgba(79,201,127,.16); color:#7fdb9a; border-color:rgba(79,201,127,.45);
+}
+.js-btn.primary:hover { background:rgba(79,201,127,.30); color:#fff; }
+.js-btn.warn {
+    background:rgba(255,184,48,.14); color:#fc7; border-color:rgba(255,184,48,.40);
+}
+.js-btn.toggle.on {
+    background:rgba(180,140,255,.20); color:#fff; border-color:rgba(180,140,255,.55);
+}
+.js-btn.live {
+    background:rgba(120,80,255,.20); color:#fff; border-color:rgba(180,140,255,.55);
+}
+.js-btn.live:hover { background:rgba(120,80,255,.32); }
+.js-btn.live.on { box-shadow:0 0 0 1px rgba(180,140,255,.55), 0 0 12px rgba(180,140,255,.35); }
+
+.js-input {
+    background:rgba(0,0,0,.30);
+    color:#fff;
+    border:1px solid rgba(255,184,80,.30);
+    border-radius:5px;
+    padding:6px 8px;
+    font-family:monospace; font-size:.78rem;
+}
+.js-input:focus { outline:none; border-color:#ffb070; }
+
+.js-bookmarks { display:flex; gap:6px; flex-wrap:wrap; max-width:100%; }
+.js-bm {
+    background:rgba(0,0,0,.30);
+    color:#aa9;
+    border:1px solid rgba(255,184,80,.20);
+    border-radius:14px;
+    padding:4px 10px;
+    font-family:monospace; font-size:.7rem;
+    cursor:pointer;
+    transition:all .15s;
+}
+.js-bm:hover {
+    color:#fff; border-color:rgba(255,184,80,.55);
+    background:rgba(255,184,80,.14);
+}
+.js-bm-yr { color:#665; margin-right:4px; }
+
+.js-label {
+    font-family:monospace; font-size:.7rem; letter-spacing:.06em;
+    text-transform:uppercase; color:#998;
+}
+.js-select {
+    background:rgba(0,0,0,.30);
+    color:#eef;
+    border:1px solid rgba(255,184,80,.32);
+    border-radius:5px;
+    padding:6px 9px;
+    font-family:monospace; font-size:.78rem;
+    cursor:pointer;
+}
+.js-slider {
+    flex:1; min-width:240px;
+    -webkit-appearance:none; appearance:none;
+    height:6px; border-radius:3px;
+    background:linear-gradient(90deg, rgba(255,184,80,.35), rgba(180,140,255,.50), rgba(255,184,80,.35));
+    outline:none; cursor:pointer;
+}
+.js-slider::-webkit-slider-thumb {
+    -webkit-appearance:none; appearance:none;
+    width:18px; height:18px; border-radius:50%;
+    background:#fff; border:2px solid #ffb070;
+    box-shadow:0 0 8px rgba(255,184,80,.6);
+    cursor:grab;
+}
+.js-slider::-moz-range-thumb {
+    width:18px; height:18px; border-radius:50%;
+    background:#fff; border:2px solid #ffb070;
+    box-shadow:0 0 8px rgba(255,184,80,.6);
+    cursor:grab;
+}
+.js-atmo-readout {
+    display:inline-flex; align-items:center; gap:5px; flex-wrap:wrap;
+    margin-left:auto;
+    font-family:monospace; font-size:.68rem;
+    background:rgba(0,0,0,.28);
+    border:1px solid rgba(255,184,80,.20);
+    border-radius:8px; padding:4px 9px;
+}
+.js-atmo-readout .k { color:#998; text-transform:uppercase; letter-spacing:.05em; font-size:.6rem; }
+.js-atmo-readout .v { color:#ffd9a8; font-weight:700; margin-right:8px; }
+.js-atmo-readout .v:last-child { margin-right:0; }
+
+/* Plot panel */
+#js-app {
+    max-width:1280px; margin:0 auto;
+    padding:18px 18px 64px;
+    display:grid; gap:18px;
+}
+.js-panel {
+    background:rgba(12,8,30,.72); backdrop-filter:blur(14px);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:12px;
+    padding:18px 20px;
+}
+.js-panel h2 {
+    font-size:.78rem; color:#ffb070; text-transform:uppercase;
+    letter-spacing:.12em; font-weight:800; margin-bottom:12px;
+}
+.js-panel p { font-size:.86rem; color:#bcb; line-height:1.6; margin-bottom:8px; }
+.js-panel p:last-child { margin-bottom:0; }
+.js-panel code {
+    font-family:monospace; font-size:.78rem;
+    background:rgba(255,255,255,.05); color:#fc7;
+    padding:1px 6px; border-radius:3px;
+}
+
+.js-plot-head {
+    display:flex; align-items:baseline; gap:14px;
+    margin-bottom:8px; flex-wrap:wrap;
+}
+.js-plot-legend { display:flex; gap:10px; flex-wrap:wrap; font-family:monospace; font-size:.7rem; color:#998; }
+.js-plot-legend .lg { display:flex; align-items:center; gap:5px; }
+.js-plot-legend .swatch { display:inline-block; width:14px; height:8px; border-radius:1px; }
+.js-plot-wrap { position:relative; height:230px; border-radius:6px; background:rgba(0,0,0,.22); border:1px solid rgba(180,140,255,.10); }
+#js-plot-canvas, #js-wind-canvas { display:block; width:100%; height:100%; }
+
+.js-plot-readout {
+    display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr));
+    gap:8px; margin-top:10px;
+}
+.js-plot-readout .cell {
+    background:rgba(255,255,255,.03);
+    border:1px solid rgba(255,184,80,.16);
+    border-radius:6px;
+    padding:8px 10px;
+    font-family:monospace; font-size:.74rem;
+}
+.js-plot-readout .cell .k { color:#998; display:block; font-size:.62rem; text-transform:uppercase; letter-spacing:.06em; }
+.js-plot-readout .cell .v { color:#fff; font-weight:700; }
+
+.js-warn {
+    font-size:.74rem; color:#998; font-style:italic;
+    border-left:2px solid rgba(255,184,48,.4); padding-left:10px; margin-top:10px;
+}
+
+/* Body labels & hover badges (HTML overlays projected from 3D) */
+.js-label-3d {
+    position:absolute;
+    pointer-events:none;
+    transform:translate(-50%, -120%);
+    font-family:ui-monospace, Menlo, monospace;
+    font-size:.66rem;
+    font-weight:600;
+    color:#fff;
+    background:rgba(8,4,24,.55);
+    border:1px solid rgba(255,184,80,.30);
+    border-radius:10px;
+    padding:1px 7px;
+    white-space:nowrap;
+    backdrop-filter:blur(6px);
+    box-shadow:0 0 8px rgba(0,0,0,.5);
+    transition:opacity .15s;
+    z-index:6;
+}
+.js-label-3d .icon { margin-right:3px; }
+.js-label-3d.minor { font-size:.6rem; padding:0 6px; opacity:.92; border-color:rgba(160,180,210,.30); }
+.js-label-3d.behind { opacity:0; }
+.js-label-3d.selected {
+    color:#ffb070;
+    border-color:rgba(255,184,80,.65);
+    box-shadow:0 0 12px rgba(255,184,80,.30);
+}
+
+.js-hover-icon {
+    position:absolute;
+    pointer-events:none;
+    transform:translate(-50%, -50%);
+    font-size:1.2rem;
+    z-index:7;
+    text-shadow:0 0 8px rgba(255,255,255,.4), 0 0 18px rgba(255,184,80,.5);
+    opacity:0;
+    transition:opacity .15s;
+}
+.js-hover-icon.show {
+    opacity:1;
+    animation:js-pulse 1.6s ease-in-out infinite;
+}
+@keyframes js-pulse {
+    0%,100% { transform:translate(-50%, -50%) scale(1); filter:brightness(1); }
+    50%     { transform:translate(-50%, -50%) scale(1.18); filter:brightness(1.4); }
+}
+
+/* Conjunction flash overlay */
+.js-conjunction {
+    position:absolute;
+    top:48px; left:50%; transform:translateX(-50%);
+    font-family:monospace; font-size:.72rem; letter-spacing:.06em;
+    text-transform:uppercase;
+    background:rgba(8,4,24,.85);
+    border:1px solid rgba(255,255,128,.55);
+    color:#ffe070;
+    padding:5px 14px;
+    border-radius:14px;
+    backdrop-filter:blur(6px);
+    pointer-events:none;
+    opacity:0;
+    transition:opacity .25s;
+    z-index:8;
+    box-shadow:0 0 16px rgba(255,224,112,.40);
+}
+.js-conjunction.show { opacity:1; }
+
+/* Tooltip */
+#js-tooltip {
+    position:absolute;
+    pointer-events:none;
+    background:rgba(8,4,24,.92);
+    border:1px solid rgba(255,184,80,.40);
+    border-radius:6px;
+    padding:8px 10px;
+    font-family:ui-monospace, Menlo, monospace;
+    font-size:.7rem;
+    color:#ffe9c0;
+    backdrop-filter:blur(8px);
+    box-shadow:0 4px 14px rgba(0,0,0,.5);
+    z-index:30;
+    line-height:1.45;
+    transform:translate(12px, 14px);
+    min-width:180px;
+    transition:opacity .12s;
+    opacity:0;
+}
+#js-tooltip.show { opacity:1; }
+#js-tooltip .tt-row { display:flex; justify-content:space-between; gap:10px; }
+#js-tooltip .tt-k { color:#998; }
+#js-tooltip .tt-v { color:#fff; font-weight:700; }
+#js-tooltip .tt-hdr {
+    display:flex; align-items:center; gap:6px;
+    color:#ffb070; font-weight:700; font-size:.74rem;
+    margin-bottom:5px; padding-bottom:4px;
+    text-transform:uppercase; letter-spacing:.04em;
+    border-bottom:1px solid rgba(255,184,80,.25);
+}
+#js-tooltip .tt-hdr .dot { width:8px; height:8px; border-radius:50%; box-shadow:0 0 5px currentColor; }
+
+</style>
+<link rel="stylesheet" href="js/nav-styles.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "@id": "https://parkersphysics.com/saturn-system.html#app",
+  "name": "Saturn System — Rings & Moons",
+  "description": "Interactive Saturn system: a physically-structured ring sculpted live by its moons — Mimas opens the Cassini Division, Pan & Daphnis clear gaps, and spiral density waves co-rotate with the moons in real time.",
+  "url": "https://parkersphysics.com/saturn-system.html",
+  "image": "https://parkersphysics.com/ParkersPhysics_logo2.jpg",
+  "applicationCategory": "EducationalApplication",
+  "applicationSubCategory": "Planetary science simulation",
+  "operatingSystem": "Web Browser",
+  "browserRequirements": "Requires JavaScript and WebGL",
+  "isAccessibleForFree": true,
+  "publisher": {
+    "@id": "https://parkersphysics.com/#org"
+  },
+  "inLanguage": "en-US"
+}
+</script>
+</head>
+<body>
+
+<script type="importmap">
+{
+    "imports": {
+        "three":         "/js/vendor/three-0.160.0/three.module.js",
+        "three/addons/": "/js/vendor/three-0.160.0/jsm/"
+    }
+}
+</script>
+<!-- perf-hints:start -->
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+<link rel="modulepreload" href="/js/vendor/three-0.160.0/three.module.js" crossorigin>
+<!-- perf-hints:end --><nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260503"; initNav("saturn-system");</script>
+
+<div id="js-hero">
+    <span class="js-tag">Moon-Sculpted Rings · Live Resonance Patterns</span>
+    <h1>Saturn System — The Rings &amp; Their Shepherds</h1>
+    <p>Saturn's rings are not a static disc — they are a billion-particle structure carved, gapped, and waved by the moons orbiting through and beyond them. This view renders the real radial structure (the <strong>D, C, B</strong> rings, the <strong>Cassini Division</strong>, the <strong>A</strong> ring with its <strong>Encke</strong> and <strong>Keeler</strong> gaps, and the braided <strong>F</strong> ring) and lets the moons sculpt it <em>in real time</em>: every spiral density wave's pattern speed equals the perturbing moon's mean motion, so the waves wind around as the moons move.</p>
+    <p><strong>Mimas</strong> opens the Cassini Division at its 2:1 resonance and pins the sharp B-ring edge into a two-lobed pattern that co-rotates with it; <strong>Pan</strong> and <strong>Daphnis</strong> sweep the Encke and Keeler gaps clear, raising scalloped wakes on the edges; <strong>Janus</strong> holds the A-ring's outer edge; and <strong>Prometheus</strong> &amp; <strong>Pandora</strong> shepherd the narrow F ring. Press <strong>▶ Play</strong> or <strong>⟲ Now</strong> and watch the rings evolve with the moons. The moons are propagated analytically (Kepler + J₂ secular precession), so their orbit rings also visibly precess over the years. Hit <strong>⤢ Wide field</strong> to pull out to Titan, Iapetus and retrograde Phoebe.</p>
+</div>
+
+<!-- ═══ STAGE ═══ -->
+<div id="js-stage">
+    <div id="js-canvas-wrap">
+        <div id="js-hud">
+            <div class="js-hud-card">
+                <span class="lbl">Sim Time</span>
+                <div class="val" id="js-time-display">+ 0.0 d</div>
+                <div class="sub" id="js-jd-display">JD —</div>
+            </div>
+            <div class="js-hud-card" style="text-align:right;">
+                <span class="lbl">Ring opening to Sun</span>
+                <div class="val" id="js-energy-display">—</div>
+                <div class="sub" id="js-step-display">dt = — s</div>
+            </div>
+        </div>
+        <div id="js-mode-pill">⏸ Paused</div>
+        <div id="js-legend"></div>
+        <div id="js-tooltip" role="tooltip" aria-hidden="true"></div>
+        <div id="js-conjunction" class="js-conjunction"></div>
+        <div id="js-overlay" style="position:absolute; inset:0; pointer-events:none; z-index:5;"></div>
+    </div>
+
+    <aside id="js-side">
+        <div class="js-side-title">Body Picker</div>
+        <div class="js-body-grid" id="js-body-grid"></div>
+
+        <div class="js-sel-head">
+            <span class="js-sel-dot" id="js-sel-dot"></span>
+            <span class="js-sel-name" id="js-sel-name">Mimas</span>
+            <span class="js-sel-sub" id="js-sel-period">0.942 d</span>
+        </div>
+
+        <div class="js-el-table" id="js-el-table"></div>
+
+        <div class="js-el-foot">
+            Moons: osculating Keplerian elements about Saturn's centre,
+            propagated analytically with J₂ secular precession. Rings:
+            radial geometry from the standard ring nomenclature. Elements
+            seeded from JPL satellite fact sheets (≈J2000).
+        </div>
+    </aside>
+</div>
+
+<!-- ═══ TIME CONTROLS ═══ -->
+<div id="js-time">
+    <div class="js-time-card">
+
+        <div class="js-row">
+            <button class="js-btn primary" id="js-play">▶ Play</button>
+            <button class="js-btn" id="js-rev" title="Reverse direction">⇄ Forward</button>
+            <span class="js-label">Speed</span>
+            <select class="js-select" id="js-speed">
+                <option value="3600">1 hr / s</option>
+                <option value="21600">6 hr / s</option>
+                <option value="86400" selected>1 d / s</option>
+                <option value="259200">3 d / s</option>
+                <option value="864000">10 d / s</option>
+                <option value="2592000">30 d / s</option>
+                <option value="8640000">100 d / s</option>
+                <option value="31557600">1 yr / s</option>
+            </select>
+            <button class="js-btn" id="js-step-back">◄ −1 hr</button>
+            <button class="js-btn" id="js-step-fwd">+1 hr ►</button>
+            <span style="flex:1"></span>
+            <button class="js-btn live" id="js-now" title="Sync to current real-world time">⟲ Now (Live)</button>
+            <button class="js-btn warn" id="js-reset" title="Reset simulation to J2000.0 epoch (2000-01-01 12:00 UT)">⟲ J2000</button>
+        </div>
+
+        <div class="js-row">
+            <span class="js-label" style="width:90px">Date (UTC)</span>
+            <input class="js-input" type="date" id="js-date" min="1500-01-01" max="2200-12-31" style="width:160px">
+            <span class="js-label">Hr</span>
+            <input class="js-input" type="number" id="js-hour" min="0" max="23" step="1" value="12" style="width:64px">
+            <span class="js-label">JD</span>
+            <input class="js-input" type="number" id="js-jd-input" step="0.5" style="width:140px">
+            <span style="flex:1"></span>
+            <span class="js-label">Jump to</span>
+            <div class="js-bookmarks" id="js-bookmarks"></div>
+        </div>
+
+        <div class="js-row">
+            <span class="js-label" style="width:90px">Trails</span>
+            <button class="js-btn toggle on" id="js-trails-toggle">Trails: ON</button>
+            <span class="js-label">Length</span>
+            <select class="js-select" id="js-trail-len">
+                <option value="600">~1 d</option>
+                <option value="3600" selected>~6 d</option>
+                <option value="10800">~18 d</option>
+            </select>
+            <span class="js-label" style="margin-left:14px">Orbit rings</span>
+            <button class="js-btn toggle on" id="js-orbits-toggle">Orbits: ON</button>
+            <span class="js-label" style="margin-left:14px">Labels</span>
+            <button class="js-btn toggle on" id="js-labels-toggle">Labels: ON</button>
+            <span class="js-label" style="margin-left:14px">Rings</span>
+            <button class="js-btn toggle on" id="js-rings-toggle">Rings: ON</button>
+        </div>
+
+        <div class="js-row">
+            <span class="js-label" style="width:90px">View</span>
+            <button class="js-btn toggle" id="js-view-top" title="Top-down (look down the spin axis)">⊙ Top-down</button>
+            <button class="js-btn toggle on" id="js-view-3d" title="Standard oblique 3D view">⛯ 3D Oblique</button>
+            <button class="js-btn toggle" id="js-view-equ" title="Edge-on the equatorial plane — see how flat the orbits really are">— Edge-on</button>
+            <span class="js-label" style="margin-left:14px">Focus</span>
+            <select class="js-select" id="js-focus" title="Lock the camera to a body so it tracks across orbit"></select>
+            <button class="js-btn" id="js-pov" title="Place the camera on the selected moon's surface, looking toward Saturn">👁 POV</button>
+            <span class="js-label" style="margin-left:14px">Scale</span>
+            <select class="js-select" id="js-scale">
+                <option value="zoom">Ring close-up (gaps &amp; waves)</option>
+                <option value="full" selected>Rings + inner moons</option>
+                <option value="system">Full system (Titan–Phoebe)</option>
+            </select>
+            <button class="js-btn toggle" id="js-view-wide" title="Fullscreen wide-field view — zoom out to Titan, Iapetus and retrograde Phoebe">⤢ Wide field</button>
+        </div>
+
+        <div class="js-row">
+            <span class="js-label" style="width:90px">Ring waves</span>
+            <span class="js-label" title="Toggle the moon-driven spiral density waves & gap scallops">Density waves</span>
+            <button class="js-btn toggle on" id="js-wave-toggle">Waves: ON</button>
+            <span class="js-label" title="Multiplies the rendered amplitude of the spiral density waves">Strength</span>
+            <input class="js-slider" type="range" id="js-wave-strength" min="0" max="3" step="0.1" value="1" style="min-width:120px; max-width:180px">
+            <span class="js-label" style="margin-left:14px">Detail</span>
+            <select class="js-select" id="js-ring-quality" title="Ring & cloud shader quality.">
+                <option value="0">Low</option>
+                <option value="1" selected>Medium</option>
+                <option value="2">High</option>
+            </select>
+            <span class="js-atmo-readout" id="js-ring-readout">
+                <span class="k">epoch</span><span class="v" id="js-ring-epoch">2000.0</span>
+                <span class="k">Mimas&nbsp;λ</span><span class="v" id="js-ring-mimas">—</span>
+                <span class="k">Pan&nbsp;λ</span><span class="v" id="js-ring-pan">—</span>
+            </span>
+        </div>
+
+    </div>
+</div>
+
+<div id="js-app">
+
+    <!-- Ring structure + resonance map -->
+    <section class="js-panel">
+        <div class="js-plot-head">
+            <h2 style="flex:0 0 auto">Ring Structure &amp; the Resonances That Carve It <span style="color:#776; text-transform:none; letter-spacing:0; font-weight:400; font-size:.7rem">— optical depth vs. radius</span></h2>
+            <div class="js-plot-legend">
+                <span class="lg"><span class="swatch" style="background:#d8c69a"></span>ring brightness</span>
+                <span class="lg"><span class="swatch" style="background:#9fd0e0"></span>moon resonance</span>
+                <span class="lg"><span class="swatch" style="background:#ff9a7f"></span>gap (cleared)</span>
+            </div>
+        </div>
+        <div class="js-plot-wrap">
+            <canvas id="js-plot-canvas"></canvas>
+        </div>
+        <div class="js-plot-readout">
+            <div class="cell"><span class="k">B-ring outer edge</span><span class="v">Mimas 2:1 · 117,580 km</span></div>
+            <div class="cell"><span class="k">Cassini Division</span><span class="v">4,800 km wide</span></div>
+            <div class="cell"><span class="k">Encke Gap</span><span class="v">Pan · 133,589 km</span></div>
+            <div class="cell"><span class="k">Keeler Gap</span><span class="v">Daphnis · 136,505 km</span></div>
+            <div class="cell"><span class="k">A-ring outer edge</span><span class="v">Janus 7:6 · 136,775 km</span></div>
+            <div class="cell"><span class="k">ring system width</span><span class="v">~73,500 km (D→F)</span></div>
+        </div>
+        <p class="js-warn">Each sharp feature sits at a <em>mean-motion resonance</em> with a moon: where a ring
+        particle's orbital period is a simple ratio of a moon's, repeated gravitational kicks add up
+        coherently. The Mimas 2:1 resonance (a particle orbiting twice per Mimas orbit) clears the
+        Cassini Division and pins the B-ring's sharp outer edge into a two-lobed pattern that
+        <em>co-rotates with Mimas</em>. Pan and Daphnis are massive enough to simply sweep their gaps
+        clear. The markers above are the same resonances the 3D renderer uses to place its spiral
+        density waves — radii are physical; visual amplitudes are exaggerated.</p>
+    </section>
+
+    <!-- Live top-down ring map -->
+    <section class="js-panel">
+        <div class="js-plot-head">
+            <h2 style="flex:0 0 auto">Live Ring Map <span style="color:#776; text-transform:none; letter-spacing:0; font-weight:400; font-size:.7rem">— top-down, synced to the simulation clock</span></h2>
+            <div class="js-plot-legend">
+                <span class="lg"><span class="swatch" style="background:#d8c69a"></span>rings</span>
+                <span class="lg"><span class="swatch" style="background:#e8c97a"></span>ring moons</span>
+                <span class="lg"><span class="swatch" style="background:#9fd0e0"></span>density-wave crest</span>
+            </div>
+        </div>
+        <div class="js-plot-wrap">
+            <canvas id="js-wind-canvas"></canvas>
+        </div>
+        <p class="js-warn">A bird's-eye view down Saturn's spin axis. The shaded annuli are the rings; the
+        thin spirals are density-wave crests, each rotating at the <em>pattern speed</em> of its driving
+        moon — i.e. that moon's mean motion. The bright dots are the gap-clearing and shepherd moons at
+        their live longitudes. Press <strong>▶ Play</strong> and the spirals wind, the B-ring edge lobes
+        sweep, and the shepherds chase the F ring — the same evolution shown in 3D, flattened so the
+        clockwork is unmistakable.</p>
+    </section>
+
+    <!-- Notes -->
+    <section class="js-panel">
+        <h2>Why this matters</h2>
+        <p><strong>Resonances build the rings.</strong> Saturn's rings look like a smooth disc from afar, but at the meter scale they are a swarm of icy particles on near-circular orbits. The structure — gaps, sharp edges, wave trains — is almost entirely the work of the moons. Wherever a ring particle's orbital period is a simple integer ratio of a moon's, the periodic gravitational tug adds up over many orbits instead of averaging away. The result is a spiral density wave (a tightly-wound traffic jam of particle orbits) or, for the strongest resonances, a cleared gap with a sculpted edge.</p>
+        <p><strong>Mimas and the Cassini Division.</strong> The Cassini Division — the famous dark band you can see in a backyard telescope — is not empty space; it is a region thinned out at the Mimas 2:1 inner Lindblad resonance. A particle there laps Mimas every two of its own orbits, so Mimas pumps its eccentricity until collisions and crowding redistribute it inward. The same resonance holds the B-ring's outer edge in a two-lobed shape that <em>rotates with Mimas</em> — exactly what this page renders.</p>
+        <p><strong>Embedded moonlets and shepherds.</strong> Pan (in the Encke Gap) and Daphnis (in the Keeler Gap) are big enough to bulldoze their own lanes, raising scalloped wakes on the gap edges as they pass. Daphnis's slight inclination lifts vertical waves that threw kilometre-long shadows when the Sun crossed the ring plane at Saturn's 2009 equinox. Prometheus and Pandora bracket the narrow F ring, and Prometheus periodically reaches in to draw out dark "streamer-channels." Janus's 7:6 resonance defines the A-ring's crisp outer edge.</p>
+        <p><strong>What you're seeing.</strong> The ring is a single shader that evaluates the real radial profile plus a set of moon-driven features. Every spiral density-wave train's pattern speed is set to the perturbing moon's mean motion (computed from its semi-major axis), so when you advance the clock the waves co-rotate with the moons that launch them. The moons themselves move on analytic Kepler orbits with first-order J₂ secular precession — Saturn's strong oblateness makes the inner moons' nodes and pericentres turn over in years, so their orbit rings visibly precess. Ring radii are physical (R_S = 60,268 km); wave amplitudes and the gap widths are exaggerated so they read on screen. The ring-opening-to-Sun readout is an approximate seasonal model (29.46-yr period; ring-plane crossings near 2009 and 2025).</p>
+    </section>
+
+    <section class="js-panel">
+        <h2>References</h2>
+        <p style="font-family:monospace; font-size:.74rem; line-height:1.7; color:#998;">
+            Goldreich &amp; Tremaine (1982) — <em>The Dynamics of Planetary Rings</em>, ARA&amp;A 20.<br>
+            Murray &amp; Dermott (1999) — <em>Solar System Dynamics</em>, ch. 10 (planetary rings).<br>
+            Cuzzi et al. (2010) — <em>An Evolving View of Saturn's Dynamic Rings</em>, Science 327.<br>
+            Colwell et al. (2009) — <em>The Structure of Saturn's Rings</em> (Saturn from Cassini-Huygens).<br>
+            Porco et al. (2005) — <em>Cassini Imaging Science: Initial Results on Saturn's Rings</em>, Science 307.<br>
+            Tiscareno et al. (2007) — <em>Cassini imaging of Saturn's rings II (density waves)</em>, Icarus 189.<br>
+            Weiss et al. (2009) — <em>Ring edge waves &amp; the masses of Pan and Daphnis</em>, AJ 138.<br>
+            NASA PDS Ring-Moon Systems Node — <code>pds-rings.seti.org</code> · JPL Satellite Fact Sheets.
+        </p>
+    </section>
+
+</div>
+
+<!-- ═══ SIMULATION ═══ -->
+<script type="module">
+import * as THREE        from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer }  from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass }      from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass }      from 'three/addons/postprocessing/OutputPass.js';
+import { SaturnSkin, SATURN_OBLIQUITY, SATURN_ROT_PERIOD_S } from './js/saturn-skin.js';
+import { elementsToState, stateToElements, G_SI } from './js/gravity-lab/physics.js';
+import {
+    SATURN_MOONS, MOON_GROUPS, M_SATURN_KG, J2_SATURN, j2NodeRate, j2PeriRate,
+} from './js/saturn-moons.js';
+import {
+    SATURN_RINGS, RING_RESONANCES, RING_GAPS, RING_FEATURES, R_SATURN_KM,
+    ringBrightness, ringColor, RING_INNER_RS, RING_OUTER_RS,
+} from './js/saturn-rings.js';
+
+// ── Constants ────────────────────────────────────────────────────────
+const KM   = 1000;                         // m per km
+const D2R  = Math.PI / 180;
+const R2D  = 180 / Math.PI;
+const J2000_JD     = 2451545.0;            // 2000-01-01 12:00 UT
+const SEC_PER_YEAR = 365.25 * 86400;
+
+const R_SAT_KM = R_SATURN_KM;              // 60,268 km
+const R_SAT_M  = R_SAT_KM * KM;
+// One Saturn radius = 1 scene unit. So Mimas at 3.08 R_S → orbit radius 3.08.
+const M_PER_UNIT = R_SAT_M;
+const m2u = m => m / M_PER_UNIT;
+const MU_SAT = G_SI * M_SATURN_KG;         // moons are negligible mass
+
+// ── Body registry ─────────────────────────────────────────────────────
+const SATURN = { key:'saturn', name:'Saturn', radius_km:R_SAT_KM, color:0xe8c97a };
+const moonByKey = Object.fromEntries(SATURN_MOONS.map(m => [m.key, m]));
+const ringByKey = Object.fromEntries(RING_FEATURES.map(r => [r.key, r]));
+const ALL_BODIES = [SATURN, ...SATURN_MOONS, ...RING_FEATURES];
+const getBody = key => ALL_BODIES.find(b => b.key === key);
+const isMoon  = key => !!moonByKey[key];
+const isRing  = key => !!ringByKey[key];
+
+// Mean motion (rad/s) of a moon — also the pattern speed of any spiral
+// density wave it launches in the rings.
+function meanMotion(key) {
+    const m = moonByKey[key];
+    if (!m) return 0;
+    const a = m.a_km * KM;
+    return Math.sqrt(MU_SAT / (a * a * a));
+}
+function periodDays(key) {
+    const m = moonByKey[key];
+    if (!m) return NaN;
+    return (2 * Math.PI / meanMotion(key)) / 86400;
+}
+
+// Saturn's own behavioural fingerprint (moons carry their own in the data).
+const SATURN_BEHAVIOR = {
+    icon:'🪐', title:'95 Earth masses · the ringed jewel',
+    bullets:[
+        'Least dense planet — it would float in a big enough bathtub.',
+        'The flattest planet: it bulges ~10% at the equator from its fast spin.',
+        'Its rings are <1 km thick yet span ~280,000 km — a near-perfect plane.',
+    ],
+};
+function behaviorOf(key) {
+    if (key === 'saturn') return SATURN_BEHAVIOR;
+    if (moonByKey[key]) return moonByKey[key].behavior || {};
+    if (ringByKey[key]) return { icon:'💍', title:ringByKey[key].note, bullets:[] };
+    return {};
+}
+function groupOf(key) {
+    if (key === 'saturn') return null;
+    if (moonByKey[key]) return moonByKey[key].group;
+    if (ringByKey[key]) return 'rings';
+    return null;
+}
+
+// ── Analytic moon propagation (Kepler + J₂ secular precession) ─────────
+function secularRates(m, n, a_m, i_rad) {
+    if (m.secular) {
+        return {
+            dRaan: m.secular.node_deg_yr * D2R / SEC_PER_YEAR,
+            dArgp: m.secular.peri_deg_yr * D2R / SEC_PER_YEAR,
+        };
+    }
+    return {
+        dRaan: j2NodeRate(n, a_m, m.e, i_rad, J2_SATURN, R_SAT_M),
+        dArgp: j2PeriRate(n, a_m, m.e, i_rad, J2_SATURN, R_SAT_M),
+    };
+}
+function moonElementsAt(m, t_s) {
+    const a_m = m.a_km * KM;
+    const n   = Math.sqrt(MU_SAT / (a_m * a_m * a_m));
+    const i_r = m.i_deg * D2R;
+    const { dRaan, dArgp } = secularRates(m, n, a_m, i_r);
+    return {
+        a:        a_m,
+        e:        m.e,
+        i_deg:    m.i_deg,
+        raan_deg: m.raan_deg + dRaan * t_s * R2D,
+        argp_deg: m.argp_deg + dArgp * t_s * R2D,
+        M_deg:    m.M_deg    + n     * t_s * R2D,
+        mu:       MU_SAT,
+    };
+}
+// Position in scene-local (system-group) coords.
+function moonLocalPos(m, t_s) {
+    const st = elementsToState(moonElementsAt(m, t_s));
+    return new THREE.Vector3(m2u(st.r[0]), m2u(st.r[2]), -m2u(st.r[1]));
+}
+// Current osculating elements (from analytic state) — normalised shape.
+function liveElements(key) {
+    const m  = moonByKey[key];
+    const el = moonElementsAt(m, sim.t_s);
+    const st = elementsToState(el);
+    return stateToElements(st.r, st.v, el.mu);
+}
+// Mean longitude (deg) — the moon's angular position used by the ring map.
+function meanLonDeg(key) {
+    const m  = moonByKey[key];
+    const el = moonElementsAt(m, sim.t_s);
+    return ((el.raan_deg + el.argp_deg + el.M_deg) % 360 + 360) % 360;
+}
+
+// ── Moon-driven ring features handed to the shader ─────────────────────
+const GAP_HALF = { encke:0.0042, keeler:0.0018 };   // visual half-widths (R_S)
+const ringFeatures = RING_RESONANCES.map(res => ({
+    type:      res.type,
+    perturber: res.perturber,
+    r:         res.r,
+    m:         res.m,
+    amp:       res.amp,
+    omega:     meanMotion(res.perturber),
+    half:      res.type === 'gap' ? (GAP_HALF[res.key] ?? 0.003) : undefined,
+}));
+
+// ── Famous Saturn-system epochs (bookmark bar) ─────────────────────────
+const SATURN_BOOKMARKS = [
+    { y:1610, m: 7, d:25, label:'Galileo',       desc:'Galileo sees Saturn’s “ears” — his telescope can’t resolve the rings (1610).' },
+    { y:1655, m: 3, d:25, label:'Huygens',       desc:'Huygens discovers Titan and recognises the ring (1655).' },
+    { y:1675, m: 1, d: 1, label:'Cassini Div.',  desc:'Cassini discovers the division now bearing his name (1675).' },
+    { y:1789, m: 9, d:17, label:'Herschel',      desc:'Herschel discovers Mimas & Enceladus (1789).' },
+    { y:1979, m: 9, d: 1, label:'Pioneer 11',    desc:'First spacecraft flyby of Saturn (Pioneer 11, Sep 1979).' },
+    { y:1980, m:11, d:12, label:'Voyager 1',     desc:'Voyager 1 reveals ring structure & braided F ring (Nov 1980).' },
+    { y:2000, m: 1, d: 1, label:'J2000',         desc:'Reference epoch — initial conditions are seeded here.' },
+    { y:2004, m: 7, d: 1, label:'Cassini',       desc:'Cassini enters orbit at Saturn (Jul 2004) — 13 years of ring science begin.' },
+    { y:2009, m: 8, d:11, label:'Equinox',       desc:'Saturn equinox: Sun crosses the ring plane; vertical structures cast long shadows.' },
+    { y:2017, m: 9, d:15, label:'Grand Finale',  desc:'Cassini dives between Saturn and its rings, then into the planet (Sep 2017).' },
+    { y:2025, m: 5, d: 6, label:'Equinox 2025',  desc:'Next ring-plane crossing as seen from the Sun (≈2025).' },
+];
+
+// ── Date / JD helpers ──────────────────────────────────────────────────
+function jdFromDate(d) { return d.getTime() / 86400000 + 2440587.5; }
+function dateFromJD(jd) { return new Date((jd - 2440587.5) * 86400000); }
+function jdFromYMD(y, m, d, hr = 12, mi = 0) {
+    const dt = new Date(Date.UTC(2000, 0, 1, hr, mi));
+    dt.setUTCFullYear(y, m - 1, d);
+    return jdFromDate(dt);
+}
+
+// ── State ──────────────────────────────────────────────────────────────
+const sim = {
+    t_s:       0,        // seconds since J2000
+    playing:   false,
+    direction: 1,
+    speed:     86400,    // sim seconds per real second
+    live:      false,
+};
+const jdFromSimT = t_s => J2000_JD + t_s / 86400;
+const simTFromJD = jd  => (jd - J2000_JD) * 86400;
+
+// Approximate seasonal ring-opening angle to the Sun (deg). 29.46-yr period,
+// ring-plane crossings near 2009.6 and 2024.9.
+function ringOpeningDeg(year) {
+    return SATURN_OBLIQUITY * R2D * Math.sin(2 * Math.PI * (year - 2009.6) / 29.457);
+}
+
+// ── Three.js setup ─────────────────────────────────────────────────────
+const wrap  = document.getElementById('js-canvas-wrap');
+const scene = new THREE.Scene();
+
+const FOV_DEG = 46;
+const OUTER_APO_U = Math.max(
+    ...SATURN_MOONS.map(m => (m.a_km * (1 + m.e) * KM) / M_PER_UNIT),
+);
+const SYSTEM_MAX_DIST = Math.ceil(
+    OUTER_APO_U / Math.tan((FOV_DEG / 2) * Math.PI / 180) * 1.15,
+);
+
+const camera = new THREE.PerspectiveCamera(FOV_DEG, 1, 0.02, 12000);
+camera.position.set(0, 7, 11);
+camera.lookAt(0, 0, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping         = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+wrap.appendChild(renderer.domElement);
+
+let composer = null;
+try {
+    composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+    composer.addPass(new UnrealBloomPass(
+        new THREE.Vector2(wrap.clientWidth || 1, wrap.clientHeight || 1),
+        0.42, 0.5, 0.88,
+    ));
+    composer.addPass(new OutputPass());
+} catch (err) {
+    console.warn('[saturn] post-processing unavailable, rendering without bloom:', err);
+    composer = null;
+}
+
+const SUN_WORLD = new THREE.Vector3(40, 9, 6).normalize();
+const _sunView  = new THREE.Vector3();
+const _invView  = new THREE.Matrix4();
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance   = 1.5;
+controls.maxDistance   = SYSTEM_MAX_DIST;
+controls.mouseButtons = { LEFT:THREE.MOUSE.ROTATE, MIDDLE:THREE.MOUSE.DOLLY, RIGHT:null };
+
+// ── Camera state machine ───────────────────────────────────────────────
+const cam = { mode:'free', focusKey:null, tween:null, presetName:'3d' };
+function easeInOut(t) { return t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2) / 2; }
+function startCameraTween(toPos, toTgt, durMs = 600) {
+    cam.tween = {
+        t0:performance.now(), dur:durMs,
+        fromPos:camera.position.clone(), toPos:toPos.clone(),
+        fromTgt:controls.target.clone(), toTgt:toTgt.clone(),
+    };
+}
+function stepCameraTween(now) {
+    if (!cam.tween) return;
+    const t = Math.min(1, (now - cam.tween.t0) / cam.tween.dur);
+    const k = easeInOut(t);
+    camera.position.lerpVectors(cam.tween.fromPos, cam.tween.toPos, k);
+    controls.target.lerpVectors(cam.tween.fromTgt, cam.tween.toTgt, k);
+    if (t >= 1) cam.tween = null;
+}
+
+function resize() {
+    const w = wrap.clientWidth, h = wrap.clientHeight;
+    renderer.setSize(w, h, false);
+    if (composer) composer.setSize(w, h);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+}
+resize();
+new ResizeObserver(resize).observe(wrap);
+
+// ── Background stars ───────────────────────────────────────────────────
+const starUniforms = { uTime:{ value:0 } };
+{
+    const n = 2600;
+    const positions = new Float32Array(n * 3);
+    const colors    = new Float32Array(n * 3);
+    const sizes     = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+        const r  = 4000 + Math.random() * 2400;
+        const th = Math.random() * Math.PI * 2;
+        const ph = Math.acos(2 * Math.random() - 1);
+        positions[i*3]   = r * Math.sin(ph) * Math.cos(th);
+        positions[i*3+1] = r * Math.sin(ph) * Math.sin(th);
+        positions[i*3+2] = r * Math.cos(ph);
+        const t = Math.random();
+        if (t < 0.2)      { colors[i*3]=1; colors[i*3+1]=.82; colors[i*3+2]=.6; }
+        else if (t < 0.35){ colors[i*3]=.7; colors[i*3+1]=.8; colors[i*3+2]=1; }
+        else              { const c=.85+.15*Math.random(); colors[i*3]=c; colors[i*3+1]=c; colors[i*3+2]=c; }
+        sizes[i] = 0.7 + Math.pow(Math.random(), 6) * 3.6;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    g.setAttribute('color',    new THREE.Float32BufferAttribute(colors,    3));
+    g.setAttribute('aSize',    new THREE.Float32BufferAttribute(sizes,     1));
+    const starMat = new THREE.ShaderMaterial({
+        uniforms: starUniforms, vertexColors:true,
+        transparent:true, depthWrite:false, blending:THREE.AdditiveBlending,
+        vertexShader:`attribute float aSize; varying vec3 vColor; varying float vTw;
+            uniform float uTime;
+            void main(){ vColor=color;
+                gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);
+                gl_PointSize=aSize;
+                float seed=position.x*12.9898+position.y*78.233+position.z*37.7;
+                vTw=0.65+0.35*sin(uTime*1.3+seed); }`,
+        fragmentShader:`varying vec3 vColor; varying float vTw;
+            void main(){ vec2 d=gl_PointCoord-vec2(.5); float r=length(d);
+                if(r>.5) discard; gl_FragColor=vec4(vColor*vTw, smoothstep(.5,0.,r)); }`,
+    });
+    scene.add(new THREE.Points(g, starMat));
+}
+
+// ── System group (tilted by Saturn's obliquity) ────────────────────────
+// Everything that should lean together — the planet, the rings, the moons,
+// their orbit rings and trails — lives in this group, so the iconic tilt is
+// applied once and the moons stay in the (tilted) ring plane.
+const systemGroup = new THREE.Group();
+systemGroup.rotation.x = SATURN_OBLIQUITY;
+scene.add(systemGroup);
+
+const satSkin = new SaturnSkin(systemGroup, {
+    radius:1.0, quality:'medium', segments:56,
+    ringInner:RING_INNER_RS, ringOuter:RING_OUTER_RS,
+    features:ringFeatures,
+});
+satSkin.mesh.userData = { kind:'planet', key:'saturn', label:'Saturn' };
+satSkin.ringU.u_planetWorld.value.set(0, 0, 0);
+
+// Lighting
+{
+    const dl = new THREE.DirectionalLight(0xfff2d8, 1.7);
+    dl.position.copy(SUN_WORLD.clone().multiplyScalar(40));
+    scene.add(dl);
+    scene.add(new THREE.AmbientLight(0x2a2c38, 0.7));
+}
+
+// ── Moon meshes + precessing orbit rings + trails ──────────────────────
+const meshes      = { saturn: satSkin.mesh };
+const trailLines  = {};
+const orbitRings  = {};
+const trailBuffers = {};
+const minorRings  = {};
+const MINOR_RING_REBUILD_S = 6 * 3600;
+const TRAIL_MAX = 4000;
+
+function visRadius(m) {
+    const real = m.radius_km / R_SAT_KM;
+    const floor = (m.group === 'titan' || m.group === 'irregular') ? 0.45 : 0.032;
+    return Math.max(real * 6, floor);
+}
+function sampleOrbit(m, t_s, posArr, N) {
+    const base = moonElementsAt(m, t_s);
+    for (let k = 0; k < N; k++) {
+        const st = elementsToState({
+            a:base.a, e:base.e, i_deg:base.i_deg,
+            raan_deg:base.raan_deg, argp_deg:base.argp_deg,
+            M_deg:(k / N) * 360, mu:base.mu,
+        });
+        posArr[k*3]   =  m2u(st.r[0]);
+        posArr[k*3+1] =  m2u(st.r[2]);
+        posArr[k*3+2] = -m2u(st.r[1]);
+    }
+}
+function makeMoon(m) {
+    const rVis = visRadius(m);
+    const mesh = new THREE.Mesh(
+        new THREE.SphereGeometry(rVis, 18, 18),
+        new THREE.MeshStandardMaterial({
+            color:m.color, emissive:m.color, emissiveIntensity:0.20,
+            roughness:0.88, metalness:0.04,
+        }),
+    );
+    mesh.userData = { kind:'moon', key:m.key, label:m.name };
+    mesh.frustumCulled = false;
+    systemGroup.add(mesh);
+    meshes[m.key] = mesh;
+
+    // Fresnel halo
+    const halo = new THREE.Mesh(
+        new THREE.SphereGeometry(rVis * 1.3, 14, 14),
+        new THREE.ShaderMaterial({
+            transparent:true, depthWrite:false, side:THREE.BackSide,
+            blending:THREE.AdditiveBlending,
+            uniforms:{ uColor:{ value:new THREE.Color(m.color) } },
+            vertexShader:`varying vec3 vN; void main(){ vN=normalize(normalMatrix*normal);
+                gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
+            fragmentShader:`uniform vec3 uColor; varying vec3 vN;
+                void main(){ float r=pow(1.-abs(vN.z),2.); gl_FragColor=vec4(uColor,r*.5); }`,
+        }),
+    );
+    mesh.add(halo);
+
+    // Precessing orbit ring
+    const N = (m.group === 'titan' || m.group === 'irregular') ? 200 : 160;
+    const posArr = new Float32Array(N * 3);
+    sampleOrbit(m, 0, posArr, N);
+    const ringGeo = new THREE.BufferGeometry();
+    ringGeo.setAttribute('position', new THREE.Float32BufferAttribute(posArr, 3));
+    ringGeo.computeBoundingSphere();
+    const grpColor = MOON_GROUPS[m.group] ? MOON_GROUPS[m.group].color : m.color;
+    const ring = new THREE.LineLoop(ringGeo, new THREE.LineBasicMaterial({
+        color:grpColor, transparent:true,
+        opacity:(m.group === 'ringmoon') ? 0.16 : 0.26, depthWrite:false,
+    }));
+    ring.frustumCulled = false;
+    systemGroup.add(ring);
+    orbitRings[m.key] = ring;
+    minorRings[m.key] = { posArr, N, lastTs:0 };
+
+    // Trail
+    const trailGeo = new THREE.BufferGeometry();
+    const positions = new Float32Array(TRAIL_MAX * 3);
+    trailGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    trailGeo.setDrawRange(0, 0);
+    const trailLine = new THREE.Line(trailGeo, new THREE.LineBasicMaterial({
+        color:m.color, transparent:true, opacity:0.8, depthWrite:false,
+    }));
+    trailLine.frustumCulled = false;
+    systemGroup.add(trailLine);
+    trailLines[m.key] = trailLine;
+    const period_s = (2 * Math.PI / meanMotion(m.key));
+    trailBuffers[m.key] = {
+        positions, idx:0, count:0, capacity:TRAIL_MAX,
+        sampleEvery: Math.max(120, Math.min(6 * 3600, period_s / 260)),
+        accum:0,
+    };
+}
+function rebuildOrbitRing(m, force) {
+    const r = minorRings[m.key];
+    if (!r) return;
+    if (!force && Math.abs(sim.t_s - r.lastTs) < MINOR_RING_REBUILD_S) return;
+    sampleOrbit(m, sim.t_s, r.posArr, r.N);
+    const ring = orbitRings[m.key];
+    ring.geometry.attributes.position.needsUpdate = true;
+    ring.geometry.computeBoundingSphere();
+    r.lastTs = sim.t_s;
+}
+for (const m of SATURN_MOONS) makeMoon(m);
+
+// Selection + hover rings (in world space)
+function makeRing(c, op, t) {
+    const m = new THREE.Mesh(
+        new THREE.RingGeometry(1.0, 1.0 + t, 64),
+        new THREE.MeshBasicMaterial({ color:c, transparent:true, opacity:op,
+            depthWrite:false, side:THREE.DoubleSide, blending:THREE.AdditiveBlending }),
+    );
+    m.visible = false; m.renderOrder = 12;
+    return m;
+}
+const selRing = makeRing(0xf0d49a, 0.92, 0.16);
+const hovRing = makeRing(0xfff0c0, 0.55, 0.10);
+scene.add(selRing); scene.add(hovRing);
+
+// World position helper (moons live in the tilted group).
+const _wp = new THREE.Vector3();
+function worldPos(key) {
+    if (!meshes[key]) return new THREE.Vector3();
+    return meshes[key].getWorldPosition(_wp.clone());
+}
+
+// ── Legend ─────────────────────────────────────────────────────────────
+const legend = document.getElementById('js-legend');
+legend.innerHTML = Object.values(MOON_GROUPS).map(g =>
+    `<span class="lg" title="${g.note}"><span class="dt" style="background:#${g.color.toString(16).padStart(6,'0')}"></span>${g.label}</span>`
+).join('');
+
+// ── Body picker / element table ────────────────────────────────────────
+const elBodyGrid = document.getElementById('js-body-grid');
+const elSelDot   = document.getElementById('js-sel-dot');
+const elSelName  = document.getElementById('js-sel-name');
+const elSelPer   = document.getElementById('js-sel-period');
+const elElTbl    = document.getElementById('js-el-table');
+
+const ELEM_DEFS = [
+    { sym:'a',  nm:'semi-major axis',     unit:'km',  fmt:v => (v / KM).toFixed(0) },
+    { sym:'e',  nm:'eccentricity',        unit:'',    fmt:v => v.toFixed(5) },
+    { sym:'i',  nm:'inclination',         unit:'°',   fmt:v => v.toFixed(3) },
+    { sym:'Ω',  nm:'long. asc. node',     unit:'°',   fmt:v => v.toFixed(2) },
+    { sym:'ω',  nm:'arg. of pericentre',  unit:'°',   fmt:v => v.toFixed(2) },
+    { sym:'M',  nm:'mean anomaly',        unit:'°',   fmt:v => v.toFixed(2) },
+    { sym:'λ',  nm:'mean longitude',      unit:'°',   fmt:v => v.toFixed(2) },
+    { sym:'r',  nm:'kronocentric dist.',  unit:'km',  fmt:v => (v / KM).toFixed(0) },
+    { sym:'v',  nm:'speed',               unit:'km/s',fmt:v => (v / KM).toFixed(3) },
+];
+
+const PICKER_SECTIONS = [
+    { label:'Saturn',                  keys:['saturn'] },
+    { label:MOON_GROUPS.ringmoon.label, keys:SATURN_MOONS.filter(m=>m.group==='ringmoon').map(m=>m.key) },
+    { label:MOON_GROUPS.coorbital.label,keys:SATURN_MOONS.filter(m=>m.group==='coorbital').map(m=>m.key) },
+    { label:MOON_GROUPS.inner.label,    keys:SATURN_MOONS.filter(m=>m.group==='inner').map(m=>m.key) },
+    { label:MOON_GROUPS.titan.label,    keys:SATURN_MOONS.filter(m=>m.group==='titan').map(m=>m.key) },
+    { label:MOON_GROUPS.irregular.label,keys:SATURN_MOONS.filter(m=>m.group==='irregular').map(m=>m.key) },
+    { label:'Ring components',          keys:RING_FEATURES.map(r=>r.key) },
+];
+
+let selected = moonByKey['mimas'];
+function buildBodyPicker() {
+    elBodyGrid.innerHTML = '';
+    for (const sec of PICKER_SECTIONS) {
+        const hdr = document.createElement('div');
+        hdr.className = 'js-body-group';
+        hdr.textContent = sec.label;
+        elBodyGrid.appendChild(hdr);
+        for (const key of sec.keys) {
+            const b = getBody(key);
+            if (!b) continue;
+            const btn = document.createElement('button');
+            btn.className = 'js-body-btn' + (key === selected.key ? ' sel' : '');
+            btn.dataset.key = key;
+            const hex = '#' + b.color.toString(16).padStart(6, '0');
+            btn.innerHTML =
+                `<div class="js-body-dot" style="background:${hex};color:${hex}"></div>` +
+                `<div class="js-body-name">${b.name}</div>`;
+            btn.addEventListener('click', () => selectBody(key));
+            elBodyGrid.appendChild(btn);
+        }
+    }
+    elElTbl.innerHTML = ELEM_DEFS.map(d =>
+        `<div class="js-el-k"><span class="sym">${d.sym}</span><span class="nm">${d.nm}</span></div>` +
+        `<div class="js-el-v" data-sym="${d.sym}">—</div>`
+    ).join('');
+}
+function formatPeriod(d) {
+    if (!isFinite(d)) return '—';
+    if (d < 30)  return `${d.toFixed(3)} d`;
+    if (d < 365) return `${d.toFixed(1)} d`;
+    return `${(d/365.25).toFixed(2)} yr`;
+}
+function selectBody(key) {
+    selected = getBody(key) || selected;
+    elBodyGrid.querySelectorAll('.js-body-btn').forEach(b =>
+        b.classList.toggle('sel', b.dataset.key === selected.key));
+    const hex = '#' + selected.color.toString(16).padStart(6, '0');
+    elSelDot.style.background = hex; elSelDot.style.color = hex;
+    elSelName.textContent = selected.name;
+    if (selected.isRing) {
+        const w = (selected.outer_km - selected.inner_km);
+        elSelPer.textContent = `${(w).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ',')} km wide`;
+    } else if (selected.key === 'saturn') {
+        elSelPer.textContent = '10.55 h spin';
+    } else {
+        elSelPer.textContent = formatPeriod(periodDays(selected.key));
+    }
+    refreshSidePanel();
+}
+function setRow(sym, html) {
+    const node = elElTbl.querySelector(`[data-sym="${sym}"]`);
+    if (node) node.innerHTML = html;
+}
+function refreshSidePanel() {
+    // Reset
+    for (const d of ELEM_DEFS) setRow(d.sym, '—');
+    if (selected.key === 'saturn') {
+        setRow('a', '1.434×10⁹<span class="un">km</span>');
+        setRow('e', '0.0565');
+        setRow('i', '26.73<span class="un">° tilt</span>');
+        setRow('M', '5.683×10²⁶<span class="un">kg</span>');
+        setRow('r', '60,268<span class="un">km</span>');
+        return;
+    }
+    if (selected.isRing) {
+        const mid = (selected.inner_km + selected.outer_km) / 2;
+        setRow('a', (selected.inner_km).toFixed(0) + '<span class="un">km in</span>');
+        setRow('e', (selected.outer_km).toFixed(0) + '<span class="un">km out</span>');
+        setRow('i', ((selected.outer_km - selected.inner_km)).toFixed(0) + '<span class="un">km wide</span>');
+        setRow('r', (mid / R_SAT_KM).toFixed(3) + '<span class="un">R_S</span>');
+        return;
+    }
+    const el = liveElements(selected.key);
+    const vals = { a:el.a, e:el.e, i:el.i_deg, 'Ω':el.raan_deg, 'ω':el.argp_deg,
+        M:el.M_deg, 'λ':el.mean_lon_deg, r:el.r_mag, v:el.v_mag };
+    for (const d of ELEM_DEFS) {
+        setRow(d.sym, d.fmt(vals[d.sym]) + (d.unit ? `<span class="un">${d.unit}</span>` : ''));
+    }
+}
+
+// ── HUD ────────────────────────────────────────────────────────────────
+const elTimeDisp   = document.getElementById('js-time-display');
+const elJdDisp     = document.getElementById('js-jd-display');
+const elEnergyDisp = document.getElementById('js-energy-display');
+const elStepDisp   = document.getElementById('js-step-display');
+const elPill       = document.getElementById('js-mode-pill');
+
+function updateHud() {
+    const days = sim.t_s / 86400;
+    const year = 2000 + days / 365.25;
+    elTimeDisp.textContent = (days >= 0 ? '+ ' : '') + days.toFixed(2) + ' d';
+    elJdDisp.textContent   = 'JD ' + (J2000_JD + days).toFixed(3);
+    const B = ringOpeningDeg(year);
+    elEnergyDisp.textContent = `${B >= 0 ? '+' : ''}${B.toFixed(1)}°`;
+    elStepDisp.textContent   = Math.abs(B) < 1 ? 'near edge-on' : (B > 0 ? 'north face lit' : 'south face lit');
+    if (sim.playing) { elPill.textContent = '▶ Playing'; elPill.classList.add('play'); }
+    else             { elPill.textContent = '⏸ Paused';  elPill.classList.remove('play'); }
+}
+
+// ── Sync meshes from analytic state ────────────────────────────────────
+function syncMeshesFromState() {
+    for (const m of SATURN_MOONS) {
+        meshes[m.key].position.copy(moonLocalPos(m, sim.t_s));
+        rebuildOrbitRing(m, false);
+    }
+    satSkin.setSimTime(sim.t_s);
+}
+function appendTrails(simSecAdvanced) {
+    for (const m of SATURN_MOONS) {
+        const tb = trailBuffers[m.key];
+        tb.accum += Math.abs(simSecAdvanced);
+        if (tb.accum < tb.sampleEvery) continue;
+        tb.accum = 0;
+        const p = moonLocalPos(m, sim.t_s);
+        const dst = tb.idx * 3;
+        tb.positions[dst] = p.x; tb.positions[dst+1] = p.y; tb.positions[dst+2] = p.z;
+        tb.idx = (tb.idx + 1) % tb.capacity;
+        if (tb.count < tb.capacity) tb.count++;
+        rebuildTrailLine(m.key);
+    }
+}
+function rebuildTrailLine(key) {
+    const tb = trailBuffers[key], line = trailLines[key];
+    const arr = line.geometry.attributes.position.array;
+    const start = (tb.idx - tb.count + tb.capacity) % tb.capacity;
+    for (let k = 0; k < tb.count; k++) {
+        const src = ((start + k) % tb.capacity) * 3, dst = k * 3;
+        arr[dst] = tb.positions[src]; arr[dst+1] = tb.positions[src+1]; arr[dst+2] = tb.positions[src+2];
+    }
+    line.geometry.setDrawRange(0, tb.count);
+    line.geometry.attributes.position.needsUpdate = true;
+    line.geometry.computeBoundingSphere();
+}
+function clearTrails() {
+    for (const k of Object.keys(trailBuffers)) {
+        const tb = trailBuffers[k];
+        tb.idx = 0; tb.count = 0; tb.accum = 0;
+        trailLines[k].geometry.setDrawRange(0, 0);
+    }
+}
+
+// ── Selection / hover rings ────────────────────────────────────────────
+function visualRadiusOf(key) {
+    if (key === 'saturn') return 1.0;
+    const m = moonByKey[key];
+    return m ? visRadius(m) : 0.04;
+}
+function updateSelRing() {
+    if (!selected || !meshes[selected.key]) { selRing.visible = false; return; }
+    const baseR = selected.key === 'saturn' ? 1.6 : Math.max(visualRadiusOf(selected.key) * 1.7, 0.10);
+    selRing.position.copy(worldPos(selected.key));
+    selRing.scale.setScalar(baseR);
+    selRing.lookAt(camera.position);
+    selRing.visible = true;
+}
+function updateHovRing(key) {
+    if (!key || !meshes[key] || (selected && key === selected.key)) { hovRing.visible = false; return; }
+    const baseR = key === 'saturn' ? 1.8 : Math.max(visualRadiusOf(key) * 2.0, 0.12);
+    hovRing.position.copy(worldPos(key));
+    hovRing.scale.setScalar(baseR);
+    hovRing.lookAt(camera.position);
+    hovRing.visible = true;
+}
+
+// ── Mouse picking ──────────────────────────────────────────────────────
+const raycaster = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+let hoveredKey = null;
+const pickables = () => Object.values(meshes);
+const elTooltip = document.getElementById('js-tooltip');
+function hitFromEvent(ev) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    ndc.x =  ((ev.clientX - rect.left) / rect.width)  * 2 - 1;
+    ndc.y = -((ev.clientY - rect.top)  / rect.height) * 2 + 1;
+    raycaster.setFromCamera(ndc, camera);
+    const hits = raycaster.intersectObjects(pickables(), true);
+    if (!hits.length) return null;
+    let obj = hits[0].object;
+    while (obj && (!obj.userData || !obj.userData.kind)) obj = obj.parent;
+    return obj && obj.userData ? obj.userData : null;
+}
+
+// ── Tooltip ────────────────────────────────────────────────────────────
+let pinnedKey = null;
+function buildTooltipHtml(key) {
+    const b = getBody(key);
+    if (!b) return '';
+    const beh = behaviorOf(key);
+    const hex = '#' + b.color.toString(16).padStart(6, '0');
+    const isPinned = (pinnedKey === key);
+    const closeHint = isPinned
+        ? `<span style="margin-left:auto; font-weight:400; font-size:.62rem; color:#776">📌 pinned · right-click to unpin</span>`
+        : `<span style="margin-left:auto; font-weight:400; font-size:.62rem; color:#776">right-click to pin</span>`;
+    let html = `<div class="tt-hdr"><span class="dot" style="background:${hex};color:${hex}"></span>${b.name}${closeHint}</div>`;
+    if (beh.title) html += `<div style="color:#ffd9a8; font-size:.7rem; line-height:1.4; margin-bottom:5px">${beh.title}</div>`;
+
+    if (key === 'saturn') {
+        html += `<div class="tt-row"><span class="tt-k">mass</span><span class="tt-v">5.683×10²⁶ kg</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">radius</span><span class="tt-v">60,268 km</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">spin</span><span class="tt-v">10.55 h</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">obliquity</span><span class="tt-v">26.73°</span></div>`;
+    } else if (b.isRing) {
+        html += `<div class="tt-row"><span class="tt-k">inner</span><span class="tt-v">${b.inner_km.toFixed(0)} km</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">outer</span><span class="tt-v">${b.outer_km.toFixed(0)} km</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">width</span><span class="tt-v">${(b.outer_km-b.inner_km).toFixed(0)} km</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">radius</span><span class="tt-v">${(b.inner_km/R_SAT_KM).toFixed(2)}–${(b.outer_km/R_SAT_KM).toFixed(2)} R_S</span></div>`;
+    } else {
+        const el = liveElements(key);
+        html += `<div class="tt-row"><span class="tt-k">a (live)</span><span class="tt-v">${(el.a/KM).toFixed(0)} km</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">e (live)</span><span class="tt-v">${el.e.toFixed(5)}</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">i</span><span class="tt-v">${el.i_deg.toFixed(2)}°${el.i_deg > 90 ? ' <span style="color:#c08878">(retro)</span>' : ''}</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">period</span><span class="tt-v">${formatPeriod(periodDays(key))}</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">r (now)</span><span class="tt-v">${(el.r_mag/KM).toFixed(0)} km</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">v (now)</span><span class="tt-v">${(el.v_mag/KM).toFixed(2)} km/s</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">phys. radius</span><span class="tt-v">${b.radius_km.toFixed(0)} km</span></div>`;
+        const m = moonByKey[key];
+        if (m) {
+            const a_m = m.a_km * KM, n = meanMotion(key);
+            const { dRaan, dArgp } = secularRates(m, n, a_m, m.i_deg * D2R);
+            const src = m.secular ? 'solar' : 'J₂';
+            html += `<div class="tt-sep"></div>`;
+            html += `<div class="tt-row"><span class="tt-k">dΩ/dt (${src})</span><span class="tt-v">${(dRaan*R2D*SEC_PER_YEAR).toFixed(2)}°/yr</span></div>`;
+            html += `<div class="tt-row"><span class="tt-k">dω/dt (${src})</span><span class="tt-v">${(dArgp*R2D*SEC_PER_YEAR).toFixed(2)}°/yr</span></div>`;
+        }
+    }
+    if (beh.bullets && beh.bullets.length) {
+        html += `<div class="tt-sep"></div>`;
+        for (const line of beh.bullets)
+            html += `<div style="color:#bcb; font-style:italic; font-size:.66rem; line-height:1.4; margin:2px 0">• ${line}</div>`;
+    }
+    return html;
+}
+function showTooltipAt(key, sx, sy) {
+    elTooltip.innerHTML = buildTooltipHtml(key);
+    elTooltip.style.left = sx + 'px';
+    elTooltip.style.top  = sy + 'px';
+    elTooltip.classList.add('show');
+}
+renderer.domElement.addEventListener('mousemove', ev => {
+    const rect = renderer.domElement.getBoundingClientRect();
+    const sx = ev.clientX - rect.left, sy = ev.clientY - rect.top;
+    const ud = hitFromEvent(ev);
+    const newKey = ud ? ud.key : null;
+    if (newKey !== hoveredKey) {
+        hoveredKey = newKey;
+        renderer.domElement.style.cursor = hoveredKey ? 'pointer' : '';
+    }
+    if (pinnedKey) return;
+    if (ud) showTooltipAt(ud.key, sx, sy);
+    else    elTooltip.classList.remove('show');
+});
+renderer.domElement.addEventListener('mouseleave', () => {
+    hoveredKey = null; renderer.domElement.style.cursor = '';
+    if (!pinnedKey) elTooltip.classList.remove('show');
+});
+function refreshPinnedTooltip() { if (pinnedKey) elTooltip.innerHTML = buildTooltipHtml(pinnedKey); }
+
+let lastClickTime = 0, lastClickKey = null;
+renderer.domElement.addEventListener('click', ev => {
+    const ud = hitFromEvent(ev);
+    const now = performance.now();
+    if (ud && ud.key) {
+        selectBody(ud.key);
+        if (lastClickKey === ud.key && now - lastClickTime < 350) {
+            focusBody(ud.key); lastClickTime = 0; lastClickKey = null;
+        } else { lastClickTime = now; lastClickKey = ud.key; }
+    } else if (pinnedKey) { pinnedKey = null; elTooltip.classList.remove('show'); }
+});
+renderer.domElement.addEventListener('contextmenu', ev => {
+    ev.preventDefault();
+    const ud = hitFromEvent(ev);
+    const rect = renderer.domElement.getBoundingClientRect();
+    const sx = ev.clientX - rect.left, sy = ev.clientY - rect.top;
+    if (ud && ud.key) {
+        if (pinnedKey === ud.key) { pinnedKey = null; elTooltip.classList.remove('show'); }
+        else { pinnedKey = ud.key; showTooltipAt(ud.key, sx, sy); }
+    } else if (pinnedKey) { pinnedKey = null; elTooltip.classList.remove('show'); }
+});
+
+// ── Time controls ──────────────────────────────────────────────────────
+const elPlay      = document.getElementById('js-play');
+const elRev       = document.getElementById('js-rev');
+const elSpeed     = document.getElementById('js-speed');
+const elStepF     = document.getElementById('js-step-fwd');
+const elStepB     = document.getElementById('js-step-back');
+const elNow       = document.getElementById('js-now');
+const elReset     = document.getElementById('js-reset');
+const elDate      = document.getElementById('js-date');
+const elHour      = document.getElementById('js-hour');
+const elJdInput   = document.getElementById('js-jd-input');
+const elBookmarks = document.getElementById('js-bookmarks');
+const elTrToggle  = document.getElementById('js-trails-toggle');
+const elTrLen     = document.getElementById('js-trail-len');
+const elOrbitsTog = document.getElementById('js-orbits-toggle');
+const elLabelsTog = document.getElementById('js-labels-toggle');
+const elViewTop   = document.getElementById('js-view-top');
+const elView3D    = document.getElementById('js-view-3d');
+const elViewEqu   = document.getElementById('js-view-equ');
+const elFocus     = document.getElementById('js-focus');
+const elPov       = document.getElementById('js-pov');
+const elScale     = document.getElementById('js-scale');
+const elRingsTog  = document.getElementById('js-rings-toggle');
+const elViewWide  = document.getElementById('js-view-wide');
+const elWaveTog   = document.getElementById('js-wave-toggle');
+const elWaveStr   = document.getElementById('js-wave-strength');
+const elRingQual  = document.getElementById('js-ring-quality');
+const elRingEpoch = document.getElementById('js-ring-epoch');
+const elRingMimas = document.getElementById('js-ring-mimas');
+const elRingPan   = document.getElementById('js-ring-pan');
+
+const QUALITY_NAME = { 0:'low', 1:'medium', 2:'high' };
+let waveStrength = 1.0, wavesOn = true;
+elRingQual.addEventListener('change', () => satSkin.setQuality(QUALITY_NAME[parseInt(elRingQual.value,10) || 0]));
+elWaveStr.addEventListener('input', () => {
+    waveStrength = parseFloat(elWaveStr.value);
+    satSkin.setWaveStrength(wavesOn ? waveStrength : 0);
+});
+elWaveTog.addEventListener('click', () => {
+    wavesOn = !wavesOn;
+    elWaveTog.classList.toggle('on', wavesOn);
+    elWaveTog.textContent = 'Waves: ' + (wavesOn ? 'ON' : 'OFF');
+    satSkin.setWaveStrength(wavesOn ? waveStrength : 0);
+});
+
+elPlay.addEventListener('click', () => {
+    sim.playing = !sim.playing;
+    sim.live = false; elNow.classList.remove('on');
+    elPlay.textContent = sim.playing ? '⏸ Pause' : '▶ Play';
+    updateHud();
+});
+elRev.addEventListener('click', () => {
+    sim.direction *= -1;
+    elRev.textContent = sim.direction > 0 ? '⇄ Forward' : '⇆ Reverse';
+    elRev.classList.toggle('on', sim.direction < 0);
+    sim.live = false; elNow.classList.remove('on');
+});
+elSpeed.addEventListener('change', () => { sim.speed = parseFloat(elSpeed.value); });
+
+function step(simSec) { sim.t_s += simSec; appendTrails(simSec); }
+function jumpToSimT(targetTs) {
+    const big = Math.abs(targetTs - sim.t_s) > 30 * 86400;
+    sim.t_s = targetTs;
+    if (big) clearTrails();
+    for (const m of SATURN_MOONS) rebuildOrbitRing(m, true);
+    syncMeshesFromState();
+    refreshSidePanel(); updateHud(); drawRingMap();
+}
+function jumpToJD(jd) { jumpToSimT(simTFromJD(jd)); }
+
+elStepF.addEventListener('click', () => { step(3600); syncMeshesFromState(); syncInputsFromSim(); refreshSidePanel(); updateHud(); });
+elStepB.addEventListener('click', () => { step(-3600); syncMeshesFromState(); syncInputsFromSim(); refreshSidePanel(); updateHud(); });
+
+elReset.addEventListener('click', () => {
+    sim.live = false; elNow.classList.remove('on');
+    sim.playing = false; elPlay.textContent = '▶ Play';
+    jumpToSimT(0); syncInputsFromSim();
+});
+elNow.addEventListener('click', () => {
+    sim.live = true; sim.playing = false; elPlay.textContent = '▶ Play';
+    elNow.classList.add('on');
+    jumpToJD(Date.now() / 86400000 + 2440587.5);
+    syncInputsFromSim();
+});
+
+function syncInputsFromSim() {
+    const jd = jdFromSimT(sim.t_s);
+    const d  = dateFromJD(jd);
+    const y = d.getUTCFullYear(), mo = d.getUTCMonth() + 1, da = d.getUTCDate();
+    elDate.value = `${String(y).padStart(4,'0')}-${String(mo).padStart(2,'0')}-${String(da).padStart(2,'0')}`;
+    elHour.value = d.getUTCHours();
+    elJdInput.value = jd.toFixed(3);
+}
+function commitDateInputs() {
+    const mm = (elDate.value || '').match(/^(-?\d+)-(\d{2})-(\d{2})$/);
+    if (!mm) return;
+    const y = parseInt(mm[1],10), mo = parseInt(mm[2],10), da = parseInt(mm[3],10);
+    const hr = Math.max(0, Math.min(23, parseInt(elHour.value,10) || 0));
+    if (!Number.isFinite(y)) return;
+    sim.live = false; elNow.classList.remove('on');
+    jumpToJD(jdFromYMD(y, mo, da, hr)); syncInputsFromSim();
+}
+elDate.addEventListener('change', commitDateInputs);
+elHour.addEventListener('change', commitDateInputs);
+elJdInput.addEventListener('change', () => {
+    const jd = parseFloat(elJdInput.value);
+    if (!Number.isFinite(jd)) return;
+    sim.live = false; elNow.classList.remove('on');
+    jumpToJD(jd); syncInputsFromSim();
+});
+
+function buildBookmarks() {
+    elBookmarks.innerHTML = '';
+    for (const bm of SATURN_BOOKMARKS) {
+        const btn = document.createElement('button');
+        btn.className = 'js-bm'; btn.title = bm.desc;
+        btn.innerHTML = `<span class="js-bm-yr">${bm.y}</span>${bm.label}`;
+        btn.addEventListener('click', () => {
+            sim.live = false; elNow.classList.remove('on');
+            sim.playing = false; elPlay.textContent = '▶ Play';
+            jumpToJD(jdFromYMD(bm.y, bm.m || 1, bm.d || 1, bm.hr || 12));
+            syncInputsFromSim();
+        });
+        elBookmarks.appendChild(btn);
+    }
+}
+
+let trailsOn = true;
+elTrToggle.addEventListener('click', () => {
+    trailsOn = !trailsOn;
+    elTrToggle.classList.toggle('on', trailsOn);
+    elTrToggle.textContent = 'Trails: ' + (trailsOn ? 'ON' : 'OFF');
+    for (const k of Object.keys(trailLines)) trailLines[k].visible = trailsOn;
+});
+elTrLen.addEventListener('change', () => {
+    const max = parseInt(elTrLen.value, 10) || 3600;
+    for (const k of Object.keys(trailBuffers)) {
+        const tb = trailBuffers[k];
+        tb.capacity = Math.min(max, TRAIL_MAX);
+        tb.count = Math.min(tb.count, tb.capacity);
+        rebuildTrailLine(k);
+    }
+});
+let orbitsOn = true;
+elOrbitsTog.addEventListener('click', () => {
+    orbitsOn = !orbitsOn;
+    elOrbitsTog.classList.toggle('on', orbitsOn);
+    elOrbitsTog.textContent = 'Orbits: ' + (orbitsOn ? 'ON' : 'OFF');
+    for (const k of Object.keys(orbitRings)) orbitRings[k].visible = orbitsOn;
+});
+
+// ── View presets ───────────────────────────────────────────────────────
+const VIEW_PRESETS = {
+    top:  { pos:new THREE.Vector3(0, 13, 0.001), btn:elViewTop },
+    '3d': { pos:new THREE.Vector3(0, 7, 11),     btn:elView3D  },
+    equ:  { pos:new THREE.Vector3(0, 0.5, 14),   btn:elViewEqu },
+};
+function clearWideFlag() {
+    if (!wideOn) return;
+    wideOn = false;
+    elViewWide.classList.remove('on'); elViewWide.textContent = '⤢ Wide field';
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+}
+function setView(name) {
+    const preset = VIEW_PRESETS[name];
+    if (!preset) return;
+    clearWideFlag();
+    cam.presetName = name;
+    elViewTop.classList.toggle('on', name === 'top');
+    elView3D .classList.toggle('on', name === '3d');
+    elViewEqu.classList.toggle('on', name === 'equ');
+    cam.mode = 'free'; cam.focusKey = null; elFocus.value = '';
+    controls.maxDistance = SYSTEM_MAX_DIST;
+    startCameraTween(preset.pos, new THREE.Vector3(0, 0, 0));
+}
+elViewTop.addEventListener('click', () => setView('top'));
+elView3D .addEventListener('click', () => setView('3d'));
+elViewEqu.addEventListener('click', () => setView('equ'));
+
+elScale.addEventListener('change', () => {
+    clearWideFlag();
+    controls.maxDistance = SYSTEM_MAX_DIST;
+    let pos;
+    if (elScale.value === 'zoom')        pos = new THREE.Vector3(0, 2.6, 4.4);
+    else if (elScale.value === 'system') pos = new THREE.Vector3(0, SYSTEM_MAX_DIST * 0.5, SYSTEM_MAX_DIST * 0.8);
+    else                                 pos = new THREE.Vector3(0, 7, 11);
+    cam.mode = 'free'; cam.focusKey = null; elFocus.value = '';
+    startCameraTween(pos, new THREE.Vector3(0, 0, 0), 900);
+});
+
+// ── Wide-field / fullscreen ────────────────────────────────────────────
+const stageWrap = document.getElementById('js-canvas-wrap');
+let wideOn = false;
+function setWide(on) {
+    wideOn = on;
+    elViewWide.classList.toggle('on', on);
+    elViewWide.textContent = on ? '⤡ Exit wide' : '⤢ Wide field';
+    cam.mode = 'free'; cam.focusKey = null; elFocus.value = '';
+    controls.maxDistance = SYSTEM_MAX_DIST;
+    if (on) {
+        startCameraTween(
+            new THREE.Vector3(0, SYSTEM_MAX_DIST * 0.5, SYSTEM_MAX_DIST * 0.8),
+            new THREE.Vector3(0, 0, 0), 900);
+        if (stageWrap.requestFullscreen) stageWrap.requestFullscreen().catch(() => {});
+    } else {
+        if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+        setView('3d');
+    }
+}
+elViewWide.addEventListener('click', () => setWide(!wideOn));
+document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement && wideOn) setWide(false);
+    setTimeout(resize, 60);
+});
+
+// ── Focus / POV ────────────────────────────────────────────────────────
+elFocus.addEventListener('change', () => focusBody(elFocus.value || null));
+function bodySceneRadius(key) { return visualRadiusOf(key); }
+function focusBody(key) {
+    if (!key || !meshes[key]) {
+        cam.mode = 'free'; cam.focusKey = null; elFocus.value = '';
+        startCameraTween(VIEW_PRESETS[cam.presetName].pos, new THREE.Vector3(0,0,0));
+        return;
+    }
+    cam.mode = 'focus'; cam.focusKey = key; elFocus.value = key;
+    const tgt = worldPos(key);
+    const r = bodySceneRadius(key);
+    const off = new THREE.Vector3(r * 14, r * 8, r * 14);
+    startCameraTween(tgt.clone().add(off), tgt);
+}
+elPov.addEventListener('click', () => {
+    if (!selected || selected.key === 'saturn' || !meshes[selected.key]) {
+        cam.mode = 'free';
+        startCameraTween(new THREE.Vector3(0, 4, 0.001), new THREE.Vector3(0,0,0));
+        return;
+    }
+    cam.mode = 'pov'; cam.focusKey = selected.key; elFocus.value = selected.key;
+    const moonPos = worldPos(selected.key);
+    const satPos  = worldPos('saturn');
+    const r = bodySceneRadius(selected.key);
+    const toSat = new THREE.Vector3().subVectors(satPos, moonPos).normalize();
+    startCameraTween(moonPos.clone().add(toSat.clone().multiplyScalar(r * 1.4)), satPos);
+});
+function applyFocusOrPov() {
+    if (cam.tween) return;
+    if (cam.mode === 'focus' && cam.focusKey && meshes[cam.focusKey]) {
+        const tgt = worldPos(cam.focusKey);
+        const offset = camera.position.clone().sub(controls.target);
+        controls.target.copy(tgt);
+        camera.position.copy(tgt).add(offset);
+    } else if (cam.mode === 'pov' && cam.focusKey && meshes[cam.focusKey]) {
+        const moonPos = worldPos(cam.focusKey);
+        const satPos  = worldPos('saturn');
+        const r = bodySceneRadius(cam.focusKey);
+        const toSat = new THREE.Vector3().subVectors(satPos, moonPos).normalize();
+        camera.position.copy(moonPos).add(toSat.clone().multiplyScalar(r * 1.4));
+        controls.target.copy(satPos);
+    }
+}
+
+let labelsOn = true;
+elLabelsTog.addEventListener('click', () => {
+    labelsOn = !labelsOn;
+    elLabelsTog.classList.toggle('on', labelsOn);
+    elLabelsTog.textContent = 'Labels: ' + (labelsOn ? 'ON' : 'OFF');
+});
+let ringsOn = true;
+elRingsTog.addEventListener('click', () => {
+    ringsOn = !ringsOn;
+    elRingsTog.classList.toggle('on', ringsOn);
+    elRingsTog.textContent = 'Rings: ' + (ringsOn ? 'ON' : 'OFF');
+    satSkin.setRingsVisible(ringsOn);
+});
+
+// ── HTML labels & hover icon ───────────────────────────────────────────
+const overlay = document.getElementById('js-overlay');
+const labelEls = {};
+const hoverIcon = document.createElement('div');
+hoverIcon.className = 'js-hover-icon';
+overlay.appendChild(hoverIcon);
+const LABEL_BODIES = [SATURN, ...SATURN_MOONS];
+for (const b of LABEL_BODIES) {
+    const div = document.createElement('div');
+    div.className = 'js-label-3d' + (b.key !== 'saturn' && (moonByKey[b.key].group==='titan'||moonByKey[b.key].group==='irregular'||moonByKey[b.key].group==='inner') ? '' : ' minor');
+    const beh = behaviorOf(b.key);
+    div.innerHTML = `<span class="icon">${beh.icon || '·'}</span>${b.name}`;
+    overlay.appendChild(div);
+    labelEls[b.key] = div;
+}
+const _projVec = new THREE.Vector3();
+function projectToScreen(pos3) {
+    _projVec.copy(pos3).project(camera);
+    const rect = renderer.domElement.getBoundingClientRect();
+    return {
+        x:(_projVec.x * 0.5 + 0.5) * rect.width,
+        y:(-_projVec.y * 0.5 + 0.5) * rect.height,
+        behind:_projVec.z > 1,
+    };
+}
+function updateLabels() {
+    if (!labelsOn) {
+        for (const el of Object.values(labelEls)) el.style.display = 'none';
+        hoverIcon.classList.remove('show');
+        return;
+    }
+    for (const b of LABEL_BODIES) {
+        const el = labelEls[b.key];
+        if (!meshes[b.key]) continue;
+        const isSel = selected && b.key === selected.key;
+        // Tiny ring-moons & co-orbitals only labelled when selected/hovered.
+        const small = b.key !== 'saturn' && (moonByKey[b.key].group === 'ringmoon' || moonByKey[b.key].group === 'coorbital');
+        if (small && !isSel && b.key !== hoveredKey) { el.style.display = 'none'; continue; }
+        const p = projectToScreen(worldPos(b.key));
+        if (p.behind) { el.style.display = 'block'; el.style.left = '-9999px'; continue; }
+        el.style.display = 'block';
+        el.style.left = `${p.x}px`; el.style.top = `${p.y}px`;
+        el.classList.toggle('selected', isSel);
+    }
+    if (hoveredKey && meshes[hoveredKey] && (!selected || hoveredKey !== selected.key)) {
+        const beh = behaviorOf(hoveredKey);
+        if (beh && beh.icon) {
+            hoverIcon.textContent = beh.icon;
+            const p = projectToScreen(worldPos(hoveredKey));
+            if (!p.behind) { hoverIcon.style.left = `${p.x}px`; hoverIcon.style.top = `${p.y - 30}px`; hoverIcon.classList.add('show'); }
+            else hoverIcon.classList.remove('show');
+        } else hoverIcon.classList.remove('show');
+    } else hoverIcon.classList.remove('show');
+}
+
+// ── Ring-plane crossing (equinox) flash ────────────────────────────────
+const elFlash = document.getElementById('js-conjunction');
+let flashActive = false;
+function detectEquinox() {
+    const year = 2000 + sim.t_s / 86400 / 365.25;
+    const B = ringOpeningDeg(year);
+    if (Math.abs(B) < 0.5 && !flashActive) {
+        elFlash.textContent = '✦ Ring-plane crossing — rings appear edge-on, shadows rake the disc';
+        elFlash.classList.add('show'); flashActive = true;
+    } else if (Math.abs(B) > 1.5 && flashActive) {
+        elFlash.classList.remove('show'); flashActive = false;
+    }
+}
+
+// ── Focus dropdown options (Saturn + moons) ────────────────────────────
+function buildFocusOptions() {
+    let html = '<option value="" selected>Free (system view)</option><option value="saturn">Saturn</option>';
+    for (const sec of PICKER_SECTIONS) {
+        if (sec.label === 'Saturn' || sec.label === 'Ring components') continue;
+        html += `<optgroup label="${sec.label}">`;
+        for (const key of sec.keys) { const b = getBody(key); if (b) html += `<option value="${key}">${b.name}</option>`; }
+        html += '</optgroup>';
+    }
+    elFocus.innerHTML = html;
+}
+
+// ── Ring profile plot ──────────────────────────────────────────────────
+const plot = document.getElementById('js-plot-canvas');
+const pctx = plot.getContext('2d');
+function resizePlot() {
+    const rect = plot.getBoundingClientRect();
+    const dpr = Math.min(devicePixelRatio, 2);
+    plot.width  = Math.max(1, Math.floor(rect.width * dpr));
+    plot.height = Math.max(1, Math.floor(rect.height * dpr));
+    pctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawProfile();
+}
+function drawProfile() {
+    const W = plot.clientWidth, H = plot.clientHeight;
+    if (W < 8 || H < 8) return;
+    pctx.clearRect(0, 0, W, H);
+    const padL = 40, padR = 16, padT = 14, padB = 26;
+    const pw = W - padL - padR, ph = H - padT - padB;
+    const rMinKm = 66000, rMaxKm = 142000;
+    const xOf = km => padL + (km - rMinKm) / (rMaxKm - rMinKm) * pw;
+    const yOf = tau => padT + (1 - tau) * ph;
+
+    // Region shading
+    for (const seg of SATURN_RINGS) {
+        if (seg.key === 'G' || seg.key === 'E') continue;
+        const x0 = xOf(seg.inner * R_SAT_KM), x1 = xOf(seg.outer * R_SAT_KM);
+        const c = (seg.color).toString(16).padStart(6,'0');
+        pctx.fillStyle = `#${c}`; pctx.globalAlpha = 0.16;
+        pctx.fillRect(x0, padT, Math.max(1, x1 - x0), ph);
+        pctx.globalAlpha = 1;
+        if (x1 - x0 > 22) {
+            pctx.fillStyle = '#9a8e74'; pctx.font = '9px ui-monospace, monospace';
+            pctx.textAlign = 'center';
+            pctx.fillText(seg.key, (x0 + x1) / 2, padT + 10);
+        }
+    }
+    // Axes
+    pctx.strokeStyle = 'rgba(255,184,80,.12)'; pctx.lineWidth = 1;
+    pctx.font = '10px ui-monospace, monospace'; pctx.fillStyle = '#776';
+    for (let km = 70000; km <= 140000; km += 10000) {
+        const x = xOf(km);
+        pctx.beginPath(); pctx.moveTo(x, padT); pctx.lineTo(x, padT + ph); pctx.stroke();
+        pctx.textAlign = 'center';
+        pctx.fillText((km/1000).toFixed(0) + 'k', x, H - padB + 13);
+    }
+    pctx.fillStyle = 'rgba(255,184,80,.55)'; pctx.textAlign = 'center';
+    pctx.fillText('ring radius (km)', padL + pw / 2, H - 3);
+
+    // Brightness curve (filled)
+    pctx.beginPath();
+    let first = true;
+    for (let px = 0; px <= pw; px += 1) {
+        const km = rMinKm + (px / pw) * (rMaxKm - rMinKm);
+        const tau = ringBrightness(km / R_SAT_KM);
+        const x = padL + px, y = yOf(tau);
+        if (first) { pctx.moveTo(x, padT + ph); pctx.lineTo(x, y); first = false; }
+        else pctx.lineTo(x, y);
+    }
+    pctx.lineTo(padL + pw, padT + ph); pctx.closePath();
+    pctx.fillStyle = 'rgba(216,198,154,.45)'; pctx.fill();
+    pctx.strokeStyle = '#e0cf9e'; pctx.lineWidth = 1.4;
+    pctx.beginPath(); first = true;
+    for (let px = 0; px <= pw; px += 1) {
+        const km = rMinKm + (px / pw) * (rMaxKm - rMinKm);
+        const y = yOf(ringBrightness(km / R_SAT_KM));
+        const x = padL + px;
+        if (first) { pctx.moveTo(x, y); first = false; } else pctx.lineTo(x, y);
+    }
+    pctx.stroke();
+
+    // Resonance markers
+    pctx.font = '9px ui-monospace, monospace';
+    for (const res of RING_RESONANCES) {
+        const km = res.r * R_SAT_KM;
+        if (km < rMinKm || km > rMaxKm) continue;
+        const x = xOf(km);
+        const gap = res.type === 'gap';
+        pctx.strokeStyle = gap ? 'rgba(255,154,127,.85)' : 'rgba(159,208,224,.85)';
+        pctx.setLineDash(gap ? [2,2] : []);
+        pctx.lineWidth = 1.2;
+        pctx.beginPath(); pctx.moveTo(x, padT); pctx.lineTo(x, padT + ph); pctx.stroke();
+        pctx.setLineDash([]);
+        pctx.save();
+        pctx.translate(x, padT + 4); pctx.rotate(Math.PI / 2);
+        pctx.fillStyle = gap ? '#ff9a7f' : '#9fd0e0';
+        pctx.textAlign = 'left';
+        pctx.fillText(res.label, 4, 3);
+        pctx.restore();
+    }
+}
+new ResizeObserver(resizePlot).observe(plot);
+
+// ── Live top-down ring map ─────────────────────────────────────────────
+const ringMap = document.getElementById('js-wind-canvas');
+const rctx = ringMap.getContext('2d');
+function resizeRingMap() {
+    const rect = ringMap.getBoundingClientRect();
+    const dpr = Math.min(devicePixelRatio, 2);
+    ringMap.width  = Math.max(1, Math.floor(rect.width * dpr));
+    ringMap.height = Math.max(1, Math.floor(rect.height * dpr));
+    rctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawRingMap();
+}
+function drawRingMap() {
+    const W = ringMap.clientWidth, H = ringMap.clientHeight;
+    if (W < 8 || H < 8) return;
+    rctx.clearRect(0, 0, W, H);
+    const cx = W / 2, cy = H / 2;
+    const rOuter = 2.36;
+    const s = (Math.min(W, H) / 2 - 10) / rOuter;       // px per R_S
+    const t = sim.t_s;
+
+    // Ring annuli
+    for (const seg of SATURN_RINGS) {
+        if (seg.key === 'G' || seg.key === 'E') continue;
+        const mid = (seg.inner + seg.outer) / 2;
+        const lw  = Math.max(1, (seg.outer - seg.inner) * s);
+        const c = (seg.color).toString(16).padStart(6,'0');
+        rctx.strokeStyle = `#${c}`;
+        rctx.globalAlpha = Math.min(0.9, 0.25 + seg.tau * 0.7);
+        rctx.lineWidth = lw;
+        rctx.beginPath(); rctx.arc(cx, cy, mid * s, 0, Math.PI * 2); rctx.stroke();
+    }
+    rctx.globalAlpha = 1;
+    // Gaps (dark)
+    for (const g of RING_GAPS) {
+        if (g.key === 'maxwell') continue;
+        rctx.strokeStyle = '#0b0712'; rctx.lineWidth = Math.max(1, g.half * 2 * s * 1.6);
+        rctx.beginPath(); rctx.arc(cx, cy, g.center * s, 0, Math.PI * 2); rctx.stroke();
+    }
+
+    // Saturn disc
+    const grd = rctx.createRadialGradient(cx, cy, 0, cx, cy, s);
+    grd.addColorStop(0, '#f0dca0'); grd.addColorStop(1, '#c9a85e');
+    rctx.fillStyle = grd;
+    rctx.beginPath(); rctx.arc(cx, cy, s, 0, Math.PI * 2); rctx.fill();
+
+    // B-ring outer edge lobes (m=2, co-rotates with Mimas)
+    const mimasOmega = meanMotion('mimas');
+    rctx.strokeStyle = 'rgba(232,201,122,.9)'; rctx.lineWidth = 1.4;
+    rctx.beginPath();
+    for (let a = 0; a <= 360; a += 3) {
+        const th = a * D2R;
+        const r = (1.951 + 0.02 * Math.cos(2 * (th - mimasOmega * t))) * s;
+        const x = cx + r * Math.cos(th), y = cy + r * Math.sin(th);
+        if (a === 0) rctx.moveTo(x, y); else rctx.lineTo(x, y);
+    }
+    rctx.closePath(); rctx.stroke();
+
+    // Spiral density-wave crests (co-rotate at perturber mean motion)
+    if (wavesOn && waveStrength > 0.01) {
+        rctx.strokeStyle = `rgba(159,208,224,${Math.min(0.85, 0.4 * waveStrength)})`;
+        rctx.lineWidth = 1.1;
+        for (const f of ringFeatures) {
+            if (f.type !== 'wave') continue;
+            const m = f.m;
+            for (let j = 0; j < m; j++) {
+                rctx.beginPath();
+                let started = false;
+                for (let dr = 0; dr <= 0.06; dr += 0.004) {
+                    const wind = 170 * dr + 2600 * dr * dr;
+                    const th = (m * f.omega * t - wind + 2 * Math.PI * j) / m;
+                    const r = (f.r + dr) * s;
+                    const x = cx + r * Math.cos(th), y = cy + r * Math.sin(th);
+                    if (!started) { rctx.moveTo(x, y); started = true; } else rctx.lineTo(x, y);
+                }
+                rctx.stroke();
+            }
+        }
+    }
+
+    // Ring moons at live longitudes
+    for (const m of SATURN_MOONS) {
+        if (m.group === 'titan' || m.group === 'irregular') continue;   // off-map
+        const aRS = m.a_km * KM / M_PER_UNIT;
+        if (aRS > rOuter + 0.15) continue;
+        const lon = meanLonDeg(m.key) * D2R;
+        const x = cx + aRS * s * Math.cos(lon), y = cy + aRS * s * Math.sin(lon);
+        rctx.fillStyle = '#' + m.color.toString(16).padStart(6,'0');
+        rctx.beginPath(); rctx.arc(x, y, m.group === 'ringmoon' ? 2.5 : 3.4, 0, Math.PI * 2); rctx.fill();
+        if (m.group === 'ringmoon' || m.key === 'mimas') {
+            rctx.fillStyle = '#cdbf9a'; rctx.font = '8px ui-monospace, monospace';
+            rctx.textAlign = 'left';
+            rctx.fillText(m.name, x + 4, y + 3);
+        }
+    }
+}
+new ResizeObserver(resizeRingMap).observe(ringMap);
+
+// ── Loop ───────────────────────────────────────────────────────────────
+let lastT = performance.now();
+function tick(now) {
+    const dt = (now - lastT) / 1000;
+    lastT = now;
+
+    if (sim.live) {
+        const targetTs = simTFromJD(Date.now() / 86400000 + 2440587.5);
+        const diff = targetTs - sim.t_s;
+        if (Math.abs(diff) < 30 * 86400) step(diff);
+        else { sim.t_s = targetTs; clearTrails(); }
+    } else if (sim.playing) {
+        step(sim.direction * sim.speed * dt);
+    }
+
+    syncMeshesFromState();
+    starUniforms.uTime.value = now * 0.001;
+
+    const simDays   = sim.t_s / 86400;
+    const epochYear = 2000 + simDays / 365.25;
+    const spinPhase = ((simDays * (86400 / SATURN_ROT_PERIOD_S)) % 1 + 1) % 1;
+    satSkin.update(now * 0.001, { spinPhase });
+
+    stepCameraTween(now);
+    applyFocusOrPov();
+
+    // Ring readout (throttled lightly via frame counter)
+    if ((now & 7) === 0 || true) {
+        if (elRingEpoch) elRingEpoch.textContent = epochYear.toFixed(1);
+        if (elRingMimas) elRingMimas.textContent = meanLonDeg('mimas').toFixed(0) + '°';
+        if (elRingPan)   elRingPan.textContent   = meanLonDeg('pan').toFixed(0) + '°';
+    }
+
+    refreshSidePanel();
+    refreshPinnedTooltip();
+    updateSelRing();
+    updateHovRing(hoveredKey);
+    updateLabels();
+    detectEquinox();
+    updateHud();
+    drawRingMap();
+
+    if (sim.live || sim.playing) syncInputsFromSim();
+
+    controls.update();
+
+    camera.updateMatrixWorld();
+    _invView.copy(camera.matrixWorld).invert();
+    _sunView.copy(SUN_WORLD).transformDirection(_invView);
+    satSkin.setSun(_sunView);
+    satSkin.setRingShadow(SUN_WORLD, new THREE.Vector3(0, 0, 0));
+
+    if (composer) composer.render();
+    else renderer.render(scene, camera);
+    requestAnimationFrame(tick);
+}
+
+// ── Boot ───────────────────────────────────────────────────────────────
+buildBodyPicker();
+buildBookmarks();
+buildFocusOptions();
+selectBody('mimas');
+syncMeshesFromState();
+syncInputsFromSim();
+drawProfile();
+resizeRingMap();
+updateHud();
+requestAnimationFrame(t => { lastT = t; tick(t); });
+</script>
+
+</body>
+</html>
