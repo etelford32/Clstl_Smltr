@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LEO Drag Forecasting That Holds Up During the Storm — Parkers Physics</title>
+<meta name="description" content="MHD-grounded thermospheric drag forecasting for LEO operators. Empirical density models underforecast storm-time drag by 2–5× — exactly when your fleet needs the number. We model the physics that drives it. Validated against the Feb-2022 Starlink loss and the May-2024 Gannon G5.">
+<link rel="canonical" href="https://parkersphysics.com/for-operators">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:title" content="The drag forecast that holds up during the storm">
+<meta property="og:description" content="MHD-grounded LEO drag forecasting. The number doesn't fall apart at the moment it matters.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://parkersphysics.com/for-operators">
+<meta property="og:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+<meta property="og:image:alt" content="Parkers Physics — MHD-grounded drag forecasting">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="The drag forecast that holds up during the storm">
+<meta name="twitter:description" content="MHD-grounded LEO drag forecasting for satellite operators. Validated against Feb-2022 Starlink and May-2024 Gannon G5.">
+<meta name="twitter:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;800;900&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+
+<style>
+/* ── Parkers Physics design tokens (shared palette, scoped inline) ───────── */
+:root{
+  --font-display:'Orbitron','Segoe UI',system-ui,sans-serif;
+  --font-sans:'Space Grotesk','Segoe UI',system-ui,sans-serif;
+  --font-mono:'JetBrains Mono',ui-monospace,monospace;
+  --tracking-cyber:.18em;
+  --black-void:#02000a;--black-panel:#07021a;--black-elev-1:#0d0626;--black-elev-2:#150a35;
+  --uv-600:#7b00ee;--uv-500:#9d3aff;--uv-400:#b765ff;--uv-300:#d29aff;
+  --pink-500:#ff1f9c;
+  --status-ok:#2eff9e;--status-warn:#ffd23f;--status-danger:#ff3050;
+  --fg-1:#f5f0ff;--fg-2:#cdc4f0;--fg-3:#9d92c8;--fg-4:#6f6695;--fg-5:#48426e;
+  --grad-uv-pink:linear-gradient(135deg,#9d3aff,#ff1f9c);
+  --grad-headline:linear-gradient(135deg,#f5f8ff,#c5b8ff 45%,#ff1f9c);
+  --glow-uv-sm:0 0 10px rgba(157,58,255,.4);
+  --glow-uv-md:0 0 22px rgba(157,58,255,.55),0 0 50px rgba(91,30,255,.35);
+  /* proof-chart series */
+  --c-observed:#8ff0ff;--c-empirical:#ff7a7a;--c-parkers:#2eff9e;
+}
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html{overflow-y:auto;scroll-behavior:smooth}
+body{min-height:100vh;overflow-x:hidden;background:#03010e;color:var(--fg-2);font-family:var(--font-sans);line-height:1.7}
+
+.fo-wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+.fo-eyebrow{display:inline-block;font-family:var(--font-display);font-weight:700;font-size:.7rem;text-transform:uppercase;letter-spacing:var(--tracking-cyber);color:var(--uv-400);text-shadow:var(--glow-uv-sm)}
+.fo-section-title{font-family:var(--font-display);font-weight:800;font-size:clamp(1.4rem,3.4vw,2rem);color:var(--fg-1);letter-spacing:.02em;line-height:1.2;margin:12px 0 14px}
+.fo-section-sub{color:var(--fg-3);max-width:680px;font-size:1.02rem}
+
+/* ── HERO ───────────────────────────────────────────────────────────────── */
+.fo-hero{position:relative;padding:88px 0 76px;background:radial-gradient(ellipse at 30% 40%,#160632 0%,#03010e 72%);overflow:hidden;border-bottom:1px solid rgba(157,58,255,.14)}
+.fo-hero::after{content:'';position:absolute;inset:0;background:repeating-linear-gradient(transparent 0 38px,rgba(157,58,255,.04) 38px 39px);pointer-events:none}
+.fo-hero-inner{position:relative;z-index:1;max-width:780px}
+.fo-badge{display:inline-flex;align-items:center;gap:8px;padding:6px 16px;background:rgba(157,58,255,.10);border:1px solid rgba(183,101,255,.35);border-radius:20px;font-family:var(--font-display);font-size:.66rem;color:var(--uv-300);letter-spacing:var(--tracking-cyber);text-transform:uppercase;margin-bottom:26px;box-shadow:var(--glow-uv-sm)}
+.fo-badge::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--status-ok);box-shadow:0 0 8px var(--status-ok);flex-shrink:0}
+.fo-h1{font-family:var(--font-display);font-weight:800;font-size:clamp(2rem,5.4vw,3.5rem);letter-spacing:.02em;line-height:1.12;margin-bottom:22px;text-transform:none;background:var(--grad-headline);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;filter:drop-shadow(0 0 16px rgba(60,160,255,.35))}
+.fo-h1 em{font-style:normal;color:var(--pink-500);-webkit-text-fill-color:var(--pink-500)}
+.fo-lede{font-size:clamp(1rem,2.2vw,1.18rem);color:var(--fg-2);max-width:620px;margin-bottom:34px}
+.fo-cta-row{display:flex;flex-wrap:wrap;gap:14px;margin-bottom:46px}
+.fo-btn{display:inline-flex;align-items:center;gap:8px;padding:14px 30px;border-radius:8px;font-family:var(--font-display);font-weight:700;font-size:.85rem;letter-spacing:.1em;text-transform:uppercase;text-decoration:none;transition:filter .2s,transform .15s,box-shadow .25s;cursor:pointer;border:none}
+.fo-btn-primary{background:var(--grad-uv-pink);color:#fff;box-shadow:var(--glow-uv-md)}
+.fo-btn-primary:hover{filter:brightness(1.1);transform:translateY(-2px)}
+.fo-btn-ghost{background:transparent;color:var(--fg-1);border:1px solid rgba(183,101,255,.4)}
+.fo-btn-ghost:hover{background:rgba(157,58,255,.1);transform:translateY(-2px)}
+.fo-stats{display:flex;flex-wrap:wrap;gap:14px 40px}
+.fo-stat-num{font-family:var(--font-display);font-size:1.6rem;font-weight:800;background:var(--grad-uv-pink);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;line-height:1.1}
+.fo-stat-lbl{font-family:var(--font-display);font-size:.62rem;text-transform:uppercase;letter-spacing:var(--tracking-cyber);color:var(--fg-4)}
+
+/* ── PROOF STRIP ────────────────────────────────────────────────────────── */
+.fo-proof{padding:64px 0;background:linear-gradient(180deg,#05010f,#0a0320)}
+.fo-chart-card{background:var(--black-panel);border:1px solid rgba(157,58,255,.18);border-radius:14px;padding:24px 22px 18px;margin-top:26px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.fo-chart{width:100%;height:auto;display:block}
+.fo-chart text{font-family:var(--font-mono)}
+.fo-legend{display:flex;flex-wrap:wrap;gap:18px;margin-top:16px;padding-top:14px;border-top:1px solid rgba(157,58,255,.12);font-family:var(--font-mono);font-size:.78rem;color:var(--fg-3)}
+.fo-legend span{display:inline-flex;align-items:center;gap:7px}
+.fo-swatch{width:16px;height:3px;border-radius:2px;display:inline-block}
+.fo-chart-caption{margin-top:14px;font-size:.82rem;color:var(--fg-4);font-style:italic}
+
+/* ── EVIDENCE / GAP CARDS ───────────────────────────────────────────────── */
+.fo-gap{padding:72px 0}
+.fo-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px;margin-top:30px}
+.fo-card{background:var(--black-elev-1);border:1px solid rgba(157,58,255,.16);border-radius:12px;padding:24px;transition:border-color .2s,transform .2s}
+.fo-card:hover{border-color:rgba(183,101,255,.45);transform:translateY(-3px)}
+.fo-card-tag{font-family:var(--font-mono);font-size:.7rem;letter-spacing:.06em;text-transform:uppercase;color:var(--status-danger);margin-bottom:10px;display:block}
+.fo-card h3{font-family:var(--font-display);font-size:1.02rem;color:var(--fg-1);margin-bottom:10px;letter-spacing:.01em}
+.fo-card p{font-size:.92rem;color:var(--fg-3)}
+.fo-card .fo-miss{color:var(--fg-1);font-weight:600}
+
+/* ── HONEST COMPARISON ──────────────────────────────────────────────────── */
+.fo-compare{padding:64px 0;background:linear-gradient(180deg,#0a0320,#05010f)}
+.fo-cmp-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:28px}
+.fo-cmp-col{border-radius:12px;padding:24px;border:1px solid rgba(157,58,255,.16)}
+.fo-cmp-col.empirical{background:rgba(255,80,80,.04);border-color:rgba(255,80,80,.2)}
+.fo-cmp-col.mhd{background:rgba(46,255,158,.04);border-color:rgba(46,255,158,.22)}
+.fo-cmp-col h3{font-family:var(--font-display);font-size:.95rem;margin-bottom:14px;letter-spacing:.04em;text-transform:uppercase}
+.fo-cmp-col.empirical h3{color:var(--c-empirical)}
+.fo-cmp-col.mhd h3{color:var(--c-parkers)}
+.fo-cmp-col ul{list-style:none}
+.fo-cmp-col li{padding:8px 0 8px 24px;position:relative;font-size:.92rem;color:var(--fg-2);border-bottom:1px solid rgba(157,58,255,.08)}
+.fo-cmp-col li:last-child{border-bottom:none}
+.fo-cmp-col.empirical li::before{content:'\2715';position:absolute;left:0;color:var(--c-empirical)}
+.fo-cmp-col.mhd li::before{content:'\2713';position:absolute;left:0;color:var(--c-parkers)}
+.fo-candor{margin-top:24px;padding:18px 20px;border-left:3px solid var(--uv-500);background:rgba(157,58,255,.06);border-radius:0 8px 8px 0;font-size:.92rem;color:var(--fg-3)}
+.fo-candor strong{color:var(--fg-1)}
+
+/* ── CONSOLE FEATURES ───────────────────────────────────────────────────── */
+.fo-console{padding:72px 0}
+.fo-feat{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin-top:28px}
+.fo-feat-item{padding:20px;border-radius:10px;background:var(--black-elev-1);border:1px solid rgba(157,58,255,.14)}
+.fo-feat-item .fo-ico{font-size:1.5rem;display:block;margin-bottom:10px}
+.fo-feat-item h4{font-family:var(--font-display);font-size:.88rem;color:var(--fg-1);margin-bottom:6px;letter-spacing:.02em}
+.fo-feat-item p{font-size:.86rem;color:var(--fg-4)}
+
+/* ── FINAL CTA ──────────────────────────────────────────────────────────── */
+.fo-final{padding:80px 0 96px;text-align:center;background:radial-gradient(ellipse at 50% 30%,#1a0838 0%,#03010e 70%);border-top:1px solid rgba(157,58,255,.14)}
+.fo-final h2{font-family:var(--font-display);font-weight:800;font-size:clamp(1.6rem,4vw,2.4rem);background:var(--grad-headline);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:16px;letter-spacing:.02em}
+.fo-final p{color:var(--fg-3);max-width:560px;margin:0 auto 30px}
+.fo-final .fo-cta-row{justify-content:center}
+
+footer.fo-footer{padding:30px 24px;text-align:center;font-size:.82rem;color:var(--fg-5);border-top:1px solid rgba(157,58,255,.1)}
+footer.fo-footer a{color:var(--fg-3);text-decoration:none;margin:0 6px}
+footer.fo-footer a:hover{color:var(--uv-300)}
+
+@media (max-width:768px){
+  .fo-cmp-grid{grid-template-columns:1fr}
+  .fo-hero{padding:64px 0 56px}
+}
+</style>
+</head>
+<body>
+
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260508"; initNav("operations");</script>
+
+<!-- ── HERO ───────────────────────────────────────────────────────────────── -->
+<header class="fo-hero">
+  <div class="fo-wrap fo-hero-inner">
+    <div class="fo-badge">MHD-Grounded · LEO Drag Forecasting</div>
+    <h1 class="fo-h1">The drag forecast that <em>holds up during the storm.</em></h1>
+    <p class="fo-lede">
+      When a geomagnetic storm hits, empirical density models underforecast thermospheric
+      drag by 2&ndash;5&times; &mdash; exactly when your fleet needs the number most.
+      Parkers Physics is grounded in MHD, so the forecast doesn&rsquo;t fall apart at the
+      moment it matters.
+    </p>
+    <div class="fo-cta-row">
+      <a href="contact-enterprise.html" class="fo-btn fo-btn-primary" data-funnel-cta="operators_request_access">Request Access</a>
+      <a href="#proof" class="fo-btn fo-btn-ghost" data-funnel-cta="operators_see_hindcast">See the hindcast</a>
+    </div>
+    <div class="fo-stats">
+      <div><div class="fo-stat-num">2&ndash;5&times;</div><div class="fo-stat-lbl">Storm drag empirical models miss</div></div>
+      <div><div class="fo-stat-num">38</div><div class="fo-stat-lbl">Starlink sats lost · Feb 2022</div></div>
+      <div><div class="fo-stat-num">G5</div><div class="fo-stat-lbl">Gannon hindcast validated</div></div>
+      <div><div class="fo-stat-num">450 km</div><div class="fo-stat-lbl">Drag-vs-quiet, live</div></div>
+    </div>
+  </div>
+</header>
+
+<!-- ── PROOF STRIP ────────────────────────────────────────────────────────── -->
+<section class="fo-proof" id="proof">
+  <div class="fo-wrap">
+    <span class="fo-eyebrow">The Proof</span>
+    <h2 class="fo-section-title">Watch the empirical model break at storm onset.</h2>
+    <p class="fo-section-sub">
+      Thermospheric density at 450&nbsp;km through a geomagnetic storm. The empirical line
+      barely moves &mdash; it says the air is thin. The atmosphere says otherwise, and a
+      satellite&rsquo;s decay clock runs on the truth, not the forecast.
+    </p>
+
+    <div class="fo-chart-card">
+      <svg class="fo-chart" viewBox="0 0 800 380" role="img"
+           aria-label="Thermospheric density through a geomagnetic storm: observed truth rises sharply at onset; the empirical model barely responds; the MHD-grounded forecast tracks the truth.">
+        <!-- axes -->
+        <line x1="60" y1="40" x2="60" y2="310" stroke="#2a2150" stroke-width="1"/>
+        <line x1="60" y1="310" x2="770" y2="310" stroke="#2a2150" stroke-width="1"/>
+        <!-- gridlines -->
+        <line x1="60" y1="240" x2="770" y2="240" stroke="#1a1535" stroke-width="1"/>
+        <line x1="60" y1="170" x2="770" y2="170" stroke="#1a1535" stroke-width="1"/>
+        <line x1="60" y1="100" x2="770" y2="100" stroke="#1a1535" stroke-width="1"/>
+        <!-- storm onset marker -->
+        <line x1="293" y1="40" x2="293" y2="310" stroke="#ff3050" stroke-width="1" stroke-dasharray="4 4" opacity=".7"/>
+        <text x="299" y="56" fill="#ff7a7a" font-size="11">storm onset</text>
+        <!-- axis labels -->
+        <text x="60" y="334" fill="#6f6695" font-size="11">0h</text>
+        <text x="290" y="334" fill="#6f6695" font-size="11">24h</text>
+        <text x="520" y="334" fill="#6f6695" font-size="11">48h</text>
+        <text x="745" y="334" fill="#6f6695" font-size="11">72h</text>
+        <text x="14" y="120" fill="#6f6695" font-size="11" transform="rotate(-90 14 120)">density at 450 km</text>
+        <!-- empirical (underforecasts) -->
+        <polyline fill="none" stroke="var(--c-empirical)" stroke-width="2.5" stroke-dasharray="6 4"
+          points="60,280 140,279 220,277 293,272 320,255 360,225 420,210 480,205 560,215 640,235 720,255 760,262"/>
+        <!-- observed truth -->
+        <polyline fill="none" stroke="var(--c-observed)" stroke-width="2.5"
+          points="60,278 140,276 220,272 293,260 320,190 360,80 420,70 480,110 560,170 640,220 720,250 760,260"/>
+        <!-- parkers (tracks truth) -->
+        <polyline fill="none" stroke="var(--c-parkers)" stroke-width="2.5"
+          points="60,279 140,277 220,273 293,262 320,200 360,95 420,82 480,120 560,178 640,224 720,251 760,261"/>
+        <!-- the miss callout -->
+        <line x1="390" y1="78" x2="390" y2="217" stroke="#ffd23f" stroke-width="1" stroke-dasharray="3 3"/>
+        <text x="398" y="150" fill="#ffd23f" font-size="11">the miss</text>
+      </svg>
+
+      <div class="fo-legend">
+        <span><i class="fo-swatch" style="background:var(--c-observed)"></i>Observed (truth)</span>
+        <span><i class="fo-swatch" style="background:var(--c-empirical);background-image:repeating-linear-gradient(90deg,var(--c-empirical) 0 5px,transparent 5px 8px)"></i>Empirical model (NRLMSIS-class)</span>
+        <span><i class="fo-swatch" style="background:var(--c-parkers)"></i>Parkers (MHD-grounded)</span>
+      </div>
+      <p class="fo-chart-caption">
+        Illustrative hindcast shape, Feb-2022-class storm. Replay the real Gannon&nbsp;G5 and
+        Feb-2022 density presets in the
+        <a href="operations.html" style="color:var(--uv-300)">Operations console</a>.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ── THE GAP ────────────────────────────────────────────────────────────── -->
+<section class="fo-gap">
+  <div class="fo-wrap">
+    <span class="fo-eyebrow">The Gap</span>
+    <h2 class="fo-section-title">Three storms. Three misses. This is the regime you&rsquo;re judged on.</h2>
+    <p class="fo-section-sub">Storm-time drag isn&rsquo;t the edge case &mdash; it&rsquo;s where fleets are lost, conjunction screens go stale, and reentry windows slip. Quiet-day forecasts are easy. The tail is the job.</p>
+    <div class="fo-grid">
+      <div class="fo-card">
+        <span class="fo-card-tag">Feb 2022 · Starlink</span>
+        <h3>The forecast said the air was thin</h3>
+        <p>A modest G1&ndash;G2 storm raised thermospheric density well past the empirical call. <span class="fo-miss">38 newly-launched Starlink satellites</span> couldn&rsquo;t raise orbit against the drag and reentered. The model wasn&rsquo;t wrong about quiet time &mdash; it was wrong about the storm.</p>
+      </div>
+      <div class="fo-card">
+        <span class="fo-card-tag">May 2024 · Gannon G5</span>
+        <h3>The strongest storm in two decades</h3>
+        <p>The Gannon superstorm drove mass density spikes that empirical models smoothed away. Our <span class="fo-miss">MHD-corrected density hindcast</span> tracks the observed thermospheric response &mdash; the validation case behind the whole approach.</p>
+      </div>
+      <div class="fo-card">
+        <span class="fo-card-tag">2024 · AR3842</span>
+        <h3>Back-to-back X-class flares</h3>
+        <p>An active region produced repeated strong flares and CMEs, compressing forecast lead time. Operators needed the drag multiplier <span class="fo-miss">before the event, not after</span> &mdash; the difference between a planned maneuver and a scramble.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── HONEST COMPARISON ──────────────────────────────────────────────────── -->
+<section class="fo-compare">
+  <div class="fo-wrap">
+    <span class="fo-eyebrow">What &ldquo;Holds Up&rdquo; Means</span>
+    <h2 class="fo-section-title">Physics, not a black box.</h2>
+    <p class="fo-section-sub">Empirical models fit a climatology to history. They&rsquo;re fast and fine on a calm day &mdash; and they revert to the mean exactly when the storm pushes the atmosphere off the curve.</p>
+    <div class="fo-cmp-grid">
+      <div class="fo-cmp-col empirical">
+        <h3>Empirical density (NRLMSIS / JB-class)</h3>
+        <ul>
+          <li>Fit to historical climatology</li>
+          <li>Reverts to mean during storms</li>
+          <li>Underforecasts storm-time drag 2&ndash;5&times;</li>
+          <li>No physical driver chain to audit</li>
+        </ul>
+      </div>
+      <div class="fo-cmp-col mhd">
+        <h3>Parkers — MHD-grounded</h3>
+        <ul>
+          <li>SWMF / BATS-R-US magnetosphere coupling</li>
+          <li>Storm energy deposition drives density</li>
+          <li>Tracks the observed storm-time response</li>
+          <li>Every number traceable to the equations</li>
+        </ul>
+      </div>
+    </div>
+    <div class="fo-candor">
+      <strong>Where we&rsquo;re honest:</strong> on a quiet day, our forecast and a good empirical
+      model are roughly a wash &mdash; the thermosphere is on its climatological curve and there&rsquo;s
+      little physics to add. The edge is the tail: the storm-time regime where the empirical
+      assumption breaks and your fleet is most exposed. That&rsquo;s the number we&rsquo;re built to get right.
+    </div>
+  </div>
+</section>
+
+<!-- ── CONSOLE ────────────────────────────────────────────────────────────── -->
+<section class="fo-console">
+  <div class="fo-wrap">
+    <span class="fo-eyebrow">The Console</span>
+    <h2 class="fo-section-title">Built for the operator&rsquo;s decision, not a demo.</h2>
+    <p class="fo-section-sub">Scrub from live through observed, forecast, and what-if storm scenarios &mdash; the whole fleet&rsquo;s drag and decay updates in lockstep.</p>
+    <div class="fo-feat">
+      <div class="fo-feat-item"><span class="fo-ico">🛰️</span><h4>Fleet Drag &amp; Decay</h4><p>Per-asset decay ETAs that shorten as the storm builds in your forward window.</p></div>
+      <div class="fo-feat-item"><span class="fo-ico">📊</span><h4>Drag-vs-Quiet</h4><p>The single multiplier: how much more drag than a calm day, at the scrubbed time.</p></div>
+      <div class="fo-feat-item"><span class="fo-ico">🎯</span><h4>Conjunction Screening</h4><p>Pairwise screens that use the storm atmosphere &mdash; not yesterday&rsquo;s density.</p></div>
+      <div class="fo-feat-item"><span class="fo-ico">⚡</span><h4>Storm Scenarios</h4><p>Inject a Gannon-class or Feb-2022 storm and watch decay clocks react.</p></div>
+      <div class="fo-feat-item"><span class="fo-ico">⛽</span><h4>Prop Budget</h4><p>Station-keeping ΔV the storm will cost, before you commit the burn.</p></div>
+      <div class="fo-feat-item"><span class="fo-ico">🔎</span><h4>Full Provenance</h4><p>Every value traces to its source and model state &mdash; auditable for evaluators.</p></div>
+    </div>
+    <div class="fo-cta-row" style="margin-top:30px">
+      <a href="operations.html" class="fo-btn fo-btn-ghost" data-funnel-cta="operators_open_console">Open the console</a>
+    </div>
+  </div>
+</section>
+
+<!-- ── FINAL CTA ──────────────────────────────────────────────────────────── -->
+<section class="fo-final">
+  <div class="fo-wrap">
+    <h2>Get the number that holds up.</h2>
+    <p>For LEO operators, government, and research programs that need storm-time drag they can stake a maneuver on.</p>
+    <div class="fo-cta-row">
+      <a href="contact-enterprise.html" class="fo-btn fo-btn-primary" data-funnel-cta="operators_final_request_access">Request Access</a>
+      <a href="gannon-superstorm.html" class="fo-btn fo-btn-ghost" data-funnel-cta="operators_view_gannon">View the Gannon hindcast</a>
+    </div>
+  </div>
+</section>
+
+<footer class="fo-footer">
+  <a href="index.html">Parkers Physics</a> ·
+  <a href="operations.html">Operations</a> ·
+  <a href="gannon-superstorm.html">Gannon Hindcast</a> ·
+  <a href="contact-enterprise.html">Enterprise</a> ·
+  <a href="privacy.html">Privacy</a> ·
+  <a href="eula.html">Terms</a>
+</footer>
+
+</body>
+</html>
