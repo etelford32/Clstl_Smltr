@@ -1458,7 +1458,7 @@ body {
 }
 .op-orbit-spark {
     width: 100%;
-    height: 44px;
+    height: 56px;
     margin: 4px 0 6px;
     background: rgba(0,200,200,.04);
     border-radius: 3px;
@@ -1466,16 +1466,40 @@ body {
 }
 .op-orbit-spark-line {
     fill: none;
-    stroke: rgba(0,255,200,.7);
+    stroke: rgba(0,255,200,.8);
     stroke-width: 1.4;
     stroke-linecap: round;
     stroke-linejoin: round;
+}
+.op-orbit-spark-area {
+    fill: url(#opAltGrad);
+    stroke: none;
+}
+/* Warm band marking the drag-significant altitudes (< DRAG_FLOOR_KM). */
+.op-orbit-spark-drag {
+    fill: rgba(255,150,70,.10);
+}
+.op-orbit-spark-apo { fill: #9bd; }
+.op-orbit-spark-per { fill: #ffae6b; }
+.op-orbit-spark-now {
+    fill: #fff;
+    stroke: rgba(0,255,200,.9);
+    stroke-width: 1.2;
+}
+.op-orbit-spark-nowlabel {
+    fill: rgba(220,245,255,.85);
+    font-family: monospace;
+    font-size: 8px;
+    text-transform: uppercase;
+    letter-spacing: .06em;
 }
 .op-orbit-spark-label {
     fill: rgba(155,200,220,.55);
     font-family: monospace;
     font-size: 8px;
 }
+/* Atmosphere & drag-pressure block — sup tag for the ρ exponent. */
+.op-orbit-atmo sup { font-size: .72em; }
 .op-orbit-rates {
     display: grid;
     grid-template-columns: 1fr 1fr 1fr;
@@ -2419,6 +2443,7 @@ import {
     mountMyFleet, mountDecayWatch, mountConjunctions, mountPropBudget,
 } from './js/operations/decision-deck.js';
 import { OperationsVisuals }  from './js/operations/visuals.js';
+import { FocusMesh }          from './js/operations/focus-mesh.js';
 import { mountGlobePicker }   from './js/operations/globe-picker.js';
 import { mountConjTimeline }  from './js/operations/conj-timeline.js';
 import { mountManeuverPanel } from './js/operations/maneuver.js';
@@ -2650,6 +2675,18 @@ const visuals = new OperationsVisuals({
     tracker: fleet.tracker,
 });
 visuals.start();
+
+/* ─── Zoom-to-detail mesh for the selected satellite ───── */
+// Promotes the selected object's dot to a class-typed 3D glyph
+// (payload / rocket body / debris, sized by RCS bucket) once the camera
+// is zoomed close to it; fades back to the dot on zoom-out. Skips
+// objects that already have a dedicated mesh (Starlink, R/Bs, Envisat,
+// ISS, Hubble, Tiangong). Shares the selection bus with everything else.
+const focusMesh = new FocusMesh(globe, fleet.tracker, {
+    getSelectedId:  () => visuals.getSelectedAsset(),
+    onSelectChange: (fn) => visuals.onSelectionChange(fn),
+});
+globe.onTick((simTimeMs) => focusMesh.tick(simTimeMs));
 
 /* ─── L0 owned-fleet glyphs + labels (Workstream C) ────── */
 // Reticle glyph + selectable name/altitude chip per owned asset. Always
