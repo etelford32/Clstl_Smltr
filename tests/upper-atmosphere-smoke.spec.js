@@ -81,4 +81,77 @@ test.describe('upper-atmosphere.html smoke', () => {
         const f107 = await page.evaluate(() => window.__ua.ui.state.f107);
         expect(f107, 'Gannon preset pushes F10.7 ~195').toBeGreaterThan(150);
     });
+
+    test('zone drag + turbulence dashboard renders a row per zone', async ({ page }) => {
+        await page.goto(URL);
+        await page.waitForFunction(() => !!window.__ua, { timeout: BOOT_TIMEOUT_MS });
+        // The dashboard paints once on start(); give it a tick to settle.
+        await page.waitForTimeout(600);
+
+        // One row per atmospheric zone (the canonical 5-layer schema).
+        const rows = page.locator('#ua-zone-dashboard .ua-zd-row');
+        await expect(rows, 'a dashboard row per atmospheric zone').toHaveCount(5);
+
+        // The first row's live readouts should be populated (the compute
+        // path ran without throwing): ρ as an exponential, a regime badge,
+        // and a turbulence state badge.
+        const rho = await page.textContent('#ua-zone-dashboard .ua-zd-row:first-child [data-f="rho"]');
+        expect(rho, 'density readout is an exponential number').toMatch(/e[+-]?\d/i);
+        const regime = await page.textContent('#ua-zone-dashboard .ua-zd-row:first-child [data-f="regime"]');
+        expect(regime?.trim(), 'flow-regime badge is populated').not.toBe('–');
+        const badge = await page.textContent('#ua-zone-dashboard .ua-zd-row:first-child [data-f="tibadge"]');
+        expect(['calm', 'unsettled', 'turbulent', 'severe'], 'turbulence state badge is a known class')
+            .toContain(badge?.trim());
+    });
+
+    test('density + turbulence overlay toggles do not throw', async ({ page }) => {
+        const errors = attachConsoleRecorder(page);
+        await page.goto(URL);
+        await page.waitForFunction(() => !!window.__ua, { timeout: BOOT_TIMEOUT_MS });
+        await page.waitForTimeout(400);
+
+        // ── Density sub-shells (Controls tab — visible by default) ──────
+        await page.check('#ua-subshell-toggle');
+        await page.waitForTimeout(150);
+        expect(await page.evaluate(() => window.__ua.globe.getDensitySubShellsVisible()),
+            'sub-shells turned on').toBe(true);
+        // Rebuild at each step granularity — exercises the dispose/rebuild path.
+        for (const step of ['25', '100', '50']) {
+            await page.selectOption('#ua-subshell-step', step);
+            await page.waitForTimeout(120);
+        }
+        await page.uncheck('#ua-subshell-toggle');
+        expect(await page.evaluate(() => window.__ua.globe.getDensitySubShellsVisible()),
+            'sub-shells turned off').toBe(false);
+
+        // ── Isodensity surfaces ─────────────────────────────────────────
+        for (const sel of ['1e-12', 'all', '1e-11', 'off']) {
+            await page.selectOption('#ua-iso-select', sel);
+            await page.waitForTimeout(120);
+        }
+        // After cycling back to 'off', no surface should be selected.
+        expect(await page.evaluate(() => window.__ua.globe.getIsodensitySelection()),
+            'isodensity selection cleared').toBe('off');
+
+        // ── Turbulence wave field (lives in the Analysis tab) ───────────
+        await page.locator('#ua-aside-tabs .ua-tab-btn[data-ua-tab="analysis"]').click();
+        await page.waitForTimeout(150);
+        await page.check('#ua-zone-dashboard .ua-zd-wave');
+        await page.waitForTimeout(300);   // let the ripple animate a few frames
+        expect(await page.evaluate(() => window.__ua.globe.getWaveFieldVisible()),
+            'wave field turned on').toBe(true);
+        await page.uncheck('#ua-zone-dashboard .ua-zd-wave');
+        expect(await page.evaluate(() => window.__ua.globe.getWaveFieldVisible()),
+            'wave field turned off').toBe(false);
+
+        // Changing the reference ballistic coefficient must not throw.
+        await page.fill('#ua-zone-dashboard .ua-zd-bc', '0.05');
+        await page.dispatchEvent('#ua-zone-dashboard .ua-zd-bc', 'change');
+        await page.waitForTimeout(150);
+
+        const filtered = errors.filter(e => !/blue-marble|three-globe/i.test(e.text || ''));
+        if (filtered.length) console.error('Console errors:', filtered);
+        expect(filtered, 'no console errors while toggling density/turbulence overlays')
+            .toHaveLength(0);
+    });
 });
