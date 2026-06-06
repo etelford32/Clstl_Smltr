@@ -93,6 +93,44 @@ export class HeroMesh {
     getMesh()   { return this._mesh; }
     getNorad()  { return this._norad; }
 
+    /**
+     * Repoint this mesh at a different NORAD. The FocusMesh driver reuses
+     * a single HeroMesh across selections rather than allocating one per
+     * satellite, so it needs to swap the tracked body. Resetting the
+     * finite-diff state forces the first post-swap frame onto the stable
+     * horizon-axis fallback instead of differencing two unrelated orbits.
+     */
+    setNorad(norad) {
+        if (!Number.isFinite(norad) || norad === this._norad) return;
+        this._norad = norad;
+        this._prevX = this._prevY = this._prevZ = NaN;
+    }
+
+    /**
+     * Adjust the uniform model scale at runtime. The tick rebuilds its
+     * transform from `_scaleM` every frame, so updating that matrix is
+     * all that's needed — the change lands on the next tick. Used by the
+     * FocusMesh to size a glyph to the selected object's RCS bucket.
+     */
+    setModelScale(scale) {
+        if (!Number.isFinite(scale) || scale <= 0 || scale === this._modelScale) return;
+        this._modelScale = scale;
+        this._scaleM.makeScale(scale, scale, scale);
+    }
+
+    /**
+     * Swap the mesh geometry — used when the FocusMesh rebuilds a glyph
+     * sized to a newly-selected object's class. Disposes the previous
+     * geometry so cycling through selections doesn't leak buffers.
+     */
+    setGeometry(geometry) {
+        if (!geometry || geometry === this._geometry) return;
+        const old = this._geometry;
+        this._geometry = geometry;
+        this._mesh.geometry = geometry;
+        old?.dispose();
+    }
+
     tick(simTimeMs) {
         if (!this._visible) return;
 
