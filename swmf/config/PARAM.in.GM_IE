@@ -162,6 +162,30 @@ ${IMF_FILE}		NameUpstreamFile
 1			nOrder
 Rusanov			TypeFlux
 
+! Boris semi-relativistic correction — ON FOR THE ENTIRE RUN, set here in
+! session 1 and persisted (SWMF carries parameters forward across #RUN
+! boundaries until overridden). Boris caps the artificial fast/Alfvén speed
+! where B is huge and rho is low (near Earth), which otherwise forces a
+! vanishing time step or a blow-up.
+!
+! CRITICAL — load-bearing placement: Boris MUST be active during the
+! steady-state relaxation, not switched on only at the time-accurate session.
+! Boris redefines the conserved momentum (it folds in the v×B electric-field
+! term). A previous revision enabled #BORIS only in session 3; the relaxed
+! state then carried the NON-Boris momentum definition, so the first
+! time-accurate step detonated the inner-boundary cell at r~3.5 R_E
+! (NaN from advance_explicit, density → 1e100), independent of nStage/CFL.
+! Relaxing WITH Boris on keeps the conserved state consistent across the
+! transition. Factor 0.02 follows the validated SWPC Geospace recipe.
+#BORIS
+T			UseBorisCorrection
+0.02			BorisClightFactor
+
+! Positivity floor, also active for the whole run — BATSRUS clips pressure
+! here instead of crashing on a storm-time negative-pressure transient.
+#MINIMUMPRESSURE
+1e-5			pMinDim [nPa]
+
 ! Non-conservative pressure update inside 6 R_E (standard for storm-time
 ! magnetosphere stability), conservative beyond. From the validated reference
 ! SWMFsoftware/BATSRUS Param/EARTH/PARAM.in.
@@ -249,9 +273,9 @@ mc3			TypeLimiter
 
 ! ════════════════════════════════════════════════════════════════════════════
 !  SESSION 3 — time-accurate production phase. Drive the storm from the relaxed
-!  steady state. Boris correction caps the near-Earth fast-mode speed so a
-!  1-stage explicit step stays stable at the large dipole field; a minimum
-!  pressure floor guards against storm-time negative pressure.
+!  steady state. The Boris correction and minimum-pressure floor are ALREADY
+!  active here — they were set in session 1 and persist across #RUN. Do NOT
+!  re-enable Boris only at this session: see the CRITICAL note on #BORIS above.
 ! ════════════════════════════════════════════════════════════════════════════
 #RUN ###########################################################################
 
@@ -277,25 +301,14 @@ T			DoSaveRestart
 
 #BEGIN_COMP GM ───────────────────────────────────────────────────────────────
 
-! Boris semi-relativistic correction: reduces the artificial Alfvén/fast speed
-! where B is huge and ρ is low (near Earth), which would otherwise force a
-! vanishing time step or blow up. Core of the SWPC time-accurate stability
-! recipe. Factor 0.01 follows PARAM.in_SWPC_simple_init.
-#BORIS
-T			UseBorisCorrection
-0.01			BorisClightFactor
-
-! Positivity floor — BATSRUS clips pressure here instead of crashing on a
-! storm-time negative-pressure transient.
-#MINIMUMPRESSURE
-1e-5			pMinDim [nPa]
-
-! 2-stage Runge-Kutta at a conservative CFL. NOTE: the SWPC recipe uses
-! 1-stage + CflExpl 0.85, but that leans on SWPC's coupled IM (ring-current)
-! pressure support and finer inner grid for inner-magnetosphere stability.
-! This GM+IE-only run on a coarser grid blows up (NaN from advance_explicit
-! near r~3.5 R_E) under a 1-stage step once storm driving ramps; RK2 with a
-! lower CFL is the robust integrator for 2nd-order spatial here.
+! Boris correction and #MINIMUMPRESSURE are inherited from session 1 (SWMF
+! persists parameters across #RUN) — intentionally NOT repeated here so the
+! relaxed steady state and this time-accurate phase share one consistent,
+! Boris-aware conserved state. See the CRITICAL #BORIS note in session 1.
+!
+! 2-stage Runge-Kutta at a conservative CFL. The SWPC reference also offers a
+! 1-stage + CflExpl 0.85 variant; with Boris consistent across the transition
+! either is stable, and RK2/0.6 is the more robust 2nd-order choice here.
 #TIMESTEPPING
 2			nStage
 0.6			CflExpl
