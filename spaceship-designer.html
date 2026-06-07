@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Space Ship Designer · Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/spaceship-designer">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/spaceship-designer">
+<meta property="og:title" content="Space Ship Designer — Parkers Physics">
+<meta property="og:description" content="Design a fully customizable rocket — stages, engines, propellants, cockpit and livery — in 3D, then fly a physically real launch to orbit.">
+<meta property="og:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+<meta property="og:image:alt" content="Parkers Physics — real-time astrophysics simulations">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Space Ship Designer — Parkers Physics">
+<meta name="twitter:description" content="Build a rocket in 3D — stages, engines, propellants, cockpit, livery — then launch it on a real ascent trajectory.">
+<meta name="twitter:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+<meta name="description" content="Space Ship Designer — build a fully customizable launch vehicle in 3D and fly a physically grounded surface-to-orbit ascent. Tune stages, engines, propellants and cockpit; sign in to unlock advanced parts and save your fleet.">
+<script type="importmap">
+{"imports":{
+  "three": "./js/vendor/three-0.160.0/three.module.js",
+  "three/addons/": "./js/vendor/three-0.160.0/jsm/"
+}}
+</script>
+<style>
+:root{
+  --c-accent:#00c6ff; --c-accent-rgb:0,200,255;
+  --c-accent-soft:rgba(0,200,255,.14);
+  --c-accent-border:rgba(0,200,255,.24);
+  --c-warn:#ffb066; --c-good:#5fe39a; --c-bad:#ff6b7d;
+  --c-surface-1:rgba(8,12,26,.86);
+  --c-surface-2:rgba(2,4,12,.94);
+  --c-panel:rgba(10,15,28,.72);
+  --c-line:rgba(120,160,200,.16);
+  --c-text:#d6dee6; --c-text-2:#9fb4c4; --c-text-mut:#6f8696;
+  --r-sm:5px; --r-md:8px; --r-lg:12px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:radial-gradient(1200px 800px at 70% -10%, #16233f 0%, #060a14 55%, #03050b 100%);
+  color:var(--c-text);
+  font-family:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  min-height:100vh;
+}
+a{color:var(--c-accent);text-decoration:none}
+
+.ssd-hero{max-width:1480px;margin:0 auto;padding:22px 20px 6px}
+.ssd-hero h1{font-size:clamp(22px,3.4vw,34px);margin:0 0 4px;letter-spacing:-.02em}
+.ssd-hero .ssd-badge{font-size:11px;font-weight:700;letter-spacing:.08em;color:#04121c;
+  background:var(--c-accent);padding:2px 8px;border-radius:999px;vertical-align:middle;margin-left:8px}
+.ssd-hero p{color:var(--c-text-2);margin:6px 0 0;max-width:760px;font-size:14px;line-height:1.5}
+
+.ssd-app{
+  max-width:1480px;margin:14px auto 60px;padding:0 20px;
+  display:grid;grid-template-columns:320px 1fr 340px;gap:16px;align-items:start;
+}
+@media (max-width:1180px){.ssd-app{grid-template-columns:1fr;}}
+
+.ssd-col{display:flex;flex-direction:column;gap:14px;min-width:0}
+.ssd-card{background:var(--c-panel);border:1px solid var(--c-line);border-radius:var(--r-lg);
+  backdrop-filter:blur(8px);overflow:hidden}
+.ssd-card>h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--c-text-2);
+  margin:0;padding:12px 14px;border-bottom:1px solid var(--c-line);display:flex;justify-content:space-between;align-items:center}
+.ssd-card>.ssd-body{padding:12px 14px;display:flex;flex-direction:column;gap:11px}
+
+.ssd-field{display:flex;flex-direction:column;gap:4px}
+.ssd-field>label{font-size:11px;color:var(--c-text-mut);text-transform:uppercase;letter-spacing:.05em}
+.ssd-field .ssd-row{display:flex;align-items:center;gap:8px}
+input[type=text],input[type=number],select{
+  width:100%;background:rgba(2,6,14,.7);color:var(--c-text);
+  border:1px solid var(--c-line);border-radius:var(--r-sm);padding:7px 9px;font-size:13px;font-family:inherit}
+input[type=range]{width:100%;accent-color:var(--c-accent)}
+select:disabled,option:disabled{color:var(--c-text-mut)}
+input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
+.ssd-rangeval{font-size:12px;color:var(--c-text-2);min-width:54px;text-align:right;font-variant-numeric:tabular-nums}
+
+.ssd-btn{cursor:pointer;border:1px solid var(--c-accent-border);background:var(--c-accent-soft);
+  color:var(--c-text);border-radius:var(--r-sm);padding:8px 12px;font-size:13px;font-weight:600;font-family:inherit;transition:.15s}
+.ssd-btn:hover{background:rgba(0,200,255,.22)}
+.ssd-btn.ssd-primary{background:var(--c-accent);color:#04121c;border-color:var(--c-accent)}
+.ssd-btn.ssd-primary:hover{filter:brightness(1.08)}
+.ssd-btn.ssd-ghost{background:transparent}
+.ssd-btn:disabled{opacity:.5;cursor:not-allowed}
+.ssd-btnrow{display:flex;gap:8px;flex-wrap:wrap}
+
+.ssd-stage{border:1px solid var(--c-line);border-radius:var(--r-md);padding:10px;display:flex;flex-direction:column;gap:9px;background:rgba(4,8,18,.4)}
+.ssd-stage>.ssd-stagehd{display:flex;justify-content:space-between;align-items:center;font-size:12px;font-weight:700;color:var(--c-accent)}
+.ssd-stage .ssd-x{cursor:pointer;color:var(--c-text-mut);font-size:16px;line-height:1;border:none;background:none}
+.ssd-stage .ssd-x:hover{color:var(--c-bad)}
+.ssd-grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+
+.ssd-note{font-size:11px;color:var(--c-text-mut);line-height:1.4}
+
+/* Canvas / stage */
+.ssd-stagewrap{position:relative;border:1px solid var(--c-line);border-radius:var(--r-lg);overflow:hidden;
+  background:#0a1422;min-height:480px;height:62vh}
+#ssd-canvas{width:100%;height:100%;display:block}
+.ssd-hud{position:absolute;top:12px;left:12px;display:flex;gap:18px;background:rgba(2,6,14,.55);
+  border:1px solid var(--c-line);border-radius:var(--r-md);padding:8px 14px;backdrop-filter:blur(6px);
+  font-variant-numeric:tabular-nums;pointer-events:none}
+.ssd-hud .ssd-h{display:flex;flex-direction:column}
+.ssd-hud .ssd-h .k{font-size:10px;color:var(--c-text-mut);text-transform:uppercase;letter-spacing:.06em}
+.ssd-hud .ssd-h .v{font-size:18px;font-weight:700}
+.ssd-viewbar{position:absolute;top:12px;right:12px;display:flex;gap:6px}
+.ssd-viewbar button{font-size:11px;padding:5px 9px}
+.ssd-launchbar{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);display:flex;gap:10px}
+.ssd-phase{position:absolute;bottom:14px;right:14px;font-size:12px;color:var(--c-accent);letter-spacing:.1em;text-transform:uppercase}
+
+/* Stats */
+.ssd-stat{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;padding:3px 0;border-bottom:1px dashed rgba(120,160,200,.10)}
+.ssd-stat .k{color:var(--c-text-2)}
+.ssd-stat .v{font-weight:700;font-variant-numeric:tabular-nums}
+.ssd-dvbar{height:9px;border-radius:999px;background:rgba(2,6,14,.6);overflow:hidden;margin-top:3px}
+.ssd-dvbar>span{display:block;height:100%;background:linear-gradient(90deg,#00c6ff,#5fe39a)}
+
+.ssd-grade{font-size:42px;font-weight:800;line-height:1}
+.ssd-grade.good{color:var(--c-good)} .ssd-grade.warn{color:var(--c-warn)} .ssd-grade.bad{color:var(--c-bad)}
+
+.ssd-hangar-item{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px;
+  padding:7px 9px;border:1px solid var(--c-line);border-radius:var(--r-sm);background:rgba(4,8,18,.4)}
+.ssd-hangar-item .nm{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ssd-hangar-item .acts{display:flex;gap:6px;flex-shrink:0}
+.ssd-hangar-item button{font-size:11px;padding:3px 7px}
+
+.ssd-lockmsg{font-size:12px;color:var(--c-warn);background:rgba(255,176,102,.08);
+  border:1px solid rgba(255,176,102,.22);border-radius:var(--r-sm);padding:8px 10px;line-height:1.45}
+.ssd-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--c-surface-2);
+  border:1px solid var(--c-accent-border);border-radius:var(--r-md);padding:10px 16px;font-size:13px;
+  z-index:9999;opacity:0;transition:opacity .25s;pointer-events:none}
+.ssd-toast.show{opacity:1}
+.ssd-toast.err{border-color:rgba(255,107,125,.5);color:#ffd0d6}
+.ssd-pill{font-size:10px;font-weight:700;letter-spacing:.05em;padding:1px 6px;border-radius:999px;
+  background:rgba(0,200,255,.14);color:var(--c-accent);text-transform:uppercase}
+</style>
+</head>
+<body>
+
+<!-- ─── Nav (shared via nav.js) ──────────────────────────────── -->
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("spaceship-designer");</script>
+
+<header class="ssd-hero">
+  <h1>Space Ship Designer<span class="ssd-badge">NEW</span></h1>
+  <p>Build a launch vehicle from the engines up — stages, propellants, thrusters, nosecone and cockpit — watch it
+     render in 3D, then fly a physically real surface-to-orbit ascent. <strong id="ssd-signin-note"></strong></p>
+</header>
+
+<div class="ssd-app">
+
+  <!-- ░░░ LEFT: design controls ░░░ -->
+  <div class="ssd-col" id="ssd-controls">
+
+    <div class="ssd-card">
+      <h2>Vehicle</h2>
+      <div class="ssd-body">
+        <div class="ssd-field"><label>Name</label>
+          <input type="text" id="ssd-name" maxlength="60" value="Aurora I"></div>
+        <div class="ssd-grid2">
+          <div class="ssd-field"><label>Launch body</label>
+            <select id="ssd-body"></select></div>
+          <div class="ssd-field"><label>Target orbit (km)</label>
+            <input type="number" id="ssd-alt" min="80" max="2000" step="10" value="200"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="ssd-card">
+      <h2>Stages <button class="ssd-btn ssd-ghost" id="ssd-add-stage" style="font-size:11px;padding:3px 9px">+ Stage</button></h2>
+      <div class="ssd-body" id="ssd-stages"></div>
+      <div class="ssd-body" style="padding-top:0"><div class="ssd-note" id="ssd-stage-hint"></div></div>
+    </div>
+
+    <div class="ssd-card">
+      <h2>Payload &amp; Nose</h2>
+      <div class="ssd-body">
+        <div class="ssd-field"><label>Nosecone</label><select id="ssd-nose"></select></div>
+        <div class="ssd-grid2">
+          <div class="ssd-field"><label>Payload (kg)</label>
+            <input type="number" id="ssd-payload" min="0" max="200000" step="500" value="8000"></div>
+          <div class="ssd-field"><label>Nose length (m)</label>
+            <input type="number" id="ssd-fairing" min="2" max="40" step="0.5" value="11"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="ssd-card">
+      <h2>Cockpit &amp; Crew</h2>
+      <div class="ssd-body">
+        <div class="ssd-field"><label>Flight deck</label><select id="ssd-cockpit"></select></div>
+        <div class="ssd-grid2">
+          <div class="ssd-field"><label>Crew</label>
+            <input type="number" id="ssd-crew" min="0" max="12" step="1" value="0"></div>
+          <div class="ssd-field"><label>Windows</label>
+            <input type="number" id="ssd-windows" min="0" max="8" step="1" value="2"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="ssd-card">
+      <h2>Fins &amp; Livery</h2>
+      <div class="ssd-body">
+        <div class="ssd-grid2">
+          <div class="ssd-field"><label>Fins</label><select id="ssd-fin"></select></div>
+          <div class="ssd-field"><label>Fin count</label>
+            <input type="number" id="ssd-fincount" min="2" max="8" step="1" value="4"></div>
+        </div>
+        <div class="ssd-grid2">
+          <div class="ssd-field"><label>Livery</label><select id="ssd-livery"></select></div>
+          <div class="ssd-field"><label>Pattern</label><select id="ssd-pattern"></select></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ░░░ CENTER: 3D + launch ░░░ -->
+  <div class="ssd-col">
+    <div class="ssd-stagewrap">
+      <canvas id="ssd-canvas"></canvas>
+      <div class="ssd-hud">
+        <div class="ssd-h"><span class="k">Altitude</span><span class="v" id="hud-alt">0 km</span></div>
+        <div class="ssd-h"><span class="k">Velocity</span><span class="v" id="hud-vel">0.00 km/s</span></div>
+        <div class="ssd-h"><span class="k">Throttle</span><span class="v" id="hud-thr">0%</span></div>
+      </div>
+      <div class="ssd-viewbar">
+        <button class="ssd-btn ssd-ghost" data-view="3q">¾</button>
+        <button class="ssd-btn ssd-ghost" data-view="front">Front</button>
+        <button class="ssd-btn ssd-ghost" data-view="side">Side</button>
+        <button class="ssd-btn ssd-ghost" data-view="top">Top</button>
+        <button class="ssd-btn ssd-ghost" id="ssd-rotate">↻ Spin</button>
+      </div>
+      <div class="ssd-launchbar">
+        <button class="ssd-btn ssd-primary" id="ssd-launch">🚀 Launch</button>
+        <button class="ssd-btn ssd-ghost" id="ssd-reset-flight">Reset</button>
+      </div>
+      <div class="ssd-phase" id="ssd-phase"></div>
+    </div>
+    <div class="ssd-card">
+      <h2>Flight Result</h2>
+      <div class="ssd-body" id="ssd-result">
+        <div class="ssd-note">Press <strong>Launch</strong> to fly your design to orbit. The ascent uses the same
+          validated integrator as the Launch Planner — drag, gravity loss and the rocket equation are all real.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ░░░ RIGHT: stats + hangar ░░░ -->
+  <div class="ssd-col">
+    <div class="ssd-card">
+      <h2>Performance</h2>
+      <div class="ssd-body" id="ssd-stats"></div>
+    </div>
+
+    <div class="ssd-card">
+      <h2>Hangar <span class="ssd-pill" id="ssd-hangar-tag">local</span></h2>
+      <div class="ssd-body" id="ssd-hangar">
+        <div class="ssd-btnrow">
+          <button class="ssd-btn ssd-primary" id="ssd-save" style="flex:1">Save design</button>
+        </div>
+        <div id="ssd-hangar-list" style="display:flex;flex-direction:column;gap:7px"></div>
+        <div class="ssd-lockmsg" id="ssd-hangar-lock" style="display:none"></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="ssd-toast" id="ssd-toast"></div>
+
+<script type="module">
+import { auth } from './js/auth.js';
+import { getSupabase } from './js/supabase-config.js';
+import {
+  defaultDesign, computeStats, runAscent, gradeAscent,
+  PROPELLANTS, ENGINE_CATALOG, NOSECONE_TYPES, FIN_TYPES, COCKPIT_LAYOUTS,
+  LIVERIES, PATTERNS, LAUNCH_BODY_OPTIONS,
+} from './js/spaceship-designer-engine.js';
+import { createRocketScene } from './js/spaceship-designer-3d.js';
+import * as store from './js/spaceship-designer-store.js';
+
+// ── State ──────────────────────────────────────────────────────────────────
+let design = store.loadDraft() || defaultDesign();
+let signedIn = false;
+let scene = null;
+let rebuildTimer = 0;
+
+const $ = (id) => document.getElementById(id);
+const toastEl = $('ssd-toast');
+function toast(msg, err = false) {
+  toastEl.textContent = msg;
+  toastEl.className = 'ssd-toast show' + (err ? ' err' : '');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { toastEl.className = 'ssd-toast'; }, 2600);
+}
+
+// Populate a <select> from a catalog map. Advanced entries are disabled (and
+// tagged) when the visitor is signed out — that is the sign-in reward.
+function fillSelect(el, entries, selectedId) {
+  el.innerHTML = '';
+  for (const e of entries) {
+    const opt = document.createElement('option');
+    opt.value = e.id;
+    const locked = e.advanced && !signedIn;
+    opt.textContent = (e.label || e.name) + (e.advanced ? (locked ? ' 🔒' : ' ✦') : '');
+    if (locked) opt.disabled = true;
+    el.appendChild(opt);
+  }
+  el.value = selectedId;
+  // If the selected value is now locked/invalid, fall back to the first allowed.
+  if (el.value !== selectedId) {
+    const firstOk = entries.find((e) => !(e.advanced && !signedIn));
+    if (firstOk) el.value = firstOk.id;
+  }
+}
+
+// ── Stage editor ─────────────────────────────────────────────────────────────
+function renderStages() {
+  const wrap = $('ssd-stages');
+  wrap.innerHTML = '';
+  design.stages.forEach((s, i) => {
+    const div = document.createElement('div');
+    div.className = 'ssd-stage';
+    div.innerHTML = `
+      <div class="ssd-stagehd"><span>Stage ${i + 1}${i === 0 ? ' · booster' : ''}</span>
+        ${design.stages.length > 1 ? `<button class="ssd-x" data-rm="${i}" title="Remove stage">×</button>` : ''}</div>
+      <div class="ssd-field"><label>Engine</label><select data-k="engineId" data-i="${i}"></select></div>
+      <div class="ssd-grid2">
+        <div class="ssd-field"><label>Engines</label>
+          <input type="number" data-k="engineCount" data-i="${i}" min="1" max="45" step="1" value="${s.engineCount}"></div>
+        <div class="ssd-field"><label>Propellant</label><select data-k="propellantId" data-i="${i}"></select></div>
+      </div>
+      <div class="ssd-grid2">
+        <div class="ssd-field"><label>Diameter (m)</label>
+          <input type="number" data-k="diameter_m" data-i="${i}" min="0.5" max="18" step="0.1" value="${s.diameter_m}"></div>
+        <div class="ssd-field"><label>Length (m)</label>
+          <input type="number" data-k="length_m" data-i="${i}" min="2" max="120" step="0.5" value="${s.length_m}"></div>
+      </div>
+      <div class="ssd-field"><label>Throttle <span class="ssd-rangeval" data-thrval="${i}">${Math.round((s.throttle ?? 1) * 100)}%</span></label>
+        <input type="range" data-k="throttle" data-i="${i}" min="0.4" max="1" step="0.05" value="${s.throttle ?? 1}"></div>`;
+    wrap.appendChild(div);
+    fillSelect(div.querySelector('[data-k="engineId"]'), Object.values(ENGINE_CATALOG), s.engineId);
+    fillSelect(div.querySelector('[data-k="propellantId"]'), Object.values(PROPELLANTS), s.propellantId);
+  });
+  // Sign-out users are capped at 2 stages.
+  const addBtn = $('ssd-add-stage');
+  const capped = !signedIn && design.stages.length >= 2;
+  addBtn.disabled = capped || design.stages.length >= 4;
+  $('ssd-stage-hint').textContent = capped
+    ? 'Sign in to add a third stage and unlock advanced engines, propellants, cockpits and liveries.'
+    : 'Stack up to 4 stages. Stage 1 fires at liftoff.';
+}
+
+// ── Read DOM → design ────────────────────────────────────────────────────────
+function readControls() {
+  design.name = $('ssd-name').value || 'Untitled';
+  design.bodyId = $('ssd-body').value;
+  design.targetAltKm = +$('ssd-alt').value || 200;
+  design.payload = {
+    mass_kg: +$('ssd-payload').value || 0,
+    nosecone: $('ssd-nose').value,
+    fairingLen_m: +$('ssd-fairing').value || 8,
+  };
+  design.cockpit = {
+    layout: $('ssd-cockpit').value,
+    crew: +$('ssd-crew').value || 0,
+    windows: +$('ssd-windows').value || 0,
+  };
+  design.fins = { type: $('ssd-fin').value, count: +$('ssd-fincount').value || 4 };
+  design.livery = { id: $('ssd-livery').value, pattern: $('ssd-pattern').value };
+}
+
+// ── Stats panel ──────────────────────────────────────────────────────────────
+function fmtMass(kg) {
+  if (kg >= 1e6) return (kg / 1e6).toFixed(2) + ' kt';
+  if (kg >= 1e3) return (kg / 1e3).toFixed(1) + ' t';
+  return Math.round(kg) + ' kg';
+}
+function renderStats() {
+  const st = computeStats(design);
+  const twrTone = st.liftoffTWR >= 1.2 ? 'var(--c-good)' : st.liftoffTWR >= 1 ? 'var(--c-warn)' : 'var(--c-bad)';
+  const rows = [
+    ['Height', st.height_m.toFixed(1) + ' m'],
+    ['Max diameter', st.maxDiameter_m.toFixed(1) + ' m'],
+    ['Liftoff mass', fmtMass(st.totalWet_kg)],
+    ['Propellant', fmtMass(st.propMass_kg)],
+    ['Payload + crew', fmtMass(st.payload_kg)],
+    ['Liftoff thrust', (st.liftoffThrust_kN / 1000).toFixed(2) + ' MN'],
+  ];
+  let html = rows.map(([k, v]) => `<div class="ssd-stat"><span class="k">${k}</span><span class="v">${v}</span></div>`).join('');
+  html += `<div class="ssd-stat"><span class="k">Liftoff TWR</span><span class="v" style="color:${twrTone}">${st.liftoffTWR.toFixed(2)}</span></div>`;
+  html += `<div class="ssd-stat" style="border:none"><span class="k">Total Δv</span><span class="v">${st.totalDv_kms.toFixed(2)} km/s</span></div>`;
+  // Per-stage Δv bars.
+  const maxDv = Math.max(...st.stages.map((s) => s.dv_kms), 0.1);
+  st.stages.forEach((s, i) => {
+    html += `<div style="margin-top:6px"><div class="ssd-stat" style="border:none;padding-bottom:1px">
+      <span class="k">Stage ${i + 1} Δv</span><span class="v">${s.dv_kms.toFixed(2)} km/s</span></div>
+      <div class="ssd-dvbar"><span style="width:${Math.min(100, s.dv_kms / maxDv * 100)}%"></span></div></div>`;
+  });
+  $('ssd-stats').innerHTML = html;
+}
+
+// ── 3D rebuild (debounced) ───────────────────────────────────────────────────
+function scheduleRebuild() {
+  clearTimeout(rebuildTimer);
+  rebuildTimer = setTimeout(() => { scene && scene.build(design); }, 120);
+}
+
+// ── Full refresh after any change ────────────────────────────────────────────
+function refresh({ rebuild = true } = {}) {
+  renderStats();
+  if (rebuild) scheduleRebuild();
+  store.saveDraft(design);
+}
+
+// ── Launch ───────────────────────────────────────────────────────────────────
+async function doLaunch() {
+  const btn = $('ssd-launch');
+  btn.disabled = true;
+  scene.reset();
+  scene.build(design);
+  const result = runAscent(design);
+  try {
+    await scene.launch(result);
+  } finally {
+    btn.disabled = false;
+  }
+  showResult(result);
+}
+
+function showResult(result) {
+  const g = gradeAscent(result);
+  const km = (x) => (x ?? 0).toFixed(0);
+  const ks = (x) => (x ?? 0).toFixed(2);
+  const statusLabel = {
+    orbit: 'Orbit achieved', 'fuel-out': 'MECO — out of propellant',
+    crashed: 'Crashed', 'time-out': 'Flight timed out', invalid: 'Invalid design',
+  }[result.status] || result.status;
+  $('ssd-result').innerHTML = `
+    <div style="display:flex;gap:16px;align-items:center">
+      <div class="ssd-grade ${g.tone}">${g.grade}</div>
+      <div><div style="font-weight:700">${statusLabel}</div>
+        <div class="ssd-note">${g.label}</div></div>
+    </div>
+    <div class="ssd-stat"><span class="k">Apoapsis at MECO</span><span class="v">${km(result.final_alt_km)} km</span></div>
+    <div class="ssd-stat"><span class="k">Velocity at MECO</span><span class="v">${ks(result.final_vt_kms)} km/s</span></div>
+    <div class="ssd-stat"><span class="k">Orbital speed needed</span><span class="v">${ks(result.v_orb_circ_kms)} km/s</span></div>
+    <div class="ssd-stat"><span class="k">Δv used</span><span class="v">${ks(result.dv_used_kms)} km/s</span></div>
+    <div class="ssd-stat"><span class="k">Gravity loss</span><span class="v">${ks(result.dv_grav_loss_kms)} km/s</span></div>
+    <div class="ssd-stat"><span class="k">Drag loss</span><span class="v">${ks(result.dv_drag_loss_kms)} km/s</span></div>
+    <div class="ssd-stat" style="border:none"><span class="k">Max-Q</span><span class="v">${(result.max_q_kPa ?? 0).toFixed(0)} kPa</span></div>`;
+}
+
+// ── Hangar (save / load) ─────────────────────────────────────────────────────
+async function refreshHangar() {
+  const tag = $('ssd-hangar-tag');
+  const lock = $('ssd-hangar-lock');
+  const list = $('ssd-hangar-list');
+  if (!signedIn) {
+    tag.textContent = 'local';
+    lock.style.display = '';
+    lock.innerHTML = 'You can design and fly freely. <a href="signin.html?next=%2Fspaceship-designer.html">Sign in</a> to save a fleet to the cloud and unlock advanced parts. Your current design is kept as a local draft.';
+    list.innerHTML = '';
+    return;
+  }
+  tag.textContent = 'cloud';
+  lock.style.display = 'none';
+  const ships = await store.listDesigns();
+  list.innerHTML = ships.length ? '' : '<div class="ssd-note">No saved rockets yet. Build one and hit Save.</div>';
+  for (const ship of ships) {
+    const row = document.createElement('div');
+    row.className = 'ssd-hangar-item';
+    const score = ship.best_score ? ` · best ${Math.round(ship.best_score)}` : '';
+    row.innerHTML = `<span class="nm" title="${ship.name}">${ship.name}${score}</span>
+      <span class="acts"><button class="ssd-btn ssd-ghost" data-load>Load</button>
+      <button class="ssd-btn ssd-ghost" data-del>Del</button></span>`;
+    row.querySelector('[data-load]').onclick = () => loadShip(ship.design_data);
+    row.querySelector('[data-del]').onclick = async () => {
+      const r = await store.deleteDesign(ship.id);
+      if (r.ok) { toast('Deleted'); refreshHangar(); } else toast('Delete failed', true);
+    };
+    list.appendChild(row);
+  }
+}
+
+function loadShip(data) {
+  if (!data || !data.stages) { toast('Could not read design', true); return; }
+  design = JSON.parse(JSON.stringify(data));
+  hydrateControls();
+  refresh();
+  toast('Loaded "' + (design.name || 'design') + '"');
+}
+
+async function doSave() {
+  readControls();
+  if (!signedIn) {
+    store.saveDraft(design);
+    toast('Saved local draft. Sign in to keep a cloud fleet.');
+    return;
+  }
+  const best = Math.round((runAscent(design).final_alt_km) || 0);
+  const r = await store.saveDesign(design, { bestScore: best });
+  if (r.ok) { toast('Saved "' + design.name + '" to your hangar'); refreshHangar(); }
+  else if (r.limitReached) toast('Saved-rocket limit reached for your plan.', true);
+  else toast('Save failed: ' + (r.error || 'unknown'), true);
+}
+
+// ── Hydrate controls from current design ─────────────────────────────────────
+function hydrateControls() {
+  $('ssd-name').value = design.name || '';
+  fillSelect($('ssd-body'), LAUNCH_BODY_OPTIONS, design.bodyId);
+  $('ssd-alt').value = design.targetAltKm || 200;
+  fillSelect($('ssd-nose'), Object.values(NOSECONE_TYPES), design.payload?.nosecone || 'ogive');
+  $('ssd-payload').value = design.payload?.mass_kg ?? 15000;
+  $('ssd-fairing').value = design.payload?.fairingLen_m ?? 11;
+  fillSelect($('ssd-cockpit'), Object.values(COCKPIT_LAYOUTS), design.cockpit?.layout || 'none');
+  $('ssd-crew').value = design.cockpit?.crew ?? 0;
+  $('ssd-windows').value = design.cockpit?.windows ?? 2;
+  fillSelect($('ssd-fin'), Object.values(FIN_TYPES), design.fins?.type || 'grid');
+  $('ssd-fincount').value = design.fins?.count ?? 4;
+  fillSelect($('ssd-livery'), Object.values(LIVERIES), design.livery?.id || 'classic');
+  fillSelect($('ssd-pattern'), PATTERNS.map((p) => ({ id: p, name: p[0].toUpperCase() + p.slice(1) })), design.livery?.pattern || 'solid');
+  renderStages();
+}
+
+// ── Wire events ──────────────────────────────────────────────────────────────
+function wire() {
+  // Top-level controls.
+  ['ssd-name', 'ssd-body', 'ssd-alt', 'ssd-nose', 'ssd-payload', 'ssd-fairing',
+   'ssd-cockpit', 'ssd-crew', 'ssd-windows', 'ssd-fin', 'ssd-fincount',
+   'ssd-livery', 'ssd-pattern'].forEach((id) => {
+    $(id).addEventListener('input', () => { readControls(); refresh(); });
+  });
+
+  // Stage controls (event delegation on the container).
+  $('ssd-stages').addEventListener('input', (e) => {
+    const t = e.target;
+    const i = +t.dataset.i, k = t.dataset.k;
+    if (Number.isNaN(i) || !k) return;
+    let val = t.value;
+    if (k !== 'engineId' && k !== 'propellantId') val = +val;
+    design.stages[i][k] = val;
+    if (k === 'throttle') {
+      const lab = $('ssd-stages').querySelector(`[data-thrval="${i}"]`);
+      if (lab) lab.textContent = Math.round(val * 100) + '%';
+    }
+    // When picking an engine, default its propellant to match.
+    if (k === 'engineId') {
+      const e2 = ENGINE_CATALOG[val];
+      if (e2?.propellant) {
+        design.stages[i].propellantId = e2.propellant;
+        const sel = $('ssd-stages').querySelector(`select[data-k="propellantId"][data-i="${i}"]`);
+        if (sel) sel.value = e2.propellant;
+      }
+    }
+    refresh();
+  });
+  $('ssd-stages').addEventListener('click', (e) => {
+    const rm = e.target.dataset.rm;
+    if (rm !== undefined && design.stages.length > 1) {
+      design.stages.splice(+rm, 1);
+      renderStages(); refresh();
+    }
+  });
+  $('ssd-add-stage').addEventListener('click', () => {
+    if (!signedIn && design.stages.length >= 2) {
+      toast('Sign in to add a third stage.', true); return;
+    }
+    if (design.stages.length >= 4) return;
+    const top = design.stages[design.stages.length - 1];
+    design.stages.push({
+      diameter_m: Math.max(1.5, top.diameter_m * 0.7), length_m: 8,
+      engineId: top.engineId, engineCount: 1, propellantId: top.propellantId,
+      fillFrac: 0.8, dryFrac: 0.1, throttle: 1,
+    });
+    renderStages(); refresh();
+  });
+
+  // View + flight controls.
+  document.querySelectorAll('[data-view]').forEach((b) =>
+    b.addEventListener('click', () => scene.setView(b.dataset.view)));
+  let spinning = false;
+  $('ssd-rotate').addEventListener('click', () => {
+    spinning = !spinning; scene.setAutoRotate(spinning);
+    $('ssd-rotate').classList.toggle('ssd-primary', spinning);
+  });
+  $('ssd-launch').addEventListener('click', doLaunch);
+  $('ssd-reset-flight').addEventListener('click', () => {
+    scene.reset(); scene.build(design);
+    $('hud-alt').textContent = '0 km'; $('hud-vel').textContent = '0.00 km/s';
+    $('hud-thr').textContent = '0%'; $('ssd-phase').textContent = '';
+  });
+  $('ssd-save').addEventListener('click', doSave);
+}
+
+// ── Boot ─────────────────────────────────────────────────────────────────────
+(async function boot() {
+  scene = createRocketScene($('ssd-canvas'), {
+    onTick: (s) => {
+      $('hud-alt').textContent = (s.altKm ?? 0).toFixed(s.altKm >= 100 ? 0 : 1) + ' km';
+      $('hud-vel').textContent = (s.vKms ?? 0).toFixed(2) + ' km/s';
+      $('hud-thr').textContent = Math.round((s.throttle ?? 0) * 100) + '%';
+    },
+    onPhase: (p) => { $('ssd-phase').textContent = p === 'idle' ? '' : p; },
+  });
+
+  hydrateControls();
+  wire();
+  refresh();
+
+  // ── Test / debug hook (used by tests/spaceship-designer-smoke.spec.js) ──
+  window.__ssd = {
+    ready: true,
+    get design() { return design; },
+    computeStats, runAscent, gradeAscent,
+    launch: doLaunch,
+    scene,
+    // Self-test: the default rocket should produce finite stats and a flyable
+    // ascent. Returns { ok, checks } like the satellite-designer harness.
+    selfTest() {
+      const checks = [];
+      const s = computeStats(design);
+      checks.push(['stats finite', Number.isFinite(s.totalWet_kg) && s.totalWet_kg > 0 && Number.isFinite(s.totalDv_kms)]);
+      checks.push(['has thrust', s.liftoffThrust_kN > 0]);
+      const r = runAscent(defaultDesign());
+      checks.push(['default reaches orbit', r.status === 'orbit']);
+      checks.push(['trajectory non-empty', (r.trajectory?.length || 0) > 0]);
+      return { ok: checks.every((c) => c[1]), checks };
+    },
+  };
+
+  try {
+    await auth.ready?.();
+    signedIn = !!auth.isSignedIn?.();
+  } catch { signedIn = false; }
+
+  $('ssd-signin-note').textContent = signedIn
+    ? 'Advanced parts unlocked. Save your fleet in the Hangar below.'
+    : 'Sign in to unlock advanced engines, propellants & cockpits — and to save your fleet.';
+
+  // Re-render selects/stages now that we know auth state (unlocks advanced parts).
+  hydrateControls();
+  refresh();
+  refreshHangar();
+
+  // React to later sign-in/out without a reload. auth.js has no change event,
+  // so listen to the Supabase client directly (same singleton auth.js uses).
+  // Driven off the session in the event payload so we don't race auth.js's own
+  // handler. Degrades to no-op if Supabase isn't configured/reachable.
+  try {
+    const sb = await getSupabase();
+    sb.auth.onAuthStateChange((_event, session) => {
+      const nowSignedIn = !!session;
+      if (nowSignedIn === signedIn) return;
+      signedIn = nowSignedIn;
+      $('ssd-signin-note').textContent = signedIn
+        ? 'Advanced parts unlocked. Save your fleet in the Hangar below.'
+        : 'Sign in to unlock advanced engines, propellants & cockpits — and to save your fleet.';
+      hydrateControls();
+      refresh();
+      refreshHangar();
+    });
+  } catch { /* anonymous-only session — fine */ }
+})();
+</script>
+
+</body>
+</html>
