@@ -277,6 +277,7 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
 
 <script type="module">
 import { auth } from './js/auth.js';
+import { getSupabase } from './js/supabase-config.js';
 import {
   defaultDesign, computeStats, runAscent, gradeAscent,
   PROPELLANTS, ENGINE_CATALOG, NOSECONE_TYPES, FIN_TYPES, COCKPIT_LAYOUTS,
@@ -649,13 +650,24 @@ function wire() {
   refresh();
   refreshHangar();
 
-  // React to later sign-in/out without a reload.
-  auth.onChange?.(async () => {
-    signedIn = !!auth.isSignedIn?.();
-    hydrateControls();
-    refresh();
-    refreshHangar();
-  });
+  // React to later sign-in/out without a reload. auth.js has no change event,
+  // so listen to the Supabase client directly (same singleton auth.js uses).
+  // Driven off the session in the event payload so we don't race auth.js's own
+  // handler. Degrades to no-op if Supabase isn't configured/reachable.
+  try {
+    const sb = await getSupabase();
+    sb.auth.onAuthStateChange((_event, session) => {
+      const nowSignedIn = !!session;
+      if (nowSignedIn === signedIn) return;
+      signedIn = nowSignedIn;
+      $('ssd-signin-note').textContent = signedIn
+        ? 'Advanced parts unlocked. Save your fleet in the Hangar below.'
+        : 'Sign in to unlock advanced engines, propellants & cockpits — and to save your fleet.';
+      hydrateControls();
+      refresh();
+      refreshHangar();
+    });
+  } catch { /* anonymous-only session — fine */ }
 })();
 </script>
 

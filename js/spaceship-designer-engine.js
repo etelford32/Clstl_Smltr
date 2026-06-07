@@ -232,12 +232,12 @@ export function computeStats(design, body = LAUNCH_BODIES[design.bodyId] || LAUN
         const ve = ispUse * G0;
         const dv = (mf > 0 && m0 > mf) ? ve * Math.log(m0 / mf) : 0;
         stages[i].dv_kms = dv / 1000;
-        stages[i].twr = stages[i].thrustSL_kN * 1000 / (m0 * g_body);
+        stages[i].twr = stages[i].thrustSL_kN * 1000 / Math.max(m0 * g_body, 1e-9);
         dvTotal += dv;
     }
 
     const liftoffThrust = stages[0]?.thrustSL_kN || 0;
-    const liftoffTWR = liftoffThrust * 1000 / (totalWet * g_body);
+    const liftoffTWR = liftoffThrust * 1000 / Math.max(totalWet * g_body, 1e-9);
     const maxDiameter = Math.max(...stages.map((s) => s.diameter_m), 1);
     const noseLen = design.payload?.fairingLen_m || 8;
     const height = stages.reduce((a, s) => a + s.length_m, 0) + noseLen;

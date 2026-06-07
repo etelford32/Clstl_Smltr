@@ -438,8 +438,7 @@ export function createRocketScene(canvas, opts = {}) {
         const throttle = s.mass_frac > 0.06 ? 1 : 0;
 
         const rise = altToScene(s.alt_km);
-        rocketRoot.position.y = rise;
-        world.position.y = -rise * 0.0;            // keep ground; rocket climbs away
+        rocketRoot.position.y = rise;              // rocket climbs; the ground stays put
         // Camera eases upward to follow.
         const targetY = rocketRoot.position.y + 25;
         controls.target.y += (targetY - controls.target.y) * 0.05;

@@ -88,6 +88,18 @@ BEGIN
         RETURN NEW;
     END IF;
 
+    -- Re-saving an existing design is an UPDATE via upsert, but Postgres still
+    -- fires this BEFORE INSERT trigger before detecting the ON CONFLICT. Skip
+    -- the cap when the (user_id, name) row already exists, so a user AT their
+    -- limit can still edit and re-save rockets they already own — only brand
+    -- new names count against the quota.
+    IF EXISTS (
+        SELECT 1 FROM public.spaceship_designs
+        WHERE user_id = NEW.user_id AND name = NEW.name
+    ) THEN
+        RETURN NEW;
+    END IF;
+
     SELECT count(*) INTO current_count
     FROM public.spaceship_designs
     WHERE user_id = NEW.user_id;
