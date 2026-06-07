@@ -55,6 +55,7 @@ import { ATMOSPHERIC_LAYER_SCHEMA, layerForAltitude }
 import { LayerParticleSystem } from './upper-atmosphere-particles.js';
 import { layerPhysics, pointPhysics } from './upper-atmosphere-physics.js';
 import { LayerVectorField } from './upper-atmosphere-vector-fields.js';
+import { ZoneWaveField } from './upper-atmosphere-wave-field.js';
 import { DragForecastOverlay } from './drag-forecast-overlay.js';
 import { FleetRibbons } from './upper-atmosphere-fleet-ribbons.js';
 import { MagneticCascade } from './upper-atmosphere-magnetic-cascade.js';
@@ -557,8 +558,11 @@ export class AtmosphereGlobe {
         this._initScene();
         this._buildEarth();
         this._buildLayerShells();
+        this._buildDensitySubShells();
+        this._buildIsodensitySurfaces();
         this._buildLayerParticles();
         this._buildLayerVectorFields();
+        this._buildZoneWaveFields();
         this._buildDragForecastOverlay();
         this._buildFleetRibbons();
         this._buildSatelliteRings();
@@ -668,6 +672,57 @@ export class AtmosphereGlobe {
     }
 
     getVectorFieldMode() { return this._fieldMode ?? 'off'; }
+
+    // ── Zone turbulence wave fields ─────────────────────────────────────────
+    // One ZoneWaveField per atmospheric regime — an animated travelling-
+    // disturbance ripple whose amplitude tracks the zone's live turbulence
+    // index. Master-off by default (zero per-frame cost until shown). The
+    // dashboard pushes per-zone indices via setZoneTurbulence(); setProfile
+    // also seeds a coarse Ap-based baseline so the ripple is alive before
+    // the first dashboard tick lands.
+
+    _buildZoneWaveFields() {
+        this._waveGroup = new THREE.Group();
+        this._waves     = {};
+        this._waveVisible = false;
+        for (const layer of ATMOSPHERIC_LAYER_SCHEMA) {
+            this._waves[layer.id] = new ZoneWaveField({
+                parent: this._waveGroup,
+                layer,
+            });
+        }
+        this._scene.add(this._waveGroup);
+    }
+
+    /** Master toggle for the turbulence wave-field overlay. */
+    setWaveFieldVisible(on) {
+        this._waveVisible = !!on;
+        if (!this._waves) return;
+        for (const id in this._waves) this._waves[id].setVisible(this._waveVisible);
+    }
+
+    getWaveFieldVisible() { return !!this._waveVisible; }
+
+    /**
+     * Push per-zone turbulence indices into the wave-field ripple
+     * amplitudes. Accepts the array `computeZoneTurbulence()` returns
+     * (objects with `{ zoneId, ti }`) or a plain `{ zoneId: ti }` map.
+     */
+    setZoneTurbulence(zi) {
+        if (!this._waves || !zi) return;
+        // Dashboard has taken ownership of the amplitudes — setProfile()
+        // stops seeding its Ap baseline from here on.
+        this._zoneTurbExternal = true;
+        if (Array.isArray(zi)) {
+            for (const z of zi) {
+                if (z && this._waves[z.zoneId]) this._waves[z.zoneId].setTurbulence(z.ti);
+            }
+        } else {
+            for (const id in zi) {
+                if (this._waves[id]) this._waves[id].setTurbulence(zi[id]);
+            }
+        }
+    }
 
     // ── Drag-forecast overlay ───────────────────────────────────────────────
     // Particle flow-line view of LEO drag. Each layer carries its own
@@ -857,6 +912,12 @@ export class AtmosphereGlobe {
             this._shells[i].material.uniforms.uIntensity.value = intensity;
         }
 
+        // Density-layer overlays track the same profile: repaint the
+        // sub-shell brightness (∝ local ρ) and re-solve the isodensity
+        // surface altitudes so they inflate / contract with the storm.
+        if (this._subShellsBuilt) this._paintDensitySubShells(profile);
+        this._positionIsodensitySurfaces(profile);
+
         // Push the latest physics into each particle system. layerPhysics
         // samples at peakKm with the layer's vertical thickness as the
         // Knudsen characteristic length, then setPhysics() rescales
@@ -881,6 +942,20 @@ export class AtmosphereGlobe {
             const fld = this._fields?.[layer.id];
             if (fld && this._fieldMode !== 'off') {
                 fld.setPhysics(phys, { f107, ap });
+            }
+        }
+
+        // Seed a coarse turbulence baseline from the current Ap so the
+        // wave-field ripple is alive even before the dashboard's first
+        // (volatility-aware) push lands. Higher Ap → more storm forcing →
+        // a livelier baseline ripple. Once the dashboard calls
+        // setZoneTurbulence() it owns the amplitudes and we stop seeding
+        // here, so the richer index never flickers against this floor.
+        if (this._waves && !this._zoneTurbExternal) {
+            const apNow = Number.isFinite(ap) ? ap : 15;
+            const baseTi = 1 - Math.exp(-Math.max(0, apNow - 5) / 45);
+            for (const layer of ATMOSPHERIC_LAYER_SCHEMA) {
+                this._waves[layer.id].setTurbulence(baseTi);
             }
         }
 
@@ -1282,6 +1357,195 @@ export class AtmosphereGlobe {
             this._shellGroup.add(mesh);
         }
         this._scene.add(this._shellGroup);
+    }
+
+    // ── Density sub-shells ───────────────────────────────────────────────────
+    // The five gradient shells answer "which regime am I in"; the sub-shells
+    // answer "how does density fall off *within* the band". They subdivide
+    // the 80–2000 km column into thin concentric wireframe spheres at a
+    // selectable altitude step (25 / 50 / 100 km), each one's brightness
+    // scaled by the local mass density so the operator can read the
+    // exponential falloff as a stack of nested shells — and watch the inner
+    // shells brighten when a storm inflates the thermosphere. Off by default
+    // (built lazily on first show, zero cost until then).
+
+    _buildDensitySubShells() {
+        this._subShellGroup   = new THREE.Group();
+        this._subShellGroup.visible = false;
+        this._subShells       = [];          // [{ mesh, altKm }]
+        this._subShellStepKm  = 50;          // default granularity
+        this._subShellsVisible = false;
+        this._subShellsBuilt  = false;
+        this._scene.add(this._subShellGroup);
+    }
+
+    /** (Re)build the sub-shell stack at the current step. */
+    _rebuildDensitySubShells() {
+        // Dispose any existing shells first.
+        for (const s of this._subShells) {
+            s.mesh.geometry?.dispose();
+            s.mesh.material?.dispose();
+            this._subShellGroup.remove(s.mesh);
+        }
+        this._subShells = [];
+
+        const step = this._subShellStepKm;
+        // Span the modelled column; skip the very floor (80 km) so the
+        // first shell sits just inside the mesosphere band.
+        const floorKm = 100, ceilKm = 2000;
+        for (let altKm = floorKm; altKm <= ceilKm; altKm += step) {
+            const layer = layerForAltitude(altKm);
+            const color = layer ? layer.colorHigh : 0x88aaff;
+            const r = 1 + altKm / R_EARTH_KM;
+            const mat = new THREE.MeshBasicMaterial({
+                color,
+                wireframe:   true,
+                transparent: true,
+                opacity:     0.05,
+                depthWrite:  false,
+                blending:    THREE.AdditiveBlending,
+            });
+            // Low segment count: the wireframe should read as a coarse
+            // density-contour grid, not a dense mesh.
+            const mesh = new THREE.Mesh(new THREE.SphereGeometry(r, 24, 16), mat);
+            mesh.renderOrder = 2;
+            mesh.userData = { kind: 'density-sub-shell', altKm };
+            this._subShells.push({ mesh, altKm });
+            this._subShellGroup.add(mesh);
+        }
+        this._subShellsBuilt = true;
+        // Paint opacities against whatever profile we already have.
+        if (this._profile) this._paintDensitySubShells(this._profile);
+    }
+
+    /** Master toggle for the density sub-shell stack. */
+    setDensitySubShellsVisible(on) {
+        this._subShellsVisible = !!on;
+        if (this._subShellsVisible && !this._subShellsBuilt) {
+            this._rebuildDensitySubShells();
+        }
+        if (this._subShellGroup) this._subShellGroup.visible = this._subShellsVisible;
+    }
+
+    getDensitySubShellsVisible() { return !!this._subShellsVisible; }
+
+    /** Set the sub-shell altitude step (km) and rebuild if showing. */
+    setDensitySubShellStep(km) {
+        const v = Number(km);
+        if (!Number.isFinite(v) || v <= 0) return;
+        this._subShellStepKm = v;
+        if (this._subShellsBuilt) this._rebuildDensitySubShells();
+    }
+
+    /**
+     * Brightness ∝ local density. Normalised in log space across the whole
+     * stack so the dense inner shells pop and the rarefied outer ones stay
+     * faint-but-visible — the same dynamic-range trick the gradient shells
+     * use, applied per sub-shell.
+     */
+    _paintDensitySubShells(profile) {
+        if (!this._subShells?.length || !profile?.samples?.length) return;
+        const logRhos = this._subShells.map(s =>
+            Math.log10(Math.max(_nearestRho(profile.samples, s.altKm), 1e-30)));
+        const maxLR = Math.max(...logRhos);
+        const minLR = Math.min(...logRhos);
+        const span  = Math.max(maxLR - minLR, 1.0);
+        for (let i = 0; i < this._subShells.length; i++) {
+            const t = (logRhos[i] - minLR) / span;        // 0 (thin) … 1 (dense)
+            this._subShells[i].mesh.material.opacity = 0.025 + 0.16 * t;
+        }
+    }
+
+    // ── Isodensity surfaces ──────────────────────────────────────────────────
+    // A constant-density shell: the surface where ρ(h) = target. Each one
+    // sits at the altitude where the live profile crosses its threshold, so
+    // it INFLATES when a storm heats + puffs the thermosphere and CONTRACTS
+    // on recovery — the atmosphere visibly "breathing". Three selectable
+    // thresholds spanning the LEO drag band; all hidden by default.
+
+    _buildIsodensitySurfaces() {
+        this._isoGroup = new THREE.Group();
+        this._isoSurfaces = [];      // [{ threshold, mesh, color, altKm }]
+        // (threshold kg/m³, colour). Spans the band where operational LEO
+        // assets live: ~1e-11 (≈250 km), 1e-12 (≈400 km), 1e-13 (≈600 km).
+        const defs = [
+            { threshold: 1e-11, color: 0x33e1ff },
+            { threshold: 1e-12, color: 0x9b6bff },
+            { threshold: 1e-13, color: 0xff66aa },
+        ];
+        for (const d of defs) {
+            const mat = new THREE.MeshBasicMaterial({
+                color:       d.color,
+                transparent: true,
+                opacity:     0.12,
+                depthWrite:  false,
+                blending:    THREE.AdditiveBlending,
+                side:        THREE.FrontSide,
+            });
+            // Unit base radius so `_positionIsodensitySurfaces` can scale
+            // the mesh to exactly r = 1 + alt/R⊕ with no offset.
+            const mesh = new THREE.Mesh(new THREE.SphereGeometry(1.0, 64, 48), mat);
+            mesh.visible = false;
+            mesh.renderOrder = 2;
+            mesh.userData = { kind: 'isodensity-surface', threshold: d.threshold };
+            this._isoSurfaces.push({ threshold: d.threshold, mesh, color: d.color, altKm: null });
+            this._isoGroup.add(mesh);
+        }
+        this._isoSelection = 'off';      // 'off' | 'all' | <threshold number>
+        this._scene.add(this._isoGroup);
+    }
+
+    /**
+     * Choose which isodensity surface(s) to show.
+     * @param {'off'|'all'|number|string} sel  'off', 'all', or a threshold
+     */
+    setIsodensityThreshold(sel) {
+        // Normalise a numeric string ("1e-12") to a number.
+        const num = typeof sel === 'string' && sel !== 'off' && sel !== 'all'
+            ? Number(sel) : sel;
+        this._isoSelection = num;
+        this._applyIsodensityVisibility();
+        if (this._profile) this._positionIsodensitySurfaces(this._profile);
+    }
+
+    getIsodensitySelection() { return this._isoSelection; }
+
+    /** Current solved altitude (km) per threshold, for a UI readout. */
+    getIsodensityAltitudes() {
+        const out = {};
+        for (const s of this._isoSurfaces) out[s.threshold] = s.altKm;
+        return out;
+    }
+
+    _applyIsodensityVisibility() {
+        for (const s of this._isoSurfaces) {
+            const selected =
+                this._isoSelection === 'all' ||
+                (Number.isFinite(this._isoSelection) &&
+                 Math.abs(this._isoSelection - s.threshold) < s.threshold * 0.01);
+            // Visibility also requires the surface to be in range (altKm set);
+            // _positionIsodensitySurfaces() finalises that.
+            s._selected = selected;
+            s.mesh.visible = selected && Number.isFinite(s.altKm);
+        }
+    }
+
+    /**
+     * Re-solve each surface's altitude from the live profile and scale its
+     * sphere there. A threshold outside the profile's density range hides
+     * its surface (no crossing exists).
+     */
+    _positionIsodensitySurfaces(profile) {
+        if (!this._isoSurfaces?.length || !profile?.samples?.length) return;
+        for (const s of this._isoSurfaces) {
+            const altKm = _altitudeForRho(profile.samples, s.threshold);
+            s.altKm = Number.isFinite(altKm) ? altKm : null;
+            if (Number.isFinite(altKm)) {
+                const r = 1 + altKm / R_EARTH_KM;
+                s.mesh.scale.set(r, r, r);
+            }
+            s.mesh.visible = !!s._selected && Number.isFinite(s.altKm);
+        }
     }
 
     _buildSatelliteRings() {
@@ -3710,6 +3974,13 @@ export class AtmosphereGlobe {
             }
         }
 
+        // Turbulence wave-field ripple. Each visible zone advances its
+        // travelling-wave phase from the shared clock; hidden zones early-
+        // out inside update(). One uniform write per visible zone.
+        if (this._waves && this._waveVisible) {
+            for (const id in this._waves) this._waves[id].update(t);
+        }
+
         // Drag-forecast tracer advection. Self-gates on visibility so it
         // costs nothing when the operator panel is closed. Camera distance
         // drives the LOD-style trail thinning so the field reads cleanly
@@ -4298,6 +4569,35 @@ function _nearestRho(samples, altitudeKm) {
     return Math.abs(a.altitudeKm - altitudeKm) < Math.abs(b.altitudeKm - altitudeKm)
         ? a.rho
         : b.rho;
+}
+
+/**
+ * Solve the altitude (km) where the profile's mass density crosses
+ * `targetRho`. The profile is altitude-ascending with monotonically
+ * falling ρ, so we scan for the first bracketing pair and interpolate in
+ * LOG-density / linear-altitude space (density is ~exponential in
+ * altitude, so log ρ is near-linear and the interpolation is accurate).
+ *
+ * Returns NaN when the target lies outside the profile's density range —
+ * i.e. no constant-density surface exists at this threshold for the
+ * current state (the caller hides that surface).
+ */
+function _altitudeForRho(samples, targetRho) {
+    if (!samples?.length || !(targetRho > 0)) return NaN;
+    const logT = Math.log(targetRho);
+    for (let i = 1; i < samples.length; i++) {
+        const r0 = samples[i - 1].rho, r1 = samples[i].rho;
+        if (!(r0 > 0) || !(r1 > 0)) continue;
+        const l0 = Math.log(r0), l1 = Math.log(r1);
+        // Bracketed when the target log-density sits between the pair.
+        if ((logT <= l0 && logT >= l1) || (logT >= l0 && logT <= l1)) {
+            const denom = (l1 - l0);
+            const f = Math.abs(denom) < 1e-12 ? 0 : (logT - l0) / denom;
+            return samples[i - 1].altitudeKm
+                 + f * (samples[i].altitudeKm - samples[i - 1].altitudeKm);
+        }
+    }
+    return NaN;
 }
 
 function _ringMesh(radius, tubeRadius, colorHex, opacity = 0.75) {
