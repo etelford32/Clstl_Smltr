@@ -162,6 +162,17 @@ ${IMF_FILE}		NameUpstreamFile
 1			nOrder
 Rusanov			TypeFlux
 
+! Explicit time stepping for the steady-state relaxation. CflExpl MUST be
+! <= 0.65 in this session: with Boris correction active (below) under LOCAL
+! time stepping, BATSRUS hard-rejects a higher CFL — "GM_set_parameters
+! WARNING: CFL number above 0.65 ... with Boris correction" followed by a
+! fatal "Correct PARAM.in!" at session 1. Without this block session 1
+! inherited a default CFL > 0.65 and aborted before iteration 1. 1-stage
+! pairs with the 1st-order scheme above.
+#TIMESTEPPING
+1			nStage
+0.6			CflExpl
+
 ! Boris semi-relativistic correction — ON FOR THE ENTIRE RUN, set here in
 ! session 1 and persisted (SWMF carries parameters forward across #RUN
 ! boundaries until overridden). Boris caps the artificial fast/Alfvén speed
