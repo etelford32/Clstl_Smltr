@@ -299,6 +299,89 @@ RUNS_DIR=runs python3 -m pipeline.run_forecast --once \
   --run-dir runs/gannon_may_2024
 ```
 
+### Solver stability — the cold-start ladder, Boris, and the CflExpl ≤ 0.65 rule
+
+> **Load-bearing. Read before editing `swmf/config/PARAM.in.GM_IE`.** Getting
+> this Gannon run to advance a single second of simulated time took four
+> non-obvious fixes in a row (2026-06-07 session). Each one is a re-discoverable
+> trap. Do not "simplify" the three-session structure or move the `#BORIS`
+> block without reading this.
+
+The template `swmf/config/PARAM.in.GM_IE` drives GM (BATS-R-US) + IE only — no
+IM/RB ring-current component, on a coarser inner grid than SWPC operational. A
+cold dipole magnetosphere **cannot** be integrated directly in 2nd-order,
+time-accurate mode; it overshoots into negative density/pressure on iteration 1
+("negative fast speed squared"). The validated recipe is a three-session ladder
+and **all three sessions matter**:
+
+| Session | `#TIMEACCURATE` | `#SCHEME` | `#TIMESTEPPING` | Purpose |
+|---|---|---|---|---|
+| 1 | `F` (steady, local dt) | `1` Rusanov (1st order) | `1` stage, **CflExpl 0.6** | relax the cold start in the most diffusive scheme |
+| 2 | `F` (steady, local dt) | `2` Rusanov mc3 1.2 | `2` stage, **CflExpl 0.6** | converge the magnetosphere shape in 2nd order |
+| 3 | `T` (time-accurate) | (inherits 2nd order) | `2` stage, CflExpl 0.6 | drive the storm from the relaxed state |
+
+**Boris must be ON from session 1 — not switched on at session 3.** This is the
+single most expensive trap in the file. The Boris semi-relativistic correction
+caps the artificial fast/Alfvén speed near Earth (huge B, low ρ), but it also
+**redefines the conserved momentum** (it folds in the v×B electric-field term).
+If you relax sessions 1–2 *without* Boris and enable it only in the
+time-accurate session 3, the relaxed state carries the non-Boris momentum
+definition and is inconsistent with the integrator. Result: the inner-boundary
+cell at **r ≈ 3.57 R_E** (just outside `rCurrents = 3.5`) detonates on the
+*first* time-accurate step — `NaN from advance_explicit`, density → 1e88…1e100,
+at `iteration = 1524`, **identically regardless of `nStage` or `CflExpl`**. That
+integrator-independence is the tell: it is not a CFL problem, it is a
+conserved-state inconsistency. Relaxing *with* Boris on fixed it; the run then
+sailed past 1524 with the simulated clock advancing.
+
+**The `CflExpl ≤ 0.65` rule.** BATS-R-US hard-rejects Boris correction combined
+with **local (steady-state) time stepping** at CFL > 0.65:
+
+```
+GM_set_parameters WARNING: CFL number above 0.65 may be unstable for
+local timestepping with Boris correction !!!
+... ERROR: Correct PARAM.in!     (fatal — aborts at session 1, iteration 0)
+```
+
+So once Boris is in session 1, sessions 1 **and** 2 (both steady-state) need an
+explicit `#TIMESTEPPING` with `CflExpl ≤ 0.65`. A session with **no**
+`#TIMESTEPPING` block inherits a default CFL above 0.65 and aborts before
+iteration 1 with `Correct PARAM.in!` (and `highest iteration reached = 0`). The
+time-accurate session 3 is not subject to this limit (it is global, not local
+time stepping), but we keep it at 0.6 anyway.
+
+**Failure-signature cheat sheet** (so the next session recognises which trap it
+hit without re-deriving it):
+
+| Symptom in `batsrus_stdout.log` | Cause | Fix |
+|---|---|---|
+| `ERROR: Correct PARAM.in!`, iter 0, `Correct PARAM` after a Boris+CFL warning | Boris + local dt with CflExpl > 0.65 | add `#TIMESTEPPING` `CflExpl 0.6` to the steady-state session(s) |
+| `NaN from advance_explicit` at `r≈3.57`, iter **1524**, density→1e100, independent of `nStage`/`CflExpl` | Boris enabled only at session 3 (inconsistent conserved state) | enable `#BORIS` from session 1 so the relaxation is Boris-consistent |
+| `negative fast speed squared`, iter 1, at the **+x upstream face** (`x≈34`) | garbage IMF (negative/huge ρ, B) at the driven boundary | re-fetch `imf_l1.dat`, see data gate below |
+| relaxes to 1500 then crashes only in session 3 | usually the Boris-transition trap above | — |
+
+**Input data gate (don't skip — a stale `imf_l1.dat` masquerades as a solver
+bug).** The upstream driver file is column-sensitive; a parser regression once
+wrote density into the temperature column, producing negative/huge ρ that blew
+up the +x boundary at iteration 1. Always re-fetch with **`python3`** (the
+container has no `python` alias — `python -m …` silently no-ops and leaves the
+old file in place) and gate before launching:
+
+```sh
+# inside the swmf container, after fetch_omni_imf writes /data/imf/imf_l1.dat:
+head -6 /data/imf/imf_l1.dat                       # density col 14, Bz col 10
+awk '$1 ~ /^[0-9]/{print $14}' /data/imf/imf_l1.dat | sort -n | sed -n '1p;$p'
+awk '$1 ~ /^[0-9]/{print $10}' /data/imf/imf_l1.dat | sort -n | sed -n '1p;$p'
+```
+
+Gate: density strictly **positive** (Gannon ≈ 0.7 → 70 /cc), Bz in **tens of
+nT** (≈ −47 → +49 nT). A negative-density min or a Bz in the thousands means the
+columns are misparsed — fix the fetch, not the PARAM.
+
+**Crash-safe resume.** Session 3 sets `#SAVERESTART` every 3600 s of simulated
+time → `GM/restartOUT/`. A long run that is interrupted resumes from the last
+checkpoint instead of re-running the cold-start ladder.
+
 ### Extract Φ_PC and HPI
 
 ```sh
