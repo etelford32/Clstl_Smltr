@@ -58,25 +58,37 @@ log = logging.getLogger("swmf.fetch_omni_imf")
 
 OMNI_BASE = "https://spdf.gsfc.nasa.gov/pub/data/omni/high_res_omni/monthly_1min"
 
-# 0-indexed column numbers in OMNI 1-min ASCII.
+# 0-indexed column numbers in OMNI HRO 1-min ASCII.
+# These follow the authoritative HRO word list (omniweb HROdocum): the file
+# carries spacecraft IDs, point counts, timeshift, RMS and |B| BEFORE the field
+# components, so the B/V/N/T fields sit much later than a naive count suggests.
+# Earlier indices (8/9/10 for B, 24/25 for N/T) silently read Percent-interp,
+# Timeshift, RMS-timeshift, and Vz-GSE — producing |B|~5000 nT and NEGATIVE
+# density, which crashes BATSRUS with "negative fast speed squared".
+#   word 15 -> idx 14  Bx GSE/GSM        word 23 -> idx 22  Vx GSE
+#   word 18 -> idx 17  By GSM            word 24 -> idx 23  Vy GSE
+#   word 19 -> idx 18  Bz GSM            word 25 -> idx 24  Vz GSE
+#                                        word 26 -> idx 25  Proton density
+#                                        word 27 -> idx 26  Temperature
 COL_YEAR    = 0
 COL_DOY     = 1
 COL_HR      = 2
 COL_MIN     = 3
-COL_BX_GSM  = 8
-COL_BY_GSM  = 9
-COL_BZ_GSM  = 10
-COL_VX      = 21
-COL_VY      = 22
-COL_VZ      = 23
-COL_NP      = 24
-COL_T       = 25
+COL_BX_GSM  = 14
+COL_BY_GSM  = 17
+COL_BZ_GSM  = 18
+COL_VX      = 22
+COL_VY      = 23
+COL_VZ      = 24
+COL_NP      = 25
+COL_T       = 26
 
 SENTINELS = {
     "B":   9999.99,    # any |B| component ≥ this is missing
     "V":   99999.9,    # any V component ≥ this is missing
     "N":   999.99,
-    "T":   1.0e7,      # T in K; sentinel 1.0e7 matches OMNI doc
+    "T":   9.99e6,     # OMNI temperature fill is 9999999.0; threshold must be
+                       # BELOW it (1.0e7 was ABOVE, so fill values leaked in).
 }
 
 
@@ -138,7 +150,7 @@ def _download(url: str, *, timeout_s: float = 60.0) -> str:
 def _parse_records(text: str) -> Iterator[tuple[datetime, list[float]]]:
     for line in text.splitlines():
         parts = line.split()
-        if len(parts) < 26:
+        if len(parts) <= COL_T:   # need at least COL_T+1 tokens (temperature)
             continue
         try:
             yr  = int(parts[COL_YEAR])
