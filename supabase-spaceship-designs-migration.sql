@@ -69,7 +69,7 @@ RETURNS INTEGER AS $$
         WHEN 'basic'       THEN 25
         ELSE 3
     END;
-$$ LANGUAGE sql IMMUTABLE;
+$$ LANGUAGE sql IMMUTABLE SET search_path = public, pg_temp;
 
 CREATE OR REPLACE FUNCTION public.enforce_spaceship_design_limit()
 RETURNS TRIGGER AS $$
@@ -103,7 +103,7 @@ BEGIN
 
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
 DROP TRIGGER IF EXISTS trg_enforce_spaceship_design_limit ON public.spaceship_designs;
 CREATE TRIGGER trg_enforce_spaceship_design_limit
@@ -117,7 +117,7 @@ BEGIN
     NEW.updated_at := now();
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = public, pg_temp;
 
 DROP TRIGGER IF EXISTS trg_touch_spaceship_design ON public.spaceship_designs;
 CREATE TRIGGER trg_touch_spaceship_design
