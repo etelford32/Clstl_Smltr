@@ -290,10 +290,15 @@ T			UseBorisCorrection
 #MINIMUMPRESSURE
 1e-5			pMinDim [nPa]
 
-! 1-stage explicit with Boris allows a larger CFL than the steady-state phase.
+! 2-stage Runge-Kutta at a conservative CFL. NOTE: the SWPC recipe uses
+! 1-stage + CflExpl 0.85, but that leans on SWPC's coupled IM (ring-current)
+! pressure support and finer inner grid for inner-magnetosphere stability.
+! This GM+IE-only run on a coarser grid blows up (NaN from advance_explicit
+! near r~3.5 R_E) under a 1-stage step once storm driving ramps; RK2 with a
+! lower CFL is the robust integrator for 2nd-order spatial here.
 #TIMESTEPPING
-1			nStage
-0.85			CflExpl
+2			nStage
+0.6			CflExpl
 
 #END_COMP GM ────────────────────────────────────────────────────────────────
 
