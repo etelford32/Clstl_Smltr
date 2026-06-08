@@ -373,6 +373,16 @@ function injectFinalOffer(tourKey) {
 // ── Bootstrap ───────────────────────────────────────────────────────────────
 function init() {
     wireStartTriggers();
+
+    // signup.html is the terminal stop of every tour, but the page now
+    // carries its own per-tier feature breakdown. Stacking the tour banner
+    // and the injected offer card on top of the sign-up form buried the
+    // fields and the primary CTA, so we close the tour out silently here.
+    // (injectFinalOffer / the final-stop banner branch are retained for any
+    //  future non-signup final stop — they are intentionally unreachable on
+    //  this page, not dead code to be removed.)
+    if (currentPage() === 'signup.html') { clearState(); return; }
+
     const state = loadState();
     if (!state || !state.active) return;
 
