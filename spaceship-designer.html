@@ -229,6 +229,7 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
         <div class="ssd-h"><span class="k">Altitude</span><span class="v" id="hud-alt">0 km</span></div>
         <div class="ssd-h"><span class="k">Velocity</span><span class="v" id="hud-vel">0.00 km/s</span></div>
         <div class="ssd-h"><span class="k">Throttle</span><span class="v" id="hud-thr">0%</span></div>
+        <div class="ssd-h"><span class="k">Thrust</span><span class="v" id="hud-thrust">0.00 MN</span></div>
       </div>
       <div class="ssd-viewbar">
         <button class="ssd-btn ssd-ghost" data-view="3q">¾</button>
@@ -238,6 +239,7 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
         <button class="ssd-btn ssd-ghost" id="ssd-rotate">↻ Spin</button>
       </div>
       <div class="ssd-launchbar">
+        <button class="ssd-btn ssd-ghost" id="ssd-static-fire" title="Hold the rocket on the pad and fire stage 1 at the design throttle — watch the engines gimbal and the plume respond live to the throttle slider.">🔥 Static Fire</button>
         <button class="ssd-btn ssd-primary" id="ssd-launch">🚀 Launch</button>
         <button class="ssd-btn ssd-ghost" id="ssd-reset-flight">Reset</button>
       </div>
@@ -420,10 +422,18 @@ function refresh({ rebuild = true } = {}) {
   store.saveDraft(design);
 }
 
+// Reflect static-fire state on its toggle button.
+function setStaticFireBtn(on) {
+  const b = $('ssd-static-fire');
+  b.classList.toggle('ssd-primary', on);
+  b.textContent = on ? '⏹ Stop Fire' : '🔥 Static Fire';
+}
+
 // ── Launch ───────────────────────────────────────────────────────────────────
 async function doLaunch() {
   const btn = $('ssd-launch');
   btn.disabled = true;
+  setStaticFireBtn(false);
   scene.reset();
   scene.build(design);
   const result = runAscent(design);
@@ -591,11 +601,18 @@ function wire() {
     spinning = !spinning; scene.setAutoRotate(spinning);
     $('ssd-rotate').classList.toggle('ssd-primary', spinning);
   });
+  // Static-fire engine test (hold-down on the pad).
+  $('ssd-static-fire').addEventListener('click', () => {
+    const on = !scene.isStaticFiring;
+    scene.setStaticFire(on);
+    setStaticFireBtn(on);
+  });
   $('ssd-launch').addEventListener('click', doLaunch);
   $('ssd-reset-flight').addEventListener('click', () => {
     scene.reset(); scene.build(design);
+    setStaticFireBtn(false);
     $('hud-alt').textContent = '0 km'; $('hud-vel').textContent = '0.00 km/s';
-    $('hud-thr').textContent = '0%'; $('ssd-phase').textContent = '';
+    $('hud-thr').textContent = '0%'; $('hud-thrust').textContent = '0.00 MN'; $('ssd-phase').textContent = '';
   });
   $('ssd-save').addEventListener('click', doSave);
 }
@@ -607,8 +624,9 @@ function wire() {
       $('hud-alt').textContent = (s.altKm ?? 0).toFixed(s.altKm >= 100 ? 0 : 1) + ' km';
       $('hud-vel').textContent = (s.vKms ?? 0).toFixed(2) + ' km/s';
       $('hud-thr').textContent = Math.round((s.throttle ?? 0) * 100) + '%';
+      $('hud-thrust').textContent = (s.thrustMN ?? 0).toFixed(2) + ' MN';
     },
-    onPhase: (p) => { $('ssd-phase').textContent = p === 'idle' ? '' : p; },
+    onPhase: (p) => { $('ssd-phase').textContent = p === 'idle' ? '' : p.replace('-', ' '); },
   });
 
   hydrateControls();
