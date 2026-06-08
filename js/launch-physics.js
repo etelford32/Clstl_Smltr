@@ -27,7 +27,7 @@ export const LAUNCH_BODIES = {
         id: 'earth', name: 'Earth',
         R_km: 6378.137, mu_km3s2: 398600.4418,
         rho0_kg_m3: 1.225, H_km: 8.5, T_surf_K: 288,
-        a_sound_ms: 340, mu_pas: 1.81e-5,
+        a_sound_ms: 340, mu_pas: 1.81e-5, p0_pa: 101325,
         atmosphere: 'N₂/O₂ · 1.013 bar',
         v_orb_low_kms: 7.79,
         notes: 'Workhorse comparison case.',
@@ -36,7 +36,7 @@ export const LAUNCH_BODIES = {
         id: 'venus', name: 'Venus',
         R_km: 6051.8, mu_km3s2: 324859.0,
         rho0_kg_m3: 65.0, H_km: 15.9, T_surf_K: 740,
-        a_sound_ms: 410, mu_pas: 3.4e-5,
+        a_sound_ms: 410, mu_pas: 3.4e-5, p0_pa: 9.2e6,
         atmosphere: 'CO₂ · 92 bar',
         v_orb_low_kms: 7.32,
         notes: '53× Earth surface density. Drag loss is enormous.',
@@ -45,7 +45,7 @@ export const LAUNCH_BODIES = {
         id: 'mars', name: 'Mars',
         R_km: 3389.5, mu_km3s2: 42828.37,
         rho0_kg_m3: 0.020, H_km: 11.1, T_surf_K: 210,
-        a_sound_ms: 240, mu_pas: 1.1e-5,
+        a_sound_ms: 240, mu_pas: 1.1e-5, p0_pa: 610,
         atmosphere: 'CO₂ · 6.4 mbar',
         v_orb_low_kms: 3.55,
         notes: 'Thin atmosphere + low gravity = friendly launch site.',
@@ -62,7 +62,7 @@ export const LAUNCH_BODIES = {
         id: 'titan', name: 'Titan',
         R_km: 2575, mu_km3s2: 8978,
         rho0_kg_m3: 5.30, H_km: 20, T_surf_K: 94,
-        a_sound_ms: 195, mu_pas: 6.3e-6,
+        a_sound_ms: 195, mu_pas: 6.3e-6, p0_pa: 146700,
         atmosphere: 'N₂/CH₄ · 1.5 bar',
         v_orb_low_kms: 1.85,
         notes: 'Cold dense atmosphere + low gravity. Aerodynamic flight is very efficient.',
@@ -155,6 +155,12 @@ export function atmosphericPressureRatio(body, alt_m) {
     if (body.rho0_kg_m3 < 1e-10) return 0;        // airless → vacuum thrust everywhere
     if (alt_m < 0) return 1;
     return Math.exp(-(alt_m / 1000) / body.H_km);
+}
+
+/** Absolute ambient pressure (Pa) at altitude — drives nozzle expansion state. */
+export function atmosphericPressure(body, alt_m) {
+    const p0 = body.p0_pa || 0;
+    return p0 * atmosphericPressureRatio(body, alt_m);
 }
 
 // ── Ascent integrator ───────────────────────────────────────────────────────
@@ -290,8 +296,16 @@ export function simulateAscent({
                 T_now = 0; mdot_now = 0; isp_now = 0; coastingNow = true;
             } else if (stageIdx < stageList.length) {
                 const st = stageList[stageIdx];
-                const p_ratio = body.rho0_kg_m3 > 1e-10 ? (rho / body.rho0_kg_m3) : 0;
-                const F = Math.max(0, st.F_vac - (st.F_vac - st.F_sl) * p_ratio);
+                // Nozzle thrust equation F = F_vac − pₐ·Aₑ, with the effective exit
+                // area Aₑ = (F_vac − F_sl)/p₀(Earth) backed out of the two thrust
+                // ratings. Uses *absolute* ambient pressure, so it correctly gives
+                // ~vacuum thrust over a near-airless world (Mars) and chokes to
+                // zero where ambient pressure overwhelms the nozzle (Venus surface,
+                // a vacuum engine at sea level). On Earth this equals the old
+                // sea-level→vacuum density-ratio interpolation exactly.
+                const Ae_eff = (st.F_vac - st.F_sl) / 101325;
+                const p_a = atmosphericPressure(body, alt_m);
+                const F = Math.max(0, st.F_vac - p_a * Ae_eff);
                 T_now = F; mdot_now = st.mdot;
                 isp_now = mdot_now > 0 ? F / (mdot_now * G0_EARTH) : 0;
             } else {

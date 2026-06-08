@@ -19,7 +19,7 @@
  */
 
 import { ENGINES } from './launch-engines.js';
-import { LAUNCH_BODIES, simulateAscent } from './launch-physics.js';
+import { LAUNCH_BODIES, simulateAscent, atmosphericPressure } from './launch-physics.js';
 
 const G0 = 9.80665;            // m/s² — standard gravity (Isp definition)
 
@@ -279,6 +279,141 @@ export function computeStats(design, body = LAUNCH_BODIES[design.bodyId] || LAUN
     };
 }
 
+// ── Nozzle physics (de Laval) ────────────────────────────────────────────────
+/**
+ * The catalog gives sea-level & vacuum thrust + Isp. Combined with a per-engine
+ * expansion ratio ε = Aₑ/Aₜ and the propellant's combustion gas properties, that
+ * is enough to reconstruct the actual converging-diverging nozzle: the exit Mach
+ * number from the isentropic area–Mach relation, the exit pressure pₑ, the exit
+ * velocity, the thrust coefficient C_F, and — crucially — the altitude at which
+ * the nozzle is perfectly expanded (pₑ = pₐ). Off that point the engine runs
+ * over- or under-expanded; far enough over-expanded the flow separates from the
+ * nozzle wall (Summerfield: pₑ/pₐ ≲ 0.35) and the engine cannot run there at all.
+ *
+ * Thrust *magnitude* still comes from the measured catalog ratings (more accurate
+ * than ideal nozzle theory); this layer adds the physical nozzle state on top —
+ * for the telemetry readout and to drive the plume's real expansion shape.
+ */
+
+// Combustion-gas properties per propellant: ratio of specific heats γ,
+// characteristic velocity c* (m/s), chamber temperature Tc (K). Representative
+// equilibrium values from standard propellant performance tables.
+export const PROP_GAS = {
+    kerolox:    { gamma: 1.21, cstar: 1715, Tc_K: 3670 },
+    methalox:   { gamma: 1.17, cstar: 1800, Tc_K: 3550 },
+    hydrolox:   { gamma: 1.20, cstar: 2360, Tc_K: 3550 },
+    hypergolic: { gamma: 1.23, cstar: 1700, Tc_K: 3400 },
+    solid:      { gamma: 1.18, cstar: 1550, Tc_K: 3300 },
+    nuclear:    { gamma: 1.30, cstar: 2800, Tc_K: 2700 },
+    ion:        { electrostatic: true },     // not a thermal de Laval nozzle
+};
+
+// Per-engine nozzle: area ratio ε and chamber pressure (Pa). Public data.
+const ENGINE_NOZZLE = {
+    merlin_1d:    { eps: 16,  pc_pa: 9.7e6 },
+    merlin_vac:   { eps: 165, pc_pa: 9.7e6 },
+    raptor_2:     { eps: 34,  pc_pa: 30e6 },
+    raptor_2_vac: { eps: 80,  pc_pa: 30e6 },
+    raptor_3:     { eps: 35,  pc_pa: 35e6 },
+    rs_25:        { eps: 69,  pc_pa: 20.6e6 },
+    rsrm:         { eps: 12,  pc_pa: 6.3e6 },
+    f1:           { eps: 16,  pc_pa: 7.0e6 },
+};
+const BELL_EPS = { merlin: 16, raptor: 34, raptor_vac: 80, merlin_vac: 165, rs25: 69, rsrm: 12, generic: 16 };
+const PC_BY_PROP = { kerolox: 9.7e6, methalox: 30e6, hydrolox: 20e6, hypergolic: 15e6, solid: 6e6, nuclear: 5e6 };
+
+/** Vandenkerckhove function Γ(γ) — appears in choked-flow / c* relations. */
+const vdk = (g) => Math.sqrt(g) * Math.pow(2 / (g + 1), (g + 1) / (2 * (g - 1)));
+
+/** Isentropic area ratio A/A* for a supersonic Mach number. */
+function areaRatio(M, g) {
+    return (1 / M) * Math.pow((2 / (g + 1)) * (1 + (g - 1) / 2 * M * M), (g + 1) / (2 * (g - 1)));
+}
+
+/** Solve the area–Mach relation for the supersonic exit Mach given ε. */
+function machFromAreaRatio(eps, g) {
+    let lo = 1.0001, hi = 30;
+    for (let i = 0; i < 60; i++) {
+        const mid = (lo + hi) / 2;
+        if (areaRatio(mid, g) > eps) hi = mid; else lo = mid;
+    }
+    return (lo + hi) / 2;
+}
+
+/**
+ * Reconstruct the nozzle for one engine. Intensive quantities (ε, Mₑ, pₑ, vₑ,
+ * C_F) are per-engine; throat/exit areas scale with the engine count.
+ */
+export function computeNozzle(engineDef, propId, count = 1, body = LAUNCH_BODIES.earth) {
+    const gas = PROP_GAS[propId] || PROP_GAS.kerolox;
+    if (gas.electrostatic) {
+        return { electrostatic: true, eps: 0, exitMach: 0, pe_pa: 0,
+            ve_ms: (engineDef.isp_vac || 3000) * G0, note: 'Electrostatic thruster — no gas-dynamic nozzle.' };
+    }
+    const g = gas.gamma, cstar = gas.cstar, Tc = gas.Tc_K;
+    const eps = ENGINE_NOZZLE[engineDef.id]?.eps || BELL_EPS[engineDef.bell] || 16;
+    const pc = ENGINE_NOZZLE[engineDef.id]?.pc_pa || PC_BY_PROP[propId] || 9.7e6;
+
+    const Me = machFromAreaRatio(eps, g);
+    const tempRatio = 1 + (g - 1) / 2 * Me * Me;
+    const pe = pc * Math.pow(tempRatio, -g / (g - 1));        // exit static pressure
+    const Te = Tc / tempRatio;
+
+    const Rspec = Math.pow(cstar * vdk(g), 2) / Tc;           // from c* = √(R·Tc)/Γ
+    const ae = Math.sqrt(g * Rspec * Te);                     // exit speed of sound
+    const ve = Me * ae;                                       // exit gas velocity
+
+    const F_vac1 = (engineDef.vac_kn || engineDef.sl_kn || 0) * 1000;
+    const ispVac = engineDef.isp_vac || engineDef.isp_sl || 300;
+    const mdot1 = ispVac > 0 ? F_vac1 / (ispVac * G0) : 0;
+    const At1 = pc > 0 ? mdot1 * cstar / pc : 0;              // throat area (choked flow)
+    const Ae1 = eps * At1;
+    const CF_vac = (pc > 0 && At1 > 0) ? F_vac1 / (pc * At1) : 0;
+
+    // Altitude where this nozzle is perfectly expanded (pₐ = pₑ) on this body.
+    const p0 = body.p0_pa || 0, H_m = (body.H_km || 8.5) * 1000;
+    const optAlt_m = (p0 > 0 && pe < p0 && pe > 0) ? H_m * Math.log(p0 / pe) : 0;
+
+    return {
+        electrostatic: false,
+        eps, pc_pa: pc, pe_pa: pe, Te_K: Te, exitMach: Me, ve_ms: ve,
+        cstar, gamma: g, CF_vac,
+        At_m2: At1 * count, Ae_m2: Ae1 * count,
+        optAlt_m,
+    };
+}
+
+/**
+ * Classify the nozzle's expansion against ambient pressure and return a 0..1
+ * "expansion" figure for the plume shader (0 = tight overexpanded sea-level
+ * plume, 1 = wide billowing vacuum plume).
+ */
+export function expansionState(nozzle, p_a) {
+    if (!nozzle || nozzle.electrostatic) return { state: 'electrostatic', ratio: 0, separated: false, expansion01: 1 };
+    const pe = nozzle.pe_pa;
+    if (p_a <= 1e-6) return { state: 'under', ratio: Infinity, separated: false, expansion01: 1 };
+    const ratio = pe / p_a;                              // pₑ/pₐ
+    const separated = ratio < 0.35;                      // Summerfield separation
+    let state;
+    if (separated)       state = 'separated';
+    else if (ratio > 1.05) state = 'under';
+    else if (ratio < 0.95) state = 'over';
+    else                   state = 'optimal';
+    const expansion01 = clamp(0.5 + 0.5 * Math.log10(ratio), 0, 1);
+    return { state, ratio, separated, expansion01 };
+}
+
+/** Convenience: stage-N nozzle expansion at a given altitude on the design's body. */
+export function designStageExpansion01(design, stageIndex, alt_m) {
+    const body = LAUNCH_BODIES[design.bodyId] || LAUNCH_BODIES.earth;
+    const s = design.stages?.[stageIndex];
+    if (!s) return 0.2;
+    const e = ENGINE_CATALOG[s.engineId] || ENGINE_CATALOG.merlin_1d;
+    const noz = computeNozzle(e, s.propellantId, 1, body);
+    const p_a = (body.p0_pa || 0) * Math.exp(-((alt_m || 0) / 1000) / (body.H_km || 8.5));
+    return expansionState(noz, p_a).expansion01;
+}
+
 // ── Aerodynamics ──────────────────────────────────────────────────────────────
 /**
  * Measured-ish aerodynamic model for a design. Total drag coefficient
@@ -433,6 +568,7 @@ export function runAscent(design) {
     // turbopump mass flow set by its vacuum rating; the integrator jettisons the
     // spent stage's dry mass at burnout. This replaces the old single-stage
     // collapse with a genuine staged thrust/TWR profile.
+    const nozzles = stats.stages.map((s) => computeNozzle(s.engine, s.propellantId, s.engineCount, body));
     const stagesSpec = stats.stages.map((s) => {
         const thr = clamp(s.throttle ?? 1, 0.4, 1);
         const F_sl_N  = (s.thrustSL_kN  || 0) * 1000;   // already includes count × throttle
@@ -458,8 +594,8 @@ export function runAscent(design) {
 
     const result = simulateAscent({ body, vehicle, target_alt_km: design.targetAltKm || 200 });
 
-    // Enrich each powered-ascent sample with the force breakdown so the live
-    // telemetry panel can read skin-friction vs pressure vs wave drag directly.
+    // Enrich each powered-ascent sample with the aero force breakdown and the
+    // active nozzle's expansion state (drives the live panels and the plume).
     const A = aero.refArea_m2;
     for (const p of result.trajectory) {
         const c = aero.components(p.mach || 0, p.rho || 0, (p.v_kms || 0) * 1000);
@@ -469,9 +605,17 @@ export function runAscent(design) {
         p.dragFriction_kN = q_pa * c.cdFriction * A / 1000;
         p.dragPressure_kN = q_pa * c.cdPressure * A / 1000;
         p.dragWave_kN     = q_pa * c.cdWave     * A / 1000;
+
+        const noz = nozzles[(p.stage || 1) - 1] || nozzles[0];
+        const p_a = atmosphericPressure(body, (p.alt_km || 0) * 1000);
+        const ex = expansionState(noz, p_a);
+        p.pa_pa = p_a; p.pe_pa = noz?.pe_pa || 0;
+        p.exitMach = noz?.exitMach || 0;
+        p.nozzleState = ex.state; p.peOverPa = ex.ratio; p.expansion01 = ex.expansion01;
+        p.separated = ex.separated;
     }
 
-    return { ...result, stats, ispEff, aero };
+    return { ...result, stats, ispEff, aero, nozzles };
 }
 
 function emptyAscent(body) {

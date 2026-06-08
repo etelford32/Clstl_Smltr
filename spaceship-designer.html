@@ -323,6 +323,17 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
         <div class="ssd-note" id="prop-stagetable"></div>
         <div class="ssd-cdtable" id="prop-static"></div>
       </div>
+      <div style="margin-top:16px">
+        <div class="ssd-stat" style="border:none;padding-bottom:4px">
+          <span class="k">Stage 1 nozzle — <strong id="noz-engine">—</strong> · de Laval</span>
+          <span class="ssd-badge2" id="noz-state">—</span>
+        </div>
+        <p class="ssd-sub" id="noz-blurb"></p>
+        <div class="ssd-aero-cols">
+          <div class="ssd-cdtable" id="noz-specs"></div>
+          <div class="ssd-cdtable" id="noz-specs2"></div>
+        </div>
+      </div>
     </div>
   </div>
   <div class="ssd-card">
@@ -374,9 +385,9 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
 import { auth } from './js/auth.js';
 import { getSupabase } from './js/supabase-config.js';
 import {
-  defaultDesign, computeStats, computeAero, runAscent, gradeAscent,
+  defaultDesign, computeStats, computeAero, computeNozzle, expansionState, runAscent, gradeAscent,
   PROPELLANTS, ENGINE_CATALOG, NOSECONE_TYPES, FIN_TYPES, COCKPIT_LAYOUTS,
-  LIVERIES, PATTERNS, LAUNCH_BODY_OPTIONS,
+  LIVERIES, PATTERNS, LAUNCH_BODY_OPTIONS, LAUNCH_BODIES,
 } from './js/spaceship-designer-engine.js';
 import { createRocketScene } from './js/spaceship-designer-3d.js';
 import * as store from './js/spaceship-designer-store.js';
@@ -609,6 +620,51 @@ function renderPropStatic() {
     ['prop-thrust', 'prop-isp', 'prop-twr', 'prop-accel', 'prop-stage', 'prop-dv'].forEach((id) => { $(id).textContent = '—'; });
     $('prop-thrust-ctx').textContent = 'MN'; $('prop-stage-ctx').textContent = 'on the pad';
   }
+  renderNozzleStatic();
+}
+
+const NOZ_TONE = { optimal: 'var(--c-good)', under: 'var(--c-accent)', over: 'var(--c-warn)', separated: 'var(--c-bad)', electrostatic: 'var(--c-accent)' };
+const NOZ_LABEL = { optimal: 'optimally expanded', under: 'under-expanded', over: 'over-expanded', separated: 'flow separated', electrostatic: 'electrostatic' };
+function setNozBadge(el, state, extra = '') {
+  el.textContent = (NOZ_LABEL[state] || state) + extra;
+  el.style.color = NOZ_TONE[state] || 'var(--c-text-2)';
+  el.style.borderColor = NOZ_TONE[state] || 'var(--c-line)';
+}
+function renderNozzleStatic() {
+  const s0 = design.stages[0] || {};
+  const e = ENGINE_CATALOG[s0.engineId] || ENGINE_CATALOG.merlin_1d;
+  const body = LAUNCH_BODIES[design.bodyId] || LAUNCH_BODIES.earth;
+  const n = computeNozzle(e, s0.propellantId, s0.engineCount || 1, body);
+  $('noz-engine').textContent = (e.label || e.name || 'Engine') + ' ×' + (s0.engineCount || 1);
+  if (n.electrostatic) {
+    setNozBadge($('noz-state'), 'electrostatic');
+    $('noz-blurb').textContent = 'Electrostatic thruster — accelerates ions in a field, with no converging-diverging gas nozzle. Whisper thrust, no liftoff capability.';
+    $('noz-specs').innerHTML = `<span class="k">Exhaust velocity</span><span class="v">${(n.ve_ms / 1000).toFixed(1)} km/s</span>`;
+    $('noz-specs2').innerHTML = '';
+    return;
+  }
+  const p0 = body.p0_pa || 0;
+  const slState = expansionState(n, p0);
+  const kPa = (pa) => pa >= 1000 ? (pa / 1000).toFixed(1) + ' kPa' : pa.toFixed(0) + ' Pa';
+  $('noz-specs').innerHTML = [
+    ['Expansion ratio ε (Aₑ/Aₜ)', n.eps.toFixed(0)],
+    ['Exit Mach Mₑ', n.exitMach.toFixed(2)],
+    ['Exit velocity vₑ', (n.ve_ms / 1000).toFixed(2) + ' km/s'],
+    ['Thrust coefficient C_F', n.CF_vac.toFixed(2)],
+  ].map(([k, v]) => `<span class="k">${k}</span><span class="v">${v}</span>`).join('');
+  $('noz-specs2').innerHTML = [
+    ['Chamber pressure p_c', (n.pc_pa / 1e6).toFixed(1) + ' MPa'],
+    ['Exit pressure pₑ', kPa(n.pe_pa)],
+    ['Throat / exit area', n.At_m2.toFixed(2) + ' / ' + n.Ae_m2.toFixed(2) + ' m²'],
+    ['Optimal altitude (pₑ=pₐ)', n.optAlt_m > 50 ? (n.optAlt_m / 1000).toFixed(1) + ' km' : 'sea level'],
+  ].map(([k, v]) => `<span class="k">${k}</span><span class="v">${v}</span>`).join('');
+  if (!liveProp) {
+    setNozBadge($('noz-state'), slState.state, ` · pₑ/pₐ ${slState.ratio.toFixed(2)} at ${body.name} surface`);
+    const opt = n.optAlt_m > 50 ? `optimally expanded at ${(n.optAlt_m / 1000).toFixed(1)} km` : 'optimally expanded at the surface';
+    $('noz-blurb').textContent = slState.separated
+      ? `This nozzle is far too large for ${body.name}'s surface pressure — the flow separates from the wall and the engine cannot run here. It needs near-vacuum (a high-altitude or upper stage).`
+      : `On the pad this nozzle is ${NOZ_LABEL[slState.state]} (pₑ/pₐ ${slState.ratio.toFixed(2)}); it becomes ${opt}, then runs increasingly under-expanded above that as the air thins.`;
+  }
 }
 function updatePropLive(s) {
   liveProp = true;
@@ -623,6 +679,14 @@ function updatePropLive(s) {
   $('prop-stage').textContent = coasting ? '— ' : 'S' + (s.stage ?? 1);
   $('prop-stage-ctx').textContent = coasting ? 'coasting' : 'firing';
   $('prop-dv').textContent = (s.dvUsed ?? 0).toFixed(2);
+  // Live nozzle expansion state.
+  if (s.nozzleState && !coasting) {
+    const ratio = s.peOverPa;
+    const rtxt = (ratio == null || !isFinite(ratio)) ? '∞' : ratio.toFixed(2);
+    setNozBadge($('noz-state'), s.nozzleState, ` · pₑ/pₐ ${rtxt} · Mₑ ${(s.exitMach ?? 0).toFixed(1)}`);
+  } else if (coasting) {
+    setNozBadge($('noz-state'), 'over', ' · engine off');
+  }
 }
 
 // ── 3D rebuild (debounced) ───────────────────────────────────────────────────
@@ -895,6 +959,11 @@ function wire() {
       checks.push(['traj carries thrust', stg1.some((p) => p.thrust_kN > 0)]);
       checks.push(['SL→vac thrust rise', stg1.length > 1 && stg1[0].thrust_kN < stg1[stg1.length - 1].thrust_kN]);
       checks.push(['staging event recorded', (r.staging_events?.length || 0) >= 1]);
+      // Nozzle de Laval physics.
+      const noz = computeNozzle(ENGINE_CATALOG.merlin_1d, 'kerolox', 1, LAUNCH_BODIES.earth);
+      checks.push(['nozzle Me supersonic', noz.exitMach > 1 && noz.pe_pa > 0]);
+      checks.push(['vac nozzle separates at SL', expansionState(computeNozzle(ENGINE_CATALOG.merlin_vac, 'kerolox', 1, LAUNCH_BODIES.earth), 101325).separated === true]);
+      checks.push(['traj carries nozzle state', r.trajectory.some((p) => !!p.nozzleState)]);
       return { ok: checks.every((c) => c[1]), checks };
     },
   };

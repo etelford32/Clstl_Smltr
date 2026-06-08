@@ -30,7 +30,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { buildEngineBell } from './launch-engine-bell.js';
 import { buildPlume, tickPlume } from './launch-plume.js';
 import { buildPad, tickBeacons } from './launch-pad-3d.js';
-import { PROPELLANTS, ENGINE_CATALOG, LIVERIES } from './spaceship-designer-engine.js';
+import { PROPELLANTS, ENGINE_CATALOG, LIVERIES, designStageExpansion01 } from './spaceship-designer-engine.js';
 
 const DAY_SKY = new THREE.Color(0x9ec7e8);
 const SPACE_SKY = new THREE.Color(0x02040a);
@@ -489,6 +489,11 @@ export function createRocketScene(canvas, opts = {}) {
                     dv_used_kms: lerp('dv_used_kms'),
                     stage: (f < 0.5 ? a : b).stage,
                     coasting: (f < 0.5 ? a : b).coasting,
+                    // Nozzle expansion telemetry.
+                    expansion01: lerp('expansion01', 0.2),
+                    exitMach: lerp('exitMach'), peOverPa: lerp('peOverPa', 1),
+                    nozzleState: (f < 0.5 ? a : b).nozzleState,
+                    separated: (f < 0.5 ? a : b).separated,
                 };
             }
         }
@@ -511,7 +516,8 @@ export function createRocketScene(canvas, opts = {}) {
                 f.ignited = true;
             }
             const spool = Math.max(0, 1 + tcd / 1.4);
-            plumes.forEach((p) => tickPlume(p, now, spool * 0.6, 0));
+            const exp0 = padExpansion();
+            plumes.forEach((p) => tickPlume(p, now, spool * 0.6, 0, exp0));
             groundFX.tick(now, spool * 0.6, 1);     // full ground-effect on the pad
             // Engines settle from a small ignition twitch to centred as they light.
             applyGimbal(Math.sin(now * 9) * 0.05 * (1 - spool), Math.cos(now * 7) * 0.05 * (1 - spool));
@@ -544,7 +550,7 @@ export function createRocketScene(canvas, opts = {}) {
         scene.fog.color.copy(scene.background);
         stars.material.opacity = mix;
 
-        plumes.forEach((p) => { p.visible = throttle > 0; tickPlume(p, now, throttle, s.alt_km); });
+        plumes.forEach((p) => { p.visible = throttle > 0; tickPlume(p, now, throttle, s.alt_km, s.expansion01); });
 
         // Thrust vectoring: a slow guidance weave plus a downrange lean that grows
         // with altitude — the visible signature of the gravity-turn steering.
@@ -572,16 +578,27 @@ export function createRocketScene(canvas, opts = {}) {
                  boundaryLayer: s.boundaryLayer, regime: s.regime,
                  // Propulsion telemetry for the live engine panel.
                  isp: s.isp_s, twr: s.twr, accelG: s.accel_g,
-                 stage: s.stage, coasting: s.coasting, dvUsed: s.dv_used_kms });
+                 stage: s.stage, coasting: s.coasting, dvUsed: s.dv_used_kms,
+                 // Nozzle expansion state.
+                 nozzleState: s.nozzleState, peOverPa: s.peOverPa,
+                 exitMach: s.exitMach, separated: s.separated, expansion01: s.expansion01 });
 
         if (flightT >= f.burn - 1e-3) endFlight(f.result);
     }
 
     // Static-fire test: hold on the pad and fire stage 1 at the design throttle,
     // with the engines weaving on their gimbals so the thrust vector is visible.
+    // Stage-1 nozzle expansion at the pad (sea level) — drives the static-fire
+    // and ignition plume shape from the real over-/optimally-expanded state.
+    function padExpansion() {
+        try { return currentDesign ? designStageExpansion01(currentDesign, 0, 0) : 0.35; }
+        catch { return 0.35; }
+    }
+
     function tickStaticFire(now) {
         const thr = clamp01(currentDesign?.stages?.[0]?.throttle ?? 1);
-        plumes.forEach((p) => { p.visible = thr > 0; tickPlume(p, now, thr, 0); });
+        const exp0 = padExpansion();
+        plumes.forEach((p) => { p.visible = thr > 0; tickPlume(p, now, thr, 0, exp0); });
         groundFX.group.visible = thr > 0;
         if (groundFX.group.visible) groundFX.tick(now, thr, 1);
         // Exaggerated gimbal sweep (a Lissajous figure) so the vectoring is obvious.
