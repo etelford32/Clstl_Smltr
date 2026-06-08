@@ -27,6 +27,7 @@ export const LAUNCH_BODIES = {
         id: 'earth', name: 'Earth',
         R_km: 6378.137, mu_km3s2: 398600.4418,
         rho0_kg_m3: 1.225, H_km: 8.5, T_surf_K: 288,
+        a_sound_ms: 340, mu_pas: 1.81e-5,
         atmosphere: 'N₂/O₂ · 1.013 bar',
         v_orb_low_kms: 7.79,
         notes: 'Workhorse comparison case.',
@@ -35,6 +36,7 @@ export const LAUNCH_BODIES = {
         id: 'venus', name: 'Venus',
         R_km: 6051.8, mu_km3s2: 324859.0,
         rho0_kg_m3: 65.0, H_km: 15.9, T_surf_K: 740,
+        a_sound_ms: 410, mu_pas: 3.4e-5,
         atmosphere: 'CO₂ · 92 bar',
         v_orb_low_kms: 7.32,
         notes: '53× Earth surface density. Drag loss is enormous.',
@@ -43,6 +45,7 @@ export const LAUNCH_BODIES = {
         id: 'mars', name: 'Mars',
         R_km: 3389.5, mu_km3s2: 42828.37,
         rho0_kg_m3: 0.020, H_km: 11.1, T_surf_K: 210,
+        a_sound_ms: 240, mu_pas: 1.1e-5,
         atmosphere: 'CO₂ · 6.4 mbar',
         v_orb_low_kms: 3.55,
         notes: 'Thin atmosphere + low gravity = friendly launch site.',
@@ -59,6 +62,7 @@ export const LAUNCH_BODIES = {
         id: 'titan', name: 'Titan',
         R_km: 2575, mu_km3s2: 8978,
         rho0_kg_m3: 5.30, H_km: 20, T_surf_K: 94,
+        a_sound_ms: 195, mu_pas: 6.3e-6,
         atmosphere: 'N₂/CH₄ · 1.5 bar',
         v_orb_low_kms: 1.85,
         notes: 'Cold dense atmosphere + low gravity. Aerodynamic flight is very efficient.',
@@ -130,6 +134,16 @@ export function atmosphericDensity(body, alt_m) {
     return body.rho0_kg_m3 * Math.exp(-(alt_m / 1000) / body.H_km);
 }
 
+/**
+ * Local speed of sound (m/s). The atmosphere model here is isothermal, so the
+ * speed of sound — which depends only on temperature and gas composition — is
+ * treated as constant with altitude. Vacuum/airless bodies return 0 (Mach is
+ * undefined and drag is zero there anyway).
+ */
+export function speedOfSound(body, _alt_m = 0) {
+    return body.a_sound_ms > 0 ? body.a_sound_ms : 0;
+}
+
 // ── Ascent integrator ───────────────────────────────────────────────────────
 
 const G0_EARTH = 9.80665;       // m/s² — standard for Isp definition
@@ -173,9 +187,16 @@ export function simulateAscent({
     let m  = vehicle.m0_kg;
     let t  = 0;
 
+    // Drag may be a constant coefficient (back-compat) or a Mach-dependent
+    // function Cd(mach, v, alt_m, rho) — the Space Ship Designer passes the
+    // latter so nosecone shape drives transonic / supersonic wave drag.
+    const cdIsFn = typeof vehicle.Cd === 'function';
+    const a_sound = speedOfSound(body);
+
     let dv_grav_loss_ms = 0;
     let dv_drag_loss_ms = 0;
     let max_q_pa = 0, max_q_alt_km = 0, max_q_t_s = 0;
+    let max_mach = 0, max_drag_N = 0, max_drag_alt_km = 0;
     const trajectory = [];
     let step = 0;
     let fuel_out = false;
@@ -193,8 +214,17 @@ export function simulateAscent({
         const q   = 0.5 * rho * v*v;
         if (q > max_q_pa) { max_q_pa = q; max_q_alt_km = alt_km; max_q_t_s = t; }
 
-        // Drag (opposite velocity)
-        const F_drag = 0.5 * rho * v*v * vehicle.Cd * vehicle.A_m2;
+        // Mach number (0 where the air is too thin for a defined speed of sound).
+        const mach = a_sound > 0 ? v / a_sound : 0;
+        // Only headline the Mach reached while there is still meaningful air —
+        // once in vacuum the velocity/sound ratio keeps climbing but means nothing
+        // aerodynamically (and drag there is zero).
+        if (mach > max_mach && rho > 1e-4) max_mach = mach;
+
+        // Drag (opposite velocity). Cd can vary with Mach when a function is given.
+        const Cd = cdIsFn ? vehicle.Cd(mach, v, alt_m, rho) : vehicle.Cd;
+        const F_drag = q * Cd * vehicle.A_m2;
+        if (F_drag > max_drag_N) { max_drag_N = F_drag; max_drag_alt_km = alt_km; }
         const drag_r = (v > 1e-9) ? -F_drag * vr / v : 0;
         const drag_t = (v > 1e-9) ? -F_drag * vt / v : 0;
 
@@ -252,6 +282,10 @@ export function simulateAscent({
                 vr_kms: vr / 1000,
                 vt_kms: vt / 1000,
                 q_kPa:  q / 1000,
+                mach,
+                cd:     Cd,
+                drag_kN: F_drag / 1000,
+                rho,
                 mass_frac: m / vehicle.m0_kg,
             });
         }
@@ -315,6 +349,9 @@ export function simulateAscent({
         // Atmosphere stats
         max_q_kPa: max_q_pa / 1000,
         max_q_alt_km, max_q_t_s,
+        max_mach,
+        max_drag_kN: max_drag_N / 1000,
+        max_drag_alt_km,
         // Mass
         fuel_burned_kg:       vehicle.m0_kg - m,
         fuel_mass_fraction:   1 - (m / vehicle.m0_kg),

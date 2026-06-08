@@ -109,12 +109,33 @@ export const ENGINE_CATALOG = {
 };
 
 // ── Cosmetic / structural catalogs ───────────────────────────────────────────
+// `aero` carries the measured-ish drag character of each nose shape, referenced
+// to the vehicle cross-section (A = π·r_max²):
+//   cdpForm — subsonic pressure (form) drag of the nose. Near-zero for a sharp
+//             streamlined nose; large for a blunt body that pushes a fat
+//             stagnation region of air ahead of it.
+//   kWave   — supersonic wave-drag scale at a reference nose fineness (~3). The
+//             dominant nose effect: a bow shock the vehicle must shove aside.
+// Rankings follow the classic nose-cone drag literature (Hoerner; the model-
+// rocketry "nose cone comparison" data): von-Kármán/ogive ≈ best, sharp cone a
+// close second, blunt fairings worse, and a blunt crew capsule worst of all
+// (it is shaped to brake on reentry, not to slip through Max-Q).
 export const NOSECONE_TYPES = {
-    ogive: { id: 'ogive', name: 'Ogive fairing', note: 'Smooth payload fairing.' },
-    cone: { id: 'cone', name: 'Sharp cone', note: 'Pointed sounding-rocket nose.' },
-    blunt: { id: 'blunt', name: 'Blunt fairing', note: 'Wide bulbous fairing.' },
-    capsule: { id: 'capsule', name: 'Crew capsule', note: 'Gumdrop crew module.' },
-    spaceplane: { id: 'spaceplane', name: 'Spaceplane', advanced: true, note: 'Winged upper stage.' },
+    ogive: { id: 'ogive', name: 'Ogive fairing', note: 'Smooth payload fairing.',
+        aero: { cdpForm: 0.04, kWave: 0.10, dragClass: 'low',
+            blurb: 'Tangent-ogive fairing — low wave drag, the all-round transonic optimum.' } },
+    cone: { id: 'cone', name: 'Sharp cone', note: 'Pointed sounding-rocket nose.',
+        aero: { cdpForm: 0.05, kWave: 0.13, dragClass: 'low',
+            blurb: 'Sharp cone — clean attached supersonic flow; a touch more transonic drag than an ogive.' } },
+    blunt: { id: 'blunt', name: 'Blunt fairing', note: 'Wide bulbous fairing.',
+        aero: { cdpForm: 0.10, kWave: 0.30, dragClass: 'high',
+            blurb: 'Blunt fairing — a strong detached bow shock drives heavy transonic / supersonic wave drag.' } },
+    capsule: { id: 'capsule', name: 'Crew capsule', note: 'Gumdrop crew module.',
+        aero: { cdpForm: 0.22, kWave: 0.55, dragClass: 'very high',
+            blurb: 'Blunt crew capsule — built to brake on reentry, not to slip through Max-Q. Pays a real ascent drag penalty.' } },
+    spaceplane: { id: 'spaceplane', name: 'Spaceplane', advanced: true, note: 'Winged upper stage.',
+        aero: { cdpForm: 0.08, kWave: 0.18, dragClass: 'moderate', wing: true,
+            blurb: 'Winged lifting body — moderate wave drag plus extra skin friction from the exposed wing area.' } },
 };
 
 export const FIN_TYPES = {
@@ -258,6 +279,131 @@ export function computeStats(design, body = LAUNCH_BODIES[design.bodyId] || LAUN
     };
 }
 
+// ── Aerodynamics ──────────────────────────────────────────────────────────────
+/**
+ * Measured-ish aerodynamic model for a design. Total drag coefficient
+ * (referenced to the cross-sectional area A = π·r_max²) is split into the three
+ * physical contributions a real rocket fights on the way up:
+ *
+ *   • Skin friction  — viscous shear in the boundary layer over the whole
+ *     wetted surface. Turbulent above Re≈5·10⁵ (it almost always is), with a
+ *     Van-Driest compressibility correction at high Mach. Scales with how long
+ *     and slender the vehicle is (wetted-area / reference-area ratio).
+ *   • Pressure drag  — base drag behind the engines + the nose's subsonic form
+ *     drag. Base drag is bled down while the engines fire (the plume fills the
+ *     near-wake).
+ *   • Wave drag      — the energy radiated into the bow shock once the flow goes
+ *     transonic. This is the dominant nose-shape effect: it switches on near the
+ *     drag-divergence Mach (~0.8), overshoots at the transonic peak (~M 1.05),
+ *     then settles to a slowly-falling supersonic plateau.
+ *
+ * Re/Cf use Schlichting flat-plate correlations; the body form factor follows
+ * Hoerner. These are engineering correlations, not CFD — good to tens of
+ * percent, which is the right fidelity for a design-it-yourself sandbox.
+ */
+const smoothstep = (a, b, x) => { const t = clamp((x - a) / (b - a || 1e-9), 0, 1); return t * t * (3 - 2 * t); };
+
+// Transonic/supersonic wave-drag shape factor (×kWave gives the nose's Cd_wave).
+function waveFactor(M) {
+    if (M <= 0.8) return 0;
+    const onset = smoothstep(0.8, 1.05, M);              // drag divergence
+    const spike = 0.35 * Math.exp(-Math.pow((M - 1.08) / 0.16, 2)); // transonic overshoot
+    const decay = M > 1.2 ? Math.pow(1.2 / M, 0.42) : 1; // slow supersonic falloff
+    return onset * decay + spike;
+}
+
+function flowRegime(M) {
+    if (M < 0.8) return 'subsonic';
+    if (M < 1.2) return 'transonic';
+    if (M < 5)   return 'supersonic';
+    return 'hypersonic';
+}
+
+/**
+ * Build the aero profile for a design. Returns geometry, a Mach-dependent total
+ * Cd (for the integrator), a per-state `components` breakdown (for telemetry),
+ * and a few measured reference points for the static readout.
+ */
+export function computeAero(design, stats = computeStats(design), body = LAUNCH_BODIES[design.bodyId] || LAUNCH_BODIES.earth) {
+    const D = Math.max(0.5, stats.maxDiameter_m);
+    const r = D / 2;
+    const refArea = Math.PI * r * r;
+    const L = Math.max(D, stats.height_m);
+    const noseLen = Math.max(0.5, design.payload?.fairingLen_m || 8);
+    const fineness = L / D;                       // whole-vehicle slenderness
+    const noseFineness = noseLen / D;             // nose slenderness
+    const mu = body.mu_pas || 1.81e-5;            // dynamic viscosity
+
+    const nose = NOSECONE_TYPES[design.payload?.nosecone] || NOSECONE_TYPES.ogive;
+    const na = nose.aero || NOSECONE_TYPES.ogive.aero;
+
+    // Wetted area: body cylinder + cone-approximated nose (+ wings if present).
+    let wetted = Math.PI * D * Math.max(0, L - noseLen) + Math.PI * r * Math.hypot(noseLen, r);
+    if (na.wing) wetted *= 1.35;                  // exposed wing surfaces
+    const wetRatio = wetted / refArea;
+
+    // Hoerner slender-body form factor (interference of the boundary layer with
+    // the body's own pressure field). ~1.05 for a slender booster, higher stubby.
+    const formFactor = 1 + 1.5 / Math.pow(fineness, 1.5) + 7 / Math.pow(fineness, 3);
+
+    // Nose wave-drag scale, adjusted for how pointed this particular nose is.
+    const finenessAdj = clamp(Math.pow(3.0 / Math.max(0.4, noseFineness), 0.6), 0.4, 2.5);
+    const cdWaveBase = na.kWave * finenessAdj;
+
+    // Per-state breakdown. `powered` lets base drag be bled by the plume.
+    function components(M, rho, v, { powered = true } = {}) {
+        const Re = (rho > 0 && v > 0) ? (rho * v * L) / mu : 0;
+
+        // Skin friction — laminar below the transition Re, turbulent above.
+        let cf = 0, boundaryLayer = 'none';
+        if (Re > 1e3) {
+            if (Re < 5e5) { cf = 1.328 / Math.sqrt(Re); boundaryLayer = 'laminar'; }
+            else { cf = 0.455 / Math.pow(Math.log10(Re), 2.58); boundaryLayer = 'turbulent'; }
+            cf /= Math.pow(1 + 0.144 * M * M, 0.65);   // Van-Driest compressibility
+        }
+        const cdFriction = cf * wetRatio * formFactor;
+
+        // Base drag (referenced to A): subsonic plateau, transonic bump, then a
+        // supersonic decline. Bled to ~half while the engines are firing.
+        let cdBase;
+        if (M < 0.8)      cdBase = 0.13;
+        else if (M < 1.2) cdBase = 0.13 + 0.12 * smoothstep(0.8, 1.05, M);
+        else              cdBase = Math.max(0.05, 0.25 / (1 + 0.5 * (M - 1.2)));
+        if (powered) cdBase *= 0.5;
+
+        // Nose: subsonic form drag (always present) + wave drag (transonic+).
+        const cdForm = na.cdpForm;
+        const cdWave = cdWaveBase * waveFactor(M);
+        const cdPressure = cdBase + cdForm;
+
+        const cdTotal = cdFriction + cdPressure + cdWave;
+        return {
+            reynolds: Re, cf, boundaryLayer, regime: flowRegime(M),
+            cdFriction, cdBase, cdForm, cdPressure, cdWave, cdTotal,
+        };
+    }
+
+    // Total Cd in the (mach, v, alt, rho) signature the integrator calls with.
+    const cd = (M, v, _alt, rho) => components(M, rho, v).cdTotal;
+
+    // Measured reference points for the static panel (use surface density).
+    const rho0 = body.rho0_kg_m3;
+    const a = body.a_sound_ms || 340;
+    const ref = {
+        subsonic:   components(0.5,  rho0, 0.5 * a),
+        transonic:  components(1.05, rho0, 1.05 * a),
+        supersonic: components(3.0,  rho0, 3.0 * a),
+    };
+
+    return {
+        refArea_m2: refArea, wettedArea_m2: wetted, wetRatio,
+        fineness, noseFineness,
+        noseId: nose.id, noseName: nose.name, dragClass: na.dragClass, blurb: na.blurb,
+        hasAtmosphere: rho0 > 1e-6,
+        cd, components, reference: ref,
+    };
+}
+
 /**
  * Run a full surface-to-orbit ascent for the design by collapsing it into the
  * effective single-stage vehicle that launch-physics.simulateAscent expects.
@@ -289,19 +435,37 @@ export function runAscent(design) {
     // orbit and badly under-fly the rocket.
     const topStage = stats.stages[stats.stages.length - 1] || { dryMass: 0 };
     const finalMass = topStage.dryMass + stats.payload_kg;
-    const r = stats.maxDiameter_m / 2;
+
+    // Real, nose-shape-dependent drag: a Mach-varying Cd from the aero model
+    // instead of a flat 0.3. A blunt capsule now pays measurably more drag loss
+    // than a sharp ogive — exactly the physical effect we want the nose to have.
+    const aero = computeAero(design, stats, body);
     const vehicle = {
         id: 'custom', name: design.name || 'Custom vehicle',
         m0_kg: stats.totalWet_kg,
         Isp_s: ispEff,
         TWR_E: stats.liftoffThrust_kN * 1000 / (stats.totalWet_kg * G0),  // referenced to Earth g for the integrator
-        Cd: 0.3,
-        A_m2: Math.PI * r * r,
+        Cd: aero.cd,                 // Mach-dependent (function) — integrator handles both
+        A_m2: aero.refArea_m2,
         dry_frac: clamp(finalMass / stats.totalWet_kg, 0.02, 0.6),
     };
 
     const result = simulateAscent({ body, vehicle, target_alt_km: design.targetAltKm || 200 });
-    return { ...result, stats, ispEff };
+
+    // Enrich each powered-ascent sample with the force breakdown so the live
+    // telemetry panel can read skin-friction vs pressure vs wave drag directly.
+    const A = aero.refArea_m2;
+    for (const p of result.trajectory) {
+        const c = aero.components(p.mach || 0, p.rho || 0, (p.v_kms || 0) * 1000);
+        const q_pa = (p.q_kPa || 0) * 1000;
+        p.cdFriction = c.cdFriction; p.cdPressure = c.cdPressure; p.cdWave = c.cdWave;
+        p.reynolds = c.reynolds; p.boundaryLayer = c.boundaryLayer; p.regime = c.regime;
+        p.dragFriction_kN = q_pa * c.cdFriction * A / 1000;
+        p.dragPressure_kN = q_pa * c.cdPressure * A / 1000;
+        p.dragWave_kN     = q_pa * c.cdWave     * A / 1000;
+    }
+
+    return { ...result, stats, ispEff, aero };
 }
 
 function emptyAscent(body) {

@@ -461,7 +461,7 @@ export function createRocketScene(canvas, opts = {}) {
         f?.resolve?.(result);
     }
 
-    // sample trajectory (alt_km, v_kms) at flight-time t (seconds since liftoff)
+    // sample trajectory (alt_km, v_kms, + aero telemetry) at flight-time t
     function sampleTraj(traj, t) {
         if (t <= traj[0].t) return traj[0];
         const last = traj[traj.length - 1];
@@ -470,10 +470,19 @@ export function createRocketScene(canvas, opts = {}) {
             if (traj[i].t >= t) {
                 const a = traj[i - 1], b = traj[i];
                 const f = (t - a.t) / Math.max(1e-3, b.t - a.t);
+                const lerp = (k, d = 0) => (a[k] ?? d) + ((b[k] ?? d) - (a[k] ?? d)) * f;
                 return {
-                    t, alt_km: a.alt_km + (b.alt_km - a.alt_km) * f,
-                    v_kms: (a.v_kms ?? 0) + ((b.v_kms ?? 0) - (a.v_kms ?? 0)) * f,
-                    mass_frac: (a.mass_frac ?? 1) + ((b.mass_frac ?? 1) - (a.mass_frac ?? 1)) * f,
+                    t, alt_km: lerp('alt_km'),
+                    v_kms: lerp('v_kms'),
+                    mass_frac: lerp('mass_frac', 1),
+                    // Aerodynamic telemetry (enriched by runAscent) for the live panel.
+                    mach: lerp('mach'), q_kPa: lerp('q_kPa'), reynolds: lerp('reynolds'),
+                    drag_kN: lerp('drag_kN'),
+                    dragFriction_kN: lerp('dragFriction_kN'),
+                    dragPressure_kN: lerp('dragPressure_kN'),
+                    dragWave_kN: lerp('dragWave_kN'),
+                    boundaryLayer: (f < 0.5 ? a : b).boundaryLayer,
+                    regime: (f < 0.5 ? a : b).regime,
                 };
             }
         }
@@ -540,7 +549,12 @@ export function createRocketScene(canvas, opts = {}) {
 
         if (tcd < 0.2) onPhase('liftoff'); else onPhase('ascent');
         onTick({ phase: 'ascent', t: flightT, altKm: s.alt_km, vKms: s.v_kms, throttle,
-                 thrustMN: stage0ThrustFull_kN * throttle / 1000 });
+                 thrustMN: stage0ThrustFull_kN * throttle / 1000,
+                 massFrac: s.mass_frac,
+                 mach: s.mach, qkPa: s.q_kPa, reynolds: s.reynolds,
+                 dragkN: s.drag_kN, dragFrictionkN: s.dragFriction_kN,
+                 dragPressurekN: s.dragPressure_kN, dragWavekN: s.dragWave_kN,
+                 boundaryLayer: s.boundaryLayer, regime: s.regime });
 
         if (flightT >= f.burn - 1e-3) endFlight(f.result);
     }
