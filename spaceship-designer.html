@@ -142,8 +142,7 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
 /* ── Aerodynamics / live force telemetry ── */
 .ssd-aero{max-width:1480px;margin:0 auto 60px;padding:0 20px}
 .ssd-aero .ssd-sub{font-size:12px;color:var(--c-text-mut);line-height:1.5;margin:0 0 4px}
-.ssd-instruments{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
-@media (max-width:760px){.ssd-instruments{grid-template-columns:repeat(2,1fr)}}
+.ssd-instruments{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:10px}
 .ssd-inst{background:rgba(4,8,18,.5);border:1px solid var(--c-line);border-radius:var(--r-md);padding:10px 12px;display:flex;flex-direction:column;gap:3px}
 .ssd-inst .k{font-size:10px;color:var(--c-text-mut);text-transform:uppercase;letter-spacing:.06em}
 .ssd-inst .v{font-size:21px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.05}
@@ -303,8 +302,29 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
 
 </div>
 
-<!-- ░░░ BOTTOM: live aerodynamic force analysis ░░░ -->
+<!-- ░░░ BOTTOM: live propulsion + aerodynamic force analysis ░░░ -->
 <div class="ssd-aero">
+  <div class="ssd-card" style="margin-bottom:14px">
+    <h2>Propulsion &amp; Thrust — Live Telemetry <span class="ssd-pill" id="ssd-prop-state">standby</span></h2>
+    <div class="ssd-body">
+      <p class="ssd-sub">Each engine pumps a near-fixed mass flow, so thrust climbs from its <strong>sea-level</strong> rating
+        to its higher <strong>vacuum</strong> rating as the air thins (the nozzle's pₑ−pₐ term grows). The vehicle also
+        sheds a spent stage's structure at burnout, after a brief coast. The integrator models all of it — so thrust,
+        specific impulse, thrust-to-weight and acceleration all evolve live as the rocket climbs and stages.</p>
+      <div class="ssd-instruments">
+        <div class="ssd-inst"><span class="k">Thrust</span><span class="v" id="prop-thrust">—</span><span class="u" id="prop-thrust-ctx">MN</span></div>
+        <div class="ssd-inst"><span class="k">Specific impulse</span><span class="v" id="prop-isp">—</span><span class="u">s · Isp</span></div>
+        <div class="ssd-inst"><span class="k">Thrust / weight</span><span class="v" id="prop-twr">—</span><span class="u">TWR</span></div>
+        <div class="ssd-inst"><span class="k">Acceleration</span><span class="v" id="prop-accel">—</span><span class="u">g</span></div>
+        <div class="ssd-inst"><span class="k">Active stage</span><span class="v" id="prop-stage">—</span><span class="u" id="prop-stage-ctx">on the pad</span></div>
+        <div class="ssd-inst"><span class="k">Δv delivered</span><span class="v" id="prop-dv">—</span><span class="u">km/s</span></div>
+      </div>
+      <div class="ssd-aero-cols" style="margin-top:14px">
+        <div class="ssd-note" id="prop-stagetable"></div>
+        <div class="ssd-cdtable" id="prop-static"></div>
+      </div>
+    </div>
+  </div>
   <div class="ssd-card">
     <h2>Aerodynamic Forces — Live Telemetry <span class="ssd-pill" id="ssd-aero-state">standby</span></h2>
     <div class="ssd-body">
@@ -568,6 +588,43 @@ function updateAeroLive(s) {
   $('aero-val-wave').textContent = wv.toFixed(1) + ' kN';
 }
 
+// ── Propulsion / thrust analysis (bottom panel) ──────────────────────────────
+let liveProp = false;
+function renderPropStatic() {
+  const st = computeStats(design);
+  const s0 = st.stages[0] || {};
+  const fmtT = (kN) => (kN >= 1000 ? (kN / 1000).toFixed(2) + ' MN' : (kN).toFixed(0) + ' kN');
+  $('prop-stagetable').innerHTML =
+    `<strong>${st.stages.length}-stage</strong> vehicle · stage 1 fires at liftoff, ` +
+    `${st.stages.length > 1 ? (st.stages.length - 1) + ' staging event' + (st.stages.length > 2 ? 's' : '') : 'single stage'}. ` +
+    `Thrust quoted sea-level → vacuum; the rise is the nozzle pressure term as the air thins.`;
+  $('prop-static').innerHTML = [
+    ['Liftoff thrust (SL → vac)', fmtT(s0.thrustSL_kN || 0) + ' → ' + fmtT(s0.thrustVac_kN || 0)],
+    ['Liftoff TWR', st.liftoffTWR.toFixed(2)],
+    ['Stage 1 Isp (SL / vac)', `${Math.round(s0.isp_s || 0)} / ${Math.round(s0.ispVac_s || 0)} s`],
+    ['Ideal Δv (Tsiolkovsky)', st.totalDv_kms.toFixed(2) + ' km/s'],
+  ].map(([k, v]) => `<span class="k">${k}</span><span class="v">${v}</span>`).join('');
+  if (!liveProp) {
+    $('ssd-prop-state').textContent = 'standby';
+    ['prop-thrust', 'prop-isp', 'prop-twr', 'prop-accel', 'prop-stage', 'prop-dv'].forEach((id) => { $(id).textContent = '—'; });
+    $('prop-thrust-ctx').textContent = 'MN'; $('prop-stage-ctx').textContent = 'on the pad';
+  }
+}
+function updatePropLive(s) {
+  liveProp = true;
+  const coasting = !!s.coasting;
+  $('ssd-prop-state').textContent = coasting ? 'staging coast' : 'burn · stage ' + (s.stage ?? 1);
+  const th = s.thrustMN ?? 0;
+  $('prop-thrust').textContent = th >= 1 ? th.toFixed(2) : (th * 1000).toFixed(0);
+  $('prop-thrust-ctx').textContent = th >= 1 ? 'MN' : 'kN';
+  $('prop-isp').textContent = coasting ? '—' : Math.round(s.isp ?? 0);
+  $('prop-twr').textContent = (s.twr ?? 0).toFixed(2);
+  $('prop-accel').textContent = (s.accelG ?? 0).toFixed(2);
+  $('prop-stage').textContent = coasting ? '— ' : 'S' + (s.stage ?? 1);
+  $('prop-stage-ctx').textContent = coasting ? 'coasting' : 'firing';
+  $('prop-dv').textContent = (s.dvUsed ?? 0).toFixed(2);
+}
+
 // ── 3D rebuild (debounced) ───────────────────────────────────────────────────
 function scheduleRebuild() {
   clearTimeout(rebuildTimer);
@@ -578,6 +635,7 @@ function scheduleRebuild() {
 function refresh({ rebuild = true } = {}) {
   renderStats();
   renderAeroStatic();
+  renderPropStatic();
   if (rebuild) scheduleRebuild();
   store.saveDraft(design);
 }
@@ -613,6 +671,11 @@ function showResult(result) {
     orbit: 'Orbit achieved', 'fuel-out': 'MECO — out of propellant',
     crashed: 'Crashed', 'time-out': 'Flight timed out', invalid: 'Invalid design',
   }[result.status] || result.status;
+  const ev = result.staging_events || [];
+  const stagingRows = ev.length
+    ? `<div class="ssd-stat" style="border:none"><span class="k">Staging</span><span class="v">${
+        ev.map((e) => `S${e.stage}→${e.stage + 1} @ T+${e.t.toFixed(0)}s, ${(e.v_kms ?? 0).toFixed(2)} km/s`).join('<br>')}</span></div>`
+    : '';
   $('ssd-result').innerHTML = `
     <div style="display:flex;gap:16px;align-items:center">
       <div class="ssd-grade ${g.tone}">${g.grade}</div>
@@ -627,7 +690,8 @@ function showResult(result) {
     <div class="ssd-stat"><span class="k">Drag loss</span><span class="v">${ks(result.dv_drag_loss_kms)} km/s</span></div>
     <div class="ssd-stat"><span class="k">Max-Q</span><span class="v">${(result.max_q_kPa ?? 0).toFixed(0)} kPa</span></div>
     <div class="ssd-stat"><span class="k">Max Mach (in atmosphere)</span><span class="v">${(result.max_mach ?? 0).toFixed(1)}</span></div>
-    <div class="ssd-stat" style="border:none"><span class="k">Peak aero drag</span><span class="v">${(result.max_drag_kN ?? 0).toFixed(0)} kN @ ${(result.max_drag_alt_km ?? 0).toFixed(0)} km</span></div>`;
+    <div class="ssd-stat"${stagingRows ? '' : ' style="border:none"'}><span class="k">Peak aero drag</span><span class="v">${(result.max_drag_kN ?? 0).toFixed(0)} kN @ ${(result.max_drag_alt_km ?? 0).toFixed(0)} km</span></div>
+    ${stagingRows}`;
 }
 
 // ── Hangar (save / load) ─────────────────────────────────────────────────────
@@ -774,6 +838,7 @@ function wire() {
     scene.reset(); scene.build(design);
     setStaticFireBtn(false);
     liveAero = false; renderAeroStatic();
+    liveProp = false; renderPropStatic();
     $('hud-alt').textContent = '0 km'; $('hud-vel').textContent = '0.00 km/s';
     $('hud-thr').textContent = '0%'; $('hud-thrust').textContent = '0.00 MN'; $('ssd-phase').textContent = '';
   });
@@ -789,6 +854,7 @@ function wire() {
       $('hud-thr').textContent = Math.round((s.throttle ?? 0) * 100) + '%';
       $('hud-thrust').textContent = (s.thrustMN ?? 0).toFixed(2) + ' MN';
       if (s.mach !== undefined) updateAeroLive(s);
+      if (s.isp !== undefined) updatePropLive(s);
     },
     onPhase: (p) => { $('ssd-phase').textContent = p === 'idle' ? '' : p.replace('-', ' '); },
   });
@@ -824,6 +890,11 @@ function wire() {
       const capsuleDesign = { ...defaultDesign(), payload: { ...defaultDesign().payload, nosecone: 'capsule' } };
       const cap = runAscent(capsuleDesign);
       checks.push(['blunt nose costs more drag', cap.dv_drag_loss_kms > r.dv_drag_loss_kms]);
+      // Propulsion: real thrust telemetry + sea-level→vacuum thrust rise + staging.
+      const stg1 = r.trajectory.filter((p) => p.stage === 1);
+      checks.push(['traj carries thrust', stg1.some((p) => p.thrust_kN > 0)]);
+      checks.push(['SL→vac thrust rise', stg1.length > 1 && stg1[0].thrust_kN < stg1[stg1.length - 1].thrust_kN]);
+      checks.push(['staging event recorded', (r.staging_events?.length || 0) >= 1]);
       return { ok: checks.every((c) => c[1]), checks };
     },
   };

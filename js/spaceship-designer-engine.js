@@ -177,10 +177,10 @@ export function defaultDesign() {
         bodyId: 'earth',
         targetAltKm: 200,
         stages: [
-            { diameter_m: 3.7, length_m: 48, engineId: 'merlin_1d', engineCount: 9, propellantId: 'kerolox', fillFrac: 0.82, dryFrac: 0.06, throttle: 1 },
+            { diameter_m: 3.7, length_m: 55, engineId: 'merlin_1d', engineCount: 9, propellantId: 'kerolox', fillFrac: 0.82, dryFrac: 0.06, throttle: 1 },
             { diameter_m: 3.7, length_m: 13, engineId: 'merlin_1d', engineCount: 1, propellantId: 'kerolox', fillFrac: 0.80, dryFrac: 0.09, throttle: 1 },
         ],
-        payload: { mass_kg: 8000, nosecone: 'ogive', fairingLen_m: 11 },
+        payload: { mass_kg: 5000, nosecone: 'ogive', fairingLen_m: 11 },
         cockpit: { layout: 'none', crew: 0, windows: 2 },
         fins: { type: 'grid', count: 4 },
         livery: { id: 'classic', pattern: 'solid' },
@@ -417,9 +417,7 @@ export function runAscent(design) {
         return { ...emptyAscent(body), stats };
     }
 
-    // Effective Isp: flight-averaged. The first stage spends time climbing out
-    // of the atmosphere so its effective Isp sits between sea-level and vacuum;
-    // upper stages run at vacuum Isp. Weight by propellant mass.
+    // Effective (flight-averaged) Isp — kept for display / legacy fallback only.
     let ispW = 0, propW = 0;
     stats.stages.forEach((s, i) => {
         const isp = i === 0 ? (s.isp_s + s.ispVac_s) / 2 : s.ispVac_s;
@@ -427,27 +425,35 @@ export function runAscent(design) {
     });
     const ispEff = propW > 0 ? ispW / propW : 300;
 
-    // Single-stage-equivalent dry fraction for a STAGED vehicle: by the time it
-    // reaches orbit it has shed every lower stage, so the mass that actually
-    // arrives is only the top stage's dry mass plus the payload. Using that as
-    // the burnout mass is what lets simulateAscent reproduce the staged Δv —
-    // collapsing to total-dry/total-wet would wrongly carry all structure to
-    // orbit and badly under-fly the rocket.
-    const topStage = stats.stages[stats.stages.length - 1] || { dryMass: 0 };
-    const finalMass = topStage.dryMass + stats.payload_kg;
-
-    // Real, nose-shape-dependent drag: a Mach-varying Cd from the aero model
-    // instead of a flat 0.3. A blunt capsule now pays measurably more drag loss
-    // than a sharp ogive — exactly the physical effect we want the nose to have.
+    // Real, nose-shape-dependent drag: a Mach-varying Cd from the aero model.
     const aero = computeAero(design, stats, body);
+
+    // Build the real multi-stage propulsion spec. Each stage carries its own
+    // sea-level & vacuum thrust (so thrust rises with altitude) and a fixed
+    // turbopump mass flow set by its vacuum rating; the integrator jettisons the
+    // spent stage's dry mass at burnout. This replaces the old single-stage
+    // collapse with a genuine staged thrust/TWR profile.
+    const stagesSpec = stats.stages.map((s) => {
+        const thr = clamp(s.throttle ?? 1, 0.4, 1);
+        const F_sl_N  = (s.thrustSL_kN  || 0) * 1000;   // already includes count × throttle
+        const F_vac_N = (s.thrustVac_kN || 0) * 1000;
+        const ispVac  = s.ispVac_s || s.isp_s || 300;
+        const mdot    = ispVac > 0 ? F_vac_N / (ispVac * G0) : 0;   // kg/s, ~constant per stage
+        return { propMass_kg: s.propMass, dryMass_kg: s.dryMass,
+                 F_sl_N, F_vac_N, mdot_kgs: mdot, Isp_vac_s: ispVac, throttle: thr };
+    });
+
     const vehicle = {
         id: 'custom', name: design.name || 'Custom vehicle',
         m0_kg: stats.totalWet_kg,
-        Isp_s: ispEff,
-        TWR_E: stats.liftoffThrust_kN * 1000 / (stats.totalWet_kg * G0),  // referenced to Earth g for the integrator
+        payload_kg: stats.payload_kg,
+        stages: stagesSpec,
         Cd: aero.cd,                 // Mach-dependent (function) — integrator handles both
         A_m2: aero.refArea_m2,
-        dry_frac: clamp(finalMass / stats.totalWet_kg, 0.02, 0.6),
+        // Legacy fields kept so non-staged readers still have something sane.
+        Isp_s: ispEff,
+        TWR_E: stats.liftoffThrust_kN * 1000 / (stats.totalWet_kg * G0),
+        dry_frac: clamp((stats.totalDry_kg) / stats.totalWet_kg, 0.02, 0.6),
     };
 
     const result = simulateAscent({ body, vehicle, target_alt_km: design.targetAltKm || 200 });

@@ -144,6 +144,19 @@ export function speedOfSound(body, _alt_m = 0) {
     return body.a_sound_ms > 0 ? body.a_sound_ms : 0;
 }
 
+/**
+ * Ambient-pressure ratio p(h)/p₀. For the isothermal atmosphere used here,
+ * pressure falls off with the same scale height as density, so p/p₀ = ρ/ρ₀.
+ * This drives the sea-level→vacuum thrust rise of a real rocket engine:
+ * the nozzle pumps out a fixed mass flow, but the (pₑ−pₐ)·Aₑ pressure term
+ * grows as the outside air thins, so thrust climbs as the vehicle ascends.
+ */
+export function atmosphericPressureRatio(body, alt_m) {
+    if (body.rho0_kg_m3 < 1e-10) return 0;        // airless → vacuum thrust everywhere
+    if (alt_m < 0) return 1;
+    return Math.exp(-(alt_m / 1000) / body.H_km);
+}
+
 // ── Ascent integrator ───────────────────────────────────────────────────────
 
 const G0_EARTH = 9.80665;       // m/s² — standard for Isp definition
@@ -166,10 +179,35 @@ export function simulateAscent({
 } = {}) {
     const R   = body.R_km * 1000;                 // body radius (m)
     const mu  = body.mu_km3s2 * 1e9;              // grav param (m³/s²)
+
+    // ── Propulsion model ──────────────────────────────────────────────────────
+    // Two paths, chosen by the vehicle spec:
+    //  • Legacy: a single constant-thrust stage (TWR_E + effective Isp). This is
+    //    what the Launch Planner's catalog vehicles use — left exactly as it was.
+    //  • Staged: an array of real stages, each with sea-level & vacuum thrust, a
+    //    fixed turbopump mass flow, and its own dry mass that is jettisoned at
+    //    burnout. Thrust on each stage rises from F_sl to F_vac as the ambient
+    //    pressure falls, and the vehicle sheds structure at staging — the actual
+    //    thrust/TWR profile of a real launch vehicle.
+    const staged = Array.isArray(vehicle.stages) && vehicle.stages.length > 0;
+    const stage_coast_s = vehicle.stage_coast_s ?? 2.5;   // brief inter-stage coast
+
+    // Legacy single-stage constants.
     const ve  = vehicle.Isp_s * G0_EARTH;         // exhaust velocity (m/s)
     const T0  = vehicle.TWR_E * vehicle.m0_kg * G0_EARTH;   // thrust (N)
     const mdot = T0 / ve;                         // mass-flow (kg/s)
     const m_dry = vehicle.m0_kg * vehicle.dry_frac;
+
+    // Staged state.
+    const stageList = staged ? vehicle.stages.map((s) => ({
+        prop: s.propMass_kg, dry: s.dryMass_kg,
+        F_sl: s.F_sl_N, F_vac: s.F_vac_N, mdot: s.mdot_kgs, ispVac: s.Isp_vac_s,
+    })) : [];
+    const payload_kg = vehicle.payload_kg || 0;
+    let stageIdx = 0;
+    let coast_left = 0;
+    const staging_events = [];
+    let dv_used_integral_ms = 0;                   // ∫(T/m)dt — exact varying-Isp Δv
 
     // Programmed pitch profile: pitch(h) = (π/2) · cos((π/2) · h/h_full)
     // brings the rocket from vertical at the surface to horizontal at h_full.
@@ -184,7 +222,9 @@ export function simulateAscent({
 
     let r = R, theta = 0;
     let vr = 0, vt = 0;
-    let m  = vehicle.m0_kg;
+    let m  = staged ? payload_kg + stageList.reduce((a, s) => a + s.prop + s.dry, 0)
+                    : vehicle.m0_kg;
+    const m0_ref = vehicle.m0_kg || m;             // for mass_frac reporting
     let t  = 0;
 
     // Drag may be a constant coefficient (back-compat) or a Mach-dependent
@@ -241,7 +281,26 @@ export function simulateAscent({
             pitch = 0;                                 // horizontal final-burn
         }
 
-        const T_now    = (m > m_dry) ? T0 : 0;
+        // Thrust this step. Staged path: F rises from sea-level to vacuum as the
+        // air thins; legacy path: constant until the (single) tank empties.
+        let T_now, mdot_now, isp_now, firingStage, coastingNow = false;
+        if (staged) {
+            firingStage = Math.min(stageIdx + 1, stageList.length);
+            if (coast_left > 0) {
+                T_now = 0; mdot_now = 0; isp_now = 0; coastingNow = true;
+            } else if (stageIdx < stageList.length) {
+                const st = stageList[stageIdx];
+                const p_ratio = body.rho0_kg_m3 > 1e-10 ? (rho / body.rho0_kg_m3) : 0;
+                const F = Math.max(0, st.F_vac - (st.F_vac - st.F_sl) * p_ratio);
+                T_now = F; mdot_now = st.mdot;
+                isp_now = mdot_now > 0 ? F / (mdot_now * G0_EARTH) : 0;
+            } else {
+                T_now = 0; mdot_now = 0; isp_now = 0;     // all stages spent
+            }
+        } else {
+            T_now = (m > m_dry) ? T0 : 0;
+            mdot_now = mdot; isp_now = vehicle.Isp_s; firingStage = 1;
+        }
         const thrust_r = T_now * Math.sin(pitch);
         const thrust_t = T_now * Math.cos(pitch);
 
@@ -261,8 +320,35 @@ export function simulateAscent({
         vt += a_t * dt_s;
         r  += vr * dt_s;
         theta += (vt / r) * dt_s;
-        if (m > m_dry) m -= mdot * dt_s;
-        else if (!fuel_out) {
+
+        // Mass update + staging.
+        if (staged) {
+            if (T_now > 0 && stageIdx < stageList.length) {
+                const st = stageList[stageIdx];
+                dv_used_integral_ms += (T_now / m) * dt_s;   // before the mass drops
+                const burn = mdot_now * dt_s;
+                st.prop -= burn;
+                m -= burn;
+                if (st.prop <= 0) {
+                    staging_events.push({ stage: stageIdx + 1, t, alt_km, v_kms: Math.hypot(vr, vt) / 1000 });
+                    stageIdx++;
+                    if (stageIdx < stageList.length) {
+                        m -= st.dry;                 // jettison the spent lower stage
+                        coast_left = stage_coast_s;  // coast briefly before next ignition
+                    } else if (!fuel_out) {
+                        // Last stage burned out → MECO. Keep its dry mass (it is the
+                        // bus that carries the payload). Latch the orbit state.
+                        fuel_out = true; peak_vt_ms = vt; peak_alt_at_meco_m = alt_m;
+                    }
+                }
+            } else if (coast_left > 0) {
+                coast_left -= dt_s;
+            } else if (!fuel_out && stageIdx >= stageList.length) {
+                fuel_out = true; peak_vt_ms = vt; peak_alt_at_meco_m = alt_m;
+            }
+        } else if (m > m_dry) {
+            m -= mdot * dt_s;
+        } else if (!fuel_out) {
             // Just hit MECO (main-engine cut-off). Latch the state so we
             // can report it as the final result regardless of what happens
             // in the post-burn coast.
@@ -286,7 +372,15 @@ export function simulateAscent({
                 cd:     Cd,
                 drag_kN: F_drag / 1000,
                 rho,
-                mass_frac: m / vehicle.m0_kg,
+                mass_frac: m / m0_ref,
+                // Propulsion telemetry (drives the live thrust panel).
+                thrust_kN: T_now / 1000,
+                isp_s:     isp_now,
+                twr:       (T_now > 0) ? T_now / (m * g) : 0,
+                accel_g:   (T_now / m) / G0_EARTH,
+                stage:     firingStage,
+                coasting:  coastingNow,
+                dv_used_kms: (staged ? dv_used_integral_ms : ve * Math.log(m0_ref / Math.max(m, m_dry))) / 1000,
             });
         }
         t += dt_s;
@@ -319,17 +413,22 @@ export function simulateAscent({
     const orbit_achieved = (meco_vt_ms > v_orb_at_meco * 0.99) && (meco_alt_m / 1000 > above_atm_km);
     const crashed = meco_alt_m < -50;
 
-    // Δv used (Tsiolkovsky on actual fuel burned)
-    const dv_used_ms = ve * Math.log(vehicle.m0_kg / Math.max(m, m_dry));
+    // Δv used. Staged: the exact ∫(T/m)dt integral (handles varying Isp and the
+    // mass jettisoned at staging). Legacy: Tsiolkovsky on the fuel burned.
+    const dv_used_ms = staged ? dv_used_integral_ms
+                              : ve * Math.log(vehicle.m0_kg / Math.max(m, m_dry));
 
     // Steering loss: whatever's left after orbital + gravity + drag.
     const dv_orbital_ms = orbit_achieved ? v_orb_at_meco : meco_vt_ms;
     const dv_steer_loss_ms = Math.max(0, dv_used_ms - dv_orbital_ms - dv_grav_loss_ms - dv_drag_loss_ms);
 
+    // Out of propellant? Staged: every stage spent. Legacy: tank empty.
+    const propellant_spent = staged ? (stageIdx >= stageList.length) : (m <= m_dry + 1);
+
     let status;
     if (crashed)              status = 'crashed';
     else if (orbit_achieved)  status = 'orbit';
-    else if (m <= m_dry + 1)  status = 'fuel-out';
+    else if (propellant_spent) status = 'fuel-out';
     else                      status = 'time-out';
 
     return {
@@ -353,10 +452,14 @@ export function simulateAscent({
         max_drag_kN: max_drag_N / 1000,
         max_drag_alt_km,
         // Mass
-        fuel_burned_kg:       vehicle.m0_kg - m,
-        fuel_mass_fraction:   1 - (m / vehicle.m0_kg),
+        fuel_burned_kg:       m0_ref - m,
+        fuel_mass_fraction:   1 - (m / m0_ref),
         // Vehicle parameters used (for display)
-        twr_at_liftoff:       vehicle.TWR_E * (G0_EARTH / (mu / (R*R))),
+        twr_at_liftoff:       staged
+            ? (stageList[0] ? stageList[0].F_sl / (m0_ref * (mu / (R*R))) : 0)
+            : vehicle.TWR_E * (G0_EARTH / (mu / (R*R))),
+        // Staging timeline (staged vehicles only)
+        staging_events,
         // Trajectory polyline
         trajectory,
     };

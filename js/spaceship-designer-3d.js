@@ -483,6 +483,12 @@ export function createRocketScene(canvas, opts = {}) {
                     dragWave_kN: lerp('dragWave_kN'),
                     boundaryLayer: (f < 0.5 ? a : b).boundaryLayer,
                     regime: (f < 0.5 ? a : b).regime,
+                    // Propulsion telemetry.
+                    thrust_kN: lerp('thrust_kN'), isp_s: lerp('isp_s'),
+                    twr: lerp('twr'), accel_g: lerp('accel_g'),
+                    dv_used_kms: lerp('dv_used_kms'),
+                    stage: (f < 0.5 ? a : b).stage,
+                    coasting: (f < 0.5 ? a : b).coasting,
                 };
             }
         }
@@ -518,7 +524,13 @@ export function createRocketScene(canvas, opts = {}) {
         const PLAY = Math.max(6, f.burn / 14);
         const flightT = tcd * PLAY;
         const s = sampleTraj(f.traj, flightT);
-        const throttle = s.mass_frac > 0.06 ? 1 : 0;
+        // Plume follows the real engine: lit whenever there is thrust, dark during
+        // the inter-stage coast. Intensity scales with thrust vs the sea-level
+        // liftoff thrust (so the vacuum thrust rise reads as a fuller plume).
+        const burning = (s.thrust_kN ?? 0) > 1 && !s.coasting;
+        const throttle = burning
+            ? Math.max(0.55, Math.min(1.2, (s.thrust_kN || 0) / Math.max(1, stage0ThrustFull_kN)))
+            : 0;
 
         const rise = altToScene(s.alt_km);
         rocketRoot.position.y = rise;              // rocket climbs; the ground stays put
@@ -547,14 +559,20 @@ export function createRocketScene(canvas, opts = {}) {
         groundFX.group.visible = groundMix > 0.02 && throttle > 0;
         if (groundFX.group.visible) groundFX.tick(now, throttle, groundMix);
 
-        if (tcd < 0.2) onPhase('liftoff'); else onPhase('ascent');
-        onTick({ phase: 'ascent', t: flightT, altKm: s.alt_km, vKms: s.v_kms, throttle,
-                 thrustMN: stage0ThrustFull_kN * throttle / 1000,
+        if (s.coasting) onPhase('staging');
+        else if (tcd < 0.2) onPhase('liftoff');
+        else onPhase((s.stage || 1) > 1 ? 'stage ' + s.stage : 'ascent');
+        onTick({ phase: 'ascent', t: flightT, altKm: s.alt_km, vKms: s.v_kms,
+                 throttle: burning ? 1 : 0,
+                 thrustMN: (s.thrust_kN ?? 0) / 1000,
                  massFrac: s.mass_frac,
                  mach: s.mach, qkPa: s.q_kPa, reynolds: s.reynolds,
                  dragkN: s.drag_kN, dragFrictionkN: s.dragFriction_kN,
                  dragPressurekN: s.dragPressure_kN, dragWavekN: s.dragWave_kN,
-                 boundaryLayer: s.boundaryLayer, regime: s.regime });
+                 boundaryLayer: s.boundaryLayer, regime: s.regime,
+                 // Propulsion telemetry for the live engine panel.
+                 isp: s.isp_s, twr: s.twr, accelG: s.accel_g,
+                 stage: s.stage, coasting: s.coasting, dvUsed: s.dv_used_kms });
 
         if (flightT >= f.burn - 1e-3) endFlight(f.result);
     }
