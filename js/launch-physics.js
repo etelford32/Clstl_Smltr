@@ -248,6 +248,19 @@ export function simulateAscent({
     const v_rot_ms = (vehicle.launch_lat_deg != null)
         ? surfaceRotationSpeed(body, vehicle.launch_lat_deg) : 0;
 
+    // ── Ascent guidance ───────────────────────────────────────────────────────
+    //  • 'programmed' (default): open-loop cosine pitch schedule vs altitude. Kept
+    //    for the Launch Planner's validated numbers.
+    //  • 'gravityturn': a real gravity turn — rise vertically to the pitchover
+    //    speed, kick a few degrees off vertical, then fly at *zero angle of attack*
+    //    (thrust along the surface-relative velocity) so gravity rotates the
+    //    trajectory. Minimises aero loads (AoA≈0 through max-Q). The kick angle is
+    //    tuned per vehicle (see runAscent) to arrive at the target orbit.
+    const guidance = vehicle.guidance || 'programmed';
+    const kick_rad = (vehicle.kick_deg ?? 8) * Math.PI / 180;
+    const kick_speed_ms = vehicle.kick_speed_ms ?? 60;
+    let max_aoa_atmo_deg = 0;
+
     // Programmed pitch profile: pitch(h) = (π/2) · cos((π/2) · h/h_full)
     // brings the rocket from vertical at the surface to horizontal at h_full.
     // h_full is calibrated per atmosphere class AND scaled with the target
@@ -315,18 +328,34 @@ export function simulateAscent({
         const drag_r = (v_rel > 1e-9) ? -F_drag * vr / v_rel : 0;
         const drag_t = (v_rel > 1e-9) ? -F_drag * vt_rel / v_rel : 0;
 
-        // Programmed cosine pitch profile from vertical (alt=0) to horizontal
-        // (alt=h_full_m). Once we're above h_full_m, hold horizontal — final
-        // burn drives tangential velocity to orbital.
+        // Guidance → commanded thrust elevation `pitch` (angle above the local
+        // horizon). `fpa` is the surface-relative flight-path elevation; the angle
+        // of attack is the difference (zero in a flown gravity turn).
+        const v_surf = Math.hypot(vr, vt_rel);
+        const fpa_surf = (v_surf > 1) ? Math.atan2(vr, vt_rel) : Math.PI / 2;
         let pitch;
-        if (alt_m < 100) {
-            pitch = Math.PI / 2;                       // vertical pre-launch hold
-        } else if (alt_m < h_full_m) {
-            const norm = alt_m / h_full_m;
-            pitch = (Math.PI / 2) * Math.cos((Math.PI / 2) * norm);
+        if (guidance === 'gravityturn') {
+            if (v_surf < kick_speed_ms) {
+                pitch = Math.PI / 2;                       // vertical until pitchover speed
+            } else if (fpa_surf > Math.PI / 2 - kick_rad) {
+                pitch = Math.max(0, fpa_surf - kick_rad);  // pitchover kick — tip below prograde
+            } else {
+                pitch = Math.max(0, fpa_surf);             // gravity turn — follow prograde (AoA≈0)
+            }
         } else {
-            pitch = 0;                                 // horizontal final-burn
+            // Programmed cosine pitch from vertical (alt=0) to horizontal (h_full),
+            // then hold horizontal for the final orbital-velocity burn.
+            if (alt_m < 100) {
+                pitch = Math.PI / 2;
+            } else if (alt_m < h_full_m) {
+                const norm = alt_m / h_full_m;
+                pitch = (Math.PI / 2) * Math.cos((Math.PI / 2) * norm);
+            } else {
+                pitch = 0;
+            }
         }
+        const aoa_deg = (pitch - fpa_surf) * 180 / Math.PI;  // thrust vs velocity
+        if (rho > 1e-4) max_aoa_atmo_deg = Math.max(max_aoa_atmo_deg, Math.abs(aoa_deg));
 
         // Thrust this step. Staged path: F rises from sea-level to vacuum as the
         // air thins; legacy path: constant until the (single) tank empties.
@@ -457,6 +486,9 @@ export function simulateAscent({
                 stage:     firingStage,
                 coasting:  coastingNow,
                 throttle:  throttle_cmd,
+                fpa_deg:   fpa_surf * 180 / Math.PI,
+                pitch_deg: pitch * 180 / Math.PI,
+                aoa_deg,
                 dv_used_kms: (staged ? dv_used_integral_ms : ve * Math.log(m0_ref / Math.max(m, m_dry))) / 1000,
             });
         }
@@ -532,6 +564,9 @@ export function simulateAscent({
         accel_limit_g,
         max_accel_g,
         q_limit_kPa:       vehicle.q_limit_kPa || 0,
+        guidance,
+        kick_deg:          guidance === 'gravityturn' ? (vehicle.kick_deg ?? 8) : 0,
+        max_aoa_atmo_deg,
         // Atmosphere stats
         max_q_kPa: max_q_pa / 1000,
         max_q_alt_km, max_q_t_s,

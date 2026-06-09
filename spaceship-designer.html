@@ -321,7 +321,10 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
         <div class="ssd-inst"><span class="k">Acceleration</span><span class="v" id="prop-accel">—</span><span class="u">g</span></div>
         <div class="ssd-inst"><span class="k">Active stage</span><span class="v" id="prop-stage">—</span><span class="u" id="prop-stage-ctx">on the pad</span></div>
         <div class="ssd-inst"><span class="k">Δv delivered</span><span class="v" id="prop-dv">—</span><span class="u">km/s</span></div>
+        <div class="ssd-inst"><span class="k">Flight-path angle</span><span class="v" id="prop-fpa">—</span><span class="u" id="prop-pitch-ctx">pitch —</span></div>
+        <div class="ssd-inst"><span class="k">Angle of attack</span><span class="v" id="prop-aoa">—</span><span class="u" id="prop-aoa-ctx">° vs velocity</span></div>
       </div>
+      <p class="ssd-sub" id="prop-guidance"></p>
       <div class="ssd-aero-cols" style="margin-top:14px">
         <div class="ssd-note" id="prop-stagetable"></div>
         <div class="ssd-cdtable" id="prop-static"></div>
@@ -640,9 +643,14 @@ function renderPropStatic() {
   ].map(([k, v]) => `<span class="k">${k}</span><span class="v">${v}</span>`).join('');
   if (!liveProp) {
     $('ssd-prop-state').textContent = 'standby';
-    ['prop-thrust', 'prop-isp', 'prop-twr', 'prop-accel', 'prop-stage', 'prop-dv'].forEach((id) => { $(id).textContent = '—'; });
+    ['prop-thrust', 'prop-isp', 'prop-twr', 'prop-accel', 'prop-stage', 'prop-dv', 'prop-fpa', 'prop-aoa'].forEach((id) => { $(id).textContent = '—'; });
     $('prop-thrust-ctx').textContent = 'MN'; $('prop-stage-ctx').textContent = 'on the pad';
+    $('prop-pitch-ctx').textContent = 'pitch —'; $('prop-aoa-ctx').textContent = '° vs velocity';
+    $('prop-aoa').style.color = '';
   }
+  $('prop-guidance').innerHTML = '<strong>Guidance: gravity turn.</strong> The rocket rises vertically, kicks a few degrees '
+    + 'off vertical, then flies at <strong>zero angle of attack</strong> — thrust along the velocity vector — so gravity itself '
+    + 'arcs the trajectory to horizontal. That keeps aerodynamic side-loads near zero through max-Q (the kick angle is auto-tuned to the orbit).';
   renderNozzleStatic();
 }
 
@@ -703,6 +711,13 @@ function updatePropLive(s) {
   const thrPct = Math.round((s.throttle ?? 1) * 100);
   $('prop-stage-ctx').textContent = coasting ? 'coasting' : (thrPct < 99 ? `throttled ${thrPct}%` : 'full thrust');
   $('prop-dv').textContent = (s.dvUsed ?? 0).toFixed(2);
+  // Guidance: flight-path angle, commanded pitch, and angle of attack.
+  $('prop-fpa').textContent = (s.fpaDeg ?? 0).toFixed(0) + '°';
+  $('prop-pitch-ctx').textContent = 'pitch ' + (s.pitchDeg ?? 0).toFixed(0) + '°';
+  const aoa = Math.abs(s.aoaDeg ?? 0);
+  $('prop-aoa').textContent = aoa.toFixed(1) + '°';
+  $('prop-aoa').style.color = aoa < 3 ? 'var(--c-good)' : aoa < 8 ? 'var(--c-warn)' : 'var(--c-bad)';
+  $('prop-aoa-ctx').textContent = aoa < 1 ? 'zero-AoA ✓' : '° off velocity';
   // Live nozzle expansion state.
   if (s.nozzleState && !coasting) {
     const ratio = s.peOverPa;
@@ -778,6 +793,8 @@ function showResult(result) {
     <div class="ssd-stat"><span class="k">Drag loss</span><span class="v">${ks(result.dv_drag_loss_kms)} km/s</span></div>
     ${(result.v_rotation_kms ?? 0) > 0.001 ? `<div class="ssd-stat"><span class="k">Rotation assist</span><span class="v" style="color:var(--c-good)">+${ks(result.v_rotation_kms)} km/s @ ${(result.launch_lat_deg ?? 0).toFixed(0)}°</span></div>` : ''}
     <div class="ssd-stat"><span class="k">Peak acceleration</span><span class="v"${(result.max_accel_g ?? 0) > (result.accel_limit_g ?? 99) + 0.1 ? ' style="color:var(--c-warn)"' : ''}>${(result.max_accel_g ?? 0).toFixed(1)} g${result.accel_limit_g ? ` / ${result.accel_limit_g} g cap` : ''}</span></div>
+    ${result.guidance === 'gravityturn' ? `<div class="ssd-stat"><span class="k">Gravity turn · pitchover kick</span><span class="v">${(result.kick_deg ?? 0).toFixed(1)}°</span></div>
+    <div class="ssd-stat"><span class="k">Peak AoA (in atmosphere)</span><span class="v" style="color:${(result.max_aoa_atmo_deg ?? 0) < 10 ? 'var(--c-good)' : 'var(--c-warn)'}">${(result.max_aoa_atmo_deg ?? 0).toFixed(1)}°</span></div>` : ''}
     <div class="ssd-stat"><span class="k">Max-Q</span><span class="v">${(result.max_q_kPa ?? 0).toFixed(0)} kPa</span></div>
     <div class="ssd-stat"><span class="k">Max Mach (in atmosphere)</span><span class="v">${(result.max_mach ?? 0).toFixed(1)}</span></div>
     <div class="ssd-stat"${stagingRows ? '' : ' style="border:none"'}><span class="k">Peak aero drag</span><span class="v">${(result.max_drag_kN ?? 0).toFixed(0)} kN @ ${(result.max_drag_alt_km ?? 0).toFixed(0)} km</span></div>
@@ -1000,6 +1017,11 @@ function wire() {
       checks.push(['equator beats pole', (eq.final_vt_kms - eq.v_orb_circ_kms) > (pole.final_vt_kms - pole.v_orb_circ_kms)]);
       checks.push(['accel capped at limit', r.max_accel_g <= r.accel_limit_g + 0.05]);
       checks.push(['traj carries throttle', r.trajectory.every((p) => Number.isFinite(p.throttle))]);
+      // Gravity turn: flies zero angle of attack through max-Q.
+      checks.push(['gravity-turn guidance', r.guidance === 'gravityturn']);
+      const maxqSample = r.trajectory.reduce((a, p) => (p.q_kPa > a.q_kPa ? p : a), r.trajectory[0]);
+      checks.push(['zero AoA at max-Q', Math.abs(maxqSample.aoa_deg) < 2]);
+      checks.push(['kick auto-tuned', r.kick_deg > 0 && r.max_aoa_atmo_deg < 20]);
       return { ok: checks.every((c) => c[1]), checks };
     },
   };

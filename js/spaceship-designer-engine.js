@@ -546,6 +546,28 @@ export function computeAero(design, stats = computeStats(design), body = LAUNCH_
  * The integrator is the validated one from the launch planner; we just feed it
  * design-derived parameters.
  */
+
+/**
+ * Tune the gravity-turn pitchover kick for a vehicle. A real gravity turn flies
+ * zero angle of attack — thrust along the velocity vector — so the only free
+ * parameter is the initial kick that starts the turn. Its effect has a cliff:
+ * just past the right kick the trajectory pitches over too far and crashes, so
+ * a coarse scan + local refine is more robust than assuming a smooth optimum.
+ * Returns the best ascent (orbit preferred, then maximum velocity margin).
+ */
+function tuneGravityTurn(body, vehicleBase, target_alt_km) {
+    const run = (kick) => simulateAscent({
+        body, target_alt_km,
+        vehicle: { ...vehicleBase, guidance: 'gravityturn', kick_deg: kick, kick_speed_ms: 120 },
+    });
+    const score = (r) => (r.status === 'orbit' ? 1000 : 0) + (r.final_vt_kms - r.v_orb_circ_kms);
+    let best = run(8), bestKick = 8, bestScore = score(best);
+    const consider = (k) => { const r = run(k); const s = score(r); if (s > bestScore) { best = r; bestScore = s; bestKick = k; } };
+    for (let k = 2; k <= 18; k += 1) consider(k);                       // coarse scan
+    for (let k = Math.max(1.5, bestKick - 1); k <= bestKick + 1; k += 0.25) consider(k);  // refine
+    return best;
+}
+
 export function runAscent(design) {
     const body = LAUNCH_BODIES[design.bodyId] || LAUNCH_BODIES.earth;
     const stats = computeStats(design, body);
@@ -603,7 +625,12 @@ export function runAscent(design) {
         dry_frac: clamp((stats.totalDry_kg) / stats.totalWet_kg, 0.02, 0.6),
     };
 
-    const result = simulateAscent({ body, vehicle, target_alt_km: design.targetAltKm || 200 });
+    // Fly a real gravity turn (zero angle of attack), tuning the pitchover kick
+    // to the vehicle. The kick angle has a sharp cliff — too aggressive and the
+    // trajectory falls over and crashes — so we scan rather than assume a smooth
+    // optimum, then keep whichever flight reaches orbit with the best margin.
+    const target_alt_km = design.targetAltKm || 200;
+    const result = tuneGravityTurn(body, vehicle, target_alt_km);
 
     // Enrich each powered-ascent sample with the aero force breakdown and the
     // active nozzle's expansion state (drives the live panels and the plume).

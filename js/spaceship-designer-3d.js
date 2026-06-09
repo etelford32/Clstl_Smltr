@@ -421,6 +421,7 @@ export function createRocketScene(canvas, opts = {}) {
             return Promise.resolve(ascentResult);
         }
         rocketRoot.position.y = 0;
+        rocketRoot.rotation.z = 0;
         plumes.forEach((p) => { p.visible = false; });
         clearGimbal();
         onPhase('ignition');
@@ -442,6 +443,7 @@ export function createRocketScene(canvas, opts = {}) {
         flight = null;
         staticFire = false;
         rocketRoot.position.y = 0;
+        rocketRoot.rotation.z = 0;
         plumes.forEach((p) => { p.visible = false; });
         clearGimbal();
         groundFX.group.visible = false;
@@ -488,6 +490,7 @@ export function createRocketScene(canvas, opts = {}) {
                     twr: lerp('twr'), accel_g: lerp('accel_g'),
                     dv_used_kms: lerp('dv_used_kms'),
                     throttle: lerp('throttle', 1),
+                    pitch_deg: lerp('pitch_deg', 90), fpa_deg: lerp('fpa_deg', 90), aoa_deg: lerp('aoa_deg'),
                     stage: (f < 0.5 ? a : b).stage,
                     coasting: (f < 0.5 ? a : b).coasting,
                     // Nozzle expansion telemetry.
@@ -541,6 +544,11 @@ export function createRocketScene(canvas, opts = {}) {
 
         const rise = altToScene(s.alt_km);
         rocketRoot.position.y = rise;              // rocket climbs; the ground stays put
+        // Gravity turn made visible: tip the whole stack from vertical toward the
+        // horizon by (90° − pitch), so it arcs downrange exactly as the guidance
+        // commands. Damped so it reads as a smooth pitch-over.
+        const tiltTarget = -((90 - (s.pitch_deg ?? 90)) * Math.PI / 180);
+        rocketRoot.rotation.z += (tiltTarget - rocketRoot.rotation.z) * 0.08;
         // Camera eases upward to follow.
         const targetY = rocketRoot.position.y + 25;
         controls.target.y += (targetY - controls.target.y) * 0.05;
@@ -553,12 +561,13 @@ export function createRocketScene(canvas, opts = {}) {
 
         plumes.forEach((p) => { p.visible = throttle > 0; tickPlume(p, now, throttle, s.alt_km, s.expansion01); });
 
-        // Thrust vectoring: a slow guidance weave plus a downrange lean that grows
-        // with altitude — the visible signature of the gravity-turn steering.
-        const lean = Math.min(0.16, s.alt_km / 90 * 0.16) * throttle;
+        // Thrust vectoring: the whole stack now tips with the real guidance pitch,
+        // so the gimbal just shows the small angle-of-attack correction (engine
+        // deflected off the body axis to steer) plus a gentle guidance weave.
+        const aoaRad = (s.aoa_deg ?? 0) * Math.PI / 180;
         applyGimbal(
-            (lean + Math.sin(flightT * 0.6) * 0.03) * throttle,
-            Math.sin(flightT * 0.45 + 1.3) * 0.03 * throttle,
+            (Math.max(-0.12, Math.min(0.12, aoaRad)) + Math.sin(flightT * 0.6) * 0.02) * throttle,
+            Math.sin(flightT * 0.45 + 1.3) * 0.02 * throttle,
         );
 
         // Ground bloom only reads near the pad; fade it out over the first ~1.5 km.
@@ -582,7 +591,9 @@ export function createRocketScene(canvas, opts = {}) {
                  stage: s.stage, coasting: s.coasting, dvUsed: s.dv_used_kms,
                  // Nozzle expansion state.
                  nozzleState: s.nozzleState, peOverPa: s.peOverPa,
-                 exitMach: s.exitMach, separated: s.separated, expansion01: s.expansion01 });
+                 exitMach: s.exitMach, separated: s.separated, expansion01: s.expansion01,
+                 // Guidance (gravity turn).
+                 pitchDeg: s.pitch_deg, fpaDeg: s.fpa_deg, aoaDeg: s.aoa_deg });
 
         if (flightT >= f.burn - 1e-3) endFlight(f.result);
     }
