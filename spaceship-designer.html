@@ -196,6 +196,9 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
           <div class="ssd-field"><label>Target orbit (km)</label>
             <input type="number" id="ssd-alt" min="80" max="2000" step="10" value="200"></div>
         </div>
+        <div class="ssd-field"><label>Launch latitude <span class="ssd-rangeval" id="ssd-lat-val">28.5°</span></label>
+          <div class="ssd-row"><input type="range" id="ssd-lat" min="0" max="90" step="0.5" value="28.5"></div>
+          <div class="ssd-note" id="ssd-lat-note"></div></div>
       </div>
     </div>
 
@@ -387,7 +390,7 @@ import { getSupabase } from './js/supabase-config.js';
 import {
   defaultDesign, computeStats, computeAero, computeNozzle, expansionState, runAscent, gradeAscent,
   PROPELLANTS, ENGINE_CATALOG, NOSECONE_TYPES, FIN_TYPES, COCKPIT_LAYOUTS,
-  LIVERIES, PATTERNS, LAUNCH_BODY_OPTIONS, LAUNCH_BODIES,
+  LIVERIES, PATTERNS, LAUNCH_BODY_OPTIONS, LAUNCH_BODIES, surfaceRotationSpeed,
 } from './js/spaceship-designer-engine.js';
 import { createRocketScene } from './js/spaceship-designer-3d.js';
 import * as store from './js/spaceship-designer-store.js';
@@ -469,6 +472,7 @@ function readControls() {
   design.name = $('ssd-name').value || 'Untitled';
   design.bodyId = $('ssd-body').value;
   design.targetAltKm = +$('ssd-alt').value || 200;
+  design.launchLatitude = +$('ssd-lat').value || 0;
   design.payload = {
     mass_kg: +$('ssd-payload').value || 0,
     nosecone: $('ssd-nose').value,
@@ -599,21 +603,40 @@ function updateAeroLive(s) {
   $('aero-val-wave').textContent = wv.toFixed(1) + ' kN';
 }
 
+// Launch-latitude → rotation assist note (under the slider).
+function updateLatNote() {
+  const lat = +$('ssd-lat').value || 0;
+  $('ssd-lat-val').textContent = lat.toFixed(1) + '°';
+  const body = LAUNCH_BODIES[$('ssd-body').value] || LAUNCH_BODIES.earth;
+  const vrot = surfaceRotationSpeed(body, lat);
+  const eq = surfaceRotationSpeed(body, 0);
+  $('ssd-lat-note').innerHTML = vrot > 1
+    ? `Eastward rotation gives <strong>+${vrot.toFixed(0)} m/s</strong> of orbital velocity free `
+      + `(${eq.toFixed(0)} m/s at the equator). Min inclination ≈ ${lat.toFixed(0)}°.`
+    : `${body.name} barely rotates — no useful launch assist.`;
+}
+
 // ── Propulsion / thrust analysis (bottom panel) ──────────────────────────────
 let liveProp = false;
 function renderPropStatic() {
   const st = computeStats(design);
   const s0 = st.stages[0] || {};
+  const body = LAUNCH_BODIES[design.bodyId] || LAUNCH_BODIES.earth;
+  const vrot = surfaceRotationSpeed(body, design.launchLatitude ?? 0);
+  const crewed = (design.cockpit?.crew || 0) > 0;
   const fmtT = (kN) => (kN >= 1000 ? (kN / 1000).toFixed(2) + ' MN' : (kN).toFixed(0) + ' kN');
   $('prop-stagetable').innerHTML =
     `<strong>${st.stages.length}-stage</strong> vehicle · stage 1 fires at liftoff, ` +
     `${st.stages.length > 1 ? (st.stages.length - 1) + ' staging event' + (st.stages.length > 2 ? 's' : '') : 'single stage'}. ` +
-    `Thrust quoted sea-level → vacuum; the rise is the nozzle pressure term as the air thins.`;
+    `Thrust quoted sea-level → vacuum; the rise is the nozzle pressure term as the air thins. ` +
+    `Auto-throttle caps dynamic pressure (max-Q) and acceleration.`;
   $('prop-static').innerHTML = [
     ['Liftoff thrust (SL → vac)', fmtT(s0.thrustSL_kN || 0) + ' → ' + fmtT(s0.thrustVac_kN || 0)],
     ['Liftoff TWR', st.liftoffTWR.toFixed(2)],
     ['Stage 1 Isp (SL / vac)', `${Math.round(s0.isp_s || 0)} / ${Math.round(s0.ispVac_s || 0)} s`],
     ['Ideal Δv (Tsiolkovsky)', st.totalDv_kms.toFixed(2) + ' km/s'],
+    ['Rotation assist', vrot > 1 ? `+${vrot.toFixed(0)} m/s @ ${(design.launchLatitude ?? 0).toFixed(0)}°` : 'none'],
+    ['Acceleration limit', `${crewed ? 4 : 6} g (${crewed ? 'crewed' : 'uncrewed'})`],
   ].map(([k, v]) => `<span class="k">${k}</span><span class="v">${v}</span>`).join('');
   if (!liveProp) {
     $('ssd-prop-state').textContent = 'standby';
@@ -677,7 +700,8 @@ function updatePropLive(s) {
   $('prop-twr').textContent = (s.twr ?? 0).toFixed(2);
   $('prop-accel').textContent = (s.accelG ?? 0).toFixed(2);
   $('prop-stage').textContent = coasting ? '— ' : 'S' + (s.stage ?? 1);
-  $('prop-stage-ctx').textContent = coasting ? 'coasting' : 'firing';
+  const thrPct = Math.round((s.throttle ?? 1) * 100);
+  $('prop-stage-ctx').textContent = coasting ? 'coasting' : (thrPct < 99 ? `throttled ${thrPct}%` : 'full thrust');
   $('prop-dv').textContent = (s.dvUsed ?? 0).toFixed(2);
   // Live nozzle expansion state.
   if (s.nozzleState && !coasting) {
@@ -752,6 +776,8 @@ function showResult(result) {
     <div class="ssd-stat"><span class="k">Δv used</span><span class="v">${ks(result.dv_used_kms)} km/s</span></div>
     <div class="ssd-stat"><span class="k">Gravity loss</span><span class="v">${ks(result.dv_grav_loss_kms)} km/s</span></div>
     <div class="ssd-stat"><span class="k">Drag loss</span><span class="v">${ks(result.dv_drag_loss_kms)} km/s</span></div>
+    ${(result.v_rotation_kms ?? 0) > 0.001 ? `<div class="ssd-stat"><span class="k">Rotation assist</span><span class="v" style="color:var(--c-good)">+${ks(result.v_rotation_kms)} km/s @ ${(result.launch_lat_deg ?? 0).toFixed(0)}°</span></div>` : ''}
+    <div class="ssd-stat"><span class="k">Peak acceleration</span><span class="v"${(result.max_accel_g ?? 0) > (result.accel_limit_g ?? 99) + 0.1 ? ' style="color:var(--c-warn)"' : ''}>${(result.max_accel_g ?? 0).toFixed(1)} g${result.accel_limit_g ? ` / ${result.accel_limit_g} g cap` : ''}</span></div>
     <div class="ssd-stat"><span class="k">Max-Q</span><span class="v">${(result.max_q_kPa ?? 0).toFixed(0)} kPa</span></div>
     <div class="ssd-stat"><span class="k">Max Mach (in atmosphere)</span><span class="v">${(result.max_mach ?? 0).toFixed(1)}</span></div>
     <div class="ssd-stat"${stagingRows ? '' : ' style="border:none"'}><span class="k">Peak aero drag</span><span class="v">${(result.max_drag_kN ?? 0).toFixed(0)} kN @ ${(result.max_drag_alt_km ?? 0).toFixed(0)} km</span></div>
@@ -817,6 +843,8 @@ function hydrateControls() {
   $('ssd-name').value = design.name || '';
   fillSelect($('ssd-body'), LAUNCH_BODY_OPTIONS, design.bodyId);
   $('ssd-alt').value = design.targetAltKm || 200;
+  $('ssd-lat').value = design.launchLatitude ?? 28.5;
+  updateLatNote();
   fillSelect($('ssd-nose'), Object.values(NOSECONE_TYPES), design.payload?.nosecone || 'ogive');
   $('ssd-payload').value = design.payload?.mass_kg ?? 15000;
   $('ssd-fairing').value = design.payload?.fairingLen_m ?? 11;
@@ -833,10 +861,10 @@ function hydrateControls() {
 // ── Wire events ──────────────────────────────────────────────────────────────
 function wire() {
   // Top-level controls.
-  ['ssd-name', 'ssd-body', 'ssd-alt', 'ssd-nose', 'ssd-payload', 'ssd-fairing',
+  ['ssd-name', 'ssd-body', 'ssd-alt', 'ssd-lat', 'ssd-nose', 'ssd-payload', 'ssd-fairing',
    'ssd-cockpit', 'ssd-crew', 'ssd-windows', 'ssd-fin', 'ssd-fincount',
    'ssd-livery', 'ssd-pattern'].forEach((id) => {
-    $(id).addEventListener('input', () => { readControls(); refresh(); });
+    $(id).addEventListener('input', () => { readControls(); updateLatNote(); refresh(); });
   });
 
   // Stage controls (event delegation on the container).
@@ -964,6 +992,14 @@ function wire() {
       checks.push(['nozzle Me supersonic', noz.exitMach > 1 && noz.pe_pa > 0]);
       checks.push(['vac nozzle separates at SL', expansionState(computeNozzle(ENGINE_CATALOG.merlin_vac, 'kerolox', 1, LAUNCH_BODIES.earth), 101325).separated === true]);
       checks.push(['traj carries nozzle state', r.trajectory.some((p) => !!p.nozzleState)]);
+      // Gravity / rotation: lower latitude → more rotation assist → easier orbit.
+      const eqD = { ...defaultDesign(), launchLatitude: 0 };
+      const poleD = { ...defaultDesign(), launchLatitude: 90 };
+      const eq = runAscent(eqD), pole = runAscent(poleD);
+      checks.push(['rotation assist > 0', r.v_rotation_kms > 0]);
+      checks.push(['equator beats pole', (eq.final_vt_kms - eq.v_orb_circ_kms) > (pole.final_vt_kms - pole.v_orb_circ_kms)]);
+      checks.push(['accel capped at limit', r.max_accel_g <= r.accel_limit_g + 0.05]);
+      checks.push(['traj carries throttle', r.trajectory.every((p) => Number.isFinite(p.throttle))]);
       return { ok: checks.every((c) => c[1]), checks };
     },
   };

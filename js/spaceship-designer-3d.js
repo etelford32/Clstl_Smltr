@@ -487,6 +487,7 @@ export function createRocketScene(canvas, opts = {}) {
                     thrust_kN: lerp('thrust_kN'), isp_s: lerp('isp_s'),
                     twr: lerp('twr'), accel_g: lerp('accel_g'),
                     dv_used_kms: lerp('dv_used_kms'),
+                    throttle: lerp('throttle', 1),
                     stage: (f < 0.5 ? a : b).stage,
                     coasting: (f < 0.5 ? a : b).coasting,
                     // Nozzle expansion telemetry.
@@ -569,7 +570,7 @@ export function createRocketScene(canvas, opts = {}) {
         else if (tcd < 0.2) onPhase('liftoff');
         else onPhase((s.stage || 1) > 1 ? 'stage ' + s.stage : 'ascent');
         onTick({ phase: 'ascent', t: flightT, altKm: s.alt_km, vKms: s.v_kms,
-                 throttle: burning ? 1 : 0,
+                 throttle: burning ? (s.throttle ?? 1) : 0,
                  thrustMN: (s.thrust_kN ?? 0) / 1000,
                  massFrac: s.mass_frac,
                  mach: s.mach, qkPa: s.q_kPa, reynolds: s.reynolds,

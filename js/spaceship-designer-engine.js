@@ -19,7 +19,7 @@
  */
 
 import { ENGINES } from './launch-engines.js';
-import { LAUNCH_BODIES, simulateAscent, atmosphericPressure } from './launch-physics.js';
+import { LAUNCH_BODIES, simulateAscent, atmosphericPressure, surfaceRotationSpeed } from './launch-physics.js';
 
 const G0 = 9.80665;            // m/s² — standard gravity (Isp definition)
 
@@ -176,6 +176,7 @@ export function defaultDesign() {
         name: 'Aurora I',
         bodyId: 'earth',
         targetAltKm: 200,
+        launchLatitude: 28.5,          // Cape Canaveral-ish — sets the rotation assist
         stages: [
             { diameter_m: 3.7, length_m: 55, engineId: 'merlin_1d', engineCount: 9, propellantId: 'kerolox', fillFrac: 0.82, dryFrac: 0.06, throttle: 1 },
             { diameter_m: 3.7, length_m: 13, engineId: 'merlin_1d', engineCount: 1, propellantId: 'kerolox', fillFrac: 0.80, dryFrac: 0.09, throttle: 1 },
@@ -575,9 +576,15 @@ export function runAscent(design) {
         const F_vac_N = (s.thrustVac_kN || 0) * 1000;
         const ispVac  = s.ispVac_s || s.isp_s || 300;
         const mdot    = ispVac > 0 ? F_vac_N / (ispVac * G0) : 0;   // kg/s, ~constant per stage
+        // Solid motors burn a cast grain — no throttle, no shutdown.
+        const throttleable = s.propellantId !== 'solid';
         return { propMass_kg: s.propMass, dryMass_kg: s.dryMass,
-                 F_sl_N, F_vac_N, mdot_kgs: mdot, Isp_vac_s: ispVac, throttle: thr };
+                 F_sl_N, F_vac_N, mdot_kgs: mdot, Isp_vac_s: ispVac, throttle: thr, throttleable };
     });
+
+    // Acceleration governor: crewed vehicles cap at a gentler 4 g, uncrewed at 6 g.
+    const crewed = (design.cockpit?.crew || 0) > 0;
+    const accel_limit_g = crewed ? 4 : 6;
 
     const vehicle = {
         id: 'custom', name: design.name || 'Custom vehicle',
@@ -586,6 +593,10 @@ export function runAscent(design) {
         stages: stagesSpec,
         Cd: aero.cd,                 // Mach-dependent (function) — integrator handles both
         A_m2: aero.refArea_m2,
+        // Launch-site rotation + thrust governors
+        launch_lat_deg: design.launchLatitude ?? 0,
+        accel_limit_g,
+        q_limit_kPa: 35,             // airframe dynamic-pressure limit (max-Q throttling)
         // Legacy fields kept so non-staged readers still have something sane.
         Isp_s: ispEff,
         TWR_E: stats.liftoffThrust_kN * 1000 / (stats.totalWet_kg * G0),
@@ -645,4 +656,4 @@ export function gradeAscent(result) {
     return { grade: 'C', label: 'Flight ended early', tone: 'warn' };
 }
 
-export { LAUNCH_BODIES, G0 };
+export { LAUNCH_BODIES, G0, surfaceRotationSpeed };
