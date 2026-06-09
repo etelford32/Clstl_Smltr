@@ -30,7 +30,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { buildEngineBell } from './launch-engine-bell.js';
 import { buildPlume, tickPlume } from './launch-plume.js';
 import { buildPad, tickBeacons } from './launch-pad-3d.js';
-import { PROPELLANTS, ENGINE_CATALOG, LIVERIES } from './spaceship-designer-engine.js';
+import { PROPELLANTS, ENGINE_CATALOG, LIVERIES, designStageExpansion01 } from './spaceship-designer-engine.js';
 
 const DAY_SKY = new THREE.Color(0x9ec7e8);
 const SPACE_SKY = new THREE.Color(0x02040a);
@@ -461,7 +461,7 @@ export function createRocketScene(canvas, opts = {}) {
         f?.resolve?.(result);
     }
 
-    // sample trajectory (alt_km, v_kms) at flight-time t (seconds since liftoff)
+    // sample trajectory (alt_km, v_kms, + aero telemetry) at flight-time t
     function sampleTraj(traj, t) {
         if (t <= traj[0].t) return traj[0];
         const last = traj[traj.length - 1];
@@ -470,10 +470,31 @@ export function createRocketScene(canvas, opts = {}) {
             if (traj[i].t >= t) {
                 const a = traj[i - 1], b = traj[i];
                 const f = (t - a.t) / Math.max(1e-3, b.t - a.t);
+                const lerp = (k, d = 0) => (a[k] ?? d) + ((b[k] ?? d) - (a[k] ?? d)) * f;
                 return {
-                    t, alt_km: a.alt_km + (b.alt_km - a.alt_km) * f,
-                    v_kms: (a.v_kms ?? 0) + ((b.v_kms ?? 0) - (a.v_kms ?? 0)) * f,
-                    mass_frac: (a.mass_frac ?? 1) + ((b.mass_frac ?? 1) - (a.mass_frac ?? 1)) * f,
+                    t, alt_km: lerp('alt_km'),
+                    v_kms: lerp('v_kms'),
+                    mass_frac: lerp('mass_frac', 1),
+                    // Aerodynamic telemetry (enriched by runAscent) for the live panel.
+                    mach: lerp('mach'), q_kPa: lerp('q_kPa'), reynolds: lerp('reynolds'),
+                    drag_kN: lerp('drag_kN'),
+                    dragFriction_kN: lerp('dragFriction_kN'),
+                    dragPressure_kN: lerp('dragPressure_kN'),
+                    dragWave_kN: lerp('dragWave_kN'),
+                    boundaryLayer: (f < 0.5 ? a : b).boundaryLayer,
+                    regime: (f < 0.5 ? a : b).regime,
+                    // Propulsion telemetry.
+                    thrust_kN: lerp('thrust_kN'), isp_s: lerp('isp_s'),
+                    twr: lerp('twr'), accel_g: lerp('accel_g'),
+                    dv_used_kms: lerp('dv_used_kms'),
+                    throttle: lerp('throttle', 1),
+                    stage: (f < 0.5 ? a : b).stage,
+                    coasting: (f < 0.5 ? a : b).coasting,
+                    // Nozzle expansion telemetry.
+                    expansion01: lerp('expansion01', 0.2),
+                    exitMach: lerp('exitMach'), peOverPa: lerp('peOverPa', 1),
+                    nozzleState: (f < 0.5 ? a : b).nozzleState,
+                    separated: (f < 0.5 ? a : b).separated,
                 };
             }
         }
@@ -496,7 +517,8 @@ export function createRocketScene(canvas, opts = {}) {
                 f.ignited = true;
             }
             const spool = Math.max(0, 1 + tcd / 1.4);
-            plumes.forEach((p) => tickPlume(p, now, spool * 0.6, 0));
+            const exp0 = padExpansion();
+            plumes.forEach((p) => tickPlume(p, now, spool * 0.6, 0, exp0));
             groundFX.tick(now, spool * 0.6, 1);     // full ground-effect on the pad
             // Engines settle from a small ignition twitch to centred as they light.
             applyGimbal(Math.sin(now * 9) * 0.05 * (1 - spool), Math.cos(now * 7) * 0.05 * (1 - spool));
@@ -509,7 +531,13 @@ export function createRocketScene(canvas, opts = {}) {
         const PLAY = Math.max(6, f.burn / 14);
         const flightT = tcd * PLAY;
         const s = sampleTraj(f.traj, flightT);
-        const throttle = s.mass_frac > 0.06 ? 1 : 0;
+        // Plume follows the real engine: lit whenever there is thrust, dark during
+        // the inter-stage coast. Intensity scales with thrust vs the sea-level
+        // liftoff thrust (so the vacuum thrust rise reads as a fuller plume).
+        const burning = (s.thrust_kN ?? 0) > 1 && !s.coasting;
+        const throttle = burning
+            ? Math.max(0.55, Math.min(1.2, (s.thrust_kN || 0) / Math.max(1, stage0ThrustFull_kN)))
+            : 0;
 
         const rise = altToScene(s.alt_km);
         rocketRoot.position.y = rise;              // rocket climbs; the ground stays put
@@ -523,7 +551,7 @@ export function createRocketScene(canvas, opts = {}) {
         scene.fog.color.copy(scene.background);
         stars.material.opacity = mix;
 
-        plumes.forEach((p) => { p.visible = throttle > 0; tickPlume(p, now, throttle, s.alt_km); });
+        plumes.forEach((p) => { p.visible = throttle > 0; tickPlume(p, now, throttle, s.alt_km, s.expansion01); });
 
         // Thrust vectoring: a slow guidance weave plus a downrange lean that grows
         // with altitude — the visible signature of the gravity-turn steering.
@@ -538,18 +566,40 @@ export function createRocketScene(canvas, opts = {}) {
         groundFX.group.visible = groundMix > 0.02 && throttle > 0;
         if (groundFX.group.visible) groundFX.tick(now, throttle, groundMix);
 
-        if (tcd < 0.2) onPhase('liftoff'); else onPhase('ascent');
-        onTick({ phase: 'ascent', t: flightT, altKm: s.alt_km, vKms: s.v_kms, throttle,
-                 thrustMN: stage0ThrustFull_kN * throttle / 1000 });
+        if (s.coasting) onPhase('staging');
+        else if (tcd < 0.2) onPhase('liftoff');
+        else onPhase((s.stage || 1) > 1 ? 'stage ' + s.stage : 'ascent');
+        onTick({ phase: 'ascent', t: flightT, altKm: s.alt_km, vKms: s.v_kms,
+                 throttle: burning ? (s.throttle ?? 1) : 0,
+                 thrustMN: (s.thrust_kN ?? 0) / 1000,
+                 massFrac: s.mass_frac,
+                 mach: s.mach, qkPa: s.q_kPa, reynolds: s.reynolds,
+                 dragkN: s.drag_kN, dragFrictionkN: s.dragFriction_kN,
+                 dragPressurekN: s.dragPressure_kN, dragWavekN: s.dragWave_kN,
+                 boundaryLayer: s.boundaryLayer, regime: s.regime,
+                 // Propulsion telemetry for the live engine panel.
+                 isp: s.isp_s, twr: s.twr, accelG: s.accel_g,
+                 stage: s.stage, coasting: s.coasting, dvUsed: s.dv_used_kms,
+                 // Nozzle expansion state.
+                 nozzleState: s.nozzleState, peOverPa: s.peOverPa,
+                 exitMach: s.exitMach, separated: s.separated, expansion01: s.expansion01 });
 
         if (flightT >= f.burn - 1e-3) endFlight(f.result);
     }
 
     // Static-fire test: hold on the pad and fire stage 1 at the design throttle,
     // with the engines weaving on their gimbals so the thrust vector is visible.
+    // Stage-1 nozzle expansion at the pad (sea level) — drives the static-fire
+    // and ignition plume shape from the real over-/optimally-expanded state.
+    function padExpansion() {
+        try { return currentDesign ? designStageExpansion01(currentDesign, 0, 0) : 0.35; }
+        catch { return 0.35; }
+    }
+
     function tickStaticFire(now) {
         const thr = clamp01(currentDesign?.stages?.[0]?.throttle ?? 1);
-        plumes.forEach((p) => { p.visible = thr > 0; tickPlume(p, now, thr, 0); });
+        const exp0 = padExpansion();
+        plumes.forEach((p) => { p.visible = thr > 0; tickPlume(p, now, thr, 0, exp0); });
         groundFX.group.visible = thr > 0;
         if (groundFX.group.visible) groundFX.tick(now, thr, 1);
         // Exaggerated gimbal sweep (a Lissajous figure) so the vectoring is obvious.
