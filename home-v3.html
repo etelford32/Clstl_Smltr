@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Parkers Physics — The universe, live in your browser</title>
+<meta name="description" content="28+ scientifically accurate space simulations powered by live NASA and NOAA data. Create a free account in 60 seconds — no credit card required.">
+<link rel="canonical" href="https://parkersphysics.com/">
+<meta property="og:url" content="https://parkersphysics.com/">
+<meta property="og:title" content="Parkers Physics — The universe, live in your browser">
+<meta property="og:description" content="Live NASA/NOAA data. 28+ WebGL simulations. Free to start — no credit card.">
+<meta property="og:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+<meta property="og:type" content="website">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="stylesheet" href="colors_and_type.css">
+<style>
+  /* ── home-v3 — the "signup-first" arm of the home_redesign experiment.
+       Conversion thesis: the legacy page sells the product and v2 sells
+       the operator wedge, but neither lets a new user ACT above the fold.
+       This arm puts the account-creation surface itself in the hero
+       (OAuth one-click + email-first handoff to signup.html), defers the
+       plan decision entirely (everyone starts free), and repeats a single
+       CTA throughout. Measured against control/redesign by the
+       home_redesign experiment — do not hand-edit copy mid-flight or the
+       test reads as noise. ─────────────────────────────────────────── */
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    background:var(--black-void);
+    color:var(--fg-2);
+    font-family:var(--font-sans);
+    font-size:var(--fs-body);
+    line-height:var(--lh-base);
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+  body::before{
+    content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
+    background:var(--grad-uv-bg);
+  }
+  #bg-field{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.7}
+  @media(prefers-reduced-motion:reduce){#bg-field{display:none}}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 var(--space-8);position:relative;z-index:1}
+  a{color:inherit;text-decoration:none}
+
+  .eyebrow{
+    font-family:var(--font-display);font-size:11px;font-weight:var(--fw-bold);
+    text-transform:uppercase;letter-spacing:var(--tracking-cyber);
+    color:var(--uv-400);text-shadow:0 0 12px rgba(157,58,255,.35);
+  }
+  h1,h2,h3{font-family:var(--font-display);font-weight:var(--fw-black);text-transform:uppercase;letter-spacing:var(--tracking-cyber);line-height:var(--lh-tight)}
+
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;border:none;
+    font-family:var(--font-display);font-weight:var(--fw-bold);font-size:12px;
+    letter-spacing:var(--tracking-wider);text-transform:uppercase;
+    transition:all .2s var(--ease-standard);
+  }
+  .btn-primary{
+    background:var(--grad-uv-pink);color:var(--fg-on-bright);
+    padding:13px 26px;border-radius:var(--radius-md);
+    box-shadow:0 0 36px rgba(157,58,255,.55),inset 0 0 22px rgba(255,255,255,.15);
+  }
+  .btn-primary:hover{transform:translateY(-2px);filter:brightness(1.12);box-shadow:0 0 48px rgba(255,31,156,.7)}
+  .btn-ghost{
+    background:transparent;color:var(--lightning-arc);
+    padding:12px 24px;border-radius:var(--radius-md);border:1px solid var(--border-arc);
+  }
+  .btn-ghost:hover{background:rgba(143,240,255,.07)}
+  .btn .arr{transition:transform .2s}
+  .btn:hover .arr{transform:translateX(3px)}
+
+  /* ── HERO: value prop + the signup card itself ─────────────────────── */
+  header{padding:var(--space-22) 0 var(--space-16);position:relative}
+  .hero-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr);gap:var(--space-13);align-items:center}
+  @media(max-width:920px){.hero-grid{grid-template-columns:1fr}}
+
+  .hero-eye{margin-bottom:var(--space-6);display:flex;align-items:center;gap:10px;animation:rise .7s .05s both}
+  .live-dot{width:7px;height:7px;border-radius:50%;background:var(--status-ok);box-shadow:0 0 10px var(--status-ok);animation:blink 2.4s ease-in-out infinite}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.35}}
+  h1{
+    font-size:clamp(1.9rem,4.4vw,3.1rem);max-width:16ch;
+    background:var(--grad-headline);-webkit-background-clip:text;background-clip:text;
+    -webkit-text-fill-color:transparent;text-shadow:0 0 40px rgba(157,58,255,.25);
+    animation:rise .7s .12s both;
+  }
+  .hero-sub{
+    margin-top:var(--space-6);max-width:52ch;font-size:1.06rem;color:var(--fg-3);
+    line-height:var(--lh-loose);animation:rise .7s .2s both;
+  }
+  .hero-points{margin-top:var(--space-6);display:flex;flex-direction:column;gap:10px;animation:rise .7s .26s both}
+  .hero-points li{list-style:none;display:flex;gap:10px;align-items:flex-start;font-size:.95rem;color:var(--fg-2)}
+  .hero-points .tick{color:var(--status-ok);font-weight:var(--fw-bold);flex-shrink:0;text-shadow:0 0 8px rgba(46,255,158,.5)}
+  .hero-secondary{margin-top:var(--space-8);animation:rise .7s .32s both}
+  .hero-secondary a{font-family:var(--font-mono);font-size:var(--fs-caption);color:var(--lightning-arc);letter-spacing:var(--tracking-wide)}
+  .hero-secondary a:hover{text-decoration:underline}
+
+  /* The signup card — the page's reason to exist */
+  .join-card{
+    background:linear-gradient(165deg,#150a35,#0a0420);
+    border:1px solid var(--border-uv);border-radius:var(--radius-lg);
+    padding:var(--space-8);box-shadow:var(--glow-uv-md);
+    animation:rise .7s .24s both;position:relative;overflow:hidden;
+  }
+  .join-card::before{content:"";position:absolute;left:0;top:0;right:0;height:2px;background:var(--grad-uv-pink)}
+  .join-card h2{font-size:1.05rem;color:var(--fg-1);letter-spacing:var(--tracking-wide)}
+  .join-card .jc-sub{margin-top:6px;font-size:.86rem;color:var(--fg-4)}
+  .jc-oauth{margin-top:var(--space-5)}
+  .jc-div{display:flex;align-items:center;gap:12px;margin:var(--space-2) 0 var(--space-4);color:var(--fg-5);font-family:var(--font-mono);font-size:var(--fs-micro);letter-spacing:var(--tracking-wide);text-transform:uppercase}
+  .jc-div::before,.jc-div::after{content:"";flex:1;border-top:1px solid var(--border-1)}
+  .jc-form{display:flex;flex-direction:column;gap:10px}
+  .jc-form input{
+    width:100%;padding:13px 14px;border-radius:var(--radius-md);
+    background:var(--black-void);border:1px solid var(--border-2);
+    color:var(--fg-1);font:inherit;font-size:.95rem;outline:none;
+    transition:border-color .2s,box-shadow .2s;
+  }
+  .jc-form input:focus{border-color:var(--uv-400);box-shadow:var(--glow-uv-sm)}
+  .jc-form input::placeholder{color:var(--fg-5)}
+  .jc-form .btn-primary{width:100%;padding:14px 20px}
+  .jc-fine{margin-top:var(--space-4);display:flex;flex-wrap:wrap;gap:8px 16px;justify-content:center}
+  .jc-fine span{font-family:var(--font-mono);font-size:var(--fs-micro);color:var(--fg-4);letter-spacing:var(--tracking-wide);text-transform:uppercase;display:flex;align-items:center;gap:6px}
+  .jc-fine .ok{color:var(--status-ok)}
+  .jc-signin{margin-top:var(--space-4);text-align:center;font-size:.82rem;color:var(--fg-4)}
+  .jc-signin a{color:var(--lightning-arc)}
+  .jc-signin a:hover{text-decoration:underline}
+  .jc-err{display:none;font-size:.8rem;color:var(--status-danger);margin-top:2px}
+
+  @keyframes rise{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+  @media(prefers-reduced-motion:reduce){
+    .hero-eye,h1,.hero-sub,.hero-points,.hero-secondary,.join-card{animation:none}
+  }
+
+  /* ── Live proof strip ──────────────────────────────────────────────── */
+  .strip{
+    margin-top:var(--space-13);display:grid;grid-template-columns:repeat(4,1fr);
+    border:1px solid var(--border-2);border-radius:var(--radius-lg);overflow:hidden;
+    background:var(--black-panel);
+  }
+  .strip div{padding:var(--space-5);border-right:1px solid var(--border-1)}
+  .strip div:last-child{border-right:none}
+  .strip .k{font-family:var(--font-mono);font-size:var(--fs-micro);letter-spacing:var(--tracking-wider);text-transform:uppercase;color:var(--fg-4)}
+  .strip .v{font-family:var(--font-display);font-weight:var(--fw-bold);font-size:1.25rem;color:var(--fg-1);margin-top:8px;text-transform:uppercase;letter-spacing:var(--tracking-wide)}
+  .strip .v.live{color:var(--status-ok)}
+  @media(max-width:680px){.strip{grid-template-columns:repeat(2,1fr)}.strip div:nth-child(2){border-right:none}}
+
+  section{padding:var(--space-22) 0;position:relative}
+  .divider{border-top:1px solid var(--border-1)}
+  .sec-head{margin-bottom:var(--space-13);max-width:64ch}
+  .sec-head h2{font-size:var(--fs-h2);margin-top:var(--space-4);color:var(--fg-1);text-shadow:0 0 30px rgba(157,58,255,.2)}
+  .sec-head p{margin-top:var(--space-3);color:var(--fg-3);font-size:1rem;text-transform:none;font-family:var(--font-sans);letter-spacing:0;line-height:var(--lh-loose)}
+
+  /* ── What's free, concretely ───────────────────────────────────────── */
+  .free-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-5)}
+  .free-card{
+    background:linear-gradient(155deg,#150a35,#0d0626);
+    border:1px solid var(--border-2);border-radius:var(--radius-lg);
+    padding:var(--space-8);display:flex;flex-direction:column;
+    transition:all .25s var(--ease-standard);
+  }
+  .free-card:hover{transform:translateY(-4px);border-color:var(--border-3)}
+  .free-card .fnum{font-family:var(--font-mono);font-size:var(--fs-micro);color:var(--fg-4);letter-spacing:var(--tracking-wide)}
+  .free-card h3{font-size:1.1rem;margin:var(--space-4) 0 var(--space-3);letter-spacing:var(--tracking-wide);color:var(--fg-1)}
+  .free-card p{font-size:.9rem;color:var(--fg-3);flex-grow:1;line-height:var(--lh-loose)}
+  .free-card .flink{margin-top:var(--space-5);font-family:var(--font-display);font-size:11px;font-weight:var(--fw-bold);letter-spacing:var(--tracking-wide);text-transform:uppercase;color:var(--pink-400);display:flex;align-items:center;gap:7px}
+  .free-card:hover .arr{transform:translateX(3px)}
+  .arr{transition:transform .2s}
+  @media(max-width:860px){.free-grid{grid-template-columns:1fr}}
+
+  /* ── 3 steps ───────────────────────────────────────────────────────── */
+  .steps{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--border-2);border-radius:var(--radius-lg);overflow:hidden}
+  .steps .col{padding:var(--space-8);border-right:1px solid var(--border-1);background:var(--black-panel)}
+  .steps .col:last-child{border-right:none}
+  .steps .idx{font-family:var(--font-display);font-weight:var(--fw-black);font-size:1.4rem;background:var(--grad-uv-pink);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+  .steps h3{font-size:1.05rem;margin:var(--space-4) 0 var(--space-3);letter-spacing:var(--tracking-wide);color:var(--fg-1)}
+  .steps p{font-size:.9rem;color:var(--fg-3);line-height:var(--lh-loose)}
+  @media(max-width:760px){.steps{grid-template-columns:1fr}.steps .col{border-right:none;border-bottom:1px solid var(--border-1)}.steps .col:last-child{border-bottom:none}}
+
+  .sim-strip{display:flex;gap:var(--space-2);flex-wrap:wrap;margin-top:var(--space-8)}
+  .sim-strip span{font-family:var(--font-mono);font-size:var(--fs-caption);color:var(--fg-3);border:1px solid var(--border-2);padding:6px 11px;border-radius:var(--radius-xs);background:var(--black-void)}
+
+  /* ── Pricing (free-forward) ────────────────────────────────────────── */
+  .tier-row{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-5);max-width:760px}
+  .tier{border:1px solid var(--border-2);border-radius:var(--radius-lg);padding:var(--space-8);background:var(--black-panel);display:flex;flex-direction:column}
+  .tier.hot{border-color:var(--border-uv);box-shadow:var(--glow-uv-md);background:linear-gradient(165deg,#150a35,#0a0420)}
+  .tier .tn{font-family:var(--font-display);font-size:10px;font-weight:var(--fw-bold);letter-spacing:var(--tracking-wider);text-transform:uppercase;color:var(--fg-4)}
+  .tier .tp{font-family:var(--font-display);font-weight:var(--fw-black);font-size:2rem;margin:9px 0 7px;color:var(--fg-1)}
+  .tier .tp span{font-size:.85rem;color:var(--fg-4);font-weight:var(--fw-medium)}
+  .tier ul{margin:var(--space-3) 0 var(--space-6);flex-grow:1}
+  .tier li{list-style:none;font-size:.88rem;color:var(--fg-3);line-height:1.6;display:flex;gap:8px}
+  .tier li::before{content:"✓";color:var(--status-ok);flex-shrink:0}
+  .tier-note{margin-top:var(--space-5);font-family:var(--font-mono);font-size:var(--fs-micro);color:var(--fg-4)}
+  .tier-note a{color:var(--lightning-arc)}
+  .tier-note a:hover{text-decoration:underline}
+  @media(max-width:680px){.tier-row{grid-template-columns:1fr}}
+
+  /* ── Final CTA ─────────────────────────────────────────────────────── */
+  .final{text-align:center;padding:var(--space-25) 0;background:var(--grad-pink-bg)}
+  .final h2{font-size:var(--fs-h2);max-width:22ch;margin:var(--space-4) auto 0;color:var(--fg-1);text-shadow:0 0 40px rgba(255,31,156,.3)}
+  .final p{color:var(--fg-3);margin:var(--space-4) auto 0;max-width:50ch;line-height:var(--lh-loose)}
+  .final .jc-form{flex-direction:row;max-width:520px;margin:var(--space-8) auto 0}
+  .final .jc-form input{flex:1}
+  .final .jc-form .btn-primary{width:auto;white-space:nowrap}
+  @media(max-width:560px){.final .jc-form{flex-direction:column}}
+  .final .jc-fine{justify-content:center}
+
+  footer{border-top:1px solid var(--border-1);padding:var(--space-13) 0 var(--space-16);background:var(--black-deeper)}
+  .brand{display:flex;align-items:center;gap:11px}
+  .brand .mark{width:28px;height:28px;border-radius:var(--radius-circle);flex-shrink:0;object-fit:cover;display:block;box-shadow:var(--glow-uv-sm)}
+  .brand b{font-family:var(--font-display);font-weight:var(--fw-bold);font-size:14px;letter-spacing:var(--tracking-wider);text-transform:uppercase;color:var(--fg-1)}
+  .foot-grid{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:var(--space-8)}
+  .foot-grid h5{font-family:var(--font-display);font-size:10px;font-weight:var(--fw-bold);letter-spacing:var(--tracking-wider);text-transform:uppercase;color:var(--fg-4);margin-bottom:var(--space-4)}
+  .foot-grid a{display:block;color:var(--fg-4);font-size:.86rem;margin-bottom:9px;transition:color .2s}
+  .foot-grid a:hover{color:var(--fg-1)}
+  .foot-brand p{color:var(--fg-5);font-size:.86rem;margin-top:var(--space-3);max-width:34ch;line-height:var(--lh-loose)}
+  .foot-bottom{margin-top:var(--space-10);padding-top:var(--space-6);border-top:1px solid var(--border-1);display:flex;justify-content:space-between;flex-wrap:wrap;gap:var(--space-3);font-family:var(--font-mono);font-size:var(--fs-micro);color:var(--fg-6);letter-spacing:var(--tracking-wide)}
+  @media(max-width:760px){.foot-grid{grid-template-columns:1fr 1fr}}
+  .anchor{scroll-margin-top:90px}
+</style>
+</head>
+<body>
+<canvas id="bg-field" aria-hidden="true"></canvas>
+
+<link rel="stylesheet" href="/js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "/js/nav.js?v=20260514"; initNav("home");</script>
+
+<header>
+  <div class="wrap">
+    <div class="hero-grid">
+      <div>
+        <div class="hero-eye">
+          <span class="live-dot"></span>
+          <span class="eyebrow">Live NASA &amp; NOAA data · streaming now</span>
+        </div>
+        <h1>The universe, live in your browser</h1>
+        <p class="hero-sub">
+          Watch the Sun erupt, the solar wind hit Earth's magnetic field, and the aurora
+          forecast update in real time — in 28+ scientifically accurate simulations built
+          on published physics, not stock animations.
+        </p>
+        <ul class="hero-points">
+          <li><span class="tick">✓</span> Free forever tier — 3 core simulations + the live space weather dashboard</li>
+          <li><span class="tick">✓</span> Real data: NOAA solar wind, Kp index, NASA solar events — refreshed live</li>
+          <li><span class="tick">✓</span> No credit card. No plan to pick. Account in under a minute.</li>
+        </ul>
+        <div class="hero-secondary">
+          <a href="/space-weather.html" data-funnel-cta data-cta="hero_try_first">Want to look around first? Open today's space weather →</a>
+        </div>
+      </div>
+
+      <div class="join-card" id="joincard">
+        <h2>Create your free account</h2>
+        <div class="jc-sub">Starts free, stays free. Upgrade only if you want more.</div>
+        <div class="jc-oauth" id="oauth-mount"></div>
+        <div class="jc-div" id="oauth-divider" style="display:none">or with email</div>
+        <form class="jc-form" id="hero-join-form" novalidate>
+          <input type="email" id="hero-email" name="email" placeholder="you@example.com"
+                 autocomplete="email" inputmode="email" aria-label="Email address">
+          <div class="jc-err" id="hero-email-err">Please enter a valid email address.</div>
+          <button type="submit" class="btn btn-primary" data-cta="hero_email_start">Start free <span class="arr">→</span></button>
+        </form>
+        <div class="jc-fine">
+          <span><span class="ok">●</span> No credit card</span>
+          <span><span class="ok">●</span> Free forever</span>
+          <span><span class="ok">●</span> 60 seconds</span>
+        </div>
+        <div class="jc-signin">Already have an account? <a href="/signin.html" data-funnel-cta data-cta="hero_signin">Sign in</a></div>
+      </div>
+    </div>
+
+    <div class="strip">
+      <div><div class="k">Simulations</div><div class="v">28+</div></div>
+      <div><div class="k">Live data feeds</div><div class="v live">12 ●</div></div>
+      <div><div class="k">Model basis</div><div class="v">Physics-first</div></div>
+      <div><div class="k">Starting price</div><div class="v">$0</div></div>
+    </div>
+  </div>
+</header>
+
+<section class="anchor divider" id="free" data-pp-section="free">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Free means free</span>
+      <h2>What your free account unlocks today</h2>
+      <p>No trial clock, no feature teases that all dead-end in a paywall. These work the moment you sign up.</p>
+    </div>
+    <div class="free-grid">
+      <div class="free-card">
+        <div class="fnum">FREE 01</div>
+        <h3>Live space weather dashboard</h3>
+        <p>Solar wind speed, density, and the Kp geomagnetic index streaming from NOAA — the same feeds professionals watch, visualized.</p>
+        <a class="flink" href="/signup.html?plan=free" data-funnel-cta data-cta="free_dashboard">Get it free <span class="arr">→</span></a>
+      </div>
+      <div class="free-card">
+        <div class="fnum">FREE 02</div>
+        <h3>3 core simulations</h3>
+        <p>Explore the Sun, Earth's magnetosphere, and the solar system in interactive WebGL — every model traced to a published equation.</p>
+        <a class="flink" href="/signup.html?plan=free" data-funnel-cta data-cta="free_sims">Get it free <span class="arr">→</span></a>
+      </div>
+      <div class="free-card">
+        <div class="fnum">FREE 03</div>
+        <h3>Aurora &amp; storm awareness</h3>
+        <p>See geomagnetic conditions at a glance and know when the sky is about to put on a show at your latitude.</p>
+        <a class="flink" href="/signup.html?plan=free" data-funnel-cta data-cta="free_aurora">Get it free <span class="arr">→</span></a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="anchor divider" id="how" data-pp-section="how">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">How it works</span>
+      <h2>From zero to live data in three steps</h2>
+    </div>
+    <div class="steps">
+      <div class="col">
+        <div class="idx">01</div>
+        <h3>Create your account</h3>
+        <p>Google, Apple, or email — your pick. No plan dropdown, no card form. Everyone starts on the free tier.</p>
+      </div>
+      <div class="col">
+        <div class="idx">02</div>
+        <h3>Land on your dashboard</h3>
+        <p>Live solar wind and Kp data are already flowing when you arrive. A short welcome tour points at the good stuff.</p>
+      </div>
+      <div class="col">
+        <div class="idx">03</div>
+        <h3>Go as deep as you like</h3>
+        <p>When three simulations stop being enough, one upgrade unlocks all 28+, full WebGL rendering, and storm alerts.</p>
+      </div>
+    </div>
+    <div class="sim-strip">
+      <span>Earth magnetosphere</span><span>Upper atmosphere</span><span>Solar physics engine</span>
+      <span>Space weather dashboard</span><span>Stellar physics</span><span>Galactic map</span>
+      <span>Black holes</span><span>Mission planner</span><span>+ 20 more</span>
+    </div>
+  </div>
+</section>
+
+<section class="anchor divider" id="pricing" data-pp-section="pricing">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Pricing, all of it</span>
+      <h2>Two numbers. No asterisks.</h2>
+    </div>
+    <div class="tier-row">
+      <div class="tier hot">
+        <div class="tn">Free — forever</div>
+        <div class="tp">$0</div>
+        <ul>
+          <li>3 core simulations</li>
+          <li>Live NOAA solar wind &amp; Kp index</li>
+          <li>Space weather dashboard</li>
+        </ul>
+        <a href="/signup.html?plan=free" class="btn btn-primary" data-funnel-cta data-cta="pricing_free">Start free <span class="arr">→</span></a>
+      </div>
+      <div class="tier">
+        <div class="tn">Basic</div>
+        <div class="tp">$10<span> / mo</span></div>
+        <ul>
+          <li>All 28+ simulations</li>
+          <li>Full WebGL rendering &amp; live NASA DONKI feeds</li>
+          <li>Geomagnetic storm alerts</li>
+        </ul>
+        <a href="/signup.html?plan=basic" class="btn btn-ghost" data-funnel-cta data-cta="pricing_basic">Start with Basic</a>
+      </div>
+    </div>
+    <p class="tier-note">
+      Educator, research, and institutional plans exist too — <a href="/pricing.html" data-funnel-cta data-cta="pricing_all">see all plans</a>.
+      Flying satellites? Operator access is scoped per mission: <a href="/for-operators.html" data-funnel-cta data-cta="pricing_operators">for-operators</a>.
+    </p>
+  </div>
+</section>
+
+<section class="final divider" data-pp-section="final">
+  <div class="wrap">
+    <span class="eyebrow">Ready when you are</span>
+    <h2>The Sun is doing something right now. See it.</h2>
+    <p>Create a free account and your dashboard is live before your coffee cools. No card, no commitment.</p>
+    <form class="jc-form" id="final-join-form" novalidate>
+      <input type="email" id="final-email" name="email" placeholder="you@example.com"
+             autocomplete="email" inputmode="email" aria-label="Email address">
+      <button type="submit" class="btn btn-primary" data-cta="final_email_start">Start free <span class="arr">→</span></button>
+    </form>
+    <div class="jc-err" id="final-email-err" style="text-align:center;margin-top:8px">Please enter a valid email address.</div>
+    <div class="jc-fine">
+      <span><span class="ok">●</span> No credit card</span>
+      <span><span class="ok">●</span> Free forever</span>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div class="foot-brand">
+        <a href="earth.html" class="brand" aria-label="Parkers Physics — Earth weather simulation"><img src="ParkersPhysics_logo2.jpg" alt="Parkers Physics" class="mark"> <b>Parkers Physics</b></a>
+        <p>Physics-first space weather forecasting for satellites, programs, and science.</p>
+      </div>
+      <div>
+        <h5>Platform</h5>
+        <a href="#free">What's free</a>
+        <a href="#pricing">Pricing</a>
+        <a href="/galactic-map.html">Simulations</a>
+        <a href="/for-operators.html">For operators</a>
+      </div>
+      <div>
+        <h5>Data sources</h5>
+        <a href="https://www.swpc.noaa.gov/">NOAA SWPC</a>
+        <a href="https://api.nasa.gov/">NASA DONKI</a>
+      </div>
+      <div>
+        <h5>Company</h5>
+        <a href="/contact-enterprise.html">Contact</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/eula.html">Terms</a>
+      </div>
+    </div>
+    <div class="foot-bottom">
+      <span>© 2026 PARKERS PHYSICS</span>
+      <span>SIGNUP-FIRST HOMEPAGE v3 · UV SYSTEM · A/B</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+/* Lightweight drifting particle field — same ambient backdrop as home-v2's
+   fallback. Respects prefers-reduced-motion and pauses when hidden. */
+window.__ppStartParticles = function(){
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+  var cv = document.getElementById('bg-field');
+  if(reduce || !cv){ if(cv) cv.style.display='none'; return; }
+  var ctx = cv.getContext('2d'), W, H, dpr, parts = [], raf, running = true;
+  var hues = ['157,58,255','255,31,156','143,240,255'];
+  function size(){
+    dpr = Math.min(window.devicePixelRatio||1, 2);
+    W = cv.width = innerWidth*dpr;
+    H = cv.height = innerHeight*dpr;
+    cv.style.width = innerWidth+'px'; cv.style.height = innerHeight+'px';
+    var target = Math.round(innerWidth*innerHeight/24000);
+    parts = [];
+    for(var i=0;i<target;i++) parts.push(spawn());
+  }
+  function spawn(){
+    return {
+      x:Math.random()*W, y:Math.random()*H,
+      r:(Math.random()*1.5+0.4)*dpr,
+      vx:(Math.random()*0.16+0.04)*dpr*(Math.random()<.5?-1:1),
+      vy:(Math.random()*0.10-0.05)*dpr,
+      a:Math.random()*0.4+0.1,
+      tw:Math.random()*Math.PI*2,
+      hue:hues[Math.floor(Math.random()*hues.length)]
+    };
+  }
+  function frame(){
+    if(!running) return;
+    ctx.clearRect(0,0,W,H);
+    for(var i=0;i<parts.length;i++){
+      var p = parts[i];
+      p.x+=p.vx; p.y+=p.vy; p.tw+=0.013;
+      if(p.x<-20)p.x=W+20; if(p.x>W+20)p.x=-20;
+      if(p.y<-20)p.y=H+20; if(p.y>H+20)p.y=-20;
+      var depth = Math.max(0, 1 - p.y/(H*0.95));
+      var alpha = p.a*depth*(0.65+0.35*Math.sin(p.tw));
+      if(alpha<=0.01) continue;
+      ctx.beginPath();
+      ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+      ctx.fillStyle='rgba('+p.hue+','+alpha.toFixed(3)+')';
+      ctx.shadowBlur=6*dpr; ctx.shadowColor='rgba('+p.hue+',0.6)';
+      ctx.fill();
+    }
+    ctx.shadowBlur=0;
+    raf=requestAnimationFrame(frame);
+  }
+  document.addEventListener('visibilitychange',function(){
+    running=!document.hidden;
+    if(running) raf=requestAnimationFrame(frame); else cancelAnimationFrame(raf);
+  });
+  addEventListener('resize',size);
+  size(); frame();
+};
+window.__ppStartParticles();
+</script>
+
+<script type="module">
+/* Funnel wiring — identical canonical stages to home-v2 so the
+   home_redesign experiment compares all three arms on the same events.
+   Importing experiments.js transitively boots the anon-safe telemetry
+   pipeline. */
+import { experiments } from './js/experiments.js';
+
+const $  = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
+
+// Page-level assignment first (reads middleware's pp_home_v cookie, so the
+// recorded variant always matches the page actually served), then the
+// canonical landing_view stage.
+experiments.assign('home_redesign');
+experiments.track('landing_view', { page: 'home-v3' });
+
+// Every plain-link CTA → canonical landing_cta_click
+$$('[data-funnel-cta]').forEach(el => {
+  el.addEventListener('click', () => {
+    experiments.track('landing_cta_click', {
+      cta: el.getAttribute('data-cta') || 'unknown',
+      target: (el.getAttribute('href') || '').slice(0, 80),
+    });
+  }, { passive: true });
+});
+
+// Email-first capture: validate, log the CTA, hand off to signup with the
+// email prefilled and the plan decision already made (free). signup.html
+// reads ?email= and ?plan= and pre-populates the form.
+function wireEmailForm(formId, inputId, errId, cta) {
+  const form = $(formId), input = $(inputId), err = $(errId);
+  if (!form || !input) return;
+  let touched = false;
+  input.addEventListener('input', () => {
+    if (!touched) { touched = true; experiments.track('landing_email_focus', { cta }); }
+    if (err) err.style.display = 'none';
+  });
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const email = input.value.trim();
+    const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    if (!valid) {
+      if (err) err.style.display = 'block';
+      input.focus();
+      return;
+    }
+    experiments.track('landing_cta_click', { cta, target: '/signup.html' });
+    window.location.href = '/signup.html?plan=free&email=' + encodeURIComponent(email);
+  });
+}
+wireEmailForm('#hero-join-form',  '#hero-email',  '#hero-email-err',  'hero_email_start');
+wireEmailForm('#final-join-form', '#final-email', '#final-email-err', 'final_email_start');
+
+// One-click OAuth signup straight from the hero. mountOAuthButtons wires
+// auth.signInWithProvider + the oauth_button_clicked funnel stage itself;
+// auth-callback.html treats a first-time OAuth user as a signup (welcome
+// email + wizard) exactly as it does coming from signup.html.
+import('./js/oauth-buttons.js').then(({ mountOAuthButtons }) => {
+  const mount = $('#oauth-mount');
+  if (!mount) return;
+  mountOAuthButtons(mount, { source: 'home-v3' });
+  if (mount.querySelector('.pp-oauth-btn')) {
+    const div = $('#oauth-divider');
+    if (div) div.style.display = '';
+  }
+}).catch(() => { /* email path still works without the module */ });
+
+// Section reach — one event per section per session (extra stage; stores
+// but is intentionally absent from the ordered funnel-summary RPC)
+if ('IntersectionObserver' in window) {
+  const seen = new Set();
+  const io = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (!e.isIntersecting) continue;
+      const name = e.target.getAttribute('data-pp-section');
+      if (seen.has(name)) continue;
+      seen.add(name);
+      experiments.track('landing_section_view', { section: name });
+    }
+  }, { threshold: 0.4 });
+  $$('[data-pp-section]').forEach(s => io.observe(s));
+}
+</script>
+
+</body>
+</html>

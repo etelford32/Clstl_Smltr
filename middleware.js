@@ -12,21 +12,26 @@
  *     loads are never split cross-origin.
  *
  *  2. Homepage A/B split (only for `/`). Picks the `home_redesign` arm
- *     50/50, pins it in the `pp_home_v` cookie so a visitor stays sticky,
- *     and internally rewrites to the variant's HTML (address bar stays
- *     `/`):
+ *     evenly across three arms, pins it in the `pp_home_v` cookie so a
+ *     visitor stays sticky, and internally rewrites to the variant's HTML
+ *     (address bar stays `/`):
  *
  *         control  → pp_home_v=index  → index.html     (legacy homepage)
- *         redesign → pp_home_v=v2     → home-v2.html   (new homepage)
+ *         redesign → pp_home_v=v2     → home-v2.html   (operator-first)
+ *         signup   → pp_home_v=v3     → home-v3.html   (signup-first)
  *
  * The cookie is intentionally NOT HttpOnly: js/experiments.js reads it for
  * the `home_redesign` experiment so the variant it records always matches
  * the page that was actually served. QA deep links keep working — a
- * `?exp_home_redesign=` query (control|redesign or index|v2) forces the
- * arm and re-pins the cookie, mirroring experiments.js's `?exp_` overrides.
+ * `?exp_home_redesign=` query (control|redesign|signup or index|v2|v3)
+ * forces the arm and re-pins the cookie, mirroring experiments.js's
+ * `?exp_` overrides.
  *
- * When the test concludes, flip the default arm here (or pin everyone to
- * `v2`) to make home-v2 the canonical homepage.
+ * Visitors already pinned to `index` or `v2` keep their arm (sticky
+ * cookie); only NEW visitors enter the three-way split, so adding the v3
+ * arm does not reshuffle anyone mid-test.
+ *
+ * When the test concludes, pin everyone to the winning arm here.
  */
 
 import { next, rewrite } from '@vercel/edge';
@@ -52,11 +57,12 @@ function readCookie(req, name) {
   return null;
 }
 
-// Accepts experiments.js variant ids (control|redesign) and the raw cookie
-// values (index|v2). Returns the canonical cookie value or null.
+// Accepts experiments.js variant ids (control|redesign|signup) and the raw
+// cookie values (index|v2|v3). Returns the canonical cookie value or null.
 function normalizeArm(v) {
   if (v === 'index' || v === 'control') return 'index';
   if (v === 'v2' || v === 'redesign') return 'v2';
+  if (v === 'v3' || v === 'signup') return 'v3';
   return null;
 }
 
@@ -95,13 +101,17 @@ export default function middleware(req) {
     arm = existing;
     pin = false;                      // returning visitor — already sticky
   } else {
-    arm = crypto.getRandomValues(new Uint8Array(1))[0] < 128 ? 'index' : 'v2';
+    // Even three-way split. 256 doesn't divide by 3 — the ≤0.4% remainder
+    // bias toward `index` is noise relative to any lift worth shipping.
+    const roll = crypto.getRandomValues(new Uint8Array(1))[0];
+    arm = roll < 85 ? 'index' : roll < 170 ? 'v2' : 'v3';
     pin = true;                       // first visit — assign + pin
   }
 
   const headers = pin ? { 'set-cookie': cookieHeader(arm) } : undefined;
 
-  return arm === 'v2'
-    ? rewrite(new URL('/home-v2.html', req.url), headers ? { headers } : undefined)
-    : next(headers ? { headers } : undefined);
+  if (arm === 'v2' || arm === 'v3') {
+    return rewrite(new URL(`/home-${arm}.html`, req.url), headers ? { headers } : undefined);
+  }
+  return next(headers ? { headers } : undefined);
 }

@@ -93,10 +93,11 @@ export const EXPERIMENTS = Object.freeze({
     home_redesign: {
         status: 'running',
         cookie: 'pp_home_v',
-        cookieMap: { index: 'control', v2: 'redesign' },
+        cookieMap: { index: 'control', v2: 'redesign', v3: 'signup' },
         variants: [
-            { id: 'control',  w: 50 },   // legacy index.html
-            { id: 'redesign', w: 50 },   // home-v2.html
+            { id: 'control',  w: 34 },   // legacy index.html
+            { id: 'redesign', w: 33 },   // home-v2.html (operator-first)
+            { id: 'signup',   w: 33 },   // home-v3.html (signup-first)
         ],
     },
 });

@@ -229,6 +229,10 @@
       "destination": "/home-v2.html"
     },
     {
+      "source": "/home-v3",
+      "destination": "/home-v3.html"
+    },
+    {
       "source": "/wr102",
       "destination": "/wr102.html"
     },
