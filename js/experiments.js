@@ -141,6 +141,7 @@ export const EXPERIMENT_GOALS = Object.freeze({
     home_redesign: [
         { stage: 'landing_cta_click',  label: 'CTA click (primary)' },
         { stage: 'signup_succeeded',   label: 'Signup' },
+        { stage: 'checkout_started',   label: 'Checkout started' },
     ],
 });
 

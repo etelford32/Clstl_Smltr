@@ -165,6 +165,22 @@
         .plan-pill-price { font-size: .68rem; color: #777; display: block; margin-top: 2px; }
         .plan-pill input[type=radio] { display: none; }
 
+        /* One-line replacement for the picker on ?plan=free arrivals */
+        .plan-locked-note {
+            display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+            margin-bottom: 14px; padding: 11px 14px;
+            border: 1px solid rgba(78,255,145,.3); border-radius: 8px;
+            background: rgba(78,255,145,.06);
+            font-size: .85rem; color: #ccd;
+        }
+        .plan-locked-note b { color: #4eff91; }
+        .plan-locked-note button {
+            margin-left: auto; padding: 0; background: none; border: none;
+            cursor: pointer; font: inherit; font-size: .8rem;
+            color: #a080ff; text-decoration: underline;
+        }
+        .plan-locked-note button:hover { color: #c0a8ff; }
+
         /* Live per-tier feature summary */
         .plan-summary {
             margin: 0 0 18px; padding: 14px 16px;
@@ -372,6 +388,16 @@
                         <span class="plan-pill-name">🏛️ Institution</span>
                         <span class="plan-pill-price">$500 / mo</span>
                     </label>
+                </div>
+
+                <!-- Shown INSTEAD of the picker when the plan decision was
+                     already made upstream (?plan=free — the signup-first
+                     homepage arm, pricing's "Start Free"). The picker stays
+                     in the DOM: "Change plan" reveals it, and an invite code
+                     that comps a paid tier re-reveals it via selectPlan. -->
+                <div class="plan-locked-note" id="plan-locked-note" style="display:none">
+                    🔭 You're starting on the <b>Free</b> plan — no card required.
+                    <button type="button" id="plan-change-btn">Change plan</button>
                 </div>
 
                 <!-- Live per-tier feature breakdown. Populated by
@@ -717,6 +743,37 @@
     selectPlan(urlPlan);
     _funnel.step('signup_plan_initial', { plan: urlPlan, source: _rawUrlPlan ? 'url' : 'default' });
 
+    // ── Deferred plan choice ───────────────────────────────────────
+    // When the CTA upstream already made the decision (?plan=free —
+    // the signup-first homepage arm, pricing's "Start Free"), don't
+    // re-open it: hide the five-pill picker behind a one-line note
+    // with a "Change plan" reveal. Note: must read the raw query param
+    // here — `_rawUrlPlan` is defaulted to 'free' above, so it cannot
+    // distinguish an explicit ?plan=free from no param at all.
+    const _explicitPlan = new URLSearchParams(location.search).get('plan');
+    if (_explicitPlan === 'free') {
+        const _pills = document.getElementById('plan-pills');
+        const _note  = document.getElementById('plan-locked-note');
+        const _revealPicker = (source) => {
+            if (_pills.style.display === '') return;
+            _pills.style.display = '';
+            _note.style.display = 'none';
+            _funnel.step('signup_plan_picker_revealed', { source });
+        };
+        _pills.style.display = 'none';
+        _note.style.display = '';
+        document.getElementById('plan-change-btn')
+            .addEventListener('click', () => _revealPicker('change_link'));
+        // An invite code that comps a paid tier auto-picks it via
+        // window.selectPlan — re-reveal so the note never lies.
+        const _lockedSelectPlan = window.selectPlan;
+        window.selectPlan = (val) => {
+            if (val !== 'free') _revealPicker('invite');
+            _lockedSelectPlan(val);
+        };
+        _funnel.step('signup_plan_picker_hidden', { plan: 'free' });
+    }
+
     document.querySelectorAll('.plan-pill').forEach(pill => {
         pill.addEventListener('click', () => {
             const planVal = pill.querySelector('input').value;
@@ -1033,6 +1090,10 @@
             //   - this was a class-seat invite (student rides parent's plan).
             const goToCheckout = plan !== 'free' && !invitedComp && !classSeatApplied;
             if (goToCheckout) {
+                // Last client-side event before the Stripe redirect. A
+                // checkout_started with no later subscription activation is
+                // an abandoned checkout — previously invisible to us.
+                _funnel.step('checkout_started', { plan });
                 // User selected a paid plan — redirect to checkout after brief delay.
                 // Post-Stripe we land back on dashboard.html as a 'success' return,
                 // which is the historical contract Stripe webhook + the portal page
