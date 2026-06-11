@@ -46,6 +46,69 @@ function _grayTex() {
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
+//  HIGH-RES FOCUS PATCH  (shared GLSL, injected into surface + cloud frags)
+// ═══════════════════════════════════════════════════════════════════════════════
+// A nested high-resolution weather window (js/weather-patch.js) that follows
+// the camera's ground footprint. The patch textures use the EXACT packing of
+// their global counterparts (u_weather / u_cloud_layers), so blending is a
+// straight mix() — no unit conversion in the shader. Bounds are degrees:
+// (lonMin, latMin, lonSpan, latSpan); lonMin may sit anywhere in [-180,180)
+// and the mod() in patchUV keeps a patch straddling the antimeridian
+// continuous. Patch rows are stored south-first with flipY=false, so
+// v=0 ⇔ latMin — do NOT "fix" this to match the global textures' flipY=true
+// convention; the patch is sampled with an explicitly computed UV, not vUv.
+
+const PATCH_GLSL_CORE = /* glsl */`
+uniform sampler2D u_patch_weather;  // same packing as u_weather
+// highp: the cloud frag runs mediump by default, and fp16 quantises
+// degree-range values to 0.06–0.125° — up to half a patch cell at the
+// 0.25° floor. The patch math must stay full-precision on mobile GPUs.
+uniform highp vec4  u_patch_bounds; // lonMin, latMin, lonSpan, latSpan (degrees)
+uniform float u_patch_on;
+
+// Equirectangular uv → patch-local uv (may land outside [0,1]).
+highp vec2 patchUV(vec2 uv) {
+    highp vec2 llDeg = uvToLatLonDeg(uv);                 // (lat, lon)
+    highp float dLon = mod(llDeg.y - u_patch_bounds.x, 360.0);
+    return vec2(dLon / max(1e-3, u_patch_bounds.z),
+                (llDeg.x - u_patch_bounds.y) / max(1e-3, u_patch_bounds.w));
+}
+
+// 1 in the patch interior, easing to 0 across the outer ~12% so the
+// high-res window blends into the global field with no visible seam.
+float patchWeight(vec2 uvP) {
+    vec2 edge = min(uvP, 1.0 - uvP);
+    return smoothstep(0.0, 0.12, min(edge.x, edge.y));
+}
+
+// Drop-in replacement for texture2D(u_weather, uv).
+vec4 sampleWeatherField(vec2 uv) {
+    vec4 wx = texture2D(u_weather, uv);
+    if (u_patch_on > 0.5) {
+        vec2 uvP = patchUV(uv);
+        float wgt = patchWeight(uvP);
+        if (wgt > 0.001) wx = mix(wx, texture2D(u_patch_weather, uvP), wgt);
+    }
+    return wx;
+}
+`;
+
+const PATCH_GLSL_CLOUDS = /* glsl */`
+uniform sampler2D u_patch_clouds;   // same packing as u_cloud_layers
+
+// Drop-in replacement for texture2D(u_cloud_layers, uv).
+vec4 sampleCloudLayers(vec2 uv) {
+    vec4 cl = texture2D(u_cloud_layers, uv);
+    if (u_patch_on > 0.5) {
+        vec2 uvP = patchUV(uv);
+        float wgt = patchWeight(uvP);
+        if (wgt > 0.001) cl = mix(cl, texture2D(u_patch_clouds, uvP), wgt);
+    }
+    return cl;
+}
+`;
+
+// ═══════════════════════════════════════════════════════════════════════════════
 //  EARTH SURFACE SHADERS
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -91,6 +154,8 @@ varying vec3 vNormalLocal;
 varying vec3 vWorldNormal;
 varying vec3 vWorldPos;
 
+${PATCH_GLSL_CORE}
+
 // ── Aurora curtains ────────────────────────────────────────────────────────────
 vec3 auroraColor(float sinAbsLat, float lon, float kp) {
     float kpEff  = kp + u_bz_south * 2.5;
@@ -115,7 +180,7 @@ vec3 auroraColor(float sinAbsLat, float lon, float kp) {
 
 // ── Weather / temperature colour ramp ─────────────────────────────────────────
 vec3 weatherOverlay(vec2 uv) {
-    float temp = texture2D(u_weather, uv).r;
+    float temp = sampleWeatherField(uv).r;
     vec3 polar    = vec3(0.05, 0.15, 0.80);
     vec3 tempZone = vec3(0.20, 0.75, 0.30);
     vec3 subtrop  = vec3(0.95, 0.60, 0.05);
@@ -280,6 +345,9 @@ uniform int  u_storm_count;
 varying vec3 vNormalLocal;
 varying vec3 vWorldNormal;
 varying vec3 vWorldPos;
+
+${PATCH_GLSL_CORE}
+${PATCH_GLSL_CLOUDS}
 
 // ── Procedural noise for natural cloud shapes ────────────────────────────────
 // Hash-based value noise + FBM give multi-scale cloud structure directly in
@@ -557,7 +625,7 @@ void main() {
     float baseHigh = mix(BASE_HIGH_DEFAULT, 0.0, u_research_mode);
 
     if (u_weather_on > 0.5) {
-        vec4  cl      = texture2D(u_cloud_layers, vUv);
+        vec4  cl      = sampleCloudLayers(vUv);
         float clLow   = cl.r;
         float clMid   = cl.g;
         float clHigh  = cl.b;
@@ -751,7 +819,7 @@ void main() {
     if (u_weather_on > 0.5 && precip > 0.004) {
         float precipI = clamp(sqrt(precip * 1.7), 0.0, 1.0);
 
-        float tC       = texture2D(u_weather, vUv).r * 110.0 - 60.0;   // °C
+        float tC       = sampleWeatherField(vUv).r * 110.0 - 60.0;   // °C
         float snowFrac = smoothstep(2.0, -1.5, tC);                    // 1 = snow
 
         vec3  rainDark = vec3(0.34, 0.40, 0.52);
@@ -1101,6 +1169,11 @@ export function createEarthUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
         u_topology:     { value: _blackTex() },   // flat until texture loads
         u_bump_strength:{ value: 0.85 },           // 0 disables bump, 1 is strong
         u_weather:      { value: _blackTex() },
+        // High-res focus patch (js/weather-patch.js). Off by default — only
+        // earth.html wires a feed; other consumers render the global field.
+        u_patch_weather:{ value: _blackTex() },
+        u_patch_bounds: { value: new THREE.Vector4(0, 0, 1, 1) },
+        u_patch_on:     { value: 0 },
         u_sun_dir:      { value: sunDir.clone() },
         u_time:         { value: 0 },
         u_kp:           { value: 0 },
@@ -1141,6 +1214,12 @@ export function createCloudUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
     return {
         u_weather:       { value: _blackTex() },
         u_cloud_layers:  { value: _blackTex() },  // real cloud fraction + precip
+        // High-res focus patch — see createEarthUniforms. Cloud frag gets its
+        // own cloud-layer patch sampler on top of the shared weather one.
+        u_patch_weather: { value: _blackTex() },
+        u_patch_clouds:  { value: _blackTex() },
+        u_patch_bounds:  { value: new THREE.Vector4(0, 0, 1, 1) },
+        u_patch_on:      { value: 0 },
         u_satellite:     { value: _grayTex()  },  // GOES/MODIS satellite imagery
         u_sun_dir:       { value: sunDir.clone() },
         u_time:          { value: 0 },

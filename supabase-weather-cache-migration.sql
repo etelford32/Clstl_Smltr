@@ -35,15 +35,17 @@ ALTER TABLE public.weather_grid_cache ENABLE ROW LEVEL SECURITY;
 -- No policies = no rows visible to anon/authenticated roles.
 -- (service_role bypasses RLS entirely, so the edge fns still work.)
 
--- Retention: keep the last 72 hourly rows (~3 days of history for
--- future trending/diagnostics). Called opportunistically from the
--- refresh endpoint after each insert.
+-- Retention: keep the last 720 hourly rows (30 days — bumped from 72
+-- by supabase-weather-cache-retention-migration.sql so Phase 4 NN
+-- training has history to learn from; keep the two files in lockstep).
+-- Called opportunistically from the refresh endpoint after each insert.
 CREATE OR REPLACE FUNCTION public.trim_weather_grid_cache()
 RETURNS void AS $$
     DELETE FROM public.weather_grid_cache
     WHERE id NOT IN (
         SELECT id FROM public.weather_grid_cache
         ORDER BY fetched_at DESC
-        LIMIT 72
+        LIMIT 720
     );
-$$ LANGUAGE sql;
+$$ LANGUAGE sql
+SET search_path = public, pg_temp;

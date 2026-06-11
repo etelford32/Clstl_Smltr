@@ -3363,6 +3363,8 @@ import {
 import { AtmosphereClimatology }    from './js/atmosphere-climatology.js';
 import { makeAtmosphereForecasters } from './js/atmosphere-forecast.js';
 import { makeWeatherFlowForecasters, WindAdvectionRK2Forecaster } from './js/weather-flow.js';
+import { FocusFootprint }        from './js/focus-footprint.js';
+import { WeatherPatchFeed }      from './js/weather-patch.js';
 import { TracerSkillTracker } from './js/tracer-skill-tracker.js';
 import { WindShearProxy } from './js/wind-shear-proxy.js';
 import { AdvectionGainTracker } from './js/advection-gain-tracker.js';
@@ -5939,6 +5941,79 @@ wxFeed.backfill(wxGridHistory, 24).then(n => {
     if (n > 0) wxResolver?.invalidate();
 });
 
+// ── High-res focus patch (nested focus window) ─────────────────────────────
+// The 5° global grid destroys all sub-synoptic structure; instead of a
+// quadratically-expensive global resolution bump, FocusFootprint tracks the
+// camera's ground footprint and WeatherPatchFeed fetches a ≤64×64 patch at
+// 0.25–1° (browser-direct Open-Meteo, keyless, per-visitor IP) whenever the
+// camera frames a region. The surface + cloud shaders blend the patch over
+// the global field inside the footprint with a soft edge (PATCH_GLSL in
+// js/earth-skin.js). The same FocusFootprint events will drive the Phase 2
+// GIBS imagery inset — one primitive, two features.
+const focusFootprint = new FocusFootprint({
+    camera, earthObject: earthMesh, radius: R_EARTH,
+});
+const wxPatchFeed = new WeatherPatchFeed();
+
+// "+ patch 64×48 · 0.5°" suffix for the wx-panel grid readout. Composed
+// with the base grid string by _refreshGridReadout so the patch status
+// survives the weather-update handler's own rewrites.
+let _baseGridStr  = '—';
+let _patchGridStr = '';
+function _refreshGridReadout() {
+    const el = document.getElementById('wx-grid');
+    if (el) el.textContent = _patchGridStr ? `${_baseGridStr} ${_patchGridStr}` : _baseGridStr;
+}
+
+{
+    const _mkPatchTex = (w, h) => {
+        const t = new THREE.DataTexture(
+            new Float32Array(w * h * 4), w, h, THREE.RGBAFormat, THREE.FloatType
+        );
+        t.magFilter = THREE.LinearFilter;   // GPU bilinear does the patch upsample
+        t.minFilter = THREE.LinearFilter;
+        t.wrapS     = THREE.ClampToEdgeWrapping;   // a patch is NOT lon-periodic
+        t.wrapT     = THREE.ClampToEdgeWrapping;
+        // Rows are south-first and sampled via the explicitly computed patch
+        // UV (v=0 ⇔ latMin), so unlike u_weather there is no flipY here.
+        t.flipY = false;
+        return t;
+    };
+    // Patch dims change with footprint shape, and DataTexture can't resize
+    // in place — recreate on mismatch, reuse otherwise.
+    const _setPatch = (uniform, data, w, h) => {
+        const cur = uniform.value;
+        if (!cur?.isDataTexture || cur.image.width !== w || cur.image.height !== h) {
+            cur?.dispose?.();
+            uniform.value = _mkPatchTex(w, h);
+        }
+        uniform.value.image.data.set(data);
+        uniform.value.needsUpdate = true;
+    };
+
+    document.addEventListener('weather-patch-update', (ev) => {
+        const { weatherRGBA, cloudRGBA, w, h, bounds, stepDeg } = ev.detail;
+        _setPatch(earthU.u_patch_weather, weatherRGBA, w, h);
+        // _setPatch may have recreated the texture — re-share the reference
+        // with the cloud shader (same pattern as u_weather above).
+        cloudU.u_patch_weather.value = earthU.u_patch_weather.value;
+        _setPatch(cloudU.u_patch_clouds, cloudRGBA, w, h);
+        earthU.u_patch_bounds.value.set(bounds.lonMin, bounds.latMin, bounds.lonSpan, bounds.latSpan);
+        cloudU.u_patch_bounds.value.copy(earthU.u_patch_bounds.value);
+        earthU.u_patch_on.value = 1;
+        cloudU.u_patch_on.value = 1;
+        const degStr = Number.isInteger(stepDeg) ? `${stepDeg}°` : `${stepDeg.toFixed(2)}°`;
+        _patchGridStr = `+ patch ${w}×${h} · ${degStr}`;
+        _refreshGridReadout();
+    });
+    document.addEventListener('weather-patch-clear', () => {
+        earthU.u_patch_on.value = 0;
+        cloudU.u_patch_on.value = 0;
+        _patchGridStr = '';
+        _refreshGridReadout();
+    });
+}
+
 // ── Forecast feed (progressive, lazy) ──────────────────────────────────────
 // Fetches hourly U/V/T/P/RH/cloud/precip from Open-Meteo's bulk forecast
 // endpoint in 24-hour batches and pushes each hour into wxGridHistory's
@@ -7172,6 +7247,15 @@ document.addEventListener('weather-update', e => {
     const { weatherBuffer, windBuffer, cloudBuffer, meta } = e.detail;
     updateWeatherTextures(weatherBuffer, windBuffer, cloudBuffer);
 
+    // Couple the high-res patch to the time scrubber. A past instant
+    // re-paints the patch from its session ring (or hides it when the
+    // session hasn't lived through that hour); any future instant hides
+    // it — there is no high-res forecast behind the window, and painting
+    // "now" data over a forecast globe would be silently wrong.
+    const scrubT = (meta?.replayT != null && (meta.replay || meta.isForecast))
+        ? meta.replayT : null;
+    wxPatchFeed.setTimeContext(scrubT);
+
     // Stash references so the hover tooltip can bilinear-sample point
     // values (T/P/RH, cloud cover, precip rate) without rerouting through
     // the event payload. WeatherFeed reuses the same Float32Array each
@@ -7223,10 +7307,11 @@ document.addEventListener('weather-update', e => {
     if (meta.gridW && meta.gridH) {
         const deg = (meta.gridDeg ?? 180 / meta.gridH);
         const degStr = Number.isInteger(deg) ? `${deg}°` : `${deg.toFixed(1)}°`;
-        document.getElementById('wx-grid').textContent = `${meta.gridW}×${meta.gridH} · ${degStr}`;
+        _baseGridStr = `${meta.gridW}×${meta.gridH} · ${degStr}`;
     } else {
-        document.getElementById('wx-grid').textContent = '—';
+        _baseGridStr = '—';
     }
+    _refreshGridReadout();
 
     // Data age — how old the cached row from Supabase is, NOT how long ago
     // the browser fetched. Surfaces pg_cron failures to visitors: fresh ≤ 90
@@ -9517,6 +9602,12 @@ function animate() {
     // detection makes this a no-op (~10 µs) when the visible frame
     // hasn't moved appreciably, so we can call it every rAF.
     wxResolver?.tick(simTimeMs);
+
+    // Focus-footprint tracker for the high-res weather patch (and, later,
+    // the imagery detail inset). Internally throttled to one event per
+    // 1.5 s and only when the camera has actually moved — per-rAF cost is
+    // one worldToLocal plus a few trig ops.
+    focusFootprint.tick();
 
     // Slider writeback: while the user isn't actively scrubbing (slider
     // not focused), keep the slider position in sync with simTimeMs so
