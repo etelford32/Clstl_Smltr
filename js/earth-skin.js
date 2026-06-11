@@ -46,47 +46,51 @@ function _grayTex() {
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  HIGH-RES FOCUS PATCH  (shared GLSL, injected into surface + cloud frags)
+//  FOCUS INSETS  (shared GLSL, injected into surface + cloud frags)
 // ═══════════════════════════════════════════════════════════════════════════════
-// A nested high-resolution weather window (js/weather-patch.js) that follows
-// the camera's ground footprint. The patch textures use the EXACT packing of
-// their global counterparts (u_weather / u_cloud_layers), so blending is a
-// straight mix() — no unit conversion in the shader. Bounds are degrees:
-// (lonMin, latMin, lonSpan, latSpan); lonMin may sit anywhere in [-180,180)
-// and the mod() in patchUV keeps a patch straddling the antimeridian
-// continuous. Patch rows are stored south-first with flipY=false, so
-// v=0 ⇔ latMin — do NOT "fix" this to match the global textures' flipY=true
-// convention; the patch is sampled with an explicitly computed UV, not vUv.
+// Two nested focus windows ride the camera's ground footprint
+// (js/focus-footprint.js): the high-res weather patch (js/weather-patch.js)
+// and the GIBS imagery detail inset (js/earth-detail-inset.js). Both share
+// the same primitive: a texture whose lat/lon bounds are passed as a vec4
+// (lonMin, latMin, lonSpan, latSpan in degrees) and blended over the global
+// field with a soft edge. lonMin may sit anywhere in [-180,180) and the
+// mod() in insetUV keeps a window straddling the antimeridian continuous.
+// Inset rows are stored south-first relative to the computed UV (v=0 ⇔
+// latMin) — do NOT "fix" this to match the global textures' row
+// conventions; insets are sampled with an explicitly computed UV, not vUv.
 
-const PATCH_GLSL_CORE = /* glsl */`
-uniform sampler2D u_patch_weather;  // same packing as u_weather
+const INSET_GLSL_HELPERS = /* glsl */`
 // highp: the cloud frag runs mediump by default, and fp16 quantises
-// degree-range values to 0.06–0.125° — up to half a patch cell at the
-// 0.25° floor. The patch math must stay full-precision on mobile GPUs.
-uniform highp vec4  u_patch_bounds; // lonMin, latMin, lonSpan, latSpan (degrees)
-uniform float u_patch_on;
+// degree-range values to 0.06–0.125° — up to half a weather-patch cell at
+// the 0.25° floor. Inset math must stay full-precision on mobile GPUs.
 
-// Equirectangular uv → patch-local uv (may land outside [0,1]).
-highp vec2 patchUV(vec2 uv) {
+// Equirectangular uv → inset-local uv (may land outside [0,1]).
+highp vec2 insetUV(vec2 uv, highp vec4 b) {
     highp vec2 llDeg = uvToLatLonDeg(uv);                 // (lat, lon)
-    highp float dLon = mod(llDeg.y - u_patch_bounds.x, 360.0);
-    return vec2(dLon / max(1e-3, u_patch_bounds.z),
-                (llDeg.x - u_patch_bounds.y) / max(1e-3, u_patch_bounds.w));
+    highp float dLon = mod(llDeg.y - b.x, 360.0);
+    return vec2(dLon / max(1e-3, b.z),
+                (llDeg.x - b.y) / max(1e-3, b.w));
 }
 
-// 1 in the patch interior, easing to 0 across the outer ~12% so the
+// 1 in the inset interior, easing to 0 across the outer ~12% so the
 // high-res window blends into the global field with no visible seam.
-float patchWeight(vec2 uvP) {
+float insetWeight(vec2 uvP) {
     vec2 edge = min(uvP, 1.0 - uvP);
     return smoothstep(0.0, 0.12, min(edge.x, edge.y));
 }
+`;
+
+const PATCH_GLSL_CORE = /* glsl */`
+uniform sampler2D u_patch_weather;  // same packing as u_weather
+uniform highp vec4  u_patch_bounds; // lonMin, latMin, lonSpan, latSpan (degrees)
+uniform float u_patch_on;
 
 // Drop-in replacement for texture2D(u_weather, uv).
 vec4 sampleWeatherField(vec2 uv) {
     vec4 wx = texture2D(u_weather, uv);
     if (u_patch_on > 0.5) {
-        vec2 uvP = patchUV(uv);
-        float wgt = patchWeight(uvP);
+        vec2 uvP = insetUV(uv, u_patch_bounds);
+        float wgt = insetWeight(uvP);
         if (wgt > 0.001) wx = mix(wx, texture2D(u_patch_weather, uvP), wgt);
     }
     return wx;
@@ -100,11 +104,30 @@ uniform sampler2D u_patch_clouds;   // same packing as u_cloud_layers
 vec4 sampleCloudLayers(vec2 uv) {
     vec4 cl = texture2D(u_cloud_layers, uv);
     if (u_patch_on > 0.5) {
-        vec2 uvP = patchUV(uv);
-        float wgt = patchWeight(uvP);
+        vec2 uvP = insetUV(uv, u_patch_bounds);
+        float wgt = insetWeight(uvP);
         if (wgt > 0.001) cl = mix(cl, texture2D(u_patch_clouds, uvP), wgt);
     }
     return cl;
+}
+`;
+
+// GIBS imagery detail inset (surface shader only). u_detail carries a
+// stitched VIIRS/MODIS corrected-reflectance window at up to ~150 m/px,
+// blended over the Blue Marble base inside its footprint. sRGB texture —
+// three.js handles decode via colorSpace, the shader just mixes.
+const DETAIL_GLSL = /* glsl */`
+uniform sampler2D u_detail;         // stitched GIBS imagery window
+uniform highp vec4  u_detail_bounds; // lonMin, latMin, lonSpan, latSpan (degrees)
+uniform float u_detail_on;
+
+// Blend the imagery inset over the global day-texture colour.
+vec3 detailBlendDay(vec3 dayCol, vec2 uv) {
+    if (u_detail_on < 0.5) return dayCol;
+    vec2 uvD = insetUV(uv, u_detail_bounds);
+    float wgt = insetWeight(uvD);
+    if (wgt < 0.001) return dayCol;
+    return mix(dayCol, texture2D(u_detail, uvD).rgb, wgt);
 }
 `;
 
@@ -154,7 +177,9 @@ varying vec3 vNormalLocal;
 varying vec3 vWorldNormal;
 varying vec3 vWorldPos;
 
+${INSET_GLSL_HELPERS}
 ${PATCH_GLSL_CORE}
+${DETAIL_GLSL}
 
 // ── Aurora curtains ────────────────────────────────────────────────────────────
 vec3 auroraColor(float sinAbsLat, float lon, float kp) {
@@ -204,7 +229,7 @@ void main() {
 
     vec3 N_base = normalize(vWorldNormal);
 
-    vec3 dayCol    = texture2D(u_day,      vUv).rgb;
+    vec3 dayCol    = detailBlendDay(texture2D(u_day, vUv).rgb, vUv);
     vec3 nightCol  = texture2D(u_night,    vUv).rgb * 2.5;
     float oceanMsk = texture2D(u_specular, vUv).r;
 
@@ -346,6 +371,7 @@ varying vec3 vNormalLocal;
 varying vec3 vWorldNormal;
 varying vec3 vWorldPos;
 
+${INSET_GLSL_HELPERS}
 ${PATCH_GLSL_CORE}
 ${PATCH_GLSL_CLOUDS}
 
@@ -1174,6 +1200,11 @@ export function createEarthUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
         u_patch_weather:{ value: _blackTex() },
         u_patch_bounds: { value: new THREE.Vector4(0, 0, 1, 1) },
         u_patch_on:     { value: 0 },
+        // GIBS imagery detail inset (js/earth-detail-inset.js). Same
+        // off-by-default contract as the weather patch.
+        u_detail:       { value: _blackTex() },
+        u_detail_bounds:{ value: new THREE.Vector4(0, 0, 1, 1) },
+        u_detail_on:    { value: 0 },
         u_sun_dir:      { value: sunDir.clone() },
         u_time:         { value: 0 },
         u_kp:           { value: 0 },
@@ -1245,9 +1276,14 @@ export function createCloudUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
  *
  * @param {object} earthU - uniforms object from createEarthUniforms()
  * @param {object} cloudU - uniforms object from createCloudUniforms() (unused, kept for API compat)
+ * @param {object} [opts]
+ * @param {number} [opts.anisotropy=1] - pass renderer.capabilities.getMaxAnisotropy()
+ *   to sharpen oblique/mid-zoom sampling. Mipmaps stay at the TextureLoader
+ *   defaults (generateMipmaps=true, LinearMipmapLinearFilter) — anisotropic
+ *   filtering rides on top of them.
  * @returns {Promise<void>}
  */
-export function loadEarthTextures(earthU, cloudU = null) {
+export function loadEarthTextures(earthU, cloudU = null, { anisotropy = 1 } = {}) {
     const loader = new THREE.TextureLoader();
 
     const loadTex = (url, onLoad, fallbackFn) => new Promise(resolve => {
@@ -1260,6 +1296,7 @@ export function loadEarthTextures(earthU, cloudU = null) {
                 // rendering the globe upside-down. Keep image rows aligned
                 // with the shader's normalToUV() by disabling the flip.
                 tex.flipY = false;
+                tex.anisotropy = anisotropy;
                 onLoad(tex);
                 resolve();
             },
@@ -1406,8 +1443,8 @@ export class EarthSkin {
     }
 
     /** Load textures from CDN. Returns Promise<void>. */
-    loadTextures() {
-        return loadEarthTextures(this.earthU, this.cloudU);
+    loadTextures(opts = {}) {
+        return loadEarthTextures(this.earthU, this.cloudU, opts);
     }
 
     /** Call every frame with elapsed time in seconds. */

@@ -3365,6 +3365,7 @@ import { makeAtmosphereForecasters } from './js/atmosphere-forecast.js';
 import { makeWeatherFlowForecasters, WindAdvectionRK2Forecaster } from './js/weather-flow.js';
 import { FocusFootprint }        from './js/focus-footprint.js';
 import { WeatherPatchFeed }      from './js/weather-patch.js';
+import { EarthDetailInset, stitchGlobalBase } from './js/earth-detail-inset.js';
 import { TracerSkillTracker } from './js/tracer-skill-tracker.js';
 import { WindShearProxy } from './js/wind-shear-proxy.js';
 import { AdvectionGainTracker } from './js/advection-gain-tracker.js';
@@ -3998,9 +3999,44 @@ earthMesh.add(tropicGroup); // child of earthMesh → rotates with globe
 // ═══════════════════════════════════════════════════════════════
 // Load textures via shared earth-skin.js loader
 // — version-pinned CDN, RepeatWrapping applied, safe 1×1 fallbacks on error
-loadEarthTextures(earthU, cloudU).then(() => {
+// Max anisotropy (typically 16) kills the smeary mid-zoom range where
+// oblique mipmap sampling used to blur the base textures; mipmaps stay at
+// the loader defaults (generateMipmaps + trilinear).
+const EARTH_TEX_ANISO = renderer.capabilities.getMaxAnisotropy();
+loadEarthTextures(earthU, cloudU, { anisotropy: EARTH_TEX_ANISO }).then(() => {
     document.getElementById('loading').classList.add('done');
+    _scheduleBaseUpgrade();
 });
+
+// ── 8K base-texture upgrade ─────────────────────────────────────────────────
+// The CDN Blue Marble is 4096×2048 (~0.09°/px) — visibly soft from half-globe
+// zoom inward. Once the page is idle, stitch BlueMarble_NextGeneration from
+// GIBS WMTS at level 3 (8192×4096, ~3–5 MB of edge-cached jpeg tiles) and
+// swap it over u_day. Strictly no-worse: any failure keeps the CDN texture.
+// Gated on GPU capability and the user's data-saver preference.
+function _scheduleBaseUpgrade() {
+    if (renderer.capabilities.maxTextureSize < 8192) return;
+    if (navigator.connection?.saveData) return;
+    const kick = () => {
+        stitchGlobalBase().then((canvas) => {
+            if (!canvas) return;
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.colorSpace = THREE.SRGBColorSpace;
+            // Same conventions as loadEarthTextures: canvas row 0 is 90°N and
+            // the shader's normalToUV has v=0 at 90°N, so no flip on upload.
+            tex.flipY     = false;
+            tex.wrapS     = THREE.RepeatWrapping;
+            tex.wrapT     = THREE.ClampToEdgeWrapping;
+            tex.anisotropy = EARTH_TEX_ANISO;
+            const old = earthU.u_day.value;
+            earthU.u_day.value = tex;
+            old?.dispose?.();
+            console.info('[EarthSkin] base texture upgraded to 8K GIBS Blue Marble');
+        });
+    };
+    if ('requestIdleCallback' in window) requestIdleCallback(kick, { timeout: 15_000 });
+    else setTimeout(kick, 8_000);
+}
 
 // ── Storm-update: push active cyclone positions into cloud shader ─────────────
 new StormFeed().start();
@@ -6013,6 +6049,35 @@ function _refreshGridReadout() {
         _refreshGridReadout();
     });
 }
+
+// ── GIBS imagery detail inset (zoom LOD) ───────────────────────────────────
+// Second subscriber to the same FocusFootprint events: past the activation
+// threshold it stitches VIIRS true-colour WMTS tiles over the visible
+// footprint (down to ~150 m/px at full zoom) and the surface shader blends
+// them over the Blue Marble base with the shared inset-edge falloff.
+const earthDetailInset = new EarthDetailInset();
+
+document.addEventListener('earth-detail-inset', (ev) => {
+    const { canvas, bounds } = ev.detail;
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    // Canvas row 0 is the inset's NORTH edge while the shared insetUV
+    // convention puts v=0 at latMin (south) — flipY=true reverses rows on
+    // upload so v=1 lands on the north edge. (CanvasTexture defaults to
+    // true; set explicitly because the relationship is load-bearing.)
+    tex.flipY      = true;
+    tex.wrapS      = THREE.ClampToEdgeWrapping;   // an inset is NOT lon-periodic
+    tex.wrapT      = THREE.ClampToEdgeWrapping;
+    tex.anisotropy = EARTH_TEX_ANISO;
+    const old = earthU.u_detail.value;
+    earthU.u_detail.value = tex;
+    earthU.u_detail_bounds.value.set(bounds.lonMin, bounds.latMin, bounds.lonSpan, bounds.latSpan);
+    earthU.u_detail_on.value = 1;
+    old?.dispose?.();
+});
+document.addEventListener('earth-detail-clear', () => {
+    earthU.u_detail_on.value = 0;
+});
 
 // ── Forecast feed (progressive, lazy) ──────────────────────────────────────
 // Fetches hourly U/V/T/P/RH/cloud/precip from Open-Meteo's bulk forecast
