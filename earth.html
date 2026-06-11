@@ -3365,7 +3365,7 @@ import { makeAtmosphereForecasters } from './js/atmosphere-forecast.js';
 import { makeWeatherFlowForecasters, WindAdvectionRK2Forecaster } from './js/weather-flow.js';
 import { FocusFootprint }        from './js/focus-footprint.js';
 import { WeatherPatchFeed }      from './js/weather-patch.js';
-import { EarthDetailInset, stitchGlobalBase } from './js/earth-detail-inset.js';
+import { EarthDetailInset, stitchGlobalBase, GIBS_LAYERS } from './js/earth-detail-inset.js';
 import { TracerSkillTracker } from './js/tracer-skill-tracker.js';
 import { WindShearProxy } from './js/wind-shear-proxy.js';
 import { AdvectionGainTracker } from './js/advection-gain-tracker.js';
@@ -6077,6 +6077,40 @@ document.addEventListener('earth-detail-inset', (ev) => {
 });
 document.addEventListener('earth-detail-clear', () => {
     earthU.u_detail_on.value = 0;
+});
+
+// ── Topology detail inset (zoom LOD, bump pass) ─────────────────────────────
+// Third subscriber to the same footprint: a GIBS shaded-relief window that
+// drives the surface bump pass harder once the camera is close enough that
+// the global height map (0.176°/texel) has nothing left to give. Tighter
+// activation than the imagery inset — relief detail only reads at close
+// range, and every active inset is another fetch stream on pan.
+const topoDetailInset = new EarthDetailInset({
+    layer: GIBS_LAYERS.topology,
+    activateSpanDeg: 25,
+    eventPrefix: 'earth-topo-detail',
+});
+
+document.addEventListener('earth-topo-detail-inset', (ev) => {
+    const { canvas, bounds } = ev.detail;
+    const tex = new THREE.CanvasTexture(canvas);
+    // Height-ish data, sampled for gradients — keep the default linear
+    // (no-colour-space) decode, matching the global u_topology texture.
+    // flipY=true for the same reason as the imagery inset: canvas row 0 is
+    // the north edge, insetUV has v=0 at latMin.
+    tex.flipY      = true;
+    tex.wrapS      = THREE.ClampToEdgeWrapping;
+    tex.wrapT      = THREE.ClampToEdgeWrapping;
+    tex.anisotropy = EARTH_TEX_ANISO;
+    const old = earthU.u_topo_detail.value;
+    earthU.u_topo_detail.value = tex;
+    earthU.u_topo_detail_bounds.value.set(bounds.lonMin, bounds.latMin, bounds.lonSpan, bounds.latSpan);
+    earthU.u_topo_detail_texel.value.set(1 / canvas.width, 1 / canvas.height);
+    earthU.u_topo_detail_on.value = 1;
+    old?.dispose?.();
+});
+document.addEventListener('earth-topo-detail-clear', () => {
+    earthU.u_topo_detail_on.value = 0;
 });
 
 // ── Forecast feed (progressive, lazy) ──────────────────────────────────────

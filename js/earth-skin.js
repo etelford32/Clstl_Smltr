@@ -131,6 +131,53 @@ vec3 detailBlendDay(vec3 dayCol, vec2 uv) {
 }
 `;
 
+// Topology detail inset (surface shader only): a high-res GIBS shaded-relief
+// window drives the existing bump pass harder at close range, where the
+// 0.176°/texel global height map has no sub-synoptic relief left to give.
+const TOPO_GLSL = /* glsl */`
+uniform sampler2D u_topo_detail;          // stitched GIBS shaded-relief window
+uniform highp vec4  u_topo_detail_bounds; // lonMin, latMin, lonSpan, latSpan (degrees)
+uniform float u_topo_detail_on;
+uniform vec2  u_topo_detail_texel;        // (1/canvasW, 1/canvasH)
+
+// Height-field gradient at uv, in the units the 85.0 bump gain downstream
+// was tuned for: change per GLOBAL texel step (0.176° on both axes),
+// x along +u (eastward), y along +v (southward).
+vec2 topoGradient(vec2 uv) {
+    float hC  = texture2D(u_topology, uv).r;
+    float hDx = texture2D(u_topology, uv + vec2(1.0 / 2048.0, 0.0)).r - hC;
+    float hDy = texture2D(u_topology, uv + vec2(0.0, 1.0 / 1024.0)).r - hC;
+    if (u_topo_detail_on > 0.5) {
+        vec2 uvT = insetUV(uv, u_topo_detail_bounds);
+        float wgt = insetWeight(uvT);
+        if (wgt > 0.001) {
+            float tC  = texture2D(u_topo_detail, uvT).r;
+            float tDx = texture2D(u_topo_detail, uvT + vec2(u_topo_detail_texel.x, 0.0)).r - tC;
+            // +uvT.y is NORTHWARD (inset v=0 ⇔ latMin) while +uv.y is
+            // southward — negate so the two gradients agree.
+            float tDy = -(texture2D(u_topo_detail, uvT + vec2(0.0, u_topo_detail_texel.y)).r - tC);
+            // Rescale the inset's fine-step deltas to the global 0.176° step.
+            // The amplification is capped at 32× — real terrain has more
+            // slope at finer scales (that's the point), but past the cap the
+            // dominant signal is jpeg noise, which uncapped k turns into
+            // surface shimmer at deep zooms.
+            highp float stepLonDeg = u_topo_detail_bounds.z * u_topo_detail_texel.x;
+            highp float stepLatDeg = u_topo_detail_bounds.w * u_topo_detail_texel.y;
+            float kx = min(32.0, 0.17578125 / max(1e-5, stepLonDeg));
+            float ky = min(32.0, 0.17578125 / max(1e-5, stepLatDeg));
+            // "Drive the bump pass harder": modest boost over a strict unit
+            // match, so close-range relief visibly pops. Deltas are clamped
+            // to the magnitude range the global map produces, keeping the
+            // downstream normalize() well-conditioned.
+            const float TOPO_DETAIL_BOOST = 1.35;
+            hDx = mix(hDx, clamp(tDx * kx * TOPO_DETAIL_BOOST, -0.25, 0.25), wgt);
+            hDy = mix(hDy, clamp(tDy * ky * TOPO_DETAIL_BOOST, -0.25, 0.25), wgt);
+        }
+    }
+    return vec2(hDx, hDy);
+}
+`;
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  EARTH SURFACE SHADERS
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -180,6 +227,7 @@ varying vec3 vWorldPos;
 ${INSET_GLSL_HELPERS}
 ${PATCH_GLSL_CORE}
 ${DETAIL_GLSL}
+${TOPO_GLSL}
 
 // ── Aurora curtains ────────────────────────────────────────────────────────────
 vec3 auroraColor(float sinAbsLat, float lon, float kp) {
@@ -238,9 +286,12 @@ void main() {
     // gradient. Project that gradient into the surface tangent basis so
     // mountains cast the right shadow regardless of camera angle. Ocean
     // is kept flat — bump only affects land via (1 - oceanMsk).
-    float hC   = texture2D(u_topology, vUv).r;
-    float hDx  = texture2D(u_topology, vUv + vec2(1.0 / 2048.0, 0.0)).r - hC;
-    float hDy  = texture2D(u_topology, vUv + vec2(0.0, 1.0 / 1024.0)).r - hC;
+    // topoGradient (TOPO_GLSL) reproduces the original three-tap global
+    // gradient and, when the high-res topology inset is live, swaps in its
+    // rescaled fine-step gradient inside the footprint.
+    vec2  hGrad = topoGradient(vUv);
+    float hDx   = hGrad.x;
+    float hDy   = hGrad.y;
     // East / north tangents at the current surface point
     vec3  up      = vec3(0.0, 1.0, 0.0);
     vec3  tEast   = normalize(cross(up, N_base));
@@ -1205,6 +1256,11 @@ export function createEarthUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
         u_detail:       { value: _blackTex() },
         u_detail_bounds:{ value: new THREE.Vector4(0, 0, 1, 1) },
         u_detail_on:    { value: 0 },
+        // GIBS topology detail inset — drives the bump pass at close range.
+        u_topo_detail:        { value: _blackTex() },
+        u_topo_detail_bounds: { value: new THREE.Vector4(0, 0, 1, 1) },
+        u_topo_detail_on:     { value: 0 },
+        u_topo_detail_texel:  { value: new THREE.Vector2(1 / 512, 1 / 512) },
         u_sun_dir:      { value: sunDir.clone() },
         u_time:         { value: 0 },
         u_kp:           { value: 0 },

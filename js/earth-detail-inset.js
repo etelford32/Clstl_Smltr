@@ -54,6 +54,16 @@ export const GIBS_LAYERS = Object.freeze({
         id: 'BlueMarble_NextGeneration',
         matrixSet: '500m', maxLevel: 7, ext: 'jpg', time: 'default',
     }),
+    // Static greyscale shaded relief (ASTER GDEM, 83°N–83°S coverage —
+    // polar tiles 404, which the all-or-nothing stitch turns into "no
+    // inset" rather than a corrupt one). Feeds the surface shader's bump
+    // pass at close range; it's a relief RENDERING rather than raw
+    // elevation, but its gradients track ridges and valleys closely
+    // enough to drive a convincing normal perturbation.
+    topology: Object.freeze({
+        id: 'ASTER_GDEM_Greyscale_Shaded_Relief',
+        matrixSet: '31.25m', maxLevel: 9, ext: 'jpg', time: 'default',
+    }),
 });
 
 // ── Pure tile math (exported for tests) ────────────────────────────────────
@@ -232,13 +242,19 @@ export class EarthDetailInset {
      *   inset starts paying for itself (an 8K base is ~0.044°/px; a level-4
      *   inset at 45° span is already 2× sharper, growing to ~150 m/px).
      * @param {number} [opts.maxTilesAcross=5]    ≤5×5 tiles ≈ ≤0.9 MB/refresh
+     * @param {string} [opts.eventPrefix='earth-detail']  dispatches
+     *   `${prefix}-inset` / `${prefix}-clear`, so multiple instances (the
+     *   imagery window, the topology window) can coexist with one listener
+     *   each instead of payload routing.
      */
     constructor({
         layer = GIBS_LAYERS.imagery,
         activateSpanDeg = 45,
         maxTilesAcross = 5,
+        eventPrefix = 'earth-detail',
     } = {}) {
         this._layer    = layer;
+        this._events   = { update: `${eventPrefix}-inset`, clear: `${eventPrefix}-clear` };
         this._opts     = { activateSpanDeg, maxTilesAcross, maxLevel: layer.maxLevel };
         this._cache    = new TileLRU();
         this._abort    = null;
@@ -282,7 +298,7 @@ export class EarthDetailInset {
 
         this._liveKey = plan.key;
         this._wantKey = null;
-        document.dispatchEvent(new CustomEvent('earth-detail-inset', {
+        document.dispatchEvent(new CustomEvent(this._events.update, {
             detail: {
                 canvas,
                 bounds:  plan.bounds,
@@ -296,7 +312,7 @@ export class EarthDetailInset {
     _clear() {
         if (this._liveKey === null) return;
         this._liveKey = null;
-        document.dispatchEvent(new CustomEvent('earth-detail-clear', {}));
+        document.dispatchEvent(new CustomEvent(this._events.clear, {}));
     }
 }
 

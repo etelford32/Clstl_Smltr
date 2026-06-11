@@ -54,7 +54,7 @@ globalThis.createImageBitmap = async (blob) => ({ url: blob.url });
 
 const {
     tileSpanDeg, tilesAcross, tilesDown, buildTileUrl,
-    zoomForSpan, planInset, stitchTiles, GIBS_LAYERS,
+    zoomForSpan, planInset, stitchTiles, GIBS_LAYERS, EarthDetailInset,
 } = await import('../js/earth-detail-inset.js');
 
 let pass = 0, fail = 0;
@@ -173,6 +173,55 @@ await check('stitchTiles: tile cache short-circuits refetches', async () => {
     await stitchTiles(args);
     assert.equal(first, 2);
     assert.equal(fetchLog.length, 2, 'second stitch served from cache');
+});
+
+await check('topology layer: static shaded relief on the 31.25m matrix set', () => {
+    const t = GIBS_LAYERS.topology;
+    assert.equal(t.id, 'ASTER_GDEM_Greyscale_Shaded_Relief');
+    assert.equal(t.matrixSet, '31.25m');
+    assert.equal(t.time, 'default');
+    const url = buildTileUrl(t, 9, 100, 300);
+    assert.ok(url.endsWith('/31.25m/9/100/300.jpg'), url);
+});
+
+await check('eventPrefix routes instances onto separate event channels', async () => {
+    fetchLog = []; failUrlPattern = null;
+    const seen = [];
+    document.addEventListener('earth-topo-detail-inset', (ev) => seen.push(ev.detail));
+    document.addEventListener('earth-detail-inset', () => seen.push('WRONG-CHANNEL'));
+
+    const inset = new EarthDetailInset({
+        layer: GIBS_LAYERS.topology,
+        activateSpanDeg: 25,
+        eventPrefix: 'earth-topo-detail',
+    });
+    document.dispatchEvent(new CustomEvent('focus-footprint-change', {
+        detail: { spanLatDeg: 10, spanLonDeg: 16, latMin: 30, latMax: 40, lonMin: -110 },
+    }));
+    await new Promise(r => setTimeout(r, 20));   // let the async stitch land
+    inset.stop();
+
+    assert.equal(seen.length, 1, `expected one topo event, saw ${JSON.stringify(seen.map(s => s?.layerId ?? s))}`);
+    assert.equal(seen[0].layerId, 'ASTER_GDEM_Greyscale_Shaded_Relief');
+    assert.ok(fetchLog.every(u => u.includes('/31.25m/')), 'fetched from the topo matrix set');
+});
+
+await check('eventPrefix: wide footprint stays inactive (tighter topo threshold)', async () => {
+    fetchLog = [];
+    const seen = [];
+    document.addEventListener('earth-topo2-inset', (ev) => seen.push(ev.detail));
+    const inset = new EarthDetailInset({
+        layer: GIBS_LAYERS.topology,
+        activateSpanDeg: 25,
+        eventPrefix: 'earth-topo2',
+    });
+    document.dispatchEvent(new CustomEvent('focus-footprint-change', {
+        detail: { spanLatDeg: 30, spanLonDeg: 40, latMin: 10, latMax: 40, lonMin: 0 },
+    }));
+    await new Promise(r => setTimeout(r, 20));
+    inset.stop();
+    assert.equal(seen.length, 0, 'no inset above the activation span');
+    assert.equal(fetchLog.length, 0, 'no tiles fetched');
 });
 
 console.log('──────────────────────────────');
