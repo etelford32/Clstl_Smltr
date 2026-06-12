@@ -3999,10 +3999,16 @@ earthMesh.add(tropicGroup); // child of earthMesh → rotates with globe
 // ═══════════════════════════════════════════════════════════════
 // Load textures via shared earth-skin.js loader
 // — version-pinned CDN, RepeatWrapping applied, safe 1×1 fallbacks on error
-// Max anisotropy (typically 16) kills the smeary mid-zoom range where
-// oblique mipmap sampling used to blur the base textures; mipmaps stay at
-// the loader defaults (generateMipmaps + trilinear).
-const EARTH_TEX_ANISO = renderer.capabilities.getMaxAnisotropy();
+// Max anisotropy kills the smeary mid-zoom range where oblique mipmap
+// sampling used to blur the base textures; mipmaps stay at the loader
+// defaults (generateMipmaps + trilinear). ×16 is effectively free on
+// desktop GPUs; on mobile tile GPUs it costs real bandwidth on every
+// textured fragment, so phones clamp to ×4 (the visual win saturates
+// well before ×16 at typical phone viewing angles).
+const IS_MOBILE_UA = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent ?? '');
+const EARTH_TEX_ANISO = IS_MOBILE_UA
+    ? Math.min(4, renderer.capabilities.getMaxAnisotropy())
+    : renderer.capabilities.getMaxAnisotropy();
 loadEarthTextures(earthU, cloudU, { anisotropy: EARTH_TEX_ANISO }).then(() => {
     document.getElementById('loading').classList.add('done');
     _scheduleBaseUpgrade();
@@ -4013,10 +4019,16 @@ loadEarthTextures(earthU, cloudU, { anisotropy: EARTH_TEX_ANISO }).then(() => {
 // zoom inward. Once the page is idle, stitch BlueMarble_NextGeneration from
 // GIBS WMTS at level 3 (8192×4096, ~3–5 MB of edge-cached jpeg tiles) and
 // swap it over u_day. Strictly no-worse: any failure keeps the CDN texture.
-// Gated on GPU capability and the user's data-saver preference.
 function _scheduleBaseUpgrade() {
     if (renderer.capabilities.maxTextureSize < 8192) return;
     if (navigator.connection?.saveData) return;
+    // GPU-memory gate: 8192×4096 RGBA8 + mips ≈ 180 MB resident (vs ~45 MB
+    // for the 4K texture). Fine on desktop; on phones it invites texture
+    // eviction jank, so mobile stays on 4K + anisotropy — which already
+    // fixes most of the mid-zoom smear. deviceMemory is Chrome-only, so
+    // only skip on the signal when it exists and reads low.
+    if (IS_MOBILE_UA) return;
+    if (Number.isFinite(navigator.deviceMemory) && navigator.deviceMemory < 8) return;
     const kick = () => {
         stitchGlobalBase().then((canvas) => {
             if (!canvas) return;
