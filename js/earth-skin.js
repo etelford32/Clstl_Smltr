@@ -413,6 +413,18 @@ uniform float u_research_mode;       // 0 = composite (procedural fill + data nu
                                      //       bypassing u_cloud_data_strength so
                                      //       researchers see what the model says,
                                      //       not what the noise field invents
+uniform float u_quality;             // adaptive ALU budget [0..1], default 1.
+                                     // This scene is fragment-bound and the FBM
+                                     // stack below is its hottest path; the
+                                     // resolution governor steps this down once
+                                     // pixelRatio hits its floor. Tiers:
+                                     //   > 0.83  full octaves + relief + shadow
+                                     //   > 0.45  one octave fewer per layer
+                                     //   else    two fewer, 2-octave warp, and
+                                     //           the relief/self-shadow taps off
+                                     // Octave REDUCTION only — never re-gate
+                                     // coverage zonally (that's the banding
+                                     // regression this shader already fixed).
 
 // Storm systems: .xy = UV position, .z = intensity [0-1], .w = spin (+1 CCW/-1 CW)
 uniform vec4 u_storms[8];
@@ -508,11 +520,14 @@ float fbm3(vec3 p, int octaves) {
 // Domain-warped 3-D FBM. A low-frequency FBM lookup is used as an offset
 // into a higher-frequency FBM, which breaks straight-line artifacts that
 // pure FBM leaves behind — no more horizontal "strips" in the cloud cover.
-float warpedFbm3(vec3 p, int octaves) {
+// warpOctaves trades warp fidelity for ALU under the quality governor; the
+// warp itself is never removed (a 2-octave warp still decorrelates the
+// lattice — dropping it entirely brings the strips back).
+float warpedFbm3(vec3 p, int octaves, int warpOctaves) {
     vec3 warp = vec3(
-        fbm3(p * 0.8 + vec3(17.3, -3.1,  0.0), 3),
-        fbm3(p * 0.8 + vec3(-9.6, 12.4,  0.0), 3),
-        fbm3(p * 0.8 + vec3( 4.2,  7.8,  0.0), 3)
+        fbm3(p * 0.8 + vec3(17.3, -3.1,  0.0), warpOctaves),
+        fbm3(p * 0.8 + vec3(-9.6, 12.4,  0.0), warpOctaves),
+        fbm3(p * 0.8 + vec3( 4.2,  7.8,  0.0), warpOctaves)
     ) - 0.5;
     return fbm3(p + warp * 1.15, octaves);
 }
@@ -665,14 +680,20 @@ void main() {
     // in place. Per-layer phase offsets (3.7, 7.3) decouple the layers so they
     // don't lock into identical shapes at the same frequency.
 
+    // Quality-tiered octave budget — see the u_quality uniform comment.
+    // At full quality these are byte-for-byte the original 5/4/5 + 3-warp.
+    int octLow  = u_quality > 0.83 ? 5 : (u_quality > 0.45 ? 4 : 3);
+    int octMid  = u_quality > 0.83 ? 4 : (u_quality > 0.45 ? 3 : 2);
+    int octWarp = u_quality > 0.45 ? 3 : 2;
+
     // Low cumulus: defined puffy cells
-    float nLow  = warpedFbm3(N_low  * 14.0 + vec3(0.0, 0.0, tLow),  5);
+    float nLow  = warpedFbm3(N_low  * 14.0 + vec3(0.0, 0.0, tLow),  octLow, octWarp);
     // Mid altostratus: smoother, broader
-    float nMid  = warpedFbm3(N_mid  *  9.5 + vec3(3.7, 0.0, tMid),  4);
+    float nMid  = warpedFbm3(N_mid  *  9.5 + vec3(3.7, 0.0, tMid),  octMid, octWarp);
     // High cirrus: higher frequency for thinner strands. ISOTROPIC — the
     // wispy elongation will come back later from wind-driven flow advection
     // (step 6 in the plan), not from a hard-coded frequency ratio.
-    float nHigh = warpedFbm3(N_high * 22.0 + vec3(7.3, 7.3, tHigh), 5);
+    float nHigh = warpedFbm3(N_high * 22.0 + vec3(7.3, 7.3, tHigh), octLow, octWarp);
 
     float alphaLow = 0.0, alphaMid = 0.0, alphaHigh = 0.0;
     float precip   = 0.0;
@@ -828,19 +849,28 @@ void main() {
     vec3  up   = abs(N_sphere.y) < 0.985 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
     vec3  tE   = normalize(cross(up, N_sphere));      // local east-ish tangent
     vec3  tN   = normalize(cross(N_sphere, tE));      // local north-ish tangent
-    const float EPS = 0.02;
-    float fC   = cloudForm(N_low);
-    float fE   = cloudForm(normalize(N_low + tE * EPS));
-    float fN   = cloudForm(normalize(N_low + tN * EPS));
-    float relAmp = clamp(alpha * 1.6, 0.0, 1.0);
-    vec3  Nb   = normalize(N - (tE * (fE - fC) + tN * (fN - fC)) * 8.0 * relAmp);
+    // Quality gate: the four cloudForm taps below are pure embellishment
+    // (relief + contact shadow). At the lowest tier they're skipped — flat
+    // lighting, which is how this shader shipped before the relief pass —
+    // saving ~8 vnoise3 evaluations per fragment. tE/tN stay unconditional:
+    // the precipitation veil uses them.
+    vec3  Nb     = N;
+    float selfSh = 0.0;
+    if (u_quality > 0.45) {
+        const float EPS = 0.02;
+        float fC   = cloudForm(N_low);
+        float fE   = cloudForm(normalize(N_low + tE * EPS));
+        float fN   = cloudForm(normalize(N_low + tN * EPS));
+        float relAmp = clamp(alpha * 1.6, 0.0, 1.0);
+        Nb = normalize(N - (tE * (fE - fC) + tN * (fN - fC)) * 8.0 * relAmp);
 
-    // Self-shadow / contact occlusion: one extra form tap a short step toward
-    // the sun in the tangent plane. If the cloud is thicker there, this point
-    // sits in its shadow. Cheap one-tap approximation of a sun-march.
-    vec3  Lt     = u_sun_dir - N_sphere * dot(u_sun_dir, N_sphere);
-    float fSun   = cloudForm(normalize(N_low + normalize(Lt + 1e-4) * 0.045));
-    float selfSh = clamp((fSun - fC) * 3.2, 0.0, 1.0) * relAmp;
+        // Self-shadow / contact occlusion: one extra form tap a short step toward
+        // the sun in the tangent plane. If the cloud is thicker there, this point
+        // sits in its shadow. Cheap one-tap approximation of a sun-march.
+        vec3  Lt   = u_sun_dir - N_sphere * dot(u_sun_dir, N_sphere);
+        float fSun = cloudForm(normalize(N_low + normalize(Lt + 1e-4) * 0.045));
+        selfSh = clamp((fSun - fC) * 3.2, 0.0, 1.0) * relAmp;
+    }
 
     float NdotLb = dot(Nb, u_sun_dir);
     float dayMix = smoothstep(-0.18, 0.20, NdotL);
@@ -1313,6 +1343,9 @@ export function createCloudUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
         u_weather_on:    { value: 0 },
         u_satellite_on:  { value: 0 },            // off until satellite texture arrives
         u_cloud_data_strength: { value: 0.5 },    // 0.5 matches original ±25% imprint
+        // Adaptive ALU budget — stepped down by earth.html's resolution
+        // governor on struggling GPUs. 1 = original full-quality shader.
+        u_quality:       { value: 1 },
         // Research / measured-only mode (see CLOUD_FRAG): 0 = composite (default),
         // 1 = data-only with hatched no-data overlay. UI toggle in earth.html.
         u_research_mode: { value: 0 },

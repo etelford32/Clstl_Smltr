@@ -3572,6 +3572,18 @@ const _prFloor = Math.min(1, _prCap);   // never upscale past 1:1 CSS pixels
 let   _prNow   = _prCap;                 // matches the setPixelRatio() call above
 let   _prEmaMs = 1000 / 60;             // frame-interval EMA, seeded at 60 fps
 let   _prLastEvalMs = 0;
+// Stage 2 of the governor: cloud-shader ALU tiers (u_quality in CLOUD_FRAG).
+// Resolution scaling alone can't rescue a GPU whose bottleneck is per-
+// fragment FBM noise — fewer pixels just re-spend the savings on the same
+// ALU-heavy fragments once the ratio floor is hit. Order of operations:
+// coarsen pixels first (cheapest visually), then drop cloud octaves; on
+// recovery, restore cloud quality before re-sharpening pixels.
+const _CLOUD_Q_TIERS = [1, 0.66, 0.33];
+let   _cloudQIdx     = 0;
+let   _cloudQForced  = false;   // URL/console override pins the tier
+function _setCloudQuality(q) {
+    cloudU.u_quality.value = q;
+}
 function _governResolution(frameMs) {
     // Ignore intervals that don't reflect GPU load: a backgrounded tab pauses
     // rAF (huge gap on return), and an occasional GC pause / sync data decode
@@ -3587,8 +3599,21 @@ function _governResolution(frameMs) {
     if (now - _prLastEvalMs < 600) return;   // re-evaluate at most ~every 0.6 s
     _prLastEvalMs = now;
     let next = _prNow;
-    if (_prEmaMs > 22 && _prNow > _prFloor)     next = Math.max(_prFloor, +(_prNow - 0.25).toFixed(2)); // < ~45 fps → coarsen
-    else if (_prEmaMs < 15 && _prNow < _prCap)  next = Math.min(_prCap,  +(_prNow + 0.25).toFixed(2));  // > ~66 fps → refine
+    if (_prEmaMs > 22) {                                       // < ~45 fps → coarsen
+        if (_prNow > _prFloor) {
+            next = Math.max(_prFloor, +(_prNow - 0.25).toFixed(2));
+        } else if (!_cloudQForced && _cloudQIdx < _CLOUD_Q_TIERS.length - 1) {
+            _cloudQIdx++;
+            _setCloudQuality(_CLOUD_Q_TIERS[_cloudQIdx]);
+        }
+    } else if (_prEmaMs < 15) {                                // > ~66 fps → refine
+        if (!_cloudQForced && _cloudQIdx > 0) {
+            _cloudQIdx--;
+            _setCloudQuality(_CLOUD_Q_TIERS[_cloudQIdx]);
+        } else if (_prNow < _prCap) {
+            next = Math.min(_prCap, +(_prNow + 0.25).toFixed(2));
+        }
+    }
     if (next !== _prNow) {
         _prNow = next;
         renderer.setPixelRatio(_prNow);
@@ -3683,6 +3708,28 @@ const stratU = { u_sun_dir: { value: SUN_EQ.clone() } };
         return clamped;
     };
     window.getCloudDataStrength = () => cloudU.u_cloud_data_strength.value;
+
+    // Cloud ALU quality override (see u_quality in CLOUD_FRAG + the
+    // governor's stage 2 above). Forcing a value pins the tier so the
+    // governor won't fight a measurement session.
+    //   earth.html?cloud_quality=0.33   or   window.setCloudQuality(0.33)
+    const qParam = new URLSearchParams(location.search).get('cloud_quality');
+    if (qParam != null) {
+        const q = parseFloat(qParam);
+        if (Number.isFinite(q)) {
+            _cloudQForced = true;
+            _setCloudQuality(Math.max(0, Math.min(1, q)));
+            console.info(`[CloudDebug] u_quality = ${cloudU.u_quality.value} (from URL, governor pinned)`);
+        }
+    }
+    window.setCloudQuality = (v) => {
+        const clamped = Math.max(0, Math.min(1, Number(v)));
+        _cloudQForced = true;
+        _setCloudQuality(clamped);
+        console.info(`[CloudDebug] u_quality = ${clamped} (governor pinned)`);
+        return clamped;
+    };
+    window.getCloudQuality = () => cloudU.u_quality.value;
 }
 
 // ═══════════════════════════════════════════════════════════════
