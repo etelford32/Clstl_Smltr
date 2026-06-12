@@ -46,6 +46,139 @@ function _grayTex() {
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
+//  FOCUS INSETS  (shared GLSL, injected into surface + cloud frags)
+// ═══════════════════════════════════════════════════════════════════════════════
+// Two nested focus windows ride the camera's ground footprint
+// (js/focus-footprint.js): the high-res weather patch (js/weather-patch.js)
+// and the GIBS imagery detail inset (js/earth-detail-inset.js). Both share
+// the same primitive: a texture whose lat/lon bounds are passed as a vec4
+// (lonMin, latMin, lonSpan, latSpan in degrees) and blended over the global
+// field with a soft edge. lonMin may sit anywhere in [-180,180) and the
+// mod() in insetUV keeps a window straddling the antimeridian continuous.
+// Inset rows are stored south-first relative to the computed UV (v=0 ⇔
+// latMin) — do NOT "fix" this to match the global textures' row
+// conventions; insets are sampled with an explicitly computed UV, not vUv.
+
+const INSET_GLSL_HELPERS = /* glsl */`
+// highp: the cloud frag runs mediump by default, and fp16 quantises
+// degree-range values to 0.06–0.125° — up to half a weather-patch cell at
+// the 0.25° floor. Inset math must stay full-precision on mobile GPUs.
+
+// Equirectangular uv → inset-local uv (may land outside [0,1]).
+highp vec2 insetUV(vec2 uv, highp vec4 b) {
+    highp vec2 llDeg = uvToLatLonDeg(uv);                 // (lat, lon)
+    highp float dLon = mod(llDeg.y - b.x, 360.0);
+    return vec2(dLon / max(1e-3, b.z),
+                (llDeg.x - b.y) / max(1e-3, b.w));
+}
+
+// 1 in the inset interior, easing to 0 across the outer ~12% so the
+// high-res window blends into the global field with no visible seam.
+float insetWeight(vec2 uvP) {
+    vec2 edge = min(uvP, 1.0 - uvP);
+    return smoothstep(0.0, 0.12, min(edge.x, edge.y));
+}
+`;
+
+const PATCH_GLSL_CORE = /* glsl */`
+uniform sampler2D u_patch_weather;  // same packing as u_weather
+uniform highp vec4  u_patch_bounds; // lonMin, latMin, lonSpan, latSpan (degrees)
+uniform float u_patch_on;
+
+// Drop-in replacement for texture2D(u_weather, uv).
+vec4 sampleWeatherField(vec2 uv) {
+    vec4 wx = texture2D(u_weather, uv);
+    if (u_patch_on > 0.5) {
+        vec2 uvP = insetUV(uv, u_patch_bounds);
+        float wgt = insetWeight(uvP);
+        if (wgt > 0.001) wx = mix(wx, texture2D(u_patch_weather, uvP), wgt);
+    }
+    return wx;
+}
+`;
+
+const PATCH_GLSL_CLOUDS = /* glsl */`
+uniform sampler2D u_patch_clouds;   // same packing as u_cloud_layers
+
+// Drop-in replacement for texture2D(u_cloud_layers, uv).
+vec4 sampleCloudLayers(vec2 uv) {
+    vec4 cl = texture2D(u_cloud_layers, uv);
+    if (u_patch_on > 0.5) {
+        vec2 uvP = insetUV(uv, u_patch_bounds);
+        float wgt = insetWeight(uvP);
+        if (wgt > 0.001) cl = mix(cl, texture2D(u_patch_clouds, uvP), wgt);
+    }
+    return cl;
+}
+`;
+
+// GIBS imagery detail inset (surface shader only). u_detail carries a
+// stitched VIIRS/MODIS corrected-reflectance window at up to ~150 m/px,
+// blended over the Blue Marble base inside its footprint. sRGB texture —
+// three.js handles decode via colorSpace, the shader just mixes.
+const DETAIL_GLSL = /* glsl */`
+uniform sampler2D u_detail;         // stitched GIBS imagery window
+uniform highp vec4  u_detail_bounds; // lonMin, latMin, lonSpan, latSpan (degrees)
+uniform float u_detail_on;
+
+// Blend the imagery inset over the global day-texture colour.
+vec3 detailBlendDay(vec3 dayCol, vec2 uv) {
+    if (u_detail_on < 0.5) return dayCol;
+    vec2 uvD = insetUV(uv, u_detail_bounds);
+    float wgt = insetWeight(uvD);
+    if (wgt < 0.001) return dayCol;
+    return mix(dayCol, texture2D(u_detail, uvD).rgb, wgt);
+}
+`;
+
+// Topology detail inset (surface shader only): a high-res GIBS shaded-relief
+// window drives the existing bump pass harder at close range, where the
+// 0.176°/texel global height map has no sub-synoptic relief left to give.
+const TOPO_GLSL = /* glsl */`
+uniform sampler2D u_topo_detail;          // stitched GIBS shaded-relief window
+uniform highp vec4  u_topo_detail_bounds; // lonMin, latMin, lonSpan, latSpan (degrees)
+uniform float u_topo_detail_on;
+uniform vec2  u_topo_detail_texel;        // (1/canvasW, 1/canvasH)
+
+// Height-field gradient at uv, in the units the 85.0 bump gain downstream
+// was tuned for: change per GLOBAL texel step (0.176° on both axes),
+// x along +u (eastward), y along +v (southward).
+vec2 topoGradient(vec2 uv) {
+    float hC  = texture2D(u_topology, uv).r;
+    float hDx = texture2D(u_topology, uv + vec2(1.0 / 2048.0, 0.0)).r - hC;
+    float hDy = texture2D(u_topology, uv + vec2(0.0, 1.0 / 1024.0)).r - hC;
+    if (u_topo_detail_on > 0.5) {
+        vec2 uvT = insetUV(uv, u_topo_detail_bounds);
+        float wgt = insetWeight(uvT);
+        if (wgt > 0.001) {
+            float tC  = texture2D(u_topo_detail, uvT).r;
+            float tDx = texture2D(u_topo_detail, uvT + vec2(u_topo_detail_texel.x, 0.0)).r - tC;
+            // +uvT.y is NORTHWARD (inset v=0 ⇔ latMin) while +uv.y is
+            // southward — negate so the two gradients agree.
+            float tDy = -(texture2D(u_topo_detail, uvT + vec2(0.0, u_topo_detail_texel.y)).r - tC);
+            // Rescale the inset's fine-step deltas to the global 0.176° step.
+            // The amplification is capped at 32× — real terrain has more
+            // slope at finer scales (that's the point), but past the cap the
+            // dominant signal is jpeg noise, which uncapped k turns into
+            // surface shimmer at deep zooms.
+            highp float stepLonDeg = u_topo_detail_bounds.z * u_topo_detail_texel.x;
+            highp float stepLatDeg = u_topo_detail_bounds.w * u_topo_detail_texel.y;
+            float kx = min(32.0, 0.17578125 / max(1e-5, stepLonDeg));
+            float ky = min(32.0, 0.17578125 / max(1e-5, stepLatDeg));
+            // "Drive the bump pass harder": modest boost over a strict unit
+            // match, so close-range relief visibly pops. Deltas are clamped
+            // to the magnitude range the global map produces, keeping the
+            // downstream normalize() well-conditioned.
+            const float TOPO_DETAIL_BOOST = 1.35;
+            hDx = mix(hDx, clamp(tDx * kx * TOPO_DETAIL_BOOST, -0.25, 0.25), wgt);
+            hDy = mix(hDy, clamp(tDy * ky * TOPO_DETAIL_BOOST, -0.25, 0.25), wgt);
+        }
+    }
+    return vec2(hDx, hDy);
+}
+`;
+
+// ═══════════════════════════════════════════════════════════════════════════════
 //  EARTH SURFACE SHADERS
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -91,6 +224,11 @@ varying vec3 vNormalLocal;
 varying vec3 vWorldNormal;
 varying vec3 vWorldPos;
 
+${INSET_GLSL_HELPERS}
+${PATCH_GLSL_CORE}
+${DETAIL_GLSL}
+${TOPO_GLSL}
+
 // ── Aurora curtains ────────────────────────────────────────────────────────────
 vec3 auroraColor(float sinAbsLat, float lon, float kp) {
     float kpEff  = kp + u_bz_south * 2.5;
@@ -115,7 +253,7 @@ vec3 auroraColor(float sinAbsLat, float lon, float kp) {
 
 // ── Weather / temperature colour ramp ─────────────────────────────────────────
 vec3 weatherOverlay(vec2 uv) {
-    float temp = texture2D(u_weather, uv).r;
+    float temp = sampleWeatherField(uv).r;
     vec3 polar    = vec3(0.05, 0.15, 0.80);
     vec3 tempZone = vec3(0.20, 0.75, 0.30);
     vec3 subtrop  = vec3(0.95, 0.60, 0.05);
@@ -139,7 +277,7 @@ void main() {
 
     vec3 N_base = normalize(vWorldNormal);
 
-    vec3 dayCol    = texture2D(u_day,      vUv).rgb;
+    vec3 dayCol    = detailBlendDay(texture2D(u_day, vUv).rgb, vUv);
     vec3 nightCol  = texture2D(u_night,    vUv).rgb * 2.5;
     float oceanMsk = texture2D(u_specular, vUv).r;
 
@@ -148,9 +286,12 @@ void main() {
     // gradient. Project that gradient into the surface tangent basis so
     // mountains cast the right shadow regardless of camera angle. Ocean
     // is kept flat — bump only affects land via (1 - oceanMsk).
-    float hC   = texture2D(u_topology, vUv).r;
-    float hDx  = texture2D(u_topology, vUv + vec2(1.0 / 2048.0, 0.0)).r - hC;
-    float hDy  = texture2D(u_topology, vUv + vec2(0.0, 1.0 / 1024.0)).r - hC;
+    // topoGradient (TOPO_GLSL) reproduces the original three-tap global
+    // gradient and, when the high-res topology inset is live, swaps in its
+    // rescaled fine-step gradient inside the footprint.
+    vec2  hGrad = topoGradient(vUv);
+    float hDx   = hGrad.x;
+    float hDy   = hGrad.y;
     // East / north tangents at the current surface point
     vec3  up      = vec3(0.0, 1.0, 0.0);
     vec3  tEast   = normalize(cross(up, N_base));
@@ -272,6 +413,18 @@ uniform float u_research_mode;       // 0 = composite (procedural fill + data nu
                                      //       bypassing u_cloud_data_strength so
                                      //       researchers see what the model says,
                                      //       not what the noise field invents
+uniform float u_quality;             // adaptive ALU budget [0..1], default 1.
+                                     // This scene is fragment-bound and the FBM
+                                     // stack below is its hottest path; the
+                                     // resolution governor steps this down once
+                                     // pixelRatio hits its floor. Tiers:
+                                     //   > 0.83  full octaves + relief + shadow
+                                     //   > 0.45  one octave fewer per layer
+                                     //   else    two fewer, 2-octave warp, and
+                                     //           the relief/self-shadow taps off
+                                     // Octave REDUCTION only — never re-gate
+                                     // coverage zonally (that's the banding
+                                     // regression this shader already fixed).
 
 // Storm systems: .xy = UV position, .z = intensity [0-1], .w = spin (+1 CCW/-1 CW)
 uniform vec4 u_storms[8];
@@ -280,6 +433,10 @@ uniform int  u_storm_count;
 varying vec3 vNormalLocal;
 varying vec3 vWorldNormal;
 varying vec3 vWorldPos;
+
+${INSET_GLSL_HELPERS}
+${PATCH_GLSL_CORE}
+${PATCH_GLSL_CLOUDS}
 
 // ── Procedural noise for natural cloud shapes ────────────────────────────────
 // Hash-based value noise + FBM give multi-scale cloud structure directly in
@@ -363,11 +520,14 @@ float fbm3(vec3 p, int octaves) {
 // Domain-warped 3-D FBM. A low-frequency FBM lookup is used as an offset
 // into a higher-frequency FBM, which breaks straight-line artifacts that
 // pure FBM leaves behind — no more horizontal "strips" in the cloud cover.
-float warpedFbm3(vec3 p, int octaves) {
+// warpOctaves trades warp fidelity for ALU under the quality governor; the
+// warp itself is never removed (a 2-octave warp still decorrelates the
+// lattice — dropping it entirely brings the strips back).
+float warpedFbm3(vec3 p, int octaves, int warpOctaves) {
     vec3 warp = vec3(
-        fbm3(p * 0.8 + vec3(17.3, -3.1,  0.0), 3),
-        fbm3(p * 0.8 + vec3(-9.6, 12.4,  0.0), 3),
-        fbm3(p * 0.8 + vec3( 4.2,  7.8,  0.0), 3)
+        fbm3(p * 0.8 + vec3(17.3, -3.1,  0.0), warpOctaves),
+        fbm3(p * 0.8 + vec3(-9.6, 12.4,  0.0), warpOctaves),
+        fbm3(p * 0.8 + vec3( 4.2,  7.8,  0.0), warpOctaves)
     ) - 0.5;
     return fbm3(p + warp * 1.15, octaves);
 }
@@ -520,14 +680,20 @@ void main() {
     // in place. Per-layer phase offsets (3.7, 7.3) decouple the layers so they
     // don't lock into identical shapes at the same frequency.
 
+    // Quality-tiered octave budget — see the u_quality uniform comment.
+    // At full quality these are byte-for-byte the original 5/4/5 + 3-warp.
+    int octLow  = u_quality > 0.83 ? 5 : (u_quality > 0.45 ? 4 : 3);
+    int octMid  = u_quality > 0.83 ? 4 : (u_quality > 0.45 ? 3 : 2);
+    int octWarp = u_quality > 0.45 ? 3 : 2;
+
     // Low cumulus: defined puffy cells
-    float nLow  = warpedFbm3(N_low  * 14.0 + vec3(0.0, 0.0, tLow),  5);
+    float nLow  = warpedFbm3(N_low  * 14.0 + vec3(0.0, 0.0, tLow),  octLow, octWarp);
     // Mid altostratus: smoother, broader
-    float nMid  = warpedFbm3(N_mid  *  9.5 + vec3(3.7, 0.0, tMid),  4);
+    float nMid  = warpedFbm3(N_mid  *  9.5 + vec3(3.7, 0.0, tMid),  octMid, octWarp);
     // High cirrus: higher frequency for thinner strands. ISOTROPIC — the
     // wispy elongation will come back later from wind-driven flow advection
     // (step 6 in the plan), not from a hard-coded frequency ratio.
-    float nHigh = warpedFbm3(N_high * 22.0 + vec3(7.3, 7.3, tHigh), 5);
+    float nHigh = warpedFbm3(N_high * 22.0 + vec3(7.3, 7.3, tHigh), octLow, octWarp);
 
     float alphaLow = 0.0, alphaMid = 0.0, alphaHigh = 0.0;
     float precip   = 0.0;
@@ -557,7 +723,7 @@ void main() {
     float baseHigh = mix(BASE_HIGH_DEFAULT, 0.0, u_research_mode);
 
     if (u_weather_on > 0.5) {
-        vec4  cl      = texture2D(u_cloud_layers, vUv);
+        vec4  cl      = sampleCloudLayers(vUv);
         float clLow   = cl.r;
         float clMid   = cl.g;
         float clHigh  = cl.b;
@@ -683,19 +849,28 @@ void main() {
     vec3  up   = abs(N_sphere.y) < 0.985 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
     vec3  tE   = normalize(cross(up, N_sphere));      // local east-ish tangent
     vec3  tN   = normalize(cross(N_sphere, tE));      // local north-ish tangent
-    const float EPS = 0.02;
-    float fC   = cloudForm(N_low);
-    float fE   = cloudForm(normalize(N_low + tE * EPS));
-    float fN   = cloudForm(normalize(N_low + tN * EPS));
-    float relAmp = clamp(alpha * 1.6, 0.0, 1.0);
-    vec3  Nb   = normalize(N - (tE * (fE - fC) + tN * (fN - fC)) * 8.0 * relAmp);
+    // Quality gate: the four cloudForm taps below are pure embellishment
+    // (relief + contact shadow). At the lowest tier they're skipped — flat
+    // lighting, which is how this shader shipped before the relief pass —
+    // saving ~8 vnoise3 evaluations per fragment. tE/tN stay unconditional:
+    // the precipitation veil uses them.
+    vec3  Nb     = N;
+    float selfSh = 0.0;
+    if (u_quality > 0.45) {
+        const float EPS = 0.02;
+        float fC   = cloudForm(N_low);
+        float fE   = cloudForm(normalize(N_low + tE * EPS));
+        float fN   = cloudForm(normalize(N_low + tN * EPS));
+        float relAmp = clamp(alpha * 1.6, 0.0, 1.0);
+        Nb = normalize(N - (tE * (fE - fC) + tN * (fN - fC)) * 8.0 * relAmp);
 
-    // Self-shadow / contact occlusion: one extra form tap a short step toward
-    // the sun in the tangent plane. If the cloud is thicker there, this point
-    // sits in its shadow. Cheap one-tap approximation of a sun-march.
-    vec3  Lt     = u_sun_dir - N_sphere * dot(u_sun_dir, N_sphere);
-    float fSun   = cloudForm(normalize(N_low + normalize(Lt + 1e-4) * 0.045));
-    float selfSh = clamp((fSun - fC) * 3.2, 0.0, 1.0) * relAmp;
+        // Self-shadow / contact occlusion: one extra form tap a short step toward
+        // the sun in the tangent plane. If the cloud is thicker there, this point
+        // sits in its shadow. Cheap one-tap approximation of a sun-march.
+        vec3  Lt   = u_sun_dir - N_sphere * dot(u_sun_dir, N_sphere);
+        float fSun = cloudForm(normalize(N_low + normalize(Lt + 1e-4) * 0.045));
+        selfSh = clamp((fSun - fC) * 3.2, 0.0, 1.0) * relAmp;
+    }
 
     float NdotLb = dot(Nb, u_sun_dir);
     float dayMix = smoothstep(-0.18, 0.20, NdotL);
@@ -751,7 +926,7 @@ void main() {
     if (u_weather_on > 0.5 && precip > 0.004) {
         float precipI = clamp(sqrt(precip * 1.7), 0.0, 1.0);
 
-        float tC       = texture2D(u_weather, vUv).r * 110.0 - 60.0;   // °C
+        float tC       = sampleWeatherField(vUv).r * 110.0 - 60.0;   // °C
         float snowFrac = smoothstep(2.0, -1.5, tC);                    // 1 = snow
 
         vec3  rainDark = vec3(0.34, 0.40, 0.52);
@@ -1101,6 +1276,21 @@ export function createEarthUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
         u_topology:     { value: _blackTex() },   // flat until texture loads
         u_bump_strength:{ value: 0.85 },           // 0 disables bump, 1 is strong
         u_weather:      { value: _blackTex() },
+        // High-res focus patch (js/weather-patch.js). Off by default — only
+        // earth.html wires a feed; other consumers render the global field.
+        u_patch_weather:{ value: _blackTex() },
+        u_patch_bounds: { value: new THREE.Vector4(0, 0, 1, 1) },
+        u_patch_on:     { value: 0 },
+        // GIBS imagery detail inset (js/earth-detail-inset.js). Same
+        // off-by-default contract as the weather patch.
+        u_detail:       { value: _blackTex() },
+        u_detail_bounds:{ value: new THREE.Vector4(0, 0, 1, 1) },
+        u_detail_on:    { value: 0 },
+        // GIBS topology detail inset — drives the bump pass at close range.
+        u_topo_detail:        { value: _blackTex() },
+        u_topo_detail_bounds: { value: new THREE.Vector4(0, 0, 1, 1) },
+        u_topo_detail_on:     { value: 0 },
+        u_topo_detail_texel:  { value: new THREE.Vector2(1 / 512, 1 / 512) },
         u_sun_dir:      { value: sunDir.clone() },
         u_time:         { value: 0 },
         u_kp:           { value: 0 },
@@ -1141,12 +1331,21 @@ export function createCloudUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
     return {
         u_weather:       { value: _blackTex() },
         u_cloud_layers:  { value: _blackTex() },  // real cloud fraction + precip
+        // High-res focus patch — see createEarthUniforms. Cloud frag gets its
+        // own cloud-layer patch sampler on top of the shared weather one.
+        u_patch_weather: { value: _blackTex() },
+        u_patch_clouds:  { value: _blackTex() },
+        u_patch_bounds:  { value: new THREE.Vector4(0, 0, 1, 1) },
+        u_patch_on:      { value: 0 },
         u_satellite:     { value: _grayTex()  },  // GOES/MODIS satellite imagery
         u_sun_dir:       { value: sunDir.clone() },
         u_time:          { value: 0 },
         u_weather_on:    { value: 0 },
         u_satellite_on:  { value: 0 },            // off until satellite texture arrives
         u_cloud_data_strength: { value: 0.5 },    // 0.5 matches original ±25% imprint
+        // Adaptive ALU budget — stepped down by earth.html's resolution
+        // governor on struggling GPUs. 1 = original full-quality shader.
+        u_quality:       { value: 1 },
         // Research / measured-only mode (see CLOUD_FRAG): 0 = composite (default),
         // 1 = data-only with hatched no-data overlay. UI toggle in earth.html.
         u_research_mode: { value: 0 },
@@ -1166,9 +1365,14 @@ export function createCloudUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
  *
  * @param {object} earthU - uniforms object from createEarthUniforms()
  * @param {object} cloudU - uniforms object from createCloudUniforms() (unused, kept for API compat)
+ * @param {object} [opts]
+ * @param {number} [opts.anisotropy=1] - pass renderer.capabilities.getMaxAnisotropy()
+ *   to sharpen oblique/mid-zoom sampling. Mipmaps stay at the TextureLoader
+ *   defaults (generateMipmaps=true, LinearMipmapLinearFilter) — anisotropic
+ *   filtering rides on top of them.
  * @returns {Promise<void>}
  */
-export function loadEarthTextures(earthU, cloudU = null) {
+export function loadEarthTextures(earthU, cloudU = null, { anisotropy = 1 } = {}) {
     const loader = new THREE.TextureLoader();
 
     const loadTex = (url, onLoad, fallbackFn) => new Promise(resolve => {
@@ -1181,6 +1385,7 @@ export function loadEarthTextures(earthU, cloudU = null) {
                 // rendering the globe upside-down. Keep image rows aligned
                 // with the shader's normalToUV() by disabling the flip.
                 tex.flipY = false;
+                tex.anisotropy = anisotropy;
                 onLoad(tex);
                 resolve();
             },
@@ -1327,8 +1532,8 @@ export class EarthSkin {
     }
 
     /** Load textures from CDN. Returns Promise<void>. */
-    loadTextures() {
-        return loadEarthTextures(this.earthU, this.cloudU);
+    loadTextures(opts = {}) {
+        return loadEarthTextures(this.earthU, this.cloudU, opts);
     }
 
     /** Call every frame with elapsed time in seconds. */
