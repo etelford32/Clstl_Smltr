@@ -6,6 +6,10 @@
   "installCommand": "",
   "crons": [
     {
+      "path": "/api/cron/refresh-solar-wind",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/cron/refresh-weather-grid",
       "schedule": "0 * * * *"
     },
