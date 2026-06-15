@@ -7,7 +7,7 @@
 > the convection drift speeds have already been tuned once and must not be
 > reverted.
 
-*Status: Phases 0–3 IMPLEMENTED (2026-06-15). Phases 4–6 pending.*
+*Status: Phases 0–4 IMPLEMENTED (2026-06-15). Phases 5–6 pending.*
 
 ### Progress log
 
@@ -48,6 +48,16 @@
   SSM is static, so there is no live signal to drive a pulse; the win is visual
   legibility.) Both new systems live in the existing "Photon walks" overlay.
   Verified: 0 shader/JS errors, all 4 smoke tests green.
+- **Phase 4 (done):** atmosphere coupling. `glowVS` now also passes an
+  object-space direction; `chromoFS` and `trFS` anchor their network to the
+  SAME `voronoi(dir*2.2)` supergranule basis the photosphere / convective zone
+  use (with matching differential-rotation drift), so the chromospheric Hα
+  network and the EUV-moss footpoints sit on the real supergranule boundaries
+  instead of an independent, camera-locked noise field (this also fixes the
+  prior view-space "swim"). The 600-particle spicule forest now rejection-
+  samples its launch directions toward those same network lanes (a JS Voronoi
+  mirroring the shader hash). Verified: 0 shader/JS errors, all 4 smoke tests
+  green.
 
 ---
 
