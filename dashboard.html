@@ -598,6 +598,9 @@ footer a:hover{color:var(--text)}
         </div>
       </div>
 
+      <!-- Today & Sun — solar day-arc, feels-like, and physics advisories -->
+      <div id="local-sky"></div>
+
       <!-- 7-Day Temperature Forecast -->
       <div id="briefing-forecast-section" style="display:none">
         <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;gap:6px">
@@ -1088,7 +1091,7 @@ const _imp = (m) => import(m).then(x => x, e => {
     return null;
 });
 const [
-    _mUL, _mSWF, _mAE, _mISE, _mOT, _mDSE, _mSL, _mTP, _mCR, _mACT,
+    _mUL, _mSWF, _mAE, _mISE, _mOT, _mDSE, _mSL, _mTP, _mCR, _mACT, _mLS,
 ] = await Promise.all([
     _imp('./js/user-location.js'),
     _imp('./js/swpc-feed.js'),
@@ -1100,6 +1103,7 @@ const [
     _imp('./js/trip-planner.js'),
     _imp('./js/class-roster.js'),
     _imp('./js/activation.js'),
+    _imp('./js/local-sky.js'),
 ]);
 // Missing export → a stub that throws when actually used, so the
 // failure surfaces inside a runCard()/runSafe() boundary rather than
@@ -1124,6 +1128,9 @@ const AlertEngine        = _pick(_mAE,  'alert-engine', 'AlertEngine');
 const ImpactScoreEngine  = _pick(_mISE, 'impact-score', 'ImpactScoreEngine');
 const OnboardingTour     = _pick(_mOT,  'onboarding-tour', 'OnboardingTour');
 const DailySummaryEngine = _pick(_mDSE, 'daily-summary', 'DailySummaryEngine');
+// local-sky.js — "Today & Sun" panel; no-op controller fallback so a failed
+// import can't throw at the daily-briefing card's mount site.
+const mountLocalSky      = _pick(_mLS, 'local-sky', 'mountLocalSky', () => ({ refresh() {}, destroy() {} }));
 // saved-locations.js (its card lives on /settings now; IIFE early-returns)
 const listLocations      = _pick(_mSL, 'saved-locations', 'listLocations');
 const addLocation        = _pick(_mSL, 'saved-locations', 'addLocation');
@@ -3318,6 +3325,11 @@ runCard('Impact score', 'impact-card', () => {
 runCard('Daily briefing', 'daily-briefing-card', () => {
     const summaryEngine = new DailySummaryEngine().start();
     const _el = id => document.getElementById(id);
+
+    // Today & Sun panel — solar day-arc + feels-like + physics advisories.
+    // Independent of the summary engine: it self-refreshes on location change
+    // and ticks the live sun position. Defensive internally (never throws).
+    mountLocalSky({ host: _el('local-sky') });
 
     async function refreshBriefing() {
         const result = await summaryEngine.generate();
