@@ -168,4 +168,39 @@ test.describe('sun.html smoke', () => {
         if (filtered.length) console.error('Console errors:', filtered);
         expect(filtered, 'no errors toggling cutaway + slider').toHaveLength(0);
     });
+
+    test('Doppler velocity view toggles cleanly', async ({ page }) => {
+        const errors = attachConsoleRecorder(page);
+        await page.goto(URL);
+        await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
+        await page.waitForTimeout(500);
+
+        await page.evaluate(() => {
+            const el = document.getElementById('tog-doppler');
+            el.checked = true;
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+        await page.waitForTimeout(250);
+        const on = await page.evaluate(() => ({
+            photosphere: window.__sun.layers.photosphere.visible,
+            corona: window.__sun.layers.corona.visible,
+            legend: document.getElementById('doppler-legend')?.style.display,
+        }));
+        expect(on.photosphere, 'photosphere shown in Doppler mode').toBe(true);
+        expect(on.corona, 'corona hidden in Doppler mode').toBe(false);
+        expect(on.legend, 'legend visible in Doppler mode').toBe('block');
+
+        await page.evaluate(() => {
+            const el = document.getElementById('tog-doppler');
+            el.checked = false;
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+        await page.waitForTimeout(200);
+        const legendOff = await page.evaluate(() => document.getElementById('doppler-legend')?.style.display);
+        expect(legendOff, 'legend hidden after exit').toBe('none');
+
+        const filtered = errors.filter((e) => !isExpectedNoise(e.text));
+        if (filtered.length) console.error('Console errors:', filtered);
+        expect(filtered, 'no errors toggling Doppler').toHaveLength(0);
+    });
 });

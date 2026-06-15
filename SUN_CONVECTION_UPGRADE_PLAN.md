@@ -7,7 +7,7 @@
 > the convection drift speeds have already been tuned once and must not be
 > reverted.
 
-*Status: Phases 0–4 IMPLEMENTED (2026-06-15). Phases 5–6 pending.*
+*Status: Phases 0–5 IMPLEMENTED (2026-06-15). Phase 6 (perf/verify) folded into each phase.*
 
 ### Progress log
 
@@ -58,6 +58,16 @@
   samples its launch directions toward those same network lanes (a JS Voronoi
   mirroring the shader hash). Verified: 0 shader/JS errors, all 4 smoke tests
   green.
+- **Phase 5 (done):** physics-first Doppler velocity view. A new "Doppler
+  velocity" toggle recolours the photosphere (`sunFS`) by line-of-sight
+  convective velocity — granule vertical up/downflow + supergranule horizontal
+  outflow (the limb "donut") + differential rotation — as a blue (approaching)
+  / red (receding) Dopplergram, with a scale-legend overlay (granule ~1 Mm,
+  supergranule ~30 Mm). The mode hides the atmosphere/interior shells and damps
+  the warm bloom / K-corona-diffuse / outer-glow / wind overlays so the map
+  reads cleanly; it is mutually exclusive with cutaway, and both snapshot and
+  restore prior visibility/pass state. Verified: 0 shader/JS errors, all 5
+  smoke tests green (added a Doppler toggle test).
 
 ---
 
