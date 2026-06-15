@@ -3237,20 +3237,35 @@ const coreFS = /* glsl */`
     void main() {
         float mu  = max(dot(normalize(vNormal), normalize(vViewDir)), 0.0);
         float rim = 1.0 - mu;
-        // p-p chain rate proxy: high-freq noise modulating a hot white core.
-        float ppRate = vn(vWorldPos * 18.0 + vec3(u_time * 0.7));
-        float dWave  = 0.5 + 0.5 * sin(u_time * 0.78 + length(vWorldPos) * 9.0);
-        float energy = 0.55 + 0.30 * ppRate + 0.25 * dWave;
-        // Center white-hot, edge red-orange (15 MK → 7 MK at the radiative boundary)
-        vec3 hotCore = vec3(1.00, 0.96, 0.78);   // 15 MK blackbody-ish white
-        vec3 outer   = vec3(1.00, 0.55, 0.18);   // edge of core, cooler
-        vec3 col = mix(hotCore, outer, rim * 0.6);
-        col *= energy;
-        // Sharp filamentary plasma streaks
-        float fil = smoothstep(0.62, 0.92, vn(vWorldPos * 8.0 + vec3(u_time * 0.20)));
-        col += vec3(1.0, 0.85, 0.50) * fil * 0.35;
-        // Alpha falls off at rim so it reads as a glowing volumetric ball
-        float a = (0.55 + energy * 0.35) * (0.65 + 0.35 * mu);
+        float r   = length(vWorldPos) / 0.25;        // 0 centre -> 1 core edge
+        // Hot white centre cooling to orange at the radiative boundary
+        // (15 MK -> ~7 MK). Limb-dim so it reads as a glowing volume.
+        vec3 hotCore = vec3(1.00, 0.97, 0.82);
+        vec3 outer   = vec3(1.00, 0.52, 0.16);
+        vec3 col = mix(hotCore, outer, pow(r, 1.5) * 0.85);
+
+        // Smooth thermonuclear base glow.
+        float base = 0.55 + 0.18 * sin(u_time * 0.8 + length(vWorldPos) * 9.0);
+
+        // Discrete pp-chain fusion pops: sparse bright knots flashing on short
+        // timescales, so the core reads as a furnace of individual fusion
+        // events rather than smooth noise (three octaves, each blinking).
+        float pops = 0.0;
+        for (int k = 0; k < 3; k++) {
+            float fk = float(k);
+            float n  = vn(vWorldPos * (22.0 + fk * 14.0) + vec3(fk * 5.1, fk * 2.7, u_time * (0.6 + fk * 0.4)));
+            float knot  = smoothstep(0.80, 0.93, n);
+            float blink = pow(max(0.0, sin(u_time * (3.0 + fk * 2.5) + n * 30.0)), 6.0);
+            pops += knot * blink;
+        }
+        pops = min(pops, 1.0);
+
+        col *= base;
+        col += vec3(1.00, 0.92, 0.66) * pops * 0.9;            // fusion flashes
+        float fil = smoothstep(0.64, 0.92, vn(vWorldPos * 8.0 + vec3(u_time * 0.2)));
+        col += vec3(1.00, 0.82, 0.46) * fil * 0.25;            // wispy filaments
+
+        float a = (0.55 + base * 0.30 + pops * 0.25) * (0.65 + 0.35 * mu);
         gl_FragColor = vec4(col, a);
     }
 `;
@@ -3273,22 +3288,25 @@ const radiativeFS = /* glsl */`
     void main() {
         float mu  = max(dot(normalize(vNormal), normalize(vViewDir)), 0.0);
         float rim = 1.0 - mu;
-        // Stratified shells — photons diffuse outward; each shell at slightly
-        // lower T (Wien displacement reddens with radius).
-        float r = length(vWorldPos);
-        float shells = 0.5 + 0.5 * sin(r * 50.0 + u_time * 0.4);
-        // Random-walk sparkles: short-lived bright pixels representing
-        // individual photon scatter events.
-        float walk = vn(vWorldPos * 26.0 + vec3(u_time * 1.2, 0.0, 0.0));
-        float spark = pow(walk, 16.0) * 1.8;
-        vec3 hot   = vec3(1.00, 0.78, 0.32);   // 7 MK
-        vec3 cool  = vec3(1.00, 0.42, 0.10);   // 2 MK boundary with CZ
-        vec3 col = mix(hot, cool, 0.5 + 0.3 * sin(r * 12.0));
-        col *= 0.45 + shells * 0.30;
-        col += vec3(1.0, 0.95, 0.70) * spark;
-        // Stronger at limb to read as a hollow shell
-        float a = (0.30 + 0.35 * rim) * (0.55 + 0.45 * shells);
-        gl_FragColor = vec4(col, a);
+        float r   = length(vWorldPos);               // 0..0.70 (mesh radius)
+        // Concentric diffusion shells drifting slowly OUTWARD over time --
+        // photons random-walking their way out, each shell cooler with radius.
+        float shells = 0.5 + 0.5 * sin(r * 52.0 - u_time * 0.5);
+        // Discrete scatter events: sharp sparse bright specks (a photon
+        // bouncing off an ion) twinkling as they migrate outward, plus a
+        // slower large-scale shimmer for depth.
+        float walk   = vn(vWorldPos * 30.0 + vec3(u_time * 1.4, u_time * 0.3, 0.0));
+        float spark  = pow(walk, 20.0) * 2.4;
+        float walk2  = vn(vWorldPos * 12.0 + vec3(0.0, u_time * 0.6, u_time * 0.2));
+        float spark2 = pow(walk2, 10.0) * 0.6;
+        vec3 hot  = vec3(1.00, 0.80, 0.34);          // ~7 MK inner
+        vec3 cool = vec3(1.00, 0.40, 0.10);          // ~2 MK outer (CZ boundary)
+        vec3 col = mix(hot, cool, smoothstep(0.0, 0.70, r));
+        col *= 0.42 + shells * 0.30;
+        col += vec3(1.00, 0.95, 0.72) * spark;
+        col += vec3(1.00, 0.80, 0.45) * spark2;
+        float a = (0.30 + 0.34 * rim) * (0.55 + 0.45 * shells) + spark * 0.15;
+        gl_FragColor = vec4(col, clamp(a, 0.0, 0.9));
     }
 `;
 
@@ -3870,6 +3888,19 @@ for (let i = 0; i < PHOTON_COUNT; i++) {
     _photonLines.push(line);
 }
 
+// Bright trackable "head" point per walker -- the photon's current position
+// -- so individual random walks are legible against the dense interior glow.
+const _photonHeadPos = new Float32Array(PHOTON_COUNT * 3);
+const _photonHeadGeo = new THREE.BufferGeometry();
+_photonHeadGeo.setAttribute('position', new THREE.BufferAttribute(_photonHeadPos, 3));
+const _photonHeadMat = new THREE.PointsMaterial({
+    color: 0xfff2cc, size: 0.07, transparent: true, opacity: 1.0,
+    depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending, sizeAttenuation: true,
+});
+const _photonHeads = new THREE.Points(_photonHeadGeo, _photonHeadMat);
+_photonHeads.frustumCulled = false;
+_photonGroup.add(_photonHeads);
+
 // Update each line's vertex buffer from the walker's circular trail.
 // Vertices are unrolled head→tail with opacity ramping from 1.0 (head) to
 // 0.0 (tail). Colour gradient encodes radial fraction: deep red at the
@@ -3925,7 +3956,12 @@ function _updatePhotonTrails() {
         ln.geometry.attributes.position.needsUpdate = true;
         ln.geometry.attributes.aColor.needsUpdate   = true;
         ln.geometry.attributes.aOpacity.needsUpdate = true;
+        // Bright trackable head at the photon's current position.
+        _photonHeadPos[wi * 3]     = w.x;
+        _photonHeadPos[wi * 3 + 1] = w.y;
+        _photonHeadPos[wi * 3 + 2] = w.z;
     }
+    _photonHeadGeo.attributes.position.needsUpdate = true;
 }
 
 // Per-frame step: bound nSteps so the walk visibly progresses without
@@ -3934,6 +3970,51 @@ function _stepPhotonPool() {
     if (!_photonGroup.visible) return;
     _photonPool.step(2);
     _updatePhotonTrails();
+    _stepNeutrinos();
+}
+
+// ── Neutrino escape streaks ──────────────────────────────────────────────────
+// The counterpoint to the trapped photon random-walk: pp-chain neutrinos barely
+// interact, so they stream straight out of the core at ~c and leave the Sun in
+// ~2 s (vs ~170 000 yr for a photon). Rendered as fast radial streaks that spawn
+// in the core and shoot outward, respawning on exit. Lives in _photonGroup so it
+// shares the "Photon walks" overlay toggle.
+const NEUTRINO_COUNT = 60;
+const _neutrinoState = [];
+const _neutrinoPos = new Float32Array(NEUTRINO_COUNT * 2 * 3);   // 2 verts/streak
+const _neutrinoGeo = new THREE.BufferGeometry();
+_neutrinoGeo.setAttribute('position', new THREE.BufferAttribute(_neutrinoPos, 3));
+const _neutrinoMat = new THREE.LineBasicMaterial({
+    color: 0x9fe8ff, transparent: true, opacity: 0.4,
+    depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending,
+});
+const _neutrinoLines = new THREE.LineSegments(_neutrinoGeo, _neutrinoMat);
+_neutrinoLines.frustumCulled = false;
+_photonGroup.add(_neutrinoLines);
+function _spawnNeutrino(i) {
+    const cosT = 2 * Math.random() - 1;
+    const sinT = Math.sqrt(Math.max(0, 1 - cosT * cosT));
+    const phi  = Math.random() * Math.PI * 2;
+    _neutrinoState[i] = {
+        dx: sinT * Math.cos(phi), dy: cosT, dz: sinT * Math.sin(phi),
+        r: Math.random() * 0.18,
+        speed: 0.045 + Math.random() * 0.05,   // R_sun units / frame (fast)
+        len: 0.10 + Math.random() * 0.12,
+    };
+}
+for (let i = 0; i < NEUTRINO_COUNT; i++) _spawnNeutrino(i);
+function _stepNeutrinos() {
+    if (!_photonGroup.visible) return;
+    for (let i = 0; i < NEUTRINO_COUNT; i++) {
+        const n = _neutrinoState[i];
+        n.r += n.speed;
+        if (n.r > 1.6) { _spawnNeutrino(i); continue; }
+        const o = i * 6;
+        const rt = Math.max(0, n.r - n.len);
+        _neutrinoPos[o]     = n.dx * rt;  _neutrinoPos[o + 1] = n.dy * rt;  _neutrinoPos[o + 2] = n.dz * rt;
+        _neutrinoPos[o + 3] = n.dx * n.r; _neutrinoPos[o + 4] = n.dy * n.r; _neutrinoPos[o + 5] = n.dz * n.r;
+    }
+    _neutrinoGeo.attributes.position.needsUpdate = true;
 }
 
 // ─── CHROMOSPHERE (r=1.15) — Ca H&K / Hα pink-red layer ──────────────────────

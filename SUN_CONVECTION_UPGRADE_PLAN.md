@@ -7,7 +7,7 @@
 > the convection drift speeds have already been tuned once and must not be
 > reverted.
 
-*Status: Phases 0–2 IMPLEMENTED (2026-06-15). Phases 3–6 pending.*
+*Status: Phases 0–3 IMPLEMENTED (2026-06-15). Phases 4–6 pending.*
 
 ### Progress log
 
@@ -38,6 +38,16 @@
   convection (not the additive ghost-glow it uses as an overlay). Outer halos
   hide; interior-layer visibility is snapshotted and restored on exit. Verified:
   0 shader errors, all 4 smoke tests green (incl. a cutaway toggle/slider test).
+- **Phase 3 (done):** core + radiative legibility. `coreFS` now reads as a
+  furnace of discrete pp-chain fusion pops (sparse blinking knots) over a hot
+  white core; `radiativeFS` shows outward-drifting diffusion shells with sharp,
+  sparse photon-scatter sparkles. The photon random-walk overlay gains a bright
+  trackable head point per walker, and a new **neutrino escape-streak** system
+  (fast radial streaks leaving the core) makes the pedagogical contrast explicit
+  — neutrinos exit in ~2 s vs ~170 000 yr for a trapped photon. (The interior
+  SSM is static, so there is no live signal to drive a pulse; the win is visual
+  legibility.) Both new systems live in the existing "Photon walks" overlay.
+  Verified: 0 shader/JS errors, all 4 smoke tests green.
 
 ---
 
