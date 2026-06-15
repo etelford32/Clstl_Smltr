@@ -617,6 +617,15 @@ footer a:hover{color:var(--text)}
     </div>
   </div>
 
+  <!-- ── MONTH-AHEAD OUTLOOK (weeks 3–6, probabilistic / driver-attributed) ── -->
+  <div class="card" id="month-outlook-card" style="margin-bottom:20px">
+    <div class="card-head">
+      <span class="card-title">Month-Ahead Outlook</span>
+      <span style="font-size:.6rem;color:var(--muted)">weeks 3–6 · probabilistic</span>
+    </div>
+    <div class="card-body" id="month-outlook"></div>
+  </div>
+
   <!-- ── PERSONALIZED SPACE WEATHER REPORT ── -->
   <div class="card" id="alert-card" style="margin-bottom:20px">
     <div class="card-head">
@@ -1091,7 +1100,7 @@ const _imp = (m) => import(m).then(x => x, e => {
     return null;
 });
 const [
-    _mUL, _mSWF, _mAE, _mISE, _mOT, _mDSE, _mSL, _mTP, _mCR, _mACT, _mLS,
+    _mUL, _mSWF, _mAE, _mISE, _mOT, _mDSE, _mSL, _mTP, _mCR, _mACT, _mLS, _mMO,
 ] = await Promise.all([
     _imp('./js/user-location.js'),
     _imp('./js/swpc-feed.js'),
@@ -1104,6 +1113,7 @@ const [
     _imp('./js/class-roster.js'),
     _imp('./js/activation.js'),
     _imp('./js/local-sky.js'),
+    _imp('./js/month-outlook.js'),
 ]);
 // Missing export → a stub that throws when actually used, so the
 // failure surfaces inside a runCard()/runSafe() boundary rather than
@@ -1131,6 +1141,8 @@ const DailySummaryEngine = _pick(_mDSE, 'daily-summary', 'DailySummaryEngine');
 // local-sky.js — "Today & Sun" panel; no-op controller fallback so a failed
 // import can't throw at the daily-briefing card's mount site.
 const mountLocalSky      = _pick(_mLS, 'local-sky', 'mountLocalSky', () => ({ refresh() {}, destroy() {} }));
+// month-outlook.js — weeks 3–6 probabilistic outlook; no-op controller fallback.
+const mountMonthOutlook  = _pick(_mMO, 'month-outlook', 'mountMonthOutlook', () => ({ refresh() {}, destroy() {} }));
 // saved-locations.js (its card lives on /settings now; IIFE early-returns)
 const listLocations      = _pick(_mSL, 'saved-locations', 'listLocations');
 const addLocation        = _pick(_mSL, 'saved-locations', 'addLocation');
@@ -3466,6 +3478,11 @@ runCard('Daily briefing', 'daily-briefing-card', () => {
             refreshBriefing();
         }
     });
+});
+
+// ── Month-Ahead Outlook (weeks 3–6 probabilistic) ────────────────────────────
+runCard('Month-ahead outlook', 'month-outlook-card', () => {
+    mountMonthOutlook({ host: document.getElementById('month-outlook') });
 });
 
 // ── Alert History Panel ──────────────────────────────────────────────────────
