@@ -122,4 +122,50 @@ test.describe('sun.html smoke', () => {
         const f1 = await page.evaluate(() => window.__sun.frames);
         expect(f1, 'frame counter advances over ~1s').toBeGreaterThan(f0 + 5);
     });
+
+    test('cutaway peel toggles + depth slider without throwing', async ({ page }) => {
+        const errors = attachConsoleRecorder(page);
+        await page.goto(URL);
+        await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
+        await page.waitForTimeout(500);
+
+        // Enable cutaway (checkbox is visually hidden — fire the change event).
+        await page.evaluate(() => {
+            const el = document.getElementById('tog-cutaway');
+            el.checked = true;
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+        await page.waitForTimeout(250);
+
+        // Interior convective shell is revealed; the photosphere mesh stays in
+        // the scene (it is clipped per-fragment, not hidden).
+        const on = await page.evaluate(() => ({
+            convective:  window.__sun.layers.convective.visible,
+            photosphere: window.__sun.layers.photosphere.visible,
+        }));
+        expect(on.convective, 'convective revealed in cutaway').toBe(true);
+        expect(on.photosphere, 'photosphere mesh stays (clipped, not hidden)').toBe(true);
+
+        // Sweep the cut-depth slider (drives u_cutOffset).
+        await page.evaluate(() => {
+            const s = document.getElementById('sl-cutdepth');
+            for (const v of ['10', '85', '45']) {
+                s.value = v;
+                s.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+        });
+        await page.waitForTimeout(150);
+
+        // Disable cutaway again; the convective shell returns to its prior state.
+        await page.evaluate(() => {
+            const el = document.getElementById('tog-cutaway');
+            el.checked = false;
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+        await page.waitForTimeout(150);
+
+        const filtered = errors.filter((e) => !isExpectedNoise(e.text));
+        if (filtered.length) console.error('Console errors:', filtered);
+        expect(filtered, 'no errors toggling cutaway + slider').toHaveLength(0);
+    });
 });

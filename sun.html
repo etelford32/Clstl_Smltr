@@ -1049,6 +1049,19 @@ import './js/telemetry.js';
                             <span class="layer-meta">white light · 10⁶ K</span>
                         </label>
                     </div>
+                    <div class="layer-grp">Cutaway</div>
+                    <div class="toggle-row layer-row" id="lr-cutaway">
+                        <input type="checkbox" id="tog-cutaway">
+                        <label for="tog-cutaway">
+                            <span class="layer-dot cz"></span>
+                            <span class="layer-name">Peel &amp; cutaway</span>
+                            <span class="layer-meta">slice in to the convection</span>
+                        </label>
+                    </div>
+                    <div class="toggle-row" id="row-cutdepth" style="display:none;align-items:center;gap:8px">
+                        <label for="sl-cutdepth" style="font-size:11px;opacity:.75;white-space:nowrap">Cut depth</label>
+                        <input type="range" id="sl-cutdepth" min="0" max="100" step="1" value="45" style="flex:1">
+                    </div>
                 </div>
             </div>
 
@@ -2009,6 +2022,13 @@ const uniforms = {
     u_teff:              { value: 5778.0 },
     u_activity:          { value: 0.5 },
     u_rot:               { value: 1.0 },
+    // Phase 2 cutaway/peel: one world-space clip plane shared by the
+    // photosphere (discard) and the convective shell (depth grading).
+    // u_cutaway gates it (0=off); u_cut is the plane normal (aimed at the
+    // camera on enable); u_cutOffset is the slice depth (>1 = disabled).
+    u_cut:               { value: new THREE.Vector3(0, 0, 1) },
+    u_cutOffset:         { value: 2.0 },
+    u_cutaway:           { value: 0.0 },
     u_showSpots:         { value: 1.0 },   // 1 = show sunspots, 0 = hide
     u_showFlares:        { value: 1.0 },   // 1 = show flares,   0 = hide
     // ── Live solar wind uniforms (driven by DSCOVR/ACE L1 pipeline) ──
@@ -2476,6 +2496,9 @@ const sunFS = /* glsl */`
     uniform float u_flare_intensity; // 0-1 white-light flash intensity at flare onset
     uniform float u_chromoIso;       // 1.0 when chromosphere isolated (this shader inactive)
     uniform float u_photIso;         // 1.0 when photosphere is isolated (boost upper-layer features)
+    uniform vec3  u_cut;             // cutaway plane normal (world space)
+    uniform float u_cutOffset;       // plane offset along u_cut; >1 = disabled
+    uniform float u_cutaway;         // 1 = cutaway/peel active
     varying vec3  vNormal;
     varying vec3  vPosition;
     varying vec3  vViewDir;
@@ -2609,6 +2632,9 @@ const sunFS = /* glsl */`
     }
 
     void main() {
+        // Cutaway peel: drop the near cap so the boiling interior shows through.
+        // vPosition is the unit object/world position (sun mesh = identity).
+        if (u_cutaway > 0.5 && dot(vPosition, u_cut) > u_cutOffset) discard;
         vec3  nrm  = normalize(vNormal);
         vec3  vDir = normalize(vViewDir);
         float mu   = max(dot(nrm, vDir), 0.0);
@@ -3298,26 +3324,20 @@ const convectiveFS = /* glsl */`
     precision highp float;
     uniform float u_time;
     uniform float u_rot;
+    uniform vec3  u_cut;        // cutaway plane normal (world space)
+    uniform float u_cutOffset;  // plane offset along u_cut; >1 disables the cut
+    uniform float u_cutaway;    // 0 = overlay ghost shell, 1 = solid cutaway bowl
     varying vec3 vNormal;
     varying vec3 vViewDir;
     varying vec3 vWorldPos;
 
-    // Match photosphere sun shader hash + Voronoi exactly so cell
-    // boundaries align across the cutaway.
+    // Worley basis -- identical hash to the photosphere shader so the
+    // supergranule cells line up across the cutaway seam in overlay mode.
     vec3 hash3(vec3 p) {
         p = fract(p * vec3(443.897, 441.423, 437.195));
         p += dot(p.zxy, p.yzx + 19.19);
         return fract(p.xyx * p.yzy * p.zxz);
     }
-    float h(vec3 p){ p=fract(p*vec3(127.1,311.7,74.7)); p+=dot(p,p+19.19); return fract(p.x*p.y*p.z); }
-    float vn(vec3 p){
-        vec3 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);
-        return mix(mix(mix(h(i),h(i+vec3(1,0,0)),u.x),mix(h(i+vec3(0,1,0)),h(i+vec3(1,1,0)),u.x),u.y),
-                   mix(mix(h(i+vec3(0,0,1)),h(i+vec3(1,0,1)),u.x),mix(h(i+vec3(0,1,1)),h(i+vec3(1,1,1)),u.x),u.y),u.z);
-    }
-    // Worley voronoi — returns (d1, d2): nearest & second-nearest cell distances.
-    // Identical implementation to the photosphere shader so the cell
-    // partition lines up across both layers.
     vec2 voronoi(vec3 p) {
         vec3 ip = floor(p), fp = fract(p);
         float d1 = 1e9, d2 = 1e9;
@@ -3338,66 +3358,64 @@ const convectiveFS = /* glsl */`
     void main() {
         float mu  = max(dot(normalize(vNormal), normalize(vViewDir)), 0.0);
         float rim = 1.0 - mu;
-        // Direction from origin (radially outward) — independent of mesh radius.
-        // Photosphere uses vPosition (|v|=1); convective mesh sits at r=0.97
-        // so we normalise to recover the same direction-on-sphere coordinate.
-        vec3 n3d = normalize(vWorldPos);
+        vec3  n3d = normalize(vWorldPos);   // unit direction on the shell
 
-        // ── Supergranulation — SAME basis as the photosphere shader ──
-        // (sgPos = n3d * 2.2 + u_time * 0.0008 * u_rot)
-        // Use voronoi.x (distance to nearest cell centre): cell interiors
-        // are upwellings (low d1, bright); cell boundaries are downflows
-        // (high d1, dark lanes). Identical to the photosphere sgCell.x
-        // term, so the patterns align under the cutaway.
-        vec3  sgPos  = n3d * 2.2 + vec3(u_time * 0.0008 * u_rot);
-        vec2  sgCell = voronoi(sgPos);
-        float sgLane = smoothstep(0.05, 0.32, sgCell.y - sgCell.x);
-        float sgUp   = 1.0 - smoothstep(0.0, 0.30, sgCell.x);
+        // Cutaway depth: signed distance past the cut plane (>0 inside the
+        // exposed window), growing toward its centre where we look straight
+        // down into the zone. Drives cell scale + plume contrast so the cells
+        // visibly enlarge with depth. When the cut is disabled (u_cutOffset
+        // >> 1) this is 0 everywhere and the shell keeps its photosphere-
+        // aligned overlay look, so the additive ghost-shell mode is unchanged.
+        float cut    = dot(n3d, u_cut) - u_cutOffset;
+        float inHole = step(0.0, cut);
+        float depth  = clamp(cut * 1.2, 0.0, 1.0);
 
-        // ── Giant convective cells (~200 Mm) — broader scale grouping ──
-        vec3  gcPos  = n3d * 0.7 + vec3(u_time * 0.0002 * u_rot);
-        vec2  gcCell = voronoi(gcPos);
-        float gcLane = smoothstep(0.02, 0.40, gcCell.y - gcCell.x);
+        // Depth-graded convection cells: fine supergranules near the surface
+        // (photosphere-aligned basis) cross-fade to broad giant cells with
+        // depth. Two Worley passes only -- the whole effect is fragment work.
+        vec2  fineC   = voronoi(n3d * 2.2 + vec3(u_time * 0.0008 * u_rot));   // supergranule
+        vec2  coarseC = voronoi(n3d * 0.7 + vec3(u_time * 0.0002 * u_rot));   // giant cells
+        float d1   = mix(fineC.x, coarseC.x, depth);
+        float d2   = mix(fineC.y, coarseC.y, depth);
+        float lane = smoothstep(0.04, 0.34, d2 - d1);   // 1 = cell interior (upflow)
+        float up   = 1.0 - smoothstep(0.0, 0.32, d1);   // bright upwelling centre
 
-        // Combined upwell pattern: bright cell interiors at both scales,
-        // dark sinking lanes between them.
-        float upwell = sgLane * 0.65 + gcLane * 0.35;
+        // Per-cell brightness variation (hash the active cell grid) so the boil
+        // looks alive and dynamic rather than a uniform array of equal cells.
+        vec3  cellId  = floor(mix(n3d * 2.2, n3d * 0.7, depth) + 7.0);
+        float cellVar = 0.55 + 0.45 * fract(sin(dot(cellId, vec3(12.9898, 78.233, 37.719))) * 43758.5453
+                                            + u_time * 0.15 * u_rot);
+        up *= cellVar;
 
-        // ── Heat plumes — bright cores rising from the radiative boundary ──
-        // Sub-cell hot upwellings centred on supergranule cell interiors.
-        // Pulses on a slow ~3-min timescale (matching real plume lifetime
-        // proxy at the upper convective zone).
-        float plumePulse = 0.5 + 0.5 * sin(u_time * 1.8 + sgCell.x * 17.0);
-        float plume      = pow(sgUp, 2.5) * plumePulse * 0.55;
+        // Downflow plumes: the lanes are sinking plasma -- darker, narrower and
+        // more contrasty with depth, with a slow inward "drip" so they plunge.
+        float laneMask = 1.0 - lane;
+        float drip  = 0.5 + 0.5 * sin(u_time * 1.2 - depth * 9.0 + d1 * 28.0);
+        float plume = laneMask * (0.45 + 0.55 * depth) * (0.6 + 0.4 * drip);
 
-        // ── Velocity-shear streaks — toroidal differential-rotation flow ──
-        // Anisotropic noise stretched along longitude (the φ direction)
-        // shows the surface-equatorial fast / pole-slow flow.
-        float shear = vn(n3d * vec3(38.0, 8.0, 38.0) + vec3(u_time * 0.18 * u_rot, 0.0, 0.0));
-        shear = pow(max(0.0, shear), 4.0) * 0.18;
+        // Rising hot plume cores at the upwelling centres (pulse on a plume
+        // lifetime proxy), brighter and more frequent with depth.
+        float coreRise = pow(up, 2.4) * (0.30 + 0.55 * depth)
+                       * (0.6 + 0.4 * sin(u_time * 1.8 + d1 * 17.0));
 
-        // ── Tachocline edge glow — bright thin rim at the inner shell base ──
-        // The convective-zone mesh sits at r=0.97. The tachocline is the
-        // shear layer at r≈0.713 where the convective zone meets the
-        // radiative zone. Encode this as a glow on the bottom-facing side
-        // of the cutaway (the back-facing geometry from the viewer when
-        // we look "down through" the photosphere).
-        float tachoEdge = pow(rim, 4.0) * 0.30;
+        // Tachocline glow at the deep base + a bright cutaway rim.
+        float tacho = pow(rim, 4.0) * 0.30 + depth * depth * 0.18;
 
-        // ── Compose colour ──
-        vec3 hot      = vec3(1.00, 0.62, 0.22);   // hot rising plasma
-        vec3 plumeCol = vec3(1.00, 0.85, 0.40);   // brighter plume cores
-        vec3 lane     = vec3(0.40, 0.16, 0.04);   // sinking dark lanes
-        vec3 tachoCol = vec3(1.00, 0.90, 0.55);   // tachocline edge, dynamo source
+        // Colour: hotter / whiter deep (toward the radiative boundary), cooler
+        // orange near the surface; dark sinking lanes deepen with depth.
+        vec3 upCol   = mix(vec3(1.00, 0.62, 0.22), vec3(1.00, 0.86, 0.56), depth);
+        vec3 laneCol = mix(vec3(0.42, 0.17, 0.05), vec3(0.16, 0.05, 0.02), depth);
+        vec3 col = mix(laneCol, upCol, up);
+        col *= 1.0 - plume * 0.72;                  // sink the downflow lanes (crisper cells)
+        col += vec3(1.00, 0.85, 0.45) * coreRise;   // bright rising plume cores
+        col += vec3(1.00, 0.90, 0.55) * tacho;      // tachocline / dynamo base
 
-        vec3 col = mix(lane, hot, upwell);
-        col     += plumeCol * plume;
-        col     += vec3(1.00, 0.70, 0.30) * shear;
-        col     += tachoCol * tachoEdge;
-
-        // Alpha: hollow-shell read — slightly stronger at rim, modulated by upwell
-        float a = (0.30 + 0.32 * rim) * (0.55 + upwell * 0.45) + plume * 0.12;
-        gl_FragColor = vec4(col, clamp(a, 0.0, 0.85));
+        // Alpha: overlay mode keeps the faint hollow-shell read; inside the
+        // cutaway window the exposed convection reads solid and bright.
+        float aOverlay = (0.30 + 0.32 * rim) * (0.55 + up * 0.45) + coreRise * 0.10;
+        float aCut     = clamp(0.62 + up * 0.40 + depth * 0.25, 0.0, 1.0);
+        float a = mix(aOverlay, aCut, u_cutaway * inHole);
+        gl_FragColor = vec4(col, clamp(a, 0.0, 1.0));
     }
 `;
 
@@ -7508,6 +7526,83 @@ document.getElementById('tog-tr').addEventListener('change', e => {
     _setLayerActive('lr-tr', e.target.checked);
     _refreshLayerIsolation();
 });
+
+// ── Cutaway / peel ────────────────────────────────────────────────────────────
+// Slices the photosphere away on the viewer-facing side (one world-space clip
+// plane, evaluated per-fragment as a discard in sunFS) so the boiling
+// convective zone + nested interior shells are revealed. Depth into the cut
+// drives cell scale and plume contrast in convectiveFS.
+let _cutSaved = null;
+function _cutDepthFromSlider() {
+    const s = parseFloat(document.getElementById('sl-cutdepth')?.value ?? '45') / 100;
+    return 0.85 - s * 1.40;   // 0.85 (shallow window) -> -0.55 (deep slice past centre)
+}
+function _syncLayerUI(togId, rowId, on) {
+    const t = document.getElementById(togId);
+    if (t) t.checked = on;
+    _setLayerActive(rowId, on);
+}
+function _setCutaway(on) {
+    const row = document.getElementById('row-cutdepth');
+    const cm  = convectiveMesh.material;
+    if (on) {
+        _cutSaved = {
+            core: coreMesh.visible, radiative: radiativeMesh.visible,
+            convective: convectiveMesh.visible, chrom: chromoMesh.visible,
+            tr: trMesh.visible, corona: coronaMesh.visible,
+        };
+        // Aim the cut at the current camera so the window faces the viewer.
+        const d = camera.position.clone().normalize();
+        uniforms.u_cut.value.set(d.x, d.y, d.z);
+        uniforms.u_cutOffset.value = _cutDepthFromSlider();
+        uniforms.u_cutaway.value = 1.0;
+        // Turn the convective shell into a SOLID, depth-tested boiling surface so
+        // the peeled window shows real structured convection occluding space —
+        // not the additive ghost-glow it uses as an overlay. (The additive
+        // interior glows just stack into a featureless fireball under bloom.)
+        cm.blending    = THREE.NoBlending;   // fully solid (ignore the shell alpha)
+        cm.transparent = false;
+        cm.depthTest   = true;
+        cm.depthWrite  = true;
+        cm.needsUpdate = true;
+        convectiveMesh.renderOrder = 0;
+        convectiveMesh.visible = true;  _syncLayerUI('tog-convective', 'lr-convective', true);
+        // Hide the outer halos for a clean slice; leave core/radiative to the
+        // user (they are tiny additive glows that would wash out the cut).
+        chromoMesh.visible = false;     _syncLayerUI('tog-chrom', 'lr-chrom', false);
+        trMesh.visible = false;         _syncLayerUI('tog-tr', 'lr-tr', false);
+        coronaMesh.visible = false;     _syncLayerUI('tog-corona', 'lr-corona', false);
+        if (row) row.style.display = 'flex';
+    } else {
+        uniforms.u_cutaway.value = 0.0;
+        uniforms.u_cutOffset.value = 2.0;   // plane beyond the sphere = no clip
+        // Restore the additive ghost-shell overlay material.
+        cm.blending    = THREE.AdditiveBlending;
+        cm.transparent = true;
+        cm.depthTest   = false;
+        cm.depthWrite  = false;
+        cm.needsUpdate = true;
+        convectiveMesh.renderOrder = -1;
+        if (_cutSaved) {
+            coreMesh.visible = _cutSaved.core;             _syncLayerUI('tog-core', 'lr-core', _cutSaved.core);
+            radiativeMesh.visible = _cutSaved.radiative;   _syncLayerUI('tog-radiative', 'lr-radiative', _cutSaved.radiative);
+            convectiveMesh.visible = _cutSaved.convective; _syncLayerUI('tog-convective', 'lr-convective', _cutSaved.convective);
+            chromoMesh.visible = _cutSaved.chrom;          _syncLayerUI('tog-chrom', 'lr-chrom', _cutSaved.chrom);
+            trMesh.visible = _cutSaved.tr;                 _syncLayerUI('tog-tr', 'lr-tr', _cutSaved.tr);
+            coronaMesh.visible = _cutSaved.corona;         _syncLayerUI('tog-corona', 'lr-corona', _cutSaved.corona);
+            _cutSaved = null;
+        }
+        if (row) row.style.display = 'none';
+    }
+    _refreshLayerIsolation();
+}
+document.getElementById('tog-cutaway')?.addEventListener('change', e => {
+    _setLayerActive('lr-cutaway', e.target.checked);
+    _setCutaway(e.target.checked);
+});
+document.getElementById('sl-cutdepth')?.addEventListener('input', () => {
+    uniforms.u_cutOffset.value = _cutDepthFromSlider();
+});
 document.getElementById('tog-fieldlines').addEventListener('change', e => { if (fieldLineGroup) fieldLineGroup.visible = e.target.checked; });
 document.getElementById('sl-bline-density').addEventListener('input', function() {
     document.getElementById('disp-bline-density').textContent = this.value + '%';
@@ -10728,6 +10823,8 @@ window.__sun = {
     THREE,
     renderer,
     scene,
+    camera,
+    controls,
     get composer() { return composer; },
     layers: {
         core:         coreMesh,

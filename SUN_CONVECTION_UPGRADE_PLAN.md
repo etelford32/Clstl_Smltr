@@ -7,7 +7,7 @@
 > the convection drift speeds have already been tuned once and must not be
 > reverted.
 
-*Status: Phase 0 + Phase 1 IMPLEMENTED (2026-06-15). Phases 2–6 pending.*
+*Status: Phases 0–2 IMPLEMENTED (2026-06-15). Phases 3–6 pending.*
 
 ### Progress log
 
@@ -27,6 +27,17 @@
   network-concentrated bright points. The tuned drift coefficients were
   preserved. Verified: shader compiles, surface boils/evolves, ~60 fps loop
   intact (software-WebGL sandbox).
+- **Phase 2 (done):** convective-zone cutaway. `convectiveFS` grades cells by
+  depth (fine supergranules near the surface cross-fade to broad giant cells
+  deeper), with dark sinking downflow plumes (inward "drip"), hotter/whiter
+  colour with depth, per-cell brightness variation, and a tachocline base glow
+  — two Worley passes, all fragment work. A "Peel & cutaway" toggle + depth
+  slider drive one world-space clip plane (a per-fragment `discard` in `sunFS`,
+  aimed at the camera on enable); in cutaway the convective shell switches to a
+  solid depth-tested surface so the peeled window shows structured boiling
+  convection (not the additive ghost-glow it uses as an overlay). Outer halos
+  hide; interior-layer visibility is snapshotted and restored on exit. Verified:
+  0 shader errors, all 4 smoke tests green (incl. a cutaway toggle/slider test).
 
 ---
 
