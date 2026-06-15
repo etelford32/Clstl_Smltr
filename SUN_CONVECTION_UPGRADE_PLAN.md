@@ -7,7 +7,26 @@
 > the convection drift speeds have already been tuned once and must not be
 > reverted.
 
-*Status: PLAN — not yet implemented. Created 2026-06-15.*
+*Status: Phase 0 + Phase 1 IMPLEMENTED (2026-06-15). Phases 2–6 pending.*
+
+### Progress log
+
+- **Phase 0 (done):** `tests/sun-smoke.spec.js` added (boot + 7-layer toggle +
+  animation-loop checks); a minimal `window.__sun` test handle exposes the
+  renderer + the seven layer meshes. The boot check asserts no shader-compile
+  errors. **It immediately caught a pre-existing bug:** `chromoFS` used
+  `col` / `hAlpha` / `caKplage` in its isolation block (§7) before they were
+  declared (§8) — the chromosphere fragment shader had been failing to compile
+  on `main`. Fixed by relocating the isolation colour tweak to after the colour
+  section. All 3 smoke tests green.
+- **Phase 1 (done):** photosphere `sunFS` now has (1a) analytic granule relief
+  via a height-gradient micro-normal folded into the existing Worley pass (no
+  extra cost), (1b) a per-cell birth→peak→fragment→fade lifecycle replacing the
+  global sinusoid, (1c) blackbody temperature contrast (hot interiors whiter,
+  cool lanes redder), and (1d) granule↔supergranule advective coupling +
+  network-concentrated bright points. The tuned drift coefficients were
+  preserved. Verified: shader compiles, surface boils/evolves, ~60 fps loop
+  intact (software-WebGL sandbox).
 
 ---
 

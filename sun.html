@@ -2555,6 +2555,31 @@ const sunFS = /* glsl */`
         return vec2(sqrt(d1), sqrt(d2));
     }
 
+    // Same Worley partition as voronoi() above (visible cells unchanged) but
+    // also returns the surface gradient direction toward the nearest cell
+    // centre, used to drive analytic granule relief and supergranular flow.
+    // convectiveFS keeps the plain voronoi(); only the photosphere needs grad.
+    vec2 voronoiGrad(vec3 p, out vec3 grad) {
+        vec3 ip = floor(p), fp = fract(p);
+        float d1 = 1e9, d2 = 1e9;
+        vec3  off1 = vec3(0.0);
+        for (int z = -1; z <= 1; z++) {
+            for (int y = -1; y <= 1; y++) {
+                for (int x = -1; x <= 1; x++) {
+                    vec3 nb  = vec3(float(x), float(y), float(z));
+                    vec3 pos = nb - fp + hash3(ip + nb);   // fragment -> centre
+                    float d  = dot(pos, pos);
+                    if (d < d1) { d2 = d1; d1 = d; off1 = pos; }
+                    else if (d < d2) { d2 = d; }
+                }
+            }
+        }
+        d1 = sqrt(d1); d2 = sqrt(d2);
+        // height grad ~ +off1/d1 -> points uphill toward the raised interior.
+        grad = off1 / max(d1, 1e-4);
+        return vec2(d1, d2);
+    }
+
     // ── Blackbody colour (Planck peak approximation) ───────────────────────────
     // Correct G-star colours: T 4000–7000 K
     vec3 blackbody(float T) {
@@ -2610,7 +2635,11 @@ const sunFS = /* glsl */`
 
         // ── Supergranulation (~30 000 km cells, flow pattern beneath granules) ──
         vec3  sgPos  = vPosition * 2.2 + vec3(u_time * 0.0008 * rotF);
-        vec2  sgCell = voronoi(sgPos);
+        vec3  sgGrad;
+        vec2  sgCell = voronoiGrad(sgPos, sgGrad);
+        // Supergranular horizontal outflow: plasma streams from cell centres
+        // out to the boundary network (-grad points away from the centre).
+        vec3  sgFlow = -sgGrad;
         // Bright cell centres (upwelling), dark lanes (downflow at boundaries)
         float superGran = smoothstep(0.0, 0.45, sgCell.x) * 0.08;
 
@@ -2624,8 +2653,17 @@ const sunFS = /* glsl */`
             fbmTex(vPosition * 5.5 + vec3(u_time * 0.0032 * rotF + 1.7)),
             fbmTex(vPosition * 5.5 + vec3(u_time * 0.0032 * rotF + 3.4))
         ) * 0.18;
-        vec3 gPos   = vPosition * 10.5 + dwarp + vec3(u_time * 0.0065 * rotF);
-        vec2 gCell  = voronoi(gPos);
+        // Granule<->supergranule coupling (1d): advect the granulation field
+        // along the supergranular outflow so granules drift toward -- and pile
+        // up at -- the network lanes. The two convection scales become one
+        // flow. (Drift coefficient 0.0065 preserved: this only adds a spatial
+        // warp, not a speed change.)
+        const float GRAN_COUPLE = 0.16;
+        vec3 gPos   = vPosition * 10.5 + dwarp
+                    + sgFlow * GRAN_COUPLE
+                    + vec3(u_time * 0.0065 * rotF);
+        vec3 gGrad;
+        vec2 gCell  = voronoiGrad(gPos, gGrad);
         // Crisper cell structure: narrower lane-transition for sharp dark
         // edges between bright cell interiors. Adds a subtle radial-bulge
         // brightness so each cell reads as 3D rather than flat.
@@ -2646,18 +2684,50 @@ const sunFS = /* glsl */`
         // Real granules form (~30 s rise), live (~5–10 min), then fade as
         // mass piles up at the boundary. Cheap proxy: hash the integer
         // cell-grid position to a per-cell phase, sin-modulate brightness.
-        vec3 cellGrid = floor(gPos);
+        vec3  cellGrid  = floor(gPos);
         float cellSeed  = hash(cellGrid);
         float cellPhase = cellSeed * 6.2832;
-        // Two-tone breath: slow main lifecycle (~3 sim-sec ≈ 5 min) +
-        // fast micro-flicker (~0.6 sim-sec) for sub-granule turbulence.
-        float granLife  = 0.5 + 0.5 * sin(u_time * 1.85 + cellPhase * 3.7);
-        float granJit   = 0.5 + 0.5 * sin(u_time * 9.2  + cellPhase * 17.0);
-        granLight *= 0.85 + granLife * 0.22 * laneD + granJit * 0.05 * laneD;
-        // "Exploding granule" rare bright burst: cells whose seed falls in
-        // the top 6% of [0,1] flash bright at random phase (~3% of frames).
-        float explode = smoothstep(0.94, 0.99, cellSeed) * pow(granLife, 6.0);
-        granLight *= 1.0 + explode * 0.45;
+        // Granule lifecycle: birth -> peak -> fragment -> fade (1b). Each cell
+        // runs its own clock (cellSeed phases it), so at any instant the field
+        // is a genuine mix of young, mature and dying granules instead of one
+        // global sinusoid. Real granules rise (~30 s), live a few minutes, then
+        // fragment as cooled plasma piles at the boundary.
+        const float GRAN_LIFE = 5.0;                          // sim-sec per granule life
+        float age     = fract(u_time / GRAN_LIFE + cellSeed);  // 0 born -> 1 dies
+        float rise    = smoothstep(0.00, 0.16, age);           // brighten as it surfaces
+        float fall    = 1.0 - smoothstep(0.74, 1.00, age);     // fade at end of life
+        float lifeEnv = rise * fall;                           // 0..1 lifecycle envelope
+        // Fast sub-granule flicker so mature granules still shimmer.
+        float granJit = 0.5 + 0.5 * sin(u_time * 9.2 + cellPhase * 17.0);
+        granLight *= 0.70 + 0.45 * lifeEnv * laneD + granJit * 0.05 * laneD;
+        // "Exploding granule": a fraction of cells grow a dark central dot and
+        // split late in life -- the classic granular-fragmentation signature.
+        float doomed  = smoothstep(0.84, 0.99, cellSeed);      // which cells explode
+        float splitT  = smoothstep(0.72, 0.84, age)
+                      * (1.0 - smoothstep(0.84, 0.96, age));
+        float coreDot = doomed * splitT * (1.0 - smoothstep(0.0, 0.22, gCell.x));
+        granLight *= 1.0 - coreDot * 0.55;                     // dark fragmenting core
+
+        // Analytic granule relief (1a): treat granule interiors as raised domes
+        // and lanes as sunken valleys, then tilt the micro-normal by the
+        // granule-height gradient (gGrad, from the same Worley pass -- no extra
+        // cost). True 3-D corrugation: granule tops catch the light, lane walls
+        // fall into shadow, strongest near the limb where we graze the relief
+        // ("orange-peel" boil). The sun mesh sits at the origin with identity
+        // transform, so object space == world space and the built-in
+        // cameraPosition gives the object-space view direction. (The gradient
+        // is discontinuous at lane centres, but reliefAmp -> 0 there via laneD,
+        // so no seams appear.)
+        vec3  nLocal    = normalize(vPosition);
+        vec3  objView   = normalize(cameraPosition - vPosition);
+        vec3  gTang     = gGrad - dot(gGrad, nLocal) * nLocal;  // tangential slope
+        float reliefAmp = laneD * lifeEnv;                      // domes raised; lanes/young flat
+        vec3  microN    = normalize(nLocal - gTang * (0.9 * reliefAmp));
+        float muR       = max(dot(microN, objView), 0.0);
+        // Baseline doming across the disc, ramping to full relief at the limb
+        // (granules read as lit 3-D cells everywhere, strongest at grazing angle).
+        float reliefW   = 0.40 + 0.60 * smoothstep(0.0, 0.85, 1.0 - mu);
+        granLight *= clamp(mix(1.0, muR / max(mu, 0.12), reliefW), 0.45, 1.8);
 
         // ── Fine sub-granulation turbulence ─────────────────────────────────
         float fineTurb = fbmTex(vPosition * 30.0 + vec3(u_time * 0.012 * rotF)) * 0.08;
@@ -2666,7 +2736,10 @@ const sunFS = /* glsl */`
         // Tiny intense specks where kG flux tubes emerge between granules
         float mbpNoise = vnoise(vPosition * 52.0 + vec3(u_time * 0.030 * rotF));
         float laneMask = 1.0 - laneD;  // 1=dark lane, 0=bright interior (for MBP placement)
-        float mbp = smoothstep(0.82, 0.92, mbpNoise) * laneMask * 0.55;
+        // Bright points cluster in the supergranular network (1d): kG flux
+        // tubes are swept to and pumped at the cell boundaries.
+        float sgNet = smoothstep(0.18, 0.42, sgCell.y - sgCell.x);
+        float mbp = smoothstep(0.82, 0.92, mbpNoise) * laneMask * (0.35 + 0.65 * sgNet) * 0.55;
 
         // ── Nanoflare / microflare transient brightenings ─────────────────────
         // Small-scale magnetic reconnection events (Parker 1988).
@@ -2832,9 +2905,14 @@ const sunFS = /* glsl */`
 
         // ── Base photospheric colour at T_eff ─────────────────────────────────
         vec3 baseCol = blackbody(u_teff);
+        // Per-cell convective temperature contrast (1c): hot bright upflow
+        // interiors run ~+250 K, cool sinking lanes ~-250 K (real granulation
+        // dT ~ +/-300 K). Driving colour -- not just brightness -- makes
+        // interiors read whiter and lanes redder.
+        vec3 granCol = blackbody(u_teff + (laneD - 0.5) * 500.0);
 
         // ── Compose surface brightness ────────────────────────────────────────
-        vec3 col = baseCol * (granLight + fineTurb + superGran);
+        vec3 col = granCol * granLight + baseCol * (fineTurb + superGran);
 
         // Magnetic bright points — intensely white
         col += vec3(1.4, 1.2, 0.9) * mbp * (1.0 - umbra) * u_showSpots;
@@ -4027,8 +4105,9 @@ const chromoFS = /* glsl */`
             alpha = max(alpha, isoFloor);
             // Slight cooling of the disk colour to distinguish it from the
             // photosphere look — pulls toward deeper Hα red, then plage on top.
-            col = mix(col, hAlpha * 1.15, diskFactor * 0.35);
-            col = mix(col, caKplage,      plageStruct * 0.45);
+            // (isolation colour tweak relocated to after section 8 -- col,
+            //  hAlpha and caKplage are not declared until then; using them
+            //  here was a pre-existing fragment-shader compile error.)
         }
         alpha = clamp(alpha, 0.0, u_chromoIso > 0.5 ? 0.95 : 0.82);
 
@@ -4049,6 +4128,13 @@ const chromoFS = /* glsl */`
         col = mix(col, vec3(1.00, 0.50, 0.25), network * 0.30 * diskFactor);
         // Plage — bright orange-pink Ca K halo
         col = mix(col, caKplage, plageStruct * 0.55);
+        // Isolation-mode colour tweak (relocated here so col/hAlpha/caKplage
+        // exist): cool the disk toward deeper Ha red, then plage on top, so the
+        // isolated chromosphere reads as a coherent shell, not the photosphere.
+        if (u_chromoIso > 0.5) {
+            col = mix(col, hAlpha * 1.15, diskFactor * 0.35);
+            col = mix(col, caKplage,      plageStruct * 0.45);
+        }
         // Spicules — slightly bluer hot tips
         col = mix(col, vec3(1.00, 0.45, 0.30), jets * pow(rim, 2.5) * 0.3);
         // Fibrils + filaments — pull color toward dark Hα absorption
@@ -10632,6 +10718,28 @@ updateAtmospherePanel();
         hint.style.opacity = window.scrollY > 40 ? '0' : '1';
     }, { passive: true });
 })();
+
+// ── Test / debug handle (smoke tests, Phase-1 verification) ──────────────────
+// Mirrors window.__ua / window.__ssd. Exposes the renderer + the seven layer
+// meshes so tests can assert visibility toggles and sample frames without a
+// debug overlay. renderer.info.render.frame is a monotonic frame counter.
+window.__sun = {
+    ready: true,
+    THREE,
+    renderer,
+    scene,
+    get composer() { return composer; },
+    layers: {
+        core:         coreMesh,
+        radiative:    radiativeMesh,
+        convective:   convectiveMesh,
+        photosphere:  sunLOD,
+        chromosphere: chromoMesh,
+        transition:   trMesh,
+        corona:       coronaMesh,
+    },
+    get frames() { return renderer.info.render.frame; },
+};
 </script>
 
 <!-- ── Simulation description ──────────────────────────────────────────── -->
