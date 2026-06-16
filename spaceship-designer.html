@@ -138,6 +138,33 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
 .ssd-toast.err{border-color:rgba(255,107,125,.5);color:#ffd0d6}
 .ssd-pill{font-size:10px;font-weight:700;letter-spacing:.05em;padding:1px 6px;border-radius:999px;
   background:rgba(0,200,255,.14);color:var(--c-accent);text-transform:uppercase}
+
+/* ── Aerodynamics / live force telemetry ── */
+.ssd-aero{max-width:1480px;margin:0 auto 60px;padding:0 20px}
+.ssd-aero .ssd-sub{font-size:12px;color:var(--c-text-mut);line-height:1.5;margin:0 0 4px}
+.ssd-instruments{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:10px}
+.ssd-inst{background:rgba(4,8,18,.5);border:1px solid var(--c-line);border-radius:var(--r-md);padding:10px 12px;display:flex;flex-direction:column;gap:3px}
+.ssd-inst .k{font-size:10px;color:var(--c-text-mut);text-transform:uppercase;letter-spacing:.06em}
+.ssd-inst .v{font-size:21px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.05}
+.ssd-inst .u{font-size:11px;color:var(--c-text-2)}
+.ssd-badge2{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  padding:2px 7px;border-radius:999px;border:1px solid var(--c-line)}
+.ssd-badge2.lam{color:#7fd3ff;border-color:rgba(127,211,255,.4);background:rgba(127,211,255,.08)}
+.ssd-badge2.turb{color:var(--c-warn);border-color:rgba(255,176,102,.4);background:rgba(255,176,102,.08)}
+.ssd-badge2.none{color:var(--c-text-mut)}
+.ssd-dragstack{display:flex;height:22px;border-radius:var(--r-sm);overflow:hidden;background:rgba(2,6,14,.6);border:1px solid var(--c-line)}
+.ssd-dragstack>span{display:block;height:100%;transition:width .12s linear}
+.ssd-seg-fric{background:linear-gradient(90deg,#3aa0ff,#5fc8ff)}
+.ssd-seg-press{background:linear-gradient(90deg,#9b7bff,#c79bff)}
+.ssd-seg-wave{background:linear-gradient(90deg,#ff7a59,#ffb066)}
+.ssd-leg{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;margin-top:7px}
+.ssd-leg .li{display:flex;align-items:center;gap:6px;color:var(--c-text-2)}
+.ssd-leg .sw{width:11px;height:11px;border-radius:3px;display:inline-block}
+.ssd-leg .val{color:var(--c-text);font-weight:700;font-variant-numeric:tabular-nums}
+.ssd-aero-cols{display:grid;grid-template-columns:1.3fr 1fr;gap:16px}
+@media (max-width:760px){.ssd-aero-cols{grid-template-columns:1fr}}
+.ssd-cdtable{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:13px;align-items:baseline}
+.ssd-cdtable .k{color:var(--c-text-2)} .ssd-cdtable .v{font-weight:700;text-align:right;font-variant-numeric:tabular-nums}
 </style>
 </head>
 <body>
@@ -169,6 +196,9 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
           <div class="ssd-field"><label>Target orbit (km)</label>
             <input type="number" id="ssd-alt" min="80" max="2000" step="10" value="200"></div>
         </div>
+        <div class="ssd-field"><label>Launch latitude <span class="ssd-rangeval" id="ssd-lat-val">28.5°</span></label>
+          <div class="ssd-row"><input type="range" id="ssd-lat" min="0" max="90" step="0.5" value="28.5"></div>
+          <div class="ssd-note" id="ssd-lat-note"></div></div>
       </div>
     </div>
 
@@ -229,6 +259,7 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
         <div class="ssd-h"><span class="k">Altitude</span><span class="v" id="hud-alt">0 km</span></div>
         <div class="ssd-h"><span class="k">Velocity</span><span class="v" id="hud-vel">0.00 km/s</span></div>
         <div class="ssd-h"><span class="k">Throttle</span><span class="v" id="hud-thr">0%</span></div>
+        <div class="ssd-h"><span class="k">Thrust</span><span class="v" id="hud-thrust">0.00 MN</span></div>
       </div>
       <div class="ssd-viewbar">
         <button class="ssd-btn ssd-ghost" data-view="3q">¾</button>
@@ -238,6 +269,7 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
         <button class="ssd-btn ssd-ghost" id="ssd-rotate">↻ Spin</button>
       </div>
       <div class="ssd-launchbar">
+        <button class="ssd-btn ssd-ghost" id="ssd-static-fire" title="Hold the rocket on the pad and fire stage 1 at the design throttle — watch the engines gimbal and the plume respond live to the throttle slider.">🔥 Static Fire</button>
         <button class="ssd-btn ssd-primary" id="ssd-launch">🚀 Launch</button>
         <button class="ssd-btn ssd-ghost" id="ssd-reset-flight">Reset</button>
       </div>
@@ -273,15 +305,92 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
 
 </div>
 
+<!-- ░░░ BOTTOM: live propulsion + aerodynamic force analysis ░░░ -->
+<div class="ssd-aero">
+  <div class="ssd-card" style="margin-bottom:14px">
+    <h2>Propulsion &amp; Thrust — Live Telemetry <span class="ssd-pill" id="ssd-prop-state">standby</span></h2>
+    <div class="ssd-body">
+      <p class="ssd-sub">Each engine pumps a near-fixed mass flow, so thrust climbs from its <strong>sea-level</strong> rating
+        to its higher <strong>vacuum</strong> rating as the air thins (the nozzle's pₑ−pₐ term grows). The vehicle also
+        sheds a spent stage's structure at burnout, after a brief coast. The integrator models all of it — so thrust,
+        specific impulse, thrust-to-weight and acceleration all evolve live as the rocket climbs and stages.</p>
+      <div class="ssd-instruments">
+        <div class="ssd-inst"><span class="k">Thrust</span><span class="v" id="prop-thrust">—</span><span class="u" id="prop-thrust-ctx">MN</span></div>
+        <div class="ssd-inst"><span class="k">Specific impulse</span><span class="v" id="prop-isp">—</span><span class="u">s · Isp</span></div>
+        <div class="ssd-inst"><span class="k">Thrust / weight</span><span class="v" id="prop-twr">—</span><span class="u">TWR</span></div>
+        <div class="ssd-inst"><span class="k">Acceleration</span><span class="v" id="prop-accel">—</span><span class="u">g</span></div>
+        <div class="ssd-inst"><span class="k">Active stage</span><span class="v" id="prop-stage">—</span><span class="u" id="prop-stage-ctx">on the pad</span></div>
+        <div class="ssd-inst"><span class="k">Δv delivered</span><span class="v" id="prop-dv">—</span><span class="u">km/s</span></div>
+      </div>
+      <div class="ssd-aero-cols" style="margin-top:14px">
+        <div class="ssd-note" id="prop-stagetable"></div>
+        <div class="ssd-cdtable" id="prop-static"></div>
+      </div>
+      <div style="margin-top:16px">
+        <div class="ssd-stat" style="border:none;padding-bottom:4px">
+          <span class="k">Stage 1 nozzle — <strong id="noz-engine">—</strong> · de Laval</span>
+          <span class="ssd-badge2" id="noz-state">—</span>
+        </div>
+        <p class="ssd-sub" id="noz-blurb"></p>
+        <div class="ssd-aero-cols">
+          <div class="ssd-cdtable" id="noz-specs"></div>
+          <div class="ssd-cdtable" id="noz-specs2"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="ssd-card">
+    <h2>Aerodynamic Forces — Live Telemetry <span class="ssd-pill" id="ssd-aero-state">standby</span></h2>
+    <div class="ssd-body">
+      <p class="ssd-sub">Drag is split into the three forces a real rocket fights on the way up: <strong>skin friction</strong>
+        (viscous shear in the turbulent boundary layer), <strong>pressure drag</strong> (base wake + the nose's subsonic
+        form drag), and <strong>wave drag</strong> (energy lost to the bow shock once the flow goes transonic). Numbers are
+        engineering correlations — Schlichting skin-friction, Hoerner form factors — fed through the same ascent integrator
+        as the flight. Press <strong>Launch</strong> to watch them move; the readout below updates live with Mach.</p>
+
+      <div class="ssd-instruments">
+        <div class="ssd-inst"><span class="k">Mach</span><span class="v" id="aero-mach">—</span><span class="u" id="aero-regime">on the pad</span></div>
+        <div class="ssd-inst"><span class="k">Dynamic pressure q</span><span class="v" id="aero-q">—</span><span class="u">kPa</span></div>
+        <div class="ssd-inst"><span class="k">Reynolds</span><span class="v" id="aero-re" style="font-size:17px">—</span><span class="u" id="aero-bl">boundary layer</span></div>
+        <div class="ssd-inst"><span class="k">Total drag</span><span class="v" id="aero-drag">—</span><span class="u">kN</span></div>
+        <div class="ssd-inst"><span class="k">Drag deceleration</span><span class="v" id="aero-decel">—</span><span class="u">m/s² · "g-drag"</span></div>
+      </div>
+
+      <div style="margin-top:14px">
+        <div class="ssd-stat" style="border:none;padding-bottom:4px"><span class="k" id="aero-stack-label">Drag composition (transonic, measured)</span></div>
+        <div class="ssd-dragstack">
+          <span class="ssd-seg-fric"  id="aero-seg-fric"  style="width:40%"></span>
+          <span class="ssd-seg-press" id="aero-seg-press" style="width:40%"></span>
+          <span class="ssd-seg-wave"  id="aero-seg-wave"  style="width:20%"></span>
+        </div>
+        <div class="ssd-leg">
+          <span class="li"><span class="sw ssd-seg-fric"></span>Skin friction <span class="val" id="aero-val-fric">—</span></span>
+          <span class="li"><span class="sw ssd-seg-press"></span>Pressure / base <span class="val" id="aero-val-press">—</span></span>
+          <span class="li"><span class="sw ssd-seg-wave"></span>Wave (shock) <span class="val" id="aero-val-wave">—</span></span>
+        </div>
+      </div>
+
+      <div class="ssd-aero-cols" style="margin-top:16px">
+        <div>
+          <div class="ssd-stat" style="border:none;padding-bottom:4px"><span class="k">Nose: <strong id="aero-nose-name">—</strong></span>
+            <span class="ssd-badge2 turb" id="aero-dragclass">—</span></div>
+          <div class="ssd-note" id="aero-blurb"></div>
+        </div>
+        <div class="ssd-cdtable" id="aero-cdtable"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="ssd-toast" id="ssd-toast"></div>
 
 <script type="module">
 import { auth } from './js/auth.js';
 import { getSupabase } from './js/supabase-config.js';
 import {
-  defaultDesign, computeStats, runAscent, gradeAscent,
+  defaultDesign, computeStats, computeAero, computeNozzle, expansionState, runAscent, gradeAscent,
   PROPELLANTS, ENGINE_CATALOG, NOSECONE_TYPES, FIN_TYPES, COCKPIT_LAYOUTS,
-  LIVERIES, PATTERNS, LAUNCH_BODY_OPTIONS,
+  LIVERIES, PATTERNS, LAUNCH_BODY_OPTIONS, LAUNCH_BODIES, surfaceRotationSpeed,
 } from './js/spaceship-designer-engine.js';
 import { createRocketScene } from './js/spaceship-designer-3d.js';
 import * as store from './js/spaceship-designer-store.js';
@@ -363,6 +472,7 @@ function readControls() {
   design.name = $('ssd-name').value || 'Untitled';
   design.bodyId = $('ssd-body').value;
   design.targetAltKm = +$('ssd-alt').value || 200;
+  design.launchLatitude = +$('ssd-lat').value || 0;
   design.payload = {
     mass_kg: +$('ssd-payload').value || 0,
     nosecone: $('ssd-nose').value,
@@ -405,6 +515,202 @@ function renderStats() {
       <div class="ssd-dvbar"><span style="width:${Math.min(100, s.dv_kms / maxDv * 100)}%"></span></div></div>`;
   });
   $('ssd-stats').innerHTML = html;
+  liftoffWet = st.totalWet_kg;
+}
+
+// ── Aerodynamic force analysis (bottom panel) ────────────────────────────────
+let liftoffWet = 0;
+const SUP = { '-': '⁻', '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹' };
+function fmtSci(x) {
+  if (!x || x < 1000) return '—';
+  const e = Math.floor(Math.log10(x));
+  const m = x / Math.pow(10, e);
+  return m.toFixed(1) + '×10' + String(e).split('').map((c) => SUP[c] || c).join('');
+}
+const DRAG_TONE = { 'low': 'var(--c-good)', 'moderate': 'var(--c-accent)', 'high': 'var(--c-warn)', 'very high': 'var(--c-bad)' };
+function setStack(fric, press, wave) {
+  const tot = Math.max(1e-9, fric + press + wave);
+  $('aero-seg-fric').style.width = (fric / tot * 100) + '%';
+  $('aero-seg-press').style.width = (press / tot * 100) + '%';
+  $('aero-seg-wave').style.width = (wave / tot * 100) + '%';
+}
+function blBadge(state) {
+  const cls = state === 'laminar' ? 'lam' : state === 'turbulent' ? 'turb' : 'none';
+  return `<span class="ssd-badge2 ${cls}">${state || '—'}</span>`;
+}
+
+// Static "measured" readout — recomputed whenever the design changes so the nose
+// choice has a visible, quantified effect even before you launch.
+function renderAeroStatic() {
+  const a = computeAero(design);
+  $('aero-nose-name').textContent = a.noseName;
+  const dc = $('aero-dragclass');
+  dc.textContent = a.dragClass + ' drag';
+  dc.style.color = DRAG_TONE[a.dragClass] || 'var(--c-text-2)';
+  dc.style.borderColor = DRAG_TONE[a.dragClass] || 'var(--c-line)';
+  $('aero-blurb').textContent = a.blurb;
+
+  // Measured Cd points + geometry.
+  const r = a.reference;
+  const noseOnly = (c) => c.cdForm + c.cdWave;          // the part the nose owns
+  $('aero-cdtable').innerHTML = [
+    ['Cd · subsonic (M 0.5)', r.subsonic.cdTotal.toFixed(3)],
+    ['Cd · transonic (M 1.05)', r.transonic.cdTotal.toFixed(3)],
+    ['Cd · supersonic (M 3)', r.supersonic.cdTotal.toFixed(3)],
+    ['Nose Cd contribution (M 1.05)', noseOnly(r.transonic).toFixed(3)],
+    ['Vehicle fineness L/D', a.fineness.toFixed(1)],
+    ['Nose fineness', a.noseFineness.toFixed(2)],
+    ['Reference area', a.refArea_m2.toFixed(1) + ' m²'],
+    ['Wetted area', a.wettedArea_m2.toFixed(0) + ' m²'],
+  ].map(([k, v]) => `<span class="k">${k}</span><span class="v">${v}</span>`).join('');
+
+  if (!liveAero) {
+    // Idle: show the measured transonic composition and reset the instruments.
+    $('ssd-aero-state').textContent = a.hasAtmosphere ? 'standby' : 'vacuum world';
+    $('aero-stack-label').textContent = 'Drag composition (transonic, measured)';
+    const c = r.transonic;
+    setStack(c.cdFriction, c.cdPressure, c.cdWave);
+    $('aero-val-fric').textContent = c.cdFriction.toFixed(3);
+    $('aero-val-press').textContent = c.cdPressure.toFixed(3);
+    $('aero-val-wave').textContent = c.cdWave.toFixed(3);
+    ['aero-mach', 'aero-q', 'aero-re', 'aero-drag', 'aero-decel'].forEach((id) => { $(id).textContent = '—'; });
+    $('aero-regime').textContent = a.hasAtmosphere ? 'on the pad' : 'no atmosphere';
+    $('aero-bl').textContent = 'boundary layer';
+  }
+}
+
+// Live readout driven by the flight's per-frame aero telemetry.
+let liveAero = false;
+function updateAeroLive(s) {
+  liveAero = true;
+  const vacuum = (s.qkPa ?? 0) < 0.02;
+  $('ssd-aero-state').textContent = vacuum ? 'vacuum · no aero' : (s.regime || '—');
+  $('aero-mach').textContent = (s.mach ?? 0).toFixed(2);
+  $('aero-regime').textContent = vacuum ? 'exo-atmospheric' : (s.regime || '');
+  $('aero-q').textContent = (s.qkPa ?? 0).toFixed((s.qkPa ?? 0) >= 10 ? 0 : 2);
+  $('aero-re').innerHTML = vacuum ? '—' : fmtSci(s.reynolds);
+  $('aero-bl').innerHTML = vacuum ? blBadge('none') : blBadge(s.boundaryLayer);
+  $('aero-drag').textContent = (s.dragkN ?? 0).toFixed(1);
+  const mass = liftoffWet * (s.massFrac ?? 1);
+  const decel = mass > 0 ? (s.dragkN ?? 0) * 1000 / mass : 0;
+  $('aero-decel').textContent = decel.toFixed(2) + ` (${(decel / 9.80665).toFixed(2)} g)`;
+
+  $('aero-stack-label').textContent = 'Drag composition (live force)';
+  const fr = s.dragFrictionkN ?? 0, pr = s.dragPressurekN ?? 0, wv = s.dragWavekN ?? 0;
+  setStack(fr, pr, wv);
+  $('aero-val-fric').textContent = fr.toFixed(1) + ' kN';
+  $('aero-val-press').textContent = pr.toFixed(1) + ' kN';
+  $('aero-val-wave').textContent = wv.toFixed(1) + ' kN';
+}
+
+// Launch-latitude → rotation assist note (under the slider).
+function updateLatNote() {
+  const lat = +$('ssd-lat').value || 0;
+  $('ssd-lat-val').textContent = lat.toFixed(1) + '°';
+  const body = LAUNCH_BODIES[$('ssd-body').value] || LAUNCH_BODIES.earth;
+  const vrot = surfaceRotationSpeed(body, lat);
+  const eq = surfaceRotationSpeed(body, 0);
+  $('ssd-lat-note').innerHTML = vrot > 1
+    ? `Eastward rotation gives <strong>+${vrot.toFixed(0)} m/s</strong> of orbital velocity free `
+      + `(${eq.toFixed(0)} m/s at the equator). Min inclination ≈ ${lat.toFixed(0)}°.`
+    : `${body.name} barely rotates — no useful launch assist.`;
+}
+
+// ── Propulsion / thrust analysis (bottom panel) ──────────────────────────────
+let liveProp = false;
+function renderPropStatic() {
+  const st = computeStats(design);
+  const s0 = st.stages[0] || {};
+  const body = LAUNCH_BODIES[design.bodyId] || LAUNCH_BODIES.earth;
+  const vrot = surfaceRotationSpeed(body, design.launchLatitude ?? 0);
+  const crewed = (design.cockpit?.crew || 0) > 0;
+  const fmtT = (kN) => (kN >= 1000 ? (kN / 1000).toFixed(2) + ' MN' : (kN).toFixed(0) + ' kN');
+  $('prop-stagetable').innerHTML =
+    `<strong>${st.stages.length}-stage</strong> vehicle · stage 1 fires at liftoff, ` +
+    `${st.stages.length > 1 ? (st.stages.length - 1) + ' staging event' + (st.stages.length > 2 ? 's' : '') : 'single stage'}. ` +
+    `Thrust quoted sea-level → vacuum; the rise is the nozzle pressure term as the air thins. ` +
+    `Auto-throttle caps dynamic pressure (max-Q) and acceleration.`;
+  $('prop-static').innerHTML = [
+    ['Liftoff thrust (SL → vac)', fmtT(s0.thrustSL_kN || 0) + ' → ' + fmtT(s0.thrustVac_kN || 0)],
+    ['Liftoff TWR', st.liftoffTWR.toFixed(2)],
+    ['Stage 1 Isp (SL / vac)', `${Math.round(s0.isp_s || 0)} / ${Math.round(s0.ispVac_s || 0)} s`],
+    ['Ideal Δv (Tsiolkovsky)', st.totalDv_kms.toFixed(2) + ' km/s'],
+    ['Rotation assist', vrot > 1 ? `+${vrot.toFixed(0)} m/s @ ${(design.launchLatitude ?? 0).toFixed(0)}°` : 'none'],
+    ['Acceleration limit', `${crewed ? 4 : 6} g (${crewed ? 'crewed' : 'uncrewed'})`],
+  ].map(([k, v]) => `<span class="k">${k}</span><span class="v">${v}</span>`).join('');
+  if (!liveProp) {
+    $('ssd-prop-state').textContent = 'standby';
+    ['prop-thrust', 'prop-isp', 'prop-twr', 'prop-accel', 'prop-stage', 'prop-dv'].forEach((id) => { $(id).textContent = '—'; });
+    $('prop-thrust-ctx').textContent = 'MN'; $('prop-stage-ctx').textContent = 'on the pad';
+  }
+  renderNozzleStatic();
+}
+
+const NOZ_TONE = { optimal: 'var(--c-good)', under: 'var(--c-accent)', over: 'var(--c-warn)', separated: 'var(--c-bad)', electrostatic: 'var(--c-accent)' };
+const NOZ_LABEL = { optimal: 'optimally expanded', under: 'under-expanded', over: 'over-expanded', separated: 'flow separated', electrostatic: 'electrostatic' };
+function setNozBadge(el, state, extra = '') {
+  el.textContent = (NOZ_LABEL[state] || state) + extra;
+  el.style.color = NOZ_TONE[state] || 'var(--c-text-2)';
+  el.style.borderColor = NOZ_TONE[state] || 'var(--c-line)';
+}
+function renderNozzleStatic() {
+  const s0 = design.stages[0] || {};
+  const e = ENGINE_CATALOG[s0.engineId] || ENGINE_CATALOG.merlin_1d;
+  const body = LAUNCH_BODIES[design.bodyId] || LAUNCH_BODIES.earth;
+  const n = computeNozzle(e, s0.propellantId, s0.engineCount || 1, body);
+  $('noz-engine').textContent = (e.label || e.name || 'Engine') + ' ×' + (s0.engineCount || 1);
+  if (n.electrostatic) {
+    setNozBadge($('noz-state'), 'electrostatic');
+    $('noz-blurb').textContent = 'Electrostatic thruster — accelerates ions in a field, with no converging-diverging gas nozzle. Whisper thrust, no liftoff capability.';
+    $('noz-specs').innerHTML = `<span class="k">Exhaust velocity</span><span class="v">${(n.ve_ms / 1000).toFixed(1)} km/s</span>`;
+    $('noz-specs2').innerHTML = '';
+    return;
+  }
+  const p0 = body.p0_pa || 0;
+  const slState = expansionState(n, p0);
+  const kPa = (pa) => pa >= 1000 ? (pa / 1000).toFixed(1) + ' kPa' : pa.toFixed(0) + ' Pa';
+  $('noz-specs').innerHTML = [
+    ['Expansion ratio ε (Aₑ/Aₜ)', n.eps.toFixed(0)],
+    ['Exit Mach Mₑ', n.exitMach.toFixed(2)],
+    ['Exit velocity vₑ', (n.ve_ms / 1000).toFixed(2) + ' km/s'],
+    ['Thrust coefficient C_F', n.CF_vac.toFixed(2)],
+  ].map(([k, v]) => `<span class="k">${k}</span><span class="v">${v}</span>`).join('');
+  $('noz-specs2').innerHTML = [
+    ['Chamber pressure p_c', (n.pc_pa / 1e6).toFixed(1) + ' MPa'],
+    ['Exit pressure pₑ', kPa(n.pe_pa)],
+    ['Throat / exit area', n.At_m2.toFixed(2) + ' / ' + n.Ae_m2.toFixed(2) + ' m²'],
+    ['Optimal altitude (pₑ=pₐ)', n.optAlt_m > 50 ? (n.optAlt_m / 1000).toFixed(1) + ' km' : 'sea level'],
+  ].map(([k, v]) => `<span class="k">${k}</span><span class="v">${v}</span>`).join('');
+  if (!liveProp) {
+    setNozBadge($('noz-state'), slState.state, ` · pₑ/pₐ ${slState.ratio.toFixed(2)} at ${body.name} surface`);
+    const opt = n.optAlt_m > 50 ? `optimally expanded at ${(n.optAlt_m / 1000).toFixed(1)} km` : 'optimally expanded at the surface';
+    $('noz-blurb').textContent = slState.separated
+      ? `This nozzle is far too large for ${body.name}'s surface pressure — the flow separates from the wall and the engine cannot run here. It needs near-vacuum (a high-altitude or upper stage).`
+      : `On the pad this nozzle is ${NOZ_LABEL[slState.state]} (pₑ/pₐ ${slState.ratio.toFixed(2)}); it becomes ${opt}, then runs increasingly under-expanded above that as the air thins.`;
+  }
+}
+function updatePropLive(s) {
+  liveProp = true;
+  const coasting = !!s.coasting;
+  $('ssd-prop-state').textContent = coasting ? 'staging coast' : 'burn · stage ' + (s.stage ?? 1);
+  const th = s.thrustMN ?? 0;
+  $('prop-thrust').textContent = th >= 1 ? th.toFixed(2) : (th * 1000).toFixed(0);
+  $('prop-thrust-ctx').textContent = th >= 1 ? 'MN' : 'kN';
+  $('prop-isp').textContent = coasting ? '—' : Math.round(s.isp ?? 0);
+  $('prop-twr').textContent = (s.twr ?? 0).toFixed(2);
+  $('prop-accel').textContent = (s.accelG ?? 0).toFixed(2);
+  $('prop-stage').textContent = coasting ? '— ' : 'S' + (s.stage ?? 1);
+  const thrPct = Math.round((s.throttle ?? 1) * 100);
+  $('prop-stage-ctx').textContent = coasting ? 'coasting' : (thrPct < 99 ? `throttled ${thrPct}%` : 'full thrust');
+  $('prop-dv').textContent = (s.dvUsed ?? 0).toFixed(2);
+  // Live nozzle expansion state.
+  if (s.nozzleState && !coasting) {
+    const ratio = s.peOverPa;
+    const rtxt = (ratio == null || !isFinite(ratio)) ? '∞' : ratio.toFixed(2);
+    setNozBadge($('noz-state'), s.nozzleState, ` · pₑ/pₐ ${rtxt} · Mₑ ${(s.exitMach ?? 0).toFixed(1)}`);
+  } else if (coasting) {
+    setNozBadge($('noz-state'), 'over', ' · engine off');
+  }
 }
 
 // ── 3D rebuild (debounced) ───────────────────────────────────────────────────
@@ -416,14 +722,24 @@ function scheduleRebuild() {
 // ── Full refresh after any change ────────────────────────────────────────────
 function refresh({ rebuild = true } = {}) {
   renderStats();
+  renderAeroStatic();
+  renderPropStatic();
   if (rebuild) scheduleRebuild();
   store.saveDraft(design);
+}
+
+// Reflect static-fire state on its toggle button.
+function setStaticFireBtn(on) {
+  const b = $('ssd-static-fire');
+  b.classList.toggle('ssd-primary', on);
+  b.textContent = on ? '⏹ Stop Fire' : '🔥 Static Fire';
 }
 
 // ── Launch ───────────────────────────────────────────────────────────────────
 async function doLaunch() {
   const btn = $('ssd-launch');
   btn.disabled = true;
+  setStaticFireBtn(false);
   scene.reset();
   scene.build(design);
   const result = runAscent(design);
@@ -443,6 +759,11 @@ function showResult(result) {
     orbit: 'Orbit achieved', 'fuel-out': 'MECO — out of propellant',
     crashed: 'Crashed', 'time-out': 'Flight timed out', invalid: 'Invalid design',
   }[result.status] || result.status;
+  const ev = result.staging_events || [];
+  const stagingRows = ev.length
+    ? `<div class="ssd-stat" style="border:none"><span class="k">Staging</span><span class="v">${
+        ev.map((e) => `S${e.stage}→${e.stage + 1} @ T+${e.t.toFixed(0)}s, ${(e.v_kms ?? 0).toFixed(2)} km/s`).join('<br>')}</span></div>`
+    : '';
   $('ssd-result').innerHTML = `
     <div style="display:flex;gap:16px;align-items:center">
       <div class="ssd-grade ${g.tone}">${g.grade}</div>
@@ -455,7 +776,12 @@ function showResult(result) {
     <div class="ssd-stat"><span class="k">Δv used</span><span class="v">${ks(result.dv_used_kms)} km/s</span></div>
     <div class="ssd-stat"><span class="k">Gravity loss</span><span class="v">${ks(result.dv_grav_loss_kms)} km/s</span></div>
     <div class="ssd-stat"><span class="k">Drag loss</span><span class="v">${ks(result.dv_drag_loss_kms)} km/s</span></div>
-    <div class="ssd-stat" style="border:none"><span class="k">Max-Q</span><span class="v">${(result.max_q_kPa ?? 0).toFixed(0)} kPa</span></div>`;
+    ${(result.v_rotation_kms ?? 0) > 0.001 ? `<div class="ssd-stat"><span class="k">Rotation assist</span><span class="v" style="color:var(--c-good)">+${ks(result.v_rotation_kms)} km/s @ ${(result.launch_lat_deg ?? 0).toFixed(0)}°</span></div>` : ''}
+    <div class="ssd-stat"><span class="k">Peak acceleration</span><span class="v"${(result.max_accel_g ?? 0) > (result.accel_limit_g ?? 99) + 0.1 ? ' style="color:var(--c-warn)"' : ''}>${(result.max_accel_g ?? 0).toFixed(1)} g${result.accel_limit_g ? ` / ${result.accel_limit_g} g cap` : ''}</span></div>
+    <div class="ssd-stat"><span class="k">Max-Q</span><span class="v">${(result.max_q_kPa ?? 0).toFixed(0)} kPa</span></div>
+    <div class="ssd-stat"><span class="k">Max Mach (in atmosphere)</span><span class="v">${(result.max_mach ?? 0).toFixed(1)}</span></div>
+    <div class="ssd-stat"${stagingRows ? '' : ' style="border:none"'}><span class="k">Peak aero drag</span><span class="v">${(result.max_drag_kN ?? 0).toFixed(0)} kN @ ${(result.max_drag_alt_km ?? 0).toFixed(0)} km</span></div>
+    ${stagingRows}`;
 }
 
 // ── Hangar (save / load) ─────────────────────────────────────────────────────
@@ -517,6 +843,8 @@ function hydrateControls() {
   $('ssd-name').value = design.name || '';
   fillSelect($('ssd-body'), LAUNCH_BODY_OPTIONS, design.bodyId);
   $('ssd-alt').value = design.targetAltKm || 200;
+  $('ssd-lat').value = design.launchLatitude ?? 28.5;
+  updateLatNote();
   fillSelect($('ssd-nose'), Object.values(NOSECONE_TYPES), design.payload?.nosecone || 'ogive');
   $('ssd-payload').value = design.payload?.mass_kg ?? 15000;
   $('ssd-fairing').value = design.payload?.fairingLen_m ?? 11;
@@ -533,10 +861,10 @@ function hydrateControls() {
 // ── Wire events ──────────────────────────────────────────────────────────────
 function wire() {
   // Top-level controls.
-  ['ssd-name', 'ssd-body', 'ssd-alt', 'ssd-nose', 'ssd-payload', 'ssd-fairing',
+  ['ssd-name', 'ssd-body', 'ssd-alt', 'ssd-lat', 'ssd-nose', 'ssd-payload', 'ssd-fairing',
    'ssd-cockpit', 'ssd-crew', 'ssd-windows', 'ssd-fin', 'ssd-fincount',
    'ssd-livery', 'ssd-pattern'].forEach((id) => {
-    $(id).addEventListener('input', () => { readControls(); refresh(); });
+    $(id).addEventListener('input', () => { readControls(); updateLatNote(); refresh(); });
   });
 
   // Stage controls (event delegation on the container).
@@ -591,11 +919,20 @@ function wire() {
     spinning = !spinning; scene.setAutoRotate(spinning);
     $('ssd-rotate').classList.toggle('ssd-primary', spinning);
   });
+  // Static-fire engine test (hold-down on the pad).
+  $('ssd-static-fire').addEventListener('click', () => {
+    const on = !scene.isStaticFiring;
+    scene.setStaticFire(on);
+    setStaticFireBtn(on);
+  });
   $('ssd-launch').addEventListener('click', doLaunch);
   $('ssd-reset-flight').addEventListener('click', () => {
     scene.reset(); scene.build(design);
+    setStaticFireBtn(false);
+    liveAero = false; renderAeroStatic();
+    liveProp = false; renderPropStatic();
     $('hud-alt').textContent = '0 km'; $('hud-vel').textContent = '0.00 km/s';
-    $('hud-thr').textContent = '0%'; $('ssd-phase').textContent = '';
+    $('hud-thr').textContent = '0%'; $('hud-thrust').textContent = '0.00 MN'; $('ssd-phase').textContent = '';
   });
   $('ssd-save').addEventListener('click', doSave);
 }
@@ -607,8 +944,11 @@ function wire() {
       $('hud-alt').textContent = (s.altKm ?? 0).toFixed(s.altKm >= 100 ? 0 : 1) + ' km';
       $('hud-vel').textContent = (s.vKms ?? 0).toFixed(2) + ' km/s';
       $('hud-thr').textContent = Math.round((s.throttle ?? 0) * 100) + '%';
+      $('hud-thrust').textContent = (s.thrustMN ?? 0).toFixed(2) + ' MN';
+      if (s.mach !== undefined) updateAeroLive(s);
+      if (s.isp !== undefined) updatePropLive(s);
     },
-    onPhase: (p) => { $('ssd-phase').textContent = p === 'idle' ? '' : p; },
+    onPhase: (p) => { $('ssd-phase').textContent = p === 'idle' ? '' : p.replace('-', ' '); },
   });
 
   hydrateControls();
@@ -624,6 +964,7 @@ function wire() {
     scene,
     // Self-test: the default rocket should produce finite stats and a flyable
     // ascent. Returns { ok, checks } like the satellite-designer harness.
+    computeAero,
     selfTest() {
       const checks = [];
       const s = computeStats(design);
@@ -632,6 +973,33 @@ function wire() {
       const r = runAscent(defaultDesign());
       checks.push(['default reaches orbit', r.status === 'orbit']);
       checks.push(['trajectory non-empty', (r.trajectory?.length || 0) > 0]);
+      // Aero model: finite Cd, transonic drag rise, and a measurable nose effect.
+      const a = computeAero(defaultDesign());
+      const sub = a.reference.subsonic.cdTotal, tra = a.reference.transonic.cdTotal;
+      checks.push(['aero Cd finite', Number.isFinite(tra) && tra > 0]);
+      checks.push(['transonic drag rise', tra > sub]);
+      checks.push(['traj carries aero', r.trajectory.some((p) => Number.isFinite(p.dragWave_kN))]);
+      const capsuleDesign = { ...defaultDesign(), payload: { ...defaultDesign().payload, nosecone: 'capsule' } };
+      const cap = runAscent(capsuleDesign);
+      checks.push(['blunt nose costs more drag', cap.dv_drag_loss_kms > r.dv_drag_loss_kms]);
+      // Propulsion: real thrust telemetry + sea-level→vacuum thrust rise + staging.
+      const stg1 = r.trajectory.filter((p) => p.stage === 1);
+      checks.push(['traj carries thrust', stg1.some((p) => p.thrust_kN > 0)]);
+      checks.push(['SL→vac thrust rise', stg1.length > 1 && stg1[0].thrust_kN < stg1[stg1.length - 1].thrust_kN]);
+      checks.push(['staging event recorded', (r.staging_events?.length || 0) >= 1]);
+      // Nozzle de Laval physics.
+      const noz = computeNozzle(ENGINE_CATALOG.merlin_1d, 'kerolox', 1, LAUNCH_BODIES.earth);
+      checks.push(['nozzle Me supersonic', noz.exitMach > 1 && noz.pe_pa > 0]);
+      checks.push(['vac nozzle separates at SL', expansionState(computeNozzle(ENGINE_CATALOG.merlin_vac, 'kerolox', 1, LAUNCH_BODIES.earth), 101325).separated === true]);
+      checks.push(['traj carries nozzle state', r.trajectory.some((p) => !!p.nozzleState)]);
+      // Gravity / rotation: lower latitude → more rotation assist → easier orbit.
+      const eqD = { ...defaultDesign(), launchLatitude: 0 };
+      const poleD = { ...defaultDesign(), launchLatitude: 90 };
+      const eq = runAscent(eqD), pole = runAscent(poleD);
+      checks.push(['rotation assist > 0', r.v_rotation_kms > 0]);
+      checks.push(['equator beats pole', (eq.final_vt_kms - eq.v_orb_circ_kms) > (pole.final_vt_kms - pole.v_orb_circ_kms)]);
+      checks.push(['accel capped at limit', r.max_accel_g <= r.accel_limit_g + 0.05]);
+      checks.push(['traj carries throttle', r.trajectory.every((p) => Number.isFinite(p.throttle))]);
       return { ok: checks.every((c) => c[1]), checks };
     },
   };
