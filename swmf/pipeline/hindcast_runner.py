@@ -207,6 +207,11 @@ def _load_fixture_mhd(fixture_dir: Path) -> list[dict]:
     return samples
 
 
+# Real SWMF/IE logs are written at the coupling cadence (a few seconds); the
+# hindcast output contract is 5-minute cadence, so we decimate on read.
+_REAL_RUN_CADENCE_S = 300.0
+
+
 def _load_real_mhd(run_dir: Path,
                    *,
                    window_start: Optional[datetime] = None,
@@ -214,13 +219,16 @@ def _load_real_mhd(run_dir: Path,
     """
     Read Φ_PC and HPI from the SWMF/IE (Ridley Ionosphere) log file
     written under `run_dir`. See `parse_ie_log.py` for the format
-    contract and column-name fallbacks.
+    contract and column-name fallbacks. Decimated to the 5-minute output
+    cadence (which also collapses the steady-state relaxation rows that all
+    share the run-start timestamp).
     """
     from pipeline.parse_ie_log import find_ie_log, parse_ie_log
     log_path = find_ie_log(run_dir)
     return parse_ie_log(log_path,
                         start_utc=window_start,
-                        end_utc=window_end)
+                        end_utc=window_end,
+                        decimate_seconds=_REAL_RUN_CADENCE_S)
 
 
 # ── Driver ────────────────────────────────────────────────────────────────────
