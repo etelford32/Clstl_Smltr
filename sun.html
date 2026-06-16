@@ -5693,6 +5693,7 @@ const cmeShockFS = /* glsl */`
 `;
 
 function spawnCMEShock(speedNorm) {
+    return;   // DISABLED (owner): removed the translucent expanding CME shock sphere
     const su = { u_age: { value: 0.0 }, u_speed: { value: speedNorm }, u_time: uniforms.u_time };
     const mat = new THREE.ShaderMaterial({
         vertexShader: cmeShockVS, fragmentShader: cmeShockFS, uniforms: su,
@@ -5815,6 +5816,7 @@ function _buildFluxRopePts(latRad, lonRad, speedNorm) {
 }
 
 function spawnFluxRope(latRad, lonRad, speedNorm) {
+    return;   // DISABLED (owner): removed the CME flux-rope tube ("the flare thing")
     const pts    = _buildFluxRopePts(latRad, lonRad, speedNorm);
     const curve  = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.45);
     const tubeR  = 0.042 + speedNorm * 0.032;   // thicker for faster CMEs
@@ -7711,6 +7713,7 @@ function eruptNearestProminence(lat_r, lon_r) {
 const eruptionMeshes = [];
 
 function spawnEruptingProminence(lat_r, lon_r, classCh) {
+    return;   // DISABLED (owner): removed the erupting-prominence / CME-front bubble
     // Determine size and colour by flare class
     const isX    = classCh === 'X';
     const isM    = classCh === 'M';
