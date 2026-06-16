@@ -1672,6 +1672,7 @@ import {
     aggregateFusionStats, radialProfile, PhotonPool,
     L_SUN_W, R_SUN_M, AU_M,
 } from './js/solar-interior-engine.js';
+import { SolarFluid } from './js/solar-fluid.js';
 import { SolarDynamo } from './js/solar-dynamo.js';
 import { EffectComposer }     from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass }         from 'three/addons/postprocessing/RenderPass.js';
@@ -2045,6 +2046,11 @@ const uniforms = {
     u_cutOffset:         { value: 2.0 },
     u_cutaway:           { value: 0.0 },
     u_doppler:           { value: 0.0 },   // 1 = Doppler line-of-sight velocity view
+    u_fluidTex:          { value: null },  // GPU thermal-convection sim (T in .r, vel in .gb)
+    u_fluidOn:           { value: 0.0 },   // 1 = sim drives the granulation
+    u_fluidT0:           { value: 1.0 },
+    u_fluidScale:        { value: 3.2 },
+    u_fluidDebug:        { value: 0.0 },
     u_showSpots:         { value: 1.0 },   // 1 = show sunspots, 0 = hide
     u_showFlares:        { value: 1.0 },   // 1 = show flares,   0 = hide
     // ── Live solar wind uniforms (driven by DSCOVR/ACE L1 pipeline) ──
@@ -2182,7 +2188,7 @@ let composer, bloomAmbient, bloomFlare, radialDiffusePass;
     //
     // URL flag ?bloom=ambient|flare|both|off (default both) sets initial
     // visibility; the two checkboxes in the rendering panel override.
-    bloomAmbient = new UnrealBloomPass(new THREE.Vector2(W, H), 0.18, 0.85, 0.55);
+    bloomAmbient = new UnrealBloomPass(new THREE.Vector2(W, H), 0.18, 0.28, 0.85);
     bloomFlare   = new UnrealBloomPass(new THREE.Vector2(W, H), 0.00, 0.20, 1.10);
     composer.addPass(bloomAmbient);
     composer.addPass(bloomFlare);
@@ -2293,6 +2299,7 @@ let composer, bloomAmbient, bloomFlare, radialDiffusePass;
     };
     radialDiffusePass = new ShaderPass(diffuseShader);
     composer.addPass(radialDiffusePass);
+    radialDiffusePass.enabled = false;   // off: produced radial glow circles
 
     // ── Space occlusion — corona-to-space shadow boundary ────────────────────
     // Final pass: smoothly darkens pixels beyond the bright corona annulus,
@@ -2516,6 +2523,11 @@ const sunFS = /* glsl */`
     uniform float u_cutOffset;       // plane offset along u_cut; >1 = disabled
     uniform float u_cutaway;         // 1 = cutaway/peel active
     uniform float u_doppler;         // 1 = Doppler velocity view
+    uniform sampler2D u_fluidTex;    // GPU convection sim
+    uniform float u_fluidOn;
+    uniform float u_fluidT0;
+    uniform float u_fluidScale;
+    uniform float u_fluidDebug;
     varying vec3  vNormal;
     varying vec3  vPosition;
     varying vec3  vViewDir;
@@ -2686,91 +2698,81 @@ const sunFS = /* glsl */`
         // Bright cell centres (upwelling), dark lanes (downflow at boundaries)
         float superGran = smoothstep(0.0, 0.45, sgCell.x) * 0.08;
 
-        // ── Granulation (~1 000 km cells) ─────────────────────────────────────
-        // Domain-warp: slow turbulent deformation gives a "boiling" look.
-        // Phase 4.6: domain warp + fine turbulence both use the pre-baked
-        // noise atlas via fbmTex (triplanar 2D lookups). Same visual feel,
-        // ~5× cheaper per fragment than the procedural fbm path.
-        vec3 dwarp = vec3(
-            fbmTex(vPosition * 5.5 + vec3(u_time * 0.0032 * rotF)),
-            fbmTex(vPosition * 5.5 + vec3(u_time * 0.0032 * rotF + 1.7)),
-            fbmTex(vPosition * 5.5 + vec3(u_time * 0.0032 * rotF + 3.4))
-        ) * 0.18;
-        // Granule<->supergranule coupling (1d): advect the granulation field
-        // along the supergranular outflow so granules drift toward -- and pile
-        // up at -- the network lanes. The two convection scales become one
-        // flow. (Drift coefficient 0.0065 preserved: this only adds a spatial
-        // warp, not a speed change.)
-        const float GRAN_COUPLE = 0.16;
-        vec3 gPos   = vPosition * 10.5 + dwarp
-                    + sgFlow * GRAN_COUPLE
-                    + vec3(u_time * 0.0065 * rotF);
-        vec3 gGrad;
-        vec2 gCell  = voronoiGrad(gPos, gGrad);
-        // Crisper cell structure: narrower lane-transition for sharp dark
-        // edges between bright cell interiors. Adds a subtle radial-bulge
-        // brightness so each cell reads as 3D rather than flat.
-        float laneD     = smoothstep(0.02, 0.16, gCell.y - gCell.x);   // 0=lane, 1=interior
-        float cellBulge = 1.0 - 0.18 * smoothstep(0.0, 0.30, gCell.x); // bright centre, slightly dim edge
+        // Granulation - flow-advected convective cells (fluid). A divergence-
+        // free convective flow advects the granulation each frame so the cells
+        // genuinely stream, shear and swirl, converging into the dark
+        // intergranular downflow lanes -- real fluid motion, not a translating
+        // texture.
+        vec3 nLocal  = normalize(vPosition);
+        vec3 objView = normalize(cameraPosition - vPosition);
 
-        // ── Schwarzschild centre-to-limb contrast attenuation ─────────────
-        // Granulation contrast (~16% intensity ratio at disk centre) drops
-        // toward the limb because we're sampling a higher, cooler part of
-        // the photosphere where convection has overshot and decoupled. The
-        // band of lane/interior brightnesses compresses toward a common mean.
-        float schw    = pow(mu, 0.5);                              // 1 at centre, ~0.55 at μ=0.3
-        float bright  = mix(0.78, 1.04, schw);                     // cell interior maximum
-        float dark    = mix(0.78, 0.32, schw);                     // dark-lane minimum
-        float granLight = mix(dark, bright, laneD) * cellBulge;
+        // Flow = supergranular outflow (divergent: out of hot cell centres into
+        // the lanes) + curl-noise turbulence (rotational eddies), kept tangential.
+        vec3 swirlG = vec3(
+            fbmTex(vPosition * 3.0 + vec3(u_time * 0.020 * rotF)),
+            fbmTex(vPosition * 3.0 + vec3(u_time * 0.020 * rotF + 5.1)),
+            fbmTex(vPosition * 3.0 + vec3(u_time * 0.020 * rotF + 9.7))
+        ) - 0.5;
+        vec3 flow = sgFlow * 0.7 + cross(swirlG, nLocal) * 1.3;
+        flow = flow - dot(flow, nLocal) * nLocal;
 
-        // ── Granule lifetime breathing ────────────────────────────────────
-        // Real granules form (~30 s rise), live (~5–10 min), then fade as
-        // mass piles up at the boundary. Cheap proxy: hash the integer
-        // cell-grid position to a per-cell phase, sin-modulate brightness.
-        vec3  cellGrid  = floor(gPos);
-        float cellSeed  = hash(cellGrid);
-        float cellPhase = cellSeed * 6.2832;
-        // Granule lifecycle: birth -> peak -> fragment -> fade (1b). Each cell
-        // runs its own clock (cellSeed phases it), so at any instant the field
-        // is a genuine mix of young, mature and dying granules instead of one
-        // global sinusoid. Real granules rise (~30 s), live a few minutes, then
-        // fragment as cooled plasma piles at the boundary.
-        const float GRAN_LIFE = 5.0;                          // sim-sec per granule life
-        float age     = fract(u_time / GRAN_LIFE + cellSeed);  // 0 born -> 1 dies
-        float rise    = smoothstep(0.00, 0.16, age);           // brighten as it surfaces
-        float fall    = 1.0 - smoothstep(0.74, 1.00, age);     // fade at end of life
-        float lifeEnv = rise * fall;                           // 0..1 lifecycle envelope
-        // Fast sub-granule flicker so mature granules still shimmer.
-        float granJit = 0.5 + 0.5 * sin(u_time * 9.2 + cellPhase * 17.0);
-        granLight *= 0.70 + 0.45 * lifeEnv * laneD + granJit * 0.05 * laneD;
-        // "Exploding granule": a fraction of cells grow a dark central dot and
-        // split late in life -- the classic granular-fragmentation signature.
-        float doomed  = smoothstep(0.84, 0.99, cellSeed);      // which cells explode
-        float splitT  = smoothstep(0.72, 0.84, age)
-                      * (1.0 - smoothstep(0.84, 0.96, age));
-        float coreDot = doomed * splitT * (1.0 - smoothstep(0.0, 0.22, gCell.x));
-        granLight *= 1.0 - coreDot * 0.55;                     // dark fragmenting core
+        // Flow-map advection: two ping-ponging phases back-traced along the flow,
+        // cross-faded, so the pattern advects continuously without runaway drift.
+        float fT     = u_time * 0.55;
+        float ph0    = fract(fT);
+        float ph1    = fract(fT + 0.5);
+        float fblend = abs(ph0 - 0.5) * 2.0;
+        vec3  gBase  = vPosition * 11.0;
+        vec3  gGradA, gGradB;
+        vec2  cA = voronoiGrad(gBase - flow * (ph0 * 0.95), gGradA);
+        vec2  cB = voronoiGrad(gBase - flow * (ph1 * 0.95), gGradB);
+        vec2  gCell = mix(cA, cB, fblend);
+        vec3  gGrad = mix(gGradA, gGradB, fblend);
+        vec3  gPos  = gBase - flow * (mix(ph0, ph1, fblend) * 0.95);
 
-        // Analytic granule relief (1a): treat granule interiors as raised domes
-        // and lanes as sunken valleys, then tilt the micro-normal by the
-        // granule-height gradient (gGrad, from the same Worley pass -- no extra
-        // cost). True 3-D corrugation: granule tops catch the light, lane walls
-        // fall into shadow, strongest near the limb where we graze the relief
-        // ("orange-peel" boil). The sun mesh sits at the origin with identity
-        // transform, so object space == world space and the built-in
-        // cameraPosition gives the object-space view direction. (The gradient
-        // is discontinuous at lane centres, but reliefAmp -> 0 there via laneD,
-        // so no seams appear.)
-        vec3  nLocal    = normalize(vPosition);
-        vec3  objView   = normalize(cameraPosition - vPosition);
-        vec3  gTang     = gGrad - dot(gGrad, nLocal) * nLocal;  // tangential slope
-        float reliefAmp = laneD * lifeEnv;                      // domes raised; lanes/young flat
-        vec3  microN    = normalize(nLocal - gTang * (0.9 * reliefAmp));
-        float muR       = max(dot(microN, objView), 0.0);
-        // Baseline doming across the disc, ramping to full relief at the limb
-        // (granules read as lit 3-D cells everywhere, strongest at grazing angle).
-        float reliefW   = 0.40 + 0.60 * smoothstep(0.0, 0.85, 1.0 - mu);
-        granLight *= clamp(mix(1.0, muR / max(mu, 0.12), reliefW), 0.45, 1.8);
+        // Crisp, thin intergranular lanes.
+        float laneD = smoothstep(0.015, 0.13, gCell.y - gCell.x);   // 0 = lane, 1 = interior
+
+        // Centre-to-limb (Schwarzschild) contrast -- modest/photographic
+        // (~15-20%): bright granules, clearly-dark-but-not-black lanes.
+        float schw   = pow(mu, 0.5);
+        float bright = mix(0.88, 1.05, schw);
+        float dark   = mix(0.90, 0.55, schw);
+        float granLight = mix(dark, bright, laneD);
+
+        // Per-cell lifecycle: a little young/mature/dying variety + the classic
+        // exploding-granule dark dot, with a SMALL brightness swing (stays crisp).
+        vec3  cellGrid = floor(gPos);
+        float cellSeed = hash(cellGrid);
+        float age      = fract(u_time / 6.0 + cellSeed);
+        float lifeEnv  = smoothstep(0.0, 0.16, age) * (1.0 - smoothstep(0.74, 1.0, age));
+        granLight *= 0.92 + 0.12 * lifeEnv * laneD;
+        float doomed = smoothstep(0.86, 0.99, cellSeed);
+        float splitT = smoothstep(0.72, 0.84, age) * (1.0 - smoothstep(0.84, 0.96, age));
+        granLight *= 1.0 - doomed * splitT * (1.0 - smoothstep(0.0, 0.20, gCell.x)) * 0.45;
+
+        // Gentle 3-D relief from the granule-height gradient (limb-weighted,
+        // subtle -- no exaggerated domes, keeps the photographic read).
+        vec3  gTang   = gGrad - dot(gGrad, nLocal) * nLocal;
+        vec3  microN  = normalize(nLocal - gTang * (0.35 * laneD));
+        float muR     = max(dot(microN, objView), 0.0);
+        float reliefW = smoothstep(0.0, 0.9, 1.0 - mu);
+        granLight *= clamp(mix(1.0, muR / max(mu, 0.2), reliefW), 0.80, 1.20);
+
+        // GPU fluid-solver convection: when the thermal-convection sim is
+        // running it OWNS the granulation -- sample its temperature field
+        // (hot upwelling = bright cell interior, cool = dark sinking lane).
+        if (u_fluidOn > 0.5) {
+            float Tn = (texture2D(u_fluidTex, vUv).r - u_fluidT0) * u_fluidScale;
+            laneD = smoothstep(-0.30, 0.45, Tn);
+            float schwF = pow(mu, 0.5);
+            granLight = mix(mix(0.92, 0.48, schwF), mix(0.92, 1.10, schwF), laneD);
+        }
+        if (u_fluidDebug > 0.5) {
+            float Td = (texture2D(u_fluidTex, vUv).r - u_fluidT0) * u_fluidScale;
+            gl_FragColor = vec4(smoothstep(-0.7, 0.7, Td) * vec3(1.0, 0.84, 0.52), 1.0);
+            return;
+        }
 
         // ── Fine sub-granulation turbulence ─────────────────────────────────
         float fineTurb = fbmTex(vPosition * 30.0 + vec3(u_time * 0.012 * rotF)) * 0.08;
@@ -3125,7 +3127,7 @@ const sunFS = /* glsl */`
         // Kept moderate so granulation contrast and sunspot detail remain visible.
         // Only flare impulsive phase pushes significantly above bloom threshold.
         // Pre-exposure for ACES tonemap below.
-        col *= 2.20 + u_flare_intensity * 1.10;
+        col *= 1.00 + u_flare_intensity * 0.78;
 
         // ── F10.7 solar-cycle boost — solar maximum = hotter, brighter photosphere ──
         // Higher radio flux index → more magnetic heating → brighter surface
@@ -3234,6 +3236,18 @@ sunLOD.addLevel(new THREE.Mesh(new THREE.SphereGeometry(1.0, 128, 128), sunMat),
 sunLOD.addLevel(new THREE.Mesh(new THREE.SphereGeometry(1.0,  72,  72), sunMat),  3.5);
 sunLOD.addLevel(new THREE.Mesh(new THREE.SphereGeometry(1.0,  40,  30), sunMat), 10.0);
 scene.add(sunLOD);
+
+// ── GPU thermal-convection solver -> drives the photosphere granulation ──
+let solarFluid = null;
+try {
+    solarFluid = new SolarFluid(THREE, renderer, { size: 192, iters: 20 });
+    solarFluid.prewarm(renderer, 40);
+    uniforms.u_fluidTex.value = solarFluid.getTexture();
+    uniforms.u_fluidOn.value  = 1.0;
+} catch (e) {
+    console.warn('[Sun] fluid solver unavailable, using procedural granulation:', e.message);
+    uniforms.u_fluidOn.value = 0.0;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  ☉ INTERIOR LAYERS — cutaway-style ghost shells for the structural layers
@@ -5144,6 +5158,7 @@ const coronaFS = /* glsl */`
         // out when many channels stack, while keeping the punch in the
         // bright streamer/AR-ray regions.
         col = col / (1.0 + col * 0.42);
+        alpha *= smoothstep(1.0, 0.42, rim);   // fade the hard 2.5R shell silhouette (no ring)
 
         gl_FragColor = vec4(col, alpha);
     }
@@ -5317,6 +5332,7 @@ const _outerGlowMesh = new THREE.Mesh(new THREE.SphereGeometry(4.0, 24, 24),
     new THREE.ShaderMaterial({ vertexShader:glowVS, fragmentShader:outerGlowFS, uniforms,
         transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.BackSide }));
 scene.add(_outerGlowMesh);
+_outerGlowMesh.visible = false;   // removed: read as a giant glow circle
 
 // ─── SOLAR WIND PARTICLES ─────────────────────────────────────────────────────
 const N_SOLAR = 2500;
@@ -8254,8 +8270,8 @@ function animate() {
     //     pass even at threshold 1.10), spikes during M/X impulsive
     //     flash, decays with the same envelope as the photosphere flash.
     if (bloomAmbient) {
-        const target = 0.16 + uniforms.u_activity.value * 0.06
-                     + uniforms.u_kp_norm.value * 0.04;
+        const target = 0.035 + uniforms.u_activity.value * 0.025
+                     + uniforms.u_kp_norm.value * 0.02;
         bloomAmbient.strength = THREE.MathUtils.lerp(bloomAmbient.strength, target, 0.04);
     }
     if (bloomFlare) {
@@ -8264,6 +8280,10 @@ function animate() {
         // sharply so X-class events get the full punch.
         const target = flareI < 0.15 ? 0.0 : (flareI - 0.15) * 0.55;
         bloomFlare.strength = THREE.MathUtils.lerp(bloomFlare.strength, target, 0.20);
+    }
+    if (solarFluid && uniforms.u_fluidOn.value > 0.5) {
+        solarFluid.step(renderer);
+        uniforms.u_fluidTex.value = solarFluid.getTexture();
     }
     composer.render();
     fpsF++;
@@ -11108,6 +11128,8 @@ window.__sun = {
     scene,
     camera,
     controls,
+    uniforms,
+    get fluid() { return solarFluid; },
     get composer() { return composer; },
     layers: {
         core:         coreMesh,

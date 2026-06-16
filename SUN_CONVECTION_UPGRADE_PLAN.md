@@ -7,7 +7,7 @@
 > the convection drift speeds have already been tuned once and must not be
 > reverted.
 
-*Status: Phases 0–5 IMPLEMENTED (2026-06-15). Phase 6 (perf/verify) folded into each phase.*
+*Status: Phases 0–5 IMPLEMENTED; reworked 2026-06-16 (GPU fluid solver + de-bloom).*
 
 ### Progress log
 
@@ -68,6 +68,20 @@
   reads cleanly; it is mutually exclusive with cutaway, and both snapshot and
   restore prior visibility/pass state. Verified: 0 shader/JS errors, all 5
   smoke tests green (added a Doppler toggle test).
+- **Rework (2026-06-16, owner feedback — "blooms too big, do fluid dynamics"):**
+  - **GPU thermal-convection solver** (`js/solar-fluid.js`): a real ping-pong
+    fluid sim on half-float render targets — buoyant instability + thermal
+    diffusion (scale selection) + potential-flow advection (`v=∇φ`, `∇²φ=T−T0`)
+    self-organises genuine convection cells. It drives the photosphere
+    granulation (`u_fluidTex` sampled in `sunFS`); falls back to the procedural
+    granulation if half-float colour buffers are unavailable.
+  - **Whole-page de-bloom**: ambient bloom radius 0.85→0.28 + strength target
+    roughly halved, photosphere HDR exposure 2.20→1.0; removed the giant glow
+    "circles" — the radius-4.0 outer-glow shell and the radial K-corona diffuse
+    pass are off by default, and the corona shell's hard 2.5R silhouette is
+    faded out so it no longer reads as a ring.
+  - Verified: 0 shader/JS errors, all 5 smoke tests green. NOTE: only verifiable
+    here on software WebGL (no GPU) — needs an eyeball on real hardware.
 
 ---
 
