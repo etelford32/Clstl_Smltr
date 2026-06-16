@@ -2716,29 +2716,38 @@ const sunFS = /* glsl */`
         vec3 flow = sgFlow * 0.7 + cross(swirlG, nLocal) * 1.3;
         flow = flow - dot(flow, nLocal) * nLocal;
 
-        // Flow-map advection: two ping-ponging phases back-traced along the flow,
-        // cross-faded, so the pattern advects continuously without runaway drift.
+        // Domain warp breaks the regular Voronoi lattice into ORGANIC cells --
+        // kills the honeycomb / "egg-shell" facet look.
+        vec3 gWarp = vec3(
+            fbmTex(vPosition * 10.0 + vec3(u_time * 0.012 * rotF)),
+            fbmTex(vPosition * 10.0 + vec3(u_time * 0.012 * rotF + 3.3)),
+            fbmTex(vPosition * 10.0 + vec3(u_time * 0.012 * rotF + 6.6))
+        ) - 0.5;
+
+        // Flow-map advection: two cross-faded phases of FINE granule cells
+        // (~1 Mm -> a dense carpet, not a few big facets), streamed by the flow.
         float fT     = u_time * 0.55;
         float ph0    = fract(fT);
         float ph1    = fract(fT + 0.5);
         float fblend = abs(ph0 - 0.5) * 2.0;
-        vec3  gBase  = vPosition * 11.0;
+        vec3  gBase  = vPosition * 46.0 + gWarp * 5.0;
         vec3  gGradA, gGradB;
-        vec2  cA = voronoiGrad(gBase - flow * (ph0 * 0.95), gGradA);
-        vec2  cB = voronoiGrad(gBase - flow * (ph1 * 0.95), gGradB);
+        vec2  cA = voronoiGrad(gBase - flow * (ph0 * 0.9), gGradA);
+        vec2  cB = voronoiGrad(gBase - flow * (ph1 * 0.9), gGradB);
         vec2  gCell = mix(cA, cB, fblend);
         vec3  gGrad = mix(gGradA, gGradB, fblend);
-        vec3  gPos  = gBase - flow * (mix(ph0, ph1, fblend) * 0.95);
+        vec3  gPos  = gBase - flow * (mix(ph0, ph1, fblend) * 0.9);
 
-        // Crisp, thin intergranular lanes.
-        float laneD = smoothstep(0.015, 0.13, gCell.y - gCell.x);   // 0 = lane, 1 = interior
+        // Soft intergranular lanes (no razor-sharp facet edges).
+        float laneD = smoothstep(0.03, 0.30, gCell.y - gCell.x);
 
-        // Centre-to-limb (Schwarzschild) contrast -- modest/photographic
-        // (~15-20%): bright granules, clearly-dark-but-not-black lanes.
+        // Warm photospheric brightness: bright granules, warm (not black) lanes.
         float schw   = pow(mu, 0.5);
-        float bright = mix(0.88, 1.05, schw);
-        float dark   = mix(0.90, 0.55, schw);
+        float bright = mix(0.98, 1.14, schw);
+        float dark   = mix(0.80, 0.56, schw);
         float granLight = mix(dark, bright, laneD);
+        // Fine sub-granule mottling so the surface never reads as flat facets.
+        granLight *= 0.90 + 0.20 * fbmTex(vPosition * 95.0 + vec3(u_time * 0.02 * rotF));
 
         // Per-cell lifecycle: a little young/mature/dying variety + the classic
         // exploding-granule dark dot, with a SMALL brightness swing (stays crisp).
@@ -2754,10 +2763,10 @@ const sunFS = /* glsl */`
         // Gentle 3-D relief from the granule-height gradient (limb-weighted,
         // subtle -- no exaggerated domes, keeps the photographic read).
         vec3  gTang   = gGrad - dot(gGrad, nLocal) * nLocal;
-        vec3  microN  = normalize(nLocal - gTang * (0.35 * laneD));
+        vec3  microN  = normalize(nLocal - gTang * (0.18 * laneD));
         float muR     = max(dot(microN, objView), 0.0);
         float reliefW = smoothstep(0.0, 0.9, 1.0 - mu);
-        granLight *= clamp(mix(1.0, muR / max(mu, 0.2), reliefW), 0.80, 1.20);
+        granLight *= clamp(mix(1.0, muR / max(mu, 0.25), reliefW), 0.88, 1.12);
 
         // GPU fluid-solver convection: when the thermal-convection sim is
         // running it OWNS the granulation -- sample its temperature field
@@ -2769,8 +2778,8 @@ const sunFS = /* glsl */`
             float Tn = (texture2D(u_fluidTex, vUv).r - u_fluidT0) * u_fluidScale;
             float fil = smoothstep(0.10, -0.55, Tn);     // cool -> dark filament
             float net = smoothstep(0.20, 0.90, Tn);      // hot  -> bright network
-            granLight *= mix(1.0, 0.28, fil);            // dark turbulent filaments
-            granLight *= 1.0 + net * 0.40;               // bright network
+            granLight *= mix(1.0, 0.58, fil);            // dark turbulent filaments (gentler)
+            granLight *= 1.0 + net * 0.30;               // bright network
             laneD = max(laneD, net * 0.6);
         }
         if (u_fluidDebug > 0.5) {
