@@ -82,6 +82,18 @@
     faded out so it no longer reads as a ring.
   - Verified: 0 shader/JS errors, all 5 smoke tests green. NOTE: only verifiable
     here on software WebGL (no GPU) — needs an eyeball on real hardware.
+  - **Upgraded to full Navier–Stokes + vorticity confinement** (owner reference
+    = SDO 304/171 filaments): `js/solar-fluid.js` now advects velocity + a
+    temperature dye, sustains turbulence with curl-noise forcing, re-injects
+    small-scale swirl via vorticity confinement, and pressure-projects for
+    incompressibility. `sunFS` renders a HYBRID — fine procedural granulation
+    for the rice-grain texture, with the sim's turbulent field overlaid as dark
+    sinuous filaments (cool) + bright network (hot). Tunables in
+    `js/solar-fluid.js` opts / live via `window.__sun.fluid.forceMat.uniforms`:
+    `vort, force, heat, cool, visc, size, iters`. CAVEAT: 2-D NS self-organises
+    into large vortices (inverse cascade), so matching the *fine* SDO mottling
+    needs param tuning on real hardware — could not be dialed in on software
+    WebGL here.
 
 ---
 

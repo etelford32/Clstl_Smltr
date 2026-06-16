@@ -2763,10 +2763,15 @@ const sunFS = /* glsl */`
         // running it OWNS the granulation -- sample its temperature field
         // (hot upwelling = bright cell interior, cool = dark sinking lane).
         if (u_fluidOn > 0.5) {
+            // Hybrid: keep the fine procedural granulation as the rice-grain
+            // texture, and overlay the NS sim's turbulent field -- cool plasma
+            // reads as dark sinuous filaments, hot as the bright network.
             float Tn = (texture2D(u_fluidTex, vUv).r - u_fluidT0) * u_fluidScale;
-            laneD = smoothstep(-0.30, 0.45, Tn);
-            float schwF = pow(mu, 0.5);
-            granLight = mix(mix(0.92, 0.48, schwF), mix(0.92, 1.10, schwF), laneD);
+            float fil = smoothstep(0.10, -0.55, Tn);     // cool -> dark filament
+            float net = smoothstep(0.20, 0.90, Tn);      // hot  -> bright network
+            granLight *= mix(1.0, 0.28, fil);            // dark turbulent filaments
+            granLight *= 1.0 + net * 0.40;               // bright network
+            laneD = max(laneD, net * 0.6);
         }
         if (u_fluidDebug > 0.5) {
             float Td = (texture2D(u_fluidTex, vUv).r - u_fluidT0) * u_fluidScale;

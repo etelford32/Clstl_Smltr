@@ -1,30 +1,27 @@
 /**
- * solar-fluid.js — GPU thermal-convection solver for the photosphere
+ * solar-fluid.js — GPU Navier–Stokes solver for the photosphere
  * ═══════════════════════════════════════════════════════════════════════════
- * A real ping-pong fluid simulation (not a procedural noise texture) that
- * drives the granulation. Boussinesq thermal convection in "potential-flow"
- * form, run on the sphere's equirectangular (lon, lat) domain:
+ * A real fluid simulation (Stam "Stable Fluids") with VORTICITY CONFINEMENT,
+ * run on the sphere's equirectangular (lon, lat) domain on ping-pong half-float
+ * render targets. Each frame:
  *
- *     v = ∇φ,   ∇²φ = (T − T0)          (hot fluid diverges/upwells,
- *                                         cool fluid converges/sinks)
- *     ∂T/∂t + v·∇T = Q − κ·T + noise    (heat input, radiative cooling)
+ *   1. ADVECT     velocity + temperature dye  (semi-Lagrangian)
+ *   2. FORCES     curl-noise forcing (sustains turbulence)
+ *                 + vorticity confinement (re-injects small-scale curl so
+ *                   eddies stay crisp and swirly, not diffused away)
+ *                 + temperature reaction (heat sources + radiative cooling)
+ *   3. DIVERGENCE of the velocity field
+ *   4. PRESSURE   Poisson solve (Jacobi) to enforce incompressibility
+ *   5. SUBTRACT   the pressure gradient → divergence-free velocity
  *
- * Each frame: derive velocity from the potential, advect the temperature
- * (semi-Lagrangian), inject heat + cool radiatively, then relax the Poisson
- * equation for the next potential (Jacobi). The result is genuine cellular
- * convection — hot upwelling cell centres ringed by cool sinking lanes that
- * continuously form, shear, merge and split, exactly like solar granulation.
+ * The turbulent velocity stretches the temperature dye into the swirling
+ * filaments / mottled network seen in SDO 304/171 imagery. The field RGBA is
+ *   .r = temperature dye   .g/.b = velocity (vₓ, v_y)
+ * sampled at the sphere UV by sunFS; the velocity is also reused to drive a
+ * *simulated* Doppler map.
  *
- * Fields are stored in half-float render targets:
- *   field RT  .r = temperature T   .g/.b = velocity (vₓ, v_y)
- *   phi   RT  .r = flow potential φ
- *
- * Domain wraps in x (longitude is periodic) and clamps in y (poles). The
- * caller samples getTexture() at the sphere UV; T in .r, velocity in .gb
- * (the velocity is reused to drive a *simulated* Doppler map).
- *
- * Degrades gracefully: if half-float color buffers aren't renderable the
- * constructor throws and the caller falls back to the procedural granulation.
+ * Domain wraps in x (longitude) and clamps in y (poles). Throws if half-float
+ * colour buffers aren't renderable so the caller can fall back to procedural.
  */
 
 const QUAD_VS = /* glsl */`
@@ -38,89 +35,130 @@ const HEAD = /* glsl */`
     uniform vec2 uTexel;
 `;
 
-// Seed the temperature field with smooth low-frequency noise so convection
-// has something to organise from.
-const SEED_FS = HEAD + /* glsl */`
-    uniform float uT0;
+const NOISE = /* glsl */`
     float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
     float vnoise(vec2 p){
         vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
         return mix(mix(hash(i), hash(i+vec2(1,0)), f.x),
                    mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), f.x), f.y);
     }
-    void main(){
-        float n = vnoise(vUv * 18.0) * 0.6 + vnoise(vUv * 40.0) * 0.4;
-        gl_FragColor = vec4(uT0 + (n - 0.5) * 0.5, 0.0, 0.0, 1.0);
-    }
+    float fbm(vec2 p){ return vnoise(p)*0.6 + vnoise(p*2.03+7.1)*0.3 + vnoise(p*4.11+3.7)*0.1; }
 `;
 
-// Advect temperature by v = ∇φ, then react (heat input + radiative cooling +
-// a little forcing noise to keep convection from freezing into a fixed grid).
-const ADVECT_FS = HEAD + /* glsl */`
-    uniform sampler2D uField;   // .r = T
-    uniform sampler2D uPhi;     // .r = φ
-    uniform float uDt, uHeat, uCool, uT0, uVel, uTime, uGain, uDiff;
-    float hash(vec2 p){ return fract(sin(dot(p, vec2(269.5, 183.3))) * 43758.5453); }
-    vec2 gradPhi(vec2 uv){
-        float l = texture2D(uPhi, uv - vec2(uTexel.x, 0.0)).r;
-        float r = texture2D(uPhi, uv + vec2(uTexel.x, 0.0)).r;
-        float d = texture2D(uPhi, uv - vec2(0.0, uTexel.y)).r;
-        float u = texture2D(uPhi, uv + vec2(0.0, uTexel.y)).r;
-        return vec2(r - l, u - d) * 0.5;
-    }
+// Seed: warm dye + a swirly initial velocity from curl noise.
+const SEED_FS = HEAD + NOISE + /* glsl */`
+    uniform float uT0;
     void main(){
-        vec2 v = gradPhi(vUv) * uVel;                 // velocity from potential
-        vec2 src = vUv - v * uDt;                     // semi-Lagrangian backtrace
-        float T = texture2D(uField, src).r;
-        // Buoyant instability: hot fluid heats faster than it cools (gain>cool),
-        // so perturbations grow into upwelling cells; the divergent outflow then
-        // spreads + cools them, and the convergent lanes between cells sink.
-        // Cool fluid (T<T0) recovers toward T0 rather than running away cold.
-        float hot = max(0.0, T - uT0);
-        T += (uHeat + uGain * hot - uCool * T) * uDt;
-        // Thermal diffusion: damps the smallest scales so convection selects a
-        // finite cell size (granulation wavelength) instead of saturating
-        // uniformly. With the buoyant instability this gives discrete cells.
-        float c   = texture2D(uField, vUv).r;
-        float lap = texture2D(uField, vUv + vec2(uTexel.x, 0.0)).r
-                  + texture2D(uField, vUv - vec2(uTexel.x, 0.0)).r
-                  + texture2D(uField, vUv + vec2(0.0, uTexel.y)).r
-                  + texture2D(uField, vUv - vec2(0.0, uTexel.y)).r - 4.0 * c;
-        T += uDiff * lap;
-        T += (hash(vUv * 991.0 + uTime) - 0.5) * 0.012 * uDt;   // forcing noise
-        T = clamp(T, 0.0, 2.5);
+        float T = uT0 + (fbm(vUv * 14.0) - 0.5) * 0.6;
+        float e = 0.01;
+        float p0 = fbm(vUv * 6.0), px = fbm((vUv+vec2(e,0))*6.0), py = fbm((vUv+vec2(0,e))*6.0);
+        vec2 v = vec2((py-p0)/e, -(px-p0)/e) * 0.02;
         gl_FragColor = vec4(T, v, 1.0);
     }
 `;
 
-// One Jacobi sweep of ∇²φ = S, with S = (T − T0):  φ = (l+r+d+u − S)/4.
-const JACOBI_FS = HEAD + /* glsl */`
-    uniform sampler2D uPhi;
+// Semi-Lagrangian advection of (T, velocity) by the velocity.
+const ADVECT_FS = HEAD + /* glsl */`
     uniform sampler2D uField;
-    uniform float uT0;
+    uniform float uDt;
     void main(){
-        float l = texture2D(uPhi, vUv - vec2(uTexel.x, 0.0)).r;
-        float r = texture2D(uPhi, vUv + vec2(uTexel.x, 0.0)).r;
-        float d = texture2D(uPhi, vUv - vec2(0.0, uTexel.y)).r;
-        float u = texture2D(uPhi, vUv + vec2(0.0, uTexel.y)).r;
-        float S = texture2D(uField, vUv).r - uT0;
-        gl_FragColor = vec4((l + r + d + u - S) * 0.25, 0.0, 0.0, 1.0);
+        vec3 f = texture2D(uField, vUv).rgb;       // r=T, gb=vel
+        vec2 src = vUv - f.gb * uDt;               // backtrace
+        gl_FragColor = vec4(texture2D(uField, src).rgb, 1.0);
+    }
+`;
+
+// Forces: curl-noise forcing + vorticity confinement + temperature reaction.
+const FORCES_FS = HEAD + NOISE + /* glsl */`
+    uniform sampler2D uField;
+    uniform float uDt, uTime, uVort, uForce, uHeat, uCool, uT0, uVisc;
+    float curlAt(vec2 uv){
+        float vyR = texture2D(uField, uv + vec2(uTexel.x, 0.0)).b;
+        float vyL = texture2D(uField, uv - vec2(uTexel.x, 0.0)).b;
+        float vxU = texture2D(uField, uv + vec2(0.0, uTexel.y)).g;
+        float vxD = texture2D(uField, uv - vec2(0.0, uTexel.y)).g;
+        return (vyR - vyL) * 0.5 - (vxU - vxD) * 0.5;
+    }
+    void main(){
+        vec3 f = texture2D(uField, vUv).rgb;
+        float T = f.r; vec2 vel = f.gb;
+
+        // Vorticity confinement: push velocity toward concentrations of |curl|
+        // (re-injects the small-scale swirl numerical advection smears out).
+        float w  = curlAt(vUv);
+        float wR = abs(curlAt(vUv + vec2(uTexel.x, 0.0)));
+        float wL = abs(curlAt(vUv - vec2(uTexel.x, 0.0)));
+        float wU = abs(curlAt(vUv + vec2(0.0, uTexel.y)));
+        float wD = abs(curlAt(vUv - vec2(0.0, uTexel.y)));
+        vec2 g = vec2(wR - wL, wU - wD);
+        g /= (length(g) + 1e-5);
+        vel += uVort * vec2(g.y, -g.x) * w * uDt;
+
+        // Divergence-free curl-noise forcing keeps the turbulence alive, and a
+        // little large-scale shear (differential rotation flavour).
+        float e = 0.012;
+        float p0 = fbm(vUv * 10.0 + uTime * 0.10);
+        float px = fbm((vUv + vec2(e, 0.0)) * 10.0 + uTime * 0.10);
+        float py = fbm((vUv + vec2(0.0, e)) * 10.0 + uTime * 0.10);
+        vec2 curlF = vec2((py - p0) / e, -(px - p0) / e);
+        vel += curlF * uForce * uDt;
+
+        vel *= (1.0 - uVisc);                          // gentle damping
+
+        // Temperature dye: inject heat at slowly-evolving network sources, cool
+        // radiatively; the turbulence stretches this into filaments.
+        float src = fbm(vUv * 14.0 - uTime * 0.04);
+        T += (smoothstep(0.55, 0.92, src) * uHeat - uCool * T) * uDt;
+        T += (hash(vUv * 911.0 + uTime) - 0.5) * 0.010 * uDt;
+        T = clamp(T, 0.0, 2.0);
+
+        gl_FragColor = vec4(T, vel, 1.0);
+    }
+`;
+
+const DIVERGENCE_FS = HEAD + /* glsl */`
+    uniform sampler2D uField;
+    void main(){
+        float vxR = texture2D(uField, vUv + vec2(uTexel.x, 0.0)).g;
+        float vxL = texture2D(uField, vUv - vec2(uTexel.x, 0.0)).g;
+        float vyU = texture2D(uField, vUv + vec2(0.0, uTexel.y)).b;
+        float vyD = texture2D(uField, vUv - vec2(0.0, uTexel.y)).b;
+        gl_FragColor = vec4((vxR - vxL + vyU - vyD) * 0.5, 0.0, 0.0, 1.0);
+    }
+`;
+
+const JACOBI_FS = HEAD + /* glsl */`
+    uniform sampler2D uPrs, uDiv;
+    void main(){
+        float l = texture2D(uPrs, vUv - vec2(uTexel.x, 0.0)).r;
+        float r = texture2D(uPrs, vUv + vec2(uTexel.x, 0.0)).r;
+        float d = texture2D(uPrs, vUv - vec2(0.0, uTexel.y)).r;
+        float u = texture2D(uPrs, vUv + vec2(0.0, uTexel.y)).r;
+        float div = texture2D(uDiv, vUv).r;
+        gl_FragColor = vec4((l + r + d + u - div) * 0.25, 0.0, 0.0, 1.0);
+    }
+`;
+
+const SUBTRACT_FS = HEAD + /* glsl */`
+    uniform sampler2D uField, uPrs;
+    void main(){
+        vec3 f = texture2D(uField, vUv).rgb;
+        float l = texture2D(uPrs, vUv - vec2(uTexel.x, 0.0)).r;
+        float r = texture2D(uPrs, vUv + vec2(uTexel.x, 0.0)).r;
+        float d = texture2D(uPrs, vUv - vec2(0.0, uTexel.y)).r;
+        float u = texture2D(uPrs, vUv + vec2(0.0, uTexel.y)).r;
+        vec2 grad = vec2(r - l, u - d) * 0.5;
+        gl_FragColor = vec4(f.r, f.gb - grad, 1.0);
     }
 `;
 
 export class SolarFluid {
-    /**
-     * @param {object} THREE     three.js namespace
-     * @param {THREE.WebGLRenderer} renderer
-     * @param {object} [opts]     { size, iters, T0, heat, cool, vel }
-     */
     constructor(THREE, renderer, opts = {}) {
         this.THREE = THREE;
         this.size  = opts.size  ?? 192;
-        this.iters = opts.iters ?? 20;
+        this.iters = opts.iters ?? 22;
         this.T0    = opts.T0    ?? 1.0;
 
-        // Require renderable half-float color buffers (WebGL2 + EXT_color_buffer_float).
         const gl = renderer.getContext();
         const isWebGL2 = (typeof WebGL2RenderingContext !== 'undefined') && (gl instanceof WebGL2RenderingContext);
         if (!isWebGL2 || !gl.getExtension('EXT_color_buffer_float')) {
@@ -133,8 +171,9 @@ export class SolarFluid {
             wrapS: THREE.RepeatWrapping, wrapT: THREE.ClampToEdgeWrapping,
             depthBuffer: false, stencilBuffer: false,
         });
-        this.fieldA = mk(); this.fieldB = mk();
-        this.phiA = mk();   this.phiB = mk();
+        this.fA = mk(); this.fB = mk();        // field: r=T, gb=velocity
+        this.pA = mk(); this.pB = mk();        // pressure (.r)
+        this.div = mk();                       // divergence (.r)
 
         this.scene = new THREE.Scene();
         this.cam   = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
@@ -142,67 +181,80 @@ export class SolarFluid {
         this.scene.add(this.quad);
 
         const texel = new THREE.Vector2(1 / this.size, 1 / this.size);
-        const mat = (fs, uniforms) => new THREE.ShaderMaterial({
+        const mat = (fs, u) => new THREE.ShaderMaterial({
             vertexShader: QUAD_VS, fragmentShader: fs,
-            uniforms: Object.assign({ uTexel: { value: texel } }, uniforms),
+            uniforms: Object.assign({ uTexel: { value: texel } }, u),
             depthTest: false, depthWrite: false,
         });
         this.seedMat   = mat(SEED_FS,   { uT0: { value: this.T0 } });
-        this.advectMat = mat(ADVECT_FS, {
-            uField: { value: null }, uPhi: { value: null },
-            uDt:   { value: 1.0 }, uHeat: { value: opts.heat ?? 0.04 },
-            uCool: { value: opts.cool ?? 0.04 }, uT0: { value: this.T0 },
-            uVel:  { value: opts.vel ?? 4.0 }, uTime: { value: 0 }, uGain: { value: opts.gain ?? 0.06 },
-            uDiff: { value: opts.diff ?? 0.16 },
+        this.advectMat = mat(ADVECT_FS, { uField: { value: null }, uDt: { value: opts.dt ?? 1.0 } });
+        this.forceMat  = mat(FORCES_FS, {
+            uField: { value: null }, uDt: { value: opts.dt ?? 1.0 }, uTime: { value: 0 },
+            uVort:  { value: opts.vort  ?? 0.42 }, uForce: { value: opts.force ?? 0.32 },
+            uHeat:  { value: opts.heat  ?? 0.06 }, uCool:  { value: opts.cool  ?? 0.05 },
+            uVisc:  { value: opts.visc  ?? 0.025 }, uT0: { value: this.T0 },
         });
-        this.jacobiMat = mat(JACOBI_FS, {
-            uPhi: { value: null }, uField: { value: null }, uT0: { value: this.T0 },
-        });
+        this.divMat = mat(DIVERGENCE_FS, { uField: { value: null } });
+        this.jacMat = mat(JACOBI_FS,     { uPrs: { value: null }, uDiv: { value: null } });
+        this.subMat = mat(SUBTRACT_FS,   { uField: { value: null }, uPrs: { value: null } });
 
-        this._blit(renderer, this.seedMat, this.fieldA);
+        this._blit(renderer, this.seedMat, this.fA);
         renderer.setRenderTarget(null);
     }
 
     _blit(renderer, material, target) {
-        const prev = renderer.getRenderTarget();
         this.quad.material = material;
         renderer.setRenderTarget(target);
         renderer.render(this.scene, this.cam);
-        renderer.setRenderTarget(prev);
     }
 
-    /** Advance the simulation one frame. Restores the prior render target. */
-    step(renderer, dt = 1.0) {
+    step(renderer, dt) {
         const prev = renderer.getRenderTarget();
+        if (dt != null) {
+            this.advectMat.uniforms.uDt.value = dt;
+            this.forceMat.uniforms.uDt.value = dt;
+        }
+        this.forceMat.uniforms.uTime.value = (performance.now() % 100000) * 0.001;
 
-        this.advectMat.uniforms.uField.value = this.fieldA.texture;
-        this.advectMat.uniforms.uPhi.value   = this.phiA.texture;
-        this.advectMat.uniforms.uDt.value    = dt;
-        this.advectMat.uniforms.uTime.value  = (performance.now() % 100000) * 0.001;
-        this._blit(renderer, this.advectMat, this.fieldB);
-        [this.fieldA, this.fieldB] = [this.fieldB, this.fieldA];
+        // 1. advect (fA -> fB), swap
+        this.advectMat.uniforms.uField.value = this.fA.texture;
+        this._blit(renderer, this.advectMat, this.fB);
+        [this.fA, this.fB] = [this.fB, this.fA];
 
+        // 2. forces (fA -> fB), swap
+        this.forceMat.uniforms.uField.value = this.fA.texture;
+        this._blit(renderer, this.forceMat, this.fB);
+        [this.fA, this.fB] = [this.fB, this.fA];
+
+        // 3. divergence (fA -> div)
+        this.divMat.uniforms.uField.value = this.fA.texture;
+        this._blit(renderer, this.divMat, this.div);
+
+        // 4. pressure Jacobi (warm-started)
         for (let i = 0; i < this.iters; i++) {
-            this.jacobiMat.uniforms.uPhi.value   = this.phiA.texture;
-            this.jacobiMat.uniforms.uField.value = this.fieldA.texture;
-            this._blit(renderer, this.jacobiMat, this.phiB);
-            [this.phiA, this.phiB] = [this.phiB, this.phiA];
+            this.jacMat.uniforms.uPrs.value = this.pA.texture;
+            this.jacMat.uniforms.uDiv.value = this.div.texture;
+            this._blit(renderer, this.jacMat, this.pB);
+            [this.pA, this.pB] = [this.pB, this.pA];
         }
 
+        // 5. subtract pressure gradient (fA, pA -> fB), swap
+        this.subMat.uniforms.uField.value = this.fA.texture;
+        this.subMat.uniforms.uPrs.value   = this.pA.texture;
+        this._blit(renderer, this.subMat, this.fB);
+        [this.fA, this.fB] = [this.fB, this.fA];
+
         renderer.setRenderTarget(prev);
     }
 
-    /** Run many steps up front so cells are developed before first display. */
-    prewarm(renderer, steps = 60) {
-        for (let i = 0; i < steps; i++) this.step(renderer);
-    }
+    prewarm(renderer, steps = 50) { for (let i = 0; i < steps; i++) this.step(renderer); }
 
-    /** Current field texture: .r temperature, .gb velocity. */
-    getTexture() { return this.fieldA.texture; }
+    getTexture() { return this.fA.texture; }
 
     dispose() {
-        [this.fieldA, this.fieldB, this.phiA, this.phiB].forEach((rt) => rt.dispose());
-        [this.seedMat, this.advectMat, this.jacobiMat].forEach((m) => m.dispose());
+        [this.fA, this.fB, this.pA, this.pB, this.div].forEach((rt) => rt.dispose());
+        [this.seedMat, this.advectMat, this.forceMat, this.divMat, this.jacMat, this.subMat]
+            .forEach((m) => m.dispose());
         this.quad.geometry.dispose();
     }
 }
