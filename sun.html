@@ -2793,19 +2793,29 @@ const sunFS = /* glsl */`
 
         // ── Nanoflare / microflare transient brightenings ─────────────────────
         // Small-scale magnetic reconnection events (Parker 1988).
-        // 6 independent sites that blink on/off over ~1-2 second timescales.
+        // Concentrated in/around the active-region footpoints (Parker 1988),
+        // firing as impulsive hot bursts -- not scattered at random.
         float microflare = 0.0;
-        for (int mf = 0; mf < 6; mf++) {
-            float fi = float(mf);
-            vec3 mfSeed = vec3(fi * 1.7 + 0.3, fi * 2.3, fi * 0.9);
-            float mfNoise = vnoise(vPosition * 14.0 + mfSeed + vec3(u_time * 0.008));
-            // Sharp threshold → small bright point
-            float mfSpot = smoothstep(0.88, 0.96, mfNoise);
-            // Blink envelope: sin^4 gives sharp pulses
-            float mfBlink = pow(max(0.0, sin(u_time * (1.2 + fi * 0.5) + fi * 11.0)), 4.0);
-            microflare += mfSpot * mfBlink;
+        vec3  nfUnit = normalize(vPosition);
+        for (int k = 0; k < 8; k++) {
+            if (k >= u_arSpotCount) break;
+            vec3  arP   = normalize(u_arSpots[k].xyz);
+            float arInt = abs(u_arSpots[k].w);
+            float cosA  = dot(nfUnit, arP);
+            if (cosA < 0.88) continue;                  // only in/near the active region
+            float ang   = acos(clamp(cosA, -1.0, 1.0));
+            // Several reconnection sites sprinkled through the AR footpoints.
+            vec3  site  = vPosition * 34.0 + vec3(float(k) * 7.3);
+            float spot  = smoothstep(0.78, 0.94, vnoise(site));
+            // Impulsive flare lightcurve: each site on its own fast clock,
+            // sharp rise then quick decay (pow(sin,9) = a hot spike + tail).
+            float ph    = vnoise(site * 1.7) * 31.0;
+            float flash = pow(max(0.0, sin(u_time * (2.4 + arInt * 4.0) + ph)), 9.0);
+            // Footpoint gating: brightest at the AR core, fading outward.
+            float gate  = exp(-ang * ang / (0.008 + 0.020 * arInt));
+            microflare += spot * flash * gate * (0.6 + arInt);
         }
-        microflare = min(microflare, 1.0) * 0.65;
+        microflare = min(microflare, 1.5);
 
         // ── Per-AR sunspot rendering (Phase 4.4) ──────────────────────────────
         // Replaces the previous noise-blot spotNoise/penNoise/facNoise/flareNoise
@@ -2968,7 +2978,7 @@ const sunFS = /* glsl */`
         col += vec3(1.4, 1.2, 0.9) * mbp * (1.0 - umbra) * u_showSpots;
 
         // Nanoflare transient brightenings — hot white-yellow pops
-        col += vec3(1.5, 1.3, 0.8) * microflare * (1.0 - umbra) * u_showFlares;
+        col += mix(vec3(1.7, 1.5, 1.1), vec3(0.85, 0.95, 1.7), 0.55) * microflare * 1.1 * (1.0 - umbra) * u_showFlares;
 
         // Facular brightening near limb (spot-local Wilson walls)
         col += baseCol * facular * 0.65;
@@ -2978,8 +2988,17 @@ const sunFS = /* glsl */`
         // slight blue-violet tint where Ca II K and UV continuum dominate.
         // Coupled to u_showSpots so the user's "Sunspot regions" toggle owns
         // the entire AR visual chain (spots + plage together).
-        vec3 plageColor = mix(baseCol * 1.18, vec3(1.05, 1.02, 0.95), 0.55);
-        col += plageColor * plage * 0.42 * u_showSpots;
+        // Active-region emission: bright Ca/EUV plage that visibly PULSES
+        // (chromospheric/coronal heating flickers even on a quiet Sun) so active
+        // regions read as ALIVE, with a hot core glow like the EUV references --
+        // not static dark spots. Much brighter than the old 0.42.
+        vec3 plageColor = mix(baseCol * 1.25, vec3(1.12, 1.00, 0.82), 0.60);
+        float arPulse = 0.70 + 0.30 * sin(u_time * 2.3 + plage * 8.0)
+                      + 0.14 * sin(u_time * 5.7 + plage * 3.0);
+        col += plageColor * plage * (0.95 + u_f107_norm * 0.6) * arPulse * u_showSpots;
+        // Hot EUV core glow at the brightest plage (the active-region cores).
+        float arCore = smoothstep(0.45, 1.15, plage);
+        col += vec3(1.25, 0.80, 0.45) * arCore * (0.55 + 0.6 * arPulse) * u_showSpots;
 
         // ── Sunspot umbra (T_umbra ~ 0.60 × T_eff ≈ 3470 K) ──────────────────
         float umbraT = u_teff * (0.60 - umbra * 0.18);
@@ -4410,9 +4429,15 @@ const spiculeVS = /* glsl */`
         // Activity modulates overall density (more spicules at solar max)
         vAlpha *= 0.5 + u_activity * 0.5;
 
+        // Spicules read as a fine fringe at the LIMB, not fat sprites blanketing
+        // the disc. Fade out on the Earth-facing hemisphere, and CLAMP the point
+        // size so zooming in doesn't balloon them into "bubbles".
+        vec3 nv = normalize(normalMatrix * aDir);
+        vAlpha *= smoothstep(0.60, 0.04, nv.z);
+
         vec4 mv = modelViewMatrix * vec4(pos, 1.0);
         gl_Position = projectionMatrix * mv;
-        gl_PointSize = mix(1.2, 2.0, aSpeed) * (200.0 / -mv.z);
+        gl_PointSize = clamp(mix(0.8, 1.5, aSpeed) * (150.0 / -mv.z), 0.5, 3.0);
     }
 `;
 const spiculeFS = /* glsl */`
@@ -4422,9 +4447,11 @@ const spiculeFS = /* glsl */`
     varying float vAlpha;
 
     void main() {
-        // Circular point sprite
+        // Soft round jet tip (no hard-edged disc -> no "bubble" look).
         vec2 c = gl_PointCoord - 0.5;
-        if (dot(c, c) > 0.25) discard;
+        float cd = dot(c, c);
+        if (cd > 0.25) discard;
+        float soft = smoothstep(0.25, 0.0, cd);
 
         // Colour: Hα deep red at base → warm pink at tip (heating as it rises)
         // Type II (fast) spicules are hotter → more orange-white at tips
@@ -4436,7 +4463,7 @@ const spiculeFS = /* glsl */`
         );
         vec3 col = mix(baseCol, tipCol, vHeight);
 
-        gl_FragColor = vec4(col, vAlpha * 0.7);
+        gl_FragColor = vec4(col, vAlpha * 0.5 * soft);
     }
 `;
 {
@@ -6124,7 +6151,7 @@ function _initNanoflareSystem() {
 
     const pool = new Array(NANOFLARE_POOL_SIZE);
     for (let i = 0; i < NANOFLARE_POOL_SIZE; i++) {
-        pool[i] = { alive: false, t0: 0, life: 1, peakSize: 1, peakAlpha: 0 };
+        pool[i] = { alive: false, t0: 0, life: 1, peakSize: 1, peakAlpha: 0, bx: 0, by: 0, bz: 0 };
     }
 
     // Permanent host group co-rotates with the photosphere so SOC-spawned
@@ -6200,6 +6227,7 @@ function _spawnNanoflare(loopIdx, sArc, energyE) {
     sys.positions[slot * 3]     = px * lift;
     sys.positions[slot * 3 + 1] = py * lift;
     sys.positions[slot * 3 + 2] = pz * lift;
+    ent.bx = px * lift; ent.by = py * lift; ent.bz = pz * lift;   // base for the rise
     sys.colors[slot * 3]     = r;
     sys.colors[slot * 3 + 1] = gC;
     sys.colors[slot * 3 + 2] = b;
@@ -6275,6 +6303,12 @@ function _updateNanoflares(t) {
         let env;
         if (age < 0.15) env = age / 0.15;
         else            env = Math.exp(-(age - 0.15) * 4.5);
+        // Hot plasma rises: drift the spark radially outward over its life so
+        // it reads as an ejected particle burst, not a static blink.
+        const rise = 1.0 + age * 0.05;
+        positions[i * 3]     = ent.bx * rise;
+        positions[i * 3 + 1] = ent.by * rise;
+        positions[i * 3 + 2] = ent.bz * rise;
         alphas[i] = ent.peakAlpha * env;
         sizes[i]  = ent.peakSize  * (0.55 + 0.45 * env);
         liveCount++;
@@ -6706,6 +6740,7 @@ function _spawnNanoflareAtSurface(latRad, lonRad, energyE) {
     sys.positions[slot * 3]     = px * lift;
     sys.positions[slot * 3 + 1] = py * lift;
     sys.positions[slot * 3 + 2] = pz * lift;
+    ent.bx = px * lift; ent.by = py * lift; ent.bz = pz * lift;   // base for the rise
     sys.colors[slot * 3]     = r;
     sys.colors[slot * 3 + 1] = gC;
     sys.colors[slot * 3 + 2] = b;
