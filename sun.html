@@ -8774,8 +8774,21 @@ async function fetchLiveSolarData() {
             return { num, loc, area, z, mag, nspot };
         }).filter(r => r.num && parseLoc(r.loc));
 
-        if (parsed.length > 0) {
-            liveRegions = parsed;
+        // solar_regions.json lists every numbered region for the last several
+        // days AND repeats each region once per observation date, so the raw
+        // list balloons to dozens of near-duplicate markers smeared across the
+        // active-latitude bands. Collapse to the real picture: keep the latest
+        // entry per region number, drop spotless plage-only regions, sort by
+        // size, and cap to 8 (matches the u_arSpots[8] shader slots).
+        const _byNum = new Map();
+        for (const r of parsed) _byNum.set(r.num, r);   // later entry (newest date) wins
+        const deduped = [..._byNum.values()]
+            .filter(r => r.area > 0 || r.nspot > 0)      // real sunspot groups only
+            .sort((a, b) => (b.area - a.area) || (b.nspot - a.nspot))
+            .slice(0, 8);
+
+        if (deduped.length > 0) {
+            liveRegions = deduped;
         }
 
         // ── Flares from edited_events.json ────────────────────────────────────
@@ -11193,6 +11206,8 @@ window.__sun = {
     get fluid() { return solarFluid; },
     get composer() { return composer; },
     setRegions: (r) => { liveRegions = r || []; },   // debug/test: inject active regions
+    rebuildMarkers: () => buildRegionMarkers(),       // debug/test: rebuild AR markers
+    get regionCount() { return liveRegions.length; },
     testFlare: (cls, latDeg, lonDeg) => {            // debug/test: fire a flare now
         const c = (cls || 'X')[0].toUpperCase();
         const la = (latDeg ?? 14), lo = (lonDeg ?? 15);
