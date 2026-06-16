@@ -3057,8 +3057,8 @@ const sunFS = /* glsl */`
             float sigKern  = 0.022 + u_flare_t * 5.0e-5;
             float uvKern   = exp(-df * df / (sigKern * sigKern)) * fDecay;
             // White-light flash brightens the kernel dramatically at onset
-            float kernBoost = 1.0 + u_flare_intensity * 2.2;
-            col += vec3(2.6, 2.1, 1.2) * uvKern * kernBoost * u_showFlares;
+            float kernBoost = 1.0 + u_flare_intensity * 0.9;   // bright kernel, but not a disc-wide bloom
+            col += vec3(2.0, 1.7, 1.1) * uvKern * kernBoost * u_showFlares;
 
             // ── Hα ribbon pair (AIA 304 Å proxy) ────────────────────────────
             // Two arcs straddling the polarity-inversion line (PIL). When the
@@ -3089,7 +3089,7 @@ const sunFS = /* glsl */`
                 rib1 = exp(-pow((dlat - sep) / rWid, 2.0)) * lonEnv;
                 rib2 = exp(-pow((dlat + sep) / rWid, 2.0)) * lonEnv;
             }
-            float ribMask = (rib1 + rib2) * fDecay * 0.85;
+            float ribMask = (rib1 + rib2) * fDecay * 1.25;   // brighter, more defined two-ribbon arcs
             // Colour: UV white at onset → Hα red as it cools
             vec3 ribHot  = vec3(1.6, 1.3, 0.9);    // bright UV continuum
             vec3 ribCool = vec3(1.1, 0.18, 0.06);  // Hα 656 nm red
@@ -3101,7 +3101,7 @@ const sunFS = /* glsl */`
             // the disk as a diffuse warm glow centred on the flare site.
             float arcadeSig  = 0.055 + u_flare_t * 8.0e-5;
             float arcadeGlow = exp(-df * df / (arcadeSig * arcadeSig))
-                             * exp(-u_flare_t / 350.0) * 0.45;
+                             * exp(-u_flare_t / 350.0) * 0.60;
             vec3 arcadeCol   = mix(vec3(0.55, 1.30, 1.20),  // AIA 131 teal (10 MK)
                                    vec3(1.00, 0.80, 0.30),  // AIA 171 gold (1 MK)
                                    clamp(u_flare_t / 250.0, 0.0, 1.0));
@@ -3160,7 +3160,8 @@ const sunFS = /* glsl */`
         // Kept moderate so granulation contrast and sunspot detail remain visible.
         // Only flare impulsive phase pushes significantly above bloom threshold.
         // Pre-exposure for ACES tonemap below.
-        col *= 1.00 + u_flare_intensity * 0.78;
+        col *= 1.00 + u_flare_intensity * 0.12;   // only a subtle global lift; the flare
+                                                  // brightness is localized (kernel/ribbons/arcade)
 
         // ── F10.7 solar-cycle boost — solar maximum = hotter, brighter photosphere ──
         // Higher radio flux index → more magnetic heating → brighter surface
@@ -8305,7 +8306,7 @@ function animate() {
         const frac  = elapsed / duration;
         const scale = 0.4 + frac * 3.5;
         ring.scale.setScalar(scale * ring.userData.peak);
-        ring.material.opacity = Math.max(0, Math.pow(1 - frac, 1.6) * ring.userData.peak * 0.85);
+        ring.material.opacity = Math.max(0, Math.pow(1 - frac, 1.6) * ring.userData.peak * 0.5);
     });
 
     controls.update();
@@ -9191,7 +9192,8 @@ buildFieldLines();
 buildProminences();
 updateLivePanel(false);
 updateFlareActivityBar();
-replayRecentFlares();
+// Flares now fire only on real-time detection (see the swpc-update handler's
+// seed-on-first-update gate) -- we no longer replay historical flares at load.
 document.getElementById('live-status').textContent = 'Default data · fetching live…';
 
 document.getElementById('btn-live-refresh').addEventListener('click', () => {
@@ -9432,6 +9434,7 @@ setInterval(() => {
 // Set of "cls|timestamp" keys for flares already given a 3D ring — prevents
 // duplicate rings when swpc-update fires repeatedly on the same flare data.
 const _shownFlareKeys = new Set();
+let _flaresSeeded = false;   // first swpc-update only seeds known flares (no firing)
 
 window.addEventListener('swpc-update', (ev) => {
     const sw  = ev.detail;
@@ -9801,6 +9804,11 @@ window.addEventListener('swpc-update', (ev) => {
     // ── Position rings for ALL recent flares (< 3h old) ─────────────────────
     // The swpc-update event fires every 60 s. We track shown flare keys so we
     // only trigger a ring once per unique flare event, not on every poll.
+    // First swpc-update only SEEDS the already-known flares so the page doesn't
+    // replay historical flares at load -- only a real-time flare (one that
+    // arrives in a later poll) actually fires.
+    const _firstFlare = !_flaresSeeded;
+    _flaresSeeded = true;
     if (sw.recent_flares?.length) {
         const cutoff3h = Date.now() - 3 * 3600e3;
         sw.recent_flares.forEach(f => {
@@ -9810,6 +9818,7 @@ window.addEventListener('swpc-update', (ev) => {
             const key = `${f.cls}|${ft}`;
             if (_shownFlareKeys.has(key)) return;
             _shownFlareKeys.add(key);
+            if (_firstFlare) return;   // seed only: don't fire historical flares at load
             const loc = parseLoc(f.location);
             if (!loc) return;
             const clsCh = (f.cls ?? f.parsed?.letter ?? 'C')[0]?.toUpperCase() ?? 'C';
@@ -9831,7 +9840,7 @@ window.addEventListener('swpc-update', (ev) => {
 
     // ── Visual flare/CME burst ───────────────────────────────────────────────
     // Trigger a sun flash when a new major flare is detected via SpaceWeatherFeed
-    if (sw.new_major_flare) {
+    if (sw.new_major_flare && !_firstFlare) {
         const cls   = sw.flare_class ?? 'M';
         const clsCh = cls[0];
         _triggerSunFlashFromSWPC(sw.flare_direction);
@@ -11180,6 +11189,20 @@ window.__sun = {
     uniforms,
     get fluid() { return solarFluid; },
     get composer() { return composer; },
+    setRegions: (r) => { liveRegions = r || []; },   // debug/test: inject active regions
+    testFlare: (cls, latDeg, lonDeg) => {            // debug/test: fire a flare now
+        const c = (cls || 'X')[0].toUpperCase();
+        const la = (latDeg ?? 14), lo = (lonDeg ?? 15);
+        const lat = la * Math.PI / 180, lon = lo * Math.PI / 180;
+        uniforms.u_flare_lat.value = lat;
+        uniforms.u_flare_lon.value = lon;
+        uniforms.u_flare_intensity.value = 1.0;
+        uniforms.u_flare_t.value = 0.0;
+        try { _refreshFlareRibbons(lat, lon); } catch (e) {}
+        try { triggerPositionFlare(la, lo, c); } catch (e) {}
+        try { eruptNearestProminence(lat, lon); } catch (e) {}
+        try { spawnEruptingProminence(lat, lon, c); } catch (e) {}
+    },
     layers: {
         core:         coreMesh,
         radiative:    radiativeMesh,
