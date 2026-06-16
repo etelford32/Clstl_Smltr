@@ -2978,8 +2978,17 @@ const sunFS = /* glsl */`
         // slight blue-violet tint where Ca II K and UV continuum dominate.
         // Coupled to u_showSpots so the user's "Sunspot regions" toggle owns
         // the entire AR visual chain (spots + plage together).
-        vec3 plageColor = mix(baseCol * 1.18, vec3(1.05, 1.02, 0.95), 0.55);
-        col += plageColor * plage * 0.42 * u_showSpots;
+        // Active-region emission: bright Ca/EUV plage that visibly PULSES
+        // (chromospheric/coronal heating flickers even on a quiet Sun) so active
+        // regions read as ALIVE, with a hot core glow like the EUV references --
+        // not static dark spots. Much brighter than the old 0.42.
+        vec3 plageColor = mix(baseCol * 1.25, vec3(1.12, 1.00, 0.82), 0.60);
+        float arPulse = 0.70 + 0.30 * sin(u_time * 2.3 + plage * 8.0)
+                      + 0.14 * sin(u_time * 5.7 + plage * 3.0);
+        col += plageColor * plage * (0.95 + u_f107_norm * 0.6) * arPulse * u_showSpots;
+        // Hot EUV core glow at the brightest plage (the active-region cores).
+        float arCore = smoothstep(0.45, 1.15, plage);
+        col += vec3(1.25, 0.80, 0.45) * arCore * (0.55 + 0.6 * arPulse) * u_showSpots;
 
         // ── Sunspot umbra (T_umbra ~ 0.60 × T_eff ≈ 3470 K) ──────────────────
         float umbraT = u_teff * (0.60 - umbra * 0.18);
@@ -4410,9 +4419,15 @@ const spiculeVS = /* glsl */`
         // Activity modulates overall density (more spicules at solar max)
         vAlpha *= 0.5 + u_activity * 0.5;
 
+        // Spicules read as a fine fringe at the LIMB, not fat sprites blanketing
+        // the disc. Fade out on the Earth-facing hemisphere, and CLAMP the point
+        // size so zooming in doesn't balloon them into "bubbles".
+        vec3 nv = normalize(normalMatrix * aDir);
+        vAlpha *= smoothstep(0.60, 0.04, nv.z);
+
         vec4 mv = modelViewMatrix * vec4(pos, 1.0);
         gl_Position = projectionMatrix * mv;
-        gl_PointSize = mix(1.2, 2.0, aSpeed) * (200.0 / -mv.z);
+        gl_PointSize = clamp(mix(0.8, 1.5, aSpeed) * (150.0 / -mv.z), 0.5, 3.0);
     }
 `;
 const spiculeFS = /* glsl */`
@@ -4422,9 +4437,11 @@ const spiculeFS = /* glsl */`
     varying float vAlpha;
 
     void main() {
-        // Circular point sprite
+        // Soft round jet tip (no hard-edged disc -> no "bubble" look).
         vec2 c = gl_PointCoord - 0.5;
-        if (dot(c, c) > 0.25) discard;
+        float cd = dot(c, c);
+        if (cd > 0.25) discard;
+        float soft = smoothstep(0.25, 0.0, cd);
 
         // Colour: Hα deep red at base → warm pink at tip (heating as it rises)
         // Type II (fast) spicules are hotter → more orange-white at tips
@@ -4436,7 +4453,7 @@ const spiculeFS = /* glsl */`
         );
         vec3 col = mix(baseCol, tipCol, vHeight);
 
-        gl_FragColor = vec4(col, vAlpha * 0.7);
+        gl_FragColor = vec4(col, vAlpha * 0.5 * soft);
     }
 `;
 {
@@ -11135,6 +11152,7 @@ window.__sun = {
     controls,
     uniforms,
     get fluid() { return solarFluid; },
+    setRegions: (r) => { liveRegions = r || []; },   // debug/test: inject active regions
     get composer() { return composer; },
     layers: {
         core:         coreMesh,
