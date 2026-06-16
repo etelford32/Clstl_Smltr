@@ -128,22 +128,68 @@ def _download(url: str, *, timeout_s: float = 90.0) -> str:
 
 
 def _parse_record(line: str, columns: tuple[str, ...]) -> Optional[dict]:
+    """
+    Map one whitespace-split data line to a canonical record using the
+    positional `columns` names. Recognised column tokens:
+
+      t              single ISO-ish timestamp token
+      date, time     two-token timestamp (e.g. TU Delft v02:
+                     "YYYY-MM-DD" "hh:mm:ss.sss") — combined into t
+      alt_km         altitude already in km
+      alt_m          altitude in metres — converted to alt_km
+      lat_deg, lon_deg, density_kg_m3
+      _              ignore this column (e.g. the GPS time-system tag,
+                     local-solar-time, argument-of-latitude, running-mean
+                     density, quality flags)
+
+    The TU Delft GRACE-FO v02 row maps as:
+      date,time,_,alt_m,lon_deg,lat_deg,_,_,density_kg_m3
+    """
     parts = line.split()
     if len(parts) < len(columns):
         return None
     try:
-        record = {}
+        record: dict = {}
+        date_str: Optional[str] = None
+        time_str: Optional[str] = None
         for col, val in zip(columns, parts):
-            if col == "t":
+            if col in ("_", "ignore", "skip"):
+                continue
+            if col == "date":
+                date_str = val
+            elif col == "time":
+                time_str = val
+            elif col == "t":
                 # Accept ISO-UTC or YYYY-MM-DDThh:mm:ss(.ffff)
-                record[col] = datetime.fromisoformat(
+                record["t"] = datetime.fromisoformat(
                     val.replace("Z", "+00:00")
                 ).astimezone(timezone.utc)
+            elif col == "alt_m":
+                record["alt_km"] = float(val) / 1000.0
             else:
                 record[col] = float(val)
+        if date_str is not None:
+            # Two-token timestamp. The TU Delft GRACE-FO stamp is GPS time;
+            # the GPS−UTC offset (~18 s in 2024) is negligible against the
+            # 5-minute pseudo-Ap cadence we validate, so we treat it as UTC.
+            iso = date_str if time_str is None else f"{date_str}T{time_str}"
+            record["t"] = datetime.fromisoformat(iso).replace(tzinfo=timezone.utc)
+        if "t" not in record:
+            return None
         return record
     except (ValueError, IndexError):
         return None
+
+
+def _decimate_records(records: list[dict], step_seconds: float) -> list[dict]:
+    """Thin time-ordered records to ~one per `step_seconds` (first per bucket)."""
+    out: list[dict] = []
+    next_t = None
+    for r in records:
+        if next_t is None or r["t"] >= next_t:
+            out.append(r)
+            next_t = r["t"] + timedelta(seconds=step_seconds)
+    return out
 
 
 def _parse_records(text: str, columns: tuple[str, ...]
@@ -212,7 +258,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     src.add_argument("--remote-template", help="URL template using {Y}{M}{D}")
     src.add_argument("--local-glob",      help="Glob of already-downloaded files")
     p.add_argument("--columns", default=",".join(DEFAULT_COLUMNS),
-                   help=f"Comma-separated column order (default: {','.join(DEFAULT_COLUMNS)})")
+                   help=f"Comma-separated column order (default: {','.join(DEFAULT_COLUMNS)}). "
+                        "Tokens: t | date,time (two-token stamp) | alt_km | alt_m "
+                        "(metres→km) | lat_deg | lon_deg | density_kg_m3 | _ (ignore). "
+                        "TU Delft v02: 'date,time,_,alt_m,lon_deg,lat_deg,_,_,density_kg_m3'")
+    p.add_argument("--decimate-seconds", type=float, default=None,
+                   help="Thin the windowed records to ~one per N seconds "
+                        "(keeps the first per bucket); for high-cadence "
+                        "accelerometer files (e.g. TU Delft 10 s).")
     p.add_argument("--out", type=Path,
                    default=Path("dsmc/fixtures/hindcast/feb_2022_starlink/grace_fo_density.csv"))
     p.add_argument("--dry-run", action="store_true",
@@ -231,8 +284,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     start = _parse_when(args.start)
     end   = _parse_when(args.end)
     columns = tuple(c.strip() for c in args.columns.split(","))
-    if "t" not in columns:
-        log.error("--columns must contain a 't' column"); return 2
+    if "t" not in columns and "date" not in columns:
+        log.error("--columns must contain a 't' (or 'date'[,'time']) column"); return 2
 
     if args.smoke_test:
         if not args.remote_template:
@@ -261,6 +314,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         log.error("no records in [%s, %s)", start, end); return 2
 
     records.sort(key=lambda r: r["t"])
+    if args.decimate_seconds:
+        n_raw = len(records)
+        records = _decimate_records(records, args.decimate_seconds)
+        log.info("Decimated %d → %d records at %.0f s cadence",
+                 n_raw, len(records), args.decimate_seconds)
     _write_csv(records, args.out)
     log.info("Wrote %d records → %s", len(records), args.out)
     return 0

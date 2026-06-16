@@ -103,15 +103,21 @@ def _msise_call(
     lat_deg: float, lon_deg: float,
     when: datetime,
 ) -> dict:
-    """Call NRLMSISE-00 via the msise00 package."""
+    """Call NRLMSISE-00 via the msise00 package.
+
+    msise00 (>=1.x) takes the solar/geomagnetic drivers in an ``indices``
+    dict — keys ``f107s`` (81-day smoothed F10.7), ``f107`` (daily F10.7)
+    and ``Ap`` (daily). They are NOT top-level kwargs; passing them as
+    ``f107s=``/``Ap=`` raises ``unexpected keyword argument`` and every
+    call silently degrades to the exponential fallback. Pass our 81-day
+    average as ``f107s`` and the daily value as ``f107``.
+    """
     ds = _msise00.run(
         time=when,
         altkm=altitude_km,
         glat=lat_deg,
         glon=lon_deg,
-        f107s=f107,
-        f107a=f107a,
-        Ap=ap,
+        indices={"f107s": f107a, "f107": f107, "Ap": ap},
     )
     # msise00 returns an xarray.Dataset; single-point call → scalar fields.
     rho = float(ds["Total"].values.squeeze())     # kg/m^3
