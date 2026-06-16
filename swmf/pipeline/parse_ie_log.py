@@ -89,9 +89,30 @@ ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 
+# ── RIM positional logfile format ─────────────────────────────────────────────
+# The Ridley_serial IE component writes a "logfile" whose first line is a prose
+# banner ("Ridley Ionosphere Model, tilt [deg] CPCP [kV] ... Hemispheric Power
+# [GW]") rather than tokenised column names — so the name/alias machinery above
+# cannot resolve it. Its columns are fixed by the model, so we recognise the
+# banner and fall back to this 0-indexed positional map. Verified against the
+# May-2024 Gannon coupled GM+IE run (NF=25 on every data row):
+#   0 t_sec | 1 yr 2 mo 3 dy 4 hr 5 mn 6 sc 7 ms | 8 tilt[deg]
+#   9 CPCP_n 10 CPCP_s [kV] | 11..14 integrated FACs [MA] | 15 HP_n 16 HP_s [GW]
+#   | 17.. auroral sub-components
+_RIM_BANNER_RE = re.compile(r"ridley\s+ionosphere\s+model", re.IGNORECASE)
+_RIM_POSITIONAL_COLS: dict[str, int] = {
+    "year": 1, "month": 2, "day": 3, "hour": 4, "minute": 5, "second": 6,
+    "cpcp_n": 9, "cpcp_s": 10, "hp_n": 15, "hp_s": 16,
+}
+
+
 # ── Locating the log ──────────────────────────────────────────────────────────
 
 _GLOB_PATTERNS = (
+    # RIM (Ridley_serial) logfile, positional "Ridley Ionosphere Model" format.
+    # Listed first because this is what the coupled GM+IE runs actually emit.
+    "IE/ionosphere/IE_t*.log",
+    "IE/IONO/IE_t*.log",
     "IE/IONO/IE_log_*.dat",
     "IE/IONO/log_*.dat",
     "IE/ionosphere/IE_log_*.dat",
@@ -103,12 +124,23 @@ _GLOB_PATTERNS = (
 
 
 def find_ie_log(run_dir: Path) -> Path:
-    """Find the IE log under a run directory. Raises if no match."""
+    """
+    Find the IE log under a run directory. Raises if no match.
+
+    For the RIM ``IE_t<stamp>.log`` naming, a run that is stopped and resumed
+    from a restart checkpoint writes a NEW file stamped at the resume time,
+    while the ORIGINAL (earliest-stamped) file keeps the full, appended,
+    gap-free series. So for that pattern we pick the EARLIEST match — taking
+    the most-recent would silently hand back only the partial resume tail
+    (e.g. miss the storm main phase). For the older rotation patterns we keep
+    the historical "most recent" behaviour.
+    """
     for pat in _GLOB_PATTERNS:
         matches = sorted(run_dir.glob(pat))
         if matches:
-            chosen = matches[-1]   # most recent if rotation
-            log.info("IE log → %s (matched %s)", chosen, pat)
+            chosen = matches[0] if "IE_t*" in pat else matches[-1]
+            log.info("IE log → %s (matched %s, %d candidate%s)",
+                     chosen, pat, len(matches), "" if len(matches) == 1 else "s")
             return chosen
     raise FileNotFoundError(
         f"no IE log under {run_dir}; tried patterns {_GLOB_PATTERNS}"
@@ -328,17 +360,53 @@ def _row_time(row: list[str], cols: dict[str, int],
     return None
 
 
+def _decimate(samples: list[dict], step_seconds: float) -> list[dict]:
+    """
+    Thin a time-ordered sample list to ~one sample per `step_seconds`, keeping
+    the LAST sample in each time bucket. We keep the last because:
+      * the steady-state relaxation writes many rows stamped at the run start
+        time (sim-time frozen at 0) while the solution converges — the last of
+        those is the converged state, which is what we want at t0;
+      * for genuine high-cadence data the bucket-final sample is a fine
+        representative at the coarser cadence.
+    Buckets are measured from the first sample's timestamp.
+    """
+    t0 = datetime.fromisoformat(samples[0]["t"].replace("Z", "+00:00"))
+    out: list[dict] = []
+    cur_bucket: Optional[int] = None
+    last: Optional[dict] = None
+    for s in samples:
+        ts = datetime.fromisoformat(s["t"].replace("Z", "+00:00"))
+        b = int((ts - t0).total_seconds() // step_seconds)
+        if cur_bucket is None:
+            cur_bucket = b
+        elif b != cur_bucket:
+            out.append(last)        # flush previous bucket's final sample
+            cur_bucket = b
+        last = s
+    if last is not None:
+        out.append(last)
+    return out
+
+
 def parse_ie_log(
     path: Path,
     start_utc: Optional[datetime] = None,
     end_utc:   Optional[datetime] = None,
     *,
     extra_aliases: Optional[dict[str, tuple[str, ...]]] = None,
+    decimate_seconds: Optional[float] = None,
 ) -> list[dict]:
     """
     Read the IE log and emit one sample per data row inside [start, end).
     Rows missing any required column or with non-numeric values are dropped
     (logged at debug). Window bounds are exclusive on `end_utc`.
+
+    If `decimate_seconds` is given, the (time-ordered) result is thinned to
+    ~one sample per that interval, keeping the last sample in each bucket —
+    which both honours the 5-minute output contract and collapses the many
+    identical-timestamp steady-state relaxation rows into their converged
+    final state.
     """
     text = path.read_text()
 
@@ -348,6 +416,16 @@ def parse_ie_log(
     n_skipped = 0
     required = ("cpcp_n", "cpcp_s", "hp_n", "hp_s")
     last_candidate: Optional[list[str]] = None    # for error suggestions
+
+    # RIM logfiles carry a prose banner instead of a column-name header. Detect
+    # it up front and install the fixed positional column map; the row loop
+    # then parses by position. The banner and any '#' comment lines fall
+    # through harmlessly — they have no parseable date and get skipped.
+    if any(_RIM_BANNER_RE.search(ln) for ln in text.splitlines()[:3]):
+        cols = dict(_RIM_POSITIONAL_COLS)
+        header_tokens = ["<RIM positional format>"]
+        log.info("RIM positional IE logfile detected (%s); using fixed "
+                 "column map %s", path.name, sorted(cols))
 
     for raw in text.splitlines():
         line = raw.strip()
@@ -408,6 +486,13 @@ def parse_ie_log(
     if not samples:
         raise RuntimeError(f"no usable rows in {path} for window "
                            f"[{start_utc}, {end_utc})")
+
+    if decimate_seconds and len(samples) > 1:
+        n_raw = len(samples)
+        samples = _decimate(samples, decimate_seconds)
+        log.info("Decimated %d → %d samples at %.0f s cadence",
+                 n_raw, len(samples), decimate_seconds)
+
     log.info("Parsed %d samples from %s", len(samples), path)
     return samples
 
