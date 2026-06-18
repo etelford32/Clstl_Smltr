@@ -797,51 +797,19 @@ async function initGlobe() {
 }
 
 async function refreshAuroraGrid() {
-  let d = null;
-  // Primary: our downsampled edge route (few KB). Falls back to a direct
-  // browser→NOAA OVATION fetch — NOAA's WAF 403s server-side fetches but
-  // allows CORS browser fetches, so this path works wherever the Earth
-  // page's aurora works (see js/swpc-feed.js header).
   try {
     const r = await fetch('/api/noaa/aurora-grid', { mode: 'cors' });
-    if (r.ok) { const j = await r.json(); if (j?.data && Array.isArray(j.data.cells) && j.data.cells.length) d = j.data; }
-  } catch (_) {}
-  if (!d) { try { d = await fetchAuroraCellsDirect(); } catch (_) {} }
-
-  const pip = document.getElementById('au-scope-pip');
-  if (!d || !Array.isArray(d.cells)) { if (pip) pip.classList.remove('live'); renderBrightest(null); return; }
-  if (globe) { globe.setSubsolar(new Date()); globe.setAurora(d); }
-  renderScopePower(d);
-  renderBrightest(d.cells);
-  if (pip) pip.classList.add('live');
-}
-
-/* Browser-direct OVATION fetch + the same downsample as api/noaa/aurora-grid.
-   Keep the knobs in lockstep with that edge route. */
-const _OVATION_URL = 'https://services.swpc.noaa.gov/json/ovation_aurora_latest.json';
-const _PROB_TO_GW = 0.025, _MIN_LAT = 40, _MIN_PROB = 4, _LON_STRIDE = 2, _MAX_CELLS = 700;
-async function fetchAuroraCellsDirect() {
-  const r = await fetch(_OVATION_URL, { mode: 'cors' });
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  const raw = await r.json();
-  if (!raw || !Array.isArray(raw.coordinates)) throw new Error('bad grid');
-  let north = 0, south = 0;
-  const cells = [];
-  for (const row of raw.coordinates) {
-    if (!Array.isArray(row) || row.length < 3) continue;
-    const lon = +row[0], lat = +row[1], prob = +row[2];     // [Longitude, Latitude, Aurora]
-    if (!Number.isFinite(lat) || !Number.isFinite(prob)) continue;
-    const w = prob * Math.cos(lat * Math.PI / 180);
-    if (lat >= 0) north += w; else south += w;
-    if (Math.abs(lat) < _MIN_LAT || prob < _MIN_PROB) continue;
-    if (!Number.isFinite(lon) || (Math.round(lon) % _LON_STRIDE) !== 0) continue;
-    cells.push([Math.round(lon), Math.round(lat), Math.round(prob)]);
+    const j = await r.json();
+    const d = j?.data;
+    if (!d || !Array.isArray(d.cells)) throw new Error('no cells');
+    if (globe) { globe.setSubsolar(new Date()); globe.setAurora(d); }
+    renderScopePower(d);
+    renderBrightest(d.cells);
+    const pip = document.getElementById('au-scope-pip'); if (pip) pip.classList.add('live');
+  } catch (_) {
+    const pip = document.getElementById('au-scope-pip'); if (pip) pip.classList.remove('live');
+    renderBrightest(null);
   }
-  cells.sort((a, b) => b[2] - a[2]);
-  const n = north * _PROB_TO_GW, s = south * _PROB_TO_GW;
-  const activity = n >= 100 ? 'extreme' : n >= 50 ? 'high' : n >= 20 ? 'active' : n >= 5 ? 'moderate' : 'quiet';
-  return { cells: cells.length > _MAX_CELLS ? cells.slice(0, _MAX_CELLS) : cells,
-           north_gw: n, south_gw: s, activity, updated: raw['Forecast Time'] ?? raw.forecast_time ?? null };
 }
 
 function renderScopePower(d) {
