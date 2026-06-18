@@ -86,6 +86,7 @@ const API_ROUTES = {
     '/api/noaa/protons':           'api/noaa/protons.js',
     '/api/noaa/electrons':         'api/noaa/electrons.js',
     '/api/noaa/aurora':            'api/noaa/aurora.js',
+    '/api/noaa/aurora-grid':       'api/noaa/aurora-grid.js',
     '/api/noaa/alerts':            'api/noaa/alerts.js',
     '/api/noaa/dst':               'api/noaa/dst.js',
     '/api/noaa/flares':            'api/noaa/flares.js',

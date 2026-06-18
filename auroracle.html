@@ -92,6 +92,8 @@ a{color:inherit;text-decoration:none}
 .chip:hover{border-color:var(--c-loc-border);color:var(--c-text-primary)}
 .chip.active{border-color:var(--c-loc-border);color:#04161a;background:var(--c-loc);font-weight:600}
 .chip.geo{border-color:var(--c-accent-border-hi);color:var(--c-accent)}
+.chip.saved{border-color:var(--c-loc-border);color:var(--c-loc)}
+.chip.saved.active{color:#04161a}
 .locbar .sep{width:1px;height:18px;background:var(--c-border-soft);margin:0 2px}
 .context{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:14px;
   font-family:'JetBrains Mono',monospace;font-size:.76rem;color:var(--c-text-muted)}
@@ -292,12 +294,91 @@ body.au-locked .au-premium>.au-gate{display:flex;position:absolute;inset:0;z-ind
 .au-alert-status.err{color:var(--c-status-error)}
 .au-alert-status b{color:var(--c-text-primary)}
 
+/* ── real-time 3D aurora analyzer (top-right of header) ── */
+.head{position:relative}
+.au-scope{position:absolute;top:26px;right:24px;width:300px;z-index:3}
+.au-scope-card{border-radius:var(--r-2xl);overflow:hidden;
+  background:linear-gradient(180deg,var(--c-surface-1),var(--c-surface-2));
+  border:1px solid var(--c-border-medium);backdrop-filter:var(--blur-glass);box-shadow:var(--shadow-panel)}
+.au-scope-head{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--c-border-faint)}
+.au-scope-head .pip{width:7px;height:7px;border-radius:50%;background:var(--c-text-faint);flex-shrink:0}
+.au-scope-head .pip.live{background:var(--c-status-live);box-shadow:0 0 8px var(--c-status-live-glow)}
+.au-scope-title{font-family:'JetBrains Mono',monospace;font-size:.62rem;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--c-text-secondary)}
+.au-scope-pwr{margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:.66rem;color:var(--c-loc)}
+.au-scope-canvas-wrap{position:relative;width:100%;height:300px;background:radial-gradient(120% 90% at 50% 30%,rgba(var(--c-loc-rgb),.05),transparent 60%)}
+#au-scope-canvas{display:block;width:100%;height:100%;cursor:grab}
+#au-scope-canvas:active{cursor:grabbing}
+.au-scope-hint{position:absolute;left:0;right:0;bottom:6px;text-align:center;pointer-events:none;
+  font-family:'JetBrains Mono',monospace;font-size:.56rem;letter-spacing:.04em;color:var(--c-text-faint)}
+.au-scope-fallback{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;
+  gap:6px;text-align:center;padding:18px;color:var(--c-text-muted);font-size:.78rem}
+.au-scope.is-fallback .au-scope-fallback{display:flex}
+.au-scope.is-fallback #au-scope-canvas{display:none}
+.au-scope-foot{padding:8px 12px 10px;border-top:1px solid var(--c-border-faint)}
+.au-scope-bright-lbl{font-family:'JetBrains Mono',monospace;font-size:.55rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--c-text-faint);margin-bottom:5px}
+.au-scope-bright{display:flex;flex-direction:column;gap:4px}
+.au-bright-row{display:flex;align-items:center;gap:7px;font-size:.74rem;color:var(--c-text-secondary)}
+.au-bright-row .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;box-shadow:0 0 6px currentColor}
+.au-bright-row .nm{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.au-bright-row .pc{font-family:'JetBrains Mono',monospace;color:var(--c-text-primary);font-weight:600}
+.au-scope-empty{font-size:.74rem;color:var(--c-text-muted);line-height:1.5}
+/* keep header copy clear of the floating scope on wide screens */
+@media(min-width:981px){.head>:not(.au-scope){padding-right:328px}}
+
+/* ── saved-locations + real-time panel (signed-in, bottom of page) ── */
+.au-mylocs{display:none;margin-top:30px;border-radius:var(--r-2xl);padding:20px 24px;
+  background:radial-gradient(130% 220% at 100% 0%,rgba(var(--c-accent-rgb),.08),transparent 55%),
+    linear-gradient(180deg,var(--c-surface-1),var(--c-surface-2));
+  border:1px solid var(--c-border-medium);backdrop-filter:var(--blur-glass);box-shadow:var(--shadow-panel)}
+body.au-signedin .au-mylocs{display:block}
+.au-mylocs-top{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-start;gap:12px 18px}
+.au-mylocs h2{font-family:'Orbitron',sans-serif;font-weight:700;font-size:1.12rem;color:#eaf6ff}
+.au-mylocs .sub{font-size:.86rem;color:var(--c-text-muted);margin-top:4px;max-width:54ch}
+.au-realtime-go{display:inline-flex;align-items:center;gap:8px;padding:11px 18px;border-radius:var(--r-sm);
+  font-weight:700;font-size:.86rem;color:#04161a;cursor:pointer;border:none;white-space:nowrap;
+  background:linear-gradient(120deg,var(--c-loc),var(--c-accent));box-shadow:0 0 20px rgba(var(--c-loc-rgb),.24);
+  transition:filter var(--t-snap),transform var(--t-fast)}
+.au-realtime-go:hover{filter:brightness(1.08)}
+.au-realtime-go:active{transform:scale(.97)}
+.au-loc-add{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+.au-loc-add input{flex:1;min-width:200px;padding:10px 13px;border-radius:var(--r-sm);background:rgba(0,0,0,.3);
+  border:1px solid var(--c-border-medium);color:var(--c-text-primary);font-family:'Space Grotesk',sans-serif;font-size:.88rem}
+.au-loc-add input:focus{outline:none;border-color:var(--c-loc-border)}
+.au-loc-add button{padding:10px 16px;border-radius:var(--r-sm);font-weight:700;font-size:.84rem;cursor:pointer;
+  color:var(--c-loc);background:rgba(var(--c-loc-rgb),.08);border:1px solid var(--c-loc-border)}
+.au-loc-add button:hover{background:rgba(var(--c-loc-rgb),.16)}
+.au-loc-add .geo{color:var(--c-accent);border-color:var(--c-accent-border-hi);background:transparent}
+.au-loc-status{font-size:.78rem;color:var(--c-text-muted);margin-top:9px;min-height:1.1em}
+.au-loc-status.err{color:var(--c-status-error)}
+.au-loc-status.ok{color:var(--c-status-live)}
+.au-loc-list{display:flex;flex-wrap:wrap;gap:9px;margin-top:14px}
+.au-loc-chip{display:inline-flex;align-items:center;gap:9px;padding:8px 10px 8px 13px;border-radius:999px;
+  background:var(--c-surface-1);border:1px solid var(--c-border-medium);transition:border-color var(--t-snap)}
+.au-loc-chip:hover{border-color:var(--c-loc-border)}
+.au-loc-chip.active{border-color:var(--c-loc-border);background:rgba(var(--c-loc-rgb),.10)}
+.au-loc-chip .pick{display:flex;flex-direction:column;gap:1px;cursor:pointer;text-align:left}
+.au-loc-chip .nm{font-size:.84rem;color:var(--c-text-primary);font-weight:600}
+.au-loc-chip .od{font-family:'JetBrains Mono',monospace;font-size:.62rem;color:var(--c-text-muted)}
+.au-loc-chip .rm{display:flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;
+  border:none;background:transparent;color:var(--c-text-faint);font-size:.9rem;cursor:pointer;line-height:1}
+.au-loc-chip .rm:hover{color:var(--c-status-error);background:rgba(255,68,34,.12)}
+.au-loc-empty{font-size:.82rem;color:var(--c-text-muted);margin-top:14px;font-style:italic}
+
 footer{position:relative;z-index:1;border-top:1px solid var(--c-border-soft);margin-top:32px;
   padding:24px 0;color:var(--c-text-faint);font-size:.8rem}
 footer .wrap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px}
 footer a{color:var(--c-text-muted)}
 
+/* below the wide breakpoint the scope drops into the flow, full width */
+@media(max-width:980px){
+  .au-scope{position:static;width:100%;margin-top:18px}
+  .au-scope-canvas-wrap{height:260px}
+}
 @media(max-width:760px){
+  .au-mylocs-top{flex-direction:column}
+  .au-realtime-go{width:100%;justify-content:center}
   .hero-pair{grid-template-columns:1fr}
   .highlights{grid-template-columns:1fr}
   .au-ml{grid-template-columns:1fr}
@@ -307,6 +388,19 @@ footer a{color:var(--c-text-muted)}
 }
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
+
+<!-- Three.js (vendored) for the real-time 3D aurora analyzer; see js/auroracle-globe.js.
+     Loaded with a dynamic import() from js/auroracle.js, which falls back gracefully
+     if WebGL / the vendor file is unavailable. -->
+<script type="importmap">
+{
+  "imports": {
+    "three":         "/js/vendor/three-0.160.0/three.module.js",
+    "three/addons/": "/js/vendor/three-0.160.0/jsm/"
+  }
+}
+</script>
+<link rel="modulepreload" href="/js/vendor/three-0.160.0/three.module.js">
 </head>
 <body class="au-locked">
 <div class="bg-fx" aria-hidden="true"></div>
@@ -330,6 +424,33 @@ footer a{color:var(--c-text-muted)}
   <div class="context" id="context"></div>
   <!-- access state: filled by js/auroracle.js after auth resolves -->
   <div class="au-access" id="au-access"></div>
+
+  <!-- real-time 3D aurora analyzer — live OVATION footprint on a globe.
+       Floats top-right on wide screens; drops into the flow below ~980px.
+       Built by js/auroracle-globe.js via dynamic import (graceful fallback). -->
+  <aside class="au-scope" id="au-scope" aria-label="Real-time 3D aurora analyzer">
+    <div class="au-scope-card">
+      <div class="au-scope-head">
+        <span class="pip" id="au-scope-pip"></span>
+        <span class="au-scope-title">Live aurora · 3D</span>
+        <span class="au-scope-pwr" id="au-scope-pwr"></span>
+      </div>
+      <div class="au-scope-canvas-wrap">
+        <canvas id="au-scope-canvas"></canvas>
+        <div class="au-scope-hint">drag to rotate · scroll to zoom</div>
+        <div class="au-scope-fallback">
+          <span style="font-size:1.5rem">🌌</span>
+          <span>3D view isn't available in this browser — the live forecast below still works.</span>
+        </div>
+      </div>
+      <div class="au-scope-foot">
+        <div class="au-scope-bright-lbl">Brightest right now</div>
+        <div class="au-scope-bright" id="au-scope-bright">
+          <div class="au-scope-empty">Connecting to the live OVATION nowcast…</div>
+        </div>
+      </div>
+    </div>
+  </aside>
 </header>
 
 <section class="wrap">
@@ -466,6 +587,25 @@ footer a{color:var(--c-text-muted)}
 </section>
 
 <section class="wrap">
+  <!-- signed-in: save multiple locations + jump to the real-time analyzer.
+       Toggled by body.au-signedin in js/auroracle.js. -->
+  <div class="au-mylocs" id="au-mylocs">
+    <div class="au-mylocs-top">
+      <div>
+        <h2>Your aurora locations</h2>
+        <p class="sub">Save the places you care about — each is scored for its own sky and dropped as a pin on the live 3D analyzer. Pick any to re-score the whole forecast.</p>
+      </div>
+      <button type="button" class="au-realtime-go" id="au-realtime-go">◉ View the aurora in real time</button>
+    </div>
+    <div class="au-loc-add">
+      <input type="text" id="au-loc-input" placeholder="Add a city or zip — e.g. Reykjavík, Fairbanks, 99701" autocomplete="off" aria-label="Add a location">
+      <button type="button" id="au-loc-add-btn">Save location</button>
+      <button type="button" class="geo" id="au-loc-geo">📍 Use my location</button>
+    </div>
+    <div class="au-loc-status" id="au-loc-status" role="status"></div>
+    <div class="au-loc-list" id="au-loc-list"></div>
+  </div>
+
   <div class="cta-band">
     <div class="cta-copy">
       <div class="cta-title">Point AurOracle at your sky</div>
