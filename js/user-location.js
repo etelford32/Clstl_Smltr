@@ -10,7 +10,9 @@
  *            clearUserLocation, auroraVisibility, formatLocalTime } from './js/user-location.js';
  */
 
-const LS_KEY = 'ppx_user_location';
+const LS_KEY      = 'ppx_user_location';
+const LS_LIST_KEY = 'ppx_user_locations';   // multi-location watch list (AurOracle)
+const MAX_SAVED   = 8;                        // keep the list (and globe pins) sane
 
 /**
  * Geocode a free-text query (city name, zip code, or street address) via Nominatim.
@@ -59,6 +61,66 @@ export function loadUserLocation() {
 export function clearUserLocation() {
     try { localStorage.removeItem(LS_KEY); } catch {}
     window.dispatchEvent(new CustomEvent('user-location-changed', { detail: null }));
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Multi-location watch list
+ *
+ * A small, device-local list of places a signed-in user wants to track at
+ * once (AurOracle: chips + globe pins). Deliberately localStorage, not a
+ * user_profiles column — see CLAUDE.md (no schema change without a migration
+ * plan; this mirrors the existing single-location + auroracle_alert pattern).
+ * Each entry carries a stable `id` so callers can mark a "current" selection
+ * and remove by identity. Changes dispatch 'user-locations-changed' with the
+ * full list as detail.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** Stable id for a place — rounded lat/lon so the same spot dedupes. */
+export function locationId(loc) {
+    if (loc && loc.id) return loc.id;
+    const lat = Number(loc?.lat ?? 0).toFixed(2);
+    const lon = Number(loc?.lon ?? 0).toFixed(2);
+    return `loc_${lat}_${lon}`;
+}
+
+/** Load the saved watch list (always an array; never throws). */
+export function loadLocationList() {
+    try {
+        const s = localStorage.getItem(LS_LIST_KEY);
+        const arr = s ? JSON.parse(s) : [];
+        return Array.isArray(arr) ? arr : [];
+    } catch { return []; }
+}
+
+/** Persist a watch list and dispatch 'user-locations-changed'. */
+export function saveLocationList(list) {
+    const arr = Array.isArray(list) ? list.slice(0, MAX_SAVED) : [];
+    try { localStorage.setItem(LS_LIST_KEY, JSON.stringify(arr)); } catch {}
+    window.dispatchEvent(new CustomEvent('user-locations-changed', { detail: arr }));
+    return arr;
+}
+
+/**
+ * Add a place to the watch list (deduped by id, capped at MAX_SAVED).
+ * Returns the updated list. A re-add moves the entry to the front.
+ * @param {{name?:string, city?:string, lat:number, lon:number}} loc
+ */
+export function addLocationToList(loc) {
+    if (!loc || !Number.isFinite(loc.lat) || !Number.isFinite(loc.lon)) return loadLocationList();
+    const id = locationId(loc);
+    const entry = {
+        id,
+        name: loc.name || loc.city || loc.displayName || 'Saved location',
+        lat:  loc.lat,
+        lon:  loc.lon,
+    };
+    const next = [entry, ...loadLocationList().filter(l => locationId(l) !== id)];
+    return saveLocationList(next);
+}
+
+/** Remove a place from the watch list by id. Returns the updated list. */
+export function removeLocationFromList(id) {
+    return saveLocationList(loadLocationList().filter(l => locationId(l) !== id));
 }
 
 /**

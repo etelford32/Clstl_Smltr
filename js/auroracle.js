@@ -26,6 +26,10 @@ import { auth } from './auth.js';
 import { tierLevel } from './tier-config.js';
 import forecastAurora from './aurora-forecast.js';
 import { AuroraHistory } from './aurora-history.js';
+import {
+  geocodeQuery, loadLocationList, addLocationToList,
+  removeLocationFromList, locationId,
+} from './user-location.js';
 
 /* ════ lightweight physical odds model (identical to aurora.html sketch) ════ */
 const RAD = Math.PI / 180;
@@ -476,7 +480,10 @@ function renderEnsemble() {
 }
 
 function renderProbability() {
-  const host = document.getElementById('au-prob'); if (!host) return;
+  // Guard on the actual output node (there is no #au-prob wrapper — checking
+  // for one here previously made this whole function a silent no-op, so the
+  // probability slider did nothing).
+  const out = document.getElementById('au-prob-out'); if (!out) return;
   const thr = threshold();
   const t = state.week[0] || { med: 3, hi: 3.5 };
   const sigma = Math.max(0.3, t.hi - t.med);
@@ -484,8 +491,7 @@ function renderProbability() {
   const kpThr = slider ? parseFloat(slider.value) : Math.min(9, Math.max(1, thr));
   const p = probAtLeast(kpThr, t.med, sigma);
   const v = verdict(oddsFor(geo(), kpThr));
-  const out = document.getElementById('au-prob-out');
-  if (out) out.innerHTML =
+  out.innerHTML =
     `<span class="au-prob-pct" style="color:${v.c}">${Math.round(p * 100)}<span>%</span></span>
      <span class="au-prob-lbl">chance Kp reaches <b>≥ ${kpThr.toFixed(1)}</b> tonight</span>`;
   const need = document.getElementById('au-prob-need');
@@ -564,31 +570,70 @@ const PICKS = [
   { name: 'Calgary, AB', lat: 51.05, lon: -114.07 },
   { name: 'Tromsø, NO',  lat: 69.65, lon: 18.96 },
 ];
+const currentSpotId = () => locationId({ lat: state.user.lat, lon: state.user.lon });
+
+/** Single entry point for "score the page for this place" — used by preset
+ *  chips, saved chips, the saved list, and both geolocation buttons. */
+function selectLocation(loc) {
+  state.user = {
+    name: loc.name || loc.city || loc.displayName || 'your location',
+    lat:  loc.lat, lon: loc.lon,
+  };
+  buildMonth(); render();
+  const slider = document.getElementById('au-prob-kp');
+  if (slider) slider.value = Math.min(9, Math.max(1, threshold())).toFixed(1);
+  renderProbability();
+  syncChipActive();
+  updateGlobePins();
+}
+
+/** Highlight whichever chip (preset or saved) matches the active location. */
+function syncChipActive() {
+  const id = currentSpotId();
+  document.querySelectorAll('#locbar .chip').forEach(c => {
+    if (c.classList.contains('geo')) return;
+    c.classList.toggle('active', c.dataset.spot === id);
+  });
+}
+
 function buildChips() {
   const bar = document.getElementById('locbar'); if (!bar) return;
   PICKS.forEach(p => {
     const b = document.createElement('button');
-    b.className = 'chip' + (p.name === state.user.name ? ' active' : '');
+    b.className = 'chip';
+    b.dataset.spot = locationId(p);
     b.textContent = p.name.split(',')[0];
-    b.onclick = () => {
-      state.user = { ...p };
-      document.querySelectorAll('#locbar .chip').forEach(c => c.classList.toggle('active',
-        !c.classList.contains('geo') && c.textContent === p.name.split(',')[0]));
-      buildMonth(); render();
-      const slider = document.getElementById('au-prob-kp'); if (slider) slider.value = Math.min(9, Math.max(1, threshold())).toFixed(1);
-      renderProbability();
-    };
+    b.onclick = () => selectLocation(p);
     bar.appendChild(b);
   });
+  syncChipActive();
 }
+
+/** Append the user's saved locations to the header chip bar (deduped vs
+ *  presets) so they can switch from the top, not just the bottom panel. */
+function renderSavedChipsInBar(list) {
+  const bar = document.getElementById('locbar'); if (!bar) return;
+  bar.querySelectorAll('.chip.saved').forEach(c => c.remove());
+  const presetIds = new Set(PICKS.map(locationId));
+  list.forEach(l => {
+    const id = locationId(l);
+    if (presetIds.has(id)) return;
+    const b = document.createElement('button');
+    b.className = 'chip saved';
+    b.dataset.spot = id;
+    b.textContent = '★ ' + (l.name || 'Saved').split(',')[0];
+    b.onclick = () => selectLocation(l);
+    bar.appendChild(b);
+  });
+  syncChipActive();
+}
+
 function initGeo() {
   const btn = document.getElementById('use-geo'); if (!btn) return;
   btn.addEventListener('click', () => {
     if (!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(pos => {
-      state.user = { name: 'your location', lat: pos.coords.latitude, lon: pos.coords.longitude };
-      document.querySelectorAll('#locbar .chip').forEach(c => c.classList.remove('active'));
-      buildMonth(); render();
+      selectLocation({ name: 'My location', lat: pos.coords.latitude, lon: pos.coords.longitude });
     }, () => {}, { timeout: 8000, maximumAge: 6e5 });
   });
 }
@@ -600,8 +645,190 @@ function initProbSlider() {
   slider.addEventListener('input', renderProbability);
 }
 
+/* ════════════════════════════════════════════════════════════════════════
+   REAL-TIME 3D AURORA ANALYZER — live OVATION footprint on a globe
+   (top-right; visible to everyone — it's the public hook)
+   ════════════════════════════════════════════════════════════════════════ */
+let globe = null;
+let gridTimer = null;
+let _brightestRegions = null;   // bound from the globe module after import
+
+async function initGlobe() {
+  const canvas = document.getElementById('au-scope-canvas');
+  const scope  = document.getElementById('au-scope');
+  if (!canvas || !scope) return;
+  try {
+    // Dynamic import so a missing vendor file / no-WebGL browser degrades to
+    // the fallback card instead of taking the whole page down (see far-side-watch).
+    const mod = await import('./auroracle-globe.js');
+    _brightestRegions = mod.brightestRegions;
+    globe = new mod.AuroraGlobe(canvas);
+    globe.start();
+    updateGlobePins();
+    await refreshAuroraGrid();
+    if (gridTimer) clearInterval(gridTimer);
+    gridTimer = setInterval(refreshAuroraGrid, 5 * 60 * 1000);   // OVATION cadence
+    // Battery courtesy: pause the render loop while the tab is hidden.
+    document.addEventListener('visibilitychange', () => {
+      if (!globe) return;
+      if (document.hidden) globe.stop();
+      else { globe.setSubsolar(new Date()); globe.start(); }
+    });
+  } catch (_) {
+    scope.classList.add('is-fallback');
+  }
+}
+
+async function refreshAuroraGrid() {
+  try {
+    const r = await fetch('/api/noaa/aurora-grid', { mode: 'cors' });
+    const j = await r.json();
+    const d = j?.data;
+    if (!d || !Array.isArray(d.cells)) throw new Error('no cells');
+    if (globe) { globe.setSubsolar(new Date()); globe.setAurora(d); }
+    renderScopePower(d);
+    renderBrightest(d.cells);
+    const pip = document.getElementById('au-scope-pip'); if (pip) pip.classList.add('live');
+  } catch (_) {
+    const pip = document.getElementById('au-scope-pip'); if (pip) pip.classList.remove('live');
+    renderBrightest(null);
+  }
+}
+
+function renderScopePower(d) {
+  const el = document.getElementById('au-scope-pwr'); if (!el) return;
+  const n = d?.north_gw;
+  el.textContent = Number.isFinite(n) ? `${Math.round(n)} GW${d.activity ? ' · ' + d.activity : ''}` : '';
+}
+
+/** green→amber→red ramp, matching js/auroracle-globe.js point shader. */
+function brightColor(prob) {
+  const t = Math.max(0, Math.min(1, prob / 100));
+  const lerp = (a, b, k) => Math.round(a + (b - a) * k);
+  let r, g, b;
+  if (t < 0.5) { const k = t * 2;        r = lerp(51, 255, k);  g = lerp(255, 217, k); b = lerp(140, 64, k); }
+  else         { const k = (t - 0.5) * 2; r = 255;              g = lerp(217, 71, k);  b = lerp(64, 92, k); }
+  return `rgb(${r},${g},${b})`;
+}
+
+function renderBrightest(cells) {
+  const host = document.getElementById('au-scope-bright'); if (!host) return;
+  const regions = (_brightestRegions && Array.isArray(cells)) ? _brightestRegions(cells, 3) : [];
+  if (!regions.length) {
+    host.innerHTML = Array.isArray(cells)
+      ? `<div class="au-scope-empty">Aurora is quiet right now — no bright cells over the oval.</div>`
+      : `<div class="au-scope-empty">Live aurora feed unavailable — retrying…</div>`;
+    return;
+  }
+  host.innerHTML = regions.map(rg =>
+    `<div class="au-bright-row"><span class="dot" style="color:${brightColor(rg.prob)}"></span>` +
+    `<span class="nm">${escapeHtml(rg.name)}</span><span class="pc">${Math.round(rg.prob)}%</span></div>`
+  ).join('');
+}
+
+function updateGlobePins() {
+  if (!globe) return;
+  const saved = loadLocationList();
+  const curId = currentSpotId();
+  const cur = { id: curId, name: state.user.name, lat: state.user.lat, lon: state.user.lon };
+  const list = [cur, ...saved.filter(l => locationId(l) !== curId)];
+  try { globe.setLocations(list, curId); } catch (_) {}
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   SIGNED-IN: save multiple locations + "view the aurora in real time"
+   ════════════════════════════════════════════════════════════════════════ */
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function renderSavedLocations() {
+  const list = loadLocationList();
+  const host = document.getElementById('au-loc-list');
+  if (host) {
+    if (!list.length) {
+      host.innerHTML = `<div class="au-loc-empty">No saved locations yet — add a city above and it'll get its own aurora score and a pin on the globe.</div>`;
+    } else {
+      const curId = currentSpotId();
+      host.innerHTML = '';
+      list.forEach(l => {
+        const gm = geomagLat(l.lat, l.lon), thr = (66.5 - Math.abs(gm)) / 2;
+        const chip = document.createElement('div');
+        chip.className = 'au-loc-chip' + (locationId(l) === curId ? ' active' : '');
+        chip.innerHTML =
+          `<div class="pick" role="button" tabindex="0">
+             <span class="nm">${escapeHtml((l.name || 'Saved').split(',')[0])}</span>
+             <span class="od">visible at ${thr >= 9 ? 'Kp&gt;9' : 'Kp ' + thr.toFixed(1)} · ${Math.abs(gm).toFixed(0)}° mag-lat</span>
+           </div>
+           <button class="rm" title="Remove" aria-label="Remove ${escapeHtml(l.name || 'location')}">×</button>`;
+        const pick = chip.querySelector('.pick');
+        pick.addEventListener('click', () => selectLocation(l));
+        pick.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectLocation(l); } });
+        chip.querySelector('.rm').addEventListener('click', e => { e.stopPropagation(); removeLocationFromList(locationId(l)); });
+        host.appendChild(chip);
+      });
+    }
+  }
+  renderSavedChipsInBar(list);
+  updateGlobePins();
+}
+
+function setLocStatus(msg, cls = '') {
+  const el = document.getElementById('au-loc-status'); if (!el) return;
+  el.textContent = msg || '';
+  el.className = 'au-loc-status' + (cls ? ' ' + cls : '');
+}
+
+async function addLocationByQuery(q) {
+  const query = (q || '').trim();
+  if (!query) { setLocStatus('Type a city or zip first.', 'err'); return; }
+  setLocStatus('Searching…');
+  try {
+    const r = await geocodeQuery(query);
+    addLocationToList({ name: r.city, lat: r.lat, lon: r.lon });   // → user-locations-changed → re-render
+    setLocStatus(`✓ Saved ${r.city}.`, 'ok');
+    const input = document.getElementById('au-loc-input'); if (input) input.value = '';
+    selectLocation({ name: r.city, lat: r.lat, lon: r.lon });
+  } catch (e) {
+    setLocStatus(e?.message || 'Could not find that place — try a city name or zip.', 'err');
+  }
+}
+
+function initSignedInPanel() {
+  const syncSignedIn = () => {
+    let on = false; try { on = auth.isSignedIn(); } catch (_) {}
+    document.body.classList.toggle('au-signedin', on);
+    if (on) renderSavedLocations();
+  };
+
+  const input = document.getElementById('au-loc-input');
+  document.getElementById('au-loc-add-btn')?.addEventListener('click', () => addLocationByQuery(input?.value));
+  input?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addLocationByQuery(input.value); } });
+
+  document.getElementById('au-loc-geo')?.addEventListener('click', () => {
+    if (!navigator.geolocation) { setLocStatus('Geolocation not available in this browser.', 'err'); return; }
+    setLocStatus('Locating…');
+    navigator.geolocation.getCurrentPosition(pos => {
+      const loc = { name: 'My location', lat: pos.coords.latitude, lon: pos.coords.longitude };
+      addLocationToList(loc); selectLocation(loc); setLocStatus('✓ Saved your current location.', 'ok');
+    }, () => setLocStatus('Could not get your location — check permissions.', 'err'), { timeout: 8000, maximumAge: 6e5 });
+  });
+
+  document.getElementById('au-realtime-go')?.addEventListener('click', () => {
+    document.getElementById('au-scope')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (globe) { globe.setSubsolar(new Date()); globe.start(); }
+    refreshAuroraGrid();
+  });
+
+  window.addEventListener('user-locations-changed', renderSavedLocations);
+  window.addEventListener('auth-changed', syncSignedIn);
+  syncSignedIn();
+}
+
 /* ════ boot ════ */
 buildWeek(); buildMonth(); buildChips(); initGeo(); initProbSlider(); render();
 patchOperational();
 initAccess();
 initAlerts();
+initGlobe();
+initSignedInPanel();
