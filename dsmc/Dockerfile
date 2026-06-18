@@ -53,9 +53,16 @@ ENV PYTHONUNBUFFERED=1
 ENV SPARTA_BIN=/opt/sparta/src/spa_mpi
 ENV SPARTA_TABLES_DIR=/app/sparta/tables
 
+# gfortran + cmake are required to build the NRLMSISE-00 Fortran driver
+# that the `msise00` package shells out to. Without them every density()
+# call raises "CMake not available" and silently degrades to the crude
+# exponential fallback (which made the Phase-0 skill number meaningless).
+# We install them here and pre-build the driver below so it's baked into
+# the image — no build, and no first-call latency, at runtime.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 python3-pip python3-dev \
         libopenmpi3 openmpi-bin \
+        gfortran cmake make \
         curl ca-certificates \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
@@ -65,6 +72,13 @@ COPY --from=sparta-builder /opt/sparta /opt/sparta
 WORKDIR /app
 COPY pipeline/requirements.txt ./pipeline/requirements.txt
 RUN pip3 install --no-cache-dir -r pipeline/requirements.txt
+
+# Pre-build the msise00 NRLMSISE-00 Fortran driver into the installed
+# package so the first real density() call doesn't have to. Passing an
+# explicit `indices` dict keeps this offline (no geomagindices fetch).
+# Fails the build loudly if the driver can't be produced — better than
+# silently shipping an image that falls back to the exponential model.
+RUN FC=gfortran python3 -c "from datetime import datetime, timezone; import msise00; ds = msise00.run(time=datetime(2024,1,1,tzinfo=timezone.utc), altkm=400.0, glat=0.0, glon=0.0, indices={'f107s':150.0,'f107':150.0,'Ap':4.0}); rho=float(ds['Total'].values.squeeze()); print('msise00 driver prebuilt; 400km quiet rho =', rho); assert rho > 0.0, 'msise00 returned non-positive density'"
 
 # Pipeline + SPARTA driver
 COPY pipeline/   ./pipeline/

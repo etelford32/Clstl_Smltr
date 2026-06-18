@@ -334,6 +334,63 @@ def generate_hindcast_run(
 
 # ── Coupled GM + IE generator (Phase-0 hindcast that produces IE log) ────────
 
+# Output subdirectories SWMF's check_dir expects in a coupled GM+IE run. A
+# stock `make rundir` creates these, but the runtime Docker image strips the
+# SWMF source tree (only /opt/swmf/bin + share/Scripts survive), so we scaffold
+# them directly or SWMF aborts with "check_dir ERROR: Cannot find/write ...".
+_RUNDIR_SUBDIRS = (
+    "GM/IO2", "GM/restartIN", "GM/restartOUT",
+    "IE/ionosphere", "STDOUT", "restartIN", "restartOUT",
+)
+
+# Ionospheric conductance coefficient files the Ridley model (#IONOSPHERE
+# TypeConductanceModel 5) loads from IE/. `make rundir` copies these from the
+# IE component source; we stage them from a local SWMF tree if one exists,
+# else fetch from upstream. Missing them => "open_file could not open
+# file=IE/cond_hal_coeffs.dat" in load_conductances.
+_IE_COND_FILES = (
+    "cond_hal_coeffs.dat", "cond_ped_coeffs.dat",
+    "cond_hal_coeffs_power.dat", "cond_ped_coeffs_power.dat",
+    "cmee_hal_coeffs.dat", "cmee_ped_coeffs.dat",
+)
+_IE_COND_BASE_URL = (
+    "https://raw.githubusercontent.com/SWMFsoftware/Ridley_serial/master/input"
+)
+
+
+def scaffold_rundir(run_dir: Path) -> None:
+    """Create component output dirs and stage IE conductance files.
+
+    Replicates the parts of SWMF's `make rundir` that a coupled GM+IE run
+    needs at runtime. Conductance files are copied from a local SWMF source
+    tree (``$SWMF_ROOT/IE/Ridley_serial/input``) when present; otherwise they
+    are downloaded from upstream. Download failures are logged, not fatal, so
+    the caller can decide whether the (then-missing) file matters for its
+    chosen conductance model.
+    """
+    import shutil
+    import urllib.request
+
+    for sub in _RUNDIR_SUBDIRS:
+        (run_dir / sub).mkdir(parents=True, exist_ok=True)
+
+    ie_dir = run_dir / "IE"
+    swmf_root = Path(os.environ.get("SWMF_ROOT", "/opt/swmf"))
+    local_input = swmf_root / "IE" / "Ridley_serial" / "input"
+    for fname in _IE_COND_FILES:
+        dest = ie_dir / fname
+        if dest.exists():
+            continue
+        src = local_input / fname
+        if src.exists():
+            shutil.copyfile(src, dest)
+            continue
+        try:
+            urllib.request.urlretrieve(f"{_IE_COND_BASE_URL}/{fname}", dest)
+        except Exception as exc:  # noqa: BLE001 — fail-soft on network/4xx
+            log.warning("could not stage IE conductance file %s: %s", fname, exc)
+
+
 def generate_gm_ie_run(
     start_time: datetime,
     sim_hours: float,
@@ -387,8 +444,17 @@ def generate_gm_ie_run(
     layout_out = run_dir / "LAYOUT.in"
     param_out.write_text(param_text)
     layout_out.write_text(layout_text)
+
+    # Scaffold the component output dirs + stage IE conductance files so the
+    # run is launchable without a manual `make rundir`.
+    scaffold_rundir(run_dir)
+
     log.info("Wrote %s and %s", param_out, layout_out)
-    log.info("Run with: mpiexec -n %d %s", nproc_total, "/opt/swmf/SWMF.exe")
+    # Binary lives at /opt/swmf/bin/SWMF.exe in current SWMF layouts, and
+    # OpenMPI refuses to run as root without --allow-run-as-root (the
+    # container runs as root), so surface the exact working invocation.
+    log.info("Run with: cd %s && mpiexec --allow-run-as-root -n %d %s",
+             run_dir, nproc_total, "/opt/swmf/bin/SWMF.exe")
     return run_dir, param_out
 
 

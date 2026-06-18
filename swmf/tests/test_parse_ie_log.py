@@ -113,6 +113,49 @@ def test_close_match_suggests_via_difflib(tmp_path: Path):
     assert any(tok in msg for tok in ("cpcpx", "cpcpy", "hpx", "hpy"))
 
 
+def _rim_row(t, hr, mn, sc, cpn, cps, hpn, hps) -> str:
+    # 0:t 1:yr 2:mo 3:dy 4:hr 5:mn 6:sc 7:ms 8:tilt 9:cpcp_n 10:cpcp_s
+    # 11..14:FACs 15:hp_n 16:hp_s
+    return (f"  {t:.5E} 2024 5 10 {hr} {mn} {sc} 0 -20.0 "
+            f"{cpn:.5E} {cps:.5E} 0.4 0.3 -0.4 -0.3 {hpn:.5E} {hps:.5E}")
+
+
+def test_rim_positional_format(tmp_path: Path):
+    """RIM 'Ridley Ionosphere Model' prose-banner logfile parses by position."""
+    banner = ("Ridley Ionosphere Model, tilt [deg] CPCP [kV]"
+              "Integrated Current [MA] and Hemispheric Power [GW]")
+    comment = "# iru and ird: integrated upward and downward FACs."
+    p = tmp_path / "IE_t240510_120000.log"
+    p.write_text("\n".join([
+        banner, comment,
+        _rim_row(0.0,   12, 0, 0, 30.0, 31.0, 10.0, 11.0),
+        _rim_row(300.0, 12, 5, 0, 45.0, 47.0, 18.0, 17.0),
+    ]) + "\n")
+    samples = parse_ie_log(p)
+    assert len(samples) == 2
+    assert samples[0]["phi_pc_kv"] == 31.0     # max(30, 31)
+    assert samples[0]["hpi_gw"]    == 21.0     # 10 + 11
+    assert samples[1]["phi_pc_kv"] == 47.0
+    assert samples[1]["hpi_gw"]    == 35.0
+
+
+def test_decimate_collapses_relaxation_dupes(tmp_path: Path):
+    """Many rows stamped at the same start time collapse to the converged last."""
+    banner = "Ridley Ionosphere Model CPCP Hemispheric Power"
+    rows = [_rim_row(0.0, 12, 0, 0, i, i + 1, 5.0, 5.0) for i in range(5)]
+    rows.append(_rim_row(300.0, 12, 5, 0, 99.0, 100.0, 9.0, 9.0))
+    p = tmp_path / "IE_t240510_120000.log"
+    p.write_text("\n".join([banner, *rows]) + "\n")
+    # Without decimation: 5 identical-timestamp relaxation rows + 1 = 6 samples.
+    assert len(parse_ie_log(p)) == 6
+    # With 5-min decimation: bucket 0 (12:00:00) collapses to its LAST row
+    # (i=4 → max(4,5)=5) and the 12:05 row is its own bucket.
+    dec = parse_ie_log(p, decimate_seconds=300.0)
+    assert len(dec) == 2
+    assert dec[0]["phi_pc_kv"] == 5.0
+    assert dec[1]["phi_pc_kv"] == 100.0
+
+
 def test_window_filter(tmp_path: Path):
     """start_utc/end_utc must trim out-of-window rows."""
     header = "step year mo dy hr mn sc cpcpn cpcps hpn hps"

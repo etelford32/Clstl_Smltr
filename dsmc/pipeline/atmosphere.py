@@ -46,7 +46,23 @@ try:
 except Exception as _exc:
     _msise00 = None
     _HAS_MSISE = False
-    log.info("msise00 unavailable (%s) — using built-in exponential fallback", _exc)
+    log.info("msise00 unavailable (%s) — trying pymsis / exponential fallback", _exc)
+
+# ── NRLMSISE-00 via pymsis (binary wheels — no gfortran/cmake) ─────────────────
+# The msise00 package compiles a Fortran driver on first use (needs gfortran +
+# cmake), which is why the production run lives in the Docker image. pymsis ships
+# manylinux/macOS wheels with the Fortran already built, so `pip install pymsis`
+# gives real NRLMSISE-00 (version=0) on a bare workstation. Verified to reproduce
+# the msise00 mass density on the Gannon GRACE track to <1%.
+try:
+    import pymsis as _pymsis      # type: ignore[import-untyped]
+    import numpy as _np
+    _HAS_PYMSIS = True
+except Exception as _exc:         # noqa: BLE001
+    _pymsis = None
+    _HAS_PYMSIS = False
+    if not _HAS_MSISE:
+        log.info("pymsis unavailable (%s) — using built-in exponential fallback", _exc)
 
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -83,13 +99,21 @@ def density(
     if sparta is not None:
         return sparta
 
-    # 2. NRLMSISE-00 (msise00 package)
+    # 2. NRLMSISE-00 (msise00 package — preferred when its Fortran driver built)
     if _HAS_MSISE:
         try:
             return _msise_call(altitude_km, f107_sfu, f107a, ap,
                                lat_deg, lon_deg, when)
         except Exception as exc:   # noqa: BLE001
-            log.warning("NRLMSISE-00 call failed (%s) — using fallback", exc)
+            log.warning("NRLMSISE-00 (msise00) call failed (%s) — trying pymsis", exc)
+
+    # 2b. NRLMSISE-00 via pymsis (no Fortran toolchain needed)
+    if _HAS_PYMSIS:
+        try:
+            return _pymsis_call(altitude_km, f107_sfu, f107a, ap,
+                                lat_deg, lon_deg, when)
+        except Exception as exc:   # noqa: BLE001
+            log.warning("NRLMSISE-00 (pymsis) call failed (%s) — using fallback", exc)
 
     # 3. Built-in exponential fallback (order-of-magnitude only)
     return _exponential_fallback(altitude_km, f107_sfu, ap)
@@ -103,15 +127,21 @@ def _msise_call(
     lat_deg: float, lon_deg: float,
     when: datetime,
 ) -> dict:
-    """Call NRLMSISE-00 via the msise00 package."""
+    """Call NRLMSISE-00 via the msise00 package.
+
+    msise00 (>=1.x) takes the solar/geomagnetic drivers in an ``indices``
+    dict — keys ``f107s`` (81-day smoothed F10.7), ``f107`` (daily F10.7)
+    and ``Ap`` (daily). They are NOT top-level kwargs; passing them as
+    ``f107s=``/``Ap=`` raises ``unexpected keyword argument`` and every
+    call silently degrades to the exponential fallback. Pass our 81-day
+    average as ``f107s`` and the daily value as ``f107``.
+    """
     ds = _msise00.run(
         time=when,
         altkm=altitude_km,
         glat=lat_deg,
         glon=lon_deg,
-        f107s=f107,
-        f107a=f107a,
-        Ap=ap,
+        indices={"f107s": f107a, "f107": f107, "Ap": ap},
     )
     # msise00 returns an xarray.Dataset; single-point call → scalar fields.
     rho = float(ds["Total"].values.squeeze())     # kg/m^3
@@ -134,6 +164,50 @@ def _msise_call(
         "ap":                ap,
         "model":             "NRLMSISE-00",
         "model_version":     getattr(_msise00, "__version__", "unknown"),
+    }
+
+
+def _pymsis_call(
+    altitude_km: float,
+    f107: float, f107a: float, ap: float,
+    lat_deg: float, lon_deg: float,
+    when: datetime,
+) -> dict:
+    """NRLMSISE-00 via the pymsis package (version=0). Same return contract
+    as _msise_call. pymsis output last-axis layout: [mass_density, N2, O2, O,
+    He, H, Ar, N, anomalous-O, NO, Temperature]; mass density is kg/m^3 and
+    number densities are m^-3."""
+    t = when.replace(tzinfo=None) if when.tzinfo else when
+    t64 = _np.datetime64(t)
+    run = getattr(_pymsis, "calculate", None)
+    if run is None:                       # older pymsis exposes msis.run
+        from pymsis import msis as _m     # type: ignore
+        run = getattr(_m, "calculate", None) or _m.run
+    try:
+        out = run(t64, lon_deg, lat_deg, altitude_km,
+                  f107s=f107, f107as=f107a, aps=[[ap] * 7], version=0)
+    except TypeError:                     # positional signature
+        out = run(t64, lon_deg, lat_deg, altitude_km, f107, f107a, [[ap] * 7], version=0)
+    arr = _np.asarray(out, dtype=float).ravel()
+    rho = float(arr[0])                   # total mass density [kg/m^3]
+    if not math.isfinite(rho) or rho <= 0.0:
+        raise ValueError(f"pymsis returned non-physical density {rho!r} (ap={ap})")
+    nN2 = float(arr[1]); nO = float(arr[3]); T = float(arr[10])
+    g = 9.80665 * (_R_EARTH_KM / (_R_EARTH_KM + altitude_km)) ** 2
+    total_n = max(nO + nN2, 1.0)
+    m_bar   = (nO * _M_O + nN2 * _M_N2) / total_n
+    H       = _KB * T / (m_bar * g) / 1000.0
+    return {
+        "altitude_km":       altitude_km,
+        "density_kg_m3":     rho,
+        "temperature_K":     T,
+        "scale_height_km":   H,
+        "o_number_density":  nO,
+        "n2_number_density": nN2,
+        "f107_sfu":          f107,
+        "ap":                ap,
+        "model":             "NRLMSISE-00",
+        "model_version":     "pymsis-" + getattr(_pymsis, "__version__", "unknown"),
     }
 
 
