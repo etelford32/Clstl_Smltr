@@ -30,6 +30,7 @@ import {
   geocodeQuery, loadLocationList, addLocationToList,
   removeLocationFromList, locationId,
 } from './user-location.js';
+import { solarPosition } from './sun-altitude.js';
 
 /* ════ lightweight physical odds model (identical to aurora.html sketch) ════ */
 const RAD = Math.PI / 180;
@@ -75,6 +76,46 @@ function magMidnightMin(lon) { return Math.max(-55, Math.min(70, Math.round((lon
 const fmtHM = min => { const m = ((Math.round(min) % 1440) + 1440) % 1440;
   return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
 function peakText(lon) { const c = magMidnightMin(lon); return { center: fmtHM(c), lo: fmtHM(c - 40), hi: fmtHM(c + 40) }; }
+
+/* ── tonight's viewing window: when is it dark, and when does aurora peak ──
+ * Aurora is only visible against a dark sky AND tends to peak near magnetic
+ * midnight (the substorm onset sector). We scan tonight's sun altitude at the
+ * location, find the astronomically-dark window (sun < −12°, nautical), and
+ * mark solar midnight (deepest sun) as the substorm-peak proxy. Times are in
+ * the LOCATION's local clock (lon/15h offset — solar, not political, which is
+ * the right frame for "when to look up"). */
+function tonightWindow(lat, lon) {
+  const offMs = (lon / 15) * 3600e3;                    // location-local = UTC + offMs
+  const now = new Date();
+  const loc = new Date(now.getTime() + offMs);          // location-local "now"
+  // Anchor the 24h scan at the location's local noon today so the whole night
+  // (which straddles UTC midnight) is covered in one pass.
+  const noonLocalUTC = Date.UTC(loc.getUTCFullYear(), loc.getUTCMonth(), loc.getUTCDate(), 12, 0, 0) - offMs;
+  const N = 144, stepMs = 600000;                        // 24h @ 10 min
+  let minAlt = 99, minI = 0;
+  const alt = new Array(N + 1);
+  for (let i = 0; i <= N; i++) {
+    const a = solarPosition(new Date(noonLocalUTC + i * stepMs), lat, lon).altitudeDeg;
+    alt[i] = a;
+    if (a < minAlt) { minAlt = a; minI = i; }
+  }
+  const DARK = -12;                                      // nautical twilight floor
+  const fmt = i => {
+    const l = new Date(noonLocalUTC + i * stepMs + offMs);
+    return String(l.getUTCHours()).padStart(2, '0') + ':' + String(l.getUTCMinutes()).padStart(2, '0');
+  };
+  if (minAlt >= DARK) {
+    // Never gets dark enough tonight — high-summer / midnight-sun latitudes.
+    return { hasDark: false, twilightOnly: minAlt < -6, peak: fmt(minI), minAlt };
+  }
+  // Walk out from the darkest sample to the nautical-dark boundaries.
+  let s = minI, e = minI;
+  while (s > 0 && alt[s - 1] < DARK) s--;
+  while (e < N && alt[e + 1] < DARK) e++;
+  return { hasDark: true, darkStart: fmt(s), darkEnd: fmt(e), peak: fmt(minI), minAlt,
+           // fraction across the dark window where the peak sits (for the bar marker)
+           peakFrac: e > s ? (minI - s) / (e - s) : 0.5 };
+}
 
 /* ════ state ════ */
 const state = {
@@ -145,8 +186,31 @@ async function patchOperational() {
 
 /* ════ RENDER ════ */
 function render() {
-  renderContext(); renderHero(); renderWeek(); renderMonth(); renderHighlights();
+  renderContext(); renderHero(); renderViewingWindow(); renderWeek(); renderMonth(); renderHighlights();
   renderProbability();  // depends on week[0]; safe to re-run on any render
+}
+
+function renderViewingWindow() {
+  const host = document.getElementById('au-tonight'); if (!host) return;
+  const bar = document.getElementById('au-tonight-bar');
+  const locEl = document.getElementById('au-tn-loc'); if (locEl) locEl.textContent = cityName() + ' · local time';
+  const w = tonightWindow(state.user.lat, state.user.lon);
+  const t = state.week[0] || { med: 3, hi: 3.5 };
+  const v = verdict(oddsFor(geo(), t.med));
+  const p = Math.round(oddsFor(geo(), t.med) * 100);
+
+  if (!w.hasDark) {
+    host.innerHTML = `<div class="au-tn-note2">${w.twilightOnly
+      ? 'Only deep twilight tonight — the sky barely darkens at this latitude, so only a strong overhead display would stand out.'
+      : 'Midnight-sun season — the sky never gets dark enough here for aurora tonight.'}</div>`;
+    if (bar) bar.style.display = 'none';
+    return;
+  }
+  host.innerHTML =
+    `<div class="au-tn-cell"><span class="au-tn-lbl">Dark sky</span><span class="au-tn-v">${w.darkStart} – ${w.darkEnd}</span></div>
+     <div class="au-tn-cell"><span class="au-tn-lbl">Likely peak</span><span class="au-tn-v">~${w.peak}</span><span class="au-tn-x">magnetic midnight</span></div>
+     <div class="au-tn-cell"><span class="au-tn-lbl">Odds at peak</span><span class="au-tn-v" style="color:${v.c}">${p}%</span><span class="au-tn-x">${v.t}</span></div>`;
+  if (bar) { bar.style.display = ''; bar.style.setProperty('--peak', (w.peakFrac * 100).toFixed(1) + '%'); }
 }
 
 function renderContext() {
@@ -680,19 +744,51 @@ async function initGlobe() {
 }
 
 async function refreshAuroraGrid() {
+  let d = null;
+  // Primary: our downsampled edge route (few KB). Falls back to a direct
+  // browser→NOAA OVATION fetch — NOAA's WAF 403s server-side fetches but
+  // allows CORS browser fetches, so this path works wherever the Earth
+  // page's aurora works (see js/swpc-feed.js header).
   try {
     const r = await fetch('/api/noaa/aurora-grid', { mode: 'cors' });
-    const j = await r.json();
-    const d = j?.data;
-    if (!d || !Array.isArray(d.cells)) throw new Error('no cells');
-    if (globe) { globe.setSubsolar(new Date()); globe.setAurora(d); }
-    renderScopePower(d);
-    renderBrightest(d.cells);
-    const pip = document.getElementById('au-scope-pip'); if (pip) pip.classList.add('live');
-  } catch (_) {
-    const pip = document.getElementById('au-scope-pip'); if (pip) pip.classList.remove('live');
-    renderBrightest(null);
+    if (r.ok) { const j = await r.json(); if (j?.data && Array.isArray(j.data.cells) && j.data.cells.length) d = j.data; }
+  } catch (_) {}
+  if (!d) { try { d = await fetchAuroraCellsDirect(); } catch (_) {} }
+
+  const pip = document.getElementById('au-scope-pip');
+  if (!d || !Array.isArray(d.cells)) { if (pip) pip.classList.remove('live'); renderBrightest(null); return; }
+  if (globe) { globe.setSubsolar(new Date()); globe.setAurora(d); }
+  renderScopePower(d);
+  renderBrightest(d.cells);
+  if (pip) pip.classList.add('live');
+}
+
+/* Browser-direct OVATION fetch + the same downsample as api/noaa/aurora-grid.
+   Keep the knobs in lockstep with that edge route. */
+const _OVATION_URL = 'https://services.swpc.noaa.gov/json/ovation_aurora_latest.json';
+const _PROB_TO_GW = 0.025, _MIN_LAT = 40, _MIN_PROB = 4, _LON_STRIDE = 2, _MAX_CELLS = 700;
+async function fetchAuroraCellsDirect() {
+  const r = await fetch(_OVATION_URL, { mode: 'cors' });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const raw = await r.json();
+  if (!raw || !Array.isArray(raw.coordinates)) throw new Error('bad grid');
+  let north = 0, south = 0;
+  const cells = [];
+  for (const row of raw.coordinates) {
+    if (!Array.isArray(row) || row.length < 3) continue;
+    const lon = +row[0], lat = +row[1], prob = +row[2];     // [Longitude, Latitude, Aurora]
+    if (!Number.isFinite(lat) || !Number.isFinite(prob)) continue;
+    const w = prob * Math.cos(lat * Math.PI / 180);
+    if (lat >= 0) north += w; else south += w;
+    if (Math.abs(lat) < _MIN_LAT || prob < _MIN_PROB) continue;
+    if (!Number.isFinite(lon) || (Math.round(lon) % _LON_STRIDE) !== 0) continue;
+    cells.push([Math.round(lon), Math.round(lat), Math.round(prob)]);
   }
+  cells.sort((a, b) => b[2] - a[2]);
+  const n = north * _PROB_TO_GW, s = south * _PROB_TO_GW;
+  const activity = n >= 100 ? 'extreme' : n >= 50 ? 'high' : n >= 20 ? 'active' : n >= 5 ? 'moderate' : 'quiet';
+  return { cells: cells.length > _MAX_CELLS ? cells.slice(0, _MAX_CELLS) : cells,
+           north_gw: n, south_gw: s, activity, updated: raw['Forecast Time'] ?? raw.forecast_time ?? null };
 }
 
 function renderScopePower(d) {
