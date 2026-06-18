@@ -137,6 +137,28 @@ section{position:relative;z-index:1}
 .htile .hbar{position:relative;height:3px;border-radius:2px;background:rgba(255,255,255,.08);margin-top:9px;overflow:hidden}
 .htile .hbar span{display:block;height:100%;border-radius:2px}
 
+/* ── tonight's viewing window card ── */
+.au-tonight-card{margin-top:12px;border-radius:var(--r-xl);padding:13px 16px 14px;
+  background:linear-gradient(180deg,var(--c-surface-1),var(--c-surface-2));
+  border:1px solid var(--c-border-medium);backdrop-filter:var(--blur-glass)}
+.au-tn-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:9px}
+.au-tn-title{font-family:'Orbitron',sans-serif;font-weight:700;font-size:.92rem;color:#eaf6ff}
+.au-tn-loc{font-family:'JetBrains Mono',monospace;font-size:.62rem;letter-spacing:.06em;color:var(--c-text-faint)}
+.au-tonight{display:flex;flex-wrap:wrap;gap:8px 28px}
+.au-tn-cell{display:flex;flex-direction:column;gap:1px}
+.au-tn-lbl{font-family:'JetBrains Mono',monospace;font-size:.58rem;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--c-text-faint)}
+.au-tn-v{font-family:'JetBrains Mono',monospace;font-weight:600;font-size:1.18rem;color:var(--c-text-primary);line-height:1.1}
+.au-tn-x{font-size:.62rem;color:var(--c-text-muted)}
+.au-tn-note2{font-size:.84rem;color:var(--c-text-muted);line-height:1.5}
+.au-tn-bar{position:relative;margin-top:10px}
+.au-tn-spark{display:block;width:100%;height:26px;
+  border-bottom:1px solid var(--c-border-faint)}
+.au-tn-bar-ends{display:flex;justify-content:space-between;margin-top:3px;
+  font-family:'JetBrains Mono',monospace;font-size:.54rem;letter-spacing:.06em;text-transform:uppercase;color:var(--c-text-faint)}
+.au-tn-bar-ends i{font-style:normal}
+.au-tn-bar-ends i:nth-child(2){color:var(--c-text-faint);opacity:.7}
+
 /* bottom conversion band */
 .cta-band{display:flex;flex-wrap:wrap;align-items:center;gap:16px;margin-top:30px;
   border-radius:var(--r-2xl);padding:20px 24px;
@@ -456,6 +478,20 @@ footer a{color:var(--c-text-muted)}
 <section class="wrap">
   <!-- hero rating pair — free for everyone -->
   <div class="hero-pair" id="hero"></div>
+
+  <!-- tonight's viewing window — when it's dark + when aurora peaks (free) -->
+  <div class="au-tonight-card" id="au-tonight-card">
+    <div class="au-tn-head">
+      <span class="au-tn-title">Tonight's viewing window</span>
+      <span class="au-tn-loc" id="au-tn-loc"></span>
+    </div>
+    <div class="au-tonight" id="au-tonight"></div>
+    <!-- hourly odds curve across tonight's dark window (peak dot · midnight tick) -->
+    <div class="au-tn-bar" id="au-tonight-bar">
+      <svg class="au-tn-spark" id="au-tonight-spark" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true"></svg>
+      <span class="au-tn-bar-ends"><i>dusk</i><i>odds through the night</i><i>dawn</i></span>
+    </div>
+  </div>
 
   <!-- compact week — nights 1–3 free, 4–7 frosted for the teaser -->
   <div class="weekhead">

@@ -30,6 +30,7 @@ import {
   geocodeQuery, loadLocationList, addLocationToList,
   removeLocationFromList, locationId,
 } from './user-location.js';
+import { solarPosition } from './sun-altitude.js';
 
 /* ════ lightweight physical odds model (identical to aurora.html sketch) ════ */
 const RAD = Math.PI / 180;
@@ -76,12 +77,54 @@ const fmtHM = min => { const m = ((Math.round(min) % 1440) + 1440) % 1440;
   return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
 function peakText(lon) { const c = magMidnightMin(lon); return { center: fmtHM(c), lo: fmtHM(c - 40), hi: fmtHM(c + 40) }; }
 
+/* ── tonight's viewing window: when is it dark, and when does aurora peak ──
+ * Aurora is only visible against a dark sky AND tends to peak near magnetic
+ * midnight (the substorm onset sector). We scan tonight's sun altitude at the
+ * location, find the astronomically-dark window (sun < −12°, nautical), and
+ * mark solar midnight (deepest sun) as the substorm-peak proxy. Times are in
+ * the LOCATION's local clock (lon/15h offset — solar, not political, which is
+ * the right frame for "when to look up"). */
+function tonightWindow(lat, lon) {
+  const offMs = (lon / 15) * 3600e3;                    // location-local = UTC + offMs
+  const now = new Date();
+  const loc = new Date(now.getTime() + offMs);          // location-local "now"
+  // Anchor the 24h scan at the location's local noon today so the whole night
+  // (which straddles UTC midnight) is covered in one pass.
+  const noonLocalUTC = Date.UTC(loc.getUTCFullYear(), loc.getUTCMonth(), loc.getUTCDate(), 12, 0, 0) - offMs;
+  const N = 144, stepMs = 600000;                        // 24h @ 10 min
+  let minAlt = 99, minI = 0;
+  const alt = new Array(N + 1);
+  for (let i = 0; i <= N; i++) {
+    const a = solarPosition(new Date(noonLocalUTC + i * stepMs), lat, lon).altitudeDeg;
+    alt[i] = a;
+    if (a < minAlt) { minAlt = a; minI = i; }
+  }
+  const DARK = -12;                                      // nautical twilight floor
+  const fmt = i => {
+    const l = new Date(noonLocalUTC + i * stepMs + offMs);
+    return String(l.getUTCHours()).padStart(2, '0') + ':' + String(l.getUTCMinutes()).padStart(2, '0');
+  };
+  if (minAlt >= DARK) {
+    // Never gets dark enough tonight — high-summer / midnight-sun latitudes.
+    return { hasDark: false, twilightOnly: minAlt < -6, peak: fmt(minI), minAlt };
+  }
+  // Walk out from the darkest sample to the nautical-dark boundaries.
+  let s = minI, e = minI;
+  while (s > 0 && alt[s - 1] < DARK) s--;
+  while (e < N && alt[e + 1] < DARK) e++;
+  const ms = i => noonLocalUTC + i * stepMs;
+  return { hasDark: true, darkStart: fmt(s), darkEnd: fmt(e), peak: fmt(minI), minAlt,
+           darkStartMs: ms(s), darkEndMs: ms(e), peakMs: ms(minI), offMs,
+           peakFrac: e > s ? (minI - s) / (e - s) : 0.5 };
+}
+
 /* ════ state ════ */
 const state = {
   user: { name: 'Calgary, AB', lat: 51.05, lon: -114.07 },
   week: [], month: null, best: null, bestP: 0,
   access: 'locked',          // 'locked' | 'unlocked'
   kpForecast: null,          // { 0, 1, 3, 6, 24 } map for the engine, from live Kp
+  kpEntries: null,           // raw SWPC 3-day Kp blocks: [{ t_hours_from_now, kp }]
   live: null,                // { power_n, power_s, activity, bz, hole } drivers
   ensemble: null,            // forecastAurora() output
   hydrated: false,
@@ -127,6 +170,7 @@ async function patchOperational() {
     const r = await fetch('/api/noaa/forecast-3day', { mode: 'cors' });
     const j = await r.json(); const e = j?.data?.entries || j?.entries;
     if (Array.isArray(e) && e.length) {
+      state.kpEntries = e;        // keep the raw 3-hourly blocks for the hourly curve
       for (let n = 0; n < 3; n++) {
         const lo = n * 24 + 6, hi = n * 24 + 30;
         const pk = e.filter(x => x.t_hours_from_now >= lo && x.t_hours_from_now < hi)
@@ -134,19 +178,92 @@ async function patchOperational() {
         if (pk > 0) { state.week[n].med = clampKp(pk); state.week[n].lo = clampKp(pk - 0.4); state.week[n].hi = clampKp(pk + 0.5); }
       }
       // Build the horizon→Kp map the ensemble forecaster consumes.
-      const nearest = h => { let best = null, bd = Infinity;
-        for (const x of e) { const d = Math.abs((x.t_hours_from_now || 0) - h); if (d < bd) { bd = d; best = x; } }
-        return best ? clampKp(best.kp || 0) : null; };
-      state.kpForecast = { 0: nearest(0), 1: nearest(1), 3: nearest(3), 6: nearest(6), 24: nearest(24) };
+      state.kpForecast = { 0: kpAtHours(0), 1: kpAtHours(1), 3: kpAtHours(3), 6: kpAtHours(6), 24: kpAtHours(24) };
       buildMonth(); render();
     }
   } catch (_) { /* mock stays */ }
 }
 
+/** Forecast Kp at `h` hours from now, nearest 3-hourly SWPC block (null if
+ *  the 3-day feed hasn't landed yet). Shared by the ensemble map + the
+ *  hourly tonight curve so both read the same profile. */
+function kpAtHours(h) {
+  const e = state.kpEntries; if (!Array.isArray(e) || !e.length) return null;
+  let best = null, bd = Infinity;
+  for (const x of e) { const d = Math.abs((x.t_hours_from_now || 0) - h); if (d < bd) { bd = d; best = x; } }
+  return best ? clampKp(best.kp || 0) : null;
+}
+
 /* ════ RENDER ════ */
 function render() {
-  renderContext(); renderHero(); renderWeek(); renderMonth(); renderHighlights();
+  renderContext(); renderHero(); renderViewingWindow(); renderWeek(); renderMonth(); renderHighlights();
   renderProbability();  // depends on week[0]; safe to re-run on any render
+}
+
+function renderViewingWindow() {
+  const host = document.getElementById('au-tonight'); if (!host) return;
+  const bar = document.getElementById('au-tonight-bar');
+  const spark = document.getElementById('au-tonight-spark');
+  const locEl = document.getElementById('au-tn-loc'); if (locEl) locEl.textContent = cityName() + ' · local time';
+  const w = tonightWindow(state.user.lat, state.user.lon);
+
+  if (!w.hasDark) {
+    host.innerHTML = `<div class="au-tn-note2">${w.twilightOnly
+      ? 'Only deep twilight tonight — the sky barely darkens at this latitude, so only a strong overhead display would stand out.'
+      : 'Midnight-sun season — the sky never gets dark enough here for aurora tonight.'}</div>`;
+    if (bar) bar.style.display = 'none';
+    return;
+  }
+  if (bar) bar.style.display = '';
+
+  // ── hourly odds across the dark window: SWPC 3-hourly Kp × this sky's oval ──
+  const fmtLoc = msV => { const l = new Date(msV + w.offMs);
+    return String(l.getUTCHours()).padStart(2, '0') + ':' + String(l.getUTCMinutes()).padStart(2, '0'); };
+  const span = Math.max(1, w.darkEndMs - w.darkStartMs);
+  const steps = Math.max(3, Math.min(14, Math.round(span / 1800000)));    // ~30-min samples, capped
+  const gm = geo(), fallbackKp = state.week[0]?.med ?? 3;
+  const pts = [];
+  for (let i = 0; i <= steps; i++) {
+    const ms = w.darkStartMs + span * i / steps;
+    const kp = kpAtHours((ms - Date.now()) / 3600000) ?? fallbackKp;
+    pts.push({ x: i / steps, odds: oddsFor(gm, kp), ms });
+  }
+  const lo = Math.min(...pts.map(p => p.odds)), hi = Math.max(...pts.map(p => p.odds));
+  // Flat night (Kp ~constant) → call solar midnight the best moment, not an
+  // arbitrary argmax that would land at dusk.
+  let pk;
+  if (hi - lo < 0.03) {
+    const midF = (w.peakMs - w.darkStartMs) / span;
+    pk = pts.reduce((a, b) => Math.abs(b.x - midF) < Math.abs(a.x - midF) ? b : a, pts[0]);
+  } else {
+    pk = pts.reduce((a, b) => b.odds > a.odds ? b : a, pts[0]);
+  }
+  const v = verdict(pk.odds);
+
+  host.innerHTML =
+    `<div class="au-tn-cell"><span class="au-tn-lbl">Dark sky</span><span class="au-tn-v">${w.darkStart} – ${w.darkEnd}</span></div>
+     <div class="au-tn-cell"><span class="au-tn-lbl">Best odds</span><span class="au-tn-v" style="color:${v.c}">${Math.round(pk.odds * 100)}%</span><span class="au-tn-x">~${fmtLoc(pk.ms)} · ${v.t}</span></div>`;
+  if (spark) drawTonightSpark(spark, pts, pk);
+}
+
+/** Tiny odds-vs-time sparkline across the dark window. Stretched to fill the
+ *  bar row (preserveAspectRatio=none), so it costs no extra vertical space —
+ *  it replaces the static night bar. Strokes use vector-effect=non-scaling-
+ *  stroke so the non-uniform stretch doesn't smear them. */
+function drawTonightSpark(svg, pts, pk) {
+  const W = 100, H = 24, pad = 2.5, rgb = COL('--c-loc-rgb'), col = COL('--c-loc');
+  const x = f => f * W;
+  // Perceptual lift (pow .65) so a low-odds night still shows a shape rather
+  // than a dead line hugging the floor, while higher reads visibly higher.
+  const y = o => H - pad - Math.pow(Math.max(0, Math.min(1, o)), 0.65) * (H - pad * 2);
+  let line = '', area = `${x(0).toFixed(1)},${H} `;
+  pts.forEach(p => { const px = x(p.x).toFixed(1), py = y(p.odds).toFixed(1); line += `${px},${py} `; area += `${px},${py} `; });
+  area += `${x(1).toFixed(1)},${H}`;
+  const pxk = x(pk.x).toFixed(1);
+  svg.innerHTML =
+    `<polygon points="${area}" fill="rgba(${rgb},.15)"/>` +
+    `<line x1="${pxk}" y1="1.5" x2="${pxk}" y2="${H}" stroke="${col}" stroke-width="1.2" opacity="0.7" vector-effect="non-scaling-stroke"/>` +
+    `<polyline points="${line.trim()}" fill="none" stroke="${col}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" style="filter:drop-shadow(0 0 2px rgba(${rgb},.55))"/>`;
 }
 
 function renderContext() {
