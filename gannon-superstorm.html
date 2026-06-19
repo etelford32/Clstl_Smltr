@@ -420,7 +420,10 @@ body {
 
     <section class="gn-panel" style="margin-top:14px;">
       <h2>Thermospheric density @ 400 km — model vs. truth</h2>
-      <div id="gn-chart-rho" class="gn-chart gn-pulse">ρ(400 km) trace + GRACE-FO / Swarm-C scatter renders here</div>
+      <div id="gn-chart-rho" class="gn-chart gn-pulse">ρ(400 km) trace + GRACE-FO truth scatter renders here</div>
+      <p style="font-size:.72rem; color:#8ab; margin:6px 0 0;">
+        Truth: GRACE-FO accelerometer density (TU Delft Doornbos v02c, real), normalized from the ~490&nbsp;km orbit to the 400&nbsp;km reference via NRLMSISE-00. Swarm-C pending.
+      </p>
       <div class="gn-legend">
         <div class="gn-legend-row"><span class="gn-legend-swatch gn-swatch--real"></span> MSIS + Ap-real (baseline)</div>
         <div class="gn-legend-row"><span class="gn-legend-swatch gn-swatch--mhd"></span>  MSIS + Ap* MHD</div>
@@ -465,7 +468,7 @@ body {
         </p>
       </div>
 
-      <div class="gn-receipt-label">Density skill vs. MSIS + saturated-Ap baseline</div>
+      <div class="gn-receipt-label">Density skill vs. MSIS + saturated-Ap baseline — validation in progress</div>
       <div class="gn-kpi-grid">
         <div class="gn-kpi"><div class="gn-kpi-label">RMSE base</div>
           <div class="gn-kpi-value" id="gn-skill-base">—</div>
@@ -643,6 +646,10 @@ function paint(sample) {
         els.pill.classList.add('gn-pill--validated');
         if (mhdReal) markSourceLive('model', prov.mhd);
     }
+    // Real GRACE-FO truth is baked into the bundle (the live TU Delft proxy is
+    // FTP-only / mirror-pending), so flip its source badge live at boot.
+    const graceReal = !!prov.grace_fo && !/placeholder|unavailable/i.test(prov.grace_fo);
+    if (graceReal) markSourceLive('density_truth', prov.grace_fo);
 
     const skill = skillSummary(replay);
     els.skill.base.textContent = fmt(skill.rmse_base, 2);
