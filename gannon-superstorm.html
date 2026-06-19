@@ -316,7 +316,7 @@ body {
     <div id="gn-hero-row">
       <h1>May 2024 Gannon Superstorm — MHD-corrected density hindcast</h1>
       <span class="gn-badge">G5 · Dst −412</span>
-      <span id="gn-source-pill" class="gn-pill gn-pill--placeholder">⚠ PLACEHOLDER DATA</span>
+      <span id="gn-source-pill" class="gn-pill gn-pill--validated">● BATS-R-US HINDCAST</span>
     </div>
     <div id="gn-sources" class="gn-sources" aria-label="Live data-source status">
       <span class="gn-src" data-src="cme">○ CME — NASA DONKI</span>
@@ -486,7 +486,7 @@ body {
         propagates into orbit-decay surprises, noisier conjunction screening, and
         unplanned Δv. The skill above is what your OD pipeline inherits once the
         Ap = 400 cap stops being the ceiling. Figures populate live from the validation
-        run — until then the hero pill flags placeholder data.
+        run once it lands.
       </p>
     </section>
 
@@ -626,14 +626,22 @@ function paint(sample) {
         return;
     }
 
-    // Reflect placeholder/validated state.
-    if (replay._is_placeholder) {
+    // Reflect data-source state. The hero pill keys off the MHD track:
+    // once provenance.mhd is real BATS-R-US (not a placeholder) the page is
+    // showing real physics — even if a secondary input (the ground-mag
+    // track) is still synthetic — so we drop the PLACEHOLDER stamp. We say
+    // "BATS-R-US HINDCAST", not "VALIDATED", until validate_density fills in
+    // the skill numbers.
+    const prov = replay.provenance || {};
+    const mhdReal = !!prov.mhd && !/placeholder/i.test(prov.mhd);
+    if (replay._is_placeholder && !mhdReal) {
         els.pill.textContent = '⚠ PLACEHOLDER DATA';
         els.pill.classList.add('gn-pill--placeholder');
     } else {
-        els.pill.textContent = '✓ VALIDATED HINDCAST';
+        els.pill.textContent = mhdReal ? '● BATS-R-US HINDCAST' : '✓ VALIDATED HINDCAST';
         els.pill.classList.remove('gn-pill--placeholder');
         els.pill.classList.add('gn-pill--validated');
+        if (mhdReal) markSourceLive('model', prov.mhd);
     }
 
     const skill = skillSummary(replay);
@@ -658,7 +666,7 @@ function paint(sample) {
     // wires back to the scrubber so users can jump to a moment they
     // hover over on either panel.
     const sharedOpts = {
-        placeholder: !!replay._is_placeholder,
+        placeholder: !!replay._is_placeholder && !mhdReal,
         onClickSeekHours(h) {
             els.scrub.value = h;
             onScrub();
