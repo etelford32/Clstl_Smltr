@@ -143,7 +143,13 @@ honest accuracy gains are: **days 1–7** (near-term Kp trajectory) and
 or decaying rotation-over-rotation?). We do not claim to pin day 23. "Tendency,
 not a timeline" stays on the chart.
 
-### Phase 1 — Historically-driven month (no ML) — *the immediate win*
+### Phase 1 — Historically-driven month (no ML) — *the immediate win* ✅ shipped
+> `api/_lib/aurora-outlook.js` (compute), `api/cron/aurora-outlook.js` (6 h
+> writer), `api/aurora/outlook.js` (read + live-compute fallback),
+> `supabase-aurora-outlook-cache-migration.sql`, and `js/auroracle.js`
+> (`fetchOutlook` → `buildWeek`/`buildMonth`). Run the migration to enable the
+> durable cache; the read endpoint live-computes until then.
+
 **Data (all already proxied):**
 - **NOAA 45-day Ap forecast** via `api/noaa/ap-history.js` (`45-day-ap-forecast.txt`,
   observed + predicted 3-h Ap). Convert Ap→Kp by inverting the canonical table in

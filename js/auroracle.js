@@ -141,41 +141,69 @@ const state = {
   live: null,                // { power_n, power_s, activity, bz, hole } drivers
   ensemble: null,            // forecastAurora() output
   cells: null,               // last OVATION bright-cell grid (for "your sky" + globe)
+  outlook: null,             // historically-driven 30-day Kp outlook (/api/aurora/outlook)
   hydrated: false,
 };
 const geo = () => geomagLat(state.user.lat, state.user.lon);
 const threshold = () => (66.5 - Math.abs(geo())) / 2;   // Kp needed for visibility here
 const cityName = () => state.user.name.split(',')[0];
 
-/* ── week: nights 1–3 operational, 4–7 recurrence (widening band) ── */
+/* ── week: nights 1–3 operational, 4–7 recurrence (widening band) ──
+ * Seeds from the historically-driven outlook (NOAA 45-day Ap + 27-day
+ * recurrence) when it's landed; otherwise the static medians keep the teaser
+ * instant. patchNearTerm() then overrides nights 1–3 with the fresher SWPC
+ * 3-day Kp. */
 function buildWeek() {
-  // ░░ INTEGRATION: nights 1–3 ← live Kp (patchOperational); 4–7 ← 27-day recurrence. ░░
   const median = [2.7, 3.0, 3.3, 5.7, 6.0, 4.3, 3.3];
   const spread = [0.3, 0.5, 0.8, 1.2, 1.5, 1.8, 2.0];
   const today = new Date();
   state.week = median.map((m, i) => {
     const d = new Date(today); d.setDate(today.getDate() + i);
-    return { i, date: d, med: clampKp(m), lo: clampKp(m - spread[i]), hi: clampKp(m + spread[i]),
-             tier: i < 3 ? 'near' : i < 5 ? 'mid' : 'far' };
+    let med = clampKp(m), lo = clampKp(m - spread[i]), hi = clampKp(m + spread[i]), driver = null;
+    const o = state.outlook?.[i];
+    if (o) { med = clampKp(o.kp_p50); lo = clampKp(o.kp_p10); hi = clampKp(o.kp_p90); driver = o.driver || null; }
+    return { i, date: d, med, lo, hi, driver, tier: i < 3 ? 'near' : i < 5 ? 'mid' : 'far' };
   });
 }
 
-/* ── month: 30 days from 27-day recurrence, wide CI ── */
+/** Override nights 1–3 with the live SWPC 3-day Kp peak (freshest signal for
+ *  the near term). Shared by patchOperational and the outlook re-apply so the
+ *  two async fetches converge regardless of arrival order. */
+function patchNearTerm() {
+  const e = state.kpEntries; if (!Array.isArray(e) || !e.length) return;
+  for (let n = 0; n < 3; n++) {
+    if (!state.week[n]) continue;
+    const lo = n * 24 + 6, hi = n * 24 + 30;
+    const pk = e.filter(x => x.t_hours_from_now >= lo && x.t_hours_from_now < hi)
+                .reduce((a, x) => Math.max(a, x.kp || 0), 0);
+    if (pk > 0) { state.week[n].med = clampKp(pk); state.week[n].lo = clampKp(pk - 0.4); state.week[n].hi = clampKp(pk + 0.5); state.week[n].driver = 'noaa-3day'; }
+  }
+}
+
+/* ── month: days 0–6 mirror the week; 7–29 from the historically-driven
+ *  outlook (NOAA 45-day + 27-day recurrence) when present, else the synthetic
+ *  recurrence sketch so the teaser still renders with zero data deps. ── */
 function buildMonth() {
   const today = new Date(), N = 30;
   const gauss = (d, c, a, w) => a * Math.exp(-((d - c) ** 2) / (2 * w * w));
-  const dates = [], med = [], lo = [], hi = [];
+  const dates = [], med = [], lo = [], hi = [], drivers = [];
   for (let d = 0; d < N; d++) {
     const dt = new Date(today); dt.setDate(today.getDate() + d); dates.push(dt);
-    let m, sp;
-    if (d < 7) { m = state.week[d].med; sp = state.week[d].hi - state.week[d].med; }
-    else {
-      m  = 2.8 + gauss(d, 17, 1.6, 2.3) + gauss(d, 31, 2.4, 2.8);
-      sp = Math.min(2.8, 1.0 + (d - 7) * 0.13);
+    let m, l, h, driver = null;
+    const o = state.outlook?.[d];
+    if (d < 7) {
+      const w = state.week[d];
+      m = w.med; l = w.lo; h = w.hi; driver = w.driver;
+    } else if (o) {
+      m = clampKp(o.kp_p50); l = clampKp(o.kp_p10); h = clampKp(o.kp_p90); driver = o.driver || null;
+    } else {
+      m = clampKp(2.8 + gauss(d, 17, 1.6, 2.3) + gauss(d, 31, 2.4, 2.8));
+      const sp = Math.min(2.8, 1.0 + (d - 7) * 0.13);
+      l = clampKp(m - sp); h = clampKp(m + sp);
     }
-    m = clampKp(m); med.push(m); lo.push(clampKp(m - sp)); hi.push(clampKp(m + sp));
+    med.push(m); lo.push(l); hi.push(h); drivers.push(driver);
   }
-  state.month = { dates, med, lo, hi };
+  state.month = { dates, med, lo, hi, drivers };
 }
 
 /* ════ live Kp patch for the firm half (also feeds the engine's kpForecast) ════ */
@@ -185,17 +213,30 @@ async function patchOperational() {
     const j = await r.json(); const e = j?.data?.entries || j?.entries;
     if (Array.isArray(e) && e.length) {
       state.kpEntries = e;        // keep the raw 3-hourly blocks for the hourly curve
-      for (let n = 0; n < 3; n++) {
-        const lo = n * 24 + 6, hi = n * 24 + 30;
-        const pk = e.filter(x => x.t_hours_from_now >= lo && x.t_hours_from_now < hi)
-                    .reduce((a, x) => Math.max(a, x.kp || 0), 0);
-        if (pk > 0) { state.week[n].med = clampKp(pk); state.week[n].lo = clampKp(pk - 0.4); state.week[n].hi = clampKp(pk + 0.5); }
-      }
+      patchNearTerm();            // nights 1–3 ← live 3-day Kp peak
       // Build the horizon→Kp map the ensemble forecaster consumes.
       state.kpForecast = { 0: kpAtHours(0), 1: kpAtHours(1), 3: kpAtHours(3), 6: kpAtHours(6), 24: kpAtHours(24) };
       buildMonth(); render();
     }
   } catch (_) { /* mock stays */ }
+}
+
+/* ════ historically-driven 30-day outlook (NOAA 45-day Ap + 27-day recurrence) ════
+ * Replaces the synthetic month/week back-half with a real, observation-grounded
+ * forecast. Best-effort: on any failure the synthetic sketch stays, so the
+ * teaser never blocks on this (AURORACLE_ML_PLAN.md §6, Phase 1). */
+async function fetchOutlook() {
+  try {
+    const r = await fetch('/api/aurora/outlook', { mode: 'cors' });
+    const j = await r.json();
+    const days = j?.data?.days;
+    if (!Array.isArray(days) || !days.length) return;
+    state.outlook = days;            // [{ i, date, kp_p10, kp_p50, kp_p90, driver }]
+    buildWeek();                     // re-seed week from the outlook…
+    patchNearTerm();                 // …then re-assert the fresher 3-day near-term
+    buildMonth();
+    render();
+  } catch (_) { /* synthetic stays */ }
 }
 
 /** Forecast Kp at `h` hours from now, nearest 3-hourly SWPC block (null if
@@ -1013,6 +1054,7 @@ function initSignedInPanel() {
 /* ════ boot ════ */
 buildWeek(); buildMonth(); buildChips(); initGeo(); initProbSlider(); render();
 patchOperational();
+fetchOutlook();
 initAccess();
 initAlerts();
 initGlobe();
