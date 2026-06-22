@@ -161,8 +161,11 @@ function auroraPointsMaterial(pixelRatio) {
     });
 }
 
-/** Camera-facing text label sprite (same recipe as farside-globe.makeLabel). */
-function makeLabel(text, color = '#cdeefe', scale = 0.26) {
+/** Camera-facing text label sprite (same recipe as farside-globe.makeLabel).
+ *  depthTest=false keeps a label always on top (the "you" pin); true lets the
+ *  globe occlude it, which is what we want for the many reference-city labels
+ *  so only the near-side ones show. */
+function makeLabel(text, color = '#cdeefe', scale = 0.26, depthTest = false) {
     const pad = 8, font = 44;
     const cvs = document.createElement('canvas');
     let ctx = cvs.getContext('2d');
@@ -178,7 +181,7 @@ function makeLabel(text, color = '#cdeefe', scale = 0.26) {
     ctx.fillText(text, pad, cvs.height / 2);
     const tex = new THREE.CanvasTexture(cvs);
     tex.colorSpace = THREE.SRGBColorSpace;
-    const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
+    const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest }));
     spr.scale.set(scale * (cvs.width / cvs.height), scale, 1);
     return spr;
 }
@@ -200,16 +203,52 @@ function regionName(lat, lonEast) {
     return 'Ross Sea & S. Pacific';
 }
 
+/** Angular gap² (deg², in lat/lon space) between a [lonEast,lat] point and a
+ *  city {lat,lon(−180..180)}, wrapping longitude. Cheap planar proxy — fine at
+ *  the small radii we test (used only to pick the nearest landmark). */
+function cityGap2(lat, lonEast, city) {
+    const L = ((lonEast % 360) + 360) % 360, cl = ((city.lon % 360) + 360) % 360;
+    const dlat = city.lat - lat;
+    let dlon = cl - L; if (dlon > 180) dlon -= 360; else if (dlon < -180) dlon += 360;
+    return dlat * dlat + dlon * dlon;
+}
+
+/** Nearest hotspot city to a cell, within maxDeg — else null. */
+function nearestCity(lat, lonEast, cities, maxDeg) {
+    if (!Array.isArray(cities) || !cities.length) return null;
+    let best = null, bd = maxDeg * maxDeg;
+    for (const c of cities) {
+        if (!Number.isFinite(c.lat) || !Number.isFinite(c.lon)) continue;
+        const d2 = cityGap2(lat, lonEast, c);
+        if (d2 < bd) { bd = d2; best = c; }
+    }
+    return best;
+}
+
+/** Live OVATION probability over a city (nearest bright cell within maxDeg). */
+export function probOverCity(city, cells, maxDeg = 4) {
+    if (!Array.isArray(cells) || !cells.length || !city) return null;
+    let best = null, bd = maxDeg * maxDeg;
+    for (const c of cells) {
+        const d2 = cityGap2(c[1], c[0], city);
+        if (d2 < bd) { bd = d2; best = c[2]; }
+    }
+    return best;
+}
+
 /**
- * Top-N brightest named regions from a cell list, one entry per region
- * (so the caption isn't three rows of "N. Canada"). Cells are [lon,lat,prob].
+ * Top-N brightest named regions from a cell list, one entry per name (so the
+ * caption isn't three rows of "N. Canada"). When `cities` is supplied, a bright
+ * cell near a hotspot is labelled with that city ("Fairbanks") instead of the
+ * coarse continental band — more concrete and useful. Cells are [lon,lat,prob].
  */
-export function brightestRegions(cells, n = 3) {
+export function brightestRegions(cells, n = 3, cities = null) {
     if (!Array.isArray(cells)) return [];
     const best = new Map();
     for (const c of cells) {
         const lon = c[0], lat = c[1], prob = c[2];
-        const name = regionName(lat, lon);
+        const city = nearestCity(lat, lon, cities, 7);
+        const name = city ? city.name.split(',')[0] : regionName(lat, lon);
         const cur = best.get(name);
         if (!cur || prob > cur.prob) best.set(name, { name, lat, lon, prob });
     }
@@ -225,6 +264,8 @@ export class AuroraGlobe {
         this._pointsMesh = null;
         this._markerGroup = null;
         this._pinGroup = null;
+        this._refGroup = null;     // hotspot-city reference landmarks
+        this._refDots = [];        // [{ city, dot }] — recoloured as the oval moves
 
         const pr = Math.min(window.devicePixelRatio || 1, 2);
         this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
@@ -305,7 +346,62 @@ export class AuroraGlobe {
             }
             this.earthGroup.add(this._markerGroup);
         }
+        this._recolorReferenceCities();      // light up hotspot cities under the live oval
         if (!this._raf) this._renderOnce();
+    }
+
+    /**
+     * Drop the aurora hotspot cities as map landmarks: dim dots that brighten
+     * to green when the live oval is over them, so the textureless globe gains
+     * geographic anchors AND answers "which famous aurora cities are lit now."
+     * @param {Array<{name:string,lat:number,lon:number,marquee?:boolean}>} cities
+     */
+    setReferenceCities(cities = []) {
+        this._refCities = (cities || []).filter(c => Number.isFinite(c.lat) && Number.isFinite(c.lon));
+        if (this._refGroup) { this.earthGroup.remove(this._refGroup); this._disposeGroup(this._refGroup); }
+        this._refGroup = new THREE.Group();
+        this._refDots = [];
+        for (const city of this._refCities) {
+            const surf = latLonToVec3(city.lat, city.lon, R * 1.008);
+            const dot = new THREE.Mesh(
+                new THREE.SphereGeometry(0.014, 12, 8),
+                new THREE.MeshBasicMaterial({ color: 0x7193ad, transparent: true, opacity: 0.75, depthWrite: false }),
+            );
+            dot.position.copy(surf);
+            this._refGroup.add(dot);
+            this._refDots.push({ city, dot });
+            if (city.marquee) {
+                // Depth-tested so only near-side labels show (no back-side clutter).
+                const lbl = makeLabel(' ' + city.name.split(',')[0] + ' ', '#a8cfe4', 0.165, true);
+                lbl.position.copy(latLonToVec3(city.lat, city.lon, R * 1.075));
+                this._refGroup.add(lbl);
+            }
+        }
+        this.earthGroup.add(this._refGroup);
+        this._recolorReferenceCities();
+        if (!this._raf) this._renderOnce();
+    }
+
+    /** Recolour hotspot dots from the current footprint: lit cities glow green
+     *  and grow; dark ones stay a dim slate. Cheap (cities × cells). */
+    _recolorReferenceCities() {
+        if (!this._refDots || !this._refDots.length) return;
+        for (const ref of this._refDots) {
+            const p = probOverCity(ref.city, this._cells, 4);
+            const lit = p != null && p >= 8;
+            ref.lit = lit;
+            const m = ref.dot.material;
+            if (lit) {
+                const t = Math.min(1, p / 55);
+                m.color.setHex(0x5fffd0);
+                m.opacity = 0.85;
+                ref.dot.scale.setScalar(1 + 1.7 * t);
+            } else {
+                m.color.setHex(0x7193ad);
+                m.opacity = 0.7;
+                ref.dot.scale.setScalar(1);
+            }
+        }
     }
 
     _makeHotspot(lat, lonEast) {
@@ -385,6 +481,10 @@ export class AuroraGlobe {
             if (this._markerGroup && !this._reduced) {
                 const s = 1 + 0.22 * Math.sin(this._t * 3.2);
                 this._markerGroup.children.forEach(m => { if (m.userData.pulse) { m.scale.setScalar(s); m.material.opacity = 0.55 + 0.4 * (0.5 + 0.5 * Math.sin(this._t * 3.2)); } });
+            }
+            if (this._refDots && !this._reduced) {
+                const o = 0.6 + 0.4 * (0.5 + 0.5 * Math.sin(this._t * 2.4));   // breathe the lit cities
+                for (const ref of this._refDots) if (ref.lit) ref.dot.material.opacity = o;
             }
             this.controls.update();
             this.renderer.render(this.scene, this.camera);
