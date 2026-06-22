@@ -56,6 +56,19 @@ function verdict(p) {
   if (p >= .15) return { t: 'Long shot', c: COL('--c-storm'),      bg: 'rgba(255,160,80,.11)' };
   return            { t: 'Unlikely',  c: COL('--c-text-faint'), bg: 'rgba(255,255,255,.035)' };
 }
+
+/* ── how easily a place sees the aurora — the Kp it needs vs its geomag lat.
+ *   Drives the colored ease-pip on each preset chip so the city list reads,
+ *   at a glance, as a ranked board of aurora hotspots (best → rare). Same
+ *   threshold model the page scores everything else with. */
+function easeFor(lat, lon) {
+  const thr = (66.5 - Math.abs(geomagLat(lat, lon))) / 2;   // Kp needed for visibility
+  if (thr <= 1.0) return { tier: 'excellent', c: COL('--c-loc'),        note: 'overhead most active nights' };
+  if (thr <= 3.0) return { tier: 'great',     c: COL('--c-status-live'), note: 'on most active nights' };
+  if (thr <= 5.0) return { tier: 'good',      c: COL('--c-accent'),     note: 'needs a moderate storm' };
+  if (thr <= 7.0) return { tier: 'occasional',c: COL('--c-storm'),      note: 'only in strong storms' };
+  return            { tier: 'rare',      c: COL('--c-text-faint'), note: 'extreme storms only' };
+}
 function gLevel(kp) {
   if (kp >= 9) return 'G5'; if (kp >= 8) return 'G4'; if (kp >= 7) return 'G3';
   if (kp >= 6) return 'G2'; if (kp >= 5) return 'G1'; if (kp >= 4) return 'active'; return 'quiet';
@@ -127,41 +140,70 @@ const state = {
   kpEntries: null,           // raw SWPC 3-day Kp blocks: [{ t_hours_from_now, kp }]
   live: null,                // { power_n, power_s, activity, bz, hole } drivers
   ensemble: null,            // forecastAurora() output
+  cells: null,               // last OVATION bright-cell grid (for "your sky" + globe)
+  outlook: null,             // historically-driven 30-day Kp outlook (/api/aurora/outlook)
   hydrated: false,
 };
 const geo = () => geomagLat(state.user.lat, state.user.lon);
 const threshold = () => (66.5 - Math.abs(geo())) / 2;   // Kp needed for visibility here
 const cityName = () => state.user.name.split(',')[0];
 
-/* ── week: nights 1–3 operational, 4–7 recurrence (widening band) ── */
+/* ── week: nights 1–3 operational, 4–7 recurrence (widening band) ──
+ * Seeds from the historically-driven outlook (NOAA 45-day Ap + 27-day
+ * recurrence) when it's landed; otherwise the static medians keep the teaser
+ * instant. patchNearTerm() then overrides nights 1–3 with the fresher SWPC
+ * 3-day Kp. */
 function buildWeek() {
-  // ░░ INTEGRATION: nights 1–3 ← live Kp (patchOperational); 4–7 ← 27-day recurrence. ░░
   const median = [2.7, 3.0, 3.3, 5.7, 6.0, 4.3, 3.3];
   const spread = [0.3, 0.5, 0.8, 1.2, 1.5, 1.8, 2.0];
   const today = new Date();
   state.week = median.map((m, i) => {
     const d = new Date(today); d.setDate(today.getDate() + i);
-    return { i, date: d, med: clampKp(m), lo: clampKp(m - spread[i]), hi: clampKp(m + spread[i]),
-             tier: i < 3 ? 'near' : i < 5 ? 'mid' : 'far' };
+    let med = clampKp(m), lo = clampKp(m - spread[i]), hi = clampKp(m + spread[i]), driver = null;
+    const o = state.outlook?.[i];
+    if (o) { med = clampKp(o.kp_p50); lo = clampKp(o.kp_p10); hi = clampKp(o.kp_p90); driver = o.driver || null; }
+    return { i, date: d, med, lo, hi, driver, tier: i < 3 ? 'near' : i < 5 ? 'mid' : 'far' };
   });
 }
 
-/* ── month: 30 days from 27-day recurrence, wide CI ── */
+/** Override nights 1–3 with the live SWPC 3-day Kp peak (freshest signal for
+ *  the near term). Shared by patchOperational and the outlook re-apply so the
+ *  two async fetches converge regardless of arrival order. */
+function patchNearTerm() {
+  const e = state.kpEntries; if (!Array.isArray(e) || !e.length) return;
+  for (let n = 0; n < 3; n++) {
+    if (!state.week[n]) continue;
+    const lo = n * 24 + 6, hi = n * 24 + 30;
+    const pk = e.filter(x => x.t_hours_from_now >= lo && x.t_hours_from_now < hi)
+                .reduce((a, x) => Math.max(a, x.kp || 0), 0);
+    if (pk > 0) { state.week[n].med = clampKp(pk); state.week[n].lo = clampKp(pk - 0.4); state.week[n].hi = clampKp(pk + 0.5); state.week[n].driver = 'noaa-3day'; }
+  }
+}
+
+/* ── month: days 0–6 mirror the week; 7–29 from the historically-driven
+ *  outlook (NOAA 45-day + 27-day recurrence) when present, else the synthetic
+ *  recurrence sketch so the teaser still renders with zero data deps. ── */
 function buildMonth() {
   const today = new Date(), N = 30;
   const gauss = (d, c, a, w) => a * Math.exp(-((d - c) ** 2) / (2 * w * w));
-  const dates = [], med = [], lo = [], hi = [];
+  const dates = [], med = [], lo = [], hi = [], drivers = [];
   for (let d = 0; d < N; d++) {
     const dt = new Date(today); dt.setDate(today.getDate() + d); dates.push(dt);
-    let m, sp;
-    if (d < 7) { m = state.week[d].med; sp = state.week[d].hi - state.week[d].med; }
-    else {
-      m  = 2.8 + gauss(d, 17, 1.6, 2.3) + gauss(d, 31, 2.4, 2.8);
-      sp = Math.min(2.8, 1.0 + (d - 7) * 0.13);
+    let m, l, h, driver = null;
+    const o = state.outlook?.[d];
+    if (d < 7) {
+      const w = state.week[d];
+      m = w.med; l = w.lo; h = w.hi; driver = w.driver;
+    } else if (o) {
+      m = clampKp(o.kp_p50); l = clampKp(o.kp_p10); h = clampKp(o.kp_p90); driver = o.driver || null;
+    } else {
+      m = clampKp(2.8 + gauss(d, 17, 1.6, 2.3) + gauss(d, 31, 2.4, 2.8));
+      const sp = Math.min(2.8, 1.0 + (d - 7) * 0.13);
+      l = clampKp(m - sp); h = clampKp(m + sp);
     }
-    m = clampKp(m); med.push(m); lo.push(clampKp(m - sp)); hi.push(clampKp(m + sp));
+    med.push(m); lo.push(l); hi.push(h); drivers.push(driver);
   }
-  state.month = { dates, med, lo, hi };
+  state.month = { dates, med, lo, hi, drivers };
 }
 
 /* ════ live Kp patch for the firm half (also feeds the engine's kpForecast) ════ */
@@ -171,17 +213,30 @@ async function patchOperational() {
     const j = await r.json(); const e = j?.data?.entries || j?.entries;
     if (Array.isArray(e) && e.length) {
       state.kpEntries = e;        // keep the raw 3-hourly blocks for the hourly curve
-      for (let n = 0; n < 3; n++) {
-        const lo = n * 24 + 6, hi = n * 24 + 30;
-        const pk = e.filter(x => x.t_hours_from_now >= lo && x.t_hours_from_now < hi)
-                    .reduce((a, x) => Math.max(a, x.kp || 0), 0);
-        if (pk > 0) { state.week[n].med = clampKp(pk); state.week[n].lo = clampKp(pk - 0.4); state.week[n].hi = clampKp(pk + 0.5); }
-      }
+      patchNearTerm();            // nights 1–3 ← live 3-day Kp peak
       // Build the horizon→Kp map the ensemble forecaster consumes.
       state.kpForecast = { 0: kpAtHours(0), 1: kpAtHours(1), 3: kpAtHours(3), 6: kpAtHours(6), 24: kpAtHours(24) };
       buildMonth(); render();
     }
   } catch (_) { /* mock stays */ }
+}
+
+/* ════ historically-driven 30-day outlook (NOAA 45-day Ap + 27-day recurrence) ════
+ * Replaces the synthetic month/week back-half with a real, observation-grounded
+ * forecast. Best-effort: on any failure the synthetic sketch stays, so the
+ * teaser never blocks on this (AURORACLE_ML_PLAN.md §6, Phase 1). */
+async function fetchOutlook() {
+  try {
+    const r = await fetch('/api/aurora/outlook', { mode: 'cors' });
+    const j = await r.json();
+    const days = j?.data?.days;
+    if (!Array.isArray(days) || !days.length) return;
+    state.outlook = days;            // [{ i, date, kp_p10, kp_p50, kp_p90, driver }]
+    buildWeek();                     // re-seed week from the outlook…
+    patchNearTerm();                 // …then re-assert the fresher 3-day near-term
+    buildMonth();
+    render();
+  } catch (_) { /* synthetic stays */ }
 }
 
 /** Forecast Kp at `h` hours from now, nearest 3-hourly SWPC block (null if
@@ -680,12 +735,29 @@ function readUtm() {
   return u;
 }
 
-/* ════ location controls ════ */
+/* ════ location controls ════
+ * Aurora hotspots — major, recognizable cities ranked best-first by the same
+ * geomag-lat visibility model the page scores with (see easeFor). North-
+ * weighted on purpose: the south geomagnetic pole sits in remote Antarctica,
+ * so even the best southern cities (Hobart) only catch the oval in big storms.
+ * `marquee` cities get a label on the 3D analyzer globe. The original four
+ * picks are kept; they sort to where their sky actually places them. */
 const PICKS = [
-  { name: 'Auburn, CA',  lat: 38.90, lon: -121.08 },
-  { name: 'Seattle, WA', lat: 47.61, lon: -122.33 },
-  { name: 'Calgary, AB', lat: 51.05, lon: -114.07 },
-  { name: 'Tromsø, NO',  lat: 69.65, lon: 18.96 },
+  { name: 'Reykjavík, IS',  lat: 64.13, lon: -21.90, marquee: true },
+  { name: 'Yellowknife, NT', lat: 62.45, lon: -114.37, marquee: true },
+  { name: 'Tromsø, NO',     lat: 69.65, lon: 18.96, marquee: true },
+  { name: 'Fairbanks, AK',  lat: 64.84, lon: -147.72, marquee: true },
+  { name: 'Murmansk, RU',   lat: 68.97, lon: 33.08, marquee: true },
+  { name: 'Whitehorse, YT', lat: 60.72, lon: -135.06 },
+  { name: 'Rovaniemi, FI',  lat: 66.50, lon: 25.73 },
+  { name: 'Anchorage, AK',  lat: 61.22, lon: -149.90 },
+  { name: 'Edmonton, AB',   lat: 53.55, lon: -113.49 },
+  { name: 'Oslo, NO',       lat: 59.91, lon: 10.75 },
+  { name: 'Winnipeg, MB',   lat: 49.90, lon: -97.14 },
+  { name: 'Calgary, AB',    lat: 51.05, lon: -114.07 },
+  { name: 'Seattle, WA',    lat: 47.61, lon: -122.33 },
+  { name: 'Hobart, TAS',    lat: -42.88, lon: 147.33 },
+  { name: 'Auburn, CA',     lat: 38.90, lon: -121.08 },
 ];
 const currentSpotId = () => locationId({ lat: state.user.lat, lon: state.user.lon });
 
@@ -702,6 +774,7 @@ function selectLocation(loc) {
   renderProbability();
   syncChipActive();
   updateGlobePins();
+  if (Array.isArray(state.cells)) renderBrightest(state.cells);   // refresh "your sky" overhead
 }
 
 /** Highlight whichever chip (preset or saved) matches the active location. */
@@ -715,11 +788,18 @@ function syncChipActive() {
 
 function buildChips() {
   const bar = document.getElementById('locbar'); if (!bar) return;
+  const lbl = document.createElement('span');
+  lbl.className = 'loc-lbl';
+  lbl.textContent = 'Aurora hotspots';
+  bar.appendChild(lbl);
   PICKS.forEach(p => {
     const b = document.createElement('button');
     b.className = 'chip';
     b.dataset.spot = locationId(p);
-    b.textContent = p.name.split(',')[0];
+    const e = easeFor(p.lat, p.lon);
+    const thr = (66.5 - Math.abs(geomagLat(p.lat, p.lon))) / 2;
+    b.title = `${p.name} · visible at ${thr <= 0 ? 'almost any active Kp' : thr >= 9 ? 'Kp>9' : 'Kp ' + thr.toFixed(1)} — ${e.note}`;
+    b.innerHTML = `<span class="chip-pip" style="background:${e.c};box-shadow:0 0 6px ${e.c}"></span>${p.name.split(',')[0]}`;
     b.onclick = () => selectLocation(p);
     bar.appendChild(b);
   });
@@ -782,6 +862,7 @@ async function initGlobe() {
     globe = new mod.AuroraGlobe(canvas);
     globe.start();
     updateGlobePins();
+    try { globe.setReferenceCities(PICKS); } catch (_) {}   // aurora hotspots as map landmarks
     await refreshAuroraGrid();
     if (gridTimer) clearInterval(gridTimer);
     gridTimer = setInterval(refreshAuroraGrid, 5 * 60 * 1000);   // OVATION cadence
@@ -802,11 +883,13 @@ async function refreshAuroraGrid() {
     const j = await r.json();
     const d = j?.data;
     if (!d || !Array.isArray(d.cells)) throw new Error('no cells');
+    state.cells = d.cells;
     if (globe) { globe.setSubsolar(new Date()); globe.setAurora(d); }
     renderScopePower(d);
     renderBrightest(d.cells);
     const pip = document.getElementById('au-scope-pip'); if (pip) pip.classList.add('live');
   } catch (_) {
+    state.cells = null;
     const pip = document.getElementById('au-scope-pip'); if (pip) pip.classList.remove('live');
     renderBrightest(null);
   }
@@ -828,16 +911,42 @@ function brightColor(prob) {
   return `rgb(${r},${g},${b})`;
 }
 
+/** Live OVATION probability directly over a point: nearest bright cell within
+ *  ~maxDeg, else null (no cell near here right now). Cells are [lonE,lat,prob],
+ *  lonE in 0..359; the user's lon is −180..180, so wrap before comparing. */
+function overheadProbAt(lat, lon, cells, maxDeg = 4) {
+  if (!Array.isArray(cells) || !cells.length) return null;
+  const L = ((lon % 360) + 360) % 360;
+  let best = null, bd = maxDeg * maxDeg;
+  for (const c of cells) {
+    const dlat = c[1] - lat;
+    let dlon = c[0] - L; if (dlon > 180) dlon -= 360; else if (dlon < -180) dlon += 360;
+    const d2 = dlat * dlat + dlon * dlon;
+    if (d2 < bd) { bd = d2; best = c[2]; }
+  }
+  return best;
+}
+
 function renderBrightest(cells) {
   const host = document.getElementById('au-scope-bright'); if (!host) return;
-  const regions = (_brightestRegions && Array.isArray(cells)) ? _brightestRegions(cells, 3) : [];
-  if (!regions.length) {
+  // "Your sky" — is the live oval over the selected location right now? The
+  // single most useful read on this map: not just where it's bright, but
+  // whether it's bright over you.
+  let you = '';
+  const me = overheadProbAt(state.user.lat, state.user.lon, cells);
+  if (me != null) {
+    you = `<div class="au-bright-row au-bright-you"><span class="dot" style="color:${brightColor(me)}"></span>` +
+      `<span class="nm">Your sky · ${escapeHtml(cityName())}</span><span class="pc">${Math.round(me)}%</span></div>`;
+  }
+  // Region rows, anchored to the nearest hotspot city when one is close.
+  const regions = (_brightestRegions && Array.isArray(cells)) ? _brightestRegions(cells, 3, PICKS) : [];
+  if (!regions.length && !you) {
     host.innerHTML = Array.isArray(cells)
       ? `<div class="au-scope-empty">Aurora is quiet right now — no bright cells over the oval.</div>`
       : `<div class="au-scope-empty">Live aurora feed unavailable — retrying…</div>`;
     return;
   }
-  host.innerHTML = regions.map(rg =>
+  host.innerHTML = you + regions.map(rg =>
     `<div class="au-bright-row"><span class="dot" style="color:${brightColor(rg.prob)}"></span>` +
     `<span class="nm">${escapeHtml(rg.name)}</span><span class="pc">${Math.round(rg.prob)}%</span></div>`
   ).join('');
@@ -945,6 +1054,7 @@ function initSignedInPanel() {
 /* ════ boot ════ */
 buildWeek(); buildMonth(); buildChips(); initGeo(); initProbSlider(); render();
 patchOperational();
+fetchOutlook();
 initAccess();
 initAlerts();
 initGlobe();

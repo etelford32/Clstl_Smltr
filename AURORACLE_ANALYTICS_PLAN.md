@@ -28,6 +28,9 @@ owns the *prediction*.
 | Tonight + best-night odds, 7-night, 30-day recurrence | hero / week / month | geomag-lat vs oval edge vs forecast Kp |
 | **Tonight's viewing window** (dark-sky window + solar-midnight substorm peak + odds at peak) | `renderViewingWindow` / `tonightWindow` | `sun-altitude.solarPosition` + Kp |
 | Real-time 3D analyzer (live OVATION footprint, brightest regions, location pins) | `auroracle-globe.js` | `/api/noaa/aurora-grid` → browser-direct fallback |
+| **Hotspot-city landmarks on the globe** — major aurora cities as reference dots that light up green when the live oval is over them (marquee cities labelled) | `setReferenceCities` / `_recolorReferenceCities` | OVATION grid × `PICKS` |
+| **City-anchored brightest list + "your sky" overhead read** — bright cells named for the nearest hotspot ("Fairbanks 78%"), plus the live % directly over the selected location | `brightestRegions(…, PICKS)` / `overheadProbAt` | OVATION grid |
+| **Ranked hotspot presets** — 15 major aurora cities sorted best-first, each with a colour-coded aurora-ease pip (overhead-most-nights → extreme-storm-only) | `PICKS` / `easeFor` / `buildChips` | geomag-lat threshold model |
 | Live ensemble (AR(3) + Kp-blend + persistence), agreement, P(exceedance), drivers | `renderEnsemble` etc. (unlock) | OVATION power history + 3-day Kp + RTSW Bz |
 | Multi-location watch list (chips + globe pins, per-location scoring) | `user-location.js` list helpers | localStorage |
 | Email alert at a Kp threshold | `/api/subscribe/aurora` | — |

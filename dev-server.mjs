@@ -105,6 +105,7 @@ const API_ROUTES = {
     '/api/launches/upcoming':      'api/launches/upcoming.js',
     '/api/weather/grid':           'api/weather/grid.js',
     '/api/weather/forecast':       'api/weather/forecast.js',
+    '/api/aurora/outlook':         'api/aurora/outlook.js',
     '/api/lightning/strikes':      'api/lightning/strikes.js',
     '/api/nws/convective':         'api/nws/convective.js',
     '/api/mars/weather':           'api/mars/weather.js',
