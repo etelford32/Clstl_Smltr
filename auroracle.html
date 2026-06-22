@@ -86,7 +86,7 @@ a{color:inherit;text-decoration:none}
 .head .lede{margin-top:12px;font-size:1rem;color:var(--c-text-secondary);max-width:62ch}
 .head .lede a{color:var(--c-loc);border-bottom:1px solid var(--c-loc-border);white-space:nowrap}
 .locbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:16px}
-.chip{font-size:.8rem;padding:6px 11px;border-radius:999px;cursor:pointer;
+.chip{display:inline-flex;align-items:center;gap:7px;font-size:.8rem;padding:6px 11px;border-radius:999px;cursor:pointer;
   background:var(--c-surface-1);border:1px solid var(--c-border-medium);color:var(--c-text-secondary);
   font-family:'Space Grotesk',sans-serif;transition:border-color var(--t-snap),color var(--t-snap),background var(--t-snap)}
 .chip:hover{border-color:var(--c-loc-border);color:var(--c-text-primary)}
@@ -94,6 +94,11 @@ a{color:inherit;text-decoration:none}
 .chip.geo{border-color:var(--c-accent-border-hi);color:var(--c-accent)}
 .chip.saved{border-color:var(--c-loc-border);color:var(--c-loc)}
 .chip.saved.active{color:#04161a}
+/* aurora-ease pip — colour = how easily this city sees the aurora (easeFor) */
+.chip-pip{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.chip.active .chip-pip{display:none}
+.loc-lbl{font-family:'JetBrains Mono',monospace;font-size:.58rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--c-text-faint);margin:0 1px}
 .locbar .sep{width:1px;height:18px;background:var(--c-border-soft);margin:0 2px}
 .context{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:14px;
   font-family:'JetBrains Mono',monospace;font-size:.76rem;color:var(--c-text-muted)}
@@ -345,6 +350,9 @@ body.au-locked .au-premium>.au-gate{display:flex;position:absolute;inset:0;z-ind
 .au-bright-row .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;box-shadow:0 0 6px currentColor}
 .au-bright-row .nm{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .au-bright-row .pc{font-family:'JetBrains Mono',monospace;color:var(--c-text-primary);font-weight:600}
+/* "your sky" overhead read — set off from the region list above it */
+.au-bright-you{padding-bottom:5px;margin-bottom:3px;border-bottom:1px solid var(--c-border-faint)}
+.au-bright-you .nm{color:var(--c-text-primary);font-weight:600}
 .au-scope-empty{font-size:.74rem;color:var(--c-text-muted);line-height:1.5}
 /* keep header copy clear of the floating scope on wide screens */
 @media(min-width:981px){.head>:not(.au-scope){padding-right:328px}}
