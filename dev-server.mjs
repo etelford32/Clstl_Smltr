@@ -17,7 +17,7 @@
 import { createServer }         from 'node:http';
 import { readFileSync }         from 'node:fs';
 import { readFile, stat }       from 'node:fs/promises';
-import { extname, join, resolve } from 'node:path';
+import { extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
@@ -224,9 +224,14 @@ async function handleApi(pathname, rawUrl, nodeRes, nodeReq) {
 // ── Handle static file requests ───────────────────────────────────────────────
 
 async function handleStatic(pathname, nodeRes) {
-    // Safety: prevent directory traversal
+    // Safety: prevent directory traversal. `resolve(ROOT)` normalizes away the
+    // trailing separator that `new URL('.', …)` leaves on ROOT — without this,
+    // the root request `/` resolves to ROOT-without-slash and fails the prefix
+    // test, 403-ing the homepage (and the CI health check). Compare against
+    // `rootDir + sep` so a sibling like `…/ParkersPhysics-evil` can't sneak past.
     const safePath = resolve(ROOT, '.' + pathname);
-    if (!safePath.startsWith(ROOT)) {
+    const rootDir  = resolve(ROOT);
+    if (safePath !== rootDir && !safePath.startsWith(rootDir + sep)) {
         nodeRes.writeHead(403);
         nodeRes.end('Forbidden');
         return;
