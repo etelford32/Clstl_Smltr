@@ -118,4 +118,94 @@ Adapted from the two parent plans. Ordered by leverage-per-effort.
 2. Do we want a **free-account middle tier** (save one location, tonight-only) between the public teaser and Basic, to capture sign-ups before the paywall?
 3. Alerts currently reuse the anonymous `aurora_subscribers` email path. For signed-in users, should they instead flow through the authenticated `notify_*` columns + `js/alert-engine.js` so they live in the account's notification center?
 
-*Last updated: 2026-06-18.*
+## 6. Build spec — historically-driven month + daily Kp-LSTM (locked plan)
+
+> Operationalises §3 (Phases A/B) plus a new **month-forecast track**. Replaces
+> the synthetic month in `js/auroracle.js` `buildMonth()` (hard-coded gaussians,
+> days 7–29) with a real, observation/recurrence-driven outlook, then layers a
+> trained Kp-LSTM **as a scored member that must beat the baseline** before it
+> touches a user-visible number.
+
+**Decisions (2026-06-22 session — locked):**
+1. **Baseline first, LSTM second.** Ship the historically-driven month now;
+   the LSTM is added only where the skill leaderboard says it beats it.
+2. **Server-side cron + Supabase cache.** The Kp outlook is *global* (only the
+   per-sky scoring is local), so it's computed once per cycle and shared — not
+   run per-browser.
+3. **New daily Kp-LSTM, hourly model untouched.** A bespoke daily-cadence net
+   for 1–30 d; `js/solar-lstm.js` / `sun.html` (0–24 h live HUD) is left alone.
+
+### Why a month-out LSTM is *not* the headline (read before "making it accurate")
+Geomagnetic activity past ~7 days is recurrence-dominated and intrinsically
+low-skill — NOAA's own 27-day outlook is recurrence, not dynamics. So the
+honest accuracy gains are: **days 1–7** (near-term Kp trajectory) and
+**modulating the recurrence amplitude** (is the recurrent CH-HSS strengthening
+or decaying rotation-over-rotation?). We do not claim to pin day 23. "Tendency,
+not a timeline" stays on the chart.
+
+### Phase 1 — Historically-driven month (no ML) — *the immediate win* ✅ shipped
+> `api/_lib/aurora-outlook.js` (compute), `api/cron/aurora-outlook.js` (6 h
+> writer), `api/aurora/outlook.js` (read + live-compute fallback),
+> `supabase-aurora-outlook-cache-migration.sql`, and `js/auroracle.js`
+> (`fetchOutlook` → `buildWeek`/`buildMonth`). Run the migration to enable the
+> durable cache; the read endpoint live-computes until then.
+
+**Data (all already proxied):**
+- **NOAA 45-day Ap forecast** via `api/noaa/ap-history.js` (`45-day-ap-forecast.txt`,
+  observed + predicted 3-h Ap). Convert Ap→Kp by inverting the canonical table in
+  `js/upper-atmosphere-engine.js` (`kpToAp`); daily-aggregate to daily-max Kp.
+- **27-day recurrence analog** from the observed planetary-K record (~60–90 d),
+  superposed at +27 d / +54 d, amplitude-weighted by the `f107-history` trend.
+- **Climatology CI** conditioned on the current F10.7 / solar-cycle phase.
+
+**Compute & serve:**
+- `api/cron/aurora-outlook.js` (new; ~every 6 h) computes a 30-day daily Kp
+  **p10/p50/p90** + per-day driver attribution and upserts to a cache table
+  `aurora_outlook_cache` (proposed: `made_at, valid_date, kp_p10/p50/p90,
+  dominant_driver, source_blend jsonb`). Register in `vercel.json` crons.
+- `api/aurora/outlook.js` (new; GET) reads the cache (browser-direct, cached).
+- `js/auroracle.js`: `buildMonth()` + the back half of `buildWeek()` consume
+  `/api/aurora/outlook`, **falling back to the current synthetic model on any
+  fetch failure** (teaser stays instant). Each chart point carries its driver
+  label ("NOAA 45-day" / "27-day recurrence" / "climatology").
+
+### Phase 2 — Score the baseline (prerequisite for any ML)
+- Log daily-median Kp predictions to `forecast_log` via `api/forecast/log.js`,
+  `field: 'kp_planetary'`, `model_id ∈ {aurora-noaa45-v1, aurora-recurrence-v1,
+  aurora-month-blend-v1}`. The archive cron + `js/forecast-validation.js`
+  back-fill observations and compute **Murphy skill vs persistence**.
+- Surface "vs persistence / vs recurrence" skill + a public "called X of last Y
+  nights" badge in the model-breakdown panel.
+
+### Phase 3 — Daily Kp-LSTM (mirror the proven weather-LSTM path)
+**Train — `scripts/train_aurora_kp_lstm/`** (mirrors `scripts/train_weather_lstm/`):
+- `data.py`: GFZ Potsdam Kp/ap (3-hourly, **1932–present, ~770k pts**) + F10.7
+  (1947–) + SILSO sunspot. Daily features:
+  `[Kp_norm, Kp@−27d, Kp@−54d, F107_norm, F107_81d_norm, sin(doy), cos(doy), cycle_phase]`.
+- `model.py`: encoder-LSTM (hidden ≈48) over `seq_len ≈ 81` days (3 rotations)
+  → **direct 30-day × 3-quantile head** (pinball loss). Direct multi-horizon +
+  daily cadence avoids the autoregressive error blow-up of rolling an hourly
+  net 720 steps; **recurrence-as-input** means it learns the *correction on
+  physics*, not the 27-day period from scratch.
+- `export.py`: serialise to `js/aurora-kp-lstm-weights.json` in the same fused-
+  gate JSON shape `solar-lstm.js` consumes. `train.py`: walk-forward backtest
+  (never train on the future), report skill vs persistence + recurrence.
+
+**Infer — `js/aurora-kp-lstm.js`** (forward pass like `solar-lstm.js`, inference
+only): loaded by `api/cron/aurora-outlook.js`, run on the latest daily window.
+Outlook blend = **skill-weighted** combo of {noaa45, recurrence, kp-lstm}; the
+LSTM contributes only at horizons where its rolling score beats baseline.
+Retrain monthly (manual or a scheduled GitHub Action); commit new weights.
+
+### Phase 4 — Calibration + unification
+Calibrated quantiles (80% band contains truth ~80% of the time), nightly skill-
+weighted reblend, and the power→oval→your-sky chain (§3 Phase E).
+
+### Guardrails
+- Teaser stays instant: outlook fetch is best-effort with synthetic fallback.
+- No heavy ML in the browser or the request path; inference is server-side in
+  the cron, weights are a small JSON. Browser does inference-only at most.
+- Every number traces to a driver or a scored `model_id`. No black box.
+- Do **not** modify `js/solar-lstm.js` / `sun.html` (anti-regression, CLAUDE.md §5).
+
+*Last updated: 2026-06-22.*
