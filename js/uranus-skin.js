@@ -49,6 +49,16 @@ const ROT_PERIOD_S = 17.24 * 3600;
 const MAG_TILT   = 58.6 * D2R;
 const MAG_OFFSET = 0.31;
 
+// ε-ring orbit (the bright, eccentric, shepherded ring). a in radii; e and the
+// width are exaggerated for visibility (true e ≈ 0.0079, width 20–96 km). The
+// ring is apse-aligned and precesses rigidly at the measured ~1.3639°/day —
+// the very rate that, observed in occultations, pinned down Uranus's J₂ & J₄.
+const EPS_A            = 2.0012;                  // semi-major axis (R_U)
+const EPS_E_VIS        = 0.085;                   // exaggerated eccentricity
+const EPS_W_PERI       = 0.012;                   // width at periapse (R_U, exagg.)
+const EPS_W_APO        = 0.052;                   // width at apoapse (R_U, exagg.)
+const EPS_PRECESS_RATE = 1.3639 * D2R / 86400;    // apsidal precession (rad/s)
+
 export class UranusSkin {
     /**
      * @param {THREE.Object3D} parent
@@ -116,20 +126,21 @@ export class UranusSkin {
         // exaggerated for visibility (true widths are only kilometres).
         this._ringMeshes = [];
         if (rings) {
+            // The circular narrow + dusty rings (ε is built separately below as
+            // an eccentric, precessing ribbon). Opacities brightened for clarity.
             const ringData = [
-                [1.40,  1.62,  0.018, 0x3c3e44, 110],  // ζ inner dust sheet
-                [1.633, 1.641, 0.055, 0x55575e, 120],  // 6
-                [1.648, 1.656, 0.055, 0x55575e, 120],  // 5
-                [1.662, 1.670, 0.055, 0x55575e, 120],  // 4
-                [1.744, 1.756, 0.080, 0x60626a, 128],  // α
-                [1.781, 1.793, 0.080, 0x60626a, 128],  // β
-                [1.841, 1.851, 0.055, 0x55575e, 128],  // η
-                [1.858, 1.868, 0.065, 0x5a5c64, 128],  // γ
-                [1.884, 1.896, 0.065, 0x5a5c64, 128],  // δ
-                [1.952, 1.962, 0.045, 0x52545c, 128],  // λ
-                [1.988, 2.016, 0.170, 0x7e808a, 160],  // ε — brightest & widest
-                [2.55,  2.74,  0.020, 0x6a564e, 120],  // ν dust (reddish)
-                [3.20,  3.52,  0.016, 0x486a7a, 120],  // μ dust (blue, Mab)
+                [1.40,  1.62,  0.030, 0x44464e, 110],  // ζ inner dust sheet
+                [1.633, 1.641, 0.090, 0x6a6c74, 120],  // 6
+                [1.648, 1.656, 0.090, 0x6a6c74, 120],  // 5
+                [1.662, 1.670, 0.090, 0x6a6c74, 120],  // 4
+                [1.744, 1.756, 0.130, 0x787a82, 128],  // α
+                [1.781, 1.793, 0.130, 0x787a82, 128],  // β
+                [1.841, 1.851, 0.090, 0x6a6c74, 128],  // η
+                [1.858, 1.868, 0.110, 0x70727a, 128],  // γ
+                [1.884, 1.896, 0.110, 0x70727a, 128],  // δ
+                [1.952, 1.962, 0.080, 0x64666e, 128],  // λ
+                [2.55,  2.74,  0.035, 0x77625a, 120],  // ν dust (reddish)
+                [3.20,  3.52,  0.028, 0x52768a, 120],  // μ dust (blue, Mab)
             ];
             for (const [innerM, outerM, opacity, color, seg] of ringData) {
                 const geo = new THREE.RingGeometry(radius * innerM, radius * outerM, seg);
@@ -145,17 +156,60 @@ export class UranusSkin {
             }
         }
 
+        // ── ε ring: an eccentric, apse-aligned ribbon that precesses ─────────
+        // Built in the X–Z plane with periapse along +X (Uranus at the focus);
+        // it is narrow at periapse and widens toward apoapse, exactly as the real
+        // ring does. setSimTime() spins the εGroup about the spin axis to render
+        // the ~1.36°/day apsidal precession that betrays the gravity field.
+        this._epsGroup = null;
+        if (rings) {
+            const N = 256;
+            const rPeri = EPS_A * (1 - EPS_E_VIS), rApo = EPS_A * (1 + EPS_E_VIS);
+            const pos = new Float32Array(N * 2 * 3);
+            for (let i = 0; i < N; i++) {
+                const th = (i / N) * Math.PI * 2;                 // true anomaly from periapse
+                const r  = EPS_A * (1 - EPS_E_VIS * EPS_E_VIS) / (1 + EPS_E_VIS * Math.cos(th));
+                const frac = (r - rPeri) / (rApo - rPeri);        // 0 at peri → 1 at apo
+                const w  = EPS_W_PERI + (EPS_W_APO - EPS_W_PERI) * frac;
+                const ri = (r - w / 2) * radius, ro = (r + w / 2) * radius;
+                const c = Math.cos(th), s = Math.sin(th);
+                const o = i * 6;
+                pos[o]   = ri * c; pos[o + 1] = 0; pos[o + 2] = ri * s;   // inner edge
+                pos[o + 3] = ro * c; pos[o + 4] = 0; pos[o + 5] = ro * s; // outer edge
+            }
+            const idx = [];
+            for (let i = 0; i < N; i++) {
+                const a0 = i * 2, b0 = i * 2 + 1;
+                const a1 = ((i + 1) % N) * 2, b1 = ((i + 1) % N) * 2 + 1;
+                idx.push(a0, b0, a1,  a1, b0, b1);
+            }
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+            geo.setIndex(idx);
+            const mat = new THREE.MeshBasicMaterial({
+                color: 0x9aa0ac, side: THREE.DoubleSide, transparent: true,
+                opacity: 0.34, depthWrite: false, blending: THREE.AdditiveBlending,
+            });
+            const eps = new THREE.Mesh(geo, mat);
+            eps.renderOrder = 1;
+            const epsGroup = new THREE.Group();
+            epsGroup.rotation.x = tilt;        // parent carries the obliquity (tilt=0)
+            epsGroup.add(eps);
+            parent.add(epsGroup);
+            this._epsGroup = epsGroup;
+        }
+
         // ── Magnetic dipole field lines (tilted + offset) ────────────────────
         this._magGroup = null;
         if (magnetosphere) {
             const magGroup = new THREE.Group();
             const lineMat = new THREE.LineBasicMaterial({
-                color: 0x66e0ff, transparent: true, opacity: 0.30,
+                color: 0x66e0ff, transparent: true, opacity: 0.42,
                 depthWrite: false, blending: THREE.AdditiveBlending,
             });
             // Dipole L-shells: r = L·cos²(mlat). Draw several L values, each at
             // a few magnetic-longitude planes.
-            const Lvals = [2.0, 3.0, 4.2];
+            const Lvals = [2.0, 3.0, 4.2, 8.0];
             const planes = 6;
             for (const L of Lvals) {
                 for (let p = 0; p < planes; p++) {
@@ -195,11 +249,13 @@ export class UranusSkin {
     }
 
     /**
-     * Advance any ring evolution to simulation time t_s (seconds since epoch).
-     * Uranus's rings carry no Neptune-style arcs, so this is a no-op kept for
-     * API parity with the other planet skins.
+     * Advance ring evolution to simulation time t_s (seconds since epoch).
+     * Precesses the eccentric ε ring rigidly about the spin axis at its measured
+     * apsidal rate — the slow turning of its line of apsides over the timeline.
      */
-    setSimTime(_t_s) { /* no arcs to librate */ }
+    setSimTime(t_s) {
+        if (this._epsGroup) this._epsGroup.rotation.y = EPS_PRECESS_RATE * t_s;
+    }
 
     setQuality(q) { this.uranusU.u_quality.value = QUALITY_MAP[q] ?? 1; }
 
@@ -207,9 +263,13 @@ export class UranusSkin {
         this.mesh.visible = v;
         if (this._atmMesh) this._atmMesh.visible = v;
         for (const r of this._ringMeshes) r.visible = v;
+        if (this._epsGroup) this._epsGroup.visible = v;
     }
 
-    setRingsVisible(v) { for (const r of this._ringMeshes) r.visible = v; }
+    setRingsVisible(v) {
+        for (const r of this._ringMeshes) r.visible = v;
+        if (this._epsGroup) this._epsGroup.visible = v;
+    }
 
     setMagnetosphereVisible(v) { if (this._magGroup) this._magGroup.visible = v; }
 }

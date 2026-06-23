@@ -502,7 +502,7 @@ body {
 <div id="us-hero">
     <span class="us-tag">Live Yoshida-4 + J₂ Integration · 97.8° Axial Tilt · ε-Ring Shepherds</span>
     <h1>Uranus System — Tipped on Its Side</h1>
-    <p>Live N-body integration of Uranus, its crowded inner ring-moons (Cordelia through Puck) and the five major moons — <strong>Miranda, Ariel, Umbriel, Titania, Oberon</strong>. Uranus is tipped <strong>97.77°</strong>: it rolls around the Sun nearly on its side, so its rings and moons orbit in a plane that stands almost <em>vertical</em> relative to its path — the headline spectacle of this scene. Uranus's oblateness (<code>J₂ = 0.003343</code>) is fed straight into the integrator, so the inner moons' orbit planes precess as they really do. The narrow <strong>ε ring</strong> is pinned between its shepherds <strong>Cordelia</strong> and <strong>Ophelia</strong>.</p>
+    <p>Live N-body integration of Uranus, its crowded inner ring-moons (Cordelia through Puck) and the five major moons — <strong>Miranda, Ariel, Umbriel, Titania, Oberon</strong>. Uranus is tipped <strong>97.77°</strong>: it rolls around the Sun nearly on its side, so its rings and moons orbit in a plane that stands almost <em>vertical</em> relative to its path — the headline spectacle of this scene. Uranus's oblateness (<code>J₂ = 0.0033461</code>, <code>J₄ = −3.2×10⁻⁵</code> — both <em>measured from the rings' precession</em>) is fed straight into the integrator, so the inner moons' orbit planes precess as they really do. The narrow, eccentric <strong>ε ring</strong> precesses on its line of apsides, pinned between its shepherds <strong>Cordelia</strong> and <strong>Ophelia</strong>.</p>
     <p>The crowded Portia group is the most tightly-packed moon system known — <strong>Cressida</strong> and <strong>Desdemona</strong> may collide within a million years (see the inner-moon dynamics plot). Below, an interactive <strong>seasonal-insolation</strong> model shows the counter-intuitive truth that at Uranus's tilt the <em>poles</em> bake harder than the equator, and a <strong>Miranda</strong> panel reconstructs the resonant tidal heating that carved the tallest cliff in the Solar System. Toggle the steeply-tilted, offset <strong>magnetic dipole</strong>, and hit <strong>⤢ Wide field</strong> to chase the captured irregulars out to Ferdinand at ~20 million km.</p>
 </div>
 
@@ -604,8 +604,8 @@ body {
         <div class="us-row">
             <span class="us-label" style="width:90px">Rings</span>
             <button class="us-btn toggle on" id="us-rings-toggle">Rings: ON</button>
-            <span class="us-label" style="margin-left:6px">Magnetic field</span>
-            <button class="us-btn toggle" id="us-mag-toggle" title="Show Uranus's dipole field — tilted 58.6° from the spin axis and offset 0.31 R_U">Dipole: OFF</button>
+            <span class="us-label" style="margin-left:6px">Magnetosphere</span>
+            <button class="us-btn toggle" id="us-mag-toggle" title="Show the tilted (58.6°), offset (0.31 R_U) dipole field lines plus the magnetopause (~18 R_U) and bow shock — see which moon orbits fall inside">Magnetosphere: OFF</button>
             <span class="us-label" style="margin-left:6px">Oblateness</span>
             <button class="us-btn toggle on" id="us-j2-toggle" title="Feed Uranus's J₂ into the integrator — drives the inner-moon nodal precession">J₂: ON</button>
         </div>
@@ -712,6 +712,30 @@ body {
         <p class="us-warn">Miranda's wild surface — fault-bounded <em>coronae</em> and the ~20 km cliff <strong>Verona Rupes</strong>, the tallest known anywhere — needs an internal heat source the tiny moon shouldn't have today. The leading idea: long ago Miranda passed through a <strong>3:1 mean-motion resonance with Umbriel</strong> that pumped its eccentricity and inclination. Tidal heating scales as <code>Ė ∝ (k₂/Q) e²</code>, so even a modest forced <em>e</em> during resonance dumps far more heat than today's nearly circular orbit. The system later escaped, damping the eccentricity but leaving the <strong>4.34° inclination frozen in</strong> — the fossil that gives the game away (Tittemore &amp; Wisdom 1990; Hammond &amp; Barr 2014). Absolute numbers hinge on the poorly-known <code>k₂/Q</code>; drag the slider to feel the e² leverage.</p>
     </section>
 
+    <!-- Gravity, magnetosphere & resonance relationships -->
+    <section class="us-panel">
+        <div class="us-plot-head">
+            <h2 style="flex:0 0 auto">Gravity · Magnetosphere · Resonances <span style="color:#69789a; text-transform:none; letter-spacing:0; font-weight:400; font-size:.7rem">— how the field, rings &amp; moons are linked</span></h2>
+            <div class="us-plot-legend">
+                <span class="lg"><span class="swatch" style="background:#66e0d8"></span>inside magnetosphere</span>
+                <span class="lg"><span class="swatch" style="background:#ff7a7a"></span>outside</span>
+                <span class="lg"><span class="swatch" style="background:#b78cff"></span>rings</span>
+            </div>
+        </div>
+        <div class="us-plot-wrap" style="height:158px">
+            <canvas id="us-lshell-canvas"></canvas>
+        </div>
+        <div class="us-plot-readout">
+            <div class="cell"><span class="k">J₂ (from rings)</span><span class="v" id="rd-j2">—</span></div>
+            <div class="cell"><span class="k">J₄ (from rings)</span><span class="v" id="rd-j4">—</span></div>
+            <div class="cell"><span class="k">ε-ring apsidal rate</span><span class="v" id="rd-eps-prec">—</span></div>
+            <div class="cell"><span class="k">Miranda nodal rate</span><span class="v" id="rd-mir-node">—</span></div>
+            <div class="cell"><span class="k">Magnetopause</span><span class="v" id="rd-mpause">—</span></div>
+            <div class="cell"><span class="k">Major moons inside</span><span class="v" id="rd-inside">—</span></div>
+        </div>
+        <p class="us-warn"><strong>Gravity ⇄ rings.</strong> Uranus's J₂ and J₄ were not measured by a probe — they were <em>inferred from the rings</em>. Each narrow ring is a precessing ellipse whose apsidal/nodal rate is set by the gravity harmonics, so timing the rings in stellar occultations (French et al. 1988; Jacobson 2014) inverts to the field. <strong>Shepherds.</strong> The ε ring's edges are held by <strong>Cordelia</strong> (24:25 resonance, inner) and <strong>Ophelia</strong> (14:13, outer); Cressida's mass was weighed through its resonance with the η ring. <strong>Magnetosphere ⇄ moons.</strong> The dipole is tilted 58.6° and offset 0.31 R_U, so with the 98° spin the field tumbles wildly; the magnetopause sits near 18 R_U, leaving the rings and inner moons to sweep gaps in the radiation belts while <strong>Oberon orbits outside it</strong>, in the magnetotail. Toggle <em>Magnetosphere</em> in the controls to see the boundary in 3D.</p>
+    </section>
+
     <!-- Notes -->
     <section class="us-panel">
         <h2>Why Uranus is the strangest planet</h2>
@@ -724,7 +748,7 @@ body {
         <h2>The rings, the shepherds, and the lopsided magnet</h2>
         <p><strong>Found by a flicker.</strong> Uranus's rings were discovered in 1977 when a background star blinked out several times on either side of the planet during an occultation — the second ring system ever found. They are extremely narrow, sharp-edged and charcoal-dark. The brightest, the <strong>ε ring</strong>, is slightly eccentric and is pinned between two shepherd moons, <strong>Cordelia</strong> (inner) and <strong>Ophelia</strong> (outer); the faint outer μ ring is dust knocked off the moon <strong>Mab</strong>.</p>
         <p><strong>The most crowded moons known.</strong> A dozen small moons are packed into a narrow band just outside the rings. They perturb one another so strongly that the system is dynamically unstable on million-year timescales — <strong>Cressida</strong> and <strong>Desdemona</strong> are on track to collide. <strong>Press ▶ Play</strong> and watch the inner-moon dynamics plot to follow their forced eccentricities and shrinking separation.</p>
-        <p><strong>A wildly tilted magnet.</strong> Uranus's magnetic dipole is inclined ~58.6° to its spin axis and offset ~0.31 R_U from the planet's centre. Combined with the 98° obliquity, the magnetosphere tumbles dramatically through each rotation — unlike any other planet. Toggle <em>Dipole: ON</em> to see the field geometry.</p>
+        <p><strong>A wildly tilted magnet.</strong> Uranus's magnetic dipole is inclined ~58.6° to its spin axis and offset ~0.31 R_U from the planet's centre. Combined with the 98° obliquity, the magnetosphere tumbles dramatically through each rotation — unlike any other planet. Toggle <em>Magnetosphere</em> to see the field lines and the magnetopause where Oberon crosses out.</p>
     </section>
 
     <section class="us-panel">
@@ -767,8 +791,12 @@ const GYR = SEC_PER_YEAR * 1e9;
 // Uranus equatorial radius (m) — the natural length unit for the scene.
 const R_URA_KM = 25559;
 const R_URA_M  = R_URA_KM * KM;
-// Uranus's second zonal harmonic — drives the inner moons' nodal precession.
-const J2_URA = 0.003343;
+// Uranus's zonal gravity harmonics — MEASURED from ring & moon precession in
+// stellar occultations (French et al. 1988; Jacobson 2014). J₂ is fed to the
+// integrator (drives inner-moon nodal precession); J₄ refines the analytic
+// precession rates shown in the gravity/magnetosphere relationships panel.
+const J2_URA = 0.0033461;
+const J4_URA = -3.21e-5;
 // Axial tilt (obliquity) of Uranus to its orbital plane — tipped just past the
 // pole, so the spin (and the whole ring/moon system) is effectively retrograde.
 const OBLIQUITY = 97.77 * D2R;
@@ -1271,6 +1299,31 @@ uraSkin.mesh.userData = { kind:'planet', key:'uranus', label:'Uranus' };
     dl.position.set(35, 8, 0);
     scene.add(dl);
     scene.add(new THREE.AmbientLight(0x1a2438, 0.7));
+}
+
+// ── Magnetosphere boundary (schematic) ───────────────────────────────
+// The magnetopause sits ~18 R_U sunward and the bow shock ~23.7 R_U (Ness 1986).
+// Rendered as faint sun-compressed shells so you can see which moon orbits fall
+// inside: the rings and inner moons sit deep in the radiation belts, Titania
+// (~17 R_U) rides the boundary, and Oberon (~22.8 R_U) orbits OUTSIDE it, in the
+// magnetotail. Toggled together with the dipole field lines.
+const MAGNETOPAUSE_RU = 18.0, BOWSHOCK_RU = 23.7;
+const magnetosphere = new THREE.Group();
+{
+    const mkShell = (R, color, op) => {
+        const m = new THREE.Mesh(
+            new THREE.SphereGeometry(R, 48, 32),
+            new THREE.MeshBasicMaterial({ color, transparent:true, opacity:op,
+                depthWrite:false, side:THREE.BackSide, blending:THREE.AdditiveBlending }),
+        );
+        m.scale.set(0.85, 1.0, 1.0);     // sun-compressed dayside (Sun at +X)
+        m.position.x = -R * 0.18;        // shift the bubble toward the tail
+        return m;
+    };
+    magnetosphere.add(mkShell(MAGNETOPAUSE_RU, 0x4aa0ff, 0.050));
+    magnetosphere.add(mkShell(BOWSHOCK_RU,     0x7fd0ff, 0.025));
+    magnetosphere.visible = false;
+    scene.add(magnetosphere);
 }
 
 // ── Moon meshes + orbit rings ────────────────────────────────────────
@@ -1883,7 +1936,8 @@ function buildTooltipHtml(key) {
         html += `<div class="tt-row"><span class="tt-k">radius</span><span class="tt-v">25,559 km</span></div>`;
         html += `<div class="tt-row"><span class="tt-k">spin</span><span class="tt-v">17.24 h (retro)</span></div>`;
         html += `<div class="tt-row"><span class="tt-k">obliquity</span><span class="tt-v">97.77°</span></div>`;
-        html += `<div class="tt-row"><span class="tt-k">J₂</span><span class="tt-v">0.003343</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">J₂ / J₄</span><span class="tt-v">3.35e−3 / −3.2e−5</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">dipole</span><span class="tt-v">tilt 58.6° · off 0.31 R</span></div>`;
         html += `<div class="tt-row"><span class="tt-k">v (bary)</span><span class="tt-v">${(speed/KM).toFixed(4)} km/s</span></div>`;
     } else {
         const el = liveElements(key);
@@ -2187,8 +2241,9 @@ let magOn = false;
 elMagTog.addEventListener('click', () => {
     magOn = !magOn;
     elMagTog.classList.toggle('on', magOn);
-    elMagTog.textContent = 'Dipole: ' + (magOn ? 'ON' : 'OFF');
+    elMagTog.textContent = 'Magnetosphere: ' + (magOn ? 'ON' : 'OFF');
     uraSkin.setMagnetosphereVisible(magOn);
+    magnetosphere.visible = magOn;
 });
 elJ2Tog.addEventListener('click', () => {
     j2Enabled = !j2Enabled;
@@ -2621,6 +2676,94 @@ elMirSlider.addEventListener('input', () => {
     drawMirandaPlot();
 });
 
+// ── Gravity / magnetosphere / resonance relationships ────────────────
+// Analytic secular precession from J₂ + J₄ (low e, i): the very rates that,
+// timed in ring/moon occultations, were inverted to MEASURE Uranus's field.
+function secularRates(a_km, i_deg) {
+    const a = a_km * KM, n = Math.sqrt(G_SI * M_URA_KG / (a * a * a));
+    const ra2 = (R_URA_M / a) ** 2, ra4 = ra2 * ra2, ci = Math.cos(i_deg * D2R);
+    return {
+        apsidal: n * (1.5 * J2_URA * ra2 - (15 / 4) * J4_URA * ra4),       // rad/s
+        nodal:  -n * (1.5 * J2_URA * ra2 - (9 / 4)  * J4_URA * ra4) * ci,  // rad/s
+    };
+}
+
+const lcanvas = document.getElementById('us-lshell-canvas');
+const lctx    = lcanvas.getContext('2d');
+function resizeLShell() {
+    const rect = lcanvas.getBoundingClientRect();
+    const dpr  = Math.min(devicePixelRatio, 2);
+    lcanvas.width  = Math.max(1, Math.floor(rect.width  * dpr));
+    lcanvas.height = Math.max(1, Math.floor(rect.height * dpr));
+    lctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+resizeLShell();
+new ResizeObserver(() => { resizeLShell(); drawLShell(); }).observe(lcanvas);
+
+const RU_MAX = 25;
+function drawLShell() {
+    const W = lcanvas.clientWidth, H = lcanvas.clientHeight;
+    if (W < 8 || H < 8) return;
+    lctx.clearRect(0, 0, W, H);
+    const padL = 16, padR = 16, padT = 26, padB = 30;
+    const pw = W - padL - padR, axisY = H - padB;
+    const xOf = ru => padL + (ru / RU_MAX) * pw;
+
+    // Ring zone band (1.4–3.4 R_U)
+    lctx.fillStyle = 'rgba(183,140,255,.18)';
+    lctx.fillRect(xOf(1.4), padT, xOf(3.4) - xOf(1.4), axisY - padT);
+    lctx.fillStyle = '#b78cff'; lctx.font = '10px ui-monospace, monospace'; lctx.textAlign = 'center';
+    lctx.fillText('rings', (xOf(1.4) + xOf(3.4)) / 2, padT - 9);
+
+    // Axis
+    lctx.strokeStyle = 'rgba(90,160,255,.30)'; lctx.lineWidth = 1;
+    lctx.beginPath(); lctx.moveTo(padL, axisY); lctx.lineTo(W - padR, axisY); lctx.stroke();
+    lctx.fillStyle = '#69789a';
+    for (let ru = 0; ru <= RU_MAX; ru += 5) {
+        const x = xOf(ru);
+        lctx.beginPath(); lctx.moveTo(x, axisY); lctx.lineTo(x, axisY + 4); lctx.stroke();
+        lctx.fillText(ru + '', x, axisY + 16);
+    }
+    lctx.fillText('distance from Uranus  (R_U)', W / 2, H - 5);
+
+    // Magnetopause + bow shock
+    const mark = (ru, color, label) => {
+        lctx.strokeStyle = color; lctx.setLineDash([4, 3]); lctx.lineWidth = 1.4;
+        lctx.beginPath(); lctx.moveTo(xOf(ru), padT - 2); lctx.lineTo(xOf(ru), axisY); lctx.stroke();
+        lctx.setLineDash([]); lctx.fillStyle = color; lctx.textAlign = 'center';
+        lctx.fillText(label, xOf(ru), padT - 9);
+    };
+    mark(BOWSHOCK_RU, 'rgba(127,208,255,.75)', 'bow shock');
+    mark(MAGNETOPAUSE_RU, 'rgba(140,185,255,.95)', 'magnetopause');
+
+    // Major-moon markers, coloured by inside/outside the magnetopause
+    const majors = ['miranda', 'ariel', 'umbriel', 'titania', 'oberon'];
+    for (const k of majors) {
+        const ru = INIT_EL[k].a_km / R_URA_KM;
+        const x = xOf(ru), inside = ru < MAGNETOPAUSE_RU;
+        lctx.fillStyle = inside ? '#66e0d8' : '#ff7a7a';
+        lctx.beginPath(); lctx.arc(x, axisY, 4, 0, Math.PI * 2); lctx.fill();
+        lctx.save(); lctx.translate(x, axisY - 8); lctx.rotate(-Math.PI / 4);
+        lctx.textAlign = 'left'; lctx.font = '9px ui-monospace, monospace';
+        lctx.fillStyle = inside ? '#9fe6e0' : '#ffb0b0';
+        lctx.fillText(getBody(k).name, 0, 0); lctx.restore();
+    }
+}
+
+// Static readouts for the relationships panel (field is time-independent).
+{
+    const eps = secularRates(51149, 0).apsidal * R2D * 86400;     // ε ring °/day
+    const mir = secularRates(INIT_EL.miranda.a_km, INIT_EL.miranda.i_deg).nodal * R2D * SEC_PER_YEAR;
+    const inside = ['miranda', 'ariel', 'umbriel', 'titania', 'oberon']
+        .filter(k => INIT_EL[k].a_km / R_URA_KM < MAGNETOPAUSE_RU).length;
+    document.getElementById('rd-j2').textContent       = '3.346×10⁻³';
+    document.getElementById('rd-j4').textContent       = '−3.21×10⁻⁵';
+    document.getElementById('rd-eps-prec').textContent = eps.toFixed(3) + '°/day';
+    document.getElementById('rd-mir-node').textContent = mir.toFixed(3) + '°/yr';
+    document.getElementById('rd-mpause').textContent   = MAGNETOPAUSE_RU.toFixed(1) + ' R_U';
+    document.getElementById('rd-inside').textContent   = inside + ' of 5';
+}
+
 // ── Loop ─────────────────────────────────────────────────────────────
 let lastT = performance.now();
 function tick(now) {
@@ -2695,6 +2838,7 @@ syncInputsFromSim();
 drawPlot();
 drawInsolPlot();
 drawMirandaPlot();
+drawLShell();
 updateHud();
 requestAnimationFrame(t => { lastT = t; tick(t); });
 </script>
