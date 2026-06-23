@@ -158,6 +158,34 @@ export const URANUS_FRAG = /* glsl */`
         return clamp(total, 0.0, 1.0);
     }
 
+    // ── Uranus Dark Spot (UDS-2006) + its bright companion ──────────────────────
+    // First confirmed dark vortex on Uranus (Hubble ACS + Keck, 2006; Hammel &
+    // Sromovsky 2009): an oval ~1,300×2,700 km at 28°N that drifted prograde at
+    // ~43 m/s, shadowed by a brighter methane "Bright Companion" cloud.
+    // Returns vec2(darkSpot, brightCompanion) in [0,1].
+    vec2 uranusDarkSpot(vec2 uv, float lat, float t) {
+        if (u_quality < 0.5) return vec2(0.0);
+        float sLat = 0.31;                          // ~28°N (lat in [-1,1])
+        float sLon = fract(0.45 + t * 0.0000016);   // slow prograde drift
+        float dlat = lat - sLat;
+        float dlon = uv.x - sLon;
+        if (dlon >  0.5) dlon -= 1.0;
+        if (dlon < -0.5) dlon += 1.0;
+        // Oval ~2:1, wider in longitude (like the real UDS).
+        float d = sqrt(dlon * dlon * 70.0 + dlat * dlat * 200.0);
+        float spot = 1.0 - smoothstep(0.0, 1.0, d);
+        if (u_quality > 1.5) {
+            float swirl = vnoise(vec2(dlon * 40.0 + sin(t * 0.003) * 2.0, dlat * 40.0));
+            spot *= 0.78 + swirl * 0.22;
+        }
+        // Bright companion cloud just equatorward of the spot.
+        float cdlat = lat - (sLat - 0.085);
+        float cdlon = dlon + 0.02;
+        float cd = sqrt(cdlon * cdlon * 150.0 + cdlat * cdlat * 320.0);
+        float comp = (1.0 - smoothstep(0.0, 1.0, cd)) * 0.85;
+        return vec2(spot, comp);
+    }
+
     // ── Zonal wind drift (equatorial retrograde, high-lat prograde) ─────────────
     float zonalDrift(float lat) {
         float eqRetro = exp(-lat * lat / 0.06) * (-0.10);    // westward at equator
@@ -191,6 +219,11 @@ export const URANUS_FRAG = /* glsl */`
         // Bright discrete cloud spots (methane ice)
         float spot = cloudSpots(uv, lat, u_time);
         cloudCol = mix(cloudCol, vec3(0.82, 0.92, 0.92), spot * 0.55);
+
+        // Uranus Dark Spot (UDS-2006) + bright companion
+        vec2 uds = uranusDarkSpot(uv, lat, u_time);
+        cloudCol = mix(cloudCol, vec3(0.20, 0.34, 0.42), uds.x * 0.70);   // dark blue-grey vortex
+        cloudCol = mix(cloudCol, vec3(0.88, 0.94, 0.94), uds.y * 0.50);   // bright companion
 
         // ── Bright polar hood + collar over the (summer) north pole ─────────────
         // North pole is rotating into sunlight ahead of the 2030 solstice.
