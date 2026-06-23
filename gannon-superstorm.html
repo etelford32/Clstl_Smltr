@@ -590,12 +590,26 @@ const els = {
         mhd:  document.getElementById('gn-skill-mhd'),
         gnd:  document.getElementById('gn-skill-gnd'),
         gate: document.getElementById('gn-skill-gate'),
-        mhdPct: document.getElementById('gn-skill-mhd-pct'),
-        gndPct: document.getElementById('gn-skill-gnd-pct'),
     },
 };
 
 function fmt(x, d = 1) { return (x === null || x === undefined) ? '—' : Number(x).toFixed(d); }
+
+// Paint the density-skill scoreboard from a (possibly null) skill block. Single
+// source of truth for both the boot render and the live-upgrade repaint, so the
+// two can't drift (e.g. one omitting the gn-gate-fail toggle). The sign is
+// explicit so a negative skill renders "-9 %", not "+-9 %".
+function paintSkill(sk) {
+    if (sk == null || sk.skill_mhd == null) return;
+    const pct = v => (v == null ? '—' : `${v >= 0 ? '+' : ''}${Math.round(v * 100)} %`);
+    els.skill.base.textContent = pct(sk.skill_mhd);        // MHD model vs real-time Ap
+    els.skill.mhd.textContent  = pct(sk.skill_wedge);      // isolated real-time MHD edge
+    els.skill.gnd.textContent  = pct(sk.skill_pseudo_ap);  // prior pseudo-Ap method
+    const pass = sk.gate_pass != null ? sk.gate_pass : (sk.skill_mhd >= 0.25);
+    els.skill.gate.textContent = pass ? 'PASS' : 'FAIL';
+    els.skill.gate.classList.toggle('gn-gate-pass', !!pass);
+    els.skill.gate.classList.toggle('gn-gate-fail', !pass);
+}
 
 // Flip a data-source badge from placeholder (○) to live (●) when a
 // background lift resolves. Makes the silent-fail lifts observable.
@@ -655,17 +669,7 @@ function paint(sample) {
     const graceReal = !!prov.grace_fo && !/placeholder|unavailable/i.test(prov.grace_fo);
     if (graceReal) markSourceLive('density_truth', prov.grace_fo);
 
-    const skill = skillSummary(replay);
-    if (skill.skill_mhd !== null && skill.skill_mhd !== undefined) {
-        const pct = v => (v == null ? '—' : `+${Math.round(v * 100)} %`);
-        els.skill.base.textContent = pct(skill.skill_mhd);        // MHD model vs real-time Ap
-        els.skill.mhd.textContent  = pct(skill.skill_wedge);      // isolated real-time MHD edge
-        els.skill.gnd.textContent  = pct(skill.skill_pseudo_ap);  // prior pseudo-Ap method
-        const pass = skill.gate_pass != null ? skill.gate_pass : (skill.skill_mhd >= 0.25);
-        els.skill.gate.textContent = pass ? 'PASS' : 'FAIL';
-        els.skill.gate.classList.toggle('gn-gate-pass', !!pass);
-        els.skill.gate.classList.toggle('gn-gate-fail', !pass);
-    }
+    paintSkill(skillSummary(replay));
 
     // Wire scrubber + buttons. Range covers preroll (Sun-side CME launches)
     // through end of the Earth-side ground-truth window. h=0 is anchored at
@@ -918,16 +922,7 @@ function paint(sample) {
 
             // Recompute + repaint the skill scoreboard against real tracks.
             try {
-                const sk = skillSummary(replay);
-                if (sk.skill_mhd != null) {
-                    const pct = v => (v == null ? '—' : `+${Math.round(v * 100)} %`);
-                    els.skill.base.textContent = pct(sk.skill_mhd);
-                    els.skill.mhd.textContent  = pct(sk.skill_wedge);
-                    els.skill.gnd.textContent  = pct(sk.skill_pseudo_ap);
-                    const pass = sk.gate_pass != null ? sk.gate_pass : (sk.skill_mhd >= 0.25);
-                    els.skill.gate.textContent = pass ? 'PASS' : 'FAIL';
-                    els.skill.gate.classList.toggle('gn-gate-pass', !!pass);
-                }
+                paintSkill(skillSummary(replay));
             } catch (_) { /* skill recompute is best-effort */ }
 
             // Flip the headline pill to validated.
