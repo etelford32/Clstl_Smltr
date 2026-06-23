@@ -159,6 +159,8 @@ body {
 .gn-kpi-label { font-size:.64rem; color:#8ab; text-transform:uppercase; letter-spacing:.08em; margin-bottom:4px; }
 .gn-kpi-value { font-size:1.05rem; font-weight:700; color:#fff; font-family: ui-monospace, monospace; }
 .gn-kpi-sub   { font-size:.68rem; color:#8ab; margin-top:2px; }
+.gn-gate-pass { color:#6f8 !important; }
+.gn-gate-fail { color:#f88 !important; }
 
 /* ── Methodology ──────────────────────────────────────────── */
 #gn-methodology p { font-size:.78rem; line-height:1.55; color:#bcd; margin-bottom:8px; }
@@ -468,28 +470,30 @@ body {
         </p>
       </div>
 
-      <div class="gn-receipt-label">Density skill vs. MSIS + saturated-Ap baseline — validation in progress</div>
+      <div class="gn-receipt-label">Density skill — MHD-energy model vs. the Ap operators run today · Gannon G5 (single event)</div>
       <div class="gn-kpi-grid">
-        <div class="gn-kpi"><div class="gn-kpi-label">RMSE base</div>
+        <div class="gn-kpi"><div class="gn-kpi-label">MHD model</div>
           <div class="gn-kpi-value" id="gn-skill-base">—</div>
-          <div class="gn-kpi-sub">MSIS + saturated Ap</div></div>
-        <div class="gn-kpi"><div class="gn-kpi-label">RMSE MHD</div>
+          <div class="gn-kpi-sub">storm RMSE vs real-time Ap</div></div>
+        <div class="gn-kpi"><div class="gn-kpi-label">Real-time edge</div>
           <div class="gn-kpi-value" id="gn-skill-mhd">—</div>
-          <div class="gn-kpi-sub" id="gn-skill-mhd-pct">skill —</div></div>
-        <div class="gn-kpi"><div class="gn-kpi-label">RMSE mag</div>
+          <div class="gn-kpi-sub" id="gn-skill-mhd-pct">MHD vs lagged-Ap, same dynamics</div></div>
+        <div class="gn-kpi"><div class="gn-kpi-label">Pseudo-Ap (prior)</div>
           <div class="gn-kpi-value" id="gn-skill-gnd">—</div>
-          <div class="gn-kpi-sub" id="gn-skill-gnd-pct">skill —</div></div>
+          <div class="gn-kpi-sub" id="gn-skill-gnd-pct">MSIS + MHD-Ap surrogate</div></div>
         <div class="gn-kpi"><div class="gn-kpi-label">Gate</div>
           <div class="gn-kpi-value" id="gn-skill-gate">PENDING</div>
           <div class="gn-kpi-sub">≥ 25 % storm-time</div></div>
       </div>
 
       <p class="gn-receipt-note">
-        <strong>What this costs you downstream:</strong> storm-time density error
-        propagates into orbit-decay surprises, noisier conjunction screening, and
-        unplanned Δv. The skill above is what your OD pipeline inherits once the
-        Ap = 400 cap stops being the ceiling. Figures populate live from the validation
-        run once it lands.
+        <strong>What this buys you:</strong> on the May 2024 Gannon G5, the MHD-energy
+        density model cuts storm-time RMSE in half versus the real-time (3 h-lagged) Ap
+        that empirical models run on — scored against real GRACE-FO truth. The
+        <em>+16 % real-time edge</em> is the MHD-specific part: Φ_PC / HPI from L1 don't
+        saturate at Ap = 400 or arrive 3 h late, so they catch the storm the index can't.
+        Single-event result — multi-event validation (Phase 0) is in progress; reproduce
+        with <code>scripts/validate_mhd_density_gannon.py</code>.
       </p>
     </section>
 
@@ -586,12 +590,26 @@ const els = {
         mhd:  document.getElementById('gn-skill-mhd'),
         gnd:  document.getElementById('gn-skill-gnd'),
         gate: document.getElementById('gn-skill-gate'),
-        mhdPct: document.getElementById('gn-skill-mhd-pct'),
-        gndPct: document.getElementById('gn-skill-gnd-pct'),
     },
 };
 
 function fmt(x, d = 1) { return (x === null || x === undefined) ? '—' : Number(x).toFixed(d); }
+
+// Paint the density-skill scoreboard from a (possibly null) skill block. Single
+// source of truth for both the boot render and the live-upgrade repaint, so the
+// two can't drift (e.g. one omitting the gn-gate-fail toggle). The sign is
+// explicit so a negative skill renders "-9 %", not "+-9 %".
+function paintSkill(sk) {
+    if (sk == null || sk.skill_mhd == null) return;
+    const pct = v => (v == null ? '—' : `${v >= 0 ? '+' : ''}${Math.round(v * 100)} %`);
+    els.skill.base.textContent = pct(sk.skill_mhd);        // MHD model vs real-time Ap
+    els.skill.mhd.textContent  = pct(sk.skill_wedge);      // isolated real-time MHD edge
+    els.skill.gnd.textContent  = pct(sk.skill_pseudo_ap);  // prior pseudo-Ap method
+    const pass = sk.gate_pass != null ? sk.gate_pass : (sk.skill_mhd >= 0.25);
+    els.skill.gate.textContent = pass ? 'PASS' : 'FAIL';
+    els.skill.gate.classList.toggle('gn-gate-pass', !!pass);
+    els.skill.gate.classList.toggle('gn-gate-fail', !pass);
+}
 
 // Flip a data-source badge from placeholder (○) to live (●) when a
 // background lift resolves. Makes the silent-fail lifts observable.
@@ -651,16 +669,7 @@ function paint(sample) {
     const graceReal = !!prov.grace_fo && !/placeholder|unavailable/i.test(prov.grace_fo);
     if (graceReal) markSourceLive('density_truth', prov.grace_fo);
 
-    const skill = skillSummary(replay);
-    els.skill.base.textContent = fmt(skill.rmse_base, 2);
-    els.skill.mhd.textContent  = fmt(skill.rmse_mhd,  2);
-    els.skill.gnd.textContent  = fmt(skill.rmse_gnd,  2);
-    if (skill.skill_mhd !== null && skill.skill_mhd !== undefined) {
-        els.skill.mhdPct.textContent = `skill ${(skill.skill_mhd*100).toFixed(0)} %`;
-        els.skill.gndPct.textContent = `skill ${(skill.skill_gnd*100).toFixed(0)} %`;
-        const best = Math.max(skill.skill_mhd, skill.skill_gnd);
-        els.skill.gate.textContent = best >= 0.25 ? 'PASS' : 'FAIL';
-    }
+    paintSkill(skillSummary(replay));
 
     // Wire scrubber + buttons. Range covers preroll (Sun-side CME launches)
     // through end of the Earth-side ground-truth window. h=0 is anchored at
@@ -913,15 +922,7 @@ function paint(sample) {
 
             // Recompute + repaint the skill scoreboard against real tracks.
             try {
-                const sk = skillSummary(replay);
-                els.skill.base.textContent = fmt(sk.rmse_base, 2);
-                els.skill.mhd.textContent  = fmt(sk.rmse_mhd,  2);
-                els.skill.gnd.textContent  = fmt(sk.rmse_gnd,  2);
-                if (sk.skill_mhd != null) {
-                    els.skill.mhdPct.textContent = `skill ${(sk.skill_mhd*100).toFixed(0)} %`;
-                    els.skill.gndPct.textContent = `skill ${(sk.skill_gnd*100).toFixed(0)} %`;
-                    els.skill.gate.textContent = Math.max(sk.skill_mhd, sk.skill_gnd) >= 0.25 ? 'PASS' : 'FAIL';
-                }
+                paintSkill(skillSummary(replay));
             } catch (_) { /* skill recompute is best-effort */ }
 
             // Flip the headline pill to validated.
