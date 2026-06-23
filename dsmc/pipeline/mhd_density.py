@@ -47,15 +47,15 @@ most of the hindcast skill. The MHD-specific wedge is **temporal**: the Ap
 index is capped at 400 and only known after its 3-hour window closes, while
 Phi_PC / HPI are computed from the L1 solar wind in real time. Driving the
 *same* relaxation with real-time MHD energy instead of the lagged Ap is worth
-~+17 % storm-time skill on Gannon (vs ~+7 % for perfect-vs-lagged Ap). That
+~+16 % storm-time skill on Gannon (vs ~+5 % for perfect-vs-lagged Ap). That
 real-time edge is what an operator actually buys.
 
 Validation (see ``scripts/validate_mhd_density_gannon.py``)
 ----------------------------------------------------------
 On the May 2024 Gannon G5 vs real TU Delft GRACE-FO v02 density:
   * +48 % storm-time RMSE skill vs MSIS+perfect-Ap
-  * +50 % vs MSIS+real-time (3 h-lagged) Ap — what operators run today
-  * +17 % isolated real-time MHD wedge (identical dynamics, MHD vs lagged Ap)
+  * +49 % vs MSIS+real-time (3 h-lagged) Ap — what operators run today
+  * +16 % isolated real-time MHD wedge (identical dynamics, MHD vs lagged Ap)
 
 This is a **single-event** result. Production claims require the multi-event
 campaign in ``MHD_DENSITY_PRODUCT_PLAN.md`` Phase 0 (>=5 events) and a fix for

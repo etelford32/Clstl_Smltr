@@ -1,10 +1,16 @@
 """Unit tests for the MHD-energy density model (pipeline.mhd_density)."""
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import numpy as np
 import pytest
 
-from pipeline import mhd_density as M
+REPO = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(REPO / "dsmc"))
+
+from pipeline import mhd_density as M  # noqa: E402
 
 
 def test_relaxation_rises_then_decays():
