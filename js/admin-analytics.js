@@ -2014,32 +2014,6 @@ export async function fetchAuthFlowMetrics(days = 30) {
 }
 
 /**
- * Daily sign-in health check — the verdict from api/cron/auth-healthcheck.js,
- * read via the auth_healthcheck_summary() SECURITY DEFINER RPC. Surfaces the
- * latest per-method pass/fail, end-to-end latency, and the recent pass-rate so
- * "is sign-in broken?" has a one-glance answer instead of a manual test.
- *
- * Returns { ok, data: { last_ran_at, last_ok, last_password_ok, last_profile_ok,
- *   last_google_ok, last_magiclink_ok, last_latency_ms, last_detail, runs,
- *   passes, pass_rate } } or { ok:true, data:null } when no run has landed yet.
- */
-export async function fetchAuthHealthcheck(limit = 30) {
-    const client = await sb();
-    if (!client) return { ok: false, error: 'Supabase not configured' };
-    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
-    try {
-        const { data, error } = await client.rpc('auth_healthcheck_summary', { p_limit: limit });
-        if (error) throw error;
-        return { ok: true, data: (Array.isArray(data) ? data[0] : data) || null };
-    } catch (err) {
-        const hint = /function .* does not exist/i.test(err.message || '')
-            ? 'auth_healthcheck_summary RPC missing — apply supabase-auth-healthcheck-migration.sql'
-            : err.message;
-        return { ok: false, error: hint };
-    }
-}
-
-/**
  * Recent auth-funnel drop-offs — sessions whose last funnel stage in the
  * window is NOT a success terminal. Returns up to `limit` rows ordered
  * newest-first, each carrying the funnel_id (copyable into the replay RPC),

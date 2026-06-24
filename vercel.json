@@ -34,10 +34,6 @@
       "schedule": "15,45 * * * *"
     },
     {
-      "path": "/api/cron/auth-healthcheck",
-      "schedule": "0 13 * * *"
-    },
-    {
       "path": "/api/cron/onboarding-nudge",
       "schedule": "30 16 * * *"
     },
