@@ -249,6 +249,16 @@ body.au-locked .daycard.au-far{filter:blur(5px);opacity:.5;pointer-events:none}
 .lg-thr{width:14px;height:0;border-top:2px dashed var(--c-accent)}
 #month-chart{width:100%;height:auto;display:block;margin-top:6px;overflow:visible}
 .month-note{font-size:.84rem;color:var(--c-text-muted);margin-top:12px;max-width:80ch}
+/* rolling forecast skill ("track record") — Phase 2 */
+.au-skill{margin-top:13px;padding-top:11px;border-top:1px solid var(--c-border-faint);
+  display:flex;flex-wrap:wrap;align-items:center;gap:5px 14px;
+  font-family:'JetBrains Mono',monospace;font-size:.72rem;color:var(--c-text-muted)}
+.au-skill:empty{display:none}
+.au-skill .au-sk-h{color:var(--c-text-faint);text-transform:uppercase;letter-spacing:.1em;font-size:.58rem}
+.au-skill b{color:var(--c-text-primary);font-weight:600}
+.au-skill b.pos{color:var(--c-status-live)}
+.au-skill b.neg{color:var(--c-storm)}
+.au-skill .au-sk-pending{font-style:italic}
 .month-note b{color:var(--c-text-secondary);font-weight:600}
 .sources{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
 .src{font-family:'JetBrains Mono',monospace;font-size:.62rem;padding:4px 9px;border-radius:var(--r-sm);
@@ -543,6 +553,9 @@ footer a{color:var(--c-text-muted)}
           <span class="src"><span class="pip"></span>HEK · coronal holes</span>
           <span class="src"><span class="pip"></span>27-day recurrence</span>
         </div>
+        <!-- Phase 2: rolling forecast skill vs persistence/recurrence — filled by
+             js/auroracle.js from /api/aurora/skill (empty until forecasts mature). -->
+        <div class="au-skill" id="au-skill"></div>
       </div>
       <div class="hl-head" style="margin-top:18px"><h2>On the horizon</h2><p>Windows worth watching over the next month — scored for your location.</p></div>
       <div class="highlights" id="highlights"></div>

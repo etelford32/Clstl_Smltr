@@ -239,6 +239,38 @@ async function fetchOutlook() {
   } catch (_) { /* synthetic stays */ }
 }
 
+/* ════ rolling forecast skill ("track record") — Phase 2 ════
+ * Reads /api/aurora/skill (per-model MAE + Murphy skill vs persistence/
+ * recurrence over matured predictions) and shows the honest record under the
+ * 30-day chart. Empty until the first nights resolve — trust is earned by
+ * showing the misses, not hiding them (AURORACLE_ML_PLAN.md §6, Phase 2). */
+async function fetchSkill() {
+  try {
+    const r = await fetch('/api/aurora/skill', { mode: 'cors' });
+    const j = await r.json();
+    if (j?.data) renderSkill(j.data);
+  } catch (_) { /* no track record yet */ }
+}
+
+function renderSkill(s) {
+  const host = document.getElementById('au-skill'); if (!host) return;
+  const blend = (s?.models || []).find(m => m.model_id === 'AUR_BLEND');
+  const days = s?.matured_days || 0;
+  if (!blend || !days || blend.n < 3) {
+    host.innerHTML = `<span class="au-sk-h">Track record</span><span class="au-sk-pending">scoring begins as forecasts resolve — the first nights are maturing now.</span>`;
+    return;
+  }
+  const pct = v => v == null ? '—' : (v >= 0 ? '+' : '−') + Math.round(Math.abs(v) * 100) + '%';
+  const cls = v => v == null ? '' : (v >= 0 ? 'pos' : 'neg');
+  const hit = s.blend_hit_rate;
+  let html = `<span class="au-sk-h">Track record</span><span>scored on <b>${days}</b> night${days === 1 ? '' : 's'}</span>`;
+  if (hit != null) html += `<span>within ±1 Kp <b>${Math.round(hit * 100)}%</b></span>`;
+  html += `<span>vs persistence <b class="${cls(blend.skill_vs_persist)}">${pct(blend.skill_vs_persist)}</b></span>`;
+  if (blend.skill_vs_recur != null) html += `<span>vs recurrence <b class="${cls(blend.skill_vs_recur)}">${pct(blend.skill_vs_recur)}</b></span>`;
+  if (blend.mae != null) html += `<span>MAE <b>${Number(blend.mae).toFixed(2)} Kp</b></span>`;
+  host.innerHTML = html;
+}
+
 /** Forecast Kp at `h` hours from now, nearest 3-hourly SWPC block (null if
  *  the 3-day feed hasn't landed yet). Shared by the ensemble map + the
  *  hourly tonight curve so both read the same profile. */
@@ -1055,6 +1087,7 @@ function initSignedInPanel() {
 buildWeek(); buildMonth(); buildChips(); initGeo(); initProbSlider(); render();
 patchOperational();
 fetchOutlook();
+fetchSkill();
 initAccess();
 initAlerts();
 initGlobe();

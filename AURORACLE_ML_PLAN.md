@@ -169,13 +169,27 @@ not a timeline" stays on the chart.
   fetch failure** (teaser stays instant). Each chart point carries its driver
   label ("NOAA 45-day" / "27-day recurrence" / "climatology").
 
-### Phase 2 — Score the baseline (prerequisite for any ML)
-- Log daily-median Kp predictions to `forecast_log` via `api/forecast/log.js`,
-  `field: 'kp_planetary'`, `model_id ∈ {aurora-noaa45-v1, aurora-recurrence-v1,
-  aurora-month-blend-v1}`. The archive cron + `js/forecast-validation.js`
-  back-fill observations and compute **Murphy skill vs persistence**.
-- Surface "vs persistence / vs recurrence" skill + a public "called X of last Y
-  nights" badge in the model-breakdown panel.
+### Phase 2 — Score the baseline (prerequisite for any ML) ✅ shipped (code)
+> `api/cron/aurora-outlook.js` (logs + back-fills each 6 h run), the
+> `aurora_forecast_skill()` RPC, `api/aurora/skill.js`, and the "Track record"
+> readout in `js/auroracle.js` / `auroracle.html`. **Two migrations to apply:**
+> `supabase-aurora-forecaster-registry-migration.sql` (AUR_* models) and
+> `supabase-aurora-skill-migration.sql` (skill RPC). Until then logging no-ops
+> (`unknown_model`) and the skill panel stays hidden — no breakage.
+
+- The cron logs per-model **daily-Kp** predictions to `forecast_log` via
+  `record_forecast_batch` at a sentinel cell `(0,0)`, `field='kp_planetary'`,
+  `model_id ∈ {AUR_PERSIST, AUR_NOAA45, AUR_RECUR, AUR_BLEND}`. Leads are capped
+  at **6 days** so each prediction matures and is back-filled while still inside
+  `forecast_log`'s 7-day hot ring (→ a rolling skill window; longer leads need
+  the R2 replay path, a later phase).
+- Each run also calls `backfill_forecast_observations` with the observed
+  daily-mean Kp (one narrow per-day window so each day's truth lands only on
+  that day's rows).
+- `aurora_forecast_skill()` returns per-model MAE/RMSE/bias + **Murphy skill vs
+  persistence and vs recurrence** over matured rows; `/api/aurora/skill` serves
+  it. The page shows "scored on N nights · within ±1 Kp X% · vs persistence
+  ±Y%" under the 30-day chart — trust earned by showing the misses.
 
 ### Phase 3 — Daily Kp-LSTM (mirror the proven weather-LSTM path)
 **Train — `scripts/train_aurora_kp_lstm/`** (mirrors `scripts/train_weather_lstm/`):
