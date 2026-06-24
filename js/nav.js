@@ -14,6 +14,12 @@
  *   - Keyboard support (Escape, Tab focus management)
  */
 
+// Side-effect import: OAuth/OTP misland sentinel. Runs first so a token that
+// landed on the wrong page (Supabase Site-URL fallback) is detected + forwarded
+// to /auth-callback.html before anything else can consume or clear the hash.
+// See js/oauth-sentinel.js.
+import './oauth-sentinel.js';
+
 // Side-effect import: cross-page guided tour controller. Hooks the hero CTA
 // on the home page and renders a progress banner on each tour stop.
 import './explore-tour.js';
