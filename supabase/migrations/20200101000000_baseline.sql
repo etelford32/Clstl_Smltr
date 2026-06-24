@@ -20,21 +20,14 @@
 -- reference tables/objects defined later in this file install cleanly.
 SET check_function_bodies = false;
 
--- pg_cron shim: two feature files call cron.schedule()/cron.unschedule()
--- at top level. Production has pg_cron; a throwaway preview DB may not.
--- If the extension is absent, install no-op stand-ins so the build can't
--- fail on scheduling calls (cron jobs are irrelevant on a preview DB).
-DO $shim$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') THEN
-    CREATE SCHEMA IF NOT EXISTS cron;
-    CREATE OR REPLACE FUNCTION cron.schedule(text, text, text) RETURNS bigint LANGUAGE sql AS 'SELECT 0::bigint';
-    CREATE OR REPLACE FUNCTION cron.schedule(text, text) RETURNS bigint LANGUAGE sql AS 'SELECT 0::bigint';
-    CREATE OR REPLACE FUNCTION cron.unschedule(text) RETURNS boolean LANGUAGE sql AS 'SELECT true';
-    CREATE OR REPLACE FUNCTION cron.unschedule(bigint) RETURNS boolean LANGUAGE sql AS 'SELECT true';
-  END IF;
-END
-$shim$;
+-- pg_cron handling: this baseline deliberately does NOT create a `cron`
+-- schema. On a fresh preview DB pg_cron isn't installed, and Supabase
+-- provisions it AFTER migrations run — a `cron` schema pre-created here
+-- collides with that step ("schema cron already exists"). Instead, every
+-- cron.schedule()/cron.job reference below is wrapped in an
+-- `IF NOT EXISTS (pg_extension WHERE extname='pg_cron') THEN RETURN`
+-- guard, so the scheduling is skipped when pg_cron is absent (cron jobs
+-- are irrelevant on a throwaway preview DB) and runs normally on prod.
 
 
 -- ═══════════════ BOOTSTRAP: core schema ═══════════════
@@ -3184,18 +3177,22 @@ REVOKE ALL ON FUNCTION public.refresh_solar_wind() FROM anon, authenticated;
 -- ═══════════════════════════════════════════════════════════════
 -- Schedule: every minute  (NOAA's rtsw_wind_1m cadence)
 -- ═══════════════════════════════════════════════════════════════
-DO $$
+DO $refresh_cron$
 BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') THEN
+        RAISE NOTICE 'pg_cron not installed — skipping refresh-solar-wind schedule.';
+        RETURN;
+    END IF;
     IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'refresh-solar-wind') THEN
         PERFORM cron.unschedule('refresh-solar-wind');
     END IF;
-END $$;
-
-SELECT cron.schedule(
-    'refresh-solar-wind',
-    '* * * * *',
-    $cron$ SELECT public.refresh_solar_wind(); $cron$
-);
+    PERFORM cron.schedule(
+        'refresh-solar-wind',
+        '* * * * *',
+        $cron$ SELECT public.refresh_solar_wind(); $cron$
+    );
+END
+$refresh_cron$;
 
 -- ═══════════════════════════════════════════════════════════════
 -- Verification
