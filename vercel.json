@@ -34,6 +34,10 @@
       "schedule": "15,45 * * * *"
     },
     {
+      "path": "/api/cron/synthetic-auth-daily",
+      "schedule": "30 12 * * *"
+    },
+    {
       "path": "/api/cron/onboarding-nudge",
       "schedule": "30 16 * * *"
     },
