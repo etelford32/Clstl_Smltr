@@ -81,3 +81,7 @@ GRANT EXECUTE ON FUNCTION public.synthetic_journey_summary(INT) TO authenticated
 INSERT INTO public.pipeline_heartbeat (pipeline_name, last_success_at, consecutive_fail)
 VALUES ('synthetic_auth_daily', now(), 0)
 ON CONFLICT (pipeline_name) DO NOTHING;
+
+INSERT INTO public.pipeline_heartbeat (pipeline_name, last_success_at, consecutive_fail)
+VALUES ('synthetic_auth_weekly', now(), 0)
+ON CONFLICT (pipeline_name) DO NOTHING;

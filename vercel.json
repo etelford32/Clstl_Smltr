@@ -38,6 +38,14 @@
       "schedule": "30 12 * * *"
     },
     {
+      "path": "/api/cron/synthetic-auth-weekly",
+      "schedule": "40 12 * * 1"
+    },
+    {
+      "path": "/api/cron/auth-health-digest",
+      "schedule": "0 13 * * *"
+    },
+    {
       "path": "/api/cron/onboarding-nudge",
       "schedule": "30 16 * * *"
     },
