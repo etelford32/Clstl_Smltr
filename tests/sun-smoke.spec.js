@@ -203,4 +203,37 @@ test.describe('sun.html smoke', () => {
         if (filtered.length) console.error('Console errors:', filtered);
         expect(filtered, 'no errors toggling Doppler').toHaveLength(0);
     });
+
+    test('EUV / magnetogram wavelength views cycle cleanly', async ({ page }) => {
+        const errors = attachConsoleRecorder(page);
+        await page.goto(URL);
+        await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
+        await page.waitForTimeout(500);
+
+        // Cycle every channel (304/171/193/211/131/magnetogram) then back to white light.
+        for (const v of ['1', '2', '3', '4', '5', '6', '0']) {
+            await page.evaluate((val) => {
+                const el = document.getElementById('view-mode');
+                el.value = val;
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            }, v);
+            await page.waitForTimeout(150);
+            const mode = await page.evaluate(() => window.__sun.uniforms.u_viewMode.value);
+            expect(mode, `u_viewMode set to ${v}`).toBe(parseFloat(v));
+        }
+
+        // A channel view hides the white-light corona shell.
+        await page.evaluate(() => {
+            const el = document.getElementById('view-mode');
+            el.value = '1';
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+        await page.waitForTimeout(150);
+        const coronaInChannel = await page.evaluate(() => window.__sun.layers.corona.visible);
+        expect(coronaInChannel, 'corona hidden in channel view').toBe(false);
+
+        const filtered = errors.filter((e) => !isExpectedNoise(e.text));
+        if (filtered.length) console.error('Console errors:', filtered);
+        expect(filtered, 'no errors cycling wavelength views').toHaveLength(0);
+    });
 });
