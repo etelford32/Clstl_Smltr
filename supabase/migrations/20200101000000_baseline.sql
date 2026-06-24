@@ -5142,42 +5142,48 @@ CREATE TABLE IF NOT EXISTS public.feedback (
   created_at timestamp with time zone DEFAULT now()
 );
 
-ALTER TABLE public.announcements ADD CONSTRAINT announcements_created_by_fkey FOREIGN KEY (created_by) REFERENCES auth.users(id);
-
-ALTER TABLE public.announcements ADD CONSTRAINT announcements_pkey PRIMARY KEY (id);
-
-ALTER TABLE public.announcements ADD CONSTRAINT announcements_severity_check CHECK ((severity = ANY (ARRAY['info'::text, 'success'::text, 'warning'::text, 'critical'::text])));
-
-ALTER TABLE public.announcements ADD CONSTRAINT announcements_target_plan_check CHECK ((target_plan = ANY (ARRAY['all'::text, 'free'::text, 'basic'::text, 'advanced'::text])));
-
-ALTER TABLE public.beta_invite_uses ADD CONSTRAINT beta_invite_uses_pkey PRIMARY KEY (id);
-
-ALTER TABLE public.beta_invite_uses ADD CONSTRAINT beta_invite_uses_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE SET NULL;
-
-ALTER TABLE public.beta_invites ADD CONSTRAINT beta_invites_code_key UNIQUE (code);
-
-ALTER TABLE public.beta_invites ADD CONSTRAINT beta_invites_created_by_fkey FOREIGN KEY (created_by) REFERENCES auth.users(id);
-
-ALTER TABLE public.beta_invites ADD CONSTRAINT beta_invites_pkey PRIMARY KEY (id);
-
--- FK relocated here from the beta_invite_uses block above: it references
--- beta_invites(id), so beta_invites' PRIMARY KEY must already exist. The
--- constraints are grouped alphabetically by table, which would otherwise
--- add this FK before beta_invites_pkey and fail on a fresh DB with
--- "no unique constraint matching given keys for referenced table".
-ALTER TABLE public.beta_invite_uses ADD CONSTRAINT beta_invite_uses_invite_id_fkey FOREIGN KEY (invite_id) REFERENCES beta_invites(id) ON DELETE CASCADE;
-
-ALTER TABLE public.farside_truth ADD CONSTRAINT farside_truth_case_id_key UNIQUE (case_id);
-
-ALTER TABLE public.farside_truth ADD CONSTRAINT farside_truth_pkey PRIMARY KEY (id);
-
-ALTER TABLE public.feedback ADD CONSTRAINT feedback_category_check CHECK ((category = ANY (ARRAY['bug'::text, 'feature'::text, 'general'::text, 'praise'::text])));
-
-ALTER TABLE public.feedback ADD CONSTRAINT feedback_pkey PRIMARY KEY (id);
-
-ALTER TABLE public.feedback ADD CONSTRAINT feedback_status_check CHECK ((status = ANY (ARRAY['new'::text, 'reviewed'::text, 'resolved'::text, 'wontfix'::text])));
-
-ALTER TABLE public.feedback ADD CONSTRAINT feedback_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE SET NULL;
+-- ── Constraints for the prod-only tables (idempotent) ─────────────────────
+-- These five tables were captured from the live schema in pg_dump style: bare
+-- ALTER TABLE ... ADD CONSTRAINT with no guard. That is fine on a fresh preview
+-- DB, but throws "constraint already exists" if the baseline is ever applied to
+-- a database that already has them (e.g. production on merge). Wrap each one in
+-- an existence check so the whole baseline is safe to (re-)apply to ANY DB.
+-- The list is ordered: beta_invites' PK/UNIQUE are added before the
+-- beta_invite_uses FK that references beta_invites(id) (ord 7 before ord 10),
+-- so a fresh DB does not hit "no unique constraint matching given keys".
+DO $$
+DECLARE
+  c RECORD;
+BEGIN
+  FOR c IN
+    SELECT * FROM (VALUES
+      ( 1, 'public.announcements',    'announcements_created_by_fkey',   'FOREIGN KEY (created_by) REFERENCES auth.users(id)'),
+      ( 2, 'public.announcements',    'announcements_pkey',              'PRIMARY KEY (id)'),
+      ( 3, 'public.announcements',    'announcements_severity_check',    'CHECK ((severity = ANY (ARRAY[''info''::text, ''success''::text, ''warning''::text, ''critical''::text])))'),
+      ( 4, 'public.announcements',    'announcements_target_plan_check', 'CHECK ((target_plan = ANY (ARRAY[''all''::text, ''free''::text, ''basic''::text, ''advanced''::text])))'),
+      ( 5, 'public.beta_invites',     'beta_invites_code_key',           'UNIQUE (code)'),
+      ( 6, 'public.beta_invites',     'beta_invites_created_by_fkey',    'FOREIGN KEY (created_by) REFERENCES auth.users(id)'),
+      ( 7, 'public.beta_invites',     'beta_invites_pkey',               'PRIMARY KEY (id)'),
+      ( 8, 'public.beta_invite_uses', 'beta_invite_uses_pkey',           'PRIMARY KEY (id)'),
+      ( 9, 'public.beta_invite_uses', 'beta_invite_uses_user_id_fkey',   'FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE SET NULL'),
+      (10, 'public.beta_invite_uses', 'beta_invite_uses_invite_id_fkey', 'FOREIGN KEY (invite_id) REFERENCES beta_invites(id) ON DELETE CASCADE'),
+      (11, 'public.farside_truth',    'farside_truth_case_id_key',       'UNIQUE (case_id)'),
+      (12, 'public.farside_truth',    'farside_truth_pkey',              'PRIMARY KEY (id)'),
+      (13, 'public.feedback',         'feedback_category_check',         'CHECK ((category = ANY (ARRAY[''bug''::text, ''feature''::text, ''general''::text, ''praise''::text])))'),
+      (14, 'public.feedback',         'feedback_pkey',                   'PRIMARY KEY (id)'),
+      (15, 'public.feedback',         'feedback_status_check',           'CHECK ((status = ANY (ARRAY[''new''::text, ''reviewed''::text, ''resolved''::text, ''wontfix''::text])))'),
+      (16, 'public.feedback',         'feedback_user_id_fkey',           'FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE SET NULL')
+    ) AS t(ord, tbl, conname, def)
+    ORDER BY t.ord
+  LOOP
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint
+      WHERE conrelid = c.tbl::regclass AND conname = c.conname
+    ) THEN
+      EXECUTE format('ALTER TABLE %s ADD CONSTRAINT %I %s', c.tbl, c.conname, c.def);
+    END IF;
+  END LOOP;
+END $$;
 
 CREATE INDEX IF NOT EXISTS farside_truth_crossing_idx ON public.farside_truth USING btree (east_limb_crossing DESC);
 
