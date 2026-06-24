@@ -5150,8 +5150,6 @@ ALTER TABLE public.announcements ADD CONSTRAINT announcements_severity_check CHE
 
 ALTER TABLE public.announcements ADD CONSTRAINT announcements_target_plan_check CHECK ((target_plan = ANY (ARRAY['all'::text, 'free'::text, 'basic'::text, 'advanced'::text])));
 
-ALTER TABLE public.beta_invite_uses ADD CONSTRAINT beta_invite_uses_invite_id_fkey FOREIGN KEY (invite_id) REFERENCES beta_invites(id) ON DELETE CASCADE;
-
 ALTER TABLE public.beta_invite_uses ADD CONSTRAINT beta_invite_uses_pkey PRIMARY KEY (id);
 
 ALTER TABLE public.beta_invite_uses ADD CONSTRAINT beta_invite_uses_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE SET NULL;
@@ -5161,6 +5159,13 @@ ALTER TABLE public.beta_invites ADD CONSTRAINT beta_invites_code_key UNIQUE (cod
 ALTER TABLE public.beta_invites ADD CONSTRAINT beta_invites_created_by_fkey FOREIGN KEY (created_by) REFERENCES auth.users(id);
 
 ALTER TABLE public.beta_invites ADD CONSTRAINT beta_invites_pkey PRIMARY KEY (id);
+
+-- FK relocated here from the beta_invite_uses block above: it references
+-- beta_invites(id), so beta_invites' PRIMARY KEY must already exist. The
+-- constraints are grouped alphabetically by table, which would otherwise
+-- add this FK before beta_invites_pkey and fail on a fresh DB with
+-- "no unique constraint matching given keys for referenced table".
+ALTER TABLE public.beta_invite_uses ADD CONSTRAINT beta_invite_uses_invite_id_fkey FOREIGN KEY (invite_id) REFERENCES beta_invites(id) ON DELETE CASCADE;
 
 ALTER TABLE public.farside_truth ADD CONSTRAINT farside_truth_case_id_key UNIQUE (case_id);
 
