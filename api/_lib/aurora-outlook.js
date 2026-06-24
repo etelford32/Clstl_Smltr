@@ -140,13 +140,34 @@ export async function computeOutlook(nowMs = Date.now()) {
         if (recMean != null && recMean > (noaa ?? recMean) + 0.5) driver = 'recurrence';
         else if (d >= 20) driver = 'climatology';
 
-        days.push({ i: d, date: isoDate(dayMs), kp_p10: round1(p10), kp_p50: round1(p50), kp_p90: round1(p90), driver });
+        days.push({
+            i: d, date: isoDate(dayMs),
+            kp_p10: round1(p10), kp_p50: round1(p50), kp_p90: round1(p90), driver,
+            // Component models — logged separately to the skill leaderboard (Phase 2)
+            // so the blend can be scored against each driver, not just shown.
+            kp_noaa45: noaa != null ? round1(noaa) : null,
+            kp_recur:  recMean != null ? round1(recMean) : null,
+        });
     }
+
+    // Observed daily-mean Kp (oldest→newest) — feeds the persistence baseline
+    // and the cron's observation back-fill (Phase 2 scoring).
+    const observedDaily = [...observed.entries()]
+        .map(([k, v]) => ({ date: isoDate(k), kp_mean: round1(v.sum / v.n), kp_max: round1(v.max), n: v.n }))
+        .sort((a, b) => (a.date < b.date ? -1 : 1));
+    // Persistence reference: most recent reasonably-complete day's mean Kp.
+    let persistence_kp = null;
+    for (let i = observedDaily.length - 1; i >= 0; i--) {
+        if (observedDaily[i].n >= 4) { persistence_kp = observedDaily[i].kp_mean; break; }
+    }
+    if (persistence_kp == null && observedDaily.length) persistence_kp = observedDaily[observedDaily.length - 1].kp_mean;
 
     return {
         made_at: new Date(nowMs).toISOString(),
         version: 'aurora-outlook-v1',
         days,
+        observed: observedDaily,
+        persistence_kp,
         meta: {
             source: 'NOAA SWPC 45-day Ap forecast + 27-day Kp recurrence',
             forecast_days:   predicted.size,
