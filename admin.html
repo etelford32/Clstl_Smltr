@@ -457,6 +457,19 @@
                     <div id="auth-flow-container"><div class="empty">Loading…</div></div>
                 </div>
             </div>
+            <!-- ── Daily sign-in health check ───────────────────────────
+                 Verdict from the auth-healthcheck cron: can the dedicated
+                 test account actually sign in (password), read its own
+                 profile (RLS / dashboard gate), and is Google OAuth still
+                 enabled. Green = users can get in. Reads
+                 auth_healthcheck_summary(). -->
+            <div class="card" style="margin:14px 0 0">
+                <h3 style="font-size:.82rem;margin-bottom:10px">
+                    Sign-in health check
+                    <span style="font-size:.7rem;color:#778;font-weight:400;margin-left:6px">daily synthetic sign-in · api/cron/auth-healthcheck</span>
+                </h3>
+                <div id="signin-health-container"><div class="empty">Loading…</div></div>
+            </div>
             <div class="card" style="margin:14px 0 0">
                 <h3 style="font-size:.82rem;margin-bottom:10px">New vs returning users</h3>
                 <div id="new-returning-container"><div class="empty">Loading…</div></div>
@@ -1020,7 +1033,7 @@ import { auth } from './js/auth.js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY, isConfigured, getSupabase, testConnection } from './js/supabase-config.js';
 import { GA_MEASUREMENT_ID } from './js/analytics.js';
 import { EXPERIMENTS, EXPERIMENT_GOALS } from './js/experiments.js';
-import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchActivationFunnel, fetchActivationDaily, fetchActivationOverview, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap, fetchWizardFunnel, fetchTourMetrics, fetchDemoMetrics, fetchAuthFlowMetrics, fetchAuthFunnelDropoffs, fetchNewVsReturning, fetchVisitorFlow, fetchEntryDestinations, fetchAcquisition, fetchAccumulatorStats, fetchExperimentAB, fetchExperimentGoals, fetchExperimentRetention, fetchDailyRetentionCurve, fetchStickiness, fetchFeatureReturnRates, wilsonCI95, twoProportionZ, fetchPerfSummary, fetchTopErrors, fetchTop404s, fetchTopAuthFailures, fetchConsentOptinRate, fetchStripeMetrics } from './js/admin-analytics.js';
+import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchActivationFunnel, fetchActivationDaily, fetchActivationOverview, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap, fetchWizardFunnel, fetchTourMetrics, fetchDemoMetrics, fetchAuthFlowMetrics, fetchAuthHealthcheck, fetchAuthFunnelDropoffs, fetchNewVsReturning, fetchVisitorFlow, fetchEntryDestinations, fetchAcquisition, fetchAccumulatorStats, fetchExperimentAB, fetchExperimentGoals, fetchExperimentRetention, fetchDailyRetentionCurve, fetchStickiness, fetchFeatureReturnRates, wilsonCI95, twoProportionZ, fetchPerfSummary, fetchTopErrors, fetchTop404s, fetchTopAuthFailures, fetchConsentOptinRate, fetchStripeMetrics } from './js/admin-analytics.js';
 import { createInviteCode, fetchInviteCodes, deactivateInvite, sendInviteEmail } from './js/admin-invites.js';
 
 // ── Tabs (wired first so they always work) ──────────────────────────────────
@@ -2420,6 +2433,47 @@ async function loadAuthFlowMetrics() {
         _onboardingMetricRow('Returning sessions (>24h)', d.returningSessions) +
         _onboardingMetricRow('Avg retries to success',   d.avgRetries.toFixed(2), _pct(d.pctNeedingRetry) + ' needed ≥1');
 }
+// Daily sign-in health check verdict (auth_healthcheck_summary RPC). One row
+// per probe with a ✓/✗ dot; a red overall pill is the "users can't sign in"
+// alarm. Renders a friendly placeholder before the first cron run lands.
+function _healthRow(label, ok, detail) {
+    const dot = ok === null
+        ? '<span style="color:#778">○</span>'
+        : ok
+            ? '<span style="color:#9ad36f">✓</span>'
+            : '<span style="color:#ff8080">✗</span>';
+    const state = ok === null ? 'skipped' : (ok ? 'pass' : 'FAIL');
+    const color = ok === null ? '#778' : (ok ? '#9ad36f' : '#ff8080');
+    return `<div style="display:flex;align-items:baseline;gap:8px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.05)">
+        <span style="width:14px;text-align:center">${dot}</span>
+        <strong style="font-size:.82rem;min-width:84px">${_esc(label)}</strong>
+        <span style="font-size:.72rem;color:${color};font-weight:700;text-transform:uppercase;min-width:46px">${state}</span>
+        <span style="font-size:.72rem;color:#99a;flex:1">${_esc(detail || '')}</span>
+    </div>`;
+}
+async function loadSigninHealth() {
+    const el = document.getElementById('signin-health-container');
+    if (!el) return;
+    const r = await fetchAuthHealthcheck(30);
+    if (!r.ok) { el.innerHTML = `<div class="empty" style="color:#ff8080">${_esc(r.error)}</div>`; return; }
+    const d = r.data;
+    if (!d) {
+        el.innerHTML = '<div class="empty">No health check has run yet. The cron fires daily at 13:00 UTC — or hit <code>/api/cron/auth-healthcheck</code> with the cron secret to run it now.</div>';
+        return;
+    }
+    const overallColor = d.last_ok ? '#9ad36f' : '#ff8080';
+    const overallText  = d.last_ok ? 'USERS CAN SIGN IN' : 'SIGN-IN FAILING';
+    el.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+            <span style="font-size:.78rem;font-weight:800;letter-spacing:.04em;color:${overallColor};border:1px solid ${overallColor};border-radius:999px;padding:3px 12px">${overallText}</span>
+            <span style="font-size:.72rem;color:#778">last run ${_fmtTimeAgo(d.last_ran_at)} · ${Number(d.last_latency_ms) || 0} ms</span>
+        </div>
+        ${_healthRow('Password', d.last_password_ok, d.last_detail?.password?.detail)}
+        ${_healthRow('Profile / RLS', d.last_profile_ok, d.last_detail?.profile?.detail)}
+        ${_healthRow('Google OAuth', d.last_google_ok, d.last_detail?.google?.detail)}
+        ${d.last_magiclink_ok === null || d.last_magiclink_ok === undefined ? '' : _healthRow('Magic link', d.last_magiclink_ok, d.last_detail?.magiclink?.detail)}
+        <div style="font-size:.7rem;color:#667;margin-top:8px;line-height:1.4">Pass rate <strong style="color:#9ad36f">${d.pass_rate ?? 0}%</strong> over last ${d.runs ?? 0} run${(d.runs ?? 0) === 1 ? '' : 's'}. Failures email ops + flag the <code>auth_signin</code> heartbeat.</div>`;
+}
 async function loadNewVsReturning() {
     const el = document.getElementById('new-returning-container');
     const r = await fetchNewVsReturning(30);
@@ -2539,6 +2593,7 @@ async function loadOnboardingAll() {
         loadTourMetrics(),
         loadDemoMetrics(),
         loadAuthFlowMetrics(),
+        loadSigninHealth(),
         loadNewVsReturning(),
         loadAuthFunnelDropoffs(),
     ]);
