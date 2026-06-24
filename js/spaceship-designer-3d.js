@@ -30,7 +30,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { buildEngineBell } from './launch-engine-bell.js';
 import { buildPlume, tickPlume } from './launch-plume.js';
 import { buildPad, tickBeacons } from './launch-pad-3d.js';
-import { PROPELLANTS, ENGINE_CATALOG, LIVERIES } from './spaceship-designer-engine.js';
+import { PROPELLANTS, ENGINE_CATALOG, LIVERIES, designStageExpansion01 } from './spaceship-designer-engine.js';
 
 const DAY_SKY = new THREE.Color(0x9ec7e8);
 const SPACE_SKY = new THREE.Color(0x02040a);
@@ -92,8 +92,16 @@ export function createRocketScene(canvas, opts = {}) {
     const rocketRoot = new THREE.Group();      // climbs in +Y during flight
     scene.add(rocketRoot);
     let plumes = [];                            // active first-stage plumes
+    let engineMounts = [];                      // gimbal pivots { pivot, isFirstStage }
     let currentDesign = null;
+    let stage0ThrustFull_kN = 0;               // first-stage thrust at 100% throttle
     let disposables = [];
+
+    // ── Ground exhaust bloom (stays on the pad; fades with altitude) ──
+    const groundFX = makeGroundFX();
+    groundFX.group.position.y = 0.12;
+    groundFX.group.visible = false;
+    world.add(groundFX.group);
 
     function disposeRocket() {
         for (const d of disposables) {
@@ -104,6 +112,7 @@ export function createRocketScene(canvas, opts = {}) {
         disposables = [];
         rocketRoot.clear();
         plumes = [];
+        engineMounts = [];
     }
 
     function track(obj) {
@@ -175,6 +184,25 @@ export function createRocketScene(canvas, opts = {}) {
         // ── Fins on the first stage ──
         addFins(rocketRoot, design.fins, design.stages[0]?.diameter_m / 2 || 1.8, track, matDark);
 
+        // First-stage thrust (full throttle) — drives the live thrust HUD and the
+        // ground-bloom intensity during a static fire.
+        const s0 = design.stages[0];
+        if (s0) {
+            const e0 = ENGINE_CATALOG[s0.engineId] || ENGINE_CATALOG.merlin_1d;
+            stage0ThrustFull_kN = (e0.sl_kn || e0.vac_kn || 0) * Math.max(1, s0.engineCount | 0);
+            // Size the ground bloom to the booster footprint and tint it to the fuel.
+            const prop0 = PROPELLANTS[s0.propellantId] || PROPELLANTS.kerolox;
+            groundFX.configure((s0.diameter_m / 2) * 2.6, prop0.flame);
+        }
+
+        // A rebuild blows away the old plumes/pivots; if we're mid static-fire
+        // (e.g. the user nudged the throttle slider), re-light the new engines so
+        // the test keeps running and updates live.
+        if (staticFire) {
+            plumes.forEach((p) => { p.visible = true; });
+            groundFX.group.visible = true;
+        }
+
         frameCamera();
         return { height: y + (design.payload?.fairingLen_m || 8) };
     }
@@ -213,11 +241,19 @@ export function createRocketScene(canvas, opts = {}) {
         proto.scale.setScalar(scale);
 
         positions.forEach(([px, pz], idx) => {
+            // Each engine hangs off a gimbal pivot at its mount point so the bell
+            // and its plume can thrust-vector together (rotate about the mount,
+            // not about the rocket centreline).
+            const pivot = new THREE.Group();
+            pivot.position.set(px, baseY, pz);
+            parent.add(pivot);
+            engineMounts.push({ pivot, isFirstStage });
+
             const bell = idx === 0 ? proto : proto.clone();
             if (idx !== 0) bell.scale.setScalar(scale);
-            bell.position.set(px, baseY - 0.2, pz);
+            bell.position.set(0, -0.2, 0);
             bell.traverse((c) => { if (c.isMesh) disposables.push(c); });
-            parent.add(bell);
+            pivot.add(bell);
 
             // Plumes only on the first stage (the one that fires at liftoff).
             if (isFirstStage) {
@@ -229,9 +265,9 @@ export function createRocketScene(canvas, opts = {}) {
                     outerColor: 0x40210e,
                     name: `plume-${idx}`,
                 });
-                plume.position.set(px, baseY - natR * scale * 2.0, pz);
+                plume.position.set(0, -natR * scale * 2.0, 0);
                 plume.traverse((c) => { if (c.isMesh) disposables.push(c); });
-                parent.add(plume);
+                pivot.add(plume);
                 plumes.push(plume);
             }
         });
@@ -350,18 +386,43 @@ export function createRocketScene(canvas, opts = {}) {
         controls.update();
     }
 
+    // ── Thrust vectoring (gimbal) ────────────────────────────────────────────
+    // Tilt every first-stage engine pivot (bell + plume) by the same small angle
+    // so the cluster visibly vectors. Angles are in radians; ~0.1 rad ≈ 5.7°.
+    function applyGimbal(angX, angZ) {
+        for (const m of engineMounts) {
+            if (!m.isFirstStage) continue;
+            m.pivot.rotation.x = angX;
+            m.pivot.rotation.z = angZ;
+        }
+    }
+    function clearGimbal() { applyGimbal(0, 0); }
+
+    // ── Static fire (hold-down engine test on the pad) ───────────────────────
+    let staticFire = false;
+    function setStaticFire(on) {
+        if (flight) return;                 // can't static-fire mid-flight
+        staticFire = !!on;
+        plumes.forEach((p) => { p.visible = staticFire; });
+        groundFX.group.visible = staticFire;
+        if (!staticFire) { clearGimbal(); onPhase('idle'); }
+        else onPhase('static-fire');
+    }
+
     // ── Flight animation ────────────────────────────────────────────────────
     let flight = null;     // { traj, dur, t0, resolve, result }
     let autoRotate = false;
     const clock = new THREE.Clock();
 
     function launch(ascentResult) {
+        staticFire = false;                       // a real launch supersedes a static fire
         if (!ascentResult || !ascentResult.trajectory?.length) {
             // No usable trajectory — still show ignition then "fail".
             return Promise.resolve(ascentResult);
         }
         rocketRoot.position.y = 0;
         plumes.forEach((p) => { p.visible = false; });
+        clearGimbal();
         onPhase('ignition');
         return new Promise((resolve) => {
             flight = {
@@ -379,8 +440,11 @@ export function createRocketScene(canvas, opts = {}) {
 
     function reset() {
         flight = null;
+        staticFire = false;
         rocketRoot.position.y = 0;
         plumes.forEach((p) => { p.visible = false; });
+        clearGimbal();
+        groundFX.group.visible = false;
         scene.background = DAY_SKY.clone();
         scene.fog.color = DAY_SKY.clone();
         stars.material.opacity = 0;
@@ -391,11 +455,13 @@ export function createRocketScene(canvas, opts = {}) {
     function endFlight(result) {
         const f = flight; flight = null;
         plumes.forEach((p) => { p.visible = false; });
+        clearGimbal();
+        groundFX.group.visible = false;
         onPhase('meco');
         f?.resolve?.(result);
     }
 
-    // sample trajectory (alt_km, v_kms) at flight-time t (seconds since liftoff)
+    // sample trajectory (alt_km, v_kms, + aero telemetry) at flight-time t
     function sampleTraj(traj, t) {
         if (t <= traj[0].t) return traj[0];
         const last = traj[traj.length - 1];
@@ -404,10 +470,31 @@ export function createRocketScene(canvas, opts = {}) {
             if (traj[i].t >= t) {
                 const a = traj[i - 1], b = traj[i];
                 const f = (t - a.t) / Math.max(1e-3, b.t - a.t);
+                const lerp = (k, d = 0) => (a[k] ?? d) + ((b[k] ?? d) - (a[k] ?? d)) * f;
                 return {
-                    t, alt_km: a.alt_km + (b.alt_km - a.alt_km) * f,
-                    v_kms: (a.v_kms ?? 0) + ((b.v_kms ?? 0) - (a.v_kms ?? 0)) * f,
-                    mass_frac: (a.mass_frac ?? 1) + ((b.mass_frac ?? 1) - (a.mass_frac ?? 1)) * f,
+                    t, alt_km: lerp('alt_km'),
+                    v_kms: lerp('v_kms'),
+                    mass_frac: lerp('mass_frac', 1),
+                    // Aerodynamic telemetry (enriched by runAscent) for the live panel.
+                    mach: lerp('mach'), q_kPa: lerp('q_kPa'), reynolds: lerp('reynolds'),
+                    drag_kN: lerp('drag_kN'),
+                    dragFriction_kN: lerp('dragFriction_kN'),
+                    dragPressure_kN: lerp('dragPressure_kN'),
+                    dragWave_kN: lerp('dragWave_kN'),
+                    boundaryLayer: (f < 0.5 ? a : b).boundaryLayer,
+                    regime: (f < 0.5 ? a : b).regime,
+                    // Propulsion telemetry.
+                    thrust_kN: lerp('thrust_kN'), isp_s: lerp('isp_s'),
+                    twr: lerp('twr'), accel_g: lerp('accel_g'),
+                    dv_used_kms: lerp('dv_used_kms'),
+                    throttle: lerp('throttle', 1),
+                    stage: (f < 0.5 ? a : b).stage,
+                    coasting: (f < 0.5 ? a : b).coasting,
+                    // Nozzle expansion telemetry.
+                    expansion01: lerp('expansion01', 0.2),
+                    exitMach: lerp('exitMach'), peOverPa: lerp('peOverPa', 1),
+                    nozzleState: (f < 0.5 ? a : b).nozzleState,
+                    separated: (f < 0.5 ? a : b).separated,
                 };
             }
         }
@@ -423,11 +510,20 @@ export function createRocketScene(canvas, opts = {}) {
         const tcd = now - f.t0;       // negative during ignition hold
 
         if (tcd < 0) {
-            // Ignition hold: spin up plume, hold on pad.
-            if (!f.ignited && tcd > -1.4) { plumes.forEach((p) => { p.visible = true; }); f.ignited = true; }
+            // Ignition hold: spin up plume, hold on pad, build the exhaust bloom.
+            if (!f.ignited && tcd > -1.4) {
+                plumes.forEach((p) => { p.visible = true; });
+                groundFX.group.visible = true;
+                f.ignited = true;
+            }
             const spool = Math.max(0, 1 + tcd / 1.4);
-            plumes.forEach((p) => tickPlume(p, now, spool * 0.6, 0));
-            onTick({ phase: 'ignition', t: tcd, altKm: 0, vKms: 0, throttle: spool * 0.6 });
+            const exp0 = padExpansion();
+            plumes.forEach((p) => tickPlume(p, now, spool * 0.6, 0, exp0));
+            groundFX.tick(now, spool * 0.6, 1);     // full ground-effect on the pad
+            // Engines settle from a small ignition twitch to centred as they light.
+            applyGimbal(Math.sin(now * 9) * 0.05 * (1 - spool), Math.cos(now * 7) * 0.05 * (1 - spool));
+            onTick({ phase: 'ignition', t: tcd, altKm: 0, vKms: 0, throttle: spool * 0.6,
+                     thrustMN: stage0ThrustFull_kN * spool * 0.6 / 1000 });
             return;
         }
 
@@ -435,7 +531,13 @@ export function createRocketScene(canvas, opts = {}) {
         const PLAY = Math.max(6, f.burn / 14);
         const flightT = tcd * PLAY;
         const s = sampleTraj(f.traj, flightT);
-        const throttle = s.mass_frac > 0.06 ? 1 : 0;
+        // Plume follows the real engine: lit whenever there is thrust, dark during
+        // the inter-stage coast. Intensity scales with thrust vs the sea-level
+        // liftoff thrust (so the vacuum thrust rise reads as a fuller plume).
+        const burning = (s.thrust_kN ?? 0) > 1 && !s.coasting;
+        const throttle = burning
+            ? Math.max(0.55, Math.min(1.2, (s.thrust_kN || 0) / Math.max(1, stage0ThrustFull_kN)))
+            : 0;
 
         const rise = altToScene(s.alt_km);
         rocketRoot.position.y = rise;              // rocket climbs; the ground stays put
@@ -449,12 +551,64 @@ export function createRocketScene(canvas, opts = {}) {
         scene.fog.color.copy(scene.background);
         stars.material.opacity = mix;
 
-        plumes.forEach((p) => { p.visible = throttle > 0; tickPlume(p, now, throttle, s.alt_km); });
+        plumes.forEach((p) => { p.visible = throttle > 0; tickPlume(p, now, throttle, s.alt_km, s.expansion01); });
 
-        if (tcd < 0.2) onPhase('liftoff'); else onPhase('ascent');
-        onTick({ phase: 'ascent', t: flightT, altKm: s.alt_km, vKms: s.v_kms, throttle });
+        // Thrust vectoring: a slow guidance weave plus a downrange lean that grows
+        // with altitude — the visible signature of the gravity-turn steering.
+        const lean = Math.min(0.16, s.alt_km / 90 * 0.16) * throttle;
+        applyGimbal(
+            (lean + Math.sin(flightT * 0.6) * 0.03) * throttle,
+            Math.sin(flightT * 0.45 + 1.3) * 0.03 * throttle,
+        );
+
+        // Ground bloom only reads near the pad; fade it out over the first ~1.5 km.
+        const groundMix = Math.max(0, 1 - s.alt_km / 1.5);
+        groundFX.group.visible = groundMix > 0.02 && throttle > 0;
+        if (groundFX.group.visible) groundFX.tick(now, throttle, groundMix);
+
+        if (s.coasting) onPhase('staging');
+        else if (tcd < 0.2) onPhase('liftoff');
+        else onPhase((s.stage || 1) > 1 ? 'stage ' + s.stage : 'ascent');
+        onTick({ phase: 'ascent', t: flightT, altKm: s.alt_km, vKms: s.v_kms,
+                 throttle: burning ? (s.throttle ?? 1) : 0,
+                 thrustMN: (s.thrust_kN ?? 0) / 1000,
+                 massFrac: s.mass_frac,
+                 mach: s.mach, qkPa: s.q_kPa, reynolds: s.reynolds,
+                 dragkN: s.drag_kN, dragFrictionkN: s.dragFriction_kN,
+                 dragPressurekN: s.dragPressure_kN, dragWavekN: s.dragWave_kN,
+                 boundaryLayer: s.boundaryLayer, regime: s.regime,
+                 // Propulsion telemetry for the live engine panel.
+                 isp: s.isp_s, twr: s.twr, accelG: s.accel_g,
+                 stage: s.stage, coasting: s.coasting, dvUsed: s.dv_used_kms,
+                 // Nozzle expansion state.
+                 nozzleState: s.nozzleState, peOverPa: s.peOverPa,
+                 exitMach: s.exitMach, separated: s.separated, expansion01: s.expansion01 });
 
         if (flightT >= f.burn - 1e-3) endFlight(f.result);
+    }
+
+    // Static-fire test: hold on the pad and fire stage 1 at the design throttle,
+    // with the engines weaving on their gimbals so the thrust vector is visible.
+    // Stage-1 nozzle expansion at the pad (sea level) — drives the static-fire
+    // and ignition plume shape from the real over-/optimally-expanded state.
+    function padExpansion() {
+        try { return currentDesign ? designStageExpansion01(currentDesign, 0, 0) : 0.35; }
+        catch { return 0.35; }
+    }
+
+    function tickStaticFire(now) {
+        const thr = clamp01(currentDesign?.stages?.[0]?.throttle ?? 1);
+        const exp0 = padExpansion();
+        plumes.forEach((p) => { p.visible = thr > 0; tickPlume(p, now, thr, 0, exp0); });
+        groundFX.group.visible = thr > 0;
+        if (groundFX.group.visible) groundFX.tick(now, thr, 1);
+        // Exaggerated gimbal sweep (a Lissajous figure) so the vectoring is obvious.
+        applyGimbal(
+            Math.sin(now * 1.3) * 0.09 * thr,
+            Math.sin(now * 0.9 + 1.0) * 0.09 * thr,
+        );
+        onTick({ phase: 'static-fire', t: now, altKm: 0, vKms: 0, throttle: thr,
+                 thrustMN: stage0ThrustFull_kN * thr / 1000 });
     }
 
     // ── Render loop ─────────────────────────────────────────────────────────
@@ -463,9 +617,10 @@ export function createRocketScene(canvas, opts = {}) {
         if (!running) return;
         raf = requestAnimationFrame(render);
         const now = clock.getElapsedTime();
-        if (autoRotate && !flight) rocketRoot.rotation.y += 0.0035;
+        if (autoRotate && !flight && !staticFire) rocketRoot.rotation.y += 0.0035;
         tickBeacons(padBeacons, now);
         if (flight) tickFlight(now);
+        else if (staticFire) tickStaticFire(now);
         controls.update();
         renderer.render(scene, camera);
     }
@@ -488,6 +643,7 @@ export function createRocketScene(canvas, opts = {}) {
         ro.disconnect();
         controls.dispose();
         disposeRocket();
+        groundFX.dispose();
         stars.geometry.dispose(); stars.material.dispose();
         renderer.dispose();
     }
@@ -497,10 +653,64 @@ export function createRocketScene(canvas, opts = {}) {
         launch,
         abort,
         reset,
+        setStaticFire,
+        get isStaticFiring() { return staticFire; },
         setView,
         setAutoRotate: (v) => { autoRotate = !!v; },
         dispose,
         get design() { return currentDesign; },
+    };
+}
+
+const clamp01 = (x) => Math.min(1, Math.max(0, x));
+
+/**
+ * Ground exhaust bloom — a flat additive disc + an expanding shock ring that
+ * pulse at the base of the booster while it fires. Purely cosmetic; intensity
+ * is driven by throttle and a 0..1 `mix` so it can fade out with altitude.
+ */
+function makeGroundFX() {
+    const group = new THREE.Group();
+    group.rotation.x = -Math.PI / 2;           // lie flat on the ground
+
+    const discMat = new THREE.MeshBasicMaterial({
+        color: 0xffd9a0, transparent: true, opacity: 0,
+        blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false,
+    });
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(1, 48), discMat);
+    group.add(disc);
+
+    const ringMat = new THREE.MeshBasicMaterial({
+        color: 0xffe6c2, transparent: true, opacity: 0,
+        blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false,
+    });
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.82, 1, 48), ringMat);
+    group.add(ring);
+
+    let baseR = 8;
+    return {
+        group, disc, ring,
+        configure(radius, color) {
+            baseR = Math.max(2, radius);
+            disc.material.color.set(color);
+            ring.material.color.set(color).lerp(new THREE.Color(0xffffff), 0.4);
+        },
+        tick(t, throttle, mix) {
+            const k = clamp01(throttle) * clamp01(mix);
+            // Billowing disc — breathes with a fast flicker so it doesn't look static.
+            const flick = 0.85 + Math.sin(t * 22) * 0.15;
+            const dR = baseR * (0.9 + 0.25 * Math.sin(t * 6)) * (0.6 + 0.6 * k);
+            disc.scale.setScalar(dR);
+            disc.material.opacity = 0.5 * k * flick;
+            // Shock ring expands outward then resets — reads as rolling exhaust.
+            const phase = (t * 0.8) % 1;
+            ring.scale.setScalar(baseR * (1 + phase * 1.8));
+            ring.material.opacity = 0.45 * k * (1 - phase);
+        },
+        dispose() {
+            disc.geometry.dispose(); disc.material.dispose();
+            ring.geometry.dispose(); ring.material.dispose();
+        },
     };
 }
 

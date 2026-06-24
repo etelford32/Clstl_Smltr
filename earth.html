@@ -167,6 +167,23 @@ body.theme-light #storm-watch-panel .sw-scrub-row2 input[type=range]::-webkit-sl
     box-shadow: 0 0 4px rgba(217, 106, 26, .45), inset 0 1px 0 rgba(255, 255, 255, .80);
 }
 
+/* AurOracle cross-sell chip in the SW HUD — teal to match the AurOracle
+   brand and stand out from the blue HUD as a "go deeper" affordance. */
+.ip-auroracle-cta{display:flex;align-items:center;gap:7px;margin:7px 0 2px;padding:7px 9px;
+    border-radius:7px;text-decoration:none;cursor:pointer;
+    background:linear-gradient(100deg,rgba(95,255,208,.10),rgba(0,198,255,.07));
+    border:1px solid rgba(95,255,208,.30);transition:border-color .15s,background .15s,transform .1s}
+.ip-auroracle-cta:hover{border-color:rgba(95,255,208,.55);background:linear-gradient(100deg,rgba(95,255,208,.16),rgba(0,198,255,.11))}
+.ip-auroracle-cta:active{transform:scale(.985)}
+.ip-aur-ico{color:#5fffd0;font-size:12px;flex-shrink:0;filter:drop-shadow(0 0 4px rgba(95,255,208,.6))}
+.ip-aur-txt{flex:1;font-size:10px;line-height:1.3;color:#bfeede}
+.ip-aur-txt b{color:#eafff7;font-weight:700;letter-spacing:.01em}
+.ip-aur-go{color:#5fffd0;font-size:13px;font-weight:700;flex-shrink:0}
+html.theme-light .ip-auroracle-cta,body.theme-light .ip-auroracle-cta{
+    background:linear-gradient(100deg,rgba(0,150,120,.12),rgba(0,140,180,.08));border-color:rgba(0,150,120,.4)}
+html.theme-light .ip-aur-txt{color:#1a6b58}
+html.theme-light .ip-aur-txt b{color:#0a4a3a}
+
 /* Aurora-power "fc-chip" intensity backgrounds inside the SW HUD
    are tuned for a dark surface (low-alpha rgba over near-black).
    On light, increase saturation so the chip still reads. */
@@ -2753,6 +2770,13 @@ import './js/telemetry.js';
             <span id="ip-aurora-forecast" class="iv"
                   style="display:flex;flex-wrap:wrap;gap:3px;justify-content:flex-end;font-size:9.5px;line-height:1.3;"></span>
         </div>
+        <!-- AurOracle cross-sell: tease the premium predictive aurora analytics
+             (tonight's viewing window, 7-night + 30-day, model breakdown). -->
+        <a class="ip-auroracle-cta" href="auroracle.html" data-funnel-cta="earth_aurora_to_auroracle">
+            <span class="ip-aur-ico">✦</span>
+            <span class="ip-aur-txt"><b>AurOracle</b> — predict your sky: tonight's viewing window, 7-night &amp; 30-day odds</span>
+            <span class="ip-aur-go">→</span>
+        </a>
 
         <!-- (hidden legacy element for JS compat) -->
         <span id="ip-storm" style="display:none;">—</span>
@@ -3363,6 +3387,9 @@ import {
 import { AtmosphereClimatology }    from './js/atmosphere-climatology.js';
 import { makeAtmosphereForecasters } from './js/atmosphere-forecast.js';
 import { makeWeatherFlowForecasters, WindAdvectionRK2Forecaster } from './js/weather-flow.js';
+import { FocusFootprint }        from './js/focus-footprint.js';
+import { WeatherPatchFeed }      from './js/weather-patch.js';
+import { EarthDetailInset, stitchGlobalBase, GIBS_LAYERS } from './js/earth-detail-inset.js';
 import { TracerSkillTracker } from './js/tracer-skill-tracker.js';
 import { WindShearProxy } from './js/wind-shear-proxy.js';
 import { AdvectionGainTracker } from './js/advection-gain-tracker.js';
@@ -3569,6 +3596,18 @@ const _prFloor = Math.min(1, _prCap);   // never upscale past 1:1 CSS pixels
 let   _prNow   = _prCap;                 // matches the setPixelRatio() call above
 let   _prEmaMs = 1000 / 60;             // frame-interval EMA, seeded at 60 fps
 let   _prLastEvalMs = 0;
+// Stage 2 of the governor: cloud-shader ALU tiers (u_quality in CLOUD_FRAG).
+// Resolution scaling alone can't rescue a GPU whose bottleneck is per-
+// fragment FBM noise — fewer pixels just re-spend the savings on the same
+// ALU-heavy fragments once the ratio floor is hit. Order of operations:
+// coarsen pixels first (cheapest visually), then drop cloud octaves; on
+// recovery, restore cloud quality before re-sharpening pixels.
+const _CLOUD_Q_TIERS = [1, 0.66, 0.33];
+let   _cloudQIdx     = 0;
+let   _cloudQForced  = false;   // URL/console override pins the tier
+function _setCloudQuality(q) {
+    cloudU.u_quality.value = q;
+}
 function _governResolution(frameMs) {
     // Ignore intervals that don't reflect GPU load: a backgrounded tab pauses
     // rAF (huge gap on return), and an occasional GC pause / sync data decode
@@ -3584,8 +3623,21 @@ function _governResolution(frameMs) {
     if (now - _prLastEvalMs < 600) return;   // re-evaluate at most ~every 0.6 s
     _prLastEvalMs = now;
     let next = _prNow;
-    if (_prEmaMs > 22 && _prNow > _prFloor)     next = Math.max(_prFloor, +(_prNow - 0.25).toFixed(2)); // < ~45 fps → coarsen
-    else if (_prEmaMs < 15 && _prNow < _prCap)  next = Math.min(_prCap,  +(_prNow + 0.25).toFixed(2));  // > ~66 fps → refine
+    if (_prEmaMs > 22) {                                       // < ~45 fps → coarsen
+        if (_prNow > _prFloor) {
+            next = Math.max(_prFloor, +(_prNow - 0.25).toFixed(2));
+        } else if (!_cloudQForced && _cloudQIdx < _CLOUD_Q_TIERS.length - 1) {
+            _cloudQIdx++;
+            _setCloudQuality(_CLOUD_Q_TIERS[_cloudQIdx]);
+        }
+    } else if (_prEmaMs < 15) {                                // > ~66 fps → refine
+        if (!_cloudQForced && _cloudQIdx > 0) {
+            _cloudQIdx--;
+            _setCloudQuality(_CLOUD_Q_TIERS[_cloudQIdx]);
+        } else if (_prNow < _prCap) {
+            next = Math.min(_prCap, +(_prNow + 0.25).toFixed(2));
+        }
+    }
     if (next !== _prNow) {
         _prNow = next;
         renderer.setPixelRatio(_prNow);
@@ -3680,6 +3732,28 @@ const stratU = { u_sun_dir: { value: SUN_EQ.clone() } };
         return clamped;
     };
     window.getCloudDataStrength = () => cloudU.u_cloud_data_strength.value;
+
+    // Cloud ALU quality override (see u_quality in CLOUD_FRAG + the
+    // governor's stage 2 above). Forcing a value pins the tier so the
+    // governor won't fight a measurement session.
+    //   earth.html?cloud_quality=0.33   or   window.setCloudQuality(0.33)
+    const qParam = new URLSearchParams(location.search).get('cloud_quality');
+    if (qParam != null) {
+        const q = parseFloat(qParam);
+        if (Number.isFinite(q)) {
+            _cloudQForced = true;
+            _setCloudQuality(Math.max(0, Math.min(1, q)));
+            console.info(`[CloudDebug] u_quality = ${cloudU.u_quality.value} (from URL, governor pinned)`);
+        }
+    }
+    window.setCloudQuality = (v) => {
+        const clamped = Math.max(0, Math.min(1, Number(v)));
+        _cloudQForced = true;
+        _setCloudQuality(clamped);
+        console.info(`[CloudDebug] u_quality = ${clamped} (governor pinned)`);
+        return clamped;
+    };
+    window.getCloudQuality = () => cloudU.u_quality.value;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -3996,9 +4070,56 @@ earthMesh.add(tropicGroup); // child of earthMesh → rotates with globe
 // ═══════════════════════════════════════════════════════════════
 // Load textures via shared earth-skin.js loader
 // — version-pinned CDN, RepeatWrapping applied, safe 1×1 fallbacks on error
-loadEarthTextures(earthU, cloudU).then(() => {
+// Max anisotropy kills the smeary mid-zoom range where oblique mipmap
+// sampling used to blur the base textures; mipmaps stay at the loader
+// defaults (generateMipmaps + trilinear). ×16 is effectively free on
+// desktop GPUs; on mobile tile GPUs it costs real bandwidth on every
+// textured fragment, so phones clamp to ×4 (the visual win saturates
+// well before ×16 at typical phone viewing angles).
+const IS_MOBILE_UA = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent ?? '');
+const EARTH_TEX_ANISO = IS_MOBILE_UA
+    ? Math.min(4, renderer.capabilities.getMaxAnisotropy())
+    : renderer.capabilities.getMaxAnisotropy();
+loadEarthTextures(earthU, cloudU, { anisotropy: EARTH_TEX_ANISO }).then(() => {
     document.getElementById('loading').classList.add('done');
+    _scheduleBaseUpgrade();
 });
+
+// ── 8K base-texture upgrade ─────────────────────────────────────────────────
+// The CDN Blue Marble is 4096×2048 (~0.09°/px) — visibly soft from half-globe
+// zoom inward. Once the page is idle, stitch BlueMarble_NextGeneration from
+// GIBS WMTS at level 3 (8192×4096, ~3–5 MB of edge-cached jpeg tiles) and
+// swap it over u_day. Strictly no-worse: any failure keeps the CDN texture.
+function _scheduleBaseUpgrade() {
+    if (renderer.capabilities.maxTextureSize < 8192) return;
+    if (navigator.connection?.saveData) return;
+    // GPU-memory gate: 8192×4096 RGBA8 + mips ≈ 180 MB resident (vs ~45 MB
+    // for the 4K texture). Fine on desktop; on phones it invites texture
+    // eviction jank, so mobile stays on 4K + anisotropy — which already
+    // fixes most of the mid-zoom smear. deviceMemory is Chrome-only, so
+    // only skip on the signal when it exists and reads low.
+    if (IS_MOBILE_UA) return;
+    if (Number.isFinite(navigator.deviceMemory) && navigator.deviceMemory < 8) return;
+    const kick = () => {
+        stitchGlobalBase().then((canvas) => {
+            if (!canvas) return;
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.colorSpace = THREE.SRGBColorSpace;
+            // Same conventions as loadEarthTextures: canvas row 0 is 90°N and
+            // the shader's normalToUV has v=0 at 90°N, so no flip on upload.
+            tex.flipY     = false;
+            tex.wrapS     = THREE.RepeatWrapping;
+            tex.wrapT     = THREE.ClampToEdgeWrapping;
+            tex.anisotropy = EARTH_TEX_ANISO;
+            const old = earthU.u_day.value;
+            earthU.u_day.value = tex;
+            old?.dispose?.();
+            console.info('[EarthSkin] base texture upgraded to 8K GIBS Blue Marble');
+        });
+    };
+    if ('requestIdleCallback' in window) requestIdleCallback(kick, { timeout: 15_000 });
+    else setTimeout(kick, 8_000);
+}
 
 // ── Storm-update: push active cyclone positions into cloud shader ─────────────
 new StormFeed().start();
@@ -5939,6 +6060,142 @@ wxFeed.backfill(wxGridHistory, 24).then(n => {
     if (n > 0) wxResolver?.invalidate();
 });
 
+// ── High-res focus patch (nested focus window) ─────────────────────────────
+// The 5° global grid destroys all sub-synoptic structure; instead of a
+// quadratically-expensive global resolution bump, FocusFootprint tracks the
+// camera's ground footprint and WeatherPatchFeed fetches a ≤64×64 patch at
+// 0.25–1° (browser-direct Open-Meteo, keyless, per-visitor IP) whenever the
+// camera frames a region. The surface + cloud shaders blend the patch over
+// the global field inside the footprint with a soft edge (PATCH_GLSL in
+// js/earth-skin.js). The same FocusFootprint events will drive the Phase 2
+// GIBS imagery inset — one primitive, two features.
+const focusFootprint = new FocusFootprint({
+    camera, earthObject: earthMesh, radius: R_EARTH,
+});
+const wxPatchFeed = new WeatherPatchFeed();
+
+// "+ patch 64×48 · 0.5°" suffix for the wx-panel grid readout. Composed
+// with the base grid string by _refreshGridReadout so the patch status
+// survives the weather-update handler's own rewrites.
+let _baseGridStr  = '—';
+let _patchGridStr = '';
+function _refreshGridReadout() {
+    const el = document.getElementById('wx-grid');
+    if (el) el.textContent = _patchGridStr ? `${_baseGridStr} ${_patchGridStr}` : _baseGridStr;
+}
+
+{
+    const _mkPatchTex = (w, h) => {
+        const t = new THREE.DataTexture(
+            new Float32Array(w * h * 4), w, h, THREE.RGBAFormat, THREE.FloatType
+        );
+        t.magFilter = THREE.LinearFilter;   // GPU bilinear does the patch upsample
+        t.minFilter = THREE.LinearFilter;
+        t.wrapS     = THREE.ClampToEdgeWrapping;   // a patch is NOT lon-periodic
+        t.wrapT     = THREE.ClampToEdgeWrapping;
+        // Rows are south-first and sampled via the explicitly computed patch
+        // UV (v=0 ⇔ latMin), so unlike u_weather there is no flipY here.
+        t.flipY = false;
+        return t;
+    };
+    // Patch dims change with footprint shape, and DataTexture can't resize
+    // in place — recreate on mismatch, reuse otherwise.
+    const _setPatch = (uniform, data, w, h) => {
+        const cur = uniform.value;
+        if (!cur?.isDataTexture || cur.image.width !== w || cur.image.height !== h) {
+            cur?.dispose?.();
+            uniform.value = _mkPatchTex(w, h);
+        }
+        uniform.value.image.data.set(data);
+        uniform.value.needsUpdate = true;
+    };
+
+    document.addEventListener('weather-patch-update', (ev) => {
+        const { weatherRGBA, cloudRGBA, w, h, bounds, stepDeg } = ev.detail;
+        _setPatch(earthU.u_patch_weather, weatherRGBA, w, h);
+        // _setPatch may have recreated the texture — re-share the reference
+        // with the cloud shader (same pattern as u_weather above).
+        cloudU.u_patch_weather.value = earthU.u_patch_weather.value;
+        _setPatch(cloudU.u_patch_clouds, cloudRGBA, w, h);
+        earthU.u_patch_bounds.value.set(bounds.lonMin, bounds.latMin, bounds.lonSpan, bounds.latSpan);
+        cloudU.u_patch_bounds.value.copy(earthU.u_patch_bounds.value);
+        earthU.u_patch_on.value = 1;
+        cloudU.u_patch_on.value = 1;
+        const degStr = Number.isInteger(stepDeg) ? `${stepDeg}°` : `${stepDeg.toFixed(2)}°`;
+        _patchGridStr = `+ patch ${w}×${h} · ${degStr}`;
+        _refreshGridReadout();
+    });
+    document.addEventListener('weather-patch-clear', () => {
+        earthU.u_patch_on.value = 0;
+        cloudU.u_patch_on.value = 0;
+        _patchGridStr = '';
+        _refreshGridReadout();
+    });
+}
+
+// ── GIBS imagery detail inset (zoom LOD) ───────────────────────────────────
+// Second subscriber to the same FocusFootprint events: past the activation
+// threshold it stitches VIIRS true-colour WMTS tiles over the visible
+// footprint (down to ~150 m/px at full zoom) and the surface shader blends
+// them over the Blue Marble base with the shared inset-edge falloff.
+const earthDetailInset = new EarthDetailInset();
+
+document.addEventListener('earth-detail-inset', (ev) => {
+    const { canvas, bounds } = ev.detail;
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    // Canvas row 0 is the inset's NORTH edge while the shared insetUV
+    // convention puts v=0 at latMin (south) — flipY=true reverses rows on
+    // upload so v=1 lands on the north edge. (CanvasTexture defaults to
+    // true; set explicitly because the relationship is load-bearing.)
+    tex.flipY      = true;
+    tex.wrapS      = THREE.ClampToEdgeWrapping;   // an inset is NOT lon-periodic
+    tex.wrapT      = THREE.ClampToEdgeWrapping;
+    tex.anisotropy = EARTH_TEX_ANISO;
+    const old = earthU.u_detail.value;
+    earthU.u_detail.value = tex;
+    earthU.u_detail_bounds.value.set(bounds.lonMin, bounds.latMin, bounds.lonSpan, bounds.latSpan);
+    earthU.u_detail_on.value = 1;
+    old?.dispose?.();
+});
+document.addEventListener('earth-detail-clear', () => {
+    earthU.u_detail_on.value = 0;
+});
+
+// ── Topology detail inset (zoom LOD, bump pass) ─────────────────────────────
+// Third subscriber to the same footprint: a GIBS shaded-relief window that
+// drives the surface bump pass harder once the camera is close enough that
+// the global height map (0.176°/texel) has nothing left to give. Tighter
+// activation than the imagery inset — relief detail only reads at close
+// range, and every active inset is another fetch stream on pan.
+const topoDetailInset = new EarthDetailInset({
+    layer: GIBS_LAYERS.topology,
+    activateSpanDeg: 25,
+    eventPrefix: 'earth-topo-detail',
+});
+
+document.addEventListener('earth-topo-detail-inset', (ev) => {
+    const { canvas, bounds } = ev.detail;
+    const tex = new THREE.CanvasTexture(canvas);
+    // Height-ish data, sampled for gradients — keep the default linear
+    // (no-colour-space) decode, matching the global u_topology texture.
+    // flipY=true for the same reason as the imagery inset: canvas row 0 is
+    // the north edge, insetUV has v=0 at latMin.
+    tex.flipY      = true;
+    tex.wrapS      = THREE.ClampToEdgeWrapping;
+    tex.wrapT      = THREE.ClampToEdgeWrapping;
+    tex.anisotropy = EARTH_TEX_ANISO;
+    const old = earthU.u_topo_detail.value;
+    earthU.u_topo_detail.value = tex;
+    earthU.u_topo_detail_bounds.value.set(bounds.lonMin, bounds.latMin, bounds.lonSpan, bounds.latSpan);
+    earthU.u_topo_detail_texel.value.set(1 / canvas.width, 1 / canvas.height);
+    earthU.u_topo_detail_on.value = 1;
+    old?.dispose?.();
+});
+document.addEventListener('earth-topo-detail-clear', () => {
+    earthU.u_topo_detail_on.value = 0;
+});
+
 // ── Forecast feed (progressive, lazy) ──────────────────────────────────────
 // Fetches hourly U/V/T/P/RH/cloud/precip from Open-Meteo's bulk forecast
 // endpoint in 24-hour batches and pushes each hour into wxGridHistory's
@@ -7172,6 +7429,15 @@ document.addEventListener('weather-update', e => {
     const { weatherBuffer, windBuffer, cloudBuffer, meta } = e.detail;
     updateWeatherTextures(weatherBuffer, windBuffer, cloudBuffer);
 
+    // Couple the high-res patch to the time scrubber. A past instant
+    // re-paints the patch from its session ring (or hides it when the
+    // session hasn't lived through that hour); any future instant hides
+    // it — there is no high-res forecast behind the window, and painting
+    // "now" data over a forecast globe would be silently wrong.
+    const scrubT = (meta?.replayT != null && (meta.replay || meta.isForecast))
+        ? meta.replayT : null;
+    wxPatchFeed.setTimeContext(scrubT);
+
     // Stash references so the hover tooltip can bilinear-sample point
     // values (T/P/RH, cloud cover, precip rate) without rerouting through
     // the event payload. WeatherFeed reuses the same Float32Array each
@@ -7223,10 +7489,11 @@ document.addEventListener('weather-update', e => {
     if (meta.gridW && meta.gridH) {
         const deg = (meta.gridDeg ?? 180 / meta.gridH);
         const degStr = Number.isInteger(deg) ? `${deg}°` : `${deg.toFixed(1)}°`;
-        document.getElementById('wx-grid').textContent = `${meta.gridW}×${meta.gridH} · ${degStr}`;
+        _baseGridStr = `${meta.gridW}×${meta.gridH} · ${degStr}`;
     } else {
-        document.getElementById('wx-grid').textContent = '—';
+        _baseGridStr = '—';
     }
+    _refreshGridReadout();
 
     // Data age — how old the cached row from Supabase is, NOT how long ago
     // the browser fetched. Surfaces pg_cron failures to visitors: fresh ≤ 90
@@ -9517,6 +9784,12 @@ function animate() {
     // detection makes this a no-op (~10 µs) when the visible frame
     // hasn't moved appreciably, so we can call it every rAF.
     wxResolver?.tick(simTimeMs);
+
+    // Focus-footprint tracker for the high-res weather patch (and, later,
+    // the imagery detail inset). Internally throttled to one event per
+    // 1.5 s and only when the camera has actually moved — per-rAF cost is
+    // one worldToLocal plus a few trig ops.
+    focusFootprint.tick();
 
     // Slider writeback: while the user isn't actively scrubbing (slider
     // not focused), keep the slider position in sync with simTimeMs so

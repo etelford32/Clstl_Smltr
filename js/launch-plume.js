@@ -17,7 +17,7 @@
  *     name = 'Plume',
  *   }) → THREE.Group
  *
- *   tickPlume(plumeGroup, t, throttle, altKm = 0)
+ *   tickPlume(plumeGroup, t, throttle, altKm = 0, expansionOverride)
  *     t       — render-loop elapsed seconds (drives shimmer / diamonds)
  *     throttle — 0..1
  *     altKm   — current altitude above pad in kilometers; the shader
@@ -25,6 +25,10 @@
  *               pressure falls (sea-level: tight overexpanded plume with
  *               crisp Mach diamonds; vacuum: wide diffuse plume, diamonds
  *               stretch and dim).
+ *     expansionOverride — optional explicit 0..1 expansion figure. When the
+ *               caller knows the real nozzle expansion state (pₑ/pₐ), it can
+ *               pass it here to drive the plume shape from physics instead of
+ *               the crude altitude proxy. Falls back to altKm when omitted.
  */
 
 import * as THREE from 'three';
@@ -241,9 +245,11 @@ export function buildPlume(opts) {
     return g;
 }
 
-export function tickPlume(plume, t, throttle = 1, altKm = 0) {
+export function tickPlume(plume, t, throttle = 1, altKm = 0, expansionOverride) {
     if (!plume.visible) return;
-    const expansion = Math.min(1, Math.max(0, altKm / 30));   // 0 SL, 1 ≥ 30 km
+    const expansion = (expansionOverride != null)
+        ? Math.min(1, Math.max(0, expansionOverride))
+        : Math.min(1, Math.max(0, altKm / 30));               // 0 SL, 1 ≥ 30 km
 
     for (const child of plume.children) {
         const u = child.userData;

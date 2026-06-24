@@ -603,8 +603,10 @@
     // form, so it has no pill — but we accept the URL param so that
     // marketing copy linking ?plan=enterprise still pre-selects something
     // sensible (advanced) instead of crashing the renderer.
-    const _rawUrlPlan = new URLSearchParams(location.search).get('plan') || 'free';
-    const urlPlan     = _rawUrlPlan === 'enterprise' ? 'advanced' : _rawUrlPlan;
+    const _rawUrlPlan = (new URLSearchParams(location.search).get('plan') || 'free').toLowerCase();
+    // AurOracle intro + legacy 'intro' invite codes map to the Basic tier.
+    const _aliasedPlan = (_rawUrlPlan === 'auroracle' || _rawUrlPlan === 'intro') ? 'basic' : _rawUrlPlan;
+    const urlPlan     = _aliasedPlan === 'enterprise' ? 'advanced' : _aliasedPlan;
     const planMap = {
         free:        'pill-free',
         basic:       'pill-basic',
