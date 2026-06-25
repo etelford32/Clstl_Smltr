@@ -1069,6 +1069,18 @@ import './js/telemetry.js';
                         <input type="range" id="sl-cutdepth" min="0" max="100" step="1" value="45" style="flex:1">
                     </div>
                     <div class="layer-grp">Views</div>
+                    <div class="toggle-row" style="align-items:center;gap:8px">
+                        <label for="view-mode" style="font-size:11px;opacity:.75;white-space:nowrap">Wavelength</label>
+                        <select id="view-mode" style="flex:1;background:#1a1410;color:#e8d8c0;border:1px solid #3a2e22;border-radius:4px;padding:3px 6px;font-size:11px">
+                            <option value="0">White light · photosphere</option>
+                            <option value="1">AIA 304 Å · chromosphere</option>
+                            <option value="2">AIA 171 Å · coronal loops</option>
+                            <option value="3">AIA 193 Å · corona + holes</option>
+                            <option value="4">AIA 211 Å · active corona</option>
+                            <option value="5">AIA 131 Å · flare plasma</option>
+                            <option value="6">HMI · magnetogram</option>
+                        </select>
+                    </div>
                     <div class="toggle-row layer-row" id="lr-doppler">
                         <input type="checkbox" id="tog-doppler">
                         <label for="tog-doppler">
@@ -2046,6 +2058,7 @@ const uniforms = {
     u_cutOffset:         { value: 2.0 },
     u_cutaway:           { value: 0.0 },
     u_doppler:           { value: 0.0 },   // 1 = Doppler line-of-sight velocity view
+    u_viewMode:          { value: 0.0 },   // 0=white light 1=304 2=171 3=193 4=211 5=131 6=magnetogram
     u_fluidTex:          { value: null },  // GPU thermal-convection sim (T in .r, vel in .gb)
     u_fluidOn:           { value: 0.0 },   // 1 = sim drives the granulation
     u_fluidT0:           { value: 1.0 },
@@ -2523,6 +2536,7 @@ const sunFS = /* glsl */`
     uniform float u_cutOffset;       // plane offset along u_cut; >1 = disabled
     uniform float u_cutaway;         // 1 = cutaway/peel active
     uniform float u_doppler;         // 1 = Doppler velocity view
+    uniform float u_viewMode;        // 0=white 1=304 2=171 3=193 4=211 5=131 6=magnetogram
     uniform sampler2D u_fluidTex;    // GPU convection sim
     uniform float u_fluidOn;
     uniform float u_fluidT0;
@@ -2655,6 +2669,15 @@ const sunFS = /* glsl */`
     // slightly in the highlights (the "filmic" look). Applied in linear-light
     // space before the global ACES the renderer already applies — kept gentle
     // so the two don't double up.
+    // AIA-style false-colour ramp: black -> channel tint -> bright -> white.
+    vec3 aiaRamp(float I, vec3 c1, vec3 c2, vec3 c3) {
+        I = max(I, 0.0);
+        vec3 c = mix(vec3(0.0), c1, smoothstep(0.0, 0.22, I));
+        c = mix(c, c2, smoothstep(0.22, 0.72, I));
+        c = mix(c, c3, smoothstep(0.72, 1.35, I));
+        return c;
+    }
+
     vec3 acesFilm(vec3 x) {
         const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
         return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
@@ -3225,6 +3248,69 @@ const sunFS = /* glsl */`
         // pre-conditioning is intentionally gentle (the post-stage will run on
         // the bloom-accumulated output).
         col = acesFilm(col * 0.95) * 1.18;
+
+        // ── EUV / magnetogram wavelength views ─────────────────────────────
+        // Recolour the whole disc to an SDO channel, synthesised from structural
+        // fields already computed: magnetic network (sgNet), active-region plage,
+        // sunspot umbra, fluid-temperature filaments, synthetic coronal holes.
+        //   1=304Å  2=171Å  3=193Å  4=211Å  5=131Å  6=HMI magnetogram
+        if (u_viewMode > 0.5) {
+            float netw = sgNet;
+            float arEm = clamp(plage * 1.5 + facular * 0.7 + mbp * 0.4, 0.0, 2.2);
+            float Tf   = texture2D(u_fluidTex, vUv).r;
+            float filament = smoothstep(0.92, 0.62, Tf);                 // cool plasma -> dark filament
+            float holeN = vnoise(fragUnit * 2.1 + vec3(11.0));
+            float polar = smoothstep(0.58, 0.86, abs(fragUnit.y));
+            float hole  = clamp(max(polar, smoothstep(0.60, 0.40, holeN)), 0.0, 1.0);
+            float moss  = 0.22 + 0.22 * vnoise(fragUnit * 16.0 + vec3(u_time * 0.02));
+            float hot   = microflare + plage * u_flare_intensity * 1.5;
+            float limb  = 0.55 + 0.45 * mu;
+            float rim   = pow(max(1.0 - mu, 0.0), 3.2);
+            vec3 euv;
+            if (u_viewMode < 1.5) {                                      // 304 — chromosphere, warm red
+                float I = (moss * 0.55 + netw * 1.0 + arEm * 1.3) * limb;
+                I *= (1.0 - filament * 0.85);
+                euv  = aiaRamp(I, vec3(0.50,0.11,0.04), vec3(1.00,0.42,0.16), vec3(1.00,0.90,0.70));
+                euv += vec3(1.00,0.35,0.12) * rim * 0.9;
+            } else if (u_viewMode < 2.5) {                              // 171 — quiet corona, gold
+                float I = (moss * 0.70 + netw * 0.85 + arEm * 1.25) * limb;
+                I *= (1.0 - hole * 0.65);
+                euv  = aiaRamp(I, vec3(0.22,0.15,0.03), vec3(0.92,0.68,0.20), vec3(1.00,0.96,0.80));
+                euv += vec3(0.90,0.75,0.30) * rim * 0.5;
+            } else if (u_viewMode < 3.5) {                              // 193 — corona + holes, bronze
+                float I = (moss * 0.70 + netw * 0.50 + arEm * 1.15) * limb;
+                I *= (1.0 - hole * 0.92);
+                euv  = aiaRamp(I, vec3(0.14,0.12,0.06), vec3(0.80,0.72,0.28), vec3(0.92,1.00,0.72));
+                euv += vec3(0.60,0.80,0.40) * rim * 0.45;
+            } else if (u_viewMode < 4.5) {                              // 211 — active corona, purple
+                float I = (moss * 0.45 + netw * 0.40 + arEm * 1.6) * limb;
+                I *= (1.0 - hole * 0.85);
+                euv  = aiaRamp(I, vec3(0.16,0.06,0.22), vec3(0.72,0.38,0.95), vec3(1.00,0.90,1.00));
+                euv += vec3(0.70,0.40,0.95) * rim * 0.4;
+            } else if (u_viewMode < 5.5) {                              // 131 — flare plasma, teal
+                float I = (moss * 0.28 + arEm * 0.7 + hot * 1.8) * limb;
+                euv  = aiaRamp(I, vec3(0.03,0.13,0.13), vec3(0.18,0.78,0.80), vec3(0.85,1.00,1.00));
+                euv += vec3(0.20,0.85,0.90) * rim * 0.35;
+            } else {                                                    // HMI magnetogram — bipolar grey
+                float b = 0.0;
+                for (int k = 0; k < 8; k++) {
+                    if (k >= u_arSpotCount) break;
+                    vec3  arP = normalize(u_arSpots[k].xyz);
+                    float ints = clamp(0.4 + abs(u_arSpots[k].w), 0.3, 1.2);
+                    vec3  east = normalize(cross(vec3(0.0,1.0,0.0), arP) + vec3(1e-6));
+                    vec3  pP = normalize(arP + east * 0.05);            // leading polarity (+)
+                    vec3  nP = normalize(arP - east * 0.05);            // trailing polarity (-)
+                    float ap = acos(clamp(dot(fragUnit, pP), -1.0, 1.0));
+                    float an = acos(clamp(dot(fragUnit, nP), -1.0, 1.0));
+                    b += ints * (exp(-ap*ap/0.0016) - exp(-an*an/0.0016));
+                }
+                b += (netw - 0.45) * 0.30;                              // faint network salt-and-pepper
+                b  = clamp(b, -1.0, 1.0);
+                euv = vec3(0.5 + b * 0.5) * (0.65 + 0.35 * mu);
+            }
+            if (u_viewMode < 5.5) euv *= (1.0 - umbra * 0.85);          // sunspots read dark in EUV too
+            col = euv;
+        }
 
         // ── Doppler velocity mode (Phase 5) ───────────────────────────────
         // Recolour the surface by line-of-sight convective velocity — the
@@ -7951,6 +8037,30 @@ function _setDoppler(on) {
     }
     _refreshLayerIsolation();
 }
+// In a channel view, hide the white-light off-limb layers (they'd clash, e.g.
+// an orange corona ring around a grey magnetogram); restore them from the
+// layer toggles on return to white light. Coronal loops stay for the corona
+// EUV channels (171/193/211).
+function _applyViewLayers(channel) {
+    const togOn = (id) => document.getElementById(id)?.checked !== false;
+    const coronaOn = channel ? false : togOn('tog-corona');
+    if (volumetricCorona) volumetricCorona.setVisible(coronaOn);
+    else if (coronaMesh)  coronaMesh.visible = coronaOn;
+    if (chromoMesh) chromoMesh.visible = channel ? false : togOn('tog-chrom');
+    if (trMesh)     trMesh.visible     = channel ? false : togOn('tog-tr');
+    if (promGroup)  promGroup.visible  = channel ? false : togOn('tog-prom');
+    if (loopGroup)  loopGroup.visible  = channel === 0 ? togOn('tog-loops') : (channel >= 2 && channel <= 4);
+}
+document.getElementById('view-mode')?.addEventListener('change', e => {
+    const m = parseFloat(e.target.value) || 0;
+    uniforms.u_viewMode.value = m;
+    // EUV/magnetogram and Doppler are mutually exclusive views.
+    if (m > 0) {
+        const dop = document.getElementById('tog-doppler');
+        if (dop?.checked) { dop.checked = false; dop.dispatchEvent(new Event('change', { bubbles: true })); }
+    }
+    _applyViewLayers(m);
+});
 document.getElementById('tog-doppler')?.addEventListener('change', e => {
     _setLayerActive('lr-doppler', e.target.checked);
     _setDoppler(e.target.checked);
