@@ -57,6 +57,18 @@ const json = (obj, status = 200) => ({ status, contentType: 'application/json', 
  *   'network'  → aborted connection
  */
 async function stubSupabase(page, { tokenResult = 'success' } = {}) {
+    // Fallback FIRST (lowest priority): any unmocked Supabase call — telemetry
+    // RPCs fired by the sentinel/funnel, etc. — returns an empty 200 so nothing
+    // reaches the real backend or hangs. Playwright matches the MOST-recently
+    // registered route first, so the specific routes below take precedence.
+    await page.route('**/*.supabase.co/**', (route) => route.fulfill(json({})));
+
+    // effective_plan_for + any other RPC — non-fatal in app code, stubbed for quiet.
+    await page.route('**/rest/v1/rpc/**', (route) => route.fulfill(json('free')));
+    await page.route('**/rest/v1/user_profiles**', (route) => route.fulfill(json([mockProfileRow])));
+    await page.route('**/auth/v1/user**', (route) => route.fulfill(json(mockUser)));
+    await page.route('**/auth/v1/logout**', (route) => route.fulfill({ status: 204, body: '' }));
+    // Registered LAST → highest priority → wins over the fallback above.
     await page.route('**/auth/v1/token**', (route) => {
         if (tokenResult === 'network') return route.abort();
         if (tokenResult === 'badcreds') {
@@ -64,14 +76,6 @@ async function stubSupabase(page, { tokenResult = 'success' } = {}) {
         }
         return route.fulfill(json(mockSession));
     });
-    await page.route('**/auth/v1/user**', (route) => route.fulfill(json(mockUser)));
-    await page.route('**/auth/v1/logout**', (route) => route.fulfill({ status: 204, body: '' }));
-    await page.route('**/rest/v1/user_profiles**', (route) => route.fulfill(json([mockProfileRow])));
-    // effective_plan_for + any other RPC — non-fatal in app code, stubbed for quiet.
-    await page.route('**/rest/v1/rpc/**', (route) => route.fulfill(json('free')));
-    // Telemetry RPCs fired by the sentinel / funnel — swallow so they never
-    // reach a real project and never slow the test.
-    await page.route('**/auth/v1/**', (route) => route.fulfill(json({})));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -84,14 +88,17 @@ test.describe('OAuth misland sentinel', () => {
         const hash = '#access_token=' + fakeJwt(USER_ID) +
             '&refresh_token=fake-refresh-token&token_type=bearer&expires_in=3600';
         await page.goto('/' + hash);
-        await page.waitForURL(/\/auth-callback\.html\?from=recovered_misland/, { timeout: 10_000 });
+        // waitUntil:'commit' — the callback page redirects again as it processes
+        // the token, so don't wait for its 'load'; match as soon as the URL
+        // commits to the forwarded address.
+        await page.waitForURL(/\/auth-callback\.html\?from=recovered_misland/, { timeout: 10_000, waitUntil: 'commit' });
         // The token payload must survive the bounce so the callback can use it.
         expect(page.url()).toContain('access_token');
     });
 
     test('an OAuth error landing on a normal page is forwarded too', async ({ page }) => {
         await page.goto('/space-weather.html#error=access_denied&error_description=User+cancelled');
-        await page.waitForURL(/\/auth-callback\.html\?from=recovered_misland/, { timeout: 10_000 });
+        await page.waitForURL(/\/auth-callback\.html\?from=recovered_misland/, { timeout: 10_000, waitUntil: 'commit' });
         expect(page.url()).toContain('error=access_denied');
     });
 
@@ -110,19 +117,17 @@ test.describe('OAuth misland sentinel', () => {
 test.describe('Signin happy path', () => {
     test('valid credentials reach the signed-in state', async ({ page }) => {
         await stubSupabase(page, { tokenResult: 'success' });
+        // Freeze the post-login redirect (default dest is dashboard.html) so the
+        // success state is observable deterministically instead of racing a
+        // navigation away from the page.
+        await page.route('**/dashboard.html**', (route) => route.abort());
         await page.goto('/signin.html');
         await page.fill('#email', 'e2e@playwright.test');
         await page.fill('#password', 'CorrectHorse9!');
         await page.click('#btn-submit');
 
-        // Success either flips on the #login-success panel or has already
-        // redirected away from /signin — accept whichever the browser reaches.
-        await expect(async () => {
-            const successShown = await page.locator('#login-success').isVisible().catch(() => false);
-            const leftSignin = !page.url().includes('signin');
-            expect(successShown || leftSignin).toBeTruthy();
-        }).toPass({ timeout: 10_000 });
-
+        // The success panel flips on once signInWithPassword resolves.
+        await expect(page.locator('#login-success')).toBeVisible({ timeout: 10_000 });
         // And the error field must NOT have been raised.
         await expect(page.locator('#err-pw')).not.toHaveClass(/visible/);
     });
