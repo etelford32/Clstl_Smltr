@@ -58,7 +58,7 @@ import logging
 import math
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -204,10 +204,25 @@ def validate(
     historical_ap: list[dict],
     *,
     density_fn: DensityFn,
+    baseline_ap_mode: str = "real",
+    persistence_lag_hours: float = 24.0,
+    climatology_ap: float = 15.0,
 ) -> Residuals:
     """
-    For each truth sample: predict baseline density (MSIS + real Ap) and
-    candidate density (MSIS + pseudo-Ap), compute residuals, summarise.
+    For each truth sample: predict baseline density and candidate density
+    (MSIS + MHD pseudo-Ap), compute residuals, summarise.
+
+    The baseline driver depends on `baseline_ap_mode`:
+      - "real"        — MSIS + the definitive (after-the-fact) Ap. The original
+                        hindcast gate: can MHD beat *perfect-hindsight* Ap.
+      - "persistence" — MSIS + Ap lagged by `persistence_lag_hours`, i.e. the
+                        Ap an operator would have had at forecast-issue time
+                        (the canonical no-skill forecast benchmark).
+      - "climatology" — MSIS + a fixed quiet `climatology_ap`.
+    The "persistence"/"climatology" modes score MHD as a FORECAST: the
+    candidate (pseudo-Ap from L1 IMF) is available in near-real-time, whereas
+    the real Ap is not. Storm-time is always defined by the REAL Ap, so the
+    mask is identical across modes and the numbers stay comparable.
     """
     samples_out = []
     sq_base = sq_cand = sq_base_storm = sq_cand_storm = 0.0
@@ -221,9 +236,18 @@ def validate(
         f107      = _interp_step(historical_ap, when, "f107_sfu")
         ap_pseudo = _interp_step(pseudo_series, when, "ap_pseudo")
 
+        if baseline_ap_mode == "persistence":
+            ap_base = _interp_step(historical_ap,
+                                   when - timedelta(hours=persistence_lag_hours),
+                                   "ap")
+        elif baseline_ap_mode == "climatology":
+            ap_base = climatology_ap
+        else:                                  # "real"
+            ap_base = ap_real
+
         try:
             base = density_fn(tr["alt_km"],
-                              f107_sfu=f107, ap=ap_real,
+                              f107_sfu=f107, ap=ap_base,
                               lat_deg=tr["lat_deg"], lon_deg=tr["lon_deg"],
                               when=when)
             cand = density_fn(tr["alt_km"],
@@ -252,6 +276,7 @@ def validate(
             "t":              when.isoformat().replace("+00:00", "Z"),
             "alt_km":         tr["alt_km"],
             "ap_real":        ap_real,
+            "ap_baseline":    ap_base,
             "ap_pseudo":      ap_pseudo,
             "f107_sfu":       f107,
             "rho_truth":      rho_truth,
@@ -297,7 +322,8 @@ def validate(
 GATE_THRESHOLD_PCT = 25.0   # MHD_DENSITY_PRODUCT_PLAN.md Phase 0 success bar
 
 
-def _render_markdown(event_id: str, hindcast: dict, r: Residuals) -> str:
+def _render_markdown(event_id: str, hindcast: dict, r: Residuals,
+                     baseline_label: str = "MSIS + real Ap") -> str:
     passed = (r.skill_storm_pct >= GATE_THRESHOLD_PCT)
     verdict = "✅ PASS" if passed else "❌ FAIL"
     return f"""# Hindcast residual report — {event_id}
@@ -306,11 +332,12 @@ def _render_markdown(event_id: str, hindcast: dict, r: Residuals) -> str:
 * **Window:** {hindcast["window_utc"][0]} → {hindcast["window_utc"][1]}
 * **Pseudo-Ap regression:** {hindcast["regression"]["version"]} — `{hindcast["regression"]["formula"]}`
 * **MHD source:** {hindcast["source"]}
+* **Baseline driver:** {baseline_label}
 * **Truth samples:** {r.n_total} ({r.n_storm} storm-time, Ap≥39)
 
 ## Residual statistics (kg/m³)
 
-|                           | Baseline (MSIS + real Ap) | Candidate (MSIS + Ap*) |
+|                           | Baseline ({baseline_label}) | Candidate (MSIS + Ap*) |
 |---------------------------|---------------------------|------------------------|
 | RMSE — full window        | {r.rmse_baseline:.3e}     | {r.rmse_candidate:.3e} |
 | RMSE — storm-time         | {r.rmse_storm_baseline:.3e} | {r.rmse_storm_candidate:.3e} |
@@ -336,6 +363,18 @@ def _build_argparser() -> argparse.ArgumentParser:
     p.add_argument("--truth",    type=Path, required=True)
     p.add_argument("--historical-ap", type=Path, required=True)
     p.add_argument("--out", type=Path, default=Path("data/hindcast"))
+    p.add_argument("--baseline-ap-mode",
+                   choices=["real", "persistence", "climatology"], default="real",
+                   help="Driver for the BASELINE MSIS run. 'real' (default) = the "
+                        "definitive after-the-fact Ap (original hindcast gate). "
+                        "'persistence'/'climatology' score the MHD pseudo-Ap as a "
+                        "FORECAST against an operationally-available Ap (the regime "
+                        "where MHD adds value — pseudo-Ap is known in near-real-time "
+                        "from L1 IMF, the real Ap is not).")
+    p.add_argument("--persistence-lag-hours", type=float, default=24.0,
+                   help="Forecast horizon for --baseline-ap-mode persistence.")
+    p.add_argument("--climatology-ap", type=float, default=15.0,
+                   help="Fixed quiet Ap for --baseline-ap-mode climatology.")
     p.add_argument("-v", "--verbose", action="store_true")
     return p
 
@@ -358,7 +397,18 @@ def main(argv: Optional[list[str]] = None) -> int:
              len(truth), len(historical_ap), len(hindcast["samples"]),
              hindcast["event_id"])
 
-    residuals = validate(hindcast, truth, historical_ap, density_fn=density_fn)
+    residuals = validate(hindcast, truth, historical_ap, density_fn=density_fn,
+                         baseline_ap_mode=args.baseline_ap_mode,
+                         persistence_lag_hours=args.persistence_lag_hours,
+                         climatology_ap=args.climatology_ap)
+
+    if args.baseline_ap_mode == "persistence":
+        baseline_label = f"MSIS + persistence-Ap (−{args.persistence_lag_hours:g} h)"
+    elif args.baseline_ap_mode == "climatology":
+        baseline_label = f"MSIS + climatology-Ap ({args.climatology_ap:g})"
+    else:
+        baseline_label = "MSIS + real Ap"
+    log.info("Baseline: %s   Candidate: MSIS + MHD pseudo-Ap", baseline_label)
 
     args.out.mkdir(parents=True, exist_ok=True)
     event_id = hindcast["event_id"]
@@ -367,6 +417,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     json_path.write_text(json.dumps({
         "event_id":       event_id,
         "density_backend":backend,
+        "baseline_ap_mode": args.baseline_ap_mode,
+        "baseline_label":   baseline_label,
+        "persistence_lag_hours": args.persistence_lag_hours,
+        "climatology_ap":   args.climatology_ap,
         "n_total":        residuals.n_total,
         "n_storm":        residuals.n_storm,
         "rmse_baseline":  residuals.rmse_baseline,
@@ -383,7 +437,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     }, indent=2))
 
     md_path = args.out / f"{event_id}_residuals.md"
-    md_path.write_text(_render_markdown(event_id, hindcast, residuals))
+    md_path.write_text(_render_markdown(event_id, hindcast, residuals, baseline_label))
 
     log.info("Wrote %s and %s", json_path, md_path)
     log.info("Storm-time skill: %+.1f %% (gate ≥ %.0f %%) — %s",

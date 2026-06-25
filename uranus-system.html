@@ -1,0 +1,2847 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Uranus System — Tipped on Its Side · Rings & Moons · Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/uranus-system.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/uranus-system.html">
+<meta property="og:title" content="Uranus System — Tipped on Its Side — Parkers Physics">
+<meta property="og:description" content="Research-grade Uranus simulator: a live Yoshida-4 + J₂ N-body of the inner ring-moons and the five major moons (Miranda–Oberon), rendered at Uranus's extreme 97.8° axial tilt, with the narrow ε ring shepherded by Cordelia &amp; Ophelia, the steeply-tilted offset magnetic dipole, an obliquity-driven seasonal-insolation model, and Miranda's resonant tidal-heating history.">
+<meta property="og:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+<meta property="og:image:alt" content="Parkers Physics — real-time astrophysics simulations">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Uranus System — Tipped on Its Side — Parkers Physics">
+<meta name="twitter:description" content="Research-grade Uranus simulator: a live Yoshida-4 + J₂ N-body of the inner ring-moons and the five major moons (Miranda–Oberon), rendered at Uranus's extreme 97.8° axial tilt, with the narrow ε ring shepherded by Cordelia &amp; Ophelia, the steeply-tilted offset magnetic dipole, an obliquity-driven seasonal-insolation model, and Miranda's resonant tidal-heating history.">
+<meta name="twitter:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+
+<meta name="description" content="Research-grade Uranus simulator: a live Yoshida-4 + J₂ N-body of the inner ring-moons and the five major moons (Miranda–Oberon), rendered at Uranus's extreme 97.8° axial tilt, with the narrow ε ring shepherded by Cordelia &amp; Ophelia, the steeply-tilted offset magnetic dipole, an obliquity-driven seasonal-insolation model, and Miranda's resonant tidal-heating history.">
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { height:auto; overflow-y:auto; }
+body {
+    width:100%; min-height:100vh; overflow-x:hidden;
+    background:#02040f; color:#cfe0f5;
+    font-family:'Segoe UI', system-ui, saus-serif;
+}
+
+#us-hero {
+    padding:28px 24px 18px;
+    background:linear-gradient(180deg, rgba(80,150,255,.12), rgba(2,4,15,0));
+    border-bottom:1px solid rgba(90,160,255,.20);
+}
+#us-hero h1 {
+    font-size:1.7rem; font-weight:800;
+    background:linear-gradient(100deg,#fff 28%,#5aa0ff);
+    -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+    margin-bottom:8px;
+}
+#us-hero p { font-size:.92rem; color:#a9bbd8; line-height:1.6; max-width:880px; }
+#us-hero .us-tag {
+    display:inline-block; font-family:monospace; font-size:.7rem; letter-spacing:.1em;
+    color:#aad4ff; background:rgba(80,150,255,.14);
+    border:1px solid rgba(90,160,255,.40); border-radius:4px;
+    padding:3px 8px; margin-bottom:10px; text-transform:uppercase;
+}
+
+/* ── Stage ───────────────────────────────────────────────────────────── */
+#us-stage {
+    position:relative;
+    width:100%; max-width:1280px;
+    margin:18px auto 0;
+    padding:0 18px;
+    display:grid;
+    grid-template-columns:1fr 320px;
+    gap:14px;
+}
+@media (max-width:920px) { #us-stage { grid-template-columns:1fr; } }
+#us-canvas-wrap {
+    position:relative;
+    width:100%; height:560px;
+    border:1px solid rgba(90,160,255,.26);
+    border-radius:14px;
+    overflow:hidden;
+    background:radial-gradient(ellipse at center, #050b1c 0%, #01030a 80%);
+    box-shadow:0 12px 40px rgba(0,0,0,.5), inset 0 0 80px rgba(40,90,180,.10);
+}
+#us-canvas-wrap canvas { display:block; width:100%; height:100%; }
+#us-canvas-wrap:fullscreen { width:100vw; height:100vh; border-radius:0; border:none; }
+
+/* HUD */
+#us-hud {
+    position:absolute; top:12px; left:14px; right:14px;
+    display:flex; justify-content:space-between; align-items:flex-start;
+    gap:12px; pointer-events:none;
+    font-family:monospace; font-size:.74rem;
+}
+.us-hud-card {
+    background:rgba(6,12,30,.72);
+    border:1px solid rgba(90,160,255,.28);
+    border-radius:6px;
+    padding:8px 11px;
+    color:#aad4ff;
+    backdrop-filter:blur(6px);
+    pointer-events:auto;
+    line-height:1.55;
+}
+.us-hud-card .lbl { color:#8a9bc0; font-size:.62rem; letter-spacing:.08em; text-transform:uppercase; display:block; margin-bottom:1px; }
+.us-hud-card .val { color:#fff; font-size:.85rem; font-weight:700; }
+.us-hud-card .sub { color:#a9bbd8; font-size:.66rem; margin-top:2px; }
+
+#us-mode-pill {
+    position:absolute; top:12px; left:50%; transform:translateX(-50%);
+    font-family:monospace; font-size:.68rem; letter-spacing:.08em;
+    text-transform:uppercase;
+    background:rgba(6,12,30,.78);
+    border:1px solid rgba(102,224,216,.55);
+    color:#66e0d8;
+    padding:5px 12px;
+    border-radius:14px;
+    backdrop-filter:blur(6px);
+    pointer-events:none;
+    transition:all .25s ease;
+}
+#us-mode-pill.play { border-color:rgba(79,201,127,.55); color:#7fdb9a; }
+
+#us-legend {
+    position:absolute; bottom:10px; left:14px;
+    display:flex; gap:10px; flex-wrap:wrap;
+    font-family:monospace; font-size:.66rem;
+    background:rgba(6,12,30,.62);
+    border:1px solid rgba(90,160,255,.22);
+    border-radius:6px;
+    padding:6px 10px;
+    color:#a9bbd8;
+    backdrop-filter:blur(6px);
+}
+#us-legend .lg { display:flex; align-items:center; gap:5px; }
+#us-legend .dt { width:8px; height:8px; border-radius:50%; }
+
+/* Side panel */
+#us-side {
+    background:rgba(8,14,34,.82);
+    border:1px solid rgba(90,160,255,.22);
+    border-radius:14px;
+    padding:14px 14px 16px;
+    backdrop-filter:blur(14px);
+    display:flex; flex-direction:column;
+    height:560px; overflow:hidden;
+}
+@media (max-width:920px) { #us-side { height:auto; max-height:none; } }
+.us-side-title {
+    font-size:.66rem; color:#8a9bc0; letter-spacing:.12em;
+    text-transform:uppercase; font-weight:700; margin-bottom:8px;
+}
+.us-body-grid {
+    display:grid; grid-template-columns:repeat(5, 1fr); gap:5px;
+    margin-bottom:14px;
+}
+.us-body-btn {
+    background:rgba(0,0,0,.30);
+    border:1px solid rgba(90,160,255,.22);
+    border-radius:5px;
+    padding:6px 4px 4px;
+    cursor:pointer;
+    text-align:center;
+    transition:all .15s;
+    font-family:inherit;
+    color:#8a9bc0;
+}
+.us-body-btn:hover { border-color:rgba(90,160,255,.55); color:#fff; }
+.us-body-btn.sel {
+    background:rgba(90,160,255,.18);
+    border-color:#5aa0ff;
+    color:#fff;
+    box-shadow:0 0 10px rgba(90,160,255,.30);
+}
+.us-body-dot {
+    width:14px; height:14px; border-radius:50%;
+    margin:0 auto 3px;
+    box-shadow:0 0 6px currentColor;
+}
+.us-body-name { font-size:.62rem; font-weight:600; letter-spacing:.04em; }
+.us-body-group {
+    grid-column:1 / -1;
+    font-size:.58rem; color:#8a9bc0; letter-spacing:.10em;
+    text-transform:uppercase; font-weight:700;
+    margin:6px 0 1px; padding-top:5px;
+    border-top:1px solid rgba(90,160,255,.12);
+}
+.us-body-group:first-child { margin-top:0; padding-top:0; border-top:none; }
+
+.us-sel-head {
+    display:flex; align-items:center; gap:8px;
+    padding:6px 0 10px;
+    border-bottom:1px solid rgba(90,160,255,.18);
+    margin-bottom:10px;
+}
+.us-sel-dot { width:18px; height:18px; border-radius:50%; box-shadow:0 0 8px currentColor; }
+.us-sel-name { font-size:1.05rem; font-weight:700; color:#fff; }
+.us-sel-sub  { font-size:.66rem; color:#8a9bc0; font-family:monospace; margin-left:auto; }
+
+.us-el-table {
+    flex:1;
+    display:grid; grid-template-columns:1fr auto;
+    column-gap:10px; row-gap:6px;
+    align-content:start;
+    font-family:monospace; font-size:.78rem;
+    overflow-y:auto;
+}
+.us-el-k { color:#8a9bc0; display:flex; align-items:baseline; gap:6px; }
+.us-el-k .sym { color:#aad4ff; font-weight:700; min-width:20px; display:inline-block; }
+.us-el-k .nm  { font-size:.66rem; color:#69789a; }
+.us-el-v { color:#fff; font-variant-numeric:tabular-nums; text-align:right; font-weight:600; }
+.us-el-v .un { color:#69789a; font-weight:400; margin-left:4px; font-size:.7rem; }
+.us-el-foot {
+    margin-top:10px; padding-top:8px;
+    border-top:1px solid rgba(90,160,255,.16);
+    font-family:monospace; font-size:.62rem; color:#69789a;
+    line-height:1.55;
+}
+
+/* Time / control card */
+#us-time { width:100%; max-width:1280px; margin:14px auto 0; padding:0 18px; }
+.us-time-card {
+    background:rgba(8,14,34,.78); backdrop-filter:blur(14px);
+    border:1px solid rgba(90,160,255,.22);
+    border-radius:12px;
+    padding:16px 18px;
+}
+.us-row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+.us-row:last-child { margin-bottom:0; }
+
+.us-btn {
+    background:rgba(90,160,255,.10);
+    color:#aad4ff;
+    border:1px solid rgba(90,160,255,.32);
+    border-radius:6px;
+    padding:7px 13px;
+    font-family:inherit; font-size:.78rem; font-weight:600;
+    cursor:pointer;
+    transition:background .15s, color .15s, border-color .15s;
+}
+.us-btn:hover { background:rgba(90,160,255,.24); color:#fff; }
+.us-btn.primary {
+    background:rgba(79,201,127,.16); color:#7fdb9a; border-color:rgba(79,201,127,.45);
+}
+.us-btn.primary:hover { background:rgba(79,201,127,.30); color:#fff; }
+.us-btn.warn {
+    background:rgba(255,184,48,.14); color:#fc7; border-color:rgba(255,184,48,.40);
+}
+.us-btn.toggle.on {
+    background:rgba(102,224,216,.20); color:#fff; border-color:rgba(102,224,216,.55);
+}
+.us-btn.live {
+    background:rgba(80,120,255,.20); color:#fff; border-color:rgba(120,160,255,.55);
+}
+.us-btn.live:hover { background:rgba(80,120,255,.32); }
+.us-btn.live.on { box-shadow:0 0 0 1px rgba(120,160,255,.55), 0 0 12px rgba(120,160,255,.35); }
+
+.us-input {
+    background:rgba(0,0,0,.30);
+    color:#fff;
+    border:1px solid rgba(90,160,255,.30);
+    border-radius:5px;
+    padding:6px 8px;
+    font-family:monospace; font-size:.78rem;
+}
+.us-input:focus { outline:none; border-color:#5aa0ff; }
+
+.us-bookmarks { display:flex; gap:6px; flex-wrap:wrap; max-width:100%; }
+.us-bm {
+    background:rgba(0,0,0,.30);
+    color:#8a9bc0;
+    border:1px solid rgba(90,160,255,.20);
+    border-radius:14px;
+    padding:4px 10px;
+    font-family:monospace; font-size:.7rem;
+    cursor:pointer;
+    transition:all .15s;
+}
+.us-bm:hover {
+    color:#fff; border-color:rgba(90,160,255,.55);
+    background:rgba(90,160,255,.14);
+}
+.us-bm-yr { color:#566; margin-right:4px; }
+
+.us-label {
+    font-family:monospace; font-size:.7rem; letter-spacing:.06em;
+    text-transform:uppercase; color:#8a9bc0;
+}
+.us-select {
+    background:rgba(0,0,0,.30);
+    color:#eef;
+    border:1px solid rgba(90,160,255,.32);
+    border-radius:5px;
+    padding:6px 9px;
+    font-family:monospace; font-size:.78rem;
+    cursor:pointer;
+}
+.us-slider {
+    flex:1; min-width:200px;
+    -webkit-appearance:none; appearance:none;
+    height:6px; border-radius:3px;
+    background:linear-gradient(90deg, rgba(90,160,255,.35), rgba(102,224,216,.50), rgba(90,160,255,.35));
+    outline:none; cursor:pointer;
+}
+.us-slider::-webkit-slider-thumb {
+    -webkit-appearance:none; appearance:none;
+    width:18px; height:18px; border-radius:50%;
+    background:#fff; border:2px solid #5aa0ff;
+    box-shadow:0 0 8px rgba(90,160,255,.6);
+    cursor:grab;
+}
+.us-slider::-moz-range-thumb {
+    width:18px; height:18px; border-radius:50%;
+    background:#fff; border:2px solid #5aa0ff;
+    box-shadow:0 0 8px rgba(90,160,255,.6);
+    cursor:grab;
+}
+
+/* Plot panel */
+#us-app {
+    max-width:1280px; margin:0 auto;
+    padding:18px 18px 64px;
+    display:grid; gap:18px;
+}
+.us-panel {
+    background:rgba(8,14,34,.72); backdrop-filter:blur(14px);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:12px;
+    padding:18px 20px;
+}
+.us-panel h2 {
+    font-size:.78rem; color:#5aa0ff; text-transform:uppercase;
+    letter-spacing:.12em; font-weight:800; margin-bottom:12px;
+}
+.us-panel p { font-size:.86rem; color:#a9bbd8; line-height:1.6; margin-bottom:8px; }
+.us-panel p:last-child { margin-bottom:0; }
+.us-panel code {
+    font-family:monospace; font-size:.78rem;
+    background:rgba(255,255,255,.05); color:#66e0d8;
+    padding:1px 6px; border-radius:3px;
+}
+
+.us-plot-head {
+    display:flex; align-items:baseline; gap:14px;
+    margin-bottom:8px; flex-wrap:wrap;
+}
+.us-plot-legend { display:flex; gap:10px; flex-wrap:wrap; font-family:monospace; font-size:.7rem; color:#8a9bc0; }
+.us-plot-legend .lg { display:flex; align-items:center; gap:5px; }
+.us-plot-legend .swatch { display:inline-block; width:14px; height:8px; border-radius:1px; }
+.us-plot-wrap { position:relative; height:230px; border-radius:6px; background:rgba(0,0,0,.22); border:1px solid rgba(102,224,216,.10); }
+#us-plot-canvas, #us-insol-canvas, #us-miranda-canvas { display:block; width:100%; height:100%; }
+
+.us-plot-readout {
+    display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr));
+    gap:8px; margin-top:10px;
+}
+.us-plot-readout .cell {
+    background:rgba(255,255,255,.03);
+    border:1px solid rgba(90,160,255,.16);
+    border-radius:6px;
+    padding:8px 10px;
+    font-family:monospace; font-size:.74rem;
+}
+.us-plot-readout .cell .k { color:#8a9bc0; display:block; font-size:.62rem; text-transform:uppercase; letter-spacing:.06em; }
+.us-plot-readout .cell .v { color:#fff; font-weight:700; }
+
+.us-warn {
+    font-size:.74rem; color:#8a9bc0; font-style:italic;
+    border-left:2px solid rgba(102,224,216,.4); padding-left:10px; margin-top:10px;
+}
+
+/* Body labels & hover badges (HTML overlays projected from 3D) */
+.us-label-3d {
+    position:absolute;
+    pointer-events:none;
+    transform:translate(-50%, -120%);
+    font-family:ui-monospace, Menlo, monospace;
+    font-size:.66rem;
+    font-weight:600;
+    color:#fff;
+    background:rgba(6,12,30,.55);
+    border:1px solid rgba(90,160,255,.30);
+    border-radius:10px;
+    padding:1px 7px;
+    white-space:nowrap;
+    backdrop-filter:blur(6px);
+    box-shadow:0 0 8px rgba(0,0,0,.5);
+    transition:opacity .15s;
+    z-index:6;
+}
+.us-label-3d .icon { margin-right:3px; }
+.us-label-3d.minor { font-size:.6rem; padding:0 6px; opacity:.92; border-color:rgba(160,180,210,.30); }
+.us-label-3d.behind { opacity:0; }
+.us-label-3d.selected {
+    color:#5aa0ff;
+    border-color:rgba(90,160,255,.65);
+    box-shadow:0 0 12px rgba(90,160,255,.30);
+}
+
+.us-hover-icon {
+    position:absolute;
+    pointer-events:none;
+    transform:translate(-50%, -50%);
+    font-size:1.2rem;
+    z-index:7;
+    text-shadow:0 0 8px rgba(255,255,255,.4), 0 0 18px rgba(90,160,255,.5);
+    opacity:0;
+    transition:opacity .15s;
+}
+.us-hover-icon.show {
+    opacity:1;
+    animation:us-pulse 1.6s ease-in-out infinite;
+}
+@keyframes us-pulse {
+    0%,100% { transform:translate(-50%, -50%) scale(1); filter:brightness(1); }
+    50%     { transform:translate(-50%, -50%) scale(1.18); filter:brightness(1.4); }
+}
+
+/* Conjunction flash overlay */
+.us-conjunction {
+    position:absolute;
+    top:48px; left:50%; transform:translateX(-50%);
+    font-family:monospace; font-size:.72rem; letter-spacing:.06em;
+    text-transform:uppercase;
+    background:rgba(6,12,30,.85);
+    border:1px solid rgba(128,224,255,.55);
+    color:#aef0ff;
+    padding:5px 14px;
+    border-radius:14px;
+    backdrop-filter:blur(6px);
+    pointer-events:none;
+    opacity:0;
+    transition:opacity .25s;
+    z-index:8;
+    box-shadow:0 0 16px rgba(120,200,255,.40);
+}
+.us-conjunction.show { opacity:1; }
+
+/* Tooltip */
+#us-tooltip {
+    position:absolute;
+    pointer-events:none;
+    background:rgba(6,12,30,.92);
+    border:1px solid rgba(90,160,255,.40);
+    border-radius:6px;
+    padding:8px 10px;
+    font-family:ui-monospace, Menlo, monospace;
+    font-size:.7rem;
+    color:#d6e6ff;
+    backdrop-filter:blur(8px);
+    box-shadow:0 4px 14px rgba(0,0,0,.5);
+    z-index:30;
+    line-height:1.45;
+    transform:translate(12px, 14px);
+    min-width:180px;
+    transition:opacity .12s;
+    opacity:0;
+}
+#us-tooltip.show { opacity:1; }
+#us-tooltip .tt-row { display:flex; justify-content:space-between; gap:10px; }
+#us-tooltip .tt-k { color:#8a9bc0; }
+#us-tooltip .tt-v { color:#fff; font-weight:700; }
+#us-tooltip .tt-sep { height:1px; background:rgba(90,160,255,.18); margin:5px 0; }
+#us-tooltip .tt-hdr {
+    display:flex; align-items:center; gap:6px;
+    color:#5aa0ff; font-weight:700; font-size:.74rem;
+    margin-bottom:5px; padding-bottom:4px;
+    text-transform:uppercase; letter-spacing:.04em;
+    border-bottom:1px solid rgba(90,160,255,.25);
+}
+#us-tooltip .tt-hdr .dot { width:8px; height:8px; border-radius:50%; box-shadow:0 0 5px currentColor; }
+
+</style>
+<link rel="stylesheet" href="js/nav-styles.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "@id": "https://parkersphysics.com/uranus-system.html#app",
+  "name": "Uranus System — Tipped on Its Side",
+  "description": "Research-grade Uranus simulator: a live Yoshida-4 + J₂ N-body of the inner ring-moons and the five major moons (Miranda–Oberon), rendered at Uranus's extreme 97.8° axial tilt, with the narrow ε ring shepherded by Cordelia &amp; Ophelia, the steeply-tilted offset magnetic dipole, an obliquity-driven seasonal-insolation model, and Miranda's resonant tidal-heating history.",
+  "url": "https://parkersphysics.com/uranus-system.html",
+  "image": "https://parkersphysics.com/ParkersPhysics_logo2.jpg",
+  "applicationCategory": "EducationalApplication",
+  "applicationSubCategory": "Planetary science simulation",
+  "operatingSystem": "Web Browser",
+  "browserRequirements": "Requires JavaScript and WebGL",
+  "isAccessibleForFree": true,
+  "publisher": {
+    "@id": "https://parkersphysics.com/#org"
+  },
+  "inLanguage": "en-US"
+}
+</script>
+</head>
+<body>
+
+<script type="importmap">
+{
+    "imports": {
+        "three":         "/js/vendor/three-0.160.0/three.module.js",
+        "three/addons/": "/js/vendor/three-0.160.0/jsm/"
+    }
+}
+</script>
+<!-- perf-hints:start -->
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+<link rel="modulepreload" href="/js/vendor/three-0.160.0/three.module.js" crossorigin>
+<!-- perf-hints:end --><nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260503"; initNav("uranus-system");</script>
+
+<div id="us-hero">
+    <span class="us-tag">Live Yoshida-4 + J₂ Integration · 97.8° Axial Tilt · ε-Ring Shepherds</span>
+    <h1>Uranus System — Tipped on Its Side</h1>
+    <p>Live N-body integration of Uranus, its crowded inner ring-moons (Cordelia through Puck) and the five major moons — <strong>Miranda, Ariel, Umbriel, Titania, Oberon</strong>. Uranus is tipped <strong>97.77°</strong>: it rolls around the Sun nearly on its side, so its rings and moons orbit in a plane that stands almost <em>vertical</em> relative to its path — the headline spectacle of this scene. Uranus's oblateness (<code>J₂ = 0.0033461</code>, <code>J₄ = −3.2×10⁻⁵</code> — both <em>measured from the rings' precession</em>) is fed straight into the integrator, so the inner moons' orbit planes precess as they really do. The narrow, eccentric <strong>ε ring</strong> precesses on its line of apsides, pinned between its shepherds <strong>Cordelia</strong> and <strong>Ophelia</strong>.</p>
+    <p>The crowded Portia group is the most tightly-packed moon system known — <strong>Cressida</strong> and <strong>Desdemona</strong> may collide within a million years (see the inner-moon dynamics plot). Below, an interactive <strong>seasonal-insolation</strong> model shows the counter-intuitive truth that at Uranus's tilt the <em>poles</em> bake harder than the equator, and a <strong>Miranda</strong> panel reconstructs the resonant tidal heating that carved the tallest cliff in the Solar System. Toggle the steeply-tilted, offset <strong>magnetic dipole</strong>, and hit <strong>⤢ Wide field</strong> to chase the captured irregulars out to Ferdinand at ~20 million km.</p>
+</div>
+
+<!-- ═══ STAGE ═══ -->
+<div id="us-stage">
+    <div id="us-canvas-wrap">
+        <div id="us-hud">
+            <div class="us-hud-card">
+                <span class="lbl">Sim Time</span>
+                <div class="val" id="us-time-display">+ 0.0 d</div>
+                <div class="sub" id="us-jd-display">JD —</div>
+            </div>
+            <div class="us-hud-card" style="text-align:right;">
+                <span class="lbl">Energy Drift</span>
+                <div class="val" id="us-energy-display">—</div>
+                <div class="sub" id="us-step-display">dt = — s</div>
+            </div>
+        </div>
+        <div id="us-mode-pill">⏸ Paused</div>
+        <div id="us-legend"></div>
+        <div id="us-tooltip" role="tooltip" aria-hidden="true"></div>
+        <div id="us-conjunction" class="us-conjunction"></div>
+        <div id="us-overlay" style="position:absolute; inset:0; pointer-events:none; z-index:5;"></div>
+    </div>
+
+    <aside id="us-side">
+        <div class="us-side-title">Body Picker</div>
+        <div class="us-body-grid" id="us-body-grid"></div>
+
+        <div class="us-sel-head">
+            <span class="us-sel-dot" id="us-sel-dot"></span>
+            <span class="us-sel-name" id="us-sel-name">Miranda</span>
+            <span class="us-sel-sub" id="us-sel-period">1.413 d</span>
+        </div>
+
+        <div class="us-el-table" id="us-el-table"></div>
+
+        <div class="us-el-foot">
+            Osculating elements relative to the Uranian centre, computed
+            from the live N-body state. Initial conditions seeded from
+            JPL planetary fact sheets at J2000. Inclinations &gt; 90° are
+            retrograde.
+        </div>
+    </aside>
+</div>
+
+<!-- ═══ TIME CONTROLS ═══ -->
+<div id="us-time">
+    <div class="us-time-card">
+
+        <div class="us-row">
+            <button class="us-btn primary" id="us-play">▶ Play</button>
+            <button class="us-btn" id="us-rev" title="Reverse direction">⇄ Forward</button>
+            <span class="us-label">Speed</span>
+            <select class="us-select" id="us-speed">
+                <option value="3600">1 hr / s</option>
+                <option value="21600">6 hr / s</option>
+                <option value="86400" selected>1 d / s</option>
+                <option value="259200">3 d / s</option>
+                <option value="864000">10 d / s</option>
+                <option value="2592000">30 d / s</option>
+                <option value="8640000">100 d / s</option>
+                <option value="31557600">1 yr / s</option>
+            </select>
+            <button class="us-btn" id="us-step-back">◄ −1 hr</button>
+            <button class="us-btn" id="us-step-fwd">+1 hr ►</button>
+            <span style="flex:1"></span>
+            <button class="us-btn live" id="us-now" title="Sync to current real-world time">⟲ Now (Live)</button>
+            <button class="us-btn warn" id="us-reset" title="Reset simulation to J2000.0 epoch (2000-01-01 12:00 UT)">⟲ J2000</button>
+        </div>
+
+        <div class="us-row">
+            <span class="us-label" style="width:90px">Date (UTC)</span>
+            <input class="us-input" type="date" id="us-date" min="1500-01-01" max="2200-12-31" style="width:160px">
+            <span class="us-label">Hr</span>
+            <input class="us-input" type="number" id="us-hour" min="0" max="23" step="1" value="12" style="width:64px">
+            <span class="us-label">JD</span>
+            <input class="us-input" type="number" id="us-jd-input" step="0.5" style="width:140px">
+            <span style="flex:1"></span>
+            <span class="us-label">Jump to</span>
+            <div class="us-bookmarks" id="us-bookmarks"></div>
+        </div>
+
+        <div class="us-row">
+            <span class="us-label" style="width:90px">Trails</span>
+            <button class="us-btn toggle on" id="us-trails-toggle">Trails: ON</button>
+            <span class="us-label">Length</span>
+            <select class="us-select" id="us-trail-len">
+                <option value="600">~1 d</option>
+                <option value="3600" selected>~6 d</option>
+                <option value="10800">~18 d</option>
+            </select>
+            <span class="us-label" style="margin-left:14px">Ghost orbits</span>
+            <button class="us-btn toggle" id="us-ghost-toggle">Keplerian ghost: OFF</button>
+            <span class="us-label" style="margin-left:14px">Labels</span>
+            <button class="us-btn toggle on" id="us-labels-toggle">Labels: ON</button>
+        </div>
+
+        <div class="us-row">
+            <span class="us-label" style="width:90px">Rings</span>
+            <button class="us-btn toggle on" id="us-rings-toggle">Rings: ON</button>
+            <span class="us-label" style="margin-left:6px">Magnetosphere</span>
+            <button class="us-btn toggle" id="us-mag-toggle" title="Show the tilted (58.6°), offset (0.31 R_U) dipole field lines plus the magnetopause (~18 R_U) and bow shock — see which moon orbits fall inside">Magnetosphere: OFF</button>
+            <span class="us-label" style="margin-left:6px">Oblateness</span>
+            <button class="us-btn toggle on" id="us-j2-toggle" title="Feed Uranus's J₂ into the integrator — drives the inner-moon nodal precession">J₂: ON</button>
+        </div>
+
+        <div class="us-row">
+            <span class="us-label" style="width:90px">View</span>
+            <button class="us-btn toggle" id="us-view-top" title="Top-down (down the ecliptic normal)">⊙ Top-down</button>
+            <button class="us-btn toggle on" id="us-view-3d" title="Standard oblique 3D view">⛯ 3D Oblique</button>
+            <button class="us-btn toggle" id="us-view-equ" title="Edge-on — look along the orbit plane to see the 97.8° tilt of the rings and moons">— Edge-on</button>
+            <span class="us-label" style="margin-left:14px">Focus</span>
+            <select class="us-select" id="us-focus" title="Lock the camera to a body so it tracks across orbit">
+                <option value="" selected>Free (system view)</option>
+            </select>
+            <button class="us-btn" id="us-pov" title="Place the camera on the selected moon's surface, looking toward Uranus">👁 POV</button>
+            <span class="us-label" style="margin-left:14px">Scale</span>
+            <select class="us-select" id="us-scale">
+                <option value="full" selected>Realistic (Oberon fits)</option>
+                <option value="zoom">Rings + inner moons</option>
+            </select>
+            <button class="us-btn toggle" id="us-view-wide" title="Fullscreen wide-field view — out to the captured irregulars and Ferdinand at ~20 Gm">⤢ Wide field</button>
+        </div>
+
+    </div>
+</div>
+
+<div id="us-app">
+
+    <!-- Inner-moon dynamics plot -->
+    <section class="us-panel">
+        <div class="us-plot-head">
+            <h2 style="flex:0 0 auto">Inner-Moon Dynamics · The Crowded Portia Group <span style="color:#69789a; text-transform:none; letter-spacing:0; font-weight:400; font-size:.7rem">— last ~30 d window</span></h2>
+            <div class="us-plot-legend">
+                <span class="lg"><span class="swatch" style="background:#5aa0ff"></span>Δλ = λ_Cressida − λ_Desdemona</span>
+                <span class="lg"><span class="swatch" style="background:#9ad0ff"></span>e_Cressida</span>
+                <span class="lg"><span class="swatch" style="background:#66e0d8"></span>e_Desdemona</span>
+                <span class="lg"><span class="swatch" style="background:#b78cff"></span>e_Juliet</span>
+            </div>
+        </div>
+        <div class="us-plot-wrap">
+            <canvas id="us-plot-canvas"></canvas>
+        </div>
+        <div class="us-plot-readout">
+            <div class="cell"><span class="k">Δλ Cressida–Desdemona</span><span class="v" id="rd-dlam">—</span></div>
+            <div class="cell"><span class="k">e_Cressida (now)</span><span class="v" id="rd-eCr">—</span></div>
+            <div class="cell"><span class="k">e_Desdemona (now)</span><span class="v" id="rd-eDe">—</span></div>
+            <div class="cell"><span class="k">e_Juliet (now)</span><span class="v" id="rd-eJu">—</span></div>
+            <div class="cell"><span class="k">Cressida–Desdemona gap</span><span class="v" id="rd-gap">—</span></div>
+            <div class="cell"><span class="k">Cressida dΩ/dt (J₂)</span><span class="v" id="rd-prec">—</span></div>
+        </div>
+        <p class="us-warn">Uranus's inner moons are packed into the most crowded satellite system known — and it is <strong>not stable</strong>. <strong>Cressida</strong> and <strong>Desdemona</strong> are squeezed so close that their orbits are expected to cross and the pair to <strong>collide within ~1 million years</strong> (French &amp; Showalter 2012; Quillen &amp; French 2014). The plot tracks their longitude difference and the forced eccentricities the moonlets swap through mutual perturbation and Uranus's J₂; the readout shows the live Cressida–Desdemona separation. With J₂ on, the orbit rings visibly precess — toggle it off to see the precession stop.</p>
+    </section>
+
+    <!-- Seasonal insolation (obliquity slider) -->
+    <section class="us-panel">
+        <div class="us-plot-head">
+            <h2 style="flex:0 0 auto">Seasonal Insolation · Why the Poles Bake <span style="color:#69789a; text-transform:none; letter-spacing:0; font-weight:400; font-size:.7rem">— annual-mean sunlight vs latitude</span></h2>
+            <div class="us-plot-legend">
+                <span class="lg"><span class="swatch" style="background:#66e0d8"></span>this tilt</span>
+                <span class="lg"><span class="swatch" style="background:#8a9bc0"></span>Earth (23.4°)</span>
+                <span class="lg"><span class="swatch" style="background:#ffb84e"></span>54.7° flip</span>
+            </div>
+        </div>
+        <div class="us-plot-wrap">
+            <canvas id="us-insol-canvas"></canvas>
+        </div>
+        <div class="us-row" style="margin-top:12px;">
+            <span class="us-label" style="width:150px">Axial tilt (obliquity)</span>
+            <input class="us-slider" id="us-obl-slider" type="range" min="0" max="98" step="0.5" value="97.8">
+            <span class="us-label" id="us-obl-val" style="min-width:80px; text-align:right; color:#aad4ff">ε = 97.8°</span>
+        </div>
+        <div class="us-plot-readout">
+            <div class="cell"><span class="k">Pole / equator (annual)</span><span class="v" id="rd-insol-ratio">—</span></div>
+            <div class="cell"><span class="k">Annual mean · pole</span><span class="v" id="rd-insol-pole">—</span></div>
+            <div class="cell"><span class="k">Annual mean · equator</span><span class="v" id="rd-insol-eq">—</span></div>
+            <div class="cell"><span class="k">Polar day / night</span><span class="v" id="rd-polarday">—</span></div>
+        </div>
+        <p class="us-warn">Because Uranus lies on its side, a pole points almost straight at the Sun for half of the 84-year orbit. Averaging the daily insolation <code>Q = (S₀/π)[H₀ sinφ sinδ + cosφ cosδ sinH₀]</code> over a full orbit gives the counter-intuitive result: above a critical tilt of <strong>54.7°</strong>, the <strong>poles receive more annual sunlight than the equator</strong>. Drag the slider from 0° (poles cold, equator hot — a low-tilt world) up past 54.7° to Uranus's <strong>97.8°</strong> and watch the curve invert. Every latitude poleward of ~7.8° sees the midnight Sun at some point in the Uranian year, and each pole gets ≈<strong>42 years</strong> of continuous daylight followed by ≈42 years of night.</p>
+    </section>
+
+    <!-- Miranda resonant tidal heating -->
+    <section class="us-panel">
+        <div class="us-plot-head">
+            <h2 style="flex:0 0 auto">Miranda · Resonant Tidal Heating <span style="color:#69789a; text-transform:none; letter-spacing:0; font-weight:400; font-size:.7rem">— how a past resonance carved Verona Rupes</span></h2>
+            <div class="us-plot-legend">
+                <span class="lg"><span class="swatch" style="background:#e6b98a"></span>tidal power Ė(e)</span>
+                <span class="lg"><span class="swatch" style="background:#9ad0ff"></span>today (e ≈ 0.0013)</span>
+                <span class="lg"><span class="swatch" style="background:#ff7a7a"></span>resonance era</span>
+            </div>
+        </div>
+        <div class="us-plot-wrap">
+            <canvas id="us-miranda-canvas"></canvas>
+        </div>
+        <div class="us-row" style="margin-top:12px;">
+            <span class="us-label" style="width:150px">Forced eccentricity</span>
+            <input class="us-slider" id="us-mire-slider" type="range" min="0" max="0.06" step="0.001" value="0.03">
+            <span class="us-label" id="us-mire-val" style="min-width:80px; text-align:right; color:#aad4ff">e = 0.030</span>
+        </div>
+        <div class="us-plot-readout">
+            <div class="cell"><span class="k">Tidal heating power</span><span class="v" id="rd-mir-power">—</span></div>
+            <div class="cell"><span class="k">Surface heat flux</span><span class="v" id="rd-mir-flux">—</span></div>
+            <div class="cell"><span class="k">× radiogenic</span><span class="v" id="rd-mir-radio">—</span></div>
+            <div class="cell"><span class="k">Inclination relic</span><span class="v" id="rd-mir-incl">4.34°</span></div>
+        </div>
+        <p class="us-warn">Miranda's wild surface — fault-bounded <em>coronae</em> and the ~20 km cliff <strong>Verona Rupes</strong>, the tallest known anywhere — needs an internal heat source the tiny moon shouldn't have today. The leading idea: long ago Miranda passed through a <strong>3:1 mean-motion resonance with Umbriel</strong> that pumped its eccentricity and inclination. Tidal heating scales as <code>Ė ∝ (k₂/Q) e²</code>, so even a modest forced <em>e</em> during resonance dumps far more heat than today's nearly circular orbit. The system later escaped, damping the eccentricity but leaving the <strong>4.34° inclination frozen in</strong> — the fossil that gives the game away (Tittemore &amp; Wisdom 1990; Hammond &amp; Barr 2014). Absolute numbers hinge on the poorly-known <code>k₂/Q</code>; drag the slider to feel the e² leverage.</p>
+    </section>
+
+    <!-- Gravity, magnetosphere & resonance relationships -->
+    <section class="us-panel">
+        <div class="us-plot-head">
+            <h2 style="flex:0 0 auto">Gravity · Magnetosphere · Resonances <span style="color:#69789a; text-transform:none; letter-spacing:0; font-weight:400; font-size:.7rem">— how the field, rings &amp; moons are linked</span></h2>
+            <div class="us-plot-legend">
+                <span class="lg"><span class="swatch" style="background:#66e0d8"></span>inside magnetosphere</span>
+                <span class="lg"><span class="swatch" style="background:#ff7a7a"></span>outside</span>
+                <span class="lg"><span class="swatch" style="background:#b78cff"></span>rings</span>
+            </div>
+        </div>
+        <div class="us-plot-wrap" style="height:158px">
+            <canvas id="us-lshell-canvas"></canvas>
+        </div>
+        <div class="us-plot-readout">
+            <div class="cell"><span class="k">J₂ (from rings)</span><span class="v" id="rd-j2">—</span></div>
+            <div class="cell"><span class="k">J₄ (from rings)</span><span class="v" id="rd-j4">—</span></div>
+            <div class="cell"><span class="k">ε-ring apsidal rate</span><span class="v" id="rd-eps-prec">—</span></div>
+            <div class="cell"><span class="k">Miranda nodal rate</span><span class="v" id="rd-mir-node">—</span></div>
+            <div class="cell"><span class="k">Magnetopause</span><span class="v" id="rd-mpause">—</span></div>
+            <div class="cell"><span class="k">Major moons inside</span><span class="v" id="rd-inside">—</span></div>
+        </div>
+        <p class="us-warn"><strong>Gravity ⇄ rings.</strong> Uranus's J₂ and J₄ were not measured by a probe — they were <em>inferred from the rings</em>. Each narrow ring is a precessing ellipse whose apsidal/nodal rate is set by the gravity harmonics, so timing the rings in stellar occultations (French et al. 1988; Jacobson 2014) inverts to the field. <strong>Shepherds.</strong> The ε ring's edges are held by <strong>Cordelia</strong> (24:25 resonance, inner) and <strong>Ophelia</strong> (14:13, outer); Cressida's mass was weighed through its resonance with the η ring. <strong>Magnetosphere ⇄ moons.</strong> The dipole is tilted 58.6° and offset 0.31 R_U, so with the 98° spin the field tumbles wildly; the magnetopause sits near 18 R_U, leaving the rings and inner moons to sweep gaps in the radiation belts while <strong>Oberon orbits outside it</strong>, in the magnetotail. Toggle <em>Magnetosphere</em> in the controls to see the boundary in 3D.</p>
+    </section>
+
+    <!-- Notes -->
+    <section class="us-panel">
+        <h2>Why Uranus is the strangest planet</h2>
+        <p><strong>A world knocked on its side.</strong> Uranus's 97.77° obliquity tips it just past the pole, so it rotates <em>retrograde</em> and effectively rolls around the Sun. The leading explanation is one or more giant impacts early in its history. The tilt drives everything you see here: the rings and regular moons orbit in Uranus's equatorial plane, which now stands almost perpendicular to its orbital plane, while the captured irregulars stay near the orbital plane — so the two families occupy visibly different planes.</p>
+        <p><strong>Miranda, the shattered moon.</strong> Despite being only ~470 km across, Miranda has the most extreme terrain known: grooved ovoid <em>coronae</em> and Verona Rupes, a ~20 km scarp. Its surface and its anomalous 4.34° inclination are best explained by a past mean-motion resonance with Umbriel that pumped its orbit and heated its interior before the system escaped the resonance.</p>
+        <p><strong>What you're seeing.</strong> A Newtonian Yoshida-4 integration in Uranus-centric SI units with the central-body J₂ term switched on. The inner-moon precession, the crowding instabilities, and the conjunction pattern all fall out of gravity alone — no scripted motion. Energy (including the J₂ potential) is bounded by the symplectic integrator, so the run stays physical indefinitely.</p>
+    </section>
+
+    <section class="us-panel">
+        <h2>The rings, the shepherds, and the lopsided magnet</h2>
+        <p><strong>Found by a flicker.</strong> Uranus's rings were discovered in 1977 when a background star blinked out several times on either side of the planet during an occultation — the second ring system ever found. They are extremely narrow, sharp-edged and charcoal-dark. The brightest, the <strong>ε ring</strong>, is slightly eccentric and is pinned between two shepherd moons, <strong>Cordelia</strong> (inner) and <strong>Ophelia</strong> (outer); the faint outer μ ring is dust knocked off the moon <strong>Mab</strong>.</p>
+        <p><strong>The most crowded moons known.</strong> A dozen small moons are packed into a narrow band just outside the rings. They perturb one another so strongly that the system is dynamically unstable on million-year timescales — <strong>Cressida</strong> and <strong>Desdemona</strong> are on track to collide. <strong>Press ▶ Play</strong> and watch the inner-moon dynamics plot to follow their forced eccentricities and shrinking separation.</p>
+        <p><strong>A wildly tilted magnet.</strong> Uranus's magnetic dipole is inclined ~58.6° to its spin axis and offset ~0.31 R_U from the planet's centre. Combined with the 98° obliquity, the magnetosphere tumbles dramatically through each rotation — unlike any other planet. Toggle <em>Magnetosphere</em> to see the field lines and the magnetopause where Oberon crosses out.</p>
+    </section>
+
+    <section class="us-panel">
+        <h2>References</h2>
+        <p style="font-family:monospace; font-size:.74rem; line-height:1.7; color:#8a9bc0;">
+            Smith, B. A. et al. (1986) — <em>Voyager 2 in the Uranian System: Imaging Science Results</em>, Science 233.<br>
+            Elliot, J. L., Dunham, E. &amp; Mink, D. (1977) — <em>The rings of Uranus</em>, Nature 267.<br>
+            Tittemore, W. C. &amp; Wisdom, J. (1990) — <em>Tidal evolution of the Uranian satellites III (Miranda)</em>, Icarus 85.<br>
+            French, R. S. &amp; Showalter, M. R. (2012) — <em>Cupid is doomed: the inner Uranian satellites</em>, Icarus 220.<br>
+            Irwin, P. G. J. et al. (2024) — <em>The colour of Uranus and Neptune</em>, MNRAS.<br>
+            Murray, C. D. &amp; Dermott, S. F. (1999) — <em>Solar System Dynamics</em>, ch. 4 &amp; 8.<br>
+            JPL Planetary Satellite Mean Elements — <code>ssd.jpl.nasa.gov/sats/elem/</code>
+        </p>
+    </section>
+
+</div>
+
+<!-- ═══ SIMULATION ═══ -->
+<script type="module">
+import * as THREE        from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { UranusSkin }   from './js/uranus-skin.js';
+import { makeMoonTexture } from './js/uranus-moon-textures.js';
+import {
+    yoshida4Step, totalEnergy, totalJ2PotentialEnergy,
+    elementsToState, stateToElements, G_SI,
+} from './js/gravity-lab/physics.js';
+import {
+    MINOR_MOONS, MOON_GROUPS, j2NodeRate, j2PeriRate,
+} from './js/uranus-minor-moons.js';
+
+// ── Constants ────────────────────────────────────────────────────────
+const KM = 1000;
+const D2R = Math.PI / 180;
+const R2D = 180 / Math.PI;
+const J2000_JD = 2451545.0;
+const SEC_PER_YEAR = 365.25 * 86400;
+const GYR = SEC_PER_YEAR * 1e9;
+
+// Uranus equatorial radius (m) — the natural length unit for the scene.
+const R_URA_KM = 25559;
+const R_URA_M  = R_URA_KM * KM;
+// Uranus's zonal gravity harmonics — MEASURED from ring & moon precession in
+// stellar occultations (French et al. 1988; Jacobson 2014). J₂ is fed to the
+// integrator (drives inner-moon nodal precession); J₄ refines the analytic
+// precession rates shown in the gravity/magnetosphere relationships panel.
+const J2_URA = 0.0033461;
+const J4_URA = -3.21e-5;
+// Axial tilt (obliquity) of Uranus to its orbital plane — tipped just past the
+// pole, so the spin (and the whole ring/moon system) is effectively retrograde.
+const OBLIQUITY = 97.77 * D2R;
+const COS_OB = Math.cos(OBLIQUITY);
+const SIN_OB = Math.sin(OBLIQUITY);
+
+const M_PER_UNIT = R_URA_M;             // 1 scene unit = 1 Uranus radius
+const m2u = m => m / M_PER_UNIT;
+
+// ── Body table (bodies[0] = Uranus; 1..7 inner ring-moons; 8..12 major moons) ──
+const URANUS_BODIES = [
+    { key:'uranus',    name:'Uranus',    mass:8.6810e25, radius_km:25559,  color:0x9fe6e6, vis:1.00 },
+    { key:'cordelia',  name:'Cordelia',  mass:4.4e16,    radius_km:20.1,   color:0x9fb8c0, vis:0.05 },
+    { key:'ophelia',   name:'Ophelia',   mass:5.3e16,    radius_km:21.4,   color:0x9fb8c0, vis:0.05 },
+    { key:'cressida',  name:'Cressida',  mass:3.4e17,    radius_km:39.8,   color:0xa6c0c8, vis:0.06 },
+    { key:'desdemona', name:'Desdemona', mass:1.8e17,    radius_km:32.0,   color:0xa6c0c8, vis:0.06 },
+    { key:'juliet',    name:'Juliet',    mass:5.6e17,    radius_km:46.8,   color:0xa6c0c8, vis:0.06 },
+    { key:'portia',    name:'Portia',    mass:1.7e18,    radius_km:67.6,   color:0xa6c0c8, vis:0.07 },
+    { key:'puck',      name:'Puck',      mass:2.9e18,    radius_km:81.0,   color:0xb0c4cc, vis:0.08 },
+    { key:'miranda',   name:'Miranda',   mass:6.4e19,    radius_km:235.8,  color:0xcfe0e2, vis:0.16 },
+    { key:'ariel',     name:'Ariel',     mass:1.251e21,  radius_km:578.9,  color:0xdcecec, vis:0.26 },
+    { key:'umbriel',   name:'Umbriel',   mass:1.275e21,  radius_km:584.7,  color:0x8f9ea4, vis:0.26 },
+    { key:'titania',   name:'Titania',   mass:3.400e21,  radius_km:788.4,  color:0xc8d2d2, vis:0.30 },
+    { key:'oberon',    name:'Oberon',    mass:3.076e21,  radius_km:761.4,  color:0xc2aa9e, vis:0.30 },
+];
+const KEYS = URANUS_BODIES.map(b => b.key);
+const idxOf = Object.fromEntries(KEYS.map((k, i) => [k, i]));
+const N_BODY_MOONS = KEYS.slice(1);     // all integrated moon keys
+
+// ── Initial Uranus-centric mean Keplerian elements at J2000 (approx). ─
+// a in km, angles in degrees. Inclinations referred to Uranus's equator
+// (its Laplace plane). Miranda's anomalous 4.23° inclination is a relic of a
+// past resonance. These are MEAN elements (structure, not ephemeris).
+const INIT_EL = {
+    cordelia:  { a_km:  49_752, e:0.00026, i_deg:0.085, raan_deg: 40.0, argp_deg: 30.0, M_deg:120.0 },
+    ophelia:   { a_km:  53_764, e:0.0099,  i_deg:0.104, raan_deg:210.0, argp_deg: 80.0, M_deg:300.0 },
+    cressida:  { a_km:  61_767, e:0.00036, i_deg:0.040, raan_deg: 60.0, argp_deg:190.0, M_deg: 20.0 },
+    desdemona: { a_km:  62_659, e:0.00013, i_deg:0.111, raan_deg:120.0, argp_deg:240.0, M_deg:200.0 },
+    juliet:    { a_km:  64_358, e:0.00066, i_deg:0.065, raan_deg:200.0, argp_deg:100.0, M_deg: 25.0 },
+    portia:    { a_km:  66_097, e:0.00005, i_deg:0.059, raan_deg: 90.0, argp_deg:310.0, M_deg:250.0 },
+    puck:      { a_km:  86_004, e:0.00012, i_deg:0.319, raan_deg:300.0, argp_deg:120.0, M_deg: 60.0 },
+    miranda:   { a_km: 129_390, e:0.0013,  i_deg:4.232, raan_deg:170.0, argp_deg:155.0, M_deg:  0.0 },
+    ariel:     { a_km: 190_900, e:0.0012,  i_deg:0.260, raan_deg: 30.0, argp_deg: 85.0, M_deg: 80.0 },
+    umbriel:   { a_km: 266_000, e:0.0039,  i_deg:0.128, raan_deg:290.0, argp_deg:110.0, M_deg:200.0 },
+    titania:   { a_km: 436_300, e:0.0011,  i_deg:0.340, raan_deg:120.0, argp_deg:200.0, M_deg:140.0 },
+    oberon:    { a_km: 583_500, e:0.0014,  i_deg:0.058, raan_deg: 10.0, argp_deg: 60.0, M_deg:250.0 },
+};
+
+const PERIOD_D = {
+    uranus:   30687.0,     // (around Sun, label only) — 84.02 yr
+    cordelia:  0.3350,
+    ophelia:   0.3764,
+    cressida:  0.4636,
+    desdemona: 0.4737,
+    juliet:    0.4931,
+    portia:    0.5132,
+    puck:      0.7618,
+    miranda:   1.41348,
+    ariel:     2.52038,
+    umbriel:   4.14418,
+    titania:   8.70587,
+    oberon:   13.46324,
+};
+
+// ── Behavioural fingerprint per body — dynamic tooltip + hover-icon. ──
+const BODY_BEHAVIOR = {
+    uranus: {
+        icon:  '🔵',
+        title: 'Tipped on its side · 97.8° obliquity',
+        bullets: [
+            'Rolls around the Sun on its side — likely knocked over by a giant impact.',
+            'Each pole gets ~42 years of sunlight, then ~42 years of darkness.',
+            'Coldest atmosphere in the Solar System (−224 °C).',
+        ],
+    },
+    cordelia: {
+        icon:  '🧲',
+        title: 'Inner shepherd of the ε ring',
+        bullets: [
+            'Orbits just inside the bright ε ring, holding its sharp inner edge.',
+            'Innermost known moon of Uranus — orbits in about 8 hours.',
+            'Discovered by Voyager 2 in 1986.',
+        ],
+    },
+    ophelia: {
+        icon:  '🧲',
+        title: 'Outer shepherd of the ε ring',
+        bullets: [
+            'Orbits just outside the ε ring, confining its sharp outer edge.',
+            'With Cordelia it traps the ring between their gravity.',
+            'Discovered by Voyager 2 in 1986.',
+        ],
+    },
+    cressida: {
+        icon:  '💥',
+        title: 'On a collision course with Desdemona',
+        bullets: [
+            'The Portia group is so crowded these moons are dynamically unstable.',
+            'Cressida and Desdemona may collide within ~1 million years.',
+            'Largest of the closely-packed inner moonlets.',
+        ],
+    },
+    desdemona: {
+        icon:  '💥',
+        title: 'Squeezed between Cressida and Juliet',
+        bullets: [
+            'Its orbit is expected to cross Cressida\'s — a future collision is likely.',
+            'Part of the most tightly-packed satellite system known.',
+            'Discovered by Voyager 2 in 1986.',
+        ],
+    },
+    juliet: {
+        icon:  '💠',
+        title: 'Portia-group moonlet',
+        bullets: [
+            'One of the crowded inner moons; orbits in about 12 hours.',
+            'Elongated, dark, irregular rubble pile.',
+            'Discovered by Voyager 2 in 1986.',
+        ],
+    },
+    portia: {
+        icon:  '💠',
+        title: 'Largest of the inner Portia group',
+        bullets: [
+            'Lends its name to the whole crowded inner-moon family.',
+            'About 135 km across; very dark.',
+            'Discovered by Voyager 2 in 1986.',
+        ],
+    },
+    puck: {
+        icon:  '🪨',
+        title: 'Largest inner moon · imaged by Voyager 2',
+        bullets: [
+            'Roughly spherical, ~162 km across and saturated with craters.',
+            'The only inner moon Voyager 2 resolved in any detail.',
+            'Sits just inside Miranda\'s orbit.',
+        ],
+    },
+    miranda: {
+        icon:  '🏔️',
+        title: 'The Solar System\'s strangest surface',
+        bullets: [
+            'Verona Rupes — a ~20 km cliff, the tallest known anywhere.',
+            'Giant ovoid "coronae" suggest it was torn apart and reassembled.',
+            'Its 4.34° tilt is a relic of a past resonance with Umbriel.',
+        ],
+    },
+    ariel: {
+        icon:  '✨',
+        title: 'Brightest and youngest Uranian moon',
+        bullets: [
+            'Smooth plains and bright-floored canyons (Kachina Chasmata).',
+            'Resurfaced relatively recently — fewest large craters.',
+            'Probably tidally heated during a past Umbriel resonance.',
+        ],
+    },
+    umbriel: {
+        icon:  '⚫',
+        title: 'The dark one · with a single bright ring',
+        bullets: [
+            'Darkest of the major moons — ancient and heavily cratered.',
+            'Wunda — a mysterious bright ring of frost near its equator.',
+            'Reflects only ~21% of the light that hits it.',
+        ],
+    },
+    titania: {
+        icon:  '🌑',
+        title: 'Largest moon of Uranus',
+        bullets: [
+            'Cut by the vast Messina Chasmata canyon system.',
+            '~1,578 km across — eighth-largest moon in the Solar System.',
+            'May hide a liquid-water layer deep inside.',
+        ],
+    },
+    oberon: {
+        icon:  '🌑',
+        title: 'Outermost major moon · dark & red',
+        bullets: [
+            'Heavily cratered, with dark crater-floor deposits and a tall mountain.',
+            'Reddened surface; sometimes orbits beyond the magnetosphere.',
+            'Discovered by William Herschel in 1787.',
+        ],
+    },
+};
+
+// ── Unified body registry (N-body + analytic minor moons) ────────────
+const ALL_BODIES = [...URANUS_BODIES, ...MINOR_MOONS];
+const MINOR_KEYS = new Set(MINOR_MOONS.map(m => m.key));
+const minorByKey = Object.fromEntries(MINOR_MOONS.map(m => [m.key, m]));
+const isMinor  = key => MINOR_KEYS.has(key);
+const getBody  = key => ALL_BODIES.find(b => b.key === key);
+const M_URA_KG = URANUS_BODIES[0].mass;
+
+function periodDays(key) {
+    if (PERIOD_D[key] != null) return PERIOD_D[key];
+    const m = minorByKey[key];
+    if (!m) return NaN;
+    const mu = G_SI * (M_URA_KG + m.mass);
+    const a  = m.a_km * KM;
+    return 2 * Math.PI * Math.sqrt(a * a * a / mu) / 86400;
+}
+function behaviorOf(key) {
+    return BODY_BEHAVIOR[key] || (minorByKey[key] && minorByKey[key].behavior) || {};
+}
+
+// ── Minor-moon analytic propagation (Kepler + secular precession) ─────
+function minorSecularRates(m, n_rad_s, a_m, i_rad) {
+    if (m.secular) {
+        return {
+            dRaan: m.secular.node_deg_yr * D2R / SEC_PER_YEAR,
+            dArgp: m.secular.peri_deg_yr * D2R / SEC_PER_YEAR,
+        };
+    }
+    return {
+        dRaan: j2NodeRate(n_rad_s, a_m, m.e, i_rad, J2_URA, R_URA_M),
+        dArgp: j2PeriRate(n_rad_s, a_m, m.e, i_rad, J2_URA, R_URA_M),
+    };
+}
+function minorMoonElementsAt(m, t_s) {
+    const mu      = G_SI * (M_URA_KG + m.mass);
+    const a_m     = m.a_km * KM;
+    const n_rad_s = Math.sqrt(mu / (a_m * a_m * a_m));
+    const i_rad   = m.i_deg * D2R;
+    const { dRaan, dArgp } = minorSecularRates(m, n_rad_s, a_m, i_rad);
+    return {
+        a:        a_m,
+        e:        m.e,
+        i_deg:    m.i_deg,
+        raan_deg: m.raan_deg + dRaan * t_s * R2D,
+        argp_deg: m.argp_deg + dArgp * t_s * R2D,
+        M_deg:    m.M_deg    + n_rad_s * t_s * R2D,
+        mu,
+    };
+}
+function minorMoonStateRel(m, t_s) {
+    return elementsToState(minorMoonElementsAt(m, t_s));
+}
+
+// ── Famous Uranus-system epochs (bookmark bar) ──────────────────────
+const URANUS_BOOKMARKS = [
+    { y:1781, m: 3, d:13, label:'Uranus found',   desc:'William Herschel discovers Uranus — the first planet found with a telescope (Mar 13, 1781).' },
+    { y:1787, m: 1, d:11, label:'Titania+Oberon', desc:'Herschel discovers the two largest moons, Titania and Oberon (1787).' },
+    { y:1851, m:10, d:24, label:'Ariel+Umbriel',  desc:'William Lassell discovers Ariel and Umbriel (1851).' },
+    { y:1948, m: 2, d:16, label:'Miranda',        desc:'Gerard Kuiper discovers Miranda — the last major moon found (1948).' },
+    { y:1977, m: 3, d:10, label:'Rings',          desc:'Elliot, Dunham & Mink discover the rings during a stellar occultation (Mar 10, 1977).' },
+    { y:1986, m: 1, d:24, label:'Voyager 2',      desc:'Voyager 2 flies past Uranus — our only close-up of the system (Jan 24, 1986).' },
+    { y:2000, m: 1, d: 1, label:'J2000',          desc:'Reference epoch — initial conditions are seeded here.' },
+    { y:2007, m:12, d: 7, label:'Equinox',        desc:'Uranian equinox — the Sun crosses the equator and the rings are seen edge-on (Dec 2007).' },
+    { y:2030, m: 1, d: 1, label:'N. solstice',    desc:'Approaching northern summer solstice — the north pole points nearly at the Sun (~2030).' },
+];
+
+// ── Date / JD helpers (Meeus Eqn. 7) ──────────────────────────────────
+function jdFromDate(d) { return d.getTime() / 86400000 + 2440587.5; }
+function dateFromJD(jd) { return new Date((jd - 2440587.5) * 86400000); }
+function jdFromYMD(y, m, d, hr = 12, mi = 0) {
+    const dt = new Date(Date.UTC(2000, 0, 1, hr, mi));
+    dt.setUTCFullYear(y, m - 1, d);
+    return jdFromDate(dt);
+}
+
+// ── Coordinate mapping: SI (Uranus equatorial inertial) → scene ─────
+// Standard axis swap puts the spin axis on world +Y, then we bake the
+// obliquity (rotation about world X) so the whole tilted system is rendered
+// directly — meshes stay children of the scene and carry true world coords.
+function toScene(r) {
+    const x = m2u(r[0]);
+    const y = m2u(r[2]);
+    const z = -m2u(r[1]);
+    return [x, y * COS_OB - z * SIN_OB, y * SIN_OB + z * COS_OB];
+}
+// Apply only the obliquity tilt to an already-swapped scene-space vector.
+function tiltScene(x, y, z) {
+    return [x, y * COS_OB - z * SIN_OB, y * SIN_OB + z * COS_OB];
+}
+// Orbital-frame mapping (NO obliquity tilt) for the captured irregulars, whose
+// elements are referred to Uranus's orbital plane rather than its equator. They
+// render in the scene's horizontal plane, so they visibly lie in a DIFFERENT
+// plane from the rings — a real consequence of the 97.8° tilt.
+function toSceneOrbital(r) {
+    return [m2u(r[0]), m2u(r[2]), -m2u(r[1])];
+}
+const minorToScene = (m, r) => (m && m.frame === 'orbital' ? toSceneOrbital(r) : toScene(r));
+
+// ── Build initial state (SI, Uranus-centric equatorial frame) ───────
+function buildInitialBodies() {
+    const bodies = URANUS_BODIES.map(b => ({ m: b.mass, r:[0,0,0], v:[0,0,0], _key:b.key }));
+    const M_nep = bodies[0].m;
+    for (const moonKey of N_BODY_MOONS) {
+        const el = INIT_EL[moonKey];
+        const m  = bodies[idxOf[moonKey]].m;
+        const mu = G_SI * (M_nep + m);
+        const st = elementsToState({
+            a:el.a_km * KM, e:el.e, i_deg:el.i_deg,
+            raan_deg:el.raan_deg, argp_deg:el.argp_deg, M_deg:el.M_deg, mu,
+        });
+        bodies[idxOf[moonKey]].r = st.r;
+        bodies[idxOf[moonKey]].v = st.v;
+    }
+    // Cancel net momentum -> Uranus velocity (barycentric frame).
+    let px=0, py=0, pz=0;
+    for (let i = 1; i < bodies.length; i++) {
+        px += bodies[i].m * bodies[i].v[0];
+        py += bodies[i].m * bodies[i].v[1];
+        pz += bodies[i].m * bodies[i].v[2];
+    }
+    bodies[0].v[0] = -px / bodies[0].m;
+    bodies[0].v[1] = -py / bodies[0].m;
+    bodies[0].v[2] = -pz / bodies[0].m;
+    return bodies;
+}
+
+// ── J₂ oblateness hook for the integrator + energy diagnostic ────────
+let j2Enabled = true;
+const J2_OPTS = { centerIdx:0, J2:J2_URA, R_eq:R_URA_M, mu: G_SI * M_URA_KG };
+const stepOpts = () => (j2Enabled ? { J2: J2_OPTS } : undefined);
+function energyNow(bodies) {
+    const base = totalEnergy(bodies).total;
+    return j2Enabled ? base + totalJ2PotentialEnergy(bodies, J2_OPTS) : base;
+}
+
+// ── State ────────────────────────────────────────────────────────────
+const sim = {
+    bodies:        buildInitialBodies(),
+    t_s:           0,
+    playing:       false,
+    direction:     1,
+    speed:         86400,
+    live:          false,
+    initialEnergy: 0,
+    dtTarget:      120,
+};
+sim.initialEnergy = energyNow(sim.bodies);
+
+const jdFromSimT = t_s => J2000_JD + t_s / 86400;
+const simTFromJD = jd  => (jd - J2000_JD) * 86400;
+
+// Keplerian-ghost state.
+const ghost = { enabled:false, elements:{} };
+function snapshotGhostElements() {
+    const M_nep = sim.bodies[0].m;
+    for (const moonKey of N_BODY_MOONS) {
+        const i  = idxOf[moonKey];
+        const m  = sim.bodies[i].m;
+        const mu = G_SI * (M_nep + m);
+        const rRel = [
+            sim.bodies[i].r[0] - sim.bodies[0].r[0],
+            sim.bodies[i].r[1] - sim.bodies[0].r[1],
+            sim.bodies[i].r[2] - sim.bodies[0].r[2],
+        ];
+        const vRel = [
+            sim.bodies[i].v[0] - sim.bodies[0].v[0],
+            sim.bodies[i].v[1] - sim.bodies[0].v[1],
+            sim.bodies[i].v[2] - sim.bodies[0].v[2],
+        ];
+        const el = stateToElements(rRel, vRel, mu);
+        ghost.elements[moonKey] = {
+            a:el.a, e:el.e, i_deg:el.i_deg, raan_deg:el.raan_deg,
+            argp_deg:el.argp_deg, M0_deg:el.M_deg, t0_s:sim.t_s, mu,
+        };
+    }
+}
+function ghostScenePos(moonKey) {
+    const el = ghost.elements[moonKey];
+    if (!el) return null;
+    const dt_s = sim.t_s - el.t0_s;
+    const n_rad_s = Math.sqrt(el.mu / (el.a * el.a * el.a));
+    const M_now = el.M0_deg + n_rad_s * dt_s * R2D;
+    const st = elementsToState({
+        a:el.a, e:el.e, i_deg:el.i_deg, raan_deg:el.raan_deg,
+        argp_deg:el.argp_deg, M_deg:M_now, mu:el.mu,
+    });
+    const jr = sim.bodies[0].r;
+    const p = toScene([st.r[0] + jr[0], st.r[1] + jr[1], st.r[2] + jr[2]]);
+    return { x:p[0], y:p[1], z:p[2] };
+}
+
+// ── Three.js setup ───────────────────────────────────────────────────
+const wrap = document.getElementById('us-canvas-wrap');
+const scene  = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(42, 1, 0.05, 32000);
+camera.position.set(0, 16, 34);
+camera.lookAt(0, 0, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping         = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+wrap.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance   = 1.2;
+// Generous zoom-out so you can always pull the camera back past the most
+// distant moon (Ferdinand's apoapsis sits ~1,090 R_U out).
+controls.maxDistance   = 4000;
+controls.mouseButtons = { LEFT:THREE.MOUSE.ROTATE, MIDDLE:THREE.MOUSE.DOLLY, RIGHT:null };
+
+// ── Camera state machine ─────────────────────────────────────────────
+const cam = { mode:'free', focusKey:null, tween:null, presetName:'3d' };
+function easeInOut(t) { return t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2) / 2; }
+function startCameraTween(toPos, toTgt, durMs = 600) {
+    cam.tween = {
+        t0:performance.now(), dur:durMs,
+        fromPos:camera.position.clone(), toPos:toPos.clone(),
+        fromTgt:controls.target.clone(), toTgt:toTgt.clone(),
+    };
+}
+function stepCameraTween(now) {
+    if (!cam.tween) return;
+    const t = Math.min(1, (now - cam.tween.t0) / cam.tween.dur);
+    const k = easeInOut(t);
+    camera.position.lerpVectors(cam.tween.fromPos, cam.tween.toPos, k);
+    controls.target.lerpVectors(cam.tween.fromTgt, cam.tween.toTgt, k);
+    if (t >= 1) cam.tween = null;
+}
+
+function resize() {
+    const w = wrap.clientWidth, h = wrap.clientHeight;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+}
+resize();
+new ResizeObserver(resize).observe(wrap);
+
+// ── Background stars (radius beyond the 9000-unit max zoom-out) ──────
+const starUniforms = { uTime:{ value:0 } };
+{
+    const n = 3600;
+    const positions = new Float32Array(n * 3);
+    const colors    = new Float32Array(n * 3);
+    const sizes     = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+        const r  = 12000 + Math.random() * 4000;
+        const th = Math.random() * Math.PI * 2;
+        const ph = Math.acos(2 * Math.random() - 1);
+        positions[i*3]   = r * Math.sin(ph) * Math.cos(th);
+        positions[i*3+1] = r * Math.sin(ph) * Math.sin(th);
+        positions[i*3+2] = r * Math.cos(ph);
+        const t = Math.random();
+        if (t < 0.2)      { colors[i*3]=.65; colors[i*3+1]=.78; colors[i*3+2]=1; }
+        else if (t < 0.35){ colors[i*3]=1; colors[i*3+1]=.85; colors[i*3+2]=.7; }
+        else              { const c=.85+.15*Math.random(); colors[i*3]=c; colors[i*3+1]=c; colors[i*3+2]=c; }
+        sizes[i] = 0.7 + Math.pow(Math.random(), 6) * 4.0;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    g.setAttribute('color',    new THREE.Float32BufferAttribute(colors,    3));
+    g.setAttribute('aSize',    new THREE.Float32BufferAttribute(sizes,     1));
+    const starMat = new THREE.ShaderMaterial({
+        uniforms: starUniforms, vertexColors:true,
+        transparent:true, depthWrite:false, blending:THREE.AdditiveBlending,
+        vertexShader:`attribute float aSize; varying vec3 vColor; varying float vTw;
+            uniform float uTime;
+            void main(){
+                vColor = color;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.);
+                gl_PointSize = aSize;
+                float seed = position.x*12.9898 + position.y*78.233 + position.z*37.7;
+                vTw = 0.65 + 0.35 * sin(uTime*1.3 + seed);
+            }`,
+        fragmentShader:`varying vec3 vColor; varying float vTw;
+            void main(){
+                vec2 d = gl_PointCoord - vec2(.5);
+                float r = length(d);
+                if (r > .5) discard;
+                gl_FragColor = vec4(vColor*vTw, smoothstep(.5,0.,r));
+            }`,
+    });
+    scene.add(new THREE.Points(g, starMat));
+}
+
+// ── Uranus (skinned) — group carries the obliquity tilt ─────────────
+const uraGroup = new THREE.Group();
+uraGroup.rotation.x = OBLIQUITY;
+scene.add(uraGroup);
+const uraSkin = new UranusSkin(uraGroup, { radius:1.0, quality:'high', segments:64 });
+uraSkin.mesh.userData = { kind:'planet', key:'uranus', label:'Uranus' };
+
+// Soft outer halo (pale methane cyan).
+{
+    const halo = new THREE.Mesh(
+        new THREE.SphereGeometry(1.32, 32, 32),
+        new THREE.ShaderMaterial({
+            transparent:true, depthWrite:false, side:THREE.BackSide,
+            blending:THREE.AdditiveBlending,
+            vertexShader:`varying vec3 vN; void main(){ vN=normalize(normalMatrix*normal);
+                gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
+            fragmentShader:`varying vec3 vN;
+                void main(){ float r=pow(1.-abs(vN.z),3.); gl_FragColor=vec4(.42,.80,.82,r*.50); }`,
+        }),
+    );
+    uraGroup.add(halo);
+}
+
+// Distant Sun.
+{
+    const dl = new THREE.DirectionalLight(0xfff4e0, 1.5);
+    dl.position.set(35, 8, 0);
+    scene.add(dl);
+    scene.add(new THREE.AmbientLight(0x1a2438, 0.7));
+}
+
+// ── Magnetosphere boundary (schematic) ───────────────────────────────
+// The magnetopause sits ~18 R_U sunward and the bow shock ~23.7 R_U (Ness 1986).
+// Rendered as faint sun-compressed shells so you can see which moon orbits fall
+// inside: the rings and inner moons sit deep in the radiation belts, Titania
+// (~17 R_U) rides the boundary, and Oberon (~22.8 R_U) orbits OUTSIDE it, in the
+// magnetotail. Toggled together with the dipole field lines.
+const MAGNETOPAUSE_RU = 18.0, BOWSHOCK_RU = 23.7;
+const magnetosphere = new THREE.Group();
+{
+    const mkShell = (R, color, op) => {
+        const m = new THREE.Mesh(
+            new THREE.SphereGeometry(R, 48, 32),
+            new THREE.MeshBasicMaterial({ color, transparent:true, opacity:op,
+                depthWrite:false, side:THREE.BackSide, blending:THREE.AdditiveBlending }),
+        );
+        m.scale.set(0.85, 1.0, 1.0);     // sun-compressed dayside (Sun at +X)
+        m.position.x = -R * 0.18;        // shift the bubble toward the tail
+        return m;
+    };
+    magnetosphere.add(mkShell(MAGNETOPAUSE_RU, 0x4aa0ff, 0.050));
+    magnetosphere.add(mkShell(BOWSHOCK_RU,     0x7fd0ff, 0.025));
+    magnetosphere.visible = false;
+    scene.add(magnetosphere);
+}
+
+// ── Moon meshes + orbit rings ────────────────────────────────────────
+const meshes  = { uranus: uraSkin.mesh };
+const ghostMeshes = {};
+const trailLines  = {};
+const trailBuffers = {};
+const TRAIL_MAX = 10800;
+
+// Build a moon surface material — procedural texture + bump where a recipe
+// exists (see uranus-moon-textures.js), else a plain tinted sphere.
+function moonMaterial(key, color) {
+    const surf = makeMoonTexture(key);
+    if (surf) {
+        return new THREE.MeshStandardMaterial({
+            map: surf.map, bumpMap: surf.bump, bumpScale: 0.010,
+            roughness: 0.95, metalness: 0.0,
+        });
+    }
+    return new THREE.MeshStandardMaterial({
+        color, emissive: color, emissiveIntensity: 0.16, roughness: 0.85, metalness: 0.05,
+    });
+}
+
+function makeMoon(b) {
+    const r = b.radius_km / R_URA_KM;
+    const rVis = Math.max(r * 13, 0.07);
+    const seg = rVis > 0.25 ? 40 : 26;     // smoother silhouette for the big moons
+    const m = new THREE.Mesh(
+        new THREE.SphereGeometry(rVis, seg, seg),
+        moonMaterial(b.key, b.color),
+    );
+    m.userData = { kind:'moon', key:b.key, label:b.name };
+    scene.add(m);
+    meshes[b.key] = m;
+
+    const halo = new THREE.Mesh(
+        new THREE.SphereGeometry(rVis * 1.30, 18, 18),
+        new THREE.ShaderMaterial({
+            transparent:true, depthWrite:false, side:THREE.BackSide,
+            blending:THREE.AdditiveBlending,
+            uniforms:{ uColor:{ value:new THREE.Color(b.color) } },
+            vertexShader:`varying vec3 vN; void main(){ vN=normalize(normalMatrix*normal);
+                gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
+            fragmentShader:`uniform vec3 uColor; varying vec3 vN;
+                void main(){ float r=pow(1.-abs(vN.z),2.); gl_FragColor=vec4(uColor,r*.55); }`,
+        }),
+    );
+    m.add(halo);
+
+    // Static reference orbit ring at the moon's mean a (equatorial plane,
+    // baked obliquity so it lines up with the tilted system).
+    const a_u = (INIT_EL[b.key].a_km * KM) / M_PER_UNIT;
+    const N = 224;
+    const ringGeo = new THREE.BufferGeometry();
+    const arr = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) {
+        const th = (i / N) * Math.PI * 2;
+        const [x,y,z] = tiltScene(a_u * Math.cos(th), 0, a_u * Math.sin(th));
+        arr[i*3] = x; arr[i*3+1] = y; arr[i*3+2] = z;
+    }
+    ringGeo.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3));
+    const ringMat = new THREE.LineBasicMaterial({
+        color:b.color, transparent:true, opacity:0.20, depthWrite:false,
+    });
+    const ring = new THREE.LineLoop(ringGeo, ringMat);
+    scene.add(ring);
+
+    // Trail.
+    const trailGeo = new THREE.BufferGeometry();
+    const positions = new Float32Array(TRAIL_MAX * 3);
+    trailGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    trailGeo.setDrawRange(0, 0);
+    const trailMat = new THREE.LineBasicMaterial({
+        color:b.color, transparent:true, opacity:0.85, depthWrite:false,
+    });
+    const trailLine = new THREE.Line(trailGeo, trailMat);
+    trailLine.frustumCulled = false;
+    scene.add(trailLine);
+    trailLines[b.key]   = trailLine;
+    trailBuffers[b.key] = { positions, idx:0, count:0, capacity:TRAIL_MAX, sampleEvery:120, accum:0 };
+
+    // Ghost marker.
+    const gh = new THREE.Mesh(
+        new THREE.SphereGeometry(rVis * 1.10, 12, 12),
+        new THREE.MeshBasicMaterial({
+            color:b.color, transparent:true, opacity:0.45, wireframe:true, depthWrite:false,
+        }),
+    );
+    gh.visible = false;
+    scene.add(gh);
+    ghostMeshes[b.key] = gh;
+}
+for (const b of URANUS_BODIES.slice(1)) makeMoon(b);
+
+// ── Minor moons (analytic) + their precessing orbit rings ────────────
+const minorRings = {};
+const MINOR_RING_REBUILD_S = 6 * 3600;
+
+function minorVisRadius(m) {
+    const real = m.radius_km / R_URA_KM;
+    // Inner ring-moons are tiny and close — keep them near true scale. The far
+    // irregulars (orbital frame) sit hundreds of units out, so give them a
+    // distance-scaled floor to stay visible from the wide-field camera.
+    if (m.frame === 'orbital') {
+        const a_u = (m.a_km * KM) / M_PER_UNIT;
+        return Math.max(real * 13, Math.min(12, Math.max(3, a_u * 0.012)));
+    }
+    return Math.max(real * 13, 0.06);
+}
+function makeMinorMoon(m) {
+    const rVis = minorVisRadius(m);
+    const mesh = new THREE.Mesh(
+        new THREE.SphereGeometry(rVis, 24, 24),
+        moonMaterial(m.key, m.color),
+    );
+    mesh.userData = { kind:'moon', key:m.key, label:m.name };
+    mesh.frustumCulled = false;
+    scene.add(mesh);
+    meshes[m.key] = mesh;
+
+    const N = 200;
+    const posArr = new Float32Array(N * 3);
+    sampleMinorRing(m, 0, posArr, N);
+    const ringGeo = new THREE.BufferGeometry();
+    ringGeo.setAttribute('position', new THREE.Float32BufferAttribute(posArr, 3));
+    ringGeo.computeBoundingSphere();
+    const grpColor = MOON_GROUPS[m.group] ? MOON_GROUPS[m.group].color : m.color;
+    const ringMat = new THREE.LineBasicMaterial({
+        color: grpColor, transparent:true, opacity:0.30, depthWrite:false,
+    });
+    const line = new THREE.LineLoop(ringGeo, ringMat);
+    line.frustumCulled = false;
+    scene.add(line);
+    minorRings[m.key] = { line, posArr, N, lastTs:0 };
+}
+function sampleMinorRing(m, t_s, posArr, N) {
+    const base = minorMoonElementsAt(m, t_s);
+    for (let k = 0; k < N; k++) {
+        const st = elementsToState({
+            a:base.a, e:base.e, i_deg:base.i_deg,
+            raan_deg:base.raan_deg, argp_deg:base.argp_deg,
+            M_deg:(k / N) * 360, mu:base.mu,
+        });
+        const [x,y,z] = minorToScene(m, st.r);
+        posArr[k*3] = x; posArr[k*3+1] = y; posArr[k*3+2] = z;
+    }
+}
+function rebuildMinorRing(m, force) {
+    const r = minorRings[m.key];
+    if (!r) return;
+    if (!force && Math.abs(sim.t_s - r.lastTs) < MINOR_RING_REBUILD_S) return;
+    sampleMinorRing(m, sim.t_s, r.posArr, r.N);
+    r.line.geometry.attributes.position.needsUpdate = true;
+    r.line.geometry.computeBoundingSphere();
+    r.lastTs = sim.t_s;
+}
+for (const m of MINOR_MOONS) makeMinorMoon(m);
+
+// Selection + hover rings.
+function makeRing(c, op, t) {
+    const geom = new THREE.RingGeometry(1.0, 1.0 + t, 64);
+    const mat  = new THREE.MeshBasicMaterial({
+        color:c, transparent:true, opacity:op,
+        depthWrite:false, side:THREE.DoubleSide, blending:THREE.AdditiveBlending,
+    });
+    const m = new THREE.Mesh(geom, mat);
+    m.visible = false; m.renderOrder = 10;
+    return m;
+}
+const selRing = makeRing(0x5aa0ff, 0.92, 0.16);
+const hovRing = makeRing(0xaef0ff, 0.55, 0.10);
+scene.add(selRing); scene.add(hovRing);
+
+// ── Legend ───────────────────────────────────────────────────────────
+const legend = document.getElementById('us-legend');
+legend.innerHTML = Object.values(MOON_GROUPS).map(g =>
+    `<span class="lg" title="${g.note}"><span class="dt" style="background:#${g.color.toString(16).padStart(6,'0')}"></span>${g.label}</span>`
+).join('');
+
+// ── Body picker / element table ──────────────────────────────────────
+const elBodyGrid = document.getElementById('us-body-grid');
+const elSelDot   = document.getElementById('us-sel-dot');
+const elSelName  = document.getElementById('us-sel-name');
+const elSelPer   = document.getElementById('us-sel-period');
+const elElTbl    = document.getElementById('us-el-table');
+
+const ELEM_DEFS = [
+    { sym:'a',  nm:'semi-major axis',     unit:'km', fmt:v => (v / KM).toFixed(0) },
+    { sym:'e',  nm:'eccentricity',        unit:'',   fmt:v => v.toFixed(5) },
+    { sym:'i',  nm:'inclination',         unit:'°',  fmt:v => v.toFixed(3) },
+    { sym:'Ω',  nm:'long. asc. node',     unit:'°',  fmt:v => v.toFixed(2) },
+    { sym:'ω',  nm:'arg. of pericentre',  unit:'°',  fmt:v => v.toFixed(2) },
+    { sym:'M',  nm:'mean anomaly',        unit:'°',  fmt:v => v.toFixed(2) },
+    { sym:'λ',  nm:'mean longitude',      unit:'°',  fmt:v => v.toFixed(2) },
+    { sym:'r',  nm:'uranuscentric dist.',unit:'km', fmt:v => (v / KM).toFixed(0) },
+    { sym:'v',  nm:'speed',               unit:'km/s',fmt:v => (v / KM).toFixed(3) },
+];
+
+const PICKER_SECTIONS = [
+    { label:'Uranus',                    keys:['uranus'] },
+    { label:MOON_GROUPS.inner.label,     keys:['cordelia','ophelia','bianca','cressida','desdemona','juliet','portia','rosalind','cupid','belinda','perdita','puck','mab'] },
+    { label:MOON_GROUPS.major.label,     keys:['miranda','ariel','umbriel','titania','oberon'] },
+    { label:MOON_GROUPS.prograde.label,  keys:MINOR_MOONS.filter(m=>m.group==='prograde').map(m=>m.key) },
+    { label:MOON_GROUPS.retrograde.label,keys:MINOR_MOONS.filter(m=>m.group==='retrograde').map(m=>m.key) },
+];
+
+let selected = getBody('miranda');
+function buildBodyPicker() {
+    elBodyGrid.innerHTML = '';
+    for (const sec of PICKER_SECTIONS) {
+        const hdr = document.createElement('div');
+        hdr.className = 'us-body-group';
+        hdr.textContent = sec.label;
+        elBodyGrid.appendChild(hdr);
+        for (const key of sec.keys) {
+            const b = getBody(key);
+            if (!b) continue;
+            const btn = document.createElement('button');
+            btn.className = 'us-body-btn' + (key === selected.key ? ' sel' : '');
+            btn.dataset.key = key;
+            const hex = '#' + b.color.toString(16).padStart(6, '0');
+            btn.innerHTML =
+                `<div class="us-body-dot" style="background:${hex};color:${hex}"></div>` +
+                `<div class="us-body-name">${b.name}</div>`;
+            btn.addEventListener('click', () => selectBody(key));
+            elBodyGrid.appendChild(btn);
+        }
+    }
+    elElTbl.innerHTML = ELEM_DEFS.map(d =>
+        `<div class="us-el-k"><span class="sym">${d.sym}</span><span class="nm">${d.nm}</span></div>` +
+        `<div class="us-el-v" data-sym="${d.sym}">—</div>`
+    ).join('');
+}
+function selectBody(key) {
+    selected = getBody(key) || selected;
+    elBodyGrid.querySelectorAll('.us-body-btn').forEach(b =>
+        b.classList.toggle('sel', b.dataset.key === selected.key));
+    const hex = '#' + selected.color.toString(16).padStart(6, '0');
+    elSelDot.style.background = hex;
+    elSelDot.style.color      = hex;
+    elSelName.textContent = selected.name;
+    elSelPer.textContent  = formatPeriod(periodDays(selected.key));
+    refreshSidePanel();
+}
+function formatPeriod(d) {
+    if (d < 30)  return `${d.toFixed(2)} d`;
+    if (d < 365) return `${d.toFixed(1)} d`;
+    return `${(d/365.25).toFixed(2)} yr`;
+}
+function liveElements(key) {
+    if (isMinor(key)) {
+        const base = minorMoonElementsAt(minorByKey[key], sim.t_s);
+        const st   = elementsToState(base);
+        return stateToElements(st.r, st.v, base.mu);
+    }
+    return meanLonRel(idxOf[key]);
+}
+function refreshSidePanel() {
+    if (selected.key === 'uranus') {
+        const b = sim.bodies[0];
+        const speed = Math.hypot(b.v[0], b.v[1], b.v[2]);
+        for (const d of ELEM_DEFS) {
+            const node = elElTbl.querySelector(`[data-sym="${d.sym}"]`);
+            if (node) node.innerHTML = '—';
+        }
+        const vnode = elElTbl.querySelector('[data-sym="v"]');
+        if (vnode) vnode.innerHTML = (speed / KM).toFixed(4) + '<span class="un">km/s</span>';
+        return;
+    }
+    const el = liveElements(selected.key);
+    const vals = {
+        a:el.a, e:el.e, i:el.i_deg, 'Ω':el.raan_deg, 'ω':el.argp_deg,
+        M:el.M_deg, 'λ':el.mean_lon_deg, r:el.r_mag, v:el.v_mag,
+    };
+    for (const d of ELEM_DEFS) {
+        const node = elElTbl.querySelector(`[data-sym="${d.sym}"]`);
+        if (!node) continue;
+        node.innerHTML = d.fmt(vals[d.sym]) + (d.unit ? `<span class="un">${d.unit}</span>` : '');
+    }
+}
+
+// ── Plot (Cressida–Desdemona Δλ + inner eccentricities) ──────────────
+const plot = document.getElementById('us-plot-canvas');
+const pctx = plot.getContext('2d');
+function resizePlot() {
+    const rect = plot.getBoundingClientRect();
+    const dpr  = Math.min(devicePixelRatio, 2);
+    plot.width  = Math.max(1, Math.floor(rect.width  * dpr));
+    plot.height = Math.max(1, Math.floor(rect.height * dpr));
+    pctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+resizePlot();
+new ResizeObserver(resizePlot).observe(plot);
+
+const PLOT_N = 360;
+const plotT   = new Float32Array(PLOT_N);
+const plotDl  = new Float32Array(PLOT_N);
+const plotECr = new Float32Array(PLOT_N);
+const plotEDe = new Float32Array(PLOT_N);
+const plotEJu = new Float32Array(PLOT_N);
+let plotHead = 0, plotCount = 0, lastSampleT = -Infinity;
+const SAMPLE_INTERVAL_S = 6 * 3600;
+
+function pushSample(tSec, dl, eNa, eDe, eGa) {
+    plotT[plotHead]=tSec; plotDl[plotHead]=dl;
+    plotECr[plotHead]=eNa; plotEDe[plotHead]=eDe; plotEJu[plotHead]=eGa;
+    plotHead = (plotHead + 1) % PLOT_N;
+    if (plotCount < PLOT_N) plotCount++;
+}
+function eachSample(fn) {
+    if (plotCount === 0) return;
+    const start = (plotHead - plotCount + PLOT_N) % PLOT_N;
+    for (let k = 0; k < plotCount; k++) {
+        const i = (start + k) % PLOT_N;
+        fn(plotT[i], plotDl[i], plotECr[i], plotEDe[i], plotEJu[i], k);
+    }
+}
+function drawPlot() {
+    const W = plot.clientWidth, H = plot.clientHeight;
+    if (W < 8 || H < 8) return;
+    pctx.clearRect(0, 0, W, H);
+    if (plotCount < 2) {
+        pctx.fillStyle = '#69789a';
+        pctx.font = '12px ui-monospace, monospace';
+        pctx.textAlign = 'center';
+        pctx.fillText('Press ▶ Play to start sampling…', W/2, H/2);
+        return;
+    }
+    const padL = 56, padR = 56, padT = 12, padB = 24;
+    const pw = W - padL - padR, ph = H - padT - padB;
+
+    let tMin = Infinity, tMax = -Infinity;
+    eachSample(t => { if (t < tMin) tMin = t; if (t > tMax) tMax = t; });
+    const tSpan = Math.max(tMax - tMin, 1);
+
+    let dMin = Infinity, dMax = -Infinity;
+    eachSample((t, dl) => { if (dl < dMin) dMin = dl; if (dl > dMax) dMax = dl; });
+    const dPad = Math.max((dMax - dMin) * 0.15, 2);
+    dMin -= dPad; dMax += dPad;
+
+    let eMin = Infinity, eMax = -Infinity;
+    eachSample((t, dl, eNa, eDe, eGa) => {
+        for (const e of [eNa, eDe, eGa]) { if (e < eMin) eMin = e; if (e > eMax) eMax = e; }
+    });
+    const ePad = Math.max((eMax - eMin) * 0.15, 5e-5);
+    eMin -= ePad; eMax += ePad;
+
+    pctx.strokeStyle = 'rgba(90,160,255,.10)';
+    pctx.lineWidth = 1;
+    pctx.font = '10px ui-monospace, monospace';
+    pctx.textBaseline = 'middle';
+    for (let k = 0; k <= 4; k++) {
+        const f = k / 4, x = padL + f * pw;
+        pctx.beginPath(); pctx.moveTo(x, padT); pctx.lineTo(x, padT + ph); pctx.stroke();
+        const t = tMin + f * (tMax - tMin);
+        pctx.fillStyle = '#69789a'; pctx.textAlign = 'center';
+        pctx.fillText((t / 86400).toFixed(1) + ' d', x, H - padB + 12);
+    }
+    for (let k = 0; k <= 4; k++) {
+        const f = k / 4, y = padT + f * ph;
+        pctx.beginPath(); pctx.moveTo(padL, y); pctx.lineTo(W - padR, y); pctx.stroke();
+    }
+    pctx.fillStyle = '#5aa0ff'; pctx.textAlign = 'right';
+    for (let k = 0; k <= 4; k++) {
+        const f = k / 4, v = dMax - f * (dMax - dMin);
+        pctx.fillText(v.toFixed(1) + '°', padL - 6, padT + f * ph);
+    }
+    pctx.fillStyle = '#9ad0ff'; pctx.textAlign = 'left';
+    for (let k = 0; k <= 4; k++) {
+        const f = k / 4, v = eMax - f * (eMax - eMin);
+        pctx.fillText(v.toFixed(4), W - padR + 6, padT + f * ph);
+    }
+    pctx.fillStyle = 'rgba(90,160,255,.55)'; pctx.textAlign = 'center';
+    pctx.save(); pctx.translate(14, padT + ph/2); pctx.rotate(-Math.PI/2);
+    pctx.fillText('Δλ  (deg)', 0, 0); pctx.restore();
+    pctx.fillStyle = 'rgba(154,208,255,.55)';
+    pctx.save(); pctx.translate(W - 14, padT + ph/2); pctx.rotate(Math.PI/2);
+    pctx.fillText('eccentricity', 0, 0); pctx.restore();
+
+    const xOf = t => padL + ((t - tMin) / tSpan) * pw;
+    const yDl = v => padT + (1 - (v - dMin) / (dMax - dMin)) * ph;
+    const yE  = v => padT + (1 - (v - eMin) / (eMax - eMin)) * ph;
+
+    pctx.lineWidth = 2; pctx.strokeStyle = '#5aa0ff';
+    pctx.beginPath(); let first = true;
+    eachSample((t, dl) => {
+        const x = xOf(t), y = yDl(dl);
+        if (first) { pctx.moveTo(x, y); first = false; } else pctx.lineTo(x, y);
+    });
+    pctx.stroke();
+
+    const eccentricSeries = [
+        { color:'#9ad0ff', getter:(t,dl,eNa)         => eNa },
+        { color:'#66e0d8', getter:(t,dl,eNa,eDe)     => eDe },
+        { color:'#b78cff', getter:(t,dl,eNa,eDe,eGa) => eGa },
+    ];
+    pctx.lineWidth = 1.5;
+    for (const ser of eccentricSeries) {
+        pctx.strokeStyle = ser.color;
+        pctx.beginPath(); let f2 = true;
+        eachSample((t, dl, eNa, eDe, eGa) => {
+            const x = xOf(t), y = yE(ser.getter(t, dl, eNa, eDe, eGa));
+            if (f2) { pctx.moveTo(x, y); f2 = false; } else pctx.lineTo(x, y);
+        });
+        pctx.stroke();
+    }
+}
+
+// ── Compute plot quantities from current state ───────────────────────
+function meanLonRel(idx) {
+    const M_nep = sim.bodies[0].m;
+    const m     = sim.bodies[idx].m;
+    const mu    = G_SI * (M_nep + m);
+    const rRel  = [
+        sim.bodies[idx].r[0] - sim.bodies[0].r[0],
+        sim.bodies[idx].r[1] - sim.bodies[0].r[1],
+        sim.bodies[idx].r[2] - sim.bodies[0].r[2],
+    ];
+    const vRel  = [
+        sim.bodies[idx].v[0] - sim.bodies[0].v[0],
+        sim.bodies[idx].v[1] - sim.bodies[0].v[1],
+        sim.bodies[idx].v[2] - sim.bodies[0].v[2],
+    ];
+    return stateToElements(rRel, vRel, mu);
+}
+function computeDynamics() {
+    const elCr = meanLonRel(idxOf.cressida);
+    const elDe = meanLonRel(idxOf.desdemona);
+    const elJu = meanLonRel(idxOf.juliet);
+    let dl = elCr.mean_lon_deg - elDe.mean_lon_deg;
+    dl = ((dl % 360) + 360) % 360;
+    if (dl > 180) dl -= 360;        // wrap to [-180, 180] so the encounter is centred
+    // Live Cressida–Desdemona separation (km) — the collision-risk metric.
+    const ic = idxOf.cressida, id = idxOf.desdemona;
+    const gap = Math.hypot(
+        sim.bodies[ic].r[0] - sim.bodies[id].r[0],
+        sim.bodies[ic].r[1] - sim.bodies[id].r[1],
+        sim.bodies[ic].r[2] - sim.bodies[id].r[2],
+    ) / KM;
+    return { dl, eCr:elCr.e, eDe:elDe.e, eJu:elJu.e, gap };
+}
+// Analytic J₂ nodal precession rate for an inner moon (deg/yr) — what drives
+// the visible orbit-ring precession.
+function cressidaNodeRateDegYr() {
+    const el = INIT_EL.cressida;
+    const a_m = el.a_km * KM;
+    const mu  = G_SI * (M_URA_KG + getBody('cressida').mass);
+    const n   = Math.sqrt(mu / (a_m * a_m * a_m));
+    return j2NodeRate(n, a_m, el.e, el.i_deg * D2R, J2_URA, R_URA_M) * R2D * SEC_PER_YEAR;
+}
+function updateReadouts(res) {
+    document.getElementById('rd-dlam').textContent = res.dl.toFixed(2) + '°';
+    document.getElementById('rd-eCr').textContent  = res.eCr.toFixed(5);
+    document.getElementById('rd-eDe').textContent  = res.eDe.toFixed(5);
+    document.getElementById('rd-eJu').textContent  = res.eJu.toFixed(5);
+    document.getElementById('rd-gap').textContent  = res.gap.toFixed(0) + ' km';
+    document.getElementById('rd-prec').textContent =
+        (j2Enabled ? cressidaNodeRateDegYr().toFixed(3) + '°/yr' : '0 (J₂ off)');
+}
+
+// ── HUD ──────────────────────────────────────────────────────────────
+const elTimeDisp   = document.getElementById('us-time-display');
+const elJdDisp     = document.getElementById('us-jd-display');
+const elEnergyDisp = document.getElementById('us-energy-display');
+const elStepDisp   = document.getElementById('us-step-display');
+const elPill       = document.getElementById('us-mode-pill');
+
+function updateHud() {
+    const days = sim.t_s / 86400;
+    elTimeDisp.textContent = (days >= 0 ? '+ ' : '') + days.toFixed(2) + ' d';
+    elJdDisp.textContent   = 'JD ' + (J2000_JD + days).toFixed(3);
+    const E = energyNow(sim.bodies);
+    const drift = (E - sim.initialEnergy) / Math.abs(sim.initialEnergy);
+    elEnergyDisp.textContent = drift === 0 ? '0' : drift.toExponential(2);
+    elStepDisp.textContent   = `dt = ${sim.dtTarget.toFixed(0)} s`;
+    if (sim.playing) { elPill.textContent = '▶ Playing'; elPill.classList.add('play'); }
+    else             { elPill.textContent = '⏸ Paused';  elPill.classList.remove('play'); }
+}
+
+// ── Render: write SI state into scene ────────────────────────────────
+function syncMeshesFromState() {
+    {
+        const b = sim.bodies[0];
+        const p = toScene(b.r);
+        uraGroup.position.set(p[0], p[1], p[2]);
+        meshes.uranus.position.set(0, 0, 0);   // skin mesh lives in uraGroup
+    }
+    for (let i = 1; i < sim.bodies.length; i++) {
+        const k = URANUS_BODIES[i].key;
+        const p = toScene(sim.bodies[i].r);
+        meshes[k].position.set(p[0], p[1], p[2]);
+        meshes[k].lookAt(uraGroup.position);   // tidal lock: keep one face to Uranus
+    }
+    if (ghost.enabled) {
+        for (let i = 1; i < sim.bodies.length; i++) {
+            const k = URANUS_BODIES[i].key;
+            const p = ghostScenePos(k);
+            if (p) ghostMeshes[k].position.set(p.x, p.y, p.z);
+        }
+    }
+    const jr = sim.bodies[0].r;
+    for (const m of MINOR_MOONS) {
+        const st = minorMoonStateRel(m, sim.t_s);
+        const rr = (m.frame === 'orbital') ? st.r : [st.r[0] + jr[0], st.r[1] + jr[1], st.r[2] + jr[2]];
+        const p = minorToScene(m, rr);
+        meshes[m.key].position.set(p[0], p[1], p[2]);
+        meshes[m.key].lookAt(uraGroup.position);
+        rebuildMinorRing(m, false);
+    }
+}
+
+function appendTrails(simSecAdvanced) {
+    for (let i = 1; i < sim.bodies.length; i++) {
+        const k = URANUS_BODIES[i].key;
+        const tb = trailBuffers[k];
+        tb.accum += simSecAdvanced;
+        if (tb.accum < tb.sampleEvery) continue;
+        tb.accum = 0;
+        const p = toScene(sim.bodies[i].r);
+        const dst = tb.idx * 3;
+        tb.positions[dst]=p[0]; tb.positions[dst+1]=p[1]; tb.positions[dst+2]=p[2];
+        tb.idx = (tb.idx + 1) % tb.capacity;
+        if (tb.count < tb.capacity) tb.count++;
+        rebuildTrailLine(k);
+    }
+}
+function rebuildTrailLine(key) {
+    const tb = trailBuffers[key], line = trailLines[key];
+    const geo = line.geometry, arr = geo.attributes.position.array;
+    const start = (tb.idx - tb.count + tb.capacity) % tb.capacity;
+    for (let k = 0; k < tb.count; k++) {
+        const src = ((start + k) % tb.capacity) * 3, dst = k * 3;
+        arr[dst]=tb.positions[src]; arr[dst+1]=tb.positions[src+1]; arr[dst+2]=tb.positions[src+2];
+    }
+    geo.setDrawRange(0, tb.count);
+    geo.attributes.position.needsUpdate = true;
+    geo.computeBoundingSphere();
+}
+function clearTrails() {
+    for (const k of Object.keys(trailBuffers)) {
+        const tb = trailBuffers[k];
+        tb.idx = 0; tb.count = 0; tb.accum = 0;
+        trailLines[k].geometry.setDrawRange(0, 0);
+    }
+}
+
+// ── Selection / hover rings ──────────────────────────────────────────
+function visualRadiusOf(key) {
+    if (key === 'uranus') return 1.0;
+    if (isMinor(key)) return minorVisRadius(minorByKey[key]);
+    const b = URANUS_BODIES.find(b => b.key === key);
+    return b ? Math.max((b.radius_km / R_URA_KM) * 13, 0.07) : 0.07;
+}
+function updateSelRing() {
+    if (!selected || !meshes[selected.key]) { selRing.visible = false; return; }
+    const m = meshes[selected.key];
+    const baseR = selected.key === 'uranus' ? 1.5 : Math.max(visualRadiusOf(selected.key) * 1.6, 0.10);
+    selRing.position.copy(selected.key === 'uranus' ? uraGroup.position : m.position);
+    selRing.scale.setScalar(baseR);
+    selRing.lookAt(camera.position);
+    selRing.visible = true;
+}
+function updateHovRing(key) {
+    if (!key || !meshes[key] || (selected && key === selected.key)) { hovRing.visible = false; return; }
+    const m = meshes[key];
+    const baseR = key === 'uranus' ? 1.7 : Math.max(visualRadiusOf(key) * 1.85, 0.12);
+    hovRing.position.copy(key === 'uranus' ? uraGroup.position : m.position);
+    hovRing.scale.setScalar(baseR);
+    hovRing.lookAt(camera.position);
+    hovRing.visible = true;
+}
+
+// ── Mouse picking ────────────────────────────────────────────────────
+const raycaster = new THREE.Raycaster();
+const ndc       = new THREE.Vector2();
+let hoveredKey  = null;
+const pickables = () => Object.values(meshes);
+const elTooltip = document.getElementById('us-tooltip');
+
+function hitFromEvent(ev) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    ndc.x =  ((ev.clientX - rect.left) / rect.width)  * 2 - 1;
+    ndc.y = -((ev.clientY - rect.top)  / rect.height) * 2 + 1;
+    raycaster.setFromCamera(ndc, camera);
+    const hits = raycaster.intersectObjects(pickables(), true);
+    if (!hits.length) return null;
+    let obj = hits[0].object;
+    while (obj && (!obj.userData || !obj.userData.kind)) obj = obj.parent;
+    return obj && obj.userData ? obj.userData : null;
+}
+
+// ── Tooltip rendering ────────────────────────────────────────────────
+let pinnedKey = null;
+function buildTooltipHtml(key) {
+    const b = getBody(key);
+    if (!b) return '';
+    const beh = behaviorOf(key);
+    const hex = '#' + b.color.toString(16).padStart(6, '0');
+    const isPinned = (pinnedKey === key);
+    const closeHint = isPinned
+        ? `<span style="margin-left:auto; font-weight:400; font-size:.62rem; color:#69789a">📌 pinned · right-click to unpin</span>`
+        : `<span style="margin-left:auto; font-weight:400; font-size:.62rem; color:#69789a">right-click to pin</span>`;
+    let html = `<div class="tt-hdr"><span class="dot" style="background:${hex};color:${hex}"></span>${b.name}${closeHint}</div>`;
+    if (beh.title) html += `<div style="color:#aad4ff; font-size:.7rem; line-height:1.4; margin-bottom:5px">${beh.title}</div>`;
+
+    if (key === 'uranus') {
+        const speed = Math.hypot(...sim.bodies[0].v);
+        html += `<div class="tt-row"><span class="tt-k">mass</span><span class="tt-v">8.681×10²⁵ kg</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">radius</span><span class="tt-v">25,559 km</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">spin</span><span class="tt-v">17.24 h (retro)</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">obliquity</span><span class="tt-v">97.77°</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">J₂ / J₄</span><span class="tt-v">3.35e−3 / −3.2e−5</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">dipole</span><span class="tt-v">tilt 58.6° · off 0.31 R</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">v (bary)</span><span class="tt-v">${(speed/KM).toFixed(4)} km/s</span></div>`;
+    } else {
+        const el = liveElements(key);
+        html += `<div class="tt-row"><span class="tt-k">a (live)</span><span class="tt-v">${(el.a / KM).toFixed(0)} km</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">e (live)</span><span class="tt-v">${el.e.toFixed(5)}</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">i</span><span class="tt-v">${el.i_deg.toFixed(2)}°${el.i_deg > 90 ? ' <span style="color:#c89878">(retrograde)</span>' : ''}</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">period</span><span class="tt-v">${formatPeriod(periodDays(key))}</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">r (now)</span><span class="tt-v">${(el.r_mag/KM).toFixed(0)} km</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">v (now)</span><span class="tt-v">${(el.v_mag/KM).toFixed(2)} km/s</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">phys. radius</span><span class="tt-v">${b.radius_km.toFixed(0)} km</span></div>`;
+
+        if (isMinor(key)) {
+            const m = minorByKey[key];
+            const a_m = m.a_km * KM;
+            const mu  = G_SI * (M_URA_KG + m.mass);
+            const n   = Math.sqrt(mu / (a_m * a_m * a_m));
+            const { dRaan, dArgp } = minorSecularRates(m, n, a_m, m.i_deg * D2R);
+            const src = m.secular ? 'solar' : 'J₂';
+            html += `<div class="tt-sep"></div>`;
+            html += `<div class="tt-row"><span class="tt-k">dΩ/dt (${src})</span><span class="tt-v">${(dRaan * R2D * SEC_PER_YEAR).toFixed(3)}°/yr</span></div>`;
+            html += `<div class="tt-row"><span class="tt-k">dω/dt (${src})</span><span class="tt-v">${(dArgp * R2D * SEC_PER_YEAR).toFixed(3)}°/yr</span></div>`;
+        }
+        if (key === 'miranda') {
+            const h = mirandaHeating(currentMirE);
+            html += `<div class="tt-sep"></div>`;
+            html += `<div class="tt-row"><span class="tt-k">tidal heat (e=${currentMirE.toFixed(3)})</span><span class="tt-v">${h.power_GW.toFixed(2)} GW</span></div>`;
+            html += `<div class="tt-row"><span class="tt-k">surface flux</span><span class="tt-v">${h.flux_mW.toFixed(2)} mW/m²</span></div>`;
+        }
+    }
+    if (beh.bullets && beh.bullets.length) {
+        html += `<div class="tt-sep"></div>`;
+        for (const line of beh.bullets)
+            html += `<div style="color:#a9bbd8; font-style:italic; font-size:.66rem; line-height:1.4; margin:2px 0">• ${line}</div>`;
+    }
+    return html;
+}
+function showTooltipAt(key, sx, sy) {
+    elTooltip.innerHTML = buildTooltipHtml(key);
+    elTooltip.style.left = sx + 'px';
+    elTooltip.style.top  = sy + 'px';
+    elTooltip.classList.add('show');
+}
+renderer.domElement.addEventListener('mousemove', ev => {
+    const rect = renderer.domElement.getBoundingClientRect();
+    const sx = ev.clientX - rect.left, sy = ev.clientY - rect.top;
+    const ud = hitFromEvent(ev);
+    const newKey = ud ? ud.key : null;
+    if (newKey !== hoveredKey) {
+        hoveredKey = newKey;
+        renderer.domElement.style.cursor = hoveredKey ? 'pointer' : '';
+    }
+    if (pinnedKey) return;
+    if (ud) showTooltipAt(ud.key, sx, sy);
+    else    elTooltip.classList.remove('show');
+});
+renderer.domElement.addEventListener('mouseleave', () => {
+    hoveredKey = null;
+    renderer.domElement.style.cursor = '';
+    if (!pinnedKey) elTooltip.classList.remove('show');
+});
+function refreshPinnedTooltip() {
+    if (!pinnedKey) return;
+    elTooltip.innerHTML = buildTooltipHtml(pinnedKey);
+}
+
+let lastClickTime = 0, lastClickKey = null;
+renderer.domElement.addEventListener('click', ev => {
+    const ud = hitFromEvent(ev);
+    const now = performance.now();
+    if (ud && ud.key) {
+        selectBody(ud.key);
+        if (lastClickKey === ud.key && now - lastClickTime < 350) {
+            focusBody(ud.key);
+            lastClickTime = 0; lastClickKey = null;
+        } else { lastClickTime = now; lastClickKey = ud.key; }
+    } else if (pinnedKey) {
+        pinnedKey = null; elTooltip.classList.remove('show');
+    }
+});
+renderer.domElement.addEventListener('contextmenu', ev => {
+    ev.preventDefault();
+    const ud = hitFromEvent(ev);
+    const rect = renderer.domElement.getBoundingClientRect();
+    const sx = ev.clientX - rect.left, sy = ev.clientY - rect.top;
+    if (ud && ud.key) {
+        if (pinnedKey === ud.key) { pinnedKey = null; elTooltip.classList.remove('show'); }
+        else { pinnedKey = ud.key; showTooltipAt(ud.key, sx, sy); }
+    } else if (pinnedKey) { pinnedKey = null; elTooltip.classList.remove('show'); }
+});
+
+// ── Time controls ────────────────────────────────────────────────────
+const elPlay      = document.getElementById('us-play');
+const elRev       = document.getElementById('us-rev');
+const elSpeed     = document.getElementById('us-speed');
+const elStepF     = document.getElementById('us-step-fwd');
+const elStepB     = document.getElementById('us-step-back');
+const elNow       = document.getElementById('us-now');
+const elReset     = document.getElementById('us-reset');
+const elDate      = document.getElementById('us-date');
+const elHour      = document.getElementById('us-hour');
+const elJdInput   = document.getElementById('us-jd-input');
+const elBookmarks = document.getElementById('us-bookmarks');
+const elTrToggle  = document.getElementById('us-trails-toggle');
+const elTrLen     = document.getElementById('us-trail-len');
+const elGhostTog  = document.getElementById('us-ghost-toggle');
+const elLabelsTog = document.getElementById('us-labels-toggle');
+const elRingsTog  = document.getElementById('us-rings-toggle');
+const elMagTog    = document.getElementById('us-mag-toggle');
+const elJ2Tog     = document.getElementById('us-j2-toggle');
+const elViewTop   = document.getElementById('us-view-top');
+const elView3D    = document.getElementById('us-view-3d');
+const elViewEqu   = document.getElementById('us-view-equ');
+const elFocus     = document.getElementById('us-focus');
+const elPov       = document.getElementById('us-pov');
+const elScale     = document.getElementById('us-scale');
+const elViewWide  = document.getElementById('us-view-wide');
+
+elPlay.addEventListener('click', () => {
+    sim.playing = !sim.playing;
+    sim.live = false; elNow.classList.remove('on');
+    elPlay.textContent = sim.playing ? '⏸ Pause' : '▶ Play';
+    updateHud();
+});
+elRev.addEventListener('click', () => {
+    sim.direction *= -1;
+    elRev.textContent = sim.direction > 0 ? '⇄ Forward' : '⇆ Reverse';
+    elRev.classList.toggle('on', sim.direction < 0);
+    sim.live = false; elNow.classList.remove('on');
+});
+elSpeed.addEventListener('change', () => { sim.speed = parseFloat(elSpeed.value); });
+
+function step(simSec) {
+    const absSec = Math.abs(simSec);
+    const dtMag  = Math.min(400, Math.max(40, absSec / 50));
+    const dt     = Math.sign(simSec) * dtMag;
+    sim.dtTarget = dtMag;
+    let remaining = simSec, safety = 200000;
+    const opts = stepOpts();
+    while (Math.abs(remaining) > 1e-6 && safety-- > 0) {
+        const this_dt = (Math.abs(remaining) < Math.abs(dt)) ? remaining : dt;
+        yoshida4Step(sim.bodies, this_dt, opts);
+        sim.t_s += this_dt;
+        remaining -= this_dt;
+        appendTrails(this_dt);
+    }
+}
+function reseedAtSimT(targetTs) {
+    sim.bodies = buildInitialBodies();
+    const M_nep = sim.bodies[0].m;
+    const dt_s  = targetTs;
+    for (const moonKey of N_BODY_MOONS) {
+        const i  = idxOf[moonKey];
+        const m  = sim.bodies[i].m;
+        const mu = G_SI * (M_nep + m);
+        const el = INIT_EL[moonKey];
+        const a_m = el.a_km * KM;
+        const n_rad_s = Math.sqrt(mu / (a_m * a_m * a_m));
+        const M_now = el.M_deg + n_rad_s * dt_s * R2D;
+        const st = elementsToState({
+            a:a_m, e:el.e, i_deg:el.i_deg, raan_deg:el.raan_deg,
+            argp_deg:el.argp_deg, M_deg:M_now, mu,
+        });
+        sim.bodies[i].r = st.r;
+        sim.bodies[i].v = st.v;
+    }
+    let px=0, py=0, pz=0;
+    for (let i = 1; i < sim.bodies.length; i++) {
+        px += sim.bodies[i].m * sim.bodies[i].v[0];
+        py += sim.bodies[i].m * sim.bodies[i].v[1];
+        pz += sim.bodies[i].m * sim.bodies[i].v[2];
+    }
+    sim.bodies[0].v[0] = -px / sim.bodies[0].m;
+    sim.bodies[0].v[1] = -py / sim.bodies[0].m;
+    sim.bodies[0].v[2] = -pz / sim.bodies[0].m;
+    sim.t_s = targetTs;
+    sim.initialEnergy = energyNow(sim.bodies);
+}
+function jumpToJD(jd) {
+    const targetTs = simTFromJD(jd);
+    const dT = targetTs - sim.t_s;
+    const ABS_DT_THRESHOLD = 365.25 * 86400 * 2;
+    if (Math.abs(dT) < ABS_DT_THRESHOLD) {
+        step(dT);
+    } else {
+        reseedAtSimT(targetTs);
+        plotCount = 0; plotHead = 0;
+        clearTrails();
+        if (ghost.enabled) snapshotGhostElements();
+    }
+    syncMeshesFromState();
+    refreshSidePanel();
+    updateHud();
+    drawPlot();
+}
+elStepF.addEventListener('click', () => { step(3600); syncInputsFromSim(); });
+elStepB.addEventListener('click', () => { step(-3600); syncInputsFromSim(); });
+
+elReset.addEventListener('click', () => {
+    sim.bodies = buildInitialBodies();
+    sim.t_s = 0;
+    sim.initialEnergy = energyNow(sim.bodies);
+    sim.live = false; elNow.classList.remove('on');
+    plotCount = 0; plotHead = 0;
+    clearTrails();
+    if (ghost.enabled) snapshotGhostElements();
+    syncMeshesFromState();
+    refreshSidePanel();
+    syncInputsFromSim();
+    updateHud();
+    drawPlot();
+});
+elNow.addEventListener('click', () => {
+    sim.live = true; sim.playing = false;
+    elPlay.textContent = '▶ Play'; elNow.classList.add('on');
+    const now = Date.now() / 86400000 + 2440587.5;
+    jumpToJD(now);
+    syncInputsFromSim();
+});
+
+function syncInputsFromSim() {
+    const jd = jdFromSimT(sim.t_s);
+    const d  = dateFromJD(jd);
+    const yyyy = String(d.getUTCFullYear()).padStart(4, '0');
+    const mm   = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const dd   = String(d.getUTCDate()).padStart(2, '0');
+    elDate.value = `${yyyy}-${mm}-${dd}`;
+    elHour.value = d.getUTCHours();
+    elJdInput.value = jd.toFixed(3);
+}
+function commitDateInputs() {
+    const m = (elDate.value || '').match(/^(-?\d+)-(\d{2})-(\d{2})$/);
+    if (!m) return;
+    const y = parseInt(m[1], 10), mo = parseInt(m[2], 10), da = parseInt(m[3], 10);
+    const hr = Math.max(0, Math.min(23, parseInt(elHour.value, 10) || 0));
+    if (!Number.isFinite(y)) return;
+    const jd = jdFromYMD(y, mo, da, hr);
+    sim.live = false; elNow.classList.remove('on');
+    jumpToJD(jd);
+    syncInputsFromSim();
+}
+elDate.addEventListener('change', commitDateInputs);
+elHour.addEventListener('change', commitDateInputs);
+elJdInput.addEventListener('change', () => {
+    const jd = parseFloat(elJdInput.value);
+    if (!Number.isFinite(jd)) return;
+    sim.live = false; elNow.classList.remove('on');
+    jumpToJD(jd);
+    syncInputsFromSim();
+});
+
+function buildBookmarks() {
+    elBookmarks.innerHTML = '';
+    for (const bm of URANUS_BOOKMARKS) {
+        const btn = document.createElement('button');
+        btn.className = 'us-bm';
+        btn.title = bm.desc;
+        btn.innerHTML = `<span class="us-bm-yr">${bm.y}</span>${bm.label}`;
+        btn.addEventListener('click', () => {
+            sim.live = false; elNow.classList.remove('on');
+            sim.playing = false; elPlay.textContent = '▶ Play';
+            const jd = jdFromYMD(bm.y, bm.m || 1, bm.d || 1, bm.hr || 12);
+            jumpToJD(jd);
+            syncInputsFromSim();
+        });
+        elBookmarks.appendChild(btn);
+    }
+}
+
+let trailsOn = true;
+elTrToggle.addEventListener('click', () => {
+    trailsOn = !trailsOn;
+    elTrToggle.classList.toggle('on', trailsOn);
+    elTrToggle.textContent = 'Trails: ' + (trailsOn ? 'ON' : 'OFF');
+    for (const k of Object.keys(trailLines)) trailLines[k].visible = trailsOn;
+});
+elTrLen.addEventListener('change', () => {
+    const max = parseInt(elTrLen.value, 10) || 3600;
+    for (const k of Object.keys(trailBuffers)) {
+        const tb = trailBuffers[k];
+        tb.capacity = Math.min(max, TRAIL_MAX);
+        tb.count    = Math.min(tb.count, tb.capacity);
+        rebuildTrailLine(k);
+    }
+});
+elGhostTog.addEventListener('click', () => {
+    ghost.enabled = !ghost.enabled;
+    elGhostTog.classList.toggle('on', ghost.enabled);
+    elGhostTog.textContent = 'Keplerian ghost: ' + (ghost.enabled ? 'ON' : 'OFF');
+    for (const k of Object.keys(ghostMeshes)) ghostMeshes[k].visible = ghost.enabled;
+    if (ghost.enabled) snapshotGhostElements();
+});
+
+let ringsOn = true;
+elRingsTog.addEventListener('click', () => {
+    ringsOn = !ringsOn;
+    elRingsTog.classList.toggle('on', ringsOn);
+    elRingsTog.textContent = 'Rings: ' + (ringsOn ? 'ON' : 'OFF');
+    uraSkin.setRingsVisible(ringsOn);
+});
+let magOn = false;
+elMagTog.addEventListener('click', () => {
+    magOn = !magOn;
+    elMagTog.classList.toggle('on', magOn);
+    elMagTog.textContent = 'Magnetosphere: ' + (magOn ? 'ON' : 'OFF');
+    uraSkin.setMagnetosphereVisible(magOn);
+    magnetosphere.visible = magOn;
+});
+elJ2Tog.addEventListener('click', () => {
+    j2Enabled = !j2Enabled;
+    elJ2Tog.classList.toggle('on', j2Enabled);
+    elJ2Tog.textContent = 'J₂: ' + (j2Enabled ? 'ON' : 'OFF');
+    // Re-baseline the energy diagnostic for the new Hamiltonian.
+    sim.initialEnergy = energyNow(sim.bodies);
+    if (ghost.enabled) snapshotGhostElements();
+});
+
+// ── View presets (smooth tweened) ────────────────────────────────────
+const FREE_MAX_DIST = 9000;     // zoom-out cap (same in every preset)
+const VIEW_PRESETS = {
+    top:  { pos:new THREE.Vector3(0, 44, 0.001), btn:elViewTop, distMax:FREE_MAX_DIST },
+    '3d': { pos:new THREE.Vector3(0, 16, 34),    btn:elView3D,  distMax:FREE_MAX_DIST },
+    equ:  { pos:new THREE.Vector3(0, 1.4, 44),   btn:elViewEqu, distMax:FREE_MAX_DIST },
+};
+function clearWideFlag() {
+    if (!wideOn) return;
+    wideOn = false;
+    elViewWide.classList.remove('on');
+    elViewWide.textContent = '⤢ Wide field';
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+}
+function setView(name) {
+    const preset = VIEW_PRESETS[name];
+    if (!preset) return;
+    clearWideFlag();
+    cam.presetName = name;
+    elViewTop.classList.toggle('on', name === 'top');
+    elView3D .classList.toggle('on', name === '3d');
+    elViewEqu.classList.toggle('on', name === 'equ');
+    cam.mode = 'free'; cam.focusKey = null; elFocus.value = '';
+    controls.maxDistance = preset.distMax;
+    startCameraTween(preset.pos, new THREE.Vector3(0, 0, 0));
+}
+elViewTop.addEventListener('click', () => setView('top'));
+elView3D .addEventListener('click', () => setView('3d'));
+elViewEqu.addEventListener('click', () => setView('equ'));
+
+elScale.addEventListener('change', () => {
+    clearWideFlag();
+    // 'zoom' frames Uranus + the rings and inner moons up close (where the
+    // planet looks largest); 'full' frames out to Oberon. Zoom-out stays
+    // unrestricted in both so you can always pull back to the whole system.
+    const pos = (elScale.value === 'zoom')
+        ? new THREE.Vector3(0, 2.2, 5.8)
+        : new THREE.Vector3(0, 16, 34);
+    controls.maxDistance = FREE_MAX_DIST;
+    cam.mode = 'free'; cam.focusKey = null; elFocus.value = '';
+    startCameraTween(pos, new THREE.Vector3(0, 0, 0));
+});
+
+// ── Wide-field / fullscreen ──────────────────────────────────────────
+const stageWrap = document.getElementById('us-canvas-wrap');
+let wideOn = false;
+function setWide(on) {
+    wideOn = on;
+    elViewWide.classList.toggle('on', on);
+    elViewWide.textContent = on ? '⤡ Exit wide' : '⤢ Wide field';
+    cam.mode = 'free'; cam.focusKey = null; elFocus.value = '';
+    controls.maxDistance = FREE_MAX_DIST;
+    if (on) {
+        // Pull far enough out to frame the irregulars out to Ferdinand (~1,090 R_U).
+        startCameraTween(new THREE.Vector3(0, 1700, 3000), new THREE.Vector3(0, 0, 0), 1000);
+        if (stageWrap.requestFullscreen) stageWrap.requestFullscreen().catch(() => {});
+    } else {
+        if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+        setView('3d');
+    }
+}
+elViewWide.addEventListener('click', () => setWide(!wideOn));
+document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement && wideOn) setWide(false);
+    setTimeout(resize, 60);
+});
+
+// Focus dropdown.
+elFocus.addEventListener('change', () => focusBody(elFocus.value || null));
+function bodyPosition(key) {
+    if (key === 'uranus') return uraGroup.position.clone();
+    return meshes[key] ? meshes[key].position.clone() : new THREE.Vector3(0,0,0);
+}
+function bodySceneRadius(key) { return visualRadiusOf(key); }
+function focusBody(key) {
+    if (!key) {
+        cam.mode = 'free'; cam.focusKey = null; elFocus.value = '';
+        startCameraTween(VIEW_PRESETS[cam.presetName].pos, new THREE.Vector3(0,0,0));
+        return;
+    }
+    cam.mode = 'focus'; cam.focusKey = key; elFocus.value = key;
+    const tgt = bodyPosition(key);
+    const r   = bodySceneRadius(key);
+    const off = new THREE.Vector3(r * 14, r * 8, r * 14);
+    startCameraTween(tgt.clone().add(off), tgt);
+}
+elPov.addEventListener('click', () => {
+    if (!selected || selected.key === 'uranus') {
+        cam.mode = 'free';
+        startCameraTween(new THREE.Vector3(0, 4, 0.001), new THREE.Vector3(0,0,0));
+        return;
+    }
+    cam.mode = 'pov'; cam.focusKey = selected.key; elFocus.value = selected.key;
+    const moonPos = bodyPosition(selected.key);
+    const r = bodySceneRadius(selected.key);
+    const toNep = new THREE.Vector3().subVectors(uraGroup.position, moonPos).normalize();
+    const camPos = moonPos.clone().add(toNep.clone().multiplyScalar(r * 1.35));
+    startCameraTween(camPos, uraGroup.position.clone());
+});
+function applyFocusOrPov() {
+    if (cam.tween) return;
+    if (cam.mode === 'focus' && cam.focusKey) {
+        const tgt = bodyPosition(cam.focusKey);
+        const offset = camera.position.clone().sub(controls.target);
+        controls.target.copy(tgt);
+        camera.position.copy(tgt).add(offset);
+    } else if (cam.mode === 'pov' && cam.focusKey && meshes[cam.focusKey]) {
+        const moonPos = meshes[cam.focusKey].position;
+        const nepPos  = uraGroup.position;
+        const r = bodySceneRadius(cam.focusKey);
+        const toNep = new THREE.Vector3().subVectors(nepPos, moonPos).normalize();
+        camera.position.copy(moonPos).add(toNep.clone().multiplyScalar(r * 1.35));
+        controls.target.copy(nepPos);
+    }
+}
+
+let labelsOn = true;
+elLabelsTog.addEventListener('click', () => {
+    labelsOn = !labelsOn;
+    elLabelsTog.classList.toggle('on', labelsOn);
+    elLabelsTog.textContent = 'Labels: ' + (labelsOn ? 'ON' : 'OFF');
+});
+
+// ── HTML labels & hover icon ─────────────────────────────────────────
+const overlay = document.getElementById('us-overlay');
+const labelEls = {};
+const hoverIcon = document.createElement('div');
+hoverIcon.className = 'us-hover-icon';
+overlay.appendChild(hoverIcon);
+for (const b of ALL_BODIES) {
+    const div = document.createElement('div');
+    div.className = 'us-label-3d' + (isMinor(b.key) ? ' minor' : '');
+    const beh = behaviorOf(b.key);
+    div.innerHTML = `<span class="icon">${beh.icon || '·'}</span>${b.name}`;
+    overlay.appendChild(div);
+    labelEls[b.key] = div;
+}
+const _projVec = new THREE.Vector3();
+function projectToScreen(pos3) {
+    _projVec.copy(pos3).project(camera);
+    const rect = renderer.domElement.getBoundingClientRect();
+    const x = (_projVec.x * 0.5 + 0.5) * rect.width;
+    const y = (-_projVec.y * 0.5 + 0.5) * rect.height;
+    return { x, y, behind:_projVec.z > 1 };
+}
+function labelPosOf(key) {
+    return key === 'uranus' ? uraGroup.position : (meshes[key] ? meshes[key].position : null);
+}
+function updateLabels() {
+    if (!labelsOn) {
+        for (const el of Object.values(labelEls)) el.style.display = 'none';
+        hoverIcon.classList.remove('show');
+        return;
+    }
+    for (const b of ALL_BODIES) {
+        const el = labelEls[b.key];
+        const pos = labelPosOf(b.key);
+        if (!pos) continue;
+        const isSel = selected && b.key === selected.key;
+        if (isMinor(b.key) && !isSel && b.key !== hoveredKey) { el.style.display = 'none'; continue; }
+        const p = projectToScreen(pos);
+        if (p.behind) { el.classList.add('behind'); el.style.display = 'block'; el.style.left = '-9999px'; continue; }
+        el.classList.remove('behind');
+        el.style.display = 'block';
+        el.style.left = `${p.x}px`;
+        el.style.top  = `${p.y}px`;
+        el.classList.toggle('selected', isSel);
+    }
+    if (hoveredKey && labelPosOf(hoveredKey) && (!selected || hoveredKey !== selected.key)) {
+        const beh = behaviorOf(hoveredKey);
+        if (beh && beh.icon) {
+            hoverIcon.textContent = beh.icon;
+            const p = projectToScreen(labelPosOf(hoveredKey));
+            if (!p.behind) {
+                hoverIcon.style.left = `${p.x}px`;
+                hoverIcon.style.top  = `${p.y - 32}px`;
+                hoverIcon.classList.add('show');
+            } else hoverIcon.classList.remove('show');
+        } else hoverIcon.classList.remove('show');
+    } else hoverIcon.classList.remove('show');
+}
+
+// ── Conjunction detector (major moons) ───────────────────────────────
+const elConjunction = document.getElementById('us-conjunction');
+let activeConjPair = null;
+const CONJ_KEYS = ['miranda','ariel','umbriel','titania','oberon'];
+function detectConjunctions() {
+    const lon = {};
+    for (const k of CONJ_KEYS) lon[k] = meanLonRel(idxOf[k]).mean_lon_deg;
+    let nearest = null, nearestDelta = 360;
+    const pairs = [['miranda','ariel'],['ariel','umbriel'],['umbriel','titania'],['titania','oberon']];
+    for (const [a, b] of pairs) {
+        let d = Math.abs(lon[a] - lon[b]);
+        if (d > 180) d = 360 - d;
+        if (d < nearestDelta) { nearestDelta = d; nearest = [a, b]; }
+    }
+    if (nearestDelta < 4 && nearest) {
+        const tag = nearest.join('+');
+        if (activeConjPair !== tag) {
+            const aName = getBody(nearest[0]).name, bName = getBody(nearest[1]).name;
+            elConjunction.textContent = `✦ ${aName} ↔ ${bName} conjunction (Δλ = ${nearestDelta.toFixed(1)}°)`;
+            elConjunction.classList.add('show');
+            activeConjPair = tag;
+        }
+    } else if (nearestDelta > 7 && activeConjPair) {
+        elConjunction.classList.remove('show');
+        activeConjPair = null;
+    }
+}
+
+// ── Seasonal insolation vs latitude (obliquity slider) ───────────────
+// Daily-mean insolation at latitude φ for sub-solar declination δ:
+//   H0 = acos(clamp(-tanφ tanδ));  Q = (S0/π)[H0 sinφ sinδ + cosφ cosδ sinH0].
+// Annual mean averages Q over the orbit (δ = asin(sinε · sinL)). We report it
+// normalised so a zero-tilt equator = 1.0 (an obliquity shape factor, not W/m²).
+const OBL_EARTH = 23.44;
+let currentObl = 97.77;
+
+function dailyInsol(latRad, decRad) {
+    let t = -Math.tan(latRad) * Math.tan(decRad);
+    let H0;
+    if (t <= -1) H0 = Math.PI;          // polar day
+    else if (t >= 1) H0 = 0;            // polar night
+    else H0 = Math.acos(t);
+    return (H0 * Math.sin(latRad) * Math.sin(decRad)
+            + Math.cos(latRad) * Math.cos(decRad) * Math.sin(H0)) / Math.PI;
+}
+// Annual-mean insolation at latitude (deg) for obliquity (deg), ÷(1/π) units.
+function annualInsol(latDeg, oblDeg) {
+    const lat = latDeg * D2R, sinE = Math.sin(oblDeg * D2R);
+    const ORB = 180; let sum = 0;
+    for (let k = 0; k < ORB; k++) {
+        const L = (k + 0.5) / ORB * 2 * Math.PI;
+        sum += dailyInsol(lat, Math.asin(sinE * Math.sin(L)));
+    }
+    return (sum / ORB) * Math.PI;       // normalise: zero-tilt equator → 1.0
+}
+
+const icanvas = document.getElementById('us-insol-canvas');
+const ictx    = icanvas.getContext('2d');
+function resizeInsolPlot() {
+    const rect = icanvas.getBoundingClientRect();
+    const dpr  = Math.min(devicePixelRatio, 2);
+    icanvas.width  = Math.max(1, Math.floor(rect.width  * dpr));
+    icanvas.height = Math.max(1, Math.floor(rect.height * dpr));
+    ictx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+resizeInsolPlot();
+new ResizeObserver(() => { resizeInsolPlot(); drawInsolPlot(); }).observe(icanvas);
+
+function drawInsolPlot() {
+    const W = icanvas.clientWidth, H = icanvas.clientHeight;
+    if (W < 8 || H < 8) return;
+    ictx.clearRect(0, 0, W, H);
+    const padL = 50, padR = 14, padT = 12, padB = 26;
+    const pw = W - padL - padR, ph = H - padT - padB;
+    const yMax = 1.6;
+    const xOf = latDeg => padL + ((latDeg + 90) / 180) * pw;
+    const yOf = v => padT + (1 - v / yMax) * ph;
+
+    // Grid
+    ictx.strokeStyle = 'rgba(90,160,255,.10)'; ictx.lineWidth = 1;
+    ictx.font = '10px ui-monospace, monospace'; ictx.textBaseline = 'middle';
+    for (const latDeg of [-90,-45,0,45,90]) {
+        const x = xOf(latDeg);
+        ictx.beginPath(); ictx.moveTo(x, padT); ictx.lineTo(x, padT + ph); ictx.stroke();
+        ictx.fillStyle = '#69789a'; ictx.textAlign = 'center';
+        ictx.fillText((latDeg === 0 ? 'eq' : (latDeg > 0 ? 'N' : 'S') + Math.abs(latDeg)) + '', x, H - padB + 13);
+    }
+    for (let k = 0; k <= 4; k++) {
+        const f = k / 4, y = padT + f * ph;
+        ictx.beginPath(); ictx.moveTo(padL, y); ictx.lineTo(W - padR, y); ictx.stroke();
+        ictx.fillStyle = '#69789a'; ictx.textAlign = 'right';
+        ictx.fillText((yMax - f * yMax).toFixed(1), padL - 6, y);
+    }
+    ictx.fillStyle = 'rgba(102,224,216,.55)'; ictx.textAlign = 'center';
+    ictx.save(); ictx.translate(12, padT + ph/2); ictx.rotate(-Math.PI/2);
+    ictx.fillText('annual sunlight  (× flat equator)', 0, 0); ictx.restore();
+    ictx.fillStyle = 'rgba(105,120,154,.8)';
+    ictx.fillText('latitude', padL + pw/2, H - 6);
+
+    const drawCurve = (oblDeg, color, width, dash) => {
+        ictx.strokeStyle = color; ictx.lineWidth = width;
+        ictx.setLineDash(dash || []);
+        ictx.beginPath();
+        for (let latDeg = -90; latDeg <= 90; latDeg += 2) {
+            const v = annualInsol(latDeg, oblDeg);
+            const x = xOf(latDeg), y = yOf(v);
+            if (latDeg === -90) ictx.moveTo(x, y); else ictx.lineTo(x, y);
+        }
+        ictx.stroke(); ictx.setLineDash([]);
+    };
+    drawCurve(OBL_EARTH, '#8a9bc0', 1.5);          // Earth reference
+    drawCurve(54.74,     '#ffb84e', 1.2, [5,4]);   // critical-tilt flip
+    drawCurve(currentObl,'#66e0d8', 2.6);          // current obliquity
+
+    // Pole & equator markers for the current obliquity
+    const ePole = annualInsol(90, currentObl), eEq = annualInsol(0, currentObl);
+    ictx.fillStyle = '#66e0d8';
+    for (const [lat, v] of [[90, ePole], [-90, ePole], [0, eEq]]) {
+        ictx.beginPath(); ictx.arc(xOf(lat), yOf(v), 3, 0, Math.PI*2); ictx.fill();
+    }
+
+    // Readouts
+    document.getElementById('rd-insol-ratio').textContent = (ePole / eEq).toFixed(2) + '×';
+    document.getElementById('rd-insol-pole').textContent  = ePole.toFixed(2);
+    document.getElementById('rd-insol-eq').textContent    = eEq.toFixed(2);
+    document.getElementById('rd-polarday').textContent    =
+        currentObl > 0.5 ? '≈42 yr each' : 'none';
+}
+const elOblSlider = document.getElementById('us-obl-slider');
+const elOblVal    = document.getElementById('us-obl-val');
+elOblSlider.addEventListener('input', () => {
+    currentObl = parseFloat(elOblSlider.value);
+    elOblVal.textContent = 'ε = ' + currentObl.toFixed(1) + '°';
+    drawInsolPlot();
+});
+
+// ── Miranda resonant tidal heating ───────────────────────────────────
+// Heating of a synchronous moon on an eccentric orbit (Peale & Cassen 1978):
+//   Ė = (21/2)(k2/Q)(G M_U² R_m⁵ / a⁶) n e².  k2/Q is poorly known — illustrative.
+const MIR_k2Q   = 1.1e-5;
+const MIR_Rm    = getBody('miranda').radius_km * KM;
+const MIR_a     = INIT_EL.miranda.a_km * KM;
+const MIR_n     = Math.sqrt(G_SI * (M_URA_KG + getBody('miranda').mass) / Math.pow(MIR_a, 3));
+const MIR_AREA  = 4 * Math.PI * MIR_Rm * MIR_Rm;
+const MIR_RADIO = 3.0;                       // nominal radiogenic flux (mW/m²)
+const MIR_E_TODAY = INIT_EL.miranda.e;       // ~0.0013
+const MIR_E_RES   = 0.03;                    // representative resonance-era e
+const MIR_E_MAX   = 0.06;
+let currentMirE = 0.03;
+
+function mirandaHeating(e) {
+    const power = 10.5 * MIR_k2Q
+        * (G_SI * M_URA_KG * M_URA_KG * Math.pow(MIR_Rm, 5) / Math.pow(MIR_a, 6))
+        * MIR_n * e * e;                       // W
+    const flux_mW = power / MIR_AREA * 1e3;     // mW/m²
+    return { power_GW: power / 1e9, flux_mW, ratio: flux_mW / MIR_RADIO };
+}
+
+const mcanvas = document.getElementById('us-miranda-canvas');
+const mctx    = mcanvas.getContext('2d');
+function resizeMirandaPlot() {
+    const rect = mcanvas.getBoundingClientRect();
+    const dpr  = Math.min(devicePixelRatio, 2);
+    mcanvas.width  = Math.max(1, Math.floor(rect.width  * dpr));
+    mcanvas.height = Math.max(1, Math.floor(rect.height * dpr));
+    mctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+resizeMirandaPlot();
+new ResizeObserver(() => { resizeMirandaPlot(); drawMirandaPlot(); }).observe(mcanvas);
+
+function drawMirandaPlot() {
+    const W = mcanvas.clientWidth, H = mcanvas.clientHeight;
+    if (W < 8 || H < 8) return;
+    mctx.clearRect(0, 0, W, H);
+    const padL = 56, padR = 14, padT = 12, padB = 26;
+    const pw = W - padL - padR, ph = H - padT - padB;
+    const yMax = mirandaHeating(MIR_E_MAX).power_GW * 1.05;
+    const xOf = e => padL + (e / MIR_E_MAX) * pw;
+    const yOf = p => padT + (1 - p / yMax) * ph;
+
+    // Grid + axes
+    mctx.strokeStyle = 'rgba(90,160,255,.10)'; mctx.lineWidth = 1;
+    mctx.font = '10px ui-monospace, monospace'; mctx.textBaseline = 'middle';
+    for (let k = 0; k <= 6; k++) {
+        const f = k / 6, x = padL + f * pw;
+        mctx.beginPath(); mctx.moveTo(x, padT); mctx.lineTo(x, padT + ph); mctx.stroke();
+        mctx.fillStyle = '#69789a'; mctx.textAlign = 'center';
+        mctx.fillText((f * MIR_E_MAX).toFixed(2), x, H - padB + 13);
+    }
+    for (let k = 0; k <= 4; k++) {
+        const f = k / 4, y = padT + f * ph;
+        mctx.beginPath(); mctx.moveTo(padL, y); mctx.lineTo(W - padR, y); mctx.stroke();
+        mctx.fillStyle = '#69789a'; mctx.textAlign = 'right';
+        mctx.fillText((yMax - f * yMax).toFixed(2), padL - 6, y);
+    }
+    mctx.fillStyle = 'rgba(230,185,138,.6)'; mctx.textAlign = 'center';
+    mctx.save(); mctx.translate(13, padT + ph/2); mctx.rotate(-Math.PI/2);
+    mctx.fillText('tidal heating  (GW)', 0, 0); mctx.restore();
+    mctx.fillStyle = 'rgba(105,120,154,.8)';
+    mctx.fillText('forced eccentricity  e', padL + pw/2, H - 6);
+
+    // Reference markers: today + resonance era
+    const markE = (e, color, label) => {
+        mctx.strokeStyle = color; mctx.setLineDash([4,4]); mctx.lineWidth = 1.3;
+        mctx.beginPath(); mctx.moveTo(xOf(e), padT); mctx.lineTo(xOf(e), padT + ph); mctx.stroke();
+        mctx.setLineDash([]); mctx.fillStyle = color; mctx.textAlign = 'center';
+        mctx.fillText(label, xOf(e), padT + 8);
+    };
+    markE(MIR_E_TODAY, '#9ad0ff', 'today');
+    markE(MIR_E_RES,   '#ff7a7a', 'resonance');
+
+    // Ė(e) curve
+    mctx.strokeStyle = '#e6b98a'; mctx.lineWidth = 2.4;
+    mctx.beginPath();
+    const STEPS = 200;
+    for (let i = 0; i <= STEPS; i++) {
+        const e = (i / STEPS) * MIR_E_MAX;
+        const x = xOf(e), y = yOf(mirandaHeating(e).power_GW);
+        if (i === 0) mctx.moveTo(x, y); else mctx.lineTo(x, y);
+    }
+    mctx.stroke();
+
+    // Current-value dot
+    const hNow = mirandaHeating(currentMirE);
+    mctx.fillStyle = '#fff';
+    mctx.beginPath(); mctx.arc(xOf(currentMirE), yOf(hNow.power_GW), 4, 0, Math.PI*2); mctx.fill();
+
+    // Readouts
+    document.getElementById('rd-mir-power').textContent = hNow.power_GW.toFixed(2) + ' GW';
+    document.getElementById('rd-mir-flux').textContent  = hNow.flux_mW.toFixed(2) + ' mW/m²';
+    document.getElementById('rd-mir-radio').textContent = hNow.ratio.toFixed(2) + '×';
+}
+const elMirSlider = document.getElementById('us-mire-slider');
+const elMirVal    = document.getElementById('us-mire-val');
+elMirSlider.addEventListener('input', () => {
+    currentMirE = parseFloat(elMirSlider.value);
+    elMirVal.textContent = 'e = ' + currentMirE.toFixed(3);
+    drawMirandaPlot();
+});
+
+// ── Gravity / magnetosphere / resonance relationships ────────────────
+// Analytic secular precession from J₂ + J₄ (low e, i): the very rates that,
+// timed in ring/moon occultations, were inverted to MEASURE Uranus's field.
+function secularRates(a_km, i_deg) {
+    const a = a_km * KM, n = Math.sqrt(G_SI * M_URA_KG / (a * a * a));
+    const ra2 = (R_URA_M / a) ** 2, ra4 = ra2 * ra2, ci = Math.cos(i_deg * D2R);
+    return {
+        apsidal: n * (1.5 * J2_URA * ra2 - (15 / 4) * J4_URA * ra4),       // rad/s
+        nodal:  -n * (1.5 * J2_URA * ra2 - (9 / 4)  * J4_URA * ra4) * ci,  // rad/s
+    };
+}
+
+const lcanvas = document.getElementById('us-lshell-canvas');
+const lctx    = lcanvas.getContext('2d');
+function resizeLShell() {
+    const rect = lcanvas.getBoundingClientRect();
+    const dpr  = Math.min(devicePixelRatio, 2);
+    lcanvas.width  = Math.max(1, Math.floor(rect.width  * dpr));
+    lcanvas.height = Math.max(1, Math.floor(rect.height * dpr));
+    lctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+resizeLShell();
+new ResizeObserver(() => { resizeLShell(); drawLShell(); }).observe(lcanvas);
+
+const RU_MAX = 25;
+function drawLShell() {
+    const W = lcanvas.clientWidth, H = lcanvas.clientHeight;
+    if (W < 8 || H < 8) return;
+    lctx.clearRect(0, 0, W, H);
+    const padL = 16, padR = 16, padT = 26, padB = 30;
+    const pw = W - padL - padR, axisY = H - padB;
+    const xOf = ru => padL + (ru / RU_MAX) * pw;
+
+    // Ring zone band (1.4–3.4 R_U)
+    lctx.fillStyle = 'rgba(183,140,255,.18)';
+    lctx.fillRect(xOf(1.4), padT, xOf(3.4) - xOf(1.4), axisY - padT);
+    lctx.fillStyle = '#b78cff'; lctx.font = '10px ui-monospace, monospace'; lctx.textAlign = 'center';
+    lctx.fillText('rings', (xOf(1.4) + xOf(3.4)) / 2, padT - 9);
+
+    // Axis
+    lctx.strokeStyle = 'rgba(90,160,255,.30)'; lctx.lineWidth = 1;
+    lctx.beginPath(); lctx.moveTo(padL, axisY); lctx.lineTo(W - padR, axisY); lctx.stroke();
+    lctx.fillStyle = '#69789a';
+    for (let ru = 0; ru <= RU_MAX; ru += 5) {
+        const x = xOf(ru);
+        lctx.beginPath(); lctx.moveTo(x, axisY); lctx.lineTo(x, axisY + 4); lctx.stroke();
+        lctx.fillText(ru + '', x, axisY + 16);
+    }
+    lctx.fillText('distance from Uranus  (R_U)', W / 2, H - 5);
+
+    // Magnetopause + bow shock
+    const mark = (ru, color, label) => {
+        lctx.strokeStyle = color; lctx.setLineDash([4, 3]); lctx.lineWidth = 1.4;
+        lctx.beginPath(); lctx.moveTo(xOf(ru), padT - 2); lctx.lineTo(xOf(ru), axisY); lctx.stroke();
+        lctx.setLineDash([]); lctx.fillStyle = color; lctx.textAlign = 'center';
+        lctx.fillText(label, xOf(ru), padT - 9);
+    };
+    mark(BOWSHOCK_RU, 'rgba(127,208,255,.75)', 'bow shock');
+    mark(MAGNETOPAUSE_RU, 'rgba(140,185,255,.95)', 'magnetopause');
+
+    // Major-moon markers, coloured by inside/outside the magnetopause
+    const majors = ['miranda', 'ariel', 'umbriel', 'titania', 'oberon'];
+    for (const k of majors) {
+        const ru = INIT_EL[k].a_km / R_URA_KM;
+        const x = xOf(ru), inside = ru < MAGNETOPAUSE_RU;
+        lctx.fillStyle = inside ? '#66e0d8' : '#ff7a7a';
+        lctx.beginPath(); lctx.arc(x, axisY, 4, 0, Math.PI * 2); lctx.fill();
+        lctx.save(); lctx.translate(x, axisY - 8); lctx.rotate(-Math.PI / 4);
+        lctx.textAlign = 'left'; lctx.font = '9px ui-monospace, monospace';
+        lctx.fillStyle = inside ? '#9fe6e0' : '#ffb0b0';
+        lctx.fillText(getBody(k).name, 0, 0); lctx.restore();
+    }
+}
+
+// Static readouts for the relationships panel (field is time-independent).
+{
+    const eps = secularRates(51149, 0).apsidal * R2D * 86400;     // ε ring °/day
+    const mir = secularRates(INIT_EL.miranda.a_km, INIT_EL.miranda.i_deg).nodal * R2D * SEC_PER_YEAR;
+    const inside = ['miranda', 'ariel', 'umbriel', 'titania', 'oberon']
+        .filter(k => INIT_EL[k].a_km / R_URA_KM < MAGNETOPAUSE_RU).length;
+    document.getElementById('rd-j2').textContent       = '3.346×10⁻³';
+    document.getElementById('rd-j4').textContent       = '−3.21×10⁻⁵';
+    document.getElementById('rd-eps-prec').textContent = eps.toFixed(3) + '°/day';
+    document.getElementById('rd-mir-node').textContent = mir.toFixed(3) + '°/yr';
+    document.getElementById('rd-mpause').textContent   = MAGNETOPAUSE_RU.toFixed(1) + ' R_U';
+    document.getElementById('rd-inside').textContent   = inside + ' of 5';
+}
+
+// ── Loop ─────────────────────────────────────────────────────────────
+let lastT = performance.now();
+function tick(now) {
+    const dt = (now - lastT) / 1000;
+    lastT = now;
+
+    if (sim.live) {
+        const nowJD = Date.now() / 86400000 + 2440587.5;
+        const targetTs = simTFromJD(nowJD);
+        const diff = targetTs - sim.t_s;
+        if (Math.abs(diff) < 7 * 86400) step(diff);
+        else { reseedAtSimT(targetTs); clearTrails(); }
+    } else if (sim.playing) {
+        step(sim.direction * sim.speed * dt);
+    }
+
+    syncMeshesFromState();
+    starUniforms.uTime.value = now * 0.001;
+    uraSkin.update(now * 0.001);
+    uraSkin.setSimTime(sim.t_s);     // (no-op for Uranus — kept for skin parity)
+
+    stepCameraTween(now);
+    applyFocusOrPov();
+
+    if (Math.abs(sim.t_s - lastSampleT) >= SAMPLE_INTERVAL_S || plotCount === 0) {
+        const res = computeDynamics();
+        pushSample(sim.t_s, res.dl, res.eCr, res.eDe, res.eJu);
+        updateReadouts(res);
+        drawPlot();
+        lastSampleT = sim.t_s;
+    }
+    refreshSidePanel();
+    refreshPinnedTooltip();
+    updateSelRing();
+    updateHovRing(hoveredKey);
+    updateLabels();
+    detectConjunctions();
+    updateHud();
+
+    if (sim.live || sim.playing) syncInputsFromSim();
+
+    controls.update();
+    renderer.render(scene, camera);
+    requestAnimationFrame(tick);
+}
+
+function buildFocusOptions() {
+    let html = '<option value="" selected>Free (system view)</option>';
+    for (const sec of PICKER_SECTIONS) {
+        html += `<optgroup label="${sec.label}">`;
+        for (const key of sec.keys) {
+            const b = getBody(key);
+            if (b) html += `<option value="${key}">${b.name}</option>`;
+        }
+        html += '</optgroup>';
+    }
+    elFocus.innerHTML = html;
+}
+
+// ── Boot ─────────────────────────────────────────────────────────────
+buildBodyPicker();
+buildBookmarks();
+buildFocusOptions();
+selectBody('miranda');
+syncMeshesFromState();
+syncInputsFromSim();
+{
+    const res = computeDynamics();
+    pushSample(sim.t_s, res.dl, res.eCr, res.eDe, res.eJu);
+    updateReadouts(res);
+}
+drawPlot();
+drawInsolPlot();
+drawMirandaPlot();
+drawLShell();
+updateHud();
+requestAnimationFrame(t => { lastT = t; tick(t); });
+</script>
+
+</body>
+</html>
