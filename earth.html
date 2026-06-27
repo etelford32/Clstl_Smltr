@@ -1242,6 +1242,26 @@ nav {
 .wx-skill-grid .skill-ch        { color: #99a; }
 .wx-skill-grid .skill-cell      { text-align: right; color: #aac; }
 
+/* ── Model skill leaderboard ─────────────────────────────────────
+   One row per registered forecaster, ranked by Murphy skill vs the
+   persistence baseline. The bar is centred at 0 skill: a green fill
+   grows right for models that beat persistence, a red fill grows left
+   for those that don't. This is the physics-first credibility surface. */
+.wx-leaderboard { font-family: monospace; font-size: 10px; color: #9ab;
+                  display: flex; flex-direction: column; gap: 3px; }
+.wx-lb-row  { display: grid; grid-template-columns: 82px 1fr 40px;
+              align-items: center; gap: 6px; }
+.wx-lb-name { color: #bcd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wx-lb-name.lead { color: #7fe0c0; font-weight: 600; }
+.wx-lb-bar  { position: relative; height: 8px; border-radius: 2px;
+              background: #161c2a; overflow: hidden; }
+.wx-lb-bar::before { content: ''; position: absolute; left: 50%; top: 0; bottom: 0;
+                     width: 1px; background: #3a4358; }
+.wx-lb-fill { position: absolute; top: 0; bottom: 0; transition: width .3s; }
+.wx-lb-pct  { text-align: right; color: #aac; }
+.wx-lb-row.warming .wx-lb-name { color: #667; }
+.wx-lb-row.warming .wx-lb-pct  { color: #556; }
+
 /* ── Wind-advection learner HUD ─────────────────────────────────
    Tiny bar chart showing α[h] per-horizon at a glance. Each bar is
    stacked: the filled portion = α value (0..1). Colour walks
@@ -3096,6 +3116,16 @@ import './js/telemetry.js';
             Forecast skill (MAE)
         </div>
         <div id="wx-skill-grid" class="wx-skill-grid">awaiting first forecast…</div>
+        <!-- Model leaderboard. Ranks every registered forecaster by Murphy
+             skill vs persistence (1 − MSE_model/MSE_persistence), averaged
+             over the channels × horizons each model actually scores. The
+             physics-first credibility surface: "our model beats 'tomorrow
+             looks like today' by N%". Rows warm up until ≥5 matched targets. -->
+        <div style="font-size:9px;color:#336a8a;letter-spacing:.07em;text-transform:uppercase;margin:8px 0 4px;"
+             title="Every registered forecaster ranked by Murphy skill vs the persistence baseline. Positive = beats 'tomorrow looks like today'; bar is centred at zero skill.">
+            Model skill vs persistence
+        </div>
+        <div id="wx-leaderboard" class="wx-leaderboard">awaiting first validation cycle…</div>
         <!-- Precipitation deep-dive coverage HUD.
              Two one-line readouts: climatology coverage (per-cell ×
              local-hour bins with ≥3 samples) and the bias-tracker pair
@@ -3371,7 +3401,7 @@ import { WeatherFrameResolver }  from './js/weather-frame-resolver.js';
 import { WeatherForecastFeed }   from './js/weather-forecast-feed.js';
 import { ForecastRegistry, PersistenceForecaster, OpenMeteoNWPForecaster, ForecastPaintProvider, CHANNEL_NAMES, FORECAST_HORIZONS_H } from './js/weather-forecast.js';
 import { WeatherForecastWorkerBridge } from './js/weather-forecast-worker-bridge.js';
-import { WeatherForecastValidator } from './js/weather-forecast-validation.js';
+import { WeatherForecastValidator, rankBySkill } from './js/weather-forecast-validation.js';
 import { mountModelsPanel } from './js/models-panel.js';
 import { ProbabilityPicker } from './js/probability-picker.js';
 import { mountRenewablesPanel } from './js/renewables-panel.js';
@@ -6791,6 +6821,66 @@ document.addEventListener('weather-forecast-validation-update', (ev) => {
 // Initial paint with whatever the validator already has on disk so the
 // table isn't blank on a fresh page load with prior history.
 _paintForecastSkill(wxForecastValidator.summary());
+
+// ── Model skill leaderboard ─────────────────────────────────────────────
+// Ranks every registered forecaster by Murphy skill vs persistence
+// (1 − MSE_model/MSE_persistence), averaged over the channel × horizon
+// buckets each model actually scores (both sides need ≥ MIN_N matched
+// targets). This is the differentiator made visible: physics-first models
+// that have to BEAT "tomorrow looks like today" on a published scoreboard,
+// not an opaque "AI-powered" claim. Friendly labels for the known model ids;
+// anything unregistered falls back to a de-suffixed id.
+const LB_LABELS = {
+    'wind-advection-rk2-v1':          'RK2 advect',
+    'wind-advection-v1':              'wind advect',
+    'optical-flow-v1':                'optical flow',
+    'open-meteo-gfs-v1':              'GFS (NWP)',
+    'precip-fusion-v1':               'precip fusion',
+    'precip-anomaly-ar3-v1':          'precip AR(3)',
+    'precip-anomaly-persistence-v1':  'precip anom',
+    'precip-climatology-v1':          'precip clim',
+};
+function _paintForecastLeaderboard(summary) {
+    const root = document.getElementById('wx-leaderboard');
+    if (!root) return;
+    if (!summary || !summary['persistence-v1']) {
+        root.textContent = 'awaiting first validation cycle…';
+        return;
+    }
+    // Ranking is the pure, unit-tested rankBySkill() from the validator module;
+    // here we only attach friendly labels and render.
+    const rows = rankBySkill(summary, { minN: 5 }).map(r => ({
+        ...r, label: LB_LABELS[r.model] || r.model.replace(/-v\d+$/, ''),
+    }));
+    if (rows.length === 0) { root.textContent = 'no models registered'; return; }
+
+    let leadAssigned = false, html = '';
+    for (const r of rows) {
+        if (r.skill === null) {
+            html += `<div class="wx-lb-row warming" title="needs ≥${MIN_N} matched targets on both sides">`
+                  + `<span class="wx-lb-name">${r.label}</span><span class="wx-lb-bar"></span>`
+                  + `<span class="wx-lb-pct">…</span></div>`;
+            continue;
+        }
+        const s      = Math.max(-1, Math.min(1, r.skill));   // clamp bar to ±1
+        const pctStr = (r.skill >= 0 ? '+' : '') + (r.skill * 100).toFixed(0) + '%';
+        const isLead = !leadAssigned && r.skill > 0;
+        if (isLead) leadAssigned = true;
+        const color  = r.skill >= 0 ? '#36c99a' : '#d9694f';
+        const fill   = r.skill >= 0
+            ? `left:50%;width:${(s * 50).toFixed(1)}%;background:${color};`
+            : `right:50%;width:${(-s * 50).toFixed(1)}%;background:${color};`;
+        html += `<div class="wx-lb-row" title="Murphy skill vs persistence over ${r.buckets} channel×horizon bucket(s), min n=${r.n}">`
+              + `<span class="wx-lb-name${isLead ? ' lead' : ''}">${isLead ? '▲ ' : ''}${r.label}</span>`
+              + `<span class="wx-lb-bar"><span class="wx-lb-fill" style="${fill}"></span></span>`
+              + `<span class="wx-lb-pct" style="color:${color}">${pctStr}</span></div>`;
+    }
+    root.innerHTML = html;
+}
+document.addEventListener('weather-forecast-validation-update', (ev) => {
+    _paintForecastLeaderboard(ev.detail?.summary ?? {});
+});
+_paintForecastLeaderboard(wxForecastValidator.summary());
 
 // ── Wind-skill strip (under the scrub bar) ──────────────────────────────
 // Companion to the wx-panel skill grid: surfaces a one-glance read of
