@@ -3370,6 +3370,7 @@ import { WeatherHistory }        from './js/weather-history.js';
 import { WeatherFrameResolver }  from './js/weather-frame-resolver.js';
 import { WeatherForecastFeed }   from './js/weather-forecast-feed.js';
 import { ForecastRegistry, PersistenceForecaster, OpenMeteoNWPForecaster, ForecastPaintProvider, CHANNEL_NAMES, FORECAST_HORIZONS_H } from './js/weather-forecast.js';
+import { WeatherForecastWorkerBridge } from './js/weather-forecast-worker-bridge.js';
 import { WeatherForecastValidator } from './js/weather-forecast-validation.js';
 import { mountModelsPanel } from './js/models-panel.js';
 import { ProbabilityPicker } from './js/probability-picker.js';
@@ -6528,15 +6529,27 @@ window._rk2Forecaster  = rk2Forecaster;
 // use, then the resolver lerps/clamps it like any replay frame. Open-Meteo
 // stays a scored leaderboard baseline (read from the forecast ring by
 // OpenMeteoNWPForecaster) and is no longer a paint source.
+//
+// The dense RK2 integration (~350 ms / hourly rebuild) runs OFF the render
+// thread via this worker bridge; the provider prepares the inputs on the
+// main thread (cheap) and swaps the result in when the worker replies. If
+// the worker can't spawn (old browser, CSP), the bridge reports
+// unavailable and the provider transparently computes inline — same output,
+// just on-thread. forecast-paint-update fires when an async reply lands so
+// the resolver repaints the current scrub position immediately.
+const wxForecastWorker = new WeatherForecastWorkerBridge();
 const wxPaintProvider = new ForecastPaintProvider({
     forecaster:  rk2Forecaster,
     history:     wxGridHistory,
     decode:      (coarse, w, h) => wxFeed._decodeCoarse(coarse, w, h),
     maxHorizonH: 24,
+    worker:      wxForecastWorker,
 });
 wxResolver?.setForecastProvider(wxPaintProvider);
+document.addEventListener('forecast-paint-update', () => wxResolver?.invalidate());
 if (wxGridHistory.size > 0) wxPaintProvider.refresh();
-window._wxPaintProvider = wxPaintProvider;
+window._wxPaintProvider  = wxPaintProvider;
+window._wxForecastWorker = wxForecastWorker;
 
 // ── Cloud + wind forecasters ─────────────────────────────────────────────
 // Same trio (Climatology / AnomalyPersistence / AnomalyAR) as precip,

@@ -329,7 +329,7 @@ export class ForecastPaintProvider {
      *   frame for ~13 days. Set false to restore the old clamp behaviour.
      */
     constructor({ forecaster, history, decode, maxHorizonH = 24,
-                  handoffBeyondHorizon = true } = {}) {
+                  handoffBeyondHorizon = true, worker = null } = {}) {
         if (!forecaster || typeof forecaster.forecastDense !== 'function') {
             throw new Error('ForecastPaintProvider: forecaster with forecastDense() required');
         }
@@ -340,6 +340,13 @@ export class ForecastPaintProvider {
         this._decode      = decode;
         this._maxHorizonH = maxHorizonH;
         this._handoff     = handoffBeyondHorizon !== false;
+        // Optional off-thread compute (WeatherForecastWorkerBridge). When
+        // available, refresh() integrates the dense forecast in a worker and
+        // swaps the result in on reply; otherwise it computes inline (the
+        // synchronous back-compat path tests rely on). _refreshGen guards
+        // against a stale worker reply landing after a newer refresh.
+        this._worker     = worker;
+        this._refreshGen = 0;
 
         this._issuedMs = null;
         this._targets  = [];          // sorted ascending target_ms
@@ -364,16 +371,71 @@ export class ForecastPaintProvider {
         document.addEventListener('weather-history-ingest', this._onIngest);
     }
 
-    /** Rebuild the dense forecast from current history (decode is lazy). */
+    /**
+     * Rebuild the dense forecast from current history (decode stays lazy).
+     *
+     * Worker path (when a bridge is wired and available): prepare the
+     * serializable inputs on the main thread — cheap: gain/shear eval + the
+     * newest two frames — then integrate off-thread and swap the result in on
+     * reply. The previous forecast keeps painting until the swap, so there's
+     * no blank frame. A generation counter drops a stale reply if a newer
+     * refresh has since been issued. Worker error → inline fallback.
+     *
+     * Inline path (no worker, or worker unavailable): compute synchronously,
+     * exactly as before. Direct callers (construction warm-up, tests) get a
+     * forecast the instant refresh() returns.
+     */
     refresh() {
-        let dense = null;
+        if (!this._inlineRefreshOnly()) {
+            let inputs = null;
+            try {
+                inputs = this._forecaster.denseInputs({
+                    history: this._history, maxHorizonH: this._maxHorizonH,
+                });
+            } catch (err) {
+                console.info('[ForecastPaintProvider] denseInputs threw:', err?.message);
+            }
+            if (!inputs) return;                       // keep the prior forecast painting
+            const gen = ++this._refreshGen;
+            this._worker.request(inputs)
+                .then((dense) => {
+                    if (gen !== this._refreshGen) return;   // superseded by a newer refresh
+                    this._applyDense(dense);
+                    this._announce();
+                })
+                .catch((err) => {
+                    if (gen !== this._refreshGen) return;
+                    console.info('[ForecastPaintProvider] worker failed, inline fallback:', err?.message);
+                    this._applyDense(this._computeInline());
+                    this._announce();
+                });
+            return;
+        }
+        // Inline (synchronous).
+        ++this._refreshGen;                            // invalidate any in-flight worker reply
+        this._applyDense(this._computeInline());
+    }
+
+    /** True when refresh() must compute on the main thread. */
+    _inlineRefreshOnly() {
+        return !(this._worker
+            && typeof this._worker.available === 'function' && this._worker.available()
+            && typeof this._forecaster.denseInputs === 'function');
+    }
+
+    _computeInline() {
         try {
-            dense = this._forecaster.forecastDense({
+            return this._forecaster.forecastDense({
                 history: this._history, maxHorizonH: this._maxHorizonH,
             });
         } catch (err) {
             console.info('[ForecastPaintProvider] forecast threw:', err?.message);
+            return null;
         }
+    }
+
+    /** Swap a freshly-computed dense forecast into the paint cache (lazy decode). */
+    _applyDense(dense) {
         this._trios.clear();
         this._coarse.clear();
         this._targets = [];
@@ -385,9 +447,8 @@ export class ForecastPaintProvider {
             const tt     = dense.target_ms[h];
             if (!(coarse instanceof Float32Array) || !Number.isFinite(tt)) continue;
             // Store the coarse frame only; decode lazily in bracket() via
-            // _trioFor(). A refresh runs hourly (every observation ingest), so
-            // decoding all 25 frames here would burn ~375 ms and pin ~78 MB
-            // of trios for frames the user may never scrub to.
+            // _trioFor(). Decoding all 25 frames here would burn ~375 ms and
+            // pin ~78 MB of trios for frames the user may never scrub to.
             this._coarse.set(tt, coarse);
             targets.push(tt);
         }
@@ -397,6 +458,18 @@ export class ForecastPaintProvider {
         this._gridW    = dense.gridW;
         this._gridH    = dense.gridH;
         this._modelId  = dense.model_id ?? this._modelId;
+    }
+
+    /**
+     * Tell the host a fresh (worker-computed) forecast landed asynchronously,
+     * so it can invalidate the resolver and repaint the current scrub
+     * position. No-op for the inline path (the caller already has the result).
+     */
+    _announce() {
+        if (typeof document === 'undefined' || typeof CustomEvent === 'undefined') return;
+        document.dispatchEvent(new CustomEvent('forecast-paint-update', {
+            detail: { model_id: this._modelId, issued_ms: this._issuedMs, horizons: this._targets.length },
+        }));
     }
 
     /**
