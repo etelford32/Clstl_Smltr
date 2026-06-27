@@ -216,6 +216,21 @@ console.log('──────────────────────�
     const provider = new ForecastPaintProvider({ forecaster: stub, history: { all: () => [] }, decode });
     provider.refresh();
 
+    // Perf contract: refresh() must NOT eagerly decode all horizons (that was
+    // ~375 ms + ~78 MB per hourly rebuild). Decode happens lazily in bracket()
+    // and the decoded cache stays bounded by _trioCap.
+    check('refresh() decodes lazily (0 decodes until bracket)', () => {
+        let decodes = 0;
+        const counting = (c, w, h) => { decodes++; return decode(c, w, h); };
+        const p = new ForecastPaintProvider({ forecaster: stub, history: { all: () => [] }, decode: counting });
+        p.refresh();
+        assert.equal(decodes, 0, `refresh must not decode, did ${decodes}`);
+        p.bracket(T0 + HOUR / 2);                       // touches h=0,h=1
+        assert.ok(decodes >= 1 && decodes <= 2, `one bracket decodes ≤2 frames, did ${decodes}`);
+        for (let i = 0; i < 20; i++) p.bracket(T0 + (i % 3) * HOUR);
+        assert.ok(p._trios.size <= p._trioCap, `decoded cache bounded by cap, size ${p._trios.size}`);
+    });
+
     check('bracket(past) → null (replay path owns it)', () => {
         assert.equal(provider.bracket(T0 - 1), null);
     });

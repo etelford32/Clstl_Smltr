@@ -343,16 +343,28 @@ export class ForecastPaintProvider {
 
         this._issuedMs = null;
         this._targets  = [];          // sorted ascending target_ms
-        this._trios    = new Map();   // target_ms → { weatherBuf, windBuf, cloudBuf }
+        this._coarse   = new Map();   // target_ms → coarse CHW Float32 (cheap to hold)
+        this._trios    = new Map();   // target_ms → decoded trio (LRU, filled lazily)
+        this._trioCap  = 6;           // decoded-trio cap (~6 × 3.1 MB ≈ 19 MB)
         this._gridW    = null;
         this._gridH    = null;
         this._modelId  = forecaster.id ?? 'forecast';
 
-        this._onIngest = this.refresh.bind(this);
+        // Debounce ingest-driven rebuilds. forecastDense is ~350 ms on the
+        // main thread; a cold-start backfill fires ~24 ingests in a tight
+        // loop, which back-to-back would freeze the page for seconds. Coalesce
+        // them into one rebuild ~200 ms after the burst settles. Direct
+        // refresh() callers (construction warm-up, tests) are unaffected.
+        this._refreshTimer = 0;
+        this._onIngest = () => {
+            if (typeof setTimeout !== 'function') { this.refresh(); return; }
+            clearTimeout(this._refreshTimer);
+            this._refreshTimer = setTimeout(() => this.refresh(), 200);
+        };
         document.addEventListener('weather-history-ingest', this._onIngest);
     }
 
-    /** Rebuild the dense forecast + decode cache from current history. */
+    /** Rebuild the dense forecast from current history (decode is lazy). */
     refresh() {
         let dense = null;
         try {
@@ -363,6 +375,7 @@ export class ForecastPaintProvider {
             console.info('[ForecastPaintProvider] forecast threw:', err?.message);
         }
         this._trios.clear();
+        this._coarse.clear();
         this._targets = [];
         if (!dense) { this._issuedMs = null; return; }
 
@@ -371,7 +384,11 @@ export class ForecastPaintProvider {
             const coarse = dense.frames[h];
             const tt     = dense.target_ms[h];
             if (!(coarse instanceof Float32Array) || !Number.isFinite(tt)) continue;
-            this._trios.set(tt, this._decode(coarse, dense.gridW, dense.gridH));
+            // Store the coarse frame only; decode lazily in bracket() via
+            // _trioFor(). A refresh runs hourly (every observation ingest), so
+            // decoding all 25 frames here would burn ~375 ms and pin ~78 MB
+            // of trios for frames the user may never scrub to.
+            this._coarse.set(tt, coarse);
             targets.push(tt);
         }
         targets.sort((a, b) => a - b);
@@ -380,6 +397,24 @@ export class ForecastPaintProvider {
         this._gridW    = dense.gridW;
         this._gridH    = dense.gridH;
         this._modelId  = dense.model_id ?? this._modelId;
+    }
+
+    /**
+     * Decode + LRU-cache the trio for a target_ms. Misses pay one decode
+     * (~15 ms); hits are O(1). Capped at _trioCap so deep scrubs don't pin
+     * the whole 0..maxHorizonH set in memory.
+     */
+    _trioFor(tt) {
+        const hit = this._trios.get(tt);
+        if (hit) { this._trios.delete(tt); this._trios.set(tt, hit); return hit; }  // bump recency
+        const coarse = this._coarse.get(tt);
+        if (!coarse) return null;
+        const trio = this._decode(coarse, this._gridW, this._gridH);
+        if (this._trios.size >= this._trioCap) {
+            this._trios.delete(this._trios.keys().next().value);   // evict oldest
+        }
+        this._trios.set(tt, trio);
+        return trio;
     }
 
     /**
@@ -407,7 +442,7 @@ export class ForecastPaintProvider {
             // identical to the old behaviour — and un-freezes progressively
             // as deeper NWP batches land.
             if (this._handoff) return null;
-            const trio = this._trios.get(last);
+            const trio = this._trioFor(last);
             return trio ? { a: trio, b: trio, frac: 0, meta: this._meta(last) } : null;
         }
         // First target strictly greater than tEff.
@@ -418,12 +453,21 @@ export class ForecastPaintProvider {
         }
         const beforeT = targets[lo - 1];
         const afterT  = targets[lo];
-        const a = this._trios.get(beforeT);
-        const b = this._trios.get(afterT);
+        const a = this._trioFor(beforeT);
+        const b = this._trioFor(afterT);
         if (!a || !b) return null;
         const span = afterT - beforeT;
         const frac = span > 0 ? (tEff - beforeT) / span : 0;
         return { a, b, frac, meta: this._meta(beforeT) };
+    }
+
+    /**
+     * Absolute ms of the deepest forecast frame (== issued_ms + maxHorizonH·h),
+     * or null when no forecast is loaded. The resolver uses this to locate the
+     * model→NWP seam and crossfade across it. Read-only; cheap.
+     */
+    horizonEndMs() {
+        return this._targets.length ? this._targets[this._targets.length - 1] : null;
     }
 
     _meta(targetMs) {
@@ -439,8 +483,10 @@ export class ForecastPaintProvider {
     }
 
     stop() {
+        if (typeof clearTimeout === 'function') clearTimeout(this._refreshTimer);
         document.removeEventListener('weather-history-ingest', this._onIngest);
         this._trios.clear();
+        this._coarse.clear();
         this._targets = [];
     }
 }

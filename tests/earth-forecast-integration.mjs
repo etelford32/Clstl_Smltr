@@ -166,7 +166,44 @@ check('past tick does NOT paint a forecast (provider returns null)', () => {
     assert.notEqual(last.meta.isForecast, true, 'past frame is not flagged forecast');
 });
 
-// 6) Handoff: beyond the RK2 horizon (maxHorizonH=24) the provider yields
+// 6) Seam continuity: the model→NWP handoff at +24h must not pop. Fill the
+//    ring with hourly NWP frames across the seam at a temperature level
+//    distinct from the RK2 field, so a hard cutover WOULD be plainly visible.
+for (let h = 18; h <= 28; h++) {
+    const c = new Float32Array(N * NUM_CH);
+    for (let k = 0; k < N; k++) c[CH_T * N + k] = 30;   // uniform 30°C vs RK2 ~5°C background
+    history.ingestForecast({ t: nowHour + h * HOUR, fetchedAt: Date.now(), source: 'open-meteo:seam', gridW: GRID_W, gridH: GRID_H, coarse: c });
+}
+provider.refresh();
+
+const meanCh0 = (buf) => { let s = 0, n = 0; for (let k = 0; k < buf.length; k += 4) { s += buf[k]; n++; } return s / n; };
+const seam = [];
+for (let tenthsH = 200; tenthsH <= 280; tenthsH += 5) {   // +20.0h .. +28.0h, 0.5h steps
+    const tEff = nowHour + (tenthsH / 10) * HOUR;
+    updates.length = 0;
+    resolver.invalidate();
+    resolver.tick(tEff);
+    seam.push(meanCh0(updates[updates.length - 1].weather));
+}
+check('seam crossfade is continuous (no pop at +24h)', () => {
+    const deltas = [];
+    for (let i = 1; i < seam.length; i++) deltas.push(Math.abs(seam[i] - seam[i - 1]));
+    const maxD  = Math.max(...deltas);
+    const meanD = deltas.reduce((a, b) => a + b, 0) / deltas.length;
+    assert.ok(meanD > 1e-4, `field actually changes across the seam (meanD=${meanD})`);
+    // A hard cutover dumps the whole RK2→NWP gap into one step (maxD ≫ meanD).
+    // The crossfade spreads it over the window so no single step dominates.
+    assert.ok(maxD < 3 * meanD, `max step ${maxD.toFixed(4)} should be < 3× mean ${meanD.toFixed(4)} (no seam pop)`);
+});
+check('seam blend weight reported in meta', () => {
+    updates.length = 0;
+    resolver.invalidate();
+    resolver.tick(nowHour + 22 * HOUR);   // mid-window → w≈0.5
+    const w = updates[updates.length - 1].meta.seamBlend;
+    assert.ok(w > 0.1 && w < 0.9, `mid-seam blend weight ~0.5, got ${w}`);
+});
+
+// 7) Handoff: beyond the RK2 horizon (maxHorizonH=24) the provider yields
 //    null and the resolver paints the NWP forecast ring instead of freezing
 //    on the RK2 last frame. Drop a distinctive ring frame at +48h.
 const ring48 = new Float32Array(N * NUM_CH);

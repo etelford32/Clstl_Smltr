@@ -67,6 +67,9 @@ const DEFAULT_LRU_SIZE       = 4;
 const DEFAULT_REDRAW_THRESH  = 60_000;            // 1 min
 const DEFAULT_LIVE_BYPASS_MS = 30 * 60_000;       // 30 min — anything newer
                                                   // than this is "live"
+const DEFAULT_SEAM_BLEND_MS  = 4 * 3_600_000;     // 4 h crossfade window where
+                                                  // the pinned model fades into
+                                                  // the NWP ring at the handoff
 
 // ── Tiny insertion-order LRU ────────────────────────────────────────────────
 // Built on Map (which preserves insertion order). Keeps the resolver
@@ -119,6 +122,7 @@ export class WeatherFrameResolver {
         redrawThreshMs = DEFAULT_REDRAW_THRESH,
         liveBypassMs   = DEFAULT_LIVE_BYPASS_MS,
         forecastProvider = null,
+        seamBlendMs    = DEFAULT_SEAM_BLEND_MS,
     } = {}) {
         if (!feed)    throw new Error('WeatherFrameResolver: feed is required');
         if (!history) throw new Error('WeatherFrameResolver: history is required');
@@ -140,6 +144,16 @@ export class WeatherFrameResolver {
         this._weatherScratch = new Float32Array(TEX_FLOATS);
         this._windScratch    = new Float32Array(TEX_FLOATS);
         this._cloudScratch   = new Float32Array(TEX_FLOATS);
+
+        // Seam crossfade. In the `seamBlendMs` window just before the pinned
+        // model's deepest horizon, the dispatch blends the model (RK2) field
+        // toward the NWP-ring field so scrubbing across the handoff has no
+        // visible pop. The model trio is lerped into these temps, then mixed
+        // into the main scratch (which holds the NWP side). 0 disables.
+        this._seamBlendMs  = seamBlendMs;
+        this._blendWxTmp   = new Float32Array(TEX_FLOATS);
+        this._blendWindTmp = new Float32Array(TEX_FLOATS);
+        this._blendCloudTmp = new Float32Array(TEX_FLOATS);
 
         // Change-detection state. -Infinity guarantees the first tick()
         // dispatches regardless of where simTimeMs lands.
@@ -259,10 +273,29 @@ export class WeatherFrameResolver {
     _dispatchReplay(tEff) {
         // Custom-forecast paint takes precedence for future timestamps.
         // The provider returns null for past/live (bracket-the-ring owns
-        // those) and clamps past its deepest horizon.
+        // those) and past its deepest horizon (hands off to the NWP ring).
         if (this._forecastProvider) {
             const fp = this._forecastProvider.bracket(tEff);
-            if (fp) { this._dispatchForecast(fp, tEff); return; }
+            if (fp) {
+                // Seam crossfade: within seamBlendMs of the model's deepest
+                // horizon, fade the model field toward the NWP ring so the
+                // handoff at the edge is continuous instead of a one-frame
+                // pop. Only when the ring actually has a forecast frame to
+                // hand off to here; otherwise paint the model alone.
+                const edge = this._seamBlendMs > 0 && this._forecastProvider.horizonEndMs
+                    ? this._forecastProvider.horizonEndMs()
+                    : null;
+                if (Number.isFinite(edge) && tEff > edge - this._seamBlendMs) {
+                    const nwp = this._history.bracket(tEff);
+                    const nwpBase = nwp && (nwp.before ?? nwp.after);
+                    if (nwpBase && nwpBase.isForecast) {
+                        this._dispatchSeamBlend(fp, nwp, tEff, edge);
+                        return;
+                    }
+                }
+                this._dispatchForecast(fp, tEff);
+                return;
+            }
         }
 
         const br = this._history.bracket(tEff);
@@ -404,6 +437,85 @@ export class WeatherFrameResolver {
                 meta:          md,
                 texW: TEX_W, texH: TEX_H,
                 replay: true,    // resolver-origin marker (echo discriminator)
+            },
+        }));
+    }
+
+    /**
+     * Crossfade the pinned model field into the NWP-ring field across the
+     * seam window, eliminating the one-frame pop at the model→NWP handoff.
+     *
+     *   w = 0 at (edge − seamBlendMs)  → 100 % model  (continuous with the
+     *                                     pure-model paint just below the window)
+     *   w = 1 at edge                  → 100 % NWP     (continuous with the
+     *                                     pure-NWP paint just past the edge)
+     *
+     * @param {{a,b,frac}} fp   model bracket from ForecastPaintProvider
+     * @param {{before,after,frac}} nwp  NWP-ring bracket from history
+     * @param {number} tEff
+     * @param {number} edge    provider.horizonEndMs()
+     */
+    _dispatchSeamBlend(fp, nwp, tEff, edge) {
+        // NWP side → main scratch (decode is LRU-cached, so repeated scrubs
+        // across the seam don't re-decode).
+        const a = this._decodeCached(nwp.before ?? nwp.after);
+        const b = (nwp.before && nwp.after) ? this._decodeCached(nwp.after) : a;
+        const nf = (nwp.before && nwp.after) ? nwp.frac : 0;
+        if (a === b || nf <= 0) {
+            this._weatherScratch.set(a.weatherBuf);
+            this._windScratch   .set(a.windBuf);
+            this._cloudScratch  .set(a.cloudBuf);
+        } else {
+            this._lerpInto(this._weatherScratch, a.weatherBuf, b.weatherBuf, nf);
+            this._lerpInto(this._windScratch,    a.windBuf,    b.windBuf,    nf);
+            this._lerpInto(this._cloudScratch,   a.cloudBuf,   b.cloudBuf,   nf);
+        }
+
+        // Model side → temp buffers.
+        this._lerpInto(this._blendWxTmp,    fp.a.weatherBuf, fp.b.weatherBuf, fp.frac);
+        this._lerpInto(this._blendWindTmp,  fp.a.windBuf,    fp.b.windBuf,    fp.frac);
+        this._lerpInto(this._blendCloudTmp, fp.a.cloudBuf,   fp.b.cloudBuf,   fp.frac);
+
+        // Crossfade weight, clamped to [0,1]. _lerpInto(out, model, out, w)
+        // computes out = model·(1−w) + out·w in place: out already holds the
+        // NWP side, and reading out[i] before writing it in the same
+        // iteration is safe (no cross-element dependency).
+        let w = (tEff - (edge - this._seamBlendMs)) / this._seamBlendMs;
+        w = w < 0 ? 0 : w > 1 ? 1 : w;
+        this._lerpInto(this._weatherScratch, this._blendWxTmp,    this._weatherScratch, w);
+        this._lerpInto(this._windScratch,    this._blendWindTmp,  this._windScratch,    w);
+        this._lerpInto(this._cloudScratch,   this._blendCloudTmp, this._cloudScratch,   w);
+
+        const dtSec   = Math.floor((tEff - Date.now()) / 1000);
+        const absMin  = Math.round(Math.abs(dtSec) / 60);
+        const dtLabel = absMin < 60 ? `${absMin}m` : `${(absMin / 60).toFixed(1)}h`;
+        const issued  = Number.isFinite(fp.meta?.issued_ms) ? fp.meta.issued_ms : Date.now();
+        const live    = this._feed.meta;
+        const md = {
+            ...live,
+            source:    `forecast · in ${dtLabel} · ${fp.meta?.source ?? 'model'}→nwp`,
+            fetchTime: new Date(issued),
+            demo:      false,
+            loaded:    true,
+            replay:    false,
+            isForecast: true,
+            replayT:   tEff,
+            cacheAgeSeconds: 0,
+            cacheFetchedAt:  new Date(issued).toISOString(),
+            gridW:   fp.meta?.gridW ?? live?.gridW,
+            gridH:   fp.meta?.gridH ?? live?.gridH,
+            gridDeg: fp.meta?.gridH ? 180 / fp.meta.gridH : live?.gridDeg,
+            seamBlend: w,
+        };
+
+        document.dispatchEvent(new CustomEvent('weather-update', {
+            detail: {
+                weatherBuffer: this._weatherScratch,
+                windBuffer:    this._windScratch,
+                cloudBuffer:   this._cloudScratch,
+                meta:          md,
+                texW: TEX_W, texH: TEX_H,
+                replay: true,
             },
         }));
     }
