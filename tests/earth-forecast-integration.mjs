@@ -166,6 +166,25 @@ check('past tick does NOT paint a forecast (provider returns null)', () => {
     assert.notEqual(last.meta.isForecast, true, 'past frame is not flagged forecast');
 });
 
+// 6) Handoff: beyond the RK2 horizon (maxHorizonH=24) the provider yields
+//    null and the resolver paints the NWP forecast ring instead of freezing
+//    on the RK2 last frame. Drop a distinctive ring frame at +48h.
+const ring48 = new Float32Array(N * NUM_CH);
+for (let k = 0; k < N; k++) ring48[CH_T * N + k] = 30 + (k % 7);   // structured, finite
+history.ingestForecast({ t: nowHour + 48 * HOUR, fetchedAt: Date.now(), source: 'open-meteo:test48', gridW: GRID_W, gridH: GRID_H, coarse: ring48 });
+provider.refresh();   // RK2 dense set is still 0..24h (uses past ring only)
+
+updates.length = 0;
+resolver.invalidate();
+resolver.tick(nowHour + 48 * HOUR);
+check('beyond RK2 horizon hands off to the NWP forecast ring (no freeze)', () => {
+    assert.ok(updates.length >= 1, 'a dispatch happened');
+    const last = updates[updates.length - 1];
+    assert.equal(last.meta.isForecast, true, 'deep-future frame still flagged forecast');
+    assert.match(last.meta.source, /open-meteo/, `should paint the NWP ring frame, got "${last.meta.source}"`);
+    assert.doesNotMatch(last.meta.source, /rk2/, 'must NOT be the clamped RK2 frame');
+});
+
 console.log('──────────────────────────────');
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

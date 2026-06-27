@@ -231,8 +231,22 @@ console.log('──────────────────────�
         assert.equal(b.b.weatherBuf[0], 1);
         assert.ok(Math.abs(b.frac - 0.5) < 1e-9, `frac ≈ 0.5, got ${b.frac}`);
     });
-    check('bracket(beyond deepest) → clamp to last horizon', () => {
-        const b = provider.bracket(T0 + 99 * HOUR);
+    // Default (handoffBeyondHorizon: true): past the deepest horizon the
+    // provider returns null so the resolver falls through to the NWP forecast
+    // ring — that's what un-freezes the deep-future scrub instead of clamping
+    // on the model's last (near-persistence) frame.
+    check('bracket(beyond deepest) → null (hands off to NWP ring)', () => {
+        assert.equal(provider.bracket(T0 + 99 * HOUR), null);
+    });
+
+    // Back-compat: handoffBeyondHorizon:false restores the old clamp-to-last.
+    const clampProvider = new ForecastPaintProvider({
+        forecaster: stub, history: { all: () => [] }, decode,
+        handoffBeyondHorizon: false,
+    });
+    clampProvider.refresh();
+    check('bracket(beyond deepest, handoff off) → clamp to last horizon', () => {
+        const b = clampProvider.bracket(T0 + 99 * HOUR);
         assert.ok(b && b.a === b.b && b.a.weatherBuf[0] === 2 && b.frac === 0);
     });
 }

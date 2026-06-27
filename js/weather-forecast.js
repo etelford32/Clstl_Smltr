@@ -319,8 +319,17 @@ export class ForecastPaintProvider {
      *   _decodeCoarse so the forecast goes through the exact same
      *   bilinear+blur+pack pipeline observations use.
      * @param {number} [opts.maxHorizonH=24]
+     * @param {boolean} [opts.handoffBeyondHorizon=true]  When true, bracket()
+     *   returns null for timestamps past the pinned model's deepest horizon
+     *   instead of clamping to the last frame. That null is the resolver's
+     *   cue to fall through to WeatherHistory.bracket(), which lerps the
+     *   Open-Meteo NWP forecast ring hour-by-hour — so the globe keeps
+     *   evolving from +maxHorizonH out to the deepest loaded NWP batch
+     *   instead of freezing on the RK2 model's last (near-persistence)
+     *   frame for ~13 days. Set false to restore the old clamp behaviour.
      */
-    constructor({ forecaster, history, decode, maxHorizonH = 24 } = {}) {
+    constructor({ forecaster, history, decode, maxHorizonH = 24,
+                  handoffBeyondHorizon = true } = {}) {
         if (!forecaster || typeof forecaster.forecastDense !== 'function') {
             throw new Error('ForecastPaintProvider: forecaster with forecastDense() required');
         }
@@ -330,6 +339,7 @@ export class ForecastPaintProvider {
         this._history     = history;
         this._decode      = decode;
         this._maxHorizonH = maxHorizonH;
+        this._handoff     = handoffBeyondHorizon !== false;
 
         this._issuedMs = null;
         this._targets  = [];          // sorted ascending target_ms
@@ -376,7 +386,10 @@ export class ForecastPaintProvider {
      * Bracketing decoded trios for a future timestamp.
      *   - null when tEff is at/before the issue time (the resolver's own
      *     replay/clamp path owns the past) or no forecast is loaded.
-     *   - clamps to the deepest horizon beyond the forecast range.
+     *   - null past the deepest horizon when handoffBeyondHorizon (default):
+     *     the resolver then paints the NWP forecast ring instead, so the
+     *     globe keeps evolving rather than freezing on the last RK2 frame.
+     *   - otherwise clamps to the deepest horizon beyond the forecast range.
      * @returns {null | { a, b, frac, meta }}
      */
     bracket(tEff) {
@@ -386,6 +399,14 @@ export class ForecastPaintProvider {
         const last  = targets[targets.length - 1];
         if (tEff < first) return null;                  // past / live — not ours
         if (tEff >= last) {
+            // Hand the deep future to the resolver's NWP-ring path. Returning
+            // null is the documented signal in WeatherFrameResolver._dispatchReplay
+            // to fall through to WeatherHistory.bracket(tEff). When the ring
+            // has no frame deeper than `last` yet (prefetch still walking
+            // forward), the ring clamps to its own newest forecast frame —
+            // identical to the old behaviour — and un-freezes progressively
+            // as deeper NWP batches land.
+            if (this._handoff) return null;
             const trio = this._trios.get(last);
             return trio ? { a: trio, b: trio, frac: 0, meta: this._meta(last) } : null;
         }

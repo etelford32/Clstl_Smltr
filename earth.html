@@ -6220,19 +6220,69 @@ const wxForecastFeed = new WeatherForecastFeed({ history: wxGridHistory });
 // seeded by the single idle pre-warm below and read from the forecast
 // ring by OpenMeteoNWPForecaster.
 
-// Idle pre-warm. After the page has been open for ~8 s with the user
-// presumably done with first-paint settling, fetch the first +24 h of
-// hourly forecast unconditionally — a single batch, well under the
-// rate-limit ceiling. This keeps the Open-Meteo "are we beating GFS?"
-// baseline populated for the validator. Skipped when the tab loaded
-// hidden (the user hasn't touched the page yet; don't pay the bandwidth
-// until they do).
-setTimeout(() => {
-    if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-        wxForecastFeed.ensureLoadedUntil(Date.now() + 24 * 3_600_000)
-            .catch(() => { /* surfaced via the fetch-end status event */ });
+// Progressive background NWP prefetch — what makes forward-scrub EVOLVE.
+//
+// The future-scrub globe paints the in-browser RK2 model for 0..+24 h, then
+// hands off to these Open-Meteo NWP frames for the mid/far future (see
+// ForecastPaintProvider.bracket's handoff branch). Without a populated ring,
+// scrubbing past +24 h froze on the RK2 model's last frame for ~13 days.
+// This loop fills the ring so the resolver can lerp real, hour-by-hour
+// evolving forecast frames out to +72 h.
+//
+// WHY THIS IS RATE-SAFE — and is NOT the reverted per-scrub fetch:
+// the bug that forced Open-Meteo off the paint path was a timeBus
+// subscription calling ensureLoadedUntil(simTime + 6h) on EVERY slider
+// 'input' event. A fast drag fired dozens of 3-chunk triplets per second
+// and tripped Open-Meteo's ~600-calls/min ceiling (surfacing as an
+// uncatchable, CORS-less NetworkError on the 429). This loader is the
+// opposite shape: it walks forward in 24 h batches on a slow BACKGROUND
+// timer, strictly serialized via .finally() so no two batches overlap.
+// Three batches (out to +72 h) is 9 chunk calls spread over ~20 s — three
+// orders of magnitude under the limit. ensureLoadedUntil() coalesces and
+// only fetches the uncovered tail, so nothing is re-fetched.
+const PREFETCH_EAGER_H  = 72;     // +3 d of evolving NWP filled in the background
+const PREFETCH_MAX_H    = 14 * 24;// hard ceiling (matches the forecast ring + slider)
+const PREFETCH_BATCH_H  = 24;     // one progressive batch
+const PREFETCH_GAP_MS   = 4000;   // spacing between background batches
+let   _prefetchTimer    = 0;
+
+// Walk the forecast ring forward to `depthH`, one PREFETCH_BATCH_H batch at a
+// time, never deeper than `maxH`. Each step waits for its fetch to settle
+// before scheduling the next (serialized — no overlapping in-flight calls).
+function _prefetchForecastStep(depthH, maxH) {
+    if (typeof document === 'undefined' || document.visibilityState !== 'visible') {
+        return;   // paused while hidden; the visibilitychange handler resumes it
     }
-}, 8000);
+    const target = Date.now() + depthH * 3_600_000;
+    const scheduleNext = () => {
+        if (depthH < maxH) {
+            clearTimeout(_prefetchTimer);
+            _prefetchTimer = setTimeout(
+                () => _prefetchForecastStep(Math.min(depthH + PREFETCH_BATCH_H, maxH), maxH),
+                PREFETCH_GAP_MS);
+        }
+    };
+    // Already covered (e.g. an earlier on-scrub deepen got here first) →
+    // skip the fetch, just continue the walk.
+    if (wxForecastFeed.loadedUntilMs >= target - 30 * 60_000) { scheduleNext(); return; }
+    wxForecastFeed.ensureLoadedUntil(target)
+        .catch(() => { /* surfaced via the fetch-end status event */ })
+        .finally(scheduleNext);
+}
+
+// Kick off ~8 s after load (first paint settled). Skipped when the tab
+// loaded hidden — don't pay bandwidth until the user is actually looking.
+setTimeout(() => _prefetchForecastStep(PREFETCH_BATCH_H, PREFETCH_EAGER_H), 8000);
+
+// Resume the eager walk if the tab was hidden mid-prefetch and comes back.
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    const haveH = (wxForecastFeed.loadedUntilMs - Date.now()) / 3_600_000;
+    if (haveH < PREFETCH_EAGER_H - 1) {
+        _prefetchForecastStep(Math.max(PREFETCH_BATCH_H,
+            Math.round(haveH) + PREFETCH_BATCH_H), PREFETCH_EAGER_H);
+    }
+});
 
 // Re-bracket on forecast ingest so the slider's current position picks
 // up the fresh forecast frames immediately, instead of waiting for the
@@ -9584,6 +9634,27 @@ timeBus.subscribe((snap) => {
     document.querySelectorAll('.tc-btn[data-speed]').forEach(btn => {
         btn.classList.toggle('active', Number(btn.dataset.speed) === simSpeed);
     });
+});
+
+// On-demand deep prefetch. The eager background walk above fills the ring to
+// +72 h; if the user scrubs PAST that, walk the ring toward their position so
+// the deep future evolves too. Debounced (800 ms) so the drag settles before
+// we fetch — this never fires per-tick, which is the distinction that keeps
+// it clear of the reverted rate-limit bug. ensureLoadedUntil() coalesces and
+// _prefetchForecastStep serializes, so a settle that lands mid-eager-walk at
+// worst issues one redundant (already-covered) step that skips its fetch.
+let _scrubDeepenTimer = 0;
+timeBus.subscribe((snap) => {
+    const aheadH = (snap.simTimeMs - Date.now()) / 3_600_000;
+    if (aheadH <= PREFETCH_EAGER_H + 1) return;                       // eager walk owns this range
+    if (wxForecastFeed.loadedUntilMs >= snap.simTimeMs - 30 * 60_000) return; // already loaded
+    clearTimeout(_scrubDeepenTimer);
+    _scrubDeepenTimer = setTimeout(() => {
+        const wantH = Math.min(Math.ceil(aheadH / PREFETCH_BATCH_H) * PREFETCH_BATCH_H, PREFETCH_MAX_H);
+        const haveH = Math.max(PREFETCH_BATCH_H,
+            Math.round((wxForecastFeed.loadedUntilMs - Date.now()) / 3_600_000));
+        _prefetchForecastStep(Math.min(haveH + PREFETCH_BATCH_H, wantH), wantH);
+    }, 800);
 });
 
 // ── Planet-rotation state ──────────────────────────────────────────────
