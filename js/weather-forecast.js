@@ -352,7 +352,11 @@ export class ForecastPaintProvider {
         this._targets  = [];          // sorted ascending target_ms
         this._coarse   = new Map();   // target_ms → coarse CHW Float32 (cheap to hold)
         this._trios    = new Map();   // target_ms → decoded trio (LRU, filled lazily)
-        this._trioCap  = 6;           // decoded-trio cap (~6 × 3.1 MB ≈ 19 MB)
+        this._trioCap  = 8;           // decoded-trio cap (~8 × 3.1 MB ≈ 25 MB)
+        // Near-term horizons the worker pre-decodes off-thread (0..N h), so the
+        // most-scrubbed window is a cache hit instead of a ~15 ms on-thread
+        // decode. Only used on the worker path; the inline path decodes lazily.
+        this._prewarmH = 6;
         this._gridW    = null;
         this._gridH    = null;
         this._modelId  = forecaster.id ?? 'forecast';
@@ -396,6 +400,7 @@ export class ForecastPaintProvider {
                 console.info('[ForecastPaintProvider] denseInputs threw:', err?.message);
             }
             if (!inputs) return;                       // keep the prior forecast painting
+            inputs.prewarmH = this._prewarmH;          // pre-decode the near term off-thread
             const gen = ++this._refreshGen;
             this._worker.request(inputs)
                 .then((dense) => {
@@ -446,11 +451,17 @@ export class ForecastPaintProvider {
             const coarse = dense.frames[h];
             const tt     = dense.target_ms[h];
             if (!(coarse instanceof Float32Array) || !Number.isFinite(tt)) continue;
-            // Store the coarse frame only; decode lazily in bracket() via
-            // _trioFor(). Decoding all 25 frames here would burn ~375 ms and
-            // pin ~78 MB of trios for frames the user may never scrub to.
+            // Store the coarse frame; decode lazily in bracket() via _trioFor().
+            // Decoding all frames here would burn ~375 ms and pin ~78 MB of
+            // trios for frames the user may never scrub to.
             this._coarse.set(tt, coarse);
             targets.push(tt);
+            // Seed any worker-pre-decoded near-term trio so the first scrub
+            // into it is a cache hit, not a ~15 ms on-thread decode.
+            const trio = dense.trios && dense.trios[h];
+            if (trio && trio.weatherBuf instanceof Float32Array && this._trios.size < this._trioCap) {
+                this._trios.set(tt, trio);
+            }
         }
         targets.sort((a, b) => a - b);
         this._targets  = targets;

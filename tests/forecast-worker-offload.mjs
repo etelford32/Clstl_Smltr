@@ -135,6 +135,33 @@ await check('stale worker reply is dropped (newest refresh wins)', async () => {
     p.stop();
 });
 
+await check('worker pre-warm: real worker decodes near-term trios, provider seeds cache (no on-thread decode)', async () => {
+    // Fake bridge runs the REAL worker kernel AND the prewarm decode path.
+    const { decodeCoarse } = await import(ROOT + '/js/weather-decode.js');
+    const runWithPrewarm = (inp) => {
+        const dense = runWorkerKernel(inp);
+        if (inp.prewarmH > 0) {
+            dense.trios = {};
+            for (const h of dense.horizons) {
+                if (h > inp.prewarmH) continue;
+                dense.trios[h] = decodeCoarse(dense.frames[h], dense.gridW, dense.gridH);
+            }
+        }
+        return dense;
+    };
+    const bridge = { available: () => true, request: (inp) => Promise.resolve(runWithPrewarm(inp)) };
+    let onThreadDecodes = 0;
+    const countingDecode = (c, w, h) => { onThreadDecodes++; return decode(c, w, h); };
+    const p = new ForecastPaintProvider({ forecaster: rk2, history, decode: countingDecode, maxHorizonH: 12, worker: bridge });
+    p.refresh();
+    await new Promise(r => setTimeout(r, 0));
+    onThreadDecodes = 0;
+    const b = p.bracket(nowHour + 2 * HOUR);          // +2h is inside the prewarm window (≤6h)
+    assert.ok(b && b.a && b.a.weatherBuf, 'near-term forecast paints');
+    assert.equal(onThreadDecodes, 0, `pre-warmed frame is a cache hit, no on-thread decode (did ${onThreadDecodes})`);
+    p.stop();
+});
+
 await check('no worker available → provider falls back to inline sync refresh', () => {
     const bridge = { available: () => false, request: () => { throw new Error('should not be called'); } };
     const p = new ForecastPaintProvider({ forecaster: rk2, history, decode, maxHorizonH: 6, worker: bridge });

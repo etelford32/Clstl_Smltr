@@ -29,6 +29,7 @@
  */
 
 import { rk2BuildHorizons } from './weather-flow.js';
+import { decodeCoarse }     from './weather-decode.js';
 
 self.onmessage = (e) => {
     const msg = e.data;
@@ -60,9 +61,27 @@ self.onmessage = (e) => {
 
         if (!dense) { self.postMessage({ type: 'forecast', id, dense: null }); return; }
 
+        const transfer = [];
+
+        // Pre-decode the near-term frames (0..prewarmH) off-thread, so the
+        // main thread doesn't pay the ~15 ms render-trio decode on first scrub
+        // into them. decodeCoarse here is the SAME shared kernel the live path
+        // uses, so these trios are byte-identical to an on-thread decode.
+        const prewarmH = Number.isFinite(msg.prewarmH) ? msg.prewarmH : 0;
+        if (prewarmH > 0) {
+            dense.trios = {};
+            for (const h of dense.horizons) {
+                if (h > prewarmH) continue;
+                const c = dense.frames[h];
+                if (!(c && c.buffer)) continue;
+                const trio = decodeCoarse(c, dense.gridW, dense.gridH);
+                dense.trios[h] = trio;
+                transfer.push(trio.weatherBuf.buffer, trio.windBuf.buffer, trio.cloudBuf.buffer);
+            }
+        }
+
         // Transfer each horizon's coarse buffer back zero-copy. The worker is
         // done with them after this post.
-        const transfer = [];
         for (const h of dense.horizons) {
             const c = dense.frames[h];
             if (c && c.buffer) transfer.push(c.buffer);
