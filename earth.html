@@ -6227,7 +6227,21 @@ const wxForecastFeed = new WeatherForecastFeed({ history: wxGridHistory });
 // ForecastPaintProvider.bracket's handoff branch). Without a populated ring,
 // scrubbing past +24 h froze on the RK2 model's last frame for ~13 days.
 // This loop fills the ring so the resolver can lerp real, hour-by-hour
-// evolving forecast frames out to +72 h.
+// evolving forecast frames out to PREFETCH_EAGER_H (+7 d).
+//
+// HOW DEEP — and why +7 d eager, +14 d on demand:
+//   • Hard ceiling is +14 d (336 h): the forecast ring is FORECAST_CAPACITY
+//     = 14×24 frames and Open-Meteo caps at forecast_days=16. The on-scrub
+//     extender below reaches this ceiling on demand.
+//   • Memory is linear at ~93 KB/coarse-frame: +7 d ≈ 16 MB ring, +14 d ≈
+//     31 MB — both under the ~100 MB IDB budget, but +14 d is heavier than
+//     a session that never scrubs that far should pay up front.
+//   • Egress is the real limiter for an *eager* walk: ~2.5 MB/batch, so
+//     +7 d ≈ 18 MB vs +14 d ≈ 35 MB of background fetch.
+//   • Skill is the soft limit: NWP carries genuine skill through ~7 d; past
+//     that it decays to climatology (smooth but low-information). So +7 d is
+//     the natural eager depth — deeper is fetched lazily only if the user
+//     actually scrubs there.
 //
 // WHY THIS IS RATE-SAFE — and is NOT the reverted per-scrub fetch:
 // the bug that forced Open-Meteo off the paint path was a timeBus
@@ -6237,10 +6251,16 @@ const wxForecastFeed = new WeatherForecastFeed({ history: wxGridHistory });
 // uncatchable, CORS-less NetworkError on the 429). This loader is the
 // opposite shape: it walks forward in 24 h batches on a slow BACKGROUND
 // timer, strictly serialized via .finally() so no two batches overlap.
-// Three batches (out to +72 h) is 9 chunk calls spread over ~20 s — three
-// orders of magnitude under the limit. ensureLoadedUntil() coalesces and
-// only fetches the uncovered tail, so nothing is re-fetched.
-const PREFETCH_EAGER_H  = 72;     // +3 d of evolving NWP filled in the background
+// Seven batches (out to +7 d) is 21 chunk calls spread over ~50 s — still
+// two orders of magnitude under the limit. ensureLoadedUntil() coalesces
+// and only fetches the uncovered tail, so nothing is re-fetched.
+//
+// Connection-aware: on a Save-Data or 2g link we keep the eager walk shallow
+// (+1 d) so a metered/slow connection isn't charged for days of forecast the
+// user may never look at. The on-scrub extender still deepens on demand.
+const _wxConn   = (typeof navigator !== 'undefined' && navigator.connection) || null;
+const _wxFrugal = !!(_wxConn && (_wxConn.saveData || /\b2g\b/.test(_wxConn.effectiveType || '')));
+const PREFETCH_EAGER_H  = _wxFrugal ? 24 : 7 * 24;  // +7 d normally, +1 d on metered/slow links
 const PREFETCH_MAX_H    = 14 * 24;// hard ceiling (matches the forecast ring + slider)
 const PREFETCH_BATCH_H  = 24;     // one progressive batch
 const PREFETCH_GAP_MS   = 4000;   // spacing between background batches
