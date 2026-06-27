@@ -436,3 +436,51 @@ export class WeatherForecastValidator {
 }
 
 export default WeatherForecastValidator;
+
+/**
+ * Rank registered forecasters by aggregate Murphy skill vs a reference model,
+ * for the leaderboard UI. Pure: operates on the public summary() shape
+ * ({ model: { channel: { horizon: { n, mse, ... } } } }) so it's unit-testable
+ * without a validator instance or a browser.
+ *
+ * Murphy skill per (channel, horizon) = 1 − MSE_model / MSE_ref, counted only
+ * where BOTH the model and the reference have ≥ minN matched targets and the
+ * reference MSE is > 0. A model's score is the mean over all such buckets it
+ * covers — so each model gets credit for whatever channels it actually
+ * forecasts (precip-only models included), and dimensionless skills mix safely.
+ *
+ * @returns {{model:string, skill:number|null, n:number, buckets:number}[]}
+ *   skill === null ⇒ "warming up" (no bucket reached minN yet). Sorted by
+ *   skill descending; warming-up rows sink to the bottom.
+ */
+export function rankBySkill(summary, {
+    referenceModel = 'persistence-v1',
+    minN = 5,
+    horizons = FORECAST_HORIZONS_H,
+} = {}) {
+    const ref = summary?.[referenceModel];
+    if (!ref) return [];
+    const rows = [];
+    for (const model of Object.keys(summary)) {
+        if (model === referenceModel) continue;
+        const m = summary[model];
+        let sum = 0, cnt = 0, nMin = Infinity;
+        for (const ch of Object.keys(m)) {
+            const refCh = ref[ch];
+            if (!refCh) continue;
+            for (const h of horizons) {
+                const a = m[ch]?.[h], b = refCh[h];
+                if (!a || !b || (a.n | 0) < minN || (b.n | 0) < minN || !(b.mse > 0)) continue;
+                sum += 1 - (a.mse / b.mse);
+                cnt++;
+                nMin = Math.min(nMin, a.n | 0);
+            }
+        }
+        rows.push({ model, skill: cnt ? sum / cnt : null, n: cnt ? nMin : 0, buckets: cnt });
+    }
+    rows.sort((a, b) =>
+        a.skill === null ? (b.skill === null ? 0 : 1)
+      : b.skill === null ? -1
+      : b.skill - a.skill);
+    return rows;
+}

@@ -652,7 +652,7 @@ const DEG2RAD = Math.PI / 180;
  * @returns {null | { model_id, issued_ms, horizons, gridW, gridH,
  *                     frames, target_ms, _meta? }}
  */
-function rk2BuildHorizons({
+export function rk2BuildHorizons({
     history, modelId, horizonsH, substepH = 1, tendencyHorizonH = 3, gainAtHour = null,
     precipFeedback = DEFAULT_PRECIP_FEEDBACK, convergenceGrowth = DEFAULT_CONVERGENCE_GROWTH,
 }) {
@@ -841,6 +841,40 @@ export class WindAdvectionRK2Forecaster {
             gainAtHour: fn, precipFeedback: this._precipFeedback,
             convergenceGrowth: this._convergenceGrowth,
         });
+    }
+
+    /**
+     * Serializable inputs for running the dense forecast off the main thread
+     * (see js/weather-forecast-worker.js). Everything the worker's
+     * rk2BuildHorizons() call needs, computed on the main thread where the
+     * learned gain/shear state lives:
+     *   - frames: only the newest two (rk2 reads `newest` + `prev` for the
+     *     wind tendency), so the postMessage clone is ~2×93 KB, not the whole
+     *     ring.
+     *   - gains: the per-horizon α[h] evaluated here (gainTracker + shearProxy
+     *     stay main-thread; the worker just indexes the array).
+     *   - microphysics config + step params (plain data).
+     * Returns null when there's no observation to seed from.
+     */
+    denseInputs({ history, maxHorizonH = 24 }) {
+        const frames = history.all();
+        if (!frames || frames.length === 0) return null;
+        const { fn } = this._gainFn(history);
+        const gains = new Array(maxHorizonH + 1);
+        for (let h = 0; h <= maxHorizonH; h++) gains[h] = fn(h);
+        const tail = frames.slice(-2).map(f => ({
+            t: f.t, gridW: f.gridW, gridH: f.gridH, coarse: f.coarse,
+        }));
+        return {
+            modelId:           this.id,
+            frames:            tail,
+            gains,
+            substepH:          this._substepH,
+            tendencyHorizonH:  this._tendencyHorizonH,
+            precipFeedback:    this._precipFeedback,
+            convergenceGrowth: this._convergenceGrowth,
+            maxHorizonH,
+        };
     }
 }
 

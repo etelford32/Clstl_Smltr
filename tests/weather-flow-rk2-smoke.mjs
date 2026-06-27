@@ -216,6 +216,21 @@ console.log('──────────────────────�
     const provider = new ForecastPaintProvider({ forecaster: stub, history: { all: () => [] }, decode });
     provider.refresh();
 
+    // Perf contract: refresh() must NOT eagerly decode all horizons (that was
+    // ~375 ms + ~78 MB per hourly rebuild). Decode happens lazily in bracket()
+    // and the decoded cache stays bounded by _trioCap.
+    check('refresh() decodes lazily (0 decodes until bracket)', () => {
+        let decodes = 0;
+        const counting = (c, w, h) => { decodes++; return decode(c, w, h); };
+        const p = new ForecastPaintProvider({ forecaster: stub, history: { all: () => [] }, decode: counting });
+        p.refresh();
+        assert.equal(decodes, 0, `refresh must not decode, did ${decodes}`);
+        p.bracket(T0 + HOUR / 2);                       // touches h=0,h=1
+        assert.ok(decodes >= 1 && decodes <= 2, `one bracket decodes ≤2 frames, did ${decodes}`);
+        for (let i = 0; i < 20; i++) p.bracket(T0 + (i % 3) * HOUR);
+        assert.ok(p._trios.size <= p._trioCap, `decoded cache bounded by cap, size ${p._trios.size}`);
+    });
+
     check('bracket(past) → null (replay path owns it)', () => {
         assert.equal(provider.bracket(T0 - 1), null);
     });
@@ -231,8 +246,22 @@ console.log('──────────────────────�
         assert.equal(b.b.weatherBuf[0], 1);
         assert.ok(Math.abs(b.frac - 0.5) < 1e-9, `frac ≈ 0.5, got ${b.frac}`);
     });
-    check('bracket(beyond deepest) → clamp to last horizon', () => {
-        const b = provider.bracket(T0 + 99 * HOUR);
+    // Default (handoffBeyondHorizon: true): past the deepest horizon the
+    // provider returns null so the resolver falls through to the NWP forecast
+    // ring — that's what un-freezes the deep-future scrub instead of clamping
+    // on the model's last (near-persistence) frame.
+    check('bracket(beyond deepest) → null (hands off to NWP ring)', () => {
+        assert.equal(provider.bracket(T0 + 99 * HOUR), null);
+    });
+
+    // Back-compat: handoffBeyondHorizon:false restores the old clamp-to-last.
+    const clampProvider = new ForecastPaintProvider({
+        forecaster: stub, history: { all: () => [] }, decode,
+        handoffBeyondHorizon: false,
+    });
+    clampProvider.refresh();
+    check('bracket(beyond deepest, handoff off) → clamp to last horizon', () => {
+        const b = clampProvider.bracket(T0 + 99 * HOUR);
         assert.ok(b && b.a === b.b && b.a.weatherBuf[0] === 2 && b.frac === 0);
     });
 }

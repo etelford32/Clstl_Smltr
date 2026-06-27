@@ -1242,6 +1242,26 @@ nav {
 .wx-skill-grid .skill-ch        { color: #99a; }
 .wx-skill-grid .skill-cell      { text-align: right; color: #aac; }
 
+/* ── Model skill leaderboard ─────────────────────────────────────
+   One row per registered forecaster, ranked by Murphy skill vs the
+   persistence baseline. The bar is centred at 0 skill: a green fill
+   grows right for models that beat persistence, a red fill grows left
+   for those that don't. This is the physics-first credibility surface. */
+.wx-leaderboard { font-family: monospace; font-size: 10px; color: #9ab;
+                  display: flex; flex-direction: column; gap: 3px; }
+.wx-lb-row  { display: grid; grid-template-columns: 82px 1fr 40px;
+              align-items: center; gap: 6px; }
+.wx-lb-name { color: #bcd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wx-lb-name.lead { color: #7fe0c0; font-weight: 600; }
+.wx-lb-bar  { position: relative; height: 8px; border-radius: 2px;
+              background: #161c2a; overflow: hidden; }
+.wx-lb-bar::before { content: ''; position: absolute; left: 50%; top: 0; bottom: 0;
+                     width: 1px; background: #3a4358; }
+.wx-lb-fill { position: absolute; top: 0; bottom: 0; transition: width .3s; }
+.wx-lb-pct  { text-align: right; color: #aac; }
+.wx-lb-row.warming .wx-lb-name { color: #667; }
+.wx-lb-row.warming .wx-lb-pct  { color: #556; }
+
 /* ── Wind-advection learner HUD ─────────────────────────────────
    Tiny bar chart showing α[h] per-horizon at a glance. Each bar is
    stacked: the filled portion = α value (0..1). Colour walks
@@ -3096,6 +3116,16 @@ import './js/telemetry.js';
             Forecast skill (MAE)
         </div>
         <div id="wx-skill-grid" class="wx-skill-grid">awaiting first forecast…</div>
+        <!-- Model leaderboard. Ranks every registered forecaster by Murphy
+             skill vs persistence (1 − MSE_model/MSE_persistence), averaged
+             over the channels × horizons each model actually scores. The
+             physics-first credibility surface: "our model beats 'tomorrow
+             looks like today' by N%". Rows warm up until ≥5 matched targets. -->
+        <div style="font-size:9px;color:#336a8a;letter-spacing:.07em;text-transform:uppercase;margin:8px 0 4px;"
+             title="Every registered forecaster ranked by Murphy skill vs the persistence baseline. Positive = beats 'tomorrow looks like today'; bar is centred at zero skill.">
+            Model skill vs persistence
+        </div>
+        <div id="wx-leaderboard" class="wx-leaderboard">awaiting first validation cycle…</div>
         <!-- Precipitation deep-dive coverage HUD.
              Two one-line readouts: climatology coverage (per-cell ×
              local-hour bins with ≥3 samples) and the bias-tracker pair
@@ -3370,7 +3400,8 @@ import { WeatherHistory }        from './js/weather-history.js';
 import { WeatherFrameResolver }  from './js/weather-frame-resolver.js';
 import { WeatherForecastFeed }   from './js/weather-forecast-feed.js';
 import { ForecastRegistry, PersistenceForecaster, OpenMeteoNWPForecaster, ForecastPaintProvider, CHANNEL_NAMES, FORECAST_HORIZONS_H } from './js/weather-forecast.js';
-import { WeatherForecastValidator } from './js/weather-forecast-validation.js';
+import { WeatherForecastWorkerBridge } from './js/weather-forecast-worker-bridge.js';
+import { WeatherForecastValidator, rankBySkill } from './js/weather-forecast-validation.js';
 import { mountModelsPanel } from './js/models-panel.js';
 import { ProbabilityPicker } from './js/probability-picker.js';
 import { mountRenewablesPanel } from './js/renewables-panel.js';
@@ -6220,19 +6251,89 @@ const wxForecastFeed = new WeatherForecastFeed({ history: wxGridHistory });
 // seeded by the single idle pre-warm below and read from the forecast
 // ring by OpenMeteoNWPForecaster.
 
-// Idle pre-warm. After the page has been open for ~8 s with the user
-// presumably done with first-paint settling, fetch the first +24 h of
-// hourly forecast unconditionally — a single batch, well under the
-// rate-limit ceiling. This keeps the Open-Meteo "are we beating GFS?"
-// baseline populated for the validator. Skipped when the tab loaded
-// hidden (the user hasn't touched the page yet; don't pay the bandwidth
-// until they do).
-setTimeout(() => {
-    if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-        wxForecastFeed.ensureLoadedUntil(Date.now() + 24 * 3_600_000)
-            .catch(() => { /* surfaced via the fetch-end status event */ });
+// Progressive background NWP prefetch — what makes forward-scrub EVOLVE.
+//
+// The future-scrub globe paints the in-browser RK2 model for 0..+24 h, then
+// hands off to these Open-Meteo NWP frames for the mid/far future (see
+// ForecastPaintProvider.bracket's handoff branch). Without a populated ring,
+// scrubbing past +24 h froze on the RK2 model's last frame for ~13 days.
+// This loop fills the ring so the resolver can lerp real, hour-by-hour
+// evolving forecast frames out to PREFETCH_EAGER_H (+7 d).
+//
+// HOW DEEP — and why +7 d eager, +14 d on demand:
+//   • Hard ceiling is +14 d (336 h): the forecast ring is FORECAST_CAPACITY
+//     = 14×24 frames and Open-Meteo caps at forecast_days=16. The on-scrub
+//     extender below reaches this ceiling on demand.
+//   • Memory is linear at ~93 KB/coarse-frame: +7 d ≈ 16 MB ring, +14 d ≈
+//     31 MB — both under the ~100 MB IDB budget, but +14 d is heavier than
+//     a session that never scrubs that far should pay up front.
+//   • Egress is the real limiter for an *eager* walk: ~2.5 MB/batch, so
+//     +7 d ≈ 18 MB vs +14 d ≈ 35 MB of background fetch.
+//   • Skill is the soft limit: NWP carries genuine skill through ~7 d; past
+//     that it decays to climatology (smooth but low-information). So +7 d is
+//     the natural eager depth — deeper is fetched lazily only if the user
+//     actually scrubs there.
+//
+// WHY THIS IS RATE-SAFE — and is NOT the reverted per-scrub fetch:
+// the bug that forced Open-Meteo off the paint path was a timeBus
+// subscription calling ensureLoadedUntil(simTime + 6h) on EVERY slider
+// 'input' event. A fast drag fired dozens of 3-chunk triplets per second
+// and tripped Open-Meteo's ~600-calls/min ceiling (surfacing as an
+// uncatchable, CORS-less NetworkError on the 429). This loader is the
+// opposite shape: it walks forward in 24 h batches on a slow BACKGROUND
+// timer, strictly serialized via .finally() so no two batches overlap.
+// Seven batches (out to +7 d) is 21 chunk calls spread over ~50 s — still
+// two orders of magnitude under the limit. ensureLoadedUntil() coalesces
+// and only fetches the uncovered tail, so nothing is re-fetched.
+//
+// Connection-aware: on a Save-Data or 2g link we keep the eager walk shallow
+// (+1 d) so a metered/slow connection isn't charged for days of forecast the
+// user may never look at. The on-scrub extender still deepens on demand.
+const _wxConn   = (typeof navigator !== 'undefined' && navigator.connection) || null;
+const _wxFrugal = !!(_wxConn && (_wxConn.saveData || /\b2g\b/.test(_wxConn.effectiveType || '')));
+const PREFETCH_EAGER_H  = _wxFrugal ? 24 : 7 * 24;  // +7 d normally, +1 d on metered/slow links
+const PREFETCH_MAX_H    = 14 * 24;// hard ceiling (matches the forecast ring + slider)
+const PREFETCH_BATCH_H  = 24;     // one progressive batch
+const PREFETCH_GAP_MS   = 4000;   // spacing between background batches
+let   _prefetchTimer    = 0;
+
+// Walk the forecast ring forward to `depthH`, one PREFETCH_BATCH_H batch at a
+// time, never deeper than `maxH`. Each step waits for its fetch to settle
+// before scheduling the next (serialized — no overlapping in-flight calls).
+function _prefetchForecastStep(depthH, maxH) {
+    if (typeof document === 'undefined' || document.visibilityState !== 'visible') {
+        return;   // paused while hidden; the visibilitychange handler resumes it
     }
-}, 8000);
+    const target = Date.now() + depthH * 3_600_000;
+    const scheduleNext = () => {
+        if (depthH < maxH) {
+            clearTimeout(_prefetchTimer);
+            _prefetchTimer = setTimeout(
+                () => _prefetchForecastStep(Math.min(depthH + PREFETCH_BATCH_H, maxH), maxH),
+                PREFETCH_GAP_MS);
+        }
+    };
+    // Already covered (e.g. an earlier on-scrub deepen got here first) →
+    // skip the fetch, just continue the walk.
+    if (wxForecastFeed.loadedUntilMs >= target - 30 * 60_000) { scheduleNext(); return; }
+    wxForecastFeed.ensureLoadedUntil(target)
+        .catch(() => { /* surfaced via the fetch-end status event */ })
+        .finally(scheduleNext);
+}
+
+// Kick off ~8 s after load (first paint settled). Skipped when the tab
+// loaded hidden — don't pay bandwidth until the user is actually looking.
+setTimeout(() => _prefetchForecastStep(PREFETCH_BATCH_H, PREFETCH_EAGER_H), 8000);
+
+// Resume the eager walk if the tab was hidden mid-prefetch and comes back.
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    const haveH = (wxForecastFeed.loadedUntilMs - Date.now()) / 3_600_000;
+    if (haveH < PREFETCH_EAGER_H - 1) {
+        _prefetchForecastStep(Math.max(PREFETCH_BATCH_H,
+            Math.round(haveH) + PREFETCH_BATCH_H), PREFETCH_EAGER_H);
+    }
+});
 
 // Re-bracket on forecast ingest so the slider's current position picks
 // up the fresh forecast frames immediately, instead of waiting for the
@@ -6458,15 +6559,27 @@ window._rk2Forecaster  = rk2Forecaster;
 // use, then the resolver lerps/clamps it like any replay frame. Open-Meteo
 // stays a scored leaderboard baseline (read from the forecast ring by
 // OpenMeteoNWPForecaster) and is no longer a paint source.
+//
+// The dense RK2 integration (~350 ms / hourly rebuild) runs OFF the render
+// thread via this worker bridge; the provider prepares the inputs on the
+// main thread (cheap) and swaps the result in when the worker replies. If
+// the worker can't spawn (old browser, CSP), the bridge reports
+// unavailable and the provider transparently computes inline — same output,
+// just on-thread. forecast-paint-update fires when an async reply lands so
+// the resolver repaints the current scrub position immediately.
+const wxForecastWorker = new WeatherForecastWorkerBridge();
 const wxPaintProvider = new ForecastPaintProvider({
     forecaster:  rk2Forecaster,
     history:     wxGridHistory,
     decode:      (coarse, w, h) => wxFeed._decodeCoarse(coarse, w, h),
     maxHorizonH: 24,
+    worker:      wxForecastWorker,
 });
 wxResolver?.setForecastProvider(wxPaintProvider);
+document.addEventListener('forecast-paint-update', () => wxResolver?.invalidate());
 if (wxGridHistory.size > 0) wxPaintProvider.refresh();
-window._wxPaintProvider = wxPaintProvider;
+window._wxPaintProvider  = wxPaintProvider;
+window._wxForecastWorker = wxForecastWorker;
 
 // ── Cloud + wind forecasters ─────────────────────────────────────────────
 // Same trio (Climatology / AnomalyPersistence / AnomalyAR) as precip,
@@ -6708,6 +6821,66 @@ document.addEventListener('weather-forecast-validation-update', (ev) => {
 // Initial paint with whatever the validator already has on disk so the
 // table isn't blank on a fresh page load with prior history.
 _paintForecastSkill(wxForecastValidator.summary());
+
+// ── Model skill leaderboard ─────────────────────────────────────────────
+// Ranks every registered forecaster by Murphy skill vs persistence
+// (1 − MSE_model/MSE_persistence), averaged over the channel × horizon
+// buckets each model actually scores (both sides need ≥ MIN_N matched
+// targets). This is the differentiator made visible: physics-first models
+// that have to BEAT "tomorrow looks like today" on a published scoreboard,
+// not an opaque "AI-powered" claim. Friendly labels for the known model ids;
+// anything unregistered falls back to a de-suffixed id.
+const LB_LABELS = {
+    'wind-advection-rk2-v1':          'RK2 advect',
+    'wind-advection-v1':              'wind advect',
+    'optical-flow-v1':                'optical flow',
+    'open-meteo-gfs-v1':              'GFS (NWP)',
+    'precip-fusion-v1':               'precip fusion',
+    'precip-anomaly-ar3-v1':          'precip AR(3)',
+    'precip-anomaly-persistence-v1':  'precip anom',
+    'precip-climatology-v1':          'precip clim',
+};
+function _paintForecastLeaderboard(summary) {
+    const root = document.getElementById('wx-leaderboard');
+    if (!root) return;
+    if (!summary || !summary['persistence-v1']) {
+        root.textContent = 'awaiting first validation cycle…';
+        return;
+    }
+    // Ranking is the pure, unit-tested rankBySkill() from the validator module;
+    // here we only attach friendly labels and render.
+    const rows = rankBySkill(summary, { minN: 5 }).map(r => ({
+        ...r, label: LB_LABELS[r.model] || r.model.replace(/-v\d+$/, ''),
+    }));
+    if (rows.length === 0) { root.textContent = 'no models registered'; return; }
+
+    let leadAssigned = false, html = '';
+    for (const r of rows) {
+        if (r.skill === null) {
+            html += `<div class="wx-lb-row warming" title="needs ≥${MIN_N} matched targets on both sides">`
+                  + `<span class="wx-lb-name">${r.label}</span><span class="wx-lb-bar"></span>`
+                  + `<span class="wx-lb-pct">…</span></div>`;
+            continue;
+        }
+        const s      = Math.max(-1, Math.min(1, r.skill));   // clamp bar to ±1
+        const pctStr = (r.skill >= 0 ? '+' : '') + (r.skill * 100).toFixed(0) + '%';
+        const isLead = !leadAssigned && r.skill > 0;
+        if (isLead) leadAssigned = true;
+        const color  = r.skill >= 0 ? '#36c99a' : '#d9694f';
+        const fill   = r.skill >= 0
+            ? `left:50%;width:${(s * 50).toFixed(1)}%;background:${color};`
+            : `right:50%;width:${(-s * 50).toFixed(1)}%;background:${color};`;
+        html += `<div class="wx-lb-row" title="Murphy skill vs persistence over ${r.buckets} channel×horizon bucket(s), min n=${r.n}">`
+              + `<span class="wx-lb-name${isLead ? ' lead' : ''}">${isLead ? '▲ ' : ''}${r.label}</span>`
+              + `<span class="wx-lb-bar"><span class="wx-lb-fill" style="${fill}"></span></span>`
+              + `<span class="wx-lb-pct" style="color:${color}">${pctStr}</span></div>`;
+    }
+    root.innerHTML = html;
+}
+document.addEventListener('weather-forecast-validation-update', (ev) => {
+    _paintForecastLeaderboard(ev.detail?.summary ?? {});
+});
+_paintForecastLeaderboard(wxForecastValidator.summary());
 
 // ── Wind-skill strip (under the scrub bar) ──────────────────────────────
 // Companion to the wx-panel skill grid: surfaces a one-glance read of
@@ -9584,6 +9757,27 @@ timeBus.subscribe((snap) => {
     document.querySelectorAll('.tc-btn[data-speed]').forEach(btn => {
         btn.classList.toggle('active', Number(btn.dataset.speed) === simSpeed);
     });
+});
+
+// On-demand deep prefetch. The eager background walk above fills the ring to
+// +72 h; if the user scrubs PAST that, walk the ring toward their position so
+// the deep future evolves too. Debounced (800 ms) so the drag settles before
+// we fetch — this never fires per-tick, which is the distinction that keeps
+// it clear of the reverted rate-limit bug. ensureLoadedUntil() coalesces and
+// _prefetchForecastStep serializes, so a settle that lands mid-eager-walk at
+// worst issues one redundant (already-covered) step that skips its fetch.
+let _scrubDeepenTimer = 0;
+timeBus.subscribe((snap) => {
+    const aheadH = (snap.simTimeMs - Date.now()) / 3_600_000;
+    if (aheadH <= PREFETCH_EAGER_H + 1) return;                       // eager walk owns this range
+    if (wxForecastFeed.loadedUntilMs >= snap.simTimeMs - 30 * 60_000) return; // already loaded
+    clearTimeout(_scrubDeepenTimer);
+    _scrubDeepenTimer = setTimeout(() => {
+        const wantH = Math.min(Math.ceil(aheadH / PREFETCH_BATCH_H) * PREFETCH_BATCH_H, PREFETCH_MAX_H);
+        const haveH = Math.max(PREFETCH_BATCH_H,
+            Math.round((wxForecastFeed.loadedUntilMs - Date.now()) / 3_600_000));
+        _prefetchForecastStep(Math.min(haveH + PREFETCH_BATCH_H, wantH), wantH);
+    }, 800);
 });
 
 // ── Planet-rotation state ──────────────────────────────────────────────

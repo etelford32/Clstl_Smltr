@@ -56,9 +56,13 @@ const NUM_COARSE_CHANNELS = 9;
 // to inferring from data.length (= 2·H², where H = sqrt(N/2)).
 const DEFAULT_GRID_W = 72;
 const DEFAULT_GRID_H = 36;
-export const TEX_W = 360;               // output texture width  (1°/pixel)
-export const TEX_H = 180;               // output texture height (1°/pixel)
-export const MAX_WIND_MS = 60;          // m/s — wind-speed normalisation ceiling
+// Render-trio decode (CHW-coarse → TEX_W×TEX_H×4 buffers) + its grid/wind
+// constants now live in the dependency-free js/weather-decode.js so the
+// forecast Web Worker can import them too. Imported locally (weather-feed uses
+// them internally) AND re-exported so every existing
+// `import { TEX_W } from './weather-feed.js'` keeps working unchanged.
+import { decodeCoarse, TEX_W, TEX_H, MAX_WIND_MS } from './weather-decode.js';
+export { TEX_W, TEX_H, MAX_WIND_MS };
 const REFRESH_MS   = 15 * 60 * 1000;   // re-fetch every 15 min (cache is 1 hr w/ SWR)
 // Retry staircase after a failed fetch. On each successive failure we step
 // to the next entry; on success we reset to the steady-state REFRESH_MS.
@@ -562,107 +566,11 @@ export class WeatherFeed {
     // pulled out of WeatherHistory. The output shape matches what
     // earth.html's updateWeatherTextures() expects so the downstream
     // shader path is unchanged.
+    // Render-trio decode. Delegates to the shared, dependency-free
+    // js/weather-decode.js so the live path here and the forecast Web Worker
+    // run byte-identical code (tests/weather-decode-identity.mjs guards it).
     _decodeCoarse(coarse, gridW, gridH) {
-        const N = gridW * gridH;
-
-        // Per-channel views — zero-copy slices of the packed CHW buffer.
-        const T   = coarse.subarray(0 * N, 1 * N);
-        const P   = coarse.subarray(1 * N, 2 * N);
-        const RH  = coarse.subarray(2 * N, 3 * N);
-        const U   = coarse.subarray(3 * N, 4 * N);
-        const V   = coarse.subarray(4 * N, 5 * N);
-        const cL  = coarse.subarray(5 * N, 6 * N);
-        const cM  = coarse.subarray(6 * N, 7 * N);
-        const cH  = coarse.subarray(7 * N, 8 * N);
-        const Pr  = coarse.subarray(8 * N, 9 * N);
-
-        // Wind speed is derived on the coarse grid from U,V. Mathematically
-        // identical to what the upstream wind_speed_10m would have been —
-        // U,V were constructed from wspd*sin/cos(dir), so hypot(U,V) == wspd.
-        const W = new Float32Array(N);
-        for (let k = 0; k < N; k++) W[k] = Math.hypot(U[k], V[k]);
-
-        // Bilinear upsample. wrapX=true so the antimeridian doesn't seam.
-        const fT  = this._bilinear(T,  gridW, gridH, TEX_W, TEX_H, true);
-        const fP  = this._bilinear(P,  gridW, gridH, TEX_W, TEX_H, true);
-        const fH  = this._bilinear(RH, gridW, gridH, TEX_W, TEX_H, true);
-        const fU  = this._bilinear(U,  gridW, gridH, TEX_W, TEX_H, true);
-        const fV  = this._bilinear(V,  gridW, gridH, TEX_W, TEX_H, true);
-        const fW  = this._bilinear(W,  gridW, gridH, TEX_W, TEX_H, true);
-
-        // Cloud channels: bilinear upsample + a SINGLE structure-preserving
-        // smoothing pass. The previous code ran two box-blur passes (≈
-        // Gaussian σ ≈ R·√2 ≈ 4–7 px on a 360-wide texture). That was enough
-        // to dissolve fronts, cyclone bands and the dry slot into a uniform
-        // low-frequency haze — so on screen the only structure left came from
-        // the shader's procedural noise, not the real Open-Meteo field. One
-        // light pass is plenty to hide the 5° upsample blockiness while
-        // keeping the synoptic gradient that makes weather systems legible.
-        // High cloud (cirrus) is naturally wispy and sharp-edged, so it gets
-        // an even lighter touch than the low/mid decks.
-        const fCL = this._bilinear(cL, gridW, gridH, TEX_W, TEX_H, true);
-        const fCM = this._bilinear(cM, gridW, gridH, TEX_W, TEX_H, true);
-        const fCH = this._bilinear(cH, gridW, gridH, TEX_W, TEX_H, true);
-        const fPr = this._bilinear(Pr, gridW, gridH, TEX_W, TEX_H, true);
-        const cellPx  = Math.max(1, Math.round(TEX_W / gridW));
-        const blurR   = Math.max(1, Math.round(cellPx * 0.40));
-        const cirrusR = Math.max(1, Math.round(cellPx * 0.25));
-        const precipR = Math.max(1, Math.round(cellPx * 0.35));
-        const sLow    = this._boxBlur(fCL, TEX_W, TEX_H, blurR);
-        const sMid    = this._boxBlur(fCM, TEX_W, TEX_H, blurR);
-        const sHigh   = this._boxBlur(fCH, TEX_W, TEX_H, cirrusR);
-        const sPrecip = this._boxBlur(fPr, TEX_W, TEX_H, precipR);
-
-        const NTEX = TEX_W * TEX_H;
-        const weatherBuf = new Float32Array(NTEX * 4);
-        const windBuf    = new Float32Array(NTEX * 4);
-        const cloudBuf   = new Float32Array(NTEX * 4);
-
-        for (let k = 0; k < NTEX; k++) {
-            const t4 = k * 4;
-
-            // weatherBuffer — normalised scalars for colour overlays
-            weatherBuf[t4+0] = Math.max(0, Math.min(1, (fT[k] + 60) / 110));   // -60…+50 °C
-            weatherBuf[t4+1] = Math.max(0, Math.min(1, (fP[k] - 850) / 210));  // 850…1060 hPa
-            weatherBuf[t4+2] = Math.max(0, Math.min(1,  fH[k] / 100));
-            weatherBuf[t4+3] = Math.max(0, Math.min(1,  fW[k] / MAX_WIND_MS));
-
-            // windBuffer — signed U,V for particle advection (already in m/s)
-            windBuf[t4+0] = fU[k] / MAX_WIND_MS;   // [-1, 1]
-            windBuf[t4+1] = fV[k] / MAX_WIND_MS;   // [-1, 1]
-            windBuf[t4+2] = fW[k] / MAX_WIND_MS;   // [0, 1]
-            windBuf[t4+3] = 1.0;
-
-            cloudBuf[t4+0] = Math.max(0, Math.min(1, sLow[k]    / 100));
-            cloudBuf[t4+1] = Math.max(0, Math.min(1, sMid[k]    / 100));
-            cloudBuf[t4+2] = Math.max(0, Math.min(1, sHigh[k]   / 100));
-            cloudBuf[t4+3] = Math.max(0, Math.min(1, sPrecip[k] / 10));   // cap 10 mm/hr
-        }
-
-        return { weatherBuf, windBuf, cloudBuf };
-    }
-
-    // ── Bilinear interpolation: inW×inH → outW×outH ──────────────────────────
-    // wrapX: when true, longitude (x axis) wraps so column 0 is adjacent to
-    //        column inW-1 (periodic boundary).  This eliminates the 10° seam
-    //        at the antimeridian where -175° meets +175°.
-    _bilinear(src, inW, inH, outW, outH, wrapX = false) {
-        const dst = new Float32Array(outW * outH);
-        for (let j = 0; j < outH; j++) {
-            const fy = (j / (outH - 1)) * (inH - 1);
-            const y0 = Math.floor(fy), y1 = Math.min(y0 + 1, inH - 1);
-            const ty = fy - y0;
-            for (let i = 0; i < outW; i++) {
-                const fx = (i / (outW - 1)) * (inW - 1);
-                const x0 = Math.floor(fx);
-                const x1 = wrapX ? (x0 + 1) % inW : Math.min(x0 + 1, inW - 1);
-                const tx = fx - x0;
-                dst[j * outW + i] =
-                    (1-tx)*(1-ty)*src[y0*inW+x0] + tx*(1-ty)*src[y0*inW+x1] +
-                    (1-tx)*   ty *src[y1*inW+x0] + tx*   ty *src[y1*inW+x1];
-            }
-        }
-        return dst;
+        return decodeCoarse(coarse, gridW, gridH);
     }
 
     // ── NaN-gap fill (nearest valid neighbour) ────────────────────────────────
@@ -682,43 +590,6 @@ export class WeatherFeed {
                 }
             }
         }
-    }
-
-    // ── Separable box blur (radius R → kernel width 2R+1) ───────────────────
-    // Wraps longitude (x axis); clamps latitude (y axis).
-    _boxBlur(src, W, H, R) {
-        const tmp = new Float32Array(W * H);
-        const dst = new Float32Array(W * H);
-        const diam = 2 * R + 1;
-
-        // Horizontal pass (wrap longitude)
-        for (let j = 0; j < H; j++) {
-            let sum = 0;
-            // Seed with first window
-            for (let dx = -R; dx <= R; dx++) {
-                sum += src[j * W + ((dx % W) + W) % W];
-            }
-            tmp[j * W + 0] = sum / diam;
-            for (let i = 1; i < W; i++) {
-                sum += src[j * W + ((i + R) % W)] - src[j * W + (((i - R - 1) % W) + W) % W];
-                tmp[j * W + i] = sum / diam;
-            }
-        }
-
-        // Vertical pass (clamp latitude)
-        for (let i = 0; i < W; i++) {
-            let sum = 0;
-            for (let dy = -R; dy <= R; dy++) {
-                sum += tmp[Math.max(0, Math.min(H - 1, dy)) * W + i];
-            }
-            dst[0 * W + i] = sum / diam;
-            for (let j = 1; j < H; j++) {
-                sum += tmp[Math.min(H - 1, j + R) * W + i] - tmp[Math.max(0, j - R - 1) * W + i];
-                dst[j * W + i] = sum / diam;
-            }
-        }
-
-        return dst;
     }
 
     // ── Procedural fallback: physically motivated zonal circulation ───────────
