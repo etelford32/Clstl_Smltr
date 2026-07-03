@@ -210,7 +210,7 @@ export class OpenMeteoNWPForecaster {
  * `info` so they're visible in DevTools without spamming the console.
  */
 export class ForecastRegistry {
-    constructor({ history } = {}) {
+    constructor({ history, ingestDebounceMs = 800, sliceBudgetMs = 12 } = {}) {
         if (!history) throw new Error('ForecastRegistry: history is required');
         this._history = history;
         /** @type {Map<string, Forecaster>} */
@@ -219,6 +219,14 @@ export class ForecastRegistry {
          *  validator and the future resolver hook. Plain object so
          *  iteration is predictable. */
         this._latest = {};
+        // Ingest-driven fan-out pacing (see _onIngest). The debounce
+        // coalesces the cold-start backfill's frame burst into one run;
+        // the slice budget bounds how long the chunked walk stays on the
+        // main thread between yields.
+        this._ingestDebounceMs = ingestDebounceMs;
+        this._sliceBudgetMs    = sliceBudgetMs;
+        this._runTimer = 0;
+        this._runGen   = 0;
         // Subscribed to weather-history-ingest dispatches from
         // WeatherHistory.ingest. Re-bound so we can remove on stop().
         this._onIngest = this._onIngest.bind(this);
@@ -238,12 +246,29 @@ export class ForecastRegistry {
     listModels() { return [...this._forecasters.keys()]; }
 
     /**
+     * Request a fan-out soon, without blocking the caller. Debounced onto
+     * the same chunked walk the ingest path uses, so callers that only
+     * want "results eventually" (post-registration kicks, bias updates)
+     * don't pay the heavy models' inline cost on the main thread the way
+     * a manual runAll() does. Multiple schedule()s coalesce.
+     */
+    schedule() {
+        clearTimeout(this._runTimer);
+        this._runTimer = setTimeout(() => { this._runAllChunked(); }, this._ingestDebounceMs);
+    }
+
+    /**
      * Run every registered forecaster against the current history and
      * emit the union as a single event. Safe to call manually (e.g. on
      * page load before the first ingest fires). Returns a map of
      * model_id → forecast result for the caller's convenience.
      */
     runAll() {
+        // A manual run supersedes any scheduled/in-flight chunked walk —
+        // both would compute from the same history, so letting the walk
+        // finish would only emit a duplicate event.
+        clearTimeout(this._runTimer);
+        this._runGen++;
         const out = {};
         for (const [id, fc] of this._forecasters) {
             try {
@@ -268,6 +293,8 @@ export class ForecastRegistry {
 
     stop() {
         document.removeEventListener('weather-history-ingest', this._onIngest);
+        clearTimeout(this._runTimer);
+        this._runGen++;                       // cancels an in-flight chunked walk
         this._forecasters.clear();
         this._latest = {};
     }
@@ -275,12 +302,53 @@ export class ForecastRegistry {
     // ── Internal ──────────────────────────────────────────────────────────
 
     _onIngest() {
-        // The history ring has just absorbed a new frame. That gives every
-        // forecaster a fresh tail to predict from. Run them all and emit.
-        // Cheap for persistence (~1 alloc per horizon), more expensive for
-        // future AR/reservoir models — but those are still O(grid) per
-        // call, well under one rAF.
-        this.runAll();
+        // The history ring absorbed a new frame — every forecaster has a
+        // fresh tail to predict from. This fan-out was originally a direct
+        // synchronous runAll(); two things outgrew that:
+        //   1. The registry now holds ~17 models, several of which are
+        //      O(grid × substeps) trajectory integrations (advection, rk2,
+        //      multilevel) — the summed loop was a multi-hundred-ms main-
+        //      thread task, competing with the render loop.
+        //   2. The cold-start backfill ingests up to 24 frames in a burst,
+        //      which used to trigger 24 FULL fan-outs at page load — only
+        //      the last one's output ever mattered.
+        // The trailing debounce collapses bursts to one run; the chunked
+        // walk yields between forecasters when the time-slice budget is
+        // spent, so the longest uninterrupted task is one model, not the
+        // sum. runAll() itself stays synchronous for manual callers.
+        this.schedule();
+    }
+
+    async _runAllChunked() {
+        const gen = ++this._runGen;
+        const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+        const out = {};
+        let sliceStart = nowMs();
+        for (const [id, fc] of this._forecasters) {
+            try {
+                // Heavy models expose forecastAsync — same result computed
+                // off-thread (worker), inline-fallback inside. The await is
+                // also a natural yield point for the render loop.
+                const result = (typeof fc.forecastAsync === 'function')
+                    ? await fc.forecastAsync({ history: this._history })
+                    : fc.forecast({ history: this._history });
+                if (gen !== this._runGen) return;     // superseded mid-await
+                if (result) out[id] = result;
+            } catch (err) {
+                console.info(`[ForecastRegistry] ${id} threw:`, err?.message);
+                if (gen !== this._runGen) return;
+            }
+            if (nowMs() - sliceStart > this._sliceBudgetMs) {
+                await new Promise(r => setTimeout(r, 0));
+                if (gen !== this._runGen) return;     // superseded / stopped
+                sliceStart = nowMs();
+            }
+        }
+        if (gen !== this._runGen) return;
+        this._latest = out;
+        document.dispatchEvent(new CustomEvent('weather-forecast-update', {
+            detail: { results: out, issued_ms: Date.now() },
+        }));
     }
 }
 
