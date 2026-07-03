@@ -37,8 +37,8 @@ export class WeatherForecastWorkerBridge {
             w.onmessage = (e) => {
                 const m = e.data;
                 // Request ids are unique across message types, so one pending
-                // map serves both 'forecast' and 'mlevels' replies.
-                if (!m || (m.type !== 'forecast' && m.type !== 'mlevels')) return;  // ignore 'ready'
+                // map serves every reply type. 'ready' has no id and falls out.
+                if (!m || !['forecast', 'mlevels', 'mforecast'].includes(m.type)) return;
                 const p = this._pending.get(m.id);
                 if (!p) return;
                 this._pending.delete(m.id);

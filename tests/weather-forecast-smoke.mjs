@@ -494,6 +494,30 @@ check('bracket() works with empty past ring + populated forecast ring', () => {
         assert.equal(updates, 1, `no duplicate event after debounce (got ${updates})`);
     });
 
+    // Chunked walk prefers forecastAsync (the worker-offload hook) while
+    // manual runAll() keeps the synchronous forecast() path.
+    let asyncCalls = 0, syncCalls = 0;
+    reg.register({
+        id: 'async-probe-v1',
+        forecast() { syncCalls++; return { model_id: this.id, frames: {}, horizons: [], target_ms: {} }; },
+        forecastAsync() {
+            asyncCalls++;
+            return Promise.resolve({ model_id: this.id, frames: {}, horizons: [], target_ms: {} });
+        },
+    });
+    document.dispatchEvent(new CustomEvent('weather-history-ingest', { detail: {} }));
+    await new Promise(r => setTimeout(r, 120));
+    check('chunked walk prefers forecastAsync for models that offer it', () => {
+        assert.equal(asyncCalls, 1, `forecastAsync called once (got ${asyncCalls})`);
+        assert.equal(syncCalls, 0, 'forecast() untouched on the chunked path');
+        assert.ok(reg.getLatest('async-probe-v1'), 'async result landed in _latest');
+    });
+    reg.runAll();
+    check('manual runAll() still uses the synchronous forecast()', () => {
+        assert.equal(syncCalls, 1, `forecast() called by runAll (got ${syncCalls})`);
+        assert.equal(asyncCalls, 1, 'forecastAsync not re-entered by runAll');
+    });
+
     document.removeEventListener('weather-forecast-update', onUpd);
     reg.stop();
 }

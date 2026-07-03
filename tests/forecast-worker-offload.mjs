@@ -171,6 +171,65 @@ await check('no worker available → provider falls back to inline sync refresh'
     p.stop();
 });
 
+// Scored fan-out offload: worker 'forecast' with an explicit horizonsH set
+// must return exactly those horizons, byte-identical to the inline scored
+// forecast() (same kernel, same gains).
+await check("worker scored 'forecast' (horizonsH) == inline forecast()", async () => {
+    const { FORECAST_HORIZONS_H } = await import(ROOT + '/js/weather-forecast.js');
+    const direct = rk2.forecast({ history });
+    const inputs = rk2.denseInputs({ history, maxHorizonH: 24 });
+    inputs.horizonsH = FORECAST_HORIZONS_H.slice();
+    workerReply = null;
+    globalThis.self.onmessage({ data: { type: 'forecast', id: 77, ...inputs } });
+    assert.ok(workerReply?.dense, 'worker replied');
+    assert.deepEqual(workerReply.dense.horizons, FORECAST_HORIZONS_H,
+        'scored horizons only, not the dense sweep');
+    for (const h of FORECAST_HORIZONS_H) {
+        const mx = framesEqual(direct.frames[h], workerReply.dense.frames[h]);
+        assert.ok(mx < 1e-6, `h=${h} identical (maxΔ=${mx})`);
+    }
+});
+
+// forecastAsync contract: unavailable bridge → inline result; rejecting
+// bridge → inline fallback. Either way a scored emission always resolves.
+await check('forecastAsync falls back inline when the worker is gone', async () => {
+    const direct = rk2.forecast({ history });
+    rk2.setWorker({ available: () => false });
+    const viaUnavailable = await rk2.forecastAsync({ history });
+    assert.ok(framesEqual(direct.frames[6], viaUnavailable.frames[6]) < 1e-6, 'unavailable → inline');
+    rk2.setWorker({ available: () => true, request: () => Promise.reject(new Error('worker died')) });
+    const viaReject = await rk2.forecastAsync({ history });
+    assert.ok(framesEqual(direct.frames[6], viaReject.frames[6]) < 1e-6, 'reject → inline fallback');
+    rk2.setWorker(null);
+});
+
+// The 'mforecast' worker branch: multi-level scored forecast, byte-identical
+// to the inline path (both call multilevelBuildHorizons).
+await check("worker 'mforecast' == inline multilevel forecast()", async () => {
+    const { MultiLevelAdvectionForecaster } = await import(ROOT + '/js/weather-flow.js');
+    const f = (v) => { const a = new Float32Array(N); a.fill(v); return a; };
+    const lw = {
+        t: nowHour, gridW: G_W, gridH: G_H,
+        t850: f(5), t500: f(-20),
+        u850: f(2), v850: f(5), u500: f(-9), v500: f(0),
+        tendU850: null, tendV850: null, tendU500: null, tendV500: null,
+    };
+    const ml = new MultiLevelAdvectionForecaster({ levelWinds: () => lw });
+    const direct = ml.forecast({ history });
+    assert.ok(direct, 'inline multilevel forecast produced');
+    const inputs = ml.scoredInputs({ history });
+    let reply = null;
+    const prevPost = globalThis.self.postMessage;
+    globalThis.self.postMessage = (m) => { if (m && m.type === 'mforecast') reply = m; };
+    globalThis.self.onmessage({ data: { type: 'mforecast', id: 78, ...inputs } });
+    globalThis.self.postMessage = prevPost;
+    assert.ok(reply?.dense, 'worker posted an mforecast reply');
+    for (const h of direct.horizons) {
+        const mx = framesEqual(direct.frames[h], reply.dense.frames[h]);
+        assert.ok(mx < 1e-6, `h=${h} identical (maxΔ=${mx})`);
+    }
+});
+
 // The 'mlevels' worker branch (multi-level model → 3-D volume level ring).
 await check("worker 'mlevels' output == inline multilevelLevelsDense (byte-identical)", async () => {
     const { multilevelLevelsDense } = await import(ROOT + '/js/weather-flow.js');

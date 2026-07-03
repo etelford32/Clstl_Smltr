@@ -246,6 +246,18 @@ export class ForecastRegistry {
     listModels() { return [...this._forecasters.keys()]; }
 
     /**
+     * Request a fan-out soon, without blocking the caller. Debounced onto
+     * the same chunked walk the ingest path uses, so callers that only
+     * want "results eventually" (post-registration kicks, bias updates)
+     * don't pay the heavy models' inline cost on the main thread the way
+     * a manual runAll() does. Multiple schedule()s coalesce.
+     */
+    schedule() {
+        clearTimeout(this._runTimer);
+        this._runTimer = setTimeout(() => { this._runAllChunked(); }, this._ingestDebounceMs);
+    }
+
+    /**
      * Run every registered forecaster against the current history and
      * emit the union as a single event. Safe to call manually (e.g. on
      * page load before the first ingest fires). Returns a map of
@@ -304,8 +316,7 @@ export class ForecastRegistry {
         // walk yields between forecasters when the time-slice budget is
         // spent, so the longest uninterrupted task is one model, not the
         // sum. runAll() itself stays synchronous for manual callers.
-        clearTimeout(this._runTimer);
-        this._runTimer = setTimeout(() => { this._runAllChunked(); }, this._ingestDebounceMs);
+        this.schedule();
     }
 
     async _runAllChunked() {
@@ -315,10 +326,17 @@ export class ForecastRegistry {
         let sliceStart = nowMs();
         for (const [id, fc] of this._forecasters) {
             try {
-                const result = fc.forecast({ history: this._history });
+                // Heavy models expose forecastAsync — same result computed
+                // off-thread (worker), inline-fallback inside. The await is
+                // also a natural yield point for the render loop.
+                const result = (typeof fc.forecastAsync === 'function')
+                    ? await fc.forecastAsync({ history: this._history })
+                    : fc.forecast({ history: this._history });
+                if (gen !== this._runGen) return;     // superseded mid-await
                 if (result) out[id] = result;
             } catch (err) {
                 console.info(`[ForecastRegistry] ${id} threw:`, err?.message);
+                if (gen !== this._runGen) return;
             }
             if (nowMs() - sliceStart > this._sliceBudgetMs) {
                 await new Promise(r => setTimeout(r, 0));

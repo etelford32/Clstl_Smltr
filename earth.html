@@ -6571,8 +6571,10 @@ precipBiasTracker.open().then(() => {
                 // A new pair updates the bias → re-run the registry so
                 // the fusion forecaster's next emission reflects the
                 // freshly-corrected field, rather than waiting up to an
-                // hour for the next history ingest.
-                wxForecastRegistry.runAll();
+                // hour for the next history ingest. schedule() (not
+                // runAll()) so the heavy models go through the chunked
+                // worker walk instead of computing inline right here.
+                wxForecastRegistry.schedule();
                 _paintPrecipCoverage();
             }
         });
@@ -6728,6 +6730,14 @@ window._mlForecaster = mlForecaster;
 // just on-thread. forecast-paint-update fires when an async reply lands so
 // the resolver repaints the current scrub position immediately.
 const wxForecastWorker = new WeatherForecastWorkerBridge();
+// The trajectory-integration models also run their SCORED forecasts through
+// this worker (forecastAsync, preferred by the registry's chunked fan-out) —
+// a single multilevel run is ~150 ms of integration that has no business on
+// the render thread. The bridge is shared: requests queue on one worker,
+// which is fine at the hourly cadence these fire.
+rk2Forecaster.setWorker(wxForecastWorker);
+adForecaster.setWorker(wxForecastWorker);
+mlForecaster.setWorker(wxForecastWorker);
 const wxPaintProvider = new ForecastPaintProvider({
     forecaster:  rk2Forecaster,
     history:     wxGridHistory,
@@ -6740,6 +6750,8 @@ document.addEventListener('forecast-paint-update', () => wxResolver?.invalidate(
 if (wxGridHistory.size > 0) wxPaintProvider.refresh();
 window._wxPaintProvider  = wxPaintProvider;
 window._wxForecastWorker = wxForecastWorker;
+window._wxForecastRegistry = wxForecastRegistry;
+window._wxGridHistory      = wxGridHistory;
 
 // ── Multi-level model → 3-D temperature volume coupling ──────────────────
 // The volume's near term (0..+24 h) paints the multi-level model's advected
@@ -6832,7 +6844,9 @@ Promise.all([cloudClimatology.open(), windClimatology.open()])
         // Re-run the registry now that the new forecasters are
         // registered — without this kick the cloud/wind models would
         // miss the next ingest cycle (~1 hour) before producing output.
-        if (wxGridHistory.size > 0) wxForecastRegistry.runAll();
+        // Scheduled (chunked, worker-preferring) rather than inline: this
+        // fires during boot, exactly when the render thread is busiest.
+        if (wxGridHistory.size > 0) wxForecastRegistry.schedule();
     })
     .catch(err => {
         console.info('[earth] cloud/wind climatology open failed:', err?.message);
@@ -6858,10 +6872,11 @@ wxForecastValidator.start().catch(err => {
 });
 
 // If a frame is already in the ring at construction time (warmup from IDB
-// resolved earlier in this script), kick off the first forecast manually
-// so the SW-panel skill table doesn't sit empty until the next live
-// ingest 15 min later.
-if (wxGridHistory.size > 0) wxForecastRegistry.runAll();
+// resolved earlier in this script), kick off the first forecast so the
+// SW-panel skill table doesn't sit empty until the next live ingest
+// 15 min later. Scheduled — the debounce also coalesces this kick with
+// the cold-start backfill's ingest burst arriving moments later.
+if (wxGridHistory.size > 0) wxForecastRegistry.schedule();
 
 // ── SW-panel skill table painter ──────────────────────────────────────────
 // Listens for the validator's summary updates and re-renders the small

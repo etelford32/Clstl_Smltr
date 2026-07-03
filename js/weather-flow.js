@@ -1105,6 +1105,47 @@ export class WindAdvectionRK2Forecaster {
             maxHorizonH,
         };
     }
+
+    /**
+     * Worker-offloaded scored forecast. denseInputs() already carries
+     * everything the worker's rk2BuildHorizons call needs; adding an
+     * explicit horizonsH restricts it to the validator's scored set
+     * instead of the dense 0..24 sweep. Falls back to the inline
+     * forecast() on any worker failure — a scored emission is never
+     * silently dropped. The registry's chunked walk prefers this method
+     * when present; manual runAll() keeps using the synchronous
+     * forecast().
+     */
+    forecastAsync({ history }) {
+        if (!(this._workerBridge && this._workerBridge.available?.())) {
+            return Promise.resolve(this.forecast({ history }));
+        }
+        const maxH = FORECAST_HORIZONS_H[FORECAST_HORIZONS_H.length - 1];
+        const inputs = this.denseInputs({ history, maxHorizonH: maxH });
+        if (!inputs) return Promise.resolve(null);
+        inputs.horizonsH = FORECAST_HORIZONS_H.slice();
+        return this._workerBridge.request(inputs, 'forecast')
+            .then((result) => {
+                if (result) {
+                    // denseInputs' _gainFn call refreshed the shear proxy,
+                    // so its diagnostics are current for this run.
+                    const d = this._shearProxy?.diagnostics?.() ?? null;
+                    this._lastDiag = {
+                        steadiness:  d?.steadiness ?? null,
+                        shear_ms:    d?.shear_ms ?? null,
+                        alpha_per_h: result._meta?.gain_per_horizon ?? null,
+                        alpha_learned_per_h: this._gainTracker ? this._gainTracker.getAllGains() : null,
+                        t: Date.now(),
+                    };
+                }
+                return result;
+            })
+            .catch(() => this.forecast({ history }));
+    }
+
+    /** Attach the shared WeatherForecastWorkerBridge (created after the
+     *  forecasters in earth.html's wiring order — hence a setter). */
+    setWorker(bridge) { this._workerBridge = bridge; }
 }
 
 // ── Multi-level advection ────────────────────────────────────────────────────
@@ -1217,6 +1258,108 @@ function fillLevelWinds({ t850, t500, u850, v850, u500, v500 }, gridW, gridH) {
 }
 
 /**
+ * The multi-level scored kernel — pure and worker-safe (plain data in,
+ * fresh Float32Arrays out). Both MultiLevelAdvectionForecaster.forecast()
+ * (inline) and the worker's 'mforecast' branch call THIS, so the two paths
+ * are byte-identical by construction.
+ *
+ * @param {object} p
+ * @param {Array}  p.frames    newest ≤2 observation frames (oldest first)
+ * @param {object} p.levels    {t850,t500,u850,v850,u500,v500, tend*} arrays
+ * @param {number[]} p.horizonsH  scored horizons
+ * @param {?number[]} p.gains  per-hour α (index h); null → 1
+ * @returns {null | { model_id, issued_ms, horizons, gridW, gridH,
+ *                    frames, target_ms, _meta }}
+ */
+export function multilevelBuildHorizons({
+    frames, levels, horizonsH, gains = null, modelId = 'multilevel-advection-v1',
+    substepH = 1, tendencyHorizonH = 3,
+    precipFeedback = DEFAULT_PRECIP_FEEDBACK,
+    convergenceGrowth = DEFAULT_CONVERGENCE_GROWTH,
+    horizontalDiffusion = DEFAULT_HORIZONTAL_DIFFUSION,
+}) {
+    if (!frames || frames.length === 0 || !levels?.u850) return null;
+    const newest = frames[frames.length - 1];
+    const { t, gridW, gridH, coarse } = newest;
+    const N = gridW * gridH;
+    if (levels.u850.length !== N) return null;
+
+    const lastGain = (gains && gains.length) ? gains[gains.length - 1] : 1;
+    const gainAt   = (h) => (gains && h >= 0 && h < gains.length ? gains[h] : lastGain);
+
+    // Surface flow + tendency — identical to the rk2 model's inputs.
+    const Ut = coarse.subarray(CH_U * N, (CH_U + 1) * N);
+    const Vt = coarse.subarray(CH_V * N, (CH_V + 1) * N);
+    let sfcTendU = null, sfcTendV = null;
+    if (frames.length >= 2) {
+        const prev = frames[frames.length - 2];
+        if (prev.gridW === gridW && prev.gridH === gridH
+            && prev.coarse?.length === coarse.length) {
+            sfcTendU = fieldTendency(Ut, prev.coarse.subarray(CH_U * N, (CH_U + 1) * N), N);
+            sfcTendV = fieldTendency(Vt, prev.coarse.subarray(CH_V * N, (CH_V + 1) * N), N);
+        }
+    }
+
+    // Level flows, thermal-wind gap-filled; precip steering = 850/500 mean.
+    const lvl = fillLevelWinds(levels, gridW, gridH);
+    const uSteer = new Float32Array(N), vSteer = new Float32Array(N);
+    for (let k = 0; k < N; k++) {
+        uSteer[k] = 0.5 * (lvl.u850[k] + lvl.u500[k]);
+        vSteer[k] = 0.5 * (lvl.v850[k] + lvl.v500[k]);
+    }
+    const steerTendU = (levels.tendU850 && levels.tendU500)
+        ? Float32Array.from(levels.tendU850, (x, k) => 0.5 * (x + levels.tendU500[k])) : null;
+    const steerTendV = (levels.tendV850 && levels.tendV500)
+        ? Float32Array.from(levels.tendV850, (x, k) => 0.5 * (x + levels.tendV500[k])) : null;
+
+    const FLOWS = {
+        sfc:   { u: Ut,       v: Vt,       tendU: sfcTendU,         tendV: sfcTendV },
+        w850:  { u: lvl.u850, v: lvl.v850, tendU: levels.tendU850,  tendV: levels.tendV850 },
+        w500:  { u: lvl.u500, v: lvl.v500, tendU: levels.tendU500,  tendV: levels.tendV500 },
+        steer: { u: uSteer,   v: vSteer,   tendU: steerTendU,       tendV: steerTendV },
+    };
+
+    const out = {}, targets = {};
+    const meta = { gain_per_horizon: {}, level_gap_cells: lvl.filled ?? 0 };
+    const scratch = { colO: new Float32Array(N), rowO: new Float32Array(N) };
+
+    for (const h of horizonsH) {
+        targets[h] = t + h * 3_600_000;
+        const gain = Math.max(0, Math.min(1, gainAt(h)));
+        meta.gain_per_horizon[h] = gain;
+
+        const frame = new Float32Array(N * NUM_CHANNELS);
+        if (h <= 0) { frame.set(coarse); out[h] = frame; continue; }
+
+        let steps = 1, dh = h;
+        for (const { flow, channels } of LEVEL_CHANNEL_MAP) {
+            const f = FLOWS[flow];
+            const o = rk2OriginField({
+                u: f.u, v: f.v, tendU: f.tendU, tendV: f.tendV,
+                gridW, gridH, h, substepH, tendencyHorizonH, gain, scratch,
+            });
+            steps = o.steps; dh = o.dh;
+            for (const ch of channels) {
+                const slice = coarse.subarray(ch * N, (ch + 1) * N);
+                for (let k = 0; k < N; k++) {
+                    frame[ch * N + k] = bilinearSample(slice, gridW, gridH, o.colO[k], o.rowO[k]);
+                }
+            }
+        }
+        // Same operator order as rk2BuildHorizons: mix, then sources.
+        applyHorizontalDiffusion(frame, N, gridW, gridH, steps, dh, horizontalDiffusion);
+        applyConvergenceGrowth(frame, N, gridW, gridH, h, convergenceGrowth);
+        reconcilePrecipWithCloud(frame, N, h, precipFeedback);
+        out[h] = frame;
+    }
+    return {
+        model_id: modelId, issued_ms: t,
+        horizons: horizonsH.slice(),
+        gridW, gridH, frames: out, target_ms: targets, _meta: meta,
+    };
+}
+
+/**
  * Multi-level semi-Lagrangian advection-diffusion, id multilevel-advection-v1.
  *
  * `levelWinds` is a provider function returning the newest pressure-level
@@ -1277,99 +1420,85 @@ export class MultiLevelAdvectionForecaster {
         return lw;
     }
 
-    /** Standard scored horizons (FORECAST_HORIZONS_H) for the validator. */
-    forecast({ history }) {
+    // Serializable inputs for one scored run — everything
+    // multilevelBuildHorizons needs, gathered where the stateful pieces
+    // (history ring, gain tracker, shear proxy, level provider) live.
+    // Shared by the inline and worker paths so both compute from
+    // byte-identical inputs. Null while the level provider is cold/stale.
+    scoredInputs({ history }) {
         const frames = history.all();
         if (!frames || frames.length === 0) return null;
         const newest = frames[frames.length - 1];
-        const { t, gridW, gridH, coarse } = newest;
-        const N = gridW * gridH;
-
-        const lw = this._usableLevels(t, N);
+        const lw = this._usableLevels(newest.t, newest.gridW * newest.gridH);
         if (!lw) return null;
-
-        const { fn: gainFn, steadiness } = this._gainFn(history);
-
-        // Surface flow + tendency — identical to the rk2 model's inputs.
-        const Ut = coarse.subarray(CH_U * N, (CH_U + 1) * N);
-        const Vt = coarse.subarray(CH_V * N, (CH_V + 1) * N);
-        let sfcTendU = null, sfcTendV = null;
-        if (frames.length >= 2) {
-            const prev = frames[frames.length - 2];
-            if (prev.gridW === gridW && prev.gridH === gridH
-                && prev.coarse?.length === coarse.length) {
-                sfcTendU = fieldTendency(Ut, prev.coarse.subarray(CH_U * N, (CH_U + 1) * N), N);
-                sfcTendV = fieldTendency(Vt, prev.coarse.subarray(CH_V * N, (CH_V + 1) * N), N);
-            }
-        }
-
-        // Level flows, thermal-wind gap-filled; precip steering = 850/500 mean.
-        const lvl = fillLevelWinds(lw, gridW, gridH);
-        const uSteer = new Float32Array(N), vSteer = new Float32Array(N);
-        for (let k = 0; k < N; k++) {
-            uSteer[k] = 0.5 * (lvl.u850[k] + lvl.u500[k]);
-            vSteer[k] = 0.5 * (lvl.v850[k] + lvl.v500[k]);
-        }
-        const steerTendU = (lw.tendU850 && lw.tendU500)
-            ? Float32Array.from(lw.tendU850, (x, k) => 0.5 * (x + lw.tendU500[k])) : null;
-        const steerTendV = (lw.tendV850 && lw.tendV500)
-            ? Float32Array.from(lw.tendV850, (x, k) => 0.5 * (x + lw.tendV500[k])) : null;
-
-        const FLOWS = {
-            sfc:   { u: Ut,       v: Vt,       tendU: sfcTendU,     tendV: sfcTendV },
-            w850:  { u: lvl.u850, v: lvl.v850, tendU: lw.tendU850,  tendV: lw.tendV850 },
-            w500:  { u: lvl.u500, v: lvl.v500, tendU: lw.tendU500,  tendV: lw.tendV500 },
-            steer: { u: uSteer,   v: vSteer,   tendU: steerTendU,   tendV: steerTendV },
-        };
-
-        const out = {}, targets = {};
-        const meta = { gain_per_horizon: {}, level_gap_cells: lvl.filled ?? 0 };
-        const scratch = { colO: new Float32Array(N), rowO: new Float32Array(N) };
-
-        for (const h of FORECAST_HORIZONS_H) {
-            targets[h] = t + h * 3_600_000;
-            const gain = Math.max(0, Math.min(1, gainFn(h)));
-            meta.gain_per_horizon[h] = gain;
-
-            const frame = new Float32Array(N * NUM_CHANNELS);
-            if (h <= 0) { frame.set(coarse); out[h] = frame; continue; }
-
-            let steps = 1, dh = h;
-            for (const { flow, channels } of LEVEL_CHANNEL_MAP) {
-                const f = FLOWS[flow];
-                const o = rk2OriginField({
-                    u: f.u, v: f.v, tendU: f.tendU, tendV: f.tendV,
-                    gridW, gridH, h, substepH: this._substepH,
-                    tendencyHorizonH: this._tendencyHorizonH, gain, scratch,
-                });
-                steps = o.steps; dh = o.dh;
-                for (const ch of channels) {
-                    const slice = coarse.subarray(ch * N, (ch + 1) * N);
-                    for (let k = 0; k < N; k++) {
-                        frame[ch * N + k] = bilinearSample(slice, gridW, gridH, o.colO[k], o.rowO[k]);
-                    }
-                }
-            }
-            // Same operator order as rk2BuildHorizons: mix, then sources.
-            applyHorizontalDiffusion(frame, N, gridW, gridH, steps, dh, this._horizontalDiffusion);
-            applyConvergenceGrowth(frame, N, gridW, gridH, h, this._convergenceGrowth);
-            reconcilePrecipWithCloud(frame, N, h, this._precipFeedback);
-            out[h] = frame;
-        }
-
-        this._lastDiag = {
-            steadiness,
-            level_t: lw.t,
-            level_gap_cells: lvl.filled ?? 0,
-            alpha_per_h: meta.gain_per_horizon,
-            t: Date.now(),
-        };
+        const { fn, steadiness } = this._gainFn(history);
+        const maxH = FORECAST_HORIZONS_H[FORECAST_HORIZONS_H.length - 1];
+        const gains = new Array(maxH + 1);
+        for (let h = 0; h <= maxH; h++) gains[h] = fn(h);
+        const tail = frames.slice(-2).map(f => ({
+            t: f.t, gridW: f.gridW, gridH: f.gridH, coarse: f.coarse,
+        }));
         return {
-            model_id: this.id, issued_ms: t,
-            horizons: FORECAST_HORIZONS_H.slice(),
-            gridW, gridH, frames: out, target_ms: targets, _meta: meta,
+            modelId: this.id,
+            frames:  tail,
+            levels: {
+                t: lw.t,
+                t850: lw.t850, t500: lw.t500,
+                u850: lw.u850, v850: lw.v850, u500: lw.u500, v500: lw.v500,
+                tendU850: lw.tendU850, tendV850: lw.tendV850,
+                tendU500: lw.tendU500, tendV500: lw.tendV500,
+            },
+            gains,
+            horizonsH:          FORECAST_HORIZONS_H.slice(),
+            substepH:           this._substepH,
+            tendencyHorizonH:   this._tendencyHorizonH,
+            precipFeedback:     this._precipFeedback,
+            convergenceGrowth:  this._convergenceGrowth,
+            horizontalDiffusion: this._horizontalDiffusion,
+            _steadiness: steadiness,     // diag only — worker ignores it
         };
     }
+
+    _noteDiag(inputs, result) {
+        if (!result) return;
+        this._lastDiag = {
+            steadiness: inputs._steadiness,
+            level_t: inputs.levels.t,
+            level_gap_cells: result._meta?.level_gap_cells ?? 0,
+            alpha_per_h: result._meta?.gain_per_horizon ?? null,
+            t: Date.now(),
+        };
+    }
+
+    /** Standard scored horizons (FORECAST_HORIZONS_H) for the validator. */
+    forecast({ history }) {
+        const inputs = this.scoredInputs({ history });
+        if (!inputs) return null;
+        const result = multilevelBuildHorizons(inputs);
+        this._noteDiag(inputs, result);
+        return result;
+    }
+
+    /**
+     * Worker-offloaded scored forecast — same inputs, same pure kernel,
+     * computed off the render thread. The registry's chunked walk prefers
+     * this when present; any worker failure falls back to the inline
+     * forecast() so a scored emission is never silently dropped.
+     */
+    forecastAsync({ history }) {
+        if (!(this._workerBridge && this._workerBridge.available?.())) {
+            return Promise.resolve(this.forecast({ history }));
+        }
+        const inputs = this.scoredInputs({ history });
+        if (!inputs) return Promise.resolve(null);
+        return this._workerBridge.request(inputs, 'mforecast')
+            .then((result) => { this._noteDiag(inputs, result); return result; })
+            .catch(() => this.forecast({ history }));
+    }
+
+    /** Attach the shared WeatherForecastWorkerBridge (created after the
+     *  forecasters in earth.html's wiring order — hence a setter). */
+    setWorker(bridge) { this._workerBridge = bridge; }
 
     /**
      * Serializable inputs for multilevelLevelsDense (worker-friendly, same
