@@ -274,30 +274,44 @@ What they verify is the pipeline plumbing: pairing, OLS, refusal
 contract, output schema. Real BATS-R-US output will overwrite
 the hindcast JSON in place and these tables get re-populated.
 
-### Generate PARAM.in
+### Generate PARAM.in — coupled GM+IE
+
+The pseudo-Ap story needs **Φ_PC and HPI**, which only the coupled **GM+IE**
+run emits (via the Ridley IE log). That path is the `gm_ie` sub-command — *not*
+`hindcast` (which is the IH-only inline template) and *not* `run_forecast
+--once` (which is the real-time forecast cycle). One command generates the
+coupled `PARAM.in` (Boris + cold-start ladder already baked into
+`config/PARAM.in.GM_IE`):
 
 ```sh
 cd swmf
-python3 -m pipeline.gen_param \
-  --mode hindcast \
-  --start 2024-05-10T12:00:00Z --end 2024-05-13T12:00:00Z \
-  --imf-file fixtures/hindcast/gannon_may_2024/imf_l1.dat \
-  --out runs/gannon_may_2024/PARAM.in
+# imf_l1.dat must already be staged in IMF_DIR (default /data/imf; set IMF_DIR
+# to point elsewhere). --f107 227.1 is the Gannon-window F10.7 from
+# historical_ap.csv. Prints "Run dir: <RUN_DIR>" — capture it for the next step.
+python3 -m pipeline.gen_param gm_ie \
+  --start 2024-05-10T12:00:00 --hours 72 \
+  --f107 227.1 --nproc 4 --imf imf_l1.dat
 ```
 
 ### Launch BATS-R-US
 
-72 h of simulated time on `MPI_NPROC=4` is a longer wall-clock run than
-the Feb 2022 hindcast — budget overnight. Tail
-`runs/gannon_may_2024/batsrus_stdout.log`. Kick off this step in the
-background and let the ground-mag-only fit (next step) produce a
-same-day result.
+72 h of simulated time on `nproc 4` is a longer wall-clock run than the Feb
+2022 hindcast — budget overnight. Tail `<RUN_DIR>/batsrus_stdout.log`. The
+`--launch-run-dir` mode launches `SWMF.exe` (the coupled binary) on the
+prepared run dir; it is distinct from `--once` (which regenerates a *forecast*
+run) and does not touch the forecast DB.
 
 ```sh
 cd swmf
-RUNS_DIR=runs python3 -m pipeline.run_forecast --once \
-  --run-dir runs/gannon_may_2024
+python3 -m pipeline.run_forecast --launch-run-dir <RUN_DIR> \
+  --nproc 4 --timeout-hours 24
 ```
+
+> **Or run the whole coupled sequence with one command inside the container:**
+> `docker compose -f docker-compose.swmf.yml run --rm swmf-hindcast` invokes
+> `swmf/run-gannon-hindcast.sh`, which does the IMF gate → `gen_param gm_ie` →
+> `run_forecast --launch-run-dir` → `hindcast_runner` in order. See
+> `NEW_COMPUTER_RUNBOOK.md`.
 
 ### Solver stability — the cold-start ladder, Boris, and the CflExpl ≤ 0.65 rule
 
@@ -384,10 +398,15 @@ checkpoint instead of re-running the cold-start ladder.
 
 ### Extract Φ_PC and HPI
 
+`hindcast_runner`'s registered event **key is `may_2024_gannon`** — reversed
+from the `gannon_may_2024` fixtures dir + front-end bundle. Pass the key form
+here (argparse `choices` rejects `gannon_may_2024`), and point `--run-dir` at
+the `gm_ie` run dir printed above:
+
 ```sh
 cd swmf
-python3 -m pipeline.hindcast_runner --event gannon_may_2024 \
-  --run-dir runs/gannon_may_2024 \
+python3 -m pipeline.hindcast_runner --event may_2024_gannon \
+  --run-dir <RUN_DIR> \
   --out ../data/hindcast -v
 ```
 

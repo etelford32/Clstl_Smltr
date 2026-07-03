@@ -206,6 +206,12 @@ COPY pipeline/ ./pipeline/
 COPY config/   ./config/
 COPY benchmark/ ./benchmark/
 
+# One-shot coupled GM+IE hindcast driver (invoked by the swmf-hindcast service
+# in docker-compose.swmf.yml). Self-contained in the image so the workstation
+# needs no extra host mount for it.
+COPY run-gannon-hindcast.sh ./run-gannon-hindcast.sh
+RUN chmod +x ./run-gannon-hindcast.sh
+
 # Run directory (bind-mounted at runtime for each forecast run)
 RUN mkdir -p /data/runs /data/imf /data/results /data/logs
 

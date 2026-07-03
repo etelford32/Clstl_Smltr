@@ -477,6 +477,28 @@ def main() -> None:
     p_hind.add_argument("--event",  default="event", help="Short event label")
     p_hind.add_argument("--imf",    default="IMF_latest.dat", help="IMF.dat filename in IMF_DIR")
 
+    # coupled GM+IE sub-command — the ONLY generator that writes PARAM.in.GM_IE
+    # and thus produces the IE log parse_ie_log.py reads for Phi_PC / HPI. This
+    # is the launch path for the Phase-0 pseudo-Ap hindcast (e.g. Gannon). See
+    # MHD_DENSITY_PHASE0_GANNON_RUNBOOK.md and the solver cold-start ladder note.
+    p_gmie = subparsers.add_parser(
+        "gm_ie", help="Coupled GM+IE hindcast run (emits the IE log for Phi_PC/HPI)")
+    p_gmie.add_argument("--start", required=True,
+                        help="ISO datetime, e.g. 2024-05-10T12:00:00 (Gannon window open)")
+    p_gmie.add_argument("--hours", type=float, default=72.0)
+    # NB: hindcast_runner's registered event KEY is `may_2024_gannon` (reversed
+    # from the `gannon_may_2024` fixtures dir + front-end bundle). This label
+    # only names the run dir; keep it matching hindcast_runner's key so the
+    # downstream `hindcast_runner --event may_2024_gannon --run-dir <here>` reads
+    # cleanly. Do not "unify" the two spellings — the split is load-bearing (see
+    # CLAUDE.md); just pass the right one to each tool.
+    p_gmie.add_argument("--event", default="may_2024_gannon", help="Short event label")
+    p_gmie.add_argument("--imf",   default="imf_l1.dat", help="IMF.dat filename in IMF_DIR")
+    p_gmie.add_argument("--f107",  type=float, default=227.1,
+                        help="F10.7 flux (sfu); the May-2024 Gannon window ran ~227")
+    p_gmie.add_argument("--nproc", type=int, default=4,
+                        help="Total MPI ranks (>=2; 1 reserved for IE)")
+
     args = parser.parse_args()
 
     if args.command == "forecast":
@@ -491,6 +513,19 @@ def main() -> None:
             sim_hours   = args.hours,
             event_label = args.event,
             imf_file    = str(IMF_DIR / args.imf),
+        )
+        print(f"Run dir: {run_dir}")
+        print(f"PARAM.in: {param}")
+
+    elif args.command == "gm_ie":
+        start = datetime.fromisoformat(args.start).replace(tzinfo=timezone.utc)
+        run_dir, param = generate_gm_ie_run(
+            start_time  = start,
+            sim_hours   = args.hours,
+            event_label = args.event,
+            imf_file    = str(IMF_DIR / args.imf),
+            f107_sfu    = args.f107,
+            nproc_total = args.nproc,
         )
         print(f"Run dir: {run_dir}")
         print(f"PARAM.in: {param}")
