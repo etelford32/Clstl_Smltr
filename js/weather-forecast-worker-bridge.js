@@ -36,7 +36,9 @@ export class WeatherForecastWorkerBridge {
             const w = new Worker(WORKER_URL, { type: 'module' });
             w.onmessage = (e) => {
                 const m = e.data;
-                if (!m || m.type !== 'forecast') return;   // ignore 'ready'
+                // Request ids are unique across message types, so one pending
+                // map serves every reply type. 'ready' has no id and falls out.
+                if (!m || !['forecast', 'mlevels', 'mforecast'].includes(m.type)) return;
                 const p = this._pending.get(m.id);
                 if (!p) return;
                 this._pending.delete(m.id);
@@ -60,19 +62,20 @@ export class WeatherForecastWorkerBridge {
     }
 
     /**
-     * Run a dense forecast off-thread. `inputs` is the object returned by
-     * WindAdvectionRK2Forecaster.denseInputs(). Resolves with the dense
-     * forecast (or null if there was nothing to seed from); rejects on
-     * worker error so the caller can fall back inline.
+     * Run a dense computation off-thread. With the default type, `inputs` is
+     * the object returned by WindAdvectionRK2Forecaster.denseInputs(); with
+     * type 'mlevels' it is MultiLevelAdvectionForecaster.levelsDenseInputs().
+     * Resolves with the dense result (or null if there was nothing to seed
+     * from); rejects on worker error so the caller can fall back inline.
      */
-    request(inputs) {
+    request(inputs, type = 'forecast') {
         const w = this._ensure();
         if (!w) return Promise.reject(new Error('forecast worker unavailable'));
         const id = this._nextId++;
         return new Promise((resolve, reject) => {
             this._pending.set(id, { resolve, reject });
             try {
-                w.postMessage({ type: 'forecast', id, ...inputs });
+                w.postMessage({ type, id, ...inputs });
             } catch (err) {
                 this._pending.delete(id);
                 reject(err);

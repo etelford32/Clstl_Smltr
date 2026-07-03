@@ -1,5 +1,16 @@
 # Predictive Weather Analytics — Pickup Plan
 
+> **Status (2026-07-03):** Phases 1–3 are SHIPPED and have grown past this
+> document — see `js/weather-forecast.js` (registry/validator/paint
+> provider), `js/weather-flow.js` (semi-Lagrangian + RK2 + horizontal
+> diffusion + multi-level advection with thermal-wind coupling), and
+> `js/temp-volume-feed.js` (850/500 hPa levels powering the 3-D temperature
+> volume). The registry ingest fan-out is debounced + time-sliced. Phase 4
+> (server-trained NN) remains open, still gated on the 30-day
+> `weather_grid_cache` retention bump. This file is kept for the Phase 1–2
+> design rationale; read `EARTH_LOD_NASA_PRECIP_PLAN.md` for the current
+> model ladder.
+
 Branch: `claude/earth-sim-time-analysis-GLF1y`
 
 This document is the cold-start brief for the next session. The

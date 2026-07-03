@@ -44,6 +44,66 @@ function _grayTex() {
     return t;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+//  TEMPERATURE COLOUR LUT
+// ═══════════════════════════════════════════════════════════════════════════════
+// Diverging meteorological ramp over the texture-encoded domain −60…+50 °C
+// (value = (T°C + 60)/110, lockstep with js/weather-decode.js). The pivot is
+// 0 °C: the cold arm darkens violet→blue away from freezing, the warm arm
+// darkens yellow→red the other way, so equal lightness ≈ equal |T − 0 °C| and
+// the freezing line is the perceptual midpoint — the boundary an analyst
+// actually cares about (rain/snow phase, icing, frost). Lightness is
+// monotonic within each arm and every adjacent stop pair clears CVD ΔE ≥ 20
+// (checked with the dataviz palette validator), unlike the legacy 4-stop
+// blue→green→orange ramp this replaces, which parked its green anchor at an
+// arbitrary −24 °C and gave 0 °C no cue at all.
+//
+// Sampled in-shader via a 256×1 LUT texture — one texture2D tap replaces the
+// old per-fragment branch chain, and keeps the surface tint, the 3-D volume,
+// and any HUD legend canvas pixel-identical to one another.
+const TEMP_RAMP_STOPS = Object.freeze([
+    // [°C, r, g, b]  (sRGB 0-255)
+    [-60, 0x2a, 0x0c, 0x5e],   // deep violet — polar night
+    [-40, 0x3b, 0x2b, 0xa6],   // indigo
+    [-25, 0x2f, 0x6a, 0xc4],   // blue
+    [-10, 0x5d, 0xb3, 0xdc],   // ice blue
+    [  0, 0xbf, 0xe8, 0xee],   // pale cyan — freezing pivot
+    [ 10, 0xf5, 0xe2, 0x9a],   // pale warm yellow
+    [ 22, 0xf0, 0xa3, 0x43],   // amber
+    [ 36, 0xd4, 0x50, 0x2a],   // hot orange-red
+    [ 50, 0x8c, 0x15, 0x26],   // deep red — extreme heat
+]);
+const TEMP_LUT_SIZE = 256;
+const TEMP_ENCODE_MIN_C = -60, TEMP_ENCODE_SPAN_C = 110;
+
+/**
+ * Build the 256×1 RGBA LUT texture for the temperature ramp. Each consumer
+ * gets its own texture object (Three.js textures can't be shared across
+ * renderers), but the pixels are deterministic from TEMP_RAMP_STOPS.
+ */
+export function createTempLUTTexture() {
+    const data = new Uint8Array(TEMP_LUT_SIZE * 4);
+    for (let i = 0; i < TEMP_LUT_SIZE; i++) {
+        const tC = TEMP_ENCODE_MIN_C + (i / (TEMP_LUT_SIZE - 1)) * TEMP_ENCODE_SPAN_C;
+        let s = 0;
+        while (s < TEMP_RAMP_STOPS.length - 2 && tC > TEMP_RAMP_STOPS[s + 1][0]) s++;
+        const [c0, r0, g0, b0] = TEMP_RAMP_STOPS[s];
+        const [c1, r1, g1, b1] = TEMP_RAMP_STOPS[s + 1];
+        const f = Math.max(0, Math.min(1, (tC - c0) / (c1 - c0)));
+        data[i * 4]     = Math.round(r0 + (r1 - r0) * f);
+        data[i * 4 + 1] = Math.round(g0 + (g1 - g0) * f);
+        data[i * 4 + 2] = Math.round(b0 + (b1 - b0) * f);
+        data[i * 4 + 3] = 255;
+    }
+    const t = new THREE.DataTexture(data, TEMP_LUT_SIZE, 1, THREE.RGBAFormat);
+    t.magFilter = THREE.LinearFilter;
+    t.minFilter = THREE.LinearFilter;
+    t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+    t.needsUpdate = true;
+    return t;
+}
+export { TEMP_RAMP_STOPS };
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  FOCUS INSETS  (shared GLSL, injected into surface + cloud frags)
@@ -207,6 +267,7 @@ uniform sampler2D u_night;
 uniform sampler2D u_specular;   // ocean mask (r = ocean)
 uniform sampler2D u_topology;   // grayscale height / elevation (r = normalised height)
 uniform sampler2D u_weather;    // R=temp, G=pressure [0=low,1=high], B=humidity, A=wind
+uniform sampler2D u_temp_lut;   // 256×1 temperature ramp (createTempLUTTexture)
 uniform vec3  u_sun_dir;
 uniform float u_time;
 uniform float u_kp;
@@ -252,17 +313,17 @@ vec3 auroraColor(float sinAbsLat, float lon, float kp) {
 }
 
 // ── Weather / temperature colour ramp ─────────────────────────────────────────
+// One LUT tap replaces the legacy 4-stop branch chain (see TEMP_RAMP_STOPS in
+// this file for the stop table + rationale). The extra smoothstep band paints
+// a thin bright seam along the 0 °C isotherm — the freezing line is the
+// operational boundary (precip phase, icing) and the diverging ramp pivots
+// there, so the seam reads as a natural crest rather than a painted contour.
 vec3 weatherOverlay(vec2 uv) {
-    float temp = sampleWeatherField(uv).r;
-    vec3 polar    = vec3(0.05, 0.15, 0.80);
-    vec3 tempZone = vec3(0.20, 0.75, 0.30);
-    vec3 subtrop  = vec3(0.95, 0.60, 0.05);
-    vec3 tropic   = vec3(0.85, 0.05, 0.10);
-    vec3 c;
-    if (temp < 0.33)      c = mix(polar,    tempZone, temp / 0.33);
-    else if (temp < 0.55) c = mix(tempZone, subtrop,  (temp - 0.33) / 0.22);
-    else                  c = mix(subtrop,  tropic,   (temp - 0.55) / 0.45);
-    return c;
+    float temp = sampleWeatherField(uv).r;            // (T°C + 60) / 110
+    vec3 c = texture2D(u_temp_lut, vec2(clamp(temp, 0.0, 1.0), 0.5)).rgb;
+    float tC = temp * 110.0 - 60.0;
+    float frz = 1.0 - smoothstep(0.35, 1.10, abs(tC));
+    return c + vec3(0.22) * frz;
 }
 
 void main() {
@@ -1263,6 +1324,139 @@ void main() {
 }`;
 
 // ═══════════════════════════════════════════════════════════════════════════════
+//  TEMPERATURE VOLUME SHELL  (ray-marched 3-D T(lat, lon, z))
+// ═══════════════════════════════════════════════════════════════════════════════
+// Renders the atmospheric temperature field as a translucent volume between
+// the surface and u_r_outer. The vertical profile at each column is anchored
+// on REAL data at three levels — the 2 m surface T already in u_weather, and
+// 850 hPa / 500 hPa temperatures from js/temp-volume-feed.js (Open-Meteo
+// pressure-level fields, hourly, past 24 h → +72 h so the profile scrubs with
+// simTimeMs) — piecewise-linear between anchors, lapse-extrapolated above
+// 500 hPa and capped at the −56.5 °C tropopause isotherm. Until the level
+// feed lands it degrades to the 6.5 K/km standard-atmosphere lapse off the
+// live surface field, so the toggle never shows an empty shell.
+//
+// The shell's geometric thickness is vertically EXAGGERATED (~0.06 R vs the
+// true troposphere's 0.0017 R) or it would be invisible at globe scale; the
+// temperatures themselves are not scaled. The 0 °C crossing gets a bright
+// sheet so the freezing-level surface — where the profile crosses phase —
+// reads as an actual 3-D surface hugging the terrain of the temperature
+// field. 16 fixed march steps; ray-sphere slab intersection is analytic, so
+// the cost is one shell draw at ~16 taps/fragment, comparable to one cloud
+// FBM octave.
+
+export const TEMPVOL_VERT = /* glsl */ `
+varying vec3 vObjPos;
+void main() {
+    vObjPos = position;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`;
+
+export const TEMPVOL_FRAG = /* glsl */ `
+${GEO_GLSL}
+
+uniform sampler2D u_weather;      // R = surface T, encoded (T°C+60)/110
+uniform sampler2D u_vol_levels;   // R = T850 norm, G = T500 norm (same encoding)
+uniform sampler2D u_temp_lut;     // 256×1 shared temperature ramp
+uniform vec3  u_cam_obj;          // camera position in the shell's object space
+uniform vec3  u_sun_dir_obj;      // sun direction in the shell's object space
+uniform float u_r_inner;          // planet surface radius (object units)
+uniform float u_r_outer;          // slab top (object units, exaggerated)
+uniform float u_alpha;            // overall opacity scale
+uniform float u_has_levels;       // 1 → real 850/500 hPa anchors are loaded
+uniform float u_top_km;           // physical altitude represented at u_r_outer
+varying vec3 vObjPos;
+
+// Analytic ray-sphere intersection: (tNear, tFar); tFar < tNear → miss.
+vec2 sphereHit(vec3 ro, vec3 rd, float r) {
+    float b = dot(ro, rd);
+    float c = dot(ro, ro) - r * r;
+    float h = b * b - c;
+    if (h < 0.0) return vec2(1e9, -1e9);
+    h = sqrt(h);
+    return vec2(-b - h, -b + h);
+}
+
+// Temperature (°C) at column uv, altitude zKm. Anchors: 2 m surface,
+// 850 hPa ≈ 1.457 km, 500 hPa ≈ 5.574 km (US standard-atmosphere heights);
+// linear between anchors, environmental-lapse extrapolation above, capped
+// at the tropopause isotherm.
+float tempAtC(vec2 uv, float zKm) {
+    float tSfc = texture2D(u_weather, uv).r * 110.0 - 60.0;
+    if (u_has_levels < 0.5) return max(tSfc - 6.5 * zKm, -56.5);
+    vec2 lv = texture2D(u_vol_levels, uv).rg * 110.0 - 60.0;
+    float z850 = 1.457, z500 = 5.574;
+    if (zKm <= z850) return mix(tSfc, lv.r, zKm / z850);
+    if (zKm <= z500) return mix(lv.r, lv.g, (zKm - z850) / (z500 - z850));
+    float lapse = (lv.g - lv.r) / (z500 - z850);       // K/km, negative
+    return max(lv.g + lapse * (zKm - z500), -56.5);
+}
+
+void main() {
+    vec3 ro = u_cam_obj;
+    vec3 rd = normalize(vObjPos - ro);
+    vec2 outer = sphereHit(ro, rd, u_r_outer);
+    if (outer.y < outer.x) discard;
+    float t0 = max(outer.x, 0.0);
+    float t1 = outer.y;
+    vec2 inner = sphereHit(ro, rd, u_r_inner);
+    if (inner.y > inner.x && inner.x > 0.0) t1 = min(t1, inner.x);  // ground ends the march
+    if (t1 <= t0) discard;
+
+    const int STEPS = 16;
+    float dt   = (t1 - t0) / float(STEPS);
+    float span = u_r_outer - u_r_inner;
+    vec4 acc = vec4(0.0);
+    for (int i = 0; i < STEPS; i++) {
+        float t = t0 + (float(i) + 0.5) * dt;
+        vec3  p = ro + rd * t;
+        float r = length(p);
+        vec3  n = p / r;
+        vec2  uv = normalToUV(n);
+        float zKm = clamp((r - u_r_inner) / span, 0.0, 1.0) * u_top_km;
+        float tC  = tempAtC(uv, zKm);
+        vec3  col = texture2D(u_temp_lut,
+                              vec2(clamp((tC + 60.0) / 110.0, 0.0, 1.0), 0.5)).rgb;
+        // Faint isotherm bands every 10 °C — a brightness ridge where the
+        // march crosses a decade isotherm surface, so the volume reads as
+        // stacked analysis surfaces instead of undifferentiated haze.
+        // Multiplicative so the ramp's hue identity is preserved.
+        float bandPos = abs(fract(tC * 0.1 + 0.5) - 0.5) * 10.0;   // °C to nearest decade line
+        col *= 1.0 + 0.28 * (1.0 - smoothstep(0.15, 0.60, bandPos));
+        // Lower troposphere carries most of the visual weight; the 0 °C
+        // crossing gets a bright sheet so the freezing-level surface pops.
+        float dens = exp(-zKm * 0.30);
+        float frz  = 1.0 - smoothstep(0.0, 1.4, abs(tC));
+        // Ride the surface's day/night so the volume doesn't glow at night.
+        float lit  = 0.45 + 0.55 * smoothstep(-0.15, 0.25, dot(n, u_sun_dir_obj));
+        float a = clamp(u_alpha * (dt / span) * 1.4 * (dens + frz * 2.4), 0.0, 1.0);
+        acc.rgb += (1.0 - acc.a) * a * col * lit;
+        acc.a   += (1.0 - acc.a) * a;
+        if (acc.a > 0.96) break;
+    }
+    if (acc.a < 0.003) discard;
+    gl_FragColor = vec4(acc.rgb / max(acc.a, 1e-4), acc.a);
+}`;
+
+/** Default temperature-volume uniforms. earth.html points u_weather at the
+ *  same DataTexture the surface shader samples, so surface tint and volume
+ *  always agree; u_vol_levels is fed by TempVolumeFeed. */
+export function createTempVolumeUniforms() {
+    return {
+        u_weather:     { value: _blackTex() },
+        u_vol_levels:  { value: _blackTex() },
+        u_temp_lut:    { value: createTempLUTTexture() },
+        u_cam_obj:     { value: new THREE.Vector3(0, 0, 3) },
+        u_sun_dir_obj: { value: new THREE.Vector3(1, 0, 0) },
+        u_r_inner:     { value: 1.0 },
+        u_r_outer:     { value: 1.06 },
+        u_alpha:       { value: 0.85 },
+        u_has_levels:  { value: 0 },
+        u_top_km:      { value: 11.0 },
+    };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 //  UNIFORM FACTORIES
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1276,6 +1470,7 @@ export function createEarthUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
         u_topology:     { value: _blackTex() },   // flat until texture loads
         u_bump_strength:{ value: 0.85 },           // 0 disables bump, 1 is strong
         u_weather:      { value: _blackTex() },
+        u_temp_lut:     { value: createTempLUTTexture() },
         // High-res focus patch (js/weather-patch.js). Off by default — only
         // earth.html wires a feed; other consumers render the global field.
         u_patch_weather:{ value: _blackTex() },

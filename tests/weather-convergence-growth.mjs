@@ -151,7 +151,10 @@ check('convergence also thickens the cloud deck (cloud+rain grow together)', () 
 });
 
 check('microphysicsStatus() reflects the live config (for the UI indicator)', () => {
-    assert.deepEqual(fcOn.microphysicsStatus(),  { convergenceGrowth: true,  precipFeedback: true });
+    // horizontalDiffusion joined the status surface with the
+    // advection-diffusion variant; it defaults OFF on this model.
+    assert.deepEqual(fcOn.microphysicsStatus(),
+        { convergenceGrowth: true, precipFeedback: true, horizontalDiffusion: false });
     assert.equal(fcOff.microphysicsStatus().convergenceGrowth, false, 'disabled term reports OFF');
     assert.equal(fcOff.microphysicsStatus().precipFeedback,    true,  'the other term stays ON');
 });
