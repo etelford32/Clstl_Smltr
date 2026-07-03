@@ -518,6 +518,7 @@ export class IsobarLayer {
         this._visible       = v;
         this._group.visible = v;
     }
+    get visible() { return this._visible; }
 
     /**
      * Rebuild all isobar geometry from a fresh weather buffer.

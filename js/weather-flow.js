@@ -225,6 +225,104 @@ export function applyConvergenceGrowth(frame, N, gridW, gridH, h, params = DEFAU
     return frame;
 }
 
+// ── Horizontal eddy diffusion ────────────────────────────────────────────────
+// Semi-Lagrangian advection is transport-only: it moves features but never
+// mixes them. Real synoptic fields also mix laterally — subgrid eddies smear
+// gradients at a rate parameterised in every operational NWP core as a
+// horizontal eddy diffusivity κ (m²/s), i.e. ∂F/∂t = κ∇²F. On this 5° grid the
+// term is small for resolved features (√(2κ·24h) ≈ 150–250 km, under half a
+// cell) but it does real work on the 2Δx checkerboard noise that back-
+// trajectory resampling and the finite-difference divergence estimate inject —
+// the Laplacian responds hardest exactly at that wavelength, so the operator
+// is a scale-selective damper first and a physics term second.
+//
+// Discretisation: explicit FTCS, flux form in latitude with cos φ metric
+// weights (so the operator conserves the global mean on the sphere), periodic
+// in longitude, zero-flux across the poles. Stability of explicit diffusion
+// requires r = κΔt/Δx² ≤ ~0.25; zonal Δx collapses near the poles, so κ is
+// clamped per row to keep r ≤ rMax there — physically read: a row can't mix
+// faster than one cell per step no matter how large κ is.
+//
+// κ per channel: momentum and mass fields (T, P, U, V) get the standard
+// synoptic-scale value; moisture/cloud a little more (their small-scale
+// variance is larger); precip the most — it is the noisiest channel and the
+// one convergence growth feeds, so damping its grid-scale ringing before the
+// microphysics reads the frame keeps the source terms honest.
+export const DEFAULT_HORIZONTAL_DIFFUSION = Object.freeze({
+    enabled: false,          // opt-in — wind-advection-rk2-v1 output stays byte-identical
+    rMax:    0.20,           // per-row cap on κ·Δt/Δx² (explicit-scheme stability)
+    // m²/s, indexed by channel [T, P, RH, U, V, cl_low, cl_mid, cl_high, precip]
+    kappa: Object.freeze([1.5e5, 1.0e5, 2.5e5, 1.0e5, 1.0e5, 2.5e5, 2.5e5, 2.5e5, 4.0e5]),
+});
+
+/**
+ * In-place apply `steps` explicit diffusion steps of Δt = dtHours each to all
+ * 9 channels of one CHW frame. Pure given (frame, N, gridW, gridH, steps,
+ * dtHours, params); mutates and returns `frame`. Disabled params or steps ≤ 0
+ * are no-ops. Runs BEFORE the microphysics source terms so the divergence
+ * estimate in applyConvergenceGrowth sees the smoothed wind field.
+ */
+export function applyHorizontalDiffusion(frame, N, gridW, gridH, steps, dtHours,
+                                          params = DEFAULT_HORIZONTAL_DIFFUSION) {
+    const p = params || DEFAULT_HORIZONTAL_DIFFUSION;
+    if (!p.enabled || steps <= 0 || dtHours <= 0) return frame;
+
+    const dtSec = dtHours * 3600;
+    const dyM   = (180 / gridH) * M_PER_DEG_LAT;
+    const dy2   = dyM * dyM;
+    const rMax  = Math.max(0.01, Math.min(0.25, p.rMax ?? 0.20));
+
+    // Per-row geometry, computed once: zonal spacing (shrinks poleward) and
+    // the cos φ weights the flux form needs at the row interfaces.
+    const dx2Row    = new Float64Array(gridH);
+    const cosRow    = new Float64Array(gridH);
+    const cosIfaceN = new Float64Array(gridH);   // interface toward j+1
+    for (let j = 0; j < gridH; j++) {
+        const lat = latOfRow(j, gridH);
+        cosRow[j] = Math.max(0.02, Math.cos(lat * Math.PI / 180));
+        const dxM = (360 / gridW) * M_PER_DEG_LAT * cosRow[j];
+        dx2Row[j] = dxM * dxM;
+    }
+    for (let j = 0; j < gridH - 1; j++) {
+        const latIface = -90 + (j + 1) * (180 / gridH);
+        cosIfaceN[j] = Math.max(0.02, Math.cos(latIface * Math.PI / 180));
+    }
+    cosIfaceN[gridH - 1] = 0;   // zero-flux across the north pole
+
+    const scratch = new Float32Array(N);
+    const kappa   = p.kappa || DEFAULT_HORIZONTAL_DIFFUSION.kappa;
+
+    for (let ch = 0; ch < NUM_CHANNELS; ch++) {
+        const k0 = Number(kappa[ch]) || 0;
+        if (k0 <= 0) continue;
+        const F = frame.subarray(ch * N, (ch + 1) * N);
+
+        for (let s = 0; s < steps; s++) {
+            for (let j = 0; j < gridH; j++) {
+                const row = j * gridW;
+                // Stability clamp: zonal spacing is the binding constraint.
+                const kEff = Math.min(k0, rMax * Math.min(dx2Row[j], dy2) / dtSec);
+                const rx   = kEff * dtSec / dx2Row[j];
+                const ry   = kEff * dtSec / dy2 / cosRow[j];
+                const cN   = cosIfaceN[j];                       // toward j+1
+                const cS   = j > 0 ? cosIfaceN[j - 1] : 0;       // toward j-1 (0 = pole)
+                for (let i = 0; i < gridW; i++) {
+                    const k  = row + i;
+                    const ip = row + ((i + 1) % gridW);
+                    const im = row + ((i - 1 + gridW) % gridW);
+                    const f  = F[k];
+                    const fluxX = F[ip] - 2 * f + F[im];
+                    const fluxY = (j < gridH - 1 ? cN * (F[row + gridW + i] - f) : 0)
+                                - (j > 0         ? cS * (f - F[row - gridW + i]) : 0);
+                    scratch[k] = f + rx * fluxX + ry * fluxY;
+                }
+            }
+            F.set(scratch.subarray(0, N));
+        }
+    }
+    return frame;
+}
+
 // Earth's radius in metres (mean) — used to convert m/s to deg/s.
 // 1° lat ≈ 111_320 m at sea level; 1° lon shrinks by cos(lat).
 const M_PER_DEG_LAT = 111_320;
@@ -655,6 +753,7 @@ const DEG2RAD = Math.PI / 180;
 export function rk2BuildHorizons({
     history, modelId, horizonsH, substepH = 1, tendencyHorizonH = 3, gainAtHour = null,
     precipFeedback = DEFAULT_PRECIP_FEEDBACK, convergenceGrowth = DEFAULT_CONVERGENCE_GROWTH,
+    horizontalDiffusion = DEFAULT_HORIZONTAL_DIFFUSION,
 }) {
     const frames = history.all();
     if (frames.length === 0) return null;
@@ -738,6 +837,10 @@ export function rk2BuildHorizons({
                 }
             }
         }
+        // Lateral mixing before the source terms: diffusing U/V first means the
+        // finite-difference divergence inside applyConvergenceGrowth reads the
+        // smoothed wind, not its grid-scale ringing (no-op unless enabled).
+        applyHorizontalDiffusion(frame, N, gridW, gridH, steps, dh, horizontalDiffusion);
         // Microphysics, in physical order: convergence first lifts moist air
         // into new cloud + rain, then the cloud→precip reconcile gates the
         // result so rain and deck stay consistent (both no-ops for h ≤ 0).
@@ -765,18 +868,27 @@ export class WindAdvectionRK2Forecaster {
      *   once per forecast, multiplies the learned gain.
      * @param {number} [opts.tendencyHorizonH=3]  τ_eff saturation horizon.
      * @param {number} [opts.substepH=1]           Hours per RK2 substep.
+     * @param {object} [opts.horizontalDiffusion]  DEFAULT_HORIZONTAL_DIFFUSION-
+     *   shaped config. Disabled by default; pass {enabled:true,…} to add the
+     *   lateral-mixing term (see applyHorizontalDiffusion).
+     * @param {string} [opts.modelId]  Registry id override, so an instance with
+     *   different physics (e.g. diffusion on) competes under its own name
+     *   instead of polluting wind-advection-rk2-v1's skill history.
      */
     constructor({ gainTracker = null, shearProxy = null, tendencyHorizonH = 3, substepH = 1,
                   precipFeedback = DEFAULT_PRECIP_FEEDBACK,
-                  convergenceGrowth = DEFAULT_CONVERGENCE_GROWTH } = {}) {
-        this.id                 = WindAdvectionRK2Forecaster.id;
-        this._gainTracker       = gainTracker;
-        this._shearProxy        = shearProxy;
-        this._tendencyHorizonH  = tendencyHorizonH;
-        this._substepH          = substepH;
-        this._precipFeedback    = precipFeedback;
-        this._convergenceGrowth = convergenceGrowth;
-        this._lastDiag          = null;
+                  convergenceGrowth = DEFAULT_CONVERGENCE_GROWTH,
+                  horizontalDiffusion = DEFAULT_HORIZONTAL_DIFFUSION,
+                  modelId = WindAdvectionRK2Forecaster.id } = {}) {
+        this.id                  = modelId;
+        this._gainTracker        = gainTracker;
+        this._shearProxy         = shearProxy;
+        this._tendencyHorizonH   = tendencyHorizonH;
+        this._substepH           = substepH;
+        this._precipFeedback     = precipFeedback;
+        this._convergenceGrowth  = convergenceGrowth;
+        this._horizontalDiffusion = horizontalDiffusion;
+        this._lastDiag           = null;
     }
 
     getLastDiag() { return this._lastDiag; }
@@ -788,8 +900,9 @@ export class WindAdvectionRK2Forecaster {
      */
     microphysicsStatus() {
         return {
-            convergenceGrowth: !!(this._convergenceGrowth && this._convergenceGrowth.enabled),
-            precipFeedback:    !!(this._precipFeedback    && this._precipFeedback.enabled),
+            convergenceGrowth:   !!(this._convergenceGrowth   && this._convergenceGrowth.enabled),
+            precipFeedback:      !!(this._precipFeedback      && this._precipFeedback.enabled),
+            horizontalDiffusion: !!(this._horizontalDiffusion && this._horizontalDiffusion.enabled),
         };
     }
 
@@ -812,6 +925,7 @@ export class WindAdvectionRK2Forecaster {
             substepH: this._substepH, tendencyHorizonH: this._tendencyHorizonH,
             gainAtHour: fn, precipFeedback: this._precipFeedback,
             convergenceGrowth: this._convergenceGrowth,
+            horizontalDiffusion: this._horizontalDiffusion,
         });
         if (result) {
             this._lastDiag = {
@@ -840,6 +954,7 @@ export class WindAdvectionRK2Forecaster {
             substepH: this._substepH, tendencyHorizonH: this._tendencyHorizonH,
             gainAtHour: fn, precipFeedback: this._precipFeedback,
             convergenceGrowth: this._convergenceGrowth,
+            horizontalDiffusion: this._horizontalDiffusion,
         });
     }
 
@@ -866,13 +981,14 @@ export class WindAdvectionRK2Forecaster {
             t: f.t, gridW: f.gridW, gridH: f.gridH, coarse: f.coarse,
         }));
         return {
-            modelId:           this.id,
-            frames:            tail,
+            modelId:             this.id,
+            frames:              tail,
             gains,
-            substepH:          this._substepH,
-            tendencyHorizonH:  this._tendencyHorizonH,
-            precipFeedback:    this._precipFeedback,
-            convergenceGrowth: this._convergenceGrowth,
+            substepH:            this._substepH,
+            tendencyHorizonH:    this._tendencyHorizonH,
+            precipFeedback:      this._precipFeedback,
+            convergenceGrowth:   this._convergenceGrowth,
+            horizontalDiffusion: this._horizontalDiffusion,
             maxHorizonH,
         };
     }

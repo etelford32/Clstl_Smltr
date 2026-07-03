@@ -63,8 +63,21 @@ import { TEX_W, TEX_H } from './weather-feed.js';
 
 const NTEX        = TEX_W * TEX_H;
 const TEX_FLOATS  = NTEX * 4;
-const DEFAULT_LRU_SIZE       = 4;
+// 8 decoded trios ≈ 24 MB. 4 was enough for a slow drag's two bracketing
+// frames, but a fast back-and-forth scrub over a day thrashed it — every
+// re-visited hour paid the 30-50 ms main-thread decode again. 8 holds a
+// full day of one-way scrubbing at hourly frames. Freed on tab-hidden.
+const DEFAULT_LRU_SIZE       = 8;
 const DEFAULT_REDRAW_THRESH  = 60_000;            // 1 min
+// Wall-clock floor between replay dispatches. Each dispatch downstream costs
+// three ~1 MB DataTexture uploads + isobar/jet rebuilds + a panel of DOM
+// writes (earth.html weather-update handler). The sim-time threshold alone
+// doesn't bound a fast drag — 1 px on the slider is already ≥60 s of sim
+// time — so without this floor a drag repainted at the full frame rate.
+// ~11 Hz is indistinguishable during a scrub of hourly-lerped data; the
+// settle frame still lands because tick() runs every rAF and dispatches as
+// soon as the window reopens. Mode transitions (live↔replay) bypass it.
+const DEFAULT_MIN_REPAINT_MS = 90;
 const DEFAULT_LIVE_BYPASS_MS = 30 * 60_000;       // 30 min — anything newer
                                                   // than this is "live"
 const DEFAULT_SEAM_BLEND_MS  = 4 * 3_600_000;     // 4 h crossfade window where
@@ -111,9 +124,11 @@ export class WeatherFrameResolver {
      * @param {object} opts
      * @param {import('./weather-feed.js').WeatherFeed}        opts.feed
      * @param {import('./weather-history.js').WeatherHistory}  opts.history
-     * @param {number} [opts.lruSize=4]                — LRU capacity (frames)
+     * @param {number} [opts.lruSize=8]                — LRU capacity (frames)
      * @param {number} [opts.redrawThreshMs=60000]     — quantize window for tick()
      * @param {number} [opts.liveBypassMs=1800000]     — within this of now → live
+     * @param {number} [opts.minRepaintMs=90]          — wall-clock floor between
+     *   replay dispatches (scrub repaint rate cap); 0 disables
      */
     constructor({
         feed,
@@ -121,6 +136,7 @@ export class WeatherFrameResolver {
         lruSize       = DEFAULT_LRU_SIZE,
         redrawThreshMs = DEFAULT_REDRAW_THRESH,
         liveBypassMs   = DEFAULT_LIVE_BYPASS_MS,
+        minRepaintMs   = DEFAULT_MIN_REPAINT_MS,
         forecastProvider = null,
         seamBlendMs    = DEFAULT_SEAM_BLEND_MS,
     } = {}) {
@@ -137,6 +153,8 @@ export class WeatherFrameResolver {
         this._lru     = new LRU(lruSize);
         this._redrawThreshMs = redrawThreshMs;
         this._liveBypassMs   = liveBypassMs;
+        this._minRepaintMs   = Math.max(0, minRepaintMs);
+        this._lastDispatchWall = -Infinity;
 
         // Scratch buffers — one allocation per resolver, mutated in place
         // every dispatch. Sized to match earth.html's u_weather DataTexture
@@ -209,6 +227,12 @@ export class WeatherFrameResolver {
 
         if (!modeChanged && !movedEnough) return;
 
+        // Wall-clock repaint cap for the replay path. Returning WITHOUT
+        // updating the memo keeps the pending change pending, so the very
+        // next tick after the window reopens paints the settle frame.
+        if (!modeChanged && !isLive
+            && wallNow - this._lastDispatchWall < this._minRepaintMs) return;
+
         if (isLive) {
             // Only flush live on the transition (or first tick). When
             // already parked at live, we leave the renderer alone — the
@@ -216,6 +240,7 @@ export class WeatherFrameResolver {
             if (this._lastWasLive !== true) this._dispatchLive();
         } else {
             this._dispatchReplay(tEff);
+            this._lastDispatchWall = wallNow;
         }
 
         this._lastRenderT = tEff;

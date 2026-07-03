@@ -18,7 +18,8 @@
  *   in  { type:'init' }                       → handshake
  *   out { type:'ready' }
  *   in  { type:'forecast', id, frames, gains, substepH, tendencyHorizonH,
- *         precipFeedback, convergenceGrowth, maxHorizonH, modelId }
+ *         precipFeedback, convergenceGrowth, horizontalDiffusion,
+ *         maxHorizonH, modelId }
  *   out { type:'forecast', id, dense }         dense.frames buffers transferred
  *   out { type:'forecast', id, dense:null }    no observation to seed from
  *   out { type:'forecast', id, error }         integration threw
@@ -41,7 +42,8 @@ self.onmessage = (e) => {
     try {
         const {
             frames, gains, substepH, tendencyHorizonH,
-            precipFeedback, convergenceGrowth, maxHorizonH, modelId,
+            precipFeedback, convergenceGrowth, horizontalDiffusion,
+            maxHorizonH, modelId,
         } = msg;
 
         const horizonsH = [];
@@ -57,6 +59,7 @@ self.onmessage = (e) => {
             gainAtHour: (h) => (gains && h >= 0 && h < gains.length ? gains[h] : lastGain),
             precipFeedback,
             convergenceGrowth,
+            ...(horizontalDiffusion ? { horizontalDiffusion } : {}),
         });
 
         if (!dense) { self.postMessage({ type: 'forecast', id, dense: null }); return; }
