@@ -1,0 +1,49 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# SWMF / BATS-R-US coupled GM+IE runner — the compose file swmf/Dockerfile
+# references ("Run: docker-compose -f docker-compose.swmf.yml up"). It was
+# referenced but never committed; this is it.
+#
+# Build context is ./swmf because the Dockerfile COPYs pipeline/ config/
+# benchmark/ relative to that directory.
+#
+#   # Build the coupled image (~30-50 min: clones + compiles SWMF).
+#   docker compose -f docker-compose.swmf.yml build
+#
+#   # Real-time forecast daemon (the image's default CMD/supervisord):
+#   docker compose -f docker-compose.swmf.yml up swmf
+#
+#   # One-shot Gannon hindcast (generate PARAM.in → run BATS-R-US → extract
+#   # Phi_PC/HPI). Stage ./swmf/data/imf/imf_l1.dat first (see the runbook).
+#   docker compose -f docker-compose.swmf.yml run --rm swmf-hindcast
+#
+# Host mounts land run outputs back in the repo so the host-side fit / validate /
+# artifact-build steps can read them (see NEW_COMPUTER_RUNBOOK.md).
+# ─────────────────────────────────────────────────────────────────────────────
+services:
+  swmf:
+    build:
+      context: ./swmf
+      dockerfile: Dockerfile
+    image: parkerphysics/swmf:latest
+    container_name: swmf
+    ports:
+      - "8000:8000"          # pipeline.serve_results FastAPI (daemon mode)
+    volumes:
+      - ./swmf/runs:/data/runs
+      - ./swmf/data/imf:/data/imf
+      - ./data/hindcast:/data/results
+      - ./swmf/logs:/data/logs
+    environment:
+      MPI_NPROC: "4"
+    restart: unless-stopped
+
+  # One-shot coupled GM+IE hindcast. Reuses the same image + mounts as `swmf`
+  # but overrides the daemon CMD with the Gannon driver and does not restart.
+  # Run with `docker compose -f docker-compose.swmf.yml run --rm swmf-hindcast`.
+  swmf-hindcast:
+    extends:
+      service: swmf
+    container_name: swmf-hindcast
+    restart: "no"
+    ports: []               # no server; this is a batch run
+    entrypoint: ["/bin/bash", "/app/run-gannon-hindcast.sh"]
