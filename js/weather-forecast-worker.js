@@ -23,19 +23,39 @@
  *   out { type:'forecast', id, dense }         dense.frames buffers transferred
  *   out { type:'forecast', id, dense:null }    no observation to seed from
  *   out { type:'forecast', id, error }         integration threw
+ *   in  { type:'mlevels', id, ...multilevelLevelsDense inputs }
+ *   out { type:'mlevels', id, dense }          per-hour t850/t500 transferred
+ *       (same null / error shapes as 'forecast') — the multi-level model's
+ *       level-temperature ring for the 3-D volume, ~2/9 the cost of the
+ *       9-channel dense forecast but still worth keeping off the render
+ *       thread.
  *
  * The gain/shear state stays on the main thread; `gains[h]` is the
  * pre-evaluated per-horizon α, so the worker is otherwise stateless and
  * deterministic for a given message.
  */
 
-import { rk2BuildHorizons } from './weather-flow.js';
+import { rk2BuildHorizons, multilevelLevelsDense } from './weather-flow.js';
 import { decodeCoarse }     from './weather-decode.js';
 
 self.onmessage = (e) => {
     const msg = e.data;
     if (!msg || typeof msg !== 'object') return;
     if (msg.type === 'init') { self.postMessage({ type: 'ready' }); return; }
+
+    if (msg.type === 'mlevels') {
+        const { id } = msg;
+        try {
+            const dense = multilevelLevelsDense(msg);
+            if (!dense) { self.postMessage({ type: 'mlevels', id, dense: null }); return; }
+            const transfer = [];
+            for (const f of dense.frames) transfer.push(f.t850.buffer, f.t500.buffer);
+            self.postMessage({ type: 'mlevels', id, dense }, transfer);
+        } catch (err) {
+            self.postMessage({ type: 'mlevels', id, error: (err && err.message) || String(err) });
+        }
+        return;
+    }
     if (msg.type !== 'forecast') return;
 
     const { id } = msg;

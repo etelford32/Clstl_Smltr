@@ -171,6 +171,31 @@ await check('no worker available → provider falls back to inline sync refresh'
     p.stop();
 });
 
+// The 'mlevels' worker branch (multi-level model → 3-D volume level ring).
+await check("worker 'mlevels' output == inline multilevelLevelsDense (byte-identical)", async () => {
+    const { multilevelLevelsDense } = await import(ROOT + '/js/weather-flow.js');
+    const f = (v) => { const a = new Float32Array(N); a.fill(v); return a; };
+    const inputs = {
+        issuedMs: nowHour, gridW: G_W, gridH: G_H,
+        t850: f(5), t500: f(-20),
+        u850: f(3), v850: f(4), u500: f(-6), v500: f(1),
+        maxHorizonH: 6,
+    };
+    inputs.t850[300] = 28;             // a feature to advect
+    const direct = multilevelLevelsDense(inputs);
+    let reply = null;
+    const prevPost = globalThis.self.postMessage;
+    globalThis.self.postMessage = (m) => { if (m && m.type === 'mlevels') reply = m; };
+    globalThis.self.onmessage({ data: { type: 'mlevels', id: 7, ...inputs } });
+    globalThis.self.postMessage = prevPost;
+    assert.ok(reply && reply.id === 7 && reply.dense, 'worker posted an mlevels reply');
+    assert.equal(reply.dense.frames.length, direct.frames.length);
+    for (let h = 0; h < direct.frames.length; h++) {
+        assert.ok(framesEqual(direct.frames[h].t850, reply.dense.frames[h].t850) < 1e-6, `t850 h=${h}`);
+        assert.ok(framesEqual(direct.frames[h].t500, reply.dense.frames[h].t500) < 1e-6, `t500 h=${h}`);
+    }
+});
+
 console.log('───────────────────────────');
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
