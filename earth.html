@@ -6763,6 +6763,9 @@ function _recomputeModelLevelRing() {
     const apply = (dense) => {
         if (gen !== _mlLevelsGen || !dense) return;
         tempVolFeed.setModelRing(dense);
+        // Tell the analyst which engine paints which span of the scrub.
+        _setVolPip('loaded',
+            'near term: in-browser multi-level advection (0–24 h) · beyond: Open-Meteo NWP → +72 h');
         if (tempVolMesh.visible) _refreshVolLevels();
     };
     if (wxForecastWorker.available()) {

@@ -30,7 +30,7 @@ globalThis.CustomEvent = class { constructor(type, init = {}) { this.type = type
 
 const {
     thermalWindShear, MultiLevelAdvectionForecaster, multilevelLevelsDense,
-    latOfRow,
+    fillNaNZonal, latOfRow,
 } = await import('../js/weather-flow.js');
 
 const GRID_W = 72, GRID_H = 36, N = GRID_W * GRID_H, NUM_CH = 9, HOUR = 3_600_000;
@@ -224,6 +224,48 @@ check('multilevelLevelsDense: h=0 identity; T850 blob rides 850 wind only', () =
         'eastward neighbour should have gained warmth');
     // 500 marker under a calm flow: unchanged (modulo nothing — no diffusion).
     assert.equal(f12.t500[k0], -5, '500 level should not move under calm wind');
+});
+
+check('fillNaNZonal: row-mean fill, passthrough when finite', () => {
+    const field = new Float32Array(N);
+    for (let j = 0; j < GRID_H; j++) {
+        for (let i = 0; i < GRID_W; i++) field[cellOf(j, i)] = j * 2;   // per-row constant
+    }
+    // Finite field passes through by reference (copy-on-write contract).
+    assert.equal(fillNaNZonal(field, GRID_W, GRID_H), field);
+
+    field[cellOf(10, 5)] = NaN;
+    field[cellOf(10, 6)] = NaN;
+    const filled = fillNaNZonal(field, GRID_W, GRID_H);
+    assert.notEqual(filled, field, 'NaN input returns a copy');
+    assert.equal(filled[cellOf(10, 5)], 20, 'hole gets the zonal mean');
+    assert.ok(Number.isNaN(field[cellOf(10, 5)]), 'input untouched');
+    for (let k = 0; k < N; k++) assert.ok(Number.isFinite(filled[k]));
+});
+
+check('multilevelLevelsDense: NaN temperature holes stay finite through advection', () => {
+    const t850 = new Float32Array(N); t850.fill(5);
+    const t500 = new Float32Array(N); t500.fill(-20);
+    for (let dj = -1; dj <= 1; dj++) {
+        for (let di = -1; di <= 1; di++) {
+            t850[cellOf(START_J + dj, START_I + di)] = NaN;   // 3×3 upstream gap
+        }
+    }
+    const zero = new Float32Array(N);
+    const east = new Float32Array(N); east.fill(10);
+    const dense = multilevelLevelsDense({
+        issuedMs: NOW, gridW: GRID_W, gridH: GRID_H,
+        t850, t500, u850: east, v850: zero, u500: zero, v500: zero,
+        maxHorizonH: 6,
+    });
+    for (const f of dense.frames) {
+        for (let k = 0; k < N; k++) {
+            assert.ok(Number.isFinite(f.t850[k]), `NaN leaked at h=${f.h} k=${k}`);
+        }
+    }
+    // The hole should read as its surroundings (zonal mean = 5), not deep cold.
+    assert.ok(Math.abs(dense.frames[0].t850[cellOf(START_J, START_I)] - 5) < 0.5,
+        'gap fills toward the zonal mean, not −60 °C');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

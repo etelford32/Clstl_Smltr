@@ -1137,10 +1137,52 @@ const LEVEL_CHANNEL_MAP = Object.freeze([
     { flow: 'steer', channels: Object.freeze([CH_PRECIP]) },
 ]);
 
+/**
+ * Replace NaN cells with their latitude row's finite mean (zonal mean — the
+ * natural prior for temperature-like fields; a row with no finite cells
+ * falls back to the global finite mean, then 0). Copy-on-write: a fully
+ * finite field passes through untouched. Without this, one upstream NaN
+ * cell bilinearly poisons every trajectory that samples near it, and the
+ * volume would render the hole as −60 °C "deep cold".
+ */
+export function fillNaNZonal(field, gridW, gridH) {
+    const N = gridW * gridH;
+    let firstBad = -1;
+    for (let k = 0; k < N; k++) {
+        if (!Number.isFinite(field[k])) { firstBad = k; break; }
+    }
+    if (firstBad < 0) return field;
+
+    let gSum = 0, gCount = 0;
+    for (let k = 0; k < N; k++) {
+        if (Number.isFinite(field[k])) { gSum += field[k]; gCount++; }
+    }
+    const gMean = gCount ? gSum / gCount : 0;
+    const out = new Float32Array(field);
+    for (let j = 0; j < gridH; j++) {
+        const row = j * gridW;
+        let sum = 0, count = 0, bad = 0;
+        for (let i = 0; i < gridW; i++) {
+            const v = out[row + i];
+            if (Number.isFinite(v)) { sum += v; count++; } else bad++;
+        }
+        if (!bad) continue;
+        const fill = count ? sum / count : gMean;
+        for (let i = 0; i < gridW; i++) {
+            if (!Number.isFinite(out[row + i])) out[row + i] = fill;
+        }
+    }
+    return out;
+}
+
 // Fill NaN holes in the level winds via thermal-wind balance (copy-on-write —
 // untouched arrays pass through). Cells where neither level has wind AND the
 // shear is unusable fall to 0 (the pre-multilevel behaviour, now rare).
+// Temperatures are zonal-mean-filled BEFORE the shear so a co-located T gap
+// doesn't defeat the reconstruction the wind gap needs.
 function fillLevelWinds({ t850, t500, u850, v850, u500, v500 }, gridW, gridH) {
+    t850 = fillNaNZonal(t850, gridW, gridH);
+    t500 = fillNaNZonal(t500, gridW, gridH);
     const N = gridW * gridH;
     let hasGap = false;
     for (let k = 0; k < N; k++) {
@@ -1374,6 +1416,12 @@ export function multilevelLevelsDense({
 }) {
     if (!t850 || !t500 || !u850) return null;
     const N = gridW * gridH;
+    // Zonal-mean-fill the temperatures BEFORE advection — a NaN hole would
+    // otherwise smear along every trajectory that samples near it and paint
+    // the volume −60 °C. (fillLevelWinds re-fills internally for the shear;
+    // that copy is cheap and keeps the two entry points independent.)
+    t850 = fillNaNZonal(t850, gridW, gridH);
+    t500 = fillNaNZonal(t500, gridW, gridH);
     const lvl = fillLevelWinds({ t850, t500, u850, v850, u500, v500 }, gridW, gridH);
     // Two-channel diffusion config: both are temperature fields, reuse κ_T.
     const hd = horizontalDiffusion || DEFAULT_HORIZONTAL_DIFFUSION;

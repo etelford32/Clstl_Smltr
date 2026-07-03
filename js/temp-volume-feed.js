@@ -319,7 +319,9 @@ export class TempVolumeFeed {
             this._t500Mdl = new Float32Array(GRID_N);
         }
         const t850 = this._t850Tmp, t500 = this._t500Tmp;
-        if (haveNwp) this._nwpLevelsInto(tMs, t850, t500);
+        // NWP interpolation only when the blend actually consumes it — a
+        // model-owned sample (wModel ≥ 1) overwrites it wholesale anyway.
+        if (haveNwp && wModel < 1) this._nwpLevelsInto(tMs, t850, t500);
         if (wModel > 0) {
             this._modelLevelsInto(tMs, this._t850Mdl, this._t500Mdl);
             if (wModel >= 1 || !haveNwp) {

@@ -448,6 +448,56 @@ check('bracket() works with empty past ring + populated forecast ring', () => {
     });
 }
 
+// ── Registry ingest fan-out: debounced burst-coalescing, chunked walk ────
+{
+    const { ForecastRegistry, PersistenceForecaster } = await import('../js/weather-forecast.js');
+    const historyR = new WeatherHistory();
+    await historyR.open();
+    // A minimal real frame so persistence has something to forecast.
+    const N = 72 * 36, NUM = 9;
+    const coarse = new Float32Array(N * NUM);
+    for (let k = 0; k < N; k++) coarse[k] = 10;
+    await historyR.ingest({
+        t: Math.floor(Date.now() / HOUR_MS) * HOUR_MS, fetchedAt: Date.now(),
+        source: 't', gridW: 72, gridH: 36, coarse,
+    });
+
+    const reg = new ForecastRegistry({
+        history: historyR, ingestDebounceMs: 25, sliceBudgetMs: 1,
+    });
+    reg.register(new PersistenceForecaster());
+    let updates = 0;
+    const onUpd = () => updates++;
+    document.addEventListener('weather-forecast-update', onUpd);
+
+    // A burst of ingest events (the cold-start backfill shape) must
+    // coalesce into exactly ONE fan-out after the debounce window.
+    for (let i = 0; i < 10; i++) {
+        document.dispatchEvent(new CustomEvent('weather-history-ingest', { detail: {} }));
+    }
+    await new Promise(r => setTimeout(r, 120));
+    check('ingest burst coalesces to one debounced fan-out', () => {
+        assert.equal(updates, 1, `expected 1 weather-forecast-update, got ${updates}`);
+        assert.ok(reg.getLatest('persistence-v1'), 'results landed');
+    });
+
+    // Manual runAll() stays synchronous and supersedes a pending walk.
+    updates = 0;
+    document.dispatchEvent(new CustomEvent('weather-history-ingest', { detail: {} }));
+    const out = reg.runAll();                        // fires immediately…
+    check('manual runAll() is synchronous and cancels the pending walk', () => {
+        assert.ok(out['persistence-v1'], 'sync results returned');
+        assert.equal(updates, 1, 'sync event fired');
+    });
+    await new Promise(r => setTimeout(r, 120));      // …and the debounced walk never double-fires
+    check('superseded debounced walk stays cancelled', () => {
+        assert.equal(updates, 1, `no duplicate event after debounce (got ${updates})`);
+    });
+
+    document.removeEventListener('weather-forecast-update', onUpd);
+    reg.stop();
+}
+
 console.log('───────────────────────────');
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

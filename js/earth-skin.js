@@ -1417,6 +1417,12 @@ void main() {
         float tC  = tempAtC(uv, zKm);
         vec3  col = texture2D(u_temp_lut,
                               vec2(clamp((tC + 60.0) / 110.0, 0.0, 1.0), 0.5)).rgb;
+        // Faint isotherm bands every 10 °C — a brightness ridge where the
+        // march crosses a decade isotherm surface, so the volume reads as
+        // stacked analysis surfaces instead of undifferentiated haze.
+        // Multiplicative so the ramp's hue identity is preserved.
+        float bandPos = abs(fract(tC * 0.1 + 0.5) - 0.5) * 10.0;   // °C to nearest decade line
+        col *= 1.0 + 0.28 * (1.0 - smoothstep(0.15, 0.60, bandPos));
         // Lower troposphere carries most of the visual weight; the 0 °C
         // crossing gets a bright sheet so the freezing-level surface pops.
         float dens = exp(-zKm * 0.30);
