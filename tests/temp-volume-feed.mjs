@@ -52,17 +52,21 @@ const mkMerged = () => Array.from({ length: GRID_N }, (_, k) => ({
         wind_direction_850hPa: [270, 270],
         wind_speed_500hPa:     [20, 20],
         wind_direction_500hPa: [180, 180],
+        cape:                  [800, 1200],
+        freezing_level_height: [3500, 3700],
     },
 }));
 
 console.log('temp-volume-feed.mjs');
 console.log('─────────────────────');
 
-check('pivot: 6-channel frames with correct t, layout, wind decompose', () => {
+check('pivot: 8-channel frames with correct t, layout, wind decompose', () => {
     const frames = pivotLevelResponses(mkMerged());
     assert.equal(frames.length, 2);
     assert.equal(frames[0].t, Date.parse(T0 + 'Z'));
-    assert.equal(frames[0].data.length, GRID_N * 6);
+    assert.equal(frames[0].data.length, GRID_N * 8);
+    assert.equal(frames[0].data[LVL.CAPE * GRID_N + 7], 800);
+    assert.equal(frames[1].data[LVL.FLH * GRID_N + 7], 3700);
     // cell 7: T850 = -13, T500 = -38 at hour 0
     assert.equal(frames[0].data[LVL.T850 * GRID_N + 7], -13);
     assert.equal(frames[0].data[LVL.T500 * GRID_N + 7], -38);
@@ -122,6 +126,22 @@ check('levelWindSnapshot: newest ≤ t, per-hour tendencies from predecessor', (
     // Oldest frame → no predecessor → null tendencies
     const snap0 = feed.levelWindSnapshot(Date.parse(T0 + 'Z'));
     assert.equal(snap0.tendU850, null);
+});
+
+check('sampleAux: CAPE/FLH lerp + normalisation; empty ring false; NaN → 0', () => {
+    const feed = new TempVolumeFeed();
+    const out = new Float32Array(GRID_N * 4);
+    assert.equal(feed.sampleAux(Date.now(), out), false, 'empty ring');
+
+    const merged = mkMerged();
+    merged[3].hourly.cape = [NaN, NaN];
+    feed._frames = pivotLevelResponses(merged);
+    const tMid = Date.parse(T0 + 'Z') + HOUR / 2;
+    assert.equal(feed.sampleAux(tMid, out), true);
+    // cell 7 midpoint: CAPE 1000 → 1000/4000; FLH 3600 → 3600/10000
+    assert.ok(Math.abs(out[7 * 4] - 1000 / 4000) < 1e-6, `cape got ${out[7 * 4]}`);
+    assert.ok(Math.abs(out[7 * 4 + 1] - 3600 / 10000) < 1e-6, `flh got ${out[7 * 4 + 1]}`);
+    assert.equal(out[3 * 4], 0, 'NaN CAPE encodes as 0 (no paint)');
 });
 
 check('model ring owns near term, seam-blends into NWP, NWP owns past/beyond', () => {
