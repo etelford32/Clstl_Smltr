@@ -82,11 +82,12 @@ RUN update-alternatives --install /usr/bin/gfortran gfortran /usr/bin/gfortran-1
 #
 # Pin a SWMF release tag below (TODO: replace master with whatever tag you
 # validate against). Tracking master is unstable for an ops pipeline.
-ARG SWMF_REF=master
+ARG SWMF_REF=5f7194214
 WORKDIR /opt
 RUN git config --global url."https://github.com/".insteadOf "git@github.com:" \
- && git clone --branch ${SWMF_REF} https://github.com/SWMFsoftware/SWMF.git swmf \
+ && git clone https://github.com/SWMFsoftware/SWMF.git swmf \
  && cd swmf \
+ && git checkout ${SWMF_REF} \
  && echo "=== .gitmodules (if present) ===" \
  && (cat .gitmodules 2>/dev/null || echo "(no .gitmodules at top level)") \
  && git submodule update --init --recursive \
@@ -110,7 +111,7 @@ RUN perl Config.pl -install -compiler=gfortran -mpi=openmpi \
 # bug. If submodule paths drift in a future SWMF release, run
 # `git submodule status` in /opt/swmf and update the COPY lines in stage 2
 # plus the -v= arg here.
-RUN perl Config.pl -v=SC/BATSRUS,IH/BATSRUS,GM/BATSRUS,IE/Ridley_serial \
+RUN perl Config.pl -v=SC/BATSRUS,IH/BATSRUS,GM/BATSRUS,IE/Ridley_serial,IM/RCM2 \
  && perl Config.pl -show
 
 # Compile — use all available cores; coupled SWMF build typically takes
@@ -122,6 +123,9 @@ RUN perl Config.pl -v=SC/BATSRUS,IH/BATSRUS,GM/BATSRUS,IE/Ridley_serial \
 # invokes for coupled hindcasts and forecasts.
 RUN make -j$(nproc) SWMF \
  && make -j$(nproc) PIDL
+
+# Run-directory template: correct per-component skeleton incl. IM/ + RCM data files
+RUN make rundir && mv run /opt/swmf/run_template
 
 # NOTE: standalone BATSRUS.exe builds (IH-only / GM-only smoke tests) used
 # to live here but were removed — `make BATSRUS` is not a target in current
@@ -187,6 +191,8 @@ COPY --from=builder /opt/swmf/SWMF.exe  /opt/swmf/SWMF.exe
 
 # Copy SWMF Scripts and utilities
 COPY --from=builder /opt/swmf/share/Scripts /opt/swmf/share/Scripts
+COPY --from=builder /opt/swmf/run_template   /opt/swmf/run_template
+COPY --from=builder /opt/swmf/PARAM.XML     /opt/swmf/PARAM.XML
 
 # Install Python pipeline dependencies.
 #
