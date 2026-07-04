@@ -145,9 +145,6 @@ WORKDIR /opt/swmf
 RUN ls -la /opt/swmf/bin/ \
  && test -x /opt/swmf/bin/SWMF.exe \
  && echo "SWMF coupled-build OK — $(stat -c '%s bytes' /opt/swmf/bin/SWMF.exe)"
-RUN ls -la /opt/swmf/bin/ \
- && ls -la /opt/swmf/SWMF.exe \
- && echo "SWMF coupled-build OK"
 
 # ── Stage 2: runtime image ─────────────────────────────────────────────────────
 FROM ubuntu:22.04 AS runtime
@@ -178,12 +175,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # separate `COPY /opt/swmf/SWMF.exe` line that older docs reference is
 # gone — that path doesn't exist in 2024+ SWMF layouts.
 COPY --from=builder /opt/swmf/bin/  /opt/swmf/bin/
-# SWMF.exe is the coupled binary that runs SC + IH + GM + IE together —
-# that's the production binary. The per-component standalone
-# BATSRUS.exe files used to be copied here too; the standalone builds
-# were removed (see note in stage 1) so the COPY lines are gone too.
-COPY --from=builder /opt/swmf/bin/      /opt/swmf/bin/
-COPY --from=builder /opt/swmf/SWMF.exe  /opt/swmf/SWMF.exe
 
 # IE/Ridley_serial is a serial Fortran component — its compiled object
 # files live alongside the SWMF binary and are linked into SWMF.exe.
@@ -216,43 +207,9 @@ COPY benchmark/ ./benchmark/
 RUN mkdir -p /data/runs /data/imf /data/results /data/logs
 
 # Supervisor config — runs ingestion daemon + API server concurrently
-COPY <<'EOF' /etc/supervisor/conf.d/swmf-pipeline.conf
-[supervisord]
-nodaemon=true
-user=root
-logfile=/data/logs/supervisord.log
-
-# ingest / forecast invoke via `python -m pipeline.MODULE` so the
-# `pipeline` package is importable. Running `python /app/pipeline/X.py`
-# instead puts sys.path[0] at /app/pipeline (not /app), which breaks
-# the `from pipeline import db` imports at module load.
-[program:ingest]
-command=python3 -m pipeline.ingest_l1 --daemon
-directory=/app
-environment=PYTHONPATH="/app"
-stdout_logfile=/data/logs/ingest.log
-stderr_logfile=/data/logs/ingest_err.log
-autorestart=true
-startretries=10
-
-[program:api]
-command=python3 -m uvicorn pipeline.serve_results:app --host 0.0.0.0 --port 8000
-directory=/app
-environment=PYTHONPATH="/app"
-stdout_logfile=/data/logs/api.log
-stderr_logfile=/data/logs/api_err.log
-autorestart=true
-startretries=5
-
-[program:forecast]
-command=python3 -m pipeline.run_forecast --daemon
-directory=/app
-environment=PYTHONPATH="/app"
-stdout_logfile=/data/logs/forecast.log
-stderr_logfile=/data/logs/forecast_err.log
-autorestart=true
-startretries=5
-EOF
+# Supervisor config lives in config/ as a plain file so the COPY works on
+# both BuildKit and the classic builder (heredoc COPY is BuildKit-only).
+COPY config/supervisor-swmf-pipeline.conf /etc/supervisor/conf.d/swmf-pipeline.conf
 
 EXPOSE 8000
 

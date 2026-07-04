@@ -340,7 +340,8 @@ def generate_hindcast_run(
 # them directly or SWMF aborts with "check_dir ERROR: Cannot find/write ...".
 _RUNDIR_SUBDIRS = (
     "GM/IO2", "GM/restartIN", "GM/restartOUT",
-    "IE/ionosphere", "STDOUT", "restartIN", "restartOUT",
+    "IE/ionosphere", "IM/plots", "IM/restartIN", "IM/restartOUT",
+    "STDOUT", "restartIN", "restartOUT",
 )
 
 # Ionospheric conductance coefficient files the Ridley model (#IONOSPHERE
@@ -367,9 +368,24 @@ def scaffold_rundir(run_dir: Path) -> None:
     are downloaded from upstream. Download failures are logged, not fatal, so
     the caller can decide whether the (then-missing) file matters for its
     chosen conductance model.
+
+    When the image carries a baked ``$SWMF_ROOT/run_template`` (produced by
+    `make rundir` at build time — see swmf/Dockerfile), the run dir is seeded
+    from it FIRST. The template is what brings the IM/ skeleton and the RCM2
+    input decks an IM-coupled run needs; the hand-rolled subdir list stays as
+    the fallback for template-less environments (host venvs, older images).
     """
     import shutil
     import urllib.request
+
+    run_template = Path(os.environ.get("SWMF_ROOT", "/opt/swmf")) / "run_template"
+    if run_template.is_dir():
+        # NEVER copy the template's PARAM.in/LAYOUT.in — they are placeholders
+        # ("Copy a working PARAM.in file here") and scaffold_rundir runs after
+        # the caller has already written the real, generated ones.
+        shutil.copytree(run_template, run_dir, symlinks=True, dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns("PARAM.in*", "LAYOUT.in*"))
+        log.info("Seeded run dir from %s", run_template)
 
     for sub in _RUNDIR_SUBDIRS:
         (run_dir / sub).mkdir(parents=True, exist_ok=True)
@@ -398,11 +414,12 @@ def generate_gm_ie_run(
     imf_file: str,
     f107_sfu: float,
     nproc_total: int = 4,
+    with_im: bool = True,
 ) -> tuple[Path, Path]:
     """
-    Generate a coupled GM + IE run. Output writes both PARAM.in (from
-    config/PARAM.in.GM_IE) and LAYOUT.in (from config/LAYOUT.in.GM_IE)
-    into the run directory.
+    Generate a coupled GM + IE (+ IM/RCM2 when with_im) run. Output writes
+    both PARAM.in (from config/PARAM.in.GM_IE_IM or config/PARAM.in.GM_IE)
+    and LAYOUT.in (from config/LAYOUT.in.GM_IE) into the run directory.
 
     Unlike generate_hindcast_run (which uses the IH-only inline template),
     this function reads the on-disk template files so they can be diffed
@@ -412,14 +429,19 @@ def generate_gm_ie_run(
     """
     if sim_hours <= 0:
         raise ValueError("sim_hours must be positive")
+    if with_im and nproc_total < 4:
+        # COMPONENTMAP in PARAM.in.GM_IE_IM: GM 0..N-3, IM N-2, IE N-1
+        raise ValueError("GM+IE+IM coupled run needs >= 4 MPI ranks (1 IM, 1 IE)")
     if nproc_total < 2:
         raise ValueError("GM+IE coupled run needs >= 2 MPI ranks (1 for IE)")
 
     ts_str  = start_time.strftime("%Y%m%dT%H%M%S")
-    run_dir = RUNS_DIR / f"gm_ie_{event_label}_{ts_str}"
+    tag     = "gm_ie_im" if with_im else "gm_ie"
+    run_dir = RUNS_DIR / f"{tag}_{event_label}_{ts_str}"
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    param_template_path  = CONFIG_DIR / "PARAM.in.GM_IE"
+    param_template_path  = CONFIG_DIR / ("PARAM.in.GM_IE_IM" if with_im
+                                         else "PARAM.in.GM_IE")
     layout_template_path = CONFIG_DIR / "LAYOUT.in.GM_IE"
     if not param_template_path.exists():
         raise FileNotFoundError(f"missing template: {param_template_path}")
@@ -477,6 +499,18 @@ def main() -> None:
     p_hind.add_argument("--event",  default="event", help="Short event label")
     p_hind.add_argument("--imf",    default="IMF_latest.dat", help="IMF.dat filename in IMF_DIR")
 
+    # gm-ie sub-command — the coupled magnetosphere run that produces the IE
+    # log (Φ_PC + HPI) for the pseudo-Ap fit. IM/RCM2 is on by default; pass
+    # --no-im to reproduce the pre-RCM GM+IE-only configuration.
+    p_gmie = subparsers.add_parser("gm-ie", help="Coupled GM+IE(+IM) storm run")
+    p_gmie.add_argument("--start",  required=True, help="ISO datetime UTC, e.g. 2024-05-10T12:00:00Z")
+    p_gmie.add_argument("--hours",  type=float, default=72.0)
+    p_gmie.add_argument("--event",  default="event", help="Short event label")
+    p_gmie.add_argument("--imf",    default="IMF_latest.dat", help="IMF.dat filename in IMF_DIR")
+    p_gmie.add_argument("--f107",   type=float, required=True, help="F10.7 flux [sfu] for IE conductance")
+    p_gmie.add_argument("--nproc",  type=int, default=4, help="Total MPI ranks (>= 4 with IM)")
+    p_gmie.add_argument("--no-im",  action="store_true", help="Disable IM/RCM2 coupling")
+
     args = parser.parse_args()
 
     if args.command == "forecast":
@@ -491,6 +525,20 @@ def main() -> None:
             sim_hours   = args.hours,
             event_label = args.event,
             imf_file    = str(IMF_DIR / args.imf),
+        )
+        print(f"Run dir: {run_dir}")
+        print(f"PARAM.in: {param}")
+
+    elif args.command == "gm-ie":
+        start = datetime.fromisoformat(args.start).replace(tzinfo=timezone.utc)
+        run_dir, param = generate_gm_ie_run(
+            start_time  = start,
+            sim_hours   = args.hours,
+            event_label = args.event,
+            imf_file    = str(IMF_DIR / args.imf),
+            f107_sfu    = args.f107,
+            nproc_total = args.nproc,
+            with_im     = not args.no_im,
         )
         print(f"Run dir: {run_dir}")
         print(f"PARAM.in: {param}")
