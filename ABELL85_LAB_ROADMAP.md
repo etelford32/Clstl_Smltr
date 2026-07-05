@@ -1,6 +1,6 @@
 # Abell 85 Pair Timeline Lab — Enhancement Roadmap to Research Grade
 
-**Page:** `abell85.html` + `js/abell85/` · **Status:** Phases 1–2 shipped; Phase 3 next
+**Page:** `abell85.html` + `js/abell85/` · **Status:** Phases 1–3 shipped; Phase 4 next
 **Goal:** the highest-grade *studyable* environment for ultramassive black hole binary
 evolution on the open web — every number inspectable, every approximation labeled,
 every claim traceable to `ABELL85_PAIR_SOURCE_CATALOG.md`.
@@ -85,7 +85,7 @@ Peters–Mathews GW luminosity (doubling as the integrator-quality readout).
   observables work.
 - 3D kick-direction sampling + spin-flip jet epilogue.
 
-## Phase 3 — Observables layer ("what would a telescope see?")
+## Phase 3 — Observables layer ("what would a telescope see?")  ✅ SHIPPED (core)
 
 - **Mock photometry**: project the star field to a surface-brightness map; fit and
   overlay a core-Sérsic profile live; compare the carved break radius against the
@@ -95,9 +95,15 @@ Peters–Mathews GW luminosity (doubling as the integrator-quality readout).
 - **GW observatory**: Peters–Mathews harmonic strain series → audio chirp with the
   frequency-shift factor displayed (~10⁹; physical peak ≈10⁻⁷ Hz); PTA-band residuals
   panel with the NANOGrav 15-yr sensitivity curve; "resolvable single source?" verdict.
-- **Optional gas mode**, clearly labeled hypothetical for these dry systems: procedural
-  circumbinary disk with cavity r ≈ 2a, streams, minidisks, ~5-orbit lump modulation
-  (Farris+ 2014 morphology).
+- **Optional gas mode** (→ rolled to Phase 5), clearly labeled hypothetical for these dry
+  systems: procedural circumbinary disk with cavity r ≈ 2a, streams, minidisks, ~5-orbit
+  lump modulation (Farris+ 2014 morphology).
+
+Shipped: mock photometry Σ(R) with live cusp-radius r_γ measurement vs observed values
+(and the deliberate single-merger shortfall vs 4.57 kpc as the Nasim+ 2021 teaching
+point); mock IFU line-of-sight velocity map + aperture σ_LOS quote (304 km/s emerges vs
+346 observed); schematic PTA single-source sensitivity + "resolvable?" verdict; GW audio
+chirp with displayed ×3·10¹⁰ frequency shift. Closed-loop hardening remains open.
 
 ## Phase 4 — Scale & performance
 

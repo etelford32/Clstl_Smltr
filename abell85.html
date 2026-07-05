@@ -207,6 +207,8 @@ canvas.bhl-chart { width:100%; height:92px; display:block; border:1px solid rgba
             <div class="bhl-panel">
                 <h2>Diagnostics</h2>
                 <canvas id="chartA" class="bhl-chart"></canvas>
+                <canvas id="chartPhot" class="bhl-chart" style="margin-top:6px;"></canvas>
+                <canvas id="chartKin" class="bhl-chart" style="margin-top:6px; height:120px;"></canvas>
                 <canvas id="chartGw" class="bhl-chart" style="margin-top:6px;"></canvas>
                 <canvas id="chartRho" class="bhl-chart" style="margin-top:6px;"></canvas>
                 <canvas id="chartBeta" class="bhl-chart" style="margin-top:6px;"></canvas>
@@ -227,6 +229,7 @@ canvas.bhl-chart { width:100%; height:92px; display:block; border:1px solid rgba
             <option value="500">500 Myr/s</option>
         </select>
         <input id="timeline" type="range" min="0" max="1" step="0.0005" value="0">
+        <button id="audioBtn" type="button" title="sonified gravitational-wave chirp — audio frequency = f_GW × 3×10¹⁰ (displayed)">🔇 GW audio</button>
         <span id="timeLabel" class="t-label">—</span>
     </div>
 </div>
@@ -310,6 +313,34 @@ canvas.bhl-chart { width:100%; height:92px; display:block; border:1px solid rgba
         <b>Click any star</b> to inspect it: specific energy, angular momentum, L/L_lc, radius,
         speed, and status, with a live trail on the selected star. Click empty space to release.</p>
 
+        <h3>Mock observations (Phase 3)</h3>
+        <p>The lab now observes itself the way a telescope would, so the simulation can be
+        compared with the published measurements <em>on their own terms</em> (constant
+        mass-to-light assumed):</p>
+        <ul>
+            <li><b>Mock photometry</b> — the live star field is projected along the line of
+                sight into Σ(R); the <b>cusp radius r_γ</b> (where the projected log-slope
+                steepens through −½, the Lauer/Carollo definition) is measured live and plotted
+                against the observed value — Holm 15A's record r_γ = 4.57 kpc (López-Cruz
+                et&nbsp;al. 2014) or Abell 402-BCG's 2.2 kpc flattened core. Watch scouring grow
+                the mock measurement — and note that a single merger tops out near ~1 kpc,
+                well short of 4.57 kpc: that shortfall is itself the published result (Nasim
+                et&nbsp;al. 2021) that record cores demand <em>repeated</em> mergers of
+                already-cored progenitors plus recoil sloshing, exactly the Rantala et&nbsp;al.
+                scenario for Holm 15A.</li>
+            <li><b>Mock IFU kinematics</b> — a MUSE/KCWI-style map of mean line-of-sight
+                velocity (blueshift ← neutral → redshift, astronomy convention) plus an annular
+                σ_LOS(R) profile; the central value is quoted against the measured dispersion
+                (346 km/s for Holm 15A). The central Kepler rise near the holes is exactly the
+                signal dynamical modelers fit for the black hole mass.</li>
+            <li><b>GW observatory</b> — the strain–frequency chart carries a schematic PTA
+                single-source sensitivity curve (anchored to the NANOGrav 15-yr scale, labeled
+                approximate) and the live state reports a "PTA-resolvable?" verdict. The 🔊
+                button sonifies the chirp: audio frequency = f_GW × 3×10¹⁰ — the shift factor is
+                displayed because the physical signal peaks near 10⁻⁷ Hz, thirty octaves below
+                human hearing.</li>
+        </ul>
+
         <h3>Controls</h3>
         <ul>
             <li><b>Orbit mode</b> (default): drag to orbit the center, scroll to zoom.
@@ -378,7 +409,8 @@ const els = {
     scaleBar: $('scaleBar'), scaleLabel: $('scaleLabel'),
     modeChip: $('modeChip'), staticPanel: $('staticPanel'), readout: $('readout'),
     chartA: $('chartA'), chartGw: $('chartGw'), chartRho: $('chartRho'), chartBeta: $('chartBeta'),
-    chartLc: $('chartLc'),
+    chartLc: $('chartLc'), chartPhot: $('chartPhot'), chartKin: $('chartKin'),
+    audioBtn: $('audioBtn'),
 };
 
 try {

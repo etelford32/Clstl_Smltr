@@ -229,4 +229,56 @@ const { rGrav, keplerPeriodMyr } = await import('../js/abell85/units.js');
         `${tighter.nCone} at a=1 pc; cleared on merge`);
 }
 
+// ══ Phase 3: observables layer ═══════════════════════════════════════════════
+const {
+    surfaceDensity, initialSurfaceDensity, cuspRadius,
+    losKinematics, sigmaLosProfile, ptaSensitivity,
+} = await import('../js/abell85/observables.js');
+
+// ── 12. photometry: core carving grows the measured cusp radius ─────────────
+{
+    const sc = makeScenario('holm15a');
+    const cl = new StarCluster(sc, 8192, 21);
+    const prof0 = surfaceDensity(cl);
+    const rg0 = cuspRadius(prof0);
+    // carve a 1.0 M_bin deficit and re-measure
+    cl.reset(1.0 * sc.mTot, true);
+    const rg1 = cuspRadius(surfaceDensity(cl));
+    assert.ok(Number.isFinite(rg1), 'carved r_γ measurable');
+    assert.ok(!Number.isFinite(rg0) || rg1 > rg0,
+        `carving grows r_γ (${rg0} → ${rg1})`);
+    // initial analytic curve exists and is monotonically falling overall
+    const init = initialSurfaceDensity(sc, cl.rMax);
+    const first = init.find(p => p.sigma > 0), last = [...init].reverse().find(p => p.sigma > 0);
+    assert.ok(first.sigma > last.sigma, 'Σ falls outward');
+    ok(`photometry: r_γ ${Number.isFinite(rg0) ? (rg0).toFixed(0) + ' pc' : 'n/a'} → ` +
+        `${rg1.toFixed(0)} pc after 1 M_bin scouring`);
+}
+
+// ── 13. kinematics: isotropic cluster → near-zero mean LOS field, sane σ ────
+{
+    const sc = makeScenario('holm15a');
+    const cl = new StarCluster(sc, 8192, 33);
+    const kin = losKinematics(cl, 2 * sc.rInfl);
+    let sumV = 0, nPix = 0;
+    for (let k = 0; k < kin.v.length; k++) {
+        if (Number.isFinite(kin.v[k])) { sumV += kin.v[k]; nPix++; }
+    }
+    assert.ok(nPix > 40, `populated pixels ${nPix}`);
+    assert.ok(Math.abs(sumV / nPix) < 120, `net LOS motion ~0 (got ${(sumV / nPix).toFixed(1)})`);
+    const { central } = sigmaLosProfile(cl);
+    assert.ok(central > sc.sigma * 0.3 && central < sc.sigma * 2.5,
+        `σ_LOS central ${central.toFixed(0)} vs host σ ${sc.sigma}`);
+    ok(`kinematics: ${nPix} IFU pixels, ⟨v_LOS⟩ ≈ ${(sumV / nPix).toFixed(0)} km/s, ` +
+        `σ_LOS(0) = ${central.toFixed(0)} km/s (host σ = ${sc.sigma})`);
+}
+
+// ── 14. PTA sensitivity curve shape ──────────────────────────────────────────
+{
+    assert.ok(ptaSensitivity(4e-9) < ptaSensitivity(4e-10), 'low-f degrades');
+    assert.ok(ptaSensitivity(4e-9) < ptaSensitivity(1e-7), 'high-f degrades');
+    assert.ok(ptaSensitivity(4e-9) > 1e-15 && ptaSensitivity(4e-9) < 5e-15, 'anchored ~2e-15');
+    ok('PTA sensitivity curve: minimum near 4 nHz at ~2e-15, degrading both ways');
+}
+
 console.log(`\nabell85-physics: all ${n} checks passed`);

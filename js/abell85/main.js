@@ -15,10 +15,62 @@
 import { makeScenario, buildHistory, sampleAt, STAGE, timeToCoalescence } from './physics.js';
 import { StarCluster } from './nbody.js';
 import { PNBinary, gwPowerSpecific } from './pn.js';
+import {
+    surfaceDensity, initialSurfaceDensity, cuspRadius,
+    losKinematics, sigmaLosProfile, ptaSensitivity,
+} from './observables.js';
 import { Renderer, Trail } from './render.js';
 import { GodCamera } from './camera.js';
 import { Diagnostics } from './diagnostics.js';
 import { fmtLen, fmtTime, fmtMass, rSchw, rGrav } from './units.js';
+
+// observed reference values the mock observations are compared against
+const OBS_REFS = {
+    holm15a: { rGammaPc: 4570, rGammaSrc: 'López-Cruz+14', sigma: 346 },
+    a402: { rGammaPc: 2200, rGammaSrc: 'McDonald+26 core', sigma: null },
+    b20402: {},
+};
+
+const GW_AUDIO_SHIFT = 3e10;    // audio Hz per physical Hz — displayed in the UI
+
+/** WebAudio sonification of the GW chirp (frequency-shifted, factor shown). */
+class GwAudio {
+    constructor() { this.on = false; this.ctx = null; }
+    toggle() {
+        if (!this.on) {
+            if (!this.ctx) {
+                const AC = window.AudioContext || window.webkitAudioContext;
+                if (!AC) return false;
+                this.ctx = new AC();
+                this.osc = this.ctx.createOscillator();
+                this.osc.type = 'sine';
+                this.gain = this.ctx.createGain();
+                this.gain.gain.value = 0;
+                this.osc.connect(this.gain).connect(this.ctx.destination);
+                this.osc.start();
+            }
+            this.ctx.resume();
+            this.on = true;
+        } else {
+            this.gain?.gain.setTargetAtTime(0, this.ctx.currentTime, 0.05);
+            this.on = false;
+            setTimeout(() => { if (!this.on) this.ctx?.suspend(); }, 250);
+        }
+        return this.on;
+    }
+    update(fgw, strain) {
+        if (!this.on || !this.ctx) return;
+        const t = this.ctx.currentTime;
+        if (fgw > 0 && strain > 0) {
+            const f = Math.min(Math.max(fgw * GW_AUDIO_SHIFT, 25), 2600);
+            this.osc.frequency.setTargetAtTime(f, t, 0.08);
+            const g = 0.2 * Math.min(Math.max((Math.log10(strain) + 17.5) / 4, 0), 1);
+            this.gain.gain.setTargetAtTime(g, t, 0.1);
+        } else {
+            this.gain.gain.setTargetAtTime(0, t, 0.1);
+        }
+    }
+}
 
 const DT_LIVE_MAX = 0.6;        // Myr of cluster time we can honestly integrate per frame
 const RESYNC_GAP = 150;         // Myr of cluster-vs-timeline lag before statistical resync
@@ -56,6 +108,10 @@ export function boot(els) {
     // live PN endgame state
     let livePN = null, pnPredDE = 0, pnRosette = [], lastRosette = 0;
     const dropPN = () => { livePN = null; pnRosette = []; pnPredDE = 0; };
+    // mock-observation state (recomputed on a throttle, not every frame)
+    let photoInit = [], obsCache = null, lastObsWall = 0;
+    const gwAudio = new GwAudio();
+    diag.ptaSens = ptaSensitivity;
 
     function rebuild(keepTime = false) {
         sc = makeScenario(state.scenarioId, state.overrides);
@@ -65,6 +121,8 @@ export function boot(els) {
         cam.distClamp = [rSchw(sc.mTot) * 5, 6e4];
         dropPN();
         state.selStar = -1; selTrail.clear();
+        photoInit = initialSurfaceDensity(sc, cluster.rMax);
+        obsCache = null; lastObsWall = 0;
         const t0 = history.samples[0].t, t1 = history.samples[history.samples.length - 1].t;
         if (!keepTime || state.tNow < t0 || state.tNow > t1) {
             state.tNow = state.scenarioId === 'holm15a' ? 0 : 0; // "today"
@@ -240,8 +298,23 @@ export function boot(els) {
             extraLines, marker,
         });
 
+        // mock observations: O(N) sweeps, throttled — telescopes don't need 60 fps
+        if (wall - lastObsWall > 400 || !obsCache) {
+            const photoLive = surfaceDensity(cluster);
+            obsCache = {
+                photoLive,
+                rGamma: cuspRadius(photoLive),
+                kin: losKinematics(cluster, 2 * sc.rInfl),
+                sigLos: sigmaLosProfile(cluster),
+            };
+            lastObsWall = wall;
+        }
+        gwAudio.update(now.fgw, now.h);
+
         diag.drawSeparation(state.tNow);
         diag.drawGw(now);
+        diag.drawPhotometry(obsCache.photoLive, photoInit, obsCache.rGamma, OBS_REFS[state.scenarioId]);
+        diag.drawKinemap(obsCache.kin);
         diag.drawDensity(cluster);
         diag.drawAnisotropy(cluster);
         diag.drawLossCone(cluster, lc);
@@ -306,6 +379,23 @@ export function boot(els) {
             rows.push(['PN endgame', state.playing ? 'catching up — slow the timeline' : 'armed — press play']);
         }
         if (lc && lc.lLc > 0) rows.push(['loss cone', `${lc.nCone} stars with L < √(2GM_bin·a)`]);
+        // mock-observation comparisons against the published measurements
+        if (obsCache) {
+            const ref = OBS_REFS[state.scenarioId] || {};
+            if (Number.isFinite(obsCache.rGamma)) {
+                rows.push(['r_γ (mock photometry)', fmtLen(obsCache.rGamma) +
+                    (ref.rGammaPc ? ` (obs ${fmtLen(ref.rGammaPc)})` : '')]);
+            }
+            if (Number.isFinite(obsCache.sigLos?.central)) {
+                rows.push(['σ_LOS central', `${obsCache.sigLos.central.toFixed(0)} km/s` +
+                    (ref.sigma ? ` (obs ${ref.sigma})` : '')]);
+            }
+        }
+        if (now.fgw > 0 && now.h > 0) {
+            const sens = ptaSensitivity(now.fgw);
+            rows.push(['PTA-resolvable (approx.)',
+                now.h > sens ? `YES — h ${(now.h / sens).toFixed(1)}× reach` : `no (${(now.h / sens).toFixed(2)}× reach)`]);
+        }
         // star inspector
         if (state.selStar >= 0 && state.selStar < cluster.n) {
             const mBh = now.a > 0 ? sc.mTot : (history.events.remnant?.mass ?? 0);
@@ -406,6 +496,11 @@ export function boot(els) {
     els.pnChk?.addEventListener('change', () => {
         state.pnOn = els.pnChk.checked;
         if (!state.pnOn) dropPN();
+    });
+    els.audioBtn?.addEventListener('click', () => {
+        const on = gwAudio.toggle();
+        els.audioBtn.textContent = on
+            ? `🔊 GW audio on · f ×3·10¹⁰` : '🔇 GW audio';
     });
 
     els.exportBtn?.addEventListener('click', () => {

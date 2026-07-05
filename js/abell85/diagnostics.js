@@ -111,6 +111,21 @@ export class Diagnostics {
         ctx.fillStyle = '#d8b25a';
         ctx.beginPath(); ctx.arc(fx(fRef), hy(hRef), 3, 0, 7); ctx.fill();
         ctx.fillText('NANOGrav A₁ᵧᵣ', fx(fRef) - 60, hy(hRef) - 6);
+        // schematic PTA single-source sensitivity (labeled approximate)
+        if (this.ptaSens) {
+            ctx.strokeStyle = 'rgba(216,178,90,0.55)'; ctx.setLineDash([4, 3]);
+            ctx.beginPath();
+            let st = false;
+            for (let i = 0; i <= 60; i++) {
+                const f = Math.pow(10, -12 + (i / 60) * 6);
+                const Y = hy(this.ptaSens(f));
+                if (Y < 14 || Y > h - 6) { st = false; continue; }
+                if (!st) { ctx.moveTo(fx(f), Y); st = true; } else ctx.lineTo(fx(f), Y);
+            }
+            ctx.stroke(); ctx.setLineDash([]);
+            ctx.fillStyle = 'rgba(216,178,90,0.8)';
+            ctx.fillText('PTA reach (approx.)', fx(3e-9), hy(this.ptaSens(4e-9)) + 12);
+        }
         // track
         const S = this.history.samples.filter(s => s.fgw > 0 && s.h > 0);
         ctx.strokeStyle = '#c2483f';
@@ -130,6 +145,93 @@ export class Diagnostics {
         ctx.fillText('1 µHz', fx(1e-6) - 30, h - 6);
     }
 
+    /**
+     * Mock photometry: projected Σ(R), initial (dashed) vs live (solid), the
+     * live cusp radius r_γ (slope = −1/2) marked, and the observed value for
+     * the scenario (e.g. Holm 15A r_γ = 4.57 kpc, López-Cruz+ 2014) as the
+     * comparison line. Series identity is double-encoded: color + line style
+     * + direct labels (never color alone).
+     */
+    drawPhotometry(photoLive, photoInit, rGamma, obs) {
+        const cv = this.els.chartPhot; if (!cv) return;
+        const { ctx, w, h } = setupCanvas(cv);
+        frame(ctx, w, h, 'mock photometry Σ(R) · cusp radius r_γ (slope −½)');
+        const all = [...photoInit, ...photoLive].filter(p => p.sigma > 0);
+        if (!all.length) return;
+        const Rs = all.map(p => p.R);
+        const lgR0 = Math.log10(Math.min(...Rs)), lgR1 = Math.log10(Math.max(...Rs));
+        const lgSmax = Math.log10(Math.max(...all.map(p => p.sigma)));
+        const lgSmin = lgSmax - 5;
+        const X = (R) => 4 + (w - 8) * (Math.log10(R) - lgR0) / (lgR1 - lgR0);
+        const Y = (s) => 14 + (h - 24) * (1 - (Math.log10(Math.max(s, 1e-12)) - lgSmin) / (lgSmax - lgSmin));
+        const line = (prof, color, dash) => {
+            ctx.strokeStyle = color; ctx.setLineDash(dash);
+            ctx.beginPath();
+            let started = false;
+            for (const p of prof) {
+                if (!(p.sigma > 0)) continue;
+                const px = X(p.R), py = Y(p.sigma);
+                if (!started) { ctx.moveTo(px, py); started = true; } else ctx.lineTo(px, py);
+            }
+            ctx.stroke(); ctx.setLineDash([]);
+        };
+        line(photoInit, '#6d8fd4', [3, 3]);
+        line(photoLive, '#f0bd55', []);
+        ctx.fillStyle = '#6d8fd4'; ctx.fillText('initial', w - 84, 24);
+        ctx.fillStyle = '#f0bd55'; ctx.fillText('· live', w - 46, 24);
+        if (Number.isFinite(rGamma)) {
+            ctx.strokeStyle = '#f0bd55'; ctx.globalAlpha = 0.7;
+            ctx.beginPath(); ctx.moveTo(X(rGamma), 14); ctx.lineTo(X(rGamma), h - 4); ctx.stroke();
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = '#f0bd55';
+            ctx.fillText(`r_γ ${fmtLen(rGamma)}`, Math.min(X(rGamma) + 4, w - 78), h - 16);
+        }
+        if (obs && obs.rGammaPc) {
+            ctx.strokeStyle = '#ff8f7a'; ctx.setLineDash([2, 3]);
+            ctx.beginPath(); ctx.moveTo(X(obs.rGammaPc), 14); ctx.lineTo(X(obs.rGammaPc), h - 4); ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = '#ff8f7a';
+            ctx.fillText(`obs ${fmtLen(obs.rGammaPc)}`, Math.min(X(obs.rGammaPc) + 4, w - 86), 34);
+        }
+    }
+
+    /**
+     * Mock IFU map: mean line-of-sight velocity per sky pixel, diverging
+     * blue (approaching) ↔ neutral ↔ red (receding), astronomy convention.
+     */
+    drawKinemap(kin) {
+        const cv = this.els.chartKin; if (!cv || !kin) return;
+        const { ctx, w, h } = setupCanvas(cv);
+        frame(ctx, w, h, 'mock IFU: line-of-sight velocity map');
+        const { v, nPix, vScale } = kin;
+        if (!(vScale > 0)) { ctx.fillStyle = '#667'; ctx.fillText('no stars in aperture', 8, h / 2); return; }
+        const off = this._kinCanvas || (this._kinCanvas = document.createElement('canvas'));
+        off.width = nPix; off.height = nPix;
+        const octx = off.getContext('2d');
+        const img = octx.createImageData(nPix, nPix);
+        // diverging: #4d9dff ↔ near-surface neutral ↔ #ff5a4e
+        const neg = [77, 157, 255], mid = [16, 18, 28], pos = [255, 90, 78];
+        for (let k = 0; k < v.length; k++) {
+            const o = k * 4;
+            if (!Number.isFinite(v[k])) { img.data[o + 3] = 0; continue; }
+            let t = Math.max(Math.min(v[k] / vScale, 1), -1);
+            const c = t < 0 ? neg : pos;
+            const f = Math.abs(t);
+            img.data[o] = mid[0] + (c[0] - mid[0]) * f;
+            img.data[o + 1] = mid[1] + (c[1] - mid[1]) * f;
+            img.data[o + 2] = mid[2] + (c[2] - mid[2]) * f;
+            img.data[o + 3] = 235;
+        }
+        octx.putImageData(img, 0, 0);
+        const size = Math.min(w * 0.52, h - 26);
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(off, (w - size) / 2, 18, size, size);
+        ctx.fillStyle = '#4d9dff'; ctx.fillText(`−${vScale.toFixed(0)} km/s`, 6, h - 6);
+        ctx.fillStyle = '#ff5a4e'; ctx.fillText(`+${vScale.toFixed(0)} km/s`, w - 76, h - 6);
+        ctx.fillStyle = '#788';
+        ctx.fillText(`±${fmtLen(kin.extent)}`, 6, 24);
+    }
+
     drawDensity(cluster) {
         const cv = this.els.chartRho; if (!cv || !this.initialProfile) return;
         const { ctx, w, h } = setupCanvas(cv);
@@ -142,7 +244,7 @@ export class Diagnostics {
         const X = (r) => 4 + (w - 8) * (Math.log10(r) - Math.log10(rMin)) / (Math.log10(rMax) - Math.log10(rMin));
         const Y = (rho) => 14 + (h - 24) * (1 - (Math.log10(Math.max(rho, 1e-12)) - lgRhoMin) / (lgRhoMax - lgRhoMin));
         // initial analytic profile (dashed)
-        ctx.strokeStyle = '#5a7aa8'; ctx.setLineDash([3, 3]);
+        ctx.strokeStyle = '#6d8fd4'; ctx.setLineDash([3, 3]);
         ctx.beginPath();
         this.initialProfile.forEach((p, i) => {
             const px = X(p.r), py = Y(p.rho);
@@ -150,7 +252,7 @@ export class Diagnostics {
         });
         ctx.stroke(); ctx.setLineDash([]);
         // live particle histogram
-        ctx.strokeStyle = '#ffd27f';
+        ctx.strokeStyle = '#f0bd55';
         ctx.beginPath();
         let started = false;
         for (const b of prof) {
