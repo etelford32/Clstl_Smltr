@@ -15,6 +15,7 @@
 import { makeScenario, buildHistory, sampleAt, STAGE, timeToCoalescence } from './physics.js';
 import { StarCluster } from './nbody.js';
 import { Renderer, Trail } from './render.js';
+import { GodCamera } from './camera.js';
 import { Diagnostics } from './diagnostics.js';
 import { fmtLen, fmtTime, fmtMass, rSchw } from './units.js';
 
@@ -36,9 +37,12 @@ export function boot(els) {
         ringsOn: true,
         follow: false,
         mode: 'live',
+        incl: 25 * Math.PI / 180,   // binary orbital-plane tilt (view param)
     };
 
     const renderer = new Renderer(els.canvas);
+    const cam = new GodCamera();
+    renderer.camera = cam;
     const diag = new Diagnostics(els);
     const trails = [new Trail(400), new Trail(400)];
     let sc, history, cluster;
@@ -48,6 +52,7 @@ export function boot(els) {
         history = buildHistory(sc);
         cluster = new StarCluster(sc, state.nStars, state.seed);
         diag.setHistory(history, cluster);
+        cam.distClamp = [rSchw(sc.mTot) * 5, 6e4];
         const t0 = history.samples[0].t, t1 = history.samples[history.samples.length - 1].t;
         if (!keepTime || state.tNow < t0 || state.tNow > t1) {
             state.tNow = state.scenarioId === 'holm15a' ? 0 : 0; // "today"
@@ -85,9 +90,13 @@ export function boot(els) {
         const ang = nu + now.peri;
         const ux = Math.cos(ang), uz = Math.sin(ang);
         const f1 = sc.m2 / sc.mTot, f2 = sc.m1 / sc.mTot;
+        // tilt the orbital plane out of the galaxy equator so the scene is
+        // genuinely three-dimensional (rotation about the x-axis)
+        const si = Math.sin(state.incl), ci = Math.cos(state.incl);
+        const tilt = (x, z) => [x, z * si, z * ci];
         return [
-            { p: [r * f1 * ux, 0, r * f1 * uz], m: sc.m1 },
-            { p: [-r * f2 * ux, 0, -r * f2 * uz], m: sc.m2 },
+            { p: tilt(r * f1 * ux, r * f1 * uz), m: sc.m1 },
+            { p: tilt(-r * f2 * ux, -r * f2 * uz), m: sc.m2 },
         ];
     }
 
@@ -137,9 +146,19 @@ export function boot(els) {
             trails[0].push(...bhs[0].p);
             if (bhs[1]) trails[1].push(...bhs[1].p);
         }
-        if (state.follow && bhs.length === 2 && now.a > 0) {
-            renderer.camera.dist = Math.min(Math.max(now.a * 6, rSchw(sc.mTot) * 40), 30000);
+        if (state.follow && cam.mode === 'orbit' && bhs.length === 2 && now.a > 0) {
+            cam.goalDist = Math.min(Math.max(now.a * 6, rSchw(sc.mTot) * 40), 30000);
         }
+        // distance-adaptive flight speed keys off the nearest hole
+        const eyeNow = cam.eye();
+        let dNear = Infinity;
+        for (const b of bhs) {
+            dNear = Math.min(dNear, Math.hypot(
+                b.p[0] - eyeNow[0], b.p[1] - eyeNow[1], b.p[2] - eyeNow[2]));
+        }
+        if (!Number.isFinite(dNear)) dNear = cam.mode === 'orbit' ? cam.dist : 1000;
+        cam.update(dtWall, dNear);
+        updateCamHud(dNear);
 
         renderer.render({
             pos: cluster.pos, flags: cluster.flags, n: cluster.n,
@@ -160,12 +179,33 @@ export function boot(els) {
     }
 
     function ringSet() {
-        const d = renderer.camera.dist;
+        const e = cam.eye();
+        const d = cam.mode === 'orbit' ? cam.dist : Math.max(Math.hypot(e[0], e[1], e[2]), 1e-3);
         const rings = [];
-        for (const R of [1, 10, 100, 1000, 10000]) {
+        for (const R of [0.01, 0.1, 1, 10, 100, 1000, 10000]) {
             if (R > d * 0.02 && R < d * 2.5) rings.push(R);
         }
         return rings;
+    }
+
+    function updateCamHud(dNear) {
+        if (els.camChip) {
+            const e = cam.eye();
+            const r = Math.hypot(e[0], e[1], e[2]);
+            els.camChip.textContent = (cam.mode === 'fly'
+                ? `🚀 fly · r ${fmtLen(r)} · v ${fmtLen(cam.speed())}/s · WASD+QE thrust · scroll = speed`
+                : `🛰 orbit · r ${fmtLen(r)} · drag = look · scroll = zoom`) + ' · F switches mode';
+        }
+        if (els.scaleBar && els.scaleLabel) {
+            const refD = cam.mode === 'orbit' ? cam.dist : Math.max(dNear, 1e-4);
+            const wpp = 2 * refD * Math.tan(cam.fov / 2) / Math.max(els.canvas.clientHeight, 1);
+            const raw = wpp * 140;                                  // ≈140 px target bar
+            const pow = Math.pow(10, Math.floor(Math.log10(raw)));
+            const mant = raw / pow;
+            const nice = (mant >= 5 ? 5 : mant >= 2 ? 2 : 1) * pow; // 1-2-5 rounding
+            els.scaleBar.style.width = Math.max(nice / wpp, 8) + 'px';
+            els.scaleLabel.textContent = fmtLen(nice);
+        }
     }
 
     function extraRows(now) {
@@ -254,31 +294,65 @@ export function boot(els) {
         URL.revokeObjectURL(a.href);
     });
 
-    // camera presets
-    els.viewCore?.addEventListener('click', () => { renderer.camera.dist = 2.5 * sc.rInfl; state.follow = false; if (els.follow) els.follow.checked = false; });
-    els.viewBinary?.addEventListener('click', () => { state.follow = true; if (els.follow) els.follow.checked = true; });
-    els.viewGalaxy?.addEventListener('click', () => { renderer.camera.dist = 14000; state.follow = false; if (els.follow) els.follow.checked = false; });
+    // camera presets — cinematic transitions via the god camera
+    const unfollow = () => { state.follow = false; if (els.follow) els.follow.checked = false; };
+    els.viewCore?.addEventListener('click', () => { unfollow(); cam.transitionTo(2.5 * sc.rInfl); });
+    els.viewBinary?.addEventListener('click', () => { state.follow = true; if (els.follow) els.follow.checked = true; if (cam.mode === 'fly') { cam.toggleMode(); syncFlyBtn(); } });
+    els.viewGalaxy?.addEventListener('click', () => { unfollow(); cam.transitionTo(14000); });
 
-    // pointer camera
-    let drag = null;
+    function syncFlyBtn() {
+        if (els.flyBtn) els.flyBtn.textContent = cam.mode === 'fly' ? '🛰 orbit mode' : '🚀 fly mode';
+    }
+    els.flyBtn?.addEventListener('click', () => { cam.toggleMode(); if (cam.mode === 'fly') unfollow(); syncFlyBtn(); });
+    syncFlyBtn();
+
+    // pointer camera: one pointer = look/orbit, two pointers = pinch zoom
+    const pointers = new Map();
     els.canvas.addEventListener('pointerdown', (e) => {
-        drag = { x: e.clientX, y: e.clientY };
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
         els.canvas.setPointerCapture(e.pointerId);
     });
     els.canvas.addEventListener('pointermove', (e) => {
-        if (!drag) return;
-        renderer.camera.yaw += (e.clientX - drag.x) * 0.005;
-        renderer.camera.pitch = Math.min(Math.max(
-            renderer.camera.pitch + (e.clientY - drag.y) * 0.005, -1.45), 1.45);
-        drag = { x: e.clientX, y: e.clientY };
+        const prev = pointers.get(e.pointerId);
+        if (!prev) return;
+        if (pointers.size === 2) {
+            const [a, b] = [...pointers.values()];
+            const dOld = Math.hypot(a.x - b.x, a.y - b.y);
+            pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+            const [a2, b2] = [...pointers.values()];
+            const dNew = Math.hypot(a2.x - b2.x, a2.y - b2.y);
+            cam.onWheel((dOld - dNew) * 4);
+            if (cam.mode === 'orbit') unfollow();
+        } else {
+            cam.onDrag(e.clientX - prev.x, e.clientY - prev.y);
+            pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        }
     });
-    els.canvas.addEventListener('pointerup', () => { drag = null; });
+    const clearPointer = (e) => pointers.delete(e.pointerId);
+    els.canvas.addEventListener('pointerup', clearPointer);
+    els.canvas.addEventListener('pointercancel', clearPointer);
     els.canvas.addEventListener('wheel', (e) => {
         e.preventDefault();
-        renderer.camera.dist = Math.min(Math.max(
-            renderer.camera.dist * Math.exp(e.deltaY * 0.0012), rSchw(sc.mTot) * 5), 60000);
-        state.follow = false; if (els.follow) els.follow.checked = false;
+        cam.onWheel(e.deltaY);
+        if (cam.mode === 'orbit') unfollow();
     }, { passive: false });
+
+    // keyboard flight: WASD + QE thrust, Shift boost, F mode toggle, Space play
+    const NAVKEYS = new Set(['w', 'a', 's', 'd', 'q', 'e', 'shift']);
+    window.addEventListener('keydown', (ev) => {
+        const tag = ev.target?.tagName;
+        if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+        const k = ev.key.toLowerCase();
+        if (k === 'f') { cam.toggleMode(); if (cam.mode === 'fly') unfollow(); syncFlyBtn(); }
+        else if (k === ' ') { ev.preventDefault(); els.playBtn.click(); }
+        else if (NAVKEYS.has(k)) { cam.keys.add(k); if (k !== 'shift') ev.preventDefault(); }
+    });
+    window.addEventListener('keyup', (ev) => cam.keys.delete(ev.key.toLowerCase()));
+    window.addEventListener('blur', () => cam.keys.clear());
+
+    els.incl?.addEventListener('input', () => {
+        state.incl = parseFloat(els.incl.value) * Math.PI / 180;
+    });
 
     function setModeChip(now) {
         if (!els.modeChip) return;

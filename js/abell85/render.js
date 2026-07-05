@@ -178,7 +178,7 @@ export class Renderer {
         this.tex = gl.createTexture();
         this._fboSize = [0, 0];
 
-        this.camera = { yaw: 0.7, pitch: 0.35, dist: 12000, target: [0, 0, 0], fov: 55 * Math.PI / 180 };
+        this.camera = null;    // GodCamera, assigned by main before first render
     }
 
     resize() {
@@ -201,29 +201,26 @@ export class Renderer {
         }
     }
 
-    eye() {
-        const { yaw, pitch, dist, target } = this.camera;
-        return [
-            target[0] + dist * Math.cos(pitch) * Math.cos(yaw),
-            target[1] + dist * Math.sin(pitch),
-            target[2] + dist * Math.cos(pitch) * Math.sin(yaw),
-        ];
-    }
-
     /**
      * @param s {pos, flags, n, bhs:[{p:[x,y,z], m}], trails:[Float32Array...],
      *           rings:[radiusPc...], lensOn:boolean}
+     *
+     * Floating origin: the eye sits at (0,0,0) in the GL frame — the view
+     * matrix is rotation-only, and every vertex is uploaded camera-relative
+     * after a double-precision subtract on the CPU. Float32 therefore only
+     * ever holds *local* offsets, which is what keeps the horizon-scale view
+     * (0.006 pc) jitter-free inside a 30 kpc scene.
      */
     render(s) {
         this.resize();
         const { gl } = this;
         const [w, h] = this._fboSize;
         const cam = this.camera;
-        const eye = this.eye();
-        const near = Math.max(cam.dist * 1e-4, 1e-4);
-        const far = Math.max(cam.dist * 50, 1e5);
+        const eye = cam.eye();
+        const { fwd, up } = cam.basis();
+        const near = 1e-5, far = 1e6;   // no depth test → only clip planes matter
         const mvp = mul4(perspective(cam.fov, w / h, near, far),
-            lookAt(eye, cam.target, [0, 1, 0]));
+            lookAt([0, 0, 0], fwd, up));
 
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo);
         gl.viewport(0, 0, w, h);
@@ -233,12 +230,12 @@ export class Renderer {
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
 
-        // scale rings in the orbital plane
+        // scale rings in the galaxy equatorial plane
         if (s.rings?.length) {
             gl.useProgram(this.progLines);
             gl.uniformMatrix4fv(gl.getUniformLocation(this.progLines, 'uMvp'), false, mvp);
             gl.uniform4f(gl.getUniformLocation(this.progLines, 'uColor'), 0.4, 0.55, 0.9, 0.12);
-            for (const R of s.rings) this._drawRing(R);
+            for (const R of s.rings) this._drawRing(R, eye);
         }
 
         // trails
@@ -248,9 +245,17 @@ export class Renderer {
             const cols = [[0.55, 0.8, 1.0, 0.55], [1.0, 0.62, 0.35, 0.55]];
             s.trails.forEach((tr, i) => {
                 if (tr.count < 2) return;
+                const o = tr.ordered();
+                const rel = this._trailRel && this._trailRel.length >= o.length
+                    ? this._trailRel : (this._trailRel = new Float32Array(tr.cap * 3));
+                for (let k = 0; k < o.length; k += 3) {
+                    rel[k] = o[k] - eye[0];
+                    rel[k + 1] = o[k + 1] - eye[1];
+                    rel[k + 2] = o[k + 2] - eye[2];
+                }
                 gl.uniform4f(gl.getUniformLocation(this.progLines, 'uColor'), ...cols[i % 2]);
                 gl.bindBuffer(gl.ARRAY_BUFFER, this.bufLine);
-                gl.bufferData(gl.ARRAY_BUFFER, tr.ordered(), gl.DYNAMIC_DRAW);
+                gl.bufferData(gl.ARRAY_BUFFER, rel.subarray(0, o.length), gl.DYNAMIC_DRAW);
                 gl.enableVertexAttribArray(0);
                 gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
                 gl.drawArrays(gl.LINE_STRIP, 0, tr.count);
@@ -262,8 +267,15 @@ export class Renderer {
             gl.useProgram(this.progPoints);
             gl.uniformMatrix4fv(gl.getUniformLocation(this.progPoints, 'uMvp'), false, mvp);
             gl.uniform1f(gl.getUniformLocation(this.progPoints, 'uPxScale'), h * 0.9);
+            const rel = this._starRel && this._starRel.length === s.n * 3
+                ? this._starRel : (this._starRel = new Float32Array(s.n * 3));
+            for (let k = 0; k < s.n * 3; k += 3) {
+                rel[k] = s.pos[k] - eye[0];
+                rel[k + 1] = s.pos[k + 1] - eye[1];
+                rel[k + 2] = s.pos[k + 2] - eye[2];
+            }
             gl.bindBuffer(gl.ARRAY_BUFFER, this.bufPos);
-            gl.bufferData(gl.ARRAY_BUFFER, s.pos.subarray(0, s.n * 3), gl.DYNAMIC_DRAW);
+            gl.bufferData(gl.ARRAY_BUFFER, rel, gl.DYNAMIC_DRAW);
             gl.enableVertexAttribArray(0);
             gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
             gl.bindBuffer(gl.ARRAY_BUFFER, this.bufFlag);
@@ -291,10 +303,11 @@ export class Renderer {
         if (s.lensOn !== false) {
             for (const bh of (s.bhs || [])) {
                 if (!bh.m || nLens >= 2) continue;
-                const ndc = project(mvp, bh.p);
+                const relP = [bh.p[0] - eye[0], bh.p[1] - eye[1], bh.p[2] - eye[2]];
+                const ndc = project(mvp, relP);
                 if (!ndc) continue;
                 const cx = (ndc[0] * 0.5 + 0.5) * w, cy = (ndc[1] * 0.5 + 0.5) * h;
-                const D = Math.hypot(bh.p[0] - eye[0], bh.p[1] - eye[1], bh.p[2] - eye[2]);
+                const D = Math.hypot(relP[0], relP[1], relP[2]);
                 const rs = rSchw(bh.m);
                 // physical Einstein radius for a source far behind the lens:
                 // θE·D = √(2 r_s D)  (world pc) → pixels via perspective scale
@@ -314,13 +327,15 @@ export class Renderer {
         gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
 
-    _drawRing(R) {
+    _drawRing(R, eye) {
         const { gl } = this;
         const N = 96;
         const v = this._ringBuf || (this._ringBuf = new Float32Array((N + 1) * 3));
         for (let i = 0; i <= N; i++) {
             const a = (i / N) * 2 * Math.PI;
-            v[i * 3] = R * Math.cos(a); v[i * 3 + 1] = 0; v[i * 3 + 2] = R * Math.sin(a);
+            v[i * 3] = R * Math.cos(a) - eye[0];
+            v[i * 3 + 1] = -eye[1];
+            v[i * 3 + 2] = R * Math.sin(a) - eye[2];
         }
         gl.bindBuffer(gl.ARRAY_BUFFER, this.bufLine);
         gl.bufferData(gl.ARRAY_BUFFER, v, gl.DYNAMIC_DRAW);

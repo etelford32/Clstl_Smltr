@@ -68,6 +68,10 @@ canvas.bhl-chart { width:100%; height:92px; display:block; border:1px solid rgba
 .bhl-views button, .bhl-bar button { font-family:inherit; font-size:11px; background:var(--pp-surface-2); color:#cfd0ff; border:1px solid var(--pp-accent-border); border-radius:4px; padding:3px 9px; cursor:pointer; }
 .bhl-views button:hover, .bhl-bar button:hover { border-color:var(--pp-accent-border-hi); color:#fff; }
 
+.bhl-scalebar { position:absolute; bottom:14px; left:14px; display:flex; align-items:center; gap:8px; pointer-events:none; }
+.bhl-scalebar .bar { height:0; border-top:2px solid #cfd0ff; border-left:2px solid #cfd0ff; border-right:2px solid #cfd0ff; padding-top:3px; box-shadow:0 0 6px rgba(138,123,255,.6); }
+.bhl-scalebar span { font-size:11px; color:#dfe1ff; text-shadow:0 0 4px #000; }
+
 .bhl-bar {
     flex:none; display:flex; align-items:center; gap:10px; padding:8px 12px;
     background:var(--pp-surface-1); border-top:1px solid var(--pp-accent-border);
@@ -126,12 +130,19 @@ canvas.bhl-chart { width:100%; height:92px; display:block; border:1px solid rgba
         <div class="bhl-hud">
             <div class="bhl-title">ULTRAMASSIVE PAIR TIMELINE · billion-year binary dynamics</div>
             <span id="modeChip" class="chip">booting…</span>
+            <span id="camChip" class="chip">🛰 orbit · drag = look · scroll = zoom · F switches mode</span>
             <div class="bhl-views">
                 <button id="viewGalaxy" type="button">core view</button>
                 <button id="viewCore" type="button">influence radius</button>
                 <button id="viewBinary" type="button">follow binary</button>
+                <button id="flyBtn" type="button">🚀 fly mode</button>
                 <button id="methodsBtn" type="button">methods &amp; provenance</button>
             </div>
+        </div>
+
+        <div class="bhl-scalebar" aria-hidden="true">
+            <div id="scaleBar" class="bar"></div>
+            <span id="scaleLabel">—</span>
         </div>
 
         <aside class="bhl-side">
@@ -158,6 +169,9 @@ canvas.bhl-chart { width:100%; height:92px; display:block; border:1px solid rgba
                 </label>
                 <label>mass ratio q
                     <input id="q" type="range" min="0.1" max="1" step="0.05" value="1">
+                </label>
+                <label>orbital plane tilt
+                    <input id="incl" type="range" min="0" max="80" step="5" value="25">
                 </label>
                 <label>merger kick
                     <select id="kick">
@@ -263,6 +277,21 @@ canvas.bhl-chart { width:100%; height:92px; display:block; border:1px solid rgba
                 the size the EHT confirmed is spin-insensitive to ≲4% (EHT Collaboration 2019).</li>
         </ul>
 
+        <h3>Controls</h3>
+        <ul>
+            <li><b>Orbit mode</b> (default): drag to orbit the center, scroll to zoom.
+                Presets fly the camera cinematically. <b>Fly mode</b> (<code>F</code> or the 🚀
+                button): WASD thrust + Q/E vertical in the view frame, Shift ×5 boost, drag to
+                look, scroll adjusts the speed scale. Flight speed is <em>distance-adaptive</em> —
+                proportional to your distance from the nearest black hole — so the same keys carry
+                you from the 30 kpc cluster core down to the photon ring without a speed slider.</li>
+            <li><code>Space</code> plays/pauses the timeline. The scale bar (bottom left) and the
+                camera chip (top) always show the current physical scale, position, and speed.</li>
+            <li>Rendering is camera-relative ("floating origin"), so there is no float32 jitter
+                even at 10⁻⁶ of the scene scale; the orbital-plane tilt slider inclines the binary
+                against the equatorial scale rings to keep the scene visibly three-dimensional.</li>
+        </ul>
+
         <h3>Honesty contract (what is NOT modeled)</h3>
         <ul>
             <li>The binary’s orbital elements follow the calibrated staged model, not a self-consistent
@@ -308,9 +337,11 @@ const els = {
     playBtn: $('playBtn'), speed: $('speed'),
     scenario: $('scenario'), massModel: $('massModel'), massModelWrap: $('massModelWrap'),
     refill: $('refill'), ecc: $('ecc'), q: $('q'), kick: $('kick'), nStars: $('nStars'),
-    lens: $('lens'), ringsChk: $('ringsChk'), follow: $('follow'),
+    lens: $('lens'), ringsChk: $('ringsChk'), follow: $('follow'), incl: $('incl'),
     exportBtn: $('exportBtn'),
     viewCore: $('viewCore'), viewBinary: $('viewBinary'), viewGalaxy: $('viewGalaxy'),
+    flyBtn: $('flyBtn'), camChip: $('camChip'),
+    scaleBar: $('scaleBar'), scaleLabel: $('scaleLabel'),
     modeChip: $('modeChip'), staticPanel: $('staticPanel'), readout: $('readout'),
     chartA: $('chartA'), chartGw: $('chartGw'), chartRho: $('chartRho'), chartBeta: $('chartBeta'),
 };
